@@ -193,8 +193,29 @@ class P0RiskGridRuntime {
     uint64_t health_callback_count = 0;
     bool snapshot_available = false;
   };
+  enum class RefreshEvidenceState {
+    PRE_REFRESH,
+    IN_PROGRESS,
+    COMPLETED_SUCCESS,
+    COMPLETED_FAILURE,
+  };
+  struct RefreshEvidenceRecord {
+    uint64_t refresh_attempt_id = 1;
+    RefreshEvidenceState state = RefreshEvidenceState::PRE_REFRESH;
+    uint64_t result_generation_id = 0;
+    uint64_t previous_successful_generation_id = 0;
+    HealthPublicationState publication;
+    InputReadiness readiness;
+    iap::RiskGridHealth health;
+    std::string snapshot_failure_reason = "none";
+  };
   HealthPublicationState healthPublicationStateSnapshot() const;
+  RefreshEvidenceRecord refreshEvidenceRecordSnapshot() const;
+  void completeRefreshEvidence(const iap::RiskGridHealth& health,
+                               double now_s, bool succeeded);
+  static const char* refreshEvidenceStateName(RefreshEvidenceState state);
   InputReadiness inputReadiness(double now_s) const;
+  InputReadiness inputReadinessLocked(double now_s) const;
   std::string snapshotFailureReason(double now_s) const;
 
   void odomCallback(const nav_msgs::msg::Odometry::ConstSharedPtr msg);
@@ -222,8 +243,11 @@ class P0RiskGridRuntime {
       const iap::CurrentIntegrityState& current) const;
   bool buildSnapshot(
       double now_s, iap::IntegritySnapshot* snapshot,
-      PredictorSourceCapture* source_capture = nullptr) const;
+      PredictorSourceCapture* source_capture = nullptr,
+      InputReadiness* readiness_capture = nullptr) const;
   iap::RiskGridHealth addLidarPredictorInputHealth(
+      iap::RiskGridHealth health) const;
+  iap::RiskGridHealth addLidarPredictorInputHealthLocked(
       iap::RiskGridHealth health) const;
   bool p0_6_fixture_occupied(const Eigen::Vector3d& pos) const;
   iap::RiskGridMap::OccupancyPredicate combinedOccupancyPredicate() const;
@@ -332,6 +356,10 @@ class P0RiskGridRuntime {
   double last_process_cpu_delta_ms_ = std::numeric_limits<double>::quiet_NaN();
   uint64_t input_callback_count_ = 0;
   uint64_t health_callback_count_ = 0;
+  uint64_t next_refresh_attempt_id_ = 1;
+  uint64_t last_successful_generation_id_ = 0;
+  InputReadiness refresh_input_readiness_;
+  RefreshEvidenceRecord refresh_evidence_;
   bool origin_set_ = false;
   bool origin_seen_ = false;
   Eigen::Vector3d origin_ecef_ = Eigen::Vector3d::Zero();

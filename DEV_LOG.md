@@ -4105,3 +4105,168 @@ cleanup, Gate promotion or next-task selection.
 **ICRA-032 BLOCKED; Gate-0B NOT_QUALIFIED.** This Builder returns control only
 to SUPERVISOR review and does not declare Review PASS or authorize cleanup,
 benchmark, Gate promotion or further task work.
+
+## 2026-08-23T14:46:49Z — ICRA-033 START
+
+IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-322. Synchronized `dev/icra` at
+`bb546fbd4dee039e982d8b07a74b8a07abc05bee`: fetch passed, divergence was
+`0 0`, so no pull ran. The only pre-existing worktree item is protected
+`docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf`, SHA-256
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`;
+it is preservation-only and will not be edited, staged, deleted, moved or
+regenerated. All new task artifacts will be below `results/icra27/icra033/`;
+ICRA-032 and every retained build/install/evidence tree are immutable inputs.
+
+Exact allowlist: P0 runtime header/source/test; Gate-0 analyzer and analyzer
+test; the smallest directly affected existing P0 health/analyzer test only if
+strictly required; `docs/icra27/P0_ROLLING_RISK_WINDOW_DESIGN.md`; new
+repository-local ICRA-033 build/install/log/tmp/ROS/run/replay/evidence;
+`DEV_LOG.md`, `docs/CHANGES.md` and `docs/TRACEABILITY.md`. Supervisor-owned
+state/task/verdict files, launch/runner/capture/config, captured-source
+validation, predictor/covariance/rolling science, workload and P1–P5 behavior
+are outside scope.
+
+Evidence schema: keep active-map `generation_id` separate from monotonic
+nonzero `refresh_attempt_id`, explicit `PRE_REFRESH` / `IN_PROGRESS` /
+`COMPLETED_SUCCESS` / `COMPLETED_FAILURE`, positive success-only
+`result_generation_id`, and `previous_successful_generation_id`. A completed
+attempt atomically freezes callback identity, outcome, snapshot, timing,
+workload/counters, source readiness/stamps, RiskGrid health and invalidation
+fields. Failure retains the prior active generation but result generation zero;
+equivalent completed duplicates deduplicate, while conflicts, unknown/partial
+states and ID reuse/regression fail closed. First success may have null interval
+only with previous-success ID zero; later successes require finite positive
+interval. Pre-refresh/in-progress forbidden claims derive from the formal
+qualification inventory, including the three ICRA-032 omissions.
+
+TDD seams are the existing P0 runtime test/health publication interface and
+analyzer message/directory outputs. RED/GREEN coverage will interleave a blocked
+provider with health publication across pre-refresh, in-progress, success,
+next in-progress, retained-active failure and following success; cover exact
+active/attempt/result identities, immutable repeated completion, duplicate
+conflict, missing/zero/regressed attempt IDs, result reuse, every forbidden
+non-completed claim and cold/later interval truth. ICRA-032 raw health will be
+replayed read-only into ICRA-033 and must remain formal fail-closed while
+diagnosing 13 success-shaped publications, the real failed refresh and ambiguous
+interleaving/duplicates. Current IAP/EGO will be configured/built/installed
+only below ICRA-033, reusing only the unchanged ICRA-026 plan-env/path/bspline
+installs. Complete affected runtime/RiskGrid/rolling/analyzer/runner/launch,
+ament/linkage and exact frozen CPU/worker-4/20–15 s/30 x 30 x 6 m/0.75 m/
+six-horizon/0.5 s/occupied-skip/no-bag/no-RViz/safety-off/P1–P5-disabled plus
+provisional exact `0.01`/profile must pass before GPU/ROS.
+
+Explicit live stop line: only after every deterministic, replay, build,
+linkage and frozen-config condition passes, invoke
+`python3 scripts/dev_planner/run_gate0_qualification.py --output-root
+results/icra27/icra033/runs --smoke` exactly once. Qualification config, GPU,
+dependency, task-local log and capture readiness must pass before ROS. If live
+evidence exists, invoke `python3 scripts/dev_planner/gate0_analyzer.py
+--gate0-root results/icra27/icra033/runs --output-dir
+results/icra27/icra033/runs/smoke/analyzer` exactly once, then stop regardless
+of outcome. No post-live correction or retry, alternate sigma, tuning,
+60-second benchmark/campaign, P4/P5 execution, cleanup, Gate promotion or
+next-task selection is authorized.
+
+## 2026-08-23T15:32:56Z — ICRA-033 COMPLETE / BLOCKED
+
+IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-322. Implemented one explicit refresh-evidence
+transaction without changing predictor, covariance, rolling science, workload,
+launch/runner/capture configuration or P1–P5 behavior. Active-map
+`generation_id` is now separate from monotonic nonzero `refresh_attempt_id`,
+explicit state, success-only `result_generation_id`, and
+`previous_successful_generation_id`. Snapshot-bound source readiness is captured
+under the combined health/LiDAR lock; completion atomically freezes start/end,
+outcome, snapshot, timing, counters, source evidence, RiskGrid health and
+invalidation fields. A later health callback overlays only callback/publish
+observability. Failure retains the last safe active map and reports result zero.
+
+Analyzer schema v2 groups completed records only by attempt ID, deduplicates only
+field-equivalent records, and fails closed on unknown/regressed attempts,
+state/identity mismatch, active/previous/result chain breaks, conflicting
+completion and result reuse. PRE_REFRESH and IN_PROGRESS forbidden claims derive
+from the complete qualification inventory, including the three ICRA-032 omitted
+fields. First success may carry null generation interval only with previous ID
+zero; later successes require a positive finite interval. The read-only ICRA-032
+raw replay SHA-256 remained
+`e920605ef23e923d5bc1ae19590acfa2ac43a0bbc2e3b293b985890931e62061`.
+All four pre-live formal replay invocations correctly exited 1 with the legacy
+schema `P0_EVIDENCE_CONTRACT_FAIL`; the separate diagnostic records 19 complete
+success-shaped observations representing generations 1–13, one real failed
+refresh (two equivalent publications), seven ambiguous interleaved observations
+and 14 duplicate callback-end observations without rewriting history.
+
+Final deterministic verification passed: runtime 79/79 active tests (one
+pre-existing disabled profile), RiskGrid 43/43, rolling 23/23 active (one
+pre-existing disabled canonical profile), occupancy adapter 7/7, analyzer
+38/38, and analyzer/runner/capture/launch CTests 4/4. Current IAP and EGO were
+built/installed below ICRA-033 and direct/ament linkage resolves ICRA-033
+IAP/EGO plus intended ICRA-026 plan-env/path-searching/bspline artifacts. Final
+`static_preflight.json` is ready with no failures, 5 IAP links, 1 plan-env link,
+76,800 logical queries, and frozen CPU, worker 4, 20/15 seconds, 30 x 30 x 6 m,
+0.75 m, six horizons, 0.5-second refresh, occupied skip, no bag/RViz,
+safety-off/P1–P5-disabled, exact `0.01` and
+`legacy_iap_rq320_baseline_v1`. This profile remains provisional and is not
+empirically calibrated.
+
+Pre-live attempt disclosure: the initial analyzer module-form invocation used
+an invalid import path; subsequent RED/GREEN runs exposed and corrected legacy
+helper/assertion expectations and one missing fixture stamp before the suite
+passed. EGO configure first used the wrong `iap_DIR` suffix, and the first
+link environment used the temporary `install_iap` prefix; both were corrected
+before live to the required ICRA-033 `install` prefix. One build orchestration
+lost its nested session handle and was followed by a clean build; the build and
+install artifact byte comparison was inapplicable because install stripping/
+RUNPATH differed, so final SHA/linkage/ament checks were used. The post-review
+runtime rebuild first failed because a test body accessed private members;
+moving that mutation into the existing friend fixture helper made the clean
+rebuild and 79-test run pass. The repository-wide uncrustify test reports 34
+pre-existing style divergences, and standalone `clang-format`/`jq` were absent;
+`git diff --check`, Python compile/tests and the scoped functional suites pass.
+No such engineering attempt invoked GPU or ROS. Builder two-axis review first
+found incomplete active/previous linking, cross-lock source capture and missing
+PRE inventory coverage; all three were repaired and independently re-reviewed
+PASS before live. The only Standards hard finding was pending CHANGES/
+TRACEABILITY documentation, now resolved; non-blocking duplication/state-string
+smell observations did not justify a scope-expanding refactor.
+
+After every static gate passed, the exact task-local runner command executed
+once only:
+
+```text
+python3 scripts/dev_planner/run_gate0_qualification.py --output-root results/icra27/icra033/runs --smoke
+```
+
+It exited 0. RTX 4070 Ti SUPER `nvidia-smi`, `cuInit(0)=0`, device count 1,
+qualification config, dependency, effective-log, capture readiness and required
+process lifecycle all passed; controlled shutdown was distinct from runtime
+death. Live evidence existed, so the exact analyzer command executed once only:
+
+```text
+python3 scripts/dev_planner/gate0_analyzer.py --gate0-root results/icra27/icra033/runs --output-dir results/icra27/icra033/runs/smoke/analyzer
+```
+
+It exited 1 with `P0_EVIDENCE_CONTRACT_FAIL`. The 31 captured observations
+contain 16 completed attempts, 14 strict successful generations, two completed
+failures, three in-progress observations, 12 equivalent completed duplicates
+and zero conflicts. Successes retain exact 76,800-query shape and finite timing
+(`refresh p95 194.485 ms`, provider p95 `150.429 ms`, generation interval p95
+`506.176 ms`); all 166 integrity reports are valid. Attempts 4 and 5 occurred
+before a usable message clock and truthfully completed as
+`message_stamp_unavailable`, but their `refresh_stamp_s`, callback-start stamp
+and callback-end stamp are null. Those three completed-identity violations are
+the terminal analyzer failures.
+
+Postrun audit finds no bag, no remaining task process, byte-identical external
+`log/` identity before/after (`74d538d7…af3634f`, 5,402 files, 174,436,451
+bytes), and task-local ROS/log/timing outputs only. The protected PDF remains
+untracked, unstaged and SHA-identical at
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+One postrun read command named nonexistent `gate0_summary.json`; it made no
+changes, and the actual `gate0_analysis.json` was then inspected. No live or
+analyzer retry, post-live product/test/analyzer correction, alternate sigma,
+tuning, 60-second benchmark/campaign, P4/P5 execution, cleanup, Gate promotion
+or next-task selection occurred.
+
+**ICRA-033 BLOCKED; Gate-0B NOT_QUALIFIED.** Builder does not claim empirical
+calibration, full IAP-RQ-322 completion or Supervisor Review PASS. Control
+returns only to SUPERVISOR review after the required commits and pushes.

@@ -1,0 +1,390 @@
+[INFO] [launch]: All log files can be found below /home/dev/ws_iap/src/iap/results/icra27/icra033/ros_log/2026-08-23-15-31-22-990775-mint-X-3596019
+[INFO] [launch]: Default logging verbosity is set to INFO
+[INFO] [launch.user]: [test_planner] self-contained planner closed-loop demo
+[INFO] [launch.user]: [test_planner] experiment: p0_open_sky
+[INFO] [launch.user]: [test_planner] scenario: gnss_open_sky
+[INFO] [launch.user]: [test_planner] runtime IAP config: /home/dev/ws_iap/src/iap/results/icra27/icra033/runs/smoke/runtime/iap_sim_demo11_test_planner_3596019_1787499083003/sim_demo11
+[INFO] [launch.user]: [test_planner] export dir: /home/dev/ws_iap/src/iap/results/icra27/icra033/runs/smoke/exports/test_planner_p0_open_sky_gnss_open_sky_3596019_1787499083003
+[INFO] [launch.user]: [test_planner] evidence run_id: 547ba33a73d148adaaaf41afdbccaebd schema: p1_evidence_provenance_v4
+[INFO] [launch.user]: [test_planner] planner_safety_profile: off
+[INFO] [launch.user]: [test_planner] safety switches: {'p1': False, 'p2': False, 'p3_local': False, 'p3_global': False, 'p4': False, 'p5_runtime': False, 'p5_final': False}, p0=True
+[INFO] [launch.user]: [test_planner] GNSS scenario: /home/dev/ws_iap/src/iap/results/icra27/icra033/install/share/iap/config/gnss_sim/demo7_open_sky.yaml
+[INFO] [launch.user]: [test_planner] rosbag output: /home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p0_open_sky_gnss_open_sky_20260823T153123Z
+[INFO] [launch.user]: [test_planner] delaying EGO planner/traj_server by 10.00s
+[INFO] [demo11_corridor_map_publisher-1]: process started with pid [3596041]
+[INFO] [pcl_render_node-2]: process started with pid [3596042]
+[INFO] [demo4_lidar_body_bridge-3]: process started with pid [3596043]
+[INFO] [iap_rosnode-4]: process started with pid [3596044]
+[INFO] [poscmd_2_odom-5]: process started with pid [3596045]
+[INFO] [odom_visualization-6]: process started with pid [3596061]
+[INFO] [odom_visualization-7]: process started with pid [3596065]
+[INFO] [odom_visualization-8]: process started with pid [3596071]
+[INFO] [gnss_sim_node-9]: process started with pid [3596076]
+[INFO] [so3_quadrotor_simulator-10]: process started with pid [3596080]
+[INFO] [component_container-11]: process started with pid [3596081]
+[INFO] [planner_evidence_provenance_publisher.py-12]: process started with pid [3596082]
+[demo4_lidar_body_bridge-3] [INFO] [1787499083.172399284] [test_planner_lidar_body_bridge]: demo4 lidar body bridge ready cloud=/sim/drone_0/lidar odom=/sim/drone_0/truth_odom output=/sim/drone_0/lidar_body frame=lidar max_odom_lookup_dt=0.050
+[demo11_corridor_map_publisher-1] [INFO] [1787499083.175154797] [test_planner_corridor_map_publisher]: Demo11 forest built: area 20.0m x 20.0m split into four 10.0m x 10.0m regions, 4.0m stratified cells, trees LL/LR/UL/UR=9/9/9/9, density LL/LR/UL/UR=0.02/0.02/0.02/0.02 trees/m^2, canopy LL/LR/UL/UR=0/0/0/0, canopy radius 0.50-1.50m, canopy density LL/LR/UL/UR=0.00/0.00/0.00/0.00, height range 0.30-1.15m, 23309 total points, terminal wall enabled at x=12.80m y=0.00m width_y=5.00m z=0.00-3.20m thickness_x=0.20m feature_depth_x=0.35m feature_count=24 feature_seed=11022 wall_points=22313, corridor walls=disabled floor=enabled x=-14.00..13.00m half_width_y=2.00m z=0.00..3.00m corridor_points=11111, p0_6_fixture=disabled name= x=-1.50..1.50 y=-0.75..0.75 z=1.00..2.00 fixture_points=0, resolution 0.10m, seed 11
+[pcl_render_node-2] [INFO] [1787499083.179130493] [drone_0_pcl_render_node]: pcl_render ready cloud_topic=pcl_render_node/cloud sensing_horizon=10.000 sensing_rate=10.000 map_resolution=0.100
+[gnss_sim_node-9] [INFO] [1787499083.181003852] [test_planner_gnss_sim_node]: Loaded GNSS scenario file: /home/dev/ws_iap/src/iap/results/icra27/icra033/install/share/iap/config/gnss_sim/demo7_open_sky.yaml
+[gnss_sim_node-9] [INFO] [1787499083.181106501] [test_planner_gnss_sim_node]: GNSS sim config: scenario_file=/home/dev/ws_iap/src/iap/results/icra27/icra033/install/share/iap/config/gnss_sim/demo7_open_sky.yaml ephemeris_source=rinex enabled_constellations=GPS,BDS,GAL,GLO enable_fault_injection=false fault_count=0
+[so3_quadrotor_simulator-10] [INFO] [1787499083.181181541] [drone_0_quadrotor_simulator_so3]: simulation epoch enabled: start_utc=2022-07-06T00:00:00Z unix=1657065600
+[so3_quadrotor_simulator-10] [INFO] [1787499083.181333744] [drone_0_quadrotor_simulator_so3]: IAP IMU topic enabled: /sim/drone_0/imu_iap
+[iap_rosnode-4] [INFO] [1787499083.182954158] [test_planner_iap_rosnode]: iap init stage=config path=/home/dev/ws_iap/src/iap/results/icra27/icra033/runs/smoke/runtime/iap_sim_demo11_test_planner_3596019_1787499083003/sim_demo11
+[iap_rosnode-4] [INFO] [1787499083.186007499] [test_planner_iap_rosnode]: iap init stage=run_logs ready dir=/home/dev/ws_iap/src/iap/results/icra27/icra033/runs/smoke/runtime/iap_logs/20260823T153123Z_183
+[iap_rosnode-4] [2026-08-23 15:31:23.186] [glim] [info] config_path: /home/dev/ws_iap/src/iap/results/icra27/icra033/runs/smoke/runtime/iap_sim_demo11_test_planner_3596019_1787499083003/sim_demo11
+[iap_rosnode-4] [2026-08-23 15:31:23.186] [glim] [info] run_dir: /home/dev/ws_iap/src/iap/results/icra27/icra033/runs/smoke/runtime/iap_logs/20260823T153123Z_183
+[iap_rosnode-4] [2026-08-23 15:31:23.186] [glim] [info] registered GPU linearization hook
+[iap_rosnode-4] [2026-08-23 15:31:23.186] [glim] [info] dump_path: /home/dev/ws_iap/src/iap/results/icra27/icra033/runs/smoke/runtime/iap_logs/20260823T153123Z_183/export/dump (legacy config value: /home/dev/ws_iap/src/iap/results/icra27/icra033/runs/smoke/runtime/iap_sim_demo11_test_planner_3596019_1787499083003/dump)
+[iap_rosnode-4] [2026-08-23 15:31:23.186] [glim] [info] load libodometry_estimation_cpu.so
+[iap_rosnode-4] [INFO] [1787499083.186320654] [test_planner_iap_rosnode]: iap init stage=load_core_modules
+[iap_rosnode-4] [2026-08-23 15:31:23.186] [glim] [warning] param odometry_estimation/clk_bias_noise not found
+[iap_rosnode-4] [2026-08-23 15:31:23.186] [glim] [warning] use default_value=100
+[iap_rosnode-4] [2026-08-23 15:31:23.186] [glim] [warning] param odometry_estimation/clk_drift_noise not found
+[iap_rosnode-4] [2026-08-23 15:31:23.186] [glim] [warning] use default_value=1
+[iap_rosnode-4] [2026-08-23 15:31:23.186] [glim] [warning] param odometry_estimation/clk_bias_relin_thresh not found
+[iap_rosnode-4] [2026-08-23 15:31:23.186] [glim] [warning] use default_value=500
+[iap_rosnode-4] [2026-08-23 15:31:23.186] [glim] [warning] param odometry_estimation/clk_drift_relin_thresh not found
+[iap_rosnode-4] [2026-08-23 15:31:23.186] [glim] [warning] use default_value=5
+[iap_rosnode-4] [2026-08-23 15:31:23.186] [glim] [warning] param odometry_estimation/sigma_p_update_scope not found
+[iap_rosnode-4] [2026-08-23 15:31:23.186] [glim] [warning] use default_value=current
+[iap_rosnode-4] [2026-08-23 15:31:23.186] [glim] [warning] param odometry_estimation/icp_cond_threshold not found
+[iap_rosnode-4] [2026-08-23 15:31:23.186] [glim] [warning] use default_value=500
+[iap_rosnode-4] [2026-08-23 15:31:23.186] [glim] [warning] param odometry_estimation/gamma_lidar_max not found
+[iap_rosnode-4] [2026-08-23 15:31:23.186] [glim] [warning] use default_value=10
+[iap_rosnode-4] [2026-08-23 15:31:23.186] [glim] [warning] param odometry_estimation/enable_icp_csv not found
+[iap_rosnode-4] [2026-08-23 15:31:23.186] [glim] [warning] use default_value=false
+[iap_rosnode-4] [2026-08-23 15:31:23.186] [glim] [warning] param odometry_estimation/icp_csv_path not found
+[iap_rosnode-4] [2026-08-23 15:31:23.186] [glim] [warning] use default_value=/tmp/iap_icp.csv
+[iap_rosnode-4] [2026-08-23 15:31:23.186] [glim] [info] [odometry_cpu] enable_icp_csv=false icp_csv_path=/home/dev/ws_iap/src/iap/results/icra27/icra033/runs/smoke/runtime/iap_logs/20260823T153123Z_183/export/iap_icp.csv
+[iap_rosnode-4] [2026-08-23 15:31:23.186] [odom] [info] clock_owner_mode=gnss odometry_owns_clock=false
+[iap_rosnode-4] [2026-08-23 15:31:23.186] [odom] [info] relinearization policy {b:dim=6:th=[0.100,0.100,0.100,0.100,0.100,0.100], c:dim=2:th=[500.000,5.000], e:dim=3:th=[0.100,0.100,0.100], l:dim=2:th=[0.100,0.100], r:dim=3:th=[0.100,0.100,0.100], v:dim=3:th=[0.100,0.100,0.100], x:dim=6:th=[0.100,0.100,0.100,0.100,0.100,0.100]}
+[gnss_sim_node-9] [INFO] [1787499083.187005750] [test_planner_gnss_sim_node]: gnss_sim_node v2 started: truth_odom_topic=/sim/drone_0/truth_odom time_source=odom_stamp origin_lla=[31.2304000, 121.4737000, 25.00]
+[gnss_sim_node-9] [WARN] [1787499083.287181724] [test_planner_gnss_sim_node]: Waiting for truth odometry before publishing GNSS range measurements
+[pcl_render_node-2] [INFO] [1787499083.289306573] [pcl_render_node]: first odometry stamp=1657065600.104158 frame_id=map
+[iap_rosnode-4] [2026-08-23 15:31:23.313] [glim] [warning] scan-to-multi-scan mode requires registration_type=VGICP (got GICP). Set use_scan_to_map=true or switch to VGICP.
+[iap_rosnode-4] [2026-08-23 15:31:23.313] [glim] [info] load libsub_mapping.so
+[iap_rosnode-4] [2026-08-23 15:31:23.313] [glim] [warning] param sub_mapping/submap_target_num_points not found
+[iap_rosnode-4] [2026-08-23 15:31:23.313] [glim] [warning] use default_value=-1
+[iap_rosnode-4] [2026-08-23 15:31:23.314] [glim] [info] load libglobal_mapping.so
+[iap_rosnode-4] [2026-08-23 15:31:23.314] [glim] [warning] param global_mapping/submap_voxel_resolution_max not found
+[iap_rosnode-4] [2026-08-23 15:31:23.314] [glim] [warning] use default_value=0.5
+[iap_rosnode-4] [2026-08-23 15:31:23.314] [glim] [warning] param global_mapping/submap_voxel_resolution_dmin not found
+[iap_rosnode-4] [2026-08-23 15:31:23.314] [glim] [warning] use default_value=5
+[iap_rosnode-4] [2026-08-23 15:31:23.314] [glim] [warning] param global_mapping/submap_voxel_resolution_dmax not found
+[iap_rosnode-4] [2026-08-23 15:31:23.314] [glim] [warning] use default_value=20
+[iap_rosnode-4] [2026-08-23 15:31:23.314] [global] [info] multiscan_window=3: global_mapping will only connect submaps within 3 recent neighbors
+[iap_rosnode-4] [INFO] [1787499083.314697926] [test_planner_iap_rosnode]: iap init stage=load_extension_modules
+[iap_rosnode-4] [2026-08-23 15:31:23.314] [glim] [info] load libgnss_extension.so
+[iap_rosnode-4] [2026-08-23 15:31:23.316] [gnss_ext] [info] [gnss_ext] Config loaded: pr_σ=1 dop_σ=0.03 elev_cut=10° canopy=[1,0.5,5,α=2] lever=[0.000,0.000,0.000] clk_q=[1,0.1] σ_E=5 σ_R=0.087
+[iap_rosnode-4] [2026-08-23 15:31:23.316] [gnss_ext] [info] [gnss_ext] clock_owner_mode=gnss gnss_owns_clock=true
+[iap_rosnode-4] [2026-08-23 15:31:23.316] [gnss_ext] [info] GnssExtensionModule created — waiting for NavSatFix origin
+[iap_rosnode-4] [2026-08-23 15:31:23.316] [gnss_ext] [info] [gnss_ext] timing_csv=ENABLED path=/home/dev/ws_iap/src/iap/results/icra27/icra033/runs/smoke/runtime/iap_logs/20260823T153123Z_183/profiling/iap_timing.csv
+[iap_rosnode-4] [2026-08-23 15:31:23.316] [gnss_ext] [info] [gnss_ext] enable_debug_csv=true
+[iap_rosnode-4] [2026-08-23 15:31:23.316] [gnss_ext] [info] [gnss_ext] Debug CSV logging ENABLED → /home/dev/ws_iap/src/iap/results/icra27/icra033/runs/smoke/runtime/iap_logs/20260823T153123Z_183/export/iap_gnss_factor_debug.csv
+[iap_rosnode-4] [2026-08-23 15:31:23.316] [gnss_ext] [info] GnssExtensionModule: subscriptions created
+[iap_rosnode-4] [2026-08-23 15:31:23.319] [glim] [info] load libintegrity_extension.so
+[iap_rosnode-4] [2026-08-23 15:31:23.320] [integrity_ext] [info] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[iap_rosnode-4] [2026-08-23 15:31:23.320] [integrity_ext] [info] [IntegrityExt] ■ Module master:  ENABLED
+[iap_rosnode-4] [2026-08-23 15:31:23.320] [integrity_ext] [info] [IntegrityExt] ■ ARAIM:          ENABLED  (needs GNSS epoch)
+[iap_rosnode-4] [2026-08-23 15:31:23.320] [integrity_ext] [info] [IntegrityExt] ■ FGO sigma_p:    ENABLED  (smoother marginal cov)
+[iap_rosnode-4] [2026-08-23 15:31:23.320] [integrity_ext] [info] [IntegrityExt] ■ Dynamic AL:     ENABLED  (trunk HAL + altitude VAL)
+[iap_rosnode-4] [2026-08-23 15:31:23.320] [integrity_ext] [info] [IntegrityExt] ■ Publish topic:  /iap/integrity
+[iap_rosnode-4] [2026-08-23 15:31:23.320] [integrity_ext] [info] [IntegrityExt] ■ RViz markers:   disabled  topic=/iap/araim_envelopes
+[iap_rosnode-4] [2026-08-23 15:31:23.320] [integrity_ext] [info] [IntegrityExt] ■ P5-5 fixture:   disabled  name=current_integrity_stamp_freeze_v1 start=30.000s duration=12.000s
+[iap_rosnode-4] [2026-08-23 15:31:23.320] [integrity_ext] [info] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[iap_rosnode-4] [2026-08-23 15:31:23.320] [integrity_ext] [info] [IntegrityExt] GNSS ARAIM constellation hypotheses: disabled
+[iap_rosnode-4] [2026-08-23 15:31:23.320] [glim] [info] [araim_debug] CSV logging to: /home/dev/ws_iap/src/iap/results/icra27/icra033/runs/smoke/runtime/iap_logs/20260823T153123Z_183/export/iap_araim.csv
+[iap_rosnode-4] [2026-08-23 15:31:23.320] [integrity_ext] [info] [IntegrityExt] ARAIM CSV: ENABLED → /home/dev/ws_iap/src/iap/results/icra27/icra033/runs/smoke/runtime/iap_logs/20260823T153123Z_183/export/iap_araim.csv
+[iap_rosnode-4] [2026-08-23 15:31:23.320] [integrity_ext] [info] [IntegrityExt] ARAIM PL decomposition CSV: disabled → /home/dev/ws_iap/src/iap/results/icra27/icra033/runs/smoke/runtime/iap_logs/20260823T153123Z_183/export/iap_araim_pl_decomp.csv
+[iap_rosnode-4] [2026-08-23 15:31:23.320] [integrity_ext] [info] [IntegrityExt] LiDAR ARAIM Stage0 CSV: disabled → /home/dev/ws_iap/src/iap/results/icra27/icra033/runs/smoke/runtime/iap_logs/20260823T153123Z_183/export/iap_lidar_araim_stage0.csv
+[iap_rosnode-4] [2026-08-23 15:31:23.320] [integrity_ext] [info] [IntegrityExt] Trajectory CSV: ENABLED → /home/dev/ws_iap/src/iap/results/icra27/icra033/runs/smoke/runtime/iap_logs/20260823T153123Z_183/export/traj_with_gnss.csv
+[iap_rosnode-4] [2026-08-23 15:31:23.320] [integrity_ext] [info] [IntegrityExt] callbacks registered — waiting for frames
+[iap_rosnode-4] [2026-08-23 15:31:23.320] [integrity_ext] [info] [IntegrityExt] publisher created → /iap/integrity
+[iap_rosnode-4] [2026-08-23 15:31:23.320] [glim] [info] load libsim_extension.so
+[iap_rosnode-4] [2026-08-23 15:31:23.321] [glim] [warning] param glim_ros/sim/ not found
+[iap_rosnode-4] [2026-08-23 15:31:23.321] [glim] [warning] use default_value=0.05
+[iap_rosnode-4] [2026-08-23 15:31:23.321] [glim] [warning] param glim_ros/sim/ not found
+[iap_rosnode-4] [2026-08-23 15:31:23.321] [glim] [warning] use default_value=2
+[iap_rosnode-4] [2026-08-23 15:31:23.321] [sim_ext] [info] [sim_ext] truth_odom_topic=/sim/drone_0/truth_odom planner_odom_topic=/drone_0_visual_slam/odom align_to_truth=true alignment_max_dt=0.050s metrics_csv=/home/dev/ws_iap/src/iap/results/icra27/icra033/runs/smoke/exports/test_planner_p0_open_sky_gnss_open_sky_3596019_1787499083003/iap_sim_truth_vs_est.csv
+[iap_rosnode-4] [2026-08-23 15:31:23.322] [sim_ext] [info] [sim_ext] subscriptions created
+[iap_rosnode-4] [INFO] [1787499083.322509508] [test_planner_iap_rosnode]: iap init stage=create_core_subscriptions
+[iap_rosnode-4] [INFO] [1787499083.322838175] [test_planner_iap_rosnode]: iap subscribed imu_topic=/sim/drone_0/imu_iap points_topic=/sim/drone_0/lidar_body
+[iap_rosnode-4] [INFO] [1787499083.323073490] [test_planner_iap_rosnode]: iap init stage=create_input_status_timer
+[iap_rosnode-4] [INFO] [1787499083.323088060] [test_planner_iap_rosnode]: iap init stage=queue_thread_start
+[iap_rosnode-4] [INFO] [1787499083.323154174] [test_planner_iap_rosnode]: iap init stage=ready
+[component_container-11] [INFO] [1787499083.399100663] [test_planner_so3_control_container]: Load Library: /home/dev/ws_iap/install/so3_control/lib/libso3_control_component.so
+[component_container-11] [INFO] [1787499083.401555900] [test_planner_so3_control_container]: Found class: rclcpp_components::NodeFactoryTemplate<SO3ControlComponent>
+[component_container-11] [INFO] [1787499083.401575425] [test_planner_so3_control_container]: Instantiate class: rclcpp_components::NodeFactoryTemplate<SO3ControlComponent>
+[component_container-11] [INFO] [1787499083.405669777] [test_planner_so3_control_component]: start SO3ControlComponent
+[INFO] [launch_ros.actions.load_composable_nodes]: Loaded node '/test_planner_so3_control_component' in container '/test_planner_so3_control_container'
+[iap_rosnode-4] [INFO] [1787499083.455687702] [test_planner_iap_rosnode]: iap input first imu stamp=1657065600.274239 frame_id=imu
+[iap_rosnode-4] [2026-08-23 15:31:23.455] [glim] [info] meta/imu_frame_id=imu
+[iap_rosnode-4] [2026-08-23 15:31:23.455] [glim] [info] meta/base_frame_id=imu
+[iap_rosnode-4] [2026-08-23 15:31:23.455] [glim] [info] auto-detected acc_scale=1.00000
+[gnss_sim_node-9] [INFO] [1787499083.487179194] [test_planner_gnss_sim_node]: Loaded 3017 GPS/BDS/GAL and 1070 GLONASS ephemeris records from RINEX NAV file: /home/dev/ws_iap/src/LIGO./Data/BRDM00DLR_S_20221870000_01D_MN.rnx
+[iap_rosnode-4] [2026-08-23 15:31:23.487] [gnss_ext] [info] [gnss_ext] Klobuchar iono params received — ionospheric correction enabled.  alpha=[1.0000e-08,0.0000e+00,0.0000e+00,0.0000e+00] beta=[90000,0,0,0]
+[iap_rosnode-4] [2026-08-23 15:31:23.487] [gnss_ext] [info] GnssExtensionModule: ECEF origin set — lat=31.230400° lon=121.473574° ECEF=[-2850075,4655718,3287777]m
+[iap_rosnode-4] [2026-08-23 15:31:23.494] [gnss_ext] [info] [gnss_ext] first epoch UTC stamp=1657065600.274  (last_frame_stamp=0.000  delta=1657065600.274s)
+[iap_rosnode-4] [2026-08-23 15:31:23.494] [gnss_ext] [info] [gnss_ext] Klobuchar iono correction ACTIVE for this epoch — alpha=[1.0000e-08,0.0000e+00,0.0000e+00,0.0000e+00] beta=[90000,0,0,0]
+[iap_rosnode-4] [2026-08-23 15:31:23.495] [gnss_ext] [info] [gnss_ext] epoch #1 inserted: stamp=1657065600.274 n_sats=41
+[pcl_render_node-2] [WARN] [1787499083.689600944] [rcvGlobalPointCloudCallBack]: Global Pointcloud received..
+[pcl_render_node-2] [INFO] [1787499083.779708629] [pcl_render_node]: first lidar publish stamp=1657065600.538274 points=3745 frame_id=map
+[demo4_lidar_body_bridge-3] [INFO] [1787499083.779949948] [test_planner_lidar_body_bridge]: first body cloud stamp=1657065600.538274 points=3745 frame_id=lidar input_frame=map
+[iap_rosnode-4] [INFO] [1787499083.780255732] [test_planner_iap_rosnode]: iap input first points stamp=1657065600.538274 frame_id=lidar width=3745 height=1 fields=3
+[iap_rosnode-4] [2026-08-23 15:31:23.780] [glim] [info] meta/lidar_frame_id=lidar
+[iap_rosnode-4] [2026-08-23 15:31:23.780] [glim] [warning] per-point timestamps are not given!!
+[iap_rosnode-4] [2026-08-23 15:31:23.780] [glim] [warning] use pseudo per-point timestamps based on the order of points
+[iap_rosnode-4] [INFO] [1787499083.781987523] [test_planner_iap_rosnode]: iap input first preprocessed frame stamp=1657065600.538274 points=3745 scan_end=1657065600.538274
+[iap_rosnode-4] [INFO] [1787499085.323167110] [test_planner_iap_rosnode]: iap input status imu_count=1868 points_count=16 accepted_frames=16 dropped_points=0 imu_publishers=1 points_publishers=1
+[iap_rosnode-4] [2026-08-23 15:31:26.788] [odom] [info] estimate initial IMU state
+[iap_rosnode-4] Initial error: 1598.78, values: 93
+[iap_rosnode-4] iter      cost      cost_change    lambda  success iter_time
+[iap_rosnode-4]    0    0.0713356      1.6e+03      1e-05      1          0
+[iap_rosnode-4]    1        0.065       0.0062      1e-06      1          0
+[iap_rosnode-4]    2        0.065      6.4e-12      1e-07      1          0
+[iap_rosnode-4] [2026-08-23 15:31:26.792] [odom] [info] initial IMU state estimation result
+[iap_rosnode-4] [2026-08-23 15:31:26.792] [odom] [info] T_world_imu=se3(-0.007461,0.001489,0.084666,-0.000201,-0.000190,-0.000134,1.000000)
+[iap_rosnode-4] [2026-08-23 15:31:26.792] [odom] [info] v_world_imu=vec(-0.001780,0.001220,-0.000777)
+[iap_rosnode-4] [2026-08-23 15:31:26.792] [odom] [info] imu_bias=vec(0.000123,-0.000111,-0.000000,0.000046,0.000045,0.000356)
+[iap_rosnode-4] [2026-08-23 15:31:26.793] [odom] [info] update_frames: clock not ready for current frame 0, skip read [count=1]
+[iap_rosnode-4] [2026-08-23 15:31:26.793] [odom] [info] [lifecycle] events=10 stamp=1657065603.538 {b:{writes=odometry=1;missing=;expected=odometry;conflicts=0;violations=0}, c:{writes=;missing=;expected=gnss;conflicts=0;violations=0}, e:{writes=;missing=;expected=gnss;conflicts=0;violations=0}, r:{writes=;missing=;expected=gnss;conflicts=0;violations=0}, v:{writes=odometry=1;missing=;expected=odometry;conflicts=0;violations=0}, x:{writes=odometry=1;missing=;expected=odometry;conflicts=0;violations=0}}
+[iap_rosnode-4] [2026-08-23 15:31:26.883] [gnss_ext] [info] [gnss_ext] E(0)/R(0) inserted — ECEF=[-2850075,4655718,3287777] σ_E=5m σ_R=0.087rad
+[iap_rosnode-4] [2026-08-23 15:31:26.883] [gnss_ext] [info] [gnss_ext] C(1) not in new_values — inserting; warm-start: bias=0m drift=0.00m/s (glim base class does not add clock variable)
+[iap_rosnode-4] [2026-08-23 15:31:26.883] [gnss_ext] [info] [gnss_ext] clock chain state: UNSEEDED -> SEEDED (clock_seeded) at 1657065603.638
+[iap_rosnode-4] [2026-08-23 15:31:26.883] [gnss_ext] [info] [gnss_ext] injection #1: 82 GNSS factors → frame 1 (stamp=1657065603.638)
+[iap_rosnode-4] [2026-08-23 15:31:26.883] [gnss_ext] [info] [gnss_ext] clock summary #1: state=SEEDED prev_missing=0 curr_missing=0 resets=0 stamp=1657065603.638
+[iap_rosnode-4] [2026-08-23 15:31:26.884] [gnss_ext] [info] [gnss_ext] diag #1: clk_bias=0.29m  clk_drift=0.0005m/s | PR rms=0.95m (41 sats)  Dop rms=0.0425m/s (41 sats)
+[iap_rosnode-4] [2026-08-23 15:31:26.886] [integrity_ext] [info] [IntegrityExt] #1: stamp=1657065603.638 state=SAFE monitor_fused_HPL=5.07m monitor_fused_VPL=14.30m HAL=10.00m monitor_IM=4.93m n_sv=41 n_trunks=0 fgo_valid=true fgo_factors=90 lidar_hyp=0 gnss_certified_HPL=5.07 gnss_certified_VPL=14.30 lidar_certified_HPL=1000000000.00 lidar_certified_VPL=1000000000.00 mode=NONE
+[iap_rosnode-4] [2026-08-23 15:31:26.886] [sim_ext] [info] [sim_ext] initialized planner odom SE3 alignment truth_stamp=1657065603.638271 est_stamp=1657065603.638271 dt=0.000000s translation=[-11.992,-0.003,1.416] rotation_deg=0.037
+[iap_rosnode-4] [2026-08-23 15:31:26.983] [gnss_ext] [info] [gnss_ext] clock chain state: SEEDED -> CHAIN_ACTIVE (clock_between_added) at 1657065603.738
+[iap_rosnode-4] [INFO] [1787499087.323150660] [test_planner_iap_rosnode]: iap input status imu_count=3868 points_count=36 accepted_frames=36 dropped_points=0 imu_publishers=1 points_publishers=1
+[iap_rosnode-4] [INFO] [1787499089.323153137] [test_planner_iap_rosnode]: iap input status imu_count=5868 points_count=56 accepted_frames=56 dropped_points=0 imu_publishers=1 points_publishers=1
+[iap_rosnode-4] [INFO] [1787499091.323146711] [test_planner_iap_rosnode]: iap input status imu_count=7868 points_count=76 accepted_frames=76 dropped_points=0 imu_publishers=1 points_publishers=1
+[iap_rosnode-4] [2026-08-23 15:31:31.782] [gnss_ext] [info] [lifecycle] events=212 stamp=1657065608.538 {b:{writes=odometry=51;missing=;expected=odometry;conflicts=0;violations=0}, c:{writes=gnss=50;missing=;expected=gnss;conflicts=0;violations=0}, e:{writes=gnss=1;missing=;expected=gnss;conflicts=0;violations=0}, r:{writes=gnss=1;missing=;expected=gnss;conflicts=0;violations=0}, v:{writes=odometry=51;missing=;expected=odometry;conflicts=0;violations=0}, x:{writes=odometry=51;missing=;expected=odometry;conflicts=0;violations=0}}
+[iap_rosnode-4] [2026-08-23 15:31:31.785] [gnss_ext] [info] [gnss_ext] diag #50: clk_bias=-0.09m  clk_drift=-0.0019m/s | PR rms=1.01m (41 sats)  Dop rms=0.0309m/s (41 sats)
+[iap_rosnode-4] [2026-08-23 15:31:31.787] [integrity_ext] [info] [IntegrityExt] #50: stamp=1657065608.538 state=SAFE monitor_fused_HPL=4.98m monitor_fused_VPL=13.84m HAL=10.00m monitor_IM=5.02m n_sv=41 n_trunks=0 fgo_valid=true fgo_factors=4300 lidar_hyp=0 gnss_certified_HPL=4.98 gnss_certified_VPL=13.84 lidar_certified_HPL=1000000000.00 lidar_certified_VPL=1000000000.00 mode=NONE
+[INFO] [ego_planner_node-13]: process started with pid [3597593]
+[INFO] [traj_server-14]: process started with pid [3597594]
+[ego_planner_node-13] hit: 0.619039
+[ego_planner_node-13] miss: -0.619039
+[ego_planner_node-13] min log: -1.99243
+[ego_planner_node-13] max: 2.19722
+[ego_planner_node-13] thresh log: 1.38629
+[iap_rosnode-4] [INFO] [1787499093.323148952] [test_planner_iap_rosnode]: iap input status imu_count=9868 points_count=96 accepted_frames=96 dropped_points=0 imu_publishers=1 points_publishers=1
+[ego_planner_node-13] [INFO] [1787499093.336098622] [drone_0_ego_planner_node]: Wait for 1 second.
+[iap_rosnode-4] [2026-08-23 15:31:33.395] [gnss_ext] [info] [gnss_ext] epoch #100 inserted: stamp=1657065610.205 n_sats=41
+[ego_planner_node-13] [INFO] [1787499093.835297566] [drone_0_ego_planner_node]: [p0] risk grid ready=0 stale=1 age=inf valid=0.000 unknown=1.000 gen=0 provider_queries=0 occupied_skip=0 provider_stale=0 provider_invalid=0 gnss_used=0 lidar_used=0 prior_used=0 stale_current_prior=0 regularized=0 conservative_max=0 lidar_points=0 lidar_fim_primitives=0 lidar_fim_valid_normals=0 lidar_fim_fallback=not_evaluated dominant_unknown=:0 refresh_stamp=nan grid_stamp=nan elapsed_ms=nan queries=0 reason=not_ready
+[traj_server-14] [WARN] [1787499094.227642848] [drone_0_traj_server]: [Traj server]: ready.
+[ego_planner_node-13] [FSM]: state: INIT
+[ego_planner_node-13] no odom.
+[ego_planner_node-13] wait for goal or trigger.
+[ego_planner_node-13] [WARN] [1787499094.587410821] [drone_0_ego_planner_node]: Waiting for trigger from [n3ctrl] from RC
+[iap_rosnode-4] [INFO] [1787499095.323155887] [test_planner_iap_rosnode]: iap input status imu_count=11868 points_count=116 accepted_frames=116 dropped_points=0 imu_publishers=1 points_publishers=1
+[ego_planner_node-13] [FSM]: state: INIT
+[ego_planner_node-13] no odom.
+[ego_planner_node-13] wait for goal or trigger.
+[ego_planner_node-13] [INFO] [1787499095.835703906] [drone_0_ego_planner_node]: [p0] risk grid ready=0 stale=1 age=inf valid=0.000 unknown=1.000 gen=0 provider_queries=0 occupied_skip=0 provider_stale=0 provider_invalid=0 gnss_used=0 lidar_used=0 prior_used=0 stale_current_prior=0 regularized=0 conservative_max=0 lidar_points=0 lidar_fim_primitives=0 lidar_fim_valid_normals=0 lidar_fim_fallback=not_evaluated dominant_unknown=:0 refresh_stamp=nan grid_stamp=nan elapsed_ms=0.004 queries=0 reason=message_stamp_unavailable
+[ego_planner_node-13] [FSM]: from INIT to WAIT_TARGET
+[ego_planner_node-13] [FSM]: from WAIT_TARGET to SEQUENTIAL_START
+[ego_planner_node-13] [RiskContext] planning_generation_id=0, query_base_time_s=1.65707e+09, snapshot_available=0
+[ego_planner_node-13] [47;30m
+[ego_planner_node-13] [drone 0 replan 0]==============================================[0m
+[ego_planner_node-13] [1;33mmulti-trajs=1[1;0m
+[ego_planner_node-13] [32miter(+1)=30,time(ms)=0.064,total_t(ms)=0.090,cost=0.293
+[ego_planner_node-13] [0mtraj 1 success.
+[ego_planner_node-13] plan_success=1
+[ego_planner_node-13] total time:[42m0.00019295[0m,optimize:0.000191784,refine:1.166e-06,avg_time=0.00019295
+[ego_planner_node-13] refine_success=1
+[ego_planner_node-13] [WARN] [1787499095.893961721] [drone_0_ego_planner_node]: P1 published fresh bspline but could not write accepted-profile evidence
+[ego_planner_node-13] [FSM]: from SEQUENTIAL_START to EXEC_TRAJ
+[ego_planner_node-13] [FSM]: state: EXEC_TRAJ
+[iap_rosnode-4] [2026-08-23 15:31:36.482] [gnss_ext] [info] [lifecycle] events=400 stamp=1657065613.238 {b:{writes=odometry=98;missing=;expected=odometry;conflicts=0;violations=0}, c:{writes=gnss=97;missing=;expected=gnss;conflicts=0;violations=0}, e:{writes=gnss=1;missing=;expected=gnss;conflicts=0;violations=0}, r:{writes=gnss=1;missing=;expected=gnss;conflicts=0;violations=0}, v:{writes=odometry=98;missing=;expected=odometry;conflicts=0;violations=0}, x:{writes=odometry=98;missing=;expected=odometry;conflicts=0;violations=0}}
+[iap_rosnode-4] [2026-08-23 15:31:36.504] [odom] [info] [lifecycle] events=400 stamp=1657065613.238 {b:{writes=odometry=98;missing=;expected=odometry;conflicts=0;violations=0}, c:{writes=gnss=97;missing=;expected=gnss;conflicts=0;violations=0}, e:{writes=gnss=1;missing=;expected=gnss;conflicts=0;violations=0}, r:{writes=gnss=1;missing=;expected=gnss;conflicts=0;violations=0}, v:{writes=odometry=98;missing=;expected=odometry;conflicts=0;violations=0}, x:{writes=odometry=98;missing=;expected=odometry;conflicts=0;violations=0}}
+[iap_rosnode-4] [2026-08-23 15:31:36.782] [gnss_ext] [info] [gnss_ext] injection #100: 82 GNSS factors → frame 100 (stamp=1657065613.538)
+[iap_rosnode-4] [2026-08-23 15:31:36.784] [gnss_ext] [info] [gnss_ext] diag #100: clk_bias=-0.04m  clk_drift=0.0114m/s | PR rms=1.20m (41 sats)  Dop rms=0.0247m/s (41 sats)
+[iap_rosnode-4] [2026-08-23 15:31:36.787] [integrity_ext] [info] [IntegrityExt] #100: stamp=1657065613.538 state=SAFE monitor_fused_HPL=5.33m monitor_fused_VPL=14.63m HAL=10.00m monitor_IM=4.67m n_sv=41 n_trunks=0 fgo_valid=true fgo_factors=4387 lidar_hyp=0 gnss_certified_HPL=5.33 gnss_certified_VPL=14.63 lidar_certified_HPL=1000000000.00 lidar_certified_VPL=1000000000.00 mode=NONE
+[ego_planner_node-13] [FSM]: from EXEC_TRAJ to REPLAN_TRAJ
+[ego_planner_node-13] [RiskContext] planning_generation_id=1, query_base_time_s=1.65707e+09, snapshot_available=1
+[ego_planner_node-13] [47;30m
+[ego_planner_node-13] [drone 0 replan 1]==============================================[0m
+[ego_planner_node-13] [1;33mmulti-trajs=1[1;0m
+[ego_planner_node-13] [32miter(+1)=14,time(ms)=0.226,total_t(ms)=0.315,cost=0.107
+[ego_planner_node-13] [0mtraj 1 success.
+[ego_planner_node-13] plan_success=1
+[ego_planner_node-13] total time:[42m0.000426077[0m,optimize:0.000424669,refine:1.408e-06,avg_time=0.000309514
+[ego_planner_node-13] refine_success=1
+[ego_planner_node-13] [WARN] [1787499096.914206392] [drone_0_ego_planner_node]: P1 published fresh bspline but could not write accepted-profile evidence
+[ego_planner_node-13] [FSM]: from REPLAN_TRAJ to EXEC_TRAJ
+[iap_rosnode-4] [INFO] [1787499097.323149739] [test_planner_iap_rosnode]: iap input status imu_count=13866 points_count=136 accepted_frames=136 dropped_points=0 imu_publishers=1 points_publishers=1
+[ego_planner_node-13] [FSM]: state: EXEC_TRAJ
+[ego_planner_node-13] [FSM]: from EXEC_TRAJ to REPLAN_TRAJ
+[ego_planner_node-13] [RiskContext] planning_generation_id=3, query_base_time_s=1.65707e+09, snapshot_available=1
+[ego_planner_node-13] [47;30m
+[ego_planner_node-13] [drone 0 replan 2]==============================================[0m
+[ego_planner_node-13] [1;33mmulti-trajs=1[1;0m
+[ego_planner_node-13] [32miter(+1)=9,time(ms)=0.202,total_t(ms)=0.281,cost=0.025
+[ego_planner_node-13] [0mtraj 1 success.
+[ego_planner_node-13] plan_success=1
+[ego_planner_node-13] total time:[42m0.00161281[0m,optimize:0.00161118,refine:1.633e-06,avg_time=0.000743945
+[ego_planner_node-13] refine_success=1
+[ego_planner_node-13] [FSM]: from REPLAN_TRAJ to EXEC_TRAJ
+[ego_planner_node-13] [WARN] [1787499097.936216770] [drone_0_ego_planner_node]: P1 published fresh bspline but could not write accepted-profile evidence
+[ego_planner_node-13] [INFO] [1787499098.026837036] [drone_0_ego_planner_node]: [p0] risk grid ready=1 stale=0 age=0.000 valid=1.000 unknown=0.000 gen=4 provider_queries=76782 occupied_skip=18 provider_stale=0 provider_invalid=0 gnss_used=76782 lidar_used=71100 prior_used=76782 stale_current_prior=0 regularized=76782 conservative_max=0 lidar_points=23309 lidar_fim_primitives=704 lidar_fim_valid_normals=704 lidar_fim_fallback= dominant_unknown=occupied_skip:18 refresh_stamp=1657065614.653213 grid_stamp=1657065614.653213 elapsed_ms=191.676 queries=76800 reason=ok
+[ego_planner_node-13] [FSM]: state: EXEC_TRAJ
+[ego_planner_node-13] [FSM]: from EXEC_TRAJ to REPLAN_TRAJ
+[ego_planner_node-13] [RiskContext] planning_generation_id=5, query_base_time_s=1.65707e+09, snapshot_available=1
+[ego_planner_node-13] [47;30m
+[ego_planner_node-13] [drone 0 replan 3]==============================================[0m
+[ego_planner_node-13] [1;33mmulti-trajs=1[1;0m
+[ego_planner_node-13] [32miter(+1)=10,time(ms)=0.212,total_t(ms)=0.288,cost=0.011
+[ego_planner_node-13] [0mtraj 1 success.
+[ego_planner_node-13] plan_success=1
+[ego_planner_node-13] total time:[42m0.00110537[0m,optimize:0.00110375,refine:1.621e-06,avg_time=0.000834301
+[ego_planner_node-13] refine_success=1
+[ego_planner_node-13] [WARN] [1787499098.947425368] [drone_0_ego_planner_node]: P1 published fresh bspline but could not write accepted-profile evidence
+[ego_planner_node-13] [FSM]: from REPLAN_TRAJ to EXEC_TRAJ
+[iap_rosnode-4] [INFO] [1787499099.323150852] [test_planner_iap_rosnode]: iap input status imu_count=15866 points_count=156 accepted_frames=156 dropped_points=0 imu_publishers=1 points_publishers=1
+[ego_planner_node-13] [FSM]: state: EXEC_TRAJ
+[ego_planner_node-13] [FSM]: from EXEC_TRAJ to REPLAN_TRAJ
+[ego_planner_node-13] [RiskContext] planning_generation_id=7, query_base_time_s=1.65707e+09, snapshot_available=1
+[ego_planner_node-13] [47;30m
+[ego_planner_node-13] [drone 0 replan 4]==============================================[0m
+[ego_planner_node-13] [1;33mmulti-trajs=1[1;0m
+[ego_planner_node-13] [32miter(+1)=9,time(ms)=0.204,total_t(ms)=0.280,cost=0.003
+[ego_planner_node-13] [0mtraj 1 success.
+[ego_planner_node-13] plan_success=1
+[ego_planner_node-13] total time:[42m0.00111467[0m,optimize:0.00111302,refine:1.655e-06,avg_time=0.000890375
+[ego_planner_node-13] refine_success=1
+[ego_planner_node-13] [FSM]: from REPLAN_TRAJ to EXEC_TRAJ
+[ego_planner_node-13] [WARN] [1787499099.958197102] [drone_0_ego_planner_node]: P1 published fresh bspline but could not write accepted-profile evidence
+[ego_planner_node-13] [INFO] [1787499100.335137152] [drone_0_ego_planner_node]: [p0] risk grid ready=1 stale=0 age=0.000 valid=1.000 unknown=0.000 gen=8 provider_queries=76782 occupied_skip=18 provider_stale=0 provider_invalid=0 gnss_used=76782 lidar_used=74340 prior_used=76782 stale_current_prior=0 regularized=76782 conservative_max=0 lidar_points=23309 lidar_fim_primitives=704 lidar_fim_valid_normals=704 lidar_fim_fallback= dominant_unknown=occupied_skip:18 refresh_stamp=1657065616.653294 grid_stamp=1657065616.653294 elapsed_ms=154.213 queries=76800 reason=ok
+[ego_planner_node-13] [FSM]: state: EXEC_TRAJ
+[ego_planner_node-13] [FSM]: from EXEC_TRAJ to REPLAN_TRAJ
+[ego_planner_node-13] [RiskContext] planning_generation_id=9, query_base_time_s=1.65707e+09, snapshot_available=1
+[ego_planner_node-13] [47;30m
+[ego_planner_node-13] [drone 0 replan 5]==============================================[0m
+[ego_planner_node-13] [1;33mmulti-trajs=1[1;0m
+[ego_planner_node-13] [32miter(+1)=14,time(ms)=0.209,total_t(ms)=0.288,cost=0.004
+[ego_planner_node-13] [0mtraj 1 success.
+[ego_planner_node-13] plan_success=1
+[ego_planner_node-13] total time:[42m0.0011778[0m,optimize:0.00117617,refine:1.632e-06,avg_time=0.000938279
+[ego_planner_node-13] refine_success=1
+[ego_planner_node-13] [WARN] [1787499100.969103911] [drone_0_ego_planner_node]: P1 published fresh bspline but could not write accepted-profile evidence
+[ego_planner_node-13] [FSM]: from REPLAN_TRAJ to EXEC_TRAJ
+[iap_rosnode-4] [INFO] [1787499101.323145183] [test_planner_iap_rosnode]: iap input status imu_count=17866 points_count=176 accepted_frames=176 dropped_points=0 imu_publishers=1 points_publishers=1
+[ego_planner_node-13] [FSM]: state: EXEC_TRAJ
+[iap_rosnode-4] [2026-08-23 15:31:41.584] [gnss_ext] [info] [lifecycle] events=604 stamp=1657065618.338 {b:{writes=odometry=149;missing=;expected=odometry;conflicts=0;violations=0}, c:{writes=gnss=148;missing=;expected=gnss;conflicts=0;violations=0}, e:{writes=gnss=1;missing=;expected=gnss;conflicts=0;violations=0}, r:{writes=gnss=1;missing=;expected=gnss;conflicts=0;violations=0}, v:{writes=odometry=149;missing=;expected=odometry;conflicts=0;violations=0}, x:{writes=odometry=149;missing=;expected=odometry;conflicts=0;violations=0}}
+[iap_rosnode-4] [2026-08-23 15:31:41.798] [gnss_ext] [info] [gnss_ext] diag #150: clk_bias=0.23m  clk_drift=0.0063m/s | PR rms=1.13m (41 sats)  Dop rms=0.0327m/s (41 sats)
+[iap_rosnode-4] [2026-08-23 15:31:41.799] [integrity_ext] [info] [IntegrityExt] #150: stamp=1657065618.538 state=SAFE monitor_fused_HPL=5.08m monitor_fused_VPL=14.62m HAL=10.00m monitor_IM=4.92m n_sv=41 n_trunks=0 fgo_valid=true fgo_factors=4387 lidar_hyp=0 gnss_certified_HPL=5.08 gnss_certified_VPL=14.62 lidar_certified_HPL=1000000000.00 lidar_certified_VPL=1000000000.00 mode=NONE
+[ego_planner_node-13] [FSM]: from EXEC_TRAJ to REPLAN_TRAJ
+[ego_planner_node-13] [RiskContext] planning_generation_id=11, query_base_time_s=1.65707e+09, snapshot_available=1
+[ego_planner_node-13] [47;30m
+[ego_planner_node-13] [drone 0 replan 6]==============================================[0m
+[ego_planner_node-13] [1;33mmulti-trajs=1[1;0m
+[ego_planner_node-13] [32miter(+1)=10,time(ms)=0.213,total_t(ms)=0.351,cost=0.003
+[ego_planner_node-13] [0mtraj 1 success.
+[ego_planner_node-13] plan_success=1
+[ego_planner_node-13] total time:[42m0.00119788[0m,optimize:0.00119636,refine:1.52e-06,avg_time=0.000975365
+[ego_planner_node-13] refine_success=1
+[ego_planner_node-13] [WARN] [1787499101.980208181] [drone_0_ego_planner_node]: P1 published fresh bspline but could not write accepted-profile evidence
+[ego_planner_node-13] [FSM]: from REPLAN_TRAJ to EXEC_TRAJ
+[iap_rosnode-4] [2026-08-23 15:31:42.187] [integrity] [warning] NIS gating: sat 108 NIS_pr=7.03 > 6.63 -- downweighted
+[ego_planner_node-13] [INFO] [1787499102.502785998] [drone_0_ego_planner_node]: [p0] risk grid ready=1 stale=0 age=0.000 valid=1.000 unknown=0.000 gen=13 provider_queries=76782 occupied_skip=18 provider_stale=0 provider_invalid=0 gnss_used=76782 lidar_used=76776 prior_used=76782 stale_current_prior=0 regularized=76782 conservative_max=0 lidar_points=23309 lidar_fim_primitives=704 lidar_fim_valid_normals=704 lidar_fim_fallback= dominant_unknown=occupied_skip:18 refresh_stamp=1657065619.153223 grid_stamp=1657065619.153223 elapsed_ms=167.662 queries=76800 reason=ok
+[ego_planner_node-13] [FSM]: state: EXEC_TRAJ
+[WARNING] [launch]: user interrupted with ctrl-c (SIGINT)
+[INFO] [traj_server-14]: sending signal 'SIGINT' to process[traj_server-14]
+[INFO] [ego_planner_node-13]: sending signal 'SIGINT' to process[ego_planner_node-13]
+[INFO] [planner_evidence_provenance_publisher.py-12]: sending signal 'SIGINT' to process[planner_evidence_provenance_publisher.py-12]
+[INFO] [component_container-11]: sending signal 'SIGINT' to process[component_container-11]
+[INFO] [so3_quadrotor_simulator-10]: sending signal 'SIGINT' to process[so3_quadrotor_simulator-10]
+[INFO] [gnss_sim_node-9]: sending signal 'SIGINT' to process[gnss_sim_node-9]
+[INFO] [odom_visualization-8]: sending signal 'SIGINT' to process[odom_visualization-8]
+[INFO] [odom_visualization-7]: sending signal 'SIGINT' to process[odom_visualization-7]
+[INFO] [odom_visualization-6]: sending signal 'SIGINT' to process[odom_visualization-6]
+[INFO] [poscmd_2_odom-5]: sending signal 'SIGINT' to process[poscmd_2_odom-5]
+[INFO] [iap_rosnode-4]: sending signal 'SIGINT' to process[iap_rosnode-4]
+[INFO] [demo4_lidar_body_bridge-3]: sending signal 'SIGINT' to process[demo4_lidar_body_bridge-3]
+[INFO] [pcl_render_node-2]: sending signal 'SIGINT' to process[pcl_render_node-2]
+[INFO] [demo11_corridor_map_publisher-1]: sending signal 'SIGINT' to process[demo11_corridor_map_publisher-1]
+[ego_planner_node-13] [FSM]: from EXEC_TRAJ to REPLAN_TRAJ
+[ego_planner_node-13] [RiskContext] planning_generation_id=13, query_base_time_s=1.65707e+09, snapshot_available=1
+[ego_planner_node-13] [47;30m
+[ego_planner_node-13] [drone 0 replan 7]==============================================[0m
+[ego_planner_node-13] [1;33mmulti-trajs=1[1;0m
+[ego_planner_node-13] [32miter(+1)=9,time(ms)=0.204,total_t(ms)=0.281,cost=0.003
+[ego_planner_node-13] [0mtraj 1 success.
+[ego_planner_node-13] plan_success=1
+[ego_planner_node-13] total time:[42m0.00116934[0m,optimize:0.00116779,refine:1.541e-06,avg_time=0.000999612
+[ego_planner_node-13] refine_success=1
+[ego_planner_node-13] [FSM]: from REPLAN_TRAJ to EXEC_TRAJ
+[ego_planner_node-13] [WARN] [1787499102.991908827] [drone_0_ego_planner_node]: P1 published fresh bspline but could not write accepted-profile evidence
+[iap_rosnode-4] [INFO] [1787499103.323156023] [test_planner_iap_rosnode]: iap input status imu_count=19866 points_count=196 accepted_frames=196 dropped_points=0 imu_publishers=1 points_publishers=1
+[iap_rosnode-4] [2026-08-23 15:31:43.395] [gnss_ext] [info] [gnss_ext] epoch #200 inserted: stamp=1657065620.205 n_sats=41
+[traj_server-14] [INFO] [1787499103.422086147] [rclcpp]: signal_handler(SIGINT/SIGTERM)
+[ego_planner_node-13] [INFO] [1787499103.422833024] [rclcpp]: signal_handler(SIGINT/SIGTERM)
+[component_container-11] [INFO] [1787499103.423992980] [rclcpp]: signal_handler(SIGINT/SIGTERM)
+[so3_quadrotor_simulator-10] [INFO] [1787499103.424632575] [rclcpp]: signal_handler(SIGINT/SIGTERM)
+[so3_quadrotor_simulator-10] terminate called after throwing an instance of 'std::runtime_error'
+[so3_quadrotor_simulator-10]   what():  context cannot be slept with because it's invalid
+[gnss_sim_node-9] [INFO] [1787499103.425356876] [rclcpp]: signal_handler(SIGINT/SIGTERM)
+[odom_visualization-8] [INFO] [1787499103.425937173] [rclcpp]: signal_handler(SIGINT/SIGTERM)
+[odom_visualization-7] [INFO] [1787499103.427756914] [rclcpp]: signal_handler(SIGINT/SIGTERM)
+[odom_visualization-6] [INFO] [1787499103.427774632] [rclcpp]: signal_handler(SIGINT/SIGTERM)
+[poscmd_2_odom-5] [INFO] [1787499103.428321419] [rclcpp]: signal_handler(SIGINT/SIGTERM)
+[poscmd_2_odom-5] terminate called after throwing an instance of 'rclcpp::exceptions::RCLError'
+[poscmd_2_odom-5]   what():  failed to create guard condition: the given context is not valid, either rcl_init() was not called or rcl_shutdown() was called., at ./src/rcl/guard_condition.c:67
+[iap_rosnode-4] [INFO] [1787499103.429103809] [rclcpp]: signal_handler(SIGINT/SIGTERM)
+[demo4_lidar_body_bridge-3] [INFO] [1787499103.429697824] [rclcpp]: signal_handler(SIGINT/SIGTERM)
+[pcl_render_node-2] [INFO] [1787499103.430270424] [rclcpp]: signal_handler(SIGINT/SIGTERM)
+[pcl_render_node-2] terminate called after throwing an instance of 'rclcpp::exceptions::RCLError'
+[pcl_render_node-2]   what():  failed to create guard condition: the given context is not valid, either rcl_init() was not called or rcl_shutdown() was called., at ./src/rcl/guard_condition.c:67
+[iap_rosnode-4] [2026-08-23 15:31:43.431] [glim] [info] waiting for odometry estimation
+[demo11_corridor_map_publisher-1] [INFO] [1787499103.432069549] [rclcpp]: signal_handler(SIGINT/SIGTERM)
+[iap_rosnode-4] [2026-08-23 15:31:43.433] [glim] [info] waiting for local mapping
+[iap_rosnode-4] [2026-08-23 15:31:43.442] [glim] [info] waiting for global mapping
+[ERROR] [so3_quadrotor_simulator-10]: process has died [pid 3596080, exit code -6, cmd '/home/dev/ws_iap/install/so3_quadrotor_simulator/lib/so3_quadrotor_simulator/so3_quadrotor_simulator --ros-args -r __node:=drone_0_quadrotor_simulator_so3 --params-file /home/dev/ws_iap/src/iap/results/icra27/icra033/tmp/launch_params_0fag7lq2 --params-file /home/dev/ws_iap/src/iap/results/icra27/icra033/tmp/launch_params_uvd3sdhc --params-file /home/dev/ws_iap/src/iap/results/icra27/icra033/tmp/launch_params_o5dzo_79 --params-file /home/dev/ws_iap/src/iap/results/icra27/icra033/tmp/launch_params__hrzmywv --params-file /home/dev/ws_iap/src/iap/results/icra27/icra033/tmp/launch_params_5mirn7e4 --params-file /home/dev/ws_iap/src/iap/results/icra27/icra033/tmp/launch_params_gjm9i8po --params-file /home/dev/ws_iap/src/iap/results/icra27/icra033/tmp/launch_params__bmnh5ye --params-file /home/dev/ws_iap/src/iap/results/icra27/icra033/tmp/launch_params_ioz5m7lj --params-file /home/dev/ws_iap/src/iap/results/icra27/icra033/tmp/launch_params_kgl86ce1 --params-file /home/dev/ws_iap/src/iap/results/icra27/icra033/tmp/launch_params_ja5dwbee --params-file /home/dev/ws_iap/src/iap/results/icra27/icra033/tmp/launch_params_pybzdrau -r odom:=/sim/drone_0/truth_odom -r imu:=/sim/drone_0/imu -r cmd:=/test_planner/so3_cmd -r force_disturbance:=/test_planner/force_disturbance -r moment_disturbance:=/test_planner/moment_disturbance'].
+[ERROR] [poscmd_2_odom-5]: process has died [pid 3596045, exit code -6, cmd '/home/dev/ws_iap/install/poscmd_2_odom/lib/poscmd_2_odom/poscmd_2_odom --ros-args -r __node:=test_planner_desired_poscmd_to_odom --params-file /home/dev/ws_iap/src/iap/results/icra27/icra033/tmp/launch_params_2dfw35yc --params-file /home/dev/ws_iap/src/iap/results/icra27/icra033/tmp/launch_params_x4r_oq3p --params-file /home/dev/ws_iap/src/iap/results/icra27/icra033/tmp/launch_params_mbd7365t -r command:=/drone_0_planning/pos_cmd -r odometry:=/test_planner/desired/odom'].
+[ERROR] [pcl_render_node-2]: process has died [pid 3596042, exit code -6, cmd '/home/dev/ws_iap/install/local_sensing/lib/local_sensing/pcl_render_node --ros-args -r __node:=drone_0_pcl_render_node --params-file /home/dev/ws_iap/src/iap/results/icra27/icra033/tmp/launch_params_g1ga8qy_ --params-file /home/dev/ws_iap/src/iap/results/icra27/icra033/tmp/launch_params_hqxuiags --params-file /home/dev/ws_iap/src/iap/results/icra27/icra033/tmp/launch_params_zwrzhfcs --params-file /home/dev/ws_iap/src/iap/results/icra27/icra033/tmp/launch_params_tguat59w --params-file /home/dev/ws_iap/src/iap/results/icra27/icra033/tmp/launch_params_zduvugh5 --params-file /home/dev/ws_iap/src/iap/results/icra27/icra033/tmp/launch_params_mnhz4xg2 --params-file /home/dev/ws_iap/src/iap/results/icra27/icra033/tmp/launch_params_oqpc2et5 --params-file /home/dev/ws_iap/install/local_sensing/share/local_sensing/config/camera.yaml -r global_map:=/map_generator/global_cloud -r local_map:=/map_generator/local_cloud -r odometry:=/sim/drone_0/truth_odom -r pcl_render_node/cloud:=/sim/drone_0/lidar -r depth:=/sim/drone_0/depth -r camera_pose:=/drone_0_pcl_render_node/camera_pose'].
+[traj_server-14] terminate called after throwing an instance of 'std::system_error'
+[traj_server-14]   what():  Invalid argument
+[iap_rosnode-4] [2026-08-23 15:31:43.528] [global] [info] saving to /home/dev/ws_iap/src/iap/results/icra27/icra033/runs/smoke/runtime/iap_logs/20260823T153123Z_183/export/dump...
+[iap_rosnode-4] [2026-08-23 15:31:43.528] [global] [info] serializing factor graph to /home/dev/ws_iap/src/iap/results/icra27/icra033/runs/smoke/runtime/iap_logs/20260823T153123Z_183/export/dump/graph.bin
+[iap_rosnode-4] [2026-08-23 15:31:43.529] [global] [info] saving config snapshot
+[iap_rosnode-4] [2026-08-23 15:31:43.529] [global] [info] saved
+[odom_visualization-8] Failed to delete datawriter, at ./src/publisher.cpp:45 during '__function__'
+[odom_visualization-8] [ERROR] [1787499103.533557006] [test_planner_desired_odom_visualization.rclcpp]: Error in destruction of rcl publisher handle: cannot publish data, at ./src/rmw_publish.cpp:66, at ./src/rcl/publisher.c:201
+[odom_visualization-8] Failed to delete datawriter, at ./src/publisher.cpp:45 during '__function__'
+[odom_visualization-8] [ERROR] [1787499103.533590723] [test_planner_desired_odom_visualization.rclcpp]: Error in destruction of rcl publisher handle: cannot publish data, at ./src/rmw_publish.cpp:66, at ./src/rcl/publisher.c:201
+[odom_visualization-8] Failed to delete datawriter, at ./src/publisher.cpp:45 during '__function__'
+[odom_visualization-8] [ERROR] [1787499103.533597547] [test_planner_desired_odom_visualization.rclcpp]: Error in destruction of rcl publisher handle: cannot publish data, at ./src/rmw_publish.cpp:66, at ./src/rcl/publisher.c:201
+[odom_visualization-8] Failed to delete datawriter, at ./src/publisher.cpp:45 during '__function__'
+[odom_visualization-8] [ERROR] [1787499103.533602678] [test_planner_desired_odom_visualization.rclcpp]: Error in destruction of rcl publisher handle: cannot publish data, at ./src/rmw_publish.cpp:66, at ./src/rcl/publisher.c:201
+[odom_visualization-8] Failed to delete datawriter, at ./src/publisher.cpp:45 during '__function__'
+[odom_visualization-8] [ERROR] [1787499103.533607162] [test_planner_desired_odom_visualization.rclcpp]: Error in destruction of rcl publisher handle: cannot publish data, at ./src/rmw_publish.cpp:66, at ./src/rcl/publisher.c:201
+[odom_visualization-8] Failed to delete datawriter, at ./src/publisher.cpp:45 during '__function__'
+[odom_visualization-8] [ERROR] [1787499103.533611498] [test_planner_desired_odom_visualization.rclcpp]: Error in destruction of rcl publisher handle: cannot publish data, at ./src/rmw_publish.cpp:66, at ./src/rcl/publisher.c:201
+[odom_visualization-8] Failed to delete datawriter, at ./src/publisher.cpp:45 during '__function__'
+[odom_visualization-8] [ERROR] [1787499103.533616051] [test_planner_desired_odom_visualization.rclcpp]: Error in destruction of rcl publisher handle: cannot publish data, at ./src/rmw_publish.cpp:66, at ./src/rcl/publisher.c:201
+[odom_visualization-8] Failed to delete datawriter, at ./src/publisher.cpp:45 during '__function__'
+[odom_visualization-8] [ERROR] [1787499103.533620805] [test_planner_desired_odom_visualization.rclcpp]: Error in destruction of rcl publisher handle: cannot publish data, at ./src/rmw_publish.cpp:66, at ./src/rcl/publisher.c:201
+[odom_visualization-8] Failed to delete datawriter, at ./src/publisher.cpp:45 during '__function__'
+[odom_visualization-8] [ERROR] [1787499103.533629704] [test_planner_desired_odom_visualization.rclcpp]: Error in destruction of rcl publisher handle: cannot publish data, at ./src/rmw_publish.cpp:66, at ./src/rcl/publisher.c:201
+[odom_visualization-8] Failed to delete datawriter, at ./src/publisher.cpp:45 during '__function__'
+[odom_visualization-8] [ERROR] [1787499103.533636787] [test_planner_desired_odom_visualization.rclcpp]: Error in destruction of rcl publisher handle: cannot publish data, at ./src/rmw_publish.cpp:66, at ./src/rcl/publisher.c:201
+[odom_visualization-8] Failed to delete datawriter, at ./src/publisher.cpp:45 during '__function__'
+[odom_visualization-8] [ERROR] [1787499103.533643193] [test_planner_desired_odom_visualization.rclcpp]: Error in destruction of rcl publisher handle: cannot publish data, at ./src/rmw_publish.cpp:66, at ./src/rcl/publisher.c:201
+[INFO] [component_container-11]: process has finished cleanly [pid 3596081]
+[odom_visualization-7] Fatal glibc error: pthread_mutex_lock.c:94 (___pthread_mutex_lock): assertion failed: mutex->__data.__owner == 0
+[INFO] [gnss_sim_node-9]: process has finished cleanly [pid 3596076]
+[INFO] [demo4_lidar_body_bridge-3]: process has finished cleanly [pid 3596043]
+[odom_visualization-6] terminate called after throwing an instance of 'std::system_error'
+[odom_visualization-6]   what():  Invalid argument
+[INFO] [demo11_corridor_map_publisher-1]: process has finished cleanly [pid 3596041]
+[INFO] [planner_evidence_provenance_publisher.py-12]: process has finished cleanly [pid 3596082]
+[ERROR] [traj_server-14]: process has died [pid 3597594, exit code -6, cmd '/home/dev/ws_iap/src/iap/results/icra27/icra033/install_ego/lib/ego_planner/traj_server --ros-args -r __node:=drone_0_traj_server --params-file /home/dev/ws_iap/src/iap/results/icra27/icra033/tmp/launch_params_qf07o_6p -r planning/bspline:=/drone_0_planning/bspline -r odometry:=/sim/drone_0/truth_odom -r position_cmd:=/drone_0_planning/pos_cmd -r /position_cmd:=/drone_0_planning/pos_cmd'].
+[ERROR] [odom_visualization-8]: process has died [pid 3596071, exit code -11, cmd '/home/dev/ws_iap/install/odom_visualization/lib/odom_visualization/odom_visualization --ros-args -r __node:=test_planner_desired_odom_visualization --params-file /home/dev/ws_iap/src/iap/results/icra27/icra033/tmp/launch_params_mcoosvq3 --params-file /home/dev/ws_iap/src/iap/results/icra27/icra033/tmp/launch_params_pq57x7wr --params-file /home/dev/ws_iap/src/iap/results/icra27/icra033/tmp/launch_params_njwd9kre --params-file /home/dev/ws_iap/src/iap/results/icra27/icra033/tmp/launch_params_kla229lf --params-file /home/dev/ws_iap/src/iap/results/icra27/icra033/tmp/launch_params_5955qp80 --params-file /home/dev/ws_iap/src/iap/results/icra27/icra033/tmp/launch_params_c122l7zv --params-file /home/dev/ws_iap/src/iap/results/icra27/icra033/tmp/launch_params_ieqii4e2 --params-file /home/dev/ws_iap/src/iap/results/icra27/icra033/tmp/launch_params_doz344ui --params-file /home/dev/ws_iap/src/iap/results/icra27/icra033/tmp/launch_params_ciqk7v6r --params-file /home/dev/ws_iap/src/iap/results/icra27/icra033/tmp/launch_params_6v5xvakz --params-file /home/dev/ws_iap/src/iap/results/icra27/icra033/tmp/launch_params_n6uu20vc --params-file /home/dev/ws_iap/src/iap/results/icra27/icra033/tmp/launch_params_dsc9mkfl -r odom:=/test_planner/desired/odom -r cmd:=/drone_0_planning/pos_cmd -r pose:=/test_planner/desired/pose -r path:=/test_planner/desired/path -r robot:=/test_planner/desired/robot -r velocity:=/test_planner/desired/velocity -r sensor:=/test_planner/desired/sensor_status -r time_gap:=/test_planner/desired/time_gap'].
+[ERROR] [odom_visualization-7]: process has died [pid 3596065, exit code -6, cmd '/home/dev/ws_iap/install/odom_visualization/lib/odom_visualization/odom_visualization --ros-args -r __node:=test_planner_truth_odom_visualization --params-file /home/dev/ws_iap/src/iap/results/icra27/icra033/tmp/launch_params_5iry2y2h --params-file /home/dev/ws_iap/src/iap/results/icra27/icra033/tmp/launch_params_8k3s8auk --params-file /home/dev/ws_iap/src/iap/results/icra27/icra033/tmp/launch_params_lxcoer2s --params-file /home/dev/ws_iap/src/iap/results/icra27/icra033/tmp/launch_params_tnu3rxyn --params-file /home/dev/ws_iap/src/iap/results/icra27/icra033/tmp/launch_params_48oa4sf6 --params-file /home/dev/ws_iap/src/iap/results/icra27/icra033/tmp/launch_params_uxn6_aou --params-file /home/dev/ws_iap/src/iap/results/icra27/icra033/tmp/launch_params__54huvo8 --params-file /home/dev/ws_iap/src/iap/results/icra27/icra033/tmp/launch_params_hc9iovav --params-file /home/dev/ws_iap/src/iap/results/icra27/icra033/tmp/launch_params_yhc4mo7x --params-file /home/dev/ws_iap/src/iap/results/icra27/icra033/tmp/launch_params_eg4s4ba4 --params-file /home/dev/ws_iap/src/iap/results/icra27/icra033/tmp/launch_params_5ih7cy00 --params-file /home/dev/ws_iap/src/iap/results/icra27/icra033/tmp/launch_params_runtoc3i -r odom:=/sim/drone_0/truth_odom -r cmd:=/drone_0_planning/pos_cmd -r pose:=/test_planner/truth/pose -r path:=/test_planner/truth/path -r robot:=/test_planner/truth/robot -r velocity:=/test_planner/truth/velocity -r sensor:=/test_planner/truth/sensor_status -r time_gap:=/test_planner/truth/time_gap'].
+[ERROR] [odom_visualization-6]: process has died [pid 3596061, exit code -6, cmd '/home/dev/ws_iap/install/odom_visualization/lib/odom_visualization/odom_visualization --ros-args -r __node:=test_planner_iap_odom_visualization --params-file /home/dev/ws_iap/src/iap/results/icra27/icra033/tmp/launch_params_u4u46plj --params-file /home/dev/ws_iap/src/iap/results/icra27/icra033/tmp/launch_params_wb8165yu --params-file /home/dev/ws_iap/src/iap/results/icra27/icra033/tmp/launch_params_qndkxl1g --params-file /home/dev/ws_iap/src/iap/results/icra27/icra033/tmp/launch_params_kqzxp3ej --params-file /home/dev/ws_iap/src/iap/results/icra27/icra033/tmp/launch_params_mi4iccwh --params-file /home/dev/ws_iap/src/iap/results/icra27/icra033/tmp/launch_params_1bg4o6wo --params-file /home/dev/ws_iap/src/iap/results/icra27/icra033/tmp/launch_params_y2a6o04s --params-file /home/dev/ws_iap/src/iap/results/icra27/icra033/tmp/launch_params_kovtwmpz --params-file /home/dev/ws_iap/src/iap/results/icra27/icra033/tmp/launch_params_pglioov6 --params-file /home/dev/ws_iap/src/iap/results/icra27/icra033/tmp/launch_params_ux16aa9w --params-file /home/dev/ws_iap/src/iap/results/icra27/icra033/tmp/launch_params_36yiphgb --params-file /home/dev/ws_iap/src/iap/results/icra27/icra033/tmp/launch_params_dc303b48 -r odom:=/drone_0_visual_slam/odom -r cmd:=/drone_0_planning/pos_cmd -r pose:=/test_planner/drone/pose -r path:=/test_planner/drone/path -r robot:=/test_planner/drone/robot -r velocity:=/test_planner/drone/velocity -r sensor:=/test_planner/drone/sensor_status -r time_gap:=/test_planner/drone/time_gap'].
+[INFO] [ego_planner_node-13]: process has finished cleanly [pid 3597593]
+[INFO] [iap_rosnode-4]: process has finished cleanly [pid 3596044]

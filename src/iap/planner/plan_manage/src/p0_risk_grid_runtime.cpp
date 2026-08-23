@@ -982,6 +982,9 @@ void P0RiskGridRuntime::refreshTimerCallback() {
   const double refresh_start_steady_s = steadyNowSeconds();
   const double now_s = liveNowSeconds();
   const std::string pre_build_failure = snapshotFailureReason(now_s);
+  const InputReadiness refresh_input_readiness = inputReadiness(now_s);
+  const iap::RiskGridHealth active_health_at_start =
+      std::isfinite(now_s) ? risk_grid_.health(now_s) : risk_grid_.health();
   {
     std::lock_guard<std::mutex> health_lock(health_state_mutex_);
     last_refresh_stamp_s_ = now_s;
@@ -1012,6 +1015,21 @@ void P0RiskGridRuntime::refreshTimerCallback() {
     last_rolling_spatial_diagnostics_ = {};
     last_provider_batch_duration_ms_ =
         std::numeric_limits<double>::quiet_NaN();
+    last_refresh_elapsed_ms_ = std::numeric_limits<double>::quiet_NaN();
+    last_generation_interval_ms_ = std::numeric_limits<double>::quiet_NaN();
+    last_refresh_end_stamp_s_ = std::numeric_limits<double>::quiet_NaN();
+    last_refresh_end_steady_s_ = std::numeric_limits<double>::quiet_NaN();
+    refresh_evidence_ = {};
+    refresh_evidence_.refresh_attempt_id = next_refresh_attempt_id_++;
+    refresh_evidence_.state = RefreshEvidenceState::IN_PROGRESS;
+    refresh_evidence_.previous_successful_generation_id =
+        last_successful_generation_id_;
+    refresh_evidence_.publication = healthPublicationStateSnapshot();
+    refresh_evidence_.health = active_health_at_start;
+    refresh_evidence_.health.provider_query_count = 0;
+    refresh_evidence_.health.occupied_skip_count = 0;
+    refresh_evidence_.snapshot_failure_reason = "none";
+    refresh_input_readiness_ = refresh_input_readiness;
   }
   if (!std::isfinite(now_s) || now_s <= 0.0) {
     risk_grid_.markRefreshFailure(now_s, "message_stamp_unavailable");
@@ -1023,19 +1041,26 @@ void P0RiskGridRuntime::refreshTimerCallback() {
       last_refresh_end_stamp_s_ = refresh_end_stamp_s;
       last_refresh_end_steady_s_ = steadyNowSeconds();
     }
+    completeRefreshEvidence(risk_grid_.health(), now_s, false);
+    publishHealth(risk_grid_.health(), now_s);
     return;
   }
   const auto fail_semantic_refresh = [&](const P0SemanticFailure failure) {
     const std::string failure_reason = semanticFailureReason(failure);
     risk_grid_.markRefreshFailure(now_s, failure_reason);
     const double refresh_end_stamp_s = liveNowSeconds();
-    std::lock_guard<std::mutex> health_lock(health_state_mutex_);
-    last_snapshot_failure_reason_ = failure_reason;
-    last_refresh_succeeded_ = false;
-    last_refresh_elapsed_ms_ = std::chrono::duration<double, std::milli>(
-        std::chrono::steady_clock::now() - refresh_start).count();
-    last_refresh_end_stamp_s_ = refresh_end_stamp_s;
-    last_refresh_end_steady_s_ = steadyNowSeconds();
+    {
+      std::lock_guard<std::mutex> health_lock(health_state_mutex_);
+      last_snapshot_failure_reason_ = failure_reason;
+      last_refresh_succeeded_ = false;
+      last_refresh_elapsed_ms_ = std::chrono::duration<double, std::milli>(
+          std::chrono::steady_clock::now() - refresh_start).count();
+      last_refresh_end_stamp_s_ = refresh_end_stamp_s;
+      last_refresh_end_steady_s_ = steadyNowSeconds();
+    }
+    const iap::RiskGridHealth failed_health = risk_grid_.health(now_s);
+    completeRefreshEvidence(failed_health, now_s, false);
+    publishHealth(failed_health, now_s);
   };
   const bool production_predictor = provider_ == nullptr;
   if (production_predictor && config_.predictor_use_current_integrity_prior) {
@@ -1050,8 +1075,15 @@ void P0RiskGridRuntime::refreshTimerCallback() {
   }
   iap::IntegritySnapshot snapshot;
   PredictorSourceCapture captured_predictor_sources;
-  if (!buildSnapshot(now_s, &snapshot,
-                     &captured_predictor_sources)) {
+  InputReadiness captured_input_readiness;
+  const bool snapshot_built = buildSnapshot(
+      now_s, &snapshot, &captured_predictor_sources,
+      &captured_input_readiness);
+  {
+    std::lock_guard<std::mutex> health_lock(health_state_mutex_);
+    refresh_input_readiness_ = captured_input_readiness;
+  }
+  if (!snapshot_built) {
     const bool invalid_current_provenance =
         production_predictor &&
         (captured_predictor_sources.current_generation == 0u ||
@@ -1086,7 +1118,9 @@ void P0RiskGridRuntime::refreshTimerCallback() {
         last_snapshot_failure_reason_ = "snapshot_builder_invalid";
       }
     }
-    publishHealth(risk_grid_.health(now_s), now_s);
+    const iap::RiskGridHealth failed_health = risk_grid_.health(now_s);
+    completeRefreshEvidence(failed_health, now_s, false);
+    publishHealth(failed_health, now_s);
     return;
   }
   {
@@ -1347,7 +1381,9 @@ void P0RiskGridRuntime::refreshTimerCallback() {
       last_refresh_end_stamp_s_ = refresh_end_stamp_s;
       last_refresh_end_steady_s_ = steadyNowSeconds();
     }
-    publishHealth(risk_grid_.health(now_s), now_s);
+    const iap::RiskGridHealth failed_health = risk_grid_.health(now_s);
+    completeRefreshEvidence(failed_health, now_s, false);
+    publishHealth(failed_health, now_s);
     return;
   }
 
@@ -1534,12 +1570,19 @@ void P0RiskGridRuntime::refreshTimerCallback() {
     last_refresh_end_stamp_s_ = refresh_end_stamp_s;
     last_refresh_succeeded_ = refresh_succeeded;
     last_refresh_end_steady_s_ = steadyNowSeconds();
-    last_generation_interval_ms_ = std::isfinite(last_generation_end_steady_s_)
-        ? 1000.0 * (last_refresh_end_steady_s_ -
-                    last_generation_end_steady_s_)
-        : std::numeric_limits<double>::quiet_NaN();
-    last_generation_end_steady_s_ = last_refresh_end_steady_s_;
+    if (refresh_succeeded) {
+      last_generation_interval_ms_ =
+          std::isfinite(last_generation_end_steady_s_)
+              ? 1000.0 * (last_refresh_end_steady_s_ -
+                          last_generation_end_steady_s_)
+              : std::numeric_limits<double>::quiet_NaN();
+      last_generation_end_steady_s_ = last_refresh_end_steady_s_;
+    } else {
+      last_generation_interval_ms_ =
+          std::numeric_limits<double>::quiet_NaN();
+    }
   }
+  completeRefreshEvidence(health, now_s, refresh_succeeded);
   publishHealth(health, now_s);
   if (safety_viz_) {
     safety_viz_->publishPredictedPLCloud(viz_snapshot, snapshot.p_wb.z(),
@@ -1555,9 +1598,9 @@ void P0RiskGridRuntime::publishHealth(const iap::RiskGridHealth& health,
   // mutex is held. A slow subscriber or RViz transport must not block input
   // callbacks or turn health into a self-fulfilling stale signal.
   const iap::RiskGridHealth enriched_health = addLidarPredictorInputHealth(health);
-  const InputReadiness readiness = inputReadiness(now_s);
   const auto mutex_wait_start = std::chrono::steady_clock::now();
   HealthPublicationState state;
+  RefreshEvidenceRecord evidence;
   std::string snapshot_failure_reason = "none";
   {
     std::lock_guard<std::mutex> health_lock(health_state_mutex_);
@@ -1570,7 +1613,18 @@ void P0RiskGridRuntime::publishHealth(const iap::RiskGridHealth& health,
         ? process_cpu_ms - last_process_cpu_ms_
         : std::numeric_limits<double>::quiet_NaN();
     last_process_cpu_ms_ = process_cpu_ms;
-    state = healthPublicationStateSnapshot();
+    const HealthPublicationState live_state = healthPublicationStateSnapshot();
+    evidence = refresh_evidence_;
+    state = evidence.publication;
+    state.health_callback_stamp_s = live_state.health_callback_stamp_s;
+    state.publish_stamp_s = live_state.publish_stamp_s;
+    state.health_callback_steady_s = live_state.health_callback_steady_s;
+    state.publish_steady_s = live_state.publish_steady_s;
+    state.input_callback_count = live_state.input_callback_count;
+    state.health_callback_count = live_state.health_callback_count;
+    state.process_cpu_delta_ms = live_state.process_cpu_delta_ms;
+    state.health_callback_duration_ms = live_state.health_callback_duration_ms;
+    state.health_callback_queue_delay_ms = live_state.health_callback_queue_delay_ms;
     state.input_callback_age_s =
         std::isfinite(last_input_callback_steady_s_)
             ? std::max(0.0, last_publish_steady_s_ -
@@ -1582,7 +1636,7 @@ void P0RiskGridRuntime::publishHealth(const iap::RiskGridHealth& health,
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - mutex_acquired).count();
     state.health_state_mutex_wait_ms = last_health_state_mutex_wait_ms_;
     state.health_state_mutex_hold_ms = last_health_state_mutex_hold_ms_;
-    snapshot_failure_reason = last_snapshot_failure_reason_;
+    snapshot_failure_reason = evidence.snapshot_failure_reason;
   }
   if (safety_viz_) {
     safety_viz_->publishRiskGridHealth(enriched_health, now_s);
@@ -1590,9 +1644,17 @@ void P0RiskGridRuntime::publishHealth(const iap::RiskGridHealth& health,
   if (!node_ || !health_pub_) {
     return;
   }
-  const auto& out_health = enriched_health;
+  const iap::RiskGridHealth& out_health = evidence.health;
+  const InputReadiness& readiness = evidence.readiness;
   std::ostringstream oss;
   oss << "{"
+      << "\"refresh_attempt_id\":" << evidence.refresh_attempt_id << ","
+      << "\"refresh_evidence_state\":"
+      << jsonString(refreshEvidenceStateName(evidence.state)) << ","
+      << "\"result_generation_id\":"
+      << evidence.result_generation_id << ","
+      << "\"previous_successful_generation_id\":"
+      << evidence.previous_successful_generation_id << ","
       << "\"ready\":" << (out_health.ready ? "true" : "false") << ","
       << "\"stale\":" << (out_health.stale ? "true" : "false") << ","
       << "\"age_s\":" << jsonNumber(out_health.age_s) << ","
@@ -1849,70 +1911,92 @@ P0RiskGridRuntime::healthPublicationStateSnapshot() const {
   return state;
 }
 
+P0RiskGridRuntime::RefreshEvidenceRecord
+P0RiskGridRuntime::refreshEvidenceRecordSnapshot() const {
+  std::lock_guard<std::mutex> lock(health_state_mutex_);
+  return refresh_evidence_;
+}
+
+const char* P0RiskGridRuntime::refreshEvidenceStateName(
+    const RefreshEvidenceState state) {
+  switch (state) {
+    case RefreshEvidenceState::PRE_REFRESH:
+      return "PRE_REFRESH";
+    case RefreshEvidenceState::IN_PROGRESS:
+      return "IN_PROGRESS";
+    case RefreshEvidenceState::COMPLETED_SUCCESS:
+      return "COMPLETED_SUCCESS";
+    case RefreshEvidenceState::COMPLETED_FAILURE:
+      return "COMPLETED_FAILURE";
+  }
+  return "UNKNOWN";
+}
+
+void P0RiskGridRuntime::completeRefreshEvidence(
+    const iap::RiskGridHealth& health, const double now_s,
+    const bool succeeded) {
+  (void)now_s;
+  std::scoped_lock lock(health_state_mutex_, lidar_predictor_input_mutex_);
+  const iap::RiskGridHealth completed_health =
+      addLidarPredictorInputHealthLocked(health);
+  refresh_evidence_.state = succeeded
+      ? RefreshEvidenceState::COMPLETED_SUCCESS
+      : RefreshEvidenceState::COMPLETED_FAILURE;
+  refresh_evidence_.result_generation_id =
+      succeeded ? completed_health.generation_id : 0u;
+  refresh_evidence_.previous_successful_generation_id =
+      last_successful_generation_id_;
+  refresh_evidence_.publication = healthPublicationStateSnapshot();
+  refresh_evidence_.readiness = refresh_input_readiness_;
+  refresh_evidence_.health = completed_health;
+  refresh_evidence_.snapshot_failure_reason = last_snapshot_failure_reason_;
+  if (succeeded) {
+    last_successful_generation_id_ = completed_health.generation_id;
+  }
+}
+
 P0RiskGridRuntime::InputReadiness
 P0RiskGridRuntime::inputReadiness(const double now_s) const {
+  std::scoped_lock lock(health_state_mutex_, lidar_predictor_input_mutex_);
+  return inputReadinessLocked(now_s);
+}
+
+P0RiskGridRuntime::InputReadiness
+P0RiskGridRuntime::inputReadinessLocked(const double now_s) const {
   InputReadiness readiness;
-  double odom_stamp = std::numeric_limits<double>::quiet_NaN();
-  double current_stamp = std::numeric_limits<double>::quiet_NaN();
-  double map_stamp = std::numeric_limits<double>::quiet_NaN();
-  double origin_stamp = std::numeric_limits<double>::quiet_NaN();
-  double gnss_epoch_stamp = std::numeric_limits<double>::quiet_NaN();
-  bool odom_seen = false;
-  bool odom_valid = false;
-  bool current_seen = false;
-  bool current_valid = false;
-  bool epoch_seen = false;
-  uint64_t epoch_satellite_count = 0;
-  bool origin_seen = false;
-  bool map_seen = false;
-  {
-    std::lock_guard<std::mutex> health_lock(health_state_mutex_);
-    odom_seen = odom_seen_;
-    odom_valid = latest_odom_pose_valid_;
-    odom_stamp = latest_odom_stamp_;
-    current_seen = current_integrity_seen_;
-    current_valid = latest_current_valid_;
-    current_stamp = latest_current_.stamp;
-    epoch_seen = gnss_epoch_seen_;
-    gnss_epoch_stamp = latest_gnss_epoch_stamp_;
-    epoch_satellite_count = latest_gnss_epoch_satellite_count_;
-    if (latest_epoch_) {
-      gnss_epoch_stamp = latest_epoch_->stamp;
-      epoch_satellite_count =
-          static_cast<uint64_t>(latest_epoch_->sats.size());
-    }
-    origin_seen = origin_seen_;
-    origin_stamp = latest_origin_stamp_;
-    map_seen = map_seen_;
-    map_stamp = latest_map_stamp_;
-  }
-  std::size_t map_point_count = 0;
-  {
-    std::lock_guard<std::mutex> lidar_lock(lidar_predictor_input_mutex_);
-    map_point_count = latest_lidar_map_point_count_;
-  }
+  const double odom_stamp = latest_odom_stamp_;
+  const double current_stamp = latest_current_.stamp;
+  const double map_stamp = latest_map_stamp_;
+  const double origin_stamp = latest_origin_stamp_;
+  const double gnss_epoch_stamp = latest_epoch_
+      ? latest_epoch_->stamp : latest_gnss_epoch_stamp_;
+  const uint64_t epoch_satellite_count = latest_epoch_
+      ? static_cast<uint64_t>(latest_epoch_->sats.size())
+      : latest_gnss_epoch_satellite_count_;
+  const std::size_t map_point_count = latest_lidar_map_point_count_;
 
   const double stale_timeout = config_.grid.stale_timeout_s;
   const double gnss_timeout = config_.gnss_epoch_max_age_s;
   const bool finite_now = std::isfinite(now_s);
 
-  readiness.odom_seen = odom_seen;
-  readiness.odom_valid = odom_seen && odom_valid;
+  readiness.odom_seen = odom_seen_;
+  readiness.odom_valid = odom_seen_ && latest_odom_pose_valid_;
   readiness.odom_stamp_s = odom_stamp;
   readiness.odom_fresh =
       readiness.odom_valid && finite_now && std::isfinite(odom_stamp) &&
       odom_stamp > 0.0 && (now_s - odom_stamp) <= stale_timeout;
 
-  readiness.current_integrity_seen = current_seen;
-  readiness.current_integrity_valid = current_seen && current_valid;
+  readiness.current_integrity_seen = current_integrity_seen_;
+  readiness.current_integrity_valid =
+      current_integrity_seen_ && latest_current_valid_;
   readiness.current_integrity_stamp_s = current_stamp;
   readiness.current_integrity_fresh =
       readiness.current_integrity_valid && finite_now &&
       std::isfinite(current_stamp) && current_stamp > 0.0 &&
       (now_s - current_stamp) <= stale_timeout;
 
-  readiness.gnss_epoch_seen = epoch_seen;
-  readiness.gnss_epoch_valid = epoch_seen && latest_epoch_.has_value() &&
+  readiness.gnss_epoch_seen = gnss_epoch_seen_;
+  readiness.gnss_epoch_valid = gnss_epoch_seen_ && latest_epoch_.has_value() &&
                                std::isfinite(gnss_epoch_stamp) &&
                                epoch_satellite_count > 0;
   readiness.gnss_epoch_stamp_s = gnss_epoch_stamp;
@@ -1922,16 +2006,16 @@ P0RiskGridRuntime::inputReadiness(const double now_s) const {
       std::isfinite(gnss_epoch_stamp) &&
       (gnss_timeout < 0.0 || (now_s - gnss_epoch_stamp) <= gnss_timeout);
 
-  readiness.origin_seen = origin_seen;
-  readiness.origin_valid = origin_seen && origin_set_;
+  readiness.origin_seen = origin_seen_;
+  readiness.origin_valid = origin_seen_ && origin_set_;
   readiness.origin_stamp_s = origin_stamp;
   readiness.origin_fresh =
       readiness.origin_valid && finite_now && std::isfinite(origin_stamp) &&
       origin_stamp > 0.0 && (now_s - origin_stamp) <= stale_timeout;
 
-  readiness.map_seen = map_seen;
+  readiness.map_seen = map_seen_;
   readiness.map_valid =
-      map_seen && std::isfinite(map_stamp) && map_point_count > 0;
+      map_seen_ && std::isfinite(map_stamp) && map_point_count > 0;
   readiness.map_stamp_s = map_stamp;
   readiness.map_point_count = static_cast<uint64_t>(map_point_count);
   readiness.map_fresh =
@@ -2369,7 +2453,8 @@ Eigen::Matrix3d P0RiskGridRuntime::currentPriorInformation(
 bool P0RiskGridRuntime::buildSnapshot(
     const double now_s,
     iap::IntegritySnapshot* snapshot,
-    PredictorSourceCapture* source_capture) const {
+    PredictorSourceCapture* source_capture,
+    InputReadiness* readiness_capture) const {
   if (snapshot == nullptr) {
     return false;
   }
@@ -2386,7 +2471,7 @@ bool P0RiskGridRuntime::buildSnapshot(
   std::optional<iap::GnssEpoch> epoch;
   uint64_t captured_gnss_epoch_generation = 0;
   {
-    std::lock_guard<std::mutex> lock(health_state_mutex_);
+    std::scoped_lock lock(health_state_mutex_, lidar_predictor_input_mutex_);
     odom_stamp = latest_odom_stamp_;
     odom_position = latest_odom_p_;
     odom_orientation = latest_odom_q_;
@@ -2399,6 +2484,9 @@ bool P0RiskGridRuntime::buildSnapshot(
     }
     epoch = latest_epoch_;
     captured_gnss_epoch_generation = latest_gnss_epoch_generation_;
+    if (readiness_capture) {
+      *readiness_capture = inputReadinessLocked(now_s);
+    }
   }
   if (source_capture) {
     source_capture->current_generation = prior_source_generation;
@@ -2458,6 +2546,11 @@ bool P0RiskGridRuntime::buildSnapshot(
 iap::RiskGridHealth P0RiskGridRuntime::addLidarPredictorInputHealth(
     iap::RiskGridHealth health) const {
   std::lock_guard<std::mutex> lock(lidar_predictor_input_mutex_);
+  return addLidarPredictorInputHealthLocked(std::move(health));
+}
+
+iap::RiskGridHealth P0RiskGridRuntime::addLidarPredictorInputHealthLocked(
+    iap::RiskGridHealth health) const {
   health.predictor_lidar_map_point_count =
       static_cast<uint64_t>(latest_lidar_map_point_count_);
   health.predictor_lidar_fim_primitive_count =

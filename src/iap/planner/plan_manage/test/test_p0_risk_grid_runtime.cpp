@@ -94,6 +94,10 @@ class BlockingProvider final : public iap::RiskPredictionProvider {
     condition_.notify_all();
     std::unique_lock<std::mutex> lock(mutex_);
     condition_.wait(lock, [this]() { return released_; });
+    const bool succeed = succeed_;
+    if (!succeed) {
+      return false;
+    }
     results->assign(queries.size(), iap::RiskPredictionResult{});
     for (auto& result : *results) {
       result.available = true;
@@ -118,11 +122,19 @@ class BlockingProvider final : public iap::RiskPredictionProvider {
     condition_.notify_all();
   }
 
+  void reset(const bool succeed) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    entered_ = false;
+    released_ = false;
+    succeed_ = succeed;
+  }
+
  private:
   std::mutex mutex_;
   std::condition_variable condition_;
   bool entered_ = false;
   bool released_ = false;
+  bool succeed_ = true;
 };
 
 class CallbackProvider final : public iap::RiskPredictionProvider {
@@ -1103,6 +1115,46 @@ namespace ego_planner {
 
 class P0RiskGridRuntimeStampTest : public ::testing::Test {
  protected:
+  struct RefreshEvidenceView {
+    uint64_t attempt_id = 0;
+    std::string state;
+    uint64_t active_generation_id = 0;
+    uint64_t result_generation_id = 0;
+    uint64_t previous_successful_generation_id = 0;
+    double start_steady_s = std::numeric_limits<double>::quiet_NaN();
+    double end_steady_s = std::numeric_limits<double>::quiet_NaN();
+    double refresh_elapsed_ms = std::numeric_limits<double>::quiet_NaN();
+    double provider_duration_ms = std::numeric_limits<double>::quiet_NaN();
+    double generation_interval_ms = std::numeric_limits<double>::quiet_NaN();
+    std::size_t refresh_query_count = 0;
+    bool snapshot_available = false;
+    std::string snapshot_failure_reason;
+    double odom_stamp_s = std::numeric_limits<double>::quiet_NaN();
+    double current_integrity_stamp_s =
+        std::numeric_limits<double>::quiet_NaN();
+  };
+
+  static RefreshEvidenceView refreshEvidence(
+      const P0RiskGridRuntime& runtime) {
+    const auto evidence = runtime.refreshEvidenceRecordSnapshot();
+    return {
+        evidence.refresh_attempt_id,
+        P0RiskGridRuntime::refreshEvidenceStateName(evidence.state),
+        evidence.health.generation_id,
+        evidence.result_generation_id,
+        evidence.previous_successful_generation_id,
+        evidence.publication.refresh_start_steady_s,
+        evidence.publication.refresh_end_steady_s,
+        evidence.publication.refresh_elapsed_ms,
+        evidence.publication.provider_batch_duration_ms,
+        evidence.publication.generation_interval_ms,
+        evidence.publication.refresh_query_count,
+        evidence.publication.snapshot_available,
+        evidence.snapshot_failure_reason,
+        evidence.readiness.odom_stamp_s,
+        evidence.readiness.current_integrity_stamp_s};
+  }
+
   struct PredictorDiagnosticCounts {
     std::size_t legacy_unique_positions = 0;
     std::size_t legacy_lidar_evaluations = 0;
@@ -1504,6 +1556,13 @@ class P0RiskGridRuntimeStampTest : public ::testing::Test {
   }
 
   static void setCurrentStamp(P0RiskGridRuntime* runtime, const double stamp) {
+    runtime->latest_current_.stamp = stamp;
+  }
+
+  static void setOdomAndCurrentStampsLocked(
+      P0RiskGridRuntime* runtime, const double stamp) {
+    std::lock_guard<std::mutex> lock(runtime->health_state_mutex_);
+    runtime->latest_odom_stamp_ = stamp;
     runtime->latest_current_.stamp = stamp;
   }
 
@@ -2596,6 +2655,159 @@ TEST_F(P0RiskGridRuntimeStampTest,
   spin_thread.join();
   EXPECT_GE(stale_callbacks.load(), 2);
   EXPECT_TRUE(runtime.health().stale);
+}
+
+TEST_F(P0RiskGridRuntimeStampTest,
+       RefreshAttemptEvidenceIsAtomicAcrossSuccessFailureAndRecovery) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_atomic_refresh_evidence_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  auto provider = std::make_unique<BlockingProvider>();
+  auto* provider_ptr = provider.get();
+  P0RiskGridRuntime runtime(node, enabledConfig(), std::move(provider));
+  seedValidInputs(&runtime, 100.0, 100.0);
+  std::vector<std::string> health_messages;
+  auto health_sub = node->create_subscription<std_msgs::msg::String>(
+      "/planning/risk_grid_health", 100,
+      [&health_messages](const std_msgs::msg::String::ConstSharedPtr message) {
+        health_messages.push_back(message->data);
+      });
+  (void)health_sub;
+  rclcpp::executors::SingleThreadedExecutor executor;
+  executor.add_node(node);
+  const auto publish_and_capture = [&]() -> const std::string& {
+    executor.spin_some();
+    health_messages.clear();
+    publishHealthNow(&runtime);
+    for (int index = 0; index < 3 && health_messages.empty(); ++index) {
+      executor.spin_some();
+    }
+    EXPECT_FALSE(health_messages.empty());
+    return health_messages.back();
+  };
+
+  const auto pre_refresh = refreshEvidence(runtime);
+  EXPECT_EQ(pre_refresh.attempt_id, 1u);
+  EXPECT_EQ(pre_refresh.state, "PRE_REFRESH");
+  EXPECT_EQ(pre_refresh.active_generation_id, 0u);
+  EXPECT_EQ(pre_refresh.result_generation_id, 0u);
+  EXPECT_FALSE(std::isfinite(pre_refresh.end_steady_s));
+  const std::string pre_message = publish_and_capture();
+  EXPECT_NE(pre_message.find("\"refresh_attempt_id\":1"), std::string::npos);
+  EXPECT_NE(pre_message.find("\"refresh_evidence_state\":\"PRE_REFRESH\""),
+            std::string::npos);
+
+  bool first_result = false;
+  std::thread first_refresh([&]() { first_result = refreshOnce(&runtime); });
+  provider_ptr->waitUntilEntered();
+  const auto first_in_progress = refreshEvidence(runtime);
+  EXPECT_EQ(first_in_progress.attempt_id, 1u);
+  EXPECT_EQ(first_in_progress.state, "IN_PROGRESS");
+  EXPECT_EQ(first_in_progress.active_generation_id, 0u);
+  EXPECT_EQ(first_in_progress.result_generation_id, 0u);
+  EXPECT_EQ(first_in_progress.refresh_query_count, 0u);
+  EXPECT_FALSE(std::isfinite(first_in_progress.end_steady_s));
+  EXPECT_FALSE(std::isfinite(first_in_progress.provider_duration_ms));
+  const std::string first_progress_message = publish_and_capture();
+  EXPECT_NE(first_progress_message.find(
+                "\"refresh_evidence_state\":\"IN_PROGRESS\""),
+            std::string::npos);
+  EXPECT_NE(first_progress_message.find("\"result_generation_id\":0"),
+            std::string::npos);
+  setOdomAndCurrentStampsLocked(&runtime, 101.0);
+  provider_ptr->release();
+  first_refresh.join();
+  ASSERT_TRUE(first_result);
+
+  const auto first_success = refreshEvidence(runtime);
+  EXPECT_EQ(first_success.attempt_id, 1u);
+  EXPECT_EQ(first_success.state, "COMPLETED_SUCCESS");
+  EXPECT_EQ(first_success.active_generation_id, 1u);
+  EXPECT_EQ(first_success.result_generation_id, 1u);
+  EXPECT_EQ(first_success.previous_successful_generation_id, 0u);
+  EXPECT_TRUE(first_success.snapshot_available);
+  EXPECT_GT(first_success.refresh_query_count, 0u);
+  EXPECT_TRUE(std::isfinite(first_success.refresh_elapsed_ms));
+  EXPECT_TRUE(std::isfinite(first_success.provider_duration_ms));
+  EXPECT_FALSE(std::isfinite(first_success.generation_interval_ms));
+  EXPECT_DOUBLE_EQ(first_success.odom_stamp_s, 100.0);
+  EXPECT_DOUBLE_EQ(first_success.current_integrity_stamp_s, 100.0);
+  const std::string first_success_message = publish_and_capture();
+  EXPECT_NE(first_success_message.find(
+                "\"refresh_evidence_state\":\"COMPLETED_SUCCESS\""),
+            std::string::npos);
+  EXPECT_NE(first_success_message.find("\"result_generation_id\":1"),
+            std::string::npos);
+  const auto repeated_first_success = refreshEvidence(runtime);
+  EXPECT_EQ(repeated_first_success.attempt_id, first_success.attempt_id);
+  EXPECT_DOUBLE_EQ(repeated_first_success.refresh_elapsed_ms,
+                   first_success.refresh_elapsed_ms);
+  EXPECT_DOUBLE_EQ(repeated_first_success.provider_duration_ms,
+                   first_success.provider_duration_ms);
+  EXPECT_EQ(repeated_first_success.refresh_query_count,
+            first_success.refresh_query_count);
+
+  provider_ptr->reset(false);
+  bool failed_result = true;
+  std::thread failed_refresh([&]() { failed_result = refreshOnce(&runtime); });
+  provider_ptr->waitUntilEntered();
+  const auto second_in_progress = refreshEvidence(runtime);
+  EXPECT_EQ(second_in_progress.attempt_id, 2u);
+  EXPECT_EQ(second_in_progress.state, "IN_PROGRESS");
+  EXPECT_EQ(second_in_progress.active_generation_id, 1u);
+  EXPECT_EQ(second_in_progress.result_generation_id, 0u);
+  EXPECT_EQ(second_in_progress.previous_successful_generation_id, 1u);
+  EXPECT_EQ(second_in_progress.refresh_query_count, 0u);
+  EXPECT_FALSE(std::isfinite(second_in_progress.end_steady_s));
+  EXPECT_FALSE(std::isfinite(second_in_progress.provider_duration_ms));
+  const std::string second_progress_message = publish_and_capture();
+  EXPECT_NE(second_progress_message.find("\"refresh_attempt_id\":2"),
+            std::string::npos);
+  EXPECT_NE(second_progress_message.find("\"generation_id\":1"),
+            std::string::npos);
+  EXPECT_NE(second_progress_message.find("\"refresh_query_count\":0"),
+            std::string::npos);
+  provider_ptr->release();
+  failed_refresh.join();
+  EXPECT_FALSE(failed_result);
+
+  const auto completed_failure = refreshEvidence(runtime);
+  EXPECT_EQ(completed_failure.attempt_id, 2u);
+  EXPECT_EQ(completed_failure.state, "COMPLETED_FAILURE");
+  EXPECT_EQ(completed_failure.active_generation_id, 1u);
+  EXPECT_EQ(completed_failure.result_generation_id, 0u);
+  EXPECT_EQ(completed_failure.previous_successful_generation_id, 1u);
+  EXPECT_TRUE(std::isfinite(completed_failure.end_steady_s));
+  const std::string failure_message = publish_and_capture();
+  EXPECT_NE(failure_message.find(
+                "\"refresh_evidence_state\":\"COMPLETED_FAILURE\""),
+            std::string::npos);
+  EXPECT_NE(failure_message.find("\"generation_id\":1"), std::string::npos);
+  EXPECT_NE(failure_message.find("\"result_generation_id\":0"),
+            std::string::npos);
+
+  provider_ptr->reset(true);
+  bool recovery_result = false;
+  std::thread recovery_refresh(
+      [&]() { recovery_result = refreshOnce(&runtime); });
+  provider_ptr->waitUntilEntered();
+  provider_ptr->release();
+  recovery_refresh.join();
+  ASSERT_TRUE(recovery_result);
+  const auto recovery = refreshEvidence(runtime);
+  EXPECT_EQ(recovery.attempt_id, 3u);
+  EXPECT_EQ(recovery.state, "COMPLETED_SUCCESS");
+  EXPECT_EQ(recovery.active_generation_id, 2u);
+  EXPECT_EQ(recovery.result_generation_id, 2u);
+  EXPECT_EQ(recovery.previous_successful_generation_id, 1u);
+  EXPECT_TRUE(std::isfinite(recovery.generation_interval_ms));
+  EXPECT_GT(recovery.generation_interval_ms, 0.0);
+  const std::string recovery_message = publish_and_capture();
+  EXPECT_NE(recovery_message.find("\"refresh_attempt_id\":3"),
+            std::string::npos);
+  EXPECT_NE(recovery_message.find("\"result_generation_id\":2"),
+            std::string::npos);
 }
 
 TEST_F(P0RiskGridRuntimeStampTest, OdomStampIsPreferredForRefreshTime) {

@@ -45,9 +45,32 @@ REQUIRED_COUNTER_FIELDS = (
 
 
 def valid_p0_message(**overrides):
+    generation_id = overrides.get("generation_id", 1)
+    default_attempt_id = (
+        generation_id
+        if isinstance(generation_id, int)
+        and not isinstance(generation_id, bool)
+        and generation_id > 0
+        else 1
+    )
+    attempt_id = overrides.get("refresh_attempt_id", default_attempt_id)
+    previous_generation_id = (
+        generation_id - 1
+        if isinstance(generation_id, int)
+        and not isinstance(generation_id, bool)
+        and generation_id > 1
+        else 0
+    )
     message = {
-        "generation_id": 1,
+        "refresh_attempt_id": attempt_id,
+        "refresh_evidence_state": "COMPLETED_SUCCESS",
+        "generation_id": generation_id,
+        "result_generation_id": generation_id,
+        "previous_successful_generation_id": previous_generation_id,
+        "refresh_callback_start_stamp_s": 0.5,
+        "refresh_callback_start_steady_s": 0.5,
         "refresh_callback_end_steady_s": 1.0,
+        "refresh_callback_end_stamp_s": 1.0,
         "refresh_query_count": 76800,
         "provider_query_count": 76800,
         "occupied_skip_count": 0,
@@ -77,7 +100,7 @@ def valid_p0_message(**overrides):
         "reason": "ok",
         "refresh_elapsed_ms": 100.0,
         "provider_batch_duration_ms": 80.0,
-        "generation_interval_ms": 500.0,
+        "generation_interval_ms": None if generation_id == 1 else 500.0,
         "refresh_stamp_s": 1.0,
         "snapshot_available": True,
         "snapshot_failure_reason": "none",
@@ -587,7 +610,7 @@ class Gate0AnalyzerTest(unittest.TestCase):
                 result["gate0b"]["gate"], "P0_EVIDENCE_CONTRACT_FAIL"
             )
             self.assertIn(
-                "refresh_callback_end_steady_s_invalid",
+                "completed_attempt_identity_invalid:refresh_callback_end_steady_s",
                 result["gate0b"]["failures"],
             )
             self.assertIn("no_valid_integrity_report", result["gate0b"]["failures"])
@@ -617,15 +640,21 @@ class Gate0AnalyzerTest(unittest.TestCase):
             )
             health = [
                 valid_p0_message(
-                    generation_id=11,
+                    generation_id=1,
                     refresh_callback_end_steady_s=1.0,
                     refresh_stamp_s=1.0,
                     refresh_elapsed_ms=100.0,
                 ),
                 valid_p0_message(
-                    generation_id=11,
+                    refresh_attempt_id=2,
+                    refresh_evidence_state="COMPLETED_FAILURE",
+                    generation_id=1,
+                    result_generation_id=0,
+                    previous_successful_generation_id=1,
                     refresh_callback_end_steady_s=2.0,
                     refresh_stamp_s=2.0,
+                    snapshot_available=False,
+                    snapshot_failure_reason="occupancy_stale",
                     ready=False,
                     reason="occupancy_stale",
                     refresh_elapsed_ms=900.0,
@@ -651,14 +680,11 @@ class Gate0AnalyzerTest(unittest.TestCase):
                 rows = list(csv.DictReader(stream))
 
             self.assertNotEqual(result["gate0b"]["gate"], "PASS")
-            self.assertEqual(result["gate0b"]["successful_generation_count"], 0)
-            self.assertTrue(
-                math.isnan(result["gate0b"]["refresh_elapsed_ms_p50"])
-            )
-            self.assertEqual(result["gate0b"]["duplicate_generation_observation_count"], 1)
-            self.assertEqual(len(rows), 1)
-            self.assertEqual(rows[0]["generation_id"], "11")
-            self.assertEqual(rows[0]["failed_refresh"], "1")
+            self.assertEqual(result["gate0b"]["successful_generation_count"], 1)
+            self.assertEqual(result["gate0b"]["completed_failure_count"], 1)
+            self.assertEqual(len(rows), 2)
+            self.assertEqual(rows[0]["generation_id"], "1")
+            self.assertEqual(rows[1]["failed_refresh"], "1")
 
     def test_successful_generation_with_nonfinite_latency_fails_closed(self):
         messages = []
@@ -833,7 +859,7 @@ class Gate0AnalyzerTest(unittest.TestCase):
                 self.assertIn(failure, summary["failures"])
 
     def test_successful_generation_requires_finite_timings_and_invalidation_reason(self):
-        for field in ("refresh_elapsed_ms", "provider_batch_duration_ms", "generation_interval_ms"):
+        for field in ("refresh_elapsed_ms", "provider_batch_duration_ms"):
             with self.subTest(field=field, defect="missing"):
                 message = valid_p0_message()
                 del message[field]
@@ -908,255 +934,200 @@ class Gate0AnalyzerTest(unittest.TestCase):
                 )
                 self.assertIn("snapshot_unavailable", summary["failures"])
 
-    def test_p0_final_observation_deduplication_is_visible(self):
-        messages = [
-            valid_p0_message(
-                generation_id=1,
-                refresh_callback_end_steady_s=30.0,
-                refresh_stamp_s=30.0,
-                refresh_elapsed_ms=300.0,
-            ),
-            valid_p0_message(
-                generation_id=2,
-                refresh_callback_end_steady_s=20.0,
-                refresh_stamp_s=20.0,
-                refresh_elapsed_ms=200.0,
-            ),
-            valid_p0_message(
-                generation_id=1,
-                refresh_callback_end_steady_s=10.0,
-                refresh_stamp_s=10.0,
-                refresh_elapsed_ms=100.0,
-            ),
-            valid_p0_message(
-                generation_id=3,
-                refresh_callback_end_steady_s=40.0,
-                refresh_stamp_s=40.0,
-                refresh_elapsed_ms=400.0,
-            ),
-            valid_p0_message(
-                generation_id=4,
-                refresh_callback_end_steady_s=40.0,
-                refresh_stamp_s=41.0,
-                refresh_elapsed_ms=450.0,
-            ),
-        ]
-
-        rows, summary = MODULE.analyze_p0_messages(messages, protocol="smoke")
-
-        self.assertEqual([row["generation_id"] for row in rows], [1, 2, 4])
-        self.assertEqual(
-            [row["refresh_elapsed_ms"] for row in rows], [100.0, 200.0, 450.0]
-        )
-        self.assertEqual(summary["captured_observation_count"], 5)
-        self.assertEqual(summary["callback_representative_count"], 4)
-        self.assertEqual(summary["duplicate_callback_observation_count"], 1)
-        self.assertEqual(summary["duplicate_generation_observation_count"], 1)
-        self.assertEqual(summary["successful_generation_count"], 3)
-        self.assertEqual(summary["gate"], "PASS")
-
-    def test_p0_final_generation_success_to_failure_replaces_obsolete_success(self):
-        messages = [
-            valid_p0_message(
-                generation_id=7,
-                refresh_callback_end_steady_s=1.0,
-                refresh_stamp_s=1.0,
-                refresh_elapsed_ms=100.0,
-            ),
-            valid_p0_message(
-                generation_id=7,
-                refresh_callback_end_steady_s=2.0,
-                refresh_stamp_s=2.0,
-                ready=False,
-                reason="occupancy_stale",
-                refresh_elapsed_ms=900.0,
-            ),
-        ]
-
-        rows, summary = MODULE.analyze_p0_messages(messages, protocol="smoke")
-
-        self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0]["generation_id"], 7)
-        self.assertEqual(rows[0]["failed_refresh"], 1)
-        self.assertEqual(summary["duplicate_generation_observation_count"], 1)
-        self.assertEqual(summary["successful_generation_count"], 0)
-        self.assertEqual(summary["failed_refresh_count"], 1)
-        self.assertTrue(math.isnan(summary["refresh_elapsed_ms_p50"]))
-        self.assertEqual(summary["gate"], "P0_INPUT_AVAILABILITY_FAIL")
-
-    def test_p0_final_generation_failure_to_success_keeps_final_success(self):
-        messages = [
-            valid_p0_message(
-                generation_id=8,
-                refresh_callback_end_steady_s=1.0,
-                refresh_stamp_s=1.0,
-                ready=False,
-                reason="occupancy_stale",
-                refresh_elapsed_ms=900.0,
-            ),
-            valid_p0_message(
-                generation_id=8,
-                refresh_callback_end_steady_s=2.0,
-                refresh_stamp_s=2.0,
-                refresh_elapsed_ms=125.0,
-            ),
-        ]
-
-        rows, summary = MODULE.analyze_p0_messages(messages, protocol="smoke")
-
-        self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0]["generation_id"], 8)
-        self.assertEqual(rows[0]["failed_refresh"], 0)
-        self.assertEqual(rows[0]["refresh_elapsed_ms"], 125.0)
-        self.assertEqual(summary["duplicate_generation_observation_count"], 1)
-        self.assertEqual(summary["successful_generation_count"], 1)
-        self.assertEqual(summary["failed_refresh_count"], 0)
-        self.assertEqual(summary["refresh_elapsed_ms_p50"], 125.0)
-        self.assertEqual(summary["gate"], "PASS")
-
-    def test_p0_final_invalid_success_does_not_fall_back_to_earlier_valid_row(self):
-        messages = [
-            valid_p0_message(
-                generation_id=9,
-                refresh_callback_end_steady_s=1.0,
-                refresh_stamp_s=1.0,
-                refresh_elapsed_ms=100.0,
-            ),
-            valid_p0_message(
-                generation_id=9,
-                refresh_callback_end_steady_s=2.0,
-                refresh_stamp_s=2.0,
-                snapshot_available=False,
-                refresh_elapsed_ms=200.0,
-            ),
-        ]
-
-        rows, summary = MODULE.analyze_p0_messages(messages, protocol="smoke")
-
-        self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0]["generation_id"], 9)
-        self.assertEqual(rows[0]["refresh_elapsed_ms"], 200.0)
-        self.assertEqual(rows[0]["failed_refresh"], 1)
-        self.assertEqual(summary["duplicate_generation_observation_count"], 1)
-        self.assertEqual(summary["successful_generation_count"], 0)
-        self.assertIn("snapshot_unavailable", summary["failures"])
-        self.assertEqual(summary["gate"], "P0_EVIDENCE_CONTRACT_FAIL")
-
-    def test_p0_final_generation_success_to_success_uses_final_latency(self):
-        messages = [
-            valid_p0_message(
-                generation_id=10,
-                refresh_callback_end_steady_s=1.0,
-                refresh_stamp_s=1.0,
-                refresh_elapsed_ms=100.0,
-            ),
-            valid_p0_message(
-                generation_id=10,
-                refresh_callback_end_steady_s=2.0,
-                refresh_stamp_s=2.0,
-                refresh_elapsed_ms=275.0,
-            ),
-        ]
-
-        rows, summary = MODULE.analyze_p0_messages(messages, protocol="smoke")
-
-        self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0]["refresh_elapsed_ms"], 275.0)
-        self.assertEqual(summary["duplicate_generation_observation_count"], 1)
-        self.assertEqual(summary["refresh_elapsed_ms_p50"], 275.0)
-        self.assertEqual(summary["gate"], "PASS")
-
-    def test_p0_malformed_callback_identity_fails_without_stamp_fallback(self):
-        malformed = valid_p0_message(
-            generation_id=2,
-            refresh_stamp_s=2.0,
-        )
-        del malformed["refresh_callback_end_steady_s"]
-
+    def test_completed_records_deduplicate_only_when_field_equivalent(self):
+        completed = valid_p0_message()
         rows, summary = MODULE.analyze_p0_messages(
-            [valid_p0_message(), malformed], protocol="smoke"
+            [completed, dict(completed)], protocol="smoke"
         )
-
-        self.assertEqual(summary["captured_observation_count"], 2)
-        self.assertEqual(summary["callback_representative_count"], 1)
-        self.assertEqual(summary["malformed_callback_identity_count"], 1)
-        self.assertEqual(summary["successful_generation_count"], 1)
-        self.assertEqual(summary["failed_refresh_count"], 1)
-        self.assertIn(
-            "refresh_callback_end_steady_s_invalid", summary["failures"]
-        )
-        self.assertEqual(summary["gate"], "P0_EVIDENCE_CONTRACT_FAIL")
-        self.assertEqual(len(rows), 2)
-        self.assertEqual(rows[-1]["refresh_callback_end_steady_s"], "")
-        self.assertEqual(rows[-1]["failed_refresh"], 1)
-
-    def test_p0_zero_generation_not_ready_without_refresh_identity_is_startup(self):
-        startup = {
-            "generation_id": 0,
-            "refresh_callback_start_stamp_s": None,
-            "refresh_callback_start_steady_s": None,
-            "refresh_callback_end_stamp_s": None,
-            "refresh_callback_end_steady_s": None,
-            "refresh_query_count": 0,
-            "ready": False,
-            "reason": "not_ready",
-        }
-
-        rows, summary = MODULE.analyze_p0_messages([startup], protocol="smoke")
-
-        self.assertEqual(rows, [])
-        self.assertEqual(summary["captured_observation_count"], 1)
-        self.assertEqual(summary["pre_refresh_observation_count"], 1)
-        self.assertEqual(summary["malformed_callback_identity_count"], 0)
-        self.assertEqual(summary["successful_generation_count"], 0)
-        self.assertEqual(summary["failed_refresh_count"], 0)
-        self.assertEqual(summary["gate"], "P0_INPUT_AVAILABILITY_FAIL")
-
-    def test_p0_startup_observation_does_not_contaminate_valid_generation(self):
-        startup = {
-            "generation_id": 0,
-            "refresh_callback_start_stamp_s": None,
-            "refresh_callback_start_steady_s": None,
-            "refresh_callback_end_stamp_s": None,
-            "refresh_callback_end_steady_s": None,
-            "refresh_query_count": 0,
-            "ready": False,
-            "reason": "not_ready",
-        }
-
-        rows, summary = MODULE.analyze_p0_messages(
-            [startup, valid_p0_message()], protocol="smoke"
-        )
-
-        self.assertEqual([row["generation_id"] for row in rows], [1])
-        self.assertEqual(summary["pre_refresh_observation_count"], 1)
-        self.assertEqual(summary["malformed_callback_identity_count"], 0)
-        self.assertEqual(summary["successful_generation_count"], 1)
-        self.assertEqual(summary["failed_refresh_count"], 0)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(summary["duplicate_completed_observation_count"], 1)
         self.assertEqual(summary["gate"], "PASS")
 
-    def test_p0_incomplete_refresh_claim_without_end_identity_is_malformed(self):
-        incomplete = valid_p0_message(
-            generation_id=0,
-            refresh_callback_start_stamp_s=1.0,
-            refresh_callback_start_steady_s=1.0,
-            refresh_callback_end_stamp_s=None,
-            refresh_callback_end_steady_s=None,
+        conflict = dict(completed, refresh_elapsed_ms=101.0)
+        _, failed = MODULE.analyze_p0_messages(
+            [completed, conflict], protocol="smoke"
+        )
+        self.assertEqual(failed["conflicting_completed_observation_count"], 1)
+        self.assertIn("conflicting_completed_attempt_record", failed["failures"])
+        self.assertEqual(failed["gate"], "P0_EVIDENCE_CONTRACT_FAIL")
+
+    def test_icra032_interleaving_keeps_attempts_distinct(self):
+        success = valid_p0_message()
+        in_progress = {
+            "refresh_attempt_id": 2,
+            "refresh_evidence_state": "IN_PROGRESS",
+            "generation_id": 1,
+            "result_generation_id": 0,
+            "previous_successful_generation_id": 1,
+            "refresh_stamp_s": 2.0,
+            "refresh_callback_start_stamp_s": 2.0,
+            "refresh_callback_start_steady_s": 2.0,
+            "ready": True,
+            "reason": "ok",
+        }
+        failure = dict(
+            in_progress,
+            refresh_evidence_state="COMPLETED_FAILURE",
+            refresh_callback_end_stamp_s=2.5,
+            refresh_callback_end_steady_s=2.5,
+            snapshot_available=False,
+            snapshot_failure_reason="occupancy_stale",
             ready=False,
-            reason="not_ready",
+            reason="occupancy_stale",
         )
-
         rows, summary = MODULE.analyze_p0_messages(
-            [incomplete], protocol="smoke"
+            [success, in_progress, failure], protocol="smoke"
+        )
+        self.assertEqual([row["refresh_attempt_id"] for row in rows], [1, 2])
+        self.assertEqual(summary["successful_generation_count"], 1)
+        self.assertEqual(summary["in_progress_observation_count"], 1)
+        self.assertEqual(summary["completed_failure_count"], 1)
+        self.assertEqual(summary["gate"], "PASS")
+
+    def test_attempt_and_result_id_contracts_fail_closed(self):
+        defects = (
+            ({"refresh_attempt_id": None}, "refresh_attempt_id_invalid"),
+            ({"refresh_attempt_id": 0}, "refresh_attempt_id_invalid"),
+            ({"refresh_evidence_state": "UNKNOWN"}, "refresh_evidence_state_unknown"),
+            ({"result_generation_id": 2}, "result_generation_active_generation_mismatch"),
+        )
+        for override, failure in defects:
+            with self.subTest(failure=failure):
+                _, summary = MODULE.analyze_p0_messages(
+                    [valid_p0_message(**override)], protocol="smoke"
+                )
+                self.assertIn(failure, summary["failures"])
+                self.assertEqual(summary["gate"], "P0_EVIDENCE_CONTRACT_FAIL")
+
+        messages = [
+            valid_p0_message(),
+            valid_p0_message(
+                refresh_attempt_id=2,
+                generation_id=1,
+                result_generation_id=1,
+                previous_successful_generation_id=1,
+                generation_interval_ms=500.0,
+            ),
+        ]
+        _, reused = MODULE.analyze_p0_messages(messages, protocol="smoke")
+        self.assertIn("result_generation_reused_or_regressed", reused["failures"])
+
+        _, regressed = MODULE.analyze_p0_messages(
+            [valid_p0_message(refresh_attempt_id=2), valid_p0_message()],
+            protocol="smoke",
+        )
+        self.assertIn("refresh_attempt_id_regressed", regressed["failures"])
+
+    def test_every_non_completed_forbidden_field_is_enforced_from_inventory(self):
+        self.assertIn("generation_interval_ms", MODULE.P0_NON_COMPLETED_FORBIDDEN_FIELDS)
+        self.assertIn("predictor_lidar_evaluations", MODULE.P0_NON_COMPLETED_FORBIDDEN_FIELDS)
+        self.assertIn("predictor_lidar_cache_hits", MODULE.P0_NON_COMPLETED_FORBIDDEN_FIELDS)
+        covered = set(MODULE.P0_NON_COMPLETED_FORBIDDEN_FIELDS) | set(
+            MODULE.P0_ACTIVE_MAP_OBSERVABILITY_FIELDS
+        ) | set(MODULE.P0_ATTEMPT_IDENTITY_FIELDS) | set(
+            MODULE.P0_ATTEMPT_START_FIELDS
+        )
+        self.assertEqual(covered, set(MODULE.P0_COMPLETED_QUALIFICATION_FIELDS))
+        base = {
+            "refresh_attempt_id": 1,
+            "refresh_evidence_state": "IN_PROGRESS",
+            "generation_id": 0,
+            "result_generation_id": 0,
+            "previous_successful_generation_id": 0,
+            "refresh_callback_start_stamp_s": 1.0,
+            "refresh_callback_start_steady_s": 1.0,
+            "ready": False,
+            "reason": "not_ready",
+        }
+        for field in MODULE.P0_NON_COMPLETED_FORBIDDEN_FIELDS:
+            with self.subTest(field=field):
+                claim = True if field.endswith(("_available", "_seen", "_valid", "_fresh")) else 1
+                _, summary = MODULE.analyze_p0_messages(
+                    [dict(base, **{field: claim})], protocol="smoke"
+                )
+                self.assertIn(
+                    f"in_progress_completion_claim:{field}", summary["failures"]
+                )
+        pre_refresh = dict(
+            base,
+            refresh_evidence_state="PRE_REFRESH",
+        )
+        for field in MODULE.P0_PRE_REFRESH_FORBIDDEN_FIELDS:
+            with self.subTest(pre_refresh_field=field):
+                claim = True if field.endswith(
+                    ("_available", "_seen", "_valid", "_fresh")
+                ) else 1
+                _, summary = MODULE.analyze_p0_messages(
+                    [dict(pre_refresh, **{field: claim})], protocol="smoke"
+                )
+                self.assertIn(
+                    f"pre_refresh_completion_claim:{field}", summary["failures"]
+                )
+
+    def test_non_completed_and_failure_active_generation_matches_previous_success(self):
+        first = valid_p0_message()
+        for state in ("IN_PROGRESS", "COMPLETED_FAILURE"):
+            with self.subTest(state=state):
+                next_attempt = valid_p0_message(
+                    refresh_attempt_id=2,
+                    refresh_evidence_state=state,
+                    generation_id=999,
+                    result_generation_id=0,
+                    previous_successful_generation_id=1,
+                    ready=False,
+                    reason="snapshot_unavailable",
+                    snapshot_available=False,
+                    snapshot_failure_reason="snapshot_unavailable",
+                )
+                if state == "IN_PROGRESS":
+                    for field in MODULE.P0_NON_COMPLETED_FORBIDDEN_FIELDS:
+                        next_attempt[field] = None
+                    next_attempt["refresh_callback_start_stamp_s"] = 2.0
+                    next_attempt["refresh_callback_start_steady_s"] = 2.0
+                    next_attempt["refresh_stamp_s"] = 2.0
+                _, summary = MODULE.analyze_p0_messages(
+                    [first, next_attempt], protocol="smoke"
+                )
+                self.assertIn(
+                    f"{state.lower()}_active_previous_generation_mismatch",
+                    summary["failures"],
+                )
+
+        self_consistent_but_unlinked = {
+            "refresh_attempt_id": 2,
+            "refresh_evidence_state": "IN_PROGRESS",
+            "generation_id": 999,
+            "result_generation_id": 0,
+            "previous_successful_generation_id": 999,
+            "refresh_stamp_s": 2.0,
+            "refresh_callback_start_stamp_s": 2.0,
+            "refresh_callback_start_steady_s": 2.0,
+            "ready": False,
+            "reason": "not_ready",
+        }
+        _, summary = MODULE.analyze_p0_messages(
+            [first, self_consistent_but_unlinked], protocol="smoke"
+        )
+        self.assertIn(
+            "in_progress_previous_generation_mismatch", summary["failures"]
         )
 
-        self.assertEqual(len(rows), 1)
-        self.assertEqual(summary["pre_refresh_observation_count"], 0)
-        self.assertEqual(summary["malformed_callback_identity_count"], 1)
-        self.assertEqual(summary["failed_refresh_count"], 1)
-        self.assertEqual(summary["gate"], "P0_EVIDENCE_CONTRACT_FAIL")
+    def test_cold_and_later_success_interval_contract(self):
+        first = valid_p0_message()
+        second = valid_p0_message(generation_id=2, refresh_attempt_id=2)
+        _, summary = MODULE.analyze_p0_messages([first, second], protocol="smoke")
+        self.assertEqual(summary["gate"], "PASS")
 
-    def test_icra031_health_replay_only_reclassifies_startup_observation(self):
+        _, cold_bad = MODULE.analyze_p0_messages(
+            [valid_p0_message(generation_interval_ms=500.0)], protocol="smoke"
+        )
+        self.assertIn("cold_start_generation_interval_not_null", cold_bad["failures"])
+        _, later_bad = MODULE.analyze_p0_messages(
+            [first, dict(second, generation_interval_ms=None)], protocol="smoke"
+        )
+        self.assertIn("later_generation_interval_not_positive_finite", later_bad["failures"])
+
+    def test_icra031_health_replay_without_explicit_schema_fails_closed(self):
         replay_path = (
             Path(__file__).resolve().parents[1]
             / "results"
@@ -1174,10 +1145,60 @@ class Gate0AnalyzerTest(unittest.TestCase):
 
         _, summary = MODULE.analyze_p0_messages(messages, protocol="smoke")
 
-        self.assertEqual(summary["pre_refresh_observation_count"], 1)
-        self.assertEqual(summary["malformed_callback_identity_count"], 0)
+        self.assertIn("refresh_evidence_state_unknown", summary["failures"])
         self.assertEqual(summary["successful_generation_count"], 0)
-        self.assertNotEqual(summary["gate"], "PASS")
+        self.assertEqual(summary["gate"], "P0_EVIDENCE_CONTRACT_FAIL")
+
+    def test_icra032_raw_replay_is_formally_closed_but_diagnostically_complete(self):
+        replay_path = (
+            Path(__file__).resolve().parents[1]
+            / "results"
+            / "icra27"
+            / "icra032"
+            / "runs"
+            / "smoke"
+            / "risk_grid_health.jsonl"
+        )
+        messages = [
+            json.loads(line)
+            for line in replay_path.read_text().splitlines()
+            if line.strip()
+        ]
+        _, formal = MODULE.analyze_p0_messages(messages, protocol="smoke")
+        self.assertEqual(formal["gate"], "P0_EVIDENCE_CONTRACT_FAIL")
+        self.assertEqual(formal["successful_generation_count"], 0)
+        self.assertIn("refresh_evidence_state_unknown", formal["failures"])
+
+        complete_success = [
+            row
+            for row in messages
+            if row.get("generation_id", 0) > 0
+            and row.get("ready") is True
+            and row.get("snapshot_available") is True
+            and row.get("refresh_query_count") == 76800
+            and math.isfinite(MODULE._float(row.get("provider_batch_duration_ms")))
+        ]
+        complete_generations = {row["generation_id"] for row in complete_success}
+        real_failures = {
+            row.get("refresh_callback_end_steady_s")
+            for row in messages
+            if row.get("generation_id") == 5
+            and row.get("reason") == "snapshot_unavailable"
+            and row.get("snapshot_failure_reason") == "snapshot_builder_invalid"
+        }
+        ambiguous_interleaving = [
+            row
+            for row in messages
+            if row.get("generation_id", 0) > 0
+            and row.get("refresh_query_count") == 0
+            and row.get("provider_batch_duration_ms") is None
+            and MODULE._float(row.get("refresh_callback_start_steady_s"))
+            > MODULE._float(row.get("refresh_callback_end_steady_s"))
+        ]
+        self.assertEqual(len(complete_success), 19)
+        self.assertEqual(len(complete_generations), 13)
+        self.assertEqual(real_failures, {5.500132527})
+        self.assertEqual(len(ambiguous_interleaving), 7)
 
     def test_p0_success_claim_requires_strict_complete_evidence(self):
         defects = (

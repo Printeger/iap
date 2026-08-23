@@ -319,3 +319,36 @@ required process 证据完整。
 - 不用旧证据 restamp 或部分 generation 发布来制造“新鲜”结果；
 - 不在语义正确前通过调 worker/GPU 掩盖缺少 map-LOS 或 covariance growth；
 - 本文不授权任何代码、ROS、smoke、benchmark、commit 或 push。
+
+## 12. ICRA-033 refresh evidence transaction
+
+RiskGrid 的 active-map identity 与 refresh-attempt identity 是两个不同域，不能再由同一个
+`generation_id` 隐式表达：
+
+- `generation_id` 始终描述当前可供消费者读取的安全 active snapshot；失败 refresh 可以保留
+  正数 active generation；
+- `refresh_attempt_id` 是从 1 开始、严格不回退的 attempt identity，状态显式为
+  `PRE_REFRESH`、`IN_PROGRESS`、`COMPLETED_SUCCESS` 或 `COMPLETED_FAILURE`；
+- `result_generation_id` 只在成功 completion 为正数且等于新 active generation；失败和未完成
+  attempt 为零；
+- `previous_successful_generation_id` 把 attempt 绑定到上一成功结果。未完成/失败 attempt 的
+  active generation 必须等于它；成功 attempt 的 result 必须形成不复用、不回退的链。
+
+Runtime 在 refresh 开始时清空当前 attempt 的完成字段，在 snapshot capture 的同一
+health/LiDAR 锁边界内保留 source readiness/stamps，并在完成时一次提交 outcome、start/end、
+snapshot、timing、work counters、source evidence、RiskGrid health 和 invalidation diagnostics。
+健康定时器可发布显式 `IN_PROGRESS`，但 completed qualification record 一旦提交，后续重复
+发布只能覆盖 callback/publish observability，不能改写 qualification fields。
+
+Analyzer 仅按 `refresh_attempt_id` 聚合 completed record；仅 field-equivalent duplicate 可去重。
+unknown state、ID/state 回退、active/previous/result 断链、冲突 duplicate、partial completion 和
+result reuse 均 fail closed。`PRE_REFRESH`/`IN_PROGRESS` 的禁止完成字段从同一个 formal
+qualification inventory 推导，包含 `generation_interval_ms`、`predictor_lidar_evaluations` 和
+`predictor_lidar_cache_hits`。首个成功结果在 previous ID 为 0 时允许 interval unavailable；
+后续成功必须携带正且有限的 interval。
+
+ICRA-033 唯一 20 秒 smoke 证明 14 个成功 generation 均保持 76,800 logical queries、完整
+counter shape 和有限 refresh/provider timing，但启动阶段两个 `message_stamp_unavailable`
+completed failures 的 message-clock start/end identity 非有限。唯一 analyzer 因此返回
+`P0_EVIDENCE_CONTRACT_FAIL`；Gate-0B 仍未资格化。该结果不构成 empirical covariance
+calibration，也不代表 IAP-RQ-322 全部完成。

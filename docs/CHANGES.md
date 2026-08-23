@@ -1195,3 +1195,27 @@ ctest --test-dir "$repo_root/results/icra27/icra015/build_ego" \
 ldd "$repo_root/results/icra27/icra015/build_ego/test_p0_risk_grid_runtime" \
   | rg -F "libiap.so => $repo_root/results/icra27/icra015/build_iap/libiap.so"
 ```
+
+## 2026-08-23 (ICRA-033 atomic refresh evidence and one-shot smoke)
+
+- IAP-RQ-320/IAP-RQ-321/IAP-RQ-322: separated active-map `generation_id` from monotonic
+  `refresh_attempt_id`, explicit refresh state, success-only `result_generation_id`, and
+  `previous_successful_generation_id`. Completed attempt evidence now freezes snapshot-bound source
+  readiness plus outcome, identity, timing, workload, RiskGrid health and invalidation data under one
+  commit boundary; later health publications cannot mix a retained map with mutable next-attempt data.
+- Gate-0 analyzer schema v2 groups completion by attempt ID, deduplicates only equivalent records, and
+  fails closed on unknown/regressed/mismatched identities, conflicting completion, result reuse and
+  partial claims. Startup/in-progress validation is derived from the formal field inventory, and the
+  first-success null interval is distinct from later positive finite intervals.
+- Deterministic verification passes runtime 79/79, RiskGrid 43/43, rolling 23/23 active, occupancy
+  adapter 7/7, analyzer 38/38, and runner/capture/launch 4/4. The final static preflight binds ICRA-033
+  IAP/EGO, ICRA-026 plan-env/path/bspline, 76,800 queries, and the frozen CPU/worker-4/20-second
+  provisional `0.01` profile. ICRA-032 raw replay remains immutable and formally fails closed under
+  the new schema; the separate diagnostic retains 13 success-shaped publications, one real failed
+  refresh, and ambiguous interleaving/duplicates.
+- The authorized runner executed once and exited 0 with GPU/dependency/log/capture/process checks
+  passing. The authorized analyzer executed once and exited 1: 14 successful generations satisfy
+  query shape and finite timing, but two startup `COMPLETED_FAILURE` attempts have non-finite
+  `refresh_stamp_s`, callback-start stamp and callback-end stamp. Result:
+  **ICRA-033 BLOCKED / Gate-0B NOT_QUALIFIED**. No retry, benchmark, tuning, P4/P5 work or Gate
+  promotion followed; exact `0.01` remains provisional rather than empirically calibrated.

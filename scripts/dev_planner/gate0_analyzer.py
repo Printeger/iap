@@ -58,8 +58,15 @@ REQUIRED_P0_SOURCE_PREFIXES = (
     "map",
 )
 P0_FIELDS = (
+    "refresh_attempt_id",
+    "refresh_evidence_state",
     "generation_id",
+    "result_generation_id",
+    "previous_successful_generation_id",
+    "refresh_callback_start_stamp_s",
+    "refresh_callback_start_steady_s",
     "refresh_callback_end_steady_s",
+    "refresh_callback_end_stamp_s",
     *REQUIRED_P0_COUNTER_FIELDS,
     "predictor_spatial_invalidation_reason",
     *REQUIRED_P0_TIMING_FIELDS,
@@ -97,6 +104,54 @@ P0_FIELDS = (
     "map_stamp_s",
     "map_point_count",
 )
+
+# One inventory owns every field used to qualify a completed refresh.  The
+# non-completed validators below are derived from it so a newly added claim
+# cannot silently escape PRE_REFRESH / IN_PROGRESS validation.
+P0_COMPLETED_QUALIFICATION_FIELDS = tuple(
+    field for field in P0_FIELDS if field != "failed_refresh"
+)
+P0_ACTIVE_MAP_OBSERVABILITY_FIELDS = (
+    "generation_id",
+    "ready",
+    "stale",
+    "valid_ratio",
+    "unknown_ratio",
+    "reason",
+    "predictor_requested_worker_count",
+    "predictor_effective_worker_count",
+)
+P0_ATTEMPT_IDENTITY_FIELDS = (
+    "refresh_attempt_id",
+    "refresh_evidence_state",
+    "result_generation_id",
+    "previous_successful_generation_id",
+)
+P0_ATTEMPT_START_FIELDS = (
+    "refresh_stamp_s",
+    "refresh_callback_start_stamp_s",
+    "refresh_callback_start_steady_s",
+)
+P0_NON_COMPLETED_FORBIDDEN_FIELDS = tuple(
+    field
+    for field in P0_COMPLETED_QUALIFICATION_FIELDS
+    if field
+    not in {
+        *P0_ACTIVE_MAP_OBSERVABILITY_FIELDS,
+        *P0_ATTEMPT_IDENTITY_FIELDS,
+        *P0_ATTEMPT_START_FIELDS,
+    }
+)
+P0_PRE_REFRESH_FORBIDDEN_FIELDS = (
+    *P0_ATTEMPT_START_FIELDS,
+    *P0_NON_COMPLETED_FORBIDDEN_FIELDS,
+)
+P0_REFRESH_EVIDENCE_STATES = {
+    "PRE_REFRESH",
+    "IN_PROGRESS",
+    "COMPLETED_SUCCESS",
+    "COMPLETED_FAILURE",
+}
 
 
 def _float(value: Any, default: float = math.nan) -> float:
@@ -715,6 +770,8 @@ def _p0_counter_contract_failures(row: dict[str, Any]) -> list[str]:
 
 def _p0_source_contract_failures(row: dict[str, Any]) -> list[str]:
     failures: list[str] = []
+    if row.get("ready") is not True:
+        failures.append("health_ready_not_true")
     reason = row.get("reason")
     if reason != "ok":
         failures.append("health_reason_not_ok")
@@ -734,49 +791,65 @@ def _p0_source_contract_failures(row: dict[str, Any]) -> list[str]:
     return failures
 
 
-def _is_p0_pre_refresh_observation(message: dict[str, Any]) -> bool:
-    """Recognize only the health publisher's strict pre-refresh startup row."""
-    generation = message.get("generation_id")
+def _positive_integral(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value > 0
+
+
+def _nonnegative_integral(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def _p0_field_claimed(message: dict[str, Any], field: str) -> bool:
+    """Return whether a non-completed row makes a completion claim."""
+    value = message.get(field)
+    if isinstance(value, bool):
+        return value
+    return value not in (None, "", 0, 0.0, "none", "uninitialized")
+
+
+def _p0_non_completed_failures(
+    message: dict[str, Any], state: str
+) -> list[str]:
+    forbidden = (
+        P0_PRE_REFRESH_FORBIDDEN_FIELDS
+        if state == "PRE_REFRESH"
+        else P0_NON_COMPLETED_FORBIDDEN_FIELDS
+    )
+    failures = [
+        f"{state.lower()}_completion_claim:{field}"
+        for field in forbidden
+        if _p0_field_claimed(message, field)
+    ]
+    if message.get("result_generation_id") != 0:
+        failures.append(f"{state.lower()}_result_generation_not_zero")
+    active_generation_id = message.get("generation_id")
+    previous_generation_id = message.get("previous_successful_generation_id")
+    if not _nonnegative_integral(active_generation_id):
+        failures.append(f"{state.lower()}_active_generation_invalid")
+    if not _nonnegative_integral(previous_generation_id):
+        failures.append(f"{state.lower()}_previous_generation_invalid")
     if (
-        not isinstance(generation, int)
-        or isinstance(generation, bool)
-        or generation != 0
-        or message.get("reason") != "not_ready"
-        or message.get("ready") is not False
+        _nonnegative_integral(active_generation_id)
+        and _nonnegative_integral(previous_generation_id)
+        and active_generation_id != previous_generation_id
     ):
-        return False
-    identity_fields = (
-        "refresh_callback_start_stamp_s",
-        "refresh_callback_start_steady_s",
-        "refresh_callback_end_stamp_s",
-        "refresh_callback_end_steady_s",
-    )
-    if any(message.get(field) not in (None, "") for field in identity_fields):
-        return False
-    work_counter_fields = tuple(
-        field
-        for field in REQUIRED_P0_COUNTER_FIELDS
-        if field
-        not in {
-            "predictor_requested_worker_count",
-            "predictor_effective_worker_count",
-        }
-    )
-    if any(
-        message.get(field) not in (None, "", 0)
-        or isinstance(message.get(field), bool)
-        for field in work_counter_fields
-    ):
-        return False
-    work_timing_fields = (
-        "refresh_scheduled_steady_s",
-        "refresh_queue_delay_ms",
-        "refresh_duration_ms",
-        "refresh_elapsed_ms",
-        "provider_batch_duration_ms",
-        "refresh_stamp_s",
-    )
-    return all(message.get(field) in (None, "") for field in work_timing_fields)
+        failures.append(f"{state.lower()}_active_previous_generation_mismatch")
+    if state == "PRE_REFRESH":
+        if message.get("previous_successful_generation_id") != 0:
+            failures.append("pre_refresh_previous_generation_not_zero")
+    else:
+        for field in P0_ATTEMPT_START_FIELDS:
+            if not math.isfinite(_float(message.get(field))):
+                failures.append(f"in_progress_start_invalid:{field}")
+    return failures
+
+
+def _p0_completed_record_key(message: dict[str, Any]) -> str:
+    record = {
+        field: message.get(field)
+        for field in P0_COMPLETED_QUALIFICATION_FIELDS
+    }
+    return json.dumps(record, sort_keys=True, separators=(",", ":"), allow_nan=True)
 
 
 def analyze_p0_messages(
@@ -785,67 +858,162 @@ def analyze_p0_messages(
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     if protocol not in {"smoke", "benchmark"}:
         raise ValueError(f"unsupported P0 protocol: {protocol}")
-    callbacks: dict[float, tuple[int, dict[str, Any]]] = {}
-    malformed_callback_rows: list[dict[str, Any]] = []
+    completed_attempts: dict[int, tuple[int, dict[str, Any], str]] = {}
+    invalid_rows: list[dict[str, Any]] = []
     captured_observation_count = 0
     pre_refresh_observation_count = 0
-    duplicate_callback_observation_count = 0
+    in_progress_observation_count = 0
+    duplicate_completed_observation_count = 0
+    conflicting_completed_observation_count = 0
+    completed_failure_count = 0
+    evidence_contract_failures: list[str] = []
+    maximum_attempt_id = 0
+    attempt_state_rank: dict[int, int] = {}
+    latest_completed_success_claim = 0
+    state_rank = {
+        "PRE_REFRESH": 0,
+        "IN_PROGRESS": 1,
+        "COMPLETED_SUCCESS": 2,
+        "COMPLETED_FAILURE": 2,
+    }
     for message in messages:
         captured_observation_count += 1
-        if _is_p0_pre_refresh_observation(message):
-            pre_refresh_observation_count += 1
-            continue
-        callback_key = _float(message.get("refresh_callback_end_steady_s"))
-        if not math.isfinite(callback_key):
+        state = message.get("refresh_evidence_state")
+        attempt_value = message.get("refresh_attempt_id")
+        if state not in P0_REFRESH_EVIDENCE_STATES:
+            evidence_contract_failures.append("refresh_evidence_state_unknown")
             row = {field: message.get(field, "") for field in P0_FIELDS}
-            row["generation_id"] = _int(message.get("generation_id"))
             row["failed_refresh"] = 1
-            malformed_callback_rows.append(row)
+            invalid_rows.append(row)
             continue
-        if callback_key in callbacks:
-            duplicate_callback_observation_count += 1
-        callbacks[callback_key] = (captured_observation_count, message)
+        if not _positive_integral(attempt_value):
+            evidence_contract_failures.append("refresh_attempt_id_invalid")
+            row = {field: message.get(field, "") for field in P0_FIELDS}
+            row["failed_refresh"] = 1
+            invalid_rows.append(row)
+            continue
+        attempt_id = attempt_value
+        if attempt_id < maximum_attempt_id:
+            evidence_contract_failures.append("refresh_attempt_id_regressed")
+        maximum_attempt_id = max(maximum_attempt_id, attempt_id)
+        rank = state_rank[state]
+        prior_rank = attempt_state_rank.get(attempt_id, -1)
+        if rank < prior_rank:
+            evidence_contract_failures.append("refresh_attempt_state_regressed")
+        if prior_rank == 2 and rank != 2:
+            evidence_contract_failures.append("refresh_attempt_state_after_completion")
+        attempt_state_rank[attempt_id] = max(prior_rank, rank)
 
-    rows: list[dict[str, Any]] = list(malformed_callback_rows)
-    generation_representatives: dict[int, tuple[int, dict[str, Any]]] = {}
-    duplicate_generation_observation_count = 0
-    evidence_contract_failures: list[str] = []
-    for capture_order, message in sorted(callbacks.values(), key=lambda item: item[0]):
-        generation_value = message.get("generation_id")
-        generation_is_positive_integral = (
-            isinstance(generation_value, int)
-            and not isinstance(generation_value, bool)
-            and generation_value > 0
-        )
-        generation_id = generation_value if generation_is_positive_integral else 0
-        if generation_is_positive_integral:
-            if generation_id in generation_representatives:
-                duplicate_generation_observation_count += 1
-            generation_representatives[generation_id] = (capture_order, message)
-            continue
-        row = {field: message.get(field, "") for field in P0_FIELDS}
-        row["generation_id"] = generation_id
-        row["failed_refresh"] = 1
-        rows.append(row)
-        if message.get("ready") is True:
-            evidence_contract_failures.append(
-                "successful_generation_id_not_positive_integral"
+        if state == "PRE_REFRESH":
+            pre_refresh_observation_count += 1
+            evidence_contract_failures.extend(
+                _p0_non_completed_failures(message, state)
             )
+            continue
+        if state == "IN_PROGRESS":
+            in_progress_observation_count += 1
+            evidence_contract_failures.extend(
+                _p0_non_completed_failures(message, state)
+            )
+            if (
+                message.get("previous_successful_generation_id")
+                != latest_completed_success_claim
+            ):
+                evidence_contract_failures.append(
+                    "in_progress_previous_generation_mismatch"
+                )
+            continue
+        key = _p0_completed_record_key(message)
+        if attempt_id in completed_attempts:
+            if completed_attempts[attempt_id][2] == key:
+                duplicate_completed_observation_count += 1
+            else:
+                conflicting_completed_observation_count += 1
+                evidence_contract_failures.append(
+                    "conflicting_completed_attempt_record"
+                )
+            continue
+        completed_attempts[attempt_id] = (captured_observation_count, message, key)
+        if state == "COMPLETED_SUCCESS":
+            result_id = message.get("result_generation_id")
+            if (
+                _positive_integral(result_id)
+                and message.get("generation_id") == result_id
+                and message.get("previous_successful_generation_id")
+                == latest_completed_success_claim
+            ):
+                latest_completed_success_claim = result_id
 
-    for _, message in sorted(
-        generation_representatives.values(), key=lambda item: item[0]
+    rows: list[dict[str, Any]] = list(invalid_rows)
+    successful_result_ids: set[int] = set()
+    previous_successful_result_id = 0
+    for _, message, _ in sorted(
+        completed_attempts.values(), key=lambda item: item[0]
     ):
         row = {field: message.get(field, "") for field in P0_FIELDS}
-        row["generation_id"] = message["generation_id"]
-        if message.get("ready") is not True:
+        state = message["refresh_evidence_state"]
+        attempt_id = message["refresh_attempt_id"]
+        result_id = message.get("result_generation_id")
+        previous_id = message.get("previous_successful_generation_id")
+        identity_failures: list[str] = []
+        for field in (*P0_ATTEMPT_START_FIELDS,
+                      "refresh_callback_end_stamp_s",
+                      "refresh_callback_end_steady_s"):
+            if not math.isfinite(_float(message.get(field))):
+                identity_failures.append(f"completed_attempt_identity_invalid:{field}")
+        if not _nonnegative_integral(previous_id):
+            identity_failures.append("previous_successful_generation_id_invalid")
+
+        if state == "COMPLETED_FAILURE":
+            completed_failure_count += 1
+            if result_id != 0:
+                identity_failures.append("completed_failure_result_generation_not_zero")
+            if previous_id != previous_successful_result_id:
+                identity_failures.append("completed_failure_previous_generation_mismatch")
+            if (
+                not _nonnegative_integral(message.get("generation_id"))
+                or message.get("generation_id") != previous_id
+            ):
+                identity_failures.append(
+                    "completed_failure_active_previous_generation_mismatch"
+                )
+            coherent_failure = (
+                message.get("snapshot_available") is False
+                or message.get("snapshot_failure_reason") not in (None, "", "none")
+                or message.get("ready") is False
+                or message.get("reason") not in (None, "", "ok")
+            )
+            if not coherent_failure:
+                identity_failures.append("completed_failure_reason_incoherent")
             row["failed_refresh"] = 1
             rows.append(row)
+            evidence_contract_failures.extend(identity_failures)
             continue
+
+        generation_value = message.get("generation_id")
+        if not _positive_integral(result_id):
+            identity_failures.append("successful_result_generation_id_not_positive_integral")
+        if not _positive_integral(generation_value):
+            identity_failures.append("successful_generation_id_not_positive_integral")
+        elif result_id != generation_value:
+            identity_failures.append("result_generation_active_generation_mismatch")
+        if _positive_integral(result_id):
+            if result_id in successful_result_ids or result_id <= previous_successful_result_id:
+                identity_failures.append("result_generation_reused_or_regressed")
+            if previous_id != previous_successful_result_id:
+                identity_failures.append("previous_successful_generation_id_mismatch")
+            interval = _float(message.get("generation_interval_ms"))
+            if previous_successful_result_id == 0:
+                if message.get("generation_interval_ms") not in (None, ""):
+                    identity_failures.append("cold_start_generation_interval_not_null")
+            elif not math.isfinite(interval) or interval <= 0.0:
+                identity_failures.append("later_generation_interval_not_positive_finite")
         claim_failures = [
+            *identity_failures,
             *_p0_counter_contract_failures(row),
             *_p0_source_contract_failures(row),
         ]
-        for field in REQUIRED_P0_TIMING_FIELDS:
+        for field in ("refresh_elapsed_ms", "provider_batch_duration_ms"):
             if not math.isfinite(_float(row.get(field))):
                 claim_failures.append(
                     f"successful_generation_timing_nonfinite:{field}"
@@ -854,11 +1022,14 @@ def analyze_p0_messages(
             claim_failures.append("successful_generation_latency_nonfinite")
         row["failed_refresh"] = 1 if claim_failures else 0
         rows.append(row)
+        if not claim_failures and _positive_integral(result_id):
+            successful_result_ids.add(result_id)
+            previous_successful_result_id = result_id
         for failure in claim_failures:
             if failure not in evidence_contract_failures:
                 evidence_contract_failures.append(failure)
 
-    rows.sort(key=lambda row: (_float(row.get("refresh_stamp_s")), _int(row.get("generation_id"))))
+    rows.sort(key=lambda row: _int(row.get("refresh_attempt_id")))
 
     successful = [row for row in rows if not _bool(row["failed_refresh"])]
     latencies = [_float(row.get("refresh_elapsed_ms")) for row in successful]
@@ -868,7 +1039,11 @@ def analyze_p0_messages(
     provider_latencies = [
         _float(row.get("provider_batch_duration_ms")) for row in successful
     ]
-    intervals = [_float(row.get("generation_interval_ms")) for row in successful]
+    intervals = [
+        _float(row.get("generation_interval_ms"))
+        for row in successful
+        if math.isfinite(_float(row.get("generation_interval_ms")))
+    ]
     shape_ok = bool(successful) and all(
         isinstance(row.get("refresh_query_count"), int)
         and not isinstance(row.get("refresh_query_count"), bool)
@@ -880,9 +1055,7 @@ def analyze_p0_messages(
         if latency_evidence_failure
         else type7_quantile(latencies, 0.95)
     )
-    failures = list(evidence_contract_failures)
-    if malformed_callback_rows:
-        failures.insert(0, "refresh_callback_end_steady_s_invalid")
+    failures = list(dict.fromkeys(evidence_contract_failures))
     if len(successful) == 0:
         failures.append("zero_successful_generations")
     minimum_successful_generations = 1 if protocol == "smoke" else 20
@@ -894,7 +1067,7 @@ def analyze_p0_messages(
         failures.append("successful_generation_latency_nonfinite")
     contract_complete = not failures
     evidence_contract_violation = bool(
-        malformed_callback_rows or evidence_contract_failures
+        evidence_contract_failures
     )
     performance_failure = (
         protocol == "benchmark"
@@ -925,18 +1098,17 @@ def analyze_p0_messages(
         gate = "PASS"
         recommendations = []
     summary = {
-        "schema_version": "gate0_p0_summary_v1",
+        "schema_version": "gate0_p0_summary_v2",
         "protocol": protocol,
         "minimum_successful_generations": minimum_successful_generations,
         "expected_refresh_query_count": EXPECTED_REFRESH_QUERY_COUNT,
         "captured_observation_count": captured_observation_count,
         "pre_refresh_observation_count": pre_refresh_observation_count,
-        "callback_representative_count": len(callbacks),
-        "duplicate_callback_observation_count": duplicate_callback_observation_count,
-        "malformed_callback_identity_count": len(malformed_callback_rows),
-        "duplicate_generation_observation_count": (
-            duplicate_generation_observation_count
-        ),
+        "in_progress_observation_count": in_progress_observation_count,
+        "completed_attempt_count": len(completed_attempts),
+        "completed_failure_count": completed_failure_count,
+        "duplicate_completed_observation_count": duplicate_completed_observation_count,
+        "conflicting_completed_observation_count": conflicting_completed_observation_count,
         "successful_generation_count": len(successful),
         "failed_refresh_count": len(rows) - len(successful),
         "refresh_elapsed_ms_p50": type7_quantile(latencies, 0.50),

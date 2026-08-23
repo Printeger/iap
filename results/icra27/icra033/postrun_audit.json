@@ -1,0 +1,26 @@
+{
+  "analyzer_command": "python3 scripts/dev_planner/gate0_analyzer.py --gate0-root results/icra27/icra033/runs --output-dir results/icra27/icra033/runs/smoke/analyzer",
+  "analyzer_exit_code": 1,
+  "analyzer_invocation_count": 1,
+  "bag_file_count": 0,
+  "checked_utc": "2026-08-23T15:32:56Z",
+  "external_log_after": {
+    "aggregate_sha256": "74d538d776b1ea6308d11d00d1d1ca342d994d6e3fd38fa8925ad54c1af3634f",
+    "byte_count": 174436451,
+    "file_count": 5402
+  },
+  "external_log_before": {
+    "aggregate_sha256": "74d538d776b1ea6308d11d00d1d1ca342d994d6e3fd38fa8925ad54c1af3634f",
+    "byte_count": 174436451,
+    "file_count": 5402
+  },
+  "external_log_byte_identical": true,
+  "gate0b": "P0_EVIDENCE_CONTRACT_FAIL",
+  "historical_replay_sha256_after": "e920605ef23e923d5bc1ae19590acfa2ac43a0bbc2e3b293b985890931e62061",
+  "protected_pdf_sha256_after": "1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6",
+  "remaining_task_process_count": 0,
+  "runner_command": "python3 scripts/dev_planner/run_gate0_qualification.py --output-root results/icra27/icra033/runs --smoke",
+  "runner_exit_code": 0,
+  "runner_invocation_count": 1,
+  "schema_version": "icra033_postrun_audit_v1"
+}
