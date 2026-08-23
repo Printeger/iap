@@ -1,9 +1,12 @@
 import importlib.util
 import hashlib
 import json
+import math
 import tempfile
 import unittest
 from pathlib import Path
+
+from launch import LaunchContext
 
 
 MODULE_PATH = Path(__file__).resolve().parents[1] / "launch" / "test_planner.launch.py"
@@ -119,6 +122,47 @@ class TestPlannerLaunchTest(unittest.TestCase):
             "/sim/drone_0/truth_odom",
         )
         self.assertEqual(defaults["iap_log_root"], "")
+
+    def test_covariance_growth_is_fail_closed_by_default_and_bound_at_ros_seam(self):
+        defaults = dict(MODULE.ARG_DEFAULTS)
+        self.assertTrue(math.isnan(float(
+            defaults["p0.predictor.sigma_grow_m_sqrt_s"]
+        )))
+        self.assertEqual(
+            defaults["p0.predictor.sigma_growth_profile"],
+            "unconfigured_fail_closed",
+        )
+        source = Path(MODULE.__file__).read_text()
+        self.assertIn(
+            '{"p0.predictor.sigma_grow_m_sqrt_s": '
+            'p0_covariance_growth["sigma_grow_m_sqrt_s"]}',
+            source,
+        )
+        self.assertIn(
+            '"p0.predictor.sigma_growth_profile": '
+            'p0_covariance_growth["profile"]',
+            source,
+        )
+
+    def test_covariance_growth_launch_materialization_is_exact_and_locale_free(self):
+        context = LaunchContext()
+        context.launch_configurations[
+            "p0.predictor.sigma_grow_m_sqrt_s"
+        ] = "0.01"
+        context.launch_configurations[
+            "p0.predictor.sigma_growth_profile"
+        ] = "legacy_iap_rq320_baseline_v1"
+        contract = MODULE._p0_covariance_growth_launch_contract(context)
+        self.assertEqual(contract, {
+            "sigma_grow_m_sqrt_s": 0.01,
+            "profile": "legacy_iap_rq320_baseline_v1",
+        })
+
+        context.launch_configurations[
+            "p0.predictor.sigma_grow_m_sqrt_s"
+        ] = "0,01"
+        with self.assertRaises(ValueError):
+            MODULE._p0_covariance_growth_launch_contract(context)
 
     def test_p1_redesign_scenarios_are_named_and_have_fixed_contracts(self):
         expected = {

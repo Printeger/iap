@@ -1,0 +1,6 @@
+The precheck body completed with ICRA031_PRECHECK_PASS and its per-check logs and
+results.tsv were persisted. The outer tee was opened before precheck.sh created
+the prechecks directory, so precheck_stdout_stderr.log was not created. This was
+a repository-local evidence-capture command-ordering error, not a product or
+preflight failure. The unchanged checks are repeated under attempt_02 after the
+output directory is created.

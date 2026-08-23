@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import ctypes
 import json
+import math
 import os
 import signal
 import subprocess
@@ -36,6 +37,14 @@ LAUNCH_DEPENDENCY_PREFLIGHT_SCHEMA = "gate0_launch_dependency_preflight_v1"
 LAUNCH_DEPENDENCY_PREFLIGHT_FILENAME = "launch_dependency_preflight.json"
 EFFECTIVE_LOG_PATH_PREFLIGHT_SCHEMA = "gate0_effective_log_path_preflight_v1"
 EFFECTIVE_LOG_PATH_PREFLIGHT_FILENAME = "effective_log_path_preflight.json"
+P0_QUALIFICATION_CONFIG_PREFLIGHT_SCHEMA = (
+    "gate0_p0_qualification_config_preflight_v1"
+)
+P0_QUALIFICATION_CONFIG_PREFLIGHT_FILENAME = (
+    "p0_qualification_config_preflight.json"
+)
+P0_QUALIFICATION_SIGMA_GROW_M_SQRT_S = 0.01
+P0_QUALIFICATION_SIGMA_GROWTH_PROFILE = "legacy_iap_rq320_baseline_v1"
 REQUIRED_LAUNCH_PACKAGES = (
     "iap",
     "ego_planner",
@@ -216,6 +225,67 @@ def run_effective_log_path_preflight(
         "failure_reasons": failures,
     }
     (run_dir / EFFECTIVE_LOG_PATH_PREFLIGHT_FILENAME).write_text(
+        json.dumps(result, indent=2, sort_keys=True) + "\n"
+    )
+    return result
+
+
+def run_p0_qualification_config_preflight(
+    output_root: Path,
+    config: dict[str, object],
+) -> dict[str, object]:
+    """Persist the exact provisional P0 covariance-growth qualification bind."""
+    output_root = output_root.resolve()
+    output_root.mkdir(parents=True, exist_ok=True)
+    sigma_key = "p0.predictor.sigma_grow_m_sqrt_s"
+    profile_key = "p0.predictor.sigma_growth_profile"
+    raw_sigma = config.get(sigma_key)
+    raw_profile = config.get(profile_key)
+    failures: list[str] = []
+
+    if raw_sigma is None:
+        failures.append("sigma_grow_m_sqrt_s_missing")
+    elif isinstance(raw_sigma, bool) or not isinstance(raw_sigma, (int, float)):
+        failures.append("sigma_grow_m_sqrt_s_not_numeric")
+    elif not math.isfinite(float(raw_sigma)):
+        failures.append("sigma_grow_m_sqrt_s_not_finite")
+    elif float(raw_sigma) < 0.0:
+        failures.append("sigma_grow_m_sqrt_s_negative")
+    elif float(raw_sigma) != P0_QUALIFICATION_SIGMA_GROW_M_SQRT_S:
+        failures.append("sigma_grow_m_sqrt_s_mismatch")
+
+    if raw_profile is None:
+        failures.append("sigma_growth_profile_missing")
+    elif raw_profile != P0_QUALIFICATION_SIGMA_GROWTH_PROFILE:
+        failures.append("sigma_growth_profile_mismatch")
+
+    effective_sigma: object = raw_sigma
+    if isinstance(raw_sigma, float) and not math.isfinite(raw_sigma):
+        effective_sigma = repr(raw_sigma)
+    requested = {
+        sigma_key: P0_QUALIFICATION_SIGMA_GROW_M_SQRT_S,
+        profile_key: P0_QUALIFICATION_SIGMA_GROWTH_PROFILE,
+    }
+    effective = {
+        sigma_key: effective_sigma,
+        profile_key: raw_profile,
+    }
+    result = {
+        "schema_version": P0_QUALIFICATION_CONFIG_PREFLIGHT_SCHEMA,
+        "checked_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "baseline_provenance": {
+            "identity": P0_QUALIFICATION_SIGMA_GROWTH_PROFILE,
+            "requirement": "IAP-RQ-320",
+            "status": "provisional_qualification_baseline_not_empirically_calibrated",
+            "unit": "m/sqrt(s)",
+        },
+        "requested": requested,
+        "effective": effective,
+        "qualification_config_ready": not failures,
+        "failure_reason": failures[0] if failures else "",
+        "failure_reasons": failures,
+    }
+    (output_root / P0_QUALIFICATION_CONFIG_PREFLIGHT_FILENAME).write_text(
         json.dumps(result, indent=2, sort_keys=True) + "\n"
     )
     return result
@@ -654,6 +724,12 @@ def p0_effective_config(
         "p0.horizons_s": "0.0,0.5,1.0,1.5,2.0,2.5",
         "p0.refresh_period_s": 0.5,
         "p0.predictor.worker_count": 4,
+        "p0.predictor.sigma_grow_m_sqrt_s": (
+            P0_QUALIFICATION_SIGMA_GROW_M_SQRT_S
+        ),
+        "p0.predictor.sigma_growth_profile": (
+            P0_QUALIFICATION_SIGMA_GROWTH_PROFILE
+        ),
         "p0.skip_occupied_voxels": True,
         "p1.use_integrity_cost": False,
         "p1.metrics_only": False,
@@ -685,6 +761,7 @@ def _write_run_files(
     run_dir: Path, run_id: str, scenario_label: str,
     config: dict[str, object], command: list[str],
     gpu_preflight: dict[str, object], gpu_preflight_path: Path,
+    qualification_config_preflight: dict[str, object] | None = None,
 ) -> dict[str, object]:
     run_dir.mkdir(parents=True, exist_ok=False)
     log_path_preflight = run_effective_log_path_preflight(run_dir, config)
@@ -702,6 +779,13 @@ def _write_run_files(
         ),
         "started_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
+    if qualification_config_preflight is not None:
+        manifest.update({
+            "p0_qualification_config_preflight": qualification_config_preflight,
+            "p0_qualification_config_preflight_path": str(
+                run_dir.parent / P0_QUALIFICATION_CONFIG_PREFLIGHT_FILENAME
+            ),
+        })
     (run_dir / "gate0_run_manifest.json").write_text(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n"
     )
@@ -901,14 +985,20 @@ def _gate0b_runner_exit(
 
 
 def run_gate0_smoke(
-    root: Path, capture_script: Path, gpu_preflight: dict[str, object]
+    root: Path, capture_script: Path, gpu_preflight: dict[str, object],
+    config: dict[str, object] | None = None,
+    qualification_config_preflight: dict[str, object] | None = None,
 ) -> int:
     run_dir = root / "smoke"
-    config = p0_effective_config(run_dir, run_duration_s=20, validation_duration_s=15)
+    if config is None:
+        config = p0_effective_config(
+            run_dir, run_duration_s=20, validation_duration_s=15
+        )
     command = launch_command(config)
     log_path_preflight = _write_run_files(
         run_dir, "p0-smoke", "gnss_open_sky", config, command,
         gpu_preflight, root / GPU_PREFLIGHT_FILENAME,
+        qualification_config_preflight,
     )
     if not log_path_preflight.get("effective_log_paths_ready"):
         print(
@@ -976,14 +1066,18 @@ def run_gate0_smoke(
 
 
 def run_gate0_benchmark(
-    root: Path, capture_script: Path, gpu_preflight: dict[str, object]
+    root: Path, capture_script: Path, gpu_preflight: dict[str, object],
+    config: dict[str, object] | None = None,
+    qualification_config_preflight: dict[str, object] | None = None,
 ) -> int:
     run_dir = root / "benchmark"
-    config = p0_effective_config(run_dir)
+    if config is None:
+        config = p0_effective_config(run_dir)
     command = launch_command(config)
     log_path_preflight = _write_run_files(
         run_dir, "p0-full-grid", "gnss_open_sky", config, command,
         gpu_preflight, root / GPU_PREFLIGHT_FILENAME,
+        qualification_config_preflight,
     )
     if not log_path_preflight.get("effective_log_paths_ready"):
         print(
@@ -1068,6 +1162,24 @@ def main() -> int:
     # A/B may be executed as separate fixed phases into one closure root.
     # Individual run directories remain fail-closed against overwrite.
     root.mkdir(parents=True, exist_ok=True)
+    p0_config = None
+    qualification_config_preflight = None
+    if args.smoke:
+        p0_config = p0_effective_config(
+            root / "smoke", run_duration_s=20, validation_duration_s=15
+        )
+    elif args.benchmark:
+        p0_config = p0_effective_config(root / "benchmark")
+    if p0_config is not None:
+        qualification_config_preflight = run_p0_qualification_config_preflight(
+            root, p0_config
+        )
+        if not qualification_config_preflight.get("qualification_config_ready"):
+            print(
+                "P0_QUALIFICATION_CONFIG_NOT_READY: "
+                f"{qualification_config_preflight.get('failure_reason', 'unknown')}"
+            )
+            return 6
     gpu_preflight = run_gpu_preflight(root)
     if not gpu_preflight.get("gpu_ready"):
         print(f"GPU_NOT_READY: {gpu_preflight.get('failure_reason', 'unknown')}")
@@ -1087,9 +1199,15 @@ def main() -> int:
     if args.gate0a_only or (not args.smoke and not args.benchmark):
         exit_codes.extend(run_gate0a(root, gpu_preflight))
     if args.smoke:
-        exit_codes.append(run_gate0_smoke(root, capture_script, gpu_preflight))
+        exit_codes.append(run_gate0_smoke(
+            root, capture_script, gpu_preflight, p0_config,
+            qualification_config_preflight,
+        ))
     if args.benchmark:
-        exit_codes.append(run_gate0_benchmark(root, capture_script, gpu_preflight))
+        exit_codes.append(run_gate0_benchmark(
+            root, capture_script, gpu_preflight, p0_config,
+            qualification_config_preflight,
+        ))
     return 0 if all(code == 0 for code in exit_codes) else 2
 
 

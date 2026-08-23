@@ -1,0 +1,14 @@
+E..............
+======================================================================
+ERROR: test_covariance_growth_is_fail_closed_by_default_and_bound_at_ros_seam (__main__.TestPlannerLaunchTest.test_covariance_growth_is_fail_closed_by_default_and_bound_at_ros_seam)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/dev/ws_iap/src/iap/test/test_test_planner_launch.py", line 127, in test_covariance_growth_is_fail_closed_by_default_and_bound_at_ros_seam
+    defaults["p0.predictor.sigma_grow_m_sqrt_s"]
+    ~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+KeyError: 'p0.predictor.sigma_grow_m_sqrt_s'
+
+----------------------------------------------------------------------
+Ran 15 tests in 0.007s
+
+FAILED (errors=1)

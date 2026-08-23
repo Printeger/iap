@@ -1,0 +1,104 @@
+ICRA-031 / GATE_0B Builder verification summary
+UTC live window: 2026-08-23T13:16:10Z onward
+Task-start commit: 045e85d52d76f6ba3c25bc014fcf8df3bb36ea62
+Result: BLOCKED; Gate-0B NOT_QUALIFIED; Supervisor review required
+
+Implemented qualification-only contract
+- launch/test_planner.launch.py declares an explicit generic NaN sigma seam and
+  materializes it as a locale-independent Python float into the exact
+  ego_planner_node ROS parameter. Generic/unconfigured behavior is still
+  invalid/fail-closed; no C++ default or covariance algebra changed.
+- The P0 qualification runner explicitly binds
+  p0.predictor.sigma_grow_m_sqrt_s=0.01 and
+  p0.predictor.sigma_growth_profile=legacy_iap_rq320_baseline_v1.
+- Requested/effective structured preflight evidence is emitted before GPU and
+  rejects missing, nonnumeric, NaN, infinity, negative, non-exact and profile
+  mismatch inputs with exit 6 before GPU/ROS.
+- This value is the provisional original IAP-RQ-320 baseline in m/sqrt(s), not
+  an empirical fit or final scientific/paper calibration.
+
+TDD and static verification
+- RED attempt 01: launch and runner suites each exit 1 on the missing seam.
+- RED attempt 02: an incorrect unittest module path exits 1 (invocation error).
+- RED attempt 03: an incorrect assumption that the loaded launch module exports
+  LaunchContext exits 1 (test-harness error).
+- RED attempt 04: corrected public materialization test exits 1 on the missing
+  helper, establishing the intended behavior boundary.
+- GREEN attempt 01: launch 15/15 and runner 27/27 pass.
+- GREEN attempt 02: focused LaunchContext materialization test 1/1 passes.
+- GREEN attempt 03: final launch 16/16 and runner 27/27 pass.
+- Current IAP configure/build/install below ICRA-031 each exit 0.
+- Affected CTest attempt 01 exits 8: inherited workspace-default
+  /home/dev/ws_iap/install/iap/lib/libiap.so shadowed the new library, causing
+  an undefined RollingSpatialAdvisoryWindow symbol and Predictor failure.
+  ldd and library symbol/hash comparison proved this was command environment,
+  not a product/build failure; the full log is retained.
+- Corrected affected CTest attempt 02 explicitly orders the ICRA-031 build/install
+  library first and passes 4/4: Predictor 46 tests, rolling advisory, runner and
+  launch suites.
+- Retained ICRA-026 test_p0_risk_grid_runtime links to ICRA-031 libiap.so and
+  passes 1/1 (76 tests), covering finite growth, tau-zero no-growth, monotonic
+  positive horizons and invalid-value fail-closed behavior.
+- Precheck attempt 01's 12 checks all passed, but its outer tee opened before the
+  output directory existed and did not retain combined stdout. The unchanged
+  static audit was repeated as attempt 02 after directory creation; all 12
+  checks again exit 0 and the complete stdout is retained. Neither attempt
+  invoked GPU, capture, ROS, smoke or analyzer.
+- Attempt 02 proves ICRA-031 libiap.so SHA-256
+  96305333dbebc9a381c25beb26485da9d9861ad9a80cd0c95589b79f96888349,
+  retained ICRA-026 libplan_env.so SHA-256
+  360cf23a8d4b1f2add6a5e1f59f47d936039b3ca61aee1bde0a644c542f46447,
+  exact 12-package ament closure, installed/source launch equality, semantic
+  direct linkage with no missing/build/stale/workspace-default resolution,
+  exact frozen config, external-log snapshot and zero task processes.
+
+Exactly one smoke and one analyzer
+- Guarded runner command (invoked once):
+  python3 scripts/dev_planner/run_gate0_qualification.py --output-root results/icra27/icra031/runs --smoke
+- Runner exit: 0. Qualification config preflight passes exact requested and
+  effective 0.01/profile before GPU. GPU preflight passes both nvidia-smi calls,
+  cuInit(0)=0 and device_count=1 on an RTX 4070 Ti SUPER. Launch dependency,
+  task-local log path and capture readiness preflights pass. Required
+  iap_rosnode is seen without runtime failure and stops only during controlled
+  shutdown. The exact CPU/worker-4/20-15 s/30x30x6 m/0.75 m/six-horizon/0.5 s/
+  occupied-skip/no-bag/no-RViz/safety-off/P1-P5-disabled contract is retained.
+- Guarded analyzer command (invoked once):
+  python3 scripts/dev_planner/gate0_analyzer.py --gate0-root results/icra27/icra031/runs --output-dir results/icra27/icra031/runs/smoke/analyzer
+- Analyzer exit: 1, gate P0_EVIDENCE_CONTRACT_FAIL. It captures 34 health rows,
+  19 callback representatives, 14 duplicate callback observations and one
+  malformed callback identity. All 166 integrity reports are valid. There are
+  zero successful generations; all generation IDs remain zero. Raw reasons are
+  prior_generation_changed=28, message_stamp_unavailable=5 and not_ready=1.
+  Exact failures: refresh_callback_end_steady_s_invalid,
+  zero_successful_generations, fewer_than_required_successful_generations and
+  refresh_query_shape_mismatch. Some attempted refreshes report 76,800 work,
+  but none publishes an accepted generation, so acceptance is not met.
+- A post-live read-only inspection command initially guessed three nonexistent
+  filenames and exited 1 without modifying evidence or invoking any flow. A
+  corrected read-only inspection used the actual gate0_run_manifest.json,
+  p0_smoke_summary.json and risk_grid_health.jsonl paths. No live retry occurred.
+
+Post-run audit
+- All five attempt-01 groups exit 0: evidence coherence, external log identity,
+  retained artifact hashes, zero task process matches and canonical hashes.
+- 30 actual IAP log files and one iap_timing.csv are strict descendants of the
+  ICRA-031 runtime tree; no bag exists.
+- External repository log/ identity is unchanged before/after:
+  aggregate a07fbf7945ec9800e95f6ef49d0d9c8bbdee8e2e8ff1500f919e1037cc4221f0,
+  43,763 files, 15,834,674,969 bytes.
+- Canonical SHA-256: gpu preflight 5a603a4f49727dbd4b09f532202311431449f514af3548ea13281b06d0a72bbc;
+  dependency preflight 2cb3bf633242937b881e8ba43441cccbca35ff99919d079d9f485798d6169960;
+  qualification config 48d32008d36f151b6d68589068851eabdf87bd249089138e9f439cb3b537dc09;
+  run manifest cd807ef4ab7b151971f8b139fc6c91722de2bcf5a8f8faf4f3483c56df8b1bfb;
+  health 395d3205b825c5ff4c327d571137ca895f26680d53b392f473973ba772e758e2;
+  integrity e9d227a95029a4a478505e2f269ca1b6e3b2dba9793bb1bc43a1415ca587b8d8;
+  analysis 0c46e950ba14437b14654718729bb55464325a8606ba51b7d05be456a9b99e43;
+  P0 summary 1a08611c2c254cd295a5bc842b516248f28fa97110fceb29bc2bde1c18be4a8c.
+
+Stop-line compliance
+No smoke/analyzer retry, post-live correction, alternate sigma, tuning,
+60-second benchmark, qualification campaign, bag/RViz, P4/P5 execution,
+cleanup, Gate promotion or next-task selection occurred. The untracked PDF and
+all historical/retained evidence were not modified, staged, deleted or
+regenerated. Builder returns the BLOCKED result to SUPERVISOR for review and
+does not claim Review PASS or empirical calibration.

@@ -1,0 +1,14 @@
+E
+======================================================================
+ERROR: test_covariance_growth_launch_materialization_is_exact_and_locale_free (__main__.TestPlannerLaunchTest.test_covariance_growth_launch_materialization_is_exact_and_locale_free)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/dev/ws_iap/src/iap/test/test_test_planner_launch.py", line 155, in test_covariance_growth_launch_materialization_is_exact_and_locale_free
+    contract = MODULE._p0_covariance_growth_launch_contract(context)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'test_planner_launch' has no attribute '_p0_covariance_growth_launch_contract'
+
+----------------------------------------------------------------------
+Ran 1 test in 0.002s
+
+FAILED (errors=1)

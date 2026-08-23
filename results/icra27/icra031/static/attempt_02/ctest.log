@@ -1,0 +1,17 @@
+Internal ctest changing into directory: /home/dev/ws_iap/src/iap/results/icra27/icra031/build_iap
+Test project /home/dev/ws_iap/src/iap/results/icra27/icra031/build_iap
+    Start  9: test_predictor_module
+1/4 Test  #9: test_predictor_module ..................   Passed    0.05 sec
+    Start 10: test_rolling_spatial_advisory_window
+2/4 Test #10: test_rolling_spatial_advisory_window ...   Passed    0.05 sec
+    Start 32: test_gate0_runner
+3/4 Test #32: test_gate0_runner ......................   Passed    6.16 sec
+    Start 34: test_test_planner_launch
+4/4 Test #34: test_test_planner_launch ...............   Passed    0.12 sec
+
+100% tests passed, 0 tests failed out of 4
+
+Label Time Summary:
+gtest    =   0.10 sec*proc (2 tests)
+
+Total Test time (real) =   6.39 sec

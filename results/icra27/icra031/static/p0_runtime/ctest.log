@@ -1,0 +1,11 @@
+Internal ctest changing into directory: /home/dev/ws_iap/src/iap/results/icra27/icra026/build_ego
+Test project /home/dev/ws_iap/src/iap/results/icra27/icra026/build_ego
+    Start 2: test_p0_risk_grid_runtime
+1/1 Test #2: test_p0_risk_grid_runtime ........   Passed    1.97 sec
+
+100% tests passed, 0 tests failed out of 1
+
+Label Time Summary:
+gtest    =   1.97 sec*proc (1 test)
+
+Total Test time (real) =   1.97 sec

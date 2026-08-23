@@ -1,0 +1,24 @@
+{
+  "build_type": "RelWithDebInfo",
+  "config_dir": "/home/dev/ws_iap/src/iap/results/icra27/icra031/runs/smoke/runtime/iap_sim_demo11_test_planner_3422215_1787490971323/sim_demo11",
+  "git_commit": "045e85d52d76f6ba3c25bc014fcf8df3bb36ea62",
+  "hostname": "mint-X",
+  "log_root": "/home/dev/ws_iap/src/iap/results/icra27/icra031/runs/smoke/runtime/iap_logs",
+  "process_name": "iap_rosnode",
+  "run_directory": "/home/dev/ws_iap/src/iap/results/icra27/icra031/runs/smoke/runtime/iap_logs/20260823T131611Z_550",
+  "selected_config_paths": {
+    "config_global_mapping": "/home/dev/ws_iap/src/iap/results/icra27/icra031/runs/smoke/runtime/iap_sim_demo11_test_planner_3422215_1787490971323/sim_demo11/../sim_ego/config_global_mapping_cpu.json",
+    "config_gnss": "/home/dev/ws_iap/src/iap/results/icra27/icra031/runs/smoke/runtime/iap_sim_demo11_test_planner_3422215_1787490971323/sim_demo11/config_gnss.json",
+    "config_logging": "/home/dev/ws_iap/src/iap/results/icra27/icra031/runs/smoke/runtime/iap_sim_demo11_test_planner_3422215_1787490971323/sim_demo11/../sim_ego/config_logging.json",
+    "config_odometry": "/home/dev/ws_iap/src/iap/results/icra27/icra031/runs/smoke/runtime/iap_sim_demo11_test_planner_3422215_1787490971323/sim_demo11/config_odometry_cpu.json",
+    "config_preprocess": "/home/dev/ws_iap/src/iap/results/icra27/icra031/runs/smoke/runtime/iap_sim_demo11_test_planner_3422215_1787490971323/sim_demo11/../sim_ego/config_sensors.json",
+    "config_ros": "/home/dev/ws_iap/src/iap/results/icra27/icra031/runs/smoke/runtime/iap_sim_demo11_test_planner_3422215_1787490971323/sim_demo11/config_ros.json",
+    "config_sensors": "/home/dev/ws_iap/src/iap/results/icra27/icra031/runs/smoke/runtime/iap_sim_demo11_test_planner_3422215_1787490971323/sim_demo11/../sim_ego/config_sensors.json",
+    "config_sub_mapping": "/home/dev/ws_iap/src/iap/results/icra27/icra031/runs/smoke/runtime/iap_sim_demo11_test_planner_3422215_1787490971323/sim_demo11/../sim_ego/config_sub_mapping_cpu.json",
+    "config_viewer": "/home/dev/ws_iap/src/iap/results/icra27/icra031/runs/smoke/runtime/iap_sim_demo11_test_planner_3422215_1787490971323/sim_demo11/../sim_ego/config_viewer.json"
+  },
+  "selected_config_root": "/home/dev/ws_iap/src/iap/results/icra27/icra031/runs/smoke/runtime/iap_sim_demo11_test_planner_3422215_1787490971323/sim_demo11",
+  "source_root": "/home/dev/ws_iap/src/iap",
+  "start_timestamp": "2026-08-23T13:16:11Z",
+  "working_directory": "/home/dev/ws_iap/src/iap"
+}

@@ -1,0 +1,88 @@
+.............EFFFF....F/usr/lib/python3.12/unittest/case.py:589: ResourceWarning: unclosed file <_io.TextIOWrapper name=3 encoding='UTF-8'>
+  if method() is not None:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+.....EE.
+======================================================================
+ERROR: test_invalid_p0_qualification_config_fails_before_gpu (__main__.Gate0RunnerTest.test_invalid_p0_qualification_config_fails_before_gpu) (label='missing')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/dev/ws_iap/src/iap/test/test_gate0_runner.py", line 386, in test_invalid_p0_qualification_config_fails_before_gpu
+    invalid.pop("p0.predictor.sigma_grow_m_sqrt_s")
+KeyError: 'p0.predictor.sigma_grow_m_sqrt_s'
+
+======================================================================
+ERROR: test_p0_config_has_exact_query_shape (__main__.Gate0RunnerTest.test_p0_config_has_exact_query_shape)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/dev/ws_iap/src/iap/test/test_gate0_runner.py", line 341, in test_p0_config_has_exact_query_shape
+    self.assertEqual(config["p0.predictor.sigma_grow_m_sqrt_s"], 0.01)
+                     ~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+KeyError: 'p0.predictor.sigma_grow_m_sqrt_s'
+
+======================================================================
+ERROR: test_p0_qualification_config_preflight_persists_exact_baseline (__main__.Gate0RunnerTest.test_p0_qualification_config_preflight_persists_exact_baseline)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/dev/ws_iap/src/iap/test/test_gate0_runner.py", line 351, in test_p0_qualification_config_preflight_persists_exact_baseline
+    result = MODULE.run_p0_qualification_config_preflight(
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'run_gate0_qualification' has no attribute 'run_p0_qualification_config_preflight'
+
+======================================================================
+FAIL: test_invalid_p0_qualification_config_fails_before_gpu (__main__.Gate0RunnerTest.test_invalid_p0_qualification_config_fails_before_gpu) (label='nan')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/dev/ws_iap/src/iap/test/test_gate0_runner.py", line 400, in test_invalid_p0_qualification_config_fails_before_gpu
+    self.assertEqual(MODULE.main(), 6)
+AssertionError: 4 != 6
+
+======================================================================
+FAIL: test_invalid_p0_qualification_config_fails_before_gpu (__main__.Gate0RunnerTest.test_invalid_p0_qualification_config_fails_before_gpu) (label='infinity')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/dev/ws_iap/src/iap/test/test_gate0_runner.py", line 400, in test_invalid_p0_qualification_config_fails_before_gpu
+    self.assertEqual(MODULE.main(), 6)
+AssertionError: 4 != 6
+
+======================================================================
+FAIL: test_invalid_p0_qualification_config_fails_before_gpu (__main__.Gate0RunnerTest.test_invalid_p0_qualification_config_fails_before_gpu) (label='negative')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/dev/ws_iap/src/iap/test/test_gate0_runner.py", line 400, in test_invalid_p0_qualification_config_fails_before_gpu
+    self.assertEqual(MODULE.main(), 6)
+AssertionError: 4 != 6
+
+======================================================================
+FAIL: test_invalid_p0_qualification_config_fails_before_gpu (__main__.Gate0RunnerTest.test_invalid_p0_qualification_config_fails_before_gpu) (label='mismatch')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/dev/ws_iap/src/iap/test/test_gate0_runner.py", line 400, in test_invalid_p0_qualification_config_fails_before_gpu
+    self.assertEqual(MODULE.main(), 6)
+AssertionError: 4 != 6
+
+======================================================================
+FAIL: test_mismatched_p0_qualification_profile_fails_before_gpu (__main__.Gate0RunnerTest.test_mismatched_p0_qualification_profile_fails_before_gpu)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/dev/ws_iap/src/iap/test/test_gate0_runner.py", line 422, in test_mismatched_p0_qualification_profile_fails_before_gpu
+    self.assertEqual(MODULE.main(), 6)
+AssertionError: 4 != 6
+
+----------------------------------------------------------------------
+Ran 27 tests in 6.111s
+
+FAILED (failures=5, errors=3)
+GPU_READY
+LAUNCH_DEPENDENCY_NOT_READY: package_not_found:so3_control
+GPU_NOT_READY: cuInit_failed_999
+EFFECTIVE_LOG_PATH_NOT_READY: iap_log_root_not_below_runtime
+GPU_READY
+LAUNCH_DEPENDENCY_NOT_READY: package_prefix_shadowed:iap
+GPU_READY
+LAUNCH_DEPENDENCY_NOT_READY: package_prefix_shadowed:iap
+GPU_READY
+LAUNCH_DEPENDENCY_NOT_READY: package_prefix_shadowed:iap
+GPU_READY
+LAUNCH_DEPENDENCY_NOT_READY: package_prefix_shadowed:iap
+GPU_READY
+LAUNCH_DEPENDENCY_NOT_READY: package_prefix_shadowed:iap

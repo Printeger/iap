@@ -1,5 +1,25 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-23 ICRA-031 covariance-growth qualification bind
+
+| Req ID | Requirement/evidence seam | Implementation and focused evidence | Status |
+|---|---|---|---|
+| IAP-RQ-311 / IAP-RQ-320 | Exact finite growth baseline must reach EGO only through the frozen qualification profile | Launch declares generic `NaN`, parses the supplied text directly to a float and passes exact `0.01` to `p0.predictor.sigma_grow_m_sqrt_s`; the manifest also records profile `legacy_iap_rq320_baseline_v1`. Launch tests prove exact ROS/manifest source, generic invalidity, float materialization and locale-like `0,01` rejection | **IMPLEMENTED / launch 16/16 PASS** |
+| IAP-RQ-320 / IAP-RQ-322 | Missing, non-finite, negative, non-exact or wrong-profile qualification config must stop before GPU/ROS | Runner config preflight persists exact requested/effective value/profile and provisional-not-calibrated provenance; focused tests cover missing, NaN, infinity, negative, `0.02` and profile mismatch with exit 6 and zero GPU/smoke calls | **PRE-GPU GUARD VERIFIED / runner 27/27 PASS / Gate-0B NOT_QUALIFIED** |
+| IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-322 | Static science/config/linkage evidence must pass before live use | Current IAP configure/build/install pass below ICRA-031; corrected explicit-library affected suite passes 4/4; retained ICRA-026 P0 runtime passes 76 tests against ICRA-031 `libiap.so`; exact 12-package ament closure and direct linkage resolve ICRA-031 IAP plus ICRA-026 plan-env without missing/build/stale/workspace-default paths | **VERIFIED / disclosed command-environment attempt retained** |
+| IAP-RQ-320 / IAP-RQ-322 | One frozen smoke must pass config, GPU, dependency, logging, capture and lifecycle guards | Sole runner exits 0; requested/effective sigma/profile are exact; `nvidia-smi`, `cuInit(0)=0`, one CUDA device, dependency and capture readiness pass; required `iap_rosnode` is healthy through runtime and only stops during controlled shutdown | **PASS / runner invoked once** |
+| IAP-RQ-311 / IAP-RQ-320 / IAP-RQ-321 | At least one accepted final generation must contain exactly 76,800 queries | Sole analyzer exits 1 with `P0_EVIDENCE_CONTRACT_FAIL`; 166/166 integrity reports are valid, but 34 health observations have generation 0, zero successful generations, one malformed callback identity and raw reasons `prior_generation_changed=28`, `message_stamp_unavailable=5`, `not_ready=1` | **BLOCKED / no live retry** |
+| IAP-RQ-320 / IAP-RQ-322 | Runtime output and post-run state must stay bounded | 30 actual IAP log files and one timing CSV are below ICRA-031 runtime; no bag exists; external `log/` identity remains exact at `a07fbf79…4221f0`, 43,763 files and 15,834,674,969 bytes; task-process matches are zero | **PASS** |
+
+Exact commands, TDD/static attempt disclosure, one-shot guards/exits, canonical
+hashes and post-run audit are in
+`results/icra27/icra031/verification_summary.txt`. The `0.01 m/sqrt(s)` value
+is the provisional original IAP-RQ-320 qualification baseline and is not an
+empirical calibration. No C++ science/default, analyzer/capture, workload or
+P1–P5 behavior changed. No live retry, 60-second benchmark, campaign, cleanup
+or Gate promotion occurred; Gate-0B remains `NOT_QUALIFIED` pending Supervisor
+review.
+
 ## 2026-08-23 ICRA-030 clock/log-repair replacement smoke
 
 | Req ID | Requirement/evidence seam | Implementation and focused evidence | Status |

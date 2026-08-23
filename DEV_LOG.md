@@ -3744,3 +3744,141 @@ qualification/campaign, P4/P5 execution, cleanup, Gate promotion or next-task
 selection occurred. The protected PDF remains untracked and was not modified,
 staged, deleted or regenerated. **DEEPSEEK returns ICRA-030 BLOCKED with
 Gate-0B NOT_QUALIFIED and hands the exact evidence to SUPERVISOR for review.**
+
+## 2026-08-23T12:58:16Z — ICRA-031 START
+
+Synchronized `dev/icra` at
+`045e85d52d76f6ba3c25bc014fcf8df3bb36ea62`; `HEAD...origin/dev/icra` is
+`0 0`. The protected PDF, all historical evidence, ICRA-026 leak, ICRA-029
+scratch, ICRA-030 run and every retained build/install tree are
+preservation-only. Every ICRA-031 build/install/log/tmp/ROS/run/evidence path
+will remain below `results/icra27/icra031/`.
+
+The exact allowlist is `launch/test_planner.launch.py`,
+`scripts/dev_planner/run_gate0_qualification.py`,
+`test/test_test_planner_launch.py`, `test/test_gate0_runner.py`, at most the
+smallest directly affected existing P0 config/runtime test file if required,
+new ICRA-031 artifacts below `results/icra27/icra031/`, and Builder-owned
+`DEV_LOG.md`, `docs/CHANGES.md`, `docs/TRACEABILITY.md`. No Supervisor-owned,
+C++ covariance/predictor/P0 science, generic default, analyzer/capture,
+historical/evidence or other product file is authorized.
+
+The sole value is exactly `p0.predictor.sigma_grow_m_sqrt_s=0.01` with
+profile identity `legacy_iap_rq320_baseline_v1`. Its provenance is the
+original IAP-RQ-320 `PredictedIntegrityComputer::Params` baseline: finite,
+positive and unit-consistent at `0.01 m/sqrt(s)`. It is a provisional Gate-0B
+qualification baseline only, not a fitted value, final empirical calibration
+or permission for P4/P5 comparative claims. The generic C++ `NaN` default
+and exact fail-closed behavior remain unchanged; diagnostic-only `0.15` is
+forbidden.
+
+The pre-agreed TDD seams are the public launch materialization boundary and
+the runner's requested/effective qualification-config preflight. RED tests
+will first require exact float delivery to the exact ROS parameter, generic
+unconfigured invalidity, requested/effective value and profile evidence, and
+fail-before-GPU behavior for missing, NaN, infinity, negative and mismatch.
+GREEN will add only the smallest launch argument/manifest/ROS-parameter seam
+and runner config/preflight needed. Existing launch/runner suites plus the
+direct Predictor/P0 runtime suites must pass before live execution.
+
+Static verification will configure/build/install current IAP under
+`results/icra27/icra031/build_iap` and `install`, retain it, reuse unchanged
+ICRA-026 EGO/bspline/path-searching/plan-env artifacts read-only, and prove
+ament/linkage resolution only to ICRA-031 `libiap.so` and ICRA-026
+`libplan_env.so`. It must also prove the exact sigma/profile and unchanged
+worker-4, 20/15 s, 30 x 30 x 6 m, 0.75 m, six-horizon, 0.5 s refresh,
+occupied-skip, CPU, no-bag/no-RViz, safety-off/P1-P5-disabled contract.
+
+Explicit live stop line: only after every static condition passes, invoke
+`python3 scripts/dev_planner/run_gate0_qualification.py --output-root
+results/icra27/icra031/runs --smoke` exactly once. Configuration must pass
+before GPU; then GPU, dependencies and capture must pass before ROS. If live
+evidence exists, invoke `python3 scripts/dev_planner/gate0_analyzer.py
+--gate0-root results/icra27/icra031/runs --output-dir
+results/icra27/icra031/runs/smoke/analyzer` exactly once, then stop regardless
+of result. No post-live correction/retry, alternate sigma, tuning, 60-second
+benchmark, campaign, bag/RViz, P4/P5 work, cleanup, Gate promotion or
+next-task selection is permitted.
+
+## 2026-08-23T13:19:31Z — ICRA-031 IMPLEMENTATION / ONE-SHOT RESULT BLOCKED
+
+The qualification-only repair is complete. Generic launch configuration keeps
+explicit invalid `NaN`, while the frozen P0 runner alone binds exact
+`p0.predictor.sigma_grow_m_sqrt_s=0.01` and
+`legacy_iap_rq320_baseline_v1`. Direct float materialization supplies the exact
+EGO ROS parameter; requested/effective preflight evidence records both fields
+and provisional-not-empirically-calibrated provenance. Missing, nonnumeric,
+NaN, infinity, negative, non-exact or profile-mismatched input exits 6 before
+GPU/ROS. No C++ default/algebra, P0 science, analyzer/capture or P1–P5 behavior
+changed.
+
+Disclosed TDD RED attempts are retained: initial launch/runner behavioral RED,
+two test-harness invocation/import errors, then the corrected missing-helper
+RED. Final launch 16/16 and runner 27/27 pass. Current IAP configure/build/
+install exit 0. Affected CTest attempt 01 exited 8 because inherited
+`LD_LIBRARY_PATH` selected workspace-default old `libiap.so`; `ldd`, symbol and
+hash checks proved the command-environment cause. Corrected attempt 02 puts the
+current task library first and passes 4/4. Retained ICRA-026 P0 runtime passes
+1/1 (76 tests) against ICRA-031 `libiap.so`, including finite growth, tau-zero,
+positive-horizon monotonicity and invalid fail-closed behavior.
+
+Precheck attempt 01's 12 static groups passed, but the outer `tee` opened before
+its directory and lost combined stdout. The unchanged static audit was repeated
+as attempt 02 after directory creation; all 12 groups again pass, proving exact
+ICRA-031/026 hashes, ament closure, installed launch, direct linkage, frozen
+config, external-log snapshot and zero task processes. Neither static attempt
+invoked GPU, capture, ROS, smoke or analyzer.
+
+The sole runner command was
+`python3 scripts/dev_planner/run_gate0_qualification.py --output-root
+results/icra27/icra031/runs --smoke`; it exited 0. Exact config preflight,
+`nvidia-smi`, `cuInit(0)=0`, one CUDA device, dependency/log/capture preflights
+and required-process runtime lifecycle pass. The frozen CPU/worker-4/20–15 s/
+30×30×6 m/0.75 m/six-horizon/0.5 s/occupied-skip/no-bag/no-RViz/safety-off/
+P1–P5-disabled contract remained exact.
+
+The sole analyzer command used the exact task-start output path and exited 1
+with `P0_EVIDENCE_CONTRACT_FAIL`. All 166 integrity reports are valid, but 34
+health observations remain generation zero with no accepted 76,800-query
+generation. Raw reasons are `prior_generation_changed=28`,
+`message_stamp_unavailable=5`, `not_ready=1`; one callback identity is
+malformed. Exact failures are `refresh_callback_end_steady_s_invalid`,
+`zero_successful_generations`, `fewer_than_required_successful_generations`
+and `refresh_query_shape_mismatch`. One later read-only inspection guessed
+three nonexistent filenames and exited 1 without writes or flow invocation;
+the corrected read-only inspection used the actual filenames.
+
+Post-run audit passes all five groups: 30 IAP log files and one timing CSV stay
+below task runtime, no bag exists, task processes are zero, and external `log/`
+remains byte-identical at `a07fbf79…4221f0`, 43,763 files and
+15,834,674,969 bytes. Full commands, attempts, exits and hashes are in
+`results/icra27/icra031/verification_summary.txt`.
+
+No live retry, post-live correction, alternate sigma, tuning, 60-second
+benchmark, campaign, P4/P5 execution, cleanup, Gate promotion or next-task
+selection occurred. The protected PDF and historical evidence remain
+untouched. The baseline is provisional, not empirical calibration.
+**ICRA-031 returns BLOCKED; Gate-0B remains NOT_QUALIFIED pending Supervisor
+review.**
+
+## 2026-08-23T13:32:09Z — ICRA-031 BUILDER TWO-AXIS REVIEW
+
+The required Builder Spec review returned PASS with no findings. It confirmed
+the exact qualification-only `0.01`/profile binding, generic invalid `NaN`,
+pre-GPU rejection, static-PASS-before-live order, one guarded runner and
+analyzer, repository-local logging, unchanged external `log/`, zero processes,
+truthful BLOCKED result, exact allowlist and protected PDF preservation.
+
+Standards review initially found one hard documentation claim: the new
+TRACEABILITY pre-GPU guard row mapped IAP-RQ-322 while saying `IMPLEMENTED`,
+contrary to `docs/REQS.md` while Gate-0B is not qualified. The Builder changed
+only that status to `PRE-GPU GUARD VERIFIED / runner 27/27 PASS / Gate-0B
+NOT_QUALIFIED`; focused read-only re-review returned PASS with no remaining hard
+finding. No product, test or live evidence was changed or regenerated.
+
+Standards retained one non-blocking judgment-call Data Clump: `config` and its
+derived `qualification_config_preflight` travel as independently optional
+arguments through the smoke/benchmark/write path. A future design could bundle
+them, but post-live product refactoring is outside ICRA-031 and prohibited by
+the stop line. Staged whitespace, allowlist, Supervisor-owned exclusions and
+protected-PDF checks pass.

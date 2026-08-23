@@ -338,6 +338,89 @@ class Gate0RunnerTest(unittest.TestCase):
         self.assertEqual(
             config["iap_log_root"], "/tmp/p0/runtime/iap_logs"
         )
+        self.assertEqual(config["p0.predictor.sigma_grow_m_sqrt_s"], 0.01)
+        self.assertEqual(
+            config["p0.predictor.sigma_growth_profile"],
+            "legacy_iap_rq320_baseline_v1",
+        )
+
+    def test_p0_qualification_config_preflight_persists_exact_baseline(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output_root = Path(directory)
+            config = MODULE.p0_effective_config(output_root / "smoke")
+            result = MODULE.run_p0_qualification_config_preflight(
+                output_root, config
+            )
+            persisted = json.loads(
+                (output_root / "p0_qualification_config_preflight.json")
+                .read_text()
+            )
+
+        self.assertTrue(result["qualification_config_ready"])
+        self.assertEqual(result, persisted)
+        self.assertEqual(
+            result["requested"]["p0.predictor.sigma_grow_m_sqrt_s"], 0.01
+        )
+        self.assertEqual(
+            result["effective"]["p0.predictor.sigma_grow_m_sqrt_s"], 0.01
+        )
+        self.assertEqual(
+            result["requested"]["p0.predictor.sigma_growth_profile"],
+            "legacy_iap_rq320_baseline_v1",
+        )
+        self.assertEqual(result["requested"], result["effective"])
+        self.assertEqual(result["failure_reasons"], [])
+
+    def test_invalid_p0_qualification_config_fails_before_gpu(self):
+        cases = {
+            "missing": None,
+            "nan": float("nan"),
+            "infinity": float("inf"),
+            "negative": -0.01,
+            "mismatch": 0.02,
+        }
+        for label, value in cases.items():
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as directory:
+                invalid = MODULE.p0_effective_config(Path(directory) / "smoke")
+                if value is None:
+                    invalid.pop("p0.predictor.sigma_grow_m_sqrt_s")
+                else:
+                    invalid["p0.predictor.sigma_grow_m_sqrt_s"] = value
+                with mock.patch.object(
+                    MODULE, "p0_effective_config", return_value=invalid
+                ), mock.patch.object(
+                    MODULE, "run_gpu_preflight"
+                ) as gpu, mock.patch.object(
+                    MODULE, "run_gate0_smoke"
+                ) as smoke, mock.patch.object(
+                    sys,
+                    "argv",
+                    [str(MODULE_PATH), "--output-root", directory, "--smoke"],
+                ):
+                    self.assertEqual(MODULE.main(), 6)
+                gpu.assert_not_called()
+                smoke.assert_not_called()
+                evidence = json.loads(
+                    (Path(directory) / "p0_qualification_config_preflight.json")
+                    .read_text()
+                )
+                self.assertFalse(evidence["qualification_config_ready"])
+
+    def test_mismatched_p0_qualification_profile_fails_before_gpu(self):
+        with tempfile.TemporaryDirectory() as directory:
+            invalid = MODULE.p0_effective_config(Path(directory) / "smoke")
+            invalid["p0.predictor.sigma_growth_profile"] = "final_calibration"
+            with mock.patch.object(
+                MODULE, "p0_effective_config", return_value=invalid
+            ), mock.patch.object(
+                MODULE, "run_gpu_preflight"
+            ) as gpu, mock.patch.object(
+                sys,
+                "argv",
+                [str(MODULE_PATH), "--output-root", directory, "--smoke"],
+            ):
+                self.assertEqual(MODULE.main(), 6)
+            gpu.assert_not_called()
 
     def test_effective_log_path_preflight_records_bounded_descendants(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -1,0 +1,57 @@
+{
+  "gate0a": {
+    "reason": "no_runs",
+    "stable_scenarios": [],
+    "status": "NO-GO-P2"
+  },
+  "gate0b": {
+    "callback_representative_count": 19,
+    "captured_observation_count": 34,
+    "duplicate_callback_observation_count": 14,
+    "duplicate_generation_observation_count": 0,
+    "expected_refresh_query_count": 76800,
+    "failed_ratio": 1.0,
+    "failed_refresh_count": 20,
+    "failures": [
+      "refresh_callback_end_steady_s_invalid",
+      "zero_successful_generations",
+      "fewer_than_required_successful_generations",
+      "refresh_query_shape_mismatch"
+    ],
+    "gate": "P0_EVIDENCE_CONTRACT_FAIL",
+    "generation_interval_ms_p50": null,
+    "generation_interval_ms_p95": null,
+    "integrity_report_count": 166,
+    "malformed_callback_identity_count": 1,
+    "manifest_failures": [],
+    "minimum_successful_generations": 1,
+    "p95_over_refresh_period": null,
+    "protocol": "smoke",
+    "provider_batch_duration_ms_p50": null,
+    "provider_batch_duration_ms_p95": null,
+    "query_shape_ok": false,
+    "recommendations": [],
+    "refresh_elapsed_ms_max": null,
+    "refresh_elapsed_ms_p50": null,
+    "refresh_elapsed_ms_p95": null,
+    "schema_version": "gate0_p0_summary_v1",
+    "stale_ratio": 1.0,
+    "successful_generation_count": 0,
+    "valid_integrity_report_count": 166
+  },
+  "runs": [
+    {
+      "attempt_count": 0,
+      "critical_violation": false,
+      "manifest_failures": "",
+      "qualified": false,
+      "run_id": "p0-smoke",
+      "scenario": "gnss_open_sky",
+      "selected_publish_reached": false,
+      "selected_reached_downstream": false,
+      "selected_refinement_reached": false,
+      "selected_update_reached": false,
+      "under_two_success_attempts": 0
+    }
+  ]
+}

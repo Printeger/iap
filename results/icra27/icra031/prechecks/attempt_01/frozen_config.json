@@ -1,0 +1,72 @@
+{
+  "baseline_provenance": "IAP-RQ-320 provisional qualification baseline; not empirically calibrated",
+  "derived_timing_path": "/home/dev/ws_iap/src/iap/results/icra27/icra031/runs/smoke/runtime/iap_logs/profiling/iap_timing.csv",
+  "effective_config": {
+    "corridor_map_stamp_authority_topic": "/sim/drone_0/truth_odom",
+    "experiment": "p0_open_sky",
+    "export_root_dir": "/home/dev/ws_iap/src/iap/results/icra27/icra031/runs/smoke/exports",
+    "iap_log_root": "/home/dev/ws_iap/src/iap/results/icra27/icra031/runs/smoke/runtime/iap_logs",
+    "iap_mapping_backend": "cpu",
+    "p0.enable_risk_grid": true,
+    "p0.horizons_s": "0.0,0.5,1.0,1.5,2.0,2.5",
+    "p0.predictor.sigma_grow_m_sqrt_s": 0.01,
+    "p0.predictor.sigma_growth_profile": "legacy_iap_rq320_baseline_v1",
+    "p0.predictor.worker_count": 4,
+    "p0.refresh_period_s": 0.5,
+    "p0.resolution_m": 0.75,
+    "p0.size_x_m": 30.0,
+    "p0.size_y_m": 30.0,
+    "p0.size_z_m": 6.0,
+    "p0.skip_occupied_voxels": true,
+    "p1.metrics_only": false,
+    "p1.use_integrity_cost": false,
+    "p2.enable_candidate_ranking": false,
+    "p3.enable_global_reference_bias": false,
+    "p3.enable_local_reference_bias": false,
+    "p4.enable_risk_aware_astar": false,
+    "p5.enable_final_gate": false,
+    "p5.enable_runtime_gate": false,
+    "planner_enable_all_safety": false,
+    "planner_enable_p1": false,
+    "planner_enable_p2": false,
+    "planner_enable_p3_global": false,
+    "planner_enable_p3_local": false,
+    "planner_enable_p4": false,
+    "planner_enable_p5_final": false,
+    "planner_enable_p5_runtime": false,
+    "planner_safety_profile": "off",
+    "record_bag": false,
+    "run_duration_s": 20,
+    "run_validator": false,
+    "runtime_root_dir": "/home/dev/ws_iap/src/iap/results/icra27/icra031/runs/smoke/runtime",
+    "scenario": "gnss_open_sky",
+    "start_rviz": false,
+    "validation_duration_s": 15
+  },
+  "exact_sigma_grow_m_sqrt_s": 0.01,
+  "exact_sigma_growth_profile": "legacy_iap_rq320_baseline_v1",
+  "failures": [],
+  "qualification_config_preflight": {
+    "baseline_provenance": {
+      "identity": "legacy_iap_rq320_baseline_v1",
+      "requirement": "IAP-RQ-320",
+      "status": "provisional_qualification_baseline_not_empirically_calibrated",
+      "unit": "m/sqrt(s)"
+    },
+    "checked_utc": "2026-08-23T13:14:29Z",
+    "effective": {
+      "p0.predictor.sigma_grow_m_sqrt_s": 0.01,
+      "p0.predictor.sigma_growth_profile": "legacy_iap_rq320_baseline_v1"
+    },
+    "failure_reason": "",
+    "failure_reasons": [],
+    "qualification_config_ready": true,
+    "requested": {
+      "p0.predictor.sigma_grow_m_sqrt_s": 0.01,
+      "p0.predictor.sigma_growth_profile": "legacy_iap_rq320_baseline_v1"
+    },
+    "schema_version": "gate0_p0_qualification_config_preflight_v1"
+  },
+  "query_count": 76800,
+  "ready": true
+}

@@ -953,6 +953,8 @@ ARG_DEFAULTS = [
     ("p0.predictor.lidar_legacy_observability", "true"),
     ("p0.predictor.lidar_fim_radius_m", "12.0"),
     ("p0.predictor.worker_count", "1"),
+    ("p0.predictor.sigma_grow_m_sqrt_s", "nan"),
+    ("p0.predictor.sigma_growth_profile", "unconfigured_fail_closed"),
     ("p0_6.fixture.enabled", "false"),
     ("p0_6.fixture.name", ""),
     ("p0_6.fixture.x_min", "-1.5"),
@@ -1529,6 +1531,19 @@ def _param_int(context, name):
     return int(LaunchConfiguration(name).perform(context))
 
 
+def _p0_covariance_growth_launch_contract(context):
+    return {
+        "sigma_grow_m_sqrt_s": float(
+            LaunchConfiguration(
+                "p0.predictor.sigma_grow_m_sqrt_s"
+            ).perform(context).strip()
+        ),
+        "profile": LaunchConfiguration(
+            "p0.predictor.sigma_growth_profile"
+        ).perform(context),
+    }
+
+
 def _fixed_lattice_no_replan_threshold(safety_enabled):
     # P1 formal evidence needs one last receding-horizon plan after the
     # trajectory fits the 2.5 s snapshot horizon.  Match the manager's own
@@ -1587,7 +1602,7 @@ def _odom_visualization_node(name, odom_topic, cmd_topic, topic_prefix, color, d
     )
 
 
-def _ego_planner_node(context, drone_id, planner_odom_topic, cloud_topic, camera_pose_topic, depth_topic, bspline_topic, map_size, goal, point_num, safety_profile, safety_enabled, p0_enabled, export_dir, evidence):
+def _ego_planner_node(context, drone_id, planner_odom_topic, cloud_topic, camera_pose_topic, depth_topic, bspline_topic, map_size, goal, point_num, safety_profile, safety_enabled, p0_enabled, p0_covariance_growth, export_dir, evidence):
     p1_enabled = safety_enabled["p1"]
     p2_enabled = safety_enabled["p2"]
     p3_local_enabled = safety_enabled["p3_local"]
@@ -1734,6 +1749,7 @@ def _ego_planner_node(context, drone_id, planner_odom_topic, cloud_topic, camera
             {"p0.predictor.lidar_legacy_observability": _param_bool(context, "p0.predictor.lidar_legacy_observability")},
             {"p0.predictor.lidar_fim_radius_m": _param_float(context, "p0.predictor.lidar_fim_radius_m")},
             {"p0.predictor.worker_count": _param_int(context, "p0.predictor.worker_count")},
+            {"p0.predictor.sigma_grow_m_sqrt_s": p0_covariance_growth["sigma_grow_m_sqrt_s"]},
             {"p0_6.fixture.enabled": _param_bool(context, "p0_6.fixture.enabled")},
             {"p0_6.fixture.name": LaunchConfiguration("p0_6.fixture.name").perform(context)},
             {"p0_6.fixture.x_min": _param_float(context, "p0_6.fixture.x_min")},
@@ -1948,6 +1964,7 @@ def _launch_setup(context):
     local_sensing_share = get_package_share_directory("local_sensing")
     scenario, experiment, preset_keys = _apply_presets(context, iap_share)
     safety_profile, safety_enabled, p0_enabled, p0_conflict, _ = _resolve_safety_switches(context, preset_keys)
+    p0_covariance_growth = _p0_covariance_growth_launch_contract(context)
 
     start_rviz = _as_bool(LaunchConfiguration("start_rviz").perform(context))
     record_bag = _as_bool(LaunchConfiguration("record_bag").perform(context))
@@ -2086,6 +2103,7 @@ def _launch_setup(context):
             safety_profile,
             safety_enabled,
             p0_enabled,
+            p0_covariance_growth,
             export_dir,
             evidence,
         ),
@@ -2503,6 +2521,8 @@ def _launch_setup(context):
         "p0.predictor.conservative_max_with_gnss": _param_bool(context, "p0.predictor.conservative_max_with_gnss"),
         "p0.predictor.lidar_legacy_observability": _param_bool(context, "p0.predictor.lidar_legacy_observability"),
         "p0.predictor.lidar_fim_radius_m": _param_float(context, "p0.predictor.lidar_fim_radius_m"),
+        "p0.predictor.sigma_grow_m_sqrt_s": p0_covariance_growth["sigma_grow_m_sqrt_s"],
+        "p0.predictor.sigma_growth_profile": p0_covariance_growth["profile"],
         "p0_6.fixture.enabled": _param_bool(context, "p0_6.fixture.enabled"),
         "p0_6.fixture.name": LaunchConfiguration("p0_6.fixture.name").perform(context),
         "p0_6.fixture.x_min": _param_float(context, "p0_6.fixture.x_min"),

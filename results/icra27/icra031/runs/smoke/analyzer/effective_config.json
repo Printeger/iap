@@ -1,0 +1,858 @@
+{
+  "runs": [
+    {
+      "capture_exit_code": 0,
+      "capture_readiness": {
+        "pid": 3422200,
+        "ready": true,
+        "ready_utc": "2026-08-23T13:16:11Z",
+        "schema_version": "gate0_capture_readiness_v1",
+        "subscriptions": [
+          {
+            "message_type": "std_msgs/msg/String",
+            "qos": {
+              "depth": 100,
+              "durability": "volatile",
+              "history": "keep_last",
+              "reliability": "reliable"
+            },
+            "topic": "/planning/risk_grid_health"
+          },
+          {
+            "message_type": "iap/msg/IntegrityReport",
+            "qos": {
+              "depth": 100,
+              "durability": "volatile",
+              "history": "keep_last",
+              "reliability": "reliable"
+            },
+            "topic": "/iap/integrity"
+          }
+        ]
+      },
+      "effective_config": {
+        "corridor_map_stamp_authority_topic": "/sim/drone_0/truth_odom",
+        "experiment": "p0_open_sky",
+        "export_root_dir": "/home/dev/ws_iap/src/iap/results/icra27/icra031/runs/smoke/exports",
+        "iap_log_root": "/home/dev/ws_iap/src/iap/results/icra27/icra031/runs/smoke/runtime/iap_logs",
+        "iap_mapping_backend": "cpu",
+        "p0.enable_risk_grid": true,
+        "p0.horizons_s": "0.0,0.5,1.0,1.5,2.0,2.5",
+        "p0.predictor.sigma_grow_m_sqrt_s": 0.01,
+        "p0.predictor.sigma_growth_profile": "legacy_iap_rq320_baseline_v1",
+        "p0.predictor.worker_count": 4,
+        "p0.refresh_period_s": 0.5,
+        "p0.resolution_m": 0.75,
+        "p0.size_x_m": 30.0,
+        "p0.size_y_m": 30.0,
+        "p0.size_z_m": 6.0,
+        "p0.skip_occupied_voxels": true,
+        "p1.metrics_only": false,
+        "p1.use_integrity_cost": false,
+        "p2.enable_candidate_ranking": false,
+        "p3.enable_global_reference_bias": false,
+        "p3.enable_local_reference_bias": false,
+        "p4.enable_risk_aware_astar": false,
+        "p5.enable_final_gate": false,
+        "p5.enable_runtime_gate": false,
+        "planner_enable_all_safety": false,
+        "planner_enable_p1": false,
+        "planner_enable_p2": false,
+        "planner_enable_p3_global": false,
+        "planner_enable_p3_local": false,
+        "planner_enable_p4": false,
+        "planner_enable_p5_final": false,
+        "planner_enable_p5_runtime": false,
+        "planner_safety_profile": "off",
+        "record_bag": false,
+        "run_duration_s": 20,
+        "run_validator": false,
+        "runtime_root_dir": "/home/dev/ws_iap/src/iap/results/icra27/icra031/runs/smoke/runtime",
+        "scenario": "gnss_open_sky",
+        "start_rviz": false,
+        "validation_duration_s": 15
+      },
+      "effective_log_path_preflight": {
+        "checked_utc": "2026-08-23T13:16:11Z",
+        "derived_timing_path": "/home/dev/ws_iap/src/iap/results/icra27/icra031/runs/smoke/runtime/iap_logs/profiling/iap_timing.csv",
+        "effective_log_paths_ready": true,
+        "failure_reason": "",
+        "failure_reasons": [],
+        "requested_log_root": "/home/dev/ws_iap/src/iap/results/icra27/icra031/runs/smoke/runtime/iap_logs",
+        "required_runtime_dir": "/home/dev/ws_iap/src/iap/results/icra27/icra031/runs/smoke/runtime",
+        "run_dir": "/home/dev/ws_iap/src/iap/results/icra27/icra031/runs/smoke",
+        "schema_version": "gate0_effective_log_path_preflight_v1",
+        "supplied_runtime_root": "/home/dev/ws_iap/src/iap/results/icra27/icra031/runs/smoke/runtime"
+      },
+      "effective_log_path_preflight_path": "/home/dev/ws_iap/src/iap/results/icra27/icra031/runs/smoke/effective_log_path_preflight.json",
+      "exit_code": 0,
+      "fixed_protocol": true,
+      "gpu_preflight": {
+        "checked_utc": "2026-08-23T13:16:11Z",
+        "commands": [
+          {
+            "argv": [
+              "nvidia-smi",
+              "-L"
+            ],
+            "exception": "",
+            "exit_code": 0,
+            "name": "nvidia_smi_list",
+            "stderr": {
+              "original_length": 0,
+              "text": "",
+              "truncated": false
+            },
+            "stdout": {
+              "original_length": 89,
+              "text": "GPU 0: NVIDIA GeForce RTX 4070 Ti SUPER (UUID: GPU-18669b5b-29eb-0bdc-00c2-65c35b8e1af9)\n",
+              "truncated": false
+            }
+          },
+          {
+            "argv": [
+              "nvidia-smi",
+              "--query-gpu=index,name,uuid,driver_version",
+              "--format=csv,noheader"
+            ],
+            "exception": "",
+            "exit_code": 0,
+            "name": "nvidia_smi_query",
+            "stderr": {
+              "original_length": 0,
+              "text": "",
+              "truncated": false
+            },
+            "stdout": {
+              "original_length": 90,
+              "text": "0, NVIDIA GeForce RTX 4070 Ti SUPER, GPU-18669b5b-29eb-0bdc-00c2-65c35b8e1af9, 580.126.09\n",
+              "truncated": false
+            }
+          }
+        ],
+        "cuda": {
+          "cuDeviceGetCount_result": 0,
+          "cuInit_result": 0,
+          "device_count": 1,
+          "library": "libcuda.so.1",
+          "library_loaded": true,
+          "load_error": ""
+        },
+        "failure_reason": "",
+        "failure_reasons": [],
+        "gpu_ready": true,
+        "schema_version": "iap_gpu_preflight_v1"
+      },
+      "gpu_preflight_path": "/home/dev/ws_iap/src/iap/results/icra27/icra031/runs/gpu_preflight.json",
+      "launch_started": true,
+      "p0_qualification_config_preflight": {
+        "baseline_provenance": {
+          "identity": "legacy_iap_rq320_baseline_v1",
+          "requirement": "IAP-RQ-320",
+          "status": "provisional_qualification_baseline_not_empirically_calibrated",
+          "unit": "m/sqrt(s)"
+        },
+        "checked_utc": "2026-08-23T13:16:10Z",
+        "effective": {
+          "p0.predictor.sigma_grow_m_sqrt_s": 0.01,
+          "p0.predictor.sigma_growth_profile": "legacy_iap_rq320_baseline_v1"
+        },
+        "failure_reason": "",
+        "failure_reasons": [],
+        "qualification_config_ready": true,
+        "requested": {
+          "p0.predictor.sigma_grow_m_sqrt_s": 0.01,
+          "p0.predictor.sigma_growth_profile": "legacy_iap_rq320_baseline_v1"
+        },
+        "schema_version": "gate0_p0_qualification_config_preflight_v1"
+      },
+      "p0_qualification_config_preflight_path": "/home/dev/ws_iap/src/iap/results/icra27/icra031/runs/p0_qualification_config_preflight.json",
+      "planner_crash": false,
+      "process_failures": [
+        {
+          "elapsed_s": 20.847782673081383,
+          "exit_code_signal": null,
+          "phase": "controlled_shutdown",
+          "process_name": "iap_rosnode",
+          "reason": "required_process_stopped_during_controlled_shutdown"
+        }
+      ],
+      "required_processes": {
+        "iap_rosnode": {
+          "runtime_failure": false,
+          "seen": true
+        }
+      },
+      "required_processes_ok": true,
+      "run_id": "p0-smoke",
+      "runtime_manifest": {
+        "artifact_provenance": {
+          "bag_path": "/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p0_open_sky_gnss_open_sky_20260823T131611Z",
+          "baseline_commit": "34fa22f17c3778c2f98a777e01516b878c183120",
+          "experiment": "p0_open_sky",
+          "export_dir": "/home/dev/ws_iap/src/iap/results/icra27/icra031/runs/smoke/exports/test_planner_p0_open_sky_gnss_open_sky_3422215_1787490971323",
+          "git_commit": "",
+          "git_worktree_clean": false,
+          "install_prefix": "/home/dev/ws_iap/src/iap/results/icra27/icra031",
+          "manifest_path": "/home/dev/ws_iap/src/iap/results/icra27/icra031/runs/smoke/exports/test_planner_p0_open_sky_gnss_open_sky_3422215_1787490971323/test_planner_manifest.json",
+          "process_start_epoch_s": 1787490971.3280833,
+          "process_start_stamp_utc": "2026-08-23T13:16:11Z",
+          "run_id": "4799e9cfffa844a0882fea6dd6cf91bf",
+          "runtime_paths": {
+            "bspline_library": {
+              "path": "/home/dev/ws_iap/src/iap/results/icra27/icra026/install_bspline_opt/lib/libbspline_opt.a",
+              "sha256": "fb04d4c0ecff5ab84f1442a8d4b4f965082f76b9bfe4119c42f00378c28df82a"
+            },
+            "bspline_opt_prefix": "/home/dev/ws_iap/src/iap/results/icra27/icra026/install_bspline_opt",
+            "ego_planner_prefix": "/home/dev/ws_iap/src/iap/results/icra27/icra026/install_ego",
+            "iap_prefix": "/home/dev/ws_iap/src/iap/results/icra27/icra031/install",
+            "launch": {
+              "path": "/home/dev/ws_iap/src/iap/results/icra27/icra031/install/share/iap/launch/test_planner.launch.py",
+              "sha256": "b207f96405925a9e17174d7b87d5592e97897c908d3f8d4105645a28323ff4a5"
+            },
+            "planner_executable": {
+              "path": "/home/dev/ws_iap/src/iap/results/icra27/icra026/install_ego/lib/ego_planner/ego_planner_node",
+              "sha256": "3d46c5a680c83e91fd020dda403e7e7fe06b8e2f21d3c33efadea30dce58a73e"
+            }
+          },
+          "scenario": "gnss_open_sky",
+          "schema_version": "p1_evidence_provenance_v4",
+          "source_repository": "",
+          "workspace_root": "/home/dev/ws_iap/src/iap/results/icra27"
+        },
+        "bspline/limit_vel": 2.0,
+        "corridor_map_stamp_authority_topic": "/sim/drone_0/truth_odom",
+        "experiment": "p0_open_sky",
+        "export_dir": "/home/dev/ws_iap/src/iap/results/icra27/icra031/runs/smoke/exports/test_planner_p0_open_sky_gnss_open_sky_3422215_1787490971323",
+        "forest_random_seed": 11,
+        "fsm.thresh_no_replan_meter": 1.0,
+        "fsm.thresh_replan_time": 1.0,
+        "gate0.candidate_events_path": "",
+        "gate0.control_points_path": "",
+        "gate0.evidence_manifest_path": "",
+        "gate0.evidence_run_id": "",
+        "gate0.qualification_evidence_enable": false,
+        "gnss_random_seed": 20260429,
+        "grid_map/local_update_range_x": 5.5,
+        "iap_logging_effective_config": {
+          "log_root": "/home/dev/ws_iap/src/iap/results/icra27/icra031/runs/smoke/runtime/iap_logs",
+          "referenced_logging_config_path": "/home/dev/ws_iap/src/iap/results/icra27/icra031/runs/smoke/runtime/iap_sim_demo11_test_planner_3422215_1787490971323/sim_ego/config_logging.json",
+          "root_config_path": "/home/dev/ws_iap/src/iap/results/icra27/icra031/runs/smoke/runtime/iap_sim_demo11_test_planner_3422215_1787490971323/sim_demo11/config.json",
+          "timing_csv_path": "/home/dev/ws_iap/src/iap/results/icra27/icra031/runs/smoke/runtime/iap_logs/profiling/iap_timing.csv"
+        },
+        "iap_mapping_backend": "cpu",
+        "lidar_start_delay_s": 0.0,
+        "manager/max_vel": 2.0,
+        "manager/p1_collision_fanout_clearance_m": 0.0,
+        "manager/p1_collision_fanout_mirror_y": false,
+        "manager/p1_collision_fanout_preserve_homotopies": false,
+        "manager/planning_horizon": 7.5,
+        "manager/use_distinctive_trajs": true,
+        "mapping_effective_config": {
+          "global_mapping_config": {
+            "path": "/home/dev/ws_iap/src/iap/results/icra27/icra031/runs/smoke/runtime/iap_sim_demo11_test_planner_3422215_1787490971323/sim_ego/config_global_mapping_cpu.json",
+            "sha256": "2f0006f879f342edc3c895815ea7f3aee8c38e1aa6b9867f811c5ac0488c6c8b"
+          },
+          "odometry_config": {
+            "path": "/home/dev/ws_iap/src/iap/results/icra27/icra031/runs/smoke/runtime/iap_sim_demo11_test_planner_3422215_1787490971323/sim_demo11/config_odometry_cpu.json",
+            "sha256": "15f74926d3c3f975c8d1d01ea472c567dc436a12a6159dac2a07b8cf80646554"
+          },
+          "selected": "cpu",
+          "sub_mapping_config": {
+            "path": "/home/dev/ws_iap/src/iap/results/icra27/icra031/runs/smoke/runtime/iap_sim_demo11_test_planner_3422215_1787490971323/sim_ego/config_sub_mapping_cpu.json",
+            "sha256": "5aa34e56c91c5dfbbc627b2b60375a91a6c8b092adfa2b82bbd09d86aec15dec"
+          }
+        },
+        "optimization/max_vel": 2.0,
+        "p0.batch_worker_count": 1,
+        "p0.enable_risk_grid": true,
+        "p0.horizons_s": [
+          0.0,
+          0.5,
+          1.0,
+          1.5,
+          2.0,
+          2.5
+        ],
+        "p0.occupancy_query_evidence_path": "/home/dev/ws_iap/src/iap/results/icra27/icra031/runs/smoke/exports/test_planner_p0_open_sky_gnss_open_sky_3422215_1787490971323/planner_p0_occupancy_query_evidence.csv",
+        "p0.predictor.conservative_max_with_gnss": false,
+        "p0.predictor.effective_worker_count": 4,
+        "p0.predictor.gnss_epoch_policy": "auto",
+        "p0.predictor.lidar_fim_radius_m": 12.0,
+        "p0.predictor.lidar_legacy_observability": true,
+        "p0.predictor.requested_worker_count": 4,
+        "p0.predictor.sigma_grow_m_sqrt_s": 0.01,
+        "p0.predictor.sigma_growth_profile": "legacy_iap_rq320_baseline_v1",
+        "p0.predictor.source_mode": "fusion",
+        "p0.predictor.use_current_integrity_prior": true,
+        "p0.raw_health_topic": "/planning/risk_grid_health",
+        "p0.refresh_period_s": 0.5,
+        "p0.resolution_m": 0.75,
+        "p0.size_x_m": 30.0,
+        "p0.size_y_m": 30.0,
+        "p0.size_z_m": 6.0,
+        "p0.skip_occupied_voxels": true,
+        "p0.stale_timeout_s": 1.0,
+        "p0_6": {
+          "fixture": {
+            "bounds": {
+              "x": [
+                -1.5,
+                1.5
+              ],
+              "y": [
+                -0.75,
+                0.75
+              ],
+              "z": [
+                1.0,
+                2.0
+              ]
+            },
+            "enabled": false,
+            "expected_raw": {
+              "low_raw_cost_threshold": 2.0,
+              "raw_c_pi": 1.2,
+              "raw_hpl_m": 1.0,
+              "raw_vpl_m": 1.2
+            },
+            "name": ""
+          }
+        },
+        "p0_6.fixture.enabled": false,
+        "p0_6.fixture.low_raw_cost_threshold": 2.0,
+        "p0_6.fixture.name": "",
+        "p0_6.fixture.raw_c_pi": 1.2,
+        "p0_6.fixture.raw_hpl_m": 1.0,
+        "p0_6.fixture.raw_vpl_m": 1.2,
+        "p0_6.fixture.x_max": 1.5,
+        "p0_6.fixture.x_min": -1.5,
+        "p0_6.fixture.y_max": 0.75,
+        "p0_6.fixture.y_min": -0.75,
+        "p0_6.fixture.z_max": 2.0,
+        "p0_6.fixture.z_min": 1.0,
+        "p1.accepted_profile_context_path": "/home/dev/ws_iap/src/iap/results/icra27/icra031/runs/smoke/exports/test_planner_p0_open_sky_gnss_open_sky_3422215_1787490971323/planner_p1_accepted_trajectory_risk_profile_context.csv",
+        "p1.accepted_profile_path": "/home/dev/ws_iap/src/iap/results/icra27/icra031/runs/smoke/exports/test_planner_p0_open_sky_gnss_open_sky_3422215_1787490971323/planner_p1_accepted_trajectory_risk_profile.csv",
+        "p1.candidate_control_points_path": "/home/dev/ws_iap/src/iap/results/icra27/icra031/runs/smoke/exports/test_planner_p0_open_sky_gnss_open_sky_3422215_1787490971323/planner_p1_candidate_control_points.csv",
+        "p1.candidate_optimization_path": "/home/dev/ws_iap/src/iap/results/icra27/icra031/runs/smoke/exports/test_planner_p0_open_sky_gnss_open_sky_3422215_1787490971323/planner_p1_candidate_optimization.csv",
+        "p1.candidate_pairwise_path": "/home/dev/ws_iap/src/iap/results/icra27/icra031/runs/smoke/exports/test_planner_p0_open_sky_gnss_open_sky_3422215_1787490971323/planner_p1_candidate_pairwise.csv",
+        "p1.candidate_profile_path": "/home/dev/ws_iap/src/iap/results/icra27/icra031/runs/smoke/exports/test_planner_p0_open_sky_gnss_open_sky_3422215_1787490971323/planner_p1_candidate_profile.csv",
+        "p1.candidate_retained_profile_path": "/home/dev/ws_iap/src/iap/results/icra27/icra031/runs/smoke/exports/test_planner_p0_open_sky_gnss_open_sky_3422215_1787490971323/planner_p1_candidate_retained_profile.csv",
+        "p1.candidate_route_precheck_path": "/home/dev/ws_iap/src/iap/results/icra27/icra031/runs/smoke/exports/test_planner_p0_open_sky_gnss_open_sky_3422215_1787490971323/metadata/p1_candidate_route_precheck.json",
+        "p1.debug_csv_enable": false,
+        "p1.debug_csv_path": "/home/dev/ws_iap/src/iap/results/icra27/icra031/runs/smoke/exports/test_planner_p0_open_sky_gnss_open_sky_3422215_1787490971323/planner_p1_integrity_cost_debug.csv",
+        "p1.formal_calibration": {},
+        "p1.lambda_integrity": 0.0,
+        "p1.max_candidates_per_attempt": 8,
+        "p1.metrics_only": false,
+        "p1.normalization_budget_fraction": 0.3,
+        "p1.objective_aggregation_mode": "fixed_200_smooth_cvar",
+        "p1.optimizer_checkpoint_path": "/home/dev/ws_iap/src/iap/results/icra27/icra031/runs/smoke/exports/test_planner_p0_open_sky_gnss_open_sky_3422215_1787490971323/planner_p1_optimizer_checkpoint.csv",
+        "p1.planning_context_timeline_path": "/home/dev/ws_iap/src/iap/results/icra27/icra031/runs/smoke/exports/test_planner_p0_open_sky_gnss_open_sky_3422215_1787490971323/planner_p1_planning_context_timeline.csv",
+        "p1.pre_admission_attempt_path": "/home/dev/ws_iap/src/iap/results/icra27/icra031/runs/smoke/exports/test_planner_p0_open_sky_gnss_open_sky_3422215_1787490971323/planner_p1_pre_admission_attempt.csv",
+        "p1.prequalification_candidate_profile_path": "/home/dev/ws_iap/src/iap/results/icra27/icra031/runs/smoke/exports/test_planner_p0_open_sky_gnss_open_sky_3422215_1787490971323/planner_p1_prequalification_candidate_profile.csv",
+        "p1.reference_identity": "metrics_only_lambda_0.00001_not_applied",
+        "p1.replacement_decision_path": "/home/dev/ws_iap/src/iap/results/icra27/icra031/runs/smoke/exports/test_planner_p0_open_sky_gnss_open_sky_3422215_1787490971323/planner_p1_replacement_decision.csv",
+        "p1.smooth_cvar_alpha": 0.9,
+        "p1.smooth_max_temperature": 0.01,
+        "p1.use_integrity_cost": false,
+        "p1_fixture_mirror_y": false,
+        "p2.debug_csv_enable": false,
+        "p2.enable_candidate_ranking": false,
+        "p3.debug_csv_enable": false,
+        "p3.enable_global_reference_bias": false,
+        "p3.enable_local_reference_bias": false,
+        "p4.debug_csv_enable": false,
+        "p4.enable_risk_aware_astar": false,
+        "p5.current_stale_to_emergency_s": 2.0,
+        "p5.current_stale_to_replan_s": 0.5,
+        "p5.enable_final_gate": false,
+        "p5.enable_runtime_gate": false,
+        "p5.future_emergency_margin_m": -0.5,
+        "p5.future_replan_margin_m": 0.3,
+        "p5.future_unknown_to_emergency_s": 2.0,
+        "p5.max_bad_ratio": 0.25,
+        "p5.pred_alert_limit_mode": "current_msg_constant",
+        "p5_3": {
+          "fixture": {
+            "bounds": {
+              "x": [
+                -10.8,
+                -8.7
+              ],
+              "y": [
+                -0.75,
+                0.75
+              ],
+              "z": [
+                1.0,
+                1.35
+              ]
+            },
+            "enabled": false,
+            "expected_alert_limit_m": {
+              "hal": 10.0,
+              "mode": "current_msg_constant",
+              "val": 10.0
+            },
+            "expected_im_m": -0.1999999999999993,
+            "expected_reason": "p5_3_high_risk_zone",
+            "injected_pl_m": {
+              "hpl_pred": 10.2,
+              "vpl_pred": 10.2
+            },
+            "name": "future_high_risk_zone_v1",
+            "tau_window_s": [
+              1.2,
+              2.0
+            ]
+          }
+        },
+        "p5_3.fixture.enabled": false,
+        "p5_3.fixture.expected_hal_m": 10.0,
+        "p5_3.fixture.expected_im_m": -0.1999999999999993,
+        "p5_3.fixture.expected_val_m": 10.0,
+        "p5_3.fixture.hpl_pred_m": 10.2,
+        "p5_3.fixture.name": "future_high_risk_zone_v1",
+        "p5_3.fixture.tau_max": 2.0,
+        "p5_3.fixture.tau_min": 1.2,
+        "p5_3.fixture.vpl_pred_m": 10.2,
+        "p5_3.fixture.x_max": -8.7,
+        "p5_3.fixture.x_min": -10.8,
+        "p5_3.fixture.y_max": 0.75,
+        "p5_3.fixture.y_min": -0.75,
+        "p5_3.fixture.z_max": 1.35,
+        "p5_3.fixture.z_min": 1.0,
+        "p5_4": {
+          "fixture": {
+            "bounds": {
+              "x": [
+                -11.7,
+                -11.1
+              ],
+              "y": [
+                -0.75,
+                0.75
+              ],
+              "z": [
+                1.0,
+                1.35
+              ]
+            },
+            "enabled": false,
+            "expected_alert_limit_m": {
+              "hal": 10.0,
+              "mode": "current_msg_constant",
+              "val": 10.0
+            },
+            "expected_emergency_time_s": 1.0,
+            "expected_first_bad_tau_s": 0.6,
+            "expected_im_m": -0.1999999999999993,
+            "expected_reason": "p5_4_near_risk_zone",
+            "injected_pl_m": {
+              "hpl_pred": 10.2,
+              "vpl_pred": 10.2
+            },
+            "name": "near_risk_zone_v1",
+            "tau_window_s": [
+              0.6,
+              0.95
+            ]
+          }
+        },
+        "p5_4.fixture.enabled": false,
+        "p5_4.fixture.expected_hal_m": 10.0,
+        "p5_4.fixture.expected_im_m": -0.1999999999999993,
+        "p5_4.fixture.expected_val_m": 10.0,
+        "p5_4.fixture.hpl_pred_m": 10.2,
+        "p5_4.fixture.name": "near_risk_zone_v1",
+        "p5_4.fixture.tau_max": 0.95,
+        "p5_4.fixture.tau_min": 0.6,
+        "p5_4.fixture.vpl_pred_m": 10.2,
+        "p5_4.fixture.x_max": -11.1,
+        "p5_4.fixture.x_min": -11.7,
+        "p5_4.fixture.y_max": 0.75,
+        "p5_4.fixture.y_min": -0.75,
+        "p5_4.fixture.z_max": 1.35,
+        "p5_4.fixture.z_min": 1.0,
+        "p5_5": {
+          "fixture": {
+            "duration_s": 12.0,
+            "enabled": false,
+            "expected_reason": "current_stale",
+            "expected_thresholds_s": {
+              "emergency": 2.0,
+              "replan": 0.5
+            },
+            "name": "current_integrity_stamp_freeze_v1",
+            "route": {
+              "enabled": false,
+              "reason": "keep P5 runtime gate active through the stale fixture window",
+              "waypoints": [
+                [
+                  12.0,
+                  0.0,
+                  1.2
+                ],
+                [
+                  -12.0,
+                  0.0,
+                  1.2
+                ],
+                [
+                  12.0,
+                  0.0,
+                  1.2
+                ],
+                [
+                  -12.0,
+                  0.0,
+                  1.2
+                ]
+              ]
+            },
+            "start_s": 30.0,
+            "window_s": [
+              30.0,
+              42.0
+            ]
+          }
+        },
+        "p5_5.fixture.duration_s": 12.0,
+        "p5_5.fixture.enabled": false,
+        "p5_5.fixture.name": "current_integrity_stamp_freeze_v1",
+        "p5_5.fixture.start_s": 30.0,
+        "p5_6": {
+          "fixture": {
+            "bounds": {
+              "x": [
+                -1.0,
+                12.5
+              ],
+              "y": [
+                -15.0,
+                15.0
+              ],
+              "z": [
+                -3.0,
+                3.0
+              ]
+            },
+            "effective_enabled": false,
+            "enabled": false,
+            "expected_reason": "future_unknown",
+            "expected_unknown": {
+              "available": true,
+              "finite_pl": false,
+              "stale": false,
+              "valid": false
+            },
+            "name": "future_unknown_zone_v1",
+            "tau_window_s": [
+              0.2,
+              2.0
+            ]
+          }
+        },
+        "p5_6.fixture.effective_enabled": false,
+        "p5_6.fixture.enabled": false,
+        "p5_6.fixture.name": "future_unknown_zone_v1",
+        "p5_6.fixture.tau_max": 2.0,
+        "p5_6.fixture.tau_min": 0.2,
+        "p5_6.fixture.x_max": 12.5,
+        "p5_6.fixture.x_min": -1.0,
+        "p5_6.fixture.y_max": 15.0,
+        "p5_6.fixture.y_min": -15.0,
+        "p5_6.fixture.z_max": 3.0,
+        "p5_6.fixture.z_min": -3.0,
+        "p5_7": {
+          "fixture": {
+            "bounds": {
+              "x": [
+                -11.7,
+                -8.7
+              ],
+              "y": [
+                -0.75,
+                0.75
+              ],
+              "z": [
+                1.0,
+                1.35
+              ]
+            },
+            "effective_enabled": false,
+            "enabled": false,
+            "expected_alert_limit_m": {
+              "hal": 10.0,
+              "mode": "current_msg_constant",
+              "val": 10.0
+            },
+            "expected_im_m": -0.1999999999999993,
+            "expected_reason": "p5_7_rejected_trajectory",
+            "injected_pl_m": {
+              "hpl_pred": 10.2,
+              "vpl_pred": 10.2
+            },
+            "name": "rejected_trajectory_zone_v1",
+            "sample_source": "final_candidate",
+            "tau_window_s": [
+              0.6,
+              2.0
+            ]
+          }
+        },
+        "p5_7.fixture.effective_enabled": false,
+        "p5_7.fixture.enabled": false,
+        "p5_7.fixture.expected_hal_m": 10.0,
+        "p5_7.fixture.expected_im_m": -0.1999999999999993,
+        "p5_7.fixture.expected_val_m": 10.0,
+        "p5_7.fixture.hpl_pred_m": 10.2,
+        "p5_7.fixture.name": "rejected_trajectory_zone_v1",
+        "p5_7.fixture.tau_max": 2.0,
+        "p5_7.fixture.tau_min": 0.6,
+        "p5_7.fixture.vpl_pred_m": 10.2,
+        "p5_7.fixture.x_max": -8.7,
+        "p5_7.fixture.x_min": -11.7,
+        "p5_7.fixture.y_max": 0.75,
+        "p5_7.fixture.y_min": -0.75,
+        "p5_7.fixture.z_max": 1.35,
+        "p5_7.fixture.z_min": 1.0,
+        "planner_enable_all_safety": false,
+        "planner_enable_p1": false,
+        "planner_enable_p2": false,
+        "planner_enable_p3_global": false,
+        "planner_enable_p3_local": false,
+        "planner_enable_p4": false,
+        "planner_enable_p5_final": false,
+        "planner_enable_p5_runtime": false,
+        "planner_safety_profile": "off",
+        "planner_start_delay_s": 10.0,
+        "record_bag": false,
+        "run_duration_s": 20.0,
+        "run_validator": false,
+        "runtime_config_path": "/home/dev/ws_iap/src/iap/results/icra27/icra031/runs/smoke/runtime/iap_sim_demo11_test_planner_3422215_1787490971323/sim_demo11",
+        "scenario": "gnss_open_sky",
+        "scenario_contract": {
+          "decision_checkpoint": {
+            "localization_error_limit_m": 0.5,
+            "pair_error_delta_limit_m": 0.25,
+            "profile_sample_zero_binding": "planner_truth_odom_state_at_planning_start",
+            "truth_source_topic": "/sim/drone_0/truth_odom",
+            "truth_x_m": -9.5,
+            "truth_x_tolerance_m": 0.4
+          },
+          "geometry": {
+            "boundary_tree_layout": {
+              "formal_min_lane_center_clearance_m": 1.7,
+              "inner_x_m": [
+                -8.0,
+                -3.0
+              ],
+              "mode": "alternating_external_and_central-box-bounded_inner"
+            },
+            "canopy_resolution_m": 0.15,
+            "central_obstacle": {
+              "enabled": false,
+              "x_m": [
+                -7.0,
+                -2.0
+              ],
+              "y_half_width_m": 0.65,
+              "z_m": [
+                0.0,
+                2.8
+              ]
+            },
+            "collision_neutral_rafters": {
+              "fixtures": [
+                "p1_soft_risk_island_v1"
+              ],
+              "half_width_m": 0.3,
+              "x_m": [
+                -10.0,
+                -8.0,
+                -6.0,
+                -4.0,
+                -2.0
+              ],
+              "z_m": [
+                2.85,
+                3.35
+              ]
+            },
+            "fixture": "",
+            "fixture_algorithm_version": "p1_deterministic_fork_geometry_v13",
+            "fixture_canopy_ball_center_z_m": 3.25,
+            "fixture_canopy_ball_radius_m": 0.42,
+            "fixture_canopy_base_z_m": 2.85,
+            "fixture_canopy_clip_radius_m": 1.1,
+            "fixture_lane_boundary_offset_m": 0.75,
+            "fixture_lane_density_area_m2": 32.0,
+            "fixture_lane_x_span_m": 16.0,
+            "fixture_lane_x_start_m": -7.8,
+            "fixture_risky_trunk_height_m": 2.85,
+            "fixture_short_trunk_height_m": 0.55,
+            "fixture_soft_island_center_y_m": -2.0,
+            "fixture_soft_island_density_area_m2": 24.0,
+            "fixture_soft_island_x_m": [
+              -6.0,
+              2.0
+            ],
+            "forest_seed": 11,
+            "formal_arm_roles": {
+              "canonical_metrics_only_reference": {
+                "mirror": "lower",
+                "primary": "upper"
+              },
+              "continuous_overhead_gnss_mask": {
+                "half_width_y_m": 1.25,
+                "lidar_exclusion_contract": {
+                  "flight_z_m": 1.5,
+                  "sensing_horizon_m": 10.0,
+                  "vertical_half_fov_deg": 30.0
+                },
+                "mirror": "lower",
+                "primary": "upper",
+                "x_m": [
+                  -11.5,
+                  2.5
+                ],
+                "z_m": [
+                  7.3,
+                  7.55
+                ]
+              },
+              "dense_lidar_trunks": {
+                "mirror": "upper",
+                "primary": "lower"
+              },
+              "gnss_occluding_risky_canopies": {
+                "mirror": "lower",
+                "primary": "upper"
+              },
+              "null": "symmetric",
+              "soft_island": "y=-2.0_m"
+            },
+            "goal_m": [
+              12.0,
+              0.0,
+              1.5
+            ],
+            "lanes": {
+              "center_abs_y_m": 2.0,
+              "half_width_m": 0.75,
+              "risky_canopy_probability": 0.85,
+              "risky_tree_density_per_m2": 0.75,
+              "safe_canopy_probability": 0.05,
+              "safe_tree_density_per_m2": 0.25
+            },
+            "lidar_observability_landmarks": {
+              "center_abs_y_m": 4.5,
+              "half_width_m": 0.25,
+              "kind": "symmetric_survey_pylons",
+              "x_m": [
+                -12.0,
+                -10.0,
+                -8.0,
+                -6.0,
+                -4.0,
+                -2.0,
+                0.0
+              ],
+              "z_m": [
+                0.0,
+                3.0
+              ]
+            },
+            "map_resolution_m": 0.1,
+            "mirror_y": false,
+            "start_m": [
+              -12.0,
+              0.0,
+              1.5
+            ],
+            "terminal_wall_enabled": true,
+            "trunk_radius_m": 0.1
+          },
+          "gnss": {
+            "doppler_noise_std_mps": 0.03,
+            "enabled_constellations": "GPS,BDS,GAL,GLO",
+            "ephemeris_source": "rinex",
+            "map_occlusion": false,
+            "multipath": false,
+            "nlos": false,
+            "pseudorange_noise_std_m": 1.0,
+            "random_seed": 20260429,
+            "scenario_file": "/home/dev/ws_iap/src/iap/results/icra27/icra031/install/share/iap/config/gnss_sim/demo7_open_sky.yaml",
+            "scenario_file_sha256": "93a6855b8486973760e3bf425e0e5c72c1d1b4b3e398fe03c51302eff5208437",
+            "skymask": false
+          },
+          "p0_prediction": {
+            "horizons_s": [
+              0.0,
+              0.5,
+              1.0,
+              1.5,
+              2.0,
+              2.5
+            ]
+          },
+          "p1": {
+            "aggregation_mode": "fixed_200_smooth_cvar",
+            "lambda_integrity": 0.0,
+            "normalization_budget_fraction": 0.3,
+            "smooth_cvar_alpha": 0.9,
+            "smooth_max_temperature": 0.01
+          },
+          "planner_dynamics": {
+            "bspline_limit_velocity_mps": 2.0,
+            "collision_fanout_clearance_m": 0.0,
+            "collision_fanout_mirror_y": false,
+            "collision_fanout_preserve_homotopies": false,
+            "local_update_range_x_m": 5.5,
+            "manager_max_velocity_mps": 2.0,
+            "optimizer_max_velocity_mps": 2.0,
+            "planning_horizon_m": 7.5,
+            "replan_period_s": 1.0
+          },
+          "risk_sources": [
+            "gnss_map_occlusion",
+            "lidar_observability"
+          ],
+          "sensor_startup": {
+            "gnss_epoch_frame_binding": "nearest_single_epoch",
+            "lidar_start_delay_s": 0.0,
+            "odometry_initialization_mode": "LOOSE",
+            "odometry_initialization_window_s": 1.0,
+            "required_strict_margin_s": -1.0,
+            "so3_feedback_imu_semantics": "world_linear_acceleration"
+          }
+        },
+        "scenario_fingerprint": "sha256:369c43e58e41788958fcbcb13c616969103d6288100e87c2fef22257b9a910be",
+        "start_rviz": false,
+        "terminal_wall_feature_seed": 11022,
+        "timebase": {
+          "bag_receive": {
+            "domain": "system_receive",
+            "field": "stamp"
+          },
+          "p0_health_payload": {
+            "domain": "sim_message",
+            "field": "health_callback_stamp_s"
+          },
+          "planning_timeline": {
+            "domain": "sim_message",
+            "field": "stamp_s"
+          }
+        },
+        "validation_duration_s": 15.0
+      },
+      "runtime_manifest_count": 1,
+      "scenario": "gnss_open_sky",
+      "schema_version": "gate0_run_manifest_v1",
+      "started_utc": "2026-08-23T13:16:11Z"
+    }
+  ],
+  "schema_version": "gate0_effective_config_v1"
+}
