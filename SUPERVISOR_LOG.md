@@ -1,5 +1,68 @@
 # ICRA Supervisor Log
 
+## 2026-08-23 — ICRA-027 review and ICRA-028 static repair authorization
+
+### Review identity and synchronization
+
+- Fixed review range: `b4c7d732d287dbcb16df41b59c58a327276a96e9...83aae4d5e935e1e64edfb45c0352da003536c6bf`.
+- Reviewed commits: `01c9b5c` and final DEV_LOG-only return `83aae4d`; both carry applicable
+  `IAP-RQ-311`, `IAP-RQ-320` and `IAP-RQ-322` identifiers.
+- After fetch, `HEAD` and `origin/dev/icra` matched at divergence `0 0`; the protected PDF remained
+  the sole untracked file. The changed product/test/docs/evidence paths are within the ICRA-027
+  allowlist, no Supervisor-owned or external-repository file changed, and no live flow ran.
+
+### Standards axis
+
+- Verdict: `REQUEST_CHANGES`; two findings, worst severity High.
+- High: after the immutable linkage assertion stopped phase execution, a Builder-side reviewer ran
+  one out-of-script `git diff --cached --check`. It changed no file and was truthfully disclosed, but
+  violated the explicit run-only-the-script fail-stop boundary.
+- Low judgment smell: `stamp_demo11_publication` implements identical behavior in array and variadic
+  overloads. Production uses only the variadic overload while tests use the array overload. This is
+  duplicated code/speculative generality and creates test/production divergence.
+- No RQ, ownership, repository-boundary, task-allowlist, documentation-sync or forbidden-live-flow
+  violation was found. Historical trailing whitespace is retained as tooling evidence rather than
+  separately reranked under the Standards baseline.
+
+### Spec axis
+
+- Verdict: `REQUEST_CHANGES / BLOCKED`; three findings, worst severity High.
+- High execution blocker: the pre-recorded linkage assertion expected two dynamic `libiap.so`
+  entries but observed one. `test_run_log_manager` correctly resolves the ICRA-027 install; the
+  Demo11 executable has no dynamic entry because `--as-needed` eliminates its unused edge. Stopping
+  was correct, but artifact hashes, final diff/allowlist, protected/leak/tree/process and post-script
+  checks never ran. The independently observed trailing whitespace confirms the required final diff
+  check could not have passed.
+- Medium: the seven-cloud identity test calls the separate array overload, not the variadic function
+  used by `Demo11CorridorMapPublisher::publish_map()`.
+- Low: zero and malformed inputs are tested only before the first accepted stamp, not for retention
+  of an existing accepted snapshot. Regression retention is covered.
+- No scope creep or implemented-but-wrong clock/log behavior was found. The core repair remains the
+  accepted baseline for the next narrow task.
+
+### Independent Supervisor verification
+
+- Retained ICRA-027 artifacts pass launch 14/14, runner 24/24 and selected root 5/5. Runner GPU,
+  dependency and path-status messages are mocked fixtures; Supervisor did not query hardware or run
+  ROS/main flow.
+- `ldd` confirms exactly one dynamic IAP consumer and resolves it to
+  `results/icra27/icra027/install/lib/libiap.so`; there is no missing, build-tree or stale-task entry.
+- PDF and ICRA-011/014/020/021/026 protected hashes remain exact. ICRA-027 retains `build_iap` and
+  `install` at approximately 3.0 GiB; all ten ICRA-026 build/install trees also remain present.
+
+### Required next action and artifact lifecycle
+
+- Overall disposition: `ICRA027_REVIEW_REQUEST_CHANGES`. Gate-0B remains `NOT_QUALIFIED`; no
+  replacement smoke is authorized.
+- Unique task: `ICRA-028 / GATE_0B`, defined in `NEXT_TASK.md`. Remove the unused array overload,
+  test the exact production variadic fanout, add post-acceptance invalid-retention cases, and complete
+  a correct two-phase repository-local verification. No publisher/launch/runner science change and
+  no live flow are allowed.
+- Per operator policy, nothing is deleted: ICRA-027 Review did not pass. ICRA-026/027 build/install
+  remain available for read-only diagnosis, and ICRA-028 must retain its own build/install through
+  development and Supervisor review. Cleanup is deferred until a repair Review PASS and pushed
+  code/documentation/handoff.
+
 ## 2026-08-23 — ICRA-026 review and ICRA-027 clock/log repair authorization
 
 ### Review identity and synchronization
