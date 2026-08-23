@@ -1,5 +1,22 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-23 ICRA-036 deterministic P4 collision-scan RED fixture
+
+| Req ID | Requirement/evidence seam | Test and review evidence | Status |
+|---|---|---|---|
+| IAP-RQ-423 | Freeze deterministic scan inputs and the exact four-status contract without production behavior | Test-local fixture fixes 15 finite samples at integer `x=0..14`, a 0.25 m occupancy grid and cases for no collision, one closed, late exit, open ended, four invalid forms, multiple closed and closed then open. Expected closed endpoints are fixed and proven free with an occupied interior; status vocabulary is exactly `NO_COLLISION`, `CLOSED_SEGMENTS`, `OPEN_ENDED_COLLISION`, `INVALID_INPUT` | **FROZEN / test-only** |
+| IAP-RQ-423 | Exercise only the narrowest truthful legacy surface and expose missing behavior as assertion-level RED | The observer calls `BsplineOptimizer::initControlPoints()` and translates only valid empty/nonempty results to no-collision/closed. It does not implement a reference scan, infer open/invalid states or synthesize endpoints. The compiled 11-case target passes four integrity/current-behavior tests and intentionally fails seven named assertions: late exit, open ended, empty, non-finite, structural invalid, unavailable occupancy and closed then open | **INTENTIONAL RED / `P4_G0A_RED_READY_FOR_REVIEW`** |
+| IAP-RQ-423 | Preserve the existing functional baseline and exact dependency boundary | Fresh ICRA-036 IAP and bspline configure/build/install pass. Existing bspline integrity passes 39/39, retained path-searching P4 passes 4/4 and occupancy epoch passes 6/6. Ament/direct consumers resolve ICRA-036 IAP/bspline plus intended read-only ICRA-026 plan-env/path-searching only; no workspace-default, deleted ICRA-035, build-tree or missing product library is used | **GREEN BASELINE / linkage verified** |
+| IAP-RQ-423 | Keep production and live scope untouched | Optimizer header/source hashes remain `6c52f424…52656` and `288d4cfb…45d3`; the protected PDF remains unstaged and unchanged. No production API/status/scan/guide change, GPU, ROS, runner/analyzer, smoke, benchmark, P4/P5 flow, cleanup or Gate promotion occurred | **BOUNDARY PASS / Supervisor review pending** |
+
+Exact fixture data, attempt disclosure, final failure names/reasons, hashes,
+commands, linkage and static-boundary notes are retained below
+`results/icra27/icra036/`. The package-wide linter attempt separately exposed
+pre-existing CMake whitespace, historical formatting divergence and the
+existing xmllint timeout; the two new C++ files pass their focused format
+check. These static observations are not counted as functional baseline
+failures and no forbidden historical or production file was reformatted.
+
 ## 2026-08-23 ICRA-035 fixed 60-second P0 Gate-0B benchmark
 
 | Req ID | Requirement/evidence seam | Qualification evidence | Status |

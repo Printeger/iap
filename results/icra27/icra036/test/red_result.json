@@ -1,0 +1,72 @@
+{
+  "schema_version": "icra036_p4_g0a_red_v1",
+  "checked_utc": "2026-08-23T18:12:14Z",
+  "target": "test_p4_collision_scan_contract",
+  "compile_exit_code": 0,
+  "ctest_exit_code": 8,
+  "gtest_return_code": 1,
+  "registered_test_count": 11,
+  "passing_test_count": 4,
+  "failing_test_count": 7,
+  "passing_tests": [
+    "P4CollisionScanFixtureIntegrity.FrozenSamplesStatusesAndEndpoints",
+    "P4CollisionScanLegacyGreen.NoCollisionIsExplicitAndHasNoSegments",
+    "P4CollisionScanLegacyGreen.ClosedSegmentHasFreeEndpoints",
+    "P4CollisionScanLegacyGreen.MultipleClosedSegmentsAreOrderedAndNonOverlapping"
+  ],
+  "failing_tests": [
+    {
+      "name": "P4CollisionScanMissingContract.EntryBeforeTwoThirdsContinuesToLateFreeExit",
+      "expected_status": "CLOSED_SEGMENTS",
+      "observed_status": "NO_COLLISION",
+      "expected_segments": [[7, 11]],
+      "observed_segment_count": 0,
+      "reason": "legacy scan stops at the old two-thirds boundary before the free exit"
+    },
+    {
+      "name": "P4CollisionScanMissingContract.OpenEndedCollisionIsNotCollapsedToNoCollision",
+      "expected_status": "OPEN_ENDED_COLLISION",
+      "observed_status": "NO_COLLISION",
+      "expected_segments": [],
+      "observed_segment_count": 0,
+      "reason": "legacy empty result cannot distinguish open-ended collision from no collision"
+    },
+    {
+      "name": "P4CollisionScanMissingContract.EmptySeedIsInvalidInput",
+      "expected_status": "INVALID_INPUT",
+      "observed_status": null,
+      "reason": "legacy API exposes no safe explicit invalid-input result"
+    },
+    {
+      "name": "P4CollisionScanMissingContract.NonFiniteSeedIsInvalidInput",
+      "expected_status": "INVALID_INPUT",
+      "observed_status": null,
+      "reason": "legacy API exposes no safe explicit invalid-input result"
+    },
+    {
+      "name": "P4CollisionScanMissingContract.StructurallyInvalidSeedIsInvalidInput",
+      "expected_status": "INVALID_INPUT",
+      "observed_status": null,
+      "reason": "legacy API exposes no safe explicit invalid-input result"
+    },
+    {
+      "name": "P4CollisionScanMissingContract.UnavailableOccupancyIsInvalidInput",
+      "expected_status": "INVALID_INPUT",
+      "observed_status": null,
+      "reason": "legacy API exposes no safe explicit invalid-input result"
+    },
+    {
+      "name": "P4CollisionScanMissingContract.ClosedThenOpenEndedDiscardsPreviouslyClosedSegments",
+      "expected_status": "OPEN_ENDED_COLLISION",
+      "observed_status": "CLOSED_SEGMENTS",
+      "expected_segments": [],
+      "observed_segment_count": 1,
+      "reason": "legacy result exposes a previously closed partial segment and loses the later open-ended entry"
+    }
+  ],
+  "fixture_sha256": "49a676a5ff51538ab961c814409f6c2dfb7ba4679a861d4e8e94cc7d5679c788",
+  "test_source_sha256": "1a867eb4dcae59f9b075c0d94690316904bb43221d0d8e6d3ad49b3ff0ca00b0",
+  "test_binary_sha256": "2c1329993586b25fee603d3761fba8c133960059c2f0478b50c294079c925845",
+  "gtest_xml_sha256": "533e8258e0d5da33215755ae214e4e294a5fc14d2d1784a3cecbd8097843f7d2",
+  "deterministic_red_ready": true
+}

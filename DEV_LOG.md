@@ -4563,3 +4563,135 @@ and the protected untracked PDF remain unchanged. No smoke, tuning, campaign,
 P1–P5 execution, cleanup, Gate promotion, empirical-calibration claim or full
 IAP-RQ-322 claim occurred. This commit changes `DEV_LOG.md` only and returns
 control to SUPERVISOR review without claiming Supervisor Review PASS.
+
+## 2026-08-23T17:50:57Z — ICRA-036 START
+
+IAP-RQ-423. Synchronized `dev/icra` at reviewed dispatch HEAD
+`71ee608b3a4ec82f0ca70a22d2da3a71a3b9bc6d`: initial status contained only
+the protected untracked PDF, fetch passed and divergence was `0 0`, so no pull
+ran. The PDF remains preservation-only at SHA-256
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+ICRA-035 and all historical evidence are immutable; deleted ICRA-035
+build/install paths will not be recreated or used.
+
+Exact allowlist: `src/iap/planner/bspline_opt/CMakeLists.txt` only for one new
+test target; new deterministic test/fixture/helper files below
+`src/iap/planner/bspline_opt/test/`; new task-local build/install/log/tmp/test/
+review/preflight evidence below `results/icra27/icra036/`; `DEV_LOG.md`;
+`docs/CHANGES.md`; and `docs/TRACEABILITY.md`. Production header/source,
+plan-env/path-searching/runtime behavior, launch, runner, analyzer, capture,
+config, Supervisor-owned files, historical evidence and the PDF are forbidden.
+Initial production hashes are optimizer header
+`6c52f424248fafa7ace27bdd9a7500fb7933311826b447873ff0420023652656` and
+optimizer source
+`288d4cfb3a71306b87e994aead0df0621bcdab05fe4a161bbe8dedbfb4ad45d3`;
+they must remain byte-identical.
+
+The frozen fixture uses 15 ordered finite control-point samples at
+`(x, 0, 0)` for integer `x=0..14`, a fixed task-local occupancy grid and no
+randomness, clock, ROS message, GPU, live map, P0 query or external file. The
+case table is:
+
+| Case | Occupied sample indices | Expected status | Expected free endpoint indices |
+|---|---|---|---|
+| no collision | none | `NO_COLLISION` | none |
+| one closed | 4, 5 | `CLOSED_SEGMENTS` | `(3, 6)` |
+| entry before old two-thirds / exit after it | 8, 9, 10 | `CLOSED_SEGMENTS` | `(7, 11)` |
+| open ended | 7..14 | `OPEN_ENDED_COLLISION` | none |
+| empty / non-finite / structurally invalid / unavailable truth | n/a | `INVALID_INPUT` | none |
+| multiple closed | 3, 4 and 7 | `CLOSED_SEGMENTS` | `(2, 5)`, `(6, 8)` |
+| closed then open ended | 3, 4 and 7..14 | `OPEN_ENDED_COLLISION` | none consumable |
+
+Every closed endpoint must be a free fixture sample and contain at least one
+strictly interior occupied sample; multiple endpoints must remain ordered and
+non-overlapping. The exact status vocabulary is `NO_COLLISION`,
+`CLOSED_SEGMENTS`, `OPEN_ENDED_COLLISION`, `INVALID_INPUT`.
+
+Current source truth exposes only `initControlPoints()` segment pairs, scans the
+initial seed only through its old two-thirds boundary and returns an empty
+vector both when no obstacle is found and when an entry has no observed exit.
+It has no explicit open-ended or invalid status. The test-local observer may
+map a valid legacy nonempty vector to `CLOSED_SEGMENTS` and valid empty vector
+to `NO_COLLISION`, but may not invent open/invalid status, free endpoints or a
+reference scan. The intentional RED names will cover the late-exit closed case,
+open-ended case, four invalid-input forms and closed-then-open case; fixture
+integrity, no-collision, early closed/free-endpoint and multiple-closed cases
+must remain green.
+
+Fresh paths are `results/icra27/icra036/{build_iap,install,log,build_bspline,
+install_bspline,tmp,test,review,preflight}`. Current IAP and bspline artifacts
+will be built there using read-only retained ICRA-026 plan-env/path-searching
+dependencies. Existing bspline, relevant path-searching P4 and occupancy-epoch
+tests must stay green; the new target must compile/run and fail only at named
+contract assertions. Static RED reruns are permitted and every attempt will be
+disclosed.
+
+Explicit stop line: after deterministic RED, green baseline, linkage,
+production-hash, diff/compile/allowlist checks, documentation, review and the
+required pushes, report only `P4_G0A_RED_READY_FOR_REVIEW` and return to
+SUPERVISOR. No production collision/status/API change, guide planning/risk/
+fallback/threshold/lineage/P5 work, GPU, ROS, launch, runner, analyzer CLI,
+smoke, benchmark, campaign, cleanup, Gate promotion or next-task selection is
+authorized.
+
+## 2026-08-23T18:09:50Z — ICRA-036 COMPLETE / BUILDER HANDOFF PREP
+
+IAP-RQ-423. Added only the new deterministic fixture
+`p4_collision_scan_fixture.hpp`, focused contract test
+`test_p4_collision_scan_contract.cpp` and its single CMake target. The fixture
+freezes 15 samples at integer `(x, 0, 0)`, `x=0..14`, a test-local 0.25 m
+occupancy grid and these outcomes: all free -> `NO_COLLISION`; occupied 4,5 ->
+`CLOSED_SEGMENTS (3,6)`; occupied 8,9,10 -> `CLOSED_SEGMENTS (7,11)`; occupied
+7..14 -> `OPEN_ENDED_COLLISION`; empty/non-finite/structural/unavailable ->
+`INVALID_INPUT`; occupied 3,4 and 7 -> `CLOSED_SEGMENTS (2,5),(6,8)`; occupied
+3,4 and 7..14 -> overall `OPEN_ENDED_COLLISION` with no consumable segments.
+Fixture integrity proves every closed endpoint is free, has a strictly interior
+occupied sample, and multiple segments are ordered and non-overlapping.
+
+The observer calls only the current `BsplineOptimizer::initControlPoints()`.
+It maps truthful valid empty/nonempty legacy results to `NO_COLLISION` or
+`CLOSED_SEGMENTS`; it does not implement a scan, infer open/invalid states or
+synthesize endpoints. The final 11-case target deterministically passes four
+tests (fixture integrity, no collision, one closed and multiple closed) and
+intentionally fails exactly seven missing-contract assertions:
+`EntryBeforeTwoThirdsContinuesToLateFreeExit` observes `NO_COLLISION` instead
+of `CLOSED_SEGMENTS (7,11)`;
+`OpenEndedCollisionIsNotCollapsedToNoCollision` observes `NO_COLLISION`;
+`EmptySeedIsInvalidInput`, `NonFiniteSeedIsInvalidInput`,
+`StructurallyInvalidSeedIsInvalidInput` and
+`UnavailableOccupancyIsInvalidInput` expose no explicit result; and
+`ClosedThenOpenEndedDiscardsPreviouslyClosedSegments` observes one consumable
+`CLOSED_SEGMENTS` result instead of overall open-ended/no segments.
+
+Fresh ICRA-036 IAP configure/build/install passed. The first bspline configure
+failed before compilation because `iap_DIR` named the generated ament CMake
+subdirectory; this is fully retained. Correcting it to the installed custom
+package directory made configure, target compile/link, full build and install
+pass. RED attempt 1 was 3-pass/8-fail because the initial multiple-obstacle
+fixture placed its first entry in the unscannable prefix; only its occupied
+indices/endpoints were corrected to 3,4 and 7 / `(2,5),(6,8)`. Attempts 2 and
+3 reproduce the exact intended 4-pass/7-fail split. The two new files pass
+focused `ament_uncrustify`. The existing bspline target passes 39/39, retained
+path-searching P4 passes 4/4 and occupancy epoch passes 6/6. A separate
+package-wide linter attempt disclosed pre-existing CMake trailing whitespace,
+broad historical source/test formatting divergence and the existing 60-second
+xmllint timeout; `cppcheck` and the functional bspline test passed. No
+historical or forbidden production formatting was changed.
+
+Ament/direct linkage resolves only task-local ICRA-036 IAP/bspline and intended
+read-only ICRA-026 plan-env/path-searching artifacts. There is no
+workspace-default, deleted ICRA-035, build-tree or missing product-library
+resolution. Optimizer header/source remain byte-identical at
+`6c52f424248fafa7ace27bdd9a7500fb7933311826b447873ff0420023652656` and
+`288d4cfb3a71306b87e994aead0df0621bcdab05fe4a161bbe8dedbfb4ad45d3`.
+The PDF remains unstaged and unchanged at
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+Compact exact evidence is below `results/icra27/icra036/`; build/install trees
+are retained for Supervisor review.
+
+Result: `P4_G0A_RED_READY_FOR_REVIEW`. This is intentionally RED test evidence,
+not production PASS or Gate promotion. No production collision/status/API or
+guide/risk/fallback/threshold/lineage/P5 implementation, GPU, ROS, live flow,
+runner/analyzer, smoke, benchmark, campaign, cleanup or next-task selection
+occurred. Final review, commits and pushes remain before the DEV_LOG-only
+handoff to SUPERVISOR.

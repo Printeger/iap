@@ -80,6 +80,16 @@ if(BUILD_TESTING)
     bspline_opt
     iap::iap
   )
+
+  ament_add_gtest(test_p4_collision_scan_contract
+    test/test_p4_collision_scan_contract.cpp
+  )
+  ament_target_dependencies(test_p4_collision_scan_contract
+    rclcpp Eigen3 plan_env path_searching
+  )
+  target_link_libraries(test_p4_collision_scan_contract
+    bspline_opt
+  )
 endif()
 
 
