@@ -6,36 +6,37 @@ branch: dev/icra
 active_role: DEEPSEEK
 status: TASK_READY
 gate: GATE_0B
-task_id: ICRA-026
-review_base: dc5fd2362d03930057508c2081e0e92cfeeaab32
-reviewed_head: 67aa7ed2b78168c67f6700eb81dd8b59e04ba835
+task_id: ICRA-027
+review_base: d5cd12b3f20ea86e9284465e0783e5a2a18ba4d1
+reviewed_head: d5cd12b3f20ea86e9284465e0783e5a2a18ba4d1
 conference_route: P0_P4_P5
 route_status: PREQUALIFICATION
 historical_gate0a_verdict: NO_GO_P2
-p0_gate0b_status: DEPENDENCY_GUARDED_REPLACEMENT_SMOKE_PENDING
+p0_gate0b_status: OCCUPANCY_CLOCK_AND_LOG_REPAIR_PENDING
 p0_gate0b_worker_count: 4
 p4_status: NOT_QUALIFIED
 p5_status: IMPLEMENTED_BUT_UNQUALIFIED
-supervisor_verdict: ICRA025_REVIEW_PASS
-review_disposition: ICRA026_REBUILD_AND_REPLACEMENT_SMOKE_AUTHORIZED
+supervisor_verdict: ICRA026_REVIEW_REQUEST_CHANGES
+review_disposition: ICRA027_CLOCK_LOG_AND_PROVENANCE_REPAIR_AUTHORIZED
 handoff_status: TASK_READY
 next_task: NEXT_TASK.md
-updated_utc: 2026-08-22T18:06:00Z
+updated_utc: 2026-08-23T04:07:47Z
 ```
 
 The conditional conference route remains `P0 -> P4 -> P5`. P0 and Gate-0B are not qualified,
 P4 remains `NOT_QUALIFIED`, and P5 remains implemented but unqualified. Gate 0A remains the
 historical `NO_GO_P2`, so P2 stays disabled for the ICRA route.
 
-ICRA-025 passes Supervisor review on Standards and Spec with zero findings. Final callback
-representatives are now selected per positive generation before success classification, including
-success-to-failure and failure-to-success order. The runner records and validates the exact ament
-dependency closure, task-local IAP/EGO identity and distinct pre-capture failure. Static real-prefix
-resolution passes for all nine packages, including isolated `so3_control`. Gate-0B remains not
-qualified because no repaired live smoke has run.
+ICRA-026 truthfully returns `BLOCKED`. Its build, linkage, regression, GPU/dependency preflights,
+one-shot lifecycle and valid integrity input pass, but every final P0 callback is generation zero
+with `occupancy_stale`. The frozen run exposes a mixed scientific clock: the scenario map publisher
+stamps its cloud with node wall time, while odometry/depth/integrity use simulator message time; the
+independent cloud callback can therefore overwrite the otherwise-correct depth occupancy epoch with
+a future wall-time stamp. The same run also created an IAP log tree outside its task root, and its
+manual verification record omitted several exact executed command wrappers.
 
-`DEEPSEEK` may begin only ICRA-026 after synchronizing `dev/icra`. It shall rebuild the current tree
-below ICRA-026, verify tests/linkage and the literal environment, then run exactly one mandatory-GPU-
-and-dependency-guarded 20-second P0 smoke plus one analyzer invocation. No retry, tuning, 60-second
-benchmark, qualification, P4/P5 work or Gate promotion is authorized. ICRA-026 build/install remains
-through its development and Supervisor review.
+`DEEPSEEK` may begin only ICRA-027 after synchronizing `dev/icra`. It shall repair and test the
+simulation map timestamp authority, task-local effective IAP logging configuration and immutable
+pre-execution command record. This is a code/static-verification task only: no GPU preflight, ROS,
+smoke, analyzer over live evidence, benchmark, qualification, P4/P5 work or Gate promotion is
+authorized. Because ICRA-026 Review did not pass, all ICRA-026 build/install trees remain retained.

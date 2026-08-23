@@ -1,5 +1,72 @@
 # ICRA Supervisor Log
 
+## 2026-08-23 — ICRA-026 review and ICRA-027 clock/log repair authorization
+
+### Review identity and synchronization
+
+- Fixed review range: `3a412f5b6a77961b54b93b1f2d4daaf1ddf0ac0f...d5cd12b3f20ea86e9284465e0783e5a2a18ba4d1`.
+- Reviewed commits: `e336501` and `d5cd12b`; both bind `IAP-RQ-320` and `IAP-RQ-322`.
+- `HEAD` and `origin/dev/icra` matched at divergence `0 0`. The protected PDF remained the sole
+  untracked file. The 27 changed paths are bounded ICRA-026 evidence and Builder-owned documentation;
+  no product/test, Supervisor-owned, historical/PDF or external-repository file changed.
+- `git diff --check` passed. Independent retained-artifact reruns passed analyzer 36/36, runner
+  21/21, plan-env occupancy epoch 6/6 and P0 runtime 76/76. No live flow was run during review.
+
+### Standards axis
+
+- Verdict: `REQUEST_CHANGES`; two findings, worst severity High.
+- High: the smoke created ignored `log/20260823T034015Z_103` (approximately 1.5 MiB) outside the
+  exact ICRA-026 output root. Its `run_info.json` binds it to the reviewed smoke. Builder correctly
+  preserved and reported the output after discovery, but the original write violates the task
+  allowlist and must be repaired before another live flow.
+- Medium: exact command provenance is incomplete. The original `ldd` aggregation/redirection
+  wrapper, faulty assertion text and executable static ament-audit command were not retained.
+  Outputs and the later truthful disclosure remain useful, but history must not be reconstructed.
+- All other Standards checks pass: allowed bounded diff, RQ-bearing commits, synchronized
+  CHANGES/TRACEABILITY/DEV_LOG, Builder-only verdict wording, protected evidence and clean diff.
+
+### Spec axis and smoke verdict
+
+- Verdict: `REQUEST_CHANGES`; three findings, worst severity High.
+- High: smoke acceptance was not achieved. The sole runner passed GPU and all nine launch
+  dependencies, capture readiness and required-process runtime/controlled shutdown. The sole
+  analyzer correctly exited 1 as `P0_INPUT_AVAILABILITY_FAIL`: 166/166 integrity reports are valid,
+  but all 19 final P0 representatives are `occupancy_stale`, generation zero and zero-query.
+- High: the task-local output contract was violated by the same leaked IAP run-log directory.
+- Medium: the exact build/test/linkage/environment command contract is only partially reproducible.
+- All other Spec requirements pass: current source rebuilt and linked task-locally; all required
+  suites pass; frozen CPU/worker-four/20-second configuration is exact; runner/analyzer each ran
+  once; no retry, tuning, benchmark, P4/P5 or Gate promotion occurred; process audit is clean.
+- Overall disposition: `ICRA026_REVIEW_REQUEST_CHANGES`. Gate-0B remains `NOT_QUALIFIED`; this is an
+  input-availability failure, not a P0 latency result and not a GPU failure.
+
+### Causal diagnosis
+
+- Raw evidence separates message and wall clocks by approximately 130,390,815 seconds. Odometry,
+  depth, integrity, GNSS origin and refresh use simulator message time, while the Demo11 scenario
+  map publisher stamps its clouds with node wall time.
+- The frozen launch routes `/map_generator/global_cloud` to GridMap's independent cloud callback
+  and P0's LiDAR callback. GridMap correctly preserves each input header as its source authority;
+  the wall-stamped independent cloud can therefore overwrite the correctly stamped depth occupancy
+  epoch. P0 correctly rejects the resulting future epoch as `occupancy_stale`.
+- The log leak is also deterministic: runtime materialization patches `glim_ros/dump_path` but leaves
+  both the selected root `config.json` logging block and referenced `config_logging.json` pointing
+  at the repository `log/`; `RunLogManager` reads the root logging block.
+
+### Required next action and artifact lifecycle
+
+- Unique task: `ICRA-027 / GATE_0B`, defined in `NEXT_TASK.md`.
+- Repair the Demo11 cloud stamp authority to use the latest valid simulator truth-odometry message
+  stamp, with no publication before authority and no consumer-side rebase. Repair runtime config
+  materialization and future preflight so actual IAP log/timing roots are descendants of the task
+  runtime tree. Persist the verification script before any command is executed.
+- ICRA-027 is build/unit/static verification only. No GPU preflight, ROS, smoke, live analyzer,
+  benchmark, qualification, P4/P5 execution or Gate promotion is authorized.
+- Per operator policy, all ICRA-026 build/install trees remain retained because Review did not pass.
+  The leaked log is also retained unchanged as boundary evidence. ICRA-027 build/install must remain
+  through its own development and Supervisor review and is deletion-eligible only after Review PASS
+  plus pushed code/documentation/handoff.
+
 ## 2026-08-22 — ICRA-025 review and ICRA-026 replacement-smoke authorization
 
 ### Review identity and synchronization
