@@ -3882,3 +3882,32 @@ arguments through the smoke/benchmark/write path. A future design could bundle
 them, but post-live product refactoring is outside ICRA-031 and prohibited by
 the stop line. Staged whitespace, allowlist, Supervisor-owned exclusions and
 protected-PDF checks pass.
+
+## 2026-08-23T13:33:07Z — ICRA-031 BUILDER TASK RETURN
+
+The bounded ICRA-031 code, tests, retained static/live evidence, verification
+summary and documentation are committed as
+`3d4bff707564ee29dc32a75a5c5f7aff8998710d` and pushed to
+`origin/dev/icra`. Builder Spec review returned PASS with no findings.
+Standards review's one documentation-status finding was corrected and its
+focused re-review returned PASS; the non-blocking Data Clump judgment is
+retained in the preceding review entry. These Builder reviews are not a
+Supervisor Review PASS or Gate promotion.
+
+The repair binds exact `0.01 m/sqrt(s)` and
+`legacy_iap_rq320_baseline_v1` only for qualification, with pre-GPU exact-value
+rejection and requested/effective evidence. It remains a provisional original
+IAP-RQ-320 baseline, not final empirical calibration. Generic behavior remains
+invalid/fail-closed and no C++ science/default changed. Static verification,
+GPU, dependencies, capture, required-process lifecycle and task-local logging
+pass. The sole runner exited 0; the sole analyzer exited 1 with
+`P0_EVIDENCE_CONTRACT_FAIL`, zero successful generations and no accepted
+76,800-query result despite 166/166 valid integrity reports. Gate-0B therefore
+remains `NOT_QUALIFIED`.
+
+No live retry, benchmark, qualification campaign, P4/P5 execution, cleanup,
+Gate promotion or next-task selection occurred. External `log/` remained
+byte-identical, no task process remains, and the protected PDF remains
+untracked at its preserved hash without modification, staging, deletion or
+regeneration. **DEEPSEEK returns ICRA-031 BLOCKED and hands the exact evidence
+to SUPERVISOR for review.**
