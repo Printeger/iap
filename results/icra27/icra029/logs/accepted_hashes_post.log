@@ -1,0 +1,5 @@
+include/iap/sim/demo11_publication_stamp_authority.hpp: OK
+test/test_demo11_publication_stamp_authority.cpp: OK
+results/icra27/icra028/install/lib/libiap.so: OK
+results/icra27/icra028/build_iap/test_demo11_publication_stamp_authority: OK
+results/icra27/icra028/build_iap/test_run_log_manager: OK

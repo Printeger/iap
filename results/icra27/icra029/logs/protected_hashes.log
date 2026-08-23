@@ -1,0 +1,9 @@
+docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf: OK
+results/icra27/icra011/p0_phase2_spatial_dedup_profile.json: OK
+results/icra27/icra014/canonical_rolling_spatial_diagnostic.json: OK
+results/icra27/icra020/p0_rolling_worker_profile.json: OK
+results/icra27/icra021/runs/smoke/risk_grid_health.jsonl: OK
+results/icra27/icra021/runs/smoke/integrity_report.jsonl: OK
+results/icra27/icra026/verification_summary.txt: OK
+results/icra27/icra027/verification_commands.sh: OK
+results/icra27/icra027/verification_summary.txt: OK

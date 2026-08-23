@@ -1,0 +1,19 @@
+Internal ctest changing into directory: /home/dev/ws_iap/src/iap/results/icra27/icra028/build_iap
+Test project /home/dev/ws_iap/src/iap/results/icra27/icra028/build_iap
+    Start  4: test_integrity_snapshot
+1/5 Test  #4: test_integrity_snapshot ...................   Passed    0.05 sec
+    Start  7: test_local_occupancy
+2/5 Test  #7: test_local_occupancy ......................   Passed    0.05 sec
+    Start 12: test_risk_grid_map
+3/5 Test #12: test_risk_grid_map ........................   Passed    0.17 sec
+    Start 17: test_run_log_manager
+4/5 Test #17: test_run_log_manager ......................   Passed    0.05 sec
+    Start 19: test_demo11_publication_stamp_authority
+5/5 Test #19: test_demo11_publication_stamp_authority ...   Passed    0.04 sec
+
+100% tests passed, 0 tests failed out of 5
+
+Label Time Summary:
+gtest    =   0.35 sec*proc (5 tests)
+
+Total Test time (real) =   0.36 sec

@@ -1,0 +1,17 @@
+results/icra27/icra029/logs/accepted_hashes_post.log
+results/icra27/icra029/logs/accepted_hashes_pre.log
+results/icra27/icra029/logs/historical_evidence_aggregates.log
+results/icra27/icra029/logs/icra026_leak_identity.log
+results/icra27/icra029/logs/icra028_evidence_aggregate.log
+results/icra27/icra029/logs/ldd_demo11.log
+results/icra27/icra029/logs/ldd_run_log_manager.log
+results/icra27/icra029/logs/phase1_script_post_hash.log
+results/icra27/icra029/logs/phase1_script_pre_hash.log
+results/icra27/icra029/logs/phase1_script_syntax.log
+results/icra27/icra029/logs/protected_hashes.log
+results/icra27/icra029/logs/retained_trees.log
+results/icra27/icra029/logs/selected_root_regressions.log
+results/icra27/icra029/logs/semantic_linkage_assertion.log
+results/icra27/icra029/logs/task_process_audit.log
+results/icra27/icra029/logs/test_gate0_runner.log
+results/icra27/icra029/logs/test_test_planner_launch.log

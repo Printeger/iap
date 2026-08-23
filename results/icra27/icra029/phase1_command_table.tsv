@@ -1,0 +1,20 @@
+order	label	contract
+01	phase1_script_pre_hash	Verify the immutable phase-1 script against its pre-execution SHA-256.
+02	phase1_script_syntax	Parse the immutable phase-1 script with bash -n.
+03	accepted_hashes_pre	Verify accepted source/test and three retained ICRA-028 artifacts before tests.
+04	icra028_evidence_aggregate	Verify 26 committed ICRA-028 evidence files and their exact aggregate.
+05	test_test_planner_launch	Run the 14-test static launch suite.
+06	test_gate0_runner	Run the 24-test static runner suite with mocked hardware/process fixtures.
+07	selected_root_regressions	Run the five retained ICRA-028 root regressions.
+08	ldd_demo11	Capture the retained Demo11 publisher dynamic linkage.
+09	ldd_run_log_manager	Capture the retained run-log-manager test dynamic linkage.
+10	semantic_linkage_assertion	Require exact manager linkage and allow only zero-or-exact Demo11 IAP linkage.
+11	accepted_hashes_post	Recheck accepted source/test and retained artifacts after tests.
+12	protected_hashes	Verify the frozen PDF and ICRA-011/014/020/021/026/027 hashes.
+13	historical_evidence_aggregates	Verify committed ICRA-024/026/027 aggregates and unchanged worktree content.
+14	icra026_leak_identity	Verify the exact retained leaked-log aggregate, count and bytes.
+15	retained_trees	Verify all ICRA-026/027/028 build/install trees remain present.
+16	task_process_audit	Require zero non-verifier processes owned by the ICRA-029 task root.
+17	phase1_script_post_hash	Recheck the immutable phase-1 script after every external assertion.
+18	opaque_log_inventory	Require the exact finite readable raw-log inventory and no unexpected task files.
+19	authored_whitespace	Check only the finite Builder-authored inventory with explicit grep statuses.

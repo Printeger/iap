@@ -3540,3 +3540,71 @@ live analyzer, benchmark, qualification/campaign, bag/RViz, disabled profile,
 tuning, P4/P5 work, Gate promotion, external cleanup or next-task selection
 ran. **ICRA-028 returns BLOCKED; Gate-0B remains NOT_QUALIFIED pending
 Supervisor review.** DEEPSEEK makes no Supervisor verdict or authorization.
+
+## 2026-08-23T11:47:29Z — ICRA-029 START
+
+Synchronized `dev/icra` at
+`c21665518dcb61a273d9e0a357753e52c8889a08`; `HEAD...origin/dev/icra` is
+`0 0`. The protected untracked PDF, historical evidence, ignored ICRA-026
+leak, accepted ICRA-028 source/test, and all retained ICRA-026/027/028
+build/install trees are preservation-only. The accepted header/test and three
+retained ICRA-028 artifact identities will be asserted only by the immutable
+phase-1 verifier, using the exact hashes frozen in `NEXT_TASK.md`; no
+pre-script test, linkage or hash assertion is permitted.
+
+The exact allowlist is new bounded scripts, command/TSV/log/summary evidence
+below `results/icra27/icra029/` plus Builder-owned `DEV_LOG.md`,
+`docs/CHANGES.md` and `docs/TRACEABILITY.md`. No product source, header, test,
+CMake, package, publisher, launch, runner, analyzer, capture, configuration,
+ICRA-028-or-older evidence, retained build/install tree, Supervisor-owned file
+or other repository may be edited or staged.
+
+Explicit stop line: materialize the finite Builder-authored and opaque-log
+inventories, literal command table, and one immutable phase-1 script before
+the first test/linkage/hash assertion. Run it exactly once against retained
+ICRA-028 artifacts. Raw third-party stdout is opaque and preserved; only the
+finite Builder-authored inventory is whitespace-gated, with match/no-match/
+execution-error statuses distinguished explicitly and no self-output operand.
+Any phase-1 failure or contradictory retained output stops without repair,
+rerun, replacement, phase 2 or Builder review. Only a semantic phase-1 PASS
+permits bounded documentation/summary updates and one immutable phase-2 run;
+phase-2 failure has the same stop rule. No configure/build/install/relink,
+ICRA-029 build tree, GPU/CUDA preflight, ROS daemon/graph/launch, simulator,
+capture, smoke, live analyzer, benchmark, qualification/campaign, bag/RViz,
+disabled profile, tuning, P4/P5 work, cleanup, Gate promotion or next-task
+selection is permitted.
+
+## 2026-08-23T11:51:44Z — ICRA-029 PHASE-1 BLOCKED / TASK RETURN
+
+The immutable verifier SHA-256 is
+`6a440503da5904bf429fa9f2003bdca8e56b424bfdd2b220ce8b13f7c8dacba9`.
+It ran exactly once against retained ICRA-028 artifacts and stopped with
+top-level exit 1 at `opaque_log_inventory`. Script pre-hash/syntax, accepted
+source/test/artifact pre-hashes, the exact 26-file ICRA-028 evidence aggregate,
+launch 14/14, runner 24/24, selected root 5/5, both direct `ldd` calls,
+semantic linkage, accepted post-hashes, protected hashes, historical
+aggregates, exact ICRA-026 leak identity, retained-tree presence, zero
+task-owned processes and post-script hash all reported exit 0 before the
+stop. Semantic linkage retained the required manager `1/1` exact ICRA-028
+install resolution and allowed Demo11 `0/0`.
+
+The finite inventory comparison found one unexpected readable task-local file:
+`results/icra27/icra029/tmp/iap_run_log_manager_test_3326404/config/config.json`.
+It was left under the explicit ICRA-029 `TMPDIR` by the authorized static
+run-log-manager regression. The verifier correctly printed the complete
+expected and actual inventories, recorded `opaque_log_inventory` exit 1 and
+wrote `phase1_exit=1`. The unexpected file remains unchanged and ignored as
+raw failure evidence; it was not deleted, moved, normalized, staged or added
+to the immutable inventory after observation.
+
+Per the first-failure rule, the phase-1 script, inventories, command table,
+TSV, logs and retained artifact trees were not repaired, replaced or rerun.
+The authored-whitespace assertion did not execute. Phase 2 and bounded summary
+evidence were not materialized, and `docs/CHANGES.md` /
+`docs/TRACEABILITY.md` were not changed because ICRA-029 permits them only
+after phase-1 PASS. No Builder review agents or further verification commands
+ran after the failure. No configure/build/install/relink, ICRA-029 build tree,
+GPU/CUDA preflight, ROS flow, simulator, capture, smoke, live analyzer,
+benchmark, qualification/campaign, P4/P5 work, cleanup, Gate promotion or
+next-task selection ran. **ICRA-029 returns BLOCKED on the unexpected opaque
+inventory file; Gate-0B remains NOT_QUALIFIED pending Supervisor review.**

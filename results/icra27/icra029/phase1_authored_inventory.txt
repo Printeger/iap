@@ -1,0 +1,7 @@
+results/icra27/icra029/phase1_authored_inventory.txt
+results/icra27/icra029/phase1_command_table.tsv
+results/icra27/icra029/phase1_opaque_log_inventory.txt
+results/icra27/icra029/phase1_pass.txt
+results/icra27/icra029/phase1_results.tsv
+results/icra27/icra029/phase1_verification.sh
+results/icra27/icra029/phase1_verification.sha256
