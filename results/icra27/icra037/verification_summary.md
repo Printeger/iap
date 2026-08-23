@@ -134,7 +134,43 @@ python3 -m json.tool results/icra27/icra037/test/green_result.json
 python3 -m json.tool results/icra27/icra037/preflight/linkage.json
 ```
 
-The initial plan-manager configure omitted the explicit
-`IAP_MSGS_TYPESUPPORT_CPP` line above. It exited 0 but was rejected because it
-selected workspace-default IAP typesupport and emitted a runtime-path cycle;
-no planner result was accepted before the corrected configure/build/install.
+Exact nonzero TDD/review attempts were:
+
+```bash
+# Before the production result/status seam existed: exit 2; 0 tests linked/run.
+cmake --build results/icra27/icra037/build_bspline \
+  --target test_p4_collision_scan_contract --parallel 2
+
+# After adding the review overlap regression, before its production fix:
+# exit 1; 1 run, 0 passed, 1 failed; observed pair count 2, expected 1.
+results/icra27/icra037/build_bspline/test_p4_collision_scan_contract \
+  --gtest_filter='P4CollisionScanLegacyGreen.MultipleRunsInsideOneControlIntervalAreMergedWithoutOverlap'
+```
+
+The initial plan-manager configure was the exact configure command above with
+the `IAP_MSGS_TYPESUPPORT_CPP` argument omitted. It exited 0 but was rejected
+because it selected workspace-default IAP typesupport and emitted a
+runtime-path cycle; no planner result was accepted before the corrected
+configure/build/install.
+
+The final linkage commands and results were:
+
+```bash
+# exit 0; all five cache values matched preflight/linkage.json.
+rg -n '^(iap_DIR|bspline_opt_DIR|path_searching_DIR|plan_env_DIR|IAP_MSGS_TYPESUPPORT_CPP):' \
+  results/icra27/icra037/build_plan_manage/CMakeCache.txt
+
+# no match (rg exit 1 is the expected zero-match result).
+rg -n '/home/dev/ws_iap/install/iap' \
+  results/icra27/icra037/build_plan_manage/CMakeFiles/*/link.txt \
+  results/icra27/icra037/build_plan_manage/CMakeCache.txt
+
+# pipeline exit 0; installed node has no non-toolchain RUNPATH/RPATH.
+readelf -d results/icra27/icra037/install_plan_manage/lib/ego_planner/ego_planner_node | \
+  rg 'NEEDED|RUNPATH|RPATH'
+
+# pipeline exit 0; zero `not found`; IAP resolved ICRA-037 and
+# plan-env/path-searching resolved the retained ICRA-026 prefixes.
+ldd results/icra27/icra037/install_plan_manage/lib/ego_planner/ego_planner_node | \
+  rg 'libiap|libplan_env|libpath_searching|not found'
+```
