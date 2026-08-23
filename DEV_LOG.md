@@ -3721,3 +3721,26 @@ and the truthful `BLOCKED / Gate-0B NOT_QUALIFIED` conclusion. The Standards
 review confirmed fail-closed reporting, protected-PDF preservation, no
 Supervisor/product/test/config/runner/analyzer/build/retained-artifact edit,
 and a clean staged whitespace check.
+
+## 2026-08-23T12:36:27Z — ICRA-030 BUILDER TASK RETURN
+
+The bounded ICRA-030 precheck, one-shot live evidence, analyzer result,
+post-run audit, verification summary and documentation are committed as
+`c22d78377033c479b97fb68670e6aabe0f9edd97` and pushed to
+`origin/dev/icra`. Both Builder review axes returned PASS with no findings;
+this is not a Supervisor Review PASS or Gate promotion.
+
+The task reused retained ICRA-028 IAP and ICRA-026 planner artifacts without
+configure/build/install/relink. Prechecks, GPU, launch dependencies, capture,
+required-process lifecycle and task-local logging all passed. The external
+repository `log/` tree remained byte-identical and no task process remains.
+The sole runner exited 0; the sole analyzer exited 1 because all 27 health
+representatives report `invalid_covariance_growth_parameter`, generation 0
+and zero queries despite 208/208 valid integrity reports. There is no valid
+76,800-query P0 generation.
+
+No runner or analyzer retry, post-live correction, 60-second benchmark,
+qualification/campaign, P4/P5 execution, cleanup, Gate promotion or next-task
+selection occurred. The protected PDF remains untracked and was not modified,
+staged, deleted or regenerated. **DEEPSEEK returns ICRA-030 BLOCKED with
+Gate-0B NOT_QUALIFIED and hands the exact evidence to SUPERVISOR for review.**
