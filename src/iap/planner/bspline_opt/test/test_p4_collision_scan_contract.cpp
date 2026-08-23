@@ -11,8 +11,8 @@
 #include <cmath>
 #include <cstddef>
 #include <memory>
-#include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -85,9 +85,9 @@ struct GridMapTestAccess
 namespace
 {
 
-struct LegacyObservation
+struct ProductionObservation
 {
-  CollisionScanStatus status = CollisionScanStatus::kNoCollision;
+  std::string_view status;
   std::vector<Segment> segments;
 };
 
@@ -114,8 +114,8 @@ Eigen::MatrixXd seedMatrix(const CollisionCase & fixture)
   return seed;
 }
 
-std::unique_ptr<ego_planner::BsplineOptimizer> makeLegacyOptimizer(
-  const GridMap::Ptr & map)
+std::unique_ptr<ego_planner::BsplineOptimizer> makeOptimizer(
+  const GridMap::Ptr & map, const bool configure_a_star = true)
 {
   ensureRclcpp();
   static int node_id = 0;
@@ -136,34 +136,28 @@ std::unique_ptr<ego_planner::BsplineOptimizer> makeLegacyOptimizer(
   auto optimizer = std::make_unique<ego_planner::BsplineOptimizer>();
   optimizer->setParam(node);
   optimizer->setEnvironment(map);
-  optimizer->a_star_ = std::make_shared<AStar>();
-  optimizer->a_star_->initGridMap(map, Eigen::Vector3i(80, 40, 20));
+  if (configure_a_star) {
+    optimizer->a_star_ = std::make_shared<AStar>();
+    optimizer->a_star_->initGridMap(map, Eigen::Vector3i(80, 40, 20));
+  }
   return optimizer;
 }
 
-std::optional<LegacyObservation> observeLegacy(const CollisionCase & fixture)
+ProductionObservation observeProduction(const CollisionCase & fixture)
 {
   Eigen::MatrixXd seed = seedMatrix(fixture);
-  if (!fixture.occupancy_truth_available || seed.rows() != 3 ||
-    seed.cols() == 0 || !seed.allFinite())
-  {
-    // The legacy API has no invalid-input result and is unsafe to call for
-    // these shapes.  Returning no observation preserves that fact; it does
-    // not synthesize the missing INVALID_INPUT status.
-    return std::nullopt;
+  GridMap::Ptr map;
+  if (fixture.occupancy_truth_available) {
+    map = std::make_shared<GridMap>();
+    GridMapTestAccess::configure(map.get(), fixture);
   }
+  auto optimizer = makeOptimizer(map, false);
+  const auto result = optimizer->scanCollisionSegments(seed);
 
-  auto map = std::make_shared<GridMap>();
-  GridMapTestAccess::configure(map.get(), fixture);
-  auto optimizer = makeLegacyOptimizer(map);
-  const auto legacy_segments = optimizer->initControlPoints(seed, true);
-
-  LegacyObservation observation;
-  observation.status = legacy_segments.empty() ?
-    CollisionScanStatus::kNoCollision :
-    CollisionScanStatus::kClosedSegments;
-  observation.segments.reserve(legacy_segments.size());
-  for (const auto & segment : legacy_segments) {
+  ProductionObservation observation;
+  observation.status = ego_planner::collisionScanStatusName(result.status);
+  observation.segments.reserve(result.closed_segments.size());
+  for (const auto & segment : result.closed_segments) {
     observation.segments.push_back(Segment{segment.first, segment.second});
   }
   return observation;
@@ -171,31 +165,25 @@ std::optional<LegacyObservation> observeLegacy(const CollisionCase & fixture)
 
 void expectExpectedResult(const CollisionCase & fixture)
 {
-  const auto observation = observeLegacy(fixture);
-  ASSERT_TRUE(observation.has_value())
-      << fixture.name << " lacks explicit "
-      << p4_collision_fixture::statusName(fixture.expected_status)
-      << " result";
-  EXPECT_EQ(p4_collision_fixture::statusName(observation->status),
+  const auto observation = observeProduction(fixture);
+  EXPECT_EQ(observation.status,
             p4_collision_fixture::statusName(fixture.expected_status))
-      << fixture.name << " legacy status collapse";
-  ASSERT_EQ(observation->segments.size(), fixture.expected_segment_count)
+      << fixture.name << " production status";
+  ASSERT_EQ(observation.segments.size(), fixture.expected_segment_count)
       << fixture.name << " consumable segment count";
   for (std::size_t index = 0; index < fixture.expected_segment_count; ++index) {
-    EXPECT_EQ(observation->segments[index], fixture.expected_segments[index])
+    EXPECT_EQ(observation.segments[index], fixture.expected_segments[index])
         << fixture.name << " segment " << index;
   }
 }
 
 void expectInvalidResult(const CollisionCase & fixture)
 {
-  const auto observation = observeLegacy(fixture);
-  ASSERT_TRUE(observation.has_value())
-      << fixture.name << " lacks explicit INVALID_INPUT result";
-  EXPECT_EQ(p4_collision_fixture::statusName(observation->status),
+  const auto observation = observeProduction(fixture);
+  EXPECT_EQ(observation.status,
             p4_collision_fixture::statusName(CollisionScanStatus::kInvalidInput))
       << fixture.name << " must not fabricate a normal scan outcome";
-  EXPECT_TRUE(observation->segments.empty());
+  EXPECT_TRUE(observation.segments.empty());
 }
 
 }  // namespace
@@ -291,4 +279,64 @@ TEST(P4CollisionScanMissingContract, UnavailableOccupancyIsInvalidInput) {
 TEST(P4CollisionScanMissingContract,
      ClosedThenOpenEndedDiscardsPreviouslyClosedSegments) {
   expectExpectedResult(p4_collision_fixture::kClosedThenOpen);
+}
+
+TEST(P4CollisionScanFailClosedIntegration,
+     InitialOpenEndedAndInvalidStopBeforeAStar) {
+  auto open_map = std::make_shared<GridMap>();
+  GridMapTestAccess::configure(
+      open_map.get(), p4_collision_fixture::kOpenEnded);
+  auto open_optimizer = makeOptimizer(open_map, false);
+  Eigen::MatrixXd open_seed = seedMatrix(p4_collision_fixture::kOpenEnded);
+  const auto open_result = open_optimizer->initControlPoints(open_seed, true);
+  EXPECT_EQ(open_result.status,
+            ego_planner::CollisionScanStatus::OPEN_ENDED_COLLISION);
+  EXPECT_TRUE(open_result.closed_segments.empty());
+  EXPECT_TRUE(open_optimizer->getLastP4GuideViz().empty());
+
+  auto invalid_optimizer = makeOptimizer(nullptr, false);
+  Eigen::MatrixXd invalid_seed = seedMatrix(
+      p4_collision_fixture::kUnavailableOccupancy);
+  const auto invalid_result = invalid_optimizer->initControlPoints(
+      invalid_seed, true);
+  EXPECT_EQ(invalid_result.status,
+            ego_planner::CollisionScanStatus::INVALID_INPUT);
+  EXPECT_TRUE(invalid_result.closed_segments.empty());
+  EXPECT_TRUE(invalid_optimizer->getLastP4GuideViz().empty());
+}
+
+TEST(P4CollisionScanClosedIntegration,
+     InitialClosedExposesOnlyCompleteFreeEndpointSegments) {
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configure(map.get(), p4_collision_fixture::kOneClosed);
+  auto optimizer = makeOptimizer(map);
+  Eigen::MatrixXd seed = seedMatrix(p4_collision_fixture::kOneClosed);
+  const auto result = optimizer->initControlPoints(seed, true);
+  ASSERT_EQ(result.status, ego_planner::CollisionScanStatus::CLOSED_SEGMENTS);
+  ASSERT_EQ(result.closed_segments.size(), 1U);
+  EXPECT_EQ(result.closed_segments.front(), std::make_pair(3, 6));
+}
+
+TEST(P4CollisionScanFailClosedIntegration,
+     ReboundOpenEndedAndInvalidStopBeforeAStar) {
+  auto open_map = std::make_shared<GridMap>();
+  GridMapTestAccess::configure(
+      open_map.get(), p4_collision_fixture::kOpenEnded);
+  auto open_optimizer = makeOptimizer(open_map, false);
+  Eigen::MatrixXd open_seed = seedMatrix(p4_collision_fixture::kOpenEnded);
+  ASSERT_EQ(open_optimizer->initControlPoints(open_seed, true).status,
+            ego_planner::CollisionScanStatus::OPEN_ENDED_COLLISION);
+  EXPECT_FALSE(open_optimizer->checkCollisionAndReboundForTest());
+  EXPECT_EQ(open_optimizer->lastCollisionScanResult().status,
+            ego_planner::CollisionScanStatus::OPEN_ENDED_COLLISION);
+  EXPECT_TRUE(open_optimizer->getLastP4GuideViz().empty());
+
+  auto invalid_optimizer = makeOptimizer(nullptr, false);
+  Eigen::MatrixXd invalid_seed(3, 0);
+  ASSERT_EQ(invalid_optimizer->initControlPoints(invalid_seed, true).status,
+            ego_planner::CollisionScanStatus::INVALID_INPUT);
+  EXPECT_FALSE(invalid_optimizer->checkCollisionAndReboundForTest());
+  EXPECT_EQ(invalid_optimizer->lastCollisionScanResult().status,
+            ego_planner::CollisionScanStatus::INVALID_INPUT);
+  EXPECT_TRUE(invalid_optimizer->getLastP4GuideViz().empty());
 }

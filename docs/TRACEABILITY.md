@@ -1,5 +1,20 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-23 ICRA-037 shared P4 collision-scan GREEN contract
+
+| Req ID | Requirement/evidence seam | Implementation and focused evidence | Status |
+|---|---|---|---|
+| IAP-RQ-423 | Represent scan outcomes truthfully through one production source of truth | `CollisionScanResult` carries the exact four statuses and ordered closed endpoints. `scanCollisionSegments()` preserves the legacy entry window, follows an active run through the complete tail, requires free endpoints with occupied interior samples, preserves scan order and clears every partial segment on open-ended or invalid input | **IMPLEMENTED / frozen contract 11/11 GREEN** |
+| IAP-RQ-423 | Initial and rebound collision paths must share the scanner and fail closed before downstream guide work | `initControlPoints()` and `check_collision_and_rebound()` both consume the same result. Open-ended/invalid outcomes expose no segments; tests deliberately omit A* and prove both paths return without guide output. The planner-manager initial caller returns failure before candidate fanout/publication; only closed segments reach existing handling | **VERIFIED / focused integration 3/3** |
+| IAP-RQ-423 | Preserve the frozen fixture and existing non-frozen behavior | Fixture SHA-256 remains `49a676a5…c788`. Final collision target passes 14/14, existing P1 passes 39/39, retained path-searching P4 passes 4/4, occupancy epoch passes 6/6 and affected plan-manager CTest passes 9/9 | **GREEN / zero functional failures** |
+| IAP-RQ-423 | Use only current task and intended retained dependency artifacts | Fresh ICRA-037 IAP/bspline/plan-manager build and install pass. Corrected CMake and direct linkage resolve ICRA-037 IAP/bspline plus read-only ICRA-026 path-searching/plan-env, with zero workspace-default IAP or missing product libraries. The protected PDF remains unchanged and unstaged | **LINKAGE / BOUNDARY PASS** |
+
+Exact TDD attempts, seven former RED outcomes, test counts, hashes and the
+corrected linkage disclosure are retained below `results/icra27/icra037/`.
+Build/install trees remain for Supervisor review. No original/risk guide work,
+profile/scoring/selection/fallback, P5, GPU, ROS/live flow, smoke, benchmark,
+qualification, cleanup or Gate promotion occurred.
+
 ## 2026-08-23 ICRA-036 deterministic P4 collision-scan RED fixture
 
 | Req ID | Requirement/evidence seam | Test and review evidence | Status |

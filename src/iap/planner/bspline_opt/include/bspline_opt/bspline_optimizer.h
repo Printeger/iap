@@ -15,6 +15,8 @@
 #include <memory>
 #include <map>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace iap
 {
@@ -28,6 +30,22 @@ namespace iap
 // The format of points: N x 3 matrix, each row is a point
 namespace ego_planner
 {
+
+  enum class CollisionScanStatus
+  {
+    NO_COLLISION,
+    CLOSED_SEGMENTS,
+    OPEN_ENDED_COLLISION,
+    INVALID_INPUT
+  };
+
+  struct CollisionScanResult
+  {
+    CollisionScanStatus status = CollisionScanStatus::INVALID_INPUT;
+    std::vector<std::pair<int, int>> closed_segments;
+  };
+
+  const char *collisionScanStatusName(CollisionScanStatus status);
 
   class ControlPoints
   {
@@ -431,7 +449,16 @@ namespace ego_planner
         const ControlPoints &base,
         const std::shared_ptr<const iap::RiskGridSnapshot> &snapshot,
         double query_base_time_s, int remaining_capacity);
-    std::vector<std::pair<int, int>> initControlPoints(Eigen::MatrixXd &init_points, bool flag_first_init = true);
+    CollisionScanResult scanCollisionSegments(
+        const Eigen::MatrixXd &points) const;
+    CollisionScanResult initControlPoints(
+        Eigen::MatrixXd &init_points, bool flag_first_init = true);
+    const CollisionScanResult &lastCollisionScanResult() const {
+      return last_collision_scan_result_;
+    }
+    bool checkCollisionAndReboundForTest() {
+      return check_collision_and_rebound();
+    }
     bool BsplineOptimizeTrajRebound(Eigen::MatrixXd &optimal_points, double ts); // must be called after initControlPoints()
     bool BsplineOptimizeTrajRebound(Eigen::MatrixXd &optimal_points, double &final_cost, const ControlPoints &control_points, double ts);
     bool BsplineOptimizeTrajBasePrepass(
@@ -571,6 +598,7 @@ namespace ego_planner
     P1OptimizationTrace last_p1_optimization_trace_;
     P1BasePrepassTrace last_p1_base_prepass_trace_;
     P1FanoutDiagnostics last_p1_fanout_diagnostics_;
+    CollisionScanResult last_collision_scan_result_;
     double last_rebound_total_gradient_norm_{std::numeric_limits<double>::quiet_NaN()};
     bool suppress_rebound_collision_for_test_{false};
     bool p1_base_prepass_active_{false};

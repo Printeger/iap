@@ -1,0 +1,61 @@
+{
+  "task": "ICRA-037",
+  "requirement": "IAP-RQ-423",
+  "gate": "P4_G0A",
+  "result": "P4_G0A_COLLISION_SCAN_GREEN_READY_FOR_REVIEW",
+  "frozen_fixture_sha256": "49a676a5ff51538ab961c814409f6c2dfb7ba4679a861d4e8e94cc7d5679c788",
+  "focused_contract": {
+    "tests": 14,
+    "failures": 0,
+    "prior_red_now_green": [
+      {
+        "name": "EntryBeforeTwoThirdsContinuesToLateFreeExit",
+        "status": "CLOSED_SEGMENTS",
+        "segments": [[7, 11]]
+      },
+      {
+        "name": "OpenEndedCollisionIsNotCollapsedToNoCollision",
+        "status": "OPEN_ENDED_COLLISION",
+        "segments": []
+      },
+      {
+        "name": "EmptySeedIsInvalidInput",
+        "status": "INVALID_INPUT",
+        "segments": []
+      },
+      {
+        "name": "NonFiniteSeedIsInvalidInput",
+        "status": "INVALID_INPUT",
+        "segments": []
+      },
+      {
+        "name": "StructurallyInvalidSeedIsInvalidInput",
+        "status": "INVALID_INPUT",
+        "segments": []
+      },
+      {
+        "name": "UnavailableOccupancyIsInvalidInput",
+        "status": "INVALID_INPUT",
+        "segments": []
+      },
+      {
+        "name": "ClosedThenOpenEndedDiscardsPreviouslyClosedSegments",
+        "status": "OPEN_ENDED_COLLISION",
+        "segments": []
+      }
+    ],
+    "integration": {
+      "initial_open_invalid_stop_before_astar": true,
+      "rebound_open_invalid_stop_before_astar": true,
+      "closed_segment": [3, 6]
+    }
+  },
+  "regression": {
+    "bspline_targets": {"passed": 2, "failed": 0},
+    "p1_integrity_cases": {"passed": 39, "failed": 0},
+    "path_searching_p4_cases": {"passed": 4, "failed": 0},
+    "occupancy_epoch_cases": {"passed": 6, "failed": 0},
+    "plan_manage_targets": {"passed": 9, "failed": 0}
+  },
+  "live_execution": false
+}

@@ -1095,7 +1095,20 @@ namespace ego_planner
     {
       bspline_optimizer_->setP4RiskSnapshot(planning_snapshot, planning_query_base_time_s);
     }
-    segments = bspline_optimizer_->initControlPoints(ctrl_pts, true);
+    const auto collision_scan =
+        bspline_optimizer_->initControlPoints(ctrl_pts, true);
+    if (collision_scan.status ==
+            CollisionScanStatus::OPEN_ENDED_COLLISION ||
+        collision_scan.status == CollisionScanStatus::INVALID_INPUT)
+    {
+      bspline_optimizer_->clearP4RiskSnapshot();
+      RCLCPP_WARN(
+          rclcpp::get_logger("ego_planner"),
+          "collision scan failed closed with status %s",
+          collisionScanStatusName(collision_scan.status));
+      return false;
+    }
+    segments = collision_scan.closed_segments;
     if (safety_viz_)
     {
       safety_viz_->publishP4Guides(

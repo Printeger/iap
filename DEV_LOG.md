@@ -4722,3 +4722,108 @@ Gate promotion, authorization of another task or permission to delete retained
 artifacts. No production change, GPU/ROS/live execution, smoke, benchmark,
 campaign, P4/P5 flow, cleanup or PDF handling occurred. Control returns only
 to SUPERVISOR review.
+
+## 2026-08-23T18:42:29Z — ICRA-037 START
+
+IAP-RQ-423. Synchronized `dev/icra` at reviewed dispatch HEAD
+`da002d92d339cc55af95eea4bb19494e58b66d9c`: initial status contained only
+the protected untracked PDF, fetch passed and divergence was `0 0`, so no pull
+ran. The PDF remains preservation-only at SHA-256
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+All historical evidence is immutable and the deleted ICRA-036 build/install
+paths will not be recreated or used.
+
+Exact allowlist: optimizer header/source; bspline CMake only if a focused test
+registration is required; focused updated/new bspline tests except the frozen
+fixture data/expectations; only the smallest required planner-manager
+header/source/CMake/focused test for fail-closed propagation; new task-local
+evidence below `results/icra27/icra037/`; `DEV_LOG.md`; `docs/CHANGES.md`; and
+`docs/TRACEABILITY.md`. Supervisor-owned, requirement/scope/gate, historical
+evidence, launch/runner/analyzer/capture/config, external repositories and the
+protected PDF are forbidden.
+
+The frozen ICRA-036 fixture remains byte-identical at
+`49a676a5ff51538ab961c814409f6c2dfb7ba4679a861d4e8e94cc7d5679c788`:
+15 samples at integer `x=0..14`; no collision; one closed `(3,6)`; entry in the
+old trigger window with late exit `(7,11)`; open tail; empty/non-finite/
+structural/unavailable invalid inputs; multiple closed `(2,5),(6,8)`; and
+closed followed by open with no consumable segment. Expected vocabulary stays
+exactly `NO_COLLISION`, `CLOSED_SEGMENTS`, `OPEN_ENDED_COLLISION`,
+`INVALID_INPUT`.
+
+Proposed smallest seam is one production `CollisionScanResult` containing the
+exact status plus ordered closed endpoint pairs and one shared scan function.
+`initControlPoints()` will consume it before existing closed-segment direction
+construction, and `check_collision_and_rebound()` will consume the same scan
+before existing rebound handling. The planner-manager initial caller will
+propagate open/invalid as `false`; only closed status may pass segment pairs to
+existing fanout. Rebound and internal restart callers will likewise stop on
+open/invalid. Focused tests will call the truthful production result, retain
+all eleven frozen assertions, and use a deliberately absent A* dependency to
+prove open/invalid initial and rebound paths return before downstream A*/guide
+work.
+
+Initial production hashes are optimizer header
+`6c52f424248fafa7ace27bdd9a7500fb7933311826b447873ff0420023652656`,
+optimizer source
+`288d4cfb3a71306b87e994aead0df0621bcdab05fe4a161bbe8dedbfb4ad45d3`,
+bspline CMake
+`7ab22ff037959447d0e81f6421a8710a295d74ae0c37fa4bdd300786a89450d3`,
+planner-manager source
+`4f194797488542d59a27c2dc55a2721f09a3375d7b151a1312585b237932f236`
+and focused RED test
+`1a867eb4dcae59f9b075c0d94690316904bb43221d0d8e6d3ad49b3ff0ca00b0`.
+Fresh paths are `results/icra27/icra037/{build_iap,install,log,build_bspline,
+install_bspline,build_plan_manage,install_plan_manage,tmp,test,review,
+preflight}` and must be retained.
+
+Stop line: finish only the shared scan/status implementation, fail-closed
+initial/rebound integration, frozen GREEN plus authorized regression/linkage/
+allowlist evidence, documentation, review and required pushes; then report
+`P4_G0A_COLLISION_SCAN_GREEN_READY_FOR_REVIEW` to SUPERVISOR. No new original/
+risk guide generation, A* behavior, 200-point profile, scoring, selection,
+fallback, control-point injection, request/decision/lineage, P5, tuning, GPU,
+ROS/live map, launch, runner/analyzer, smoke, benchmark, campaign, cleanup,
+Gate promotion or next-task selection is authorized.
+
+## 2026-08-23T19:06:08Z — ICRA-037 IMPLEMENTATION COMPLETE / REVIEW PREP
+
+IAP-RQ-423. The smallest production seam is complete: one explicit
+`CollisionScanResult` and one shared scanner now serve both initial and rebound
+collision handling. The status vocabulary is exactly `NO_COLLISION`,
+`CLOSED_SEGMENTS`, `OPEN_ENDED_COLLISION`, `INVALID_INPUT`. Valid entry remains
+bounded by the legacy two-thirds trigger; an entered run continues through the
+complete seed tail. Open-ended and invalid outcomes discard all segments and
+return before existing A*/guide work. The planner-manager initial caller also
+returns failure before candidate fanout/publication for those outcomes.
+
+TDD began with one focused compile exit 2 on the deliberately absent result,
+status and access seam, then compiled GREEN. The frozen fixture remains exact
+at `49a676a5ff51538ab961c814409f6c2dfb7ba4679a861d4e8e94cc7d5679c788`.
+All seven former RED assertions are GREEN: late exit is `CLOSED_SEGMENTS`
+`(7,11)`; open tail and closed-then-open are `OPEN_ENDED_COLLISION` with no
+segments; empty, non-finite, structural and unavailable occupancy are
+`INVALID_INPUT` with no segments. Final focused coverage is 14/14, including
+initial/rebound open/invalid tests with absent A* and one valid closed `(3,6)`
+integration case. Existing P1 is 39/39; retained path-searching P4 is 4/4;
+occupancy epoch is 6/6; affected plan-manager CTest is 9/9.
+
+Fresh IAP, bspline and plan-manager configure/build/install complete under
+ICRA-037. The first plan-manager configure selected workspace-default IAP
+typesupport and emitted a runtime-path cycle; before accepting any planner
+test, it was reconfigured with the exact task-local IAP typesupport file,
+rebuilt and reinstalled. Final CMake/direct linkage resolves ICRA-037
+IAP/bspline and intended read-only ICRA-026 path-searching/plan-env only, with
+no workspace-default IAP or missing product library. Compact evidence is below
+`results/icra27/icra037/`; build/install trees are retained.
+
+No CMake change was required. Production changes are limited to the optimizer
+header/source and the smallest planner-manager source propagation; focused
+test observation now calls the production result directly while frozen fixture
+data/expectations remain byte-identical. No guide generation/selection,
+profile/risk/scoring/fallback/lineage, P5, GPU, ROS/live flow, smoke,
+benchmark, qualification, cleanup or Gate promotion occurred. The protected
+PDF remains unstaged and unchanged at
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+Static/allowlist review and the required two-axis review are next; this entry
+does not promote the Gate or authorize another task.

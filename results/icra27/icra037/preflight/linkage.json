@@ -1,0 +1,25 @@
+{
+  "task": "ICRA-037",
+  "requirement": "IAP-RQ-423",
+  "status": "PASS",
+  "cmake": {
+    "iap_DIR": "/home/dev/ws_iap/src/iap/results/icra27/icra037/install/share/iap",
+    "bspline_opt_DIR": "/home/dev/ws_iap/src/iap/results/icra27/icra037/install_bspline/share/bspline_opt/cmake",
+    "path_searching_DIR": "/home/dev/ws_iap/src/iap/results/icra27/icra026/install_path_searching/share/path_searching/cmake",
+    "plan_env_DIR": "/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/share/plan_env/cmake",
+    "iap_typesupport_cpp": "/home/dev/ws_iap/src/iap/results/icra27/icra037/install/lib/libiap__rosidl_typesupport_cpp.so"
+  },
+  "direct_resolution": {
+    "libiap.so": "/home/dev/ws_iap/src/iap/results/icra27/icra037/install/lib/libiap.so",
+    "libiap__rosidl_typesupport_cpp.so": "/home/dev/ws_iap/src/iap/results/icra27/icra037/install/lib/libiap__rosidl_typesupport_cpp.so",
+    "libpath_searching.so": "/home/dev/ws_iap/src/iap/results/icra27/icra026/install_path_searching/lib/libpath_searching.so",
+    "libplan_env.so": "/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/lib/libplan_env.so"
+  },
+  "workspace_default_iap_matches": 0,
+  "missing_product_libraries": 0,
+  "notes": [
+    "The first plan_manage configure selected workspace-default IAP typesupport and emitted a RUNPATH cycle warning.",
+    "Before any planner test, configure was corrected with the exact task-local IAP typesupport file; build, install, tests and final linkage audit were then rerun successfully.",
+    "The installed ego_planner_node has no non-toolchain RUNPATH and resolves the intended product libraries under the recorded exact LD_LIBRARY_PATH."
+  ]
+}

@@ -964,11 +964,128 @@ namespace ego_planner
     return supplemental;
   }
 
+  const char *collisionScanStatusName(const CollisionScanStatus status)
+  {
+    switch (status)
+    {
+      case CollisionScanStatus::NO_COLLISION:
+        return "NO_COLLISION";
+      case CollisionScanStatus::CLOSED_SEGMENTS:
+        return "CLOSED_SEGMENTS";
+      case CollisionScanStatus::OPEN_ENDED_COLLISION:
+        return "OPEN_ENDED_COLLISION";
+      case CollisionScanStatus::INVALID_INPUT:
+        return "INVALID_INPUT";
+    }
+    return "INVALID_INPUT";
+  }
+
+  CollisionScanResult BsplineOptimizer::scanCollisionSegments(
+      const Eigen::MatrixXd &points) const
+  {
+    CollisionScanResult result;
+    if (!grid_map_ || points.rows() != 3 || points.cols() <= 2 * order_ ||
+        !points.allFinite())
+      return result;
+
+    const double resolution = grid_map_->getResolution();
+    const double average_spacing =
+        (points.col(0) - points.col(points.cols() - 1)).norm() /
+        static_cast<double>(points.cols() - 1);
+    if (!std::isfinite(resolution) || resolution <= 0.0 ||
+        !std::isfinite(average_spacing) || average_spacing <= 0.0)
+      return result;
+
+    const double step_size = resolution / average_spacing / 1.5;
+    if (!std::isfinite(step_size) || step_size <= 0.0)
+      return result;
+
+    constexpr int kEnoughStableSamples = 2;
+    const int trigger_end = static_cast<int>(points.cols()) - order_ -
+        (static_cast<int>(points.cols()) - 2 * order_) / 3;
+    const int tail_end = static_cast<int>(points.cols()) - 1;
+    int stable_sample_count = kEnoughStableSamples + 1;
+    int free_start_index = -1;
+    int free_end_index = -1;
+    bool last_occupied = false;
+    bool active_entry = false;
+    bool possible_exit = false;
+
+    for (int index = order_; index <= tail_end; ++index)
+    {
+      const bool entry_allowed = index <= trigger_end;
+      for (double alpha = 1.0; alpha > 0.0; alpha -= step_size)
+      {
+        const Eigen::Vector3d sample =
+            alpha * points.col(index - 1) +
+            (1.0 - alpha) * points.col(index);
+        const int occupancy = grid_map_->getInflateOccupancy(sample);
+        if (occupancy < 0)
+          return CollisionScanResult{};
+        const bool occupied = occupancy != 0;
+
+        if (occupied && !last_occupied)
+        {
+          if (!active_entry && entry_allowed &&
+              (stable_sample_count > kEnoughStableSamples || index == order_))
+          {
+            free_start_index = index - 1;
+            active_entry = true;
+          }
+          stable_sample_count = 0;
+          possible_exit = false;
+        }
+        else if (!occupied && last_occupied)
+        {
+          if (active_entry)
+          {
+            free_end_index = index;
+            possible_exit = true;
+          }
+          stable_sample_count = 0;
+        }
+        else
+        {
+          ++stable_sample_count;
+        }
+
+        if (active_entry && possible_exit &&
+            (stable_sample_count > kEnoughStableSamples || index == tail_end))
+        {
+          const int start_occupancy = grid_map_->getInflateOccupancy(
+              points.col(free_start_index));
+          const int end_occupancy = grid_map_->getInflateOccupancy(
+              points.col(free_end_index));
+          if (start_occupancy != 0 || end_occupancy != 0)
+            return CollisionScanResult{};
+          result.closed_segments.emplace_back(
+              free_start_index, free_end_index);
+          active_entry = false;
+          possible_exit = false;
+        }
+
+        last_occupied = occupied;
+      }
+    }
+
+    if (active_entry)
+    {
+      result.status = CollisionScanStatus::OPEN_ENDED_COLLISION;
+      result.closed_segments.clear();
+      return result;
+    }
+    result.status = result.closed_segments.empty()
+        ? CollisionScanStatus::NO_COLLISION
+        : CollisionScanStatus::CLOSED_SEGMENTS;
+    return result;
+  }
+
   /* This function is very similar to check_collision_and_rebound().
    * It was written separately, just because I did it once and it has been running stably since March 2020.
    * But I will merge then someday.*/
   // 初始化控制点
-  std::vector<std::pair<int, int>> BsplineOptimizer::initControlPoints(Eigen::MatrixXd &init_points, bool flag_first_init /*= true*/)
+  CollisionScanResult BsplineOptimizer::initControlPoints(
+      Eigen::MatrixXd &init_points, bool flag_first_init /*= true*/)
   {
     last_p4_guides_.clear();
 
@@ -979,86 +1096,13 @@ namespace ego_planner
       cps_.points = init_points;
     }
 
-    /*** Segment the initial trajectory according to obstacles ***/
-    // 进入或离开障碍物稳定的时间间隔
-    constexpr int ENOUGH_INTERVAL = 2;
-    // 障碍物检测的步长
-    double step_size = grid_map_->getResolution() / ((init_points.col(0) - init_points.rightCols(1)).norm() / (init_points.cols() - 1)) / 1.5;
-    int in_id = -1, out_id = -1;
-    vector<std::pair<int, int>> segment_ids;
-    int same_occ_state_times = ENOUGH_INTERVAL + 1;
-    bool occ, last_occ = false;
-    // 标识片段的起点和终点是否找到
-    bool flag_got_start = false, flag_got_end = false, flag_got_end_maybe = false;
-    int i_end = (int)init_points.cols() - order_ - ((int)init_points.cols() - 2 * order_) / 3; // only check closed 2/3 points.
-    // 遍历所有点
-    for (int i = order_; i <= i_end; ++i)
-    {
-      // cout << " *" << i-1 << "*" ;
-      //  相邻两个点之间进行线性插值并检测障碍物
-      for (double a = 1.0; a > 0.0; a -= step_size)
-      {
-        // TODO:没搞懂这是干嘛的
-        occ = grid_map_->getInflateOccupancy(a * init_points.col(i - 1) + (1 - a) * init_points.col(i));
-        // cout << " " << occ;
-        //  cout << setprecision(5);
-        //  cout << (a * init_points.col(i-1) + (1-a) * init_points.col(i)).transpose() << " occ1=" << occ << endl;
-
-        // 进入障碍物
-        if (occ && !last_occ)
-        {
-          if (same_occ_state_times > ENOUGH_INTERVAL || i == order_)
-          {
-            in_id = i - 1;
-            flag_got_start = true;
-          }
-          same_occ_state_times = 0;
-          flag_got_end_maybe = false; // terminate in advance
-        }
-        // 离开障碍物
-        else if (!occ && last_occ)
-        {
-          out_id = i;
-          flag_got_end_maybe = true;
-          same_occ_state_times = 0;
-        }
-        // 如果状态没发生变化
-        else
-        {
-          ++same_occ_state_times;
-        }
-
-        // 如果已经离开障碍物，则结束
-        if (flag_got_end_maybe && (same_occ_state_times > ENOUGH_INTERVAL || (i == (int)init_points.cols() - order_)))
-        {
-          flag_got_end_maybe = false;
-          flag_got_end = true;
-        }
-
-        last_occ = occ;
-
-        // 重置标志位并存储信息
-        if (flag_got_start && flag_got_end)
-        {
-          flag_got_start = false;
-          flag_got_end = false;
-          segment_ids.push_back(std::pair<int, int>(in_id, out_id));
-        }
-      }
-    }
-    // cout << endl;
-
-    // for (size_t i = 0; i < segment_ids.size(); i++)
-    // {
-    //   cout << "segment_ids=" << segment_ids[i].first << " ~ " << segment_ids[i].second << endl;
-    // }
-
-    // return in advance
-    if (segment_ids.size() == 0)
-    {
-      vector<std::pair<int, int>> blank_ret;
-      return blank_ret;
-    }
+    last_collision_scan_result_ = scanCollisionSegments(init_points);
+    if (last_collision_scan_result_.status !=
+        CollisionScanStatus::CLOSED_SEGMENTS)
+      return last_collision_scan_result_;
+    vector<std::pair<int, int>> segment_ids =
+        last_collision_scan_result_.closed_segments;
+    bool occ = false;
 
     /*** a star search ***/
     // 在每个无障碍片段 segment_ids 的起点和终点之间寻找一条路径
@@ -1067,15 +1111,16 @@ namespace ego_planner
     {
       // cout << "in=" << in.transpose() << " out=" << out.transpose() << endl;
       Eigen::Vector3d in(init_points.col(segment_ids[i].first)), out(init_points.col(segment_ids[i].second));
-      if (a_star_->AstarSearch(/*(in-out).norm()/10+0.05*/ 0.1, in, out))
+      if (a_star_ &&
+          a_star_->AstarSearch(/*(in-out).norm()/10+0.05*/ 0.1, in, out))
       {
         a_star_pathes.push_back(a_star_->getPath());
       }
       else
       {
         RCLCPP_ERROR(rclcpp::get_logger("initControlPoints"), "a star error, force return!");
-        vector<std::pair<int, int>> blank_ret;
-        return blank_ret;
+        last_collision_scan_result_ = CollisionScanResult{};
+        return last_collision_scan_result_;
       }
     }
 
@@ -1323,7 +1368,11 @@ namespace ego_planner
       }
     }
 
-    return final_segment_ids;
+    last_collision_scan_result_.status = final_segment_ids.empty()
+        ? CollisionScanStatus::INVALID_INPUT
+        : CollisionScanStatus::CLOSED_SEGMENTS;
+    last_collision_scan_result_.closed_segments = std::move(final_segment_ids);
+    return last_collision_scan_result_;
   }
 
   // 急停情况下提前退出
@@ -1824,79 +1873,56 @@ namespace ego_planner
   // 检查是否有障碍物？
   bool BsplineOptimizer::check_collision_and_rebound(void)
   {
-
-    int end_idx = cps_.size - order_;
-
-    /*** Check and segment the initial trajectory according to obstacles ***/
-    int in_id, out_id;
-    vector<std::pair<int, int>> segment_ids;
-    bool flag_new_obs_valid = false;
-    int i_end = end_idx - (end_idx - order_) / 3;
-    for (int i = order_ - 1; i <= i_end; ++i)
+    last_p4_guides_.clear();
+    last_collision_scan_result_ = scanCollisionSegments(cps_.points);
+    if (last_collision_scan_result_.status ==
+            CollisionScanStatus::OPEN_ENDED_COLLISION ||
+        last_collision_scan_result_.status ==
+            CollisionScanStatus::INVALID_INPUT)
     {
+      force_stop_type_ = STOP_FOR_ERROR;
+      return false;
+    }
+    if (last_collision_scan_result_.status ==
+        CollisionScanStatus::NO_COLLISION)
+      return false;
 
-      bool occ = grid_map_->getInflateOccupancy(cps_.points.col(i));
-
-      /*** check if the new collision will be valid ***/
-      if (occ)
+    vector<std::pair<int, int>> segment_ids;
+    for (const auto &segment : last_collision_scan_result_.closed_segments)
+    {
+      bool new_collision = false;
+      for (int index = segment.first + 1;
+           index < segment.second && !new_collision; ++index)
       {
-        for (size_t k = 0; k < cps_.direction[i].size(); ++k)
+        bool occupied =
+            grid_map_->getInflateOccupancy(cps_.points.col(index)) > 0;
+        for (size_t direction_index = 0;
+             occupied && direction_index < cps_.direction[index].size();
+             ++direction_index)
         {
           cout.precision(2);
-          if ((cps_.points.col(i) - cps_.base_point[i][k]).dot(cps_.direction[i][k]) < 1 * grid_map_->getResolution()) // current point is outside all the collision_points.
-          {
-            occ = false; // Not really takes effect, just for better hunman understanding.
-            break;
-          }
+          if ((cps_.points.col(index) -
+               cps_.base_point[index][direction_index])
+                  .dot(cps_.direction[index][direction_index]) <
+              grid_map_->getResolution())
+            occupied = false;
         }
+        new_collision = occupied;
       }
-
-      if (occ)
-      {
-        flag_new_obs_valid = true;
-
-        int j;
-        for (j = i - 1; j >= 0; --j)
-        {
-          occ = grid_map_->getInflateOccupancy(cps_.points.col(j));
-          if (!occ)
-          {
-            in_id = j;
-            break;
-          }
-        }
-        if (j < 0) // fail to get the obs free point
-        {
-          RCLCPP_ERROR(rclcpp::get_logger("check_collision_and_rebound"), "ERROR! the drone is in obstacle. This should not happen.");
-          in_id = 0;
-        }
-
-        for (j = i + 1; j < cps_.size; ++j)
-        {
-          occ = grid_map_->getInflateOccupancy(cps_.points.col(j));
-
-          if (!occ)
-          {
-            out_id = j;
-            break;
-          }
-        }
-        if (j >= cps_.size) // fail to get the obs free point
-        {
-          RCLCPP_WARN(rclcpp::get_logger("check_collision_and_rebound"), 
-                      "WARN! terminal point of the current trajectory is in obstacle, skip this planning.");
-
-          force_stop_type_ = STOP_FOR_ERROR;
-          return false;
-        }
-
-        i = j + 1;
-
-        segment_ids.push_back(std::pair<int, int>(in_id, out_id));
-      }
+      if (new_collision)
+        segment_ids.push_back(segment);
     }
 
-    if (flag_new_obs_valid)
+    if (segment_ids.empty())
+    {
+      last_collision_scan_result_.status =
+          CollisionScanStatus::NO_COLLISION;
+      last_collision_scan_result_.closed_segments.clear();
+      return false;
+    }
+    last_collision_scan_result_.closed_segments = segment_ids;
+
+    if (!segment_ids.empty())
     {
       static uint64_t p4_astar_call_id = 0;
       vector<vector<Eigen::Vector3d>> a_star_pathes;
@@ -2474,7 +2500,11 @@ namespace ego_planner
         {
           success = false;
           restart_nums++;
-          initControlPoints(cps_.points, false);
+          const auto collision_scan = initControlPoints(cps_.points, false);
+          if (collision_scan.status ==
+                  CollisionScanStatus::OPEN_ENDED_COLLISION ||
+              collision_scan.status == CollisionScanStatus::INVALID_INPUT)
+            return false;
           new_lambda2_ *= 2; // 提高规避权重
 
           printf("\033[32miter(+1)=%d,time(ms)=%5.3f, swarm too close, keep optimizing\n\033[0m", iter_num_, time_ms);
@@ -2535,28 +2565,32 @@ namespace ego_planner
           check_pts(1, i) += offset_xy(1);
           check_pts(2, i) += offset_xy(2);
         }
-        flag_cls_xyp = initControlPoints(check_pts, false).size() > 0;
+        flag_cls_xyp = !initControlPoints(
+            check_pts, false).closed_segments.empty();
         for (Eigen::Index i = 0; i < cps_.points.cols(); i++)
         {
           check_pts(0, i) -= 2 * offset_xy(0);
           check_pts(1, i) -= 2 * offset_xy(1);
           check_pts(2, i) -= 2 * offset_xy(2);
         }
-        flag_cls_xyn = initControlPoints(check_pts, false).size() > 0;
+        flag_cls_xyn = !initControlPoints(
+            check_pts, false).closed_segments.empty();
         for (Eigen::Index i = 0; i < cps_.points.cols(); i++)
         {
           check_pts(0, i) += offset_xy(0) + offset_z(0);
           check_pts(1, i) += offset_xy(1) + offset_z(1);
           check_pts(2, i) += offset_xy(2) + offset_z(2);
         }
-        flag_cls_zp = initControlPoints(check_pts, false).size() > 0;
+        flag_cls_zp = !initControlPoints(
+            check_pts, false).closed_segments.empty();
         for (Eigen::Index i = 0; i < cps_.points.cols(); i++)
         {
           check_pts(0, i) -= 2 * offset_z(0);
           check_pts(1, i) -= 2 * offset_z(1);
           check_pts(2, i) -= 2 * offset_z(2);
         }
-        flag_cls_zn = initControlPoints(check_pts, false).size() > 0;
+        flag_cls_zn = !initControlPoints(
+            check_pts, false).closed_segments.empty();
         if ((flag_cls_xyp ^ flag_cls_xyn) || (flag_cls_zp ^ flag_cls_zn))
           flag_occ = true;
 #endif
@@ -2571,7 +2605,11 @@ namespace ego_planner
         else // restart
         {
           restart_nums++;
-          initControlPoints(cps_.points, false);
+          const auto collision_scan = initControlPoints(cps_.points, false);
+          if (collision_scan.status ==
+                  CollisionScanStatus::OPEN_ENDED_COLLISION ||
+              collision_scan.status == CollisionScanStatus::INVALID_INPUT)
+            return false;
           new_lambda2_ *= 2;
 
           printf("\033[32miter(+1)=%d,time(ms)=%5.3f, collided, keep optimizing\n\033[0m", iter_num_, time_ms);
