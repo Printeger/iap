@@ -3402,3 +3402,31 @@ protected/leak identity, retained-tree, process or post-script audit is claimed
 as PASS. No GPU/CUDA query, ROS flow, smoke, analyzer, benchmark,
 qualification, P4/P5 work or external cleanup ran. Control returns to
 Supervisor review without a Gate decision.
+
+## 2026-08-23T07:47:41Z — ICRA-027 BUILDER TASK RETURN
+
+The bounded implementation, tests, evidence and truthful BLOCKED review record
+are committed as `01c9b5c9d6a7c59520bd7b3436f4eaddfab75753` and pushed to
+`origin/dev/icra`. The immutable script ran once: self-hash/syntax,
+configure, full build, install, launch 14/14, runner 24/24, selected root 5/5
+and direct two-binary `ldd` completed successfully. Its next linkage assertion
+exited 1 at `libiap_total=1 libiap_exact=1` because it incorrectly expected two
+dynamic IAP entries; the script was not edited, resumed or rerun.
+
+The required review disclosed one Medium production-variadic-path coverage
+gap and one Low post-acceptance zero/malformed-retention coverage gap. It also
+disclosed that the Standards reviewer mistakenly ran one post-stop,
+out-of-script `git diff --cached --check`, which exited 1 on trailing
+whitespace in immutable/captured evidence and changed no file. Builder made no
+correction or retry. The immutable script's remaining hashes, final diff and
+allowlist, protected/leak identity, retained-tree, process and post-hash audits
+remain unexecuted and are not claimed as PASS.
+
+The repository-local ICRA-027 build/install and stop evidence remain retained.
+The ICRA-026 leak and protected PDF were not intentionally modified, staged,
+deleted, moved or regenerated; the PDF remains untracked. No GPU/CUDA query,
+ROS daemon/graph/launch, simulator, capture, smoke, analyzer over live
+evidence, benchmark, qualification/campaign, disabled profile, P4/P5 flow,
+Gate promotion or external cleanup ran. **ICRA-027 returns BLOCKED and Gate-0B
+remains NOT_QUALIFIED pending Supervisor review.** DEEPSEEK makes no Supervisor
+verdict or next-task decision.
