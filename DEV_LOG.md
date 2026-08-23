@@ -4829,3 +4829,43 @@ PDF remains unstaged and unchanged at
 `1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
 Static/allowlist review and the required two-axis review are next; this entry
 does not promote the Gate or authorize another task.
+
+## 2026-08-23T19:22:21Z — ICRA-037 FINAL HANDOFF
+
+IAP-RQ-423. Implementation, compact evidence, documentation and two-axis
+review commits `d9104b9`, `44f2b4a`, `8100654`, `100c4ba` and `9d8592e` are
+pushed to `origin/dev/icra`; divergence was `0 0` immediately before this
+DEV_LOG-only handoff.
+
+The final production contract has one shared scanner/result for initial and
+rebound handling, exact statuses `NO_COLLISION`, `CLOSED_SEGMENTS`,
+`OPEN_ENDED_COLLISION`, `INVALID_INPUT`, legacy-window entry with full-tail
+completion, ordered non-overlapping closed endpoints and open/invalid
+fail-closed propagation before existing A*/guide/candidate publication work.
+All frozen fixture bytes/expectations remain unchanged. The seven former RED
+assertions are GREEN, and the review-added same-control-interval regression
+first reproduced two overlapping endpoint pairs before the merge fix.
+
+Final deterministic results are collision 15/15, P1 39/39, retained
+path-searching P4 4/4, occupancy epoch 6/6 and affected plan-manager CTest 9/9,
+all with zero failures. Fresh task-local build/install artifacts are retained.
+Final ament/direct closure uses ICRA-037 IAP/bspline and intended read-only
+ICRA-026 path-searching/plan-env; workspace-default IAP and missing product
+library matches are zero. `git diff --check`, focused formatting, JSON,
+allowlist and zero-task-process audits pass. Frozen fixture SHA-256 remains
+`49a676a5ff51538ab961c814409f6c2dfb7ba4679a861d4e8e94cc7d5679c788`;
+the protected PDF remains unstaged at
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+
+Standards and Spec final reviews each report zero findings; their fixed point,
+initial findings, repairs and final verdicts are retained in
+`results/icra27/icra037/review/two_axis_review.md`. Exact nonzero attempts,
+build/test commands, exits/counts, linkage audit and limitations are in
+`verification_summary.md`.
+
+Builder result is `P4_G0A_COLLISION_SCAN_GREEN_READY_FOR_REVIEW`. This is not
+Gate promotion, authorization of another task, permission to delete retained
+artifacts or permission to begin original/risk guide, profile/scoring,
+selection/fallback, lineage or P5 work. No GPU, ROS/live flow, smoke,
+benchmark, qualification, campaign, cleanup or protected-PDF handling
+occurred. Control returns only to SUPERVISOR review.
