@@ -3066,3 +3066,175 @@ self-check has zero remaining Standards or Spec findings; this is not a final
 review or Supervisor verdict. **Gate-0B remains NOT_QUALIFIED.** DEEPSEEK
 issues no replacement-smoke authorization, next task or Gate decision and
 returns control to Supervisor review.
+
+## 2026-08-23T03:23:22Z — ICRA-026 START
+
+Synchronized `dev/icra` at
+`3a412f5b6a77961b54b93b1f2d4daaf1ddf0ac0f`; `HEAD...origin/dev/icra` is
+`0 0`. The protected untracked PDF and ICRA-011/014/020/021 evidence remain
+exact at SHA-256
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`,
+`778abd22158805c41150b4eeed9c37a3f660237a0bb0599e9a567e3533c7b32c`,
+`44f47b23137d17f4b0cbc81af6827156865bdecb36089bf53f770960a2fb963d`,
+`2f68e3123426b5a1117e86bb5abc7c69117a070bcf583ec759974fddeb71a0bd`,
+`59f88a7eb9cde2695aad20aef7e6f32c4f065e1caf0bf127907f2a814b40ee59`
+and `b82089044a2088d02b0e44c9a3a2eebd2e43168d559578046afe989352052aca`
+respectively. Committed ICRA-024 blocked-run evidence and ICRA-025
+verification have no worktree diff. The Supervisor-deleted ICRA-022/024
+build/install paths remain absent and will not be recreated or used.
+
+The exact allowlist is new ICRA-026 build/install/runtime/log/evidence only
+below `results/icra27/icra026/`, with only bounded review evidence staged;
+`DEV_LOG.md`, `docs/CHANGES.md`, and `docs/TRACEABILITY.md`. No source or test
+change is authorized. Supervisor-owned state/task/log/scope/plan/design/Gate
+documents, the protected PDF, all historical evidence and every other
+repository or external path are excluded.
+
+Explicit stop line: configure, build and install the current tree only below
+ICRA-026; pass the exact prescribed analyzer/runner/capture/validator and C++
+test matrix; prove task-local direct linkage, hashes and the literal ordered
+ament environment; then, and only then, run exactly one mandatory-GPU- and
+dependency-guarded 20-second P0 smoke plus exactly one formal analyzer
+invocation. Any build, test, linkage or static dependency failure stops before
+GPU/ROS. After the one runner and one analyzer invocation, pass or fail, stop
+without environment correction, retry, tuning, backend/parameter change,
+60-second benchmark, qualification/campaign, bag/RViz, disabled profile,
+P4/P5 execution, Gate promotion, historical rewrite, external cleanup or
+user-data mutation.
+
+## 2026-08-23T03:42:22Z — ICRA-026 VERIFICATION / ONE-SHOT BLOCKED
+
+Repository-local configure/build/install completed with exit 0 for current
+`iap`, `plan_env`, `path_searching`, `bspline_opt` and `ego_planner` source.
+Analyzer, runner, capture and direct ICRA-020 validator suites pass 36/36,
+21/21, 1/1 and 5/5. The C++ matrix passes selected root 8/8, plan-env 6/6,
+P0 76/76, Adapter 7/7, rolling 23/23, retained Ego 8/8, P4 4/4 and P1
+integrity 39/39. The disabled ICRA-014 and ICRA-020 profiles were not invoked.
+
+Seven `ldd` consumers have no `not found`, ICRA-022/024 or external
+build-tree resolution. Their direct IAP/plan-env dependencies resolve only
+ICRA-026 `libiap.so` and `libplan_env.so`, SHA-256
+`144ecf560ba6e14577f1e9bc594bd3cea8a3e55ff4f472b5a9d222195de63c1c`
+and `360cf23a8d4b1f2add6a5e1f59f47d936039b3ca61aee1bde0a644c542f46447`.
+The literal environment sourced ROS Jazzy and the existing workspace setup,
+then prepended ICRA-026 EGO/bspline/path/plan-env/IAP prefixes and libraries
+in the prescribed order. Its read-only ament audit exited 0 with no errors:
+all nine required packages resolve to exact active entries and IAP/EGO resolve
+to ICRA-026.
+
+Only after every static check passed, this exact command ran once:
+
+```text
+python3 scripts/dev_planner/run_gate0_qualification.py --output-root results/icra27/icra026/runs --smoke
+```
+
+The runner exited 0. Mandatory GPU preflight passed on GPU 0 `NVIDIA GeForce
+RTX 4070 Ti SUPER`, driver `580.126.09`: both `nvidia-smi` commands exit 0,
+`libcuda.so.1` loads, `cuInit(0)=0`, `cuDeviceGetCount=0` and
+`device_count=1`. The subsequent dependency preflight passes all nine
+packages. Capture is ready before launch; required `iap_rosnode` is observed,
+has no runtime failure and stops only during controlled shutdown. The manifest
+records CPU mapping, worker four, `20/15 s`, `30 x 30 x 6 m`, `0.75 m`, six
+fixed horizons, `0.5 s` refresh, occupied skip on, no bag/RViz, safety profile
+off and P1/P2/P3/P4/P5 disabled.
+
+This exact formal analyzer command then ran once over the immutable evidence:
+
+```text
+python3 scripts/dev_planner/gate0_analyzer.py --gate0-root results/icra27/icra026/runs --output-dir results/icra27/icra026/runs/smoke/analyzer
+```
+
+It exited 1 with `P0_INPUT_AVAILABILITY_FAIL`. All 166 integrity rows are
+finite and valid and the runner manifest has no failure, but all 19 final
+health representatives report `occupancy_stale`, `ready=false`, generation
+zero and zero refresh queries. There is therefore no successful 76,800-query
+P0 generation; failed/stale ratios are 1.0 and the analyzer emits no tuning
+recommendation.
+
+Canonical SHA-256 values are GPU preflight
+`f5e365ce094dc3c66169dacc06c615c61e4cb2f8058621e4b35ced84d9dab6ed`,
+dependency preflight
+`b45edf305f446063a5ccd22904d93e6f63067f6b36667a9507949dca8889726c`,
+capture readiness
+`9b3038d3fff018f8f35700d2eaae80de457ad623aa22512327cd00f847b7fb0a`,
+run manifest
+`48c975e835ffad1e29a3f717193766654f6acecea101034f287bc164fb16effd`,
+runtime/test-planner manifest
+`b9b0450d45512de8eb52fb48536191993dde202351a9ab29a2aee2a597815291`,
+raw health
+`21a6235ef99fc7c9596038e99673f059ba800df15834c96f8b7f2edf304a0408`,
+raw integrity
+`7a49cadde6863566b94c3494b65cbca5daa2b5eb5376ff596e5f3a55796053a8`,
+analysis
+`ef7dafea7c60941f42ab63091264dee14581ecfc9b9c519a1f7ff77f3779f813`,
+P0 summary
+`a6834b0ee1c1dfb433a9b2b9a39cd647409a802a7b8b5557f5bf67d95c4a5710`
+and P0 CSV
+`ad7497b10deb4c437539aeed7887888db442bfe67d11ebae4aa080e0d57c50be`.
+Retained commands, environment/test/linkage results, hashes and the exact
+runner/analyzer invocations are bounded in
+`results/icra27/icra026/verification_summary.txt`; the later Builder review
+entry records the incomplete command-provenance blocker.
+
+No task-owned process remains and none was manually terminated. The
+configured bag path was not created. There was no retry, environment repair,
+tuning, backend/parameter change, 60-second benchmark, qualification,
+campaign, bag/RViz, disabled profile, P4/P5 execution or Gate promotion.
+ICRA-026 build/install trees remain retained for Supervisor review. Protected
+hashes remain exact, committed ICRA-024/025 evidence has no worktree diff and
+the PDF remains solely untracked and untouched. **ICRA-026 BLOCKED; Gate-0B
+remains NOT_QUALIFIED pending Supervisor review.** This is a Builder result,
+not a final Standards/Spec or Supervisor verdict.
+
+## 2026-08-23T03:50:46Z — ICRA-026 BUILDER REVIEW CORRECTIONS / BLOCKED
+
+The initial two-axis Builder review reported no Standards finding and three
+Spec findings; correction review then identified one Standards truthfulness
+issue in the command record. The retained build/test commands, literal
+environment, seven one-time `ldd` operands, corrected read-only linkage
+assertion and historical runner/analyzer commands are now in
+`results/icra27/icra026/retained_command_record.txt`. It explicitly records
+that the original linkage aggregation/redirection wrapper, faulty post-`ldd`
+assertion text and executable static ament-audit command were not retained
+verbatim and are not reconstructed after the fact. This incomplete exact
+command provenance is an additional evidence blocker.
+
+The exact read-only `/proc` audit, timestamp, absolute whole-task-root
+ownership match criteria, zero matches and exit 0 are retained in
+`results/icra27/icra026/process_audit.txt`; no process was terminated.
+
+One High Spec finding is an additional fail-closed blocker. The retained
+task-local smoke stdout shows that `iap_rosnode` created
+`/home/dev/ws_iap/src/iap/log/20260823T034015Z_103` at 03:40:15Z despite the
+task-local runtime/dump configuration. The ignored directory is 1.5 MiB, and
+its `metadata/run_info.json` binds it to the exact source root, working
+directory, commit and smoke start time. It is outside the ICRA-026 allowlist.
+It remains unstaged and unchanged because NEXT_TASK.md also forbids
+allowlist-external modification and external cleanup; Builder does not assume
+authority to delete or move it.
+
+No runner, formal analyzer, ROS flow, test, build, `ldd`, retry, environment
+repair, tuning, benchmark, qualification or P4/P5 execution was repeated while
+closing review evidence. **ICRA-026 is BLOCKED on zero successful 76,800-query
+P0 generations, out-of-allowlist runtime output and incomplete exact command
+provenance; Gate-0B remains NOT_QUALIFIED pending Supervisor review.** This is
+a Builder self-check and blocker report, not a final Standards/Spec or
+Supervisor verdict.
+
+## 2026-08-23T03:57:32Z — ICRA-026 FINAL BUILDER TWO-AXIS SELF-CHECK
+
+The final staged-diff Builder review has zero remaining actionable Standards
+findings and zero remaining actionable Spec findings. The process audit now
+matches the entire exact absolute ICRA-026 task root and reports zero matches.
+All command-record language is narrowed to retained commands and explicitly
+identifies the missing historical command provenance without reconstruction.
+The ignored out-of-allowlist run directory remains unstaged and unchanged.
+
+The exact staged allowlist contains only `DEV_LOG.md`, `docs/CHANGES.md`,
+`docs/TRACEABILITY.md` and bounded ICRA-026 review evidence. It excludes
+build/install trees, runtime copies, ROS logs, full launch output, the PDF,
+historical artifacts, source/test files and Supervisor-owned files;
+`git diff --cached --check` passes after restaging. The three recorded
+fail-closed conditions remain Builder blockers. This is not a final
+Standards/Spec or Supervisor verdict and does not authorize Gate promotion or
+another flow.

@@ -1,0 +1,35 @@
+ICRA-026 task-owned process audit
+Requirements: IAP-RQ-320, IAP-RQ-322
+audit_started_utc=2026-08-23T03:55:00Z
+
+Exact read-only audit command:
+
+audit_started_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+task_root_exact=/home/dev/ws_iap/src/iap/results/icra27/icra026
+match_count=0
+for proc_path in /proc/[0-9]*; do
+  pid=${proc_path#/proc/}
+  [ "$pid" = "$$" ] && continue
+  [ "$pid" = "$PPID" ] && continue
+  [ -r "$proc_path/cmdline" ] || continue
+  cmdline=$(tr '\0' ' ' < "$proc_path/cmdline" 2>/dev/null) || continue
+  case "$cmdline" in
+    *"$task_root_exact"*)
+      printf '%s\t%s\n' "$pid" "$cmdline"
+      match_count=$((match_count + 1))
+      ;;
+  esac
+done
+printf 'audit_started_utc=%s\ntask_root=%s\nmatch_count=%d\naudit_exit=0\n' "$audit_started_utc" "$task_root_exact" "$match_count"
+
+Observed stdout:
+
+audit_started_utc=2026-08-23T03:55:00Z
+task_root=/home/dev/ws_iap/src/iap/results/icra27/icra026
+match_count=0
+audit_exit=0
+
+The exact absolute task-root match covers runner/capture/analyzer/launch,
+task-local runtime and ROS arguments, build/test binaries and any other
+process whose command line names an ICRA-026 path. No such process remained;
+therefore no process was terminated.

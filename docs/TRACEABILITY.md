@@ -1,5 +1,25 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-23 ICRA-026 dependency-guarded replacement smoke
+
+| Req ID | Requirement/evidence seam | Implementation and focused evidence | Status |
+|---|---|---|---|
+| IAP-RQ-320 / IAP-RQ-322 | Rebuild the reviewed current tree without stale task artifacts | Five task-local build/install pairs below `results/icra27/icra026/`; Python suites pass 36/36, 21/21, 1/1 and 5/5; C++ suites pass 8/8, 6/6, 76/76, 7/7, 23/23, 8/8, 4/4 and 39/39; disabled profiles remain uninvoked | **VERIFIED** |
+| IAP-RQ-320 / IAP-RQ-322 | Bind every direct consumer and future runner to the exact ICRA-026 environment | Seven `ldd` checks resolve only task-local `libiap.so` and `libplan_env.so`, hashes `144ecf56…de63c1c` / `360cf23a…f46447`, with no missing/old/external build-tree entry; literal ordered ament audit resolves all nine packages and exact task-local IAP/EGO | **VERIFIED** |
+| IAP-RQ-320 / IAP-RQ-322 | Enforce mandatory GPU and dependency preflight before capture/launch | Sole runner records `gpu_ready=true`, `cuInit_result=0`, `device_count=1`; then records `launch_dependencies_ready=true` for all nine packages before capture/launch | **PASS** |
+| IAP-RQ-320 / IAP-RQ-322 | Preserve frozen smoke configuration and required-process lifecycle | Runner exit 0; capture ready; required `iap_rosnode` observed with no runtime failure and controlled shutdown; CPU mapping, worker four, 20/15 s, fixed grid/horizons/refresh, occupied skip, no bag/RViz, safety off and P1–P5 disabled | **PASS** |
+| IAP-RQ-320 / IAP-RQ-322 | Require at least one valid 76,800-query P0 generation before Gate-0B can advance | Sole analyzer exit 1: 166/166 valid integrity rows but 19/19 health representatives are `occupancy_stale`, generation 0, zero queries; classification is `P0_INPUT_AVAILABILITY_FAIL` with zero successful generations | **BLOCKED / no retry** |
+| IAP-RQ-320 / IAP-RQ-322 | Confine every task-created runtime/output path to ICRA-026 | Final Builder review binds ignored `log/20260823T034015Z_103` to this exact smoke through its `run_info.json` and retained task-local stdout; it is outside the allowlist and was neither staged nor modified because external cleanup is forbidden | **BLOCKED / Supervisor disposition required** |
+| IAP-RQ-320 / IAP-RQ-322 | Retain exact build/test/linkage/environment commands | Build/test commands, seven `ldd` operands and the literal overlay are retained, but the original linkage aggregation/redirection wrapper, faulty assertion and executable static ament-audit command were not preserved verbatim and are not reconstructed | **BLOCKED / incomplete command provenance** |
+
+Retained commands and explicit provenance gaps, complete hashes, preservation
+checks, process audit and bounded one-shot evidence are recorded in
+`results/icra27/icra026/verification_summary.txt`, `retained_command_record.txt`
+and `process_audit.txt`.
+No source/default/threshold changed; no retry, tuning, 60-second benchmark,
+qualification, P4/P5 execution or Gate decision occurred. Gate-0B remains
+`NOT_QUALIFIED` pending Supervisor review.
+
 ## 2026-08-22 ICRA-025 final-generation and launch-dependency repair
 
 | Req ID | Requirement/evidence seam | Implementation and focused evidence | Status |

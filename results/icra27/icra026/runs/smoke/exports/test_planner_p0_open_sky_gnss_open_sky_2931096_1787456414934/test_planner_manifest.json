@@ -1,0 +1,654 @@
+{
+  "artifact_provenance": {
+    "schema_version": "p1_evidence_provenance_v4",
+    "run_id": "2cb78bfdd1cc456c87db5c9bc326110b",
+    "git_commit": "",
+    "baseline_commit": "34fa22f17c3778c2f98a777e01516b878c183120",
+    "git_worktree_clean": false,
+    "source_repository": "",
+    "workspace_root": "/home/dev/ws_iap/src/iap/results/icra27",
+    "install_prefix": "/home/dev/ws_iap/src/iap/results/icra27/icra026",
+    "export_dir": "/home/dev/ws_iap/src/iap/results/icra27/icra026/runs/smoke/exports/test_planner_p0_open_sky_gnss_open_sky_2931096_1787456414934",
+    "bag_path": "/home/dev/ws_iap/src/iap/results/planner_validation/bags/test_planner_p0_open_sky_gnss_open_sky_20260823T034014Z",
+    "experiment": "p0_open_sky",
+    "scenario": "gnss_open_sky",
+    "process_start_stamp_utc": "2026-08-23T03:40:14Z",
+    "process_start_epoch_s": 1787456414.9375486,
+    "runtime_paths": {
+      "iap_prefix": "/home/dev/ws_iap/src/iap/results/icra27/icra026/install",
+      "ego_planner_prefix": "/home/dev/ws_iap/src/iap/results/icra27/icra026/install_ego",
+      "bspline_opt_prefix": "/home/dev/ws_iap/src/iap/results/icra27/icra026/install_bspline_opt",
+      "launch": {
+        "path": "/home/dev/ws_iap/src/iap/results/icra27/icra026/install/share/iap/launch/test_planner.launch.py",
+        "sha256": "c361cd3d081e041c6714b3f3c01c11f5caafaa4ba3ab3e4f3446a4c283e36999"
+      },
+      "planner_executable": {
+        "path": "/home/dev/ws_iap/src/iap/results/icra27/icra026/install_ego/lib/ego_planner/ego_planner_node",
+        "sha256": "3d46c5a680c83e91fd020dda403e7e7fe06b8e2f21d3c33efadea30dce58a73e"
+      },
+      "bspline_library": {
+        "path": "/home/dev/ws_iap/src/iap/results/icra27/icra026/install_bspline_opt/lib/libbspline_opt.a",
+        "sha256": "fb04d4c0ecff5ab84f1442a8d4b4f965082f76b9bfe4119c42f00378c28df82a"
+      }
+    },
+    "manifest_path": "/home/dev/ws_iap/src/iap/results/icra27/icra026/runs/smoke/exports/test_planner_p0_open_sky_gnss_open_sky_2931096_1787456414934/test_planner_manifest.json"
+  },
+  "experiment": "p0_open_sky",
+  "scenario": "gnss_open_sky",
+  "iap_mapping_backend": "cpu",
+  "mapping_effective_config": {
+    "selected": "cpu",
+    "odometry_config": {
+      "path": "/home/dev/ws_iap/src/iap/results/icra27/icra026/runs/smoke/runtime/iap_sim_demo11_test_planner_2931096_1787456414934/sim_demo11/config_odometry_cpu.json",
+      "sha256": "15f74926d3c3f975c8d1d01ea472c567dc436a12a6159dac2a07b8cf80646554"
+    },
+    "sub_mapping_config": {
+      "path": "/home/dev/ws_iap/src/iap/results/icra27/icra026/runs/smoke/runtime/iap_sim_demo11_test_planner_2931096_1787456414934/sim_ego/config_sub_mapping_cpu.json",
+      "sha256": "5aa34e56c91c5dfbbc627b2b60375a91a6c8b092adfa2b82bbd09d86aec15dec"
+    },
+    "global_mapping_config": {
+      "path": "/home/dev/ws_iap/src/iap/results/icra27/icra026/runs/smoke/runtime/iap_sim_demo11_test_planner_2931096_1787456414934/sim_ego/config_global_mapping_cpu.json",
+      "sha256": "2f0006f879f342edc3c895815ea7f3aee8c38e1aa6b9867f811c5ac0488c6c8b"
+    }
+  },
+  "scenario_contract": {
+    "geometry": {
+      "fixture_algorithm_version": "p1_deterministic_fork_geometry_v13",
+      "fixture": "",
+      "mirror_y": false,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ],
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "central_obstacle": {
+        "enabled": false,
+        "x_m": [
+          -7.0,
+          -2.0
+        ],
+        "y_half_width_m": 0.65,
+        "z_m": [
+          0.0,
+          2.8
+        ]
+      },
+      "lanes": {
+        "center_abs_y_m": 2.0,
+        "half_width_m": 0.75,
+        "safe_tree_density_per_m2": 0.25,
+        "risky_tree_density_per_m2": 0.75,
+        "safe_canopy_probability": 0.05,
+        "risky_canopy_probability": 0.85
+      },
+      "forest_seed": 11,
+      "map_resolution_m": 0.1,
+      "trunk_radius_m": 0.1,
+      "canopy_resolution_m": 0.15,
+      "fixture_short_trunk_height_m": 0.55,
+      "fixture_risky_trunk_height_m": 2.85,
+      "fixture_canopy_base_z_m": 2.85,
+      "fixture_canopy_ball_center_z_m": 3.25,
+      "fixture_canopy_ball_radius_m": 0.42,
+      "fixture_canopy_clip_radius_m": 1.1,
+      "formal_arm_roles": {
+        "canonical_metrics_only_reference": {
+          "primary": "upper",
+          "mirror": "lower"
+        },
+        "dense_lidar_trunks": {
+          "primary": "lower",
+          "mirror": "upper"
+        },
+        "gnss_occluding_risky_canopies": {
+          "primary": "upper",
+          "mirror": "lower"
+        },
+        "continuous_overhead_gnss_mask": {
+          "primary": "upper",
+          "mirror": "lower",
+          "x_m": [
+            -11.5,
+            2.5
+          ],
+          "half_width_y_m": 1.25,
+          "z_m": [
+            7.3,
+            7.55
+          ],
+          "lidar_exclusion_contract": {
+            "flight_z_m": 1.5,
+            "sensing_horizon_m": 10.0,
+            "vertical_half_fov_deg": 30.0
+          }
+        },
+        "soft_island": "y=-2.0_m",
+        "null": "symmetric"
+      },
+      "lidar_observability_landmarks": {
+        "kind": "symmetric_survey_pylons",
+        "x_m": [
+          -12.0,
+          -10.0,
+          -8.0,
+          -6.0,
+          -4.0,
+          -2.0,
+          0.0
+        ],
+        "center_abs_y_m": 4.5,
+        "half_width_m": 0.25,
+        "z_m": [
+          0.0,
+          3.0
+        ]
+      },
+      "boundary_tree_layout": {
+        "mode": "alternating_external_and_central-box-bounded_inner",
+        "inner_x_m": [
+          -8.0,
+          -3.0
+        ],
+        "formal_min_lane_center_clearance_m": 1.7
+      },
+      "collision_neutral_rafters": {
+        "fixtures": [
+          "p1_soft_risk_island_v1"
+        ],
+        "x_m": [
+          -10.0,
+          -8.0,
+          -6.0,
+          -4.0,
+          -2.0
+        ],
+        "half_width_m": 0.3,
+        "z_m": [
+          2.85,
+          3.35
+        ]
+      },
+      "fixture_lane_x_start_m": -7.8,
+      "fixture_lane_x_span_m": 16.0,
+      "fixture_lane_boundary_offset_m": 0.75,
+      "fixture_lane_density_area_m2": 32.0,
+      "fixture_soft_island_density_area_m2": 24.0,
+      "fixture_soft_island_x_m": [
+        -6.0,
+        2.0
+      ],
+      "fixture_soft_island_center_y_m": -2.0,
+      "terminal_wall_enabled": true
+    },
+    "risk_sources": [
+      "gnss_map_occlusion",
+      "lidar_observability"
+    ],
+    "sensor_startup": {
+      "lidar_start_delay_s": 0.0,
+      "odometry_initialization_mode": "LOOSE",
+      "odometry_initialization_window_s": 1.0,
+      "required_strict_margin_s": -1.0,
+      "gnss_epoch_frame_binding": "nearest_single_epoch",
+      "so3_feedback_imu_semantics": "world_linear_acceleration"
+    },
+    "gnss": {
+      "scenario_file": "/home/dev/ws_iap/src/iap/results/icra27/icra026/install/share/iap/config/gnss_sim/demo7_open_sky.yaml",
+      "scenario_file_sha256": "93a6855b8486973760e3bf425e0e5c72c1d1b4b3e398fe03c51302eff5208437",
+      "random_seed": 20260429,
+      "ephemeris_source": "rinex",
+      "enabled_constellations": "GPS,BDS,GAL,GLO",
+      "pseudorange_noise_std_m": 1.0,
+      "doppler_noise_std_mps": 0.03,
+      "map_occlusion": false,
+      "skymask": false,
+      "nlos": false,
+      "multipath": false
+    },
+    "p1": {
+      "lambda_integrity": 0.0,
+      "normalization_budget_fraction": 0.3,
+      "aggregation_mode": "fixed_200_smooth_cvar",
+      "smooth_cvar_alpha": 0.9,
+      "smooth_max_temperature": 0.01
+    },
+    "planner_dynamics": {
+      "manager_max_velocity_mps": 2.0,
+      "optimizer_max_velocity_mps": 2.0,
+      "bspline_limit_velocity_mps": 2.0,
+      "replan_period_s": 1.0,
+      "planning_horizon_m": 7.5,
+      "collision_fanout_clearance_m": 0.0,
+      "collision_fanout_preserve_homotopies": false,
+      "collision_fanout_mirror_y": false,
+      "local_update_range_x_m": 5.5
+    },
+    "p0_prediction": {
+      "horizons_s": [
+        0.0,
+        0.5,
+        1.0,
+        1.5,
+        2.0,
+        2.5
+      ]
+    },
+    "decision_checkpoint": {
+      "truth_x_m": -9.5,
+      "truth_x_tolerance_m": 0.4,
+      "truth_source_topic": "/sim/drone_0/truth_odom",
+      "profile_sample_zero_binding": "planner_truth_odom_state_at_planning_start",
+      "localization_error_limit_m": 0.5,
+      "pair_error_delta_limit_m": 0.25
+    }
+  },
+  "scenario_fingerprint": "sha256:bdd4116608dc2afd9ad432ae67c4229f45d06edb25544644b64b607c01076163",
+  "runtime_config_path": "/home/dev/ws_iap/src/iap/results/icra27/icra026/runs/smoke/runtime/iap_sim_demo11_test_planner_2931096_1787456414934/sim_demo11",
+  "export_dir": "/home/dev/ws_iap/src/iap/results/icra27/icra026/runs/smoke/exports/test_planner_p0_open_sky_gnss_open_sky_2931096_1787456414934",
+  "run_duration_s": 20.0,
+  "validation_duration_s": 15.0,
+  "planner_start_delay_s": 10.0,
+  "lidar_start_delay_s": 0.0,
+  "manager/max_vel": 2.0,
+  "manager/planning_horizon": 7.5,
+  "manager/p1_collision_fanout_clearance_m": 0.0,
+  "manager/p1_collision_fanout_preserve_homotopies": false,
+  "manager/p1_collision_fanout_mirror_y": false,
+  "manager/use_distinctive_trajs": true,
+  "p1_fixture_mirror_y": false,
+  "gate0.qualification_evidence_enable": false,
+  "gate0.candidate_events_path": "",
+  "gate0.control_points_path": "",
+  "gate0.evidence_run_id": "",
+  "gate0.evidence_manifest_path": "",
+  "optimization/max_vel": 2.0,
+  "bspline/limit_vel": 2.0,
+  "fsm.thresh_replan_time": 1.0,
+  "grid_map/local_update_range_x": 5.5,
+  "record_bag": false,
+  "start_rviz": false,
+  "run_validator": false,
+  "timebase": {
+    "planning_timeline": {
+      "domain": "sim_message",
+      "field": "stamp_s"
+    },
+    "p0_health_payload": {
+      "domain": "sim_message",
+      "field": "health_callback_stamp_s"
+    },
+    "bag_receive": {
+      "domain": "system_receive",
+      "field": "stamp"
+    }
+  },
+  "planner_safety_profile": "off",
+  "planner_enable_all_safety": false,
+  "fsm.thresh_no_replan_meter": 1.0,
+  "p0.enable_risk_grid": true,
+  "p1.use_integrity_cost": false,
+  "p1.metrics_only": false,
+  "p1.lambda_integrity": 0.0,
+  "p1.debug_csv_enable": false,
+  "p1.debug_csv_path": "/home/dev/ws_iap/src/iap/results/icra27/icra026/runs/smoke/exports/test_planner_p0_open_sky_gnss_open_sky_2931096_1787456414934/planner_p1_integrity_cost_debug.csv",
+  "p2.enable_candidate_ranking": false,
+  "p2.debug_csv_enable": false,
+  "p3.enable_local_reference_bias": false,
+  "p3.enable_global_reference_bias": false,
+  "p3.debug_csv_enable": false,
+  "p4.enable_risk_aware_astar": false,
+  "p4.debug_csv_enable": false,
+  "p5.enable_runtime_gate": false,
+  "p5.enable_final_gate": false,
+  "forest_random_seed": 11,
+  "gnss_random_seed": 20260429,
+  "terminal_wall_feature_seed": 11022,
+  "p1.max_candidates_per_attempt": 8,
+  "p1.candidate_optimization_path": "/home/dev/ws_iap/src/iap/results/icra27/icra026/runs/smoke/exports/test_planner_p0_open_sky_gnss_open_sky_2931096_1787456414934/planner_p1_candidate_optimization.csv",
+  "p1.candidate_control_points_path": "/home/dev/ws_iap/src/iap/results/icra27/icra026/runs/smoke/exports/test_planner_p0_open_sky_gnss_open_sky_2931096_1787456414934/planner_p1_candidate_control_points.csv",
+  "p1.candidate_profile_path": "/home/dev/ws_iap/src/iap/results/icra27/icra026/runs/smoke/exports/test_planner_p0_open_sky_gnss_open_sky_2931096_1787456414934/planner_p1_candidate_profile.csv",
+  "p1.candidate_pairwise_path": "/home/dev/ws_iap/src/iap/results/icra27/icra026/runs/smoke/exports/test_planner_p0_open_sky_gnss_open_sky_2931096_1787456414934/planner_p1_candidate_pairwise.csv",
+  "p1.optimizer_checkpoint_path": "/home/dev/ws_iap/src/iap/results/icra27/icra026/runs/smoke/exports/test_planner_p0_open_sky_gnss_open_sky_2931096_1787456414934/planner_p1_optimizer_checkpoint.csv",
+  "p0.occupancy_query_evidence_path": "/home/dev/ws_iap/src/iap/results/icra27/icra026/runs/smoke/exports/test_planner_p0_open_sky_gnss_open_sky_2931096_1787456414934/planner_p0_occupancy_query_evidence.csv",
+  "p1.accepted_profile_path": "/home/dev/ws_iap/src/iap/results/icra27/icra026/runs/smoke/exports/test_planner_p0_open_sky_gnss_open_sky_2931096_1787456414934/planner_p1_accepted_trajectory_risk_profile.csv",
+  "p1.accepted_profile_context_path": "/home/dev/ws_iap/src/iap/results/icra27/icra026/runs/smoke/exports/test_planner_p0_open_sky_gnss_open_sky_2931096_1787456414934/planner_p1_accepted_trajectory_risk_profile_context.csv",
+  "p1.planning_context_timeline_path": "/home/dev/ws_iap/src/iap/results/icra27/icra026/runs/smoke/exports/test_planner_p0_open_sky_gnss_open_sky_2931096_1787456414934/planner_p1_planning_context_timeline.csv",
+  "p1.pre_admission_attempt_path": "/home/dev/ws_iap/src/iap/results/icra27/icra026/runs/smoke/exports/test_planner_p0_open_sky_gnss_open_sky_2931096_1787456414934/planner_p1_pre_admission_attempt.csv",
+  "p1.candidate_route_precheck_path": "/home/dev/ws_iap/src/iap/results/icra27/icra026/runs/smoke/exports/test_planner_p0_open_sky_gnss_open_sky_2931096_1787456414934/metadata/p1_candidate_route_precheck.json",
+  "p1.prequalification_candidate_profile_path": "/home/dev/ws_iap/src/iap/results/icra27/icra026/runs/smoke/exports/test_planner_p0_open_sky_gnss_open_sky_2931096_1787456414934/planner_p1_prequalification_candidate_profile.csv",
+  "p1.replacement_decision_path": "/home/dev/ws_iap/src/iap/results/icra27/icra026/runs/smoke/exports/test_planner_p0_open_sky_gnss_open_sky_2931096_1787456414934/planner_p1_replacement_decision.csv",
+  "p1.candidate_retained_profile_path": "/home/dev/ws_iap/src/iap/results/icra27/icra026/runs/smoke/exports/test_planner_p0_open_sky_gnss_open_sky_2931096_1787456414934/planner_p1_candidate_retained_profile.csv",
+  "p1.objective_aggregation_mode": "fixed_200_smooth_cvar",
+  "p1.smooth_max_temperature": 0.01,
+  "p1.smooth_cvar_alpha": 0.9,
+  "p1.normalization_budget_fraction": 0.3,
+  "p1.formal_calibration": {},
+  "p1.reference_identity": "metrics_only_lambda_0.00001_not_applied",
+  "p0.raw_health_topic": "/planning/risk_grid_health",
+  "p0.resolution_m": 0.75,
+  "p0.size_x_m": 30.0,
+  "p0.size_y_m": 30.0,
+  "p0.size_z_m": 6.0,
+  "p0.horizons_s": [
+    0.0,
+    0.5,
+    1.0,
+    1.5,
+    2.0,
+    2.5
+  ],
+  "p0.refresh_period_s": 0.5,
+  "p0.stale_timeout_s": 1.0,
+  "p0.batch_worker_count": 1,
+  "p0.predictor.requested_worker_count": 4,
+  "p0.predictor.effective_worker_count": 4,
+  "p0.skip_occupied_voxels": true,
+  "p0.predictor.source_mode": "fusion",
+  "p0.predictor.gnss_epoch_policy": "auto",
+  "p0.predictor.use_current_integrity_prior": true,
+  "p0.predictor.conservative_max_with_gnss": false,
+  "p0.predictor.lidar_legacy_observability": true,
+  "p0.predictor.lidar_fim_radius_m": 12.0,
+  "p0_6.fixture.enabled": false,
+  "p0_6.fixture.name": "",
+  "p0_6.fixture.x_min": -1.5,
+  "p0_6.fixture.x_max": 1.5,
+  "p0_6.fixture.y_min": -0.75,
+  "p0_6.fixture.y_max": 0.75,
+  "p0_6.fixture.z_min": 1.0,
+  "p0_6.fixture.z_max": 2.0,
+  "p0_6.fixture.raw_hpl_m": 1.0,
+  "p0_6.fixture.raw_vpl_m": 1.2,
+  "p0_6.fixture.raw_c_pi": 1.2,
+  "p0_6.fixture.low_raw_cost_threshold": 2.0,
+  "p5_3.fixture.enabled": false,
+  "p5_3.fixture.name": "future_high_risk_zone_v1",
+  "p5_3.fixture.x_min": -10.8,
+  "p5_3.fixture.x_max": -8.7,
+  "p5_3.fixture.y_min": -0.75,
+  "p5_3.fixture.y_max": 0.75,
+  "p5_3.fixture.z_min": 1.0,
+  "p5_3.fixture.z_max": 1.35,
+  "p5_3.fixture.tau_min": 1.2,
+  "p5_3.fixture.tau_max": 2.0,
+  "p5_3.fixture.hpl_pred_m": 10.2,
+  "p5_3.fixture.vpl_pred_m": 10.2,
+  "p5_3.fixture.expected_hal_m": 10.0,
+  "p5_3.fixture.expected_val_m": 10.0,
+  "p5_3.fixture.expected_im_m": -0.1999999999999993,
+  "p5_4.fixture.enabled": false,
+  "p5_4.fixture.name": "near_risk_zone_v1",
+  "p5_4.fixture.x_min": -11.7,
+  "p5_4.fixture.x_max": -11.1,
+  "p5_4.fixture.y_min": -0.75,
+  "p5_4.fixture.y_max": 0.75,
+  "p5_4.fixture.z_min": 1.0,
+  "p5_4.fixture.z_max": 1.35,
+  "p5_4.fixture.tau_min": 0.6,
+  "p5_4.fixture.tau_max": 0.95,
+  "p5_4.fixture.hpl_pred_m": 10.2,
+  "p5_4.fixture.vpl_pred_m": 10.2,
+  "p5_4.fixture.expected_hal_m": 10.0,
+  "p5_4.fixture.expected_val_m": 10.0,
+  "p5_4.fixture.expected_im_m": -0.1999999999999993,
+  "p5_5.fixture.enabled": false,
+  "p5_5.fixture.name": "current_integrity_stamp_freeze_v1",
+  "p5_5.fixture.start_s": 30.0,
+  "p5_5.fixture.duration_s": 12.0,
+  "p5_6.fixture.enabled": false,
+  "p5_6.fixture.effective_enabled": false,
+  "p5_6.fixture.name": "future_unknown_zone_v1",
+  "p5_6.fixture.x_min": -1.0,
+  "p5_6.fixture.x_max": 12.5,
+  "p5_6.fixture.y_min": -15.0,
+  "p5_6.fixture.y_max": 15.0,
+  "p5_6.fixture.z_min": -3.0,
+  "p5_6.fixture.z_max": 3.0,
+  "p5_6.fixture.tau_min": 0.2,
+  "p5_6.fixture.tau_max": 2.0,
+  "p5_7.fixture.enabled": false,
+  "p5_7.fixture.effective_enabled": false,
+  "p5_7.fixture.name": "rejected_trajectory_zone_v1",
+  "p5_7.fixture.x_min": -11.7,
+  "p5_7.fixture.x_max": -8.7,
+  "p5_7.fixture.y_min": -0.75,
+  "p5_7.fixture.y_max": 0.75,
+  "p5_7.fixture.z_min": 1.0,
+  "p5_7.fixture.z_max": 1.35,
+  "p5_7.fixture.tau_min": 0.6,
+  "p5_7.fixture.tau_max": 2.0,
+  "p5_7.fixture.hpl_pred_m": 10.2,
+  "p5_7.fixture.vpl_pred_m": 10.2,
+  "p5_7.fixture.expected_hal_m": 10.0,
+  "p5_7.fixture.expected_val_m": 10.0,
+  "p5_7.fixture.expected_im_m": -0.1999999999999993,
+  "p5.current_stale_to_replan_s": 0.5,
+  "p5.current_stale_to_emergency_s": 2.0,
+  "p5.future_unknown_to_emergency_s": 2.0,
+  "p5.pred_alert_limit_mode": "current_msg_constant",
+  "p5.future_replan_margin_m": 0.3,
+  "p5.future_emergency_margin_m": -0.5,
+  "p5.max_bad_ratio": 0.25,
+  "p0_6": {
+    "fixture": {
+      "enabled": false,
+      "name": "",
+      "bounds": {
+        "x": [
+          -1.5,
+          1.5
+        ],
+        "y": [
+          -0.75,
+          0.75
+        ],
+        "z": [
+          1.0,
+          2.0
+        ]
+      },
+      "expected_raw": {
+        "raw_hpl_m": 1.0,
+        "raw_vpl_m": 1.2,
+        "raw_c_pi": 1.2,
+        "low_raw_cost_threshold": 2.0
+      }
+    }
+  },
+  "p5_3": {
+    "fixture": {
+      "enabled": false,
+      "name": "future_high_risk_zone_v1",
+      "bounds": {
+        "x": [
+          -10.8,
+          -8.7
+        ],
+        "y": [
+          -0.75,
+          0.75
+        ],
+        "z": [
+          1.0,
+          1.35
+        ]
+      },
+      "tau_window_s": [
+        1.2,
+        2.0
+      ],
+      "injected_pl_m": {
+        "hpl_pred": 10.2,
+        "vpl_pred": 10.2
+      },
+      "expected_alert_limit_m": {
+        "mode": "current_msg_constant",
+        "hal": 10.0,
+        "val": 10.0
+      },
+      "expected_im_m": -0.1999999999999993,
+      "expected_reason": "p5_3_high_risk_zone"
+    }
+  },
+  "p5_4": {
+    "fixture": {
+      "enabled": false,
+      "name": "near_risk_zone_v1",
+      "bounds": {
+        "x": [
+          -11.7,
+          -11.1
+        ],
+        "y": [
+          -0.75,
+          0.75
+        ],
+        "z": [
+          1.0,
+          1.35
+        ]
+      },
+      "tau_window_s": [
+        0.6,
+        0.95
+      ],
+      "injected_pl_m": {
+        "hpl_pred": 10.2,
+        "vpl_pred": 10.2
+      },
+      "expected_alert_limit_m": {
+        "mode": "current_msg_constant",
+        "hal": 10.0,
+        "val": 10.0
+      },
+      "expected_im_m": -0.1999999999999993,
+      "expected_reason": "p5_4_near_risk_zone",
+      "expected_first_bad_tau_s": 0.6,
+      "expected_emergency_time_s": 1.0
+    }
+  },
+  "p5_5": {
+    "fixture": {
+      "enabled": false,
+      "name": "current_integrity_stamp_freeze_v1",
+      "window_s": [
+        30.0,
+        42.0
+      ],
+      "start_s": 30.0,
+      "duration_s": 12.0,
+      "expected_thresholds_s": {
+        "replan": 0.5,
+        "emergency": 2.0
+      },
+      "expected_reason": "current_stale",
+      "route": {
+        "enabled": false,
+        "waypoints": [
+          [
+            12.0,
+            0.0,
+            1.2
+          ],
+          [
+            -12.0,
+            0.0,
+            1.2
+          ],
+          [
+            12.0,
+            0.0,
+            1.2
+          ],
+          [
+            -12.0,
+            0.0,
+            1.2
+          ]
+        ],
+        "reason": "keep P5 runtime gate active through the stale fixture window"
+      }
+    }
+  },
+  "p5_6": {
+    "fixture": {
+      "enabled": false,
+      "effective_enabled": false,
+      "name": "future_unknown_zone_v1",
+      "bounds": {
+        "x": [
+          -1.0,
+          12.5
+        ],
+        "y": [
+          -15.0,
+          15.0
+        ],
+        "z": [
+          -3.0,
+          3.0
+        ]
+      },
+      "tau_window_s": [
+        0.2,
+        2.0
+      ],
+      "expected_reason": "future_unknown",
+      "expected_unknown": {
+        "available": true,
+        "valid": false,
+        "stale": false,
+        "finite_pl": false
+      }
+    }
+  },
+  "p5_7": {
+    "fixture": {
+      "enabled": false,
+      "effective_enabled": false,
+      "name": "rejected_trajectory_zone_v1",
+      "bounds": {
+        "x": [
+          -11.7,
+          -8.7
+        ],
+        "y": [
+          -0.75,
+          0.75
+        ],
+        "z": [
+          1.0,
+          1.35
+        ]
+      },
+      "tau_window_s": [
+        0.6,
+        2.0
+      ],
+      "injected_pl_m": {
+        "hpl_pred": 10.2,
+        "vpl_pred": 10.2
+      },
+      "expected_alert_limit_m": {
+        "mode": "current_msg_constant",
+        "hal": 10.0,
+        "val": 10.0
+      },
+      "expected_im_m": -0.1999999999999993,
+      "expected_reason": "p5_7_rejected_trajectory",
+      "sample_source": "final_candidate"
+    }
+  },
+  "planner_enable_p1": false,
+  "planner_enable_p2": false,
+  "planner_enable_p3_local": false,
+  "planner_enable_p3_global": false,
+  "planner_enable_p4": false,
+  "planner_enable_p5_runtime": false,
+  "planner_enable_p5_final": false
+}

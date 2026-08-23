@@ -1,0 +1,116 @@
+ICRA-026 retained command record and explicit evidence gaps
+Requirements: IAP-RQ-320, IAP-RQ-322
+
+The following variables and literal overlay were used from
+/home/dev/ws_iap/src/iap. Variable expansion produced the absolute paths
+recorded in CMakeCache.txt, ldd output and static_ament_environment.json.
+
+repo_root="$PWD"
+task_root="$repo_root/results/icra27/icra026"
+source /opt/ros/jazzy/setup.bash
+source /home/dev/ws_iap/install/setup.bash
+export AMENT_PREFIX_PATH="$task_root/install_ego:$task_root/install_bspline_opt:$task_root/install_path_searching:$task_root/install_plan_env:$task_root/install${AMENT_PREFIX_PATH:+:$AMENT_PREFIX_PATH}"
+export LD_LIBRARY_PATH="$task_root/install_ego/lib:$task_root/install_bspline_opt/lib:$task_root/install_path_searching/lib:$task_root/install_plan_env/lib:$task_root/install/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export ROS_HOME="$task_root/ros_home"
+export ROS_LOG_DIR="$task_root/ros_log"
+export TMPDIR="$task_root/tmp"
+export IAP_TEST_ARTIFACT_DIR="$task_root/test_artifacts/predictor"
+
+Configure, build and install commands; each exited 0:
+
+cmake -S . -B results/icra27/icra026/build_iap -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_WITH_CUDA=ON -DBUILD_WITH_VIEWER=ON -DBUILD_WITH_OPENCV=ON -DCMAKE_INSTALL_PREFIX="$PWD/results/icra27/icra026/install" > results/icra27/icra026/logs/configure_iap.log 2>&1
+cmake --build results/icra27/icra026/build_iap -j2 > results/icra27/icra026/logs/build_iap.log 2>&1
+cmake --install results/icra27/icra026/build_iap > results/icra27/icra026/logs/install_iap.log 2>&1
+
+cmake -S src/iap/planner/plan_env -B results/icra27/icra026/build_plan_env -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$PWD/results/icra27/icra026/install_plan_env" > results/icra27/icra026/logs/configure_plan_env.log 2>&1
+cmake --build results/icra27/icra026/build_plan_env -j2 > results/icra27/icra026/logs/build_plan_env.log 2>&1
+cmake --install results/icra27/icra026/build_plan_env > results/icra27/icra026/logs/install_plan_env.log 2>&1
+
+cmake -S src/iap/planner/path_searching -B results/icra27/icra026/build_path_searching -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$PWD/results/icra27/icra026/install_path_searching" -Diap_DIR="$PWD/results/icra27/icra026/install/share/iap" -Dplan_env_DIR="$PWD/results/icra27/icra026/install_plan_env/share/plan_env/cmake" > results/icra27/icra026/logs/configure_path_searching.log 2>&1
+cmake --build results/icra27/icra026/build_path_searching -j2 > results/icra27/icra026/logs/build_path_searching.log 2>&1
+cmake --install results/icra27/icra026/build_path_searching > results/icra27/icra026/logs/install_path_searching.log 2>&1
+
+cmake -S src/iap/planner/bspline_opt -B results/icra27/icra026/build_bspline_opt -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$PWD/results/icra27/icra026/install_bspline_opt" -Diap_DIR="$PWD/results/icra27/icra026/install/share/iap" -Dplan_env_DIR="$PWD/results/icra27/icra026/install_plan_env/share/plan_env/cmake" -Dpath_searching_DIR="$PWD/results/icra27/icra026/install_path_searching/share/path_searching/cmake" > results/icra27/icra026/logs/configure_bspline_opt.log 2>&1
+cmake --build results/icra27/icra026/build_bspline_opt -j2 > results/icra27/icra026/logs/build_bspline_opt.log 2>&1
+cmake --install results/icra27/icra026/build_bspline_opt > results/icra27/icra026/logs/install_bspline_opt.log 2>&1
+
+cmake -S src/iap/planner/plan_manage -B results/icra27/icra026/build_ego -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$PWD/results/icra27/icra026/install_ego" -Diap_DIR="$PWD/results/icra27/icra026/install/share/iap" -Dplan_env_DIR="$PWD/results/icra27/icra026/install_plan_env/share/plan_env/cmake" -Dpath_searching_DIR="$PWD/results/icra27/icra026/install_path_searching/share/path_searching/cmake" -Dbspline_opt_DIR="$PWD/results/icra27/icra026/install_bspline_opt/share/bspline_opt/cmake" > results/icra27/icra026/logs/configure_ego.log 2>&1
+cmake --build results/icra27/icra026/build_ego -j2 > results/icra27/icra026/logs/build_ego.log 2>&1
+cmake --install results/icra27/icra026/build_ego > results/icra27/icra026/logs/install_ego.log 2>&1
+
+Test commands in the literal overlay above; each exited 0:
+
+python3 test/test_gate0_analyzer.py > results/icra27/icra026/logs/test_gate0_analyzer.log 2>&1
+python3 test/test_gate0_runner.py > results/icra27/icra026/logs/test_gate0_runner.log 2>&1
+python3 test/test_gate0_capture_p0_health.py > results/icra27/icra026/logs/test_gate0_capture.log 2>&1
+python3 test/test_icra020_p0_rolling_worker_profile.py > results/icra27/icra026/logs/test_icra020_validator.log 2>&1
+
+ctest --test-dir results/icra27/icra026/build_iap --output-on-failure -R 'test_integrity_snapshot|test_local_occupancy|test_predictor_module|test_rolling_spatial_advisory_window|test_predictor_risk_conversion|test_risk_grid_map|test_icra011_spatial_dedup_profile|test_icra020_p0_rolling_worker_profile' > results/icra27/icra026/logs/test_selected_root_8.log 2>&1
+results/icra27/icra026/build_plan_env/test_grid_map_occupancy_epoch > results/icra27/icra026/logs/test_plan_env_6.log 2>&1
+results/icra27/icra026/build_ego/test_p0_risk_grid_runtime > results/icra27/icra026/logs/test_p0_76.log 2>&1
+results/icra27/icra026/build_ego/test_p0_occupancy_epoch_adapter > results/icra27/icra026/logs/test_adapter_7.log 2>&1
+results/icra27/icra026/build_iap/test_rolling_spatial_advisory_window > results/icra27/icra026/logs/test_rolling_23.log 2>&1
+ctest --test-dir results/icra27/icra026/build_ego --output-on-failure -R 'test_p0_risk_grid_runtime|test_p0_occupancy_epoch_adapter|test_p1_replan_admission|test_p1_candidate_selection|test_p5_runtime_integrity_gate|test_p2_candidate_ranking|test_p3_reference_bias|test_planning_risk_context' > results/icra27/icra026/logs/test_ego_retained_8.log 2>&1
+results/icra27/icra026/build_path_searching/test_p4_risk_astar > results/icra27/icra026/logs/test_p4_4.log 2>&1
+results/icra27/icra026/build_bspline_opt/test_p1_integrity_cost > results/icra27/icra026/logs/test_p1_integrity_39.log 2>&1
+
+The disabled ICRA-014/020 profiles were not selected or invoked.
+
+The seven ldd operands, invoked once each in the same overlay and written in
+this order to logs/linkage_direct_consumers.log, were:
+
+ldd "$task_root/build_iap/test_rolling_spatial_advisory_window"
+ldd "$task_root/build_plan_env/test_grid_map_occupancy_epoch"
+ldd "$task_root/build_ego/test_p0_risk_grid_runtime"
+ldd "$task_root/build_ego/test_p0_occupancy_epoch_adapter"
+ldd "$task_root/build_path_searching/test_p4_risk_astar"
+ldd "$task_root/build_bspline_opt/test_p1_integrity_cost"
+ldd "$task_root/build_ego/test_planning_risk_context"
+
+The exact aggregation/redirection shell around these seven operands was not
+retained verbatim and is not reconstructed after the fact. The complete
+unchanged ldd output is retained in logs/linkage_direct_consumers.log.
+
+The initial post-ldd assertion was not retained verbatim. It exited 1 because
+an `if awk ...; then exit 1; fi` wrapper interpreted awk's normal zero exit on
+an empty match as a forbidden match. It did not rerun or alter ldd evidence.
+This omission is recorded rather than reconstructing a command after the fact.
+
+The corrected read-only assertion over the unchanged ldd log was retained
+verbatim below and exited 0 with:
+forbidden_count=0 iap_total=6 iap_exact=6 plan_total=3 plan_exact=3
+
+link_log="$PWD/results/icra27/icra026/logs/linkage_direct_consumers.log"
+iap_expected="$PWD/results/icra27/icra026/install/lib/libiap.so"
+plan_expected="$PWD/results/icra27/icra026/install_plan_env/lib/libplan_env.so"
+forbidden_count=$(awk '/not found|icra022|icra024/ || ($0 ~ / => / && $0 ~ /results\/icra27\/[^/]+\/build[^/]*/) {print; n++} END {print n+0 > "/dev/stderr"}' "$link_log" 2>results/icra27/icra026/tmp/linkage_forbidden_count.txt | wc -l)
+iap_total=$(awk '/libiap\.so =>/ {n++} END {print n+0}' "$link_log")
+iap_exact=$(awk -v expected="$iap_expected" '$1 == "libiap.so" && $2 == "=>" && $3 == expected {n++} END {print n+0}' "$link_log")
+plan_total=$(awk '/libplan_env\.so =>/ {n++} END {print n+0}' "$link_log")
+plan_exact=$(awk -v expected="$plan_expected" '$1 == "libplan_env.so" && $2 == "=>" && $3 == expected {n++} END {print n+0}' "$link_log")
+printf 'forbidden_count=%s iap_total=%s iap_exact=%s plan_total=%s plan_exact=%s\n' "$forbidden_count" "$iap_total" "$iap_exact" "$plan_total" "$plan_exact"
+test "$forbidden_count" -eq 0
+test "$iap_total" -eq 6
+test "$iap_exact" -eq 6
+test "$plan_total" -eq 3
+test "$plan_exact" -eq 3
+
+The read-only ament-index audit used the same literal sourced/prepended
+environment above and `ament_index_python.packages.get_package_prefix()` for
+these exact package names, in order:
+
+iap ego_planner local_sensing odom_visualization poscmd_2_odom gnss_sim so3_quadrotor_simulator so3_control rclcpp_components
+
+Its full ordered AMENT_PREFIX_PATH, LD_LIBRARY_PATH, package-to-prefix mapping,
+expected task prefixes, ready=true, errors=[] and exit 0 are retained in
+logs/static_ament_environment.json.
+
+The exact executable Python/heredoc command that produced this JSON was not
+retained verbatim and is not reconstructed after the fact. Together with the
+missing ldd aggregation wrapper and initial faulty assertion text, this is a
+fail-closed command-provenance evidence gap in the Builder handoff.
+
+Historical one-shot commands (must not be rerun):
+
+python3 scripts/dev_planner/run_gate0_qualification.py --output-root results/icra27/icra026/runs --smoke
+python3 scripts/dev_planner/gate0_analyzer.py --gate0-root results/icra27/icra026/runs --output-dir results/icra27/icra026/runs/smoke/analyzer
