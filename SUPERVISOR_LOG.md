@@ -1,5 +1,74 @@
 # ICRA Supervisor Log
 
+## 2026-08-23 — ICRA-035 review PASS, Gate-0B qualified and P4-G0A RED authorization
+
+### Review identity and synchronization
+
+- Fixed review range: `7f0fc40e997a40a040b2c83282d9c9e3dae1eef9...e8353160764f0701058c4961be1ab68d3f414a97`.
+- Reviewed commits: main evidence/documentation `f4e89f8` and final DEV_LOG-only handoff `e835316`;
+  both carry applicable `IAP-RQ-320`, `IAP-RQ-321` and `IAP-RQ-322` identifiers.
+- After fetch, `HEAD` and `origin/dev/icra` matched at divergence `0 0`. The protected PDF remains the
+  sole untracked file. All 34 changed paths match the ICRA-035 allowlist; no source/header/test,
+  analyzer/runner/capture/launch/config/CMake, Supervisor-owned, historical, PDF or external-repository
+  file changed.
+
+### Standards axis
+
+- Verdict: `PASS`; zero hard findings and zero judgment-call smells; worst none.
+- RQ/document synchronization, evidence-only scope, build retention, protected PDF/history,
+  GPU-before-ROS, one-shot guards, process lifecycle, no-bag/RViz boundary and two-commit handoff all
+  conform. The task-local preflight helper is one bounded qualification artifact, not a reusable
+  product-module design smell.
+
+### Spec axis
+
+- Verdict: `PASS`; zero missing/partial, scope-creep or implemented-wrong findings; worst none.
+- Fresh task-local IAP/EGO build/install and exact current/ICRA-026 ament/direct linkage pass. The
+  affected IAP selection passes 6/6 and EGO selection passes 2/2; Supervisor reran the same retained
+  selections with task-local libraries and reproduced 6/6 plus 2/2.
+- The frozen effective configuration is exact: CPU mapping, worker 4, 60/55 seconds, 30 x 30 x 6 m,
+  0.75 m, six horizons through 2.5 s, 0.5-second refresh, occupied skip, no bag/RViz, safety off,
+  P1--P5 disabled, and provisional `0.01` / `legacy_iap_rq320_baseline_v1`.
+- Mandatory GPU preflight precedes ROS and passes both `nvidia-smi` calls, `cuInit(0)=0` and device
+  count 1. Required `iap_rosnode` is observed without runtime failure and stops only during controlled
+  shutdown. Post-live audit finds no task process or bag.
+
+### Gate-0B verdict
+
+- The runner and analyzer each execute exactly once, exit 0 and have zero retries. Analyzer reports
+  209 observations, 105 completed attempts, 103 strict successful generations, two coherent
+  completed failures, 18 in-progress observations, 86 equivalent duplicates, zero conflicts and
+  607/607 valid integrity reports.
+- Every success has exactly 76,800 logical queries. Refresh p50/p95/max is
+  `175.482122/184.1007665/199.520467 ms`; provider p50/p95 is
+  `146.82252/150.8886328 ms`; generation-interval p50/p95 is
+  `500.135382/511.2421743 ms`. Refresh p95 is safely below the fixed 400 ms limit.
+- External `log/` remains byte-identical, and compact evidence, manifest/config, detailed counters,
+  invalidation reasons, command/exits and lifecycle evidence are retained under ICRA-035.
+- Verdict: `ICRA035_REVIEW_PASS_GATE0B_QUALIFIED`. This promotes only P0 Gate-0B. Exact sigma/profile
+  remains provisional; it is not empirical calibration or full IAP-RQ-322 completion.
+
+### Artifact lifecycle
+
+- During review, the retained ICRA-035 `build_iap`, `install`, `build_ego` and `install_ego` trees were
+  approximately 4.3 GiB total and contained no tracked files. After Review PASS and pushed evidence,
+  documentation and handoff, Supervisor permanently deleted exactly those four reproducible trees in
+  accordance with the operator lifecycle policy.
+- Benchmark JSONL, manifests, GPU/process/preflight evidence, logs, analyzer outputs, source, tests and
+  the PDF remain present. Their reviewed health/integrity/manifest/summary hashes remain
+  `4ddedfda…8545`, `8ef1774d…83f`, `28de1936…d2e5` and `21f967ed…828`.
+
+### Required next action
+
+- Unique task: `ICRA-036 / P4_G0A`, defined in `NEXT_TASK.md`; active role is `DEEPSEEK`, state
+  `TASK_READY`.
+- Add only a deterministic collision-scan fixture, CMake test registration and a compileable,
+  intentionally RED contract suite. Freeze no/closed/open-ended/invalid/multiple-obstacle behavior,
+  free endpoints and entry-before-two-thirds/exit-after-two-thirds truth before any production edit.
+- Existing tests must remain green; the new target may fail only for the documented missing explicit
+  scan contract. No production header/source, P4 guide, P5, GPU/ROS/live flow, cleanup or Gate
+  promotion is authorized. ICRA-036 build/install must remain through Supervisor review.
+
 ## 2026-08-23 — ICRA-034 review PASS and ICRA-035 fixed benchmark authorization
 
 ### Review identity and synchronization

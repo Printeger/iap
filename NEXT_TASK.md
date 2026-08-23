@@ -1,135 +1,135 @@
-# ICRA-035 — Run the fixed 60-second P0 Gate-0B benchmark once
+# ICRA-036 — Freeze the deterministic P4 collision-scan RED fixture
 
-> Active gate: `GATE_0B`
+> Active gate: `P4_G0A`
 > Owner: `DEEPSEEK`
 > Activation: `TASK_READY`
-> Supervisor verdict: `ICRA034_REVIEW_PASS_SMOKE_PREREQUISITE_QUALIFIED`
-> Requirement mapping: `IAP-RQ-320`, `IAP-RQ-321`, `IAP-RQ-322`
+> Supervisor verdict: `ICRA035_REVIEW_PASS_GATE0B_QUALIFIED`
+> Requirement mapping: `IAP-RQ-423`
 > Conference route: conditional P0 -> P4 -> P5
-> This task: fresh task-local build/linkage, one frozen P0-only benchmark, one analyzer
+> This task: test-only deterministic collision fixture and reviewed RED contract; no production change
 
 ## Supervisor decision
 
-ICRA-034 passes Standards and Spec review with zero findings. Its sole guarded reanalysis of immutable
-ICRA-033 smoke evidence exits 0/PASS: 31 observations, 16 completed attempts, 14 strict successful
-76,800-query generations, two coherent typed startup failures, three in-progress observations,
-12 equivalent duplicates, zero conflicts and 166/166 valid integrity reports. The raw input hashes
-and byte counts remain exact. Refresh/provider/generation-interval p95 is approximately
-`194.485/150.429/506.176 ms`.
+ICRA-035 passes Standards and Spec review with zero findings. Its single fixed Gate-0B benchmark
+passes all preflights, process checks and analyzer acceptance: 103 strict successful generations,
+exact 76,800-query shape, 607/607 valid integrity reports and refresh p95 `184.1007665 ms` against the
+400 ms limit. Runner and analyzer each ran once with no retry, bag or remaining process. P0 Gate-0B is
+therefore qualified.
 
-The P0 smoke prerequisite is now qualified. Gate-0B itself remains open because the separately frozen
-60/55-second benchmark has not run against the current implementation. ICRA-035 shall make no product,
-analyzer, test, launch, runner, capture or configuration change. It shall build the reviewed HEAD into
-fresh task-local artifacts, prove the frozen contract, then run exactly one benchmark and one analyzer.
+The route now advances only to P4-G0A. The active ICRA plan requires the first P4 task to submit a
+deterministic, test-only RED collision fixture before changing production collision or guide logic.
+ICRA-036 must freeze inputs and expected scan outcomes, prove that existing behavior lacks the planned
+explicit contract, and stop. A later Supervisor-authorized task will implement production behavior.
 
 ## 1. Synchronize, preserve and declare the boundary
 
 - Follow `AGENTS.md` synchronization. Stop as `REMOTE_DIVERGED` if both sides lead; never reset,
   clean, stash, rebase, amend pushed history or overwrite another role's work.
-- Preserve the untracked PDF and all tracked historical evidence. Do not edit, delete, move, stage,
-  regenerate or conceal them. Treat ICRA-033 raw input and ICRA-034 reanalysis as immutable references.
-- ICRA-033 task-local build/install trees were deleted by Supervisor after Review PASS. Do not depend
-  on, recreate or write into their old paths. ICRA-034 created no build/install.
-- Put every new build/install/log/tmp/ROS/run/evidence artifact below `results/icra27/icra035/`.
-  Record one START entry in `DEV_LOG.md` with exact paths, allowlist, build/linkage matrix, frozen
-  configuration, one-shot commands and stop line. Do not edit Supervisor-owned files.
-- Retain all ICRA-035 build/install trees throughout development and Supervisor review. Builder is not
-  authorized to clean them; after Review PASS and pushed code/documentation, cleanup is Supervisor-only.
+- Preserve the untracked PDF, ICRA-035 Gate evidence and all historical evidence. Do not edit, delete,
+  move, stage, regenerate or write into them. ICRA-035 build/install trees were deleted by Supervisor
+  after Review PASS; do not recreate or depend on those paths.
+- Put all ICRA-036 build/install/log/tmp/test/review evidence below `results/icra27/icra036/`.
+  Retain task build/install through development and Supervisor review. Cleanup is Supervisor-only
+  after Review PASS and pushed code/documentation.
+- Add one START entry to `DEV_LOG.md` with the exact allowlist, fixture table, expected RED cases,
+  current known behavior and stop line. Do not edit Supervisor-owned files or choose another task.
 
-## 2. Fresh build, tests and linkage before live execution
+## 2. Freeze deterministic collision cases
 
-No source correction is authorized in this qualification task. Command/environment mistakes before
-live execution may be corrected and rerun only when fully disclosed; any product, test, configuration,
-linkage or retained-dependency defect returns `BLOCKED` without GPU/ROS.
+Add one deterministic fixture with fixed seed/control-point positions and a fixed occupancy oracle or
+task-local map. It must have no randomness, wall-clock dependence, ROS message timing, GPU, live map,
+P0 query or external file dependence. Freeze every sample position, occupancy state and expected
+segment endpoint index in the test source or a small test-only fixture file.
 
-- Configure/build/install current IAP into task-local `build_iap`, `install` and `log` paths. Build and
-  install current `ego_planner` into task-local `build_ego` and `install_ego`, resolving current IAP
-  plus the unchanged retained ICRA-026 plan-env/path-searching/bspline dependencies read-only.
-- Run the complete existing affected P0 runtime, RiskGrid, rolling, occupancy, analyzer, runner,
-  capture and launch suites needed to prove the reviewed code and evidence path. Do not modify a test
-  to obtain PASS.
-- Prove direct and ament linkage resolves ICRA-035 IAP/EGO and the intended retained dependency
-  prefixes, with no workspace-default, deleted ICRA-033, build-tree, missing or stale product library.
-- Freeze and hash the installed launch/runtime inputs and effective benchmark configuration before
-  GPU/ROS. The exact contract is CPU mapping backend, worker count 4, runtime/validation 60/55 seconds,
-  `30 x 30 x 6 m`, resolution `0.75 m`, horizons `0.0..2.5 s` at `0.5 s`, refresh `0.5 s`, occupied
-  skip enabled, no bag, no RViz, safety off, P1/P2/P3/P4/P5 disabled, and exact provisional
-  `0.01 m/sqrt(s)` with profile `legacy_iap_rq320_baseline_v1`.
-- Require capture readiness for `/planning/risk_grid_health` and `/iap/integrity`, task-local logs,
-  exact 76,800 logical queries, the benchmark minimum of 20 successful generations and p95 limit
-  400 ms. Preserve the explicit attempt/result/active evidence schema from ICRA-033/034.
+The fixture suite must cover all of the following independently:
 
-Any build, test, linkage, hash, frozen-config, output-path, dependency or capture-preparation failure
-stops before live execution. Do not switch backend, tune, repair code or loosen validation.
+- `NO_COLLISION`: all relevant samples free and no segment returned.
+- `CLOSED_SEGMENTS`: one `free -> occupied -> free` segment with both returned endpoints proven free
+  and at least one occupied sample strictly between them.
+- Entry in the first two-thirds with exit in the final third: entry is a trigger window only; scanning
+  must continue to the seed tail and return the complete closed segment.
+- `OPEN_ENDED_COLLISION`: a valid entry in the trigger window with no free exit by the seed tail. It
+  must not become `NO_COLLISION`, must not invent an occupied endpoint and must expose no consumable
+  closed segment.
+- `INVALID_INPUT`: empty/non-finite/structurally invalid seed or unavailable occupancy truth returns an
+  explicit invalid result without fabricating a normal scan outcome.
+- Multiple closed obstacles are returned in scan order with non-overlapping free endpoints.
+- A closed segment followed by an open-ended entry returns overall `OPEN_ENDED_COLLISION`; previously
+  found partial segments are not consumable by the planner.
 
-## 3. Mandatory GPU preflight and exactly one benchmark
+The frozen expected status vocabulary is exactly `NO_COLLISION`, `CLOSED_SEGMENTS`,
+`OPEN_ENDED_COLLISION`, `INVALID_INPUT`. Do not introduce guide planning, risk scoring, fallback,
+threshold, lineage or P5 expectations into this fixture.
 
-Only after Section 2 passes, invoke exactly once:
+## 3. Add a compileable, intentionally RED production contract suite
 
-`python3 scripts/dev_planner/run_gate0_qualification.py --output-root results/icra27/icra035/runs --benchmark`
+- Add one focused C++ test target under the existing `bspline_opt` test package and the smallest CMake
+  registration needed to build it. Production headers and sources must remain byte-identical.
+- Exercise the current collision scan through the narrowest existing callable surface. A test-local
+  observer may translate only values the legacy API truthfully exposes; it must not copy/reimplement
+  the desired scan algorithm, infer an open/invalid status from fixture expectations, synthesize free
+  endpoints or contain a hidden passing reference implementation.
+- The new target must compile and execute. RED must be assertion-level evidence of the missing contract,
+  not a missing include/symbol, linker error, crash, timeout, ROS/environment failure or brittle source
+  text inspection.
+- Freeze fixture inputs and expected assertions so the subsequent production task can make the suite
+  green without changing cases or expected outcomes. A future adapter may call the new production
+  result type, but may not rewrite the registered fixture or weaken assertions.
+- Existing behavior is expected to collapse open-ended/invalid states into an empty/undifferentiated
+  result and to stop initial scanning at the old two-thirds boundary. Record the exact observed RED
+  failures; do not change production code to repair them in ICRA-036.
 
-- The runner must complete mandatory GPU preflight before capture or ROS: `nvidia-smi` must discover a
-  GPU, CUDA Driver API `cuInit(0)` must succeed and `device_count >= 1`. A failure records
-  `GPU_NOT_READY`, starts no ROS and ends ICRA-035 without retry.
-- Launch dependency, qualification-config, task-local-log and capture-readiness preflights must pass
-  before the main flow. Required processes must be observed as launch descendants and remain alive
-  throughout runtime. Controlled shutdown is not runtime death.
-- The benchmark configuration is immutable before and after launch. Do not change ROI, resolution,
-  horizons, refresh period, worker count, sigma, backend, occupied skip, duration, validation window,
-  topic QoS or any feature switch.
-- Stop after the one runner regardless of its result. No second benchmark, alternate output root,
-  wait/retry loop, post-live source correction or tuning is authorized.
+At minimum, fixture integrity, `NO_COLLISION` and any currently correct closed/free-endpoint cases must
+pass. The intended contract target must fail only on the explicitly named missing behaviors. Any
+unrelated assertion, compile, link, sanitizer, process or nondeterminism failure invalidates the RED
+evidence and must be corrected within test/CMake scope before handoff.
 
-## 4. Exactly one analyzer and Gate-0B acceptance
+## 4. Build and verify the RED boundary
 
-If the one runner produced sufficient live evidence, invoke exactly once:
+- Create fresh task-local current IAP and current `bspline_opt` build/install artifacts as needed,
+  using the unchanged retained ICRA-026 plan-env/path-searching dependencies read-only. Prove linkage
+  resolves the current task and intended retained prefixes, never workspace-default, deleted
+  ICRA-035, missing, stale or build-tree product libraries.
+- Run all existing `bspline_opt`, relevant path-searching P4 and occupancy-epoch tests separately and
+  require them to remain green.
+- Run the new target separately and require deterministic reproduction of the exact registered RED
+  test names and reasons. Repeat only the test target as needed before finalizing the fixture; this is
+  static test development, not a live exactly-once experiment. Disclose all attempts.
+- Run `git diff --check`, compile checks and an allowlist audit. Record the green baseline separately
+  from the intentional RED target; never describe an overall nonzero CTest exit as an unrelated build
+  failure or as production PASS.
 
-`python3 scripts/dev_planner/gate0_analyzer.py --gate0-root results/icra27/icra035/runs --output-dir results/icra27/icra035/runs/benchmark/analyzer`
-
-- Guard and record the sole analyzer invocation, exact stdout/stderr and exit code. Stop after it
-  regardless of outcome; do not overwrite or rerun it.
-- PASS requires runner exit 0, analyzer exit 0/PASS, no required-process runtime failure, valid frozen
-  manifest/config/linkage, at least one captured valid integrity report, at least 20 distinct strict
-  successful result generations, and every success having exactly 76,800 logical queries, finite
-  refresh/provider timing, complete counter algebra and coherent source/snapshot evidence.
-- Type-7 refresh p95 must be `<= 400 ms`. Retain p50/p95/max, provider timing, generation interval,
-  p95/500 ms, stale/failed ratio, actual provider dispatch, spatial recompute/reuse, GNSS/LiDAR
-  invocation, horizon fusion, window shift/full-rebuild reasons, typed completed failures,
-  in-progress observations and duplicate/conflict counts.
-- Fewer than 20 successes, wrong shape, invalid/zero integrity, non-finite evidence, p95 above 400 ms,
-  schema conflict, process failure or manifest/config mismatch is a truthful Gate failure. Do not
-  reinterpret it as environment success or tune and retry.
-- Exact `0.01` and the profile remain provisional even on PASS. This benchmark is not empirical
-  covariance calibration or full IAP-RQ-322 completion.
+No GPU preflight, ROS, launch, runner, analyzer CLI, smoke, benchmark or campaign is authorized.
 
 ## 5. Documentation and handoff
 
-- Update `docs/CHANGES.md`, `docs/TRACEABILITY.md` and `DEV_LOG.md` with build/test/linkage/preflight
-  commands and exits, immutable configuration hashes, runner/analyzer invocation counts, metrics,
-  process cleanup audit and truthful PASS/BLOCKED result.
-- Stage only compact ICRA-035 evidence required to reproduce the verdict: preflight/config/linkage
-  records, runner manifest, capture readiness, health/integrity JSONL, bounded stdout/capture logs,
-  runtime manifest and analyzer CSV/JSON/effective-config outputs. Do not stage build/install, large
-  truth CSV, ROS logs unrelated to the verdict or the protected PDF.
-- Terminate only ROS processes proven to have been started by ICRA-035; record that none remain. Do
-  not terminate unrelated user processes.
-- Commit and push evidence/documentation, then commit and push one final `DEV_LOG.md`-only handoff.
-  Every commit must carry applicable `IAP-RQ-320`, `IAP-RQ-321` and/or `IAP-RQ-322`.
-- Builder may not declare Supervisor Review PASS, delete build/install, promote Gate-0B, authorize P4,
-  execute P4/P5, start a campaign or select another task. Return to Supervisor review after push.
+- Update `docs/CHANGES.md`, `docs/TRACEABILITY.md` and `DEV_LOG.md` with `IAP-RQ-423`, exact fixture
+  cases, expected/observed statuses, build/linkage, green baseline, intentional RED names and commands.
+- Stage only the test/CMake changes and compact ICRA-036 review evidence. Do not stage build/install,
+  large logs, historical evidence or the protected PDF.
+- Commit and push the test/CMake/evidence/documentation changes, then commit and push one final
+  `DEV_LOG.md`-only handoff. Every commit must contain `IAP-RQ-423`.
+- Builder must report `P4_G0A_RED_READY_FOR_REVIEW`, not production PASS or Gate promotion. It may not
+  implement the missing collision contract, edit Supervisor state, delete build/install, authorize
+  the next task, begin P4 dual-guide work or execute P5.
 
 ## Allowed files
 
-- new task-local build/install/log/tmp/ROS/run/review evidence below `results/icra27/icra035/`, with
-  only compact verdict evidence staged;
+- `src/iap/planner/bspline_opt/CMakeLists.txt`, only for the new test target;
+- new deterministic test and small fixture/helper files below
+  `src/iap/planner/bspline_opt/test/`;
+- new task-local build/install/log/test/review evidence below `results/icra27/icra036/`, with only
+  compact review evidence staged;
 - `DEV_LOG.md`;
 - `docs/CHANGES.md`;
 - `docs/TRACEABILITY.md`.
 
 ## Forbidden
 
-- No source, header, test, analyzer, runner, capture, launch, config, CMake or product change.
-- No writes into ICRA-033/034 or retained ICRA-026 dependencies; no historical/PDF/external-repository
-  edit, move, delete or staging.
-- No workload/backend/sigma/profile/threshold/QoS tuning, benchmark/analyzer retry, smoke, rosbag,
-  RViz, 60-run campaign, P1/P2/P3/P4/P5 execution, Gate promotion or artifact cleanup.
+- No modification to any production header/source, plan-env/path-searching/runtime behavior, launch,
+  runner, analyzer, capture, config, requirement/scope/plan/gate or Supervisor-owned file.
+- No implementation of `CollisionScanStatus`, new production scan API, P4 request/decision, original
+  or risk A*, 200-point profile, selection/fallback, control-point injection, lineage or P5 behavior.
+- No GPU, ROS, live map, smoke, benchmark, bag/RViz, tuning, threshold calibration, live
+  P1/P2/P3/P4/P5 pipeline execution, campaign, historical/PDF/external-repository change or artifact
+  cleanup.
