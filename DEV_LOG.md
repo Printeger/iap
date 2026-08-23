@@ -3608,3 +3608,116 @@ GPU/CUDA preflight, ROS flow, simulator, capture, smoke, live analyzer,
 benchmark, qualification/campaign, P4/P5 work, cleanup, Gate promotion or
 next-task selection ran. **ICRA-029 returns BLOCKED on the unexpected opaque
 inventory file; Gate-0B remains NOT_QUALIFIED pending Supervisor review.**
+
+## 2026-08-23T12:18:06Z — ICRA-030 START
+
+Synchronized `dev/icra` at
+`0e1d4cafb2d110b8f19bdd5840371a2254bb04b4`; `HEAD...origin/dev/icra` is
+`0 0`. The protected PDF, historical evidence, ignored ICRA-026 leak,
+ICRA-029 scratch evidence and all retained build/install trees are
+preservation-only. Every new run/log/tmp/ROS/evidence path is bounded below
+`results/icra27/icra030/`; no ICRA-030 build/install tree will be created.
+
+The exact artifact mapping is IAP from retained ICRA-028
+`build_iap`/`install` and plan-env/path-searching/bspline/EGO from retained
+ICRA-026 build/install pairs. To satisfy the unchanged runner's sibling-prefix
+identity check without copying or modifying artifacts, the task-local plumbing
+names `results/icra27/icra030/install` and `install_ego` will be symlinks to
+the exact retained ICRA-028 IAP and ICRA-026 EGO installs; `.resolve()` and the
+active ament index must still identify the retained targets. The literal
+environment sources `/opt/ros/jazzy/setup.bash`, then
+`/home/dev/ws_iap/install/setup.bash`, and prepends retained ICRA-028 IAP then
+retained ICRA-026 EGO/bspline/path-searching/plan-env prefixes and libraries.
+
+The exact planned commands are:
+`bash results/icra27/icra030/precheck.sh` for correctable engineering
+prechecks; after static PASS only,
+`python3 scripts/dev_planner/run_gate0_qualification.py --output-root
+results/icra27/icra030/runs --smoke` exactly once; and, only if live capture
+evidence exists, `python3 scripts/dev_planner/gate0_analyzer.py --gate0-root
+results/icra27/icra030/runs --output-dir
+results/icra27/icra030/runs/smoke/analyzer` exactly once. Runner and analyzer
+stdout plus exit codes will be retained below ICRA-030.
+
+Explicit stop line: correctable command/evidence-plumbing prechecks may be
+fixed and rerun with every attempt retained, but a real artifact, dependency
+or product defect stops before GPU/ROS. After all prechecks PASS, consume at
+most one runner invocation. GPU or dependency preflight failure starts no ROS
+and stops without retry; once live capture is reached, run one analyzer even
+if the runner is nonzero, then stop regardless of result. No environment
+correction or retry after the runner, no product/test/config/default change,
+configure/build/install/relink, alternate artifact, parameter/backend/worker/
+workload change, 60-second benchmark, qualification/campaign, bag/RViz,
+tuning, P4/P5 work, cleanup, Gate promotion or next-task selection is
+permitted.
+
+## 2026-08-23T12:29:44Z — ICRA-030 SINGLE SMOKE / BLOCKED
+
+Precheck attempt 01 exited 0. It proved the required ICRA-028 `libiap.so`
+hash `92754f9f…0f616f`, ICRA-026 `libplan_env.so` hash
+`360cf23a…f46447`, exact retained artifact mapping, the 12-package active
+ament closure, semantic direct-consumer linkage without missing/build/stale/
+workspace-default IAP or plan-env resolution, the complete frozen smoke
+configuration, future task-local IAP log/timing paths and zero task processes.
+No correction or precheck rerun was needed; no configure, build, install or
+relink command ran and no ICRA-030 build/install tree exists.
+
+The one authorized runner command was
+`python3 scripts/dev_planner/run_gate0_qualification.py --output-root
+results/icra27/icra030/runs --smoke`. It ran exactly once and exited 0.
+Mandatory GPU preflight passed on one RTX 4070 Ti SUPER, driver 580.126.09;
+both `nvidia-smi` calls exited 0, CUDA records `cuInit_result=0` and
+`device_count=1`. Dependency preflight and capture readiness passed.
+`iap_rosnode` was seen with no runtime failure and remained valid until its
+expected controlled shutdown. The frozen CPU/worker-4/20–15 s/30×30×6 m/
+0.75 m/six-horizon/0.5 s/occupied-skip/no-bag/no-RViz/safety-off/P1–P5-
+disabled configuration remained exact.
+
+The one formal analyzer command was
+`python3 scripts/dev_planner/gate0_analyzer.py --gate0-root
+results/icra27/icra030/runs --output-dir
+results/icra27/icra030/runs/smoke/analyzer`. It ran exactly once and exited
+1. All 208 integrity rows are valid, but all 27 final callback
+representatives are `invalid_covariance_growth_parameter`, `ready=false`,
+generation 0 and zero queries. The analyzer truthfully returns
+`P0_INPUT_AVAILABILITY_FAIL`, zero successful 76,800-query generations,
+`zero_successful_generations`, `fewer_than_required_successful_generations`
+and `refresh_query_shape_mismatch`, with no recommendation. The ICRA-027
+clock/log repair therefore removes the prior observed stale-clock/log escape
+symptoms but exposes this new first scientific input blocker; it does not
+qualify P0.
+
+Post-run evidence confirms 34 actual IAP log files and one actual timing CSV
+below the task runtime, no bag, zero remaining task processes and the exact
+external repository `log/` identity unchanged at aggregate
+`a07fbf7945ec9800e95f6ef49d0d9c8bbdee8e2e8ff1500f919e1037cc4221f0`,
+43,763 files and 15,834,674,969 bytes. Post-run attempt 01's five audit groups
+all exited 0, but its outer `tee` opened before the script created the
+attempt directory and did not retain combined stdout. That evidence-command
+plumbing mistake was corrected by parameterizing/precreating attempt 02;
+attempt 02 again passed all five read-only groups and retained complete
+stdout. Neither attempt invoked the live runner or analyzer.
+
+Per the one-shot fail-closed rule there was no runner/analyzer retry,
+post-live environment correction, parameter/backend/worker/workload change,
+product/test/config/default change, 60-second benchmark, qualification/
+campaign, bag/RViz, tuning, P4/P5 work, cleanup, Gate promotion or next-task
+selection. **ICRA-030 returns BLOCKED; Gate-0B remains NOT_QUALIFIED pending
+Supervisor review.**
+
+## 2026-08-23T12:35:42Z — ICRA-030 BUILDER TWO-AXIS REVIEW
+
+The required Builder Standards and Spec reviews inspected the current staged
+diff against task-start commit
+`0e1d4cafb2d110b8f19bdd5840371a2254bb04b4`. Both reviews returned PASS with
+no findings. They ran read-only and did not invoke smoke, analyzer, ROS, GPU,
+build, tests or any evidence-producing script.
+
+The Spec review independently confirmed the exact allowlist, precheck gating,
+one runner and one analyzer guard/command/exit record, GPU/dependency/capture/
+process/log evidence coherence, attempt-01/02 post-run disclosure, exact
+27/27 covariance-growth failure and 208/208 valid-integrity classification,
+and the truthful `BLOCKED / Gate-0B NOT_QUALIFIED` conclusion. The Standards
+review confirmed fail-closed reporting, protected-PDF preservation, no
+Supervisor/product/test/config/runner/analyzer/build/retained-artifact edit,
+and a clean staged whitespace check.

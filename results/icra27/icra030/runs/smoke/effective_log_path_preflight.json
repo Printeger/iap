@@ -1,0 +1,12 @@
+{
+  "checked_utc": "2026-08-23T12:22:27Z",
+  "derived_timing_path": "/home/dev/ws_iap/src/iap/results/icra27/icra030/runs/smoke/runtime/iap_logs/profiling/iap_timing.csv",
+  "effective_log_paths_ready": true,
+  "failure_reason": "",
+  "failure_reasons": [],
+  "requested_log_root": "/home/dev/ws_iap/src/iap/results/icra27/icra030/runs/smoke/runtime/iap_logs",
+  "required_runtime_dir": "/home/dev/ws_iap/src/iap/results/icra27/icra030/runs/smoke/runtime",
+  "run_dir": "/home/dev/ws_iap/src/iap/results/icra27/icra030/runs/smoke",
+  "schema_version": "gate0_effective_log_path_preflight_v1",
+  "supplied_runtime_root": "/home/dev/ws_iap/src/iap/results/icra27/icra030/runs/smoke/runtime"
+}

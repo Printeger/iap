@@ -1,0 +1,131 @@
+ICRA-030 / GATE_0B replacement-smoke verification summary
+========================================================
+
+Outcome
+-------
+
+BLOCKED / Gate-0B NOT_QUALIFIED. The one authorized P0 smoke reached live
+capture and the runner exited 0, but the one formal analyzer exited 1 with
+P0_INPUT_AVAILABILITY_FAIL. All 27 final callback representatives have
+reason=invalid_covariance_growth_parameter, ready=false, generation_id=0 and
+refresh_query_count=0. There is no successful 76,800-query generation.
+
+Synchronization and retained artifacts
+--------------------------------------
+
+Task-start HEAD: 0e1d4cafb2d110b8f19bdd5840371a2254bb04b4
+Task-start HEAD...origin/dev/icra: 0 0
+
+The task reused the ICRA-028 IAP and ICRA-026 planner artifacts read-only.
+No configure, build, install or relink command ran and no ICRA-030 build or
+install tree was created. The task-local `install` and `install_ego` names are
+symlink plumbing only; their resolved targets are the retained ICRA-028 IAP
+and ICRA-026 EGO installs.
+
+Retained hashes, checked before and after the live run:
+
+92754f9fdc7a1a7492c3cc895ca112adc0a121a025ca5756b259378edd0f616f  results/icra27/icra028/install/lib/libiap.so
+360cf23a8d4b1f2add6a5e1f59f47d936039b3ca61aee1bde0a644c542f46447  results/icra27/icra026/install_plan_env/lib/libplan_env.so
+
+Pre-live checks
+---------------
+
+Exactly one precheck attempt ran:
+
+bash results/icra27/icra030/precheck.sh
+
+attempt_01 exit: 0
+
+The attempt proves both retained hashes, exact symlink targets, a 12-package
+active ament closure, exact ICRA-028 IAP plus ICRA-026 EGO/plan-env/
+path-searching/bspline resolution, and semantic direct-consumer linkage with
+no missing, build-tree, stale-task or workspace-default IAP/plan-env
+resolution. It also proves the frozen CPU mapping, worker 4, 20/15-second,
+30 x 30 x 6 m, 0.75 m, six-horizon, 0.5-second refresh, occupied-skip,
+no-bag/no-RViz, safety-off, P1-P5-disabled configuration and a 76,800-query
+shape. The pre-existing repository `log/` identity and a zero task-process
+state were captured before live execution.
+
+Exactly one runner and analyzer
+-------------------------------
+
+Runner command, invoked exactly once:
+
+python3 scripts/dev_planner/run_gate0_qualification.py --output-root results/icra27/icra030/runs --smoke
+
+Runner exit: 0
+
+GPU preflight passed on NVIDIA GeForce RTX 4070 Ti SUPER, driver 580.126.09.
+Both nvidia-smi calls returned 0; CUDA Driver API recorded cuInit_result=0,
+cuDeviceGetCount_result=0 and device_count=1. Launch-dependency preflight
+passed before capture/launch. Capture readiness is true with capture exit 0.
+The runner records launch_started=true, required_processes_ok=true and
+iap_rosnode seen=true/runtime_failure=false; its only process-failure record
+is the expected controlled shutdown after 25.901662 seconds.
+
+Analyzer command, invoked exactly once on the immutable smoke evidence:
+
+python3 scripts/dev_planner/gate0_analyzer.py --gate0-root results/icra27/icra030/runs --output-dir results/icra27/icra030/runs/smoke/analyzer
+
+Analyzer exit: 1
+
+The analyzer selected 27/27 callback representatives. All 208 integrity
+reports are valid, but there are zero successful generations and the expected
+76,800-query shape is absent. The exact failures are
+zero_successful_generations, fewer_than_required_successful_generations and
+refresh_query_shape_mismatch. The classification is
+P0_INPUT_AVAILABILITY_FAIL and recommendations is empty. Direct inspection
+of the retained raw health rows identifies the new first blocker as 27/27
+invalid_covariance_growth_parameter, rather than the ICRA-026
+occupancy_stale result.
+
+Runtime/log/process closure
+---------------------------
+
+The effective IAP log root, root config, referenced logging config and timing
+path are strict descendants of
+results/icra27/icra030/runs/smoke/runtime/. The retained runtime contains 34
+actual IAP log files and one actual iap_timing.csv below that root. No bag was
+created. The post-run task process audit reports zero matches.
+
+The repository `log/` identity is byte-for-byte unchanged:
+
+before: aggregate=a07fbf7945ec9800e95f6ef49d0d9c8bbdee8e2e8ff1500f919e1037cc4221f0 count=43763 bytes=15834674969
+after:  aggregate=a07fbf7945ec9800e95f6ef49d0d9c8bbdee8e2e8ff1500f919e1037cc4221f0 count=43763 bytes=15834674969
+
+Post-run audit attempt disclosure
+---------------------------------
+
+attempt_01: the audit itself passed and wrote its structured evidence, but
+the outer tee opened before the script created attempt_01, so the combined
+stdout_stderr.log was not created. This was an evidence-command plumbing
+mistake only; it did not invoke the runner or analyzer.
+
+attempt_02: after parameterizing the audit output directory and creating it
+before tee, all five read-only audit groups passed: evidence contract,
+external-log identity, retained hashes, zero task processes and canonical
+evidence hashes. The combined output and exit 0 are retained. No live command
+was rerun.
+
+Canonical live-evidence SHA-256
+------------------------------
+
+4a07e0880ec810391e7922aad8c0f6648954dd67336f4e5b2b8fda5a3f376bd4  runs/gpu_preflight.json
+4875712d927a4e8a8160d266ba68c77d6ac9c32f04c84f76b4dd354ac3533150  runs/launch_dependency_preflight.json
+62e548acb82b9031c5dcd38212b7e8a986299e9cf149250d4b005263dbe90d2e  runs/smoke/capture_ready.json
+76e8ac3566fabce8e06d512417b7c1e3f0a5e3cf59e7a97a88ef8971e284f622  runs/smoke/gate0_run_manifest.json
+1ad306f02bd9c695613f4b09ca8e1dae2f2385b70d25dea70e3d47462685835d  runs/smoke/risk_grid_health.jsonl
+ead61062c6c84dbf4951c2caa575ce6b6d1c862b252410640e7248df8ea6ed4a  runs/smoke/integrity_report.jsonl
+cdaf3a4a26bc9ce51e404fb4e572a06f4dbd331803601dac76ac75112d36356f  runs/smoke/analyzer/gate0_analysis.json
+ec99c35ce6169ea6176cab54d90c87e9b45dd21675afa40471c14dba3a236c23  runs/smoke/analyzer/p0_smoke_summary.json
+5db3a2651f7d9a51f8a823999ca9c23612035342ba7f6cf5a11ae8b8daa24742  runs/smoke/analyzer/p0_smoke_benchmark.csv
+c8c0cf82a4c30889cf2a299ddf95ad8fc077f8b74139c4ef5097f7342f252029  runs/smoke/analyzer/effective_config.json
+
+Stop boundary
+-------------
+
+No runner retry, analyzer retry, environment correction after live start,
+parameter/backend/worker/workload change, product/test/config/default change,
+60-second benchmark, qualification/campaign, bag/RViz, tuning, P4/P5 run,
+cleanup, Gate promotion or next-task selection occurred. Builder reports this
+BLOCKED result for Supervisor review and makes no Review PASS declaration.

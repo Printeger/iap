@@ -1,5 +1,22 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-23 ICRA-030 clock/log-repair replacement smoke
+
+| Req ID | Requirement/evidence seam | Implementation and focused evidence | Status |
+|---|---|---|---|
+| IAP-RQ-311 / IAP-RQ-320 / IAP-RQ-322 | Reuse only accepted retained artifacts in one exact launch environment | Precheck attempt 01 verifies the frozen ICRA-028 `libiap.so` and ICRA-026 `libplan_env.so` hashes, exact ament identity for IAP and four planner packages, all required launch packages, and semantic direct-consumer linkage without missing/build/stale/workspace-default IAP or plan-env resolution | **PASS / no rebuild or relink** |
+| IAP-RQ-320 / IAP-RQ-322 | GPU, dependency and capture readiness must pass before one live P0 smoke | RTX 4070 Ti SUPER, both `nvidia-smi` commands exit 0, `cuInit(0)=0`, one CUDA device; dependency closure and capture are ready; runner exit 0; `iap_rosnode` is seen with no runtime failure and only controlled-shutdown disposition | **PASS / runner invoked once** |
+| IAP-RQ-311 / IAP-RQ-320 | The repaired clock path must produce at least one final valid 76,800-query generation | 208/208 integrity reports are valid, but all 27 final health representatives are `invalid_covariance_growth_parameter`, generation 0 and zero queries. The sole analyzer exits 1 with `P0_INPUT_AVAILABILITY_FAIL`, three exact availability/query-shape failures and no recommendation | **BLOCKED / no live retry** |
+| IAP-RQ-320 / IAP-RQ-322 | Effective logging, actual runtime output and process lifecycle must remain task-local | Root/referenced logging configs, IAP log root, 34 actual log files and actual timing CSV are below ICRA-030 runtime; no bag exists; external `log/` before/after identity is exactly unchanged; post-run task-process count is zero | **PASS** |
+
+Exact commands, exits, attempt disclosure, canonical hashes and bounded evidence
+are recorded in `results/icra27/icra030/verification_summary.txt`. The
+post-run audit was repeated only to correct its outer `tee` directory timing;
+the runner and analyzer were each invoked exactly once. No product/test/config
+change, configure/build/install/relink, retry, benchmark, qualification,
+P4/P5 run, cleanup or Gate promotion occurred. Gate-0B remains
+`NOT_QUALIFIED` pending Supervisor review.
+
 ## 2026-08-23 ICRA-028 production publication seam and verification repair
 
 | Req ID | Requirement/evidence seam | Implementation and focused evidence | Status |

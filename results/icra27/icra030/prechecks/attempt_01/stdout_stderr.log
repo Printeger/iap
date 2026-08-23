@@ -1,0 +1,31 @@
+BEGIN artifact_hashes
+COMMAND bash -c $'\n  printf "%s  %s\\n" \\\n    92754f9fdc7a1a7492c3cc895ca112adc0a121a025ca5756b259378edd0f616f results/icra27/icra028/install/lib/libiap.so \\\n    360cf23a8d4b1f2add6a5e1f59f47d936039b3ca61aee1bde0a644c542f46447 results/icra27/icra026/install_plan_env/lib/libplan_env.so \\\n    | sha256sum -c -\n'
+END artifact_hashes exit=0
+BEGIN artifact_mapping
+COMMAND bash -c $'\n  test -L results/icra27/icra030/install\n  test -L results/icra27/icra030/install_ego\n  test "$(readlink -f results/icra27/icra030/install)" = \\\n    /home/dev/ws_iap/src/iap/results/icra27/icra028/install\n  test "$(readlink -f results/icra27/icra030/install_ego)" = \\\n    /home/dev/ws_iap/src/iap/results/icra27/icra026/install_ego\n  printf "iap_mapping=%s\\nego_mapping=%s\\n" \\\n    "$(readlink -f results/icra27/icra030/install)" \\\n    "$(readlink -f results/icra27/icra030/install_ego)"\n'
+END artifact_mapping exit=0
+BEGIN ament_index
+COMMAND python3 /home/dev/ws_iap/src/iap/results/icra27/icra030/ament_precheck.py /home/dev/ws_iap/src/iap/results/icra27/icra030/prechecks/attempt_01/ament_environment.json
+END ament_index exit=0
+BEGIN frozen_config
+COMMAND python3 /home/dev/ws_iap/src/iap/results/icra27/icra030/config_precheck.py /home/dev/ws_iap/src/iap/results/icra27/icra030/prechecks/attempt_01/frozen_config.json
+END frozen_config exit=0
+BEGIN ldd_manager
+COMMAND ldd /home/dev/ws_iap/src/iap/results/icra27/icra028/build_iap/test_run_log_manager
+END ldd_manager exit=0
+BEGIN ldd_demo11
+COMMAND ldd /home/dev/ws_iap/src/iap/results/icra27/icra028/build_iap/demo11_corridor_map_publisher
+END ldd_demo11 exit=0
+BEGIN ldd_direct_consumers
+COMMAND bash -c $'\n  for binary in "$@"; do\n    printf "BINARY=%s\\n" "$binary"\n    ldd "$binary" || exit $?\n  done\n' _ /home/dev/ws_iap/src/iap/results/icra27/icra028/build_iap/test_rolling_spatial_advisory_window /home/dev/ws_iap/src/iap/results/icra27/icra026/build_plan_env/test_grid_map_occupancy_epoch /home/dev/ws_iap/src/iap/results/icra27/icra026/build_ego/test_p0_risk_grid_runtime /home/dev/ws_iap/src/iap/results/icra27/icra026/build_ego/test_p0_occupancy_epoch_adapter /home/dev/ws_iap/src/iap/results/icra27/icra026/build_path_searching/test_p4_risk_astar /home/dev/ws_iap/src/iap/results/icra27/icra026/build_bspline_opt/test_p1_integrity_cost /home/dev/ws_iap/src/iap/results/icra27/icra026/build_ego/test_planning_risk_context
+END ldd_direct_consumers exit=0
+BEGIN linkage_assertion
+COMMAND python3 /home/dev/ws_iap/src/iap/results/icra27/icra030/linkage_precheck.py /home/dev/ws_iap/src/iap/results/icra27/icra030/prechecks/attempt_01/ldd_manager.log /home/dev/ws_iap/src/iap/results/icra27/icra030/prechecks/attempt_01/ldd_demo11.log /home/dev/ws_iap/src/iap/results/icra27/icra030/prechecks/attempt_01/ldd_direct_consumers.log /home/dev/ws_iap/src/iap/results/icra27/icra030/prechecks/attempt_01/linkage.json /home/dev/ws_iap/src/iap/results/icra27/icra028/install/lib/libiap.so /home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/lib/libplan_env.so /home/dev/ws_iap/src/iap/results/icra27/icra028/install /home/dev/ws_iap/src/iap/results/icra27/icra026/install_ego /home/dev/ws_iap/src/iap/results/icra27/icra026/install_bspline_opt /home/dev/ws_iap/src/iap/results/icra27/icra026/install_path_searching /home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env
+END linkage_assertion exit=0
+BEGIN external_log_snapshot
+COMMAND bash -c $'\n  set -u -o pipefail\n  output=$1\n  identity=$2\n  find log -type f -print0 | sort -z | xargs -0 sha256sum > "$output"\n  aggregate=$(sha256sum "$output" | awk "{print \\$1}")\n  count=$(wc -l < "$output")\n  bytes=$(du -sb log | awk "{print \\$1}")\n  printf "aggregate=%s count=%s bytes=%s\\n" "$aggregate" "$count" "$bytes" \\\n    > "$identity"\n  cat "$identity"\n' _ /home/dev/ws_iap/src/iap/results/icra27/icra030/prechecks/attempt_01/external_log_before_files.sha256 /home/dev/ws_iap/src/iap/results/icra27/icra030/prechecks/attempt_01/external_log_before_identity.txt
+END external_log_snapshot exit=0
+BEGIN process_precheck
+COMMAND bash -c $'\n  set -u -o pipefail\n  task_root=$1\n  declare -A excluded=()\n  ancestor=$$\n  while [ "$ancestor" -gt 1 ] && [ -r "/proc/$ancestor/stat" ]; do\n    excluded[$ancestor]=1\n    ancestor=$(awk "{print \\$4}" "/proc/$ancestor/stat")\n  done\n  matches=0\n  for proc_path in /proc/[0-9]*; do\n    pid=${proc_path#/proc/}\n    [ -n "${excluded[$pid]:-}" ] && continue\n    [ -r "$proc_path/cmdline" ] || continue\n    cmdline=$(tr "\\0" " " < "$proc_path/cmdline" 2>/dev/null) || continue\n    case "$cmdline" in\n      *"$task_root"*)\n        printf "%s\\t%s\\n" "$pid" "$cmdline"\n        matches=$((matches + 1))\n        ;;\n    esac\n  done\n  printf "task_process_matches=%d\\n" "$matches"\n  test "$matches" -eq 0\n' _ /home/dev/ws_iap/src/iap/results/icra27/icra030
+END process_precheck exit=0
+ICRA030_PRECHECK_PASS

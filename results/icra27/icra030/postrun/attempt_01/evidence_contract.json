@@ -1,0 +1,54 @@
+{
+  "actual_iap_log_file_count": 34,
+  "actual_timing_files": [
+    "/home/dev/ws_iap/src/iap/results/icra27/icra030/runs/smoke/runtime/iap_logs/20260823T122227Z_684/profiling/iap_timing.csv"
+  ],
+  "analyzer_exit": 1,
+  "analyzer_gate": "P0_INPUT_AVAILABILITY_FAIL",
+  "bag_files": [],
+  "controlled_shutdown_records": [
+    {
+      "elapsed_s": 25.901662013027817,
+      "exit_code_signal": null,
+      "phase": "controlled_shutdown",
+      "process_name": "iap_rosnode",
+      "reason": "required_process_stopped_during_controlled_shutdown"
+    }
+  ],
+  "cuda": {
+    "cuDeviceGetCount_result": 0,
+    "cuInit_result": 0,
+    "device_count": 1,
+    "library": "libcuda.so.1",
+    "library_loaded": true,
+    "load_error": ""
+  },
+  "effective_logging": {
+    "log_root": "/home/dev/ws_iap/src/iap/results/icra27/icra030/runs/smoke/runtime/iap_logs",
+    "referenced_logging_config_path": "/home/dev/ws_iap/src/iap/results/icra27/icra030/runs/smoke/runtime/iap_sim_demo11_test_planner_3355036_1787487747456/sim_ego/config_logging.json",
+    "root_config_path": "/home/dev/ws_iap/src/iap/results/icra27/icra030/runs/smoke/runtime/iap_sim_demo11_test_planner_3355036_1787487747456/sim_demo11/config.json",
+    "timing_csv_path": "/home/dev/ws_iap/src/iap/results/icra27/icra030/runs/smoke/runtime/iap_logs/profiling/iap_timing.csv"
+  },
+  "evidence_ready": true,
+  "expected_refresh_query_count": 76800,
+  "failures": [],
+  "generation_counts": {
+    "0": 27
+  },
+  "gpu_ready": true,
+  "health_count": 27,
+  "iap_rosnode": {
+    "runtime_failure": false,
+    "seen": true
+  },
+  "integrity_count": 208,
+  "launch_dependencies_ready": true,
+  "reason_counts": {
+    "invalid_covariance_growth_parameter": 27
+  },
+  "required_processes_ok": true,
+  "runner_exit": 0,
+  "smoke_accepted": false,
+  "successful_generation_count": 0,
+  "valid_integrity_count": 208
+}
