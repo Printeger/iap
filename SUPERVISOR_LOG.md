@@ -1,5 +1,66 @@
 # ICRA Supervisor Log
 
+## 2026-08-23 — ICRA-028 review and ICRA-029 verifier-only authorization
+
+### Review identity and synchronization
+
+- Fixed review range: `248c7b0bb8333bbb28f8a74283d00a399211894a...f8eb5233acd70c208e9ed39e9a5c48cd059dfc7b`.
+- Reviewed commits: `ab4471e` and final DEV_LOG-only return `f8eb523`; both carry applicable
+  `IAP-RQ-311`, `IAP-RQ-320` and `IAP-RQ-322` identifiers.
+- After fetch, `HEAD` and `origin/dev/icra` matched at divergence `0 0`. The protected PDF remained
+  the sole untracked file. Changed paths match the ICRA-028 allowlist; no publisher, launch, runner,
+  analyzer, live-flow product, Supervisor-owned or external-repository file changed.
+
+### Standards axis
+
+- Verdict: `REQUEST_CHANGES`, two findings, worst High.
+- High hard violation: phase-1 added its own already-open `generated_text_whitespace.log` to grep's
+  input list. Grep emitted 22 real trailing-space matches from opaque CMake stdout, then returned
+  error 2. The two-branch `if grep` check treated that execution error as no match, recorded exit 0
+  and allowed a false phase-1 PASS. This violates the task's fail-stop evidence contract.
+- Low judgment smell: the production-shaped test repeats seven cloud declarations, the seven-way
+  variadic invocation and seven assertions across scenarios. This is accepted for now; a fixture
+  refactor is not authorized in the verifier-only repair.
+- No scope, ownership, RQ, documentation-sync, protected-PDF or branch-sync violation was found.
+
+### Spec axis
+
+- Verdict: `REQUEST_CHANGES`, one High root-cause finding.
+- The same self-referential, fail-open whitespace audit means phase 1 cannot establish its frozen
+  contract. Phase 2 was correctly not run, leaving its allowlist, staged-documentation and
+  finalization checks incomplete.
+- No product/spec defect was found in the bounded code change. The array overload is removed; the
+  exact production variadic seam covers all seven clouds, pre-authority rejection, identical stamps,
+  exact post-acceptance invalid-retention cases and monotonic advance. Linkage evidence uses the
+  correct semantic direct-consumer criterion.
+
+### Supervisor verification and environment note
+
+- Source/test-only `git diff --check` passed. Full-range `git diff --check` correctly exposes trailing
+  spaces in retained opaque CMake output and in the failed audit's captured matches; these files are
+  immutable ICRA-028 failure evidence, not product-source defects.
+- Launch unit tests pass 14/14 and runner unit tests pass 24/24. Printed GPU/dependency statuses are
+  mocked test fixtures; Supervisor ran no GPU preflight or live flow.
+- An initial direct CTest invocation omitted the retained-task library environment. `ldd` showed it
+  resolving `/home/dev/ws_iap/install/iap/lib/libiap.so`, and three ABI/symbol tests failed. This is
+  an invalid review setup, not a product result. After prepending the exact ICRA-028 install and
+  install/lib paths, `ldd` resolved `results/icra27/icra028/install/lib/libiap.so` and the selected
+  root suite passed 5/5.
+- ICRA-028's product/test changes are accepted as the static repair baseline. Overall review remains
+  `ICRA028_REVIEW_REQUEST_CHANGES`; Gate-0B remains `NOT_QUALIFIED` because verification is invalid.
+
+### Required next action and artifact lifecycle
+
+- Unique task: `ICRA-029 / GATE_0B`, defined in `NEXT_TASK.md`.
+- Repair only the verifier in new ICRA-029 evidence. Preserve accepted source/test and immutable
+  ICRA-028 evidence, reuse ICRA-028 build/install read-only, distinguish grep statuses 0/1/>1, exclude
+  audit output from operands, and complete both phases. Raw third-party output is opaque evidence;
+  the formatting gate applies only to a finite inventory of Builder-authored files.
+- No build, GPU/ROS/live flow, replacement smoke, benchmark, tuning, P4/P5 work or Gate promotion is
+  authorized. All retained ICRA-026/027/028 build/install trees remain through ICRA-029 review.
+- No build/install is deleted now because ICRA-028 Review did not pass. Cleanup becomes eligible only
+  after the repairing review passes and code/documentation/handoff are pushed.
+
 ## 2026-08-23 — ICRA-027 review and ICRA-028 static repair authorization
 
 ### Review identity and synchronization
