@@ -4725,8 +4725,8 @@ to SUPERVISOR review.
 
 ## 2026-08-23T18:42:29Z — ICRA-037 START
 
-IAP-RQ-423. Synchronized `dev/icra` at reviewed dispatch HEAD
-`da002d92d339cc55af95eea4bb19494e58b66d9c`: initial status contained only
+IAP-RQ-423. Synchronized `dev/icra` at ICRA-037 authorization HEAD
+`cc6a58a82befd23758b9ed2d0661253df34a0594`: initial status contained only
 the protected untracked PDF, fetch passed and divergence was `0 0`, so no pull
 ran. The PDF remains preservation-only at SHA-256
 `1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
