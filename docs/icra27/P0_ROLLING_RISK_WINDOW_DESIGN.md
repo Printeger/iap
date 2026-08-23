@@ -352,3 +352,19 @@ counter shape 和有限 refresh/provider timing，但启动阶段两个 `message
 completed failures 的 message-clock start/end identity 非有限。唯一 analyzer 因此返回
 `P0_EVIDENCE_CONTRACT_FAIL`；Gate-0B 仍未资格化。该结果不构成 empirical covariance
 calibration，也不代表 IAP-RQ-322 全部完成。
+
+## 13. ICRA-034 message-clock-unavailable failure time (IAP-RQ-320/321/322)
+
+`message_stamp_unavailable` 是唯一允许 completed record 缺少 message-domain 时间的类型化
+例外，而且仅适用于完整的 `COMPLETED_FAILURE`：attempt ID 必须为正，result generation 为
+零，active generation 等于 previous successful generation，snapshot 不可用且 outcome 与
+snapshot reason 都精确为 `message_stamp_unavailable`。`refresh_stamp_s`、callback-start stamp
+和 callback-end stamp 必须同时为 JSON `null`；不能伪造有限 message time，也不能只缺其中
+一部分。
+
+该例外不放宽 attempt identity。callback-start/end steady time 仍须有限且有序，elapsed time
+须有限且非负，provider/work/predictor 工作计数须为零。任一非零工作、非零 result、
+active/previous 断链、snapshot/reason 不匹配、steady identity 缺失/非有限/倒序，或者类型化
+记录出现有限 message stamp，均 fail closed。成功 completion 及任何其他失败原因继续要求
+三项 message-domain stamp 和 steady identity 都有限；duplicate、generation chain、source、
+counter、timing 与 integrity 规则不变。

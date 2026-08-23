@@ -4294,3 +4294,104 @@ or next-task selection occurred.
 **ICRA-033 BLOCKED; Gate-0B NOT_QUALIFIED.** Builder does not claim empirical
 calibration, full IAP-RQ-322 completion or Supervisor Review PASS. Control
 returns only to SUPERVISOR review after the required commits and pushes.
+
+## 2026-08-23T16:05:26Z — ICRA-034 START
+
+Task boundary is analyzer-only correction of the exact typed
+`message_stamp_unavailable` completed-failure contract, deterministic analyzer
+verification, and one read-only reanalysis of immutable ICRA-033 smoke evidence.
+The exact allowlist is `scripts/dev_planner/gate0_analyzer.py`,
+`test/test_gate0_analyzer.py`,
+`docs/icra27/P0_ROLLING_RISK_WINDOW_DESIGN.md` only for the typed failure-time
+semantics, new bounded outputs/hash/review evidence below
+`results/icra27/icra034/`, `DEV_LOG.md`, `docs/CHANGES.md`, and
+`docs/TRACEABILITY.md`. No GPU, ROS, launch, runner, capture, rosbag, main flow,
+smoke, qualification, build/install, runtime/C++, workload/science, benchmark,
+P1–P5, cleanup, historical evidence or Supervisor-owned file operation is
+authorized.
+
+The deterministic test matrix is Python compile/static validation plus the
+complete direct `test/test_gate0_analyzer.py` suite, retaining every existing
+success, in-progress, cold-start, duplicate/conflict, source/counter/timing and
+historical fail-closed test while adding the full positive typed-failure shape
+and all enumerated negative cases. Initial immutable input identities are:
+
+- `risk_grid_health.jsonl`: SHA-256
+  `d91a0af57eef4e2936345c683509f092deec38ce28f21b6607755ac6a8b61bc3`,
+  112,289 bytes;
+- `integrity_report.jsonl`: SHA-256
+  `53a08cf7ca295e935b9e3214bfca695a45f5fef1e284252a05cd63bd63b0d869`,
+  39,237 bytes;
+- `gate0_run_manifest.json`: SHA-256
+  `04e2e971e3415ce65c4d8ac5f51127a53c63571898444a097448ea8797c0bf1a`,
+  6,404 bytes.
+
+Only after implementation, the full direct suite, compile/static checks, review
+and an exact pre-invocation hash/byte recheck pass may the prescribed analyzer
+command run. An invocation guard will enforce exactly one formal reanalysis;
+after that invocation the builder stops regardless of outcome and never retries.
+The protected untracked PDF remains untouched and initially SHA-256
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`
+(243,368 bytes).
+
+## 2026-08-23T16:18:58Z — ICRA-034 COMPLETE / BUILDER HANDOFF
+
+Implemented only the exact analyzer-side typed startup failure contract for
+IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-322. A `COMPLETED_FAILURE` qualifies for null
+message time only when both outcome and snapshot reason are exactly
+`message_stamp_unavailable`, its positive attempt produces result zero, active
+generation equals the preceding successful generation, snapshot is unavailable,
+all three message timestamp keys are explicitly present and null together,
+steady start/end are finite and ordered, elapsed is finite/nonnegative, and
+provider/work/predictor work counters are integral zero. Success, other failure
+reasons and every malformed/partial/fabricated form remain fail closed.
+Typed-only cumulative counters are included in completed duplicate identity but
+remain outside the non-completed forbidden inventory so legitimate active-map
+values on `IN_PROGRESS` do not become completion claims.
+
+TDD and verification attempts are fully disclosed. The first focused launcher
+used `python3 -m unittest ...` and exited 1 because `test/` is not a package; it
+did not import the test. The direct focused RED test then exited 1 as expected
+because the old analyzer returned `P0_EVIDENCE_CONTRACT_FAIL`. Focused GREEN
+runs covered the full attempts 4/5 shape and all negative cases. Successive
+two-axis reviews found incomplete actual counter coverage, missing-key/null
+ambiguity, typed-counter omission from duplicate identity and an attempted
+global inventory placement that would reject valid cumulative active-map values
+on `IN_PROGRESS`; each was corrected before formal reanalysis. Final review
+reported zero Standards blockers and zero Spec blockers. Final Python compile,
+`git diff --check` and the complete direct analyzer suite pass 42/42.
+
+Immediately before formal use, immutable ICRA-033 inputs still matched the START
+record exactly: health `d91a0af57eef4e2936345c683509f092deec38ce28f21b6607755ac6a8b61bc3`
+/ 112,289 bytes, integrity
+`53a08cf7ca295e935b9e3214bfca695a45f5fef1e284252a05cd63bd63b0d869`
+/ 39,237 bytes, and manifest
+`04e2e971e3415ce65c4d8ac5f51127a53c63571898444a097448ea8797c0bf1a`
+/ 6,404 bytes. The invocation guard consumed the sole permitted slot before the
+exact command ran once:
+
+```text
+python3 scripts/dev_planner/gate0_analyzer.py --gate0-root results/icra27/icra033/runs --output-dir results/icra27/icra034/reanalysis
+```
+
+It exited 0 with empty stderr and `PASS`: 31 captured observations, 16 completed
+attempts, 14 strict successful result generations, two coherent typed failures,
+three in-progress observations, 12 equivalent completed duplicates, zero
+conflicts and 166/166 valid integrity reports. Every accepted generation retains
+the exact 76,800 logical-query shape. Retained p95 measurements are refresh
+`194.48499765 ms`, provider batch `150.42874975 ms`, and generation interval
+`506.1757368 ms`. The command, exact stdout, exit, empty stderr, guard and bounded
+output hashes are retained below `results/icra27/icra034/`. No second analyzer
+invocation occurred or is permitted.
+
+The post-reanalysis SHA-256 and byte counts for all three raw inputs are exactly
+equal to the pre-reanalysis values. The protected PDF remains untracked,
+unstaged, untouched and SHA-256
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`
+(243,368 bytes). No GPU, ROS, launch, runner, capture, rosbag, smoke,
+qualification, build/install, task-process cleanup, tuning, 60-second benchmark,
+campaign or P1–P5 execution occurred. Exact requested/effective `0.01` and
+`legacy_iap_rq320_baseline_v1` remain provisional; this is not empirical
+calibration, full IAP-RQ-322 completion, Gate promotion or Supervisor Review
+PASS. ICRA-034 builder work is complete and control returns only to SUPERVISOR
+review after the required commits and pushes.

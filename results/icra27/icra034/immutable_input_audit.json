@@ -1,0 +1,38 @@
+{
+  "inputs": [
+    {
+      "bytes": 112289,
+      "path": "results/icra27/icra033/runs/smoke/risk_grid_health.jsonl",
+      "post_reanalysis": {
+        "bytes": 112289,
+        "matches_pre_reanalysis": true,
+        "sha256": "d91a0af57eef4e2936345c683509f092deec38ce28f21b6607755ac6a8b61bc3"
+      },
+      "pre_reanalysis_sha256": "d91a0af57eef4e2936345c683509f092deec38ce28f21b6607755ac6a8b61bc3"
+    },
+    {
+      "bytes": 39237,
+      "path": "results/icra27/icra033/runs/smoke/integrity_report.jsonl",
+      "post_reanalysis": {
+        "bytes": 39237,
+        "matches_pre_reanalysis": true,
+        "sha256": "53a08cf7ca295e935b9e3214bfca695a45f5fef1e284252a05cd63bd63b0d869"
+      },
+      "pre_reanalysis_sha256": "53a08cf7ca295e935b9e3214bfca695a45f5fef1e284252a05cd63bd63b0d869"
+    },
+    {
+      "bytes": 6404,
+      "path": "results/icra27/icra033/runs/smoke/gate0_run_manifest.json",
+      "post_reanalysis": {
+        "bytes": 6404,
+        "matches_pre_reanalysis": true,
+        "sha256": "04e2e971e3415ce65c4d8ac5f51127a53c63571898444a097448ea8797c0bf1a"
+      },
+      "pre_reanalysis_sha256": "04e2e971e3415ce65c4d8ac5f51127a53c63571898444a097448ea8797c0bf1a"
+    }
+  ],
+  "pre_reanalysis_checked_at_utc": "2026-08-23T16:16:37Z",
+  "post_reanalysis_checked_at_utc": "2026-08-23T16:17:25Z",
+  "schema_version": "icra034_immutable_input_audit_v1",
+  "status": "PRE_POST_EXACT_MATCH"
+}

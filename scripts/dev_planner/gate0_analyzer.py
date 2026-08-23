@@ -50,6 +50,19 @@ REQUIRED_P0_TIMING_FIELDS = (
     "provider_batch_duration_ms",
     "generation_interval_ms",
 )
+P0_TYPED_FAILURE_ADDITIONAL_COUNTER_FIELDS = (
+    "provider_invalid_count",
+    "provider_stale_count",
+    "predictor_conservative_max_count",
+    "predictor_gnss_used_count",
+    "predictor_lidar_fim_primitive_count",
+    "predictor_lidar_fim_valid_normal_count",
+    "predictor_lidar_map_point_count",
+    "predictor_lidar_used_count",
+    "predictor_prior_used_count",
+    "predictor_regularized_count",
+    "predictor_stale_current_prior_count",
+)
 REQUIRED_P0_SOURCE_PREFIXES = (
     "odom",
     "current_integrity",
@@ -132,6 +145,33 @@ P0_ATTEMPT_START_FIELDS = (
     "refresh_callback_start_stamp_s",
     "refresh_callback_start_steady_s",
 )
+P0_MESSAGE_TIMESTAMP_FIELDS = (
+    "refresh_stamp_s",
+    "refresh_callback_start_stamp_s",
+    "refresh_callback_end_stamp_s",
+)
+P0_STEADY_IDENTITY_FIELDS = (
+    "refresh_callback_start_steady_s",
+    "refresh_callback_end_steady_s",
+)
+P0_MESSAGE_STAMP_UNAVAILABLE_ZERO_COUNTER_FIELDS = (
+    *(
+        field
+        for field in REQUIRED_P0_COUNTER_FIELDS
+        if field
+        not in {
+            "predictor_requested_worker_count",
+            "predictor_effective_worker_count",
+        }
+    ),
+    *P0_TYPED_FAILURE_ADDITIONAL_COUNTER_FIELDS,
+    "predictor_lidar_evaluations",
+    "predictor_lidar_cache_hits",
+)
+P0_COMPLETED_RECORD_EQUIVALENCE_FIELDS = tuple(dict.fromkeys((
+    *P0_COMPLETED_QUALIFICATION_FIELDS,
+    *P0_MESSAGE_STAMP_UNAVAILABLE_ZERO_COUNTER_FIELDS,
+)))
 P0_NON_COMPLETED_FORBIDDEN_FIELDS = tuple(
     field
     for field in P0_COMPLETED_QUALIFICATION_FIELDS
@@ -847,9 +887,53 @@ def _p0_non_completed_failures(
 def _p0_completed_record_key(message: dict[str, Any]) -> str:
     record = {
         field: message.get(field)
-        for field in P0_COMPLETED_QUALIFICATION_FIELDS
+        for field in P0_COMPLETED_RECORD_EQUIVALENCE_FIELDS
     }
     return json.dumps(record, sort_keys=True, separators=(",", ":"), allow_nan=True)
+
+
+def _p0_message_stamp_unavailable_failures(
+    message: dict[str, Any],
+) -> list[str]:
+    failures: list[str] = []
+    for field in P0_MESSAGE_TIMESTAMP_FIELDS:
+        if field not in message:
+            failures.append(f"message_stamp_unavailable_timestamp_missing:{field}")
+    if any(message.get(field) is not None for field in P0_MESSAGE_TIMESTAMP_FIELDS):
+        failures.append("message_stamp_unavailable_timestamps_not_all_null")
+
+    steady_start = _float(message.get("refresh_callback_start_steady_s"))
+    steady_end = _float(message.get("refresh_callback_end_steady_s"))
+    for field, value in zip(
+        P0_STEADY_IDENTITY_FIELDS, (steady_start, steady_end), strict=True
+    ):
+        if not math.isfinite(value):
+            failures.append(f"message_stamp_unavailable_steady_invalid:{field}")
+    if (
+        math.isfinite(steady_start)
+        and math.isfinite(steady_end)
+        and steady_end < steady_start
+    ):
+        failures.append("message_stamp_unavailable_steady_not_ordered")
+
+    elapsed = _float(message.get("refresh_elapsed_ms"))
+    if not math.isfinite(elapsed) or elapsed < 0.0:
+        failures.append("message_stamp_unavailable_elapsed_invalid")
+    for field in P0_MESSAGE_STAMP_UNAVAILABLE_ZERO_COUNTER_FIELDS:
+        value = message.get(field)
+        if (
+            not isinstance(value, int)
+            or isinstance(value, bool)
+            or value != 0
+        ):
+            failures.append(f"message_stamp_unavailable_counter_not_zero:{field}")
+    if message.get("snapshot_available") is not False:
+        failures.append("message_stamp_unavailable_snapshot_available")
+    if message.get("snapshot_failure_reason") != "message_stamp_unavailable":
+        failures.append("message_stamp_unavailable_snapshot_reason_mismatch")
+    if message.get("reason") != "message_stamp_unavailable":
+        failures.append("message_stamp_unavailable_reason_mismatch")
+    return failures
 
 
 def analyze_p0_messages(
@@ -866,6 +950,7 @@ def analyze_p0_messages(
     duplicate_completed_observation_count = 0
     conflicting_completed_observation_count = 0
     completed_failure_count = 0
+    message_stamp_unavailable_failure_count = 0
     evidence_contract_failures: list[str] = []
     maximum_attempt_id = 0
     attempt_state_rank: dict[int, int] = {}
@@ -956,11 +1041,27 @@ def analyze_p0_messages(
         result_id = message.get("result_generation_id")
         previous_id = message.get("previous_successful_generation_id")
         identity_failures: list[str] = []
-        for field in (*P0_ATTEMPT_START_FIELDS,
-                      "refresh_callback_end_stamp_s",
-                      "refresh_callback_end_steady_s"):
-            if not math.isfinite(_float(message.get(field))):
-                identity_failures.append(f"completed_attempt_identity_invalid:{field}")
+        typed_message_clock_failure = (
+            state == "COMPLETED_FAILURE"
+            and (
+                message.get("reason") == "message_stamp_unavailable"
+                or message.get("snapshot_failure_reason")
+                == "message_stamp_unavailable"
+            )
+        )
+        if typed_message_clock_failure:
+            identity_failures.extend(
+                _p0_message_stamp_unavailable_failures(message)
+            )
+        else:
+            for field in (
+                *P0_MESSAGE_TIMESTAMP_FIELDS,
+                *P0_STEADY_IDENTITY_FIELDS,
+            ):
+                if not math.isfinite(_float(message.get(field))):
+                    identity_failures.append(
+                        f"completed_attempt_identity_invalid:{field}"
+                    )
         if not _nonnegative_integral(previous_id):
             identity_failures.append("previous_successful_generation_id_invalid")
 
@@ -985,6 +1086,8 @@ def analyze_p0_messages(
             )
             if not coherent_failure:
                 identity_failures.append("completed_failure_reason_incoherent")
+            if typed_message_clock_failure and not identity_failures:
+                message_stamp_unavailable_failure_count += 1
             row["failed_refresh"] = 1
             rows.append(row)
             evidence_contract_failures.extend(identity_failures)
@@ -1107,6 +1210,9 @@ def analyze_p0_messages(
         "in_progress_observation_count": in_progress_observation_count,
         "completed_attempt_count": len(completed_attempts),
         "completed_failure_count": completed_failure_count,
+        "message_stamp_unavailable_failure_count": (
+            message_stamp_unavailable_failure_count
+        ),
         "duplicate_completed_observation_count": duplicate_completed_observation_count,
         "conflicting_completed_observation_count": conflicting_completed_observation_count,
         "successful_generation_count": len(successful),

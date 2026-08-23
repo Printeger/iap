@@ -1,0 +1,10 @@
+{
+  "command": "python3 scripts/dev_planner/gate0_analyzer.py --gate0-root results/icra27/icra033/runs --output-dir results/icra27/icra034/reanalysis",
+  "completed_at_utc": "2026-08-23T16:17:25Z",
+  "exit_code": 0,
+  "invocation_count": 1,
+  "retry_performed": false,
+  "schema_version": "icra034_formal_reanalysis_record_v1",
+  "stderr": "",
+  "stdout_path": "results/icra27/icra034/formal_reanalysis_stdout.json"
+}

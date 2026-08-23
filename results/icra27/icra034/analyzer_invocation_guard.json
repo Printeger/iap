@@ -1,0 +1,8 @@
+{
+  "command": "python3 scripts/dev_planner/gate0_analyzer.py --gate0-root results/icra27/icra033/runs --output-dir results/icra27/icra034/reanalysis",
+  "invocation_count": 1,
+  "invocation_slot_consumed_at_utc": "2026-08-23T16:16:37Z",
+  "maximum_invocations": 1,
+  "retry_allowed": false,
+  "schema_version": "icra034_analyzer_invocation_guard_v1"
+}

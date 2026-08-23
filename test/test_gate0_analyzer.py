@@ -131,6 +131,75 @@ def valid_p0_message(**overrides):
     return message
 
 
+def message_stamp_unavailable_failure(**overrides):
+    message = valid_p0_message(
+        refresh_attempt_id=4,
+        refresh_evidence_state="COMPLETED_FAILURE",
+        generation_id=0,
+        result_generation_id=0,
+        previous_successful_generation_id=0,
+        refresh_stamp_s=None,
+        refresh_callback_start_stamp_s=None,
+        refresh_callback_start_steady_s=2.0005731,
+        refresh_callback_end_stamp_s=None,
+        refresh_callback_end_steady_s=2.00057666,
+        refresh_elapsed_ms=0.003615,
+        provider_batch_duration_ms=None,
+        generation_interval_ms=None,
+        provider_invalid_count=0,
+        provider_stale_count=0,
+        predictor_conservative_max_count=0,
+        predictor_gnss_used_count=0,
+        predictor_spatial_invalidation_reason="none",
+        predictor_lidar_evaluations=0,
+        predictor_lidar_cache_hits=0,
+        predictor_lidar_fim_primitive_count=0,
+        predictor_lidar_fim_valid_normal_count=0,
+        predictor_lidar_map_point_count=0,
+        predictor_lidar_used_count=0,
+        predictor_prior_used_count=0,
+        predictor_regularized_count=0,
+        predictor_stale_current_prior_count=0,
+        ready=False,
+        stale=True,
+        valid_ratio=0.0,
+        unknown_ratio=1.0,
+        reason="message_stamp_unavailable",
+        snapshot_available=False,
+        snapshot_failure_reason="message_stamp_unavailable",
+        odom_seen=False,
+        odom_valid=False,
+        odom_fresh=False,
+        odom_stamp_s=None,
+        current_integrity_seen=False,
+        current_integrity_valid=False,
+        current_integrity_fresh=False,
+        current_integrity_stamp_s=None,
+        gnss_epoch_seen=False,
+        gnss_epoch_valid=False,
+        gnss_epoch_fresh=False,
+        gnss_epoch_stamp_s=None,
+        gnss_epoch_satellite_count=0,
+        origin_seen=False,
+        origin_valid=False,
+        origin_fresh=False,
+        origin_stamp_s=None,
+        map_seen=False,
+        map_valid=False,
+        map_fresh=False,
+        map_stamp_s=None,
+        map_point_count=0,
+    )
+    for field in REQUIRED_COUNTER_FIELDS:
+        if field not in {
+            "predictor_requested_worker_count",
+            "predictor_effective_worker_count",
+        }:
+            message[field] = 0
+    message.update(overrides)
+    return message
+
+
 class Gate0AnalyzerTest(unittest.TestCase):
     def test_canonical_control_point_hash_is_frozen(self):
         digest, canonical = MODULE.canonical_control_points_hash(
@@ -982,6 +1051,211 @@ class Gate0AnalyzerTest(unittest.TestCase):
         self.assertEqual(summary["successful_generation_count"], 1)
         self.assertEqual(summary["in_progress_observation_count"], 1)
         self.assertEqual(summary["completed_failure_count"], 1)
+        self.assertEqual(summary["gate"], "PASS")
+
+    def test_message_stamp_unavailable_completed_failures_accept_full_startup_shape(self):
+        attempt_4 = message_stamp_unavailable_failure()
+        attempt_5 = message_stamp_unavailable_failure(
+            refresh_attempt_id=5,
+            refresh_callback_start_steady_s=2.500798263,
+            refresh_callback_end_steady_s=2.500802107,
+            refresh_elapsed_ms=0.003847,
+        )
+        success = valid_p0_message(
+            refresh_attempt_id=6,
+            generation_id=1,
+            result_generation_id=1,
+            previous_successful_generation_id=0,
+        )
+
+        rows, summary = MODULE.analyze_p0_messages(
+            [attempt_4, attempt_5, success], protocol="smoke"
+        )
+
+        self.assertEqual([row["refresh_attempt_id"] for row in rows], [4, 5, 6])
+        self.assertEqual(summary["completed_failure_count"], 2)
+        self.assertEqual(summary["message_stamp_unavailable_failure_count"], 2)
+        self.assertEqual(summary["successful_generation_count"], 1)
+        self.assertEqual(summary["gate"], "PASS")
+
+    def test_message_stamp_unavailable_completed_failure_fails_closed(self):
+        defects = (
+            (
+                {"refresh_stamp_s": 2.0},
+                "message_stamp_unavailable_timestamps_not_all_null",
+            ),
+            (
+                {
+                    "refresh_stamp_s": 2.0,
+                    "refresh_callback_start_stamp_s": 2.0,
+                    "refresh_callback_end_stamp_s": 2.1,
+                },
+                "message_stamp_unavailable_timestamps_not_all_null",
+            ),
+            (
+                {"refresh_callback_start_steady_s": None},
+                "message_stamp_unavailable_steady_invalid:refresh_callback_start_steady_s",
+            ),
+            (
+                {"refresh_callback_end_steady_s": math.inf},
+                "message_stamp_unavailable_steady_invalid:refresh_callback_end_steady_s",
+            ),
+            (
+                {
+                    "refresh_callback_start_steady_s": 3.0,
+                    "refresh_callback_end_steady_s": 2.0,
+                },
+                "message_stamp_unavailable_steady_not_ordered",
+            ),
+            (
+                {"refresh_elapsed_ms": math.nan},
+                "message_stamp_unavailable_elapsed_invalid",
+            ),
+            (
+                {"refresh_elapsed_ms": -0.1},
+                "message_stamp_unavailable_elapsed_invalid",
+            ),
+            (
+                {"refresh_query_count": 1},
+                "message_stamp_unavailable_counter_not_zero:refresh_query_count",
+            ),
+            (
+                {"provider_query_count": 1},
+                "message_stamp_unavailable_counter_not_zero:provider_query_count",
+            ),
+            (
+                {"provider_invalid_count": 1},
+                "message_stamp_unavailable_counter_not_zero:provider_invalid_count",
+            ),
+            (
+                {"predictor_lidar_evaluations": 1},
+                "message_stamp_unavailable_counter_not_zero:predictor_lidar_evaluations",
+            ),
+            (
+                {"predictor_regularized_count": 1},
+                "message_stamp_unavailable_counter_not_zero:predictor_regularized_count",
+            ),
+            (
+                {"result_generation_id": 1},
+                "completed_failure_result_generation_not_zero",
+            ),
+            (
+                {"generation_id": 1},
+                "completed_failure_active_previous_generation_mismatch",
+            ),
+            (
+                {"generation_id": 1, "previous_successful_generation_id": 1},
+                "completed_failure_previous_generation_mismatch",
+            ),
+            (
+                {"snapshot_available": True},
+                "message_stamp_unavailable_snapshot_available",
+            ),
+            (
+                {"snapshot_failure_reason": "occupancy_stale"},
+                "message_stamp_unavailable_snapshot_reason_mismatch",
+            ),
+            (
+                {"reason": "occupancy_stale"},
+                "message_stamp_unavailable_reason_mismatch",
+            ),
+        )
+        success = valid_p0_message(refresh_attempt_id=6)
+        for overrides, failure in defects:
+            with self.subTest(failure=failure):
+                _, summary = MODULE.analyze_p0_messages(
+                    [message_stamp_unavailable_failure(**overrides), success],
+                    protocol="smoke",
+                )
+                self.assertIn(failure, summary["failures"])
+                self.assertEqual(
+                    summary["message_stamp_unavailable_failure_count"], 0
+                )
+                self.assertEqual(summary["gate"], "P0_EVIDENCE_CONTRACT_FAIL")
+
+        missing_stamp = message_stamp_unavailable_failure()
+        del missing_stamp["refresh_callback_end_stamp_s"]
+        _, missing_summary = MODULE.analyze_p0_messages(
+            [missing_stamp, success], protocol="smoke"
+        )
+        self.assertIn(
+            "message_stamp_unavailable_timestamp_missing:refresh_callback_end_stamp_s",
+            missing_summary["failures"],
+        )
+        self.assertEqual(
+            missing_summary["message_stamp_unavailable_failure_count"], 0
+        )
+        self.assertEqual(missing_summary["gate"], "P0_EVIDENCE_CONTRACT_FAIL")
+
+        completed = message_stamp_unavailable_failure()
+        conflicting_duplicate = dict(completed, provider_invalid_count=1)
+        _, conflict_summary = MODULE.analyze_p0_messages(
+            [completed, conflicting_duplicate, success], protocol="smoke"
+        )
+        self.assertEqual(
+            conflict_summary["duplicate_completed_observation_count"], 0
+        )
+        self.assertEqual(
+            conflict_summary["conflicting_completed_observation_count"], 1
+        )
+        self.assertIn(
+            "conflicting_completed_attempt_record", conflict_summary["failures"]
+        )
+        self.assertEqual(conflict_summary["gate"], "P0_EVIDENCE_CONTRACT_FAIL")
+
+    def test_null_message_timestamps_are_not_exempt_for_success_or_other_failure(self):
+        success_with_nulls = valid_p0_message(
+            refresh_stamp_s=None,
+            refresh_callback_start_stamp_s=None,
+            refresh_callback_end_stamp_s=None,
+        )
+        _, success_summary = MODULE.analyze_p0_messages(
+            [success_with_nulls], protocol="smoke"
+        )
+        self.assertIn(
+            "completed_attempt_identity_invalid:refresh_stamp_s",
+            success_summary["failures"],
+        )
+        self.assertEqual(success_summary["gate"], "P0_EVIDENCE_CONTRACT_FAIL")
+
+        other_failure = message_stamp_unavailable_failure(
+            reason="occupancy_stale",
+            snapshot_failure_reason="occupancy_stale",
+        )
+        _, other_summary = MODULE.analyze_p0_messages(
+            [other_failure, valid_p0_message(refresh_attempt_id=6)],
+            protocol="smoke",
+        )
+        self.assertIn(
+            "completed_attempt_identity_invalid:refresh_stamp_s",
+            other_summary["failures"],
+        )
+        self.assertEqual(other_summary["gate"], "P0_EVIDENCE_CONTRACT_FAIL")
+
+    def test_in_progress_allows_active_map_cumulative_predictor_counters(self):
+        in_progress = {
+            "refresh_attempt_id": 1,
+            "refresh_evidence_state": "IN_PROGRESS",
+            "generation_id": 0,
+            "result_generation_id": 0,
+            "previous_successful_generation_id": 0,
+            "refresh_stamp_s": 1.0,
+            "refresh_callback_start_stamp_s": 1.0,
+            "refresh_callback_start_steady_s": 1.0,
+            "predictor_gnss_used_count": 11,
+            "predictor_lidar_used_count": 12,
+            "predictor_prior_used_count": 13,
+            "predictor_regularized_count": 14,
+            "ready": False,
+            "reason": "not_ready",
+        }
+        _, summary = MODULE.analyze_p0_messages(
+            [in_progress, valid_p0_message(refresh_attempt_id=2)],
+            protocol="smoke",
+        )
+
+        self.assertEqual(summary["in_progress_observation_count"], 1)
+        self.assertEqual(summary["successful_generation_count"], 1)
         self.assertEqual(summary["gate"], "PASS")
 
     def test_attempt_and_result_id_contracts_fail_closed(self):

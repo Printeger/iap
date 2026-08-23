@@ -1,0 +1,11 @@
+{
+  "files": [
+    {"bytes": 1, "path": "candidate_control_points.csv", "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"},
+    {"bytes": 1, "path": "candidate_qualification.csv", "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"},
+    {"bytes": 33766, "path": "effective_config.json", "sha256": "1c11c61ba6028632e7eededde8f206a6dfe1df4d435e23ae2a59ead97a08449d"},
+    {"bytes": 1726, "path": "gate0_analysis.json", "sha256": "c93c4174d79d8f08e900950b7c2106549046855171c002c8f2946689390004b2"},
+    {"bytes": 9169, "path": "p0_smoke_benchmark.csv", "sha256": "00c6454a417110ddaa607faa6cbb55e6608d77ac8cfdf0e94afbe52ae030158e"},
+    {"bytes": 1132, "path": "p0_smoke_summary.json", "sha256": "d949ad439c0de6c450517c7e09bfc8099d6e569270c6a32d14ed49e9c15b7ee6"}
+  ],
+  "schema_version": "icra034_reanalysis_output_hashes_v1"
+}

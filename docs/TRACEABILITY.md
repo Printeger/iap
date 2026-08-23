@@ -1,5 +1,20 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-23 ICRA-034 typed message-clock failure reanalysis
+
+| Req ID | Requirement/evidence seam | Implementation and focused evidence | Status |
+|---|---|---|---|
+| IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-322 | A completed startup failure may lack message time only when no message clock truthfully exists | `gate0_analyzer.py` recognizes only exact `COMPLETED_FAILURE` / `message_stamp_unavailable` records with all three timestamp keys explicitly null, finite ordered steady identity, finite nonnegative elapsed, zero result/work, active/previous equality and unavailable matching snapshot; success and other failure reasons retain finite message-stamp requirements | **IMPLEMENTED / analyzer direct suite 42/42** |
+| IAP-RQ-320 / IAP-RQ-322 | Any partial or malformed typed failure must remain fail closed | Tests cover missing/partial/fabricated stamps; missing/nonfinite/reversed steady time; NaN/negative elapsed; nonzero work/provider/predictor counters; nonzero result; chain, snapshot and reason mismatch. Typed-only cumulative counters are included in completed duplicate equivalence, and a changed counter produces conflict; a separate regression preserves valid `IN_PROGRESS` active-map cumulative counters | **VERIFIED / compile and diff check PASS** |
+| IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-322 | Reanalysis must consume immutable ICRA-033 evidence exactly once and preserve its identity | Guard records one allowed/one consumed invocation. Pre/post SHA-256 and byte counts exactly match health `d91a0af…61bc3` / 112,289, integrity `53a08cf…d869` / 39,237 and manifest `04e2e971…bf1a` / 6,404. Exact command/stdout/empty stderr/exit 0 and output hashes are below `results/icra27/icra034/` | **PASS / no retry** |
+| IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-322 | Immutable smoke must retain strict successful workload, timing, lifecycle and integrity evidence | Formal result is PASS with 31 observations, 16 completed, 14 successful 76,800-query generations, two coherent typed failures, three in-progress, 12 equivalent duplicates, zero conflicts and 166/166 valid integrity; p95 refresh/provider/interval are `194.48499765` / `150.42874975` / `506.1757368 ms` | **ANALYZER PASS / SUPERVISOR REVIEW PENDING** |
+
+No GPU, ROS, launch, runner, capture, smoke, qualification, build/install,
+reanalysis retry, 60-second benchmark, tuning, P4/P5 execution, cleanup or Gate
+promotion occurred. Exact requested/effective `0.01` and profile
+`legacy_iap_rq320_baseline_v1` remain provisional and are not an empirical
+calibration or a claim of full IAP-RQ-322 completion.
+
 ## 2026-08-23 ICRA-032 immutable captured-source publication
 
 | Req ID | Requirement/evidence seam | Implementation and focused evidence | Status |
