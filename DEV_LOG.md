@@ -4695,3 +4695,30 @@ guide/risk/fallback/threshold/lineage/P5 implementation, GPU, ROS, live flow,
 runner/analyzer, smoke, benchmark, campaign, cleanup or next-task selection
 occurred. Final review, commits and pushes remain before the DEV_LOG-only
 handoff to SUPERVISOR.
+
+## 2026-08-23T18:16:50Z — ICRA-036 FINAL HANDOFF
+
+IAP-RQ-423. Two-axis review against dispatch HEAD
+`71ee608b3a4ec82f0ca70a22d2da3a71a3b9bc6d` completed with zero final
+Standards findings and zero final Spec findings. A preliminary Spec question
+about package auto-linters was withdrawn after confirming that the base owns
+the unchanged CMake/production/old-test formatting failures, the existing
+functional bspline target passes 39/39, `cppcheck` passes and both new files
+pass focused formatting. The existing direct xmllint timeout and all historical
+static divergence remain explicitly disclosed; no forbidden repair or test
+weakening occurred.
+
+Final authorized verification is stable: IAP and bspline builds/installations
+are retained; existing functional baselines pass 39/39, 4/4 and 6/6; the
+fixture green filter passes 4/4; and the independent contract target compiles
+then reproduces exactly 11 tests, four passes and the seven documented
+assertion-level failures. Linkage, JSON, diff, allowlist, production hashes,
+protected-PDF hash and zero-task-process audits pass. Main commit `6bc516c` and
+compact review-evidence commit `26f3d99` were pushed to `origin/dev/icra`; the
+branch was `0 0` immediately before this DEV_LOG-only handoff.
+
+Builder result is `P4_G0A_RED_READY_FOR_REVIEW`. This is not production PASS,
+Gate promotion, authorization of another task or permission to delete retained
+artifacts. No production change, GPU/ROS/live execution, smoke, benchmark,
+campaign, P4/P5 flow, cleanup or PDF handling occurred. Control returns only
+to SUPERVISOR review.
