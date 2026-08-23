@@ -1,5 +1,63 @@
 # ICRA Supervisor Log
 
+## 2026-08-23 — ICRA-029 review and direct ICRA-030 replacement-smoke authorization
+
+### Review identity and synchronization
+
+- Fixed review range: `c21665518dcb61a273d9e0a357753e52c8889a08...c44e067c0e542a748127cf9525dc9805eafac1ff`.
+- The sole reviewed commit is `c44e067`; it carries `IAP-RQ-311`, `IAP-RQ-320` and `IAP-RQ-322`.
+- After fetch, `HEAD` and `origin/dev/icra` matched at divergence `0 0`. The protected PDF remained
+  the sole untracked file. The diff contains only `DEV_LOG.md` and new bounded ICRA-029 evidence; no
+  product/test, Supervisor-owned, historical, retained-build or external-repository path changed.
+
+### Standards axis
+
+- Verdict: zero hard violations and one Low judgment smell; worst Low.
+- Low duplicated-code smell: both inventory audit functions repeat loading, duplicate/empty and
+  readability checks. This is not a Gate blocker and the failed verifier is now immutable evidence.
+- Builder's BLOCKED account is truthful: the first 17 checks pass, inventory exits 1, the final marker
+  records `phase1_exit=1`, and no prohibited phase 2, product edit, build or live flow occurred.
+
+### Spec axis
+
+- Verdict: `REQUEST_CHANGES / BLOCKED`, two findings, worst High.
+- High: the literal two-phase task contract is incomplete because phase 1 stopped and phase 2 did not
+  run. Required finalize/documentation/handoff claims therefore cannot be marked Builder PASS.
+- Medium: authored-whitespace runs before the results TSV receives its own row and before the EXIT
+  trap writes the final marker, so even a clean run would not prove the final authored-file state.
+- The unexpected PID-named `tmp/.../config/config.json` is not a product defect. The authorized
+  run-log-manager test explicitly creates it through `std::filesystem::temp_directory_path()`, and
+  ICRA-029 deliberately sets `TMPDIR` below its task root.
+
+### Supervisor closure and process correction
+
+- The repeated static-task cycle was caused by verifier engineering plus an overconstrained
+  Supervisor procedure, not by recurring P0 failure. Requiring a frozen exact inventory of an entire
+  task tree was incompatible with an authorized test whose scratch path contains a runtime PID. The
+  once-only/no-repair rule amplified that small issue into a full blocked handoff.
+- Supervisor independently verified final authored files contain no trailing whitespace, the only
+  inventory delta is the ignored 220-byte test config with expected structure, the fixed-range diff
+  matches the allowlist, accepted source/test/artifact hashes are exact, the ICRA-028 evidence
+  aggregate is exact, direct linkage resolves the retained ICRA-028 `libiap.so`, and no task process
+  remains. Retained logs prove launch 14/14, runner 24/24 and selected root 5/5.
+- ICRA-029 remains `REQUEST_CHANGES` against its literal procedure; it is not rewritten as PASS.
+  Nevertheless, no safety, product or scientific uncertainty justifies another verifier-only task.
+  Supervisor accepts the ICRA-028 static baseline by explicit review disposition and moves directly
+  to live validation.
+- Going forward, auxiliary scripts and read-only prechecks may be corrected and rerun before live
+  evidence capture. The exactly-once restriction applies to the formal smoke and analyzer, where
+  retry would bias scientific evidence, not to development of evidence plumbing.
+
+### Required next action and artifact lifecycle
+
+- Unique task: `ICRA-030 / GATE_0B`, defined in `NEXT_TASK.md`.
+- Reuse retained ICRA-028 IAP and ICRA-026 planner artifacts. After correctable static environment,
+  hash and linkage prechecks pass, run exactly one 20-second P0 replacement smoke under mandatory GPU
+  and launch-dependency preflight, then run the formal analyzer exactly once and stop.
+- No current build/install tree is deleted because it is required for ICRA-030 and must remain
+  through its Supervisor review. After Review PASS plus pushed evidence/documentation/handoff,
+  obsolete retained build/install trees become deletion-eligible under the operator policy.
+
 ## 2026-08-23 — ICRA-028 review and ICRA-029 verifier-only authorization
 
 ### Review identity and synchronization

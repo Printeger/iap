@@ -1,127 +1,121 @@
-# ICRA-029 — Repair the verifier and close static qualification evidence
+# ICRA-030 — Run one clock/log-repair replacement smoke
 
 > Active gate: `GATE_0B`
 > Owner: `DEEPSEEK`
 > Activation: `TASK_READY`
-> Supervisor verdict: `ICRA028_REVIEW_REQUEST_CHANGES`
+> Supervisor verdict: `ICRA029_REVIEW_REQUEST_CHANGES_STATIC_BASELINE_ACCEPTED`
 > Requirement mapping: `IAP-RQ-311`, `IAP-RQ-320`, `IAP-RQ-322`
 > Conference route: conditional P0 -> P4 -> P5
-> This task: verifier-only evidence repair against retained ICRA-028 artifacts; no product or live flow
+> This task: read-only prechecks plus exactly one P0-only live smoke and one analyzer
 
 ## Supervisor decision
 
-ICRA-028 does not pass review, but its product/test delta is accepted as the new static baseline.
-The unused array overload was removed; the focused test calls the sole production variadic API with
-seven named clouds and proves authority gating, identical fanout, exact post-acceptance rejection and
-retention for zero/negative-sec/nanosecond-overflow/regression, and monotonic advance. With the exact
-ICRA-028 install environment, Supervisor reruns pass launch 14/14, runner 24/24 and selected root
-5/5, and the direct consumer resolves the retained ICRA-028 `libiap.so`.
+Do not run another verifier-only repair. ICRA-029 stopped on an expected PID-named scratch config
+created by the authorized run-log-manager test below its explicit `TMPDIR`; it did not expose a P0,
+product, linkage or test defect. Supervisor independently closed the unexecuted final whitespace,
+allowlist, hash and provenance checks and accepts the ICRA-028 static product baseline for live
+validation. ICRA-029 remains a truthful `REQUEST_CHANGES` against its literal overconstrained
+procedure; this is an explicit Supervisor disposition, not a retroactive Builder PASS.
 
-The blocking defect is in phase-1 verification. `generated_text_whitespace` included its own open
-output file among its grep operands. Grep printed 22 real trailing-space matches from opaque CMake
-stdout, then returned error 2 (`input file is also the output`). The `if grep ...; then` wrapper
-treated both no-match status 1 and execution-error status 2 as success, recorded exit 0 and printed a
-false phase-1 PASS. Phase 2 correctly did not run. Standards reports two findings (worst High: this
-fail-open verifier; Low: duplicated seven-cloud test arrangement). Spec reports one High finding:
-the same root cause leaves the frozen two-phase verification contract incomplete. The Low test smell
-is accepted for now and is outside this verifier-only task.
+ICRA-030 now answers the real question left by ICRA-026: with the repaired simulator message-clock
+authority and bounded IAP log routing, can the unchanged four-worker P0 flow produce valid
+76,800-query generations in one 20-second smoke? No code change or additional static qualification
+cycle is authorized.
 
-ICRA-029 closes only the verification defect. It must not edit accepted source/test, repair or
-normalize immutable ICRA-028 evidence, or run a new build/live flow. If ICRA-029 passes Supervisor
-review and all code/documentation/handoff commits are pushed, Supervisor may apply the operator's
-artifact policy and delete the completed repair chain's obsolete build/install trees. Until then all
-current build/install trees stay retained.
-
-## 1. Synchronize, preserve, and freeze the accepted baseline
+## 1. Synchronize and preserve
 
 - Follow `AGENTS.md` synchronization. Stop as `REMOTE_DIVERGED` if both sides lead; never reset,
   clean, stash, rebase, amend pushed history or overwrite another role's work.
-- Preserve the untracked PDF, ICRA-011/014/020/021 protected evidence, committed ICRA-024/026/027/028
-  evidence and ignored ICRA-026 leak exactly as found. Do not edit, delete, move, stage or conceal
-  them.
-- Preserve all ICRA-026/027/028 build/install trees throughout development and Supervisor review.
-  Reuse only ICRA-028 build/install read-only. Do not configure, build, install, relink or create an
-  ICRA-029 build/install tree.
-- The accepted files must remain byte-identical:
-  - `include/iap/sim/demo11_publication_stamp_authority.hpp` SHA-256
-    `72dd0f3148ec40dec590fb11e8dc0534a1f89ef906f9171b6e791a77a19f0b20`;
-  - `test/test_demo11_publication_stamp_authority.cpp` SHA-256
-    `48208f4b4f90c88d2fbb5edbf107607a6c1f794df5c683cb5d1e7db144cd0c07`.
-- The retained ICRA-028 artifacts must remain byte-identical:
-  - `install/lib/libiap.so` SHA-256
+- Preserve the untracked PDF, protected/historical evidence, ignored ICRA-026 leaked log, ICRA-029
+  scratch failure evidence and every retained build/install tree. Do not edit, delete, move, stage or
+  conceal them.
+- Reuse ICRA-028 `build_iap`/`install` for current IAP and ICRA-026 plan-env/path-searching/
+  bspline/EGO build/install trees read-only. Do not configure, build, install, relink or create an
+  ICRA-030 build/install tree.
+- Create every ICRA-030 run/log/tmp/ROS/evidence path only below `results/icra27/icra030/`. Record one
+  START entry with the exact command, artifact mapping and stop line. Do not edit Supervisor-owned
+  files or select another task.
+
+## 2. Correctable pre-live checks
+
+These checks must all pass before the live runner. They are engineering prechecks, not scientific
+trials: command/evidence-plumbing mistakes may be corrected and rerun within ICRA-030, with every
+attempt disclosed. They do not consume the one authorized smoke. Product/test/config changes,
+parameter changes and use of alternate artifacts remain forbidden.
+
+- Verify exact retained hashes:
+  - ICRA-028 `install/lib/libiap.so`:
     `92754f9fdc7a1a7492c3cc895ca112adc0a121a025ca5756b259378edd0f616f`;
-  - `build_iap/test_demo11_publication_stamp_authority` SHA-256
-    `a65dc85dd987e0c030b0b2c777d007513633c80a4e17878a4d9052756d45d4ff`;
-  - `build_iap/test_run_log_manager` SHA-256
-    `e00b0d4857c5529bf75c933336af61ba8176b7b675a4485b148d2d6ec7e814c7`.
-- Record one ICRA-029 START entry with the exact allowlist and stop line. Do not edit any
-  Supervisor-owned file or scope/plan/design/Gate document.
+  - ICRA-026 `install_plan_env/lib/libplan_env.so`:
+    `360cf23a8d4b1f2add6a5e1f59f47d936039b3ca61aee1bde0a644c542f46447`.
+- Assemble one literal environment from `/opt/ros/jazzy`, read-only workspace install, ICRA-028 IAP
+  install, and retained ICRA-026 EGO/bspline/path-searching/plan-env installs. Prove through the active
+  ament index that `iap` resolves exactly to ICRA-028, `ego_planner` and the three planner packages
+  resolve exactly to ICRA-026, every required launch package resolves, and each resolved prefix is an
+  exact active `AMENT_PREFIX_PATH` entry.
+- Use `ldd` to prove direct consumers resolve only ICRA-028 `libiap.so` and ICRA-026
+  `libplan_env.so`, with no `not found`, build-tree, deleted-task or workspace-default IAP/plan-env
+  resolution.
+- Verify the frozen smoke configuration before launch: CPU mapping backend, worker 4, `20/15 s`,
+  `30 x 30 x 6 m`, `0.75 m`, horizons `0,0.5,1.0,1.5,2.0,2.5 s`, refresh `0.5 s`, occupied skip on,
+  no bag/RViz, safety profile off, and P1/P2/P3/P4/P5 disabled.
+- Snapshot the existing repository `log/` tree identity and verify the requested IAP log and timing
+  paths are absolute descendants of the future ICRA-030 run runtime directory. Do not clean or alter
+  the historical ICRA-026 leak.
+- If a precheck reveals a real artifact, dependency or product defect rather than a command-recording
+  mistake, stop `BLOCKED` before GPU/ROS. Do not rebuild, patch, switch artifacts or weaken checks.
 
-## 2. Define a correct evidence-format contract
+## 3. Exactly one live smoke and one analyzer
 
-- Treat raw stdout/stderr emitted by CMake, CTest, Python unittest, `ldd` and other third-party tools
-  as opaque evidence. Preserve it byte-for-byte; its upstream spacing is not a formatting gate and
-  must not be normalized to manufacture a clean result.
-- The no-trailing-whitespace gate applies only to Builder-authored ICRA-029 scripts, command table,
-  TSV, summary and documentation lines. The verifier must enumerate this finite input list before
-  opening its audit output, and the audit output must never be one of its own operands.
-- Any search/assertion with multiple legitimate statuses must distinguish them explicitly. For a
-  no-match check, status 0 means a prohibited match and fails, status 1 means no match and passes,
-  and every status greater than 1 is an execution error and fails. Never encode this as a two-branch
-  `if grep` assertion.
-- Record the exact authored-file inventory and opaque-log inventory. Unexpected files, unreadable
-  operands, duplicate/self-referential operands or search execution errors must fail closed.
+Only after all Section 2 checks pass, run exactly once in the validated environment:
 
-## 3. Run one immutable phase-1 verification
+`python3 scripts/dev_planner/run_gate0_qualification.py --output-root results/icra27/icra030/runs --smoke`
 
-- Before the first test, linkage or hash assertion, materialize and SHA-256 one repository-local
-  ICRA-029 phase-1 script containing its literal environment, commands, redirections and assertions.
-  Run it exactly once. On any failure, preserve evidence, do not repair/rerun/replace commands, do
-  not run phase 2, and return `BLOCKED` without Builder-side review agents.
-- The script must prepend the retained ICRA-028 `install` and `install/lib` paths after sourcing the
-  stated ROS/workspace environment. It must prove with `ldd` that `test_run_log_manager` has exactly
-  one `libiap.so` entry resolving to
-  `results/icra27/icra028/install/lib/libiap.so`; reject `not found`, build-tree and stale-task
-  resolution. Demo11 may have zero dynamic `libiap.so` entries because of `--as-needed`.
-- Verify the accepted source/test and three retained artifact hashes above before and after tests.
-  Verify that the committed ICRA-028 evidence remains exactly 26 tracked files with aggregate
-  SHA-256 `8336d74e3bc49aed622d1d92fa73f145211f87a202fbb3fe729a780889fbadb4`.
-- Run only these repository-local static suites against retained ICRA-028 artifacts:
-  - `test_test_planner_launch.py`: 14/14;
-  - `test_gate0_runner.py`: 24/24; printed GPU/dependency strings are mocked fixtures;
-  - selected root regressions: 5/5 for publication authority, run-log manager, integrity snapshot,
-    local occupancy and risk-grid map.
-- Recheck protected hashes, the exact ICRA-026 leak identity, retained ICRA-026/027/028 trees, zero
-  task-owned processes, the finite authored-file whitespace contract, the opaque-log inventory and
-  the unchanged phase-1 script hash. Record real exit codes; a top-level zero is insufficient if any
-  semantic assertion or retained output contradicts PASS.
+- The runner must perform mandatory GPU preflight before ROS: `nvidia-smi` succeeds, CUDA Driver API
+  `cuInit(0)` succeeds and `device_count >= 1`. On failure, record `GPU_NOT_READY`, start no ROS and
+  stop without retry.
+- After GPU PASS, launch-dependency preflight must pass and persist exact prefix/package resolution
+  before capture/launch. On failure, record `LAUNCH_DEPENDENCY_NOT_READY`, start no ROS and stop
+  without retry.
+- Required capture and launch processes must remain alive during the run and be distinguished from
+  controlled shutdown. Top-level launch exit 0 alone is not success. Clean up only processes proven
+  to have been started by this task.
+- Run the formal analyzer exactly once on the immutable smoke evidence. Run it even when the runner
+  reached live capture but returned nonzero, so the retained inputs receive one truthful
+  classification; do not run it when preflight stopped before evidence exists.
+- Smoke acceptance requires runner exit 0, analyzer exit 0/PASS, valid integrity input and at least
+  one successful final P0 generation with exactly 76,800 queries. No accepted positive generation may
+  be classified `occupancy_stale`, future/negative-age or missing authority. IAP effective log and
+  timing paths must remain inside the ICRA-030 run tree, and the pre-existing repository `log/` tree
+  identity must remain unchanged.
+- Stop after the single runner and analyzer regardless of result. No environment correction, retry,
+  tuning, backend/worker/workload change, 60-second benchmark, qualification campaign or P4/P5 run.
 
-## 4. Finalize only after phase 1 passes
+## 4. Evidence, documentation and handoff
 
-- Only after phase 1 passes may Builder add bounded ICRA-029 summary evidence and update
-  `docs/CHANGES.md`, `docs/TRACEABILITY.md` and `DEV_LOG.md`. State that ICRA-028 product/test is the
-  accepted baseline and ICRA-029 repairs verification provenance only; do not rewrite history.
-- Materialize, hash and run one phase-2 finalize script exactly once. It must check staged diff
-  whitespace, exact allowlist, no source/test/product changes, excluded PDF/historical evidence/
-  build-install trees, required documentation, truthful phase-1 exits/counts/linkage/hashes, and the
-  unchanged phase-1 script hash. Phase-2 failure stops without repair, retry or Builder review.
-- If both phases pass, commit and push the evidence/documentation changes, then commit and push one
-  final `DEV_LOG.md`-only handoff. Every commit must carry applicable `IAP-RQ-311`, `IAP-RQ-320`
-  and/or `IAP-RQ-322`. Builder may report only self-check results and return to Supervisor; it may
-  not authorize cleanup, smoke, Gate promotion or another task.
+- Retain exact precheck attempts, final environment, artifact hashes/linkage, GPU/dependency output,
+  runner/analyzer commands and exits, manifests, captured health/integrity, process lifecycle,
+  analyzer summary and before/after external-log identity below ICRA-030.
+- Update `docs/CHANGES.md`, `docs/TRACEABILITY.md` and `DEV_LOG.md` with the exact result whether PASS
+  or BLOCKED. Do not rewrite ICRA-026/027/028/029 history.
+- Run a normal final allowlist and staged-diff check. Formatting/evidence-command mistakes may be
+  corrected before commit; they do not authorize rerunning the live smoke or analyzer.
+- Commit and push bounded evidence/documentation, then commit and push one final `DEV_LOG.md`-only
+  handoff. Every commit must carry applicable `IAP-RQ-311`, `IAP-RQ-320` and/or `IAP-RQ-322`.
+  Builder may report the result but may not declare Review PASS, delete artifacts, promote Gate-0B,
+  authorize the benchmark or select another task.
 
 ## Allowed files
 
-- new bounded scripts, command/TSV/log/summary evidence below `results/icra27/icra029/` only;
+- new ICRA-030 run/log/tmp/ROS/evidence below `results/icra27/icra030/`, with only bounded review
+  evidence staged;
 - `DEV_LOG.md`, `docs/CHANGES.md`, `docs/TRACEABILITY.md`.
 
 ## Forbidden
 
-- No product source, header, test, CMake, package, publisher, launch, runner, analyzer, capture or
-  configuration edit; no change to ICRA-028 or older evidence.
-- No configure/build/install/relink and no ICRA-029 build/install tree. Do not write into retained
-  ICRA-026/027/028 build/install trees except for normal ignored CTest result files produced by the
-  exact authorized selected-root run.
-- No GPU/CUDA preflight, ROS daemon/graph/launch, simulator, capture, smoke, live analyzer, benchmark,
-  qualification/campaign, bag/RViz, disabled profile, tuning, P4/P5 work, cleanup, Gate promotion or
-  next-task selection.
+- No product, test, CMake, package, launch, runner, analyzer, capture, checked-in config/default or
+  planner change; no build/install/relink and no modification of retained artifacts.
+- No edit/delete/move of PDF, historical evidence, ICRA-026 leak, ICRA-029 scratch or external data.
+- No live smoke retry, analyzer retry, 60-second benchmark, qualification/campaign, bag/RViz, tuning,
+  backend/worker/workload/ROI/resolution/horizon/refresh/threshold change, P4/P5 execution, cleanup,
+  Gate promotion or next-task selection.
