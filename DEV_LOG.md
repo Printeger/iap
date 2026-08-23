@@ -3516,3 +3516,27 @@ analyzer, benchmark, qualification/campaign, disabled profile, tuning, P4/P5
 work, Gate promotion or external cleanup ran. **ICRA-028 is BLOCKED on the
 phase-1 generated-whitespace audit false PASS; Gate-0B remains NOT_QUALIFIED
 pending Supervisor review.**
+
+## 2026-08-23T09:59:37Z — ICRA-028 BUILDER TASK RETURN
+
+The bounded seam cleanup, focused tests, immutable phase-1 evidence,
+documentation and truthful BLOCKED record are committed as
+`ab4471e0e7ac7df327bef9bb9e3692c8cd6ab1f1` and pushed to
+`origin/dev/icra`. The product-shaped tests and semantic linkage checks pass,
+but Builder does not claim phase-1 PASS: its generated-whitespace assertion
+misclassified a `grep` self-output error after printing actual trailing-space
+matches from the CMake configure log.
+
+The immutable script and raw logs remain unchanged and were never rerun.
+Phase 2 was not materialized or executed, and the task rule therefore
+prohibited Builder-side review agents and all further verification commands.
+Repository-local ICRA-028 build/install and evidence remain retained for
+Supervisor review. The protected PDF remains untracked; historical evidence,
+the ICRA-026 leak and retained ICRA-026/027 trees were not intentionally
+modified, staged, deleted, moved or regenerated.
+
+No GPU/CUDA preflight, ROS daemon/graph/launch, simulator, capture, smoke,
+live analyzer, benchmark, qualification/campaign, bag/RViz, disabled profile,
+tuning, P4/P5 work, Gate promotion, external cleanup or next-task selection
+ran. **ICRA-028 returns BLOCKED; Gate-0B remains NOT_QUALIFIED pending
+Supervisor review.** DEEPSEEK makes no Supervisor verdict or authorization.
