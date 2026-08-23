@@ -3238,3 +3238,36 @@ historical artifacts, source/test files and Supervisor-owned files;
 fail-closed conditions remain Builder blockers. This is not a final
 Standards/Spec or Supervisor verdict and does not authorize Gate promotion or
 another flow.
+
+## 2026-08-23T03:58:16Z — ICRA-026 BUILDER TASK RETURN
+
+The bounded implementation/evidence/documentation commit
+`e33650101c7bfea432abc4f9dbf1d104c96d9015` is pushed to
+`origin/dev/icra`. The current tree rebuilt and installed into retained
+ICRA-026 paths; the required Python and C++ matrix passes at 36/36, 21/21,
+1/1, 5/5, 8/8, 6/6, 76/76, 7/7, 23/23, 8/8, 4/4 and 39/39. Direct linkage,
+library hashes, literal ordered environment, nine-package dependency closure,
+GPU readiness, capture readiness and controlled process lifecycle pass.
+
+Exactly one guarded 20-second runner invocation exited 0 and exactly one
+formal analyzer invocation exited 1 with `P0_INPUT_AVAILABILITY_FAIL`: 166/166
+integrity rows are valid, but 19/19 final health representatives are
+`occupancy_stale`, generation zero and zero queries, yielding no successful
+76,800-query generation. There was no retry, environment repair, tuning,
+60-second benchmark, qualification/campaign, disabled profile, P4/P5 flow or
+Gate promotion.
+
+ICRA-026 returns **BLOCKED** on three fail-closed conditions: no successful P0
+generation; ignored out-of-allowlist runtime output at
+`log/20260823T034015Z_103`; and incomplete verbatim provenance for the original
+`ldd` aggregation wrapper, faulty assertion and executable static ament-audit
+command. The external directory remains unstaged and unchanged because this
+task forbids allowlist-external modification and external cleanup. The final
+Builder two-axis review has zero remaining actionable Standards findings and
+zero remaining actionable Spec findings for this truthful BLOCKED handoff.
+
+The retained ICRA-026 build/install trees remain for Supervisor review, the
+whole-task-root process audit has zero matches, protected hashes remain exact,
+and the PDF remains solely untracked and untouched. **Gate-0B remains
+NOT_QUALIFIED.** DEEPSEEK makes no Supervisor verdict, Gate authorization or
+next-task decision and returns control to Supervisor review.
