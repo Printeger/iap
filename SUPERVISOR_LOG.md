@@ -1,5 +1,65 @@
 # ICRA Supervisor Log
 
+## 2026-08-23 — ICRA-030 review and ICRA-031 sigma-growth baseline authorization
+
+### Review identity and synchronization
+
+- Fixed review range: `0e1d4cafb2d110b8f19bdd5840371a2254bb04b4...bf3f39747451bff5d978bd47de828e9e42aac43a`.
+- Reviewed commits: `c22d783` and final DEV_LOG-only return `bf3f397`; both carry applicable
+  `IAP-RQ-311`, `IAP-RQ-320` and `IAP-RQ-322` identifiers.
+- The first fetch attempt encountered a transient remote connection close; a second fetch succeeded.
+  `HEAD` and `origin/dev/icra` then matched at divergence `0 0`. The protected PDF remained the sole
+  untracked file. The 75 changed paths are exactly bounded ICRA-030 evidence plus CHANGES,
+  TRACEABILITY and DEV_LOG; no product/test/config/runner/analyzer/Supervisor/external file changed.
+
+### Standards axis
+
+- Verdict: `PASS`, zero hard violations and one Low judgment smell; worst Low.
+- Low duplicated-code smell: command wrappers, environment bootstrap and `/proc` task-process scans
+  repeat across one-shot evidence scripts. This does not affect retained evidence credibility.
+- RQ/document synchronization, task allowlist, PDF/history preservation, build/install retention,
+  exactly-one invocation guards, GPU-before-ROS, required-process lifecycle, task-local logging and
+  truthful BLOCKED handoff all conform.
+
+### Spec axis
+
+- Builder task execution verdict: `PASS`; smoke acceptance verdict: `FAIL / BLOCKED`.
+- One High finding: the acceptance contract requires at least one valid 76,800-query P0 generation.
+  The sole runner exits 0, but the sole analyzer exits 1: 27/27 final representatives are
+  `invalid_covariance_growth_parameter`, `ready=false`, generation zero and zero queries.
+- All procedural requirements pass: exact retained artifact mapping/linkage, frozen worker-4 smoke,
+  GPU and 12-package dependency preflight, capture, process lifecycle, 208/208 valid integrity rows,
+  one runner/one analyzer, task-local logs/timing, unchanged external `log/`, no build/product edit,
+  retry, tuning, benchmark, P4/P5 execution, cleanup or Gate promotion.
+
+### Causal diagnosis and Supervisor correction
+
+- The P0 runtime declares `p0.predictor.sigma_grow_m_sqrt_s` with an intentionally invalid `NaN`
+  default and rejects non-finite or negative values before any provider query. ICRA-030's launch and
+  effective configuration do not supply that parameter. The observed 27/27 reason distribution is
+  therefore deterministic and directly explained; GPU, clock, occupancy, integrity and logging are
+  not the blocker.
+- This was a known readiness item: CHANGES and TRACEABILITY state that the default remains invalid and
+  production calibration is pending. ICRA-030's precheck omitted it and still reported frozen config
+  ready. Supervisor should have included this prerequisite before authorizing the smoke.
+- Do not promote the synthetic profile value `0.15`; it is explicitly diagnostic-only. For the
+  qualification-performance route, freeze the historical IAP-RQ-320 baseline `0.01 m/sqrt(s)` that
+  existed in the original `PredictedIntegrityComputer::Params`. It is finite, positive,
+  unit-consistent and preserves nonzero monotonic covariance growth. Label it a provisional
+  qualification baseline, not final empirical/paper calibration; the C++ default remains NaN so
+  unconfigured production use continues to fail closed.
+
+### Required next action and artifact lifecycle
+
+- Unique task: `ICRA-031 / GATE_0B`, defined in `NEXT_TASK.md`.
+- Bind exact `0.01` through the qualification runner and launch parameter seam, include it in frozen
+  effective-config/preflight evidence, add focused regressions, install current launch/runtime
+  artifacts below ICRA-031, then run exactly one guarded replacement smoke and one analyzer after all
+  static checks pass. This combined task avoids another repair-only handoff.
+- ICRA-030 Review does not pass smoke acceptance, so no build/install is deleted. ICRA-030 itself has
+  no real build tree; its install entries are retained symlinks. The approximately 4.8 GiB ICRA-026
+  and 3.0 GiB ICRA-028 artifacts remain required through ICRA-031 development and review.
+
 ## 2026-08-23 — ICRA-029 review and direct ICRA-030 replacement-smoke authorization
 
 ### Review identity and synchronization
