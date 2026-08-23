@@ -1,5 +1,87 @@
 # ICRA Supervisor Log
 
+## 2026-08-23 — ICRA-031 review and ICRA-032 immutable-source transaction authorization
+
+### Review identity and synchronization
+
+- Fixed review range: `045e85d52d76f6ba3c25bc014fcf8df3bb36ea62...462dfa8cb509199ca6dac76506262e26649feb97`.
+- Reviewed commits: `3d4bff7` and final DEV_LOG-only return `462dfa8`; both carry applicable
+  `IAP-RQ-320`, `IAP-RQ-321` and/or `IAP-RQ-322` identifiers.
+- After fetch, `HEAD` and `origin/dev/icra` matched at divergence `0 0`. The protected PDF remains
+  the sole untracked file. The 136 changed paths match the exact ICRA-031 allowlist; no
+  Supervisor-owned, C++ science/default, analyzer/capture, historical or external-repository file
+  changed. ICRA-031 build/install remain retained.
+
+### Standards axis
+
+- Verdict: `PASS`, zero hard violations and one Low judgment smell; worst Low.
+- Low Data Clump: the runner threads `config` and its derived
+  `qualification_config_preflight` as separately optional values through main, smoke/benchmark and
+  manifest construction. They have one lifecycle and could later become one contract object, but
+  that refactor was outside ICRA-031 and is not a Gate blocker.
+- RQ/document synchronization, task allowlist, protected-PDF/history preservation, exactly-one
+  invocation guards, GPU-before-ROS, process lifecycle, bounded logging and truthful BLOCKED return
+  all conform. Exact requested/effective `0.01` and
+  `legacy_iap_rq320_baseline_v1` evidence is present and remains explicitly provisional.
+
+### Spec axis
+
+- Verdict: `REQUEST_CHANGES`; implementation/scope/procedure pass, but smoke acceptance fails.
+  Findings: two High and one Medium; worst High.
+- High: no generation can commit at the normal integrity update rate. Completed refreshes execute
+  all 76,800 logical queries in approximately 163--197 ms, but an integrity callback advances
+  `latest_current_generation_` during each immutable batch. The terminal validator requires that
+  live generation to equal the captured prior generation and discards every result as
+  `prior_generation_changed`. Generation stays zero.
+- High: the analyzer treats the legitimate initial `not_ready` health observation, which represents
+  no completed refresh and has neither refresh start nor end identity, as a malformed completed
+  callback. That independent evidence-contract defect could still reject a repaired live flow.
+- Medium: launch/runner/live evidence proves exact `0.01` reaches full provider queries, but the
+  retained direct C++ runtime tests exercise other finite values rather than the exact frozen
+  qualification value.
+- All other task requirements pass: static/TDD disclosure, exact artifact mapping, one runner and
+  one analyzer, GPU/dependency/capture/process/log contracts, 166/166 valid integrity reports,
+  allowlist/documentation and the no-retry/no-benchmark stop line.
+
+### Causal diagnosis and process correction
+
+- This is not the previous sigma blocker and is not a GPU-performance problem. ICRA-031 successfully
+  exposed the next fail-closed seam. The provider completes well below the 500 ms refresh period;
+  the result is rejected only because the implementation simultaneously promises an immutable
+  captured transaction and demands that high-rate live source versions remain unchanged until
+  publication.
+- Fixing only the prior comparison risks revealing the same starvation sequentially for GNSS,
+  LiDAR or occupancy. ICRA-032 therefore covers the whole immutable source transaction: captured
+  owners, versions and stamps must be coherent/fresh at capture and remain the only data used in the
+  generation; a newer valid live version does not revoke them, and the next refresh observes it and
+  invalidates/recomputes the documented region. Missing, mutable, internally inconsistent, stale,
+  regressed or frame/config-invalid capture remains fail closed.
+- To avoid another live-run discovery cycle, ICRA-032 must first pass a production-shaped test that
+  advances every active source while a batch is in flight, an exact `0.01` runtime regression, and a
+  replay of ICRA-031 evidence proving the analyzer repair removes only startup misclassification and
+  cannot manufacture a successful generation.
+
+### Supervisor verification and artifact lifecycle
+
+- `git diff --check 045e85d...462dfa8`: exit 0.
+- Corrected direct invocations pass runner 27/27 and launch 16/16. The first Supervisor invocation
+  used nonexistent Python package names and exited 1 before tests; it changed no source/evidence and
+  was immediately corrected to the repository's direct-file form.
+- Retained current-library Predictor and rolling-window CTest selection passes 2/2. Supervisor ran
+  no GPU preflight, ROS, smoke or analyzer and did not alter immutable live evidence.
+- Overall Review is not PASS because formal smoke acceptance failed. Under the operator lifecycle
+  rule, no ICRA-031 or prerequisite build/install is deleted. They remain available for ICRA-032
+  development, linkage verification and Supervisor retest.
+
+### Required next action
+
+- Unique task: `ICRA-032 / GATE_0B`, defined in `NEXT_TASK.md`; active role is `DEEPSEEK`, state
+  `TASK_READY`.
+- Repair immutable-source publication and startup-health classification, complete deterministic
+  tests/replay/build/linkage first, then run exactly one replacement smoke and one analyzer.
+- No live retry, 60-second benchmark, tuning, workload change, P4/P5 execution, cleanup or Gate
+  promotion is authorized.
+
 ## 2026-08-23 — ICRA-030 review and ICRA-031 sigma-growth baseline authorization
 
 ### Review identity and synchronization
