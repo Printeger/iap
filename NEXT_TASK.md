@@ -1,130 +1,135 @@
-# ICRA-034 — Type message-clock-unavailable failures and reanalyze immutable smoke
+# ICRA-035 — Run the fixed 60-second P0 Gate-0B benchmark once
 
 > Active gate: `GATE_0B`
 > Owner: `DEEPSEEK`
 > Activation: `TASK_READY`
-> Supervisor verdict: `ICRA033_ANALYZER_FALSE_REJECTION_MESSAGE_CLOCK_UNAVAILABLE`
+> Supervisor verdict: `ICRA034_REVIEW_PASS_SMOKE_PREREQUISITE_QUALIFIED`
 > Requirement mapping: `IAP-RQ-320`, `IAP-RQ-321`, `IAP-RQ-322`
 > Conference route: conditional P0 -> P4 -> P5
-> This task: analyzer-only typed failure contract, focused tests, then one immutable-evidence reanalysis
+> This task: fresh task-local build/linkage, one frozen P0-only benchmark, one analyzer
 
 ## Supervisor decision
 
-Accept ICRA-033's runtime and atomic evidence-transaction implementation. Its sole live smoke contains
-16 completed attempts: 14 strict successful 76,800-query result generations and two explicit
-`COMPLETED_FAILURE` attempts during startup. Three in-progress observations and 12 field-equivalent
-completed duplicates are coherent; there are zero conflicting duplicates and all 166 integrity
-reports are valid. Do not reopen the runtime transaction, predictor science, sigma, workload, source
-validation, GPU execution or performance.
+ICRA-034 passes Standards and Spec review with zero findings. Its sole guarded reanalysis of immutable
+ICRA-033 smoke evidence exits 0/PASS: 31 observations, 16 completed attempts, 14 strict successful
+76,800-query generations, two coherent typed startup failures, three in-progress observations,
+12 equivalent duplicates, zero conflicts and 166/166 valid integrity reports. The raw input hashes
+and byte counts remain exact. Refresh/provider/generation-interval p95 is approximately
+`194.485/150.429/506.176 ms`.
 
-The remaining analyzer failure is a state-specific contract defect. Attempts 4 and 5 have reason
-`message_stamp_unavailable`: no message clock exists from which truthful refresh/start/end message
-timestamps could be produced. They correctly carry three null message timestamps, finite ordered
-steady-clock start/end identity, finite elapsed time, nonzero attempt identity, result generation
-zero, active generation equal to the previous successful generation, unavailable snapshot and zero
-work. The analyzer currently requires finite message-domain stamps for every completed attempt and
-therefore falsely rejects both records. Fabricating message time is forbidden.
+The P0 smoke prerequisite is now qualified. Gate-0B itself remains open because the separately frozen
+60/55-second benchmark has not run against the current implementation. ICRA-035 shall make no product,
+analyzer, test, launch, runner, capture or configuration change. It shall build the reviewed HEAD into
+fresh task-local artifacts, prove the frozen contract, then run exactly one benchmark and one analyzer.
 
-ICRA-034 shall repair only that typed analyzer contract and formally reanalyze the immutable ICRA-033
-raw evidence. No GPU preflight, ROS, launch, runner, smoke or replacement capture is authorized.
-
-## 1. Synchronize and preserve the boundary
+## 1. Synchronize, preserve and declare the boundary
 
 - Follow `AGENTS.md` synchronization. Stop as `REMOTE_DIVERGED` if both sides lead; never reset,
   clean, stash, rebase, amend pushed history or overwrite another role's work.
-- Preserve the untracked PDF, all historical evidence and every retained build/install tree. Do not
-  edit, delete, move, stage or conceal them. ICRA-033 raw evidence is immutable input.
-- Record one START entry in `DEV_LOG.md` with the exact allowlist, test matrix, immutable input hashes,
-  and the one-reanalysis stop line. Do not edit Supervisor-owned files or select another task.
-- Create new evidence only below `results/icra27/icra034/`. This task needs no new build/install tree;
-  all current task and prerequisite build/install trees remain retained through Supervisor review.
+- Preserve the untracked PDF and all tracked historical evidence. Do not edit, delete, move, stage,
+  regenerate or conceal them. Treat ICRA-033 raw input and ICRA-034 reanalysis as immutable references.
+- ICRA-033 task-local build/install trees were deleted by Supervisor after Review PASS. Do not depend
+  on, recreate or write into their old paths. ICRA-034 created no build/install.
+- Put every new build/install/log/tmp/ROS/run/evidence artifact below `results/icra27/icra035/`.
+  Record one START entry in `DEV_LOG.md` with exact paths, allowlist, build/linkage matrix, frozen
+  configuration, one-shot commands and stop line. Do not edit Supervisor-owned files.
+- Retain all ICRA-035 build/install trees throughout development and Supervisor review. Builder is not
+  authorized to clean them; after Review PASS and pushed code/documentation, cleanup is Supervisor-only.
 
-## 2. Implement the state-specific completed identity contract
+## 2. Fresh build, tests and linkage before live execution
 
-- Preserve the existing strict completed-success rule: all refresh/start/end message-domain stamps
-  and steady-clock identities must be finite, coherent and ordered as already specified.
-- Recognize a null-message-clock exception only for the exact typed record:
-  `COMPLETED_FAILURE`, reason `message_stamp_unavailable`, positive attempt ID, result generation zero,
-  active generation equal to previous successful generation, snapshot unavailable, finite ordered
-  steady start/end, finite nonnegative elapsed time, and zero provider/work/predictor counters.
-- For that exact record, all three message-domain refresh/start/end stamps must be null together.
-  Partial nulls, fabricated finite message stamps, missing/non-finite/non-ordered steady identity,
-  nonzero work, nonzero result generation, active/previous mismatch, snapshot availability, or any
-  reason mismatch must fail closed.
-- Completed failures with any other reason remain subject to the existing finite message-domain stamp
-  contract. Do not create a broad `COMPLETED_FAILURE` exemption or weaken success, duplicate,
-  generation-chain, source, counter, timing or integrity validation.
-- Keep the change local and explicit. Refactoring the large analyzer state machine or sharing the C++
-  and Python state vocabulary is not authorized in this corrective task.
+No source correction is authorized in this qualification task. Command/environment mistakes before
+live execution may be corrected and rerun only when fully disclosed; any product, test, configuration,
+linkage or retained-dependency defect returns `BLOCKED` without GPU/ROS.
 
-## 3. Deterministic verification
+- Configure/build/install current IAP into task-local `build_iap`, `install` and `log` paths. Build and
+  install current `ego_planner` into task-local `build_ego` and `install_ego`, resolving current IAP
+  plus the unchanged retained ICRA-026 plan-env/path-searching/bspline dependencies read-only.
+- Run the complete existing affected P0 runtime, RiskGrid, rolling, occupancy, analyzer, runner,
+  capture and launch suites needed to prove the reviewed code and evidence path. Do not modify a test
+  to obtain PASS.
+- Prove direct and ament linkage resolves ICRA-035 IAP/EGO and the intended retained dependency
+  prefixes, with no workspace-default, deleted ICRA-033, build-tree, missing or stale product library.
+- Freeze and hash the installed launch/runtime inputs and effective benchmark configuration before
+  GPU/ROS. The exact contract is CPU mapping backend, worker count 4, runtime/validation 60/55 seconds,
+  `30 x 30 x 6 m`, resolution `0.75 m`, horizons `0.0..2.5 s` at `0.5 s`, refresh `0.5 s`, occupied
+  skip enabled, no bag, no RViz, safety off, P1/P2/P3/P4/P5 disabled, and exact provisional
+  `0.01 m/sqrt(s)` with profile `legacy_iap_rq320_baseline_v1`.
+- Require capture readiness for `/planning/risk_grid_health` and `/iap/integrity`, task-local logs,
+  exact 76,800 logical queries, the benchmark minimum of 20 successful generations and p95 limit
+  400 ms. Preserve the explicit attempt/result/active evidence schema from ICRA-033/034.
 
-Engineering checks may be corrected and rerun before the single formal reanalysis; disclose all
-attempts. No engineering check may start ROS or mutate ICRA-033 evidence.
+Any build, test, linkage, hash, frozen-config, output-path, dependency or capture-preparation failure
+stops before live execution. Do not switch backend, tune, repair code or loosen validation.
 
-- Add a positive analyzer fixture matching the full attempts 4/5 shape, including all three null
-  message stamps and finite ordered steady-clock evidence.
-- Add fail-closed cases for partial null stamps, success with null stamps, another failure reason with
-  null stamps, missing/non-finite/non-ordered steady identity, non-finite/negative elapsed time,
-  nonzero work/provider/predictor counters, nonzero result generation, active/previous mismatch,
-  snapshot/reason mismatch and unexpected finite message timestamps for
-  `message_stamp_unavailable`.
-- Run Python compile/static checks and the complete direct analyzer test suite. Retain all existing
-  ICRA-033 success, in-progress, cold-start, duplicate/conflict, source/counter/timing and historical
-  fail-closed tests.
-- Before reanalysis, record SHA-256 and byte counts for the ICRA-033 raw risk-grid health, integrity
-  and run-manifest inputs. Recheck them after reanalysis and require exact equality.
+## 3. Mandatory GPU preflight and exactly one benchmark
 
-Any implementation, test, input-integrity or evidence-path failure stops before formal reanalysis.
-Do not weaken tests or edit raw evidence to obtain PASS.
+Only after Section 2 passes, invoke exactly once:
 
-## 4. Exactly one formal reanalysis, no live rerun
+`python3 scripts/dev_planner/run_gate0_qualification.py --output-root results/icra27/icra035/runs --benchmark`
 
-Only after Section 3 passes, invoke exactly once:
+- The runner must complete mandatory GPU preflight before capture or ROS: `nvidia-smi` must discover a
+  GPU, CUDA Driver API `cuInit(0)` must succeed and `device_count >= 1`. A failure records
+  `GPU_NOT_READY`, starts no ROS and ends ICRA-035 without retry.
+- Launch dependency, qualification-config, task-local-log and capture-readiness preflights must pass
+  before the main flow. Required processes must be observed as launch descendants and remain alive
+  throughout runtime. Controlled shutdown is not runtime death.
+- The benchmark configuration is immutable before and after launch. Do not change ROI, resolution,
+  horizons, refresh period, worker count, sigma, backend, occupied skip, duration, validation window,
+  topic QoS or any feature switch.
+- Stop after the one runner regardless of its result. No second benchmark, alternate output root,
+  wait/retry loop, post-live source correction or tuning is authorized.
 
-`python3 scripts/dev_planner/gate0_analyzer.py --gate0-root results/icra27/icra033/runs --output-dir results/icra27/icra034/reanalysis`
+## 4. Exactly one analyzer and Gate-0B acceptance
 
-- This is the sole formal analyzer execution under ICRA-034 and is not permission to retry the
-  ICRA-033 analyzer in place. Use an invocation guard and disclose the command, stdout/stderr and exit
-  code. Stop after it regardless of outcome.
-- Acceptance requires analyzer exit 0/PASS; 31 observations; 16 completed attempts; 14 strict
-  successful result generations; two coherent typed failures; three in-progress observations;
-  12 equivalent completed duplicates; zero conflicts; 166/166 valid integrity reports; exact 76,800
-  logical queries per successful generation; and unchanged timing statistics within serialization
-  precision.
-- The expected retained measurements are approximately refresh p95 `194.485 ms`, provider p95
-  `150.429 ms` and generation-interval p95 `506.176 ms`. These are verification expectations, not
-  authorization to tune thresholds or science.
-- Exact requested/effective `0.01` and `legacy_iap_rq320_baseline_v1` remain provisional. Do not claim
-  empirical calibration, a new live run, Gate promotion or benchmark qualification.
-- No GPU, ROS, launch, runner, capture, rosbag, task-process cleanup or external-log write is allowed.
+If the one runner produced sufficient live evidence, invoke exactly once:
+
+`python3 scripts/dev_planner/gate0_analyzer.py --gate0-root results/icra27/icra035/runs --output-dir results/icra27/icra035/runs/benchmark/analyzer`
+
+- Guard and record the sole analyzer invocation, exact stdout/stderr and exit code. Stop after it
+  regardless of outcome; do not overwrite or rerun it.
+- PASS requires runner exit 0, analyzer exit 0/PASS, no required-process runtime failure, valid frozen
+  manifest/config/linkage, at least one captured valid integrity report, at least 20 distinct strict
+  successful result generations, and every success having exactly 76,800 logical queries, finite
+  refresh/provider timing, complete counter algebra and coherent source/snapshot evidence.
+- Type-7 refresh p95 must be `<= 400 ms`. Retain p50/p95/max, provider timing, generation interval,
+  p95/500 ms, stale/failed ratio, actual provider dispatch, spatial recompute/reuse, GNSS/LiDAR
+  invocation, horizon fusion, window shift/full-rebuild reasons, typed completed failures,
+  in-progress observations and duplicate/conflict counts.
+- Fewer than 20 successes, wrong shape, invalid/zero integrity, non-finite evidence, p95 above 400 ms,
+  schema conflict, process failure or manifest/config mismatch is a truthful Gate failure. Do not
+  reinterpret it as environment success or tune and retry.
+- Exact `0.01` and the profile remain provisional even on PASS. This benchmark is not empirical
+  covariance calibration or full IAP-RQ-322 completion.
 
 ## 5. Documentation and handoff
 
-- Update `docs/icra27/P0_ROLLING_RISK_WINDOW_DESIGN.md` only as needed to state the typed failure-time
-  semantics; update `docs/CHANGES.md`, `docs/TRACEABILITY.md` and `DEV_LOG.md` with tests, immutable
-  input hashes, the exact one-shot command/exit and truthful result.
-- Stage only allowlisted files and bounded ICRA-034 review evidence. Confirm the protected PDF and all
-  build/install trees remain untouched and untracked/retained as applicable.
-- Commit and push implementation/test/evidence/documentation, then commit and push one final
-  `DEV_LOG.md`-only handoff. Every commit must carry applicable `IAP-RQ-320`, `IAP-RQ-321` and/or
-  `IAP-RQ-322`.
-- Builder may not declare Supervisor Review PASS, clean artifacts, authorize the 60-second benchmark,
-  promote Gate-0B, execute P4/P5 or create another task. Return to Supervisor review after push.
+- Update `docs/CHANGES.md`, `docs/TRACEABILITY.md` and `DEV_LOG.md` with build/test/linkage/preflight
+  commands and exits, immutable configuration hashes, runner/analyzer invocation counts, metrics,
+  process cleanup audit and truthful PASS/BLOCKED result.
+- Stage only compact ICRA-035 evidence required to reproduce the verdict: preflight/config/linkage
+  records, runner manifest, capture readiness, health/integrity JSONL, bounded stdout/capture logs,
+  runtime manifest and analyzer CSV/JSON/effective-config outputs. Do not stage build/install, large
+  truth CSV, ROS logs unrelated to the verdict or the protected PDF.
+- Terminate only ROS processes proven to have been started by ICRA-035; record that none remain. Do
+  not terminate unrelated user processes.
+- Commit and push evidence/documentation, then commit and push one final `DEV_LOG.md`-only handoff.
+  Every commit must carry applicable `IAP-RQ-320`, `IAP-RQ-321` and/or `IAP-RQ-322`.
+- Builder may not declare Supervisor Review PASS, delete build/install, promote Gate-0B, authorize P4,
+  execute P4/P5, start a campaign or select another task. Return to Supervisor review after push.
 
 ## Allowed files
 
-- `scripts/dev_planner/gate0_analyzer.py`;
-- `test/test_gate0_analyzer.py`;
-- `docs/icra27/P0_ROLLING_RISK_WINDOW_DESIGN.md` only for the exact typed failure-time contract;
-- new bounded analyzer outputs, input-hash records and review evidence below
-  `results/icra27/icra034/`;
-- `DEV_LOG.md`, `docs/CHANGES.md`, `docs/TRACEABILITY.md`.
+- new task-local build/install/log/tmp/ROS/run/review evidence below `results/icra27/icra035/`, with
+  only compact verdict evidence staged;
+- `DEV_LOG.md`;
+- `docs/CHANGES.md`;
+- `docs/TRACEABILITY.md`.
 
 ## Forbidden
 
-- No C++/runtime/header/runtime-test, launch, runner, capture, config, smoke or workload change.
-- No GPU preflight, ROS, rosbag, live analyzer, replacement smoke, retry, tuning, 60-second benchmark,
-  campaign, P1/P2/P3/P4/P5 execution, Gate promotion or cleanup.
-- No edit/delete/move of historical/PDF/external evidence; no modification of ICRA-033 raw evidence;
-  no new build/install and no deletion of retained build/install trees.
+- No source, header, test, analyzer, runner, capture, launch, config, CMake or product change.
+- No writes into ICRA-033/034 or retained ICRA-026 dependencies; no historical/PDF/external-repository
+  edit, move, delete or staging.
+- No workload/backend/sigma/profile/threshold/QoS tuning, benchmark/analyzer retry, smoke, rosbag,
+  RViz, 60-run campaign, P1/P2/P3/P4/P5 execution, Gate promotion or artifact cleanup.

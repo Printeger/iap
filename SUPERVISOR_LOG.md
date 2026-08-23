@@ -1,5 +1,72 @@
 # ICRA Supervisor Log
 
+## 2026-08-23 — ICRA-034 review PASS and ICRA-035 fixed benchmark authorization
+
+### Review identity and synchronization
+
+- Fixed review range: `c175510e9eedd5f6262fda72e16165e85536a1ff...37062d4b415a19e70fba4ee0aac4744d89c5e3c7`.
+- Reviewed commits: main implementation/evidence/documentation `0e98cfd` and final DEV_LOG-only
+  handoff `37062d4`; both carry applicable `IAP-RQ-320`, `IAP-RQ-321` and `IAP-RQ-322` identifiers.
+- After fetch, `HEAD` and `origin/dev/icra` matched at divergence `0 0`. The protected PDF remains the
+  sole untracked file. All 20 changed paths match the ICRA-034 allowlist; no Supervisor-owned,
+  runtime/C++, launch/runner/capture/config, P1--P5, historical, external-repository or
+  cross-repository file changed.
+
+### Standards axis
+
+- Verdict: `PASS`; zero findings and no documented-standard violation or reportable baseline smell.
+- RQ/document synchronization, task allowlist, ownership, protected PDF/history, immutable inputs,
+  exactly-one guard, no-live boundary, two-commit handoff and artifact retention all conform.
+- The existing string vocabulary is not reported as Primitive Obsession here because ICRA-034
+  explicitly required a small local repair and forbade a state-machine/cross-language enum refactor.
+
+### Spec axis
+
+- Verdict: `PASS`; zero missing/partial, scope-creep or implemented-wrong findings.
+- The exact typed exception requires `COMPLETED_FAILURE`, matching `message_stamp_unavailable`
+  outcome/snapshot reason, positive attempt, result zero, active/previous equality, snapshot false,
+  all three message stamps explicitly null, finite ordered steady identity, finite nonnegative elapsed
+  and zero work counters. Success, other failures and every missing/partial/fabricated/malformed form
+  remain fail closed.
+- Positive attempts-4/5 shape and all required negative cases are covered, including changed-counter
+  duplicate conflict and valid in-progress cumulative counters. The direct analyzer suite passes
+  42/42 and `git diff --check` passes.
+
+### Formal reanalysis and smoke-prerequisite verdict
+
+- The single guarded analyzer command ran once, was not retried, exited 0 with empty stderr and
+  returned PASS. It reports 31 observations, 16 completed attempts, 14 strict successful 76,800-query
+  generations, two coherent typed failures, three in-progress observations, 12 equivalent completed
+  duplicates, zero conflicts and 166/166 valid integrity reports.
+- Refresh/provider/generation-interval p95 is `194.48499765/150.42874975/506.1757368 ms`.
+- ICRA-033 raw health, integrity and manifest identities independently match the recorded pre/post
+  audit exactly: `d91a0af…61bc3 / 112289`, `53a08cf…d869 / 39237`, and
+  `04e2e971…bf1a / 6404`. All recorded reanalysis output hashes also match current bytes.
+- Supervisor reran only the static 42-test analyzer suite and hash/diff checks. No analyzer CLI, GPU,
+  ROS, launch, runner, capture or smoke was invoked during review.
+- Verdict: `ICRA034_REVIEW_PASS_SMOKE_PREREQUISITE_QUALIFIED`. This closes the 20-second smoke
+  prerequisite but does not promote Gate-0B; the fixed 60/55-second benchmark remains mandatory.
+
+### Artifact lifecycle
+
+- ICRA-034 created no build/install tree. The retained ICRA-033 build/install directories contained no
+  tracked files and were approximately 5.0 GiB total. After Review PASS and pushed code/docs/handoff,
+  Supervisor deleted exactly `build_iap`, `install`, `install_iap`, `build_ego` and `install_ego`
+  below `results/icra27/icra033/`, as required by the operator lifecycle policy.
+- The environment did not support recoverable Trash on this mount, so the five reproducible trees
+  were permanently removed. All tracked/raw evidence remains present, and its three qualification
+  hashes remain exact. No historical evidence, source, PDF or retained ICRA-026 dependency changed.
+
+### Required next action
+
+- Unique task: `ICRA-035 / GATE_0B`, defined in `NEXT_TASK.md`; active role is `DEEPSEEK`, state
+  `TASK_READY`.
+- Build current IAP/EGO into fresh ICRA-035 task-local build/install trees, prove frozen worker-4
+  configuration and linkage, pass mandatory GPU/dependency/capture preflights, then execute exactly
+  one fixed 60/55-second P0-only benchmark and exactly one analyzer if evidence exists.
+- No product/analyzer/test change, retry, tuning, alternate workload, P4/P5 execution, cleanup or Gate
+  promotion is authorized. ICRA-035 artifacts must remain through its Supervisor review.
+
 ## 2026-08-23 — ICRA-033 review and ICRA-034 analyzer-only reanalysis authorization
 
 ### Review identity and synchronization
