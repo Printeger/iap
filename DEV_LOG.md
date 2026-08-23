@@ -4539,3 +4539,27 @@ Exact sigma/profile remains provisional, not empirical calibration or full
 IAP-RQ-322 completion. Builder claims only the recorded Gate-0B result and
 returns it to SUPERVISOR review after the required commits and pushes; Builder
 does not claim Supervisor Review PASS.
+
+## 2026-08-23T17:10:53Z — ICRA-035 FINAL HANDOFF
+
+Main evidence/documentation commit `f4e89f8` (`ICRA-035 qualify Gate-0B
+benchmark (IAP-RQ-320 IAP-RQ-321 IAP-RQ-322)`) was pushed successfully to
+`origin/dev/icra`. Before that push, the first final `git fetch origin` attempt
+failed when the SSH-over-443 connection was closed; it changed nothing. The
+immediate fetch retry passed, verified divergence `1 0` (local-only lead), and
+the main push then exited 0.
+
+Final two-axis Builder review against dispatch HEAD `7f0fc40` reports Standards
+PASS with zero hard findings and zero judgement-call smells. Spec review found
+no technical defect or scope creep; its sole procedural observation was to
+complete the prescribed main push and this final `DEV_LOG.md`-only handoff
+commit/push. Those delivery steps are the only changes after review.
+
+The immutable result remains runner invocation 1 / exit 0, analyzer invocation
+1 / exit 0, no retries, and Gate-0B PASS with 103 strict 76,800-query successful
+generations, refresh p95 `184.1007665 ms` and 607/607 valid integrity reports.
+No task process or bag remains; external `log/`, retained build/install trees
+and the protected untracked PDF remain unchanged. No smoke, tuning, campaign,
+P1–P5 execution, cleanup, Gate promotion, empirical-calibration claim or full
+IAP-RQ-322 claim occurred. This commit changes `DEV_LOG.md` only and returns
+control to SUPERVISOR review without claiming Supervisor Review PASS.
