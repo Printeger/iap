@@ -1,0 +1,9 @@
+{
+  "schema_version": "icra035_analyzer_invocation_v1",
+  "command": "python3 scripts/dev_planner/gate0_analyzer.py --gate0-root results/icra27/icra035/runs --output-dir results/icra27/icra035/runs/benchmark/analyzer",
+  "invocation_count": 1,
+  "exit_code": 0,
+  "stderr": "",
+  "retry_count": 0,
+  "stdout_path": "results/icra27/icra035/preflight/analyzer_stdout.log"
+}

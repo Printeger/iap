@@ -1,0 +1,55 @@
+{
+  "gate0a": {
+    "reason": "no_runs",
+    "stable_scenarios": [],
+    "status": "NO-GO-P2"
+  },
+  "gate0b": {
+    "captured_observation_count": 209,
+    "completed_attempt_count": 105,
+    "completed_failure_count": 2,
+    "conflicting_completed_observation_count": 0,
+    "duplicate_completed_observation_count": 86,
+    "expected_refresh_query_count": 76800,
+    "failed_ratio": 0.01904761904761905,
+    "failed_refresh_count": 2,
+    "failures": [],
+    "gate": "PASS",
+    "generation_interval_ms_p50": 500.1353819999998,
+    "generation_interval_ms_p95": 511.2421743000002,
+    "in_progress_observation_count": 18,
+    "integrity_report_count": 607,
+    "manifest_failures": [],
+    "message_stamp_unavailable_failure_count": 0,
+    "minimum_successful_generations": 20,
+    "p95_over_refresh_period": 0.36820153299999997,
+    "pre_refresh_observation_count": 0,
+    "protocol": "benchmark",
+    "provider_batch_duration_ms_p50": 146.82252,
+    "provider_batch_duration_ms_p95": 150.88863279999998,
+    "query_shape_ok": true,
+    "recommendations": [],
+    "refresh_elapsed_ms_max": 199.520467,
+    "refresh_elapsed_ms_p50": 175.482122,
+    "refresh_elapsed_ms_p95": 184.1007665,
+    "schema_version": "gate0_p0_summary_v2",
+    "stale_ratio": 0.01904761904761905,
+    "successful_generation_count": 103,
+    "valid_integrity_report_count": 607
+  },
+  "runs": [
+    {
+      "attempt_count": 0,
+      "critical_violation": false,
+      "manifest_failures": "",
+      "qualified": false,
+      "run_id": "p0-full-grid",
+      "scenario": "gnss_open_sky",
+      "selected_publish_reached": false,
+      "selected_reached_downstream": false,
+      "selected_refinement_reached": false,
+      "selected_update_reached": false,
+      "under_two_success_attempts": 0
+    }
+  ]
+}

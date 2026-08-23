@@ -1,0 +1,10 @@
+{
+  "schema_version": "icra035_benchmark_invocation_guard_v1",
+  "created_utc": "2026-08-23T16:59:29Z",
+  "maximum_invocations": 1,
+  "invocation_count": 1,
+  "retry_allowed": false,
+  "command": "python3 scripts/dev_planner/run_gate0_qualification.py --output-root results/icra27/icra035/runs --benchmark",
+  "static_preflight_ready": true,
+  "benchmark_output_preexisting": false
+}

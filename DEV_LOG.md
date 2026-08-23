@@ -4413,3 +4413,129 @@ hashes/bytes and the protected untracked PDF remain exact. This final handoff
 commit changes `DEV_LOG.md` only and returns control to SUPERVISOR review; it
 does not declare Supervisor Review PASS, empirical calibration, full
 IAP-RQ-322 completion or Gate-0B promotion.
+
+## 2026-08-23T16:42:00Z — ICRA-035 START
+
+IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-322. Synchronized `dev/icra` at reviewed
+task-dispatch HEAD `7f0fc40e997a40a040b2c83282d9c9e3dae1eef9`: initial status contained only
+the protected untracked PDF, fetch passed and divergence was `0 0`, so no pull
+ran. The PDF is preservation-only, SHA-256
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`,
+and will not be edited, staged, deleted, moved or regenerated. ICRA-033/034
+evidence and retained ICRA-026 dependency trees are immutable inputs; deleted
+ICRA-033 build/install paths will not be used or recreated.
+
+Exact allowlist: new task-local build/install/log/tmp/ROS/run/review evidence
+below `results/icra27/icra035/`, plus `DEV_LOG.md`, `docs/CHANGES.md` and
+`docs/TRACEABILITY.md`. No source, header, test, analyzer, runner, capture,
+launch, config, CMake, product, Supervisor-owned, historical, PDF or external
+repository file may change. Fresh paths are `build_iap`, `install`, `log`,
+`build_ego`, `install_ego`, `tmp`, `ros_log`, `runs`, `preflight` and `review`
+under the ICRA-035 root; all build/install trees are retained through Supervisor
+review and never staged or cleaned by Builder.
+
+Build/linkage matrix: configure/build/install current IAP into ICRA-035
+`build_iap`/`install`, then current `ego_planner` into
+`build_ego`/`install_ego` using the ICRA-035 IAP package and read-only ICRA-026
+`install_plan_env`, `install_path_searching` and `install_bspline_opt` package
+prefixes. Run the complete existing P0 runtime, RiskGrid, rolling, occupancy,
+analyzer, runner, capture and launch suites. Direct and ament audits must resolve
+current ICRA-035 IAP/EGO plus exactly the intended ICRA-026 dependencies, with
+no workspace-default, deleted ICRA-033, build-tree, missing or stale product
+library.
+
+Frozen benchmark contract: CPU mapping backend; worker count 4; runtime /
+validation `60 / 55 s`; `30 x 30 x 6 m` ROI; `0.75 m` resolution; six horizons
+`0.0, 0.5, 1.0, 1.5, 2.0, 2.5 s`; `0.5 s` refresh; occupied skip enabled; no
+bag or RViz; safety off; P1/P2/P3/P4/P5 disabled; exact provisional sigma
+`0.01 m/sqrt(s)` and profile `legacy_iap_rq320_baseline_v1`. Capture must be
+ready for `/planning/risk_grid_health` and `/iap/integrity`; outputs/logs must
+remain task-local; every success must contain 76,800 logical queries; benchmark
+requires at least 20 strict successes and type-7 refresh p95 `<= 400 ms`.
+
+Explicit one-shot stop line: only after every build, test, linkage, hash,
+dependency, frozen-config and output-path check passes, invoke exactly once:
+
+```text
+python3 scripts/dev_planner/run_gate0_qualification.py --output-root results/icra27/icra035/runs --benchmark
+```
+
+The runner must pass mandatory GPU preflight before capture/ROS. Stop after that
+runner regardless of outcome; there is no retry, alternate root, wait loop,
+correction or tuning. Only if sufficient live evidence exists, invoke exactly
+once and then stop regardless of outcome:
+
+```text
+python3 scripts/dev_planner/gate0_analyzer.py --gate0-root results/icra27/icra035/runs --output-dir results/icra27/icra035/runs/benchmark/analyzer
+```
+
+No smoke, rosbag, RViz, campaign, alternate workload/sigma/backend, P1–P5
+execution, Gate promotion, artifact cleanup or next-task selection is authorized.
+
+## 2026-08-23T17:04:37Z — ICRA-035 COMPLETE / BUILDER HANDOFF PREP
+
+IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-322. No product or test file changed. Fresh
+ICRA-035 IAP configure/build/install exited 0. Fresh EGO configure/build/install
+exited 0 against the ICRA-035 IAP and read-only ICRA-026 plan-env,
+path-searching and bspline prefixes. The affected IAP CTest selection passed
+6/6 (rolling 23, RiskGrid 43, analyzer 42, runner 27, capture 1, launch 16) and
+the EGO P0 selection passed 2/2 (runtime 79 active tests with one existing
+disabled profile not invoked, adapter 7). Final ament and direct linkage resolve
+only the exact task-local IAP/EGO and intended retained ICRA-026 dependencies.
+
+All non-live corrections are disclosed. One initial read-only `rg` lookup
+misparsed a `--benchmark` pattern and was corrected with `--`. The first EGO
+configure exited 0 but warned about an inherited workspace-IAP runtime path; it
+was corrected before build with a narrowed environment and
+`-U IAP_MSGS_TYPESUPPORT_CPP`. The first static helper invocation supplied its
+dependency subdirectory instead of the task preflight root and exited 1 on that
+record-path assertion even though actual ament/linkage was correct; its failed
+dependency JSON is retained, the helper path/rendering was corrected, and the
+final preflight exited 0/ready. After live execution, one read-only `jq`
+inspection exited 127 because `jq` is absent and was replaced by read-only
+Python JSON inspection. None of these attempts started ROS or altered the
+frozen workload. The first final JSON syntax sweep recursively included the
+runtime's JSON5/comment-bearing configuration copies and raised
+`JSONDecodeError`; its shell continued and the final affected CTest selections
+passed 6/6 and 2/2. The corrected syntax sweep is limited to staged strict-JSON
+evidence. No runtime artifact was modified and no live command was repeated.
+
+Final static preflight SHA-256 is
+`08878746a4778ee6ca7b4c34913e10ba8487102b7fc17e26edd61dc2707b1244`;
+the frozen effective configuration hash is
+`97b4ccb8bbb348ef285771e9d29f735188477b568ad53fb957dfeca612b211e5`.
+It binds exact CPU/worker-4/60–55 s/30×30×6 m/0.75 m/six-horizon/0.5 s
+refresh/occupied-skip/no-bag/no-RViz/safety-off/P1–P5-disabled execution plus
+provisional `0.01` / `legacy_iap_rq320_baseline_v1`.
+
+The runner guard consumed the sole slot, and the prescribed benchmark command
+ran exactly once. Mandatory GPU preflight passed on one RTX 4070 Ti SUPER with
+both `nvidia-smi` exits 0, CUDA `cuInit(0)=0` and device count 1. Config,
+dependency, task-local logging and capture readiness passed; runner exited 0;
+required `iap_rosnode` was seen, had no runtime failure and stopped only during
+controlled shutdown. There was no runner retry.
+
+The 209 health observations and 607 integrity records were sufficient, so the
+analyzer guard consumed its sole slot and the prescribed analyzer ran exactly
+once. It exited 0 with **Gate-0B PASS**: 105 completed attempts, 103 strict
+successful 76,800-query generations, two typed failures, 18 in-progress
+observations, 86 equivalent duplicates, zero conflicts and 607/607 valid
+integrity records. Refresh p50/p95/max is
+`175.482122 / 184.1007665 / 199.520467 ms`; provider p50/p95 is
+`146.82252 / 150.8886328 ms`; generation interval p50/p95 is
+`500.135382 / 511.2421743 ms`; failed/stale ratio is `0.019047619`; p95 is
+below the fixed 400 ms limit. There was no analyzer retry.
+
+Post-live audit finds zero task-process matches and no bag. All 38 IAP runtime
+log files and 17 ROS log files are task-local. External repository `log/` is
+byte-identical before and after at SHA-256
+`a07fbf7945ec9800e95f6ef49d0d9c8bbdee8e2e8ff1500f919e1037cc4221f0`,
+43,763 files and 15,834,674,845 bytes. The protected PDF remains untracked,
+unstaged and unchanged at SHA-256
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+No smoke, tuning, alternate workload, campaign, P1–P5 execution, cleanup or
+Gate promotion occurred. Build/install trees remain retained for Supervisor.
+Exact sigma/profile remains provisional, not empirical calibration or full
+IAP-RQ-322 completion. Builder claims only the recorded Gate-0B result and
+returns it to SUPERVISOR review after the required commits and pushes; Builder
+does not claim Supervisor Review PASS.

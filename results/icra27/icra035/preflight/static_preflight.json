@@ -1,0 +1,437 @@
+{
+  "ament_packages": {
+    "bspline_opt": "/home/dev/ws_iap/src/iap/results/icra27/icra026/install_bspline_opt",
+    "ego_planner": "/home/dev/ws_iap/src/iap/results/icra27/icra035/install_ego",
+    "iap": "/home/dev/ws_iap/src/iap/results/icra27/icra035/install",
+    "path_searching": "/home/dev/ws_iap/src/iap/results/icra27/icra026/install_path_searching",
+    "plan_env": "/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env"
+  },
+  "artifact_sha256": {
+    "installed_analyzer": "4043bfd46e4f04e0ac99212b699a9da4d4f6e1e7cbfbf4d6479865f1c5abd6a8",
+    "installed_capture": "3ef13e1c5622cbcf4b16aaa94e8faf5c65d81ba8117f897f50e93a1ce4d27028",
+    "installed_ego": "584704c1798840a40711cd9697964020b985f48b45376be969a1dde96be3c859",
+    "installed_iap": "06e3c9f5b8c0e71eb7d94d82d14b78681a0b0391d846c0224752522cf76bdde1",
+    "installed_runner": "02b01e2c390ce74f6a3e0598a00fa76d69021e9041f2c86ff38e6b76059613dd"
+  },
+  "disabled_expected": [
+    "planner_enable_p1",
+    "planner_enable_p2",
+    "planner_enable_p3_local",
+    "planner_enable_p3_global",
+    "planner_enable_p4",
+    "planner_enable_p5_runtime",
+    "planner_enable_p5_final",
+    "p1.use_integrity_cost",
+    "p1.metrics_only",
+    "p2.enable_candidate_ranking",
+    "p3.enable_local_reference_bias",
+    "p3.enable_global_reference_bias",
+    "p4.enable_risk_aware_astar",
+    "p5.enable_runtime_gate",
+    "p5.enable_final_gate"
+  ],
+  "effective_config": {
+    "corridor_map_stamp_authority_topic": "/sim/drone_0/truth_odom",
+    "experiment": "p0_open_sky",
+    "export_root_dir": "/home/dev/ws_iap/src/iap/results/icra27/icra035/runs/benchmark/exports",
+    "iap_log_root": "/home/dev/ws_iap/src/iap/results/icra27/icra035/runs/benchmark/runtime/iap_logs",
+    "iap_mapping_backend": "cpu",
+    "p0.enable_risk_grid": true,
+    "p0.horizons_s": "0.0,0.5,1.0,1.5,2.0,2.5",
+    "p0.predictor.sigma_grow_m_sqrt_s": 0.01,
+    "p0.predictor.sigma_growth_profile": "legacy_iap_rq320_baseline_v1",
+    "p0.predictor.worker_count": 4,
+    "p0.refresh_period_s": 0.5,
+    "p0.resolution_m": 0.75,
+    "p0.size_x_m": 30.0,
+    "p0.size_y_m": 30.0,
+    "p0.size_z_m": 6.0,
+    "p0.skip_occupied_voxels": true,
+    "p1.metrics_only": false,
+    "p1.use_integrity_cost": false,
+    "p2.enable_candidate_ranking": false,
+    "p3.enable_global_reference_bias": false,
+    "p3.enable_local_reference_bias": false,
+    "p4.enable_risk_aware_astar": false,
+    "p5.enable_final_gate": false,
+    "p5.enable_runtime_gate": false,
+    "planner_enable_all_safety": false,
+    "planner_enable_p1": false,
+    "planner_enable_p2": false,
+    "planner_enable_p3_global": false,
+    "planner_enable_p3_local": false,
+    "planner_enable_p4": false,
+    "planner_enable_p5_final": false,
+    "planner_enable_p5_runtime": false,
+    "planner_safety_profile": "off",
+    "record_bag": false,
+    "run_duration_s": 60,
+    "run_validator": false,
+    "runtime_root_dir": "/home/dev/ws_iap/src/iap/results/icra27/icra035/runs/benchmark/runtime",
+    "scenario": "gnss_open_sky",
+    "start_rviz": false,
+    "validation_duration_s": 55
+  },
+  "effective_config_sha256": "97b4ccb8bbb348ef285771e9d29f735188477b568ad53fb957dfeca612b211e5",
+  "ego_cache": {
+    "IAP_MSGS_TYPESUPPORT_CPP": "/home/dev/ws_iap/src/iap/results/icra27/icra035/install/lib/libiap__rosidl_typesupport_cpp.so",
+    "bspline_opt_DIR": "/home/dev/ws_iap/src/iap/results/icra27/icra026/install_bspline_opt/share/bspline_opt/cmake",
+    "iap_DIR": "/home/dev/ws_iap/src/iap/results/icra27/icra035/install/share/iap",
+    "path_searching_DIR": "/home/dev/ws_iap/src/iap/results/icra27/icra026/install_path_searching/share/path_searching/cmake",
+    "plan_env_DIR": "/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/share/plan_env/cmake"
+  },
+  "empirically_calibrated": false,
+  "expected_iap": "/home/dev/ws_iap/src/iap/results/icra27/icra035/install/lib/libiap.so",
+  "expected_plan_env": "/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/lib/libplan_env.so",
+  "failures": [],
+  "frozen_expected": {
+    "export_root_dir": "/home/dev/ws_iap/src/iap/results/icra27/icra035/runs/benchmark/exports",
+    "iap_log_root": "/home/dev/ws_iap/src/iap/results/icra27/icra035/runs/benchmark/runtime/iap_logs",
+    "iap_mapping_backend": "cpu",
+    "p0.horizons_s": "0.0,0.5,1.0,1.5,2.0,2.5",
+    "p0.predictor.sigma_grow_m_sqrt_s": 0.01,
+    "p0.predictor.sigma_growth_profile": "legacy_iap_rq320_baseline_v1",
+    "p0.predictor.worker_count": 4,
+    "p0.refresh_period_s": 0.5,
+    "p0.resolution_m": 0.75,
+    "p0.size_x_m": 30.0,
+    "p0.size_y_m": 30.0,
+    "p0.size_z_m": 6.0,
+    "p0.skip_occupied_voxels": true,
+    "planner_enable_all_safety": false,
+    "planner_safety_profile": "off",
+    "record_bag": false,
+    "run_duration_s": 60,
+    "run_validator": false,
+    "runtime_root_dir": "/home/dev/ws_iap/src/iap/results/icra27/icra035/runs/benchmark/runtime",
+    "start_rviz": false,
+    "validation_duration_s": 55
+  },
+  "iap_link_count": 5,
+  "launch_dependency_preflight": {
+    "ament_prefix_path": [
+      "/home/dev/ws_iap/src/iap/results/icra27/icra035/install_ego",
+      "/home/dev/ws_iap/src/iap/results/icra27/icra035/install",
+      "/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env",
+      "/home/dev/ws_iap/src/iap/results/icra27/icra026/install_path_searching",
+      "/home/dev/ws_iap/src/iap/results/icra27/icra026/install_bspline_opt",
+      "/home/dev/ws_iap/install/so3_quadrotor_simulator",
+      "/home/dev/ws_iap/install/uav_utils",
+      "/home/dev/ws_iap/install/traj_utils",
+      "/home/dev/ws_iap/install/so3_control",
+      "/home/dev/ws_iap/install/poscmd_2_odom",
+      "/home/dev/ws_iap/install/odom_visualization",
+      "/home/dev/ws_iap/install/local_sensing",
+      "/home/dev/ws_iap/install/quadrotor_msgs",
+      "/home/dev/ws_iap/install/pose_utils",
+      "/home/dev/ws_iap/install/mockamap",
+      "/home/dev/ws_iap/install/map_generator",
+      "/home/dev/ws_iap/install/gnss_sim",
+      "/home/dev/ws_iap/install/gnss_comm",
+      "/home/dev/ws_iap/install/cmake_utils",
+      "/root/ros2_ws/install/glim_ros",
+      "/root/ros2_ws/install/glim",
+      "/opt/ros/jazzy"
+    ],
+    "ament_prefix_path_raw": "/home/dev/ws_iap/src/iap/results/icra27/icra035/install_ego:/home/dev/ws_iap/src/iap/results/icra27/icra035/install:/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env:/home/dev/ws_iap/src/iap/results/icra27/icra026/install_path_searching:/home/dev/ws_iap/src/iap/results/icra27/icra026/install_bspline_opt:/home/dev/ws_iap/install/so3_quadrotor_simulator:/home/dev/ws_iap/install/uav_utils:/home/dev/ws_iap/install/traj_utils:/home/dev/ws_iap/install/so3_control:/home/dev/ws_iap/install/poscmd_2_odom:/home/dev/ws_iap/install/odom_visualization:/home/dev/ws_iap/install/local_sensing:/home/dev/ws_iap/install/quadrotor_msgs:/home/dev/ws_iap/install/pose_utils:/home/dev/ws_iap/install/mockamap:/home/dev/ws_iap/install/map_generator:/home/dev/ws_iap/install/gnss_sim:/home/dev/ws_iap/install/gnss_comm:/home/dev/ws_iap/install/cmake_utils:/root/ros2_ws/install/glim_ros:/root/ros2_ws/install/glim:/opt/ros/jazzy",
+    "checked_utc": "2026-08-23T16:58:56Z",
+    "expected_task_local_prefixes": {
+      "ego_planner": "/home/dev/ws_iap/src/iap/results/icra27/icra035/install_ego",
+      "iap": "/home/dev/ws_iap/src/iap/results/icra27/icra035/install"
+    },
+    "failure_reason": "",
+    "failure_reasons": [],
+    "launch_dependencies_ready": true,
+    "packages": [
+      {
+        "check": {
+          "api": "ament_index_python.packages.get_package_prefix",
+          "arguments": [
+            "iap"
+          ],
+          "exception": "",
+          "result": "/home/dev/ws_iap/src/iap/results/icra27/icra035/install"
+        },
+        "expected_prefix": "/home/dev/ws_iap/src/iap/results/icra27/icra035/install",
+        "failure_reasons": [],
+        "in_ament_prefix_path": true,
+        "matches_expected_prefix": true,
+        "package": "iap",
+        "prefix_exists": true,
+        "ready": true,
+        "resolved_prefix": "/home/dev/ws_iap/src/iap/results/icra27/icra035/install"
+      },
+      {
+        "check": {
+          "api": "ament_index_python.packages.get_package_prefix",
+          "arguments": [
+            "ego_planner"
+          ],
+          "exception": "",
+          "result": "/home/dev/ws_iap/src/iap/results/icra27/icra035/install_ego"
+        },
+        "expected_prefix": "/home/dev/ws_iap/src/iap/results/icra27/icra035/install_ego",
+        "failure_reasons": [],
+        "in_ament_prefix_path": true,
+        "matches_expected_prefix": true,
+        "package": "ego_planner",
+        "prefix_exists": true,
+        "ready": true,
+        "resolved_prefix": "/home/dev/ws_iap/src/iap/results/icra27/icra035/install_ego"
+      },
+      {
+        "check": {
+          "api": "ament_index_python.packages.get_package_prefix",
+          "arguments": [
+            "local_sensing"
+          ],
+          "exception": "",
+          "result": "/home/dev/ws_iap/install/local_sensing"
+        },
+        "expected_prefix": "",
+        "failure_reasons": [],
+        "in_ament_prefix_path": true,
+        "matches_expected_prefix": null,
+        "package": "local_sensing",
+        "prefix_exists": true,
+        "ready": true,
+        "resolved_prefix": "/home/dev/ws_iap/install/local_sensing"
+      },
+      {
+        "check": {
+          "api": "ament_index_python.packages.get_package_prefix",
+          "arguments": [
+            "odom_visualization"
+          ],
+          "exception": "",
+          "result": "/home/dev/ws_iap/install/odom_visualization"
+        },
+        "expected_prefix": "",
+        "failure_reasons": [],
+        "in_ament_prefix_path": true,
+        "matches_expected_prefix": null,
+        "package": "odom_visualization",
+        "prefix_exists": true,
+        "ready": true,
+        "resolved_prefix": "/home/dev/ws_iap/install/odom_visualization"
+      },
+      {
+        "check": {
+          "api": "ament_index_python.packages.get_package_prefix",
+          "arguments": [
+            "poscmd_2_odom"
+          ],
+          "exception": "",
+          "result": "/home/dev/ws_iap/install/poscmd_2_odom"
+        },
+        "expected_prefix": "",
+        "failure_reasons": [],
+        "in_ament_prefix_path": true,
+        "matches_expected_prefix": null,
+        "package": "poscmd_2_odom",
+        "prefix_exists": true,
+        "ready": true,
+        "resolved_prefix": "/home/dev/ws_iap/install/poscmd_2_odom"
+      },
+      {
+        "check": {
+          "api": "ament_index_python.packages.get_package_prefix",
+          "arguments": [
+            "gnss_sim"
+          ],
+          "exception": "",
+          "result": "/home/dev/ws_iap/install/gnss_sim"
+        },
+        "expected_prefix": "",
+        "failure_reasons": [],
+        "in_ament_prefix_path": true,
+        "matches_expected_prefix": null,
+        "package": "gnss_sim",
+        "prefix_exists": true,
+        "ready": true,
+        "resolved_prefix": "/home/dev/ws_iap/install/gnss_sim"
+      },
+      {
+        "check": {
+          "api": "ament_index_python.packages.get_package_prefix",
+          "arguments": [
+            "so3_quadrotor_simulator"
+          ],
+          "exception": "",
+          "result": "/home/dev/ws_iap/install/so3_quadrotor_simulator"
+        },
+        "expected_prefix": "",
+        "failure_reasons": [],
+        "in_ament_prefix_path": true,
+        "matches_expected_prefix": null,
+        "package": "so3_quadrotor_simulator",
+        "prefix_exists": true,
+        "ready": true,
+        "resolved_prefix": "/home/dev/ws_iap/install/so3_quadrotor_simulator"
+      },
+      {
+        "check": {
+          "api": "ament_index_python.packages.get_package_prefix",
+          "arguments": [
+            "so3_control"
+          ],
+          "exception": "",
+          "result": "/home/dev/ws_iap/install/so3_control"
+        },
+        "expected_prefix": "",
+        "failure_reasons": [],
+        "in_ament_prefix_path": true,
+        "matches_expected_prefix": null,
+        "package": "so3_control",
+        "prefix_exists": true,
+        "ready": true,
+        "resolved_prefix": "/home/dev/ws_iap/install/so3_control"
+      },
+      {
+        "check": {
+          "api": "ament_index_python.packages.get_package_prefix",
+          "arguments": [
+            "rclcpp_components"
+          ],
+          "exception": "",
+          "result": "/opt/ros/jazzy"
+        },
+        "expected_prefix": "",
+        "failure_reasons": [],
+        "in_ament_prefix_path": true,
+        "matches_expected_prefix": null,
+        "package": "rclcpp_components",
+        "prefix_exists": true,
+        "ready": true,
+        "resolved_prefix": "/opt/ros/jazzy"
+      }
+    ],
+    "required_packages": [
+      "iap",
+      "ego_planner",
+      "local_sensing",
+      "odom_visualization",
+      "poscmd_2_odom",
+      "gnss_sim",
+      "so3_quadrotor_simulator",
+      "so3_control",
+      "rclcpp_components"
+    ],
+    "schema_version": "gate0_launch_dependency_preflight_v1"
+  },
+  "linkage": {
+    "ego_planner_node": [
+      {
+        "library": "libplan_env.so",
+        "path": "/home/dev/ws_iap/src/iap/results/icra27/icra026/install_plan_env/lib/libplan_env.so"
+      },
+      {
+        "library": "libpath_searching.so",
+        "path": "/home/dev/ws_iap/src/iap/results/icra27/icra026/install_path_searching/lib/libpath_searching.so"
+      },
+      {
+        "library": "libiap.so",
+        "path": "/home/dev/ws_iap/src/iap/results/icra27/icra035/install/lib/libiap.so"
+      },
+      {
+        "library": "libiap__rosidl_typesupport_cpp.so",
+        "path": "/home/dev/ws_iap/src/iap/results/icra27/icra035/install/lib/libiap__rosidl_typesupport_cpp.so"
+      },
+      {
+        "library": "libiap__rosidl_generator_c.so",
+        "path": "/home/dev/ws_iap/src/iap/results/icra27/icra035/install/lib/libiap__rosidl_generator_c.so"
+      }
+    ],
+    "test_p0_occupancy_epoch_adapter": [
+      {
+        "library": "libiap.so",
+        "path": "/home/dev/ws_iap/src/iap/results/icra27/icra035/install/lib/libiap.so"
+      }
+    ],
+    "test_p0_risk_grid_runtime": [
+      {
+        "library": "libiap.so",
+        "path": "/home/dev/ws_iap/src/iap/results/icra27/icra035/install/lib/libiap.so"
+      },
+      {
+        "library": "libiap__rosidl_typesupport_cpp.so",
+        "path": "/home/dev/ws_iap/src/iap/results/icra27/icra035/install/lib/libiap__rosidl_typesupport_cpp.so"
+      },
+      {
+        "library": "libiap__rosidl_generator_c.so",
+        "path": "/home/dev/ws_iap/src/iap/results/icra27/icra035/install/lib/libiap__rosidl_generator_c.so"
+      }
+    ],
+    "test_risk_grid_map": [
+      {
+        "library": "libiap.so",
+        "path": "/home/dev/ws_iap/src/iap/results/icra27/icra035/install/lib/libiap.so"
+      }
+    ],
+    "test_rolling_spatial_advisory_window": [
+      {
+        "library": "libiap.so",
+        "path": "/home/dev/ws_iap/src/iap/results/icra27/icra035/install/lib/libiap.so"
+      }
+    ]
+  },
+  "plan_env_link_count": 1,
+  "pre_live_task_processes": [],
+  "provisional_profile": true,
+  "qualification_config_preflight": {
+    "baseline_provenance": {
+      "identity": "legacy_iap_rq320_baseline_v1",
+      "requirement": "IAP-RQ-320",
+      "status": "provisional_qualification_baseline_not_empirically_calibrated",
+      "unit": "m/sqrt(s)"
+    },
+    "checked_utc": "2026-08-23T16:58:56Z",
+    "effective": {
+      "p0.predictor.sigma_grow_m_sqrt_s": 0.01,
+      "p0.predictor.sigma_growth_profile": "legacy_iap_rq320_baseline_v1"
+    },
+    "failure_reason": "",
+    "failure_reasons": [],
+    "qualification_config_ready": true,
+    "requested": {
+      "p0.predictor.sigma_grow_m_sqrt_s": 0.01,
+      "p0.predictor.sigma_growth_profile": "legacy_iap_rq320_baseline_v1"
+    },
+    "schema_version": "gate0_p0_qualification_config_preflight_v1"
+  },
+  "query_count": 76800,
+  "ready": true,
+  "schema_version": "icra035_static_preflight_v1",
+  "source_install_inputs": {
+    "ego_advanced_param_launch": {
+      "installed": "/home/dev/ws_iap/src/iap/results/icra27/icra035/install_ego/share/ego_planner/launch/advanced_param.launch.py",
+      "installed_sha256": "807d1aa28e9054c589b7c27a793382ea3e54d82e071957f429b627b24fe74d5b",
+      "source": "/home/dev/ws_iap/src/iap/src/iap/planner/plan_manage/launch/advanced_param.launch.py",
+      "source_sha256": "807d1aa28e9054c589b7c27a793382ea3e54d82e071957f429b627b24fe74d5b"
+    },
+    "gate0_analyzer": {
+      "installed": "/home/dev/ws_iap/src/iap/results/icra27/icra035/install/lib/iap/gate0_analyzer.py",
+      "installed_sha256": "4043bfd46e4f04e0ac99212b699a9da4d4f6e1e7cbfbf4d6479865f1c5abd6a8",
+      "source": "/home/dev/ws_iap/src/iap/scripts/dev_planner/gate0_analyzer.py",
+      "source_sha256": "4043bfd46e4f04e0ac99212b699a9da4d4f6e1e7cbfbf4d6479865f1c5abd6a8"
+    },
+    "gate0_capture": {
+      "installed": "/home/dev/ws_iap/src/iap/results/icra27/icra035/install/lib/iap/gate0_capture_p0_health.py",
+      "installed_sha256": "3ef13e1c5622cbcf4b16aaa94e8faf5c65d81ba8117f897f50e93a1ce4d27028",
+      "source": "/home/dev/ws_iap/src/iap/scripts/dev_planner/gate0_capture_p0_health.py",
+      "source_sha256": "3ef13e1c5622cbcf4b16aaa94e8faf5c65d81ba8117f897f50e93a1ce4d27028"
+    },
+    "gate0_runner": {
+      "installed": "/home/dev/ws_iap/src/iap/results/icra27/icra035/install/lib/iap/run_gate0_qualification.py",
+      "installed_sha256": "02b01e2c390ce74f6a3e0598a00fa76d69021e9041f2c86ff38e6b76059613dd",
+      "source": "/home/dev/ws_iap/src/iap/scripts/dev_planner/run_gate0_qualification.py",
+      "source_sha256": "02b01e2c390ce74f6a3e0598a00fa76d69021e9041f2c86ff38e6b76059613dd"
+    },
+    "test_planner_launch": {
+      "installed": "/home/dev/ws_iap/src/iap/results/icra27/icra035/install/share/iap/launch/test_planner.launch.py",
+      "installed_sha256": "b207f96405925a9e17174d7b87d5592e97897c908d3f8d4105645a28323ff4a5",
+      "source": "/home/dev/ws_iap/src/iap/launch/test_planner.launch.py",
+      "source_sha256": "b207f96405925a9e17174d7b87d5592e97897c908d3f8d4105645a28323ff4a5"
+    }
+  }
+}

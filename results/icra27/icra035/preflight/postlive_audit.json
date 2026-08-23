@@ -1,0 +1,30 @@
+{
+  "schema_version": "icra035_postlive_audit_v1",
+  "checked_utc": "2026-08-23T17:03:07Z",
+  "runner_invocation_count": 1,
+  "runner_exit_code": 0,
+  "analyzer_invocation_count": 1,
+  "analyzer_exit_code": 0,
+  "gate0b": "PASS",
+  "task_process_matches": [],
+  "task_process_count": 0,
+  "bag_artifacts": [],
+  "external_declared_bag_path_exists": false,
+  "external_log": {
+    "before_manifest_sha256": "a07fbf7945ec9800e95f6ef49d0d9c8bbdee8e2e8ff1500f919e1037cc4221f0",
+    "after_manifest_sha256": "a07fbf7945ec9800e95f6ef49d0d9c8bbdee8e2e8ff1500f919e1037cc4221f0",
+    "before_file_count": 43763,
+    "after_file_count": 43763,
+    "before_byte_count": 15834674845,
+    "after_byte_count": 15834674845,
+    "unchanged": true
+  },
+  "task_local_logs": {
+    "iap_log_file_count": 38,
+    "iap_log_byte_count": 7797632,
+    "ros_log_file_count": 17,
+    "ros_log_byte_count": 43572
+  },
+  "protected_pdf_sha256": "1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6",
+  "cleanup_performed": false
+}

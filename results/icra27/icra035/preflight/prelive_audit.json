@@ -1,0 +1,32 @@
+{
+  "schema_version": "icra035_prelive_audit_v1",
+  "checked_utc": "2026-08-23T16:59:29Z",
+  "head": "7f0fc40e997a40a040b2c83282d9c9e3dae1eef9",
+  "static_preflight": {
+    "path": "results/icra27/icra035/preflight/static_preflight.json",
+    "sha256": "08878746a4778ee6ca7b4c34913e10ba8487102b7fc17e26edd61dc2707b1244",
+    "ready": true,
+    "effective_config_sha256": "97b4ccb8bbb348ef285771e9d29f735188477b568ad53fb957dfeca612b211e5"
+  },
+  "builds": {
+    "iap_configure_build_install": "PASS",
+    "ego_configure_build_install": "PASS"
+  },
+  "tests": {
+    "iap_affected": {"passed": 6, "failed": 0},
+    "ego_p0": {"passed": 2, "failed": 0}
+  },
+  "external_log_baseline": {
+    "manifest_sha256": "a07fbf7945ec9800e95f6ef49d0d9c8bbdee8e2e8ff1500f919e1037cc4221f0",
+    "file_count": 43763,
+    "byte_count": 15834674845,
+    "write_policy": "read_only"
+  },
+  "untracked_pdf": {
+    "path": "docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf",
+    "sha256": "1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6",
+    "policy": "preserve_unmodified_unstaged"
+  },
+  "benchmark_output_preexisting": false,
+  "benchmark_authorized": true
+}

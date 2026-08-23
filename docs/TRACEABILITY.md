@@ -1,5 +1,23 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-23 ICRA-035 fixed 60-second P0 Gate-0B benchmark
+
+| Req ID | Requirement/evidence seam | Qualification evidence | Status |
+|---|---|---|---|
+| IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-322 | Current reviewed implementation and exact runtime path must pass all static gates before live use | Fresh ICRA-035 IAP/EGO build/install passes; affected IAP targets pass 6/6 and EGO targets pass 2/2; ament and five direct IAP plus one plan-env links resolve exact ICRA-035 / intended ICRA-026 prefixes with no workspace-default, ICRA-033, build-tree, missing or stale product library. Source/installed runner, analyzer, capture and launch hashes match | **STATIC PASS** |
+| IAP-RQ-320 / IAP-RQ-322 | Qualification must use the exact frozen workload and provisional growth profile | Effective config hash `97b4ccb…11e5` binds CPU, worker 4, 60/55 s, 30×30×6 m, 0.75 m, horizons 0.0–2.5 s by 0.5 s, 0.5 s refresh, occupied skip, no bag/RViz, safety off, P1–P5 disabled and exact provisional `0.01` / `legacy_iap_rq320_baseline_v1`; static/config/log/dependency/capture preflights all pass | **PASS / provisional, not empirical calibration** |
+| IAP-RQ-320 / IAP-RQ-322 | Exactly one benchmark may start only after mandatory GPU preflight | Guard consumed one runner slot; RTX 4070 Ti SUPER discovery, both `nvidia-smi` calls, CUDA `cuInit(0)` and one-device query pass before ROS. Runner exits 0; `iap_rosnode` is observed alive with no runtime failure and stops only during controlled shutdown | **PASS / runner 1, retry 0** |
+| IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-322 | Gate-0B requires at least 20 strict 76,800-query successes, valid integrity/counter/source evidence and refresh p95 ≤ 400 ms | Sole analyzer exits 0/PASS: 209 observations, 105 completed attempts, 103 strict successes, two typed failures, 18 in-progress, 86 equivalent duplicates, zero conflicts and 607/607 valid integrity. Refresh p50/p95/max `175.482122 / 184.1007665 / 199.520467 ms`; provider p50/p95 `146.82252 / 150.8886328 ms`; generation interval p50/p95 `500.135382 / 511.2421743 ms`; failed/stale ratio `0.019047619`; exact query shape true | **GATE-0B PASS / analyzer 1, retry 0 / SUPERVISOR REVIEW PENDING** |
+| IAP-RQ-320 / IAP-RQ-322 | Evidence and terminal state remain repository-local and bounded | Compact evidence is below `results/icra27/icra035/`; 38 IAP and 17 ROS log files are task-local; external `log/` remains exactly `a07fbf79…4221f0`, 43,763 files and 15,834,674,845 bytes; no bag or task process remains; protected PDF remains unstaged at `1f07da56…44f6`; build/install trees are retained for review | **PASS / no cleanup or promotion** |
+
+Exact build/test commands, disclosed pre-live corrections, one-shot commands,
+guards, stdout/exits, hashes and post-live audit are in
+`results/icra27/icra035/verification_summary.md`. No source, header, test,
+analyzer, runner, capture, launch, config, CMake or product file changed. No
+smoke, campaign, P1–P5 execution, tuning, retry, artifact cleanup or Gate
+promotion occurred. Builder returns this PASS only for Supervisor review and
+does not claim empirical calibration or full IAP-RQ-322 completion.
+
 ## 2026-08-23 ICRA-034 typed message-clock failure reanalysis
 
 | Req ID | Requirement/evidence seam | Implementation and focused evidence | Status |

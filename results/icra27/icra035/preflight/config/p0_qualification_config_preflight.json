@@ -1,0 +1,21 @@
+{
+  "baseline_provenance": {
+    "identity": "legacy_iap_rq320_baseline_v1",
+    "requirement": "IAP-RQ-320",
+    "status": "provisional_qualification_baseline_not_empirically_calibrated",
+    "unit": "m/sqrt(s)"
+  },
+  "checked_utc": "2026-08-23T16:58:56Z",
+  "effective": {
+    "p0.predictor.sigma_grow_m_sqrt_s": 0.01,
+    "p0.predictor.sigma_growth_profile": "legacy_iap_rq320_baseline_v1"
+  },
+  "failure_reason": "",
+  "failure_reasons": [],
+  "qualification_config_ready": true,
+  "requested": {
+    "p0.predictor.sigma_grow_m_sqrt_s": 0.01,
+    "p0.predictor.sigma_growth_profile": "legacy_iap_rq320_baseline_v1"
+  },
+  "schema_version": "gate0_p0_qualification_config_preflight_v1"
+}

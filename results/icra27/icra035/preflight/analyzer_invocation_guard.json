@@ -1,0 +1,10 @@
+{
+  "schema_version": "icra035_analyzer_invocation_guard_v1",
+  "created_utc": "2026-08-23T17:01:41Z",
+  "maximum_invocations": 1,
+  "invocation_count": 1,
+  "retry_allowed": false,
+  "command": "python3 scripts/dev_planner/gate0_analyzer.py --gate0-root results/icra27/icra035/runs --output-dir results/icra27/icra035/runs/benchmark/analyzer",
+  "live_evidence_sufficient": true,
+  "analyzer_output_preexisting": false
+}

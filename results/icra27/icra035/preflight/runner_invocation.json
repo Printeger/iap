@@ -1,0 +1,9 @@
+{
+  "schema_version": "icra035_runner_invocation_v1",
+  "command": "python3 scripts/dev_planner/run_gate0_qualification.py --output-root results/icra27/icra035/runs --benchmark",
+  "invocation_count": 1,
+  "exit_code": 0,
+  "stdout": "GPU_READY\r\n",
+  "stderr": "",
+  "retry_count": 0
+}
