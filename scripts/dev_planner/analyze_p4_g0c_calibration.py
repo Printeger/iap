@@ -669,9 +669,12 @@ def _validated_output_path(
     if candidate is None:
         return None
     requested = Path(candidate).expanduser()
-    if _has_symlink_component(requested.absolute()):
+    absolute_requested = requested.absolute()
+    if _has_symlink_component(absolute_requested):
         raise AnalysisError(f"{label} cannot use a symlinked path")
     resolved = requested.resolve()
+    if absolute_requested != resolved:
+        raise AnalysisError(f"{label} must not use a lexical path alias")
     root = Path(runs_root).expanduser().resolve()
     inside_root = resolved == root or root in resolved.parents
     if inside_root and resolved != root / expected_in_root_name:

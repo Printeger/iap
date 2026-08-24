@@ -1,0 +1,19 @@
+{
+  "branch": "dev/icra",
+  "fixture_hashes": {
+    "p4_collision_guide_fixture.hpp": "d540c23dc38102751740bcb61e79993e4704564c811e9d75bfa6be90c52511af",
+    "p4_collision_scan_fixture.hpp": "49a676a5ff51538ab961c814409f6c2dfb7ba4679a861d4e8e94cc7d5679c788",
+    "p4_g0c_live_fixture_v1.json": "985aabcd486186a4430305b409669422499f891d529369c6f0bfe8e7dfe0d710"
+  },
+  "initial_divergence": "0 0",
+  "initial_head": "2088cbeedd0f0121d02d80a17493d53eb877bc45",
+  "pdf_sha256": "1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6",
+  "pdf_status": "untracked_unstaged_unchanged",
+  "retained_icra042": {
+    "file_count": 3829,
+    "manifest_after_sha256": "6836841bc7ee74594ff80926bfd67c8531ea2d26076b27406cb9aeea3d784d34",
+    "manifest_before_sha256": "6836841bc7ee74594ff80926bfd67c8531ea2d26076b27406cb9aeea3d784d34",
+    "manifest_cmp_exit": 0,
+    "tree_count": 12
+  }
+}

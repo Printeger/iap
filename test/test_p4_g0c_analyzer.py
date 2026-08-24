@@ -9,6 +9,7 @@ import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 REPO = Path(__file__).resolve().parents[1]
@@ -809,6 +810,58 @@ class P4G0CAnalyzerTest(unittest.TestCase):
                 ])
             self.assertEqual(exit_code, 2)
             self.assertEqual(target.read_text(), "retained\n")
+
+    def test_lexical_output_aliases_reject_before_analyze_or_write(self):
+        cases = (
+            (
+                "--output",
+                lambda root: root / "nonexistent/../p4_g0c_analysis.json",
+            ),
+            (
+                "--draft-output",
+                lambda root: root / ".." / root.name
+                / "p4_g0c_threshold_draft.json",
+            ),
+        )
+        for option, make_alias in cases:
+            with self.subTest(option=option), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp) / "runs"
+                self._make_bundle(root)
+                alias = make_alias(root)
+                with mock.patch.object(
+                    MODULE, "analyze", wraps=MODULE.analyze
+                ) as analyze_spy, contextlib.redirect_stdout(
+                    io.StringIO()
+                ), contextlib.redirect_stderr(io.StringIO()):
+                    exit_code = MODULE.main([
+                        "--runs-root", str(root), option, str(alias)
+                    ])
+
+                self.assertEqual(exit_code, 2)
+                analyze_spy.assert_not_called()
+                self.assertFalse((root / "nonexistent").exists())
+                self.assertFalse((root / "p4_g0c_analysis.json").exists())
+                self.assertFalse(
+                    (root / "p4_g0c_threshold_draft.json").exists()
+                )
+
+    def test_canonical_relative_and_absolute_named_outputs_still_work(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "runs"
+            self._make_bundle(root)
+            draft_output = root / "p4_g0c_threshold_draft.json"
+            with contextlib.chdir(root), contextlib.redirect_stdout(
+                io.StringIO()
+            ), contextlib.redirect_stderr(io.StringIO()):
+                exit_code = MODULE.main([
+                    "--runs-root", str(root),
+                    "--output", "p4_g0c_analysis.json",
+                    "--draft-output", str(draft_output),
+                ])
+
+            self.assertEqual(exit_code, 0)
+            self.assertTrue((root / "p4_g0c_analysis.json").is_file())
+            self.assertTrue(draft_output.is_file())
 
     def test_named_outputs_are_excluded_from_raw_hash_and_rejected_has_no_draft(self):
         with tempfile.TemporaryDirectory() as tmp:

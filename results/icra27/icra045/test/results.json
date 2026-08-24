@@ -1,0 +1,27 @@
+{
+  "forbidden_flow_invocations": 0,
+  "focused": {
+    "analyzer": 24,
+    "launch_contract": 6,
+    "launch_golden": 16,
+    "protocol": 6,
+    "runner": 14,
+    "total": 66
+  },
+  "full_python": {
+    "command": "python3 -m unittest discover -s test -p 'test_*.py'",
+    "exit": 0,
+    "invocations": 1,
+    "tests": 405
+  },
+  "red_phase": {
+    "lexical_alias_suite_exit": 1,
+    "reviewed_alias_failures": 2
+  },
+  "static": {
+    "flake8_fatal_exit": 0,
+    "git_diff_check_exit": 0,
+    "json_validation_exit": 0,
+    "py_compile_exit": 0
+  }
+}

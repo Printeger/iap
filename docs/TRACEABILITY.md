@@ -1087,3 +1087,11 @@ They do not convert historical `NO-GO-P2`, failed P0 Gate-0B evidence, the stati
 | IAP-RQ-423 | Bind every completed run to its complete real production artifact tree | shared `p4_g0c_run_artifact_inventory_v1`; runner state v3 binds inventory and dynamic test-planner manifest path/hash; analyzer recomputes every path/type/size/hash and rejects all required drift/escape/symlink/secondary-artifact cases | **FAIL-CLOSED; synthetic 15-run tree only** |
 | IAP-RQ-423 | Make analyzer outputs named, raw-hash neutral and non-overwriting | CLI prevalidates exact in-root names, swap/alias/symlink/existence and registry collision before analysis; exclusive writes prevent overwrite; rejected bundles emit no draft; read-only reanalysis preserves the raw hash | **IMPLEMENTED; no registry/application change** |
 | IAP-RQ-423 | Preserve retained products and prove repair without live execution | focused 64/64 and post-review Python discovery 403/403 pass; 3,829 files across 12 ICRA-042 trees retain identical before/after hash `6836841b…d784d34`; compact evidence is under `results/icra27/icra044/` | **READY FOR SUPERVISOR REVIEW; not G0C PASS** |
+
+## 2026-08-24 ICRA-045 G0C analyzer lexical-alias repair
+
+| Req ID | Requirement/evidence seam | Implementation and retained evidence | Status |
+|---|---|---|---|
+| IAP-RQ-423 | Reject lexical output aliases before analysis or filesystem mutation | analyzer compares the expanded absolute request to canonical resolution for both output roles; direct CLI regression covers `nonexistent/../` and `runs/../runs/`, exit 2, zero `analyze()` calls and zero target/intermediate/other-output creation | **FAIL-CLOSED; synthetic only** |
+| IAP-RQ-423 | Preserve canonical output behavior and prior G0C protections | fresh production-shaped bundle accepts canonical relative analysis and absolute draft paths; all ICRA-044 output, inventory and raw-hash adversaries remain green | **IMPLEMENTED; no schema/runner/product change** |
+| IAP-RQ-423 | Reproduce repair while preserving protected and retained artifacts | focused 66/66 and one final Python discovery 405/405 pass; 3,829 files across 12 ICRA-042 trees retain identical before/after hash `6836841b…d784d34`; compact evidence is under `results/icra27/icra045/` | **READY FOR SUPERVISOR REVIEW; not G0C PASS** |

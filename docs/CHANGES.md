@@ -1437,8 +1437,9 @@ ldd "$repo_root/results/icra27/icra015/build_ego/test_p0_risk_grid_runtime" \
 - Analyzer output is deterministic and non-overwriting. In-root output names
   are exactly `p4_g0c_analysis.json` and `p4_g0c_threshold_draft.json`; named
   outputs are excluded from the raw input hash on first/read-only reanalysis.
-  Arbitrary/swapped/aliased/symlinked/existing destinations fail before
-  analysis/write, and rejected analysis writes no draft.
+  Arbitrary/swapped/shared/symlinked/existing destinations fail before
+  analysis/write, and rejected analysis writes no draft. ICRA-045 below closes
+  the remaining lexical `..` alias omission.
 - Red suites reproduced dirty-root GPU reachability, production artifact
   rejection, self-invalidating arbitrary output and named-output overwrite.
   Final focused tests pass 64/64 and the post-review full Python discovery
@@ -1451,6 +1452,33 @@ Direct reproduction commands from the repository root:
 python3 test/test_p4_g0c_protocol.py
 python3 test/test_p4_g0c_runner.py
 python3 test/test_p4_g0c_analyzer.py
+python3 test/test_p4_g0c_launch_contract.py
+python3 test/test_test_planner_launch.py
+python3 -m unittest discover -s test -p 'test_*.py'
+```
+
+## 2026-08-24 (ICRA-045 G0C analyzer lexical-alias repair)
+
+- IAP-RQ-423: `_validated_output_path()` now compares the expanded absolute
+  request with its canonical resolution before analysis. A live lexical detour
+  such as `nonexistent/../p4_g0c_analysis.json` or
+  `runs/../runs/p4_g0c_threshold_draft.json` fails with exit 2 rather than
+  being silently normalized and written.
+- The direct regression proves both output roles reject before `analyze()` and
+  before creating the target, intermediate directory or other output. A fresh
+  valid bundle still accepts the canonical relative analysis name and absolute
+  draft name. Existing exact-name, outside-root, symlink, swap, no-overwrite
+  and raw-hash-neutral behavior remains covered.
+- Focused analyzer/protocol/runner/launch suites pass 66/66 and the one final
+  repository Python discovery passes 405/405. This is synthetic protocol
+  readiness only; no GPU, ROS, launch, calibration or compiled flow ran.
+
+Direct reproduction commands from the repository root:
+
+```bash
+python3 test/test_p4_g0c_analyzer.py
+python3 test/test_p4_g0c_protocol.py
+python3 test/test_p4_g0c_runner.py
 python3 test/test_p4_g0c_launch_contract.py
 python3 test/test_test_planner_launch.py
 python3 -m unittest discover -s test -p 'test_*.py'

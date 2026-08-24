@@ -6117,3 +6117,73 @@ smoke, benchmark, threshold draft/freeze/application, G0D, P5, cleanup or gate
 promotion ran. Builder result is
 `P4_G0C_LIVE_ARTIFACT_PROTOCOL_READY_FOR_REVIEW`, not G0C PASS. Control returns
 only to SUPERVISOR review.
+
+## 2026-08-24T10:38:56Z — ICRA-045 START
+
+IAP-RQ-423. Synchronized `dev/icra` at Supervisor task HEAD
+`2088cbeedd0f0121d02d80a17493d53eb877bc45`: initial status contained only the
+protected untracked PDF, fetch passed and divergence was `0 0`, so no pull ran.
+`AGENT_STATE.md` authorizes only DEEPSEEK, `TASK_READY`, ICRA-045 and
+`P4_G0C_ANALYZER_ALIAS_REPAIR`.
+
+This repair is limited to
+`scripts/dev_planner/analyze_p4_g0c_calibration.py`,
+`test/test_p4_g0c_analyzer.py`, compact repository-local evidence below
+`results/icra27/icra045/`, `DEV_LOG.md`, `docs/CHANGES.md` and
+`docs/TRACEABILITY.md`. The exact defect is that
+`<runs_root>/nonexistent/../p4_g0c_analysis.json` canonicalizes to the allowed
+target and is currently written instead of rejected before analysis.
+
+The public seam is analyzer `main()` return status and filesystem effects,
+with the task-required assertion that `analyze()` is not reached. The red test
+is `test_lexical_output_aliases_reject_before_analyze_or_write`, covering the
+analysis alias above and
+`<runs_root>/../<runs_root-name>/p4_g0c_threshold_draft.json`; it requires exit
+2, no analyze call and no target/intermediate/other output creation. Green
+coverage will also prove fresh canonical relative and absolute named outputs
+still succeed.
+
+Stop line: no protocol, runner, inventory/state/schema, threshold, registry,
+product, launch/config/fixture or gate change is authorized. ICRA-045 will run
+only synthetic Python/static/repository-local audits; it will not execute GPU
+preflight, ROS, launch, calibration, CTest/retained binaries, bag/RViz, smoke,
+benchmark, G0D, P5, cleanup or gate promotion. Final result may only be
+`P4_G0C_LIVE_ARTIFACT_PROTOCOL_READY_FOR_REVIEW`, never G0C PASS.
+
+## 2026-08-24T10:42:31Z — ICRA-045 IMPLEMENTATION AND VERIFICATION
+
+IAP-RQ-423. The task-required CLI regression first reproduced both reviewed
+aliases returning exit 0 and writing their canonical targets. Output
+validation now makes the expanded request absolute, rejects any symlink
+component, and then requires that absolute lexical identity to equal canonical
+resolution before checking root/name/existence policy. Both `--output` and
+`--draft-output` therefore reject lexical detours before `analyze()` and before
+any target or directory creation; ordinary canonical relative and absolute
+named paths still succeed on a fresh valid bundle.
+
+Final direct suites pass analyzer 24/24, protocol 6/6, runner 14/14, launch
+contract 6/6 and launch golden 16/16 (66/66). The one final
+`python3 -m unittest discover -s test -p 'test_*.py'` invocation passes 405/405.
+Python syntax, fatal-only flake8 and `git diff --check` pass. All 3,829 files in
+the 12 retained ICRA-042 trees have identical before/after byte manifests with
+SHA-256 `6836841bc7ee74594ff80926bfd67c8531ea2d26076b27406cb9aeea3d784d34`.
+
+No protocol/runner/inventory/state/schema, threshold, registry, product,
+launch/config/fixture or gate behavior changed. No GPU preflight, ROS, launch,
+calibration, CTest/retained binary, bag/RViz, smoke, benchmark, G0D, P5,
+cleanup or gate promotion ran. Current result is
+`P4_G0C_LIVE_ARTIFACT_PROTOCOL_READY_FOR_REVIEW`, never G0C PASS, pending final
+two-axis review and protection audits.
+
+## 2026-08-24T10:46:31Z — ICRA-045 TWO-AXIS REVIEW
+
+IAP-RQ-423. Independent Standards and Spec reviewers compared the staged diff
+against task HEAD `2088cbeedd0f0121d02d80a17493d53eb877bc45`. Standards reports
+0 hard findings, 0 judgement-call smells and 0 blocking findings. Spec reports
+0 missing/partial requirements, 0 scope creep, 0 incorrect behavior and 0
+blocking findings. The aggregate is recorded at
+`results/icra27/icra045/review/two_axis_review.md`.
+
+No remediation was required. Current result remains
+`P4_G0C_LIVE_ARTIFACT_PROTOCOL_READY_FOR_REVIEW`, never G0C PASS, pending final
+protection/synchronization audits and commit/push handoff.
