@@ -1,5 +1,71 @@
 # ICRA Supervisor Log
 
+## 2026-08-24 — ICRA-051 review BLOCKED and ICRA-052 r3 environment hardening
+
+### Review identity and synchronization
+
+- Fixed review range: `4c18d47cc09a47e930fae59796657d8c48eeba74...cddfa2197bb1d4ee8f68fd105596174c3db53c45`.
+- Reviewed blocked evidence/docs `c1af58f` and final DEV_LOG-only handoff `cddfa21`; both carry
+  `IAP-RQ-423`. The eight changed paths match the ICRA-051 allowlist and DEEPSEEK ownership; no product,
+  config/protocol/registry/launch/script/test, Supervisor-owned or external-repository tracked file changed.
+- After fetch, HEAD and `origin/dev/icra` match at divergence `0 0`. The protected PDF remains the sole
+  untracked repository file, unstaged and hash-identical at
+  `1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+
+### Standards axis
+
+- Verdict: `BLOCKED`; one High hard violation, zero nonblocking findings; worst High.
+- The full-runner command omitted `HOME`, `ROS_HOME` and task-local `ROS_LOG_DIR`. ROS created
+  `/root/.ros/log/2026-08-24-14-34-21-049171-mint-X-965267/launch.log` outside the repository/task boundary.
+  Supervisor independently verified the retained 1,950-byte file and SHA-256
+  `f506e5565d73ad601673c814635797c360f650c7be3c4356e9217449df2458e7`.
+- This corrects the Builder self-review's Standards `0/0` claim: external evidence creation violates both
+  `AGENTS.md` repository-output policy and ICRA-051's fresh-root requirement. It is a Standards and Spec
+  blocker. No Fowler judgment-call smell is reported.
+- Commits, allowlist, ownership, requirement/docs synchronization, protected hashes, fail-closed process
+  stop and artifact retention otherwise conform. No retained executable, GPU, ROS, runner/analyzer or test
+  was executed during Supervisor Review.
+
+### Spec axis
+
+- Verdict: `BLOCKED / REQUEST_CHANGES`; one High blocking finding, zero nonblocking; worst High.
+- CUDA-on build is accepted: 17/17 packages, `BUILD_WITH_CUDA=ON`, all six non-symlink runtime libraries,
+  loadable GPU library and complete linkage pass. The sole standalone dependency preflight passes all 18
+  packages, 13 executables, component, 14 configs and six libraries from exact task/Jazzy prefixes.
+- Real GPU preflight also passes on the RTX 4070 Ti SUPER with `cuInit(0)=0` and `device_count=1`. The
+  blocker is therefore not CUDA, dependencies, GPU availability or planner algorithm behavior.
+- The sole full runner reaches the first registered r2 ID, then fails after 0.36 seconds with
+  `rcutils_expand_user failed` / `Failed to get logging directory`. Neither `iap_rosnode` nor
+  `ego_planner_node` starts. State SHA
+  `7c3cafc505ad33e7e8631a2ed1534bf5e21c6cf4f4d9eb252319a250989846a7` is 1 attempted / 0 complete /
+  0 retry. Analyzer and threshold-action counts are zero; no task process remains.
+
+### Why repeated BLOCKED and corrective policy
+
+- ICRA-046 exposed an underdeclared full dependency closure; ICRA-047 through ICRA-049 repaired replacement
+  protocol/evidence seams. ICRA-050 then self-disabled CUDA in its build command. ICRA-051 fixed CUDA but
+  omitted the ROS logging/home environment. These are different pre-live contract failures, not repeated
+  GPU or algorithm failures.
+- Fail-closed one-shot rules correctly prevent invalid evidence from being labelled PASS, but the process
+  relied too heavily on prose and manually assembled shell environments. That allowed prerequisites to be
+  discovered serially and consumed live identities unnecessarily.
+- Corrective policy: do not authorize another calibration immediately. First move mutable environment and
+  output-path ownership into shared runner code, reject every escape before GPU/launch/attempt, and prove it
+  with complete adversarial tests. The next live task must not depend on a Builder remembering extra exports.
+
+### Gate verdict, artifact lifecycle and required next action
+
+- Verdict: `ICRA051_REVIEW_BLOCKED_SELF_INDUCED_ROS_LOG_ENVIRONMENT`. P4-G0C remains unqualified. The first
+  r2 ID is immutably consumed, so neither ICRA-051 nor the complete r2 matrix may be retried/reused.
+- No cleanup is permitted. ICRA-051 build (~1.2 GiB), install (~460 MiB), log, dependency and failed runs
+  remain retained. The external launch log is preserved as evidence and is not modified. Historical
+  ICRA-046 and ICRA-050 blocked products remain retained.
+- Unique next task: `ICRA-052 / P4_G0C_R3_LAUNCH_ENVIRONMENT_PROTOCOL_REPAIR`, defined in `NEXT_TASK.md`;
+  active role is `DEEPSEEK`, state `TASK_READY`.
+- ICRA-052 is synthetic only: register non-overlapping r3 identities/lineage, make runner-owned canonical
+  `HOME`/`ROS_HOME`/`ROS_LOG_DIR`/`TMPDIR` and all mutable launch paths a pre-attempt gate, and test every
+  missing/outside/symlink/type/provenance adversary. A later Review PASS may authorize the fresh r3 live run.
+
 ## 2026-08-24 — ICRA-050 review BLOCKED and ICRA-051 CUDA live reissue
 
 ### Review identity and synchronization
