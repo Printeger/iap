@@ -1915,3 +1915,32 @@ to create `/root/.ros/log/2026-08-24-14-34-21-049171-mint-X-965267/launch.log`
 outside the task root. The fail-closed result remains truthful, but 1/15
 attempted and 0/15 complete does not satisfy the live matrix and no retry is
 permitted after the sole invocation was consumed.
+## 2026-08-24 (ICRA-052 r3 launch-environment protocol repair)
+
+- IAP-RQ-423: registered canonical r3 protocol, proposed/null/disabled
+  registry and replacement lineage with 15 new `p4-g0c-r3-*` identities,
+  unchanged v2 science, zero r1/r2 overlap, and exact bindings to both consumed
+  ICRA-046 and ICRA-051 1/0/0 failed executions.
+- The production runner now derives, validates, creates and propagates exact
+  task-local `HOME`, `ROS_HOME`, `ROS_LOG_DIR` and `TMPDIR` values before GPU,
+  launch state or attempted-ID mutation. It inventories eight exact per-run
+  outputs, including the disabled-bag destination, and rejects missing,
+  relative, outside, lexical-parent, symlink, conflicting and unknown paths
+  with typed `LAUNCH_ENVIRONMENT_NOT_READY` evidence.
+- Launch and analyzer v3 dispatch bind the exact environment/output contract
+  into launch, run and runner-state evidence. Analyzer semantic checks reject
+  remove/change/wrong-type mutations for every one of the 12 bindings even
+  after legitimate provenance hashes are refreshed; no draft is produced.
+- Formal repository-local verification passes focused P4 discovery 83/83 and
+  full Python discovery 438/438. Syntax (9 files), fatal-only flake8, four
+  canonical JSON files and diff checks pass. An early development-test TMPDIR
+  omission was recorded and corrected by both formal reruns under
+  `results/icra27/icra052/tmp`.
+- Supervisor correction: ICRA-051 has one High Standards blocker as well as
+  one High Spec blocker because it created the external ROS launch log outside
+  repository/output boundaries. This change preserves that log and all
+  ICRA-051 bytes; it does not rewrite the earlier Builder self-review.
+- This was synthetic only: zero build, CTest, GPU, ROS, live runner/analyzer
+  CLI, main-flow, smoke, qualification or threshold action. Result is
+  `P4_G0C_R3_LAUNCH_ENVIRONMENT_PROTOCOL_READY_FOR_REVIEW`, never live-ready or
+  G0C PASS.

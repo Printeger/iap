@@ -25,6 +25,9 @@ if str(SCRIPT_DIR) not in sys.path:
 
 from p4_g0c_protocol import (  # noqa: E402
     DECISION_CSV_COLUMNS,
+    LAUNCH_ENVIRONMENT_KEYS,
+    LAUNCH_ENVIRONMENT_SCHEMA,
+    MUTABLE_OUTPUT_KEYS,
     RUN_ARTIFACT_INVENTORY_FILENAME,
     DecisionSchemaError,
     ProtocolBundle,
@@ -32,6 +35,7 @@ from p4_g0c_protocol import (  # noqa: E402
     canonical_bytes,
     decision_identity,
     effective_config_sha256,
+    expected_launch_environment_binding,
     exact_json_equal,
     expand_run_plan,
     load_canonical_json,
@@ -40,6 +44,7 @@ from p4_g0c_protocol import (  # noqa: E402
     parse_decision_row,
     sha256_file,
     validate_test_planner_effective_contract,
+    validate_launch_environment_binding,
     validate_decision_header,
 )
 from run_gate0_qualification import (  # noqa: E402
@@ -50,9 +55,12 @@ from run_gate0_qualification import (  # noqa: E402
 
 RUNNER_SCHEMA_V1 = "p4_g0c_runner_state_v3"
 RUNNER_SCHEMA_V2 = "p4_g0c_runner_state_v4"
-DEPENDENCY_SCHEMA = "p4_g0c_runtime_dependencies_v2"
+RUNNER_SCHEMA_V3 = "p4_g0c_runner_state_v5"
+DEPENDENCY_SCHEMA_V2 = "p4_g0c_runtime_dependencies_v2"
+DEPENDENCY_SCHEMA_V3 = "p4_g0c_runtime_dependencies_v3"
 LEGACY_PROTOCOL_SCHEMA = "p4_g0c_protocol_v1"
 REPLACEMENT_PROTOCOL_SCHEMA = "p4_g0c_protocol_v2"
+HARDENED_PROTOCOL_SCHEMA = "p4_g0c_protocol_v3"
 EXPECTED_ACTIVE_PACKAGES = {
     "iap", "ego_planner", "local_sensing", "odom_visualization",
     "poscmd_2_odom", "gnss_sim", "so3_quadrotor_simulator",
@@ -94,7 +102,9 @@ def load_bundle(
     bundle.protocol_path = str(Path(protocol_path).resolve())
     bundle.registry_path = str(Path(registry_path).resolve())
     bundle.fixture_path = str(Path(fixture_path).resolve())
-    if bundle.protocol.get("schema_version") == REPLACEMENT_PROTOCOL_SCHEMA:
+    if bundle.protocol.get("schema_version") in {
+        REPLACEMENT_PROTOCOL_SCHEMA, HARDENED_PROTOCOL_SCHEMA
+    }:
         repository_root = Path(protocol_path).resolve().parents[2]
         bundle.dependency_manifest_path = str(
             repository_root
@@ -117,7 +127,9 @@ def _dependency_failure(reason: str) -> dict[str, Any]:
 
 
 def load_runtime_dependency_manifest(
-    path: Path, expected_sha256: str
+    path: Path, expected_sha256: str, *,
+    expected_schema: str = DEPENDENCY_SCHEMA_V2,
+    expected_experiment: str = "p4_g0c_metrics_calibration_v2",
 ) -> dict[str, Any]:
     path = Path(path)
     if sha256_file(path) != expected_sha256:
@@ -128,9 +140,9 @@ def load_runtime_dependency_manifest(
         "components", "config_hashes", "inactive_packages", "prefix_policy",
         "runtime_libraries",
     }
-    if set(manifest) != required_keys or manifest.get("schema_version") != DEPENDENCY_SCHEMA:
+    if set(manifest) != required_keys or manifest.get("schema_version") != expected_schema:
         raise RunnerError("DEPENDENCY_MANIFEST_SCHEMA_MISMATCH")
-    if manifest.get("experiment") != "p4_g0c_metrics_calibration_v2":
+    if manifest.get("experiment") != expected_experiment:
         raise RunnerError("DEPENDENCY_MANIFEST_EXPERIMENT_MISMATCH")
     packages = manifest.get("packages")
     if not isinstance(packages, list) or not packages:
@@ -379,12 +391,26 @@ def validate_runtime_dependencies(
     manifest_path: Path | None = None,
     environment: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    if bundle.protocol.get("schema_version") != REPLACEMENT_PROTOCOL_SCHEMA:
+    protocol_schema = bundle.protocol.get("schema_version")
+    if protocol_schema not in {
+        REPLACEMENT_PROTOCOL_SCHEMA, HARDENED_PROTOCOL_SCHEMA
+    }:
         return _dependency_failure("DEPENDENCY_PROTOCOL_V2_REQUIRED")
     binding = bundle.protocol["runtime_dependency_manifest"]
     path = Path(manifest_path or bundle.dependency_manifest_path)
     try:
-        manifest = load_runtime_dependency_manifest(path, binding["sha256"])
+        hardened = protocol_schema == HARDENED_PROTOCOL_SCHEMA
+        manifest = load_runtime_dependency_manifest(
+            path,
+            binding["sha256"],
+            expected_schema=(
+                DEPENDENCY_SCHEMA_V3 if hardened else DEPENDENCY_SCHEMA_V2
+            ),
+            expected_experiment=(
+                "p4_g0c_metrics_calibration_v3"
+                if hardened else "p4_g0c_metrics_calibration_v2"
+            ),
+        )
     except (OSError, RuntimeError) as exc:
         reason = str(exc)
         if reason != "DEPENDENCY_MANIFEST_HASH_MISMATCH":
@@ -529,14 +555,152 @@ def validate_runtime_dependencies(
     }
 
 
-def launch_command(bundle: ProtocolBundle, record: dict[str, Any]) -> list[str]:
+def derive_launch_environment_inventory(
+    runs_root: Path, plan: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """Derive every mutable r3 path from the fresh runs root, never the shell."""
+    root = Path(runs_root).resolve()
+    run_outputs = []
+    child_environment: dict[str, str] | None = None
+    for record in plan:
+        binding = expected_launch_environment_binding(
+            root, Path(record["run_dir"])
+        )
+        if child_environment is None:
+            child_environment = binding["child_environment"]
+        elif not exact_json_equal(
+            child_environment, binding["child_environment"]
+        ):
+            raise RunnerError("LAUNCH_ENVIRONMENT_NOT_READY:environment_drift")
+        run_outputs.append({
+            "run_id": record["run_id"],
+            "mutable_output_paths": binding["mutable_output_paths"],
+        })
+    return {
+        "schema_version": LAUNCH_ENVIRONMENT_SCHEMA,
+        "runs_root": str(root),
+        "child_environment": child_environment or {},
+        "run_outputs": run_outputs,
+    }
+
+
+def validate_launch_environment_inventory(
+    inventory: Any, runs_root: Path, plan: list[dict[str, Any]],
+    *, require_pristine: bool,
+) -> dict[str, Any]:
+    """Fail closed on unknown, aliased, escaping, symlinked or conflicting paths."""
+    if not isinstance(inventory, dict) or set(inventory) != {
+        "schema_version", "runs_root", "child_environment", "run_outputs"
+    }:
+        raise RunnerError("LAUNCH_ENVIRONMENT_NOT_READY:inventory_schema")
+    root = Path(runs_root).resolve()
+    if (
+        inventory.get("schema_version") != LAUNCH_ENVIRONMENT_SCHEMA
+        or inventory.get("runs_root") != str(root)
+    ):
+        raise RunnerError("LAUNCH_ENVIRONMENT_NOT_READY:root_binding")
+    outputs = inventory.get("run_outputs")
+    if not isinstance(outputs, list) or len(outputs) != len(plan):
+        raise RunnerError("LAUNCH_ENVIRONMENT_NOT_READY:run_inventory")
+    child_environment = inventory.get("child_environment")
+    for record, output in zip(plan, outputs):
+        if not isinstance(output, dict) or set(output) != {
+            "run_id", "mutable_output_paths"
+        } or output.get("run_id") != record["run_id"]:
+            raise RunnerError("LAUNCH_ENVIRONMENT_NOT_READY:run_binding")
+        try:
+            validated = validate_launch_environment_binding(
+                child_environment, output.get("mutable_output_paths")
+            )
+        except RuntimeError as exc:
+            raise RunnerError(f"LAUNCH_ENVIRONMENT_NOT_READY:{exc}") from exc
+        expected = expected_launch_environment_binding(
+            root, Path(record["run_dir"])
+        )
+        if not exact_json_equal(validated, expected):
+            raise RunnerError("LAUNCH_ENVIRONMENT_NOT_READY:path_mismatch")
+        if require_pristine:
+            for value in output["mutable_output_paths"].values():
+                path = Path(value)
+                if path.exists() or path.is_symlink():
+                    raise RunnerError(
+                        "LAUNCH_ENVIRONMENT_NOT_READY:conflicting_output"
+                    )
+    if require_pristine:
+        environment_root = root / "launch_environment"
+        if environment_root.exists() or environment_root.is_symlink():
+            raise RunnerError("LAUNCH_ENVIRONMENT_NOT_READY:conflicting_environment")
+    return inventory
+
+
+def prepare_launch_environment(
+    runs_root: Path,
+    plan: list[dict[str, Any]],
+    *,
+    inventory_factory: Callable[[Path, list[dict[str, Any]]], dict[str, Any]] = (
+        derive_launch_environment_inventory
+    ),
+) -> dict[str, Any]:
+    inventory = inventory_factory(Path(runs_root), plan)
+    validate_launch_environment_inventory(
+        inventory, runs_root, plan, require_pristine=True
+    )
+    child_environment = inventory["child_environment"]
+    environment_root = Path(child_environment["HOME"]).parent
+    try:
+        environment_root.mkdir()
+        for key in LAUNCH_ENVIRONMENT_KEYS:
+            path = Path(child_environment[key])
+            path.mkdir()
+            if path.is_symlink() or not path.is_dir() or not os.access(path, os.W_OK):
+                raise RunnerError(
+                    f"LAUNCH_ENVIRONMENT_NOT_READY:not_writable:{key}"
+                )
+    except (OSError, RuntimeError) as exc:
+        if isinstance(exc, RunnerError):
+            raise
+        raise RunnerError(
+            f"LAUNCH_ENVIRONMENT_NOT_READY:create:{type(exc).__name__}"
+        ) from exc
+    return inventory
+
+
+def child_launch_environment(
+    base_environment: dict[str, str] | None,
+    inventory: dict[str, Any],
+) -> dict[str, str]:
+    environment = dict(os.environ if base_environment is None else base_environment)
+    environment.update(inventory["child_environment"])
+    return environment
+
+
+def _run_environment_binding(
+    inventory: dict[str, Any], run_id: str
+) -> dict[str, dict[str, str]]:
+    matches = [
+        output for output in inventory["run_outputs"]
+        if output["run_id"] == run_id
+    ]
+    if len(matches) != 1:
+        raise RunnerError("LAUNCH_ENVIRONMENT_NOT_READY:run_binding_lookup")
+    return {
+        "child_environment": inventory["child_environment"],
+        "mutable_output_paths": matches[0]["mutable_output_paths"],
+    }
+
+
+def launch_command(
+    bundle: ProtocolBundle, record: dict[str, Any],
+    launch_environment: dict[str, dict[str, str]] | None = None,
+) -> list[str]:
     run_dir = Path(record["run_dir"]).resolve()
     manifest_path = run_dir / "p4_g0c_run_manifest.json"
     csv_path = run_dir / "p4_decisions.csv"
+    schema = bundle.protocol["schema_version"]
     values = {
         "experiment": (
-            "p4_g0c_metrics_calibration_v2"
-            if bundle.protocol["schema_version"] == REPLACEMENT_PROTOCOL_SCHEMA
+            "p4_g0c_metrics_calibration_v3" if schema == HARDENED_PROTOCOL_SCHEMA
+            else "p4_g0c_metrics_calibration_v2" if schema == REPLACEMENT_PROTOCOL_SCHEMA
             else "p4_g0c_metrics_calibration_v1"
         ),
         "p4.g0c.protocol_path": bundle.protocol_path,
@@ -554,6 +718,25 @@ def launch_command(bundle: ProtocolBundle, record: dict[str, Any]) -> list[str]:
         "export_root_dir": str(run_dir / "exports"),
         "iap_log_root": str(run_dir / "runtime" / "iap_logs"),
     }
+    if schema == HARDENED_PROTOCOL_SCHEMA:
+        if launch_environment is None:
+            raise RunnerError("LAUNCH_ENVIRONMENT_NOT_READY:missing_binding")
+        validate_launch_environment_binding(
+            launch_environment.get("child_environment"),
+            launch_environment.get("mutable_output_paths"),
+        )
+        child = launch_environment["child_environment"]
+        outputs = launch_environment["mutable_output_paths"]
+        values.update({
+            "runtime_root_dir": outputs["runtime_root_dir"],
+            "export_root_dir": outputs["export_root_dir"],
+            "iap_log_root": outputs["iap_log_root"],
+            "bag_output_dir": outputs["bag_output_dir"],
+            "p4.g0c.child_home": child["HOME"],
+            "p4.g0c.child_ros_home": child["ROS_HOME"],
+            "p4.g0c.child_ros_log_dir": child["ROS_LOG_DIR"],
+            "p4.g0c.child_tmpdir": child["TMPDIR"],
+        })
     return [
         "ros2", "launch", "iap", "test_planner.launch.py",
         *[f"{key}:={value}" for key, value in values.items()],
@@ -563,11 +746,13 @@ def launch_command(bundle: ProtocolBundle, record: dict[str, Any]) -> list[str]:
 def _execute_launch(
     record: dict[str, Any], command: list[str], duration_s: float,
     required: dict[str, list[str]],
+    environment: dict[str, str] | None = None,
 ) -> tuple[int, dict[str, Any]]:
     run_dir = Path(record["run_dir"])
     with (run_dir / "stdout.log").open("w") as output:
         launch = subprocess.Popen(
-            command, stdout=output, stderr=subprocess.STDOUT
+            command, stdout=output, stderr=subprocess.STDOUT,
+            env=environment,
         )
         monitor = RequiredProcessMonitor(launch.pid, required, duration_s)
 
@@ -596,6 +781,7 @@ def _validate_and_finalize_run(
     bundle: ProtocolBundle,
     record: dict[str, Any],
     monitor_result: dict[str, Any],
+    launch_environment: dict[str, dict[str, str]] | None = None,
 ) -> dict[str, str]:
     run_dir = Path(record["run_dir"])
     manifest_path = run_dir / "p4_g0c_run_manifest.json"
@@ -618,12 +804,15 @@ def _validate_and_finalize_run(
             f"run manifest binding mismatch: {record['run_id']}:"
             "test_planner_manifest_path"
         ) from exc
-    replacement = (
-        bundle.protocol["schema_version"] == REPLACEMENT_PROTOCOL_SCHEMA
-    )
+    protocol_schema = bundle.protocol["schema_version"]
+    hardened = protocol_schema == HARDENED_PROTOCOL_SCHEMA
+    replacement = protocol_schema in {
+        REPLACEMENT_PROTOCOL_SCHEMA, HARDENED_PROTOCOL_SCHEMA
+    }
     required_manifest = {
         "schema_version": (
-            "p4_g0c_run_manifest_v2" if replacement
+            "p4_g0c_run_manifest_v3" if hardened
+            else "p4_g0c_run_manifest_v2" if replacement
             else "p4_g0c_run_manifest_v1"
         ),
         "run_id": record["run_id"],
@@ -635,7 +824,8 @@ def _validate_and_finalize_run(
         "csv_path": str(csv_path.resolve()),
         "gate": "G0C",
         "experiment": (
-            "p4_g0c_metrics_calibration_v2" if replacement
+            "p4_g0c_metrics_calibration_v3" if hardened
+            else "p4_g0c_metrics_calibration_v2" if replacement
             else "p4_g0c_metrics_calibration_v1"
         ),
         "scenario": "p4_g0c_free_corridor_v1",
@@ -660,6 +850,28 @@ def _validate_and_finalize_run(
                 "replacement_lineage"
             ]["sha256"],
         })
+        if hardened:
+            if launch_environment is None:
+                raise RunnerError(
+                    f"run manifest binding mismatch: {record['run_id']}:"
+                    "launch_environment"
+                )
+            try:
+                validated_environment = validate_launch_environment_binding(
+                    manifest.get("child_environment"),
+                    manifest.get("mutable_output_paths"),
+                )
+            except RuntimeError as exc:
+                raise RunnerError(
+                    f"run manifest binding mismatch: {record['run_id']}:"
+                    "launch_environment"
+                ) from exc
+            if not exact_json_equal(validated_environment, launch_environment):
+                raise RunnerError(
+                    f"run manifest binding mismatch: {record['run_id']}:"
+                    "launch_environment"
+                )
+            required_manifest.update(launch_environment)
         manifest_effective = manifest.get("effective_values")
         if (
             not isinstance(manifest_effective, dict)
@@ -762,7 +974,9 @@ def _base_result(bundle: ProtocolBundle, plan: list[dict[str, Any]]) -> dict[str
     registered_ids = [record["run_id"] for record in plan]
     return {
         "schema_version": (
-            RUNNER_SCHEMA_V2
+            RUNNER_SCHEMA_V3
+            if bundle.protocol["schema_version"] == HARDENED_PROTOCOL_SCHEMA
+            else RUNNER_SCHEMA_V2
             if bundle.protocol["schema_version"] == REPLACEMENT_PROTOCOL_SCHEMA
             else RUNNER_SCHEMA_V1
         ),
@@ -803,6 +1017,9 @@ def run(
     dependency_environment: dict[str, str] | None = None,
     gpu_preflight: Callable[[Path], dict[str, Any]] = run_gpu_preflight,
     launch_executor: Callable[..., tuple[int, dict[str, Any]]] = _execute_launch,
+    launch_environment_factory: Callable[
+        [Path, list[dict[str, Any]]], dict[str, Any]
+    ] = derive_launch_environment_inventory,
 ) -> dict[str, Any]:
     if sum(bool(mode) for mode in (
         plan_only, preflight_only, dependency_preflight_only
@@ -864,6 +1081,34 @@ def run(
     if dependency_preflight_only:
         return result
 
+    launch_environment_inventory = None
+    launch_process_environment = None
+    if bundle.protocol["schema_version"] == HARDENED_PROTOCOL_SCHEMA:
+        result["runner_state"] = "LAUNCH_ENVIRONMENT_PREFLIGHT_RUNNING"
+        _persist_result(runs_root, result)
+        try:
+            launch_environment_inventory = prepare_launch_environment(
+                runs_root,
+                plan,
+                inventory_factory=launch_environment_factory,
+            )
+        except (RunnerError, OSError) as exc:
+            reason = str(exc)
+            if not reason.startswith("LAUNCH_ENVIRONMENT_NOT_READY"):
+                reason = f"LAUNCH_ENVIRONMENT_NOT_READY:{type(exc).__name__}"
+            result.update({
+                "runner_state": "FAILED",
+                "failure_reason": reason,
+            })
+            _persist_result(runs_root, result)
+            return result
+        result["launch_environment"] = launch_environment_inventory
+        result["runner_state"] = "LAUNCH_ENVIRONMENT_PREFLIGHT_PASS"
+        _persist_result(runs_root, result)
+        launch_process_environment = child_launch_environment(
+            dependency_environment, launch_environment_inventory
+        )
+
     preflight_path = runs_root / "preflight"
 
     result["runner_state"] = "GPU_PREFLIGHT_RUNNING"
@@ -896,7 +1141,13 @@ def run(
     for record in plan:
         run_dir = Path(record["run_dir"])
         run_dir.mkdir(parents=True, exist_ok=False)
-        command = launch_command(bundle, record)
+        run_environment = (
+            _run_environment_binding(
+                launch_environment_inventory, record["run_id"]
+            )
+            if launch_environment_inventory is not None else None
+        )
+        command = launch_command(bundle, record, run_environment)
         (run_dir / "launch_command.json").write_text(
             json.dumps(command, indent=2) + "\n"
         )
@@ -911,9 +1162,15 @@ def run(
         result["launch_invocations"] = len(result["attempted_run_ids"])
         _persist_result(runs_root, result)
         try:
-            exit_code, monitor_result = launch_executor(
-                record, command, duration_s, REQUIRED_PROCESSES
-            )
+            if bundle.protocol["schema_version"] == HARDENED_PROTOCOL_SCHEMA:
+                exit_code, monitor_result = launch_executor(
+                    record, command, duration_s, REQUIRED_PROCESSES,
+                    launch_process_environment,
+                )
+            else:
+                exit_code, monitor_result = launch_executor(
+                    record, command, duration_s, REQUIRED_PROCESSES
+                )
         except Exception as exc:  # Launch boundary failures must remain in the ledger.
             result["attempts"][-1]["state"] = "FAILED"
             result.update({
@@ -938,7 +1195,7 @@ def run(
             return result
         try:
             inventory_binding = _validate_and_finalize_run(
-                bundle, record, monitor_result
+                bundle, record, monitor_result, run_environment
             )
         except (RunnerError, OSError) as exc:
             result["attempts"][-1]["state"] = "FAILED"
@@ -963,12 +1220,12 @@ def run(
 def _parser() -> argparse.ArgumentParser:
     repo = Path(__file__).resolve().parents[2]
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--protocol", type=Path, default=repo / "config/icra27/p4_g0c_protocol_v2.json")
-    parser.add_argument("--registry", type=Path, default=repo / "config/icra27/p4_threshold_registry_v2.json")
+    parser.add_argument("--protocol", type=Path, default=repo / "config/icra27/p4_g0c_protocol_v3.json")
+    parser.add_argument("--registry", type=Path, default=repo / "config/icra27/p4_threshold_registry_v3.json")
     parser.add_argument("--fixture", type=Path, default=repo / "config/icra27/p4_g0c_live_fixture_v1.json")
     parser.add_argument(
         "--dependency-manifest", type=Path,
-        default=repo / "config/icra27/p4_g0c_runtime_dependencies_v2.json",
+        default=repo / "config/icra27/p4_g0c_runtime_dependencies_v3.json",
     )
     parser.add_argument("--runs-root", type=Path, required=True)
     modes = parser.add_mutually_exclusive_group()
@@ -985,10 +1242,16 @@ def main(argv: list[str] | None = None) -> int:
             Path(__file__).resolve().parents[2]
             / "config/icra27/p4_g0c_protocol_v1.json"
         )
+        registered_v2_path = (
+            Path(__file__).resolve().parents[2]
+            / "config/icra27/p4_g0c_protocol_v2.json"
+        )
         trusted_schema = (
             LEGACY_PROTOCOL_SCHEMA
             if args.protocol.resolve() == registered_v1_path
             else REPLACEMENT_PROTOCOL_SCHEMA
+            if args.protocol.resolve() == registered_v2_path
+            else HARDENED_PROTOCOL_SCHEMA
         )
         bundle = load_bundle(
             args.protocol,

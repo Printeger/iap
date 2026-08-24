@@ -20,18 +20,21 @@ SPEC.loader.exec_module(RUNNER)
 
 class P4G0CDependencyPreflightTest(unittest.TestCase):
     def setUp(self):
-        self.protocol = REPO / "config/icra27/p4_g0c_protocol_v2.json"
-        self.registry = REPO / "config/icra27/p4_threshold_registry_v2.json"
+        self.protocol = REPO / "config/icra27/p4_g0c_protocol_v3.json"
+        self.registry = REPO / "config/icra27/p4_threshold_registry_v3.json"
         self.fixture = REPO / "config/icra27/p4_g0c_live_fixture_v1.json"
         self.bundle = RUNNER.load_bundle(
-            self.protocol, self.registry, self.fixture
+            self.protocol, self.registry, self.fixture,
+            expected_protocol_schema=RUNNER.HARDENED_PROTOCOL_SCHEMA,
         )
         self.manifest_path = (
-            REPO / "config/icra27/p4_g0c_runtime_dependencies_v2.json"
+            REPO / "config/icra27/p4_g0c_runtime_dependencies_v3.json"
         )
         self.manifest = RUNNER.load_runtime_dependency_manifest(
             self.manifest_path,
             self.bundle.protocol["runtime_dependency_manifest"]["sha256"],
+            expected_schema=RUNNER.DEPENDENCY_SCHEMA_V3,
+            expected_experiment="p4_g0c_metrics_calibration_v3",
         )
 
     @staticmethod

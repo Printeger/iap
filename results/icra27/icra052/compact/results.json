@@ -1,0 +1,50 @@
+{
+  "adversarial_cases": {
+    "analyzer_binding_mutations": 36,
+    "launch_child_environment_mismatches": 5,
+    "runner_pre_attempt_rejections": 7
+  },
+  "forbidden_invocations": {
+    "analyzer_cli": 0,
+    "build": 0,
+    "ctest": 0,
+    "gpu_preflight": 0,
+    "live_runner": 0,
+    "main_flow": 0,
+    "qualification": 0,
+    "ros_launch": 0,
+    "smoke": 0
+  },
+  "gate": "P4_G0C_R3_LAUNCH_ENVIRONMENT_PROTOCOL_REPAIR",
+  "hashes": {
+    "external_icra051_launch_log": "f506e5565d73ad601673c814635797c360f650c7be3c4356e9217449df2458e7",
+    "icra051_runner_state": "7c3cafc505ad33e7e8631a2ed1534bf5e21c6cf4f4d9eb252319a250989846a7",
+    "launch_contract": "6433ec711b91ed74d70948eceae199f7cb6b67789c829e506b778d2f14590ac7",
+    "protected_pdf": "1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6",
+    "protocol_v3": "1789d3fc32178f02002a468ba58b9efd2768ea3f335969e49e9452b84d524c86",
+    "registry_v3": "ea5d06da91d02a65e9938a95d4116802d0be43dcc7317f12f20bd43ff84ae9a5",
+    "replacement_lineage_v3": "87947cb0373f1a6114f38510b09621ea8cf36f7eab6b80fe1a7095509e977d60",
+    "runtime_dependencies_v3": "670ee322b88537713f6dda99ef4ae748674a63bd37e3d6a132ceba6c376f651a"
+  },
+  "requirement": "IAP-RQ-423",
+  "result": "P4_G0C_R3_LAUNCH_ENVIRONMENT_PROTOCOL_READY_FOR_REVIEW",
+  "task": "ICRA-052",
+  "tests": {
+    "focused": {
+      "count": 83,
+      "exit": 0,
+      "tmpdir": "results/icra27/icra052/tmp"
+    },
+    "full_python_discovery": {
+      "count": 438,
+      "exit": 0,
+      "tmpdir": "results/icra27/icra052/tmp"
+    }
+  },
+  "validation": {
+    "canonical_json_files": 4,
+    "diff_check_exit": 0,
+    "fatal_flake8_exit": 0,
+    "syntax_files": 9
+  }
+}

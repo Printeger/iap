@@ -31,8 +31,11 @@ from launch_ros.descriptions import ComposableNode
 P1_EVIDENCE_SCHEMA_VERSION = "p1_evidence_provenance_v4"
 P4_G0C_EXPERIMENT_V1 = "p4_g0c_metrics_calibration_v1"
 P4_G0C_EXPERIMENT_V2 = "p4_g0c_metrics_calibration_v2"
+P4_G0C_EXPERIMENT_V3 = "p4_g0c_metrics_calibration_v3"
 P4_G0C_EXPERIMENT = P4_G0C_EXPERIMENT_V1
-P4_G0C_EXPERIMENTS = {P4_G0C_EXPERIMENT_V1, P4_G0C_EXPERIMENT_V2}
+P4_G0C_EXPERIMENTS = {
+    P4_G0C_EXPERIMENT_V1, P4_G0C_EXPERIMENT_V2, P4_G0C_EXPERIMENT_V3
+}
 P4_G0C_SCENARIO = "p4_g0c_free_corridor_v1"
 P4_G0C_REQUIRED_PROCESSES = ["iap_rosnode", "ego_planner_node"]
 P4_G0C_PROTOCOL_SHA256 = (
@@ -57,6 +60,14 @@ P4_G0C_ARTIFACT_PRESET_V2 = {
     "p4.g0c.protocol_path": "config/icra27/p4_g0c_protocol_v2.json",
     "p4.g0c.protocol_sha256": P4_G0C_RUNTIME_HASH_REQUIRED,
     "p4.g0c.registry_path": "config/icra27/p4_threshold_registry_v2.json",
+    "p4.g0c.registry_sha256": P4_G0C_RUNTIME_HASH_REQUIRED,
+    "p4.g0c.fixture_path": "config/icra27/p4_g0c_live_fixture_v1.json",
+    "p4.g0c.fixture_sha256": P4_G0C_FIXTURE_SHA256,
+}
+P4_G0C_ARTIFACT_PRESET_V3 = {
+    "p4.g0c.protocol_path": "config/icra27/p4_g0c_protocol_v3.json",
+    "p4.g0c.protocol_sha256": P4_G0C_RUNTIME_HASH_REQUIRED,
+    "p4.g0c.registry_path": "config/icra27/p4_threshold_registry_v3.json",
     "p4.g0c.registry_sha256": P4_G0C_RUNTIME_HASH_REQUIRED,
     "p4.g0c.fixture_path": "config/icra27/p4_g0c_live_fixture_v1.json",
     "p4.g0c.fixture_sha256": P4_G0C_FIXTURE_SHA256,
@@ -214,10 +225,16 @@ def _p4_g0c_binding(
     declared_protocol_sha256, declared_registry_sha256,
     declared_fixture_sha256, run_id, seed, repetition,
     run_manifest_path, csv_path, effective_values,
+    child_environment=None, mutable_output_paths=None,
 ):
     if str(experiment) not in P4_G0C_EXPERIMENTS:
         return {}
-    replacement = str(experiment) == P4_G0C_EXPERIMENT_V2
+    version = (
+        3 if str(experiment) == P4_G0C_EXPERIMENT_V3
+        else 2 if str(experiment) == P4_G0C_EXPERIMENT_V2
+        else 1
+    )
+    replacement = version >= 2
     paths = {
         "protocol": Path(protocol_path).expanduser().resolve(),
         "registry": Path(registry_path).expanduser().resolve(),
@@ -268,7 +285,7 @@ def _p4_g0c_binding(
     if protocol.get("live_fixture", {}).get("sha256") != actual_hashes["fixture"]:
         raise RuntimeError("P4-G0C protocol fixture hash mismatch")
     expected_run_id = (
-        f"p4-g0c-r2-seed{int(seed)}-rep{int(repetition):02d}"
+        f"p4-g0c-r{version}-seed{int(seed)}-rep{int(repetition):02d}"
         if replacement
         else f"p4-g0c-seed{int(seed)}-rep{int(repetition):02d}"
     )
@@ -293,16 +310,21 @@ def _p4_g0c_binding(
         "selection_applied": False,
     })
     expected_protocol_schema = (
-        "p4_g0c_protocol_v2" if replacement else "p4_g0c_protocol_v1"
+        f"p4_g0c_protocol_v{version}"
     )
     if protocol.get("schema_version") != expected_protocol_schema:
         raise RuntimeError("P4-G0C protocol schema mismatch")
+    expected_science = dict(P4_G0C_FROZEN_SCIENTIFIC_IDENTITY)
+    if version == 3:
+        expected_science["run_id_template"] = (
+            "p4-g0c-r3-seed{seed}-rep{repetition:02d}"
+        )
     if replacement and any(
         _canonical_json_bytes(protocol.get(key))
         != _canonical_json_bytes(value)
-        for key, value in P4_G0C_FROZEN_SCIENTIFIC_IDENTITY.items()
+        for key, value in expected_science.items()
     ):
-        raise RuntimeError("P4-G0C v2 scientific identity mismatch")
+        raise RuntimeError(f"P4-G0C v{version} scientific identity mismatch")
     if (
         replacement
         and _canonical_json_bytes(protocol.get("effective_values"))
@@ -313,7 +335,7 @@ def _p4_g0c_binding(
         raise RuntimeError("P4-G0C protocol effective config mismatch")
     if (
         registry.get("schema_version") != (
-            "p4_threshold_registry_v2" if replacement
+            f"p4_threshold_registry_v{version}" if replacement
             else "p4_threshold_registry_v1"
         )
         or registry.get("state") != "PROPOSED_UNCALIBRATED"
@@ -341,9 +363,9 @@ def _p4_g0c_binding(
     effective_canonical = json.dumps(
         typed_values, sort_keys=True, separators=(",", ":"), ensure_ascii=True
     ).encode("utf-8")
-    return {
+    result = {
         "schema_version": (
-            "p4_g0c_run_manifest_v2" if replacement
+            f"p4_g0c_run_manifest_v{version}" if replacement
             else "p4_g0c_run_manifest_v1"
         ),
         "gate": "G0C",
@@ -374,6 +396,47 @@ def _p4_g0c_binding(
             ).get("sha256"),
         } if replacement else {}),
     }
+    if version == 3:
+        if not isinstance(child_environment, dict) or set(child_environment) != {
+            "HOME", "ROS_HOME", "ROS_LOG_DIR", "TMPDIR"
+        }:
+            raise RuntimeError("P4-G0C child environment is malformed")
+        if not isinstance(mutable_output_paths, dict) or set(mutable_output_paths) != {
+            "bag_output_dir", "decision_csv_path", "export_root_dir",
+            "iap_log_root", "launch_command_path", "run_manifest_path",
+            "runtime_root_dir", "stdout_log_path",
+        }:
+            raise RuntimeError("P4-G0C mutable-output inventory is malformed")
+        run_dir = manifest_path.parent
+        runs_root = run_dir.parent
+        environment_root = runs_root / "launch_environment"
+        expected_environment = {
+            "HOME": str(environment_root / "home"),
+            "ROS_HOME": str(environment_root / "ros_home"),
+            "ROS_LOG_DIR": str(environment_root / "ros_logs"),
+            "TMPDIR": str(environment_root / "tmp"),
+        }
+        expected_outputs = {
+            "bag_output_dir": str(run_dir / "bags"),
+            "decision_csv_path": str(decision_path),
+            "export_root_dir": str(run_dir / "exports"),
+            "iap_log_root": str(run_dir / "runtime" / "iap_logs"),
+            "launch_command_path": str(run_dir / "launch_command.json"),
+            "run_manifest_path": str(manifest_path),
+            "runtime_root_dir": str(run_dir / "runtime"),
+            "stdout_log_path": str(run_dir / "stdout.log"),
+        }
+        if child_environment != expected_environment:
+            raise RuntimeError("P4-G0C child environment is not canonical")
+        if mutable_output_paths != expected_outputs:
+            raise RuntimeError("P4-G0C mutable-output inventory is not canonical")
+        if any(os.environ.get(key) != value for key, value in expected_environment.items()):
+            raise RuntimeError("P4-G0C propagated child environment mismatch")
+        result.update({
+            "child_environment": expected_environment,
+            "mutable_output_paths": expected_outputs,
+        })
+    return result
 
 
 def _prepare_p4_g0c_context(context, experiment, iap_share):
@@ -436,6 +499,42 @@ def _prepare_p4_g0c_context(context, experiment, iap_share):
             "p4.g0c.run_manifest_path").perform(context),
         csv_path=csv_path,
         effective_values=effective,
+        child_environment={
+            "HOME": LaunchConfiguration("p4.g0c.child_home").perform(context),
+            "ROS_HOME": LaunchConfiguration(
+                "p4.g0c.child_ros_home"
+            ).perform(context),
+            "ROS_LOG_DIR": LaunchConfiguration(
+                "p4.g0c.child_ros_log_dir"
+            ).perform(context),
+            "TMPDIR": LaunchConfiguration("p4.g0c.child_tmpdir").perform(context),
+        },
+        mutable_output_paths={
+            "bag_output_dir": LaunchConfiguration("bag_output_dir").perform(context),
+            "decision_csv_path": csv_path,
+            "export_root_dir": LaunchConfiguration(
+                "export_root_dir"
+            ).perform(context),
+            "iap_log_root": LaunchConfiguration("iap_log_root").perform(context),
+            "launch_command_path": str(
+                Path(LaunchConfiguration(
+                    "p4.g0c.run_manifest_path"
+                ).perform(context)).expanduser().resolve().parent
+                / "launch_command.json"
+            ),
+            "run_manifest_path": LaunchConfiguration(
+                "p4.g0c.run_manifest_path"
+            ).perform(context),
+            "runtime_root_dir": LaunchConfiguration(
+                "runtime_root_dir"
+            ).perform(context),
+            "stdout_log_path": str(
+                Path(LaunchConfiguration(
+                    "p4.g0c.run_manifest_path"
+                ).perform(context)).expanduser().resolve().parent
+                / "stdout.log"
+            ),
+        },
     )
     manifest_path = Path(
         LaunchConfiguration("p4.g0c.run_manifest_path").perform(context)
@@ -1145,6 +1244,11 @@ EXPERIMENT_PRESETS = {
         **P4_G0C_ARTIFACT_PRESET_V2,
         "scenario": "p4_g0c_free_corridor_v1",
     },
+    "p4_g0c_metrics_calibration_v3": {
+        **P4_G0C_FROZEN_LAUNCH_VALUES,
+        **P4_G0C_ARTIFACT_PRESET_V3,
+        "scenario": "p4_g0c_free_corridor_v1",
+    },
     "all_degraded_lidar_good": {
         "scenario": "gnss_degraded_lidar_good",
         "planner_safety_profile": "all",
@@ -1495,6 +1599,10 @@ ARG_DEFAULTS = [
     ("p4.g0c.repetition", "0"),
     ("p4.g0c.run_manifest_path", ""),
     ("p4.g0c.csv_path", ""),
+    ("p4.g0c.child_home", ""),
+    ("p4.g0c.child_ros_home", ""),
+    ("p4.g0c.child_ros_log_dir", ""),
+    ("p4.g0c.child_tmpdir", ""),
     ("p5.enable_runtime_gate", "false"),
     ("p5.enable_final_gate", "false"),
     ("p5.horizon_s", "2.0"),
@@ -2493,10 +2601,16 @@ def _launch_setup(context):
     bag_root_dir = LaunchConfiguration("bag_output_dir").perform(context).strip()
     if not bag_root_dir:
         bag_root_dir = str(Path(runtime_root) / "bag")
-    bag_stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
-    bag_scenario = _safe_path_component(scenario, "manual")
-    bag_experiment = _safe_path_component(experiment, "experiment")
-    bag_output_dir = str(Path(bag_root_dir) / f"test_planner_{bag_experiment}_{bag_scenario}_{bag_stamp}")
+    if experiment == P4_G0C_EXPERIMENT_V3:
+        bag_output_dir = bag_root_dir
+    else:
+        bag_stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+        bag_scenario = _safe_path_component(scenario, "manual")
+        bag_experiment = _safe_path_component(experiment, "experiment")
+        bag_output_dir = str(
+            Path(bag_root_dir)
+            / f"test_planner_{bag_experiment}_{bag_scenario}_{bag_stamp}"
+        )
     if record_bag:
         os.makedirs(bag_root_dir, exist_ok=True)
     evidence = _runtime_provenance(iap_share, export_dir, bag_output_dir, experiment, scenario)

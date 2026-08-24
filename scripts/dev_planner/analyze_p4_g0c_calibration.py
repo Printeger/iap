@@ -18,6 +18,7 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 from p4_g0c_protocol import (  # noqa: E402
+    LAUNCH_ENVIRONMENT_SCHEMA,
     RUN_ARTIFACT_INVENTORY_FILENAME,
     DecisionSchemaError,
     ProtocolBundle,
@@ -25,6 +26,7 @@ from p4_g0c_protocol import (  # noqa: E402
     canonical_bytes,
     decision_identity,
     effective_config_sha256,
+    expected_launch_environment_binding,
     exact_json_equal,
     expand_run_plan,
     load_protocol_bundle,
@@ -32,11 +34,13 @@ from p4_g0c_protocol import (  # noqa: E402
     validate_run_artifact_inventory,
     validate_decision_header,
     validate_test_planner_effective_contract,
+    validate_launch_environment_binding,
 )
 
 
 PROTOCOL_SCHEMA_V1 = "p4_g0c_protocol_v1"
 PROTOCOL_SCHEMA_V2 = "p4_g0c_protocol_v2"
+PROTOCOL_SCHEMA_V3 = "p4_g0c_protocol_v3"
 RUNNER_STATE_FILENAME = "p4_g0c_runner_state.json"
 REQUIRED_PROCESSES = ["iap_rosnode", "ego_planner_node"]
 ALLOWED_ROOT_METADATA = {
@@ -52,13 +56,19 @@ class AnalysisError(RuntimeError):
 
 
 def _versioned_schema(bundle: ProtocolBundle, stem: str) -> str:
-    version = "v2" if bundle.protocol.get("schema_version") == PROTOCOL_SCHEMA_V2 else "v1"
+    version = {
+        PROTOCOL_SCHEMA_V1: "v1",
+        PROTOCOL_SCHEMA_V2: "v2",
+        PROTOCOL_SCHEMA_V3: "v3",
+    }[bundle.protocol.get("schema_version")]
     return f"{stem}_{version}"
 
 
 def _runner_state_schema(bundle: ProtocolBundle) -> str:
     return (
-        "p4_g0c_runner_state_v4"
+        "p4_g0c_runner_state_v5"
+        if bundle.protocol.get("schema_version") == PROTOCOL_SCHEMA_V3
+        else "p4_g0c_runner_state_v4"
         if bundle.protocol.get("schema_version") == PROTOCOL_SCHEMA_V2
         else "p4_g0c_runner_state_v3"
     )
@@ -136,7 +146,7 @@ def _root_inventory_failures(
     failures = []
     bundle_paths: list[Path] = []
     allowed_names = set(registered_run_ids) | ALLOWED_ROOT_METADATA | {
-        "preflight"
+        "preflight", "launch_environment"
     }
     try:
         entries = list(root.iterdir())
@@ -172,6 +182,27 @@ def _root_inventory_failures(
                 else:
                     bundle_paths.append(entry)
 
+    launch_environment = root / "launch_environment"
+    if launch_environment.exists():
+        if not launch_environment.is_dir() or launch_environment.is_symlink():
+            failures.append("root_inventory_launch_environment_type")
+        else:
+            expected_directories = {"home", "ros_home", "ros_logs", "tmp"}
+            actual_directories = {
+                entry.name for entry in launch_environment.iterdir()
+                if entry.is_dir() and not entry.is_symlink()
+            }
+            if actual_directories != expected_directories:
+                failures.append("root_inventory_launch_environment_directories")
+            for entry in launch_environment.rglob("*"):
+                if entry.is_symlink():
+                    failures.append(
+                        "root_inventory_launch_environment_symlink:"
+                        f"{entry.relative_to(launch_environment)}"
+                    )
+                elif entry.is_file():
+                    bundle_paths.append(entry)
+
     return failures, bundle_paths
 
 
@@ -205,7 +236,9 @@ def _runner_state_failures(
         "failure_reason": "",
         "failed_run_id": "",
     }
-    if bundle.protocol.get("schema_version") == PROTOCOL_SCHEMA_V2:
+    if bundle.protocol.get("schema_version") in {
+        PROTOCOL_SCHEMA_V2, PROTOCOL_SCHEMA_V3
+    }:
         expected_scalars["gpu_preflight_invocations"] = 1
     for key, value in expected_scalars.items():
         if state.get(key) != value:
@@ -275,7 +308,9 @@ def _runner_state_failures(
         failures.append("runner_state_attempt_ledger")
     if state.get("runs") != plan:
         failures.append("runner_state_plan")
-    if bundle.protocol.get("schema_version") == PROTOCOL_SCHEMA_V2:
+    if bundle.protocol.get("schema_version") in {
+        PROTOCOL_SCHEMA_V2, PROTOCOL_SCHEMA_V3
+    }:
         dependency = state.get("dependency_preflight")
         if (
             not isinstance(dependency, dict)
@@ -284,6 +319,47 @@ def _runner_state_failures(
             != bundle.protocol["runtime_dependency_manifest"]["sha256"]
         ):
             failures.append("runner_state_dependency_preflight")
+    if bundle.protocol.get("schema_version") == PROTOCOL_SCHEMA_V3:
+        launch_environment = state.get("launch_environment")
+        if not isinstance(launch_environment, dict) or set(launch_environment) != {
+            "schema_version", "runs_root", "child_environment", "run_outputs"
+        }:
+            failures.append("runner_state_launch_environment_schema")
+        else:
+            if (
+                launch_environment.get("schema_version")
+                != LAUNCH_ENVIRONMENT_SCHEMA
+                or launch_environment.get("runs_root") != str(root.resolve())
+            ):
+                failures.append("runner_state_launch_environment_root")
+            outputs = launch_environment.get("run_outputs")
+            if not isinstance(outputs, list) or len(outputs) != len(plan):
+                failures.append("runner_state_launch_environment_runs")
+            else:
+                for record, output in zip(plan, outputs):
+                    expected = expected_launch_environment_binding(
+                        root, Path(record["run_dir"])
+                    )
+                    try:
+                        actual = validate_launch_environment_binding(
+                            launch_environment.get("child_environment"),
+                            output.get("mutable_output_paths")
+                            if isinstance(output, dict) else None,
+                        )
+                    except RuntimeError:
+                        failures.append(
+                            f"runner_state_launch_environment_binding:{record['run_id']}"
+                        )
+                        continue
+                    if (
+                        not isinstance(output, dict)
+                        or set(output) != {"run_id", "mutable_output_paths"}
+                        or output.get("run_id") != record["run_id"]
+                        or not exact_json_equal(actual, expected)
+                    ):
+                        failures.append(
+                            f"runner_state_launch_environment_binding:{record['run_id']}"
+                        )
     return failures, state, path
 
 
@@ -364,6 +440,21 @@ def _run_inventory_failures(
         validate_test_planner_effective_contract(bundle, launch_manifest)
     except RuntimeError as exc:
         failures.append(f"config_mismatch:{run_id}:test_planner:{exc}")
+    if bundle.protocol.get("schema_version") == PROTOCOL_SCHEMA_V3:
+        try:
+            run_manifest = json.loads(
+                (run_dir / "p4_g0c_run_manifest.json").read_text()
+            )
+            launch_binding = launch_manifest["p4.g0c"]
+            for key in ("child_environment", "mutable_output_paths"):
+                if not exact_json_equal(
+                    launch_binding.get(key), run_manifest.get(key)
+                ):
+                    failures.append(
+                        f"launch_environment_mismatch:{run_id}:{key}"
+                    )
+        except (OSError, json.JSONDecodeError, KeyError, TypeError):
+            failures.append(f"launch_environment_mismatch:{run_id}:unreadable")
     return failures, bundle_paths
 
 
@@ -388,7 +479,9 @@ def _manifest_failures(
         "fixture_sha256": bundle.fixture_sha256,
         "csv_path": str(csv_path.resolve()),
         "experiment": (
-            "p4_g0c_metrics_calibration_v2"
+            "p4_g0c_metrics_calibration_v3"
+            if bundle.protocol.get("schema_version") == PROTOCOL_SCHEMA_V3
+            else "p4_g0c_metrics_calibration_v2"
             if bundle.protocol.get("schema_version") == PROTOCOL_SCHEMA_V2
             else "p4_g0c_metrics_calibration_v1"
         ),
@@ -406,7 +499,9 @@ def _manifest_failures(
         "overwrite_allowed": False,
         "test_planner_manifest_path": expected_launch_manifest_path,
     }
-    if bundle.protocol.get("schema_version") == PROTOCOL_SCHEMA_V2:
+    if bundle.protocol.get("schema_version") in {
+        PROTOCOL_SCHEMA_V2, PROTOCOL_SCHEMA_V3
+    }:
         expected.update({
             "dependency_manifest_sha256": bundle.protocol[
                 "runtime_dependency_manifest"
@@ -415,7 +510,24 @@ def _manifest_failures(
                 "replacement_lineage"
             ]["sha256"],
         })
-    replacement = bundle.protocol.get("schema_version") == PROTOCOL_SCHEMA_V2
+    replacement = bundle.protocol.get("schema_version") in {
+        PROTOCOL_SCHEMA_V2, PROTOCOL_SCHEMA_V3
+    }
+    if bundle.protocol.get("schema_version") == PROTOCOL_SCHEMA_V3:
+        expected_environment = expected_launch_environment_binding(
+            Path(record["run_dir"]).parent,
+            Path(record["run_dir"]),
+        )
+        try:
+            actual_environment = validate_launch_environment_binding(
+                manifest.get("child_environment"),
+                manifest.get("mutable_output_paths"),
+            )
+        except RuntimeError:
+            failures.append(f"manifest_truth:{run_id}:launch_environment")
+        else:
+            if not exact_json_equal(actual_environment, expected_environment):
+                failures.append(f"manifest_truth:{run_id}:launch_environment")
     for key, value in expected.items():
         if (
             not exact_json_equal(manifest.get(key), value)
@@ -708,8 +820,8 @@ def analyze(bundle: ProtocolBundle, runs_root: Path) -> dict[str, Any]:
 def _parser() -> argparse.ArgumentParser:
     repo = Path(__file__).resolve().parents[2]
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--protocol", type=Path, default=repo / "config/icra27/p4_g0c_protocol_v2.json")
-    parser.add_argument("--registry", type=Path, default=repo / "config/icra27/p4_threshold_registry_v2.json")
+    parser.add_argument("--protocol", type=Path, default=repo / "config/icra27/p4_g0c_protocol_v3.json")
+    parser.add_argument("--registry", type=Path, default=repo / "config/icra27/p4_threshold_registry_v3.json")
     parser.add_argument("--fixture", type=Path, default=repo / "config/icra27/p4_g0c_live_fixture_v1.json")
     parser.add_argument("--runs-root", type=Path, required=True)
     parser.add_argument("--output", type=Path)
@@ -769,10 +881,16 @@ def main(argv: list[str] | None = None) -> int:
             Path(__file__).resolve().parents[2]
             / "config/icra27/p4_g0c_protocol_v1.json"
         )
+        registered_v2_path = (
+            Path(__file__).resolve().parents[2]
+            / "config/icra27/p4_g0c_protocol_v2.json"
+        )
         trusted_schema = (
             PROTOCOL_SCHEMA_V1
             if args.protocol.resolve() == registered_v1_path
             else PROTOCOL_SCHEMA_V2
+            if args.protocol.resolve() == registered_v2_path
+            else PROTOCOL_SCHEMA_V3
         )
         bundle = load_bundle(
             args.protocol,

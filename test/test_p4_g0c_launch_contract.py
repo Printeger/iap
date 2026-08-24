@@ -112,6 +112,78 @@ class P4G0CLaunchContractTest(unittest.TestCase):
                 effective_values=MODULE.P4_G0C_FROZEN_LAUNCH_VALUES,
             )
 
+    def test_v3_binding_requires_exact_propagated_environment_and_outputs(self):
+        protocol = REPO / "config/icra27/p4_g0c_protocol_v3.json"
+        registry = REPO / "config/icra27/p4_threshold_registry_v3.json"
+        fixture = REPO / "config/icra27/p4_g0c_live_fixture_v1.json"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            run_dir = root / "p4-g0c-r3-seed211-rep01"
+            environment_root = root / "launch_environment"
+            child = {
+                "HOME": str(environment_root / "home"),
+                "ROS_HOME": str(environment_root / "ros_home"),
+                "ROS_LOG_DIR": str(environment_root / "ros_logs"),
+                "TMPDIR": str(environment_root / "tmp"),
+            }
+            outputs = {
+                "bag_output_dir": str(run_dir / "bags"),
+                "decision_csv_path": str(run_dir / "p4_decisions.csv"),
+                "export_root_dir": str(run_dir / "exports"),
+                "iap_log_root": str(run_dir / "runtime/iap_logs"),
+                "launch_command_path": str(run_dir / "launch_command.json"),
+                "run_manifest_path": str(run_dir / "p4_g0c_run_manifest.json"),
+                "runtime_root_dir": str(run_dir / "runtime"),
+                "stdout_log_path": str(run_dir / "stdout.log"),
+            }
+            arguments = {
+                "experiment": MODULE.P4_G0C_EXPERIMENT_V3,
+                "protocol_path": protocol,
+                "registry_path": registry,
+                "fixture_path": fixture,
+                "declared_protocol_sha256": MODULE._sha256_file(protocol),
+                "declared_registry_sha256": MODULE._sha256_file(registry),
+                "declared_fixture_sha256": MODULE._sha256_file(fixture),
+                "run_id": run_dir.name,
+                "seed": 211,
+                "repetition": 1,
+                "run_manifest_path": run_dir / "p4_g0c_run_manifest.json",
+                "csv_path": run_dir / "p4_decisions.csv",
+                "effective_values": MODULE.P4_G0C_FROZEN_LAUNCH_VALUES,
+                "child_environment": child,
+                "mutable_output_paths": outputs,
+            }
+            with mock.patch.dict(MODULE.os.environ, child, clear=False):
+                binding = MODULE._p4_g0c_binding(**arguments)
+            self.assertEqual(binding["schema_version"], "p4_g0c_run_manifest_v3")
+            self.assertEqual(binding["child_environment"], child)
+            self.assertEqual(binding["mutable_output_paths"], outputs)
+
+            for key in child:
+                with self.subTest(key=key):
+                    bad_environment = dict(child)
+                    bad_environment[key] = f"{child[key]}-drift"
+                    with mock.patch.dict(MODULE.os.environ, child, clear=False):
+                        with self.assertRaisesRegex(
+                            RuntimeError, "child environment is not canonical"
+                        ):
+                            MODULE._p4_g0c_binding(
+                                **{
+                                    **arguments,
+                                    "child_environment": bad_environment,
+                                }
+                            )
+
+            with mock.patch.dict(
+                MODULE.os.environ,
+                {**child, "ROS_LOG_DIR": f"{child['ROS_LOG_DIR']}-drift"},
+                clear=False,
+            ):
+                with self.assertRaisesRegex(
+                    RuntimeError, "propagated child environment mismatch"
+                ):
+                    MODULE._p4_g0c_binding(**arguments)
+
     def test_v2_launch_trust_split_requires_hashes_and_freezes_science(self):
         self.assertEqual(
             MODULE.P4_G0C_ARTIFACT_PRESET_V2["p4.g0c.protocol_sha256"],

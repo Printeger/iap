@@ -13,10 +13,12 @@ from typing import Any
 
 PROTOCOL_SCHEMA_V1 = "p4_g0c_protocol_v1"
 PROTOCOL_SCHEMA_V2 = "p4_g0c_protocol_v2"
-PROTOCOL_SCHEMAS = {PROTOCOL_SCHEMA_V1, PROTOCOL_SCHEMA_V2}
+PROTOCOL_SCHEMA_V3 = "p4_g0c_protocol_v3"
+PROTOCOL_SCHEMAS = {PROTOCOL_SCHEMA_V1, PROTOCOL_SCHEMA_V2, PROTOCOL_SCHEMA_V3}
 REGISTRY_SCHEMA_V1 = "p4_threshold_registry_v1"
 REGISTRY_SCHEMA_V2 = "p4_threshold_registry_v2"
-REGISTRY_SCHEMAS = {REGISTRY_SCHEMA_V1, REGISTRY_SCHEMA_V2}
+REGISTRY_SCHEMA_V3 = "p4_threshold_registry_v3"
+REGISTRY_SCHEMAS = {REGISTRY_SCHEMA_V1, REGISTRY_SCHEMA_V2, REGISTRY_SCHEMA_V3}
 FIXTURE_SCHEMA = "p4_g0c_fixture_v1"
 PROPOSED_STATE = "PROPOSED_UNCALIBRATED"
 GATE_NAMES = (
@@ -27,7 +29,8 @@ GATE_NAMES = (
 )
 RUN_ID_PATTERN_V1 = re.compile(r"^p4-g0c-seed([0-9]+)-rep([0-9]{2})$")
 RUN_ID_PATTERN_V2 = re.compile(r"^p4-g0c-r2-seed([0-9]+)-rep([0-9]{2})$")
-RUN_ID_PATTERNS = (RUN_ID_PATTERN_V1, RUN_ID_PATTERN_V2)
+RUN_ID_PATTERN_V3 = re.compile(r"^p4-g0c-r3-seed([0-9]+)-rep([0-9]{2})$")
+RUN_ID_PATTERNS = (RUN_ID_PATTERN_V1, RUN_ID_PATTERN_V2, RUN_ID_PATTERN_V3)
 DECISION_SCHEMA = "p4_collision_guide_decision_v1"
 DECISION_CSV_COLUMNS = (
     "schema_version", "stamp", "planning_attempt_id",
@@ -74,6 +77,24 @@ P4_G0C_PROTOCOL_V2_TRUSTED_SHA256 = (
 )
 P4_G0C_REGISTRY_V2_TRUSTED_SHA256 = (
     "99ccf38c317d45d8605a7e382628a8f0afd32c8097a763d05bfdcc5807beb94f"
+)
+P4_G0C_PROTOCOL_V3_TRUSTED_SHA256 = (
+    "1789d3fc32178f02002a468ba58b9efd2768ea3f335969e49e9452b84d524c86"
+)
+P4_G0C_REGISTRY_V3_TRUSTED_SHA256 = (
+    "ea5d06da91d02a65e9938a95d4116802d0be43dcc7317f12f20bd43ff84ae9a5"
+)
+LAUNCH_ENVIRONMENT_SCHEMA = "p4_g0c_launch_environment_v1"
+LAUNCH_ENVIRONMENT_KEYS = ("HOME", "ROS_HOME", "ROS_LOG_DIR", "TMPDIR")
+MUTABLE_OUTPUT_KEYS = (
+    "bag_output_dir",
+    "decision_csv_path",
+    "export_root_dir",
+    "iap_log_root",
+    "launch_command_path",
+    "run_manifest_path",
+    "runtime_root_dir",
+    "stdout_log_path",
 )
 FROZEN_NUMERICAL_NOISE_FLOOR = {
     "calibration_mutable": False,
@@ -204,17 +225,96 @@ def effective_config_sha256(effective_values: dict[str, Any]) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+def expected_launch_environment_binding(
+    runs_root: Path, run_dir: Path
+) -> dict[str, dict[str, str]]:
+    """Return the sole canonical mutable-output contract for one r3 run."""
+    root = Path(runs_root).resolve()
+    run = Path(run_dir).resolve()
+    environment_root = root / "launch_environment"
+    return {
+        "child_environment": {
+            "HOME": str(environment_root / "home"),
+            "ROS_HOME": str(environment_root / "ros_home"),
+            "ROS_LOG_DIR": str(environment_root / "ros_logs"),
+            "TMPDIR": str(environment_root / "tmp"),
+        },
+        "mutable_output_paths": {
+            "bag_output_dir": str(run / "bags"),
+            "decision_csv_path": str(run / "p4_decisions.csv"),
+            "export_root_dir": str(run / "exports"),
+            "iap_log_root": str(run / "runtime" / "iap_logs"),
+            "launch_command_path": str(run / "launch_command.json"),
+            "run_manifest_path": str(run / "p4_g0c_run_manifest.json"),
+            "runtime_root_dir": str(run / "runtime"),
+            "stdout_log_path": str(run / "stdout.log"),
+        },
+    }
+
+
+def validate_launch_environment_binding(
+    child_environment: Any,
+    mutable_output_paths: Any,
+) -> dict[str, dict[str, str]]:
+    """Validate exact r3 environment/output evidence without trusting hashes."""
+    if (
+        not isinstance(child_environment, dict)
+        or set(child_environment) != set(LAUNCH_ENVIRONMENT_KEYS)
+        or any(not isinstance(value, str) or not value for value in child_environment.values())
+    ):
+        raise ProtocolError("launch child environment is malformed")
+    if (
+        not isinstance(mutable_output_paths, dict)
+        or set(mutable_output_paths) != set(MUTABLE_OUTPUT_KEYS)
+        or any(not isinstance(value, str) or not value for value in mutable_output_paths.values())
+    ):
+        raise ProtocolError("launch mutable-output inventory is malformed")
+    requested_paths = {
+        **child_environment,
+        **mutable_output_paths,
+    }
+    canonical_paths: dict[str, Path] = {}
+    for key, value in requested_paths.items():
+        path = Path(value)
+        if not path.is_absolute() or ".." in path.parts:
+            raise ProtocolError(f"launch mutable path is not canonical: {key}")
+        resolved = path.resolve()
+        if str(path) != str(resolved):
+            raise ProtocolError(f"launch mutable path is aliased or symlinked: {key}")
+        canonical_paths[key] = resolved
+    if len(set(canonical_paths.values())) != len(canonical_paths):
+        raise ProtocolError("launch mutable paths are duplicate")
+    run_manifest = canonical_paths["run_manifest_path"]
+    run_dir = run_manifest.parent
+    runs_root = run_dir.parent
+    expected = expected_launch_environment_binding(runs_root, run_dir)
+    actual = {
+        "child_environment": child_environment,
+        "mutable_output_paths": mutable_output_paths,
+    }
+    if not exact_json_equal(actual, expected):
+        raise ProtocolError("launch environment/output binding is not canonical")
+    if runs_root not in run_dir.parents and run_dir.parent != runs_root:
+        raise ProtocolError("launch run directory escapes runs root")
+    return actual
+
+
 def validate_test_planner_effective_contract(
     bundle: ProtocolBundle, launch_manifest: dict[str, Any]
 ) -> None:
     """Bind launch-emitted effective values to the reviewed protocol bundle."""
-    if bundle.protocol.get("schema_version") != PROTOCOL_SCHEMA_V2:
+    schema = bundle.protocol.get("schema_version")
+    if schema not in {PROTOCOL_SCHEMA_V2, PROTOCOL_SCHEMA_V3}:
         return
     binding = launch_manifest.get("p4.g0c")
     if not isinstance(binding, dict):
         raise ProtocolError("test-planner G0C binding is missing")
     expected = {
-        "schema_version": "p4_g0c_run_manifest_v2",
+        "schema_version": (
+            "p4_g0c_run_manifest_v3"
+            if schema == PROTOCOL_SCHEMA_V3
+            else "p4_g0c_run_manifest_v2"
+        ),
         "protocol_sha256": bundle.protocol_sha256,
         "registry_sha256": bundle.registry_sha256,
         "fixture_sha256": bundle.fixture_sha256,
@@ -234,6 +334,19 @@ def validate_test_planner_effective_contract(
             "replacement_lineage"
         ]["sha256"],
     })
+    if schema == PROTOCOL_SCHEMA_V3:
+        expected.update({
+            "child_environment": launch_manifest.get("p4.g0c", {}).get(
+                "child_environment"
+            ),
+            "mutable_output_paths": launch_manifest.get("p4.g0c", {}).get(
+                "mutable_output_paths"
+            ),
+        })
+        validate_launch_environment_binding(
+            binding.get("child_environment"),
+            binding.get("mutable_output_paths"),
+        )
     binding_effective = binding.get("effective_values")
     if (
         not isinstance(binding_effective, dict)
@@ -590,7 +703,7 @@ def registered_run_ids(protocol: dict[str, Any]) -> list[str]:
     matrix_matches = (
         exact_json_equal(seeds, [211, 223, 237, 253, 271])
         and exact_json_equal(repetitions, [1, 2, 3])
-        if schema == PROTOCOL_SCHEMA_V2
+        if schema in {PROTOCOL_SCHEMA_V2, PROTOCOL_SCHEMA_V3}
         else seeds == [211, 223, 237, 253, 271]
         and repetitions == [1, 2, 3]
     )
@@ -600,6 +713,8 @@ def registered_run_ids(protocol: dict[str, Any]) -> list[str]:
         template = "p4-g0c-seed{seed}-rep{repetition:02d}"
     elif schema == PROTOCOL_SCHEMA_V2:
         template = "p4-g0c-r2-seed{seed}-rep{repetition:02d}"
+    elif schema == PROTOCOL_SCHEMA_V3:
+        template = "p4-g0c-r3-seed{seed}-rep{repetition:02d}"
     else:
         raise ProtocolError("unknown P4-G0C protocol schema")
     return [
@@ -620,7 +735,7 @@ def validate_protocol(protocol: dict[str, Any]) -> None:
         raise ProtocolError("matrix order is not frozen")
     if (
         not exact_json_equal(protocol.get("minimum_complete_decisions"), 100)
-        if schema == PROTOCOL_SCHEMA_V2
+        if schema in {PROTOCOL_SCHEMA_V2, PROTOCOL_SCHEMA_V3}
         else protocol.get("minimum_complete_decisions") != 100
     ):
         raise ProtocolError("minimum complete-decision count is not 100")
@@ -674,13 +789,13 @@ def validate_protocol(protocol: dict[str, Any]) -> None:
     for key, value in required.items():
         if (
             not exact_json_equal(effective.get(key), value)
-            if schema == PROTOCOL_SCHEMA_V2
+            if schema in {PROTOCOL_SCHEMA_V2, PROTOCOL_SCHEMA_V3}
             else effective.get(key) != value
         ):
             raise ProtocolError(f"effective protocol value is not frozen: {key}")
     floor = protocol.get("numerical_noise_floor")
     quantiles = protocol.get("quantiles")
-    if schema == PROTOCOL_SCHEMA_V2:
+    if schema in {PROTOCOL_SCHEMA_V2, PROTOCOL_SCHEMA_V3}:
         if not exact_json_equal(floor, FROZEN_NUMERICAL_NOISE_FLOOR):
             raise ProtocolError(
                 "scientific contract numerical-noise floor is not frozen"
@@ -736,22 +851,26 @@ def validate_protocol(protocol: dict[str, Any]) -> None:
     }
     if (
         not exact_json_equal(ratio, expected_ratio)
-        if schema == PROTOCOL_SCHEMA_V2
+        if schema in {PROTOCOL_SCHEMA_V2, PROTOCOL_SCHEMA_V3}
         else ratio != expected_ratio
     ):
         raise ProtocolError(
             "scientific contract path-ratio consistency is not frozen"
         )
-    if schema == PROTOCOL_SCHEMA_V2:
-        if protocol.get("run_id_template") != (
-            "p4-g0c-r2-seed{seed}-rep{repetition:02d}"
-        ):
+    if schema in {PROTOCOL_SCHEMA_V2, PROTOCOL_SCHEMA_V3}:
+        expected_template = (
+            "p4-g0c-r3-seed{seed}-rep{repetition:02d}"
+            if schema == PROTOCOL_SCHEMA_V3
+            else "p4-g0c-r2-seed{seed}-rep{repetition:02d}"
+        )
+        if protocol.get("run_id_template") != expected_template:
             raise ProtocolError("replacement run-ID template is not frozen")
         if not exact_json_equal(protocol.get("run_duration_s"), 90):
             raise ProtocolError("replacement run duration is not 90 seconds")
+        version = "v3" if schema == PROTOCOL_SCHEMA_V3 else "v2"
         for key, expected_schema in (
-            ("runtime_dependency_manifest", "p4_g0c_runtime_dependencies_v2"),
-            ("replacement_lineage", "p4_g0c_replacement_lineage_v2"),
+            ("runtime_dependency_manifest", f"p4_g0c_runtime_dependencies_{version}"),
+            ("replacement_lineage", f"p4_g0c_replacement_lineage_{version}"),
         ):
             binding = protocol.get(key)
             if (
@@ -849,6 +968,90 @@ def validate_replacement_lineage(
             )
 
 
+def validate_replacement_lineage_v3(
+    lineage: dict[str, Any], repository_root: Path
+) -> None:
+    """Bind both consumed live matrices before registering disjoint r3 IDs."""
+    if set(lineage) != {
+        "schema_version", "superseded_protocols", "failed_live_executions",
+        "replacement_namespace",
+    }:
+        raise ProtocolError("r3 replacement lineage root is malformed")
+    if lineage.get("schema_version") != "p4_g0c_replacement_lineage_v3":
+        raise ProtocolError("r3 replacement lineage schema is unknown")
+    if lineage.get("replacement_namespace") != (
+        "p4-g0c-r3-seed<seed>-rep<two-digits>"
+    ):
+        raise ProtocolError("r3 replacement lineage namespace is not frozen")
+    expected_protocols = [
+        {
+            "path": "config/icra27/p4_g0c_protocol_v1.json",
+            "sha256": "9e89ea42675459a63853d98845f02b7fe5b9434a9f28fcbd6ef5ba1bc5bd906d",
+        },
+        {
+            "path": "config/icra27/p4_g0c_protocol_v2.json",
+            "sha256": "8b0b2c3ed531680c6c8268738cb1bcb9136f39d2b97e68769e54a53afe59de79",
+        },
+    ]
+    if not exact_json_equal(lineage.get("superseded_protocols"), expected_protocols):
+        raise ProtocolError("r3 superseded protocol lineage mismatch")
+    expected_executions = [
+        {
+            "analyzer_invocations": 0,
+            "attempted_run_count": 1,
+            "calibration_data_eligible": False,
+            "complete_run_count": 0,
+            "failed_run_id": "p4-g0c-seed211-rep01",
+            "failure_classification": "MISSING_PRELIVE_DEPENDENCY_GATE",
+            "failure_reason": "launch_exit_1:package_so3_control_not_found",
+            "retry_count": 0,
+            "runner_state": {
+                "path": "results/icra27/icra046/runs/p4_g0c_runner_state.json",
+                "sha256": "a6dba6376b225f2fd00c218bdd19f911b9183e5e53a868f55cb0f1914d474ef1",
+            },
+            "task_id": "ICRA-046",
+            "threshold_application_possible": False,
+            "threshold_draft_exists": False,
+        },
+        {
+            "analyzer_invocations": 0,
+            "attempted_run_count": 1,
+            "calibration_data_eligible": False,
+            "complete_run_count": 0,
+            "external_log": {
+                "path": "/root/.ros/log/2026-08-24-14-34-21-049171-mint-X-965267/launch.log",
+                "sha256": "f506e5565d73ad601673c814635797c360f650c7be3c4356e9217449df2458e7",
+            },
+            "failed_run_id": "p4-g0c-r2-seed211-rep01",
+            "failure_classification": (
+                "SELF_INDUCED_NON_REPOSITORY_LOCAL_ROS_LOG_ENVIRONMENT"
+            ),
+            "failure_reason": "launch_exit_1",
+            "retry_count": 0,
+            "runner_state": {
+                "path": "results/icra27/icra051/runs/p4_g0c_runner_state.json",
+                "sha256": "7c3cafc505ad33e7e8631a2ed1534bf5e21c6cf4f4d9eb252319a250989846a7",
+            },
+            "task_id": "ICRA-051",
+            "threshold_application_possible": False,
+            "threshold_draft_exists": False,
+        },
+    ]
+    if not exact_json_equal(lineage.get("failed_live_executions"), expected_executions):
+        raise ProtocolError("r3 failed live-execution lineage mismatch")
+    for artifact in expected_protocols:
+        path = repository_root / artifact["path"]
+        if sha256_file(path) != artifact["sha256"]:
+            raise ProtocolError(f"r3 retained protocol drift: {artifact['path']}")
+    for execution in expected_executions:
+        state = execution["runner_state"]
+        if sha256_file(repository_root / state["path"]) != state["sha256"]:
+            raise ProtocolError(f"r3 retained runner-state drift: {state['path']}")
+        external = execution.get("external_log")
+        if external and sha256_file(Path(external["path"])) != external["sha256"]:
+            raise ProtocolError("r3 retained external launch-log drift")
+
+
 def load_protocol_bundle(
     protocol_path: Path,
     registry_path: Path,
@@ -864,7 +1067,7 @@ def load_protocol_bundle(
     protocol_sha = sha256_file(protocol_path)
     registry_sha = sha256_file(registry_path)
     fixture_sha = sha256_file(fixture_path)
-    if expected_protocol_schema not in {PROTOCOL_SCHEMA_V1, PROTOCOL_SCHEMA_V2}:
+    if expected_protocol_schema not in PROTOCOL_SCHEMAS:
         raise ProtocolError("trusted protocol mode is invalid")
     if protocol.get("schema_version") != expected_protocol_schema:
         raise ProtocolError("protocol schema does not match trusted mode")
@@ -873,13 +1076,18 @@ def load_protocol_bundle(
         or registry_sha != P4_G0C_REGISTRY_V2_TRUSTED_SHA256
     ):
         raise ProtocolError("v2 trust anchor protocol/registry hash mismatch")
+    if expected_protocol_schema == PROTOCOL_SCHEMA_V3 and (
+        protocol_sha != P4_G0C_PROTOCOL_V3_TRUSTED_SHA256
+        or registry_sha != P4_G0C_REGISTRY_V3_TRUSTED_SHA256
+    ):
+        raise ProtocolError("v3 trust anchor protocol/registry hash mismatch")
     validate_protocol(protocol)
     validate_proposed_registry(registry)
-    expected_registry_schema = (
-        REGISTRY_SCHEMA_V2
-        if expected_protocol_schema == PROTOCOL_SCHEMA_V2
-        else REGISTRY_SCHEMA_V1
-    )
+    expected_registry_schema = {
+        PROTOCOL_SCHEMA_V1: REGISTRY_SCHEMA_V1,
+        PROTOCOL_SCHEMA_V2: REGISTRY_SCHEMA_V2,
+        PROTOCOL_SCHEMA_V3: REGISTRY_SCHEMA_V3,
+    }[expected_protocol_schema]
     if registry.get("schema_version") != expected_registry_schema:
         raise ProtocolError("protocol and registry versions do not match")
     if fixture.get("schema_version") != FIXTURE_SCHEMA:
@@ -891,7 +1099,7 @@ def load_protocol_bundle(
         raise ProtocolError("protocol fixture hash mismatch")
     if registry.get("numerical_noise_floor") != protocol.get("numerical_noise_floor"):
         raise ProtocolError("registry numerical-noise floor mismatch")
-    if expected_protocol_schema == PROTOCOL_SCHEMA_V2:
+    if expected_protocol_schema in {PROTOCOL_SCHEMA_V2, PROTOCOL_SCHEMA_V3}:
         repository_root = protocol_path.resolve().parents[2]
         for key in ("runtime_dependency_manifest", "replacement_lineage"):
             binding = protocol[key]
@@ -902,7 +1110,10 @@ def load_protocol_bundle(
             if payload.get("schema_version") != binding["schema_version"]:
                 raise ProtocolError(f"replacement {key} schema mismatch")
             if key == "replacement_lineage":
-                validate_replacement_lineage(payload, repository_root)
+                if expected_protocol_schema == PROTOCOL_SCHEMA_V3:
+                    validate_replacement_lineage_v3(payload, repository_root)
+                else:
+                    validate_replacement_lineage(payload, repository_root)
     return ProtocolBundle(
         protocol, registry, fixture, protocol_sha, registry_sha, fixture_sha
     )
@@ -914,7 +1125,9 @@ def expand_run_plan(protocol: dict[str, Any], runs_root: Path) -> list[dict[str,
     result = []
     for seed in protocol["seeds"]:
         for repetition in protocol["repetitions"]:
-            if protocol["schema_version"] == PROTOCOL_SCHEMA_V2:
+            if protocol["schema_version"] == PROTOCOL_SCHEMA_V3:
+                run_id = f"p4-g0c-r3-seed{seed}-rep{repetition:02d}"
+            elif protocol["schema_version"] == PROTOCOL_SCHEMA_V2:
                 run_id = f"p4-g0c-r2-seed{seed}-rep{repetition:02d}"
             else:
                 run_id = f"p4-g0c-seed{seed}-rep{repetition:02d}"

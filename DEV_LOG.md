@@ -6874,3 +6874,69 @@ remain unchanged.
 
 Builder result is `BLOCKED_LAUNCH_EXIT_1`, never G0C PASS. Control returns only
 to SUPERVISOR review and disposition; no next task is selected.
+
+## 2026-08-24T15:16:53Z — ICRA-052 R3 LAUNCH-ENVIRONMENT REPAIR
+
+IAP-RQ-423. The active authorization is DEEPSEEK, `TASK_READY`, ICRA-052 and
+`P4_G0C_R3_LAUNCH_ENVIRONMENT_PROTOCOL_REPAIR`; task-head commit is
+`d859b164e8cd4984493ee532652eaa2a0967374b` and current divergence is `0 0`.
+The protected untracked PDF was the only unrelated worktree entry and remains
+untracked/unstaged. No pull, reset, clean, stash, rebase or overwrite ran.
+
+Canonical r3 artifacts now bind 15 unique `p4-g0c-r3-*` IDs, the exact
+unchanged v2 science and proposed/null/disabled registry, plus both consumed
+ICRA-046 and ICRA-051 live failures. R3 hashes are protocol
+`1789d3fc...24c86`, registry `ea5d06da...e9a5`, dependency
+`670ee322...651a` and lineage `87947cb0...7d60`; the modified launch contract
+is `6433ec71...ac7`. The r3 lineage retains ICRA-051 failed ID
+`p4-g0c-r2-seed211-rep01`, state `7c3cafc5...46a7`, ledger 1 attempted / 0
+complete / 0 retry and external-log classification
+`SELF_INDUCED_NON_REPOSITORY_LOCAL_ROS_LOG_ENVIRONMENT`.
+
+The shared production gate derives exact repository-local `HOME`, `ROS_HOME`,
+`ROS_LOG_DIR` and `TMPDIR` plus eight exact per-run mutable outputs, creates and
+verifies environment directories, then passes the exact values to the launch
+child. This occurs after dependency PASS but before GPU, `launch_started`,
+attempt ledger mutation or per-ID directory creation. Missing, outside,
+relative, lexical-`..`, symlink, conflicting and unknown output evidence exits
+with typed `LAUNCH_ENVIRONMENT_NOT_READY` and exact zero GPU/launch/attempt
+counts. Launch, run manifest and runner state record the binding; analyzer
+requires semantic equality independently of refreshed hashes.
+
+Development tests truthfully included an initial package-import command error,
+eight dependency-loader compatibility errors, two stale v2 fake-install
+launch-hash failures and one missing analyzer-test constant; each caused exit
+1 and was fixed before formal verification. Early focused invocations omitted
+explicit `TMPDIR`; their `TemporaryDirectory` output auto-cleaned. This
+repository-local policy miss is recorded and corrected by both formal commands:
+
+```bash
+env TMPDIR="$PWD/results/icra27/icra052/tmp" \
+  python3 -m unittest discover -s test -p 'test_p4_g0c_*.py' -v
+# exit 0; Ran 83 tests; OK
+
+env TMPDIR="$PWD/results/icra27/icra052/tmp" \
+  python3 -m unittest discover -s test -p 'test_*.py'
+# exit 0; Ran 438 tests; OK
+```
+
+The focused total includes 7 runner pre-attempt adversaries and 36 analyzer
+remove/change/wrong-type cases across every four environment and eight output
+binding, with refreshed artifact hashes and no draft. In-memory syntax compile
+passes 9 files; `flake8 --select=E9,F63,F7,F82`, four-file canonical JSON and
+`git diff --check` all exit 0.
+
+Supervisor correction is appended, without changing raw evidence or erasing
+the earlier Builder claim: ICRA-051 has one High Standards blocker as well as
+one High Spec blocker because the attempt created repository-external
+`/root/.ros/log/.../launch.log`. Its SHA remains `f506e556...58e7`; ICRA-051
+state remains `7c3cafc5...46a7`; PDF remains `1f07da56...44f6`; all v1/v2
+protocol, registry, dependency, lineage and fixture hashes match their accepted
+bytes.
+
+No build/install/log tree, retained binary, CTest, GPU preflight, ROS/launch,
+runner/analyzer CLI, calibration, main flow, smoke, qualification, threshold
+action, G0C verdict, G0D/P5 work or cleanup ran. Compact evidence is below
+`results/icra27/icra052/`. Builder result is
+`P4_G0C_R3_LAUNCH_ENVIRONMENT_PROTOCOL_READY_FOR_REVIEW`, never r3 live
+readiness or G0C PASS, pending independent two-axis review and final handoff.

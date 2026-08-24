@@ -186,6 +186,16 @@ class P4G0CAnalyzerTest(unittest.TestCase):
 
     def _make_bundle(self, root, row_counts=None, mutate=None):
         plan = MODULE.expand_run_plan(self.bundle.protocol, root)
+        protocol_schema = self.bundle.protocol["schema_version"]
+        replacement = protocol_schema in {
+            MODULE.PROTOCOL_SCHEMA_V2, MODULE.PROTOCOL_SCHEMA_V3
+        }
+        hardened = protocol_schema == MODULE.PROTOCOL_SCHEMA_V3
+        if hardened:
+            for directory in ("home", "ros_home", "ros_logs", "tmp"):
+                (root / "launch_environment" / directory).mkdir(
+                    parents=True, exist_ok=True
+                )
         row_counts = row_counts or [7] * 15
         global_index = 0
         inventory_bindings = []
@@ -199,8 +209,8 @@ class P4G0CAnalyzerTest(unittest.TestCase):
                 global_index += 1
             manifest = {
                 "schema_version": (
-                    "p4_g0c_run_manifest_v2"
-                    if self.bundle.protocol["schema_version"].endswith("_v2")
+                    "p4_g0c_run_manifest_v3" if hardened
+                    else "p4_g0c_run_manifest_v2" if replacement
                     else "p4_g0c_run_manifest_v1"
                 ),
                 "gate": "G0C",
@@ -218,8 +228,8 @@ class P4G0CAnalyzerTest(unittest.TestCase):
                 ),
                 "csv_path": str(csv_path.resolve()),
                 "experiment": (
-                    "p4_g0c_metrics_calibration_v2"
-                    if self.bundle.protocol["schema_version"].endswith("_v2")
+                    "p4_g0c_metrics_calibration_v3" if hardened
+                    else "p4_g0c_metrics_calibration_v2" if replacement
                     else "p4_g0c_metrics_calibration_v1"
                 ),
                 "scenario": "p4_g0c_free_corridor_v1",
@@ -241,7 +251,7 @@ class P4G0CAnalyzerTest(unittest.TestCase):
                     ).resolve()
                 ),
             }
-            if self.bundle.protocol["schema_version"].endswith("_v2"):
+            if replacement:
                 manifest.update({
                     "dependency_manifest_sha256": self.bundle.protocol[
                         "runtime_dependency_manifest"
@@ -250,6 +260,10 @@ class P4G0CAnalyzerTest(unittest.TestCase):
                         "replacement_lineage"
                     ]["sha256"],
                 })
+            if hardened:
+                manifest.update(MODULE.expected_launch_environment_binding(
+                    root, run_dir
+                ))
             if mutate is not None:
                 mutate(run_index, manifest, rows)
             with csv_path.open("w", newline="") as stream:
@@ -281,11 +295,11 @@ class P4G0CAnalyzerTest(unittest.TestCase):
                         *(
                             ("dependency_manifest_sha256",
                              "replacement_lineage_sha256")
-                            if self.bundle.protocol[
-                                "schema_version"
-                            ].endswith("_v2")
+                            if replacement
                             else ()
                         ),
+                        *(("child_environment", "mutable_output_paths")
+                          if hardened else ()),
                     )
                 },
             }) + "\n")
@@ -304,8 +318,8 @@ class P4G0CAnalyzerTest(unittest.TestCase):
         run_ids = [record["run_id"] for record in plan]
         runner_state = {
             "schema_version": (
-                "p4_g0c_runner_state_v4"
-                if self.bundle.protocol["schema_version"].endswith("_v2")
+                "p4_g0c_runner_state_v5" if hardened
+                else "p4_g0c_runner_state_v4" if replacement
                 else "p4_g0c_runner_state_v3"
             ),
             "runner_state": "COMPLETE",
@@ -332,7 +346,7 @@ class P4G0CAnalyzerTest(unittest.TestCase):
             "failure_reason": "",
             "failed_run_id": "",
         }
-        if self.bundle.protocol["schema_version"].endswith("_v2"):
+        if replacement:
             runner_state.update({
                 "gpu_preflight_invocations": 1,
                 "dependency_preflight": {
@@ -342,6 +356,26 @@ class P4G0CAnalyzerTest(unittest.TestCase):
                     ]["sha256"],
                 },
             })
+        if hardened:
+            first_binding = MODULE.expected_launch_environment_binding(
+                root, Path(plan[0]["run_dir"])
+            )
+            runner_state["launch_environment"] = {
+                "schema_version": MODULE.LAUNCH_ENVIRONMENT_SCHEMA,
+                "runs_root": str(root.resolve()),
+                "child_environment": first_binding["child_environment"],
+                "run_outputs": [
+                    {
+                        "run_id": record["run_id"],
+                        "mutable_output_paths": (
+                            MODULE.expected_launch_environment_binding(
+                                root, Path(record["run_dir"])
+                            )["mutable_output_paths"]
+                        ),
+                    }
+                    for record in plan
+                ],
+            }
         (root / "p4_g0c_runner_state.json").write_text(
             json.dumps(runner_state, sort_keys=True) + "\n"
         )
@@ -405,6 +439,96 @@ class P4G0CAnalyzerTest(unittest.TestCase):
             result["threshold_draft"]["schema_version"],
             "p4_g0c_threshold_draft_v2",
         )
+
+    def test_v3_environment_and_output_bindings_fail_closed_after_rehash(self):
+        self.bundle = MODULE.load_bundle(
+            REPO / "config/icra27/p4_g0c_protocol_v3.json",
+            REPO / "config/icra27/p4_threshold_registry_v3.json",
+            REPO / "config/icra27/p4_g0c_live_fixture_v1.json",
+            expected_protocol_schema=MODULE.PROTOCOL_SCHEMA_V3,
+        )
+        operations = {
+            "remove": lambda target, key, _value: target.pop(key),
+            "change": lambda target, key, value: target.__setitem__(
+                key, f"{value}-changed"
+            ),
+            "wrong_type": lambda target, key, value: target.__setitem__(
+                key, [value]
+            ),
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._make_bundle(root)
+            baseline = MODULE.analyze(self.bundle, root)
+            self.assertEqual(baseline["analysis_status"], "DRAFT_ELIGIBLE")
+            run_id = self.bundle.protocol["registered_run_ids"][0]
+            run_manifest_path = root / run_id / "p4_g0c_run_manifest.json"
+            launch_manifest_path = (
+                root / run_id
+                / "exports/synthetic_run_token/test_planner_manifest.json"
+            )
+            state_path = root / "p4_g0c_runner_state.json"
+            originals = {
+                "run": json.loads(run_manifest_path.read_text()),
+                "launch": json.loads(launch_manifest_path.read_text()),
+                "state": json.loads(state_path.read_text()),
+            }
+            bindings = (
+                ("child_environment", (
+                    "HOME", "ROS_HOME", "ROS_LOG_DIR", "TMPDIR",
+                )),
+                ("mutable_output_paths", (
+                    "bag_output_dir", "decision_csv_path", "export_root_dir",
+                    "iap_log_root", "launch_command_path", "run_manifest_path",
+                    "runtime_root_dir", "stdout_log_path",
+                )),
+            )
+            adversarial_count = 0
+            for section, keys in bindings:
+                for key in keys:
+                    expected = originals["run"][section][key]
+                    for operation, mutate in operations.items():
+                        with self.subTest(
+                            section=section, key=key, operation=operation
+                        ):
+                            run_manifest = json.loads(json.dumps(originals["run"]))
+                            launch_manifest = json.loads(
+                                json.dumps(originals["launch"])
+                            )
+                            state = json.loads(json.dumps(originals["state"]))
+                            state_binding = (
+                                state["launch_environment"]["child_environment"]
+                                if section == "child_environment"
+                                else state["launch_environment"]["run_outputs"][0][
+                                    "mutable_output_paths"
+                                ]
+                            )
+                            mutate(run_manifest[section], key, expected)
+                            mutate(
+                                launch_manifest["p4.g0c"][section], key, expected
+                            )
+                            mutate(state_binding, key, expected)
+                            run_manifest_path.write_text(
+                                json.dumps(run_manifest, sort_keys=True) + "\n"
+                            )
+                            launch_manifest_path.write_text(
+                                json.dumps(launch_manifest, sort_keys=True) + "\n"
+                            )
+                            state_path.write_text(
+                                json.dumps(state, sort_keys=True) + "\n"
+                            )
+                            self._refresh_inventory_binding(root)
+                            result = MODULE.analyze(self.bundle, root)
+                            self.assertEqual(
+                                result["analysis_status"], "REJECTED"
+                            )
+                            self.assertNotIn("threshold_draft", result)
+                            self.assertTrue(any(
+                                "launch_environment" in failure
+                                for failure in result["failures"]
+                            ))
+                            adversarial_count += 1
+            self.assertEqual(adversarial_count, 36)
 
     def test_v2_launch_effective_disagreement_rejects_before_draft(self):
         self.bundle = MODULE.load_bundle(

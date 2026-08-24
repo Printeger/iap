@@ -107,6 +107,73 @@ class P4G0CProtocolTest(unittest.TestCase):
         ):
             MODULE.validate_protocol(invalid)
 
+    def test_v3_replacement_is_disjoint_and_preserves_science_and_failures(self):
+        bundles = {
+            version: MODULE.load_protocol_bundle(
+                REPO / f"config/icra27/p4_g0c_protocol_v{version}.json",
+                REPO / f"config/icra27/p4_threshold_registry_v{version}.json",
+                REPO / "config/icra27/p4_g0c_live_fixture_v1.json",
+                expected_protocol_schema=getattr(
+                    MODULE, f"PROTOCOL_SCHEMA_V{version}"
+                ),
+            )
+            for version in (1, 2, 3)
+        }
+        scientific_keys = {
+            "effective_values", "matrix_order", "minimum_complete_decisions",
+            "no_exclusion", "no_overwrite", "no_retry",
+            "numerical_noise_floor", "path_ratio_consistency", "quantiles",
+            "repetitions", "run_duration_s", "seeds", "threshold_formulas",
+            "live_fixture",
+        }
+        self.assertEqual(
+            {key: bundles[3].protocol[key] for key in scientific_keys},
+            {key: bundles[2].protocol[key] for key in scientific_keys},
+        )
+        ids = {
+            version: set(bundle.protocol["registered_run_ids"])
+            for version, bundle in bundles.items()
+        }
+        self.assertEqual(len(ids[3]), 15)
+        self.assertFalse(ids[3] & ids[1])
+        self.assertFalse(ids[3] & ids[2])
+        self.assertTrue(all(run_id.startswith("p4-g0c-r3-") for run_id in ids[3]))
+
+        lineage = MODULE.load_canonical_json(
+            REPO / bundles[3].protocol["replacement_lineage"]["path"]
+        )
+        failed = {
+            item["task_id"]: item for item in lineage["failed_live_executions"]
+        }
+        self.assertEqual(set(failed), {"ICRA-046", "ICRA-051"})
+        icra051 = failed["ICRA-051"]
+        self.assertEqual(icra051["failed_run_id"], "p4-g0c-r2-seed211-rep01")
+        self.assertEqual(
+            icra051["runner_state"]["sha256"],
+            "7c3cafc505ad33e7e8631a2ed1534bf5e21c6cf4f4d9eb252319a250989846a7",
+        )
+        self.assertEqual(
+            (
+                icra051["attempted_run_count"],
+                icra051["complete_run_count"],
+                icra051["retry_count"],
+            ),
+            (1, 0, 0),
+        )
+        self.assertEqual(
+            icra051["failure_classification"],
+            "SELF_INDUCED_NON_REPOSITORY_LOCAL_ROS_LOG_ENVIRONMENT",
+        )
+        self.assertEqual(
+            icra051["external_log"]["sha256"],
+            "f506e5565d73ad601673c814635797c360f650c7be3c4356e9217449df2458e7",
+        )
+        registry = bundles[3].registry
+        self.assertEqual(registry["state"], "PROPOSED_UNCALIBRATED")
+        self.assertFalse(registry["application_enabled"])
+        self.assertIsNone(registry["calibration_bundle_sha256"])
+        self.assertTrue(all(value is None for value in registry["gates"].values()))
+
     def test_top_level_production_effective_mapping_is_exact_and_complete(self):
         mapping = MODULE.TEST_PLANNER_TOP_LEVEL_EFFECTIVE_MAP
         self.assertEqual(len(mapping), 28)
