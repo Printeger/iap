@@ -1,5 +1,74 @@
 # ICRA Supervisor Log
 
+## 2026-08-24 — ICRA-053 review REQUEST_CHANGES and ICRA-054 class-level closure
+
+### Review identity and synchronization
+
+- Fixed review range: `9ad3eefaeef1248bf1874cc4d3cb9711d19f5657...fea58fa8aff3a428a926467df6ccfb046db1fe26`.
+- Reviewed XDG implementation `e88df98`, production-surface proof `62b7cf9` and final DEV_LOG-only handoff
+  `fea58fa`; all carry `IAP-RQ-423`. All 15 changed paths are within the ICRA-053 allowlist and DEEPSEEK
+  ownership; Supervisor-owned and external-repository tracked files are unchanged.
+- After fetch, HEAD and `origin/dev/icra` match at divergence `0 0`. The protected PDF is the sole untracked
+  repository file and retains SHA-256
+  `1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+
+### Standards axis
+
+- Verdict: `BLOCKED`; one High hard violation and two Low judgment findings; worst High.
+- High repository-output violation: ICRA-053 commands exported only task-local `TMPDIR`, while tests create
+  ROS `LaunchContext` objects. Read-only inventory finds eight empty external launch logs during the Builder
+  task window at UTC 15:53:10, 15:54:03, 15:54:09, 15:55:30, 16:06:29, 16:06:40, 16:07:06 and
+  16:07:29 below `/root/.ros/log`. The latter four are directly bracketed by the implementation commits;
+  all eight have SHA-256 `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`.
+  This contradicts the task's zero-external-output requirement and the retained verification claim.
+- Low possible Primitive Obsession: exact mode `0700` is represented as a string in state/evidence and
+  converted at validation sites. Low possible Message Chains: the structural launch test relies on nested
+  AST attribute traversal. These are maintainability observations, not separate gate blockers.
+- Commits, ownership, docs synchronization, protected hashes, no forbidden build/GPU/live invocation and
+  retention of historical products otherwise conform. ICRA-053 has compact evidence and an empty task temp
+  directory, but no build/install/log product tree.
+
+### Spec axis
+
+- Verdict: `REQUEST_CHANGES`; one High blocking finding and zero nonblocking findings; worst High.
+- High incomplete structural proof: `test_p4_g0c_launch_contract.py` recognizes only environment values
+  expressed directly as `LaunchConfiguration(...)` or absolute string literals. It already omits the
+  production variable-valued FAST DDS profile action. A future variable-bound or joined writable path can
+  therefore bypass the proof while tests remain green.
+- The runner sink scan is likewise limited to selected AST forms and selected functions. It does not
+  exhaustively classify variable targets, all write modes, `write_bytes`, `touch`, `shutil` operations or
+  subprocess file outputs. Consequently the required invariant—every production mutable sink is registered
+  or the test fails—has not been established.
+- Accepted work remains: r3 selects the runner-owned canonical XDG directory instead of `/tmp/runtime-root`,
+  creates it before GPU/launch/attempt without symlink traversal, enforces exact mode `0700`, binds all five
+  environment keys and eight outputs, and covers all 13 bindings with 39 analyzer mutations. Disjoint IDs,
+  accepted science, ICRA-046/051 lineage, dependency closure and v1/v2 behavior remain intact.
+
+### Independent verification and Supervisor process correction
+
+- Supervisor independently reran focused P4-G0C discovery 87/87, launch-contract discovery 16/16 and full
+  repository Python discovery 442/442; all pass with existing expected diagnostics/ResourceWarning. Source
+  review nonetheless reproduces both blocking conditions, so green tests do not establish the missing
+  invariants.
+- The Supervisor rerun repeated the same harness mistake by setting only `TMPDIR`. It created four further
+  empty external launch logs at UTC 16:15:07, 16:15:15, 16:15:20 and 16:15:37 with the same empty-file hash.
+  This is a Supervisor review-process violation, is recorded explicitly here, and is not attributed to the
+  Builder. No external log was deleted or modified.
+- Verdict: `ICRA053_REVIEW_REQUEST_CHANGES_NON_HERMETIC_TESTS_AND_INCOMPLETE_MUTATION_SURFACE`. This is not
+  r3 live readiness, G0C PASS or threshold authorization. No live execution is authorized.
+
+### Artifact lifecycle and required next action
+
+- Review did not pass, so no cleanup occurs. ICRA-053 created no build/install product to delete; retain its
+  compact evidence. Retain ICRA-051 and all historical blocked build/install/log/dependency/runs products,
+  all external ROS logs and the protected PDF.
+- Unique next task: `ICRA-054 / P4_G0C_R3_HERMETIC_TEST_AND_MUTATION_SURFACE_CLOSURE`, defined in
+  `NEXT_TASK.md`; active role is `DEEPSEEK`, state `TASK_READY`.
+- ICRA-054 is synthetic only. It must add one mandatory test bootstrap that owns `TMPDIR`, `HOME`,
+  `ROS_HOME`, `ROS_LOG_DIR` and `XDG_RUNTIME_DIR` before launch imports, prove zero external-log delta, and
+  exhaustively classify every production environment action and filesystem mutation primitive. If that
+  class-level proof passes Review, the following task may fresh-build CUDA and execute r3 live once.
+
 ## 2026-08-24 — ICRA-052 review REQUEST_CHANGES and ICRA-053 XDG repair
 
 ### Review identity and synchronization
