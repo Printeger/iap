@@ -8,7 +8,6 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
-#include <iostream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -169,10 +168,8 @@ void expectOriginalFallback(
 
 }  // namespace
 
-TEST(P4CollisionGuideDecision, PositiveFixtureIsDeterministicMetricsOnly)
+TEST(P4CollisionGuideDecision, ScriptedPathsExerciseMetricsOnlyDecisionContract)
 {
-  ASSERT_EQ(
-    p4_collision_guide_fixture::kName, "p4_collision_guide_v1");
   uint64_t epoch = 9;
   const auto snapshot = makeSnapshot(ProviderMode::SPATIAL);
   auto first_search = successfulSearch();
@@ -200,16 +197,6 @@ TEST(P4CollisionGuideDecision, PositiveFixtureIsDeterministicMetricsOnly)
   EXPECT_DOUBLE_EQ(first.original_search_latency_ms, 1.25);
   EXPECT_DOUBLE_EQ(first.risk_search_latency_ms, 2.5);
   EXPECT_DOUBLE_EQ(first.total_search_latency_ms, 3.75);
-  std::cout << "[p4_collision_guide_v1] request_hash=" << first.request_hash
-            << " original_hash=" << first.original.canonical_hash
-            << " risk_hash=" << first.risk.canonical_hash
-            << " selected_hash=" << first.selected.canonical_hash
-            << " original_mean=" << first.original.risk_profile.mean
-            << " original_max=" << first.original.risk_profile.max
-            << " risk_mean=" << first.risk.risk_profile.mean
-            << " risk_max=" << first.risk.risk_profile.max
-            << " ratio=" << first.risk_original_length_ratio << std::endl;
-
   auto repeat_search = successfulSearch();
   ego_planner::P4CollisionGuidePlanner repeat_planner(repeat_search);
   const auto repeat = repeat_planner.planCollisionGuide(
@@ -369,13 +356,24 @@ TEST(P4CollisionGuideDecision, InjectionRechecksRequestAndEpochIdentity)
     makeRequest(snapshot, epoch, &epoch));
   ego_planner::P4GuideDecisionReason reason;
   EXPECT_TRUE(ego_planner::p4GuideDecisionReadyForInjection(
-      decision, 41, 7, snapshot, 10.0, epoch, &reason));
+      decision, makeRequest(snapshot, epoch, &epoch), &reason));
+  const ego_planner::P4GuideRequest wrong_attempt(
+    42, 7, Eigen::Vector3d(-4.0, 0.0, 0.0),
+    Eigen::Vector3d(4.0, 0.0, 0.0), true, snapshot, 10.0, epoch,
+    [&epoch]() {return epoch;}, metricsOnlyConfig());
   EXPECT_FALSE(ego_planner::p4GuideDecisionReadyForInjection(
-      decision, 42, 7, snapshot, 10.0, epoch, &reason));
+      decision, wrong_attempt, &reason));
   EXPECT_EQ(
     reason, ego_planner::P4GuideDecisionReason::REQUEST_IDENTITY_MISMATCH);
+  auto corrupt_hash = decision;
+  corrupt_hash.request_hash = "corrupt";
   EXPECT_FALSE(ego_planner::p4GuideDecisionReadyForInjection(
-      decision, 41, 7, snapshot, 10.0, epoch + 1, &reason));
+      corrupt_hash, makeRequest(snapshot, epoch, &epoch), &reason));
+  EXPECT_EQ(
+    reason, ego_planner::P4GuideDecisionReason::REQUEST_IDENTITY_MISMATCH);
+  ++epoch;
+  EXPECT_FALSE(ego_planner::p4GuideDecisionReadyForInjection(
+      decision, makeRequest(snapshot, epoch - 1, &epoch), &reason));
   EXPECT_EQ(
     reason, ego_planner::P4GuideDecisionReason::OCCUPANCY_EPOCH_CHANGED);
 }

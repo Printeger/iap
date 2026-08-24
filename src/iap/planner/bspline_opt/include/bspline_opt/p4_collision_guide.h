@@ -218,10 +218,8 @@ private:
   };
 
   bool p4GuideDecisionReadyForInjection(
-    const P4GuideDecision & decision, uint64_t planning_attempt_id,
-    uint64_t collision_segment_id,
-    const std::shared_ptr < const iap::RiskGridSnapshot > &snapshot,
-    double query_base_time_s, uint64_t live_occupancy_epoch,
+    const P4GuideDecision & decision,
+    const P4GuideRequest & expected_request,
     P4GuideDecisionReason * reason = nullptr);
 
   std::string canonicalP4GuideHash(

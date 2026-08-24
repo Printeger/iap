@@ -17,22 +17,32 @@ inline constexpr double kObstacleYMax = 1.0;
 inline constexpr double kHighCorridorCost = 20.0;
 inline constexpr double kLowCorridorCost = 1.0;
 
+inline Eigen::Vector3d start()
+{
+  return Eigen::Vector3d(-4.0, 0.0, 0.0);
+}
+
+inline Eigen::Vector3d end()
+{
+  return Eigen::Vector3d(4.0, 0.0, 0.0);
+}
+
 inline std::vector<Eigen::Vector3d> originalGuide()
 {
   return {
-    Eigen::Vector3d(-4.0, 0.0, 0.0),
+    start(),
     Eigen::Vector3d(-2.0, -2.0, 0.0),
     Eigen::Vector3d(2.0, -2.0, 0.0),
-    Eigen::Vector3d(4.0, 0.0, 0.0)};
+    end()};
 }
 
 inline std::vector<Eigen::Vector3d> riskGuide()
 {
   return {
-    Eigen::Vector3d(-4.0, 0.0, 0.0),
+    start(),
     Eigen::Vector3d(-2.0, 2.0, 0.0),
     Eigen::Vector3d(2.0, 2.0, 0.0),
-    Eigen::Vector3d(4.0, 0.0, 0.0)};
+    end()};
 }
 
 }  // namespace p4_collision_guide_fixture

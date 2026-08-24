@@ -462,13 +462,16 @@ namespace ego_planner
   }
 
   void BsplineOptimizer::setP4RiskSnapshot(std::shared_ptr<const iap::RiskGridSnapshot> snapshot,
-                                           double query_base_time_s)
+                                           double query_base_time_s,
+                                           uint64_t planning_attempt_id)
   {
     p4_config_.query_speed_mps = std::isfinite(max_vel_) && max_vel_ > 1.0e-3 ? max_vel_ : 1.0;
+    if (p4_config_.enable_risk_aware_astar)
+      p4_config_.metrics_only = true;
     p4_risk_snapshot_ = std::move(snapshot);
     p4_query_base_time_s_ = query_base_time_s;
     p4_occupancy_epoch_ = grid_map_ ? grid_map_->occupancyGeneration() : 0;
-    active_p4_attempt_id_ = p1_risk_context_.planning_attempt_id;
+    active_p4_attempt_id_ = planning_attempt_id;
     if (!a_star_)
       return;
     a_star_->setP4Config(p4_config_);
@@ -491,42 +494,90 @@ namespace ego_planner
            static_cast<uint64_t>(static_cast<uint32_t>(segment.second + 1));
   }
 
-  P4GuideDecision BsplineOptimizer::planCollisionGuideForSegment(
+  P4GuideRequest BsplineOptimizer::makeP4GuideRequest(
       const Eigen::MatrixXd &points,
-      const std::pair<int, int> &segment)
+      const std::pair<int, int> &segment) const
   {
-    if (active_p4_attempt_id_ == 0)
-    {
-      active_p4_attempt_id_ = p1_risk_context_.planning_attempt_id;
-      if (active_p4_attempt_id_ == 0)
-        active_p4_attempt_id_ = ++p4_local_attempt_seq_;
-    }
-    if (!p4_risk_snapshot_)
-    {
-      p4_query_base_time_s_ = std::isfinite(p1_risk_context_.query_base_time_s)
-                                  ? p1_risk_context_.query_base_time_s
-                                  : 0.0;
-      p4_occupancy_epoch_ = grid_map_ ? grid_map_->occupancyGeneration() : 0;
-    }
-    P4GuideRequest request(
+    return P4GuideRequest(
         active_p4_attempt_id_, p4SegmentId(segment),
         points.col(segment.first), points.col(segment.second), true,
         p4_risk_snapshot_, p4_query_base_time_s_, p4_occupancy_epoch_,
         [map = grid_map_]() { return map ? map->occupancyGeneration() : 0; },
         p4_config_);
+  }
+
+  P4GuideDecision BsplineOptimizer::planCollisionGuideForSegment(
+      const Eigen::MatrixXd &points,
+      const std::pair<int, int> &segment)
+  {
+    const P4GuideRequest request = makeP4GuideRequest(points, segment);
     P4AStarGuideSearch search(a_star_);
     P4CollisionGuidePlanner planner(search);
     return planner.planCollisionGuide(request);
   }
 
   bool BsplineOptimizer::p4DecisionReadyForInjection(
-      const P4GuideDecision &decision,
+      P4GuideDecision *decision,
+      const Eigen::MatrixXd &points,
       const std::pair<int, int> &segment) const
   {
-    return p4GuideDecisionReadyForInjection(
-        decision, active_p4_attempt_id_, p4SegmentId(segment),
-        p4_risk_snapshot_, p4_query_base_time_s_,
-        grid_map_ ? grid_map_->occupancyGeneration() : 0);
+    if (!decision)
+      return false;
+    P4GuideDecisionReason reason = P4GuideDecisionReason::NOT_EVALUATED;
+    const bool ready = ego_planner::p4GuideDecisionReadyForInjection(
+        *decision, makeP4GuideRequest(points, segment), &reason);
+    if (!ready)
+    {
+      decision->status = P4GuideDecisionStatus::DECISION_INVALID_REPLAN_REQUIRED;
+      decision->reason = reason;
+      decision->selected = P4GuideRecord{};
+      decision->selection_applied = false;
+    }
+    return ready;
+  }
+
+  bool BsplineOptimizer::collectP4GuidesForSegments(
+      const Eigen::MatrixXd &points,
+      const std::vector<std::pair<int, int>> &segments,
+      std::vector<std::vector<Eigen::Vector3d>> *guide_paths,
+      const char *logger_name)
+  {
+    if (!guide_paths)
+      return false;
+    guide_paths->clear();
+    guide_paths->reserve(segments.size());
+    for (const auto &segment : segments)
+    {
+      P4GuideDecision decision = planCollisionGuideForSegment(points, segment);
+      writeP4Csv(p4_config_, decision, rclcpp::Clock().now().seconds());
+      last_p4_guides_.push_back(std::move(decision));
+      const auto &stored = last_p4_guides_.back();
+      if (stored.status != P4GuideDecisionStatus::ORIGINAL_SELECTED ||
+          !stored.selected.returned)
+      {
+        RCLCPP_ERROR(
+            rclcpp::get_logger(logger_name),
+            "P4 guide decision failed closed: status=%s reason=%s",
+            p4GuideDecisionStatusName(stored.status),
+            p4GuideDecisionReasonName(stored.reason));
+        return false;
+      }
+      guide_paths->push_back(stored.selected.complete_path);
+    }
+    for (size_t index = 0; index < segments.size(); ++index)
+    {
+      if (!p4DecisionReadyForInjection(
+          &last_p4_guides_[index], points, segments[index]))
+      {
+        RCLCPP_ERROR(
+            rclcpp::get_logger(logger_name),
+            "P4 guide identity changed before constraint injection: reason=%s",
+            p4GuideDecisionReasonName(last_p4_guides_[index].reason));
+        guide_paths->clear();
+        return false;
+      }
+    }
+    return true;
   }
 
   // 返回多个安全的控制点集
@@ -1165,15 +1216,6 @@ namespace ego_planner
 
     if (flag_first_init)
     {
-      active_p4_attempt_id_ = p1_risk_context_.planning_attempt_id;
-      if (active_p4_attempt_id_ == 0)
-        active_p4_attempt_id_ = ++p4_local_attempt_seq_;
-      if (!p4_risk_snapshot_)
-        p4_occupancy_epoch_ = grid_map_ ? grid_map_->occupancyGeneration() : 0;
-    }
-
-    if (flag_first_init)
-    {
       cps_.clearance = dist0_;
       cps_.resize(init_points.cols());
       cps_.points = init_points;
@@ -1189,38 +1231,11 @@ namespace ego_planner
 
     /*** one immutable P4 decision per scanner-closed segment ***/
     vector<vector<Eigen::Vector3d>> a_star_pathes;
-    for (size_t i = 0; i < segment_ids.size(); ++i)
+    if (!collectP4GuidesForSegments(
+        init_points, segment_ids, &a_star_pathes, "initControlPoints"))
     {
-      P4GuideDecision decision = planCollisionGuideForSegment(init_points, segment_ids[i]);
-      writeP4Csv(p4_config_, decision, rclcpp::Clock().now().seconds());
-      last_p4_guides_.push_back(decision);
-      if (decision.status == P4GuideDecisionStatus::ORIGINAL_SELECTED &&
-          decision.selected.returned)
-      {
-        a_star_pathes.push_back(decision.selected.complete_path);
-      }
-      else
-      {
-        RCLCPP_ERROR(
-            rclcpp::get_logger("initControlPoints"),
-            "P4 guide decision failed closed: status=%s reason=%s",
-            p4GuideDecisionStatusName(decision.status),
-            p4GuideDecisionReasonName(decision.reason));
-        last_collision_scan_result_ = CollisionScanResult{};
-        return last_collision_scan_result_;
-      }
-    }
-
-    for (size_t i = 0; i < segment_ids.size(); ++i)
-    {
-      if (!p4DecisionReadyForInjection(last_p4_guides_[i], segment_ids[i]))
-      {
-        RCLCPP_ERROR(
-            rclcpp::get_logger("initControlPoints"),
-            "P4 guide identity changed before constraint injection");
-        last_collision_scan_result_ = CollisionScanResult{};
-        return last_collision_scan_result_;
-      }
+      last_collision_scan_result_ = CollisionScanResult{};
+      return last_collision_scan_result_;
     }
 
     /*** calculate bounds ***/
@@ -2036,38 +2051,12 @@ namespace ego_planner
     if (!segment_ids.empty())
     {
       vector<vector<Eigen::Vector3d>> a_star_pathes;
-      for (size_t i = 0; i < segment_ids.size(); ++i)
+      if (!collectP4GuidesForSegments(
+          cps_.points, segment_ids, &a_star_pathes,
+          "check_collision_and_rebound"))
       {
-        P4GuideDecision decision = planCollisionGuideForSegment(cps_.points, segment_ids[i]);
-        writeP4Csv(p4_config_, decision, rclcpp::Clock().now().seconds());
-        last_p4_guides_.push_back(decision);
-        if (decision.status == P4GuideDecisionStatus::ORIGINAL_SELECTED &&
-            decision.selected.returned)
-        {
-          a_star_pathes.push_back(decision.selected.complete_path);
-        }
-        else
-        {
-          RCLCPP_ERROR(
-              rclcpp::get_logger("check_collision_and_rebound"),
-              "P4 guide decision failed closed: status=%s reason=%s",
-              p4GuideDecisionStatusName(decision.status),
-              p4GuideDecisionReasonName(decision.reason));
-          force_stop_type_ = STOP_FOR_ERROR;
-          return false;
-        }
-      }
-
-      for (size_t i = 0; i < segment_ids.size(); ++i)
-      {
-        if (!p4DecisionReadyForInjection(last_p4_guides_[i], segment_ids[i]))
-        {
-          RCLCPP_ERROR(
-              rclcpp::get_logger("check_collision_and_rebound"),
-              "P4 guide identity changed before constraint injection");
-          force_stop_type_ = STOP_FOR_ERROR;
-          return false;
-        }
+        force_stop_type_ = STOP_FOR_ERROR;
+        return false;
       }
 
       for (size_t i = 1; i < segment_ids.size(); i++) // Avoid overlap

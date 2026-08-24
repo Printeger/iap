@@ -208,6 +208,13 @@ bool epochCurrent(const P4GuideRequest & request)
          request.liveOccupancyEpoch()() == request.occupancyEpoch();
 }
 
+bool requestIdentityCurrent(
+  const P4GuideRequest & request, const std::string & expected_hash)
+{
+  return request.valid() &&
+         request.canonicalIdentityHash() == expected_hash;
+}
+
 }  // namespace
 
 const char * p4GuideDecisionStatusName(P4GuideDecisionStatus status)
@@ -421,6 +428,10 @@ P4GuideDecision P4CollisionGuidePlanner::planCollisionGuide(
     decision.reason = P4GuideDecisionReason::OCCUPANCY_EPOCH_CHANGED;
     return decision;
   }
+  if (!requestIdentityCurrent(request, decision.request_hash)) {
+    decision.reason = P4GuideDecisionReason::REQUEST_IDENTITY_MISMATCH;
+    return decision;
+  }
 
   const P4GuideSearchOutcome original = search_.searchOriginal(request);
   decision.original_search_latency_ms = original.metrics.elapsed_ms;
@@ -440,6 +451,11 @@ P4GuideDecision P4CollisionGuidePlanner::planCollisionGuide(
     decision.reason = P4GuideDecisionReason::ZERO_LENGTH_GEOMETRY;
     return decision;
   }
+  if (!requestIdentityCurrent(request, decision.request_hash)) {
+    decision.reason = P4GuideDecisionReason::REQUEST_IDENTITY_MISMATCH;
+    decision.original = P4GuideRecord{};
+    return decision;
+  }
   if (!epochCurrent(request)) {
     decision.reason = P4GuideDecisionReason::OCCUPANCY_EPOCH_CHANGED;
     decision.original = P4GuideRecord{};
@@ -457,6 +473,12 @@ P4GuideDecision P4CollisionGuidePlanner::planCollisionGuide(
   const P4GuideSearchOutcome risk = search_.searchRiskAware(request);
   decision.risk_search_latency_ms = risk.metrics.elapsed_ms;
   decision.total_search_latency_ms += decision.risk_search_latency_ms;
+  if (!requestIdentityCurrent(request, decision.request_hash)) {
+    decision.reason = P4GuideDecisionReason::REQUEST_IDENTITY_MISMATCH;
+    decision.original = P4GuideRecord{};
+    decision.risk = P4GuideRecord{};
+    return decision;
+  }
   if (!epochCurrent(request)) {
     decision.reason = P4GuideDecisionReason::OCCUPANCY_EPOCH_CHANGED;
     decision.original = P4GuideRecord{};
@@ -503,10 +525,8 @@ P4GuideDecision P4CollisionGuidePlanner::planCollisionGuide(
 }
 
 bool p4GuideDecisionReadyForInjection(
-  const P4GuideDecision & decision, uint64_t planning_attempt_id,
-  uint64_t collision_segment_id,
-  const std::shared_ptr<const iap::RiskGridSnapshot> & snapshot,
-  double query_base_time_s, uint64_t live_occupancy_epoch,
+  const P4GuideDecision & decision,
+  const P4GuideRequest & expected_request,
   P4GuideDecisionReason * reason)
 {
   const auto fail = [reason](P4GuideDecisionReason value) {
@@ -522,14 +542,18 @@ bool p4GuideDecisionReadyForInjection(
   {
     return fail(P4GuideDecisionReason::REQUEST_IDENTITY_MISMATCH);
   }
-  if (decision.planning_attempt_id != planning_attempt_id ||
-    decision.collision_segment_id != collision_segment_id ||
-    !sameDouble(decision.query_base_time_s, query_base_time_s) ||
-    !sameSnapshotIdentity(decision.snapshot_owner, snapshot))
+  if (!expected_request.valid() ||
+    decision.request_hash != expected_request.canonicalIdentityHash() ||
+    decision.planning_attempt_id != expected_request.planningAttemptId() ||
+    decision.collision_segment_id != expected_request.collisionSegmentId() ||
+    !sameDouble(decision.query_base_time_s, expected_request.queryBaseTimeS()) ||
+    !sameSnapshotIdentity(decision.snapshot_owner, expected_request.snapshot()))
   {
     return fail(P4GuideDecisionReason::REQUEST_IDENTITY_MISMATCH);
   }
-  if (decision.occupancy_epoch != live_occupancy_epoch) {
+  if (!epochCurrent(expected_request) ||
+    decision.occupancy_epoch != expected_request.occupancyEpoch())
+  {
     return fail(P4GuideDecisionReason::OCCUPANCY_EPOCH_CHANGED);
   }
   if (reason) {

@@ -1102,10 +1102,9 @@ namespace ego_planner
         p1_objective_allowed || p1_fallback_reason == "metrics_only";
 
     vector<std::pair<int, int>> segments;
-    if (bspline_optimizer_->getP4RiskAStarConfig().enable_risk_aware_astar)
-    {
-      bspline_optimizer_->setP4RiskSnapshot(planning_snapshot, planning_query_base_time_s);
-    }
+    bspline_optimizer_->setP4RiskSnapshot(
+        planning_snapshot, planning_query_base_time_s,
+        planning_risk_context_.planning_attempt_id);
     const auto collision_scan =
         bspline_optimizer_->initControlPoints(ctrl_pts, true);
     if (collisionScanFailsClosed(collision_scan.status))

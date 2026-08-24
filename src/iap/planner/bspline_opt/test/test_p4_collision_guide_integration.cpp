@@ -1,4 +1,5 @@
 #include "p4_collision_scan_fixture.hpp"
+#include "p4_collision_guide_fixture.hpp"
 
 #include <bspline_opt/bspline_optimizer.h>
 #include <gtest/gtest.h>
@@ -6,10 +7,12 @@
 #include <plan_env/grid_map.h>
 #include <rclcpp/rclcpp.hpp>
 
+#include <atomic>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <iomanip>
+#include <iostream>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -76,6 +79,56 @@ struct GridMapTestAccess
       }
     }
   }
+
+  static void configureGuideFixture(GridMap * map)
+  {
+    map->mp_.map_origin_ = Eigen::Vector3d(-5.0, -3.0, -1.0);
+    map->mp_.map_size_ = Eigen::Vector3d(
+      40 * kResolutionM, 24 * kResolutionM, 8 * kResolutionM);
+    map->mp_.map_min_boundary_ = map->mp_.map_origin_;
+    map->mp_.map_max_boundary_ = map->mp_.map_origin_ + map->mp_.map_size_;
+    map->mp_.map_voxel_num_ = Eigen::Vector3i(40, 24, 8);
+    map->mp_.resolution_ = kResolutionM;
+    map->mp_.resolution_inv_ = 1.0 / kResolutionM;
+    map->mp_.obstacles_inflation_ = 0.0;
+    map->mp_.min_occupancy_log_ = 0.5;
+    map->mp_.clamp_min_log_ = -2.0;
+    map->mp_.unknown_flag_ = 0.01;
+    map->mp_.frame_id_ = "map";
+
+    const std::size_t count = static_cast<std::size_t>(40 * 24 * 8);
+    map->md_.occupancy_buffer_.assign(count, -2.01);
+    map->md_.occupancy_buffer_inflate_.assign(count, 0);
+    map->md_.occupancy_buffer_raw_cloud_.assign(count, 0);
+    for (int x_index = 0; x_index < 40; ++x_index) {
+      const double x = map->mp_.map_origin_.x() +
+        (static_cast<double>(x_index) + 0.5) * kResolutionM;
+      if (x < p4_collision_guide_fixture::kObstacleXMin ||
+        x > p4_collision_guide_fixture::kObstacleXMax)
+      {
+        continue;
+      }
+      for (int y_index = 0; y_index < 24; ++y_index) {
+        const double y = map->mp_.map_origin_.y() +
+          (static_cast<double>(y_index) + 0.5) * kResolutionM;
+        if (y < p4_collision_guide_fixture::kObstacleYMin ||
+          y > p4_collision_guide_fixture::kObstacleYMax)
+        {
+          continue;
+        }
+        for (int z_index = 0; z_index < 8; ++z_index) {
+          const Eigen::Vector3i index(x_index, y_index, z_index);
+          map->md_.occupancy_buffer_inflate_[static_cast<std::size_t>(
+              map->toAddress(index))] = 1;
+        }
+      }
+    }
+  }
+
+  static void advanceOccupancyEpoch(GridMap * map)
+  {
+    map->occupancy_update_sequence_.fetch_add(2, std::memory_order_acq_rel);
+  }
 };
 
 namespace
@@ -98,7 +151,9 @@ public:
       result.available = true;
       result.valid = true;
       result.stale = false;
-      result.hpl_pred = query.position_w.y() < 0.0 ? 20.0 : 1.0;
+      const bool high_corridor =
+        std::abs(query.position_w.x()) < 2.5 && query.position_w.y() < 0.0;
+      result.hpl_pred = high_corridor ? 20.0 : 1.0;
       result.vpl_pred = result.hpl_pred;
       result.reason = "ok";
       results->push_back(result);
@@ -134,7 +189,7 @@ std::shared_ptr<const iap::RiskGridSnapshot> makeSnapshot()
 {
   iap::RiskGridMapParams params;
   params.frame_id = "map";
-  params.lattice_anchor_w = Eigen::Vector3d(7.0, 0.0, 0.0);
+  params.lattice_anchor_w = Eigen::Vector3d::Zero();
   params.resolution_m = 0.5;
   params.size_x_m = 24.0;
   params.size_y_m = 12.0;
@@ -145,15 +200,15 @@ std::shared_ptr<const iap::RiskGridSnapshot> makeSnapshot()
   CorridorProvider provider;
   std::string reason;
   EXPECT_TRUE(grid.refreshFromProvider(
-      Eigen::Vector3d(7.0, 0.0, 0.0), 10.0, provider, &reason)) << reason;
+      Eigen::Vector3d::Zero(), 10.0, provider, &reason)) << reason;
   return grid.acquireSnapshot();
 }
 
-P4RiskAStarConfig p4Config(bool enabled)
+P4RiskAStarConfig p4Config(bool enabled, bool metrics_only = false)
 {
   P4RiskAStarConfig config;
   config.enable_risk_aware_astar = enabled;
-  config.metrics_only = enabled;
+  config.metrics_only = metrics_only;
   config.lambda_p4_risk = 0.2;
   config.max_extra_path_ratio = 1.30;
   config.query_speed_mps = 10.0;
@@ -187,15 +242,8 @@ std::unique_ptr<ego_planner::BsplineOptimizer> makeOptimizer(
   optimizer->setEnvironment(map);
   optimizer->a_star_ = std::make_shared<AStar>();
   optimizer->a_star_->initGridMap(map, Eigen::Vector3i(200, 80, 30));
-  ego_planner::BsplineOptimizer::P1PlanningRiskContext context;
-  context.snapshot = snapshot;
-  context.query_base_time_s = 10.0;
-  context.planning_attempt_id = 73;
-  optimizer->setP1PlanningRiskContext(std::move(context));
   optimizer->setP4RiskAStarConfigForTest(p4Config(p4_enabled));
-  if (p4_enabled) {
-    optimizer->setP4RiskSnapshot(snapshot, 10.0);
-  }
+  optimizer->setP4RiskSnapshot(snapshot, 10.0, 73);
   return optimizer;
 }
 
@@ -225,6 +273,60 @@ std::string constraintHash(const ego_planner::ControlPoints & points)
 
 }  // namespace
 
+TEST(P4CollisionGuideIntegration, PositiveFixtureUsesProductionAStar)
+{
+  ASSERT_EQ(p4_collision_guide_fixture::kName, "p4_collision_guide_v1");
+  const auto snapshot = makeSnapshot();
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureGuideFixture(map.get());
+  uint64_t epoch = map->occupancyGeneration();
+
+  const auto run = [&]() {
+      auto astar = std::make_shared<AStar>();
+      astar->initGridMap(map, Eigen::Vector3i(200, 100, 30));
+      ego_planner::P4AStarGuideSearch search(astar);
+      ego_planner::P4CollisionGuidePlanner planner(search);
+      const ego_planner::P4GuideRequest request(
+        91, 1, p4_collision_guide_fixture::start(),
+        p4_collision_guide_fixture::end(), true, snapshot, 10.0, epoch,
+        [&epoch]() {return epoch;}, p4Config(true, true));
+      return planner.planCollisionGuide(request);
+    };
+
+  const auto first = run();
+  ASSERT_EQ(
+    first.status, ego_planner::P4GuideDecisionStatus::ORIGINAL_SELECTED);
+  EXPECT_EQ(first.reason, ego_planner::P4GuideDecisionReason::METRICS_ONLY);
+  ASSERT_TRUE(first.original.returned);
+  ASSERT_TRUE(first.risk.returned);
+  EXPECT_TRUE(first.original.risk_profile.complete());
+  EXPECT_TRUE(first.risk.risk_profile.complete());
+  EXPECT_EQ(first.original.risk_profile.valid_count, 200U);
+  EXPECT_EQ(first.risk.risk_profile.valid_count, 200U);
+  EXPECT_LT(first.risk.risk_profile.mean, first.original.risk_profile.mean);
+  EXPECT_LT(first.risk.risk_profile.max, first.original.risk_profile.max);
+  EXPECT_LE(first.risk_original_length_ratio, 1.30);
+  EXPECT_EQ(first.selected.canonical_hash, first.original.canonical_hash);
+  EXPECT_FALSE(first.selection_applied);
+
+  const auto repeat = run();
+  EXPECT_EQ(repeat.request_hash, first.request_hash);
+  EXPECT_EQ(repeat.original.canonical_hash, first.original.canonical_hash);
+  EXPECT_EQ(repeat.risk.canonical_hash, first.risk.canonical_hash);
+  EXPECT_EQ(repeat.selected.canonical_hash, first.selected.canonical_hash);
+  std::cout << std::setprecision(17)
+            << "[p4_collision_guide_v1 actual_astar] request_hash="
+            << first.request_hash
+            << " original_hash=" << first.original.canonical_hash
+            << " risk_hash=" << first.risk.canonical_hash
+            << " selected_hash=" << first.selected.canonical_hash
+            << " original_mean=" << first.original.risk_profile.mean
+            << " original_max=" << first.original.risk_profile.max
+            << " risk_mean=" << first.risk.risk_profile.mean
+            << " risk_max=" << first.risk.risk_profile.max
+            << " ratio=" << first.risk_original_length_ratio << std::endl;
+}
+
 TEST(P4CollisionGuideIntegration, InitialAndReboundUseSameDecisionSeam)
 {
   const auto snapshot = makeSnapshot();
@@ -233,6 +335,7 @@ TEST(P4CollisionGuideIntegration, InitialAndReboundUseSameDecisionSeam)
   GridMapTestAccess::configure(
     initial_map.get(), p4_collision_fixture::kOneClosed);
   auto initial_optimizer = makeOptimizer(initial_map, snapshot, true);
+  EXPECT_TRUE(initial_optimizer->getP4RiskAStarConfig().metrics_only);
   ASSERT_TRUE(initial_optimizer->hasP4RiskSnapshotForTest());
   Eigen::MatrixXd initial_seed = seedMatrix(
     p4_collision_fixture::kOneClosed);
@@ -241,6 +344,7 @@ TEST(P4CollisionGuideIntegration, InitialAndReboundUseSameDecisionSeam)
     ego_planner::CollisionScanStatus::CLOSED_SEGMENTS);
   ASSERT_EQ(initial_optimizer->getLastP4GuideViz().size(), 1U);
   const auto initial_decision = initial_optimizer->getLastP4GuideViz().front();
+  EXPECT_EQ(initial_decision.planning_attempt_id, 73U);
   EXPECT_TRUE(initial_optimizer->hasP4RiskSnapshotForTest());
   EXPECT_EQ(initial_decision.snapshot_owner, snapshot);
 
@@ -313,4 +417,31 @@ TEST(P4CollisionGuideIntegration, MetricsOnlyConstraintHashMatchesOriginalOnly)
   EXPECT_EQ(
     constraintHash(metrics_optimizer->getControlPoints()),
     constraintHash(original_optimizer->getControlPoints()));
+}
+
+TEST(P4CollisionGuideIntegration, InjectionEpochMismatchInvalidatesDecision)
+{
+  const auto snapshot = makeSnapshot();
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configure(
+    map.get(), p4_collision_fixture::kOneClosed);
+  auto optimizer = makeOptimizer(map, snapshot, true);
+  Eigen::MatrixXd seed = seedMatrix(p4_collision_fixture::kOneClosed);
+  ASSERT_EQ(
+    optimizer->initControlPoints(seed, true).status,
+    ego_planner::CollisionScanStatus::CLOSED_SEGMENTS);
+  ASSERT_EQ(optimizer->getLastP4GuideViz().size(), 1U);
+  auto decision = optimizer->getLastP4GuideViz().front();
+
+  GridMapTestAccess::advanceOccupancyEpoch(map.get());
+  EXPECT_FALSE(optimizer->p4DecisionReadyForInjectionForTest(
+    &decision, seed, std::make_pair(3, 6)));
+  EXPECT_EQ(
+    decision.status,
+    ego_planner::P4GuideDecisionStatus::DECISION_INVALID_REPLAN_REQUIRED);
+  EXPECT_EQ(
+    decision.reason,
+    ego_planner::P4GuideDecisionReason::OCCUPANCY_EPOCH_CHANGED);
+  EXPECT_FALSE(decision.selected.returned);
+  EXPECT_FALSE(decision.selection_applied);
 }

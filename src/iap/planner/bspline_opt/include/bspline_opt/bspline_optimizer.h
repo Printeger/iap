@@ -417,7 +417,8 @@ namespace ego_planner
     void setP1PlanningRiskContext(P1PlanningRiskContext context);
     void clearRiskSnapshot();
     void setP4RiskSnapshot(std::shared_ptr<const iap::RiskGridSnapshot> snapshot,
-                           double query_base_time_s);
+                           double query_base_time_s,
+                           uint64_t planning_attempt_id);
     void clearP4RiskSnapshot();
 
     // optional inputs
@@ -476,6 +477,11 @@ namespace ego_planner
     const P4RiskAStarConfig &getP4RiskAStarConfig() const { return p4_config_; }
     const std::vector<P4GuideViz> &getLastP4GuideViz() const { return last_p4_guides_; }
     bool hasP4RiskSnapshotForTest() const { return static_cast<bool>(p4_risk_snapshot_); }
+    bool p4DecisionReadyForInjectionForTest(
+        P4GuideDecision *decision, const Eigen::MatrixXd &points,
+        const std::pair<int, int> &segment) const {
+      return p4DecisionReadyForInjection(decision, points, segment);
+    }
     const OptimizerCostBreakdown &getLastOptimizerCostBreakdown() const { return last_optimizer_cost_breakdown_; }
     const P1OptimizationTrace &getLastP1OptimizationTrace() const { return last_p1_optimization_trace_; }
     const P1BasePrepassTrace &getLastP1BasePrepassTrace() const {
@@ -617,7 +623,6 @@ namespace ego_planner
     std::shared_ptr<const iap::RiskGridSnapshot> p4_risk_snapshot_;
     double p4_query_base_time_s_{0.0};
     uint64_t p4_occupancy_epoch_{0};
-    uint64_t p4_local_attempt_seq_{0};
     uint64_t active_p4_attempt_id_{0};
     P1PlanningRiskContext p1_risk_context_;
     bool p1_debug_csv_header_written_{false};
@@ -683,11 +688,20 @@ namespace ego_planner
         const Eigen::MatrixXd &control_points, double interval_s);
     void writeP1CandidateSidecars(const P1OptimizationTrace &trace) const;
     uint64_t p4SegmentId(const std::pair<int, int> &segment) const;
+    P4GuideRequest makeP4GuideRequest(
+        const Eigen::MatrixXd &points,
+        const std::pair<int, int> &segment) const;
     P4GuideDecision planCollisionGuideForSegment(
         const Eigen::MatrixXd &points,
         const std::pair<int, int> &segment);
+    bool collectP4GuidesForSegments(
+        const Eigen::MatrixXd &points,
+        const std::vector<std::pair<int, int>> &segments,
+        std::vector<std::vector<Eigen::Vector3d>> *guide_paths,
+        const char *logger_name);
     bool p4DecisionReadyForInjection(
-        const P4GuideDecision &decision,
+        P4GuideDecision *decision,
+        const Eigen::MatrixXd &points,
         const std::pair<int, int> &segment) const;
     bool check_collision_and_rebound(void);
 

@@ -5170,3 +5170,59 @@ qualification, calibration, threshold choice, G0C/G0D, `metrics_only=false`
 qualification, risk-guide application, final B-spline lineage, P5, campaign,
 tuning or cleanup ran. General `p4.metrics_only` defaults false for existing
 semantics, but this task contains no risk-selection threshold or authority.
+
+## 2026-08-24T05:21:11Z — ICRA-039 TWO-AXIS REVIEW REPAIR
+
+IAP-RQ-423. Review fixed point is Supervisor authorization commit `b45ff3a`;
+the initial implementation is `4086ce5`. Standards found no hard documented
+violation and two maintainability findings: duplicated initial/rebound P4
+decision consumption and the five-value injection identity clump. Spec found
+four gaps: production used a P1/local surrogate rather than the manager's real
+attempt ID, request identity was not fully rechecked, the reported positive
+fixture used scripted paths rather than production A*, and the registered G0B
+attempt did not force `metrics_only=true`.
+
+The repair passes the manager's nonzero `planning_attempt_id` directly into
+the P4 context, removes the local attempt surrogate, and always establishes
+that context before collision handling even when P1 is disabled. Enabling P4
+forces the registered attempt to metrics-only while the general parameter
+default remains false. One `makeP4GuideRequest()` operation now reconstructs
+the complete identity, including endpoints and effective config; the planner
+rehashes it between searches and injection compares the complete hash plus
+typed snapshot/time/epoch identity. An injection mismatch updates the stored
+decision to `DECISION_INVALID_REPLAN_REQUIRED`, clears `selected`, leaves
+`selection_applied=false`, and returns before constraint use.
+
+Initial and rebound now call one `collectP4GuidesForSegments()` operation for
+planning, CSV consumption, decision storage and pre-injection validation,
+removing the reviewed duplication. The injection helper accepts one expected
+request object instead of five separately traveling identity values. A focused
+production-wrapper regression advances the occupancy epoch after a valid
+decision and proves the invalid/replan state and empty selection.
+
+The authoritative `p4_collision_guide_v1` positive fixture now creates its
+declared central obstacle in a real `GridMap`, supplies deterministic finite
+high/low corridor risk, and runs original then risk through production
+`P4AStarGuideSearch`. Two complete runs repeat request/original/risk/selected
+hashes `1c8abe0fa4e4136a` / `2a3380ee05f43a1f` /
+`b3789ad7a8e50365` / `2a3380ee05f43a1f`. Both profiles are 200/200 valid;
+original mean/max is `2.0295422607088973/10.500000000000002`, risk mean/max
+is `1/1.0000000000000002`, length ratio is `1.0`, and the selected guide
+remains original with no application. The scripted unit pair remains only a
+decision/fallback contract test and is no longer the reported fixture.
+
+After repair, task-local bspline and plan-manager rebuild/install pass. Final
+independent tests pass: decision 11/11, integration 4/4, collision 17/17, P1
+39/39, path-searching P4 5/5, occupancy epoch 6/6, and affected plan-manager
+CTest 9/9 with 186 active cases, one pre-existing disabled case and zero
+failures. XML/JSON parsing and `git diff --check` pass. Updated source hashes
+are decision header/source `815cf83f…dd81` / `6e492240…6596`, fixture
+`d540c23d…11af`, optimizer header/source `a3b3b5f1…a774` /
+`b2560371…a6ed`, and manager `80816299…20c5`. Frozen scan fixture remains
+`49a676a5…c788`; protected PDF remains untracked and unchanged at
+`1f07da56…844f6`.
+
+No GPU, ROS/live map, launch, runner, analyzer, capture, smoke, benchmark,
+qualification, calibration, threshold selection, G0C/G0D, risk application,
+P5, campaign, cleanup or protected-PDF handling occurred. The repaired commit
+will receive a fresh Standards/Spec review before handoff.

@@ -6,9 +6,9 @@
 	skipped="0"
 	hostname="mint-X"
 	time="2"
-	timestamp="2026-08-24T04:58:50"
+	timestamp="2026-08-24T05:19:37"
 	>
-	<testcase name="test_gate0_qualification_writer" classname="test_gate0_qualification_writer" time="0.0481467" status="run">
+	<testcase name="test_gate0_qualification_writer" classname="test_gate0_qualification_writer" time="0.044671" status="run">
 		<properties>
 			<property name="cmake_labels" value="gtest"/>
 		</properties>
@@ -23,7 +23,7 @@ Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc
 [ RUN      ] Gate0QualificationWriter.WritesStableSchemaAndEveryControlPoint
 [       OK ] Gate0QualificationWriter.WritesStableSchemaAndEveryControlPoint (0 ms)
 [ RUN      ] Gate0QualificationWriter.ConcurrentAppendsKeepOneHeaderAndCompleteRows
-[       OK ] Gate0QualificationWriter.ConcurrentAppendsKeepOneHeaderAndCompleteRows (1 ms)
+[       OK ] Gate0QualificationWriter.ConcurrentAppendsKeepOneHeaderAndCompleteRows (2 ms)
 [----------] 3 tests from Gate0QualificationWriter (2 ms total)
 
 [----------] Global test environment tear-down
@@ -34,7 +34,7 @@ Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc
 -- run_test.py: verify result file '/home/dev/ws_iap/src/iap/results/icra27/icra039/build_plan_manage/test_results/ego_planner/test_gate0_qualification_writer.gtest.xml'
 </system-out>
 	</testcase>
-	<testcase name="test_p0_risk_grid_runtime" classname="test_p0_risk_grid_runtime" time="2.07497" status="run">
+	<testcase name="test_p0_risk_grid_runtime" classname="test_p0_risk_grid_runtime" time="1.97008" status="run">
 		<properties>
 			<property name="cmake_labels" value="gtest"/>
 		</properties>
@@ -45,9 +45,9 @@ Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc
 [----------] Global test environment set-up.
 [----------] 12 tests from P0RiskGridRuntimeTest
 [ RUN      ] P0RiskGridRuntimeTest.DisabledConfigCreatesNoRuntimeObject
-[       OK ] P0RiskGridRuntimeTest.DisabledConfigCreatesNoRuntimeObject (19 ms)
+[       OK ] P0RiskGridRuntimeTest.DisabledConfigCreatesNoRuntimeObject (17 ms)
 [ RUN      ] P0RiskGridRuntimeTest.GnssEpochFreshnessDefaultIsTwoSeconds
-[       OK ] P0RiskGridRuntimeTest.GnssEpochFreshnessDefaultIsTwoSeconds (3 ms)
+[       OK ] P0RiskGridRuntimeTest.GnssEpochFreshnessDefaultIsTwoSeconds (4 ms)
 [ RUN      ] P0RiskGridRuntimeTest.GnssEpochFreshnessCanBeOverridden
 [       OK ] P0RiskGridRuntimeTest.GnssEpochFreshnessCanBeOverridden (3 ms)
 [ RUN      ] P0RiskGridRuntimeTest.PredictorParamsCanBeOverridden
@@ -59,161 +59,161 @@ Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc
 [ RUN      ] P0RiskGridRuntimeTest.P5_4FixtureParamsCanBeOverridden
 [       OK ] P0RiskGridRuntimeTest.P5_4FixtureParamsCanBeOverridden (3 ms)
 [ RUN      ] P0RiskGridRuntimeTest.P5_6FixtureParamsCanBeOverridden
-[       OK ] P0RiskGridRuntimeTest.P5_6FixtureParamsCanBeOverridden (3 ms)
+[       OK ] P0RiskGridRuntimeTest.P5_6FixtureParamsCanBeOverridden (2 ms)
 [ RUN      ] P0RiskGridRuntimeTest.InvalidPredictorSourceModeThrows
-[       OK ] P0RiskGridRuntimeTest.InvalidPredictorSourceModeThrows (3 ms)
+[       OK ] P0RiskGridRuntimeTest.InvalidPredictorSourceModeThrows (2 ms)
 [ RUN      ] P0RiskGridRuntimeTest.InvalidPredictorGnssEpochPolicyThrows
-[       OK ] P0RiskGridRuntimeTest.InvalidPredictorGnssEpochPolicyThrows (3 ms)
+[       OK ] P0RiskGridRuntimeTest.InvalidPredictorGnssEpochPolicyThrows (2 ms)
 [ RUN      ] P0RiskGridRuntimeTest.EnabledRuntimeConstructsWithInjectedProvider
-[INFO] [1787547530.564064671] [p0_enabled_runtime_test]: [p0] risk grid ready=0 stale=1 age=inf valid=0.000 unknown=1.000 gen=0 provider_queries=0 occupied_skip=0 provider_stale=0 provider_invalid=0 gnss_used=0 lidar_used=0 prior_used=0 stale_current_prior=0 regularized=0 conservative_max=0 lidar_points=0 lidar_fim_primitives=0 lidar_fim_valid_normals=0 lidar_fim_fallback=not_evaluated dominant_unknown=:0 refresh_stamp=nan grid_stamp=nan elapsed_ms=0.006 queries=0 reason=message_stamp_unavailable
+[INFO] [1787548777.327685657] [p0_enabled_runtime_test]: [p0] risk grid ready=0 stale=1 age=inf valid=0.000 unknown=1.000 gen=0 provider_queries=0 occupied_skip=0 provider_stale=0 provider_invalid=0 gnss_used=0 lidar_used=0 prior_used=0 stale_current_prior=0 regularized=0 conservative_max=0 lidar_points=0 lidar_fim_primitives=0 lidar_fim_valid_normals=0 lidar_fim_fallback=not_evaluated dominant_unknown=:0 refresh_stamp=nan grid_stamp=nan elapsed_ms=0.006 queries=0 reason=message_stamp_unavailable
 [       OK ] P0RiskGridRuntimeTest.EnabledRuntimeConstructsWithInjectedProvider (8 ms)
 [ RUN      ] P0RiskGridRuntimeTest.RawHealthTopicIsAbsoluteAndIndependentOfDebugFlag
 [       OK ] P0RiskGridRuntimeTest.RawHealthTopicIsAbsoluteAndIndependentOfDebugFlag (4 ms)
-[----------] 12 tests from P0RiskGridRuntimeTest (63 ms total)
+[----------] 12 tests from P0RiskGridRuntimeTest (60 ms total)
 
 [----------] 2 tests from SafetyRvizPublisherTest
 [ RUN      ] SafetyRvizPublisherTest.RiskGridHealthMarkerUsesProvidedStamp
 [       OK ] SafetyRvizPublisherTest.RiskGridHealthMarkerUsesProvidedStamp (0 ms)
 [ RUN      ] SafetyRvizPublisherTest.AcceptedSnapshotCloudBypassesPeriodicThrottle
-[       OK ] SafetyRvizPublisherTest.AcceptedSnapshotCloudBypassesPeriodicThrottle (4 ms)
-[----------] 2 tests from SafetyRvizPublisherTest (4 ms total)
+[       OK ] SafetyRvizPublisherTest.AcceptedSnapshotCloudBypassesPeriodicThrottle (3 ms)
+[----------] 2 tests from SafetyRvizPublisherTest (3 ms total)
 
 [----------] 65 tests from P0RiskGridRuntimeStampTest
 [ RUN      ] P0RiskGridRuntimeStampTest.P0_6FixtureProducesOccupiedSkipHealth
-[       OK ] P0RiskGridRuntimeStampTest.P0_6FixtureProducesOccupiedSkipHealth (5 ms)
+[       OK ] P0RiskGridRuntimeStampTest.P0_6FixtureProducesOccupiedSkipHealth (4 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.SlowRefreshKeepsDeadlineCadenceHealthAndInputProgress
-[       OK ] P0RiskGridRuntimeStampTest.SlowRefreshKeepsDeadlineCadenceHealthAndInputProgress (1099 ms)
+[       OK ] P0RiskGridRuntimeStampTest.SlowRefreshKeepsDeadlineCadenceHealthAndInputProgress (1100 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.HealthJsonPreservesExactSnapshotStampForEvidenceBinding
-[       OK ] P0RiskGridRuntimeStampTest.HealthJsonPreservesExactSnapshotStampForEvidenceBinding (5 ms)
+[       OK ] P0RiskGridRuntimeStampTest.HealthJsonPreservesExactSnapshotStampForEvidenceBinding (4 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.BlockedRefreshDoesNotStarveHealthAndConsecutiveStaleReports
-[       OK ] P0RiskGridRuntimeStampTest.BlockedRefreshDoesNotStarveHealthAndConsecutiveStaleReports (219 ms)
+[       OK ] P0RiskGridRuntimeStampTest.BlockedRefreshDoesNotStarveHealthAndConsecutiveStaleReports (218 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.RefreshAttemptEvidenceIsAtomicAcrossSuccessFailureAndRecovery
-[       OK ] P0RiskGridRuntimeStampTest.RefreshAttemptEvidenceIsAtomicAcrossSuccessFailureAndRecovery (6 ms)
+[       OK ] P0RiskGridRuntimeStampTest.RefreshAttemptEvidenceIsAtomicAcrossSuccessFailureAndRecovery (5 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.OdomStampIsPreferredForRefreshTime
 [       OK ] P0RiskGridRuntimeStampTest.OdomStampIsPreferredForRefreshTime (4 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.OccupancyEpochFactoryFreezesOneGenerationPerRefresh
-[       OK ] P0RiskGridRuntimeStampTest.OccupancyEpochFactoryFreezesOneGenerationPerRefresh (5 ms)
+[       OK ] P0RiskGridRuntimeStampTest.OccupancyEpochFactoryFreezesOneGenerationPerRefresh (4 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.MissingOccupancyEpochFromConfiguredFactoryFailsClosed
-[       OK ] P0RiskGridRuntimeStampTest.MissingOccupancyEpochFromConfiguredFactoryFailsClosed (4 ms)
+[       OK ] P0RiskGridRuntimeStampTest.MissingOccupancyEpochFromConfiguredFactoryFailsClosed (3 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.CurrentStampIsFallbackWhenOdomInvalid
-[       OK ] P0RiskGridRuntimeStampTest.CurrentStampIsFallbackWhenOdomInvalid (4 ms)
+[       OK ] P0RiskGridRuntimeStampTest.CurrentStampIsFallbackWhenOdomInvalid (3 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.MessageStampIsNaNWhenMessageStampsInvalid
-[       OK ] P0RiskGridRuntimeStampTest.MessageStampIsNaNWhenMessageStampsInvalid (4 ms)
+[       OK ] P0RiskGridRuntimeStampTest.MessageStampIsNaNWhenMessageStampsInvalid (3 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.SnapshotFailureReasonDistinguishesSourceStates
-[       OK ] P0RiskGridRuntimeStampTest.SnapshotFailureReasonDistinguishesSourceStates (4 ms)
+[       OK ] P0RiskGridRuntimeStampTest.SnapshotFailureReasonDistinguishesSourceStates (3 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.InputReadinessReportsSeenValidAndFreshSources
-[       OK ] P0RiskGridRuntimeStampTest.InputReadinessReportsSeenValidAndFreshSources (5 ms)
+[       OK ] P0RiskGridRuntimeStampTest.InputReadinessReportsSeenValidAndFreshSources (3 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.StaleOdomOrCurrentPreventsSnapshot
-[       OK ] P0RiskGridRuntimeStampTest.StaleOdomOrCurrentPreventsSnapshot (4 ms)
+[       OK ] P0RiskGridRuntimeStampTest.StaleOdomOrCurrentPreventsSnapshot (3 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.GnssRangeCallbackCompletesWithoutRecursiveLock
 [       OK ] P0RiskGridRuntimeStampTest.GnssRangeCallbackCompletesWithoutRecursiveLock (4 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.NonNullInvalidGnssCallbackPublishesOneAbsentGeneration
 [       OK ] P0RiskGridRuntimeStampTest.NonNullInvalidGnssCallbackPublishesOneAbsentGeneration (4 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.InvalidGnssCallbackDuringProviderWorkAbortsAndLaterEpochRecovers
-[       OK ] P0RiskGridRuntimeStampTest.InvalidGnssCallbackDuringProviderWorkAbortsAndLaterEpochRecovers (6 ms)
+[       OK ] P0RiskGridRuntimeStampTest.InvalidGnssCallbackDuringProviderWorkAbortsAndLaterEpochRecovers (5 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.OptionalExplicitAbsentToValidCallbackPublishesCapturedAbsence
-[       OK ] P0RiskGridRuntimeStampTest.OptionalExplicitAbsentToValidCallbackPublishesCapturedAbsence (5 ms)
+[       OK ] P0RiskGridRuntimeStampTest.OptionalExplicitAbsentToValidCallbackPublishesCapturedAbsence (4 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.AutoExplicitAbsentToAbsentCallbackPublishesCapturedAbsence
-[       OK ] P0RiskGridRuntimeStampTest.AutoExplicitAbsentToAbsentCallbackPublishesCapturedAbsence (5 ms)
+[       OK ] P0RiskGridRuntimeStampTest.AutoExplicitAbsentToAbsentCallbackPublishesCapturedAbsence (4 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.NeverSeenOptionalAndAutoPublishCapturedAbsenceOnFirstCallback
-[       OK ] P0RiskGridRuntimeStampTest.NeverSeenOptionalAndAutoPublishCapturedAbsenceOnFirstCallback (11 ms)
+[       OK ] P0RiskGridRuntimeStampTest.NeverSeenOptionalAndAutoPublishCapturedAbsenceOnFirstCallback (8 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.InactiveGnssCallbacksDoNotAbortLidarOnlyOrDisabledRefresh
-[       OK ] P0RiskGridRuntimeStampTest.InactiveGnssCallbacksDoNotAbortLidarOnlyOrDisabledRefresh (10 ms)
+[       OK ] P0RiskGridRuntimeStampTest.InactiveGnssCallbacksDoNotAbortLidarOnlyOrDisabledRefresh (9 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.OptionalAndAutoNeverReuseEpochClearedByInvalidCallback
-[       OK ] P0RiskGridRuntimeStampTest.OptionalAndAutoNeverReuseEpochClearedByInvalidCallback (11 ms)
+[       OK ] P0RiskGridRuntimeStampTest.OptionalAndAutoNeverReuseEpochClearedByInvalidCallback (8 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.GnssOriginMapValidityMatrixIsTruthful
-[       OK ] P0RiskGridRuntimeStampTest.GnssOriginMapValidityMatrixIsTruthful (5 ms)
+[       OK ] P0RiskGridRuntimeStampTest.GnssOriginMapValidityMatrixIsTruthful (3 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.RefreshSnapshotUsesMessageStamp
-[       OK ] P0RiskGridRuntimeStampTest.RefreshSnapshotUsesMessageStamp (4 ms)
+[       OK ] P0RiskGridRuntimeStampTest.RefreshSnapshotUsesMessageStamp (3 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.UseCurrentIntegrityPriorFalseOmitsLambdaBase
-[       OK ] P0RiskGridRuntimeStampTest.UseCurrentIntegrityPriorFalseOmitsLambdaBase (4 ms)
+[       OK ] P0RiskGridRuntimeStampTest.UseCurrentIntegrityPriorFalseOmitsLambdaBase (3 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.PointCloudXyzParsingStoresFiniteMapPoints
-[       OK ] P0RiskGridRuntimeStampTest.PointCloudXyzParsingStoresFiniteMapPoints (4 ms)
+[       OK ] P0RiskGridRuntimeStampTest.PointCloudXyzParsingStoresFiniteMapPoints (3 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.PointCloudNormalFieldsGenerateFimPrimitives
 [       OK ] P0RiskGridRuntimeStampTest.PointCloudNormalFieldsGenerateFimPrimitives (4 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.PointCloudWithoutNormalsGeneratesPcaFimPrimitives
 [       OK ] P0RiskGridRuntimeStampTest.PointCloudWithoutNormalsGeneratesPcaFimPrimitives (4 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.InvalidOrEmptyPointCloudClearsLidarPredictorInputs
-[       OK ] P0RiskGridRuntimeStampTest.InvalidOrEmptyPointCloudClearsLidarPredictorInputs (4 ms)
+[       OK ] P0RiskGridRuntimeStampTest.InvalidOrEmptyPointCloudClearsLidarPredictorInputs (3 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.LidarOnlyInvalidGnssCallbackStillRebuildsCurrentHorizons
-[       OK ] P0RiskGridRuntimeStampTest.LidarOnlyInvalidGnssCallbackStillRebuildsCurrentHorizons (9 ms)
+[       OK ] P0RiskGridRuntimeStampTest.LidarOnlyInvalidGnssCallbackStillRebuildsCurrentHorizons (8 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.LidarOnlyDisabledWithFimPrimitivesUsesLidarAndNotGnss
-[       OK ] P0RiskGridRuntimeStampTest.LidarOnlyDisabledWithFimPrimitivesUsesLidarAndNotGnss (5 ms)
+[       OK ] P0RiskGridRuntimeStampTest.LidarOnlyDisabledWithFimPrimitivesUsesLidarAndNotGnss (4 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.FusionAutoMissingGnssEpochUsesLidarAndNotStaleField
-[       OK ] P0RiskGridRuntimeStampTest.FusionAutoMissingGnssEpochUsesLidarAndNotStaleField (5 ms)
+[       OK ] P0RiskGridRuntimeStampTest.FusionAutoMissingGnssEpochUsesLidarAndNotStaleField (4 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.StaleCurrentPriorWithLidarGoodPreventsSnapshot
-[       OK ] P0RiskGridRuntimeStampTest.StaleCurrentPriorWithLidarGoodPreventsSnapshot (4 ms)
+[       OK ] P0RiskGridRuntimeStampTest.StaleCurrentPriorWithLidarGoodPreventsSnapshot (3 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.StaleCurrentWithNoUsablePredictorSourcePreventsSnapshot
-[       OK ] P0RiskGridRuntimeStampTest.StaleCurrentWithNoUsablePredictorSourcePreventsSnapshot (4 ms)
+[       OK ] P0RiskGridRuntimeStampTest.StaleCurrentWithNoUsablePredictorSourcePreventsSnapshot (3 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.LidarOnlyDisabledMissingGnssEpochDoesNotMakeFrameStale
-[       OK ] P0RiskGridRuntimeStampTest.LidarOnlyDisabledMissingGnssEpochDoesNotMakeFrameStale (5 ms)
+[       OK ] P0RiskGridRuntimeStampTest.LidarOnlyDisabledMissingGnssEpochDoesNotMakeFrameStale (4 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.ProductionProviderBindsVersionedImmutableGnssOccupancyEpoch
 [       OK ] P0RiskGridRuntimeStampTest.ProductionProviderBindsVersionedImmutableGnssOccupancyEpoch (5 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.NewerLiveSourcesDoNotRevokeCapturedProductionTransaction
-[       OK ] P0RiskGridRuntimeStampTest.NewerLiveSourcesDoNotRevokeCapturedProductionTransaction (6 ms)
+[       OK ] P0RiskGridRuntimeStampTest.NewerLiveSourcesDoNotRevokeCapturedProductionTransaction (4 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.PositiveHorizonEarlyFailureKeepsPreviousGeneration
-[       OK ] P0RiskGridRuntimeStampTest.PositiveHorizonEarlyFailureKeepsPreviousGeneration (5 ms)
+[       OK ] P0RiskGridRuntimeStampTest.PositiveHorizonEarlyFailureKeepsPreviousGeneration (4 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.WithinRefreshSpatialDedupReportsExactProductionCounts
-[       OK ] P0RiskGridRuntimeStampTest.WithinRefreshSpatialDedupReportsExactProductionCounts (5 ms)
+[       OK ] P0RiskGridRuntimeStampTest.WithinRefreshSpatialDedupReportsExactProductionCounts (4 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.ProductionProviderReusesSpatialAdviceAcrossPriorOnlyRefresh
-[       OK ] P0RiskGridRuntimeStampTest.ProductionProviderReusesSpatialAdviceAcrossPriorOnlyRefresh (9 ms)
+[       OK ] P0RiskGridRuntimeStampTest.ProductionProviderReusesSpatialAdviceAcrossPriorOnlyRefresh (7 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.NewerIdenticalRawOccupancyRetainsAllLosAndUsesCurrentDiagnostics
-[       OK ] P0RiskGridRuntimeStampTest.NewerIdenticalRawOccupancyRetainsAllLosAndUsesCurrentDiagnostics (9 ms)
+[       OK ] P0RiskGridRuntimeStampTest.NewerIdenticalRawOccupancyRetainsAllLosAndUsesCurrentDiagnostics (8 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.AddedRemovedAndMixedRawDeltaEachForceCompleteFreshEquivalentRebuild
-[       OK ] P0RiskGridRuntimeStampTest.AddedRemovedAndMixedRawDeltaEachForceCompleteFreshEquivalentRebuild (28 ms)
+[       OK ] P0RiskGridRuntimeStampTest.AddedRemovedAndMixedRawDeltaEachForceCompleteFreshEquivalentRebuild (22 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.SameVersionContradictionFailsButNewerVersionDoesNotRevokeCapture
-[       OK ] P0RiskGridRuntimeStampTest.SameVersionContradictionFailsButNewerVersionDoesNotRevokeCapture (5 ms)
+[       OK ] P0RiskGridRuntimeStampTest.SameVersionContradictionFailsButNewerVersionDoesNotRevokeCapture (4 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.NewerPriorGnssAndLidarVersionsPublishThenApplyOnNextRefresh
-[       OK ] P0RiskGridRuntimeStampTest.NewerPriorGnssAndLidarVersionsPublishThenApplyOnNextRefresh (18 ms)
+[       OK ] P0RiskGridRuntimeStampTest.NewerPriorGnssAndLidarVersionsPublishThenApplyOnNextRefresh (15 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.ChangedProducerWithCoincidentGenerationCannotReuseLosContent
-[       OK ] P0RiskGridRuntimeStampTest.ChangedProducerWithCoincidentGenerationCannotReuseLosContent (6 ms)
+[       OK ] P0RiskGridRuntimeStampTest.ChangedProducerWithCoincidentGenerationCannotReuseLosContent (4 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.DisabledProductionSourcesDoNotEraseStationarySpatialReuse
-[       OK ] P0RiskGridRuntimeStampTest.DisabledProductionSourcesDoNotEraseStationarySpatialReuse (17 ms)
+[       OK ] P0RiskGridRuntimeStampTest.DisabledProductionSourcesDoNotEraseStationarySpatialReuse (14 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.StationarySubVoxelAndOneVoxelRollMatchFreshFullForWorkersOneTwoFour
-[       OK ] P0RiskGridRuntimeStampTest.StationarySubVoxelAndOneVoxelRollMatchFreshFullForWorkersOneTwoFour (58 ms)
+[       OK ] P0RiskGridRuntimeStampTest.StationarySubVoxelAndOneVoxelRollMatchFreshFullForWorkersOneTwoFour (49 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.NewerOccupancyGenerationPublishesCaptureThenAppearsNextRefresh
-[       OK ] P0RiskGridRuntimeStampTest.NewerOccupancyGenerationPublishesCaptureThenAppearsNextRefresh (5 ms)
+[       OK ] P0RiskGridRuntimeStampTest.NewerOccupancyGenerationPublishesCaptureThenAppearsNextRefresh (4 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.RematerializedLosWithStableSourceVersionUsesOneCapturePerRefresh
-[       OK ] P0RiskGridRuntimeStampTest.RematerializedLosWithStableSourceVersionUsesOneCapturePerRefresh (5 ms)
+[       OK ] P0RiskGridRuntimeStampTest.RematerializedLosWithStableSourceVersionUsesOneCapturePerRefresh (4 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.MissingActiveLidarFailsBeforeBatchWithTypedAttemptDiagnostic
-[       OK ] P0RiskGridRuntimeStampTest.MissingActiveLidarFailsBeforeBatchWithTypedAttemptDiagnostic (5 ms)
+[       OK ] P0RiskGridRuntimeStampTest.MissingActiveLidarFailsBeforeBatchWithTypedAttemptDiagnostic (4 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.RequiredGnssAndZeroCurrentProvenancePublishTypedAttemptFailure
-[       OK ] P0RiskGridRuntimeStampTest.RequiredGnssAndZeroCurrentProvenancePublishTypedAttemptFailure (32 ms)
+[       OK ] P0RiskGridRuntimeStampTest.RequiredGnssAndZeroCurrentProvenancePublishTypedAttemptFailure (25 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.ExpiredStableOccupancyOwnerDuringBatchFailsClosed
-[       OK ] P0RiskGridRuntimeStampTest.ExpiredStableOccupancyOwnerDuringBatchFailsClosed (5 ms)
+[       OK ] P0RiskGridRuntimeStampTest.ExpiredStableOccupancyOwnerDuringBatchFailsClosed (3 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.ProductionSameGenerationStableOccupancyOwnerReplacementFailsClosed
-[       OK ] P0RiskGridRuntimeStampTest.ProductionSameGenerationStableOccupancyOwnerReplacementFailsClosed (5 ms)
+[       OK ] P0RiskGridRuntimeStampTest.ProductionSameGenerationStableOccupancyOwnerReplacementFailsClosed (4 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.ProductionGnssTtlRetainsThenExpiresOriginalSpatialEpoch
-[       OK ] P0RiskGridRuntimeStampTest.ProductionGnssTtlRetainsThenExpiresOriginalSpatialEpoch (6 ms)
+[       OK ] P0RiskGridRuntimeStampTest.ProductionGnssTtlRetainsThenExpiresOriginalSpatialEpoch (5 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.ProductionWatchdogAdvancesOnlyAfterSuccessfulFullPublication
-[       OK ] P0RiskGridRuntimeStampTest.ProductionWatchdogAdvancesOnlyAfterSuccessfulFullPublication (6 ms)
+[       OK ] P0RiskGridRuntimeStampTest.ProductionWatchdogAdvancesOnlyAfterSuccessfulFullPublication (5 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.ProductionLegacyCurrentTtlRetainsTdopThenExpiresAndRejectsDiscreteChange
-[       OK ] P0RiskGridRuntimeStampTest.ProductionLegacyCurrentTtlRetainsTdopThenExpiresAndRejectsDiscreteChange (6 ms)
+[       OK ] P0RiskGridRuntimeStampTest.ProductionLegacyCurrentTtlRetainsTdopThenExpiresAndRejectsDiscreteChange (4 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.NewerPriorGenerationDoesNotRevokeCapturedProviderBatch
-[       OK ] P0RiskGridRuntimeStampTest.NewerPriorGenerationDoesNotRevokeCapturedProviderBatch (5 ms)
+[       OK ] P0RiskGridRuntimeStampTest.NewerPriorGenerationDoesNotRevokeCapturedProviderBatch (3 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.NewerGnssEpochPublishesCaptureThenInvalidatesNextRefresh
-[       OK ] P0RiskGridRuntimeStampTest.NewerGnssEpochPublishesCaptureThenInvalidatesNextRefresh (5 ms)
+[       OK ] P0RiskGridRuntimeStampTest.NewerGnssEpochPublishesCaptureThenInvalidatesNextRefresh (4 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.LidarOwnerChangeDuringProductionRefreshKeepsPreviousGeneration
-[       OK ] P0RiskGridRuntimeStampTest.LidarOwnerChangeDuringProductionRefreshKeepsPreviousGeneration (5 ms)
+[       OK ] P0RiskGridRuntimeStampTest.LidarOwnerChangeDuringProductionRefreshKeepsPreviousGeneration (4 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.NewerLidarGenerationPublishesCaptureThenInvalidatesNextRefresh
-[       OK ] P0RiskGridRuntimeStampTest.NewerLidarGenerationPublishesCaptureThenInvalidatesNextRefresh (5 ms)
+[       OK ] P0RiskGridRuntimeStampTest.NewerLidarGenerationPublishesCaptureThenInvalidatesNextRefresh (4 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.DisabledLegacyMapOwnerChangeDoesNotAbortProductionRefresh
-[       OK ] P0RiskGridRuntimeStampTest.DisabledLegacyMapOwnerChangeDoesNotAbortProductionRefresh (5 ms)
+[       OK ] P0RiskGridRuntimeStampTest.DisabledLegacyMapOwnerChangeDoesNotAbortProductionRefresh (4 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.MissingStaleOrWrongFrameOccupancyEpochKeepsPreviousGeneration
-[       OK ] P0RiskGridRuntimeStampTest.MissingStaleOrWrongFrameOccupancyEpochKeepsPreviousGeneration (5 ms)
+[       OK ] P0RiskGridRuntimeStampTest.MissingStaleOrWrongFrameOccupancyEpochKeepsPreviousGeneration (4 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.OccupancyFreshnessUsesMessageClockAndRejectsFutureOrStaleEpochs
-[       OK ] P0RiskGridRuntimeStampTest.OccupancyFreshnessUsesMessageClockAndRejectsFutureOrStaleEpochs (12 ms)
+[       OK ] P0RiskGridRuntimeStampTest.OccupancyFreshnessUsesMessageClockAndRejectsFutureOrStaleEpochs (11 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.MissingStaleOrInvalidGrowthPriorKeepsPreviousGeneration
-[       OK ] P0RiskGridRuntimeStampTest.MissingStaleOrInvalidGrowthPriorKeepsPreviousGeneration (5 ms)
+[       OK ] P0RiskGridRuntimeStampTest.MissingStaleOrInvalidGrowthPriorKeepsPreviousGeneration (4 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.FrozenPointZeroOneSigmaReachesPredictionAndGrowsMonotonically
-[       OK ] P0RiskGridRuntimeStampTest.FrozenPointZeroOneSigmaReachesPredictionAndGrowsMonotonically (9 ms)
+[       OK ] P0RiskGridRuntimeStampTest.FrozenPointZeroOneSigmaReachesPredictionAndGrowsMonotonically (8 ms)
 [ RUN      ] P0RiskGridRuntimeStampTest.MapLosAndGrowthWorkersOneTwoFourAreScientificallyEquivalent
-[       OK ] P0RiskGridRuntimeStampTest.MapLosAndGrowthWorkersOneTwoFourAreScientificallyEquivalent (17 ms)
+[       OK ] P0RiskGridRuntimeStampTest.MapLosAndGrowthWorkersOneTwoFourAreScientificallyEquivalent (13 ms)
 [ DISABLED ] P0RiskGridRuntimeStampTest.DISABLED_ICRA020_ProductionRuntimeWorkerScalingProfile
-[----------] 65 tests from P0RiskGridRuntimeStampTest (1837 ms total)
+[----------] 65 tests from P0RiskGridRuntimeStampTest (1739 ms total)
 
 [----------] Global test environment tear-down
-[==========] 79 tests from 3 test suites ran. (1905 ms total)
+[==========] 79 tests from 3 test suites ran. (1804 ms total)
 [  PASSED  ] 79 tests.
 
   YOU HAVE 1 DISABLED TEST
@@ -223,7 +223,7 @@ Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc
 -- run_test.py: verify result file '/home/dev/ws_iap/src/iap/results/icra27/icra039/build_plan_manage/test_results/ego_planner/test_p0_risk_grid_runtime.gtest.xml'
 </system-out>
 	</testcase>
-	<testcase name="test_p0_occupancy_epoch_adapter" classname="test_p0_occupancy_epoch_adapter" time="0.0547964" status="run">
+	<testcase name="test_p0_occupancy_epoch_adapter" classname="test_p0_occupancy_epoch_adapter" time="0.0477043" status="run">
 		<properties>
 			<property name="cmake_labels" value="gtest"/>
 		</properties>
@@ -257,7 +257,7 @@ Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc
 -- run_test.py: verify result file '/home/dev/ws_iap/src/iap/results/icra27/icra039/build_plan_manage/test_results/ego_planner/test_p0_occupancy_epoch_adapter.gtest.xml'
 </system-out>
 	</testcase>
-	<testcase name="test_p1_replan_admission" classname="test_p1_replan_admission" time="0.0440991" status="run">
+	<testcase name="test_p1_replan_admission" classname="test_p1_replan_admission" time="0.0400572" status="run">
 		<properties>
 			<property name="cmake_labels" value="gtest"/>
 		</properties>
@@ -289,7 +289,7 @@ Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc
 -- run_test.py: verify result file '/home/dev/ws_iap/src/iap/results/icra27/icra039/build_plan_manage/test_results/ego_planner/test_p1_replan_admission.gtest.xml'
 </system-out>
 	</testcase>
-	<testcase name="test_p1_candidate_selection" classname="test_p1_candidate_selection" time="0.0443292" status="run">
+	<testcase name="test_p1_candidate_selection" classname="test_p1_candidate_selection" time="0.0383927" status="run">
 		<properties>
 			<property name="cmake_labels" value="gtest"/>
 		</properties>
@@ -343,7 +343,7 @@ Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc
 -- run_test.py: verify result file '/home/dev/ws_iap/src/iap/results/icra27/icra039/build_plan_manage/test_results/ego_planner/test_p1_candidate_selection.gtest.xml'
 </system-out>
 	</testcase>
-	<testcase name="test_p5_runtime_integrity_gate" classname="test_p5_runtime_integrity_gate" time="0.200215" status="run">
+	<testcase name="test_p5_runtime_integrity_gate" classname="test_p5_runtime_integrity_gate" time="0.190471" status="run">
 		<properties>
 			<property name="cmake_labels" value="gtest"/>
 		</properties>
@@ -367,7 +367,7 @@ Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc
 
 [----------] 28 tests from P5RuntimeIntegrityGateTest
 [ RUN      ] P5RuntimeIntegrityGateTest.DisabledConfigCreatesNoRuntimeObject
-[       OK ] P5RuntimeIntegrityGateTest.DisabledConfigCreatesNoRuntimeObject (18 ms)
+[       OK ] P5RuntimeIntegrityGateTest.DisabledConfigCreatesNoRuntimeObject (15 ms)
 [ RUN      ] P5RuntimeIntegrityGateTest.CurrentStaleEscalates
 [       OK ] P5RuntimeIntegrityGateTest.CurrentStaleEscalates (0 ms)
 [ RUN      ] P5RuntimeIntegrityGateTest.CurrentInvalidIsExplicit
@@ -419,20 +419,20 @@ Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc
 [ RUN      ] P5RuntimeIntegrityGateTest.NoFutureTrajectoryWindowIsDiagnosticUnknown
 [       OK ] P5RuntimeIntegrityGateTest.NoFutureTrajectoryWindowIsDiagnosticUnknown (0 ms)
 [ RUN      ] P5RuntimeIntegrityGateTest.PublishedStatusJsonIncludesSampleDiagnostics
-[       OK ] P5RuntimeIntegrityGateTest.PublishedStatusJsonIncludesSampleDiagnostics (14 ms)
+[       OK ] P5RuntimeIntegrityGateTest.PublishedStatusJsonIncludesSampleDiagnostics (12 ms)
 [ RUN      ] P5RuntimeIntegrityGateTest.StatusCarriesVizSamplesAndMarkers
 [       OK ] P5RuntimeIntegrityGateTest.StatusCarriesVizSamplesAndMarkers (0 ms)
-[----------] 28 tests from P5RuntimeIntegrityGateTest (35 ms total)
+[----------] 28 tests from P5RuntimeIntegrityGateTest (30 ms total)
 
 [----------] Global test environment tear-down
-[==========] 33 tests from 2 test suites ran. (35 ms total)
+[==========] 33 tests from 2 test suites ran. (30 ms total)
 [  PASSED  ] 33 tests.
 -- run_test.py: return code 0
 -- run_test.py: inject classname prefix into gtest result file '/home/dev/ws_iap/src/iap/results/icra27/icra039/build_plan_manage/test_results/ego_planner/test_p5_runtime_integrity_gate.gtest.xml'
 -- run_test.py: verify result file '/home/dev/ws_iap/src/iap/results/icra27/icra039/build_plan_manage/test_results/ego_planner/test_p5_runtime_integrity_gate.gtest.xml'
 </system-out>
 	</testcase>
-	<testcase name="test_p2_candidate_ranking" classname="test_p2_candidate_ranking" time="0.061005" status="run">
+	<testcase name="test_p2_candidate_ranking" classname="test_p2_candidate_ranking" time="0.0512965" status="run">
 		<properties>
 			<property name="cmake_labels" value="gtest"/>
 		</properties>
@@ -464,7 +464,7 @@ Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc
 -- run_test.py: verify result file '/home/dev/ws_iap/src/iap/results/icra27/icra039/build_plan_manage/test_results/ego_planner/test_p2_candidate_ranking.gtest.xml'
 </system-out>
 	</testcase>
-	<testcase name="test_p3_reference_bias" classname="test_p3_reference_bias" time="0.142832" status="run">
+	<testcase name="test_p3_reference_bias" classname="test_p3_reference_bias" time="0.124881" status="run">
 		<properties>
 			<property name="cmake_labels" value="gtest"/>
 		</properties>
@@ -477,32 +477,32 @@ Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc
 [ RUN      ] P3ReferenceBiasTest.NoSnapshotReturnsNominalLocalTarget
 [       OK ] P3ReferenceBiasTest.NoSnapshotReturnsNominalLocalTarget (0 ms)
 [ RUN      ] P3ReferenceBiasTest.OccupiedLocalCandidatesReturnNominalTarget
-[       OK ] P3ReferenceBiasTest.OccupiedLocalCandidatesReturnNominalTarget (11 ms)
+[       OK ] P3ReferenceBiasTest.OccupiedLocalCandidatesReturnNominalTarget (10 ms)
 [ RUN      ] P3ReferenceBiasTest.LowerRiskLocalCandidateIsSelected
-[       OK ] P3ReferenceBiasTest.LowerRiskLocalCandidateIsSelected (10 ms)
+[       OK ] P3ReferenceBiasTest.LowerRiskLocalCandidateIsSelected (9 ms)
 [ RUN      ] P3ReferenceBiasTest.NoBacktrackingRejectsLowerRiskBehindNominalTarget
-[       OK ] P3ReferenceBiasTest.NoBacktrackingRejectsLowerRiskBehindNominalTarget (10 ms)
+[       OK ] P3ReferenceBiasTest.NoBacktrackingRejectsLowerRiskBehindNominalTarget (9 ms)
 [ RUN      ] P3ReferenceBiasTest.InsufficientCoveragePreventsGlobalBias
-[       OK ] P3ReferenceBiasTest.InsufficientCoveragePreventsGlobalBias (12 ms)
+[       OK ] P3ReferenceBiasTest.InsufficientCoveragePreventsGlobalBias (10 ms)
 [ RUN      ] P3ReferenceBiasTest.TemporalHorizonInsufficientPreventsGlobalBias
-[       OK ] P3ReferenceBiasTest.TemporalHorizonInsufficientPreventsGlobalBias (11 ms)
+[       OK ] P3ReferenceBiasTest.TemporalHorizonInsufficientPreventsGlobalBias (8 ms)
 [ RUN      ] P3ReferenceBiasTest.EnoughCoverageGeneratesBiasedWaypoints
-[       OK ] P3ReferenceBiasTest.EnoughCoverageGeneratesBiasedWaypoints (10 ms)
+[       OK ] P3ReferenceBiasTest.EnoughCoverageGeneratesBiasedWaypoints (8 ms)
 [ RUN      ] P3ReferenceBiasTest.DetourRatioFallback
-[       OK ] P3ReferenceBiasTest.DetourRatioFallback (10 ms)
+[       OK ] P3ReferenceBiasTest.DetourRatioFallback (9 ms)
 [ RUN      ] P3ReferenceBiasTest.DisabledModesPreserveNominalBehavior
-[       OK ] P3ReferenceBiasTest.DisabledModesPreserveNominalBehavior (10 ms)
-[----------] 9 tests from P3ReferenceBiasTest (87 ms total)
+[       OK ] P3ReferenceBiasTest.DisabledModesPreserveNominalBehavior (9 ms)
+[----------] 9 tests from P3ReferenceBiasTest (76 ms total)
 
 [----------] Global test environment tear-down
-[==========] 9 tests from 1 test suite ran. (87 ms total)
+[==========] 9 tests from 1 test suite ran. (76 ms total)
 [  PASSED  ] 9 tests.
 -- run_test.py: return code 0
 -- run_test.py: inject classname prefix into gtest result file '/home/dev/ws_iap/src/iap/results/icra27/icra039/build_plan_manage/test_results/ego_planner/test_p3_reference_bias.gtest.xml'
 -- run_test.py: verify result file '/home/dev/ws_iap/src/iap/results/icra27/icra039/build_plan_manage/test_results/ego_planner/test_p3_reference_bias.gtest.xml'
 </system-out>
 	</testcase>
-	<testcase name="test_planning_risk_context" classname="test_planning_risk_context" time="0.310227" status="run">
+	<testcase name="test_planning_risk_context" classname="test_planning_risk_context" time="0.29886" status="run">
 		<properties>
 			<property name="cmake_labels" value="gtest"/>
 		</properties>
@@ -518,10 +518,10 @@ Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc
 [RiskContext] planning_generation_id=0, query_base_time_s=42.5, snapshot_available=0
 [       OK ] PlanningRiskContextTest.BeginWithoutP0RuntimeCreatesDeterministicNullContext (0 ms)
 [ RUN      ] PlanningRiskContextTest.TrajectoryCommandSurvivesLateSubscriber
-[       OK ] PlanningRiskContextTest.TrajectoryCommandSurvivesLateSubscriber (103 ms)
+[       OK ] PlanningRiskContextTest.TrajectoryCommandSurvivesLateSubscriber (101 ms)
 [ RUN      ] PlanningRiskContextTest.StaleContextFailsClosedAgainstItsImmutableSnapshot
 [       OK ] PlanningRiskContextTest.StaleContextFailsClosedAgainstItsImmutableSnapshot (0 ms)
-[----------] 4 tests from PlanningRiskContextTest (103 ms total)
+[----------] 4 tests from PlanningRiskContextTest (101 ms total)
 
 [----------] 3 tests from P1AcceptedContextValidationTest
 [ RUN      ] P1AcceptedContextValidationTest.SeparatesStrictSpatialInteriorFromTemporalHorizon
@@ -577,7 +577,7 @@ Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc
 [----------] 1 test from PlanningTimeProviderTest (0 ms total)
 
 [----------] Global test environment tear-down
-[==========] 26 tests from 4 test suites ran. (103 ms total)
+[==========] 26 tests from 4 test suites ran. (101 ms total)
 [  PASSED  ] 26 tests.
 -- run_test.py: return code 0
 -- run_test.py: inject classname prefix into gtest result file '/home/dev/ws_iap/src/iap/results/icra27/icra039/build_plan_manage/test_results/ego_planner/test_planning_risk_context.gtest.xml'

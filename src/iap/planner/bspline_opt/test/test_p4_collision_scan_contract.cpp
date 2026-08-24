@@ -163,6 +163,7 @@ std::unique_ptr<ego_planner::BsplineOptimizer> makeOptimizer(
     optimizer->a_star_ = std::make_shared<AStar>();
     optimizer->a_star_->initGridMap(map, Eigen::Vector3i(80, 40, 20));
   }
+  optimizer->setP4RiskSnapshot(nullptr, 0.0, 17);
   return optimizer;
 }
 
