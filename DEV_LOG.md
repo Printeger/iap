@@ -5023,3 +5023,150 @@ original/risk guide, profile/scoring/selection, lineage or P5 work. No GPU,
 ROS/live flow, launch, runner, analyzer, smoke, benchmark, qualification,
 campaign, tuning, cleanup or protected-PDF handling occurred. Control returns
 only to SUPERVISOR review.
+
+## 2026-08-24T04:24:09Z — ICRA-039 START
+
+IAP-RQ-423. Synchronized `dev/icra` at Supervisor authorization HEAD
+`b45ff3ad633fc7ce3ab2418f774073a6eb3a2d16`: initial status contained only
+the protected untracked PDF, fetch passed and divergence was `0 0`, so no pull
+ran. `AGENT_STATE.md` confirms DEEPSEEK, `TASK_READY`, ICRA-039 and P4_G0B.
+
+Exact allowlist: new focused P4 decision header/source/test files under
+`bspline_opt`; optimizer header/source/CMake; only the smallest required P4
+search/config/identity files and focused tests in `path_searching`; only the
+smallest attempt-context, occupancy-epoch/snapshot-lifetime integration and
+focused tests in `plan_manage`; compact ICRA-039 evidence; `DEV_LOG.md`;
+`docs/CHANGES.md`; and `docs/TRACEABILITY.md`. Supervisor-owned, requirement,
+scope/gate, P0/P1/P2/P3/P5, launch/config/analyzer/capture, historical,
+fixture/PDF and external-repository files remain forbidden.
+
+The production interface will be one immutable-request decision module:
+`P4GuideDecision planCollisionGuide(const P4GuideRequest&)`. The request binds
+nonzero attempt/segment IDs, scanner-verified finite free endpoints, one
+shared immutable snapshot and its generation/stamp/frame, finite query-base
+time, frozen cumulative-distance/query-speed timing, one occupancy generation
+with a live recheck, and the complete effective P4 config including
+`metrics_only`. The schema-versioned decision owns original/risk/selected
+complete guides, deterministic canonical hashes, exactly 200 equal-arc final
+samples per returned guide, complete risk profiles, length/ratio/search
+latencies, request/snapshot/time/epoch identity, typed status/reason and
+`selection_applied`.
+
+Identity model: both searches use exactly the same request object. Original
+search runs first. Occupancy generation is checked before search, between
+searches, after search and immediately before constraint injection; attempt,
+segment, snapshot and query-base identity are compared again before injection.
+The decision retains the snapshot owner through metrics-only original-guide
+injection. Guide hashes canonicalize schema, point count and finite IEEE value
+text; equal-arc query time is `query_base + cumulative_distance/query_speed`.
+Duplicate/zero-length geometry and identity changes fail closed.
+
+The deterministic `p4_collision_guide_v1` fixture will use one frozen central
+obstacle and two free corridors with reproducible finite high/low `c_pi`.
+Positive evidence requires both same-event searches, 200/200 valid profiles,
+strictly lower risk-guide mean/max, ratio no greater than the unchanged 1.30
+cap, repeat-stable hashes, original selection, `selection_applied=false` and
+control-constraint identity equal to original-only. Focused negatives cover
+original failure; missing, unknown, stale and non-finite risk; risk failure and
+the existing 0.2-second timeout; incomplete support; ratio failure; occupancy
+epoch and request-identity changes; and duplicate/zero-length geometry.
+
+Fallback matrix: original failure is typed planner failure with no risk
+substitution; occupancy/request mismatch is typed decision-invalid/replan with
+neither guide injected; all risk availability/profile/search/timeout/ratio
+failures retain the current-epoch original with the exact typed reason. G0B
+uses `metrics_only=true`; even a better risk guide leaves original selected
+and uninjected. The general parameter default remains false, but this task
+never authorizes risk-guide application because thresholds do not exist.
+Initial and rebound closed paths will use the same seam; open/invalid and the
+ICRA-038 interpolation-only stop remain earlier boundaries.
+
+Initial hashes are optimizer header
+`61bd3f096644661413ed4ea4fa77cc6d4b6a8072ca0fcb4aebcb281a6a29fbd0`,
+source `bc2b559ba1d12c585a4432cc04a43cde11f18085919d36b3c8243850662c124e`,
+bspline CMake `7ab22ff037959447d0e81f6421a8710a295d74ae0c37fa4bdd300786a89450d3`,
+A* header/source
+`105049b2407b6f7eb4346de118863c8e92021fa3a8d7275be460f5209f4c4653` /
+`de25fdf86cf5b0bbed75c2b22ba16538b6a71cd364606ef8f8c447b16faa625c`,
+planner manager `ef4bd0ecdc5029900a7bb33607a1418a7d167fca68c0e1dfae4a560883a4b5ac`,
+frozen scan fixture
+`49a676a5ff51538ab961c814409f6c2dfb7ba4679a861d4e8e94cc7d5679c788`
+and protected PDF
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+
+Stop line: finish the metrics-only deep seam, deterministic tests, fresh
+task-local builds/linkage, compact evidence/docs, review and push, then report
+`P4_G0B_METRICS_ONLY_READY_FOR_REVIEW`. No threshold selection, calibration,
+G0C/G0D, `metrics_only=false` qualification, risk-guide application,
+composite/live profile, final B-spline lineage, P5 integration, GPU, ROS/live
+flow, launch, runner/analyzer, smoke, benchmark, campaign, tuning, cleanup,
+Gate promotion or next-task selection is authorized.
+
+## 2026-08-24T05:01:42Z — ICRA-039 IMPLEMENTATION AND FINAL TEST EVIDENCE
+
+IAP-RQ-423. Added the deep production seam
+`P4GuideDecision planCollisionGuide(const P4GuideRequest&)`, schema
+`p4_collision_guide_decision_v1`, and made both initial and rebound closed
+collision consumers use it. The decision alone owns request/snapshot/time/
+epoch identity, original/risk/selected complete guides, canonical hashes,
+exact 200-point equal-arc profiles, lengths/ratio, separate/total search
+latency and typed status/reason. CSV and RViz now consume this decision.
+
+Original A* is always first. Original failure is planner failure; an occupancy
+epoch change is decision-invalid/replan-required with neither guide injected;
+missing/unknown/stale/non-finite/incomplete risk, risk failure/timeout and
+ratio failure retain the current-epoch original. Both equal-arc sampling and
+query time use cumulative guide distance. The existing 0.2-second timeout,
+1.30 ratio cap, occupied-before-risk order and heuristic authority are
+unchanged. Duplicate/zero-length complete-guide geometry fails closed.
+
+The deterministic `p4_collision_guide_v1` positive pair reports request hash
+`7bd26f07409447dc`, original/selected hash `41088c073625ccfb` and risk hash
+`1de1b8a73bb252bb`, repeat-identically. Both profiles are 200/200 valid;
+original mean/max is `19.6051/20`, risk mean/max is `1.3949/10.5`, and ratio
+is `1.0`. Despite the lower risk guide, metrics-only status selects original,
+`selection_applied=false`, and the injected constraint hash equals an
+original-only run. Integration proves initial/rebound share the seam and keep
+the snapshot owner alive through injection.
+
+Fresh task-local IAP, plan-env, path-searching, bspline and plan-manager
+configure/build/install completed. A development-only all-file uncrustify
+attempt rewrote legacy formatting and removed semicolons from aggregate
+returns; its first incremental bspline/plan-manager rebuild failed at those
+syntax sites. The semicolons were restored and all unrelated formatting noise
+was mechanically removed before the final source/build/test state. Final
+`set -e` path-searching, bspline and plan-manager rebuild/install exits are 0.
+
+Final independent tests are decision 11/11, initial/rebound integration 2/2,
+collision 17/17, P1 39/39, path-searching P4 5/5, occupancy epoch 6/6 and
+affected plan-manager CTest 9/9: 186 active cases pass and one pre-existing
+profile remains disabled. Focused new-file formatting and `git diff --check`
+pass. Compact result/linkage JSON and GTest/CTest XML are repository-local.
+
+CMake/direct linkage resolves ICRA-039 IAP/typesupport, plan-env,
+path-searching, bspline and plan-manager products. Explicit retained
+transitive dependencies are ROS Jazzy plus workspace `traj_utils` and
+`gnss_comm`; workspace-default IAP, deleted-task, build-tree, missing product
+library and non-toolchain RUNPATH matches are zero. Installed optimizer,
+decision and A* headers match source. Plan-env's fresh configure warning that
+explicit IAP/typesupport cache variables are unused is disclosed because that
+package does not consume IAP.
+
+Final source hashes: decision header/source
+`0c2cf58b9bcc3ce19de2aecdb1434b9299c8a1f7eb24fdbd92ca6f9d692af86e` /
+`4bace70897440e24c5875ccdf681fd18a3403a693013839edb4c367c77b15214`;
+fixture `fa1b5a2cf1614869bfb817321949ec93e6abd562ced5d340c8989019e5449caa`;
+optimizer header/source
+`b938cf3568c8c0e1f4718594dbc5294eebfde605d0ea983589d3e919460c6ad5` /
+`74a081445519b02a8556e51bb8fc38c48ddff809a128e7bd33e9b7c724e8e1a3`;
+A* header/source
+`8b6dcc17a25740ec392b6595de7f72e09a9a098e01536c94cdeb0d317faef286` /
+`7d9acb5f081c4315cc5cf497b96039b5032648c4f3b86ea259f16c7a253e27f5`.
+The frozen scan fixture remains `49a676a5…c788`; the untracked PDF remains
+unchanged and unstaged at `1f07da5631…844f6`.
+
+No GPU, ROS/live map, launch, runner, analyzer, capture, smoke, benchmark,
+qualification, calibration, threshold choice, G0C/G0D, `metrics_only=false`
+qualification, risk-guide application, final B-spline lineage, P5, campaign,
+tuning or cleanup ran. General `p4.metrics_only` defaults false for existing
+semantics, but this task contains no risk-selection threshold or authority.

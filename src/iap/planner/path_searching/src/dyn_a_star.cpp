@@ -168,7 +168,7 @@ double AStar::queryTimeForEdge(const GridNodePtr current, double geometric_cost)
     const double speed = std::isfinite(p4_config_.query_speed_mps) && p4_config_.query_speed_mps > 1.0e-3
                              ? p4_config_.query_speed_mps
                              : 1.0;
-    const double distance_m = current ? (Index2Coord(current->index) - search_start_pt_).norm() +
+    const double distance_m = current ? current->travelDistance +
                                             geometric_cost * step_size_
                                       : geometric_cost * step_size_;
     return risk_query_base_time_s_ + distance_m / speed;
@@ -236,6 +236,7 @@ bool AStar::astarSearchImpl(const double step_size, Vector3d start_pt, Vector3d 
     startPtr->index = start_idx;
     startPtr->rounds = rounds_;
     startPtr->gScore = 0;
+    startPtr->travelDistance = 0.0;
     startPtr->fScore = getHeu(startPtr, endPtr);
     startPtr->state = GridNode::OPENSET; //put start node in open set
     startPtr->cameFrom = NULL;
@@ -321,6 +322,7 @@ bool AStar::astarSearchImpl(const double step_size, Vector3d start_pt, Vector3d 
                         neighborPtr->state = GridNode::OPENSET;
                         neighborPtr->cameFrom = current;
                         neighborPtr->gScore = tentative_gScore;
+                        neighborPtr->travelDistance = current->travelDistance + static_cost * step_size_;
                         neighborPtr->fScore = tentative_gScore + getHeu(neighborPtr, endPtr);
                         openSet_.push(neighborPtr); //put neighbor in open set and record it.
                     }
@@ -328,6 +330,7 @@ bool AStar::astarSearchImpl(const double step_size, Vector3d start_pt, Vector3d 
                     { //in open set and need update
                         neighborPtr->cameFrom = current;
                         neighborPtr->gScore = tentative_gScore;
+                        neighborPtr->travelDistance = current->travelDistance + static_cost * step_size_;
                         neighborPtr->fScore = tentative_gScore + getHeu(neighborPtr, endPtr);
                     }
                 }

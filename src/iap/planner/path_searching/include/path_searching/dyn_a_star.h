@@ -5,6 +5,7 @@
 #include <rclcpp/rclcpp.hpp>
 #include <Eigen/Eigen>
 #include <plan_env/grid_map.h>
+#include <cmath>
 #include <cstdint>
 #include <memory>
 #include <queue>
@@ -18,6 +19,7 @@ class RiskGridSnapshot;
 struct P4RiskAStarConfig
 {
 	bool enable_risk_aware_astar = false;
+	bool metrics_only = false;
 	double lambda_p4_risk = 0.05;
 	double risk_cost_max = 100.0;
 	double unknown_edge_penalty = 1.0;
@@ -66,6 +68,7 @@ struct GridNode
 	Eigen::Vector3i index;
 
 	double gScore{inf}, fScore{inf};
+	double travelDistance{0.0};
 	GridNodePtr cameFrom{NULL};
 };
 
@@ -149,6 +152,13 @@ public:
 		return edgeCostWithRisk(current_pos, neighbor_pos, geometric_cost, query_time_s);
 	}
 	bool isOccupiedForTest(const Eigen::Vector3d &pos) { return checkOccupancy(pos); }
+	double queryTimeFromCumulativeDistanceForTest(double distance_m) const
+	{
+		const double speed = std::isfinite(p4_config_.query_speed_mps) && p4_config_.query_speed_mps > 1.0e-3
+		                         ? p4_config_.query_speed_mps
+		                         : 1.0;
+		return risk_query_base_time_s_ + distance_m / speed;
+	}
 };
 
 inline double AStar::getHeu(GridNodePtr node1, GridNodePtr node2)

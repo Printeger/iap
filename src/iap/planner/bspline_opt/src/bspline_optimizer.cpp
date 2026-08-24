@@ -169,14 +169,6 @@ namespace ego_planner
       });
     }
 
-    double pathLength(const std::vector<Eigen::Vector3d> &path)
-    {
-      double length = 0.0;
-      for (size_t i = 1; i < path.size(); ++i)
-        length += (path[i] - path[i - 1]).norm();
-      return length;
-    }
-
     std::string siblingPath(const std::string &path, const std::string &filename)
     {
       const auto slash = path.find_last_of("/\\");
@@ -228,10 +220,8 @@ namespace ego_planner
     }
 
     void writeP4Csv(const P4RiskAStarConfig &config,
-                    const P4AStarMetrics &metrics,
-                    double stamp,
-                    uint64_t astar_call_id,
-                    int segment_id)
+                    const P4GuideDecision &decision,
+                    double stamp)
     {
       if (!config.enable_risk_aware_astar || !config.debug_csv_enable || config.debug_csv_path.empty())
         return;
@@ -245,25 +235,41 @@ namespace ego_planner
         return;
       if (write_header)
       {
-        csv << "stamp,astar_call_id,segment_id,risk_enabled,snapshot_generation_id,"
-               "expanded_nodes,risk_query_count,unknown_count,occupied_reject_count,"
-               "original_path_length,risk_path_length,path_length_ratio,path_mean_cost,"
-               "path_max_cost,elapsed_ms,fallback_reason\n";
+        csv << "schema_version,stamp,planning_attempt_id,collision_segment_id,"
+               "request_hash,snapshot_generation_id,snapshot_stamp_s,snapshot_frame,"
+               "query_base_time_s,occupancy_epoch,status,reason,selection_applied,"
+               "original_hash,risk_hash,selected_hash,original_sample_count,"
+               "original_valid_count,original_unknown_count,original_stale_count,"
+               "original_non_finite_count,original_mean,original_max,risk_sample_count,"
+               "risk_valid_count,risk_unknown_count,risk_stale_count,risk_non_finite_count,"
+               "risk_mean,risk_max,original_path_length,risk_path_length,path_length_ratio,"
+               "original_search_latency_ms,risk_search_latency_ms,total_search_latency_ms\n";
       }
-      csv << stamp << ',' << astar_call_id << ',' << segment_id << ','
-          << (metrics.risk_enabled ? 1 : 0) << ','
-          << metrics.snapshot_generation_id << ','
-          << metrics.expanded_nodes << ','
-          << metrics.risk_query_count << ','
-          << metrics.unknown_count << ','
-          << metrics.occupied_reject_count << ','
-          << metrics.original_path_length << ','
-          << metrics.risk_path_length << ','
-          << metrics.path_length_ratio << ','
-          << metrics.path_mean_cost << ','
-          << metrics.path_max_cost << ','
-          << metrics.elapsed_ms << ','
-          << metrics.fallback_reason << '\n';
+      const auto &original = decision.original.risk_profile;
+      const auto &risk = decision.risk.risk_profile;
+      csv << decision.schema_version << ',' << stamp << ','
+          << decision.planning_attempt_id << ','
+          << decision.collision_segment_id << ',' << decision.request_hash << ','
+          << decision.snapshot_generation << ',' << decision.snapshot_stamp_s << ','
+          << decision.snapshot_frame << ',' << decision.query_base_time_s << ','
+          << decision.occupancy_epoch << ','
+          << p4GuideDecisionStatusName(decision.status) << ','
+          << p4GuideDecisionReasonName(decision.reason) << ','
+          << (decision.selection_applied ? 1 : 0) << ','
+          << decision.original.canonical_hash << ','
+          << decision.risk.canonical_hash << ','
+          << decision.selected.canonical_hash << ','
+          << original.sample_count << ',' << original.valid_count << ','
+          << original.unknown_count << ',' << original.stale_count << ','
+          << original.non_finite_count << ',' << original.mean << ','
+          << original.max << ',' << risk.sample_count << ',' << risk.valid_count << ','
+          << risk.unknown_count << ',' << risk.stale_count << ','
+          << risk.non_finite_count << ',' << risk.mean << ',' << risk.max << ','
+          << decision.original.length_m << ',' << decision.risk.length_m << ','
+          << decision.risk_original_length_ratio << ','
+          << decision.original_search_latency_ms << ','
+          << decision.risk_search_latency_ms << ','
+          << decision.total_search_latency_ms << '\n';
     }
   } // namespace
 
@@ -304,6 +310,7 @@ namespace ego_planner
     node->declare_parameter("p1.smooth_cvar_alpha", 0.90);
     node->declare_parameter("p1.normalization_budget_fraction", 0.30);
     node->declare_parameter("p4.enable_risk_aware_astar", false);
+    node->declare_parameter("p4.metrics_only", false);
     node->declare_parameter("p4.lambda_p4_risk", 0.05);
     node->declare_parameter("p4.risk_cost_max", 100.0);
     node->declare_parameter("p4.unknown_edge_penalty", 1.0);
@@ -391,6 +398,7 @@ namespace ego_planner
       p1_config_.objective_aggregation_mode = "fixed_200_mean";
     }
     node->get_parameter("p4.enable_risk_aware_astar", p4_config_.enable_risk_aware_astar);
+    node->get_parameter("p4.metrics_only", p4_config_.metrics_only);
     node->get_parameter("p4.lambda_p4_risk", p4_config_.lambda_p4_risk);
     node->get_parameter("p4.risk_cost_max", p4_config_.risk_cost_max);
     node->get_parameter("p4.unknown_edge_penalty", p4_config_.unknown_edge_penalty);
@@ -456,18 +464,69 @@ namespace ego_planner
   void BsplineOptimizer::setP4RiskSnapshot(std::shared_ptr<const iap::RiskGridSnapshot> snapshot,
                                            double query_base_time_s)
   {
+    p4_config_.query_speed_mps = std::isfinite(max_vel_) && max_vel_ > 1.0e-3 ? max_vel_ : 1.0;
+    p4_risk_snapshot_ = std::move(snapshot);
+    p4_query_base_time_s_ = query_base_time_s;
+    p4_occupancy_epoch_ = grid_map_ ? grid_map_->occupancyGeneration() : 0;
+    active_p4_attempt_id_ = p1_risk_context_.planning_attempt_id;
     if (!a_star_)
       return;
-    p4_config_.query_speed_mps = std::isfinite(max_vel_) && max_vel_ > 1.0e-3 ? max_vel_ : 1.0;
     a_star_->setP4Config(p4_config_);
-    a_star_->setRiskSnapshot(std::move(snapshot), query_base_time_s);
+    a_star_->setRiskSnapshot(p4_risk_snapshot_, query_base_time_s);
   }
 
   void BsplineOptimizer::clearP4RiskSnapshot()
   {
-    if (!a_star_)
-      return;
-    a_star_->clearRiskSnapshot();
+    p4_risk_snapshot_.reset();
+    p4_query_base_time_s_ = 0.0;
+    p4_occupancy_epoch_ = 0;
+    active_p4_attempt_id_ = 0;
+    if (a_star_)
+      a_star_->clearRiskSnapshot();
+  }
+
+  uint64_t BsplineOptimizer::p4SegmentId(const std::pair<int, int> &segment) const
+  {
+    return (static_cast<uint64_t>(static_cast<uint32_t>(segment.first + 1)) << 32) |
+           static_cast<uint64_t>(static_cast<uint32_t>(segment.second + 1));
+  }
+
+  P4GuideDecision BsplineOptimizer::planCollisionGuideForSegment(
+      const Eigen::MatrixXd &points,
+      const std::pair<int, int> &segment)
+  {
+    if (active_p4_attempt_id_ == 0)
+    {
+      active_p4_attempt_id_ = p1_risk_context_.planning_attempt_id;
+      if (active_p4_attempt_id_ == 0)
+        active_p4_attempt_id_ = ++p4_local_attempt_seq_;
+    }
+    if (!p4_risk_snapshot_)
+    {
+      p4_query_base_time_s_ = std::isfinite(p1_risk_context_.query_base_time_s)
+                                  ? p1_risk_context_.query_base_time_s
+                                  : 0.0;
+      p4_occupancy_epoch_ = grid_map_ ? grid_map_->occupancyGeneration() : 0;
+    }
+    P4GuideRequest request(
+        active_p4_attempt_id_, p4SegmentId(segment),
+        points.col(segment.first), points.col(segment.second), true,
+        p4_risk_snapshot_, p4_query_base_time_s_, p4_occupancy_epoch_,
+        [map = grid_map_]() { return map ? map->occupancyGeneration() : 0; },
+        p4_config_);
+    P4AStarGuideSearch search(a_star_);
+    P4CollisionGuidePlanner planner(search);
+    return planner.planCollisionGuide(request);
+  }
+
+  bool BsplineOptimizer::p4DecisionReadyForInjection(
+      const P4GuideDecision &decision,
+      const std::pair<int, int> &segment) const
+  {
+    return p4GuideDecisionReadyForInjection(
+        decision, active_p4_attempt_id_, p4SegmentId(segment),
+        p4_risk_snapshot_, p4_query_base_time_s_,
+        grid_map_ ? grid_map_->occupancyGeneration() : 0);
   }
 
   // 返回多个安全的控制点集
@@ -1106,6 +1165,15 @@ namespace ego_planner
 
     if (flag_first_init)
     {
+      active_p4_attempt_id_ = p1_risk_context_.planning_attempt_id;
+      if (active_p4_attempt_id_ == 0)
+        active_p4_attempt_id_ = ++p4_local_attempt_seq_;
+      if (!p4_risk_snapshot_)
+        p4_occupancy_epoch_ = grid_map_ ? grid_map_->occupancyGeneration() : 0;
+    }
+
+    if (flag_first_init)
+    {
       cps_.clearance = dist0_;
       cps_.resize(init_points.cols());
       cps_.points = init_points;
@@ -1119,21 +1187,37 @@ namespace ego_planner
         last_collision_scan_result_.closed_segments;
     bool occ = false;
 
-    /*** a star search ***/
-    // 在每个无障碍片段 segment_ids 的起点和终点之间寻找一条路径
+    /*** one immutable P4 decision per scanner-closed segment ***/
     vector<vector<Eigen::Vector3d>> a_star_pathes;
     for (size_t i = 0; i < segment_ids.size(); ++i)
     {
-      // cout << "in=" << in.transpose() << " out=" << out.transpose() << endl;
-      Eigen::Vector3d in(init_points.col(segment_ids[i].first)), out(init_points.col(segment_ids[i].second));
-      if (a_star_ &&
-          a_star_->AstarSearch(/*(in-out).norm()/10+0.05*/ 0.1, in, out))
+      P4GuideDecision decision = planCollisionGuideForSegment(init_points, segment_ids[i]);
+      writeP4Csv(p4_config_, decision, rclcpp::Clock().now().seconds());
+      last_p4_guides_.push_back(decision);
+      if (decision.status == P4GuideDecisionStatus::ORIGINAL_SELECTED &&
+          decision.selected.returned)
       {
-        a_star_pathes.push_back(a_star_->getPath());
+        a_star_pathes.push_back(decision.selected.complete_path);
       }
       else
       {
-        RCLCPP_ERROR(rclcpp::get_logger("initControlPoints"), "a star error, force return!");
+        RCLCPP_ERROR(
+            rclcpp::get_logger("initControlPoints"),
+            "P4 guide decision failed closed: status=%s reason=%s",
+            p4GuideDecisionStatusName(decision.status),
+            p4GuideDecisionReasonName(decision.reason));
+        last_collision_scan_result_ = CollisionScanResult{};
+        return last_collision_scan_result_;
+      }
+    }
+
+    for (size_t i = 0; i < segment_ids.size(); ++i)
+    {
+      if (!p4DecisionReadyForInjection(last_p4_guides_[i], segment_ids[i]))
+      {
+        RCLCPP_ERROR(
+            rclcpp::get_logger("initControlPoints"),
+            "P4 guide identity changed before constraint injection");
         last_collision_scan_result_ = CollisionScanResult{};
         return last_collision_scan_result_;
       }
@@ -1951,87 +2035,38 @@ namespace ego_planner
 
     if (!segment_ids.empty())
     {
-      static uint64_t p4_astar_call_id = 0;
       vector<vector<Eigen::Vector3d>> a_star_pathes;
       for (size_t i = 0; i < segment_ids.size(); ++i)
       {
-        /*** a star search ***/
-        Eigen::Vector3d in(cps_.points.col(segment_ids[i].first)), out(cps_.points.col(segment_ids[i].second));
-        const uint64_t astar_call_id = ++p4_astar_call_id;
-        const bool original_success = a_star_->AstarSearchOriginal(/*(in-out).norm()/10+0.05*/ 0.1, in, out);
-        if (original_success)
+        P4GuideDecision decision = planCollisionGuideForSegment(cps_.points, segment_ids[i]);
+        writeP4Csv(p4_config_, decision, rclcpp::Clock().now().seconds());
+        last_p4_guides_.push_back(decision);
+        if (decision.status == P4GuideDecisionStatus::ORIGINAL_SELECTED &&
+            decision.selected.returned)
         {
-          const std::vector<Eigen::Vector3d> original_path = a_star_->getPath();
-          std::vector<Eigen::Vector3d> risk_path;
-          std::vector<Eigen::Vector3d> selected_path = original_path;
-          bool selected_risk_path = false;
-          P4AStarMetrics metrics = a_star_->getLastP4Metrics();
-          metrics.original_path_length = pathLength(original_path);
-          metrics.risk_path_length = 0.0;
-          metrics.path_length_ratio = 1.0;
-          metrics.risk_enabled = false;
-
-          if (!p4_config_.enable_risk_aware_astar)
-          {
-            metrics.fallback_reason = "p4_disabled";
-          }
-          else if (!a_star_->hasRiskSnapshot())
-          {
-            metrics.fallback_reason = p4_config_.fallback_to_original_when_risk_not_ready
-                                          ? "snapshot_unavailable"
-                                          : "snapshot_unavailable";
-          }
-          else
-          {
-            const bool risk_success = a_star_->AstarSearchRiskAware(0.1, in, out);
-            P4AStarMetrics risk_metrics = a_star_->getLastP4Metrics();
-            risk_metrics.original_path_length = metrics.original_path_length;
-            risk_metrics.risk_enabled = true;
-            if (risk_success)
-            {
-              risk_path = a_star_->getPath();
-              risk_metrics.risk_path_length = pathLength(risk_path);
-              risk_metrics.path_length_ratio =
-                  metrics.original_path_length > 1.0e-9
-                      ? risk_metrics.risk_path_length / metrics.original_path_length
-                      : 1.0;
-              if (risk_metrics.path_length_ratio > p4_config_.max_extra_path_ratio)
-              {
-                risk_metrics.fallback_reason = "path_length_ratio_exceeded";
-              }
-              else
-              {
-                selected_path = risk_path;
-                selected_risk_path = true;
-                risk_metrics.fallback_reason = "risk_path_selected";
-              }
-            }
-            else
-            {
-              risk_metrics.risk_path_length = 0.0;
-              risk_metrics.path_length_ratio = 0.0;
-              risk_metrics.fallback_reason = "risk_search_failed";
-            }
-            metrics = risk_metrics;
-          }
-          a_star_->recordP4GuideMetrics(metrics);
-          P4GuideViz guide;
-          guide.original_path = original_path;
-          guide.risk_path = risk_path;
-          guide.selected_path = selected_path;
-          guide.segment_start = in;
-          guide.segment_end = out;
-          guide.metrics = metrics;
-          guide.risk_selected = selected_risk_path;
-          last_p4_guides_.push_back(guide);
-          writeP4Csv(p4_config_, metrics, rclcpp::Clock().now().seconds(), astar_call_id, static_cast<int>(i));
-          a_star_pathes.push_back(selected_path);
+          a_star_pathes.push_back(decision.selected.complete_path);
         }
         else
         {
-          RCLCPP_ERROR(rclcpp::get_logger("check_collision_and_rebound"), "a star error");
-          segment_ids.erase(segment_ids.begin() + i);
-          i--;
+          RCLCPP_ERROR(
+              rclcpp::get_logger("check_collision_and_rebound"),
+              "P4 guide decision failed closed: status=%s reason=%s",
+              p4GuideDecisionStatusName(decision.status),
+              p4GuideDecisionReasonName(decision.reason));
+          force_stop_type_ = STOP_FOR_ERROR;
+          return false;
+        }
+      }
+
+      for (size_t i = 0; i < segment_ids.size(); ++i)
+      {
+        if (!p4DecisionReadyForInjection(last_p4_guides_[i], segment_ids[i]))
+        {
+          RCLCPP_ERROR(
+              rclcpp::get_logger("check_collision_and_rebound"),
+              "P4 guide identity changed before constraint injection");
+          force_stop_type_ = STOP_FOR_ERROR;
+          return false;
         }
       }
 

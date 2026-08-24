@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites tests="2" failures="0" disabled="0" errors="0" time="0.14" timestamp="2026-08-24T04:58:49.307" name="AllTests">
+  <testsuite name="P4CollisionGuideIntegration" tests="2" failures="0" disabled="0" skipped="0" errors="0" time="0.14" timestamp="2026-08-24T04:58:49.307">
+    <testcase name="InitialAndReboundUseSameDecisionSeam" file="/home/dev/ws_iap/src/iap/src/iap/planner/bspline_opt/test/test_p4_collision_guide_integration.cpp" line="228" status="run" result="completed" time="0.091" timestamp="2026-08-24T04:58:49.307" classname="P4CollisionGuideIntegration" />
+    <testcase name="MetricsOnlyConstraintHashMatchesOriginalOnly" file="/home/dev/ws_iap/src/iap/src/iap/planner/bspline_opt/test/test_p4_collision_guide_integration.cpp" line="286" status="run" result="completed" time="0.048" timestamp="2026-08-24T04:58:49.399" classname="P4CollisionGuideIntegration" />
+  </testsuite>
+</testsuites>

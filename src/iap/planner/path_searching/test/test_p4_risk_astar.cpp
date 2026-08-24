@@ -150,3 +150,13 @@ TEST(P4RiskAStarTest, PathLengthRatioFallbackMetricsCanBeRecorded) {
   EXPECT_GT(astar.getLastP4Metrics().path_length_ratio, 1.3);
 }
 
+TEST(P4RiskAStarTest, QueryTimeUsesFrozenCumulativeTravelDistance) {
+  AStar astar;
+  auto config = enabledConfig();
+  config.query_speed_mps = 2.0;
+  astar.setP4Config(config);
+  astar.setRiskSnapshot(nullptr, 10.0);
+
+  EXPECT_DOUBLE_EQ(astar.queryTimeFromCumulativeDistanceForTest(0.0), 10.0);
+  EXPECT_DOUBLE_EQ(astar.queryTimeFromCumulativeDistanceForTest(7.0), 13.5);
+}

@@ -3,6 +3,31 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(icra-039-p4-g0b-dual-guide-decision): IAP-RQ-423 — add one production `P4GuideDecision planCollisionGuide(const P4GuideRequest&)` seam shared by initial and rebound closed-collision handling. The immutable request binds attempt/segment, scanner endpoints, snapshot owner/generation/stamp/frame, query base, cumulative-distance time, occupancy epoch/live recheck and full P4 config. Schema `p4_collision_guide_decision_v1` owns complete original/risk/selected guides and deterministic hashes, exactly 200 equal-arc samples and profiles, lengths/ratio, latencies and typed outcome. Original A* runs first; original failure is planner failure, epoch mismatch is invalid/replan, and risk availability/profile/search/timeout/ratio defects retain the current-epoch original with exact reasons. G0B metrics-only never applies risk: the deterministic `p4_collision_guide_v1` pair is 200/200 for both guides, risk mean/max `1.3949/10.5` is strictly below original `19.6051/20`, ratio is `1.0`, selected hash equals original `41088c073625ccfb`, and constraint hash matches original-only. Fresh task-local builds pass decision 11/11, integration 2/2, collision 17/17, P1 39/39, path P4 5/5, occupancy 6/6 and plan-manager 9/9 (186 active plus one existing disabled). Linkage and static audits pass. No risk application, thresholds/calibration/G0C, GPU, ROS/live flow, smoke, benchmark, qualification or P5 work ran; result is `P4_G0B_METRICS_ONLY_READY_FOR_REVIEW`.
+
+Reproduce the deterministic ICRA-039 selection from the repository root (no
+live flow):
+
+```bash
+source /opt/ros/jazzy/setup.bash
+icra039_root="$PWD/results/icra27/icra039"
+cmake --build "$icra039_root/build_path_searching" --parallel 2
+cmake --install "$icra039_root/build_path_searching"
+cmake --build "$icra039_root/build_bspline" --parallel 2
+cmake --install "$icra039_root/build_bspline"
+cmake --build "$icra039_root/build_plan_manage" --parallel 2
+cmake --install "$icra039_root/build_plan_manage"
+export LD_LIBRARY_PATH="$icra039_root/install_plan_manage/lib:$icra039_root/install_bspline/lib:$icra039_root/install_path_searching/lib:$icra039_root/install_plan_env/lib:$icra039_root/install_iap/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+"$icra039_root/build_bspline/test_p4_collision_guide"
+"$icra039_root/build_bspline/test_p4_collision_guide_integration"
+"$icra039_root/build_bspline/test_p4_collision_scan_contract"
+"$icra039_root/build_bspline/test_p1_integrity_cost"
+"$icra039_root/build_path_searching/test_p4_risk_astar"
+"$icra039_root/build_plan_env/test_grid_map_occupancy_epoch"
+ctest --test-dir "$icra039_root/build_plan_manage" --output-on-failure \
+  -R '^(test_gate0_qualification_writer|test_p0_risk_grid_runtime|test_p0_occupancy_epoch_adapter|test_p1_replan_admission|test_p1_candidate_selection|test_p5_runtime_integrity_gate|test_p2_candidate_ranking|test_p3_reference_bias|test_planning_risk_context)$'
+```
+
 - fix(icra-038-p4-rebound-truth-preservation): IAP-RQ-423 — repair the rebound consumer so a scanner `CLOSED_SEGMENTS` result cannot be rewritten to `NO_COLLISION` when an adjacent-endpoint or otherwise interpolation-only segment has no occupied interior integer control point. Such an unclassifiable segment now preserves the scanner's complete status/endpoints, sets the existing `STOP_FOR_ERROR` state and returns before A*/guide work; one unclassifiable segment rejects the complete multi-segment attempt without exposing a partial actionable subset. The scanner, its four statuses, initial-path behavior and planner-manager propagation remain unchanged. Production-facing regressions cover exact `(2,3)` adjacency and an ordinary-then-adjacent `[(2,5),(6,7)]` result. Final collision tests pass 17/17, P1 39/39, retained path-searching P4 4/4, occupancy epoch 6/6 and affected plan-manager CTest 9/9 (186 active cases, one existing disabled). Fresh ICRA-038 bspline/plan-manager builds and installs link against ICRA-037 IAP/typesupport plus intended read-only ICRA-026 dependencies, and all six retained ICRA-037 tree identities remain unchanged. No scanner redesign, original/risk guide development, G0B, P5, GPU, ROS/live flow, smoke, benchmark, qualification, cleanup or Gate promotion occurred; result is `P4_G0A_REBOUND_REPAIR_READY_FOR_REVIEW`.
 
 Reproduce the deterministic ICRA-038 selection from the repository root (no

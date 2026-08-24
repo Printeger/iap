@@ -106,14 +106,14 @@ namespace ego_planner
       for (const auto &guide : guides)
       {
         SafetyVizP4Guide viz;
-        viz.original_path = guide.original_path;
-        viz.risk_path = guide.risk_path;
-        viz.selected_path = guide.selected_path;
+        viz.original_path = guide.original.complete_path;
+        viz.risk_path = guide.risk.complete_path;
+        viz.selected_path = guide.selected.complete_path;
         viz.segment_start = guide.segment_start;
         viz.segment_end = guide.segment_end;
-        viz.path_length_ratio = guide.metrics.path_length_ratio;
-        viz.risk_selected = guide.risk_selected;
-        viz.reason = guide.metrics.fallback_reason;
+        viz.path_length_ratio = guide.risk_original_length_ratio;
+        viz.risk_selected = guide.selection_applied;
+        viz.reason = p4GuideDecisionReasonName(guide.reason);
         out.push_back(viz);
       }
       return out;
@@ -842,6 +842,17 @@ namespace ego_planner
         }
       }
     } local_risk_context_guard{this, created_local_risk_context};
+    struct P4RiskSnapshotGuard
+    {
+      BsplineOptimizer *optimizer = nullptr;
+      ~P4RiskSnapshotGuard()
+      {
+        if (optimizer)
+        {
+          optimizer->clearP4RiskSnapshot();
+        }
+      }
+    } p4_risk_snapshot_guard{bspline_optimizer_.get()};
 
     const auto planning_snapshot = currentPlanningRiskSnapshot();
     const double planning_query_base_time_s = currentPlanningQueryBaseTime();
@@ -1099,7 +1110,6 @@ namespace ego_planner
         bspline_optimizer_->initControlPoints(ctrl_pts, true);
     if (collisionScanFailsClosed(collision_scan.status))
     {
-      bspline_optimizer_->clearP4RiskSnapshot();
       RCLCPP_WARN(
           rclcpp::get_logger("ego_planner"),
           "collision scan failed closed with status %s",
@@ -1113,7 +1123,6 @@ namespace ego_planner
           toSafetyVizP4Guides(bspline_optimizer_->getLastP4GuideViz()),
           plannerNow().seconds());
     }
-    bspline_optimizer_->clearP4RiskSnapshot();
     // 计算时间差并更新时间
     auto now = rclcpp::Clock().now();
     t_init = now - t_start;

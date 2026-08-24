@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites tests="6" failures="0" disabled="0" errors="0" time="0." timestamp="2026-08-24T04:58:50.390" name="AllTests">
+  <testsuite name="GridMapOccupancyEpochTest" tests="6" failures="0" disabled="0" skipped="0" errors="0" time="0." timestamp="2026-08-24T04:58:50.390">
+    <testcase name="CaptureSharesFrozenRawFusedGenerationWithDiagnostic" file="/home/dev/ws_iap/src/iap/src/iap/planner/plan_env/test/test_grid_map_occupancy_epoch.cpp" line="211" status="run" result="completed" time="0." timestamp="2026-08-24T04:58:50.390" classname="GridMapOccupancyEpochTest" />
+    <testcase name="InProgressOrPreCloudCaptureFailsClosed" file="/home/dev/ws_iap/src/iap/src/iap/planner/plan_env/test/test_grid_map_occupancy_epoch.cpp" line="256" status="run" result="completed" time="0." timestamp="2026-08-24T04:58:50.390" classname="GridMapOccupancyEpochTest" />
+    <testcase name="DepthFusionPublishesSourceStampInsteadOfHostReceiptTime" file="/home/dev/ws_iap/src/iap/src/iap/planner/plan_env/test/test_grid_map_occupancy_epoch.cpp" line="270" status="run" result="completed" time="0." timestamp="2026-08-24T04:58:50.390" classname="GridMapOccupancyEpochTest" />
+    <testcase name="DepthCallbacksBindEachCommittedGenerationToItsOwnSourceStamp" file="/home/dev/ws_iap/src/iap/src/iap/planner/plan_env/test/test_grid_map_occupancy_epoch.cpp" line="285" status="run" result="completed" time="0." timestamp="2026-08-24T04:58:50.390" classname="GridMapOccupancyEpochTest" />
+    <testcase name="InvalidDepthSourceStampPreservesPublishedEpochAndBuffers" file="/home/dev/ws_iap/src/iap/src/iap/planner/plan_env/test/test_grid_map_occupancy_epoch.cpp" line="308" status="run" result="completed" time="0." timestamp="2026-08-24T04:58:50.390" classname="GridMapOccupancyEpochTest" />
+    <testcase name="IndependentPointCloudKeepsInputHeaderTimestampAuthority" file="/home/dev/ws_iap/src/iap/src/iap/planner/plan_env/test/test_grid_map_occupancy_epoch.cpp" line="332" status="run" result="completed" time="0." timestamp="2026-08-24T04:58:50.390" classname="GridMapOccupancyEpochTest" />
+  </testsuite>
+</testsuites>

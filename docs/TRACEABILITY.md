@@ -1,5 +1,20 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-24 ICRA-039 P4-G0B metrics-only dual-guide decision
+
+| Req ID | Requirement/evidence seam | Implementation and focused evidence | Status |
+|---|---|---|---|
+| IAP-RQ-423 | One same-event source of truth must own both complete guides, profile truth and selection truth | Immutable `P4GuideRequest` and schema-versioned `P4GuideDecision` bind attempt/segment/endpoints, snapshot owner/generation/stamp/frame, query base, cumulative-distance timing, occupancy epoch/config, complete path hashes, 200-point equal-arc profiles, lengths/ratio, latencies and typed outcome. CSV and RViz consume the decision rather than recomputing it | **IMPLEMENTED / deep seam** |
+| IAP-RQ-423 | Original and risk search must preserve identity and fail/fallback exactly | `P4CollisionGuidePlanner` runs original first and risk second with the same request. Original failure is planner failure; epoch mismatch is invalid/replan with no injection; missing/unknown/stale/non-finite/incomplete risk, risk failure/0.2 s timeout and ratio failure preserve current-epoch original. Injection rechecks attempt, segment, snapshot, query base and epoch | **VERIFIED / fail closed** |
+| IAP-RQ-423 | G0B must measure but never apply the risk guide | `p4_collision_guide_v1` yields repeat-stable request/original/risk hashes `7bd26f07409447dc` / `41088c073625ccfb` / `1de1b8a73bb252bb`; both profiles are 200/200, risk mean/max `1.3949/10.5` is lower than `19.6051/20`, ratio is `1.0`, selected equals original and `selection_applied=false`. Constraint hash equals original-only | **METRICS-ONLY / geometry no-op** |
+| IAP-RQ-423 | Initial/rebound integration and the accepted baseline must remain green | Both paths call the same seam, retain the immutable snapshot through injection and preserve earlier open/invalid/interpolation-only stops. Final tests pass decision 11/11, integration 2/2, collision 17/17, P1 39/39, path P4 5/5, occupancy 6/6 and plan-manager 9/9 (186 active, one disabled) | **GREEN / zero failures** |
+| IAP-RQ-423 | Fresh products and compact evidence must be repository-local and reviewable | Fresh ICRA-039 builds/installations and exact CMake/direct linkage pass with zero workspace-default IAP, deleted-task, build-tree, missing-library or non-toolchain RUNPATH matches. Compact JSON/XML/summary evidence is below `results/icra27/icra039/`; build/install trees remain unstaged for review | **LINKAGE / BOUNDARY PASS** |
+
+This result is ready only for Supervisor review. It does not qualify G0B,
+authorize thresholds/calibration/G0C, apply a risk guide or execute P5. No GPU,
+ROS/live flow, launch, runner, analyzer, capture, smoke, benchmark,
+qualification, campaign or cleanup occurred.
+
 ## 2026-08-24 ICRA-038 P4 rebound truth-preservation repair
 
 | Req ID | Requirement/evidence seam | Implementation and focused evidence | Status |

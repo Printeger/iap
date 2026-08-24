@@ -55,6 +55,7 @@ ament_export_include_directories(include)
 add_library( bspline_opt 
     src/uniform_bspline.cpp 
     src/bspline_optimizer.cpp 
+    src/p4_collision_guide.cpp
     src/gradient_descent_optimizer.cpp
     )
 
@@ -89,6 +90,28 @@ if(BUILD_TESTING)
   )
   target_link_libraries(test_p4_collision_scan_contract
     bspline_opt
+  )
+
+  ament_add_gtest(test_p4_collision_guide
+    test/test_p4_collision_guide.cpp
+  )
+  ament_target_dependencies(test_p4_collision_guide
+    rclcpp Eigen3 iap path_searching
+  )
+  target_link_libraries(test_p4_collision_guide
+    bspline_opt
+    iap::iap
+  )
+
+  ament_add_gtest(test_p4_collision_guide_integration
+    test/test_p4_collision_guide_integration.cpp
+  )
+  ament_target_dependencies(test_p4_collision_guide_integration
+    rclcpp Eigen3 iap plan_env path_searching
+  )
+  target_link_libraries(test_p4_collision_guide_integration
+    bspline_opt
+    iap::iap
   )
 endif()
 

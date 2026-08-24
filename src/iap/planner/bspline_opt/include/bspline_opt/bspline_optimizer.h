@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <limits>
 #include <Eigen/Eigen>
-#include <path_searching/dyn_a_star.h>
+#include <bspline_opt/p4_collision_guide.h>
 #include <bspline_opt/uniform_bspline.h>
 #include <plan_env/grid_map.h>
 #include <plan_env/obj_predictor.h>
@@ -393,16 +393,7 @@ namespace ego_planner
       std::string reason = "not_evaluated";
     };
 
-    struct P4GuideViz
-    {
-      std::vector<Eigen::Vector3d> original_path;
-      std::vector<Eigen::Vector3d> risk_path;
-      std::vector<Eigen::Vector3d> selected_path;
-      Eigen::Vector3d segment_start = Eigen::Vector3d::Zero();
-      Eigen::Vector3d segment_end = Eigen::Vector3d::Zero();
-      P4AStarMetrics metrics;
-      bool risk_selected = false;
-    };
+    using P4GuideViz = P4GuideDecision;
 
     BsplineOptimizer() {}
     ~BsplineOptimizer() {}
@@ -484,6 +475,7 @@ namespace ego_planner
     std::string p1AcceptedTrajectoryRiskProfileContextPath() const;
     const P4RiskAStarConfig &getP4RiskAStarConfig() const { return p4_config_; }
     const std::vector<P4GuideViz> &getLastP4GuideViz() const { return last_p4_guides_; }
+    bool hasP4RiskSnapshotForTest() const { return static_cast<bool>(p4_risk_snapshot_); }
     const OptimizerCostBreakdown &getLastOptimizerCostBreakdown() const { return last_optimizer_cost_breakdown_; }
     const P1OptimizationTrace &getLastP1OptimizationTrace() const { return last_p1_optimization_trace_; }
     const P1BasePrepassTrace &getLastP1BasePrepassTrace() const {
@@ -622,6 +614,11 @@ namespace ego_planner
     } p1_normalized_stage_;
     std::shared_ptr<const iap::RiskGridSnapshot> risk_snapshot_;
     double risk_query_base_time_s_{0.0};
+    std::shared_ptr<const iap::RiskGridSnapshot> p4_risk_snapshot_;
+    double p4_query_base_time_s_{0.0};
+    uint64_t p4_occupancy_epoch_{0};
+    uint64_t p4_local_attempt_seq_{0};
+    uint64_t active_p4_attempt_id_{0};
     P1PlanningRiskContext p1_risk_context_;
     bool p1_debug_csv_header_written_{false};
     struct P1PreOptimizationTrace
@@ -685,6 +682,13 @@ namespace ego_planner
     void captureP1PostOptimizationTrajectory(
         const Eigen::MatrixXd &control_points, double interval_s);
     void writeP1CandidateSidecars(const P1OptimizationTrace &trace) const;
+    uint64_t p4SegmentId(const std::pair<int, int> &segment) const;
+    P4GuideDecision planCollisionGuideForSegment(
+        const Eigen::MatrixXd &points,
+        const std::pair<int, int> &segment);
+    bool p4DecisionReadyForInjection(
+        const P4GuideDecision &decision,
+        const std::pair<int, int> &segment) const;
     bool check_collision_and_rebound(void);
 
     static int earlyExit(void *func_data, const double *x, const double *g, const double fx, const double xnorm, const double gnorm, const double step, int n, int k, int ls);
