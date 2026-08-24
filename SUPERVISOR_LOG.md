@@ -43,9 +43,11 @@
   exact retained manifest SHA-256
   `6836841bc7ee74594ff80926bfd67c8531ea2d26076b27406cb9aeea3d784d34`, approximately 4.6 GiB.
   ICRA-045 created no build/install product.
-- After this PASS record and next-task state are pushed, Supervisor removes exactly those twelve
-  reproducible ICRA-042 build/install directories. Compact evidence, source/docs/tests and the protected
-  PDF remain; no calibration raw data exists yet.
+- After the PASS record and next-task state were pushed in `ee7e1ba`, Supervisor removed exactly those
+  twelve reproducible ICRA-042 build/install directories, recovering approximately 4.6 GiB and raising
+  available filesystem capacity from 30 GiB to 35 GiB. Compact evidence, source/docs/tests and the
+  protected PDF remain; no calibration raw data exists yet. The removed products are reproducible from
+  the retained commands but were deleted in place rather than moved to a recovery location.
 - Unique next task: `ICRA-046 / P4_G0C_LIVE_CALIBRATION`, defined in `NEXT_TASK.md`; active role is
   `DEEPSEEK`, state `TASK_READY`. It must freshly rebuild the six required products, pass dependency/
   linkage/capacity and built-in GPU preflight, execute exactly 15 immutable registered runs once and

@@ -20,7 +20,7 @@ supervisor_verdict: ICRA045_REVIEW_PASS_G0C_PROTOCOL_LIVE_READY
 review_disposition: ICRA046_G0C_LIVE_CALIBRATION_AUTHORIZED
 handoff_status: TASK_READY
 next_task: NEXT_TASK.md
-updated_utc: 2026-08-24T10:53:15Z
+updated_utc: 2026-08-24T10:55:01Z
 ```
 
 The conditional conference route remains `P0 -> P4 -> P5`. P0 Gate-0B, P4-G0A and P4-G0B remain
@@ -33,7 +33,8 @@ ICRA-046 is the only authorized task: rebuild fresh task-local products, execute
 immutable threshold draft for review but must not freeze the registry, claim G0C PASS, apply P4 or enter
 G0D/P5.
 
-After this PASS verdict and the Supervisor review/task commit are pushed, the twelve reproducible
-ICRA-042 build/install directories are cleanup-eligible and will be removed. ICRA-046 must create and
-retain its own fresh build/install products through development and Supervisor Review. Its raw
-calibration bundle remains retained for later threshold-freeze audit even after build/install cleanup.
+After this PASS verdict and the Supervisor review/task commit were pushed, Supervisor removed exactly
+the twelve reproducible ICRA-042 build/install directories, recovering approximately 4.6 GiB. Compact
+ICRA-042 evidence remains. ICRA-046 must create and retain its own fresh build/install products through
+development and Supervisor Review. Its raw calibration bundle remains retained for later
+threshold-freeze audit even after build/install cleanup.
