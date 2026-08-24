@@ -55,6 +55,15 @@ and affected plan-manager CTest 9/9. The latter comprises 186 active cases,
 one pre-existing disabled case and zero failures. All ten retained ICRA-039
 build/install file-path/size manifest hashes exactly match task START.
 
+Exact process exits were zero for the focused identity run (3 cases, none
+disabled), focused metrics-boundary run (1 case, none disabled), complete
+decision run (15 cases, none disabled), integration run (5 cases, none
+disabled), collision run (17 cases, none disabled), P1 run (39 cases, none
+disabled), retained path-searching P4 run (5 cases, none disabled), retained
+occupancy-epoch run (6 cases, none disabled), and affected plan-manager CTest
+run (9 targets, 186 active cases, one disabled case). These exits are also
+recorded per run in `test/result.json`.
+
 During linkage diagnosis, one old ICRA-039 integration CTest was accidentally
 invoked before the retained-library runtime prefix was applied. It failed from
 mixed workspace-default dynamic libraries and rewrote retained build-tree test
@@ -62,6 +71,12 @@ logs. The loader cause was proven by `ldd`; the old four-target CTest was
 restored with the correct retained prefix and the exact ten-tree START
 manifests were re-established before continuing. No source, installed product,
 tracked historical evidence or frozen fixture changed.
+
+The independent Spec review correctly notes that matching path/size manifests
+cannot prove byte-for-byte restoration and that the task's “untouched
+throughout” process constraint cannot be repaired retroactively. The builder
+therefore records this as a fail-closed process nonconformance for Supervisor
+disposition; it is not represented as G0B PASS.
 
 ## Scope and limitations
 

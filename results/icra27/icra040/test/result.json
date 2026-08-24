@@ -45,13 +45,15 @@
     "repeat_hashes_equal": true
   },
   "tests": {
-    "decision": {"passed": 15, "failed": 0, "disabled": 0},
-    "integration": {"passed": 5, "failed": 0, "disabled": 0},
-    "collision": {"passed": 17, "failed": 0, "disabled": 0},
-    "p1": {"passed": 39, "failed": 0, "disabled": 0},
-    "path_searching_p4": {"passed": 5, "failed": 0, "disabled": 0},
-    "occupancy_epoch": {"passed": 6, "failed": 0, "disabled": 0},
-    "plan_manage_targets": {"passed": 9, "failed": 0},
+    "focused_identity": {"passed": 3, "failed": 0, "disabled": 0, "exit_code": 0},
+    "focused_metrics_boundary": {"passed": 1, "failed": 0, "disabled": 0, "exit_code": 0},
+    "decision": {"passed": 15, "failed": 0, "disabled": 0, "exit_code": 0},
+    "integration": {"passed": 5, "failed": 0, "disabled": 0, "exit_code": 0},
+    "collision": {"passed": 17, "failed": 0, "disabled": 0, "exit_code": 0},
+    "p1": {"passed": 39, "failed": 0, "disabled": 0, "exit_code": 0},
+    "path_searching_p4": {"passed": 5, "failed": 0, "disabled": 0, "exit_code": 0},
+    "occupancy_epoch": {"passed": 6, "failed": 0, "disabled": 0, "exit_code": 0},
+    "plan_manage_targets": {"passed": 9, "failed": 0, "disabled": 0, "exit_code": 0},
     "plan_manage_active_cases": {"passed": 186, "failed": 0},
     "plan_manage_disabled_cases": 1
   },

@@ -5422,3 +5422,26 @@ map, launch, runner, analyzer, capture, smoke, benchmark, qualification,
 campaign, tuning, cleanup, Gate promotion or next-task work occurred. Frozen
 fixture and protected untracked PDF remain exact at `49a676a5…c788` and
 `1f07da56…844f6`.
+
+## 2026-08-24T06:25:39Z — ICRA-040 TWO-AXIS REVIEW FOLLOW-UP
+
+IAP-RQ-423. Independent Standards review found no hard violation and recorded
+four judgement-call smells: duplicated validation/test shapes, Boolean
+authorization arguments and the `guideSeedMatrix()` name. The narrow task
+forbids Low design-debt refactor and interface redesign, so these non-blocking
+heuristics were not expanded into unrelated production changes.
+
+Independent Spec review returned `REQUEST_CHANGES`. Its Medium evidence
+finding is repaired: compact JSON and the verification summary now record exit
+code zero for focused identity 3/3, focused boundary 1/1, decision 15/15,
+integration 5/5, collision 17/17, P1 39/39, retained path-searching P4 5/5,
+retained occupancy epoch 6/6 and affected plan-manager 9/9; only the latter has
+one existing disabled case.
+
+Its High process finding is valid and cannot be repaired retroactively. The
+earlier accidental retained ICRA-039 CTest invocation changed build-tree test
+logs, violating “untouched throughout development”; restored path/size
+manifests do not prove byte-for-byte identity. The two requested code repairs
+and regressions remain technically successful, but review is fail-closed for
+Supervisor disposition. No historical tree is touched again and no G0B PASS
+is claimed.
