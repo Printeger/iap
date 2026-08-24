@@ -1,5 +1,72 @@
 # ICRA Supervisor Log
 
+## 2026-08-24 — ICRA-041 review PASS, P4-G0B qualified and ICRA-042 authorization
+
+### Review identity and synchronization
+
+- Fixed review range: `8f75dabc8ff274f483f636ac1d7bd34fc97752b7...53f166ddeba5c325d46e84f450797a027e7cd123`.
+- Reviewed clean-room evidence `cacb9a7`, review closure `2c794c5` and final DEV_LOG-only handoff
+  `53f166d`; every commit carries applicable `IAP-RQ-423`.
+- After fetch, `HEAD` and `origin/dev/icra` matched at divergence `0 0`. All 20 changed paths match the
+  ICRA-041 allowlist and product source/header/test/CMake/config diff count is zero. Frozen collision
+  scan/guide and protected PDF hashes remain exact at `49a676a5…c788`, `d540c23d…11af` and
+  `1f07da56…44f6`; the PDF remains the sole untracked file.
+
+### Standards axis
+
+- Verdict: `PASS`; zero hard violations and zero judgment findings; worst none.
+- The compact 27-line `task_env.bash` is intentional reproducibility evidence: it contains no secret,
+  clears inherited prefixes, admits only ICRA-041/ROS/authorized dependencies and writes only below the
+  task root. Full 517 KiB manifests correctly remain unstaged while their schema/hash comparison is
+  compact tracked evidence.
+- Ownership, requirement/docs synchronization, commit messages, artifact retention, no-live boundary,
+  protected files and historical evidence conform.
+
+### Spec axis
+
+- Verdict: `PASS`; zero missing/partial, scope-creep or implemented-wrong findings; worst none.
+- All 14 retained ICRA-039/040 directories are covered by 3,123 regular-file/symlink records. Before,
+  after and Supervisor live manifest hashes are identical at `d18c1c89…e3162`; regular bytes and exact
+  symlink targets are covered. ICRA-041 made no further historical write.
+- Fresh IAP, plan-env, path-searching, bspline-opt and plan-manager products plus the necessary fresh
+  in-repository quadrotor message dependency resolve entirely within ICRA-041. CMake/link/dynamic audits
+  contain zero historical, workspace-default product, build-tree or missing-library matches.
+- The full deterministic contract, no-retry behavior, metrics-only false boundary, compact evidence,
+  required pushes and final handoff conform. No G0C/G0D/live work or application occurred.
+
+### Independent verification and Gate verdict
+
+- Supervisor ran only ICRA-041 binaries and reproduced decision 15/15, integration 5/5, collision 17/17,
+  P1 39/39, fresh path-searching P4 5/5, fresh occupancy 6/6 and all nine plan-manager executables with
+  186 active cases, one existing disabled case and zero failures.
+- The production-A* request/original/risk/selected hashes, 200/200 profiles, risk statistics and ratio
+  repeat exactly; original remains selected and no risk guide is applied. Protected hashes, diff check,
+  branch synchronization and zero-process audits pass.
+- Verdict: `ICRA041_REVIEW_PASS_P4_G0B_QUALIFIED`. This proves the metrics-only dual-guide measurement
+  seam and closes the old artifact-provenance blocker. It does not qualify calibration/G0C or authorize
+  selection application/G0D.
+- No GPU, ROS/live flow, launch, smoke, benchmark, calibration or P5 work ran.
+
+### Artifact lifecycle
+
+- Through Review, all ten ICRA-039, four ICRA-040 and twelve ICRA-041 build/install directories remained
+  present and untracked, totaling approximately 12 GiB; compact evidence and full unstaged manifests
+  remain available.
+- After this Review PASS and pushed Builder/Supervisor documentation, Supervisor deletes exactly those
+  26 reproducible build/install directories. Compact evidence, source, tests, docs and protected PDF
+  remain. The deletion does not affect tracked content and the products can be rebuilt from recorded
+  commands.
+
+### Required next action
+
+- Unique task: `ICRA-042 / P4_G0C_PROTOCOL`, defined in `NEXT_TASK.md`; active role is `DEEPSEEK`, state
+  `TASK_READY`.
+- Before observing calibration data, register and freeze the 5×3 immutable matrix, numerical-noise floor,
+  quantile algorithms, metrics-only launch contract, proposed threshold registry, fail-closed runner and
+  analyzer with deterministic tests.
+- No calibration execution, data-derived threshold freeze, G0D/application, P5, GPU/ROS/live flow or
+  cleanup is authorized.
+
 ## 2026-08-24 — ICRA-040 review REQUEST_CHANGES and ICRA-041 clean requalification
 
 ### Review identity and synchronization
