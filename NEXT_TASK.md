@@ -1,110 +1,112 @@
-# ICRA-046 — Execute the registered P4-G0C live calibration matrix
+# ICRA-047 — Re-register G0C and enforce the complete runtime dependency closure
 
-> Active gate: `P4_G0C_LIVE_CALIBRATION`
+> Active gate: `P4_G0C_REPLACEMENT_PROTOCOL`
 > Owner: `DEEPSEEK`
 > Activation: `TASK_READY`
-> Supervisor verdict: `ICRA045_REVIEW_PASS_G0C_PROTOCOL_LIVE_READY`
+> Supervisor verdict: `ICRA046_REVIEW_BLOCKED_PRELIVE_DEPENDENCY_GATE`
 > Requirement mapping: `IAP-RQ-423`
 > Conference route: conditional P0 -> P4 -> P5
-> This task: fresh build, one GPU-gated 15-run metrics-only calibration and one analysis; no threshold freeze
+> This task: replacement run identities and executable dependency preflight; synthetic only, no live run
 
 ## Supervisor decision
 
-ICRA-045 passes independent Standards and Spec review with zero findings. The G0C protocol now rejects
-dirty roots, binds every real production artifact, validates complete typed identities and rejects every
-tested inventory/output alias before analysis or write. The fixed 5×3 runner may therefore execute live.
+ICRA-046 truthfully stopped after its only runner invocation passed GPU preflight and the first launch
+failed because `so3_control` was absent. The retained ledger is one attempted, zero complete, zero retry;
+neither required process started and the analyzer was never invoked. This is fail-closed, but the explicit
+pre-live dependency gate was violated: `--show-args` did not prove the launch runtime closure before
+GPU/ROS. The Supervisor task also underdeclared that closure by naming only six build products even though
+the launch uses multiple in-repository simulator packages.
 
-ICRA-046 collects exactly the preregistered 15 metrics-only runs and invokes the analyzer exactly once.
-It may produce an immutable threshold draft but must not edit the proposed registry, freeze a threshold,
-claim G0C PASS or apply the risk guide. Supervisor will review the complete raw bundle and draft before
-authorizing any separate freeze changeset.
+The failed `p4-g0c-seed211-rep01` identity and v1 one-shot cannot be reused or erased. ICRA-047 therefore
+creates a versioned replacement protocol with new run identities and makes full package/executable/plugin/
+config resolution an executable runner gate before GPU. It performs synthetic tests only. A later task
+may build the complete closure and run a fresh replacement matrix only after independent review.
 
-## 1. Synchronize, preserve scientific inputs and prepare fresh products
+## 1. Preserve ICRA-046 and declare the replacement lineage
 
 - Follow `AGENTS.md` synchronization. Stop on `REMOTE_DIVERGED`; never reset, clean, stash, rebase,
-  amend pushed history or overwrite another role's work. Preserve the protected PDF and every tracked
-  protocol/registry/fixture byte and hash.
-- ICRA-042 build/install products were removed only after their successful protocol Review. Rebuild all
-  required products from current `dev/icra` into new task-local directories below
-  `results/icra27/icra046/`: `quadrotor_msgs`, IAP, plan-env, path-searching, bspline-opt and
-  plan-manager. Do not consume historical IAP/planner build/install trees or workspace-default
-  IAP/planner libraries.
-- Recreate the sanitized environment pattern recorded in
-  `results/icra27/icra041/preflight/task_env.bash`, replacing only the task root with ICRA-046. Admit
-  task-local products, `/opt/ros/jazzy`, and the already-authorized unchanged external
-  `traj_utils`/`gnss_comm` dependencies. Keep `ROS_HOME`, `ROS_LOG_DIR` and `TMPDIR` below ICRA-046.
-- Before any live runner invocation, require source/installed config and launch bytes to match, dynamic
-  linkage to resolve only the declared task/external prefixes, required ROS package/launch arguments to
-  resolve without starting ROS, and at least 20 GiB free capacity. Build or dependency failure stops
-  before GPU/ROS; do not repair product source or alter protocol inputs in this task.
+  amend pushed history or overwrite another role's work.
+- Preserve all twelve ICRA-046 build/install directories and the four-file failed raw tree byte-for-byte.
+  Bind v1 protocol SHA `9e89ea42675459a63853d98845f02b7fe5b9434a9f28fcbd6ef5ba1bc5bd906d`,
+  failed raw manifest `f307e61a90707d6da5a38138558a97447c5267ef9a5184f3df92ca8b97079438`,
+  runner-state SHA `a6dba6376b225f2fd00c218bdd19f911b9183e5e53a868f55cb0f1914d474ef1`,
+  failed ID, 1 attempted / 0 complete / 0 retry and missing `so3_control` reason in the replacement-lineage
+  artifact. Do not execute retained binaries, GPU, ROS, runner or analyzer.
+- Never modify/delete the existing v1 protocol, v1 registry, fixture, ICRA-046 evidence or protected PDF.
+  Put new temporary/test/review output below `results/icra27/icra047/`.
 
-## 2. Pre-live verification and immutable one-shot boundary
+## 2. Register an immutable v2 replacement without changing scientific values
 
-- Using only fresh ICRA-046 products, run the focused Python protocol/runner/analyzer/launch suites and
-  the same P4 decision, integration, collision, path-searching, occupancy and plan-manager regressions
-  used to qualify ICRA-042. Record exact commands, exit codes, test counts and linkage. Do not execute any
-  retained historical binary.
-- Compute and record before-live hashes of `p4_g0c_protocol_v1.json`,
-  `p4_threshold_registry_v1.json`, `p4_g0c_live_fixture_v1.json`, the installed launch and current code
-  identity. Confirm the registry is still `PROPOSED_UNCALIBRATED`, all four gates and calibration-bundle
-  hash are null, and `application_enabled=false`.
-- The live root is exactly `results/icra27/icra046/runs` and must not exist before the sole runner call.
-  Put shell stdout/stderr logs outside that root. Do not use `--plan-only` or `--preflight-only` on the
-  live root and do not manually create a child beneath it.
-- From the sanitized task environment, invoke `run_p4_g0c_calibration.py` exactly once in full mode. Its
-  built-in GPU preflight must pass `nvidia-smi`, `cuInit(0)` and `device_count>=1` before ROS. On
-  `GPU_NOT_READY`, dependency failure, required-process death, launch error, malformed/missing artifact
-  or any non-COMPLETE state: stop immediately, preserve evidence and report `BLOCKED`; no retry, wait
-  loop, root repair, run exclusion or second live root is authorized.
+- Add new canonical `p4_g0c_protocol_v2` and proposed `p4_threshold_registry_v2` artifacts. Keep the
+  exact seeds `[211,223,237,253,271]`, three repetitions, seed-major order, 90-second duration, all
+  effective values, 0.2-second per-search timeout, 1.30 hard ratio cap, numerical floor, tolerance,
+  Type-7 quantiles, threshold formulas, minimum 100 decisions and no-exclusion/no-overwrite/no-retry
+  rules unchanged.
+- Give all 15 replacement runs a new unambiguous namespace such as
+  `p4-g0c-r2-seed<seed>-rep<two digits>`; no v1 run ID may appear. Bind the superseded protocol,
+  disqualified ICRA-046 execution and reason `PRELIVE_DEPENDENCY_GATE_VIOLATION_NO_CALIBRATION_DATA`.
+- The v2 registry remains `PROPOSED_UNCALIBRATED`: four gates and calibration bundle null,
+  `application_enabled=false`. Update loader/runner/analyzer/launch bindings only as required to support
+  v2 while keeping v1 readable for historical validation. No observed threshold or application change.
 
-## 3. Registered data and single analyzer invocation
+## 3. Freeze and enforce the complete launch runtime closure
 
-- Require the exact seed-major IDs for seeds `[211,223,237,253,271]`, repetitions `[1,2,3]`, 15/15
-  COMPLETE attempts, zero retry/exclusion, at least 100 complete decisions, complete 200/200 original
-  and risk path coverage, no search timeout, `p4.metrics_only=true`, `selection_applied=false`, P1/P2/P3
-  disabled, P5 disabled, bag/RViz disabled and the exact frozen effective configuration.
-- After the runner reaches COMPLETE and all task ROS processes are shut down, invoke
-  `analyze_p4_g0c_calibration.py` exactly once with the live root and exact in-root outputs
-  `p4_g0c_analysis.json` and `p4_g0c_threshold_draft.json`. Do not invoke any alternate analyzer,
-  normalize or rewrite raw data, or rerun after either success or failure.
-- `DRAFT_ELIGIBLE` is the only successful Builder result. Record the raw bundle SHA-256, decision/run
-  denominators, all coverage/timeout/improvement/path-ratio distributions, Type-7 source rows and four
-  proposed values. `REJECTED`, missing draft, nonzero analyzer exit or any gate datum at/below the
-  numerical floor returns `BLOCKED` with the original bundle retained.
-- A threshold draft is evidence only. Do not copy its values into
-  `p4_threshold_registry_v1.json`, change `PROPOSED_UNCALIBRATED`, enable application, run G0D/P5 or
-  describe the result as G0C PASS.
+- Add one versioned runtime-dependency manifest derived from `launch/test_planner.launch.py`. It must
+  include at least these active G0C packages: `iap`, `ego_planner`, `local_sensing`, `odom_visualization`,
+  `poscmd_2_odom`, `gnss_sim`, `so3_quadrotor_simulator`, `so3_control`, `rclcpp_components`, plus the
+  exact executables used by the launch, `SO3ControlComponent`, and both required SO3 config files.
+  Include transitive in-repository build dependencies `cmake_utils`, `pose_utils` and `uav_utils` in the
+  later-build closure. RViz and bag packages remain inactive and must not be made runtime requirements.
+- Before persisting GPU-running state or calling GPU preflight, the runner must validate every declared
+  package prefix, exact executable, component resource/plugin and config file in the current sanitized
+  environment. Any missing/mismatched item returns a typed dependency failure with zero GPU and zero
+  launch calls.
+- Provide a non-ROS, non-GPU dependency-preflight-only mode on a separate fresh root. It must use the
+  exact same validation function as full mode; its root cannot be reused for live execution. Full mode
+  must repeat the validation before GPU so the standalone check cannot become a bypass.
+- Do not rely on `ros2 launch --show-args` as dependency proof. No test may start ROS or accept a package
+  merely because it exists in an undeclared historical/workspace-default prefix.
 
-## 4. Evidence, artifact lifecycle and handoff
+## 4. Required synthetic red-to-green evidence
 
-- Retain the complete raw `runs/` tree, analyzer outputs and all ICRA-046 build/install products through
-  development and Supervisor Review. Do not delete, move, compress or mutate them. Calibration raw data
-  remains retained after Review for the later freeze audit; only reproducible ICRA-046 build/install
-  becomes cleanup-eligible after Review PASS and pushed code/docs.
-- Track only compact protection/build/linkage/test/run/analyzer summaries below
-  `results/icra27/icra046/`. Do not stage raw runs, build/install, ROS logs, temporary files or the
-  protected PDF. Update `DEV_LOG.md`, `docs/CHANGES.md` and `docs/TRACEABILITY.md` with `IAP-RQ-423`,
-  exact commands, outcomes, hashes and explicit not-frozen/not-PASS limitation.
-- Stage only the allowed compact evidence/docs. Commit/push, then make and push one final DEV_LOG-only
-  handoff. Recheck `HEAD == origin/dev/icra`, protected/config hashes, raw-bundle immutability, remaining
-  capacity and zero task-related processes before returning control.
-- Report either `P4_G0C_CALIBRATION_DRAFT_READY_FOR_REVIEW` or `BLOCKED_<first-failure>`; never promote
-  the Gate or prescribe a threshold/application decision.
+- Add red tests reproducing ICRA-046: `iap`/`ego_planner` and `--show-args` pass while `so3_control` is
+  absent, yet the old runner reaches fake GPU/launch. Green must prove the new runner stops before both.
+- Parameterize missing cases across every declared package, executable, plugin and config. Prove the
+  exact complete closure passes dependency-preflight-only and full fake execution ordering, while an
+  undeclared/historical prefix, duplicate package identity or manifest/hash drift rejects.
+- Prove v1 failed IDs cannot enter v2, all 15 r2 identities are exact/unique, scientific values/formulas
+  are byte-for-byte or canonical-value equivalent to v1, lineage hashes are exact, v2 proposed registry
+  is null/disabled, and no threshold draft or application is possible from ICRA-046.
+- Run focused protocol/runner/analyzer/launch suites, full repository Python discovery, syntax, JSON,
+  `git diff --check`, allowlist, protected/ICRA-046 before-after manifests, branch synchronization and
+  zero-process audits. No GPU preflight, ROS, launch, calibration, CTest or retained binary may run.
 
-## Allowed files and artifacts
+## 5. Documentation and handoff
 
-- new task-local build/install/log/tmp/ROS/raw-run artifacts only below `results/icra27/icra046/`;
-- compact tracked evidence below `results/icra27/icra046/`;
-- `DEV_LOG.md`;
-- `docs/CHANGES.md`;
-- `docs/TRACEABILITY.md`.
+- Update `DEV_LOG.md`, `docs/CHANGES.md` and `docs/TRACEABILITY.md` with `IAP-RQ-423`, exact reproduction
+  commands, the immutable ICRA-046 blocker, replacement lineage and explicit no-live/no-threshold limit.
+- Stage only allowed code/config/tests/docs and compact ICRA-047 evidence. Never stage ICRA-046 raw/
+  build/install, ICRA-047 synthetic scratch output or the protected PDF. Commit/push the implementation,
+  then commit/push one final DEV_LOG-only handoff; every commit contains `IAP-RQ-423`.
+- Report `P4_G0C_REPLACEMENT_PROTOCOL_READY_FOR_REVIEW`, never G0C PASS. Do not authorize or execute the
+  replacement live matrix yourself.
+
+## Allowed files
+
+- new v2 protocol/registry and runtime-dependency/lineage JSON below `config/icra27/`;
+- `scripts/dev_planner/p4_g0c_protocol.py`;
+- `scripts/dev_planner/run_p4_g0c_calibration.py`;
+- `scripts/dev_planner/analyze_p4_g0c_calibration.py` only if v2 schema support requires it;
+- `launch/test_planner.launch.py` only for versioned v2 binding, not product behavior;
+- focused `test/test_p4_g0c_*.py` and `test/test_test_planner_launch.py` changes;
+- compact evidence below `results/icra27/icra047/`;
+- `DEV_LOG.md`, `docs/CHANGES.md`, `docs/TRACEABILITY.md`.
 
 ## Forbidden
 
-- No product source/header/CMake, script/test/launch/config/protocol/registry/fixture or Supervisor-owned
-  file change; no seed/repetition/run-ID/duration/effective-value/numerical-floor/tolerance/quantile/
-  formula adjustment.
-- No retry, run exclusion, alternate live root, post-data tuning, threshold freeze, registry mutation,
-  application, G0D, P5, formal campaign, bag/RViz or historical/external/protected-artifact change.
-- No cleanup of ICRA-046 products or calibration data before Supervisor review; no deletion of any
-  artifact except ordinary self-cleaning temporary files created by pre-live tests below the task root.
+- No reuse/deletion/rewrite of ICRA-046 run IDs, ledger, raw data or build/install; no C++/header/CMake/
+  product/scenario/geometry/P0/P1/P2/P3/P4-decision/P5 behavior change.
+- No seed/repetition/duration/effective-value/floor/tolerance/quantile/formula/threshold adjustment; no
+  registry freeze/application, G0C verdict, G0D, P5 or formal campaign.
+- No GPU, ROS/live launch, calibration, bag/RViz, smoke, benchmark, CTest/retained binary, artifact
+  cleanup, historical/protected/external-repository change or Gate promotion.

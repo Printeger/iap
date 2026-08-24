@@ -1,5 +1,64 @@
 # ICRA Supervisor Log
 
+## 2026-08-24 — ICRA-046 BLOCKED and ICRA-047 replacement-protocol authorization
+
+### Review identity and synchronization
+
+- Fixed review range: `6ef1d3b4ae5ee982a930de35a040315550955f41...0e5ba07e6d6d4667f491b94a0bf1dd82118b192e`.
+- Reviewed blocked evidence/docs `6ff759f` and final DEV_LOG-only handoff `0e5ba07`; both carry
+  `IAP-RQ-423`. All eleven changed paths are allowlisted evidence/docs; no Supervisor-owned, product,
+  script/test/launch/config/protocol/registry/fixture or external-repository file changed.
+- After fetch, `HEAD` and `origin/dev/icra` match at divergence `0 0`. The protected PDF is the sole
+  untracked file and retains SHA-256
+  `1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+
+### Standards axis
+
+- Verdict: `BLOCKED`; one High documented-process finding, zero judgment smells; worst High.
+- High pre-live dependency-gate violation: ICRA-046 required every runtime ROS package/launch argument
+  to resolve before GPU/ROS. The checks covered only `iap`, `ego_planner`, six binary linkages and
+  `--show-args`, then entered the sole runner despite never proving `so3_control`. The one-shot was
+  consumed when the launch failed on that package.
+- The post-failure handoff is otherwise truthful and compliant: exact allowlist/ownership, one runner,
+  zero retry/analyzer, fail-closed stop, hashes, retention, no threshold/freeze/application and zero
+  remaining task processes.
+
+### Spec axis
+
+- Verdict: `BLOCKED`; one High finding; worst High.
+- The protocol violation and runtime blocker are distinct. The missing package caused the 0.164-second
+  runtime exit; entering GPU/ROS without first establishing the full dependency closure violated
+  ICRA-046 section 1. The v1 run identity is now FAILED and cannot be repaired/reused inside ICRA-046.
+- Six fresh product builds and regressions otherwise pass. GPU preflight is genuine (`nvidia-smi` 0,
+  `cuInit=0`, one RTX 4070 Ti SUPER); state is 1 attempted / 0 complete / 0 retry, both required
+  processes never started, analyzer 0, no draft, and no alternate root/freeze/G0D/P5 occurred.
+
+### Evidence and Gate verdict
+
+- Supervisor read-only verification reproduces the runner-state SHA `a6dba637…4ef1`, exact four raw
+  files, protected protocol/registry/fixture/launch/PDF hashes, twelve retained build/install trees and
+  zero task process. Raw manifest remains `f307e61a…9438` per retained evidence.
+- Capacity increased externally from 36.8 GB at task start to 122.6 GB before live despite the new
+  4.6-GB build. Existing repository result trees remain; the evidence does not establish who changed
+  workspace-wide storage. This unexplained external-state change is not attributed to Builder and was
+  not needed beyond the already-satisfied 20-GiB minimum.
+- Verdict: `ICRA046_REVIEW_BLOCKED_PRELIVE_DEPENDENCY_GATE`. P4-G0A/G0B and the v1 synthetic protocol
+  review remain historical PASS; G0C calibration/freeze/application remain NOT QUALIFIED.
+
+### Artifact lifecycle and required next action
+
+- All twelve ICRA-046 build/install directories (~4.6 GiB) and the failed four-file raw tree remain
+  retained. Review is BLOCKED, so no cleanup occurs. The failed evidence and v1 ID are immutable and may
+  not be erased, overwritten or represented as an excluded calibration run.
+- The Supervisor task itself underdeclared runtime closure by naming six products while the launch also
+  requires `so3_control`, `local_sensing`, `odom_visualization`, `poscmd_2_odom`, `gnss_sim`,
+  `so3_quadrotor_simulator` and their in-repository utility dependencies. Repairing only
+  `so3_control` risks another one-package-at-a-time failure.
+- Unique next task: `ICRA-047 / P4_G0C_REPLACEMENT_PROTOCOL`, defined in `NEXT_TASK.md`; active role is
+  `DEEPSEEK`, state `TASK_READY`. Add new non-overlapping r2 identities, bind the failed v1 lineage and
+  enforce the entire package/executable/component/config closure before GPU with synthetic tests only.
+- No replacement live run is authorized until ICRA-047 independent Review PASS.
+
 ## 2026-08-24 — ICRA-045 review PASS and ICRA-046 live calibration authorization
 
 ### Review identity and synchronization
