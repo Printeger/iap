@@ -6764,3 +6764,86 @@ unstaged. Protected artifacts, ICRA-046/047/048/049 evidence, external
 `gnss_comm` and the untracked/unstaged PDF remain unchanged. Builder result is
 `BLOCKED_DEPENDENCY_RUNTIME_LIBRARY_MISSING`, never G0C PASS. Control returns
 only to SUPERVISOR review and disposition.
+
+## 2026-08-24T14:26:23Z — ICRA-051 START
+
+IAP-RQ-423. Synchronized `dev/icra` at task HEAD
+`4c18d47cc09a47e930fae59796657d8c48eeba74`: initial status contained only the
+protected untracked PDF, fetch passed and divergence was `0 0`, so no pull ran.
+`AGENT_STATE.md` authorizes only DEEPSEEK, `TASK_READY`, ICRA-051 and
+`P4_G0C_REPLACEMENT_LIVE_CALIBRATION_CUDA_REISSUE`.
+
+The fresh-root boundary passed with 120,639,520,768 available bytes, zero
+task/required processes and exact resolution of the 17 authorized package
+sources. CUDA compiler, headers and runtime were readable at CUDA 12.5.82.
+ICRA-050 state `701c37b8…bd` proved all r2 identities unused (0 attempted,
+0 complete, 0 GPU and 0 launch). Protected v1/v2 protocol, registry, fixture,
+dependency, lineage and launch hashes, the PDF, ICRA-046/047/048/049/050 trees
+and read-only external `gnss_comm` matched their recorded identities.
+
+## 2026-08-24T14:35:54Z — ICRA-051 BLOCKED AT FIRST LIVE LAUNCH
+
+IAP-RQ-423. The one permitted fresh sanitized non-symlink merged CUDA build
+wrote only below `results/icra27/icra051/{build,install,log}` and exited 0:
+17/17 packages finished in 4m57s with `BUILD_WITH_CUDA=ON`, CUDA compiler
+`/usr/local/cuda/bin/nvcc`, and no workspace-default build/install output.
+
+The mandatory static closure check passed before runner invocation:
+`BUILD_WITH_CUDA:BOOL=ON`, exact 17 package indexes, six declared non-symlink
+ELF runtime libraries with no unresolved or historical/default linkage, and
+loadable `libodometry_estimation_gpu.so` at SHA-256 `c241e032…f894`.
+
+The sole standalone `--dependency-preflight-only` invocation used the fresh
+separate root and identical ordered `AMENT_PREFIX_PATH` /
+`P4_G0C_ALLOWED_PREFIXES` containing only the ICRA-051 merged install and
+`/opt/ros/jazzy`. It exited 0 in `DEPENDENCY_PREFLIGHT_PASS`: 18 packages,
+13 executables, one SO3 component, 14 configs and six runtime libraries; GPU
+and launch invocation counts remained zero. State SHA is `fc6812e4…cf1`.
+
+The sole full registered runner then repeated the dependency PASS and its
+built-in GPU preflight passed: RTX 4070 Ti SUPER, driver 580.126.09,
+`cuInit(0)=0`, `cuDeviceGetCount=0`, `device_count=1`. The first registered ID
+`p4-g0c-r2-seed211-rep01` was attempted once, but launch exited 1 after 0.36s
+before either `iap_rosnode` or `ego_planner_node` appeared. ROS logging reported
+`rcutils_expand_user failed` and `Failed to get logging directory`; the
+recorded sanitized full-runner environment contains neither `HOME` nor an
+explicit `ROS_LOG_DIR`. Runner exit is 2, state `FAILED`, reason
+`launch_exit_1`, ledger 1 attempted / 0 complete / 0 retry, state SHA
+`7c3cafc5…46a7`.
+
+Fail-closed stop is final for ICRA-051. No remaining identity was attempted,
+analyzer invocation count is zero, and analysis/threshold draft do not exist.
+No retry, alternate root, environment repair, threshold action, G0C PASS,
+G0D, P5, formal campaign or cleanup occurred. Post-failure task process count
+is exactly zero. The exact build/runtime commands and full environment/console/
+exit records are retained; compact executed-command evidence is
+`results/icra27/icra051/compact/commands.md`.
+
+All ICRA-051 build/install/log/dependency/raw products remain intact through
+Review. Final protection hashes and prior-tree aggregates match the initial
+audit; external `gnss_comm` is unchanged and the PDF remains untracked and
+unstaged. Builder result is `BLOCKED_LAUNCH_EXIT_1`, never G0C PASS, pending
+independent two-axis review and SUPERVISOR disposition.
+
+## 2026-08-24T14:39:00Z — ICRA-051 TWO-AXIS BLOCKED REVIEW
+
+IAP-RQ-423. Independent review against task HEAD
+`4c18d47cc09a47e930fae59796657d8c48eeba74` reports Standards 0 blocking / 0
+nonblocking and Spec 1 blocking / 0 nonblocking.
+
+The Spec blocker is self-induced: `NEXT_TASK.md` required all new logs below
+the ICRA-051 task root, but the full-runner environment set neither `HOME` nor
+a repository-local `ROS_LOG_DIR`. ROS launch therefore failed before required
+process start and also created external
+`/root/.ros/log/2026-08-24-14-34-21-049171-mint-X-965267/launch.log` (1950 bytes,
+SHA-256 `f506e556…58e7`). The live-matrix requirement remains unmet at 1/15
+attempted and 0/15 complete. Truthful fail-closed handling does not cure the
+preceding output-environment violation, and the consumed full invocation may
+not be retried within ICRA-051.
+
+Review confirms all other audited boundaries: sole CUDA-on 17-package build,
+static six-library closure PASS before the sole standalone dependency PASS,
+sole built-in GPU PASS before launch, immediate first-failure stop, zero
+analyzer/retry/task processes, allowed staged files only, retained raw task
+products and unchanged protected evidence/PDF/external source. Result remains
+`BLOCKED_LAUNCH_EXIT_1`, never G0C PASS, pending commit/push handoff.

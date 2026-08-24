@@ -1,0 +1,31 @@
+{
+  "schema_version": "icra051_final_protection_v1",
+  "checked_utc": "2026-08-24T14:35:54Z",
+  "protected_hashes_unchanged": true,
+  "protected_evidence_trees_unchanged": true,
+  "external_gnss_comm_unchanged": true,
+  "pdf_untracked_and_unstaged": true,
+  "protected_hashes": {
+    "docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf": "1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6",
+    "config/icra27/p4_g0c_protocol_v1.json": "9e89ea42675459a63853d98845f02b7fe5b9434a9f28fcbd6ef5ba1bc5bd906d",
+    "config/icra27/p4_threshold_registry_v1.json": "1a9e206c12133035b29dd4ff573cf3868cf4765f3b9213362e507d85c24deaff",
+    "config/icra27/p4_g0c_live_fixture_v1.json": "985aabcd486186a4430305b409669422499f891d529369c6f0bfe8e7dfe0d710",
+    "config/icra27/p4_g0c_protocol_v2.json": "8b0b2c3ed531680c6c8268738cb1bcb9136f39d2b97e68769e54a53afe59de79",
+    "config/icra27/p4_threshold_registry_v2.json": "99ccf38c317d45d8605a7e382628a8f0afd32c8097a763d05bfdcc5807beb94f",
+    "config/icra27/p4_g0c_runtime_dependencies_v2.json": "d347896447ff27fd332b4b8764e1fa4368a7410b3080b49c77bc1b5f280d7652",
+    "config/icra27/p4_g0c_replacement_lineage_v2.json": "9268ec4df0994fde82a8a7b07a07cd26f813356a642901576a7ac2703e59c6d5",
+    "launch/test_planner.launch.py": "162f19384112eeeccd02cd8228d05cd4a5758a72fb9fdeb4a738081777aefe03"
+  },
+  "protected_evidence_trees": {
+    "icra046": {"files": 3815, "directories": 759, "bytes": 4884473709, "aggregate_sha256": "823d41bf0e9f5e17ede8b538624ba71d46626d5e1369451f4989a9a0e4cd96b1"},
+    "icra047": {"files": 53, "directories": 26, "bytes": 1385667, "aggregate_sha256": "b411cfd9b251cfd6de31bd250d39ce63414a8e6df2c8f40f4593041fb28def81"},
+    "icra048": {"files": 51, "directories": 27, "bytes": 1374841, "aggregate_sha256": "561edd73851ebcf12ae17ff3642d80631b25d587d2aaf43a20a788f438fc24b1"},
+    "icra049": {"files": 47, "directories": 26, "bytes": 1125518, "aggregate_sha256": "9201f8267ee389e660ec4ded8af9984ab30f618a19bbf1f44d2a80ea2191b5bc"},
+    "icra050": {"files": 7326, "directories": 1300, "bytes": 1694580429, "aggregate_sha256": "8d28a71c73e0b1676c6ded5b4791d3e188b93c41e316270afe0fc7951ad0a78a"}
+  },
+  "external_gnss_comm": {
+    "files": 43,
+    "bytes": 249746,
+    "aggregate_sha256": "de422a4bbb3aa199e723e3ada8a3d03113772f04b6b934a65fc46317f03ef16a"
+  }
+}

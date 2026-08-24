@@ -1820,3 +1820,98 @@ blocking / 0 nonblocking. The Spec blocker is the sole build's explicit
 library, so the observed dependency failure is self-induced rather than proof
 that a conforming complete build failed. Because the one standalone gate is
 already consumed, no remediation or retry is permitted within ICRA-050.
+
+## 2026-08-24 (ICRA-051 CUDA reissue BLOCKED)
+
+- IAP-RQ-423: synchronized at
+  `4c18d47cc09a47e930fae59796657d8c48eeba74`, verified `0 0` divergence,
+  120,639,520,768 available bytes, zero task processes, exact authorized source
+  inventory and unchanged protected artifacts before execution.
+- The sole fresh non-symlink merged build below ICRA-051 exited 0 with all 17
+  packages in 4m57s and `BUILD_WITH_CUDA=ON`. Static closure inspection passed
+  exact package indexes, all six non-symlink ELF runtime libraries, hashes,
+  linkage and dynamic loading of `libodometry_estimation_gpu.so`.
+- The sole standalone dependency runner exited 0 with
+  `DEPENDENCY_PREFLIGHT_PASS`: 18 packages, 13 executables, one component,
+  14 configs and six runtime libraries resolved from the ordered ICRA-051 and
+  Jazzy prefixes; GPU and launch calls were zero at this boundary.
+- The sole full runner repeated dependency PASS and built-in GPU PASS
+  (`cuInit=0`, one RTX 4070 Ti SUPER), then its first launch exited before
+  either required process started. The ROS console reports
+  `rcutils_expand_user failed` / `Failed to get logging directory`; the exact
+  sanitized environment omitted both `HOME` and `ROS_LOG_DIR`. Runner result is
+  `FAILED`, `launch_exit_1`, 1 attempted / 0 complete / 0 retry.
+- Fail-closed handling stopped the matrix immediately. Analyzer invocations are
+  zero, no analysis/draft exists, all task processes are zero and all raw task
+  products remain retained. No retry, alternate root, threshold action, G0C
+  verdict, G0D, P5, formal campaign or cleanup occurred.
+
+The exact effective build command was:
+
+```bash
+colcon --log-base results/icra27/icra051/log build \
+  --base-paths \
+    /home/dev/ws_iap/src/iap \
+    /home/dev/ws_iap/src/iap/src/iap/planner/bspline_opt \
+    /home/dev/ws_iap/src/iap/src/iap/planner/path_searching \
+    /home/dev/ws_iap/src/iap/src/iap/planner/plan_env \
+    /home/dev/ws_iap/src/iap/src/iap/planner/plan_manage \
+    /home/dev/ws_iap/src/iap/src/iap/planner/traj_utils \
+    /home/dev/ws_iap/src/iap/src/uav_simulator/Utils/cmake_utils \
+    /home/dev/ws_iap/src/iap/src/uav_simulator/Utils/odom_visualization \
+    /home/dev/ws_iap/src/iap/src/uav_simulator/Utils/pose_utils \
+    /home/dev/ws_iap/src/iap/src/uav_simulator/Utils/quadrotor_msgs \
+    /home/dev/ws_iap/src/iap/src/uav_simulator/Utils/uav_utils \
+    /home/dev/ws_iap/src/iap/src/uav_simulator/fake_drone \
+    /home/dev/ws_iap/src/iap/src/uav_simulator/gnss_sim \
+    /home/dev/ws_iap/src/iap/src/uav_simulator/local_sensing \
+    /home/dev/ws_iap/src/iap/src/uav_simulator/so3_control \
+    /home/dev/ws_iap/src/iap/src/uav_simulator/so3_quadrotor_simulator \
+    /home/dev/ws_iap/src/gnss_comm \
+  --packages-select \
+    iap bspline_opt path_searching plan_env ego_planner traj_utils \
+    cmake_utils odom_visualization pose_utils quadrotor_msgs uav_utils \
+    poscmd_2_odom gnss_sim local_sensing so3_control \
+    so3_quadrotor_simulator gnss_comm \
+  --build-base results/icra27/icra051/build \
+  --install-base results/icra27/icra051/install \
+  --merge-install --executor sequential \
+  --event-handlers console_direct+ \
+  --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
+    -DBUILD_WITH_CUDA=ON \
+    -DCMAKE_CUDA_COMPILER=/usr/local/cuda/bin/nvcc \
+    -DBUILD_WITH_OPENCV=OFF -DBUILD_WITH_VIEWER=OFF
+```
+
+The two sole runner invocations were:
+
+```bash
+AMENT_PREFIX_PATH="$PWD/results/icra27/icra051/install:/opt/ros/jazzy" \
+P4_G0C_ALLOWED_PREFIXES="$PWD/results/icra27/icra051/install:/opt/ros/jazzy" \
+PYTHONDONTWRITEBYTECODE=1 \
+TMPDIR="$PWD/results/icra27/icra051/tmp" \
+python3 scripts/dev_planner/run_p4_g0c_calibration.py \
+  --dependency-preflight-only \
+  --runs-root "$PWD/results/icra27/icra051/dependency_preflight"
+
+AMENT_PREFIX_PATH="$PWD/results/icra27/icra051/install:/opt/ros/jazzy" \
+P4_G0C_ALLOWED_PREFIXES="$PWD/results/icra27/icra051/install:/opt/ros/jazzy" \
+PYTHONDONTWRITEBYTECODE=1 \
+TMPDIR="$PWD/results/icra27/icra051/tmp" \
+python3 scripts/dev_planner/run_p4_g0c_calibration.py \
+  --runs-root "$PWD/results/icra27/icra051/runs"
+```
+
+The analyzer command was not invoked and has no exit code because the runner
+was not COMPLETE. Full raw commands, environments and consoles remain below
+`results/icra27/icra051/`; selectively staged compact evidence is under
+`results/icra27/icra051/compact/`. Result is `BLOCKED_LAUNCH_EXIT_1`, never
+G0C PASS.
+
+Independent review reports Standards 0 blocking / 0 nonblocking and Spec 1
+blocking / 0 nonblocking. The Spec blocker is the missing repository-local
+`ROS_LOG_DIR`: it self-induced the first-launch failure and allowed ROS launch
+to create `/root/.ros/log/2026-08-24-14-34-21-049171-mint-X-965267/launch.log`
+outside the task root. The fail-closed result remains truthful, but 1/15
+attempted and 0/15 complete does not satisfy the live matrix and no retry is
+permitted after the sole invocation was consumed.

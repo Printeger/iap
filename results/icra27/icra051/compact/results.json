@@ -1,0 +1,111 @@
+{
+  "schema_version": "icra051_compact_result_v1",
+  "task_id": "ICRA-051",
+  "requirement": "IAP-RQ-423",
+  "result": "BLOCKED_LAUNCH_EXIT_1",
+  "review": {
+    "standards_blocking": 0,
+    "standards_nonblocking": 0,
+    "spec_blocking": 1,
+    "spec_nonblocking": 0,
+    "spec_blocker": "full runner omitted repository-local ROS_LOG_DIR, self-induced launch_exit_1, and created an external /root/.ros launch log"
+  },
+  "task_head": "4c18d47cc09a47e930fae59796657d8c48eeba74",
+  "build": {
+    "invocations": 1,
+    "exit_code": 0,
+    "package_count": 17,
+    "summary": "17 packages finished [4min 57s]",
+    "merge_install": true,
+    "symlink_install": false,
+    "build_with_cuda": true,
+    "cuda_compiler": "/usr/local/cuda/bin/nvcc",
+    "cuda_version": "12.5.82"
+  },
+  "static_cuda_closure": {
+    "result": "PASS",
+    "package_index_count": 17,
+    "runtime_library_count": 6,
+    "gpu_library": "lib/libodometry_estimation_gpu.so",
+    "gpu_library_sha256": "c241e032047bcf19d6906a3985124b7390c0a66cbf3fcd70fffdda67635bf894",
+    "gpu_library_loadable": true,
+    "unresolved_linkages": 0
+  },
+  "standalone_dependency_preflight": {
+    "invocations": 1,
+    "exit_code": 0,
+    "runner_state": "DEPENDENCY_PREFLIGHT_PASS",
+    "dependency_ready": true,
+    "package_count": 18,
+    "executable_count": 13,
+    "component_count": 1,
+    "config_count": 14,
+    "runtime_library_count": 6,
+    "ament_prefix_path": "/home/dev/ws_iap/src/iap/results/icra27/icra051/install:/opt/ros/jazzy",
+    "allowed_prefixes": "/home/dev/ws_iap/src/iap/results/icra27/icra051/install:/opt/ros/jazzy",
+    "gpu_preflight_invocations": 0,
+    "launch_invocations": 0,
+    "state_sha256": "fc6812e4167d50217179197ca86fb7c3238f615156aeba4fb746c299b34c4cf1"
+  },
+  "full_runner": {
+    "invocations": 1,
+    "exit_code": 2,
+    "runner_state": "FAILED",
+    "failure_reason": "launch_exit_1",
+    "gpu_preflight_invocations": 1,
+    "launch_invocations": 1,
+    "launch_started": true,
+    "attempted_run_count": 1,
+    "completed_run_count": 0,
+    "failed_run_id": "p4-g0c-r2-seed211-rep01",
+    "retries": 0,
+    "state_sha256": "7c3cafc505ad33e7e8631a2ed1534bf5e21c6cf4f4d9eb252319a250989846a7"
+  },
+  "gpu_preflight": {
+    "gpu_ready": true,
+    "device": "NVIDIA GeForce RTX 4070 Ti SUPER",
+    "driver_version": "580.126.09",
+    "cuda_driver_library": "libcuda.so.1",
+    "cuInit_result": 0,
+    "cuDeviceGetCount_result": 0,
+    "device_count": 1,
+    "sha256": "8adc96255a8dd7107caa835b7a60feecadf84c72e49d66cbb97bf6665b448038"
+  },
+  "launch_failure": {
+    "elapsed_s": 0.3644529590383172,
+    "iap_rosnode_seen": false,
+    "ego_planner_node_seen": false,
+    "required_processes_ok": false,
+    "console_reason": "rcutils_expand_user failed; Failed to get logging directory",
+    "stdout_sha256": "818d11fde81fcc918176bcd6733c013f8100de2ce1db2acdacbdcfd2c946447b",
+    "external_launch_log": "/root/.ros/log/2026-08-24-14-34-21-049171-mint-X-965267/launch.log",
+    "external_launch_log_sha256": "f506e5565d73ad601673c814635797c360f650c7be3c4356e9217449df2458e7"
+  },
+  "downstream": {
+    "analyzer_invocations": 0,
+    "analysis_exists": false,
+    "threshold_draft_exists": false,
+    "threshold_actions": 0,
+    "g0c_pass_claimed": false
+  },
+  "post_failure_process_audit": {
+    "runner_or_analyzer_or_required_process_count": 0
+  },
+  "retained_artifacts": {
+    "build": {"files": 5121, "directories": 1099, "bytes": 1215987660, "aggregate_sha256": "cd34accfa57e5dee28d40d7b5e4a50846d5365d52ee3302b22504614237863a4"},
+    "install": {"files": 2117, "directories": 180, "bytes": 476034269, "aggregate_sha256": "1b754bf06781e0479b04b2096c876c07e00b89d611d681bcd178b79e32b23670"},
+    "log": {"files": 88, "directories": 19, "bytes": 2858652, "aggregate_sha256": "24d9bf3eb9eac32cec737d1cf1733f68a19949ea67570c13dfe2d4ec2661c962"},
+    "dependency_preflight": {"files": 1, "directories": 1, "bytes": 4876, "aggregate_sha256": "788f694c4d9f57b0c9077e61d6a5b6aca6fce54f688b06946b2b5de01678063c"},
+    "runs": {"files": 51, "directories": 10, "bytes": 197817, "aggregate_sha256": "3034a74fd57843cbb586c6953e414c402f9c4f5e9e5f6c06cf5dfa6e84fcee27"}
+  },
+  "raw_log_hashes": {
+    "build_console": "ab58d0ca33215c6890be78c0ab27e0afb45593d2d68805c4de7f4e576d7d1301",
+    "build_environment": "e66fd83c8678d15186cb1ffe40b66ca41cac6a7fbcf5d2d904def818702523e1",
+    "build_exit": "933dacc714ce36180a30532ecdf2b3207efcb51345615808b1455ed408bf62d7",
+    "static_cuda_closure": "db11a98e9f28711ad9189ab46a46a86342fef2e226d85c87fba4f7d3b222aa90",
+    "dependency_environment": "5e2fabce82bfcc0106c615026f80e055b615251c861c9b1b13d875908616cb83",
+    "dependency_exit": "25146c78eb4a744e2bd49c62794808bb792d69dba743015ab4c4511a72f8484d",
+    "full_runner_environment": "5e2fabce82bfcc0106c615026f80e055b615251c861c9b1b13d875908616cb83",
+    "full_runner_exit": "9e34c32b533b01b24770ef5c3de763872924b03c50d64164deaa8ad2b7836f6a"
+  }
+}

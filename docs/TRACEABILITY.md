@@ -1137,3 +1137,13 @@ They do not convert historical `NO-GO-P2`, failed P0 Gate-0B evidence, the stati
 | IAP-RQ-423 | Fresh-build the complete declared closure without historical/default products | One sanitized non-symlink merged build under `results/icra27/icra050/{build,install,log}` exited 0 with 17/17 packages; exact sources, environment, command and hashes are retained | **BUILD EXIT 0; CUDA runtime library absent** |
 | IAP-RQ-423 | Prove the complete dependency closure before GPU or ROS | Sole standalone runner used only the ICRA-050 install plus `/opt/ros/jazzy` and exited 2 with `DEPENDENCY_RUNTIME_LIBRARY_MISSING:iap:lib/libodometry_estimation_gpu.so`; state SHA `701c37b8…bd` | **BLOCKED; dependency gate failed** |
 | IAP-RQ-423 | Stop without retry or downstream evidence mutation on a typed dependency failure | Zero full runner, GPU, ROS/launch and analyzer calls; no live runs root, analysis or draft; zero task processes; all task products and prior evidence retained | **FAIL-CLOSED; not G0C PASS** |
+
+## 2026-08-24 ICRA-051 G0C CUDA reissue
+
+| Req ID | Requirement/evidence seam | Implementation and retained evidence | Status |
+|---|---|---|---|
+| IAP-RQ-423 | Fresh-build and statically prove the complete CUDA closure before runner use | Sole sanitized CUDA-on build exited 0 with 17/17 packages; exact package index and six non-symlink ELF libraries pass hashes/linkage; `libodometry_estimation_gpu.so` is loadable at `c241e032…f894` | **CUDA CLOSURE PASS** |
+| IAP-RQ-423 | Require the complete standalone dependency gate before GPU or ROS | Sole separate dependency invocation exits 0 with 18 packages, 13 executables, one component, 14 configs and six libraries from exact ICRA-051/Jazzy prefixes; state `fc6812e4…cf1` | **DEPENDENCY PREFLIGHT PASS** |
+| IAP-RQ-423 | Run the registered matrix once behind built-in GPU proof and stop on first failure | GPU passes `nvidia-smi`, `cuInit=0`, one device; first ID launch exits 1 on unavailable ROS logging directory before either required process starts; runner `7c3cafc5…46a7`, 1 attempted / 0 complete / 0 retry | **BLOCKED_LAUNCH_EXIT_1** |
+| IAP-RQ-423 | Preserve raw failure truth and forbid downstream threshold action | Analyzer invocations 0, no analysis/draft, no retry/alternate root/threshold action/G0C verdict; zero task processes; complete task products and protected prior evidence retained | **FAIL-CLOSED; not G0C PASS** |
+| IAP-RQ-423 | Keep every new log and temporary product repository-local | Full invocation omitted `ROS_LOG_DIR`, failed ROS logging initialization and created `/root/.ros/log/.../launch.log`; independent Standards review 0/0, Spec review 1 blocking / 0 nonblocking | **SPEC BLOCKER; no retry permitted** |
