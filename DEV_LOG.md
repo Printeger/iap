@@ -6097,3 +6097,23 @@ JSON and diff checks pass. Review evidence is repository-local at
 No live or compiled flow ran. The protected PDF remains untracked/unstaged and
 the retained ICRA-042 manifest is unchanged. Result remains
 `P4_G0C_LIVE_ARTIFACT_PROTOCOL_READY_FOR_REVIEW`, never G0C PASS.
+
+## 2026-08-24T10:27:33Z — ICRA-044 BUILDER HANDOFF
+
+IAP-RQ-423. Implementation, tests, compact evidence and two-axis review were
+committed as `574cfd9` and pushed to `origin/dev/icra`. Final reviewer verdicts
+are Standards 0 findings / 0 blocking and Spec 0 findings / 0 blocking.
+
+Final evidence: focused protocol/runner/analyzer/launch suites pass 64/64;
+post-review full repository Python discovery passes 403/403; syntax,
+fatal-only flake8, JSON, diff, exact allowlist, branch synchronization and
+zero-process audits pass. All 3,829 files in the 12 retained ICRA-042 trees
+match the frozen before manifest byte-for-byte. The protected PDF remains
+untracked, unstaged and unchanged at SHA-256
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+
+No GPU preflight, ROS, launch, calibration, CTest/retained binary, bag/RViz,
+smoke, benchmark, threshold draft/freeze/application, G0D, P5, cleanup or gate
+promotion ran. Builder result is
+`P4_G0C_LIVE_ARTIFACT_PROTOCOL_READY_FOR_REVIEW`, not G0C PASS. Control returns
+only to SUPERVISOR review.
