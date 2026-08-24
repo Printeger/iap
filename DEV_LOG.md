@@ -6448,3 +6448,116 @@ binary, smoke, benchmark, bag/RViz, threshold draft/freeze/application, G0D,
 P5 or cleanup ran. Builder result is
 `P4_G0C_REPLACEMENT_PROTOCOL_READY_FOR_REVIEW`, never G0C PASS. Control returns
 only to SUPERVISOR review; no replacement live matrix is authorized here.
+
+## 2026-08-24T12:27:49Z — ICRA-048 START
+
+IAP-RQ-423. Synchronized `dev/icra` at Supervisor task HEAD
+`8657412bc5fcbc6b727ca186b7d642ad3b0d5b49`: initial status contained only the
+protected untracked PDF, fetch passed and divergence was `0 0`, so no pull ran.
+`AGENT_STATE.md` authorizes only DEEPSEEK, `TASK_READY`, ICRA-048 and
+`P4_G0C_REPLACEMENT_PROTOCOL_REPAIR`.
+
+This task is synthetic-only and addresses the three Supervisor findings: v2
+disabled P1/P2 incorrectly became metrics-only at the effective launch path;
+v2 registration compared actual hashes to themselves while the shared loader
+did not freeze the complete scientific contract; and a secondary v2 run
+manifest entered analyzer inventory. GPU preflight, ROS/launch, runner/analyzer
+CLI, calibration, CTest/retained binary, smoke, benchmark, bag/RViz, threshold
+action, G0C verdict, G0D, P5 and cleanup are forbidden.
+
+Before work, protected PDF SHA-256 was
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+The retained ICRA-046 tree was 3,815 files / 759 directories /
+4,884,473,805 bytes with aggregate SHA-256
+`823d41bf0e9f5e17ede8b538624ba71d46626d5e1369451f4989a9a0e4cd96b1`;
+the complete ICRA-047 evidence aggregate was
+`b411cfd9b251cfd6de31bd250d39ce63414a8e6df2c8f40f4593041fb28def81`.
+V1 protocol/registry/fixture and replacement-lineage hashes were respectively
+`9e89ea42675459a63853d98845f02b7fe5b9434a9f28fcbd6ef5ba1bc5bd906d`,
+`1a9e206c12133035b29dd4ff573cf3868cf4765f3b9213362e507d85c24deaff`,
+`985aabcd486186a4430305b409669422499f891d529369c6f0bfe8e7dfe0d710`
+and `9268ec4df0994fde82a8a7b07a07cd26f813356a642901576a7ac2703e59c6d5`.
+
+## 2026-08-24T12:47:52Z — ICRA-048 CONTRACT REPAIR AND VERIFICATION
+
+IAP-RQ-423. Regression-first tests reproduced all three review defects: six
+protocol failures proved secondary-v2 admission and missing exact scientific/
+immutable registration checks; the real launch-setup path proved disabled v2
+P1/P2 became `metrics_only=true`; analyzer accepted a secondary-v2 bundle and
+remained draft-eligible. No runtime process was started by these tests.
+
+The launch now treats every registered G0C version through its explicit frozen
+effective values, so ego-planner, test-planner manifest, run manifest and
+protocol all retain `p1.metrics_only=false` and `p2.metrics_only=false`. The
+shared loader owns explicit full-file v2 protocol/registry trust anchors and
+rejects mismatch before dependency validation or output creation; the launch
+independently freezes exact formulas, floor and derivation, quantile method/
+interpolation/definition/ties/units, path tolerance and derivation, seeds,
+repetitions, order, duration, effective values and no-exclusion/no-overwrite/
+no-retry rules. This split remains acyclic. Runner completion and analyzer
+eligibility both fail closed when the test-planner effective contract disagrees
+with the registered bundle. Inventory rejects secondary v1 and v2 manifests.
+
+The unavoidable canonical cascade ends at launch
+`162f19384112eeeccd02cd8228d05cd4a5758a72fb9fdeb4a738081777aefe03`,
+runtime dependency
+`d347896447ff27fd332b4b8764e1fa4368a7410b3080b49c77bc1b5f280d7652`,
+protocol v2
+`8b0b2c3ed531680c6c8268738cb1bcb9136f39d2b97e68769e54a53afe59de79`
+and registry v2
+`99ccf38c317d45d8605a7e382628a8f0afd32c8097a763d05bfdcc5807beb94f`.
+Lineage and all scientific values remain byte/value-identical.
+
+With `TMPDIR=$PWD/results/icra27/icra048/tmp`, pre-review direct protocol,
+runner, analyzer and launch-contract suites passed 11/11, 15/15, 26/26 and
+9/9; aggregate focused discovery passed 69/69 and launch golden passed 16/16.
+The pre-review full repository Python discovery passed 424/424. Python syntax,
+fatal-only flake8, canonical JSON and `git diff --check` pass. The full suite
+retains one pre-existing unrelated `ResourceWarning` and expected diagnostic
+stdout. No live boundary or threshold action ran. Current result is only
+`P4_G0C_V2_CONTRACT_REPAIR_READY_FOR_REVIEW`, never G0C PASS, pending
+independent review and final protection/synchronization audits.
+
+## 2026-08-24T13:00:01Z — ICRA-048 REVIEW REMEDIATION
+
+IAP-RQ-423. Initial independent review found one Standards blocker and two
+Spec blockers: the full-file anchor mode was selected from the untrusted
+protocol schema, Python equality admitted bool/int and int/float substitutions,
+and the supplied effective-value hash was not recomputed. Spec also identified
+the new v2 effective-contract check as an unnecessary v1 rejection surface.
+
+Remediation makes v2 the default trusted caller mode and requires explicit
+registered-v1 mode only for historical v1 use. A coordinated v2-path schema
+downgrade now rejects before dependency validation. All v2 protocol,
+launch-science and manifest comparisons use canonical exact-type JSON
+identity; the manifest effective hash is recomputed from the supplied values.
+Runner/analyzer full-contract enforcement is v2-only, preserving v1 behavior.
+New adversaries cover schema downgrade, `211.0`, `1` for true, `0` for false,
+`4096.0`, stale effective hashes in both test-planner and run manifests, and
+run-manifest exact-type disagreement. Registered-v1 CLI mode is selected only
+from the exact protected v1 path in both runner and analyzer. The resulting
+unavoidable hash cascade is the final set recorded above.
+
+Repository-local final suites pass protocol 13/13, runner 16/16, analyzer
+28/28, launch contract 9/9, launch golden 16/16, focused discovery 74/74 and
+full discovery 429/429. Four full discovery invocations ran in ICRA-048: the
+initial 424, first exact-type remediation 427, v1 runner-compatibility 427 and
+final run-manifest remediation 429. Syntax, fatal-only flake8, canonical JSON
+and diff checks pass. The boundary remains synthetic-only and awaits final
+independent re-review.
+
+## 2026-08-24T13:05:33Z — ICRA-048 FINAL TWO-AXIS REVIEW
+
+IAP-RQ-423. Independent review against fixed task HEAD
+`8657412bc5fcbc6b727ca186b7d642ad3b0d5b49` first found the untrusted schema
+mode, exact-type/stale-hash manifest gaps and v1 compatibility surface recorded
+above. After remediation, Standards reports 0 code blockers / 0 smells and
+Spec reports 0 blocking / 0 nonblocking findings. The compact aggregate is
+retained at `results/icra27/icra048/review/two_axis_review.md`.
+
+Final protection audit covers the actual restaged candidate: 18/18 paths are
+allowlisted, unstaged diff is empty, branch divergence is `0 0`, task-process
+count is zero, and the PDF remains only untracked/unstaged. No GPU, ROS/launch,
+runner/analyzer CLI, calibration, CTest/retained binary, smoke, benchmark,
+threshold action, G0C verdict, G0D or P5 ran. Result remains
+`P4_G0C_V2_CONTRACT_REPAIR_READY_FOR_REVIEW`, never G0C PASS.

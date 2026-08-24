@@ -14,11 +14,36 @@ SPEC.loader.exec_module(MODULE)
 
 
 class P4G0CProtocolTest(unittest.TestCase):
+    @staticmethod
+    def _copy_v2_bundle_root(root):
+        paths = {
+            "protocol": "config/icra27/p4_g0c_protocol_v2.json",
+            "registry": "config/icra27/p4_threshold_registry_v2.json",
+            "fixture": "config/icra27/p4_g0c_live_fixture_v1.json",
+            "dependency": "config/icra27/p4_g0c_runtime_dependencies_v2.json",
+            "lineage": "config/icra27/p4_g0c_replacement_lineage_v2.json",
+            "v1_protocol": "config/icra27/p4_g0c_protocol_v1.json",
+            "raw_manifest": (
+                "results/icra27/icra046/preflight/raw_runs_manifest.tsv"
+            ),
+            "runner_state": (
+                "results/icra27/icra046/runs/p4_g0c_runner_state.json"
+            ),
+        }
+        copied = {}
+        for name, relative in paths.items():
+            target = root / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes((REPO / relative).read_bytes())
+            copied[name] = target
+        return copied
+
     def test_v2_replacement_is_exact_unique_and_scientifically_equivalent(self):
         v1 = MODULE.load_protocol_bundle(
             REPO / "config/icra27/p4_g0c_protocol_v1.json",
             REPO / "config/icra27/p4_threshold_registry_v1.json",
             REPO / "config/icra27/p4_g0c_live_fixture_v1.json",
+            expected_protocol_schema=MODULE.PROTOCOL_SCHEMA_V1,
         )
         v2 = MODULE.load_protocol_bundle(
             REPO / "config/icra27/p4_g0c_protocol_v2.json",
@@ -91,11 +116,97 @@ class P4G0CProtocolTest(unittest.TestCase):
         self.assertIsNone(bundle.registry["calibration_bundle_sha256"])
         self.assertFalse(bundle.registry["application_enabled"])
 
+    def test_v2_full_file_trust_anchor_rejects_coordinated_and_isolated_drift(self):
+        for case in ("coordinated", "isolated_registry"):
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as tmp:
+                paths = self._copy_v2_bundle_root(Path(tmp))
+                protocol = json.loads(paths["protocol"].read_text())
+                registry = json.loads(paths["registry"].read_text())
+                if case == "coordinated":
+                    protocol["unreviewed_note"] = "coordinated drift"
+                    paths["protocol"].write_bytes(MODULE.canonical_bytes(protocol))
+                    registry["protocol_sha256"] = MODULE.sha256_file(
+                        paths["protocol"]
+                    )
+                else:
+                    registry["unreviewed_note"] = "coordinated bytes not required"
+                paths["registry"].write_bytes(MODULE.canonical_bytes(registry))
+
+                with self.assertRaisesRegex(
+                    MODULE.ProtocolError, "v2 trust anchor"
+                ):
+                    MODULE.load_protocol_bundle(
+                        paths["protocol"], paths["registry"], paths["fixture"]
+                    )
+
+    def test_v2_trusted_mode_rejects_coordinated_schema_downgrade(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = self._copy_v2_bundle_root(Path(tmp))
+            paths["protocol"].write_bytes(
+                (REPO / "config/icra27/p4_g0c_protocol_v1.json").read_bytes()
+            )
+            paths["registry"].write_bytes(
+                (REPO / "config/icra27/p4_threshold_registry_v1.json").read_bytes()
+            )
+
+            with self.assertRaisesRegex(
+                MODULE.ProtocolError, "schema does not match trusted mode"
+            ):
+                MODULE.load_protocol_bundle(
+                    paths["protocol"], paths["registry"], paths["fixture"]
+                )
+
+    def test_shared_validator_freezes_complete_scientific_contract(self):
+        original = MODULE.load_canonical_json(
+            REPO / "config/icra27/p4_g0c_protocol_v2.json"
+        )
+        mutations = {
+            "formula": lambda payload: payload["threshold_formulas"].update({
+                "max_improvement_min": "Q50(original_max-risk_max)"
+            }),
+            "floor_derivation": lambda payload: payload[
+                "numerical_noise_floor"
+            ]["derivation"].update({"multiplier": 2048}),
+            "quantile_definition": lambda payload: payload["quantiles"].update({
+                "definition": "nearest rank"
+            }),
+        }
+        for label, mutate in mutations.items():
+            with self.subTest(label=label):
+                payload = json.loads(json.dumps(original))
+                mutate(payload)
+                with self.assertRaisesRegex(
+                    MODULE.ProtocolError, "scientific contract"
+                ):
+                    MODULE.validate_protocol(payload)
+
+    def test_v2_exact_types_reject_python_equal_substitutions(self):
+        original = MODULE.load_canonical_json(
+            REPO / "config/icra27/p4_g0c_protocol_v2.json"
+        )
+        mutations = {
+            "seed_float": lambda payload: payload["seeds"].__setitem__(0, 211.0),
+            "boolean_integer": lambda payload: payload.update({"no_retry": 1}),
+            "effective_boolean_integer": lambda payload: payload[
+                "effective_values"
+            ].update({"p1.metrics_only": 0}),
+            "floor_integer_float": lambda payload: payload[
+                "numerical_noise_floor"
+            ]["derivation"].update({"multiplier": 4096.0}),
+        }
+        for label, mutate in mutations.items():
+            with self.subTest(label=label):
+                payload = json.loads(json.dumps(original))
+                mutate(payload)
+                with self.assertRaises(MODULE.ProtocolError):
+                    MODULE.validate_protocol(payload)
+
     def test_registered_bundle_has_exact_seed_major_matrix_and_hash_binding(self):
         bundle = MODULE.load_protocol_bundle(
             REPO / "config/icra27/p4_g0c_protocol_v1.json",
             REPO / "config/icra27/p4_threshold_registry_v1.json",
             REPO / "config/icra27/p4_g0c_live_fixture_v1.json",
+            expected_protocol_schema=MODULE.PROTOCOL_SCHEMA_V1,
         )
         plan = MODULE.expand_run_plan(bundle.protocol, Path("/runs"))
 
@@ -121,6 +232,7 @@ class P4G0CProtocolTest(unittest.TestCase):
             REPO / "config/icra27/p4_g0c_protocol_v1.json",
             REPO / "config/icra27/p4_threshold_registry_v1.json",
             REPO / "config/icra27/p4_g0c_live_fixture_v1.json",
+            expected_protocol_schema=MODULE.PROTOCOL_SCHEMA_V1,
         )
         protocol = bundle.protocol
         effective = protocol["effective_values"]
@@ -242,6 +354,23 @@ class P4G0CProtocolTest(unittest.TestCase):
                     "runtime/p4_g0c_export_manifest.json",
                 ],
             )
+
+    def test_inventory_rejects_secondary_v1_and_v2_run_manifests(self):
+        for schema in (
+            "p4_g0c_run_manifest_v1", "p4_g0c_run_manifest_v2"
+        ):
+            with self.subTest(schema=schema), tempfile.TemporaryDirectory() as tmp:
+                run_dir = Path(tmp) / "p4-g0c-r2-seed211-rep01"
+                run_dir.mkdir(parents=True)
+                (run_dir / "secondary.json").write_text(
+                    json.dumps({"schema_version": schema}) + "\n"
+                )
+                with self.assertRaisesRegex(
+                    MODULE.ProtocolError, "secondary G0C run manifest"
+                ):
+                    MODULE.make_run_artifact_inventory(
+                        run_dir, "p4-g0c-r2-seed211-rep01"
+                    )
 
     def test_noncanonical_json_and_calibrated_registry_fail_closed(self):
         with tempfile.TemporaryDirectory() as tmp:

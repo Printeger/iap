@@ -1629,3 +1629,68 @@ the test evidence. After closure/loadability remediation and repository-local
 and the final full repository Python discovery passes 417/417. Five full
 discoveries ran in total: one policy-noncompliant pre-review run and four
 repository-local remediation/final runs, all retained in the evidence.
+
+## 2026-08-24 (ICRA-048 G0C v2 runtime-contract repair)
+
+- IAP-RQ-423: fixed the Supervisor-reproduced v2 effective-value defect. Every
+  G0C schema in `P4_G0C_EXPERIMENTS` now consumes its frozen launch values;
+  the real `_launch_setup` path proves ego-planner parameters, test-planner
+  manifest, run manifest and protocol all agree on
+  `p1.metrics_only=false` and `p2.metrics_only=false`. Non-G0C and v1 behavior
+  remain unchanged.
+- Added an acyclic immutable trust-root split. The shared loader pins exact
+  full-file protocol v2 SHA-256
+  `8b0b2c3ed531680c6c8268738cb1bcb9136f39d2b97e68769e54a53afe59de79`
+  and registry v2 SHA-256
+  `99ccf38c317d45d8605a7e382628a8f0afd32c8097a763d05bfdcc5807beb94f`
+  before dependency validation or output creation. The hash-bound launch does
+  not point back to those full-file hashes: it independently freezes all exact
+  scientific/effective values and requires runner-declared actual hashes.
+  Coordinated protocol/registry drift and isolated registry drift both reject.
+- Runner refuses COMPLETE and analyzer refuses draft eligibility if the
+  production test-planner manifest disagrees with the registered full
+  effective-value set. Exact v2 formulas, numerical floor and derivation,
+  Type-7 quantile definition/method/interpolation/ties/units, path-ratio
+  tolerance and derivation, seeds/repetitions/order/duration/minimum decisions
+  and no-exclusion/no-overwrite/no-retry rules are frozen by the shared and
+  launch contracts.
+- Inventory treats both `p4_g0c_run_manifest_v1` and
+  `p4_g0c_run_manifest_v2` outside the sole registered manifest path as
+  secondary artifacts. Adversarial v1/v2 analyzer regressions reject before
+  draft creation while a production-shaped v2 bundle remains accepted.
+- The minimal canonical hash cascade is launch
+  `162f19384112eeeccd02cd8228d05cd4a5758a72fb9fdeb4a738081777aefe03`
+  -> runtime dependencies
+  `d347896447ff27fd332b4b8764e1fa4368a7410b3080b49c77bc1b5f280d7652`
+  -> protocol v2 -> registry v2. Replacement lineage remains byte-identical at
+  `9268ec4df0994fde82a8a7b07a07cd26f813356a642901576a7ac2703e59c6d5`.
+
+Synthetic reproduction from the repository root:
+
+```bash
+mkdir -p results/icra27/icra048/tmp results/icra27/icra048/scratch/pycache
+TMPDIR="$PWD/results/icra27/icra048/tmp" PYTHONDONTWRITEBYTECODE=1 python3 test/test_p4_g0c_protocol.py
+TMPDIR="$PWD/results/icra27/icra048/tmp" PYTHONDONTWRITEBYTECODE=1 python3 test/test_p4_g0c_runner.py
+TMPDIR="$PWD/results/icra27/icra048/tmp" PYTHONDONTWRITEBYTECODE=1 python3 test/test_p4_g0c_analyzer.py
+TMPDIR="$PWD/results/icra27/icra048/tmp" PYTHONDONTWRITEBYTECODE=1 python3 test/test_p4_g0c_launch_contract.py
+TMPDIR="$PWD/results/icra27/icra048/tmp" PYTHONDONTWRITEBYTECODE=1 python3 test/test_test_planner_launch.py
+TMPDIR="$PWD/results/icra27/icra048/tmp" PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s test -p 'test_p4_g0c*.py'
+PYTHONPYCACHEPREFIX="$PWD/results/icra27/icra048/scratch/pycache" python3 -m py_compile launch/test_planner.launch.py scripts/dev_planner/p4_g0c_protocol.py scripts/dev_planner/run_p4_g0c_calibration.py scripts/dev_planner/analyze_p4_g0c_calibration.py test/test_p4_g0c_protocol.py test/test_p4_g0c_launch_contract.py test/test_p4_g0c_runner.py test/test_p4_g0c_analyzer.py
+python3 -m flake8 --select=E9,F63,F7,F82 launch/test_planner.launch.py scripts/dev_planner/p4_g0c_protocol.py scripts/dev_planner/run_p4_g0c_calibration.py scripts/dev_planner/analyze_p4_g0c_calibration.py test/test_p4_g0c_protocol.py test/test_p4_g0c_launch_contract.py test/test_p4_g0c_runner.py test/test_p4_g0c_analyzer.py
+TMPDIR="$PWD/results/icra27/icra048/tmp" PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s test -p 'test_*.py'
+git diff --check
+```
+
+Initial review found and remediation closed schema-downgrade and Python
+type-coercion gaps. Trusted v2 mode no longer derives from untrusted artifact
+content; exact-type canonical comparisons reject bool/int and int/float
+substitutions, effective hashes are recomputed, and the new contract check is
+v2-only. Run-manifest effective values now receive the same exact-type and
+recomputed-hash checks before runner COMPLETE and analyzer draft eligibility;
+the exact protected v1 path retains registered-v1 CLI mode. Final direct suites
+pass 13/13, 16/16, 28/28, 9/9 and launch golden 16/16; focused discovery passes
+74/74 and the fourth/final full discovery passes 429/429. ICRA-048 ran
+no GPU preflight, ROS/launch, runner/analyzer CLI, calibration, CTest/retained
+binary, smoke, benchmark, bag/RViz, threshold draft/freeze/application, G0C
+verdict, G0D, P5 or cleanup. Result is
+`P4_G0C_V2_CONTRACT_REPAIR_READY_FOR_REVIEW`, never G0C PASS.

@@ -1,0 +1,201 @@
+{
+  "schema_version": "icra048_synthetic_test_results_v1",
+  "red": [
+    {
+      "command": "TMPDIR=$PWD/results/icra27/icra048/tmp PYTHONDONTWRITEBYTECODE=1 python3 test/test_p4_g0c_protocol.py",
+      "tests": 11,
+      "failures": 6,
+      "exit_code": 1,
+      "result": "FAILED_EXPECTED",
+      "reproduced": [
+        "secondary p4_g0c_run_manifest_v2 accepted",
+        "exact formula/floor/derivation/quantile contract not frozen",
+        "coordinated protocol and registry drift accepted",
+        "isolated registry drift accepted"
+      ]
+    },
+    {
+      "command": "TMPDIR=$PWD/results/icra27/icra048/tmp PYTHONDONTWRITEBYTECODE=1 python3 test/test_p4_g0c_launch_contract.py",
+      "tests": 8,
+      "failures": 1,
+      "exit_code": 1,
+      "result": "FAILED_EXPECTED",
+      "reproduced": "real v2 launch path produced metrics_only=true for disabled P1/P2"
+    },
+    {
+      "command": "TMPDIR=$PWD/results/icra27/icra048/tmp PYTHONDONTWRITEBYTECODE=1 python3 test/test_p4_g0c_analyzer.py",
+      "tests": 25,
+      "failures": 1,
+      "exit_code": 1,
+      "result": "FAILED_EXPECTED",
+      "reproduced": "secondary v2 manifest remained DRAFT_ELIGIBLE"
+    }
+  ],
+  "pre_review_green": [
+    {
+      "command": "TMPDIR=$PWD/results/icra27/icra048/tmp PYTHONDONTWRITEBYTECODE=1 python3 test/test_p4_g0c_protocol.py",
+      "tests": 11,
+      "failures": 0,
+      "exit_code": 0
+    },
+    {
+      "command": "TMPDIR=$PWD/results/icra27/icra048/tmp PYTHONDONTWRITEBYTECODE=1 python3 test/test_p4_g0c_runner.py",
+      "tests": 15,
+      "failures": 0,
+      "exit_code": 0
+    },
+    {
+      "command": "TMPDIR=$PWD/results/icra27/icra048/tmp PYTHONDONTWRITEBYTECODE=1 python3 test/test_p4_g0c_analyzer.py",
+      "tests": 26,
+      "failures": 0,
+      "exit_code": 0
+    },
+    {
+      "command": "TMPDIR=$PWD/results/icra27/icra048/tmp PYTHONDONTWRITEBYTECODE=1 python3 test/test_p4_g0c_launch_contract.py",
+      "tests": 9,
+      "failures": 0,
+      "exit_code": 0
+    },
+    {
+      "command": "TMPDIR=$PWD/results/icra27/icra048/tmp PYTHONDONTWRITEBYTECODE=1 python3 test/test_test_planner_launch.py",
+      "tests": 16,
+      "failures": 0,
+      "exit_code": 0
+    },
+    {
+      "command": "TMPDIR=$PWD/results/icra27/icra048/tmp PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s test -p 'test_p4_g0c*.py'",
+      "tests": 69,
+      "failures": 0,
+      "exit_code": 0
+    },
+    {
+      "command": "TMPDIR=$PWD/results/icra27/icra048/tmp PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s test -p 'test_*.py'",
+      "tests": 424,
+      "failures": 0,
+      "exit_code": 0,
+      "repository_local_tmpdir": true,
+      "full_discovery_invocation_count": 1,
+      "note": "one pre-existing unrelated ResourceWarning and expected diagnostic stdout were emitted"
+    }
+  ],
+  "review_remediation_green": [
+    {
+      "command": "TMPDIR=$PWD/results/icra27/icra048/tmp PYTHONDONTWRITEBYTECODE=1 python3 test/test_p4_g0c_protocol.py",
+      "tests": 13,
+      "failures": 0,
+      "exit_code": 0
+    },
+    {
+      "command": "TMPDIR=$PWD/results/icra27/icra048/tmp PYTHONDONTWRITEBYTECODE=1 python3 test/test_p4_g0c_runner.py",
+      "tests": 15,
+      "failures": 0,
+      "exit_code": 0
+    },
+    {
+      "command": "TMPDIR=$PWD/results/icra27/icra048/tmp PYTHONDONTWRITEBYTECODE=1 python3 test/test_p4_g0c_analyzer.py",
+      "tests": 27,
+      "failures": 0,
+      "exit_code": 0
+    },
+    {
+      "command": "TMPDIR=$PWD/results/icra27/icra048/tmp PYTHONDONTWRITEBYTECODE=1 python3 test/test_p4_g0c_launch_contract.py",
+      "tests": 9,
+      "failures": 0,
+      "exit_code": 0
+    },
+    {
+      "command": "TMPDIR=$PWD/results/icra27/icra048/tmp PYTHONDONTWRITEBYTECODE=1 python3 test/test_test_planner_launch.py",
+      "tests": 16,
+      "failures": 0,
+      "exit_code": 0
+    },
+    {
+      "command": "TMPDIR=$PWD/results/icra27/icra048/tmp PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s test -p 'test_p4_g0c*.py'",
+      "tests": 72,
+      "failures": 0,
+      "exit_code": 0
+    },
+    {
+      "command": "TMPDIR=$PWD/results/icra27/icra048/tmp PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s test -p 'test_*.py'",
+      "tests": 427,
+      "failures": 0,
+      "exit_code": 0,
+      "repository_local_tmpdir": true,
+      "full_discovery_invocation_count_total": 2,
+      "note": "one pre-existing unrelated ResourceWarning and expected diagnostic stdout were emitted"
+    }
+  ],
+  "final_review_remediation_green": [
+    {
+      "command": "TMPDIR=$PWD/results/icra27/icra048/tmp PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s test -p 'test_*.py'",
+      "tests": 427,
+      "failures": 0,
+      "exit_code": 0,
+      "repository_local_tmpdir": true,
+      "full_discovery_invocation_count_total": 3,
+      "reason": "registered v1 runner CLI trusted-mode preservation"
+    },
+    {
+      "command": "TMPDIR=$PWD/results/icra27/icra048/tmp PYTHONDONTWRITEBYTECODE=1 python3 test/test_p4_g0c_protocol.py",
+      "tests": 13,
+      "failures": 0,
+      "exit_code": 0
+    },
+    {
+      "command": "TMPDIR=$PWD/results/icra27/icra048/tmp PYTHONDONTWRITEBYTECODE=1 python3 test/test_p4_g0c_runner.py",
+      "tests": 16,
+      "failures": 0,
+      "exit_code": 0
+    },
+    {
+      "command": "TMPDIR=$PWD/results/icra27/icra048/tmp PYTHONDONTWRITEBYTECODE=1 python3 test/test_p4_g0c_analyzer.py",
+      "tests": 28,
+      "failures": 0,
+      "exit_code": 0
+    },
+    {
+      "command": "TMPDIR=$PWD/results/icra27/icra048/tmp PYTHONDONTWRITEBYTECODE=1 python3 test/test_p4_g0c_launch_contract.py",
+      "tests": 9,
+      "failures": 0,
+      "exit_code": 0
+    },
+    {
+      "command": "TMPDIR=$PWD/results/icra27/icra048/tmp PYTHONDONTWRITEBYTECODE=1 python3 test/test_test_planner_launch.py",
+      "tests": 16,
+      "failures": 0,
+      "exit_code": 0
+    },
+    {
+      "command": "TMPDIR=$PWD/results/icra27/icra048/tmp PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s test -p 'test_p4_g0c*.py'",
+      "tests": 74,
+      "failures": 0,
+      "exit_code": 0
+    },
+    {
+      "command": "TMPDIR=$PWD/results/icra27/icra048/tmp PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s test -p 'test_*.py'",
+      "tests": 429,
+      "failures": 0,
+      "exit_code": 0,
+      "repository_local_tmpdir": true,
+      "full_discovery_invocation_count_total": 4,
+      "reason": "final run-manifest exact-type and recomputed-hash remediation",
+      "note": "one pre-existing unrelated ResourceWarning and expected diagnostic stdout were emitted"
+    }
+  ],
+  "static_checks": {
+    "python_syntax": "PASS",
+    "fatal_only_flake8": "PASS",
+    "canonical_json": "PASS",
+    "git_diff_check": "PASS"
+  },
+  "forbidden_runtime_invocations": {
+    "gpu_preflight": 0,
+    "ros_or_launch": 0,
+    "runner_cli": 0,
+    "analyzer_cli": 0,
+    "calibration": 0,
+    "ctest_or_retained_binary": 0,
+    "smoke_or_benchmark": 0,
+    "threshold_action": 0
+  }
+}

@@ -44,6 +44,7 @@ P4_G0C_REGISTRY_SHA256 = (
 P4_G0C_FIXTURE_SHA256 = (
     "985aabcd486186a4430305b409669422499f891d529369c6f0bfe8e7dfe0d710"
 )
+P4_G0C_RUNTIME_HASH_REQUIRED = "__declared_actual_sha256_required__"
 P4_G0C_ARTIFACT_PRESET = {
     "p4.g0c.protocol_path": "config/icra27/p4_g0c_protocol_v1.json",
     "p4.g0c.protocol_sha256": P4_G0C_PROTOCOL_SHA256,
@@ -54,9 +55,9 @@ P4_G0C_ARTIFACT_PRESET = {
 }
 P4_G0C_ARTIFACT_PRESET_V2 = {
     "p4.g0c.protocol_path": "config/icra27/p4_g0c_protocol_v2.json",
-    "p4.g0c.protocol_sha256": "",
+    "p4.g0c.protocol_sha256": P4_G0C_RUNTIME_HASH_REQUIRED,
     "p4.g0c.registry_path": "config/icra27/p4_threshold_registry_v2.json",
-    "p4.g0c.registry_sha256": "",
+    "p4.g0c.registry_sha256": P4_G0C_RUNTIME_HASH_REQUIRED,
     "p4.g0c.fixture_path": "config/icra27/p4_g0c_live_fixture_v1.json",
     "p4.g0c.fixture_sha256": P4_G0C_FIXTURE_SHA256,
 }
@@ -94,6 +95,66 @@ P4_G0C_FROZEN_LAUNCH_VALUES = {
     "record_bag": "false",
     "start_rviz": "false",
     "run_validator": "true",
+}
+P4_G0C_FROZEN_SCIENTIFIC_IDENTITY = {
+    "matrix_order": "seed_major_repetition_ascending",
+    "minimum_complete_decisions": 100,
+    "no_exclusion": True,
+    "no_overwrite": True,
+    "no_retry": True,
+    "numerical_noise_floor": {
+        "calibration_mutable": False,
+        "derivation": {
+            "artifact": "ieee754_binary64_precision_bound_v1",
+            "binary64_epsilon": 2.220446049250313e-16,
+            "multiplier": 4096,
+            "rounding": "round_up_to_1e-12",
+            "source": "deterministic_numeric_precision_only",
+            "unrounded_bound": 9.094947017729282e-13,
+        },
+        "unit": "risk_cost",
+        "value": 1e-12,
+    },
+    "path_ratio_consistency": {
+        "absolute_tolerance": 2e-5,
+        "calibration_mutable": False,
+        "derivation": {
+            "eligible_ratio_cap": 1.3,
+            "per_value_max_relative_rounding": 5e-6,
+            "rounding": "round_up_to_2e-5",
+            "serialization": (
+                "std_ostream_defaultfloat_precision_6_significant_digits"
+            ),
+            "three_value_worst_case_absolute_bound": 1.95002e-5,
+        },
+        "unit": "dimensionless",
+    },
+    "quantiles": {
+        "definition": (
+            "sort finite values ascending; h=(n-1)*p; interpolate between "
+            "floor(h) and ceil(h)"
+        ),
+        "interpolation": "linear_lower_plus_fraction_times_upper_minus_lower",
+        "method": "TYPE_7_LINEAR",
+        "tie_behavior": "stable_input_row_index",
+        "units": {
+            "improvement": "risk_cost",
+            "path_ratio": "dimensionless",
+            "total_search": "s",
+        },
+    },
+    "repetitions": [1, 2, 3],
+    "run_duration_s": 90,
+    "run_id_template": "p4-g0c-r2-seed{seed}-rep{repetition:02d}",
+    "seeds": [211, 223, 237, 253, 271],
+    "threshold_formulas": {
+        "max_improvement_min": "Q10(original_max-risk_max)",
+        "mean_improvement_min": "Q10(original_mean-risk_mean)",
+        "path_ratio_max": "min(1.30,Q95(path_ratio)+0.02)",
+        "total_search_timeout_s": (
+            "min(0.40,Q95(total_search_s)+max(0.01,0.20*Q95(total_search_s)))"
+        ),
+    },
 }
 
 
@@ -166,16 +227,20 @@ def _p4_g0c_binding(
         if not path.is_file():
             raise RuntimeError(f"P4-G0C {name} artifact is missing: {path}")
     actual_hashes = {name: _sha256_file(path) for name, path in paths.items()}
-    registered_hashes = (
-        actual_hashes
-        if replacement
-        else {
+    if replacement:
+        # The full v2 protocol/registry trust anchor lives in the shared loader
+        # to keep protocol -> dependency -> launch acyclic. This launch freezes
+        # science independently and requires caller-declared actual hashes.
+        registered_hashes = {"fixture": P4_G0C_FIXTURE_SHA256}
+    else:
+        registered_hashes = {
             "protocol": P4_G0C_PROTOCOL_SHA256,
             "registry": P4_G0C_REGISTRY_SHA256,
             "fixture": P4_G0C_FIXTURE_SHA256,
         }
-    )
     for name, actual in actual_hashes.items():
+        if name not in registered_hashes:
+            continue
         if actual != registered_hashes[name]:
             raise RuntimeError(f"P4-G0C {name} is not the registered artifact")
     declared_hashes = {
@@ -232,7 +297,19 @@ def _p4_g0c_binding(
     )
     if protocol.get("schema_version") != expected_protocol_schema:
         raise RuntimeError("P4-G0C protocol schema mismatch")
-    if protocol.get("effective_values") != typed_values:
+    if replacement and any(
+        _canonical_json_bytes(protocol.get(key))
+        != _canonical_json_bytes(value)
+        for key, value in P4_G0C_FROZEN_SCIENTIFIC_IDENTITY.items()
+    ):
+        raise RuntimeError("P4-G0C v2 scientific identity mismatch")
+    if (
+        replacement
+        and _canonical_json_bytes(protocol.get("effective_values"))
+        != _canonical_json_bytes(typed_values)
+    ) or (
+        not replacement and protocol.get("effective_values") != typed_values
+    ):
         raise RuntimeError("P4-G0C protocol effective config mismatch")
     if (
         registry.get("schema_version") != (
@@ -247,8 +324,13 @@ def _p4_g0c_binding(
             "path_ratio_max", "total_search_timeout_s",
         }
         or any(value is not None for value in registry.get("gates", {}).values())
-        or registry.get("numerical_noise_floor")
-        != protocol.get("numerical_noise_floor")
+        or (
+            _canonical_json_bytes(registry.get("numerical_noise_floor"))
+            != _canonical_json_bytes(protocol.get("numerical_noise_floor"))
+            if replacement
+            else registry.get("numerical_noise_floor")
+            != protocol.get("numerical_noise_floor")
+        )
     ):
         raise RuntimeError("P4-G0C proposed registry contract mismatch")
     if (
@@ -1883,7 +1965,7 @@ def _param_int(context, name):
 
 def _effective_metrics_only(context, name, enabled, overrides):
     experiment = LaunchConfiguration("experiment").perform(context).strip()
-    if name in overrides or experiment == P4_G0C_EXPERIMENT:
+    if name in overrides or experiment in P4_G0C_EXPERIMENTS:
         return _param_bool(context, name)
     return not enabled
 

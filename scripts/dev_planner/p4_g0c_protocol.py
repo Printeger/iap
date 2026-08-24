@@ -66,6 +66,50 @@ DECISION_IDENTITY_COLUMNS = (
 )
 RUN_ARTIFACT_INVENTORY_SCHEMA = "p4_g0c_run_artifact_inventory_v1"
 RUN_ARTIFACT_INVENTORY_FILENAME = "p4_g0c_artifact_inventory.json"
+# Acyclic trust root: these full-file hashes live only in the shared loader.
+# The protocol binds dependency -> launch, so the hash-bound launch must never
+# embed either value and create protocol -> dependency -> launch -> protocol.
+P4_G0C_PROTOCOL_V2_TRUSTED_SHA256 = (
+    "8b0b2c3ed531680c6c8268738cb1bcb9136f39d2b97e68769e54a53afe59de79"
+)
+P4_G0C_REGISTRY_V2_TRUSTED_SHA256 = (
+    "99ccf38c317d45d8605a7e382628a8f0afd32c8097a763d05bfdcc5807beb94f"
+)
+FROZEN_NUMERICAL_NOISE_FLOOR = {
+    "calibration_mutable": False,
+    "derivation": {
+        "artifact": "ieee754_binary64_precision_bound_v1",
+        "binary64_epsilon": 2.220446049250313e-16,
+        "multiplier": 4096,
+        "rounding": "round_up_to_1e-12",
+        "source": "deterministic_numeric_precision_only",
+        "unrounded_bound": 9.094947017729282e-13,
+    },
+    "unit": "risk_cost",
+    "value": 1e-12,
+}
+FROZEN_QUANTILES = {
+    "definition": (
+        "sort finite values ascending; h=(n-1)*p; interpolate between "
+        "floor(h) and ceil(h)"
+    ),
+    "interpolation": "linear_lower_plus_fraction_times_upper_minus_lower",
+    "method": "TYPE_7_LINEAR",
+    "tie_behavior": "stable_input_row_index",
+    "units": {
+        "improvement": "risk_cost",
+        "path_ratio": "dimensionless",
+        "total_search": "s",
+    },
+}
+FROZEN_THRESHOLD_FORMULAS = {
+    "max_improvement_min": "Q10(original_max-risk_max)",
+    "mean_improvement_min": "Q10(original_mean-risk_mean)",
+    "path_ratio_max": "min(1.30,Q95(path_ratio)+0.02)",
+    "total_search_timeout_s": (
+        "min(0.40,Q95(total_search_s)+max(0.01,0.20*Q95(total_search_s)))"
+    ),
+}
 
 
 class ProtocolError(RuntimeError):
@@ -105,6 +149,11 @@ def canonical_bytes(payload: Any) -> bytes:
     ).encode("utf-8")
 
 
+def exact_json_equal(actual: Any, expected: Any) -> bool:
+    """Compare JSON values without Python's bool/int or int/float coercion."""
+    return canonical_bytes(actual) == canonical_bytes(expected)
+
+
 def sha256_file(path: Path) -> str:
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
@@ -117,6 +166,52 @@ def effective_config_sha256(effective_values: dict[str, Any]) -> str:
         ensure_ascii=True,
     ).encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
+
+
+def validate_test_planner_effective_contract(
+    bundle: ProtocolBundle, launch_manifest: dict[str, Any]
+) -> None:
+    """Bind launch-emitted effective values to the reviewed protocol bundle."""
+    if bundle.protocol.get("schema_version") != PROTOCOL_SCHEMA_V2:
+        return
+    binding = launch_manifest.get("p4.g0c")
+    if not isinstance(binding, dict):
+        raise ProtocolError("test-planner G0C binding is missing")
+    expected = {
+        "schema_version": "p4_g0c_run_manifest_v2",
+        "protocol_sha256": bundle.protocol_sha256,
+        "registry_sha256": bundle.registry_sha256,
+        "fixture_sha256": bundle.fixture_sha256,
+        "effective_values": bundle.protocol["effective_values"],
+        "effective_config_sha256": effective_config_sha256(
+            bundle.protocol["effective_values"]
+        ),
+        "selection_applied": False,
+        "record_bag": False,
+        "start_rviz": False,
+    }
+    expected.update({
+        "dependency_manifest_sha256": bundle.protocol[
+            "runtime_dependency_manifest"
+        ]["sha256"],
+        "replacement_lineage_sha256": bundle.protocol[
+            "replacement_lineage"
+        ]["sha256"],
+    })
+    binding_effective = binding.get("effective_values")
+    if (
+        not isinstance(binding_effective, dict)
+        or binding.get("effective_config_sha256")
+        != effective_config_sha256(binding_effective)
+    ):
+        raise ProtocolError(
+            "test-planner G0C binding effective hash mismatch"
+        )
+    for key, value in expected.items():
+        if not exact_json_equal(binding.get(key), value):
+            raise ProtocolError(
+                f"test-planner G0C binding mismatch: {key}"
+            )
 
 
 def validate_decision_header(fieldnames: list[str] | None) -> None:
@@ -282,7 +377,9 @@ def _validate_registered_artifact_bytes(path: str, raw: bytes) -> None:
             payload = None
         if (
             isinstance(payload, dict)
-            and payload.get("schema_version") == "p4_g0c_run_manifest_v1"
+            and payload.get("schema_version") in {
+                "p4_g0c_run_manifest_v1", "p4_g0c_run_manifest_v2"
+            }
         ):
             raise ProtocolError(f"secondary G0C run manifest: {path}")
     if pure.suffix.lower() == ".csv" and path != "p4_decisions.csv":
@@ -439,9 +536,16 @@ def load_canonical_json(path: Path) -> dict[str, Any]:
 def registered_run_ids(protocol: dict[str, Any]) -> list[str]:
     seeds = protocol.get("seeds")
     repetitions = protocol.get("repetitions")
-    if seeds != [211, 223, 237, 253, 271] or repetitions != [1, 2, 3]:
-        raise ProtocolError("protocol seed/repetition matrix is not frozen")
     schema = protocol.get("schema_version")
+    matrix_matches = (
+        exact_json_equal(seeds, [211, 223, 237, 253, 271])
+        and exact_json_equal(repetitions, [1, 2, 3])
+        if schema == PROTOCOL_SCHEMA_V2
+        else seeds == [211, 223, 237, 253, 271]
+        and repetitions == [1, 2, 3]
+    )
+    if not matrix_matches:
+        raise ProtocolError("protocol seed/repetition matrix is not frozen")
     if schema == PROTOCOL_SCHEMA_V1:
         template = "p4-g0c-seed{seed}-rep{repetition:02d}"
     elif schema == PROTOCOL_SCHEMA_V2:
@@ -464,7 +568,11 @@ def validate_protocol(protocol: dict[str, Any]) -> None:
         raise ProtocolError("registered run IDs are not the exact immutable matrix")
     if protocol.get("matrix_order") != "seed_major_repetition_ascending":
         raise ProtocolError("matrix order is not frozen")
-    if protocol.get("minimum_complete_decisions") != 100:
+    if (
+        not exact_json_equal(protocol.get("minimum_complete_decisions"), 100)
+        if schema == PROTOCOL_SCHEMA_V2
+        else protocol.get("minimum_complete_decisions") != 100
+    ):
         raise ProtocolError("minimum complete-decision count is not 100")
     if any(protocol.get(key) is not True for key in ("no_overwrite", "no_exclusion", "no_retry")):
         raise ProtocolError("no-overwrite/no-exclusion/no-retry rules must be true")
@@ -514,21 +622,53 @@ def validate_protocol(protocol: dict[str, Any]) -> None:
     if set(effective) != set(required):
         raise ProtocolError("effective protocol values must match the exact frozen set")
     for key, value in required.items():
-        if effective.get(key) != value:
+        if (
+            not exact_json_equal(effective.get(key), value)
+            if schema == PROTOCOL_SCHEMA_V2
+            else effective.get(key) != value
+        ):
             raise ProtocolError(f"effective protocol value is not frozen: {key}")
     floor = protocol.get("numerical_noise_floor")
-    if not isinstance(floor, dict):
-        raise ProtocolError("numerical-noise floor is missing")
-    value = floor.get("value")
-    if not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
-        raise ProtocolError("numerical-noise floor must be finite and nonnegative")
-    if floor.get("unit") != "risk_cost" or floor.get("calibration_mutable") is not False:
-        raise ProtocolError("numerical-noise floor unit/mutability is invalid")
     quantiles = protocol.get("quantiles")
-    if not isinstance(quantiles, dict) or quantiles.get("method") != "TYPE_7_LINEAR":
-        raise ProtocolError("quantile method is not frozen")
-    if quantiles.get("tie_behavior") != "stable_input_row_index":
-        raise ProtocolError("quantile tie behavior is not frozen")
+    if schema == PROTOCOL_SCHEMA_V2:
+        if not exact_json_equal(floor, FROZEN_NUMERICAL_NOISE_FLOOR):
+            raise ProtocolError(
+                "scientific contract numerical-noise floor is not frozen"
+            )
+        if not exact_json_equal(quantiles, FROZEN_QUANTILES):
+            raise ProtocolError("scientific contract quantiles are not frozen")
+        if not exact_json_equal(
+            protocol.get("threshold_formulas"), FROZEN_THRESHOLD_FORMULAS
+        ):
+            raise ProtocolError(
+                "scientific contract threshold formulas are not frozen"
+            )
+    else:
+        if not isinstance(floor, dict):
+            raise ProtocolError("numerical-noise floor is missing")
+        value = floor.get("value")
+        if (
+            not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            or value < 0
+        ):
+            raise ProtocolError(
+                "numerical-noise floor must be finite and nonnegative"
+            )
+        if (
+            floor.get("unit") != "risk_cost"
+            or floor.get("calibration_mutable") is not False
+        ):
+            raise ProtocolError(
+                "numerical-noise floor unit/mutability is invalid"
+            )
+        if (
+            not isinstance(quantiles, dict)
+            or quantiles.get("method") != "TYPE_7_LINEAR"
+        ):
+            raise ProtocolError("quantile method is not frozen")
+        if quantiles.get("tie_behavior") != "stable_input_row_index":
+            raise ProtocolError("quantile tie behavior is not frozen")
     ratio = protocol.get("path_ratio_consistency")
     expected_ratio = {
         "absolute_tolerance": 2e-5,
@@ -544,14 +684,20 @@ def validate_protocol(protocol: dict[str, Any]) -> None:
         },
         "unit": "dimensionless",
     }
-    if ratio != expected_ratio:
-        raise ProtocolError("path-ratio consistency tolerance is not frozen")
+    if (
+        not exact_json_equal(ratio, expected_ratio)
+        if schema == PROTOCOL_SCHEMA_V2
+        else ratio != expected_ratio
+    ):
+        raise ProtocolError(
+            "scientific contract path-ratio consistency is not frozen"
+        )
     if schema == PROTOCOL_SCHEMA_V2:
         if protocol.get("run_id_template") != (
             "p4-g0c-r2-seed{seed}-rep{repetition:02d}"
         ):
             raise ProtocolError("replacement run-ID template is not frozen")
-        if protocol.get("run_duration_s") != 90:
+        if not exact_json_equal(protocol.get("run_duration_s"), 90):
             raise ProtocolError("replacement run duration is not 90 seconds")
         for key, expected_schema in (
             ("runtime_dependency_manifest", "p4_g0c_runtime_dependencies_v2"),
@@ -654,7 +800,10 @@ def validate_replacement_lineage(
 
 
 def load_protocol_bundle(
-    protocol_path: Path, registry_path: Path, fixture_path: Path
+    protocol_path: Path,
+    registry_path: Path,
+    fixture_path: Path,
+    expected_protocol_schema: str = PROTOCOL_SCHEMA_V2,
 ) -> ProtocolBundle:
     protocol_path = Path(protocol_path)
     registry_path = Path(registry_path)
@@ -662,20 +811,29 @@ def load_protocol_bundle(
     protocol = load_canonical_json(protocol_path)
     registry = load_canonical_json(registry_path)
     fixture = load_canonical_json(fixture_path)
+    protocol_sha = sha256_file(protocol_path)
+    registry_sha = sha256_file(registry_path)
+    fixture_sha = sha256_file(fixture_path)
+    if expected_protocol_schema not in {PROTOCOL_SCHEMA_V1, PROTOCOL_SCHEMA_V2}:
+        raise ProtocolError("trusted protocol mode is invalid")
+    if protocol.get("schema_version") != expected_protocol_schema:
+        raise ProtocolError("protocol schema does not match trusted mode")
+    if expected_protocol_schema == PROTOCOL_SCHEMA_V2 and (
+        protocol_sha != P4_G0C_PROTOCOL_V2_TRUSTED_SHA256
+        or registry_sha != P4_G0C_REGISTRY_V2_TRUSTED_SHA256
+    ):
+        raise ProtocolError("v2 trust anchor protocol/registry hash mismatch")
     validate_protocol(protocol)
     validate_proposed_registry(registry)
     expected_registry_schema = (
         REGISTRY_SCHEMA_V2
-        if protocol.get("schema_version") == PROTOCOL_SCHEMA_V2
+        if expected_protocol_schema == PROTOCOL_SCHEMA_V2
         else REGISTRY_SCHEMA_V1
     )
     if registry.get("schema_version") != expected_registry_schema:
         raise ProtocolError("protocol and registry versions do not match")
     if fixture.get("schema_version") != FIXTURE_SCHEMA:
         raise ProtocolError("unknown P4-G0C fixture schema")
-    protocol_sha = sha256_file(protocol_path)
-    registry_sha = sha256_file(registry_path)
-    fixture_sha = sha256_file(fixture_path)
     if registry.get("protocol_sha256") != protocol_sha:
         raise ProtocolError("registry protocol hash mismatch")
     live_fixture = protocol.get("live_fixture")
@@ -683,7 +841,7 @@ def load_protocol_bundle(
         raise ProtocolError("protocol fixture hash mismatch")
     if registry.get("numerical_noise_floor") != protocol.get("numerical_noise_floor"):
         raise ProtocolError("registry numerical-noise floor mismatch")
-    if protocol.get("schema_version") == PROTOCOL_SCHEMA_V2:
+    if expected_protocol_schema == PROTOCOL_SCHEMA_V2:
         repository_root = protocol_path.resolve().parents[2]
         for key in ("runtime_dependency_manifest", "replacement_lineage"):
             binding = protocol[key]

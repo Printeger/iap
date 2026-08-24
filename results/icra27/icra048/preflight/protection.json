@@ -1,0 +1,68 @@
+{
+  "schema_version": "icra048_protection_v1",
+  "task_head": "8657412bc5fcbc6b727ca186b7d642ad3b0d5b49",
+  "branch_sync": {
+    "initial_divergence_local_remote": [0, 0],
+    "pre_commit_divergence_local_remote": [0, 0],
+    "pre_commit_fetch_completed": true
+  },
+  "protected_pdf": {
+    "path": "docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf",
+    "sha256_before": "1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6",
+    "sha256_after": "1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6",
+    "tracked": false,
+    "staged": false,
+    "byte_identical": true
+  },
+  "icra046_tree": {
+    "path": "results/icra27/icra046",
+    "aggregate_sha256_before": "823d41bf0e9f5e17ede8b538624ba71d46626d5e1369451f4989a9a0e4cd96b1",
+    "aggregate_sha256_after": "823d41bf0e9f5e17ede8b538624ba71d46626d5e1369451f4989a9a0e4cd96b1",
+    "file_count_before": 3815,
+    "file_count_after": 3815,
+    "directory_count_before": 759,
+    "directory_count_after": 759,
+    "size_bytes_before": 4884473805,
+    "size_bytes_after": 4884473805,
+    "byte_identical": true
+  },
+  "icra047_evidence": {
+    "path": "results/icra27/icra047",
+    "aggregate_sha256_before": "b411cfd9b251cfd6de31bd250d39ce63414a8e6df2c8f40f4593041fb28def81",
+    "aggregate_sha256_after": "b411cfd9b251cfd6de31bd250d39ce63414a8e6df2c8f40f4593041fb28def81",
+    "byte_identical": true
+  },
+  "v1_artifacts": {
+    "protocol_sha256_before_after": "9e89ea42675459a63853d98845f02b7fe5b9434a9f28fcbd6ef5ba1bc5bd906d",
+    "registry_sha256_before_after": "1a9e206c12133035b29dd4ff573cf3868cf4765f3b9213362e507d85c24deaff",
+    "fixture_sha256_before_after": "985aabcd486186a4430305b409669422499f891d529369c6f0bfe8e7dfe0d710"
+  },
+  "v2_artifacts": {
+    "protocol_sha256_before": "b7a6abe09cf4a5030366d212b9fc74e46c4409d095e9313d6a13af69d75ef920",
+    "protocol_sha256_after": "8b0b2c3ed531680c6c8268738cb1bcb9136f39d2b97e68769e54a53afe59de79",
+    "registry_sha256_before": "7be0f4a02e8b949bd4429cf5c61113f05258f511e12100941ffebbcc3c2d4ae9",
+    "registry_sha256_after": "99ccf38c317d45d8605a7e382628a8f0afd32c8097a763d05bfdcc5807beb94f",
+    "runtime_dependency_sha256_before": "1af4d640f69637437f61181e81d45c2f5f1f72a8cafd2dc63a6a10ae63f3c1d6",
+    "runtime_dependency_sha256_after": "d347896447ff27fd332b4b8764e1fa4368a7410b3080b49c77bc1b5f280d7652",
+    "launch_sha256_before": "4114404a65cd0d848bb25b1f11b9cf5d397eb683b372feb1465ed4b139ed2873",
+    "launch_sha256_after": "162f19384112eeeccd02cd8228d05cd4a5758a72fb9fdeb4a738081777aefe03",
+    "lineage_sha256_before_after": "9268ec4df0994fde82a8a7b07a07cd26f813356a642901576a7ac2703e59c6d5"
+  },
+  "live_boundaries": {
+    "gpu_preflight_invocations": 0,
+    "ros_or_launch_invocations": 0,
+    "runner_cli_invocations": 0,
+    "analyzer_cli_invocations": 0,
+    "calibration_invocations": 0,
+    "ctest_or_retained_binary_invocations": 0,
+    "smoke_or_benchmark_invocations": 0,
+    "threshold_actions": 0
+  },
+  "final_audit": {
+    "checked_utc": "2026-08-24T13:06:22Z",
+    "task_process_count": 0,
+    "available_bytes": 122383396864,
+    "changed_paths_allowlisted": true,
+    "icra048_scratch_staged": false
+  }
+}

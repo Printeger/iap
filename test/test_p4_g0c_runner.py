@@ -124,6 +124,16 @@ class P4G0CRunnerTest(unittest.TestCase):
         launch_manifest_path.write_text(json.dumps({
             "schema_version": "test_planner_manifest_v1",
             "run_id": record["run_id"],
+            "p4.g0c": {
+                key: manifest[key] for key in (
+                    "schema_version", "protocol_sha256", "registry_sha256",
+                    "fixture_sha256", "effective_values",
+                    "effective_config_sha256", "selection_applied",
+                    "record_bag", "start_rviz",
+                    "dependency_manifest_sha256",
+                    "replacement_lineage_sha256",
+                )
+            },
         }) + "\n")
         timing = run_dir / "runtime/profiling/iap_timing.csv"
         timing.parent.mkdir(parents=True)
@@ -565,6 +575,64 @@ class P4G0CRunnerTest(unittest.TestCase):
                     record,
                     {"required_processes_ok": True},
                 )
+
+    def test_launch_effective_disagreement_fails_finalization(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            record = MODULE.expand_run_plan(
+                self.bundle.protocol, Path(tmp)
+            )[0]
+            run_dir = Path(record["run_dir"])
+            run_dir.mkdir()
+            self._write_production_outputs(record, 0)
+            launch_path = (
+                run_dir
+                / "exports/synthetic_run_token/test_planner_manifest.json"
+            )
+            launch_manifest = json.loads(launch_path.read_text())
+            launch_manifest["p4.g0c"]["effective_values"][
+                "p2.metrics_only"
+            ] = True
+            launch_manifest["p4.g0c"]["effective_config_sha256"] = (
+                MODULE.effective_config_sha256(
+                    launch_manifest["p4.g0c"]["effective_values"]
+                )
+            )
+            launch_path.write_text(json.dumps(launch_manifest) + "\n")
+            with self.assertRaisesRegex(
+                MODULE.RunnerError, "launch manifest effective contract mismatch"
+            ):
+                MODULE._validate_and_finalize_run(
+                    self.bundle,
+                    record,
+                    {"required_processes_ok": True},
+                )
+            persisted = json.loads(
+                (run_dir / "p4_g0c_run_manifest.json").read_text()
+            )
+            self.assertNotEqual(persisted.get("runner_state"), "COMPLETE")
+
+    def test_run_manifest_python_equal_drift_fails_before_complete(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            record = MODULE.expand_run_plan(
+                self.bundle.protocol, Path(tmp)
+            )[0]
+            run_dir = Path(record["run_dir"])
+            run_dir.mkdir()
+            self._write_production_outputs(record, 0)
+            manifest_path = run_dir / "p4_g0c_run_manifest.json"
+            manifest = json.loads(manifest_path.read_text())
+            manifest["effective_values"]["p1.metrics_only"] = 0
+            manifest_path.write_text(json.dumps(manifest) + "\n")
+            with self.assertRaisesRegex(
+                MODULE.RunnerError, "effective_config_sha256"
+            ):
+                MODULE._validate_and_finalize_run(
+                    self.bundle,
+                    record,
+                    {"required_processes_ok": True},
+                )
+            persisted = json.loads(manifest_path.read_text())
+            self.assertNotEqual(persisted.get("runner_state"), "COMPLETE")
 
     def test_launch_command_binds_identity_without_redeclaring_frozen_switches(self):
         record = MODULE.expand_run_plan(self.bundle.protocol, Path("/runs"))[0]

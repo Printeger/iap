@@ -32,12 +32,14 @@ from p4_g0c_protocol import (  # noqa: E402
     canonical_bytes,
     decision_identity,
     effective_config_sha256,
+    exact_json_equal,
     expand_run_plan,
     load_canonical_json,
     load_protocol_bundle,
     make_run_artifact_inventory,
     parse_decision_row,
     sha256_file,
+    validate_test_planner_effective_contract,
     validate_decision_header,
 )
 from run_gate0_qualification import (  # noqa: E402
@@ -49,6 +51,7 @@ from run_gate0_qualification import (  # noqa: E402
 RUNNER_SCHEMA_V1 = "p4_g0c_runner_state_v3"
 RUNNER_SCHEMA_V2 = "p4_g0c_runner_state_v4"
 DEPENDENCY_SCHEMA = "p4_g0c_runtime_dependencies_v2"
+LEGACY_PROTOCOL_SCHEMA = "p4_g0c_protocol_v1"
 REPLACEMENT_PROTOCOL_SCHEMA = "p4_g0c_protocol_v2"
 EXPECTED_ACTIVE_PACKAGES = {
     "iap", "ego_planner", "local_sensing", "odom_visualization",
@@ -77,9 +80,17 @@ class RunnerError(RuntimeError):
 
 
 def load_bundle(
-    protocol_path: Path, registry_path: Path, fixture_path: Path
+    protocol_path: Path,
+    registry_path: Path,
+    fixture_path: Path,
+    expected_protocol_schema: str = REPLACEMENT_PROTOCOL_SCHEMA,
 ) -> ProtocolBundle:
-    bundle = load_protocol_bundle(protocol_path, registry_path, fixture_path)
+    bundle = load_protocol_bundle(
+        protocol_path,
+        registry_path,
+        fixture_path,
+        expected_protocol_schema=expected_protocol_schema,
+    )
     bundle.protocol_path = str(Path(protocol_path).resolve())
     bundle.registry_path = str(Path(registry_path).resolve())
     bundle.fixture_path = str(Path(fixture_path).resolve())
@@ -649,8 +660,22 @@ def _validate_and_finalize_run(
                 "replacement_lineage"
             ]["sha256"],
         })
+        manifest_effective = manifest.get("effective_values")
+        if (
+            not isinstance(manifest_effective, dict)
+            or manifest.get("effective_config_sha256")
+            != effective_config_sha256(manifest_effective)
+        ):
+            raise RunnerError(
+                f"run manifest binding mismatch: "
+                f"{record['run_id']}:effective_config_sha256"
+            )
     for key, expected in required_manifest.items():
-        if manifest.get(key) != expected:
+        if (
+            not exact_json_equal(manifest.get(key), expected)
+            if replacement
+            else manifest.get(key) != expected
+        ):
             raise RunnerError(f"run manifest binding mismatch: {record['run_id']}:{key}")
     try:
         with csv_path.open(newline="") as stream:
@@ -686,6 +711,21 @@ def _validate_and_finalize_run(
                 identities.add(identity)
     except (OSError, csv.Error) as exc:
         raise RunnerError(f"missing P4 decision CSV: {record['run_id']}") from exc
+    try:
+        launch_manifest = json.loads(launch_manifest_path.read_text())
+        if not isinstance(launch_manifest, dict):
+            raise ValueError("launch manifest root is not an object")
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
+        raise RunnerError(
+            f"missing or malformed launch manifest: {record['run_id']}"
+        ) from exc
+    try:
+        validate_test_planner_effective_contract(bundle, launch_manifest)
+    except RuntimeError as exc:
+        raise RunnerError(
+            f"launch manifest effective contract mismatch: "
+            f"{record['run_id']}:{exc}"
+        ) from exc
     manifest.update(monitor_result)
     manifest["runner_state"] = "COMPLETE"
     manifest["launch_exit_code"] = 0
@@ -697,14 +737,6 @@ def _validate_and_finalize_run(
     except OSError as exc:
         raise RunnerError(
             f"run manifest finalization failed: {record['run_id']}"
-        ) from exc
-    try:
-        launch_manifest = json.loads(launch_manifest_path.read_text())
-        if not isinstance(launch_manifest, dict):
-            raise ValueError("launch manifest root is not an object")
-    except (OSError, json.JSONDecodeError, ValueError) as exc:
-        raise RunnerError(
-            f"missing or malformed launch manifest: {record['run_id']}"
         ) from exc
     if inventory_path.exists() or inventory_path.is_symlink():
         raise RunnerError(
@@ -949,7 +981,21 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
-        bundle = load_bundle(args.protocol, args.registry, args.fixture)
+        registered_v1_path = (
+            Path(__file__).resolve().parents[2]
+            / "config/icra27/p4_g0c_protocol_v1.json"
+        )
+        trusted_schema = (
+            LEGACY_PROTOCOL_SCHEMA
+            if args.protocol.resolve() == registered_v1_path
+            else REPLACEMENT_PROTOCOL_SCHEMA
+        )
+        bundle = load_bundle(
+            args.protocol,
+            args.registry,
+            args.fixture,
+            expected_protocol_schema=trusted_schema,
+        )
         result = run(
             bundle,
             args.runs_root,

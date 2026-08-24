@@ -24,6 +24,15 @@ class P4G0CLaunchContractTest(unittest.TestCase):
             context.launch_configurations[name] = str(default)
         return context
 
+    @staticmethod
+    def _node_parameters(node, context):
+        result = {}
+        for item in node._Node__parameters:
+            for substitutions, value in item.items():
+                key = "".join(part.perform(context) for part in substitutions)
+                result[key] = value
+        return result
+
     def test_general_metrics_only_default_is_false_and_profile_is_exact(self):
         defaults = dict(MODULE.ARG_DEFAULTS)
         self.assertEqual(defaults["p4.metrics_only"], "false")
@@ -103,6 +112,89 @@ class P4G0CLaunchContractTest(unittest.TestCase):
                 effective_values=MODULE.P4_G0C_FROZEN_LAUNCH_VALUES,
             )
 
+    def test_v2_launch_trust_split_requires_hashes_and_freezes_science(self):
+        self.assertEqual(
+            MODULE.P4_G0C_ARTIFACT_PRESET_V2["p4.g0c.protocol_sha256"],
+            MODULE.P4_G0C_RUNTIME_HASH_REQUIRED,
+        )
+        self.assertEqual(
+            MODULE.P4_G0C_ARTIFACT_PRESET_V2["p4.g0c.registry_sha256"],
+            MODULE.P4_G0C_RUNTIME_HASH_REQUIRED,
+        )
+        fixture = REPO / "config/icra27/p4_g0c_live_fixture_v1.json"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            protocol = root / "protocol.json"
+            registry = root / "registry.json"
+            protocol_payload = json.loads(
+                (REPO / "config/icra27/p4_g0c_protocol_v2.json").read_text()
+            )
+            registry_payload = json.loads(
+                (REPO / "config/icra27/p4_threshold_registry_v2.json").read_text()
+            )
+            protocol_payload["threshold_formulas"][
+                "mean_improvement_min"
+            ] = "Q50(original_mean-risk_mean)"
+            protocol.write_bytes(MODULE._canonical_json_bytes(protocol_payload))
+            registry_payload["protocol_sha256"] = MODULE._sha256_file(protocol)
+            registry.write_bytes(MODULE._canonical_json_bytes(registry_payload))
+            run_dir = root / "p4-g0c-r2-seed211-rep01"
+            arguments = {
+                "experiment": MODULE.P4_G0C_EXPERIMENT_V2,
+                "protocol_path": protocol,
+                "registry_path": registry,
+                "fixture_path": fixture,
+                "declared_protocol_sha256": MODULE._sha256_file(protocol),
+                "declared_registry_sha256": MODULE._sha256_file(registry),
+                "declared_fixture_sha256": MODULE._sha256_file(fixture),
+                "run_id": run_dir.name,
+                "seed": 211,
+                "repetition": 1,
+                "run_manifest_path": run_dir / "p4_g0c_run_manifest.json",
+                "csv_path": run_dir / "p4_decisions.csv",
+                "effective_values": MODULE.P4_G0C_FROZEN_LAUNCH_VALUES,
+            }
+            with self.assertRaisesRegex(RuntimeError, "scientific identity"):
+                MODULE._p4_g0c_binding(**arguments)
+            protocol_payload = json.loads(
+                (REPO / "config/icra27/p4_g0c_protocol_v2.json").read_text()
+            )
+            protocol_payload["no_retry"] = 1
+            protocol.write_bytes(MODULE._canonical_json_bytes(protocol_payload))
+            registry_payload["protocol_sha256"] = MODULE._sha256_file(protocol)
+            registry.write_bytes(MODULE._canonical_json_bytes(registry_payload))
+            arguments.update({
+                "declared_protocol_sha256": MODULE._sha256_file(protocol),
+                "declared_registry_sha256": MODULE._sha256_file(registry),
+            })
+            with self.assertRaisesRegex(RuntimeError, "scientific identity"):
+                MODULE._p4_g0c_binding(**arguments)
+            arguments.update({
+                "protocol_path": REPO / "config/icra27/p4_g0c_protocol_v2.json",
+                "registry_path": REPO / "config/icra27/p4_threshold_registry_v2.json",
+                "declared_protocol_sha256": MODULE._sha256_file(
+                    REPO / "config/icra27/p4_g0c_protocol_v2.json"
+                ),
+                "declared_registry_sha256": MODULE._sha256_file(
+                    REPO / "config/icra27/p4_threshold_registry_v2.json"
+                ),
+                "effective_values": {
+                    **MODULE.P4_G0C_FROZEN_LAUNCH_VALUES,
+                    "p1.metrics_only": 0,
+                },
+            })
+            with self.assertRaisesRegex(RuntimeError, "effective config"):
+                MODULE._p4_g0c_binding(**arguments)
+            arguments.update({
+                "protocol_path": REPO / "config/icra27/p4_g0c_protocol_v2.json",
+                "registry_path": REPO / "config/icra27/p4_threshold_registry_v2.json",
+                "effective_values": MODULE.P4_G0C_FROZEN_LAUNCH_VALUES,
+                "declared_protocol_sha256": MODULE.P4_G0C_RUNTIME_HASH_REQUIRED,
+                "declared_registry_sha256": MODULE.P4_G0C_RUNTIME_HASH_REQUIRED,
+            })
+            with self.assertRaisesRegex(RuntimeError, "protocol hash mismatch"):
+                MODULE._p4_g0c_binding(**arguments)
+
     def test_conflicting_g0c_override_is_rejected_not_normalized(self):
         effective = dict(MODULE.P4_G0C_FROZEN_LAUNCH_VALUES)
         effective["p4.metrics_only"] = "false"
@@ -124,6 +216,89 @@ class P4G0CLaunchContractTest(unittest.TestCase):
         self.assertFalse(MODULE._effective_metrics_only(
             context, "p2.metrics_only", False, set()
         ))
+
+    def test_v2_real_launch_path_keeps_node_and_both_manifests_false(self):
+        protocol = REPO / "config/icra27/p4_g0c_protocol_v2.json"
+        registry = REPO / "config/icra27/p4_threshold_registry_v2.json"
+        fixture = REPO / "config/icra27/p4_g0c_live_fixture_v1.json"
+        package_shares = {
+            "iap": REPO,
+            "local_sensing": REPO / "src/uav_simulator/local_sensing",
+            "so3_control": REPO / "src/uav_simulator/so3_control",
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runtime_root = root / "runtime"
+            export_root = root / "exports"
+            run_dir = root / "p4-g0c-r2-seed211-rep01"
+            values = {
+                "experiment": MODULE.P4_G0C_EXPERIMENT_V2,
+                "runtime_root_dir": str(runtime_root),
+                "export_root_dir": str(export_root),
+                "iap_log_root": str(runtime_root / "iap_logs"),
+                "p4.g0c.protocol_path": str(protocol),
+                "p4.g0c.protocol_sha256": MODULE._sha256_file(protocol),
+                "p4.g0c.registry_path": str(registry),
+                "p4.g0c.registry_sha256": MODULE._sha256_file(registry),
+                "p4.g0c.fixture_path": str(fixture),
+                "p4.g0c.fixture_sha256": MODULE._sha256_file(fixture),
+                "p4.g0c.run_id": run_dir.name,
+                "p4.g0c.seed": "211",
+                "p4.g0c.repetition": "1",
+                "p4.g0c.run_manifest_path": str(
+                    run_dir / "p4_g0c_run_manifest.json"
+                ),
+                "p4.g0c.csv_path": str(run_dir / "p4_decisions.csv"),
+            }
+            context = self._context()
+            context.launch_configurations.update(values)
+            argv = ["test_planner.launch.py"] + [
+                f"{key}:={value}" for key, value in values.items()
+            ]
+
+            def share(package):
+                return str(package_shares[package])
+
+            with (
+                mock.patch.object(MODULE.sys, "argv", argv),
+                mock.patch.object(
+                    MODULE, "get_package_share_directory", side_effect=share
+                ),
+                mock.patch.object(
+                    MODULE,
+                    "get_package_prefix",
+                    side_effect=lambda package: str(root / "prefix" / package),
+                ),
+            ):
+                actions = MODULE._launch_setup(context)
+
+            planner_nodes = [
+                action for action in actions
+                if getattr(action, "_Node__package", "") == "ego_planner"
+                and getattr(action, "_Node__node_executable", "")
+                == "ego_planner_node"
+            ]
+            self.assertEqual(len(planner_nodes), 1)
+            planner_values = self._node_parameters(planner_nodes[0], context)
+            test_manifest_paths = list(
+                export_root.rglob("test_planner_manifest.json")
+            )
+            self.assertEqual(len(test_manifest_paths), 1)
+            test_manifest = json.loads(test_manifest_paths[0].read_text())
+            run_manifest = json.loads(
+                (run_dir / "p4_g0c_run_manifest.json").read_text()
+            )
+            protocol_values = json.loads(protocol.read_text())["effective_values"]
+
+        for key in ("p1.metrics_only", "p2.metrics_only"):
+            self.assertFalse(planner_values[key])
+            self.assertFalse(test_manifest[key])
+            self.assertFalse(run_manifest["effective_values"][key])
+            self.assertFalse(protocol_values[key])
+            self.assertEqual(test_manifest[key], planner_values[key])
+            self.assertEqual(
+                run_manifest["effective_values"][key], planner_values[key]
+            )
 
     def test_binding_requires_exact_hashes_run_identity_and_run_local_paths(self):
         protocol = REPO / "config/icra27/p4_g0c_protocol_v1.json"

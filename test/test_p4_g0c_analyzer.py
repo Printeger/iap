@@ -41,6 +41,7 @@ class P4G0CAnalyzerTest(unittest.TestCase):
             REPO / "config/icra27/p4_g0c_protocol_v1.json",
             REPO / "config/icra27/p4_threshold_registry_v1.json",
             REPO / "config/icra27/p4_g0c_live_fixture_v1.json",
+            expected_protocol_schema=MODULE.PROTOCOL_SCHEMA_V1,
         )
 
     def _row(self, index):
@@ -216,6 +217,22 @@ class P4G0CAnalyzerTest(unittest.TestCase):
             launch_manifest.write_text(json.dumps({
                 "schema_version": "test_planner_manifest_v1",
                 "run_id": record["run_id"],
+                "p4.g0c": {
+                    key: manifest[key] for key in (
+                        "schema_version", "protocol_sha256",
+                        "registry_sha256", "fixture_sha256",
+                        "effective_values", "effective_config_sha256",
+                        "selection_applied", "record_bag", "start_rviz",
+                        *(
+                            ("dependency_manifest_sha256",
+                             "replacement_lineage_sha256")
+                            if self.bundle.protocol[
+                                "schema_version"
+                            ].endswith("_v2")
+                            else ()
+                        ),
+                    )
+                },
             }) + "\n")
             (run_dir / "exports/runtime_provenance_manifest.json").write_text(
                 '{"schema_version":"runtime_provenance_v1"}\n'
@@ -333,6 +350,91 @@ class P4G0CAnalyzerTest(unittest.TestCase):
             result["threshold_draft"]["schema_version"],
             "p4_g0c_threshold_draft_v2",
         )
+
+    def test_v2_launch_effective_disagreement_rejects_before_draft(self):
+        self.bundle = MODULE.load_bundle(
+            REPO / "config/icra27/p4_g0c_protocol_v2.json",
+            REPO / "config/icra27/p4_threshold_registry_v2.json",
+            REPO / "config/icra27/p4_g0c_live_fixture_v1.json",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._make_bundle(root)
+            run_id = self.bundle.protocol["registered_run_ids"][0]
+            launch_path = (
+                root / run_id
+                / "exports/synthetic_run_token/test_planner_manifest.json"
+            )
+            launch_manifest = json.loads(launch_path.read_text())
+            launch_manifest["p4.g0c"]["effective_values"][
+                "p1.metrics_only"
+            ] = True
+            launch_manifest["p4.g0c"]["effective_config_sha256"] = (
+                MODULE.effective_config_sha256(
+                    launch_manifest["p4.g0c"]["effective_values"]
+                )
+            )
+            launch_path.write_text(json.dumps(launch_manifest) + "\n")
+            self._refresh_inventory_binding(root)
+            result = MODULE.analyze(self.bundle, root)
+        self.assertEqual(result["analysis_status"], "REJECTED")
+        self.assertNotIn("threshold_draft", result)
+        self.assertTrue(any(
+            "config_mismatch" in failure
+            and "test-planner G0C binding mismatch: effective_values" in failure
+            for failure in result["failures"]
+        ))
+
+    def test_v2_python_equal_effective_drift_rejects_stale_hash(self):
+        self.bundle = MODULE.load_bundle(
+            REPO / "config/icra27/p4_g0c_protocol_v2.json",
+            REPO / "config/icra27/p4_threshold_registry_v2.json",
+            REPO / "config/icra27/p4_g0c_live_fixture_v1.json",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._make_bundle(root)
+            run_id = self.bundle.protocol["registered_run_ids"][0]
+            launch_path = (
+                root / run_id
+                / "exports/synthetic_run_token/test_planner_manifest.json"
+            )
+            launch_manifest = json.loads(launch_path.read_text())
+            launch_manifest["p4.g0c"]["effective_values"][
+                "p1.metrics_only"
+            ] = 0
+            launch_path.write_text(json.dumps(launch_manifest) + "\n")
+            self._refresh_inventory_binding(root)
+            result = MODULE.analyze(self.bundle, root)
+        self.assertEqual(result["analysis_status"], "REJECTED")
+        self.assertNotIn("threshold_draft", result)
+        self.assertTrue(any(
+            "effective hash mismatch" in failure
+            for failure in result["failures"]
+        ))
+
+    def test_v2_run_manifest_python_equal_drift_rejects_stale_hash(self):
+        self.bundle = MODULE.load_bundle(
+            REPO / "config/icra27/p4_g0c_protocol_v2.json",
+            REPO / "config/icra27/p4_threshold_registry_v2.json",
+            REPO / "config/icra27/p4_g0c_live_fixture_v1.json",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._make_bundle(root)
+            run_id = self.bundle.protocol["registered_run_ids"][0]
+            manifest_path = root / run_id / "p4_g0c_run_manifest.json"
+            manifest = json.loads(manifest_path.read_text())
+            manifest["effective_values"]["p1.metrics_only"] = 0
+            manifest_path.write_text(json.dumps(manifest) + "\n")
+            self._refresh_inventory_binding(root)
+            result = MODULE.analyze(self.bundle, root)
+        self.assertEqual(result["analysis_status"], "REJECTED")
+        self.assertNotIn("threshold_draft", result)
+        self.assertTrue(any(
+            "effective_config_sha256" in failure
+            for failure in result["failures"]
+        ))
 
     def test_exact_100_boundary_is_eligible_and_draft_uses_frozen_formulas(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -728,16 +830,23 @@ class P4G0CAnalyzerTest(unittest.TestCase):
 
     def test_inventory_cannot_authorize_secondary_g0c_manifest_or_decision_csv(self):
         cases = {
-            "secondary G0C run manifest": (
-                "secondary.json",
+            "v1 manifest": (
+                "secondary G0C run manifest",
+                "secondary_v1.json",
                 '{"schema_version":"p4_g0c_run_manifest_v1"}\n',
             ),
-            "secondary P4 decision CSV": (
+            "v2 manifest": (
+                "secondary G0C run manifest",
+                "secondary_v2.json",
+                '{"schema_version":"p4_g0c_run_manifest_v2"}\n',
+            ),
+            "decision CSV": (
+                "secondary P4 decision CSV",
                 "secondary.csv", ",".join(CSV_FIELDS) + "\n"
             ),
         }
-        for expected, (name, content) in cases.items():
-            with self.subTest(name=name), tempfile.TemporaryDirectory() as tmp:
+        for label, (expected, name, content) in cases.items():
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as tmp:
                 root = Path(tmp)
                 self._make_bundle(root)
                 run_dir = root / "p4-g0c-seed211-rep01"

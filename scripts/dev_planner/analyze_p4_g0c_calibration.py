@@ -25,14 +25,17 @@ from p4_g0c_protocol import (  # noqa: E402
     canonical_bytes,
     decision_identity,
     effective_config_sha256,
+    exact_json_equal,
     expand_run_plan,
     load_protocol_bundle,
     parse_decision_row,
     validate_run_artifact_inventory,
     validate_decision_header,
+    validate_test_planner_effective_contract,
 )
 
 
+PROTOCOL_SCHEMA_V1 = "p4_g0c_protocol_v1"
 PROTOCOL_SCHEMA_V2 = "p4_g0c_protocol_v2"
 RUNNER_STATE_FILENAME = "p4_g0c_runner_state.json"
 REQUIRED_PROCESSES = ["iap_rosnode", "ego_planner_node"]
@@ -62,9 +65,17 @@ def _runner_state_schema(bundle: ProtocolBundle) -> str:
 
 
 def load_bundle(
-    protocol_path: Path, registry_path: Path, fixture_path: Path
+    protocol_path: Path,
+    registry_path: Path,
+    fixture_path: Path,
+    expected_protocol_schema: str = PROTOCOL_SCHEMA_V2,
 ) -> ProtocolBundle:
-    bundle = load_protocol_bundle(protocol_path, registry_path, fixture_path)
+    bundle = load_protocol_bundle(
+        protocol_path,
+        registry_path,
+        fixture_path,
+        expected_protocol_schema=expected_protocol_schema,
+    )
     bundle.protocol_path = str(Path(protocol_path).resolve())
     bundle.registry_path = str(Path(registry_path).resolve())
     bundle.fixture_path = str(Path(fixture_path).resolve())
@@ -285,7 +296,7 @@ def _is_sha256(value: Any) -> bool:
 
 
 def _run_inventory_failures(
-    record: dict[str, Any], attempt: dict[str, Any]
+    bundle: ProtocolBundle, record: dict[str, Any], attempt: dict[str, Any]
 ) -> tuple[list[str], list[Path]]:
     run_id = record["run_id"]
     run_dir = Path(record["run_dir"])
@@ -349,6 +360,10 @@ def _run_inventory_failures(
         launch_raw
     ).hexdigest():
         failures.append(f"launch_manifest_binding:{run_id}:sha256")
+    try:
+        validate_test_planner_effective_contract(bundle, launch_manifest)
+    except RuntimeError as exc:
+        failures.append(f"config_mismatch:{run_id}:test_planner:{exc}")
     return failures, bundle_paths
 
 
@@ -400,12 +415,21 @@ def _manifest_failures(
                 "replacement_lineage"
             ]["sha256"],
         })
+    replacement = bundle.protocol.get("schema_version") == PROTOCOL_SCHEMA_V2
     for key, value in expected.items():
-        if manifest.get(key) != value:
+        if (
+            not exact_json_equal(manifest.get(key), value)
+            if replacement
+            else manifest.get(key) != value
+        ):
             category = "hash_mismatch" if key.endswith("sha256") else "manifest_truth"
             failures.append(f"{category}:{run_id}:{key}")
     effective = manifest.get("effective_values")
-    if effective != bundle.protocol["effective_values"]:
+    if (
+        not exact_json_equal(effective, bundle.protocol["effective_values"])
+        if replacement
+        else effective != bundle.protocol["effective_values"]
+    ):
         failures.append(f"config_mismatch:{run_id}:effective_values")
         if isinstance(effective, dict):
             if effective.get("p4.metrics_only") is not True:
@@ -418,6 +442,12 @@ def _manifest_failures(
     if len(config_hash) != 64 or any(c not in "0123456789abcdef" for c in config_hash):
         failures.append(f"hash_mismatch:{run_id}:effective_config_sha256")
     elif config_hash != expected_config_hash:
+        failures.append(f"hash_mismatch:{run_id}:effective_config_sha256")
+    elif (
+        replacement
+        and isinstance(effective, dict)
+        and config_hash != effective_config_sha256(effective)
+    ):
         failures.append(f"hash_mismatch:{run_id}:effective_config_sha256")
     return failures
 
@@ -574,7 +604,7 @@ def analyze(bundle: ProtocolBundle, runs_root: Path) -> dict[str, Any]:
             ):
                 attempt = attempts[run_index]
         inventory_errors, inventory_paths = _run_inventory_failures(
-            record, attempt
+            bundle, record, attempt
         )
         failures.extend(inventory_errors)
         bundle_paths.extend(inventory_paths)
@@ -735,7 +765,21 @@ def _write_json_exclusive(path: Path, payload: dict[str, Any]) -> None:
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
-        bundle = load_bundle(args.protocol, args.registry, args.fixture)
+        registered_v1_path = (
+            Path(__file__).resolve().parents[2]
+            / "config/icra27/p4_g0c_protocol_v1.json"
+        )
+        trusted_schema = (
+            PROTOCOL_SCHEMA_V1
+            if args.protocol.resolve() == registered_v1_path
+            else PROTOCOL_SCHEMA_V2
+        )
+        bundle = load_bundle(
+            args.protocol,
+            args.registry,
+            args.fixture,
+            expected_protocol_schema=trusted_schema,
+        )
         output_path = _validated_output_path(
             args.runs_root, args.output, "p4_g0c_analysis.json", "analysis output"
         )
