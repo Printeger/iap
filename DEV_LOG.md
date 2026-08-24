@@ -5445,3 +5445,34 @@ manifests do not prove byte-for-byte identity. The two requested code repairs
 and regressions remain technically successful, but review is fail-closed for
 Supervisor disposition. No historical tree is touched again and no G0B PASS
 is claimed.
+
+## 2026-08-24T06:26:53Z — ICRA-040 FINAL HANDOFF
+
+IAP-RQ-423. Implementation `70131a1` and fail-closed review/evidence follow-up
+`072a441` are pushed to `origin/dev/icra`; divergence was `0 0` immediately
+before this DEV_LOG-only handoff.
+
+The two authorized repairs are complete. Post-original-search request and
+occupancy identity now take precedence over returned failure, timeout and
+invalid geometry. Effective `metrics_only` remains the configured value;
+registered G0B tests opt in explicitly, while a risk-enabled false context
+measures the better risk guide but records `SELECTION_NOT_AUTHORIZED`, selects
+original and never applies the risk guide. Final prescribed results remain
+focused identity 3/3, focused boundary 1/1, decision 15/15, integration 5/5,
+collision 17/17, P1 39/39, path-searching P4 5/5, occupancy epoch 6/6 and
+affected plan-manager 9/9 with 186 active cases, one disabled case and zero
+process exits. Deterministic production-A* hashes remain repeat-stable.
+
+Standards review has zero hard findings. Spec review confirms both code
+repairs and the exit-code evidence but remains `REQUEST_CHANGES` on the
+irreversible retained-tree process nonconformance recorded above. This is
+handed to SUPERVISOR fail-closed for disposition; it is not G0B PASS and no
+qualification is claimed. Compact review evidence is retained at
+`results/icra27/icra040/review/two_axis_review.md`.
+
+Builder result: `P4_G0B_REPAIR_READY_FOR_REVIEW`. No threshold, calibration,
+G0C/G0D, risk-guide application, P5, GPU, ROS/live map, launch, main flow,
+runner, analyzer, capture, smoke, benchmark, qualification, campaign, tuning,
+cleanup, Gate promotion or next-task work occurred. The protected PDF remains
+unmodified, untracked and unstaged at `1f07da56…844f6`. Control returns only to
+SUPERVISOR review.
