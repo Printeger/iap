@@ -5246,3 +5246,53 @@ test counts and synchronized documentation. Compact review evidence is
 `results/icra27/icra039/review/two_axis_review.md`. Builder state remains
 `P4_G0B_METRICS_ONLY_READY_FOR_REVIEW`; this review does not qualify G0B or
 authorize another gate.
+
+## 2026-08-24T05:25:26Z — ICRA-039 FINAL HANDOFF
+
+IAP-RQ-423. Implementation `4086ce5`, review repair `05a9a36`, and two-axis
+review evidence `632cf77` are pushed to `origin/dev/icra`; divergence was
+`0 0` immediately before this DEV_LOG-only handoff.
+
+The final production module exposes one immutable `P4GuideRequest` /
+schema-versioned `P4GuideDecision` seam used by both initial and rebound
+closed-collision paths. The manager supplies its real nonzero attempt ID even
+without P1; complete request identity is rehashed between searches and
+reconstructed before injection. Any request/epoch mismatch becomes
+`DECISION_INVALID_REPLAN_REQUIRED`, clears the selected guide and prevents
+constraint consumption. The shared collection/validation operation removes
+consumer drift. Enabled G0B attempts force `metrics_only=true`; the general
+parameter default remains false, no risk guide can be applied, and
+`selection_applied=false`.
+
+The authoritative central-obstacle `p4_collision_guide_v1` fixture runs both
+searches through production A*. Repeat-stable request/original/risk/selected
+hashes are `1c8abe0fa4e4136a` / `2a3380ee05f43a1f` /
+`b3789ad7a8e50365` / `2a3380ee05f43a1f`. Original and risk profiles are
+200/200 valid; original mean/max is
+`2.0295422607088973/10.500000000000002`, risk mean/max is
+`1/1.0000000000000002`, ratio is `1.0`, and the original-only constraint hash
+matches the metrics-only result.
+
+Final tests pass decision 11/11, integration 4/4, collision 17/17, P1 39/39,
+path-searching P4 5/5, occupancy epoch 6/6, and affected plan-manager CTest
+9/9 with 186 active cases, one pre-existing disabled case and zero failures.
+Fresh task-local changed-package build/install passes. Exact task-local linkage
+has zero workspace-default IAP, deleted-task, build-tree, missing-library or
+non-toolchain RUNPATH matches; source/installed headers match. Focused
+formatting, JSON/XML parsing, diff/allowlist and zero-task-process audits pass.
+
+Final Standards and Spec reviews each report zero findings after confirming
+all initial findings resolved. Evidence is retained in
+`results/icra27/icra039/{verification_summary.md,test,preflight,review}`;
+task-local build/install remains for Supervisor review. Final decision
+header/source hashes are `815cf83f…dd81` / `6e492240…6596`, optimizer
+header/source `a3b3b5f1…a774` / `b2560371…a6ed`, fixture `d540c23d…11af`,
+manager `80816299…20c5`, and frozen scan fixture `49a676a5…c788`. The protected
+PDF remains unmodified, untracked and unstaged at `1f07da56…844f6`.
+
+Builder result: `P4_G0B_METRICS_ONLY_READY_FOR_REVIEW`. This is not G0B PASS,
+Gate promotion, threshold/calibration/G0C/G0D authorization, risk-guide
+application, final B-spline lineage or P5 work. No GPU, ROS/live map, launch,
+runner, analyzer, capture, smoke, benchmark, qualification, campaign, tuning,
+cleanup or protected-PDF handling occurred. Control returns only to
+SUPERVISOR review.
