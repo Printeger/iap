@@ -6385,8 +6385,8 @@ be valid scripts or full native-architecture ELF executables and every
 component/runtime library must be a full native ELF shared object. ELF inputs
 also undergo non-ROS dynamic-link resolution, so truncation, wrong architecture
 and unresolved `DT_NEEDED` dependencies reject. Exact allowed/current prefix
-lists must match;
-missing, invalid, drifted, duplicate, aliased/symlinked, undeclared or
+lists must match; missing, invalid, drifted, duplicate, aliased/symlinked,
+undeclared or
 workspace-default historical inputs fail with typed `DEPENDENCY_*` reasons and
 zero GPU/launch calls. `--dependency-preflight-only` uses the same validation
 function on a fresh one-use root; full mode repeats validation.
@@ -6412,3 +6412,39 @@ errors because `test/` is not a package; the corrected discovery command is
 green. Syntax, fatal-only flake8, canonical JSON and `git diff --check` pass.
 No live boundary was invoked and no threshold draft/application was created.
 Current result is protocol readiness only, never G0C PASS.
+
+## 2026-08-24T12:18:13Z — ICRA-047 BUILDER HANDOFF
+
+IAP-RQ-423. The versioned replacement protocol, proposed/null/disabled
+registry, immutable ICRA-046 lineage, executable dependency preflight, focused
+tests and compact evidence were committed as `7307dfb` and pushed to
+`origin/dev/icra`.
+
+The enforced pre-GPU closure contains 18 packages, 13 loadable script or full
+native-ELF executables, the registered SO3 component and full native ELF
+library, 14 exact SHA-256-bound config files, six config-selected IAP shared
+libraries and the hashed launch contract. ELF checks reject incomplete headers,
+wrong architecture and unresolved dynamic dependencies. Dependency-only and
+full modes use the same validator; every typed failure remains before GPU state,
+GPU call or launch.
+
+Repository-local final verification is focused 62/62, launch golden 16/16 and
+full Python discovery 417/417. The evidence truthfully retains one earlier
+unconstrained 416/416 run, four repository-local full reruns, and one corrected
+five-loader-error command. Two-axis review ends at Standards 0 blocking / 1
+nonblocking distributed-version-policy smell and Spec 0 blocking / 0
+nonblocking.
+
+Final protected checks retain ICRA-046 at 3,815 files / 759 directories /
+4,884,473,805 bytes and aggregate SHA-256
+`823d41bf0e9f5e17ede8b538624ba71d46626d5e1369451f4989a9a0e4cd96b1`.
+The PDF remains untracked, unstaged and unchanged at
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+Task-process count is zero; after the implementation push, branch divergence is
+`0 0`.
+
+No GPU preflight, ROS/launch, runner/analyzer CLI, calibration, CTest/retained
+binary, smoke, benchmark, bag/RViz, threshold draft/freeze/application, G0D,
+P5 or cleanup ran. Builder result is
+`P4_G0C_REPLACEMENT_PROTOCOL_READY_FOR_REVIEW`, never G0C PASS. Control returns
+only to SUPERVISOR review; no replacement live matrix is authorized here.
