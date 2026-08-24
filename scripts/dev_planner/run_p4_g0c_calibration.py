@@ -23,13 +23,18 @@ if str(SCRIPT_DIR) not in sys.path:
 
 from p4_g0c_protocol import (  # noqa: E402
     DECISION_CSV_COLUMNS,
+    RUN_ARTIFACT_INVENTORY_FILENAME,
     DecisionSchemaError,
     ProtocolBundle,
+    bound_test_planner_manifest_path,
+    canonical_bytes,
     decision_identity,
     effective_config_sha256,
     expand_run_plan,
     load_protocol_bundle,
+    make_run_artifact_inventory,
     parse_decision_row,
+    sha256_file,
     validate_decision_header,
 )
 from run_gate0_qualification import (  # noqa: E402
@@ -38,7 +43,7 @@ from run_gate0_qualification import (  # noqa: E402
 )
 
 
-RUNNER_SCHEMA = "p4_g0c_runner_state_v2"
+RUNNER_SCHEMA = "p4_g0c_runner_state_v3"
 REQUIRED_PROCESSES = {
     "iap_rosnode": ["iap_rosnode", "test_planner_iap_rosnode"],
     "ego_planner_node": ["ego_planner_node", "drone_0_ego_planner_node"],
@@ -118,10 +123,11 @@ def _validate_and_finalize_run(
     bundle: ProtocolBundle,
     record: dict[str, Any],
     monitor_result: dict[str, Any],
-) -> None:
+) -> dict[str, str]:
     run_dir = Path(record["run_dir"])
     manifest_path = run_dir / "p4_g0c_run_manifest.json"
     csv_path = run_dir / "p4_decisions.csv"
+    inventory_path = run_dir / RUN_ARTIFACT_INVENTORY_FILENAME
     try:
         manifest = json.loads(manifest_path.read_text())
     except (OSError, json.JSONDecodeError) as exc:
@@ -130,6 +136,15 @@ def _validate_and_finalize_run(
         raise RunnerError(
             f"missing or malformed run manifest: {record['run_id']}:root"
         )
+    try:
+        launch_manifest_path = bound_test_planner_manifest_path(
+            run_dir, manifest.get("test_planner_manifest_path")
+        )
+    except RuntimeError as exc:
+        raise RunnerError(
+            f"run manifest binding mismatch: {record['run_id']}:"
+            "test_planner_manifest_path"
+        ) from exc
     required_manifest = {
         "schema_version": "p4_g0c_run_manifest_v1",
         "run_id": record["run_id"],
@@ -203,6 +218,32 @@ def _validate_and_finalize_run(
         raise RunnerError(
             f"run manifest finalization failed: {record['run_id']}"
         ) from exc
+    try:
+        launch_manifest = json.loads(launch_manifest_path.read_text())
+        if not isinstance(launch_manifest, dict):
+            raise ValueError("launch manifest root is not an object")
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
+        raise RunnerError(
+            f"missing or malformed launch manifest: {record['run_id']}"
+        ) from exc
+    if inventory_path.exists() or inventory_path.is_symlink():
+        raise RunnerError(
+            f"existing run artifact inventory is forbidden: {record['run_id']}"
+        )
+    try:
+        inventory = make_run_artifact_inventory(run_dir, record["run_id"])
+        with inventory_path.open("xb") as stream:
+            stream.write(canonical_bytes(inventory))
+    except (OSError, RuntimeError) as exc:
+        raise RunnerError(
+            f"run artifact inventory failed: {record['run_id']}:{exc}"
+        ) from exc
+    return {
+        "artifact_inventory_path": str(inventory_path.resolve()),
+        "artifact_inventory_sha256": sha256_file(inventory_path),
+        "test_planner_manifest_path": str(launch_manifest_path.resolve()),
+        "test_planner_manifest_sha256": sha256_file(launch_manifest_path),
+    }
 
 
 def _base_result(bundle: ProtocolBundle, plan: list[dict[str, Any]]) -> dict[str, Any]:
@@ -245,23 +286,42 @@ def run(
 ) -> dict[str, Any]:
     if plan_only and preflight_only:
         raise RunnerError("plan-only and preflight-only are mutually exclusive")
-    runs_root = Path(runs_root).expanduser().resolve()
+    requested_root = Path(runs_root).expanduser()
+    runs_root = requested_root.resolve()
     plan = expand_run_plan(bundle.protocol, runs_root)
     result = _base_result(bundle, plan)
     if plan_only:
         return result
-    state_path = runs_root / "p4_g0c_runner_state.json"
-    if state_path.exists() or state_path.is_symlink():
-        raise RunnerError(f"existing runner state is forbidden: {state_path}")
+    if requested_root.is_symlink():
+        raise RunnerError(f"symlink runs root is forbidden: {requested_root}")
+    if runs_root.exists():
+        if not runs_root.is_dir() or runs_root.is_symlink():
+            raise RunnerError(f"runs root is not an ordinary directory: {runs_root}")
+        try:
+            existing_children = sorted(entry.name for entry in runs_root.iterdir())
+        except OSError as exc:
+            raise RunnerError(f"runs root is unreadable: {runs_root}") from exc
+        if existing_children:
+            if "p4_g0c_runner_state.json" in existing_children:
+                raise RunnerError(
+                    "existing runner state is forbidden: "
+                    f"{runs_root / 'p4_g0c_runner_state.json'}"
+                )
+            registered_existing = [
+                run_id for run_id in result["registered_run_ids"]
+                if run_id in existing_children
+            ]
+            if registered_existing:
+                raise RunnerError(
+                    "existing run directory is forbidden: "
+                    f"{runs_root / registered_existing[0]}"
+                )
+            raise RunnerError(
+                f"dirty runs root is forbidden: {runs_root}:"
+                f"{','.join(existing_children)}"
+            )
+
     preflight_path = runs_root / "preflight"
-    if preflight_path.exists() or preflight_path.is_symlink():
-        raise RunnerError(
-            f"existing preflight directory is forbidden: {preflight_path}"
-        )
-    for record in plan:
-        run_dir = Path(record["run_dir"])
-        if run_dir.exists() or run_dir.is_symlink():
-            raise RunnerError(f"existing run directory is forbidden: {record['run_dir']}")
 
     result["runner_state"] = "PREFLIGHT_RUNNING"
     _persist_result(runs_root, result)
@@ -333,7 +393,9 @@ def run(
             _persist_result(runs_root, result)
             return result
         try:
-            _validate_and_finalize_run(bundle, record, monitor_result)
+            inventory_binding = _validate_and_finalize_run(
+                bundle, record, monitor_result
+            )
         except (RunnerError, OSError) as exc:
             result["attempts"][-1]["state"] = "FAILED"
             result.update({
@@ -343,6 +405,7 @@ def run(
             })
             _persist_result(runs_root, result)
             return result
+        result["attempts"][-1].update(inventory_binding)
         result["attempts"][-1]["state"] = "COMPLETE"
         result["completed_run_ids"].append(record["run_id"])
         result["completed_run_count"] = len(result["completed_run_ids"])

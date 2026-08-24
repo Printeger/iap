@@ -5974,3 +5974,126 @@ threshold draft/freeze/application, G0D, P5, cleanup or gate promotion ran.
 
 Builder result: `P4_G0C_PROTOCOL_REPAIR_READY_FOR_REVIEW`, not G0C PASS.
 Control returns only to SUPERVISOR review.
+
+## 2026-08-24T09:59:13Z — ICRA-044 START
+
+IAP-RQ-423. Synchronized `dev/icra` at Supervisor task HEAD
+`67cfa82f4ec5f8023f9197326c1413fff789f575`: initial status contained only the
+protected untracked PDF, fetch passed and divergence was `0 0`, so no pull
+ran. `AGENT_STATE.md` authorizes only DEEPSEEK, `TASK_READY`, ICRA-044 and
+`P4_G0C_LIVE_ARTIFACT_REPAIR`.
+
+Exact allowed implementation files are
+`scripts/dev_planner/{p4_g0c_protocol,run_p4_g0c_calibration,analyze_p4_g0c_calibration}.py`
+and their three focused tests. Compact evidence may be added only below
+`results/icra27/icra044/`; documentation is limited to `DEV_LOG.md`,
+`docs/CHANGES.md` and `docs/TRACEABILITY.md`. The existing launch already
+records `test_planner_manifest_path`, so no launch correction is planned.
+Supervisor-owned files, config/registry/protocol values, C++/CMake/product
+behavior, retained trees and protected artifacts are outside scope.
+
+The runner state will version to `p4_g0c_runner_state_v3`. Each COMPLETE
+attempt will retain exact `artifact_inventory_path`,
+`artifact_inventory_sha256`, `test_planner_manifest_path` and
+`test_planner_manifest_sha256` fields; RUNNING/FAILED attempts cannot carry
+COMPLETE inventory bindings. Before any state write or fake/real GPU boundary,
+non-plan execution requires the user-supplied root to be absent or an empty,
+non-symlink directory and rejects every existing child.
+
+Each run will contain one canonical
+`p4_g0c_run_artifact_inventory_v1` file named
+`p4_g0c_artifact_inventory.json`. Its ordered entries cover every regular file
+and every symlink-free directory below the run, excluding only the inventory
+file itself. Directory entries have exact `path/type`; regular entries add
+canonical nonnegative `size_bytes` and lowercase SHA-256. Paths are normalized
+run-relative POSIX paths with no absolute, empty, dot, parent, duplicate or
+escape form. Nested retry/run directories, secondary G0C manifests and
+secondary P4 decision CSVs remain forbidden. The exact production
+`exports/test_planner_manifest.json`, `runtime/profiling/iap_timing.csv`,
+`stdout.log`, `launch_command.json`, G0C run manifest and `p4_decisions.csv`
+are explicitly representable and hash-verified.
+
+Exact named root analyzer outputs are excluded from raw input inventory and
+raw calibration hashing on both first and read-only reanalysis. In-root
+`--output` accepts only `p4_g0c_analysis.json`; in-root `--draft-output`
+accepts only `p4_g0c_threshold_draft.json`. Swapped, aliased, symlinked,
+arbitrary or existing destinations reject before analysis/write, writes use
+no-overwrite creation, and rejected analysis never writes a draft.
+
+Red tests will prove arbitrary-file and retry-directory roots currently reach
+the fake GPU/launch seam; genuine export manifest and runtime timing CSV
+currently self-reject; arbitrary in-root analyzer output currently succeeds
+then invalidates reanalysis; and an existing named output is overwritten.
+Green adversaries will cover zero boundary calls for every dirty-root form,
+all 15 exact COMPLETE bindings, add/change/remove/symlink inventory drift,
+launch-manifest path/hash mismatch, forbidden nested retry/run/secondary G0C
+artifacts, output name/swap/alias/symlink/no-overwrite rejection and stable raw
+hash under read-only named-output reanalysis.
+
+Stop line: ICRA-044 runs only synthetic Python tests and repository-local
+audits. It will not execute GPU preflight, ROS, launch, calibration,
+CTest/retained binaries, bag/RViz, smoke, benchmark, threshold
+draft/freeze/application, G0D, P5, cleanup or gate promotion. Final result may
+only be `P4_G0C_LIVE_ARTIFACT_PROTOCOL_READY_FOR_REVIEW`, never G0C PASS.
+
+## 2026-08-24T10:16:13Z — ICRA-044 IMPLEMENTATION AND VERIFICATION
+
+IAP-RQ-423. Implemented the START schemas and boundaries. Non-plan runner
+execution now rejects a root symlink, non-directory or every existing child
+before state persistence and the GPU seam; plan-only remains read-only and a
+preflight-only state makes that root non-reusable. Runner state v3 adds the
+four exact inventory/test-planner-manifest path/hash fields only when an
+attempt completes.
+
+The shared canonical run inventory recursively records all regular files and
+symlink-free directories with normalized relative paths; only its own exact
+file is excluded. Generic production output names are admitted by content
+hash rather than a global manifest/CSV blacklist. Reserved/nested run forms,
+secondary G0C manifest schema and secondary exact P4 decision header remain
+rejected. The recorded launch-manifest path may include the real dynamic
+exports run-token directory but must be absolute, normalized, symlink-free,
+named `test_planner_manifest.json` and remain under the registered run's
+`exports/` tree.
+
+Analyzer state binding requires all 15 exact COMPLETE v3 attempts. It verifies
+canonical inventory bytes, inventory hash, each entry/path/type/size/hash,
+launch-manifest JSON-object truth and its recorded path/hash before any row may
+contribute. Named root analyzer outputs are explicitly excluded from the raw
+input set. CLI validation and exclusive creation reject arbitrary, swapped,
+aliased, symlinked or existing outputs; rejected analysis emits no draft.
+
+The dirty-root suite and production-artifact/output suite each exited 1 in the
+red phase. Final direct suites pass protocol 6/6, runner 14/14, analyzer 22/22,
+launch contract 6/6 and launch golden 16/16 (64/64). The final
+`python3 -m unittest discover -s test -p 'test_*.py'` invocation passed
+403/403 after review remediation. Python syntax, fatal-only flake8 and
+`git diff --check` pass. Exact
+commands are also present directly in `docs/CHANGES.md`.
+
+No GPU preflight, ROS, launch, calibration, CTest/retained binary, bag/RViz,
+smoke, benchmark, threshold draft/freeze/application, G0D, P5, cleanup or gate
+promotion ran. Current result is
+`P4_G0C_LIVE_ARTIFACT_PROTOCOL_READY_FOR_REVIEW`, not G0C PASS, pending final
+protection audits and two-axis review.
+
+## 2026-08-24T10:25:44Z — ICRA-044 TWO-AXIS REVIEW REMEDIATION
+
+IAP-RQ-423. Independent Standards and Spec reviewers compared the staged diff
+against task HEAD `67cfa82f4ec5f8023f9197326c1413fff789f575`. Spec review found one
+blocking basename-only nested manifest/CSV blacklist. A new test first failed
+because `runtime/p4_decisions_metrics.csv` was rejected; the name blacklist was
+then removed while content-aware G0C manifest-schema and exact P4 decision-
+header rejection remained. Protocol and production-shaped analyzer tests prove
+similarly named non-G0C artifacts are inventory-compatible end to end.
+
+Standards re-review then identified one non-blocking Speculative Generality
+judgement call in the obsolete file-role branch. The validator was narrowed to
+directory-only nested retry/run rejection. Final Standards and Spec re-reviews
+both report 0 findings and 0 blocking findings. Final focused evidence is
+64/64; post-review full Python discovery is 403/403; syntax, fatal-only flake8,
+JSON and diff checks pass. Review evidence is repository-local at
+`results/icra27/icra044/review/two_axis_review.md`.
+
+No live or compiled flow ran. The protected PDF remains untracked/unstaged and
+the retained ICRA-042 manifest is unchanged. Result remains
+`P4_G0C_LIVE_ARTIFACT_PROTOCOL_READY_FOR_REVIEW`, never G0C PASS.

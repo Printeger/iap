@@ -1,7 +1,11 @@
 import csv
+import contextlib
+import hashlib
 import importlib.util
+import io
 import json
 import math
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -78,10 +82,57 @@ class P4G0CAnalyzerTest(unittest.TestCase):
             "total_search_latency_ms": "90.0",
         }
 
+    def _write_artifact_inventory(self, run_dir, run_id):
+        inventory_path = run_dir / "p4_g0c_artifact_inventory.json"
+        entries = []
+        for path in sorted(
+            run_dir.rglob("*"), key=lambda item: item.relative_to(run_dir).as_posix()
+        ):
+            relative = path.relative_to(run_dir).as_posix()
+            if path == inventory_path:
+                continue
+            self.assertFalse(path.is_symlink())
+            if path.is_dir():
+                entries.append({"path": relative, "type": "directory"})
+            else:
+                raw = path.read_bytes()
+                entries.append({
+                    "path": relative,
+                    "type": "regular",
+                    "size_bytes": len(raw),
+                    "sha256": hashlib.sha256(raw).hexdigest(),
+                })
+        payload = {
+            "schema_version": "p4_g0c_run_artifact_inventory_v1",
+            "run_id": run_id,
+            "excluded_path": "p4_g0c_artifact_inventory.json",
+            "entries": entries,
+        }
+        raw_inventory = (
+            json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n"
+        )
+        inventory_path.write_text(raw_inventory)
+        launch_manifests = list(
+            (run_dir / "exports").rglob("test_planner_manifest.json")
+        )
+        self.assertEqual(len(launch_manifests), 1)
+        launch_manifest_path = launch_manifests[0]
+        return {
+            "artifact_inventory_path": str(inventory_path.resolve()),
+            "artifact_inventory_sha256": hashlib.sha256(
+                raw_inventory.encode()
+            ).hexdigest(),
+            "test_planner_manifest_path": str(launch_manifest_path.resolve()),
+            "test_planner_manifest_sha256": hashlib.sha256(
+                launch_manifest_path.read_bytes()
+            ).hexdigest(),
+        }
+
     def _make_bundle(self, root, row_counts=None, mutate=None):
         plan = MODULE.expand_run_plan(self.bundle.protocol, root)
         row_counts = row_counts or [7] * 15
         global_index = 0
+        inventory_bindings = []
         for run_index, (record, count) in enumerate(zip(plan, row_counts)):
             run_dir = Path(record["run_dir"])
             run_dir.mkdir(parents=True)
@@ -116,6 +167,12 @@ class P4G0CAnalyzerTest(unittest.TestCase):
                 "selection_applied": False,
                 "immutable_run_id": True,
                 "overwrite_allowed": False,
+                "test_planner_manifest_path": str(
+                    (
+                        run_dir / "exports/synthetic_run_token"
+                        / "test_planner_manifest.json"
+                    ).resolve()
+                ),
             }
             if mutate is not None:
                 mutate(run_index, manifest, rows)
@@ -126,9 +183,34 @@ class P4G0CAnalyzerTest(unittest.TestCase):
             (run_dir / "p4_g0c_run_manifest.json").write_text(
                 json.dumps(manifest, sort_keys=True) + "\n"
             )
+            (run_dir / "launch_command.json").write_text(
+                json.dumps(["ros2", "launch"]) + "\n"
+            )
+            (run_dir / "stdout.log").write_text("controlled shutdown\n")
+            launch_manifest = (
+                run_dir / "exports/synthetic_run_token"
+                / "test_planner_manifest.json"
+            )
+            launch_manifest.parent.mkdir(parents=True)
+            launch_manifest.write_text(json.dumps({
+                "schema_version": "test_planner_manifest_v1",
+                "run_id": record["run_id"],
+            }) + "\n")
+            (run_dir / "exports/runtime_provenance_manifest.json").write_text(
+                '{"schema_version":"runtime_provenance_v1"}\n'
+            )
+            (run_dir / "exports/iap_gnss_factor_debug.csv").write_text(
+                "stamp,satellite,residual\n1,3,0.1\n"
+            )
+            timing = run_dir / "runtime/profiling/iap_timing.csv"
+            timing.parent.mkdir(parents=True)
+            timing.write_text("stamp,duration_ms\n1,2\n")
+            inventory_bindings.append(
+                self._write_artifact_inventory(run_dir, record["run_id"])
+            )
         run_ids = [record["run_id"] for record in plan]
         runner_state = {
-            "schema_version": "p4_g0c_runner_state_v2",
+            "schema_version": "p4_g0c_runner_state_v3",
             "runner_state": "COMPLETE",
             "protocol_sha256": self.bundle.protocol_sha256,
             "registry_sha256": self.bundle.registry_sha256,
@@ -141,6 +223,7 @@ class P4G0CAnalyzerTest(unittest.TestCase):
                     "attempt_index": index,
                     "run_id": run_id,
                     "state": "COMPLETE",
+                    **inventory_bindings[index - 1],
                 }
                 for index, run_id in enumerate(run_ids, start=1)
             ],
@@ -155,6 +238,33 @@ class P4G0CAnalyzerTest(unittest.TestCase):
         (root / "p4_g0c_runner_state.json").write_text(
             json.dumps(runner_state, sort_keys=True) + "\n"
         )
+
+    def _refresh_inventory_binding(self, root, run_index=0):
+        record = MODULE.expand_run_plan(self.bundle.protocol, root)[run_index]
+        run_dir = Path(record["run_dir"])
+        binding = self._write_artifact_inventory(run_dir, record["run_id"])
+        state_path = root / "p4_g0c_runner_state.json"
+        state = json.loads(state_path.read_text())
+        state["attempts"][run_index].update(binding)
+        state_path.write_text(json.dumps(state, sort_keys=True) + "\n")
+
+    def _rewrite_inventory_payload(self, root, payload, run_index=0):
+        run_id = MODULE.expand_run_plan(
+            self.bundle.protocol, root
+        )[run_index]["run_id"]
+        inventory_path = (
+            root / run_id / "p4_g0c_artifact_inventory.json"
+        )
+        raw = json.dumps(
+            payload, sort_keys=True, separators=(",", ":")
+        ) + "\n"
+        inventory_path.write_text(raw)
+        state_path = root / "p4_g0c_runner_state.json"
+        state = json.loads(state_path.read_text())
+        state["attempts"][run_index]["artifact_inventory_sha256"] = (
+            hashlib.sha256(raw.encode()).hexdigest()
+        )
+        state_path.write_text(json.dumps(state, sort_keys=True) + "\n")
 
     def test_type7_quantile_has_stable_tie_sources_and_unit_conversion(self):
         q = MODULE.quantile_type7([(3.0, 7), (1.0, 4), (1.0, 2), (5.0, 8)], 0.5)
@@ -412,29 +522,333 @@ class P4G0CAnalyzerTest(unittest.TestCase):
             result = MODULE.analyze(self.bundle, root)
         self.assertEqual(result["analysis_status"], "REJECTED")
         self.assertTrue(any(
-            "root_inventory_manifest" in item for item in result["failures"]
-        ))
-        self.assertTrue(any(
-            "root_inventory_decision_csv" in item
+            "unregistered nested run directory" in item
             for item in result["failures"]
         ))
 
     def test_alternate_manifest_and_csv_names_cannot_bypass_inventory(self):
+        cases = (
+            ("alternate_manifest.json", "{}"),
+            ("decisions.csv", "x\n"),
+        )
+        for name, content in cases:
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                self._make_bundle(root)
+                run_dir = root / "p4-g0c-seed211-rep01"
+                (run_dir / name).write_text(content)
+                result = MODULE.analyze(self.bundle, root)
+                self.assertEqual(result["analysis_status"], "REJECTED")
+                self.assertTrue(any(
+                    "artifact inventory does not match" in item
+                    for item in result["failures"]
+                ))
+
+    def test_registered_production_manifest_and_timing_csv_are_eligible(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             self._make_bundle(root)
             run_dir = root / "p4-g0c-seed211-rep01"
-            (run_dir / "alternate_manifest.json").write_text("{}")
-            (run_dir / "decisions.csv").write_text("x\n")
+            self.assertTrue(
+                (
+                    run_dir / "exports/synthetic_run_token"
+                    / "test_planner_manifest.json"
+                ).is_file()
+            )
+            self.assertTrue(
+                (run_dir / "runtime/profiling/iap_timing.csv").is_file()
+            )
+            (run_dir / "runtime/p4_decisions_metrics.csv").write_text(
+                "metric,value\nlatency,1\n"
+            )
+            (run_dir / "runtime/p4_g0c_export_manifest.json").write_text(
+                '{"schema_version":"runtime_export_v1"}\n'
+            )
+            self._refresh_inventory_binding(root)
+            result = MODULE.analyze(self.bundle, root)
+        self.assertEqual(result["analysis_status"], "DRAFT_ELIGIBLE")
+
+    def test_arbitrary_in_root_output_rejects_before_write_or_self_invalidation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._make_bundle(root)
+            output = root / "arbitrary.json"
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
+                io.StringIO()
+            ):
+                exit_code = MODULE.main([
+                    "--runs-root", str(root), "--output", str(output)
+                ])
+            reanalysis = MODULE.analyze(self.bundle, root)
+        self.assertEqual(exit_code, 2)
+        self.assertFalse(output.exists())
+        self.assertEqual(reanalysis["analysis_status"], "DRAFT_ELIGIBLE")
+
+    def test_existing_named_analyzer_outputs_are_never_overwritten(self):
+        cases = {
+            "--output": ("p4_g0c_analysis.json", "analysis-retained\n"),
+            "--draft-output": (
+                "p4_g0c_threshold_draft.json", "draft-retained\n"
+            ),
+        }
+        for option, (name, retained) in cases.items():
+            with self.subTest(option=option), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                self._make_bundle(root)
+                output = root / name
+                output.write_text(retained)
+                with contextlib.redirect_stdout(
+                    io.StringIO()
+                ), contextlib.redirect_stderr(io.StringIO()):
+                    exit_code = MODULE.main([
+                        "--runs-root", str(root), option, str(output)
+                    ])
+                self.assertEqual(exit_code, 2)
+                self.assertEqual(output.read_text(), retained)
+
+    def test_post_inventory_add_change_remove_and_symlink_reject(self):
+        mutations = {
+            "added": lambda run_dir: (
+                run_dir / "extra.bin"
+            ).write_bytes(b"extra"),
+            "changed": lambda run_dir: (
+                run_dir / "stdout.log"
+            ).write_text("changed\n"),
+            "removed": lambda run_dir: (
+                run_dir / "stdout.log"
+            ).unlink(),
+            "symlink": lambda run_dir: (
+                run_dir / "linked.log"
+            ).symlink_to(run_dir / "stdout.log"),
+        }
+        for label, mutate in mutations.items():
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                self._make_bundle(root)
+                mutate(root / "p4-g0c-seed211-rep01")
+                result = MODULE.analyze(self.bundle, root)
+                self.assertEqual(result["analysis_status"], "REJECTED")
+                self.assertTrue(any(
+                    "artifact_inventory_invalid" in item
+                    for item in result["failures"]
+                ))
+
+    def test_inventory_missing_duplicate_and_escaping_entries_reject(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._make_bundle(root)
+            inventory_path = (
+                root
+                / "p4-g0c-seed211-rep01/p4_g0c_artifact_inventory.json"
+            )
+            inventory_path.unlink()
             result = MODULE.analyze(self.bundle, root)
         self.assertEqual(result["analysis_status"], "REJECTED")
         self.assertTrue(any(
-            "root_inventory_manifest" in item for item in result["failures"]
+            "artifact_inventory_missing" in item for item in result["failures"]
         ))
+
+        mutations = {
+            "duplicate": lambda payload: payload["entries"].append(
+                dict(payload["entries"][-1])
+            ),
+            "escaping": lambda payload: payload["entries"].insert(
+                0, {"path": "../escape", "type": "directory"}
+            ),
+        }
+        for label, mutate in mutations.items():
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                self._make_bundle(root)
+                inventory_path = (
+                    root
+                    / "p4-g0c-seed211-rep01/p4_g0c_artifact_inventory.json"
+                )
+                payload = json.loads(inventory_path.read_text())
+                mutate(payload)
+                self._rewrite_inventory_payload(root, payload)
+                result = MODULE.analyze(self.bundle, root)
+                self.assertEqual(result["analysis_status"], "REJECTED")
+                self.assertTrue(any(
+                    "artifact_inventory_invalid" in item
+                    for item in result["failures"]
+                ))
+
+    def test_inventory_cannot_authorize_secondary_g0c_manifest_or_decision_csv(self):
+        cases = {
+            "secondary G0C run manifest": (
+                "secondary.json",
+                '{"schema_version":"p4_g0c_run_manifest_v1"}\n',
+            ),
+            "secondary P4 decision CSV": (
+                "secondary.csv", ",".join(CSV_FIELDS) + "\n"
+            ),
+        }
+        for expected, (name, content) in cases.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                self._make_bundle(root)
+                run_dir = root / "p4-g0c-seed211-rep01"
+                (run_dir / name).write_text(content)
+                self._refresh_inventory_binding(root)
+                result = MODULE.analyze(self.bundle, root)
+                self.assertEqual(result["analysis_status"], "REJECTED")
+                self.assertTrue(any(
+                    expected in item for item in result["failures"]
+                ))
+
+    def test_launch_manifest_path_hash_and_object_are_bound(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._make_bundle(root)
+            manifest_path = (
+                root / "p4-g0c-seed211-rep01/p4_g0c_run_manifest.json"
+            )
+            manifest = json.loads(manifest_path.read_text())
+            manifest["test_planner_manifest_path"] = str(
+                root / "elsewhere/test_planner_manifest.json"
+            )
+            manifest_path.write_text(json.dumps(manifest, sort_keys=True) + "\n")
+            result = MODULE.analyze(self.bundle, root)
+        self.assertEqual(result["analysis_status"], "REJECTED")
         self.assertTrue(any(
-            "root_inventory_decision_csv" in item
+            "manifest_truth" in item and "test_planner_manifest_path" in item
             for item in result["failures"]
         ))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._make_bundle(root)
+            launch_manifest = (
+                root
+                / "p4-g0c-seed211-rep01/exports/synthetic_run_token"
+                / "test_planner_manifest.json"
+            )
+            launch_manifest.write_text("[]\n")
+            self._refresh_inventory_binding(root)
+            result = MODULE.analyze(self.bundle, root)
+        self.assertEqual(result["analysis_status"], "REJECTED")
+        self.assertTrue(any(
+            "launch_manifest_invalid" in item for item in result["failures"]
+        ))
+
+        binding_cases = [
+            ("launch_manifest_binding",
+                "test_planner_manifest_sha256", "0" * 64
+            ),
+            ("launch_manifest_binding",
+                "test_planner_manifest_path", "/tmp/other-launch-manifest.json"
+            ),
+            ("artifact_inventory_binding",
+                "artifact_inventory_sha256", "0" * 64
+            ),
+            ("artifact_inventory_binding",
+                "artifact_inventory_path", "/tmp/other-inventory.json"
+            ),
+        ]
+        for expected, field, value in binding_cases:
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                self._make_bundle(root)
+                state_path = root / "p4_g0c_runner_state.json"
+                state = json.loads(state_path.read_text())
+                state["attempts"][0][field] = value
+                state_path.write_text(json.dumps(state, sort_keys=True) + "\n")
+                result = MODULE.analyze(self.bundle, root)
+                self.assertEqual(result["analysis_status"], "REJECTED")
+                self.assertTrue(any(
+                    expected in item for item in result["failures"]
+                ))
+
+    def test_output_swap_alias_and_symlink_reject_before_any_write(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._make_bundle(root)
+            cases = [
+                [
+                    "--output",
+                    str(root / "p4_g0c_threshold_draft.json"),
+                ],
+                [
+                    "--draft-output",
+                    str(root / "p4_g0c_analysis.json"),
+                ],
+            ]
+            for argv in cases:
+                with self.subTest(option=argv[0]), contextlib.redirect_stdout(
+                    io.StringIO()
+                ), contextlib.redirect_stderr(io.StringIO()):
+                    exit_code = MODULE.main([
+                        "--runs-root", str(root), *argv
+                    ])
+                    self.assertEqual(exit_code, 2)
+            self.assertFalse((root / "p4_g0c_analysis.json").exists())
+            self.assertFalse((root / "p4_g0c_threshold_draft.json").exists())
+
+            shared = Path(tmp) / "shared.json"
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
+                io.StringIO()
+            ):
+                exit_code = MODULE.main([
+                    "--runs-root", str(root),
+                    "--output", str(shared),
+                    "--draft-output", str(shared),
+                ])
+            self.assertEqual(exit_code, 2)
+            self.assertFalse(shared.exists())
+
+            target = Path(tmp) / "retained.json"
+            target.write_text("retained\n")
+            symlinked = root / "p4_g0c_analysis.json"
+            symlinked.symlink_to(target)
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
+                io.StringIO()
+            ):
+                exit_code = MODULE.main([
+                    "--runs-root", str(root), "--output", str(symlinked)
+                ])
+            self.assertEqual(exit_code, 2)
+            self.assertEqual(target.read_text(), "retained\n")
+
+    def test_named_outputs_are_excluded_from_raw_hash_and_rejected_has_no_draft(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._make_bundle(root)
+            baseline = MODULE.analyze(self.bundle, root)
+            analysis_output = root / "p4_g0c_analysis.json"
+            draft_output = root / "p4_g0c_threshold_draft.json"
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
+                io.StringIO()
+            ):
+                exit_code = MODULE.main([
+                    "--runs-root", str(root),
+                    "--output", str(analysis_output),
+                    "--draft-output", str(draft_output),
+                ])
+            reanalysis = MODULE.analyze(self.bundle, root)
+            self.assertEqual(exit_code, 0)
+            self.assertTrue(analysis_output.is_file())
+            self.assertTrue(draft_output.is_file())
+            self.assertEqual(
+                baseline["raw_bundle_sha256"],
+                reanalysis["raw_bundle_sha256"],
+            )
+            self.assertEqual(reanalysis["analysis_status"], "DRAFT_ELIGIBLE")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._make_bundle(root)
+            (root / "unregistered.txt").write_text("dirty")
+            draft_output = root / "p4_g0c_threshold_draft.json"
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
+                io.StringIO()
+            ):
+                exit_code = MODULE.main([
+                    "--runs-root", str(root),
+                    "--draft-output", str(draft_output),
+                ])
+            self.assertEqual(exit_code, 2)
+            self.assertFalse(draft_output.exists())
 
     def test_ratio_tolerance_boundary_and_raw_hash_are_stable(self):
         def mutate(index, manifest, rows):
@@ -498,9 +912,7 @@ class P4G0CAnalyzerTest(unittest.TestCase):
             root = Path(tmp)
             self._make_bundle(root, [6] * 15)
             missing = root / "p4-g0c-seed271-rep03"
-            for child in missing.iterdir():
-                child.unlink()
-            missing.rmdir()
+            shutil.rmtree(missing)
             duplicate_manifest = (
                 root / "p4-g0c-seed271-rep02" / "p4_g0c_run_manifest.json"
             )

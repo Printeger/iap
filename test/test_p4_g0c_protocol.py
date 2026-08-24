@@ -93,6 +93,79 @@ class P4G0CProtocolTest(unittest.TestCase):
             "risk_search_latency_ms", "total_search_latency_ms",
         ))
 
+    def test_run_artifact_inventory_schema_is_canonical_complete_and_symlink_free(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp) / "p4-g0c-seed211-rep01"
+            launch_manifest = run_dir / "exports/test_planner_manifest.json"
+            launch_manifest.parent.mkdir(parents=True)
+            launch_manifest.write_text("{}\n")
+            timing = run_dir / "runtime/profiling/iap_timing.csv"
+            timing.parent.mkdir(parents=True)
+            timing.write_text("stamp,duration_ms\n")
+            (run_dir / "stdout.log").write_text("done\n")
+            inventory = MODULE.make_run_artifact_inventory(
+                run_dir, "p4-g0c-seed211-rep01"
+            )
+            entries = MODULE.validate_run_artifact_inventory(
+                inventory, run_dir, "p4-g0c-seed211-rep01"
+            )
+            self.assertEqual(inventory["schema_version"], (
+                "p4_g0c_run_artifact_inventory_v1"
+            ))
+            self.assertEqual(
+                [entry["path"] for entry in entries],
+                [
+                    "exports",
+                    "exports/test_planner_manifest.json",
+                    "runtime",
+                    "runtime/profiling",
+                    "runtime/profiling/iap_timing.csv",
+                    "stdout.log",
+                ],
+            )
+            self.assertTrue(all(
+                set(entry) == {"path", "type", "size_bytes", "sha256"}
+                for entry in entries if entry["type"] == "regular"
+            ))
+
+            duplicate = json.loads(json.dumps(inventory))
+            duplicate["entries"].append(dict(duplicate["entries"][-1]))
+            with self.assertRaisesRegex(
+                MODULE.ProtocolError, "unordered or duplicate"
+            ):
+                MODULE.validate_run_artifact_inventory(
+                    duplicate, run_dir, "p4-g0c-seed211-rep01"
+                )
+
+            (run_dir / "linked.log").symlink_to(run_dir / "stdout.log")
+            with self.assertRaisesRegex(MODULE.ProtocolError, "symlink"):
+                MODULE.collect_run_artifact_entries(run_dir)
+
+    def test_inventory_does_not_blacklist_production_like_filenames(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp) / "p4-g0c-seed211-rep01"
+            runtime = run_dir / "runtime"
+            runtime.mkdir(parents=True)
+            (runtime / "p4_decisions_metrics.csv").write_text(
+                "metric,value\nlatency,1\n"
+            )
+            (runtime / "p4_g0c_export_manifest.json").write_text(
+                '{"schema_version":"runtime_export_v1"}\n'
+            )
+
+            inventory = MODULE.make_run_artifact_inventory(
+                run_dir, "p4-g0c-seed211-rep01"
+            )
+
+            self.assertEqual(
+                [entry["path"] for entry in inventory["entries"]],
+                [
+                    "runtime",
+                    "runtime/p4_decisions_metrics.csv",
+                    "runtime/p4_g0c_export_manifest.json",
+                ],
+            )
+
     def test_noncanonical_json_and_calibrated_registry_fail_closed(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

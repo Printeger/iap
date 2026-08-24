@@ -1417,3 +1417,41 @@ ldd "$repo_root/results/icra27/icra015/build_ego/test_p0_risk_grid_runtime" \
   preflight, ROS/launch, calibration, CTest, smoke, benchmark, draft/freeze/
   application, G0D or P5 ran. Result is protocol-repair readiness for
   Supervisor review, not G0C PASS.
+
+## 2026-08-24 (ICRA-044 P4-G0C live-artifact protocol repair)
+
+- IAP-RQ-423: the runner now requires an absent or empty ordinary root before
+  any state/GPU boundary and versions state as `p4_g0c_runner_state_v3`.
+  COMPLETE attempts bind canonical `p4_g0c_run_artifact_inventory_v1` bytes
+  plus the exact recorded test-planner manifest path/hash. Failed attempts
+  retain FAILED with no COMPLETE inventory binding; preflight-only roots cannot
+  be reused.
+- Each per-run inventory records every regular file and symlink-free directory
+  with normalized relative path, byte size and SHA-256, excluding only itself.
+  Analyzer recomputation rejects missing/add/change/remove/duplicate/escape/
+  symlink drift, nested retry/run trees and secondary G0C manifest/P4-decision
+  artifacts while accepting inventoried production manifests, timing and other
+  export/runtime CSVs. Dynamic
+  `exports/<run-token>/test_planner_manifest.json` is bound to the exact path
+  recorded by the G0C manifest and must remain inside that run's exports tree.
+- Analyzer output is deterministic and non-overwriting. In-root output names
+  are exactly `p4_g0c_analysis.json` and `p4_g0c_threshold_draft.json`; named
+  outputs are excluded from the raw input hash on first/read-only reanalysis.
+  Arbitrary/swapped/aliased/symlinked/existing destinations fail before
+  analysis/write, and rejected analysis writes no draft.
+- Red suites reproduced dirty-root GPU reachability, production artifact
+  rejection, self-invalidating arbitrary output and named-output overwrite.
+  Final focused tests pass 64/64 and the post-review full Python discovery
+  passes 403/403. No live or compiled flow ran; this is live-artifact protocol
+  readiness for Supervisor review, not G0C PASS.
+
+Direct reproduction commands from the repository root:
+
+```bash
+python3 test/test_p4_g0c_protocol.py
+python3 test/test_p4_g0c_runner.py
+python3 test/test_p4_g0c_analyzer.py
+python3 test/test_p4_g0c_launch_contract.py
+python3 test/test_test_planner_launch.py
+python3 -m unittest discover -s test -p 'test_*.py'
+```

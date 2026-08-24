@@ -7,7 +7,7 @@ import hashlib
 import json
 import math
 import re
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 
@@ -58,6 +58,8 @@ DECISION_NONEMPTY_COLUMNS = (
 DECISION_IDENTITY_COLUMNS = (
     "planning_attempt_id", "collision_segment_id", "request_hash",
 )
+RUN_ARTIFACT_INVENTORY_SCHEMA = "p4_g0c_run_artifact_inventory_v1"
+RUN_ARTIFACT_INVENTORY_FILENAME = "p4_g0c_artifact_inventory.json"
 
 
 class ProtocolError(RuntimeError):
@@ -242,6 +244,176 @@ def decision_identity(parsed_row: dict[str, Any]) -> tuple[Any, ...]:
         integers[key] if key in integers else strings[key]
         for key in DECISION_IDENTITY_COLUMNS
     )
+
+
+def _validate_artifact_relative_path(path: str) -> PurePosixPath:
+    if not isinstance(path, str) or not path or "\\" in path:
+        raise ProtocolError("artifact inventory path is not normalized")
+    pure = PurePosixPath(path)
+    if (
+        pure.is_absolute()
+        or pure.as_posix() != path
+        or any(part in {"", ".", ".."} for part in pure.parts)
+    ):
+        raise ProtocolError(f"artifact inventory path is not normalized: {path}")
+    return pure
+
+
+def _validate_registered_artifact_directory(path: str) -> None:
+    pure = _validate_artifact_relative_path(path)
+    name = pure.name
+    lowered = name.lower()
+    if "retry" in lowered or name.startswith("p4-g0c-"):
+        raise ProtocolError(f"unregistered nested run directory: {path}")
+
+
+def _validate_registered_artifact_bytes(path: str, raw: bytes) -> None:
+    pure = PurePosixPath(path)
+    if pure.suffix.lower() == ".json" and path != "p4_g0c_run_manifest.json":
+        try:
+            payload = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            payload = None
+        if (
+            isinstance(payload, dict)
+            and payload.get("schema_version") == "p4_g0c_run_manifest_v1"
+        ):
+            raise ProtocolError(f"secondary G0C run manifest: {path}")
+    if pure.suffix.lower() == ".csv" and path != "p4_decisions.csv":
+        try:
+            first_line = raw.decode("utf-8").splitlines()[0]
+        except (UnicodeDecodeError, IndexError):
+            first_line = ""
+        if first_line == ",".join(DECISION_CSV_COLUMNS):
+            raise ProtocolError(f"secondary P4 decision CSV: {path}")
+
+
+def collect_run_artifact_entries(run_dir: Path) -> list[dict[str, Any]]:
+    requested_root = Path(run_dir)
+    if requested_root.is_symlink():
+        raise ProtocolError(f"run directory cannot be a symlink: {requested_root}")
+    root = requested_root.resolve()
+    if not root.is_dir():
+        raise ProtocolError(f"run directory is missing: {root}")
+    entries: list[dict[str, Any]] = []
+
+    def visit(directory: Path) -> None:
+        try:
+            children = sorted(directory.iterdir(), key=lambda item: item.name)
+        except OSError as exc:
+            raise ProtocolError(f"run artifact directory is unreadable: {directory}") from exc
+        for child in children:
+            relative = child.relative_to(root).as_posix()
+            if child.is_symlink():
+                raise ProtocolError(f"run artifact cannot be a symlink: {relative}")
+            if relative == RUN_ARTIFACT_INVENTORY_FILENAME:
+                if not child.is_file():
+                    raise ProtocolError("artifact inventory path is not a regular file")
+                continue
+            if child.is_dir():
+                _validate_registered_artifact_directory(relative)
+                entries.append({"path": relative, "type": "directory"})
+                visit(child)
+            elif child.is_file():
+                _validate_artifact_relative_path(relative)
+                try:
+                    raw = child.read_bytes()
+                except OSError as exc:
+                    raise ProtocolError(
+                        f"run artifact is unreadable: {relative}"
+                    ) from exc
+                _validate_registered_artifact_bytes(relative, raw)
+                entries.append({
+                    "path": relative,
+                    "type": "regular",
+                    "size_bytes": len(raw),
+                    "sha256": hashlib.sha256(raw).hexdigest(),
+                })
+            else:
+                raise ProtocolError(f"unsupported run artifact type: {relative}")
+    visit(root)
+    return sorted(entries, key=lambda entry: entry["path"])
+
+
+def make_run_artifact_inventory(run_dir: Path, run_id: str) -> dict[str, Any]:
+    if not RUN_ID_PATTERN.fullmatch(str(run_id)):
+        raise ProtocolError(f"artifact inventory run ID is invalid: {run_id}")
+    return {
+        "schema_version": RUN_ARTIFACT_INVENTORY_SCHEMA,
+        "run_id": run_id,
+        "excluded_path": RUN_ARTIFACT_INVENTORY_FILENAME,
+        "entries": collect_run_artifact_entries(run_dir),
+    }
+
+
+def validate_run_artifact_inventory(
+    inventory: dict[str, Any], run_dir: Path, run_id: str
+) -> list[dict[str, Any]]:
+    if not isinstance(inventory, dict) or set(inventory) != {
+        "schema_version", "run_id", "excluded_path", "entries"
+    }:
+        raise ProtocolError("run artifact inventory root/schema is malformed")
+    if inventory.get("schema_version") != RUN_ARTIFACT_INVENTORY_SCHEMA:
+        raise ProtocolError("run artifact inventory version is not registered")
+    if inventory.get("run_id") != run_id:
+        raise ProtocolError("run artifact inventory ID is not bound")
+    if inventory.get("excluded_path") != RUN_ARTIFACT_INVENTORY_FILENAME:
+        raise ProtocolError("run artifact inventory self-exclusion is not exact")
+    entries = inventory.get("entries")
+    if not isinstance(entries, list):
+        raise ProtocolError("run artifact inventory entries are missing")
+    paths: list[str] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise ProtocolError("run artifact inventory entry is not an object")
+        path = entry.get("path")
+        _validate_artifact_relative_path(path)
+        if path == RUN_ARTIFACT_INVENTORY_FILENAME:
+            raise ProtocolError("run artifact inventory includes itself")
+        artifact_type = entry.get("type")
+        if artifact_type == "directory":
+            if set(entry) != {"path", "type"}:
+                raise ProtocolError(f"directory inventory entry is malformed: {path}")
+            _validate_registered_artifact_directory(path)
+        elif artifact_type == "regular":
+            if set(entry) != {"path", "type", "size_bytes", "sha256"}:
+                raise ProtocolError(f"file inventory entry is malformed: {path}")
+            size = entry.get("size_bytes")
+            sha256 = entry.get("sha256")
+            if not isinstance(size, int) or isinstance(size, bool) or size < 0:
+                raise ProtocolError(f"file inventory size is invalid: {path}")
+            if (
+                not isinstance(sha256, str)
+                or len(sha256) != 64
+                or any(character not in "0123456789abcdef" for character in sha256)
+            ):
+                raise ProtocolError(f"file inventory SHA-256 is invalid: {path}")
+        else:
+            raise ProtocolError(f"artifact inventory type is invalid: {path}")
+        paths.append(path)
+    if paths != sorted(paths) or len(paths) != len(set(paths)):
+        raise ProtocolError("run artifact inventory paths are unordered or duplicate")
+    actual_entries = collect_run_artifact_entries(run_dir)
+    if entries != actual_entries:
+        raise ProtocolError("run artifact inventory does not match the run tree")
+    return actual_entries
+
+
+def bound_test_planner_manifest_path(run_dir: Path, value: Any) -> Path:
+    if not isinstance(value, str) or not value:
+        raise ProtocolError("test-planner manifest path is missing")
+    candidate = Path(value)
+    if not candidate.is_absolute():
+        raise ProtocolError("test-planner manifest path is not absolute")
+    resolved = candidate.resolve()
+    if str(candidate) != str(resolved):
+        raise ProtocolError("test-planner manifest path is aliased or symlinked")
+    exports_root = (Path(run_dir).resolve() / "exports").resolve()
+    if resolved.name != "test_planner_manifest.json":
+        raise ProtocolError("test-planner manifest basename is not exact")
+    if exports_root not in resolved.parents:
+        raise ProtocolError("test-planner manifest path escapes exports")
+    return resolved
 
 
 def load_canonical_json(path: Path) -> dict[str, Any]:

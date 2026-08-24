@@ -18,13 +18,17 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 from p4_g0c_protocol import (  # noqa: E402
+    RUN_ARTIFACT_INVENTORY_FILENAME,
     DecisionSchemaError,
     ProtocolBundle,
+    bound_test_planner_manifest_path,
+    canonical_bytes,
     decision_identity,
     effective_config_sha256,
     expand_run_plan,
     load_protocol_bundle,
     parse_decision_row,
+    validate_run_artifact_inventory,
     validate_decision_header,
 )
 
@@ -32,7 +36,7 @@ from p4_g0c_protocol import (  # noqa: E402
 ANALYSIS_SCHEMA = "p4_g0c_analysis_v1"
 DRAFT_SCHEMA = "p4_g0c_threshold_draft_v1"
 RUN_MANIFEST_SCHEMA = "p4_g0c_run_manifest_v1"
-RUNNER_STATE_SCHEMA = "p4_g0c_runner_state_v2"
+RUNNER_STATE_SCHEMA = "p4_g0c_runner_state_v3"
 RUNNER_STATE_FILENAME = "p4_g0c_runner_state.json"
 REQUIRED_PROCESSES = ["iap_rosnode", "ego_planner_node"]
 ALLOWED_ROOT_METADATA = {
@@ -147,44 +151,6 @@ def _root_inventory_failures(
                 else:
                     bundle_paths.append(entry)
 
-    expected_manifests = {
-        (root / run_id / "p4_g0c_run_manifest.json").resolve()
-        for run_id in registered_run_ids
-    }
-    expected_csvs = {
-        (root / run_id / "p4_decisions.csv").resolve()
-        for run_id in registered_run_ids
-    }
-    for path in root.rglob("*"):
-        if path.is_dir() and (
-            path.name.startswith("p4-g0c-")
-            or "retry" in path.name.lower()
-        ):
-            if (
-                path.parent != root
-                or path.name not in registered_run_ids
-            ):
-                failures.append(
-                    f"root_inventory_run_like_directory:{path.relative_to(root)}"
-                )
-        if "manifest" in path.name.lower() and not path.is_dir():
-            if (
-                path.name != "p4_g0c_run_manifest.json"
-                or path.resolve() not in expected_manifests
-                or path.is_symlink()
-            ):
-                failures.append(
-                    f"root_inventory_manifest:{path.relative_to(root)}"
-                )
-        if path.suffix.lower() == ".csv" and not path.is_dir():
-            if (
-                path.name != "p4_decisions.csv"
-                or path.resolve() not in expected_csvs
-                or path.is_symlink()
-            ):
-                failures.append(
-                    f"root_inventory_decision_csv:{path.relative_to(root)}"
-                )
     return failures, bundle_paths
 
 
@@ -204,10 +170,6 @@ def _runner_state_failures(
         return [f"runner_state_malformed:{exc}"], {}, path
 
     expected_ids = [record["run_id"] for record in plan]
-    expected_attempts = [
-        {"attempt_index": index, "run_id": run_id, "state": "COMPLETE"}
-        for index, run_id in enumerate(expected_ids, start=1)
-    ]
     failures = []
     expected_scalars = {
         "schema_version": RUNNER_STATE_SCHEMA,
@@ -248,11 +210,125 @@ def _runner_state_failures(
     completed = state.get("completed_run_ids")
     if completed != expected_ids:
         failures.append("runner_state_completed_ids")
-    if state.get("attempts") != expected_attempts:
+    attempts = state.get("attempts")
+    attempt_keys = {
+        "attempt_index", "run_id", "state", "artifact_inventory_path",
+        "artifact_inventory_sha256", "test_planner_manifest_path",
+        "test_planner_manifest_sha256",
+    }
+    attempt_ledger_valid = isinstance(attempts, list) and len(attempts) == 15
+    if attempt_ledger_valid:
+        for index, (run_id, attempt) in enumerate(
+            zip(expected_ids, attempts), start=1
+        ):
+            run_dir = root / run_id
+            expected_inventory = str(
+                (run_dir / RUN_ARTIFACT_INVENTORY_FILENAME).resolve()
+            )
+            expected_launch_manifest = ""
+            if isinstance(attempt, dict):
+                try:
+                    expected_launch_manifest = str(
+                        bound_test_planner_manifest_path(
+                            run_dir, attempt.get("test_planner_manifest_path")
+                        )
+                    )
+                except RuntimeError:
+                    pass
+            if (
+                not isinstance(attempt, dict)
+                or set(attempt) != attempt_keys
+                or attempt.get("attempt_index") != index
+                or attempt.get("run_id") != run_id
+                or attempt.get("state") != "COMPLETE"
+                or attempt.get("artifact_inventory_path") != expected_inventory
+                or attempt.get("test_planner_manifest_path") != expected_launch_manifest
+                or not _is_sha256(attempt.get("artifact_inventory_sha256"))
+                or not _is_sha256(attempt.get("test_planner_manifest_sha256"))
+            ):
+                attempt_ledger_valid = False
+                break
+    if not attempt_ledger_valid:
         failures.append("runner_state_attempt_ledger")
     if state.get("runs") != plan:
         failures.append("runner_state_plan")
     return failures, state, path
+
+
+def _is_sha256(value: Any) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
+def _run_inventory_failures(
+    record: dict[str, Any], attempt: dict[str, Any]
+) -> tuple[list[str], list[Path]]:
+    run_id = record["run_id"]
+    run_dir = Path(record["run_dir"])
+    inventory_path = run_dir / RUN_ARTIFACT_INVENTORY_FILENAME
+    failures: list[str] = []
+    bundle_paths: list[Path] = []
+    if inventory_path.is_symlink() or not inventory_path.is_file():
+        return [f"artifact_inventory_missing:{run_id}"], bundle_paths
+    try:
+        raw_inventory = inventory_path.read_bytes()
+        inventory = json.loads(raw_inventory.decode("utf-8"))
+        if not isinstance(inventory, dict):
+            raise ValueError("inventory root is not an object")
+        if raw_inventory != canonical_bytes(inventory):
+            raise ValueError("inventory JSON is not canonical")
+        entries = validate_run_artifact_inventory(
+            inventory, run_dir, run_id
+        )
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError, RuntimeError) as exc:
+        return [f"artifact_inventory_invalid:{run_id}:{exc}"], bundle_paths
+    inventory_sha = hashlib.sha256(raw_inventory).hexdigest()
+    if attempt.get("artifact_inventory_path") != str(inventory_path.resolve()):
+        failures.append(f"artifact_inventory_binding:{run_id}:path")
+    if attempt.get("artifact_inventory_sha256") != inventory_sha:
+        failures.append(f"artifact_inventory_binding:{run_id}:sha256")
+    bundle_paths.append(inventory_path)
+    bundle_paths.extend(
+        run_dir / entry["path"]
+        for entry in entries if entry["type"] == "regular"
+    )
+    try:
+        launch_manifest_path = bound_test_planner_manifest_path(
+            run_dir, attempt.get("test_planner_manifest_path")
+        )
+    except RuntimeError as exc:
+        failures.append(f"launch_manifest_binding:{run_id}:path:{exc}")
+        return failures, bundle_paths
+    inventory_regular_paths = {
+        str((run_dir / entry["path"]).resolve())
+        for entry in entries if entry["type"] == "regular"
+    }
+    if str(launch_manifest_path) not in inventory_regular_paths:
+        failures.append(f"launch_manifest_binding:{run_id}:inventory")
+        return failures, bundle_paths
+    if launch_manifest_path.is_symlink() or not launch_manifest_path.is_file():
+        failures.append(f"launch_manifest_missing:{run_id}")
+        return failures, bundle_paths
+    try:
+        launch_raw = launch_manifest_path.read_bytes()
+        launch_manifest = json.loads(launch_raw.decode("utf-8"))
+        if not isinstance(launch_manifest, dict):
+            raise ValueError("launch manifest root is not an object")
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        failures.append(f"launch_manifest_invalid:{run_id}:{exc}")
+        return failures, bundle_paths
+    if attempt.get("test_planner_manifest_path") != str(
+        launch_manifest_path.resolve()
+    ):
+        failures.append(f"launch_manifest_binding:{run_id}:path")
+    if attempt.get("test_planner_manifest_sha256") != hashlib.sha256(
+        launch_raw
+    ).hexdigest():
+        failures.append(f"launch_manifest_binding:{run_id}:sha256")
+    return failures, bundle_paths
 
 
 def _manifest_failures(
@@ -261,6 +337,7 @@ def _manifest_failures(
     manifest: dict[str, Any],
     csv_path: Path,
     expected_config_hash: str,
+    expected_launch_manifest_path: str,
 ) -> list[str]:
     run_id = record["run_id"]
     failures = []
@@ -284,6 +361,7 @@ def _manifest_failures(
         "selection_applied": False,
         "immutable_run_id": True,
         "overwrite_allowed": False,
+        "test_planner_manifest_path": expected_launch_manifest_path,
     }
     for key, value in expected.items():
         if manifest.get(key) != value:
@@ -444,13 +522,25 @@ def analyze(bundle: ProtocolBundle, runs_root: Path) -> dict[str, Any]:
     ratio_tolerance = float(
         bundle.protocol["path_ratio_consistency"]["absolute_tolerance"]
     )
-    for record in plan:
+    for run_index, record in enumerate(plan):
         run_dir = Path(record["run_dir"])
         manifest_path = run_dir / "p4_g0c_run_manifest.json"
         csv_path = run_dir / "p4_decisions.csv"
         if not run_dir.is_dir():
             failures.append(f"missing_run:{record['run_id']}")
             continue
+        attempts = runner_state.get("attempts")
+        attempt = {}
+        if isinstance(attempts, list):
+            if run_index < len(attempts) and isinstance(
+                attempts[run_index], dict
+            ):
+                attempt = attempts[run_index]
+        inventory_errors, inventory_paths = _run_inventory_failures(
+            record, attempt
+        )
+        failures.extend(inventory_errors)
+        bundle_paths.extend(inventory_paths)
         if manifest_path.is_file():
             bundle_paths.append(manifest_path)
         if csv_path.is_file():
@@ -468,7 +558,12 @@ def analyze(bundle: ProtocolBundle, runs_root: Path) -> dict[str, Any]:
         elif manifest_run_id:
             seen_run_ids.add(manifest_run_id)
         manifest_errors = _manifest_failures(
-            bundle, record, manifest, csv_path, expected_config_hash
+            bundle,
+            record,
+            manifest,
+            csv_path,
+            expected_config_hash,
+            str(attempt.get("test_planner_manifest_path", "")),
         )
         failures.extend(manifest_errors)
         try:
@@ -555,22 +650,79 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _has_symlink_component(path: Path) -> bool:
+    current = path
+    while True:
+        if current.is_symlink():
+            return True
+        if current.parent == current:
+            return False
+        current = current.parent
+
+
+def _validated_output_path(
+    runs_root: Path,
+    candidate: Path | None,
+    expected_in_root_name: str,
+    label: str,
+) -> Path | None:
+    if candidate is None:
+        return None
+    requested = Path(candidate).expanduser()
+    if _has_symlink_component(requested.absolute()):
+        raise AnalysisError(f"{label} cannot use a symlinked path")
+    resolved = requested.resolve()
+    root = Path(runs_root).expanduser().resolve()
+    inside_root = resolved == root or root in resolved.parents
+    if inside_root and resolved != root / expected_in_root_name:
+        raise AnalysisError(
+            f"{label} inside runs root must be {expected_in_root_name}"
+        )
+    if resolved.exists() or resolved.is_symlink():
+        raise AnalysisError(f"{label} refuses to overwrite: {resolved}")
+    return resolved
+
+
+def _write_json_exclusive(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with path.open("x") as stream:
+            stream.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    except FileExistsError as exc:
+        raise AnalysisError(f"analyzer output refuses to overwrite: {path}") from exc
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
         bundle = load_bundle(args.protocol, args.registry, args.fixture)
+        output_path = _validated_output_path(
+            args.runs_root, args.output, "p4_g0c_analysis.json", "analysis output"
+        )
+        draft_output_path = _validated_output_path(
+            args.runs_root,
+            args.draft_output,
+            "p4_g0c_threshold_draft.json",
+            "threshold draft output",
+        )
+        if (
+            output_path is not None
+            and draft_output_path is not None
+            and output_path == draft_output_path
+        ):
+            raise AnalysisError("analysis and threshold draft outputs are aliased")
+        for label, path in (
+            ("analysis output", output_path),
+            ("threshold draft output", draft_output_path),
+        ):
+            if path is not None and path == args.registry.resolve():
+                raise AnalysisError(f"{label} cannot overwrite registry")
         result = analyze(bundle, args.runs_root)
-        if args.output:
-            if args.output.resolve() == args.registry.resolve():
-                raise AnalysisError("analyzer output cannot overwrite registry")
-            args.output.parent.mkdir(parents=True, exist_ok=True)
-            args.output.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
-        if args.draft_output and "threshold_draft" in result:
-            if args.draft_output.resolve() == args.registry.resolve():
-                raise AnalysisError("threshold draft cannot overwrite registry")
-            args.draft_output.parent.mkdir(parents=True, exist_ok=True)
-            args.draft_output.write_text(
-                json.dumps(result["threshold_draft"], indent=2, sort_keys=True) + "\n"
+        if output_path is not None:
+            _write_json_exclusive(output_path, result)
+        if draft_output_path is not None and "threshold_draft" in result:
+            _write_json_exclusive(
+                draft_output_path, result["threshold_draft"]
             )
     except (AnalysisError, RuntimeError) as exc:
         print(f"P4_G0C_ANALYZER_FAILED: {exc}", file=sys.stderr)

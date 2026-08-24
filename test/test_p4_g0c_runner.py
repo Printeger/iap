@@ -1,5 +1,6 @@
 import importlib.util
 import csv
+import hashlib
 import json
 import tempfile
 import unittest
@@ -24,6 +25,92 @@ class P4G0CRunnerTest(unittest.TestCase):
             self.protocol, self.registry, self.fixture
         )
 
+    def _valid_row(self, index):
+        row = {name: "0" for name in MODULE.DECISION_CSV_COLUMNS}
+        row.update({
+            "schema_version": "p4_collision_guide_decision_v1",
+            "stamp": str(index),
+            "planning_attempt_id": str(index + 1),
+            "collision_segment_id": "1",
+            "request_hash": f"request-{index}",
+            "snapshot_generation_id": "7",
+            "snapshot_stamp_s": "10.0",
+            "snapshot_frame": "map",
+            "query_base_time_s": "10.0",
+            "occupancy_epoch": "19",
+            "status": "ORIGINAL_SELECTED",
+            "reason": "METRICS_ONLY",
+            "selection_applied": "0",
+            "original_hash": f"original-{index}",
+            "risk_hash": f"risk-{index}",
+            "selected_hash": f"original-{index}",
+            "original_sample_count": "200",
+            "original_valid_count": "200",
+            "original_mean": "2.0",
+            "original_max": "3.0",
+            "risk_sample_count": "200",
+            "risk_valid_count": "200",
+            "risk_mean": "1.0",
+            "risk_max": "1.0",
+            "original_path_length": "10.0",
+            "risk_path_length": "11.0",
+            "path_length_ratio": "1.1",
+            "original_search_latency_ms": "40.0",
+            "risk_search_latency_ms": "50.0",
+            "total_search_latency_ms": "90.0",
+        })
+        return row
+
+    def _write_production_outputs(self, record, row_index):
+        run_dir = Path(record["run_dir"])
+        csv_path = run_dir / "p4_decisions.csv"
+        launch_manifest_path = (
+            run_dir / "exports/synthetic_run_token/test_planner_manifest.json"
+        )
+        manifest = {
+            "schema_version": "p4_g0c_run_manifest_v1",
+            "run_id": record["run_id"],
+            "seed": record["seed"],
+            "repetition": record["repetition"],
+            "protocol_sha256": self.bundle.protocol_sha256,
+            "registry_sha256": self.bundle.registry_sha256,
+            "fixture_sha256": self.bundle.fixture_sha256,
+            "csv_path": str(csv_path.resolve()),
+            "gate": "G0C",
+            "experiment": "p4_g0c_metrics_calibration_v1",
+            "scenario": "p4_g0c_free_corridor_v1",
+            "decision_schema_version": "p4_collision_guide_decision_v1",
+            "effective_values": self.bundle.protocol["effective_values"],
+            "effective_config_sha256": MODULE.effective_config_sha256(
+                self.bundle.protocol["effective_values"]
+            ),
+            "required_process_set": list(MODULE.REQUIRED_PROCESSES),
+            "selection_applied": False,
+            "record_bag": False,
+            "start_rviz": False,
+            "immutable_run_id": True,
+            "overwrite_allowed": False,
+            "test_planner_manifest_path": str(launch_manifest_path.resolve()),
+        }
+        (run_dir / "p4_g0c_run_manifest.json").write_text(
+            json.dumps(manifest, sort_keys=True) + "\n"
+        )
+        with csv_path.open("w", newline="") as stream:
+            writer = csv.DictWriter(
+                stream, fieldnames=MODULE.DECISION_CSV_COLUMNS
+            )
+            writer.writeheader()
+            writer.writerow(self._valid_row(row_index))
+        launch_manifest_path.parent.mkdir(parents=True)
+        launch_manifest_path.write_text(json.dumps({
+            "schema_version": "test_planner_manifest_v1",
+            "run_id": record["run_id"],
+        }) + "\n")
+        timing = run_dir / "runtime/profiling/iap_timing.csv"
+        timing.parent.mkdir(parents=True)
+        timing.write_text("stamp,duration_ms\n1,2\n")
+        (run_dir / "stdout.log").write_text("controlled shutdown\n")
+
     def test_plan_only_is_nonmutating_and_seed_major(self):
         with tempfile.TemporaryDirectory() as tmp:
             runs_root = Path(tmp) / "not-created"
@@ -38,6 +125,20 @@ class P4G0CRunnerTest(unittest.TestCase):
         self.assertEqual(len(result["runs"]), 15)
         self.assertEqual(result["runs"][0]["run_id"], "p4-g0c-seed211-rep01")
         self.assertEqual(result["runs"][-1]["run_id"], "p4-g0c-seed271-rep03")
+
+    def test_plan_only_does_not_touch_or_validate_an_existing_root(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "runs"
+            root.mkdir()
+            retained = root / "retained.txt"
+            retained.write_text("unchanged\n")
+            result = MODULE.run(self.bundle, root, plan_only=True)
+            self.assertEqual(result["runner_state"], "PLANNED")
+            self.assertEqual(retained.read_text(), "unchanged\n")
+            self.assertEqual(
+                sorted(path.name for path in root.iterdir()),
+                ["retained.txt"],
+            )
 
     def test_existing_even_empty_run_directory_is_refused_before_preflight(self):
         calls = []
@@ -68,6 +169,57 @@ class P4G0CRunnerTest(unittest.TestCase):
             self.assertEqual(state_path.read_text(), retained)
         self.assertEqual(calls, [])
 
+    def test_every_dirty_or_symlink_root_is_refused_before_gpu_or_launch(self):
+        dirty_cases = {
+            "arbitrary_file": lambda root: (
+                root.mkdir(), (root / "unregistered.txt").write_text("dirty")
+            ),
+            "retry_directory": lambda root: (
+                root.mkdir(), (root / "p4-g0c-retry").mkdir()
+            ),
+            "old_analyzer_output": lambda root: (
+                root.mkdir(), (root / "p4_g0c_analysis.json").write_text("{}")
+            ),
+        }
+        for label, prepare in dirty_cases.items():
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp) / "runs"
+                prepare(root)
+                calls = []
+                with self.assertRaisesRegex(MODULE.RunnerError, "dirty runs root"):
+                    MODULE.run(
+                        self.bundle,
+                        root,
+                        gpu_preflight=lambda _: (
+                            calls.append("gpu") or {"gpu_ready": True}
+                        ),
+                        launch_executor=lambda *_: calls.append("launch"),
+                    )
+                self.assertEqual(calls, [])
+                self.assertFalse(
+                    (root / "p4_g0c_runner_state.json").exists()
+                )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "target"
+            target.mkdir()
+            root = Path(tmp) / "runs"
+            root.symlink_to(target, target_is_directory=True)
+            calls = []
+            with self.assertRaisesRegex(MODULE.RunnerError, "symlink runs root"):
+                MODULE.run(
+                    self.bundle,
+                    root,
+                    gpu_preflight=lambda _: (
+                        calls.append("gpu") or {"gpu_ready": True}
+                    ),
+                    launch_executor=lambda *_: calls.append("launch"),
+                )
+            self.assertEqual(calls, [])
+            self.assertFalse(
+                (target / "p4_g0c_runner_state.json").exists()
+            )
+
     def test_gpu_failure_emits_not_ready_and_starts_no_launch(self):
         order = []
         with tempfile.TemporaryDirectory() as tmp:
@@ -90,18 +242,91 @@ class P4G0CRunnerTest(unittest.TestCase):
     def test_preflight_only_starts_no_launch(self):
         order = []
         with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "runs"
             result = MODULE.run(
                 self.bundle,
-                Path(tmp) / "runs",
+                root,
                 preflight_only=True,
                 gpu_preflight=lambda _: (
                     order.append("gpu") or {"gpu_ready": True}
                 ),
                 launch_executor=lambda *_: order.append("ros"),
             )
+            with self.assertRaisesRegex(
+                MODULE.RunnerError, "existing runner state"
+            ):
+                MODULE.run(
+                    self.bundle,
+                    root,
+                    gpu_preflight=lambda _: order.append("gpu-reuse"),
+                    launch_executor=lambda *_: order.append("ros-reuse"),
+                )
         self.assertEqual(order, ["gpu"])
         self.assertEqual(result["runner_state"], "PREFLIGHT_PASS")
         self.assertFalse(result["launch_started"])
+
+    def test_complete_matrix_binds_exact_production_artifact_inventories(self):
+        launched = []
+
+        def launch(record, *_):
+            launched.append(record["run_id"])
+            self._write_production_outputs(record, len(launched) - 1)
+            return 0, {
+                "required_processes_ok": True,
+                "required_processes": {
+                    name: {"seen": True, "runtime_failure": False}
+                    for name in MODULE.REQUIRED_PROCESSES
+                },
+                "process_failures": [],
+            }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "runs"
+            result = MODULE.run(
+                self.bundle,
+                root,
+                gpu_preflight=lambda _: {"gpu_ready": True},
+                launch_executor=launch,
+            )
+            persisted = json.loads(
+                (root / "p4_g0c_runner_state.json").read_text()
+            )
+            first_inventory_path = Path(
+                result["attempts"][0]["artifact_inventory_path"]
+            )
+            first_inventory = json.loads(first_inventory_path.read_text())
+            inventory_raw = first_inventory_path.read_bytes()
+        self.assertEqual(len(launched), 15)
+        self.assertEqual(result["schema_version"], "p4_g0c_runner_state_v3")
+        self.assertEqual(result["runner_state"], "COMPLETE")
+        self.assertEqual(result, persisted)
+        self.assertTrue(all(
+            attempt["state"] == "COMPLETE"
+            and set(attempt) == {
+                "attempt_index", "run_id", "state",
+                "artifact_inventory_path", "artifact_inventory_sha256",
+                "test_planner_manifest_path", "test_planner_manifest_sha256",
+            }
+            for attempt in result["attempts"]
+        ))
+        self.assertEqual(
+            result["attempts"][0]["artifact_inventory_sha256"],
+            hashlib.sha256(inventory_raw).hexdigest(),
+        )
+        self.assertEqual(
+            first_inventory["schema_version"],
+            "p4_g0c_run_artifact_inventory_v1",
+        )
+        paths = {entry["path"] for entry in first_inventory["entries"]}
+        self.assertTrue({
+            "exports/synthetic_run_token/test_planner_manifest.json",
+            "runtime/profiling/iap_timing.csv",
+            "stdout.log",
+            "launch_command.json",
+            "p4_g0c_run_manifest.json",
+            "p4_decisions.csv",
+        }.issubset(paths))
+        self.assertNotIn("p4_g0c_artifact_inventory.json", paths)
 
     def test_required_process_failure_stops_remaining_matrix_without_retry(self):
         launched = []
@@ -150,6 +375,12 @@ class P4G0CRunnerTest(unittest.TestCase):
         self.assertEqual(result["completed_run_ids"], [])
         self.assertEqual(result["attempts"][0]["state"], "FAILED")
         self.assertEqual(result["attempts"][0]["attempt_index"], 1)
+        self.assertNotIn(
+            "artifact_inventory_path", result["attempts"][0]
+        )
+        self.assertNotIn(
+            "test_planner_manifest_sha256", result["attempts"][0]
+        )
 
     def test_top_level_success_without_bound_manifest_csv_fails_closed(self):
         def launch(*_):
@@ -279,6 +510,9 @@ class P4G0CRunnerTest(unittest.TestCase):
                 "start_rviz": False,
                 "immutable_run_id": True,
                 "overwrite_allowed": False,
+                "test_planner_manifest_path": str(
+                    (run_dir / "exports/test_planner_manifest.json").resolve()
+                ),
             }
             (run_dir / "p4_g0c_run_manifest.json").write_text(
                 json.dumps(manifest)
