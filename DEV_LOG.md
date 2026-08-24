@@ -6313,3 +6313,28 @@ truthful fail-closed handoff. Aggregate review is retained at
 Review disposition remains
 `BLOCKED_LAUNCH_DEPENDENCY_SO3_CONTROL_NOT_FOUND`, never G0C PASS. No retry,
 repair, analyzer, threshold action or cleanup is authorized.
+
+## 2026-08-24T11:23:36Z — ICRA-046 BUILDER HANDOFF
+
+IAP-RQ-423. The fresh build/test package, immutable first-failure raw evidence,
+compact BLOCKED summaries and two-axis review were committed as `6ff759f` and
+pushed to `origin/dev/icra`.
+
+Runtime blocker: the sole runner passed real GPU preflight, then its first
+launch exited 1 because `so3_control` was unavailable; state is 1 attempted / 0
+complete / 0 retry. Independent review also records one irreversible protocol
+finding: required runtime package resolution was not established before the
+runner entered GPU/ROS. Handoff evidence has 0 remaining findings and no
+additional commit/push blocker.
+
+Runner invocations remain 1, launch invocations 1 and analyzer invocations 0;
+no analysis or draft exists. The retained raw four-file tree still matches
+manifest SHA-256
+`f307e61a90707d6da5a38138558a97447c5267ef9a5184f3df92ca8b97079438`.
+All ICRA-046 build/install products and raw data remain retained. Protected
+config/fixture/launch/PDF hashes, registry proposed/null/disabled truth,
+capacity above 20 GiB and zero task-process state were rechecked.
+
+Builder result is `BLOCKED_LAUNCH_DEPENDENCY_SO3_CONTROL_NOT_FOUND`, never G0C
+PASS. No retry, repair, alternate root, analyzer, threshold freeze/application,
+G0D, P5 or cleanup is authorized. Control returns only to SUPERVISOR review.
