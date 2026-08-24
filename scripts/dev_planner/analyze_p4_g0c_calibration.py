@@ -18,18 +18,29 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 from p4_g0c_protocol import (  # noqa: E402
+    DecisionSchemaError,
     ProtocolBundle,
+    decision_identity,
     effective_config_sha256,
     expand_run_plan,
     load_protocol_bundle,
+    parse_decision_row,
+    validate_decision_header,
 )
 
 
 ANALYSIS_SCHEMA = "p4_g0c_analysis_v1"
 DRAFT_SCHEMA = "p4_g0c_threshold_draft_v1"
-DECISION_SCHEMA = "p4_collision_guide_decision_v1"
 RUN_MANIFEST_SCHEMA = "p4_g0c_run_manifest_v1"
+RUNNER_STATE_SCHEMA = "p4_g0c_runner_state_v2"
+RUNNER_STATE_FILENAME = "p4_g0c_runner_state.json"
 REQUIRED_PROCESSES = ["iap_rosnode", "ego_planner_node"]
+ALLOWED_ROOT_METADATA = {
+    RUNNER_STATE_FILENAME,
+    "p4_g0c_analysis.json",
+    "p4_g0c_threshold_draft.json",
+}
+ALLOWED_PREFLIGHT_METADATA = {"gpu_preflight.json"}
 
 
 class AnalysisError(RuntimeError):
@@ -83,27 +94,6 @@ def quantile_type7(values: list[tuple[float, int]], probability: float) -> dict[
     }
 
 
-def _int(row: dict[str, str], key: str) -> int:
-    raw = row.get(key, "")
-    try:
-        value = int(raw)
-    except (TypeError, ValueError) as exc:
-        raise AnalysisError(f"{key} is not a typed integer") from exc
-    if str(value) != str(raw).strip():
-        raise AnalysisError(f"{key} is not a canonical integer")
-    return value
-
-
-def _float(row: dict[str, str], key: str) -> float:
-    try:
-        value = float(row.get(key, ""))
-    except (TypeError, ValueError) as exc:
-        raise AnalysisError(f"{key} is not a typed float") from exc
-    if not math.isfinite(value):
-        raise AnalysisError(f"{key} must be finite")
-    return value
-
-
 def _raw_bundle_hash(root: Path, paths: list[Path]) -> str:
     digest = hashlib.sha256()
     for path in sorted(set(paths), key=lambda item: str(item.relative_to(root))):
@@ -113,6 +103,156 @@ def _raw_bundle_hash(root: Path, paths: list[Path]) -> str:
         digest.update(hashlib.sha256(path.read_bytes()).digest())
         digest.update(b"\0")
     return digest.hexdigest()
+
+
+def _root_inventory_failures(
+    root: Path, registered_run_ids: list[str]
+) -> tuple[list[str], list[Path]]:
+    failures = []
+    bundle_paths: list[Path] = []
+    allowed_names = set(registered_run_ids) | ALLOWED_ROOT_METADATA | {
+        "preflight"
+    }
+    try:
+        entries = list(root.iterdir())
+    except OSError as exc:
+        return [f"root_inventory_unreadable:{exc}"], bundle_paths
+    for entry in entries:
+        if entry.name not in allowed_names:
+            failures.append(f"root_inventory_unregistered:{entry.name}")
+        if entry.is_symlink():
+            failures.append(f"root_inventory_symlink:{entry.name}")
+    for run_id in registered_run_ids:
+        path = root / run_id
+        if not path.is_dir() or path.is_symlink():
+            failures.append(f"root_inventory_registered_run:{run_id}")
+    for name in ALLOWED_ROOT_METADATA:
+        path = root / name
+        if path.exists() and (not path.is_file() or path.is_symlink()):
+            failures.append(f"root_inventory_metadata_type:{name}")
+    preflight = root / "preflight"
+    if preflight.exists():
+        if not preflight.is_dir() or preflight.is_symlink():
+            failures.append("root_inventory_preflight_type")
+        else:
+            for entry in preflight.iterdir():
+                if (
+                    entry.name not in ALLOWED_PREFLIGHT_METADATA
+                    or not entry.is_file()
+                    or entry.is_symlink()
+                ):
+                    failures.append(
+                        f"root_inventory_preflight_metadata:{entry.name}"
+                    )
+                else:
+                    bundle_paths.append(entry)
+
+    expected_manifests = {
+        (root / run_id / "p4_g0c_run_manifest.json").resolve()
+        for run_id in registered_run_ids
+    }
+    expected_csvs = {
+        (root / run_id / "p4_decisions.csv").resolve()
+        for run_id in registered_run_ids
+    }
+    for path in root.rglob("*"):
+        if path.is_dir() and (
+            path.name.startswith("p4-g0c-")
+            or "retry" in path.name.lower()
+        ):
+            if (
+                path.parent != root
+                or path.name not in registered_run_ids
+            ):
+                failures.append(
+                    f"root_inventory_run_like_directory:{path.relative_to(root)}"
+                )
+        if "manifest" in path.name.lower() and not path.is_dir():
+            if (
+                path.name != "p4_g0c_run_manifest.json"
+                or path.resolve() not in expected_manifests
+                or path.is_symlink()
+            ):
+                failures.append(
+                    f"root_inventory_manifest:{path.relative_to(root)}"
+                )
+        if path.suffix.lower() == ".csv" and not path.is_dir():
+            if (
+                path.name != "p4_decisions.csv"
+                or path.resolve() not in expected_csvs
+                or path.is_symlink()
+            ):
+                failures.append(
+                    f"root_inventory_decision_csv:{path.relative_to(root)}"
+                )
+    return failures, bundle_paths
+
+
+def _runner_state_failures(
+    bundle: ProtocolBundle,
+    root: Path,
+    plan: list[dict[str, Any]],
+) -> tuple[list[str], dict[str, Any], Path]:
+    path = root / RUNNER_STATE_FILENAME
+    try:
+        state = json.loads(path.read_text())
+        if not isinstance(state, dict):
+            raise ValueError("runner state root is not an object")
+    except OSError as exc:
+        return [f"runner_state_missing:{exc}"], {}, path
+    except (json.JSONDecodeError, ValueError) as exc:
+        return [f"runner_state_malformed:{exc}"], {}, path
+
+    expected_ids = [record["run_id"] for record in plan]
+    expected_attempts = [
+        {"attempt_index": index, "run_id": run_id, "state": "COMPLETE"}
+        for index, run_id in enumerate(expected_ids, start=1)
+    ]
+    failures = []
+    expected_scalars = {
+        "schema_version": RUNNER_STATE_SCHEMA,
+        "runner_state": "COMPLETE",
+        "protocol_sha256": bundle.protocol_sha256,
+        "registry_sha256": bundle.registry_sha256,
+        "fixture_sha256": bundle.fixture_sha256,
+        "completed_run_count": 15,
+        "launch_invocations": 15,
+        "launch_started": True,
+        "retries": 0,
+        "failure_reason": "",
+        "failed_run_id": "",
+    }
+    for key, value in expected_scalars.items():
+        if state.get(key) != value:
+            if key.endswith("sha256"):
+                category = "runner_state_hash"
+            elif key == "runner_state":
+                category = "runner_state_state"
+            else:
+                category = f"runner_state_{key}"
+            failures.append(category)
+    if state.get("registered_run_ids") != expected_ids:
+        failures.append("runner_state_registered_ids")
+    attempted = state.get("attempted_run_ids")
+    if attempted != expected_ids:
+        typed_attempted = (
+            isinstance(attempted, list)
+            and all(isinstance(item, str) for item in attempted)
+        )
+        if typed_attempted and len(set(attempted)) != len(attempted):
+            failures.append("runner_state_duplicate_attempt")
+        elif typed_attempted and set(attempted) == set(expected_ids):
+            failures.append("runner_state_attempt_order")
+        else:
+            failures.append("runner_state_attempted_ids")
+    completed = state.get("completed_run_ids")
+    if completed != expected_ids:
+        failures.append("runner_state_completed_ids")
+    if state.get("attempts") != expected_attempts:
+        failures.append("runner_state_attempt_ledger")
+    if state.get("runs") != plan:
+        failures.append("runner_state_plan")
+    return failures, state, path
 
 
 def _manifest_failures(
@@ -168,43 +308,28 @@ def _manifest_failures(
 
 
 def _row_metrics(
-    row: dict[str, str], source_index: int, noise_floor: float
-) -> tuple[dict[str, float] | None, list[str]]:
+    row: dict[str, str], source_index: int, noise_floor: float,
+    path_ratio_tolerance: float,
+) -> tuple[dict[str, float] | None, list[str], tuple[Any, ...] | None]:
     failures = []
     prefix = f"row_{source_index}"
-    if row.get("schema_version") != DECISION_SCHEMA:
-        failures.append(f"typed_schema:{prefix}")
-    if row.get("status") != "ORIGINAL_SELECTED" or row.get("reason") != "METRICS_ONLY":
-        failures.append(f"incomplete_decision:{prefix}")
     try:
-        selection_applied = _int(row, "selection_applied")
-        counts = {
-            key: _int(row, key)
-            for key in (
-                "original_sample_count", "original_valid_count",
-                "original_unknown_count", "original_stale_count",
-                "original_non_finite_count", "risk_sample_count",
-                "risk_valid_count", "risk_unknown_count", "risk_stale_count",
-                "risk_non_finite_count",
-            )
-        }
-        floats = {
-            key: _float(row, key)
-            for key in (
-                "original_mean", "original_max", "risk_mean", "risk_max",
-                "path_length_ratio", "original_search_latency_ms",
-                "risk_search_latency_ms", "total_search_latency_ms",
-            )
-        }
-    except AnalysisError as exc:
-        failures.append(f"typed_non_finite:{prefix}:{exc}")
-        return None, failures
-    if selection_applied != 0:
+        typed = parse_decision_row(row, path_ratio_tolerance)
+    except DecisionSchemaError as exc:
+        failures.append(f"{exc.code}:{prefix}:{exc}")
+        return None, failures, None
+    strings = typed["strings"]
+    counts = typed["integers"]
+    floats = typed["floats"]
+    identity = decision_identity(typed)
+    if (
+        strings["status"] != "ORIGINAL_SELECTED"
+        or strings["reason"] != "METRICS_ONLY"
+    ):
+        failures.append(f"incomplete_decision:{prefix}")
+    if counts["selection_applied"] != 0:
         failures.append(f"selection_applied:{prefix}")
-    hashes = [row.get(name, "") for name in (
-        "request_hash", "original_hash", "risk_hash", "selected_hash"
-    )]
-    if any(not value for value in hashes) or row.get("selected_hash") != row.get("original_hash"):
+    if strings["selected_hash"] != strings["original_hash"]:
         failures.append(f"identity_mismatch:{prefix}")
     if (
         counts["original_sample_count"] != 200
@@ -231,7 +356,7 @@ def _row_metrics(
     ):
         failures.append(f"timeout:{prefix}")
     if failures:
-        return None, failures
+        return None, failures, identity
     return {
         "mean_improvement": mean_improvement,
         "max_improvement": max_improvement,
@@ -239,7 +364,7 @@ def _row_metrics(
         "total_search_s": milliseconds_to_seconds(
             floats["total_search_latency_ms"]
         ),
-    }, []
+    }, [], identity
 
 
 def _threshold_draft(
@@ -297,8 +422,18 @@ def _threshold_draft(
 def analyze(bundle: ProtocolBundle, runs_root: Path) -> dict[str, Any]:
     root = Path(runs_root).expanduser().resolve()
     plan = expand_run_plan(bundle.protocol, root)
+    registered_ids = [record["run_id"] for record in plan]
     failures: list[str] = []
-    bundle_paths: list[Path] = []
+    inventory_failures, bundle_paths = _root_inventory_failures(
+        root, registered_ids
+    )
+    failures.extend(inventory_failures)
+    runner_failures, runner_state, runner_state_path = _runner_state_failures(
+        bundle, root, plan
+    )
+    failures.extend(runner_failures)
+    if runner_state_path.is_file():
+        bundle_paths.append(runner_state_path)
     metrics: list[tuple[int, dict[str, float]]] = []
     denominator = 0
     seen_run_ids: set[str] = set()
@@ -306,6 +441,9 @@ def analyze(bundle: ProtocolBundle, runs_root: Path) -> dict[str, Any]:
         bundle.protocol["effective_values"]
     )
     noise_floor = float(bundle.protocol["numerical_noise_floor"]["value"])
+    ratio_tolerance = float(
+        bundle.protocol["path_ratio_consistency"]["absolute_tolerance"]
+    )
     for record in plan:
         run_dir = Path(record["run_dir"])
         manifest_path = run_dir / "p4_g0c_run_manifest.json"
@@ -335,19 +473,37 @@ def analyze(bundle: ProtocolBundle, runs_root: Path) -> dict[str, Any]:
         failures.extend(manifest_errors)
         try:
             with csv_path.open(newline="") as stream:
-                reader = csv.DictReader(stream)
+                reader = csv.DictReader(stream, strict=True)
                 rows = list(reader)
-        except OSError as exc:
+        except (OSError, csv.Error) as exc:
             failures.append(f"malformed_csv:{record['run_id']}:{exc}")
             continue
-        if reader.fieldnames is None:
-            failures.append(f"malformed_csv:{record['run_id']}:missing_header")
+        try:
+            validate_decision_header(reader.fieldnames)
+        except DecisionSchemaError as exc:
+            failures.append(f"{exc.code}:{record['run_id']}:{exc}")
+            denominator += len(rows)
             continue
+        if not rows:
+            failures.append(f"empty_run_csv:{record['run_id']}")
+            continue
+        run_identities: set[tuple[Any, ...]] = set()
         for row in rows:
             source_index = denominator
             denominator += 1
-            row_metric, row_failures = _row_metrics(row, source_index, noise_floor)
+            row_metric, row_failures, identity = _row_metrics(
+                row, source_index, noise_floor, ratio_tolerance
+            )
             failures.extend(row_failures)
+            if identity is not None:
+                if identity in run_identities:
+                    failures.append(
+                        f"duplicate_decision_identity:"
+                        f"{record['run_id']}:row_{source_index}"
+                    )
+                    row_metric = None
+                else:
+                    run_identities.add(identity)
             if row_metric is not None:
                 metrics.append((source_index, row_metric))
     if len(metrics) < int(bundle.protocol["minimum_complete_decisions"]):
@@ -364,6 +520,15 @@ def analyze(bundle: ProtocolBundle, runs_root: Path) -> dict[str, Any]:
         "fixture_sha256": bundle.fixture_sha256,
         "raw_bundle_sha256": raw_hash,
         "registered_run_count": len(plan),
+        "registered_run_denominator_count": len(plan),
+        "attempted_run_denominator_count": (
+            len(runner_state.get("attempted_run_ids", []))
+            if isinstance(runner_state.get("attempted_run_ids"), list) else 0
+        ),
+        "completed_run_denominator_count": (
+            len(runner_state.get("completed_run_ids", []))
+            if isinstance(runner_state.get("completed_run_ids"), list) else 0
+        ),
         "complete_decision_count": len(metrics),
         "denominator_decision_count": denominator,
         "failed_rows_retained_in_denominator": True,

@@ -10,7 +10,6 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-import math
 import signal
 import subprocess
 import sys
@@ -23,10 +22,15 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 from p4_g0c_protocol import (  # noqa: E402
+    DECISION_CSV_COLUMNS,
+    DecisionSchemaError,
     ProtocolBundle,
+    decision_identity,
     effective_config_sha256,
     expand_run_plan,
     load_protocol_bundle,
+    parse_decision_row,
+    validate_decision_header,
 )
 from run_gate0_qualification import (  # noqa: E402
     RequiredProcessMonitor,
@@ -34,94 +38,13 @@ from run_gate0_qualification import (  # noqa: E402
 )
 
 
-RUNNER_SCHEMA = "p4_g0c_runner_state_v1"
+RUNNER_SCHEMA = "p4_g0c_runner_state_v2"
 REQUIRED_PROCESSES = {
     "iap_rosnode": ["iap_rosnode", "test_planner_iap_rosnode"],
     "ego_planner_node": ["ego_planner_node", "drone_0_ego_planner_node"],
 }
-REQUIRED_CSV_COLUMNS = {
-    "schema_version",
-    "request_hash",
-    "status",
-    "reason",
-    "selection_applied",
-    "original_hash",
-    "risk_hash",
-    "selected_hash",
-    "original_sample_count",
-    "original_valid_count",
-    "original_unknown_count",
-    "original_stale_count",
-    "original_non_finite_count",
-    "risk_sample_count",
-    "risk_valid_count",
-    "risk_unknown_count",
-    "risk_stale_count",
-    "risk_non_finite_count",
-    "original_mean",
-    "original_max",
-    "risk_mean",
-    "risk_max",
-    "path_length_ratio",
-    "original_search_latency_ms",
-    "risk_search_latency_ms",
-    "total_search_latency_ms",
-}
-INTEGER_CSV_COLUMNS = {
-    "selection_applied",
-    "original_sample_count",
-    "original_valid_count",
-    "original_unknown_count",
-    "original_stale_count",
-    "original_non_finite_count",
-    "risk_sample_count",
-    "risk_valid_count",
-    "risk_unknown_count",
-    "risk_stale_count",
-    "risk_non_finite_count",
-}
-FLOAT_CSV_COLUMNS = {
-    "original_mean",
-    "original_max",
-    "risk_mean",
-    "risk_max",
-    "path_length_ratio",
-    "original_search_latency_ms",
-    "risk_search_latency_ms",
-    "total_search_latency_ms",
-}
-
-
 class RunnerError(RuntimeError):
     """The matrix cannot proceed without violating the registered protocol."""
-
-
-def _validate_typed_csv_row(row: dict[str, str], run_id: str) -> None:
-    if row.get("schema_version") != "p4_collision_guide_decision_v1":
-        raise RunnerError(f"malformed P4 decision CSV: {run_id}:schema")
-    if any(row.get(key, "") == "" for key in REQUIRED_CSV_COLUMNS):
-        raise RunnerError(f"malformed P4 decision CSV: {run_id}:empty_field")
-    for key in INTEGER_CSV_COLUMNS:
-        raw = row[key].strip()
-        try:
-            value = int(raw)
-        except ValueError as exc:
-            raise RunnerError(
-                f"malformed P4 decision CSV: {run_id}:{key}"
-            ) from exc
-        if str(value) != raw:
-            raise RunnerError(f"malformed P4 decision CSV: {run_id}:{key}")
-    for key in FLOAT_CSV_COLUMNS:
-        try:
-            value = float(row[key])
-        except ValueError as exc:
-            raise RunnerError(
-                f"malformed P4 decision CSV: {run_id}:{key}"
-            ) from exc
-        if not math.isfinite(value):
-            raise RunnerError(f"malformed P4 decision CSV: {run_id}:{key}")
-
-
 def load_bundle(
     protocol_path: Path, registry_path: Path, fixture_path: Path
 ) -> ProtocolBundle:
@@ -203,6 +126,10 @@ def _validate_and_finalize_run(
         manifest = json.loads(manifest_path.read_text())
     except (OSError, json.JSONDecodeError) as exc:
         raise RunnerError(f"missing or malformed run manifest: {record['run_id']}") from exc
+    if not isinstance(manifest, dict):
+        raise RunnerError(
+            f"missing or malformed run manifest: {record['run_id']}:root"
+        )
     required_manifest = {
         "schema_version": "p4_g0c_run_manifest_v1",
         "run_id": record["run_id"],
@@ -232,36 +159,71 @@ def _validate_and_finalize_run(
             raise RunnerError(f"run manifest binding mismatch: {record['run_id']}:{key}")
     try:
         with csv_path.open(newline="") as stream:
-            reader = csv.DictReader(stream)
-            if reader.fieldnames is None or not REQUIRED_CSV_COLUMNS.issubset(reader.fieldnames):
-                raise RunnerError(f"malformed P4 decision CSV: {record['run_id']}")
+            reader = csv.DictReader(stream, strict=True)
+            try:
+                validate_decision_header(reader.fieldnames)
+            except DecisionSchemaError as exc:
+                raise RunnerError(
+                    f"malformed P4 decision CSV: "
+                    f"{record['run_id']}:{exc.code}"
+                ) from exc
             rows = list(reader)
             if not rows:
                 raise RunnerError(f"empty P4 decision CSV: {record['run_id']}")
+            identities = set()
+            tolerance = bundle.protocol[
+                "path_ratio_consistency"
+            ]["absolute_tolerance"]
             for row in rows:
-                _validate_typed_csv_row(row, record["run_id"])
-    except OSError as exc:
+                try:
+                    typed = parse_decision_row(row, tolerance)
+                except DecisionSchemaError as exc:
+                    raise RunnerError(
+                        f"malformed P4 decision CSV: "
+                        f"{record['run_id']}:{exc.code}"
+                    ) from exc
+                identity = decision_identity(typed)
+                if identity in identities:
+                    raise RunnerError(
+                        f"malformed P4 decision CSV: "
+                        f"{record['run_id']}:duplicate_decision_identity"
+                    )
+                identities.add(identity)
+    except (OSError, csv.Error) as exc:
         raise RunnerError(f"missing P4 decision CSV: {record['run_id']}") from exc
     manifest.update(monitor_result)
     manifest["runner_state"] = "COMPLETE"
     manifest["launch_exit_code"] = 0
     manifest["retry_count"] = 0
-    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+    try:
+        manifest_path.write_text(
+            json.dumps(manifest, indent=2, sort_keys=True) + "\n"
+        )
+    except OSError as exc:
+        raise RunnerError(
+            f"run manifest finalization failed: {record['run_id']}"
+        ) from exc
 
 
 def _base_result(bundle: ProtocolBundle, plan: list[dict[str, Any]]) -> dict[str, Any]:
+    registered_ids = [record["run_id"] for record in plan]
     return {
         "schema_version": RUNNER_SCHEMA,
         "runner_state": "PLANNED",
         "protocol_sha256": bundle.protocol_sha256,
         "registry_sha256": bundle.registry_sha256,
         "fixture_sha256": bundle.fixture_sha256,
+        "registered_run_ids": registered_ids,
+        "attempted_run_ids": [],
+        "completed_run_ids": [],
+        "attempts": [],
         "runs": plan,
         "completed_run_count": 0,
         "launch_invocations": 0,
         "launch_started": False,
         "retries": 0,
         "failure_reason": "",
+        "failed_run_id": "",
     }
 
 
@@ -288,11 +250,30 @@ def run(
     result = _base_result(bundle, plan)
     if plan_only:
         return result
+    state_path = runs_root / "p4_g0c_runner_state.json"
+    if state_path.exists() or state_path.is_symlink():
+        raise RunnerError(f"existing runner state is forbidden: {state_path}")
+    preflight_path = runs_root / "preflight"
+    if preflight_path.exists() or preflight_path.is_symlink():
+        raise RunnerError(
+            f"existing preflight directory is forbidden: {preflight_path}"
+        )
     for record in plan:
-        if Path(record["run_dir"]).exists():
+        run_dir = Path(record["run_dir"])
+        if run_dir.exists() or run_dir.is_symlink():
             raise RunnerError(f"existing run directory is forbidden: {record['run_dir']}")
 
-    preflight = gpu_preflight(runs_root / "preflight")
+    result["runner_state"] = "PREFLIGHT_RUNNING"
+    _persist_result(runs_root, result)
+    try:
+        preflight = gpu_preflight(preflight_path)
+    except Exception as exc:  # Preflight failure must remain non-overwriteable.
+        result.update({
+            "runner_state": "FAILED",
+            "failure_reason": f"gpu_preflight_error:{type(exc).__name__}",
+        })
+        _persist_result(runs_root, result)
+        return result
     result["gpu_preflight"] = preflight
     if preflight.get("gpu_ready") is not True:
         result.update({
@@ -317,11 +298,29 @@ def run(
         )
         result["runner_state"] = "RUNNING"
         result["launch_started"] = True
-        result["launch_invocations"] += 1
-        exit_code, monitor_result = launch_executor(
-            record, command, duration_s, REQUIRED_PROCESSES
-        )
+        result["attempted_run_ids"].append(record["run_id"])
+        result["attempts"].append({
+            "attempt_index": len(result["attempted_run_ids"]),
+            "run_id": record["run_id"],
+            "state": "RUNNING",
+        })
+        result["launch_invocations"] = len(result["attempted_run_ids"])
+        _persist_result(runs_root, result)
+        try:
+            exit_code, monitor_result = launch_executor(
+                record, command, duration_s, REQUIRED_PROCESSES
+            )
+        except Exception as exc:  # Launch boundary failures must remain in the ledger.
+            result["attempts"][-1]["state"] = "FAILED"
+            result.update({
+                "runner_state": "FAILED",
+                "failure_reason": f"launch_executor_error:{type(exc).__name__}",
+                "failed_run_id": record["run_id"],
+            })
+            _persist_result(runs_root, result)
+            return result
         if exit_code != 0 or monitor_result.get("required_processes_ok") is not True:
+            result["attempts"][-1]["state"] = "FAILED"
             result.update({
                 "runner_state": "FAILED",
                 "failure_reason": (
@@ -335,7 +334,8 @@ def run(
             return result
         try:
             _validate_and_finalize_run(bundle, record, monitor_result)
-        except RunnerError as exc:
+        except (RunnerError, OSError) as exc:
+            result["attempts"][-1]["state"] = "FAILED"
             result.update({
                 "runner_state": "FAILED",
                 "failure_reason": str(exc),
@@ -343,7 +343,10 @@ def run(
             })
             _persist_result(runs_root, result)
             return result
-        result["completed_run_count"] += 1
+        result["attempts"][-1]["state"] = "COMPLETE"
+        result["completed_run_ids"].append(record["run_id"])
+        result["completed_run_count"] = len(result["completed_run_ids"])
+        _persist_result(runs_root, result)
 
     result["runner_state"] = "COMPLETE"
     _persist_result(runs_root, result)

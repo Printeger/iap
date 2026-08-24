@@ -126,6 +126,35 @@ class P4G0CAnalyzerTest(unittest.TestCase):
             (run_dir / "p4_g0c_run_manifest.json").write_text(
                 json.dumps(manifest, sort_keys=True) + "\n"
             )
+        run_ids = [record["run_id"] for record in plan]
+        runner_state = {
+            "schema_version": "p4_g0c_runner_state_v2",
+            "runner_state": "COMPLETE",
+            "protocol_sha256": self.bundle.protocol_sha256,
+            "registry_sha256": self.bundle.registry_sha256,
+            "fixture_sha256": self.bundle.fixture_sha256,
+            "registered_run_ids": run_ids,
+            "attempted_run_ids": run_ids,
+            "completed_run_ids": run_ids,
+            "attempts": [
+                {
+                    "attempt_index": index,
+                    "run_id": run_id,
+                    "state": "COMPLETE",
+                }
+                for index, run_id in enumerate(run_ids, start=1)
+            ],
+            "runs": plan,
+            "completed_run_count": 15,
+            "launch_invocations": 15,
+            "launch_started": True,
+            "retries": 0,
+            "failure_reason": "",
+            "failed_run_id": "",
+        }
+        (root / "p4_g0c_runner_state.json").write_text(
+            json.dumps(runner_state, sort_keys=True) + "\n"
+        )
 
     def test_type7_quantile_has_stable_tie_sources_and_unit_conversion(self):
         q = MODULE.quantile_type7([(3.0, 7), (1.0, 4), (1.0, 2), (5.0, 8)], 0.5)
@@ -151,6 +180,9 @@ class P4G0CAnalyzerTest(unittest.TestCase):
         self.assertEqual(result["analysis_status"], "DRAFT_ELIGIBLE")
         self.assertEqual(result["complete_decision_count"], 100)
         self.assertEqual(result["denominator_decision_count"], 100)
+        self.assertEqual(result["registered_run_denominator_count"], 15)
+        self.assertEqual(result["attempted_run_denominator_count"], 15)
+        self.assertEqual(result["completed_run_denominator_count"], 15)
         self.assertEqual(result["failures"], [])
         draft = result["threshold_draft"]
         self.assertEqual(draft["state"], "DRAFT_UNCALIBRATED")
@@ -163,6 +195,260 @@ class P4G0CAnalyzerTest(unittest.TestCase):
         self.assertEqual(len(draft["calibration_bundle_sha256"]), 64)
         self.assertNotIn("PASS", json.dumps(draft))
         self.assertNotIn("FROZEN", json.dumps(draft))
+
+    def test_extra_retry_directory_and_header_only_run_are_not_excludable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._make_bundle(root)
+            (root / "p4-g0c-seed211-rep01-retry").mkdir()
+            result = MODULE.analyze(self.bundle, root)
+        self.assertEqual(result["analysis_status"], "REJECTED")
+        self.assertTrue(any(
+            "root_inventory" in item for item in result["failures"]
+        ))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._make_bundle(root, [0] + [8] * 14)
+            result = MODULE.analyze(self.bundle, root)
+        self.assertEqual(result["denominator_decision_count"], 112)
+        self.assertEqual(result["analysis_status"], "REJECTED")
+        self.assertTrue(any(
+            "empty_run_csv" in item for item in result["failures"]
+        ))
+
+    def test_absent_partial_failed_reordered_and_duplicate_ledgers_reject(self):
+        cases = {
+            "runner_state_missing": lambda path, state: path.unlink(),
+            "runner_state_attempted_ids": lambda path, state: (
+                state.update({
+                    "attempted_run_ids": state["attempted_run_ids"][:-1]
+                }),
+                path.write_text(json.dumps(state)),
+            ),
+            "runner_state_state": lambda path, state: (
+                state.update({"runner_state": "FAILED"}),
+                path.write_text(json.dumps(state)),
+            ),
+            "runner_state_attempt_order": lambda path, state: (
+                state["attempted_run_ids"].__setitem__(
+                    slice(0, 2), list(reversed(state["attempted_run_ids"][:2]))
+                ),
+                path.write_text(json.dumps(state)),
+            ),
+            "runner_state_duplicate_attempt": lambda path, state: (
+                state["attempted_run_ids"].__setitem__(
+                    1, state["attempted_run_ids"][0]
+                ),
+                path.write_text(json.dumps(state)),
+            ),
+            "runner_state_completed_ids": lambda path, state: (
+                state.update({
+                    "completed_run_ids": state["completed_run_ids"][:-1]
+                }),
+                path.write_text(json.dumps(state)),
+            ),
+            "runner_state_launch_invocations": lambda path, state: (
+                state.update({"launch_invocations": 14}),
+                path.write_text(json.dumps(state)),
+            ),
+            "runner_state_retries": lambda path, state: (
+                state.update({"retries": 1}),
+                path.write_text(json.dumps(state)),
+            ),
+        }
+        for expected, mutate in cases.items():
+            with self.subTest(expected=expected), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                self._make_bundle(root)
+                path = root / "p4_g0c_runner_state.json"
+                state = json.loads(path.read_text())
+                mutate(path, state)
+                result = MODULE.analyze(self.bundle, root)
+                self.assertEqual(result["analysis_status"], "REJECTED")
+                self.assertTrue(any(
+                    expected in item for item in result["failures"]
+                ))
+
+    def test_authoritative_attempt_entries_reject_partial_failed_reordered_duplicate(self):
+        mutations = {
+            "partial": lambda attempts: attempts.pop(),
+            "failed": lambda attempts: attempts[0].update({"state": "FAILED"}),
+            "reordered": lambda attempts: attempts.__setitem__(
+                slice(0, 2), list(reversed(attempts[:2]))
+            ),
+            "duplicate": lambda attempts: attempts.__setitem__(
+                1, dict(attempts[0])
+            ),
+        }
+        for label, mutate in mutations.items():
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                self._make_bundle(root)
+                path = root / "p4_g0c_runner_state.json"
+                state = json.loads(path.read_text())
+                mutate(state["attempts"])
+                path.write_text(json.dumps(state))
+                result = MODULE.analyze(self.bundle, root)
+                self.assertEqual(result["analysis_status"], "REJECTED")
+                self.assertIn(
+                    "runner_state_attempt_ledger", result["failures"]
+                )
+
+    def test_complete_identity_header_and_path_arithmetic_fail_closed(self):
+        row_cases = {
+            "duplicate_decision_identity": None,
+            "path_length": {"original_path_length": "0"},
+            "path_ratio_consistency": {"path_length_ratio": "1.100021"},
+        }
+        for expected, update in row_cases.items():
+            def mutate(index, manifest, rows):
+                if index != 0:
+                    return
+                if update is None:
+                    for key in (
+                        "planning_attempt_id", "collision_segment_id",
+                        "request_hash",
+                    ):
+                        rows[1][key] = rows[0][key]
+                else:
+                    rows[0].update(update)
+
+            with self.subTest(expected=expected), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                self._make_bundle(root, mutate=mutate)
+                result = MODULE.analyze(self.bundle, root)
+                self.assertEqual(result["analysis_status"], "REJECTED")
+                self.assertTrue(any(
+                    expected in item for item in result["failures"]
+                ))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._make_bundle(root)
+            csv_path = root / "p4-g0c-seed211-rep01" / "p4_decisions.csv"
+            row = self._row(0)
+            row["unexpected"] = "unexpected"
+            with csv_path.open("w", newline="") as stream:
+                writer = csv.DictWriter(
+                    stream, fieldnames=CSV_FIELDS + ["unexpected"]
+                )
+                writer.writeheader()
+                writer.writerow(row)
+            result = MODULE.analyze(self.bundle, root)
+        self.assertEqual(result["analysis_status"], "REJECTED")
+        self.assertTrue(any(
+            "csv_header" in item for item in result["failures"]
+        ))
+
+    def test_every_immutable_context_field_is_typed_and_nonblank(self):
+        cases = {
+            "stamp": ("", "typed_non_finite"),
+            "planning_attempt_id": ("", "typed_integer"),
+            "collision_segment_id": ("", "typed_integer"),
+            "request_hash": ("", "typed_identity"),
+            "snapshot_generation_id": ("", "typed_integer"),
+            "snapshot_stamp_s": ("nan", "typed_non_finite"),
+            "snapshot_frame": ("", "typed_identity"),
+            "query_base_time_s": ("inf", "typed_non_finite"),
+            "occupancy_epoch": ("", "typed_integer"),
+            "original_hash": ("", "typed_identity"),
+            "risk_hash": ("", "typed_identity"),
+            "selected_hash": ("", "typed_identity"),
+            "original_path_length": ("nan", "typed_non_finite"),
+            "risk_path_length": ("", "typed_non_finite"),
+        }
+        for field, (value, expected) in cases.items():
+            def mutate(index, manifest, rows):
+                if index == 0:
+                    rows[0][field] = value
+
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                self._make_bundle(root, mutate=mutate)
+                result = MODULE.analyze(self.bundle, root)
+                self.assertEqual(result["analysis_status"], "REJECTED")
+                self.assertTrue(any(
+                    expected in item for item in result["failures"]
+                ))
+
+    def test_missing_duplicate_reordered_and_unexpected_headers_reject(self):
+        headers = {
+            "missing": CSV_FIELDS[:-1],
+            "duplicate": CSV_FIELDS[:-1] + [CSV_FIELDS[-2]],
+            "reordered": [CSV_FIELDS[1], CSV_FIELDS[0]] + CSV_FIELDS[2:],
+            "unexpected": CSV_FIELDS + ["unexpected"],
+        }
+        for label, header in headers.items():
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                self._make_bundle(root)
+                csv_path = (
+                    root / "p4-g0c-seed211-rep01" / "p4_decisions.csv"
+                )
+                row = self._row(0)
+                if label == "unexpected":
+                    row["unexpected"] = "unexpected"
+                with csv_path.open("w", newline="") as stream:
+                    writer = csv.DictWriter(
+                        stream, fieldnames=header, extrasaction="ignore"
+                    )
+                    writer.writeheader()
+                    writer.writerow(row)
+                result = MODULE.analyze(self.bundle, root)
+                self.assertEqual(result["analysis_status"], "REJECTED")
+                self.assertTrue(any(
+                    "csv_header" in item for item in result["failures"]
+                ))
+
+    def test_unregistered_p4_manifest_and_decision_csv_reject(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._make_bundle(root)
+            nested = root / "p4-g0c-seed211-rep01" / "retry"
+            nested.mkdir()
+            (nested / "p4_g0c_retry_manifest.json").write_text("{}")
+            (nested / "p4_decisions_retry.csv").write_text("x\n")
+            result = MODULE.analyze(self.bundle, root)
+        self.assertEqual(result["analysis_status"], "REJECTED")
+        self.assertTrue(any(
+            "root_inventory_manifest" in item for item in result["failures"]
+        ))
+        self.assertTrue(any(
+            "root_inventory_decision_csv" in item
+            for item in result["failures"]
+        ))
+
+    def test_alternate_manifest_and_csv_names_cannot_bypass_inventory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._make_bundle(root)
+            run_dir = root / "p4-g0c-seed211-rep01"
+            (run_dir / "alternate_manifest.json").write_text("{}")
+            (run_dir / "decisions.csv").write_text("x\n")
+            result = MODULE.analyze(self.bundle, root)
+        self.assertEqual(result["analysis_status"], "REJECTED")
+        self.assertTrue(any(
+            "root_inventory_manifest" in item for item in result["failures"]
+        ))
+        self.assertTrue(any(
+            "root_inventory_decision_csv" in item
+            for item in result["failures"]
+        ))
+
+    def test_ratio_tolerance_boundary_and_raw_hash_are_stable(self):
+        def mutate(index, manifest, rows):
+            if index == 0:
+                rows[0]["path_length_ratio"] = "1.100019"
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._make_bundle(root, [7] * 10 + [6] * 5, mutate=mutate)
+            first = MODULE.analyze(self.bundle, root)
+            second = MODULE.analyze(self.bundle, root)
+        self.assertEqual(first["analysis_status"], "DRAFT_ELIGIBLE")
+        self.assertEqual(first["raw_bundle_sha256"], second["raw_bundle_sha256"])
+        self.assertEqual(len(first["raw_bundle_sha256"]), 64)
 
     def test_invalid_rows_and_manifest_truth_fail_closed_without_filtering(self):
         cases = {

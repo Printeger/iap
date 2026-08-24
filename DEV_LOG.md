@@ -5808,3 +5808,144 @@ gate promotion ran.
 
 Builder result: `P4_G0C_PROTOCOL_READY_FOR_REVIEW`, not G0C PASS. Control
 returns only to SUPERVISOR review.
+
+## 2026-08-24T09:13:23Z — ICRA-043 START
+
+IAP-RQ-423. Synchronized `dev/icra` at reviewed HEAD
+`71d0dfbddac70266da074d73ea1d5563c622ab0d`: initial status contained only the
+protected untracked PDF, fetch passed and divergence was `0 0`, so no pull
+ran. `AGENT_STATE.md` authorizes only DEEPSEEK, `TASK_READY`, ICRA-043 and
+`P4_G0C_PROTOCOL_REPAIR`.
+
+Exact allowed files are the three focused G0C Python helpers
+`scripts/dev_planner/{p4_g0c_protocol,run_p4_g0c_calibration,analyze_p4_g0c_calibration}.py`;
+their three focused tests; only if required for the pre-data ratio tolerance,
+the protocol/registry JSON plus launch/golden test; compact evidence below
+`results/icra27/icra043/`; `DEV_LOG.md`; `docs/CHANGES.md`; and
+`docs/TRACEABILITY.md`. No C++/header/CMake/product behavior, Supervisor-owned,
+historical/external, protected PDF or other file is authorized.
+
+The new authoritative runner-state schema is
+`p4_g0c_runner_state_v2`. It freezes the exact registered ID list and records
+ordered attempt entries, attempted IDs and completed IDs. An attempt is
+persisted before its launch executor is called; completion is persisted only
+after process, manifest and exact CSV validation. First failure remains in the
+ledger as `FAILED`; omission, duplicate, reorder, overwrite and retry are not
+filterable.
+
+Calibration-root inventory allows only the 15 exact registered run
+directories, `p4_g0c_runner_state.json`, the exact `preflight/gpu_preflight.json`
+path, and explicitly named analyzer metadata. Any other top-level directory,
+run-like directory, G0C manifest or P4 decision CSV is a hard rejection. Every
+registered CSV must contain at least one row, independent of the global
+100-decision minimum. Analyzer output exposes registered, attempted and
+completed run denominators separately.
+
+One shared ordered CSV schema mirrors the production header exactly: schema
+and stamp; positive planning-attempt/collision-segment identity; nonempty
+request hash; positive snapshot generation plus finite stamp/frame/query base;
+canonical occupancy epoch, status/reason/application; all three guide hashes;
+both full coverage/statistic groups; positive original/risk path lengths,
+ratio; and all three finite search latencies. Headers reject missing,
+duplicate, reordered or unexpected columns. Duplicate
+`(planning_attempt_id,collision_segment_id,request_hash)` identities within a
+run reject the bundle.
+
+The pre-data ratio arithmetic tolerance will be frozen in canonical protocol
+bytes at `2e-5` absolute: production uses default C++ stream precision of six
+significant digits, giving at most `5e-6` relative rounding per serialized
+positive value; under the already-frozen eligible ratio cap `1.30`, independent
+rounding of original length, risk length and ratio is conservatively bounded
+below `1.95002e-5`. Calibration observations cannot change this value.
+
+Red tests will reproduce the extra retry directory, header-only registered run
+despite at least 100 other rows, absent/partial/failed/reordered/duplicate
+ledger, blank/non-finite immutable context, duplicate row identity, zero/path
+length type failures and inconsistent ratio. Positive boundaries cover the
+exact 15-run ledger, at least one row per run, exactly 100 rows, the frozen
+ratio tolerance, stable raw-bundle hash, pre-executor attempt persistence and
+first-failure visibility without retry.
+
+Stop line: ICRA-043 runs only synthetic Python tests and repository-local
+audits. It will not execute CTest, any retained ICRA-042 binary, GPU preflight,
+ROS, launch, calibration, bag/RViz, smoke, benchmark, draft/freeze/apply
+thresholds, G0D, P5, cleanup or gate promotion. Final result may only be
+`P4_G0C_PROTOCOL_REPAIR_READY_FOR_REVIEW`, never G0C PASS.
+
+## 2026-08-24T09:29:18Z — ICRA-043 IMPLEMENTATION AND VERIFICATION
+
+IAP-RQ-423. Implemented the authoritative `p4_g0c_runner_state_v2` attempt
+ledger, strict root inventory and shared exact production CSV schema described
+in START. Attempts are persisted before executor entry, completion follows
+artifact validation, and every failed attempt remains named in state. Analyzer
+binding requires exact ordered registered/attempted/completed 15-run lists,
+15 COMPLETE indexed attempts, registered hashes, COMPLETE state and zero
+retry. Every registered CSV must contain at least one row.
+
+Protocol bytes now freeze the pre-data `2e-5` path-ratio tolerance and its
+six-significant-digit serialization derivation. Registry and launch bindings
+were updated consistently. Canonical SHA-256 values are protocol
+`9e89ea42675459a63853d98845f02b7fe5b9434a9f28fcbd6ef5ba1bc5bd906d`,
+registry `1a9e206c12133035b29dd4ff573cf3868cf4765f3b9213362e507d85c24deaff`
+and launch `26f914f749758745b9c031819df0e969def46bd7fd15bb3caac831921df2dd65`.
+All four threshold values remain null and application remains false.
+
+Red protocol, runner and analyzer suites each exited 1 before repair. Direct
+focused reproduction passed protocol 4/4, runner 8/8, analyzer 11/11, launch
+contract 6/6 and launch golden 16/16 (45/45). The one final repository Python
+discovery `python3 -m unittest discover -s test -p 'test_*.py'` passed 384/384.
+Python syntax, fatal-only flake8, canonical JSON and `git diff --check` passed.
+Two preliminary `unittest` package-form commands executed zero tests because
+the system `test` package shadowed this repository directory; direct test-file
+execution corrected the command without rerunning the final full suite.
+
+The 12 retained ICRA-042 build/install trees contain 3,829 files. Their exact
+before/after manifest SHA-256 values both equal
+`6836841bc7ee74594ff80926bfd67c8531ea2d26076b27406cb9aeea3d784d34`
+and `cmp` exited zero. Protected scan fixture
+`49a676a5ff51538ab961c814409f6c2dfb7ba4679a861d4e8e94cc7d5679c788`,
+guide fixture
+`d540c23dc38102751740bcb61e79993e4704564c811e9d75bfa6be90c52511af`
+and untracked PDF
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`
+remain exact. Compact evidence is under `results/icra27/icra043/`; raw logs and
+full manifests remain unstaged.
+
+No GPU preflight, ROS, launch, calibration, CTest/retained binary, bag/RViz,
+smoke, benchmark, threshold draft/freeze/application, G0D, P5, cleanup or gate
+promotion ran. Current result is
+`P4_G0C_PROTOCOL_REPAIR_READY_FOR_REVIEW`, not G0C PASS, pending the required
+two-axis review and commit handoff.
+
+Initial two-axis review found four actionable provenance gaps: a prior
+preflight FAILED state could be overwritten, alternate manifest/CSV names
+escaped inventory, a manifest-finalization `OSError` left an attempt RUNNING,
+and direct partial/FAILED/reordered/duplicate `attempts` adversaries were
+missing. One judgement-call duplication in decision identity extraction was
+also accepted for cleanup.
+
+Review remediation is red-to-green. Runner now refuses any existing state,
+preflight path or registered run path before preflight; persists
+`PREFLIGHT_RUNNING` before invoking preflight; retains preflight exceptions;
+and converts finalization boundary errors into persisted FAILED attempt state.
+Analyzer rejects any alternate manifest-named file and every non-registered
+CSV name. Tests directly corrupt all four authoritative attempt-list forms,
+and decision identity construction is centralized in the shared protocol
+helper. Post-remediation focused protocol/runner/analyzer/launch suites pass
+49/49. Because review changed boundary code after the initial 384/384 full
+discovery, a post-remediation discovery passed 388/388.
+
+A Standards re-review then found that syntactically valid non-object manifest
+JSON could raise `AttributeError` and strand an attempt at RUNNING. A direct
+red test reproduced this; manifest validation now requires an object root and
+persists the attempt as FAILED. Final focused count is 50/50 and the final full
+discovery passes 389/389. No live or compiled flow ran.
+
+## 2026-08-24T09:42:07Z — ICRA-043 FINAL TWO-AXIS REVIEW
+
+IAP-RQ-423. Standards and Spec independently reviewed the staged diff against
+fixed Supervisor task HEAD `71d0dfbddac70266da074d73ea1d5563c622ab0d`.
+All initial and re-review findings were repaired red-to-green as recorded
+above. Final Standards reports 0 findings and `NO BLOCKING FINDING`; final Spec
+reports 0 findings and `NO BLOCKING FINDING`. The aggregate is retained at
+`results/icra27/icra043/review/two_axis_review.md`.

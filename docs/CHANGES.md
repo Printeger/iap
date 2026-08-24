@@ -1387,3 +1387,33 @@ ldd "$repo_root/results/icra27/icra015/build_ego/test_p0_risk_grid_runtime" \
   No GPU preflight, ROS/launch, calibration, smoke, benchmark, threshold
   application, G0D or P5 execution occurred. This is protocol readiness for
   Supervisor review, not G0C PASS.
+
+## 2026-08-24 (ICRA-043 P4-G0C protocol repair)
+
+- IAP-RQ-423: replaced the filterable ICRA-042 completion count with an
+  authoritative `p4_g0c_runner_state_v2` ledger. Each ordered attempt is
+  persisted before executor invocation and becomes complete only after
+  process/manifest/CSV validation; the first failure stays visible and stops
+  without retry. Analysis requires the exact 15 registered, attempted and
+  completed IDs, hashes and COMPLETE records.
+- Root inventory now admits only the exact 15 run directories, runner state,
+  one exact preflight artifact and named analyzer outputs. Extra retry/run-like
+  directories, alternate G0C manifests/P4 CSVs and any registered header-only
+  CSV fail closed even when at least 100 rows exist elsewhere.
+- Runner and analyzer now share the exact ordered 36-column production CSV
+  contract. Canonical integer/finite fields, positive immutable identity/path
+  fields, duplicate decision identities and ratio arithmetic are validated.
+  The pre-data `2e-5` absolute ratio tolerance is frozen from six-significant-
+  digit production serialization and the existing 1.30 eligibility cap; no
+  calibration observation or threshold value changed.
+- Red protocol/runner/analyzer tests reproduced the review exploits. Focused
+  suites pass 50/50, including retained-state/finalization-I/O/non-object-root
+  and direct ledger/inventory remediation tests; final Python discovery passes
+  389/389.
+  Exact
+  hashes and commands are in
+  `results/icra27/icra043/verification_summary.md`; 3,829 files in all 12
+  ICRA-042 retained build/install trees remained byte-identical. No GPU
+  preflight, ROS/launch, calibration, CTest, smoke, benchmark, draft/freeze/
+  application, G0D or P5 ran. Result is protocol-repair readiness for
+  Supervisor review, not G0C PASS.

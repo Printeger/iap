@@ -22,10 +22,54 @@ GATE_NAMES = (
     "total_search_timeout_s",
 )
 RUN_ID_PATTERN = re.compile(r"^p4-g0c-seed([0-9]+)-rep([0-9]{2})$")
+DECISION_SCHEMA = "p4_collision_guide_decision_v1"
+DECISION_CSV_COLUMNS = (
+    "schema_version", "stamp", "planning_attempt_id",
+    "collision_segment_id", "request_hash", "snapshot_generation_id",
+    "snapshot_stamp_s", "snapshot_frame", "query_base_time_s",
+    "occupancy_epoch", "status", "reason", "selection_applied",
+    "original_hash", "risk_hash", "selected_hash",
+    "original_sample_count", "original_valid_count",
+    "original_unknown_count", "original_stale_count",
+    "original_non_finite_count", "original_mean", "original_max",
+    "risk_sample_count", "risk_valid_count", "risk_unknown_count",
+    "risk_stale_count", "risk_non_finite_count", "risk_mean", "risk_max",
+    "original_path_length", "risk_path_length", "path_length_ratio",
+    "original_search_latency_ms", "risk_search_latency_ms",
+    "total_search_latency_ms",
+)
+DECISION_INTEGER_COLUMNS = (
+    "planning_attempt_id", "collision_segment_id", "snapshot_generation_id",
+    "occupancy_epoch", "selection_applied", "original_sample_count",
+    "original_valid_count", "original_unknown_count", "original_stale_count",
+    "original_non_finite_count", "risk_sample_count", "risk_valid_count",
+    "risk_unknown_count", "risk_stale_count", "risk_non_finite_count",
+)
+DECISION_FLOAT_COLUMNS = (
+    "stamp", "snapshot_stamp_s", "query_base_time_s", "original_mean",
+    "original_max", "risk_mean", "risk_max", "original_path_length",
+    "risk_path_length", "path_length_ratio", "original_search_latency_ms",
+    "risk_search_latency_ms", "total_search_latency_ms",
+)
+DECISION_NONEMPTY_COLUMNS = (
+    "schema_version", "request_hash", "snapshot_frame", "status", "reason",
+    "original_hash", "risk_hash", "selected_hash",
+)
+DECISION_IDENTITY_COLUMNS = (
+    "planning_attempt_id", "collision_segment_id", "request_hash",
+)
 
 
 class ProtocolError(RuntimeError):
     """A versioned G0C artifact violates the frozen pre-data contract."""
+
+
+class DecisionSchemaError(RuntimeError):
+    """A production P4 decision row violates the shared typed schema."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
 
 
 class ProtocolBundle:
@@ -65,6 +109,139 @@ def effective_config_sha256(effective_values: dict[str, Any]) -> str:
         ensure_ascii=True,
     ).encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
+
+
+def validate_decision_header(fieldnames: list[str] | None) -> None:
+    if tuple(fieldnames or ()) != DECISION_CSV_COLUMNS:
+        raise DecisionSchemaError(
+            "csv_header",
+            "P4 decision CSV header is not the exact production schema",
+        )
+
+
+def _canonical_integer(row: dict[str, str], key: str) -> int:
+    raw = row.get(key)
+    if not isinstance(raw, str):
+        raise DecisionSchemaError("typed_integer", f"{key} is missing")
+    stripped = raw.strip()
+    try:
+        value = int(stripped)
+    except ValueError as exc:
+        raise DecisionSchemaError(
+            "typed_integer", f"{key} is not an integer"
+        ) from exc
+    if str(value) != stripped:
+        raise DecisionSchemaError(
+            "typed_integer", f"{key} is not a canonical integer"
+        )
+    return value
+
+
+def _finite_float(row: dict[str, str], key: str) -> float:
+    raw = row.get(key)
+    if not isinstance(raw, str):
+        raise DecisionSchemaError("typed_non_finite", f"{key} is missing")
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise DecisionSchemaError(
+            "typed_non_finite", f"{key} is not numeric"
+        ) from exc
+    if not math.isfinite(value):
+        raise DecisionSchemaError(
+            "typed_non_finite", f"{key} is not finite"
+        )
+    return value
+
+
+def parse_decision_row(
+    row: dict[str, str], path_ratio_tolerance: float
+) -> dict[str, Any]:
+    if set(row) != set(DECISION_CSV_COLUMNS):
+        raise DecisionSchemaError(
+            "csv_header", "P4 decision row columns do not match the header"
+        )
+    strings: dict[str, str] = {}
+    for key in DECISION_NONEMPTY_COLUMNS:
+        value = row.get(key)
+        if not isinstance(value, str) or not value.strip():
+            raise DecisionSchemaError(
+                "typed_identity", f"{key} must be nonempty"
+            )
+        strings[key] = value
+    if strings["schema_version"] != DECISION_SCHEMA:
+        raise DecisionSchemaError(
+            "typed_schema", "decision schema version is not registered"
+        )
+
+    integers = {
+        key: _canonical_integer(row, key) for key in DECISION_INTEGER_COLUMNS
+    }
+    for key in (
+        "planning_attempt_id", "collision_segment_id",
+        "snapshot_generation_id",
+    ):
+        if integers[key] <= 0:
+            raise DecisionSchemaError(
+                "typed_identity", f"{key} must be positive"
+            )
+    if integers["occupancy_epoch"] < 0:
+        raise DecisionSchemaError(
+            "typed_identity", "occupancy_epoch must be nonnegative"
+        )
+    if integers["selection_applied"] not in (0, 1):
+        raise DecisionSchemaError(
+            "typed_integer", "selection_applied must be 0 or 1"
+        )
+    for key in set(DECISION_INTEGER_COLUMNS) - {
+        "planning_attempt_id", "collision_segment_id",
+        "snapshot_generation_id", "occupancy_epoch", "selection_applied",
+    }:
+        if integers[key] < 0:
+            raise DecisionSchemaError(
+                "typed_integer", f"{key} must be nonnegative"
+            )
+
+    floats = {key: _finite_float(row, key) for key in DECISION_FLOAT_COLUMNS}
+    for key in (
+        "original_mean", "original_max", "risk_mean", "risk_max",
+        "original_search_latency_ms", "risk_search_latency_ms",
+        "total_search_latency_ms",
+    ):
+        if floats[key] < 0.0:
+            raise DecisionSchemaError(
+                "typed_non_finite", f"{key} must be nonnegative"
+            )
+    for key in ("original_path_length", "risk_path_length"):
+        if floats[key] <= 0.0:
+            raise DecisionSchemaError(
+                "path_length", f"{key} must be positive"
+            )
+    if floats["path_length_ratio"] <= 0.0:
+        raise DecisionSchemaError(
+            "path_length", "path_length_ratio must be positive"
+        )
+    tolerance = float(path_ratio_tolerance)
+    if not math.isfinite(tolerance) or tolerance < 0.0:
+        raise DecisionSchemaError(
+            "path_ratio_consistency", "ratio tolerance is invalid"
+        )
+    recomputed = floats["risk_path_length"] / floats["original_path_length"]
+    if abs(floats["path_length_ratio"] - recomputed) > tolerance:
+        raise DecisionSchemaError(
+            "path_ratio_consistency",
+            "path_length_ratio is inconsistent with serialized path lengths",
+        )
+    return {"strings": strings, "integers": integers, "floats": floats}
+
+
+def decision_identity(parsed_row: dict[str, Any]) -> tuple[Any, ...]:
+    integers = parsed_row["integers"]
+    strings = parsed_row["strings"]
+    return tuple(
+        integers[key] if key in integers else strings[key]
+        for key in DECISION_IDENTITY_COLUMNS
+    )
 
 
 def load_canonical_json(path: Path) -> dict[str, Any]:
@@ -166,6 +343,23 @@ def validate_protocol(protocol: dict[str, Any]) -> None:
         raise ProtocolError("quantile method is not frozen")
     if quantiles.get("tie_behavior") != "stable_input_row_index":
         raise ProtocolError("quantile tie behavior is not frozen")
+    ratio = protocol.get("path_ratio_consistency")
+    expected_ratio = {
+        "absolute_tolerance": 2e-5,
+        "calibration_mutable": False,
+        "derivation": {
+            "eligible_ratio_cap": 1.3,
+            "per_value_max_relative_rounding": 5e-6,
+            "rounding": "round_up_to_2e-5",
+            "serialization": (
+                "std_ostream_defaultfloat_precision_6_significant_digits"
+            ),
+            "three_value_worst_case_absolute_bound": 1.95002e-5,
+        },
+        "unit": "dimensionless",
+    }
+    if ratio != expected_ratio:
+        raise ProtocolError("path-ratio consistency tolerance is not frozen")
 
 
 def validate_proposed_registry(registry: dict[str, Any]) -> None:

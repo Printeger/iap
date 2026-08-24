@@ -71,6 +71,27 @@ class P4G0CProtocolTest(unittest.TestCase):
             protocol["quantiles"]["tie_behavior"],
             "stable_input_row_index",
         )
+        self.assertEqual(
+            protocol["path_ratio_consistency"]["absolute_tolerance"],
+            2e-5,
+        )
+
+    def test_shared_decision_csv_schema_matches_production_header_exactly(self):
+        self.assertEqual(MODULE.DECISION_CSV_COLUMNS, (
+            "schema_version", "stamp", "planning_attempt_id",
+            "collision_segment_id", "request_hash",
+            "snapshot_generation_id", "snapshot_stamp_s", "snapshot_frame",
+            "query_base_time_s", "occupancy_epoch", "status", "reason",
+            "selection_applied", "original_hash", "risk_hash",
+            "selected_hash", "original_sample_count", "original_valid_count",
+            "original_unknown_count", "original_stale_count",
+            "original_non_finite_count", "original_mean", "original_max",
+            "risk_sample_count", "risk_valid_count", "risk_unknown_count",
+            "risk_stale_count", "risk_non_finite_count", "risk_mean",
+            "risk_max", "original_path_length", "risk_path_length",
+            "path_length_ratio", "original_search_latency_ms",
+            "risk_search_latency_ms", "total_search_latency_ms",
+        ))
 
     def test_noncanonical_json_and_calibrated_registry_fail_closed(self):
         with tempfile.TemporaryDirectory() as tmp:

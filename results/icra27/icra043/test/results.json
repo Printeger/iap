@@ -1,0 +1,37 @@
+{
+  "forbidden_flow_invocations": 0,
+  "full_python": {
+    "command": "python3 -m unittest discover -s test -p 'test_*.py'",
+    "exit": 0,
+    "final_tests": 389,
+    "initial_tests_before_review_remediation": 384,
+    "intermediate_tests_after_first_review": 388,
+    "invocations": 3
+  },
+  "focused": {
+    "analyzer": 13,
+    "launch_contract": 6,
+    "launch_golden": 16,
+    "protocol": 4,
+    "runner": 11,
+    "total": 50
+  },
+  "red_phase": {
+    "analyzer_exit": 1,
+    "protocol_exit": 1,
+    "runner_exit": 1,
+    "review_remediation_analyzer_exit": 1,
+    "review_remediation_runner_exit": 1,
+    "second_review_runner_exit": 1
+  },
+  "static": {
+    "canonical_json_exit": 0,
+    "flake8_fatal_exit": 0,
+    "git_diff_check_exit": 0,
+    "py_compile_exit": 0
+  },
+  "test_command_corrections": {
+    "incorrect_package_import_attempts": 2,
+    "tests_executed_by_incorrect_attempts": 0
+  }
+}
