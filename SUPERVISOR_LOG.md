@@ -1,5 +1,65 @@
 # ICRA Supervisor Log
 
+## 2026-08-24 — ICRA-052 review REQUEST_CHANGES and ICRA-053 XDG repair
+
+### Review identity and synchronization
+
+- Fixed review range: `d859b164e8cd4984493ee532652eaa2a0967374b...799c94b56390d2415d091e6125c1c4544f71f9ca`.
+- Reviewed implementation/docs `e44af11`, dependency-preservation remediation `1f7e8eb` and final
+  DEV_LOG-only handoff `799c94b`; all carry `IAP-RQ-423`. All 18 changed paths are within the ICRA-052
+  allowlist and DEEPSEEK ownership; Supervisor-owned and external-repository files are unchanged.
+- After fetch, HEAD and `origin/dev/icra` match at divergence `0 0`. The protected PDF is the sole untracked
+  repository file and retains SHA-256
+  `1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+
+### Standards axis
+
+- Verdict: `BLOCKED`; one High hard violation and two Low judgment findings; worst High.
+- High task-temp boundary violation: Builder records early focused test invocations without explicit
+  repository-local `TMPDIR`. Python `TemporaryDirectory` therefore created auto-cleaned paths outside the
+  repository, contrary to ICRA-052's requirement that every task temp/evidence path remain below
+  `results/icra27/icra052/`. Correct final reruns do not erase the executed scope violation.
+- Low possible Duplicated Code: the canonical environment/output map is repeated in shared validation and
+  launch validation. Low possible Repeated Switches/Shotgun Surgery: v1/v2/v3 dispatch is distributed
+  across protocol, runner, analyzer and launch. These are nonblocking defense-in-depth/versioning costs.
+- Commits, ownership, docs synchronization, protected hashes, ICRA-051 retention and zero forbidden live/
+  build invocation otherwise conform. ICRA-052 has no build/install/log product; its task TMPDIR is empty.
+
+### Spec axis
+
+- Verdict: `REQUEST_CHANGES`; one High blocking finding; worst High.
+- High incomplete production mutable-path inventory: `launch/test_planner.launch.py` still unconditionally
+  sets `XDG_RUNTIME_DIR=/tmp/runtime-root`. This external writable runtime/temp path is absent from
+  `LAUNCH_ENVIRONMENT_KEYS`, mutable-output inventory, runner state, run/test-planner manifests and analyzer
+  validation. It also overrides the inherited runner child environment for every launch.
+- This directly violates the requirement that every mutable production output/temp path be a canonical
+  descendant of the fresh runs root and propagated exactly. The unknown-output test mutates the declared
+  inventory itself, so it cannot discover a production launch sink omitted from that same map.
+- Accepted work remains: 15 disjoint r3 IDs; unchanged science; exact ICRA-046/051 lineage; complete v3
+  dependency contract; four currently declared environment keys and eight outputs validated before GPU/
+  launch/attempt; refreshed-provenance analyzer adversaries; zero live/GPU/ROS/CLI/CTest/build execution.
+
+### Independent verification and Gate verdict
+
+- Supervisor reran focused P4-G0C discovery 84/84 and complete Python discovery 439/439 with
+  `TMPDIR=results/icra27/icra052/tmp`; both pass. The full suite retains one pre-existing ResourceWarning
+  and expected diagnostic stdout. Source inspection independently reproduces the unconditional external
+  XDG assignment and its absence from all registered maps.
+- Verdict: `ICRA052_REVIEW_REQUEST_CHANGES_UNREGISTERED_XDG_RUNTIME_AND_EXTERNAL_TMP`. This is not r3 live
+  readiness, G0C PASS or threshold authorization. No GPU/ROS/live execution is authorized.
+
+### Artifact lifecycle and required next action
+
+- ICRA-052 created no build/install/log product, so there is nothing to delete. Its compact evidence remains
+  retained because Review did not pass. ICRA-051's ~1.2-GiB build, ~460-MiB install, log/dependency/runs and
+  external ROS log remain retained and immutable; no historical blocked-product cleanup occurred.
+- Unique next task: `ICRA-053 / P4_G0C_R3_XDG_RUNTIME_ENVIRONMENT_REPAIR`, defined in `NEXT_TASK.md`; active
+  role is `DEEPSEEK`, state `TASK_READY`.
+- ICRA-053 is narrow and synthetic: register canonical task-local `XDG_RUNTIME_DIR` with mode 0700, bind it
+  into all evidence/analyzer paths, remove the r3 `/tmp/runtime-root` override and add a structural test that
+  compares the registered map with actual production launch path sinks. All test commands must use the
+  task-local TMPDIR from the first invocation.
+
 ## 2026-08-24 — ICRA-051 review BLOCKED and ICRA-052 r3 environment hardening
 
 ### Review identity and synchronization
