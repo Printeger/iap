@@ -4985,3 +4985,41 @@ review note that `IAP-RQ-423` is defined in `docs/REQS.md` rather than
 `docs/spec/talk_spec.md` is pre-existing and is not an ICRA-038 finding.
 Compact review evidence is retained in
 `results/icra27/icra038/review/two_axis_review.md`.
+
+## 2026-08-24T03:26:01Z — ICRA-038 FINAL HANDOFF
+
+IAP-RQ-423. Implementation/evidence/documentation commit `5c8a7af` and
+two-axis review/evidence commit `90f5dc5` are pushed to `origin/dev/icra`;
+divergence was `0 0` immediately before this DEV_LOG-only handoff.
+
+The rebound consumer now preserves a truthful scanner `CLOSED_SEGMENTS`
+status and its complete endpoints whenever any adjacent-endpoint or otherwise
+interpolation-only segment lacks occupied interior integer evidence. It sets
+existing `STOP_FOR_ERROR` and returns before A*/guide work; the complete
+multi-segment attempt fails closed without exposing an earlier partial subset.
+Scanner, initial path, ordinary classified behavior and planner-manager remain
+unchanged.
+
+Final deterministic results are collision 17/17, P1 39/39, retained
+path-searching P4 4/4, occupancy epoch 6/6 and affected plan-manager CTest
+9/9, totaling 186 active plan-manager cases plus one existing disabled profile
+and zero failures. Fresh ICRA-038 bspline/plan-manager configure, build and
+install pass. Linkage resolves ICRA-038 bspline, ICRA-037 IAP/typesupport and
+the intended read-only ICRA-026 plan-env/path-searching only. Focused
+formatting, JSON, diff, allowlist, source/library identity and zero-task-process
+audits pass. All six ICRA-037 tree identities remain unchanged.
+
+Standards and Spec final reviews each report zero findings. Exact RED/GREEN
+attempts, commands, test counts, linkage, identities and limitations are in
+`results/icra27/icra038/verification_summary.md`; review evidence is in
+`results/icra27/icra038/review/two_axis_review.md`. The frozen fixture remains
+`49a676a5ff51538ab961c814409f6c2dfb7ba4679a861d4e8e94cc7d5679c788`.
+The protected PDF remains unmodified and unstaged at
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+
+Builder result is `P4_G0A_REBOUND_REPAIR_READY_FOR_REVIEW`. This is not Gate
+promotion, authorization of another task, or permission to begin G0B,
+original/risk guide, profile/scoring/selection, lineage or P5 work. No GPU,
+ROS/live flow, launch, runner, analyzer, smoke, benchmark, qualification,
+campaign, tuning, cleanup or protected-PDF handling occurred. Control returns
+only to SUPERVISOR review.
