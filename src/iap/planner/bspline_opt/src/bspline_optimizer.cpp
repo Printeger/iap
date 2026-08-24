@@ -1900,14 +1900,18 @@ namespace ego_planner
       return false;
 
     vector<std::pair<int, int>> segment_ids;
+    bool has_unclassifiable_segment = false;
     for (const auto &segment : last_collision_scan_result_.closed_segments)
     {
+      bool has_occupied_interior_sample = false;
       bool new_collision = false;
       for (int index = segment.first + 1;
            index < segment.second && !new_collision; ++index)
       {
         bool occupied =
             grid_map_->getInflateOccupancy(cps_.points.col(index)) > 0;
+        has_occupied_interior_sample =
+            has_occupied_interior_sample || occupied;
         for (size_t direction_index = 0;
              occupied && direction_index < cps_.direction[index].size();
              ++direction_index)
@@ -1921,8 +1925,19 @@ namespace ego_planner
         }
         new_collision = occupied;
       }
+      if (!has_occupied_interior_sample)
+      {
+        has_unclassifiable_segment = true;
+        break;
+      }
       if (new_collision)
         segment_ids.push_back(segment);
+    }
+
+    if (has_unclassifiable_segment)
+    {
+      force_stop_type_ = STOP_FOR_ERROR;
+      return false;
     }
 
     if (segment_ids.empty())

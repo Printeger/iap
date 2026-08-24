@@ -116,6 +116,27 @@ Eigen::MatrixXd seedMatrix(const CollisionCase & fixture)
   return seed;
 }
 
+Eigen::MatrixXd sameControlIntervalSeed()
+{
+  Eigen::MatrixXd seed = seedMatrix(p4_collision_fixture::kNoCollision);
+  seed(0, 2) = 2.0;
+  seed(0, 3) = 8.0;
+  for (Eigen::Index index = 4; index < seed.cols(); ++index) {
+    seed(0, index) = 8.0 + 12.0 * static_cast<double>(index - 3);
+  }
+  return seed;
+}
+
+Eigen::MatrixXd ordinaryThenAdjacentSeed()
+{
+  Eigen::MatrixXd seed = seedMatrix(p4_collision_fixture::kNoCollision);
+  seed(0, 7) = 8.0;
+  for (Eigen::Index index = 8; index < seed.cols(); ++index) {
+    seed(0, index) = static_cast<double>(index + 1);
+  }
+  return seed;
+}
+
 std::unique_ptr<ego_planner::BsplineOptimizer> makeOptimizer(
   const GridMap::Ptr & map, const bool configure_a_star = true)
 {
@@ -258,12 +279,7 @@ TEST(P4CollisionScanLegacyGreen,
   GridMapTestAccess::configure(
     map.get(), p4_collision_fixture::kMultipleClosed, 568);
   auto optimizer = makeOptimizer(map, false);
-  Eigen::MatrixXd seed = seedMatrix(p4_collision_fixture::kNoCollision);
-  seed(0, 2) = 2.0;
-  seed(0, 3) = 8.0;
-  for (Eigen::Index index = 4; index < seed.cols(); ++index) {
-    seed(0, index) = 8.0 + 12.0 * static_cast<double>(index - 3);
-  }
+  const Eigen::MatrixXd seed = sameControlIntervalSeed();
 
   const auto result = optimizer->scanCollisionSegments(seed);
   ASSERT_EQ(result.status, ego_planner::CollisionScanStatus::CLOSED_SEGMENTS);
@@ -360,4 +376,70 @@ TEST(P4CollisionScanFailClosedIntegration,
   EXPECT_EQ(invalid_optimizer->lastCollisionScanResult().status,
             ego_planner::CollisionScanStatus::INVALID_INPUT);
   EXPECT_TRUE(invalid_optimizer->getLastP4GuideViz().empty());
+}
+
+TEST(P4CollisionScanFailClosedIntegration,
+     ReboundAdjacentEndpointsPreserveTruthAndStopBeforeAStar) {
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configure(
+    map.get(), p4_collision_fixture::kNoCollision, 568);
+  auto optimizer = makeOptimizer(map, false);
+  Eigen::MatrixXd seed = sameControlIntervalSeed();
+  ASSERT_EQ(optimizer->initControlPoints(seed, true).status,
+            ego_planner::CollisionScanStatus::NO_COLLISION);
+
+  GridMapTestAccess::configure(
+    map.get(), p4_collision_fixture::kMultipleClosed, 568);
+  const auto scan = optimizer->scanCollisionSegments(seed);
+  ASSERT_EQ(scan.status, ego_planner::CollisionScanStatus::CLOSED_SEGMENTS);
+  ASSERT_EQ(scan.closed_segments.size(), 1U);
+  EXPECT_EQ(scan.closed_segments.front(), std::make_pair(2, 3));
+
+  bool stopped_for_error = false;
+  EXPECT_FALSE(
+    optimizer->checkCollisionAndReboundForTest(&stopped_for_error));
+  EXPECT_TRUE(stopped_for_error);
+  ASSERT_EQ(optimizer->lastCollisionScanResult().status,
+            ego_planner::CollisionScanStatus::CLOSED_SEGMENTS);
+  ASSERT_EQ(
+    optimizer->lastCollisionScanResult().closed_segments.size(), 1U);
+  EXPECT_EQ(
+    optimizer->lastCollisionScanResult().closed_segments.front(),
+    std::make_pair(2, 3));
+  EXPECT_TRUE(optimizer->getLastP4GuideViz().empty());
+}
+
+TEST(P4CollisionScanFailClosedIntegration,
+     ReboundUnclassifiableSegmentRejectsEntireMultiSegmentResult) {
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configure(
+    map.get(), p4_collision_fixture::kNoCollision, 76);
+  auto optimizer = makeOptimizer(map, false);
+  Eigen::MatrixXd seed = ordinaryThenAdjacentSeed();
+  ASSERT_EQ(optimizer->initControlPoints(seed, true).status,
+            ego_planner::CollisionScanStatus::NO_COLLISION);
+
+  GridMapTestAccess::configure(
+    map.get(), p4_collision_fixture::kMultipleClosed, 76);
+  const auto scan = optimizer->scanCollisionSegments(seed);
+  ASSERT_EQ(scan.status, ego_planner::CollisionScanStatus::CLOSED_SEGMENTS);
+  ASSERT_EQ(scan.closed_segments.size(), 2U);
+  EXPECT_EQ(scan.closed_segments[0], std::make_pair(2, 5));
+  EXPECT_EQ(scan.closed_segments[1], std::make_pair(6, 7));
+
+  bool stopped_for_error = false;
+  EXPECT_FALSE(
+    optimizer->checkCollisionAndReboundForTest(&stopped_for_error));
+  EXPECT_TRUE(stopped_for_error);
+  ASSERT_EQ(optimizer->lastCollisionScanResult().status,
+            ego_planner::CollisionScanStatus::CLOSED_SEGMENTS);
+  ASSERT_EQ(
+    optimizer->lastCollisionScanResult().closed_segments.size(), 2U);
+  EXPECT_EQ(
+    optimizer->lastCollisionScanResult().closed_segments[0],
+    std::make_pair(2, 5));
+  EXPECT_EQ(
+    optimizer->lastCollisionScanResult().closed_segments[1],
+    std::make_pair(6, 7));
+  EXPECT_TRUE(optimizer->getLastP4GuideViz().empty());
 }

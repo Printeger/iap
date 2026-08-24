@@ -1,5 +1,19 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-24 ICRA-038 P4 rebound truth-preservation repair
+
+| Req ID | Requirement/evidence seam | Implementation and focused evidence | Status |
+|---|---|---|---|
+| IAP-RQ-423 | A truthful closed scanner result must not be downgraded merely because its segment has no occupied interior integer control point | `check_collision_and_rebound()` verifies that each closed segment has truthful integer occupancy evidence before applying the legacy direction/base-point suppression. An adjacent `(2,3)` result preserves exact `CLOSED_SEGMENTS` status/endpoints, sets existing `STOP_FOR_ERROR` and returns before A*/guide work | **IMPLEMENTED / focused regression GREEN** |
+| IAP-RQ-423 | An unclassifiable member must reject the whole multi-segment rebound attempt | The ordinary-then-adjacent `[(2,5),(6,7)]` regression proves that the first segment is not consumed as a partial result when the second cannot be classified; the full scanner result remains observable and A*/guide output remains absent | **VERIFIED / fail closed** |
+| IAP-RQ-423 | Preserve the ICRA-037 production contract and deterministic baseline | Scanner source, initial collision path, planner-manager, frozen fixture and CMake are unchanged. Final collision passes 17/17, P1 39/39, retained path-searching P4 4/4, occupancy epoch 6/6 and affected plan-manager CTest 9/9 (186 active, one existing disabled) | **GREEN / zero functional failures** |
+| IAP-RQ-423 | Bound artifacts and dependencies to the reviewed task chain | Fresh ICRA-038 bspline/plan-manager builds and installs use ICRA-037 IAP/typesupport and intended read-only ICRA-026 plan-env/path-searching. All six ICRA-037 build/install tree manifests and the frozen fixture/PDF hashes remain unchanged | **LINKAGE / PRESERVATION PASS** |
+
+Exact RED/GREEN attempts, command ledger, identities, linkage and limitations
+are retained below `results/icra27/icra038/`. No scanner redesign,
+original/risk guide, G0B, P5, GPU, ROS/live flow, smoke, benchmark,
+qualification, cleanup or Gate promotion occurred.
+
 ## 2026-08-23 ICRA-037 shared P4 collision-scan GREEN contract
 
 | Req ID | Requirement/evidence seam | Implementation and focused evidence | Status |

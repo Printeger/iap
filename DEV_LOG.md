@@ -4869,3 +4869,100 @@ artifacts or permission to begin original/risk guide, profile/scoring,
 selection/fallback, lineage or P5 work. No GPU, ROS/live flow, smoke,
 benchmark, qualification, campaign, cleanup or protected-PDF handling
 occurred. Control returns only to SUPERVISOR review.
+
+## 2026-08-24T03:01:32Z — ICRA-038 START
+
+IAP-RQ-423. Synchronized `dev/icra` at reviewed ICRA-037 handoff HEAD
+`e3c41b654da86a6dd36aa7e483f6adea8fe505d0`: initial status contained only
+the protected untracked PDF, fetch passed and divergence was `0 0`, so no pull
+ran. `AGENT_STATE.md` confirms DEEPSEEK, `TASK_READY`, ICRA-038 and P4_G0A.
+
+The exact High finding is rebound truth loss: the shared scanner truthfully
+returns an adjacent-endpoint interpolation-only `CLOSED_SEGMENTS (2,3)`, but
+`check_collision_and_rebound()` inspects only integer control points strictly
+between the endpoints. That range is empty, so it discards the segment and
+rewrites the production result to `NO_COLLISION`; the ICRA-037 overlap test
+exercised only the scanner and did not protect this consumer.
+
+Exact allowlist: `bspline_optimizer.cpp`; its header only if strictly required
+for truthful test access; the focused collision-contract test; new compact
+evidence below `results/icra27/icra038/`; `DEV_LOG.md`; `docs/CHANGES.md`; and
+`docs/TRACEABILITY.md`. Planner-manager, frozen fixture, CMake, plan-env,
+path-searching, Supervisor-owned/scope/gate/requirement files, historical
+evidence, protected PDF and all external repositories are forbidden.
+
+Proposed invariant: a scanner `CLOSED_SEGMENTS` result is never downgraded to
+`NO_COLLISION` merely because a segment has no interior integer control point.
+The legacy direction/base-point suppression remains only where a complete
+segment has enough truthful interior occupancy evidence. Any adjacent-endpoint
+or otherwise unclassifiable segment makes the whole rebound attempt retain its
+scan status/endpoints, set the existing error-stop state and return before
+A*/guide work; no partial multi-segment subset may be consumed.
+
+TDD will extend the existing production-facing focused target through
+`initControlPoints()` and the real rebound consumer. It will prove scanner
+`CLOSED_SEGMENTS (2,3)`, no downgrade, conservative error-stop return, absent
+A*/guide output and whole-attempt failure for a multi-segment input containing
+one unclassifiable segment. The frozen eleven cases, open/invalid initial and
+rebound cases, ordinary closed path and overlap regression remain unchanged.
+Required static regressions are focused collision, P1 39/39, retained
+path-searching P4 4/4, occupancy epoch 6/6 and affected plan-manager 9/9.
+
+Initial hashes are optimizer header
+`5b751d5358095122ad5b959276074041aa397d297c9ff2f2e8f7668524817e9a`,
+optimizer source
+`0f032c38f01b2e93a434e0bf015471d178311c67738e3004399a18d928c192bb`,
+focused test
+`9291317425289475ac33618dc9cb56011fb589a8d0a6ee0112898ab91700d9a8`,
+frozen fixture
+`49a676a5ff51538ab961c814409f6c2dfb7ba4679a861d4e8e94cc7d5679c788`
+and protected PDF
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+All six ICRA-037 build/install trees have pre-repair file-count/byte/manifest
+identities recorded and will remain read-only.
+
+Stop line: repair only the rebound consumer invariant, add the two narrow
+production regressions, build/test/link against the authorized retained
+dependencies, record compact evidence/docs, review and push, then report
+`P4_G0A_REBOUND_REPAIR_READY_FOR_REVIEW`. No scanner redesign, fifth status,
+direction-model/A*/guide/FSM redesign, G0B, profile/risk/scoring/selection,
+lineage, P5, GPU, ROS/live flow, launch, runner/analyzer, smoke, benchmark,
+campaign, tuning, cleanup, Gate promotion or next-task selection is authorized.
+
+## 2026-08-24T03:18:24Z — ICRA-038 IMPLEMENTATION COMPLETE / REVIEW PREP
+
+IAP-RQ-423. The rebound consumer now requires at least one actually occupied
+interior integer control point for every scanner-closed segment before the
+legacy direction/base-point suppression may classify it. If any segment lacks
+that evidence, the complete scanner `CLOSED_SEGMENTS` status and endpoint list
+remain intact, existing `STOP_FOR_ERROR` is set, and rebound returns before
+A*/guide work. This applies to the entire multi-segment attempt, so an earlier
+ordinary segment cannot escape as a partial actionable subset.
+
+TDD reproduced the exact defect: the adjacent `(2,3)` regression exited 1
+with false error-stop and a `NO_COLLISION` rewrite; the ordinary-then-adjacent
+`[(2,5),(6,7)]` regression reached the deliberately absent A* dependency and
+terminated with SIGSEGV/exit 139 before the repair. Both are now GREEN. Final
+deterministic counts are collision 17/17, P1 39/39, retained path-searching P4
+4/4, occupancy epoch 6/6 and affected plan-manager CTest 9/9, comprising 186
+active cases plus one existing disabled profile and zero failures.
+
+Fresh ICRA-038 bspline and plan-manager configure/build/install pass. Direct
+and CMake linkage resolves ICRA-038 bspline, ICRA-037 IAP/typesupport and the
+intended read-only ICRA-026 plan-env/path-searching only; source/installed
+header equality passes, the installed planner node has no non-toolchain
+RUNPATH, and no product library is missing. All six retained ICRA-037
+build/install trees preserve their pre-repair file/byte/manifest identities.
+The frozen fixture remains
+`49a676a5ff51538ab961c814409f6c2dfb7ba4679a861d4e8e94cc7d5679c788`;
+the protected unstaged PDF remains
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+
+Only the rebound consumer, its strictly required existing test-access wrapper,
+the focused production-facing test, compact ICRA-038 evidence and required
+Builder documentation changed. Scanner, initial path, planner-manager, frozen
+fixture and CMake are unchanged. No GPU, ROS/live flow, launch, runner,
+analyzer, smoke, benchmark, qualification, original/risk guide, G0B, P5,
+cleanup or Gate promotion ran. Compact evidence is ready below
+`results/icra27/icra038/`; next action is the mandated two-axis review before
+the implementation/evidence/docs commit and final DEV_LOG-only handoff.

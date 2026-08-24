@@ -3,6 +3,27 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(icra-038-p4-rebound-truth-preservation): IAP-RQ-423 — repair the rebound consumer so a scanner `CLOSED_SEGMENTS` result cannot be rewritten to `NO_COLLISION` when an adjacent-endpoint or otherwise interpolation-only segment has no occupied interior integer control point. Such an unclassifiable segment now preserves the scanner's complete status/endpoints, sets the existing `STOP_FOR_ERROR` state and returns before A*/guide work; one unclassifiable segment rejects the complete multi-segment attempt without exposing a partial actionable subset. The scanner, its four statuses, initial-path behavior and planner-manager propagation remain unchanged. Production-facing regressions cover exact `(2,3)` adjacency and an ordinary-then-adjacent `[(2,5),(6,7)]` result. Final collision tests pass 17/17, P1 39/39, retained path-searching P4 4/4, occupancy epoch 6/6 and affected plan-manager CTest 9/9 (186 active cases, one existing disabled). Fresh ICRA-038 bspline/plan-manager builds and installs link against ICRA-037 IAP/typesupport plus intended read-only ICRA-026 dependencies, and all six retained ICRA-037 tree identities remain unchanged. No scanner redesign, original/risk guide development, G0B, P5, GPU, ROS/live flow, smoke, benchmark, qualification, cleanup or Gate promotion occurred; result is `P4_G0A_REBOUND_REPAIR_READY_FOR_REVIEW`.
+
+Reproduce the deterministic ICRA-038 selection from the repository root (no
+live flow):
+
+```bash
+source /opt/ros/jazzy/setup.bash
+icra038_root="$PWD/results/icra27/icra038"
+cmake --build "$icra038_root/build_bspline" --parallel 2
+cmake --install "$icra038_root/build_bspline"
+cmake --build "$icra038_root/build_plan_manage" --parallel 2
+cmake --install "$icra038_root/build_plan_manage"
+export LD_LIBRARY_PATH="$icra038_root/install_plan_manage/lib:$icra038_root/install_bspline/lib:$PWD/results/icra27/icra037/install/lib:$PWD/results/icra27/icra026/install_path_searching/lib:$PWD/results/icra27/icra026/install_plan_env/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+ctest --test-dir "$icra038_root/build_bspline" --output-on-failure \
+  -R '^(test_p1_integrity_cost|test_p4_collision_scan_contract)$'
+"$PWD/results/icra27/icra026/build_path_searching/test_p4_risk_astar"
+"$PWD/results/icra27/icra026/build_plan_env/test_grid_map_occupancy_epoch"
+ctest --test-dir "$icra038_root/build_plan_manage" --output-on-failure \
+  -R '^(test_gate0_qualification_writer|test_p0_risk_grid_runtime|test_p0_occupancy_epoch_adapter|test_p1_replan_admission|test_p1_candidate_selection|test_p5_runtime_integrity_gate|test_p2_candidate_ranking|test_p3_reference_bias|test_planning_risk_context)$'
+```
+
 - fix(icra-037-p4-collision-scan-green): IAP-RQ-423 — introduce one production collision-scan result with exact `NO_COLLISION`, `CLOSED_SEGMENTS`, `OPEN_ENDED_COLLISION` and `INVALID_INPUT` states, and make both initial and rebound handling consume the shared scanner. Entry remains limited to the legacy two-thirds trigger window, while an active run continues to the complete seed tail; open-ended and invalid outcomes discard all segments and stop before downstream A*/guide handling. Overlapping endpoint pairs caused by multiple interpolated runs inside one control interval are merged, preserving scan order and non-overlap. The smallest planner-manager propagation returns failure before candidate fanout/publication for those outcomes. The byte-identical frozen fixture is now 11/11 GREEN, with four focused production integration/regression cases for initial/rebound fail-closed behavior, closed endpoint exposure and overlap prevention; final collision target is 15/15, P1 remains 39/39, retained path-searching P4 and occupancy epoch remain 4/4 and 6/6, and affected plan-manager CTest is 9/9. Fresh task-local builds/installations and corrected direct/ament linkage pass against ICRA-037 IAP/bspline plus intended read-only ICRA-026 dependencies. No guide generation/selection, P5, GPU/ROS/live flow, smoke, benchmark, qualification, cleanup or Gate promotion occurred; result is `P4_G0A_COLLISION_SCAN_GREEN_READY_FOR_REVIEW`.
 
 Reproduce the retained ICRA-037 build and deterministic test selection from the

@@ -1,0 +1,49 @@
+{
+  "task": "ICRA-038",
+  "requirement": "IAP-RQ-423",
+  "gate": "P4_G0A",
+  "result": "P4_G0A_REBOUND_REPAIR_READY_FOR_REVIEW",
+  "focused_collision": {
+    "tests": 17,
+    "failures": 0,
+    "adjacent_endpoint_rebound": {
+      "scanner_status": "CLOSED_SEGMENTS",
+      "scanner_segments": [[2, 3]],
+      "rebound_status": "CLOSED_SEGMENTS",
+      "rebound_segments": [[2, 3]],
+      "error_stop": true,
+      "astar_dependency_present": false,
+      "guide_count": 0
+    },
+    "multi_segment_rebound": {
+      "scanner_status": "CLOSED_SEGMENTS",
+      "scanner_segments": [[2, 5], [6, 7]],
+      "rebound_status": "CLOSED_SEGMENTS",
+      "rebound_segments": [[2, 5], [6, 7]],
+      "error_stop": true,
+      "astar_dependency_present": false,
+      "guide_count": 0
+    }
+  },
+  "tdd_red": [
+    {
+      "test": "ReboundAdjacentEndpointsPreserveTruthAndStopBeforeAStar",
+      "exit_code": 1,
+      "observed": "error_stop=false and rebound status NO_COLLISION"
+    },
+    {
+      "test": "ReboundUnclassifiableSegmentRejectsEntireMultiSegmentResult",
+      "exit_code": 139,
+      "observed": "SIGSEGV after the ordinary partial subset reached the deliberately absent A* dependency"
+    }
+  ],
+  "regression": {
+    "p1": {"passed": 39, "failed": 0},
+    "path_searching_p4": {"passed": 4, "failed": 0},
+    "occupancy_epoch": {"passed": 6, "failed": 0},
+    "plan_manage_targets": {"passed": 9, "failed": 0},
+    "plan_manage_active_cases": {"passed": 186, "failed": 0},
+    "plan_manage_disabled_cases": 1
+  },
+  "live_execution": false
+}

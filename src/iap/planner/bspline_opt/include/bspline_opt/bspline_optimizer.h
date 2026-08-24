@@ -457,8 +457,12 @@ namespace ego_planner
     const CollisionScanResult &lastCollisionScanResult() const {
       return last_collision_scan_result_;
     }
-    bool checkCollisionAndReboundForTest() {
-      return check_collision_and_rebound();
+    bool checkCollisionAndReboundForTest(bool *stopped_for_error = nullptr) {
+      force_stop_type_ = DONT_STOP;
+      const bool result = check_collision_and_rebound();
+      if (stopped_for_error)
+        *stopped_for_error = force_stop_type_ == STOP_FOR_ERROR;
+      return result;
     }
     bool BsplineOptimizeTrajRebound(Eigen::MatrixXd &optimal_points, double ts); // must be called after initControlPoints()
     bool BsplineOptimizeTrajRebound(Eigen::MatrixXd &optimal_points, double &final_cost, const ControlPoints &control_points, double ts);
