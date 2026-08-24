@@ -6847,3 +6847,30 @@ sole built-in GPU PASS before launch, immediate first-failure stop, zero
 analyzer/retry/task processes, allowed staged files only, retained raw task
 products and unchanged protected evidence/PDF/external source. Result remains
 `BLOCKED_LAUNCH_EXIT_1`, never G0C PASS, pending commit/push handoff.
+
+## 2026-08-24T14:43:38Z — ICRA-051 BUILDER BLOCKED HANDOFF
+
+IAP-RQ-423. The CUDA closure, dependency/GPU PASS evidence, truthful first-
+launch blocker, compact commands, final protection audit and two-axis review
+were committed as `c1af58f` and pushed to `origin/dev/icra`. Post-push fetch
+and divergence are `0 0`.
+
+Retained execution facts are final: the sole fresh CUDA-on build exited 0 with
+17/17 packages; static six-library closure passed; the sole standalone
+dependency runner exited 0; and the sole full runner passed built-in GPU
+preflight before exiting 2 with `launch_exit_1` on the first registered ID.
+Ledger is 1 attempted / 0 complete / 0 retry; both required processes were
+never seen and the final task-process audit is zero. Analyzer invocations are
+zero, no analysis/draft exists and no threshold action or G0C PASS occurred.
+
+Independent review is Standards 0 blocking / 0 nonblocking and Spec 1 blocking
+/ 0 nonblocking. The full-runner environment omitted repository-local
+`ROS_LOG_DIR`, self-induced the ROS logging initialization failure and created
+one external `/root/.ros/log/.../launch.log`; this cannot be repaired after the
+single full invocation was consumed. All task raw/build/install/log products
+remain retained and unstaged. Protected prior evidence, protocol/registry/
+dependency/launch bytes, external `gnss_comm` and the untracked/unstaged PDF
+remain unchanged.
+
+Builder result is `BLOCKED_LAUNCH_EXIT_1`, never G0C PASS. Control returns only
+to SUPERVISOR review and disposition; no next task is selected.
