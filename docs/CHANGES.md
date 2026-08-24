@@ -1326,3 +1326,26 @@ ldd "$repo_root/results/icra27/icra015/build_ego/test_p0_risk_grid_runtime" \
   `refresh_stamp_s`, callback-start stamp and callback-end stamp. Result:
   **ICRA-033 BLOCKED / Gate-0B NOT_QUALIFIED**. No retry, benchmark, tuning, P4/P5 work or Gate
   promotion followed; exact `0.01` remains provisional rather than empirically calibrated.
+
+## 2026-08-24 (ICRA-041 clean-room P4-G0B requalification)
+
+- IAP-RQ-423: made no product edit. Built a fresh self-contained current chain
+  for IAP, plan-env, path-searching, bspline-opt and plan-manager below
+  `results/icra27/icra041/`; a fresh task-local `quadrotor_msgs` bootstrap
+  satisfies unchanged CMake without admitting the workspace-default product.
+  Sanitized CMake/runtime prefixes admit only ROS Jazzy, immutable workspace
+  `traj_utils`/`gnss_comm` and ICRA-041 products.
+- Exact exits are zero for identity 3/3, decision 15/15, false boundary 1/1,
+  integration 5/5, collision 17/17, P1 39/39, fresh path-searching 5/5,
+  fresh occupancy 6/6 and plan-manager 9/9 (186 active, one disabled). The
+  production-A* fixture repeats the reviewed hashes/statistics, keeps original
+  selected and applies no risk guide.
+- Byte-level before/after manifests cover every file and symlink in all 14
+  retained ICRA-039/040 trees. Both canonical hashes are
+  `d18c1c89ef585ef42a31eb9b1f944c8eecbe7d6f1da98ecf567e3816357e3162`;
+  this proves no ICRA-041 write and does not repair the ICRA-040 history.
+- Reproduce using `results/icra27/icra041/preflight/task_env.bash` with the
+  exact configure/build and test commands recorded in `DEV_LOG.md` and
+  `results/icra27/icra041/verification_summary.md`. Result is
+  `P4_G0B_CLEAN_REQUALIFICATION_READY_FOR_REVIEW`, not G0B PASS; no live flow,
+  smoke, benchmark, calibration, G0C/G0D or P5 was run.

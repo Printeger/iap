@@ -1,0 +1,41 @@
+{
+  "schema_version": "icra041_linkage_audit_v1",
+  "task": "ICRA-041",
+  "requirement": "IAP-RQ-423",
+  "status": "PASS",
+  "cmake": {
+    "iap_DIR": "results/icra27/icra041/install_iap/share/iap",
+    "plan_env_DIR": "results/icra27/icra041/install_plan_env/share/plan_env/cmake",
+    "path_searching_DIR": "results/icra27/icra041/install_path_searching/share/path_searching/cmake",
+    "bspline_opt_DIR": "results/icra27/icra041/install_bspline/share/bspline_opt/cmake",
+    "quadrotor_msgs_DIR": "results/icra27/icra041/install_quadrotor_msgs/share/quadrotor_msgs/cmake",
+    "traj_utils_DIR": "/home/dev/ws_iap/install/traj_utils/share/traj_utils/cmake",
+    "gnss_comm_DIR": "/home/dev/ws_iap/install/gnss_comm/share/gnss_comm/cmake"
+  },
+  "direct_resolution": {
+    "libiap.so": "results/icra27/icra041/install_iap/lib/libiap.so",
+    "libiap__rosidl_typesupport_cpp.so": "results/icra27/icra041/install_iap/lib/libiap__rosidl_typesupport_cpp.so",
+    "libplan_env.so": "results/icra27/icra041/install_plan_env/lib/libplan_env.so",
+    "libpath_searching.so": "results/icra27/icra041/install_path_searching/lib/libpath_searching.so",
+    "libbspline_opt.a": "results/icra27/icra041/install_bspline/lib/libbspline_opt.a"
+  },
+  "audits": {
+    "cmake_historical_matches": 0,
+    "cmake_other_task_matches": 0,
+    "cmake_workspace_default_product_matches": 0,
+    "link_command_historical_matches": 0,
+    "link_command_workspace_default_product_matches": 0,
+    "dynamic_missing_libraries": 0,
+    "dynamic_historical_matches": 0,
+    "dynamic_workspace_default_product_matches": 0,
+    "dynamic_build_tree_resolutions": 0,
+    "installed_node_runpath_entries": 0
+  },
+  "installed_headers_match_source": {
+    "risk_grid_map.hpp": true,
+    "grid_map.h": true,
+    "dyn_a_star.h": true,
+    "p4_collision_guide.h": true,
+    "bspline_optimizer.h": true
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "schema_version": "icra041_build_identity_v1",
+  "task": "ICRA-041",
+  "requirement": "IAP-RQ-423",
+  "authorization_head": "8f75dabc8ff274f483f636ac1d7bd34fc97752b7",
+  "reviewed_product_head": "57ea9263b90987245e352033a82241139d3ac2f1",
+  "product_source_diff_count": 0,
+  "environment": {
+    "ros": "/opt/ros/jazzy",
+    "workspace_dependencies": [
+      "/home/dev/ws_iap/install/traj_utils",
+      "/home/dev/ws_iap/install/gnss_comm"
+    ],
+    "fresh_bootstrap_dependency": "results/icra27/icra041/install_quadrotor_msgs",
+    "inherited_prefixes_sanitized": true
+  },
+  "builds": {
+    "quadrotor_msgs": {"configure_exit": 0, "build_install_exit": 0, "tests_enabled": false},
+    "iap": {"configure_exit": 0, "build_install_exit": 0, "tests_enabled": true},
+    "plan_env": {"configure_exit": 0, "build_install_exit": 0, "tests_enabled": true},
+    "path_searching": {"configure_exit": 0, "build_install_exit": 0, "tests_enabled": true},
+    "bspline_opt": {"configure_exit": 0, "build_install_exit": 0, "tests_enabled": true},
+    "plan_manage": {"configure_exit": 0, "build_install_exit": 0, "tests_enabled": true}
+  },
+  "installed_product_sha256": {
+    "libiap.so": "9a7a8d069e162e9487d8229961e7ad440ee2b2a63099be56288c01d68e9e153e",
+    "libiap__rosidl_typesupport_cpp.so": "8be1e1ef7d9b1856cbbd1013061a3c5404a5332755ca70a751731c44d604f52f",
+    "libplan_env.so": "d3f05ddcdd50b16f27a8dced26a753a4df185e807e0e2d56207c19e4c1bda230",
+    "libpath_searching.so": "b271161e360d403abed6e17ea487b44b9c7c4f894705431c84ad973a9534b45c",
+    "libbspline_opt.a": "6bfbe7bdaa6eb6447b7af270a024f2f0e6c22c8d06c351bd5c54f5d7159e20f0",
+    "ego_planner_node": "7fb955e85c01ef140348dac21eb9b7171a556251487c445bea637a4443307dc5"
+  }
+}

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites tests="1" failures="0" disabled="0" errors="0" time="0.062" timestamp="2026-08-24T07:05:12.182" name="AllTests">
+  <testsuite name="P4CollisionGuideIntegration" tests="1" failures="0" disabled="0" skipped="0" errors="0" time="0.062" timestamp="2026-08-24T07:05:12.182">
+    <testcase name="NonG0BContextPreservesFalseMetricsBoundary" file="/home/dev/ws_iap/src/iap/src/iap/planner/bspline_opt/test/test_p4_collision_guide_integration.cpp" line="341" status="run" result="completed" time="0.062" timestamp="2026-08-24T07:05:12.182" classname="P4CollisionGuideIntegration" />
+  </testsuite>
+</testsuites>

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites tests="5" failures="0" disabled="0" errors="0" time="0.316" timestamp="2026-08-24T07:05:17.450" name="AllTests">
+  <testsuite name="P4CollisionGuideIntegration" tests="5" failures="0" disabled="0" skipped="0" errors="0" time="0.316" timestamp="2026-08-24T07:05:17.450">
+    <testcase name="PositiveFixtureUsesProductionAStar" file="/home/dev/ws_iap/src/iap/src/iap/planner/bspline_opt/test/test_p4_collision_guide_integration.cpp" line="287" status="run" result="completed" time="0.145" timestamp="2026-08-24T07:05:17.450" classname="P4CollisionGuideIntegration" />
+    <testcase name="NonG0BContextPreservesFalseMetricsBoundary" file="/home/dev/ws_iap/src/iap/src/iap/planner/bspline_opt/test/test_p4_collision_guide_integration.cpp" line="341" status="run" result="completed" time="0.046" timestamp="2026-08-24T07:05:17.596" classname="P4CollisionGuideIntegration" />
+    <testcase name="InitialAndReboundUseSameDecisionSeam" file="/home/dev/ws_iap/src/iap/src/iap/planner/bspline_opt/test/test_p4_collision_guide_integration.cpp" line="372" status="run" result="completed" time="0.054" timestamp="2026-08-24T07:05:17.643" classname="P4CollisionGuideIntegration" />
+    <testcase name="MetricsOnlyConstraintHashMatchesOriginalOnly" file="/home/dev/ws_iap/src/iap/src/iap/planner/bspline_opt/test/test_p4_collision_guide_integration.cpp" line="432" status="run" result="completed" time="0.045" timestamp="2026-08-24T07:05:17.697" classname="P4CollisionGuideIntegration" />
+    <testcase name="InjectionEpochMismatchInvalidatesDecision" file="/home/dev/ws_iap/src/iap/src/iap/planner/bspline_opt/test/test_p4_collision_guide_integration.cpp" line="464" status="run" result="completed" time="0.024" timestamp="2026-08-24T07:05:17.742" classname="P4CollisionGuideIntegration" />
+  </testsuite>
+</testsuites>

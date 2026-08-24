@@ -5476,3 +5476,103 @@ runner, analyzer, capture, smoke, benchmark, qualification, campaign, tuning,
 cleanup, Gate promotion or next-task work occurred. The protected PDF remains
 unmodified, untracked and unstaged at `1f07da56…844f6`. Control returns only to
 SUPERVISOR review.
+
+## 2026-08-24T06:51:13Z — ICRA-041 START
+
+IAP-RQ-423. Synchronized `dev/icra` at Supervisor authorization HEAD
+`8f75dabc8ff274f483f636ac1d7bd34fc97752b7`: initial status contained only
+the protected untracked PDF, fetch passed and divergence was `0 0`, so no pull
+ran. `AGENT_STATE.md` confirms DEEPSEEK, `TASK_READY`, ICRA-041 and P4_G0B.
+Reviewed product source is unchanged from `57ea9263b90987245e352033a82241139d3ac2f1`;
+the descendant changes are Supervisor-owned task/state/log documentation only.
+
+This task permits zero product edits. Exact staged allowlist is compact new
+evidence below `results/icra27/icra041/`, `DEV_LOG.md`, `docs/CHANGES.md` and
+`docs/TRACEABILITY.md`. Product source/header/test/CMake/config/fixture,
+Supervisor-owned files, historical evidence, retained products, protected PDF
+and external repositories are forbidden.
+
+Before configure, a sorted byte-level manifest covering every regular file
+and symlink in the ten ICRA-039 and four ICRA-040 retained build/install trees
+was written only to ICRA-041. Its 3,124-line/528,446-byte canonical SHA-256 is
+`d18c1c89ef585ef42a31eb9b1f944c8eecbe7d6f1da98ecf567e3816357e3162`.
+Each regular entry records repository-relative path, type, size and SHA-256;
+each symlink records path, type, link size and exact target. The same command
+will produce `retained_after.tsv`; byte comparison and canonical hashes must
+match. This proves only that ICRA-041 made no further retained-tree write and
+does not repair the historical ICRA-040 incident.
+
+The clean environment wrapper unsets inherited AMENT/CMake/colcon/runtime/
+Python paths, sources only `/opt/ros/jazzy`, then prepends ICRA-041 products
+and immutable workspace `traj_utils`/`gnss_comm`. Because current IAP and
+plan-manager CMake require `quadrotor_msgs`, which is absent from ROS Jazzy, a
+fresh task-local message package is bootstrapped from unchanged repository
+source; no workspace-default quadrotor product is consumed. The five required
+products then build in order with the wrapper and these exact configure
+arguments:
+
+- `cmake -S src/uav_simulator/Utils/quadrotor_msgs -B results/icra27/icra041/build_quadrotor_msgs -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DCMAKE_INSTALL_PREFIX=$PWD/results/icra27/icra041/install_quadrotor_msgs`;
+- `cmake -S . -B results/icra27/icra041/build_iap -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_WITH_CUDA=OFF -DBUILD_WITH_VIEWER=OFF -DBUILD_WITH_OPENCV=OFF -DBUILD_TESTING=ON -DCMAKE_INSTALL_PREFIX=$PWD/results/icra27/icra041/install_iap`;
+- `cmake -S src/iap/planner/plan_env -B results/icra27/icra041/build_plan_env -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_INSTALL_PREFIX=$PWD/results/icra27/icra041/install_plan_env`;
+- `cmake -S src/iap/planner/path_searching -B results/icra27/icra041/build_path_searching -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_INSTALL_PREFIX=$PWD/results/icra27/icra041/install_path_searching`;
+- `cmake -S src/iap/planner/bspline_opt -B results/icra27/icra041/build_bspline -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_INSTALL_PREFIX=$PWD/results/icra27/icra041/install_bspline`;
+- `cmake -S src/iap/planner/plan_manage -B results/icra27/icra041/build_plan_manage -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_INSTALL_PREFIX=$PWD/results/icra27/icra041/install_plan_manage`.
+
+Each configure is executed as `set -o pipefail; bash
+results/icra27/icra041/preflight/task_env.bash <command> 2>&1 | tee
+results/icra27/icra041/logs/configure_<package>.log`. Each build/install is
+exactly `set -o pipefail; bash results/icra27/icra041/preflight/task_env.bash
+cmake --build results/icra27/icra041/build_<package> --target install -j2 2>&1
+| tee results/icra27/icra041/logs/build_<package>.log`.
+
+Tests will invoke only ICRA-041 binaries through the same wrapper: focused
+decision epoch-precedence 3/3, complete decision 15/15, focused false boundary
+1/1, complete integration 5/5, collision 17/17, P1 39/39, path-searching P4
+5/5, occupancy epoch 6/6, and
+`ctest --test-dir results/icra27/icra041/build_plan_manage -L gtest --output-on-failure --output-junit results/icra27/icra041/test/plan_manage.xml`
+for the nine affected targets/186 active cases/one disabled case. Each direct
+GTest command uses an explicit filter where focused and an explicit task-local
+XML path; every exit is recorded.
+
+Stop line: any configure/build/linkage/test/deterministic-hash/manifest failure
+is BLOCKED with no retry, tuning or old-product fallback. Complete only fresh
+products, deterministic evidence, compact docs/review and push, then report
+`P4_G0B_CLEAN_REQUALIFICATION_READY_FOR_REVIEW`. No G0B PASS, G0C/G0D, risk
+application, P5, GPU, ROS/live map, launch, runner/analyzer/capture, smoke,
+benchmark, campaign, calibration, tuning, cleanup or next-task work is
+authorized.
+
+## 2026-08-24T07:08:02Z — ICRA-041 BUILD AND REQUALIFICATION
+
+IAP-RQ-423. No product file changed. A sanitized environment built and
+installed fresh task-local quadrotor messages, IAP, plan-env, path-searching,
+bspline-opt and plan-manager in dependency order. Every configure and
+build/install exit is zero. The fresh message bootstrap was necessary because
+unchanged IAP/plan-manager CMake requires `quadrotor_msgs` and Jazzy does not
+provide it; no workspace-default quadrotor product was consumed.
+
+CMake caches bind all IAP/planner dependencies to ICRA-041 and only admit ROS
+Jazzy plus immutable workspace `traj_utils`/`gnss_comm`. Direct `ldd` across
+the relevant binaries resolves ICRA-041 `libiap.so`, IAP typesupport,
+`libplan_env.so` and `libpath_searching.so`; missing, historical,
+workspace-default product and build-tree resolution counts are zero. Installed
+node RUNPATH is empty. Relevant installed/source headers match byte-for-byte.
+
+Each prescribed test command ran once without retry and exited zero: focused
+identity 3/3, decision 15/15, focused false boundary 1/1, integration 5/5,
+collision 17/17, P1 39/39, path-searching P4 5/5, occupancy epoch 6/6 and
+plan-manager 9/9 with 186 active cases and one existing disabled case. The
+production-A* fixture repeats hashes `1c8abe0fa4e4136a` /
+`2a3380ee05f43a1f` / `b3789ad7a8e50365` / `2a3380ee05f43a1f`, both 200/200
+profiles, reviewed risk statistics and ratio `1.0`; original remains selected
+and no risk guide is applied. The separate risk-enabled false-boundary case
+preserves false and records `SELECTION_NOT_AUTHORIZED`.
+
+After all tests, the 14 retained-tree manifest is byte-identical to START:
+3,124 lines, 528,446 bytes and SHA-256 `d18c1c89…e3162`; `cmp` exits zero.
+This proves no ICRA-041 write and does not claim to repair the historical
+ICRA-040 event. Compact JSON/XML/text evidence is repository-local below
+ICRA-041. Builder result is
+`P4_G0B_CLEAN_REQUALIFICATION_READY_FOR_REVIEW`, not G0B PASS. No GPU,
+ROS/live map, launch, main flow, runner, analyzer, capture, smoke, benchmark,
+campaign, calibration, G0C/G0D, risk application, P5, tuning or cleanup ran.

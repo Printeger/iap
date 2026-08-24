@@ -1,0 +1,16 @@
+{
+  "schema_version": "icra041_retained_manifest_v1",
+  "task": "ICRA-041",
+  "requirement": "IAP-RQ-423",
+  "retained_directory_count": 14,
+  "entry_count": 3123,
+  "line_count_including_header": 3124,
+  "manifest_size_bytes": 528446,
+  "record_fields": ["relative_path", "type", "size", "sha256_or_symlink_target"],
+  "before_sha256": "d18c1c89ef585ef42a31eb9b1f944c8eecbe7d6f1da98ecf567e3816357e3162",
+  "after_sha256": "d18c1c89ef585ef42a31eb9b1f944c8eecbe7d6f1da98ecf567e3816357e3162",
+  "byte_for_byte_equal": true,
+  "comparison_exit": 0,
+  "full_manifests_staged": false,
+  "claim_boundary": "Proves no ICRA-041 write to retained trees; does not repair ICRA-040 history."
+}
