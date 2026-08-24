@@ -1,5 +1,57 @@
 # ICRA Supervisor Log
 
+## 2026-08-24 — ICRA-050 review BLOCKED and ICRA-051 CUDA live reissue
+
+### Review identity and synchronization
+
+- Fixed review range: `7cecd16f710ec5cad8378117ceb7cf8a40dc6e72...bee21572df56d25c9ba9c2b3b76e7eec23fbb551`.
+- Reviewed blocked evidence/docs `2b9a368` and final DEV_LOG-only handoff `bee2157`; both carry
+  `IAP-RQ-423`. All nine changed paths match the ICRA-050 allowlist and DEEPSEEK ownership; no product,
+  configuration, protocol, registry, Supervisor-owned or external-repository file changed.
+- After fetch, HEAD and `origin/dev/icra` match at divergence `0 0`. The protected PDF is the sole
+  untracked file and remains unstaged with SHA-256
+  `1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+
+### Standards axis
+
+- Verdict: `PASS`; zero blocking and zero nonblocking findings; worst none.
+- Commit messages, ownership/allowlist, CHANGES/TRACEABILITY/DEV_LOG synchronization, exact commands and
+  exits, protected hashes and branch state conform. Independent aggregate recomputation matches retained
+  ICRA-046/047/048/049 and ICRA-050 evidence, including the read-only external `gnss_comm` source.
+- The ICRA-050 build/install/log/dependency products remain retained, no task process remains, and no
+  runs/analysis/draft or cleanup exists. The CUDA-off closure is a Spec failure, not a Standards smell.
+
+### Spec axis
+
+- Verdict: `BLOCKED / REQUEST_CHANGES`; one High blocking finding, zero nonblocking; worst High.
+- High incomplete declared closure: ICRA-050 required the complete six-library IAP runtime closure, but
+  its build command explicitly passed `-DBUILD_WITH_CUDA=OFF`. Retained CMake cache confirms OFF and the
+  install contains CPU/CT odometry libraries but omits mandatory
+  `lib/libodometry_estimation_gpu.so`. The sole standalone dependency preflight therefore exited 2 with
+  `DEPENDENCY_RUNTIME_LIBRARY_MISSING:iap:lib/libodometry_estimation_gpu.so`.
+- This blocker was self-induced by the build command. CMake defaults CUDA ON and the retained cache sees
+  the CUDA toolkit; no GPU preflight occurred, so this is not evidence of an unavailable GPU or failed
+  CUDA Driver API.
+- Post-failure behavior is correct and fail-closed: state SHA
+  `701c37b87cb04fee6ec61692764ae4ff8be06442385afcc2f40645536c59a8bd` records zero attempted/completed
+  identities, zero GPU/launch invocations and no launch start. Full runner, ROS, analyzer and threshold
+  action counts are all zero.
+
+### Gate verdict, artifact lifecycle and required next action
+
+- Verdict: `ICRA050_REVIEW_BLOCKED_SELF_INDUCED_CUDA_OFF_BUILD`. P4-G0C remains unqualified; no live
+  calibration result, threshold draft/freeze/application, G0D or P5 qualification is claimed.
+- No ICRA-050 cleanup is permitted because Review is blocked. Its complete ~1.7-GiB build/install/log/
+  dependency evidence remains retained. Historical ICRA-046 artifacts also remain retained and untouched.
+- The r2 identities were never attempted, so they remain available without a replacement-protocol or
+  registry change. The consumed standalone dependency root makes in-task ICRA-050 repair/retry forbidden.
+- Unique next task: `ICRA-051 / P4_G0C_REPLACEMENT_LIVE_CALIBRATION_CUDA_REISSUE`, defined in
+  `NEXT_TASK.md`; active role is `DEEPSEEK`, state `TASK_READY`.
+- ICRA-051 must fresh-build all 17 packages with explicit `BUILD_WITH_CUDA=ON`, prove the cache, mandatory
+  GPU library and all six runtime libraries before consuming its standalone dependency invocation, then
+  follow the unchanged dependency -> GPU -> 15 live runs -> one analyzer sequence. Any failure stops
+  without retry, tuning or cleanup.
+
 ## 2026-08-24 — ICRA-049 review PASS and ICRA-050 replacement live authorization
 
 ### Review identity and synchronization
