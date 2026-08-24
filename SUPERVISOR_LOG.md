@@ -1,5 +1,61 @@
 # ICRA Supervisor Log
 
+## 2026-08-24 — ICRA-048 review REQUEST_CHANGES and ICRA-049 evidence-binding repair
+
+### Review identity and synchronization
+
+- Fixed review range: `8657412bc5fcbc6b727ca186b7d642ad3b0d5b49...3361c278ad7f9c7faeb7a5c64e4b1d45c9eaee5a`.
+- Reviewed implementation/evidence `7cc9504` and final DEV_LOG-only handoff `3361c27`; both carry
+  `IAP-RQ-423`. All 18 changed paths match the ICRA-048 allowlist and DEEPSEEK ownership.
+- After fetch, HEAD and `origin/dev/icra` match at divergence `0 0`. The sole untracked protected PDF
+  remains unstaged with SHA-256
+  `1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+
+### Standards axis
+
+- Verdict: `PASS`; zero blocking findings and one Low judgment smell; worst Low.
+- Low Repeated Switches/Duplicated Code: runner and analyzer duplicate the exact registered-v1-path to
+  trusted-schema selection while version dispatch remains distributed. This is nonblocking and does not
+  authorize a broader refactor.
+- Allowlist, ownership, commit messages, CHANGES/TRACEABILITY/DEV_LOG synchronization, diff check, branch
+  sync, protected artifacts and no-live boundary conform. ICRA-048 created no build/install tree.
+
+### Spec axis
+
+- Verdict: `REQUEST_CHANGES`; one High blocking finding, zero nonblocking; worst High.
+- High production top-level effective-value bypass: the shared validator verifies only the nested
+  `p4.g0c.effective_values` declaration in `test_planner_manifest.json`. It never compares the production
+  manifest's top-level effective runtime fields produced by `_effective_metrics_only()` and the other
+  resolved launch paths.
+- Independent reproduction changed only the first run's top-level `p1.metrics_only` to true, retained the
+  nested binding/protocol value false and refreshed legitimate inventory/state hashes. Analyzer returned
+  `DRAFT_ELIGIBLE`, reported zero failures and emitted a threshold draft. This is the same evidence split
+  that concealed the ICRA-047 live mismatch, so the explicit ICRA-048 fail-closed requirement is partial.
+- Current correct behavior is otherwise accepted: the real v2 launch test gives planner node, top-level
+  manifest, run manifest and protocol false P1/P2 values; full immutable anchors and exact science reject
+  coordinated/isolated/type/schema drift; secondary v1/v2 manifests reject; the minimal hash cascade,
+  lineage/v1/ICRA-046 preservation and forbidden boundaries pass.
+
+### Verification, Gate verdict and artifact lifecycle
+
+- Supervisor independently reran focused G0C discovery 74/74 and full Python discovery 429/429 with
+  repository-local TMPDIR; both pass. The full suite emits one pre-existing unrelated ResourceWarning and
+  expected diagnostic stdout. Green suites do not cover the production top-level-only drift above.
+- Verdict: `ICRA048_REVIEW_REQUEST_CHANGES_TEST_PLANNER_TOP_LEVEL_BINDING`. This is not protocol PASS,
+  G0C PASS, calibration authorization or threshold authorization. No GPU/ROS/live rerun is permitted.
+- ICRA-048 created no build/install products. All twelve ICRA-046 build/install directories and its failed
+  raw evidence remain retained and immutable. Review is not PASS, so no cleanup occurs.
+
+### Required next action
+
+- Unique next task: `ICRA-049 / P4_G0C_REPLACEMENT_EVIDENCE_BINDING_REPAIR`, defined in `NEXT_TASK.md`;
+  active role is `DEEPSEEK`, state `TASK_READY`.
+- Require exact presence/value/type agreement for all 28 protocol effective keys materialized at the
+  production manifest top level; parameterize complete-key missing/change/type adversaries with refreshed
+  provenance so runner cannot COMPLETE and analyzer cannot draft on semantic disagreement.
+- If ICRA-049 passes independent Review, the next task may freshly build the complete declared dependency
+  closure and execute dependency-only plus live gates before the 15 immutable r2 runs.
+
 ## 2026-08-24 — ICRA-047 review REQUEST_CHANGES and ICRA-048 v2-contract repair
 
 ### Review identity and synchronization
