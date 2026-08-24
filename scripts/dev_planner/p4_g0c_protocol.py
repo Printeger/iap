@@ -110,6 +110,42 @@ FROZEN_THRESHOLD_FORMULAS = {
         "min(0.40,Q95(total_search_s)+max(0.01,0.20*Q95(total_search_s)))"
     ),
 }
+TEST_PLANNER_TOP_LEVEL_EFFECTIVE_MAP = {
+    "manager/p1_collision_fanout_clearance_m": (
+        "manager/p1_collision_fanout_clearance_m"
+    ),
+    "manager/p1_collision_fanout_mirror_y": (
+        "manager/p1_collision_fanout_mirror_y"
+    ),
+    "manager/p1_collision_fanout_preserve_homotopies": (
+        "manager/p1_collision_fanout_preserve_homotopies"
+    ),
+    "manager/use_distinctive_trajs": "manager/use_distinctive_trajs",
+    "p0.enable_risk_grid": "p0.enable_risk_grid",
+    "p1.debug_csv_enable": "p1.debug_csv_enable",
+    "p1.metrics_only": "p1.metrics_only",
+    "p1.use_integrity_cost": "p1.use_integrity_cost",
+    "p2.debug_csv_enable": "p2.debug_csv_enable",
+    "p2.enable_candidate_ranking": "p2.enable_candidate_ranking",
+    "p2.metrics_only": "p2.metrics_only",
+    "p3.debug_csv_enable": "p3.debug_csv_enable",
+    "p3.enable_global_reference_bias": "p3.enable_global_reference_bias",
+    "p3.enable_local_reference_bias": "p3.enable_local_reference_bias",
+    "p4.debug_csv_enable": "p4.debug_csv_enable",
+    "p4.enable_risk_aware_astar": "p4.enable_risk_aware_astar",
+    "p4.metrics_only": "p4.metrics_only",
+    "planner_enable_p1": "planner_enable_p1",
+    "planner_enable_p2": "planner_enable_p2",
+    "planner_enable_p3_global": "planner_enable_p3_global",
+    "planner_enable_p3_local": "planner_enable_p3_local",
+    "planner_enable_p4": "planner_enable_p4",
+    "planner_enable_p5_final": "planner_enable_p5_final",
+    "planner_enable_p5_runtime": "planner_enable_p5_runtime",
+    "planner_safety_profile": "planner_safety_profile",
+    "record_bag": "record_bag",
+    "run_validator": "run_validator",
+    "start_rviz": "start_rviz",
+}
 
 
 class ProtocolError(RuntimeError):
@@ -211,6 +247,20 @@ def validate_test_planner_effective_contract(
         if not exact_json_equal(binding.get(key), value):
             raise ProtocolError(
                 f"test-planner G0C binding mismatch: {key}"
+            )
+    protocol_effective = bundle.protocol["effective_values"]
+    for manifest_key, protocol_key in (
+        TEST_PLANNER_TOP_LEVEL_EFFECTIVE_MAP.items()
+    ):
+        if manifest_key not in launch_manifest:
+            raise ProtocolError(
+                f"test-planner top-level effective missing: {manifest_key}"
+            )
+        if not exact_json_equal(
+            launch_manifest[manifest_key], protocol_effective[protocol_key]
+        ):
+            raise ProtocolError(
+                f"test-planner top-level effective mismatch: {manifest_key}"
             )
 
 

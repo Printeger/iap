@@ -1694,3 +1694,45 @@ no GPU preflight, ROS/launch, runner/analyzer CLI, calibration, CTest/retained
 binary, smoke, benchmark, bag/RViz, threshold draft/freeze/application, G0C
 verdict, G0D, P5 or cleanup. Result is
 `P4_G0C_V2_CONTRACT_REPAIR_READY_FOR_REVIEW`, never G0C PASS.
+
+## 2026-08-24 (ICRA-049 G0C top-level evidence binding)
+
+- IAP-RQ-423: added the exact 28-entry mapping from protocol effective values
+  to the production `test_planner_manifest.json` top-level surface. It covers
+  the manager fanout/distinctive fields, risk-grid switch, P1/P2/P3/P4 runtime
+  and debug switches, all seven `planner_enable_*` flags, planner profile and
+  record/RViz/validator flags.
+- The shared v2 validator now requires every mapped top-level key and compares
+  canonical JSON bytes, so `false` differs from `0` and `0.0` differs from
+  `0`. The existing nested `p4.g0c` protocol/hash/scientific binding remains
+  fully validated. No launch/config/protocol/registry/dependency/lineage/
+  fixture or scientific value changed.
+- Synthetic runner and analyzer fixtures now match the production manifest
+  shape. For every one of the 28 keys, parameterized remove, changed-value and
+  wrong-type adversaries keep the nested binding unchanged. Runner rejects all
+  84 cases before COMPLETE/final inventory; analyzer rejects all 84 after
+  legitimate inventory/state hash refresh and creates no threshold draft.
+  Normal v2 evidence remains synthetic COMPLETE / `DRAFT_ELIGIBLE`.
+
+Exact reproduction from the repository root:
+
+```bash
+mkdir -p results/icra27/icra049/tmp results/icra27/icra049/scratch/pycache
+TMPDIR="$PWD/results/icra27/icra049/tmp" PYTHONDONTWRITEBYTECODE=1 python3 test/test_p4_g0c_protocol.py
+TMPDIR="$PWD/results/icra27/icra049/tmp" PYTHONDONTWRITEBYTECODE=1 python3 test/test_p4_g0c_runner.py
+TMPDIR="$PWD/results/icra27/icra049/tmp" PYTHONDONTWRITEBYTECODE=1 python3 test/test_p4_g0c_analyzer.py
+TMPDIR="$PWD/results/icra27/icra049/tmp" PYTHONDONTWRITEBYTECODE=1 python3 test/test_p4_g0c_launch_contract.py
+TMPDIR="$PWD/results/icra27/icra049/tmp" PYTHONDONTWRITEBYTECODE=1 python3 test/test_test_planner_launch.py
+TMPDIR="$PWD/results/icra27/icra049/tmp" PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s test -p 'test_p4_g0c*.py'
+PYTHONPYCACHEPREFIX="$PWD/results/icra27/icra049/scratch/pycache" python3 -m py_compile scripts/dev_planner/p4_g0c_protocol.py test/test_p4_g0c_protocol.py test/test_p4_g0c_runner.py test/test_p4_g0c_analyzer.py
+python3 -m flake8 --select=E9,F63,F7,F82 scripts/dev_planner/p4_g0c_protocol.py test/test_p4_g0c_protocol.py test/test_p4_g0c_runner.py test/test_p4_g0c_analyzer.py
+TMPDIR="$PWD/results/icra27/icra049/tmp" PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s test -p 'test_*.py'
+git diff --check
+```
+
+Final direct suites pass 14/14, 17/17, 29/29, 9/9 and launch golden 16/16;
+focused discovery passes 77/77 and the one full discovery passes 432/432.
+ICRA-049 ran no build, GPU preflight, ROS/launch, runner/analyzer CLI,
+calibration, CTest/retained binary, bag/RViz, threshold action, G0C verdict,
+G0D, P5 or cleanup. Result is
+`P4_G0C_TOP_LEVEL_EVIDENCE_BINDING_READY_FOR_REVIEW`, never G0C PASS.

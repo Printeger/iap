@@ -13,6 +13,38 @@ assert SPEC.loader is not None
 SPEC.loader.exec_module(MODULE)
 
 
+EXPECTED_TOP_LEVEL_EFFECTIVE_KEYS = {
+    "manager/p1_collision_fanout_clearance_m",
+    "manager/p1_collision_fanout_mirror_y",
+    "manager/p1_collision_fanout_preserve_homotopies",
+    "manager/use_distinctive_trajs",
+    "p0.enable_risk_grid",
+    "p1.debug_csv_enable",
+    "p1.metrics_only",
+    "p1.use_integrity_cost",
+    "p2.debug_csv_enable",
+    "p2.enable_candidate_ranking",
+    "p2.metrics_only",
+    "p3.debug_csv_enable",
+    "p3.enable_global_reference_bias",
+    "p3.enable_local_reference_bias",
+    "p4.debug_csv_enable",
+    "p4.enable_risk_aware_astar",
+    "p4.metrics_only",
+    "planner_enable_p1",
+    "planner_enable_p2",
+    "planner_enable_p3_global",
+    "planner_enable_p3_local",
+    "planner_enable_p4",
+    "planner_enable_p5_final",
+    "planner_enable_p5_runtime",
+    "planner_safety_profile",
+    "record_bag",
+    "run_validator",
+    "start_rviz",
+}
+
+
 class P4G0CProtocolTest(unittest.TestCase):
     @staticmethod
     def _copy_v2_bundle_root(root):
@@ -74,6 +106,20 @@ class P4G0CProtocolTest(unittest.TestCase):
             MODULE.ProtocolError, "exact immutable matrix"
         ):
             MODULE.validate_protocol(invalid)
+
+    def test_top_level_production_effective_mapping_is_exact_and_complete(self):
+        mapping = MODULE.TEST_PLANNER_TOP_LEVEL_EFFECTIVE_MAP
+        self.assertEqual(len(mapping), 28)
+        self.assertEqual(set(mapping), EXPECTED_TOP_LEVEL_EFFECTIVE_KEYS)
+        self.assertEqual(set(mapping.values()), EXPECTED_TOP_LEVEL_EFFECTIVE_KEYS)
+        self.assertTrue(all(key == value for key, value in mapping.items()))
+        protocol = MODULE.load_canonical_json(
+            REPO / "config/icra27/p4_g0c_protocol_v2.json"
+        )
+        self.assertTrue(
+            EXPECTED_TOP_LEVEL_EFFECTIVE_KEYS
+            < set(protocol["effective_values"])
+        )
 
     def test_v2_lineage_and_proposed_registry_preserve_icra046_truth(self):
         bundle = MODULE.load_protocol_bundle(

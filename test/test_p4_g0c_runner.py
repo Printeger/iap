@@ -16,6 +16,61 @@ assert SPEC.loader is not None
 SPEC.loader.exec_module(MODULE)
 
 
+TOP_LEVEL_EFFECTIVE_KEYS = (
+    "manager/p1_collision_fanout_clearance_m",
+    "manager/p1_collision_fanout_mirror_y",
+    "manager/p1_collision_fanout_preserve_homotopies",
+    "manager/use_distinctive_trajs",
+    "p0.enable_risk_grid",
+    "p1.debug_csv_enable",
+    "p1.metrics_only",
+    "p1.use_integrity_cost",
+    "p2.debug_csv_enable",
+    "p2.enable_candidate_ranking",
+    "p2.metrics_only",
+    "p3.debug_csv_enable",
+    "p3.enable_global_reference_bias",
+    "p3.enable_local_reference_bias",
+    "p4.debug_csv_enable",
+    "p4.enable_risk_aware_astar",
+    "p4.metrics_only",
+    "planner_enable_p1",
+    "planner_enable_p2",
+    "planner_enable_p3_global",
+    "planner_enable_p3_local",
+    "planner_enable_p4",
+    "planner_enable_p5_final",
+    "planner_enable_p5_runtime",
+    "planner_safety_profile",
+    "record_bag",
+    "run_validator",
+    "start_rviz",
+)
+
+
+def top_level_effective_values(protocol):
+    return {
+        key: protocol["effective_values"][key]
+        for key in TOP_LEVEL_EFFECTIVE_KEYS
+    }
+
+
+def changed_value(value):
+    if isinstance(value, bool):
+        return not value
+    if isinstance(value, (int, float)):
+        return value + 1.0
+    return f"{value}-drift"
+
+
+def wrong_type_value(value):
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, float):
+        return int(value)
+    return [value]
+
+
 class P4G0CRunnerTest(unittest.TestCase):
     def setUp(self):
         self.protocol = REPO / "config/icra27/p4_g0c_protocol_v2.json"
@@ -124,6 +179,7 @@ class P4G0CRunnerTest(unittest.TestCase):
         launch_manifest_path.write_text(json.dumps({
             "schema_version": "test_planner_manifest_v1",
             "run_id": record["run_id"],
+            **top_level_effective_values(self.bundle.protocol),
             "p4.g0c": {
                 key: manifest[key] for key in (
                     "schema_version", "protocol_sha256", "registry_sha256",
@@ -633,6 +689,65 @@ class P4G0CRunnerTest(unittest.TestCase):
                 )
             persisted = json.loads(manifest_path.read_text())
             self.assertNotEqual(persisted.get("runner_state"), "COMPLETE")
+
+    def test_all_top_level_effective_disagreements_fail_before_complete(self):
+        operations = {
+            "remove": lambda manifest, key, _value: manifest.pop(key),
+            "change": lambda manifest, key, value: manifest.__setitem__(
+                key, changed_value(value)
+            ),
+            "wrong_type": lambda manifest, key, value: manifest.__setitem__(
+                key, wrong_type_value(value)
+            ),
+        }
+        for key in TOP_LEVEL_EFFECTIVE_KEYS:
+            expected = self.bundle.protocol["effective_values"][key]
+            for operation, mutate in operations.items():
+                with self.subTest(key=key, operation=operation):
+                    with tempfile.TemporaryDirectory() as tmp:
+                        record = MODULE.expand_run_plan(
+                            self.bundle.protocol, Path(tmp)
+                        )[0]
+                        run_dir = Path(record["run_dir"])
+                        run_dir.mkdir()
+                        self._write_production_outputs(record, 0)
+                        launch_path = (
+                            run_dir
+                            / "exports/synthetic_run_token"
+                            / "test_planner_manifest.json"
+                        )
+                        launch_manifest = json.loads(
+                            launch_path.read_text()
+                        )
+                        nested_before = json.loads(json.dumps(
+                            launch_manifest["p4.g0c"]
+                        ))
+                        mutate(launch_manifest, key, expected)
+                        launch_path.write_text(
+                            json.dumps(launch_manifest) + "\n"
+                        )
+                        with self.assertRaisesRegex(
+                            MODULE.RunnerError,
+                            "launch manifest effective contract mismatch",
+                        ):
+                            MODULE._validate_and_finalize_run(
+                                self.bundle,
+                                record,
+                                {"required_processes_ok": True},
+                            )
+                        self.assertEqual(
+                            launch_manifest["p4.g0c"], nested_before
+                        )
+                        self.assertFalse(
+                            (run_dir / MODULE.RUN_ARTIFACT_INVENTORY_FILENAME)
+                            .exists()
+                        )
+                        persisted = json.loads(
+                            (run_dir / "p4_g0c_run_manifest.json").read_text()
+                        )
+                        self.assertNotEqual(
+                            persisted.get("runner_state"), "COMPLETE"
+                        )
 
     def test_launch_command_binds_identity_without_redeclaring_frozen_switches(self):
         record = MODULE.expand_run_plan(self.bundle.protocol, Path("/runs"))[0]

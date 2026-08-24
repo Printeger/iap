@@ -34,6 +34,60 @@ CSV_FIELDS = [
     "total_search_latency_ms",
 ]
 
+TOP_LEVEL_EFFECTIVE_KEYS = (
+    "manager/p1_collision_fanout_clearance_m",
+    "manager/p1_collision_fanout_mirror_y",
+    "manager/p1_collision_fanout_preserve_homotopies",
+    "manager/use_distinctive_trajs",
+    "p0.enable_risk_grid",
+    "p1.debug_csv_enable",
+    "p1.metrics_only",
+    "p1.use_integrity_cost",
+    "p2.debug_csv_enable",
+    "p2.enable_candidate_ranking",
+    "p2.metrics_only",
+    "p3.debug_csv_enable",
+    "p3.enable_global_reference_bias",
+    "p3.enable_local_reference_bias",
+    "p4.debug_csv_enable",
+    "p4.enable_risk_aware_astar",
+    "p4.metrics_only",
+    "planner_enable_p1",
+    "planner_enable_p2",
+    "planner_enable_p3_global",
+    "planner_enable_p3_local",
+    "planner_enable_p4",
+    "planner_enable_p5_final",
+    "planner_enable_p5_runtime",
+    "planner_safety_profile",
+    "record_bag",
+    "run_validator",
+    "start_rviz",
+)
+
+
+def top_level_effective_values(protocol):
+    return {
+        key: protocol["effective_values"][key]
+        for key in TOP_LEVEL_EFFECTIVE_KEYS
+    }
+
+
+def changed_value(value):
+    if isinstance(value, bool):
+        return not value
+    if isinstance(value, (int, float)):
+        return value + 1.0
+    return f"{value}-drift"
+
+
+def wrong_type_value(value):
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, float):
+        return int(value)
+    return [value]
+
 
 class P4G0CAnalyzerTest(unittest.TestCase):
     def setUp(self):
@@ -217,6 +271,7 @@ class P4G0CAnalyzerTest(unittest.TestCase):
             launch_manifest.write_text(json.dumps({
                 "schema_version": "test_planner_manifest_v1",
                 "run_id": record["run_id"],
+                **top_level_effective_values(self.bundle.protocol),
                 "p4.g0c": {
                     key: manifest[key] for key in (
                         "schema_version", "protocol_sha256",
@@ -435,6 +490,55 @@ class P4G0CAnalyzerTest(unittest.TestCase):
             "effective_config_sha256" in failure
             for failure in result["failures"]
         ))
+
+    def test_all_top_level_effective_disagreements_reject_before_draft(self):
+        self.bundle = MODULE.load_bundle(
+            REPO / "config/icra27/p4_g0c_protocol_v2.json",
+            REPO / "config/icra27/p4_threshold_registry_v2.json",
+            REPO / "config/icra27/p4_g0c_live_fixture_v1.json",
+        )
+        operations = {
+            "remove": lambda manifest, key, _value: manifest.pop(key),
+            "change": lambda manifest, key, value: manifest.__setitem__(
+                key, changed_value(value)
+            ),
+            "wrong_type": lambda manifest, key, value: manifest.__setitem__(
+                key, wrong_type_value(value)
+            ),
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._make_bundle(root)
+            run_id = self.bundle.protocol["registered_run_ids"][0]
+            launch_path = (
+                root / run_id
+                / "exports/synthetic_run_token/test_planner_manifest.json"
+            )
+            original = json.loads(launch_path.read_text())
+            nested_before = json.loads(json.dumps(original["p4.g0c"]))
+            for key in TOP_LEVEL_EFFECTIVE_KEYS:
+                expected = self.bundle.protocol["effective_values"][key]
+                for operation, mutate in operations.items():
+                    with self.subTest(key=key, operation=operation):
+                        launch_manifest = json.loads(json.dumps(original))
+                        mutate(launch_manifest, key, expected)
+                        launch_path.write_text(
+                            json.dumps(launch_manifest) + "\n"
+                        )
+                        self._refresh_inventory_binding(root)
+                        result = MODULE.analyze(self.bundle, root)
+                        self.assertEqual(
+                            launch_manifest["p4.g0c"], nested_before
+                        )
+                        self.assertEqual(
+                            result["analysis_status"], "REJECTED"
+                        )
+                        self.assertNotIn("threshold_draft", result)
+                        self.assertTrue(any(
+                            "config_mismatch" in failure
+                            and "test-planner" in failure
+                            for failure in result["failures"]
+                        ))
 
     def test_exact_100_boundary_is_eligible_and_draft_uses_frozen_formulas(self):
         with tempfile.TemporaryDirectory() as tmp:

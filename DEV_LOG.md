@@ -6586,3 +6586,64 @@ binary, smoke, benchmark, bag/RViz, threshold draft/freeze/application, G0C
 verdict, G0D, P5 or cleanup ran. Builder result is
 `P4_G0C_V2_CONTRACT_REPAIR_READY_FOR_REVIEW`, never G0C PASS. Control returns
 only to SUPERVISOR review; no replacement live matrix is authorized.
+
+## 2026-08-24T13:28:22Z — ICRA-049 TOP-LEVEL EVIDENCE BINDING
+
+IAP-RQ-423. Synchronized `dev/icra` at task HEAD
+`d828802c89d6dae1dfc969d7a1f625b9ef26b0b0`: initial status contained only the
+protected untracked PDF, fetch passed and divergence was `0 0`, so no pull ran.
+`AGENT_STATE.md` authorizes only DEEPSEEK, `TASK_READY`, ICRA-049 and
+`P4_G0C_REPLACEMENT_EVIDENCE_BINDING_REPAIR`.
+
+The accepted ICRA-048 anchors remain unchanged. Initial protected hashes are
+PDF `1f07da56…844f6`, protocol v2 `8b0b2c3e…59de79`, registry v2
+`99ccf38c…beb94f`, dependency `d3478964…d7652`, lineage
+`9268ec4d…c6d5` and launch `162f1938…fe03`. ICRA-046 remains 3,815 files /
+759 directories / 4,884,473,805 bytes with aggregate `823d41bf…96b1`;
+ICRA-047 and ICRA-048 evidence aggregates are respectively `b411cfd9…f81`
+and `561edd73…24b1`.
+
+Regression-first fixtures added all 28 protocol-effective fields materialized
+by the production test-planner manifest at top level while retaining the full
+nested `p4.g0c` binding. Before implementation, protocol 14 tests had one
+expected mapping error; runner 17 tests had 84 expected failures and analyzer
+29 tests had 84 expected failures. Every remove/change/wrong-type mutation of
+the 28-key surface bypassed runner finalization, and every analyzer adversary
+with legitimately refreshed inventory/state hashes remained `DRAFT_ELIGIBLE`.
+This includes top-level-only P1/P2 metrics drift with nested false values.
+
+The shared protocol module now owns one explicit 28-entry top-level-to-protocol
+mapping. For v2, `validate_test_planner_effective_contract()` requires every
+mapped top-level key and compares it with canonical exact JSON type equality,
+then continues validating the complete nested binding. Runner therefore
+rejects before COMPLETE/final inventory; analyzer rejects before threshold
+draft. The unchanged production-shaped fixtures still reach synthetic runner
+COMPLETE and analyzer `DRAFT_ELIGIBLE`.
+
+With `TMPDIR=$PWD/results/icra27/icra049/tmp`, direct protocol, runner and
+analyzer suites pass 14/14, 17/17 and 29/29; launch contract and launch golden
+pass 9/9 and 16/16; focused G0C discovery passes 77/77; the one full repository
+Python discovery passes 432/432. Python syntax, fatal-only flake8, canonical
+JSON and `git diff --check` pass. The full suite retains one pre-existing
+unrelated `ResourceWarning` and expected diagnostic stdout.
+
+No launch/config/protocol/registry/dependency/lineage/fixture or scientific
+value changed. No build, GPU preflight, ROS/launch, runner/analyzer CLI,
+calibration, CTest/retained binary, bag/RViz, threshold action, G0C verdict,
+G0D, P5 or cleanup ran. Current result is only
+`P4_G0C_TOP_LEVEL_EVIDENCE_BINDING_READY_FOR_REVIEW`, never G0C PASS, pending
+independent review and final protection audits.
+
+## 2026-08-24T13:34:07Z — ICRA-049 TWO-AXIS REVIEW
+
+IAP-RQ-423. Independent review against task HEAD
+`d828802c89d6dae1dfc969d7a1f625b9ef26b0b0` reports Standards 0 blocking /
+1 nonblocking and Spec 0 blocking / 0 nonblocking. The sole judgement smell is
+the intentional duplicated 28-key oracle/mutation helpers in runner and
+analyzer tests; keeping the test surfaces independent makes production-map
+omissions observable, and a new shared helper is outside the allowed list.
+
+No remediation is required. The aggregate is retained at
+`results/icra27/icra049/review/two_axis_review.md`. Current result remains
+`P4_G0C_TOP_LEVEL_EVIDENCE_BINDING_READY_FOR_REVIEW`, never G0C PASS, pending
+the final protection/synchronization audit and commit/push handoff.

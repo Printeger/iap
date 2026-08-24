@@ -1,0 +1,100 @@
+{
+  "schema_version": "icra049_synthetic_test_results_v1",
+  "red": [
+    {
+      "command": "TMPDIR=$PWD/results/icra27/icra049/tmp PYTHONDONTWRITEBYTECODE=1 python3 test/test_p4_g0c_protocol.py",
+      "tests": 14,
+      "errors": 1,
+      "exit_code": 1,
+      "result": "FAILED_EXPECTED",
+      "reason": "the exact production top-level effective mapping did not exist"
+    },
+    {
+      "command": "TMPDIR=$PWD/results/icra27/icra049/tmp PYTHONDONTWRITEBYTECODE=1 python3 test/test_p4_g0c_runner.py",
+      "tests": 17,
+      "failures": 84,
+      "exit_code": 1,
+      "result": "FAILED_EXPECTED",
+      "reason": "all 28 x remove/change/wrong-type top-level adversaries bypassed finalization"
+    },
+    {
+      "command": "TMPDIR=$PWD/results/icra27/icra049/tmp PYTHONDONTWRITEBYTECODE=1 python3 test/test_p4_g0c_analyzer.py",
+      "tests": 29,
+      "failures": 84,
+      "exit_code": 1,
+      "result": "FAILED_EXPECTED",
+      "reason": "all 28 x remove/change/wrong-type top-level adversaries remained DRAFT_ELIGIBLE after provenance refresh"
+    }
+  ],
+  "green": [
+    {
+      "command": "TMPDIR=$PWD/results/icra27/icra049/tmp PYTHONDONTWRITEBYTECODE=1 python3 test/test_p4_g0c_protocol.py",
+      "tests": 14,
+      "failures": 0,
+      "exit_code": 0
+    },
+    {
+      "command": "TMPDIR=$PWD/results/icra27/icra049/tmp PYTHONDONTWRITEBYTECODE=1 python3 test/test_p4_g0c_runner.py",
+      "tests": 17,
+      "failures": 0,
+      "exit_code": 0
+    },
+    {
+      "command": "TMPDIR=$PWD/results/icra27/icra049/tmp PYTHONDONTWRITEBYTECODE=1 python3 test/test_p4_g0c_analyzer.py",
+      "tests": 29,
+      "failures": 0,
+      "exit_code": 0
+    },
+    {
+      "command": "TMPDIR=$PWD/results/icra27/icra049/tmp PYTHONDONTWRITEBYTECODE=1 python3 test/test_p4_g0c_launch_contract.py",
+      "tests": 9,
+      "failures": 0,
+      "exit_code": 0
+    },
+    {
+      "command": "TMPDIR=$PWD/results/icra27/icra049/tmp PYTHONDONTWRITEBYTECODE=1 python3 test/test_test_planner_launch.py",
+      "tests": 16,
+      "failures": 0,
+      "exit_code": 0
+    },
+    {
+      "command": "TMPDIR=$PWD/results/icra27/icra049/tmp PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s test -p 'test_p4_g0c*.py'",
+      "tests": 77,
+      "failures": 0,
+      "exit_code": 0
+    },
+    {
+      "command": "TMPDIR=$PWD/results/icra27/icra049/tmp PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s test -p 'test_*.py'",
+      "tests": 432,
+      "failures": 0,
+      "exit_code": 0,
+      "repository_local_tmpdir": true,
+      "full_discovery_invocation_count": 1,
+      "note": "one pre-existing unrelated ResourceWarning and expected diagnostic stdout were emitted"
+    }
+  ],
+  "parameterized_surface": {
+    "mapped_top_level_key_count": 28,
+    "operations_per_key": ["remove", "change", "wrong_type"],
+    "runner_adversary_count": 84,
+    "analyzer_adversary_count": 84,
+    "nested_binding_unchanged": true,
+    "analyzer_inventory_and_state_hashes_refreshed": true
+  },
+  "static_checks": {
+    "python_syntax": "PASS",
+    "fatal_only_flake8": "PASS",
+    "canonical_json": "PASS",
+    "git_diff_check": "PASS"
+  },
+  "forbidden_runtime_invocations": {
+    "build": 0,
+    "gpu_preflight": 0,
+    "ros_or_launch": 0,
+    "runner_cli": 0,
+    "analyzer_cli": 0,
+    "calibration": 0,
+    "ctest_or_retained_binary": 0,
+    "threshold_action": 0
+  }
+}
