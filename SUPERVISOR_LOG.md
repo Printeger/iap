@@ -1,5 +1,65 @@
 # ICRA Supervisor Log
 
+## 2026-08-24 — ICRA-038 review PASS, P4-G0A qualified and ICRA-039 G0B authorization
+
+### Review identity and synchronization
+
+- Fixed review range: `554b98111e41136efb44bdf05596e061f3d8c32d...8ae1b40d2f8b2763cec3c51ada15dcc9a2267baa`.
+- Reviewed implementation `5c8a7af`, two-axis evidence `90f5dc5` and final DEV_LOG-only handoff
+  `8ae1b40`; all carry applicable `IAP-RQ-423`.
+- After fetch, `HEAD` and `origin/dev/icra` matched at divergence `0 0`. All ten changed paths match the
+  ICRA-038 allowlist. Frozen fixture and protected PDF hashes remain exact at `49a676a5…c788` and
+  `1f07da56…44f6`; the PDF remains the sole untracked file.
+
+### Standards axis
+
+- Verdict: `PASS`; zero hard findings and zero new judgment-call smells; worst none.
+- Production changes are local to the rebound consumption boundary plus explicitly authorized minimal
+  test access. Scanner, fixture, planner-manager, CMake, Supervisor files, history and PDF are unchanged.
+  Requirement/docs synchronization, command ledger, compact evidence, final handoff and artifact
+  retention conform.
+- The two Low ICRA-037 observations remain recorded debt but are not new ICRA-038 findings: the task did
+  not expand the collision-pair representation or create a new test abstraction.
+
+### Spec axis
+
+- Verdict: `PASS`; zero missing/partial, scope-creep or implemented-wrong findings; worst none.
+- Adjacent/interpolation-only collision retains `CLOSED_SEGMENTS (2,3)`, preserves endpoints, sets the
+  existing error stop and returns before the deliberately absent A*/guide dependency. It can no longer
+  become `NO_COLLISION`.
+- A mixed result retains both `(2,5)` and `(6,7)` and fails the entire rebound attempt before the earlier
+  actionable subset reaches A*. Open/invalid, ordinary closed and all frozen collision behavior remain
+  unchanged.
+
+### Independent verification and Gate verdict
+
+- Supervisor reproduced collision 17/17, P1 39/39, path-searching P4 4/4, occupancy epoch 6/6 and the
+  affected plan-manager 9/9 targets with zero failures. Current source/executable/install hashes match
+  the ledger. Linkage resolves ICRA-038 bspline/plan-manager, ICRA-037 IAP/typesupport and intended
+  ICRA-026 plan-env/path-searching, with no stale/workspace-default or missing product library.
+- No GPU, ROS/live flow, launch, smoke, benchmark, G0B implementation or P5 work ran.
+- Verdict: `ICRA038_REVIEW_PASS_P4_G0A_QUALIFIED`. This closes the ICRA-037 High finding and qualifies
+  only deterministic collision Gate G0A; it does not qualify dual-guide G0B.
+
+### Artifact lifecycle
+
+- Through repair review, all six ICRA-037 trees and four ICRA-038 trees remained available, totaling
+  approximately 6.2 GiB, and none contains tracked files.
+- After this Review PASS and pushed Builder/Supervisor code and documentation, Supervisor permanently
+  deletes exactly ICRA-037 `build_iap`, `install`, `build_bspline`, `install_bspline`,
+  `build_plan_manage`, `install_plan_manage` and ICRA-038 `build_bspline`, `install_bspline`,
+  `build_plan_manage`, `install_plan_manage`. Compact evidence, source, tests, docs and PDF remain.
+
+### Required next action
+
+- Unique task: `ICRA-039 / P4_G0B`, defined in `NEXT_TASK.md`; active role is `DEEPSEEK`, state
+  `TASK_READY`.
+- Implement one `planCollisionGuide(request)` deep seam, deterministic spatial-risk fixture, same-event
+  original/risk guides, immutable request/occupancy identity, 200-point final-path profiles and
+  metrics-only original-guide injection shared by initial/rebound paths.
+- No calibration/G0C, threshold freeze, risk-guide application, G0D/P5, GPU/ROS/live flow, cleanup or
+  Gate promotion is authorized. ICRA-039 builds remain through Supervisor review.
+
 ## 2026-08-24 — ICRA-037 review REQUEST_CHANGES and ICRA-038 rebound repair authorization
 
 ### Review identity and synchronization
