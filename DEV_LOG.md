@@ -5226,3 +5226,23 @@ No GPU, ROS/live map, launch, runner, analyzer, capture, smoke, benchmark,
 qualification, calibration, threshold selection, G0C/G0D, risk application,
 P5, campaign, cleanup or protected-PDF handling occurred. The repaired commit
 will receive a fresh Standards/Spec review before handoff.
+
+## 2026-08-24T05:24:37Z — ICRA-039 TWO-AXIS REVIEW PASS
+
+IAP-RQ-423. Final parallel review of fixed point `b45ff3a` through repair
+commit `05a9a36` reports Standards 0 findings and Spec 0 findings. Standards
+confirms the shared collection/validation operation resolves initial/rebound
+duplication and the reconstructed `P4GuideRequest` resolves the injection
+identity clump, with no new documented-standard violation or judgement smell.
+Spec confirms all four initial gaps are closed: manager-owned nonzero attempt
+identity independent of P1, full request rehash/reconstruction and typed
+pre-injection invalidation, a production-A* central-obstacle positive fixture,
+and forced metrics-only for enabled G0B attempts while the general default
+remains false.
+
+Both reviews confirm allowlist compliance, exact fallback behavior, unchanged
+0.2-second timeout and 1.30 ratio cap, preserved pre-stops, compact evidence,
+test counts and synchronized documentation. Compact review evidence is
+`results/icra27/icra039/review/two_axis_review.md`. Builder state remains
+`P4_G0B_METRICS_ONLY_READY_FOR_REVIEW`; this review does not qualify G0B or
+authorize another gate.
