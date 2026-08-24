@@ -1,5 +1,64 @@
 # ICRA Supervisor Log
 
+## 2026-08-24 — ICRA-047 review REQUEST_CHANGES and ICRA-048 v2-contract repair
+
+### Review identity and synchronization
+
+- Fixed review range: `f7d60bd3d8a3dab048986ea821b6e8e8b3e50361...16d2b7fce501cfd04ed91db0f46093f65d41e81b`.
+- Reviewed implementation/evidence `7307dfb` and final DEV_LOG-only handoff `16d2b7f`; both carry
+  `IAP-RQ-423`. All 20 changed paths match the ICRA-047 allowlist and DEEPSEEK ownership.
+- After `git fetch origin`, HEAD and `origin/dev/icra` match at divergence `0 0`. The sole untracked file
+  remains the protected PDF, SHA-256
+  `1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+
+### Standards axis
+
+- Verdict: `PASS`; zero blocking findings and two Low judgment smells; worst Low.
+- Low Repeated Switches/Shotgun Surgery: v1/v2 policy is distributed across protocol, runner, analyzer
+  and launch. Low Duplicated Code: SHA-256 shape validation is repeated. Neither authorizes a refactor in
+  the narrow repair task.
+- Ownership, allowlist, commits, requirement/docs synchronization, protected files, ICRA-046/v1
+  immutability, branch sync and zero-process audit conform. Independent repository-local reruns pass the
+  focused G0C suite 62/62 and launch golden suite 16/16. The disclosed early unconstrained temporary-file
+  run was remediated with repository-local `TMPDIR` and is not a current content blocker.
+
+### Spec axis
+
+- Verdict: `REQUEST_CHANGES`; three findings, worst High.
+- High runtime-value mismatch: `_effective_metrics_only()` recognizes only the v1 constant. Pure-function
+  reproduction for v2 returns `true` for both disabled P1 and P2, while the frozen v2 protocol and run
+  manifest claim `false`. The future live planner/test-planner manifest would therefore diverge from its
+  scientific identity and could still reach draft analysis.
+- High missing immutable trust anchor: v2 launch registration equates registered hashes with current
+  hashes, its preset SHA fields are empty, and the shared validator does not freeze complete formulas/
+  floor semantics. A copied v2 protocol with an altered threshold formula plus a coherently updated
+  registry SHA was accepted as a v2 run manifest; the validator also accepted an altered floor value.
+- Medium ambiguous raw bundle: secondary-manifest detection rejects only the v1 schema. A JSON artifact
+  named `secondary.json` with schema `p4_g0c_run_manifest_v2` is accepted, whereas the same v1 artifact
+  rejects. This breaks the single-manifest raw-bundle invariant inherited by v2.
+
+### Accepted work, Gate verdict and artifact lifecycle
+
+- The replacement lineage, exact r2 namespace, complete package/executable/component/config pre-GPU gate,
+  same-validator standalone/full ordering, proposed/null/disabled registry, synthetic boundary and
+  ICRA-046 preservation are accepted foundations. Builder evidence reports final full Python discovery
+  417/417, syntax/JSON/diff checks pass and forbidden live invocation counts are zero.
+- Verdict: `ICRA047_REVIEW_REQUEST_CHANGES_V2_LIVE_CONTRACT`. This is not replacement-protocol PASS, G0C
+  PASS, calibration authorization or threshold authorization. No GPU/ROS/live rerun is permitted.
+- All twelve ICRA-046 build/install directories and its four-file failed raw tree remain retained and
+  immutable. Review is not PASS, so no build/install cleanup occurs; compact evidence and the protected
+  PDF remain untouched.
+
+### Required next action
+
+- Unique next task: `ICRA-048 / P4_G0C_REPLACEMENT_PROTOCOL_REPAIR`, defined in `NEXT_TASK.md`; active
+  role is `DEEPSEEK`, state `TASK_READY`.
+- Repair exact v2 runtime metrics-only values, introduce an acyclic immutable v2 trust anchor with full
+  scientific validation, and reject secondary v2 manifests. Refresh only the resulting hash cascade and
+  prove all three red-to-green synthetically.
+- If ICRA-048 passes independent Review, the following task may freshly build the entire declared closure,
+  pass dependency-only and repeated full dependency/GPU gates, then execute the 15 r2 live runs once.
+
 ## 2026-08-24 — ICRA-046 BLOCKED and ICRA-047 replacement-protocol authorization
 
 ### Review identity and synchronization
