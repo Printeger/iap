@@ -1,5 +1,70 @@
 # ICRA Supervisor Log
 
+## 2026-08-24 — ICRA-039 review REQUEST_CHANGES and ICRA-040 focused repair authorization
+
+### Review identity and synchronization
+
+- Fixed review range: `b45ff3ad633fc7ce3ab2418f774073a6eb3a2d16...b47b463733957223022b7d23d444e950dd1f2181`.
+- Reviewed implementation `4086ce5`, repair/evidence `05a9a36`, two-axis record `632cf77` and final
+  DEV_LOG-only handoff `b47b463`; all carry applicable `IAP-RQ-423`.
+- After fetch, `HEAD` and `origin/dev/icra` matched at divergence `0 0`. All 27 changed paths match the
+  ICRA-039 allowlist. The frozen collision fixture and protected PDF hashes remain exact at
+  `49a676a5…c788` and `1f07da56…44f6`; the PDF remains the sole untracked file.
+
+### Standards axis
+
+- Verdict: `PASS`; zero hard findings and two Low judgment-call smells; worst Low.
+- Low Data Clumps: snapshot, query base, occupancy epoch and attempt ID travel/set/clear together in the
+  optimizer and may later merit one named attempt context. Low Speculative Generality: the search
+  outcome `reason` is populated but production does not consume it. Neither is a G0B correctness defect
+  or authorized ICRA-040 refactor.
+- Ownership, allowlist, requirement/docs synchronization, commits, final handoff, no-live boundary and
+  artifact retention otherwise conform.
+
+### Spec axis
+
+- Verdict: `REQUEST_CHANGES`; two findings; worst High.
+- High invalidation precedence: `planCollisionGuide()` interprets original-search failure/timeout or
+  invalid/duplicate geometry before rechecking request identity and occupancy epoch. An epoch change
+  during a failed or malformed original search can therefore be misreported as planner/geometry failure
+  instead of authoritative `DECISION_INVALID_REPLAN_REQUIRED`. Existing coverage changes the epoch only
+  after a successful valid original path and misses this precedence.
+- Medium metrics-only boundary: `setP4RiskSnapshot()` forces `metrics_only=true` for every P4-enabled
+  attempt. This contradicts the required truthful default outside registered G0B/G0C context and makes
+  recorded effective configuration depend on a hidden rewrite. G0B must explicitly opt in; an
+  unregistered false value must remain false while application remains unauthorized until G0D.
+- All other required G0B mechanics conform: one shared decision seam, original-first dual search,
+  immutable snapshot/time identity, complete-path 200-sample profiles, deterministic positive fixture,
+  metrics-only original injection and shared initial/rebound consumption.
+
+### Independent verification and Gate verdict
+
+- Supervisor reproduced bspline 4/4, path-searching 1/1, occupancy 1/1 and plan-manager 9/9 selected CTest
+  targets with zero failures. Builder evidence additionally records decision 11/11, integration 4/4,
+  collision 17/17 and P1 39/39. Linkage resolves current ICRA-039 products plus declared immutable
+  transitive dependencies, with no workspace-default, deleted-task, build-tree, missing-library or
+  non-toolchain runpath match.
+- Green regressions do not close the two untested semantic boundaries. Verdict:
+  `ICRA039_REVIEW_REQUEST_CHANGES_IDENTITY_PRECEDENCE_AND_METRICS_BOUNDARY`; P4-G0A remains PASS, but
+  P4-G0B is not qualified.
+- No GPU, ROS/live flow, launch, smoke, benchmark, calibration, G0C/G0D or P5 work ran.
+
+### Artifact lifecycle
+
+- All ten ICRA-039 task-local build/install trees remain retained and untracked through repair review:
+  IAP, plan-env, path-searching, bspline and plan-manager build/install pairs, approximately 5.1 GiB.
+- Review is `REQUEST_CHANGES`, so none is eligible for deletion. ICRA-040 must also retain its fresh
+  task-local bspline/plan-manager build/install until a future Review PASS and pushed code/docs.
+
+### Required next action
+
+- Unique task: `ICRA-040 / P4_G0B`, defined in `NEXT_TASK.md`; active role is `DEEPSEEK`, state
+  `TASK_READY`.
+- Repair identity/epoch precedence immediately after original-search return, remove the hidden
+  metrics-only rewrite, make G0B opt in explicitly and prove the non-G0B authorization stop.
+- No design-debt refactor, calibration/G0C, thresholds, risk-guide application, G0D/P5, GPU/ROS/live
+  flow or cleanup is authorized.
+
 ## 2026-08-24 — ICRA-038 review PASS, P4-G0A qualified and ICRA-039 G0B authorization
 
 ### Review identity and synchronization
