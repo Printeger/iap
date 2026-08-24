@@ -31,12 +31,12 @@
   "task": "ICRA-052",
   "tests": {
     "focused": {
-      "count": 83,
+      "count": 84,
       "exit": 0,
       "tmpdir": "results/icra27/icra052/tmp"
     },
     "full_python_discovery": {
-      "count": 438,
+      "count": 439,
       "exit": 0,
       "tmpdir": "results/icra27/icra052/tmp"
     }

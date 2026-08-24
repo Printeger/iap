@@ -73,6 +73,26 @@ class P4G0CLaunchEnvironmentTest(unittest.TestCase):
             )
             self.assertEqual(len(inventory["run_outputs"]), 15)
 
+            for absent_key in MODULE.LAUNCH_ENVIRONMENT_KEYS:
+                with self.subTest(absent_key=absent_key):
+                    caller = {
+                        key: f"/caller/{key.lower()}"
+                        for key in MODULE.LAUNCH_ENVIRONMENT_KEYS
+                        if key != absent_key
+                    }
+                    child = MODULE.child_launch_environment(caller, inventory)
+                    self.assertEqual(
+                        child[absent_key],
+                        expected["child_environment"][absent_key],
+                    )
+                    self.assertEqual(
+                        {
+                            key: child[key]
+                            for key in MODULE.LAUNCH_ENVIRONMENT_KEYS
+                        },
+                        expected["child_environment"],
+                    )
+
     def test_malicious_and_unknown_paths_fail_before_gpu_launch_or_attempt(self):
         cases = (
             "missing_environment_key",

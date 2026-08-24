@@ -113,9 +113,12 @@ def load_bundle(
     return bundle
 
 
-def _dependency_failure(reason: str) -> dict[str, Any]:
+def _dependency_failure(
+    reason: str,
+    schema_version: str = "p4_g0c_dependency_preflight_result_v2",
+) -> dict[str, Any]:
     return {
-        "schema_version": "p4_g0c_dependency_preflight_result_v2",
+        "schema_version": schema_version,
         "dependency_ready": False,
         "failure_reason": reason,
         "package_count": 0,
@@ -396,10 +399,18 @@ def validate_runtime_dependencies(
         REPLACEMENT_PROTOCOL_SCHEMA, HARDENED_PROTOCOL_SCHEMA
     }:
         return _dependency_failure("DEPENDENCY_PROTOCOL_V2_REQUIRED")
+    hardened = protocol_schema == HARDENED_PROTOCOL_SCHEMA
+    result_schema = (
+        "p4_g0c_dependency_preflight_result_v3"
+        if hardened else "p4_g0c_dependency_preflight_result_v2"
+    )
+
+    def dependency_failure(reason: str) -> dict[str, Any]:
+        return _dependency_failure(reason, result_schema)
+
     binding = bundle.protocol["runtime_dependency_manifest"]
     path = Path(manifest_path or bundle.dependency_manifest_path)
     try:
-        hardened = protocol_schema == HARDENED_PROTOCOL_SCHEMA
         manifest = load_runtime_dependency_manifest(
             path,
             binding["sha256"],
@@ -415,20 +426,20 @@ def validate_runtime_dependencies(
         reason = str(exc)
         if reason != "DEPENDENCY_MANIFEST_HASH_MISMATCH":
             reason = f"DEPENDENCY_MANIFEST_INVALID:{reason}"
-        return _dependency_failure(reason)
+        return dependency_failure(reason)
     environment = dict(os.environ if environment is None else environment)
     current, reason = _canonical_prefixes(_environment_prefixes(
         environment, manifest["prefix_policy"]["current_prefixes_environment"]
     ))
     if reason:
-        return _dependency_failure(reason)
+        return dependency_failure(reason)
     allowed, reason = _canonical_prefixes(_environment_prefixes(
         environment, manifest["prefix_policy"]["allowed_prefixes_environment"]
     ))
     if reason:
-        return _dependency_failure(reason)
+        return dependency_failure(reason)
     if not current or current != allowed:
-        return _dependency_failure("DEPENDENCY_PREFIX_UNDECLARED")
+        return dependency_failure("DEPENDENCY_PREFIX_UNDECLARED")
     forbidden_roots = [
         Path(value).resolve()
         for value in manifest["prefix_policy"]["forbidden_prefix_roots"]
@@ -437,7 +448,7 @@ def validate_runtime_dependencies(
         prefix == forbidden or forbidden in prefix.parents
         for prefix in current for forbidden in forbidden_roots
     ):
-        return _dependency_failure("DEPENDENCY_PREFIX_HISTORICAL")
+        return dependency_failure("DEPENDENCY_PREFIX_HISTORICAL")
 
     package_prefixes: dict[str, Path] = {}
     for package in manifest["packages"]:
@@ -450,9 +461,9 @@ def validate_runtime_dependencies(
             )
         ]
         if not matches:
-            return _dependency_failure(f"DEPENDENCY_PACKAGE_MISSING:{name}")
+            return dependency_failure(f"DEPENDENCY_PACKAGE_MISSING:{name}")
         if len(matches) != 1:
-            return _dependency_failure(f"DEPENDENCY_PACKAGE_DUPLICATE:{name}")
+            return dependency_failure(f"DEPENDENCY_PACKAGE_DUPLICATE:{name}")
         package_prefixes[name] = matches[0]
 
     executable_count = 0
@@ -463,22 +474,22 @@ def validate_runtime_dependencies(
         for executable in package["executables"]:
             path = prefix / "lib" / name / executable
             if not _ordinary_file_within(path, prefix, executable=True):
-                return _dependency_failure(
+                return dependency_failure(
                     f"DEPENDENCY_EXECUTABLE_MISSING:{name}:{executable}"
                 )
             if not _is_loadable_executable(path, environment):
-                return _dependency_failure(
+                return dependency_failure(
                     f"DEPENDENCY_EXECUTABLE_INVALID:{name}:{executable}"
                 )
             executable_count += 1
         for relative in package["config_files"]:
             path = prefix / "share" / name / relative
             if not _ordinary_file_within(path, prefix):
-                return _dependency_failure(
+                return dependency_failure(
                     f"DEPENDENCY_CONFIG_MISSING:{name}:{relative}"
                 )
             if sha256_file(path) != manifest["config_hashes"][f"{name}:{relative}"]:
-                return _dependency_failure(
+                return dependency_failure(
                     f"DEPENDENCY_CONFIG_HASH_MISMATCH:{name}:{relative}"
                 )
             config_count += 1
@@ -488,12 +499,12 @@ def validate_runtime_dependencies(
         prefix = package_prefixes[library["package"]]
         path = prefix / library["relative_path"]
         if not _ordinary_file_within(path, prefix):
-            return _dependency_failure(
+            return dependency_failure(
                 "DEPENDENCY_RUNTIME_LIBRARY_MISSING:"
                 f"{library['package']}:{library['relative_path']}"
             )
         if not _is_loadable_elf(path, {3}, environment):
-            return _dependency_failure(
+            return dependency_failure(
                 "DEPENDENCY_RUNTIME_LIBRARY_INVALID:"
                 f"{library['package']}:{library['relative_path']}"
             )
@@ -506,7 +517,7 @@ def validate_runtime_dependencies(
             / component["package"]
         )
         if not _ordinary_file_within(resource, prefix):
-            return _dependency_failure(
+            return dependency_failure(
                 f"DEPENDENCY_COMPONENT_MISSING:{component['package']}:{component['plugin']}"
             )
         try:
@@ -519,16 +530,16 @@ def validate_runtime_dependencies(
             registrations = set()
         expected = (component["plugin"], component["library"])
         if expected not in registrations:
-            return _dependency_failure(
+            return dependency_failure(
                 f"DEPENDENCY_COMPONENT_MISMATCH:{component['package']}:{component['plugin']}"
             )
         library = prefix / component["library"]
         if not _ordinary_file_within(library, prefix):
-            return _dependency_failure(
+            return dependency_failure(
                 f"DEPENDENCY_COMPONENT_LIBRARY_MISSING:{component['package']}:{component['plugin']}"
             )
         if not _is_loadable_elf(library, {3}, environment):
-            return _dependency_failure(
+            return dependency_failure(
                 f"DEPENDENCY_COMPONENT_LIBRARY_INVALID:{component['package']}:{component['plugin']}"
             )
 
@@ -539,9 +550,9 @@ def validate_runtime_dependencies(
         not _ordinary_file_within(launch_path, prefix)
         or sha256_file(launch_path) != launch["sha256"]
     ):
-        return _dependency_failure("DEPENDENCY_LAUNCH_CONTRACT_MISMATCH")
+        return dependency_failure("DEPENDENCY_LAUNCH_CONTRACT_MISMATCH")
     return {
-        "schema_version": "p4_g0c_dependency_preflight_result_v2",
+        "schema_version": result_schema,
         "dependency_ready": True,
         "failure_reason": "",
         "manifest_path": str(path.resolve()),

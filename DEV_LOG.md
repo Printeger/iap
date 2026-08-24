@@ -6913,11 +6913,11 @@ repository-local policy miss is recorded and corrected by both formal commands:
 ```bash
 env TMPDIR="$PWD/results/icra27/icra052/tmp" \
   python3 -m unittest discover -s test -p 'test_p4_g0c_*.py' -v
-# exit 0; Ran 83 tests; OK
+# exit 0; Ran 84 tests; OK
 
 env TMPDIR="$PWD/results/icra27/icra052/tmp" \
   python3 -m unittest discover -s test -p 'test_*.py'
-# exit 0; Ran 438 tests; OK
+# exit 0; Ran 439 tests; OK
 ```
 
 The focused total includes 7 runner pre-attempt adversaries and 36 analyzer
@@ -6925,6 +6925,16 @@ remove/change/wrong-type cases across every four environment and eight output
 binding, with refreshed artifact hashes and no draft. In-memory syntax compile
 passes 9 files; `flake8 --select=E9,F63,F7,F82`, four-file canonical JSON and
 `git diff --check` all exit 0.
+
+The first independent Spec review reported 1 blocking / 2 nonblocking: the
+dependency-preflight class had been repointed from v2 to v3, absent caller
+values were not tested one key at a time, and production r3 dependency results
+still used a v2 schema label. Remediation restored the existing class to v2
+protocol/registry/dependency/schema semantics using the immutable historical
+launch bytes from task parent `cddfa21`, added a separate v3 complete-closure
+test and exact v3 result schema, and added all four absent-key cases. The final
+repository-local reruns above are post-remediation: focused 84/84 and full
+Python 439/439.
 
 Supervisor correction is appended, without changing raw evidence or erasing
 the earlier Builder claim: ICRA-051 has one High Standards blocker as well as

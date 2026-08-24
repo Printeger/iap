@@ -7,8 +7,8 @@ main flow, smoke or qualification.
 
 Formal verification commands and results:
 
-- `env TMPDIR=$PWD/results/icra27/icra052/tmp python3 -m unittest discover -s test -p 'test_p4_g0c_*.py' -v` — exit 0, 83 tests.
-- `env TMPDIR=$PWD/results/icra27/icra052/tmp python3 -m unittest discover -s test -p 'test_*.py'` — exit 0, 438 tests.
+- `env TMPDIR=$PWD/results/icra27/icra052/tmp python3 -m unittest discover -s test -p 'test_p4_g0c_*.py' -v` — exit 0, 84 tests.
+- `env TMPDIR=$PWD/results/icra27/icra052/tmp python3 -m unittest discover -s test -p 'test_*.py'` — exit 0, 439 tests.
 - in-memory `compile()` over the four production Python files and five focused
   tests — exit 0, 9 files.
 - `python3 -m flake8 --select=E9,F63,F7,F82 ...` — exit 0.
@@ -32,6 +32,13 @@ disabled-bag destination and unknown-output fail-closed behavior. Analyzer
 coverage applies remove/change/wrong-type to every new binding (12 x 3 = 36),
 refreshes the legitimate launch/inventory hashes, and proves no threshold
 draft is emitted.
+
+The first Spec review found that the existing dependency-preflight test class
+had been repointed from v2 to v3. Remediation restored its v2 protocol,
+registry, dependency and schema semantics against the immutable historical
+launch bytes, added separate v3 complete-closure coverage, gave production r3
+dependency results their v3 schema, and added all four absent-caller-key
+cases. The 84/84 and 439/439 commands above are the post-remediation reruns.
 
 Protected SHA-256 values remain: PDF `1f07da56...44f6`, ICRA-051 state
 `7c3cafc5...46a7`, and external launch log `f506e556...58e7`. The external log

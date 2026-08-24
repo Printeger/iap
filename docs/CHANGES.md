@@ -1931,8 +1931,8 @@ permitted after the sole invocation was consumed.
   into launch, run and runner-state evidence. Analyzer semantic checks reject
   remove/change/wrong-type mutations for every one of the 12 bindings even
   after legitimate provenance hashes are refreshed; no draft is produced.
-- Formal repository-local verification passes focused P4 discovery 83/83 and
-  full Python discovery 438/438. Syntax (9 files), fatal-only flake8, four
+- Formal repository-local verification passes focused P4 discovery 84/84 and
+  full Python discovery 439/439. Syntax (9 files), fatal-only flake8, four
   canonical JSON files and diff checks pass. An early development-test TMPDIR
   omission was recorded and corrected by both formal reruns under
   `results/icra27/icra052/tmp`.
@@ -1940,6 +1940,10 @@ permitted after the sole invocation was consumed.
   one High Spec blocker because it created the external ROS launch log outside
   repository/output boundaries. This change preserves that log and all
   ICRA-051 bytes; it does not rewrite the earlier Builder self-review.
+- Spec-review remediation restored the existing dependency-preflight suite to
+  v2 historical semantics, added separate v3 complete-closure/result-schema
+  coverage, and proves every individually absent caller environment key is
+  still replaced by the runner-owned canonical value.
 - This was synthetic only: zero build, CTest, GPU, ROS, live runner/analyzer
   CLI, main-flow, smoke, qualification or threshold action. Result is
   `P4_G0C_R3_LAUNCH_ENVIRONMENT_PROTOCOL_READY_FOR_REVIEW`, never live-ready or
