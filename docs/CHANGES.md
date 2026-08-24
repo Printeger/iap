@@ -1483,3 +1483,83 @@ python3 test/test_p4_g0c_launch_contract.py
 python3 test/test_test_planner_launch.py
 python3 -m unittest discover -s test -p 'test_*.py'
 ```
+
+## 2026-08-24 (ICRA-046 G0C live calibration BLOCKED)
+
+- IAP-RQ-423: rebuilt fresh task-local quadrotor-msg, IAP, plan-env,
+  path-searching, bspline-opt and plan-manager products with all twelve
+  configure/install exits zero. Installed protocol/registry/fixture/launch
+  bytes match source; dynamic linkage has zero missing, historical, default
+  IAP/planner or build-tree resolutions.
+- Pre-live focused Python passes 66/66, full Python passes 405/405, fresh P4
+  decision/integration/collision/path/occupancy passes 15/15, 5/5, 17/17, 5/5
+  and 6/6, and plan-manager passes 9/9 targets (186 active, one disabled).
+- The sole full runner invocation passed GPU preflight (`nvidia-smi` exits 0,
+  `cuInit=0`, `device_count=1`) but its first launch exited 1 because package
+  `so3_control` was absent from the sanitized authorized prefixes. Neither
+  required process started; state is FAILED at 1 attempted / 0 complete with
+  zero retry. Analyzer invocation count is zero and no draft exists.
+- The prior `ros2 launch ... --show-args` exit 0 did not resolve the runtime
+  Node package. Entering runner/GPU/ROS without proving `so3_control` resolution
+  violated the pre-live dependency gate and is irreversible after consuming
+  the one-shot call; it is retained as a protocol finding, not repaired.
+- Result is `BLOCKED_LAUNCH_DEPENDENCY_SO3_CONTROL_NOT_FOUND`, not G0C PASS.
+  Raw runs/build/install products remain retained; registry remains proposed,
+  uncalibrated and disabled.
+
+Exact fresh configure/install commands were:
+
+```bash
+bash results/icra27/icra046/preflight/task_env.bash cmake -S src/uav_simulator/Utils/quadrotor_msgs -B results/icra27/icra046/build_quadrotor_msgs -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DCMAKE_INSTALL_PREFIX="$PWD/results/icra27/icra046/install_quadrotor_msgs"
+bash results/icra27/icra046/preflight/task_env.bash cmake -S . -B results/icra27/icra046/build_iap -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_TESTING=ON -DBUILD_WITH_CUDA=OFF -DBUILD_WITH_OPENCV=OFF -DBUILD_WITH_VIEWER=OFF -DCMAKE_INSTALL_PREFIX="$PWD/results/icra27/icra046/install_iap"
+bash results/icra27/icra046/preflight/task_env.bash cmake -S src/iap/planner/plan_env -B results/icra27/icra046/build_plan_env -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_INSTALL_PREFIX="$PWD/results/icra27/icra046/install_plan_env"
+bash results/icra27/icra046/preflight/task_env.bash cmake -S src/iap/planner/path_searching -B results/icra27/icra046/build_path_searching -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_INSTALL_PREFIX="$PWD/results/icra27/icra046/install_path_searching"
+bash results/icra27/icra046/preflight/task_env.bash cmake -S src/iap/planner/bspline_opt -B results/icra27/icra046/build_bspline -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_INSTALL_PREFIX="$PWD/results/icra27/icra046/install_bspline"
+bash results/icra27/icra046/preflight/task_env.bash cmake -S src/iap/planner/plan_manage -B results/icra27/icra046/build_plan_manage -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_INSTALL_PREFIX="$PWD/results/icra27/icra046/install_plan_manage"
+bash results/icra27/icra046/preflight/task_env.bash cmake --build results/icra27/icra046/build_quadrotor_msgs --target install -j2
+bash results/icra27/icra046/preflight/task_env.bash cmake --build results/icra27/icra046/build_iap --target install -j2
+bash results/icra27/icra046/preflight/task_env.bash cmake --build results/icra27/icra046/build_plan_env --target install -j2
+bash results/icra27/icra046/preflight/task_env.bash cmake --build results/icra27/icra046/build_path_searching --target install -j2
+bash results/icra27/icra046/preflight/task_env.bash cmake --build results/icra27/icra046/build_bspline --target install -j2
+bash results/icra27/icra046/preflight/task_env.bash cmake --build results/icra27/icra046/build_plan_manage --target install -j2
+```
+
+Exact non-starting package/launch/linkage checks were:
+
+```bash
+bash results/icra27/icra046/preflight/task_env.bash ros2 pkg prefix iap
+bash results/icra27/icra046/preflight/task_env.bash ros2 pkg prefix ego_planner
+bash results/icra27/icra046/preflight/task_env.bash ros2 launch iap test_planner.launch.py --show-args
+bash results/icra27/icra046/preflight/task_env.bash ldd results/icra27/icra046/build_bspline/test_p4_collision_guide
+bash results/icra27/icra046/preflight/task_env.bash ldd results/icra27/icra046/build_bspline/test_p4_collision_guide_integration
+bash results/icra27/icra046/preflight/task_env.bash ldd results/icra27/icra046/build_bspline/test_p4_collision_scan_contract
+bash results/icra27/icra046/preflight/task_env.bash ldd results/icra27/icra046/build_path_searching/test_p4_risk_astar
+bash results/icra27/icra046/preflight/task_env.bash ldd results/icra27/icra046/build_plan_env/test_grid_map_occupancy_epoch
+bash results/icra27/icra046/preflight/task_env.bash ldd results/icra27/icra046/install_plan_manage/lib/ego_planner/ego_planner_node
+```
+
+The package-prefix, show-args and all six ldd checks exited 0; zero forbidden
+linkage was found. The missing `so3_control` runtime package proves those
+checks were incomplete, not that dependency readiness passed.
+
+Exact prescribed test and consumed one-shot commands were:
+
+```bash
+python3 test/test_p4_g0c_protocol.py
+python3 test/test_p4_g0c_runner.py
+python3 test/test_p4_g0c_analyzer.py
+python3 test/test_p4_g0c_launch_contract.py
+python3 test/test_test_planner_launch.py
+python3 -m unittest discover -s test -p 'test_*.py'
+bash results/icra27/icra046/preflight/task_env.bash results/icra27/icra046/build_bspline/test_p4_collision_guide
+bash results/icra27/icra046/preflight/task_env.bash results/icra27/icra046/build_bspline/test_p4_collision_guide_integration
+bash results/icra27/icra046/preflight/task_env.bash results/icra27/icra046/build_bspline/test_p4_collision_scan_contract
+bash results/icra27/icra046/preflight/task_env.bash results/icra27/icra046/build_path_searching/test_p4_risk_astar
+bash results/icra27/icra046/preflight/task_env.bash results/icra27/icra046/build_plan_env/test_grid_map_occupancy_epoch
+bash results/icra27/icra046/preflight/task_env.bash ctest --test-dir results/icra27/icra046/build_plan_manage -L gtest --output-on-failure
+bash results/icra27/icra046/preflight/task_env.bash python3 scripts/dev_planner/run_p4_g0c_calibration.py --runs-root "$PWD/results/icra27/icra046/runs"
+```
+
+The runner command above has already consumed ICRA-046's only authorized call
+and must not be rerun. The analyzer was not invoked because COMPLETE was not
+reached.

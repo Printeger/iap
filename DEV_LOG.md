@@ -6207,3 +6207,109 @@ smoke, benchmark, threshold/registry/application, G0D, P5, cleanup or gate
 promotion ran. Builder result is
 `P4_G0C_LIVE_ARTIFACT_PROTOCOL_READY_FOR_REVIEW`, never G0C PASS. Control
 returns only to SUPERVISOR review.
+
+## 2026-08-24T10:57:27Z — ICRA-046 START
+
+IAP-RQ-423. Synchronized `dev/icra` at Supervisor task HEAD
+`6ef1d3b4ae5ee982a930de35a040315550955f41`: initial status contained only the
+protected untracked PDF, fetch passed and divergence was `0 0`, so no pull ran.
+`AGENT_STATE.md` authorizes only DEEPSEEK, `TASK_READY`, ICRA-046 and
+`P4_G0C_LIVE_CALIBRATION`.
+
+The immutable one-shot boundary is exact: live root
+`results/icra27/icra046/runs` is absent; no plan-only or preflight-only call may
+touch it; the full runner may be invoked once only, and the registered analyzer
+may be invoked once only after a 15/15 COMPLETE runner and zero task ROS
+processes. Any first build, dependency, GPU, required-process, launch, artifact,
+runner-state or analyzer failure stops without retry, alternate root, repair,
+exclusion or data rewrite.
+
+Fresh products will be configured and installed in dependency order below
+ICRA-046 using the sanitized
+`results/icra27/icra046/preflight/task_env.bash`: `quadrotor_msgs` Release with
+tests off; IAP RelWithDebInfo with tests on and CUDA/OpenCV/viewer build options
+off; then plan-env, path-searching, bspline-opt and plan-manager Release with
+tests on. Each configure uses its exact source and task-local install prefix;
+each install uses `cmake --build <task-build> --target install -j2`. Only
+`/opt/ros/jazzy`, task-local products and unchanged external `traj_utils`/
+`gnss_comm` prefixes are admitted.
+
+Before-live raw file hashes are protocol
+`9e89ea42675459a63853d98845f02b7fe5b9434a9f28fcbd6ef5ba1bc5bd906d`,
+registry `1a9e206c12133035b29dd4ff573cf3868cf4765f3b9213362e507d85c24deaff`,
+fixture `985aabcd486186a4430305b409669422499f891d529369c6f0bfe8e7dfe0d710`
+and launch `26f914f749758745b9c031819df0e969def46bd7fd15bb3caac831921df2dd65`.
+Registry truth is `PROPOSED_UNCALIBRATED`, null calibration bundle, four null
+gates and `application_enabled=false`. Protected PDF SHA-256 remains
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+Initial workspace capacity is 36,807,364,608 bytes, above the 20 GiB minimum.
+
+Allowed writes are new task-local build/install/log/tmp/ROS/raw-run artifacts
+and compact evidence only below `results/icra27/icra046/`, plus `DEV_LOG.md`,
+`docs/CHANGES.md` and `docs/TRACEABILITY.md`. No product/script/test/launch/
+config/protocol/registry/fixture or Supervisor-owned file may change. No
+threshold freeze, application, G0D, P5, formal campaign, bag/RViz, cleanup or
+gate promotion is authorized. Final status is only
+`P4_G0C_CALIBRATION_DRAFT_READY_FOR_REVIEW` or `BLOCKED_<first-failure>`, never
+G0C PASS.
+
+## 2026-08-24T11:15:23Z — ICRA-046 BLOCKED AT FIRST LIVE LAUNCH
+
+IAP-RQ-423. All six fresh configure/install pairs exited 0. Source/installed
+protocol, registry, fixture and launch bytes match; six-binary dynamic linkage
+has zero missing, historical, workspace-default IAP/planner or build-tree
+resolution. Focused Python passes 66/66, full discovery passes 405/405, fresh
+P4 regressions pass 15/15, 5/5, 17/17, 5/5 and 6/6, and plan-manager passes
+9/9 targets with 186 active cases and one existing disabled case.
+
+The sole full runner invocation used exactly
+`results/icra27/icra046/runs`. Built-in GPU preflight PASS is authoritative:
+both `nvidia-smi` commands exit 0, `cuInit(0)=0`,
+`cuDeviceGetCount=0`, `device_count=1`, GPU NVIDIA GeForce RTX 4070 Ti SUPER.
+The first registered launch then exited 1 at approximately 0.164 s because ROS
+package `so3_control` was not found in the sanitized task/authorized prefixes.
+Neither `iap_rosnode` nor `ego_planner_node` ever started.
+
+Authoritative runner state is FAILED with one invocation, one launch, first ID
+`p4-g0c-seed211-rep01` FAILED, 1 attempted / 0 complete / 0 retry and
+`failure_reason=launch_exit_1`. The prior non-starting `ros2 launch ...
+--show-args` check exited 0 but did not resolve this runtime Node package; this
+limitation is retained rather than concealed or repaired.
+
+This is also an explicit pre-live protocol violation: required ROS package
+resolution was not actually established before the sole runner call, contrary
+to the task requirement that dependency failure stop before GPU/ROS. Because
+the one-shot call is consumed, the breach cannot be repaired inside ICRA-046.
+It is recorded as an independent review finding alongside the first runtime
+blocker.
+
+Fail-closed stop is final for this task: no retry, alternate root, root repair,
+run exclusion or second runner occurred. Because runner COMPLETE was not
+reached, analyzer invocations are 0 and analysis/draft outputs do not exist.
+The raw four-file runs tree is retained with manifest SHA-256
+`f307e61a90707d6da5a38138558a97447c5267ef9a5184f3df92ca8b97079438`;
+all ICRA-046 build/install/raw products remain untouched for Supervisor review.
+
+No threshold freeze, registry mutation, application, G0D, P5, formal campaign,
+bag/RViz, cleanup or gate promotion ran. Builder status is
+`BLOCKED_LAUNCH_DEPENDENCY_SO3_CONTROL_NOT_FOUND`, never G0C PASS.
+
+## 2026-08-24T11:22:26Z — ICRA-046 TWO-AXIS BLOCKED REVIEW
+
+IAP-RQ-423. Independent review against task HEAD
+`6ef1d3b4ae5ee982a930de35a040315550955f41` confirms one Standards hard finding
+and one Spec blocking finding: the same irreversible pre-live dependency-gate
+violation. Required runtime `so3_control` resolution was not established before
+the sole runner entered GPU preflight and ROS launch.
+
+Initial Spec review also found incomplete exact-command evidence. Without
+rerunning any command or touching raw data, documentation now records every
+configure/install, package/show-args, ldd, test and sole runner command plus
+outcome. Final reviewers report 0 remaining handoff-evidence findings, 0
+judgement-only smells and no additional blocker to committing/pushing the
+truthful fail-closed handoff. Aggregate review is retained at
+`results/icra27/icra046/review/two_axis_review.md`.
+
+Review disposition remains
+`BLOCKED_LAUNCH_DEPENDENCY_SO3_CONTROL_NOT_FOUND`, never G0C PASS. No retry,
+repair, analyzer, threshold action or cleanup is authorized.

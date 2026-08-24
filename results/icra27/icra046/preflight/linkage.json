@@ -1,0 +1,21 @@
+{
+  "binary_count": 6,
+  "build_tree_product_resolution_count": 0,
+  "environment_wrapper_sha256": "6b70ad7a294e42d1c09af62244cbfbaa25b2fc2abb88794880ffc9865bdeea1f",
+  "external_prefixes": [
+    "/home/dev/ws_iap/install/traj_utils",
+    "/home/dev/ws_iap/install/gnss_comm"
+  ],
+  "historical_product_resolution_count": 0,
+  "launch_show_args_exit": 0,
+  "missing_library_count": 0,
+  "package_prefixes": {
+    "ego_planner": "/home/dev/ws_iap/src/iap/results/icra27/icra046/install_plan_manage",
+    "iap": "/home/dev/ws_iap/src/iap/results/icra27/icra046/install_iap"
+  },
+  "prelive_required_package_resolution_established": false,
+  "prelive_violation": "show-args did not resolve runtime Node package so3_control before runner",
+  "runtime_environment": "results/icra27/icra046/preflight/task_env.bash",
+  "schema_version": "icra046_linkage_v1",
+  "workspace_default_iap_planner_resolution_count": 0
+}

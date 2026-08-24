@@ -1,0 +1,15 @@
+{
+  "fresh_regressions": {
+    "occupancy": {"failures": 0, "tests": 6},
+    "p4_collision": {"failures": 0, "tests": 17},
+    "p4_decision": {"failures": 0, "tests": 15},
+    "p4_integration": {"failures": 0, "tests": 5},
+    "p4_path_searching": {"failures": 0, "tests": 5},
+    "plan_manage": {"active_cases": 186, "ctest_targets": 9, "existing_disabled_cases": 1, "failures": 0}
+  },
+  "python": {
+    "focused": {"analyzer": 24, "failures": 0, "launch_contract": 6, "launch_golden": 16, "protocol": 6, "runner": 14, "total": 66},
+    "full_discovery": {"errors": 0, "failures": 0, "invocations": 1, "tests": 405}
+  },
+  "schema_version": "icra046_test_results_v1"
+}

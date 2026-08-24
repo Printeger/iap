@@ -1,0 +1,24 @@
+{
+  "authorization_head": "6ef1d3b4ae5ee982a930de35a040315550955f41",
+  "branch": "dev/icra",
+  "capacity_bytes": {
+    "initial": 36807364608,
+    "post_failure": 122578173952,
+    "pre_live": 122578186240,
+    "required_minimum": 21474836480
+  },
+  "protected_hashes_before_after": {
+    "docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf": "1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6",
+    "config/icra27/p4_g0c_live_fixture_v1.json": "985aabcd486186a4430305b409669422499f891d529369c6f0bfe8e7dfe0d710",
+    "config/icra27/p4_g0c_protocol_v1.json": "9e89ea42675459a63853d98845f02b7fe5b9434a9f28fcbd6ef5ba1bc5bd906d",
+    "config/icra27/p4_threshold_registry_v1.json": "1a9e206c12133035b29dd4ff573cf3868cf4765f3b9213362e507d85c24deaff",
+    "launch/test_planner.launch.py": "26f914f749758745b9c031819df0e969def46bd7fd15bb3caac831921df2dd65"
+  },
+  "protected_pdf_status": "untracked_unstaged_unchanged",
+  "registry_truth": {
+    "application_enabled": false,
+    "calibration_bundle_sha256": null,
+    "four_gate_values_null": true,
+    "state": "PROPOSED_UNCALIBRATED"
+  }
+}

@@ -1095,3 +1095,11 @@ They do not convert historical `NO-GO-P2`, failed P0 Gate-0B evidence, the stati
 | IAP-RQ-423 | Reject lexical output aliases before analysis or filesystem mutation | analyzer compares the expanded absolute request to canonical resolution for both output roles; direct CLI regression covers `nonexistent/../` and `runs/../runs/`, exit 2, zero `analyze()` calls and zero target/intermediate/other-output creation | **FAIL-CLOSED; synthetic only** |
 | IAP-RQ-423 | Preserve canonical output behavior and prior G0C protections | fresh production-shaped bundle accepts canonical relative analysis and absolute draft paths; all ICRA-044 output, inventory and raw-hash adversaries remain green | **IMPLEMENTED; no schema/runner/product change** |
 | IAP-RQ-423 | Reproduce repair while preserving protected and retained artifacts | focused 66/66 and one final Python discovery 405/405 pass; 3,829 files across 12 ICRA-042 trees retain identical before/after hash `6836841b…d784d34`; compact evidence is under `results/icra27/icra045/` | **READY FOR SUPERVISOR REVIEW; not G0C PASS** |
+
+## 2026-08-24 ICRA-046 G0C live calibration
+
+| Req ID | Requirement/evidence seam | Implementation and retained evidence | Status |
+|---|---|---|---|
+| IAP-RQ-423 | Build and qualify only fresh task-local products before live use | six configure/install pairs exit 0; source/install config and launch bytes match; linkage is task/external-only; focused 66/66, full Python 405/405 and prescribed fresh C++ regressions pass, but `--show-args` did not establish runtime `so3_control` resolution before runner entry | **BUILD/TEST PASS; DEPENDENCY GATE VIOLATED** |
+| IAP-RQ-423 | Gate the one-shot 5×3 calibration on a real GPU and stop at first failure | sole runner GPU preflight passes `nvidia-smi`, `cuInit=0`, `device_count=1`; first launch exits 1 because `so3_control` is not found, both required processes never start, ledger retains 1 attempted / 0 complete / 0 retry | **BLOCKED; first launch only** |
+| IAP-RQ-423 | Preserve raw failure truth and forbid downstream threshold action | four-file raw runs manifest hash `f307e61a…97079438`; analyzer invocations 0, no analysis/draft, registry still proposed/null/disabled, all task products and raw evidence retained below ICRA-046 | **FAIL-CLOSED; not G0C PASS** |

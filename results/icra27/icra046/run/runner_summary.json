@@ -1,0 +1,45 @@
+{
+  "analyzer": {
+    "analysis_output_exists": false,
+    "draft_output_exists": false,
+    "invocations": 0,
+    "reason_not_invoked": "runner_not_complete"
+  },
+  "first_failure": {
+    "failed_run_id": "p4-g0c-seed211-rep01",
+    "launch_exit_code": 1,
+    "missing_package": "so3_control",
+    "required_processes_never_started": ["iap_rosnode", "ego_planner_node"],
+    "runner_failure_reason": "launch_exit_1"
+  },
+  "gpu_preflight": {
+    "cuDeviceGetCount_result": 0,
+    "cuInit_result": 0,
+    "device_count": 1,
+    "gpu_name": "NVIDIA GeForce RTX 4070 Ti SUPER",
+    "gpu_ready": true,
+    "nvidia_smi_list_exit": 0,
+    "nvidia_smi_query_exit": 0
+  },
+  "prelive_dependency_protocol": {
+    "required_package_resolution_established": false,
+    "show_args_exit": 0,
+    "violation": "runner entered GPU and ROS launch before so3_control resolution was proven"
+  },
+  "raw_runs": {
+    "file_count": 4,
+    "manifest_sha256": "f307e61a90707d6da5a38138558a97447c5267ef9a5184f3df92ca8b97079438",
+    "runner_state_sha256": "a6dba6376b225f2fd00c218bdd19f911b9183e5e53a868f55cb0f1914d474ef1"
+  },
+  "runner": {
+    "attempted_run_count": 1,
+    "completed_run_count": 0,
+    "exit_code": 2,
+    "invocations": 1,
+    "launch_invocations": 1,
+    "retries": 0,
+    "state": "FAILED"
+  },
+  "schema_version": "icra046_runner_summary_v1",
+  "status": "BLOCKED_LAUNCH_DEPENDENCY_SO3_CONTROL_NOT_FOUND"
+}
