@@ -7169,3 +7169,38 @@ Compact truthful evidence is under `results/icra27/icra054/compact/`. Builder
 result is `BLOCKED_EXTERNAL_TEMP_CREATION`, not hermetic-surface READY, live
 readiness, threshold eligibility/application, G0C PASS, G0D or P5. Control
 returns only to SUPERVISOR review.
+
+## 2026-08-24 — ICRA-054 BUILDER BLOCKED HANDOFF
+
+IAP-RQ-423. Implementation, Builder docs and compact BLOCKED evidence commit
+`3a1ea9d` is pushed to `origin/dev/icra`. It truthfully records the creation
+and premature removal of two repository-external `/tmp/icra054_*_names.txt`
+files. Under NEXT_TASK.md this is an immediate task blocker which a later clean
+run cannot cure; no READY result is claimed.
+
+Independent review against fixed task head `6e762fb` reports Standards 1
+blocking / 3 nonblocking and Spec 3 blocking / 2 nonblocking / 0 scope-creep.
+Both axes confirm the external creation/cleanup violation and truthful BLOCKED
+classification. Standards additionally notes unused `source_name`, primitive
+dictionary/string classification records and the 978-line multi-surface
+classifier as nonblocking maintainability judgements.
+
+Spec review identifies two further implementation blockers which were not
+remediated after the task became irrecoverably blocked: environment-condition
+classification distinguishes Equals/NotEquals but does not verify the actual
+experiment operand and r3 constant; and unknown module-level mutation calls
+such as `os.remove(output)` may be silently omitted instead of rejected. It
+also notes that subprocess regressions compare names rather than existing-file
+content (the separate task-level metadata and content-hash comparisons are
+exact) and that this final DEV_LOG-only commit was pending at review time.
+
+Formal focused/full discovery, syntax, fatal-only flake8 and canonical JSON
+remain intentionally not run after the blocker. No build, compiled test, GPU,
+ROS process/service, live runner/analyzer, main flow, smoke, qualification,
+threshold, G0C/G0D or P5 action ran. `/root/.ros/log` metadata and file hashes
+remain equal to the task-start baselines; all retained external logs remain
+untouched. The protected PDF remains unmodified, untracked and unstaged.
+
+Final Builder result is `BLOCKED_EXTERNAL_TEMP_CREATION`, with additional
+fail-closed classifier review blockers retained for Supervisor disposition.
+No next task is selected. Control returns only to SUPERVISOR review.
