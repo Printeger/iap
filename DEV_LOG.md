@@ -7056,3 +7056,22 @@ threshold action, G0C verdict, G0D/P5 work or cleanup ran. Compact evidence is
 under `results/icra27/icra053/`. Builder result is
 `P4_G0C_R3_XDG_RUNTIME_ENVIRONMENT_READY_FOR_REVIEW`, never r3 live readiness
 or G0C PASS, pending independent review and final handoff.
+
+The first independent review reported Standards 0 blocking / 1 nonblocking
+and Spec 1 blocking / 1 nonblocking / 1 scope-creep. The Spec blocker was
+valid: the output half of the production-surface test only inspected the
+already-declared `_p4_g0c_binding` dictionary. Remediation now independently
+parses runner child propagation, six launch output arguments, direct
+`launch_command.json`/`stdout.log` writes and the launch
+runtime/export/log/bag/CSV/manifest sink chains, then requires their normalized
+surface to equal the literal five-key/eight-output binding. It also filters
+path-valued environment actions so unrelated scalar environment variables are
+not part of the contract.
+
+The first remediation test exposed only a test-visitor ambiguity: two
+`bag_root_dir` assignments were counted. Restricting extraction to the
+assignment containing `LaunchConfiguration("bag_output_dir")` fixed it. Final
+post-remediation repository-local reruns pass focused 87/87 and full Python
+442/442 under the explicit ICRA-053 TMPDIR. The Standards nonblocking judgement
+call is the deliberately narrow string/octal representation of the single XDG
+mode; no cross-module abstraction was added outside this repair.

@@ -35,6 +35,18 @@
   },
   "requirement": "IAP-RQ-423",
   "result": "P4_G0C_R3_XDG_RUNTIME_ENVIRONMENT_READY_FOR_REVIEW",
+  "review_remediation": {
+    "initial_spec": {
+      "blocking": 1,
+      "nonblocking": 1,
+      "scope_creep": 1
+    },
+    "initial_standards": {
+      "blocking": 0,
+      "nonblocking": 1
+    },
+    "production_output_surface_independently_enumerated": true
+  },
   "task": "ICRA-053",
   "tests": {
     "focused": {

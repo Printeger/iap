@@ -32,8 +32,17 @@ The structural test parses production launch construction rather than importing
 the shared registry: it enumerates all top-level `SetEnvironmentVariable`
 actions, proves r3 selects the registered XDG launch argument, proves legacy
 non-r3 alone retains `/tmp/runtime-root`, and independently checks the exact
-five environment/eight output keys passed into the production r3 binding. Any
-new unregistered action or binding sink changes the literal surface and fails.
+five environment/eight output keys passed into the production r3 binding.
+
+The initial Spec review correctly found that the output half still inspected
+only that declared binding. Remediation now also parses the production runner
+and launch ASTs independently: five child arguments, six launch output
+arguments, the `launch_command.json`/`stdout.log` direct runner writes and the
+runtime/export/log/bag/CSV/manifest sink chains must normalize to the same
+eight output keys. Path-valued environment actions are filtered independently
+so unrelated scalar environment variables are outside this contract. The
+post-remediation focused and complete discoveries again pass 87/87 and
+442/442.
 
 Runner coverage includes absent and malicious caller XDG values plus missing,
 extra, changed, wrong-type, outside, lexical-parent, alias, symlink, duplicate

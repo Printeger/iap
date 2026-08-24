@@ -1969,6 +1969,12 @@ permitted after the sole invocation was consumed.
   propagation. Analyzer covers all 13 bindings x remove/change/wrong-type = 39
   refreshed-provenance adversaries, plus filesystem/state mode drift, with no
   threshold draft.
+- Initial Spec review found that the output-surface test only re-read the
+  declared binding and also over-constrained unrelated scalar environment
+  actions. Remediation independently enumerates runner child propagation, six
+  launch path arguments, two direct runner writes and actual launch
+  runtime/export/log/bag/CSV/manifest sink chains; their normalized set must
+  equal the literal five-key/eight-output binding.
 - Formal repository-local verification passes focused P4 discovery 87/87,
   launch golden 16/16 and full Python discovery 442/442. Every Python command,
   including RED development commands and one recorded invocation-shape error,
