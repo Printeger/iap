@@ -5773,3 +5773,38 @@ split. Remediation fixes all findings inside the allowlist and adds synthetic
 coverage. Final Standards and Spec re-reviews each report zero findings and
 `NO BLOCKING FINDING`; the aggregate is retained at
 `results/icra27/icra042/review/two_axis_review.md`.
+
+## 2026-08-24T08:35:25Z — ICRA-042 FINAL BUILDER HANDOFF
+
+IAP-RQ-423. Implementation/evidence/documentation commit
+`45a5f68a5906bd3b249d7322e652196d2809bf84` is pushed to `origin/dev/icra`.
+It registers canonical protocol
+`496b2af570c0491ab4d35a84e32309608cc59a1784191842c5b055abb840617a`,
+proposed registry
+`77462979a0ac691a804dd0077b3b5da0dcf508c0eaa4551a884cc57645945784`
+and live fixture
+`985aabcd486186a4430305b409669422499f891d529369c6f0bfe8e7dfe0d710`.
+The registry is still `PROPOSED_UNCALIBRATED`: four gates and calibration
+bundle are null, application is false, and no G0C decision is claimed.
+
+Final verification remains Python 376/376, focused protocol/launch/runner/
+analyzer 21/21, launch golden 16/16, fresh P4 decision 15/15, integration 5/5,
+collision 17/17, path-searching 5/5, occupancy 6/6 and plan-manager 9/9 with
+186 active cases plus one existing disabled case. Plan-only remains
+non-mutating with 15 registered IDs and zero launch/retry. Task-environment
+linkage contains zero missing, historical, workspace-default IAP/planner or
+build-tree product resolutions. Standards and Spec final reviews each report
+zero findings and `NO BLOCKING FINDING`.
+
+Protected hashes remain exact: collision scan fixture
+`49a676a5ff51538ab961c814409f6c2dfb7ba4679a861d4e8e94cc7d5679c788`,
+collision guide fixture
+`d540c23dc38102751740bcb61e79993e4704564c811e9d75bfa6be90c52511af`
+and untracked/unstaged PDF
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+Zero relevant processes remain. No GPU preflight, ROS, launch, calibration,
+smoke, benchmark, bag/RViz, threshold freeze/application, G0D, P5, cleanup or
+gate promotion ran.
+
+Builder result: `P4_G0C_PROTOCOL_READY_FOR_REVIEW`, not G0C PASS. Control
+returns only to SUPERVISOR review.
