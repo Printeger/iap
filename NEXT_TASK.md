@@ -1,121 +1,107 @@
-# ICRA-040 — Repair G0B identity precedence and metrics-only boundary
+# ICRA-041 — Clean-room P4-G0B requalification from fresh products
 
 > Active gate: `P4_G0B`
 > Owner: `DEEPSEEK`
 > Activation: `TASK_READY`
-> Supervisor verdict: `ICRA039_REVIEW_REQUEST_CHANGES_IDENTITY_PRECEDENCE_AND_METRICS_BOUNDARY`
+> Supervisor verdict: `ICRA040_REVIEW_REQUEST_CHANGES_RETAINED_ARTIFACT_PROVENANCE`
 > Requirement mapping: `IAP-RQ-423`
 > Conference route: conditional P0 -> P4 -> P5
-> This task: repair exactly two G0B review findings; no calibration, application or G0C
+> This task: evidence-only self-contained rebuild and deterministic requalification; zero product edits
 
 ## Supervisor decision
 
-ICRA-039 is technically substantial and its complete regression suite passes, but it does not qualify
-P4-G0B. Two Spec defects remain:
+ICRA-040's requested code repairs are correct. Supervisor independently reproduced decision 15/15,
+integration 5/5, collision 17/17, P1 39/39, path-searching P4 5/5, occupancy epoch 6/6 and all nine
+plan-manager executables with 186 active cases, one existing disabled case and zero failures. The
+post-original identity/epoch checkpoint is authoritative, and the effective `metrics_only` boundary is
+truthful while risk-guide application remains unauthorized.
 
-1. **High — invalidation precedence:** after original A* returns, original failure/timeout/invalid
-   geometry is interpreted before occupancy/request identity is rechecked. If the epoch changes during
-   that search, the decision can report planner/geometry failure instead of the authoritative
-   `DECISION_INVALID_REPLAN_REQUIRED` result.
-2. **Medium — metrics-only configuration boundary:** `setP4RiskSnapshot()` silently forces
-   `metrics_only=true` whenever risk-aware A* is enabled. This makes the declared/default effective
-   configuration untruthful outside the registered G0B/G0C context. G0B tests must opt in explicitly;
-   an unregistered `metrics_only=false` context must remain false while still refusing risk-guide
-   application because G0D has not authorized it.
+P4-G0B nevertheless remains unqualified because ICRA-040 accidentally invoked an old ICRA-039 CTest and
+rewrote retained build-tree logs. Repeating that CTest restored only a path/size manifest and cannot undo
+or prove byte-for-byte recovery from the process violation. No further code repair is required.
 
-ICRA-040 shall repair only these findings, prove their precedence/boundary with focused tests, rerun the
-existing ICRA-039 regressions and hand back for G0B review. The two Low Standards observations—attempt
-context data clumping and the currently unread search `reason` field—remain recorded design debt and are
-not authorized for refactor here.
+ICRA-041 shall resolve provenance once, without relying on the affected history: build every required
+product fresh from reviewed HEAD, run the entire G0B matrix only from those products, and treat all
+ICRA-039/040 build/install trees as opaque retained artifacts. This is not authorization for G0C.
 
-## 1. Synchronize, preserve and declare the boundary
+## 1. Synchronize and freeze the evidence boundary
 
 - Follow `AGENTS.md` synchronization. Stop as `REMOTE_DIVERGED` if both sides lead; never reset, clean,
   stash, rebase, amend pushed history or overwrite another role's work.
-- Preserve the protected untracked PDF, frozen collision fixture and all compact historical evidence.
-  Do not modify history or Supervisor-owned files.
-- Retain all ten existing ICRA-039 build/install trees untouched throughout development and review:
-  `build_iap`, `install_iap`, `build_plan_env`, `install_plan_env`, `build_path_searching`,
-  `install_path_searching`, `build_bspline`, `install_bspline`, `build_plan_manage` and
-  `install_plan_manage` below `results/icra27/icra039/`.
-- Put new ICRA-040 build/install/log/test/review artifacts below `results/icra27/icra040/`. Retain them
-  through Supervisor review. Cleanup remains Supervisor-only after Review PASS and pushed code/docs.
-- Add one START entry to `DEV_LOG.md` naming the two findings, exact allowlist, focused tests, regression
-  matrix, retained dependencies and stop line.
+- Preserve the protected untracked PDF, frozen collision fixture, compact historical evidence and all
+  14 retained ICRA-039/040 build/install directories. Do not source, execute, test, relink, install into,
+  regenerate, delete, chmod or otherwise write anything below those retained directories.
+- Before any configure/build, record a sorted byte-level baseline manifest below
+  `results/icra27/icra041/preflight/` for every regular file and symlink in the 14 retained directories:
+  relative path, type, size, SHA-256 for regular files and exact target for symlinks. Repeat after all
+  tests; manifests and their canonical hashes must be identical. This proves no further ICRA-041 write;
+  do not claim it repairs the historical ICRA-040 incident.
+- Put every ICRA-041 build/install/log/test/review artifact below `results/icra27/icra041/`. Retain all
+  task build/install through Supervisor review. Cleanup remains Supervisor-only after Review PASS and
+  pushed code/docs.
+- Add one START entry to `DEV_LOG.md` with reviewed source HEAD, zero-product-edit allowlist, dependency
+  boundary, retained-tree manifest method, exact build/test commands and stop line.
 
-## 2. Make identity invalidation authoritative after original search
+## 2. Build a self-contained current product chain
 
-- Immediately after every return from `searchOriginal(request)`, and before inspecting success,
-  timeout, returned geometry or constructing an original-guide record, revalidate the immutable request
-  identity and live occupancy epoch.
-- A request-identity mismatch must return `DECISION_INVALID_REPLAN_REQUIRED` with
-  `REQUEST_IDENTITY_MISMATCH`; an occupancy mismatch must return the same status with
-  `OCCUPANCY_EPOCH_CHANGED`. The result must contain no original, risk or selected guide,
-  `selection_applied=false`, and risk search must not run.
-- Add focused precedence tests in which the epoch changes during original search and original search
-  then returns: (a) failure, (b) timeout, and (c) success with duplicate/zero-length geometry. Every case
-  must resolve to invalid/replan, not planner failure, timeout fallback or geometry failure.
-- Add or retain stable-epoch counterparts proving genuine original failure/timeout/zero-length geometry
-  keeps its existing typed result. Exercise request-identity precedence through the smallest existing
-  test seam if it is mutable during search; do not redesign the public interface merely to manufacture a
-  test hook.
-- Preserve the already-correct rechecks between searches and before constraint injection.
+- From the unchanged reviewed source at or descendant only by task documentation, build fresh task-local
+  products in dependency order: IAP, plan-env, path-searching, bspline-opt and plan-manager. Use distinct
+  `build_*`, `install_*` and log roots below ICRA-041.
+- The new chain may use `/opt/ros/jazzy` plus the existing immutable workspace `traj_utils` and
+  `gnss_comm` dependencies. It must not consume any IAP/planner library, header, package config, binary
+  or test from workspace-default, ICRA-039, ICRA-040, deleted-task or another historical task root.
+- Sanitize and record the configure/runtime environment so task-local prefixes take precedence. Audit
+  every relevant CMake cache, installed header/source hash, direct dynamic resolution, missing library
+  and installed executable RUNPATH. Any old/default IAP or planner match is a hard failure; do not fix it
+  by executing an old build.
+- No product source, test, header, CMake, configuration or fixture edit is permitted. A build failure is
+  `BLOCKED` evidence, not authority to change code.
 
-## 3. Preserve effective `metrics_only` configuration and the authorization stop
+## 3. Requalify the complete deterministic G0B contract
 
-- Remove the unconditional enabled-risk to `metrics_only=true` rewrite from
-  `BsplineOptimizer::setP4RiskSnapshot()`. The effective decision request and evidence must preserve the
-  value supplied by configuration/context.
-- Make every registered G0B deterministic and initial/rebound integration test set
-  `metrics_only=true` explicitly. Their selected/injected guide remains original and
-  `selection_applied=false`; constraint hashes remain equivalent to original-only behavior.
-- Add a focused non-G0B boundary test with risk enabled and `metrics_only=false`. Prove the value remains
-  false after snapshot/attempt-context setup, the decision records `SELECTION_NOT_AUTHORIZED`, selects
-  the original guide and keeps `selection_applied=false` even when the measured risk guide is better.
-- Do not add thresholds or apply the risk guide. `metrics_only=false` is configuration truth only in
-  this task; G0D remains the sole future authorization point for geometry application.
-- Correct ICRA-039 documentation language that claims or implies the manager automatically registers
-  all P4-enabled calls as G0B. Do not change launch profiles or parameter defaults.
+- Run only ICRA-041 test binaries/products, never CTest or binaries from ICRA-039/040.
+- Run and record exact exit codes for:
+  - P4 decision 15/15, including the three epoch-precedence and stable-epoch counterparts;
+  - P4 initial/rebound integration 5/5, including explicit G0B true and non-G0B false boundary;
+  - collision contract 17/17 and P1 integrity cost 39/39;
+  - fresh path-searching P4 5/5 and fresh occupancy epoch 6/6;
+  - affected fresh plan-manager targets 9/9, 186 active cases, one existing disabled case.
+- Revalidate `p4_collision_guide_v1`: both profiles 200/200 valid, risk mean/max lower as frozen, ratio
+  1.0, repeat-stable request/original/risk/selected hashes, selected original and no application.
+- Prove the non-G0B risk-enabled `metrics_only=false` case stays false, returns
+  `SELECTION_NOT_AUTHORIZED`, selects original and keeps `selection_applied=false`.
+- Any test, linkage, manifest or deterministic hash failure stops the task. No retry, tuning or fallback
+  to old products is allowed.
 
-## 4. Verification, evidence and handoff
+## 4. Evidence, review and handoff
 
-- Build fresh task-local current bspline and plan-manager products below `results/icra27/icra040/`, using
-  only explicitly declared retained ICRA-039 IAP/plan-env/path-searching products as immutable
-  dependencies. Reject workspace-default, deleted-task, build-tree and missing-library linkage.
-- Run the new identity-precedence and metrics-boundary tests separately, then rerun ICRA-039 decision
-  11/11, initial/rebound integration 4/4, collision 17/17, P1 39/39, path-searching P4, occupancy epoch
-  and affected plan-manager 9/9 regressions. Record exact cases, exits and disabled tests.
-- Revalidate the deterministic positive fixture and its repeat hashes. The frozen collision fixture hash
-  must remain exact; no favorable-output retry is allowed.
-- Run `git diff --check`, focused formatting, JSON/schema validation, allowlist and zero-process audits.
-  No GPU preflight, ROS, launch, runner, analyzer, smoke, benchmark or campaign is authorized.
-- Update `docs/CHANGES.md`, `docs/TRACEABILITY.md` and `DEV_LOG.md` with `IAP-RQ-423`, the two repairs,
-  result matrix, tests, linkage and unchanged limitations.
-- Stage only authorized source/test changes and compact ICRA-040 evidence. Never stage build/install,
-  large logs, historical evidence or the protected PDF.
-- Commit and push implementation/evidence/documentation, then commit and push one final DEV_LOG-only
-  handoff. Every commit must contain `IAP-RQ-423`.
-- Report `P4_G0B_REPAIR_READY_FOR_REVIEW`. Do not claim G0B PASS, delete artifacts, authorize G0C/G0D,
-  apply the risk guide or execute P5.
+- Produce compact ICRA-041 JSON/XML/text evidence for build identity, linkage, exact tests/exits,
+  deterministic fixture and before/after retained-tree manifest equality. Do not stage build/install,
+  raw compiler logs or the full per-file manifests if they are large; stage their schemas, canonical
+  hashes and compact comparison result.
+- Run `git diff --check`, JSON/XML/schema, exact allowlist, protected hashes, branch divergence and
+  zero-process audits. No GPU preflight, ROS, launch, runner, analyzer, capture, smoke, benchmark or
+  campaign is authorized.
+- Update only `docs/CHANGES.md`, `docs/TRACEABILITY.md` and `DEV_LOG.md` with `IAP-RQ-423`, reproducible
+  commands, clean dependency provenance, results and explicit limitations.
+- Commit and push compact evidence/documentation, then commit and push one final DEV_LOG-only handoff.
+  Every commit must contain `IAP-RQ-423`.
+- Report `P4_G0B_CLEAN_REQUALIFICATION_READY_FOR_REVIEW`. Do not claim G0B PASS, delete artifacts,
+  authorize G0C/G0D, apply the risk guide or execute P5.
 
 ## Allowed files
 
-- `src/iap/planner/bspline_opt/src/p4_collision_guide.cpp`;
-- `src/iap/planner/bspline_opt/src/bspline_optimizer.cpp`;
-- the corresponding P4 decision and initial/rebound integration tests under
-  `src/iap/planner/bspline_opt/test/`;
-- the corresponding headers only if strictly necessary for the two repairs;
-- compact task-local evidence below `results/icra27/icra040/`;
+- new task-local build/install/log and compact evidence below `results/icra27/icra041/`, with only compact
+  evidence staged;
 - `DEV_LOG.md`;
 - `docs/CHANGES.md`;
 - `docs/TRACEABILITY.md`.
 
 ## Forbidden
 
-- No path-searching or plan-manager production change, CMake expansion, P0 risk-grid/predictor semantic
-  change, P1/P2/P3/P5 change, EGO collision/dynamics/heuristic/feasibility change, composite profile,
-  launch/runner/analyzer/capture, scope/plan/gate/requirements, Supervisor-owned, historical/PDF or
-  external-repository change.
-- No cleanup, Low design-debt refactor, interface redesign, threshold choice/freeze, calibration,
-  G0C/G0D, risk-guide constraint application, final B-spline lineage, P5 integration, GPU/ROS/live map,
-  smoke, benchmark, bag/RViz run or formal campaign.
+- No product source, header, test, CMake, launch/config, fixture, requirements, scope/plan/gate,
+  Supervisor-owned, protected PDF, historical evidence or external-repository change.
+- No read-time dependency on or execution from ICRA-039/040 build/install products; no write, cleanup or
+  attempted restoration below them.
+- No design-debt refactor, threshold choice/freeze, calibration, G0C/G0D, risk-guide application, final
+  B-spline lineage, P5 integration, GPU/ROS/live map, smoke, benchmark, bag/RViz run or formal campaign.

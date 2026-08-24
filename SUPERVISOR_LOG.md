@@ -1,5 +1,75 @@
 # ICRA Supervisor Log
 
+## 2026-08-24 — ICRA-040 review REQUEST_CHANGES and ICRA-041 clean requalification
+
+### Review identity and synchronization
+
+- Fixed review range: `d9e9e45db24d9a386578f544758aa829b6080cae...57ea9263b90987245e352033a82241139d3ac2f1`.
+- Reviewed repair `70131a1`, fail-closed review/evidence `072a441` and final DEV_LOG-only handoff
+  `57ea926`; every commit carries applicable `IAP-RQ-423`.
+- After fetch, `HEAD` and `origin/dev/icra` matched at divergence `0 0`. All 20 changed paths match the
+  ICRA-040 allowlist. The frozen collision fixture and protected PDF hashes remain exact at
+  `49a676a5…c788` and `1f07da56…44f6`; the PDF remains the sole untracked file.
+
+### Standards axis
+
+- Verdict: `REQUEST_CHANGES`; one High documented-process violation and four Low judgment smells; worst
+  High.
+- High retained-artifact violation: Builder's own evidence records that an old ICRA-039 integration
+  CTest was accidentally invoked and rewrote retained build-tree test logs. This violates ICRA-040's
+  requirement that all ten retained directories remain untouched throughout development/review. A later
+  path/size-manifest match cannot prove byte-for-byte restoration or undo the process event.
+- Low judgments: repeated identity/epoch checkpoint shapes, repeated precedence-test assertions, two
+  adjacent Boolean integration-helper arguments and the vague `guideSeedMatrix()` test-helper name.
+  These do not justify product refactor in the bounded requalification task.
+- Requirement/docs synchronization, ownership, allowlist, commit messages, current artifact retention,
+  no-live boundary and protected files otherwise conform.
+
+### Spec axis
+
+- Verdict: `REQUEST_CHANGES`; one High finding; worst High.
+- High provenance nonconformance: `NEXT_TASK.md §1` required the ten ICRA-039 build/install trees to be
+  untouched throughout. The admitted CTest execution changed retained logs and cannot be repaired
+  retroactively; ICRA-040 therefore cannot be represented as an unqualified G0B PASS.
+- The two requested functional repairs conform. Identity/epoch is checked immediately after original
+  search before interpreting failure, timeout or geometry; invalidation exposes no guides and runs no
+  risk search. Stable outcomes retain their typed results. `metrics_only` is no longer silently forced,
+  G0B opts in explicitly and the non-G0B false boundary remains truthful with original selection,
+  `SELECTION_NOT_AUTHORIZED` and no application.
+- Exit-code evidence, corrected docs, source scope, deterministic fixture, fresh ICRA-040 products and
+  forbidden G0C/G0D/live boundaries otherwise conform.
+
+### Independent functional verification and Gate verdict
+
+- Supervisor executed binaries directly, without CTest or log output into retained trees, and reproduced
+  decision 15/15, integration 5/5, collision 17/17, P1 39/39, path-searching P4 5/5, occupancy 6/6 and
+  all nine plan-manager executables with 186 active cases, one existing disabled case and zero failures.
+- The production-A* hashes and risk metrics repeat exactly. With the recorded explicit runtime prefix,
+  dynamic resolution uses ICRA-040 bspline/plan-manager plus intended retained ICRA-039 IAP, plan-env and
+  path-searching products; protected hashes, diff check and zero-process audit pass.
+- Functional correctness is accepted, but green tests cannot erase broken artifact provenance. Verdict:
+  `ICRA040_REVIEW_REQUEST_CHANGES_RETAINED_ARTIFACT_PROVENANCE`; P4-G0A remains PASS and P4-G0B remains
+  unqualified.
+- No GPU, ROS/live flow, launch, smoke, benchmark, calibration, G0C/G0D or P5 work ran.
+
+### Artifact lifecycle
+
+- All ten ICRA-039 and four ICRA-040 build/install directories remain present, untracked and retained,
+  totaling approximately 6.7 GiB. No directory was deleted during this REQUEST_CHANGES review.
+- ICRA-041 must treat all 14 as opaque and build a fresh self-contained chain. Cleanup is Supervisor-only
+  after a future Review PASS and pushed documentation; successful clean requalification will supersede
+  the old task-local product evidence.
+
+### Required next action
+
+- Unique task: `ICRA-041 / P4_G0B`, defined in `NEXT_TASK.md`; active role is `DEEPSEEK`, state
+  `TASK_READY`.
+- Make zero product edits. Build fresh IAP/plan-env/path-searching/bspline/plan-manager products under
+  ICRA-041 without consuming old/default IAP/planner products, rerun the complete deterministic matrix,
+  and prove no further write to retained trees with before/after byte-level manifests.
+- No product repair, calibration/G0C, thresholds, risk-guide application, G0D/P5, live flow or cleanup is
+  authorized.
+
 ## 2026-08-24 — ICRA-039 review REQUEST_CHANGES and ICRA-040 focused repair authorization
 
 ### Review identity and synchronization
