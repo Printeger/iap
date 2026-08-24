@@ -1,5 +1,72 @@
 # ICRA Supervisor Log
 
+## 2026-08-24 — ICRA-043 review REQUEST_CHANGES and ICRA-044 live-artifact repair
+
+### Review identity and synchronization
+
+- Fixed review range: `71d0dfbddac70266da074d73ea1d5563c622ab0d...c06e2bc7438fce077d66ed3e5cea03b89c95bc80`.
+- Reviewed implementation/evidence `eb3b3f4` and final DEV_LOG-only handoff `c06e2bc`; both carry
+  applicable `IAP-RQ-423`.
+- After fetch, `HEAD` and `origin/dev/icra` matched at divergence `0 0`. All 16 changed paths match the
+  ICRA-043 allowlist; no C++/header/CMake/product or Supervisor-owned file changed. The protected PDF is
+  the sole untracked file at exact SHA256 `1f07da56...44f6`.
+- Canonical protocol, proposed registry and fixture hashes reproduce as `9e89ea42...906d`,
+  `1a9e206c...eaff` and `985aabcd...10a`. Four threshold values remain null and application false.
+
+### Standards axis
+
+- Verdict: `REQUEST_CHANGES`; one Medium documented-standard violation and one Low judgment finding;
+  worst Medium.
+- Medium reproducibility documentation: `docs/CHANGES.md` records test counts and points to the compact
+  verification summary but does not contain a runnable reproduction command. This violates repository
+  DoD and ICRA-043 §4, which explicitly requires reproduction commands in CHANGES/TRACEABILITY/DEV_LOG.
+- Low Duplicated Code: three runner failure branches repeat mutation to FAILED, failed-run assignment,
+  persistence and return. A small helper could centralize the shape, but this is a judgment call and not
+  authorization for broader refactoring.
+- Ownership, allowlist, requirement mapping, two-commit handoff, protected artifacts, retained products
+  and no-live/no-compiled boundaries otherwise conform.
+
+### Spec axis
+
+- Verdict: `REQUEST_CHANGES`; three findings; worst High.
+- High production-inventory incompatibility: `test_planner.launch.py` always writes
+  `exports/test_planner_manifest.json`, and the registered IAP path can write
+  `runtime/profiling/iap_timing.csv`. The analyzer rejects every non-G0C manifest name and every
+  non-decision CSV anywhere below a run. Adding either mandatory production-shaped file to an otherwise
+  valid 15-run bundle reproducibly changes `DRAFT_ELIGIBLE` to `REJECTED`; a real live bundle cannot pass.
+- High dirty-root fail-open execution: the runner checks only state, preflight and the 15 registered
+  directories. With a pre-existing unregistered/retry child, Supervisor's synthetic executor was still
+  called. The runner can therefore spend live runs creating a bundle its analyzer is guaranteed to reject.
+- Medium self-invalidating analyzer output: arbitrary `--output <runs_root>/custom.json` returned zero
+  and wrote the file, while immediate reanalysis rejected it as unregistered. Existing named analysis
+  output is silently overwritten. This contradicts the exact named inventory and no-overwrite intent.
+- The ordered ledger, per-run nonempty rule, exact 36-column schema, complete typed identity, duplicate
+  rejection, path-ratio tolerance/hash cascade and original ICRA-042 exploit repairs otherwise conform.
+
+### Independent verification and Gate verdict
+
+- Supervisor reproduced focused protocol 4/4, runner 11/11, analyzer 13/13, launch contract 6/6 and
+  launch golden 16/16 (50/50), plus repository Python 389/389. Syntax and `git diff --check` pass; one
+  existing subprocess `ResourceWarning` remains non-blocking.
+- Synthetic adversarial checks independently reproduced all three Spec defects without GPU/ROS/launch:
+  production manifest/timing paths reject, a dirty root reaches the fake launch boundary, and an
+  arbitrary analyzer output exits zero then makes reanalysis reject.
+- Green unit tests do not make the actual launch output compatible with the inventory. Verdict:
+  `ICRA043_REVIEW_REQUEST_CHANGES_LIVE_ARTIFACT_INVENTORY`. P4-G0A/G0B remain PASS; G0C protocol is not
+  live-ready, no calibration or threshold freeze is authorized.
+
+### Artifact lifecycle and required next action
+
+- All twelve ICRA-042 build/install directories remain retained and untracked, approximately 4.6 GiB;
+  ICRA-043 created no compiled product tree. Review is `REQUEST_CHANGES`, so no cleanup is eligible.
+- Unique next task: `ICRA-044 / P4_G0C_LIVE_ARTIFACT_REPAIR`, defined in `NEXT_TASK.md`; active role is
+  `DEEPSEEK`, state `TASK_READY`.
+- Reject every dirty root before GPU, replace the nested filename blacklist with a post-launch per-run
+  path/size/SHA inventory that accepts and binds real production artifacts, constrain analyzer output
+  names/refuse overwrite, and put runnable commands directly in `docs/CHANGES.md`.
+- No GPU/ROS/live calibration, threshold change, product behavior, G0D/P5, retained-tree execution/write
+  or artifact cleanup is authorized.
+
 ## 2026-08-24 — ICRA-042 review REQUEST_CHANGES and ICRA-043 provenance repair
 
 ### Review identity and synchronization
