@@ -1,0 +1,587 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="(empty)"
+	tests="9"
+	failures="0"
+	disabled="0"
+	skipped="0"
+	hostname="mint-X"
+	time="2"
+	timestamp="2026-08-24T06:04:00"
+	>
+	<testcase name="test_gate0_qualification_writer" classname="test_gate0_qualification_writer" time="0.0463753" status="run">
+		<properties>
+			<property name="cmake_labels" value="gtest"/>
+		</properties>
+		<system-out>-- run_test.py: invoking following command in '/home/dev/ws_iap/src/iap/results/icra27/icra040/build_plan_manage':
+ - /home/dev/ws_iap/src/iap/results/icra27/icra040/build_plan_manage/test_gate0_qualification_writer --gtest_output=xml:/home/dev/ws_iap/src/iap/results/icra27/icra040/build_plan_manage/test_results/ego_planner/test_gate0_qualification_writer.gtest.xml
+Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc
+[==========] Running 3 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 3 tests from Gate0QualificationWriter
+[ RUN      ] Gate0QualificationWriter.DisabledIsNoOp
+[       OK ] Gate0QualificationWriter.DisabledIsNoOp (0 ms)
+[ RUN      ] Gate0QualificationWriter.WritesStableSchemaAndEveryControlPoint
+[       OK ] Gate0QualificationWriter.WritesStableSchemaAndEveryControlPoint (0 ms)
+[ RUN      ] Gate0QualificationWriter.ConcurrentAppendsKeepOneHeaderAndCompleteRows
+[       OK ] Gate0QualificationWriter.ConcurrentAppendsKeepOneHeaderAndCompleteRows (2 ms)
+[----------] 3 tests from Gate0QualificationWriter (2 ms total)
+
+[----------] Global test environment tear-down
+[==========] 3 tests from 1 test suite ran. (2 ms total)
+[  PASSED  ] 3 tests.
+-- run_test.py: return code 0
+-- run_test.py: inject classname prefix into gtest result file '/home/dev/ws_iap/src/iap/results/icra27/icra040/build_plan_manage/test_results/ego_planner/test_gate0_qualification_writer.gtest.xml'
+-- run_test.py: verify result file '/home/dev/ws_iap/src/iap/results/icra27/icra040/build_plan_manage/test_results/ego_planner/test_gate0_qualification_writer.gtest.xml'
+</system-out>
+	</testcase>
+	<testcase name="test_p0_risk_grid_runtime" classname="test_p0_risk_grid_runtime" time="2.00735" status="run">
+		<properties>
+			<property name="cmake_labels" value="gtest"/>
+		</properties>
+		<system-out>-- run_test.py: invoking following command in '/home/dev/ws_iap/src/iap/results/icra27/icra040/build_plan_manage':
+ - /home/dev/ws_iap/src/iap/results/icra27/icra040/build_plan_manage/test_p0_risk_grid_runtime --gtest_output=xml:/home/dev/ws_iap/src/iap/results/icra27/icra040/build_plan_manage/test_results/ego_planner/test_p0_risk_grid_runtime.gtest.xml
+Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc
+[==========] Running 79 tests from 3 test suites.
+[----------] Global test environment set-up.
+[----------] 12 tests from P0RiskGridRuntimeTest
+[ RUN      ] P0RiskGridRuntimeTest.DisabledConfigCreatesNoRuntimeObject
+[       OK ] P0RiskGridRuntimeTest.DisabledConfigCreatesNoRuntimeObject (18 ms)
+[ RUN      ] P0RiskGridRuntimeTest.GnssEpochFreshnessDefaultIsTwoSeconds
+[       OK ] P0RiskGridRuntimeTest.GnssEpochFreshnessDefaultIsTwoSeconds (3 ms)
+[ RUN      ] P0RiskGridRuntimeTest.GnssEpochFreshnessCanBeOverridden
+[       OK ] P0RiskGridRuntimeTest.GnssEpochFreshnessCanBeOverridden (2 ms)
+[ RUN      ] P0RiskGridRuntimeTest.PredictorParamsCanBeOverridden
+[       OK ] P0RiskGridRuntimeTest.PredictorParamsCanBeOverridden (3 ms)
+[ RUN      ] P0RiskGridRuntimeTest.P0_6FixtureParamsCanBeOverridden
+[       OK ] P0RiskGridRuntimeTest.P0_6FixtureParamsCanBeOverridden (3 ms)
+[ RUN      ] P0RiskGridRuntimeTest.P5_3FixtureParamsCanBeOverridden
+[       OK ] P0RiskGridRuntimeTest.P5_3FixtureParamsCanBeOverridden (3 ms)
+[ RUN      ] P0RiskGridRuntimeTest.P5_4FixtureParamsCanBeOverridden
+[       OK ] P0RiskGridRuntimeTest.P5_4FixtureParamsCanBeOverridden (2 ms)
+[ RUN      ] P0RiskGridRuntimeTest.P5_6FixtureParamsCanBeOverridden
+[       OK ] P0RiskGridRuntimeTest.P5_6FixtureParamsCanBeOverridden (3 ms)
+[ RUN      ] P0RiskGridRuntimeTest.InvalidPredictorSourceModeThrows
+[       OK ] P0RiskGridRuntimeTest.InvalidPredictorSourceModeThrows (3 ms)
+[ RUN      ] P0RiskGridRuntimeTest.InvalidPredictorGnssEpochPolicyThrows
+[       OK ] P0RiskGridRuntimeTest.InvalidPredictorGnssEpochPolicyThrows (3 ms)
+[ RUN      ] P0RiskGridRuntimeTest.EnabledRuntimeConstructsWithInjectedProvider
+[INFO] [1787551440.519443668] [p0_enabled_runtime_test]: [p0] risk grid ready=0 stale=1 age=inf valid=0.000 unknown=1.000 gen=0 provider_queries=0 occupied_skip=0 provider_stale=0 provider_invalid=0 gnss_used=0 lidar_used=0 prior_used=0 stale_current_prior=0 regularized=0 conservative_max=0 lidar_points=0 lidar_fim_primitives=0 lidar_fim_valid_normals=0 lidar_fim_fallback=not_evaluated dominant_unknown=:0 refresh_stamp=nan grid_stamp=nan elapsed_ms=0.006 queries=0 reason=message_stamp_unavailable
+[       OK ] P0RiskGridRuntimeTest.EnabledRuntimeConstructsWithInjectedProvider (8 ms)
+[ RUN      ] P0RiskGridRuntimeTest.RawHealthTopicIsAbsoluteAndIndependentOfDebugFlag
+[       OK ] P0RiskGridRuntimeTest.RawHealthTopicIsAbsoluteAndIndependentOfDebugFlag (4 ms)
+[----------] 12 tests from P0RiskGridRuntimeTest (60 ms total)
+
+[----------] 2 tests from SafetyRvizPublisherTest
+[ RUN      ] SafetyRvizPublisherTest.RiskGridHealthMarkerUsesProvidedStamp
+[       OK ] SafetyRvizPublisherTest.RiskGridHealthMarkerUsesProvidedStamp (0 ms)
+[ RUN      ] SafetyRvizPublisherTest.AcceptedSnapshotCloudBypassesPeriodicThrottle
+[       OK ] SafetyRvizPublisherTest.AcceptedSnapshotCloudBypassesPeriodicThrottle (3 ms)
+[----------] 2 tests from SafetyRvizPublisherTest (3 ms total)
+
+[----------] 65 tests from P0RiskGridRuntimeStampTest
+[ RUN      ] P0RiskGridRuntimeStampTest.P0_6FixtureProducesOccupiedSkipHealth
+[       OK ] P0RiskGridRuntimeStampTest.P0_6FixtureProducesOccupiedSkipHealth (4 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.SlowRefreshKeepsDeadlineCadenceHealthAndInputProgress
+[       OK ] P0RiskGridRuntimeStampTest.SlowRefreshKeepsDeadlineCadenceHealthAndInputProgress (1099 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.HealthJsonPreservesExactSnapshotStampForEvidenceBinding
+[       OK ] P0RiskGridRuntimeStampTest.HealthJsonPreservesExactSnapshotStampForEvidenceBinding (4 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.BlockedRefreshDoesNotStarveHealthAndConsecutiveStaleReports
+[       OK ] P0RiskGridRuntimeStampTest.BlockedRefreshDoesNotStarveHealthAndConsecutiveStaleReports (217 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.RefreshAttemptEvidenceIsAtomicAcrossSuccessFailureAndRecovery
+[       OK ] P0RiskGridRuntimeStampTest.RefreshAttemptEvidenceIsAtomicAcrossSuccessFailureAndRecovery (5 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.OdomStampIsPreferredForRefreshTime
+[       OK ] P0RiskGridRuntimeStampTest.OdomStampIsPreferredForRefreshTime (3 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.OccupancyEpochFactoryFreezesOneGenerationPerRefresh
+[       OK ] P0RiskGridRuntimeStampTest.OccupancyEpochFactoryFreezesOneGenerationPerRefresh (4 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.MissingOccupancyEpochFromConfiguredFactoryFailsClosed
+[       OK ] P0RiskGridRuntimeStampTest.MissingOccupancyEpochFromConfiguredFactoryFailsClosed (4 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.CurrentStampIsFallbackWhenOdomInvalid
+[       OK ] P0RiskGridRuntimeStampTest.CurrentStampIsFallbackWhenOdomInvalid (4 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.MessageStampIsNaNWhenMessageStampsInvalid
+[       OK ] P0RiskGridRuntimeStampTest.MessageStampIsNaNWhenMessageStampsInvalid (4 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.SnapshotFailureReasonDistinguishesSourceStates
+[       OK ] P0RiskGridRuntimeStampTest.SnapshotFailureReasonDistinguishesSourceStates (4 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.InputReadinessReportsSeenValidAndFreshSources
+[       OK ] P0RiskGridRuntimeStampTest.InputReadinessReportsSeenValidAndFreshSources (4 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.StaleOdomOrCurrentPreventsSnapshot
+[       OK ] P0RiskGridRuntimeStampTest.StaleOdomOrCurrentPreventsSnapshot (4 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.GnssRangeCallbackCompletesWithoutRecursiveLock
+[       OK ] P0RiskGridRuntimeStampTest.GnssRangeCallbackCompletesWithoutRecursiveLock (4 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.NonNullInvalidGnssCallbackPublishesOneAbsentGeneration
+[       OK ] P0RiskGridRuntimeStampTest.NonNullInvalidGnssCallbackPublishesOneAbsentGeneration (4 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.InvalidGnssCallbackDuringProviderWorkAbortsAndLaterEpochRecovers
+[       OK ] P0RiskGridRuntimeStampTest.InvalidGnssCallbackDuringProviderWorkAbortsAndLaterEpochRecovers (5 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.OptionalExplicitAbsentToValidCallbackPublishesCapturedAbsence
+[       OK ] P0RiskGridRuntimeStampTest.OptionalExplicitAbsentToValidCallbackPublishesCapturedAbsence (4 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.AutoExplicitAbsentToAbsentCallbackPublishesCapturedAbsence
+[       OK ] P0RiskGridRuntimeStampTest.AutoExplicitAbsentToAbsentCallbackPublishesCapturedAbsence (5 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.NeverSeenOptionalAndAutoPublishCapturedAbsenceOnFirstCallback
+[       OK ] P0RiskGridRuntimeStampTest.NeverSeenOptionalAndAutoPublishCapturedAbsenceOnFirstCallback (9 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.InactiveGnssCallbacksDoNotAbortLidarOnlyOrDisabledRefresh
+[       OK ] P0RiskGridRuntimeStampTest.InactiveGnssCallbacksDoNotAbortLidarOnlyOrDisabledRefresh (9 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.OptionalAndAutoNeverReuseEpochClearedByInvalidCallback
+[       OK ] P0RiskGridRuntimeStampTest.OptionalAndAutoNeverReuseEpochClearedByInvalidCallback (9 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.GnssOriginMapValidityMatrixIsTruthful
+[       OK ] P0RiskGridRuntimeStampTest.GnssOriginMapValidityMatrixIsTruthful (4 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.RefreshSnapshotUsesMessageStamp
+[       OK ] P0RiskGridRuntimeStampTest.RefreshSnapshotUsesMessageStamp (4 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.UseCurrentIntegrityPriorFalseOmitsLambdaBase
+[       OK ] P0RiskGridRuntimeStampTest.UseCurrentIntegrityPriorFalseOmitsLambdaBase (4 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.PointCloudXyzParsingStoresFiniteMapPoints
+[       OK ] P0RiskGridRuntimeStampTest.PointCloudXyzParsingStoresFiniteMapPoints (4 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.PointCloudNormalFieldsGenerateFimPrimitives
+[       OK ] P0RiskGridRuntimeStampTest.PointCloudNormalFieldsGenerateFimPrimitives (4 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.PointCloudWithoutNormalsGeneratesPcaFimPrimitives
+[       OK ] P0RiskGridRuntimeStampTest.PointCloudWithoutNormalsGeneratesPcaFimPrimitives (4 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.InvalidOrEmptyPointCloudClearsLidarPredictorInputs
+[       OK ] P0RiskGridRuntimeStampTest.InvalidOrEmptyPointCloudClearsLidarPredictorInputs (4 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.LidarOnlyInvalidGnssCallbackStillRebuildsCurrentHorizons
+[       OK ] P0RiskGridRuntimeStampTest.LidarOnlyInvalidGnssCallbackStillRebuildsCurrentHorizons (8 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.LidarOnlyDisabledWithFimPrimitivesUsesLidarAndNotGnss
+[       OK ] P0RiskGridRuntimeStampTest.LidarOnlyDisabledWithFimPrimitivesUsesLidarAndNotGnss (4 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.FusionAutoMissingGnssEpochUsesLidarAndNotStaleField
+[       OK ] P0RiskGridRuntimeStampTest.FusionAutoMissingGnssEpochUsesLidarAndNotStaleField (4 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.StaleCurrentPriorWithLidarGoodPreventsSnapshot
+[       OK ] P0RiskGridRuntimeStampTest.StaleCurrentPriorWithLidarGoodPreventsSnapshot (4 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.StaleCurrentWithNoUsablePredictorSourcePreventsSnapshot
+[       OK ] P0RiskGridRuntimeStampTest.StaleCurrentWithNoUsablePredictorSourcePreventsSnapshot (4 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.LidarOnlyDisabledMissingGnssEpochDoesNotMakeFrameStale
+[       OK ] P0RiskGridRuntimeStampTest.LidarOnlyDisabledMissingGnssEpochDoesNotMakeFrameStale (4 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.ProductionProviderBindsVersionedImmutableGnssOccupancyEpoch
+[       OK ] P0RiskGridRuntimeStampTest.ProductionProviderBindsVersionedImmutableGnssOccupancyEpoch (5 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.NewerLiveSourcesDoNotRevokeCapturedProductionTransaction
+[       OK ] P0RiskGridRuntimeStampTest.NewerLiveSourcesDoNotRevokeCapturedProductionTransaction (5 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.PositiveHorizonEarlyFailureKeepsPreviousGeneration
+[       OK ] P0RiskGridRuntimeStampTest.PositiveHorizonEarlyFailureKeepsPreviousGeneration (5 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.WithinRefreshSpatialDedupReportsExactProductionCounts
+[       OK ] P0RiskGridRuntimeStampTest.WithinRefreshSpatialDedupReportsExactProductionCounts (5 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.ProductionProviderReusesSpatialAdviceAcrossPriorOnlyRefresh
+[       OK ] P0RiskGridRuntimeStampTest.ProductionProviderReusesSpatialAdviceAcrossPriorOnlyRefresh (8 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.NewerIdenticalRawOccupancyRetainsAllLosAndUsesCurrentDiagnostics
+[       OK ] P0RiskGridRuntimeStampTest.NewerIdenticalRawOccupancyRetainsAllLosAndUsesCurrentDiagnostics (8 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.AddedRemovedAndMixedRawDeltaEachForceCompleteFreshEquivalentRebuild
+[       OK ] P0RiskGridRuntimeStampTest.AddedRemovedAndMixedRawDeltaEachForceCompleteFreshEquivalentRebuild (26 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.SameVersionContradictionFailsButNewerVersionDoesNotRevokeCapture
+[       OK ] P0RiskGridRuntimeStampTest.SameVersionContradictionFailsButNewerVersionDoesNotRevokeCapture (5 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.NewerPriorGnssAndLidarVersionsPublishThenApplyOnNextRefresh
+[       OK ] P0RiskGridRuntimeStampTest.NewerPriorGnssAndLidarVersionsPublishThenApplyOnNextRefresh (16 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.ChangedProducerWithCoincidentGenerationCannotReuseLosContent
+[       OK ] P0RiskGridRuntimeStampTest.ChangedProducerWithCoincidentGenerationCannotReuseLosContent (5 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.DisabledProductionSourcesDoNotEraseStationarySpatialReuse
+[       OK ] P0RiskGridRuntimeStampTest.DisabledProductionSourcesDoNotEraseStationarySpatialReuse (16 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.StationarySubVoxelAndOneVoxelRollMatchFreshFullForWorkersOneTwoFour
+[       OK ] P0RiskGridRuntimeStampTest.StationarySubVoxelAndOneVoxelRollMatchFreshFullForWorkersOneTwoFour (54 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.NewerOccupancyGenerationPublishesCaptureThenAppearsNextRefresh
+[       OK ] P0RiskGridRuntimeStampTest.NewerOccupancyGenerationPublishesCaptureThenAppearsNextRefresh (4 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.RematerializedLosWithStableSourceVersionUsesOneCapturePerRefresh
+[       OK ] P0RiskGridRuntimeStampTest.RematerializedLosWithStableSourceVersionUsesOneCapturePerRefresh (4 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.MissingActiveLidarFailsBeforeBatchWithTypedAttemptDiagnostic
+[       OK ] P0RiskGridRuntimeStampTest.MissingActiveLidarFailsBeforeBatchWithTypedAttemptDiagnostic (4 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.RequiredGnssAndZeroCurrentProvenancePublishTypedAttemptFailure
+[       OK ] P0RiskGridRuntimeStampTest.RequiredGnssAndZeroCurrentProvenancePublishTypedAttemptFailure (28 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.ExpiredStableOccupancyOwnerDuringBatchFailsClosed
+[       OK ] P0RiskGridRuntimeStampTest.ExpiredStableOccupancyOwnerDuringBatchFailsClosed (4 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.ProductionSameGenerationStableOccupancyOwnerReplacementFailsClosed
+[       OK ] P0RiskGridRuntimeStampTest.ProductionSameGenerationStableOccupancyOwnerReplacementFailsClosed (5 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.ProductionGnssTtlRetainsThenExpiresOriginalSpatialEpoch
+[       OK ] P0RiskGridRuntimeStampTest.ProductionGnssTtlRetainsThenExpiresOriginalSpatialEpoch (5 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.ProductionWatchdogAdvancesOnlyAfterSuccessfulFullPublication
+[       OK ] P0RiskGridRuntimeStampTest.ProductionWatchdogAdvancesOnlyAfterSuccessfulFullPublication (5 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.ProductionLegacyCurrentTtlRetainsTdopThenExpiresAndRejectsDiscreteChange
+[       OK ] P0RiskGridRuntimeStampTest.ProductionLegacyCurrentTtlRetainsTdopThenExpiresAndRejectsDiscreteChange (5 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.NewerPriorGenerationDoesNotRevokeCapturedProviderBatch
+[       OK ] P0RiskGridRuntimeStampTest.NewerPriorGenerationDoesNotRevokeCapturedProviderBatch (4 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.NewerGnssEpochPublishesCaptureThenInvalidatesNextRefresh
+[       OK ] P0RiskGridRuntimeStampTest.NewerGnssEpochPublishesCaptureThenInvalidatesNextRefresh (5 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.LidarOwnerChangeDuringProductionRefreshKeepsPreviousGeneration
+[       OK ] P0RiskGridRuntimeStampTest.LidarOwnerChangeDuringProductionRefreshKeepsPreviousGeneration (5 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.NewerLidarGenerationPublishesCaptureThenInvalidatesNextRefresh
+[       OK ] P0RiskGridRuntimeStampTest.NewerLidarGenerationPublishesCaptureThenInvalidatesNextRefresh (5 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.DisabledLegacyMapOwnerChangeDoesNotAbortProductionRefresh
+[       OK ] P0RiskGridRuntimeStampTest.DisabledLegacyMapOwnerChangeDoesNotAbortProductionRefresh (4 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.MissingStaleOrWrongFrameOccupancyEpochKeepsPreviousGeneration
+[       OK ] P0RiskGridRuntimeStampTest.MissingStaleOrWrongFrameOccupancyEpochKeepsPreviousGeneration (4 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.OccupancyFreshnessUsesMessageClockAndRejectsFutureOrStaleEpochs
+[       OK ] P0RiskGridRuntimeStampTest.OccupancyFreshnessUsesMessageClockAndRejectsFutureOrStaleEpochs (11 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.MissingStaleOrInvalidGrowthPriorKeepsPreviousGeneration
+[       OK ] P0RiskGridRuntimeStampTest.MissingStaleOrInvalidGrowthPriorKeepsPreviousGeneration (4 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.FrozenPointZeroOneSigmaReachesPredictionAndGrowsMonotonically
+[       OK ] P0RiskGridRuntimeStampTest.FrozenPointZeroOneSigmaReachesPredictionAndGrowsMonotonically (8 ms)
+[ RUN      ] P0RiskGridRuntimeStampTest.MapLosAndGrowthWorkersOneTwoFourAreScientificallyEquivalent
+[       OK ] P0RiskGridRuntimeStampTest.MapLosAndGrowthWorkersOneTwoFourAreScientificallyEquivalent (14 ms)
+[ DISABLED ] P0RiskGridRuntimeStampTest.DISABLED_ICRA020_ProductionRuntimeWorkerScalingProfile
+[----------] 65 tests from P0RiskGridRuntimeStampTest (1778 ms total)
+
+[----------] Global test environment tear-down
+[==========] 79 tests from 3 test suites ran. (1842 ms total)
+[  PASSED  ] 79 tests.
+
+  YOU HAVE 1 DISABLED TEST
+
+-- run_test.py: return code 0
+-- run_test.py: inject classname prefix into gtest result file '/home/dev/ws_iap/src/iap/results/icra27/icra040/build_plan_manage/test_results/ego_planner/test_p0_risk_grid_runtime.gtest.xml'
+-- run_test.py: verify result file '/home/dev/ws_iap/src/iap/results/icra27/icra040/build_plan_manage/test_results/ego_planner/test_p0_risk_grid_runtime.gtest.xml'
+</system-out>
+	</testcase>
+	<testcase name="test_p0_occupancy_epoch_adapter" classname="test_p0_occupancy_epoch_adapter" time="0.0506331" status="run">
+		<properties>
+			<property name="cmake_labels" value="gtest"/>
+		</properties>
+		<system-out>-- run_test.py: invoking following command in '/home/dev/ws_iap/src/iap/results/icra27/icra040/build_plan_manage':
+ - /home/dev/ws_iap/src/iap/results/icra27/icra040/build_plan_manage/test_p0_occupancy_epoch_adapter --gtest_output=xml:/home/dev/ws_iap/src/iap/results/icra27/icra040/build_plan_manage/test_results/ego_planner/test_p0_occupancy_epoch_adapter.gtest.xml
+Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc
+[==========] Running 7 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 7 tests from P0OccupancyEpochAdapterTest
+[ RUN      ] P0OccupancyEpochAdapterTest.NormalizedIdentityIsSortedAndOrderIndependentAcrossNegativeWorldKeys
+[       OK ] P0OccupancyEpochAdapterTest.NormalizedIdentityIsSortedAndOrderIndependentAcrossNegativeWorldKeys (0 ms)
+[ RUN      ] P0OccupancyEpochAdapterTest.CompleteDeltaReportsExactSortedAddedRemovedAndBoundsAcrossSkippedEpochs
+[       OK ] P0OccupancyEpochAdapterTest.CompleteDeltaReportsExactSortedAddedRemovedAndBoundsAcrossSkippedEpochs (0 ms)
+[ RUN      ] P0OccupancyEpochAdapterTest.DeltaProofRejectsMisalignmentDuplicateGeometryOwnerAndVersionContradiction
+[       OK ] P0OccupancyEpochAdapterTest.DeltaProofRejectsMisalignmentDuplicateGeometryOwnerAndVersionContradiction (0 ms)
+[ RUN      ] P0OccupancyEpochAdapterTest.CompleteCapturedSetProducesMatchingImmutableLosGrid
+[       OK ] P0OccupancyEpochAdapterTest.CompleteCapturedSetProducesMatchingImmutableLosGrid (0 ms)
+[ RUN      ] P0OccupancyEpochAdapterTest.CapacityOrCountMismatchFailsClosed
+[       OK ] P0OccupancyEpochAdapterTest.CapacityOrCountMismatchFailsClosed (0 ms)
+[ RUN      ] P0OccupancyEpochAdapterTest.NonFiniteOrInvalidMetadataFailsClosed
+[       OK ] P0OccupancyEpochAdapterTest.NonFiniteOrInvalidMetadataFailsClosed (0 ms)
+[ RUN      ] P0OccupancyEpochAdapterTest.MissingStableSourceSeamFailsClosed
+[       OK ] P0OccupancyEpochAdapterTest.MissingStableSourceSeamFailsClosed (0 ms)
+[----------] 7 tests from P0OccupancyEpochAdapterTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 7 tests from 1 test suite ran. (0 ms total)
+[  PASSED  ] 7 tests.
+-- run_test.py: return code 0
+-- run_test.py: inject classname prefix into gtest result file '/home/dev/ws_iap/src/iap/results/icra27/icra040/build_plan_manage/test_results/ego_planner/test_p0_occupancy_epoch_adapter.gtest.xml'
+-- run_test.py: verify result file '/home/dev/ws_iap/src/iap/results/icra27/icra040/build_plan_manage/test_results/ego_planner/test_p0_occupancy_epoch_adapter.gtest.xml'
+</system-out>
+	</testcase>
+	<testcase name="test_p1_replan_admission" classname="test_p1_replan_admission" time="0.0417209" status="run">
+		<properties>
+			<property name="cmake_labels" value="gtest"/>
+		</properties>
+		<system-out>-- run_test.py: invoking following command in '/home/dev/ws_iap/src/iap/results/icra27/icra040/build_plan_manage':
+ - /home/dev/ws_iap/src/iap/results/icra27/icra040/build_plan_manage/test_p1_replan_admission --gtest_output=xml:/home/dev/ws_iap/src/iap/results/icra27/icra040/build_plan_manage/test_results/ego_planner/test_p1_replan_admission.gtest.xml
+Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc
+[==========] Running 6 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 6 tests from P1ReplanAdmissionTest
+[ RUN      ] P1ReplanAdmissionTest.SameRejectedGenerationIsSingleFlight
+[       OK ] P1ReplanAdmissionTest.SameRejectedGenerationIsSingleFlight (0 ms)
+[ RUN      ] P1ReplanAdmissionTest.RetryRequiresANewHealthyGeneration
+[       OK ] P1ReplanAdmissionTest.RetryRequiresANewHealthyGeneration (0 ms)
+[ RUN      ] P1ReplanAdmissionTest.UnavailableGenerationZeroAllowsOneBaseInitialFallback
+[       OK ] P1ReplanAdmissionTest.UnavailableGenerationZeroAllowsOneBaseInitialFallback (0 ms)
+[ RUN      ] P1ReplanAdmissionTest.UnavailableGenerationKeepsExistingTrajectory
+[       OK ] P1ReplanAdmissionTest.UnavailableGenerationKeepsExistingTrajectory (0 ms)
+[ RUN      ] P1ReplanAdmissionTest.DeferredTicksDoNotAllocatePlanningAttemptIds
+[       OK ] P1ReplanAdmissionTest.DeferredTicksDoNotAllocatePlanningAttemptIds (0 ms)
+[ RUN      ] P1ReplanAdmissionTest.P5BypassDoesNotMutateP1AdmissionState
+[       OK ] P1ReplanAdmissionTest.P5BypassDoesNotMutateP1AdmissionState (0 ms)
+[----------] 6 tests from P1ReplanAdmissionTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 6 tests from 1 test suite ran. (0 ms total)
+[  PASSED  ] 6 tests.
+-- run_test.py: return code 0
+-- run_test.py: inject classname prefix into gtest result file '/home/dev/ws_iap/src/iap/results/icra27/icra040/build_plan_manage/test_results/ego_planner/test_p1_replan_admission.gtest.xml'
+-- run_test.py: verify result file '/home/dev/ws_iap/src/iap/results/icra27/icra040/build_plan_manage/test_results/ego_planner/test_p1_replan_admission.gtest.xml'
+</system-out>
+	</testcase>
+	<testcase name="test_p1_candidate_selection" classname="test_p1_candidate_selection" time="0.0405465" status="run">
+		<properties>
+			<property name="cmake_labels" value="gtest"/>
+		</properties>
+		<system-out>-- run_test.py: invoking following command in '/home/dev/ws_iap/src/iap/results/icra27/icra040/build_plan_manage':
+ - /home/dev/ws_iap/src/iap/results/icra27/icra040/build_plan_manage/test_p1_candidate_selection --gtest_output=xml:/home/dev/ws_iap/src/iap/results/icra27/icra040/build_plan_manage/test_results/ego_planner/test_p1_candidate_selection.gtest.xml
+Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc
+[==========] Running 17 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 17 tests from P1CandidateSelectionTest
+[ RUN      ] P1CandidateSelectionTest.Attempt19And20AreSeparateReplansNotOneRankSet
+[       OK ] P1CandidateSelectionTest.Attempt19And20AreSeparateReplansNotOneRankSet (0 ms)
+[ RUN      ] P1CandidateSelectionTest.RanksOnlyCandidatesFromOneAttempt
+[       OK ] P1CandidateSelectionTest.RanksOnlyCandidatesFromOneAttempt (0 ms)
+[ RUN      ] P1CandidateSelectionTest.PrefersLowerFixedLatticeRiskBeforeOptimizerMerit
+[       OK ] P1CandidateSelectionTest.PrefersLowerFixedLatticeRiskBeforeOptimizerMerit (0 ms)
+[ RUN      ] P1CandidateSelectionTest.NarrowPeakFixtureRejectsAdaptiveMeanOnlyImprovement
+[       OK ] P1CandidateSelectionTest.NarrowPeakFixtureRejectsAdaptiveMeanOnlyImprovement (0 ms)
+[ RUN      ] P1CandidateSelectionTest.RejectsLegacyFixedLambdaConflictAndSelectsNormalizedWinner
+[       OK ] P1CandidateSelectionTest.RejectsLegacyFixedLambdaConflictAndSelectsNormalizedWinner (0 ms)
+[ RUN      ] P1CandidateSelectionTest.PrefersReplaceableCandidateOverLowerMeritIncumbentRegression
+[       OK ] P1CandidateSelectionTest.PrefersReplaceableCandidateOverLowerMeritIncumbentRegression (0 ms)
+[ RUN      ] P1CandidateSelectionTest.SharedForwardWindowCanReplaceShorterIncumbentWithoutFullTailBias
+[       OK ] P1CandidateSelectionTest.SharedForwardWindowCanReplaceShorterIncumbentWithoutFullTailBias (0 ms)
+[ RUN      ] P1CandidateSelectionTest.SharedWindowMissingForCandidateRejectsWithoutFullProfileFallback
+[       OK ] P1CandidateSelectionTest.SharedWindowMissingForCandidateRejectsWithoutFullProfileFallback (0 ms)
+[ RUN      ] P1CandidateSelectionTest.CollisionFeasibleCandidateReplacesCollisionInfeasibleIncumbent
+[       OK ] P1CandidateSelectionTest.CollisionFeasibleCandidateReplacesCollisionInfeasibleIncumbent (0 ms)
+[ RUN      ] P1CandidateSelectionTest.MissingIncumbentEvidenceIsNotTreatedAsCollisionInfeasible
+[       OK ] P1CandidateSelectionTest.MissingIncumbentEvidenceIsNotTreatedAsCollisionInfeasible (0 ms)
+[ RUN      ] P1CandidateSelectionTest.RejectsRefinementThatRegressesSelectedSeedMean
+[       OK ] P1CandidateSelectionTest.RejectsRefinementThatRegressesSelectedSeedMean (0 ms)
+[ RUN      ] P1CandidateSelectionTest.RejectsRefinementThatNoLongerStrictlyReplacesIncumbent
+[       OK ] P1CandidateSelectionTest.RejectsRefinementThatNoLongerStrictlyReplacesIncumbent (0 ms)
+[ RUN      ] P1CandidateSelectionTest.AcceptsFullSupportRefinementThatPreservesBothComparisons
+[       OK ] P1CandidateSelectionTest.AcceptsFullSupportRefinementThatPreservesBothComparisons (0 ms)
+[ RUN      ] P1CandidateSelectionTest.CollisionFeasibleRefinementReplacesCollisionInfeasibleIncumbent
+[       OK ] P1CandidateSelectionTest.CollisionFeasibleRefinementReplacesCollisionInfeasibleIncumbent (0 ms)
+[ RUN      ] P1CandidateSelectionTest.RefinementUsesSharedForwardWindowForIncumbentComparison
+[       OK ] P1CandidateSelectionTest.RefinementUsesSharedForwardWindowForIncumbentComparison (0 ms)
+[ RUN      ] P1CandidateSelectionTest.RejectsRefinementWithoutFullSupport
+[       OK ] P1CandidateSelectionTest.RejectsRefinementWithoutFullSupport (0 ms)
+[ RUN      ] P1CandidateSelectionTest.MetricsOnlyRefinementCannotGateTheBasePlannerPublication
+[       OK ] P1CandidateSelectionTest.MetricsOnlyRefinementCannotGateTheBasePlannerPublication (0 ms)
+[----------] 17 tests from P1CandidateSelectionTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 17 tests from 1 test suite ran. (0 ms total)
+[  PASSED  ] 17 tests.
+-- run_test.py: return code 0
+-- run_test.py: inject classname prefix into gtest result file '/home/dev/ws_iap/src/iap/results/icra27/icra040/build_plan_manage/test_results/ego_planner/test_p1_candidate_selection.gtest.xml'
+-- run_test.py: verify result file '/home/dev/ws_iap/src/iap/results/icra27/icra040/build_plan_manage/test_results/ego_planner/test_p1_candidate_selection.gtest.xml'
+</system-out>
+	</testcase>
+	<testcase name="test_p5_runtime_integrity_gate" classname="test_p5_runtime_integrity_gate" time="0.193202" status="run">
+		<properties>
+			<property name="cmake_labels" value="gtest"/>
+		</properties>
+		<system-out>-- run_test.py: invoking following command in '/home/dev/ws_iap/src/iap/results/icra27/icra040/build_plan_manage':
+ - /home/dev/ws_iap/src/iap/results/icra27/icra040/build_plan_manage/test_p5_runtime_integrity_gate --gtest_output=xml:/home/dev/ws_iap/src/iap/results/icra27/icra040/build_plan_manage/test_results/ego_planner/test_p5_runtime_integrity_gate.gtest.xml
+Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc
+[==========] Running 33 tests from 2 test suites.
+[----------] Global test environment set-up.
+[----------] 5 tests from PredAlertLimitProviderTest
+[ RUN      ] PredAlertLimitProviderTest.OccupancyClearanceUsesNearestInflatedObstacle
+[       OK ] PredAlertLimitProviderTest.OccupancyClearanceUsesNearestInflatedObstacle (0 ms)
+[ RUN      ] PredAlertLimitProviderTest.OccupancyClearanceUsesMaxWhenNoObstacleFound
+[       OK ] PredAlertLimitProviderTest.OccupancyClearanceUsesMaxWhenNoObstacleFound (0 ms)
+[ RUN      ] PredAlertLimitProviderTest.PositionDependentModesFailWithoutMap
+[       OK ] PredAlertLimitProviderTest.PositionDependentModesFailWithoutMap (0 ms)
+[ RUN      ] PredAlertLimitProviderTest.VerticalBoundOnlyUsesHeightMargin
+[       OK ] PredAlertLimitProviderTest.VerticalBoundOnlyUsesHeightMargin (0 ms)
+[ RUN      ] PredAlertLimitProviderTest.PositionDependentModesRejectMapOutsidePosition
+[       OK ] PredAlertLimitProviderTest.PositionDependentModesRejectMapOutsidePosition (0 ms)
+[----------] 5 tests from PredAlertLimitProviderTest (0 ms total)
+
+[----------] 28 tests from P5RuntimeIntegrityGateTest
+[ RUN      ] P5RuntimeIntegrityGateTest.DisabledConfigCreatesNoRuntimeObject
+[       OK ] P5RuntimeIntegrityGateTest.DisabledConfigCreatesNoRuntimeObject (17 ms)
+[ RUN      ] P5RuntimeIntegrityGateTest.CurrentStaleEscalates
+[       OK ] P5RuntimeIntegrityGateTest.CurrentStaleEscalates (0 ms)
+[ RUN      ] P5RuntimeIntegrityGateTest.CurrentInvalidIsExplicit
+[       OK ] P5RuntimeIntegrityGateTest.CurrentInvalidIsExplicit (0 ms)
+[ RUN      ] P5RuntimeIntegrityGateTest.FutureUnknownRequestsReplanThenEscalatesAfterThreshold
+[       OK ] P5RuntimeIntegrityGateTest.FutureUnknownRequestsReplanThenEscalatesAfterThreshold (0 ms)
+[ RUN      ] P5RuntimeIntegrityGateTest.SnapshotUnavailableRemainsStartupReplanEvidenceOnly
+[       OK ] P5RuntimeIntegrityGateTest.SnapshotUnavailableRemainsStartupReplanEvidenceOnly (0 ms)
+[ RUN      ] P5RuntimeIntegrityGateTest.FutureBadInsideEmergencyTimeRequestsCandidate
+[       OK ] P5RuntimeIntegrityGateTest.FutureBadInsideEmergencyTimeRequestsCandidate (0 ms)
+[ RUN      ] P5RuntimeIntegrityGateTest.ConcurrentCurrentLowMarginAndFutureBadCarryBothReasons
+[       OK ] P5RuntimeIntegrityGateTest.ConcurrentCurrentLowMarginAndFutureBadCarryBothReasons (0 ms)
+[ RUN      ] P5RuntimeIntegrityGateTest.CurrentLowMarginDoesNotForgeFutureReason
+[       OK ] P5RuntimeIntegrityGateTest.CurrentLowMarginDoesNotForgeFutureReason (0 ms)
+[ RUN      ] P5RuntimeIntegrityGateTest.CurrentMsgConstantModeMatchesLegacyFutureAL
+[       OK ] P5RuntimeIntegrityGateTest.CurrentMsgConstantModeMatchesLegacyFutureAL (0 ms)
+[ RUN      ] P5RuntimeIntegrityGateTest.PredictionHorizonTailUsesCoveredSafeSamples
+[       OK ] P5RuntimeIntegrityGateTest.PredictionHorizonTailUsesCoveredSafeSamples (0 ms)
+[ RUN      ] P5RuntimeIntegrityGateTest.ConfigConstantModeCanTriggerFutureBad
+[       OK ] P5RuntimeIntegrityGateTest.ConfigConstantModeCanTriggerFutureBad (0 ms)
+[ RUN      ] P5RuntimeIntegrityGateTest.VerticalBoundOnlyModeCanTriggerFutureBad
+[       OK ] P5RuntimeIntegrityGateTest.VerticalBoundOnlyModeCanTriggerFutureBad (0 ms)
+[ RUN      ] P5RuntimeIntegrityGateTest.InvalidPredictedALCountsAsUnknown
+[       OK ] P5RuntimeIntegrityGateTest.InvalidPredictedALCountsAsUnknown (0 ms)
+[ RUN      ] P5RuntimeIntegrityGateTest.FinalGateFailureIsReturnedBeforePublishPath
+[       OK ] P5RuntimeIntegrityGateTest.FinalGateFailureIsReturnedBeforePublishPath (0 ms)
+[ RUN      ] P5RuntimeIntegrityGateTest.StartupSnapshotUnavailableDoesNotEscalateFinalGateFailure
+[       OK ] P5RuntimeIntegrityGateTest.StartupSnapshotUnavailableDoesNotEscalateFinalGateFailure (0 ms)
+[ RUN      ] P5RuntimeIntegrityGateTest.TransientCurrentStaleDoesNotEscalateFinalGateFailure
+[       OK ] P5RuntimeIntegrityGateTest.TransientCurrentStaleDoesNotEscalateFinalGateFailure (0 ms)
+[ RUN      ] P5RuntimeIntegrityGateTest.FutureUnknownDurationClearsAfterFieldRecovery
+[       OK ] P5RuntimeIntegrityGateTest.FutureUnknownDurationClearsAfterFieldRecovery (0 ms)
+[ RUN      ] P5RuntimeIntegrityGateTest.FinalGateLightRiskCurrentLowMarginDoesNotAccumulateFailureBudget
+[       OK ] P5RuntimeIntegrityGateTest.FinalGateLightRiskCurrentLowMarginDoesNotAccumulateFailureBudget (0 ms)
+[ RUN      ] P5RuntimeIntegrityGateTest.RuntimeSustainedCurrentLowMarginEscalates
+[       OK ] P5RuntimeIntegrityGateTest.RuntimeSustainedCurrentLowMarginEscalates (0 ms)
+[ RUN      ] P5RuntimeIntegrityGateTest.FinalGateFailureCountEscalatesForFutureLowMarginReplan
+[       OK ] P5RuntimeIntegrityGateTest.FinalGateFailureCountEscalatesForFutureLowMarginReplan (0 ms)
+[ RUN      ] P5RuntimeIntegrityGateTest.FinalGatePassResetsFailureBudget
+[       OK ] P5RuntimeIntegrityGateTest.FinalGatePassResetsFailureBudget (0 ms)
+[ RUN      ] P5RuntimeIntegrityGateTest.NominalFinalGateKeepsFailureCountZero
+[       OK ] P5RuntimeIntegrityGateTest.NominalFinalGateKeepsFailureCountZero (0 ms)
+[ RUN      ] P5RuntimeIntegrityGateTest.FutureSamplesCarryTrajectoryTiming
+[       OK ] P5RuntimeIntegrityGateTest.FutureSamplesCarryTrajectoryTiming (0 ms)
+[ RUN      ] P5RuntimeIntegrityGateTest.P5_7FixtureRejectsFinalCandidateWithoutRuntimeContamination
+[       OK ] P5RuntimeIntegrityGateTest.P5_7FixtureRejectsFinalCandidateWithoutRuntimeContamination (0 ms)
+[ RUN      ] P5RuntimeIntegrityGateTest.P5_7FixtureEnabledButIneffectiveDoesNotRejectFinalCandidate
+[       OK ] P5RuntimeIntegrityGateTest.P5_7FixtureEnabledButIneffectiveDoesNotRejectFinalCandidate (0 ms)
+[ RUN      ] P5RuntimeIntegrityGateTest.NoFutureTrajectoryWindowIsDiagnosticUnknown
+[       OK ] P5RuntimeIntegrityGateTest.NoFutureTrajectoryWindowIsDiagnosticUnknown (0 ms)
+[ RUN      ] P5RuntimeIntegrityGateTest.PublishedStatusJsonIncludesSampleDiagnostics
+[       OK ] P5RuntimeIntegrityGateTest.PublishedStatusJsonIncludesSampleDiagnostics (12 ms)
+[ RUN      ] P5RuntimeIntegrityGateTest.StatusCarriesVizSamplesAndMarkers
+[       OK ] P5RuntimeIntegrityGateTest.StatusCarriesVizSamplesAndMarkers (0 ms)
+[----------] 28 tests from P5RuntimeIntegrityGateTest (31 ms total)
+
+[----------] Global test environment tear-down
+[==========] 33 tests from 2 test suites ran. (31 ms total)
+[  PASSED  ] 33 tests.
+-- run_test.py: return code 0
+-- run_test.py: inject classname prefix into gtest result file '/home/dev/ws_iap/src/iap/results/icra27/icra040/build_plan_manage/test_results/ego_planner/test_p5_runtime_integrity_gate.gtest.xml'
+-- run_test.py: verify result file '/home/dev/ws_iap/src/iap/results/icra27/icra040/build_plan_manage/test_results/ego_planner/test_p5_runtime_integrity_gate.gtest.xml'
+</system-out>
+	</testcase>
+	<testcase name="test_p2_candidate_ranking" classname="test_p2_candidate_ranking" time="0.0527324" status="run">
+		<properties>
+			<property name="cmake_labels" value="gtest"/>
+		</properties>
+		<system-out>-- run_test.py: invoking following command in '/home/dev/ws_iap/src/iap/results/icra27/icra040/build_plan_manage':
+ - /home/dev/ws_iap/src/iap/results/icra27/icra040/build_plan_manage/test_p2_candidate_ranking --gtest_output=xml:/home/dev/ws_iap/src/iap/results/icra27/icra040/build_plan_manage/test_results/ego_planner/test_p2_candidate_ranking.gtest.xml
+Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc
+[==========] Running 6 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 6 tests from P2CandidateRankingTest
+[ RUN      ] P2CandidateRankingTest.DisabledSelectsOriginalRuntimeWinnerByFinalCost
+[       OK ] P2CandidateRankingTest.DisabledSelectsOriginalRuntimeWinnerByFinalCost (0 ms)
+[ RUN      ] P2CandidateRankingTest.NormalizationUsesOriginalCostNotTotalCost
+[       OK ] P2CandidateRankingTest.NormalizationUsesOriginalCostNotTotalCost (0 ms)
+[ RUN      ] P2CandidateRankingTest.MetricsOnlyPreservesOriginalCostWinner
+[       OK ] P2CandidateRankingTest.MetricsOnlyPreservesOriginalCostWinner (0 ms)
+[ RUN      ] P2CandidateRankingTest.RankingEnabledSelectsCandidateScoreWinner
+[       OK ] P2CandidateRankingTest.RankingEnabledSelectsCandidateScoreWinner (0 ms)
+[ RUN      ] P2CandidateRankingTest.SnapshotUnavailableFallsBackToOriginalCost
+[       OK ] P2CandidateRankingTest.SnapshotUnavailableFallsBackToOriginalCost (0 ms)
+[ RUN      ] P2CandidateRankingTest.LowValidRatioFallsBackToOriginalCost
+[       OK ] P2CandidateRankingTest.LowValidRatioFallsBackToOriginalCost (0 ms)
+[----------] 6 tests from P2CandidateRankingTest (2 ms total)
+
+[----------] Global test environment tear-down
+[==========] 6 tests from 1 test suite ran. (2 ms total)
+[  PASSED  ] 6 tests.
+-- run_test.py: return code 0
+-- run_test.py: inject classname prefix into gtest result file '/home/dev/ws_iap/src/iap/results/icra27/icra040/build_plan_manage/test_results/ego_planner/test_p2_candidate_ranking.gtest.xml'
+-- run_test.py: verify result file '/home/dev/ws_iap/src/iap/results/icra27/icra040/build_plan_manage/test_results/ego_planner/test_p2_candidate_ranking.gtest.xml'
+</system-out>
+	</testcase>
+	<testcase name="test_p3_reference_bias" classname="test_p3_reference_bias" time="0.131693" status="run">
+		<properties>
+			<property name="cmake_labels" value="gtest"/>
+		</properties>
+		<system-out>-- run_test.py: invoking following command in '/home/dev/ws_iap/src/iap/results/icra27/icra040/build_plan_manage':
+ - /home/dev/ws_iap/src/iap/results/icra27/icra040/build_plan_manage/test_p3_reference_bias --gtest_output=xml:/home/dev/ws_iap/src/iap/results/icra27/icra040/build_plan_manage/test_results/ego_planner/test_p3_reference_bias.gtest.xml
+Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc
+[==========] Running 9 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 9 tests from P3ReferenceBiasTest
+[ RUN      ] P3ReferenceBiasTest.NoSnapshotReturnsNominalLocalTarget
+[       OK ] P3ReferenceBiasTest.NoSnapshotReturnsNominalLocalTarget (0 ms)
+[ RUN      ] P3ReferenceBiasTest.OccupiedLocalCandidatesReturnNominalTarget
+[       OK ] P3ReferenceBiasTest.OccupiedLocalCandidatesReturnNominalTarget (11 ms)
+[ RUN      ] P3ReferenceBiasTest.LowerRiskLocalCandidateIsSelected
+[       OK ] P3ReferenceBiasTest.LowerRiskLocalCandidateIsSelected (10 ms)
+[ RUN      ] P3ReferenceBiasTest.NoBacktrackingRejectsLowerRiskBehindNominalTarget
+[       OK ] P3ReferenceBiasTest.NoBacktrackingRejectsLowerRiskBehindNominalTarget (9 ms)
+[ RUN      ] P3ReferenceBiasTest.InsufficientCoveragePreventsGlobalBias
+[       OK ] P3ReferenceBiasTest.InsufficientCoveragePreventsGlobalBias (10 ms)
+[ RUN      ] P3ReferenceBiasTest.TemporalHorizonInsufficientPreventsGlobalBias
+[       OK ] P3ReferenceBiasTest.TemporalHorizonInsufficientPreventsGlobalBias (9 ms)
+[ RUN      ] P3ReferenceBiasTest.EnoughCoverageGeneratesBiasedWaypoints
+[       OK ] P3ReferenceBiasTest.EnoughCoverageGeneratesBiasedWaypoints (9 ms)
+[ RUN      ] P3ReferenceBiasTest.DetourRatioFallback
+[       OK ] P3ReferenceBiasTest.DetourRatioFallback (9 ms)
+[ RUN      ] P3ReferenceBiasTest.DisabledModesPreserveNominalBehavior
+[       OK ] P3ReferenceBiasTest.DisabledModesPreserveNominalBehavior (9 ms)
+[----------] 9 tests from P3ReferenceBiasTest (79 ms total)
+
+[----------] Global test environment tear-down
+[==========] 9 tests from 1 test suite ran. (79 ms total)
+[  PASSED  ] 9 tests.
+-- run_test.py: return code 0
+-- run_test.py: inject classname prefix into gtest result file '/home/dev/ws_iap/src/iap/results/icra27/icra040/build_plan_manage/test_results/ego_planner/test_p3_reference_bias.gtest.xml'
+-- run_test.py: verify result file '/home/dev/ws_iap/src/iap/results/icra27/icra040/build_plan_manage/test_results/ego_planner/test_p3_reference_bias.gtest.xml'
+</system-out>
+	</testcase>
+	<testcase name="test_planning_risk_context" classname="test_planning_risk_context" time="0.305618" status="run">
+		<properties>
+			<property name="cmake_labels" value="gtest"/>
+		</properties>
+		<system-out>-- run_test.py: invoking following command in '/home/dev/ws_iap/src/iap/results/icra27/icra040/build_plan_manage':
+ - /home/dev/ws_iap/src/iap/results/icra27/icra040/build_plan_manage/test_planning_risk_context --gtest_output=xml:/home/dev/ws_iap/src/iap/results/icra27/icra040/build_plan_manage/test_results/ego_planner/test_planning_risk_context.gtest.xml
+Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc
+[==========] Running 26 tests from 4 test suites.
+[----------] Global test environment set-up.
+[----------] 4 tests from PlanningRiskContextTest
+[ RUN      ] PlanningRiskContextTest.ManualContextKeepsGenerationUntilClear
+[       OK ] PlanningRiskContextTest.ManualContextKeepsGenerationUntilClear (0 ms)
+[ RUN      ] PlanningRiskContextTest.BeginWithoutP0RuntimeCreatesDeterministicNullContext
+[RiskContext] planning_generation_id=0, query_base_time_s=42.5, snapshot_available=0
+[       OK ] PlanningRiskContextTest.BeginWithoutP0RuntimeCreatesDeterministicNullContext (0 ms)
+[ RUN      ] PlanningRiskContextTest.TrajectoryCommandSurvivesLateSubscriber
+[       OK ] PlanningRiskContextTest.TrajectoryCommandSurvivesLateSubscriber (103 ms)
+[ RUN      ] PlanningRiskContextTest.StaleContextFailsClosedAgainstItsImmutableSnapshot
+[       OK ] PlanningRiskContextTest.StaleContextFailsClosedAgainstItsImmutableSnapshot (0 ms)
+[----------] 4 tests from PlanningRiskContextTest (103 ms total)
+
+[----------] 3 tests from P1AcceptedContextValidationTest
+[ RUN      ] P1AcceptedContextValidationTest.SeparatesStrictSpatialInteriorFromTemporalHorizon
+[       OK ] P1AcceptedContextValidationTest.SeparatesStrictSpatialInteriorFromTemporalHorizon (0 ms)
+[ RUN      ] P1AcceptedContextValidationTest.EnforcesFrameGenerationFreshnessAndCoverageBinding
+[       OK ] P1AcceptedContextValidationTest.EnforcesFrameGenerationFreshnessAndCoverageBinding (0 ms)
+[ RUN      ] P1AcceptedContextValidationTest.RejectsMapEdgeThatCannotSupportTrilinearInterpolation
+[       OK ] P1AcceptedContextValidationTest.RejectsMapEdgeThatCannotSupportTrilinearInterpolation (0 ms)
+[----------] 3 tests from P1AcceptedContextValidationTest (0 ms total)
+
+[----------] 18 tests from P1SoftFallbackPolicyTest
+[ RUN      ] P1SoftFallbackPolicyTest.MetricsOnlyNeverRejectsBaseCandidateForTemporalHorizon
+[       OK ] P1SoftFallbackPolicyTest.MetricsOnlyNeverRejectsBaseCandidateForTemporalHorizon (0 ms)
+[ RUN      ] P1SoftFallbackPolicyTest.EnabledModeFallsBackToBaseCandidateWhenContextCannotCoverTrajectory
+[       OK ] P1SoftFallbackPolicyTest.EnabledModeFallsBackToBaseCandidateWhenContextCannotCoverTrajectory (0 ms)
+[ RUN      ] P1SoftFallbackPolicyTest.FixedDurationOutsideSnapshotHorizonCannotEnterBasePrepass
+[       OK ] P1SoftFallbackPolicyTest.FixedDurationOutsideSnapshotHorizonCannotEnterBasePrepass (0 ms)
+[ RUN      ] P1SoftFallbackPolicyTest.OccupiedSingletonGetsSymmetricGeometricFanout
+[       OK ] P1SoftFallbackPolicyTest.OccupiedSingletonGetsSymmetricGeometricFanout (0 ms)
+[ RUN      ] P1SoftFallbackPolicyTest.FormalFanoutPreservesBothChordHomotopiesAndMirrorsCandidateIdentity
+[       OK ] P1SoftFallbackPolicyTest.FormalFanoutPreservesBothChordHomotopiesAndMirrorsCandidateIdentity (0 ms)
+[ RUN      ] P1SoftFallbackPolicyTest.FormalEvidenceFanoutDoesNotDependOnPlannerReturningEmptySegments
+[       OK ] P1SoftFallbackPolicyTest.FormalEvidenceFanoutDoesNotDependOnPlannerReturningEmptySegments (0 ms)
+[ RUN      ] P1SoftFallbackPolicyTest.FormalMetricsOnlyReferenceUsesMirrorBoundCanonicalArm
+[       OK ] P1SoftFallbackPolicyTest.FormalMetricsOnlyReferenceUsesMirrorBoundCanonicalArm (0 ms)
+[ RUN      ] P1SoftFallbackPolicyTest.FormalEvidenceFanoutNeutralizesCommittedEndpointSide
+[       OK ] P1SoftFallbackPolicyTest.FormalEvidenceFanoutNeutralizesCommittedEndpointSide (0 ms)
+[ RUN      ] P1SoftFallbackPolicyTest.MetricsOnlyReferenceObservationIsOncePerTrajectoryInsideHorizon
+[       OK ] P1SoftFallbackPolicyTest.MetricsOnlyReferenceObservationIsOncePerTrajectoryInsideHorizon (0 ms)
+[ RUN      ] P1SoftFallbackPolicyTest.FormalCheckpointObservationCoversEnabledRetainedIncumbent
+[       OK ] P1SoftFallbackPolicyTest.FormalCheckpointObservationCoversEnabledRetainedIncumbent (0 ms)
+[ RUN      ] P1SoftFallbackPolicyTest.ExecutingTrajectoryMayObserveWithoutRequestingAReplan
+[       OK ] P1SoftFallbackPolicyTest.ExecutingTrajectoryMayObserveWithoutRequestingAReplan (0 ms)
+[ RUN      ] P1SoftFallbackPolicyTest.IncumbentExecutionIsIndependentOfTransientFsmReplanState
+[       OK ] P1SoftFallbackPolicyTest.IncumbentExecutionIsIndependentOfTransientFsmReplanState (0 ms)
+[ RUN      ] P1SoftFallbackPolicyTest.FormalCheckpointApproachDefersOnlyPeriodicReplanning
+[       OK ] P1SoftFallbackPolicyTest.FormalCheckpointApproachDefersOnlyPeriodicReplanning (0 ms)
+[ RUN      ] P1SoftFallbackPolicyTest.PostOptimizationInvalidityKeepsExistingOrDefersBaseInitialFallback
+[       OK ] P1SoftFallbackPolicyTest.PostOptimizationInvalidityKeepsExistingOrDefersBaseInitialFallback (0 ms)
+[ RUN      ] P1SoftFallbackPolicyTest.SuccessfulBasePrepassWithoutFullSupportPublishesInitialBaseCandidate
+[       OK ] P1SoftFallbackPolicyTest.SuccessfulBasePrepassWithoutFullSupportPublishesInitialBaseCandidate (0 ms)
+[ RUN      ] P1SoftFallbackPolicyTest.SuccessfulBasePrepassWithoutFullSupportAdvancesRecedingHorizon
+[       OK ] P1SoftFallbackPolicyTest.SuccessfulBasePrepassWithoutFullSupportAdvancesRecedingHorizon (0 ms)
+[ RUN      ] P1SoftFallbackPolicyTest.UnsupportedBasePrepassCannotOverwriteP1Incumbent
+[       OK ] P1SoftFallbackPolicyTest.UnsupportedBasePrepassCannotOverwriteP1Incumbent (0 ms)
+[ RUN      ] P1SoftFallbackPolicyTest.FullSupportAdmitsNormalizedP1Stage
+[       OK ] P1SoftFallbackPolicyTest.FullSupportAdmitsNormalizedP1Stage (0 ms)
+[----------] 18 tests from P1SoftFallbackPolicyTest (0 ms total)
+
+[----------] 1 test from PlanningTimeProviderTest
+[ RUN      ] PlanningTimeProviderTest.EmergencyStopUsesProvidedSimStamp
+[       OK ] PlanningTimeProviderTest.EmergencyStopUsesProvidedSimStamp (0 ms)
+[----------] 1 test from PlanningTimeProviderTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 26 tests from 4 test suites ran. (103 ms total)
+[  PASSED  ] 26 tests.
+-- run_test.py: return code 0
+-- run_test.py: inject classname prefix into gtest result file '/home/dev/ws_iap/src/iap/results/icra27/icra040/build_plan_manage/test_results/ego_planner/test_planning_risk_context.gtest.xml'
+-- run_test.py: verify result file '/home/dev/ws_iap/src/iap/results/icra27/icra040/build_plan_manage/test_results/ego_planner/test_planning_risk_context.gtest.xml'
+</system-out>
+	</testcase>
+</testsuite>

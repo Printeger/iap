@@ -185,6 +185,16 @@ Eigen::MatrixXd seedMatrix(const CollisionCase & fixture)
   return seed;
 }
 
+Eigen::MatrixXd guideSeedMatrix()
+{
+  Eigen::MatrixXd seed(3, 9);
+  for (Eigen::Index index = 0; index < seed.cols(); ++index) {
+    seed.col(index) = Eigen::Vector3d(
+      static_cast<double>(index) - 4.0, 0.0, 0.0);
+  }
+  return seed;
+}
+
 std::shared_ptr<const iap::RiskGridSnapshot> makeSnapshot()
 {
   iap::RiskGridMapParams params;
@@ -218,7 +228,7 @@ P4RiskAStarConfig p4Config(bool enabled, bool metrics_only = false)
 std::unique_ptr<ego_planner::BsplineOptimizer> makeOptimizer(
   const GridMap::Ptr & map,
   const std::shared_ptr<const iap::RiskGridSnapshot> & snapshot,
-  bool p4_enabled)
+  bool p4_enabled, bool metrics_only)
 {
   ensureRclcpp();
   static int node_id = 0;
@@ -242,7 +252,8 @@ std::unique_ptr<ego_planner::BsplineOptimizer> makeOptimizer(
   optimizer->setEnvironment(map);
   optimizer->a_star_ = std::make_shared<AStar>();
   optimizer->a_star_->initGridMap(map, Eigen::Vector3i(200, 80, 30));
-  optimizer->setP4RiskAStarConfigForTest(p4Config(p4_enabled));
+  optimizer->setP4RiskAStarConfigForTest(
+    p4Config(p4_enabled, metrics_only));
   optimizer->setP4RiskSnapshot(snapshot, 10.0, 73);
   return optimizer;
 }
@@ -327,6 +338,37 @@ TEST(P4CollisionGuideIntegration, PositiveFixtureUsesProductionAStar)
             << " ratio=" << first.risk_original_length_ratio << std::endl;
 }
 
+TEST(P4CollisionGuideIntegration, NonG0BContextPreservesFalseMetricsBoundary)
+{
+  const auto snapshot = makeSnapshot();
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureGuideFixture(map.get());
+  auto optimizer = makeOptimizer(map, snapshot, true, false);
+  EXPECT_TRUE(optimizer->getP4RiskAStarConfig().enable_risk_aware_astar);
+  EXPECT_FALSE(optimizer->getP4RiskAStarConfig().metrics_only);
+  Eigen::MatrixXd seed = guideSeedMatrix();
+
+  ASSERT_EQ(
+    optimizer->initControlPoints(seed, true).status,
+    ego_planner::CollisionScanStatus::CLOSED_SEGMENTS);
+  ASSERT_EQ(optimizer->getLastP4GuideViz().size(), 1U);
+  const auto decision = optimizer->getLastP4GuideViz().front();
+  ASSERT_TRUE(decision.original.returned);
+  ASSERT_TRUE(decision.risk.returned);
+  EXPECT_TRUE(decision.original.risk_profile.complete());
+  EXPECT_TRUE(decision.risk.risk_profile.complete());
+  EXPECT_LT(decision.risk.risk_profile.mean, decision.original.risk_profile.mean);
+  EXPECT_LE(decision.risk.risk_profile.max, decision.original.risk_profile.max);
+  EXPECT_EQ(
+    decision.status, ego_planner::P4GuideDecisionStatus::ORIGINAL_SELECTED);
+  EXPECT_EQ(
+    decision.reason,
+    ego_planner::P4GuideDecisionReason::SELECTION_NOT_AUTHORIZED);
+  EXPECT_EQ(
+    decision.selected.canonical_hash, decision.original.canonical_hash);
+  EXPECT_FALSE(decision.selection_applied);
+}
+
 TEST(P4CollisionGuideIntegration, InitialAndReboundUseSameDecisionSeam)
 {
   const auto snapshot = makeSnapshot();
@@ -334,7 +376,7 @@ TEST(P4CollisionGuideIntegration, InitialAndReboundUseSameDecisionSeam)
   auto initial_map = std::make_shared<GridMap>();
   GridMapTestAccess::configure(
     initial_map.get(), p4_collision_fixture::kOneClosed);
-  auto initial_optimizer = makeOptimizer(initial_map, snapshot, true);
+  auto initial_optimizer = makeOptimizer(initial_map, snapshot, true, true);
   EXPECT_TRUE(initial_optimizer->getP4RiskAStarConfig().metrics_only);
   ASSERT_TRUE(initial_optimizer->hasP4RiskSnapshotForTest());
   Eigen::MatrixXd initial_seed = seedMatrix(
@@ -351,7 +393,7 @@ TEST(P4CollisionGuideIntegration, InitialAndReboundUseSameDecisionSeam)
   auto rebound_map = std::make_shared<GridMap>();
   GridMapTestAccess::configure(
     rebound_map.get(), p4_collision_fixture::kNoCollision);
-  auto rebound_optimizer = makeOptimizer(rebound_map, snapshot, true);
+  auto rebound_optimizer = makeOptimizer(rebound_map, snapshot, true, true);
   Eigen::MatrixXd rebound_seed = seedMatrix(
     p4_collision_fixture::kOneClosed);
   ASSERT_EQ(
@@ -396,8 +438,8 @@ TEST(P4CollisionGuideIntegration, MetricsOnlyConstraintHashMatchesOriginalOnly)
     metrics_map.get(), p4_collision_fixture::kOneClosed);
   GridMapTestAccess::configure(
     original_map.get(), p4_collision_fixture::kOneClosed);
-  auto metrics_optimizer = makeOptimizer(metrics_map, snapshot, true);
-  auto original_optimizer = makeOptimizer(original_map, snapshot, false);
+  auto metrics_optimizer = makeOptimizer(metrics_map, snapshot, true, true);
+  auto original_optimizer = makeOptimizer(original_map, snapshot, false, false);
   Eigen::MatrixXd metrics_seed = seedMatrix(
     p4_collision_fixture::kOneClosed);
   Eigen::MatrixXd original_seed = metrics_seed;
@@ -425,7 +467,7 @@ TEST(P4CollisionGuideIntegration, InjectionEpochMismatchInvalidatesDecision)
   auto map = std::make_shared<GridMap>();
   GridMapTestAccess::configure(
     map.get(), p4_collision_fixture::kOneClosed);
-  auto optimizer = makeOptimizer(map, snapshot, true);
+  auto optimizer = makeOptimizer(map, snapshot, true, true);
   Eigen::MatrixXd seed = seedMatrix(p4_collision_fixture::kOneClosed);
   ASSERT_EQ(
     optimizer->initControlPoints(seed, true).status,

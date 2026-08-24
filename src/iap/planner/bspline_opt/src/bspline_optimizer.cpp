@@ -466,8 +466,6 @@ namespace ego_planner
                                            uint64_t planning_attempt_id)
   {
     p4_config_.query_speed_mps = std::isfinite(max_vel_) && max_vel_ > 1.0e-3 ? max_vel_ : 1.0;
-    if (p4_config_.enable_risk_aware_astar)
-      p4_config_.metrics_only = true;
     p4_risk_snapshot_ = std::move(snapshot);
     p4_query_base_time_s_ = query_base_time_s;
     p4_occupancy_epoch_ = grid_map_ ? grid_map_->occupancyGeneration() : 0;

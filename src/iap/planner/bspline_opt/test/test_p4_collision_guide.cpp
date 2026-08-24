@@ -226,6 +226,81 @@ TEST(P4CollisionGuideDecision, OriginalFailureIsPlannerFailure)
   EXPECT_FALSE(decision.selected.returned);
 }
 
+TEST(P4CollisionGuideDecision, EpochChangeDuringFailedOriginalSearchIsAuthoritative)
+{
+  uint64_t epoch = 31;
+  auto search = successfulSearch();
+  search.original.success = false;
+  search.original.path.clear();
+  search.original.reason = "no_path";
+  search.after_original = [&epoch]() {++epoch;};
+  ego_planner::P4CollisionGuidePlanner planner(search);
+
+  const auto decision = planner.planCollisionGuide(
+    makeRequest(makeSnapshot(ProviderMode::SPATIAL), 31, &epoch));
+
+  EXPECT_EQ(
+    decision.status,
+    ego_planner::P4GuideDecisionStatus::DECISION_INVALID_REPLAN_REQUIRED);
+  EXPECT_EQ(
+    decision.reason,
+    ego_planner::P4GuideDecisionReason::OCCUPANCY_EPOCH_CHANGED);
+  EXPECT_EQ(search.calls, (std::vector<std::string>{"original"}));
+  EXPECT_FALSE(decision.original.returned);
+  EXPECT_FALSE(decision.risk.returned);
+  EXPECT_FALSE(decision.selected.returned);
+  EXPECT_FALSE(decision.selection_applied);
+}
+
+TEST(P4CollisionGuideDecision, OriginalTimeoutIsPlannerFailureWhenEpochIsStable)
+{
+  uint64_t epoch = 32;
+  auto search = successfulSearch();
+  search.original.success = false;
+  search.original.timed_out = true;
+  search.original.path.clear();
+  search.original.reason = "timeout";
+  ego_planner::P4CollisionGuidePlanner planner(search);
+
+  const auto decision = planner.planCollisionGuide(
+    makeRequest(makeSnapshot(ProviderMode::SPATIAL), epoch, &epoch));
+
+  EXPECT_EQ(
+    decision.status, ego_planner::P4GuideDecisionStatus::PLANNER_FAILURE);
+  EXPECT_EQ(
+    decision.reason,
+    ego_planner::P4GuideDecisionReason::ORIGINAL_SEARCH_TIMEOUT);
+  EXPECT_EQ(search.calls, (std::vector<std::string>{"original"}));
+  EXPECT_FALSE(decision.selected.returned);
+}
+
+TEST(P4CollisionGuideDecision, EpochChangeDuringTimedOutOriginalSearchIsAuthoritative)
+{
+  uint64_t epoch = 33;
+  auto search = successfulSearch();
+  search.original.success = false;
+  search.original.timed_out = true;
+  search.original.path.clear();
+  search.original.reason = "timeout";
+  search.after_original = [&epoch]() {++epoch;};
+  ego_planner::P4CollisionGuidePlanner planner(search);
+
+  const auto decision = planner.planCollisionGuide(
+    makeRequest(makeSnapshot(ProviderMode::SPATIAL), 33, &epoch));
+
+  EXPECT_EQ(
+    decision.status,
+    ego_planner::P4GuideDecisionStatus::DECISION_INVALID_REPLAN_REQUIRED);
+  EXPECT_EQ(
+    decision.reason,
+    ego_planner::P4GuideDecisionReason::OCCUPANCY_EPOCH_CHANGED);
+  EXPECT_EQ(search.calls, (std::vector<std::string>{"original"}));
+  EXPECT_FALSE(decision.original.returned);
+  EXPECT_FALSE(decision.risk.returned);
+  EXPECT_FALSE(decision.selected.returned);
+  EXPECT_FALSE(decision.selection_applied);
+}
+
 TEST(P4CollisionGuideDecision, MissingSnapshotFallsBackToOriginal)
 {
   uint64_t epoch = 4;
@@ -394,4 +469,29 @@ TEST(P4CollisionGuideDecision, DuplicateGeometryFailsClosed)
     ego_planner::P4GuideDecisionReason::ZERO_LENGTH_GEOMETRY);
   EXPECT_EQ(search.calls, (std::vector<std::string>{"original"}));
   EXPECT_FALSE(decision.selected.returned);
+}
+
+TEST(P4CollisionGuideDecision, EpochChangePrecedesDuplicateOriginalGeometry)
+{
+  uint64_t epoch = 34;
+  auto search = successfulSearch();
+  search.original.path.insert(
+    search.original.path.begin() + 1, search.original.path.front());
+  search.after_original = [&epoch]() {++epoch;};
+  ego_planner::P4CollisionGuidePlanner planner(search);
+
+  const auto decision = planner.planCollisionGuide(
+    makeRequest(makeSnapshot(ProviderMode::SPATIAL), 34, &epoch));
+
+  EXPECT_EQ(
+    decision.status,
+    ego_planner::P4GuideDecisionStatus::DECISION_INVALID_REPLAN_REQUIRED);
+  EXPECT_EQ(
+    decision.reason,
+    ego_planner::P4GuideDecisionReason::OCCUPANCY_EPOCH_CHANGED);
+  EXPECT_EQ(search.calls, (std::vector<std::string>{"original"}));
+  EXPECT_FALSE(decision.original.returned);
+  EXPECT_FALSE(decision.risk.returned);
+  EXPECT_FALSE(decision.selected.returned);
+  EXPECT_FALSE(decision.selection_applied);
 }

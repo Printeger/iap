@@ -434,6 +434,14 @@ P4GuideDecision P4CollisionGuidePlanner::planCollisionGuide(
   }
 
   const P4GuideSearchOutcome original = search_.searchOriginal(request);
+  if (!requestIdentityCurrent(request, decision.request_hash)) {
+    decision.reason = P4GuideDecisionReason::REQUEST_IDENTITY_MISMATCH;
+    return decision;
+  }
+  if (!epochCurrent(request)) {
+    decision.reason = P4GuideDecisionReason::OCCUPANCY_EPOCH_CHANGED;
+    return decision;
+  }
   decision.original_search_latency_ms = original.metrics.elapsed_ms;
   decision.total_search_latency_ms = decision.original_search_latency_ms;
   if (!original.success) {

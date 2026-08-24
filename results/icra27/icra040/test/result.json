@@ -1,0 +1,60 @@
+{
+  "schema_version": "icra040_p4_g0b_repair_result_v1",
+  "task": "ICRA-040",
+  "requirement": "IAP-RQ-423",
+  "gate": "P4_G0B",
+  "result": "P4_G0B_REPAIR_READY_FOR_REVIEW",
+  "identity_precedence": {
+    "focused_passed": 3,
+    "focused_failed": 0,
+    "failure_precedence": "OCCUPANCY_EPOCH_CHANGED",
+    "timeout_precedence": "OCCUPANCY_EPOCH_CHANGED",
+    "duplicate_geometry_precedence": "OCCUPANCY_EPOCH_CHANGED",
+    "status": "DECISION_INVALID_REPLAN_REQUIRED",
+    "guides_returned": 0,
+    "risk_search_ran": false,
+    "selection_applied": false
+  },
+  "metrics_boundary": {
+    "focused_passed": 1,
+    "focused_failed": 0,
+    "risk_enabled": true,
+    "metrics_only": false,
+    "risk_mean_strictly_lower": true,
+    "risk_max_non_increasing": true,
+    "decision_reason": "selection_not_authorized",
+    "selected_guide": "original",
+    "selection_applied": false
+  },
+  "fixture": {
+    "name": "p4_collision_guide_v1",
+    "search_implementation": "P4AStarGuideSearch",
+    "request_hash": "1c8abe0fa4e4136a",
+    "original_hash": "2a3380ee05f43a1f",
+    "risk_hash": "b3789ad7a8e50365",
+    "selected_hash": "2a3380ee05f43a1f",
+    "original_samples": 200,
+    "original_valid": 200,
+    "risk_samples": 200,
+    "risk_valid": 200,
+    "original_mean": 2.0295422607088973,
+    "original_max": 10.500000000000002,
+    "risk_mean": 1.0,
+    "risk_max": 1.0000000000000002,
+    "risk_original_length_ratio": 1.0,
+    "repeat_hashes_equal": true
+  },
+  "tests": {
+    "decision": {"passed": 15, "failed": 0, "disabled": 0},
+    "integration": {"passed": 5, "failed": 0, "disabled": 0},
+    "collision": {"passed": 17, "failed": 0, "disabled": 0},
+    "p1": {"passed": 39, "failed": 0, "disabled": 0},
+    "path_searching_p4": {"passed": 5, "failed": 0, "disabled": 0},
+    "occupancy_epoch": {"passed": 6, "failed": 0, "disabled": 0},
+    "plan_manage_targets": {"passed": 9, "failed": 0},
+    "plan_manage_active_cases": {"passed": 186, "failed": 0},
+    "plan_manage_disabled_cases": 1
+  },
+  "live_execution": false,
+  "risk_guide_applied": false
+}

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites tests="3" failures="0" disabled="0" errors="0" time="0.014" timestamp="2026-08-24T06:03:37.272" name="AllTests">
+  <testsuite name="P4CollisionGuideDecision" tests="3" failures="0" disabled="0" skipped="0" errors="0" time="0.014" timestamp="2026-08-24T06:03:37.272">
+    <testcase name="EpochChangeDuringFailedOriginalSearchIsAuthoritative" file="/home/dev/ws_iap/src/iap/src/iap/planner/bspline_opt/test/test_p4_collision_guide.cpp" line="229" status="run" result="completed" time="0.005" timestamp="2026-08-24T06:03:37.272" classname="P4CollisionGuideDecision" />
+    <testcase name="EpochChangeDuringTimedOutOriginalSearchIsAuthoritative" file="/home/dev/ws_iap/src/iap/src/iap/planner/bspline_opt/test/test_p4_collision_guide.cpp" line="277" status="run" result="completed" time="0.004" timestamp="2026-08-24T06:03:37.277" classname="P4CollisionGuideDecision" />
+    <testcase name="EpochChangePrecedesDuplicateOriginalGeometry" file="/home/dev/ws_iap/src/iap/src/iap/planner/bspline_opt/test/test_p4_collision_guide.cpp" line="474" status="run" result="completed" time="0.004" timestamp="2026-08-24T06:03:37.282" classname="P4CollisionGuideDecision" />
+  </testsuite>
+</testsuites>

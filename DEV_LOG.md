@@ -5296,3 +5296,129 @@ application, final B-spline lineage or P5 work. No GPU, ROS/live map, launch,
 runner, analyzer, capture, smoke, benchmark, qualification, campaign, tuning,
 cleanup or protected-PDF handling occurred. Control returns only to
 SUPERVISOR review.
+
+## 2026-08-24T05:48:03Z — ICRA-040 START
+
+IAP-RQ-423. Synchronized `dev/icra` at Supervisor authorization HEAD
+`d9e9e45db24d9a386578f544758aa829b6080cae`: initial status contained only
+the protected untracked PDF, fetch passed and divergence was `0 0`, so no pull
+ran. `AGENT_STATE.md` confirms DEEPSEEK, `TASK_READY`, ICRA-040 and P4_G0B.
+
+This task repairs exactly two findings. First, immediately after every
+original-search return, request identity and live occupancy epoch must take
+precedence over original failure, timeout and invalid geometry. Second,
+`setP4RiskSnapshot()` must preserve the configured `metrics_only` value:
+registered G0B tests opt in explicitly, while a risk-enabled
+`metrics_only=false` context remains truthful but still receives
+`SELECTION_NOT_AUTHORIZED`, original selection and no application.
+
+Exact allowlist: P4 decision and optimizer sources; corresponding P4 decision
+and initial/rebound integration tests; corresponding headers only if strictly
+necessary; compact ICRA-040 evidence; `DEV_LOG.md`; `docs/CHANGES.md`; and
+`docs/TRACEABILITY.md`. Path-searching/plan-manager production, CMake,
+P0/P1/P2/P3/P5, collision/dynamics/heuristic/feasibility, launch/runner/
+analyzer/capture, Supervisor-owned, scope/gate/requirements, historical,
+frozen fixture/PDF and external-repository files remain forbidden. The two
+recorded Low design-debt observations are not refactor authority.
+
+Pre-agreed TDD seams are the public
+`P4CollisionGuidePlanner::planCollisionGuide()` decision result and the
+existing initial/rebound optimizer integration interface. Focused RED cases
+will change epoch during original search followed by failure, timeout and
+duplicate geometry, while stable-epoch counterparts retain planner failure,
+timeout and geometry failure. The metrics boundary will prove explicit G0B
+true behavior plus risk-enabled false preservation, exact
+`SELECTION_NOT_AUTHORIZED`, original selection and
+`selection_applied=false`. The full regression matrix is decision 11/11 plus
+new cases, integration 4/4 plus boundary cases, collision 17/17, P1 39/39,
+path-searching P4, occupancy epoch and affected plan-manager 9/9.
+
+Fresh ICRA-040 bspline/plan-manager build/install/log/test/review artifacts
+will stay below `results/icra27/icra040/` and use retained ICRA-039 IAP,
+plan-env and path-searching installations as immutable dependencies. Initial
+ten-tree manifest hashes are build/install IAP `64a1de2a…7c5` /
+`ac8ce6fd…952e`, plan-env `563cdb47…fb9d` / `91c1f591…2259`, path-searching
+`252a5bc1…6642` / `77652e42…9e2c`, bspline `8357f46d…2151` /
+`079f23d1…d3a`, and plan-manager `a18a5cee…f642` /
+`41eca95b…1f85`. They remain read-only throughout development and review.
+
+Initial decision/optimizer source hashes are `6e492240…6596` /
+`b2560371…a6ed`; decision/integration test hashes are `57c3e7bc…addb` /
+`e84054d9…9285`. Frozen collision fixture remains `49a676a5…c788`; protected
+PDF remains untracked at `1f07da56…844f6`.
+
+Stop line: complete only the two repairs, focused RED/GREEN tests, fresh
+task-local builds/linkage, full prescribed regressions, compact evidence/docs,
+review and push, then report `P4_G0B_REPAIR_READY_FOR_REVIEW`. No threshold,
+calibration, G0C/G0D, risk-guide application, lineage, P5, GPU, ROS/live map,
+launch, runner/analyzer, smoke, benchmark, campaign, tuning, cleanup, Gate
+promotion or next-task selection is authorized.
+
+## 2026-08-24T06:19:41Z — ICRA-040 IMPLEMENTATION AND VERIFICATION
+
+IAP-RQ-423. Both authorized review repairs are implemented. Immediately after
+`searchOriginal(request)` returns, `planCollisionGuide()` now revalidates the
+canonical request and live occupancy epoch before reading failure, timeout or
+geometry. Epoch mutation paired with returned failure, timeout and duplicate
+geometry produces exact invalid/replan plus `OCCUPANCY_EPOCH_CHANGED`, no
+original/risk/selected record, no risk search and no application. Stable
+failure, timeout and duplicate geometry retain their typed results. The
+request itself is immutable during search, so no new mutation hook or public
+interface was manufactured.
+
+The first focused identity RED returned `PLANNER_FAILURE` /
+`ORIGINAL_SEARCH_FAILED` instead of invalid/replan. After the minimal
+post-return recheck, focused precedence is GREEN 3/3 and the complete decision
+suite is GREEN 15/15. `setP4RiskSnapshot()` no longer forces
+`metrics_only=true`. Every existing registered G0B integration setup now
+passes true explicitly. The focused false-boundary RED observed forced true
+and `METRICS_ONLY`; after removal, it preserves risk-enabled/false, measures a
+strictly lower mean with non-increasing max, records
+`SELECTION_NOT_AUTHORIZED`, selects original and keeps
+`selection_applied=false`. Focused boundary is GREEN 1/1 and integration is
+GREEN 5/5.
+
+Fresh ICRA-040 bspline and plan-manager configure/build/install pass below
+`results/icra27/icra040/`. Final independent results are decision 15/15,
+integration 5/5, collision 17/17, P1 39/39, retained path-searching P4 5/5,
+retained occupancy epoch 6/6 and affected plan-manager CTest 9/9, comprising
+186 active cases, one existing disabled case and zero failures. The unchanged
+production-A* fixture repeats request/original/risk/selected hashes
+`1c8abe0fa4e4136a` / `2a3380ee05f43a1f` / `b3789ad7a8e50365` /
+`2a3380ee05f43a1f`, 200/200 profiles, original mean/max
+`2.0295422607088973/10.500000000000002`, risk mean/max
+`1/1.0000000000000002` and ratio `1.0`.
+
+Linkage diagnosis found the interactive shell's workspace-default
+`LD_LIBRARY_PATH` precedes the correct executable RUNPATH. One accidental old
+ICRA-039 integration CTest therefore loaded mixed default libraries and
+rewrote retained build-tree test logs. `ldd` proved the cause. The old complete
+four-target CTest was restored with retained ICRA-039 libraries explicitly
+first; all ten file-path/size manifest hashes now exactly equal START:
+`64a1de2aa644ad559202f32e3fd7bbe704175ba900e7b5381c1fc2e4e427c7c5`,
+`ac8ce6fd79a82ea209dbece9cbefbb62a0e105a3f47c57d748eb4d65e01b952e`,
+`563cdb47c4e1804813fbb2432dc7c305f30628c97e4871e2ce648436c1f1fb9d`,
+`91c1f591192f8cbfbc1117a3ad2dfd12f11f48e5d93d6edd69cc9d5de9452259`,
+`252a5bc16e684be8ced45043b052f15c481ca8c97d8b65123f23cb68f6776642`,
+`77652e420a80bb1386e79fa6ef3ec9ba84b71f0f587f68c7e07285a7831f9e2c`,
+`8357f46dcd59f70f73bf48a479c8b7b5ec86470948922b5e611de5db74ed2151`,
+`079f23d1ac85f27a77147a7870694664c261c020cb57d1dff521608f1d050d3a`,
+`a18a5cee94f49f1a6eeb35d9c42b4fd815498194f826b6630e7933461f17f642`
+and
+`41eca95b13fbd53b765498ae764b53671c3b5f14d6556b1eb501240e47451f85`.
+
+Fresh direct resolution uses ICRA-040 `libbspline_opt.a` and retained ICRA-039
+`libiap.so`, IAP typesupport, `libplan_env.so` and `libpath_searching.so` with
+zero missing, workspace-default IAP, deleted-task or build-tree matches.
+Installed optimizer/decision/A* headers match source and the installed node
+has no non-toolchain RUNPATH. Final changed source hashes are decision
+`98016309…98f2`, optimizer `0c999dff…81fa`, decision test `e7e8b381…f28d`
+and integration test `92f1d42e…a66c`. Compact JSON/XML/linkage/summary evidence
+is repository-local below ICRA-040.
+
+Builder result remains `P4_G0B_REPAIR_READY_FOR_REVIEW`, not PASS. No
+threshold, calibration, G0C/G0D, risk-guide application, P5, GPU, ROS/live
+map, launch, runner, analyzer, capture, smoke, benchmark, qualification,
+campaign, tuning, cleanup, Gate promotion or next-task work occurred. Frozen
+fixture and protected untracked PDF remain exact at `49a676a5…c788` and
+`1f07da56…844f6`.
