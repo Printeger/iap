@@ -18,12 +18,25 @@ SPEC.loader.exec_module(MODULE)
 
 class P4G0CRunnerTest(unittest.TestCase):
     def setUp(self):
-        self.protocol = REPO / "config/icra27/p4_g0c_protocol_v1.json"
-        self.registry = REPO / "config/icra27/p4_threshold_registry_v1.json"
+        self.protocol = REPO / "config/icra27/p4_g0c_protocol_v2.json"
+        self.registry = REPO / "config/icra27/p4_threshold_registry_v2.json"
         self.fixture = REPO / "config/icra27/p4_g0c_live_fixture_v1.json"
         self.bundle = MODULE.load_bundle(
             self.protocol, self.registry, self.fixture
         )
+        self.dependency_patch = mock.patch.object(
+            MODULE,
+            "validate_runtime_dependencies",
+            return_value={
+                "schema_version": "p4_g0c_dependency_preflight_result_v2",
+                "dependency_ready": True,
+                "failure_reason": "",
+            },
+        )
+        self.dependency_patch.start()
+
+    def tearDown(self):
+        self.dependency_patch.stop()
 
     def _valid_row(self, index):
         row = {name: "0" for name in MODULE.DECISION_CSV_COLUMNS}
@@ -68,7 +81,7 @@ class P4G0CRunnerTest(unittest.TestCase):
             run_dir / "exports/synthetic_run_token/test_planner_manifest.json"
         )
         manifest = {
-            "schema_version": "p4_g0c_run_manifest_v1",
+            "schema_version": "p4_g0c_run_manifest_v2",
             "run_id": record["run_id"],
             "seed": record["seed"],
             "repetition": record["repetition"],
@@ -77,7 +90,7 @@ class P4G0CRunnerTest(unittest.TestCase):
             "fixture_sha256": self.bundle.fixture_sha256,
             "csv_path": str(csv_path.resolve()),
             "gate": "G0C",
-            "experiment": "p4_g0c_metrics_calibration_v1",
+            "experiment": "p4_g0c_metrics_calibration_v2",
             "scenario": "p4_g0c_free_corridor_v1",
             "decision_schema_version": "p4_collision_guide_decision_v1",
             "effective_values": self.bundle.protocol["effective_values"],
@@ -90,6 +103,12 @@ class P4G0CRunnerTest(unittest.TestCase):
             "start_rviz": False,
             "immutable_run_id": True,
             "overwrite_allowed": False,
+            "dependency_manifest_sha256": self.bundle.protocol[
+                "runtime_dependency_manifest"
+            ]["sha256"],
+            "replacement_lineage_sha256": self.bundle.protocol[
+                "replacement_lineage"
+            ]["sha256"],
             "test_planner_manifest_path": str(launch_manifest_path.resolve()),
         }
         (run_dir / "p4_g0c_run_manifest.json").write_text(
@@ -123,8 +142,8 @@ class P4G0CRunnerTest(unittest.TestCase):
             self.assertFalse(runs_root.exists())
         self.assertEqual(result["runner_state"], "PLANNED")
         self.assertEqual(len(result["runs"]), 15)
-        self.assertEqual(result["runs"][0]["run_id"], "p4-g0c-seed211-rep01")
-        self.assertEqual(result["runs"][-1]["run_id"], "p4-g0c-seed271-rep03")
+        self.assertEqual(result["runs"][0]["run_id"], "p4-g0c-r2-seed211-rep01")
+        self.assertEqual(result["runs"][-1]["run_id"], "p4-g0c-r2-seed271-rep03")
 
     def test_plan_only_does_not_touch_or_validate_an_existing_root(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -144,7 +163,7 @@ class P4G0CRunnerTest(unittest.TestCase):
         calls = []
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            (root / "p4-g0c-seed211-rep01").mkdir()
+            (root / "p4-g0c-r2-seed211-rep01").mkdir()
             with self.assertRaisesRegex(MODULE.RunnerError, "existing run directory"):
                 MODULE.run(
                     self.bundle,
@@ -297,7 +316,7 @@ class P4G0CRunnerTest(unittest.TestCase):
             first_inventory = json.loads(first_inventory_path.read_text())
             inventory_raw = first_inventory_path.read_bytes()
         self.assertEqual(len(launched), 15)
-        self.assertEqual(result["schema_version"], "p4_g0c_runner_state_v3")
+        self.assertEqual(result["schema_version"], "p4_g0c_runner_state_v4")
         self.assertEqual(result["runner_state"], "COMPLETE")
         self.assertEqual(result, persisted)
         self.assertTrue(all(
@@ -360,17 +379,17 @@ class P4G0CRunnerTest(unittest.TestCase):
                 gpu_preflight=lambda _: {"gpu_ready": True},
                 launch_executor=launch,
             )
-        self.assertEqual(launched, ["p4-g0c-seed211-rep01"])
+        self.assertEqual(launched, ["p4-g0c-r2-seed211-rep01"])
         self.assertEqual(result["runner_state"], "FAILED")
         self.assertEqual(result["completed_run_count"], 0)
         self.assertEqual(result["launch_invocations"], 1)
         self.assertEqual(result["retries"], 0)
         self.assertEqual(
             persisted_before_executor[0]["attempted_run_ids"],
-            ["p4-g0c-seed211-rep01"],
+            ["p4-g0c-r2-seed211-rep01"],
         )
         self.assertEqual(result["attempted_run_ids"], [
-            "p4-g0c-seed211-rep01"
+            "p4-g0c-r2-seed211-rep01"
         ])
         self.assertEqual(result["completed_run_ids"], [])
         self.assertEqual(result["attempts"][0]["state"], "FAILED")
@@ -405,7 +424,7 @@ class P4G0CRunnerTest(unittest.TestCase):
         self.assertEqual(result["launch_invocations"], 1)
         self.assertEqual(result["retries"], 0)
         self.assertEqual(result["attempted_run_ids"], [
-            "p4-g0c-seed211-rep01"
+            "p4-g0c-r2-seed211-rep01"
         ])
         self.assertEqual(result["completed_run_ids"], [])
         self.assertEqual(result["attempts"][0]["state"], "FAILED")
@@ -439,7 +458,7 @@ class P4G0CRunnerTest(unittest.TestCase):
         self.assertEqual(result["runner_state"], "FAILED")
         self.assertEqual(result["attempts"][0]["state"], "FAILED")
         self.assertEqual(
-            result["failed_run_id"], "p4-g0c-seed211-rep01"
+            result["failed_run_id"], "p4-g0c-r2-seed211-rep01"
         )
         self.assertEqual(persisted, result)
 
@@ -473,7 +492,7 @@ class P4G0CRunnerTest(unittest.TestCase):
         self.assertEqual(result["runner_state"], "FAILED")
         self.assertEqual(result["attempts"][0]["state"], "FAILED")
         self.assertEqual(
-            result["failed_run_id"], "p4-g0c-seed211-rep01"
+            result["failed_run_id"], "p4-g0c-r2-seed211-rep01"
         )
         self.assertEqual(persisted, result)
 
@@ -486,7 +505,7 @@ class P4G0CRunnerTest(unittest.TestCase):
             run_dir.mkdir()
             csv_path = run_dir / "p4_decisions.csv"
             manifest = {
-                "schema_version": "p4_g0c_run_manifest_v1",
+                "schema_version": "p4_g0c_run_manifest_v2",
                 "run_id": record["run_id"],
                 "seed": record["seed"],
                 "repetition": record["repetition"],
@@ -495,7 +514,7 @@ class P4G0CRunnerTest(unittest.TestCase):
                 "fixture_sha256": self.bundle.fixture_sha256,
                 "csv_path": str(csv_path.resolve()),
                 "gate": "G0C",
-                "experiment": "p4_g0c_metrics_calibration_v1",
+                "experiment": "p4_g0c_metrics_calibration_v2",
                 "scenario": "p4_g0c_free_corridor_v1",
                 "decision_schema_version": (
                     "p4_collision_guide_decision_v1"
@@ -509,6 +528,12 @@ class P4G0CRunnerTest(unittest.TestCase):
                 "record_bag": False,
                 "start_rviz": False,
                 "immutable_run_id": True,
+                "dependency_manifest_sha256": self.bundle.protocol[
+                    "runtime_dependency_manifest"
+                ]["sha256"],
+                "replacement_lineage_sha256": self.bundle.protocol[
+                    "replacement_lineage"
+                ]["sha256"],
                 "overwrite_allowed": False,
                 "test_planner_manifest_path": str(
                     (run_dir / "exports/test_planner_manifest.json").resolve()
@@ -545,8 +570,8 @@ class P4G0CRunnerTest(unittest.TestCase):
         record = MODULE.expand_run_plan(self.bundle.protocol, Path("/runs"))[0]
         command = MODULE.launch_command(self.bundle, record)
         joined = " ".join(command)
-        self.assertIn("experiment:=p4_g0c_metrics_calibration_v1", command)
-        self.assertIn("p4.g0c.run_id:=p4-g0c-seed211-rep01", command)
+        self.assertIn("experiment:=p4_g0c_metrics_calibration_v2", command)
+        self.assertIn("p4.g0c.run_id:=p4-g0c-r2-seed211-rep01", command)
         self.assertIn(f"p4.g0c.protocol_sha256:={self.bundle.protocol_sha256}", command)
         self.assertNotIn("p4.metrics_only:=", joined)
         self.assertNotIn("start_rviz:=", joined)

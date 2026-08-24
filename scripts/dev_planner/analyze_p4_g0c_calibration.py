@@ -33,10 +33,7 @@ from p4_g0c_protocol import (  # noqa: E402
 )
 
 
-ANALYSIS_SCHEMA = "p4_g0c_analysis_v1"
-DRAFT_SCHEMA = "p4_g0c_threshold_draft_v1"
-RUN_MANIFEST_SCHEMA = "p4_g0c_run_manifest_v1"
-RUNNER_STATE_SCHEMA = "p4_g0c_runner_state_v3"
+PROTOCOL_SCHEMA_V2 = "p4_g0c_protocol_v2"
 RUNNER_STATE_FILENAME = "p4_g0c_runner_state.json"
 REQUIRED_PROCESSES = ["iap_rosnode", "ego_planner_node"]
 ALLOWED_ROOT_METADATA = {
@@ -49,6 +46,19 @@ ALLOWED_PREFLIGHT_METADATA = {"gpu_preflight.json"}
 
 class AnalysisError(RuntimeError):
     """A typed input or deterministic computation is invalid."""
+
+
+def _versioned_schema(bundle: ProtocolBundle, stem: str) -> str:
+    version = "v2" if bundle.protocol.get("schema_version") == PROTOCOL_SCHEMA_V2 else "v1"
+    return f"{stem}_{version}"
+
+
+def _runner_state_schema(bundle: ProtocolBundle) -> str:
+    return (
+        "p4_g0c_runner_state_v4"
+        if bundle.protocol.get("schema_version") == PROTOCOL_SCHEMA_V2
+        else "p4_g0c_runner_state_v3"
+    )
 
 
 def load_bundle(
@@ -172,7 +182,7 @@ def _runner_state_failures(
     expected_ids = [record["run_id"] for record in plan]
     failures = []
     expected_scalars = {
-        "schema_version": RUNNER_STATE_SCHEMA,
+        "schema_version": _runner_state_schema(bundle),
         "runner_state": "COMPLETE",
         "protocol_sha256": bundle.protocol_sha256,
         "registry_sha256": bundle.registry_sha256,
@@ -184,6 +194,8 @@ def _runner_state_failures(
         "failure_reason": "",
         "failed_run_id": "",
     }
+    if bundle.protocol.get("schema_version") == PROTOCOL_SCHEMA_V2:
+        expected_scalars["gpu_preflight_invocations"] = 1
     for key, value in expected_scalars.items():
         if state.get(key) != value:
             if key.endswith("sha256"):
@@ -252,6 +264,15 @@ def _runner_state_failures(
         failures.append("runner_state_attempt_ledger")
     if state.get("runs") != plan:
         failures.append("runner_state_plan")
+    if bundle.protocol.get("schema_version") == PROTOCOL_SCHEMA_V2:
+        dependency = state.get("dependency_preflight")
+        if (
+            not isinstance(dependency, dict)
+            or dependency.get("dependency_ready") is not True
+            or dependency.get("manifest_sha256")
+            != bundle.protocol["runtime_dependency_manifest"]["sha256"]
+        ):
+            failures.append("runner_state_dependency_preflight")
     return failures, state, path
 
 
@@ -342,7 +363,7 @@ def _manifest_failures(
     run_id = record["run_id"]
     failures = []
     expected = {
-        "schema_version": RUN_MANIFEST_SCHEMA,
+        "schema_version": _versioned_schema(bundle, "p4_g0c_run_manifest"),
         "gate": "G0C",
         "run_id": run_id,
         "seed": record["seed"],
@@ -351,6 +372,13 @@ def _manifest_failures(
         "registry_sha256": bundle.registry_sha256,
         "fixture_sha256": bundle.fixture_sha256,
         "csv_path": str(csv_path.resolve()),
+        "experiment": (
+            "p4_g0c_metrics_calibration_v2"
+            if bundle.protocol.get("schema_version") == PROTOCOL_SCHEMA_V2
+            else "p4_g0c_metrics_calibration_v1"
+        ),
+        "scenario": "p4_g0c_free_corridor_v1",
+        "decision_schema_version": "p4_collision_guide_decision_v1",
         "required_process_set": REQUIRED_PROCESSES,
         "required_processes_ok": True,
         "runner_state": "COMPLETE",
@@ -363,6 +391,15 @@ def _manifest_failures(
         "overwrite_allowed": False,
         "test_planner_manifest_path": expected_launch_manifest_path,
     }
+    if bundle.protocol.get("schema_version") == PROTOCOL_SCHEMA_V2:
+        expected.update({
+            "dependency_manifest_sha256": bundle.protocol[
+                "runtime_dependency_manifest"
+            ]["sha256"],
+            "replacement_lineage_sha256": bundle.protocol[
+                "replacement_lineage"
+            ]["sha256"],
+        })
     for key, value in expected.items():
         if manifest.get(key) != value:
             category = "hash_mismatch" if key.endswith("sha256") else "manifest_truth"
@@ -458,7 +495,7 @@ def _threshold_draft(
     ratio_q = q("path_ratio", 0.95)
     search_q = q("total_search_s", 0.95)
     return {
-        "schema_version": DRAFT_SCHEMA,
+        "schema_version": _versioned_schema(bundle, "p4_g0c_threshold_draft"),
         "state": "DRAFT_UNCALIBRATED",
         "protocol_sha256": bundle.protocol_sha256,
         "registry_sha256": bundle.registry_sha256,
@@ -608,7 +645,7 @@ def analyze(bundle: ProtocolBundle, runs_root: Path) -> dict[str, Any]:
         )
     raw_hash = _raw_bundle_hash(root, bundle_paths) if bundle_paths else ""
     result = {
-        "schema_version": ANALYSIS_SCHEMA,
+        "schema_version": _versioned_schema(bundle, "p4_g0c_analysis"),
         "analysis_status": "REJECTED" if failures else "DRAFT_ELIGIBLE",
         "protocol_sha256": bundle.protocol_sha256,
         "registry_sha256": bundle.registry_sha256,
@@ -641,8 +678,8 @@ def analyze(bundle: ProtocolBundle, runs_root: Path) -> dict[str, Any]:
 def _parser() -> argparse.ArgumentParser:
     repo = Path(__file__).resolve().parents[2]
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--protocol", type=Path, default=repo / "config/icra27/p4_g0c_protocol_v1.json")
-    parser.add_argument("--registry", type=Path, default=repo / "config/icra27/p4_threshold_registry_v1.json")
+    parser.add_argument("--protocol", type=Path, default=repo / "config/icra27/p4_g0c_protocol_v2.json")
+    parser.add_argument("--registry", type=Path, default=repo / "config/icra27/p4_threshold_registry_v2.json")
     parser.add_argument("--fixture", type=Path, default=repo / "config/icra27/p4_g0c_live_fixture_v1.json")
     parser.add_argument("--runs-root", type=Path, required=True)
     parser.add_argument("--output", type=Path)

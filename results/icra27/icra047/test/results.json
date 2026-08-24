@@ -1,0 +1,108 @@
+{
+  "schema_version": "icra047_synthetic_test_results_v1",
+  "red": {
+    "command": "python3 test/test_p4_g0c_dependency_preflight.py",
+    "result": "FAILED_EXPECTED",
+    "tests": 5,
+    "failures": 5,
+    "reason": "v2 protocol artifacts and dependency validator not yet implemented"
+  },
+  "pre_review_green": [
+    {
+      "command": "python3 -m unittest discover -s test -p 'test_p4_g0c_*.py'",
+      "tests": 61,
+      "failures": 0,
+      "exit_code": 0,
+      "repository_local_tmpdir": false
+    },
+    {
+      "command": "python3 test/test_test_planner_launch.py",
+      "tests": 16,
+      "failures": 0,
+      "exit_code": 0,
+      "repository_local_tmpdir": false
+    },
+    {
+      "command": "PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s test -p 'test_*.py'",
+      "tests": 416,
+      "failures": 0,
+      "exit_code": 0,
+      "repository_local_tmpdir": false,
+      "policy_finding": "TemporaryDirectory outputs were not explicitly constrained to the repository"
+    }
+  ],
+  "review_remediation": [
+    {
+      "command": "TMPDIR=$PWD/results/icra27/icra047/tmp PYTHONDONTWRITEBYTECODE=1 python3 -m unittest test.test_p4_g0c_dependency_preflight test.test_p4_g0c_protocol test.test_p4_g0c_runner test.test_p4_g0c_analyzer test.test_p4_g0c_launch_contract",
+      "tests": 0,
+      "loader_errors": 5,
+      "exit_code": 1,
+      "reason": "test directory is not a Python package; corrected to discovery syntax"
+    },
+    {
+      "command": "TMPDIR=$PWD/results/icra27/icra047/tmp PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s test -p 'test_p4_g0c*.py'",
+      "tests": 62,
+      "failures": 0,
+      "exit_code": 0,
+      "note": "first pass exposed ResourceWarning; implementation closed the file handle and this command then passed cleanly"
+    },
+    {
+      "command": "TMPDIR=$PWD/results/icra27/icra047/tmp PYTHONDONTWRITEBYTECODE=1 python3 test/test_test_planner_launch.py",
+      "tests": 16,
+      "failures": 0,
+      "exit_code": 0
+    },
+    {
+      "command": "TMPDIR=$PWD/results/icra27/icra047/tmp PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s test -p 'test_*.py'",
+      "tests": 417,
+      "failures": 0,
+      "exit_code": 0,
+      "full_discovery_invocation_count_total_at_this_point": 2,
+      "repository_local_tmpdir": true,
+      "note": "one pre-existing ResourceWarning was emitted by an unrelated test"
+    },
+    {
+      "command": "TMPDIR=$PWD/results/icra27/icra047/tmp PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s test -p 'test_*.py'",
+      "tests": 417,
+      "failures": 0,
+      "exit_code": 0,
+      "full_discovery_invocation_count_total": 3,
+      "repository_local_tmpdir": true,
+      "reason": "final rerun after defensive shebang parser fix",
+      "note": "one pre-existing ResourceWarning was emitted by an unrelated test"
+    },
+    {
+      "command": "TMPDIR=$PWD/results/icra27/icra047/tmp PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s test -p 'test_*.py'",
+      "tests": 417,
+      "failures": 0,
+      "exit_code": 0,
+      "full_discovery_invocation_count_total": 4,
+      "repository_local_tmpdir": true,
+      "reason": "final rerun after full ELF header, native architecture and dynamic-link closure remediation",
+      "note": "one pre-existing ResourceWarning was emitted by an unrelated test"
+    },
+    {
+      "command": "TMPDIR=$PWD/results/icra27/icra047/tmp PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s test -p 'test_*.py'",
+      "tests": 417,
+      "failures": 0,
+      "exit_code": 0,
+      "full_discovery_invocation_count_total": 5,
+      "repository_local_tmpdir": true,
+      "reason": "final fixed-tree rerun with ldd inheriting the explicit sanitized environment",
+      "note": "one pre-existing ResourceWarning was emitted by an unrelated test"
+    }
+  ],
+  "static_checks": {
+    "python_syntax": "PASS",
+    "fatal_only_flake8": "PASS",
+    "canonical_json": "PASS",
+    "git_diff_check": "PASS"
+  },
+  "forbidden_runtime_invocations": {
+    "gpu_preflight": 0,
+    "ros_or_launch": 0,
+    "runner_cli": 0,
+    "analyzer_cli": 0,
+    "ctest_or_retained_binary": 0
+  }
+}

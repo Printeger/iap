@@ -143,7 +143,11 @@ class P4G0CAnalyzerTest(unittest.TestCase):
                 rows.append(self._row(global_index))
                 global_index += 1
             manifest = {
-                "schema_version": "p4_g0c_run_manifest_v1",
+                "schema_version": (
+                    "p4_g0c_run_manifest_v2"
+                    if self.bundle.protocol["schema_version"].endswith("_v2")
+                    else "p4_g0c_run_manifest_v1"
+                ),
                 "gate": "G0C",
                 "run_id": record["run_id"],
                 "seed": record["seed"],
@@ -158,6 +162,13 @@ class P4G0CAnalyzerTest(unittest.TestCase):
                     self.bundle.protocol["effective_values"]
                 ),
                 "csv_path": str(csv_path.resolve()),
+                "experiment": (
+                    "p4_g0c_metrics_calibration_v2"
+                    if self.bundle.protocol["schema_version"].endswith("_v2")
+                    else "p4_g0c_metrics_calibration_v1"
+                ),
+                "scenario": "p4_g0c_free_corridor_v1",
+                "decision_schema_version": "p4_collision_guide_decision_v1",
                 "required_process_set": ["iap_rosnode", "ego_planner_node"],
                 "required_processes_ok": True,
                 "runner_state": "COMPLETE",
@@ -175,6 +186,15 @@ class P4G0CAnalyzerTest(unittest.TestCase):
                     ).resolve()
                 ),
             }
+            if self.bundle.protocol["schema_version"].endswith("_v2"):
+                manifest.update({
+                    "dependency_manifest_sha256": self.bundle.protocol[
+                        "runtime_dependency_manifest"
+                    ]["sha256"],
+                    "replacement_lineage_sha256": self.bundle.protocol[
+                        "replacement_lineage"
+                    ]["sha256"],
+                })
             if mutate is not None:
                 mutate(run_index, manifest, rows)
             with csv_path.open("w", newline="") as stream:
@@ -211,7 +231,11 @@ class P4G0CAnalyzerTest(unittest.TestCase):
             )
         run_ids = [record["run_id"] for record in plan]
         runner_state = {
-            "schema_version": "p4_g0c_runner_state_v3",
+            "schema_version": (
+                "p4_g0c_runner_state_v4"
+                if self.bundle.protocol["schema_version"].endswith("_v2")
+                else "p4_g0c_runner_state_v3"
+            ),
             "runner_state": "COMPLETE",
             "protocol_sha256": self.bundle.protocol_sha256,
             "registry_sha256": self.bundle.registry_sha256,
@@ -236,6 +260,16 @@ class P4G0CAnalyzerTest(unittest.TestCase):
             "failure_reason": "",
             "failed_run_id": "",
         }
+        if self.bundle.protocol["schema_version"].endswith("_v2"):
+            runner_state.update({
+                "gpu_preflight_invocations": 1,
+                "dependency_preflight": {
+                    "dependency_ready": True,
+                    "manifest_sha256": self.bundle.protocol[
+                        "runtime_dependency_manifest"
+                    ]["sha256"],
+                },
+            })
         (root / "p4_g0c_runner_state.json").write_text(
             json.dumps(runner_state, sort_keys=True) + "\n"
         )
@@ -282,6 +316,23 @@ class P4G0CAnalyzerTest(unittest.TestCase):
         )
         with self.assertRaisesRegex(MODULE.AnalysisError, "finite"):
             MODULE.quantile_type7([(math.nan, 0)], 0.95)
+
+    def test_v2_complete_synthetic_bundle_is_draft_eligible(self):
+        self.bundle = MODULE.load_bundle(
+            REPO / "config/icra27/p4_g0c_protocol_v2.json",
+            REPO / "config/icra27/p4_threshold_registry_v2.json",
+            REPO / "config/icra27/p4_g0c_live_fixture_v1.json",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._make_bundle(root)
+            result = MODULE.analyze(self.bundle, root)
+        self.assertEqual(result["analysis_status"], "DRAFT_ELIGIBLE")
+        self.assertEqual(result["schema_version"], "p4_g0c_analysis_v2")
+        self.assertEqual(
+            result["threshold_draft"]["schema_version"],
+            "p4_g0c_threshold_draft_v2",
+        )
 
     def test_exact_100_boundary_is_eligible_and_draft_uses_frozen_formulas(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -791,6 +842,8 @@ class P4G0CAnalyzerTest(unittest.TestCase):
                 io.StringIO()
             ):
                 exit_code = MODULE.main([
+                    "--protocol", str(REPO / "config/icra27/p4_g0c_protocol_v1.json"),
+                    "--registry", str(REPO / "config/icra27/p4_threshold_registry_v1.json"),
                     "--runs-root", str(root),
                     "--output", str(shared),
                     "--draft-output", str(shared),
@@ -854,6 +907,8 @@ class P4G0CAnalyzerTest(unittest.TestCase):
                 io.StringIO()
             ), contextlib.redirect_stderr(io.StringIO()):
                 exit_code = MODULE.main([
+                    "--protocol", str(REPO / "config/icra27/p4_g0c_protocol_v1.json"),
+                    "--registry", str(REPO / "config/icra27/p4_threshold_registry_v1.json"),
                     "--runs-root", str(root),
                     "--output", "p4_g0c_analysis.json",
                     "--draft-output", str(draft_output),
@@ -874,6 +929,8 @@ class P4G0CAnalyzerTest(unittest.TestCase):
                 io.StringIO()
             ):
                 exit_code = MODULE.main([
+                    "--protocol", str(REPO / "config/icra27/p4_g0c_protocol_v1.json"),
+                    "--registry", str(REPO / "config/icra27/p4_threshold_registry_v1.json"),
                     "--runs-root", str(root),
                     "--output", str(analysis_output),
                     "--draft-output", str(draft_output),

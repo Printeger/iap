@@ -1563,3 +1563,69 @@ bash results/icra27/icra046/preflight/task_env.bash python3 scripts/dev_planner/
 The runner command above has already consumed ICRA-046's only authorized call
 and must not be rerun. The analyzer was not invoked because COMPLETE was not
 reached.
+
+## 2026-08-24 (ICRA-047 G0C replacement protocol and dependency closure)
+
+- IAP-RQ-423: added canonical `p4_g0c_protocol_v2`,
+  `p4_threshold_registry_v2`, `p4_g0c_replacement_lineage_v2` and
+  `p4_g0c_runtime_dependencies_v2`. All scientific values remain equivalent
+  to v1: seeds `[211,223,237,253,271]`, three seed-major repetitions,
+  90-second duration, 0.2-second per-search timeout, 1.30 hard ratio cap,
+  numerical floor, ratio tolerance, Type-7 quantiles, threshold formulas,
+  minimum 100 complete decisions and no overwrite/exclusion/retry. The 15
+  replacement IDs use the disjoint `p4-g0c-r2-seed...` namespace.
+- The lineage freezes ICRA-046 as disqualified: failed v1 first ID, missing
+  `so3_control`, 1 attempted / 0 complete / 0 retry, zero analyzer, exact v1
+  protocol/raw-manifest/runner-state hashes and reason
+  `PRELIVE_DEPENDENCY_GATE_VIOLATION_NO_CALIBRATION_DATA`. Registry v2 remains
+  `PROPOSED_UNCALIBRATED`, with four null gates, null bundle and
+  `application_enabled=false`.
+- Runner state v4 performs a canonical/hash-bound runtime closure check before
+  any GPU-running state or GPU call. It validates exact package markers,
+  loadable scripts/full native ELF executables, `SO3ControlComponent`
+  resource/full native ELF library, 14 exact SHA-256-bound config files, six
+  config-selected IAP ELF shared libraries and the hashed launch contract in a
+  strict sanitized prefix list. ELF inputs also require successful non-ROS
+  dynamic-link resolution. Missing,
+  malformed, drifted, duplicate, undeclared, historical, alias or symlink
+  cases return typed `DEPENDENCY_*` failure with zero GPU and launch
+  invocations. The closure includes all active G0C launch packages and the
+  in-repository build dependencies `cmake_utils`, `pose_utils` and `uav_utils`;
+  bag and RViz remain inactive.
+- `--dependency-preflight-only` is non-ROS/non-GPU and consumes a separate
+  fresh root. Full mode invokes the exact same validator again before GPU, so
+  standalone success cannot bypass the live gate. V1 remains readable for
+  historical analysis but non-plan runner execution requires v2.
+- Analyzer and launch bindings understand both historical v1 and replacement
+  v2 schemas; v2 manifests bind dependency/lineage hashes. No product/scenario
+  behavior or threshold value changed.
+
+Synthetic reproduction from the repository root:
+
+```bash
+mkdir -p results/icra27/icra047/tmp
+TMPDIR="$PWD/results/icra27/icra047/tmp" PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s test -p 'test_p4_g0c*.py'
+TMPDIR="$PWD/results/icra27/icra047/tmp" PYTHONDONTWRITEBYTECODE=1 python3 test/test_test_planner_launch.py
+PYTHONPYCACHEPREFIX="$PWD/results/icra27/icra047/scratch/pycache" python3 -m py_compile scripts/dev_planner/p4_g0c_protocol.py scripts/dev_planner/run_p4_g0c_calibration.py scripts/dev_planner/analyze_p4_g0c_calibration.py launch/test_planner.launch.py test/test_p4_g0c_protocol.py test/test_p4_g0c_runner.py test/test_p4_g0c_dependency_preflight.py test/test_p4_g0c_analyzer.py test/test_p4_g0c_launch_contract.py test/test_test_planner_launch.py
+TMPDIR="$PWD/results/icra27/icra047/tmp" PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s test -p 'test_*.py'
+```
+
+Future dependency-only use requires a fresh sanitized environment and a unique
+root; this command was not executed in ICRA-047:
+
+```bash
+P4_G0C_ALLOWED_PREFIXES="$AMENT_PREFIX_PATH" python3 scripts/dev_planner/run_p4_g0c_calibration.py --dependency-preflight-only --runs-root results/icra27/<future-task>/dependency-only
+```
+
+ICRA-047 ran no GPU preflight, ROS/launch, runner/analyzer CLI, calibration,
+CTest/retained binary, smoke, benchmark, bag/RViz, threshold draft/freeze/
+application, G0D, P5 or cleanup. Result is
+`P4_G0C_REPLACEMENT_PROTOCOL_READY_FOR_REVIEW`, never G0C PASS.
+
+Pre-review full discovery passed 416/416 but did not explicitly constrain
+temporary directories to the repository; this review finding is retained in
+the test evidence. After closure/loadability remediation and repository-local
+`TMPDIR` enforcement, focused G0C suites pass 62/62, launch golden passes 16/16
+and the final full repository Python discovery passes 417/417. Five full
+discoveries ran in total: one policy-noncompliant pre-review run and four
+repository-local remediation/final runs, all retained in the evidence.

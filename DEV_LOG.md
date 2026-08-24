@@ -6338,3 +6338,77 @@ capacity above 20 GiB and zero task-process state were rechecked.
 Builder result is `BLOCKED_LAUNCH_DEPENDENCY_SO3_CONTROL_NOT_FOUND`, never G0C
 PASS. No retry, repair, alternate root, analyzer, threshold freeze/application,
 G0D, P5 or cleanup is authorized. Control returns only to SUPERVISOR review.
+
+## 2026-08-24T11:31:02Z — ICRA-047 START
+
+IAP-RQ-423. Synchronized `dev/icra` at Supervisor task HEAD `f7d60bd`: initial
+status contained only the protected untracked PDF, fetch passed and divergence
+was `0 0`, so no pull ran. `AGENT_STATE.md` authorizes only DEEPSEEK,
+`TASK_READY`, ICRA-047 and `P4_G0C_REPLACEMENT_PROTOCOL`.
+
+This task is synthetic-only. GPU preflight, ROS, launch, runner/analyzer CLI,
+calibration, CTest, retained binaries, bag/RViz, smoke, benchmark, cleanup,
+threshold application, G0D and P5 are forbidden. Temporary syntax output is
+repository-local below `results/icra27/icra047/scratch/`; it is not staged.
+
+Before work, the protected PDF SHA-256 was
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+The complete retained ICRA-046 tree contained 3,815 files / 759 directories /
+4,884,473,805 bytes and had aggregate file-content SHA-256
+`823d41bf0e9f5e17ede8b538624ba71d46626d5e1369451f4989a9a0e4cd96b1`.
+The frozen raw-manifest and runner-state hashes were respectively
+`f307e61a90707d6da5a38138558a97447c5267ef9a5184f3df92ca8b97079438`
+and `a6dba6376b225f2fd00c218bdd19f911b9183e5e53a868f55cb0f1914d474ef1`.
+
+## 2026-08-24T11:53:18Z — ICRA-047 REPLACEMENT PROTOCOL IMPLEMENTED
+
+IAP-RQ-423. Added canonical v2 protocol, proposed registry, replacement
+lineage and complete runtime-dependency manifest. The v2 matrix uses exactly
+`p4-g0c-r2-seed<seed>-rep<two digits>` across unchanged seeds/repetitions and
+keeps the v1 effective values, 90-second duration, 0.2-second search timeout,
+1.30 cap, numerical floor, ratio tolerance, Type-7 quantiles, formulas,
+minimum 100 decisions and no-overwrite/no-exclusion/no-retry rules.
+
+The lineage binds the v1 protocol, consumed first ID, ICRA-046 1 attempted / 0
+complete / 0 retry, missing `so3_control`, raw/state hashes, zero analyzer and
+`PRELIVE_DEPENDENCY_GATE_VIOLATION_NO_CALIBRATION_DATA`. Registry v2 remains
+`PROPOSED_UNCALIBRATED`: four gates and bundle are null and application is
+disabled.
+
+The runner now validates the canonical/hash-bound dependency manifest before
+persisting GPU-running state or calling GPU. The frozen closure covers 18
+packages, 13 active executables, `SO3ControlComponent` plus its library, 14
+exact config files plus the launch contract, six config-selected IAP shared
+libraries, and explicit build-closure packages including `cmake_utils`,
+`pose_utils` and `uav_utils`. Config bytes are SHA-256 bound; executables must
+be valid scripts or full native-architecture ELF executables and every
+component/runtime library must be a full native ELF shared object. ELF inputs
+also undergo non-ROS dynamic-link resolution, so truncation, wrong architecture
+and unresolved `DT_NEEDED` dependencies reject. Exact allowed/current prefix
+lists must match;
+missing, invalid, drifted, duplicate, aliased/symlinked, undeclared or
+workspace-default historical inputs fail with typed `DEPENDENCY_*` reasons and
+zero GPU/launch calls. `--dependency-preflight-only` uses the same validation
+function on a fresh one-use root; full mode repeats validation.
+
+Red evidence was the direct command
+`python3 test/test_p4_g0c_dependency_preflight.py`: before implementation it
+failed 5/5 cases because v2 artifacts were absent. Pre-review focused/full
+tests passed 61/61 and 416/416, but review correctly found their temporary
+directories had not been explicitly constrained to the repository. This
+policy miss is retained in `results/icra27/icra047/test/results.json`; no live
+boundary was crossed.
+
+Review remediation corrected four fabricated config paths to the real
+`sim_demo11`/`sim_ego` closure, added the omitted viewer/logging/sensor files,
+bound all 14 config hashes and six dynamically selected libraries, and added
+content-drift plus truncated/wrong-architecture/unresolved-linkage tests. With
+`TMPDIR=$PWD/results/icra27/icra047/tmp`, focused discovery passes 62/62,
+launch golden passes 16/16 and the final post-remediation full repository
+discovery passes 417/417. Five full discoveries ran in total: one unconstrained
+pre-review and four repository-local remediation/final passes. An initial
+repository-local module-form command produced five loader
+errors because `test/` is not a package; the corrected discovery command is
+green. Syntax, fatal-only flake8, canonical JSON and `git diff --check` pass.
+No live boundary was invoked and no threshold draft/application was created.
+Current result is protocol readiness only, never G0C PASS.

@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -42,6 +43,65 @@ class P4G0CLaunchContractTest(unittest.TestCase):
             float(scenario["p1_fixture_risky_canopy_probability"]),
             float(scenario["p1_fixture_safe_canopy_probability"]),
         )
+
+    def test_v2_profile_and_binding_use_only_r2_identity(self):
+        profile = MODULE.EXPERIMENT_PRESETS[
+            "p4_g0c_metrics_calibration_v2"
+        ]
+        self.assertEqual(profile, {
+            **MODULE.P4_G0C_FROZEN_LAUNCH_VALUES,
+            **MODULE.P4_G0C_ARTIFACT_PRESET_V2,
+            "scenario": "p4_g0c_free_corridor_v1",
+        })
+        protocol = REPO / "config/icra27/p4_g0c_protocol_v2.json"
+        registry = REPO / "config/icra27/p4_threshold_registry_v2.json"
+        fixture = REPO / "config/icra27/p4_g0c_live_fixture_v1.json"
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp) / "p4-g0c-r2-seed211-rep01"
+            binding = MODULE._p4_g0c_binding(
+                experiment="p4_g0c_metrics_calibration_v2",
+                protocol_path=protocol,
+                registry_path=registry,
+                fixture_path=fixture,
+                declared_protocol_sha256=MODULE._sha256_file(protocol),
+                declared_registry_sha256=MODULE._sha256_file(registry),
+                declared_fixture_sha256=MODULE._sha256_file(fixture),
+                run_id=run_dir.name,
+                seed=211,
+                repetition=1,
+                run_manifest_path=run_dir / "p4_g0c_run_manifest.json",
+                csv_path=run_dir / "p4_decisions.csv",
+                effective_values=MODULE.P4_G0C_FROZEN_LAUNCH_VALUES,
+            )
+        self.assertEqual(binding["schema_version"], "p4_g0c_run_manifest_v2")
+        self.assertEqual(binding["run_id"], "p4-g0c-r2-seed211-rep01")
+        protocol_payload = json.loads(protocol.read_text())
+        self.assertEqual(
+            binding["dependency_manifest_sha256"],
+            protocol_payload["runtime_dependency_manifest"]["sha256"],
+        )
+        self.assertEqual(
+            binding["replacement_lineage_sha256"],
+            protocol_payload["replacement_lineage"]["sha256"],
+        )
+        with self.assertRaisesRegex(RuntimeError, "run identity"):
+            MODULE._p4_g0c_binding(
+                experiment="p4_g0c_metrics_calibration_v2",
+                protocol_path=protocol,
+                registry_path=registry,
+                fixture_path=fixture,
+                declared_protocol_sha256=MODULE._sha256_file(protocol),
+                declared_registry_sha256=MODULE._sha256_file(registry),
+                declared_fixture_sha256=MODULE._sha256_file(fixture),
+                run_id="p4-g0c-seed211-rep01",
+                seed=211,
+                repetition=1,
+                run_manifest_path=(
+                    Path(tmp) / "p4-g0c-seed211-rep01/p4_g0c_run_manifest.json"
+                ),
+                csv_path=Path(tmp) / "p4-g0c-seed211-rep01/p4_decisions.csv",
+                effective_values=MODULE.P4_G0C_FROZEN_LAUNCH_VALUES,
+            )
 
     def test_conflicting_g0c_override_is_rejected_not_normalized(self):
         effective = dict(MODULE.P4_G0C_FROZEN_LAUNCH_VALUES)

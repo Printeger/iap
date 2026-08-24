@@ -14,6 +14,83 @@ SPEC.loader.exec_module(MODULE)
 
 
 class P4G0CProtocolTest(unittest.TestCase):
+    def test_v2_replacement_is_exact_unique_and_scientifically_equivalent(self):
+        v1 = MODULE.load_protocol_bundle(
+            REPO / "config/icra27/p4_g0c_protocol_v1.json",
+            REPO / "config/icra27/p4_threshold_registry_v1.json",
+            REPO / "config/icra27/p4_g0c_live_fixture_v1.json",
+        )
+        v2 = MODULE.load_protocol_bundle(
+            REPO / "config/icra27/p4_g0c_protocol_v2.json",
+            REPO / "config/icra27/p4_threshold_registry_v2.json",
+            REPO / "config/icra27/p4_g0c_live_fixture_v1.json",
+        )
+        scientific_keys = {
+            "effective_values", "matrix_order", "minimum_complete_decisions",
+            "no_exclusion", "no_overwrite", "no_retry",
+            "numerical_noise_floor", "path_ratio_consistency", "quantiles",
+            "repetitions", "seeds", "threshold_formulas", "live_fixture",
+        }
+        self.assertEqual(
+            {key: v2.protocol[key] for key in scientific_keys},
+            {key: v1.protocol[key] for key in scientific_keys},
+        )
+        self.assertEqual(v2.protocol["run_duration_s"], 90)
+        run_ids = v2.protocol["registered_run_ids"]
+        self.assertEqual(len(run_ids), 15)
+        self.assertEqual(len(set(run_ids)), 15)
+        self.assertEqual(run_ids[0], "p4-g0c-r2-seed211-rep01")
+        self.assertEqual(run_ids[-1], "p4-g0c-r2-seed271-rep03")
+        self.assertTrue(all("p4-g0c-seed" not in run_id for run_id in run_ids))
+
+        invalid = json.loads(json.dumps(v2.protocol))
+        invalid["registered_run_ids"][0] = "p4-g0c-seed211-rep01"
+        with self.assertRaisesRegex(
+            MODULE.ProtocolError, "exact immutable matrix"
+        ):
+            MODULE.validate_protocol(invalid)
+
+    def test_v2_lineage_and_proposed_registry_preserve_icra046_truth(self):
+        bundle = MODULE.load_protocol_bundle(
+            REPO / "config/icra27/p4_g0c_protocol_v2.json",
+            REPO / "config/icra27/p4_threshold_registry_v2.json",
+            REPO / "config/icra27/p4_g0c_live_fixture_v1.json",
+        )
+        lineage = MODULE.load_canonical_json(
+            REPO / bundle.protocol["replacement_lineage"]["path"]
+        )
+        failed = lineage["disqualified_execution"]
+        self.assertEqual(
+            lineage["superseded_protocol"]["sha256"],
+            "9e89ea42675459a63853d98845f02b7fe5b9434a9f28fcbd6ef5ba1bc5bd906d",
+        )
+        self.assertEqual(
+            failed["raw_manifest"]["sha256"],
+            "f307e61a90707d6da5a38138558a97447c5267ef9a5184f3df92ca8b97079438",
+        )
+        self.assertEqual(
+            failed["runner_state"]["sha256"],
+            "a6dba6376b225f2fd00c218bdd19f911b9183e5e53a868f55cb0f1914d474ef1",
+        )
+        self.assertEqual(failed["failed_run_id"], "p4-g0c-seed211-rep01")
+        self.assertEqual(
+            (failed["attempted_run_count"], failed["complete_run_count"],
+             failed["retry_count"], failed["analyzer_invocations"]),
+            (1, 0, 0, 0),
+        )
+        self.assertEqual(
+            failed["replacement_reason"],
+            "PRELIVE_DEPENDENCY_GATE_VIOLATION_NO_CALIBRATION_DATA",
+        )
+        self.assertFalse(failed["threshold_draft_exists"])
+        self.assertFalse(failed["threshold_application_possible"])
+        self.assertEqual(bundle.registry["state"], "PROPOSED_UNCALIBRATED")
+        self.assertTrue(all(
+            value is None for value in bundle.registry["gates"].values()
+        ))
+        self.assertIsNone(bundle.registry["calibration_bundle_sha256"])
+        self.assertFalse(bundle.registry["application_enabled"])
+
     def test_registered_bundle_has_exact_seed_major_matrix_and_hash_binding(self):
         bundle = MODULE.load_protocol_bundle(
             REPO / "config/icra27/p4_g0c_protocol_v1.json",
