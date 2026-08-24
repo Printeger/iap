@@ -1,5 +1,60 @@
 # ICRA Supervisor Log
 
+## 2026-08-24 — ICRA-049 review PASS and ICRA-050 replacement live authorization
+
+### Review identity and synchronization
+
+- Fixed review range: `d828802c89d6dae1dfc969d7a1f625b9ef26b0b0...03d81e2e646df855d8dbb4e0a9e3e9865e53e315`.
+- Reviewed implementation/evidence `c213eb8` and final DEV_LOG-only handoff `03d81e2`; both carry
+  `IAP-RQ-423`. All 11 changed paths match the ICRA-049 allowlist and DEEPSEEK ownership; no Supervisor,
+  launch/config/protocol/registry/dependency/product/CMake or external-repository file changed.
+- After fetch, HEAD and `origin/dev/icra` match at divergence `0 0`. The sole untracked PDF remains
+  unstaged and hash-identical at
+  `1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+
+### Standards axis
+
+- Verdict: `PASS`; zero blocking findings and one Low judgment smell; worst Low.
+- Low intentional Duplicated Code: runner and analyzer tests independently repeat the 28-key oracle and
+  mutation helpers. Sharing the production mapping would weaken omission detection, while a new helper
+  was outside the narrow allowlist. No remediation is required.
+- Requirement/docs synchronization, commit structure, branch/protected-state audit, repository-local tmp,
+  ICRA-046/047/048 retention and zero forbidden invocation evidence conform.
+
+### Spec axis
+
+- Verdict: `PASS`; zero blocking and zero nonblocking findings; worst none.
+- Independent real launch-manifest materialization proves the production manifest/protocol intersection is
+  exactly the frozen 28-key map: both sets have 28 entries, with no unmapped actual or mapped-missing key,
+  and all exact values/types validate.
+- Runner and analyzer consume the same shared validator. All 28 x remove/change/wrong-type adversaries
+  retain the nested binding; analyzer adversaries refresh legitimate inventory/state hashes. Runner never
+  reaches COMPLETE/final inventory and analyzer never drafts. Nominal evidence remains COMPLETE and
+  `DRAFT_ELIGIBLE` synthetically.
+- Prior immutable-anchor, exact-science, schema-downgrade, secondary-manifest and real-launch regressions
+  remain intact. No scientific, configuration, product or runtime scope changed.
+
+### Independent verification and Gate verdict
+
+- Supervisor reran focused G0C discovery 77/77 and full repository Python discovery 432/432 with
+  repository-local TMPDIR. Python syntax/JSON/diff evidence passes. The existing unrelated ResourceWarning
+  and expected diagnostic stdout remain nonblocking.
+- Verdict: `ICRA049_REVIEW_PASS_G0C_REPLACEMENT_LIVE_READY`. This is replacement-protocol readiness, not
+  G0C PASS, threshold freeze/application or calibration evidence.
+
+### Artifact lifecycle and required next action
+
+- ICRA-049 created no build/install tree, so there is no current-task product to delete after PASS. All
+  twelve historical ICRA-046 build/install directories and its failed raw evidence remain retained; no
+  cleanup occurred. The next task must not execute or reuse them.
+- Unique next task: `ICRA-050 / P4_G0C_REPLACEMENT_LIVE_CALIBRATION`, defined in `NEXT_TASK.md`; active
+  role is `DEEPSEEK`, state `TASK_READY`.
+- Fresh-build all 17 non-system declared packages into one task-local non-symlink install; resolve
+  `rclcpp_components` from Jazzy; pass a separate dependency-only root, then repeat dependency and GPU
+  gates in one full runner before exactly 15 r2 runs and one complete-bundle analysis.
+- Any build/dependency/GPU/process/run/analyzer failure stops without retry or tuning. A draft returns to
+  Supervisor review; registry mutation, threshold freeze/application and G0C PASS remain unauthorized.
+
 ## 2026-08-24 — ICRA-048 review REQUEST_CHANGES and ICRA-049 evidence-binding repair
 
 ### Review identity and synchronization
