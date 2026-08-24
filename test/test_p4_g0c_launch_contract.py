@@ -1,17 +1,25 @@
-import ast
 import importlib.util
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
-from launch import LaunchContext
-
-
 REPO = Path(__file__).resolve().parents[1]
+SCRIPT_DIR = REPO / "scripts" / "dev_planner"
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from run_p4_g0c_tests import require_hermetic_test_environment  # noqa: E402
+from p4_g0c_surface_classifier import production_surface  # noqa: E402
+
+require_hermetic_test_environment()
+
+from launch import LaunchContext  # noqa: E402
+
+
 MODULE_PATH = REPO / "launch" / "test_planner.launch.py"
-RUNNER_PATH = REPO / "scripts" / "dev_planner" / "run_p4_g0c_calibration.py"
 SPEC = importlib.util.spec_from_file_location("test_planner_launch_g0c", MODULE_PATH)
 MODULE = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
@@ -56,345 +64,30 @@ class P4G0CLaunchContractTest(unittest.TestCase):
         )
 
     def test_r3_registered_paths_equal_production_launch_surface(self):
-        source = MODULE_PATH.read_text()
-        tree = ast.parse(source)
-        runner_tree = ast.parse(RUNNER_PATH.read_text())
-        functions = {
-            node.name: node
-            for node in tree.body
-            if isinstance(node, ast.FunctionDef)
-        }
-        runner_functions = {
-            node.name: node
-            for node in runner_tree.body
-            if isinstance(node, ast.FunctionDef)
-        }
-
-        def launch_configurations(node):
-            return {
-                item.args[0].value
-                for item in ast.walk(node)
-                if (
-                    isinstance(item, ast.Call)
-                    and isinstance(item.func, ast.Name)
-                    and item.func.id == "LaunchConfiguration"
-                    and item.args
-                    and isinstance(item.args[0], ast.Constant)
-                    and isinstance(item.args[0].value, str)
-                )
-            }
-
-        generate = functions["generate_launch_description"]
-        environment_actions = []
-        for node in ast.walk(generate):
-            if (
-                isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Name)
-                and node.func.id == "SetEnvironmentVariable"
-                and len(node.args) >= 2
-                and isinstance(node.args[0], ast.Constant)
-            ):
-                environment_actions.append(node)
-        path_environment_actions = [
-            node for node in environment_actions
-            if (
-                isinstance(node.args[1], ast.Call)
-                and isinstance(node.args[1].func, ast.Name)
-                and node.args[1].func.id == "LaunchConfiguration"
-            ) or (
-                isinstance(node.args[1], ast.Constant)
-                and isinstance(node.args[1].value, str)
-                and node.args[1].value.startswith("/")
-            )
-        ]
+        surface = production_surface(REPO)
         self.assertEqual(
-            {node.args[0].value for node in path_environment_actions},
-            {"XDG_RUNTIME_DIR"},
+            sorted(item["name"] for item in surface["environment_actions"]),
+            [
+                "FASTRTPS_DEFAULT_PROFILES_FILE", "QT_X11_NO_MITSHM",
+                "XDG_RUNTIME_DIR", "XDG_RUNTIME_DIR",
+            ],
         )
-        xdg_actions = path_environment_actions
-        self.assertEqual(len(xdg_actions), 2)
-        self.assertTrue(all(
-            any(keyword.arg == "condition" for keyword in node.keywords)
-            for node in xdg_actions
-        ))
-        registered = [
-            node for node in xdg_actions
-            if isinstance(node.args[1], ast.Call)
-        ]
-        legacy = [
-            node for node in xdg_actions
-            if isinstance(node.args[1], ast.Constant)
-        ]
-        self.assertEqual(len(registered), 1)
-        self.assertEqual(len(legacy), 1)
-        self.assertEqual(legacy[0].args[1].value, "/tmp/runtime-root")
-        registered_condition = {
-            keyword.arg: keyword.value for keyword in registered[0].keywords
-        }["condition"]
-        legacy_condition = {
-            keyword.arg: keyword.value for keyword in legacy[0].keywords
-        }["condition"]
-        self.assertEqual(registered_condition.func.id, "IfCondition")
-        self.assertEqual(
-            registered_condition.args[0].func.id, "EqualsSubstitution"
-        )
-        self.assertEqual(legacy_condition.func.id, "IfCondition")
-        self.assertEqual(
-            legacy_condition.args[0].func.id, "NotEqualsSubstitution"
-        )
-        for condition in (registered_condition, legacy_condition):
-            predicate = condition.args[0]
-            self.assertEqual(
-                predicate.args[0].func.id, "LaunchConfiguration"
-            )
-            self.assertEqual(predicate.args[0].args[0].value, "experiment")
-            self.assertEqual(predicate.args[1].id, "P4_G0C_EXPERIMENT_V3")
-        xdg_value = registered[0].args[1]
-        self.assertIsInstance(xdg_value, ast.Call)
-        self.assertIsInstance(xdg_value.func, ast.Name)
-        self.assertEqual(xdg_value.func.id, "LaunchConfiguration")
-        self.assertEqual(xdg_value.args[0].value, "p4.g0c.child_xdg_runtime_dir")
-
-        prepare = functions["_prepare_p4_g0c_context"]
-        bindings = [
-            node for node in ast.walk(prepare)
-            if isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Name)
-            and node.func.id == "_p4_g0c_binding"
-        ]
-        self.assertEqual(len(bindings), 1)
-        keywords = {item.arg: item.value for item in bindings[0].keywords}
-        child_keys = {
-            key.value for key in keywords["child_environment"].keys
-        }
-        output_keys = {
-            key.value for key in keywords["mutable_output_paths"].keys
-        }
-        self.assertEqual(child_keys, {
+        bindings = surface["runner_launch_bindings"]
+        self.assertEqual(set(bindings["child_environment"].values()), {
             "HOME", "ROS_HOME", "ROS_LOG_DIR", "TMPDIR", "XDG_RUNTIME_DIR",
         })
-        self.assertEqual(output_keys, {
+        expected_outputs = {
             "bag_output_dir", "decision_csv_path", "export_root_dir",
             "iap_log_root", "launch_command_path", "run_manifest_path",
             "runtime_root_dir", "stdout_log_path",
-        })
-
-        launch_command = runner_functions["launch_command"]
-        runner_child_arguments = {}
-        runner_output_arguments = {}
-        for node in ast.walk(launch_command):
-            if not isinstance(node, ast.Dict):
-                continue
-            for key, value in zip(node.keys, node.values):
-                if not isinstance(key, ast.Constant) or not isinstance(key.value, str):
-                    continue
-                if (
-                    isinstance(value, ast.Subscript)
-                    and isinstance(value.value, ast.Name)
-                    and isinstance(value.slice, ast.Constant)
-                ):
-                    if value.value.id == "child":
-                        runner_child_arguments[key.value] = value.slice.value
-                    elif value.value.id == "outputs":
-                        runner_output_arguments[key.value] = value.slice.value
-        self.assertEqual(runner_child_arguments, {
-            "p4.g0c.child_home": "HOME",
-            "p4.g0c.child_ros_home": "ROS_HOME",
-            "p4.g0c.child_ros_log_dir": "ROS_LOG_DIR",
-            "p4.g0c.child_tmpdir": "TMPDIR",
-            "p4.g0c.child_xdg_runtime_dir": "XDG_RUNTIME_DIR",
-        })
-        self.assertEqual(set(runner_child_arguments.values()), child_keys)
-
-        run_local_paths = {}
-        launch_values = None
-        for node in launch_command.body:
-            if not isinstance(node, ast.Assign) or len(node.targets) != 1:
-                continue
-            target = node.targets[0]
-            if (
-                isinstance(target, ast.Name)
-                and isinstance(node.value, ast.BinOp)
-                and isinstance(node.value.op, ast.Div)
-                and isinstance(node.value.left, ast.Name)
-                and node.value.left.id == "run_dir"
-                and isinstance(node.value.right, ast.Constant)
-            ):
-                run_local_paths[target.id] = node.value.right.value
-            if (
-                isinstance(target, ast.Name)
-                and target.id == "values"
-                and isinstance(node.value, ast.Dict)
-            ):
-                launch_values = node.value
-        self.assertIsNotNone(launch_values)
-        local_path_semantics = {
-            "p4_g0c_run_manifest.json": "run_manifest_path",
-            "p4_decisions.csv": "decision_csv_path",
         }
-        for key, value in zip(launch_values.keys, launch_values.values):
-            if not isinstance(key, ast.Constant) or not isinstance(key.value, str):
-                continue
-            local_names = {
-                item.id for item in ast.walk(value)
-                if isinstance(item, ast.Name) and item.id in run_local_paths
-            }
-            if local_names:
-                self.assertEqual(len(local_names), 1)
-                filename = run_local_paths[local_names.pop()]
-                self.assertIn(filename, local_path_semantics)
-                runner_output_arguments[key.value] = local_path_semantics[filename]
-        self.assertEqual(runner_output_arguments, {
-            "bag_output_dir": "bag_output_dir",
-            "export_root_dir": "export_root_dir",
-            "iap_log_root": "iap_log_root",
-            "p4.g0c.csv_path": "decision_csv_path",
-            "p4.g0c.run_manifest_path": "run_manifest_path",
-            "runtime_root_dir": "runtime_root_dir",
-        })
-
-        direct_run_writes = set()
-        for function_name in ("_execute_launch", "run"):
-            for node in ast.walk(runner_functions[function_name]):
-                if (
-                    not isinstance(node, ast.Call)
-                    or not isinstance(node.func, ast.Attribute)
-                    or node.func.attr not in {"open", "write_text"}
-                    or not isinstance(node.func.value, ast.BinOp)
-                    or not isinstance(node.func.value.op, ast.Div)
-                    or not isinstance(node.func.value.left, ast.Name)
-                    or node.func.value.left.id != "run_dir"
-                    or not isinstance(node.func.value.right, ast.Constant)
-                ):
-                    continue
-                if node.func.attr == "open" and not (
-                    node.args
-                    and isinstance(node.args[0], ast.Constant)
-                    and str(node.args[0].value).startswith(("w", "a", "x"))
-                ):
-                    continue
-                direct_run_writes.add(node.func.value.right.value)
-        self.assertEqual(
-            direct_run_writes, {"launch_command.json", "stdout.log"}
-        )
-        direct_write_semantics = {
-            "launch_command.json": "launch_command_path",
-            "stdout.log": "stdout_log_path",
+        classified_outputs = {
+            item["classification"].split(":", 1)[1]
+            for item in surface["mutations"]
+            if ":" in item["classification"]
+            and item["classification"].split(":", 1)[1] in expected_outputs
         }
-
-        runtime_config = functions["_runtime_config"]
-        launch_mutable_arguments = set()
-        for node in ast.walk(runtime_config):
-            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
-                continue
-            if node.func.id in {
-                "_resolve_run_roots", "_materialize_iap_logging_config",
-            }:
-                launch_mutable_arguments.update(launch_configurations(node))
-
-        launch_setup = functions["_launch_setup"]
-        bag_root_assignments = [
-            node for node in ast.walk(launch_setup)
-            if isinstance(node, ast.Assign)
-            and any(
-                isinstance(target, ast.Name) and target.id == "bag_root_dir"
-                for target in node.targets
-            )
-            and launch_configurations(node)
-        ]
-        self.assertEqual(len(bag_root_assignments), 1)
-        self.assertEqual(
-            launch_configurations(bag_root_assignments[0]), {"bag_output_dir"}
-        )
-        self.assertTrue(any(
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and isinstance(node.func.value, ast.Name)
-            and node.func.value.id == "os"
-            and node.func.attr == "makedirs"
-            and node.args
-            and isinstance(node.args[0], ast.Name)
-            and node.args[0].id == "bag_root_dir"
-            for node in ast.walk(launch_setup)
-        ))
-        launch_mutable_arguments.add("bag_output_dir")
-
-        g0c_path_assignments = [
-            node for node in ast.walk(launch_setup)
-            if isinstance(node, ast.Assign)
-            and any(
-                isinstance(target, ast.Name) and target.id == "g0c_path"
-                for target in node.targets
-            )
-        ]
-        self.assertEqual(len(g0c_path_assignments), 1)
-        self.assertEqual(
-            launch_configurations(g0c_path_assignments[0]),
-            {"p4.g0c.run_manifest_path"},
-        )
-        self.assertTrue(any(
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and isinstance(node.func.value, ast.Name)
-            and node.func.value.id == "g0c_path"
-            and node.func.attr == "write_text"
-            for node in ast.walk(launch_setup)
-        ))
-        launch_mutable_arguments.add("p4.g0c.run_manifest_path")
-
-        csv_aliases = [
-            node for node in ast.walk(prepare)
-            if isinstance(node, ast.Assign)
-            and len(node.targets) == 1
-            and isinstance(node.targets[0], ast.Name)
-            and node.targets[0].id == "csv_path"
-        ]
-        self.assertEqual(len(csv_aliases), 1)
-        self.assertEqual(
-            launch_configurations(csv_aliases[0]), {"p4.g0c.csv_path"}
-        )
-        self.assertTrue(any(
-            isinstance(node, ast.Assign)
-            and len(node.targets) == 1
-            and isinstance(node.targets[0], ast.Subscript)
-            and isinstance(node.targets[0].value, ast.Attribute)
-            and node.targets[0].value.attr == "launch_configurations"
-            and isinstance(node.targets[0].slice, ast.Constant)
-            and node.targets[0].slice.value == "p4.debug_csv_path"
-            and isinstance(node.value, ast.Name)
-            and node.value.id == "csv_path"
-            for node in ast.walk(prepare)
-        ))
-        ego_planner = functions["_ego_planner_node"]
-        self.assertTrue(any(
-            isinstance(node, ast.Dict)
-            and any(
-                isinstance(key, ast.Constant)
-                and key.value == "p4.debug_csv_path"
-                and isinstance(value, ast.Name)
-                and value.id == "p4_debug_path"
-                for key, value in zip(node.keys, node.values)
-            )
-            for node in ast.walk(ego_planner)
-        ))
-        launch_mutable_arguments.add("p4.g0c.csv_path")
-
-        self.assertEqual(launch_mutable_arguments, {
-            "bag_output_dir", "export_root_dir", "iap_log_root",
-            "p4.g0c.csv_path", "p4.g0c.run_manifest_path",
-            "runtime_root_dir",
-        })
-        launch_argument_semantics = {
-            key: runner_output_arguments[key]
-            for key in launch_mutable_arguments
-        }
-        actual_output_keys = set(launch_argument_semantics.values()) | {
-            direct_write_semantics[path] for path in direct_run_writes
-        }
-        self.assertEqual(actual_output_keys, output_keys)
-        self.assertIn(
-            "p4.g0c.child_xdg_runtime_dir", dict(MODULE.ARG_DEFAULTS)
-        )
+        self.assertEqual(classified_outputs, expected_outputs)
 
     def test_v2_profile_and_binding_use_only_r2_identity(self):
         profile = MODULE.EXPERIMENT_PRESETS[

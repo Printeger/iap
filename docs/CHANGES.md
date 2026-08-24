@@ -1990,3 +1990,30 @@ permitted after the sole invocation was consumed.
   smoke, qualification or threshold action. Result is
   `P4_G0C_R3_XDG_RUNTIME_ENVIRONMENT_READY_FOR_REVIEW`, not live readiness or
   G0C PASS.
+
+## 2026-08-24 (ICRA-054 hermetic test and mutation-surface closure blocked)
+
+- IAP-RQ-423: added a repository-local unittest bootstrap that derives exact
+  `HOME`, `ROS_HOME`, `ROS_LOG_DIR`, `TMPDIR` and `XDG_RUNTIME_DIR` paths from
+  an explicit ICRA-054 task root, validates canonical/no-symlink ownership and
+  access, applies XDG mode `0700`, and exports the paths before launch imports.
+- Launch-context tests now fail before importing `launch` when any writable
+  path is missing, external or rebound. Development regressions passed 5/5
+  bootstrap, 8/8 classifier, 11/11 launch-contract and 16/16 launch-golden;
+  `/root/.ros/log` retained identical 17,759-entry metadata and 16,461-file
+  content-hash inventories.
+- Replaced the selected-shape scan with a fail-closed classifier covering all
+  four production environment actions, 50 production path/mutation records,
+  eight registered output semantics and 24 supported mutation meta-cases.
+  Variable-bound, joined, substitution-list, unresolved and unknown shapes
+  fail; the variable-valued FAST DDS profile is explicitly immutable/read-only.
+- Correction to ICRA-053: its task-window tests created eight empty external
+  ROS `launch.log` files despite the earlier zero-output claim; Supervisor's
+  initial independent rerun repeated the harness error and created four more.
+  Historical evidence and all 12 external files remain untouched.
+- A later shell-only delta diagnosis created two `/tmp/icra054_*_names.txt`
+  files outside the repository. They were removed before the no-cleanup rule
+  was re-read, but the task declares any such creation immediately blocking
+  and not curable by cleanup. Formal focused/full discovery and static Python
+  checks therefore did not run. Result is `BLOCKED_EXTERNAL_TEMP_CREATION`,
+  never G0C PASS or readiness.

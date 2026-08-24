@@ -1169,3 +1169,12 @@ They do not convert historical `NO-GO-P2`, failed P0 Gate-0B evidence, the stati
 | IAP-RQ-423 | Reject refreshed-provenance semantic drift without draft | Runner covers 10 XDG evidence attacks with zero GPU/launch/attempt; analyzer covers 13 fields x 3 mutations = 39 plus two mode cases, refreshes legitimate hashes and emits no threshold draft | **ADVERSARIAL PASS** |
 | IAP-RQ-423 | Correct ICRA-052 review truth and preserve protected history | Builder docs append one High Standards blocker for external test temp and one High Spec blocker for unregistered external XDG; v1/v2, r3 science/lineage, ICRA-051 state/log and PDF bytes remain exact | **CORRECTED AND PRESERVED** |
 | IAP-RQ-423 | Verify without external temp, build, GPU, ROS or qualification | Every Python command used ICRA-053 TMPDIR; focused 87/87, launch 16/16, full discovery 442/442, syntax 9/9, canonical JSON 4/4, fatal-only flake8 and diff checks pass; compact evidence is `results/icra27/icra053/` | **READY FOR SUPERVISOR REVIEW; not G0C PASS** |
+
+## 2026-08-24 ICRA-054 hermetic test and mutation-surface closure
+
+| Req ID | Requirement/evidence seam | Implementation and retained evidence | Status |
+|---|---|---|---|
+| IAP-RQ-423 | Make launch-context Python verification hermetic by construction | One explicit-root bootstrap owns five canonical environment directories, enforces XDG `0700`, exports before ROS launch imports and supplies an early read-only guard; focused development coverage passes 5/5 and launch contracts pass 11/11 plus golden 16/16 | **IMPLEMENTED; synthetic only** |
+| IAP-RQ-423 | Inventory the complete r3 environment and filesystem/process path surface | Fail-closed static classifier inventories four environment actions and 50 production path/mutation records, normalizes all eight outputs, covers 24 mutation primitives and rejects variable/join/list/unresolved/unknown adversaries | **IMPLEMENTED; formal suite incomplete** |
+| IAP-RQ-423 | Correct ICRA-053 external-output claims without rewriting history | Builder docs now record eight empty external launch logs from ICRA-053 tests and four from Supervisor rerun; retained files and raw prior evidence are unchanged | **CORRECTED; historical bytes preserved** |
+| IAP-RQ-423 | Keep every ICRA-054 output repository-local | `/root/.ros/log` metadata/content inventories compare exactly, but a diagnostic created and prematurely removed two `/tmp/icra054_*_names.txt` files; by the explicit immediate-blocker rule, later clean verification cannot cure this | **BLOCKED_EXTERNAL_TEMP_CREATION** |

@@ -7110,3 +7110,62 @@ Builder result is
 `P4_G0C_R3_XDG_RUNTIME_ENVIRONMENT_READY_FOR_REVIEW`, not r3 live readiness,
 threshold eligibility/application, G0C PASS, G0D or P5. No next task is
 selected. Control returns only to SUPERVISOR review.
+
+## 2026-08-24 — ICRA-054 hermetic mutation-surface closure (BLOCKED)
+
+IAP-RQ-423. Synchronized `dev/icra` at task head `6e762fb`; fetch passed,
+divergence was `0 0`, and no pull ran. Initial status contained only the
+protected untracked PDF. Capacity was 118,974,889,984 bytes and relevant
+process count was zero. The PDF remains unmodified, untracked and unstaged at
+SHA-256 `1f07da56...44f6`.
+
+Before the first Python command, the explicit
+`results/icra27/icra054/{home,ros_home,ros_logs,tmp,xdg_runtime}` roots were
+created, with XDG mode `0700`, and `/root/.ros/log` metadata/content baselines
+were recorded read-only. New `run_p4_g0c_tests.py` validates the absolute
+canonical task root, rejects outside/parent/alias/symlink/wrong-type/unsafe
+mode inputs, creates all five directories through a no-follow directory FD,
+exports the exact environment and then execs unittest. Both launch-context
+test files invoke its read-only guard before importing `launch`.
+
+The shared static classifier exhaustively inventories all four production
+`SetEnvironmentVariable` actions regardless of literal, variable,
+`LaunchConfiguration`, join or list shape. FAST DDS is explicit trusted
+immutable read-only, Qt is scalar, r3 XDG is registered mutable, and legacy
+XDG is non-r3. The production path/mutation surface has 50 exact records and
+normalizes to all eight registered outputs. Meta tests exercise 24 supported
+open/write/create/mkdir/rename/replace/unlink/copy/move/remove/process-output
+operations and fail on unknown or unresolved targets.
+
+Development verification used only the hermetic bootstrap and passed 5/5
+bootstrap regressions, 8/8 classifier regressions, 11/11 launch contracts and
+16/16 launch golden tests. Two invalid package-style unittest invocations
+exited 1 before test import; corrected discovery invocations passed. No build,
+compiled test, GPU, ROS process/service, live CLI, main flow, smoke,
+qualification or threshold action ran.
+
+The initial external-log comparison used a wrong formatting/sort command and
+returned nonzero. Read-only diagnosis proved the baseline itself used a
+different format: the correct comparisons are metadata cmp 0 over 17,759
+entries and content-hash cmp 0 over 16,461 files. Baseline inventory hashes
+are `8f95a3c3...7d30e` and `3aa124f3...5bfc`; no external ROS log changed.
+
+That diagnosis nevertheless created `/tmp/icra054_before_names.txt` and
+`/tmp/icra054_after_names.txt`. Both were removed before the exact
+no-cleanup/immediate-blocker clause was re-read. This is disclosed rather than
+treated as cured: NEXT_TASK.md makes any external file creation an immediate
+blocker, so formal focused/full discovery, syntax, fatal-only flake8 and
+canonical JSON were not run. `git diff --check` passed.
+
+ICRA-053 correction: its Builder task-window tests created eight empty
+external ROS launch logs, while Supervisor's initial independent rerun created
+four more by repeating the same harness mistake. All 12 logs and historical
+evidence remain untouched. Accepted r3 launch/dependency/protocol/registry/
+lineage hashes remain respectively `396122ae...ee7d`, `ff7c66f1...5fc6`,
+`7df40eff...9401`, `8825c70c...82c8`, `87947cb0...7d60`; no science,
+identity, v1/v2 or retained product byte was changed.
+
+Compact truthful evidence is under `results/icra27/icra054/compact/`. Builder
+result is `BLOCKED_EXTERNAL_TEMP_CREATION`, not hermetic-surface READY, live
+readiness, threshold eligibility/application, G0C PASS, G0D or P5. Control
+returns only to SUPERVISOR review.

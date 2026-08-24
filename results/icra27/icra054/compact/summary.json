@@ -1,0 +1,54 @@
+{
+  "environment_actions": {
+    "classified": 4,
+    "registered_mutable": 1,
+    "immutable_read_only": 1,
+    "non_path_scalar": 1,
+    "legacy_non_r3": 1
+  },
+  "external_ros_log_baseline": {
+    "file_count": 16461,
+    "metadata_inventory_sha256": "8f95a3c3940f10c3d4902a6bd706666b2b2834e459a41973fec68f9f5887d30e",
+    "metadata_cmp_exit": 0,
+    "sha256_inventory_sha256": "3aa124f37fb1bdcb74e678659b12fbb14de86d369ed57f6ee5a10623a9285bfc",
+    "sha256_cmp_exit": 0
+  },
+  "forbidden_invocations": {
+    "build": 0,
+    "compiled_test": 0,
+    "gpu": 0,
+    "live_cli": 0,
+    "ros_process_or_service": 0,
+    "smoke_or_qualification": 0
+  },
+  "incident": {
+    "classification": "external_temp_creation",
+    "created_paths": [
+      "/tmp/icra054_after_names.txt",
+      "/tmp/icra054_before_names.txt"
+    ],
+    "discovered_after_creation": true,
+    "removed_before_governance_clause_was_re_read": true,
+    "task_blocking": true
+  },
+  "mutation_surface": {
+    "production_records": 50,
+    "registered_output_semantics": 8,
+    "supported_meta_operations": 24
+  },
+  "requirement": "IAP-RQ-423",
+  "result": "BLOCKED_EXTERNAL_TEMP_CREATION",
+  "task": "ICRA-054",
+  "verification": {
+    "canonical_json": "not_run_after_blocker",
+    "classifier": "8/8_pass",
+    "complete_python_discovery": "not_run_after_blocker",
+    "fatal_only_flake8": "not_run_after_blocker",
+    "focused_p4_discovery": "not_run_after_blocker",
+    "git_diff_check": "pass",
+    "hermetic_bootstrap": "5/5_pass",
+    "launch_contract": "11/11_pass",
+    "launch_golden": "16/16_pass",
+    "syntax": "not_run_after_blocker"
+  }
+}

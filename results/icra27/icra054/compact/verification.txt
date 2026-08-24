@@ -1,0 +1,41 @@
+ICRA-054 / IAP-RQ-423
+result: BLOCKED_EXTERNAL_TEMP_CREATION
+
+Implemented before blocker:
+- repository-local hermetic unittest bootstrap with exact task-root HOME,
+  ROS_HOME, ROS_LOG_DIR, TMPDIR and XDG_RUNTIME_DIR bindings;
+- pre-import guard for both launch-context test files;
+- fail-closed production environment, filesystem mutation, subprocess output,
+  launch-argument and logging-sink classifier;
+- adversarial coverage for variable, join, substitution-list, unresolved and
+  unknown shapes plus 24 supported mutation operations.
+
+Passing development verification through the bootstrap:
+- hermetic bootstrap regressions: 5/5;
+- classifier regressions: 8/8;
+- launch-contract regressions: 11/11;
+- launch golden regressions: 16/16;
+- git diff --check: exit 0.
+
+Not run after blocker:
+- formal focused P4-G0C discovery;
+- complete repository Python discovery;
+- syntax, fatal-only flake8 and canonical JSON checks.
+
+External ROS log proof:
+- baseline metadata inventory: 17,759 entries, sha256
+  8f95a3c3940f10c3d4902a6bd706666b2b2834e459a41973fec68f9f5887d30e;
+- baseline content inventory: 16,461 files, sha256
+  3aa124f37fb1bdcb74e678659b12fbb14de86d369ed57f6ee5a10623a9285bfc;
+- final read-only comparisons: metadata cmp 0, content-hash cmp 0.
+
+Blocking incident:
+- a read-only delta-diagnosis shell command created
+  /tmp/icra054_before_names.txt and /tmp/icra054_after_names.txt;
+- both files were removed before the no-cleanup clause was re-read;
+- NEXT_TASK.md makes any external file creation immediately task-blocking and
+  states that cleanup cannot cure it, so no READY result is claimed.
+
+No build, compiled test, GPU, ROS process/service, live runner/analyzer,
+calibration, main flow, smoke, qualification, threshold, G0C/G0D or P5 action
+ran. The protected PDF remained untracked and unstaged.

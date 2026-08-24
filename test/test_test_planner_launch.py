@@ -2,14 +2,24 @@ import importlib.util
 import hashlib
 import json
 import math
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
-from launch import LaunchContext
+REPO = Path(__file__).resolve().parents[1]
+SCRIPT_DIR = REPO / "scripts" / "dev_planner"
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from run_p4_g0c_tests import require_hermetic_test_environment  # noqa: E402
+
+require_hermetic_test_environment()
+
+from launch import LaunchContext  # noqa: E402
 
 
-MODULE_PATH = Path(__file__).resolve().parents[1] / "launch" / "test_planner.launch.py"
+MODULE_PATH = REPO / "launch" / "test_planner.launch.py"
 SPEC = importlib.util.spec_from_file_location("test_planner_launch", MODULE_PATH)
 MODULE = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
