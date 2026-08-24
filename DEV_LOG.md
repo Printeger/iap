@@ -6950,3 +6950,40 @@ action, G0C verdict, G0D/P5 work or cleanup ran. Compact evidence is below
 `results/icra27/icra052/`. Builder result is
 `P4_G0C_R3_LAUNCH_ENVIRONMENT_PROTOCOL_READY_FOR_REVIEW`, never r3 live
 readiness or G0C PASS, pending independent two-axis review and final handoff.
+
+## 2026-08-24T15:28:54Z — ICRA-052 BUILDER HANDOFF
+
+IAP-RQ-423. Implementation/docs/evidence commit `e44af11` and Spec-review
+remediation commit `1f7e8eb` are pushed to `origin/dev/icra`. The first Spec
+review's 1 blocking / 2 nonblocking findings were all remediated before this
+handoff: existing dependency-preflight coverage again validates v2 historical
+semantics; independent v3 complete-closure coverage requires the production
+v3 result schema; and each absent caller environment key is proven to receive
+its exact runner-owned value.
+
+Final independent re-review against task head `d859b164` reports Standards
+0 blocking / 2 nonblocking and Spec 0 blocking / 0 nonblocking / 0 scope
+creep. The Standards judgement calls are the deliberate defense-in-depth
+duplication of canonical paths in shared validation and launch, plus repeated
+v1/v2/v3 dispatch cascades. Neither changes the accepted contract or blocks
+review.
+
+Post-remediation repository-local verification is focused 84/84 and complete
+Python discovery 439/439, both exit 0 under
+`results/icra27/icra052/tmp`. Syntax 9/9, fatal-only flake8, canonical JSON
+4/4 and diff checks pass. Final TMPDIR inventory is empty. Build, CTest, GPU,
+ROS/launch, live runner/analyzer CLI, main flow, smoke and qualification
+invocations remain exactly zero; final task/required-process count is zero.
+
+Final protection audit remains exact: ICRA-051 runner state
+`7c3cafc5...46a7`, external ROS log `f506e556...58e7`, protected PDF
+`1f07da56...44f6`, and all v1/v2 protocol, registry, dependency, lineage and
+fixture bytes are unchanged. The PDF remains the sole untracked/unstaged file.
+Supervisor-owned files and all retained task trees remain untouched. The
+Builder-doc correction remains explicit that ICRA-051 has one High Standards
+and one High Spec blocker for its external ROS log.
+
+Builder result is
+`P4_G0C_R3_LAUNCH_ENVIRONMENT_PROTOCOL_READY_FOR_REVIEW`, not r3 live
+readiness, threshold eligibility/application, G0C PASS, G0D or P5. No next
+task is selected. Control returns only to SUPERVISOR review.
