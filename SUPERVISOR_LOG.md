@@ -1,5 +1,71 @@
 # ICRA Supervisor Log
 
+## 2026-08-24 — ICRA-042 review REQUEST_CHANGES and ICRA-043 provenance repair
+
+### Review identity and synchronization
+
+- Fixed review range: `dc99af894eb9e49d511238e6096932c13a7a70df...d257b707fc5207032fb0fd551e1598cccac298a2`.
+- Reviewed protocol implementation `45a5f68` and final DEV_LOG-only handoff `d257b70`; both carry
+  applicable `IAP-RQ-423`.
+- After fetch, `HEAD` and `origin/dev/icra` matched at divergence `0 0`. All 21 changed paths match the
+  ICRA-042 allowlist; no C++ product source changed. The protected PDF remains the sole untracked file
+  at exact SHA256 `1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+- Canonical protocol, proposed registry and live-fixture hashes reproduce as `496b2af5...617a`,
+  `77462979...5784` and `985aabcd...10a`. No GPU preflight, ROS, launch or calibration was run.
+
+### Standards axis
+
+- Verdict: `PASS`; zero hard violations and two Low judgment findings; worst Low.
+- Low duplicated code: identical `load_bundle()` wrappers exist in the runner and analyzer. Low Data
+  Clumps: the protocol/registry/fixture path-plus-SHA triples travel independently where a richer
+  `ProtocolBundle` could own them. These are non-blocking maintenance observations and do not authorize
+  a broad refactor.
+- Ownership, allowlist, requirement/docs synchronization, commit messages, no-live boundary, protected
+  files and task-artifact retention otherwise conform.
+
+### Spec axis
+
+- Verdict: `REQUEST_CHANGES`; two High findings; worst High.
+- High no-exclusion failure: `analyze()` visits only the 15 expected paths and does not inventory extra
+  attempts. An added malformed retry directory is ignored. Separately, one registered header-only CSV
+  is accepted when the other 14 runs contain 112 valid rows. Both adversarial bundles returned
+  `DRAFT_ELIGIBLE`, contrary to the exact 15 immutable runs, no-retry/no-exclusion and failed-run
+  denominator contract.
+- High incomplete identity validation: the shared production CSV has stamp, attempt/segment IDs,
+  snapshot generation/stamp/frame, query base, occupancy epoch and both path lengths, but the runner and
+  analyzer validate none of them. Blank values in all those fields across 105 rows still returned
+  `DRAFT_ELIGIBLE`, and `path_length_ratio` is never checked against risk/original lengths. Detached or
+  duplicated rows can therefore influence thresholds without complete immutable provenance.
+- The registered seeds/repetitions, protocol/effective values, metrics-only launch wiring, live
+  production fixture, GPU-before-ROS runner ordering, process fail-closed behavior, numerical floor,
+  Type-7 formulas and unset proposed registry otherwise match ICRA-042.
+
+### Independent verification and Gate verdict
+
+- Supervisor reproduced all 376 Python tests, including focused G0C 21/21 and launch 16/16, with zero
+  failures. One existing subprocess `ResourceWarning` is non-blocking. Python syntax, canonical JSON and
+  `git diff --check` pass.
+- Direct retained ICRA-042 binaries reproduce P4 decision 15/15, integration 5/5, collision 17/17,
+  path-searching 5/5, occupancy 6/6 and all nine plan-manager executables with 186 active cases, one
+  existing disabled case and zero failures. Dynamic linkage resolves only ICRA-042 task products plus
+  authorized external message dependencies; zero task-related ROS process remains.
+- Green nominal tests do not exercise the two adversarial provenance boundaries. Verdict:
+  `ICRA042_REVIEW_REQUEST_CHANGES_CALIBRATION_PROVENANCE`. P4-G0A and G0B remain PASS, but G0C protocol
+  is not ready and no live calibration is authorized.
+
+### Artifact lifecycle and required next action
+
+- All twelve ICRA-042 build/install directories remain retained and untracked through this review,
+  totaling approximately 4.6 GiB. Review is `REQUEST_CHANGES`, so none is eligible for deletion and
+  ICRA-043 must not write into or execute CTest against them.
+- Unique next task: `ICRA-043 / P4_G0C_PROTOCOL_REPAIR`, defined in `NEXT_TASK.md`; active role is
+  `DEEPSEEK`, state `TASK_READY`.
+- Add an authoritative pre-launch attempt ledger, exact calibration-root inventory, per-run nonempty
+  requirement, complete shared CSV schema/typed identity validation, duplicate-decision rejection and
+  path-length-ratio consistency check. Prove both review exploits red-to-green with synthetic tests only.
+- No GPU/ROS/live calibration, product change, observed threshold, G0C verdict, G0D/P5, risk-guide
+  application or artifact cleanup is authorized.
+
 ## 2026-08-24 — ICRA-041 review PASS, P4-G0B qualified and ICRA-042 authorization
 
 ### Review identity and synchronization

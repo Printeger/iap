@@ -5,35 +5,38 @@ schema_version: icra_single_branch_two_agent_v2
 branch: dev/icra
 active_role: DEEPSEEK
 status: TASK_READY
-gate: P4_G0C_PROTOCOL
-task_id: ICRA-042
-review_base: 8f75dabc8ff274f483f636ac1d7bd34fc97752b7
-reviewed_head: 53f166ddeba5c325d46e84f450797a027e7cd123
+gate: P4_G0C_PROTOCOL_REPAIR
+task_id: ICRA-043
+review_base: dc99af894eb9e49d511238e6096932c13a7a70df
+reviewed_head: d257b707fc5207032fb0fd551e1598cccac298a2
 conference_route: P0_P4_P5
-route_status: P4_G0C_PROTOCOL_REGISTRATION
+route_status: P4_G0C_PROTOCOL_REPAIR
 historical_gate0a_verdict: NO_GO_P2
 p0_gate0b_status: PASS
 p0_gate0b_worker_count: 4
-p4_status: G0A_PASS_G0B_PASS_G0C_PROTOCOL_PENDING
+p4_status: G0A_PASS_G0B_PASS_G0C_PROTOCOL_REQUEST_CHANGES
 p5_status: IMPLEMENTED_BUT_UNQUALIFIED
-supervisor_verdict: ICRA041_REVIEW_PASS_P4_G0B_QUALIFIED
-review_disposition: ICRA042_G0C_PROTOCOL_AND_RUNNER_AUTHORIZED
+supervisor_verdict: ICRA042_REVIEW_REQUEST_CHANGES_CALIBRATION_PROVENANCE
+review_disposition: ICRA043_G0C_EVIDENCE_BOUNDARY_REPAIR_AUTHORIZED
 handoff_status: TASK_READY
 next_task: NEXT_TASK.md
-updated_utc: 2026-08-24T07:33:44Z
+updated_utc: 2026-08-24T09:08:19Z
 ```
 
-The conditional conference route remains `P0 -> P4 -> P5`. P0 Gate-0B remains `PASS`; the historical
-Gate-0A verdict remains `NO_GO_P2`, so P2 stays disabled. ICRA-041 passes Standards and Spec review with
-zero findings. Its clean-room products reproduce the complete deterministic matrix without historical
-or workspace-default product dependencies, so P4-G0B is now qualified.
+The conditional conference route remains `P0 -> P4 -> P5`. P0 Gate-0B, P4-G0A and P4-G0B remain
+`PASS`; the historical Gate-0A verdict remains `NO_GO_P2`, so P2 stays disabled. ICRA-042 correctly
+registers the pre-data 5x3 G0C protocol, metrics-only launch profile, proposed threshold registry,
+runner/analyzer skeleton and deterministic formulas, but it does not pass protocol review.
 
-The route advances only to the P4-G0C protocol-registration boundary. `DEEPSEEK` may begin ICRA-042
-after synchronization. It shall pre-register the immutable calibration matrix, numerical-noise floor,
-quantile formulas, metrics-only launch contract, evidence schema, runner and analyzer, with deterministic
-tests only. It must not start GPU/ROS calibration, choose data-derived thresholds, apply a risk guide,
-enter G0D/P5 or alter the qualified P4 decision algorithm.
+Two High Spec findings block live calibration. The analyzer can ignore an extra retry/unregistered run
+and can accept a header-only registered run when the remaining runs provide at least 100 decisions.
+It also validates only a subset of the production decision schema, so blank immutable context fields or
+a fabricated path-length ratio can still produce `DRAFT_ELIGIBLE`. ICRA-043 is the only authorized task:
+close the exact-run/attempt ledger and full typed identity/path-consistency boundaries with deterministic
+tests. It must not run GPU preflight, ROS, launch or calibration, and must not select thresholds or alter
+P4 product behavior.
 
-After the ICRA-041 Review PASS and pushed Supervisor changeset, the superseded ICRA-039/040 products and
-the current ICRA-041 build/install products are eligible for Supervisor cleanup. Compact evidence,
-source, tests, documentation and the protected PDF remain.
+Because this review is `REQUEST_CHANGES`, all twelve ICRA-042 build/install directories remain retained
+and untracked. Neither role may delete them in ICRA-043. Cleanup becomes eligible only after a later
+Supervisor Review PASS and pushed code/documentation; compact evidence, source, tests and the protected
+PDF always remain.
