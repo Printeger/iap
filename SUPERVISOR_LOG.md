@@ -1,5 +1,63 @@
 # ICRA Supervisor Log
 
+## 2026-08-24 — ICRA-044 review REQUEST_CHANGES and ICRA-045 analyzer-alias repair
+
+### Review identity and synchronization
+
+- Fixed review range: `67cfa82f4ec5f8023f9197326c1413fff789f575...37839c262f4bdec8fb7344cd99d991142be9eb33`.
+- Reviewed implementation/evidence `574cfd9` and final DEV_LOG-only handoff `37839c2`; both carry
+  applicable `IAP-RQ-423`. Builder changes comprise 13 allowlisted paths and no Supervisor-owned,
+  C++/header/CMake/product, launch or config file.
+- After fetch, `HEAD` and `origin/dev/icra` matched at divergence `0 0`. The protected PDF is the sole
+  untracked file at exact SHA256 `1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+  `git diff --check` passes.
+
+### Standards axis
+
+- Verdict: `PASS`; zero hard violations and one Low judgment finding; worst Low.
+- Low duplicated code: lowercase SHA-256 shape validation is repeated in the protocol and analyzer. This
+  is non-blocking and does not authorize a broader refactor.
+- Ownership, allowlist, requirement/docs synchronization, directly runnable CHANGES commands, two-commit
+  handoff, protected artifacts, retained products and no-live/no-compiled boundaries conform.
+
+### Spec axis
+
+- Verdict: `REQUEST_CHANGES`; one Medium finding; worst Medium.
+- Medium analyzer output alias: `_validated_output_path()` resolves the candidate and checks only the
+  resolved target. An in-root lexical alias such as
+  `<runs_root>/nonexistent/../p4_g0c_analysis.json` therefore returns success and creates the canonical
+  analysis file. This contradicts ICRA-044 section 3 and `docs/CHANGES.md`, both of which require aliased
+  destinations to reject before analysis/write.
+- Dirty roots stop before fake GPU/launch; plan-only remains non-mutating; preflight roots are not
+  reusable; all 15 complete attempts bind exact inventories and launch manifests. Production-shaped
+  launch-manifest/timing artifacts pass, while add/change/remove/symlink/escape/duplicate/secondary/retry
+  adversaries reject. Exact named outputs are exclusive and raw-hash neutral. No other scope or
+  implementation mismatch was found.
+
+### Independent verification and Gate verdict
+
+- Supervisor reproduced focused protocol 6/6, runner 14/14, analyzer 22/22, launch contract 6/6 and
+  launch golden 16/16, plus repository Python 403/403. Python syntax and `git diff --check` pass. One
+  existing subprocess `ResourceWarning` remains non-blocking.
+- The lexical-alias reproduction exits zero and writes the canonical output, proving that the existing
+  test named “alias” covers swaps/shared/symlinks but not `..` aliases. Green nominal coverage therefore
+  does not satisfy the explicit no-alias boundary.
+- Verdict: `ICRA044_REVIEW_REQUEST_CHANGES_ANALYZER_OUTPUT_ALIAS`. P4-G0A/G0B remain PASS; G0C is not
+  live-ready, and calibration/threshold freeze remain unauthorized.
+
+### Artifact lifecycle and required next action
+
+- All twelve ICRA-042 build/install directories remain retained and untracked: 3,829 regular files and
+  approximately 4.6 GiB. ICRA-043/044 created no compiled product tree. Because Review is
+  `REQUEST_CHANGES`, no cleanup is eligible.
+- Unique next task: `ICRA-045 / P4_G0C_ANALYZER_ALIAS_REPAIR`, defined in `NEXT_TASK.md`; active role is
+  `DEEPSEEK`, state `TASK_READY`.
+- Reject lexical aliases for both analyzer output roles before `analyze()` or any filesystem write; prove
+  canonical relative/absolute paths still work and preserve every ICRA-044 adversarial test. No runner,
+  inventory/schema, threshold, launch/product, GPU/ROS/live or retained-artifact work is authorized.
+- If ICRA-045 passes independent review, the following task may rebuild fresh task-local products and
+  execute the registered 15-run G0C calibration.
+
 ## 2026-08-24 — ICRA-043 review REQUEST_CHANGES and ICRA-044 live-artifact repair
 
 ### Review identity and synchronization

@@ -1,119 +1,92 @@
-# ICRA-044 — Make the G0C inventory accept exactly one real production run
+# ICRA-045 — Reject lexical aliases before G0C analyzer writes
 
-> Active gate: `P4_G0C_LIVE_ARTIFACT_REPAIR`
+> Active gate: `P4_G0C_ANALYZER_ALIAS_REPAIR`
 > Owner: `DEEPSEEK`
 > Activation: `TASK_READY`
-> Supervisor verdict: `ICRA043_REVIEW_REQUEST_CHANGES_LIVE_ARTIFACT_INVENTORY`
+> Supervisor verdict: `ICRA044_REVIEW_REQUEST_CHANGES_ANALYZER_OUTPUT_ALIAS`
 > Requirement mapping: `IAP-RQ-423`
 > Conference route: conditional P0 -> P4 -> P5
-> This task: production-output inventory, dirty-root stop, immutable analyzer outputs and docs; no live run
+> This task: one analyzer path-normalization defect and its regression only; no live run
 
 ## Supervisor decision
 
-ICRA-043 repairs the two original ICRA-042 provenance exploits and passes its nominal/adversarial Python
-suites, but the resulting root policy is not executable against the registered launch. The launch always
-writes `exports/test_planner_manifest.json`, and the IAP runtime can write
-`runtime/profiling/iap_timing.csv`; the analyzer classifies both as forbidden solely because their names
-contain `manifest` or end in `.csv`. A genuine G0C run is therefore guaranteed to be rejected.
+ICRA-044 closes the dirty-root, production-artifact inventory, immutable binding, named-output and
+reproducibility defects for its nominal and adversarial suites. Independent review reproduced 403/403
+repository Python tests and all focused suites. It nevertheless does not satisfy the explicit G0C
+output-path contract: an in-root lexical alias such as
+`<runs_root>/nonexistent/../p4_g0c_analysis.json` resolves to the canonical file, returns success and
+writes it. Section 3 of ICRA-044 requires every aliased destination to fail before analysis and before
+write, and `docs/CHANGES.md` currently claims that behavior already exists.
 
-Two other fail-closed edges remain. A dirty root containing an unregistered/retry artifact is not checked
-by the runner before GPU/launch, so all 15 runs could be spent on a bundle known to be ineligible. The
-analyzer accepts arbitrary `--output` names inside the root, returns success, then rejects its own file on
-the next invocation; named outputs are silently overwritten. `docs/CHANGES.md` also records counts but
-not the exact reproduction commands required by repository DoD.
+ICRA-045 fixes exactly this validation omission. No inventory, runner, schema, calibration or product
+change is authorized. If this bounded repair passes independent Supervisor review, the following task
+may rebuild fresh task-local products and execute the registered 15-run G0C calibration.
 
-ICRA-044 closes only these boundaries with synthetic tests. It is the final protocol-readiness repair;
-if it passes independent review, the following task may execute the 15 registered calibrations.
-
-## 1. Synchronize, preserve artifacts and declare scope
+## 1. Synchronize and preserve review artifacts
 
 - Follow `AGENTS.md` synchronization. Stop on `REMOTE_DIVERGED`; never reset, clean, stash, rebase,
   amend pushed history or overwrite another role's work.
-- Preserve the protected PDF, frozen fixtures/evidence and every one of the twelve ICRA-042 build/install
-  directories byte-for-byte. Do not execute CTest or any retained binary. ICRA-043 has no task-local
-  compiled product to clean.
-- Put temporary/test/review output below `results/icra27/icra044/`. Add one START entry to `DEV_LOG.md`
-  naming the exact files, schemas and red tests. Do not edit Supervisor-owned files.
+- Preserve the protected PDF, frozen fixtures/evidence and all twelve ICRA-042 build/install directories
+  byte-for-byte. Do not execute CTest or any retained binary. ICRA-043/044 created no task-local compiled
+  product to clean.
+- Put any temporary/test/review output below `results/icra27/icra045/`. Add one START entry to
+  `DEV_LOG.md` naming the exact defect, files and red test. Do not edit Supervisor-owned files.
 
-## 2. Reject a dirty root before GPU and register the real post-launch artifact set
+## 2. Close only the lexical-alias boundary
 
-- Before persisting preflight state or invoking GPU preflight, require the resolved live `runs_root` to
-  be absent or an empty, non-symlink directory. Reject every existing child, including arbitrary files,
-  retry/unregistered directories, old analyzer outputs, preflight state and registered run directories.
-  `--plan-only` remains non-mutating; `--preflight-only` uses a separate fresh root and cannot be reused
-  for live execution.
-- Do not maintain a fragile global filename blacklist for nested production outputs. After each launch
-  and process shutdown, generate one versioned per-run artifact inventory containing every regular file
-  and symlink-free directory below that registered run, with normalized relative path, byte size and
-  SHA-256 for every file. Exclude only the inventory file itself to avoid a self-hash cycle.
-- Bind each completed attempt to its artifact-inventory path and SHA-256 in the authoritative runner
-  state. The analyzer must require all 15 exact inventory bindings, recompute every entry/hash/size and
-  reject missing, added, changed, duplicate, escaping or symlinked artifacts. A failed attempt remains
-  FAILED and cannot acquire a COMPLETE inventory binding.
-- The registered production files `exports/test_planner_manifest.json`,
-  `runtime/profiling/iap_timing.csv`, `stdout.log`, `launch_command.json`, the G0C run manifest and
-  `p4_decisions.csv` must be representable and verifiable rather than rejected by basename. Bind the
-  launch manifest at the exact path already recorded by `test_planner_manifest_path`; require it to be a
-  JSON object and bind its byte hash. Do not authorize arbitrary second G0C manifests, decision CSVs or
-  nested retry/run directories.
-- Preserve the exact 15 ordered attempt IDs, one-or-more decision rows per run, zero retry, first-failure
-  stop and all ICRA-043 typed identity/path checks. If the state schema changes, version it explicitly and
-  update runner/analyzer/tests/docs together; no observed data may affect the schema.
+- In `_validated_output_path()` require the user-requested output path, after making it absolute but
+  before canonical resolution, to already identify the normalized, symlink-free canonical path. A path
+  containing a live lexical detour such as `component/../` must reject even when its resolved target has
+  the required basename and lies inside `runs_root`.
+- Apply the same rule to `--output` and `--draft-output`. Preserve support for ordinary relative and
+  absolute canonical paths. Preserve the existing exact in-root names, outside-root behavior, symlink
+  rejection, swapped/arbitrary-name rejection, exclusive no-overwrite writes and raw-bundle hash
+  neutrality.
+- Reject before calling `analyze()` and before creating any file or directory. Do not compensate by
+  normalizing the alias silently, and do not delete or overwrite a pre-existing destination.
 
-## 3. Make analyzer output deterministic, named and non-overwriting
+## 3. Required red-to-green verification
 
-- If `--output` or `--draft-output` resolves inside `runs_root`, accept only
-  `p4_g0c_analysis.json` and `p4_g0c_threshold_draft.json` respectively. Reject swapped, aliased,
-  symlinked or arbitrary names before analysis and before any write.
-- Refuse to overwrite either existing named output. A rejected analysis must not emit a threshold draft.
-  Output validation/writes must not mutate any registered run or change the raw calibration-bundle hash.
-- Define whether exact named analyzer outputs are excluded from the raw input inventory, and enforce that
-  rule consistently on first analysis and read-only reanalysis. Adding any other root artifact must
-  remain a hard rejection.
+- Add a direct regression that first demonstrates the reviewed defect, then proves both analyzer output
+  roles reject lexical aliases with exit code 2. Cover at least
+  `<runs_root>/nonexistent/../p4_g0c_analysis.json` and
+  `<runs_root>/../<runs_root-name>/p4_g0c_threshold_draft.json`; neither target, intermediate directory
+  nor other output may be created, and `analyze()` must not be called.
+- Prove canonical relative and absolute named destinations still work on fresh valid bundles. Preserve
+  every ICRA-044 adversarial test, including arbitrary/swapped/symlinked/existing destinations and raw
+  hash neutrality.
+- Run the focused analyzer, protocol, runner and launch suites; full repository Python discovery;
+  Python syntax; JSON validation; `git diff --check`; exact allowlist; protected hashes; retained-tree
+  before/after byte manifest; branch synchronization and zero-process audits.
+- Do not run GPU preflight, ROS, launch, calibration, compiled binaries or retained CTest. This is a
+  synthetic repair and must report `P4_G0C_LIVE_ARTIFACT_PROTOCOL_READY_FOR_REVIEW`, never G0C PASS.
 
-## 4. Required synthetic red-to-green verification and documentation
+## 4. Documentation, commit and handoff
 
-- Add red tests proving the current ICRA-043 behavior: a pre-existing arbitrary file and retry directory
-  still reach the fake GPU/launch boundary; real `exports/test_planner_manifest.json` and
-  `runtime/profiling/iap_timing.csv` make an otherwise complete bundle reject; arbitrary in-root analyzer
-  output returns success then self-invalidates; and an existing named output is overwritten.
-- Add green tests proving zero GPU/launch calls from every dirty root, a complete production-shaped run
-  tree passes only with exact per-run inventories, any post-inventory add/change/remove/symlink fails,
-  launch-manifest path/hash binding holds, arbitrary output names fail before writes and named outputs
-  never overwrite. Preserve all ICRA-043 exploit tests.
-- Run focused G0C protocol/runner/analyzer/launch tests, full repository Python discovery, Python syntax,
-  JSON validation, `git diff --check`, exact allowlist, protected hashes, retained-tree before/after byte
-  manifest, branch synchronization and zero-process audits. Do not run GPU preflight, ROS, launch,
-  calibration or compiled binaries.
-- Put the exact directly runnable focused and full Python reproduction commands in `docs/CHANGES.md`
-  itself, not only behind a link to task evidence. Update `docs/TRACEABILITY.md` and `DEV_LOG.md` with
-  `IAP-RQ-423`, exact schemas, outcomes and explicit no-live limitation.
-- Stage only allowed code/tests/docs and compact ICRA-044 evidence. Never stage build/install, raw logs,
-  synthetic threshold drafts, calibration data or the protected PDF. Commit/push the repair, then
-  commit/push one final DEV_LOG-only handoff; every commit must contain `IAP-RQ-423`.
-- Report `P4_G0C_LIVE_ARTIFACT_PROTOCOL_READY_FOR_REVIEW`, never G0C PASS.
+- Correct `docs/CHANGES.md` so its alias claim is backed by the new regression and keep exact directly
+  runnable focused/full Python commands. Update `docs/TRACEABILITY.md` and `DEV_LOG.md` under
+  `IAP-RQ-423`, including the explicit no-live limitation.
+- Stage only the allowed code/tests/docs and compact ICRA-045 evidence. Never stage build/install, raw
+  logs, synthetic calibration data, threshold drafts or the protected PDF.
+- Commit/push the repair, then commit/push one final `DEV_LOG.md`-only handoff. Every commit must contain
+  `IAP-RQ-423`. Recheck `HEAD == origin/dev/icra`, protected hashes, retained manifests and clean process
+  state before returning control.
 
 ## Allowed files
 
-- `scripts/dev_planner/p4_g0c_protocol.py`;
-- `scripts/dev_planner/run_p4_g0c_calibration.py`;
 - `scripts/dev_planner/analyze_p4_g0c_calibration.py`;
-- `test/test_p4_g0c_protocol.py`;
-- `test/test_p4_g0c_runner.py`;
 - `test/test_p4_g0c_analyzer.py`;
-- only if the existing launch-manifest binding needs a focused correction:
-  `launch/test_planner.launch.py` and `test/test_p4_g0c_launch_contract.py`;
-- compact evidence below `results/icra27/icra044/`;
+- compact evidence below `results/icra27/icra045/`;
 - `DEV_LOG.md`;
 - `docs/CHANGES.md`;
 - `docs/TRACEABILITY.md`.
 
 ## Forbidden
 
-- No protocol seeds/repetitions/run-ID/effective-value/noise-floor/ratio-tolerance/quantile/threshold
-  change; no threshold value or registry/application change; no live-fixture geometry change.
-- No C++/header/CMake/product behavior, P0/P1/P2/P3/P4 decision/P5 change; no composite profile, G0C
-  verdict, G0D or risk-guide application.
+- No protocol/runner/inventory/state/schema/seed/repetition/run-ID/effective-value/noise-floor/
+  ratio-tolerance/quantile/threshold change; no registry/application change.
+- No C++/header/CMake/product behavior, launch/config/fixture, P0/P1/P2/P3/P4 decision/P5 change; no
+  composite profile, G0C verdict, G0D or risk-guide application.
 - No GPU preflight, ROS/live launch, calibration, bag/RViz, smoke, benchmark, CTest/retained binary,
   artifact cleanup, retained-tree write, historical/protected/external-repository change or Gate
   promotion.
