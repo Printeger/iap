@@ -5949,3 +5949,28 @@ All initial and re-review findings were repaired red-to-green as recorded
 above. Final Standards reports 0 findings and `NO BLOCKING FINDING`; final Spec
 reports 0 findings and `NO BLOCKING FINDING`. The aggregate is retained at
 `results/icra27/icra043/review/two_axis_review.md`.
+
+## 2026-08-24T09:43:58Z — ICRA-043 FINAL BUILDER HANDOFF
+
+IAP-RQ-423. Implementation/evidence/documentation commit
+`eb3b3f41dd532bab826bfef15f43ae8f289217d2` is pushed to
+`origin/dev/icra`. It repairs G0C provenance with the authoritative ordered
+attempt ledger, non-overwriteable preflight/failure state, exact root
+inventory, one shared 36-column typed decision schema, duplicate identity
+rejection and the pre-data `2e-5` path-ratio arithmetic tolerance. No proposed
+threshold value changed; registry application remains false.
+
+Final verification is focused 50/50 and repository Python 389/389. Syntax,
+fatal-only flake8, canonical/valid JSON and `git diff --check` pass. Final
+Standards and Spec reviews each report zero findings and
+`NO BLOCKING FINDING`. All 3,829 files in the 12 retained ICRA-042 build/install
+trees remain byte-identical under exact before/after manifest SHA-256
+`6836841bc7ee74594ff80926bfd67c8531ea2d26076b27406cb9aeea3d784d34`.
+
+Protected scan/guide/PDF hashes remain exact and the PDF remains
+untracked/unstaged. Zero relevant processes remain. No GPU preflight, ROS,
+launch, calibration, CTest/retained binary, bag/RViz, smoke, benchmark,
+threshold draft/freeze/application, G0D, P5, cleanup or gate promotion ran.
+
+Builder result: `P4_G0C_PROTOCOL_REPAIR_READY_FOR_REVIEW`, not G0C PASS.
+Control returns only to SUPERVISOR review.
