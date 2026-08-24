@@ -1,136 +1,123 @@
-# ICRA-037 — Implement the P4 collision-scan GREEN contract
+# ICRA-038 — Repair rebound collision-scan truth loss
 
 > Active gate: `P4_G0A`
 > Owner: `DEEPSEEK`
 > Activation: `TASK_READY`
-> Supervisor verdict: `ICRA036_REVIEW_PASS_RED_CONTRACT_FROZEN`
+> Supervisor verdict: `ICRA037_REVIEW_REQUEST_CHANGES_REBOUND_TRUTH_LOSS`
 > Requirement mapping: `IAP-RQ-423`
 > Conference route: conditional P0 -> P4 -> P5
-> This task: bounded shared collision-scan implementation and fail-closed integration; no guide planning
+> This task: one High-finding repair and production-facing regression; no dual-guide work
 
 ## Supervisor decision
 
-ICRA-036 passes Standards and Spec review with zero findings. Its deterministic fixture is compileable,
-uses only the existing production surface, keeps production bytes unchanged and freezes eleven cases.
-Supervisor independently reproduced four passing cases and the exact seven intentional assertion-level
-RED cases: late exit, open-ended tail, empty input, non-finite input, structural invalidity, unavailable
-occupancy and a closed segment followed by an open-ended collision. Existing bspline, path-searching and
-occupancy-epoch baselines remain green.
+ICRA-037 is not accepted. Standards review found no hard violation and two non-blocking Low smells,
+but Spec review found one High safety-relevant truth-loss in the rebound consumer.
 
-The RED contract is now fixed. ICRA-037 shall implement the smallest production seam that represents
-scan status and closed segments explicitly, use it in real collision handling, and make all eleven
-frozen assertions green without weakening or replacing the fixture. This task stops before any original
-versus risk guide construction, A* invocation, profile/risk scoring, selection, fallback or P5 work.
+`scanCollisionSegments()` correctly returns `CLOSED_SEGMENTS (2,3)` when occupied samples lie between
+two adjacent free control points. `check_collision_and_rebound()` then iterates integer indices strictly
+between `2` and `3`; the range is empty, so it drops the segment and rewrites the result to
+`NO_COLLISION`. The new same-control-interval regression proves the scanner result but never calls the
+rebound consumer. A truthful closed collision can therefore be silently downgraded in production.
 
-## 1. Synchronize, preserve and declare the boundary
+ICRA-038 shall repair only this finding and return to Supervisor. P4-G0A remains unqualified; the P4
+deep module and G0B remain forbidden until this repair passes review.
 
-- Follow `AGENTS.md` synchronization. Stop as `REMOTE_DIVERGED` if both sides lead; never reset,
-  clean, stash, rebase, amend pushed history or overwrite another role's work.
-- Preserve the protected untracked PDF and all historical evidence. Do not edit, delete, move, stage,
-  regenerate or write into them. ICRA-036 build/install trees were deleted by Supervisor only after its
-  Review PASS and pushed code/documentation; do not recreate or depend on those paths.
-- Put all ICRA-037 build/install/log/tmp/test/review evidence below `results/icra27/icra037/`. Retain
-  task build/install through development and Supervisor review. Cleanup is Supervisor-only after Review
-  PASS and pushed code/documentation.
-- Add one START entry to `DEV_LOG.md` with the exact allowlist, frozen fixture identity, proposed
-  production seam, production callers, fail-closed behavior and stop line. Do not edit Supervisor-owned
-  files or choose another task.
+## 1. Synchronize and preserve
 
-## 2. Implement one explicit shared collision-scan result
+- Follow the `AGENTS.md` synchronization protocol. Stop as `REMOTE_DIVERGED` if both sides lead; never
+  reset, clean, stash, rebase, amend pushed history or overwrite another role's work.
+- Preserve the protected untracked PDF, frozen ICRA-036 fixture and all historical evidence. Do not
+  edit, delete, move, stage or regenerate them.
+- ICRA-037 Review did not pass. Retain all six ICRA-037 build/install trees unchanged for comparison and
+  linkage verification; do not clean or overwrite them.
+- Put new ICRA-038 build/install/log/test/review evidence below `results/icra27/icra038/`. Retain it
+  through development and Supervisor review. Cleanup remains Supervisor-only after a later Review PASS
+  and pushed code/documentation.
+- Add one ICRA-038 START entry to `DEV_LOG.md` containing the exact High finding, allowlist, proposed
+  invariant, tests and stop line. Do not edit Supervisor-owned files or choose another task.
 
-- Add a production result whose status vocabulary is exactly `NO_COLLISION`, `CLOSED_SEGMENTS`,
-  `OPEN_ENDED_COLLISION`, `INVALID_INPUT`, together with ordered closed segments where applicable.
-- Keep one source of truth for scanning. Initial and rebound collision handling must call the same
-  production scan seam; do not add a test-only implementation, duplicate scan loop or fixture-aware
-  branch.
-- For a valid scan, use the legacy entry trigger window only to decide whether an occupied run starts.
-  Once an entry starts before the two-thirds boundary, continue scanning through the complete seed tail
-  to find its free exit.
-- A closed segment has free endpoints and at least one occupied sample strictly between them. Return
-  multiple closed segments in scan order without overlap.
-- If an entered run has no free exit by the seed tail, return `OPEN_ENDED_COLLISION` with no consumable
-  segments. If a prior closed segment is followed by an open-ended run, discard the prior partial result
-  and return the same overall open-ended outcome.
-- Empty, non-finite or structurally invalid input, or unavailable occupancy truth, returns
-  `INVALID_INPUT`. Do not fabricate normal success, endpoints or occupancy.
-- Preserve the current `NO_COLLISION` and valid closed-segment behavior except where the frozen contract
-  explicitly corrects the old two-thirds truncation.
+## 2. Repair the rebound invariant
 
-The result type and helper may be private/internal if tests can reach it through a narrow truthful
-adapter, but the implementation must be used by production callers. Avoid exposing unrelated planner
-state or introducing a broad public API.
+- A `CLOSED_SEGMENTS` result from the shared production scanner must never be rewritten to
+  `NO_COLLISION` merely because there is no occupied integer control point strictly inside its free
+  endpoints.
+- Preserve the existing directional/base-point suppression only when the rebound consumer has enough
+  truthful occupancy evidence to classify the complete segment as already represented. Absence of an
+  interior integer sample is not evidence of no collision.
+- For an adjacent-endpoint or otherwise interpolation-only closed segment that cannot be truthfully
+  classified by the legacy direction filter, choose the conservative behavior: keep the scan status and
+  endpoints, set the existing error-stop state, return before A*/guide work and fail the current attempt
+  closed. Do not invent a fifth scan status.
+- If any segment in a multi-segment result is unclassifiable, fail the entire rebound attempt closed;
+  do not consume a partial subset or publish a normal result.
+- Preserve existing behavior for `NO_COLLISION`, ordinary actionable `CLOSED_SEGMENTS`,
+  `OPEN_ENDED_COLLISION` and `INVALID_INPUT`. Initial-path and planner-manager behavior from ICRA-037
+  must remain unchanged.
 
-## 3. Integrate fail-closed without beginning guide work
+Do not redesign the scanner, collision geometry, direction model, A*, guide selection or FSM. The code
+change should remain local to the rebound consumption boundary plus the smallest test access required.
 
-- Update the current initial and rebound collision paths to consume the explicit result. Only
-  `CLOSED_SEGMENTS` may expose closed segments to the existing downstream collision handling.
-- `OPEN_ENDED_COLLISION` and `INVALID_INPUT` must stop that collision-handling attempt fail closed:
-  no partial segment consumption, no normal success return and no newly accepted/published normal
-  trajectory caused by that attempt.
-- Prove by focused tests that downstream A*/guide construction is not invoked for open-ended or invalid
-  results. Existing behavior for no collision and valid closed segments must remain green.
-- Do not implement the P4 original guide, risk guide, request/decision records, 200-point risk profile,
-  candidate scoring, selection/fallback, lineage or a new planner algorithm. This task only establishes
-  truthful collision scan and the stop boundary required by those later stages.
+## 3. Add production-facing regression coverage
 
-If proving the no-publish boundary requires touching plan management, keep the change to the smallest
-status propagation/return handling and focused test. Do not refactor the planner manager or change
-unrelated publication, FSM, timing or retry behavior.
+- Keep `p4_collision_scan_fixture.hpp` byte-identical and do not weaken or replace any ICRA-036/037
+  expectation.
+- Extend the focused collision target so the existing same-control-interval case is passed through
+  `initControlPoints()` and the real rebound consumer, not only `scanCollisionSegments()`.
+- Prove all of the following:
+  1. the shared scanner returns `CLOSED_SEGMENTS (2,3)`;
+  2. rebound cannot change it to `NO_COLLISION`;
+  3. because no interior integer control point exists, rebound takes the conservative error-stop path;
+  4. A*/guide work is not invoked and no guide output is created;
+  5. a multi-segment input containing an unclassifiable interpolation-only segment does not expose or
+     consume a partial subset.
+- Keep the existing initial/rebound open/invalid, valid closed, overlap, frozen eleven-case and all
+  non-frozen regression assertions green.
+- Test through a narrow truthful production seam. Do not duplicate the scanner in tests, inspect source
+  text or derive expected behavior from fixture names.
 
-## 4. Make the frozen RED suite green and protect regressions
+The two Low Standards observations—`std::pair<int,int>` domain typing and the public test-only wrapper—
+are recorded debt, not authorization for a broader API refactor in this repair.
 
-- Do not change the ICRA-036 fixture inputs, sample coordinates, occupancy truth, expected statuses,
-  endpoint indices or assertion strength. The fixture header must remain byte-identical.
-- The test observer may be minimally updated only to call the new production result. It must not scan,
-  infer status from expectations, synthesize endpoints or retain the legacy lossy translation.
-- All eleven frozen collision-contract cases must compile and pass. Report the prior seven RED names and
-  their new observed status/endpoints as GREEN evidence.
-- Add only the smallest production-facing tests needed to demonstrate shared-caller use, fail-closed
-  open/invalid behavior and no downstream guide/A* call. Avoid source-text inspection and mock-only
-  tests that bypass the actual seam.
-- Run all existing `bspline_opt` tests, relevant path-searching P4 tests, occupancy-epoch tests and any
-  affected planner-manager tests separately. Every non-frozen baseline must remain green.
+## 4. Build, linkage and verification
 
-No GPU preflight, ROS, launch, runner, analyzer CLI, smoke, benchmark or campaign is authorized.
+- Build fresh task-local current bspline and, if required for linked-consumer validation, plan-manager
+  artifacts under ICRA-038. Reuse ICRA-037 IAP and the unchanged ICRA-026 plan-env/path-searching only
+  as read-only dependencies; record exact ament/direct linkage and reject workspace-default matches.
+- Run the complete focused collision target and report exact case counts, including the new rebound and
+  multi-segment tests. Separately require P1 39/39, path-searching P4 4/4, occupancy epoch 6/6 and the
+  affected plan-manager 9/9 selection to remain green.
+- Re-run `git diff --check`, focused formatting, JSON validation, allowlist, library/source identity and
+  zero-task-process audits. No GPU preflight, ROS, launch, runner, analyzer, smoke or benchmark is
+  authorized.
 
-## 5. Build, linkage, evidence and handoff
+## 5. Documentation and handoff
 
-- Create fresh ICRA-037 task-local current IAP and current bspline/affected-planner build/install
-  artifacts as needed. Use retained immutable dependency prefixes read-only and prove direct and ament
-  linkage resolves the current task, never workspace-default, deleted ICRA-036, missing, stale or
-  build-tree product libraries.
-- Run `git diff --check`, compile checks, the named tests and an allowlist audit. Record every command,
-  exit code and test count in compact task-local evidence.
-- Update `docs/CHANGES.md`, `docs/TRACEABILITY.md` and `DEV_LOG.md` with `IAP-RQ-423`, exact behavior,
-  production callers, tests, linkage and limitations.
-- Stage only task-authorized source/test/CMake changes and compact ICRA-037 evidence. Do not stage
-  build/install, large logs, historical evidence or the protected PDF.
+- Update `docs/CHANGES.md`, `docs/TRACEABILITY.md` and `DEV_LOG.md` with `IAP-RQ-423`, the original
+  High finding, exact repair invariant, tests, linkage and remaining limitations.
+- Stage only the authorized source/test changes and compact ICRA-038 evidence. Never stage build/install,
+  large logs, ICRA-037/historical evidence or the protected PDF.
 - Commit and push implementation/evidence/documentation, then commit and push one final
   `DEV_LOG.md`-only handoff. Every commit must contain `IAP-RQ-423`.
-- Builder must report `P4_G0A_COLLISION_SCAN_GREEN_READY_FOR_REVIEW`. It may not promote the Gate,
-  delete build/install, authorize another task, start dual-guide work or execute P5.
+- Report `P4_G0A_REBOUND_REPAIR_READY_FOR_REVIEW`. Do not claim Gate PASS, delete artifacts, authorize
+  another task, begin G0B/dual-guide work or execute P5.
 
 ## Allowed files
 
-- `src/iap/planner/bspline_opt/include/bspline_opt/bspline_optimizer.h`;
 - `src/iap/planner/bspline_opt/src/bspline_optimizer.cpp`;
-- `src/iap/planner/bspline_opt/CMakeLists.txt`, only for focused test registration;
-- focused new/updated files below `src/iap/planner/bspline_opt/test/`, except the frozen ICRA-036
-  fixture data/expectations;
-- only if required for fail-closed status propagation: the smallest affected planner-manager
-  header/source, CMake and focused test below `src/iap/planner/plan_manage/`;
-- new task-local build/install/log/test/review evidence below `results/icra27/icra037/`, with only
-  compact review evidence staged;
+- only if strictly required for truthful test access,
+  `src/iap/planner/bspline_opt/include/bspline_opt/bspline_optimizer.h`;
+- `src/iap/planner/bspline_opt/test/test_p4_collision_scan_contract.cpp`;
+- new compact build/test/linkage/review evidence below `results/icra27/icra038/`;
 - `DEV_LOG.md`;
 - `docs/CHANGES.md`;
 - `docs/TRACEABILITY.md`.
 
 ## Forbidden
 
-- No change to the frozen ICRA-036 fixture inputs/expectations or protected PDF; no historical evidence,
-  scope/plan/gate/requirement, Supervisor-owned, launch, runner, analyzer, capture, configuration or
-  external-repository change.
-- No P4 original/risk guide generation, A*, 200-point profile, scoring, selection/fallback, control-point
-  injection, request/decision/lineage contract, P5 behavior, tuning or threshold calibration.
-- No GPU, ROS, live map, smoke, benchmark, bag/RViz, live P1/P2/P3/P4/P5 pipeline execution, campaign,
-  retry to find a favorable result or artifact cleanup.
+- No change to the frozen fixture, planner-manager, plan-env/path-searching, CMake, launch, runner,
+  analyzer, capture, config, scope/plan/gate/requirement, Supervisor-owned, historical/PDF or external-
+  repository file.
+- No new collision status, scan redesign, original/risk guide deep module, request/decision identity,
+  risk search/profile/resampling, selection/fallback, control-point injection/lineage or P5 behavior.
+- No GPU, ROS, live map, smoke, benchmark, bag/RViz, tuning, calibration, live P1/P2/P3/P4/P5 pipeline,
+  campaign, retry for favorable results or artifact cleanup.

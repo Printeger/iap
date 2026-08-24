@@ -6,37 +6,35 @@ branch: dev/icra
 active_role: DEEPSEEK
 status: TASK_READY
 gate: P4_G0A
-task_id: ICRA-037
-review_base: 71ee608b3a4ec82f0ca70a22d2da3a71a3b9bc6d
-reviewed_head: da002d92d339cc55af95eea4bb19494e58b66d9c
+task_id: ICRA-038
+review_base: cc6a58a82befd23758b9ed2d0661253df34a0594
+reviewed_head: e3c41b654da86a6dd36aa7e483f6adea8fe505d0
 conference_route: P0_P4_P5
-route_status: P4_COLLISION_SCAN_IMPLEMENTATION
+route_status: P4_COLLISION_SCAN_REBOUND_REPAIR
 historical_gate0a_verdict: NO_GO_P2
 p0_gate0b_status: PASS
 p0_gate0b_worker_count: 4
-p4_status: G0A_GREEN_IMPLEMENTATION_PENDING
+p4_status: G0A_REQUEST_CHANGES
 p5_status: IMPLEMENTED_BUT_UNQUALIFIED
-supervisor_verdict: ICRA036_REVIEW_PASS_RED_CONTRACT_FROZEN
-review_disposition: ICRA037_COLLISION_SCAN_GREEN_IMPLEMENTATION_AUTHORIZED
+supervisor_verdict: ICRA037_REVIEW_REQUEST_CHANGES_REBOUND_TRUTH_LOSS
+review_disposition: ICRA038_REBOUND_FAIL_CLOSED_REPAIR_AUTHORIZED
 handoff_status: TASK_READY
 next_task: NEXT_TASK.md
-updated_utc: 2026-08-23T18:37:35Z
+updated_utc: 2026-08-24T02:36:55Z
 ```
 
 The conditional conference route remains `P0 -> P4 -> P5`. P0 Gate-0B remains `PASS`; the historical
-Gate-0A verdict remains `NO_GO_P2`, so P2 stays disabled. P4-G0A now advances from the frozen RED
-contract to its bounded production GREEN implementation. P5 remains implemented but unqualified on
-the conference route.
+Gate-0A verdict remains `NO_GO_P2`, so P2 stays disabled. P4-G0A remains open and dual-guide work is
+not authorized.
 
-ICRA-036 passes Standards and Spec review with zero findings. The fixture and its expected outcomes
-are frozen, existing baselines remain green, and the focused target compiles then reproducibly reports
-four passing cases plus seven assertion-level RED cases that correspond exactly to the missing
-collision-scan contract. No production behavior changed.
+ICRA-037 passes the Standards axis with no hard violations and two non-blocking Low design smells, but
+fails the Spec axis with one High finding. The shared scanner truthfully returns an adjacent-endpoint
+closed segment such as `(2,3)`, while the rebound consumer examines an empty integer-control-point
+range and rewrites that result to `NO_COLLISION`. The focused overlap regression exercises only the
+scanner and therefore does not protect the production rebound consumer.
 
-`DEEPSEEK` may begin only ICRA-037 after synchronizing `dev/icra`. It shall implement the smallest
-shared production collision-scan result seam that makes all eleven frozen ICRA-036 cases green and is
-actually consumed by the initial and rebound collision paths. Open-ended and invalid scans must fail
-closed and must never expose partial closed segments for guide consumption. No dual-guide generation,
-risk selection, P5 execution, live run or threshold calibration is authorized. ICRA-037 build/install
-must be retained through development and Supervisor review; cleanup remains Supervisor-only after
-Review PASS and pushed code/documentation.
+`DEEPSEEK` may begin only ICRA-038 after synchronizing `dev/icra`. It shall repair this truth-loss at
+the rebound boundary and add a production-facing regression proving a truthful closed segment is
+preserved or causes an explicit fail-closed stop, never a false `NO_COLLISION`. All ICRA-037 and
+ICRA-038 build/install artifacts must remain through the repair review. No P4 deep-module, dual-guide,
+risk-profile, P5 or live work is authorized.

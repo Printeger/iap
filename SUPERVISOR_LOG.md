@@ -1,5 +1,65 @@
 # ICRA Supervisor Log
 
+## 2026-08-24 — ICRA-037 review REQUEST_CHANGES and ICRA-038 rebound repair authorization
+
+### Review identity and synchronization
+
+- Fixed review range: `cc6a58a82befd23758b9ed2d0661253df34a0594...e3c41b654da86a6dd36aa7e483f6adea8fe505d0`.
+- Reviewed six pushed commits from `d9104b9` through the final DEV_LOG-only handoff `e3c41b6`; every
+  commit carries applicable `IAP-RQ-423`.
+- After fetch, `HEAD` and `origin/dev/icra` matched at divergence `0 0`. All eleven changed paths are
+  allowlisted. The frozen fixture hash remains `49a676a5…c788`, and the protected PDF remains the sole
+  untracked file at unchanged hash `1f07da56…44f6`.
+
+### Standards axis
+
+- Verdict: `PASS`; zero hard findings and two Low judgment-call smells; worst Low.
+- Low Primitive Obsession: collision segments remain `std::pair<int,int>` rather than a named domain
+  type. Low Middle Man/test-interface leakage: public `checkCollisionAndReboundForTest()` only forwards
+  the private production method. Neither finding blocks this bounded task, and neither authorizes a
+  broader repair refactor.
+- Requirement/docs synchronization, allowlist, ownership, commits, reproducible commands, protected
+  history/PDF, no-live boundary and retained artifacts otherwise conform.
+
+### Spec axis
+
+- Verdict: `REQUEST_CHANGES`; one High finding; worst High.
+- High rebound truth-loss: the shared scanner truthfully returns an adjacent-endpoint closed collision
+  such as `(2,3)`, including the new same-control-interval regression. The rebound consumer then checks
+  only integer indices strictly between the endpoints. That range is empty, so it removes the segment,
+  rewrites `last_collision_scan_result_` to `NO_COLLISION` and returns. The production-facing test does
+  not exercise this consumer path.
+- This violates the frozen requirement that initial and rebound consume the same scan truth and that a
+  closed segment is defined by occupied samples between free endpoints. An interpolation-only obstacle
+  can be detected and then silently downgraded instead of being handled or stopped fail closed.
+- All other reviewed behavior conforms: exact four states, frozen 11-case GREEN, late exit, open/invalid
+  and closed-then-open behavior, initial fail-closed propagation, no A*/guide for open/invalid, corrected
+  current linkage and forbidden-scope compliance.
+
+### Independent verification and artifact lifecycle
+
+- Supervisor reproduced the retained test selections: bspline 2/2 targets, including P1 39/39 and
+  collision 15/15; path-searching P4 4/4; occupancy epoch 6/6; affected plan-manager 9/9. Source,
+  executable and installed-library hashes match the submitted ledger. Direct linkage resolves ICRA-037
+  IAP/bspline and the intended ICRA-026 dependencies with no workspace-default IAP or missing library.
+- Passing tests do not remove the High finding because the adjacent-endpoint regression stops at the
+  scanner and omits the rebound consumer that loses the result.
+- Verdict: `ICRA037_REVIEW_REQUEST_CHANGES_REBOUND_TRUTH_LOSS`. P4-G0A is not promoted and G0B is not
+  authorized.
+- ICRA-037 retains exactly `build_iap`, `install`, `build_bspline`, `install_bspline`,
+  `build_plan_manage` and `install_plan_manage`, approximately 4.6 GiB total. Review did not pass, so
+  none is deletion-eligible. Compact evidence, source, tests, docs and PDF remain unchanged.
+
+### Required next action
+
+- Unique task: `ICRA-038 / P4_G0A`, defined in `NEXT_TASK.md`; active role is `DEEPSEEK`, state
+  `TASK_READY`.
+- Repair only the rebound downgrade. An unclassifiable interpolation-only closed segment must retain
+  its truthful status/endpoints and stop the current attempt before A*/guide work; it must never become
+  `NO_COLLISION`. Add adjacent-endpoint and multi-segment production-consumer regressions.
+- No scanner redesign, planner-manager change, deep-module/dual-guide, G0B, P5, GPU/ROS/live work,
+  cleanup or Gate promotion is authorized. ICRA-037 and ICRA-038 builds remain through repair review.
+
 ## 2026-08-23 — ICRA-036 review PASS and ICRA-037 collision-scan GREEN authorization
 
 ### Review identity and synchronization
