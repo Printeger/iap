@@ -1,0 +1,69 @@
+{
+  "schema_version": "icra050_compact_result_v1",
+  "task_id": "ICRA-050",
+  "requirement": "IAP-RQ-423",
+  "result": "BLOCKED_DEPENDENCY_RUNTIME_LIBRARY_MISSING",
+  "review": {
+    "standards_blocking": 0,
+    "standards_nonblocking": 0,
+    "spec_blocking": 1,
+    "spec_nonblocking": 0,
+    "spec_blocker": "BUILD_WITH_CUDA=OFF intentionally excluded mandatory iap:lib/libodometry_estimation_gpu.so from the declared closure"
+  },
+  "task_head": "7cecd16f710ec5cad8378117ceb7cf8a40dc6e72",
+  "build": {
+    "invocations": 1,
+    "exit_code": 0,
+    "package_count": 17,
+    "summary": "17 packages finished [4min 58s]",
+    "merge_install": true,
+    "symlink_install": false,
+    "build_with_cuda": false,
+    "installed_odometry_libraries": [
+      "libodometry_estimation_cpu.so",
+      "libodometry_estimation_ct.so"
+    ],
+    "required_missing_library": "lib/libodometry_estimation_gpu.so"
+  },
+  "standalone_dependency_preflight": {
+    "invocations": 1,
+    "exit_code": 2,
+    "runner_state": "FAILED",
+    "failure_reason": "DEPENDENCY_RUNTIME_LIBRARY_MISSING:iap:lib/libodometry_estimation_gpu.so",
+    "ament_prefix_path": "/home/dev/ws_iap/src/iap/results/icra27/icra050/install:/opt/ros/jazzy",
+    "allowed_prefixes": "/home/dev/ws_iap/src/iap/results/icra27/icra050/install:/opt/ros/jazzy",
+    "gpu_preflight_invocations": 0,
+    "launch_invocations": 0,
+    "launch_started": false,
+    "state_sha256": "701c37b87cb04fee6ec61692764ae4ff8be06442385afcc2f40645536c59a8bd"
+  },
+  "downstream": {
+    "full_runner_invocations": 0,
+    "gpu_preflight_invocations": 0,
+    "ros_launch_invocations": 0,
+    "analyzer_invocations": 0,
+    "runs_root_exists": false,
+    "analysis_exists": false,
+    "threshold_draft_exists": false,
+    "threshold_actions": 0
+  },
+  "post_failure_process_audit": {
+    "runner_or_analyzer_process_count": 0,
+    "iap_rosnode_process_count": 0,
+    "ego_planner_node_process_count": 0
+  },
+  "retained_artifacts": {
+    "build": {"files": 5106, "directories": 1095, "bytes": 1215166234, "aggregate_sha256": "7537fd632006f0a3126643d7c8cb768bc456acbbc2e967fb32bda44da099ec7e"},
+    "install": {"files": 2116, "directories": 180, "bytes": 475998486, "aggregate_sha256": "1c82920480e3dbb5234796bb21e2737ecf2f98cf255a9d0875d0b7fb728254c4"},
+    "log": {"files": 88, "directories": 19, "bytes": 2843184, "aggregate_sha256": "e2d464bff7347427ee944279bb1597481c6310843f3c84dc11a5f8546a18ca2d"},
+    "dependency_preflight": {"files": 1, "directories": 1, "bytes": 4683, "aggregate_sha256": "5d1d64738ff7d1dff8ea42aefe087cdf1e8b15002ea9e9f0ee311b11da47f005"}
+  },
+  "raw_log_hashes": {
+    "build_console": "48ddfb3a9c4462bc318963763e517e800643cc05ec6a135a69301e23c59e14b3",
+    "build_environment": "82735103022f69297f2551d30e3d923d03bcaf7e3988c0cb8e26388a36292396",
+    "build_exit": "933dacc714ce36180a30532ecdf2b3207efcb51345615808b1455ed408bf62d7",
+    "dependency_console": "701c37b87cb04fee6ec61692764ae4ff8be06442385afcc2f40645536c59a8bd",
+    "dependency_environment": "bdfbbb965fc2ce3ff44a6cdd2a7de82f8637f753b2802f7810b7104d1c37a3d9",
+    "dependency_exit": "c52982ebbbd6e84a969f868b044b80e42cbff3d8e6dbd2c40d6603a71107ee24"
+  }
+}

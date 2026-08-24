@@ -1129,3 +1129,11 @@ They do not convert historical `NO-GO-P2`, failed P0 Gate-0B evidence, the stati
 | IAP-RQ-423 | Production top-level runtime evidence must match the nested registered protocol binding | shared protocol module freezes the exact 28-entry top-level mapping and validates every required field with canonical exact JSON type equality while preserving complete nested `p4.g0c` validation | **FAIL-CLOSED; synthetic only** |
 | IAP-RQ-423 | Provenance refresh must not conceal semantic top-level disagreement | production-shaped runner/analyzer fixtures cover 28×3 remove/change/wrong-type adversaries; runner rejects before COMPLETE/inventory and analyzer rejects after legitimate inventory/state refresh with no draft; P1/P2 top-level-only drift is included | **REPAIRED; no threshold action** |
 | IAP-RQ-423 | Preserve accepted ICRA-048 anchors and all retained evidence | no launch/config/protocol/registry/dependency/lineage/fixture bytes changed; focused 77/77, launch golden 16/16 and full Python 432/432 pass under repository-local TMPDIR | **READY FOR SUPERVISOR REVIEW; not G0C PASS** |
+
+## 2026-08-24 ICRA-050 G0C r2 live calibration
+
+| Req ID | Requirement/evidence seam | Implementation and retained evidence | Status |
+|---|---|---|---|
+| IAP-RQ-423 | Fresh-build the complete declared closure without historical/default products | One sanitized non-symlink merged build under `results/icra27/icra050/{build,install,log}` exited 0 with 17/17 packages; exact sources, environment, command and hashes are retained | **BUILD EXIT 0; CUDA runtime library absent** |
+| IAP-RQ-423 | Prove the complete dependency closure before GPU or ROS | Sole standalone runner used only the ICRA-050 install plus `/opt/ros/jazzy` and exited 2 with `DEPENDENCY_RUNTIME_LIBRARY_MISSING:iap:lib/libodometry_estimation_gpu.so`; state SHA `701c37b8…bd` | **BLOCKED; dependency gate failed** |
+| IAP-RQ-423 | Stop without retry or downstream evidence mutation on a typed dependency failure | Zero full runner, GPU, ROS/launch and analyzer calls; no live runs root, analysis or draft; zero task processes; all task products and prior evidence retained | **FAIL-CLOSED; not G0C PASS** |

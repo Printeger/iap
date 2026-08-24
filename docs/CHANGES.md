@@ -1736,3 +1736,87 @@ ICRA-049 ran no build, GPU preflight, ROS/launch, runner/analyzer CLI,
 calibration, CTest/retained binary, bag/RViz, threshold action, G0C verdict,
 G0D, P5 or cleanup. Result is
 `P4_G0C_TOP_LEVEL_EVIDENCE_BINDING_READY_FOR_REVIEW`, never G0C PASS.
+
+## 2026-08-24 (ICRA-050 G0C r2 live calibration BLOCKED)
+
+- IAP-RQ-423: synchronized at
+  `7cecd16f710ec5cad8378117ceb7cf8a40dc6e72`, verified `0 0` divergence,
+  122,372,354,048 available bytes, zero task/required processes, the exact 17
+  package source paths and unchanged protected hashes before build.
+- One sanitized fresh non-symlink merged build below ICRA-050 exited 0 with all
+  17 packages finished in 4m58s. The build used `BUILD_WITH_CUDA=OFF`; its
+  install contains CPU and CT odometry libraries but not the dependency-
+  manifest-required `lib/libodometry_estimation_gpu.so`.
+- The sole standalone dependency-preflight runner used identical ordered
+  `AMENT_PREFIX_PATH` and `P4_G0C_ALLOWED_PREFIXES` containing only the
+  ICRA-050 install and `/opt/ros/jazzy`. It exited 2 with typed reason
+  `DEPENDENCY_RUNTIME_LIBRARY_MISSING:iap:lib/libodometry_estimation_gpu.so`.
+  State hash is `701c37b8…bd`; GPU/launch invocations are zero and ROS never
+  started.
+- The typed dependency failure consumed the standalone gate and stopped the
+  task. Full runner, GPU preflight, all 15 live runs and analyzer invocations
+  are zero; the live `runs` root does not exist. No retry, rebuild, dependency
+  repair, alternate root, analysis, threshold draft/freeze/application, G0C
+  verdict, G0D, P5, formal campaign or cleanup occurred.
+
+The exact effective build command was:
+
+```bash
+colcon --log-base results/icra27/icra050/log build \
+  --base-paths \
+    /home/dev/ws_iap/src/iap \
+    /home/dev/ws_iap/src/iap/src/iap/planner/bspline_opt \
+    /home/dev/ws_iap/src/iap/src/iap/planner/path_searching \
+    /home/dev/ws_iap/src/iap/src/iap/planner/plan_env \
+    /home/dev/ws_iap/src/iap/src/iap/planner/plan_manage \
+    /home/dev/ws_iap/src/iap/src/iap/planner/traj_utils \
+    /home/dev/ws_iap/src/iap/src/uav_simulator/Utils/cmake_utils \
+    /home/dev/ws_iap/src/iap/src/uav_simulator/Utils/odom_visualization \
+    /home/dev/ws_iap/src/iap/src/uav_simulator/Utils/pose_utils \
+    /home/dev/ws_iap/src/iap/src/uav_simulator/Utils/quadrotor_msgs \
+    /home/dev/ws_iap/src/iap/src/uav_simulator/Utils/uav_utils \
+    /home/dev/ws_iap/src/iap/src/uav_simulator/fake_drone \
+    /home/dev/ws_iap/src/iap/src/uav_simulator/gnss_sim \
+    /home/dev/ws_iap/src/iap/src/uav_simulator/local_sensing \
+    /home/dev/ws_iap/src/iap/src/uav_simulator/so3_control \
+    /home/dev/ws_iap/src/iap/src/uav_simulator/so3_quadrotor_simulator \
+    /home/dev/ws_iap/src/gnss_comm \
+  --packages-select \
+    iap bspline_opt path_searching plan_env ego_planner traj_utils \
+    cmake_utils odom_visualization pose_utils quadrotor_msgs uav_utils \
+    poscmd_2_odom gnss_sim local_sensing so3_control \
+    so3_quadrotor_simulator gnss_comm \
+  --build-base results/icra27/icra050/build \
+  --install-base results/icra27/icra050/install \
+  --merge-install --executor sequential \
+  --event-handlers console_direct+ \
+  --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
+    -DBUILD_WITH_CUDA=OFF -DBUILD_WITH_OPENCV=OFF \
+    -DBUILD_WITH_VIEWER=OFF
+```
+
+The sole executed runtime-protocol command was:
+
+```bash
+AMENT_PREFIX_PATH="$PWD/results/icra27/icra050/install:/opt/ros/jazzy" \
+P4_G0C_ALLOWED_PREFIXES="$PWD/results/icra27/icra050/install:/opt/ros/jazzy" \
+PYTHONDONTWRITEBYTECODE=1 \
+TMPDIR="$PWD/results/icra27/icra050/tmp" \
+python3 scripts/dev_planner/run_p4_g0c_calibration.py \
+  --dependency-preflight-only \
+  --runs-root "$PWD/results/icra27/icra050/dependency_preflight"
+```
+
+The full runner and analyzer commands were not invoked and have no exit code.
+The full repository test suite was also not run after failure because the task
+requires an immediate fail-closed stop. Full command/environment/stdout/stderr
+evidence is retained below `results/icra27/icra050/preflight/`; compact evidence
+is under `results/icra27/icra050/compact/`. Result is
+`BLOCKED_DEPENDENCY_RUNTIME_LIBRARY_MISSING`, never G0C PASS.
+
+Independent review reports Standards 0 blocking / 0 nonblocking and Spec 1
+blocking / 0 nonblocking. The Spec blocker is the sole build's explicit
+`BUILD_WITH_CUDA=OFF`: it guaranteed omission of the mandatory GPU runtime
+library, so the observed dependency failure is self-induced rather than proof
+that a conforming complete build failed. Because the one standalone gate is
+already consumed, no remediation or retry is permitted within ICRA-050.

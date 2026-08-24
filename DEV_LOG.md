@@ -6672,3 +6672,70 @@ CTest/retained binary, main flow, smoke, qualification, bag/RViz, threshold
 action, G0C verdict, G0D, P5 or cleanup ran. Builder result is
 `P4_G0C_TOP_LEVEL_EVIDENCE_BINDING_READY_FOR_REVIEW`, never G0C PASS. Control
 returns only to SUPERVISOR review.
+
+## 2026-08-24T13:49:49Z — ICRA-050 START
+
+IAP-RQ-423. Synchronized `dev/icra` at task HEAD
+`7cecd16f710ec5cad8378117ceb7cf8a40dc6e72`: initial status contained only the
+protected untracked PDF, fetch passed and divergence was `0 0`, so no pull ran.
+`AGENT_STATE.md` authorizes only DEEPSEEK, `TASK_READY`, ICRA-050 and
+`P4_G0C_REPLACEMENT_LIVE_CALIBRATION`.
+
+The one-shot boundary was clean: ICRA-050 did not exist, capacity was
+122,372,354,048 bytes, task/required process counts were zero and the 17 exact
+source package identities resolved. Protected v1/v2 protocol, registry,
+fixture, dependency, lineage and launch hashes, the PDF and all ICRA-046/047/
+048/049 aggregates matched their accepted identities. External `gnss_comm`
+was recorded as read-only at aggregate `de422a4…16a`.
+
+## 2026-08-24T13:59:28Z — ICRA-050 BLOCKED AT STANDALONE DEPENDENCY GATE
+
+IAP-RQ-423. The sole fresh sanitized non-symlink merged build wrote only below
+`results/icra27/icra050/{build,install,log}` and exited 0: all 17 packages
+finished in 4m58s. The exact command, environment, full console and exit code
+are retained. The command used `BUILD_WITH_CUDA=OFF`; the resulting install has
+`libodometry_estimation_cpu.so` and `libodometry_estimation_ct.so`, but lacks
+the immutable dependency requirement `iap:lib/libodometry_estimation_gpu.so`.
+
+The sole standalone `--dependency-preflight-only` runner used the separate
+fresh `dependency_preflight` root and identical ordered current/allowed prefix
+lists containing only the ICRA-050 merged install and `/opt/ros/jazzy`. It
+exited 2 with runner state FAILED and typed reason
+`DEPENDENCY_RUNTIME_LIBRARY_MISSING:iap:lib/libodometry_estimation_gpu.so`.
+The state SHA-256 is `701c37b87cb04fee6ec61692764ae4ff8be06442385afcc2f40645536c59a8bd`.
+
+Fail-closed stop is final for this task. The dependency state records zero GPU
+preflight, zero launch and `launch_started=false`; full runner, live runs and
+analyzer invocation counts are zero. The registered live `runs` root was never
+created, no analysis or threshold draft exists, and post-failure task process
+counts are exactly zero. No retry, rebuild, package repair, alternate root,
+threshold action, G0C verdict, G0D, P5, formal campaign or cleanup occurred.
+
+All ICRA-050 build/install/log/dependency products remain retained for Review.
+All protected hashes, prior evidence aggregates and external GNSS source are
+unchanged. The full repository test suite was not run after the typed failure
+because `NEXT_TASK.md` requires immediate stop. Builder result is
+`BLOCKED_DEPENDENCY_RUNTIME_LIBRARY_MISSING`, never G0C PASS, pending
+independent review and final protection audit.
+
+## 2026-08-24T14:03:55Z — ICRA-050 TWO-AXIS BLOCKED REVIEW
+
+IAP-RQ-423. Independent review against task HEAD
+`7cecd16f710ec5cad8378117ceb7cf8a40dc6e72` reports Standards 0 blocking / 0
+nonblocking and Spec 1 blocking / 0 nonblocking.
+
+The Spec blocker is explicit: `NEXT_TASK.md` required a fresh complete closure
+including all six IAP runtime libraries, but the sole build used
+`BUILD_WITH_CUDA=OFF`, guaranteeing omission of mandatory
+`iap:lib/libodometry_estimation_gpu.so`. The dependency failure is therefore
+self-induced rather than evidence that a conforming complete build failed.
+Truthful disclosure and the correct no-retry stop do not cure the preceding
+build-spec violation.
+
+Review confirms all post-failure behavior is otherwise fail-closed: exactly
+one dependency-preflight call, zero GPU/ROS/full-runner/analyzer calls, no
+retry, alternate root, cleanup or protected mutation, and raw products remain
+retained. The blocker cannot be remediated within the consumed ICRA-050
+one-shot boundary. Result remains
+`BLOCKED_DEPENDENCY_RUNTIME_LIBRARY_MISSING`, never G0C PASS, pending final
+protection audit and commit/push handoff to SUPERVISOR.
