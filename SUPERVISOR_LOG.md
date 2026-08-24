@@ -1,5 +1,58 @@
 # ICRA Supervisor Log
 
+## 2026-08-24 — ICRA-045 review PASS and ICRA-046 live calibration authorization
+
+### Review identity and synchronization
+
+- Fixed review range: `2088cbeedd0f0121d02d80a17493d53eb877bc45...5c27c773d0c678b8a38acb5035515afcc2513faa`.
+- Reviewed implementation/evidence `6535b0d` and final DEV_LOG-only handoff `5c27c77`; both carry
+  applicable `IAP-RQ-423`. All nine changed paths match the ICRA-045 allowlist; no Supervisor-owned,
+  product/CMake, protocol/runner/schema, launch/config/fixture or registry file changed.
+- After fetch, `HEAD` and `origin/dev/icra` matched at divergence `0 0`. The protected PDF remains the
+  sole untracked file at exact SHA-256
+  `1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+
+### Standards axis
+
+- Verdict: `PASS`; zero hard findings, zero judgment-call smells; worst none.
+- The five-line validation change is bounded and clearly named. Requirement/docs synchronization,
+  ownership, exact allowlist, two-commit handoff, retained-artifact protection and no-live/no-compiled
+  boundaries all conform.
+
+### Spec axis
+
+- Verdict: `PASS`; zero missing/partial requirements, zero scope creep and zero incorrect behavior;
+  worst none.
+- Both required lexical `..` aliases reject with exit 2 before `analyze()` and without creating their
+  target, intermediate directory or other output. Canonical relative analysis and absolute draft paths
+  still succeed. Existing outside-root, swapped/arbitrary, symlink, no-overwrite, exclusive-write and
+  raw-hash-neutral behavior remains covered.
+
+### Independent verification and Gate verdict
+
+- Supervisor reproduced analyzer 24/24, protocol 6/6, runner 14/14, launch contract 6/6 and launch golden
+  16/16 (66/66), plus repository Python discovery 405/405 and Python syntax. `git diff --check`, protected
+  hashes, exact changed-path scope and zero task-process audit pass. The existing unrelated subprocess
+  `ResourceWarning` remains non-blocking.
+- Verdict: `ICRA045_REVIEW_PASS_G0C_PROTOCOL_LIVE_READY`. This is protocol readiness, not G0C PASS;
+  thresholds remain null/unfrozen and application remains disabled.
+
+### Artifact lifecycle and required next action
+
+- All twelve ICRA-042 build/install directories remained intact throughout Review: 3,829 regular files,
+  exact retained manifest SHA-256
+  `6836841bc7ee74594ff80926bfd67c8531ea2d26076b27406cb9aeea3d784d34`, approximately 4.6 GiB.
+  ICRA-045 created no build/install product.
+- After this PASS record and next-task state are pushed, Supervisor removes exactly those twelve
+  reproducible ICRA-042 build/install directories. Compact evidence, source/docs/tests and the protected
+  PDF remain; no calibration raw data exists yet.
+- Unique next task: `ICRA-046 / P4_G0C_LIVE_CALIBRATION`, defined in `NEXT_TASK.md`; active role is
+  `DEEPSEEK`, state `TASK_READY`. It must freshly rebuild the six required products, pass dependency/
+  linkage/capacity and built-in GPU preflight, execute exactly 15 immutable registered runs once and
+  analyze the complete bundle once.
+- A `DRAFT_ELIGIBLE` threshold draft returns to Supervisor review. Registry mutation, threshold freeze,
+  G0C PASS, risk-guide application, G0D, P5 and formal campaign remain unauthorized.
+
 ## 2026-08-24 — ICRA-044 review REQUEST_CHANGES and ICRA-045 analyzer-alias repair
 
 ### Review identity and synchronization
