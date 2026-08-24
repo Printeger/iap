@@ -6739,3 +6739,28 @@ retained. The blocker cannot be remediated within the consumed ICRA-050
 one-shot boundary. Result remains
 `BLOCKED_DEPENDENCY_RUNTIME_LIBRARY_MISSING`, never G0C PASS, pending final
 protection audit and commit/push handoff to SUPERVISOR.
+
+## 2026-08-24T14:05:55Z — ICRA-050 BUILDER BLOCKED HANDOFF
+
+IAP-RQ-423. The truthful dependency blocker, complete executed-command record,
+compact evidence, final protection audit and two-axis review were committed as
+`2b9a368` and pushed to `origin/dev/icra`. Post-push fetch/divergence is `0 0`.
+
+The retained facts are unchanged: one fresh build exited 0 with 17/17 packages;
+the sole standalone dependency runner exited 2 because the install lacked
+mandatory `iap:lib/libodometry_estimation_gpu.so`; and the build had explicitly
+used `BUILD_WITH_CUDA=OFF`. Standards reports 0 blocking / 0 nonblocking while
+Spec reports 1 blocking / 0 nonblocking for this self-induced incomplete-
+closure build. No in-task retry is permitted.
+
+GPU preflight, ROS/launch, full runner, all 15 live identities and analyzer
+invocation counts remain zero. The live `runs` root, analysis and threshold
+draft do not exist; task process counts are zero. No rebuild, alternate root,
+threshold action, G0C verdict, G0D, P5, formal campaign or cleanup ran. The full
+test suite was not run after the typed failure due the required immediate stop.
+
+All ICRA-050 raw build/install/log/dependency products remain retained and
+unstaged. Protected artifacts, ICRA-046/047/048/049 evidence, external
+`gnss_comm` and the untracked/unstaged PDF remain unchanged. Builder result is
+`BLOCKED_DEPENDENCY_RUNTIME_LIBRARY_MISSING`, never G0C PASS. Control returns
+only to SUPERVISOR review and disposition.
