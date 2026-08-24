@@ -12,6 +12,7 @@ import csv
 import json
 import os
 import signal
+import stat
 import struct
 import subprocess
 import sys
@@ -26,6 +27,7 @@ if str(SCRIPT_DIR) not in sys.path:
 from p4_g0c_protocol import (  # noqa: E402
     DECISION_CSV_COLUMNS,
     LAUNCH_ENVIRONMENT_KEYS,
+    LAUNCH_ENVIRONMENT_DIRECTORY_MODES,
     LAUNCH_ENVIRONMENT_SCHEMA,
     MUTABLE_OUTPUT_KEYS,
     RUN_ARTIFACT_INVENTORY_FILENAME,
@@ -591,6 +593,7 @@ def derive_launch_environment_inventory(
         "schema_version": LAUNCH_ENVIRONMENT_SCHEMA,
         "runs_root": str(root),
         "child_environment": child_environment or {},
+        "directory_modes": dict(LAUNCH_ENVIRONMENT_DIRECTORY_MODES),
         "run_outputs": run_outputs,
     }
 
@@ -601,7 +604,8 @@ def validate_launch_environment_inventory(
 ) -> dict[str, Any]:
     """Fail closed on unknown, aliased, escaping, symlinked or conflicting paths."""
     if not isinstance(inventory, dict) or set(inventory) != {
-        "schema_version", "runs_root", "child_environment", "run_outputs"
+        "schema_version", "runs_root", "child_environment",
+        "directory_modes", "run_outputs",
     }:
         raise RunnerError("LAUNCH_ENVIRONMENT_NOT_READY:inventory_schema")
     root = Path(runs_root).resolve()
@@ -614,6 +618,8 @@ def validate_launch_environment_inventory(
     if not isinstance(outputs, list) or len(outputs) != len(plan):
         raise RunnerError("LAUNCH_ENVIRONMENT_NOT_READY:run_inventory")
     child_environment = inventory.get("child_environment")
+    if inventory.get("directory_modes") != LAUNCH_ENVIRONMENT_DIRECTORY_MODES:
+        raise RunnerError("LAUNCH_ENVIRONMENT_NOT_READY:directory_modes")
     for record, output in zip(plan, outputs):
         if not isinstance(output, dict) or set(output) != {
             "run_id", "mutable_output_paths"
@@ -658,14 +664,37 @@ def prepare_launch_environment(
     )
     child_environment = inventory["child_environment"]
     environment_root = Path(child_environment["HOME"]).parent
+    root_fd = None
     try:
-        environment_root.mkdir()
+        environment_root.mkdir(mode=0o700)
+        open_flags = os.O_RDONLY | os.O_DIRECTORY
+        if hasattr(os, "O_NOFOLLOW"):
+            open_flags |= os.O_NOFOLLOW
+        root_fd = os.open(environment_root, open_flags)
         for key in LAUNCH_ENVIRONMENT_KEYS:
             path = Path(child_environment[key])
-            path.mkdir()
-            if path.is_symlink() or not path.is_dir() or not os.access(path, os.W_OK):
+            mode = 0o700 if key == "XDG_RUNTIME_DIR" else 0o755
+            os.mkdir(path.name, mode=mode, dir_fd=root_fd)
+            directory_fd = os.open(path.name, open_flags, dir_fd=root_fd)
+            try:
+                if key == "XDG_RUNTIME_DIR":
+                    os.fchmod(directory_fd, 0o700)
+                metadata = os.fstat(directory_fd)
+            finally:
+                os.close(directory_fd)
+            if (
+                not stat.S_ISDIR(metadata.st_mode)
+                or metadata.st_uid != os.geteuid()
+                or not os.access(path, os.W_OK | os.X_OK)
+            ):
                 raise RunnerError(
-                    f"LAUNCH_ENVIRONMENT_NOT_READY:not_writable:{key}"
+                    f"LAUNCH_ENVIRONMENT_NOT_READY:directory_access:{key}"
+                )
+            if key == "XDG_RUNTIME_DIR" and (
+                stat.S_IMODE(metadata.st_mode) != 0o700
+            ):
+                raise RunnerError(
+                    "LAUNCH_ENVIRONMENT_NOT_READY:directory_mode:XDG_RUNTIME_DIR"
                 )
     except (OSError, RuntimeError) as exc:
         if isinstance(exc, RunnerError):
@@ -673,6 +702,9 @@ def prepare_launch_environment(
         raise RunnerError(
             f"LAUNCH_ENVIRONMENT_NOT_READY:create:{type(exc).__name__}"
         ) from exc
+    finally:
+        if root_fd is not None:
+            os.close(root_fd)
     return inventory
 
 
@@ -747,6 +779,7 @@ def launch_command(
             "p4.g0c.child_ros_home": child["ROS_HOME"],
             "p4.g0c.child_ros_log_dir": child["ROS_LOG_DIR"],
             "p4.g0c.child_tmpdir": child["TMPDIR"],
+            "p4.g0c.child_xdg_runtime_dir": child["XDG_RUNTIME_DIR"],
         })
     return [
         "ros2", "launch", "iap", "test_planner.launch.py",

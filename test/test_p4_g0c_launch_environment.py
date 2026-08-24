@@ -2,6 +2,7 @@ import copy
 import importlib.util
 import json
 import os
+import stat
 import tempfile
 import unittest
 from pathlib import Path
@@ -56,6 +57,9 @@ class P4G0CLaunchEnvironmentTest(unittest.TestCase):
             expected = MODULE.expected_launch_environment_binding(
                 root, Path(plan[0]["run_dir"])
             )
+            self.assertEqual(set(MODULE.LAUNCH_ENVIRONMENT_KEYS), {
+                "HOME", "ROS_HOME", "ROS_LOG_DIR", "TMPDIR", "XDG_RUNTIME_DIR",
+            })
             self.assertEqual(
                 inventory["child_environment"], expected["child_environment"]
             )
@@ -72,6 +76,9 @@ class P4G0CLaunchEnvironmentTest(unittest.TestCase):
                 inventory["run_outputs"][0]["mutable_output_paths"],
             )
             self.assertEqual(len(inventory["run_outputs"]), 15)
+            self.assertEqual(
+                inventory["directory_modes"], {"XDG_RUNTIME_DIR": "0700"}
+            )
 
             for absent_key in MODULE.LAUNCH_ENVIRONMENT_KEYS:
                 with self.subTest(absent_key=absent_key):
@@ -92,6 +99,77 @@ class P4G0CLaunchEnvironmentTest(unittest.TestCase):
                         },
                         expected["child_environment"],
                     )
+
+    def test_xdg_adversaries_fail_before_gpu_launch_or_attempt(self):
+        cases = (
+            "missing", "extra", "change", "wrong_type", "outside",
+            "lexical_parent", "alias", "symlink", "duplicate", "wrong_mode",
+        )
+        for case in cases:
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp) / "runs"
+
+                def malicious_factory(runs_root, plan):
+                    inventory = copy.deepcopy(
+                        MODULE.derive_launch_environment_inventory(runs_root, plan)
+                    )
+                    child = inventory["child_environment"]
+                    if case == "missing":
+                        child.pop("XDG_RUNTIME_DIR")
+                    elif case == "extra":
+                        child["UNREGISTERED_RUNTIME_DIR"] = str(
+                            runs_root / "launch_environment" / "unregistered"
+                        )
+                    elif case == "change":
+                        child["XDG_RUNTIME_DIR"] = str(
+                            runs_root / "launch_environment" / "xdg-other"
+                        )
+                    elif case == "wrong_type":
+                        child["XDG_RUNTIME_DIR"] = [child["XDG_RUNTIME_DIR"]]
+                    elif case == "outside":
+                        child["XDG_RUNTIME_DIR"] = str(Path(tmp) / "outside-xdg")
+                    elif case == "lexical_parent":
+                        child["XDG_RUNTIME_DIR"] = str(
+                            runs_root / "launch_environment" / ".." / "xdg"
+                        )
+                    elif case == "alias":
+                        child["XDG_RUNTIME_DIR"] = (
+                            f"{runs_root}/launch_environment//xdg_runtime"
+                        )
+                    elif case == "symlink":
+                        target = Path(tmp) / "outside-target"
+                        target.mkdir()
+                        alias = runs_root / "xdg-alias"
+                        alias.symlink_to(target, target_is_directory=True)
+                        child["XDG_RUNTIME_DIR"] = str(alias)
+                    elif case == "duplicate":
+                        child["XDG_RUNTIME_DIR"] = child["HOME"]
+                    elif case == "wrong_mode":
+                        inventory["directory_modes"]["XDG_RUNTIME_DIR"] = "0755"
+                    return inventory
+
+                gpu_calls = []
+                launch_calls = []
+                result = MODULE.run(
+                    self.bundle,
+                    root,
+                    gpu_preflight=lambda _: gpu_calls.append(True),
+                    launch_executor=lambda *args: launch_calls.append(args),
+                    launch_environment_factory=malicious_factory,
+                )
+                self.assertEqual(result["runner_state"], "FAILED")
+                self.assertTrue(result["failure_reason"].startswith(
+                    "LAUNCH_ENVIRONMENT_NOT_READY"
+                ))
+                self.assertEqual(result["gpu_preflight_invocations"], 0)
+                self.assertEqual(result["launch_invocations"], 0)
+                self.assertEqual(result["attempted_run_ids"], [])
+                self.assertFalse(result["launch_started"])
+                self.assertEqual(gpu_calls, [])
+                self.assertEqual(launch_calls, [])
+                self.assertFalse(
+                    (root / "p4-g0c-r3-seed211-rep01").exists()
+                )
 
     def test_malicious_and_unknown_paths_fail_before_gpu_launch_or_attempt(self):
         cases = (
@@ -199,6 +277,7 @@ class P4G0CLaunchEnvironmentTest(unittest.TestCase):
                     "ROS_HOME": "/caller/ros-home",
                     "ROS_LOG_DIR": "/caller/ros-log",
                     "TMPDIR": "/caller/tmp",
+                    "XDG_RUNTIME_DIR": "/caller/xdg",
                 },
                 gpu_preflight=lambda _: {
                     "gpu_ready": True,
@@ -209,8 +288,13 @@ class P4G0CLaunchEnvironmentTest(unittest.TestCase):
             expected = MODULE.expected_launch_environment_binding(
                 root, Path(result["runs"][0]["run_dir"])
             )
+            xdg_mode = stat.S_IMODE(
+                Path(expected["child_environment"]["XDG_RUNTIME_DIR"])
+                .stat().st_mode
+            )
 
         self.assertEqual(result["gpu_preflight_invocations"], 1)
+        self.assertEqual(xdg_mode, 0o700)
         self.assertEqual(result["launch_invocations"], 1)
         self.assertEqual(len(result["attempted_run_ids"]), 1)
         self.assertTrue(result["launch_started"])
@@ -234,6 +318,10 @@ class P4G0CLaunchEnvironmentTest(unittest.TestCase):
         self.assertEqual(
             command_values["p4.g0c.child_ros_log_dir"],
             expected["child_environment"]["ROS_LOG_DIR"],
+        )
+        self.assertEqual(
+            command_values["p4.g0c.child_xdg_runtime_dir"],
+            expected["child_environment"]["XDG_RUNTIME_DIR"],
         )
 
 

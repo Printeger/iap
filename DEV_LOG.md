@@ -6987,3 +6987,72 @@ Builder result is
 `P4_G0C_R3_LAUNCH_ENVIRONMENT_PROTOCOL_READY_FOR_REVIEW`, not r3 live
 readiness, threshold eligibility/application, G0C PASS, G0D or P5. No next
 task is selected. Control returns only to SUPERVISOR review.
+## 2026-08-24T15:55:42Z — ICRA-053 XDG RUNTIME REPAIR
+
+IAP-RQ-423. Synchronized `dev/icra` at task head
+`9ad3eefaeef1248bf1874cc4d3cb9711d19f5657`; initial status contained only the
+protected untracked PDF, fetch passed and divergence was `0 0`, so no pull ran.
+Authorization is DEEPSEEK, `TASK_READY`, ICRA-053 and
+`P4_G0C_R3_XDG_RUNTIME_ENVIRONMENT_REPAIR`. Available capacity was
+118,907,805,696 bytes and task/required-process count was zero.
+
+Before the first Python command, `results/icra27/icra053/tmp` was created.
+Every development and formal Python invocation explicitly used its absolute
+path as `TMPDIR`; no external temp or evidence was created. The first unittest
+command used invalid package-style paths and exited 1 because `test/` is not a
+package. Correct single-file RED commands then truthfully failed on the
+intended ICRA-052 defects: literal `/tmp/runtime-root`, absent XDG runner
+schema/command and incomplete analyzer evidence.
+
+The repaired exact child environment is `HOME`, `ROS_HOME`, `ROS_LOG_DIR`,
+`TMPDIR`, `XDG_RUNTIME_DIR`; XDG is solely
+`<runs-root>/launch_environment/xdg_runtime`. Runner inventory records mode
+`0700`; creation uses a no-follow directory FD, current-owner and exact-mode
+checks plus W/X access. Missing, extra, changed, wrong-type, relative/outside,
+lexical parent, alias, symlink, duplicate, wrong-mode or propagated mismatch
+is typed `LAUNCH_ENVIRONMENT_NOT_READY` before GPU, launch state, attempt or
+per-run output. R3 child launch uses the exact argument; only legacy non-r3
+retains `/tmp/runtime-root`.
+
+The independent production AST proof enumerates top-level environment actions
+and exact five-key/eight-output binding rather than sharing the validator map.
+It failed on ICRA-052 source and passes only with conditional r3 XDG selection;
+an unregistered new action or binding sink changes the surface and fails. The
+analyzer now checks 13 x 3 = 39 refreshed-provenance binding mutations plus
+filesystem/runner-state XDG mode drift; all reject without draft.
+
+Formal commands were:
+
+```bash
+env TMPDIR="$PWD/results/icra27/icra053/tmp" \
+  python3 -m unittest discover -s test -p 'test_p4_g0c_*.py' -v
+# exit 0; Ran 87 tests; OK
+
+env TMPDIR="$PWD/results/icra27/icra053/tmp" \
+  python3 test/test_test_planner_launch.py -v
+# exit 0; Ran 16 tests; OK
+
+env TMPDIR="$PWD/results/icra27/icra053/tmp" \
+  python3 -m unittest discover -s test -p 'test_*.py'
+# exit 0; Ran 442 tests; OK
+```
+
+In-memory syntax compile passes 9 files; fatal-only flake8, four canonical r3
+JSON files and `git diff --check` exit 0. Final task TMPDIR entry count is zero.
+Unavoidable r3 hashes are launch `396122ae...ee7d`, dependency
+`ff7c66f1...5fc6`, protocol `7df40eff...9401`, registry
+`8825c70c...82c8`; lineage remains `87947cb0...7d60`.
+
+Supervisor correction is appended without rewriting earlier Builder history:
+ICRA-052 has one High Standards blocker for its early external temporary
+directories and one High Spec blocker for unregistered production
+`XDG_RUNTIME_DIR=/tmp/runtime-root`. ICRA-051 state remains
+`7c3cafc5...46a7`, external log remains `f506e556...58e7`, PDF remains
+`1f07da56...44f6`, and every v1/v2 hash matches task-start bytes.
+
+No build/install/log product, compiled test, CTest, GPU preflight, ROS/launch,
+live runner/analyzer CLI, calibration, main flow, smoke, qualification,
+threshold action, G0C verdict, G0D/P5 work or cleanup ran. Compact evidence is
+under `results/icra27/icra053/`. Builder result is
+`P4_G0C_R3_XDG_RUNTIME_ENVIRONMENT_READY_FOR_REVIEW`, never r3 live readiness
+or G0C PASS, pending independent review and final handoff.

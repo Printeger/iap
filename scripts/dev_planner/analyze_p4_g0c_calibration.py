@@ -8,6 +8,8 @@ import csv
 import hashlib
 import json
 import math
+import os
+import stat
 import sys
 from pathlib import Path
 from typing import Any
@@ -18,6 +20,7 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 from p4_g0c_protocol import (  # noqa: E402
+    LAUNCH_ENVIRONMENT_DIRECTORY_MODES,
     LAUNCH_ENVIRONMENT_SCHEMA,
     RUN_ARTIFACT_INVENTORY_FILENAME,
     DecisionSchemaError,
@@ -187,13 +190,28 @@ def _root_inventory_failures(
         if not launch_environment.is_dir() or launch_environment.is_symlink():
             failures.append("root_inventory_launch_environment_type")
         else:
-            expected_directories = {"home", "ros_home", "ros_logs", "tmp"}
+            expected_directories = {
+                "home", "ros_home", "ros_logs", "tmp", "xdg_runtime",
+            }
             actual_directories = {
                 entry.name for entry in launch_environment.iterdir()
                 if entry.is_dir() and not entry.is_symlink()
             }
             if actual_directories != expected_directories:
                 failures.append("root_inventory_launch_environment_directories")
+            xdg_runtime = launch_environment / "xdg_runtime"
+            try:
+                xdg_metadata = xdg_runtime.stat()
+                if (
+                    xdg_runtime.is_symlink()
+                    or not xdg_runtime.is_dir()
+                    or xdg_metadata.st_uid != os.geteuid()
+                    or stat.S_IMODE(xdg_metadata.st_mode) != 0o700
+                    or not os.access(xdg_runtime, os.W_OK | os.X_OK)
+                ):
+                    failures.append("root_inventory_xdg_runtime_contract")
+            except OSError:
+                failures.append("root_inventory_xdg_runtime_contract")
             for entry in launch_environment.rglob("*"):
                 if entry.is_symlink():
                     failures.append(
@@ -322,7 +340,8 @@ def _runner_state_failures(
     if bundle.protocol.get("schema_version") == PROTOCOL_SCHEMA_V3:
         launch_environment = state.get("launch_environment")
         if not isinstance(launch_environment, dict) or set(launch_environment) != {
-            "schema_version", "runs_root", "child_environment", "run_outputs"
+            "schema_version", "runs_root", "child_environment",
+            "directory_modes", "run_outputs",
         }:
             failures.append("runner_state_launch_environment_schema")
         else:
@@ -332,6 +351,11 @@ def _runner_state_failures(
                 or launch_environment.get("runs_root") != str(root.resolve())
             ):
                 failures.append("runner_state_launch_environment_root")
+            if (
+                launch_environment.get("directory_modes")
+                != LAUNCH_ENVIRONMENT_DIRECTORY_MODES
+            ):
+                failures.append("runner_state_launch_environment_modes")
             outputs = launch_environment.get("run_outputs")
             if not isinstance(outputs, list) or len(outputs) != len(plan):
                 failures.append("runner_state_launch_environment_runs")

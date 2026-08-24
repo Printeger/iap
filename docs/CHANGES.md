@@ -1948,3 +1948,39 @@ permitted after the sole invocation was consumed.
   CLI, main-flow, smoke, qualification or threshold action. Result is
   `P4_G0C_R3_LAUNCH_ENVIRONMENT_PROTOCOL_READY_FOR_REVIEW`, never live-ready or
   G0C PASS.
+## 2026-08-24 (ICRA-053 r3 XDG runtime environment repair)
+
+- IAP-RQ-423: registered `XDG_RUNTIME_DIR` as the fifth exact r3 launch child
+  key at `<runs-root>/launch_environment/xdg_runtime`. The runner creates it
+  through a directory file descriptor with no-follow semantics, verifies
+  current ownership, exact mode `0700`, write/execute access and canonical
+  descendant identity before GPU, launch state, attempted ID or run output.
+- Production launch no longer unconditionally overrides r3 with
+  `/tmp/runtime-root`: conditional actions select the registered launch
+  argument only for r3 and preserve the legacy value only for non-r3. The run
+  command, runner state, run manifest and test-planner manifest carry the exact
+  XDG value; analyzer also verifies state mode and filesystem mode.
+- A production-source AST test independently enumerates path-valued environment
+  actions and the five-key/eight-output r3 binding surface. It failed on the
+  ICRA-052 literal override and now fails closed if another unregistered action
+  or sink is added.
+- Runner XDG coverage contains 10 malicious evidence classes plus absent and
+  malicious caller replacement, actual `0700` nominal creation and exact child
+  propagation. Analyzer covers all 13 bindings x remove/change/wrong-type = 39
+  refreshed-provenance adversaries, plus filesystem/state mode drift, with no
+  threshold draft.
+- Formal repository-local verification passes focused P4 discovery 87/87,
+  launch golden 16/16 and full Python discovery 442/442. Every Python command,
+  including RED development commands and one recorded invocation-shape error,
+  explicitly used `results/icra27/icra053/tmp`; its final inventory is empty.
+  Syntax 9/9, fatal-only flake8, canonical JSON 4/4 and diff checks pass.
+- Supervisor correction: ICRA-052 has one High Standards blocker for its early
+  repository-external temporary directories and one High Spec blocker for the
+  unregistered production `XDG_RUNTIME_DIR=/tmp/runtime-root`. Earlier Builder
+  text remains historical and is not rewritten.
+- Only the unavoidable r3 launch -> dependency -> protocol -> registry hashes
+  changed. R3 science, 15 IDs, lineage, all v1/v2 artifacts, ICRA-051 bytes and
+  the PDF remain unchanged. This task ran no build, CTest, GPU, ROS, live CLI,
+  smoke, qualification or threshold action. Result is
+  `P4_G0C_R3_XDG_RUNTIME_ENVIRONMENT_READY_FOR_REVIEW`, not live readiness or
+  G0C PASS.

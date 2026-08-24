@@ -23,6 +23,8 @@ from launch.actions import TimerAction
 from launch.conditions import IfCondition
 from launch.events import Shutdown
 from launch.substitutions import LaunchConfiguration
+from launch.substitutions import EqualsSubstitution
+from launch.substitutions import NotEqualsSubstitution
 from launch_ros.actions import ComposableNodeContainer
 from launch_ros.actions import Node
 from launch_ros.descriptions import ComposableNode
@@ -398,7 +400,7 @@ def _p4_g0c_binding(
     }
     if version == 3:
         if not isinstance(child_environment, dict) or set(child_environment) != {
-            "HOME", "ROS_HOME", "ROS_LOG_DIR", "TMPDIR"
+            "HOME", "ROS_HOME", "ROS_LOG_DIR", "TMPDIR", "XDG_RUNTIME_DIR"
         }:
             raise RuntimeError("P4-G0C child environment is malformed")
         if not isinstance(mutable_output_paths, dict) or set(mutable_output_paths) != {
@@ -415,6 +417,7 @@ def _p4_g0c_binding(
             "ROS_HOME": str(environment_root / "ros_home"),
             "ROS_LOG_DIR": str(environment_root / "ros_logs"),
             "TMPDIR": str(environment_root / "tmp"),
+            "XDG_RUNTIME_DIR": str(environment_root / "xdg_runtime"),
         }
         expected_outputs = {
             "bag_output_dir": str(run_dir / "bags"),
@@ -508,6 +511,9 @@ def _prepare_p4_g0c_context(context, experiment, iap_share):
                 "p4.g0c.child_ros_log_dir"
             ).perform(context),
             "TMPDIR": LaunchConfiguration("p4.g0c.child_tmpdir").perform(context),
+            "XDG_RUNTIME_DIR": LaunchConfiguration(
+                "p4.g0c.child_xdg_runtime_dir"
+            ).perform(context),
         },
         mutable_output_paths={
             "bag_output_dir": LaunchConfiguration("bag_output_dir").perform(context),
@@ -1603,6 +1609,7 @@ ARG_DEFAULTS = [
     ("p4.g0c.child_ros_home", ""),
     ("p4.g0c.child_ros_log_dir", ""),
     ("p4.g0c.child_tmpdir", ""),
+    ("p4.g0c.child_xdg_runtime_dir", ""),
     ("p5.enable_runtime_gate", "false"),
     ("p5.enable_final_gate", "false"),
     ("p5.horizon_s", "2.0"),
@@ -3809,7 +3816,20 @@ def generate_launch_description():
         [
             *[DeclareLaunchArgument(name, default_value=default) for name, default in ARG_DEFAULTS],
             SetEnvironmentVariable("QT_X11_NO_MITSHM", "1"),
-            SetEnvironmentVariable("XDG_RUNTIME_DIR", "/tmp/runtime-root"),
+            SetEnvironmentVariable(
+                "XDG_RUNTIME_DIR",
+                LaunchConfiguration("p4.g0c.child_xdg_runtime_dir"),
+                condition=IfCondition(EqualsSubstitution(
+                    LaunchConfiguration("experiment"), P4_G0C_EXPERIMENT_V3,
+                )),
+            ),
+            SetEnvironmentVariable(
+                "XDG_RUNTIME_DIR",
+                "/tmp/runtime-root",
+                condition=IfCondition(NotEqualsSubstitution(
+                    LaunchConfiguration("experiment"), P4_G0C_EXPERIMENT_V3,
+                )),
+            ),
             SetEnvironmentVariable("FASTRTPS_DEFAULT_PROFILES_FILE", fastdds_profile),
             OpaqueFunction(function=_launch_setup),
         ]

@@ -192,10 +192,13 @@ class P4G0CAnalyzerTest(unittest.TestCase):
         }
         hardened = protocol_schema == MODULE.PROTOCOL_SCHEMA_V3
         if hardened:
-            for directory in ("home", "ros_home", "ros_logs", "tmp"):
+            for directory in (
+                "home", "ros_home", "ros_logs", "tmp", "xdg_runtime",
+            ):
                 (root / "launch_environment" / directory).mkdir(
                     parents=True, exist_ok=True
                 )
+            (root / "launch_environment" / "xdg_runtime").chmod(0o700)
         row_counts = row_counts or [7] * 15
         global_index = 0
         inventory_bindings = []
@@ -364,6 +367,7 @@ class P4G0CAnalyzerTest(unittest.TestCase):
                 "schema_version": MODULE.LAUNCH_ENVIRONMENT_SCHEMA,
                 "runs_root": str(root.resolve()),
                 "child_environment": first_binding["child_environment"],
+                "directory_modes": {"XDG_RUNTIME_DIR": "0700"},
                 "run_outputs": [
                     {
                         "run_id": record["run_id"],
@@ -476,6 +480,7 @@ class P4G0CAnalyzerTest(unittest.TestCase):
             bindings = (
                 ("child_environment", (
                     "HOME", "ROS_HOME", "ROS_LOG_DIR", "TMPDIR",
+                    "XDG_RUNTIME_DIR",
                 )),
                 ("mutable_output_paths", (
                     "bag_output_dir", "decision_csv_path", "export_root_dir",
@@ -528,7 +533,36 @@ class P4G0CAnalyzerTest(unittest.TestCase):
                                 for failure in result["failures"]
                             ))
                             adversarial_count += 1
-            self.assertEqual(adversarial_count, 36)
+            self.assertEqual(adversarial_count, 39)
+
+    def test_v3_xdg_mode_evidence_rejects_before_draft(self):
+        self.bundle = MODULE.load_bundle(
+            REPO / "config/icra27/p4_g0c_protocol_v3.json",
+            REPO / "config/icra27/p4_threshold_registry_v3.json",
+            REPO / "config/icra27/p4_g0c_live_fixture_v1.json",
+            expected_protocol_schema=MODULE.PROTOCOL_SCHEMA_V3,
+        )
+        for case in ("filesystem", "runner_state"):
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                self._make_bundle(root)
+                if case == "filesystem":
+                    (root / "launch_environment/xdg_runtime").chmod(0o755)
+                else:
+                    state_path = root / "p4_g0c_runner_state.json"
+                    state = json.loads(state_path.read_text())
+                    state["launch_environment"]["directory_modes"] = {
+                        "XDG_RUNTIME_DIR": "0755"
+                    }
+                    state_path.write_text(json.dumps(state, sort_keys=True) + "\n")
+                result = MODULE.analyze(self.bundle, root)
+                self.assertEqual(result["analysis_status"], "REJECTED")
+                self.assertNotIn("threshold_draft", result)
+                self.assertTrue(any(
+                    "xdg_runtime" in failure
+                    or "launch_environment_modes" in failure
+                    for failure in result["failures"]
+                ))
 
     def test_v2_launch_effective_disagreement_rejects_before_draft(self):
         self.bundle = MODULE.load_bundle(

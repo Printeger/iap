@@ -1,3 +1,4 @@
+import ast
 import importlib.util
 import json
 import tempfile
@@ -51,6 +52,104 @@ class P4G0CLaunchContractTest(unittest.TestCase):
         self.assertGreater(
             float(scenario["p1_fixture_risky_canopy_probability"]),
             float(scenario["p1_fixture_safe_canopy_probability"]),
+        )
+
+    def test_r3_registered_paths_equal_production_launch_surface(self):
+        source = MODULE_PATH.read_text()
+        tree = ast.parse(source)
+        functions = {
+            node.name: node
+            for node in tree.body
+            if isinstance(node, ast.FunctionDef)
+        }
+        generate = functions["generate_launch_description"]
+        environment_actions = []
+        for node in ast.walk(generate):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "SetEnvironmentVariable"
+                and len(node.args) >= 2
+                and isinstance(node.args[0], ast.Constant)
+            ):
+                environment_actions.append(node)
+        self.assertEqual({node.args[0].value for node in environment_actions}, {
+            "FASTRTPS_DEFAULT_PROFILES_FILE",
+            "QT_X11_NO_MITSHM",
+            "XDG_RUNTIME_DIR",
+        })
+        xdg_actions = [
+            node for node in environment_actions
+            if node.args[0].value == "XDG_RUNTIME_DIR"
+        ]
+        self.assertEqual(len(xdg_actions), 2)
+        self.assertTrue(all(
+            any(keyword.arg == "condition" for keyword in node.keywords)
+            for node in xdg_actions
+        ))
+        registered = [
+            node for node in xdg_actions
+            if isinstance(node.args[1], ast.Call)
+        ]
+        legacy = [
+            node for node in xdg_actions
+            if isinstance(node.args[1], ast.Constant)
+        ]
+        self.assertEqual(len(registered), 1)
+        self.assertEqual(len(legacy), 1)
+        self.assertEqual(legacy[0].args[1].value, "/tmp/runtime-root")
+        registered_condition = {
+            keyword.arg: keyword.value for keyword in registered[0].keywords
+        }["condition"]
+        legacy_condition = {
+            keyword.arg: keyword.value for keyword in legacy[0].keywords
+        }["condition"]
+        self.assertEqual(registered_condition.func.id, "IfCondition")
+        self.assertEqual(
+            registered_condition.args[0].func.id, "EqualsSubstitution"
+        )
+        self.assertEqual(legacy_condition.func.id, "IfCondition")
+        self.assertEqual(
+            legacy_condition.args[0].func.id, "NotEqualsSubstitution"
+        )
+        for condition in (registered_condition, legacy_condition):
+            predicate = condition.args[0]
+            self.assertEqual(
+                predicate.args[0].func.id, "LaunchConfiguration"
+            )
+            self.assertEqual(predicate.args[0].args[0].value, "experiment")
+            self.assertEqual(predicate.args[1].id, "P4_G0C_EXPERIMENT_V3")
+        xdg_value = registered[0].args[1]
+        self.assertIsInstance(xdg_value, ast.Call)
+        self.assertIsInstance(xdg_value.func, ast.Name)
+        self.assertEqual(xdg_value.func.id, "LaunchConfiguration")
+        self.assertEqual(xdg_value.args[0].value, "p4.g0c.child_xdg_runtime_dir")
+
+        prepare = functions["_prepare_p4_g0c_context"]
+        bindings = [
+            node for node in ast.walk(prepare)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "_p4_g0c_binding"
+        ]
+        self.assertEqual(len(bindings), 1)
+        keywords = {item.arg: item.value for item in bindings[0].keywords}
+        child_keys = {
+            key.value for key in keywords["child_environment"].keys
+        }
+        output_keys = {
+            key.value for key in keywords["mutable_output_paths"].keys
+        }
+        self.assertEqual(child_keys, {
+            "HOME", "ROS_HOME", "ROS_LOG_DIR", "TMPDIR", "XDG_RUNTIME_DIR",
+        })
+        self.assertEqual(output_keys, {
+            "bag_output_dir", "decision_csv_path", "export_root_dir",
+            "iap_log_root", "launch_command_path", "run_manifest_path",
+            "runtime_root_dir", "stdout_log_path",
+        })
+        self.assertIn(
+            "p4.g0c.child_xdg_runtime_dir", dict(MODULE.ARG_DEFAULTS)
         )
 
     def test_v2_profile_and_binding_use_only_r2_identity(self):
@@ -125,6 +224,7 @@ class P4G0CLaunchContractTest(unittest.TestCase):
                 "ROS_HOME": str(environment_root / "ros_home"),
                 "ROS_LOG_DIR": str(environment_root / "ros_logs"),
                 "TMPDIR": str(environment_root / "tmp"),
+                "XDG_RUNTIME_DIR": str(environment_root / "xdg_runtime"),
             }
             outputs = {
                 "bag_output_dir": str(run_dir / "bags"),

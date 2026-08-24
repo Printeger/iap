@@ -79,13 +79,16 @@ P4_G0C_REGISTRY_V2_TRUSTED_SHA256 = (
     "99ccf38c317d45d8605a7e382628a8f0afd32c8097a763d05bfdcc5807beb94f"
 )
 P4_G0C_PROTOCOL_V3_TRUSTED_SHA256 = (
-    "1789d3fc32178f02002a468ba58b9efd2768ea3f335969e49e9452b84d524c86"
+    "7df40eff39a8c6e40e5f893719df6dd9a21ff97a5941992c075fd5ead4729401"
 )
 P4_G0C_REGISTRY_V3_TRUSTED_SHA256 = (
-    "ea5d06da91d02a65e9938a95d4116802d0be43dcc7317f12f20bd43ff84ae9a5"
+    "8825c70c3814b574ba4709a94aac4d5d85d37d617b453a3aaefb4b80da5d82c8"
 )
 LAUNCH_ENVIRONMENT_SCHEMA = "p4_g0c_launch_environment_v1"
-LAUNCH_ENVIRONMENT_KEYS = ("HOME", "ROS_HOME", "ROS_LOG_DIR", "TMPDIR")
+LAUNCH_ENVIRONMENT_KEYS = (
+    "HOME", "ROS_HOME", "ROS_LOG_DIR", "TMPDIR", "XDG_RUNTIME_DIR",
+)
+LAUNCH_ENVIRONMENT_DIRECTORY_MODES = {"XDG_RUNTIME_DIR": "0700"}
 MUTABLE_OUTPUT_KEYS = (
     "bag_output_dir",
     "decision_csv_path",
@@ -238,6 +241,7 @@ def expected_launch_environment_binding(
             "ROS_HOME": str(environment_root / "ros_home"),
             "ROS_LOG_DIR": str(environment_root / "ros_logs"),
             "TMPDIR": str(environment_root / "tmp"),
+            "XDG_RUNTIME_DIR": str(environment_root / "xdg_runtime"),
         },
         "mutable_output_paths": {
             "bag_output_dir": str(run / "bags"),

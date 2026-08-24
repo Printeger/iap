@@ -1,0 +1,63 @@
+{
+  "adversarial_cases": {
+    "analyzer_environment_output_mutations": 39,
+    "analyzer_xdg_mode_cases": 2,
+    "runner_xdg_cases": 10
+  },
+  "environment_contract": {
+    "child_environment_keys": 5,
+    "mutable_output_keys": 8,
+    "registered_bindings": 13,
+    "xdg_runtime_mode": "0700",
+    "xdg_runtime_relative_path": "launch_environment/xdg_runtime"
+  },
+  "forbidden_invocations": {
+    "analyzer_cli": 0,
+    "build": 0,
+    "ctest": 0,
+    "gpu_preflight": 0,
+    "live_runner": 0,
+    "main_flow": 0,
+    "qualification": 0,
+    "ros_launch": 0,
+    "smoke": 0
+  },
+  "gate": "P4_G0C_R3_XDG_RUNTIME_ENVIRONMENT_REPAIR",
+  "hashes": {
+    "external_icra051_launch_log": "f506e5565d73ad601673c814635797c360f650c7be3c4356e9217449df2458e7",
+    "icra051_runner_state": "7c3cafc505ad33e7e8631a2ed1534bf5e21c6cf4f4d9eb252319a250989846a7",
+    "launch_contract": "396122ae31da84741283a6ce35d69874124243b4d17e2fd45a1f831664d5ee7d",
+    "protected_pdf": "1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6",
+    "protocol_v3": "7df40eff39a8c6e40e5f893719df6dd9a21ff97a5941992c075fd5ead4729401",
+    "registry_v3": "8825c70c3814b574ba4709a94aac4d5d85d37d617b453a3aaefb4b80da5d82c8",
+    "replacement_lineage_v3": "87947cb0373f1a6114f38510b09621ea8cf36f7eab6b80fe1a7095509e977d60",
+    "runtime_dependencies_v3": "ff7c66f182296a1f057acafee5306d7d81aa49be8a40c14acd8e832d98cb5fc6"
+  },
+  "requirement": "IAP-RQ-423",
+  "result": "P4_G0C_R3_XDG_RUNTIME_ENVIRONMENT_READY_FOR_REVIEW",
+  "task": "ICRA-053",
+  "tests": {
+    "focused": {
+      "count": 87,
+      "exit": 0,
+      "tmpdir": "results/icra27/icra053/tmp"
+    },
+    "full_python_discovery": {
+      "count": 442,
+      "exit": 0,
+      "tmpdir": "results/icra27/icra053/tmp"
+    },
+    "launch_golden": {
+      "count": 16,
+      "exit": 0,
+      "tmpdir": "results/icra27/icra053/tmp"
+    }
+  },
+  "validation": {
+    "canonical_json_files": 4,
+    "diff_check_exit": 0,
+    "fatal_flake8_exit": 0,
+    "syntax_files": 9,
+    "task_tmp_final_entry_count": 0
+  }
+}
