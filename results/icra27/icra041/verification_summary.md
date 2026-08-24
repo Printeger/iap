@@ -43,7 +43,7 @@ keeps `selection_applied=false`.
 
 ## Retained provenance
 
-Before configure and after every test, the same sorted manifest command hashed
+Before configure and after all tests, the same sorted manifest command hashed
 every regular file and symlink in all 14 retained ICRA-039/040 build/install
 trees. Both 3,124-line, 528,446-byte manifests have canonical SHA-256
 `d18c1c89ef585ef42a31eb9b1f944c8eecbe7d6f1da98ecf567e3816357e3162` and
@@ -55,12 +55,11 @@ remain task-local and unstaged; compact schema/hash/comparison evidence is in
 ## Reproduction and limitations
 
 Configure/build commands and exact options are recorded in the ICRA-041 START
-entry. Tests use `bash results/icra27/icra041/preflight/task_env.bash` followed
-by the task-local binary, an explicit focused filter where applicable and
-`--gtest_output=xml:results/icra27/icra041/test/<suite>.xml`. Plan-manager uses
-`ctest --test-dir results/icra27/icra041/build_plan_manage -L gtest
---output-on-failure --output-junit
-$PWD/results/icra27/icra041/test/plan_manage.xml`.
+entry. The literal executable paths, filter strings, XML paths and manifest
+generator are recorded in the ICRA-041 REVIEW REMEDIATION entry. Plan-manager
+uses `bash results/icra27/icra041/preflight/task_env.bash ctest --test-dir
+results/icra27/icra041/build_plan_manage -L gtest --output-on-failure
+--output-junit /home/dev/ws_iap/src/iap/results/icra27/icra041/test/plan_manage.xml`.
 
 This evidence is deterministic unit/integration requalification only. It is
 not G0B PASS and does not authorize G0C/G0D, threshold/calibration, risk-guide

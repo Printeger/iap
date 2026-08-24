@@ -5576,3 +5576,49 @@ ICRA-041. Builder result is
 `P4_G0B_CLEAN_REQUALIFICATION_READY_FOR_REVIEW`, not G0B PASS. No GPU,
 ROS/live map, launch, main flow, runner, analyzer, capture, smoke, benchmark,
 campaign, calibration, G0C/G0D, risk application, P5, tuning or cleanup ran.
+
+## 2026-08-24T07:17:32Z — ICRA-041 REVIEW REMEDIATION
+
+IAP-RQ-423. The two-axis review found no standards violation. The spec axis
+requested that the direct test and retained-manifest commands be recorded
+literally and that the closing audits be made explicit. The exact direct test
+commands, each invoked once through the clean task wrapper and never retried,
+were:
+
+```text
+bash results/icra27/icra041/preflight/task_env.bash results/icra27/icra041/build_bspline/test_p4_collision_guide --gtest_filter=P4CollisionGuideDecision.EpochChangeDuringFailedOriginalSearchIsAuthoritative:P4CollisionGuideDecision.EpochChangeDuringTimedOutOriginalSearchIsAuthoritative:P4CollisionGuideDecision.EpochChangePrecedesDuplicateOriginalGeometry --gtest_output=xml:results/icra27/icra041/test/focused_identity.xml
+bash results/icra27/icra041/preflight/task_env.bash results/icra27/icra041/build_bspline/test_p4_collision_guide --gtest_output=xml:results/icra27/icra041/test/decision.xml
+bash results/icra27/icra041/preflight/task_env.bash results/icra27/icra041/build_bspline/test_p4_collision_guide_integration --gtest_filter=P4CollisionGuideIntegration.NonG0BContextPreservesFalseMetricsBoundary --gtest_output=xml:results/icra27/icra041/test/focused_metrics_boundary.xml
+bash results/icra27/icra041/preflight/task_env.bash results/icra27/icra041/build_bspline/test_p4_collision_guide_integration --gtest_output=xml:results/icra27/icra041/test/integration.xml
+bash results/icra27/icra041/preflight/task_env.bash results/icra27/icra041/build_bspline/test_p4_collision_scan_contract --gtest_output=xml:results/icra27/icra041/test/collision.xml
+bash results/icra27/icra041/preflight/task_env.bash results/icra27/icra041/build_bspline/test_p1_integrity_cost --gtest_output=xml:results/icra27/icra041/test/p1.xml
+bash results/icra27/icra041/preflight/task_env.bash results/icra27/icra041/build_path_searching/test_p4_risk_astar --gtest_output=xml:results/icra27/icra041/test/path_searching_p4.xml
+bash results/icra27/icra041/preflight/task_env.bash results/icra27/icra041/build_plan_env/test_grid_map_occupancy_epoch --gtest_output=xml:results/icra27/icra041/test/occupancy_epoch.xml
+bash results/icra27/icra041/preflight/task_env.bash ctest --test-dir results/icra27/icra041/build_plan_manage -L gtest --output-on-failure --output-junit /home/dev/ws_iap/src/iap/results/icra27/icra041/test/plan_manage.xml
+```
+
+The focused commands are not retries: they ran before their complete suites,
+all exited zero, and provide explicit evidence for the named epoch-precedence
+and false-boundary requirements in NEXT_TASK section 3. That section requires
+the complete suites and forbids retry after failure, but does not impose a
+single total execution of each test case. No failed command was rerun.
+
+The exact manifest generator was run once before configure with output
+redirected to `retained_before.tsv` and once after all tests with output
+redirected to `retained_after.tsv`:
+
+```bash
+retained=(results/icra27/icra039/build_iap results/icra27/icra039/install_iap results/icra27/icra039/build_plan_env results/icra27/icra039/install_plan_env results/icra27/icra039/build_path_searching results/icra27/icra039/install_path_searching results/icra27/icra039/build_bspline results/icra27/icra039/install_bspline results/icra27/icra039/build_plan_manage results/icra27/icra039/install_plan_manage results/icra27/icra040/build_bspline results/icra27/icra040/install_bspline results/icra27/icra040/build_plan_manage results/icra27/icra040/install_plan_manage); { printf 'path\ttype\tsize\tsha256_or_target\n'; find "${retained[@]}" \( -type f -o -type l \) -print0 | sort -z | while IFS= read -r -d '' p; do if [[ -L "$p" ]]; then printf '%s\tsymlink\t%s\t%s\n' "$p" "$(stat -c %s -- "$p")" "$(readlink -- "$p")"; else printf '%s\tregular\t%s\t%s\n' "$p" "$(stat -c %s -- "$p")" "$(sha256sum -- "$p" | cut -d ' ' -f1)"; fi; done; } > OUTPUT.tsv
+```
+
+Closing audits pass: `git diff --check`; parsing of every compact JSON and all
+nine XML files; exact schema/value checks including suite counts, invocations,
+zero retries and retained manifest equality; exact changed-path allowlist; and
+zero ICRA-041 processes. Product source changes from authorization fixed point
+are zero. After a fresh fetch, pre-push divergence is `1 0` (the local evidence
+commit only). Protected hashes remain exact: collision scan fixture
+`49a676a5ff51538ab961c814409f6c2dfb7ba4679a861d4e8e94cc7d5679c788`,
+collision guide fixture
+`d540c23dc38102751740bcb61e79993e4704564c811e9d75bfa6be90c52511af`,
+and untracked/unstaged PDF
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
