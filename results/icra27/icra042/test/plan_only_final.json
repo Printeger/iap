@@ -1,0 +1,104 @@
+{
+  "completed_run_count": 0,
+  "failure_reason": "",
+  "fixture_sha256": "985aabcd486186a4430305b409669422499f891d529369c6f0bfe8e7dfe0d710",
+  "launch_invocations": 0,
+  "launch_started": false,
+  "protocol_sha256": "496b2af570c0491ab4d35a84e32309608cc59a1784191842c5b055abb840617a",
+  "registry_sha256": "77462979a0ac691a804dd0077b3b5da0dcf508c0eaa4551a884cc57645945784",
+  "retries": 0,
+  "runner_state": "PLANNED",
+  "runs": [
+    {
+      "repetition": 1,
+      "run_dir": "/home/dev/ws_iap/src/iap/results/icra27/icra042/synthetic_plan_runs_final/p4-g0c-seed211-rep01",
+      "run_id": "p4-g0c-seed211-rep01",
+      "seed": 211
+    },
+    {
+      "repetition": 2,
+      "run_dir": "/home/dev/ws_iap/src/iap/results/icra27/icra042/synthetic_plan_runs_final/p4-g0c-seed211-rep02",
+      "run_id": "p4-g0c-seed211-rep02",
+      "seed": 211
+    },
+    {
+      "repetition": 3,
+      "run_dir": "/home/dev/ws_iap/src/iap/results/icra27/icra042/synthetic_plan_runs_final/p4-g0c-seed211-rep03",
+      "run_id": "p4-g0c-seed211-rep03",
+      "seed": 211
+    },
+    {
+      "repetition": 1,
+      "run_dir": "/home/dev/ws_iap/src/iap/results/icra27/icra042/synthetic_plan_runs_final/p4-g0c-seed223-rep01",
+      "run_id": "p4-g0c-seed223-rep01",
+      "seed": 223
+    },
+    {
+      "repetition": 2,
+      "run_dir": "/home/dev/ws_iap/src/iap/results/icra27/icra042/synthetic_plan_runs_final/p4-g0c-seed223-rep02",
+      "run_id": "p4-g0c-seed223-rep02",
+      "seed": 223
+    },
+    {
+      "repetition": 3,
+      "run_dir": "/home/dev/ws_iap/src/iap/results/icra27/icra042/synthetic_plan_runs_final/p4-g0c-seed223-rep03",
+      "run_id": "p4-g0c-seed223-rep03",
+      "seed": 223
+    },
+    {
+      "repetition": 1,
+      "run_dir": "/home/dev/ws_iap/src/iap/results/icra27/icra042/synthetic_plan_runs_final/p4-g0c-seed237-rep01",
+      "run_id": "p4-g0c-seed237-rep01",
+      "seed": 237
+    },
+    {
+      "repetition": 2,
+      "run_dir": "/home/dev/ws_iap/src/iap/results/icra27/icra042/synthetic_plan_runs_final/p4-g0c-seed237-rep02",
+      "run_id": "p4-g0c-seed237-rep02",
+      "seed": 237
+    },
+    {
+      "repetition": 3,
+      "run_dir": "/home/dev/ws_iap/src/iap/results/icra27/icra042/synthetic_plan_runs_final/p4-g0c-seed237-rep03",
+      "run_id": "p4-g0c-seed237-rep03",
+      "seed": 237
+    },
+    {
+      "repetition": 1,
+      "run_dir": "/home/dev/ws_iap/src/iap/results/icra27/icra042/synthetic_plan_runs_final/p4-g0c-seed253-rep01",
+      "run_id": "p4-g0c-seed253-rep01",
+      "seed": 253
+    },
+    {
+      "repetition": 2,
+      "run_dir": "/home/dev/ws_iap/src/iap/results/icra27/icra042/synthetic_plan_runs_final/p4-g0c-seed253-rep02",
+      "run_id": "p4-g0c-seed253-rep02",
+      "seed": 253
+    },
+    {
+      "repetition": 3,
+      "run_dir": "/home/dev/ws_iap/src/iap/results/icra27/icra042/synthetic_plan_runs_final/p4-g0c-seed253-rep03",
+      "run_id": "p4-g0c-seed253-rep03",
+      "seed": 253
+    },
+    {
+      "repetition": 1,
+      "run_dir": "/home/dev/ws_iap/src/iap/results/icra27/icra042/synthetic_plan_runs_final/p4-g0c-seed271-rep01",
+      "run_id": "p4-g0c-seed271-rep01",
+      "seed": 271
+    },
+    {
+      "repetition": 2,
+      "run_dir": "/home/dev/ws_iap/src/iap/results/icra27/icra042/synthetic_plan_runs_final/p4-g0c-seed271-rep02",
+      "run_id": "p4-g0c-seed271-rep02",
+      "seed": 271
+    },
+    {
+      "repetition": 3,
+      "run_dir": "/home/dev/ws_iap/src/iap/results/icra27/icra042/synthetic_plan_runs_final/p4-g0c-seed271-rep03",
+      "run_id": "p4-g0c-seed271-rep03",
+      "seed": 271
+    }
+  ],
+  "schema_version": "p4_g0c_runner_state_v1"
+}

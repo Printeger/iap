@@ -1,0 +1,28 @@
+{
+  "schema_version": "icra042_linkage_v1",
+  "environment_wrapper_sha256": "45ce7204dbd1073f210c5cdd8c28b42b48bd379f232d37f4c4f5cb13cf2586f6",
+  "runtime_environment": "results/icra27/icra042/preflight/task_env.bash",
+  "binaries": {
+    "build_bspline/test_p4_collision_guide": {
+      "libiap.so": "results/icra27/icra042/install_iap/lib/libiap.so",
+      "libpath_searching.so": "results/icra27/icra042/install_path_searching/lib/libpath_searching.so"
+    },
+    "build_path_searching/test_p4_risk_astar": {
+      "libiap.so": "results/icra27/icra042/install_iap/lib/libiap.so",
+      "libpath_searching.so": "results/icra27/icra042/install_path_searching/lib/libpath_searching.so"
+    },
+    "build_plan_env/test_grid_map_occupancy_epoch": {
+      "libplan_env.so": "results/icra27/icra042/install_plan_env/lib/libplan_env.so"
+    },
+    "install_plan_manage/lib/ego_planner/ego_planner_node": {
+      "libiap.so": "results/icra27/icra042/install_iap/lib/libiap.so",
+      "libplan_env.so": "results/icra27/icra042/install_plan_env/lib/libplan_env.so",
+      "libpath_searching.so": "results/icra27/icra042/install_path_searching/lib/libpath_searching.so"
+    }
+  },
+  "immutable_workspace_dependencies": ["install/traj_utils", "install/gnss_comm"],
+  "missing_library_count": 0,
+  "historical_product_resolution_count": 0,
+  "workspace_default_iap_planner_resolution_count": 0,
+  "build_tree_product_resolution_count": 0
+}

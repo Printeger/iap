@@ -1,0 +1,26 @@
+{
+  "schema_version": "icra042_build_identity_v1",
+  "authorization_head": "dc99af894eb9e49d511238e6096932c13a7a70df",
+  "builds": [
+    {"product": "quadrotor_msgs", "source": "src/uav_simulator/Utils/quadrotor_msgs", "build_type": "Release", "build_testing": false, "configure_exit": 0, "install_exit": 0},
+    {"product": "iap", "source": ".", "build_type": "RelWithDebInfo", "build_testing": true, "build_with_cuda": false, "build_with_opencv": false, "build_with_viewer": false, "configure_exit": 0, "install_exit": 0},
+    {"product": "plan_env", "source": "src/iap/planner/plan_env", "build_type": "Release", "build_testing": true, "configure_exit": 0, "install_exit": 0},
+    {"product": "path_searching", "source": "src/iap/planner/path_searching", "build_type": "Release", "build_testing": true, "configure_exit": 0, "install_exit": 0},
+    {"product": "bspline_opt", "source": "src/iap/planner/bspline_opt", "build_type": "Release", "build_testing": true, "configure_exit": 0, "install_exit": 0},
+    {"product": "plan_manage", "source": "src/iap/planner/plan_manage", "build_type": "Release", "build_testing": true, "configure_exit": 0, "install_exit": 0}
+  ],
+  "canonical_artifacts": {
+    "fixture_sha256": "985aabcd486186a4430305b409669422499f891d529369c6f0bfe8e7dfe0d710",
+    "protocol_sha256": "496b2af570c0491ab4d35a84e32309608cc59a1784191842c5b055abb840617a",
+    "registry_sha256": "77462979a0ac691a804dd0077b3b5da0dcf508c0eaa4551a884cc57645945784",
+    "launch_sha256": "a4fc1c21425571cb9f19210922b04363dc3fa273f8de12c2852c9eb244d003c7"
+  },
+  "installed_byte_matches": {
+    "fixture": true,
+    "protocol": true,
+    "registry": true,
+    "launch": true
+  },
+  "historical_product_reference_count": 0,
+  "workspace_default_iap_planner_cache_reference_count": 0
+}

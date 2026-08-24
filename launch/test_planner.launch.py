@@ -29,6 +29,61 @@ from launch_ros.descriptions import ComposableNode
 
 
 P1_EVIDENCE_SCHEMA_VERSION = "p1_evidence_provenance_v4"
+P4_G0C_EXPERIMENT = "p4_g0c_metrics_calibration_v1"
+P4_G0C_SCENARIO = "p4_g0c_free_corridor_v1"
+P4_G0C_REQUIRED_PROCESSES = ["iap_rosnode", "ego_planner_node"]
+P4_G0C_PROTOCOL_SHA256 = (
+    "496b2af570c0491ab4d35a84e32309608cc59a1784191842c5b055abb840617a"
+)
+P4_G0C_REGISTRY_SHA256 = (
+    "77462979a0ac691a804dd0077b3b5da0dcf508c0eaa4551a884cc57645945784"
+)
+P4_G0C_FIXTURE_SHA256 = (
+    "985aabcd486186a4430305b409669422499f891d529369c6f0bfe8e7dfe0d710"
+)
+P4_G0C_ARTIFACT_PRESET = {
+    "p4.g0c.protocol_path": "config/icra27/p4_g0c_protocol_v1.json",
+    "p4.g0c.protocol_sha256": P4_G0C_PROTOCOL_SHA256,
+    "p4.g0c.registry_path": "config/icra27/p4_threshold_registry_v1.json",
+    "p4.g0c.registry_sha256": P4_G0C_REGISTRY_SHA256,
+    "p4.g0c.fixture_path": "config/icra27/p4_g0c_live_fixture_v1.json",
+    "p4.g0c.fixture_sha256": P4_G0C_FIXTURE_SHA256,
+}
+P4_G0C_FROZEN_LAUNCH_VALUES = {
+    "planner_safety_profile": "p4",
+    "planner_enable_p1": "false",
+    "planner_enable_p2": "false",
+    "planner_enable_p3_local": "false",
+    "planner_enable_p3_global": "false",
+    "planner_enable_p4": "true",
+    "planner_enable_p5_runtime": "false",
+    "planner_enable_p5_final": "false",
+    "p0.enable_risk_grid": "true",
+    "p1.use_integrity_cost": "false",
+    "p1.metrics_only": "false",
+    "p1.debug_csv_enable": "false",
+    "manager/p1_collision_fanout_clearance_m": "0.0",
+    "manager/p1_collision_fanout_preserve_homotopies": "false",
+    "manager/p1_collision_fanout_mirror_y": "false",
+    "p2.enable_candidate_ranking": "false",
+    "p2.metrics_only": "false",
+    "p2.debug_csv_enable": "false",
+    "p3.enable_local_reference_bias": "false",
+    "p3.enable_global_reference_bias": "false",
+    "p3.debug_csv_enable": "false",
+    "p4.enable_risk_aware_astar": "true",
+    "p4.metrics_only": "true",
+    "p4.max_extra_path_ratio": "1.30",
+    "p4.debug_csv_enable": "true",
+    "manager/use_distinctive_trajs": "false",
+    "safety_viz.enable_p1_viz": "false",
+    "safety_viz.enable_p2_viz": "false",
+    "safety_viz.enable_p3_viz": "false",
+    "safety_viz.enable_p4_viz": "false",
+    "record_bag": "false",
+    "start_rviz": "false",
+    "run_validator": "true",
+}
 
 
 def _so3_feedback_imu_topic(sim_imu_topic, _iap_imu_topic):
@@ -45,6 +100,231 @@ def _sha256_file(path):
         for block in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(block)
     return digest.hexdigest()
+
+
+def _canonical_json_bytes(payload):
+    return (
+        json.dumps(
+            payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        )
+        + "\n"
+    ).encode("utf-8")
+
+
+def _p4_g0c_typed_value(value):
+    raw = str(value).strip()
+    lowered = raw.lower()
+    if lowered in {"true", "false"}:
+        return lowered == "true"
+    try:
+        return float(raw)
+    except ValueError:
+        return raw
+
+
+def _validate_p4_g0c_profile_values(experiment, effective_values, explicit_overrides):
+    if str(experiment) != P4_G0C_EXPERIMENT:
+        return
+    for key, expected in P4_G0C_FROZEN_LAUNCH_VALUES.items():
+        actual = effective_values.get(key)
+        if _p4_g0c_typed_value(actual) != _p4_g0c_typed_value(expected):
+            qualifier = "conflicting explicit override" if key in explicit_overrides else "profile mismatch"
+            raise RuntimeError(
+                f"P4-G0C {qualifier} for {key}: expected {expected}, got {actual}"
+            )
+
+
+def _p4_g0c_binding(
+    *, experiment, protocol_path, registry_path, fixture_path,
+    declared_protocol_sha256, declared_registry_sha256,
+    declared_fixture_sha256, run_id, seed, repetition,
+    run_manifest_path, csv_path, effective_values,
+):
+    if str(experiment) != P4_G0C_EXPERIMENT:
+        return {}
+    paths = {
+        "protocol": Path(protocol_path).expanduser().resolve(),
+        "registry": Path(registry_path).expanduser().resolve(),
+        "fixture": Path(fixture_path).expanduser().resolve(),
+    }
+    for name, path in paths.items():
+        if not path.is_file():
+            raise RuntimeError(f"P4-G0C {name} artifact is missing: {path}")
+    actual_hashes = {name: _sha256_file(path) for name, path in paths.items()}
+    registered_hashes = {
+        "protocol": P4_G0C_PROTOCOL_SHA256,
+        "registry": P4_G0C_REGISTRY_SHA256,
+        "fixture": P4_G0C_FIXTURE_SHA256,
+    }
+    for name, actual in actual_hashes.items():
+        if actual != registered_hashes[name]:
+            raise RuntimeError(f"P4-G0C {name} is not the registered artifact")
+    declared_hashes = {
+        "protocol": str(declared_protocol_sha256),
+        "registry": str(declared_registry_sha256),
+        "fixture": str(declared_fixture_sha256),
+    }
+    for name in actual_hashes:
+        if actual_hashes[name] != declared_hashes[name]:
+            raise RuntimeError(f"P4-G0C {name} hash mismatch")
+    try:
+        artifacts = {
+            name: json.loads(path.read_text()) for name, path in paths.items()
+        }
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"P4-G0C binding artifact is malformed: {exc}") from exc
+    for name, payload in artifacts.items():
+        if paths[name].read_bytes() != _canonical_json_bytes(payload):
+            raise RuntimeError(f"P4-G0C {name} artifact is not canonical")
+    protocol = artifacts["protocol"]
+    registry = artifacts["registry"]
+    fixture = artifacts["fixture"]
+    if registry.get("protocol_sha256") != actual_hashes["protocol"]:
+        raise RuntimeError("P4-G0C registry protocol hash mismatch")
+    if protocol.get("live_fixture", {}).get("sha256") != actual_hashes["fixture"]:
+        raise RuntimeError("P4-G0C protocol fixture hash mismatch")
+    expected_run_id = f"p4-g0c-seed{int(seed)}-rep{int(repetition):02d}"
+    if run_id != expected_run_id or run_id not in protocol.get("registered_run_ids", []):
+        raise RuntimeError("P4-G0C run identity is not registered")
+    manifest_path = Path(run_manifest_path).expanduser().resolve()
+    decision_path = Path(csv_path).expanduser().resolve()
+    if (
+        manifest_path.parent != decision_path.parent
+        or manifest_path.parent.name != run_id
+    ):
+        raise RuntimeError("P4-G0C manifest and CSV must be in the immutable run directory")
+    typed_values = {
+        key: _p4_g0c_typed_value(effective_values[key])
+        for key in sorted(P4_G0C_FROZEN_LAUNCH_VALUES)
+    }
+    typed_values.update({
+        "gate": "G0C",
+        "p0.enabled": True,
+        "p4.enabled": True,
+        "p4.per_search_timeout_s": 0.2,
+        "selection_applied": False,
+    })
+    if protocol.get("schema_version") != "p4_g0c_protocol_v1":
+        raise RuntimeError("P4-G0C protocol schema mismatch")
+    if protocol.get("effective_values") != typed_values:
+        raise RuntimeError("P4-G0C protocol effective config mismatch")
+    if (
+        registry.get("schema_version") != "p4_threshold_registry_v1"
+        or registry.get("state") != "PROPOSED_UNCALIBRATED"
+        or registry.get("application_enabled") is not False
+        or registry.get("calibration_bundle_sha256") is not None
+        or set(registry.get("gates", {})) != {
+            "mean_improvement_min", "max_improvement_min",
+            "path_ratio_max", "total_search_timeout_s",
+        }
+        or any(value is not None for value in registry.get("gates", {}).values())
+        or registry.get("numerical_noise_floor")
+        != protocol.get("numerical_noise_floor")
+    ):
+        raise RuntimeError("P4-G0C proposed registry contract mismatch")
+    if (
+        fixture.get("schema_version") != "p4_g0c_fixture_v1"
+        or fixture.get("scenario") != P4_G0C_SCENARIO
+    ):
+        raise RuntimeError("P4-G0C fixture contract mismatch")
+    effective_canonical = json.dumps(
+        typed_values, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+    ).encode("utf-8")
+    return {
+        "schema_version": "p4_g0c_run_manifest_v1",
+        "gate": "G0C",
+        "run_id": run_id,
+        "seed": int(seed),
+        "repetition": int(repetition),
+        "protocol_path": str(paths["protocol"]),
+        "protocol_sha256": actual_hashes["protocol"],
+        "registry_path": str(paths["registry"]),
+        "registry_sha256": actual_hashes["registry"],
+        "fixture_path": str(paths["fixture"]),
+        "fixture_sha256": actual_hashes["fixture"],
+        "effective_values": typed_values,
+        "effective_config_sha256": hashlib.sha256(effective_canonical).hexdigest(),
+        "csv_path": str(decision_path),
+        "required_process_set": list(P4_G0C_REQUIRED_PROCESSES),
+        "record_bag": False,
+        "start_rviz": False,
+        "selection_applied": False,
+        "immutable_run_id": True,
+        "overwrite_allowed": False,
+    }
+
+
+def _prepare_p4_g0c_context(context, experiment, iap_share):
+    if str(experiment) != P4_G0C_EXPERIMENT:
+        return {}
+    overrides = _launch_arg_overrides()
+    scenario = LaunchConfiguration("scenario").perform(context)
+    if scenario != P4_G0C_SCENARIO:
+        qualifier = "conflicting explicit override" if "scenario" in overrides else "profile mismatch"
+        raise RuntimeError(
+            f"P4-G0C {qualifier} for scenario: expected "
+            f"{P4_G0C_SCENARIO}, got {scenario}"
+        )
+    effective = {
+        key: LaunchConfiguration(key).perform(context)
+        for key in P4_G0C_FROZEN_LAUNCH_VALUES
+    }
+    _validate_p4_g0c_profile_values(experiment, effective, overrides)
+    expected_scenario_values = {
+        key: _maybe_resolve_iap_config_path(key, value, iap_share)
+        for key, value in SCENARIO_PRESETS[P4_G0C_SCENARIO].items()
+    }
+    for key, expected in expected_scenario_values.items():
+        actual = LaunchConfiguration(key).perform(context)
+        if _p4_g0c_typed_value(actual) != _p4_g0c_typed_value(expected):
+            qualifier = (
+                "conflicting explicit override"
+                if key in overrides else "scenario mismatch"
+            )
+            raise RuntimeError(
+                f"P4-G0C {qualifier} for {key}: "
+                f"expected {expected}, got {actual}"
+            )
+    seed = int(LaunchConfiguration("p4.g0c.seed").perform(context))
+    repetition = int(LaunchConfiguration("p4.g0c.repetition").perform(context))
+    for key in ("forest_random_seed", "gnss_random_seed", "terminal_wall_feature_seed"):
+        if key in overrides and int(LaunchConfiguration(key).perform(context)) != seed:
+            raise RuntimeError(f"P4-G0C conflicting explicit override for {key}")
+        context.launch_configurations[key] = str(seed)
+    csv_path = LaunchConfiguration("p4.g0c.csv_path").perform(context)
+    explicit_csv = LaunchConfiguration("p4.debug_csv_path").perform(context)
+    if "p4.debug_csv_path" in overrides and Path(explicit_csv).resolve() != Path(csv_path).resolve():
+        raise RuntimeError("P4-G0C conflicting explicit override for p4.debug_csv_path")
+    context.launch_configurations["p4.debug_csv_path"] = csv_path
+    binding = _p4_g0c_binding(
+        experiment=experiment,
+        protocol_path=LaunchConfiguration("p4.g0c.protocol_path").perform(context),
+        registry_path=LaunchConfiguration("p4.g0c.registry_path").perform(context),
+        fixture_path=LaunchConfiguration("p4.g0c.fixture_path").perform(context),
+        declared_protocol_sha256=LaunchConfiguration(
+            "p4.g0c.protocol_sha256").perform(context),
+        declared_registry_sha256=LaunchConfiguration(
+            "p4.g0c.registry_sha256").perform(context),
+        declared_fixture_sha256=LaunchConfiguration(
+            "p4.g0c.fixture_sha256").perform(context),
+        run_id=LaunchConfiguration("p4.g0c.run_id").perform(context),
+        seed=seed,
+        repetition=repetition,
+        run_manifest_path=LaunchConfiguration(
+            "p4.g0c.run_manifest_path").perform(context),
+        csv_path=csv_path,
+        effective_values=effective,
+    )
+    manifest_path = Path(
+        LaunchConfiguration("p4.g0c.run_manifest_path").perform(context)
+    ).expanduser().resolve()
+    decision_path = Path(csv_path).expanduser().resolve()
+    if manifest_path.exists() or decision_path.exists():
+        raise RuntimeError("P4-G0C refuses existing manifest or decision CSV")
+    return binding
 
 
 def _mapping_backend_config_provenance(path):
@@ -558,6 +838,11 @@ SCENARIO_PRESETS = {
         "p1_map_fixture": "p1_soft_risk_island_v1",
         "p1_fixture_central_obstacle_enabled": "true",
     },
+    "p4_g0c_free_corridor_v1": {
+        **P1_FORK_MAP_PRESET, **P1_FUSED_SENSOR_PRESET,
+        "p1_map_fixture": "p1_fork_fused_v1",
+        "p1_fixture_central_obstacle_enabled": "true",
+    },
 }
 
 
@@ -730,6 +1015,11 @@ EXPERIMENT_PRESETS = {
         "planner_safety_profile": "p4",
         "p4.debug_csv_enable": "true",
         "safety_viz.enable_p4_viz": "true",
+    },
+    "p4_g0c_metrics_calibration_v1": {
+        **P4_G0C_FROZEN_LAUNCH_VALUES,
+        **P4_G0C_ARTIFACT_PRESET,
+        "scenario": "p4_g0c_free_corridor_v1",
     },
     "all_degraded_lidar_good": {
         "scenario": "gnss_degraded_lidar_good",
@@ -1062,6 +1352,7 @@ ARG_DEFAULTS = [
     ("p3.debug_csv_enable", "false"),
     ("p3.debug_csv_path", ""),
     ("p4.enable_risk_aware_astar", "false"),
+    ("p4.metrics_only", "false"),
     ("p4.lambda_p4_risk", "0.05"),
     ("p4.risk_cost_max", "100.0"),
     ("p4.unknown_edge_penalty", "1.0"),
@@ -1069,6 +1360,17 @@ ARG_DEFAULTS = [
     ("p4.fallback_to_original_when_risk_not_ready", "true"),
     ("p4.debug_csv_enable", "false"),
     ("p4.debug_csv_path", ""),
+    ("p4.g0c.protocol_path", ""),
+    ("p4.g0c.protocol_sha256", ""),
+    ("p4.g0c.registry_path", ""),
+    ("p4.g0c.registry_sha256", ""),
+    ("p4.g0c.fixture_path", ""),
+    ("p4.g0c.fixture_sha256", ""),
+    ("p4.g0c.run_id", ""),
+    ("p4.g0c.seed", "0"),
+    ("p4.g0c.repetition", "0"),
+    ("p4.g0c.run_manifest_path", ""),
+    ("p4.g0c.csv_path", ""),
     ("p5.enable_runtime_gate", "false"),
     ("p5.enable_final_gate", "false"),
     ("p5.horizon_s", "2.0"),
@@ -1131,7 +1433,13 @@ ARG_DEFAULTS = [
 
 
 def _maybe_resolve_iap_config_path(key, value, iap_share):
-    if key == "gnss_scenario_file" and str(value).startswith("config/"):
+    if (
+        key == "gnss_scenario_file" or key in {
+            "p4.g0c.protocol_path",
+            "p4.g0c.registry_path",
+            "p4.g0c.fixture_path",
+        }
+    ) and str(value).startswith("config/"):
         return str(Path(iap_share) / str(value))
     return value
 
@@ -1531,6 +1839,13 @@ def _param_int(context, name):
     return int(LaunchConfiguration(name).perform(context))
 
 
+def _effective_metrics_only(context, name, enabled, overrides):
+    experiment = LaunchConfiguration("experiment").perform(context).strip()
+    if name in overrides or experiment == P4_G0C_EXPERIMENT:
+        return _param_bool(context, name)
+    return not enabled
+
+
 def _p0_covariance_growth_launch_contract(context):
     return {
         "sigma_grow_m_sqrt_s": float(
@@ -1613,12 +1928,17 @@ def _ego_planner_node(context, drone_id, planner_odom_topic, cloud_topic, camera
     overrides = _launch_arg_overrides()
 
     p1_use = _param_bool(context, "p1.use_integrity_cost") if "p1.use_integrity_cost" in overrides else p1_enabled
-    p1_metrics_only = _param_bool(context, "p1.metrics_only") if "p1.metrics_only" in overrides else (not p1_enabled)
+    p1_metrics_only = _effective_metrics_only(
+        context, "p1.metrics_only", p1_enabled, overrides
+    )
     p2_use = _param_bool(context, "p2.enable_candidate_ranking") if "p2.enable_candidate_ranking" in overrides else p2_enabled
-    p2_metrics_only = _param_bool(context, "p2.metrics_only") if "p2.metrics_only" in overrides else (not p2_enabled)
+    p2_metrics_only = _effective_metrics_only(
+        context, "p2.metrics_only", p2_enabled, overrides
+    )
     p3_local = _param_bool(context, "p3.enable_local_reference_bias") if "p3.enable_local_reference_bias" in overrides else p3_local_enabled
     p3_global = _param_bool(context, "p3.enable_global_reference_bias") if "p3.enable_global_reference_bias" in overrides else p3_global_enabled
     p4_use = _param_bool(context, "p4.enable_risk_aware_astar") if "p4.enable_risk_aware_astar" in overrides else p4_enabled
+    p4_metrics_only = _param_bool(context, "p4.metrics_only")
     p5_runtime = _param_bool(context, "p5.enable_runtime_gate") if "p5.enable_runtime_gate" in overrides else p5_runtime_enabled
     p5_final = _param_bool(context, "p5.enable_final_gate") if "p5.enable_final_gate" in overrides else p5_final_enabled
     p5_6_fixture_effective_enabled = _p5_6_fixture_effective_enabled(context)
@@ -1855,6 +2175,7 @@ def _ego_planner_node(context, drone_id, planner_odom_topic, cloud_topic, camera
             {"p3.debug_csv_enable": _param_bool(context, "p3.debug_csv_enable")},
             {"p3.debug_csv_path": p3_debug_path},
             {"p4.enable_risk_aware_astar": p4_use},
+            {"p4.metrics_only": p4_metrics_only},
             {"p4.lambda_p4_risk": _param_float(context, "p4.lambda_p4_risk")},
             {"p4.risk_cost_max": _param_float(context, "p4.risk_cost_max")},
             {"p4.unknown_edge_penalty": _param_float(context, "p4.unknown_edge_penalty")},
@@ -1963,6 +2284,9 @@ def _launch_setup(context):
     so3_control_share = get_package_share_directory("so3_control")
     local_sensing_share = get_package_share_directory("local_sensing")
     scenario, experiment, preset_keys = _apply_presets(context, iap_share)
+    p4_g0c_binding = _prepare_p4_g0c_context(
+        context, experiment, iap_share
+    )
     safety_profile, safety_enabled, p0_enabled, p0_conflict, _ = _resolve_safety_switches(context, preset_keys)
     p0_covariance_growth = _p0_covariance_growth_launch_contract(context)
 
@@ -2177,15 +2501,19 @@ def _launch_setup(context):
         if "p1.use_integrity_cost" in overrides
         else p1_enabled_for_manifest
     )
-    p1_metrics_only_for_manifest = (
-        _param_bool(context, "p1.metrics_only")
-        if "p1.metrics_only" in overrides
-        else (not p1_enabled_for_manifest)
+    p1_metrics_only_for_manifest = _effective_metrics_only(
+        context, "p1.metrics_only", p1_enabled_for_manifest, overrides
     )
     p2_use_for_manifest = (
         _param_bool(context, "p2.enable_candidate_ranking")
         if "p2.enable_candidate_ranking" in overrides
         else bool(safety_enabled.get("p2"))
+    )
+    p2_metrics_only_for_manifest = _effective_metrics_only(
+        context,
+        "p2.metrics_only",
+        bool(safety_enabled.get("p2")),
+        overrides,
     )
     p3_local_for_manifest = (
         _param_bool(context, "p3.enable_local_reference_bias")
@@ -2202,6 +2530,7 @@ def _launch_setup(context):
         if "p4.enable_risk_aware_astar" in overrides
         else bool(safety_enabled.get("p4"))
     )
+    p4_metrics_only_for_manifest = _param_bool(context, "p4.metrics_only")
     p5_runtime_for_manifest = (
         _param_bool(context, "p5.enable_runtime_gate")
         if "p5.enable_runtime_gate" in overrides
@@ -2466,12 +2795,17 @@ def _launch_setup(context):
         "p1.debug_csv_enable": _param_bool(context, "p1.debug_csv_enable"),
         "p1.debug_csv_path": p1_debug_path_for_manifest,
         "p2.enable_candidate_ranking": p2_use_for_manifest,
+        "p2.metrics_only": p2_metrics_only_for_manifest,
         "p2.debug_csv_enable": _param_bool(context, "p2.debug_csv_enable"),
         "p3.enable_local_reference_bias": p3_local_for_manifest,
         "p3.enable_global_reference_bias": p3_global_for_manifest,
         "p3.debug_csv_enable": _param_bool(context, "p3.debug_csv_enable"),
         "p4.enable_risk_aware_astar": p4_use_for_manifest,
+        "p4.metrics_only": p4_metrics_only_for_manifest,
         "p4.debug_csv_enable": _param_bool(context, "p4.debug_csv_enable"),
+        "p4.debug_csv_path": LaunchConfiguration(
+            "p4.debug_csv_path").perform(context),
+        "p4.g0c": p4_g0c_binding,
         "p5.enable_runtime_gate": p5_runtime_for_manifest,
         "p5.enable_final_gate": p5_final_for_manifest,
         "forest_random_seed": _param_int(context, "forest_random_seed"),
@@ -2797,6 +3131,23 @@ def _launch_setup(context):
     }
     manifest_path = Path(export_dir) / "test_planner_manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
+    if p4_g0c_binding:
+        g0c_manifest = {
+            **p4_g0c_binding,
+            "experiment": experiment,
+            "scenario": scenario,
+            "decision_schema_version": "p4_collision_guide_decision_v1",
+            "test_planner_manifest_path": str(manifest_path.resolve()),
+            "runner_state": "RUNNING",
+            "required_processes_ok": None,
+            "required_processes": {},
+            "process_failures": [],
+        }
+        g0c_path = Path(
+            LaunchConfiguration("p4.g0c.run_manifest_path").perform(context)
+        ).expanduser().resolve()
+        g0c_path.parent.mkdir(parents=True, exist_ok=True)
+        g0c_path.write_text(json.dumps(g0c_manifest, indent=2, sort_keys=True) + "\n")
 
     lidar_renderer_node = Node(
         package="local_sensing",

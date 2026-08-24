@@ -1349,3 +1349,41 @@ ldd "$repo_root/results/icra27/icra015/build_ego/test_p0_risk_grid_runtime" \
   `results/icra27/icra041/verification_summary.md`. Result is
   `P4_G0B_CLEAN_REQUALIFICATION_READY_FOR_REVIEW`, not G0B PASS; no live flow,
   smoke, benchmark, calibration, G0C/G0D or P5 was run.
+
+## 2026-08-24 (ICRA-042 P4-G0C protocol registration)
+
+- IAP-RQ-423: added canonical `p4_g0c_protocol_v1` and
+  `p4_threshold_registry_v1` artifacts. The protocol freezes five seeds by
+  three ordered repetitions, 15 immutable IDs, a 100-complete-decision
+  minimum, no overwrite/exclusion/retry, exact metrics-only launch values,
+  Type-7 quantiles and a pre-data `1e-12 risk_cost` numerical floor. The
+  registry remains `PROPOSED_UNCALIBRATED`, with all four data-derived gates
+  null, no calibration-bundle hash and application disabled.
+- Added one deterministic free-corridor live-fixture registration and one
+  `p4_g0c_metrics_calibration_v1` launch profile. The general
+  `p4.metrics_only` default remains false; the registered profile forces P0/P4
+  evidence on, original selection/no application, P1/P2/P3 paths off, P5 off,
+  path cap 1.30, each-search timeout 0.2 s, no distinctive trajectories and
+  no bag/RViz. Conflicting explicit overrides and hash/run-directory binding
+  errors fail closed.
+- Added a future fail-closed runner and analyzer. Plan-only is non-mutating;
+  future execution orders mandatory GPU preflight before ROS, refuses existing
+  run directories, monitors both required processes, never retries and stops
+  the matrix on first failure. Analysis retains every failed row in the
+  denominator and may emit only `DRAFT_UNCALIBRATED` values using the frozen
+  formulas; it cannot update the registry or claim PASS/FROZEN.
+- Synthetic protocol/launch/runner/analyzer tests pass 21/21 and launch golden
+  tests pass 16/16. Full Python discovery passes 376/376. Fresh task-local
+  regressions pass P4 decision 15/15, integration 5/5, collision 17/17,
+  path-searching 5/5, occupancy 6/6 and plan-manager 9/9 (186 active, one
+  existing disabled). Exact commands, hashes and linkage proof are in
+  `results/icra27/icra042/verification_summary.md`.
+- Canonical SHA-256 values are protocol
+  `496b2af570c0491ab4d35a84e32309608cc59a1784191842c5b055abb840617a`,
+  proposed registry
+  `77462979a0ac691a804dd0077b3b5da0dcf508c0eaa4551a884cc57645945784`
+  and live fixture
+  `985aabcd486186a4430305b409669422499f891d529369c6f0bfe8e7dfe0d710`.
+  No GPU preflight, ROS/launch, calibration, smoke, benchmark, threshold
+  application, G0D or P5 execution occurred. This is protocol readiness for
+  Supervisor review, not G0C PASS.

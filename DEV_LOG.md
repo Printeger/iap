@@ -5643,3 +5643,133 @@ application, P5, tuning or cleanup occurred.
 
 Builder result: `P4_G0B_CLEAN_REQUALIFICATION_READY_FOR_REVIEW`. This is not
 G0B PASS. Control returns only to SUPERVISOR review.
+
+## 2026-08-24T07:47:04Z — ICRA-042 START
+
+IAP-RQ-423. Synchronized `dev/icra` at Supervisor authorization HEAD
+`dc99af894eb9e49d511238e6096932c13a7a70df`: initial status contained only the
+protected untracked PDF, fetch passed and divergence was `0 0`, so no pull ran.
+`AGENT_STATE.md` confirms DEEPSEEK, `TASK_READY`, ICRA-042 and
+`P4_G0C_PROTOCOL`.
+
+Exact allowed implementation files are new versioned JSON below
+`config/icra27/`; `launch/test_planner.launch.py`; new focused helpers below
+`scripts/dev_planner/`; new Python tests below `test/`; only if indispensable,
+the explicitly allowed P4 CSV writer/focused test/CMake seam; compact evidence
+below `results/icra27/icra042/`; `DEV_LOG.md`; `docs/CHANGES.md`; and
+`docs/TRACEABILITY.md`. Supervisor-owned files, requirements/scope/gate,
+historical evidence/products, external repositories, protected PDF and all
+unlisted product behavior are forbidden.
+
+The frozen schemas are `p4_g0c_protocol_v1`, `p4_threshold_registry_v1`,
+`p4_g0c_fixture_v1`, `p4_g0c_run_manifest_v1`, `p4_g0c_analysis_v1` and
+`p4_g0c_threshold_draft_v1`, bound to existing typed decision rows
+`p4_collision_guide_decision_v1`. Canonical JSON is UTF-8, lexicographically
+sorted keys, compact separators and one terminal newline; SHA-256 covers those
+exact bytes.
+
+The pre-data protocol freezes seeds `[211,223,237,253,271]`, repetitions
+`[1,2,3]` in seed-major order, run IDs
+`p4-g0c-seed<seed>-rep<two digits>`, 15 immutable runs, at least 100 complete
+decisions, no overwrite/exclusion/retry, G0C, P0/P4 enabled,
+`p4.metrics_only=true`, `selection_applied=false`, path ratio cap `1.30`, each
+search timeout `0.2 s`, `manager/use_distinctive_trajs=false`, P1/P2/P3
+objective/metrics/debug/fanout/viz disabled, P4 CSV evidence enabled, and
+bag/RViz disabled. The numerical floor is frozen at `1e-12 risk_cost`, derived
+pre-data as a conservative rounded-up bound above `4096 *` IEEE-754 binary64
+epsilon; calibration cannot change it.
+
+Quantiles use sorted finite values, stable original-row-index tie ordering and
+Type-7 linear interpolation with `h=(n-1)p`. Frozen formulas are
+`Q10(original_mean-risk_mean)`, `Q10(original_max-risk_max)`,
+`min(1.30,Q95(path_ratio)+0.02)`, and
+`min(0.40 s,Q95(total_search_s)+max(0.01 s,0.20*Q95(total_search_s)))`.
+Registry gate values remain null and `PROPOSED_UNCALIBRATED`; no registry
+mutation, `FROZEN` or PASS label is authorized.
+
+Runner states are `PLANNED -> PREFLIGHT_PASS -> RUNNING -> COMPLETE`, with any
+failure transitioning to `FAILED` and stopping all remaining runs. Plan-only
+is non-mutating. Preflight-only starts no ROS. Future live mode must perform
+`nvidia-smi`, `cuInit(0)` and `device_count>=1` before ROS, refuse every
+existing run directory, monitor the declared required processes, require the
+bound manifest/CSV and never retry or overwrite.
+
+Deterministic tests cover schema/hash identity, 5x3 ordering, override and
+registry rejection, manifest/hash binding, typed CSV parsing, quantile
+edge/ties and ms-to-s conversion, 100-decision boundary, timeout/coverage/
+application/noise failures, no-overwrite, required-process failure and GPU
+preflight ordering with synthetic temporary inputs only. Authorized fresh
+task-local affected builds/regressions and linkage checks follow after the
+focused Python/launch tests pass.
+
+Stop line: no GPU preflight, ROS, launch, live calibration, 15-run collection,
+smoke, benchmark, bag/RViz, observed-data threshold freeze, risk-guide
+application, G0D, P5, cleanup or gate promotion may run in ICRA-042. Any
+implementation/build/test/linkage/schema/hash/process failure stops or is
+fixed only inside the exact allowlist; final result may be only
+`P4_G0C_PROTOCOL_READY_FOR_REVIEW`, never G0C PASS.
+
+## 2026-08-24T08:20:43Z — ICRA-042 IMPLEMENTATION AND VERIFICATION
+
+IAP-RQ-423. Added canonical protocol, proposed registry and deterministic live
+fixture artifacts. Their final SHA-256 values are respectively
+`496b2af570c0491ab4d35a84e32309608cc59a1784191842c5b055abb840617a`,
+`77462979a0ac691a804dd0077b3b5da0dcf508c0eaa4551a884cc57645945784`
+and `985aabcd486186a4430305b409669422499f891d529369c6f0bfe8e7dfe0d710`.
+Protocol loading requires canonical bytes, exact 5x3 seed-major identities,
+the full effective-value set and a proposed registry with exactly four null
+gates, null calibration bundle and application disabled.
+
+The launch adds general-default-false `p4.metrics_only`, passes it to the
+existing optimizer parameter and records it. Exactly one G0C experiment and
+one production-mechanism scenario are registered. The profile binds the
+canonical hashes, immutable run ID, seed/repetition, effective-config hash,
+decision CSV, required-process set and no-bag/no-RViz truth, while rejecting
+conflicting explicit values. No optimizer/C++ edit was necessary: the existing
+typed decision CSV already contains the original/risk 200-sample coverage,
+identity, selection, latency, ratio and risk fields required by the analyzer.
+
+The future runner expands exactly 15 IDs; plan-only creates no run root,
+preflight-only cannot launch, every existing run directory is rejected before
+preflight, and future live mode calls the existing `nvidia-smi`/`cuInit(0)`/
+device-count preflight before ROS. It monitors `iap_rosnode` and
+`ego_planner_node`, requires a hash-bound manifest and nonempty typed CSV, stops
+after the first failure, and records zero retries. The analyzer requires all
+15 exact manifests/config hashes; every CSV row remains in the denominator and
+any malformed, incomplete, unknown/stale/non-finite, identity, selection,
+timeout, path-cap or `<=1e-12` improvement failure rejects the bundle. A valid
+bundle may produce only `DRAFT_UNCALIBRATED` with raw-bundle hash, source row
+indices, Type-7 interpolation and the four frozen formulas; registry mutation
+and PASS/FROZEN labels are absent.
+
+Fresh task-local builds/installations below `results/icra27/icra042/` passed
+for `quadrotor_msgs`, IAP, plan-env, path-searching, bspline-opt and
+plan-manager. The sanitized task environment resolves IAP/plan-env/path
+libraries only from ICRA-042, with the explicitly unchanged workspace
+`traj_utils`/`gnss_comm`; missing, historical, workspace-default IAP/planner
+and build-tree product resolution counts are zero. Source/installed protocol,
+registry, fixture and launch bytes match exactly.
+
+Verification passed: `python3 -m py_compile` for launch and all three new
+helpers; full `python3 -m unittest discover -s test -p 'test_*.py'` at 376/376;
+post-review focused protocol 3/3, launch contract 6/6, runner 8/8, analyzer
+4/4 and existing launch golden 16/16. Fresh binary regressions pass P4 decision
+15/15, integration 5/5, collision 17/17, path-searching 5/5, occupancy 6/6 and
+plan-manager 9/9 with 186 active cases plus one existing disabled case. The
+final plan-only record is `PLANNED`, exact 15 IDs, run root absent, launch
+invocations zero, launch-start false and retries zero. Exact commands and
+compact evidence are in `results/icra27/icra042/verification_summary.md`,
+`preflight/{build_identity,linkage}.json` and `test/results.json`.
+
+No GPU preflight, ROS, launch, live calibration, 15-run collection, smoke,
+benchmark, bag/RViz, observed-data threshold freeze, risk-guide application,
+G0D, P5, cleanup or gate promotion ran. The implementation result remains
+`P4_G0C_PROTOCOL_READY_FOR_REVIEW`, never G0C PASS.
+
+Two-axis review initially found incomplete full-config/hash validation in the
+analyzer, partial manifest/typed-CSV validation in the runner, insufficiently
+fixed launch artifact/scenario bindings, and a G0C P1/P2 metrics-only truth
+split. Remediation fixes all findings inside the allowlist and adds synthetic
+coverage. Final Standards and Spec re-reviews each report zero findings and
+`NO BLOCKING FINDING`; the aggregate is retained at
+`results/icra27/icra042/review/two_axis_review.md`.

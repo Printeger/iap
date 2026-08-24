@@ -1,0 +1,36 @@
+{
+  "schema_version": "icra042_test_results_v1",
+  "fresh_regressions": {
+    "p4_decision": {"tests": 15, "failures": 0, "disabled": 0},
+    "p4_integration": {"tests": 5, "failures": 0, "disabled": 0},
+    "p4_collision": {"tests": 17, "failures": 0, "disabled": 0},
+    "p4_path_searching": {"tests": 5, "failures": 0, "disabled": 0},
+    "occupancy": {"tests": 6, "failures": 0, "disabled": 0},
+    "plan_manage": {"ctest_targets": 9, "active_cases": 186, "failures": 0, "existing_disabled_cases": 1}
+  },
+  "python": {
+    "full_discovery": {"tests": 376, "failures": 0, "errors": 0},
+    "post_review_focused": {"protocol": 3, "launch_contract": 6, "runner": 8, "analyzer": 4, "launch_golden": 16, "failures": 0}
+  },
+  "plan_only": {
+    "runner_state": "PLANNED",
+    "run_count": 15,
+    "first_run_id": "p4-g0c-seed211-rep01",
+    "last_run_id": "p4-g0c-seed271-rep03",
+    "runs_root_created": false,
+    "launch_invocations": 0,
+    "launch_started": false,
+    "retries": 0,
+    "evidence_sha256": "18cdd248d530c223149175d2134a7767683c25716fba3d9cf9ed7ac2d874fc9d"
+  },
+  "forbidden_runtime_invocations": {
+    "gpu_preflight": 0,
+    "ros": 0,
+    "launch": 0,
+    "calibration": 0,
+    "smoke": 0,
+    "benchmark": 0,
+    "bag": 0,
+    "rviz": 0
+  }
+}
