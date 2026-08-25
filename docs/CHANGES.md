@@ -2615,6 +2615,38 @@ of an absolute installed path, and each run must have a distinct real raw JSON
 whose verified content equals its typed run evidence. A contract file or any
 unrelated repository file can no longer stand in for run evidence.
 
+## 2026-08-25 (ICRA-068 isolated P0+P5 live closure and harness)
+
+Requirements: `IAP-RQ-320`, `IAP-RQ-421`, `IAP-RQ-422`, `IAP-RQ-423`.
+
+- Built the proven 17-package main-flow closure into only
+  `results/icra27/icra068/{build,install}` with Release, CUDA on, tests off,
+  merged non-symlink install semantics. All packages passed; clean linkage
+  excludes workspace-global build/install overlays.
+- Added `run_icra_p0_p5_qualification.py`, which freezes the three authorized
+  first-attempt IDs, performs the single GPU gate, enforces 40 GiB free space,
+  launches in order, monitors every main-flow child, stops on first failure,
+  and normalizes real repository-local bag/P0/P5/bspline evidence.
+- Expanded only the live evidence/process schema: 16 actual child identities
+  and the real `/drone_0_planning/bspline` topic replace the synthetic two-node
+  approximation. P0/P5 decisions, thresholds, actions and fixture geometry are
+  unchanged.
+- Added authoritative live-bundle support. Synthetic `validation_only=true`
+  input is a typed technical blocker; PASS requires exact isolated-install,
+  runner-state, raw-source, process/topic, profile and ordered behavior binds.
+- Verification: live runner 5/5, qualification analyzer/contract 11/11, and
+  full repository-local hermetic discovery 536/536, with no external ROS-log
+  delta.
+
+Reproduce the non-live checks only with:
+
+```bash
+source /home/dev/ws_iap/install/setup.bash
+python3 scripts/dev_planner/run_p4_g0c_tests.py \
+  --task-root "$PWD/results/icra27/icra063/icra068_phase_c_full" \
+  unittest discover -s test -p 'test_*.py'
+```
+
 ## 2026-08-25 (ICRA-068 historical P4 test-fixture decoupling)
 
 Requirements: `IAP-RQ-423`.

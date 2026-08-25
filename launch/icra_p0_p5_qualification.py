@@ -12,7 +12,14 @@ from pathlib import Path
 CONTRACT_SCHEMA = "icra_p0_p5_qualification_contract_v1"
 EVIDENCE_SCHEMA = "icra_p0_p5_synthetic_evidence_v1"
 RESULT_SCHEMA = "icra_p0_p5_validation_result_v1"
+LIVE_EVIDENCE_SCHEMA = "icra_p0_p5_live_evidence_v1"
+LIVE_RESULT_SCHEMA = "icra_p0_p5_live_result_v1"
 CASE_IDS = ("SAFE_NORMAL", "FINAL_REJECT", "RUNTIME_FAIL")
+LIVE_RUN_IDENTITIES = {
+    "SAFE_NORMAL": "icra-p0-p5-live-safe-normal-001",
+    "FINAL_REJECT": "icra-p0-p5-live-final-reject-001",
+    "RUNTIME_FAIL": "icra-p0-p5-live-runtime-fail-001",
+}
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 SOURCE_REPOSITORY = Path(__file__).resolve().parents[1]
 
@@ -530,6 +537,162 @@ def bind_run_artifacts(bundle, repository_root, raw_directory):
     return bundle
 
 
+def write_live_bundle(
+    contract, contract_path, runs, git_commit, install_manifest_path, output_path
+):
+    """Bind completed real runs and their raw sources without analyzing them."""
+    output_path = Path(output_path).resolve()
+    repository_root = SOURCE_REPOSITORY
+    if not _within(output_path, repository_root):
+        raise ContractError("live output must be repository-local")
+    install_manifest_path = Path(install_manifest_path).resolve()
+    if not _within(install_manifest_path, repository_root):
+        raise ContractError("install manifest must be repository-local")
+    if {run.get("case_id"): run.get("run_id") for run in runs} != LIVE_RUN_IDENTITIES:
+        raise ContractError("live run identities/order mismatch")
+    raw_directory = output_path.parent / "normalized_raw"
+    raw_directory.mkdir(parents=True, exist_ok=False)
+    raw_hashes = {}
+    normalized_hashes = {}
+    for run in runs:
+        if run.get("validation_only") is not False:
+            raise ContractError("live run cannot be validation-only")
+        run_id = run["run_id"]
+        raw_path = raw_directory / f"{run_id}.json"
+        raw_path.write_text(json.dumps(
+            run, sort_keys=True, separators=(",", ":"), allow_nan=False
+        ) + "\n")
+        artifacts = {
+            str(raw_path.relative_to(repository_root)): _sha256(raw_path),
+        }
+        for relative in (run.get("raw_sources") or {}).values():
+            path = repository_root / relative
+            if not path.is_file() or path.is_symlink():
+                raise ContractError(f"live raw source unavailable: {relative}")
+            artifacts[str(relative)] = _sha256(path)
+        raw_hashes[run_id] = artifacts
+        normalized_hashes[run_id] = evidence_sha256(run)
+    runner_state_path = output_path.parent / "runner_state.json"
+    bundle = {
+        "schema_version": LIVE_EVIDENCE_SCHEMA,
+        "validation_only": False,
+        "manifest": {
+            "route_id": contract["route_id"],
+            "git_commit": git_commit,
+            "contract_sha256": _sha256(contract_path),
+            "analyzer_version": contract["analyzer_version"],
+            "fixture_identities": {
+                case_id: contract["cases"][case_id]["fixture_alias"]
+                for case_id in CASE_IDS
+            },
+            "run_identities": dict(LIVE_RUN_IDENTITIES),
+            "raw_artifact_hashes": raw_hashes,
+            "normalized_evidence_sha256": normalized_hashes,
+            "install_manifest_path": str(
+                install_manifest_path.relative_to(repository_root)
+            ),
+            "install_manifest_sha256": _sha256(install_manifest_path),
+            "runner_state_path": str(runner_state_path.relative_to(repository_root)),
+            "runner_state_sha256": _sha256(runner_state_path),
+        },
+        "runs": runs,
+    }
+    output_path.write_text(json.dumps(
+        bundle, indent=2, sort_keys=True, allow_nan=False
+    ) + "\n")
+    return bundle
+
+
+def analyze_live_bundle(
+    contract, bundle, contract_path, repository_root=None
+):
+    """Authoritatively analyze real evidence; synthetic evidence is rejected."""
+    repository_root = Path(repository_root or SOURCE_REPOSITORY).resolve()
+    technical = []
+    if not isinstance(bundle, dict):
+        bundle = {}
+        technical.append("live bundle must be an object")
+    if bundle.get("schema_version") != LIVE_EVIDENCE_SCHEMA:
+        technical.append("wrong live evidence schema_version")
+    if bundle.get("validation_only") is not False:
+        technical.append("live qualification rejects validation_only evidence")
+    runs = bundle.get("runs") if isinstance(bundle.get("runs"), list) else []
+    if any(not isinstance(run, dict) or run.get("validation_only") is not False for run in runs):
+        technical.append("live run contains validation-only or malformed evidence")
+    manifest = bundle.get("manifest") if isinstance(bundle.get("manifest"), dict) else {}
+    if manifest.get("run_identities") != LIVE_RUN_IDENTITIES:
+        technical.append("live fixed identity binding mismatch")
+    for key in ("install_manifest_path", "runner_state_path"):
+        relative = manifest.get(key)
+        path = repository_root / relative if isinstance(relative, str) else repository_root
+        expected = manifest.get(key.replace("_path", "_sha256"))
+        if not isinstance(relative, str) or Path(relative).is_absolute() \
+                or not _within(path, repository_root) or not path.is_file() \
+                or not isinstance(expected, str) or _sha256(path) != expected:
+            technical.append(f"{key} binding mismatch")
+    install_path = repository_root / str(manifest.get("install_manifest_path", ""))
+    if install_path.is_file():
+        try:
+            install_manifest = json.loads(install_path.read_text())
+        except (OSError, json.JSONDecodeError):
+            install_manifest = {}
+        if install_manifest.get("git_commit") != manifest.get("git_commit"):
+            technical.append("install manifest commit mismatch")
+        if install_manifest.get("closure_ready") is not True:
+            technical.append("install closure is not ready")
+    runner_path = repository_root / str(manifest.get("runner_state_path", ""))
+    if runner_path.is_file():
+        try:
+            runner_state = json.loads(runner_path.read_text())
+        except (OSError, json.JSONDecodeError):
+            runner_state = {}
+        expected_ids = list(LIVE_RUN_IDENTITIES.values())
+        if not (
+            runner_state.get("state") == "COMPLETE"
+            and runner_state.get("registered") == expected_ids
+            and runner_state.get("attempted") == expected_ids
+            and runner_state.get("completed") == expected_ids
+            and runner_state.get("retries") == 0
+            and runner_state.get("gpu_preflight_invocations") == 1
+            and runner_state.get("launch_invocations") == 3
+        ):
+            technical.append("runner state is not exact complete one-shot evidence")
+    validation_input = json.loads(json.dumps(bundle))
+    validation_input["schema_version"] = EVIDENCE_SCHEMA
+    validation_input["validation_only"] = True
+    base = analyze_bundle(
+        contract, validation_input, contract_path, repository_root
+    )
+    failures = list(base["failures"])
+    technical_markers = (
+        "manifest", "identity", "raw artifact", "hash", "process", "topic",
+        "P0", "launch binding", "malformed", "missing", "uncontrolled",
+    )
+    behavioral = [
+        failure for failure in failures
+        if not any(marker.lower() in failure.lower() for marker in technical_markers)
+    ]
+    technical.extend(failure for failure in failures if failure not in behavioral)
+    if technical:
+        status = "P5_PROSPECTIVE_QUALIFICATION_TECHNICAL_BLOCKER"
+    elif behavioral:
+        status = "P5_PROSPECTIVE_QUALIFICATION_FAIL"
+    else:
+        status = "P5_PROSPECTIVE_QUALIFICATION_PASS"
+    return {
+        "schema_version": LIVE_RESULT_SCHEMA,
+        "validation_only": False,
+        "status": status,
+        "qualification_claim": status == "P5_PROSPECTIVE_QUALIFICATION_PASS",
+        "route_id": contract["route_id"],
+        "contract_sha256": _sha256(contract_path),
+        "case_results": base["case_results"],
+        "technical_failures": technical,
+        "behavioral_failures": behavioral,
+        "validated_manifest": manifest,
+    }
+
+
 def _within(path, root):
     try:
         Path(path).resolve().relative_to(Path(root).resolve())
@@ -546,6 +709,11 @@ def main(argv=None):
     analyze.add_argument("--input", required=True)
     analyze.add_argument("--output", required=True)
     analyze.add_argument("--repository-root", required=True)
+    analyze_live = subparsers.add_parser("analyze-live")
+    analyze_live.add_argument("--contract", required=True)
+    analyze_live.add_argument("--input", required=True)
+    analyze_live.add_argument("--output", required=True)
+    analyze_live.add_argument("--repository-root", required=True)
     emit = subparsers.add_parser("emit-synthetic-input")
     emit.add_argument("--contract", required=True)
     emit.add_argument("--git-commit", required=True)
@@ -558,7 +726,7 @@ def main(argv=None):
             f"repository-root must be the actual checkout {SOURCE_REPOSITORY}"
         )
     paths = [("contract", args.contract), ("output", args.output)]
-    if args.command == "analyze":
+    if args.command in {"analyze", "analyze-live"}:
         paths.append(("input", args.input))
     for label, path in paths:
         if not _within(path, args.repository_root):
@@ -582,11 +750,17 @@ def main(argv=None):
         bundle = json.loads(Path(args.input).read_text(), parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value)))
     except (OSError, json.JSONDecodeError, ValueError) as exc:
         raise ContractError(f"cannot load synthetic evidence: {exc}") from exc
-    result = analyze_bundle(contract, bundle, args.contract, SOURCE_REPOSITORY)
+    result = (
+        analyze_live_bundle(contract, bundle, args.contract, SOURCE_REPOSITORY)
+        if args.command == "analyze-live"
+        else analyze_bundle(contract, bundle, args.contract, SOURCE_REPOSITORY)
+    )
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(result, indent=2, sort_keys=True, allow_nan=False) + "\n")
-    return 0 if result["status"] == "VALIDATION_ONLY_PASS" else 2
+    return 0 if result["status"] in {
+        "VALIDATION_ONLY_PASS", "P5_PROSPECTIVE_QUALIFICATION_PASS"
+    } else 2
 
 
 if __name__ == "__main__":

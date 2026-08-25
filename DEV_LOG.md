@@ -8012,3 +8012,33 @@ Both hermetic runs reported the 17,762-entry external ROS-log inventory
 unchanged. GPU, ROS, live identity, analyzer and product-build invocations
 remain zero at this Phase-A freeze; ICRA-068 proceeds directly to the isolated
 current-install build required by Phase B.
+
+## 2026-08-25 — ICRA-068 Phases B/C isolated closure and live harness
+
+IAP-RQ-320, IAP-RQ-421, IAP-RQ-422 and IAP-RQ-423. Phase B used the proven
+17-package sequential merged non-symlink Release/CUDA closure and wrote only
+`results/icra27/icra068/build` and `results/icra27/icra068/install`. All 17
+packages finished in 4m49s with exit 0. Clean-linkage inspection resolves IAP
+and GNSS libraries from the ICRA-068 install and GLIM only from its declared
+read-only prefix; workspace-global build/install overlays are excluded.
+
+Phase C added the one-shot live runner/normalizer. It freezes the exact ordered
+IDs `icra-p0-p5-live-safe-normal-001`,
+`icra-p0-p5-live-final-reject-001` and
+`icra-p0-p5-live-runtime-fail-001`, refuses existing identities, records one
+GPU preflight, stops at the first incomplete arm, and never retries. The
+canonical evidence schema now names all 16 main-flow child identities,
+including the bag recorder, SO3 container, all three odom visualizers,
+provenance publisher and validator, plus the exact
+`/drone_0_planning/bspline` topic. Real evidence is normalized only from
+installed launch binding, bag metadata, P0 health, P5 status and bspline
+messages; source hashes and controlled shutdown remain bound. The live analyzer
+rejects every validation-only bundle and accepts only exact install/runner/raw
+hashes and one-shot counts.
+
+TDD recorded missing runner and install-alias interfaces, then passed 5/5 live
+runner tests and 11/11 analyzer/contract tests. Complete hermetic discovery
+passed 536/536 with the 17,762-entry external ROS inventory unchanged. GPU,
+ROS, live attempts and authoritative analyzer calls remain zero. The final
+source commit will be installed into the existing isolated build, followed by
+one dependency/install manifest freeze before Phase D.

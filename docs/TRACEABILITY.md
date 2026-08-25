@@ -1357,3 +1357,13 @@ They do not convert historical `NO-GO-P2`, failed P0 Gate-0B evidence, the stati
 |---|---|---|---|
 | IAP-RQ-423 | Keep a historical dependency oracle independent of the evolving current launch | `test/icra_historical_p4_fixture.py`, `test/test_p4_g0c_dependency_preflight.py`, `test/test_p4_g0c_runner.py` materialize and hash-check the exact `564dd6a` launch bytes in a test-local non-symlink install | **IMPLEMENTED; PRODUCT/P4 FROZEN INPUTS UNCHANGED** |
 | IAP-RQ-423 | Require zero active test failures before current-install build | dependency 14/14, runner 25/25, P4 161/161 and complete hermetic discovery 529/529 pass; external ROS inventory remains 17,762 entries | **PHASE A PASS** |
+
+## 2026-08-25 ICRA-068 isolated live qualification closure
+
+| Req ID | Requirement/evidence seam | Implementation and retained evidence | Status |
+|---|---|---|---|
+| IAP-RQ-320 | Bind every arm to reviewed P0 identity | canonical contract and live analyzer require worker 4, sigma `0.01`, `legacy_iap_rq320_baseline_v1`, positive stable generations and exact installed profile | **IMPLEMENTED; NON-LIVE TESTS PASS** |
+| IAP-RQ-421, IAP-RQ-422 | Run only the P0+P5 contingency route | live config preserves P5 final/runtime and P0 while disabling P1/P2/P3/P4, all-safety, distinctive/fanout/viz/application paths; no threshold/action/fixture decision changed | **PROFILE PRESERVED** |
+| IAP-RQ-423 | Prove isolated current runtime closure | 17/17 sequential merged non-symlink Release/CUDA packages; three source/install aliases, package/executable/library/config identities, clean linkage and exact prefixes are fail-closed in `icra068_install_manifest_v1` | **BUILD PASS; FINAL MANIFEST FREEZE PENDING COMMIT** |
+| IAP-RQ-423 | Bind full live ownership and real evidence | `run_icra_p0_p5_qualification.py`, canonical contract and analyzer bind 16 child identities, three exact topics, bag/P0/P5/bspline sources, controlled shutdown, fixed ordered IDs and zero retries | **IMPLEMENTED; 16/16 FOCUSED TESTS PASS** |
+| IAP-RQ-423 | Reject synthetic qualification claims | `analyze_live_bundle` rejects `validation_only=true`; full hermetic discovery passes 536/536 with external inventory unchanged | **FAIL-CLOSED OFFLINE PASS** |

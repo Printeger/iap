@@ -6,13 +6,27 @@
   "qualification_family": "icra_p0_p5_qualification",
   "analyzer_version": "icra_p0_p5_qualification_analyzer_v1",
   "required_processes": [
-    "iap_rosnode",
-    "ego_planner_node"
+    "test_planner_corridor_map_publisher",
+    "drone_0_pcl_render_node",
+    "test_planner_lidar_body_bridge",
+    "test_planner_iap_rosnode",
+    "test_planner_desired_poscmd_to_odom",
+    "test_planner_iap_odom_visualization",
+    "test_planner_truth_odom_visualization",
+    "test_planner_desired_odom_visualization",
+    "test_planner_gnss_sim_node",
+    "drone_0_quadrotor_simulator_so3",
+    "test_planner_so3_control_container",
+    "drone_0_ego_planner_node",
+    "drone_0_traj_server",
+    "test_planner_evidence_provenance",
+    "test_planner_integrity_validator",
+    "test_planner_bag_recorder"
   ],
   "required_topics": [
     "/planning/risk_grid_health",
     "/planning/integrity_gate_status",
-    "/planning/bspline"
+    "/drone_0_planning/bspline"
   ],
   "profile_values": {
     "planner_safety_profile": "icra_p0_p5",

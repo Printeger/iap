@@ -236,6 +236,59 @@ class IcraP0P5QualificationTest(unittest.TestCase):
                 "--repository-root", "/",
             ])
 
+    def test_live_analyzer_rejects_synthetic_validation_bundle(self):
+        result = MODULE.analyze_live_bundle(
+            self.contract,
+            synthetic_bundle(self.contract, self.raw_directory),
+            CONTRACT_PATH,
+        )
+        self.assertEqual(
+            result["status"],
+            "P5_PROSPECTIVE_QUALIFICATION_TECHNICAL_BLOCKER",
+        )
+        self.assertFalse(result["qualification_claim"])
+        self.assertTrue(any(
+            "validation_only" in failure
+            for failure in result["technical_failures"]
+        ))
+
+    def test_live_analyzer_accepts_exact_one_shot_real_bundle(self):
+        source = synthetic_bundle(self.contract, self.raw_directory)
+        runs = source["runs"]
+        for run in runs:
+            run["run_id"] = MODULE.LIVE_RUN_IDENTITIES[run["case_id"]]
+            run["validation_only"] = False
+            run["raw_sources"] = {}
+            run["launch_binding"] = MODULE.build_launch_binding(
+                self.contract, CONTRACT_PATH, run["case_id"], "1" * 40,
+                run["run_id"],
+                MODULE.resolve_launch_values(self.contract, run["case_id"], {}),
+            )
+        with tempfile.TemporaryDirectory(dir=REPO) as tmp:
+            root = Path(tmp)
+            install = root / "install_manifest.json"
+            install.write_text(json.dumps({
+                "git_commit": "1" * 40, "closure_ready": True,
+            }) + "\n")
+            runner = root / "runner_state.json"
+            identities = list(MODULE.LIVE_RUN_IDENTITIES.values())
+            runner.write_text(json.dumps({
+                "state": "COMPLETE", "registered": identities,
+                "attempted": identities, "completed": identities,
+                "retries": 0, "gpu_preflight_invocations": 1,
+                "launch_invocations": 3,
+            }) + "\n")
+            evidence = root / "live.json"
+            bundle = MODULE.write_live_bundle(
+                self.contract, CONTRACT_PATH, runs, "1" * 40,
+                install, evidence,
+            )
+            result = MODULE.analyze_live_bundle(
+                self.contract, bundle, CONTRACT_PATH, REPO
+            )
+        self.assertEqual(result["status"], "P5_PROSPECTIVE_QUALIFICATION_PASS")
+        self.assertTrue(result["qualification_claim"])
+
 
 if __name__ == "__main__":
     unittest.main()
