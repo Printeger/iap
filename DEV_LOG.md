@@ -7370,3 +7370,48 @@ is non-git/read-only and its pre-build content-tree aggregate is
 `de422a4b...16a`; protected PDF remains `1f07da56...44f6`. Phase A now awaits
 its required commit/push before the single fresh CUDA build. No build, GPU,
 ROS/live runner, identity, analyzer, threshold or qualification action has run.
+
+## 2026-08-25T03:45:47Z — ICRA-056 BLOCKED AT DEPENDENCY OUTPUT BINDING
+
+IAP-RQ-423. Phase-A commit `c195edd` was pushed before live work. The one
+permitted fresh non-symlink merged CUDA build then exited 0: 17/17 packages in
+4m47s, Release, `BUILD_TESTING=OFF`, `BUILD_WITH_CUDA=ON`, CUDA 12.5.1 via
+`/usr/local/cuda/bin/nvcc`, OpenCV/viewer OFF, and no historical/default build
+or install root. Static closure passed with 17 exact package indexes, six
+ordinary non-symlink ELF runtime libraries, a loadable
+`libodometry_estimation_gpu.so` (`0848175b...5c7cf`), zero unresolved or
+historical linkage, and exact frozen launch/config/dependency/protocol/
+registry/lineage/fixture hashes.
+
+The initial static diagnostic is retained unchanged and disclosed: it emitted
+six false negatives because the image has no `file` command, and used a
+relative-path `gnss_comm` aggregate inconsistent with the recorded absolute-
+path baseline. The resolution was read-only: `readelf` proves all six ELF64
+headers and the baseline aggregate recomputes exactly to `de422a4b...16a`.
+No build or live boundary was rerun.
+
+The sole standalone dependency invocation used exact task-local HOME,
+ROS_HOME, ROS_LOG_DIR, TMPDIR and 0700 XDG_RUNTIME_DIR, with both ordered
+prefix variables equal to ICRA-056 install plus `/opt/ros/jazzy`. Process exit
+was 0 and counts were 18 packages / 13 executables / one component / 14
+configs / six libraries, with zero GPU, launch or identity attempt. Its
+immutable state SHA is `0d305191...32361`.
+
+The state nevertheless binds `dependency_preflight.manifest_path` to
+`results/icra27/icra056/install/lib/libsub_mapping.so`, rather than
+`config/icra27/p4_g0c_runtime_dependencies_v3.json`. Static inspection proves
+the production defect: `validate_runtime_dependencies()` first assigns local
+`path` to the manifest, reuses `path` for executable/config/runtime-library
+checks, then serializes the overwritten value at return. The manifest hash and
+counts are correct, but the path provenance is false. This is an explicit
+dependency output-binding failure under `NEXT_TASK.md`; the forbidden
+production runner was not modified.
+
+Fail-closed stop is final for this task:
+`BLOCKED_DEPENDENCY_MANIFEST_PATH_BINDING`. Full-runner invocations, built-in
+GPU preflight, r3 attempts/completions/retries, analyzer invocations and
+threshold actions are all zero; `runs/`, analysis and draft outputs do not
+exist. No task/required process remains. The protected PDF is unchanged,
+untracked and unstaged at `1f07da56...44f6`; `gnss_comm` is unchanged. All
+ICRA-056 raw build/install/log/dependency evidence remains retained. Control
+returns only to SUPERVISOR review; no next task is selected.

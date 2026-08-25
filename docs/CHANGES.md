@@ -165,6 +165,32 @@ python3 scripts/dev_planner/run_p4_g0c_tests.py \
 git diff --check
 ```
 
+## 2026-08-25 (ICRA-056 dependency provenance BLOCKED)
+
+- IAP-RQ-423: the single fresh merged CUDA-on build completed all 17 packages
+  in 4m47s. Static closure passed: 17 exact package indexes,
+  `BUILD_WITH_CUDA:BOOL=ON`, six declared ordinary non-symlink ELF libraries,
+  loadable GPU odometry library, zero unresolved/historical linkage and exact
+  frozen artifact hashes. A retained initial diagnostic false-negative caused
+  by unavailable `file` and a mismatched relative-path external aggregate was
+  resolved read-only with `readelf` and the recorded absolute-path baseline;
+  the build was not repeated.
+- The sole repository-local standalone dependency gate exited 0 and validated
+  18 packages, 13 executables, one component, 14 configs and six libraries,
+  with zero GPU, launch or identity attempt. Its state SHA is
+  `0d305191...32361`.
+- The same state incorrectly serializes `dependency_preflight.manifest_path`
+  as the installed `lib/libsub_mapping.so`. Production
+  `validate_runtime_dependencies()` reuses local `path` after loading the
+  manifest and returns the last runtime-library path. The correct manifest
+  hash does not cure false path provenance, so the output-binding rule stops
+  the task as `BLOCKED_DEPENDENCY_MANIFEST_PATH_BINDING`.
+- Full runner, built-in GPU preflight, all 15 r3 identities and analyzer have
+  zero invocations. `runs/`, analysis and draft do not exist; no retry,
+  threshold change, G0C claim, G0D/P5, smoke or qualification occurred. Raw
+  products remain retained for Supervisor review, while compact evidence is
+  under `results/icra27/icra056/compact/`.
+
 The historical one-shot command, stdout/stderr, exit, immutable input audit and
 bounded output hashes are retained below `results/icra27/icra034/`; do not rerun
 that command.

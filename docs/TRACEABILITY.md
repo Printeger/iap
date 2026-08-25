@@ -1195,3 +1195,11 @@ They do not convert historical `NO-GO-P2`, failed P0 Gate-0B evidence, the stati
 | IAP-RQ-423 | Model the corrected runner-owned container without adding a ninth launch output | `production_surface()` proves exactly one canonical `runs_root`, fresh-root guards, exact runner-state child and canonical preflight/environment/run descendants; five environment and eight output leaves remain separate and exact | **PHASE A IMPLEMENTED** |
 | IAP-RQ-423 | Fail closed on every container/output contract drift | Focused regressions reject missing, duplicate, renamed and second containers, wrong state child, parent/sibling escape, changed ownership AST and an extra output semantic | **ADVERSARIAL PASS** |
 | IAP-RQ-423 | Keep all synthetic verification repository-local before live work | ICRA-056 launcher owns five environment roots; bootstrap 8/8, classifier 18/18, focused 113/113, launch 11/11 + 16/16, full Python 468/468, syntax 6/6, flake8, canonical JSON 4/4 and diff checks pass with identical 17,759-entry external inventories | **PHASE A PASS; BUILD/LIVE PENDING** |
+
+## 2026-08-25 ICRA-056 dependency provenance stop
+
+| Req ID | Requirement/evidence seam | Implementation and retained evidence | Status |
+|---|---|---|---|
+| IAP-RQ-423 | Build one complete fresh CUDA runtime before dependency/GPU/live | Sole merged non-symlink build exits 0 with 17/17 packages; static closure proves CUDA ON, 17 unique indexes, six ordinary ELF libraries, loadable GPU odometry library, zero unresolved/historical linkage and exact frozen hashes | **BUILD + STATIC CLOSURE PASS** |
+| IAP-RQ-423 | Make dependency provenance exact before GPU or ROS | Sole standalone gate reports complete 18/13/1/14/6 validation and zero GPU/launch/attempt, but state `0d305191...32361` binds `manifest_path` to installed `libsub_mapping.so`; production reuses the manifest local variable during runtime-library validation | **BLOCKED_DEPENDENCY_MANIFEST_PATH_BINDING** |
+| IAP-RQ-423 | Stop without consuming evidence after an output-binding failure | Full runner, GPU preflight, r3 attempts, retries and analyzer remain zero; runs/analysis/draft are absent, processes are zero, protected PDF and read-only `gnss_comm` identities remain exact | **FAIL-CLOSED; SUPERVISOR REVIEW REQUIRED** |
