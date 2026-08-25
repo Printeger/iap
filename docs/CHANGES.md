@@ -2556,3 +2556,26 @@ python3 scripts/dev_planner/analyze_p4_g0c_calibration.py \
     results/icra27/icra064/retained_lstat_content_inventory.json \
   --output results/icra27/icra063/runs_final/p4_g0c_analysis.json
 ```
+
+## 2026-08-25 (ICRA-067 P0+P5 contingency profile and non-live harness)
+
+- Added one canonical `icra_p0_p5_qualification_contract_v1` source for the
+  isolated conference profile, unchanged P0 Gate-0B identity, unchanged P5
+  thresholds/query policy, registered fixture aliases and three prospective
+  qualification cases.
+- Launch now rejects contradictory CLI/preset/lower-level values instead of
+  coercing them. It keeps P0 and both P5 gates/evidence on while P1/P2/P3/P4,
+  distinctive trajectories, lower-level application, metrics/debug/trace,
+  fanout and visualization paths remain off.
+- Added a repository-local validation-only analyzer. It rejects identity,
+  lifecycle, finite-row, topic, P0 stability, config/contract/raw hash,
+  fixture, ordering, publication and runtime-action adversaries. Controlled
+  shutdown remains distinct from runtime failure, and synthetic PASS can never
+  claim qualification.
+- Focused hermetic suites pass (6 analyzer/contract and 20 launch tests), plus
+  syntax/fatal lint/diff checks, with no external ROS-log delta. Full discovery
+  ran 525 tests; only four frozen P4-r6 launch-SHA closure checks fail because
+  their ICRA-066 manifest intentionally binds the pre-ICRA-067 launch. Forbidden
+  P4 artifacts were not rewritten. No build, GPU, ROS, live arm or qualification
+  command ran; handoff is typed
+  `BLOCKED_ICRA067_FROZEN_P4_LAUNCH_HASH_CONFLICT`.

@@ -7942,3 +7942,38 @@ Independent two-axis review reports Spec PASS with no blocker or scope creep.
 The Standards review's reproducibility-command omission and ambiguous
 “external” wording were corrected in `docs/CHANGES.md`; no other standards or
 code-smell finding remains.
+
+## 2026-08-25 — ICRA-067 isolated P0+P5 profile and prospective harness
+
+IAP-RQ-320, IAP-RQ-421, IAP-RQ-422 and IAP-RQ-423. Added the fail-closed
+`icra_p0_p5` profile and the three non-live qualification aliases
+`SAFE_NORMAL`, `FINAL_REJECT` and `RUNTIME_FAIL`. A single versioned contract
+drives launch values, fixture registration, manifest identity and the
+validation-only analyzer. P0 retains worker 4, sigma 0.01, the reviewed
+`legacy_iap_rq320_baseline_v1` profile, six frozen horizons, 30x30x6 m ROI,
+0.75 m resolution and 0.5 s refresh. P5 final/runtime and evidence are enabled
+with unchanged thresholds/query values. P1/P2/P3/P4, distinctive trajectories,
+metrics/debug/trace/fanout/application and safety-viz paths are off.
+
+Focused hermetic tests pass 6/6 analyzer/contract and 20/20 launch tests;
+syntax, fatal flake8 and diff checks pass with the 17,762-entry external ROS
+inventory unchanged. Full hermetic discovery ran 525 tests and failed only four
+immutable P4-r6 closure checks: three `RETAINED_R6_DRIFT:exact_final_install`
+errors and one `DEPENDENCY_LAUNCH_CONTRACT_MISMATCH`. Those tests require the
+ICRA-066 launch SHA `24f34c6a...44595`, while ICRA-067 is explicitly required
+to change that launch. Updating the frozen P4-v6 dependency manifest/tests is
+forbidden, so the task stops as
+`BLOCKED_ICRA067_FROZEN_P4_LAUNCH_HASH_CONFLICT`; no P4 artifact was changed.
+
+No GPU, ROS, launch, live runner, registered identity, bag, product build or
+qualification was invoked. The following are the exact prospective commands
+for a Supervisor-authorized future live task; they were documented only and
+not executed:
+
+```bash
+source /home/dev/ws_iap/install/setup.bash
+ros2 launch iap test_planner.launch.py experiment:=icra_p0_p5_qualification_safe_normal run_duration_s:=90 validation_duration_s:=90 start_rviz:=false run_validator:=true record_bag:=true
+ros2 launch iap test_planner.launch.py experiment:=icra_p0_p5_qualification_final_reject run_duration_s:=90 validation_duration_s:=90 start_rviz:=false run_validator:=true record_bag:=true
+ros2 launch iap test_planner.launch.py experiment:=icra_p0_p5_qualification_runtime_fail run_duration_s:=90 validation_duration_s:=90 start_rviz:=false run_validator:=true record_bag:=true
+python3 launch/icra_p0_p5_qualification.py analyze --contract config/icra27/icra_p0_p5_qualification_v1.json --input results/icra27/icra068/live/icra_p0_p5_evidence_v1.json --output results/icra27/icra068/live/icra_p0_p5_analysis_v1.json --repository-root /home/dev/ws_iap/src/iap
+```

@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 REPO = Path(__file__).resolve().parents[1]
 SCRIPT_DIR = REPO / "scripts" / "dev_planner"
@@ -372,6 +373,88 @@ class TestPlannerLaunchTest(unittest.TestCase):
             )
             with self.assertRaisesRegex(RuntimeError, "calibration"):
                 MODULE._formal_calibration_provenance(str(path.with_name("missing.json")))
+
+    @staticmethod
+    def _launch_context_with_defaults(**updates):
+        context = LaunchContext()
+        context.launch_configurations.update(dict(MODULE.ARG_DEFAULTS))
+        context.launch_configurations.update(updates)
+        return context
+
+    def test_icra_p0_p5_qualification_arm_resolves_from_one_contract(self):
+        experiment = "icra_p0_p5_qualification_final_reject"
+        context = self._launch_context_with_defaults(experiment=experiment)
+        with mock.patch.object(sys, "argv", ["test", f"experiment:={experiment}"]):
+            scenario, selected, applied = MODULE._apply_presets(context, REPO)
+            profile, enabled, p0_enabled, conflict, _ = MODULE._resolve_safety_switches(
+                context, applied
+            )
+        self.assertEqual(selected, experiment)
+        self.assertEqual(scenario, "lidar_corridor_degenerate")
+        self.assertEqual(profile, "icra_p0_p5")
+        self.assertEqual(enabled, {
+            "p1": False, "p2": False, "p3_local": False,
+            "p3_global": False, "p4": False,
+            "p5_runtime": True, "p5_final": True,
+        })
+        self.assertTrue(p0_enabled)
+        self.assertFalse(conflict)
+        self.assertEqual(context.launch_configurations["p0.predictor.worker_count"], "4")
+        self.assertEqual(context.launch_configurations["p5_7.fixture.enabled"], "true")
+        self.assertEqual(context.launch_configurations["p5_6.fixture.enabled"], "false")
+
+    def test_icra_p0_p5_launch_rejects_equal_level_and_lower_level_conflicts(self):
+        experiment = "icra_p0_p5_qualification_safe_normal"
+        for key, value in (
+            ("planner_enable_p1", "true"),
+            ("p1.metrics_only", "true"),
+            ("planner_enable_p5_final", "false"),
+            ("p5_7.fixture.enabled", "true"),
+        ):
+            with self.subTest(key=key):
+                context = self._launch_context_with_defaults(
+                    experiment=experiment, **{key: value}
+                )
+                with mock.patch.object(
+                    sys, "argv", ["test", f"experiment:={experiment}", f"{key}:={value}"]
+                ), self.assertRaisesRegex(RuntimeError, "conflicting explicit override"):
+                    MODULE._apply_presets(context, REPO)
+
+    def test_icra_p0_p5_launch_binding_carries_prospective_identity(self):
+        experiment = "icra_p0_p5_qualification_runtime_fail"
+        context = self._launch_context_with_defaults(experiment=experiment)
+        with mock.patch.object(sys, "argv", ["test", f"experiment:={experiment}"]):
+            MODULE._apply_presets(context, REPO)
+        binding = MODULE._icra_p0_p5_launch_binding(
+            context,
+            experiment,
+            REPO,
+            {"git_commit": "a" * 40, "run_id": "prospective-run"},
+        )
+        self.assertEqual(binding["case_id"], "RUNTIME_FAIL")
+        self.assertEqual(binding["git_commit"], "a" * 40)
+        self.assertEqual(binding["run_id"], "prospective-run")
+        self.assertEqual(binding["fixture_alias"], "p5_6_future_unknown_zone_v1")
+        self.assertEqual(binding["raw_artifact_hashes"], "REQUIRED_AT_ANALYSIS")
+        self.assertEqual(binding["p0_profile"]["worker_count"], 4)
+        self.assertEqual(binding["p5_thresholds"]["p5.horizon_s"], 2.0)
+
+    def test_named_icra_p0_p5_profile_does_not_arm_a_qualification_case(self):
+        context = self._launch_context_with_defaults(
+            experiment="baseline_corridor_off",
+            planner_safety_profile="icra_p0_p5",
+        )
+        with mock.patch.object(
+            sys, "argv",
+            ["test", "experiment:=baseline_corridor_off", "planner_safety_profile:=icra_p0_p5"],
+        ):
+            scenario, experiment, _ = MODULE._apply_presets(context, REPO)
+        self.assertEqual(experiment, "baseline_corridor_off")
+        self.assertEqual(scenario, "lidar_corridor_degenerate")
+        self.assertEqual(context.launch_configurations["experiment"], experiment)
+        self.assertEqual(context.launch_configurations["scenario"], scenario)
+        self.assertEqual(context.launch_configurations["p5_7.fixture.enabled"], "false")
+        self.assertEqual(context.launch_configurations["p5_6.fixture.enabled"], "false")
 
 
 if __name__ == "__main__":

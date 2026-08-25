@@ -1341,3 +1341,12 @@ They do not convert historical `NO-GO-P2`, failed P0 Gate-0B evidence, the stati
 | IAP-RQ-423 | Bind reviewed implementation and unchanged r6 evidence before replacement | Handoff parent/diff, analyzer/test SHA, runner state, recovery inventory, old/preserved analysis and ICRA-065 103-file arrays all match; draft absent | **FROZEN INPUT PASS** |
 | IAP-RQ-320, IAP-RQ-322 | Emit aggregate Type-7 calibration statistics without row exclusion | Sole authoritative call retains 192/192 decisions; mean Q10 `0.000020000000000131024` passes floor and max Q10 `0` fails | **ANALYZER TECHNICAL PASS; SCIENTIFIC NO-GO** |
 | IAP-RQ-423 | Preserve one-call and downstream authority | Analyzer calls = 1 with expected exit 2; output SHA `572e5d79...a9c1e`; technical failures 0, runs 15/15/15, sole max-improvement failed gate, no draft/registry/application/G0D/P5 action | **AUTHORITATIVE SCIENTIFIC_NO_GO; SUPERVISOR REVIEW** |
+
+## 2026-08-25 ICRA-067 P0+P5 contingency activation
+
+| Req ID | Requirement/evidence seam | Implementation and retained evidence | Status |
+|---|---|---|---|
+| IAP-RQ-320 | Preserve reviewed P0 and frozen P5 decisions | Contract binds P0 worker 4, sigma 0.01, baseline profile, horizons/ROI/resolution/refresh and every existing P5 threshold/query value | **PROFILE CONTRACT PASS; NO LIVE CLAIM** |
+| IAP-RQ-421, IAP-RQ-422 | Isolate the conference route | `icra_p0_p5` enables P0 plus P5 final/runtime/evidence; high/lower P1/P2/P3/P4, distinctive/fanout/debug/metrics/trace/viz/application paths are exact false/empty and contradictory overrides reject | **FOCUSED TEST PASS** |
+| IAP-RQ-423 | Pre-register three prospective cases and fail closed | SAFE_NORMAL, P5-7 FINAL_REJECT and P5-6 RUNTIME_FAIL bind case/run/fixture/process/topic/P0/event identities and canonical raw-row hashes; adversarial synthetic tests reject every required failure class | **VALIDATION-ONLY PASS; QUALIFICATION FALSE** |
+| IAP-RQ-423 | Preserve P4 authority and repository-local execution | No P4 files or scientific evidence changed; no GPU/ROS/live/build ran. Full 525-test discovery is blocked only by four immutable P4-v6 checks that require the old launch SHA | **BLOCKED_ICRA067_FROZEN_P4_LAUNCH_HASH_CONFLICT** |
