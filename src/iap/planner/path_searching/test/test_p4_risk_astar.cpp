@@ -8,6 +8,41 @@
 #include <string>
 #include <vector>
 
+struct GridMapTestAccess {
+  static void configureBarrier(GridMap* map) {
+    constexpr double resolution = 0.5;
+    constexpr int x_cells = 16;
+    constexpr int y_cells = 16;
+    constexpr int z_cells = 8;
+    map->mp_.map_origin_ = Eigen::Vector3d(-4.0, -4.0, -2.0);
+    map->mp_.map_size_ = Eigen::Vector3d(
+        x_cells * resolution, y_cells * resolution, z_cells * resolution);
+    map->mp_.map_min_boundary_ = map->mp_.map_origin_;
+    map->mp_.map_max_boundary_ = map->mp_.map_origin_ + map->mp_.map_size_;
+    map->mp_.map_voxel_num_ = Eigen::Vector3i(x_cells, y_cells, z_cells);
+    map->mp_.resolution_ = resolution;
+    map->mp_.resolution_inv_ = 1.0 / resolution;
+    map->mp_.min_occupancy_log_ = 0.5;
+    map->mp_.clamp_min_log_ = -2.0;
+
+    const std::size_t cell_count =
+        static_cast<std::size_t>(x_cells * y_cells * z_cells);
+    map->md_.occupancy_buffer_.assign(cell_count, -2.01);
+    map->md_.occupancy_buffer_inflate_.assign(cell_count, 0);
+    map->md_.occupancy_buffer_raw_cloud_.assign(cell_count, 0);
+
+    // A finite wall across the direct route. The search must reject these
+    // occupied nodes and route around an edge of the wall.
+    for (int y = 6; y <= 9; ++y) {
+      for (int z = 3; z <= 4; ++z) {
+        const Eigen::Vector3i index(8, y, z);
+        map->md_.occupancy_buffer_inflate_[
+            static_cast<std::size_t>(map->toAddress(index))] = 1;
+      }
+    }
+  }
+};
+
 namespace {
 
 class ConstantRiskProvider final : public iap::RiskPredictionProvider {
@@ -193,4 +228,31 @@ TEST(P4RiskAStarTest, QueryTimeUsesFrozenCumulativeTravelDistance) {
 
   EXPECT_DOUBLE_EQ(astar.queryTimeFromCumulativeDistanceForTest(0.0), 10.0);
   EXPECT_DOUBLE_EQ(astar.queryTimeFromCumulativeDistanceForTest(7.0), 13.5);
+}
+
+TEST(P4RiskAStarTest, ConservativeSearchRejectsOccupiedBarrierAndReturnsFreePath) {
+  ConstantRiskProvider provider(4.0);
+  auto snapshot = makeOccupiedSnapshot(provider);
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureBarrier(map.get());
+
+  AStar astar;
+  auto config = enabledConfig();
+  config.cost_query_policy =
+      iap::RiskCostQueryPolicy::CONSERVATIVE_OCCUPIED_COST_SUPPORT;
+  astar.setP4Config(config);
+  astar.setRiskSnapshot(snapshot, 10.0);
+  astar.initGridMap(map, Eigen::Vector3i(14, 14, 6));
+
+  ASSERT_TRUE(astar.AstarSearchRiskAware(
+      0.5, Eigen::Vector3d(-2.0, 0.0, 0.0),
+      Eigen::Vector3d(2.0, 0.0, 0.0)));
+  const auto path = astar.getPath();
+
+  ASSERT_FALSE(path.empty());
+  EXPECT_GT(astar.getLastP4Metrics().occupied_reject_count, 0);
+  EXPECT_GT(astar.getLastP4Metrics().risk_query_count, 0);
+  for (const auto& point : path) {
+    EXPECT_FALSE(astar.isOccupiedForTest(point)) << point.transpose();
+  }
 }

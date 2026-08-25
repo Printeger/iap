@@ -691,6 +691,31 @@ class P4G0CSurfaceClassifierTest(unittest.TestCase):
                 "runs_root / 'p4_g0c_runner_state.json'", "derived:runs_root",
             ),
             (
+                "recover_r6_matrix", "Path.mkdir", "evidence",
+                "registered:recovery_evidence_root",
+            ),
+            (
+                "recover_r6_matrix", "Path.open", "original_state_path",
+                "derived:recovery_evidence_root",
+            ),
+            (
+                "recover_r6_matrix", "Path.open", "inventory_path",
+                "derived:runs_root",
+            ),
+            (
+                "recover_r6_matrix", "Path.open", "transition_path",
+                "derived:recovery_evidence_root",
+            ),
+            (
+                "recover_r6_matrix", "Path.mkdir", "run_dir",
+                "derived:runs_root",
+            ),
+            (
+                "recover_r6_matrix", "Path.write_text",
+                "run_dir / 'launch_command.json'",
+                "registered:launch_command_path",
+            ),
+            (
                 "_runtime_config", "Path.mkdir", "export_dir",
                 "registered:export_root_dir",
             ),
@@ -789,6 +814,10 @@ class P4G0CSurfaceClassifierTest(unittest.TestCase):
             )
         validated = production_surface(REPO)["contract"]
         self.assertEqual(validated["container_semantics"], {"runs_root"})
+        self.assertEqual(
+            validated["recovery_evidence_semantics"],
+            {"recovery_evidence_root"},
+        )
         self.assertEqual(
             validated["runner_state_child"], "p4_g0c_runner_state.json"
         )

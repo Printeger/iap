@@ -2433,3 +2433,59 @@ git diff --check d0aa033...HEAD
   completed, 1 launch and 0 retry; no remaining identity or analyzer ran.
 - No source/config/build changed after identity consumption; no draft,
   threshold action, G0C/G0D/P5 claim or P5 execution occurred.
+
+## 2026-08-25 (ICRA-064 exact r6 recovery pre-live freeze)
+
+- Versioned r6 artifact inventory to admit only the exact safe producer alias
+  `runtime/iap_logs/latest`, and versioned analyzer/runner recovery evidence for
+  two sessions and two GPU preflights without permitting an identity retry.
+- Added exact retained-root/hash/failure validation, canonical recovery
+  provenance, offline first-run adoption, ordered continuation from rep02, and
+  terminal post-live failure behavior. Recovery now requires the canonical
+  ICRA-063 `build_final/install` plus Jazzy prefix set and validates the full
+  dependency closure before any write. Normal dirty-root execution is unchanged.
+- Added exhaustive alias topology/replacement and recovery-record adversaries,
+  mutation-surface classification for the separate repository-local recovery
+  evidence root, and a real occupied-barrier A* search proof.
+- Passed focused C++/Python and 512 hermetic Python tests. Validation-only on
+  the exact retained root reports rep02 next, 14 remaining and zero writes,
+  launches or retries; live continuation/analyzer remain pending the pushed
+  pre-live freeze.
+- The post-validation read-only inventory exactly matches all 113 first-run and
+  504 shared-environment entries from the prewrite freeze, not only the five
+  headline hashes.
+
+Reproduce the offline ICRA-064 tests from the repository root (these commands
+do not run GPU, ROS, the matrix or the analyzer):
+
+```bash
+python3 -m unittest discover -s test -p 'test_p4_g0c_*.py'
+python3 scripts/dev_planner/run_p4_g0c_tests.py \
+  --task-root "$PWD/results/icra27/icra063/icra064_review_python" \
+  unittest -- discover -s test -p 'test_*.py'
+cmake --build results/icra27/icra063/tdd_p4/path_searching \
+  --target test_p4_risk_astar -- -j1
+results/icra27/icra063/tdd_p4/path_searching/test_p4_risk_astar
+git diff --check
+```
+
+The following validation-only invocation was valid only while the exact
+ICRA-063 terminal FAILED state remained unchanged and before the one-shot
+continuation. It performs zero recovery writes, GPU checks or launches and must
+not be repeated after continuation changes the authoritative state:
+
+```bash
+env \
+  AMENT_PREFIX_PATH="$PWD/results/icra27/icra063/build_final/install:/opt/ros/jazzy" \
+  P4_G0C_ALLOWED_PREFIXES="$PWD/results/icra27/icra063/build_final/install:/opt/ros/jazzy" \
+  CMAKE_PREFIX_PATH="$PWD/results/icra27/icra063/build_final/install:/root/ros2_ws/install/glim_ros:/root/ros2_ws/install/glim:/opt/ros/jazzy" \
+  LD_LIBRARY_PATH="$PWD/results/icra27/icra063/build_final/install/lib:/root/ros2_ws/install/glim_ros/lib:/root/ros2_ws/install/glim/lib:/opt/ros/jazzy/lib:/opt/ros/jazzy/lib/x86_64-linux-gnu" \
+  python3 scripts/dev_planner/run_p4_g0c_calibration.py \
+  --protocol config/icra27/p4_g0c_protocol_v6.json \
+  --registry config/icra27/p4_threshold_registry_v6.json \
+  --fixture config/icra27/p4_g0c_live_fixture_v2.json \
+  --dependency-manifest config/icra27/p4_g0c_runtime_dependencies_v6.json \
+  --runs-root results/icra27/icra063/runs_final \
+  --recovery-evidence-root results/icra27/icra064/recovery_final \
+  --r6-recovery-validate-only
+```

@@ -7815,3 +7815,36 @@ one launch, zero retry. Per the post-identity terminal rule, no source/config/
 build correction, identity retry, remaining identity, analyzer invocation,
 draft, threshold action or G0C/G0D/P5 claim was performed. Result is
 `BLOCKED_POST_IDENTITY_RUN_ARTIFACT_SYMLINK` for Supervisor review.
+
+## 2026-08-25 — ICRA-064 RECOVERY PRE-LIVE FREEZE
+
+IAP-RQ-320, IAP-RQ-322 and IAP-RQ-423. A read-only lstat/content inventory
+froze the retained ICRA-063 first run and shared launch environment before any
+recovery write. The terminal runner state and four scientific files retain the
+Supervisor-bound hashes; the run-local alias is exactly the relative direct
+child `20260825T125103Z_278`, and the ROS alias resolves to an ordinary direct
+child of its task-local `ros_logs` root.
+
+The r6 artifact inventory now versions and records only the exact producer
+alias `runtime/iap_logs/latest` as a typed literal-target entry. The analyzer
+admits only the exact ROS `latest` alias. Alternate names, escapes, dot paths,
+nested/dangling targets, chains/loops, non-directories and replacement are
+fail-closed. The mutation-surface proof separately classifies the retained
+runs root and repository-local recovery-evidence root.
+
+The explicit recovery entry point binds only the exact retained root, terminal
+state, hashes, failure category and ordered r6 plan. It preserves the canonical
+original state, validates the offline inventory, adopts ID 1 with zero launch
+or retry, and can continue only IDs 2--15 as a second session with a fresh GPU
+preflight. A real A* search test proves a conservative occupied barrier is
+rejected and absent from every returned path point.
+
+Focused Python/C++ tests and 512/512 hermetic Python discovery pass with no
+external ROS-log delta. Exact retained validation-only reports 13 decisions,
+`ADOPTION_ELIGIBLE`, next ID `p4-g0c-r6-seed211-rep02`, 14 remaining and zero
+writes/launches/retries. Post-validation state SHA remains
+`15c3f5d...5760`; inventory and recovery evidence remain absent. Live
+continuation and analyzer have not yet been invoked at this pre-live freeze.
+The validation also re-proves the exact final install dependency closure before
+any recovery write, and the complete 113-entry first-run plus 504-entry shared
+environment lstat/content scopes match their prewrite freeze exactly afterward.

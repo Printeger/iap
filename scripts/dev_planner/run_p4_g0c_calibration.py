@@ -18,7 +18,7 @@ import struct
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, NamedTuple
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -46,6 +46,7 @@ from p4_g0c_protocol import (  # noqa: E402
     make_run_artifact_inventory,
     parse_decision_row,
     sha256_file,
+    validate_run_artifact_inventory,
     validate_test_planner_effective_contract,
     validate_launch_environment_binding,
     validate_decision_header,
@@ -62,6 +63,7 @@ RUNNER_SCHEMA_V3 = "p4_g0c_runner_state_v5"
 RUNNER_SCHEMA_V4 = "p4_g0c_runner_state_v6"
 RUNNER_SCHEMA_V5 = "p4_g0c_runner_state_v7"
 RUNNER_SCHEMA_V6 = "p4_g0c_runner_state_v8"
+RUNNER_SCHEMA_V6_RECOVERY = "p4_g0c_runner_state_v9"
 DEPENDENCY_SCHEMA_V2 = "p4_g0c_runtime_dependencies_v2"
 DEPENDENCY_SCHEMA_V3 = "p4_g0c_runtime_dependencies_v3"
 DEPENDENCY_SCHEMA_V4 = "p4_g0c_runtime_dependencies_v4"
@@ -97,6 +99,50 @@ REQUIRED_PROCESSES = {
 }
 class RunnerError(RuntimeError):
     """The matrix cannot proceed without violating the registered protocol."""
+
+
+class R6RecoveryContract(NamedTuple):
+    runs_root: Path
+    runner_state_sha256: str
+    decisions_sha256: str
+    run_manifest_sha256: str
+    test_planner_manifest_sha256: str
+    stdout_sha256: str
+    run_alias_target: str
+
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+ICRA063_R6_RECOVERY_CONTRACT = R6RecoveryContract(
+    runs_root=(
+        _REPO_ROOT / "results/icra27/icra063/runs_final"
+    ).resolve(),
+    runner_state_sha256=(
+        "15c3f5d537f602dff6476dc498b0cc327f085147eabf1183c141399e46705760"
+    ),
+    decisions_sha256=(
+        "c6bf3a8c4702b988b6da4770895b9511085a41d3ccd0ca593180b655a9b86ccd"
+    ),
+    run_manifest_sha256=(
+        "9c1af28e8d040745a66df153b54b9fbb345e0494e284e45253a7a1f90e38b624"
+    ),
+    test_planner_manifest_sha256=(
+        "8a87baa01b1f551a33828eab56fc2de95ee0a14c814841833e16b0fcae3a19cb"
+    ),
+    stdout_sha256=(
+        "df3d675ee343dfc53a4c7084c8fb86a850875abc4df74efd498f118a202a7be3"
+    ),
+    run_alias_target="20260825T125103Z_278",
+)
+R6_RECOVERY_FIRST_RUN_ID = "p4-g0c-r6-seed211-rep01"
+R6_RECOVERY_FAILURE_SUFFIX = (
+    "run artifact cannot be a symlink: runtime/iap_logs/latest"
+)
+R6_RECOVERY_FINAL_INSTALL = (
+    _REPO_ROOT / "results/icra27/icra063/build_final/install"
+).resolve()
+R6_RECOVERY_EXACT_PREFIXES = [
+    str(R6_RECOVERY_FINAL_INSTALL), "/opt/ros/jazzy",
+]
 
 
 def load_bundle(
@@ -1149,6 +1195,465 @@ def _persist_result(runs_root: Path, result: dict[str, Any]) -> None:
     )
 
 
+def _validate_recovery_alias(
+    alias: Path, parent: Path, *, expected_literal: str | None,
+    absolute_allowed: bool,
+) -> str:
+    if not alias.is_symlink():
+        raise RunnerError(f"RETAINED_R6_DRIFT:alias_missing:{alias}")
+    try:
+        literal = os.readlink(alias)
+    except OSError as exc:
+        raise RunnerError(f"RETAINED_R6_DRIFT:alias_unreadable:{alias}") from exc
+    if expected_literal is not None and literal != expected_literal:
+        raise RunnerError(f"RETAINED_R6_DRIFT:alias_target:{alias}")
+    target = Path(literal)
+    if target.is_absolute():
+        if not absolute_allowed:
+            raise RunnerError(f"RETAINED_R6_DRIFT:absolute_alias:{alias}")
+        candidate = target
+        try:
+            if str(candidate) != str(candidate.resolve(strict=True)):
+                raise RunnerError(f"RETAINED_R6_DRIFT:aliased_target:{alias}")
+        except OSError as exc:
+            raise RunnerError(f"RETAINED_R6_DRIFT:dangling_alias:{alias}") from exc
+    else:
+        if (
+            not literal or "\\" in literal or len(target.parts) != 1
+            or target.parts[0] in {"", ".", ".."}
+        ):
+            raise RunnerError(f"RETAINED_R6_DRIFT:unsafe_alias:{alias}")
+        candidate = parent / literal
+    try:
+        metadata = os.lstat(candidate)
+    except OSError as exc:
+        raise RunnerError(f"RETAINED_R6_DRIFT:dangling_alias:{alias}") from exc
+    if (
+        stat.S_ISLNK(metadata.st_mode)
+        or not stat.S_ISDIR(metadata.st_mode)
+        or candidate.parent.resolve() != parent.resolve()
+    ):
+        raise RunnerError(f"RETAINED_R6_DRIFT:alias_escape_or_type:{alias}")
+    return literal
+
+
+def _validate_recovery_scientific_csv(csv_path: Path) -> int:
+    try:
+        with csv_path.open(newline="") as stream:
+            reader = csv.DictReader(stream, strict=True)
+            validate_decision_header(reader.fieldnames)
+            rows = list(reader)
+    except (OSError, csv.Error, DecisionSchemaError) as exc:
+        raise RunnerError("RETAINED_R6_DRIFT:decision_csv") from exc
+    if not rows:
+        raise RunnerError("RETAINED_R6_DRIFT:empty_decisions")
+    identities = set()
+    for row in rows:
+        try:
+            parsed = parse_decision_row(row, 2.0e-5)
+        except DecisionSchemaError as exc:
+            raise RunnerError("RETAINED_R6_DRIFT:decision_schema") from exc
+        strings = parsed["strings"]
+        counts = parsed["integers"]
+        identity = decision_identity(parsed)
+        if identity in identities:
+            raise RunnerError("RETAINED_R6_DRIFT:duplicate_decision")
+        identities.add(identity)
+        if (
+            strings["status"] != "ORIGINAL_SELECTED"
+            or strings["reason"] != "metrics_only"
+            or counts["selection_applied"] != 0
+            or counts["snapshot_generation_id"] <= 0
+            or counts["collision_segment_id"] <= 0
+            or counts["original_sample_count"] != 200
+            or counts["original_valid_count"] != 200
+            or counts["risk_sample_count"] != 200
+            or counts["risk_valid_count"] != 200
+            or any(counts[key] != 0 for key in (
+                "original_unknown_count", "original_stale_count",
+                "original_non_finite_count", "risk_unknown_count",
+                "risk_stale_count", "risk_non_finite_count",
+            ))
+        ):
+            raise RunnerError("RETAINED_R6_DRIFT:scientific_contract")
+    return len(rows)
+
+
+def _validate_r6_recovery_input(
+    bundle: ProtocolBundle, runs_root: Path,
+    dependency_manifest_path: Path | None = None,
+    dependency_environment: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    contract = ICRA063_R6_RECOVERY_CONTRACT
+    requested = Path(runs_root).expanduser()
+    root = requested.resolve()
+    if (
+        bundle.protocol.get("schema_version") != TEMPORAL_SUPPORT_PROTOCOL_SCHEMA
+        or requested.is_symlink()
+        or root != contract.runs_root
+    ):
+        raise RunnerError("RETAINED_R6_DRIFT:root_or_protocol")
+    plan = expand_run_plan(bundle.protocol, root)
+    first = plan[0]
+    if first["run_id"] != R6_RECOVERY_FIRST_RUN_ID:
+        raise RunnerError("RETAINED_R6_DRIFT:first_identity")
+    state_path = root / "p4_g0c_runner_state.json"
+    run_dir = Path(first["run_dir"])
+    manifest_path = run_dir / "p4_g0c_run_manifest.json"
+    decisions_path = run_dir / "p4_decisions.csv"
+    stdout_path = run_dir / "stdout.log"
+    try:
+        state = json.loads(state_path.read_text())
+        manifest = json.loads(manifest_path.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RunnerError("RETAINED_R6_DRIFT:unreadable_state_or_manifest") from exc
+    test_manifest_path = bound_test_planner_manifest_path(
+        run_dir, manifest.get("test_planner_manifest_path")
+    )
+    expected_hashes = {
+        state_path: contract.runner_state_sha256,
+        decisions_path: contract.decisions_sha256,
+        manifest_path: contract.run_manifest_sha256,
+        test_manifest_path: contract.test_planner_manifest_sha256,
+        stdout_path: contract.stdout_sha256,
+    }
+    if any(sha256_file(path) != expected for path, expected in expected_hashes.items()):
+        raise RunnerError("RETAINED_R6_DRIFT:hash")
+    if (
+        state.get("runner_state") != "FAILED"
+        or state.get("attempted_run_ids") != [R6_RECOVERY_FIRST_RUN_ID]
+        or state.get("completed_run_ids") != []
+        or state.get("launch_invocations") != 1
+        or state.get("retries") != 0
+        or state.get("failed_run_id") != R6_RECOVERY_FIRST_RUN_ID
+        or not str(state.get("failure_reason", "")).endswith(
+            R6_RECOVERY_FAILURE_SUFFIX
+        )
+    ):
+        raise RunnerError("RETAINED_R6_DRIFT:terminal_state")
+    process_failures = manifest.get("process_failures")
+    required_processes = manifest.get("required_processes")
+    controlled_failures = (
+        isinstance(process_failures, list)
+        and all(
+            isinstance(item, dict)
+            and item.get("phase") == "controlled_shutdown"
+            and item.get("reason")
+            == "required_process_stopped_during_controlled_shutdown"
+            for item in process_failures
+        )
+    )
+    healthy_required = (
+        isinstance(required_processes, dict)
+        and set(required_processes) == set(REQUIRED_PROCESSES)
+        and all(
+            isinstance(required_processes[name], dict)
+            and required_processes[name].get("seen") is True
+            and required_processes[name].get("runtime_failure") is False
+            for name in REQUIRED_PROCESSES
+        )
+    )
+    if (
+        manifest.get("runner_state") != "COMPLETE"
+        or manifest.get("launch_exit_code") != 0
+        or manifest.get("retry_count") != 0
+        or manifest.get("required_processes_ok") is not True
+        or not controlled_failures
+        or not healthy_required
+    ):
+        raise RunnerError("RETAINED_R6_DRIFT:manifest_process_contract")
+    validate_test_planner_effective_contract(
+        bundle, json.loads(test_manifest_path.read_text())
+    )
+    launch_environment = state.get("launch_environment")
+    validate_launch_environment_inventory(
+        launch_environment, root, plan, require_pristine=False
+    )
+    _validate_recovery_alias(
+        run_dir / "runtime/iap_logs/latest",
+        run_dir / "runtime/iap_logs",
+        expected_literal=contract.run_alias_target,
+        absolute_allowed=False,
+    )
+    shared_alias_target = _validate_recovery_alias(
+        root / "launch_environment/ros_logs/latest",
+        root / "launch_environment/ros_logs",
+        expected_literal=None,
+        absolute_allowed=True,
+    )
+    decision_count = _validate_recovery_scientific_csv(decisions_path)
+    inventory_path = run_dir / RUN_ARTIFACT_INVENTORY_FILENAME
+    if inventory_path.exists() or inventory_path.is_symlink():
+        raise RunnerError("RETAINED_R6_DRIFT:unexpected_first_inventory")
+    offline_inventory = make_run_artifact_inventory(
+        run_dir, first["run_id"]
+    )
+    validate_run_artifact_inventory(
+        offline_inventory, run_dir, first["run_id"]
+    )
+    for record in plan[1:]:
+        candidate = Path(record["run_dir"])
+        if candidate.exists() or candidate.is_symlink():
+            raise RunnerError("RETAINED_R6_DRIFT:later_identity_exists")
+    dependency = validate_runtime_dependencies(
+        bundle, dependency_manifest_path, dependency_environment
+    )
+    if (
+        dependency.get("dependency_ready") is not True
+        or dependency.get("manifest_sha256")
+        != bundle.protocol["runtime_dependency_manifest"]["sha256"]
+        or dependency.get("validated_prefixes")
+        != R6_RECOVERY_EXACT_PREFIXES
+        or R6_RECOVERY_FINAL_INSTALL.is_symlink()
+        or not R6_RECOVERY_FINAL_INSTALL.is_dir()
+    ):
+        raise RunnerError("RETAINED_R6_DRIFT:exact_final_install")
+    profile = validate_p0_profile_binding(bundle)
+    if profile.get("profile_ready") is not True:
+        raise RunnerError("RETAINED_R6_DRIFT:p0_profile")
+    return {
+        "contract": contract,
+        "root": root,
+        "plan": plan,
+        "state": state,
+        "state_path": state_path,
+        "first_record": first,
+        "first_run_dir": run_dir,
+        "test_manifest_path": test_manifest_path,
+        "decision_count": decision_count,
+        "dependency_preflight": dependency,
+        "offline_inventory": offline_inventory,
+        "p0_profile_preflight": profile,
+        "shared_alias_target": shared_alias_target,
+    }
+
+
+def recover_r6_matrix(
+    bundle: ProtocolBundle, runs_root: Path, evidence_root: Path, *,
+    validation_only: bool = False,
+    dependency_manifest_path: Path | None = None,
+    dependency_environment: dict[str, str] | None = None,
+    gpu_preflight: Callable[[Path], dict[str, Any]] = run_gpu_preflight,
+    launch_executor: Callable[..., tuple[int, dict[str, Any]]] = _execute_launch,
+) -> dict[str, Any]:
+    validated = _validate_r6_recovery_input(
+        bundle, runs_root, dependency_manifest_path,
+        dependency_environment,
+    )
+    evidence = Path(evidence_root).expanduser().resolve()
+    allowed = (_REPO_ROOT / "results/icra27/icra064").resolve()
+    if allowed not in evidence.parents or evidence == allowed:
+        raise RunnerError("RECOVERY_EVIDENCE_PATH_NOT_ALLOWED")
+    if validation_only:
+        return {
+            "schema_version": "p4_g0c_r6_recovery_validation_v1",
+            "recovery_state": "ADOPTION_ELIGIBLE",
+            "adopted_run_id": R6_RECOVERY_FIRST_RUN_ID,
+            "next_run_id": validated["plan"][1]["run_id"],
+            "remaining_run_count": 14,
+            "recovery_writes": 0,
+            "recovery_launches": 0,
+            "recovery_retries": 0,
+            "decision_count": validated["decision_count"],
+        }
+    if evidence.exists() or evidence.is_symlink():
+        raise RunnerError("RECOVERY_EVIDENCE_ALREADY_EXISTS")
+    evidence.mkdir(parents=True, exist_ok=False)
+    state = validated["state"]
+    original_state_path = evidence / "original_terminal_state.json"
+    with original_state_path.open("xb") as stream:
+        stream.write(canonical_bytes(state))
+
+    first = validated["first_record"]
+    first_run_dir = validated["first_run_dir"]
+    inventory_path = first_run_dir / RUN_ARTIFACT_INVENTORY_FILENAME
+    inventory = validated["offline_inventory"]
+    validate_run_artifact_inventory(inventory, first_run_dir, first["run_id"])
+    with inventory_path.open("xb") as stream:
+        stream.write(canonical_bytes(inventory))
+    inventory_sha256 = sha256_file(inventory_path)
+    test_manifest_path = validated["test_manifest_path"]
+    scientific_hashes = {
+        "decisions_sha256": sha256_file(first_run_dir / "p4_decisions.csv"),
+        "run_manifest_sha256": sha256_file(
+            first_run_dir / "p4_g0c_run_manifest.json"
+        ),
+        "test_planner_manifest_sha256": sha256_file(test_manifest_path),
+        "stdout_sha256": sha256_file(first_run_dir / "stdout.log"),
+    }
+    contract = validated["contract"]
+    expected_scientific = {
+        "decisions_sha256": contract.decisions_sha256,
+        "run_manifest_sha256": contract.run_manifest_sha256,
+        "test_planner_manifest_sha256": contract.test_planner_manifest_sha256,
+        "stdout_sha256": contract.stdout_sha256,
+    }
+    if scientific_hashes != expected_scientific:
+        raise RunnerError("RETAINED_R6_DRIFT:post_inventory_science")
+
+    original_reason = state["failure_reason"]
+    recovery_record = {
+        "schema_version": "p4_g0c_r6_recovery_record_v1",
+        "source_task": "ICRA-063",
+        "recovery_task": "ICRA-064",
+        "original_runner_state_sha256": contract.runner_state_sha256,
+        "original_failure_reason": original_reason,
+        "adopted_run_id": first["run_id"],
+        "recovery_launch_invocations": 0,
+        "recovery_retries": 0,
+        "artifact_inventory_path": str(inventory_path.resolve()),
+        "artifact_inventory_sha256": inventory_sha256,
+        "scientific_hashes_before": scientific_hashes,
+        "scientific_hashes_after": dict(scientific_hashes),
+        "shared_ros_logs_latest_target": validated["shared_alias_target"],
+        "next_run_id": validated["plan"][1]["run_id"],
+        "remaining_run_count": 14,
+    }
+    state.update({
+        "schema_version": RUNNER_SCHEMA_V6_RECOVERY,
+        "runner_state": "RECOVERY_ADOPTED",
+        "completed_run_ids": [first["run_id"]],
+        "completed_run_count": 1,
+        "failure_reason": "",
+        "failed_run_id": "",
+        "recovery": recovery_record,
+        "runner_sessions": [
+            {"session_index": 1, "gpu_preflight_invocations": 1,
+             "launch_invocations": 1},
+            {"session_index": 2, "gpu_preflight_invocations": 0,
+             "launch_invocations": 0},
+        ],
+        "dependency_preflight": validated["dependency_preflight"],
+        "p0_profile_preflight": validated["p0_profile_preflight"],
+    })
+    state["attempts"][0].update({
+        "state": "COMPLETE",
+        "artifact_inventory_path": str(inventory_path.resolve()),
+        "artifact_inventory_sha256": inventory_sha256,
+        "test_planner_manifest_path": str(test_manifest_path.resolve()),
+        "test_planner_manifest_sha256": sha256_file(test_manifest_path),
+    })
+    _persist_result(validated["root"], state)
+    adopted_state_sha256 = sha256_file(validated["state_path"])
+    transition = {
+        "schema_version": "icra064_r6_recovery_transition_v1",
+        "original_terminal_state_path": str(original_state_path.resolve()),
+        "original_terminal_state_raw_sha256": contract.runner_state_sha256,
+        "original_terminal_state_canonical_sha256": sha256_file(
+            original_state_path
+        ),
+        "adopted_state_sha256": adopted_state_sha256,
+        "recovery": recovery_record,
+    }
+    transition_path = evidence / "recovery_transition.json"
+    with transition_path.open("xb") as stream:
+        stream.write(canonical_bytes(transition))
+
+    launch_environment = validate_launch_environment_inventory(
+        state.get("launch_environment"), validated["root"],
+        validated["plan"], require_pristine=False,
+    )
+    launch_process_environment = child_launch_environment(
+        dependency_environment, launch_environment
+    )
+
+    state["runner_state"] = "GPU_PREFLIGHT_RUNNING"
+    state["gpu_preflight_invocations"] = 2
+    state["runner_sessions"][1]["gpu_preflight_invocations"] = 1
+    _persist_result(validated["root"], state)
+    try:
+        preflight = gpu_preflight(
+            validated["root"] / "preflight/session_02"
+        )
+    except Exception as exc:
+        state.update({
+            "runner_state": "FAILED",
+            "failure_reason": f"gpu_preflight_error:{type(exc).__name__}",
+        })
+        _persist_result(validated["root"], state)
+        return state
+    state["gpu_preflight_session_02"] = preflight
+    if preflight.get("gpu_ready") is not True:
+        state.update({
+            "runner_state": "FAILED",
+            "failure_reason": "GPU_NOT_READY",
+            "gpu_failure_reason": preflight.get("failure_reason", "unknown"),
+        })
+        _persist_result(validated["root"], state)
+        return state
+
+    duration_s = float(bundle.protocol.get("run_duration_s", 90.0))
+    for record in validated["plan"][1:]:
+        run_dir = Path(record["run_dir"])
+        run_dir.mkdir(parents=True, exist_ok=False)
+        run_environment = _run_environment_binding(
+            launch_environment, record["run_id"]
+        )
+        command = launch_command(bundle, record, run_environment)
+        (run_dir / "launch_command.json").write_text(
+            json.dumps(command, indent=2) + "\n"
+        )
+        state["runner_state"] = "RUNNING"
+        state["attempted_run_ids"].append(record["run_id"])
+        state["attempts"].append({
+            "attempt_index": len(state["attempted_run_ids"]),
+            "run_id": record["run_id"],
+            "state": "RUNNING",
+        })
+        state["launch_invocations"] += 1
+        state["runner_sessions"][1]["launch_invocations"] += 1
+        _persist_result(validated["root"], state)
+        try:
+            exit_code, monitor_result = launch_executor(
+                record, command, duration_s, REQUIRED_PROCESSES,
+                launch_process_environment,
+            )
+        except Exception as exc:
+            state["attempts"][-1]["state"] = "FAILED"
+            state.update({
+                "runner_state": "FAILED",
+                "failure_reason": f"launch_executor_error:{type(exc).__name__}",
+                "failed_run_id": record["run_id"],
+            })
+            _persist_result(validated["root"], state)
+            return state
+        if exit_code != 0 or monitor_result.get("required_processes_ok") is not True:
+            state["attempts"][-1]["state"] = "FAILED"
+            state.update({
+                "runner_state": "FAILED",
+                "failure_reason": (
+                    f"launch_exit_{exit_code}" if exit_code != 0
+                    else "required_process_failure"
+                ),
+                "failed_run_id": record["run_id"],
+            })
+            _persist_result(validated["root"], state)
+            return state
+        try:
+            binding = _validate_and_finalize_run(
+                bundle, record, monitor_result, run_environment
+            )
+        except (RunnerError, OSError) as exc:
+            state["attempts"][-1]["state"] = "FAILED"
+            state.update({
+                "runner_state": "FAILED",
+                "failure_reason": str(exc),
+                "failed_run_id": record["run_id"],
+            })
+            _persist_result(validated["root"], state)
+            return state
+        state["attempts"][-1].update(binding)
+        state["attempts"][-1]["state"] = "COMPLETE"
+        state["completed_run_ids"].append(record["run_id"])
+        state["completed_run_count"] = len(state["completed_run_ids"])
+        _persist_result(validated["root"], state)
+    state.update({
+        "runner_state": "COMPLETE", "failure_reason": "", "failed_run_id": "",
+    })
+    _persist_result(validated["root"], state)
+    return state
+
+
 def run(
     bundle: ProtocolBundle,
     runs_root: Path,
@@ -1390,6 +1895,9 @@ def _parser() -> argparse.ArgumentParser:
     modes.add_argument("--plan-only", action="store_true")
     modes.add_argument("--preflight-only", action="store_true")
     modes.add_argument("--dependency-preflight-only", action="store_true")
+    modes.add_argument("--r6-recovery-validate-only", action="store_true")
+    modes.add_argument("--r6-recovery-continue", action="store_true")
+    parser.add_argument("--recovery-evidence-root", type=Path)
     return parser
 
 
@@ -1435,24 +1943,41 @@ def main(argv: list[str] | None = None) -> int:
             args.fixture,
             expected_protocol_schema=trusted_schema,
         )
-        result = run(
-            bundle,
-            args.runs_root,
-            plan_only=args.plan_only,
-            preflight_only=args.preflight_only,
-            dependency_preflight_only=args.dependency_preflight_only,
-            dependency_manifest_path=args.dependency_manifest,
+        recovery_mode = (
+            args.r6_recovery_validate_only or args.r6_recovery_continue
         )
+        if recovery_mode:
+            if args.recovery_evidence_root is None:
+                raise RunnerError("RECOVERY_EVIDENCE_PATH_REQUIRED")
+            result = recover_r6_matrix(
+                bundle, args.runs_root, args.recovery_evidence_root,
+                validation_only=args.r6_recovery_validate_only,
+                dependency_manifest_path=args.dependency_manifest,
+            )
+        else:
+            if args.recovery_evidence_root is not None:
+                raise RunnerError("RECOVERY_EVIDENCE_PATH_WITHOUT_RECOVERY")
+            result = run(
+                bundle,
+                args.runs_root,
+                plan_only=args.plan_only,
+                preflight_only=args.preflight_only,
+                dependency_preflight_only=args.dependency_preflight_only,
+                dependency_manifest_path=args.dependency_manifest,
+            )
     except (RunnerError, RuntimeError) as exc:
         print(f"P4_G0C_RUNNER_FAILED: {exc}", file=sys.stderr)
         return 2
     print(json.dumps(result, indent=2, sort_keys=True))
-    if result["failure_reason"] == "GPU_NOT_READY":
+    if result.get("failure_reason") == "GPU_NOT_READY":
         print("GPU_NOT_READY", file=sys.stderr)
         return 2
-    return 0 if result["runner_state"] in {
-        "PLANNED", "DEPENDENCY_PREFLIGHT_PASS", "PREFLIGHT_PASS", "COMPLETE"
-    } else 2
+    return 0 if (
+        result.get("recovery_state") == "ADOPTION_ELIGIBLE"
+        or result.get("runner_state") in {
+            "PLANNED", "DEPENDENCY_PREFLIGHT_PASS", "PREFLIGHT_PASS", "COMPLETE"
+        }
+    ) else 2
 
 
 if __name__ == "__main__":

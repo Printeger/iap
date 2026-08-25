@@ -189,7 +189,12 @@ class P4G0CRunnerTest(unittest.TestCase):
             "query_base_time_s": "10.0",
             "occupancy_epoch": "19",
             "status": "ORIGINAL_SELECTED",
-            "reason": "METRICS_ONLY",
+            "reason": (
+                "metrics_only"
+                if self.bundle.protocol["schema_version"]
+                == MODULE.TEMPORAL_SUPPORT_PROTOCOL_SCHEMA
+                else "METRICS_ONLY"
+            ),
             "selection_applied": "0",
             "original_hash": f"original-{index}",
             "risk_hash": f"risk-{index}",
@@ -217,8 +222,16 @@ class P4G0CRunnerTest(unittest.TestCase):
         launch_manifest_path = (
             run_dir / "exports/synthetic_run_token/test_planner_manifest.json"
         )
+        schema = self.bundle.protocol["schema_version"]
+        version = schema.rsplit("_", 1)[-1]
+        replacement = schema != MODULE.LEGACY_PROTOCOL_SCHEMA
+        hardened = schema in {
+            MODULE.HARDENED_PROTOCOL_SCHEMA, MODULE.PROFILED_PROTOCOL_SCHEMA,
+            MODULE.CLOSED_FIXTURE_PROTOCOL_SCHEMA,
+            MODULE.TEMPORAL_SUPPORT_PROTOCOL_SCHEMA,
+        }
         manifest = {
-            "schema_version": "p4_g0c_run_manifest_v2",
+            "schema_version": f"p4_g0c_run_manifest_{version}",
             "run_id": record["run_id"],
             "seed": record["seed"],
             "repetition": record["repetition"],
@@ -227,7 +240,7 @@ class P4G0CRunnerTest(unittest.TestCase):
             "fixture_sha256": self.bundle.fixture_sha256,
             "csv_path": str(csv_path.resolve()),
             "gate": "G0C",
-            "experiment": "p4_g0c_metrics_calibration_v2",
+            "experiment": f"p4_g0c_metrics_calibration_{version}",
             "scenario": "p4_g0c_free_corridor_v1",
             "decision_schema_version": "p4_collision_guide_decision_v1",
             "effective_values": self.bundle.protocol["effective_values"],
@@ -240,14 +253,28 @@ class P4G0CRunnerTest(unittest.TestCase):
             "start_rviz": False,
             "immutable_run_id": True,
             "overwrite_allowed": False,
-            "dependency_manifest_sha256": self.bundle.protocol[
-                "runtime_dependency_manifest"
-            ]["sha256"],
-            "replacement_lineage_sha256": self.bundle.protocol[
-                "replacement_lineage"
-            ]["sha256"],
             "test_planner_manifest_path": str(launch_manifest_path.resolve()),
         }
+        if replacement:
+            manifest.update({
+                "dependency_manifest_sha256": self.bundle.protocol[
+                    "runtime_dependency_manifest"
+                ]["sha256"],
+                "replacement_lineage_sha256": self.bundle.protocol[
+                    "replacement_lineage"
+                ]["sha256"],
+            })
+        if hardened:
+            manifest.update(MODULE.expected_launch_environment_binding(
+                run_dir.parent, run_dir
+            ))
+        if schema in {
+            MODULE.CLOSED_FIXTURE_PROTOCOL_SCHEMA,
+            MODULE.TEMPORAL_SUPPORT_PROTOCOL_SCHEMA,
+        }:
+            manifest["admission_parameter"] = {
+                "requested": True, "effective": True,
+            }
         (run_dir / "p4_g0c_run_manifest.json").write_text(
             json.dumps(manifest, sort_keys=True) + "\n"
         )
@@ -258,7 +285,7 @@ class P4G0CRunnerTest(unittest.TestCase):
             writer.writeheader()
             writer.writerow(self._valid_row(row_index))
         launch_manifest_path.parent.mkdir(parents=True)
-        launch_manifest_path.write_text(json.dumps({
+        launch_manifest_payload = {
             "schema_version": "test_planner_manifest_v1",
             "run_id": record["run_id"],
             **top_level_effective_values(self.bundle.protocol),
@@ -268,15 +295,355 @@ class P4G0CRunnerTest(unittest.TestCase):
                     "fixture_sha256", "effective_values",
                     "effective_config_sha256", "selection_applied",
                     "record_bag", "start_rviz",
-                    "dependency_manifest_sha256",
-                    "replacement_lineage_sha256",
+                    *(("dependency_manifest_sha256",
+                       "replacement_lineage_sha256") if replacement else ()),
+                    *(("child_environment", "mutable_output_paths")
+                      if hardened else ()),
+                    *(("admission_parameter",) if schema in {
+                        MODULE.CLOSED_FIXTURE_PROTOCOL_SCHEMA,
+                        MODULE.TEMPORAL_SUPPORT_PROTOCOL_SCHEMA,
+                    } else ()),
                 )
             },
-        }) + "\n")
+        }
+        if schema in {
+            MODULE.PROFILED_PROTOCOL_SCHEMA,
+            MODULE.CLOSED_FIXTURE_PROTOCOL_SCHEMA,
+            MODULE.TEMPORAL_SUPPORT_PROTOCOL_SCHEMA,
+        }:
+            launch_manifest_payload[
+                "p4.require_risk_grid_ready_before_planning"
+            ] = self.bundle.protocol["effective_values"][
+                "p4.require_risk_grid_ready_before_planning"
+            ]
+        if schema in {
+            MODULE.CLOSED_FIXTURE_PROTOCOL_SCHEMA,
+            MODULE.TEMPORAL_SUPPORT_PROTOCOL_SCHEMA,
+        }:
+            launch_manifest_payload.update({
+                "p0.predictor.requested_worker_count": 4,
+                "p0.predictor.effective_worker_count": 4,
+            })
+        if schema == MODULE.TEMPORAL_SUPPORT_PROTOCOL_SCHEMA:
+            launch_manifest_payload.update({
+                "p0.horizons_s": [
+                    0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0,
+                ],
+                "p4.cost_query_policy": (
+                    "CONSERVATIVE_OCCUPIED_COST_SUPPORT"
+                ),
+            })
+        launch_manifest_path.write_text(
+            json.dumps(launch_manifest_payload) + "\n"
+        )
         timing = run_dir / "runtime/profiling/iap_timing.csv"
         timing.parent.mkdir(parents=True)
         timing.write_text("stamp,duration_ms\n1,2\n")
         (run_dir / "stdout.log").write_text("controlled shutdown\n")
+
+    def _make_failed_r6_recovery_root(self, root):
+        self.bundle = MODULE.load_bundle(
+            REPO / "config/icra27/p4_g0c_protocol_v6.json",
+            REPO / "config/icra27/p4_threshold_registry_v6.json",
+            REPO / "config/icra27/p4_g0c_live_fixture_v2.json",
+            expected_protocol_schema=MODULE.TEMPORAL_SUPPORT_PROTOCOL_SCHEMA,
+        )
+        plan = MODULE.expand_run_plan(self.bundle.protocol, root)
+        root.mkdir()
+        launch_environment = MODULE.prepare_launch_environment(root, plan)
+        record = plan[0]
+        run_dir = Path(record["run_dir"])
+        run_dir.mkdir()
+        (run_dir / "launch_command.json").write_text("[]\n")
+        self._write_production_outputs(record, 0)
+        logs = run_dir / "runtime/iap_logs"
+        target = logs / "synthetic-first-session"
+        target.mkdir(parents=True)
+        (target / "runtime.log").write_text("retained\n")
+        (logs / "latest").symlink_to(target.name)
+        monitor = {
+            "required_processes_ok": True,
+            "required_processes": {
+                name: {"seen": True, "runtime_failure": False}
+                for name in MODULE.REQUIRED_PROCESSES
+            },
+            "process_failures": [],
+        }
+        with mock.patch.object(
+            MODULE, "make_run_artifact_inventory",
+            side_effect=RuntimeError(
+                "run artifact cannot be a symlink: runtime/iap_logs/latest"
+            ),
+        ):
+            with self.assertRaisesRegex(
+                MODULE.RunnerError, "run artifact cannot be a symlink"
+            ):
+                MODULE._validate_and_finalize_run(
+                    self.bundle, record, monitor,
+                    MODULE._run_environment_binding(
+                        launch_environment, record["run_id"]
+                    ),
+                )
+        ros_logs = root / "launch_environment/ros_logs"
+        ros_target = ros_logs / "synthetic-ros-session"
+        ros_target.mkdir()
+        (ros_target / "launch.log").write_text("retained launch\n")
+        (ros_logs / "latest").symlink_to(ros_target.resolve())
+        failure = (
+            "run artifact inventory failed: p4-g0c-r6-seed211-rep01:"
+            "run artifact cannot be a symlink: runtime/iap_logs/latest"
+        )
+        state = MODULE._base_result(self.bundle, plan)
+        state.update({
+            "runner_state": "FAILED",
+            "dependency_preflight": {
+                "dependency_ready": True,
+                "manifest_sha256": self.bundle.protocol[
+                    "runtime_dependency_manifest"
+                ]["sha256"],
+            },
+            "p0_profile_preflight": {"profile_ready": True},
+            "launch_environment": launch_environment,
+            "gpu_preflight_invocations": 1,
+            "gpu_preflight": {"gpu_ready": True},
+            "launch_started": True,
+            "attempted_run_ids": [record["run_id"]],
+            "attempts": [{
+                "attempt_index": 1, "run_id": record["run_id"],
+                "state": "FAILED",
+            }],
+            "launch_invocations": 1,
+            "failure_reason": failure,
+            "failed_run_id": record["run_id"],
+        })
+        state_path = root / "p4_g0c_runner_state.json"
+        state_path.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n")
+        run_manifest = run_dir / "p4_g0c_run_manifest.json"
+        test_manifest = Path(json.loads(
+            run_manifest.read_text()
+        )["test_planner_manifest_path"])
+        contract = MODULE.R6RecoveryContract(
+            runs_root=root.resolve(),
+            runner_state_sha256=hashlib.sha256(
+                state_path.read_bytes()
+            ).hexdigest(),
+            decisions_sha256=hashlib.sha256(
+                (run_dir / "p4_decisions.csv").read_bytes()
+            ).hexdigest(),
+            run_manifest_sha256=hashlib.sha256(
+                run_manifest.read_bytes()
+            ).hexdigest(),
+            test_planner_manifest_sha256=hashlib.sha256(
+                test_manifest.read_bytes()
+            ).hexdigest(),
+            stdout_sha256=hashlib.sha256(
+                (run_dir / "stdout.log").read_bytes()
+            ).hexdigest(),
+            run_alias_target="synthetic-first-session",
+        )
+        return contract
+
+    def _ready_r6_recovery_dependency(self):
+        return {
+            "dependency_ready": True,
+            "manifest_sha256": self.bundle.protocol[
+                "runtime_dependency_manifest"
+            ]["sha256"],
+            "validated_prefixes": list(MODULE.R6_RECOVERY_EXACT_PREFIXES),
+        }
+
+    def test_r6_recovery_validation_only_is_exact_and_nonmutating(self):
+        task_tmp = REPO / "results/icra27/icra064"
+        task_tmp.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=task_tmp) as tmp:
+            root = Path(tmp) / "runs"
+            contract = self._make_failed_r6_recovery_root(root)
+            state_path = root / "p4_g0c_runner_state.json"
+            before = state_path.read_bytes()
+            evidence_root = Path(tmp) / "recovery-evidence"
+            with mock.patch.object(
+                MODULE, "ICRA063_R6_RECOVERY_CONTRACT", contract
+            ), mock.patch.object(
+                MODULE, "validate_runtime_dependencies",
+                return_value=self._ready_r6_recovery_dependency(),
+            ):
+                result = MODULE.recover_r6_matrix(
+                    self.bundle, root, evidence_root,
+                    validation_only=True,
+                )
+
+            self.assertEqual(result["recovery_state"], "ADOPTION_ELIGIBLE")
+            self.assertEqual(
+                result["next_run_id"], "p4-g0c-r6-seed211-rep02"
+            )
+            self.assertEqual(result["remaining_run_count"], 14)
+            self.assertEqual(result["recovery_writes"], 0)
+            self.assertEqual(result["recovery_launches"], 0)
+            self.assertEqual(state_path.read_bytes(), before)
+            self.assertFalse(evidence_root.exists())
+            self.assertFalse(
+                (root / "p4-g0c-r6-seed211-rep01"
+                 / "p4_g0c_artifact_inventory.json").exists()
+            )
+
+    def test_r6_recovery_continues_only_remaining_fourteen_once(self):
+        task_tmp = REPO / "results/icra27/icra064"
+        task_tmp.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=task_tmp) as tmp:
+            root = Path(tmp) / "runs"
+            contract = self._make_failed_r6_recovery_root(root)
+            first_run = root / "p4-g0c-r6-seed211-rep01"
+            frozen_hashes = {
+                name: hashlib.sha256((first_run / name).read_bytes()).hexdigest()
+                for name in (
+                    "p4_decisions.csv", "p4_g0c_run_manifest.json",
+                    "stdout.log",
+                )
+            }
+            launched = []
+
+            def launch(record, *_):
+                launched.append(record["run_id"])
+                self._write_production_outputs(record, len(launched))
+                logs = Path(record["run_dir"]) / "runtime/iap_logs"
+                target = logs / f"synthetic-{record['run_id']}"
+                target.mkdir(parents=True)
+                (target / "runtime.log").write_text("complete\n")
+                (logs / "latest").symlink_to(target.name)
+                return 0, {
+                    "required_processes_ok": True,
+                    "required_processes": {
+                        name: {"seen": True, "runtime_failure": False}
+                        for name in MODULE.REQUIRED_PROCESSES
+                    },
+                    "process_failures": [],
+                }
+
+            evidence_root = Path(tmp) / "recovery-evidence"
+            dependency = self._ready_r6_recovery_dependency()
+            with mock.patch.object(
+                MODULE, "ICRA063_R6_RECOVERY_CONTRACT", contract
+            ), mock.patch.object(
+                MODULE, "validate_runtime_dependencies",
+                return_value=dependency,
+            ):
+                result = MODULE.recover_r6_matrix(
+                    self.bundle, root, evidence_root,
+                    gpu_preflight=lambda _: {"gpu_ready": True},
+                    launch_executor=launch,
+                )
+
+            self.assertEqual(
+                launched,
+                self.bundle.protocol["registered_run_ids"][1:],
+            )
+            self.assertEqual(result["runner_state"], "COMPLETE")
+            self.assertEqual(result["attempted_run_ids"], (
+                self.bundle.protocol["registered_run_ids"]
+            ))
+            self.assertEqual(result["completed_run_ids"], (
+                self.bundle.protocol["registered_run_ids"]
+            ))
+            self.assertEqual(result["launch_invocations"], 15)
+            self.assertEqual(result["gpu_preflight_invocations"], 2)
+            self.assertEqual(result["retries"], 0)
+            self.assertEqual(result["runner_sessions"], [
+                {"session_index": 1, "gpu_preflight_invocations": 1,
+                 "launch_invocations": 1},
+                {"session_index": 2, "gpu_preflight_invocations": 1,
+                 "launch_invocations": 14},
+            ])
+            self.assertTrue((
+                first_run / "p4_g0c_artifact_inventory.json"
+            ).is_file())
+            self.assertTrue((
+                evidence_root / "original_terminal_state.json"
+            ).is_file())
+            self.assertTrue((
+                evidence_root / "recovery_transition.json"
+            ).is_file())
+            self.assertEqual(frozen_hashes, {
+                name: hashlib.sha256((first_run / name).read_bytes()).hexdigest()
+                for name in frozen_hashes
+            })
+
+    def test_r6_recovery_gpu_failure_is_terminal_and_cannot_retry(self):
+        task_tmp = REPO / "results/icra27/icra064"
+        task_tmp.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=task_tmp) as tmp:
+            root = Path(tmp) / "runs"
+            contract = self._make_failed_r6_recovery_root(root)
+            evidence_root = Path(tmp) / "recovery-evidence"
+            dependency = self._ready_r6_recovery_dependency()
+            never_launch = mock.Mock(
+                side_effect=AssertionError("launch must not run")
+            )
+            with mock.patch.object(
+                MODULE, "ICRA063_R6_RECOVERY_CONTRACT", contract
+            ), mock.patch.object(
+                MODULE, "validate_runtime_dependencies",
+                return_value=dependency,
+            ):
+                result = MODULE.recover_r6_matrix(
+                    self.bundle, root, evidence_root,
+                    gpu_preflight=lambda _: {
+                        "gpu_ready": False,
+                        "failure_reason": "synthetic_gpu_failure",
+                    },
+                    launch_executor=never_launch,
+                )
+                with self.assertRaisesRegex(
+                    MODULE.RunnerError, "RETAINED_R6_DRIFT"
+                ):
+                    MODULE.recover_r6_matrix(
+                        self.bundle, root, evidence_root,
+                        gpu_preflight=lambda _: {"gpu_ready": True},
+                        launch_executor=never_launch,
+                    )
+
+            self.assertEqual(result["runner_state"], "FAILED")
+            self.assertEqual(result["failure_reason"], "GPU_NOT_READY")
+            self.assertEqual(result["gpu_preflight_invocations"], 2)
+            self.assertEqual(result["launch_invocations"], 1)
+            self.assertEqual(
+                result["attempted_run_ids"],
+                ["p4-g0c-r6-seed211-rep01"],
+            )
+            never_launch.assert_not_called()
+
+    def test_r6_recovery_rejects_alternate_install_before_any_write(self):
+        task_tmp = REPO / "results/icra27/icra064"
+        task_tmp.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=task_tmp) as tmp:
+            root = Path(tmp) / "runs"
+            contract = self._make_failed_r6_recovery_root(root)
+            state_path = root / "p4_g0c_runner_state.json"
+            before = state_path.read_bytes()
+            evidence_root = Path(tmp) / "recovery-evidence"
+            dependency = self._ready_r6_recovery_dependency()
+            dependency["validated_prefixes"] = [
+                str(Path(tmp) / "alternate-install"), "/opt/ros/jazzy",
+            ]
+
+            with mock.patch.object(
+                MODULE, "ICRA063_R6_RECOVERY_CONTRACT", contract
+            ), mock.patch.object(
+                MODULE, "validate_runtime_dependencies",
+                return_value=dependency,
+            ), self.assertRaisesRegex(
+                MODULE.RunnerError, "exact_final_install"
+            ):
+                MODULE.recover_r6_matrix(
+                    self.bundle, root, evidence_root,
+                    validation_only=True,
+                )
+
+            self.assertEqual(state_path.read_bytes(), before)
+            self.assertFalse(evidence_root.exists())
+            self.assertFalse((
+                root / "p4-g0c-r6-seed211-rep01"
+                / "p4_g0c_artifact_inventory.json"
+            ).exists())
 
     def test_plan_only_is_nonmutating_and_seed_major(self):
         with tempfile.TemporaryDirectory() as tmp:

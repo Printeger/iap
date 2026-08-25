@@ -1095,6 +1095,17 @@ _RUNNER_ROOT_BINDINGS = {
     ),
     ("_validate_and_finalize_run", "inventory_path"): "derived:runs_root",
     ("_persist_result", "runs_root"): "registered:runs_root",
+    ("recover_r6_matrix", "evidence"): (
+        "registered:recovery_evidence_root"
+    ),
+    ("recover_r6_matrix", "original_state_path"): (
+        "derived:recovery_evidence_root"
+    ),
+    ("recover_r6_matrix", "inventory_path"): "derived:runs_root",
+    ("recover_r6_matrix", "transition_path"): (
+        "derived:recovery_evidence_root"
+    ),
+    ("recover_r6_matrix", "run_dir"): "derived:runs_root",
     ("run", "run_dir"): "derived:runs_root",
     ("run", "runs_root"): "registered:runs_root",
 }
@@ -1110,6 +1121,10 @@ _RUNNER_TARGET_POLICIES = {
     ): "registered:run_manifest_path",
     (
         "run", "Path.write_text", "run_dir / 'launch_command.json'",
+    ): "registered:launch_command_path",
+    (
+        "recover_r6_matrix", "Path.write_text",
+        "run_dir / 'launch_command.json'",
     ): "registered:launch_command_path",
     (
         "_execute_launch", "subprocess.Popen.stdout", "output",
@@ -1434,6 +1449,7 @@ def validate_production_contract(
     output_semantics: set[str] = set()
     environment_semantics: set[str] = set()
     container_semantics: set[str] = set()
+    recovery_evidence_semantics: set[str] = set()
     for record in mutations:
         classification = record.get("classification")
         if not isinstance(classification, str):
@@ -1451,6 +1467,8 @@ def validate_production_contract(
             environment_semantics.add(root)
         elif root == "runs_root":
             container_semantics.add(root)
+        elif root == "recovery_evidence_root":
+            recovery_evidence_semantics.add(root)
         else:
             raise SurfaceClassificationError(
                 f"unexpected production semantic root:{root}"
@@ -1463,6 +1481,11 @@ def validate_production_contract(
         raise SurfaceClassificationError(
             f"container semantic mismatch:{container_semantics}"
         )
+    if recovery_evidence_semantics != {"recovery_evidence_root"}:
+        raise SurfaceClassificationError(
+            "recovery evidence semantic mismatch:"
+            f"{recovery_evidence_semantics}"
+        )
     return {
         "canonical_descendants": container["canonical_descendants"],
         "child_environment": actual_child_environment,
@@ -1470,6 +1493,7 @@ def validate_production_contract(
         "environment_mutation_semantics": environment_semantics,
         "ownership_guards": container["ownership_guards"],
         "output_semantics": output_semantics,
+        "recovery_evidence_semantics": recovery_evidence_semantics,
         "runner_state_child": container["runner_state_child"],
     }
 

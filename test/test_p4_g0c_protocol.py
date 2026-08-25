@@ -580,6 +580,93 @@ class P4G0CProtocolTest(unittest.TestCase):
                 ],
             )
 
+    def test_r6_inventory_records_only_exact_safe_iap_logs_latest_alias(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp) / "p4-g0c-r6-seed211-rep01"
+            logs = run_dir / "runtime/iap_logs"
+            target = logs / "20260825T125103Z_278"
+            target.mkdir(parents=True)
+            (target / "metrics.csv").write_text("metric,value\n")
+            (logs / "latest").symlink_to(target.name)
+
+            inventory = MODULE.make_run_artifact_inventory(
+                run_dir, run_dir.name
+            )
+            entries = MODULE.validate_run_artifact_inventory(
+                inventory, run_dir, run_dir.name
+            )
+
+            self.assertEqual(
+                inventory["schema_version"],
+                "p4_g0c_run_artifact_inventory_v2",
+            )
+            self.assertIn({
+                "path": "runtime/iap_logs/latest",
+                "type": "symlink",
+                "target": "20260825T125103Z_278",
+            }, entries)
+            self.assertIn({
+                "path": "runtime/iap_logs/20260825T125103Z_278",
+                "type": "directory",
+            }, entries)
+
+    def test_r6_inventory_rejects_nonexact_or_unsafe_latest_aliases(self):
+        cases = {
+            "alternate_name": ("runtime/iap_logs/current", "target", "dir"),
+            "absolute_target": (
+                "runtime/iap_logs/latest", "/tmp/outside", "none"
+            ),
+            "nested_target": (
+                "runtime/iap_logs/latest", "nested/target", "dir"
+            ),
+            "dot_target": ("runtime/iap_logs/latest", ".", "none"),
+            "dotdot_target": ("runtime/iap_logs/latest", "..", "none"),
+            "dangling_target": (
+                "runtime/iap_logs/latest", "missing", "none"
+            ),
+            "regular_file_target": (
+                "runtime/iap_logs/latest", "target", "file"
+            ),
+            "symlink_chain": (
+                "runtime/iap_logs/latest", "intermediate", "chain"
+            ),
+        }
+        for label, (relative, target_value, target_kind) in cases.items():
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as tmp:
+                run_dir = Path(tmp) / "p4-g0c-r6-seed211-rep01"
+                link = run_dir / relative
+                link.parent.mkdir(parents=True)
+                target = link.parent / target_value
+                if target_kind == "dir":
+                    target.mkdir(parents=True)
+                elif target_kind == "file":
+                    target.write_text("not a directory\n")
+                elif target_kind == "chain":
+                    (link.parent / "real-target").mkdir()
+                    target.symlink_to("real-target")
+                link.symlink_to(target_value)
+                with self.assertRaisesRegex(MODULE.ProtocolError, "symlink"):
+                    MODULE.make_run_artifact_inventory(run_dir, run_dir.name)
+
+    def test_r6_inventory_validation_rechecks_alias_target_type(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp) / "p4-g0c-r6-seed211-rep01"
+            logs = run_dir / "runtime/iap_logs"
+            target = logs / "session"
+            target.mkdir(parents=True)
+            alias = logs / "latest"
+            alias.symlink_to(target.name)
+            inventory = MODULE.make_run_artifact_inventory(
+                run_dir, run_dir.name
+            )
+
+            target.rmdir()
+            target.write_text("replaced after inventory\n")
+            with self.assertRaisesRegex(MODULE.ProtocolError, "symlink"):
+                MODULE.validate_run_artifact_inventory(
+                    inventory, run_dir, run_dir.name
+                )
+
     def test_inventory_rejects_secondary_v1_and_v2_run_manifests(self):
         for schema in (
             "p4_g0c_run_manifest_v1", "p4_g0c_run_manifest_v2"

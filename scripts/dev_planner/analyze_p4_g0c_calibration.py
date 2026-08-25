@@ -55,6 +55,7 @@ ALLOWED_ROOT_METADATA = {
     "p4_g0c_threshold_draft.json",
 }
 ALLOWED_PREFLIGHT_METADATA = {"gpu_preflight.json"}
+R6_SAFE_ROS_LOG_ALIAS = Path("ros_logs/latest")
 
 
 class AnalysisError(RuntimeError):
@@ -75,7 +76,7 @@ def _versioned_schema(bundle: ProtocolBundle, stem: str) -> str:
 
 def _runner_state_schema(bundle: ProtocolBundle) -> str:
     return (
-        "p4_g0c_runner_state_v8"
+        "p4_g0c_runner_state_v9"
         if bundle.protocol.get("schema_version") == PROTOCOL_SCHEMA_V6
         else "p4_g0c_runner_state_v7" if bundle.protocol.get("schema_version") == PROTOCOL_SCHEMA_V5
         else "p4_g0c_runner_state_v6"
@@ -154,11 +155,50 @@ def _raw_bundle_hash(root: Path, paths: list[Path]) -> str:
     return digest.hexdigest()
 
 
+def _safe_ros_logs_latest(alias: Path, launch_environment: Path) -> bool:
+    ros_logs = launch_environment / "ros_logs"
+    if alias != ros_logs / "latest":
+        return False
+    try:
+        literal = os.readlink(alias)
+    except OSError:
+        return False
+    target = Path(literal)
+    if target.is_absolute():
+        candidate = target
+        try:
+            if str(candidate) != str(candidate.resolve(strict=True)):
+                return False
+        except OSError:
+            return False
+    else:
+        if (
+            not literal
+            or "\\" in literal
+            or len(target.parts) != 1
+            or target.parts[0] in {"", ".", ".."}
+        ):
+            return False
+        candidate = ros_logs / literal
+    try:
+        metadata = os.lstat(candidate)
+    except OSError:
+        return False
+    return (
+        stat.S_ISDIR(metadata.st_mode)
+        and not stat.S_ISLNK(metadata.st_mode)
+        and candidate.parent.resolve() == ros_logs.resolve()
+    )
+
+
 def _root_inventory_failures(
     root: Path, registered_run_ids: list[str]
 ) -> tuple[list[str], list[Path]]:
     failures = []
     bundle_paths: list[Path] = []
+    r6_root = bool(registered_run_ids) and all(
+        run_id.startswith("p4-g0c-r6-") for run_id in registered_run_ids
+    )
     allowed_names = set(registered_run_ids) | ALLOWED_ROOT_METADATA | {
         "preflight", "launch_environment"
     }
@@ -185,6 +225,23 @@ def _root_inventory_failures(
             failures.append("root_inventory_preflight_type")
         else:
             for entry in preflight.iterdir():
+                if (
+                    r6_root and entry.name == "session_02"
+                    and entry.is_dir() and not entry.is_symlink()
+                ):
+                    children = list(entry.iterdir())
+                    if (
+                        len(children) != 1
+                        or children[0].name != "gpu_preflight.json"
+                        or not children[0].is_file()
+                        or children[0].is_symlink()
+                    ):
+                        failures.append(
+                            "root_inventory_preflight_metadata:session_02"
+                        )
+                    else:
+                        bundle_paths.append(children[0])
+                    continue
                 if (
                     entry.name not in ALLOWED_PREFLIGHT_METADATA
                     or not entry.is_file()
@@ -225,10 +282,16 @@ def _root_inventory_failures(
                 failures.append("root_inventory_xdg_runtime_contract")
             for entry in launch_environment.rglob("*"):
                 if entry.is_symlink():
-                    failures.append(
-                        "root_inventory_launch_environment_symlink:"
-                        f"{entry.relative_to(launch_environment)}"
-                    )
+                    if not (
+                        r6_root
+                        and entry.relative_to(launch_environment)
+                        == R6_SAFE_ROS_LOG_ALIAS
+                        and _safe_ros_logs_latest(entry, launch_environment)
+                    ):
+                        failures.append(
+                            "root_inventory_launch_environment_symlink:"
+                            f"{entry.relative_to(launch_environment)}"
+                        )
                 elif entry.is_file():
                     bundle_paths.append(entry)
 
@@ -269,7 +332,10 @@ def _runner_state_failures(
         PROTOCOL_SCHEMA_V2, PROTOCOL_SCHEMA_V3, PROTOCOL_SCHEMA_V4,
         PROTOCOL_SCHEMA_V5, PROTOCOL_SCHEMA_V6,
     }:
-        expected_scalars["gpu_preflight_invocations"] = 1
+        expected_scalars["gpu_preflight_invocations"] = (
+            2 if bundle.protocol.get("schema_version") == PROTOCOL_SCHEMA_V6
+            else 1
+        )
     for key, value in expected_scalars.items():
         if state.get(key) != value:
             if key.endswith("sha256"):
@@ -338,6 +404,72 @@ def _runner_state_failures(
         failures.append("runner_state_attempt_ledger")
     if state.get("runs") != plan:
         failures.append("runner_state_plan")
+    if bundle.protocol.get("schema_version") == PROTOCOL_SCHEMA_V6:
+        expected_sessions = [
+            {"session_index": 1, "gpu_preflight_invocations": 1,
+             "launch_invocations": 1},
+            {"session_index": 2, "gpu_preflight_invocations": 1,
+             "launch_invocations": 14},
+        ]
+        if state.get("runner_sessions") != expected_sessions:
+            failures.append("runner_state_sessions")
+        recovery = state.get("recovery")
+        first_attempt = (
+            attempts[0] if isinstance(attempts, list) and attempts
+            and isinstance(attempts[0], dict) else {}
+        )
+        scientific_keys = {
+            "decisions_sha256", "run_manifest_sha256",
+            "test_planner_manifest_sha256", "stdout_sha256",
+        }
+        before = (
+            recovery.get("scientific_hashes_before")
+            if isinstance(recovery, dict) else None
+        )
+        after = (
+            recovery.get("scientific_hashes_after")
+            if isinstance(recovery, dict) else None
+        )
+        alias = root / "launch_environment/ros_logs/latest"
+        try:
+            shared_target = os.readlink(alias)
+        except OSError:
+            shared_target = None
+        recovery_valid = (
+            isinstance(recovery, dict)
+            and set(recovery) == {
+                "schema_version", "source_task", "recovery_task",
+                "original_runner_state_sha256", "original_failure_reason",
+                "adopted_run_id", "recovery_launch_invocations",
+                "recovery_retries", "artifact_inventory_path",
+                "artifact_inventory_sha256", "scientific_hashes_before",
+                "scientific_hashes_after", "shared_ros_logs_latest_target",
+                "next_run_id", "remaining_run_count",
+            }
+            and recovery.get("schema_version")
+            == "p4_g0c_r6_recovery_record_v1"
+            and recovery.get("source_task") == "ICRA-063"
+            and recovery.get("recovery_task") == "ICRA-064"
+            and _is_sha256(recovery.get("original_runner_state_sha256"))
+            and str(recovery.get("original_failure_reason", "")).endswith(
+                "run artifact cannot be a symlink: runtime/iap_logs/latest"
+            )
+            and recovery.get("adopted_run_id") == expected_ids[0]
+            and recovery.get("recovery_launch_invocations") == 0
+            and recovery.get("recovery_retries") == 0
+            and recovery.get("artifact_inventory_path")
+            == first_attempt.get("artifact_inventory_path")
+            and recovery.get("artifact_inventory_sha256")
+            == first_attempt.get("artifact_inventory_sha256")
+            and isinstance(before, dict) and set(before) == scientific_keys
+            and before == after
+            and all(_is_sha256(value) for value in before.values())
+            and recovery.get("shared_ros_logs_latest_target") == shared_target
+            and recovery.get("next_run_id") == expected_ids[1]
+            and recovery.get("remaining_run_count") == 14
+        )
+        if not recovery_valid:
+            failures.append("runner_state_recovery")
     if bundle.protocol.get("schema_version") in {
         PROTOCOL_SCHEMA_V2, PROTOCOL_SCHEMA_V3, PROTOCOL_SCHEMA_V4,
         PROTOCOL_SCHEMA_V5, PROTOCOL_SCHEMA_V6,
@@ -624,7 +756,7 @@ def _manifest_failures(
 
 def _row_metrics(
     row: dict[str, str], source_index: int, noise_floor: float,
-    path_ratio_tolerance: float,
+    path_ratio_tolerance: float, expected_reason: str,
 ) -> tuple[dict[str, float] | None, list[str], tuple[Any, ...] | None]:
     failures = []
     prefix = f"row_{source_index}"
@@ -639,7 +771,7 @@ def _row_metrics(
     identity = decision_identity(typed)
     if (
         strings["status"] != "ORIGINAL_SELECTED"
-        or strings["reason"] != "METRICS_ONLY"
+        or strings["reason"] != expected_reason
     ):
         failures.append(f"incomplete_decision:{prefix}")
     if counts["selection_applied"] != 0:
@@ -824,7 +956,9 @@ def analyze(bundle: ProtocolBundle, runs_root: Path) -> dict[str, Any]:
             source_index = denominator
             denominator += 1
             row_metric, row_failures, identity = _row_metrics(
-                row, source_index, noise_floor, ratio_tolerance
+                row, source_index, noise_floor, ratio_tolerance,
+                "metrics_only" if bundle.protocol.get("schema_version")
+                == PROTOCOL_SCHEMA_V6 else "METRICS_ONLY",
             )
             failures.extend(row_failures)
             if identity is not None:

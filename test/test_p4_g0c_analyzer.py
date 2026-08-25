@@ -5,6 +5,7 @@ import importlib.util
 import io
 import json
 import math
+import os
 import shutil
 import tempfile
 import unittest
@@ -102,7 +103,7 @@ class P4G0CAnalyzerTest(unittest.TestCase):
             "p4_g0c_analysis_v6",
         )
         self.assertEqual(
-            MODULE._runner_state_schema(bundle), "p4_g0c_runner_state_v8"
+            MODULE._runner_state_schema(bundle), "p4_g0c_runner_state_v9"
         )
 
     def setUp(self):
@@ -126,7 +127,11 @@ class P4G0CAnalyzerTest(unittest.TestCase):
             "query_base_time_s": "10.0",
             "occupancy_epoch": "19",
             "status": "ORIGINAL_SELECTED",
-            "reason": "METRICS_ONLY",
+            "reason": (
+                "metrics_only"
+                if self.bundle.protocol["schema_version"]
+                == MODULE.PROTOCOL_SCHEMA_V6 else "METRICS_ONLY"
+            ),
             "selection_applied": "0",
             "original_hash": f"original-{index}",
             "risk_hash": f"risk-{index}",
@@ -162,8 +167,15 @@ class P4G0CAnalyzerTest(unittest.TestCase):
             relative = path.relative_to(run_dir).as_posix()
             if path == inventory_path:
                 continue
-            self.assertFalse(path.is_symlink())
-            if path.is_dir():
+            if path.is_symlink():
+                self.assertTrue(run_id.startswith("p4-g0c-r6-"))
+                self.assertEqual(relative, "runtime/iap_logs/latest")
+                entries.append({
+                    "path": relative,
+                    "type": "symlink",
+                    "target": os.readlink(path),
+                })
+            elif path.is_dir():
                 entries.append({"path": relative, "type": "directory"})
             else:
                 raw = path.read_bytes()
@@ -174,7 +186,11 @@ class P4G0CAnalyzerTest(unittest.TestCase):
                     "sha256": hashlib.sha256(raw).hexdigest(),
                 })
         payload = {
-            "schema_version": "p4_g0c_run_artifact_inventory_v1",
+            "schema_version": (
+                "p4_g0c_run_artifact_inventory_v2"
+                if run_id.startswith("p4-g0c-r6-")
+                else "p4_g0c_run_artifact_inventory_v1"
+            ),
             "run_id": run_id,
             "excluded_path": "p4_g0c_artifact_inventory.json",
             "entries": entries,
@@ -202,10 +218,11 @@ class P4G0CAnalyzerTest(unittest.TestCase):
     def _make_bundle(self, root, row_counts=None, mutate=None):
         plan = MODULE.expand_run_plan(self.bundle.protocol, root)
         protocol_schema = self.bundle.protocol["schema_version"]
-        replacement = protocol_schema in {
-            MODULE.PROTOCOL_SCHEMA_V2, MODULE.PROTOCOL_SCHEMA_V3
+        replacement = protocol_schema != MODULE.PROTOCOL_SCHEMA_V1
+        hardened = protocol_schema in {
+            MODULE.PROTOCOL_SCHEMA_V3, MODULE.PROTOCOL_SCHEMA_V4,
+            MODULE.PROTOCOL_SCHEMA_V5, MODULE.PROTOCOL_SCHEMA_V6,
         }
-        hardened = protocol_schema == MODULE.PROTOCOL_SCHEMA_V3
         if hardened:
             for directory in (
                 "home", "ros_home", "ros_logs", "tmp", "xdg_runtime",
@@ -214,6 +231,12 @@ class P4G0CAnalyzerTest(unittest.TestCase):
                     parents=True, exist_ok=True
                 )
             (root / "launch_environment" / "xdg_runtime").chmod(0o700)
+        if protocol_schema == MODULE.PROTOCOL_SCHEMA_V6:
+            ros_logs = root / "launch_environment/ros_logs"
+            ros_target = ros_logs / "synthetic-ros-log-run"
+            ros_target.mkdir()
+            (ros_target / "launch.log").write_text("bound raw log\n")
+            (ros_logs / "latest").symlink_to(ros_target.resolve())
         row_counts = row_counts or [7] * 15
         global_index = 0
         inventory_bindings = []
@@ -226,10 +249,8 @@ class P4G0CAnalyzerTest(unittest.TestCase):
                 rows.append(self._row(global_index))
                 global_index += 1
             manifest = {
-                "schema_version": (
-                    "p4_g0c_run_manifest_v3" if hardened
-                    else "p4_g0c_run_manifest_v2" if replacement
-                    else "p4_g0c_run_manifest_v1"
+                "schema_version": MODULE._versioned_schema(
+                    self.bundle, "p4_g0c_run_manifest"
                 ),
                 "gate": "G0C",
                 "run_id": record["run_id"],
@@ -245,10 +266,8 @@ class P4G0CAnalyzerTest(unittest.TestCase):
                     self.bundle.protocol["effective_values"]
                 ),
                 "csv_path": str(csv_path.resolve()),
-                "experiment": (
-                    "p4_g0c_metrics_calibration_v3" if hardened
-                    else "p4_g0c_metrics_calibration_v2" if replacement
-                    else "p4_g0c_metrics_calibration_v1"
+                "experiment": "p4_g0c_metrics_calibration_" + (
+                    protocol_schema.rsplit("_", 1)[-1]
                 ),
                 "scenario": "p4_g0c_free_corridor_v1",
                 "decision_schema_version": "p4_collision_guide_decision_v1",
@@ -282,6 +301,12 @@ class P4G0CAnalyzerTest(unittest.TestCase):
                 manifest.update(MODULE.expected_launch_environment_binding(
                     root, run_dir
                 ))
+            if protocol_schema in {
+                MODULE.PROTOCOL_SCHEMA_V5, MODULE.PROTOCOL_SCHEMA_V6,
+            }:
+                manifest["admission_parameter"] = {
+                    "requested": True, "effective": True,
+                }
             if mutate is not None:
                 mutate(run_index, manifest, rows)
             with csv_path.open("w", newline="") as stream:
@@ -300,7 +325,7 @@ class P4G0CAnalyzerTest(unittest.TestCase):
                 / "test_planner_manifest.json"
             )
             launch_manifest.parent.mkdir(parents=True)
-            launch_manifest.write_text(json.dumps({
+            launch_manifest_payload = {
                 "schema_version": "test_planner_manifest_v1",
                 "run_id": record["run_id"],
                 **top_level_effective_values(self.bundle.protocol),
@@ -318,9 +343,42 @@ class P4G0CAnalyzerTest(unittest.TestCase):
                         ),
                         *(("child_environment", "mutable_output_paths")
                           if hardened else ()),
+                        *(("admission_parameter",)
+                          if protocol_schema in {
+                              MODULE.PROTOCOL_SCHEMA_V5,
+                              MODULE.PROTOCOL_SCHEMA_V6,
+                          } else ()),
                     )
                 },
-            }) + "\n")
+            }
+            if protocol_schema in {
+                MODULE.PROTOCOL_SCHEMA_V4, MODULE.PROTOCOL_SCHEMA_V5,
+                MODULE.PROTOCOL_SCHEMA_V6,
+            }:
+                launch_manifest_payload[
+                    "p4.require_risk_grid_ready_before_planning"
+                ] = self.bundle.protocol["effective_values"][
+                    "p4.require_risk_grid_ready_before_planning"
+                ]
+            if protocol_schema in {
+                MODULE.PROTOCOL_SCHEMA_V5, MODULE.PROTOCOL_SCHEMA_V6,
+            }:
+                launch_manifest_payload.update({
+                    "p0.predictor.requested_worker_count": 4,
+                    "p0.predictor.effective_worker_count": 4,
+                })
+            if protocol_schema == MODULE.PROTOCOL_SCHEMA_V6:
+                launch_manifest_payload.update({
+                    "p0.horizons_s": [
+                        0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0,
+                    ],
+                    "p4.cost_query_policy": (
+                        "CONSERVATIVE_OCCUPIED_COST_SUPPORT"
+                    ),
+                })
+            launch_manifest.write_text(
+                json.dumps(launch_manifest_payload) + "\n"
+            )
             (run_dir / "exports/runtime_provenance_manifest.json").write_text(
                 '{"schema_version":"runtime_provenance_v1"}\n'
             )
@@ -330,16 +388,18 @@ class P4G0CAnalyzerTest(unittest.TestCase):
             timing = run_dir / "runtime/profiling/iap_timing.csv"
             timing.parent.mkdir(parents=True)
             timing.write_text("stamp,duration_ms\n1,2\n")
+            if protocol_schema == MODULE.PROTOCOL_SCHEMA_V6:
+                logs = run_dir / "runtime/iap_logs"
+                target = logs / f"synthetic-{record['run_id']}"
+                target.mkdir(parents=True)
+                (target / "runtime.log").write_text("bound runtime log\n")
+                (logs / "latest").symlink_to(target.name)
             inventory_bindings.append(
                 self._write_artifact_inventory(run_dir, record["run_id"])
             )
         run_ids = [record["run_id"] for record in plan]
         runner_state = {
-            "schema_version": (
-                "p4_g0c_runner_state_v5" if hardened
-                else "p4_g0c_runner_state_v4" if replacement
-                else "p4_g0c_runner_state_v3"
-            ),
+            "schema_version": MODULE._runner_state_schema(self.bundle),
             "runner_state": "COMPLETE",
             "protocol_sha256": self.bundle.protocol_sha256,
             "registry_sha256": self.bundle.registry_sha256,
@@ -366,7 +426,9 @@ class P4G0CAnalyzerTest(unittest.TestCase):
         }
         if replacement:
             runner_state.update({
-                "gpu_preflight_invocations": 1,
+                "gpu_preflight_invocations": (
+                    2 if protocol_schema == MODULE.PROTOCOL_SCHEMA_V6 else 1
+                ),
                 "dependency_preflight": {
                     "dependency_ready": True,
                     "manifest_sha256": self.bundle.protocol[
@@ -395,6 +457,61 @@ class P4G0CAnalyzerTest(unittest.TestCase):
                     for record in plan
                 ],
             }
+        if protocol_schema == MODULE.PROTOCOL_SCHEMA_V6:
+            first_run = Path(plan[0]["run_dir"])
+            first_manifest = first_run / "p4_g0c_run_manifest.json"
+            first_test_manifest = Path(json.loads(
+                first_manifest.read_text()
+            )["test_planner_manifest_path"])
+            scientific = {
+                "decisions_sha256": hashlib.sha256(
+                    (first_run / "p4_decisions.csv").read_bytes()
+                ).hexdigest(),
+                "run_manifest_sha256": hashlib.sha256(
+                    first_manifest.read_bytes()
+                ).hexdigest(),
+                "test_planner_manifest_sha256": hashlib.sha256(
+                    first_test_manifest.read_bytes()
+                ).hexdigest(),
+                "stdout_sha256": hashlib.sha256(
+                    (first_run / "stdout.log").read_bytes()
+                ).hexdigest(),
+            }
+            runner_state.update({
+                "runner_sessions": [
+                    {"session_index": 1, "gpu_preflight_invocations": 1,
+                     "launch_invocations": 1},
+                    {"session_index": 2, "gpu_preflight_invocations": 1,
+                     "launch_invocations": 14},
+                ],
+                "recovery": {
+                    "schema_version": "p4_g0c_r6_recovery_record_v1",
+                    "source_task": "ICRA-063",
+                    "recovery_task": "ICRA-064",
+                    "original_runner_state_sha256": "a" * 64,
+                    "original_failure_reason": (
+                        "run artifact inventory failed: "
+                        "p4-g0c-r6-seed211-rep01:run artifact cannot be a "
+                        "symlink: runtime/iap_logs/latest"
+                    ),
+                    "adopted_run_id": run_ids[0],
+                    "recovery_launch_invocations": 0,
+                    "recovery_retries": 0,
+                    "artifact_inventory_path": inventory_bindings[0][
+                        "artifact_inventory_path"
+                    ],
+                    "artifact_inventory_sha256": inventory_bindings[0][
+                        "artifact_inventory_sha256"
+                    ],
+                    "scientific_hashes_before": scientific,
+                    "scientific_hashes_after": dict(scientific),
+                    "shared_ros_logs_latest_target": os.readlink(
+                        root / "launch_environment/ros_logs/latest"
+                    ),
+                    "next_run_id": run_ids[1],
+                    "remaining_run_count": 14,
+                },
+            })
         (root / "p4_g0c_runner_state.json").write_text(
             json.dumps(runner_state, sort_keys=True) + "\n"
         )
@@ -452,12 +569,149 @@ class P4G0CAnalyzerTest(unittest.TestCase):
             root = Path(tmp)
             self._make_bundle(root)
             result = MODULE.analyze(self.bundle, root)
-        self.assertEqual(result["analysis_status"], "DRAFT_ELIGIBLE")
+        self.assertEqual(
+            result["analysis_status"], "DRAFT_ELIGIBLE", result["failures"]
+        )
         self.assertEqual(result["schema_version"], "p4_g0c_analysis_v2")
         self.assertEqual(
             result["threshold_draft"]["schema_version"],
             "p4_g0c_threshold_draft_v2",
         )
+
+    def test_v6_exact_ros_logs_latest_alias_is_raw_bound_and_eligible(self):
+        self.bundle = MODULE.load_bundle(
+            REPO / "config/icra27/p4_g0c_protocol_v6.json",
+            REPO / "config/icra27/p4_threshold_registry_v6.json",
+            REPO / "config/icra27/p4_g0c_live_fixture_v2.json",
+            expected_protocol_schema=MODULE.PROTOCOL_SCHEMA_V6,
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._make_bundle(root)
+            result = MODULE.analyze(self.bundle, root)
+
+        self.assertEqual(
+            result["analysis_status"], "DRAFT_ELIGIBLE", result["failures"]
+        )
+        self.assertEqual(result["failures"], [])
+
+    def test_v6_ros_logs_alias_rejects_all_escape_and_replacement_shapes(self):
+        self.bundle = MODULE.load_bundle(
+            REPO / "config/icra27/p4_g0c_protocol_v6.json",
+            REPO / "config/icra27/p4_threshold_registry_v6.json",
+            REPO / "config/icra27/p4_g0c_live_fixture_v2.json",
+            expected_protocol_schema=MODULE.PROTOCOL_SCHEMA_V6,
+        )
+        cases = (
+            "alternate_name", "absolute_escape", "relative_nested",
+            "dot", "dotdot", "dangling", "symlink_chain",
+            "symlink_loop", "regular_file", "target_replacement",
+        )
+        for label in cases:
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                self._make_bundle(root)
+                ros_logs = root / "launch_environment/ros_logs"
+                alias = ros_logs / "latest"
+                original_target = Path(os.readlink(alias))
+                if label == "target_replacement":
+                    shutil.rmtree(original_target)
+                    original_target.write_text("replaced\n")
+                else:
+                    alias.unlink()
+                    if label == "alternate_name":
+                        (ros_logs / "current").symlink_to(original_target)
+                    elif label == "absolute_escape":
+                        outside = root / "outside-ros-logs"
+                        outside.mkdir()
+                        alias.symlink_to(outside.resolve())
+                    elif label == "relative_nested":
+                        (ros_logs / "nested/target").mkdir(parents=True)
+                        alias.symlink_to("nested/target")
+                    elif label == "dot":
+                        alias.symlink_to(".")
+                    elif label == "dotdot":
+                        alias.symlink_to("..")
+                    elif label == "dangling":
+                        alias.symlink_to("missing")
+                    elif label == "symlink_chain":
+                        (ros_logs / "intermediate").symlink_to(
+                            original_target
+                        )
+                        alias.symlink_to("intermediate")
+                    elif label == "symlink_loop":
+                        (ros_logs / "intermediate").symlink_to("intermediate")
+                        alias.symlink_to("intermediate")
+                    elif label == "regular_file":
+                        (ros_logs / "regular").write_text("not a dir\n")
+                        alias.symlink_to("regular")
+
+                result = MODULE.analyze(self.bundle, root)
+                self.assertNotEqual(result["analysis_status"], "DRAFT_ELIGIBLE")
+                self.assertTrue(
+                    any(
+                        failure.startswith("root_inventory_launch_environment_symlink")
+                        or failure == "runner_state_recovery"
+                        for failure in result["failures"]
+                    ),
+                    result["failures"],
+                )
+
+    def test_v6_recovery_record_tampering_is_terminal(self):
+        self.bundle = MODULE.load_bundle(
+            REPO / "config/icra27/p4_g0c_protocol_v6.json",
+            REPO / "config/icra27/p4_threshold_registry_v6.json",
+            REPO / "config/icra27/p4_g0c_live_fixture_v2.json",
+            expected_protocol_schema=MODULE.PROTOCOL_SCHEMA_V6,
+        )
+        mutations = {
+            "launch_count": ("recovery_launch_invocations", 1),
+            "next_identity": ("next_run_id", "p4-g0c-r6-seed211-rep03"),
+            "hash_mismatch": (
+                "scientific_hashes_after", {
+                    "decisions_sha256": "0" * 64,
+                    "run_manifest_sha256": "1" * 64,
+                    "test_planner_manifest_sha256": "2" * 64,
+                    "stdout_sha256": "3" * 64,
+                },
+            ),
+            "extra_key": ("unexpected", True),
+        }
+        for label, (key, value) in mutations.items():
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                self._make_bundle(root)
+                state_path = root / "p4_g0c_runner_state.json"
+                state = json.loads(state_path.read_text())
+                state["recovery"][key] = value
+                state_path.write_text(json.dumps(state, sort_keys=True) + "\n")
+
+                result = MODULE.analyze(self.bundle, root)
+                self.assertIn("runner_state_recovery", result["failures"])
+                self.assertNotEqual(result["analysis_status"], "DRAFT_ELIGIBLE")
+
+    def test_v6_requires_exact_lowercase_producer_metrics_only_reason(self):
+        self.bundle = MODULE.load_bundle(
+            REPO / "config/icra27/p4_g0c_protocol_v6.json",
+            REPO / "config/icra27/p4_threshold_registry_v6.json",
+            REPO / "config/icra27/p4_g0c_live_fixture_v2.json",
+            expected_protocol_schema=MODULE.PROTOCOL_SCHEMA_V6,
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._make_bundle(
+                root,
+                mutate=lambda _, __, rows: [
+                    row.update({"reason": "METRICS_ONLY"}) for row in rows
+                ],
+            )
+            result = MODULE.analyze(self.bundle, root)
+
+        self.assertTrue(any(
+            failure.startswith("incomplete_decision:")
+            for failure in result["failures"]
+        ))
+        self.assertNotEqual(result["analysis_status"], "DRAFT_ELIGIBLE")
 
     def test_v3_environment_and_output_bindings_fail_closed_after_rehash(self):
         self.bundle = MODULE.load_bundle(

@@ -6,7 +6,9 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import re
+import stat
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -78,7 +80,9 @@ DECISION_IDENTITY_COLUMNS = (
     "planning_attempt_id", "collision_segment_id", "request_hash",
 )
 RUN_ARTIFACT_INVENTORY_SCHEMA = "p4_g0c_run_artifact_inventory_v1"
+RUN_ARTIFACT_INVENTORY_SCHEMA_V2 = "p4_g0c_run_artifact_inventory_v2"
 RUN_ARTIFACT_INVENTORY_FILENAME = "p4_g0c_artifact_inventory.json"
+R6_SAFE_RUN_ALIAS_PATH = "runtime/iap_logs/latest"
 # Acyclic trust root: these full-file hashes live only in the shared loader.
 # The protocol binds dependency -> launch, so the hash-bound launch must never
 # embed either value and create protocol -> dependency -> launch -> protocol.
@@ -651,7 +655,40 @@ def _validate_registered_artifact_bytes(path: str, raw: bytes) -> None:
             raise ProtocolError(f"secondary P4 decision CSV: {path}")
 
 
-def collect_run_artifact_entries(run_dir: Path) -> list[dict[str, Any]]:
+def _r6_safe_run_alias_entry(
+    root: Path, child: Path, relative: str
+) -> dict[str, Any]:
+    if relative != R6_SAFE_RUN_ALIAS_PATH:
+        raise ProtocolError(f"run artifact cannot be a symlink: {relative}")
+    try:
+        target = os.readlink(child)
+    except OSError as exc:
+        raise ProtocolError(f"run artifact symlink is unreadable: {relative}") from exc
+    pure_target = PurePosixPath(target)
+    if (
+        not target
+        or "\\" in target
+        or pure_target.is_absolute()
+        or len(pure_target.parts) != 1
+        or pure_target.parts[0] in {"", ".", ".."}
+        or pure_target.as_posix() != target
+    ):
+        raise ProtocolError(f"run artifact symlink target is unsafe: {relative}")
+    target_path = child.parent / target
+    try:
+        metadata = os.lstat(target_path)
+    except OSError as exc:
+        raise ProtocolError(f"run artifact symlink target is missing: {relative}") from exc
+    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+        raise ProtocolError(f"run artifact symlink target is not a directory: {relative}")
+    if target_path.parent.resolve() != child.parent.resolve() or root not in target_path.parents:
+        raise ProtocolError(f"run artifact symlink target escapes: {relative}")
+    return {"path": relative, "type": "symlink", "target": target}
+
+
+def collect_run_artifact_entries(
+    run_dir: Path, *, allow_r6_safe_alias: bool = False
+) -> list[dict[str, Any]]:
     requested_root = Path(run_dir)
     if requested_root.is_symlink():
         raise ProtocolError(f"run directory cannot be a symlink: {requested_root}")
@@ -668,6 +705,9 @@ def collect_run_artifact_entries(run_dir: Path) -> list[dict[str, Any]]:
         for child in children:
             relative = child.relative_to(root).as_posix()
             if child.is_symlink():
+                if allow_r6_safe_alias:
+                    entries.append(_r6_safe_run_alias_entry(root, child, relative))
+                    continue
                 raise ProtocolError(f"run artifact cannot be a symlink: {relative}")
             if relative == RUN_ARTIFACT_INVENTORY_FILENAME:
                 if not child.is_file():
@@ -701,11 +741,17 @@ def collect_run_artifact_entries(run_dir: Path) -> list[dict[str, Any]]:
 def make_run_artifact_inventory(run_dir: Path, run_id: str) -> dict[str, Any]:
     if not any(pattern.fullmatch(str(run_id)) for pattern in RUN_ID_PATTERNS):
         raise ProtocolError(f"artifact inventory run ID is invalid: {run_id}")
+    is_r6 = RUN_ID_PATTERN_V6.fullmatch(str(run_id)) is not None
     return {
-        "schema_version": RUN_ARTIFACT_INVENTORY_SCHEMA,
+        "schema_version": (
+            RUN_ARTIFACT_INVENTORY_SCHEMA_V2
+            if is_r6 else RUN_ARTIFACT_INVENTORY_SCHEMA
+        ),
         "run_id": run_id,
         "excluded_path": RUN_ARTIFACT_INVENTORY_FILENAME,
-        "entries": collect_run_artifact_entries(run_dir),
+        "entries": collect_run_artifact_entries(
+            run_dir, allow_r6_safe_alias=is_r6
+        ),
     }
 
 
@@ -716,7 +762,12 @@ def validate_run_artifact_inventory(
         "schema_version", "run_id", "excluded_path", "entries"
     }:
         raise ProtocolError("run artifact inventory root/schema is malformed")
-    if inventory.get("schema_version") != RUN_ARTIFACT_INVENTORY_SCHEMA:
+    is_r6 = RUN_ID_PATTERN_V6.fullmatch(str(run_id)) is not None
+    expected_schema = (
+        RUN_ARTIFACT_INVENTORY_SCHEMA_V2
+        if is_r6 else RUN_ARTIFACT_INVENTORY_SCHEMA
+    )
+    if inventory.get("schema_version") != expected_schema:
         raise ProtocolError("run artifact inventory version is not registered")
     if inventory.get("run_id") != run_id:
         raise ProtocolError("run artifact inventory ID is not bound")
@@ -751,12 +802,24 @@ def validate_run_artifact_inventory(
                 or any(character not in "0123456789abcdef" for character in sha256)
             ):
                 raise ProtocolError(f"file inventory SHA-256 is invalid: {path}")
+        elif artifact_type == "symlink":
+            if (
+                not is_r6
+                or path != R6_SAFE_RUN_ALIAS_PATH
+                or set(entry) != {"path", "type", "target"}
+            ):
+                raise ProtocolError(f"symlink inventory entry is malformed: {path}")
+            target = entry.get("target")
+            if not isinstance(target, str):
+                raise ProtocolError(f"symlink inventory target is invalid: {path}")
         else:
             raise ProtocolError(f"artifact inventory type is invalid: {path}")
         paths.append(path)
     if paths != sorted(paths) or len(paths) != len(set(paths)):
         raise ProtocolError("run artifact inventory paths are unordered or duplicate")
-    actual_entries = collect_run_artifact_entries(run_dir)
+    actual_entries = collect_run_artifact_entries(
+        run_dir, allow_r6_safe_alias=is_r6
+    )
     if entries != actual_entries:
         raise ProtocolError("run artifact inventory does not match the run tree")
     return actual_entries
