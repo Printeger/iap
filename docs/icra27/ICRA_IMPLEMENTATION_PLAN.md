@@ -10,6 +10,11 @@ ICRA-066 以权威 analyzer 关闭 P4-G0C：技术证据 `15/15/15 runs`、`192/
 `icra_p0_p5` profile → prospective P5 final/runtime system qualification → 仅在资格通过后冻结
 contingency campaign。P0 Gate-0B 保持 PASS；P1/P2/P3/P4 仅保留源码/回归，不进入会议 profile。
 
+ICRA-067 已完成并通过 Supervisor 的 profile/synthetic-harness Review：三类 synthetic case 均为
+`VALIDATION_ONLY_PASS`，不构成 live qualification。ICRA-068 先一次性解除历史 P4 测试夹具对当前
+launch 的错误绑定，再在同一任务内执行 isolated build、GPU preflight 和三个 prospective live case。
+这四个历史测试失败不是 P0/P5 产品失败，也不授权修改任何 P4 冻结证据。
+
 下方 P0 → P4 → P5 计划保留为失败路线的审计记录，不再授权 P4 工作。冲突时以本 activation、
 根 `AGENT_STATE.md` 和 `NEXT_TASK.md` 为准。
 

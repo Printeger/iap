@@ -1,90 +1,116 @@
-# ICRA-067 — Activate the isolated P0+P5 profile and qualification harness
+# ICRA-068 — Close the historical test binding and run prospective P0+P5 qualification
 
-> Active gate: `P0_P5_CONTINGENCY_PROFILE_AND_QUALIFICATION_HARNESS`
+> Active gate: `P0_P5_PROSPECTIVE_LIVE_QUALIFICATION`
 > Owner: `DEEPSEEK`
 > Activation: `TASK_READY`
-> Supervisor verdict: `ICRA066_PASS_P4_G0C_NO_GO_P0_P5_CONTINGENCY_ACTIVATED`
+> Supervisor verdict: `ICRA067_PASS_WITH_HISTORICAL_P4_TEST_BINDING_WAIVER`
 > Requirement mapping: `IAP-RQ-320`, `IAP-RQ-421`, `IAP-RQ-422`, `IAP-RQ-423`
 > Conference route: P0 + P5 contingency
-> This task: isolated profile -> fail-closed manifest -> prospective P5 harness; no live run
+> One task: historical test-fixture decoupling -> current isolated install -> GPU preflight -> three live cases -> authoritative qualification
 
 ## Supervisor decision
 
-P4-G0C is authoritatively closed as scientific NO-GO: the risk guide did not achieve a positive Q10 maximum-
-risk improvement. Do not revise thresholds, create r7, enter G0D or reuse P4 as the conference treatment.
+ICRA-067 is accepted. Its focused 9/9 analyzer/contract tests, 20/20 launch tests and reproducible three-case
+synthetic manifest all pass, and `qualification_claim=false` is correct. The four full-suite failures are not a
+P0/P5 product defect: frozen P4-r6 manifests require the historical launch SHA
+`24f34c6a9d84119c2963819aa77f2f620f906dd344f2179dbab68e4e43044595`, while their synthetic-prefix helpers
+incorrectly copy the current source launch. The exact historical bytes remain available from
+`564dd6ad8c864f496b63a1b09afd3febe31eef21:launch/test_planner.launch.py` and match that SHA.
 
-The pre-registered contingency is now active. P0 remains the immutable future-risk advisory field; original
-EGO planning retains occupancy/dynamics authority; P5 final is the hard gate before normal publication and P5
-runtime monitors the committed trajectory. P1/P2/P3/P4 remain compiled and tested but disabled in ICRA runs.
+Fix this test-only binding once and proceed directly to live qualification in the same task. Do not return for
+an intermediate review merely because the historical test repair passes. Stop only for a typed technical,
+GPU, dependency, process, evidence or scientific-gate failure.
 
-Existing `p5` presets and historical P5-1..P5-8 artifacts are useful implementation history, not prospective
-qualification of the new route. ICRA-067 adds the missing isolated profile and qualification contract without
-changing P0/P5 scientific decisions or launching the main flow.
+## Phase A — One-time historical test-fixture decoupling
 
-## 1. Add one deep, fail-closed conference profile
+- Change only `test/test_p4_g0c_dependency_preflight.py`, `test/test_p4_g0c_runner.py`, or one smallest shared
+  test-only helper. Synthetic retained P4-r6 installs must materialize the frozen launch bytes from Git object
+  `564dd6a:launch/test_planner.launch.py`, assert their SHA is `24f34c6a...44595`, and never substitute the
+  current source launch.
+- Do not change a P4 protocol, registry, dependency manifest, runner, product source, raw/scientific artifact,
+  frozen hash or historical verdict. This repairs only the test oracle's temporal semantics.
+- Run the affected four tests, all P4 hermetic tests and complete repository-local hermetic Python discovery.
+  All active tests must finish with zero failure/error before Phase B. A current-source failure outside the four
+  known historical-binding cases is a typed blocker; do not skip or xfail tests.
 
-- Add the named profile `icra_p0_p5` to the existing launch/profile resolver rather than duplicating launch
-  defaults. It must resolve P0 enabled, P5 final/runtime enabled, and P1/P2/P3/P4 disabled at both high and
-  lower-level switches. Freeze `planner_enable_all_safety=false` and `manager/use_distinctive_trajs=false`.
-- Disable P1/P2 metrics-only/debug/objective/fanout/viz paths, P3 local/global/debug/viz paths, and all P4
-  decision/metrics/debug/trace/viz/application paths. Do not delete their code or legacy profiles.
-- Preserve the reviewed P0 Gate-0B profile: worker 4, sigma `0.01`, profile
-  `legacy_iap_rq320_baseline_v1`, frozen horizons/ROI/resolution/refresh semantics. Do not reopen P0 performance.
-- Enable existing P5 final/runtime and machine-readable evidence without changing thresholds, actions, retry/
-  emergency policy, PL/AL formulas or query semantics.
-- Reject every explicit CLI/preset/lower-level override that contradicts the profile, including all-safety,
-  P1-P4 enable, P5 disable, P0 disable, distinctive-on, metrics/debug/viz leakage and fixture combinations not
-  registered by the qualification arm. Do not silently coerce a conflicting override.
+## Phase B — Build and bind the current qualification install
 
-## 2. Bind profile identity and prospective evidence
+- Create only `results/icra27/icra068/build` and `results/icra27/icra068/install`; build the smallest proven
+  complete runtime closure for `test_planner.launch.py`. Do not use or overwrite workspace-global build/install.
+- Verify source and installed bytes/hashes agree for the current `launch/test_planner.launch.py`,
+  `launch/icra_p0_p5_qualification.py` and `config/icra27/icra_p0_p5_qualification_v1.json`. Resolve all three
+  installed aliases and prove the effective profile has P0/P5 on and P1/P2/P3/P4 off.
+- Freeze one ICRA-068 dependency/install manifest with current commit, package prefixes, executables, libraries,
+  configs and the three current hashes. Reject symlinks, undeclared/duplicate package identity, stale global
+  overlays or any installed/source mismatch before GPU preflight.
 
-- Introduce the smallest versioned canonical profile/qualification manifest needed to bind route, git commit,
-  effective switches/values, P0 profile, P5 thresholds, fixture identity, run identity, analyzer version and
-  raw artifact hashes. One source must drive launch resolution and analyzer validation; do not create two sets
-  of defaults.
-- Add one non-live `icra_p0_p5_qualification` preset/arm family with three typed cases:
-  1. `SAFE_NORMAL`: P0 becomes ready; P5 final accepts; exactly one normal B-spline identity is published;
-     runtime does not falsely trigger.
-  2. `FINAL_REJECT`: the registered final-only fixture is hit; P5 final rejects the candidate; that candidate
-     identity has zero normal publication.
-  3. `RUNTIME_FAIL`: a registered post-publication unsafe/stale/unknown condition produces the frozen P5 runtime
-     action/reason and never fabricates safe evidence.
-- Reuse existing P5 fixture and analyzer primitives where their semantics match. Version aliases/manifest
-  identity for ICRA; do not treat historical artifacts as new evidence and do not add a new scenario or planner.
-- The analyzer/harness must fail closed on missing/duplicate run identities, process death, malformed/non-finite
-  rows, topic gaps, unstable P0, wrong switches/profile/hash, fixture leakage, reject-with-publish, missing safe
-  publish, or absent runtime action. Controlled shutdown is not runtime failure.
+## Phase C — Live runner and evidence binding
 
-## 3. Test-only acceptance
+- Add the smallest P0+P5 live runner/normalizer around the existing launch, required-process monitor, GPU
+  preflight and P5 evidence/analyzer primitives. Extend the ICRA qualification analyzer only as needed to accept
+  real live evidence; synthetic `validation_only=true` evidence must never be accepted as live qualification.
+- Freeze exactly these first-attempt identities before launch:
+  - `icra-p0-p5-live-safe-normal-001`
+  - `icra-p0-p5-live-final-reject-001`
+  - `icra-p0-p5-live-runtime-fail-001`
+- Bind the full required process set actually launched by the main flow, not only `iap_rosnode` and
+  `ego_planner_node`. Every required child must be observed as task-owned, remain alive through its run, and be
+  separated from runner-controlled shutdown. Bind exact required topic identities/counts, effective profile,
+  P0 generation/stability, candidate/event order, raw file hashes, installed contract/hash and run identity.
+- Reuse existing P5-7 final-only and P5-6 future-unknown fixture semantics. Do not change thresholds, actions,
+  retry/emergency policy, PL/AL formulas, query semantics, scenario geometry or P0 Gate-0B values.
 
-- Add focused launch/profile golden tests and analyzer synthetic tests for all three cases plus malicious
-  overrides. Prove P1/P2/P3/P4 are off, P0/P5 are on, final precedes publish, rejected identity is not published,
-  and runtime failure remains separate from final rejection.
-- Run focused tests and the repository-local hermetic Python suite. Build only the smallest non-CUDA C++ P5
-  unit target if a changed interface requires it; otherwise do not build product packages.
-- Produce a validation-only manifest from synthetic inputs. It may not start GPU preflight, ROS, the full runner
-  or any live identity. Do not claim P5 qualification from unit/synthetic evidence.
+## Phase D — One GPU preflight and exactly one ordered live attempt per case
 
-## 4. Document and hand off
+1. Before any ROS/launch command, run one recorded GPU preflight using the existing NVML/Driver-API logic.
+   PASS requires both `nvidia-smi` checks, `cuInit(0)==0` and `device_count>=1`. On failure emit
+   `GPU_NOT_READY`, start no ROS process and stop without retry.
+2. Require at least 40 GiB free before the first live arm. Use only the ICRA-068 isolated install and
+   repository-local HOME/ROS_HOME/ROS_LOG_DIR/TMPDIR/XDG_RUNTIME_DIR. Start no RViz. Preserve the registered
+   lightweight evidence/bag outputs; do not run a campaign.
+3. Run the identities once, in the frozen order SAFE_NORMAL -> FINAL_REJECT -> RUNTIME_FAIL. Maximum duration
+   is 90 s per arm; controlled early completion is allowed after the arm's evidence is complete. On any arm
+   failure, stop; do not retry, tune, replace its identity or continue later arms.
+4. After each attempt, clean up only processes proven to be started by that attempt. Any required-process death,
+   orphan or ambiguous ownership is a blocker and cannot be converted into controlled shutdown.
 
-- Update `DEV_LOG.md`, `docs/CHANGES.md`, `docs/TRACEABILITY.md` and compact redacted ICRA-067 evidence. Record
-  the exact future live commands but do not execute them.
-- Commit with applicable requirement IDs and push. Stage only allowed source/tests/config/docs/compact files;
-  preserve the PDF and all scientific evidence.
-- Return to Supervisor with either `PROFILE_AND_HARNESS_READY` or one typed technical blocker. Do not start the
-  live P5 qualification, campaign, paper-result generation or another route pivot.
-- Retain any ICRA-067 build/install through Supervisor Review. After PASS and push, Supervisor will delete only
-  that task's reproducible build/install products.
+## Phase E — Authoritative acceptance
+
+- Invoke the live analyzer exactly once after all three attempts complete. PASS requires:
+  - all three registered/attempted/completed identities exactly once and zero technical failure;
+  - P0 ready/stable with worker 4, sigma `0.01` and `legacy_iap_rq320_baseline_v1` in every arm;
+  - P1/P2/P3/P4, all-safety, distinctive, their metrics/debug/trace/fanout/viz/application paths all disabled;
+  - SAFE_NORMAL: one matching final accept before its normal publication and no false runtime action;
+  - FINAL_REJECT: the registered P5-7 rejection and zero normal publication for that rejected identity;
+  - RUNTIME_FAIL: matching accept/publication followed by the frozen P5-6 `EMERGENCY_STOP / future_unknown_timeout` action;
+  - required processes/topics, raw hashes, contract/install/profile/run identities and shutdown boundaries exact.
+- The only PASS claim is `P5_PROSPECTIVE_QUALIFICATION_PASS`. Any behavioral gate failure is
+  `P5_PROSPECTIVE_QUALIFICATION_FAIL`; any dependency/process/evidence failure is a typed technical blocker.
+  Neither result authorizes retry, tuning, campaign or paper-result generation.
+
+## Document, commit and hand off
+
+- Update `DEV_LOG.md`, `docs/CHANGES.md`, `docs/TRACEABILITY.md` and compact/redacted ICRA-068 evidence with
+  exact commands, exit codes, counts, hashes, identities and failure boundaries. Raw live evidence and bags stay
+  ignored/local; never stage or delete them.
+- Commit with applicable requirement IDs and push. Stage only authorized source/test/config/docs/compact files;
+  preserve the untracked PDF and every historical/scientific artifact.
+- Return to Supervisor with `P5_PROSPECTIVE_QUALIFICATION_PASS`, `P5_PROSPECTIVE_QUALIFICATION_FAIL`, or one
+  typed technical blocker. Do not create another task or edit Supervisor-owned files.
+- Retain ICRA-068 build/install through Supervisor Review. After PASS and push, Supervisor will delete only
+  `results/icra27/icra068/build` and `results/icra27/icra068/install`; raw evidence, bags, logs and manifests remain.
 
 ## Allowed files
 
-- `launch/test_planner.launch.py` and the smallest existing profile/manifest helper required by the deep profile.
-- Existing P5 analyzer/runner helpers and their focused Python tests; existing P5 C++ unit tests only if needed.
-- One versioned ICRA P0+P5 profile/qualification config, Builder docs and compact ICRA-067 evidence.
+- The two named historical P4 test files and one smallest test-only helper if necessary.
+- One P0+P5 live runner/normalizer and focused tests; `launch/icra_p0_p5_qualification.py` plus its focused tests.
+- The canonical P0+P5 contract only for live evidence/process schema additions that do not alter frozen
+  P0/P5 decisions; compact ICRA-068 evidence and required Builder documentation.
 
 ## Forbidden
 
-- No P0/P5 product decision or threshold change; no P4 repair/r7/G0D; no P1/P2/P3 work; no new planner,
-  trajectory representation, scenario or fixture semantics; no full build unless interface necessity is proven;
-  no GPU preflight, ROS/launch, live runner/identity, rosbag, campaign, threshold tuning/application, external-
-  repository write, credential persistence, PDF/raw staging or deletion of scientific evidence.
+- No P0/P5 threshold, action, retry/emergency, formula, query or product-decision change; no P4 source/runner/
+  protocol/registry/dependency/raw/science change; no P1/P2/P3 work; no new planner/scenario/fixture geometry;
+  no xfail/skip/deletion of tests; no GPU/ROS retry; no identity replacement; no campaign/tuning; no external-
+  repository write; no workspace-global build/install mutation; no credential persistence; no PDF/raw staging
+  or deletion of historical/scientific/live evidence.

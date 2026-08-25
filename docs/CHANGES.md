@@ -2559,6 +2559,11 @@ python3 scripts/dev_planner/analyze_p4_g0c_calibration.py \
 
 ## 2026-08-25 (ICRA-067 P0+P5 contingency profile and non-live harness)
 
+Requirements: `IAP-RQ-320`, `IAP-RQ-421`, `IAP-RQ-422`, `IAP-RQ-423`.
+This change isolates the activated conference route so that P0 remains the
+reviewed advisory field and P5 remains the only integrity hard gate, while the
+closed P1/P2/P3/P4 routes cannot leak into prospective evidence.
+
 - Added one canonical `icra_p0_p5_qualification_contract_v1` source for the
   isolated conference profile, unchanged P0 Gate-0B identity, unchanged P5
   thresholds/query policy, registered fixture aliases and three prospective

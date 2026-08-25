@@ -5,34 +5,30 @@ schema_version: icra_single_branch_two_agent_v2
 branch: dev/icra
 active_role: DEEPSEEK
 status: TASK_READY
-gate: P0_P5_CONTINGENCY_PROFILE_AND_QUALIFICATION_HARNESS
-task_id: ICRA-067
-review_base: 29960831ee905041225bf983d2ed9b50e7da3839
-reviewed_head: 6e37b9ee37bf11661b2da70751c55685938540fe
+gate: P0_P5_PROSPECTIVE_LIVE_QUALIFICATION
+task_id: ICRA-068
+review_base: 564dd6ad8c864f496b63a1b09afd3febe31eef21
+reviewed_head: 625b76762569962ea6f1718431f86946f131e6b0
 conference_route: P0_P5_CONTINGENCY
-route_status: P4_G0C_SCIENTIFIC_NO_GO_P0_P5_CONTINGENCY_ACTIVATED
+route_status: P0_P5_PROFILE_AND_SYNTHETIC_HARNESS_REVIEWED
 historical_gate0a_verdict: NO_GO_P2
 p0_gate0b_status: PASS
 p0_gate0b_worker_count: 4
 p4_status: G0A_PASS_G0B_PASS_G0C_SCIENTIFIC_NO_GO_CLOSED
-p5_status: IMPLEMENTED_BUT_UNQUALIFIED_PROFILE_TASK_READY
-supervisor_verdict: ICRA066_PASS_P4_G0C_NO_GO_P0_P5_CONTINGENCY_ACTIVATED
-review_disposition: ICRA067_PROFILE_AND_HARNESS_DEVELOPMENT_AUTHORIZED
+p5_status: PROFILE_AND_SYNTHETIC_HARNESS_PASS_LIVE_QUALIFICATION_TASK_READY
+supervisor_verdict: ICRA067_PASS_WITH_HISTORICAL_P4_TEST_BINDING_WAIVER
+review_disposition: ICRA068_TEST_DECOUPLING_AND_LIVE_QUALIFICATION_AUTHORIZED
 handoff_status: TASK_READY
 next_task: NEXT_TASK.md
-updated_utc: 2026-08-25T16:20:32Z
+updated_utc: 2026-08-25T23:04:46Z
 ```
 
-ICRA-066 passes both Review axes. The authoritative analyzer ran exactly once and returned the expected typed
-scientific result: zero technical failures, 15/15/15 runs, 192/192 decisions, mean Q10 above the numerical
-floor and max Q10 equal to zero. P4-G0C is closed as `SCIENTIFIC_NO_GO`; no threshold draft exists and G0D is
-permanently unauthorized for this conference route.
+ICRA-067 passes its P0+P5 implementation and synthetic-harness scope. The canonical profile is fail closed,
+focused tests pass 9/9 and 20/20, and all three synthetic cases reproduce `VALIDATION_ONLY_PASS` with no
+qualification claim. No P0/P5 decision, threshold, P4 artifact, GPU run, ROS run or live identity changed.
 
-The explicit P0+P5 contingency is now the active conference route. P0 Gate-0B remains PASS. P5 final and
-runtime implementation plus historical tests are retained, but the conference profile and prospective system
-qualification remain unqualified. P1/P2/P3/P4 stay present in source and disabled in every new ICRA arm.
-
-ICRA-067 is the only authorized task. It is a real development task: add one fail-closed `icra_p0_p5` profile,
-bind its effective configuration and evidence identity, and create the smallest reusable qualification harness
-for safe-publish, final-reject/no-publish and runtime-failure cases. It does not run ROS or change P5 decisions;
-live qualification follows only after Review.
+The four full-suite failures are a historical P4-r6 test-fixture defect: those tests correctly preserve the old
+launch SHA, but incorrectly materialize their synthetic retained install from the current evolving source file.
+That conflict is waived for the ICRA-067 product verdict; it is not a P0/P5 failure. ICRA-068 must decouple the
+historical fixture once, obtain a zero-failure hermetic suite, then continue in the same task to the prospective
+three-case live qualification. No separate formatting/review loop is authorized between those phases.

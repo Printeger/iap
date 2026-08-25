@@ -157,11 +157,11 @@ The existing `p4` profile does not enable P5. The existing `all` profile enables
 | Scope pivot | Supervisor authorizes new route | Docs, requirement, state and task agree | `CONDITIONAL_GO` for preparation |
 | ICRA-004 smoke | Supervisor changeset handed off and functional GPU preflight | Valid integrity, one real P0 generation, 76,800 queries | `PASS`; reviewed at `3de0892` |
 | P0 Gate-0B | Reviewed smoke PASS | ≥20 generations and p95 `≤400 ms` | `ICRA-005 TASK_READY`; benchmark pending |
-| P4-G0A | P0 Gate-0B PASS; red fixture reviewed | Closed/no/open/multi scan cases PASS | `NOT_QUALIFIED` |
-| P4-G0B | G0A PASS | Metrics-only pair, identity and 200/200 profiles; no application | `NOT_QUALIFIED` |
-| P4-G0C | G0B PASS | Metrics-only calibration, frozen thresholds and zero timeout | `NOT_QUALIFIED` |
-| P4-G0D | G0C PASS | Post-freeze selected hash reaches B-spline and P5 | `NOT_QUALIFIED` |
-| P5 system gate | P4 lineage available | Final reject has zero publish; runtime cases PASS | Implemented, unqualified |
+| P4-G0A | P0 Gate-0B PASS; red fixture reviewed | Closed/no/open/multi scan cases PASS | `PASS` (historical closed route) |
+| P4-G0B | G0A PASS | Metrics-only pair, identity and 200/200 profiles; no application | `PASS` (historical closed route) |
+| P4-G0C | G0B PASS | Metrics-only calibration and positive mean/max improvement | `SCIENTIFIC_NO_GO`: max improvement Q10 = 0; route closed |
+| P4-G0D | G0C scientific GO | Post-freeze selected hash reaches B-spline and P5 | Permanently unauthorized for this conference route |
+| P5 system gate | Reviewed isolated P0+P5 profile and zero-failure active tests | SAFE_NORMAL, final reject/no-publish and runtime-fail prospective identities PASS | `ICRA-067 harness PASS`; ICRA-068 live qualification TASK_READY |
 | Campaign | All technical gates PASS | GPU ready and `≥40 GiB` free | Storage gate remains external |
 
 Passing one row authorizes only Supervisor review and the next explicit task. It does not automatically move a later row to PASS.

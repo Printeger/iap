@@ -10,6 +10,10 @@ P4-G0C 的 prospective calibration 技术闭环通过，但科学门失败：Typ
 novelty 必须单独、保守表述；当前只授权隔离 profile 与 prospective P5 system qualification，
 不因历史 P5 测试而自称 qualified，也不自动启动 campaign。
 
+ICRA-067 的隔离 profile、canonical contract 和 synthetic harness 已通过 Review，但仍明确
+`qualification_claim=false`。ICRA-068 将在历史 P4 test-oracle 与当前 launch 解耦且全量测试归零后，
+直接执行三个首次 prospective live identities；在权威 live analyzer PASS 前，P5 仍为 unqualified。
+
 以下 P0 → P4 → P5 复审正文作为决策历史保留，不再授权后续 P4 Gate。
 
 ## Active re-review declaration — 2026-08-20

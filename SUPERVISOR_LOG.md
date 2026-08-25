@@ -1,5 +1,49 @@
 # ICRA Supervisor Log
 
+## 2026-08-25 — ICRA-067 profile/harness PASS; historical P4 test binding waived once
+
+### Review identity and synchronization
+
+- Fixed review range: `564dd6ad8c864f496b63a1b09afd3febe31eef21...625b76762569962ea6f1718431f86946f131e6b0`.
+  Builder commits are `8e28d48`, `b629a8a`, `1aa24de`, `0346fd2` and `625b767`; their full messages bind
+  `IAP-RQ-320`, `IAP-RQ-421`, `IAP-RQ-422` and `IAP-RQ-423`. The local `origin/dev/icra` reference equals HEAD
+  at divergence `0 0`; one review-time fetch attempt was closed by the remote on port 443 and made no local
+  change. The protected PDF remains the sole untracked file and retains its frozen hash.
+- The changeset contains only the authorized canonical contract, launch/helper, focused tests, Builder docs and
+  compact synthetic evidence. No product C++, P4 configuration/raw/science evidence, GPU/ROS/live identity,
+  threshold or decision changed.
+
+### Two-axis review and Supervisor verification
+
+- Standards initially reported two Medium documentation findings: the ICRA-067 `docs/CHANGES.md` entry omitted
+  explicit requirement IDs, and its `docs/TRACEABILITY.md` rows did not name implementation/test/evidence paths.
+  The Supervisor changeset corrects both without rewriting Builder execution history. Two Low judgement smells
+  (case registration spread and independent synthetic-oracle construction) are accepted; neither affects the
+  frozen three-case scope.
+- Spec reports one High incomplete acceptance item and one Low documentation mismatch, with zero scope creep.
+  The High item is the complete hermetic result: 524/528 pass, while four historical P4-r6 tests fail because
+  their synthetic install copies the evolving source launch but validates the frozen historical SHA. The Low
+  item was the stale 525/528 count and is corrected in traceability.
+- Supervisor reproduces the focused suites at 9/9 and 20/20 with unchanged 17,762-entry external ROS inventory.
+  The retained synthetic input re-analyzes byte-identically to compact SHA
+  `26da1f10322024cc77c279dd0f92914417d98cbf74d4820780e87033672d869c`; SAFE_NORMAL, FINAL_REJECT and
+  RUNTIME_FAIL all pass with `qualification_claim=false`. Contract SHA is
+  `21c52024e713734480a2d2c9dd3fd66ee1e81ef7b27da0a5d799ff5f7acbaf8e`.
+
+### Verdict, waiver and next task
+
+- `ICRA067_PASS_WITH_HISTORICAL_P4_TEST_BINDING_WAIVER`. The four failures are not waived as permanently
+  acceptable test failures: only the ICRA-067 P0/P5 verdict is unblocked because the task simultaneously had to
+  modify the launch and was forbidden to alter P4 history. The historical test oracle must be decoupled once
+  before live execution, without modifying any P4 manifest, runner, source or scientific artifact.
+- Unique next task is `ICRA-068 / P0_P5_PROSPECTIVE_LIVE_QUALIFICATION`. Phase A materializes frozen P4 test
+  bytes from Git object `564dd6a:launch/test_planner.launch.py` and requires a zero-failure full suite. Without
+  an intermediate review, the same task then builds an isolated current install, performs one GPU preflight,
+  runs exactly one SAFE_NORMAL, FINAL_REJECT and RUNTIME_FAIL identity, and invokes the live analyzer once.
+- ICRA-067 created no task build/install directory, so there is nothing from that task to delete. Review-only
+  hermetic logs and all raw/compact/scientific evidence remain retained. ICRA-068 build/install must remain until
+  its Supervisor Review and pushed verdict, then only those reproducible directories may be deleted.
+
 ## 2026-08-25 — ICRA-066 PASS; P4-G0C scientific NO-GO; P0+P5 contingency activated
 
 ### Review identity and two-axis verdict

@@ -11,6 +11,10 @@ original EGO planning retains motion-feasibility authority, and P5 final/runtime
 P1/P2/P3/P4 stay present but disabled. The immediate work order is an isolated fail-closed `icra_p0_p5`
 profile and prospective P5 system qualification; historical P5 artifacts are not relabelled as qualification.
 
+ICRA-067 has now passed profile and validation-only harness review. This does not qualify P5. ICRA-068 is the
+only authorized live gate: after one test-only historical P4 fixture decoupling, it binds a current isolated
+install and executes the first SAFE_NORMAL, FINAL_REJECT and RUNTIME_FAIL identities exactly once.
+
 The conditional P0 → P4 → P5 scope below is retained as the audited failed route. Where it conflicts with this
 activation, this section and root `AGENT_STATE.md`/`NEXT_TASK.md` are authoritative.
 
