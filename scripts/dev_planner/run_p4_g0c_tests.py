@@ -23,7 +23,10 @@ ENVIRONMENT_PATHS = {
 }
 HERMETIC_ROOT_ENVIRONMENT = "P4_G0C_HERMETIC_TEST_ROOT"
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-ALLOWED_RESULTS_ROOT = REPOSITORY_ROOT / "results" / "icra27" / "icra063"
+ALLOWED_RESULTS_ROOTS = tuple(
+    REPOSITORY_ROOT / "results" / "icra27" / task
+    for task in ("icra062", "icra063")
+)
 EXTERNAL_ROS_LOG_ROOT = Path("/root/.ros/log")
 EXTERNAL_DELTA_EXIT = 86
 
@@ -76,8 +79,8 @@ def _require_no_symlink_chain(path: Path) -> None:
 
 def _validate_task_root(task_root: object, *, create: bool) -> Path:
     root = _canonical_absolute_path(task_root, "task_root")
-    if not _within(root, ALLOWED_RESULTS_ROOT):
-        raise HermeticTestEnvironmentError("task_root:outside_icra063")
+    if not any(_within(root, allowed) for allowed in ALLOWED_RESULTS_ROOTS):
+        raise HermeticTestEnvironmentError("task_root:outside_allowed_task")
     _require_no_symlink_chain(root)
     if root.exists():
         if root.is_symlink() or not root.is_dir():

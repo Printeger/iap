@@ -838,7 +838,6 @@ def launch_command(
         HARDENED_PROTOCOL_SCHEMA, PROFILED_PROTOCOL_SCHEMA,
         CLOSED_FIXTURE_PROTOCOL_SCHEMA,
         TEMPORAL_SUPPORT_PROTOCOL_SCHEMA,
-        TEMPORAL_SUPPORT_PROTOCOL_SCHEMA,
     }:
         if launch_environment is None:
             raise RunnerError("LAUNCH_ENVIRONMENT_NOT_READY:missing_binding")

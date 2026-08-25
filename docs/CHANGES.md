@@ -2388,3 +2388,17 @@ authorized for repetition after this typed stop.
   identities, runner, analyzer, draft and threshold action remain untouched.
 - Stopped tracking the exact ICRA-062 raw classification while preserving its
   ignored local copy, and recorded four honest Low pre-recorder deviations.
+
+Reproduce safe offline ICRA-063 verification from the repository root. The
+GPU preflight and one-shot readiness must not be rerun:
+
+```bash
+python3 scripts/dev_planner/run_p4_g0c_tests.py \
+  --task-root "$PWD/results/icra27/icra063/review-tests" unittest -- \
+  discover -s test -p 'test_*.py'
+cmake --build results/icra27/icra063/tdd_riskgrid/build/iap \
+  --target test_risk_grid_map -- -j1
+results/icra27/icra063/tdd_riskgrid/build/iap/test_risk_grid_map \
+  --gtest_filter='RiskGridMapTest.R6TemporalEnvelopeSupportsObservedTailOnlyThroughThreeSeconds'
+git diff --check d0aa033...HEAD
+```
