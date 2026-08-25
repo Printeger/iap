@@ -1,5 +1,65 @@
 # ICRA Supervisor Log
 
+## 2026-08-25 — ICRA-060 admission PASS, r4 fixture ineligible, r5 integrated live authorized
+
+### Review identity and synchronization
+
+- Fixed review range: `03ff2b4062e947369563b6e2c3dae1798af5f8fb...fab027d479b957c7673517bdac864e81b4eb0b57`.
+- Builder commit `fab027d` binds `IAP-RQ-320`, `IAP-RQ-322` and `IAP-RQ-423`; all 18 changed paths stay
+  within ICRA-060 ownership and allowlist. Fetch succeeds; HEAD and `origin/dev/icra` match at divergence
+  `0 0`. The protected PDF is the sole untracked file and retains SHA-256
+  `1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+- No task ROS process remains. `git diff --check` passes. Supervisor independently reran the retained focused
+  admission executable: 3/3 tests pass.
+
+### Standards axis
+
+- Verdict: one Medium final-PASS evidence finding, zero scope/ownership violations; worst Medium. This is
+  folded into ICRA-061 and does not authorize an evidence-only task or another ROS run for historical fields.
+- `compact/command_ledger.json` omits retained build/test/readiness/audit attempts, substitutes prose
+  `argv_evidence` for some exact argv and lacks timing fields. `final_verification.md` says two GPU readiness
+  preflights although attempts 01, 02 and 04 each passed; attempt 03 was a wrapper-command failure.
+- Requirement-bound commit, allowed ownership, GPU-before-ROS ordering, fail-closed behavior, v1-v3
+  preservation, zero registered identity consumption, build/install retention and PDF protection conform.
+
+### Spec axis
+
+- Verdict: one High incomplete scientific-prerequisite finding, two nonblocking test/evidence findings, zero
+  scope creep; worst High. Overall disposition is `REQUEST_CHANGES`, while the admission implementation is
+  accepted.
+- Final readiness releases the barrier once at RiskGrid generation 1 after 881 deferrals. All 9,600 later
+  planning contexts carry a positive available snapshot, invalid-identity count is zero and no P4 row occurs
+  before release. Fresh CUDA build, three GPU preflights and required processes pass.
+- The frozen r4 fixture makes the required closed segment impossible in the first local seed: start `x=-12`,
+  obstacle `x=[-8,-3]`, horizon `7.5 m`, local target near `x=-4.5`. The seed enters occupancy but ends before
+  a free exit; `scanCollisionSegments()` correctly returns `OPEN_ENDED_COLLISION`, and
+  `initControlPoints()` correctly returns before `collectP4GuidesForSegments()`.
+- This is not an admission, GPU, permission or formatting defect. The production OPEN_ENDED contract must not
+  be weakened. Formal dependency, runner, 15 registered r4 identities and analyzer are all uninvoked; no r4
+  ID is consumed.
+- Nonblocking closure items: requested/effective admission fields are not both explicit in manifests, and
+  pure admission value-object tests do not directly cover the FSM's no-context/trial/row waiting behavior.
+
+### Gate verdict and next action
+
+- Verdict: `ICRA060_REVIEW_ADMISSION_PASS_R4_FIXTURE_INELIGIBLE_REQUEST_CHANGES`. Accepted: admission code,
+  default-off compatibility, valid-snapshot release, CUDA/GPU/process closure and truthful fail-closed stop.
+  Not complete: eligible closed-segment readiness, registered calibration matrix and analyzer.
+- Unique next task: `ICRA-061 / P4_G0C_R5_CLOSED_SEGMENT_FIXTURE_AND_LIVE`, active role `DEEPSEEK`, state
+  `TASK_READY`. It version-controls one predeclared obstacle correction (`x=[-9,-7]`), creates v5/r5 identities,
+  proves exact geometry through the production scanner, then performs readiness, dependency, all 15 live runs
+  and analyzer in one development cycle without intermediate Review.
+- ICRA-060 compact evidence repair and missing admission integration coverage are included in ICRA-061. They
+  cannot create another audit-only stop. Genuine GPU/security/external-mutation failures and post-identity
+  runtime/scientific failures remain fail-closed.
+
+### Artifact lifecycle
+
+- Review is not PASS-complete, so no build/install is deleted. Retain all ICRA-056/059/060 products and all
+  evidence through ICRA-061 Review.
+- On ICRA-061 Review PASS after code/docs are pushed, delete only reproducible build/install directories for
+  ICRA-061, ICRA-060, ICRA-059 and superseded ICRA-056. Do not delete evidence or the PDF.
+
 ## 2026-08-25 — ICRA-059 partial PASS; startup-ordering repair and direct r4 live authorized
 
 ### Review identity and synchronization
