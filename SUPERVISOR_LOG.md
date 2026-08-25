@@ -1,5 +1,67 @@
 # ICRA Supervisor Log
 
+## 2026-08-25 — ICRA-059 partial PASS; startup-ordering repair and direct r4 live authorized
+
+### Review identity and synchronization
+
+- Fixed review range: `8465667778e4984739bb2cce40a645fb817981c3...ba787699f6f438fa2e0b5b4f2c3f76c36028ab88`.
+- Builder commits `7ec1f94` and `ba78769` carry `IAP-RQ-320`, `IAP-RQ-322` and `IAP-RQ-423`.
+  All 23 changed files stay within the ICRA-059 allowlist and Builder ownership. After fetch, HEAD and
+  `origin/dev/icra` match at divergence `0 0`; the protected PDF remains the sole untracked file with SHA-256
+  `1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+
+### Standards axis
+
+- Literal-contract count: two blocking evidence findings, one Low judgement smell; worst High. Supervisor
+  classifies both evidence findings as non-gating for forward development and requires their correction
+  inside ICRA-060 rather than another audit/review cycle.
+- High evidence finding: the second commit rewrites `phase_a_results.json` from the original Phase-A hashes
+  to later hashes while retaining the earlier 121-test/full-discovery/syntax/flake8 claims. The final tree has
+  focused 122 and canonical/diff evidence, but the historical Phase-A result must not be rebound. Restore the
+  Phase-A record and create separately hash-bound final-tree verification.
+- Medium evidence finding: compact Phase-B/readiness evidence summarizes build, closure, GPU, launch and final
+  audits without retaining every exact argv, safe environment allowlist and exit/duration. Raw colcon logs do
+  not reconstruct the top-level command. ICRA-060 will use a structured exact command ledger.
+- Low judgement smell: repeated schema/version/experiment switches appear across runner and launch. Defer the
+  descriptor refactor; it is not relevant to the gate.
+- Ownership, requirement IDs, task-local execution, GPU-before-ROS ordering, fail-closed behavior, zero r4
+  identity consumption, build/install retention and PDF protection otherwise conform.
+
+### Spec axis
+
+- Count: one High incomplete-task finding, one Medium nonblocking evidence finding, zero scope creep; worst
+  High.
+- The High item is a correctable readiness orchestration defect, not a proven P0 science or P0-to-P4 interface
+  failure. Exact P0 values materialize correctly; fresh build, static closure and GPU pass. P0 reaches its
+  first valid generation at simulation stamp about `1657065606.498`, then generation 19. All P4 context
+  acquisitions/decisions occur earlier, at about `1657065601.03` through `1657065601.43`; no P4 request is
+  made after P0 becomes ready.
+- The task explicitly authorized wiring/implementation correction and fresh developmental readiness attempts
+  before identity consumption. Builder stopped too early. The retained result proves a startup race only.
+- The readiness ID is nonregistered; Phase-C dependency, full runner and analyzer counts are zero. Exactly zero
+  registered r4 identities are attempted/completed/retried, so the existing 15 r4 IDs remain usable.
+
+### Gate verdict and next action
+
+- Verdict: `ICRA059_REVIEW_TECHNICAL_PARTIAL_PASS_STARTUP_ORDERING_REQUEST_CHANGES`. Accepted: r4 protocol,
+  exact P0 binding and validation, fresh CUDA closure, GPU preflight, typed failure and fail-closed identity
+  protection. Not accepted as complete: deterministic post-ready P4 request, matrix and analyzer.
+- Unique next task: `ICRA-060 / P4_G0C_R4_RISKGRID_ADMISSION_AND_LIVE`, active role `DEEPSEEK`, state
+  `TASK_READY`. It adds a default-off P4 admission barrier, reruns a new developmental readiness, then proceeds
+  in the same task to dependency, GPU, all 15 existing r4 identities and analyzer. There is no audit-only task
+  and no intermediate Supervisor Review.
+- Pre-identity command/evidence/path/mode mistakes are correctable in-task and are not gate blockers. Genuine
+  GPU/permission/external-mutation failures and post-identity scientific/runtime failures remain fail-closed;
+  guardrails are not relaxed into accepting invalid experimental data.
+
+### Artifact lifecycle
+
+- Review is not PASS-complete, so nothing is deleted. ICRA-059 build attempts 02/03 are each about 1.7 GiB;
+  ICRA-056 build/install remain about 1.2 GiB/460 MiB. Retain all through ICRA-060 Review.
+- On ICRA-060 Review PASS after pushed code/docs, delete only reproducible ICRA-060 build/install,
+  ICRA-059 `build_attempt_*/build` and `build_attempt_*/install`, and superseded ICRA-056 build/install.
+  Retained scientific/log evidence and the PDF are not cleanup targets.
+
 ## 2026-08-25 — ICRA-058 Review BLOCKED on unbound P0 profile; r4 replacement authorized
 
 ### Review identity and synchronization

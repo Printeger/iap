@@ -1,155 +1,133 @@
-# ICRA-059 — Bind the qualified P0 profile and execute a fresh r4 calibration
+# ICRA-060 — Deterministic RiskGrid admission and complete r4 calibration
 
-> Active gate: `P4_G0C_R4_P0_PROFILE_BINDING_AND_LIVE_CALIBRATION`
+> Active gate: `P4_G0C_R4_RISKGRID_ADMISSION_AND_LIVE`
 > Owner: `DEEPSEEK`
 > Activation: `TASK_READY`
-> Supervisor verdict: `ICRA058_REVIEW_BLOCKED_P0_COVARIANCE_GROWTH_UNBOUND`
+> Supervisor verdict: `ICRA059_REVIEW_TECHNICAL_PARTIAL_PASS_STARTUP_ORDERING_REQUEST_CHANGES`
 > Requirement mapping: `IAP-RQ-320`, `IAP-RQ-322`, `IAP-RQ-423`
 > Conference route: conditional P0 -> P4 -> P5
-> This task: versioned r4 repair -> readiness gate -> fresh CUDA closure -> 15 new runs -> analyzer
+> This task: admission repair -> readiness PASS -> fresh CUDA closure -> 15 existing r4 runs -> analyzer
 
 ## Supervisor decision
 
-ICRA-058 is a real live/configuration failure, not another procedural false blocker. CUDA closure, dependency
-and GPU pass; both required processes survive 90 seconds and the integrity validator accepts 821 messages.
-However, all 17 P4 decision rows have generation zero, non-finite snapshot stamp, empty frame and
-`snapshot_unavailable`. Runtime P0 health remains `ready=0`, `gen=0`, with
-`invalid_covariance_growth_parameter` because the v3 protocol omitted the already qualified P0 binding and
-launch materialized `NaN` / `unconfigured_fail_closed`.
+ICRA-059 did not encounter a permission or formatting blocker. Exact P0 binding works, the CUDA/GPU path is
+healthy, and P0 reaches `ready=1`, generation 19. The retained timeline proves a startup race: all 15 P4
+decisions occur before P0's first valid generation, and no P4 request occurs afterward. Therefore zero
+positive P4 snapshots does not yet prove a broken data interface or scientific failure.
 
-Do not relax typed snapshot validation and do not reuse any r3 identity. ICRA-059 creates a versioned r4
-replacement using the already accepted provisional Gate-0B profile—exactly `0.01` and
-`legacy_iap_rq320_baseline_v1`—without recalibration or P0 science changes. A developmental runtime readiness
-gate must prove a valid RiskGrid snapshot before any registered r4 identity is attempted. The same task then
-continues directly to the complete matrix and analyzer; there is no intermediate Supervisor Review.
+No registered r4 identity was attempted. Keep the existing 15 r4 IDs and scientific settings. Implement a
+deterministic P0-ready planning-admission barrier, rerun only a new nonregistered readiness attempt, and on
+PASS proceed directly to the complete r4 matrix and analyzer. There is no audit-only phase and no
+intermediate Supervisor Review.
 
-## 1. Synchronization, preservation and lifecycle
+Evidence/provenance defects found in Review are non-gating: repair them in this task while development is
+still pre-identity. Ordinary command, path, mode, staging and documentation mistakes before the first
+registered r4 attempt are corrected in-task and cannot by themselves terminate qualification.
 
-- Follow `AGENTS.md` synchronization. Stop on `REMOTE_DIVERGED` or a real ownership conflict; never reset,
-  clean, stash, rebase, amend pushed history or overwrite another role's work.
-- Preserve the immutable ICRA-058 failed bundle and its consumed
-  `p4-g0c-r3-seed211-rep01`; preserve all other historical evidence, external ROS logs, `gnss_comm` and the
-  protected PDF. No r3 ID may be retried, relabeled, copied into r4 or included in r4 analysis.
-- Use only `results/icra27/icra059/` for new homes/logs/temp/build/install/readiness/runs/analysis. Every ROS
-  invocation binds repository-local `HOME`, `ROS_HOME`, `ROS_LOG_DIR`, `TMPDIR` and `XDG_RUNTIME_DIR` mode
-  `0700`, with a sanitized allowlisted child environment and mandatory GPU preflight before launch.
-- Pre-identity command, build and readiness implementation mistakes are developmental and may be corrected
-  in this same task using fresh attempt roots. Record every attempt. They do not require a new task or Review.
-- The r4 protocol/config/code and qualification build become immutable immediately before the first registered
-  r4 identity. From that point, no source/config/build change and no identity retry/replacement is allowed.
+## 1. Preserve accepted work and evidence
 
-## 2. Phase A — Versioned r4 protocol and exact P0 binding
+- Follow `AGENTS.md` synchronization. Preserve the protected PDF, external repositories/logs, all historical
+  results, immutable r3 failure evidence and all ICRA-056/ICRA-059 build/install products through Review.
+- Preserve v1-v3 protocol/registry/dependency bytes. Preserve exact P0 values `0.01` and
+  `legacy_iap_rq320_baseline_v1`, the two accepted ICRA-035 evidence hashes, P4 formulas, thresholds, seeds,
+  repetitions, scenario and all 15 registered r4 IDs.
+- The r4 scientific identity remains unconsumed and may be mechanically rebound to the repaired launch/build
+  hashes before live. Do not create r5 IDs or change P0/P4 science.
+- Use only `results/icra27/icra060/` for new build, homes, logs, temp, readiness, dependency, runs and
+  analysis. Sanitize the child environment and bind task-local `HOME`, `ROS_HOME`, `ROS_LOG_DIR`, `TMPDIR`
+  and mode-`0700` `XDG_RUNTIME_DIR` before every ROS invocation.
 
-- Keep every v1/v2/v3 protocol, registry, dependency manifest, lineage and recorded run byte-identical.
-- Add new canonical versioned artifacts:
-  - `config/icra27/p4_g0c_protocol_v4.json`;
-  - `config/icra27/p4_threshold_registry_v4.json`;
-  - `config/icra27/p4_g0c_runtime_dependencies_v4.json`; and
-  - `config/icra27/p4_g0c_replacement_lineage_v4.json`.
-- The v4 protocol preserves v3 scientific settings, seeds, repetitions, duration, formulas, numerical floor,
-  path-ratio tolerance and disabled selection. It changes only replacement/provenance necessities:
-  - schema/experiment/run template become v4/r4;
-  - exactly 15 IDs are `p4-g0c-r4-seed{seed}-rep{repetition:02d}`;
-  - effective values additionally freeze
-    `p0.predictor.sigma_grow_m_sqrt_s=0.01` and
-    `p0.predictor.sigma_growth_profile=legacy_iap_rq320_baseline_v1`; and
-  - a fail-closed P0 Gate-0B binding cites exact retained qualification evidence, including
-    `results/icra27/icra035/runs/p0_qualification_config_preflight.json` SHA-256
-    `6d9ddcc0dd079a3a857a24cf61381441e4260498108077d3be795a8c6ea9b60b` and analyzer
-    `results/icra27/icra035/runs/benchmark/analyzer/gate0_analysis.json` SHA-256
-    `5855368ddc0f89d69c8d13d3f9083b40371678177f2f6eaf3ce7fb68ee0dbaf3`.
-- The lineage must bind the v3 protocol/registry, ICRA-058 runner-state and compact-result hashes, record the
-  consumed r3 identity and typed/root-cause verdict, and exclude every r3 artifact from the r4 bundle.
-- Extend protocol loader, runner, analyzer and launch for v4 without weakening v1/v2/v3 behavior. Launch must
-  accept `p4_g0c_metrics_calibration_v4`, pass both P0 values to EGO, and bind their exact typed values into
-  top-level/effective/run manifests. The v4 dependency manifest binds the updated installed launch and keeps
-  the exact runtime closure (18 packages, 13 executables, one component, 14 configs, six libraries).
-- Add a pre-GPU/pre-launch configuration gate: missing, boolean, nonnumeric, non-finite, negative, non-exact
-  sigma, wrong profile, wrong evidence hash, unconfigured default, or requested/effective mismatch must fail
-  before GPU, ROS and registered identity consumption.
-- Improve diagnosis without accepting invalid rows: a decision with `snapshot_unavailable`, generation zero,
-  non-finite stamp or empty frame remains a hard failure but is reported as a typed P0 RiskGrid/snapshot
-  failure with the producer reason, not merely generic `typed_identity`.
-- Update the production-surface classifier for the exact v4 experiment/paths/outputs and preserve its
-  deny-by-default model. Add adversarial tests for P0 binding, v4 lineage/hash/run-ID isolation, v1-v3
-  preservation, launch materialization and clearer snapshot-unavailable rejection.
-- Run focused protocol/runner/dependency/launch/analyzer/classifier suites and complete Python discovery,
-  syntax, fatal-only flake8, canonical JSON and `git diff --check` through a task-local hermetic launcher.
-  External inventory delta must be empty.
-- Update Builder docs. Commit and push Phase A with all applicable requirement IDs before qualification work;
-  proceed directly without intermediate Supervisor Review or Builder-side two-axis Review.
+## 2. Implement deterministic P4 admission
 
-## 3. Phase B — Fresh CUDA build and developmental RiskGrid readiness
+- Add an explicit boolean runtime contract named `p4.require_risk_grid_ready_before_planning`, default
+  `false`. Bind it `true` only for the r4 calibration experiment and record requested/effective values in
+  launch/run manifests.
+- When enabled, keep the EGO node, P0 timers and sensor callbacks running, but do not begin a planning-risk
+  context, consume a planning trial or issue a P4 request until one acquired snapshot simultaneously has:
+  non-null ownership, `health.ready=true`, `health.stale=false`, `generation_id>0`, finite positive stamp and
+  nonempty frame. A null/unready/stale snapshot must produce a throttled defer diagnostic, not a P4 fallback
+  decision.
+- Release the barrier deterministically when the condition becomes true. Record the release stamp,
+  generation and defer count. The first and every subsequent P4 decision must use a positive typed snapshot
+  identity. The harness timeout remains authoritative; do not add a tuned science timeout.
+- Keep the default-false legacy behavior byte/behavior compatible. Do not change RiskGrid refresh, covariance
+  growth, grid geometry, worker count, P4 search cost, selection authority or threshold logic.
+- Add focused C++ and launch/runner tests for null, unready, stale and valid snapshots; prove waiting does not
+  consume a planning attempt/P4 row and that a valid snapshot releases exactly once. Test default-false
+  compatibility and exact v4 manifest materialization.
 
-- Produce a fresh non-symlink merged Release CUDA build of the accepted 17-package closure below an explicit
-  ICRA-059 attempt root. Use sequential executor, `BUILD_TESTING=OFF`, `BUILD_WITH_CUDA=ON`,
-  `/usr/local/cuda/bin/nvcc`, OpenCV OFF and viewer OFF; source only Jazzy before build and keep external
-  `gnss_comm` read-only.
-- Revalidate the exact final qualification build: 17 package indexes, updated installed launch hash, v4
-  dependency closure, six ordinary ELF libraries, loadable GPU library, no unresolved/historical/default
-  linkage, Release/CUDA cache and all frozen source/config hashes. Record every exact command and exit—not a
-  representative subset.
-- Before registered identities, run a short v4 **developmental readiness launch** in a distinct non-calibration
-  root/ID excluded from protocol registration and analyzer input. It must use the exact final effective config
-  and prove:
-  - both P0 values are exact in requested, effective and test-planner manifests;
-  - P0 RiskGrid reaches `ready=true`, `generation_id>0`, finite stamp and nonempty expected frame;
-  - at least one P4 request receives that snapshot identity;
-  - no `invalid_covariance_growth_parameter`, `unconfigured_fail_closed` or snapshot-unavailable-only output;
-  - required processes survive the observation interval and shut down cleanly.
-- The readiness run requires its own successful GPU preflight. It is developmental, never enters the r4
-  calibration bundle and consumes no registered identity. A command/wiring/implementation defect may be fixed,
-  rebuilt into a fresh attempt and rerun in this same task without tuning sigma/profile/science. A genuine
-  failure under the exact accepted profile stops before registered identities.
-- After readiness PASS, freeze the exact source/config hashes and qualification build/install. Commit/push any
-  pre-identity corrections and synchronized docs, then proceed directly to Phase C.
+## 3. Correct evidence without creating another gate
 
-## 4. Phase C — One immutable r4 matrix and analyzer
+- Restore `results/icra27/icra059/compact/phase_a_results.json` to its Phase-A commit (`7ec1f94`) hashes and
+  claims; do not rebind historical 121-test evidence to later source. Put final-current-tree verification in
+  a separate ICRA-060 result with its own source/config hashes.
+- Run focused P4 tests and complete Python discovery, syntax, fatal-only flake8, canonical JSON and
+  `git diff --check` on the final pre-live tree. Run relevant C++ tests in the fresh CUDA build.
+- Record exact argv, cwd, safe environment allowlist, start/end/duration and exit code for tests, build,
+  static closure, GPU, readiness, dependency, runner, analyzer and final audits. Prefer one structured command
+  ledger written before/after each command so missing prose cannot become another Review loop. Never record
+  credential values.
+- These evidence corrections are required for final PASS but are not a reason to stop before live. Correct
+  pre-identity evidence mistakes in-place, rerun only the affected non-live check, and continue.
 
-- Use only the final ICRA-059 merged install plus `/opt/ros/jazzy` as the ordered `AMENT_PREFIX_PATH` and
-  `P4_G0C_ALLOWED_PREFIXES`. Run one standalone v4 dependency preflight against a fresh root; require exact
-  manifest path/hash, 18/13/1/14/6, zero GPU/launch/identity/retry and PASS.
-- Invoke the full v4 runner once against a fresh r4 runs root. Its built-in GPU preflight must pass
-  `nvidia-smi`, `cuInit(0)` and `device_count>=1` before ROS.
-- Execute all 15 registered r4 identities in frozen order, once each, with zero retry/exclusion. Require every
-  process interval and finalized inventory, valid positive snapshot identity on accepted decision rows, exact
-  runner `COMPLETE`, 15 attempted/completed/launches and one built-in GPU preflight.
-- After the first r4 identity attempt, any real dependency/GPU/launch/process/RiskGrid/CSV/inventory failure is
-  terminal. Preserve the immutable bundle and never rerun, replace or tune an identity.
-- Only after runner `COMPLETE`, invoke analyzer against the immutable complete bundle. A scientific/evidence
-  rejection is terminal and cannot be tuned. A demonstrable analyzer implementation defect may be narrowly
-  fixed/tested and the unchanged bundle reanalyzed once, recording both invocations; live is never rerun.
-- Success requires `DRAFT_ELIGIBLE`. Do not apply/freeze thresholds, enable selection, claim G0C PASS, start
-  G0D/P5 or run another scenario; those decisions return to Supervisor.
+## 4. Fresh build and developmental readiness
 
-## 5. Evidence, handoff and artifact cleanup
+- Build the accepted 17-package merged non-symlink Release/CUDA closure under a fresh ICRA-060 attempt root:
+  sequential executor, `BUILD_TESTING=OFF`, `BUILD_WITH_CUDA=ON`, registered nvcc, OpenCV OFF and viewer OFF.
+  Correct any command-line/path mistake in-task using a fresh attempt; do not treat it as a gate result.
+- Validate 17 package indexes, six ordinary loadable ELF libraries, no unresolved/historical linkage,
+  source/installed launch equality and exact final source/config/dependency hashes.
+- Run GPU preflight before the developmental ROS launch. A real `nvidia-smi`, `cuInit(0)` or device-count
+  failure remains `GPU_NOT_READY`; CPU fallback is forbidden.
+- Run a new nonregistered readiness identity, disjoint from every r4 ID and all earlier readiness products.
+  It must prove: P0 ready/generation/stamp/frame; zero P4 rows before barrier release; at least one P4 row
+  after release with matching positive generation, finite stamp and nonempty frame; required processes alive
+  during the interval; clean controlled shutdown.
+- A diagnosed admission/wiring defect remains developmental: fix, test, rebuild to a fresh attempt root and
+  rerun readiness in this same task. Each rerun must cite a concrete code/wiring correction. Do not tune
+  sigma/profile/grid/scenario or reuse a readiness root.
 
-- Record exact full argv/environment allowlist/exit/duration for every test, build, static check, readiness,
-  dependency, runner, analyzer and final process/protected-file audit. Do not use “representative command” as
-  the sole reproducibility evidence. Record the direct ICRA-058 symptom and proven upstream P0 cause without
-  mutating old evidence.
-- Update `DEV_LOG.md`, `docs/CHANGES.md`, `docs/TRACEABILITY.md` and compact redacted ICRA-059 evidence. Never
-  stage raw build/install/log/home/temp/readiness/runs trees, environment dumps or the PDF.
-- After work, make one consolidated final evidence/docs commit/push with applicable requirement IDs and return
-  directly to Supervisor Review. No Builder-side two-axis Review and no separate DEV_LOG-only handoff commit.
-- Retain all ICRA-059 build*/install* attempts and the adopted ICRA-056 build/install through development and
-  Supervisor Review. On Review PASS after all code/docs are pushed, Supervisor deletes the reproducible
-  ICRA-059 build*/install* and superseded ICRA-056 build/install. On BLOCKED/REQUEST_CHANGES, retain all.
+## 5. Freeze once, then execute Phase C
+
+- After readiness PASS, freeze final source/config/build hashes and push the pre-live correction. Proceed
+  directly without Supervisor Review.
+- Run one standalone v4 dependency preflight using only the final ICRA-060 install plus
+  `/opt/ros/jazzy`; require exact 18/13/1/14/6 and zero GPU/launch/identity/retry in that invocation.
+- Invoke the full v4 runner once. Its built-in GPU preflight must precede ROS and pass. Execute all 15
+  existing `p4-g0c-r4-*` IDs in frozen order, exactly once, with 15 attempted/completed/launches and zero
+  retry/exclusion. Every accepted decision must carry a valid positive snapshot identity.
+- After runner `COMPLETE`, invoke the analyzer once against the immutable bundle. Success requires exact
+  `DRAFT_ELIGIBLE`. Do not apply thresholds, enable selection, claim G0C PASS, start G0D/P5 or tune results.
+- One-shot protection begins only when the first registered r4 identity is attempted. From that point, a real
+  GPU/process/RiskGrid/CSV/inventory/scientific failure is terminal and no source/config/build or identity may
+  be changed/retried. A narrow analyzer-only defect may be fixed and the unchanged live bundle reanalyzed once.
+
+## 6. Handoff and artifact lifecycle
+
+- Update `DEV_LOG.md`, `docs/CHANGES.md`, `docs/TRACEABILITY.md` and compact redacted ICRA-060 evidence. Make
+  requirement-bound commits and push before handoff. Never edit Supervisor-owned files or stage raw products
+  or the PDF.
+- Do not stop for nonblocking smells, prose formatting, missing optional metadata or correctable local
+  permission/mode setup. Do not create a documentation-only handoff commit or Builder-side Review.
+- Retain ICRA-060 build/install and all ICRA-059/ICRA-056 build/install through Supervisor Review. On Review
+  PASS after code/docs are pushed, Supervisor deletes only reproducible build/install directories under
+  ICRA-060, ICRA-059 build attempts and the superseded ICRA-056 build/install. On a genuine technical or
+  scientific failure after the one-shot boundary, retain them.
 
 ## Allowed files
 
-- New v4 protocol/registry/dependency/lineage artifacts only; existing v1-v3 artifacts are immutable.
-- `scripts/dev_planner/p4_g0c_protocol.py`, runner, analyzer, surface classifier and hermetic launcher for exact
-  v4/profile/readiness support.
-- `launch/test_planner.launch.py` for exact v4 experiment and P0 binding only.
-- Focused P4-G0C protocol/runner/dependency/launch/analyzer/classifier tests.
-- `DEV_LOG.md`, `docs/CHANGES.md`, `docs/TRACEABILITY.md`, compact redacted ICRA-059 evidence and ignored raw
-  task-local products.
+- `src/iap/planner/plan_manage/include/ego_planner/ego_replan_fsm.h` and
+  `src/iap/planner/plan_manage/src/ego_replan_fsm.cpp` for the admission barrier.
+- `planner_manager.h/.cpp`, plan-manage CMake/tests and a new focused test only if required for a clean seam.
+- `launch/test_planner.launch.py`; v4 protocol/registry/dependency/lineage only for mechanical final-hash and
+  admission binding; v1-v3 remain immutable.
+- P4 protocol/runner/analyzer/classifier/hermetic scripts and tests only as needed for the admission contract,
+  final provenance and structured command ledger.
+- Builder docs and compact redacted ICRA-059 correction/ICRA-060 evidence.
 
 ## Forbidden
 
-- No P0/P4 C++ science or algorithm change; no new/tuned covariance value, worker count, grid geometry,
-  threshold formula or scenario; no v1-v3 artifact mutation.
-- No r3 reuse, live identity retry, CPU fallback, threshold application, G0C PASS claim, G0D/P5 campaign,
-  external-repository write, broad environment/log scan, credential persistence, raw-product/PDF staging or
-  cleanup before Review.
+- No P0/P4 science, covariance, grid, worker, threshold, formula, seed, repetition or scenario tuning.
+- No r3 reuse, r5 creation, registered-r4 retry, CPU fallback, threshold application, G0C PASS claim,
+  G0D/P5 run, external-repository write, credential persistence, raw-product/PDF staging or cleanup before
+  Review.
