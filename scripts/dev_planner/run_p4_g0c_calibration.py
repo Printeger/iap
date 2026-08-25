@@ -411,10 +411,10 @@ def validate_runtime_dependencies(
         return _dependency_failure(reason, result_schema)
 
     binding = bundle.protocol["runtime_dependency_manifest"]
-    resolved_manifest_path = Path(
-        manifest_path or bundle.dependency_manifest_path
-    ).resolve()
     try:
+        resolved_manifest_path = Path(
+            manifest_path or bundle.dependency_manifest_path
+        ).resolve()
         manifest = load_runtime_dependency_manifest(
             resolved_manifest_path,
             binding["sha256"],

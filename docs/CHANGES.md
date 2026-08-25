@@ -118,13 +118,24 @@ git diff --check
   runtime libraries. Reordered config validation and alternate valid terminal
   runtime/component ELF content preserve provenance; wrong hash, missing files,
   symlink/escape and historical prefixes still reject.
-- Hermetic verification passes dependency 11/11, bootstrap 8/8, classifier
-  18/18, focused 115/115, launch 11/11 + 16/16 and full discovery 470/470,
+- Hermetic verification passes dependency 12/12, bootstrap 8/8, classifier
+  18/18, focused 116/116, launch 11/11 + 16/16 and full discovery 471/471,
   plus syntax, fatal-only flake8, canonical JSON and diff checks. External
   17,759-entry inventories remain byte-identical at `82b029de...eee9`.
 - The initial focused command used a non-importable unittest file path and is
   retained; corrected discovery produced the intended single provenance RED.
   No build, GPU, ROS/live, identity or analyzer action ran in Phase A.
+
+Reproduce the final synthetic repair verification without entering any live
+boundary:
+
+```bash
+ROOT="$PWD/results/icra27/icra057"
+python3 scripts/dev_planner/run_p4_g0c_tests.py --task-root "$ROOT" unittest -- discover -s test -p 'test_p4_g0c_dependency_preflight.py'
+python3 scripts/dev_planner/run_p4_g0c_tests.py --task-root "$ROOT" unittest -- discover -s test -p 'test_p4_g0c_*.py'
+python3 scripts/dev_planner/run_p4_g0c_tests.py --task-root "$ROOT" unittest -- discover -s test -p 'test_*.py'
+git diff --check
+```
 
 ## 2026-08-25 (ICRA-057 credential-output BLOCKED)
 
@@ -141,6 +152,11 @@ git diff --check
   adopted static closure: dependency, GPU, full runner, all r3 identities and
   analyzer each have zero invocations, and their roots are absent. No rebuild,
   cleanup, threshold action, G0C claim, G0D or P5 work occurred.
+- Review remediation moved canonical manifest resolution inside the existing
+  typed `OSError`/`RuntimeError` boundary and added a symlink-loop regression.
+  Final dependency/focused/full results are 12/12, 116/116 and 471/471. Exact
+  safe Phase-A and incident-trigger command shapes are recorded in redacted
+  compact evidence; the BLOCKED outcome and zero downstream counts are unchanged.
 
 ## 2026-08-25 (ICRA-056 container contract and r3 live task)
 

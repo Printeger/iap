@@ -1209,8 +1209,8 @@ They do not convert historical `NO-GO-P2`, failed P0 Gate-0B evidence, the stati
 | Req ID | Requirement/evidence seam | Implementation and retained evidence | Status |
 |---|---|---|---|
 | IAP-RQ-423 | Bind dependency success provenance to the selected manifest | `validate_runtime_dependencies()` owns immutable `resolved_manifest_path` and distinct artifact-path locals; success returns the same canonical manifest path plus protocol-bound SHA, prefixes and exact 18/13/1/14/6 counts | **PHASE A IMPLEMENTED** |
-| IAP-RQ-423 | Preserve validation behavior while preventing last-artifact corruption | Focused 11/11 covers reordered config and alternate terminal ELF content plus wrong hash, missing artifact, prefix alias, artifact escape and historical-prefix rejection | **REGRESSION PASS** |
-| IAP-RQ-423 | Keep repair verification repository-local before adoption/live | Bootstrap 8/8, classifier 18/18, focused 115/115, launch 11/11 + 16/16, full discovery 470/470, syntax/flake8/canonical/diff all pass with empty 17,759-entry external delta | **PHASE A PASS; ADOPTION/LIVE PENDING** |
+| IAP-RQ-423 | Preserve validation behavior while preventing last-artifact corruption | Focused 12/12 covers reordered config and alternate terminal ELF content plus wrong hash, missing artifact, prefix alias, artifact escape, manifest symlink loop and historical-prefix rejection | **REGRESSION PASS** |
+| IAP-RQ-423 | Keep repair verification repository-local before adoption/live | Bootstrap 8/8, classifier 18/18, focused 116/116, launch 11/11 + 16/16, full discovery 471/471, syntax/flake8/canonical/diff all pass with empty 17,759-entry external delta | **PHASE A PASS; ADOPTION/LIVE PENDING** |
 
 ## 2026-08-25 ICRA-057 credential-output stop
 

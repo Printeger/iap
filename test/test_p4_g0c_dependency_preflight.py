@@ -491,6 +491,23 @@ class P4G0CDependencyPreflightTest(unittest.TestCase):
             f"{library['package']}:{library['relative_path']}",
         )
 
+    def test_manifest_symlink_loop_returns_typed_failure(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            first = root / "manifest-loop-a.json"
+            second = root / "manifest-loop-b.json"
+            first.symlink_to(second)
+            second.symlink_to(first)
+            result = RUNNER.validate_runtime_dependencies(
+                self.bundle,
+                first,
+                {},
+            )
+        self.assertFalse(result["dependency_ready"])
+        self.assertTrue(
+            result["failure_reason"].startswith("DEPENDENCY_MANIFEST_INVALID:")
+        )
+
     def test_component_library_registration_and_launch_hash_drift_reject(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

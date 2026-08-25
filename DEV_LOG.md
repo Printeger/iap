@@ -7464,9 +7464,9 @@ also proves config reordering and different valid terminal runtime/component
 ELFs cannot corrupt provenance, while prefix and artifact symlink escapes,
 wrong hash, missing artifacts and historical prefixes remain fail-closed.
 
-Formal ICRA-057 launcher results pass: dependency 11/11, bootstrap/comparator
-8/8, classifier 18/18, focused P4-G0C 115/115, launch 11/11 plus 16/16 and
-full Python discovery 470/470. Syntax for eight files, fatal-only flake8,
+Formal ICRA-057 launcher results pass: dependency 12/12, bootstrap/comparator
+8/8, classifier 18/18, focused P4-G0C 116/116, launch 11/11 plus 16/16 and
+full Python discovery 471/471. Syntax for eight files, fatal-only flake8,
 canonical JSON 4/4 and `git diff --check` pass. Each external inventory has
 17,759 entries; final before/after SHA is `82b029de...eee9`, delta empty.
 
@@ -7502,3 +7502,19 @@ Protected PDF SHA remains `1f07da56...44f6`, read-only `gnss_comm` remains
 `de422a4b...16a`, and all historical evidence is retained. Builder result is
 `BLOCKED_CREDENTIAL_VALUE_OUTPUT_EXPOSURE`, never G0C PASS. No next task is
 selected; control returns only to SUPERVISOR review and disposition.
+
+## 2026-08-25 — ICRA-057 REVIEW REMEDIATION
+
+IAP-RQ-423. Two-axis review found one code and one reproducibility blocker.
+The code RED proved a manifest symlink loop raised outside the typed failure
+boundary. Manifest resolution now occurs once inside the existing
+`except (OSError, RuntimeError)` boundary, and the public result regression
+passes without changing any dependency validation policy. Final hermetic
+results are dependency 12/12, focused 116/116 and full 471/471; all remaining
+formal counts stay green and every external delta is empty.
+
+The compact command ledger now contains the exact safe Phase-A invocations and
+the exact read-only metadata command shape that caused the output incident,
+without reproducing any credential name or value. The original typed outcome
+remains `BLOCKED_CREDENTIAL_VALUE_OUTPUT_EXPOSURE`; Phase B/Phase C were not
+resumed and every downstream invocation remains zero.
