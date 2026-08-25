@@ -694,6 +694,7 @@ def classify_process_output_arguments(
     write_parameters = {
         "csv_path", "p1.debug_csv_path", "p2.debug_csv_path",
         "p3.debug_csv_path", "p4.debug_csv_path", "summary_path",
+        "p4.profile_trace_path",
     }
     read_parameters = {
         "config_path", "gate0.candidate_events_path", "gate0.control_points_path",
@@ -1163,6 +1164,10 @@ _LAUNCH_TARGET_POLICIES = {
         "_ego_planner_node", "Node.parameter.p4.debug_csv_path",
         "p4_debug_path",
     ): "registered:decision_csv_path",
+    (
+        "_ego_planner_node", "Node.parameter.p4.profile_trace_path",
+        "p4_profile_trace_path",
+    ): "derived:decision_csv_path",
     (
         "_ego_planner_node", "Node.input.p1.evidence_manifest_path",
         "evidence['manifest_path']",

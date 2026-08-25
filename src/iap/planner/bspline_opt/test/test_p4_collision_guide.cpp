@@ -207,6 +207,41 @@ TEST(P4CollisionGuideDecision, ScriptedPathsExerciseMetricsOnlyDecisionContract)
   EXPECT_EQ(repeat.selected.canonical_hash, first.selected.canonical_hash);
 }
 
+TEST(P4CollisionGuideDecision, ProfileTraceDoesNotChangeIdentityOrDecision)
+{
+  uint64_t epoch = 9;
+  const auto snapshot = makeSnapshot(ProviderMode::SPATIAL);
+  auto disabled_search = successfulSearch();
+  ego_planner::P4CollisionGuidePlanner disabled_planner(disabled_search);
+  const auto disabled_request = makeRequest(snapshot, epoch, &epoch);
+  const auto disabled = disabled_planner.planCollisionGuide(disabled_request);
+
+  auto enabled_config = metricsOnlyConfig();
+  enabled_config.profile_trace_enable = true;
+  enabled_config.profile_trace_path = "/diagnostic/path/is/not/decision/input.csv";
+  auto enabled_search = successfulSearch();
+  ego_planner::P4CollisionGuidePlanner enabled_planner(enabled_search);
+  const auto enabled_request = makeRequest(
+    snapshot, epoch, &epoch, enabled_config);
+  const auto enabled = enabled_planner.planCollisionGuide(enabled_request);
+
+  EXPECT_EQ(enabled_request.canonicalIdentityHash(),
+            disabled_request.canonicalIdentityHash());
+  EXPECT_EQ(enabled.status, disabled.status);
+  EXPECT_EQ(enabled.reason, disabled.reason);
+  EXPECT_EQ(enabled.request_hash, disabled.request_hash);
+  EXPECT_EQ(enabled.original.canonical_hash, disabled.original.canonical_hash);
+  EXPECT_EQ(enabled.risk.canonical_hash, disabled.risk.canonical_hash);
+  EXPECT_EQ(enabled.original.risk_profile.valid_count,
+            disabled.original.risk_profile.valid_count);
+  EXPECT_TRUE(disabled.original.sample_traces.empty());
+  EXPECT_TRUE(disabled.risk.sample_traces.empty());
+  EXPECT_EQ(enabled.original.sample_traces.size(), 200U);
+  EXPECT_EQ(enabled.risk.sample_traces.size(), 200U);
+  EXPECT_EQ(enabled.original.sample_traces.front().sample_index, 0U);
+  EXPECT_EQ(enabled.original.sample_traces.back().sample_index, 199U);
+}
+
 TEST(P4CollisionGuideDecision, OriginalFailureIsPlannerFailure)
 {
   uint64_t epoch = 3;

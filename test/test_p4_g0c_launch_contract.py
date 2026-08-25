@@ -29,7 +29,7 @@ SPEC.loader.exec_module(MODULE)
 
 
 class P4G0CLaunchContractTest(unittest.TestCase):
-    def test_v5_preset_materializes_only_the_versioned_obstacle_interval(self):
+    def test_v5_preset_materializes_versioned_fixture_and_worker_profile(self):
         v4 = MODULE.EXPERIMENT_PRESETS[MODULE.P4_G0C_EXPERIMENT_V4]
         v5 = MODULE.EXPERIMENT_PRESETS[MODULE.P4_G0C_EXPERIMENT_V5]
         differences = {
@@ -40,9 +40,13 @@ class P4G0CLaunchContractTest(unittest.TestCase):
             "p4.g0c.fixture_path", "p4.g0c.fixture_sha256",
             "p1_fixture_central_x_min_m",
             "p1_fixture_central_x_max_m",
+            "p0.predictor.worker_count",
         })
         self.assertEqual(v5["p1_fixture_central_x_min_m"], "-9.0")
         self.assertEqual(v5["p1_fixture_central_x_max_m"], "-7.0")
+        self.assertEqual(v5["p0.predictor.worker_count"], "4")
+        self.assertNotIn("p0.predictor.worker_count", v4)
+        self.assertEqual(dict(MODULE.ARG_DEFAULTS)["p0.predictor.worker_count"], "1")
         self.assertEqual(dict(MODULE.ARG_DEFAULTS)["init_x"], "-12.0")
         self.assertEqual(
             dict(MODULE.ARG_DEFAULTS)["manager/planning_horizon"], "7.5"
@@ -109,6 +113,77 @@ class P4G0CLaunchContractTest(unittest.TestCase):
                 },
                 readiness_mode=True,
             )
+
+    def test_profile_trace_is_default_off_and_only_v5_readiness_enables_it(self):
+        defaults = dict(MODULE.ARG_DEFAULTS)
+        self.assertEqual(defaults["p4.profile_trace_enable"], "false")
+        self.assertEqual(defaults["p4.profile_trace_path"], "")
+        csv_path = "/repo/results/readiness/p4_decisions.csv"
+        for experiment in (
+                "", MODULE.P4_G0C_EXPERIMENT_V4,
+                MODULE.P4_G0C_EXPERIMENT_V5):
+            disabled = MODULE._p4_g0c_profile_trace_binding(
+                experiment, False, csv_path)
+            self.assertEqual(disabled, {"enabled": False, "path": ""})
+        v4 = MODULE._p4_g0c_profile_trace_binding(
+            MODULE.P4_G0C_EXPERIMENT_V4, True, csv_path)
+        self.assertEqual(v4, {"enabled": False, "path": ""})
+        v5 = MODULE._p4_g0c_profile_trace_binding(
+            MODULE.P4_G0C_EXPERIMENT_V5, True, csv_path)
+        self.assertTrue(v5["enabled"])
+        self.assertEqual(
+            v5["path"], "/repo/results/readiness/p4_equal_arc_profile_trace.csv"
+        )
+
+    def test_v5_binding_canonicalizes_predictor_worker_as_integer_four(self):
+        protocol = REPO / "config/icra27/p4_g0c_protocol_v5.json"
+        registry = REPO / "config/icra27/p4_threshold_registry_v5.json"
+        fixture = REPO / "config/icra27/p4_g0c_live_fixture_v2.json"
+        with tempfile.TemporaryDirectory() as tmp:
+            runs_root = Path(tmp).resolve()
+            run_id = "p4-g0c-r5-readiness-contract-test"
+            run_dir = runs_root / run_id
+            manifest = run_dir / "p4_g0c_run_manifest.json"
+            csv_path = run_dir / "p4_decisions.csv"
+            environment_root = runs_root / "launch_environment"
+            child = {
+                "HOME": str(environment_root / "home"),
+                "ROS_HOME": str(environment_root / "ros_home"),
+                "ROS_LOG_DIR": str(environment_root / "ros_logs"),
+                "TMPDIR": str(environment_root / "tmp"),
+                "XDG_RUNTIME_DIR": str(environment_root / "xdg_runtime"),
+            }
+            outputs = {
+                "bag_output_dir": str(run_dir / "bags"),
+                "decision_csv_path": str(csv_path),
+                "export_root_dir": str(run_dir / "exports"),
+                "iap_log_root": str(run_dir / "runtime/iap_logs"),
+                "launch_command_path": str(run_dir / "launch_command.json"),
+                "run_manifest_path": str(manifest),
+                "runtime_root_dir": str(run_dir / "runtime"),
+                "stdout_log_path": str(run_dir / "stdout.log"),
+            }
+            with mock.patch.dict(MODULE.os.environ, child, clear=False):
+                binding = MODULE._p4_g0c_binding(
+                    experiment=MODULE.P4_G0C_EXPERIMENT_V5,
+                    protocol_path=protocol, registry_path=registry,
+                    fixture_path=fixture,
+                    declared_protocol_sha256=MODULE._sha256_file(protocol),
+                    declared_registry_sha256=MODULE._sha256_file(registry),
+                    declared_fixture_sha256=MODULE._sha256_file(fixture),
+                    run_id=run_id, seed=211, repetition=1,
+                    run_manifest_path=manifest, csv_path=csv_path,
+                    effective_values={
+                        **MODULE.P4_G0C_FROZEN_LAUNCH_VALUES,
+                        **MODULE.P4_G0C_V5_P0_PROFILE_VALUES,
+                    },
+                    child_environment=child, mutable_output_paths=outputs,
+                    readiness_mode=True,
+                )
+        self.assertIs(type(binding["effective_values"][
+            "p0.predictor.worker_count"]), int)
+        self.assertEqual(binding["effective_values"][
+            "p0.predictor.worker_count"], 4)
 
     @staticmethod
     def _context():

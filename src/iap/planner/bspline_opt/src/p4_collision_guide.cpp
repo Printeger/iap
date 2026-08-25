@@ -67,6 +67,7 @@ bool buildGuideRecord(
   const std::vector<Eigen::Vector3d> & path,
   const std::shared_ptr<const iap::RiskGridSnapshot> & snapshot,
   double query_base_time_s, double query_speed_mps,
+  bool profile_trace_enable,
   P4GuideRecord * record)
 {
   if (!record || path.size() < 2 || !std::isfinite(query_base_time_s) ||
@@ -133,9 +134,21 @@ bool buildGuideRecord(
       continue;
     }
     iap::RiskCostSample sample;
+    iap::RiskCostQueryTrace query_trace;
     const double query_time_s =
       query_base_time_s + distance / query_speed_mps;
-    const bool hit = snapshot->queryCost(point, query_time_s, &sample);
+    const bool hit = snapshot->queryCost(
+      point, query_time_s, &sample,
+      profile_trace_enable ? &query_trace : nullptr);
+    if (profile_trace_enable) {
+      P4GuideRecord::SampleTrace trace;
+      trace.sample_index = sample_index;
+      trace.point = point;
+      trace.query_time_s = query_time_s;
+      trace.sample = sample;
+      trace.query = std::move(query_trace);
+      built.sample_traces.push_back(std::move(trace));
+    }
     if (hit && sample.valid && !sample.stale && std::isfinite(sample.cost)) {
       ++built.risk_profile.valid_count;
       valid_sum += sample.cost;
@@ -453,7 +466,8 @@ P4GuideDecision P4CollisionGuidePlanner::planCollisionGuide(
   }
   if (!buildGuideRecord(
       original.path, request.snapshot(), request.queryBaseTimeS(),
-      request.config().query_speed_mps, &decision.original))
+      request.config().query_speed_mps,
+      request.config().profile_trace_enable, &decision.original))
   {
     decision.status = P4GuideDecisionStatus::PLANNER_FAILURE;
     decision.reason = P4GuideDecisionReason::ZERO_LENGTH_GEOMETRY;
@@ -500,7 +514,8 @@ P4GuideDecision P4CollisionGuidePlanner::planCollisionGuide(
   }
   if (!buildGuideRecord(
       risk.path, request.snapshot(), request.queryBaseTimeS(),
-      request.config().query_speed_mps, &decision.risk))
+      request.config().query_speed_mps,
+      request.config().profile_trace_enable, &decision.risk))
   {
     decision.reason = P4GuideDecisionReason::ZERO_LENGTH_GEOMETRY;
     decision.original = P4GuideRecord{};

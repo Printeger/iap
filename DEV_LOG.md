@@ -7704,3 +7704,44 @@ analyzer gate is forbidden. Result is
 `BLOCKED_R5_READINESS_PROFILE_INCOMPLETE_BEFORE_REGISTERED_IDENTITY`; full
 runner, registered attempts/retries and analyzer remain zero, with no draft,
 threshold action or G0C PASS claim.
+
+## 2026-08-25 — ICRA-062 P0 WORKER REPAIR AND TRACED R5 BLOCKER
+
+IAP-RQ-320, IAP-RQ-322 and IAP-RQ-423. The v5-only P4 preset and canonical r5
+protocol now bind typed predictor worker count 4; pre-launch validation requires
+the exact integer and the live manifest proves requested/effective `4/4` while
+the distinct legacy outer `p0.batch_worker_count` remains 1. General defaults
+and v1-v4 bytes/behavior are unchanged. Mechanically affected v5 hashes were
+rebound before live work.
+
+Removed the production FSM friend/callback added only for the synthetic
+three-counter admission test and removed that false integration test. Runtime
+now invokes the accepted admission object directly; its three real unit tests
+and retained ICRA-061 live evidence remain the proof. Commit `79add9c` lacks an
+applicable requirement ID; this immutable process deviation was not rewritten.
+
+Added a default-off trace enabled only for nonregistered v5 readiness. It binds
+every original/risk equal-arc sample to attempt/segment/request/arm/index and
+records point/time/tau, query reason, temporal layer, interpolation corner,
+exact weights, source flags and occupancy diagnostics. Focused C++ proves trace
+enablement leaves request identity, decision, path hashes and profiles
+unchanged. The offline classifier requires exactly 200 samples per arm.
+
+Final attempt 03 builds 17/17 sequential merged non-symlink Release/CUDA
+packages; source/install equality, six loadable ELF libraries, zero historical
+linkage, required-process monitoring and GPU preflight pass. Two earlier launch
+invocations were rejected before any ROS node by canonical worker binding
+defects (`4` absent, then `4.0` versus integer `4`); both remain recorded as
+pre-runtime orchestration deviations with zero P4 rows and zero identity use.
+The actual readiness releases once at generation 1 after 590 deferrals,
+produces 12 positive-generation rows, and records exact worker `4/4`.
+
+All 12 identities have 200 traced samples per arm. Classification finds 3,040
+`POSITIVE_WEIGHT_OCCUPIED_SKIP` invalid samples and 10 `TIME_SUPPORT` samples;
+the latter are risk-arm sample 199 with `time_out_of_horizon` at tau about
+2.50208 s. Every other category is zero. Section 6 requires every remaining
+invalid sample to be occupied skip and explicitly preserves time-support
+failure, so no RiskGrid semantics, r6 artifact, registered runner, analyzer or
+threshold action is permitted. Final result is
+`BLOCKED_R5_READINESS_TIME_SUPPORT_BEFORE_REGISTERED_IDENTITY`; registered
+attempt/completion/retry counts remain `0/0/0` and no G0C PASS is claimed.

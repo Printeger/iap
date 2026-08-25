@@ -27,6 +27,8 @@ struct P4RiskAStarConfig
 	bool fallback_to_original_when_risk_not_ready = true;
 	bool debug_csv_enable = false;
 	std::string debug_csv_path;
+	bool profile_trace_enable = false;
+	std::string profile_trace_path;
 	double query_speed_mps = 1.0;
 };
 

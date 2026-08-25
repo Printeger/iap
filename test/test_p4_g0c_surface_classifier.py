@@ -577,6 +577,10 @@ class P4G0CSurfaceClassifierTest(unittest.TestCase):
                 "p4_debug_path", "registered:decision_csv_path",
             ),
             (
+                "_ego_planner_node", "Node.parameter.p4.profile_trace_path",
+                "p4_profile_trace_path", "derived:decision_csv_path",
+            ),
+            (
                 "_ego_planner_node", "Node.input.gate0.candidate_events_path",
                 "LaunchConfiguration('gate0.candidate_events_path').perform(context)",
                 "immutable_read_only_path",

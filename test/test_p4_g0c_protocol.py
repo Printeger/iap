@@ -46,6 +46,21 @@ EXPECTED_TOP_LEVEL_EFFECTIVE_KEYS = {
 
 
 class P4G0CProtocolTest(unittest.TestCase):
+    def test_v5_runtime_worker_binding_requires_exact_typed_four_four(self):
+        valid = {
+            "p0.predictor.requested_worker_count": 4,
+            "p0.predictor.effective_worker_count": 4,
+        }
+        MODULE.validate_v5_runtime_worker_binding(valid)
+        for key in valid:
+            for bad_value in (None, True, 4.0, "4", 1, 3, 5):
+                with self.subTest(key=key, bad_value=bad_value):
+                    invalid = dict(valid)
+                    invalid[key] = bad_value
+                    with self.assertRaisesRegex(
+                            MODULE.ProtocolError, key):
+                        MODULE.validate_v5_runtime_worker_binding(invalid)
+
     def test_v5_versions_only_fixture_geometry_and_registers_disjoint_r5(self):
         v4 = MODULE.load_protocol_bundle(
             REPO / "config/icra27/p4_g0c_protocol_v4.json",
@@ -67,7 +82,7 @@ class P4G0CProtocolTest(unittest.TestCase):
         v2_fixture["map"]["central_obstacle"]["x_m"] = [-8.0, -3.0]
         self.assertEqual(v2_fixture, v1_fixture)
         frozen = {
-            "effective_values", "matrix_order", "minimum_complete_decisions",
+            "matrix_order", "minimum_complete_decisions",
             "no_exclusion", "no_overwrite", "no_retry",
             "numerical_noise_floor", "p0_profile_binding",
             "path_ratio_consistency", "quantiles", "repetitions",
@@ -77,6 +92,9 @@ class P4G0CProtocolTest(unittest.TestCase):
             {key: v5.protocol[key] for key in frozen},
             {key: v4.protocol[key] for key in frozen},
         )
+        v5_effective = dict(v5.protocol["effective_values"])
+        self.assertEqual(v5_effective.pop("p0.predictor.worker_count"), 4)
+        self.assertEqual(v5_effective, v4.protocol["effective_values"])
         self.assertEqual(len(v5.protocol["registered_run_ids"]), 15)
         self.assertTrue(all(
             run_id.startswith("p4-g0c-r5-")

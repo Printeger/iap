@@ -150,12 +150,17 @@ def validate_p0_profile_binding(bundle: ProtocolBundle) -> dict[str, Any]:
     effective = bundle.protocol.get("effective_values", {})
     sigma = effective.get("p0.predictor.sigma_grow_m_sqrt_s")
     profile = effective.get("p0.predictor.sigma_growth_profile")
+    worker_count = effective.get("p0.predictor.worker_count")
     if type(sigma) is not float or not math.isfinite(sigma) or sigma != 0.01:
         return {"schema_version": schema, "profile_ready": False,
                 "failure_reason": "P0_SIGMA_BINDING_MISMATCH"}
     if profile != "legacy_iap_rq320_baseline_v1":
         return {"schema_version": schema, "profile_ready": False,
                 "failure_reason": "P0_PROFILE_BINDING_MISMATCH"}
+    if bundle.protocol.get("schema_version") == CLOSED_FIXTURE_PROTOCOL_SCHEMA \
+            and (type(worker_count) is not int or worker_count != 4):
+        return {"schema_version": schema, "profile_ready": False,
+                "failure_reason": "P0_WORKER_BINDING_MISMATCH"}
     binding = bundle.protocol.get("p0_profile_binding", {})
     expected = {
         "config_preflight": "6d9ddcc0dd079a3a857a24cf61381441e4260498108077d3be795a8c6ea9b60b",
@@ -171,7 +176,8 @@ def validate_p0_profile_binding(bundle: ProtocolBundle) -> dict[str, Any]:
                     "failure_reason": f"P0_EVIDENCE_BINDING_MISMATCH:{key}"}
     return {"schema_version": schema, "profile_ready": True,
             "failure_reason": "", "sigma_grow_m_sqrt_s": sigma,
-            "sigma_growth_profile": profile}
+            "sigma_growth_profile": profile,
+            "predictor_worker_count": worker_count}
 
 
 def load_runtime_dependency_manifest(

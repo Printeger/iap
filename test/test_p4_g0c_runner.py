@@ -113,6 +113,27 @@ class P4G0CRunnerTest(unittest.TestCase):
                 result = MODULE.validate_p0_profile_binding(bundle)
                 self.assertEqual(result["failure_reason"], "P0_SIGMA_BINDING_MISMATCH")
 
+    def test_v5_p0_profile_gate_requires_exact_typed_predictor_worker_four(self):
+        bundle = MODULE.load_bundle(
+            REPO / "config/icra27/p4_g0c_protocol_v5.json",
+            REPO / "config/icra27/p4_threshold_registry_v5.json",
+            REPO / "config/icra27/p4_g0c_live_fixture_v2.json",
+            expected_protocol_schema=MODULE.CLOSED_FIXTURE_PROTOCOL_SCHEMA,
+        )
+        for bad_worker in (None, True, "4", 1, 3, 5):
+            with self.subTest(bad_worker=bad_worker):
+                bundle.protocol["effective_values"][
+                    "p0.predictor.worker_count"
+                ] = bad_worker
+                result = MODULE.validate_p0_profile_binding(bundle)
+                self.assertEqual(
+                    result["failure_reason"], "P0_WORKER_BINDING_MISMATCH"
+                )
+        bundle.protocol["effective_values"]["p0.predictor.worker_count"] = 4
+        result = MODULE.validate_p0_profile_binding(bundle)
+        self.assertTrue(result["profile_ready"])
+        self.assertEqual(result["predictor_worker_count"], 4)
+
     def setUp(self):
         self.protocol = REPO / "config/icra27/p4_g0c_protocol_v2.json"
         self.registry = REPO / "config/icra27/p4_threshold_registry_v2.json"

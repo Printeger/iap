@@ -4,56 +4,6 @@
 
 #include <limits>
 
-namespace ego_planner {
-class P4RiskGridPlanningAdmissionIntegrationAccess {
- public:
-  static P4RiskGridPlanningAdmission::Decision admit(
-      P4RiskGridPlanningAdmission& admission,
-      const P4RiskGridPlanningAdmission::Inputs& inputs,
-      const std::function<void()>& admitted_effect) {
-    return EGOReplanFSM::applyP4RiskGridPlanningAdmission(
-        admission, inputs, admitted_effect);
-  }
-};
-}  // namespace ego_planner
-
-TEST(P4RiskGridPlanningAdmissionIntegrationTest,
-     EnabledFsmCreatesEffectsOnlyAfterPositiveSnapshot) {
-  ego_planner::P4RiskGridPlanningAdmission admission;
-  int planning_risk_contexts = 0;
-  int planning_trials = 0;
-  int p4_rows = 0;
-  const auto effects = [&]() {
-    ++planning_risk_contexts;
-    ++planning_trials;
-    ++p4_rows;
-  };
-
-  const ego_planner::P4RiskGridPlanningAdmission::Inputs waiting{
-      true, false, false, true, 0U, 0.0, ""};
-  for (int attempt = 0; attempt < 3; ++attempt) {
-    const auto decision =
-        ego_planner::P4RiskGridPlanningAdmissionIntegrationAccess::admit(
-            admission, waiting, effects);
-    EXPECT_FALSE(decision.allow_planning);
-  }
-  EXPECT_EQ(planning_risk_contexts, 0);
-  EXPECT_EQ(planning_trials, 0);
-  EXPECT_EQ(p4_rows, 0);
-
-  const ego_planner::P4RiskGridPlanningAdmission::Inputs positive{
-      true, true, true, false, 7U, 42.5, "map"};
-  const auto released =
-      ego_planner::P4RiskGridPlanningAdmissionIntegrationAccess::admit(
-          admission, positive, effects);
-  EXPECT_TRUE(released.allow_planning);
-  EXPECT_TRUE(released.released_now);
-  EXPECT_EQ(released.generation_id, 7U);
-  EXPECT_EQ(planning_risk_contexts, 1);
-  EXPECT_EQ(planning_trials, 1);
-  EXPECT_EQ(p4_rows, 1);
-}
-
 TEST(P4RiskGridPlanningAdmissionTest, DefaultDisabledPreservesPlanning) {
   ego_planner::P4RiskGridPlanningAdmission admission;
 

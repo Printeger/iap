@@ -1265,3 +1265,13 @@ They do not convert historical `NO-GO-P2`, failed P0 Gate-0B evidence, the stati
 | IAP-RQ-423 | Require exact standalone dependencies before registered execution | sole v5 dependency invocation passes 18 packages, 13 executables, one component, 14 configs and six libraries from ICRA-061/Jazzy; GPU/launch/attempt/retry are all zero | **DEPENDENCY PREFLIGHT PASS** |
 | IAP-RQ-423 | Do not consume one-shot identities when readiness proves deterministic analyzer rejection | all 12 positive-identity closed-segment rows are `incomplete_profile`; original validity is 0-17/200 and risk validity 103-147/200 despite stable generation 17/global validity 0.984; immutable analyzer requires both 200/200 and retains failed rows | **BLOCKED BEFORE REGISTERED IDENTITY** |
 | IAP-RQ-423 | Preserve scientific and downstream fail-closed boundaries | full runner/analyzer = 0/0; r5 attempts/completions/retries = 0/0/0; no row exclusion, science/profile/fixture/threshold change, draft, G0C claim, G0D or P5 execution | **SUPERVISOR REVIEW REQUIRED** |
+
+## 2026-08-25 ICRA-062 worker correction, trace and typed stop
+
+| Req ID | Requirement/evidence seam | Implementation and retained evidence | Status |
+|---|---|---|---|
+| IAP-RQ-320, IAP-RQ-322 | Run accepted predictor parallelism, not the legacy outer batch label | v5/r5 freezes typed worker 4; runner rejects absent/bool/string/non-4 values; live manifest is requested/effective `4/4`, outer batch remains 1 | **CORRECTED AND LIVE-PROVEN** |
+| IAP-RQ-423 | Remove synthetic admission confidence without weakening runtime | Deleted production friend/callback and fake counter test; direct admission passes three focused unit cases and live release-once/positive-snapshot evidence | **IMPLEMENTED** |
+| IAP-RQ-423 | Explain every incomplete equal-arc sample without changing decisions | default-off nonregistered trace records query/layer/corner/exact-weight/source/occupancy detail; classifier proves 12 identities x 200 samples x two arms; noninterference C++ passes | **DIAGNOSTIC CLOSURE PASS** |
+| IAP-RQ-423 | Enter bounded support repair only under its exact predicate | totals are occupied skip 3,040, time support 10, every other category 0; time support remains explicitly fail-closed, so no Section-6 policy or r6 exists | **BLOCKED_R5_READINESS_TIME_SUPPORT** |
+| IAP-RQ-423 | Preserve one-shot and downstream boundaries | registered r5/r6 attempts, completions and retries are zero; runner/analyzer/draft/action/G0C/G0D/P5 are absent | **SUPERVISOR REVIEW REQUIRED** |

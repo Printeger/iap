@@ -98,10 +98,10 @@ P4_G0C_REGISTRY_V4_TRUSTED_SHA256 = (
     "c760c217ce8dee4bd379c6048e7909f40ea3a08adb99dd4f9b21eba2189f7d91"
 )
 P4_G0C_PROTOCOL_V5_TRUSTED_SHA256 = (
-    "abb0eea66cdd88cc2616d06a5aa7829f90654de0fa4bf7f35cbc0c126b11f125"
+    "fa13796bb46c703cd528b3dc3414f9eb664eadd101cab9dd2beb324907590418"
 )
 P4_G0C_REGISTRY_V5_TRUSTED_SHA256 = (
-    "7728f4bf6d9a8d626a1fb9b09d43ca54c884cba34021103bd3dea7683f899736"
+    "a6f0bcd84db8f89162fb9429e8baf44b47b6e850e45d5f158d1fcbd3a962df75"
 )
 LAUNCH_ENVIRONMENT_SCHEMA = "p4_g0c_launch_environment_v1"
 LAUNCH_ENVIRONMENT_KEYS = (
@@ -219,6 +219,21 @@ class ProtocolBundle:
         self.protocol_sha256 = protocol_sha256
         self.registry_sha256 = registry_sha256
         self.fixture_sha256 = fixture_sha256
+
+
+def validate_v5_runtime_worker_binding(
+    launch_manifest: dict[str, Any]
+) -> None:
+    """Require the two launch-emitted runtime worker counts to be typed 4/4."""
+    for worker_key in (
+        "p0.predictor.requested_worker_count",
+        "p0.predictor.effective_worker_count",
+    ):
+        worker_count = launch_manifest.get(worker_key)
+        if type(worker_count) is not int or worker_count != 4:
+            raise ProtocolError(
+                f"test-planner top-level effective mismatch: {worker_key}"
+            )
 
 
 def canonical_bytes(payload: Any) -> bytes:
@@ -413,6 +428,8 @@ def validate_test_planner_effective_contract(
             raise ProtocolError(
                 f"test-planner top-level effective mismatch: {barrier_key}"
             )
+    if bundle.protocol.get("schema_version") == PROTOCOL_SCHEMA_V5:
+        validate_v5_runtime_worker_binding(launch_manifest)
 
 
 def validate_decision_header(fieldnames: list[str] | None) -> None:
@@ -851,6 +868,8 @@ def validate_protocol(protocol: dict[str, Any]) -> None:
             ),
             "p4.require_risk_grid_ready_before_planning": True,
         })
+    if schema == PROTOCOL_SCHEMA_V5:
+        required["p0.predictor.worker_count"] = 4
     if set(effective) != set(required):
         raise ProtocolError("effective protocol values must match the exact frozen set")
     for key, value in required.items():

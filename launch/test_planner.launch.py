@@ -102,6 +102,10 @@ P4_G0C_V4_P0_PROFILE_VALUES = {
     "p0.predictor.sigma_growth_profile": "legacy_iap_rq320_baseline_v1",
     "p4.require_risk_grid_ready_before_planning": "true",
 }
+P4_G0C_V5_P0_PROFILE_VALUES = {
+    **P4_G0C_V4_P0_PROFILE_VALUES,
+    "p0.predictor.worker_count": "4",
+}
 P4_G0C_FROZEN_LAUNCH_VALUES = {
     "planner_safety_profile": "p4",
     "planner_enable_p1": "false",
@@ -238,6 +242,17 @@ def _p4_g0c_typed_value(value):
         return raw
 
 
+def _p4_g0c_profile_trace_binding(experiment, readiness_mode, csv_path):
+    enabled = experiment == P4_G0C_EXPERIMENT_V5 and bool(readiness_mode)
+    return {
+        "enabled": enabled,
+        "path": (
+            str(Path(csv_path).with_name("p4_equal_arc_profile_trace.csv"))
+            if enabled else ""
+        ),
+    }
+
+
 def _validate_p4_g0c_profile_values(experiment, effective_values, explicit_overrides):
     if str(experiment) not in P4_G0C_EXPERIMENTS:
         return
@@ -249,7 +264,12 @@ def _validate_p4_g0c_profile_values(experiment, effective_values, explicit_overr
                 f"P4-G0C {qualifier} for {key}: expected {expected}, got {actual}"
             )
     if str(experiment) in {P4_G0C_EXPERIMENT_V4, P4_G0C_EXPERIMENT_V5}:
-        for key, expected in P4_G0C_V4_P0_PROFILE_VALUES.items():
+        profile = (
+            P4_G0C_V5_P0_PROFILE_VALUES
+            if str(experiment) == P4_G0C_EXPERIMENT_V5
+            else P4_G0C_V4_P0_PROFILE_VALUES
+        )
+        for key, expected in profile.items():
             actual = effective_values.get(key)
             if _p4_g0c_typed_value(actual) != _p4_g0c_typed_value(expected):
                 raise RuntimeError(
@@ -364,10 +384,18 @@ def _p4_g0c_binding(
         "selection_applied": False,
     })
     if version in {4, 5}:
+        profile = (
+            P4_G0C_V5_P0_PROFILE_VALUES
+            if version == 5 else P4_G0C_V4_P0_PROFILE_VALUES
+        )
         typed_values.update({
             key: _p4_g0c_typed_value(effective_values[key])
-            for key in P4_G0C_V4_P0_PROFILE_VALUES
+            for key in profile
         })
+        if version == 5:
+            typed_values["p0.predictor.worker_count"] = int(
+                effective_values["p0.predictor.worker_count"]
+            )
     expected_protocol_schema = (
         f"p4_g0c_protocol_v{version}"
     )
@@ -525,9 +553,14 @@ def _prepare_p4_g0c_context(context, experiment, iap_share):
         for key in P4_G0C_FROZEN_LAUNCH_VALUES
     }
     if experiment in {P4_G0C_EXPERIMENT_V4, P4_G0C_EXPERIMENT_V5}:
+        profile = (
+            P4_G0C_V5_P0_PROFILE_VALUES
+            if experiment == P4_G0C_EXPERIMENT_V5
+            else P4_G0C_V4_P0_PROFILE_VALUES
+        )
         effective.update({
             key: LaunchConfiguration(key).perform(context)
-            for key in P4_G0C_V4_P0_PROFILE_VALUES
+            for key in profile
         })
     _validate_p4_g0c_profile_values(experiment, effective, overrides)
     expected_scenario_values = {
@@ -565,6 +598,23 @@ def _prepare_p4_g0c_context(context, experiment, iap_share):
     if "p4.debug_csv_path" in overrides and Path(explicit_csv).resolve() != Path(csv_path).resolve():
         raise RuntimeError("P4-G0C conflicting explicit override for p4.debug_csv_path")
     context.launch_configurations["p4.debug_csv_path"] = csv_path
+    readiness_mode = _param_bool(context, "p4.g0c.readiness_mode")
+    trace_binding = _p4_g0c_profile_trace_binding(
+        experiment, readiness_mode, csv_path)
+    profile_trace_enable = trace_binding["enabled"]
+    if "p4.profile_trace_enable" in overrides and \
+            _param_bool(context, "p4.profile_trace_enable") != profile_trace_enable:
+        raise RuntimeError(
+            "P4-G0C profile trace is permitted only for v5 readiness"
+        )
+    profile_trace_path = trace_binding["path"]
+    if "p4.profile_trace_path" in overrides and \
+            LaunchConfiguration("p4.profile_trace_path").perform(context) != \
+            profile_trace_path:
+        raise RuntimeError("P4-G0C conflicting profile trace path")
+    context.launch_configurations["p4.profile_trace_enable"] = str(
+        profile_trace_enable).lower()
+    context.launch_configurations["p4.profile_trace_path"] = profile_trace_path
     binding = _p4_g0c_binding(
         experiment=experiment,
         protocol_path=LaunchConfiguration("p4.g0c.protocol_path").perform(context),
@@ -583,7 +633,7 @@ def _prepare_p4_g0c_context(context, experiment, iap_share):
             "p4.g0c.run_manifest_path").perform(context),
         csv_path=csv_path,
         effective_values=effective,
-        readiness_mode=_param_bool(context, "p4.g0c.readiness_mode"),
+        readiness_mode=readiness_mode,
         child_environment={
             "HOME": LaunchConfiguration("p4.g0c.child_home").perform(context),
             "ROS_HOME": LaunchConfiguration(
@@ -1345,7 +1395,7 @@ EXPERIMENT_PRESETS = {
     },
     "p4_g0c_metrics_calibration_v5": {
         **P4_G0C_FROZEN_LAUNCH_VALUES,
-        **P4_G0C_V4_P0_PROFILE_VALUES,
+        **P4_G0C_V5_P0_PROFILE_VALUES,
         **P4_G0C_ARTIFACT_PRESET_V5,
         "scenario": "p4_g0c_free_corridor_v1",
         "p1_fixture_central_x_min_m": str(P4_G0C_V5_CENTRAL_OBSTACLE_X_M[0]),
@@ -1691,6 +1741,8 @@ ARG_DEFAULTS = [
     ("p4.debug_csv_enable", "false"),
     ("p4.require_risk_grid_ready_before_planning", "false"),
     ("p4.debug_csv_path", ""),
+    ("p4.profile_trace_enable", "false"),
+    ("p4.profile_trace_path", ""),
     ("p4.g0c.protocol_path", ""),
     ("p4.g0c.protocol_sha256", ""),
     ("p4.g0c.registry_path", ""),
@@ -2294,6 +2346,9 @@ def _ego_planner_node(context, drone_id, planner_odom_topic, cloud_topic, camera
     p4_debug_path = LaunchConfiguration("p4.debug_csv_path").perform(context)
     if not p4_debug_path:
         p4_debug_path = str(Path(export_dir) / "planner_p4_risk_astar_debug.csv")
+    p4_profile_trace_enable = _param_bool(context, "p4.profile_trace_enable")
+    p4_profile_trace_path = LaunchConfiguration(
+        "p4.profile_trace_path").perform(context)
 
     map_size_x, map_size_y, map_size_z = map_size
     goal_x, goal_y, goal_z = goal
@@ -2522,6 +2577,8 @@ def _ego_planner_node(context, drone_id, planner_odom_topic, cloud_topic, camera
             {"p4.fallback_to_original_when_risk_not_ready": _param_bool(context, "p4.fallback_to_original_when_risk_not_ready")},
             {"p4.debug_csv_enable": _param_bool(context, "p4.debug_csv_enable")},
             {"p4.debug_csv_path": p4_debug_path},
+            {"p4.profile_trace_enable": p4_profile_trace_enable},
+            {"p4.profile_trace_path": p4_profile_trace_path},
             {"p5.enable_runtime_gate": p5_runtime},
             {"p5.enable_final_gate": p5_final},
             {"p5.horizon_s": _param_float(context, "p5.horizon_s")},
@@ -3154,6 +3211,10 @@ def _launch_setup(context):
         "p4.debug_csv_enable": _param_bool(context, "p4.debug_csv_enable"),
         "p4.debug_csv_path": LaunchConfiguration(
             "p4.debug_csv_path").perform(context),
+        "p4.profile_trace_enable": _param_bool(
+            context, "p4.profile_trace_enable"),
+        "p4.profile_trace_path": LaunchConfiguration(
+            "p4.profile_trace_path").perform(context),
         "p4.g0c": p4_g0c_binding,
         "p5.enable_runtime_gate": p5_runtime_for_manifest,
         "p5.enable_final_gate": p5_final_for_manifest,

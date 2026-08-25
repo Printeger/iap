@@ -271,6 +271,79 @@ namespace ego_planner
           << decision.risk_search_latency_ms << ','
           << decision.total_search_latency_ms << '\n';
     }
+
+    const char *p4OccupancyClass(
+        const iap::RiskOccupancyDiagnostic &occupancy)
+    {
+      if (!occupancy.available)
+        return "UNAVAILABLE";
+      if (occupancy.raw_occupied)
+        return "RAW_OCCUPIED";
+      if (occupancy.inflated_occupied)
+        return "INFLATED_OCCUPIED";
+      return "FREE";
+    }
+
+    void writeP4ProfileTraceCsv(const P4RiskAStarConfig &config,
+                                const P4GuideDecision &decision)
+    {
+      if (!config.profile_trace_enable || config.profile_trace_path.empty())
+        return;
+      std::ifstream existing(config.profile_trace_path);
+      const bool write_header =
+          !existing.good() || existing.peek() == std::ifstream::traits_type::eof();
+      existing.close();
+      std::ofstream csv(config.profile_trace_path, std::ios::app);
+      if (!csv.good())
+        return;
+      if (write_header)
+        csv << "schema_version,planning_attempt_id,collision_segment_id,request_hash,"
+               "arm,sample_index,point_x,point_y,point_z,query_time_s,query_tau_s,"
+               "sample_valid,sample_stale,sample_cost,top_reason,risk_generation_id,"
+               "frame_id,corner_id,temporal_layer,horizon_id,horizon_s,temporal_weight,"
+               "voxel_x,voxel_y,voxel_z,voxel_position_x,voxel_position_y,voxel_position_z,"
+               "spatial_weight,source_flags,corner_cost,corner_valid,corner_stale,"
+               "corner_unknown,corner_reason,occupancy_class,occupancy_source\n";
+      const auto emit_arm = [&](const char *arm, const P4GuideRecord &record) {
+        for (const auto &sample_trace : record.sample_traces) {
+          const auto emit = [&](const iap::RiskCostQueryCornerTrace *corner) {
+            csv << "p4_equal_arc_profile_trace_v1," << decision.planning_attempt_id << ','
+                << decision.collision_segment_id << ',' << decision.request_hash << ','
+                << arm << ',' << sample_trace.sample_index << ','
+                << sample_trace.point.x() << ',' << sample_trace.point.y() << ','
+                << sample_trace.point.z() << ',' << sample_trace.query_time_s << ','
+                << sample_trace.query.query_tau_s << ','
+                << (sample_trace.sample.valid ? 1 : 0) << ','
+                << (sample_trace.sample.stale ? 1 : 0) << ','
+                << sample_trace.sample.cost << ',' << sample_trace.query.reason << ','
+                << sample_trace.query.risk_generation_id << ','
+                << sample_trace.query.frame_id << ',';
+            if (!corner) {
+              csv << "-1,-1,-1,nan,0,-1,-1,-1,nan,nan,nan,0,0,nan,0,1,1,not_evaluated,UNAVAILABLE,unavailable\n";
+              return;
+            }
+            csv << corner->corner_id << ',' << corner->temporal_layer << ','
+                << corner->horizon_id << ',' << corner->horizon_s << ','
+                << corner->temporal_weight << ',' << corner->voxel_index.x() << ','
+                << corner->voxel_index.y() << ',' << corner->voxel_index.z() << ','
+                << corner->voxel_position.x() << ',' << corner->voxel_position.y() << ','
+                << corner->voxel_position.z() << ',' << corner->spatial_weight << ','
+                << corner->source_flags << ',' << corner->c_pi << ','
+                << (corner->valid ? 1 : 0) << ',' << (corner->stale ? 1 : 0) << ','
+                << (corner->unknown ? 1 : 0) << ',' << corner->invalid_reason << ','
+                << p4OccupancyClass(corner->occupancy) << ','
+                << corner->occupancy.source << '\n';
+          };
+          if (sample_trace.query.corners.empty())
+            emit(nullptr);
+          else
+            for (const auto &corner : sample_trace.query.corners)
+              emit(&corner);
+        }
+      };
+      emit_arm("original", decision.original);
+      emit_arm("risk", decision.risk);
+    }
   } // namespace
 
 
@@ -318,6 +391,8 @@ namespace ego_planner
     node->declare_parameter("p4.fallback_to_original_when_risk_not_ready", true);
     node->declare_parameter("p4.debug_csv_enable", false);
     node->declare_parameter("p4.debug_csv_path", std::string(""));
+    node->declare_parameter("p4.profile_trace_enable", false);
+    node->declare_parameter("p4.profile_trace_path", std::string(""));
 
     node->get_parameter("optimization/lambda_smooth", lambda1_);
     node->get_parameter("optimization/lambda_collision", lambda2_);
@@ -406,6 +481,8 @@ namespace ego_planner
     node->get_parameter("p4.fallback_to_original_when_risk_not_ready", p4_config_.fallback_to_original_when_risk_not_ready);
     node->get_parameter("p4.debug_csv_enable", p4_config_.debug_csv_enable);
     node->get_parameter("p4.debug_csv_path", p4_config_.debug_csv_path);
+    node->get_parameter("p4.profile_trace_enable", p4_config_.profile_trace_enable);
+    node->get_parameter("p4.profile_trace_path", p4_config_.profile_trace_path);
     p4_config_.query_speed_mps = std::isfinite(max_vel_) && max_vel_ > 1.0e-3 ? max_vel_ : 1.0;
   }
 
@@ -548,6 +625,7 @@ namespace ego_planner
     {
       P4GuideDecision decision = planCollisionGuideForSegment(points, segment);
       writeP4Csv(p4_config_, decision, rclcpp::Clock().now().seconds());
+      writeP4ProfileTraceCsv(p4_config_, decision);
       last_p4_guides_.push_back(std::move(decision));
       const auto &stored = last_p4_guides_.back();
       if (stored.status != P4GuideDecisionStatus::ORIGINAL_SELECTED ||

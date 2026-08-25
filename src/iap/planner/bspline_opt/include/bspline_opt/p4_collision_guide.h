@@ -14,11 +14,7 @@
 #include <vector>
 
 #include <path_searching/dyn_a_star.h>
-
-namespace iap
-{
-  class RiskGridSnapshot;
-}
+#include <iap/planner/risk_grid_map.hpp>
 
 namespace ego_planner
 {
@@ -89,6 +85,16 @@ namespace ego_planner
     std::string canonical_hash;
     double length_m = 0.0;
     P4GuideRiskProfile risk_profile;
+    struct SampleTrace
+    {
+      std::size_t sample_index = 0;
+      Eigen::Vector3d point = Eigen::Vector3d::Constant(
+        std::numeric_limits<double>::quiet_NaN());
+      double query_time_s = std::numeric_limits<double>::quiet_NaN();
+      iap::RiskCostSample sample;
+      iap::RiskCostQueryTrace query;
+    };
+    std::vector<SampleTrace> sample_traces;
   };
 
   class P4GuideRequest

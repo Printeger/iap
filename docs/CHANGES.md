@@ -2338,3 +2338,38 @@ git diff --check
 - Final state is
   `BLOCKED_R5_READINESS_PROFILE_INCOMPLETE_BEFORE_REGISTERED_IDENTITY`; no r5
   identity, retry, draft, threshold action, G0C verdict, G0D or P5 work exists.
+
+## 2026-08-25 (ICRA-062 worker-4 profile and diagnostic P4 trace)
+
+- Requirements: `IAP-RQ-320`, `IAP-RQ-322`, `IAP-RQ-423`.
+- Bound v5/r5 predictor worker count to typed integer 4 and made launch/runner
+  fail closed unless live requested/effective values are `4/4`; retained
+  `p0.batch_worker_count=1` and all v1-v4/default behavior.
+- Removed the test-only FSM friend/callback and fake counter integration test;
+  direct admission plus three real unit cases and live evidence remain.
+- Added default-off, v5-readiness-only equal-arc traces and a fail-closed
+  classifier requiring 200 samples per arm across seven mutually exclusive
+  categories. C++ coverage proves decision noninterference.
+- Fresh CUDA build, GPU and required-process readiness pass. The corrected live
+  run finds 3,040 occupied-skip invalid samples plus 10 genuine risk-endpoint
+  `TIME_SUPPORT` samples. Section 6 forbids repairing time support, so the task
+  stops before r6, registered r5, analyzer, draft or threshold action as
+  `BLOCKED_R5_READINESS_TIME_SUPPORT_BEFORE_REGISTERED_IDENTITY`.
+
+Reproduce the non-live ICRA-062 verification and retained trace classification
+from the repository root (the one-shot readiness run must not be rerun):
+
+```bash
+python3 scripts/dev_planner/run_p4_g0c_tests.py \
+  --task-root "$PWD/results/icra27/icra062/review-tests" unittest -- \
+  discover -s test -p 'test_*.py'
+python3 scripts/dev_planner/classify_p4_profile_trace.py \
+  --trace results/icra27/icra062/readiness_attempt_03/p4-g0c-r5-readiness-icra062-attempt03/p4_equal_arc_profile_trace.csv \
+  --output results/icra27/icra062/readiness_attempt_03/p4_profile_trace_classification.json
+git diff --check
+```
+
+Exact fresh-build and one-shot readiness argv, cwd, safe environment-key
+allowlist, timestamps, exits and artifact paths are retained in
+`results/icra27/icra062/command_ledger.json`; they are evidence, not commands
+authorized for repetition after this typed stop.
