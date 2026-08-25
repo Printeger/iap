@@ -1,0 +1,58 @@
+{
+  "analyzer_version": "icra_p0_p5_qualification_analyzer_v1",
+  "case_results": {
+    "FINAL_REJECT": {
+      "status": "PASS"
+    },
+    "RUNTIME_FAIL": {
+      "status": "PASS"
+    },
+    "SAFE_NORMAL": {
+      "status": "PASS"
+    }
+  },
+  "contract_sha256": "34b1544d4d37714f03be0f40f4b6a0689677dae24ff6ce1d5470ed26f2358fca",
+  "failures": [],
+  "launch_binding_sha256": {
+    "FINAL_REJECT": "49e532df3853600d0f59b83d1ac0f2b5f1a57acb94e945a588576b5d55cdd649",
+    "RUNTIME_FAIL": "0f9f3a98c1a966fd89c2cd0f8fe2939c7a0e453f14547824dfdb5d46ca58db98",
+    "SAFE_NORMAL": "7cf4ae8f2911679b07980819249c091f0dbc16e81577c2c6ae2f8d74056fadf3"
+  },
+  "qualification_claim": false,
+  "route_id": "ICRA_P0_P5_CONTINGENCY_V1",
+  "schema_version": "icra_p0_p5_validation_result_v1",
+  "status": "VALIDATION_ONLY_PASS",
+  "validated_manifest": {
+    "analyzer_version": "icra_p0_p5_qualification_analyzer_v1",
+    "contract_sha256": "34b1544d4d37714f03be0f40f4b6a0689677dae24ff6ce1d5470ed26f2358fca",
+    "fixture_identities": {
+      "FINAL_REJECT": "p5_7_rejected_trajectory_zone_v1",
+      "RUNTIME_FAIL": "p5_6_future_unknown_zone_v1",
+      "SAFE_NORMAL": "none_v1"
+    },
+    "git_commit": "b629a8a4dab2553db8d35447708324bd18aa4979",
+    "normalized_evidence_sha256": {
+      "synthetic-final-reject-v1": "ce9408e7a9c443dbe805631d118f142735ed74c91f6667eb662b5a4ea60048b1",
+      "synthetic-runtime-fail-v1": "ddd61c18a54e08ac2c23fae114cef11bd19127b5678581fe35fbf62ba645acab",
+      "synthetic-safe-normal-v1": "9b90e03b6eb9ac4e2d5b5162f39efb23cd41c97234657155384feea39d6ab9ce"
+    },
+    "raw_artifact_hashes": {
+      "synthetic-final-reject-v1": {
+        "config/icra27/icra_p0_p5_qualification_v1.json": "34b1544d4d37714f03be0f40f4b6a0689677dae24ff6ce1d5470ed26f2358fca"
+      },
+      "synthetic-runtime-fail-v1": {
+        "config/icra27/icra_p0_p5_qualification_v1.json": "34b1544d4d37714f03be0f40f4b6a0689677dae24ff6ce1d5470ed26f2358fca"
+      },
+      "synthetic-safe-normal-v1": {
+        "config/icra27/icra_p0_p5_qualification_v1.json": "34b1544d4d37714f03be0f40f4b6a0689677dae24ff6ce1d5470ed26f2358fca"
+      }
+    },
+    "route_id": "ICRA_P0_P5_CONTINGENCY_V1",
+    "run_identities": {
+      "FINAL_REJECT": "synthetic-final-reject-v1",
+      "RUNTIME_FAIL": "synthetic-runtime-fail-v1",
+      "SAFE_NORMAL": "synthetic-safe-normal-v1"
+    }
+  },
+  "validation_only": true
+}

@@ -2576,7 +2576,8 @@ python3 scripts/dev_planner/analyze_p4_g0c_calibration.py \
   syntax/fatal lint/diff checks, with no external ROS-log delta. Full discovery
   ran 525 tests; only four frozen P4-r6 launch-SHA closure checks fail because
   their ICRA-066 manifest intentionally binds the pre-ICRA-067 launch. Forbidden
-  P4 artifacts were not rewritten. No build, GPU, ROS, live arm or qualification
+  P4 artifacts were not rewritten. The post-review discovery total is 528:
+  524 pass and those same four frozen checks fail. No build, GPU, ROS, live arm or qualification
   command ran; handoff is typed
   `BLOCKED_ICRA067_FROZEN_P4_LAUNCH_HASH_CONFLICT`.
 
@@ -2593,3 +2594,12 @@ python3 launch/icra_p0_p5_qualification.py analyze --contract config/icra27/icra
 The four prospective live/analyzer commands are recorded verbatim in
 `DEV_LOG.md`; they require a new Supervisor-authorized live task and were not
 executed by ICRA-067.
+
+Two-axis review findings were resolved before handoff: launch and analyzer now
+share the same versioned launch-binding constructor; complete reused P5-6/P5-7
+fixture geometry lives in the contract; analyzer raw hashes name and verify real
+checkout-local files; `--repository-root` must equal the actual checkout; and
+FINAL_REJECT permits unrelated candidate publication while still forbidding the
+rejected identity. Compact synthetic result SHA is
+`54eaec91f4b055917250a9d92dfb42160b86c43b1c5dbc5f22b9f8fdd4062553`;
+it is explicitly validation-only and makes no qualification claim.

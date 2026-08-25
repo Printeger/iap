@@ -7957,13 +7957,24 @@ metrics/debug/trace/fanout/application and safety-viz paths are off.
 
 Focused hermetic tests pass 8/8 analyzer/contract and 20/20 launch tests;
 syntax, fatal flake8 and diff checks pass with the 17,762-entry external ROS
-inventory unchanged. Full hermetic discovery ran 525 tests and failed only four
+inventory unchanged. Post-review full hermetic discovery ran 528 tests: 524
+passed and only four
 immutable P4-r6 closure checks: three `RETAINED_R6_DRIFT:exact_final_install`
 errors and one `DEPENDENCY_LAUNCH_CONTRACT_MISMATCH`. Those tests require the
 ICRA-066 launch SHA `24f34c6a...44595`, while ICRA-067 is explicitly required
 to change that launch. Updating the frozen P4-v6 dependency manifest/tests is
 forbidden, so the task stops as
 `BLOCKED_ICRA067_FROZEN_P4_LAUNCH_HASH_CONFLICT`; no P4 artifact was changed.
+
+Independent two-axis review found one reproducibility-doc violation, one
+duplicated resolver smell and four spec gaps. Follow-up commit `b629a8a`
+centralizes the resolver, puts reproduction commands in `docs/CHANGES.md`,
+unifies launch/analyzer bindings, freezes complete reused P5-6/P5-7 fixture
+geometry, verifies real repository-local raw files, rejects a forged checkout
+root and limits FINAL_REJECT's zero-publication rule to the rejected identity.
+The synthetic validation manifest is `VALIDATION_ONLY_PASS` for all three cases
+with `qualification_claim=false`; its SHA is
+`54eaec91...4062553`, contract SHA `34b1544d...58fca`.
 
 No GPU, ROS, launch, live runner, registered identity, bag, product build or
 qualification was invoked. The following are the exact prospective commands
