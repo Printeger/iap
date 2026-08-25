@@ -1218,3 +1218,12 @@ They do not convert historical `NO-GO-P2`, failed P0 Gate-0B evidence, the stati
 |---|---|---|---|
 | IAP-RQ-423 | Prevent environment/credential values from entering ICRA-057 evidence | A read-only metadata search mistakenly included a retained event log whose tool output exposed serialized environment values; no value/name was copied into repository evidence and scoped tracked/compact scan is clean | **BLOCKED_CREDENTIAL_VALUE_OUTPUT_EXPOSURE** |
 | IAP-RQ-423 | Stop before one-shot live boundaries after output violation | Adopted closure verdict is incomplete; dependency/GPU/full runner/r3/analyzer invocations are all zero, roots absent, processes zero, historical artifacts and protected identities retained | **FAIL-CLOSED; SUPERVISOR REVIEW REQUIRED** |
+
+## 2026-08-25 ICRA-058 direct r3 live continuation
+
+| Req ID | Requirement/evidence seam | Implementation and retained evidence | Status |
+|---|---|---|---|
+| IAP-RQ-423 | Reuse only the accepted frozen CUDA product before live | Read-only ICRA-056 closure has 17 exact package indexes, Release/CUDA ON/tests OFF, 14 bound configs, six ordinary ELF libraries, loadable GPU odometry SHA `0848175b...5c7cf`, zero unresolved/historical linkage and exact frozen input hashes | **ADOPTED CLOSURE PASS; no build** |
+| IAP-RQ-423 | Require corrected provenance before GPU or ROS | Sole fresh ICRA-058 dependency preflight exits 0/PASS with canonical manifest/SHA, exact 18/13/1/14/6 counts and zero downstream activity; state SHA is `db8f0c1c...bdb46` | **DEPENDENCY PREFLIGHT PASS** |
+| IAP-RQ-423 | Execute each r3 identity at most once behind mandatory GPU proof | Sole full runner passes `nvidia-smi`, `cuInit(0)` and one device, consumes only `p4-g0c-r3-seed211-rep01`, and records 1 attempted / 0 completed / 1 launch / 0 retry; required processes survive the 90-second interval and controlled shutdown | **ONE-SHOT BOUNDARY PRESERVED** |
+| IAP-RQ-423 | Reject malformed scientific evidence without threshold action | First decision row has empty `snapshot_frame`, producing `malformed P4 decision CSV: ...:typed_identity`; runner exits 2/FAILED, analyzer/draft/action remain zero/absent, external logs and protected identities remain exact | **BLOCKED_MALFORMED_P4_DECISION_CSV_TYPED_IDENTITY** |

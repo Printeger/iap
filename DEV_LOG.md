@@ -7532,3 +7532,59 @@ preflight, GPU preflight, full runner, all registered identities, analyzer and
 threshold action remain at zero invocations, and their task-local roots remain
 absent. All authorized implementation, tests, docs and compact evidence are
 pushed; control returns to SUPERVISOR review without selecting a next task.
+
+## 2026-08-25 — ICRA-058 DIRECT R3 LIVE CONTINUATION
+
+IAP-RQ-423. Synchronization was `0 0`; initial worktree contained only the
+protected untracked PDF and the ICRA-058 root was fresh. A sanitized `env -i`
+caller created repository-local HOME, ROS_HOME, ROS_LOG_DIR, TMPDIR and 0700
+XDG roots. External ROS-log baseline was 17,758 entries with metadata SHA
+`24e013db...4b7b` and content SHA `534a735b...a73`; both remain exact.
+
+No build ran. Read-only adoption proves 17 ICRA-056 package indexes resolve
+only to its merged install; the exact cache remains Release,
+`BUILD_TESTING=OFF`, `BUILD_WITH_CUDA=ON` and uses the registered nvcc. All
+six declared runtime libraries remain ordinary non-symlink ELF files. GPU
+odometry retains SHA `0848175b...5c7cf`, loads, and has zero unresolved or
+historical/default linkage. Fourteen installed configs and frozen dependency,
+protocol, registry, lineage, fixture and source/installed launch hashes match.
+
+Pre-live read-only diagnostics disclosed several correctable invocation
+mistakes: unavailable JSON tooling, an over-narrow metadata depth, setup with
+incompatible nounset, an unavailable sanitized-shell scanner, one mistyped
+config hash and one wrong protocol-summary key. Those outputs were invalidated
+before live and corrected without product mutation. An exact CMake metadata
+read also surfaced an embedded historical path environment; it contained no
+credential-like value, was not persisted, and the file was excluded from all
+later commands/evidence.
+
+The sole fresh standalone dependency command exits 0 with state
+`DEPENDENCY_PREFLIGHT_PASS`, exact canonical v3 manifest/SHA and
+18 packages / 13 executables / one component / 14 configs / six runtime
+libraries. GPU, launch, attempted/completed identities and retry all remain
+zero in that state (`db8f0c1c...bdb46`).
+
+The sole full runner then passes its mandatory built-in GPU preflight: both
+`nvidia-smi` calls exit 0, CUDA Driver `cuInit(0)` returns 0 and device count is
+one. It launches the first registered identity
+`p4-g0c-r3-seed211-rep01` exactly once. `iap_rosnode` and
+`ego_planner_node` survive the complete 90-second interval and finish cleanly
+after controlled SIGINT; the integrity validator passes 821 messages.
+
+Final run inventory nevertheless rejects the 17 decision rows. Row one has an
+empty `snapshot_frame`, so the registered parser returns
+`malformed P4 decision CSV: p4-g0c-r3-seed211-rep01:typed_identity`. Runner
+exit is 2 and state is `FAILED` (`9f6241a2...b62ddf`), with 1 attempted,
+0 completed, 1 launch and 0 retry. This consumed identity and immutable bundle
+were not rerun, replaced, repaired or analyzed.
+
+Builder result is `BLOCKED_MALFORMED_P4_DECISION_CSV_TYPED_IDENTITY`, never
+G0C PASS. Analyzer, analysis/draft, threshold action, alternate scenario,
+G0D/P5 and cleanup are zero/absent. No task process remains. External ROS logs
+are unchanged; `gnss_comm` is `de422a4b...16a` and the protected PDF remains
+untracked/unstaged at `1f07da56...44f6`. Exact redacted evidence is under
+`results/icra27/icra058/compact/`; control returns directly to SUPERVISOR.
+
+A final process audit briefly matched a process that self-exited before its
+command line could be identified. No signal was sent; repeated audits are
+clean and manual termination count is zero.

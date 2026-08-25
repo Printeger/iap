@@ -106,6 +106,41 @@ python3 test/test_gate0_analyzer.py
 git diff --check
 ```
 
+## 2026-08-25 (ICRA-058 direct r3 live continuation BLOCKED)
+
+- IAP-RQ-423: adopted the unchanged ICRA-056 CUDA closure without invoking
+  `colcon`. Seventeen package indexes, Release/CUDA-ON/tests-OFF cache,
+  fourteen configs, six ordinary non-symlink ELF libraries, loadable GPU
+  odometry SHA `0848175b...5c7cf`, zero unresolved/historical linkage and all
+  frozen v3/fixture/launch hashes pass.
+- The sole standalone dependency invocation exits 0 as
+  `DEPENDENCY_PREFLIGHT_PASS`, binds the canonical manifest/SHA, reports exact
+  18/13/1/14/6 counts and records zero GPU/launch/attempt/retry.
+- The sole full runner passes built-in GPU proof (`nvidia-smi` exits 0,
+  `cuInit(0)=0`, one device), then consumes only
+  `p4-g0c-r3-seed211-rep01`. Both required processes survive the registered
+  90-second interval and exit cleanly after controlled SIGINT; test-planner
+  integrity validation passes 821 messages.
+- Final inventory fails closed because the 17-row P4 decision CSV has an empty
+  `snapshot_frame` in its first row and therefore violates the registered
+  `typed_identity` schema. Runner exit/state are 2/`FAILED`, with 1 attempted,
+  0 completed, 1 launch and 0 retry. Result is
+  `BLOCKED_MALFORMED_P4_DECISION_CSV_TYPED_IDENTITY`.
+- Per one-shot rules the bundle was not rerun or replaced. Analyzer, analysis,
+  threshold draft/action, G0C claim, G0D/P5 and cleanup remain zero/absent.
+  External ROS logs, `gnss_comm` and the protected PDF are unchanged; no task
+  process remains. Exact commands and hashes are in
+  `results/icra27/icra058/compact/`.
+
+Reproduce only the read-only compact verification; do not rerun the consumed
+live identity:
+
+```bash
+sha256sum results/icra27/icra058/dependency_preflight/p4_g0c_runner_state.json
+sha256sum results/icra27/icra058/runs/p4_g0c_runner_state.json
+git diff --check
+```
+
 ## 2026-08-25 (ICRA-057 dependency provenance repair Phase A)
 
 - IAP-RQ-423: repair only `validate_runtime_dependencies()` by resolving the
