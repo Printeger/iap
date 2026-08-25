@@ -7955,7 +7955,7 @@ validation-only analyzer. P0 retains worker 4, sigma 0.01, the reviewed
 with unchanged thresholds/query values. P1/P2/P3/P4, distinctive trajectories,
 metrics/debug/trace/fanout/application and safety-viz paths are off.
 
-Focused hermetic tests pass 6/6 analyzer/contract and 20/20 launch tests;
+Focused hermetic tests pass 8/8 analyzer/contract and 20/20 launch tests;
 syntax, fatal flake8 and diff checks pass with the 17,762-entry external ROS
 inventory unchanged. Full hermetic discovery ran 525 tests and failed only four
 immutable P4-r6 closure checks: three `RETAINED_R6_DRIFT:exact_final_install`

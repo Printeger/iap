@@ -22,7 +22,7 @@ IcraP0P5ContractError = _ICRA_P0_P5_HELPER.ContractError
 load_icra_p0_p5_contract = _ICRA_P0_P5_HELPER.load_contract
 resolve_icra_p0_p5_launch_values = _ICRA_P0_P5_HELPER.resolve_launch_values
 resolve_icra_p0_p5_profile_values = _ICRA_P0_P5_HELPER.resolve_profile_values
-p0_icra_p0_p5_profile_binding = _ICRA_P0_P5_HELPER.p0_profile_binding
+build_icra_p0_p5_launch_binding = _ICRA_P0_P5_HELPER.build_launch_binding
 
 from ament_index_python.packages import get_package_prefix, get_package_share_directory
 from launch import LaunchDescription
@@ -1936,21 +1936,37 @@ def _typed_contract_override(raw, expected):
     return str(raw)
 
 
-def _apply_icra_p0_p5_profile(
-    context, experiment, iap_share, user_overrides, applied_keys
-):
+def _resolve_icra_p0_p5_context(context, experiment, iap_share, overrides):
     profile = LaunchConfiguration("planner_safety_profile").perform(context).strip()
     case_id = ICRA_P0_P5_CASE_BY_EXPERIMENT.get(experiment)
     if case_id is None and profile != "icra_p0_p5":
         return None
     contract_path = Path(iap_share) / ICRA_P0_P5_CONTRACT_PATH
     contract = load_icra_p0_p5_contract(contract_path)
-    resolver = (
-        resolve_icra_p0_p5_launch_values if case_id is not None
-        else resolve_icra_p0_p5_profile_values
+    values = (
+        resolve_icra_p0_p5_launch_values(contract, case_id, overrides)
+        if case_id is not None
+        else resolve_icra_p0_p5_profile_values(contract, overrides)
     )
-    resolver_args = (contract, case_id, {}) if case_id is not None else (contract, {})
-    expected = resolver(*resolver_args)
+    return {
+        "case_id": case_id,
+        "contract": contract,
+        "contract_path": contract_path,
+        "fixture_alias": (
+            contract["cases"][case_id]["fixture_alias"]
+            if case_id is not None else "none_v1"
+        ),
+        "values": values,
+    }
+
+
+def _apply_icra_p0_p5_profile(
+    context, experiment, iap_share, user_overrides, applied_keys
+):
+    resolved = _resolve_icra_p0_p5_context(context, experiment, iap_share, {})
+    if resolved is None:
+        return None
+    expected = resolved["values"]
     explicit_values = {}
     for key in user_overrides:
         if key not in context.launch_configurations:
@@ -1958,11 +1974,9 @@ def _apply_icra_p0_p5_profile(
         raw = context.launch_configurations[key]
         explicit_values[key] = _typed_contract_override(raw, expected.get(key, raw))
     try:
-        resolver_args = (
-            (contract, case_id, explicit_values)
-            if case_id is not None else (contract, explicit_values)
+        _resolve_icra_p0_p5_context(
+            context, experiment, iap_share, explicit_values
         )
-        resolver(*resolver_args)
     except IcraP0P5ContractError as exc:
         raise RuntimeError(str(exc)) from exc
     for key in applied_keys & set(expected):
@@ -1974,16 +1988,15 @@ def _apply_icra_p0_p5_profile(
     for key, value in expected.items():
         context.launch_configurations[key] = _launch_value(value)
         applied_keys.add(key)
+    contract = resolved["contract"]
+    contract_path = resolved["contract_path"]
     return {
         "schema_version": contract["schema_version"],
         "route_id": contract["route_id"],
         "profile_name": contract["profile_name"],
         "qualification_family": contract["qualification_family"],
-        "case_id": case_id,
-        "fixture_alias": (
-            contract["cases"][case_id]["fixture_alias"]
-            if case_id is not None else "none_v1"
-        ),
+        "case_id": resolved["case_id"],
+        "fixture_alias": resolved["fixture_alias"],
         "analyzer_version": contract["analyzer_version"],
         "contract_path": str(contract_path.resolve()),
         "contract_sha256": _sha256_file(contract_path),
@@ -1991,50 +2004,23 @@ def _apply_icra_p0_p5_profile(
 
 
 def _icra_p0_p5_launch_binding(context, experiment, iap_share, evidence):
-    profile = LaunchConfiguration("planner_safety_profile").perform(context).strip()
-    case_id = ICRA_P0_P5_CASE_BY_EXPERIMENT.get(experiment)
-    if case_id is None and profile != "icra_p0_p5":
+    resolved = _resolve_icra_p0_p5_context(context, experiment, iap_share, {})
+    if resolved is None:
         return None
-    contract_path = Path(iap_share) / ICRA_P0_P5_CONTRACT_PATH
-    contract = load_icra_p0_p5_contract(contract_path)
-    resolver = (
-        resolve_icra_p0_p5_launch_values if case_id is not None
-        else resolve_icra_p0_p5_profile_values
-    )
-    resolver_args = (contract, case_id, {}) if case_id is not None else (contract, {})
-    expected = resolver(*resolver_args)
+    contract = resolved["contract"]
+    contract_path = resolved["contract_path"]
+    expected = resolved["values"]
     effective = {
         key: _typed_contract_override(
             LaunchConfiguration(key).perform(context), expected_value
         )
         for key, expected_value in expected.items()
     }
-    resolver_args = (
-        (contract, case_id, effective)
-        if case_id is not None else (contract, effective)
+    _resolve_icra_p0_p5_context(context, experiment, iap_share, effective)
+    return build_icra_p0_p5_launch_binding(
+        contract, contract_path, resolved["case_id"], evidence["git_commit"],
+        evidence["run_id"], effective,
     )
-    resolver(*resolver_args)
-    return {
-        "schema_version": contract["schema_version"],
-        "route_id": contract["route_id"],
-        "profile_name": contract["profile_name"],
-        "qualification_family": contract["qualification_family"],
-        "case_id": case_id,
-        "git_commit": evidence["git_commit"],
-        "run_id": evidence["run_id"],
-        "effective_values": effective,
-        "p0_profile": p0_icra_p0_p5_profile_binding(contract),
-        "p5_thresholds": dict(contract["p5_thresholds"]),
-        "fixture_alias": (
-            contract["cases"][case_id]["fixture_alias"]
-            if case_id is not None else "none_v1"
-        ),
-        "analyzer_version": contract["analyzer_version"],
-        "contract_path": str(contract_path.resolve()),
-        "contract_sha256": _sha256_file(contract_path),
-        "raw_artifact_hashes": "REQUIRED_AT_ANALYSIS",
-        "qualification_status": "NOT_RUN",
-    }
 
 
 def _apply_presets(context, iap_share):

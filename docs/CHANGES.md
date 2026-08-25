@@ -2572,10 +2572,24 @@ python3 scripts/dev_planner/analyze_p4_g0c_calibration.py \
   fixture, ordering, publication and runtime-action adversaries. Controlled
   shutdown remains distinct from runtime failure, and synthetic PASS can never
   claim qualification.
-- Focused hermetic suites pass (6 analyzer/contract and 20 launch tests), plus
+- Focused hermetic suites pass (8 analyzer/contract and 20 launch tests), plus
   syntax/fatal lint/diff checks, with no external ROS-log delta. Full discovery
   ran 525 tests; only four frozen P4-r6 launch-SHA closure checks fail because
   their ICRA-066 manifest intentionally binds the pre-ICRA-067 launch. Forbidden
   P4 artifacts were not rewritten. No build, GPU, ROS, live arm or qualification
   command ran; handoff is typed
   `BLOCKED_ICRA067_FROZEN_P4_LAUNCH_HASH_CONFLICT`.
+
+Reproduce only the non-live checks and synthetic validation with:
+
+```bash
+source /home/dev/ws_iap/install/setup.bash
+python3 scripts/dev_planner/run_p4_g0c_tests.py --task-root /home/dev/ws_iap/src/iap/results/icra27/icra063/icra067_focused unittest discover -s test -p test_icra_p0_p5_qualification.py
+python3 scripts/dev_planner/run_p4_g0c_tests.py --task-root /home/dev/ws_iap/src/iap/results/icra27/icra063/icra067_focused unittest discover -s test -p test_test_planner_launch.py
+python3 launch/icra_p0_p5_qualification.py emit-synthetic-input --contract config/icra27/icra_p0_p5_qualification_v1.json --git-commit "$(git rev-parse HEAD)" --output results/icra27/icra067/validation/synthetic_input.json --repository-root /home/dev/ws_iap/src/iap
+python3 launch/icra_p0_p5_qualification.py analyze --contract config/icra27/icra_p0_p5_qualification_v1.json --input results/icra27/icra067/validation/synthetic_input.json --output results/icra27/icra067/compact/validation_manifest.json --repository-root /home/dev/ws_iap/src/iap
+```
+
+The four prospective live/analyzer commands are recorded verbatim in
+`DEV_LOG.md`; they require a new Supervisor-authorized live task and were not
+executed by ICRA-067.

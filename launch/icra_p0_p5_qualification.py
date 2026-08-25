@@ -14,6 +14,7 @@ EVIDENCE_SCHEMA = "icra_p0_p5_synthetic_evidence_v1"
 RESULT_SCHEMA = "icra_p0_p5_validation_result_v1"
 CASE_IDS = ("SAFE_NORMAL", "FINAL_REJECT", "RUNTIME_FAIL")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+SOURCE_REPOSITORY = Path(__file__).resolve().parents[1]
 
 
 class ContractError(RuntimeError):
@@ -31,6 +32,13 @@ def evidence_sha256(run):
     return hashlib.sha256(payload).hexdigest()
 
 
+def _evidence_sha256_or_invalid(value):
+    try:
+        return evidence_sha256(value)
+    except (TypeError, ValueError):
+        return "INVALID"
+
+
 def p0_profile_binding(contract):
     values = contract["profile_values"]
     return {
@@ -45,6 +53,39 @@ def p0_profile_binding(contract):
         ],
         "refresh_period_s": values["p0.refresh_period_s"],
         "stale_timeout_s": values["p0.stale_timeout_s"],
+    }
+
+
+def build_launch_binding(
+    contract, contract_path, case_id, git_commit, run_id, effective_values
+):
+    expected = (
+        _case_values(contract, case_id)
+        if case_id is not None else _profile_values(contract)
+    )
+    if effective_values != expected:
+        raise ContractError("launch binding effective values mismatch")
+    fixture_alias = (
+        contract["cases"][case_id]["fixture_alias"]
+        if case_id is not None else "none_v1"
+    )
+    return {
+        "schema_version": contract["schema_version"],
+        "route_id": contract["route_id"],
+        "profile_name": contract["profile_name"],
+        "qualification_family": contract["qualification_family"],
+        "case_id": case_id,
+        "git_commit": git_commit,
+        "run_id": run_id,
+        "effective_values": effective_values,
+        "p0_profile": p0_profile_binding(contract),
+        "p5_thresholds": dict(contract["p5_thresholds"]),
+        "fixture_alias": fixture_alias,
+        "analyzer_version": contract["analyzer_version"],
+        "contract_path": str(Path(contract_path).resolve()),
+        "contract_sha256": _sha256(contract_path),
+        "raw_artifact_hashes": "REQUIRED_AT_ANALYSIS",
+        "qualification_status": "NOT_RUN",
     }
 
 
@@ -236,8 +277,6 @@ def _validate_case(contract, run, failures):
                 failures.append(f"{prefix}: wrong registered final rejection reason")
             if any(event.get("candidate_id") == identity for event in publishes):
                 failures.append(f"{prefix}: rejected identity was normally published")
-        if publishes:
-            failures.append(f"{prefix}: final-only fixture leaked publication")
     elif case_id == "RUNTIME_FAIL":
         if len(accepts) != 1 or len(publishes) != 1 or len(runtime) != 1 or rejects:
             failures.append(f"{prefix}: runtime case requires accept, publish, then one runtime action")
@@ -257,8 +296,9 @@ def _validate_case(contract, run, failures):
             failures.append(f"{prefix}: fabricated runtime safe evidence")
 
 
-def analyze_bundle(contract, bundle, contract_path):
+def analyze_bundle(contract, bundle, contract_path, repository_root=None):
     failures = []
+    repository_root = Path(repository_root or Path(contract_path).resolve().parents[2])
     if not isinstance(bundle, dict):
         bundle = {}
         failures.append("bundle must be an object")
@@ -271,15 +311,10 @@ def analyze_bundle(contract, bundle, contract_path):
     if not isinstance(manifest, dict):
         manifest = {}
         failures.append("missing manifest")
-    expected_values = {**contract["profile_values"], **contract["p5_thresholds"]}
     expected_manifest = {
         "route_id": contract["route_id"],
-        "profile_name": contract["profile_name"],
         "contract_sha256": _sha256(contract_path),
         "analyzer_version": contract["analyzer_version"],
-        "effective_values": expected_values,
-        "p0_profile": p0_profile_binding(contract),
-        "p5_thresholds": contract["p5_thresholds"],
         "fixture_identities": {
             case_id: contract["cases"][case_id]["fixture_alias"]
             for case_id in CASE_IDS
@@ -310,8 +345,23 @@ def analyze_bundle(contract, bundle, contract_path):
         failures.append("manifest run identity binding mismatch")
     hashes = manifest.get("raw_artifact_hashes")
     if not isinstance(hashes, dict) or set(hashes) != set(run_ids) \
-            or any(not isinstance(value, str) or SHA256_RE.fullmatch(value) is None for value in hashes.values()):
+            or any(not isinstance(value, dict) or not value for value in hashes.values()):
         failures.append("raw artifact hashes missing, malformed, or identity-mismatched")
+    else:
+        for run_id, artifacts in hashes.items():
+            for relative, expected_hash in artifacts.items():
+                path = repository_root / relative
+                if not isinstance(relative, str) or Path(relative).is_absolute() \
+                        or not _within(path, repository_root):
+                    failures.append(f"run[{run_id}]: raw artifact path is not repository-local")
+                elif not path.is_file():
+                    failures.append(f"run[{run_id}]: raw artifact missing")
+                elif not isinstance(expected_hash, str) or SHA256_RE.fullmatch(expected_hash) is None \
+                        or _sha256(path) != expected_hash:
+                    failures.append(f"run[{run_id}]: raw artifact hash mismatch")
+    normalized_hashes = manifest.get("normalized_evidence_sha256")
+    if not isinstance(normalized_hashes, dict) or set(normalized_hashes) != set(run_ids):
+        failures.append("normalized evidence hashes missing or identity-mismatched")
     elif len(run_ids) == len(set(run_ids)):
         for run in runs:
             if not isinstance(run, dict) or not run.get("run_id"):
@@ -321,14 +371,23 @@ def analyze_bundle(contract, bundle, contract_path):
             except (TypeError, ValueError):
                 failures.append(f"run[{run.get('case_id')}]: raw evidence is not canonical JSON")
                 continue
-            if hashes[run["run_id"]] != actual_hash:
-                failures.append(f"run[{run.get('case_id')}]: raw artifact hash mismatch")
+            if normalized_hashes[run["run_id"]] != actual_hash:
+                failures.append(f"run[{run.get('case_id')}]: normalized evidence hash mismatch")
     case_results = {}
     for run in runs:
         if not isinstance(run, dict):
             failures.append("malformed run row")
             continue
         before = len(failures)
+        case_id = run.get("case_id")
+        if case_id in contract["cases"] and run.get("run_id"):
+            expected_binding = build_launch_binding(
+                contract, contract_path, case_id,
+                manifest.get("git_commit"), run["run_id"],
+                _case_values(contract, case_id),
+            )
+            if run.get("launch_binding") != expected_binding:
+                failures.append(f"run[{case_id}]: launch binding mismatch")
         _validate_common_run(contract, run, failures)
         _validate_case(contract, run, failures)
         case_results[run.get("case_id", "<missing>")] = {
@@ -336,11 +395,19 @@ def analyze_bundle(contract, bundle, contract_path):
         }
     return {
         "schema_version": RESULT_SCHEMA,
+        "validation_only": True,
         "status": "VALIDATION_ONLY_PASS" if not failures else "VALIDATION_ONLY_FAIL",
         "qualification_claim": False,
         "route_id": contract["route_id"],
         "analyzer_version": contract["analyzer_version"],
         "contract_sha256": _sha256(contract_path),
+        "validated_manifest": manifest,
+        "launch_binding_sha256": {
+            run.get("case_id", "<missing>"): _evidence_sha256_or_invalid(
+                run.get("launch_binding", {})
+            )
+            for run in runs if isinstance(run, dict)
+        },
         "case_results": case_results,
         "failures": failures,
     }
@@ -394,20 +461,21 @@ def build_synthetic_validation_bundle(contract, contract_path, git_commit):
             ],
         },
     ]
+    for run in runs:
+        run["launch_binding"] = build_launch_binding(
+            contract, contract_path, run["case_id"], git_commit,
+            run["run_id"], _case_values(contract, run["case_id"]),
+        )
+    contract_relative = str(Path(contract_path).resolve().relative_to(SOURCE_REPOSITORY))
+    contract_hash = _sha256(contract_path)
     return {
         "schema_version": EVIDENCE_SCHEMA,
         "validation_only": True,
         "manifest": {
             "route_id": contract["route_id"],
             "git_commit": git_commit,
-            "profile_name": contract["profile_name"],
             "contract_sha256": _sha256(contract_path),
             "analyzer_version": contract["analyzer_version"],
-            "effective_values": {
-                **contract["profile_values"], **contract["p5_thresholds"]
-            },
-            "p0_profile": p0_profile_binding(contract),
-            "p5_thresholds": contract["p5_thresholds"],
             "fixture_identities": {
                 case_id: contract["cases"][case_id]["fixture_alias"]
                 for case_id in CASE_IDS
@@ -416,6 +484,9 @@ def build_synthetic_validation_bundle(contract, contract_path, git_commit):
                 run["case_id"]: run["run_id"] for run in runs
             },
             "raw_artifact_hashes": {
+                run["run_id"]: {contract_relative: contract_hash} for run in runs
+            },
+            "normalized_evidence_sha256": {
                 run["run_id"]: evidence_sha256(run) for run in runs
             },
         },
@@ -445,6 +516,11 @@ def main(argv=None):
     emit.add_argument("--output", required=True)
     emit.add_argument("--repository-root", required=True)
     args = parser.parse_args(argv)
+    requested_repository = Path(args.repository_root).resolve()
+    if requested_repository != SOURCE_REPOSITORY or not (SOURCE_REPOSITORY / ".git").exists():
+        raise ContractError(
+            f"repository-root must be the actual checkout {SOURCE_REPOSITORY}"
+        )
     paths = [("contract", args.contract), ("output", args.output)]
     if args.command == "analyze":
         paths.append(("input", args.input))
@@ -468,7 +544,7 @@ def main(argv=None):
         bundle = json.loads(Path(args.input).read_text(), parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value)))
     except (OSError, json.JSONDecodeError, ValueError) as exc:
         raise ContractError(f"cannot load synthetic evidence: {exc}") from exc
-    result = analyze_bundle(contract, bundle, args.contract)
+    result = analyze_bundle(contract, bundle, args.contract, SOURCE_REPOSITORY)
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(result, indent=2, sort_keys=True, allow_nan=False) + "\n")

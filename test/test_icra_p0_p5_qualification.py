@@ -19,7 +19,6 @@ SPEC.loader.exec_module(MODULE)
 
 def synthetic_bundle(contract):
     digest = hashlib.sha256(CONTRACT_PATH.read_bytes()).hexdigest()
-    effective = {**contract["profile_values"], **contract["p5_thresholds"]}
     common = {
         "processes": [
             {"identity": name, "alive_until_controlled_shutdown": True}
@@ -64,18 +63,21 @@ def synthetic_bundle(contract):
             ],
         },
     ]
+    for run in runs:
+        values = MODULE.resolve_launch_values(contract, run["case_id"], {})
+        run["launch_binding"] = MODULE.build_launch_binding(
+            contract, CONTRACT_PATH, run["case_id"], "1" * 40,
+            run["run_id"], values,
+        )
+    contract_relative = str(CONTRACT_PATH.relative_to(REPO))
     return {
         "schema_version": "icra_p0_p5_synthetic_evidence_v1",
         "validation_only": True,
         "manifest": {
             "route_id": contract["route_id"],
             "git_commit": "1" * 40,
-            "profile_name": contract["profile_name"],
             "contract_sha256": digest,
             "analyzer_version": contract["analyzer_version"],
-            "effective_values": effective,
-            "p0_profile": MODULE.p0_profile_binding(contract),
-            "p5_thresholds": contract["p5_thresholds"],
             "fixture_identities": {
                 case_id: contract["cases"][case_id]["fixture_alias"]
                 for case_id in MODULE.CASE_IDS
@@ -84,6 +86,9 @@ def synthetic_bundle(contract):
                 run["case_id"]: run["run_id"] for run in runs
             },
             "raw_artifact_hashes": {
+                run["run_id"]: {contract_relative: digest} for run in runs
+            },
+            "normalized_evidence_sha256": {
                 run["run_id"]: MODULE.evidence_sha256(run) for run in runs
             },
         },
@@ -148,6 +153,8 @@ class IcraP0P5QualificationTest(unittest.TestCase):
         self.assertEqual(result["status"], "VALIDATION_ONLY_PASS")
         self.assertFalse(result["qualification_claim"])
         self.assertEqual(set(result["case_results"]), {"SAFE_NORMAL", "FINAL_REJECT", "RUNTIME_FAIL"})
+        self.assertEqual(set(result["launch_binding_sha256"]), set(MODULE.CASE_IDS))
+        self.assertEqual(result["validated_manifest"]["git_commit"], "1" * 40)
 
     def test_analyzer_rejects_adversarial_evidence(self):
         mutations = {}
@@ -156,9 +163,9 @@ class IcraP0P5QualificationTest(unittest.TestCase):
         mutations["nonfinite"] = lambda b: b["runs"][0]["p0_samples"][0].update(refresh_s=math.nan)
         mutations["topic gap"] = lambda b: b["runs"][0]["topic_counts"].update({"/planning/bspline": 0})
         mutations["unstable p0"] = lambda b: b["runs"][0]["p0_samples"][0].update(stable=False)
-        mutations["wrong config"] = lambda b: b["manifest"]["effective_values"].update({"planner_enable_p1": True})
+        mutations["wrong config"] = lambda b: b["runs"][0]["launch_binding"]["effective_values"].update({"planner_enable_p1": True})
         mutations["wrong hash"] = lambda b: b["manifest"].update(contract_sha256="0" * 64)
-        mutations["wrong raw hash"] = lambda b: b["manifest"]["raw_artifact_hashes"].update({"icra-p0-p5-safe-001": "0" * 64})
+        mutations["wrong raw hash"] = lambda b: b["manifest"]["raw_artifact_hashes"]["icra-p0-p5-safe-001"].update({str(CONTRACT_PATH.relative_to(REPO)): "0" * 64})
         mutations["fixture leakage"] = lambda b: b["runs"][0].update(fixture_alias="p5_7_rejected_trajectory_zone_v1")
         mutations["reject with publish"] = lambda b: b["runs"][1]["events"].append({"sequence": 2, "type": "NORMAL_PUBLISH", "candidate_id": "rejected-candidate"})
         mutations["missing safe publish"] = lambda b: b["runs"][0].update(events=b["runs"][0]["events"][:1])
@@ -170,6 +177,18 @@ class IcraP0P5QualificationTest(unittest.TestCase):
                 result = MODULE.analyze_bundle(self.contract, bundle, CONTRACT_PATH)
                 self.assertEqual(result["status"], "VALIDATION_ONLY_FAIL")
                 self.assertTrue(result["failures"])
+
+    def test_final_reject_allows_publication_of_an_unrelated_candidate(self):
+        bundle = synthetic_bundle(self.contract)
+        run = bundle["runs"][1]
+        run["events"].append({
+            "sequence": 2, "type": "NORMAL_PUBLISH", "candidate_id": "other-candidate"
+        })
+        bundle["manifest"]["normalized_evidence_sha256"][run["run_id"]] = (
+            MODULE.evidence_sha256(run)
+        )
+        result = MODULE.analyze_bundle(self.contract, bundle, CONTRACT_PATH)
+        self.assertEqual(result["status"], "VALIDATION_ONLY_PASS", result)
 
     def test_cli_writes_repository_local_validation_manifest(self):
         bundle = synthetic_bundle(self.contract)
@@ -187,6 +206,14 @@ class IcraP0P5QualificationTest(unittest.TestCase):
             result = json.loads(output.read_text())
             self.assertEqual(result["status"], "VALIDATION_ONLY_PASS")
             self.assertFalse(result["qualification_claim"])
+
+    def test_cli_rejects_caller_selected_external_repository_root(self):
+        with self.assertRaisesRegex(MODULE.ContractError, "actual checkout"):
+            MODULE.main([
+                "emit-synthetic-input", "--contract", str(CONTRACT_PATH),
+                "--git-commit", "1" * 40, "--output", "/tmp/not-allowed.json",
+                "--repository-root", "/",
+            ])
 
 
 if __name__ == "__main__":
