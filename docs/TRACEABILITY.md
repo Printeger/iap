@@ -1324,3 +1324,12 @@ They do not convert historical `NO-GO-P2`, failed P0 Gate-0B evidence, the stati
 | IAP-RQ-320, IAP-RQ-322 | Retain every scientific row and require registered calibration eligibility | Sole analyzer retains denominator 192 and complete count 136, but records 56 `noise_floor` failures | **ANALYZER REJECTED** |
 | IAP-RQ-423 | Require exact typed recovery provenance through analysis | Recovery record preserves the pre-continuation shared ROS alias literal; producer advances `latest` during later runs, so sole analyzer reports `runner_state_recovery` rather than silently rewriting provenance | **FAIL-CLOSED PROVENANCE STOP** |
 | IAP-RQ-423 | Preserve downstream authority after rejection | Analyzer invocations = 1; draft/action/G0C/G0D/P5 = 0/0/0/0/0; no identity or analyzer retry | **SUPERVISOR REVIEW REQUIRED** |
+
+## 2026-08-25 ICRA-065 analyzer correction validation stop
+
+| Req ID | Requirement/evidence seam | Implementation and retained evidence | Status |
+|---|---|---|---|
+| IAP-RQ-423 | Bind immutable recovery-time provenance without weakening final alias safety | Exact retained inventory schema/root/SHA and target subtree are validated; historical A may differ from independently safe final B; tamper, escape, missing, chain and replacement tests fail closed | **OFFLINE IMPLEMENTED; TESTS PASS** |
+| IAP-RQ-320, IAP-RQ-322 | Apply the frozen floor to Type-7 aggregate improvements while retaining complete rows | Individual floor-level values no longer exclude structurally complete rows; typed statistics and exact failed gates distinguish `SCIENTIFIC_NO_GO` from technical `REJECTED` | **OFFLINE IMPLEMENTED; TESTS PASS** |
+| IAP-RQ-423 | Validate unchanged r6 evidence before the single authoritative analysis | Frozen inputs 103/103 exact; read-only preflight has 0 technical failures, 15/15/15 runs, 192/192 decisions, max Q10 0, but mean Q10 `0.000020000000000131024` differs from frozen expected `0.000304` | **BLOCKED_ICRA065_VALIDATION_Q10_MEAN_MISMATCH** |
+| IAP-RQ-423 | Preserve downstream authority on validation mismatch | Authoritative analyzer/output replacement = 0; old analysis SHA remains `f584fc51...d7391`; draft/registry/threshold/G0C/G0D/P5 actions remain absent | **FAIL-CLOSED; SUPERVISOR REVIEW REQUIRED** |

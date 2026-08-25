@@ -516,6 +516,60 @@ class P4G0CAnalyzerTest(unittest.TestCase):
             json.dumps(runner_state, sort_keys=True) + "\n"
         )
 
+    def _write_retained_recovery_inventory(self, root):
+        scopes = {}
+        for name, scope_root in (
+            ("first_run", Path(MODULE.expand_run_plan(
+                self.bundle.protocol, root
+            )[0]["run_dir"])),
+            ("launch_environment", root / "launch_environment"),
+        ):
+            entries = []
+            for path in sorted(
+                scope_root.rglob("*"),
+                key=lambda item: item.relative_to(scope_root).as_posix(),
+            ):
+                metadata = os.lstat(path)
+                entry = {
+                    "mode": metadata.st_mode & 0o777,
+                    "path": path.relative_to(scope_root).as_posix(),
+                    "size": metadata.st_size,
+                }
+                if path.is_symlink():
+                    entry.update({"type": "symlink", "target": os.readlink(path)})
+                elif path.is_dir():
+                    entry["type"] = "directory"
+                else:
+                    entry.update({
+                        "type": "regular",
+                        "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                    })
+                entries.append(entry)
+            scopes[name] = {"root": str(scope_root.resolve()), "entries": entries}
+        payload = {
+            "read_only": True,
+            "schema_version": "icra064_retained_lstat_content_inventory_v1",
+            "scopes": scopes,
+        }
+        path = root.parent / "retained_lstat_content_inventory.json"
+        raw = json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n"
+        path.write_text(raw)
+        return path, hashlib.sha256(raw.encode()).hexdigest()
+
+    def _analyze_v6(self, root, inventory_path=None, expected_sha256=None):
+        if inventory_path is None:
+            inventory_path, expected_sha256 = (
+                self._write_retained_recovery_inventory(root)
+            )
+        with mock.patch.object(
+            MODULE, "R6_RETAINED_INVENTORY_SHA256", expected_sha256
+        ):
+            return MODULE.analyze(
+                self.bundle,
+                root,
+                retained_recovery_inventory_path=inventory_path,
+            )
+
     def _refresh_inventory_binding(self, root, run_index=0):
         record = MODULE.expand_run_plan(self.bundle.protocol, root)[run_index]
         run_dir = Path(record["run_dir"])
@@ -586,14 +640,120 @@ class P4G0CAnalyzerTest(unittest.TestCase):
             expected_protocol_schema=MODULE.PROTOCOL_SCHEMA_V6,
         )
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
+            root = Path(tmp) / "runs"
+            root.mkdir()
             self._make_bundle(root)
-            result = MODULE.analyze(self.bundle, root)
+            inventory_path, inventory_sha256 = (
+                self._write_retained_recovery_inventory(root)
+            )
+            ros_logs = root / "launch_environment/ros_logs"
+            historical_target = Path(os.readlink(ros_logs / "latest"))
+            final_target = ros_logs / "synthetic-session-2"
+            final_target.mkdir()
+            (final_target / "launch.log").write_text("later raw log\n")
+            (ros_logs / "latest").unlink()
+            (ros_logs / "latest").symlink_to(final_target.resolve())
+            result = self._analyze_v6(
+                root, inventory_path, inventory_sha256
+            )
 
         self.assertEqual(
             result["analysis_status"], "DRAFT_ELIGIBLE", result["failures"]
         )
         self.assertEqual(result["failures"], [])
+        self.assertNotEqual(historical_target, final_target)
+
+    def test_v6_retained_recovery_provenance_fails_closed(self):
+        self.bundle = MODULE.load_bundle(
+            REPO / "config/icra27/p4_g0c_protocol_v6.json",
+            REPO / "config/icra27/p4_threshold_registry_v6.json",
+            REPO / "config/icra27/p4_g0c_live_fixture_v2.json",
+            expected_protocol_schema=MODULE.PROTOCOL_SCHEMA_V6,
+        )
+        cases = (
+            "missing_input", "hash_mismatch", "exact_schema",
+            "tampered_inventory_target",
+            "tampered_recovery_target", "missing_target", "outside_root",
+            "target_replacement", "directory_replacement",
+        )
+        for label in cases:
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp) / "runs"
+                root.mkdir()
+                self._make_bundle(root)
+                inventory_path, inventory_sha256 = (
+                    self._write_retained_recovery_inventory(root)
+                )
+                state_path = root / "p4_g0c_runner_state.json"
+                state = json.loads(state_path.read_text())
+                historical = Path(
+                    state["recovery"]["shared_ros_logs_latest_target"]
+                )
+                if label == "missing_input":
+                    inventory_path = None
+                elif label == "hash_mismatch":
+                    inventory_sha256 = "0" * 64
+                elif label == "exact_schema":
+                    payload = json.loads(inventory_path.read_text())
+                    payload.pop("read_only")
+                    inventory_path.write_text(json.dumps(payload) + "\n")
+                    inventory_sha256 = hashlib.sha256(
+                        inventory_path.read_bytes()
+                    ).hexdigest()
+                elif label == "tampered_inventory_target":
+                    payload = json.loads(inventory_path.read_text())
+                    next(
+                        entry for entry in payload["scopes"]
+                        ["launch_environment"]["entries"]
+                        if entry["path"] == "ros_logs/latest"
+                    )["target"] += "-tampered"
+                    inventory_path.write_text(json.dumps(payload) + "\n")
+                    inventory_sha256 = hashlib.sha256(
+                        inventory_path.read_bytes()
+                    ).hexdigest()
+                elif label == "tampered_recovery_target":
+                    state["recovery"]["shared_ros_logs_latest_target"] += "-drift"
+                    state_path.write_text(json.dumps(state, sort_keys=True) + "\n")
+                elif label == "missing_target":
+                    shutil.rmtree(historical)
+                elif label == "outside_root":
+                    outside = root / "outside"
+                    outside.mkdir()
+                    outside_target = str(outside.resolve())
+                    state["recovery"]["shared_ros_logs_latest_target"] = (
+                        outside_target
+                    )
+                    state_path.write_text(json.dumps(state, sort_keys=True) + "\n")
+                    payload = json.loads(inventory_path.read_text())
+                    next(
+                        entry for entry in payload["scopes"]
+                        ["launch_environment"]["entries"]
+                        if entry["path"] == "ros_logs/latest"
+                    )["target"] = outside_target
+                    inventory_path.write_text(json.dumps(payload) + "\n")
+                    inventory_sha256 = hashlib.sha256(
+                        inventory_path.read_bytes()
+                    ).hexdigest()
+                elif label == "target_replacement":
+                    shutil.rmtree(historical)
+                    historical.write_text("replacement\n")
+                elif label == "directory_replacement":
+                    shutil.rmtree(historical)
+                    historical.mkdir()
+                    (historical / "launch.log").write_text("replacement\n")
+
+                if inventory_path is None:
+                    result = MODULE.analyze(self.bundle, root)
+                else:
+                    result = self._analyze_v6(
+                        root, inventory_path, inventory_sha256
+                    )
+                self.assertEqual(result["analysis_status"], "REJECTED")
+                self.assertTrue(any(
+                    failure.startswith("recovery_inventory_")
+                    or failure == "runner_state_recovery"
+                    for failure in result["failures"]
+                ), result["failures"])
 
     def test_v6_ros_logs_alias_rejects_all_escape_and_replacement_shapes(self):
         self.bundle = MODULE.load_bundle(
@@ -609,7 +769,8 @@ class P4G0CAnalyzerTest(unittest.TestCase):
         )
         for label in cases:
             with self.subTest(label=label), tempfile.TemporaryDirectory() as tmp:
-                root = Path(tmp)
+                root = Path(tmp) / "runs"
+                root.mkdir()
                 self._make_bundle(root)
                 ros_logs = root / "launch_environment/ros_logs"
                 alias = ros_logs / "latest"
@@ -646,7 +807,7 @@ class P4G0CAnalyzerTest(unittest.TestCase):
                         (ros_logs / "regular").write_text("not a dir\n")
                         alias.symlink_to("regular")
 
-                result = MODULE.analyze(self.bundle, root)
+                result = self._analyze_v6(root)
                 self.assertNotEqual(result["analysis_status"], "DRAFT_ELIGIBLE")
                 self.assertTrue(
                     any(
@@ -679,14 +840,15 @@ class P4G0CAnalyzerTest(unittest.TestCase):
         }
         for label, (key, value) in mutations.items():
             with self.subTest(label=label), tempfile.TemporaryDirectory() as tmp:
-                root = Path(tmp)
+                root = Path(tmp) / "runs"
+                root.mkdir()
                 self._make_bundle(root)
                 state_path = root / "p4_g0c_runner_state.json"
                 state = json.loads(state_path.read_text())
                 state["recovery"][key] = value
                 state_path.write_text(json.dumps(state, sort_keys=True) + "\n")
 
-                result = MODULE.analyze(self.bundle, root)
+                result = self._analyze_v6(root)
                 self.assertIn("runner_state_recovery", result["failures"])
                 self.assertNotEqual(result["analysis_status"], "DRAFT_ELIGIBLE")
 
@@ -698,14 +860,15 @@ class P4G0CAnalyzerTest(unittest.TestCase):
             expected_protocol_schema=MODULE.PROTOCOL_SCHEMA_V6,
         )
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
+            root = Path(tmp) / "runs"
+            root.mkdir()
             self._make_bundle(
                 root,
                 mutate=lambda _, __, rows: [
                     row.update({"reason": "METRICS_ONLY"}) for row in rows
                 ],
             )
-            result = MODULE.analyze(self.bundle, root)
+            result = self._analyze_v6(root)
 
         self.assertTrue(any(
             failure.startswith("incomplete_decision:")
@@ -990,6 +1153,73 @@ class P4G0CAnalyzerTest(unittest.TestCase):
         self.assertEqual(len(draft["calibration_bundle_sha256"]), 64)
         self.assertNotIn("PASS", json.dumps(draft))
         self.assertNotIn("FROZEN", json.dumps(draft))
+
+    def test_aggregate_noise_floor_keeps_individual_floor_rows_complete(self):
+        def mutate(_, __, rows):
+            for row in rows:
+                if int(row["stamp"]) < 10:
+                    row.update({
+                        "original_mean": "1.0", "risk_mean": "1.0",
+                        "original_max": "1.0", "risk_max": "1.0",
+                    })
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._make_bundle(root, mutate=mutate)
+            result = MODULE.analyze(self.bundle, root)
+
+        self.assertEqual(result["analysis_status"], "DRAFT_ELIGIBLE")
+        self.assertEqual(result["complete_decision_count"], 105)
+        self.assertEqual(result["denominator_decision_count"], 105)
+        self.assertFalse(any(
+            failure.startswith("noise_floor:") for failure in result["failures"]
+        ))
+        statistics = result["calibration_statistics"]
+        self.assertGreater(
+            statistics["gates"]["mean_improvement"]["value"], 1e-12
+        )
+        self.assertGreater(
+            statistics["gates"]["max_improvement"]["value"], 1e-12
+        )
+
+    def test_zero_aggregate_max_gate_is_typed_scientific_no_go(self):
+        def mutate(_, __, rows):
+            for row in rows:
+                row["risk_max"] = row["original_max"]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._make_bundle(root, mutate=mutate)
+            result = MODULE.analyze(self.bundle, root)
+
+        self.assertEqual(result["analysis_status"], "SCIENTIFIC_NO_GO")
+        self.assertEqual(result["complete_decision_count"], 105)
+        self.assertEqual(result["denominator_decision_count"], 105)
+        self.assertEqual(result["failed_scientific_gates"], [
+            "max_improvement_gate_at_or_below_noise_floor"
+        ])
+        self.assertEqual(
+            result["calibration_statistics"]["gates"]
+            ["max_improvement"]["value"],
+            0.0,
+        )
+        self.assertNotIn("threshold_draft", result)
+
+    def test_technical_failure_never_masquerades_as_scientific_no_go(self):
+        def mutate(index, _, rows):
+            for row in rows:
+                row["risk_max"] = row["original_max"]
+            if index == 0:
+                rows[0]["risk_valid_count"] = "199"
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._make_bundle(root, mutate=mutate)
+            result = MODULE.analyze(self.bundle, root)
+
+        self.assertEqual(result["analysis_status"], "REJECTED")
+        self.assertNotIn("failed_scientific_gates", result)
+        self.assertNotIn("threshold_draft", result)
 
     def test_extra_retry_directory_and_header_only_run_are_not_excludable(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1654,9 +1884,6 @@ class P4G0CAnalyzerTest(unittest.TestCase):
             ),
             "path_ratio": lambda _, manifest, rows: (
                 rows[0].update({"path_length_ratio": "1.3001"})
-            ),
-            "noise_floor": lambda _, manifest, rows: (
-                rows[0].update({"original_mean": "1.0", "risk_mean": "1.0"})
             ),
             "hash_mismatch": lambda _, manifest, rows: (
                 manifest.update({"registry_sha256": "0" * 64})

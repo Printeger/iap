@@ -2505,3 +2505,23 @@ env \
 - Stopped fail-closed with no draft, threshold action, G0C/G0D/P5 claim or P5
   execution. The analyzer and identities must not be rerun; Supervisor review
   is required for `BLOCKED_R6_ANALYZER_RECOVERY_ALIAS_DRIFT_AND_NOISE_FLOOR`.
+
+## 2026-08-25 (ICRA-065 offline analyzer correction validation stop)
+
+- Preserved the ICRA-064 rejected analysis exactly and froze 103 authoritative
+  inputs before changing the offline analyzer.
+- Added explicit retained recovery-inventory provenance: historical target A
+  is bound to the frozen inventory while final safe alias B is validated
+  independently. Schema/hash/root/topology/content replacement adversaries
+  remain fail-closed.
+- Moved the frozen numerical floor comparison from individual rows to the
+  preregistered Type-7 aggregate Q10 gates. Technically valid aggregate failure
+  is typed `SCIENTIFIC_NO_GO`; invalid bundles remain `REJECTED`; eligible
+  synthetic bundles retain draft behavior.
+- Focused analyzer tests pass 41/41 and full hermetic Python discovery passes
+  with no external delta. All 103 frozen inputs remain exact.
+- Stopped before authoritative output replacement because the one read-only
+  validation preflight produced mean Q10
+  `0.000020000000000131024`, not frozen expected `0.000304` (max Q10 `0`,
+  technical failures 0, decisions 192/192). No analyzer output/draft/registry/
+  threshold/G0C/G0D/P5 mutation occurred; Supervisor review is required.

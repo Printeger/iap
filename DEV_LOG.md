@@ -7874,3 +7874,41 @@ no threshold was applied and no G0C/G0D/P5 claim or execution occurred. Per the
 single-analyzer rule, the analyzer was not rerun. Final task result is
 `BLOCKED_R6_ANALYZER_RECOVERY_ALIAS_DRIFT_AND_NOISE_FLOOR` for Supervisor
 review.
+
+## 2026-08-25 — ICRA-065 OFFLINE ANALYZER VALIDATION BLOCK
+
+IAP-RQ-320, IAP-RQ-322 and IAP-RQ-423. The task first preserved the old
+rejected analysis byte-for-byte and froze 103 protocol, registry, fixture,
+dependency, lineage, runner and raw-run inputs. The mandatory startup Git sync
+and required-file reads occurred before the ICRA-065 ledger was initialized;
+this is recorded as a procedural evidence-order deviation, with no task file
+mutation before the first recorded freeze command. The inherited ICRA-064
+ledger label `icra063_command_ledger_v1` is the Supervisor-waived Low metadata
+defect and was not rewritten; the new ledger uses `icra065_command_ledger_v1`.
+
+The analyzer correction separates the immutable recovery-time ROS alias target
+from the independently safe final alias, requires the exact retained lstat/
+content inventory and rejects schema, root, hash, topology, missing, escape and
+replacement adversaries. Structurally valid rows now remain complete regardless
+of individual improvement; deterministic Type-7 aggregate gates produce either
+`DRAFT_ELIGIBLE`, typed `SCIENTIFIC_NO_GO`, or technical `REJECTED`.
+
+Focused analyzer tests pass 41/41, focused fatal lint/syntax pass, and full
+hermetic Python discovery exits 0 with an empty 17,762-entry external delta.
+All 103 frozen inputs remain byte-identical and no task process remains.
+
+The single permitted read-only validation preflight found zero technical
+failures, 15/15/15 runs and 192/192 decisions. It produced max Q10 `0` and the
+expected max-gate `SCIENTIFIC_NO_GO`, but mean Q10 was
+`0.000020000000000131024`, not the Supervisor-frozen `0.000304`. Per the exact
+mismatch stop rule, the authoritative analyzer was not invoked, the old
+analysis SHA `f584fc51...d7391` remains in place, no draft was created and no
+registry/threshold/G0C/G0D/P5 action occurred. Result:
+`BLOCKED_ICRA065_VALIDATION_Q10_MEAN_MISMATCH` for Supervisor review.
+
+Independent two-axis review found the frozen-Q10 mismatch as the sole blocker.
+Its provenance findings were hardened without another analyzer execution: the
+production frozen inventory hash is no longer caller-overridable, exact-schema
+and agreeing outside-root adversaries are explicit, and filesystem races during
+retained-target traversal become typed technical rejection. Post-review checks
+were limited to syntax, fatal lint and diff validation.

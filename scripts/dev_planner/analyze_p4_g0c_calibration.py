@@ -56,6 +56,10 @@ ALLOWED_ROOT_METADATA = {
 }
 ALLOWED_PREFLIGHT_METADATA = {"gpu_preflight.json"}
 R6_SAFE_ROS_LOG_ALIAS = Path("ros_logs/latest")
+R6_RETAINED_INVENTORY_SCHEMA = "icra064_retained_lstat_content_inventory_v1"
+R6_RETAINED_INVENTORY_SHA256 = (
+    "b39ddec294a7df0680b204509418a410d1f209449e7ed4d8292b55091d6e784e"
+)
 
 
 class AnalysisError(RuntimeError):
@@ -191,6 +195,149 @@ def _safe_ros_logs_latest(alias: Path, launch_environment: Path) -> bool:
     )
 
 
+def _retained_recovery_inventory_failures(
+    root: Path,
+    inventory_path: Path | None,
+) -> tuple[list[str], str | None, str | None]:
+    """Bind r6 recovery-time alias provenance to the retained lstat inventory."""
+    if inventory_path is None:
+        return ["recovery_inventory_missing"], None, None
+    path = Path(inventory_path).expanduser().absolute()
+    if path.is_symlink() or _has_symlink_component(path) or path.resolve() != path:
+        return ["recovery_inventory_path_symlink"], None, None
+    try:
+        raw = path.read_bytes()
+    except OSError as exc:
+        return [f"recovery_inventory_unreadable:{exc}"], None, None
+    actual_sha256 = hashlib.sha256(raw).hexdigest()
+    if actual_sha256 != R6_RETAINED_INVENTORY_SHA256:
+        return ["recovery_inventory_hash"], None, actual_sha256
+    try:
+        payload = json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return ["recovery_inventory_schema"], None, actual_sha256
+    if (
+        not isinstance(payload, dict)
+        or set(payload) != {"read_only", "schema_version", "scopes"}
+        or payload.get("read_only") is not True
+        or payload.get("schema_version") != R6_RETAINED_INVENTORY_SCHEMA
+        or not isinstance(payload.get("scopes"), dict)
+        or set(payload["scopes"]) != {"first_run", "launch_environment"}
+    ):
+        return ["recovery_inventory_schema"], None, actual_sha256
+
+    expected_roots = {
+        "first_run": root / "p4-g0c-r6-seed211-rep01",
+        "launch_environment": root / "launch_environment",
+    }
+    typed_entries: dict[str, dict[str, Any]] = {}
+    for scope_name, expected_root in expected_roots.items():
+        scope = payload["scopes"].get(scope_name)
+        if (
+            not isinstance(scope, dict)
+            or set(scope) != {"root", "entries"}
+            or scope.get("root") != str(expected_root.resolve())
+            or not isinstance(scope.get("entries"), list)
+        ):
+            return ["recovery_inventory_schema"], None, actual_sha256
+        seen: set[str] = set()
+        for entry in scope["entries"]:
+            if not isinstance(entry, dict):
+                return ["recovery_inventory_schema"], None, actual_sha256
+            entry_type = entry.get("type")
+            keys = {
+                "directory": {"mode", "path", "size", "type"},
+                "regular": {"mode", "path", "sha256", "size", "type"},
+                "symlink": {"mode", "path", "size", "target", "type"},
+            }.get(entry_type)
+            relative = entry.get("path")
+            if (
+                keys is None
+                or set(entry) != keys
+                or not isinstance(relative, str)
+                or not relative
+                or Path(relative).is_absolute()
+                or Path(relative).as_posix() != relative
+                or any(part in {"", ".", ".."} for part in Path(relative).parts)
+                or relative in seen
+                or not isinstance(entry.get("mode"), int)
+                or isinstance(entry.get("mode"), bool)
+                or not isinstance(entry.get("size"), int)
+                or isinstance(entry.get("size"), bool)
+                or entry["size"] < 0
+                or (entry_type == "regular" and not _is_sha256(entry.get("sha256")))
+                or (entry_type == "symlink" and not isinstance(entry.get("target"), str))
+            ):
+                return ["recovery_inventory_schema"], None, actual_sha256
+            seen.add(relative)
+            if scope_name == "launch_environment":
+                typed_entries[relative] = entry
+
+    alias_entry = typed_entries.get(R6_SAFE_ROS_LOG_ALIAS.as_posix())
+    if not isinstance(alias_entry, dict) or alias_entry.get("type") != "symlink":
+        return ["recovery_inventory_alias_entry"], None, actual_sha256
+    historical_target = alias_entry.get("target")
+    target = Path(historical_target)
+    ros_logs = (root / "launch_environment/ros_logs").resolve()
+    try:
+        target_metadata = os.lstat(target)
+        target_canonical = target.resolve(strict=True)
+    except (OSError, RuntimeError):
+        return ["recovery_inventory_historical_target"], None, actual_sha256
+    target_relative = f"ros_logs/{target.name}"
+    represented = typed_entries.get(target_relative)
+    retained_subtree = {
+        relative: entry for relative, entry in typed_entries.items()
+        if relative == target_relative
+        or relative.startswith(target_relative + "/")
+    }
+    has_content_evidence = len(retained_subtree) > 1
+    if (
+        not target.is_absolute()
+        or str(target) != str(target_canonical)
+        or target.parent != ros_logs
+        or not stat.S_ISDIR(target_metadata.st_mode)
+        or stat.S_ISLNK(target_metadata.st_mode)
+        or not isinstance(represented, dict)
+        or represented.get("type") != "directory"
+        or not has_content_evidence
+    ):
+        return ["recovery_inventory_historical_target"], None, actual_sha256
+    try:
+        current_subtree: dict[str, Path] = {target_relative: target}
+        for current in target.rglob("*"):
+            current_subtree[
+                f"{target_relative}/{current.relative_to(target).as_posix()}"
+            ] = current
+        if set(current_subtree) != set(retained_subtree):
+            return ["recovery_inventory_target_replaced"], None, actual_sha256
+        for relative, current in current_subtree.items():
+            retained = retained_subtree[relative]
+            metadata = os.lstat(current)
+            common_matches = (
+                stat.S_IMODE(metadata.st_mode) == retained["mode"]
+                and metadata.st_size == retained["size"]
+            )
+            if retained["type"] == "directory":
+                type_matches = stat.S_ISDIR(metadata.st_mode)
+            elif retained["type"] == "regular":
+                type_matches = (
+                    stat.S_ISREG(metadata.st_mode)
+                    and hashlib.sha256(current.read_bytes()).hexdigest()
+                    == retained["sha256"]
+                )
+            else:
+                type_matches = (
+                    stat.S_ISLNK(metadata.st_mode)
+                    and os.readlink(current) == retained["target"]
+                )
+            if not common_matches or not type_matches:
+                return ["recovery_inventory_target_replaced"], None, actual_sha256
+    except (OSError, RuntimeError):
+        return ["recovery_inventory_target_replaced"], None, actual_sha256
+    return [], historical_target, actual_sha256
+
+
 def _root_inventory_failures(
     root: Path, registered_run_ids: list[str]
 ) -> tuple[list[str], list[Path]]:
@@ -302,6 +449,7 @@ def _runner_state_failures(
     bundle: ProtocolBundle,
     root: Path,
     plan: list[dict[str, Any]],
+    retained_historical_target: str | None = None,
 ) -> tuple[list[str], dict[str, Any], Path]:
     path = root / RUNNER_STATE_FILENAME
     try:
@@ -430,11 +578,6 @@ def _runner_state_failures(
             recovery.get("scientific_hashes_after")
             if isinstance(recovery, dict) else None
         )
-        alias = root / "launch_environment/ros_logs/latest"
-        try:
-            shared_target = os.readlink(alias)
-        except OSError:
-            shared_target = None
         recovery_valid = (
             isinstance(recovery, dict)
             and set(recovery) == {
@@ -464,7 +607,8 @@ def _runner_state_failures(
             and isinstance(before, dict) and set(before) == scientific_keys
             and before == after
             and all(_is_sha256(value) for value in before.values())
-            and recovery.get("shared_ros_logs_latest_target") == shared_target
+            and recovery.get("shared_ros_logs_latest_target")
+            == retained_historical_target
             and recovery.get("next_run_id") == expected_ids[1]
             and recovery.get("remaining_run_count") == 14
         )
@@ -755,7 +899,7 @@ def _manifest_failures(
 
 
 def _row_metrics(
-    row: dict[str, str], source_index: int, noise_floor: float,
+    row: dict[str, str], source_index: int,
     path_ratio_tolerance: float, expected_reason: str,
 ) -> tuple[dict[str, float] | None, list[str], tuple[Any, ...] | None]:
     failures = []
@@ -792,8 +936,6 @@ def _row_metrics(
         failures.append(f"coverage:{prefix}")
     mean_improvement = floats["original_mean"] - floats["risk_mean"]
     max_improvement = floats["original_max"] - floats["risk_max"]
-    if mean_improvement <= noise_floor or max_improvement <= noise_floor:
-        failures.append(f"noise_floor:{prefix}")
     if floats["path_length_ratio"] > 1.3:
         failures.append(f"path_ratio:{prefix}")
     if (
@@ -814,9 +956,8 @@ def _row_metrics(
     }, [], identity
 
 
-def _threshold_draft(
+def _calibration_statistics(
     bundle: ProtocolBundle,
-    raw_bundle_sha256: str,
     metrics: list[tuple[int, dict[str, float]]],
 ) -> dict[str, Any]:
     def q(name: str, p: float) -> dict[str, Any]:
@@ -826,32 +967,36 @@ def _threshold_draft(
     max_q = q("max_improvement", 0.10)
     ratio_q = q("path_ratio", 0.95)
     search_q = q("total_search_s", 0.95)
+    noise_floor = float(bundle.protocol["numerical_noise_floor"]["value"])
     return {
-        "schema_version": _versioned_schema(bundle, "p4_g0c_threshold_draft"),
-        "state": "DRAFT_UNCALIBRATED",
-        "protocol_sha256": bundle.protocol_sha256,
-        "registry_sha256": bundle.registry_sha256,
-        "fixture_sha256": bundle.fixture_sha256,
-        "calibration_bundle_sha256": raw_bundle_sha256,
+        "schema_version": _versioned_schema(
+            bundle, "p4_g0c_calibration_statistics"
+        ),
         "complete_decision_count": len(metrics),
+        "numerical_noise_floor": {
+            "value": noise_floor,
+            "unit": "risk_cost",
+        },
         "gates": {
-            "mean_improvement_min": {
+            "mean_improvement": {
                 "value": mean_q["value"], "unit": "risk_cost",
                 "formula": "Q10(original_mean-risk_mean)",
                 "quantile_source": mean_q,
+                "passes_noise_floor": mean_q["value"] > noise_floor,
             },
-            "max_improvement_min": {
+            "max_improvement": {
                 "value": max_q["value"], "unit": "risk_cost",
                 "formula": "Q10(original_max-risk_max)",
                 "quantile_source": max_q,
+                "passes_noise_floor": max_q["value"] > noise_floor,
             },
-            "path_ratio_max": {
+            "path_ratio": {
                 "value": min(1.30, ratio_q["value"] + 0.02),
                 "unit": "dimensionless",
                 "formula": "min(1.30,Q95(path_ratio)+0.02)",
                 "quantile_source": ratio_q,
             },
-            "total_search_timeout_s": {
+            "dual_search_p95": {
                 "value": min(
                     0.40,
                     search_q["value"] + max(0.01, 0.20 * search_q["value"]),
@@ -861,12 +1006,39 @@ def _threshold_draft(
                 "quantile_source": search_q,
             },
         },
+    }
+
+
+def _threshold_draft(
+    bundle: ProtocolBundle,
+    raw_bundle_sha256: str,
+    statistics: dict[str, Any],
+) -> dict[str, Any]:
+    gates = statistics["gates"]
+    return {
+        "schema_version": _versioned_schema(bundle, "p4_g0c_threshold_draft"),
+        "state": "DRAFT_UNCALIBRATED",
+        "protocol_sha256": bundle.protocol_sha256,
+        "registry_sha256": bundle.registry_sha256,
+        "fixture_sha256": bundle.fixture_sha256,
+        "calibration_bundle_sha256": raw_bundle_sha256,
+        "complete_decision_count": statistics["complete_decision_count"],
+        "gates": {
+            "mean_improvement_min": dict(gates["mean_improvement"]),
+            "max_improvement_min": dict(gates["max_improvement"]),
+            "path_ratio_max": dict(gates["path_ratio"]),
+            "total_search_timeout_s": dict(gates["dual_search_p95"]),
+        },
         "registry_updated": False,
         "application_enabled": False,
     }
 
 
-def analyze(bundle: ProtocolBundle, runs_root: Path) -> dict[str, Any]:
+def analyze(
+    bundle: ProtocolBundle,
+    runs_root: Path,
+    retained_recovery_inventory_path: Path | None = None,
+) -> dict[str, Any]:
     root = Path(runs_root).expanduser().resolve()
     plan = expand_run_plan(bundle.protocol, root)
     registered_ids = [record["run_id"] for record in plan]
@@ -875,8 +1047,18 @@ def analyze(bundle: ProtocolBundle, runs_root: Path) -> dict[str, Any]:
         root, registered_ids
     )
     failures.extend(inventory_failures)
+    retained_historical_target = None
+    retained_inventory_sha256 = None
+    if bundle.protocol.get("schema_version") == PROTOCOL_SCHEMA_V6:
+        recovery_failures, retained_historical_target, retained_inventory_sha256 = (
+            _retained_recovery_inventory_failures(
+                root,
+                retained_recovery_inventory_path,
+            )
+        )
+        failures.extend(recovery_failures)
     runner_failures, runner_state, runner_state_path = _runner_state_failures(
-        bundle, root, plan
+        bundle, root, plan, retained_historical_target
     )
     failures.extend(runner_failures)
     if runner_state_path.is_file():
@@ -887,7 +1069,6 @@ def analyze(bundle: ProtocolBundle, runs_root: Path) -> dict[str, Any]:
     expected_config_hash = effective_config_sha256(
         bundle.protocol["effective_values"]
     )
-    noise_floor = float(bundle.protocol["numerical_noise_floor"]["value"])
     ratio_tolerance = float(
         bundle.protocol["path_ratio_consistency"]["absolute_tolerance"]
     )
@@ -956,7 +1137,7 @@ def analyze(bundle: ProtocolBundle, runs_root: Path) -> dict[str, Any]:
             source_index = denominator
             denominator += 1
             row_metric, row_failures, identity = _row_metrics(
-                row, source_index, noise_floor, ratio_tolerance,
+                row, source_index, ratio_tolerance,
                 "metrics_only" if bundle.protocol.get("schema_version")
                 == PROTOCOL_SCHEMA_V6 else "METRICS_ONLY",
             )
@@ -978,9 +1159,10 @@ def analyze(bundle: ProtocolBundle, runs_root: Path) -> dict[str, Any]:
             f"{bundle.protocol['minimum_complete_decisions']}"
         )
     raw_hash = _raw_bundle_hash(root, bundle_paths) if bundle_paths else ""
+    analysis_status = "REJECTED" if failures else "DRAFT_ELIGIBLE"
     result = {
         "schema_version": _versioned_schema(bundle, "p4_g0c_analysis"),
-        "analysis_status": "REJECTED" if failures else "DRAFT_ELIGIBLE",
+        "analysis_status": analysis_status,
         "protocol_sha256": bundle.protocol_sha256,
         "registry_sha256": bundle.registry_sha256,
         "fixture_sha256": bundle.fixture_sha256,
@@ -1002,10 +1184,29 @@ def analyze(bundle: ProtocolBundle, runs_root: Path) -> dict[str, Any]:
         "registry_updated": False,
         "application_enabled": False,
     }
-    if not failures:
-        result["threshold_draft"] = _threshold_draft(
-            bundle, raw_hash, metrics
+    if retained_inventory_sha256 is not None:
+        result["retained_recovery_inventory_sha256"] = (
+            retained_inventory_sha256
         )
+    if not failures:
+        statistics = _calibration_statistics(bundle, metrics)
+        result["calibration_statistics"] = statistics
+        failed_scientific_gates = []
+        if not statistics["gates"]["mean_improvement"]["passes_noise_floor"]:
+            failed_scientific_gates.append(
+                "mean_improvement_gate_at_or_below_noise_floor"
+            )
+        if not statistics["gates"]["max_improvement"]["passes_noise_floor"]:
+            failed_scientific_gates.append(
+                "max_improvement_gate_at_or_below_noise_floor"
+            )
+        if failed_scientific_gates:
+            result["analysis_status"] = "SCIENTIFIC_NO_GO"
+            result["failed_scientific_gates"] = failed_scientific_gates
+        else:
+            result["threshold_draft"] = _threshold_draft(
+                bundle, raw_hash, statistics
+            )
     return result
 
 
@@ -1016,6 +1217,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--registry", type=Path, default=repo / "config/icra27/p4_threshold_registry_v6.json")
     parser.add_argument("--fixture", type=Path, default=repo / "config/icra27/p4_g0c_live_fixture_v2.json")
     parser.add_argument("--runs-root", type=Path, required=True)
+    parser.add_argument("--retained-recovery-inventory", type=Path)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--draft-output", type=Path)
     return parser
@@ -1117,7 +1319,11 @@ def main(argv: list[str] | None = None) -> int:
         ):
             if path is not None and path == args.registry.resolve():
                 raise AnalysisError(f"{label} cannot overwrite registry")
-        result = analyze(bundle, args.runs_root)
+        result = analyze(
+            bundle,
+            args.runs_root,
+            retained_recovery_inventory_path=args.retained_recovery_inventory,
+        )
         if output_path is not None:
             _write_json_exclusive(output_path, result)
         if draft_output_path is not None and "threshold_draft" in result:
