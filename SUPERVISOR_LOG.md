@@ -1,5 +1,74 @@
 # ICRA Supervisor Log
 
+## 2026-08-25 — ICRA-061 closed segment achieved; wrong P0 worker profile invalidates blocker verdict
+
+### Review identity and synchronization
+
+- Fixed review range: `c291f88cf76fd4c1a28a0690de8fe1904c660a23...34a81f96a5504977b51b607f2c047682b5ed43d3`.
+- Reviewed Builder commits `79add9c` and `34a81f9`; 32 paths are within the ICRA-061 implementation/evidence
+  scope. Fetch succeeds and HEAD matches `origin/dev/icra` at divergence `0 0`. The protected PDF remains the
+  sole untracked user file with SHA-256
+  `1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+- `git diff --check` passes and no task ROS process remains. Supervisor independently reran admission 4/4 and
+  exact r4/r5 scanner 2/2 from retained builds; both pass. The first scanner invocation lacked one sanitized
+  library path and exited 127, then the corrected read-only invocation passed; this is Supervisor diagnostic
+  activity and does not alter Builder evidence.
+
+### Standards axis
+
+- Hard findings: three. First, commit `79add9c` lacks an `IAP-RQ-XXX` in its commit message, contrary to
+  `AGENTS.md`; history is already pushed and may not be rewritten, so the deviation is recorded and all new
+  commits must comply. Second, the claimed admission integration test only increments three artificial
+  callback counters through a new friend/helper and never drives the real FSM context/trial/P4-row path.
+  Third, ICRA-061 has no complete structured command ledger.
+- These findings do not invalidate the live admission timeline and do not create an audit-only task. ICRA-062
+  removes the test-only production seam and folds ledger reconstruction into technical work.
+- One ignored raw colcon event log retained the inherited build environment including credential-bearing
+  variables. It is not tracked or staged, but credential rotation is recommended. Historical raw evidence is
+  not quoted or altered; ICRA-062 must launch build/test/ROS from a minimal allowlisted environment so this
+  does not recur.
+- Scope/ownership, v1-v4 preservation, GPU-before-ROS, required-process shutdown, identity preservation,
+  build/install retention and PDF protection otherwise conform. One Low Middle-Man/Speculative-Generality
+  smell applies to the synthetic admission helper.
+
+### Spec axis
+
+- Material progress is accepted: v2 fixture exact `x=[-9,-7]`, y `0.65`, z `[0,2.8]`; production scanner
+  reports r5 `CLOSED_SEGMENTS` and r4 `OPEN_ENDED_COLLISION`; CUDA 17/17, GPU, process health and dependency
+  18/13/1/14/6 pass. Readiness releases once after 848 deferrals, has zero pre-release rows and produces 12
+  closed-segment positive-snapshot P4 rows. No registered r5 identity is consumed.
+- High configuration defect: ICRA-061 freezes worker count 4, but its installed live manifest records
+  predictor requested/effective `1/1`. The r5 preset omitted the accepted P0 predictor worker binding. The
+  legacy `p0.batch_worker_count=1` is a separate outer-batch field and is not the qualified parallelism value.
+- All 12 rows are genuinely `incomplete_profile`: original valid counts are 0-17/200 and risk counts
+  103-147/200, with `occupied_skip` dominant. This is a useful diagnostic signal, but it cannot be called a
+  qualified scientific blocker until repeated under exact predictor worker `4/4`.
+- Builder also added an unapproved pre-identity analyzer-projection veto and stopped after readiness although
+  the literal readiness conditions and dependency passed. Not consuming identities was scientifically safe,
+  but the task is incomplete and the stop classification is not accepted as final.
+- The final enabled/y/z preflight was completed only after readiness rather than before it. Installed values
+  are correct; this is a nonblocking ordering/evidence defect.
+
+### Gate verdict and next action
+
+- Verdict: `ICRA061_REVIEW_ENGINEERING_PROGRESS_WRONG_P0_WORKER_PROFILE_REQUEST_CHANGES`. This is not a GPU,
+  permission, build or closed-segment blocker. The active technical uncertainty is P4 profile interpolation
+  support after the required worker correction.
+- Unique task: `ICRA-062 / P4_G0C_PROFILE_SUPPORT_AND_LIVE`, active role `DEEPSEEK`, state `TASK_READY`. It
+  binds predictor `4/4`, adds per-sample query traces and reruns one nonregistered r5 readiness. Complete r5
+  continues directly to the matrix. If only occupied interpolation support remains, a preauthorized
+  conservative P4 cost policy is versioned as r6, verified and taken directly through 15 runs and analyzer in
+  the same task. No intermediate audit or Supervisor Review is authorized.
+- Non-occupied invalid trace categories, a failed repaired readiness, a real GPU/security/external mutation,
+  or a post-identity failure remain genuine fail-closed conditions.
+
+### Artifact lifecycle
+
+- Review is not PASS-complete, so nothing is deleted. Retain all ICRA-056/059/060/061 build/install products
+  and evidence through ICRA-062 Review.
+- After ICRA-062 Review PASS and pushed code/docs, delete only reproducible build/install directories for
+  ICRA-056/059/060/061/062. Retain compact/scientific evidence and the PDF.
+
 ## 2026-08-25 — ICRA-060 admission PASS, r4 fixture ineligible, r5 integrated live authorized
 
 ### Review identity and synchronization

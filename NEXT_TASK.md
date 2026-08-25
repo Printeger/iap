@@ -1,153 +1,163 @@
-# ICRA-061 — Versioned closed-segment fixture and complete r5 calibration
+# ICRA-062 — Correct P0 profile, close P4 risk support, and complete calibration
 
-> Active gate: `P4_G0C_R5_CLOSED_SEGMENT_FIXTURE_AND_LIVE`
+> Active gate: `P4_G0C_PROFILE_SUPPORT_AND_LIVE`
 > Owner: `DEEPSEEK`
 > Activation: `TASK_READY`
-> Supervisor verdict: `ICRA060_REVIEW_ADMISSION_PASS_R4_FIXTURE_INELIGIBLE_REQUEST_CHANGES`
+> Supervisor verdict: `ICRA061_REVIEW_ENGINEERING_PROGRESS_WRONG_P0_WORKER_PROFILE_REQUEST_CHANGES`
 > Requirement mapping: `IAP-RQ-320`, `IAP-RQ-322`, `IAP-RQ-423`
 > Conference route: conditional P0 -> P4 -> P5
-> This task: fixture correction -> deterministic scan preflight -> readiness -> fresh CUDA closure -> 15 r5 runs -> analyzer
+> This task: worker 4/4 repair -> traced readiness -> bounded support repair if needed -> 15 registered runs -> analyzer
 
 ## Supervisor decision
 
-ICRA-060 successfully repaired RiskGrid startup ordering. Its final readiness attempt released the barrier
-once at generation 1 after 881 deferrals, and all 9,600 later planning contexts carried valid positive
-snapshot identities. CUDA build, GPU preflight and required processes were healthy.
+ICRA-061 resolves the previous structural blocker. The v2 obstacle produces `CLOSED_SEGMENTS`; admission
+releases once after 848 deferrals; zero row appears before release; 12 post-release P4 rows carry positive
+snapshot identities. Fresh CUDA build, GPU, required processes and dependency preflight pass.
 
-The r4 fixture is nevertheless structurally ineligible for P4 calibration. With start `x=-12`, planning
-horizon `7.5 m` and obstacle `x=[-8,-3]`, the first local seed ends near `x=-4.5`, inside the obstacle.
-`OPEN_ENDED_COLLISION` is therefore correct and must remain fail-closed. Formal dependency, runner, all 15 r4
-identities and analyzer were never invoked; no r4 identity was consumed.
+The new stop is not yet a valid scientific verdict. ICRA-061 required the accepted P0 worker count 4, but the
+actual readiness manifest records `p0.predictor.requested_worker_count=1` and
+`p0.predictor.effective_worker_count=1`. All 12 rows are `incomplete_profile` (original 0-17/200, risk
+103-147/200), dominated by occupied-skip support. Correct the profile before interpreting those rows.
 
-The scientific fixture must now be versioned instead of silently rebinding r4. ICRA-061 creates r5 with one
-predeclared geometry correction, validates it against the production scanner before any live attempt, then
-completes the entire calibration without an intermediate Supervisor Review. Evidence formatting and command
-ledger corrections are folded into this task and cannot create another audit-only loop.
+ICRA-062 is one integrated repair/live task, not an audit. First rerun r5 readiness under exact worker `4/4`
+with per-sample query traces. If coverage is complete, execute r5 immediately. If the only remaining failure
+is conservative interpolation support adjacent to occupied voxels, apply the bounded policy below, create r6,
+verify once and execute r6 immediately. Do not return for an intermediate Review.
 
-## 1. Preserve accepted behavior and evidence
+## 1. Preserve accepted work and boundaries
 
-- Follow `AGENTS.md` synchronization. Preserve the protected PDF and every historical result. Preserve v1-v4
-  protocol/registry/dependency/lineage and r4 compact evidence byte-for-byte; r4 remains an unconsumed,
-  superseded scientific identity.
-- Preserve ICRA-060 admission behavior and public contract: parameter
-  `p4.require_risk_grid_ready_before_planning`, default `false`, calibration binding `true`, exact snapshot
-  validity fields, release-once behavior and zero planning context/trial/P4 row before release.
-- Preserve `OPEN_ENDED_COLLISION` and `INVALID_INPUT` fail-closed behavior. Never synthesize an exit, truncate
-  an occupied interval into a closed segment, treat open-ended as no collision, or publish a new normal
-  trajectory from either status.
-- Preserve exact P0 profile `legacy_iap_rq320_baseline_v1`, sigma `0.01`, worker count 4, P4 formulas,
-  thresholds, seeds, repetition counts, guide selection authority and all P5 behavior.
-- Use only `results/icra27/icra061/` for new build, test, preflight, homes, logs, temp, readiness, dependency,
-  registered runs and analysis. Bind task-local `HOME`, `ROS_HOME`, `ROS_LOG_DIR`, `TMPDIR` and mode-`0700`
-  `XDG_RUNTIME_DIR` before every ROS invocation.
+- Follow `AGENTS.md` synchronization. Preserve the protected PDF, all historical evidence and v1-v4
+  protocol/fixture/registry/dependency/lineage bytes. Preserve the committed ICRA-061 r5 result as historical
+  evidence; r5 protocol hashes may be mechanically rebound only for the originally required worker `4/4`.
+  Preserve r5 fixture geometry `x=[-9,-7]`, y `0.65`,
+  z `[0,2.8]`, start, horizon, grid geometry, P0 sigma/profile, seeds, repetitions, formulas, thresholds,
+  selection authority, scanner fail-closed behavior and all P5 behavior.
+- Preserve the ICRA-060 admission runtime behavior. No planning context/P4 row before a ready positive
+  snapshot; one release transition; all later rows use positive identity.
+- No r5 identity has been consumed. It may be mechanically rebound to the originally required worker `4/4`
+  before live. If risk-query semantics change, r5 is superseded unconsumed and 15 new r6 identities are
+  mandatory.
+- Use only `results/icra27/icra062/` for all new outputs. Before every build/test/ROS command use a minimal
+  sanitized child environment; no credential-bearing variable may reach colcon/CMake event logs or compact
+  evidence. Existing ignored ICRA-061 raw logs remain historical and must not be staged or quoted.
 
-## 2. Create one versioned r5 scientific fixture
+## 2. Correct the exact P0 worker profile
 
-- Add `p4_g0c_live_fixture_v2` with the same scenario semantics, corridor geometry, risk mechanisms and risk
-  values as v1, changing only the central obstacle x interval from `[-8.0,-3.0]` to `[-9.0,-7.0]`. Keep
-  `y_half_width_m=0.65` and `z_m=[0.0,2.8]` unchanged.
-- The fixed geometry gives the unchanged first 7.5-m local seed approximately 3 m of free approach, 2 m of
-  occupied interval and 2.5 m of free tail. These are structural scan margins, not tuning against P4 risk
-  output. Do not try alternative obstacle intervals after observing runtime or decision data.
-- Create canonical v5 protocol, registry, runtime-dependency and lineage documents and 15 new `p4-g0c-r5-*`
-  identities using the unchanged seeds/repetitions. Bind v5 to the v2 fixture and record r4 replacement reason
-  `R4_FIXTURE_OPEN_ENDED_BEFORE_GUIDE_REQUEST_NO_REGISTERED_ID_CONSUMED`.
-- Update launch/runner/analyzer/classifier contracts only as mechanically required to recognize v5/r5 and
-  exact hashes. Do not alter threshold interpretation or acceptance formulas.
+- Bind `p0.predictor.worker_count=4` in the profiled P4 experiment preset and in the r5 protocol effective
+  values. Pre-launch validation must require runtime requested/effective predictor counts `4/4`.
+- `p0.batch_worker_count=1` describes the legacy outer batch invocation and is not the qualified predictor
+  parallelism field. Do not change it merely to make labels agree; document the distinction and rely on the
+  typed predictor requested/effective fields.
+- Add launch/protocol/runner tests proving default experiments remain unchanged and r5 materializes exact
+  predictor `4/4`. Worker output equivalence remains covered by accepted P0 tests; do not change predictor
+  mathematics, provider ordering or RiskGrid contents.
+- Rebind only mechanically affected r5 hashes. No fixture/science change and no registered identity is used
+  in this phase.
 
-## 3. Make fixture eligibility deterministic before live
+## 3. Remove false test confidence and close evidence hygiene
 
-- Add a focused test that exercises the production `scanCollisionSegments()` semantics with the exact r5
-  start, horizon, sample ordering and obstacle bounds. It must prove `CLOSED_SEGMENTS`, both endpoints free,
-  at least one occupied sample between them and a nonempty free tail after exit.
-- Keep existing `NO_COLLISION`, `OPEN_ENDED_COLLISION`, `INVALID_INPUT`, multi-obstacle and free-endpoint tests.
-  Add a regression proving the original r4 geometry remains `OPEN_ENDED_COLLISION`; this prevents the test
-  from weakening scanner semantics merely to pass r5.
-- Add a no-ROS fixture-eligibility preflight that materializes the same values used by the installed launch
-  and emits a typed result. It must fail before build/live if source fixture, protocol and effective launch
-  geometry disagree. A hand-written JSON claim or analyzer-only synthetic row is not sufficient.
-- Do not modify `bspline_optimizer.cpp/.h` unless the new exact-geometry test exposes a defect that contradicts
-  the already accepted scan contract. Any such unexpected production change requires stopping and returning
-  to Supervisor; fixture eligibility may not be obtained by weakening the scanner.
+- Remove the production-header friend plus arbitrary callback helper introduced solely for the synthetic
+  admission test. Remove or replace the fake three-counter test. The accepted unit admission tests plus the
+  live manifest/timeline are the integration proof; do not build another test-only abstraction into the FSM.
+- Preserve the live ICRA-061 evidence of zero pre-release and positive post-release rows. Do not rerun
+  ICRA-061 ROS. Record that its earlier test was not a true FSM integration test.
+- Record the missing requirement ID on commit `79add9c` as an immutable process deviation; do not amend,
+  rebase or force-push. Every new commit must contain applicable `IAP-RQ-XXX` IDs.
+- Reconstruct an honest compact ICRA-061 command index from retained structured artifacts where possible,
+  using typed unknown fields where impossible. Do not invent argv and do not let this stop technical work.
+- From the first ICRA-062 action, use one structured command ledger with exact argv/cwd, safe environment-key
+  allowlist, start/end/duration and exit code. Evidence/path/mode/prose corrections before registered identity
+  are repaired in-task.
 
-## 4. Close ICRA-060 evidence gaps without a separate stop
+## 4. Add diagnostic-only P4 profile traces before readiness
 
-- Correct ICRA-060 compact prose to state that readiness attempts 01, 02 and 04 each passed GPU preflight;
-  retain attempt 03 as a command/wrapper failure, not a GPU or ROS attempt.
-- Complete the ICRA-060 command ledger from retained command JSON, scripts and manifests: include attempts
-  01-04 and focused/full/static/final audits with exact argv where retained, cwd, safe environment key
-  allowlist, start/end/duration and exit. Where historical exact argv is genuinely unrecoverable, record a
-  typed `UNRECOVERABLE_HISTORICAL_FIELD` plus the authoritative artifact path; do not invent it and do not
-  rerun ICRA-060 ROS.
-- Record admission parameter `requested` and `effective` values in v5 manifests. Extend focused integration
-  coverage to prove the enabled FSM creates no planning-risk context/trial/P4 row while waiting, then creates
-  them only after a positive snapshot. Pure value-object tests alone are insufficient.
-- Run focused P4 tests, complete Python discovery, relevant C++ tests, syntax, fatal-only flake8, canonical
-  JSON and `git diff --check` on the final pre-live tree. Use one structured command recorder from the first
-  ICRA-061 command onward; correct missing/path/mode/prose fields in-task and continue.
+- Add a default-off, nonregistered-only profile trace for both original and risk guide samples. For every
+  invalid equal-arc sample record: arm, sample index, point, query time/tau, top-level reason, interpolation
+  layer/corner IDs, spatial/temporal weights, source flags and occupancy classification. Do not record raw
+  sensor data or credentials.
+- Add an offline classifier with mutually exclusive counts:
+  `ZERO_WEIGHT_INVALID_CORNER`, `POSITIVE_WEIGHT_OCCUPIED_SKIP`, `OUT_OF_MAP`, `TIME_SUPPORT`, `STALE`,
+  `PROVIDER_INVALID`, and `OTHER`. Bind counts to row/sample identities and prove 200 samples per arm.
+- Trace mode must not alter search, interpolation, cost, decision or CSV semantics. Registered runs must have
+  trace mode disabled. Add unit tests for classification and trace/decision noninterference.
 
-## 5. Fresh build and one nonregistered readiness
+## 5. Fresh build and corrected r5 readiness
 
-- Build a fresh 17-package merged non-symlink Release/CUDA closure under a new ICRA-061 attempt root:
-  sequential executor, `BUILD_TESTING=OFF`, `BUILD_WITH_CUDA=ON`, registered nvcc, OpenCV OFF and viewer OFF.
-  Correct command/path mistakes in-task using a fresh attempt root; they are not scientific gate results.
-- Validate package indexes, six ordinary loadable ELF libraries, zero unresolved/historical linkage,
-  source/installed launch equality and exact final source/config/dependency hashes.
-- Run GPU preflight before ROS. A real `nvidia-smi`, `cuInit(0)` or device-count failure remains
-  `GPU_NOT_READY` and stops before ROS; CPU fallback is forbidden.
-- Run exactly one successful nonregistered r5 readiness identity after the deterministic preflight. It must
-  prove: P0 ready with positive generation/stamp/frame; zero P4 rows before admission release; at least one
-  post-release P4 request and decision row using the matching positive snapshot; at least one
-  `CLOSED_SEGMENTS` scan; zero `OPEN_ENDED_COLLISION`/`INVALID_INPUT`; required processes alive during the
-  interval; clean controlled shutdown.
-- A concrete pre-identity implementation/wiring defect may be fixed, rebuilt to a fresh root and readiness
-  rerun in this task. Do not change the fixed r5 fixture or science. Correctable command/evidence mistakes do
-  not end the task. Record every unsuccessful developmental attempt truthfully.
+- Build a fresh 17-package merged non-symlink Release/CUDA closure under ICRA-062 using sequential executor,
+  `BUILD_TESTING=OFF`, CUDA/nvcc ON and OpenCV/viewer OFF. Validate indexes, six ELF libraries, zero historical
+  linkage, installed/source equality and final hashes.
+- Before ROS run GPU preflight. Real `nvidia-smi`, `cuInit(0)` or device-count failure stops before launch;
+  CPU fallback is forbidden.
+- Run one nonregistered traced r5 readiness with exact worker `4/4`. Require all earlier admission,
+  positive-snapshot, closed-segment, process and shutdown conditions. Capture final stable RiskGrid health.
+- If every decision is `METRICS_ONLY` with original/risk 200/200 and zero invalid counts, freeze r5 and proceed
+  immediately to Section 7. Do not create r6.
+- If any row remains incomplete, classify all invalid samples from this same attempt and follow only Section
+  6. Do not try another obstacle, grid, threshold, horizon, worker count, seed or profile.
 
-## 6. Freeze once and execute the complete r5 matrix
+## 6. Preauthorized occupied-support correction, only if trace proves it
 
-- After readiness PASS, freeze and commit/push final source/config/build hashes. Continue directly without
-  Supervisor Review.
-- Run one standalone v5 dependency preflight using only the final ICRA-061 install and `/opt/ros/jazzy`;
-  require the existing exact dependency counts and zero GPU/launch/identity/retry in that invocation.
-- Invoke the full v5 runner once. Its built-in GPU preflight must precede ROS and pass. Execute all 15 new
-  `p4-g0c-r5-*` identities in frozen order, exactly once, with 15 attempted/completed/launches and zero
-  retry/exclusion. Every accepted decision must carry a valid positive snapshot identity and closed segment.
-- After runner `COMPLETE`, invoke the analyzer once against the immutable bundle. Success requires exact
-  `DRAFT_ELIGIBLE`. Do not apply thresholds, enable selection, claim G0C PASS, start G0D/P5 or tune results.
-- One-shot protection begins with the first registered r5 identity. From that point, a genuine GPU/process/
-  RiskGrid/CSV/inventory/scientific failure is terminal: do not change source/config/build/fixture, retry an
-  identity or substitute data. A narrow analyzer-only defect may be fixed and the unchanged complete bundle
-  reanalyzed once.
+- First make interpolation numerically correct: a corner whose exact spatial or temporal interpolation weight
+  is zero must not invalidate a query. Derive the zero comparison from exact computed weights; do not use a
+  tuned spatial tolerance. Preserve strict validation for every positive-weight corner.
+- If, after excluding zero-weight corners, every remaining invalid sample is
+  `POSITIVE_WEIGHT_OCCUPIED_SKIP`, authorize one P4-specific conservative cost-support policy:
+  occupied-skip corners contribute their already stored finite `unknown_cost` to `queryCost` interpolation,
+  while remaining marked invalid/unknown in RiskGrid health and predicted-PL queries. All other unknown,
+  stale, non-finite, out-of-map and time-support failures remain fail-closed.
+- Apply the same P4 cost policy to original and risk arms and the risk-aware A* edge query. Original EGO
+  occupancy/inflation checks remain the hard collision authority; do not make occupied nodes traversable,
+  change A* occupancy checks or weaken P5.
+- Add focused tests proving: zero-weight invalid corners are ignored; positive-weight occupied support yields
+  a finite conservative cost; occupied health/PL stays invalid; provider-invalid/stale/out-of-map/time queries
+  still fail; A* never traverses occupied nodes; both P4 arms use identical support semantics.
+- This is a scientific query-semantics change. Create v6 protocol/registry/dependency/lineage and 15 new r6
+  identities with unchanged fixture/seeds/repetitions/threshold formulas, recording r5 as unconsumed and
+  superseded. Fresh-build to a new ICRA-062 attempt root and run one nonregistered r6 readiness.
+- r6 readiness must produce only `METRICS_ONLY`, 200/200 profiles, zero invalid samples, positive snapshot
+  identities and closed segments. If it does, proceed immediately to Section 7 using r6. If trace contains
+  any non-occupied positive-weight failure or r6 remains incomplete, stop as a genuine typed technical
+  blocker without changing science again.
 
-## 7. Handoff and artifact lifecycle
+## 7. Freeze and execute the registered matrix
 
-- Update `DEV_LOG.md`, `docs/CHANGES.md`, `docs/TRACEABILITY.md` and compact redacted ICRA-061 evidence. Make
-  requirement-bound commits and push before handoff. Never edit Supervisor-owned files or stage raw products
-  or the PDF.
-- Do not stop for formatting, local path/mode, missing optional metadata or another correctable pre-identity
-  orchestration/evidence issue. Resolve it inside ICRA-061 and keep moving. Stop only for the genuine
-  fail-closed conditions above or an unexpected need to weaken production scan semantics.
-- Retain every ICRA-056/059/060/061 build/install through Supervisor Review. Because ICRA-060 is not
-  PASS-complete, no cleanup is authorized now. On ICRA-061 Review PASS after code/docs are pushed, delete only
-  reproducible build/install directories belonging to ICRA-061, ICRA-060, ICRA-059 and superseded ICRA-056;
-  retain compact/raw scientific evidence and the protected PDF.
-- The 9,600-attempt tight retry behavior observed under open-ended collision is recorded as post-G0C runtime
-  hardening. Do not mix FSM retry/backoff redesign into this calibration task.
+- Freeze and commit/push final code/config/build hashes after readiness PASS. Continue without Supervisor
+  Review using exactly one eligible version: r5 if no query semantic change, otherwise r6.
+- Run one standalone dependency preflight from the final ICRA-062 install plus `/opt/ros/jazzy`; require exact
+  18 packages, 13 executables, one component, 14 configs and six libraries, with zero GPU/launch/identity.
+- Invoke the matching full runner once. Its GPU preflight must precede ROS. Execute all 15 registered IDs in
+  frozen order, exactly once, with 15 attempted/completed/launches and zero retry/exclusion. Every accepted
+  row requires positive snapshot identity, closed segment, `METRICS_ONLY`, 200/200 profiles and zero invalid.
+- Invoke the matching analyzer once after runner `COMPLETE`; require exact `DRAFT_ELIGIBLE`. Do not apply the
+  draft, enable selection, claim G0C PASS, start G0D/P5 or tune results.
+- One-shot protection begins with the first registered identity. Thereafter real GPU/process/RiskGrid/CSV/
+  inventory/scientific failure is terminal; no source/config/build change or identity retry is allowed. A
+  narrow analyzer-only defect may be fixed and the unchanged complete bundle reanalyzed once.
+
+## 8. Handoff and artifact lifecycle
+
+- Update `DEV_LOG.md`, `docs/CHANGES.md`, `docs/TRACEABILITY.md` and compact redacted ICRA-062 evidence; make
+  requirement-bound commits and push. Do not edit Supervisor-owned files, stage raw products or stage the PDF.
+- Do not stop for formatting, path/mode, optional metadata, ledger or another correctable pre-identity
+  orchestration issue. Repair it in-task. Do stop for real GPU/security/external-mutation failures, an
+  unauthorized trace category, or post-identity failure.
+- Retain all ICRA-056/059/060/061/062 build/install through Supervisor Review. No cleanup is authorized now.
+  After an ICRA-062 Review PASS and pushed code/docs, delete only reproducible build/install directories from
+  those tasks; retain scientific/compact evidence and the protected PDF.
 
 ## Allowed files
 
-- New v2 fixture and v5 protocol/registry/dependency/lineage; v5/r5 mechanical support in launch, P4 runner,
-  analyzer, classifier and their tests.
-- `bspline_opt` focused test/CMake files for exact-geometry scanner coverage; production scanner files are
-  read-only unless an unexpected contract defect requires a Supervisor stop.
-- Plan-manage admission integration tests/CMake and minimal test seams; production admission changes only for
-  a demonstrated integration-test defect and without changing its accepted contract.
-- Builder-owned docs and compact redacted ICRA-060 correction/ICRA-061 evidence.
+- Profiled P4 launch/protocol/runner/analyzer/classifier support and tests; r5 mechanical hashes.
+- P4 trace fields/writer/classifier and focused tests; RiskGrid cost interpolation and P4/A* call sites only
+  for the exact Section-6 decision tree.
+- New v6 protocol/registry/dependency/lineage only if Section 6 is entered; the v2 fixture remains unchanged.
+- Removal/replacement of the synthetic FSM test seam; Builder-owned docs and compact redacted evidence.
 
 ## Forbidden
 
-- No v1-v4 mutation, r4 execution/relabel, P0/P4 science tuning beyond the single predeclared v2 obstacle x
-  interval, scanner weakening, synthetic endpoint/decision, planning-horizon change, seed/repetition change,
-  threshold application, G0C PASS claim, G0D/P5 run, CPU fallback, registered-r5 retry, external-repository
-  write, credential persistence, raw-product/PDF staging or cleanup before Review.
+- No obstacle/grid/horizon/P0 science/threshold/formula/seed/repetition tuning; no v1-v4 or
+  historical-evidence mutation;
+  no analyzer coverage weakening or failed-row exclusion; no occupied traversal, PL-validity fabrication,
+  scanner weakening, synthetic endpoint/decision, CPU fallback, registered retry, threshold application,
+  G0C PASS claim, G0D/P5 run, external-repository write, credential persistence, raw-product/PDF staging or
+  cleanup before Review.
