@@ -1211,3 +1211,10 @@ They do not convert historical `NO-GO-P2`, failed P0 Gate-0B evidence, the stati
 | IAP-RQ-423 | Bind dependency success provenance to the selected manifest | `validate_runtime_dependencies()` owns immutable `resolved_manifest_path` and distinct artifact-path locals; success returns the same canonical manifest path plus protocol-bound SHA, prefixes and exact 18/13/1/14/6 counts | **PHASE A IMPLEMENTED** |
 | IAP-RQ-423 | Preserve validation behavior while preventing last-artifact corruption | Focused 11/11 covers reordered config and alternate terminal ELF content plus wrong hash, missing artifact, prefix alias, artifact escape and historical-prefix rejection | **REGRESSION PASS** |
 | IAP-RQ-423 | Keep repair verification repository-local before adoption/live | Bootstrap 8/8, classifier 18/18, focused 115/115, launch 11/11 + 16/16, full discovery 470/470, syntax/flake8/canonical/diff all pass with empty 17,759-entry external delta | **PHASE A PASS; ADOPTION/LIVE PENDING** |
+
+## 2026-08-25 ICRA-057 credential-output stop
+
+| Req ID | Requirement/evidence seam | Implementation and retained evidence | Status |
+|---|---|---|---|
+| IAP-RQ-423 | Prevent environment/credential values from entering ICRA-057 evidence | A read-only metadata search mistakenly included a retained event log whose tool output exposed serialized environment values; no value/name was copied into repository evidence and scoped tracked/compact scan is clean | **BLOCKED_CREDENTIAL_VALUE_OUTPUT_EXPOSURE** |
+| IAP-RQ-423 | Stop before one-shot live boundaries after output violation | Adopted closure verdict is incomplete; dependency/GPU/full runner/r3/analyzer invocations are all zero, roots absent, processes zero, historical artifacts and protected identities retained | **FAIL-CLOSED; SUPERVISOR REVIEW REQUIRED** |

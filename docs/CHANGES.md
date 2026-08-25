@@ -126,6 +126,22 @@ git diff --check
   retained; corrected discovery produced the intended single provenance RED.
   No build, GPU, ROS/live, identity or analyzer action ran in Phase A.
 
+## 2026-08-25 (ICRA-057 credential-output BLOCKED)
+
+- IAP-RQ-423: Phase-A repair and formal evidence were committed/pushed as
+  `9decf92`. The subsequent read-only adopted-install metadata query
+  accidentally included the retained ICRA-056 log directory; a historical
+  event record serialized a full build environment and the tool emitted
+  credential-like values.
+- No value or variable name is reproduced in repository evidence. No ICRA-056
+  artifact was changed or removed, and a scoped scan confirms ICRA-057
+  tracked/compact files contain no credential assignment pattern.
+- The explicit output rule makes this
+  `BLOCKED_CREDENTIAL_VALUE_OUTPUT_EXPOSURE`. Work stopped before completing
+  adopted static closure: dependency, GPU, full runner, all r3 identities and
+  analyzer each have zero invocations, and their roots are absent. No rebuild,
+  cleanup, threshold action, G0C claim, G0D or P5 work occurred.
+
 ## 2026-08-25 (ICRA-056 container contract and r3 live task)
 
 - IAP-RQ-423: correct the Supervisor-owned static model to one canonical,

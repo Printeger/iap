@@ -7474,3 +7474,31 @@ No inherited environment dump, credential value, colcon/build/install, GPU,
 ROS/live runner, identity, analyzer or threshold action occurred. Phase A is
 ready for its required commit/push before read-only adoption of the frozen
 ICRA-056 CUDA install; no intermediate Review is requested.
+
+## 2026-08-25T05:02:33Z — ICRA-057 BLOCKED ON CREDENTIAL OUTPUT
+
+IAP-RQ-423. Phase-A repair/evidence commit `9decf92` was pushed before Phase B.
+The first adopted-install metadata inspection correctly read the three cache
+booleans/build type and exact CUDA compiler entries. However, the same
+read-only `rg` command mistakenly included the retained ICRA-056 `log/`
+directory while looking for compiler/version metadata. A historical event
+record there serializes the full build environment, and tool output therefore
+included credential-like variable values.
+
+This is an output-policy violation even though it did not create or modify a
+repository file. The values and variable names are deliberately not copied
+into DEV_LOG, compact evidence or any ICRA-057 raw file. The historical
+ICRA-056 log remains untouched; no deletion, overwrite, redaction or cleanup
+was attempted. A scoped post-incident scan confirms no credential assignment
+pattern in ICRA-057 tracked/compact evidence.
+
+Fail-closed stop occurred before an adopted static-closure verdict and before
+any one-shot Phase-C boundary. ICRA-057 standalone dependency, GPU preflight,
+full runner, r3 attempt/completion/retry, analyzer and threshold-action counts
+are all zero. `dependency_preflight`, `preflight` and `runs` roots are absent;
+zero task/required process remains. No `colcon` or ICRA-057 build/install ran.
+
+Protected PDF SHA remains `1f07da56...44f6`, read-only `gnss_comm` remains
+`de422a4b...16a`, and all historical evidence is retained. Builder result is
+`BLOCKED_CREDENTIAL_VALUE_OUTPUT_EXPOSURE`, never G0C PASS. No next task is
+selected; control returns only to SUPERVISOR review and disposition.
