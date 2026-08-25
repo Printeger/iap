@@ -7231,7 +7231,7 @@ Mutation RED proved module/async/nested writes, aliases, extended os families
 and four subprocess helpers were omitted; scope/namespace deny tables made the
 suite GREEN. A later RED exposed official `capture_output=True` as an
 over-rejection; the explicit read-only keyword set resolved it. Final
-classifier coverage is 14/14.
+pre-review classifier coverage was 14/14; post-review coverage is 16/16.
 
 Both XDG actions now require exact `IfCondition` structure and ordered
 `LaunchConfiguration("experiment")`, named `P4_G0C_EXPERIMENT_V3` operands;
@@ -7245,12 +7245,14 @@ scopes. Import aliases normalize for `os`, `shutil`, `pathlib/Path` and
 attributes, unresolved modes/flags/keywords/receivers/targets. Coverage adds
 `remove`, `rmdir`, truncate, chmod/chown, link/symlink families and all five
 subprocess launch helpers. `source_name` now appears in typed diagnostics and
-records. Production remains the exact five-environment/eight-output contract,
-50 literal path records and unchanged launch/runner bytes.
+records. The raw production inventory remains 50 literal path records and
+reaches all five environment/eight registered output semantics, but exact
+validation now rejects the additional real `runs_root` semantic root. Launch
+and runner bytes remain unchanged.
 
 Formal commands used only the ICRA-055 launcher root: focused P4 discovery
-109/109, launch-contract 11/11, launch-golden 16/16 and complete Python
-discovery 464/464 all exit 0. Syntax 6/6, fatal-only flake8, canonical JSON 4/4
+111/111, launch-contract 11/11, launch-golden 16/16 and complete Python
+discovery 466/466 all exit 0. Syntax 6/6, fatal-only flake8, canonical JSON 4/4
 and `git diff --check` pass. The full-discovery external inventories both hash
 to `82b029de...eee9` over 17,759 entries; cmp is 0 and structured delta is
 empty. All task snapshots/homes/logs/temp remain ignored and unstaged; only
@@ -7267,5 +7269,71 @@ No build/install/log product, compiled test, CTest, GPU preflight, ROS process
 or launch service, live runner/analyzer CLI, calibration, main flow, smoke,
 qualification, identity consumption, threshold, G0C/G0D or P5 action ran.
 Compact evidence is under `results/icra27/icra055/compact/`. Builder result is
-`P4_G0C_R3_HERMETIC_CLASSIFIER_READY_FOR_REVIEW`, not live readiness or G0C
-PASS, pending independent review and final DEV_LOG-only handoff.
+`BLOCKED_PRODUCTION_SURFACE_EXCEEDS_EIGHT_OUTPUT_CONTRACT`, not live readiness
+or G0C PASS, pending final DEV_LOG-only handoff.
+
+### ICRA-055 independent review, remediation and final disposition
+
+IAP-RQ-423. Implementation/docs/evidence commits `72ccae8`, `f2119f6` and
+`32bd497` were pushed to `origin/dev/icra`. The first independent Standards
+review found one blocking reproducibility gap in `docs/CHANGES.md` and three
+nonblocking architecture observations. The exact repository-root launcher
+commands close the blocker; the subprocess/ExecuteProcess flag parser was also
+consolidated. Primitive record dictionaries and the classifier's broad file
+responsibility remain explicitly nonblocking under NEXT_TASK section 4.
+
+The first Spec review found five blocking implementation classes and the
+procedural final-handoff item: noncanonical descendants, unknown/dynamic
+qualified mutations, incomplete subprocess positional/final/dynamic flags, an
+uninvoked guard false positive, and an eight-output assertion that filtered
+extras. RED/GREEN remediation rejected absolute/parent/sibling path transforms,
+nested module and arbitrary dynamic `getattr` mutation calls, positional
+stdout/stderr for all five subprocess helpers, unresolved flags before the
+`--` delimiter, and nested launch imports in recursively discovered `test/`
+files. The exact condition/action multiset and external comparator behavior
+remain unchanged.
+
+The next Spec re-review exposed a decisive remaining production fact rather
+than an allowed-file implementation gap. The unchanged runner writes
+`runs_root/p4_g0c_runner_state.json` and creates `runs_root` run/environment
+containers. These are ancestors or siblings of the exact eight
+`MUTABLE_OUTPUT_KEYS`, never exact outputs or canonical descendants. Mapping
+them to an output would be false, while accepting `runs_root` would introduce a
+ninth semantic root contrary to NEXT_TASK section 4. Because the production
+runner is forbidden scope, `production_surface()` now rejects it with
+`unexpected production semantic root:runs_root`; ICRA-055 must remain BLOCKED.
+
+One attempted package-style unittest command named
+`test.test_p4_g0c_surface_classifier` and `test.test_p4_g0c_hermetic_tests`;
+because `test/` is not a package it produced two import errors. The prescribed
+discovery entry then reproduced nine RED failures and passed after correction.
+Two optional canonical checks of the newly edited pretty-printed compact JSON
+returned noncanonical before it was converted to canonical one-line form; its
+final canonical check passes. Every one of these launcher invocations reports
+`EXTERNAL_ROS_LOG_UNCHANGED` over 17,759 entries and remained repository-local.
+
+Final formal evidence postdates all final code and predates `32bd497`: focused
+111/111, classifier 16/16, launch-contract 11/11, launch-golden 16/16 and full
+Python 466/466 pass; syntax 6/6, fatal-only flake8 and four-file canonical JSON
+pass. The final full before/after inventories both hash to
+`82b029dee5cd6444ee812316381565531308365dd6704cbc2df938a4fa68eee9`,
+cmp is 0, delta is empty, and result hash is
+`28f026eb710a1422f6d4f79b68f55858320dc54d1ff46ab50f8974abfb5eae0d`.
+Reviewer timestamp concern was withdrawn after exact stat showed code mtimes
+02:24:34–02:28:56 UTC, formal results 02:29:19–02:30:48, and commit 02:31:52.
+
+Final Standards review has no code/evidence blocker after this DEV_LOG-only
+handoff; its two remaining architecture observations are nonblocking. Corrected
+final Spec verdict is `PASS_AS_TRUTHFUL_BLOCKED`: code blockers 0,
+formal/evidence blockers 0, external production-contract blockers 1 and scope
+creep 0. These are Builder reviews, not a Supervisor verdict.
+
+No production launch/runner/science/config/protocol/registry/dependency/
+lineage byte changed. No build/install/log product, compiled test, CTest, GPU,
+ROS/live process, runner/analyzer CLI, calibration, main flow, smoke,
+qualification, identity consumption, G0C/G0D or P5 action ran. ICRA-054
+evidence and incident records remain preserved. The protected PDF remains
+unmodified, untracked and unstaged at `1f07da56...44f6`; no task process
+remains. Final Builder result is
+`BLOCKED_PRODUCTION_SURFACE_EXCEEDS_EIGHT_OUTPUT_CONTRACT`. No next task is
+selected; control returns only to SUPERVISOR review and disposition.
