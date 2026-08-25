@@ -7992,3 +7992,23 @@ ros2 launch iap test_planner.launch.py experiment:=icra_p0_p5_qualification_fina
 ros2 launch iap test_planner.launch.py experiment:=icra_p0_p5_qualification_runtime_fail run_duration_s:=90 validation_duration_s:=90 start_rviz:=false run_validator:=true record_bag:=true
 python3 launch/icra_p0_p5_qualification.py analyze --contract config/icra27/icra_p0_p5_qualification_v1.json --input results/icra27/icra068/live/icra_p0_p5_evidence_v1.json --output results/icra27/icra068/live/icra_p0_p5_analysis_v1.json --repository-root /home/dev/ws_iap/src/iap
 ```
+
+## 2026-08-25 — ICRA-068 Phase A historical P4 test-fixture decoupling
+
+IAP-RQ-423. Synchronized `dev/icra` with `origin/dev/icra` at task activation
+with `0 0` divergence and preserved the untracked
+`docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf`. The historical P4-r6 test oracle now
+materializes `launch/test_planner.launch.py` from Git object
+`564dd6ad8c864f496b63a1b09afd3febe31eef21` and rejects any payload whose SHA
+is not `24f34c6a9d84119c2963819aa77f2f620f906dd344f2179dbab68e4e43044595`.
+The resulting retained-install fixture is test-local and non-symlink; no P4
+product, protocol, registry, dependency manifest, runner, raw evidence,
+scientific artifact or verdict changed.
+
+TDD first recorded missing-helper/materializer failures. The dependency
+preflight suite then passed 14/14, the P4 runner suite 25/25, all P4 Python
+tests 161/161, and complete repository-local hermetic discovery 529/529.
+Both hermetic runs reported the 17,762-entry external ROS-log inventory
+unchanged. GPU, ROS, live identity, analyzer and product-build invocations
+remain zero at this Phase-A freeze; ICRA-068 proceeds directly to the isolated
+current-install build required by Phase B.

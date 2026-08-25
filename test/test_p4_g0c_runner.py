@@ -4,8 +4,11 @@ import hashlib
 import json
 import tempfile
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 from unittest import mock
+
+from icra_historical_p4_fixture import materialize_p4_r6_test_install
 
 
 REPO = Path(__file__).resolve().parents[1]
@@ -452,6 +455,17 @@ class P4G0CRunnerTest(unittest.TestCase):
             "validated_prefixes": list(MODULE.R6_RECOVERY_EXACT_PREFIXES),
         }
 
+    @contextmanager
+    def _historical_r6_install(self, root):
+        install = materialize_p4_r6_test_install(REPO, Path(root))
+        prefixes = [str(install), "/opt/ros/jazzy"]
+        with mock.patch.object(
+            MODULE, "R6_RECOVERY_FINAL_INSTALL", install
+        ), mock.patch.object(
+            MODULE, "R6_RECOVERY_EXACT_PREFIXES", prefixes
+        ):
+            yield install
+
     def test_r6_recovery_validation_only_is_exact_and_nonmutating(self):
         task_tmp = REPO / "results/icra27/icra064"
         task_tmp.mkdir(parents=True, exist_ok=True)
@@ -461,7 +475,7 @@ class P4G0CRunnerTest(unittest.TestCase):
             state_path = root / "p4_g0c_runner_state.json"
             before = state_path.read_bytes()
             evidence_root = Path(tmp) / "recovery-evidence"
-            with mock.patch.object(
+            with self._historical_r6_install(Path(tmp)), mock.patch.object(
                 MODULE, "ICRA063_R6_RECOVERY_CONTRACT", contract
             ), mock.patch.object(
                 MODULE, "validate_runtime_dependencies",
@@ -520,18 +534,19 @@ class P4G0CRunnerTest(unittest.TestCase):
                 }
 
             evidence_root = Path(tmp) / "recovery-evidence"
-            dependency = self._ready_r6_recovery_dependency()
-            with mock.patch.object(
-                MODULE, "ICRA063_R6_RECOVERY_CONTRACT", contract
-            ), mock.patch.object(
-                MODULE, "validate_runtime_dependencies",
-                return_value=dependency,
-            ):
-                result = MODULE.recover_r6_matrix(
-                    self.bundle, root, evidence_root,
-                    gpu_preflight=lambda _: {"gpu_ready": True},
-                    launch_executor=launch,
-                )
+            with self._historical_r6_install(Path(tmp)):
+                dependency = self._ready_r6_recovery_dependency()
+                with mock.patch.object(
+                    MODULE, "ICRA063_R6_RECOVERY_CONTRACT", contract
+                ), mock.patch.object(
+                    MODULE, "validate_runtime_dependencies",
+                    return_value=dependency,
+                ):
+                    result = MODULE.recover_r6_matrix(
+                        self.bundle, root, evidence_root,
+                        gpu_preflight=lambda _: {"gpu_ready": True},
+                        launch_executor=launch,
+                    )
 
             self.assertEqual(
                 launched,
@@ -574,32 +589,33 @@ class P4G0CRunnerTest(unittest.TestCase):
             root = Path(tmp) / "runs"
             contract = self._make_failed_r6_recovery_root(root)
             evidence_root = Path(tmp) / "recovery-evidence"
-            dependency = self._ready_r6_recovery_dependency()
             never_launch = mock.Mock(
                 side_effect=AssertionError("launch must not run")
             )
-            with mock.patch.object(
-                MODULE, "ICRA063_R6_RECOVERY_CONTRACT", contract
-            ), mock.patch.object(
-                MODULE, "validate_runtime_dependencies",
-                return_value=dependency,
-            ):
-                result = MODULE.recover_r6_matrix(
-                    self.bundle, root, evidence_root,
-                    gpu_preflight=lambda _: {
-                        "gpu_ready": False,
-                        "failure_reason": "synthetic_gpu_failure",
-                    },
-                    launch_executor=never_launch,
-                )
-                with self.assertRaisesRegex(
-                    MODULE.RunnerError, "RETAINED_R6_DRIFT"
+            with self._historical_r6_install(Path(tmp)):
+                dependency = self._ready_r6_recovery_dependency()
+                with mock.patch.object(
+                    MODULE, "ICRA063_R6_RECOVERY_CONTRACT", contract
+                ), mock.patch.object(
+                    MODULE, "validate_runtime_dependencies",
+                    return_value=dependency,
                 ):
-                    MODULE.recover_r6_matrix(
+                    result = MODULE.recover_r6_matrix(
                         self.bundle, root, evidence_root,
-                        gpu_preflight=lambda _: {"gpu_ready": True},
+                        gpu_preflight=lambda _: {
+                            "gpu_ready": False,
+                            "failure_reason": "synthetic_gpu_failure",
+                        },
                         launch_executor=never_launch,
                     )
+                    with self.assertRaisesRegex(
+                        MODULE.RunnerError, "RETAINED_R6_DRIFT"
+                    ):
+                        MODULE.recover_r6_matrix(
+                            self.bundle, root, evidence_root,
+                            gpu_preflight=lambda _: {"gpu_ready": True},
+                            launch_executor=never_launch,
+                        )
 
             self.assertEqual(result["runner_state"], "FAILED")
             self.assertEqual(result["failure_reason"], "GPU_NOT_READY")

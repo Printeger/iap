@@ -8,6 +8,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from icra_historical_p4_fixture import (
+    FROZEN_P4_R6_LAUNCH_SHA256,
+    frozen_p4_r6_launch_bytes,
+)
+
 
 REPO = Path(__file__).resolve().parents[1]
 RUNNER_PATH = REPO / "scripts/dev_planner/run_p4_g0c_calibration.py"
@@ -88,7 +93,13 @@ class P4G0CDependencyPreflightTest(unittest.TestCase):
         )
         launch_path.parent.mkdir(parents=True, exist_ok=True)
         launch_source = REPO / launch_contract["source_path"]
-        if self.manifest["schema_version"] in {
+        if self.manifest["schema_version"] == RUNNER.DEPENDENCY_SCHEMA_V6:
+            launch_bytes = frozen_p4_r6_launch_bytes(REPO)
+            self.assertEqual(
+                self.manifest["launch_contract"]["sha256"],
+                FROZEN_P4_R6_LAUNCH_SHA256,
+            )
+        elif self.manifest["schema_version"] in {
             RUNNER.DEPENDENCY_SCHEMA_V2, RUNNER.DEPENDENCY_SCHEMA_V3,
             RUNNER.DEPENDENCY_SCHEMA_V4,
         }:

@@ -1350,3 +1350,10 @@ They do not convert historical `NO-GO-P2`, failed P0 Gate-0B evidence, the stati
 | IAP-RQ-421, IAP-RQ-422 | Isolate the conference route | `launch/test_planner.launch.py` and the canonical contract enable P0 plus P5 final/runtime/evidence while disabling high/lower P1/P2/P3/P4, distinctive/fanout/debug/metrics/trace/viz/application paths; `test/test_test_planner_launch.py` verifies profile and override rejection | **FOCUSED TEST PASS** |
 | IAP-RQ-423 | Pre-register three prospective cases and fail closed | `launch/icra_p0_p5_qualification.py` binds SAFE_NORMAL, P5-7 FINAL_REJECT and P5-6 RUNTIME_FAIL to case/run/fixture/process/topic/P0/event identities and repository-local raw hashes; `test/test_icra_p0_p5_qualification.py` supplies adversarial coverage and `results/icra27/icra067/validation/` retains raw synthetic evidence | **VALIDATION-ONLY PASS; QUALIFICATION FALSE** |
 | IAP-RQ-423 | Preserve P4 authority and repository-local execution | `results/icra27/icra067/compact/final_result.json` records zero GPU/ROS/live/build action and the 528-test result (524 pass, four frozen P4-v6 launch-SHA checks fail); P4 config/raw/science artifacts remain unchanged | **HISTORICAL TEST-BINDING CONFLICT; SUPERVISOR REVIEW REQUIRED** |
+
+## 2026-08-25 ICRA-068 historical P4 test-fixture decoupling
+
+| Req ID | Requirement/evidence seam | Implementation and retained evidence | Status |
+|---|---|---|---|
+| IAP-RQ-423 | Keep a historical dependency oracle independent of the evolving current launch | `test/icra_historical_p4_fixture.py`, `test/test_p4_g0c_dependency_preflight.py`, `test/test_p4_g0c_runner.py` materialize and hash-check the exact `564dd6a` launch bytes in a test-local non-symlink install | **IMPLEMENTED; PRODUCT/P4 FROZEN INPUTS UNCHANGED** |
+| IAP-RQ-423 | Require zero active test failures before current-install build | dependency 14/14, runner 25/25, P4 161/161 and complete hermetic discovery 529/529 pass; external ROS inventory remains 17,762 entries | **PHASE A PASS** |

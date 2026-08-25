@@ -2614,3 +2614,27 @@ provenance: the binding emits the contract's frozen relative identity instead
 of an absolute installed path, and each run must have a distinct real raw JSON
 whose verified content equals its typed run evidence. A contract file or any
 unrelated repository file can no longer stand in for run evidence.
+
+## 2026-08-25 (ICRA-068 historical P4 test-fixture decoupling)
+
+Requirements: `IAP-RQ-423`.
+
+- Added a test-only immutable Git-object fixture for the historical P4-r6
+  launch. Synthetic retained installs use the exact bytes registered at
+  commit `564dd6a` and verify SHA
+  `24f34c6a9d84119c2963819aa77f2f620f906dd344f2179dbab68e4e43044595`
+  instead of copying the evolving current launch.
+- Updated only the two authorized historical P4 test suites. P4 production
+  code, frozen manifests and scientific evidence remain untouched.
+- Verification passed 14 dependency-preflight tests, 25 runner tests, all 161
+  P4 Python tests and complete 529-test repository-local hermetic discovery,
+  with zero failures/errors and no external ROS-log inventory delta.
+
+Reproduce the complete non-live check from the repository root with:
+
+```bash
+source /home/dev/ws_iap/install/setup.bash
+python3 scripts/dev_planner/run_p4_g0c_tests.py \
+  --task-root "$PWD/results/icra27/icra063/icra068_phase_a_full" \
+  unittest discover -s test -p 'test_*.py'
+```
