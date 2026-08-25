@@ -7912,3 +7912,33 @@ production frozen inventory hash is no longer caller-overridable, exact-schema
 and agreeing outside-root adversaries are explicit, and filesystem races during
 retained-target traversal become typed technical rejection. Post-review checks
 were limited to syntax, fatal lint and diff validation.
+
+## 2026-08-25 — ICRA-066 AUTHORITATIVE OFFLINE P4-G0C NO-GO
+
+IAP-RQ-320, IAP-RQ-322 and IAP-RQ-423. The reviewed Builder commit was the
+immediate parent of the Supervisor handoff, whose intervening diff contained
+only `AGENT_STATE.md`, `NEXT_TASK.md` and `SUPERVISOR_LOG.md`. Analyzer, test,
+runner-state, recovery-inventory, old-analysis and 103-file freeze bindings all
+matched exactly; the threshold draft was absent. No validation or test suite
+was rerun.
+
+After confirming the byte-exact old analysis remained preserved under
+ICRA-065, ICRA-066 removed only its obsolete `runs_final` copy and invoked the
+reviewed offline analyzer exactly once. Exit 2 is the expected typed scientific
+result. The new authoritative analysis SHA is
+`572e5d79...a9c1e`: technical failures are zero, registered/attempted/completed
+runs are 15/15/15, complete/denominator decisions are 192/192, mean Q10 is
+`0.000020000000000131024` and passes `1e-12`, while max Q10 is `0` and fails.
+The only failed gate is `max_improvement_gate_at_or_below_noise_floor`.
+
+Thus runner PASS plus analyzer technical PASS produces a genuine P4-G0C
+`SCIENTIFIC_NO_GO`, not G0C PASS. All 103 frozen inputs remain byte-identical;
+the retained recovery-inventory SHA is exact, registry/application are
+unchanged/disabled and no draft exists. GPU, ROS, runner, identity, build,
+G0D and P5 invocations were zero. Control returns to Supervisor review without
+choosing or executing the contingency route.
+
+Independent two-axis review reports Spec PASS with no blocker or scope creep.
+The Standards review's reproducibility-command omission and ambiguous
+“external” wording were corrected in `docs/CHANGES.md`; no other standards or
+code-smell finding remains.

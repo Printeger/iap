@@ -1,0 +1,135 @@
+{
+  "commands": [
+    {
+      "argv": [
+        "bash",
+        "-c",
+        "set -eu\nrepo=/home/dev/ws_iap/src/iap\nreviewed=49730bfde7cbc63818ce6833b583c2191ae81592\nhead=$(git -c safe.directory=\"$repo\" rev-parse HEAD)\norigin=$(git -c safe.directory=\"$repo\" rev-parse origin/dev/icra)\nparent=$(git -c safe.directory=\"$repo\" rev-parse HEAD^)\ntest \"$head\" = \"$origin\"\ntest \"$parent\" = \"$reviewed\"\ntest \"$(git -c safe.directory=\"$repo\" diff --name-only \"$reviewed\"..HEAD)\" = \"AGENT_STATE.md\nNEXT_TASK.md\nSUPERVISOR_LOG.md\"\ntest \"$(sha256sum scripts/dev_planner/analyze_p4_g0c_calibration.py | cut -d\" \" -f1)\" = ae2517e8fa1f392db45434cb7d005872f2ee721fdd6d15c177b4c3c6c69e0b42\ntest \"$(sha256sum test/test_p4_g0c_analyzer.py | cut -d\" \" -f1)\" = 8e867e2a58dceed09f1fa6b0a213392419b42afb11851f59ad659be0e9ffa219\ntest \"$(sha256sum results/icra27/icra063/runs_final/p4_g0c_runner_state.json | cut -d\" \" -f1)\" = 475004c649af993013e2a58736b7bba78b384d0d28c4c700a92c5f940eee1dd1\ntest \"$(sha256sum results/icra27/icra064/retained_lstat_content_inventory.json | cut -d\" \" -f1)\" = b39ddec294a7df0680b204509418a410d1f209449e7ed4d8292b55091d6e784e\ntest \"$(sha256sum results/icra27/icra063/runs_final/p4_g0c_analysis.json | cut -d\" \" -f1)\" = f584fc5152b9060606365f283b374991aa0f07be6f98ac816a7b9a31fa9d7391\ntest \"$(sha256sum results/icra27/icra065/rejected_analysis_icra064.json | cut -d\" \" -f1)\" = f584fc5152b9060606365f283b374991aa0f07be6f98ac816a7b9a31fa9d7391\ntest \"$(sha256sum results/icra27/icra065/input_hashes_after.json | cut -d\" \" -f1)\" = 1a8fd866bb1e48139d9ab4e56abf286d6fbf6fddbdf29d5c32ac859e6fd3c95c\ntest ! -e results/icra27/icra063/runs_final/p4_g0c_threshold_draft.json\npython3 -c \"import json; from pathlib import Path; b=json.loads(Path(\\\"results/icra27/icra065/input_hashes_before.json\\\").read_text()); a=json.loads(Path(\\\"results/icra27/icra065/input_hashes_after.json\\\").read_text()); assert a[\\\"status\\\"] == \\\"PASS\\\" and a[\\\"file_count\\\"] == 103 and a[\\\"mismatches\\\"] == [] and a[\\\"files\\\"] == b[\\\"files\\\"]; print({\\\"head\\\": \\\"$head\\\", \\\"parent\\\": \\\"$parent\\\", \\\"frozen_files\\\": len(a[\\\"files\\\"]), \\\"status\\\": a[\\\"status\\\"]})\"\n"
+      ],
+      "cwd": "/home/dev/ws_iap/src/iap",
+      "duration_s": 0.031609,
+      "end_utc": "2026-08-25T15:35:45.831043Z",
+      "environment_allowlist": [
+        "HOME",
+        "LANG",
+        "LC_ALL",
+        "PATH",
+        "PYTHONPATH",
+        "ROS_HOME",
+        "ROS_LOG_DIR",
+        "TMPDIR",
+        "XDG_RUNTIME_DIR"
+      ],
+      "exit_code": 0,
+      "name": "bind_reviewed_handoff_and_frozen_inputs",
+      "start_utc": "2026-08-25T15:35:45.799517Z"
+    },
+    {
+      "argv": [
+        "unlink",
+        "/home/dev/ws_iap/src/iap/results/icra27/icra063/runs_final/p4_g0c_analysis.json"
+      ],
+      "cwd": "/home/dev/ws_iap/src/iap",
+      "duration_s": 0.003996,
+      "end_utc": "2026-08-25T15:35:59.446907Z",
+      "environment_allowlist": [
+        "HOME",
+        "LANG",
+        "LC_ALL",
+        "PATH",
+        "PYTHONPATH",
+        "ROS_HOME",
+        "ROS_LOG_DIR",
+        "TMPDIR",
+        "XDG_RUNTIME_DIR"
+      ],
+      "exit_code": 0,
+      "name": "remove_exact_obsolete_analysis",
+      "start_utc": "2026-08-25T15:35:59.442981Z"
+    },
+    {
+      "argv": [
+        "python3",
+        "scripts/dev_planner/analyze_p4_g0c_calibration.py",
+        "--protocol",
+        "config/icra27/p4_g0c_protocol_v6.json",
+        "--registry",
+        "config/icra27/p4_threshold_registry_v6.json",
+        "--fixture",
+        "config/icra27/p4_g0c_live_fixture_v2.json",
+        "--runs-root",
+        "results/icra27/icra063/runs_final",
+        "--retained-recovery-inventory",
+        "results/icra27/icra064/retained_lstat_content_inventory.json",
+        "--output",
+        "results/icra27/icra063/runs_final/p4_g0c_analysis.json"
+      ],
+      "cwd": "/home/dev/ws_iap/src/iap",
+      "duration_s": 1.231418,
+      "end_utc": "2026-08-25T15:36:07.501621Z",
+      "environment_allowlist": [
+        "HOME",
+        "LANG",
+        "LC_ALL",
+        "PATH",
+        "PYTHONPATH",
+        "ROS_HOME",
+        "ROS_LOG_DIR",
+        "TMPDIR",
+        "XDG_RUNTIME_DIR"
+      ],
+      "exit_code": 2,
+      "name": "authoritative_offline_analyzer_once",
+      "start_utc": "2026-08-25T15:36:06.270351Z"
+    },
+    {
+      "argv": [
+        "python3",
+        "-c",
+        "import hashlib,json; from pathlib import Path\nrepo=Path(\".\").resolve(); out=repo/\"results/icra27/icra063/runs_final/p4_g0c_analysis.json\"; d=json.loads(out.read_text()); g=d[\"calibration_statistics\"][\"gates\"]\nassert d[\"analysis_status\"]==\"SCIENTIFIC_NO_GO\" and d[\"failures\"]==[]\nassert [d[\"registered_run_denominator_count\"],d[\"attempted_run_denominator_count\"],d[\"completed_run_denominator_count\"]]==[15,15,15]\nassert [d[\"complete_decision_count\"],d[\"denominator_decision_count\"]]==[192,192]\nassert g[\"mean_improvement\"][\"value\"]==0.000020000000000131024 and g[\"mean_improvement\"][\"passes_noise_floor\"] is True\nassert g[\"max_improvement\"][\"value\"]==0.0 and g[\"max_improvement\"][\"passes_noise_floor\"] is False\nassert d[\"failed_scientific_gates\"]==[\"max_improvement_gate_at_or_below_noise_floor\"]\nassert d[\"retained_recovery_inventory_sha256\"]==\"b39ddec294a7df0680b204509418a410d1f209449e7ed4d8292b55091d6e784e\"\nassert d[\"registry_updated\"] is False and d[\"application_enabled\"] is False and \"threshold_draft\" not in d\nassert not (out.parent/\"p4_g0c_threshold_draft.json\").exists()\nfrozen=json.loads((repo/\"results/icra27/icra065/input_hashes_after.json\").read_text()); mismatches=[]\nfor item in frozen[\"files\"]:\n p=repo/item[\"path\"]; actual=hashlib.sha256(p.read_bytes()).hexdigest()\n if actual!=item[\"sha256\"] or p.stat().st_size!=item[\"size_bytes\"]: mismatches.append(item[\"path\"])\nassert mismatches==[]\nledger=json.loads((repo/\"results/icra27/icra066/command_ledger.json\").read_text()); call=next(x for x in ledger[\"commands\"] if x[\"name\"]==\"authoritative_offline_analyzer_once\"); assert call[\"exit_code\"]==2\nold=repo/\"results/icra27/icra065/rejected_analysis_icra064.json\"; assert hashlib.sha256(old.read_bytes()).hexdigest()==\"f584fc5152b9060606365f283b374991aa0f07be6f98ac816a7b9a31fa9d7391\"\nprint(json.dumps({\"status\":d[\"analysis_status\"],\"analysis_sha256\":hashlib.sha256(out.read_bytes()).hexdigest(),\"runs\":\"15/15/15\",\"decisions\":\"192/192\",\"q10_mean\":g[\"mean_improvement\"][\"value\"],\"q10_max\":g[\"max_improvement\"][\"value\"],\"technical_failures\":len(d[\"failures\"]),\"frozen_mismatches\":mismatches,\"authoritative_exit\":call[\"exit_code\"]},sort_keys=True))"
+      ],
+      "cwd": "/home/dev/ws_iap/src/iap",
+      "duration_s": 0.027597,
+      "end_utc": "2026-08-25T15:36:31.939607Z",
+      "environment_allowlist": [
+        "HOME",
+        "LANG",
+        "LC_ALL",
+        "PATH",
+        "PYTHONPATH",
+        "ROS_HOME",
+        "ROS_LOG_DIR",
+        "TMPDIR",
+        "XDG_RUNTIME_DIR"
+      ],
+      "exit_code": 0,
+      "name": "verify_authoritative_no_go_and_frozen_inputs",
+      "start_utc": "2026-08-25T15:36:31.912144Z"
+    },
+    {
+      "argv": [
+        "bash",
+        "-c",
+        "set -eu\ngit -c safe.directory=/home/dev/ws_iap/src/iap diff --check\ntest -z \"$(git -c safe.directory=/home/dev/ws_iap/src/iap diff --cached --name-only)\"\ngit -c safe.directory=/home/dev/ws_iap/src/iap check-ignore -q results/icra27/icra063/runs_final/p4_g0c_analysis.json\ntest \"$(git -c safe.directory=/home/dev/ws_iap/src/iap status --porcelain -- docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf)\" = \"?? docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf\"\ntest ! -e results/icra27/icra063/runs_final/p4_g0c_threshold_draft.json\nif pgrep -af \"[a]nalyze_p4_g0c_calibration|[r]un_p4_g0c_calibration|[r]os2 launch|[t]est_planner\"; then exit 1; fi\npython3 -c \"import hashlib,json; from pathlib import Path; repo=Path(\\\".\\\").resolve(); out=json.loads((repo/\\\"results/icra27/icra063/runs_final/p4_g0c_analysis.json\\\").read_text()); compact=json.loads((repo/\\\"results/icra27/icra066/compact/final_result.json\\\").read_text()); ledger=json.loads((repo/\\\"results/icra27/icra066/command_ledger.json\\\").read_text()); assert sum(c[\\\"name\\\"]==\\\"authoritative_offline_analyzer_once\\\" for c in ledger[\\\"commands\\\"])==1; assert compact[\\\"analysis_sha256\\\"]==hashlib.sha256((repo/\\\"results/icra27/icra063/runs_final/p4_g0c_analysis.json\\\").read_bytes()).hexdigest(); assert compact[\\\"analysis_status\\\"]==out[\\\"analysis_status\\\"]==\\\"SCIENTIFIC_NO_GO\\\"; frozen=json.loads((repo/\\\"results/icra27/icra065/input_hashes_after.json\\\").read_text()); assert all(hashlib.sha256((repo/x[\\\"path\\\"]).read_bytes()).hexdigest()==x[\\\"sha256\\\"] for x in frozen[\\\"files\\\"]); print({\\\"status\\\": out[\\\"analysis_status\\\"], \\\"authoritative_calls\\\": 1, \\\"frozen_files\\\": len(frozen[\\\"files\\\"]), \\\"processes\\\": 0})\"\n"
+      ],
+      "cwd": "/home/dev/ws_iap/src/iap",
+      "duration_s": 0.061622,
+      "end_utc": "2026-08-25T15:39:34.898653Z",
+      "environment_allowlist": [
+        "HOME",
+        "LANG",
+        "LC_ALL",
+        "PATH",
+        "PYTHONPATH",
+        "ROS_HOME",
+        "ROS_LOG_DIR",
+        "TMPDIR",
+        "XDG_RUNTIME_DIR"
+      ],
+      "exit_code": 0,
+      "name": "final_document_and_protection_audit",
+      "start_utc": "2026-08-25T15:39:34.837199Z"
+    }
+  ],
+  "schema_version": "icra066_command_ledger_v1"
+}

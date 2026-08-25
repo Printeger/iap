@@ -1333,3 +1333,11 @@ They do not convert historical `NO-GO-P2`, failed P0 Gate-0B evidence, the stati
 | IAP-RQ-320, IAP-RQ-322 | Apply the frozen floor to Type-7 aggregate improvements while retaining complete rows | Individual floor-level values no longer exclude structurally complete rows; typed statistics and exact failed gates distinguish `SCIENTIFIC_NO_GO` from technical `REJECTED` | **OFFLINE IMPLEMENTED; TESTS PASS** |
 | IAP-RQ-423 | Validate unchanged r6 evidence before the single authoritative analysis | Frozen inputs 103/103 exact; read-only preflight has 0 technical failures, 15/15/15 runs, 192/192 decisions, max Q10 0, but mean Q10 `0.000020000000000131024` differs from frozen expected `0.000304` | **BLOCKED_ICRA065_VALIDATION_Q10_MEAN_MISMATCH** |
 | IAP-RQ-423 | Preserve downstream authority on validation mismatch | Authoritative analyzer/output replacement = 0; old analysis SHA remains `f584fc51...d7391`; draft/registry/threshold/G0C/G0D/P5 actions remain absent | **FAIL-CLOSED; SUPERVISOR REVIEW REQUIRED** |
+
+## 2026-08-25 ICRA-066 authoritative offline P4-G0C result
+
+| Req ID | Requirement/evidence seam | Implementation and retained evidence | Status |
+|---|---|---|---|
+| IAP-RQ-423 | Bind reviewed implementation and unchanged r6 evidence before replacement | Handoff parent/diff, analyzer/test SHA, runner state, recovery inventory, old/preserved analysis and ICRA-065 103-file arrays all match; draft absent | **FROZEN INPUT PASS** |
+| IAP-RQ-320, IAP-RQ-322 | Emit aggregate Type-7 calibration statistics without row exclusion | Sole authoritative call retains 192/192 decisions; mean Q10 `0.000020000000000131024` passes floor and max Q10 `0` fails | **ANALYZER TECHNICAL PASS; SCIENTIFIC NO-GO** |
+| IAP-RQ-423 | Preserve one-call and downstream authority | Analyzer calls = 1 with expected exit 2; output SHA `572e5d79...a9c1e`; technical failures 0, runs 15/15/15, sole max-improvement failed gate, no draft/registry/application/G0D/P5 action | **AUTHORITATIVE SCIENTIFIC_NO_GO; SUPERVISOR REVIEW** |

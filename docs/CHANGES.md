@@ -2525,3 +2525,34 @@ env \
   `0.000020000000000131024`, not frozen expected `0.000304` (max Q10 `0`,
   technical failures 0, decisions 192/192). No analyzer output/draft/registry/
   threshold/G0C/G0D/P5 mutation occurred; Supervisor review is required.
+
+## 2026-08-25 (ICRA-066 authoritative offline P4-G0C NO-GO)
+
+- Bound the reviewed analyzer/test and unchanged 103-file r6 input freeze,
+  preserved the old rejected analysis outside the authoritative path under
+  repository-local ICRA-065, and replaced only its obsolete `runs_final` copy.
+- Invoked the reviewed offline analyzer exactly once. Expected exit 2 wrote
+  analysis SHA `572e5d79...a9c1e` with zero technical failures, runs 15/15/15
+  and decisions 192/192.
+- Authoritative Type-7 gates are mean Q10
+  `0.000020000000000131024` (passes `1e-12`) and max Q10 `0` (fails). The sole
+  failed gate is `max_improvement_gate_at_or_below_noise_floor`, yielding typed
+  `SCIENTIFIC_NO_GO` with no threshold draft.
+- Runner PASS and analyzer technical PASS therefore close P4-G0C as a
+  scientific NO-GO. Registry/application remained unchanged/disabled; no
+  tests, validation loop, GPU, ROS, runner, identity, G0D or P5 ran.
+
+The following exact historical one-shot command has already been consumed and
+must not be rerun. It is recorded only to reproduce the ICRA-066 evidence
+contract:
+
+```bash
+python3 scripts/dev_planner/analyze_p4_g0c_calibration.py \
+  --protocol config/icra27/p4_g0c_protocol_v6.json \
+  --registry config/icra27/p4_threshold_registry_v6.json \
+  --fixture config/icra27/p4_g0c_live_fixture_v2.json \
+  --runs-root results/icra27/icra063/runs_final \
+  --retained-recovery-inventory \
+    results/icra27/icra064/retained_lstat_content_inventory.json \
+  --output results/icra27/icra063/runs_final/p4_g0c_analysis.json
+```
