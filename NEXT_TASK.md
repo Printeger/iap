@@ -1,142 +1,137 @@
-# ICRA-064 — Recover r6 inventory offline and finish the remaining matrix
+# ICRA-065 — Correct the r6 analyzer offline and freeze the P4-G0C NO-GO
 
-> Active gate: `P4_G0C_R6_INVENTORY_RECOVERY_AND_MATRIX_CONTINUATION`
+> Active gate: `P4_G0C_R6_OFFLINE_ANALYZER_CORRECTION_AND_NO_GO_FREEZE`
 > Owner: `DEEPSEEK`
 > Activation: `TASK_READY`
-> Supervisor verdict: `ICRA063_R6_SCIENCE_PASS_POST_IDENTITY_INVENTORY_TOOL_REQUEST_CHANGES`
+> Supervisor verdict: `ICRA064_RUNNER_PASS_ANALYZER_REQUEST_CHANGES_EXPECTED_P4_G0C_NO_GO`
 > Requirement mapping: `IAP-RQ-320`, `IAP-RQ-322`, `IAP-RQ-423`
 > Conference route: conditional P0 -> P4 -> P5
-> This task: safe-alias contract -> offline first-run adoption -> remaining 14 IDs -> analyzer
+> This task: analyzer semantics -> offline reanalysis once -> authoritative scientific verdict
 
 ## Supervisor decision
 
-ICRA-063 passes the r6 scientific readiness. The first registered identity
-`p4-g0c-r6-seed211-rep01` also completed its 90-second runtime with GPU/process PASS, controlled shutdown,
-13 positive-snapshot closed-segment `METRICS_ONLY` decisions, exact 200/200 coverage in both arms and zero
-invalid samples. It failed only when the blanket inventory rule rejected the normal producer-created relative
-alias `runtime/iap_logs/latest -> 20260825T125103Z_278`.
+ICRA-064 made material progress and closes the live r6 execution phase. All 15 registered identities are
+unique, attempted and complete; there are exactly 15 launches, zero retries/exclusions, two runner sessions
+(`1 + 14`) and two passing GPU preflights. All 192 decision rows are metrics-only, structurally complete,
+200/200 in both arms, process-valid and retained in the denominator. No identity may ever run again.
 
-That identity is already consumed and must never launch again. Do not create r7 or discard scientifically
-valid data for this offline tooling defect. ICRA-064 must first prove the retained run has not drifted, narrow
-the alias contract, generate its inventory offline, record an auditable recovery transition, and continue
-only IDs 2-15. This is one integrated recovery/live task with no intermediate Review.
+The current analyzer combines one false tooling rejection with a real scientific result:
 
-## 1. Preserve science, identities and retained evidence
+1. The recovery record correctly freezes the shared ROS `latest` target at adoption time. Fourteen later ROS
+   launches legitimately advanced the mutable convenience alias. Requiring the historical target to equal
+   the final current alias is a provenance-model bug.
+2. The preregistered plan defines the improvement gates as Q10 over all complete decision improvements and
+   compares those aggregate gates with the frozen numerical-noise floor. The current analyzer instead rejects
+   every row whose individual mean or max improvement is at/below the floor, reducing 192 complete rows to
+   136. That is not the registered formula.
 
-- Follow `AGENTS.md` synchronization. Preserve the protected PDF, v1-v6 protocol/registry/dependency/lineage,
-  fixture, launch, production C++ and final ICRA-063 install bytes. Preserve r6 horizons, worker/profile,
-  seeds, order, repetitions, formulas, thresholds, selection state and all P5 behavior.
-- Do not rebuild or modify product code/config. Python inventory/runner/analyzer recovery logic, focused tests,
-  one missing C++ safety test, Builder docs and compact evidence are the only implementation scope.
-- Preserve the existing `results/icra27/icra063/runs_final/` tree. Never delete, move, truncate, chmod, rewrite
-  or relaunch the first run's decision CSV, run manifest, test-planner manifest, stdout or runtime files.
-- The repeated pre-recorder bookkeeping deviation is waived as non-scientific and is not a Gate criterion.
-  Start the ICRA-064 ledger as early as possible, never invent missing fields, and do not rerun work to repair
-  ledger completeness. Formatting, metadata and command-index defects remain correctable in-task.
+Supervisor read-only replay over the unchanged 192 rows obtains Type-7 Q10 mean improvement `0.000304` and
+Type-7 Q10 max improvement `0`. The frozen floor is `1e-12 risk_cost`; therefore P4-G0C is expected to close
+as a genuine scientific NO-GO on the max-improvement gate. This result must not be hidden by row exclusion,
+threshold relaxation, another live run or a new r7 identity.
 
-## 2. Freeze and verify the consumed first run before any recovery write
+## 1. Freeze the exact input and old analyzer result
 
-- Create a read-only lstat/content inventory under `results/icra27/icra064/` for the retained first-run tree
-  and the shared launch environment. Bind the current committed terminal state and exact hashes:
-  - runner state: `15c3f5d537f602dff6476dc498b0cc327f085147eabf1183c141399e46705760`;
-  - decisions: `c6bf3a8c4702b988b6da4770895b9511085a41d3ccd0ca593180b655a9b86ccd`;
-  - run manifest: `9c1af28e8d040745a66df153b54b9fbb345e0494e284e45253a7a1f90e38b624`;
-  - test-planner manifest: `8a87baa01b1f551a33828eab56fc2de95ee0a14c814841833e16b0fcae3a19cb`;
-  - stdout: `df3d675ee343dfc53a4c7084c8fb86a850875abc4df74efd498f118a202a7be3`.
-- Require terminal state `FAILED`, exactly 1 attempted / 0 completed / 1 launch / 0 retry, failed ID
-  `p4-g0c-r6-seed211-rep01`, and exact reason ending
-  `run artifact cannot be a symlink: runtime/iap_logs/latest`.
-- Require the run-local link to have the exact relative single-component target
-  `20260825T125103Z_278`, resolving to an ordinary direct-child directory below that run's
-  `runtime/iap_logs/`. Require the current shared `launch_environment/ros_logs/latest` link to resolve to an
-  ordinary direct-child directory under the same `ros_logs/` root. Any hash, type, target, escape or state
-  mismatch is a genuine `RETAINED_R6_DRIFT` stop before modification or ROS.
+- Follow the `AGENTS.md` Git synchronization protocol. Preserve the protected PDF and all retained r6 raw,
+  runtime, recovery, build and install artifacts. Start the ICRA-065 command ledger with the first task command.
+- Before replacing any analyzer output, preserve a byte-exact offline copy of the current rejected analysis
+  under `results/icra27/icra065/` and bind these Supervisor-frozen hashes:
+  - current analysis: `f584fc5152b9060606365f283b374991aa0f07be6f98ac816a7b9a31fa9d7391`;
+  - completed runner state: `475004c649af993013e2a58736b7bba78b384d0d28c4c700a92c5f940eee1dd1`;
+  - retained pre-recovery lstat/content inventory:
+    `b39ddec294a7df0680b204509418a410d1f209449e7ed4d8292b55091d6e784e`;
+  - recovery transition: `2808ae7e99f368ce173127291e349bca9c456754d71218f2f861605103a018ea`;
+  - canonical original terminal state:
+    `36750a604399fcdbdbada943ec5f46ab9024906085b4b5f43a41d86e6298ad6b`.
+- Verify before and after the task that every run CSV/manifest/stdout/inventory and all protocol/registry/
+  fixture/dependency/lineage inputs are byte-identical. Do not modify the authoritative runner state.
+- The ICRA-064 ledger's historical `schema_version=icra063_command_ledger_v1` label is a waived Low metadata
+  defect. Do not rewrite evidence or rerun anything to repair it. Use an ICRA-065 schema label in the new ledger
+  and record the waiver once in `DEV_LOG.md`; it is not a Gate blocker.
 
-## 3. Replace blanket symlink rejection with two exact safe-alias contracts
+## 2. Correct recovery provenance without weakening alias safety
 
-- Version the run artifact inventory schema for r6 recovery. Admit exactly
-  `runtime/iap_logs/latest` as a typed symlink entry containing its literal target. Its target must be relative,
-  one component, nonempty, free of `.`/`..`, and resolve without another symlink to an existing ordinary
-  direct-child directory inside the same `iap_logs` directory. Inventory the target directory and contents
-  normally. Every other per-run symlink remains rejected.
-- In analyzer root validation, admit exactly `launch_environment/ros_logs/latest`. ROS may use an absolute
-  target, but it must be canonical, resolve without an intermediate symlink to an existing ordinary
-  direct-child directory inside that exact task-local `ros_logs` root, and its target contents must remain in
-  the raw-bundle inventory/hash. Every other launch-environment or root symlink remains rejected.
-- Add adversarial tests for alternate path/name, absolute run-local target, relative/absolute escape,
-  `.`/`..`, nested target, dangling target, symlink chain/loop, non-directory target, target replacement and
-  unregistered symlinks. Do not relax dependency-prefix, output-path or build/install symlink rules.
-- Add an end-to-end synthetic runner/analyzer test containing both exact producer aliases. It must finalize
-  all synthetic runs and reach `DRAFT_ELIGIBLE`; each adversarial variation must fail closed before draft.
+- In the r6 analyzer, treat `recovery.shared_ros_logs_latest_target` as immutable recovery-time provenance,
+  not as the expected value of the final mutable `launch_environment/ros_logs/latest` link.
+- Add a required, explicit r6 analyzer input for the retained pre-recovery lstat/content inventory. Validate its
+  exact schema, expected roots, frozen SHA-256 above and the `ros_logs/latest` typed entry. The recovery record's
+  historical target must exactly equal that frozen entry's target.
+- Require the historical target to be canonical, inside the exact task-local `ros_logs` root, an ordinary
+  direct-child directory with no symlink chain, and still represented by retained/raw inventory evidence.
+- Independently validate the final current `ros_logs/latest` alias using the existing exact safe-alias contract.
+  It may point to a different ordinary direct child after later launches. Every alternate-name, escape,
+  dangling, nested, chained, replaced or non-directory case remains fail-closed.
+- Add an end-to-end regression in which session 1 freezes target A, session 2 advances the final alias to safe
+  target B, and the analyzer accepts provenance. Add adversarial tests for tampered historical target/inventory,
+  hash mismatch, missing target, outside-root target, unsafe final alias and target replacement.
 
-## 4. Close the missing hard-occupancy safety proof
+## 3. Implement the preregistered aggregate noise-floor gate
 
-- Extend `test_p4_risk_astar.cpp` with a real search-level test, not another direct edge-cost probe. Construct
-  an occupied node/barrier under `CONSERVATIVE_OCCUPIED_COST_SUPPORT`, execute A* and prove the returned path
-  never contains/traverses an occupied node. Preserve the existing proof that occupied support contributes
-  finite `unknown_cost` only to cost evaluation.
-- Do not modify A* production occupancy, RiskGrid health/PL validity or P5. If the test exposes a production
-  safety defect, stop and return to Supervisor; product repair is outside ICRA-064.
+- A decision is complete when its schema, identity, metrics-only state, selected/original identity, 200/200
+  coverage, zero invalid counts, path-ratio cap and timeout requirements pass. Individual improvement at or
+  below the noise floor does not make that row incomplete and must not remove it from the metric sample.
+- Compute the existing deterministic Type-7 quantiles over all structurally complete retained rows:
 
-## 5. Implement one explicit offline adoption/continuation mode
+~~~text
+mean_improvement_gate = Q10(original_mean - risk_mean)
+max_improvement_gate  = Q10(original_max  - risk_max)
+path_ratio_gate       = min(1.30, Q95(path_ratio) + 0.02)
+dual_search_p95_gate  = min(0.40 s, Q95(total_search_s)
+                            + max(0.01 s, 0.20 * Q95(total_search_s)))
+~~~
 
-- Add a typed, explicit r6 recovery entry point. It must accept only the exact retained ICRA-063 terminal
-  root and hashes from Section 2; normal fresh-run mode must continue rejecting dirty/existing roots.
-- Before mutating the runner state, preserve the canonical original terminal state and its SHA-256 in compact
-  ICRA-064 recovery evidence outside `runs_final/`. Generate and validate the first run's inventory offline.
-  Revalidate its existing manifest/CSV/test-manifest/process/scientific contract and all Section-2 hashes.
-- The recovery transition may create only the inventory and update the authoritative runner state. It must
-  record original terminal-state hash/reason, adopted run ID, zero recovery launch, zero retry, inventory
-  binding and exact before/after scientific hashes. Mark attempt 1 complete without changing its scientific
-  files. Analyzer must require this exact typed recovery record rather than silently accepting a rewritten
-  ledger.
-- Resume the existing ordered plan at index 2. Reject any attempt to relaunch, regenerate or overwrite ID 1,
-  skip/reorder another ID, use a different root/protocol/install, or adopt any other failure category.
-- The continuation is a second orchestration session, not an identity retry. Version runner/analyzer evidence
-  so it records two runner sessions and two GPU preflights while still requiring exactly 15 unique launches,
-  15 attempted IDs, 15 completed IDs and zero identity retries/exclusions.
+- Compare the two resulting Q10 improvement gates, not individual rows, with the frozen `1e-12 risk_cost`
+  floor. Preserve every row and run in the denominator. Do not change Type-7 ordering/tie behavior, formulas,
+  units, floor, seeds, repetitions, hard caps or minimum-complete-decision requirement.
+- Separate technical rejection from scientific NO-GO in typed output. A structurally/provenance-invalid bundle
+  remains `REJECTED`; a technically valid bundle whose aggregate improvement gate is at/below the floor must
+  report an explicit `SCIENTIFIC_NO_GO` with the computed calibration statistics and exact failed gate(s).
+  It must not emit a threshold draft. Preserve `DRAFT_ELIGIBLE` behavior for a truly eligible synthetic bundle.
+- Add tests proving: fewer than 10% individual floor-level rows can still yield an eligible Q10 when the Type-7
+  result is above the floor; a zero Q10 max gate yields `SCIENTIFIC_NO_GO`; all valid rows remain complete and in
+  the denominator; technical failures never masquerade as scientific NO-GO.
 
-## 6. Pre-live proof and remaining 14 registered identities
+## 4. Verify offline, then analyze the unchanged bundle exactly once
 
-- Run focused Python and C++ tests plus full hermetic Python discovery. Before ROS, dry-run the exact retained
-  recovery root in validation-only mode: it must report first-run adoption eligible, next ID exactly
-  `p4-g0c-r6-seed211-rep02`, 14 remaining and zero writes/launches. Commit and push the recovery code/docs.
-- Run the explicit recovery/continuation command exactly once. Revalidate final ICRA-063 install/dependency
-  closure, then perform a fresh mandatory GPU preflight before any remaining ROS launch.
-- Launch only IDs 2-15 in frozen order, once each. Final authoritative totals must be 15 unique attempted,
-  15 completed, 15 launches, zero retries/exclusions; ID 1 retains its original hashes and each other run must
-  satisfy positive snapshot, closed segment, `METRICS_ONLY`, 200/200 both arms, zero invalid samples, healthy
-  required processes and controlled shutdown.
-- A genuine GPU/process/scientific/hash failure during continuation is terminal. Do not retry an identity,
-  create r7, tune science or discard a row. Correctable offline output formatting before analyzer remains
-  repairable without rerunning any identity.
+- Run focused analyzer/protocol tests and full hermetic Python discovery. No C++ rebuild is needed; source and
+  the retained 7/7 risk-A* result are frozen. Verify no external ROS-log delta and no task process remains.
+- Before the authoritative call, run a validation-only/read-only analyzer preflight if needed. It must not
+  create or replace the analysis output or draft. Once tests and all frozen hashes pass, invoke the corrected
+  analyzer exactly once on the unchanged completed r6 bundle, supplying the exact retained recovery inventory.
+- Expected authoritative result:
+  - technical provenance/structure failures: zero;
+  - registered/attempted/completed runs: `15/15/15`;
+  - denominator and complete decisions: `192/192`;
+  - Type-7 Q10 mean improvement: `0.000304 risk_cost`;
+  - Type-7 Q10 max improvement: `0 risk_cost`;
+  - status: `SCIENTIFIC_NO_GO` caused by the max-improvement gate;
+  - threshold draft absent, registry unchanged, application disabled.
+- If the unchanged bytes produce different quantiles or a technical rejection after the specified corrections,
+  stop and return evidence to Supervisor. Do not rerun the analyzer, reinterpret rows, tune science or launch ROS.
 
-## 7. Analyze and hand off
+## 5. Document and hand off
 
-- Invoke the r6 analyzer exactly once after recovery runner state is `COMPLETE`; require exact
-  `DRAFT_ELIGIBLE`, all 15 registered/attempted/completed identities, at least 100 retained complete decisions,
-  and exact recovery provenance. Do not apply the draft, enable selection, claim G0C PASS, start G0D/P5 or
-  tune results.
-- Update `DEV_LOG.md`, `docs/CHANGES.md`, `docs/TRACEABILITY.md` and compact redacted ICRA-064 evidence. Commit
-  with applicable requirement IDs and push. Do not edit Supervisor-owned files or stage raw products/PDF.
-- Retain ICRA-056/059/060/061/062/063/064 build/install products through Supervisor Review. Only after
-  ICRA-064 Review PASS and pushed code/docs may Supervisor delete those reproducible build/install directories.
-  Retain all scientific/compact evidence, recovery provenance and the protected PDF.
+- Update `DEV_LOG.md`, `docs/CHANGES.md`, `docs/TRACEABILITY.md` and compact redacted ICRA-065 evidence. Clearly
+  distinguish `runner PASS`, `analyzer tooling corrected`, and `P4-G0C scientific NO-GO`.
+- Commit with applicable requirement IDs and push. Explicitly stage only authorized task files. Do not edit
+  Supervisor-owned files or stage raw run products, credentials or the PDF.
+- Return to Supervisor after the one offline analysis. Do not start G0D/P5. The next Supervisor decision will
+  choose between the P0+P5 contingency route and a separately justified P4 algorithm revision; Builder must not
+  choose that research direction inside ICRA-065.
+- Retain all current task build/install products through Supervisor Review. If ICRA-065 Review passes and the
+  code/docs are pushed, Supervisor may then remove only reproducible completed-task build/install directories.
+  Raw scientific/recovery/analyzer evidence and the protected PDF remain retained.
 
 ## Allowed files
 
-- `scripts/dev_planner/p4_g0c_protocol.py`, r6 runner/analyzer recovery logic and their Python tests.
-- The missing search-level test in `src/iap/planner/path_searching/test/test_p4_risk_astar.cpp`; no production
-  C++ change.
-- Builder-owned docs, compact redacted ICRA-064 evidence and the two authorized recovery-created files in the
-  retained root: first-run artifact inventory plus authoritative runner state.
+- `scripts/dev_planner/analyze_p4_g0c_calibration.py` and its focused tests; the smallest protocol helper/test
+  change strictly required to expose typed aggregate-gate statistics.
+- Builder-owned docs, ICRA-065 command ledger and compact/preserved offline analysis evidence.
+- The single corrected authoritative `p4_g0c_analysis.json` output after its old bytes are preserved and bound.
 
 ## Forbidden
 
-- No ID-1 launch/retry, no new r7 identity, no product C++/launch/config/fixture/protocol/registry/dependency/
-  lineage/build/install change, no threshold/formula/seed/order/repetition/science change, and no deletion or
-  rewriting of retained first-run scientific/runtime artifacts.
-- No general symlink allowance, target dereference outside exact roots, analyzer weakening, failed-row
-  exclusion, occupied traversal, health/PL-validity fabrication, CPU fallback, threshold application, G0C
-  PASS claim, G0D/P5 run, external-repository write, credential persistence, raw-product/PDF staging or
-  cleanup before Review.
+- No GPU preflight, ROS/launch, r6 identity execution/retry, runner invocation or runner-state mutation. No r7,
+  product C++, launch/config/fixture/protocol/registry/dependency/lineage/build/install change, formula/floor/
+  threshold/seed/order/repetition change, row/run exclusion, draft application, G0C PASS claim, G0D/P5 run,
+  external-repository write, credential persistence, raw-product/PDF staging or cleanup before Review.

@@ -1,5 +1,59 @@
 # ICRA Supervisor Log
 
+## 2026-08-25 — ICRA-064 live matrix PASS; analyzer correction required; P4-G0C expected NO-GO
+
+### Review identity and synchronization
+
+- Fixed review range: `3b95aa2e11e698819d6b28650ce34d07ea3c2935...63f2a1c22c935cea46c868a7bb0cf6be6cb67ab2`.
+  Builder commits `44e481c` and `63f2a1c` bind applicable `IAP-RQ-320`, `IAP-RQ-322` and `IAP-RQ-423`.
+  Fetch succeeded; HEAD and `origin/dev/icra` matched at divergence `0 0`; `git diff --check` passed.
+- The protected PDF remains the sole untracked user file and retains SHA-256
+  `1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`. No task ROS process remains.
+  All current build/install products remain retained.
+
+### Standards axis
+
+- No blocking standards violation. Scope, ownership, requirement-bound commits, v1-v6 scientific identity,
+  first-run immutability, second GPU preflight, launch/retry accounting, fail-closed analyzer stop, process
+  cleanup, build retention and PDF protection comply.
+- Low nonblocking metadata defect: `results/icra27/icra064/command_ledger.json` still labels its schema
+  `icra063_command_ledger_v1`. Its 49 real entries contain the required command fields. This historical label is
+  waived; it must be documented once and must not trigger evidence rewriting, reruns or another Gate loop.
+- The code-review skill's Standards review reports `0 blocking / 1 Low nonblocking`; no judgement-only code
+  smell was promoted to a Gate finding.
+
+### Spec axis and evidence verdict
+
+- The r6 recovery and live matrix pass. ID 1 was adopted offline with its four scientific hashes unchanged and
+  zero recovery launch/retry. IDs 2--15 launched once each in frozen order. Final totals are 15 unique attempted,
+  15 completed, 15 launches, zero retries/exclusions, two sessions and two GPU preflights. All 192 decision rows
+  satisfy metrics-only, process, controlled-shutdown, identity, 200/200 coverage and invalid-count contracts.
+- The exact safe-alias contracts and the real risk-A* occupied-barrier test are accepted. Supervisor replayed
+  149/149 focused hermetic P4-G0C Python tests with no external ROS-log delta and the retained, correctly linked
+  risk-A* binary at 7/7.
+- High analyzer provenance defect: the analyzer compares the immutable recovery-time ROS `latest` target with
+  the final mutable alias after 14 additional launches. Both are valid ordinary direct children, and their
+  expected difference must not produce `runner_state_recovery`.
+- High analyzer formula defect: the implementation rejects individual rows at/below the numerical-noise floor.
+  The preregistered plan instead defines mean/max improvement gates as Type-7 Q10 over all complete rows, then
+  compares those aggregate gates with the floor. Individual floor-level rows must remain complete and retained.
+- Read-only Supervisor calculation across all 192 rows gives mean-improvement Q10 `0.000304`, max-improvement
+  Q10 `0`, 18 individual mean-floor rows and 56 individual max-floor rows. Correcting the analyzer therefore
+  removes the false provenance failure but does not rescue P4: the aggregate max-improvement gate is genuinely
+  at/below the frozen `1e-12 risk_cost` floor.
+- Verdict: `ICRA064_RUNNER_PASS_ANALYZER_REQUEST_CHANGES_EXPECTED_P4_G0C_NO_GO`. The current `REJECTED` output is
+  not authoritative because it mixes tooling and scientific semantics. No threshold draft, application, G0D or
+  P5 action occurred.
+
+### Required next action and artifact lifecycle
+
+- Unique next task is `ICRA-065 / P4_G0C_R6_OFFLINE_ANALYZER_CORRECTION_AND_NO_GO_FREEZE`. It preserves the old
+  analysis, fixes historical-versus-current alias provenance, implements the registered aggregate Q10 floor
+  gate, and analyzes the unchanged completed bundle once. GPU, ROS, identities, r7 and tuning are forbidden.
+- Review is not yet PASS because the authoritative analyzer output is missing. Delete no build/install now.
+  After ICRA-065 Review passes and pushed docs/code freeze the truthful scientific NO-GO, Supervisor may delete
+  only reproducible completed-task build/install directories; raw evidence and the PDF remain.
+
 ## 2026-08-25 — ICRA-063 r6 science/readiness PASS; normal producer alias blocks inventory
 
 ### Review identity and synchronization
