@@ -2420,3 +2420,16 @@ git diff --check d0aa033...HEAD
 - Froze the r6 candidate before the standalone dependency preflight and the
   one-shot registered matrix. No threshold was applied and no G0C/G0D/P5
   claim or execution occurred.
+
+## 2026-08-25 (ICRA-063 one-shot matrix terminal result)
+
+- Passed the standalone final-install dependency gate at the exact
+  18/13/1/14/6 inventory with no GPU, launch or identity consumption.
+- Invoked the r6 full runner once. Its GPU preflight passed and registered
+  `p4-g0c-r6-seed211-rep01` ran once, producing 13 positive-snapshot
+  metrics-only 200/200 decisions with healthy required processes.
+- Stopped terminally when fail-closed artifact inventory rejected the runtime
+  producer symlink `runtime/iap_logs/latest`. Counts are 1 attempted, 0
+  completed, 1 launch and 0 retry; no remaining identity or analyzer ran.
+- No source/config/build changed after identity consumption; no draft,
+  threshold action, G0C/G0D/P5 claim or P5 execution occurred.

@@ -7796,3 +7796,22 @@ snapshot closed-segment decisions are all metrics-only. Both arms are 200/200
 for every decision; all unknown, stale, non-finite, time-support, out-of-map,
 provider-invalid and other-invalid counts are zero. Registered r6 attempts,
 full-runner invocations and analyzer invocations remain zero at this freeze.
+
+## 2026-08-25 — ICRA-063 ONE-SHOT MATRIX TERMINAL STOP
+
+After freeze commit `3d995d2` was pushed, the standalone dependency-only gate
+passed the exact 18/13/1/14/6 inventory with zero GPU, launch or identity use.
+The r6 full runner was then invoked exactly once. Its internal GPU preflight
+passed and the first frozen identity `p4-g0c-r6-seed211-rep01` ran once for the
+full interval with healthy required processes and controlled shutdown. It
+produced 13 positive-snapshot metrics-only decisions with exact 200/200
+coverage in both arms and zero recorded invalid counts.
+
+Finalization failed closed before accepting that identity because the raw
+runtime contains the producer-created symlink `runtime/iap_logs/latest`.
+Artifact inventory forbids any symlink and reports `run artifact cannot be a
+symlink: runtime/iap_logs/latest`. Final state is one attempted, zero completed,
+one launch, zero retry. Per the post-identity terminal rule, no source/config/
+build correction, identity retry, remaining identity, analyzer invocation,
+draft, threshold action or G0C/G0D/P5 claim was performed. Result is
+`BLOCKED_POST_IDENTITY_RUN_ARTIFACT_SYMLINK` for Supervisor review.

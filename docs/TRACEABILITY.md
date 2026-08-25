@@ -1294,3 +1294,12 @@ They do not convert historical `NO-GO-P2`, failed P0 Gate-0B evidence, the stati
 | IAP-RQ-423 | Repair correctable pre-identity orchestration without consuming readiness | Initial typed-list mismatch and missing evidence parent both reject before ROS; neither starts a required process or registered identity | **CORRECTED IN-TASK** |
 | IAP-RQ-423 | Prove one true nonregistered r6 readiness | mandatory GPU proof remains PASS; admission releases once; 13 positive-snapshot closed-segment decisions are metrics-only with exact 200/200 arms and zero invalid categories; required processes are healthy with controlled shutdown | **READINESS PASS** |
 | IAP-RQ-423 | Freeze before registered work | final fresh build passes 17/17 merged non-symlink Release/CUDA, six ELF, zero historical linkage and source/install equality; runner/analyzer/registered attempts remain zero at freeze | **FROZEN; MATRIX PENDING** |
+
+## 2026-08-25 ICRA-063 registered one-shot terminal stop
+
+| Req ID | Requirement/evidence seam | Implementation and retained evidence | Status |
+|---|---|---|---|
+| IAP-RQ-423 | Require exact standalone runtime closure before identity use | final install plus Jazzy passes 18 packages, 13 executables, one component, 14 configs and six libraries with zero GPU/launch/attempt | **DEPENDENCY PREFLIGHT PASS** |
+| IAP-RQ-320, IAP-RQ-322, IAP-RQ-423 | Consume registered identities only through the frozen r6 runner | sole runner invocation passes GPU and launches only `p4-g0c-r6-seed211-rep01`; raw decision evidence has 13 positive snapshots, metrics-only, 200/200 arms and zero invalid counts | **1 ATTEMPTED; SCIENTIFIC ROWS PRODUCED** |
+| IAP-RQ-423 | Fail closed on non-ordinary raw artifact topology | finalization rejects producer-created `runtime/iap_logs/latest` symlink; artifact inventory is absent and the identity is not accepted complete | **BLOCKED_POST_IDENTITY_RUN_ARTIFACT_SYMLINK** |
+| IAP-RQ-423 | Preserve terminal one-shot authority | completed/retry/remaining launches are 0/0/0; analyzer, draft, threshold action, G0C/G0D/P5 claim and P5 run remain absent | **TERMINAL; SUPERVISOR REVIEW REQUIRED** |
