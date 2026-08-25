@@ -1,5 +1,70 @@
 # ICRA Supervisor Log
 
+## 2026-08-25 — ICRA-058 Review BLOCKED on unbound P0 profile; r4 replacement authorized
+
+### Review identity and synchronization
+
+- Fixed review range: `bdb0489d7d472ea31a3588c784e69cd93b391d42...6af7f985d7c5c3acf7220d3fedfc5e3398f42a2f`.
+- The sole consolidated Builder commit `6af7f98` contains `IAP-RQ-423`; all six changed paths are authorized
+  Builder docs/compact evidence, with no production or Supervisor-owned file change. HEAD and
+  `origin/dev/icra` match at divergence `0 0`. The protected PDF remains the sole untracked file with SHA-256
+  `1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+
+### Standards axis
+
+- Verdict under the literal ICRA-058 handoff contract: one Medium blocking evidence finding, zero nonblocking
+  findings; worst Medium.
+- `compact/commands.md` labels CUDA-closure commands as representative and narrates several ELF/hash/load/link
+  and final process checks without retaining every exact argv and per-command exit. The conclusions are
+  supported by retained results, but the task required exact safe commands/exits sufficient to reproduce the
+  complete boundary. This evidence gap is carried into the next integrated task and does not create a separate
+  documentation-only loop.
+- All other Standards checks pass: one requirement-bound consolidated commit, allowed ownership, synchronized
+  CHANGES/TRACEABILITY/DEV_LOG, sanitized task-local environment, correct dependency/GPU order, one consumed
+  identity with zero retry, required-process runtime/shutdown separation, no analyzer after failure, no
+  credential persistence/external mutation/cleanup, retained build/install and no applicable code smell.
+
+### Spec axis
+
+- Verdict: one High blocking live/configuration finding, one Medium partial-cause evidence finding, zero scope
+  creep; worst High.
+- CUDA closure passes; standalone dependency passes exact 18/13/1/14/6; built-in GPU preflight passes two
+  `nvidia-smi` checks, `cuInit(0)=0` and one device. The first r3 identity runs the full 90-second interval,
+  both required processes survive, and the integrity validator accepts 821 messages.
+- The runner nevertheless ends `FAILED`, 1 attempted / 0 completed / 1 launch / 0 retry, analyzer zero. All
+  17 decision rows carry generation zero, non-finite snapshot stamp, empty frame and
+  `snapshot_unavailable`; the parser truthfully rejects the first as `typed_identity`.
+- Supervisor independent replay of the retained first row deterministically reproduces
+  `typed_identity:snapshot_frame must be nonempty`; an independent count proves all 17/17 rows share the
+  invalid snapshot identity.
+- The immediate compact verdict is accurate but incomplete. The retained test-planner manifest records
+  `p0.predictor.sigma_grow_m_sqrt_s=NaN` and profile `unconfigured_fail_closed`; stdout repeatedly reports
+  `risk grid ready=0`, generation zero and `invalid_covariance_growth_parameter`. The v3 P4 protocol omitted
+  the exact P0 Gate-0B binding (`0.01`, `legacy_iap_rq320_baseline_v1`). This is the upstream cause.
+
+### Gate verdict and Supervisor responsibility
+
+- Verdict: `ICRA058_REVIEW_BLOCKED_P0_COVARIANCE_GROWTH_UNBOUND`. This cannot be waived by accepting empty
+  snapshot fields: P4 calibration without a generated RiskGrid snapshot has no scientific validity.
+- The missing cross-gate precondition is a Supervisor task/protocol design omission. Builder was forbidden to
+  change protocol/config and correctly stopped after the first immutable r3 identity. The consumed r3 bundle
+  remains evidence and is never retried or relabeled.
+- Unique next task: `ICRA-059 / P4_G0C_R4_P0_PROFILE_BINDING_AND_LIVE_CALIBRATION`, defined in
+  `NEXT_TASK.md`; active role is `DEEPSEEK`, state `TASK_READY`.
+- ICRA-059 is one integrated development cycle: versioned r4 protocol/lineage and 15 new identities, exact
+  accepted P0 profile binding and pre-launch validation, a non-calibration runtime RiskGrid-readiness gate,
+  fresh CUDA closure, dependency/GPU, complete r4 matrix and analyzer. No intermediate Supervisor Review or
+  standalone synthetic-audit task is authorized.
+
+### Artifact lifecycle
+
+- Review is blocked, so nothing is deleted. ICRA-058 created no build/install; retain its raw and compact
+  failed bundle. Retain the adopted ICRA-056 build (1.2 GiB) and install (460 MiB), plus every historical
+  product, through ICRA-059 development and Review.
+- On ICRA-059 Review PASS after all code/docs are pushed, delete the reproducible ICRA-059 build*/install* and
+  superseded ICRA-056 build/install. On BLOCKED/REQUEST_CHANGES, retain everything. Logs/evidence and the PDF
+  are not cleanup targets.
+
 ## 2026-08-25 — ICRA-057 code PASS, procedural terminal rule waived, ICRA-058 direct live
 
 ### Review identity and synchronization
