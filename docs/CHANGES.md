@@ -2572,7 +2572,7 @@ python3 scripts/dev_planner/analyze_p4_g0c_calibration.py \
   fixture, ordering, publication and runtime-action adversaries. Controlled
   shutdown remains distinct from runtime failure, and synthetic PASS can never
   claim qualification.
-- Focused hermetic suites pass (8 analyzer/contract and 20 launch tests), plus
+- Focused hermetic suites pass (9 analyzer/contract and 20 launch tests), plus
   syntax/fatal lint/diff checks, with no external ROS-log delta. Full discovery
   ran 525 tests; only four frozen P4-r6 launch-SHA closure checks fail because
   their ICRA-066 manifest intentionally binds the pre-ICRA-067 launch. Forbidden

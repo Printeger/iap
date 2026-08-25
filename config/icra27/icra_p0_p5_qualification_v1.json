@@ -1,5 +1,6 @@
 {
   "schema_version": "icra_p0_p5_qualification_contract_v1",
+  "contract_path": "config/icra27/icra_p0_p5_qualification_v1.json",
   "route_id": "ICRA_P0_P5_CONTINGENCY_V1",
   "profile_name": "icra_p0_p5",
   "qualification_family": "icra_p0_p5_qualification",

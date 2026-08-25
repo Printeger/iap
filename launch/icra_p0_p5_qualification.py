@@ -82,7 +82,7 @@ def build_launch_binding(
         "p5_thresholds": dict(contract["p5_thresholds"]),
         "fixture_alias": fixture_alias,
         "analyzer_version": contract["analyzer_version"],
-        "contract_path": str(Path(contract_path).resolve()),
+        "contract_path": contract["contract_path"],
         "contract_sha256": _sha256(contract_path),
         "raw_artifact_hashes": "REQUIRED_AT_ANALYSIS",
         "qualification_status": "NOT_RUN",
@@ -108,6 +108,7 @@ def load_contract(path):
         raise ContractError("contract must register SAFE_NORMAL, FINAL_REJECT, RUNTIME_FAIL in order")
     for key in (
         "route_id", "profile_name", "qualification_family", "analyzer_version",
+        "contract_path",
         "profile_values", "p5_thresholds", "fixture_switches",
         "required_processes", "required_topics",
     ):
@@ -348,7 +349,12 @@ def analyze_bundle(contract, bundle, contract_path, repository_root=None):
             or any(not isinstance(value, dict) or not value for value in hashes.values()):
         failures.append("raw artifact hashes missing, malformed, or identity-mismatched")
     else:
+        run_by_id = {
+            run.get("run_id"): run for run in runs
+            if isinstance(run, dict) and run.get("run_id")
+        }
         for run_id, artifacts in hashes.items():
+            raw_run_bound = False
             for relative, expected_hash in artifacts.items():
                 path = repository_root / relative
                 if not isinstance(relative, str) or Path(relative).is_absolute() \
@@ -359,6 +365,15 @@ def analyze_bundle(contract, bundle, contract_path, repository_root=None):
                 elif not isinstance(expected_hash, str) or SHA256_RE.fullmatch(expected_hash) is None \
                         or _sha256(path) != expected_hash:
                     failures.append(f"run[{run_id}]: raw artifact hash mismatch")
+                else:
+                    try:
+                        raw_payload = json.loads(path.read_text())
+                    except (OSError, json.JSONDecodeError):
+                        raw_payload = None
+                    if raw_payload == run_by_id.get(run_id):
+                        raw_run_bound = True
+            if not raw_run_bound:
+                failures.append(f"run[{run_id}]: raw artifacts do not bind run evidence")
     normalized_hashes = manifest.get("normalized_evidence_sha256")
     if not isinstance(normalized_hashes, dict) or set(normalized_hashes) != set(run_ids):
         failures.append("normalized evidence hashes missing or identity-mismatched")
@@ -466,8 +481,6 @@ def build_synthetic_validation_bundle(contract, contract_path, git_commit):
             contract, contract_path, run["case_id"], git_commit,
             run["run_id"], _case_values(contract, run["case_id"]),
         )
-    contract_relative = str(Path(contract_path).resolve().relative_to(SOURCE_REPOSITORY))
-    contract_hash = _sha256(contract_path)
     return {
         "schema_version": EVIDENCE_SCHEMA,
         "validation_only": True,
@@ -484,7 +497,7 @@ def build_synthetic_validation_bundle(contract, contract_path, git_commit):
                 run["case_id"]: run["run_id"] for run in runs
             },
             "raw_artifact_hashes": {
-                run["run_id"]: {contract_relative: contract_hash} for run in runs
+                run["run_id"]: {} for run in runs
             },
             "normalized_evidence_sha256": {
                 run["run_id"]: evidence_sha256(run) for run in runs
@@ -492,6 +505,29 @@ def build_synthetic_validation_bundle(contract, contract_path, git_commit):
         },
         "runs": runs,
     }
+
+
+def bind_run_artifacts(bundle, repository_root, raw_directory):
+    """Write one canonical raw evidence file per run and bind its real hash."""
+    repository_root = Path(repository_root).resolve()
+    raw_directory = Path(raw_directory).resolve()
+    if not _within(raw_directory, repository_root):
+        raise ContractError("raw artifact directory must be repository-local")
+    raw_directory.mkdir(parents=True, exist_ok=True)
+    hashes = {}
+    normalized = {}
+    for run in bundle["runs"]:
+        run_id = run["run_id"]
+        path = raw_directory / f"{run_id}.json"
+        path.write_text(json.dumps(
+            run, sort_keys=True, separators=(",", ":"), allow_nan=False
+        ) + "\n")
+        relative = str(path.relative_to(repository_root))
+        hashes[run_id] = {relative: _sha256(path)}
+        normalized[run_id] = evidence_sha256(run)
+    bundle["manifest"]["raw_artifact_hashes"] = hashes
+    bundle["manifest"]["normalized_evidence_sha256"] = normalized
+    return bundle
 
 
 def _within(path, root):
@@ -533,10 +569,12 @@ def main(argv=None):
             raise ContractError("git commit must be a full lowercase SHA-1")
         output = Path(args.output)
         output.parent.mkdir(parents=True, exist_ok=True)
+        bundle = build_synthetic_validation_bundle(
+            contract, args.contract, args.git_commit
+        )
+        bind_run_artifacts(bundle, SOURCE_REPOSITORY, output.parent / "raw")
         output.write_text(json.dumps(
-            build_synthetic_validation_bundle(
-                contract, args.contract, args.git_commit
-            ),
+            bundle,
             indent=2, sort_keys=True, allow_nan=False,
         ) + "\n")
         return 0

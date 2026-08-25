@@ -17,7 +17,7 @@ assert SPEC.loader is not None
 SPEC.loader.exec_module(MODULE)
 
 
-def synthetic_bundle(contract):
+def synthetic_bundle(contract, raw_directory):
     digest = hashlib.sha256(CONTRACT_PATH.read_bytes()).hexdigest()
     common = {
         "processes": [
@@ -69,8 +69,7 @@ def synthetic_bundle(contract):
             contract, CONTRACT_PATH, run["case_id"], "1" * 40,
             run["run_id"], values,
         )
-    contract_relative = str(CONTRACT_PATH.relative_to(REPO))
-    return {
+    bundle = {
         "schema_version": "icra_p0_p5_synthetic_evidence_v1",
         "validation_only": True,
         "manifest": {
@@ -86,7 +85,7 @@ def synthetic_bundle(contract):
                 run["case_id"]: run["run_id"] for run in runs
             },
             "raw_artifact_hashes": {
-                run["run_id"]: {contract_relative: digest} for run in runs
+                run["run_id"]: {} for run in runs
             },
             "normalized_evidence_sha256": {
                 run["run_id"]: MODULE.evidence_sha256(run) for run in runs
@@ -94,11 +93,15 @@ def synthetic_bundle(contract):
         },
         "runs": runs,
     }
+    return MODULE.bind_run_artifacts(bundle, REPO, raw_directory)
 
 
 class IcraP0P5QualificationTest(unittest.TestCase):
     def setUp(self):
         self.contract = MODULE.load_contract(CONTRACT_PATH)
+        self.raw_tmp = tempfile.TemporaryDirectory(dir=REPO)
+        self.addCleanup(self.raw_tmp.cleanup)
+        self.raw_directory = Path(self.raw_tmp.name) / "raw"
 
     def test_profile_values_are_frozen_and_all_other_paths_are_off(self):
         values = MODULE.resolve_launch_values(self.contract, "SAFE_NORMAL", {})
@@ -148,8 +151,27 @@ class IcraP0P5QualificationTest(unittest.TestCase):
                 {"p5_6.fixture.enabled": True},
             )
 
+    def test_launch_binding_identity_is_portable_across_install_and_source_paths(self):
+        with tempfile.TemporaryDirectory(dir=REPO) as tmp:
+            installed = Path(tmp) / "share/iap/config/icra27/contract.json"
+            installed.parent.mkdir(parents=True)
+            installed.write_bytes(CONTRACT_PATH.read_bytes())
+            installed_contract = MODULE.load_contract(installed)
+            values = MODULE.resolve_launch_values(self.contract, "SAFE_NORMAL", {})
+            source_binding = MODULE.build_launch_binding(
+                self.contract, CONTRACT_PATH, "SAFE_NORMAL", "1" * 40, "run-1", values
+            )
+            installed_binding = MODULE.build_launch_binding(
+                installed_contract, installed, "SAFE_NORMAL", "1" * 40, "run-1", values
+            )
+        self.assertEqual(source_binding, installed_binding)
+
     def test_all_three_synthetic_cases_pass_without_qualification_claim(self):
-        result = MODULE.analyze_bundle(self.contract, synthetic_bundle(self.contract), CONTRACT_PATH)
+        result = MODULE.analyze_bundle(
+            self.contract,
+            synthetic_bundle(self.contract, self.raw_directory),
+            CONTRACT_PATH,
+        )
         self.assertEqual(result["status"], "VALIDATION_ONLY_PASS")
         self.assertFalse(result["qualification_claim"])
         self.assertEqual(set(result["case_results"]), {"SAFE_NORMAL", "FINAL_REJECT", "RUNTIME_FAIL"})
@@ -165,33 +187,32 @@ class IcraP0P5QualificationTest(unittest.TestCase):
         mutations["unstable p0"] = lambda b: b["runs"][0]["p0_samples"][0].update(stable=False)
         mutations["wrong config"] = lambda b: b["runs"][0]["launch_binding"]["effective_values"].update({"planner_enable_p1": True})
         mutations["wrong hash"] = lambda b: b["manifest"].update(contract_sha256="0" * 64)
-        mutations["wrong raw hash"] = lambda b: b["manifest"]["raw_artifact_hashes"]["icra-p0-p5-safe-001"].update({str(CONTRACT_PATH.relative_to(REPO)): "0" * 64})
+        mutations["wrong raw hash"] = lambda b: b["manifest"]["raw_artifact_hashes"]["icra-p0-p5-safe-001"].update({next(iter(b["manifest"]["raw_artifact_hashes"]["icra-p0-p5-safe-001"])): "0" * 64})
+        mutations["unbound raw artifact"] = lambda b: b["manifest"]["raw_artifact_hashes"].update({"icra-p0-p5-safe-001": {str(CONTRACT_PATH.relative_to(REPO)): hashlib.sha256(CONTRACT_PATH.read_bytes()).hexdigest()}})
         mutations["fixture leakage"] = lambda b: b["runs"][0].update(fixture_alias="p5_7_rejected_trajectory_zone_v1")
         mutations["reject with publish"] = lambda b: b["runs"][1]["events"].append({"sequence": 2, "type": "NORMAL_PUBLISH", "candidate_id": "rejected-candidate"})
         mutations["missing safe publish"] = lambda b: b["runs"][0].update(events=b["runs"][0]["events"][:1])
         mutations["absent runtime action"] = lambda b: b["runs"][2].update(events=b["runs"][2]["events"][:2])
         for label, mutate in mutations.items():
             with self.subTest(label=label):
-                bundle = synthetic_bundle(self.contract)
+                bundle = synthetic_bundle(self.contract, self.raw_directory)
                 mutate(bundle)
                 result = MODULE.analyze_bundle(self.contract, bundle, CONTRACT_PATH)
                 self.assertEqual(result["status"], "VALIDATION_ONLY_FAIL")
                 self.assertTrue(result["failures"])
 
     def test_final_reject_allows_publication_of_an_unrelated_candidate(self):
-        bundle = synthetic_bundle(self.contract)
+        bundle = synthetic_bundle(self.contract, self.raw_directory)
         run = bundle["runs"][1]
         run["events"].append({
             "sequence": 2, "type": "NORMAL_PUBLISH", "candidate_id": "other-candidate"
         })
-        bundle["manifest"]["normalized_evidence_sha256"][run["run_id"]] = (
-            MODULE.evidence_sha256(run)
-        )
+        MODULE.bind_run_artifacts(bundle, REPO, self.raw_directory)
         result = MODULE.analyze_bundle(self.contract, bundle, CONTRACT_PATH)
         self.assertEqual(result["status"], "VALIDATION_ONLY_PASS", result)
 
     def test_cli_writes_repository_local_validation_manifest(self):
-        bundle = synthetic_bundle(self.contract)
+        bundle = synthetic_bundle(self.contract, self.raw_directory)
         with tempfile.TemporaryDirectory(dir=REPO) as tmp:
             root = Path(tmp)
             source = root / "synthetic.json"
