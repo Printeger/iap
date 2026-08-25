@@ -12,7 +12,9 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 from run_p4_g0c_tests import require_hermetic_test_environment  # noqa: E402
-from p4_g0c_surface_classifier import production_surface  # noqa: E402
+from p4_g0c_surface_classifier import (  # noqa: E402
+    production_surface_inventory,
+)
 
 require_hermetic_test_environment()
 
@@ -64,7 +66,7 @@ class P4G0CLaunchContractTest(unittest.TestCase):
         )
 
     def test_r3_registered_paths_equal_production_launch_surface(self):
-        surface = production_surface(REPO)
+        surface = production_surface_inventory(REPO)
         self.assertEqual(
             sorted(item["name"] for item in surface["environment_actions"]),
             [

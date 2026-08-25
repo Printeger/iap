@@ -380,24 +380,13 @@ def _resolve_mutation_target(
                 node.args[0], function, assignments, root_bindings, seen
             )
         if isinstance(node.func, ast.Attribute) and node.func.attr in {
-            "expanduser", "resolve", "with_name", "with_suffix",
+            "expanduser", "resolve",
         }:
             base = _resolve_mutation_target(
                 node.func.value, function, assignments, root_bindings, seen
             )
             if base is None:
                 return None
-            if node.func.attr in {"with_name", "with_suffix"}:
-                if not (
-                    len(node.args) == 1
-                    and isinstance(node.args[0], ast.Constant)
-                    and isinstance(node.args[0].value, str)
-                    and node.args[0].value not in {"", ".", ".."}
-                    and not Path(node.args[0].value).is_absolute()
-                    and len(Path(node.args[0].value).parts) == 1
-                ):
-                    return None
-                return f"derived:{_semantic_root(base)}"
             return base
     if isinstance(node, ast.Attribute) and node.attr == "name":
         return _resolve_mutation_target(
@@ -515,11 +504,7 @@ def _dynamic_namespace_call(
     if _normalized_call_name(lookup.func, aliases) != "getattr" or not lookup.args:
         return None
     namespace = _normalized_call_name(lookup.args[0], aliases)
-    if namespace in {"os", "shutil", "subprocess", "pathlib", "Path"} or (
-        namespace.startswith(("os.", "shutil.", "subprocess.", "pathlib."))
-    ):
-        return namespace
-    return None
+    return namespace or ast.unparse(lookup.args[0])
 
 
 def classify_mutations(
@@ -638,7 +623,6 @@ def classify_mutations(
                 )
             if (
                 isinstance(node.func, ast.Attribute)
-                and isinstance(node.func.value, ast.Name)
                 and node.func.attr in _UNKNOWN_MODULE_MUTATION_METHODS
             ):
                 raise SurfaceClassificationError(
@@ -735,6 +719,8 @@ def classify_process_output_arguments(
                 and isinstance(resolved.value, str)
                 else None
             )
+            if value == "--":
+                break
             if value in {"--bag-output", "--manifest"}:
                 if index + 1 >= len(command.elts):
                     raise SurfaceClassificationError(
@@ -785,11 +771,10 @@ def classify_process_output_arguments(
             candidates: list[tuple[str, ast.AST]] = []
             if name in _SUBPROCESS_HELPERS:
                 positional_streams: dict[str, ast.AST] = {}
-                if name == "subprocess.Popen":
-                    if len(node.args) > 4:
-                        positional_streams["stdout"] = node.args[4]
-                    if len(node.args) > 5:
-                        positional_streams["stderr"] = node.args[5]
+                if len(node.args) > 4:
+                    positional_streams["stdout"] = node.args[4]
+                if len(node.args) > 5:
+                    positional_streams["stderr"] = node.args[5]
                 for stream_name, stream in positional_streams.items():
                     if not is_memory_stream(stream):
                         candidates.append((f"{name}.{stream_name}", stream))
@@ -836,7 +821,7 @@ def classify_process_output_arguments(
                     command,
                     "ExecuteProcess",
                     assignments,
-                    reject_dynamic_flags=False,
+                    reject_dynamic_flags=True,
                 ))
             elif name == "Node":
                 parameters = next(
@@ -1216,9 +1201,6 @@ _EXPECTED_OUTPUT_SEMANTICS = {
     "launch_command_path", "run_manifest_path", "runtime_root_dir",
     "stdout_log_path",
 }
-_RUNNER_CONTROL_ROOTS = {"runs_root"}
-
-
 def validate_production_contract(
     environment_actions: list[dict[str, object]],
     mutations: list[dict[str, object]],
@@ -1243,7 +1225,6 @@ def validate_production_contract(
         )
     output_semantics: set[str] = set()
     environment_semantics: set[str] = set()
-    control_roots: set[str] = set()
     for record in mutations:
         classification = record.get("classification")
         if not isinstance(classification, str):
@@ -1259,8 +1240,6 @@ def validate_production_contract(
             output_semantics.add(root)
         elif root in _EXPECTED_CHILD_ENVIRONMENT:
             environment_semantics.add(root)
-        elif root in _RUNNER_CONTROL_ROOTS:
-            control_roots.add(root)
         else:
             raise SurfaceClassificationError(
                 f"unexpected production semantic root:{root}"
@@ -1273,11 +1252,11 @@ def validate_production_contract(
         "child_environment": actual_child_environment,
         "environment_mutation_semantics": environment_semantics,
         "output_semantics": output_semantics,
-        "runner_control_roots": control_roots,
     }
 
 
-def production_surface(repository_root: Path) -> dict[str, object]:
+def production_surface_inventory(repository_root: Path) -> dict[str, object]:
+    """Return classified records without weakening the exact contract check."""
     launch_path = repository_root / "launch" / "test_planner.launch.py"
     runner_path = (
         repository_root / "scripts" / "dev_planner"
@@ -1311,12 +1290,19 @@ def production_surface(repository_root: Path) -> dict[str, object]:
         _classify_runner_launch_bindings(runner_source)
     )
     mutations.extend(runner_launch_mutations)
-    contract = validate_production_contract(
-        environment_actions, mutations, runner_launch_bindings
-    )
     return {
-        "contract": contract,
         "environment_actions": environment_actions,
         "mutations": mutations,
         "runner_launch_bindings": runner_launch_bindings,
     }
+
+
+def production_surface(repository_root: Path) -> dict[str, object]:
+    """Return the production surface only when its exact contract is closed."""
+    surface = production_surface_inventory(repository_root)
+    surface["contract"] = validate_production_contract(
+        surface["environment_actions"],
+        surface["mutations"],
+        surface["runner_launch_bindings"],
+    )
+    return surface

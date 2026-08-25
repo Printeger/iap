@@ -11,6 +11,7 @@ from scripts.dev_planner.p4_g0c_surface_classifier import (  # noqa: E402
     classify_mutations,
     classify_process_output_arguments,
     production_surface,
+    production_surface_inventory,
     validate_production_contract,
 )
 
@@ -47,7 +48,7 @@ class P4G0CSurfaceClassifierTest(unittest.TestCase):
     """)
 
     def test_production_environment_actions_are_all_classified(self):
-        surface = production_surface(REPO)
+        surface = production_surface_inventory(REPO)
         actual = {
             (
                 item["name"],
@@ -337,12 +338,20 @@ class P4G0CSurfaceClassifierTest(unittest.TestCase):
             "absolute_rhs": "(root / '/external').write_text('x')",
             "parent_rhs": "(root / '..' / 'escape').write_text('x')",
             "parent_attribute": "(root.parent / 'escape').write_text('x')",
+            "sibling_with_name": "root.with_name('sibling').write_text('x')",
+            "sibling_with_suffix": "root.with_suffix('.bak').write_text('x')",
             "unsafe_with_name": "root.with_name('../escape').write_text('x')",
             "short_circuit_flags": (
                 "os.open(root / 'output', os.O_WRONLY | UNKNOWN_FLAG)"
             ),
             "unknown_module_qualified": (
                 "customfs.remove(root / 'output')"
+            ),
+            "nested_unknown_module_qualified": (
+                "pkg.fs.remove(root / 'output')"
+            ),
+            "dynamic_unknown_namespace": (
+                "getattr(customfs, 'remove')(root / 'output')"
             ),
             "dynamic_nested_namespace": (
                 "getattr(os.path, 'remove')(root / 'output')"
@@ -434,20 +443,25 @@ class P4G0CSurfaceClassifierTest(unittest.TestCase):
                 )
 
     def test_subprocess_positional_and_list_flags_are_complete(self):
-        positional = classify_process_output_arguments(
-            textwrap.dedent("""
-                import subprocess
-                def launch(root):
-                    subprocess.Popen(
-                        command, -1, None, None,
-                        root / 'stdout', root / 'stderr')
-            """),
-            target_policies={},
-            root_bindings={("launch", "root"): "registered:meta_root"},
-        )
-        self.assertEqual({item["api"] for item in positional}, {
-            "subprocess.Popen.stdout", "subprocess.Popen.stderr",
-        })
+        for helper in ("Popen", "run", "call", "check_call", "check_output"):
+            with self.subTest(helper=helper):
+                positional = classify_process_output_arguments(
+                    textwrap.dedent(f"""
+                        import subprocess
+                        def launch(root):
+                            subprocess.{helper}(
+                                command, -1, None, None,
+                                root / 'stdout', root / 'stderr')
+                    """),
+                    target_policies={},
+                    root_bindings={
+                        ("launch", "root"): "registered:meta_root"
+                    },
+                )
+                self.assertEqual({item["api"] for item in positional}, {
+                    f"subprocess.{helper}.stdout",
+                    f"subprocess.{helper}.stderr",
+                })
         cases = {
             "recognized_flag_without_target": (
                 "subprocess.run(['tool', '--manifest'])"
@@ -457,6 +471,9 @@ class P4G0CSurfaceClassifierTest(unittest.TestCase):
             ),
             "dynamic_flag": (
                 "subprocess.run(['tool', output_flag, root / 'output'])"
+            ),
+            "execute_process_dynamic_flag": (
+                "ExecuteProcess(cmd=['tool', output_flag, root / 'output'])"
             ),
         }
         for case, expression in cases.items():
@@ -517,7 +534,7 @@ class P4G0CSurfaceClassifierTest(unittest.TestCase):
                 )
 
     def test_production_path_and_mutation_surface_is_exact_and_complete(self):
-        surface = production_surface(REPO)
+        surface = production_surface_inventory(REPO)
         actual = sorted(
             (
                 item["function"], item["api"], item["target"],
@@ -738,18 +755,7 @@ class P4G0CSurfaceClassifierTest(unittest.TestCase):
             "iap_log_root", "launch_command_path", "run_manifest_path",
             "runtime_root_dir", "stdout_log_path",
         }
-        surface = production_surface(REPO)
-        self.assertEqual(surface["contract"]["output_semantics"], expected)
-        self.assertEqual(surface["contract"]["child_environment"], {
-            "HOME", "ROS_HOME", "ROS_LOG_DIR", "TMPDIR", "XDG_RUNTIME_DIR",
-        })
-        self.assertEqual(
-            surface["contract"]["environment_mutation_semantics"],
-            {"XDG_RUNTIME_DIR"},
-        )
-        self.assertEqual(
-            surface["contract"]["runner_control_roots"], {"runs_root"}
-        )
+        surface = production_surface_inventory(REPO)
         unexpected = list(surface["mutations"]) + [{
             "classification": "derived:unexpected_root",
         }]
@@ -759,9 +765,26 @@ class P4G0CSurfaceClassifierTest(unittest.TestCase):
                 unexpected,
                 surface["runner_launch_bindings"],
             )
+        with self.assertRaisesRegex(
+            SurfaceClassificationError,
+            "unexpected production semantic root:runs_root",
+        ):
+            production_surface(REPO)
+        with self.assertRaisesRegex(
+            SurfaceClassificationError,
+            "unexpected production semantic root:runs_root",
+        ):
+            validate_production_contract(
+                surface["environment_actions"],
+                [
+                    {"classification": f"registered:{semantic}"}
+                    for semantic in expected
+                ] + [{"classification": "derived:runs_root"}],
+                surface["runner_launch_bindings"],
+            )
 
     def test_runner_launch_path_arguments_are_complete_and_classified(self):
-        bindings = production_surface(REPO)["runner_launch_bindings"]
+        bindings = production_surface_inventory(REPO)["runner_launch_bindings"]
         self.assertEqual(bindings["child_environment"], {
             "p4.g0c.child_home": "HOME",
             "p4.g0c.child_ros_home": "ROS_HOME",

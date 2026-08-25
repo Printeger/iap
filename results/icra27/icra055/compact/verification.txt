@@ -1,5 +1,5 @@
 ICRA-055 / IAP-RQ-423
-result: P4_G0C_R3_HERMETIC_CLASSIFIER_READY_FOR_REVIEW
+result: BLOCKED_PRODUCTION_SURFACE_EXCEEDS_EIGHT_OUTPUT_CONTRACT
 
 Hermetic launcher:
 - exact root: /home/dev/ws_iap/src/iap/results/icra27/icra055;
@@ -32,9 +32,13 @@ Classifier closure:
   operands; subprocess positional streams, final/dynamic flags and unknown
   module-qualified mutation calls also reject;
 - 32 mutation-family cases and all five subprocess helpers are covered;
-- production surface validation requires exactly 50 path records, five child
-  environment roots, four environment actions and eight output semantics;
-  `runs_root` is the registered runner control root, not a ninth output.
+- the inventory remains exactly 50 path records and reaches five child
+  environment roots, four environment actions and all eight output semantics;
+- exact contract validation now rejects the additional `runs_root` semantic
+  root. The production runner really writes `p4_g0c_runner_state.json` and
+  creates run/environment containers there; these are not exact or canonical
+  descendants of any of the eight registered mutable outputs. The runner is
+  outside the ICRA-055 allowlist, so truthful classification is BLOCKED.
 
 Independent review remediation:
 - the initial Standards review found one blocking command-provenance gap and
@@ -45,6 +49,11 @@ Independent review remediation:
   subprocess positional/final/dynamic flags, invoked top-level guard proof and
   an eight-output assertion that filtered extras. Focused RED/GREEN tests and
   exact production-contract validation close all implementation blockers.
+- final Spec re-review found five residual blockers. Canonical sibling,
+  nested/dynamic namespace, all-helper positional stream, ExecuteProcess
+  dynamic-flag and recursive guard discovery gaps were repaired RED/GREEN.
+  The remaining no-extra-root finding exposed the production `runs_root`
+  contradiction above and therefore changes the task result to BLOCKED.
 
 Formal commands all used run_p4_g0c_tests.py with the exact ICRA-055 root:
 - unittest discover -s test -p 'test_p4_g0c_*.py' -v: 111/111, exit 0;

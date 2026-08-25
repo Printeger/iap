@@ -2045,8 +2045,7 @@ permitted after the sole invocation was consumed.
   covers positional subprocess streams and final/dynamic flags, rejects unknown
   nested namespaces, requires an invoked top-level import guard, and validates
   the exact five-root/four-action/eight-output production contract without
-  filtering unexpected semantics. `runs_root` remains the registered runner
-  control root, not a ninth output.
+  filtering unexpected semantics.
 - Formal hermetic verification passes focused 111/111, launch-contract 11/11,
   launch-golden 16/16 and full Python 466/466; syntax 6/6, fatal-only flake8,
   canonical JSON 4/4 and diff checks pass. Every launcher result reports the
@@ -2054,9 +2053,13 @@ permitted after the sole invocation was consumed.
   `82b029de...eee9`, cmp 0, delta empty.
 - No production launch/runner/science/config/protocol/registry/dependency/
   lineage byte changed; ICRA-054 history and external logs remain untouched.
-  No build, GPU, ROS/live flow, smoke or qualification ran. Result is
-  `P4_G0C_R3_HERMETIC_CLASSIFIER_READY_FOR_REVIEW`, never live-ready or G0C
-  PASS.
+  No build, GPU, ROS/live flow, smoke or qualification ran. Exact validation
+  now truthfully rejects production's additional `runs_root`: the runner writes
+  `p4_g0c_runner_state.json` and creates run/environment containers that are
+  neither exact nor descendants of the eight registered outputs. The runner is
+  outside this task's allowlist, so result is
+  `BLOCKED_PRODUCTION_SURFACE_EXCEEDS_EIGHT_OUTPUT_CONTRACT`, never live-ready
+  or G0C PASS.
 
 Reproduce the ICRA-055 synthetic verification from the repository root with
 the controlled launcher (all commands use the same explicit task root):

@@ -27,15 +27,15 @@ class P4G0CHermeticTests(unittest.TestCase):
     @staticmethod
     def _top_level_guard_precedes_launch_import(source):
         tree = ast.parse(source)
-        guarded = False
-        for node in tree.body:
-            if (
-                isinstance(node, ast.Expr)
-                and isinstance(node.value, ast.Call)
-                and isinstance(node.value.func, ast.Name)
-                and node.value.func.id == "require_hermetic_test_environment"
-            ):
-                guarded = True
+        top_level_guard_lines = [
+            node.lineno for node in tree.body
+            if isinstance(node, ast.Expr)
+            and isinstance(node.value, ast.Call)
+            and isinstance(node.value.func, ast.Name)
+            and node.value.func.id == "require_hermetic_test_environment"
+        ]
+        launch_import_lines = [
+            node.lineno for node in ast.walk(tree)
             if (
                 isinstance(node, ast.Import)
                 and any(alias.name == "launch" for alias in node.names)
@@ -43,9 +43,12 @@ class P4G0CHermeticTests(unittest.TestCase):
                 isinstance(node, ast.ImportFrom)
                 and node.module is not None
                 and (node.module == "launch" or node.module.startswith("launch."))
-            ):
-                return guarded
-        return True
+            )
+        ]
+        return not launch_import_lines or (
+            bool(top_level_guard_lines)
+            and min(top_level_guard_lines) < min(launch_import_lines)
+        )
 
     @staticmethod
     def _external_log_inventory():
@@ -199,7 +202,7 @@ class P4G0CHermeticTests(unittest.TestCase):
         self.assertEqual(compare_inventories({"kept": regular}, {"kept": regular}), [])
 
     def test_every_launch_import_has_the_hermetic_guard_first(self):
-        for path in sorted((REPO / "test").glob("*.py")):
+        for path in sorted((REPO / "test").rglob("*.py")):
             with self.subTest(path=path.name):
                 self.assertTrue(
                     self._top_level_guard_precedes_launch_import(
@@ -214,6 +217,13 @@ class P4G0CHermeticTests(unittest.TestCase):
         """)
         self.assertFalse(
             self._top_level_guard_precedes_launch_import(uninvoked_guard)
+        )
+        nested_import = textwrap.dedent("""
+            def import_later():
+                from launch import LaunchContext
+        """)
+        self.assertFalse(
+            self._top_level_guard_precedes_launch_import(nested_import)
         )
 
     def test_child_failure_exit_and_external_result_are_distinct(self):
