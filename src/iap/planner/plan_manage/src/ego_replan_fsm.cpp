@@ -803,7 +803,9 @@ namespace ego_planner
       inputs.frame_id = snapshot->params().frame_id;
     }
 
-    const auto decision = p4_risk_grid_planning_admission_.admit(inputs);
+    const auto decision = applyP4RiskGridPlanningAdmission(
+        p4_risk_grid_planning_admission_, inputs,
+        [&]() { p4_admitted_risk_grid_snapshot_ = snapshot; });
     if (!decision.allow_planning)
     {
       p4_waiting_for_risk_grid_ready_ = true;
@@ -820,7 +822,6 @@ namespace ego_planner
       return true;
     }
     p4_waiting_for_risk_grid_ready_ = false;
-    p4_admitted_risk_grid_snapshot_ = snapshot;
     if (decision.released_now)
     {
       RCLCPP_INFO(

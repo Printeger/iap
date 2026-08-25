@@ -82,6 +82,57 @@ struct GridMapTestAccess
       }
     }
   }
+
+  static void configureExactObstacle(
+    GridMap * map, const double obstacle_x_min,
+    const double obstacle_x_max)
+  {
+    constexpr double resolution = 0.1;
+    constexpr int x_cells = 280;
+    constexpr int y_cells = 100;
+    constexpr int z_cells = 32;
+    map->mp_.map_origin_ = Eigen::Vector3d(-14.0, -5.0, 0.0);
+    map->mp_.map_size_ = Eigen::Vector3d(28.0, 10.0, 3.2);
+    map->mp_.map_min_boundary_ = map->mp_.map_origin_;
+    map->mp_.map_max_boundary_ = map->mp_.map_origin_ + map->mp_.map_size_;
+    map->mp_.map_voxel_num_ = Eigen::Vector3i(x_cells, y_cells, z_cells);
+    map->mp_.resolution_ = resolution;
+    map->mp_.resolution_inv_ = 1.0 / resolution;
+    map->mp_.obstacles_inflation_ = 0.0;
+    map->mp_.min_occupancy_log_ = 0.5;
+    map->mp_.clamp_min_log_ = -2.0;
+    map->mp_.unknown_flag_ = 0.01;
+    map->mp_.frame_id_ = "map";
+
+    const std::size_t cell_count =
+      static_cast<std::size_t>(x_cells * y_cells * z_cells);
+    map->md_.occupancy_buffer_.assign(cell_count, -2.01);
+    map->md_.occupancy_buffer_inflate_.assign(cell_count, 0);
+    map->md_.occupancy_buffer_raw_cloud_.assign(cell_count, 0);
+    for (int x_index = 0; x_index < x_cells; ++x_index) {
+      const double x = map->mp_.map_origin_.x() +
+        (static_cast<double>(x_index) + 0.5) * resolution;
+      if (x < obstacle_x_min || x > obstacle_x_max) {
+        continue;
+      }
+      for (int y_index = 0; y_index < y_cells; ++y_index) {
+        const double y = map->mp_.map_origin_.y() +
+          (static_cast<double>(y_index) + 0.5) * resolution;
+        if (std::abs(y) > 0.65) {
+          continue;
+        }
+        for (int z_index = 0; z_index < z_cells; ++z_index) {
+          const double z = map->mp_.map_origin_.z() +
+            (static_cast<double>(z_index) + 0.5) * resolution;
+          if (z > 2.8) {
+            continue;
+          }
+          map->md_.occupancy_buffer_inflate_[static_cast<std::size_t>(
+            map->toAddress(Eigen::Vector3i(x_index, y_index, z_index)))] = 1;
+        }
+      }
+    }
+  }
 };
 
 namespace
@@ -91,6 +142,16 @@ struct ProductionObservation
 {
   std::string_view status;
   std::vector<Segment> segments;
+};
+
+struct ExactGeometryObservation
+{
+  std::string_view status;
+  std::vector<Segment> segments;
+  bool entry_endpoint_free = false;
+  bool exit_endpoint_free = false;
+  std::size_t occupied_sample_count = 0;
+  std::size_t free_tail_sample_count = 0;
 };
 
 void ensureRclcpp()
@@ -183,6 +244,61 @@ ProductionObservation observeProduction(const CollisionCase & fixture)
   observation.segments.reserve(result.closed_segments.size());
   for (const auto & segment : result.closed_segments) {
     observation.segments.push_back(Segment{segment.first, segment.second});
+  }
+  return observation;
+}
+
+ExactGeometryObservation observeExactP4G0CGeometry(
+  const double obstacle_x_min, const double obstacle_x_max)
+{
+  constexpr double start_x = -12.0;
+  constexpr double horizon_m = 7.5;
+  constexpr double control_spacing_m = 0.4;
+  constexpr int control_point_count = 20;
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureExactObstacle(
+    map.get(), obstacle_x_min, obstacle_x_max);
+
+  Eigen::MatrixXd seed(3, control_point_count);
+  for (int index = 0; index < control_point_count; ++index) {
+    seed.col(index) = Eigen::Vector3d(
+      std::min(
+        start_x + control_spacing_m * static_cast<double>(index),
+        start_x + horizon_m),
+      0.0, 1.0);
+  }
+  EXPECT_DOUBLE_EQ(seed(0, 0), start_x);
+  EXPECT_DOUBLE_EQ(seed(0, control_point_count - 1), start_x + horizon_m);
+
+  auto optimizer = makeOptimizer(map, false);
+  const auto result = optimizer->scanCollisionSegments(seed);
+  ExactGeometryObservation observation;
+  observation.status = ego_planner::collisionScanStatusName(result.status);
+  for (const auto & segment : result.closed_segments) {
+    observation.segments.push_back(Segment{segment.first, segment.second});
+  }
+  if (!result.closed_segments.empty()) {
+    const auto segment = result.closed_segments.front();
+    observation.entry_endpoint_free =
+      map->getInflateOccupancy(seed.col(segment.first)) == 0;
+    observation.exit_endpoint_free =
+      map->getInflateOccupancy(seed.col(segment.second)) == 0;
+  }
+
+  bool observed_exit = false;
+  for (double x = start_x; x <= start_x + horizon_m + 1.0e-9; x += 0.1) {
+    const bool occupied =
+      map->getInflateOccupancy(Eigen::Vector3d(x, 0.0, 1.0)) != 0;
+    if (occupied) {
+      ++observation.occupied_sample_count;
+      observed_exit = false;
+    } else if (observation.occupied_sample_count > 0) {
+      observed_exit = true;
+      ++observation.free_tail_sample_count;
+    }
+  }
+  if (!observed_exit) {
+    observation.free_tail_sample_count = 0;
   }
   return observation;
 }
@@ -443,4 +559,24 @@ TEST(P4CollisionScanFailClosedIntegration,
     optimizer->lastCollisionScanResult().closed_segments[1],
     std::make_pair(6, 7));
   EXPECT_TRUE(optimizer->getLastP4GuideViz().empty());
+}
+
+TEST(P4G0CExactGeometryEligibility,
+     R5FixtureProducesOneClosedSegmentWithFreeEndpointsAndTail) {
+  const auto observation = observeExactP4G0CGeometry(-9.0, -7.0);
+
+  ASSERT_EQ(observation.status, "CLOSED_SEGMENTS");
+  ASSERT_EQ(observation.segments.size(), 1U);
+  EXPECT_TRUE(observation.entry_endpoint_free);
+  EXPECT_TRUE(observation.exit_endpoint_free);
+  EXPECT_GT(observation.occupied_sample_count, 0U);
+  EXPECT_GT(observation.free_tail_sample_count, 0U);
+}
+
+TEST(P4G0CExactGeometryEligibility,
+     SupersededR4FixtureRemainsOpenEndedCollision) {
+  const auto observation = observeExactP4G0CGeometry(-8.0, -3.0);
+
+  EXPECT_EQ(observation.status, "OPEN_ENDED_COLLISION");
+  EXPECT_TRUE(observation.segments.empty());
 }

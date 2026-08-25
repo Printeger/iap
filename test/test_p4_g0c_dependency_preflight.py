@@ -89,12 +89,15 @@ class P4G0CDependencyPreflightTest(unittest.TestCase):
         launch_path.parent.mkdir(parents=True, exist_ok=True)
         launch_source = REPO / launch_contract["source_path"]
         if self.manifest["schema_version"] in {
-            RUNNER.DEPENDENCY_SCHEMA_V2, RUNNER.DEPENDENCY_SCHEMA_V3
+            RUNNER.DEPENDENCY_SCHEMA_V2, RUNNER.DEPENDENCY_SCHEMA_V3,
+            RUNNER.DEPENDENCY_SCHEMA_V4,
         }:
             frozen_commit = (
                 "cddfa2197bb1d4ee8f68fd105596174c3db53c45"
                 if self.manifest["schema_version"] == RUNNER.DEPENDENCY_SCHEMA_V2
                 else "e88df98"
+                if self.manifest["schema_version"] == RUNNER.DEPENDENCY_SCHEMA_V3
+                else "c291f88"
             )
             launch_bytes = subprocess.check_output(
                 [
@@ -273,6 +276,39 @@ class P4G0CDependencyPreflightTest(unittest.TestCase):
         self.assertEqual(
             result["manifest_sha256"],
             self.bundle.protocol["runtime_dependency_manifest"]["sha256"],
+        )
+        self.assertEqual(
+            (result["package_count"], result["executable_count"],
+             result["component_count"], result["config_count"],
+             result["runtime_library_count"]),
+            (18, 13, 1, 14, 6),
+        )
+
+    def test_v5_complete_closure_binds_closed_fixture_launch(self):
+        self.fixture = REPO / "config/icra27/p4_g0c_live_fixture_v2.json"
+        self.bundle = RUNNER.load_bundle(
+            REPO / "config/icra27/p4_g0c_protocol_v5.json",
+            REPO / "config/icra27/p4_threshold_registry_v5.json",
+            self.fixture,
+            expected_protocol_schema=RUNNER.CLOSED_FIXTURE_PROTOCOL_SCHEMA,
+        )
+        self.manifest_path = (
+            REPO / "config/icra27/p4_g0c_runtime_dependencies_v5.json"
+        )
+        self.manifest = RUNNER.load_runtime_dependency_manifest(
+            self.manifest_path,
+            self.bundle.protocol["runtime_dependency_manifest"]["sha256"],
+            expected_schema=RUNNER.DEPENDENCY_SCHEMA_V5,
+            expected_experiment="p4_g0c_metrics_calibration_v5",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            prefix = self._complete_prefix(Path(tmp))
+            result = RUNNER.validate_runtime_dependencies(
+                self.bundle, self.manifest_path, self._environment([prefix])
+            )
+        self.assertTrue(result["dependency_ready"], result)
+        self.assertEqual(
+            result["schema_version"], "p4_g0c_dependency_preflight_result_v5"
         )
         self.assertEqual(
             (result["package_count"], result["executable_count"],

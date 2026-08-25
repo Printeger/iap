@@ -52,6 +52,14 @@ class P4G0CSurfaceClassifierTest(unittest.TestCase):
                     )),
                 ),
                 SetEnvironmentVariable(
+                    'XDG_RUNTIME_DIR',
+                    LaunchConfiguration('p4.g0c.child_xdg_runtime_dir'),
+                    condition=IfCondition(EqualsSubstitution(
+                        LaunchConfiguration('experiment'),
+                        P4_G0C_EXPERIMENT_V5,
+                    )),
+                ),
+                SetEnvironmentVariable(
                     'FASTRTPS_DEFAULT_PROFILES_FILE', fastdds_profile),
             ]
     """)
@@ -177,7 +185,7 @@ class P4G0CSurfaceClassifierTest(unittest.TestCase):
     def test_environment_action_multiset_is_never_partial_or_empty(self):
         self.assertEqual(len(classify_environment_actions(
             self.ENVIRONMENT_SOURCE
-        )), 5)
+        )), 6)
         incomplete = self.ENVIRONMENT_SOURCE.replace(
             "SetEnvironmentVariable('QT_X11_NO_MITSHM', '1'),", "", 1
         )

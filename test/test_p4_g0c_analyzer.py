@@ -1236,6 +1236,7 @@ class P4G0CAnalyzerTest(unittest.TestCase):
                 exit_code = MODULE.main([
                     "--protocol", str(REPO / "config/icra27/p4_g0c_protocol_v1.json"),
                     "--registry", str(REPO / "config/icra27/p4_threshold_registry_v1.json"),
+                    "--fixture", str(REPO / "config/icra27/p4_g0c_live_fixture_v1.json"),
                     "--runs-root", str(root),
                     "--output", str(shared),
                     "--draft-output", str(shared),
@@ -1301,6 +1302,7 @@ class P4G0CAnalyzerTest(unittest.TestCase):
                 exit_code = MODULE.main([
                     "--protocol", str(REPO / "config/icra27/p4_g0c_protocol_v1.json"),
                     "--registry", str(REPO / "config/icra27/p4_threshold_registry_v1.json"),
+                    "--fixture", str(REPO / "config/icra27/p4_g0c_live_fixture_v1.json"),
                     "--runs-root", str(root),
                     "--output", "p4_g0c_analysis.json",
                     "--draft-output", str(draft_output),
@@ -1323,6 +1325,7 @@ class P4G0CAnalyzerTest(unittest.TestCase):
                 exit_code = MODULE.main([
                     "--protocol", str(REPO / "config/icra27/p4_g0c_protocol_v1.json"),
                     "--registry", str(REPO / "config/icra27/p4_threshold_registry_v1.json"),
+                    "--fixture", str(REPO / "config/icra27/p4_g0c_live_fixture_v1.json"),
                     "--runs-root", str(root),
                     "--output", str(analysis_output),
                     "--draft-output", str(draft_output),

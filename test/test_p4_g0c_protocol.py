@@ -46,6 +46,47 @@ EXPECTED_TOP_LEVEL_EFFECTIVE_KEYS = {
 
 
 class P4G0CProtocolTest(unittest.TestCase):
+    def test_v5_versions_only_fixture_geometry_and_registers_disjoint_r5(self):
+        v4 = MODULE.load_protocol_bundle(
+            REPO / "config/icra27/p4_g0c_protocol_v4.json",
+            REPO / "config/icra27/p4_threshold_registry_v4.json",
+            REPO / "config/icra27/p4_g0c_live_fixture_v1.json",
+            expected_protocol_schema=MODULE.PROTOCOL_SCHEMA_V4,
+        )
+        v5 = MODULE.load_protocol_bundle(
+            REPO / "config/icra27/p4_g0c_protocol_v5.json",
+            REPO / "config/icra27/p4_threshold_registry_v5.json",
+            REPO / "config/icra27/p4_g0c_live_fixture_v2.json",
+            expected_protocol_schema=MODULE.PROTOCOL_SCHEMA_V5,
+        )
+        v1_fixture = json.loads((
+            REPO / "config/icra27/p4_g0c_live_fixture_v1.json"
+        ).read_text())
+        v2_fixture = json.loads(json.dumps(v5.fixture))
+        v2_fixture["schema_version"] = "p4_g0c_fixture_v1"
+        v2_fixture["map"]["central_obstacle"]["x_m"] = [-8.0, -3.0]
+        self.assertEqual(v2_fixture, v1_fixture)
+        frozen = {
+            "effective_values", "matrix_order", "minimum_complete_decisions",
+            "no_exclusion", "no_overwrite", "no_retry",
+            "numerical_noise_floor", "p0_profile_binding",
+            "path_ratio_consistency", "quantiles", "repetitions",
+            "run_duration_s", "seeds", "threshold_formulas",
+        }
+        self.assertEqual(
+            {key: v5.protocol[key] for key in frozen},
+            {key: v4.protocol[key] for key in frozen},
+        )
+        self.assertEqual(len(v5.protocol["registered_run_ids"]), 15)
+        self.assertTrue(all(
+            run_id.startswith("p4-g0c-r5-")
+            for run_id in v5.protocol["registered_run_ids"]
+        ))
+        self.assertFalse(
+            set(v5.protocol["registered_run_ids"])
+            & set(v4.protocol["registered_run_ids"])
+        )
+
     def test_v4_binds_exact_p0_profile_and_disjoint_r4_matrix(self):
         bundle = MODULE.load_protocol_bundle(
             REPO / "config/icra27/p4_g0c_protocol_v4.json",

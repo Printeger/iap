@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdint>
 #include <iostream>
+#include <functional>
 #include <string>
 #include "nav_msgs/msg/path.hpp"
 #include "nav_msgs/msg/odometry.hpp"
@@ -105,6 +106,7 @@ namespace ego_planner
   {
 
   private:
+    friend class P4RiskGridPlanningAdmissionIntegrationAccess;
     /* ---------- flag ---------- */
     enum FSM_EXEC_STATE
     {
@@ -186,6 +188,16 @@ namespace ego_planner
     bool callEmergencyStop(Eigen::Vector3d stop_pos);                          // front-end and back-end method
     bool planFromGlobalTraj(const int trial_times = 1);
     bool planFromCurrentTraj(const int trial_times = 1);
+    static P4RiskGridPlanningAdmission::Decision applyP4RiskGridPlanningAdmission(
+        P4RiskGridPlanningAdmission &admission,
+        const P4RiskGridPlanningAdmission::Inputs &inputs,
+        const std::function<void()> &admitted_effect)
+    {
+      const auto decision = admission.admit(inputs);
+      if (decision.allow_planning)
+        admitted_effect();
+      return decision;
+    }
 
     /* return value: std::pair< Times of the same state be continuously called, current continuously called state > */
     void changeFSMExecState(FSM_EXEC_STATE new_state, string pos_call);

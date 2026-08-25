@@ -29,6 +29,29 @@ SPEC.loader.exec_module(MODULE)
 
 
 class P4G0CLaunchContractTest(unittest.TestCase):
+    def test_v5_preset_materializes_only_the_versioned_obstacle_interval(self):
+        v4 = MODULE.EXPERIMENT_PRESETS[MODULE.P4_G0C_EXPERIMENT_V4]
+        v5 = MODULE.EXPERIMENT_PRESETS[MODULE.P4_G0C_EXPERIMENT_V5]
+        differences = {
+            key for key in set(v4) | set(v5) if v4.get(key) != v5.get(key)
+        }
+        self.assertEqual(differences, {
+            "p4.g0c.protocol_path", "p4.g0c.registry_path",
+            "p4.g0c.fixture_path", "p4.g0c.fixture_sha256",
+            "p1_fixture_central_x_min_m",
+            "p1_fixture_central_x_max_m",
+        })
+        self.assertEqual(v5["p1_fixture_central_x_min_m"], "-9.0")
+        self.assertEqual(v5["p1_fixture_central_x_max_m"], "-7.0")
+        self.assertEqual(dict(MODULE.ARG_DEFAULTS)["init_x"], "-12.0")
+        self.assertEqual(
+            dict(MODULE.ARG_DEFAULTS)["manager/planning_horizon"], "7.5"
+        )
+        self.assertEqual(
+            dict(MODULE.ARG_DEFAULTS)["manager/control_points_distance"],
+            "0.4",
+        )
+
     def test_v4_preset_materializes_exact_p0_profile(self):
         profile = MODULE.EXPERIMENT_PRESETS[MODULE.P4_G0C_EXPERIMENT_V4]
         self.assertEqual(
@@ -52,7 +75,7 @@ class P4G0CLaunchContractTest(unittest.TestCase):
         )
         for key, value in MODULE.P4_G0C_V4_P0_PROFILE_VALUES.items():
             with self.subTest(key=key), self.assertRaisesRegex(
-                RuntimeError, "v4 P0 profile mismatch"
+                RuntimeError, "profiled P0 mismatch"
             ):
                 MODULE._validate_p4_g0c_profile_values(
                     MODULE.P4_G0C_EXPERIMENT_V4,
@@ -130,6 +153,7 @@ class P4G0CLaunchContractTest(unittest.TestCase):
             [
                 "FASTRTPS_DEFAULT_PROFILES_FILE", "QT_X11_NO_MITSHM",
                 "XDG_RUNTIME_DIR", "XDG_RUNTIME_DIR", "XDG_RUNTIME_DIR",
+                "XDG_RUNTIME_DIR",
             ],
         )
         bindings = surface["runner_launch_bindings"]

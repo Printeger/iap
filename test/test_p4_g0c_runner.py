@@ -72,6 +72,32 @@ def wrong_type_value(value):
 
 
 class P4G0CRunnerTest(unittest.TestCase):
+    def test_v5_plan_and_launch_command_use_only_registered_r5_identity(self):
+        bundle = MODULE.load_bundle(
+            REPO / "config/icra27/p4_g0c_protocol_v5.json",
+            REPO / "config/icra27/p4_threshold_registry_v5.json",
+            REPO / "config/icra27/p4_g0c_live_fixture_v2.json",
+            expected_protocol_schema=MODULE.CLOSED_FIXTURE_PROTOCOL_SCHEMA,
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "runs"
+            plan = MODULE.expand_run_plan(bundle.protocol, root)
+            environment = MODULE.expected_launch_environment_binding(
+                root, Path(plan[0]["run_dir"])
+            )
+            command = MODULE.launch_command(bundle, plan[0], environment)
+        self.assertEqual(len(plan), 15)
+        self.assertTrue(all(
+            record["run_id"].startswith("p4-g0c-r5-") for record in plan
+        ))
+        self.assertIn("experiment:=p4_g0c_metrics_calibration_v5", command)
+        self.assertIn(
+            "p4.g0c.fixture_path:=" + str(
+                (REPO / "config/icra27/p4_g0c_live_fixture_v2.json").resolve()
+            ),
+            command,
+        )
+
     def test_v4_p0_profile_gate_rejects_bad_sigma_before_gpu_or_launch(self):
         bundle = MODULE.load_bundle(
             REPO / "config/icra27/p4_g0c_protocol_v4.json",

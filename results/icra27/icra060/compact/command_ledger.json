@@ -1,8 +1,38 @@
 {
   "commands": [
     {
+      "argv": [
+        "bash",
+        "results/icra27/icra060/build_attempt_03/run_build.sh"
+      ],
+      "cwd": "/home/dev/ws_iap/src/iap",
+      "duration_s": 0,
+      "end_utc": "2026-08-25T08:27:33Z",
+      "environment_allowlist": [
+        "AMENT_PREFIX_PATH",
+        "CMAKE_PREFIX_PATH",
+        "CUDA_HOME",
+        "HOME",
+        "LANG",
+        "LD_LIBRARY_PATH",
+        "PATH",
+        "PYTHONPATH",
+        "ROS_DISTRO",
+        "ROS_HOME",
+        "ROS_LOG_DIR",
+        "ROS_PYTHON_VERSION",
+        "ROS_VERSION",
+        "TMPDIR",
+        "XDG_RUNTIME_DIR"
+      ],
+      "exit_code": 1,
+      "name": "fresh_cuda_build_attempt_03_command_failure",
+      "start_utc": "2026-08-25T08:27:33Z"
+    },
+    {
       "argv": ["bash", "results/icra27/icra060/build_attempt_04/run_build.sh"],
       "cwd": "/home/dev/ws_iap/src/iap",
+      "duration_s": 288,
       "end_utc": "2026-08-25T08:32:52Z",
       "environment_allowlist": ["AMENT_PREFIX_PATH", "CMAKE_PREFIX_PATH", "CUDA_HOME", "HOME", "LANG", "LD_LIBRARY_PATH", "PATH", "PYTHONPATH", "ROS_DISTRO", "ROS_HOME", "ROS_LOG_DIR", "ROS_PYTHON_VERSION", "ROS_VERSION", "TMPDIR", "XDG_RUNTIME_DIR"],
       "exit_code": 0,
@@ -12,12 +42,19 @@
     {
       "argv": ["bash", "results/icra27/icra060/final_audits/static_closure.sh"],
       "cwd": "/home/dev/ws_iap/src/iap",
+      "duration_s": 0,
+      "end_utc": "2026-08-25T08:37:48Z",
       "environment_allowlist": [],
       "exit_code": 0,
       "name": "static_closure",
+      "start_utc": "2026-08-25T08:37:48Z",
       "timing_source": "results/icra27/icra060/final_audits/static_closure_command.json"
     },
     {
+      "argv": {
+        "authoritative_artifact": "results/icra27/icra060/readiness_attempt_01/preflight/gpu/gpu_preflight.json",
+        "typed": "UNRECOVERABLE_HISTORICAL_FIELD"
+      },
       "argv_evidence": "readiness_attempt_01/preflight/gpu/gpu_preflight.json commands array (nvidia-smi) plus in-process CUDA driver probe",
       "checked_utc": "2026-08-25T08:06:42Z",
       "cwd": "/home/dev/ws_iap/src/iap",
@@ -26,6 +63,10 @@
       "name": "gpu_preflight_attempt_01"
     },
     {
+      "argv": {
+        "authoritative_artifact": "results/icra27/icra060/readiness_attempt_02/preflight/gpu/gpu_preflight.json",
+        "typed": "UNRECOVERABLE_HISTORICAL_FIELD"
+      },
       "argv_evidence": "readiness_attempt_02/preflight/gpu/gpu_preflight.json commands array (nvidia-smi) plus in-process CUDA driver probe",
       "checked_utc": "2026-08-25T08:17:19Z",
       "cwd": "/home/dev/ws_iap/src/iap",
@@ -34,8 +75,32 @@
       "name": "gpu_preflight_attempt_02"
     },
     {
+      "argv": {
+        "authoritative_artifact": "results/icra27/icra060/readiness_attempt_04/preflight/gpu/gpu_preflight.json",
+        "typed": "UNRECOVERABLE_HISTORICAL_FIELD"
+      },
+      "argv_evidence": "readiness_attempt_04/preflight/gpu/gpu_preflight.json commands array (nvidia-smi) plus in-process CUDA driver probe",
+      "checked_utc": "2026-08-25T08:35:51Z",
+      "cwd": "/home/dev/ws_iap/src/iap",
+      "environment_allowlist": [
+        "HOME",
+        "PATH",
+        "ROS_HOME",
+        "ROS_LOG_DIR",
+        "TMPDIR",
+        "XDG_RUNTIME_DIR"
+      ],
+      "exit_code": 0,
+      "name": "gpu_preflight_attempt_04"
+    },
+    {
+      "argv": {
+        "authoritative_artifact": "results/icra27/icra060/readiness_attempt_01/p4-g0c-r4-readiness-icra060-attempt01/p4_g0c_run_manifest.json",
+        "typed": "UNRECOVERABLE_HISTORICAL_FIELD"
+      },
       "argv_evidence": "readiness_attempt_01 run manifest and stdout.log",
       "cwd": "/home/dev/ws_iap/src/iap",
+      "duration_s": 20.978413,
       "end_utc": "2026-08-25T08:08:11.175510Z",
       "environment_allowlist": ["AMENT_PREFIX_PATH", "CMAKE_PREFIX_PATH", "HOME", "LD_LIBRARY_PATH", "PATH", "PYTHONPATH", "ROS_HOME", "ROS_LOG_DIR", "TMPDIR", "XDG_RUNTIME_DIR"],
       "exit_code": 0,
@@ -44,8 +109,13 @@
       "start_utc": "2026-08-25T08:07:50.197097Z"
     },
     {
+      "argv": {
+        "authoritative_artifact": "results/icra27/icra060/readiness_attempt_02/p4-g0c-r4-readiness-icra060-attempt02/p4_g0c_run_manifest.json",
+        "typed": "UNRECOVERABLE_HISTORICAL_FIELD"
+      },
       "argv_evidence": "readiness_attempt_02 run manifest and stdout.log",
       "cwd": "/home/dev/ws_iap/src/iap",
+      "duration_s": 21.107978,
       "end_utc": "2026-08-25T08:18:14.097075Z",
       "environment_allowlist": ["AMENT_PREFIX_PATH", "CMAKE_PREFIX_PATH", "HOME", "LD_LIBRARY_PATH", "PATH", "PYTHONPATH", "ROS_HOME", "ROS_LOG_DIR", "TMPDIR", "XDG_RUNTIME_DIR"],
       "exit_code": 0,
@@ -56,6 +126,7 @@
     {
       "argv": ["bash", "results/icra27/icra060/cpp_tests_attempt_02/run_tests.sh"],
       "cwd": "/home/dev/ws_iap/src/iap",
+      "duration_s": 25,
       "end_utc": "2026-08-25T08:33:47Z",
       "environment_allowlist": ["HOME", "ROS_HOME", "ROS_LOG_DIR", "TMPDIR", "XDG_RUNTIME_DIR"],
       "exit_code": 0,
@@ -63,8 +134,36 @@
       "start_utc": "2026-08-25T08:33:22Z"
     },
     {
+      "argv": [
+        "bash",
+        "results/icra27/icra060/readiness_attempt_03/run_readiness.sh"
+      ],
+      "classification": "COMMAND_WRAPPER_FAILURE_BEFORE_GPU_OR_ROS",
+      "cwd": "/home/dev/ws_iap/src/iap",
+      "duration_s": 0,
+      "end_utc": "2026-08-25T08:35:07Z",
+      "environment_allowlist": [
+        "AMENT_PREFIX_PATH",
+        "CMAKE_PREFIX_PATH",
+        "HOME",
+        "LD_LIBRARY_PATH",
+        "PATH",
+        "PYTHONPATH",
+        "ROS_HOME",
+        "ROS_LOG_DIR",
+        "TMPDIR",
+        "XDG_RUNTIME_DIR"
+      ],
+      "exit_code": 1,
+      "gpu_preflight_invocations": 0,
+      "name": "nonregistered_readiness_attempt_03_command_failure",
+      "ros_invocations": 0,
+      "start_utc": "2026-08-25T08:35:07Z"
+    },
+    {
       "argv": ["bash", "results/icra27/icra060/readiness_attempt_04/run_readiness.sh"],
       "cwd": "/home/dev/ws_iap/src/iap",
+      "duration_s": 21,
       "end_utc": "2026-08-25T08:36:12Z",
       "environment_allowlist": ["AMENT_PREFIX_PATH", "CMAKE_PREFIX_PATH", "HOME", "LD_LIBRARY_PATH", "PATH", "PYTHONPATH", "ROS_HOME", "ROS_LOG_DIR", "TMPDIR", "XDG_RUNTIME_DIR"],
       "exit_code": 0,
@@ -72,8 +171,48 @@
       "start_utc": "2026-08-25T08:35:51Z"
     },
     {
+      "argv": {
+        "authoritative_artifact": "results/icra27/icra060/final_audits/syntax_command.json",
+        "typed": "UNRECOVERABLE_HISTORICAL_FIELD"
+      },
+      "cwd": "/home/dev/ws_iap/src/iap",
+      "duration_s": 1,
+      "end_utc": "2026-08-25T08:23:07Z",
+      "environment_allowlist": [],
+      "exit_code": 0,
+      "name": "syntax_audit",
+      "start_utc": "2026-08-25T08:23:06Z"
+    },
+    {
+      "argv": {
+        "authoritative_artifact": "results/icra27/icra060/final_audits/flake8_command.json",
+        "typed": "UNRECOVERABLE_HISTORICAL_FIELD"
+      },
+      "cwd": "/home/dev/ws_iap/src/iap",
+      "duration_s": 2,
+      "end_utc": "2026-08-25T08:23:09Z",
+      "environment_allowlist": [],
+      "exit_code": 0,
+      "name": "fatal_only_flake8_audit",
+      "start_utc": "2026-08-25T08:23:07Z"
+    },
+    {
+      "argv": {
+        "authoritative_artifact": "results/icra27/icra060/final_audits/canonical_json_command.json",
+        "typed": "UNRECOVERABLE_HISTORICAL_FIELD"
+      },
+      "cwd": "/home/dev/ws_iap/src/iap",
+      "duration_s": 1,
+      "end_utc": "2026-08-25T08:23:10Z",
+      "environment_allowlist": [],
+      "exit_code": 0,
+      "name": "canonical_json_audit",
+      "start_utc": "2026-08-25T08:23:09Z"
+    },
+    {
       "argv": ["python3", "scripts/dev_planner/run_p4_g0c_tests.py", "--task-root", "/home/dev/ws_iap/src/iap/results/icra27/icra060/hermetic_tests", "unittest", "--", "discover", "-s", "test", "-p", "test_*.py"],
       "cwd": "/home/dev/ws_iap/src/iap",
+      "duration_s": 34,
       "end_utc": "2026-08-25T08:39:14Z",
       "environment_allowlist": ["HOME", "ROS_HOME", "ROS_LOG_DIR", "TMPDIR", "XDG_RUNTIME_DIR"],
       "exit_code": 0,

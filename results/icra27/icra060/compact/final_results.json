@@ -51,6 +51,14 @@
     "v1_v3_artifacts_changed": false
   },
   "readiness": {
+    "command_failures": [
+      {
+        "attempt": 3,
+        "classification": "COMMAND_WRAPPER_FAILURE_BEFORE_GPU_OR_ROS",
+        "gpu_preflight_invocations": 0,
+        "ros_invocations": 0
+      }
+    ],
     "attempts": [
       {
         "barrier_defer_count": 712,

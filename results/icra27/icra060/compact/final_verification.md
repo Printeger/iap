@@ -5,6 +5,6 @@
 - Syntax: 4/4 PASS. Fatal-only flake8: PASS. Canonical v4 JSON: 4/4 PASS.
 - Fresh build attempt 04: 17/17 PASS, sequential merged non-symlink Release/CUDA, tests OFF, OpenCV/viewer OFF, registered nvcc.
 - Static closure: PASS for 17 indexes, zero symlinks, six ELF libraries, linkage, installed/source launch equality and CMake contract.
-- GPU preflight: PASS before each of two disjoint nonregistered readiness attempts.
+- GPU preflight: PASS before readiness attempts 01, 02 and 04. Attempt 03 was a command/wrapper failure before GPU preflight or ROS and is not a GPU/ROS attempt.
 - Final readiness attempt 04: barrier releases once with positive generation 1; all 9,600 subsequent planning contexts use a positive available snapshot, but zero P4 rows result because `OPEN_ENDED_COLLISION` returns before the P4 guide-request seam.
 - Result: `BLOCKED_P4_OPEN_ENDED_COLLISION_BEFORE_GUIDE_REQUEST`. Formal dependency, full runner, all registered r4 identities and analyzer remain uninvoked.
