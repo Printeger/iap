@@ -1,5 +1,67 @@
 # ICRA Supervisor Log
 
+## 2026-08-25 — ICRA-056 Review BLOCKED, ICRA-057 integrated repair/live authorized
+
+### Review identity and synchronization
+
+- Fixed review range: `0968f3469b9ff6815bb45eac7340e1dd8a53c44c...37621f9002f8d9fe5254149d0af42dbf2b58e166`.
+- Reviewed Phase-A/build commit `c195edd`, blocker evidence `4c370a9` and final DEV_LOG-only handoff
+  `37621f9`; all carry `IAP-RQ-423`. The 11 changed paths match the ICRA-056 allowlist and ownership;
+  production runner/launch/science/config/protocol/registry/dependency/lineage bytes are unchanged.
+- After fetch, HEAD and `origin/dev/icra` match at divergence `0 0`. The protected PDF remains the sole
+  untracked file with SHA-256
+  `1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+
+### Standards axis
+
+- Verdict: `PASS`; zero blocking and two Low nonblocking judgment findings; worst Low.
+- Commits, allowed files, Builder documentation, final handoff, one CUDA build, one dependency invocation,
+  fail-closed stop, artifact retention, task-local XDG mode `0700`, zero task-window external output,
+  protected hashes and zero leftover task process conform.
+- Possible Primitive Obsession: classifier correctness includes exact raw AST strings. Possible Duplicated
+  Code: canonical container schema construction is repeated between classification and validation. These are
+  deferred maintainability observations, not live blockers and do not create another audit task.
+
+### Spec axis
+
+- Verdict: `PASS_AS_TRUTHFUL_BLOCKED`; one High blocking finding, one Medium nonblocking evidence finding,
+  zero scope creep; worst High.
+- High production blocker: `validate_runtime_dependencies()` initially binds local `path` to the v3 manifest,
+  then overwrites it during executable/config/runtime-library validation and finally serializes that last
+  artifact into `manifest_path`. Retained state therefore reports
+  `results/icra27/icra056/install/lib/libsub_mapping.so` instead of the canonical
+  `config/icra27/p4_g0c_runtime_dependencies_v3.json`. Counts and manifest hash are correct, but provenance
+  is false; the explicit output-binding gate requires a stop.
+- Medium evidence hygiene: retained `preflight/build_environment.txt` records the shell environment before
+  command-level task-local overrides rather than the complete effective colcon environment. It also contains
+  plaintext credential-bearing variables. The raw ignored evidence must not be staged, quoted or deleted
+  during this blocked Review; future evidence must use an explicit safe allowlist/redaction. Credential
+  rotation is recommended outside repository evidence handling.
+- All other Spec evidence passes: Phase A formal 113/113, launch 11/11, golden 16/16 and full Python 468/468;
+  exactly one successful 17-package merged CUDA build; six ELF libraries and GPU load/link closure; exactly
+  one dependency invocation with 18/13/1/14/6; frozen hashes; zero GPU/full-runner/r3/analyzer/threshold
+  action; no remaining task process. All 15 r3 identities remain unconsumed.
+
+### Gate verdict and next action
+
+- Verdict: `ICRA056_REVIEW_BLOCKED_DEPENDENCY_MANIFEST_PATH_BINDING`. This is a narrow production-runner
+  defect, not a GPU, build, ROS, permission or Supervisor-contract failure. Builder's fail-closed behavior is
+  accepted; P4-G0C remains unqualified and no threshold action is authorized.
+- Unique next task: `ICRA-057 / P4_G0C_R3_DEPENDENCY_PROVENANCE_REPAIR_AND_LIVE_CALIBRATION`, defined in
+  `NEXT_TASK.md`; active role is `DEEPSEEK`, state `TASK_READY`.
+- ICRA-057 fixes the manifest local/output binding with a regression, revalidates and explicitly adopts the
+  hash-verified ICRA-056 CUDA install, then uses fresh ICRA-057 dependency/runs roots and proceeds in the same
+  task to one built-in GPU preflight, exactly 15 r3 live runs and one analyzer invocation. There is no CUDA
+  rebuild, intermediate synthetic Review or identity retry.
+
+### Artifact lifecycle
+
+- Review is blocked, so nothing is deleted. Retain ICRA-056 build/install/log/dependency evidence and every
+  historical product; do not reuse its consumed dependency root. The PDF remains unstaged.
+- The ICRA-056 install is explicitly adopted only as a frozen, revalidated input to ICRA-057. Retain it
+  through the next Supervisor Review. If ICRA-057 passes after code/docs are pushed, Supervisor may delete
+  only the reproducible adopted ICRA-056 build/install; otherwise retain everything.
+
 ## 2026-08-25 — ICRA-055 implementation PASS, Supervisor contract corrected, ICRA-056 live authorized
 
 ### Review identity and synchronization

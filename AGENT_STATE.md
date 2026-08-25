@@ -5,36 +5,37 @@ schema_version: icra_single_branch_two_agent_v2
 branch: dev/icra
 active_role: DEEPSEEK
 status: TASK_READY
-gate: P4_G0C_R3_CONTAINER_CONTRACT_AND_LIVE_CALIBRATION
-task_id: ICRA-056
-review_base: 4a6dbd6f9dfa94f92388bf91482cb8f236c032e9
-reviewed_head: 74cb730e0776842d2dbabbfa64ccc7dd50fbc293
+gate: P4_G0C_R3_DEPENDENCY_PROVENANCE_REPAIR_AND_LIVE_CALIBRATION
+task_id: ICRA-057
+review_base: 0968f3469b9ff6815bb45eac7340e1dd8a53c44c
+reviewed_head: 37621f9002f8d9fe5254149d0af42dbf2b58e166
 conference_route: P0_P4_P5
-route_status: P4_G0C_R3_LIVE_AUTHORIZED_WITH_CONTAINER_CONTRACT_CORRECTION
+route_status: P4_G0C_R3_LIVE_BLOCKED_DEPENDENCY_MANIFEST_PROVENANCE
 historical_gate0a_verdict: NO_GO_P2
 p0_gate0b_status: PASS
 p0_gate0b_worker_count: 4
-p4_status: G0A_PASS_G0B_PASS_G0C_R3_LIVE_TASK_READY
+p4_status: G0A_PASS_G0B_PASS_G0C_R3_DEPENDENCY_PROVENANCE_REPAIR_READY
 p5_status: IMPLEMENTED_BUT_UNQUALIFIED
-supervisor_verdict: ICRA055_REVIEW_PASS_BUILDER_SUPERVISOR_CONTRACT_DEFECT_CORRECTED
-review_disposition: ICRA056_INTEGRATED_CONTAINER_CONTRACT_AND_LIVE_AUTHORIZED
+supervisor_verdict: ICRA056_REVIEW_BLOCKED_DEPENDENCY_MANIFEST_PATH_BINDING
+review_disposition: ICRA057_INTEGRATED_DEPENDENCY_PROVENANCE_REPAIR_AND_LIVE_AUTHORIZED
 handoff_status: TASK_READY
 next_task: NEXT_TASK.md
-updated_utc: 2026-08-25T02:50:05Z
+updated_utc: 2026-08-25T04:01:21Z
 ```
 
 The conditional conference route remains `P0 -> P4 -> P5`. P0 Gate-0B, P4-G0A and P4-G0B remain
-`PASS`; historical Gate-0A remains `NO_GO_P2`, so P2 stays disabled. ICRA-055 closes the hermetic launcher,
-exact XDG conditions, deny-by-default production mutation discovery and external-log comparator. Independent
-focused 111/111 and full Python 466/466 reruns pass with identical 17,759-entry external inventories.
+`PASS`; historical Gate-0A remains `NO_GO_P2`, so P2 stays disabled. ICRA-056 Phase A, its one fresh
+17-package CUDA build and the static CUDA closure all pass. The standalone dependency invocation also
+validates the required 18/13/1/14/6 closure and manifest hash.
 
-ICRA-055's Builder correctly reported a literal task-contract blocker: production has a `runs_root`
-semantic beyond eight per-run outputs. Supervisor Review determines that the task contract was wrong, not
-the implementation or production runner. `runs_root` is the canonical fresh container boundary that owns
-runner state, preflight, environment and run directories; the eight keys are exact launch-output leaves
-below it. The Builder result remains preserved, while the Supervisor contract is corrected here.
+ICRA-056 is nevertheless blocked before GPU/live because production `validate_runtime_dependencies()`
+reuses its local `path`: the returned `manifest_path` is the last runtime library rather than the bound v3
+dependency manifest. Builder correctly stopped with zero GPU preflight, launch, r3 identity, analyzer or
+threshold action. This is a narrow production-runner defect, not an environment/GPU failure or another
+Supervisor-contract error. All 15 r3 identities remain unconsumed.
 
-ICRA-056 is the only authorized task. Phase A mechanically models the sole registered `runs_root` container
-and must pass before Phase B; the same task then fresh-builds CUDA, runs dependency/GPU preflight, executes
-the 15 registered r3 runs once and analyzes the complete bundle. There is no intermediate synthetic Review.
-ICRA-055 created no build/install products, so nothing is deleted; preserve all evidence and the PDF.
+ICRA-057 is the only authorized task. It repairs and regression-tests the dependency provenance binding,
+then reuses only the hash-verified ICRA-056 CUDA install as an explicitly adopted frozen input. The same task
+uses fresh ICRA-057 dependency/runs roots and proceeds, without intermediate Review, to the built-in GPU
+preflight, exactly 15 registered r3 runs and one analyzer invocation. ICRA-056 build/install remain retained
+through ICRA-057 development and Supervisor Review; no cleanup is authorized now.
