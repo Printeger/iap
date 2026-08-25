@@ -284,22 +284,22 @@ class P4G0CDependencyPreflightTest(unittest.TestCase):
             (18, 13, 1, 14, 6),
         )
 
-    def test_v5_complete_closure_binds_closed_fixture_launch(self):
+    def test_v6_complete_closure_binds_temporal_support_launch(self):
         self.fixture = REPO / "config/icra27/p4_g0c_live_fixture_v2.json"
         self.bundle = RUNNER.load_bundle(
-            REPO / "config/icra27/p4_g0c_protocol_v5.json",
-            REPO / "config/icra27/p4_threshold_registry_v5.json",
+            REPO / "config/icra27/p4_g0c_protocol_v6.json",
+            REPO / "config/icra27/p4_threshold_registry_v6.json",
             self.fixture,
-            expected_protocol_schema=RUNNER.CLOSED_FIXTURE_PROTOCOL_SCHEMA,
+            expected_protocol_schema=RUNNER.TEMPORAL_SUPPORT_PROTOCOL_SCHEMA,
         )
         self.manifest_path = (
-            REPO / "config/icra27/p4_g0c_runtime_dependencies_v5.json"
+            REPO / "config/icra27/p4_g0c_runtime_dependencies_v6.json"
         )
         self.manifest = RUNNER.load_runtime_dependency_manifest(
             self.manifest_path,
             self.bundle.protocol["runtime_dependency_manifest"]["sha256"],
-            expected_schema=RUNNER.DEPENDENCY_SCHEMA_V5,
-            expected_experiment="p4_g0c_metrics_calibration_v5",
+            expected_schema=RUNNER.DEPENDENCY_SCHEMA_V6,
+            expected_experiment="p4_g0c_metrics_calibration_v6",
         )
         with tempfile.TemporaryDirectory() as tmp:
             prefix = self._complete_prefix(Path(tmp))
@@ -308,7 +308,7 @@ class P4G0CDependencyPreflightTest(unittest.TestCase):
             )
         self.assertTrue(result["dependency_ready"], result)
         self.assertEqual(
-            result["schema_version"], "p4_g0c_dependency_preflight_result_v5"
+            result["schema_version"], "p4_g0c_dependency_preflight_result_v6"
         )
         self.assertEqual(
             (result["package_count"], result["executable_count"],

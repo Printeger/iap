@@ -1275,3 +1275,13 @@ They do not convert historical `NO-GO-P2`, failed P0 Gate-0B evidence, the stati
 | IAP-RQ-423 | Explain every incomplete equal-arc sample without changing decisions | default-off nonregistered trace records query/layer/corner/exact-weight/source/occupancy detail; classifier proves 12 identities x 200 samples x two arms; noninterference C++ passes | **DIAGNOSTIC CLOSURE PASS** |
 | IAP-RQ-423 | Enter bounded support repair only under its exact predicate | totals are occupied skip 3,040, time support 10, every other category 0; time support remains explicitly fail-closed, so no Section-6 policy or r6 exists | **BLOCKED_R5_READINESS_TIME_SUPPORT** |
 | IAP-RQ-423 | Preserve one-shot and downstream boundaries | registered r5/r6 attempts, completions and retries are zero; runner/analyzer/draft/action/G0C/G0D/P5 are absent | **SUPERVISOR REVIEW REQUIRED** |
+
+## 2026-08-25 ICRA-063 r6 support and typed stop
+
+| Req ID | Requirement/evidence seam | Implementation and retained evidence | Status |
+|---|---|---|---|
+| IAP-RQ-320, IAP-RQ-322 | Extend only the observed temporal tail and preserve integrity semantics | r6 fixes seven horizons through exactly 3.0 s; typed conservative policy supports only positive-weight occupied cost with finite `unknown_cost`; health/PL and other invalid sources remain false/fail-closed | **IMPLEMENTED; FOCUSED TESTS PASS** |
+| IAP-RQ-423 | Keep P4 consumers and identities exact | original/risk guide and A* share one policy; v6 registers 15 disjoint r6 IDs while r5 is unconsumed and v1-v5 bytes remain unchanged | **OFFLINE CONTRACT PASS** |
+| IAP-RQ-423 | Require fresh CUDA and preflight before readiness | 17/17 merged nonsymlink Release/CUDA build, six ELF libraries, zero historical linkage and mandatory GPU device count 1 pass | **BUILD + GPU PASS** |
+| IAP-RQ-423 | Stop on the sole failed readiness without identity consumption | dependency 18/13/1/14/6 and P0 profile pass, but launch rejects effective config before ROS; required processes never start; readiness is not retried | **BLOCKED_R6_READINESS_PROTOCOL_EFFECTIVE_CONFIG_MISMATCH** |
+| IAP-RQ-423 | Preserve registered one-shot and authority boundaries | r6 attempts/completions/retries, full runner and analyzer are 0/0/0/0/0; no draft, threshold action, G0C/G0D/P5 claim | **SUPERVISOR REVIEW REQUIRED** |

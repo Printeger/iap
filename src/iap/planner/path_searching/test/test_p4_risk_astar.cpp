@@ -78,6 +78,20 @@ std::shared_ptr<const iap::RiskGridSnapshot> makeSnapshot(
   return snapshot;
 }
 
+std::shared_ptr<const iap::RiskGridSnapshot> makeOccupiedSnapshot(
+    iap::RiskPredictionProvider& provider) {
+  auto params = makeParams();
+  params.skip_occupied_voxels = true;
+  iap::RiskGridMap grid(params);
+  std::string reason;
+  EXPECT_TRUE(grid.refreshFromProvider(
+      Eigen::Vector3d::Zero(), 10.0, provider,
+      [](const Eigen::Vector3d&) { return true; }, &reason)) << reason;
+  auto snapshot = grid.acquireSnapshot();
+  EXPECT_NE(snapshot, nullptr);
+  return snapshot;
+}
+
 P4RiskAStarConfig enabledConfig() {
   P4RiskAStarConfig config;
   config.enable_risk_aware_astar = true;
@@ -135,6 +149,26 @@ TEST(P4RiskAStarTest, UnknownAddsPenaltyNotZeroRisk) {
   EXPECT_DOUBLE_EQ(cost, 5.0);
   EXPECT_EQ(astar.getLastP4Metrics().risk_query_count, 1);
   EXPECT_EQ(astar.getLastP4Metrics().unknown_count, 1);
+}
+
+TEST(P4RiskAStarTest, ConservativeOccupiedSupportUsesUnknownCostNotPenalty) {
+  ConstantRiskProvider provider(4.0);
+  auto snapshot = makeOccupiedSnapshot(provider);
+
+  AStar astar;
+  auto config = enabledConfig();
+  config.cost_query_policy =
+      iap::RiskCostQueryPolicy::CONSERVATIVE_OCCUPIED_COST_SUPPORT;
+  config.unknown_edge_penalty = 3.0;
+  astar.setP4Config(config);
+  astar.setRiskSnapshot(snapshot, 10.0);
+
+  const double cost = astar.edgeCostWithRiskForTest(
+      Eigen::Vector3d::Zero(), Eigen::Vector3d::UnitY(), 2.0, 10.5);
+
+  EXPECT_DOUBLE_EQ(cost, 2.0 + 0.05 * 2.0 * 10.0);
+  EXPECT_EQ(astar.getLastP4Metrics().risk_query_count, 1);
+  EXPECT_EQ(astar.getLastP4Metrics().unknown_count, 0);
 }
 
 TEST(P4RiskAStarTest, PathLengthRatioFallbackMetricsCanBeRecorded) {

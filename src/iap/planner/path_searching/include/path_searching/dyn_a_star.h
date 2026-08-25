@@ -10,11 +10,7 @@
 #include <memory>
 #include <queue>
 #include <string>
-
-namespace iap
-{
-class RiskGridSnapshot;
-}
+#include <iap/planner/risk_grid_map.hpp>
 
 struct P4RiskAStarConfig
 {
@@ -30,6 +26,8 @@ struct P4RiskAStarConfig
 	bool profile_trace_enable = false;
 	std::string profile_trace_path;
 	double query_speed_mps = 1.0;
+	iap::RiskCostQueryPolicy cost_query_policy =
+		iap::RiskCostQueryPolicy::LEGACY_STRICT;
 };
 
 struct P4AStarMetrics

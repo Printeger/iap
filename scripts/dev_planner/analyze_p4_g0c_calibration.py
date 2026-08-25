@@ -46,6 +46,7 @@ PROTOCOL_SCHEMA_V2 = "p4_g0c_protocol_v2"
 PROTOCOL_SCHEMA_V3 = "p4_g0c_protocol_v3"
 PROTOCOL_SCHEMA_V4 = "p4_g0c_protocol_v4"
 PROTOCOL_SCHEMA_V5 = "p4_g0c_protocol_v5"
+PROTOCOL_SCHEMA_V6 = "p4_g0c_protocol_v6"
 RUNNER_STATE_FILENAME = "p4_g0c_runner_state.json"
 REQUIRED_PROCESSES = ["iap_rosnode", "ego_planner_node"]
 ALLOWED_ROOT_METADATA = {
@@ -67,14 +68,16 @@ def _versioned_schema(bundle: ProtocolBundle, stem: str) -> str:
         PROTOCOL_SCHEMA_V3: "v3",
         PROTOCOL_SCHEMA_V4: "v4",
         PROTOCOL_SCHEMA_V5: "v5",
+        PROTOCOL_SCHEMA_V6: "v6",
     }[bundle.protocol.get("schema_version")]
     return f"{stem}_{version}"
 
 
 def _runner_state_schema(bundle: ProtocolBundle) -> str:
     return (
-        "p4_g0c_runner_state_v7"
-        if bundle.protocol.get("schema_version") == PROTOCOL_SCHEMA_V5
+        "p4_g0c_runner_state_v8"
+        if bundle.protocol.get("schema_version") == PROTOCOL_SCHEMA_V6
+        else "p4_g0c_runner_state_v7" if bundle.protocol.get("schema_version") == PROTOCOL_SCHEMA_V5
         else "p4_g0c_runner_state_v6"
         if bundle.protocol.get("schema_version") == PROTOCOL_SCHEMA_V4
         else "p4_g0c_runner_state_v5"
@@ -264,7 +267,7 @@ def _runner_state_failures(
     }
     if bundle.protocol.get("schema_version") in {
         PROTOCOL_SCHEMA_V2, PROTOCOL_SCHEMA_V3, PROTOCOL_SCHEMA_V4,
-        PROTOCOL_SCHEMA_V5,
+        PROTOCOL_SCHEMA_V5, PROTOCOL_SCHEMA_V6,
     }:
         expected_scalars["gpu_preflight_invocations"] = 1
     for key, value in expected_scalars.items():
@@ -337,7 +340,7 @@ def _runner_state_failures(
         failures.append("runner_state_plan")
     if bundle.protocol.get("schema_version") in {
         PROTOCOL_SCHEMA_V2, PROTOCOL_SCHEMA_V3, PROTOCOL_SCHEMA_V4,
-        PROTOCOL_SCHEMA_V5,
+        PROTOCOL_SCHEMA_V5, PROTOCOL_SCHEMA_V6,
     }:
         dependency = state.get("dependency_preflight")
         if (
@@ -348,7 +351,7 @@ def _runner_state_failures(
         ):
             failures.append("runner_state_dependency_preflight")
     if bundle.protocol.get("schema_version") in {
-        PROTOCOL_SCHEMA_V3, PROTOCOL_SCHEMA_V4, PROTOCOL_SCHEMA_V5
+        PROTOCOL_SCHEMA_V3, PROTOCOL_SCHEMA_V4, PROTOCOL_SCHEMA_V5, PROTOCOL_SCHEMA_V6
     }:
         launch_environment = state.get("launch_environment")
         if not isinstance(launch_environment, dict) or set(launch_environment) != {
@@ -477,7 +480,7 @@ def _run_inventory_failures(
     except RuntimeError as exc:
         failures.append(f"config_mismatch:{run_id}:test_planner:{exc}")
     if bundle.protocol.get("schema_version") in {
-        PROTOCOL_SCHEMA_V3, PROTOCOL_SCHEMA_V4, PROTOCOL_SCHEMA_V5
+        PROTOCOL_SCHEMA_V3, PROTOCOL_SCHEMA_V4, PROTOCOL_SCHEMA_V5, PROTOCOL_SCHEMA_V6
     }:
         try:
             run_manifest = json.loads(
@@ -517,7 +520,9 @@ def _manifest_failures(
         "fixture_sha256": bundle.fixture_sha256,
         "csv_path": str(csv_path.resolve()),
         "experiment": (
-            "p4_g0c_metrics_calibration_v5"
+            "p4_g0c_metrics_calibration_v6"
+            if bundle.protocol.get("schema_version") == PROTOCOL_SCHEMA_V6
+            else "p4_g0c_metrics_calibration_v5"
             if bundle.protocol.get("schema_version") == PROTOCOL_SCHEMA_V5
             else "p4_g0c_metrics_calibration_v4"
             if bundle.protocol.get("schema_version") == PROTOCOL_SCHEMA_V4
@@ -543,7 +548,7 @@ def _manifest_failures(
     }
     if bundle.protocol.get("schema_version") in {
         PROTOCOL_SCHEMA_V2, PROTOCOL_SCHEMA_V3, PROTOCOL_SCHEMA_V4,
-        PROTOCOL_SCHEMA_V5,
+        PROTOCOL_SCHEMA_V5, PROTOCOL_SCHEMA_V6,
     }:
         expected.update({
             "dependency_manifest_sha256": bundle.protocol[
@@ -553,17 +558,19 @@ def _manifest_failures(
                 "replacement_lineage"
             ]["sha256"],
         })
-    if bundle.protocol.get("schema_version") == PROTOCOL_SCHEMA_V5:
+    if bundle.protocol.get("schema_version") in {
+        PROTOCOL_SCHEMA_V5, PROTOCOL_SCHEMA_V6,
+    }:
         expected["admission_parameter"] = {
             "requested": True,
             "effective": True,
         }
     replacement = bundle.protocol.get("schema_version") in {
         PROTOCOL_SCHEMA_V2, PROTOCOL_SCHEMA_V3, PROTOCOL_SCHEMA_V4,
-        PROTOCOL_SCHEMA_V5,
+        PROTOCOL_SCHEMA_V5, PROTOCOL_SCHEMA_V6,
     }
     if bundle.protocol.get("schema_version") in {
-        PROTOCOL_SCHEMA_V3, PROTOCOL_SCHEMA_V4, PROTOCOL_SCHEMA_V5
+        PROTOCOL_SCHEMA_V3, PROTOCOL_SCHEMA_V4, PROTOCOL_SCHEMA_V5, PROTOCOL_SCHEMA_V6
     }:
         expected_environment = expected_launch_environment_binding(
             Path(record["run_dir"]).parent,
@@ -871,8 +878,8 @@ def analyze(bundle: ProtocolBundle, runs_root: Path) -> dict[str, Any]:
 def _parser() -> argparse.ArgumentParser:
     repo = Path(__file__).resolve().parents[2]
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--protocol", type=Path, default=repo / "config/icra27/p4_g0c_protocol_v5.json")
-    parser.add_argument("--registry", type=Path, default=repo / "config/icra27/p4_threshold_registry_v5.json")
+    parser.add_argument("--protocol", type=Path, default=repo / "config/icra27/p4_g0c_protocol_v6.json")
+    parser.add_argument("--registry", type=Path, default=repo / "config/icra27/p4_threshold_registry_v6.json")
     parser.add_argument("--fixture", type=Path, default=repo / "config/icra27/p4_g0c_live_fixture_v2.json")
     parser.add_argument("--runs-root", type=Path, required=True)
     parser.add_argument("--output", type=Path)
@@ -946,6 +953,8 @@ def main(argv: list[str] | None = None) -> int:
             else PROTOCOL_SCHEMA_V4
             if args.protocol.name == "p4_g0c_protocol_v4.json"
             else PROTOCOL_SCHEMA_V5
+            if args.protocol.name == "p4_g0c_protocol_v5.json"
+            else PROTOCOL_SCHEMA_V6
         )
         bundle = load_bundle(
             args.protocol,

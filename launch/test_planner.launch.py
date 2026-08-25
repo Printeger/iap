@@ -36,10 +36,12 @@ P4_G0C_EXPERIMENT_V2 = "p4_g0c_metrics_calibration_v2"
 P4_G0C_EXPERIMENT_V3 = "p4_g0c_metrics_calibration_v3"
 P4_G0C_EXPERIMENT_V4 = "p4_g0c_metrics_calibration_v4"
 P4_G0C_EXPERIMENT_V5 = "p4_g0c_metrics_calibration_v5"
+P4_G0C_EXPERIMENT_V6 = "p4_g0c_metrics_calibration_v6"
 P4_G0C_EXPERIMENT = P4_G0C_EXPERIMENT_V1
 P4_G0C_EXPERIMENTS = {
     P4_G0C_EXPERIMENT_V1, P4_G0C_EXPERIMENT_V2, P4_G0C_EXPERIMENT_V3,
     P4_G0C_EXPERIMENT_V4, P4_G0C_EXPERIMENT_V5,
+    P4_G0C_EXPERIMENT_V6,
 }
 P4_G0C_SCENARIO = "p4_g0c_free_corridor_v1"
 P4_G0C_REQUIRED_PROCESSES = ["iap_rosnode", "ego_planner_node"]
@@ -96,6 +98,14 @@ P4_G0C_ARTIFACT_PRESET_V5 = {
     "p4.g0c.fixture_path": "config/icra27/p4_g0c_live_fixture_v2.json",
     "p4.g0c.fixture_sha256": P4_G0C_RUNTIME_HASH_REQUIRED,
 }
+P4_G0C_ARTIFACT_PRESET_V6 = {
+    "p4.g0c.protocol_path": "config/icra27/p4_g0c_protocol_v6.json",
+    "p4.g0c.protocol_sha256": P4_G0C_RUNTIME_HASH_REQUIRED,
+    "p4.g0c.registry_path": "config/icra27/p4_threshold_registry_v6.json",
+    "p4.g0c.registry_sha256": P4_G0C_RUNTIME_HASH_REQUIRED,
+    "p4.g0c.fixture_path": "config/icra27/p4_g0c_live_fixture_v2.json",
+    "p4.g0c.fixture_sha256": P4_G0C_RUNTIME_HASH_REQUIRED,
+}
 P4_G0C_V5_CENTRAL_OBSTACLE_X_M = (-9.0, -7.0)
 P4_G0C_V4_P0_PROFILE_VALUES = {
     "p0.predictor.sigma_grow_m_sqrt_s": "0.01",
@@ -105,6 +115,11 @@ P4_G0C_V4_P0_PROFILE_VALUES = {
 P4_G0C_V5_P0_PROFILE_VALUES = {
     **P4_G0C_V4_P0_PROFILE_VALUES,
     "p0.predictor.worker_count": "4",
+}
+P4_G0C_V6_P0_PROFILE_VALUES = {
+    **P4_G0C_V5_P0_PROFILE_VALUES,
+    "p0.horizons_s": "0.0,0.5,1.0,1.5,2.0,2.5,3.0",
+    "p4.cost_query_policy": "CONSERVATIVE_OCCUPIED_COST_SUPPORT",
 }
 P4_G0C_FROZEN_LAUNCH_VALUES = {
     "planner_safety_profile": "p4",
@@ -243,7 +258,9 @@ def _p4_g0c_typed_value(value):
 
 
 def _p4_g0c_profile_trace_binding(experiment, readiness_mode, csv_path):
-    enabled = experiment == P4_G0C_EXPERIMENT_V5 and bool(readiness_mode)
+    enabled = experiment in {
+        P4_G0C_EXPERIMENT_V5, P4_G0C_EXPERIMENT_V6,
+    } and bool(readiness_mode)
     return {
         "enabled": enabled,
         "path": (
@@ -263,9 +280,14 @@ def _validate_p4_g0c_profile_values(experiment, effective_values, explicit_overr
             raise RuntimeError(
                 f"P4-G0C {qualifier} for {key}: expected {expected}, got {actual}"
             )
-    if str(experiment) in {P4_G0C_EXPERIMENT_V4, P4_G0C_EXPERIMENT_V5}:
+    if str(experiment) in {
+        P4_G0C_EXPERIMENT_V4, P4_G0C_EXPERIMENT_V5,
+        P4_G0C_EXPERIMENT_V6,
+    }:
         profile = (
-            P4_G0C_V5_P0_PROFILE_VALUES
+            P4_G0C_V6_P0_PROFILE_VALUES
+            if str(experiment) == P4_G0C_EXPERIMENT_V6
+            else P4_G0C_V5_P0_PROFILE_VALUES
             if str(experiment) == P4_G0C_EXPERIMENT_V5
             else P4_G0C_V4_P0_PROFILE_VALUES
         )
@@ -288,7 +310,8 @@ def _p4_g0c_binding(
     if str(experiment) not in P4_G0C_EXPERIMENTS:
         return {}
     version = (
-        5 if str(experiment) == P4_G0C_EXPERIMENT_V5
+        6 if str(experiment) == P4_G0C_EXPERIMENT_V6
+        else 5 if str(experiment) == P4_G0C_EXPERIMENT_V5
         else 4 if str(experiment) == P4_G0C_EXPERIMENT_V4
         else 3 if str(experiment) == P4_G0C_EXPERIMENT_V3
         else 2 if str(experiment) == P4_G0C_EXPERIMENT_V2
@@ -311,7 +334,7 @@ def _p4_g0c_binding(
         registered_hashes = {
             "fixture": (
                 P4_G0C_FIXTURE_V2_SHA256
-                if version == 5 else P4_G0C_FIXTURE_SHA256
+                if version in {5, 6} else P4_G0C_FIXTURE_SHA256
             )
         }
     else:
@@ -356,7 +379,7 @@ def _p4_g0c_binding(
     )
     if readiness_mode:
         if (
-            version not in {4, 5}
+            version not in {4, 5, 6}
             or not re.fullmatch(
                 rf"p4-g0c-r{version}-readiness-[a-z0-9-]+", run_id
             )
@@ -383,16 +406,17 @@ def _p4_g0c_binding(
         "p4.per_search_timeout_s": 0.2,
         "selection_applied": False,
     })
-    if version in {4, 5}:
+    if version in {4, 5, 6}:
         profile = (
-            P4_G0C_V5_P0_PROFILE_VALUES
+            P4_G0C_V6_P0_PROFILE_VALUES
+            if version == 6 else P4_G0C_V5_P0_PROFILE_VALUES
             if version == 5 else P4_G0C_V4_P0_PROFILE_VALUES
         )
         typed_values.update({
             key: _p4_g0c_typed_value(effective_values[key])
             for key in profile
         })
-        if version == 5:
+        if version in {5, 6}:
             typed_values["p0.predictor.worker_count"] = int(
                 effective_values["p0.predictor.worker_count"]
             )
@@ -402,7 +426,7 @@ def _p4_g0c_binding(
     if protocol.get("schema_version") != expected_protocol_schema:
         raise RuntimeError("P4-G0C protocol schema mismatch")
     expected_science = dict(P4_G0C_FROZEN_SCIENTIFIC_IDENTITY)
-    if version in {3, 4, 5}:
+    if version in {3, 4, 5, 6}:
         expected_science["run_id_template"] = (
             f"p4-g0c-r{version}-seed{{seed}}-rep{{repetition:02d}}"
         )
@@ -443,7 +467,7 @@ def _p4_g0c_binding(
     ):
         raise RuntimeError("P4-G0C proposed registry contract mismatch")
     expected_fixture_schema = (
-        "p4_g0c_fixture_v2" if version == 5 else "p4_g0c_fixture_v1"
+        "p4_g0c_fixture_v2" if version in {5, 6} else "p4_g0c_fixture_v1"
     )
     if (
         fixture.get("schema_version") != expected_fixture_schema
@@ -527,7 +551,7 @@ def _p4_g0c_binding(
             "child_environment": expected_environment,
             "mutable_output_paths": expected_outputs,
         })
-    if version == 5:
+    if version in {5, 6}:
         result["admission_parameter"] = {
             "requested": True,
             "effective": typed_values[
@@ -552,9 +576,14 @@ def _prepare_p4_g0c_context(context, experiment, iap_share):
         key: LaunchConfiguration(key).perform(context)
         for key in P4_G0C_FROZEN_LAUNCH_VALUES
     }
-    if experiment in {P4_G0C_EXPERIMENT_V4, P4_G0C_EXPERIMENT_V5}:
+    if experiment in {
+        P4_G0C_EXPERIMENT_V4, P4_G0C_EXPERIMENT_V5,
+        P4_G0C_EXPERIMENT_V6,
+    }:
         profile = (
-            P4_G0C_V5_P0_PROFILE_VALUES
+            P4_G0C_V6_P0_PROFILE_VALUES
+            if experiment == P4_G0C_EXPERIMENT_V6
+            else P4_G0C_V5_P0_PROFILE_VALUES
             if experiment == P4_G0C_EXPERIMENT_V5
             else P4_G0C_V4_P0_PROFILE_VALUES
         )
@@ -567,7 +596,7 @@ def _prepare_p4_g0c_context(context, experiment, iap_share):
         key: _maybe_resolve_iap_config_path(key, value, iap_share)
         for key, value in SCENARIO_PRESETS[P4_G0C_SCENARIO].items()
     }
-    if experiment == P4_G0C_EXPERIMENT_V5:
+    if experiment in {P4_G0C_EXPERIMENT_V5, P4_G0C_EXPERIMENT_V6}:
         expected_scenario_values.update({
             "p1_fixture_central_x_min_m": str(
                 P4_G0C_V5_CENTRAL_OBSTACLE_X_M[0]
@@ -605,7 +634,7 @@ def _prepare_p4_g0c_context(context, experiment, iap_share):
     if "p4.profile_trace_enable" in overrides and \
             _param_bool(context, "p4.profile_trace_enable") != profile_trace_enable:
         raise RuntimeError(
-            "P4-G0C profile trace is permitted only for v5 readiness"
+            "P4-G0C profile trace is permitted only for v5/v6 readiness"
         )
     profile_trace_path = trace_binding["path"]
     if "p4.profile_trace_path" in overrides and \
@@ -1401,6 +1430,14 @@ EXPERIMENT_PRESETS = {
         "p1_fixture_central_x_min_m": str(P4_G0C_V5_CENTRAL_OBSTACLE_X_M[0]),
         "p1_fixture_central_x_max_m": str(P4_G0C_V5_CENTRAL_OBSTACLE_X_M[1]),
     },
+    "p4_g0c_metrics_calibration_v6": {
+        **P4_G0C_FROZEN_LAUNCH_VALUES,
+        **P4_G0C_V6_P0_PROFILE_VALUES,
+        **P4_G0C_ARTIFACT_PRESET_V6,
+        "scenario": "p4_g0c_free_corridor_v1",
+        "p1_fixture_central_x_min_m": str(P4_G0C_V5_CENTRAL_OBSTACLE_X_M[0]),
+        "p1_fixture_central_x_max_m": str(P4_G0C_V5_CENTRAL_OBSTACLE_X_M[1]),
+    },
     "all_degraded_lidar_good": {
         "scenario": "gnss_degraded_lidar_good",
         "planner_safety_profile": "all",
@@ -1743,6 +1780,7 @@ ARG_DEFAULTS = [
     ("p4.debug_csv_path", ""),
     ("p4.profile_trace_enable", "false"),
     ("p4.profile_trace_path", ""),
+    ("p4.cost_query_policy", "LEGACY_STRICT"),
     ("p4.g0c.protocol_path", ""),
     ("p4.g0c.protocol_sha256", ""),
     ("p4.g0c.registry_path", ""),
@@ -2349,6 +2387,8 @@ def _ego_planner_node(context, drone_id, planner_odom_topic, cloud_topic, camera
     p4_profile_trace_enable = _param_bool(context, "p4.profile_trace_enable")
     p4_profile_trace_path = LaunchConfiguration(
         "p4.profile_trace_path").perform(context)
+    p4_cost_query_policy = LaunchConfiguration(
+        "p4.cost_query_policy").perform(context)
 
     map_size_x, map_size_y, map_size_z = map_size
     goal_x, goal_y, goal_z = goal
@@ -2579,6 +2619,7 @@ def _ego_planner_node(context, drone_id, planner_odom_topic, cloud_topic, camera
             {"p4.debug_csv_path": p4_debug_path},
             {"p4.profile_trace_enable": p4_profile_trace_enable},
             {"p4.profile_trace_path": p4_profile_trace_path},
+            {"p4.cost_query_policy": p4_cost_query_policy},
             {"p5.enable_runtime_gate": p5_runtime},
             {"p5.enable_final_gate": p5_final},
             {"p5.horizon_s": _param_float(context, "p5.horizon_s")},
@@ -2766,7 +2807,8 @@ def _launch_setup(context):
     if not bag_root_dir:
         bag_root_dir = str(Path(runtime_root) / "bag")
     if experiment in {
-        P4_G0C_EXPERIMENT_V3, P4_G0C_EXPERIMENT_V4, P4_G0C_EXPERIMENT_V5
+        P4_G0C_EXPERIMENT_V3, P4_G0C_EXPERIMENT_V4,
+        P4_G0C_EXPERIMENT_V5, P4_G0C_EXPERIMENT_V6,
     }:
         bag_output_dir = bag_root_dir
     else:
@@ -3215,6 +3257,8 @@ def _launch_setup(context):
             context, "p4.profile_trace_enable"),
         "p4.profile_trace_path": LaunchConfiguration(
             "p4.profile_trace_path").perform(context),
+        "p4.cost_query_policy": LaunchConfiguration(
+            "p4.cost_query_policy").perform(context),
         "p4.g0c": p4_g0c_binding,
         "p5.enable_runtime_gate": p5_runtime_for_manifest,
         "p5.enable_final_gate": p5_final_for_manifest,
@@ -4007,6 +4051,13 @@ def generate_launch_description():
                 LaunchConfiguration("p4.g0c.child_xdg_runtime_dir"),
                 condition=IfCondition(EqualsSubstitution(
                     LaunchConfiguration("experiment"), P4_G0C_EXPERIMENT_V5,
+                )),
+            ),
+            SetEnvironmentVariable(
+                "XDG_RUNTIME_DIR",
+                LaunchConfiguration("p4.g0c.child_xdg_runtime_dir"),
+                condition=IfCondition(EqualsSubstitution(
+                    LaunchConfiguration("experiment"), P4_G0C_EXPERIMENT_V6,
                 )),
             ),
             SetEnvironmentVariable("FASTRTPS_DEFAULT_PROFILES_FILE", fastdds_profile),

@@ -2373,3 +2373,18 @@ Exact fresh-build and one-shot readiness argv, cwd, safe environment-key
 allowlist, timestamps, exits and artifact paths are retained in
 `results/icra27/icra062/command_ledger.json`; they are evidence, not commands
 authorized for repetition after this typed stop.
+
+## 2026-08-25 (ICRA-063 r6 temporal and occupied support)
+
+- Added a typed, default-strict RiskGrid query policy and enabled conservative
+  occupied cost support only for r6 P4 guide/A* cost consumers; health, PL,
+  occupancy rejection and all other invalid categories remain fail-closed.
+- Added canonical v6 protocol/registry/dependency/lineage, 15 disjoint r6 IDs,
+  and exact horizons through 3.0 s. v1-v5 artifacts remain byte-identical.
+- Passed focused C++, 501 Python contracts, and a fresh 17-package Release/CUDA
+  nonsymlink closure. GPU preflight passed with one CUDA device.
+- The sole nonregistered r6 readiness was rejected before ROS by
+  `P4-G0C protocol effective config mismatch`. It was not retried; registered
+  identities, runner, analyzer, draft and threshold action remain untouched.
+- Stopped tracking the exact ICRA-062 raw classification while preserving its
+  ignored local copy, and recorded four honest Low pre-recorder deviations.

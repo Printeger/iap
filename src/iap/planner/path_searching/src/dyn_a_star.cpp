@@ -183,7 +183,8 @@ double AStar::edgeCostWithRisk(const Vector3d &current_pos, const Vector3d &neig
     ++last_p4_metrics_.risk_query_count;
     iap::RiskCostSample sample;
     const Vector3d query_pos = 0.5 * (current_pos + neighbor_pos);
-    if (!risk_snapshot_->queryCost(query_pos, query_time_s, &sample) ||
+    if (!risk_snapshot_->queryCost(
+            query_pos, query_time_s, &sample, p4_config_.cost_query_policy) ||
         !sample.valid || sample.stale || !std::isfinite(sample.cost))
     {
         ++last_p4_metrics_.unknown_count;

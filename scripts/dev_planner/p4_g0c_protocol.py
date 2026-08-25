@@ -16,13 +16,15 @@ PROTOCOL_SCHEMA_V2 = "p4_g0c_protocol_v2"
 PROTOCOL_SCHEMA_V3 = "p4_g0c_protocol_v3"
 PROTOCOL_SCHEMA_V4 = "p4_g0c_protocol_v4"
 PROTOCOL_SCHEMA_V5 = "p4_g0c_protocol_v5"
-PROTOCOL_SCHEMAS = {PROTOCOL_SCHEMA_V1, PROTOCOL_SCHEMA_V2, PROTOCOL_SCHEMA_V3, PROTOCOL_SCHEMA_V4, PROTOCOL_SCHEMA_V5}
+PROTOCOL_SCHEMA_V6 = "p4_g0c_protocol_v6"
+PROTOCOL_SCHEMAS = {PROTOCOL_SCHEMA_V1, PROTOCOL_SCHEMA_V2, PROTOCOL_SCHEMA_V3, PROTOCOL_SCHEMA_V4, PROTOCOL_SCHEMA_V5, PROTOCOL_SCHEMA_V6}
 REGISTRY_SCHEMA_V1 = "p4_threshold_registry_v1"
 REGISTRY_SCHEMA_V2 = "p4_threshold_registry_v2"
 REGISTRY_SCHEMA_V3 = "p4_threshold_registry_v3"
 REGISTRY_SCHEMA_V4 = "p4_threshold_registry_v4"
 REGISTRY_SCHEMA_V5 = "p4_threshold_registry_v5"
-REGISTRY_SCHEMAS = {REGISTRY_SCHEMA_V1, REGISTRY_SCHEMA_V2, REGISTRY_SCHEMA_V3, REGISTRY_SCHEMA_V4, REGISTRY_SCHEMA_V5}
+REGISTRY_SCHEMA_V6 = "p4_threshold_registry_v6"
+REGISTRY_SCHEMAS = {REGISTRY_SCHEMA_V1, REGISTRY_SCHEMA_V2, REGISTRY_SCHEMA_V3, REGISTRY_SCHEMA_V4, REGISTRY_SCHEMA_V5, REGISTRY_SCHEMA_V6}
 FIXTURE_SCHEMA_V1 = "p4_g0c_fixture_v1"
 FIXTURE_SCHEMA_V2 = "p4_g0c_fixture_v2"
 PROPOSED_STATE = "PROPOSED_UNCALIBRATED"
@@ -37,7 +39,8 @@ RUN_ID_PATTERN_V2 = re.compile(r"^p4-g0c-r2-seed([0-9]+)-rep([0-9]{2})$")
 RUN_ID_PATTERN_V3 = re.compile(r"^p4-g0c-r3-seed([0-9]+)-rep([0-9]{2})$")
 RUN_ID_PATTERN_V4 = re.compile(r"^p4-g0c-r4-seed([0-9]+)-rep([0-9]{2})$")
 RUN_ID_PATTERN_V5 = re.compile(r"^p4-g0c-r5-seed([0-9]+)-rep([0-9]{2})$")
-RUN_ID_PATTERNS = (RUN_ID_PATTERN_V1, RUN_ID_PATTERN_V2, RUN_ID_PATTERN_V3, RUN_ID_PATTERN_V4, RUN_ID_PATTERN_V5)
+RUN_ID_PATTERN_V6 = re.compile(r"^p4-g0c-r6-seed([0-9]+)-rep([0-9]{2})$")
+RUN_ID_PATTERNS = (RUN_ID_PATTERN_V1, RUN_ID_PATTERN_V2, RUN_ID_PATTERN_V3, RUN_ID_PATTERN_V4, RUN_ID_PATTERN_V5, RUN_ID_PATTERN_V6)
 DECISION_SCHEMA = "p4_collision_guide_decision_v1"
 DECISION_CSV_COLUMNS = (
     "schema_version", "stamp", "planning_attempt_id",
@@ -102,6 +105,12 @@ P4_G0C_PROTOCOL_V5_TRUSTED_SHA256 = (
 )
 P4_G0C_REGISTRY_V5_TRUSTED_SHA256 = (
     "a6f0bcd84db8f89162fb9429e8baf44b47b6e850e45d5f158d1fcbd3a962df75"
+)
+P4_G0C_PROTOCOL_V6_TRUSTED_SHA256 = (
+    "0fd6ffe987a4e193225e8f7e2797fe5052cca7d3bfca1ea9d390855d08584e05"
+)
+P4_G0C_REGISTRY_V6_TRUSTED_SHA256 = (
+    "270102d2f53c2bf080e63551ab3555b7d9d546eeafca8a2bd8d97f8ae1b82d1c"
 )
 LAUNCH_ENVIRONMENT_SCHEMA = "p4_g0c_launch_environment_v1"
 LAUNCH_ENVIRONMENT_KEYS = (
@@ -236,6 +245,19 @@ def validate_v5_runtime_worker_binding(
             )
 
 
+def validate_v6_runtime_binding(launch_manifest: dict[str, Any]) -> None:
+    validate_v5_runtime_worker_binding(launch_manifest)
+    expected = {
+        "p0.horizons_s": [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0],
+        "p4.cost_query_policy": "CONSERVATIVE_OCCUPIED_COST_SUPPORT",
+    }
+    for key, value in expected.items():
+        if not exact_json_equal(launch_manifest.get(key), value):
+            raise ProtocolError(
+                f"test-planner top-level effective mismatch: {key}"
+            )
+
+
 def canonical_bytes(payload: Any) -> bytes:
     return (
         json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
@@ -342,15 +364,16 @@ def validate_test_planner_effective_contract(
 ) -> None:
     """Bind launch-emitted effective values to the reviewed protocol bundle."""
     schema = bundle.protocol.get("schema_version")
-    if schema not in {PROTOCOL_SCHEMA_V2, PROTOCOL_SCHEMA_V3, PROTOCOL_SCHEMA_V4, PROTOCOL_SCHEMA_V5}:
+    if schema not in {PROTOCOL_SCHEMA_V2, PROTOCOL_SCHEMA_V3, PROTOCOL_SCHEMA_V4, PROTOCOL_SCHEMA_V5, PROTOCOL_SCHEMA_V6}:
         return
     binding = launch_manifest.get("p4.g0c")
     if not isinstance(binding, dict):
         raise ProtocolError("test-planner G0C binding is missing")
     expected = {
         "schema_version": (
-            "p4_g0c_run_manifest_v5"
-            if schema == PROTOCOL_SCHEMA_V5
+            "p4_g0c_run_manifest_v6"
+            if schema == PROTOCOL_SCHEMA_V6
+            else "p4_g0c_run_manifest_v5" if schema == PROTOCOL_SCHEMA_V5
             else "p4_g0c_run_manifest_v4" if schema == PROTOCOL_SCHEMA_V4
             else "p4_g0c_run_manifest_v3" if schema == PROTOCOL_SCHEMA_V3
             else "p4_g0c_run_manifest_v2"
@@ -374,12 +397,12 @@ def validate_test_planner_effective_contract(
             "replacement_lineage"
         ]["sha256"],
     })
-    if schema == PROTOCOL_SCHEMA_V5:
+    if schema in {PROTOCOL_SCHEMA_V5, PROTOCOL_SCHEMA_V6}:
         expected["admission_parameter"] = {
             "requested": True,
             "effective": True,
         }
-    if schema in {PROTOCOL_SCHEMA_V3, PROTOCOL_SCHEMA_V4, PROTOCOL_SCHEMA_V5}:
+    if schema in {PROTOCOL_SCHEMA_V3, PROTOCOL_SCHEMA_V4, PROTOCOL_SCHEMA_V5, PROTOCOL_SCHEMA_V6}:
         expected.update({
             "child_environment": launch_manifest.get("p4.g0c", {}).get(
                 "child_environment"
@@ -420,7 +443,7 @@ def validate_test_planner_effective_contract(
             raise ProtocolError(
                 f"test-planner top-level effective mismatch: {manifest_key}"
             )
-    if bundle.protocol.get("schema_version") in {PROTOCOL_SCHEMA_V4, PROTOCOL_SCHEMA_V5}:
+    if bundle.protocol.get("schema_version") in {PROTOCOL_SCHEMA_V4, PROTOCOL_SCHEMA_V5, PROTOCOL_SCHEMA_V6}:
         barrier_key = "p4.require_risk_grid_ready_before_planning"
         if not exact_json_equal(
             launch_manifest.get(barrier_key), protocol_effective[barrier_key]
@@ -430,6 +453,8 @@ def validate_test_planner_effective_contract(
             )
     if bundle.protocol.get("schema_version") == PROTOCOL_SCHEMA_V5:
         validate_v5_runtime_worker_binding(launch_manifest)
+    if bundle.protocol.get("schema_version") == PROTOCOL_SCHEMA_V6:
+        validate_v6_runtime_binding(launch_manifest)
 
 
 def validate_decision_header(fieldnames: list[str] | None) -> None:
@@ -775,7 +800,7 @@ def registered_run_ids(protocol: dict[str, Any]) -> list[str]:
     matrix_matches = (
         exact_json_equal(seeds, [211, 223, 237, 253, 271])
         and exact_json_equal(repetitions, [1, 2, 3])
-        if schema in {PROTOCOL_SCHEMA_V2, PROTOCOL_SCHEMA_V3, PROTOCOL_SCHEMA_V4, PROTOCOL_SCHEMA_V5}
+        if schema in {PROTOCOL_SCHEMA_V2, PROTOCOL_SCHEMA_V3, PROTOCOL_SCHEMA_V4, PROTOCOL_SCHEMA_V5, PROTOCOL_SCHEMA_V6}
         else seeds == [211, 223, 237, 253, 271]
         and repetitions == [1, 2, 3]
     )
@@ -791,6 +816,8 @@ def registered_run_ids(protocol: dict[str, Any]) -> list[str]:
         template = "p4-g0c-r4-seed{seed}-rep{repetition:02d}"
     elif schema == PROTOCOL_SCHEMA_V5:
         template = "p4-g0c-r5-seed{seed}-rep{repetition:02d}"
+    elif schema == PROTOCOL_SCHEMA_V6:
+        template = "p4-g0c-r6-seed{seed}-rep{repetition:02d}"
     else:
         raise ProtocolError("unknown P4-G0C protocol schema")
     return [
@@ -811,7 +838,7 @@ def validate_protocol(protocol: dict[str, Any]) -> None:
         raise ProtocolError("matrix order is not frozen")
     if (
         not exact_json_equal(protocol.get("minimum_complete_decisions"), 100)
-        if schema in {PROTOCOL_SCHEMA_V2, PROTOCOL_SCHEMA_V3, PROTOCOL_SCHEMA_V4, PROTOCOL_SCHEMA_V5}
+        if schema in {PROTOCOL_SCHEMA_V2, PROTOCOL_SCHEMA_V3, PROTOCOL_SCHEMA_V4, PROTOCOL_SCHEMA_V5, PROTOCOL_SCHEMA_V6}
         else protocol.get("minimum_complete_decisions") != 100
     ):
         raise ProtocolError("minimum complete-decision count is not 100")
@@ -860,7 +887,7 @@ def validate_protocol(protocol: dict[str, Any]) -> None:
         "safety_viz.enable_p4_viz": False,
         "start_rviz": False,
     }
-    if schema in {PROTOCOL_SCHEMA_V4, PROTOCOL_SCHEMA_V5}:
+    if schema in {PROTOCOL_SCHEMA_V4, PROTOCOL_SCHEMA_V5, PROTOCOL_SCHEMA_V6}:
         required.update({
             "p0.predictor.sigma_grow_m_sqrt_s": 0.01,
             "p0.predictor.sigma_growth_profile": (
@@ -868,20 +895,25 @@ def validate_protocol(protocol: dict[str, Any]) -> None:
             ),
             "p4.require_risk_grid_ready_before_planning": True,
         })
-    if schema == PROTOCOL_SCHEMA_V5:
+    if schema in {PROTOCOL_SCHEMA_V5, PROTOCOL_SCHEMA_V6}:
         required["p0.predictor.worker_count"] = 4
+    if schema == PROTOCOL_SCHEMA_V6:
+        required.update({
+            "p0.horizons_s": [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0],
+            "p4.cost_query_policy": "CONSERVATIVE_OCCUPIED_COST_SUPPORT",
+        })
     if set(effective) != set(required):
         raise ProtocolError("effective protocol values must match the exact frozen set")
     for key, value in required.items():
         if (
             not exact_json_equal(effective.get(key), value)
-            if schema in {PROTOCOL_SCHEMA_V2, PROTOCOL_SCHEMA_V3, PROTOCOL_SCHEMA_V4, PROTOCOL_SCHEMA_V5}
+            if schema in {PROTOCOL_SCHEMA_V2, PROTOCOL_SCHEMA_V3, PROTOCOL_SCHEMA_V4, PROTOCOL_SCHEMA_V5, PROTOCOL_SCHEMA_V6}
             else effective.get(key) != value
         ):
             raise ProtocolError(f"effective protocol value is not frozen: {key}")
     floor = protocol.get("numerical_noise_floor")
     quantiles = protocol.get("quantiles")
-    if schema in {PROTOCOL_SCHEMA_V2, PROTOCOL_SCHEMA_V3, PROTOCOL_SCHEMA_V4, PROTOCOL_SCHEMA_V5}:
+    if schema in {PROTOCOL_SCHEMA_V2, PROTOCOL_SCHEMA_V3, PROTOCOL_SCHEMA_V4, PROTOCOL_SCHEMA_V5, PROTOCOL_SCHEMA_V6}:
         if not exact_json_equal(floor, FROZEN_NUMERICAL_NOISE_FLOOR):
             raise ProtocolError(
                 "scientific contract numerical-noise floor is not frozen"
@@ -937,13 +969,13 @@ def validate_protocol(protocol: dict[str, Any]) -> None:
     }
     if (
         not exact_json_equal(ratio, expected_ratio)
-        if schema in {PROTOCOL_SCHEMA_V2, PROTOCOL_SCHEMA_V3, PROTOCOL_SCHEMA_V4, PROTOCOL_SCHEMA_V5}
+        if schema in {PROTOCOL_SCHEMA_V2, PROTOCOL_SCHEMA_V3, PROTOCOL_SCHEMA_V4, PROTOCOL_SCHEMA_V5, PROTOCOL_SCHEMA_V6}
         else ratio != expected_ratio
     ):
         raise ProtocolError(
             "scientific contract path-ratio consistency is not frozen"
         )
-    if schema in {PROTOCOL_SCHEMA_V2, PROTOCOL_SCHEMA_V3, PROTOCOL_SCHEMA_V4, PROTOCOL_SCHEMA_V5}:
+    if schema in {PROTOCOL_SCHEMA_V2, PROTOCOL_SCHEMA_V3, PROTOCOL_SCHEMA_V4, PROTOCOL_SCHEMA_V5, PROTOCOL_SCHEMA_V6}:
         expected_template = (
             f"p4-g0c-r{schema[-1]}-seed{{seed}}-rep{{repetition:02d}}"
         )
@@ -964,7 +996,7 @@ def validate_protocol(protocol: dict[str, Any]) -> None:
                 or not _is_sha256(binding.get("sha256"))
             ):
                 raise ProtocolError(f"replacement {key} binding is malformed")
-    if schema in {PROTOCOL_SCHEMA_V4, PROTOCOL_SCHEMA_V5}:
+    if schema in {PROTOCOL_SCHEMA_V4, PROTOCOL_SCHEMA_V5, PROTOCOL_SCHEMA_V6}:
         expected_binding = {
             "analyzer": {
                 "path": "results/icra27/icra035/runs/benchmark/analyzer/gate0_analysis.json",
@@ -1214,6 +1246,35 @@ def validate_replacement_lineage_v5(
             raise ProtocolError(f"r5 retained artifact drift: {artifact['path']}")
 
 
+def validate_replacement_lineage_v6(
+    lineage: dict[str, Any], repository_root: Path
+) -> None:
+    """Bind the unconsumed r5 attempt and isolate the repaired r6 matrix."""
+    if lineage.get("schema_version") != "p4_g0c_replacement_lineage_v6":
+        raise ProtocolError("r6 replacement lineage schema is unknown")
+    if lineage.get("replacement_namespace") != (
+        "p4-g0c-r6-seed<seed>-rep<two-digits>"
+    ) or lineage.get("excluded_namespaces") != [
+        "p4-g0c-r5-seed<seed>-rep<two-digits>"
+    ]:
+        raise ProtocolError("r6 replacement lineage namespace isolation failed")
+    if lineage.get("replacement_reason") != (
+        "R5_TEMPORAL_AND_OCCUPIED_SUPPORT_INCOMPLETE_NO_REGISTERED_ID_CONSUMED"
+    ):
+        raise ProtocolError("r6 replacement reason mismatch")
+    if not exact_json_equal(lineage.get("r5_execution"), {
+        "attempted_registered_run_count": 0,
+        "registered_identity_consumed": False,
+        "task_id": "ICRA-062",
+    }):
+        raise ProtocolError("r6 unconsumed r5 execution record mismatch")
+    for artifact in lineage.get("superseded_artifacts", []):
+        if not isinstance(artifact, dict) or not _is_sha256(artifact.get("sha256")):
+            raise ProtocolError("r6 retained artifact binding is malformed")
+        if sha256_file(repository_root / artifact["path"]) != artifact["sha256"]:
+            raise ProtocolError(f"r6 retained artifact drift: {artifact['path']}")
+
+
 def load_protocol_bundle(
     protocol_path: Path,
     registry_path: Path,
@@ -1253,6 +1314,11 @@ def load_protocol_bundle(
         or registry_sha != P4_G0C_REGISTRY_V5_TRUSTED_SHA256
     ):
         raise ProtocolError("v5 trust anchor protocol/registry hash mismatch")
+    if expected_protocol_schema == PROTOCOL_SCHEMA_V6 and (
+        protocol_sha != P4_G0C_PROTOCOL_V6_TRUSTED_SHA256
+        or registry_sha != P4_G0C_REGISTRY_V6_TRUSTED_SHA256
+    ):
+        raise ProtocolError("v6 trust anchor protocol/registry hash mismatch")
     validate_protocol(protocol)
     validate_proposed_registry(registry)
     expected_registry_schema = {
@@ -1261,12 +1327,13 @@ def load_protocol_bundle(
         PROTOCOL_SCHEMA_V3: REGISTRY_SCHEMA_V3,
         PROTOCOL_SCHEMA_V4: REGISTRY_SCHEMA_V4,
         PROTOCOL_SCHEMA_V5: REGISTRY_SCHEMA_V5,
+        PROTOCOL_SCHEMA_V6: REGISTRY_SCHEMA_V6,
     }[expected_protocol_schema]
     if registry.get("schema_version") != expected_registry_schema:
         raise ProtocolError("protocol and registry versions do not match")
     expected_fixture_schema = (
         FIXTURE_SCHEMA_V2
-        if expected_protocol_schema == PROTOCOL_SCHEMA_V5
+        if expected_protocol_schema in {PROTOCOL_SCHEMA_V5, PROTOCOL_SCHEMA_V6}
         else FIXTURE_SCHEMA_V1
     )
     if fixture.get("schema_version") != expected_fixture_schema:
@@ -1280,7 +1347,7 @@ def load_protocol_bundle(
         raise ProtocolError("registry numerical-noise floor mismatch")
     if expected_protocol_schema in {
         PROTOCOL_SCHEMA_V2, PROTOCOL_SCHEMA_V3, PROTOCOL_SCHEMA_V4,
-        PROTOCOL_SCHEMA_V5,
+        PROTOCOL_SCHEMA_V5, PROTOCOL_SCHEMA_V6,
     }:
         repository_root = protocol_path.resolve().parents[2]
         for key in ("runtime_dependency_manifest", "replacement_lineage"):
@@ -1292,7 +1359,9 @@ def load_protocol_bundle(
             if payload.get("schema_version") != binding["schema_version"]:
                 raise ProtocolError(f"replacement {key} schema mismatch")
             if key == "replacement_lineage":
-                if expected_protocol_schema == PROTOCOL_SCHEMA_V5:
+                if expected_protocol_schema == PROTOCOL_SCHEMA_V6:
+                    validate_replacement_lineage_v6(payload, repository_root)
+                elif expected_protocol_schema == PROTOCOL_SCHEMA_V5:
                     validate_replacement_lineage_v5(payload, repository_root)
                 elif expected_protocol_schema == PROTOCOL_SCHEMA_V4:
                     validate_replacement_lineage_v4(payload, repository_root)
@@ -1311,7 +1380,9 @@ def expand_run_plan(protocol: dict[str, Any], runs_root: Path) -> list[dict[str,
     result = []
     for seed in protocol["seeds"]:
         for repetition in protocol["repetitions"]:
-            if protocol["schema_version"] == PROTOCOL_SCHEMA_V5:
+            if protocol["schema_version"] == PROTOCOL_SCHEMA_V6:
+                run_id = f"p4-g0c-r6-seed{seed}-rep{repetition:02d}"
+            elif protocol["schema_version"] == PROTOCOL_SCHEMA_V5:
                 run_id = f"p4-g0c-r5-seed{seed}-rep{repetition:02d}"
             elif protocol["schema_version"] == PROTOCOL_SCHEMA_V4:
                 run_id = f"p4-g0c-r4-seed{seed}-rep{repetition:02d}"

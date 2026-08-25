@@ -7745,3 +7745,29 @@ failure, so no RiskGrid semantics, r6 artifact, registered runner, analyzer or
 threshold action is permitted. Final result is
 `BLOCKED_R5_READINESS_TIME_SUPPORT_BEFORE_REGISTERED_IDENTITY`; registered
 attempt/completion/retry counts remain `0/0/0` and no G0C PASS is claimed.
+
+## 2026-08-25 — ICRA-063 R6 SUPPORT SEMANTICS; READINESS LAUNCH BLOCKED
+
+IAP-RQ-320, IAP-RQ-322 and IAP-RQ-423. Added a typed RiskGrid cost-query
+policy with legacy-strict default and r6-only conservative occupied cost
+support. Positive-weight `OCCUPIED_SKIP` corners contribute finite
+`unknown_cost`; zero-weight invalid corners are ignored; all other invalid
+categories, health and PL validity remain fail-closed. Original/risk guide
+profiles and risk-A* use the same policy. Focused C++ and 501/501 hermetic
+Python tests pass, including the exact seven-layer 0.0--3.0 s envelope.
+
+Created canonical v6 protocol/registry/dependency/lineage with 15 disjoint r6
+IDs; r5 remains unconsumed and v1-v5 hashes are unchanged. The raw ICRA-062
+classification is no longer tracked but its ignored local copy remains. Its
+four pre-recorder entries are recorded as immutable Low deviations using
+`UNRECOVERABLE_PRE_RECORDER_FIELD` rather than invented timing.
+
+The fresh build passes 17/17 sequential merged non-symlink Release/CUDA
+packages, 17 tests-off caches, six ELF libraries and zero historical linkage.
+Mandatory GPU preflight passes one device. The sole nonregistered r6 readiness
+then exits before ROS: launch rejects `P4-G0C protocol effective config
+mismatch`; dependency 18/13/1/14/6 and P0 profile preflights passed, while both
+required processes never started. The readiness is not retried. Registered r6
+attempts, full runner and analyzer remain zero; no draft, threshold action or
+G0C claim exists. Result is
+`BLOCKED_R6_READINESS_PROTOCOL_EFFECTIVE_CONFIG_MISMATCH_BEFORE_REGISTERED_IDENTITY`.

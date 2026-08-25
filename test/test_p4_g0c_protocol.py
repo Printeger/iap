@@ -46,6 +46,39 @@ EXPECTED_TOP_LEVEL_EFFECTIVE_KEYS = {
 
 
 class P4G0CProtocolTest(unittest.TestCase):
+    def test_v6_extends_only_temporal_and_occupied_support_identity(self):
+        v5 = MODULE.load_protocol_bundle(
+            REPO / "config/icra27/p4_g0c_protocol_v5.json",
+            REPO / "config/icra27/p4_threshold_registry_v5.json",
+            REPO / "config/icra27/p4_g0c_live_fixture_v2.json",
+            expected_protocol_schema=MODULE.PROTOCOL_SCHEMA_V5,
+        )
+        v6 = MODULE.load_protocol_bundle(
+            REPO / "config/icra27/p4_g0c_protocol_v6.json",
+            REPO / "config/icra27/p4_threshold_registry_v6.json",
+            REPO / "config/icra27/p4_g0c_live_fixture_v2.json",
+            expected_protocol_schema=MODULE.PROTOCOL_SCHEMA_V6,
+        )
+        effective = dict(v6.protocol["effective_values"])
+        self.assertEqual(
+            effective.pop("p0.horizons_s"),
+            [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0],
+        )
+        self.assertEqual(
+            effective.pop("p4.cost_query_policy"),
+            "CONSERVATIVE_OCCUPIED_COST_SUPPORT",
+        )
+        self.assertEqual(effective, v5.protocol["effective_values"])
+        self.assertEqual(len(v6.protocol["registered_run_ids"]), 15)
+        self.assertTrue(all(
+            run_id.startswith("p4-g0c-r6-")
+            for run_id in v6.protocol["registered_run_ids"]
+        ))
+        self.assertFalse(
+            set(v5.protocol["registered_run_ids"])
+            & set(v6.protocol["registered_run_ids"])
+        )
+
     def test_v5_runtime_worker_binding_requires_exact_typed_four_four(self):
         valid = {
             "p0.predictor.requested_worker_count": 4,

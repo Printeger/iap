@@ -425,6 +425,7 @@ bool interpolate_cost_layer(const RiskGridSnapshot::Generation& generation,
                             const double query_time_s,
                             SpatialCostInterp* out,
                             std::string* reason,
+                            const RiskCostQueryPolicy policy,
                             RiskCostQueryTrace* trace = nullptr,
                             const int temporal_layer = -1,
                             const double temporal_weight = 0.0) {
@@ -439,11 +440,24 @@ bool interpolate_cost_layer(const RiskGridSnapshot::Generation& generation,
       for (int dz = 0; dz <= 1; ++dz) {
         const Eigen::Vector3i id = base_id + Eigen::Vector3i(dx, dy, dz);
         const RiskVoxel& voxel = voxel_at(generation, horizon_id, id);
+        const double spatial_weight = wx[dx] * wy[dy] * wz[dz];
+        const double combined_weight = spatial_weight * temporal_weight;
         std::string corner_reason;
         const bool corner_valid = validate_corner(
             voxel, query_time_s, generation.params.stale_timeout_s,
             false, true, &corner_reason);
-        if (!corner_valid && first_invalid_reason.empty()) {
+        const bool conservative_occupied_support =
+            policy == RiskCostQueryPolicy::CONSERVATIVE_OCCUPIED_COST_SUPPORT &&
+            combined_weight > 0.0 && voxel.unknown && !voxel.valid &&
+            !voxel.stale &&
+            voxel.source_flags == RISK_GRID_SOURCE_OCCUPIED_SKIP &&
+            corner_reason == "occupied" &&
+            std::isfinite(generation.params.unknown_cost);
+        const bool ignored_zero_weight =
+            policy == RiskCostQueryPolicy::CONSERVATIVE_OCCUPIED_COST_SUPPORT &&
+            combined_weight == 0.0;
+        if (!corner_valid && !conservative_occupied_support &&
+            !ignored_zero_weight && first_invalid_reason.empty()) {
           first_invalid_reason = corner_reason;
           valid = false;
         }
@@ -459,7 +473,7 @@ bool interpolate_cost_layer(const RiskGridSnapshot::Generation& generation,
           corner.voxel_position =
               (id.cast<double>() + Eigen::Vector3d::Constant(0.5)) *
                   generation.params.resolution_m + generation.origin;
-          corner.spatial_weight = wx[dx] * wy[dy] * wz[dz];
+          corner.spatial_weight = spatial_weight;
           corner.source_flags = voxel.source_flags;
           corner.c_pi = voxel.c_pi;
           corner.valid = voxel.valid;
@@ -471,7 +485,9 @@ bool interpolate_cost_layer(const RiskGridSnapshot::Generation& generation,
           }
           trace->corners.push_back(std::move(corner));
         }
-        c[dx][dy][dz] = voxel.c_pi;
+        c[dx][dy][dz] = conservative_occupied_support
+                            ? generation.params.unknown_cost
+                            : (ignored_zero_weight ? 0.0 : voxel.c_pi);
       }
     }
   }
@@ -487,7 +503,10 @@ bool interpolate_cost_layer(const RiskGridSnapshot::Generation& generation,
   for (int dx = 0; dx <= 1; ++dx) {
     for (int dy = 0; dy <= 1; ++dy) {
       for (int dz = 0; dz <= 1; ++dz) {
-        value += wx[dx] * wy[dy] * wz[dz] * c[dx][dy][dz];
+        const double weight = wx[dx] * wy[dy] * wz[dz];
+        if (weight > 0.0) {
+          value += weight * c[dx][dy][dz];
+        }
       }
     }
   }
@@ -495,17 +514,23 @@ bool interpolate_cost_layer(const RiskGridSnapshot::Generation& generation,
   Eigen::Vector3d grad = Eigen::Vector3d::Zero();
   for (int dy = 0; dy <= 1; ++dy) {
     for (int dz = 0; dz <= 1; ++dz) {
-      grad.x() += wy[dy] * wz[dz] * (c[1][dy][dz] - c[0][dy][dz]);
+      if (std::isfinite(c[1][dy][dz]) && std::isfinite(c[0][dy][dz])) {
+        grad.x() += wy[dy] * wz[dz] * (c[1][dy][dz] - c[0][dy][dz]);
+      }
     }
   }
   for (int dx = 0; dx <= 1; ++dx) {
     for (int dz = 0; dz <= 1; ++dz) {
-      grad.y() += wx[dx] * wz[dz] * (c[dx][1][dz] - c[dx][0][dz]);
+      if (std::isfinite(c[dx][1][dz]) && std::isfinite(c[dx][0][dz])) {
+        grad.y() += wx[dx] * wz[dz] * (c[dx][1][dz] - c[dx][0][dz]);
+      }
     }
   }
   for (int dx = 0; dx <= 1; ++dx) {
     for (int dy = 0; dy <= 1; ++dy) {
-      grad.z() += wx[dx] * wy[dy] * (c[dx][dy][1] - c[dx][dy][0]);
+      if (std::isfinite(c[dx][dy][1]) && std::isfinite(c[dx][dy][0])) {
+        grad.z() += wx[dx] * wy[dy] * (c[dx][dy][1] - c[dx][dy][0]);
+      }
     }
   }
   grad /= generation.params.resolution_m;
@@ -610,12 +635,29 @@ bool trilinear_base(const RiskGridSnapshot& snapshot,
 bool RiskGridSnapshot::queryCost(const Eigen::Vector3d& p_w,
                                  const double query_time_s,
                                  RiskCostSample* out) const {
-  return queryCost(p_w, query_time_s, out, nullptr);
+  return queryCost(p_w, query_time_s, out,
+                   RiskCostQueryPolicy::LEGACY_STRICT, nullptr);
 }
 
 bool RiskGridSnapshot::queryCost(const Eigen::Vector3d& p_w,
                                  const double query_time_s,
                                  RiskCostSample* out,
+                                 RiskCostQueryTrace* trace) const {
+  return queryCost(p_w, query_time_s, out,
+                   RiskCostQueryPolicy::LEGACY_STRICT, trace);
+}
+
+bool RiskGridSnapshot::queryCost(const Eigen::Vector3d& p_w,
+                                 const double query_time_s,
+                                 RiskCostSample* out,
+                                 const RiskCostQueryPolicy policy) const {
+  return queryCost(p_w, query_time_s, out, policy, nullptr);
+}
+
+bool RiskGridSnapshot::queryCost(const Eigen::Vector3d& p_w,
+                                 const double query_time_s,
+                                 RiskCostSample* out,
+                                 const RiskCostQueryPolicy policy,
                                  RiskCostQueryTrace* trace) const {
   if (out == nullptr) {
     return false;
@@ -669,7 +711,7 @@ bool RiskGridSnapshot::queryCost(const Eigen::Vector3d& p_w,
   SpatialCostInterp lower;
   const bool lower_valid = interpolate_cost_layer(
       *generation_, bracket.lower, base_id, frac, query_time_s, &lower,
-      &reason, trace, 0, 1.0 - bracket.weight_upper);
+      &reason, policy, trace, 0, 1.0 - bracket.weight_upper);
   const std::string lower_reason = reason;
   SpatialCostInterp upper = lower;
   bool upper_valid = lower_valid;
@@ -677,7 +719,7 @@ bool RiskGridSnapshot::queryCost(const Eigen::Vector3d& p_w,
   if (bracket.upper != bracket.lower) {
     upper_valid = interpolate_cost_layer(
         *generation_, bracket.upper, base_id, frac, query_time_s, &upper,
-        &upper_reason, trace, 1, bracket.weight_upper);
+        &upper_reason, policy, trace, 1, bracket.weight_upper);
   }
   if (!lower_valid || !upper_valid) {
     return fail(!lower_valid ? lower_reason : upper_reason);

@@ -90,6 +90,21 @@ def wrong_type_value(value):
 
 
 class P4G0CAnalyzerTest(unittest.TestCase):
+    def test_v6_uses_exact_versioned_analysis_and_runner_schemas(self):
+        bundle = MODULE.load_bundle(
+            REPO / "config/icra27/p4_g0c_protocol_v6.json",
+            REPO / "config/icra27/p4_threshold_registry_v6.json",
+            REPO / "config/icra27/p4_g0c_live_fixture_v2.json",
+            expected_protocol_schema=MODULE.PROTOCOL_SCHEMA_V6,
+        )
+        self.assertEqual(
+            MODULE._versioned_schema(bundle, "p4_g0c_analysis"),
+            "p4_g0c_analysis_v6",
+        )
+        self.assertEqual(
+            MODULE._runner_state_schema(bundle), "p4_g0c_runner_state_v8"
+        )
+
     def setUp(self):
         self.bundle = MODULE.load_bundle(
             REPO / "config/icra27/p4_g0c_protocol_v1.json",

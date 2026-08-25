@@ -393,6 +393,8 @@ namespace ego_planner
     node->declare_parameter("p4.debug_csv_path", std::string(""));
     node->declare_parameter("p4.profile_trace_enable", false);
     node->declare_parameter("p4.profile_trace_path", std::string(""));
+    node->declare_parameter(
+      "p4.cost_query_policy", std::string("LEGACY_STRICT"));
 
     node->get_parameter("optimization/lambda_smooth", lambda1_);
     node->get_parameter("optimization/lambda_collision", lambda2_);
@@ -483,6 +485,20 @@ namespace ego_planner
     node->get_parameter("p4.debug_csv_path", p4_config_.debug_csv_path);
     node->get_parameter("p4.profile_trace_enable", p4_config_.profile_trace_enable);
     node->get_parameter("p4.profile_trace_path", p4_config_.profile_trace_path);
+    std::string p4_cost_query_policy;
+    node->get_parameter("p4.cost_query_policy", p4_cost_query_policy);
+    if (p4_cost_query_policy == "CONSERVATIVE_OCCUPIED_COST_SUPPORT") {
+      p4_config_.cost_query_policy =
+        iap::RiskCostQueryPolicy::CONSERVATIVE_OCCUPIED_COST_SUPPORT;
+    } else {
+      if (p4_cost_query_policy != "LEGACY_STRICT") {
+        RCLCPP_WARN(
+          rclcpp::get_logger("BsplineOptimizer"),
+          "unsupported p4.cost_query_policy '%s'; using LEGACY_STRICT",
+          p4_cost_query_policy.c_str());
+      }
+      p4_config_.cost_query_policy = iap::RiskCostQueryPolicy::LEGACY_STRICT;
+    }
     p4_config_.query_speed_mps = std::isfinite(max_vel_) && max_vel_ > 1.0e-3 ? max_vel_ : 1.0;
   }
 

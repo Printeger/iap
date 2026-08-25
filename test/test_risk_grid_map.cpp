@@ -538,6 +538,25 @@ TEST(RiskGridMapTest, TemporalInterpolationAcrossHorizons) {
   EXPECT_NEAR(sample.grad.z(), 4.0, 1.0e-9);
 }
 
+TEST(RiskGridMapTest, R6TemporalEnvelopeSupportsObservedTailOnlyThroughThreeSeconds) {
+  auto params = base_params();
+  params.horizons_s = {0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0};
+  iap::RiskGridMap grid(params);
+  auto snapshot = make_snapshot(&grid, 10.0);
+
+  const Eigen::Vector3d query(0.0, 0.0, 0.0);
+  iap::RiskCostSample supported;
+  ASSERT_TRUE(snapshot->queryCost(query, 12.50208, &supported))
+    << supported.reason;
+  EXPECT_TRUE(supported.valid);
+  EXPECT_NEAR(
+    supported.cost, AffineProvider::affine(query, 2.50208), 1.0e-9);
+
+  iap::RiskCostSample unsupported;
+  EXPECT_FALSE(snapshot->queryCost(query, 13.000001, &unsupported));
+  EXPECT_EQ(unsupported.reason, "time_out_of_horizon");
+}
+
 TEST(RiskGridMapTest, QueryCostAndPredictedPLAreSemanticallySeparate) {
   iap::RiskGridMap grid(base_params());
   auto snapshot = make_snapshot(&grid, 10.0);
@@ -637,6 +656,107 @@ TEST(RiskGridMapTest, SkipOccupiedVoxelsMarksOccupiedAsUnknown) {
   EXPECT_EQ(pl.reason, "occupied");
   EXPECT_FALSE(pl.available);
   EXPECT_FALSE(pl.valid);
+}
+
+TEST(RiskGridMapTest,
+     ConservativeOccupiedCostSupportPreservesIntegrityInvalidity) {
+  iap::RiskGridMapParams params = base_params();
+  params.skip_occupied_voxels = true;
+  iap::RiskGridMap grid(params);
+  AffineProvider provider;
+  std::string reason;
+  ASSERT_TRUE(grid.refreshFromProvider(
+      Eigen::Vector3d::Zero(), 10.0, provider,
+      [](const Eigen::Vector3d&) { return true; }, &reason)) << reason;
+
+  const auto snapshot = grid.acquireSnapshot();
+  ASSERT_NE(snapshot, nullptr);
+  iap::RiskCostSample strict;
+  EXPECT_FALSE(snapshot->queryCost(Eigen::Vector3d::Zero(), 10.5, &strict));
+  EXPECT_EQ(strict.reason, "occupied");
+
+  iap::RiskCostSample supported;
+  iap::RiskCostQueryTrace trace;
+  ASSERT_TRUE(snapshot->queryCost(
+      Eigen::Vector3d::Zero(), 10.5, &supported,
+      iap::RiskCostQueryPolicy::CONSERVATIVE_OCCUPIED_COST_SUPPORT,
+      &trace)) << supported.reason;
+  EXPECT_TRUE(supported.valid);
+  EXPECT_FALSE(supported.stale);
+  EXPECT_DOUBLE_EQ(supported.cost, params.unknown_cost);
+  EXPECT_EQ(supported.reason, "ok");
+  EXPECT_TRUE(trace.success);
+  EXPECT_EQ(trace.corners.size(), 16u);
+  EXPECT_TRUE(std::all_of(
+      trace.corners.begin(), trace.corners.end(), [](const auto& corner) {
+        return !corner.valid && corner.unknown &&
+               corner.invalid_reason == "occupied";
+      }));
+
+  const auto health = snapshot->health();
+  EXPECT_DOUBLE_EQ(health.valid_ratio, 0.0);
+  EXPECT_DOUBLE_EQ(health.unknown_ratio, 1.0);
+  EXPECT_EQ(health.occupied_skip_count, 54u);
+  iap::PredictedPLSample pl;
+  EXPECT_FALSE(snapshot->queryPredictedPL(
+      Eigen::Vector3d::Zero(), 10.5, &pl));
+  EXPECT_FALSE(pl.valid);
+  EXPECT_EQ(pl.reason, "occupied");
+}
+
+TEST(RiskGridMapTest,
+     ConservativeOccupiedCostSupportIgnoresOnlyExactZeroWeightCorners) {
+  iap::RiskGridMapParams params = base_params();
+  params.skip_occupied_voxels = true;
+  iap::RiskGridMap grid(params);
+  AffineProvider provider;
+  std::string reason;
+  ASSERT_TRUE(grid.refreshFromProvider(
+      Eigen::Vector3d::Zero(), 10.0, provider,
+      [](const Eigen::Vector3d& p) { return p.x() > 0.0; }, &reason))
+      << reason;
+  const auto snapshot = grid.acquireSnapshot();
+  ASSERT_NE(snapshot, nullptr);
+  const Eigen::Vector3d exact_center(-0.5, -0.5, -0.5);
+
+  iap::RiskCostSample strict;
+  EXPECT_FALSE(snapshot->queryCost(exact_center, 10.0, &strict));
+  iap::RiskCostSample supported;
+  ASSERT_TRUE(snapshot->queryCost(
+      exact_center, 10.0, &supported,
+      iap::RiskCostQueryPolicy::CONSERVATIVE_OCCUPIED_COST_SUPPORT));
+  EXPECT_TRUE(supported.valid);
+  EXPECT_TRUE(std::isfinite(supported.cost));
+  EXPECT_NE(supported.cost, params.unknown_cost);
+}
+
+TEST(RiskGridMapTest,
+     ConservativeOccupiedCostSupportRejectsOtherInvalidCategories) {
+  iap::RiskGridMapParams params = base_params();
+  params.stale_timeout_s = 0.1;
+  iap::RiskGridMap grid(params);
+  const auto snapshot = make_snapshot(&grid, 10.0);
+  iap::RiskCostSample sample;
+  EXPECT_FALSE(snapshot->queryCost(
+      Eigen::Vector3d::Zero(), 10.2, &sample,
+      iap::RiskCostQueryPolicy::CONSERVATIVE_OCCUPIED_COST_SUPPORT));
+  EXPECT_EQ(sample.reason, "stale_voxel");
+  EXPECT_FALSE(snapshot->queryCost(
+      Eigen::Vector3d::Zero(), 13.1, &sample,
+      iap::RiskCostQueryPolicy::CONSERVATIVE_OCCUPIED_COST_SUPPORT));
+  EXPECT_EQ(sample.reason, "time_out_of_horizon");
+
+  iap::RiskGridMap invalid_grid(base_params());
+  AffineProvider invalid_provider;
+  invalid_provider.mark_unknown = true;
+  ASSERT_TRUE(invalid_grid.refreshFromProvider(
+      Eigen::Vector3d::Zero(), 10.0, invalid_provider));
+  const auto invalid_snapshot = invalid_grid.acquireSnapshot();
+  ASSERT_NE(invalid_snapshot, nullptr);
+  EXPECT_FALSE(invalid_snapshot->queryCost(
+      Eigen::Vector3d::Zero(), 10.0, &sample,
+      iap::RiskCostQueryPolicy::CONSERVATIVE_OCCUPIED_COST_SUPPORT));
+  EXPECT_EQ(sample.reason, "unknown_voxel");
 }
 
 TEST(RiskGridMapTest, QueryTraceAttributesOccupiedInterpolationCorner) {

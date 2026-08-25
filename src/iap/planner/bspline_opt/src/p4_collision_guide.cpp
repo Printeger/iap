@@ -67,6 +67,7 @@ bool buildGuideRecord(
   const std::vector<Eigen::Vector3d> & path,
   const std::shared_ptr<const iap::RiskGridSnapshot> & snapshot,
   double query_base_time_s, double query_speed_mps,
+  iap::RiskCostQueryPolicy cost_query_policy,
   bool profile_trace_enable,
   P4GuideRecord * record)
 {
@@ -139,6 +140,7 @@ bool buildGuideRecord(
       query_base_time_s + distance / query_speed_mps;
     const bool hit = snapshot->queryCost(
       point, query_time_s, &sample,
+      cost_query_policy,
       profile_trace_enable ? &query_trace : nullptr);
     if (profile_trace_enable) {
       P4GuideRecord::SampleTrace trace;
@@ -329,6 +331,12 @@ bool P4GuideRequest::valid(std::string * reason) const
   {
     return fail("invalid_effective_config");
   }
+  if (config_.cost_query_policy != iap::RiskCostQueryPolicy::LEGACY_STRICT &&
+    config_.cost_query_policy !=
+    iap::RiskCostQueryPolicy::CONSERVATIVE_OCCUPIED_COST_SUPPORT)
+  {
+    return fail("invalid_cost_query_policy");
+  }
   if (snapshot_ &&
     (snapshot_->generation_id() == 0 ||
     !std::isfinite(snapshot_->stamp_s()) ||
@@ -367,6 +375,7 @@ std::string P4GuideRequest::canonicalIdentityHash() const
   appendCanonicalDouble(stream, config_.unknown_edge_penalty);
   appendCanonicalDouble(stream, config_.max_extra_path_ratio);
   appendCanonicalDouble(stream, config_.query_speed_mps);
+  stream << static_cast<int>(config_.cost_query_policy) << ';';
   stream << config_.fallback_to_original_when_risk_not_ready << ';' <<
     config_.debug_csv_enable << ';' << config_.debug_csv_path;
   return hashHex(fnv1aAppend(kFnvOffset, stream.str()));
@@ -467,6 +476,7 @@ P4GuideDecision P4CollisionGuidePlanner::planCollisionGuide(
   if (!buildGuideRecord(
       original.path, request.snapshot(), request.queryBaseTimeS(),
       request.config().query_speed_mps,
+      request.config().cost_query_policy,
       request.config().profile_trace_enable, &decision.original))
   {
     decision.status = P4GuideDecisionStatus::PLANNER_FAILURE;
@@ -515,6 +525,7 @@ P4GuideDecision P4CollisionGuidePlanner::planCollisionGuide(
   if (!buildGuideRecord(
       risk.path, request.snapshot(), request.queryBaseTimeS(),
       request.config().query_speed_mps,
+      request.config().cost_query_policy,
       request.config().profile_trace_enable, &decision.risk))
   {
     decision.reason = P4GuideDecisionReason::ZERO_LENGTH_GEOMETRY;

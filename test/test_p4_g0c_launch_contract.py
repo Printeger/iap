@@ -29,6 +29,20 @@ SPEC.loader.exec_module(MODULE)
 
 
 class P4G0CLaunchContractTest(unittest.TestCase):
+    def test_v6_preset_has_exact_horizon_and_conservative_policy(self):
+        profile = MODULE.EXPERIMENT_PRESETS[MODULE.P4_G0C_EXPERIMENT_V6]
+        self.assertEqual(
+            profile["p0.horizons_s"], "0.0,0.5,1.0,1.5,2.0,2.5,3.0"
+        )
+        self.assertEqual(
+            profile["p4.cost_query_policy"],
+            "CONSERVATIVE_OCCUPIED_COST_SUPPORT",
+        )
+        self.assertEqual(
+            dict(MODULE.ARG_DEFAULTS)["p4.cost_query_policy"],
+            "LEGACY_STRICT",
+        )
+
     def test_v5_preset_materializes_versioned_fixture_and_worker_profile(self):
         v4 = MODULE.EXPERIMENT_PRESETS[MODULE.P4_G0C_EXPERIMENT_V4]
         v5 = MODULE.EXPERIMENT_PRESETS[MODULE.P4_G0C_EXPERIMENT_V5]
@@ -228,7 +242,7 @@ class P4G0CLaunchContractTest(unittest.TestCase):
             [
                 "FASTRTPS_DEFAULT_PROFILES_FILE", "QT_X11_NO_MITSHM",
                 "XDG_RUNTIME_DIR", "XDG_RUNTIME_DIR", "XDG_RUNTIME_DIR",
-                "XDG_RUNTIME_DIR",
+                "XDG_RUNTIME_DIR", "XDG_RUNTIME_DIR",
             ],
         )
         bindings = surface["runner_launch_bindings"]

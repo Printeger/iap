@@ -61,15 +61,18 @@ RUNNER_SCHEMA_V2 = "p4_g0c_runner_state_v4"
 RUNNER_SCHEMA_V3 = "p4_g0c_runner_state_v5"
 RUNNER_SCHEMA_V4 = "p4_g0c_runner_state_v6"
 RUNNER_SCHEMA_V5 = "p4_g0c_runner_state_v7"
+RUNNER_SCHEMA_V6 = "p4_g0c_runner_state_v8"
 DEPENDENCY_SCHEMA_V2 = "p4_g0c_runtime_dependencies_v2"
 DEPENDENCY_SCHEMA_V3 = "p4_g0c_runtime_dependencies_v3"
 DEPENDENCY_SCHEMA_V4 = "p4_g0c_runtime_dependencies_v4"
 DEPENDENCY_SCHEMA_V5 = "p4_g0c_runtime_dependencies_v5"
+DEPENDENCY_SCHEMA_V6 = "p4_g0c_runtime_dependencies_v6"
 LEGACY_PROTOCOL_SCHEMA = "p4_g0c_protocol_v1"
 REPLACEMENT_PROTOCOL_SCHEMA = "p4_g0c_protocol_v2"
 HARDENED_PROTOCOL_SCHEMA = "p4_g0c_protocol_v3"
 PROFILED_PROTOCOL_SCHEMA = "p4_g0c_protocol_v4"
 CLOSED_FIXTURE_PROTOCOL_SCHEMA = "p4_g0c_protocol_v5"
+TEMPORAL_SUPPORT_PROTOCOL_SCHEMA = "p4_g0c_protocol_v6"
 EXPECTED_ACTIVE_PACKAGES = {
     "iap", "ego_planner", "local_sensing", "odom_visualization",
     "poscmd_2_odom", "gnss_sim", "so3_quadrotor_simulator",
@@ -114,6 +117,7 @@ def load_bundle(
     if bundle.protocol.get("schema_version") in {
         REPLACEMENT_PROTOCOL_SCHEMA, HARDENED_PROTOCOL_SCHEMA,
         PROFILED_PROTOCOL_SCHEMA, CLOSED_FIXTURE_PROTOCOL_SCHEMA,
+        TEMPORAL_SUPPORT_PROTOCOL_SCHEMA,
     }:
         repository_root = Path(protocol_path).resolve().parents[2]
         bundle.dependency_manifest_path = str(
@@ -143,7 +147,8 @@ def validate_p0_profile_binding(bundle: ProtocolBundle) -> dict[str, Any]:
     """Fail closed on the exact retained Gate-0B profile before GPU or ROS."""
     schema = "p4_g0c_p0_profile_preflight_v1"
     if bundle.protocol.get("schema_version") not in {
-        PROFILED_PROTOCOL_SCHEMA, CLOSED_FIXTURE_PROTOCOL_SCHEMA
+        PROFILED_PROTOCOL_SCHEMA, CLOSED_FIXTURE_PROTOCOL_SCHEMA,
+        TEMPORAL_SUPPORT_PROTOCOL_SCHEMA,
     }:
         return {"schema_version": schema, "profile_ready": True,
                 "failure_reason": "", "not_applicable": True}
@@ -157,7 +162,8 @@ def validate_p0_profile_binding(bundle: ProtocolBundle) -> dict[str, Any]:
     if profile != "legacy_iap_rq320_baseline_v1":
         return {"schema_version": schema, "profile_ready": False,
                 "failure_reason": "P0_PROFILE_BINDING_MISMATCH"}
-    if bundle.protocol.get("schema_version") == CLOSED_FIXTURE_PROTOCOL_SCHEMA \
+    if bundle.protocol.get("schema_version") in {
+            CLOSED_FIXTURE_PROTOCOL_SCHEMA, TEMPORAL_SUPPORT_PROTOCOL_SCHEMA} \
             and (type(worker_count) is not int or worker_count != 4):
         return {"schema_version": schema, "profile_ready": False,
                 "failure_reason": "P0_WORKER_BINDING_MISMATCH"}
@@ -449,9 +455,11 @@ def validate_runtime_dependencies(
     if protocol_schema not in {
         REPLACEMENT_PROTOCOL_SCHEMA, HARDENED_PROTOCOL_SCHEMA,
         PROFILED_PROTOCOL_SCHEMA, CLOSED_FIXTURE_PROTOCOL_SCHEMA,
+        TEMPORAL_SUPPORT_PROTOCOL_SCHEMA,
     }:
         return _dependency_failure("DEPENDENCY_PROTOCOL_V2_REQUIRED")
-    version = 5 if protocol_schema == CLOSED_FIXTURE_PROTOCOL_SCHEMA else 4 \
+    version = 6 if protocol_schema == TEMPORAL_SUPPORT_PROTOCOL_SCHEMA else 5 \
+        if protocol_schema == CLOSED_FIXTURE_PROTOCOL_SCHEMA else 4 \
         if protocol_schema == PROFILED_PROTOCOL_SCHEMA else 3 \
         if protocol_schema == HARDENED_PROTOCOL_SCHEMA else 2
     hardened = version >= 3
@@ -471,6 +479,7 @@ def validate_runtime_dependencies(
             resolved_manifest_path,
             binding["sha256"],
             expected_schema=(
+                DEPENDENCY_SCHEMA_V6 if version == 6 else
                 DEPENDENCY_SCHEMA_V5 if version == 5 else
                 DEPENDENCY_SCHEMA_V4 if version == 4 else
                 DEPENDENCY_SCHEMA_V3 if version == 3 else DEPENDENCY_SCHEMA_V2
@@ -803,7 +812,8 @@ def launch_command(
     schema = bundle.protocol["schema_version"]
     values = {
         "experiment": (
-            "p4_g0c_metrics_calibration_v5" if schema == CLOSED_FIXTURE_PROTOCOL_SCHEMA
+            "p4_g0c_metrics_calibration_v6" if schema == TEMPORAL_SUPPORT_PROTOCOL_SCHEMA
+            else "p4_g0c_metrics_calibration_v5" if schema == CLOSED_FIXTURE_PROTOCOL_SCHEMA
             else "p4_g0c_metrics_calibration_v4" if schema == PROFILED_PROTOCOL_SCHEMA
             else "p4_g0c_metrics_calibration_v3" if schema == HARDENED_PROTOCOL_SCHEMA
             else "p4_g0c_metrics_calibration_v2" if schema == REPLACEMENT_PROTOCOL_SCHEMA
@@ -827,6 +837,8 @@ def launch_command(
     if schema in {
         HARDENED_PROTOCOL_SCHEMA, PROFILED_PROTOCOL_SCHEMA,
         CLOSED_FIXTURE_PROTOCOL_SCHEMA,
+        TEMPORAL_SUPPORT_PROTOCOL_SCHEMA,
+        TEMPORAL_SUPPORT_PROTOCOL_SCHEMA,
     }:
         if launch_environment is None:
             raise RunnerError("LAUNCH_ENVIRONMENT_NOT_READY:missing_binding")
@@ -918,14 +930,17 @@ def _validate_and_finalize_run(
     hardened = protocol_schema in {
         HARDENED_PROTOCOL_SCHEMA, PROFILED_PROTOCOL_SCHEMA,
         CLOSED_FIXTURE_PROTOCOL_SCHEMA,
+        TEMPORAL_SUPPORT_PROTOCOL_SCHEMA,
     }
     replacement = protocol_schema in {
         REPLACEMENT_PROTOCOL_SCHEMA, HARDENED_PROTOCOL_SCHEMA,
         PROFILED_PROTOCOL_SCHEMA, CLOSED_FIXTURE_PROTOCOL_SCHEMA,
+        TEMPORAL_SUPPORT_PROTOCOL_SCHEMA,
     }
     required_manifest = {
         "schema_version": (
-            "p4_g0c_run_manifest_v5" if protocol_schema == CLOSED_FIXTURE_PROTOCOL_SCHEMA
+            "p4_g0c_run_manifest_v6" if protocol_schema == TEMPORAL_SUPPORT_PROTOCOL_SCHEMA
+            else "p4_g0c_run_manifest_v5" if protocol_schema == CLOSED_FIXTURE_PROTOCOL_SCHEMA
             else "p4_g0c_run_manifest_v4" if protocol_schema == PROFILED_PROTOCOL_SCHEMA
             else "p4_g0c_run_manifest_v3" if hardened
             else "p4_g0c_run_manifest_v2" if replacement
@@ -940,7 +955,8 @@ def _validate_and_finalize_run(
         "csv_path": str(csv_path.resolve()),
         "gate": "G0C",
         "experiment": (
-            "p4_g0c_metrics_calibration_v5" if protocol_schema == CLOSED_FIXTURE_PROTOCOL_SCHEMA
+            "p4_g0c_metrics_calibration_v6" if protocol_schema == TEMPORAL_SUPPORT_PROTOCOL_SCHEMA
+            else "p4_g0c_metrics_calibration_v5" if protocol_schema == CLOSED_FIXTURE_PROTOCOL_SCHEMA
             else "p4_g0c_metrics_calibration_v4" if protocol_schema == PROFILED_PROTOCOL_SCHEMA
             else "p4_g0c_metrics_calibration_v3" if hardened
             else "p4_g0c_metrics_calibration_v2" if replacement
@@ -968,7 +984,9 @@ def _validate_and_finalize_run(
                 "replacement_lineage"
             ]["sha256"],
         })
-    if protocol_schema == CLOSED_FIXTURE_PROTOCOL_SCHEMA:
+    if protocol_schema in {
+        CLOSED_FIXTURE_PROTOCOL_SCHEMA, TEMPORAL_SUPPORT_PROTOCOL_SCHEMA,
+    }:
         required_manifest["admission_parameter"] = {
             "requested": True,
             "effective": True,
@@ -1097,8 +1115,9 @@ def _base_result(bundle: ProtocolBundle, plan: list[dict[str, Any]]) -> dict[str
     registered_ids = [record["run_id"] for record in plan]
     return {
         "schema_version": (
-            RUNNER_SCHEMA_V5
-            if bundle.protocol["schema_version"] == CLOSED_FIXTURE_PROTOCOL_SCHEMA
+            RUNNER_SCHEMA_V6
+            if bundle.protocol["schema_version"] == TEMPORAL_SUPPORT_PROTOCOL_SCHEMA
+            else RUNNER_SCHEMA_V5 if bundle.protocol["schema_version"] == CLOSED_FIXTURE_PROTOCOL_SCHEMA
             else RUNNER_SCHEMA_V4 if bundle.protocol["schema_version"] == PROFILED_PROTOCOL_SCHEMA
             else RUNNER_SCHEMA_V3 if bundle.protocol["schema_version"] == HARDENED_PROTOCOL_SCHEMA
             else RUNNER_SCHEMA_V2
@@ -1218,6 +1237,7 @@ def run(
     if bundle.protocol["schema_version"] in {
         HARDENED_PROTOCOL_SCHEMA, PROFILED_PROTOCOL_SCHEMA,
         CLOSED_FIXTURE_PROTOCOL_SCHEMA,
+        TEMPORAL_SUPPORT_PROTOCOL_SCHEMA,
     }:
         result["runner_state"] = "LAUNCH_ENVIRONMENT_PREFLIGHT_RUNNING"
         _persist_result(runs_root, result)
@@ -1300,6 +1320,7 @@ def run(
             if bundle.protocol["schema_version"] in {
                 HARDENED_PROTOCOL_SCHEMA, PROFILED_PROTOCOL_SCHEMA,
                 CLOSED_FIXTURE_PROTOCOL_SCHEMA,
+                TEMPORAL_SUPPORT_PROTOCOL_SCHEMA,
             }:
                 exit_code, monitor_result = launch_executor(
                     record, command, duration_s, REQUIRED_PROCESSES,
@@ -1358,12 +1379,12 @@ def run(
 def _parser() -> argparse.ArgumentParser:
     repo = Path(__file__).resolve().parents[2]
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--protocol", type=Path, default=repo / "config/icra27/p4_g0c_protocol_v5.json")
-    parser.add_argument("--registry", type=Path, default=repo / "config/icra27/p4_threshold_registry_v5.json")
+    parser.add_argument("--protocol", type=Path, default=repo / "config/icra27/p4_g0c_protocol_v6.json")
+    parser.add_argument("--registry", type=Path, default=repo / "config/icra27/p4_threshold_registry_v6.json")
     parser.add_argument("--fixture", type=Path, default=repo / "config/icra27/p4_g0c_live_fixture_v2.json")
     parser.add_argument(
         "--dependency-manifest", type=Path,
-        default=repo / "config/icra27/p4_g0c_runtime_dependencies_v5.json",
+        default=repo / "config/icra27/p4_g0c_runtime_dependencies_v6.json",
     )
     parser.add_argument("--runs-root", type=Path, required=True)
     modes = parser.add_mutually_exclusive_group()
@@ -1392,6 +1413,10 @@ def main(argv: list[str] | None = None) -> int:
             Path(__file__).resolve().parents[2]
             / "config/icra27/p4_g0c_protocol_v4.json"
         )
+        registered_v5_path = (
+            Path(__file__).resolve().parents[2]
+            / "config/icra27/p4_g0c_protocol_v5.json"
+        )
         trusted_schema = (
             LEGACY_PROTOCOL_SCHEMA
             if args.protocol.resolve() == registered_v1_path
@@ -1402,6 +1427,8 @@ def main(argv: list[str] | None = None) -> int:
             else PROFILED_PROTOCOL_SCHEMA
             if args.protocol.resolve() == registered_v4_path
             else CLOSED_FIXTURE_PROTOCOL_SCHEMA
+            if args.protocol.resolve() == registered_v5_path
+            else TEMPORAL_SUPPORT_PROTOCOL_SCHEMA
         )
         bundle = load_bundle(
             args.protocol,

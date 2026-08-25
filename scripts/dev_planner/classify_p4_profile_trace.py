@@ -22,8 +22,10 @@ CATEGORIES = (
 )
 ARMS = ("original", "risk")
 EXPECTED_SAMPLES_PER_ARM = 200
+RISK_GRID_SOURCE_OCCUPIED_SKIP = 1 << 31
 OCCUPIED_SKIP_BINDING = (
-    "occupied", "RAW_OCCUPIED", "raw_cloud", 2147483648
+    "occupied", "RAW_OCCUPIED", "raw_cloud",
+    RISK_GRID_SOURCE_OCCUPIED_SKIP,
 )
 IDENTITY_FIELDS = (
     "planning_attempt_id", "collision_segment_id", "request_hash"

@@ -41,6 +41,13 @@ def rows_with_invalid(invalid):
 
 
 class P4ProfileTraceClassifierTest(unittest.TestCase):
+    def test_occupied_skip_binding_uses_named_source_flag(self):
+        self.assertEqual(MODULE.RISK_GRID_SOURCE_OCCUPIED_SKIP, 1 << 31)
+        self.assertEqual(
+            MODULE.OCCUPIED_SKIP_BINDING[-1],
+            MODULE.RISK_GRID_SOURCE_OCCUPIED_SKIP,
+        )
+
     def test_mutually_exclusive_categories_and_exact_200_per_arm(self):
         invalid = {
             0: {"sample_valid": "0", "top_reason": "unknown_voxel",

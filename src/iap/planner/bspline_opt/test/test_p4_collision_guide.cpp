@@ -83,6 +83,30 @@ std::shared_ptr<const iap::RiskGridSnapshot> makeSnapshot(ProviderMode mode)
   return snapshot;
 }
 
+std::shared_ptr<const iap::RiskGridSnapshot> makeOccupiedSnapshot()
+{
+  iap::RiskGridMapParams params;
+  params.frame_id = "map";
+  params.resolution_m = 0.5;
+  params.size_x_m = 16.0;
+  params.size_y_m = 16.0;
+  params.size_z_m = 4.0;
+  params.horizons_s = {0.0, 5.0, 10.0};
+  params.stale_timeout_s = 100.0;
+  params.unknown_cost = 50.0;
+  params.cost_max = 100.0;
+  params.skip_occupied_voxels = true;
+  iap::RiskGridMap grid(params);
+  CorridorRiskProvider provider(ProviderMode::SPATIAL);
+  std::string reason;
+  EXPECT_TRUE(grid.refreshFromProvider(
+      Eigen::Vector3d::Zero(), 10.0, provider,
+      [](const Eigen::Vector3d &) {return true;}, &reason)) << reason;
+  auto snapshot = grid.acquireSnapshot();
+  EXPECT_NE(snapshot, nullptr);
+  return snapshot;
+}
+
 P4RiskAStarConfig metricsOnlyConfig()
 {
   P4RiskAStarConfig config;
@@ -240,6 +264,38 @@ TEST(P4CollisionGuideDecision, ProfileTraceDoesNotChangeIdentityOrDecision)
   EXPECT_EQ(enabled.risk.sample_traces.size(), 200U);
   EXPECT_EQ(enabled.original.sample_traces.front().sample_index, 0U);
   EXPECT_EQ(enabled.original.sample_traces.back().sample_index, 199U);
+}
+
+TEST(P4CollisionGuideDecision,
+  BothArmsUseIdenticalConservativeOccupiedCostSupport)
+{
+  uint64_t epoch = 9;
+  const auto snapshot = makeOccupiedSnapshot();
+  auto strict_search = successfulSearch();
+  ego_planner::P4CollisionGuidePlanner strict_planner(strict_search);
+  const auto strict = strict_planner.planCollisionGuide(
+    makeRequest(snapshot, epoch, &epoch));
+  expectOriginalFallback(
+    strict, ego_planner::P4GuideDecisionReason::INCOMPLETE_PROFILE);
+  EXPECT_FALSE(strict.original.risk_profile.complete());
+  EXPECT_FALSE(strict.risk.risk_profile.complete());
+
+  auto supported_config = metricsOnlyConfig();
+  supported_config.cost_query_policy =
+    iap::RiskCostQueryPolicy::CONSERVATIVE_OCCUPIED_COST_SUPPORT;
+  auto supported_search = successfulSearch();
+  ego_planner::P4CollisionGuidePlanner supported_planner(supported_search);
+  const auto supported = supported_planner.planCollisionGuide(
+    makeRequest(snapshot, epoch, &epoch, supported_config));
+
+  expectOriginalFallback(
+    supported, ego_planner::P4GuideDecisionReason::METRICS_ONLY);
+  EXPECT_TRUE(supported.original.risk_profile.complete());
+  EXPECT_TRUE(supported.risk.risk_profile.complete());
+  EXPECT_DOUBLE_EQ(supported.original.risk_profile.mean, 50.0);
+  EXPECT_DOUBLE_EQ(supported.risk.risk_profile.mean, 50.0);
+  EXPECT_DOUBLE_EQ(supported.original.risk_profile.max, 50.0);
+  EXPECT_DOUBLE_EQ(supported.risk.risk_profile.max, 50.0);
 }
 
 TEST(P4CollisionGuideDecision, OriginalFailureIsPlannerFailure)

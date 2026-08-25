@@ -21,6 +21,11 @@ enum class RiskGridSourceValidation {
 
 constexpr uint32_t RISK_GRID_SOURCE_OCCUPIED_SKIP = 1u << 31;
 
+enum class RiskCostQueryPolicy {
+  LEGACY_STRICT = 0,
+  CONSERVATIVE_OCCUPIED_COST_SUPPORT,
+};
+
 struct P5_3HighRiskZoneFixtureConfig {
   bool enabled = false;
   std::string name = "future_high_risk_zone_v1";
@@ -263,6 +268,15 @@ class RiskGridSnapshot {
   bool queryCost(const Eigen::Vector3d& p_w,
                  double query_time_s,
                  RiskCostSample* out,
+                 RiskCostQueryTrace* trace) const;
+  bool queryCost(const Eigen::Vector3d& p_w,
+                 double query_time_s,
+                 RiskCostSample* out,
+                 RiskCostQueryPolicy policy) const;
+  bool queryCost(const Eigen::Vector3d& p_w,
+                 double query_time_s,
+                 RiskCostSample* out,
+                 RiskCostQueryPolicy policy,
                  RiskCostQueryTrace* trace) const;
 
   bool queryPredictedPL(const Eigen::Vector3d& p_w,

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""No-ROS eligibility preflight for the versioned P4-G0C r5 fixture."""
+"""No-ROS eligibility preflight for the versioned P4-G0C r5/r6 fixture."""
 
 from __future__ import annotations
 
@@ -13,7 +13,6 @@ from typing import Any
 
 
 RESULT_SCHEMA = "p4_g0c_fixture_eligibility_preflight_v1"
-EXPERIMENT = "p4_g0c_metrics_calibration_v5"
 SCANNER_FILTER = (
     "P4G0CExactGeometryEligibility."
     "R5FixtureProducesOneClosedSegmentWithFreeEndpointsAndTail:"
@@ -75,7 +74,9 @@ def _literal(node: ast.AST, names: dict[str, Any]) -> Any:
     raise ValueError("LAUNCH_VALUE_NOT_STATIC")
 
 
-def _launch_geometry(launch_path: Path) -> dict[str, Any]:
+def _launch_geometry(
+    launch_path: Path, experiment: str = "p4_g0c_metrics_calibration_v5"
+) -> dict[str, Any]:
     tree = ast.parse(launch_path.read_text(encoding="utf-8"), str(launch_path))
     assignments = _assignments(tree)
     obstacle = _literal(
@@ -110,7 +111,7 @@ def _launch_geometry(launch_path: Path) -> dict[str, Any]:
         raise ValueError("LAUNCH_PRESETS_NOT_STATIC")
     experiment_node = None
     for key, value in zip(presets.keys, presets.values):
-        if isinstance(key, ast.Constant) and key.value == EXPERIMENT:
+        if isinstance(key, ast.Constant) and key.value == experiment:
             experiment_node = value
             break
     if not isinstance(experiment_node, ast.Dict):
@@ -182,7 +183,15 @@ def run_preflight(
     try:
         fixture = _load_json(fixture_path)
         protocol = _load_json(protocol_path)
-        launch_geometry = _launch_geometry(launch_path)
+        schema = protocol.get("schema_version")
+        if schema not in {"p4_g0c_protocol_v5", "p4_g0c_protocol_v6"}:
+            return _failure("PROTOCOL_SCHEMA_MISMATCH")
+        launch_geometry = _launch_geometry(
+            launch_path,
+            "p4_g0c_metrics_calibration_v6"
+            if schema == "p4_g0c_protocol_v6"
+            else "p4_g0c_metrics_calibration_v5",
+        )
     except (OSError, UnicodeDecodeError, json.JSONDecodeError, KeyError, ValueError) as exc:
         return _failure(f"MATERIALIZATION_FAILED:{exc}")
     expected_obstacle = {
@@ -195,8 +204,6 @@ def run_preflight(
     ):
         return _failure("SOURCE_FIXTURE_GEOMETRY_MISMATCH")
     fixture_binding = protocol.get("live_fixture", {})
-    if protocol.get("schema_version") != "p4_g0c_protocol_v5":
-        return _failure("PROTOCOL_SCHEMA_MISMATCH")
     if fixture_binding.get("path") != (
         "config/icra27/p4_g0c_live_fixture_v2.json"
     ):
