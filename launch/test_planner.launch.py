@@ -249,7 +249,7 @@ def _p4_g0c_binding(
     declared_protocol_sha256, declared_registry_sha256,
     declared_fixture_sha256, run_id, seed, repetition,
     run_manifest_path, csv_path, effective_values,
-    child_environment=None, mutable_output_paths=None,
+    child_environment=None, mutable_output_paths=None, readiness_mode=False,
 ):
     if str(experiment) not in P4_G0C_EXPERIMENTS:
         return {}
@@ -314,7 +314,14 @@ def _p4_g0c_binding(
         if replacement
         else f"p4-g0c-seed{int(seed)}-rep{int(repetition):02d}"
     )
-    if run_id != expected_run_id or run_id not in protocol.get("registered_run_ids", []):
+    if readiness_mode:
+        if (
+            version != 4
+            or not re.fullmatch(r"p4-g0c-r4-readiness-[a-z0-9-]+", run_id)
+            or run_id in protocol.get("registered_run_ids", [])
+        ):
+            raise RuntimeError("P4-G0C readiness identity is not isolated")
+    elif run_id != expected_run_id or run_id not in protocol.get("registered_run_ids", []):
         raise RuntimeError("P4-G0C run identity is not registered")
     manifest_path = Path(run_manifest_path).expanduser().resolve()
     decision_path = Path(csv_path).expanduser().resolve()
@@ -485,6 +492,11 @@ def _prepare_p4_g0c_context(context, experiment, iap_share):
         key: LaunchConfiguration(key).perform(context)
         for key in P4_G0C_FROZEN_LAUNCH_VALUES
     }
+    if experiment == P4_G0C_EXPERIMENT_V4:
+        effective.update({
+            key: LaunchConfiguration(key).perform(context)
+            for key in P4_G0C_V4_P0_PROFILE_VALUES
+        })
     _validate_p4_g0c_profile_values(experiment, effective, overrides)
     expected_scenario_values = {
         key: _maybe_resolve_iap_config_path(key, value, iap_share)
@@ -530,6 +542,7 @@ def _prepare_p4_g0c_context(context, experiment, iap_share):
             "p4.g0c.run_manifest_path").perform(context),
         csv_path=csv_path,
         effective_values=effective,
+        readiness_mode=_param_bool(context, "p4.g0c.readiness_mode"),
         child_environment={
             "HOME": LaunchConfiguration("p4.g0c.child_home").perform(context),
             "ROS_HOME": LaunchConfiguration(
@@ -1635,6 +1648,7 @@ ARG_DEFAULTS = [
     ("p4.g0c.fixture_path", ""),
     ("p4.g0c.fixture_sha256", ""),
     ("p4.g0c.run_id", ""),
+    ("p4.g0c.readiness_mode", "false"),
     ("p4.g0c.seed", "0"),
     ("p4.g0c.repetition", "0"),
     ("p4.g0c.run_manifest_path", ""),

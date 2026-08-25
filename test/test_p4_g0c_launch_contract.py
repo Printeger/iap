@@ -51,6 +51,33 @@ class P4G0CLaunchContractTest(unittest.TestCase):
                     {key},
                 )
 
+    def test_v4_readiness_mode_never_accepts_a_registered_r4_identity(self):
+        protocol = REPO / "config/icra27/p4_g0c_protocol_v4.json"
+        registry = REPO / "config/icra27/p4_threshold_registry_v4.json"
+        fixture = REPO / "config/icra27/p4_g0c_live_fixture_v1.json"
+        run_id = "p4-g0c-r4-seed211-rep01"
+        with tempfile.TemporaryDirectory() as tmp, self.assertRaisesRegex(
+            RuntimeError, "readiness identity is not isolated"
+        ):
+            run_dir = Path(tmp) / run_id
+            MODULE._p4_g0c_binding(
+                experiment=MODULE.P4_G0C_EXPERIMENT_V4,
+                protocol_path=protocol,
+                registry_path=registry,
+                fixture_path=fixture,
+                declared_protocol_sha256=MODULE._sha256_file(protocol),
+                declared_registry_sha256=MODULE._sha256_file(registry),
+                declared_fixture_sha256=MODULE._sha256_file(fixture),
+                run_id=run_id, seed=211, repetition=1,
+                run_manifest_path=run_dir / "p4_g0c_run_manifest.json",
+                csv_path=run_dir / "p4_decisions.csv",
+                effective_values={
+                    **MODULE.P4_G0C_FROZEN_LAUNCH_VALUES,
+                    **MODULE.P4_G0C_V4_P0_PROFILE_VALUES,
+                },
+                readiness_mode=True,
+            )
+
     @staticmethod
     def _context():
         context = LaunchContext()

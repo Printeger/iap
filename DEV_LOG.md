@@ -7610,3 +7610,31 @@ discovery; syntax, fatal-only flake8, four canonical JSON checks and repository
 diff checks pass. Every controlled invocation reports the same 17,759-entry
 external inventory with empty delta. Phase B/C invocation counts remain zero;
 no build, GPU, ROS, readiness, registered r4 identity or analyzer has run.
+
+## 2026-08-25 — ICRA-059 READINESS BLOCKED BEFORE R4 IDENTITIES
+
+Phase-A commit `7ec1f94` was pushed before qualification. Build attempt 01
+failed at argument parsing because `--log-base` was placed after `build`; it
+configured zero packages and is retained. Attempt 02 then built 17/17 packages
+in 4m42s. A pre-readiness review found the nonregistered readiness identity
+needed an explicit isolated launch seam and that the actual v4 effective-map
+materialization omitted the two P0 keys. The narrow pre-identity correction
+rejects registered IDs in readiness mode and materializes both exact values.
+Fresh attempt 03 rebuilt 17/17 packages in 4m44s.
+
+Attempt 03 passes the final static closure: 17 package indexes, merged
+non-symlink install, Release, tests OFF, CUDA ON with the registered nvcc,
+OpenCV/viewer OFF, installed/source launch SHA `91f3ec3d…14bf`, and six
+ordinary ELF libraries with no missing or historical linkage. The sole
+readiness GPU preflight passes both `nvidia-smi` calls, `cuInit(0)` and one
+device. The 20-second nonregistered readiness launch materializes P0 sigma
+`0.01` and profile `legacy_iap_rq320_baseline_v1` in top-level and effective
+manifests; both required processes survive the interval and exit cleanly.
+
+Readiness nevertheless fails its scientific/runtime acceptance condition.
+P0 reaches `ready=1`, generation 19 and finite stamps only by the shutdown
+boundary, while all 15 P4 decisions retain generation zero and producer reason
+`snapshot_unavailable`; zero P4 request receives a positive snapshot identity.
+This is `BLOCKED_R4_READINESS_NO_P4_POSITIVE_SNAPSHOT`. Per fail-closed rules,
+no readiness retry, standalone Phase-C dependency, full runner, registered r4
+identity or analyzer was invoked. No threshold action or G0C PASS is claimed.

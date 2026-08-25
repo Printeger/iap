@@ -119,6 +119,17 @@ git diff --check
 - Phase-A hermetic focused/full discovery and static/canonical/diff checks pass
   with zero external ROS-log delta. No qualification/live boundary has run.
 
+## 2026-08-25 ICRA-059 readiness outcome
+
+- Added a v4-only readiness identity seam that accepts only disjoint
+  `p4-g0c-r4-readiness-*` IDs and refuses every registered r4 identity; fixed
+  actual launch-time P0 effective-map materialization before live use.
+- Final fresh attempt 03 built all 17 packages with the frozen CUDA/Release
+  settings and passed the exact static closure.
+- The sole 20-second readiness launch passed GPU and exact P0 manifest checks,
+  and P0 reached generation 19, but none of 15 P4 decisions received a positive
+  snapshot identity. Task stops fail-closed before all Phase-C boundaries.
+
 ## 2026-08-25 (ICRA-058 direct r3 live continuation BLOCKED)
 
 - IAP-RQ-423: adopted the unchanged ICRA-056 CUDA closure without invoking

@@ -1236,3 +1236,11 @@ They do not convert historical `NO-GO-P2`, failed P0 Gate-0B evidence, the stati
 | IAP-RQ-423 | Replace consumed r3 evidence without reuse or changed P4 science | v4 registers 15 disjoint ordered r4 IDs, binds v3 protocol/registry plus ICRA-058 state `9f6241a2…b62ddf` and compact `6a804b26…a32`, and excludes r3 namespace/artifacts | **R4 REGISTERED; no identity attempted** |
 | IAP-RQ-423 | Materialize exact config and keep invalid snapshots fail-closed | v4 launch/dependency/runner/analyzer manifests carry exact P0 values; `snapshot_unavailable` with invalid generation/stamp/frame rejects as `p0_riskgrid_snapshot` with producer reason | **ADVERSARIAL PASS** |
 | IAP-RQ-423 | Complete repository-local Phase-A verification before qualification | Hermetic focused 121/121 and full discovery pass; syntax, fatal-only flake8, canonical JSON and diff checks pass; all external inventory deltas are empty | **PHASE A READY FOR COMMIT/PUSH** |
+
+## 2026-08-25 ICRA-059 readiness fail-closed result
+
+| Req ID | Requirement/evidence seam | Implementation and retained evidence | Status |
+|---|---|---|---|
+| IAP-RQ-320, IAP-RQ-322 | Prove the exact accepted P0 profile reaches runtime | Readiness manifests carry exact typed `0.01` and `legacy_iap_rq320_baseline_v1`; P0 reaches `ready=1`, generation 19 and finite stamps | **P0 PRODUCER READY AT BOUNDARY** |
+| IAP-RQ-423 | Require a P4 request to receive a positive RiskGrid snapshot before any r4 identity | Nonregistered 20-second readiness produces 15 P4 rows, all generation zero / `snapshot_unavailable`; positive snapshot rows = 0 | **BLOCKED_R4_READINESS_NO_P4_POSITIVE_SNAPSHOT** |
+| IAP-RQ-423 | Preserve one-shot calibration identities after readiness failure | Phase-C dependency/full runner/analyzer invocations = 0; r4 attempts/completions/retries = 0/0/0; no threshold action or G0C claim | **FAIL-CLOSED; SUPERVISOR REVIEW** |
