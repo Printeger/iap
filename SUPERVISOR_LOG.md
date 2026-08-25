@@ -1,5 +1,42 @@
 # ICRA Supervisor Log
 
+## 2026-08-25 — ICRA-066 PASS; P4-G0C scientific NO-GO; P0+P5 contingency activated
+
+### Review identity and two-axis verdict
+
+- Fixed review range: `29960831ee905041225bf983d2ed9b50e7da3839...6e37b9e`. The sole Builder commit
+  binds `IAP-RQ-320`, `IAP-RQ-322` and `IAP-RQ-423`; HEAD equals `origin/dev/icra` at divergence `0 0` and
+  `git diff --check` passes. The protected PDF remains sole untracked input with unchanged hash.
+- Standards: PASS with zero documented findings and zero judgement smells. Spec: PASS with zero missing,
+  scope-creep or wrong items. The diff contains only authorized Builder docs, one five-command ledger and one
+  compact result; raw analysis remains ignored/local and all build/install products were retained through Review.
+
+### Authoritative Gate verdict
+
+- The reviewed analyzer was invoked exactly once with the frozen v6 inputs and returned exit 2. This is typed
+  scientific NO-GO, not process failure. The output has zero technical failures, 15/15/15 registered/attempted/
+  completed runs and 192/192 complete/denominator decisions.
+- Mean-improvement Q10 is `0.000020000000000131024` and passes the `1e-12` floor. Max-improvement Q10 is `0`
+  and the sole failed gate is `max_improvement_gate_at_or_below_noise_floor`. Registry/application remain
+  unchanged/disabled and no threshold draft exists.
+- All 103 frozen files still match their recorded hashes. The old rejected analysis remains preserved, the new
+  authoritative analysis SHA is `572e5d79fc5148cb5a4c33d30296186fdeceaa4cc9454c05f2b0986f9cda9c1e`,
+  no task process remains, and no GPU/ROS/runner/identity/G0D/P5 action occurred.
+- Verdict: `ICRA066_PASS_P4_G0C_NO_GO_P0_P5_CONTINGENCY_ACTIVATED`. P4-G0D and a P0+P4+P5 treatment are closed;
+  no r7, threshold tuning or scientific retry is permitted.
+
+### Route and next task
+
+- The preregistered P0+P5 contingency is now the active conference route. P0 Gate-0B remains PASS; P0 is
+  advisory, EGO retains motion authority, and P5 final/runtime are the IAP hard gates. P1/P2/P3/P4 remain in
+  source but disabled. Historical P5 runs remain history and are not relabelled as prospective qualification.
+- Unique next task is `ICRA-067 / P0_P5_CONTINGENCY_PROFILE_AND_QUALIFICATION_HARNESS`: implement an isolated
+  fail-closed `icra_p0_p5` profile and synthetic qualification contract for safe publish, final reject/no-publish
+  and runtime failure. It is real development but performs no live ROS qualification.
+- ICRA-066 Review and push satisfy the retention release condition. Supervisor will now remove only explicitly
+  resolved reproducible build/install directories from completed ICRA-056/059/060/061/062/063 tasks. Scientific,
+  runtime, recovery, ledger, compact, log and PDF evidence remain retained.
+
 ## 2026-08-25 — ICRA-065 analyzer implementation PASS; Supervisor Q10 expectation corrected
 
 ### Review identity and synchronization

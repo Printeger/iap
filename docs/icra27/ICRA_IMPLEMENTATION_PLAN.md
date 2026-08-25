@@ -1,4 +1,17 @@
-# ICRA 2027 P0 → P4 → P5 正式开发实施计划
+# ICRA 2027 P0 + P5 contingency 正式开发实施计划
+
+## Contingency activation — 2026-08-25
+
+ICRA-066 以权威 analyzer 关闭 P4-G0C：技术证据 `15/15/15 runs`、`192/192 decisions` 全部有效，
+但 Type-7 `Q10(max_original-max_risk)=0`，未超过 `1e-12` numerical-noise floor。因此 P4 为
+`SCIENTIFIC_NO_GO`，不得冻结应用阈值、进入 G0D、创建 r7 或把失败结果包装成 treatment。
+
+预注册的 P0+P5 contingency 现由 Supervisor 显式激活。开发顺序改为：隔离且 fail-closed 的
+`icra_p0_p5` profile → prospective P5 final/runtime system qualification → 仅在资格通过后冻结
+contingency campaign。P0 Gate-0B 保持 PASS；P1/P2/P3/P4 仅保留源码/回归，不进入会议 profile。
+
+下方 P0 → P4 → P5 计划保留为失败路线的审计记录，不再授权 P4 工作。冲突时以本 activation、
+根 `AGENT_STATE.md` 和 `NEXT_TASK.md` 为准。
 
 ## Active-plan declaration — 2026-08-20
 

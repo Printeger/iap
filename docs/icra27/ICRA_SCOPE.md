@@ -1,4 +1,18 @@
-# ICRA 2027 Conference Scope — Conditional P0 → P4 → P5
+# ICRA 2027 Conference Scope — Active P0 + P5 contingency
+
+## Contingency activation — 2026-08-25
+
+ICRA-066 authoritatively closes P4-G0C as `SCIENTIFIC_NO_GO`: all 15 runs and 192 decisions are technically
+valid, but the registered Type-7 Q10 maximum-risk improvement is `0`, not above the `1e-12` floor. P4-G0D and
+the P0+P4+P5 treatment are therefore closed for the conference route; P4 source and evidence remain retained.
+
+The explicitly preregistered `P0+P5` contingency is now active by Supervisor decision. P0 remains advisory,
+original EGO planning retains motion-feasibility authority, and P5 final/runtime remain the only IAP hard gates.
+P1/P2/P3/P4 stay present but disabled. The immediate work order is an isolated fail-closed `icra_p0_p5`
+profile and prospective P5 system qualification; historical P5 artifacts are not relabelled as qualification.
+
+The conditional P0 → P4 → P5 scope below is retained as the audited failed route. Where it conflicts with this
+activation, this section and root `AGENT_STATE.md`/`NEXT_TASK.md` are authoritative.
 
 > Scope pivot authorized 2026-08-20. Source audit is bound to `dev/icra` commit `bd3858a72ba06b7eb1551006876c55362c979bab`.
 

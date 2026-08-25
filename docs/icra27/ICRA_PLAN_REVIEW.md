@@ -1,4 +1,16 @@
-# ICRA 2027 P0 → P4 → P5 计划复审
+# ICRA 2027 P0 + P5 contingency 计划复审
+
+## Final P4 verdict and contingency decision — 2026-08-25
+
+P4-G0C 的 prospective calibration 技术闭环通过，但科学门失败：Type-7 mean-improvement Q10 为
+`0.000020000000000131024`，max-improvement Q10 为 `0`。后者不大于冻结 floor，故原
+`CONDITIONAL GO` 正式收敛为 `NO_GO_P4`，而不是继续调参或扩场景。
+
+按本评审预注册的 fallback，P0+P5 现在成为唯一 active conference route。它的工程风险较低但
+novelty 必须单独、保守表述；当前只授权隔离 profile 与 prospective P5 system qualification，
+不因历史 P5 测试而自称 qualified，也不自动启动 campaign。
+
+以下 P0 → P4 → P5 复审正文作为决策历史保留，不再授权后续 P4 Gate。
 
 ## Active re-review declaration — 2026-08-20
 

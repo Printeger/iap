@@ -1,108 +1,90 @@
-# ICRA-066 — Emit the authoritative offline P4-G0C scientific NO-GO
+# ICRA-067 — Activate the isolated P0+P5 profile and qualification harness
 
-> Active gate: `P4_G0C_R6_AUTHORITATIVE_OFFLINE_NO_GO_OUTPUT`
+> Active gate: `P0_P5_CONTINGENCY_PROFILE_AND_QUALIFICATION_HARNESS`
 > Owner: `DEEPSEEK`
 > Activation: `TASK_READY`
-> Supervisor verdict: `ICRA065_ANALYZER_IMPLEMENTATION_PASS_SUPERVISOR_EXPECTATION_CORRECTED`
-> Requirement mapping: `IAP-RQ-320`, `IAP-RQ-322`, `IAP-RQ-423`
-> Conference route: conditional P0 -> P4 -> P5
-> This task: frozen-hash check -> one authoritative analyzer call -> NO-GO handoff
+> Supervisor verdict: `ICRA066_PASS_P4_G0C_NO_GO_P0_P5_CONTINGENCY_ACTIVATED`
+> Requirement mapping: `IAP-RQ-320`, `IAP-RQ-421`, `IAP-RQ-422`, `IAP-RQ-423`
+> Conference route: P0 + P5 contingency
+> This task: isolated profile -> fail-closed manifest -> prospective P5 harness; no live run
 
 ## Supervisor decision
 
-ICRA-065 code and evidence pass Review. The analyzer now validates immutable recovery-time alias A against the
-frozen inventory while independently validating final mutable alias B; retains all structurally complete rows;
-applies the `1e-12 risk_cost` floor to aggregate Type-7 Q10 gates; and distinguishes technical `REJECTED`,
-scientific `SCIENTIFIC_NO_GO` and eligible `DRAFT_ELIGIBLE` outcomes.
+P4-G0C is authoritatively closed as scientific NO-GO: the risk guide did not achieve a positive Q10 maximum-
+risk improvement. Do not revise thresholds, create r7, enter G0D or reuse P4 as the conference treatment.
 
-The ICRA-065 validation stop was correct under its literal instruction, but the frozen expected mean Q10 was a
-Supervisor calculation error. `sort -n` did not order scientific-notation values numerically. Exact float parsing
-over all 192 rows gives Type-7 `h=19.1`; both bounding values are `0.000020000000000131024`, so:
+The pre-registered contingency is now active. P0 remains the immutable future-risk advisory field; original
+EGO planning retains occupancy/dynamics authority; P5 final is the hard gate before normal publication and P5
+runtime monitors the committed trajectory. P1/P2/P3/P4 remain compiled and tested but disabled in ICRA runs.
 
-~~~text
-mean_improvement_gate = 0.000020000000000131024  > 1e-12  PASS
-max_improvement_gate  = 0.0                      <= 1e-12 FAIL
-~~~
+Existing `p5` presets and historical P5-1..P5-8 artifacts are useful implementation history, not prospective
+qualification of the new route. ICRA-067 adds the missing isolated profile and qualification contract without
+changing P0/P5 scientific decisions or launching the main flow.
 
-The corrected value does not change the scientific result: P4-G0C is a genuine NO-GO because the risk guide
-does not reliably improve the path maximum-risk metric. ICRA-066 is a single offline output task, not another
-development, validation, format or live-execution loop.
+## 1. Add one deep, fail-closed conference profile
 
-## 1. Bind the already-reviewed implementation and evidence
+- Add the named profile `icra_p0_p5` to the existing launch/profile resolver rather than duplicating launch
+  defaults. It must resolve P0 enabled, P5 final/runtime enabled, and P1/P2/P3/P4 disabled at both high and
+  lower-level switches. Freeze `planner_enable_all_safety=false` and `manager/use_distinctive_trajs=false`.
+- Disable P1/P2 metrics-only/debug/objective/fanout/viz paths, P3 local/global/debug/viz paths, and all P4
+  decision/metrics/debug/trace/viz/application paths. Do not delete their code or legacy profiles.
+- Preserve the reviewed P0 Gate-0B profile: worker 4, sigma `0.01`, profile
+  `legacy_iap_rq320_baseline_v1`, frozen horizons/ROI/resolution/refresh semantics. Do not reopen P0 performance.
+- Enable existing P5 final/runtime and machine-readable evidence without changing thresholds, actions, retry/
+  emergency policy, PL/AL formulas or query semantics.
+- Reject every explicit CLI/preset/lower-level override that contradicts the profile, including all-safety,
+  P1-P4 enable, P5 disable, P0 disable, distinctive-on, metrics/debug/viz leakage and fixture combinations not
+  registered by the qualification arm. Do not silently coerce a conflicting override.
 
-- Follow `AGENTS.md` Git synchronization. Preserve the protected PDF and all raw/recovery/build/install evidence.
-  Start a minimal ICRA-066 ledger as early as practical; ledger timing/format is documentation only and must not
-  block the scientific call unless a credential is persisted or a task/external file is actually modified.
-- Require `HEAD == origin/dev/icra`; require reviewed Builder commit
-  `49730bfde7cbc63818ce6833b583c2191ae81592` to be the immediate parent of this Supervisor handoff and require
-  the intervening diff to contain only `AGENT_STATE.md`, `NEXT_TASK.md` and `SUPERVISOR_LOG.md`. Then bind:
-  - analyzer SHA-256: `ae2517e8fa1f392db45434cb7d005872f2ee721fdd6d15c177b4c3c6c69e0b42`;
-  - analyzer-test SHA-256: `8e867e2a58dceed09f1fa6b0a213392419b42afb11851f59ad659be0e9ffa219`;
-  - runner-state SHA-256: `475004c649af993013e2a58736b7bba78b384d0d28c4c700a92c5f940eee1dd1`;
-  - retained recovery inventory SHA-256:
-    `b39ddec294a7df0680b204509418a410d1f209449e7ed4d8292b55091d6e784e`;
-  - old analysis and preserved-copy SHA-256:
-    `f584fc5152b9060606365f283b374991aa0f07be6f98ac816a7b9a31fa9d7391`;
-  - ICRA-065 frozen-input verification SHA-256:
-    `1a8fd866bb1e48139d9ab4e56abf286d6fbf6fddbdf29d5c32ac859e6fd3c95c`.
-- Require the ICRA-065 `input_hashes_after.json` status `PASS`, file count 103, empty mismatches, and exact equality
-  of its `files` array with `input_hashes_before.json`. Do not recreate either manifest or rerun validation.
-- The ICRA-065 pre-ledger Git/read ordering deviation is explicitly waived as non-scientific. Do not repair,
-  reconstruct or re-execute history. The small duplicated test-helper smell is nonblocking and out of scope.
+## 2. Bind profile identity and prospective evidence
 
-## 2. Replace only the obsolete analysis output
+- Introduce the smallest versioned canonical profile/qualification manifest needed to bind route, git commit,
+  effective switches/values, P0 profile, P5 thresholds, fixture identity, run identity, analyzer version and
+  raw artifact hashes. One source must drive launch resolution and analyzer validation; do not create two sets
+  of defaults.
+- Add one non-live `icra_p0_p5_qualification` preset/arm family with three typed cases:
+  1. `SAFE_NORMAL`: P0 becomes ready; P5 final accepts; exactly one normal B-spline identity is published;
+     runtime does not falsely trigger.
+  2. `FINAL_REJECT`: the registered final-only fixture is hit; P5 final rejects the candidate; that candidate
+     identity has zero normal publication.
+  3. `RUNTIME_FAIL`: a registered post-publication unsafe/stale/unknown condition produces the frozen P5 runtime
+     action/reason and never fabricates safe evidence.
+- Reuse existing P5 fixture and analyzer primitives where their semantics match. Version aliases/manifest
+  identity for ICRA; do not treat historical artifacts as new evidence and do not add a new scenario or planner.
+- The analyzer/harness must fail closed on missing/duplicate run identities, process death, malformed/non-finite
+  rows, topic gaps, unstable P0, wrong switches/profile/hash, fixture leakage, reject-with-publish, missing safe
+  publish, or absent runtime action. Controlled shutdown is not runtime failure.
 
-- Confirm the byte-exact old output is still present both at
-  `results/icra27/icra063/runs_final/p4_g0c_analysis.json` and at the preserved
-  `results/icra27/icra065/rejected_analysis_icra064.json`, with the frozen SHA above. Confirm the threshold draft
-  is absent and registry bytes are unchanged.
-- After all checks pass, remove only the exact obsolete `runs_final/p4_g0c_analysis.json`. This replacement is
-  explicitly authorized because its old bytes are already retained and hash-bound outside `runs_final`.
-  Do not delete, move or modify any other raw, runtime, recovery, runner, config or evidence file.
-- Do not run another validation preflight or test suite. ICRA-065 and Supervisor Review already passed focused
-  41/41 and full hermetic 516/516; repeated verification would add no scientific information.
+## 3. Test-only acceptance
 
-## 3. Invoke the authoritative analyzer exactly once
+- Add focused launch/profile golden tests and analyzer synthetic tests for all three cases plus malicious
+  overrides. Prove P1/P2/P3/P4 are off, P0/P5 are on, final precedes publish, rejected identity is not published,
+  and runtime failure remains separate from final rejection.
+- Run focused tests and the repository-local hermetic Python suite. Build only the smallest non-CUDA C++ P5
+  unit target if a changed interface requires it; otherwise do not build product packages.
+- Produce a validation-only manifest from synthetic inputs. It may not start GPU preflight, ROS, the full runner
+  or any live identity. Do not claim P5 qualification from unit/synthetic evidence.
 
-- Run the reviewed analyzer exactly once with frozen v6 protocol/registry/fixture, the unchanged
-  `results/icra27/icra063/runs_final` root, the exact retained recovery inventory, and output exactly
-  `results/icra27/icra063/runs_final/p4_g0c_analysis.json`.
-- Analyzer process exit `2` is the expected typed scientific NO-GO, not a task failure. Accept it only if the
-  newly created output proves all of the following:
-  - `analysis_status == SCIENTIFIC_NO_GO`;
-  - `failures == []` and there are zero technical/provenance failures;
-  - registered/attempted/completed runs are `15/15/15`;
-  - complete/denominator decisions are `192/192`;
-  - mean Q10 is exactly `0.000020000000000131024` and passes the frozen floor;
-  - max Q10 is exactly `0.0` and `failed_scientific_gates` contains only
-    `max_improvement_gate_at_or_below_noise_floor`;
-  - retained recovery inventory SHA matches; registry is not updated; application remains disabled;
-  - no threshold draft exists.
-- If the one call returns a technical rejection, different metrics, writes no output, or changes any frozen
-  input, stop and hand off without a retry. Do not restore by rerunning, tune thresholds or modify analyzer code.
+## 4. Document and hand off
 
-## 4. Document, push and return
-
-- Update only Builder-owned `DEV_LOG.md`, `docs/CHANGES.md`, `docs/TRACEABILITY.md`, the ICRA-066 ledger and one
-  compact redacted final-result file. State clearly that runner PASS plus analyzer technical PASS led to a
-  scientific P4-G0C NO-GO.
-- Do not change product/analyzer/test/config code. Explicitly stage only the authorized docs/compact files;
-  raw `runs_final/p4_g0c_analysis.json` remains retained locally and must not be staged unless already governed
-  by the repository ignore policy. Never stage the PDF or raw run products.
-- Commit with applicable requirement IDs and push, then return to Supervisor. Do not choose or execute G0D/P5.
-  Supervisor will close P4 and issue the P0+P5 contingency-route task after reviewing this authoritative output.
-- Retain all build/install products through Supervisor Review. After ICRA-066 Review PASS and pushed docs,
-  Supervisor will remove only reproducible completed-task build/install directories; scientific/recovery/
-  analyzer evidence and the protected PDF remain.
+- Update `DEV_LOG.md`, `docs/CHANGES.md`, `docs/TRACEABILITY.md` and compact redacted ICRA-067 evidence. Record
+  the exact future live commands but do not execute them.
+- Commit with applicable requirement IDs and push. Stage only allowed source/tests/config/docs/compact files;
+  preserve the PDF and all scientific evidence.
+- Return to Supervisor with either `PROFILE_AND_HARNESS_READY` or one typed technical blocker. Do not start the
+  live P5 qualification, campaign, paper-result generation or another route pivot.
+- Retain any ICRA-067 build/install through Supervisor Review. After PASS and push, Supervisor will delete only
+  that task's reproducible build/install products.
 
 ## Allowed files
 
-- The exact authoritative `results/icra27/icra063/runs_final/p4_g0c_analysis.json` replacement.
-- Builder-owned docs plus minimal ICRA-066 ledger and compact result evidence.
+- `launch/test_planner.launch.py` and the smallest existing profile/manifest helper required by the deep profile.
+- Existing P5 analyzer/runner helpers and their focused Python tests; existing P5 C++ unit tests only if needed.
+- One versioned ICRA P0+P5 profile/qualification config, Builder docs and compact ICRA-067 evidence.
 
 ## Forbidden
 
-- No source/test/config/protocol/registry/fixture/dependency/lineage/runner-state/raw-run change; no validation
-  rerun, unit/full test rerun, build/install mutation, GPU preflight, ROS/launch, runner or identity execution,
-  r7, row/run exclusion, formula/floor/threshold/seed/order/repetition change, draft/application, G0C PASS,
-  G0D/P5 execution, external-repository write, credential persistence, PDF/raw-product staging or cleanup.
+- No P0/P5 product decision or threshold change; no P4 repair/r7/G0D; no P1/P2/P3 work; no new planner,
+  trajectory representation, scenario or fixture semantics; no full build unless interface necessity is proven;
+  no GPU preflight, ROS/launch, live runner/identity, rosbag, campaign, threshold tuning/application, external-
+  repository write, credential persistence, PDF/raw staging or deletion of scientific evidence.

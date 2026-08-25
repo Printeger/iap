@@ -1,4 +1,12 @@
-# ICRA System Flow — Conditional P0 → P4 → P5
+# ICRA System Flow — Active P0 + P5 contingency
+
+> Contingency activated 2026-08-25 after authoritative P4-G0C `SCIENTIFIC_NO_GO`.
+
+> Current status: P0 Gate-0B `PASS`; P4 `G0C NO_GO / DISABLED`; P5 `IMPLEMENTED-BUT-UNQUALIFIED`.
+
+The active flow is now `P0 advisory snapshot -> original EGO planning/refinement -> P5 final -> normal publish
+-> P5 runtime`. P1/P2/P3/P4 are disabled in the conference profile. The detailed P4 diagram below is retained
+as the audited failed route and does not authorize P4 application or G0D.
 
 > Scope pivot: 2026-08-20. Source audit: `dev/icra` at `bd3858a72ba06b7eb1551006876c55362c979bab`.
 
