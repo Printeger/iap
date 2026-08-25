@@ -7848,3 +7848,29 @@ continuation and analyzer have not yet been invoked at this pre-live freeze.
 The validation also re-proves the exact final install dependency closure before
 any recovery write, and the complete 113-entry first-run plus 504-entry shared
 environment lstat/content scopes match their prewrite freeze exactly afterward.
+
+## 2026-08-25 — ICRA-064 ONE-SHOT CONTINUATION AND ANALYZER STOP
+
+Pre-live commit `44e481c` was pushed with `HEAD == origin/dev/icra`. The
+explicit recovery continuation was then invoked exactly once. It preserved the
+canonical original terminal state, created and validated only the missing
+first-run inventory, retained all four first-run scientific hashes, passed the
+exact 18/13/1/14/6 final-install dependency closure and a fresh second-session
+GPU preflight, and launched only ordered IDs 2--15.
+
+The runner completed with 15 unique attempted and completed IDs, 15 total
+launches, zero retries/exclusions, two runner sessions (`1 + 14`) and two GPU
+preflights. All 14 new identities passed required-process, controlled-shutdown,
+CSV/manifest and artifact-inventory finalization. No identity was relaunched.
+
+The r6 analyzer was invoked exactly once after runner `COMPLETE`. It retained
+all 192 denominator decisions and found 136 complete decisions, but returned
+`REJECTED`: 56 rows failed the registered noise-floor criterion, and exact
+recovery provenance failed because the recovery record freezes the original
+shared ROS `latest` literal while the producer advanced that alias during the
+14 continued launches. The current and recorded alias targets are distinct
+ordinary direct children; no raw evidence was rewritten. No draft was created,
+no threshold was applied and no G0C/G0D/P5 claim or execution occurred. Per the
+single-analyzer rule, the analyzer was not rerun. Final task result is
+`BLOCKED_R6_ANALYZER_RECOVERY_ALIAS_DRIFT_AND_NOISE_FLOOR` for Supervisor
+review.

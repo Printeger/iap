@@ -1314,3 +1314,13 @@ They do not convert historical `NO-GO-P2`, failed P0 Gate-0B evidence, the stati
 | IAP-RQ-320, IAP-RQ-322, IAP-RQ-423 | Preserve hard occupancy independently of finite conservative cost support | Real risk-aware A* search routes around a finite occupied barrier, records occupied rejection and returns no occupied path point | **C++ SEARCH PROOF PASS** |
 | IAP-RQ-423 | Freeze tested recovery code before the one live continuation | Focused suites plus 512/512 hermetic discovery pass with zero external ROS-log delta; retained state hash remains exact and recovery writes/launches/retries remain 0/0/0 | **PRE-LIVE COMMIT/PUSH READY** |
 | IAP-RQ-423 | Prove validation-only is globally nonmutating over retained recovery input | Post-validation lstat/content recomputation matches all 113 first-run and 504 shared launch-environment entries from the prewrite inventory | **FULL-SCOPE EQUALITY PASS** |
+
+## 2026-08-25 ICRA-064 continuation and terminal analysis
+
+| Req ID | Requirement/evidence seam | Implementation and retained evidence | Status |
+|---|---|---|---|
+| IAP-RQ-320, IAP-RQ-322, IAP-RQ-423 | Adopt consumed ID 1 without changing science or retrying identity | Recovery inventory SHA `14fbc467...f34a`; decisions/run-manifest/test-manifest/stdout retain exact Supervisor hashes; recovery launch/retry = 0/0 | **OFFLINE ADOPTION PASS** |
+| IAP-RQ-423 | Continue only ordered IDs 2--15 behind exact final-install and fresh GPU proof | Final runner SHA `475004c6...1dd1`; 15 unique attempted/completed, 15 launches, zero retries/exclusions, sessions `1 + 14`, GPU preflights `1 + 1`, required-process and artifact finalization complete | **RUNNER COMPLETE** |
+| IAP-RQ-320, IAP-RQ-322 | Retain every scientific row and require registered calibration eligibility | Sole analyzer retains denominator 192 and complete count 136, but records 56 `noise_floor` failures | **ANALYZER REJECTED** |
+| IAP-RQ-423 | Require exact typed recovery provenance through analysis | Recovery record preserves the pre-continuation shared ROS alias literal; producer advances `latest` during later runs, so sole analyzer reports `runner_state_recovery` rather than silently rewriting provenance | **FAIL-CLOSED PROVENANCE STOP** |
+| IAP-RQ-423 | Preserve downstream authority after rejection | Analyzer invocations = 1; draft/action/G0C/G0D/P5 = 0/0/0/0/0; no identity or analyzer retry | **SUPERVISOR REVIEW REQUIRED** |

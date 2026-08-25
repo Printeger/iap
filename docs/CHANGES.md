@@ -2489,3 +2489,19 @@ env \
   --recovery-evidence-root results/icra27/icra064/recovery_final \
   --r6-recovery-validate-only
 ```
+
+## 2026-08-25 (ICRA-064 one-shot continuation and analyzer result)
+
+- Pushed pre-live freeze `44e481c`, then invoked the recovery continuation
+  exactly once. Offline adoption preserved the original four scientific hashes;
+  the second session passed exact dependency closure and its fresh GPU proof.
+- Completed all 15 registered identities with 15 unique attempts/completions,
+  15 launches, zero retries/exclusions, session launches `1 + 14` and GPU
+  preflights `1 + 1`. ID 1 was never relaunched.
+- Invoked the r6 analyzer exactly once after `COMPLETE`. It retained 192 rows
+  and counted 136 complete, but rejected 56 noise-floor rows and the recovery
+  record's original shared ROS alias literal after ROS advanced `latest` during
+  continuation. Analyzer output SHA is `f584fc51...d7391`.
+- Stopped fail-closed with no draft, threshold action, G0C/G0D/P5 claim or P5
+  execution. The analyzer and identities must not be rerun; Supervisor review
+  is required for `BLOCKED_R6_ANALYZER_RECOVERY_ALIAS_DRIFT_AND_NOISE_FLOOR`.
