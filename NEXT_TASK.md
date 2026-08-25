@@ -1,141 +1,142 @@
-# ICRA-063 — Version r6 support semantics and complete P4 calibration
+# ICRA-064 — Recover r6 inventory offline and finish the remaining matrix
 
-> Active gate: `P4_G0C_R6_TEMPORAL_AND_OCCUPIED_SUPPORT_LIVE`
+> Active gate: `P4_G0C_R6_INVENTORY_RECOVERY_AND_MATRIX_CONTINUATION`
 > Owner: `DEEPSEEK`
 > Activation: `TASK_READY`
-> Supervisor verdict: `ICRA062_ENGINEERING_PASS_R5_TEMPORAL_SUPPORT_REQUEST_CHANGES`
+> Supervisor verdict: `ICRA063_R6_SCIENCE_PASS_POST_IDENTITY_INVENTORY_TOOL_REQUEST_CHANGES`
 > Requirement mapping: `IAP-RQ-320`, `IAP-RQ-322`, `IAP-RQ-423`
 > Conference route: conditional P0 -> P4 -> P5
-> This task: r6 time/support repair -> one readiness -> 15 registered runs -> analyzer
+> This task: safe-alias contract -> offline first-run adoption -> remaining 14 IDs -> analyzer
 
 ## Supervisor decision
 
-ICRA-062 is accepted as a faithful diagnostic task. The final r5 readiness uses predictor worker `4/4`,
-releases admission once, produces 12 positive-snapshot closed-segment decisions, and keeps required processes
-healthy. Across 12 identities and two 200-sample arms, the classifier reports 3040
-`POSITIVE_WEIGHT_OCCUPIED_SKIP` and 10 `TIME_SUPPORT`; every other invalid category is zero. The ten time
-failures are risk-arm sample 199 in attempts 1-10 at `tau ~= 2.50208 s`, just beyond the current `2.5 s`
-P0 horizon. No r5 registered identity was consumed.
+ICRA-063 passes the r6 scientific readiness. The first registered identity
+`p4-g0c-r6-seed211-rep01` also completed its 90-second runtime with GPU/process PASS, controlled shutdown,
+13 positive-snapshot closed-segment `METRICS_ONLY` decisions, exact 200/200 coverage in both arms and zero
+invalid samples. It failed only when the blanket inventory rule rejected the normal producer-created relative
+alias `runtime/iap_logs/latest -> 20260825T125103Z_278`.
 
-This is one bounded scientific repair and live task. Do not return for an intermediate audit or Review.
-Create r6 because both the temporal-support envelope and P4 cost-query semantics change. After one passing
-r6 readiness, continue immediately through dependency preflight, all 15 registered identities and the
-analyzer. Correctable evidence issues are repaired in this same task and never become a standalone loop.
+That identity is already consumed and must never launch again. Do not create r7 or discard scientifically
+valid data for this offline tooling defect. ICRA-064 must first prove the retained run has not drifted, narrow
+the alias contract, generate its inventory offline, record an auditable recovery transition, and continue
+only IDs 2-15. This is one integrated recovery/live task with no intermediate Review.
 
-## 1. Preserve accepted work and boundaries
+## 1. Preserve science, identities and retained evidence
 
-- Follow `AGENTS.md` synchronization. Preserve the protected PDF, all historical evidence, and v1-v5
-  protocol/fixture/registry/dependency/lineage bytes. Record r5 as unconsumed and superseded; do not rewrite
-  it. Preserve the v2 obstacle geometry, start, goal, speed, grid resolution/extent, P0 sigma/profile,
-  predictor worker `4/4`, seeds, repetitions, formulas, thresholds, selection authority, admission FSM,
-  scanner behavior, process rules and all P5 behavior.
-- Use only `results/icra27/icra063/` for new outputs. Use a minimal sanitized child environment before every
-  build/test/ROS command. Initialize the structured command recorder before the first task command and record
-  exact argv/cwd, safe environment-key allowlist, start/end/duration and exit code.
-- Retain all current ICRA-056/059/060/061/062 build/install products. Build ICRA-063 into a new repository-local
-  root; do not reuse a historical build as final evidence.
+- Follow `AGENTS.md` synchronization. Preserve the protected PDF, v1-v6 protocol/registry/dependency/lineage,
+  fixture, launch, production C++ and final ICRA-063 install bytes. Preserve r6 horizons, worker/profile,
+  seeds, order, repetitions, formulas, thresholds, selection state and all P5 behavior.
+- Do not rebuild or modify product code/config. Python inventory/runner/analyzer recovery logic, focused tests,
+  one missing C++ safety test, Builder docs and compact evidence are the only implementation scope.
+- Preserve the existing `results/icra27/icra063/runs_final/` tree. Never delete, move, truncate, chmod, rewrite
+  or relaunch the first run's decision CSV, run manifest, test-planner manifest, stdout or runtime files.
+- The repeated pre-recorder bookkeeping deviation is waived as non-scientific and is not a Gate criterion.
+  Start the ICRA-064 ledger as early as possible, never invent missing fields, and do not rerun work to repair
+  ledger completeness. Formatting, metadata and command-index defects remain correctable in-task.
 
-## 2. Fold evidence corrections into the technical task
+## 2. Freeze and verify the consumed first run before any recovery write
 
-- Stop tracking exactly
-  `results/icra27/icra062/readiness_attempt_03/p4_profile_trace_classification.json` while preserving its
-  ignored local raw copy. Compact evidence may retain only aggregate counts, hashes and the minimal ten-row
-  time-support binding needed to reproduce the verdict. Do not stage other raw readiness products.
-- Record the four honest ICRA-062 pre-recorder `UNRECOVERABLE_PRE_RECORDER_FIELD` entries as an immutable Low
-  process deviation. Do not invent timestamps or rerun ICRA-062.
-- If the touched classifier/trace code still uses the literal occupied source flag, replace it with a named
-  domain constant or typed field. Do not perform an unrelated refactor of the launch profile-selection code.
+- Create a read-only lstat/content inventory under `results/icra27/icra064/` for the retained first-run tree
+  and the shared launch environment. Bind the current committed terminal state and exact hashes:
+  - runner state: `15c3f5d537f602dff6476dc498b0cc327f085147eabf1183c141399e46705760`;
+  - decisions: `c6bf3a8c4702b988b6da4770895b9511085a41d3ccd0ca593180b655a9b86ccd`;
+  - run manifest: `9c1af28e8d040745a66df153b54b9fbb345e0494e284e45253a7a1f90e38b624`;
+  - test-planner manifest: `8a87baa01b1f551a33828eab56fc2de95ee0a14c814841833e16b0fcae3a19cb`;
+  - stdout: `df3d675ee343dfc53a4c7084c8fb86a850875abc4df74efd498f118a202a7be3`.
+- Require terminal state `FAILED`, exactly 1 attempted / 0 completed / 1 launch / 0 retry, failed ID
+  `p4-g0c-r6-seed211-rep01`, and exact reason ending
+  `run artifact cannot be a symlink: runtime/iap_logs/latest`.
+- Require the run-local link to have the exact relative single-component target
+  `20260825T125103Z_278`, resolving to an ordinary direct-child directory below that run's
+  `runtime/iap_logs/`. Require the current shared `launch_environment/ros_logs/latest` link to resolve to an
+  ordinary direct-child directory under the same `ros_logs/` root. Any hash, type, target, escape or state
+  mismatch is a genuine `RETAINED_R6_DRIFT` stop before modification or ROS.
 
-## 3. Create the r6 temporal-support identity
+## 3. Replace blanket symlink rejection with two exact safe-alias contracts
 
-- Create new v6 protocol, registry, dependency and lineage artifacts with exactly 15 new r6 identities in the
-  same frozen order, seeds and repetitions as r5. Bind every mechanically affected source/config/build hash.
-- Set the r6 effective P0 horizons to exactly `[0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0]` seconds. This continues
-  the existing fixed 0.5-second cadence and supports the measured `2.50208 s` endpoint without clamping or a
-  tuned epsilon. Queries above `3.0 s` remain fail-closed.
-- Preserve the accepted predictor worker requested/effective values `4/4`. Do not change the separate legacy
-  outer `p0.batch_worker_count=1` field.
+- Version the run artifact inventory schema for r6 recovery. Admit exactly
+  `runtime/iap_logs/latest` as a typed symlink entry containing its literal target. Its target must be relative,
+  one component, nonempty, free of `.`/`..`, and resolve without another symlink to an existing ordinary
+  direct-child directory inside the same `iap_logs` directory. Inventory the target directory and contents
+  normally. Every other per-run symlink remains rejected.
+- In analyzer root validation, admit exactly `launch_environment/ros_logs/latest`. ROS may use an absolute
+  target, but it must be canonical, resolve without an intermediate symlink to an existing ordinary
+  direct-child directory inside that exact task-local `ros_logs` root, and its target contents must remain in
+  the raw-bundle inventory/hash. Every other launch-environment or root symlink remains rejected.
+- Add adversarial tests for alternate path/name, absolute run-local target, relative/absolute escape,
+  `.`/`..`, nested target, dangling target, symlink chain/loop, non-directory target, target replacement and
+  unregistered symlinks. Do not relax dependency-prefix, output-path or build/install symlink rules.
+- Add an end-to-end synthetic runner/analyzer test containing both exact producer aliases. It must finalize
+  all synthetic runs and reach `DRAFT_ELIGIBLE`; each adversarial variation must fail closed before draft.
 
-## 4. Add a typed P4 conservative occupied-cost-support policy
+## 4. Close the missing hard-occupancy safety proof
 
-- Introduce an explicit query policy or enum whose default is the legacy strict behavior. Enable a distinct
-  `CONSERVATIVE_OCCUPIED_COST_SUPPORT` policy only for the r6 P4 experiment.
-- Under that policy, only a positive-weight corner whose source is `OCCUPIED_SKIP` may contribute the existing
-  finite `unknown_cost` to cost interpolation. A zero-weight corner does not participate. Every other
-  provider-invalid, stale, non-finite, out-of-map, time-support or unknown source remains fail-closed.
-- Apply the identical policy to original-guide and risk-guide profile queries and to risk-aware A* edge-cost
-  queries. Do not silently select different semantics by arm or call site.
-- Preserve hard safety authority: occupied RiskGrid health and `queryPredictedPL()` remain invalid; original
-  EGO occupancy/inflation/collision/dynamics checks remain unchanged; risk-aware A* may never traverse an
-  occupied node; P5 remains unchanged. The policy supplies a conservative finite planning cost, not free
-  space or valid integrity.
+- Extend `test_p4_risk_astar.cpp` with a real search-level test, not another direct edge-cost probe. Construct
+  an occupied node/barrier under `CONSERVATIVE_OCCUPIED_COST_SUPPORT`, execute A* and prove the returned path
+  never contains/traverses an occupied node. Preserve the existing proof that occupied support contributes
+  finite `unknown_cost` only to cost evaluation.
+- Do not modify A* production occupancy, RiskGrid health/PL validity or P5. If the test exposes a production
+  safety defect, stop and return to Supervisor; product repair is outside ICRA-064.
 
-## 5. Focused verification
+## 5. Implement one explicit offline adoption/continuation mode
 
-- Add tests proving default/legacy strict behavior is byte- and result-compatible; r6 exposes the exact seven
-  horizons; `tau ~= 2.50208 s` is supported and `tau > 3.0 s` fails.
-- Prove positive-weight occupied support returns the configured finite conservative cost, while all other
-  positive-weight invalid categories still fail. Prove occupied health/PL validity remains false and A*
-  never traverses occupied nodes.
-- Prove original and risk arms use identical support semantics, diagnostic trace remains noninterfering and
-  registered runs have trace disabled. Preserve existing worker-equivalence, admission and scanner tests.
+- Add a typed, explicit r6 recovery entry point. It must accept only the exact retained ICRA-063 terminal
+  root and hashes from Section 2; normal fresh-run mode must continue rejecting dirty/existing roots.
+- Before mutating the runner state, preserve the canonical original terminal state and its SHA-256 in compact
+  ICRA-064 recovery evidence outside `runs_final/`. Generate and validate the first run's inventory offline.
+  Revalidate its existing manifest/CSV/test-manifest/process/scientific contract and all Section-2 hashes.
+- The recovery transition may create only the inventory and update the authoritative runner state. It must
+  record original terminal-state hash/reason, adopted run ID, zero recovery launch, zero retry, inventory
+  binding and exact before/after scientific hashes. Mark attempt 1 complete without changing its scientific
+  files. Analyzer must require this exact typed recovery record rather than silently accepting a rewritten
+  ledger.
+- Resume the existing ordered plan at index 2. Reject any attempt to relaunch, regenerate or overwrite ID 1,
+  skip/reorder another ID, use a different root/protocol/install, or adopt any other failure category.
+- The continuation is a second orchestration session, not an identity retry. Version runner/analyzer evidence
+  so it records two runner sessions and two GPU preflights while still requiring exactly 15 unique launches,
+  15 attempted IDs, 15 completed IDs and zero identity retries/exclusions.
 
-## 6. Fresh build and one r6 readiness
+## 6. Pre-live proof and remaining 14 registered identities
 
-- Produce one fresh 17-package merged non-symlink Release/CUDA closure using the sequential executor,
-  `BUILD_TESTING=OFF`, CUDA/nvcc ON and OpenCV/viewer OFF. Validate indexes, six ELF libraries, zero historical
-  linkage, installed/source equality and final hashes.
-- Before ROS, run the mandatory GPU preflight. `nvidia-smi`, `cuInit(0)` and `device_count >= 1` must pass;
-  otherwise emit `GPU_NOT_READY` and stop before launch without retry.
-- Run exactly one nonregistered traced r6 readiness. Require predictor requested/effective `4/4`, max horizon
-  `3.0 s`, admission release once, no P4 row before release, positive snapshot identities, closed segments,
-  healthy required processes and controlled shutdown.
-- Every decision must be `METRICS_ONLY`; both arms must be exactly 200/200; invalid counts for time,
-  out-of-map, stale, provider-invalid and other unknown sources must be zero. Trace may classify occupied
-  support used by the explicit policy, but it must not create an invalid sample. If readiness fails these
-  scientific/process conditions, stop once with a typed genuine blocker. Do not tune again.
+- Run focused Python and C++ tests plus full hermetic Python discovery. Before ROS, dry-run the exact retained
+  recovery root in validation-only mode: it must report first-run adoption eligible, next ID exactly
+  `p4-g0c-r6-seed211-rep02`, 14 remaining and zero writes/launches. Commit and push the recovery code/docs.
+- Run the explicit recovery/continuation command exactly once. Revalidate final ICRA-063 install/dependency
+  closure, then perform a fresh mandatory GPU preflight before any remaining ROS launch.
+- Launch only IDs 2-15 in frozen order, once each. Final authoritative totals must be 15 unique attempted,
+  15 completed, 15 launches, zero retries/exclusions; ID 1 retains its original hashes and each other run must
+  satisfy positive snapshot, closed segment, `METRICS_ONLY`, 200/200 both arms, zero invalid samples, healthy
+  required processes and controlled shutdown.
+- A genuine GPU/process/scientific/hash failure during continuation is terminal. Do not retry an identity,
+  create r7, tune science or discard a row. Correctable offline output formatting before analyzer remains
+  repairable without rerunning any identity.
 
-## 7. Freeze and execute the registered matrix
+## 7. Analyze and hand off
 
-- After readiness PASS, freeze and commit/push the exact r6 code/config/build hashes, then continue without
-  Supervisor Review. Run one standalone dependency preflight from the final ICRA-063 install plus
-  `/opt/ros/jazzy`; require exactly 18 packages, 13 executables, one component, 14 configs and six libraries,
-  with zero GPU/launch/identity consumption.
-- Invoke the r6 full runner once. Its GPU preflight precedes ROS. Execute all 15 registered IDs in frozen order
-  exactly once: 15 attempted, 15 completed, 15 launches, zero retry/exclusion. Every accepted row requires a
-  positive snapshot identity, closed segment, `METRICS_ONLY`, 200/200 profiles and zero invalid samples.
-- Invoke the r6 analyzer once after runner `COMPLETE`; require exact `DRAFT_ELIGIBLE`. Do not apply the draft,
-  enable selection, claim G0C PASS, start G0D/P5 or tune the result.
-- One-shot protection begins with the first registered identity. A real GPU/process/RiskGrid/CSV/inventory/
-  scientific failure after that point is terminal; no source/config/build change or identity retry is allowed.
-  A narrow analyzer-only defect may be fixed and the unchanged complete bundle reanalyzed once.
-
-## 8. Handoff and artifact lifecycle
-
-- Update `DEV_LOG.md`, `docs/CHANGES.md`, `docs/TRACEABILITY.md` and compact redacted ICRA-063 evidence. Commit
-  with applicable `IAP-RQ-XXX` IDs and push. Do not edit Supervisor-owned files or stage raw products/PDF.
-- Do not stop for formatting, path/mode, optional metadata or another correctable pre-identity orchestration
-  issue. Repair it in-task. Stop only for genuine GPU/security/external-mutation, failed r6 readiness, or a
-  post-identity failure.
-- Retain all ICRA-056/059/060/061/062/063 build/install products through Supervisor Review. Only after
-  ICRA-063 Review PASS and pushed code/docs may reproducible build/install directories for those tasks be
-  deleted. Retain scientific/compact evidence, raw local evidence and the protected PDF.
+- Invoke the r6 analyzer exactly once after recovery runner state is `COMPLETE`; require exact
+  `DRAFT_ELIGIBLE`, all 15 registered/attempted/completed identities, at least 100 retained complete decisions,
+  and exact recovery provenance. Do not apply the draft, enable selection, claim G0C PASS, start G0D/P5 or
+  tune results.
+- Update `DEV_LOG.md`, `docs/CHANGES.md`, `docs/TRACEABILITY.md` and compact redacted ICRA-064 evidence. Commit
+  with applicable requirement IDs and push. Do not edit Supervisor-owned files or stage raw products/PDF.
+- Retain ICRA-056/059/060/061/062/063/064 build/install products through Supervisor Review. Only after
+  ICRA-064 Review PASS and pushed code/docs may Supervisor delete those reproducible build/install directories.
+  Retain all scientific/compact evidence, recovery provenance and the protected PDF.
 
 ## Allowed files
 
-- P0 r6 horizon-profile wiring and focused tests; v6 protocol/registry/dependency/lineage and matching
-  runner/analyzer/profile artifacts.
-- RiskGrid cost-interpolation policy, the P4 profile and risk-A* call sites, classifier named constants and
-  focused tests needed for the exact r6 semantics above.
-- Builder-owned docs and compact redacted ICRA-063 evidence; removal from Git tracking of the one exact raw
-  ICRA-062 classification artifact while preserving its local copy.
+- `scripts/dev_planner/p4_g0c_protocol.py`, r6 runner/analyzer recovery logic and their Python tests.
+- The missing search-level test in `src/iap/planner/path_searching/test/test_p4_risk_astar.cpp`; no production
+  C++ change.
+- Builder-owned docs, compact redacted ICRA-064 evidence and the two authorized recovery-created files in the
+  retained root: first-run artifact inventory plus authoritative runner state.
 
 ## Forbidden
 
-- No fixture, obstacle, speed, grid geometry, P0 sigma, worker count, threshold, formula, seed or repetition
-  tuning; no time clamp/tolerance; no v1-v5 or historical-evidence mutation; no alternate horizon beyond the
-  exact `3.0 s` extension.
-- No analyzer coverage weakening, failed-row exclusion, occupied traversal, health/PL-validity fabrication,
-  scanner/admission weakening, CPU fallback, registered retry, threshold application, G0C PASS claim,
-  G0D/P5 run, external-repository write, credential persistence, raw-product/PDF staging or cleanup before
-  Review.
+- No ID-1 launch/retry, no new r7 identity, no product C++/launch/config/fixture/protocol/registry/dependency/
+  lineage/build/install change, no threshold/formula/seed/order/repetition/science change, and no deletion or
+  rewriting of retained first-run scientific/runtime artifacts.
+- No general symlink allowance, target dereference outside exact roots, analyzer weakening, failed-row
+  exclusion, occupied traversal, health/PL-validity fabrication, CPU fallback, threshold application, G0C
+  PASS claim, G0D/P5 run, external-repository write, credential persistence, raw-product/PDF staging or
+  cleanup before Review.

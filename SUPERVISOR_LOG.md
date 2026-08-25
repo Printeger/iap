@@ -1,5 +1,71 @@
 # ICRA Supervisor Log
 
+## 2026-08-25 — ICRA-063 r6 science/readiness PASS; normal producer alias blocks inventory
+
+### Review identity and synchronization
+
+- Fixed review range: `d0aa0337566fc86d8bd1df90e74410661510b2b8...114d8fc5a68ac351a2b7a8de5b8d6801c4882f38`.
+  Four Builder commits bind applicable `IAP-RQ-320`, `IAP-RQ-322` and `IAP-RQ-423`. Fetch succeeded and HEAD
+  matched `origin/dev/icra` at divergence `0 0`. `git diff --check` passes.
+- The protected PDF remains the sole untracked user file with unchanged SHA-256
+  `1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`. No task ROS process remains and
+  all ICRA-056/059/060/061/062/063 build/install products remain retained.
+
+### Standards axis
+
+- No current blocking standards violation. All commits are requirement-bound and pushed; ownership/scope,
+  v1-v5 immutability, sanitized environment, raw-evidence exclusion, GPU-before-ROS, freeze/one-shot behavior,
+  process cleanup, build retention and PDF protection comply.
+- High nonblocking immutable deviation: ICRA-063 again starts its recorder after the initial Git/spec actions
+  and honestly records four `UNRECOVERABLE_PRE_RECORDER_FIELD` entries despite the prior instruction. This
+  bookkeeping defect is waived and removed as a future Gate criterion; no reconstruction or rerun is allowed.
+- Medium nonblocking historical deviation: `4f0b7cd` initially treated a correctable pre-ROS horizon-binding
+  rejection as terminal and `e59d090` used intermediate-review wording, contrary to the one-task/no-intermediate
+  Review instruction. It was corrected before identity consumption and does not justify another loop.
+- Judgement smells: repeated schema/version switches and shotgun edits across launch/protocol/runner/analyzer.
+  They are not refactored during this bounded recovery task.
+
+### Spec axis
+
+- Accepted: typed legacy-strict/default and r6-only conservative occupied-cost policy; occupied health and
+  predicted PL remain invalid; other invalid categories remain fail-closed; original/risk profile semantics
+  match. Exact seven horizons through `3.0 s`, worker `4/4`, fixture/science/P5 preservation and 15 disjoint r6
+  IDs all pass. Raw ICRA-062 classification was untracked while its local copy remains retained.
+- Final fresh build passes 17/17 merged non-symlink Release/CUDA packages, six ELF libraries, source/install
+  equality and zero historical linkage. GPU preflight passes one device. The true r6 readiness passes with 13
+  positive-snapshot closed decisions, all `METRICS_ONLY`, both arms 200/200, zero invalid counts, healthy
+  required processes and controlled shutdown. Standalone dependency passes exact 18/13/1/14/6.
+- Medium missing proof: the new risk-A* test exercises only `edgeCostWithRiskForTest()`; it does not execute
+  search and therefore does not prove that an occupied node remains untraversable. ICRA-064 adds the test only;
+  production occupancy code is unchanged.
+- High tooling defect: run inventory blanket-rejects every symlink although the production RunLogManager
+  normally creates `runtime/iap_logs/latest`, already visible in the passing readiness. The first registered
+  identity therefore ran cleanly but finalization stopped at this expected alias. The analyzer would later
+  also reject the normal shared `launch_environment/ros_logs/latest`; both must be covered before continuation.
+
+### Supervisor verification and verdict
+
+- Exact retained binaries pass RiskGrid 47/47, collision-guide 17/17 and risk-A* 6/6 when replayed with their
+  ledger-bound install/library paths. A first generic CTest replay loaded historical workspace libraries and
+  failed with symbol errors/exit 139; this was a Supervisor linkage setup mismatch, not product evidence.
+- The hermetic P4-G0C Python selection passes 138/138 and the trace classifier passes 8/8. A direct unittest
+  invocation without the required hermetic wrapper produced two environment errors; the exact wrapper replay
+  passes and confirms no external ROS-log delta.
+- The first r6 ID has 13 positive-snapshot 200/200 rows, zero invalid samples, GPU/process PASS and controlled
+  shutdown. Counts are 1 attempted / 0 finalized / 1 launch / 0 retry; analyzer calls are zero. Its committed
+  decision and manifest hashes match retained bytes. Stopping was correct under the frozen one-shot rule, and
+  ID 1 must not run again.
+- Verdict: `ICRA063_R6_SCIENCE_PASS_POST_IDENTITY_INVENTORY_TOOL_REQUEST_CHANGES`. Unique next task is
+  `ICRA-064 / P4_G0C_R6_INVENTORY_RECOVERY_AND_MATRIX_CONTINUATION`. It validates narrow safe aliases, adopts
+  the retained first run offline with explicit provenance, performs a new GPU preflight and launches only the
+  remaining 14 IDs before one analyzer call. No r7 or scientific retry is authorized.
+
+### Artifact lifecycle
+
+- Review is not final Gate PASS, so no build/install is deleted. Retain all existing products through
+  ICRA-064 Review. After ICRA-064 PASS and pushed code/docs, Supervisor may delete only reproducible
+  build/install directories for ICRA-056/059/060/061/062/063/064; all evidence and PDF remain.
+
 ## 2026-08-25 — ICRA-062 diagnostic closure; r5 temporal support is the genuine blocker
 
 ### Review identity and synchronization
