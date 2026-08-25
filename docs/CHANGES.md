@@ -2017,3 +2017,37 @@ permitted after the sole invocation was consumed.
   and not curable by cleanup. Formal focused/full discovery and static Python
   checks therefore did not run. Result is `BLOCKED_EXTERNAL_TEMP_CREATION`,
   never G0C PASS or readiness.
+
+## 2026-08-25 (ICRA-055 hermetic classifier correction)
+
+- IAP-RQ-423: extended the repository-local launcher into the sole controlled
+  entry for unittest, syntax, fatal-only flake8 and canonical-JSON checks. It
+  owns all five task-local Python/ROS paths and records a complete external ROS
+  inventory before and after each child, preserving the exact child exit when
+  unchanged and returning a typed blocker for any name/metadata/target/content
+  delta.
+- Pure comparator tests cover added, removed, metadata-changed,
+  symlink-target-changed and same-name content-changed entries. Integration
+  constructs `LaunchContext()` below the ICRA-055 root, discovers every test
+  launch import and requires its guard first, and distinguishes child failure
+  from external mutation in structured task-local evidence.
+- Environment classification now requires the exact r3 and legacy condition
+  ASTs, including wrapper, ordered experiment operand and named v3 constant,
+  plus the exact four-action multiset. Nine wrong-key/constant/order/type/
+  operator/wrapper/shape/missing adversaries fail closed.
+- Mutation discovery now scans module, synchronous, asynchronous and nested
+  scopes; normalizes imports/aliases; explicitly allows or classifies known
+  `os`, `shutil`, `pathlib/Path` and five subprocess-helper operations; and
+  rejects unknown namespace members, dynamic attributes, unresolved modes,
+  flags, keywords, receivers and targets. `source_name` is retained in typed
+  mutation records and diagnostics.
+- Formal hermetic verification passes focused 109/109, launch-contract 11/11,
+  launch-golden 16/16 and full Python 464/464; syntax 6/6, fatal-only flake8,
+  canonical JSON 4/4 and diff checks pass. Every launcher result reports the
+  same 17,759-entry external inventory; final before/after SHA-256 is
+  `82b029de...eee9`, cmp 0, delta empty.
+- No production launch/runner/science/config/protocol/registry/dependency/
+  lineage byte changed; ICRA-054 history and external logs remain untouched.
+  No build, GPU, ROS/live flow, smoke or qualification ran. Result is
+  `P4_G0C_R3_HERMETIC_CLASSIFIER_READY_FOR_REVIEW`, never live-ready or G0C
+  PASS.

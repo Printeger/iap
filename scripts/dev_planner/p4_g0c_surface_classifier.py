@@ -21,9 +21,57 @@ def _call_name(node: ast.AST) -> str:
     return ""
 
 
+def _import_aliases(tree: ast.AST) -> dict[str, str]:
+    aliases = {
+        "os": "os", "shutil": "shutil", "subprocess": "subprocess",
+        "pathlib": "pathlib", "Path": "Path",
+    }
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for item in node.names:
+                if item.name in {"os", "shutil", "subprocess", "pathlib"}:
+                    aliases[item.asname or item.name] = item.name
+        elif isinstance(node, ast.ImportFrom) and node.module in {
+            "os", "shutil", "subprocess", "pathlib",
+        }:
+            for item in node.names:
+                target = (
+                    "Path" if node.module == "pathlib" and item.name == "Path"
+                    else f"{node.module}.{item.name}"
+                )
+                aliases[item.asname or item.name] = target
+    return aliases
+
+
+def _normalized_call_name(node: ast.AST, aliases: Mapping[str, str]) -> str:
+    name = _call_name(node)
+    if not name:
+        return ""
+    first, separator, remainder = name.partition(".")
+    normalized = aliases.get(first, first)
+    return f"{normalized}.{remainder}" if separator else normalized
+
+
+def _scope_nodes(scope: ast.AST):
+    pending = list(getattr(scope, "body", ()))
+    while pending:
+        node = pending.pop()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            continue
+        yield node
+        pending.extend(ast.iter_child_nodes(node))
+
+
+def _scopes(tree: ast.Module):
+    yield "<module>", tree
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            yield node.name, node
+
+
 def _function_assignments(function: ast.AST) -> dict[str, ast.AST]:
     assignments: dict[str, ast.AST] = {}
-    for node in ast.walk(function):
+    for node in _scope_nodes(function):
         if (
             isinstance(node, ast.Assign)
             and len(node.targets) == 1
@@ -103,12 +151,37 @@ def _condition_operator(call: ast.Call) -> str:
     condition = conditions.get("condition")
     if not isinstance(condition, ast.Call) or _call_name(condition.func) != "IfCondition":
         return "unconditional"
-    if not condition.args or not isinstance(condition.args[0], ast.Call):
+    if (
+        len(condition.args) != 1
+        or condition.keywords
+        or not isinstance(condition.args[0], ast.Call)
+    ):
         raise SurfaceClassificationError("unresolved environment condition")
-    operator = _call_name(condition.args[0].func)
+    comparison = condition.args[0]
+    operator = _call_name(comparison.func)
     if operator not in {"EqualsSubstitution", "NotEqualsSubstitution"}:
         raise SurfaceClassificationError(
             f"unresolved environment condition operator:{operator}"
+        )
+    if len(comparison.args) != 2 or comparison.keywords:
+        raise SurfaceClassificationError(
+            "environment condition comparison shape mismatch"
+        )
+    experiment, expected = comparison.args
+    if not (
+        isinstance(experiment, ast.Call)
+        and _call_name(experiment.func) == "LaunchConfiguration"
+        and len(experiment.args) == 1
+        and not experiment.keywords
+        and isinstance(experiment.args[0], ast.Constant)
+        and experiment.args[0].value == "experiment"
+    ):
+        raise SurfaceClassificationError(
+            "environment condition experiment operand mismatch"
+        )
+    if not isinstance(expected, ast.Name) or expected.id != "P4_G0C_EXPERIMENT_V3":
+        raise SurfaceClassificationError(
+            "environment condition r3 constant mismatch"
         )
     return operator
 
@@ -116,11 +189,9 @@ def _condition_operator(call: ast.Call) -> str:
 def classify_environment_actions(source: str) -> list[dict[str, object]]:
     tree = ast.parse(source)
     records: list[dict[str, object]] = []
-    for function in (
-        node for node in tree.body if isinstance(node, ast.FunctionDef)
-    ):
-        assignments = _function_assignments(function)
-        for node in ast.walk(function):
+    for scope_name, scope in _scopes(tree):
+        assignments = _function_assignments(scope)
+        for node in _scope_nodes(scope):
             if not (
                 isinstance(node, ast.Call)
                 and _call_name(node.func) == "SetEnvironmentVariable"
@@ -171,7 +242,7 @@ def classify_environment_actions(source: str) -> list[dict[str, object]]:
                     f"unclassified environment action:{name}"
                 )
             records.append({
-                "function": function.name,
+                "function": scope_name,
                 "line": node.lineno,
                 "name": name,
                 "classification": classification,
@@ -180,17 +251,18 @@ def classify_environment_actions(source: str) -> list[dict[str, object]]:
                 "value": value,
                 "condition": condition,
             })
-    counts = {name: 0 for name in {
-        item["name"] for item in records
-    }}
+    counts = {name: 0 for name in {item["name"] for item in records}}
     for record in records:
         counts[str(record["name"])] += 1
-    for name, count in counts.items():
-        expected = 2 if name == "XDG_RUNTIME_DIR" else 1
-        if count != expected:
-            raise SurfaceClassificationError(
-                f"duplicate or incomplete environment action:{name}:{count}"
-            )
+    expected_counts = {
+        "FASTRTPS_DEFAULT_PROFILES_FILE": 1,
+        "QT_X11_NO_MITSHM": 1,
+        "XDG_RUNTIME_DIR": 2,
+    }
+    if counts != expected_counts:
+        raise SurfaceClassificationError(
+            f"environment action multiset mismatch:{counts}"
+        )
     return records
 
 
@@ -201,14 +273,58 @@ _PATH_READ_METHODS = {
     "samefile", "stat", "with_name", "with_suffix",
 }
 _PATH_MUTATION_METHODS = {
+    "chmod": "Path.chmod",
+    "hardlink_to": "Path.hardlink_to",
     "mkdir": "Path.mkdir",
     "open": "Path.open",
     "rename": "Path.rename",
     "replace": "Path.replace",
+    "rmdir": "Path.rmdir",
+    "symlink_to": "Path.symlink_to",
     "touch": "Path.touch",
     "unlink": "Path.unlink",
     "write_bytes": "Path.write_bytes",
     "write_text": "Path.write_text",
+}
+_PATH_CLASS_READ_CALLS = {"Path.cwd", "Path.home", "pathlib.Path.cwd", "pathlib.Path.home"}
+
+_OS_READ_CALLS = {
+    "os.access", "os.close", "os.environ.get", "os.fstat", "os.getegid",
+    "os.geteuid", "os.getgid", "os.getpid", "os.getuid", "os.lstat",
+    "os.path.abspath", "os.path.basename", "os.path.dirname",
+    "os.path.exists", "os.path.isabs", "os.path.join", "os.path.realpath",
+    "os.path.relpath", "os.path.samefile", "os.path.split", "os.readlink",
+    "os.stat", "os.uname",
+}
+_OS_MUTATION_CALLS = {
+    "os.chmod": (0, None), "os.chown": (0, None),
+    "os.fchmod": (0, None), "os.fchown": (0, None),
+    "os.ftruncate": (0, None), "os.lchown": (0, None),
+    "os.link": (1, None), "os.makedirs": (0, None),
+    "os.mkdir": (0, None), "os.remove": (0, None),
+    "os.removedirs": (0, None), "os.rename": (0, 1),
+    "os.renames": (0, 1), "os.replace": (0, 1),
+    "os.rmdir": (0, None), "os.symlink": (1, None),
+    "os.truncate": (0, None), "os.unlink": (0, None),
+    "os.utime": (0, None),
+}
+_SHUTIL_READ_CALLS = {"shutil.disk_usage", "shutil.which"}
+_SHUTIL_MUTATION_CALLS = {
+    "shutil.chown": (0, None), "shutil.copy": (1, None),
+    "shutil.copy2": (1, None), "shutil.copyfile": (1, None),
+    "shutil.copytree": (1, None), "shutil.move": (1, 0),
+    "shutil.rmtree": (0, None),
+}
+_SUBPROCESS_HELPERS = {
+    "subprocess.Popen", "subprocess.call", "subprocess.check_call",
+    "subprocess.check_output", "subprocess.run",
+}
+_SUBPROCESS_READ_ONLY_KEYWORDS = {
+    "bufsize", "capture_output", "check", "close_fds", "creationflags",
+    "cwd", "encoding", "env", "errors", "executable", "input",
+    "pass_fds", "pipesize", "preexec_fn", "process_group",
+    "restore_signals", "shell", "start_new_session", "startupinfo",
+    "stdin", "text", "timeout", "universal_newlines",
 }
 
 
@@ -325,6 +441,7 @@ def _record_mutation(
     assignments: Mapping[str, ast.AST],
     root_bindings: Mapping[tuple[str, str], str],
     target_policies: Mapping[tuple[str, str, str], str],
+    source_name: str,
     secondary: ast.AST | None = None,
 ) -> None:
     target_text = ast.unparse(target)
@@ -335,7 +452,8 @@ def _record_mutation(
         )
     if classification is None:
         raise SurfaceClassificationError(
-            f"unresolved mutation target:{function}:{api}:{ast.unparse(target)}"
+            f"{source_name}:unresolved mutation target:{function}:{api}:"
+            f"{ast.unparse(target)}"
         )
     if secondary is not None:
         secondary_classification = _resolve_mutation_target(
@@ -353,12 +471,27 @@ def _record_mutation(
         if classification.startswith("registered:"):
             classification = f"derived:{_semantic_root(classification)}"
     records.append({
+        "source": source_name,
         "function": function,
         "line": node.lineno,
         "api": api,
         "target": target_text,
         "classification": classification,
     })
+
+
+def _dynamic_namespace_call(
+    call: ast.Call, aliases: Mapping[str, str]
+) -> str | None:
+    if not isinstance(call.func, ast.Call):
+        return None
+    lookup = call.func
+    if _normalized_call_name(lookup.func, aliases) != "getattr" or not lookup.args:
+        return None
+    namespace = _normalized_call_name(lookup.args[0], aliases)
+    if namespace in {"os", "shutil", "subprocess", "pathlib", "Path"}:
+        return namespace
+    return None
 
 
 def classify_mutations(
@@ -369,39 +502,112 @@ def classify_mutations(
     target_policies: Mapping[tuple[str, str, str], str] | None = None,
 ) -> list[dict[str, object]]:
     tree = ast.parse(source)
+    aliases = _import_aliases(tree)
     records: list[dict[str, object]] = []
     target_policies = target_policies or {}
-    for function in (
-        node for node in tree.body if isinstance(node, ast.FunctionDef)
-    ):
-        assignments = _function_assignments(function)
-        for node in ast.walk(function):
+    for scope_name, scope in _scopes(tree):
+        assignments = _function_assignments(scope)
+        for node in _scope_nodes(scope):
             if not isinstance(node, ast.Call):
                 continue
-            name = _call_name(node.func)
+            dynamic_namespace = _dynamic_namespace_call(node, aliases)
+            if dynamic_namespace is not None:
+                raise SurfaceClassificationError(
+                    f"{source_name}:dynamic namespace call:{dynamic_namespace}"
+                )
+            name = _normalized_call_name(node.func, aliases)
             if isinstance(node.func, ast.Name) and name == "open":
                 mode = _write_mode(node, default="r", positional_index=1)
                 if any(flag in mode for flag in "wax+"):
                     if not node.args:
-                        raise SurfaceClassificationError("builtin open lacks target")
+                        raise SurfaceClassificationError(
+                            f"{source_name}:builtin open lacks target"
+                        )
                     _record_mutation(
                         records, api="builtin.open", target=node.args[0],
-                        node=node, function=function.name, assignments=assignments,
+                        node=node, function=scope_name, assignments=assignments,
                         root_bindings=root_bindings,
                         target_policies=target_policies,
+                        source_name=source_name,
                     )
                 continue
             if name == "os.open":
                 if len(node.args) < 2:
-                    raise SurfaceClassificationError("os.open lacks flags")
+                    raise SurfaceClassificationError(
+                        f"{source_name}:os.open lacks flags"
+                    )
                 if _os_open_is_write(node.args[1], assignments):
                     _record_mutation(
                         records, api="os.open", target=node.args[0], node=node,
-                        function=function.name, assignments=assignments,
+                        function=scope_name, assignments=assignments,
                         root_bindings=root_bindings,
                         target_policies=target_policies,
+                        source_name=source_name,
                     )
                 continue
+            if name in _OS_MUTATION_CALLS:
+                target_index, secondary_index = _OS_MUTATION_CALLS[name]
+                if len(node.args) <= target_index:
+                    raise SurfaceClassificationError(
+                        f"{source_name}:{name} lacks target"
+                    )
+                _record_mutation(
+                    records, api=name, target=node.args[target_index],
+                    secondary=(
+                        node.args[secondary_index]
+                        if secondary_index is not None
+                        and len(node.args) > secondary_index else None
+                    ),
+                    node=node, function=scope_name, assignments=assignments,
+                    root_bindings=root_bindings,
+                    target_policies=target_policies, source_name=source_name,
+                )
+                continue
+            if name.startswith("os."):
+                if name in _OS_READ_CALLS:
+                    continue
+                raise SurfaceClassificationError(
+                    f"{source_name}:unknown os member:{name}"
+                )
+            if name in _SHUTIL_MUTATION_CALLS:
+                target_index, secondary_index = _SHUTIL_MUTATION_CALLS[name]
+                if len(node.args) <= target_index:
+                    raise SurfaceClassificationError(
+                        f"{source_name}:{name} lacks target"
+                    )
+                _record_mutation(
+                    records, api=name, target=node.args[target_index],
+                    secondary=(
+                        node.args[secondary_index]
+                        if secondary_index is not None else None
+                    ),
+                    node=node, function=scope_name, assignments=assignments,
+                    root_bindings=root_bindings,
+                    target_policies=target_policies, source_name=source_name,
+                )
+                continue
+            if name.startswith("shutil."):
+                if name in _SHUTIL_READ_CALLS:
+                    continue
+                raise SurfaceClassificationError(
+                    f"{source_name}:unknown shutil member:{name}"
+                )
+            if name in _SUBPROCESS_HELPERS:
+                continue
+            if name.startswith("subprocess."):
+                raise SurfaceClassificationError(
+                    f"{source_name}:unknown subprocess member:{name}"
+                )
+            if name in {"Path", "pathlib.Path"} or name in _PATH_CLASS_READ_CALLS:
+                continue
+            if name.startswith(("Path.", "pathlib.Path.")):
+                raise SurfaceClassificationError(
+                    f"{source_name}:unknown Path member:{name}"
+                )
+            if name.startswith("pathlib."):
+                raise SurfaceClassificationError(
+                    f"{source_name}:unknown pathlib member:{name}"
+                )
             if isinstance(node.func, ast.Attribute):
                 method = node.func.attr
                 if method == "open":
@@ -409,18 +615,23 @@ def classify_mutations(
                     if any(flag in mode for flag in "wax+"):
                         _record_mutation(
                             records, api="Path.open", target=node.func.value,
-                            node=node, function=function.name,
+                            node=node, function=scope_name,
                             assignments=assignments, root_bindings=root_bindings,
                             target_policies=target_policies,
+                            source_name=source_name,
                         )
                     continue
-                if (
-                    method in _PATH_MUTATION_METHODS
-                    and not name.startswith(("os.", "shutil.", "subprocess."))
-                ):
+                receiver = _resolve_mutation_target(
+                    node.func.value, scope_name, assignments, root_bindings
+                )
+                if method in _PATH_MUTATION_METHODS:
                     if method == "replace" and len(node.args) >= 2:
-                        # str.replace(old, new) is scalar and not a Path mutation.
                         continue
+                    if receiver is None:
+                        raise SurfaceClassificationError(
+                            f"{source_name}:unresolved Path mutation receiver:"
+                            f"{scope_name}:{method}"
+                        )
                     secondary = (
                         node.args[0]
                         if method in {"rename", "replace"} and node.args
@@ -429,66 +640,16 @@ def classify_mutations(
                     _record_mutation(
                         records, api=_PATH_MUTATION_METHODS[method],
                         target=node.func.value, secondary=secondary, node=node,
-                        function=function.name, assignments=assignments,
+                        function=scope_name, assignments=assignments,
                         root_bindings=root_bindings,
                         target_policies=target_policies,
+                        source_name=source_name,
                     )
                     continue
-            os_api = {
-                "os.makedirs": ("os.makedirs", 0, None),
-                "os.fchmod": ("os.fchmod", 0, None),
-                "os.mkdir": ("os.mkdir", 0, None),
-                "os.rename": ("os.rename", 0, 1),
-                "os.replace": ("os.replace", 0, 1),
-                "os.unlink": ("os.unlink", 0, None),
-            }.get(name)
-            if os_api is not None:
-                api, target_index, secondary_index = os_api
-                if len(node.args) <= target_index:
-                    raise SurfaceClassificationError(f"{api} lacks target")
-                _record_mutation(
-                    records, api=api, target=node.args[target_index],
-                    secondary=(
-                        node.args[secondary_index]
-                        if secondary_index is not None
-                        and len(node.args) > secondary_index else None
-                    ),
-                    node=node, function=function.name, assignments=assignments,
-                    root_bindings=root_bindings,
-                    target_policies=target_policies,
-                )
-                continue
-            shutil_api = {
-                "shutil.copy": ("shutil.copy", 1, None),
-                "shutil.copy2": ("shutil.copy2", 1, None),
-                "shutil.copyfile": ("shutil.copyfile", 1, None),
-                "shutil.copytree": ("shutil.copytree", 1, None),
-                "shutil.move": ("shutil.move", 1, 0),
-                "shutil.rmtree": ("shutil.rmtree", 0, None),
-            }.get(name)
-            if shutil_api is not None:
-                api, target_index, secondary_index = shutil_api
-                if len(node.args) <= target_index:
-                    raise SurfaceClassificationError(f"{api} lacks target")
-                _record_mutation(
-                    records, api=api, target=node.args[target_index],
-                    secondary=(
-                        node.args[secondary_index]
-                        if secondary_index is not None else None
-                    ),
-                    node=node, function=function.name, assignments=assignments,
-                    root_bindings=root_bindings,
-                    target_policies=target_policies,
-                )
-                continue
-            if isinstance(node.func, ast.Attribute):
-                receiver = _resolve_mutation_target(
-                    node.func.value, function.name, assignments, root_bindings
-                )
-                if receiver is not None and node.func.attr not in _PATH_READ_METHODS:
+                if receiver is not None and method not in _PATH_READ_METHODS:
                     raise SurfaceClassificationError(
-                        f"unknown path mutation primitive:{function.name}:"
-                        f"{node.func.attr}"
+                        f"{source_name}:unknown path mutation primitive:"
+                        f"{scope_name}:{method}"
                     )
     return records
 
@@ -500,6 +661,7 @@ def classify_process_output_arguments(
     root_bindings: Mapping[tuple[str, str], str] | None = None,
 ) -> list[dict[str, object]]:
     tree = ast.parse(source)
+    aliases = _import_aliases(tree)
     records: list[dict[str, object]] = []
     root_bindings = root_bindings or {}
     write_parameters = {
@@ -510,29 +672,65 @@ def classify_process_output_arguments(
         "config_path", "gate0.candidate_events_path", "gate0.control_points_path",
         "gate0.evidence_manifest_path", "manifest_path", "p1.evidence_manifest_path",
     }
-    for function in (
-        node for node in tree.body if isinstance(node, ast.FunctionDef)
-    ):
-        assignments = _function_assignments(function)
-        for node in ast.walk(function):
+    for scope_name, scope in _scopes(tree):
+        assignments = _function_assignments(scope)
+        for node in _scope_nodes(scope):
             if not isinstance(node, ast.Call):
                 continue
-            name = _call_name(node.func)
+            dynamic_namespace = _dynamic_namespace_call(node, aliases)
+            if dynamic_namespace == "subprocess":
+                raise SurfaceClassificationError(
+                    "dynamic subprocess member is forbidden"
+                )
+            name = _normalized_call_name(node.func, aliases)
             candidates: list[tuple[str, ast.AST]] = []
-            if name == "subprocess.Popen":
+            if name in _SUBPROCESS_HELPERS:
                 for keyword in node.keywords:
                     if keyword.arg in {"stdout", "stderr"}:
                         if (
                             isinstance(keyword.value, ast.Attribute)
-                            and _call_name(keyword.value) in {
+                            and _normalized_call_name(keyword.value, aliases) in {
                                 "subprocess.DEVNULL", "subprocess.PIPE",
                                 "subprocess.STDOUT",
                             }
                         ):
                             continue
                         candidates.append((
-                            f"subprocess.Popen.{keyword.arg}", keyword.value,
+                            f"{name}.{keyword.arg}", keyword.value,
                         ))
+                    elif keyword.arg not in _SUBPROCESS_READ_ONLY_KEYWORDS:
+                        raise SurfaceClassificationError(
+                            f"unknown subprocess output keyword:{name}:"
+                            f"{keyword.arg}"
+                        )
+                command = node.args[0] if node.args else None
+                if isinstance(command, (ast.List, ast.Tuple)):
+                    for index, item in enumerate(command.elts[:-1]):
+                        if (
+                            isinstance(item, ast.Constant)
+                            and item.value in {"--bag-output", "--manifest"}
+                        ):
+                            candidates.append((
+                                f"{name}.{item.value}", command.elts[index + 1]
+                            ))
+                        elif (
+                            isinstance(item, ast.Constant)
+                            and isinstance(item.value, str)
+                            and item.value.startswith("-")
+                            and any(
+                                token in item.value.lower()
+                                for token in (
+                                    "dir", "file", "manifest", "output", "path"
+                                )
+                            )
+                        ):
+                            raise SurfaceClassificationError(
+                                f"unknown subprocess path flag:{name}:{item.value}"
+                            )
+            elif name.startswith("subprocess."):
+                raise SurfaceClassificationError(
+                    f"unknown subprocess member:{name}"
+                )
             elif name == "ExecuteProcess":
                 command = next(
                     (
@@ -613,19 +811,19 @@ def classify_process_output_arguments(
             for api, target in candidates:
                 target_text = ast.unparse(target)
                 classification = target_policies.get(
-                    (function.name, api, target_text)
+                    (scope_name, api, target_text)
                 )
                 if classification is None:
                     classification = _resolve_mutation_target(
-                        target, function.name, assignments, root_bindings
+                        target, scope_name, assignments, root_bindings
                     )
                 if classification is None:
                     raise SurfaceClassificationError(
-                        f"unclassified subprocess output:{function.name}:"
+                        f"unclassified subprocess output:{scope_name}:"
                         f"{api}:{target_text}"
                     )
                 records.append({
-                    "function": function.name,
+                    "function": scope_name,
                     "line": node.lineno,
                     "api": api,
                     "target": target_text,

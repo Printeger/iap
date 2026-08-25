@@ -1,3 +1,5 @@
+import ast
+import json
 import os
 import stat
 import subprocess
@@ -13,17 +15,17 @@ BOOTSTRAP = SCRIPT_DIR / "run_p4_g0c_tests.py"
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from run_p4_g0c_tests import ENVIRONMENT_PATHS  # noqa: E402
+from run_p4_g0c_tests import (  # noqa: E402
+    ENVIRONMENT_PATHS,
+    compare_inventories,
+    external_log_inventory,
+)
 
 
 class P4G0CHermeticTests(unittest.TestCase):
     @staticmethod
     def _external_log_inventory():
-        root = Path("/root/.ros/log")
-        return {
-            str(path.relative_to(root))
-            for path in root.rglob("*")
-        }
+        return external_log_inventory()
 
     @staticmethod
     def _run_bootstrap(task_root, suite_root):
@@ -33,6 +35,7 @@ class P4G0CHermeticTests(unittest.TestCase):
                 str(BOOTSTRAP),
                 "--task-root",
                 str(task_root),
+                "unittest",
                 "--",
                 "discover",
                 "-s",
@@ -118,7 +121,7 @@ class P4G0CHermeticTests(unittest.TestCase):
                     completed = self._run_bootstrap(root, parent)
                     self.assertEqual(completed.returncode, 2)
                     self.assertIn(
-                        "HERMETIC_TEST_ENVIRONMENT_NOT_READY", completed.stderr
+                        "HERMETIC_VERIFICATION_NOT_READY", completed.stderr
                     )
         self.assertEqual(self._external_log_inventory(), before)
 
@@ -135,6 +138,103 @@ class P4G0CHermeticTests(unittest.TestCase):
             self.assertEqual(completed.returncode, 2)
             self.assertIn("XDG_RUNTIME_DIR:unsafe_mode", completed.stderr)
             self.assertEqual(stat.S_IMODE(xdg.stat().st_mode), 0o755)
+        self.assertEqual(self._external_log_inventory(), before)
+
+    def test_inventory_comparator_detects_every_required_delta_class(self):
+        regular = {
+            "type": "regular", "mode": 0o644, "uid": 0, "gid": 0,
+            "size": 3, "mtime_ns": 10, "ctime_ns": 11,
+            "symlink_target": None, "sha256": "aaa",
+        }
+        symlink = {
+            "type": "symlink", "mode": 0o777, "uid": 0, "gid": 0,
+            "size": 6, "mtime_ns": 10, "ctime_ns": 11,
+            "symlink_target": "target", "sha256": None,
+        }
+        cases = {
+            "added": ({"kept": regular}, {"kept": regular, "new": regular}),
+            "removed": ({"kept": regular, "old": regular}, {"kept": regular}),
+            "metadata": (
+                {"kept": regular},
+                {"kept": {**regular, "mode": 0o600}},
+            ),
+            "symlink_target": (
+                {"link": symlink},
+                {"link": {**symlink, "symlink_target": "other"}},
+            ),
+            "same_name_content": (
+                {"kept": regular},
+                {"kept": {**regular, "sha256": "bbb"}},
+            ),
+        }
+        for name, (before, after) in cases.items():
+            with self.subTest(name=name):
+                delta = compare_inventories(before, after)
+                self.assertEqual(len(delta), 1)
+                self.assertNotEqual(delta[0]["change"], "unchanged")
+        self.assertEqual(compare_inventories({"kept": regular}, {"kept": regular}), [])
+
+    def test_every_launch_import_has_the_hermetic_guard_first(self):
+        for path in sorted((REPO / "test").glob("*.py")):
+            tree = ast.parse(path.read_text(), filename=str(path))
+            launch_import_lines = [
+                node.lineno for node in ast.walk(tree)
+                if (
+                    isinstance(node, ast.Import)
+                    and any(alias.name == "launch" for alias in node.names)
+                ) or (
+                    isinstance(node, ast.ImportFrom)
+                    and node.module is not None
+                    and (node.module == "launch" or node.module.startswith("launch."))
+                )
+            ]
+            if not launch_import_lines:
+                continue
+            guard_lines = [
+                node.lineno for node in ast.walk(tree)
+                if isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "require_hermetic_test_environment"
+            ]
+            with self.subTest(path=path.name):
+                self.assertTrue(guard_lines, "launch import lacks hermetic guard")
+                self.assertLess(min(guard_lines), min(launch_import_lines))
+
+    def test_child_failure_exit_and_external_result_are_distinct(self):
+        before = self._external_log_inventory()
+        with tempfile.TemporaryDirectory() as tmp:
+            parent = Path(tmp)
+            suite = parent / "failing-suite"
+            suite.mkdir()
+            (suite / "test_failure.py").write_text(
+                "import unittest\n"
+                "class ExpectedFailure(unittest.TestCase):\n"
+                "    def test_fails(self):\n"
+                "        self.fail('expected child failure')\n"
+            )
+            root = parent / "failure-root"
+            completed = subprocess.run(
+                [
+                    sys.executable, str(BOOTSTRAP), "--task-root", str(root),
+                    "unittest", "--", "discover", "-s", str(suite),
+                    "-p", "test_failure.py",
+                ],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            self.assertEqual(completed.returncode, 1)
+            self.assertIn("EXTERNAL_ROS_LOG_UNCHANGED", completed.stdout)
+            result_paths = sorted(
+                (root / "external_inventory").glob("*-result.json")
+            )
+            self.assertEqual(len(result_paths), 1)
+            result = json.loads(result_paths[0].read_text())
+            self.assertEqual(result["child_exit"], 1)
+            self.assertEqual(result["final_exit"], 1)
+            self.assertEqual(result["external_delta"], [])
+            self.assertEqual(result["result"], "CHILD_FAILED")
         self.assertEqual(self._external_log_inventory(), before)
 
     def test_bootstrap_contains_launch_context_artifacts_below_task_root(self):
@@ -163,6 +263,7 @@ class P4G0CHermeticTests(unittest.TestCase):
                     str(BOOTSTRAP),
                     "--task-root",
                     str(root),
+                    "unittest",
                     "--",
                     "discover",
                     "-s",
@@ -177,7 +278,7 @@ class P4G0CHermeticTests(unittest.TestCase):
                 check=False,
             )
             self.assertEqual(completed.returncode, 0, completed.stderr)
-            self.assertIn("HERMETIC_TEST_ENVIRONMENT_READY", completed.stdout)
+            self.assertIn("HERMETIC_VERIFICATION_READY", completed.stdout)
             self.assertIn(str(root), completed.stdout)
             for name, relative in ENVIRONMENT_PATHS.items():
                 path = root / relative

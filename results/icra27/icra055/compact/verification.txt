@@ -1,0 +1,50 @@
+ICRA-055 / IAP-RQ-423
+result: P4_G0C_R3_HERMETIC_CLASSIFIER_READY_FOR_REVIEW
+
+Hermetic launcher:
+- exact root: /home/dev/ws_iap/src/iap/results/icra27/icra055;
+- controlled modes: unittest, syntax, flake8, canonical-json only;
+- exact task-local HOME, ROS_HOME, ROS_LOG_DIR, TMPDIR and XDG_RUNTIME_DIR;
+- XDG mode 0700 and pre-import guard discovery;
+- child exit and external mutation are distinct structured results.
+
+External ROS log proof:
+- every Python invocation captured relative name, type, mode, uid/gid, size,
+  mtime_ns, ctime_ns, symlink target and regular-file SHA-256 before and after;
+- formal full-discovery inventories contain 17,759 entries;
+- before/after canonical SHA-256 is identical:
+  82b029dee5cd6444ee812316381565531308365dd6704cbc2df938a4fa68eee9;
+- cmp exit 0 and structured delta [].
+
+Classifier closure:
+- both r3 and legacy XDG conditions require exact IfCondition wrapper,
+  Equals/NotEquals operator, LaunchConfiguration("experiment") left operand
+  and P4_G0C_EXPERIMENT_V3 name right operand;
+- nine condition adversaries reject, including wrong key/constant, reversed
+  operands, string lookalike, wrong operator/wrapper, extra substitution,
+  missing condition and wrong legacy operator;
+- exact production action multiset remains FAST DDS, Qt, r3 XDG, legacy XDG;
+- module, sync, async and nested scopes are inspected;
+- os, shutil, pathlib/Path and subprocess aliases are normalized; unknown
+  namespace members, dynamic lookup, modes, flags, targets and output keywords
+  reject;
+- 32 mutation-family cases and all five subprocess helpers are covered;
+- production surface remains exactly 50 path records, five environment keys
+  and eight output semantics.
+
+Formal commands all used run_p4_g0c_tests.py with the exact ICRA-055 root:
+- unittest discover -s test -p 'test_p4_g0c_*.py' -v: 109/109, exit 0;
+- unittest launch-contract discovery: 11/11, exit 0;
+- unittest launch-golden discovery: 16/16, exit 0;
+- syntax: 6/6, exit 0;
+- fatal-only flake8: exit 0;
+- canonical JSON: 4/4, exit 0;
+- unittest discover -s test -p 'test_*.py': 464/464, exit 0;
+- git diff --check: exit 0.
+
+No build/install/log product, compiled test, CTest, GPU preflight, ROS process,
+launch service, runner/analyzer CLI, calibration, main flow, smoke,
+qualification, identity consumption or threshold action ran. No production
+launch/runner/science/config/protocol/registry/dependency/lineage byte changed.
+ICRA-054 evidence and external incident records remain preserved. The PDF is
+unmodified, untracked and unstaged.

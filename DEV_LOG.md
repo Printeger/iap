@@ -7204,3 +7204,68 @@ untouched. The protected PDF remains unmodified, untracked and unstaged.
 Final Builder result is `BLOCKED_EXTERNAL_TEMP_CREATION`, with additional
 fail-closed classifier review blockers retained for Supervisor disposition.
 No next task is selected. Control returns only to SUPERVISOR review.
+
+## 2026-08-25 — ICRA-055 hermetic classifier correction
+
+IAP-RQ-423. Synchronized `dev/icra` at task head `4a6dbd6`; fetch passed,
+divergence was `0 0`, and no pull ran. Initial status contained only the
+protected untracked PDF. Available capacity before handoff evidence was
+118,709,006,336 bytes; no task process remained.
+
+The ICRA-054 Review verdict is accepted without rewriting its BLOCKED history.
+ICRA-055 changes only the authorized launcher, classifier and focused tests.
+The launcher now restricts roots to ICRA-055, creates/validates exact `HOME`,
+`ROS_HOME`, `ROS_LOG_DIR`, `TMPDIR` and `XDG_RUNTIME_DIR` before any child,
+supports only unittest/syntax/fatal-flake8/canonical-JSON modes, and no longer
+uses `execve`. It inventories `/root/.ros/log` before and after each child by
+relative name, type, mode, uid/gid, size, mtime/ctime, symlink target and
+regular-file SHA-256. Structured results separate the exact child exit from a
+typed exit 86 external-mutation blocker.
+
+Development RED/GREEN history was hermetic. Initial launcher tests had six
+stale message-string failures, then passed 7/7; the child-exit regression made
+the final bootstrap/comparator set 8/8. Environment RED proved wrong experiment
+key, wrong v3 constant, reversed operands, extra substitution and partial/empty
+multisets were accepted; exact condition/multiset parsing made 10/10 GREEN.
+Mutation RED proved module/async/nested writes, aliases, extended os families
+and four subprocess helpers were omitted; scope/namespace deny tables made the
+suite GREEN. A later RED exposed official `capture_output=True` as an
+over-rejection; the explicit read-only keyword set resolved it. Final
+classifier coverage is 14/14.
+
+Both XDG actions now require exact `IfCondition` structure and ordered
+`LaunchConfiguration("experiment")`, named `P4_G0C_EXPERIMENT_V3` operands;
+registered r3 uses Equals and legacy uses NotEquals. Nine malformed condition
+classes reject. The exact action multiset is one FAST DDS immutable path, one
+Qt scalar, one registered r3 XDG and one legacy XDG.
+
+Mutation discovery directly scans module, synchronous, asynchronous and nested
+scopes. Import aliases normalize for `os`, `shutil`, `pathlib/Path` and
+`subprocess`; explicit read/mutation/helper sets deny unknown members, dynamic
+attributes, unresolved modes/flags/keywords/receivers/targets. Coverage adds
+`remove`, `rmdir`, truncate, chmod/chown, link/symlink families and all five
+subprocess launch helpers. `source_name` now appears in typed diagnostics and
+records. Production remains the exact five-environment/eight-output contract,
+50 literal path records and unchanged launch/runner bytes.
+
+Formal commands used only the ICRA-055 launcher root: focused P4 discovery
+109/109, launch-contract 11/11, launch-golden 16/16 and complete Python
+discovery 464/464 all exit 0. Syntax 6/6, fatal-only flake8, canonical JSON 4/4
+and `git diff --check` pass. The full-discovery external inventories both hash
+to `82b029de...eee9` over 17,759 entries; cmp is 0 and structured delta is
+empty. All task snapshots/homes/logs/temp remain ignored and unstaged; only
+compact evidence is selected.
+
+ICRA-054 summary/verification hashes remain `98a5551b...3c24` and
+`fd00a565...5907`. Production launch/runner hashes remain `396122ae...ee7d`
+and `05234cea...c3c`; r3 protocol/registry/dependency/lineage remain
+`7df40eff...9401`, `8825c70c...82c8`, `ff7c66f1...5fc6`,
+`87947cb0...7d60`. Protected PDF remains unmodified/untracked/unstaged at
+`1f07da56...44f6`; all external logs and historical products are untouched.
+
+No build/install/log product, compiled test, CTest, GPU preflight, ROS process
+or launch service, live runner/analyzer CLI, calibration, main flow, smoke,
+qualification, identity consumption, threshold, G0C/G0D or P5 action ran.
+Compact evidence is under `results/icra27/icra055/compact/`. Builder result is
+`P4_G0C_R3_HERMETIC_CLASSIFIER_READY_FOR_REVIEW`, not live readiness or G0C
+PASS, pending independent review and final DEV_LOG-only handoff.
