@@ -5,37 +5,36 @@ schema_version: icra_single_branch_two_agent_v2
 branch: dev/icra
 active_role: DEEPSEEK
 status: TASK_READY
-gate: P4_G0C_R3_HERMETIC_CLASSIFIER_CORRECTION
-task_id: ICRA-055
-review_base: 6e762fbed9095ae8d0ff2e1cb8af19a0bd63fb00
-reviewed_head: af34048ff50819ccab5ce261026ca95ef4e83a46
+gate: P4_G0C_R3_CONTAINER_CONTRACT_AND_LIVE_CALIBRATION
+task_id: ICRA-056
+review_base: 4a6dbd6f9dfa94f92388bf91482cb8f236c032e9
+reviewed_head: 74cb730e0776842d2dbabbfa64ccc7dd50fbc293
 conference_route: P0_P4_P5
-route_status: P4_G0C_R3_PROTOCOL_PARTIAL_BLOCKED_HERMETIC_CLASSIFIER
+route_status: P4_G0C_R3_LIVE_AUTHORIZED_WITH_CONTAINER_CONTRACT_CORRECTION
 historical_gate0a_verdict: NO_GO_P2
 p0_gate0b_status: PASS
 p0_gate0b_worker_count: 4
-p4_status: G0A_PASS_G0B_PASS_G0C_R3_PROTOCOL_REQUEST_CHANGES_HERMETIC_CLASSIFIER
+p4_status: G0A_PASS_G0B_PASS_G0C_R3_LIVE_TASK_READY
 p5_status: IMPLEMENTED_BUT_UNQUALIFIED
-supervisor_verdict: ICRA054_REVIEW_BLOCKED_EXTERNAL_TEMP_AND_INCOMPLETE_FAIL_CLOSED_CLASSIFIER
-review_disposition: ICRA055_SYNTHETIC_HERMETIC_CLASSIFIER_CORRECTION_AUTHORIZED
+supervisor_verdict: ICRA055_REVIEW_PASS_BUILDER_SUPERVISOR_CONTRACT_DEFECT_CORRECTED
+review_disposition: ICRA056_INTEGRATED_CONTAINER_CONTRACT_AND_LIVE_AUTHORIZED
 handoff_status: TASK_READY
 next_task: NEXT_TASK.md
-updated_utc: 2026-08-25T01:28:01Z
+updated_utc: 2026-08-25T02:50:05Z
 ```
 
 The conditional conference route remains `P0 -> P4 -> P5`. P0 Gate-0B, P4-G0A and P4-G0B remain
-`PASS`; historical Gate-0A remains `NO_GO_P2`, so P2 stays disabled. ICRA-054 adds a task-local hermetic
-unittest bootstrap and a much broader production mutation classifier. Development regressions pass 5/5
-bootstrap, 8/8 classifier, 11/11 launch-contract and 16/16 launch-golden tests; no build, GPU or live work
-ran.
+`PASS`; historical Gate-0A remains `NO_GO_P2`, so P2 stays disabled. ICRA-055 closes the hermetic launcher,
+exact XDG conditions, deny-by-default production mutation discovery and external-log comparator. Independent
+focused 111/111 and full Python 466/466 reruns pass with identical 17,759-entry external inventories.
 
-ICRA-054 is nevertheless `BLOCKED`. A diagnostic command created and then deleted two external
-`/tmp/icra054_*_names.txt` files, violating the immediate-blocker and no-cleanup rules. Formal verification
-therefore correctly stopped. Review also finds that r3 condition operands are not verified, unknown
-module-qualified mutation APIs can be silently omitted, and hermetic regressions compare external log names
-without metadata/content.
+ICRA-055's Builder correctly reported a literal task-contract blocker: production has a `runs_root`
+semantic beyond eight per-run outputs. Supervisor Review determines that the task contract was wrong, not
+the implementation or production runner. `runs_root` is the canonical fresh container boundary that owns
+runner state, preflight, environment and run directories; the eight keys are exact launch-output leaves
+below it. The Builder result remains preserved, while the Supervisor contract is corrected here.
 
-ICRA-055 is the only authorized task: a synthetic correction of those complete fail-closed seams, using the
-hermetic entry point for every Python action and repository-local snapshots only. No GPU, live runner/
-analyzer CLI, build or CTest is authorized. ICRA-054 created no build/install products, so nothing is
-deleted; preserve its complete blocked evidence, historical products, external logs and protected PDF.
+ICRA-056 is the only authorized task. Phase A mechanically models the sole registered `runs_root` container
+and must pass before Phase B; the same task then fresh-builds CUDA, runs dependency/GPU preflight, executes
+the 15 registered r3 runs once and analyzes the complete bundle. There is no intermediate synthetic Review.
+ICRA-055 created no build/install products, so nothing is deleted; preserve all evidence and the PDF.

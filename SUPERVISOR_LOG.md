@@ -1,5 +1,67 @@
 # ICRA Supervisor Log
 
+## 2026-08-25 — ICRA-055 implementation PASS, Supervisor contract corrected, ICRA-056 live authorized
+
+### Review identity and synchronization
+
+- Fixed review range: `4a6dbd6f9dfa94f92388bf91482cb8f236c032e9...74cb730e0776842d2dbabbfa64ccc7dd50fbc293`.
+- Reviewed primary closure `72ccae8`, two independent-review remediations `f2119f6`/`32bd497` and final
+  DEV_LOG-only handoff `74cb730`; all carry `IAP-RQ-423`. The 10 changed paths match ICRA-055 ownership and
+  allowlist; production runner/launch/science/config/protocol/registry/dependency/lineage bytes are unchanged.
+- After fetch, HEAD and `origin/dev/icra` match at divergence `0 0`. The protected PDF remains the sole
+  untracked file with SHA-256
+  `1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+
+### Standards axis
+
+- Verdict: `PASS`; zero blocking and two Low nonblocking judgment findings; worst Low.
+- Ownership, allowed files, commit IDs, final DEV_LOG-only handoff, CHANGES reproduction commands,
+  TRACEABILITY, repository-local homes/logs/snapshots/temp, historical-product retention and protected hashes
+  conform. All task-window external inventories contain the same 17,759 entries with empty delta.
+- Possible Primitive Obsession: classifier policies remain dictionaries and encoded
+  `registered:*`/`derived:*` strings. Possible Divergent Change: the approximately 1,300-line classifier
+  covers several AST surfaces. These are deferred maintainability observations, not live blockers and do not
+  create another task. The prior unused `source_name` finding is resolved.
+
+### Spec axis
+
+- Builder implementation/evidence verdict: `PASS`; zero blocking, zero nonblocking and zero scope-creep
+  findings. Supervisor contract verdict: one High defect; worst High.
+- Exact XDG r3/legacy conditions, four-action multiset, module/sync/async/nested discovery, alias-aware
+  deny-by-default filesystem/process outputs, canonical descendants, recursive invoked launch guards and the
+  full external name/metadata/target/content comparator meet ICRA-055's intended safety objective.
+- The literal “five environments/eight outputs with no extra semantic root” clause is unsatisfiable against
+  the already accepted production model. The runner validates and owns a fresh canonical `runs_root`, writes
+  its state at `runs_root/p4_g0c_runner_state.json`, and creates preflight, launch-environment and run
+  descendants there. The eight `MUTABLE_OUTPUT_KEYS` are exact per-run launch-output leaves, so their common
+  container cannot be one of them or their descendant.
+- Builder correctly preserved production bytes, classified `runs_root`, rejected the literal false contract
+  and reported `BLOCKED_PRODUCTION_SURFACE_EXCEEDS_EIGHT_OUTPUT_CONTRACT`. This is not returned as another
+  Builder failure. Supervisor corrects the model to one registered container boundary plus five/eight exact
+  descendant contracts; raw Builder evidence remains unchanged.
+
+### Independent verification and Gate verdict
+
+- Supervisor reran focused P4-G0C 111/111 and complete repository Python 466/466 through the hermetic
+  launcher; both exit 0. Both invocations report `EXTERNAL_ROS_LOG_UNCHANGED` over 17,759 entries. The full
+  suite retains one existing ResourceWarning and expected diagnostic stdout, with no test failure.
+- Verdict: `ICRA055_REVIEW_PASS_BUILDER_SUPERVISOR_CONTRACT_DEFECT_CORRECTED`. The implementation is accepted
+  and no further standalone synthetic audit is authorized. This is permission for the integrated ICRA-056
+  pre-live correction and live task, not G0C PASS or threshold application.
+
+### Artifact lifecycle and next action
+
+- ICRA-055 created no build/install product, so there is nothing to delete after PASS. Its task-local raw
+  test evidence remains retained; historical blocked products and external logs remain untouched. The PDF is
+  unstaged.
+- Unique next task: `ICRA-056 / P4_G0C_R3_CONTAINER_CONTRACT_AND_LIVE_CALIBRATION`, defined in
+  `NEXT_TASK.md`; active role is `DEEPSEEK`, state `TASK_READY`.
+- Phase A performs only the mechanical one-container classifier correction. On its tests passing, the same
+  task proceeds without intermediate Review to one fresh CUDA build, standalone dependency gate, built-in
+  GPU preflight, exactly 15 r3 live runs and one analyzer invocation. Nonblocking smells cannot stop it.
+- Retain ICRA-056 build/install during Builder work and Supervisor Review. Only after a later Supervisor PASS
+  and pushed code/docs will the current-task ICRA-056 build/install be deleted; any BLOCKED result retains it.
+
 ## 2026-08-25 — ICRA-054 review BLOCKED and ICRA-055 hermetic reissue
 
 ### Review identity and synchronization
