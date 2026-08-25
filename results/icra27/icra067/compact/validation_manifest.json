@@ -11,12 +11,12 @@
       "status": "PASS"
     }
   },
-  "contract_sha256": "34b1544d4d37714f03be0f40f4b6a0689677dae24ff6ce1d5470ed26f2358fca",
+  "contract_sha256": "21c52024e713734480a2d2c9dd3fd66ee1e81ef7b27da0a5d799ff5f7acbaf8e",
   "failures": [],
   "launch_binding_sha256": {
-    "FINAL_REJECT": "49e532df3853600d0f59b83d1ac0f2b5f1a57acb94e945a588576b5d55cdd649",
-    "RUNTIME_FAIL": "0f9f3a98c1a966fd89c2cd0f8fe2939c7a0e453f14547824dfdb5d46ca58db98",
-    "SAFE_NORMAL": "7cf4ae8f2911679b07980819249c091f0dbc16e81577c2c6ae2f8d74056fadf3"
+    "FINAL_REJECT": "eaf3378525a78fd12789c8c887dd7f276fee8da51e9fb686a34296a8e288740a",
+    "RUNTIME_FAIL": "a9e43d47273b90a86b3d76f635d3940be0ca61beea9d38024ed6c7b81e898eb1",
+    "SAFE_NORMAL": "a29e530186b8af310cd970e4896e00837b0689984f5f8fe283a35b7af07a5896"
   },
   "qualification_claim": false,
   "route_id": "ICRA_P0_P5_CONTINGENCY_V1",
@@ -24,27 +24,27 @@
   "status": "VALIDATION_ONLY_PASS",
   "validated_manifest": {
     "analyzer_version": "icra_p0_p5_qualification_analyzer_v1",
-    "contract_sha256": "34b1544d4d37714f03be0f40f4b6a0689677dae24ff6ce1d5470ed26f2358fca",
+    "contract_sha256": "21c52024e713734480a2d2c9dd3fd66ee1e81ef7b27da0a5d799ff5f7acbaf8e",
     "fixture_identities": {
       "FINAL_REJECT": "p5_7_rejected_trajectory_zone_v1",
       "RUNTIME_FAIL": "p5_6_future_unknown_zone_v1",
       "SAFE_NORMAL": "none_v1"
     },
-    "git_commit": "b629a8a4dab2553db8d35447708324bd18aa4979",
+    "git_commit": "0346fd2bc923bec47be8f9bf69b5d2a48a857242",
     "normalized_evidence_sha256": {
-      "synthetic-final-reject-v1": "ce9408e7a9c443dbe805631d118f142735ed74c91f6667eb662b5a4ea60048b1",
-      "synthetic-runtime-fail-v1": "ddd61c18a54e08ac2c23fae114cef11bd19127b5678581fe35fbf62ba645acab",
-      "synthetic-safe-normal-v1": "9b90e03b6eb9ac4e2d5b5162f39efb23cd41c97234657155384feea39d6ab9ce"
+      "synthetic-final-reject-v1": "39ac5fb17904f2b77fcf9bf2e91c04c2b3a57a2034945ca4c108883f75d9111a",
+      "synthetic-runtime-fail-v1": "f578405fb39316c804c63e35899d0af160e8ced562771b0790f6d05b1c55ba77",
+      "synthetic-safe-normal-v1": "1021b4a20910d8763ff648588e1b475ddfce773c8e6b62e0a9f9156c61e9b06a"
     },
     "raw_artifact_hashes": {
       "synthetic-final-reject-v1": {
-        "config/icra27/icra_p0_p5_qualification_v1.json": "34b1544d4d37714f03be0f40f4b6a0689677dae24ff6ce1d5470ed26f2358fca"
+        "results/icra27/icra067/validation/raw/synthetic-final-reject-v1.json": "c9cc98a83e78bfc11b854a6e3b8a6eb07a8359e8c86944e8b94644c49f9411ec"
       },
       "synthetic-runtime-fail-v1": {
-        "config/icra27/icra_p0_p5_qualification_v1.json": "34b1544d4d37714f03be0f40f4b6a0689677dae24ff6ce1d5470ed26f2358fca"
+        "results/icra27/icra067/validation/raw/synthetic-runtime-fail-v1.json": "b4322024fe9dd45461ec217c34622a577dd5509ba61ee76e613906e8008743ab"
       },
       "synthetic-safe-normal-v1": {
-        "config/icra27/icra_p0_p5_qualification_v1.json": "34b1544d4d37714f03be0f40f4b6a0689677dae24ff6ce1d5470ed26f2358fca"
+        "results/icra27/icra067/validation/raw/synthetic-safe-normal-v1.json": "98ae1e63e2db8454a65a1296cb2965e891b1e90b092bf26a52f43aa0388b408e"
       }
     },
     "route_id": "ICRA_P0_P5_CONTINGENCY_V1",

@@ -7967,14 +7967,18 @@ forbidden, so the task stops as
 `BLOCKED_ICRA067_FROZEN_P4_LAUNCH_HASH_CONFLICT`; no P4 artifact was changed.
 
 Independent two-axis review found one reproducibility-doc violation, one
-duplicated resolver smell and four spec gaps. Follow-up commit `b629a8a`
+duplicated resolver smell and four initial spec gaps. Follow-up commits
+`b629a8a` and `0346fd2`
 centralizes the resolver, puts reproduction commands in `docs/CHANGES.md`,
 unifies launch/analyzer bindings, freezes complete reused P5-6/P5-7 fixture
 geometry, verifies real repository-local raw files, rejects a forged checkout
 root and limits FINAL_REJECT's zero-publication rule to the rejected identity.
 The synthetic validation manifest is `VALIDATION_ONLY_PASS` for all three cases
 with `qualification_claim=false`; its SHA is
-`54eaec91...4062553`, contract SHA `34b1544d...58fca`.
+`26da1f10...72d869c`, contract SHA `21c52024...acbaf8e`. Each synthetic
+run's raw JSON is independently repository-local, content-hashed and required
+to equal that run's typed evidence; installed/source contract locations emit
+the same frozen relative manifest identity.
 
 No GPU, ROS, launch, live runner, registered identity, bag, product build or
 qualification was invoked. The following are the exact prospective commands

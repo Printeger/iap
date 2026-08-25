@@ -2601,5 +2601,11 @@ fixture geometry lives in the contract; analyzer raw hashes name and verify real
 checkout-local files; `--repository-root` must equal the actual checkout; and
 FINAL_REJECT permits unrelated candidate publication while still forbidding the
 rejected identity. Compact synthetic result SHA is
-`54eaec91f4b055917250a9d92dfb42160b86c43b1c5dbc5f22b9f8fdd4062553`;
+`26da1f10322024cc77c279dd0f92914417d98cbf74d4820780e87033672d869c`;
 it is explicitly validation-only and makes no qualification claim.
+
+Final spec re-review also closed install/source portability and raw-run
+provenance: the binding emits the contract's frozen relative identity instead
+of an absolute installed path, and each run must have a distinct real raw JSON
+whose verified content equals its typed run evidence. A contract file or any
+unrelated repository file can no longer stand in for run evidence.
