@@ -1,5 +1,65 @@
 # ICRA Supervisor Log
 
+## 2026-08-25 — ICRA-057 code PASS, procedural terminal rule waived, ICRA-058 direct live
+
+### Review identity and synchronization
+
+- Fixed review range: `c21f96050a2ef00f13fc0c1fd9056dcb48283de9...6271181a10c746f370fe639dbdeb0247d55cb570`.
+- Reviewed provenance repair `9decf92`, incident record `3749fdd`, typed-failure remediation `4fc60c7` and
+  final Builder handoff `6271181`; all contain `IAP-RQ-423`. The 11 changed paths remain within ICRA-057
+  ownership and allowlist. HEAD and `origin/dev/icra` match at divergence `0 0`; the protected PDF is the
+  sole untracked file and retains SHA-256
+  `1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+
+### Standards axis
+
+- Under the literal ICRA-057 task, verdict is one High blocking finding and zero nonblocking findings.
+  A read-only compiler-metadata `rg` accidentally included the retained ICRA-056 `log/` tree and emitted
+  serialized credential-like values to transient tool output, violating the task's safe-output clause.
+- All other Standards items pass: allowed files/ownership, requirement IDs, synchronized docs, narrow semantic
+  locals, no smell finding, no persisted credential assignment in ICRA-057 evidence, no external mutation,
+  no build/live action after the incident, artifact retention and no remaining task process.
+
+### Spec axis
+
+- Verdict under the literal task is one High incomplete-outcome finding, one Medium operational precaution,
+  zero wrong implementation and zero scope creep. Adopted static closure, dependency, GPU, identities and
+  analyzer are all zero, so ICRA-057 is not live-ready and cannot authorize cleanup.
+- The production repair itself is correct: `resolved_manifest_path` is resolved inside the typed failure
+  boundary, separate artifact locals cannot overwrite it, and the result returns that exact path. Regression
+  coverage binds path/hash/prefixes/counts and fail-closed aliases/artifacts.
+- Builder evidence passes dependency 12/12, focused P4-G0C 116/116 and complete Python 471/471. Supervisor
+  independently reran dependency 12/12 and complete Python 471/471 through the hermetic ICRA-057 launcher;
+  both exit 0 and external inventories remain unchanged at 17,759 entries. The existing expected diagnostic
+  stdout and ResourceWarning do not fail the suite.
+
+### Supervisor policy correction and verdict
+
+- The incident is real and credential rotation is recommended, but it did not persist into repository/task
+  evidence, change an external or historical artifact, alter the CUDA closure or consume a live identity.
+  Treating this transient read-only output as qualification-invalidating was an over-strict Supervisor rule.
+- Verdict: `ICRA057_REVIEW_CODE_PASS_PROCEDURAL_TERMINAL_RULE_WAIVED`. ICRA-057 is not declared live-complete;
+  instead its accepted code/build eligibility advances immediately to ICRA-058 direct live continuation.
+- Future terminal output policy is narrowed: persisted/staged/pushed credential leakage or unauthorized
+  external mutation remains terminal. A contained transient tool-output incident is recorded and excluded
+  from future commands but does not abort qualification. Pre-identity shell/metadata/evidence mistakes are
+  correctable within the same task. One-shot protection starts with the first registered live identity.
+- Builder-side two-axis reviews and mandatory separate DEV_LOG-only handoff commits are removed from the next
+  task. This preserves independent Supervisor Review while eliminating redundant handoff loops.
+
+### Artifact lifecycle and next action
+
+- No cleanup occurs because live qualification is incomplete. ICRA-057 created no build/install; retain its
+  raw evidence. Retain the adopted ICRA-056 build (1.2 GiB) and install (460 MiB) through the next Review.
+- Unique next task: `ICRA-058 / P4_G0C_R3_DIRECT_LIVE_CONTINUATION`, defined in `NEXT_TASK.md`; active role is
+  `DEEPSEEK`, state `TASK_READY`.
+- ICRA-058 performs no CUDA rebuild or synthetic audit. It safely revalidates exact cache/install paths, then
+  executes dependency, built-in GPU preflight, all 15 r3 identities and analyzer in one cycle. Narrow
+  pre-identity orchestration correction and immutable-bundle analyzer correction are authorized in-task;
+  scientific failure, real dependency/GPU failure and identity retry remain fail-closed.
+- On ICRA-058 Review PASS after code/docs are pushed, delete only the adopted reproducible ICRA-056
+  build/install. Otherwise retain all products.
+
 ## 2026-08-25 — ICRA-056 Review BLOCKED, ICRA-057 integrated repair/live authorized
 
 ### Review identity and synchronization
