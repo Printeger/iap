@@ -233,6 +233,82 @@ class P4G0CDependencyPreflightTest(unittest.TestCase):
             result["schema_version"],
             "p4_g0c_dependency_preflight_result_v3",
         )
+        self.assertEqual(
+            result["manifest_path"], str(self.manifest_path.resolve())
+        )
+        self.assertEqual(
+            result["manifest_sha256"],
+            "ff7c66f182296a1f057acafee5306d7d81aa49be8a40c14acd8e832d98cb5fc6",
+        )
+        self.assertEqual(result["validated_prefixes"], [str(prefix.resolve())])
+        self.assertEqual(
+            {
+                "packages": result["package_count"],
+                "executables": result["executable_count"],
+                "components": result["component_count"],
+                "configs": result["config_count"],
+                "runtime_libraries": result["runtime_library_count"],
+            },
+            {
+                "packages": 18,
+                "executables": 13,
+                "components": 1,
+                "configs": 14,
+                "runtime_libraries": 6,
+            },
+        )
+
+    def test_manifest_path_is_stable_after_all_artifact_validation(self):
+        protocol = REPO / "config/icra27/p4_g0c_protocol_v3.json"
+        registry = REPO / "config/icra27/p4_threshold_registry_v3.json"
+        bundle = RUNNER.load_bundle(
+            protocol,
+            registry,
+            self.fixture,
+            expected_protocol_schema=RUNNER.HARDENED_PROTOCOL_SCHEMA,
+        )
+        source_manifest = (
+            REPO / "config/icra27/p4_g0c_runtime_dependencies_v3.json"
+        )
+        payload = json.loads(source_manifest.read_text())
+        iap_package = next(
+            package for package in payload["packages"]
+            if package["name"] == "iap"
+        )
+        iap_package["config_files"].reverse()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            requested_manifest = root / "reordered-config-manifest.json"
+            requested_manifest.write_bytes(RUNNER.canonical_bytes(payload))
+            bundle.protocol["runtime_dependency_manifest"]["sha256"] = (
+                RUNNER.sha256_file(requested_manifest)
+            )
+            self.manifest = payload
+            prefix = self._complete_prefix(root)
+            last_runtime_library = payload["runtime_libraries"][-1]
+            (prefix / last_runtime_library["relative_path"]).write_bytes(
+                Path("/lib")
+                .joinpath(f"{os.uname().machine}-linux-gnu/libm.so.6")
+                .read_bytes()
+            )
+            component_library = prefix / payload["components"][-1]["library"]
+            component_library.write_bytes(
+                Path("/lib")
+                .joinpath(f"{os.uname().machine}-linux-gnu/libz.so.1")
+                .read_bytes()
+            )
+            result = RUNNER.validate_runtime_dependencies(
+                bundle,
+                requested_manifest,
+                self._environment([prefix]),
+            )
+        self.assertTrue(result["dependency_ready"])
+        self.assertEqual(
+            result["manifest_path"], str(requested_manifest.resolve())
+        )
+        self.assertEqual(result["config_count"], 14)
+        self.assertEqual(result["runtime_library_count"], 6)
+        self.assertEqual(result["component_count"], 1)
 
     def test_every_declared_package_executable_component_and_config_is_required(self):
         cases = []
@@ -349,6 +425,21 @@ class P4G0CDependencyPreflightTest(unittest.TestCase):
                 historical["failure_reason"], "DEPENDENCY_PREFIX_HISTORICAL"
             )
 
+            alias = root / "prefix-alias"
+            alias.symlink_to(prefix, target_is_directory=True)
+            alias_result = RUNNER.validate_runtime_dependencies(
+                self.bundle,
+                self.manifest_path,
+                {
+                    "AMENT_PREFIX_PATH": str(alias),
+                    "P4_G0C_ALLOWED_PREFIXES": str(alias),
+                },
+            )
+            self.assertEqual(
+                alias_result["failure_reason"],
+                "DEPENDENCY_PREFIX_SYMLINK_OR_ALIAS",
+            )
+
             duplicate = root / "duplicate_prefix"
             marker = (
                 duplicate / "share/ament_index/resource_index/packages/iap"
@@ -378,6 +469,27 @@ class P4G0CDependencyPreflightTest(unittest.TestCase):
                 drift_result["failure_reason"],
                 "DEPENDENCY_MANIFEST_HASH_MISMATCH",
             )
+
+    def test_runtime_library_symlink_escape_remains_fail_closed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            prefix = self._complete_prefix(root)
+            library = self.manifest["runtime_libraries"][0]
+            library_path = prefix / library["relative_path"]
+            escaped_library = root / "escaped-library.so"
+            escaped_library.write_bytes(library_path.read_bytes())
+            library_path.unlink()
+            library_path.symlink_to(escaped_library)
+            result = RUNNER.validate_runtime_dependencies(
+                self.bundle,
+                self.manifest_path,
+                self._environment([prefix]),
+            )
+        self.assertEqual(
+            result["failure_reason"],
+            "DEPENDENCY_RUNTIME_LIBRARY_MISSING:"
+            f"{library['package']}:{library['relative_path']}",
+        )
 
     def test_component_library_registration_and_launch_hash_drift_reject(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -411,10 +411,12 @@ def validate_runtime_dependencies(
         return _dependency_failure(reason, result_schema)
 
     binding = bundle.protocol["runtime_dependency_manifest"]
-    path = Path(manifest_path or bundle.dependency_manifest_path)
+    resolved_manifest_path = Path(
+        manifest_path or bundle.dependency_manifest_path
+    ).resolve()
     try:
         manifest = load_runtime_dependency_manifest(
-            path,
+            resolved_manifest_path,
             binding["sha256"],
             expected_schema=(
                 DEPENDENCY_SCHEMA_V3 if hardened else DEPENDENCY_SCHEMA_V2
@@ -474,23 +476,27 @@ def validate_runtime_dependencies(
         name = package["name"]
         prefix = package_prefixes[name]
         for executable in package["executables"]:
-            path = prefix / "lib" / name / executable
-            if not _ordinary_file_within(path, prefix, executable=True):
+            executable_path = prefix / "lib" / name / executable
+            if not _ordinary_file_within(
+                executable_path, prefix, executable=True
+            ):
                 return dependency_failure(
                     f"DEPENDENCY_EXECUTABLE_MISSING:{name}:{executable}"
                 )
-            if not _is_loadable_executable(path, environment):
+            if not _is_loadable_executable(executable_path, environment):
                 return dependency_failure(
                     f"DEPENDENCY_EXECUTABLE_INVALID:{name}:{executable}"
                 )
             executable_count += 1
         for relative in package["config_files"]:
-            path = prefix / "share" / name / relative
-            if not _ordinary_file_within(path, prefix):
+            config_path = prefix / "share" / name / relative
+            if not _ordinary_file_within(config_path, prefix):
                 return dependency_failure(
                     f"DEPENDENCY_CONFIG_MISSING:{name}:{relative}"
                 )
-            if sha256_file(path) != manifest["config_hashes"][f"{name}:{relative}"]:
+            if sha256_file(config_path) != manifest["config_hashes"][
+                f"{name}:{relative}"
+            ]:
                 return dependency_failure(
                     f"DEPENDENCY_CONFIG_HASH_MISMATCH:{name}:{relative}"
                 )
@@ -499,13 +505,13 @@ def validate_runtime_dependencies(
     runtime_library_count = 0
     for library in manifest["runtime_libraries"]:
         prefix = package_prefixes[library["package"]]
-        path = prefix / library["relative_path"]
-        if not _ordinary_file_within(path, prefix):
+        runtime_library_path = prefix / library["relative_path"]
+        if not _ordinary_file_within(runtime_library_path, prefix):
             return dependency_failure(
                 "DEPENDENCY_RUNTIME_LIBRARY_MISSING:"
                 f"{library['package']}:{library['relative_path']}"
             )
-        if not _is_loadable_elf(path, {3}, environment):
+        if not _is_loadable_elf(runtime_library_path, {3}, environment):
             return dependency_failure(
                 "DEPENDENCY_RUNTIME_LIBRARY_INVALID:"
                 f"{library['package']}:{library['relative_path']}"
@@ -514,18 +520,18 @@ def validate_runtime_dependencies(
 
     for component in manifest["components"]:
         prefix = package_prefixes[component["package"]]
-        resource = (
+        component_resource_path = (
             prefix / "share/ament_index/resource_index/rclcpp_components"
             / component["package"]
         )
-        if not _ordinary_file_within(resource, prefix):
+        if not _ordinary_file_within(component_resource_path, prefix):
             return dependency_failure(
                 f"DEPENDENCY_COMPONENT_MISSING:{component['package']}:{component['plugin']}"
             )
         try:
             registrations = {
                 tuple(line.strip().split(";", 1))
-                for line in resource.read_text().splitlines()
+                for line in component_resource_path.read_text().splitlines()
                 if line.strip() and ";" in line
             }
         except OSError:
@@ -535,29 +541,31 @@ def validate_runtime_dependencies(
             return dependency_failure(
                 f"DEPENDENCY_COMPONENT_MISMATCH:{component['package']}:{component['plugin']}"
             )
-        library = prefix / component["library"]
-        if not _ordinary_file_within(library, prefix):
+        component_library_path = prefix / component["library"]
+        if not _ordinary_file_within(component_library_path, prefix):
             return dependency_failure(
                 f"DEPENDENCY_COMPONENT_LIBRARY_MISSING:{component['package']}:{component['plugin']}"
             )
-        if not _is_loadable_elf(library, {3}, environment):
+        if not _is_loadable_elf(component_library_path, {3}, environment):
             return dependency_failure(
                 f"DEPENDENCY_COMPONENT_LIBRARY_INVALID:{component['package']}:{component['plugin']}"
             )
 
     launch = manifest["launch_contract"]
     prefix = package_prefixes[launch["package"]]
-    launch_path = prefix / "share" / launch["package"] / launch["relative_path"]
+    launch_contract_path = (
+        prefix / "share" / launch["package"] / launch["relative_path"]
+    )
     if (
-        not _ordinary_file_within(launch_path, prefix)
-        or sha256_file(launch_path) != launch["sha256"]
+        not _ordinary_file_within(launch_contract_path, prefix)
+        or sha256_file(launch_contract_path) != launch["sha256"]
     ):
         return dependency_failure("DEPENDENCY_LAUNCH_CONTRACT_MISMATCH")
     return {
         "schema_version": result_schema,
         "dependency_ready": True,
         "failure_reason": "",
-        "manifest_path": str(path.resolve()),
+        "manifest_path": str(resolved_manifest_path),
         "manifest_sha256": binding["sha256"],
         "package_count": len(package_prefixes),
         "executable_count": executable_count,

@@ -1203,3 +1203,11 @@ They do not convert historical `NO-GO-P2`, failed P0 Gate-0B evidence, the stati
 | IAP-RQ-423 | Build one complete fresh CUDA runtime before dependency/GPU/live | Sole merged non-symlink build exits 0 with 17/17 packages; static closure proves CUDA ON, 17 unique indexes, six ordinary ELF libraries, loadable GPU odometry library, zero unresolved/historical linkage and exact frozen hashes | **BUILD + STATIC CLOSURE PASS** |
 | IAP-RQ-423 | Make dependency provenance exact before GPU or ROS | Sole standalone gate reports complete 18/13/1/14/6 validation and zero GPU/launch/attempt, but state `0d305191...32361` binds `manifest_path` to installed `libsub_mapping.so`; production reuses the manifest local variable during runtime-library validation | **BLOCKED_DEPENDENCY_MANIFEST_PATH_BINDING** |
 | IAP-RQ-423 | Stop without consuming evidence after an output-binding failure | Full runner, GPU preflight, r3 attempts, retries and analyzer remain zero; runs/analysis/draft are absent, processes are zero, protected PDF and read-only `gnss_comm` identities remain exact | **FAIL-CLOSED; SUPERVISOR REVIEW REQUIRED** |
+
+## 2026-08-25 ICRA-057 dependency provenance repair
+
+| Req ID | Requirement/evidence seam | Implementation and retained evidence | Status |
+|---|---|---|---|
+| IAP-RQ-423 | Bind dependency success provenance to the selected manifest | `validate_runtime_dependencies()` owns immutable `resolved_manifest_path` and distinct artifact-path locals; success returns the same canonical manifest path plus protocol-bound SHA, prefixes and exact 18/13/1/14/6 counts | **PHASE A IMPLEMENTED** |
+| IAP-RQ-423 | Preserve validation behavior while preventing last-artifact corruption | Focused 11/11 covers reordered config and alternate terminal ELF content plus wrong hash, missing artifact, prefix alias, artifact escape and historical-prefix rejection | **REGRESSION PASS** |
+| IAP-RQ-423 | Keep repair verification repository-local before adoption/live | Bootstrap 8/8, classifier 18/18, focused 115/115, launch 11/11 + 16/16, full discovery 470/470, syntax/flake8/canonical/diff all pass with empty 17,759-entry external delta | **PHASE A PASS; ADOPTION/LIVE PENDING** |

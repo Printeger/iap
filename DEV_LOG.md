@@ -7438,3 +7438,39 @@ commit/push. Final Builder handoff is
 `BLOCKED_DEPENDENCY_MANIFEST_PATH_BINDING`, never G0C PASS. Complete ICRA-056
 raw evidence remains retained; no cleanup or next-task selection occurred.
 Control returns only to SUPERVISOR review and disposition.
+
+## 2026-08-25 — ICRA-057 DEPENDENCY PROVENANCE REPAIR PHASE A
+
+IAP-RQ-423. Synchronized `dev/icra` at reviewed head `37621f9`; divergence was
+`0 0` and initial status contained only the protected untracked PDF. The fresh
+ICRA-057 root did not exist, available capacity was 115,588,390,912 bytes and
+no task/required process existed. ICRA-046 through ICRA-056 artifacts,
+external ROS logs, read-only `gnss_comm` (`de422a4b...16a`) and the PDF
+(`1f07da56...44f6`) were preserved.
+
+TDD used the public `validate_runtime_dependencies()` result seam. The first
+test command incorrectly passed a file path to unittest and failed import
+before collecting tests; it is retained, and the discovery-form command then
+produced the true RED: 8/9 passed, while v3 `manifest_path` returned the final
+temporary `libsub_mapping.so` instead of the canonical requested manifest.
+
+The narrow production repair resolves the selected manifest once as
+`resolved_manifest_path`, loads and returns that same path, and uses distinct
+locals for executable, config, runtime-library, component-resource,
+component-library and launch-contract paths. No schema, hash, prefix,
+ordinary-file, loadability or failure check changed. Regression coverage binds
+the exact manifest path/hash, ordered prefixes and 18/13/1/14/6 counts; it
+also proves config reordering and different valid terminal runtime/component
+ELFs cannot corrupt provenance, while prefix and artifact symlink escapes,
+wrong hash, missing artifacts and historical prefixes remain fail-closed.
+
+Formal ICRA-057 launcher results pass: dependency 11/11, bootstrap/comparator
+8/8, classifier 18/18, focused P4-G0C 115/115, launch 11/11 plus 16/16 and
+full Python discovery 470/470. Syntax for eight files, fatal-only flake8,
+canonical JSON 4/4 and `git diff --check` pass. Each external inventory has
+17,759 entries; final before/after SHA is `82b029de...eee9`, delta empty.
+
+No inherited environment dump, credential value, colcon/build/install, GPU,
+ROS/live runner, identity, analyzer or threshold action occurred. Phase A is
+ready for its required commit/push before read-only adoption of the frozen
+ICRA-056 CUDA install; no intermediate Review is requested.

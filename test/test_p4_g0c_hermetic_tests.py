@@ -137,7 +137,7 @@ class P4G0CHermeticTests(unittest.TestCase):
             cases = {
                 "outside": "/root/.ros/log",
                 "previous_task_root": str(
-                    REPO / "results" / "icra27" / "icra055"
+                    REPO / "results" / "icra27" / "icra056"
                 ),
                 "lexical_parent": f"{parent}/child/../child",
                 "lexical_alias": str(hermetic_root).replace(

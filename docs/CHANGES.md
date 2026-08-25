@@ -106,6 +106,26 @@ python3 test/test_gate0_analyzer.py
 git diff --check
 ```
 
+## 2026-08-25 (ICRA-057 dependency provenance repair Phase A)
+
+- IAP-RQ-423: repair only `validate_runtime_dependencies()` by resolving the
+  selected manifest once and retaining that semantic local through all
+  artifact validation. Executable, config, runtime-library, component resource,
+  component library and launch paths now use distinct descriptive names, so
+  successful `manifest_path` can no longer inherit the last checked artifact.
+- Public-result regressions bind canonical manifest path, exact v3 hash,
+  prefixes and 18 packages / 13 executables / one component / 14 configs / six
+  runtime libraries. Reordered config validation and alternate valid terminal
+  runtime/component ELF content preserve provenance; wrong hash, missing files,
+  symlink/escape and historical prefixes still reject.
+- Hermetic verification passes dependency 11/11, bootstrap 8/8, classifier
+  18/18, focused 115/115, launch 11/11 + 16/16 and full discovery 470/470,
+  plus syntax, fatal-only flake8, canonical JSON and diff checks. External
+  17,759-entry inventories remain byte-identical at `82b029de...eee9`.
+- The initial focused command used a non-importable unittest file path and is
+  retained; corrected discovery produced the intended single provenance RED.
+  No build, GPU, ROS/live, identity or analyzer action ran in Phase A.
+
 ## 2026-08-25 (ICRA-056 container contract and r3 live task)
 
 - IAP-RQ-423: correct the Supervisor-owned static model to one canonical,
