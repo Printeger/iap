@@ -2317,3 +2317,24 @@ git diff --check
   fail-closed as `BLOCKED_P4_OPEN_ENDED_COLLISION_BEFORE_GUIDE_REQUEST` without
   formal dependency, full runner, registered identity, analyzer or threshold
   action.
+
+## 2026-08-25 (ICRA-061 versioned closed-segment fixture)
+
+- Added immutable fixture v2 plus canonical v5 protocol, registry, dependency
+  and replacement lineage for 15 new r5 identities; only central obstacle x
+  changes from `[-8,-3]` to `[-9,-7]` and all v1-v4/science bytes remain fixed.
+- Added exact production scanner regression coverage for r5 closed segments
+  and superseded r4 open-ended behavior. The installed no-ROS preflight now
+  checks effective obstacle enabled/x/y/z, start, horizon and control spacing.
+- Preserved the ICRA-060 default-false admission contract and added focused
+  effect gating plus live proof of zero context/P4 rows while waiting and
+  positive-identity rows only after release. Corrected ICRA-060 readiness prose
+  and expanded its retained command ledger without rerunning ICRA-060 ROS.
+- Fresh CUDA/static closure and standalone v5 dependency pass. The sole r5
+  readiness passes GPU, required processes, release-once and `CLOSED_SEGMENTS`,
+  but all 12 decision rows remain `incomplete_profile` with neither arm at
+  200/200 coverage. The registered runner and analyzer remain uninvoked because
+  the immutable bundle would be rejected deterministically.
+- Final state is
+  `BLOCKED_R5_READINESS_PROFILE_INCOMPLETE_BEFORE_REGISTERED_IDENTITY`; no r5
+  identity, retry, draft, threshold action, G0C verdict, G0D or P5 work exists.

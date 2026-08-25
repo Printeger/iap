@@ -1,0 +1,77 @@
+{
+  "build": {
+    "attempt": 1,
+    "build_testing": false,
+    "build_type": "Release",
+    "build_with_cuda": true,
+    "merged_non_symlink": true,
+    "package_count": 17,
+    "static_closure": "PASS"
+  },
+  "dependency_preflight": {
+    "component_count": 1,
+    "config_count": 14,
+    "executable_count": 13,
+    "gpu_preflight_invocations": 0,
+    "launch_invocations": 0,
+    "package_count": 18,
+    "result": "PASS",
+    "runtime_library_count": 6
+  },
+  "downstream": {
+    "analyzer_invocations": 0,
+    "draft_created": false,
+    "full_runner_invocations": 0,
+    "g0c_pass_claimed": false,
+    "registered_r5_attempts": 0,
+    "registered_r5_completions": 0,
+    "registered_r5_retries": 0,
+    "threshold_actions": 0
+  },
+  "final_artifacts": {
+    "dependency_v5_sha256": "1d15384e0909efdf4f41c9b048c2a455c4fd6fe28206a6ef944051080587efef",
+    "fixture_v2_sha256": "2ba39a328b8ba9deff0e82524cd5c8474484a0f4d0ff9abf8efb0da6e1cf86e4",
+    "launch_sha256": "8b23ce649ee092de74e98a07a43259a99515c02dae2e9fafd95457ab31a3aeb1",
+    "lineage_v5_sha256": "2bee29b12ed4fb7454dcdcd13e0c474ca205fa7b7cfd34083947031d6f739faa",
+    "protocol_v5_sha256": "abb0eea66cdd88cc2616d06a5aa7829f90654de0fa4bf7f35cbc0c126b11f125",
+    "registry_v5_sha256": "7728f4bf6d9a8d626a1fb9b09d43ca54c884cba34021103bd3dea7683f899736"
+  },
+  "fixture_eligibility": {
+    "central_obstacle_enabled": true,
+    "central_obstacle_x_m": [-9.0, -7.0],
+    "central_obstacle_y_half_width_m": 0.65,
+    "central_obstacle_z_m": [0.0, 2.8],
+    "r4_status": "OPEN_ENDED_COLLISION",
+    "r5_status": "CLOSED_SEGMENTS",
+    "result": "PASS"
+  },
+  "preservation": {
+    "protected_pdf_sha256": "1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6",
+    "registered_r5_identities_consumed": 0,
+    "v1_v4_artifacts_changed": false
+  },
+  "readiness": {
+    "barrier_defer_count": 848,
+    "barrier_release_count": 1,
+    "closed_segment_rows": 12,
+    "gpu_ready": true,
+    "identity": "p4-g0c-r5-readiness-icra061-attempt01",
+    "incomplete_profile_rows": 12,
+    "positive_snapshot_identity_rows": 12,
+    "pre_release_p4_rows": 0,
+    "required_processes_ok": true,
+    "row_count": 12
+  },
+  "requirements": ["IAP-RQ-320", "IAP-RQ-322", "IAP-RQ-423"],
+  "result": "BLOCKED_R5_READINESS_PROFILE_INCOMPLETE_BEFORE_REGISTERED_IDENTITY",
+  "schema_version": "icra061_compact_result_v1",
+  "task_id": "ICRA-061",
+  "verification": {
+    "cpp_admission_tests": "PASS_4_OF_4",
+    "external_ros_inventory_delta": 0,
+    "fatal_only_flake8": "PASS",
+    "full_python_discovery": "PASS_485_OF_485",
+    "postreview_fixture_preflight": "PASS",
+    "syntax": "PASS"
+  }
+}

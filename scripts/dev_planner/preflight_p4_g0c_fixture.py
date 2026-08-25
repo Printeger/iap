@@ -82,6 +82,29 @@ def _launch_geometry(launch_path: Path) -> dict[str, Any]:
         assignments["P4_G0C_V5_CENTRAL_OBSTACLE_X_M"], {}
     )
     defaults = dict(_literal(assignments["ARG_DEFAULTS"], {}))
+    fork_node = assignments["P1_FORK_MAP_PRESET"]
+    if not isinstance(fork_node, ast.Dict):
+        raise ValueError("LAUNCH_FORK_PRESET_NOT_STATIC")
+    fork_map = {
+        str(_literal(key, {})): _literal(value, {})
+        for key, value in zip(fork_node.keys, fork_node.values)
+        if key is not None
+    }
+    scenario_presets = assignments["SCENARIO_PRESETS"]
+    if not isinstance(scenario_presets, ast.Dict):
+        raise ValueError("LAUNCH_SCENARIOS_NOT_STATIC")
+    scenario_node = None
+    for key, value in zip(scenario_presets.keys, scenario_presets.values):
+        if isinstance(key, ast.Constant) and key.value == "p4_g0c_free_corridor_v1":
+            scenario_node = value
+            break
+    if not isinstance(scenario_node, ast.Dict):
+        raise ValueError("LAUNCH_V5_SCENARIO_MISSING")
+    scenario = {
+        str(_literal(key, {})): _literal(value, {})
+        for key, value in zip(scenario_node.keys, scenario_node.values)
+        if key is not None
+    }
     presets = assignments["EXPERIMENT_PRESETS"]
     if not isinstance(presets, ast.Dict):
         raise ValueError("LAUNCH_PRESETS_NOT_STATIC")
@@ -96,13 +119,26 @@ def _launch_geometry(launch_path: Path) -> dict[str, Any]:
     geometry_overrides: dict[str, Any] = {}
     for key, value in zip(experiment_node.keys, experiment_node.values):
         if isinstance(key, ast.Constant) and key.value in {
-            "p1_fixture_central_x_min_m", "p1_fixture_central_x_max_m"
+            "p1_fixture_central_obstacle_enabled",
+            "p1_fixture_central_x_min_m",
+            "p1_fixture_central_x_max_m",
+            "p1_fixture_central_y_half_width_m",
+            "p1_fixture_central_z_max_m",
         }:
             geometry_overrides[str(key.value)] = _literal(value, names)
-    if set(geometry_overrides) != {
-        "p1_fixture_central_x_min_m", "p1_fixture_central_x_max_m"
-    }:
+    effective = {**defaults, **fork_map, **scenario, **geometry_overrides}
+    required = {
+        "p1_fixture_central_obstacle_enabled",
+        "p1_fixture_central_x_min_m",
+        "p1_fixture_central_x_max_m",
+        "p1_fixture_central_y_half_width_m",
+        "p1_fixture_central_z_max_m",
+    }
+    if not required.issubset(effective):
         raise ValueError("LAUNCH_V5_GEOMETRY_OVERRIDE_MISSING")
+    enabled = str(effective["p1_fixture_central_obstacle_enabled"]).lower()
+    if enabled not in {"true", "false"}:
+        raise ValueError("LAUNCH_V5_GEOMETRY_ENABLED_NOT_BOOLEAN")
     return {
         "start_x_m": float(defaults["init_x"]),
         "horizon_m": float(defaults["manager/planning_horizon"]),
@@ -110,8 +146,15 @@ def _launch_geometry(launch_path: Path) -> dict[str, Any]:
             defaults["manager/control_points_distance"]
         ),
         "obstacle_x_m": [
-            float(geometry_overrides["p1_fixture_central_x_min_m"]),
-            float(geometry_overrides["p1_fixture_central_x_max_m"]),
+            float(effective["p1_fixture_central_x_min_m"]),
+            float(effective["p1_fixture_central_x_max_m"]),
+        ],
+        "obstacle_enabled": enabled == "true",
+        "obstacle_y_half_width_m": float(
+            effective["p1_fixture_central_y_half_width_m"]
+        ),
+        "obstacle_z_m": [
+            0.0, float(effective["p1_fixture_central_z_max_m"])
         ],
     }
 
@@ -166,6 +209,9 @@ def run_preflight(
         "horizon_m": 7.5,
         "control_point_distance_m": 0.4,
         "obstacle_x_m": [-9.0, -7.0],
+        "obstacle_enabled": True,
+        "obstacle_y_half_width_m": 0.65,
+        "obstacle_z_m": [0.0, 2.8],
     }
     if launch_geometry != expected_geometry:
         return _failure(

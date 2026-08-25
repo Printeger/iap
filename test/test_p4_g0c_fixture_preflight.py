@@ -95,6 +95,30 @@ class P4G0CFixturePreflightTest(unittest.TestCase):
         self.assertEqual(result["typed_result"], "FIXTURE_ELIGIBILITY_FAIL")
         self.assertEqual(result["failure_reason"], "PRODUCTION_SCANNER_CONTRACT_FAILED")
 
+    def test_effective_scenario_y_geometry_drift_fails_before_scanner(self):
+        module = self._load_module()
+        fixture = REPO / "config/icra27/p4_g0c_live_fixture_v2.json"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            launch = root / "test_planner.launch.py"
+            launch.write_text(
+                (REPO / "launch/test_planner.launch.py").read_text().replace(
+                    '"p1_fixture_central_y_half_width_m": "0.65"',
+                    '"p1_fixture_central_y_half_width_m": "0.66"',
+                    1,
+                )
+            )
+            marker = root / "scanner-invoked"
+            scanner = root / "scanner"
+            scanner.write_text(f"#!/bin/sh\ntouch {marker}\nexit 0\n")
+            scanner.chmod(scanner.stat().st_mode | stat.S_IXUSR)
+            result = module.run_preflight(
+                fixture, self._protocol(root, fixture), launch, scanner
+            )
+        self.assertEqual(result["typed_result"], "FIXTURE_ELIGIBILITY_FAIL")
+        self.assertEqual(result["failure_reason"], "EFFECTIVE_LAUNCH_GEOMETRY_MISMATCH")
+        self.assertFalse(marker.exists())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -7671,3 +7671,36 @@ Result is `BLOCKED_P4_OPEN_ENDED_COLLISION_BEFORE_GUIDE_REQUEST`; formal v4
 dependency, full runner, all 15 registered r4 identities and analyzer remain
 uninvoked. No threshold action or G0C PASS is claimed; control returns to
 SUPERVISOR review with raw products retained.
+
+## 2026-08-25 — ICRA-061 R5 CLOSED FIXTURE; PROFILE COVERAGE BLOCKED
+
+IAP-RQ-320, IAP-RQ-322 and IAP-RQ-423. Added versioned fixture v2 and canonical
+v5 protocol/registry/dependency/lineage with 15 disjoint r5 identities. Only the
+predeclared central obstacle x interval changes to `[-9,-7]`; v1-v4 bytes,
+seeds, repetitions, formulas, thresholds, P0 profile and P5 behavior remain
+unchanged. Exact production scanner tests prove r5 `CLOSED_SEGMENTS` with free
+endpoints/free tail and preserve r4 `OPEN_ENDED_COLLISION`. The installed
+no-ROS preflight now materializes enabled/x/y/z geometry and fails on drift.
+
+Fresh attempt 01 builds 17/17 sequential merged non-symlink Release/CUDA
+packages. Static closure, exact source/install hashes, six ELF libraries,
+focused C++, hermetic Python 485/485, syntax, fatal-only flake8, canonical JSON
+and diff checks pass. ICRA-060 compact prose and its retained command ledger are
+corrected, including focused failed/successful discovery and typed historical
+fields. The sole standalone v5 dependency preflight passes exact 18/13/1/14/6
+counts with zero GPU/launch/identity/retry.
+
+The sole nonregistered r5 readiness passes GPU/process health, releases the
+admission barrier once at generation 1 after 848 deferrals, emits zero
+pre-release P4 rows, and produces 12 positive-snapshot `CLOSED_SEGMENTS`
+decisions. All 12 decisions are nevertheless `incomplete_profile`: original
+validity is 17/200 for ten rows and 0/200 for two; risk validity is 103-147/200.
+This persists through final RiskGrid generation 17 with global validity 0.984
+and `occupied_skip` as dominant unknown, so it is not startup warm-up. Because
+the frozen analyzer retains every failed row and requires `METRICS_ONLY` plus
+200/200 coverage on both arms, the registered matrix would be deterministically
+ineligible. Changing the P0 profile, fixture, P4 science, row denominator or
+analyzer gate is forbidden. Result is
+`BLOCKED_R5_READINESS_PROFILE_INCOMPLETE_BEFORE_REGISTERED_IDENTITY`; full
+runner, registered attempts/retries and analyzer remain zero, with no draft,
+threshold action or G0C PASS claim.

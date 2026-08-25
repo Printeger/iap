@@ -210,6 +210,63 @@
       "start_utc": "2026-08-25T08:23:09Z"
     },
     {
+      "argv": ["/usr/bin/python3", "-m", "unittest", "discover", "-s", "test", "-p", "test_p4_g0c*.py", "-v"],
+      "cwd": "/home/dev/ws_iap/src/iap",
+      "duration_s": {
+        "authoritative_artifact": "results/icra27/icra060/hermetic_tests/external_inventory/unittest-1933476-result.json",
+        "typed": "UNRECOVERABLE_HISTORICAL_FIELD"
+      },
+      "end_utc": {
+        "authoritative_artifact": "results/icra27/icra060/hermetic_tests/external_inventory/unittest-1933476-after.json",
+        "typed": "UNRECOVERABLE_HISTORICAL_FIELD"
+      },
+      "environment_allowlist": ["HOME", "ROS_HOME", "ROS_LOG_DIR", "TMPDIR", "XDG_RUNTIME_DIR"],
+      "exit_code": 1,
+      "name": "focused_python_discovery_attempt_01_failed",
+      "start_utc": {
+        "authoritative_artifact": "results/icra27/icra060/hermetic_tests/external_inventory/unittest-1933476-before.json",
+        "typed": "UNRECOVERABLE_HISTORICAL_FIELD"
+      }
+    },
+    {
+      "argv": ["/usr/bin/python3", "-m", "unittest", "discover", "-s", "test", "-p", "test_p4_g0c*.py", "-v"],
+      "cwd": "/home/dev/ws_iap/src/iap",
+      "duration_s": {
+        "authoritative_artifact": "results/icra27/icra060/hermetic_tests/external_inventory/unittest-1936841-result.json",
+        "typed": "UNRECOVERABLE_HISTORICAL_FIELD"
+      },
+      "end_utc": {
+        "authoritative_artifact": "results/icra27/icra060/hermetic_tests/external_inventory/unittest-1936841-after.json",
+        "typed": "UNRECOVERABLE_HISTORICAL_FIELD"
+      },
+      "environment_allowlist": ["HOME", "ROS_HOME", "ROS_LOG_DIR", "TMPDIR", "XDG_RUNTIME_DIR"],
+      "exit_code": 0,
+      "name": "focused_python_discovery_attempt_02",
+      "start_utc": {
+        "authoritative_artifact": "results/icra27/icra060/hermetic_tests/external_inventory/unittest-1936841-before.json",
+        "typed": "UNRECOVERABLE_HISTORICAL_FIELD"
+      }
+    },
+    {
+      "argv": ["/usr/bin/python3", "-m", "unittest", "discover", "-s", "test", "-p", "test_*.py"],
+      "cwd": "/home/dev/ws_iap/src/iap",
+      "duration_s": {
+        "authoritative_artifact": "results/icra27/icra060/hermetic_tests/external_inventory/unittest-1993397-result.json",
+        "typed": "UNRECOVERABLE_HISTORICAL_FIELD"
+      },
+      "end_utc": {
+        "authoritative_artifact": "results/icra27/icra060/hermetic_tests/external_inventory/unittest-1993397-after.json",
+        "typed": "UNRECOVERABLE_HISTORICAL_FIELD"
+      },
+      "environment_allowlist": ["HOME", "ROS_HOME", "ROS_LOG_DIR", "TMPDIR", "XDG_RUNTIME_DIR"],
+      "exit_code": 0,
+      "name": "full_python_discovery_attempt_01",
+      "start_utc": {
+        "authoritative_artifact": "results/icra27/icra060/hermetic_tests/external_inventory/unittest-1993397-before.json",
+        "typed": "UNRECOVERABLE_HISTORICAL_FIELD"
+      }
+    },
+    {
       "argv": ["python3", "scripts/dev_planner/run_p4_g0c_tests.py", "--task-root", "/home/dev/ws_iap/src/iap/results/icra27/icra060/hermetic_tests", "unittest", "--", "discover", "-s", "test", "-p", "test_*.py"],
       "cwd": "/home/dev/ws_iap/src/iap",
       "duration_s": 34,
@@ -218,6 +275,28 @@
       "exit_code": 0,
       "name": "full_python_discovery",
       "start_utc": "2026-08-25T08:38:40Z"
+    },
+    {
+      "argv": {
+        "authoritative_artifact": "results/icra27/icra060/compact/final_verification.md",
+        "typed": "UNRECOVERABLE_HISTORICAL_FIELD"
+      },
+      "cwd": "/home/dev/ws_iap/src/iap",
+      "duration_s": {
+        "authoritative_artifact": "results/icra27/icra060/compact/final_verification.md",
+        "typed": "UNRECOVERABLE_HISTORICAL_FIELD"
+      },
+      "end_utc": {
+        "authoritative_artifact": "results/icra27/icra060/compact/final_verification.md",
+        "typed": "UNRECOVERABLE_HISTORICAL_FIELD"
+      },
+      "environment_allowlist": [],
+      "exit_code": 0,
+      "name": "final_git_diff_check",
+      "start_utc": {
+        "authoritative_artifact": "results/icra27/icra060/compact/final_verification.md",
+        "typed": "UNRECOVERABLE_HISTORICAL_FIELD"
+      }
     }
   ],
   "not_invoked": ["formal_v4_dependency_preflight", "full_v4_runner", "registered_r4_identity", "analyzer"],

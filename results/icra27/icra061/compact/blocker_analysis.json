@@ -1,0 +1,45 @@
+{
+  "analyzer_invocations": 0,
+  "analyzer_contract_projection": {
+    "coverage_requirement": "original_valid_count=200,risk_valid_count=200,all_invalid_counts=0",
+    "failed_rows_retained_in_denominator": true,
+    "required_reason": "METRICS_ONLY",
+    "source": "scripts/dev_planner/analyze_p4_g0c_calibration.py:_row_metrics"
+  },
+  "registered_r5": {
+    "analyzer_invocations": 0,
+    "attempted": 0,
+    "completed": 0,
+    "full_runner_invocations": 0,
+    "retries": 0
+  },
+  "result": "BLOCKED_R5_READINESS_PROFILE_INCOMPLETE_BEFORE_REGISTERED_IDENTITY",
+  "schema_version": "icra061_preidentity_blocker_v1",
+  "scientific_remediation_forbidden": [
+    "alternate obstacle interval",
+    "P0 profile change",
+    "P4 formula or threshold change",
+    "CSV row exclusion",
+    "analyzer coverage weakening"
+  ],
+  "task_id": "ICRA-061",
+  "readiness_csv": {
+    "path": "results/icra27/icra061/readiness_attempt_01/p4-g0c-r5-readiness-icra061-attempt01/p4_decisions.csv",
+    "row_count": 12,
+    "positive_snapshot_identity_rows": 12,
+    "status_counts": {"ORIGINAL_SELECTED": 12},
+    "reason_counts": {"incomplete_profile": 12},
+    "original_valid_count_distribution": {"0": 2, "17": 10},
+    "original_unknown_count_distribution": {"183": 10, "200": 2},
+    "risk_valid_count_distribution": {"103": 1, "136": 10, "147": 1},
+    "risk_unknown_count_distribution": {"53": 1, "64": 10, "97": 1},
+    "snapshot_frame": "map",
+    "snapshot_generation_id": 1,
+    "stable_runtime_evidence": {
+      "final_generation_id": 17,
+      "final_global_valid_ratio": 0.984,
+      "final_global_unknown_ratio": 0.016,
+      "dominant_unknown_reason": "occupied_skip"
+    }
+  }
+}
