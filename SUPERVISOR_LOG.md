@@ -1,5 +1,76 @@
 # ICRA Supervisor Log
 
+## 2026-08-25 — ICRA-054 review BLOCKED and ICRA-055 hermetic reissue
+
+### Review identity and synchronization
+
+- Fixed review range: `6e762fbed9095ae8d0ff2e1cb8af19a0bd63fb00...af34048ff50819ccab5ce261026ca95ef4e83a46`.
+- Reviewed implementation/docs/blocked evidence `3a1ea9d` and final DEV_LOG-only handoff `af34048`; both
+  carry `IAP-RQ-423`. All 11 changed paths are within the ICRA-054 allowlist and DEEPSEEK ownership; no
+  Supervisor-owned, production science/config/protocol/registry or external-repository tracked file changed.
+- After fetch, HEAD and `origin/dev/icra` match at divergence `0 0`. The protected PDF is the sole untracked
+  repository file and retains SHA-256
+  `1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+
+### Standards axis
+
+- Verdict: `BLOCKED`; one High hard violation and three nonblocking judgment findings; worst High.
+- High external-output/cleanup violation: a diagnostic command created
+  `/tmp/icra054_before_names.txt` and `/tmp/icra054_after_names.txt`, then deleted both before the Builder
+  re-read the no-cleanup rule. ICRA-054 explicitly made any external creation immediately task-blocking and
+  not curable by a later clean run. Builder correctly disclosed the incident and returned
+  `BLOCKED_EXTERNAL_TEMP_CREATION`; the truthful handoff is accepted, but the task cannot pass.
+- Possible Speculative Generality: `classify_mutations(..., source_name, ...)` accepts but does not use
+  `source_name`. Possible Primitive Obsession: tuple-key policies, dictionaries and encoded
+  `registered:*`/`derived:*` strings substitute for typed records. Possible Divergent Change: the 978-line
+  classifier combines environment, filesystem, subprocess, configuration and runner-binding analyzers.
+  These three are nonblocking maintainability judgments.
+- Ownership, allowlist, requirement IDs, docs synchronization, protected hashes, retention of prior products
+  and absence of forbidden build/GPU/live work otherwise conform.
+
+### Spec axis
+
+- Verdict: `BLOCKED / REQUEST_CHANGES`; three High blocking findings, one Medium nonblocking finding and no
+  scope creep; worst High.
+- High task-invalidating incident and incomplete verification: the external create/delete violation is
+  real, and formal focused/full discovery, syntax, fatal-only flake8 and canonical JSON correctly stopped
+  afterward. These checks cannot be backfilled to turn ICRA-054 into READY.
+- High incomplete r3 reachability proof: `_condition_operator` checks only `EqualsSubstitution` versus
+  `NotEqualsSubstitution`; it never proves the operands are exactly `LaunchConfiguration("experiment")`
+  and `P4_G0C_EXPERIMENT_V3`. A wrong launch key or constant can therefore invert or mislabel r3 reachability
+  while the classifier passes.
+- High non-exhaustive mutation proof: the scanner is restricted to top-level synchronous functions and a
+  fixed recognized API map. Unknown module-qualified mutations such as `os.remove(output)`, other subprocess
+  helpers/output arguments, module-scope writes and async/nested scopes can be silently omitted. Rejection
+  only occurs for selected namespaces or a receiver already resolved as a known path.
+- Medium incomplete hermetic regression: `_external_log_inventory` compares relative path names only, so
+  changes to metadata, symlink targets or contents of an existing external log are invisible. The retained
+  task-level metadata/content comparison proves this run only; it does not close the regression class.
+- Accepted partial work remains: the bootstrap owns all five repository-local environment directories and
+  guards launch imports; existing development regressions pass 5/5 bootstrap, 8/8 classifier, 11/11 launch
+  contracts and 16/16 golden; the broader scanner classifies the current four environment actions and 50
+  current mutation records. `/root/.ros/log` task-level metadata/content inventories are unchanged.
+
+### Gate verdict and independent review policy
+
+- Verdict: `ICRA054_REVIEW_BLOCKED_EXTERNAL_TEMP_AND_INCOMPLETE_FAIL_CLOSED_CLASSIFIER`. This is not r3 live
+  readiness, G0C PASS or threshold authorization. No fresh build or live execution is authorized.
+- Supervisor did not run Python tests after confirming the irreversible task blocker and source-level
+  classifier defects. This avoids producing misleading formal evidence for ICRA-054 and avoids repeating
+  the external-output failure. Read-only git/diff/artifact checks pass.
+
+### Artifact lifecycle and required next action
+
+- Review did not pass, so no cleanup occurs. ICRA-054 created no build/install product; retain its compact
+  evidence, task-local home/ROS-log/temp/XDG tree and external-incident record. Retain all ICRA-051 and
+  historical blocked build/install/log/dependency/runs products, every external ROS log and the PDF.
+- Unique next task: `ICRA-055 / P4_G0C_R3_HERMETIC_CLASSIFIER_CORRECTION`, defined in `NEXT_TASK.md`; active
+  role is `DEEPSEEK`, state `TASK_READY`.
+- ICRA-055 is synthetic only. It must make the hermetic launcher own metadata/content comparison and every
+  Python verification mode, verify exact r3 condition operands, and deny unknown mutation namespaces,
+  scopes and subprocess outputs by default. A Review PASS may authorize the following fresh CUDA/r3 live
+  task.
+
 ## 2026-08-24 — ICRA-053 review REQUEST_CHANGES and ICRA-054 class-level closure
 
 ### Review identity and synchronization
