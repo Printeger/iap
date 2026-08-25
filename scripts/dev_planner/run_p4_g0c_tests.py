@@ -23,7 +23,7 @@ ENVIRONMENT_PATHS = {
 }
 HERMETIC_ROOT_ENVIRONMENT = "P4_G0C_HERMETIC_TEST_ROOT"
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-ALLOWED_RESULTS_ROOT = REPOSITORY_ROOT / "results" / "icra27" / "icra057"
+ALLOWED_RESULTS_ROOT = REPOSITORY_ROOT / "results" / "icra27" / "icra059"
 EXTERNAL_ROS_LOG_ROOT = Path("/root/.ros/log")
 EXTERNAL_DELTA_EXIT = 86
 
@@ -77,7 +77,7 @@ def _require_no_symlink_chain(path: Path) -> None:
 def _validate_task_root(task_root: object, *, create: bool) -> Path:
     root = _canonical_absolute_path(task_root, "task_root")
     if not _within(root, ALLOWED_RESULTS_ROOT):
-        raise HermeticTestEnvironmentError("task_root:outside_icra057")
+        raise HermeticTestEnvironmentError("task_root:outside_icra059")
     _require_no_symlink_chain(root)
     if root.exists():
         if root.is_symlink() or not root.is_dir():
@@ -286,6 +286,10 @@ def _controlled_command(mode: str, arguments: Sequence[str]) -> list[str]:
         if not args:
             raise HermeticTestEnvironmentError("unittest:arguments_missing")
         return [sys.executable, "-m", "unittest", *args]
+    if mode == "git-diff-check":
+        if args:
+            raise HermeticTestEnvironmentError("git-diff-check:unexpected_arguments")
+        return ["git", "diff", "--check"]
     files = _repository_files(args)
     if mode == "syntax":
         program = (
@@ -316,6 +320,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--task-root", required=True)
     parser.add_argument("mode", choices=(
         "unittest", "syntax", "flake8", "canonical-json",
+        "git-diff-check",
     ))
     parser.add_argument("arguments", nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)

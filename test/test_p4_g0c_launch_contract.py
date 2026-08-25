@@ -29,6 +29,28 @@ SPEC.loader.exec_module(MODULE)
 
 
 class P4G0CLaunchContractTest(unittest.TestCase):
+    def test_v4_preset_materializes_exact_p0_profile(self):
+        profile = MODULE.EXPERIMENT_PRESETS[MODULE.P4_G0C_EXPERIMENT_V4]
+        self.assertEqual(
+            profile["p0.predictor.sigma_grow_m_sqrt_s"], "0.01"
+        )
+        self.assertEqual(
+            profile["p0.predictor.sigma_growth_profile"],
+            "legacy_iap_rq320_baseline_v1",
+        )
+        MODULE._validate_p4_g0c_profile_values(
+            MODULE.P4_G0C_EXPERIMENT_V4, profile, set()
+        )
+        for key, value in MODULE.P4_G0C_V4_P0_PROFILE_VALUES.items():
+            with self.subTest(key=key), self.assertRaisesRegex(
+                RuntimeError, "v4 P0 profile mismatch"
+            ):
+                MODULE._validate_p4_g0c_profile_values(
+                    MODULE.P4_G0C_EXPERIMENT_V4,
+                    {**profile, key: "drift" if value != "0.01" else "0.02"},
+                    {key},
+                )
+
     @staticmethod
     def _context():
         context = LaunchContext()
@@ -71,7 +93,7 @@ class P4G0CLaunchContractTest(unittest.TestCase):
             sorted(item["name"] for item in surface["environment_actions"]),
             [
                 "FASTRTPS_DEFAULT_PROFILES_FILE", "QT_X11_NO_MITSHM",
-                "XDG_RUNTIME_DIR", "XDG_RUNTIME_DIR",
+                "XDG_RUNTIME_DIR", "XDG_RUNTIME_DIR", "XDG_RUNTIME_DIR",
             ],
         )
         bindings = surface["runner_launch_bindings"]

@@ -1227,3 +1227,12 @@ They do not convert historical `NO-GO-P2`, failed P0 Gate-0B evidence, the stati
 | IAP-RQ-423 | Require corrected provenance before GPU or ROS | Sole fresh ICRA-058 dependency preflight exits 0/PASS with canonical manifest/SHA, exact 18/13/1/14/6 counts and zero downstream activity; state SHA is `db8f0c1c...bdb46` | **DEPENDENCY PREFLIGHT PASS** |
 | IAP-RQ-423 | Execute each r3 identity at most once behind mandatory GPU proof | Sole full runner passes `nvidia-smi`, `cuInit(0)` and one device, consumes only `p4-g0c-r3-seed211-rep01`, and records 1 attempted / 0 completed / 1 launch / 0 retry; required processes survive the 90-second interval and controlled shutdown | **ONE-SHOT BOUNDARY PRESERVED** |
 | IAP-RQ-423 | Reject malformed scientific evidence without threshold action | First decision row has empty `snapshot_frame`, producing `malformed P4 decision CSV: ...:typed_identity`; runner exits 2/FAILED, analyzer/draft/action remain zero/absent, external logs and protected identities remain exact | **BLOCKED_MALFORMED_P4_DECISION_CSV_TYPED_IDENTITY** |
+
+## 2026-08-25 ICRA-059 r4 P0 binding — Phase A
+
+| Req ID | Requirement/evidence seam | Implementation and retained evidence | Status |
+|---|---|---|---|
+| IAP-RQ-320, IAP-RQ-322 | Bind the already qualified P0 covariance-growth profile exactly | v4 freezes typed sigma `0.01`, profile `legacy_iap_rq320_baseline_v1` and exact ICRA-035 config/analyzer hashes; loader and runner reject missing, wrong-type, non-finite, non-exact or drifted evidence before GPU/ROS | **PHASE A PASS; no recalibration** |
+| IAP-RQ-423 | Replace consumed r3 evidence without reuse or changed P4 science | v4 registers 15 disjoint ordered r4 IDs, binds v3 protocol/registry plus ICRA-058 state `9f6241a2…b62ddf` and compact `6a804b26…a32`, and excludes r3 namespace/artifacts | **R4 REGISTERED; no identity attempted** |
+| IAP-RQ-423 | Materialize exact config and keep invalid snapshots fail-closed | v4 launch/dependency/runner/analyzer manifests carry exact P0 values; `snapshot_unavailable` with invalid generation/stamp/frame rejects as `p0_riskgrid_snapshot` with producer reason | **ADVERSARIAL PASS** |
+| IAP-RQ-423 | Complete repository-local Phase-A verification before qualification | Hermetic focused 121/121 and full discovery pass; syntax, fatal-only flake8, canonical JSON and diff checks pass; all external inventory deltas are empty | **PHASE A READY FOR COMMIT/PUSH** |

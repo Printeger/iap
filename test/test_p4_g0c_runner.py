@@ -72,6 +72,21 @@ def wrong_type_value(value):
 
 
 class P4G0CRunnerTest(unittest.TestCase):
+    def test_v4_p0_profile_gate_rejects_bad_sigma_before_gpu_or_launch(self):
+        bundle = MODULE.load_bundle(
+            REPO / "config/icra27/p4_g0c_protocol_v4.json",
+            REPO / "config/icra27/p4_threshold_registry_v4.json",
+            REPO / "config/icra27/p4_g0c_live_fixture_v1.json",
+            expected_protocol_schema=MODULE.PROFILED_PROTOCOL_SCHEMA,
+        )
+        for bad_sigma in (True, "0.01", float("nan"), -0.01, 0.02):
+            with self.subTest(bad_sigma=bad_sigma):
+                bundle.protocol["effective_values"][
+                    "p0.predictor.sigma_grow_m_sqrt_s"
+                ] = bad_sigma
+                result = MODULE.validate_p0_profile_binding(bundle)
+                self.assertEqual(result["failure_reason"], "P0_SIGMA_BINDING_MISMATCH")
+
     def setUp(self):
         self.protocol = REPO / "config/icra27/p4_g0c_protocol_v2.json"
         self.registry = REPO / "config/icra27/p4_threshold_registry_v2.json"

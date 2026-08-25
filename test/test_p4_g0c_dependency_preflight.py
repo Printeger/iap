@@ -88,11 +88,18 @@ class P4G0CDependencyPreflightTest(unittest.TestCase):
         )
         launch_path.parent.mkdir(parents=True, exist_ok=True)
         launch_source = REPO / launch_contract["source_path"]
-        if self.manifest["schema_version"] == RUNNER.DEPENDENCY_SCHEMA_V2:
+        if self.manifest["schema_version"] in {
+            RUNNER.DEPENDENCY_SCHEMA_V2, RUNNER.DEPENDENCY_SCHEMA_V3
+        }:
+            frozen_commit = (
+                "cddfa2197bb1d4ee8f68fd105596174c3db53c45"
+                if self.manifest["schema_version"] == RUNNER.DEPENDENCY_SCHEMA_V2
+                else "e88df98"
+            )
             launch_bytes = subprocess.check_output(
                 [
                     "git", "show",
-                    "cddfa2197bb1d4ee8f68fd105596174c3db53c45:"
+                    frozen_commit + ":"
                     + launch_contract["source_path"],
                 ],
                 cwd=REPO,
@@ -233,29 +240,45 @@ class P4G0CDependencyPreflightTest(unittest.TestCase):
             result["schema_version"],
             "p4_g0c_dependency_preflight_result_v3",
         )
-        self.assertEqual(
-            result["manifest_path"], str(self.manifest_path.resolve())
-        )
+        self.assertEqual(result["manifest_path"], str(self.manifest_path.resolve()))
         self.assertEqual(
             result["manifest_sha256"],
             "ff7c66f182296a1f057acafee5306d7d81aa49be8a40c14acd8e832d98cb5fc6",
         )
         self.assertEqual(result["validated_prefixes"], [str(prefix.resolve())])
+
+    def test_v4_complete_closure_binds_updated_launch_and_result_schema(self):
+        self.bundle = RUNNER.load_bundle(
+            REPO / "config/icra27/p4_g0c_protocol_v4.json",
+            REPO / "config/icra27/p4_threshold_registry_v4.json",
+            self.fixture,
+            expected_protocol_schema=RUNNER.PROFILED_PROTOCOL_SCHEMA,
+        )
+        self.manifest_path = REPO / "config/icra27/p4_g0c_runtime_dependencies_v4.json"
+        self.manifest = RUNNER.load_runtime_dependency_manifest(
+            self.manifest_path,
+            self.bundle.protocol["runtime_dependency_manifest"]["sha256"],
+            expected_schema=RUNNER.DEPENDENCY_SCHEMA_V4,
+            expected_experiment="p4_g0c_metrics_calibration_v4",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            prefix = self._complete_prefix(Path(tmp))
+            result = RUNNER.validate_runtime_dependencies(
+                self.bundle, self.manifest_path, self._environment([prefix])
+            )
+        self.assertTrue(result["dependency_ready"], result)
         self.assertEqual(
-            {
-                "packages": result["package_count"],
-                "executables": result["executable_count"],
-                "components": result["component_count"],
-                "configs": result["config_count"],
-                "runtime_libraries": result["runtime_library_count"],
-            },
-            {
-                "packages": 18,
-                "executables": 13,
-                "components": 1,
-                "configs": 14,
-                "runtime_libraries": 6,
-            },
+            result["schema_version"], "p4_g0c_dependency_preflight_result_v4"
+        )
+        self.assertEqual(
+            result["manifest_sha256"],
+            self.bundle.protocol["runtime_dependency_manifest"]["sha256"],
+        )
+        self.assertEqual(
+            (result["package_count"], result["executable_count"],
+             result["component_count"], result["config_count"],
+             result["runtime_library_count"]),
+            (18, 13, 1, 14, 6),
         )
 
     def test_manifest_path_is_stable_after_all_artifact_validation(self):

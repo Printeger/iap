@@ -46,6 +46,26 @@ EXPECTED_TOP_LEVEL_EFFECTIVE_KEYS = {
 
 
 class P4G0CProtocolTest(unittest.TestCase):
+    def test_v4_binds_exact_p0_profile_and_disjoint_r4_matrix(self):
+        bundle = MODULE.load_protocol_bundle(
+            REPO / "config/icra27/p4_g0c_protocol_v4.json",
+            REPO / "config/icra27/p4_threshold_registry_v4.json",
+            REPO / "config/icra27/p4_g0c_live_fixture_v1.json",
+            expected_protocol_schema=MODULE.PROTOCOL_SCHEMA_V4,
+        )
+        effective = bundle.protocol["effective_values"]
+        self.assertEqual(effective["p0.predictor.sigma_grow_m_sqrt_s"], 0.01)
+        self.assertIs(type(effective["p0.predictor.sigma_grow_m_sqrt_s"]), float)
+        self.assertEqual(
+            effective["p0.predictor.sigma_growth_profile"],
+            "legacy_iap_rq320_baseline_v1",
+        )
+        self.assertEqual(len(bundle.protocol["registered_run_ids"]), 15)
+        self.assertTrue(all(
+            run_id.startswith("p4-g0c-r4-")
+            for run_id in bundle.protocol["registered_run_ids"]
+        ))
+
     @staticmethod
     def _copy_v2_bundle_root(root):
         paths = {

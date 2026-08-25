@@ -106,6 +106,19 @@ python3 test/test_gate0_analyzer.py
 git diff --check
 ```
 
+## 2026-08-25 ICRA-059 r4 P0 profile binding — Phase A
+
+- Added immutable v4 protocol, proposed registry, dependency manifest and
+  replacement lineage with 15 fresh r4 IDs and exact retained Gate-0B profile
+  evidence (`0.01`, `legacy_iap_rq320_baseline_v1`).
+- Added a pre-GPU/pre-launch P0 profile/evidence gate, v4 launch/run manifest
+  materialization, v4 analyzer/dependency schemas and deny-by-default surface
+  classification without changing v1-v3 artifacts.
+- Snapshot-unavailable rows remain hard failures and now surface a typed P0
+  RiskGrid/snapshot diagnosis including the producer reason.
+- Phase-A hermetic focused/full discovery and static/canonical/diff checks pass
+  with zero external ROS-log delta. No qualification/live boundary has run.
+
 ## 2026-08-25 (ICRA-058 direct r3 live continuation BLOCKED)
 
 - IAP-RQ-423: adopted the unchanged ICRA-056 CUDA closure without invoking

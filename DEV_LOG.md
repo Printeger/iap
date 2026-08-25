@@ -7588,3 +7588,25 @@ untracked/unstaged at `1f07da56...44f6`. Exact redacted evidence is under
 A final process audit briefly matched a process that self-exited before its
 command line could be identified. No signal was sent; repeated audits are
 clean and manual termination count is zero.
+
+## 2026-08-25 — ICRA-059 PHASE A R4 P0 PROFILE BINDING
+
+IAP-RQ-320, IAP-RQ-322 and IAP-RQ-423. Synchronization was `0 0`; the only
+initial worktree item was the protected untracked PDF. Canonical v4 artifacts
+register exactly 15 disjoint `p4-g0c-r4-*` identities and preserve all v1-v3
+bytes. The v4 effective contract adds only the accepted Gate-0B values
+`sigma_grow_m_sqrt_s=0.01` and `legacy_iap_rq320_baseline_v1`, binds both
+retained ICRA-035 qualification hashes, and records the consumed ICRA-058 r3
+identity/state/compact verdict.
+
+The loader, dependency gate, runner, launch, analyzer and static classifier now
+understand v4. The runner validates exact typed P0 values and retained evidence
+before GPU, ROS, launch or identity consumption. Invalid snapshot identity
+remains rejected, now with typed `p0_riskgrid_snapshot` and the producer's
+`snapshot_unavailable` reason.
+
+Hermetic Phase-A verification passes 121 focused tests and complete Python
+discovery; syntax, fatal-only flake8, four canonical JSON checks and repository
+diff checks pass. Every controlled invocation reports the same 17,759-entry
+external inventory with empty delta. Phase B/C invocation counts remain zero;
+no build, GPU, ROS, readiness, registered r4 identity or analyzer has run.

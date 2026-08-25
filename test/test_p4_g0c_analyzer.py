@@ -898,6 +898,27 @@ class P4G0CAnalyzerTest(unittest.TestCase):
                     expected in item for item in result["failures"]
                 ))
 
+    def test_snapshot_unavailable_is_rejected_with_typed_p0_diagnosis(self):
+        def mutate(index, manifest, rows):
+            if index == 0:
+                rows[0].update({
+                    "reason": "snapshot_unavailable",
+                    "snapshot_generation_id": "0",
+                    "snapshot_stamp_s": "nan",
+                    "snapshot_frame": "",
+                })
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._make_bundle(root, mutate=mutate)
+            result = MODULE.analyze(self.bundle, root)
+        self.assertEqual(result["analysis_status"], "REJECTED")
+        self.assertTrue(any(
+            "p0_riskgrid_snapshot" in item
+            and "producer_reason=snapshot_unavailable" in item
+            for item in result["failures"]
+        ))
+
     def test_missing_duplicate_reordered_and_unexpected_headers_reject(self):
         headers = {
             "missing": CSV_FIELDS[:-1],

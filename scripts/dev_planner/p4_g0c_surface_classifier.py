@@ -179,9 +179,11 @@ def _condition_operator(call: ast.Call) -> str:
         raise SurfaceClassificationError(
             "environment condition experiment operand mismatch"
         )
-    if not isinstance(expected, ast.Name) or expected.id != "P4_G0C_EXPERIMENT_V3":
+    if not isinstance(expected, ast.Name) or expected.id not in {
+        "P4_G0C_EXPERIMENT_V3", "P4_G0C_EXPERIMENT_V4"
+    }:
         raise SurfaceClassificationError(
-            "environment condition r3 constant mismatch"
+            "environment condition registered calibration constant mismatch"
         )
     return operator
 
@@ -257,7 +259,7 @@ def classify_environment_actions(source: str) -> list[dict[str, object]]:
     expected_counts = {
         "FASTRTPS_DEFAULT_PROFILES_FILE": 1,
         "QT_X11_NO_MITSHM": 1,
-        "XDG_RUNTIME_DIR": 2,
+        "XDG_RUNTIME_DIR": 3,
     }
     if counts != expected_counts:
         raise SurfaceClassificationError(
@@ -1396,7 +1398,7 @@ def validate_production_contract(
     action_names = [str(item.get("name")) for item in environment_actions]
     if sorted(action_names) != sorted([
         "FASTRTPS_DEFAULT_PROFILES_FILE", "QT_X11_NO_MITSHM",
-        "XDG_RUNTIME_DIR", "XDG_RUNTIME_DIR",
+        "XDG_RUNTIME_DIR", "XDG_RUNTIME_DIR", "XDG_RUNTIME_DIR",
     ]):
         raise SurfaceClassificationError(
             f"environment action contract mismatch:{action_names}"

@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import math
 import os
 import signal
 import stat
@@ -58,11 +59,14 @@ from run_gate0_qualification import (  # noqa: E402
 RUNNER_SCHEMA_V1 = "p4_g0c_runner_state_v3"
 RUNNER_SCHEMA_V2 = "p4_g0c_runner_state_v4"
 RUNNER_SCHEMA_V3 = "p4_g0c_runner_state_v5"
+RUNNER_SCHEMA_V4 = "p4_g0c_runner_state_v6"
 DEPENDENCY_SCHEMA_V2 = "p4_g0c_runtime_dependencies_v2"
 DEPENDENCY_SCHEMA_V3 = "p4_g0c_runtime_dependencies_v3"
+DEPENDENCY_SCHEMA_V4 = "p4_g0c_runtime_dependencies_v4"
 LEGACY_PROTOCOL_SCHEMA = "p4_g0c_protocol_v1"
 REPLACEMENT_PROTOCOL_SCHEMA = "p4_g0c_protocol_v2"
 HARDENED_PROTOCOL_SCHEMA = "p4_g0c_protocol_v3"
+PROFILED_PROTOCOL_SCHEMA = "p4_g0c_protocol_v4"
 EXPECTED_ACTIVE_PACKAGES = {
     "iap", "ego_planner", "local_sensing", "odom_visualization",
     "poscmd_2_odom", "gnss_sim", "so3_quadrotor_simulator",
@@ -105,7 +109,8 @@ def load_bundle(
     bundle.registry_path = str(Path(registry_path).resolve())
     bundle.fixture_path = str(Path(fixture_path).resolve())
     if bundle.protocol.get("schema_version") in {
-        REPLACEMENT_PROTOCOL_SCHEMA, HARDENED_PROTOCOL_SCHEMA
+        REPLACEMENT_PROTOCOL_SCHEMA, HARDENED_PROTOCOL_SCHEMA,
+        PROFILED_PROTOCOL_SCHEMA,
     }:
         repository_root = Path(protocol_path).resolve().parents[2]
         bundle.dependency_manifest_path = str(
@@ -129,6 +134,39 @@ def _dependency_failure(
         "config_count": 0,
         "runtime_library_count": 0,
     }
+
+
+def validate_p0_profile_binding(bundle: ProtocolBundle) -> dict[str, Any]:
+    """Fail closed on the exact retained Gate-0B profile before GPU or ROS."""
+    schema = "p4_g0c_p0_profile_preflight_v1"
+    if bundle.protocol.get("schema_version") != PROFILED_PROTOCOL_SCHEMA:
+        return {"schema_version": schema, "profile_ready": True,
+                "failure_reason": "", "not_applicable": True}
+    effective = bundle.protocol.get("effective_values", {})
+    sigma = effective.get("p0.predictor.sigma_grow_m_sqrt_s")
+    profile = effective.get("p0.predictor.sigma_growth_profile")
+    if type(sigma) is not float or not math.isfinite(sigma) or sigma != 0.01:
+        return {"schema_version": schema, "profile_ready": False,
+                "failure_reason": "P0_SIGMA_BINDING_MISMATCH"}
+    if profile != "legacy_iap_rq320_baseline_v1":
+        return {"schema_version": schema, "profile_ready": False,
+                "failure_reason": "P0_PROFILE_BINDING_MISMATCH"}
+    binding = bundle.protocol.get("p0_profile_binding", {})
+    expected = {
+        "config_preflight": "6d9ddcc0dd079a3a857a24cf61381441e4260498108077d3be795a8c6ea9b60b",
+        "analyzer": "5855368ddc0f89d69c8d13d3f9083b40371678177f2f6eaf3ce7fb68ee0dbaf3",
+    }
+    repository_root = Path(bundle.protocol_path).resolve().parents[2]
+    for key, expected_sha in expected.items():
+        artifact = binding.get(key, {})
+        path = repository_root / str(artifact.get("path", ""))
+        if artifact.get("sha256") != expected_sha or not path.is_file() \
+                or sha256_file(path) != expected_sha:
+            return {"schema_version": schema, "profile_ready": False,
+                    "failure_reason": f"P0_EVIDENCE_BINDING_MISMATCH:{key}"}
+    return {"schema_version": schema, "profile_ready": True,
+            "failure_reason": "", "sigma_grow_m_sqrt_s": sigma,
+            "sigma_growth_profile": profile}
 
 
 def load_runtime_dependency_manifest(
@@ -398,13 +436,15 @@ def validate_runtime_dependencies(
 ) -> dict[str, Any]:
     protocol_schema = bundle.protocol.get("schema_version")
     if protocol_schema not in {
-        REPLACEMENT_PROTOCOL_SCHEMA, HARDENED_PROTOCOL_SCHEMA
+        REPLACEMENT_PROTOCOL_SCHEMA, HARDENED_PROTOCOL_SCHEMA,
+        PROFILED_PROTOCOL_SCHEMA,
     }:
         return _dependency_failure("DEPENDENCY_PROTOCOL_V2_REQUIRED")
-    hardened = protocol_schema == HARDENED_PROTOCOL_SCHEMA
+    version = 4 if protocol_schema == PROFILED_PROTOCOL_SCHEMA else 3 \
+        if protocol_schema == HARDENED_PROTOCOL_SCHEMA else 2
+    hardened = version >= 3
     result_schema = (
-        "p4_g0c_dependency_preflight_result_v3"
-        if hardened else "p4_g0c_dependency_preflight_result_v2"
+        f"p4_g0c_dependency_preflight_result_v{version}"
     )
 
     def dependency_failure(reason: str) -> dict[str, Any]:
@@ -419,11 +459,11 @@ def validate_runtime_dependencies(
             resolved_manifest_path,
             binding["sha256"],
             expected_schema=(
-                DEPENDENCY_SCHEMA_V3 if hardened else DEPENDENCY_SCHEMA_V2
+                DEPENDENCY_SCHEMA_V4 if version == 4 else
+                DEPENDENCY_SCHEMA_V3 if version == 3 else DEPENDENCY_SCHEMA_V2
             ),
             expected_experiment=(
-                "p4_g0c_metrics_calibration_v3"
-                if hardened else "p4_g0c_metrics_calibration_v2"
+                f"p4_g0c_metrics_calibration_v{version}"
             ),
         )
     except (OSError, RuntimeError) as exc:
@@ -750,7 +790,8 @@ def launch_command(
     schema = bundle.protocol["schema_version"]
     values = {
         "experiment": (
-            "p4_g0c_metrics_calibration_v3" if schema == HARDENED_PROTOCOL_SCHEMA
+            "p4_g0c_metrics_calibration_v4" if schema == PROFILED_PROTOCOL_SCHEMA
+            else "p4_g0c_metrics_calibration_v3" if schema == HARDENED_PROTOCOL_SCHEMA
             else "p4_g0c_metrics_calibration_v2" if schema == REPLACEMENT_PROTOCOL_SCHEMA
             else "p4_g0c_metrics_calibration_v1"
         ),
@@ -769,7 +810,7 @@ def launch_command(
         "export_root_dir": str(run_dir / "exports"),
         "iap_log_root": str(run_dir / "runtime" / "iap_logs"),
     }
-    if schema == HARDENED_PROTOCOL_SCHEMA:
+    if schema in {HARDENED_PROTOCOL_SCHEMA, PROFILED_PROTOCOL_SCHEMA}:
         if launch_environment is None:
             raise RunnerError("LAUNCH_ENVIRONMENT_NOT_READY:missing_binding")
         validate_launch_environment_binding(
@@ -857,13 +898,15 @@ def _validate_and_finalize_run(
             "test_planner_manifest_path"
         ) from exc
     protocol_schema = bundle.protocol["schema_version"]
-    hardened = protocol_schema == HARDENED_PROTOCOL_SCHEMA
+    hardened = protocol_schema in {HARDENED_PROTOCOL_SCHEMA, PROFILED_PROTOCOL_SCHEMA}
     replacement = protocol_schema in {
-        REPLACEMENT_PROTOCOL_SCHEMA, HARDENED_PROTOCOL_SCHEMA
+        REPLACEMENT_PROTOCOL_SCHEMA, HARDENED_PROTOCOL_SCHEMA,
+        PROFILED_PROTOCOL_SCHEMA,
     }
     required_manifest = {
         "schema_version": (
-            "p4_g0c_run_manifest_v3" if hardened
+            "p4_g0c_run_manifest_v4" if protocol_schema == PROFILED_PROTOCOL_SCHEMA
+            else "p4_g0c_run_manifest_v3" if hardened
             else "p4_g0c_run_manifest_v2" if replacement
             else "p4_g0c_run_manifest_v1"
         ),
@@ -876,7 +919,8 @@ def _validate_and_finalize_run(
         "csv_path": str(csv_path.resolve()),
         "gate": "G0C",
         "experiment": (
-            "p4_g0c_metrics_calibration_v3" if hardened
+            "p4_g0c_metrics_calibration_v4" if protocol_schema == PROFILED_PROTOCOL_SCHEMA
+            else "p4_g0c_metrics_calibration_v3" if hardened
             else "p4_g0c_metrics_calibration_v2" if replacement
             else "p4_g0c_metrics_calibration_v1"
         ),
@@ -1026,8 +1070,9 @@ def _base_result(bundle: ProtocolBundle, plan: list[dict[str, Any]]) -> dict[str
     registered_ids = [record["run_id"] for record in plan]
     return {
         "schema_version": (
-            RUNNER_SCHEMA_V3
-            if bundle.protocol["schema_version"] == HARDENED_PROTOCOL_SCHEMA
+            RUNNER_SCHEMA_V4
+            if bundle.protocol["schema_version"] == PROFILED_PROTOCOL_SCHEMA
+            else RUNNER_SCHEMA_V3 if bundle.protocol["schema_version"] == HARDENED_PROTOCOL_SCHEMA
             else RUNNER_SCHEMA_V2
             if bundle.protocol["schema_version"] == REPLACEMENT_PROTOCOL_SCHEMA
             else RUNNER_SCHEMA_V1
@@ -1130,12 +1175,21 @@ def run(
         return result
     result["runner_state"] = "DEPENDENCY_PREFLIGHT_PASS"
     _persist_result(runs_root, result)
+    profile = validate_p0_profile_binding(bundle)
+    result["p0_profile_preflight"] = profile
+    if profile.get("profile_ready") is not True:
+        result.update({"runner_state": "FAILED",
+                       "failure_reason": profile["failure_reason"]})
+        _persist_result(runs_root, result)
+        return result
     if dependency_preflight_only:
         return result
 
     launch_environment_inventory = None
     launch_process_environment = None
-    if bundle.protocol["schema_version"] == HARDENED_PROTOCOL_SCHEMA:
+    if bundle.protocol["schema_version"] in {
+        HARDENED_PROTOCOL_SCHEMA, PROFILED_PROTOCOL_SCHEMA
+    }:
         result["runner_state"] = "LAUNCH_ENVIRONMENT_PREFLIGHT_RUNNING"
         _persist_result(runs_root, result)
         try:
@@ -1214,7 +1268,9 @@ def run(
         result["launch_invocations"] = len(result["attempted_run_ids"])
         _persist_result(runs_root, result)
         try:
-            if bundle.protocol["schema_version"] == HARDENED_PROTOCOL_SCHEMA:
+            if bundle.protocol["schema_version"] in {
+                HARDENED_PROTOCOL_SCHEMA, PROFILED_PROTOCOL_SCHEMA
+            }:
                 exit_code, monitor_result = launch_executor(
                     record, command, duration_s, REQUIRED_PROCESSES,
                     launch_process_environment,
@@ -1272,12 +1328,12 @@ def run(
 def _parser() -> argparse.ArgumentParser:
     repo = Path(__file__).resolve().parents[2]
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--protocol", type=Path, default=repo / "config/icra27/p4_g0c_protocol_v3.json")
-    parser.add_argument("--registry", type=Path, default=repo / "config/icra27/p4_threshold_registry_v3.json")
+    parser.add_argument("--protocol", type=Path, default=repo / "config/icra27/p4_g0c_protocol_v4.json")
+    parser.add_argument("--registry", type=Path, default=repo / "config/icra27/p4_threshold_registry_v4.json")
     parser.add_argument("--fixture", type=Path, default=repo / "config/icra27/p4_g0c_live_fixture_v1.json")
     parser.add_argument(
         "--dependency-manifest", type=Path,
-        default=repo / "config/icra27/p4_g0c_runtime_dependencies_v3.json",
+        default=repo / "config/icra27/p4_g0c_runtime_dependencies_v4.json",
     )
     parser.add_argument("--runs-root", type=Path, required=True)
     modes = parser.add_mutually_exclusive_group()
@@ -1298,12 +1354,18 @@ def main(argv: list[str] | None = None) -> int:
             Path(__file__).resolve().parents[2]
             / "config/icra27/p4_g0c_protocol_v2.json"
         )
+        registered_v3_path = (
+            Path(__file__).resolve().parents[2]
+            / "config/icra27/p4_g0c_protocol_v3.json"
+        )
         trusted_schema = (
             LEGACY_PROTOCOL_SCHEMA
             if args.protocol.resolve() == registered_v1_path
             else REPLACEMENT_PROTOCOL_SCHEMA
             if args.protocol.resolve() == registered_v2_path
             else HARDENED_PROTOCOL_SCHEMA
+            if args.protocol.resolve() == registered_v3_path
+            else PROFILED_PROTOCOL_SCHEMA
         )
         bundle = load_bundle(
             args.protocol,
