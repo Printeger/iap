@@ -136,6 +136,9 @@ class P4G0CHermeticTests(unittest.TestCase):
             symlink.symlink_to(Path("/root/.ros/log"), target_is_directory=True)
             cases = {
                 "outside": "/root/.ros/log",
+                "previous_task_root": str(
+                    REPO / "results" / "icra27" / "icra055"
+                ),
                 "lexical_parent": f"{parent}/child/../child",
                 "lexical_alias": str(hermetic_root).replace(
                     "/results/", "//results/", 1

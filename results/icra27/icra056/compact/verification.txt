@@ -1,0 +1,27 @@
+ICRA-056 / IAP-RQ-423 / Phase A
+result: PHASE_A_PASS_BUILD_LIVE_PENDING
+
+The hermetic launcher is bound to results/icra27/icra056 and owns exact HOME,
+ROS_HOME, ROS_LOG_DIR, TMPDIR and XDG_RUNTIME_DIR paths. Every Python child is
+surrounded by complete /root/.ros/log name/type/mode/uid/gid/size/mtime/ctime/
+symlink-target/content inventories.
+
+The corrected static contract proves one runner-owned runs_root container,
+canonicalization and fresh-root guards, exact p4_g0c_runner_state.json child,
+and canonical preflight/launch-environment/run-directory descendants. Five
+child-environment paths and eight per-run output leaves remain exact and are
+not expanded to a ninth output.
+
+Adversaries reject missing/duplicate/renamed/second containers, wrong state
+child, parent/sibling escapes, altered production ownership and extra output
+semantics. Formal verification passes bootstrap 8/8, classifier 18/18,
+focused 113/113, launch contract 11/11, launch golden 16/16, full Python
+468/468, syntax 6/6, fatal-only flake8, canonical JSON 4/4 and diff check.
+
+The final Phase-A external inventories contain 17,759 entries. Before and
+after SHA-256 are both 82b029dee5cd6444ee812316381565531308365dd6704cbc2df938a4fa68eee9;
+cmp is 0 and structured delta is empty.
+
+No build, dependency/GPU gate, ROS/live runner, r3 identity, analyzer,
+threshold or qualification action ran during Phase A. Production and retained
+historical bytes, external gnss_comm and the protected PDF remain unchanged.

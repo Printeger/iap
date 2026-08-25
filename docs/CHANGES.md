@@ -106,6 +106,65 @@ python3 test/test_gate0_analyzer.py
 git diff --check
 ```
 
+## 2026-08-25 (ICRA-056 container contract and r3 live task)
+
+- IAP-RQ-423: correct the Supervisor-owned static model to one canonical,
+  runner-owned `runs_root` container plus the exact five child-environment and
+  eight per-run output leaves. Production AST proof requires canonicalization,
+  symlink/wrong-type/dirty-root rejection, the exact
+  `p4_g0c_runner_state.json` child, and canonical preflight,
+  launch-environment and run-directory descendants. `runs_root` remains
+  distinct from `MUTABLE_OUTPUT_KEYS`; launch, runner, protocol and science
+  bytes are unchanged.
+- Missing/duplicate/renamed/second containers, wrong state child,
+  parent/sibling descendants, altered production ownership guards and extra
+  output semantics fail closed. The hermetic launcher now binds only the
+  ICRA-056 result root while retaining all five environment paths and complete
+  external name/metadata/target/content comparison.
+- Pre-build Phase-A verification passes bootstrap/comparator 8/8, classifier
+  18/18, focused P4-G0C 113/113, launch-contract 11/11, launch-golden 16/16 and
+  complete Python discovery 468/468. Syntax 6/6, fatal-only flake8, canonical
+  JSON 4/4 and diff checks pass. The full 17,759-entry external inventory is
+  byte-identical before/after at SHA-256 `82b029de...eee9`.
+
+Reproduce Phase A from the repository root before any build/live action:
+
+```bash
+python3 scripts/dev_planner/run_p4_g0c_tests.py \
+  --task-root "$PWD/results/icra27/icra056" unittest -- \
+  discover -s test -p 'test_p4_g0c_*.py'
+python3 scripts/dev_planner/run_p4_g0c_tests.py \
+  --task-root "$PWD/results/icra27/icra056" unittest -- \
+  discover -s test -p 'test_p4_g0c_launch_contract.py'
+python3 scripts/dev_planner/run_p4_g0c_tests.py \
+  --task-root "$PWD/results/icra27/icra056" unittest -- \
+  discover -s test -p 'test_test_planner_launch.py'
+python3 scripts/dev_planner/run_p4_g0c_tests.py \
+  --task-root "$PWD/results/icra27/icra056" unittest -- \
+  discover -s test -p 'test_*.py'
+python3 scripts/dev_planner/run_p4_g0c_tests.py \
+  --task-root "$PWD/results/icra27/icra056" syntax -- \
+  scripts/dev_planner/run_p4_g0c_tests.py \
+  scripts/dev_planner/p4_g0c_surface_classifier.py \
+  test/test_p4_g0c_hermetic_tests.py \
+  test/test_p4_g0c_surface_classifier.py \
+  test/test_p4_g0c_launch_contract.py test/test_test_planner_launch.py
+python3 scripts/dev_planner/run_p4_g0c_tests.py \
+  --task-root "$PWD/results/icra27/icra056" flake8 -- \
+  scripts/dev_planner/run_p4_g0c_tests.py \
+  scripts/dev_planner/p4_g0c_surface_classifier.py \
+  test/test_p4_g0c_hermetic_tests.py \
+  test/test_p4_g0c_surface_classifier.py \
+  test/test_p4_g0c_launch_contract.py test/test_test_planner_launch.py
+python3 scripts/dev_planner/run_p4_g0c_tests.py \
+  --task-root "$PWD/results/icra27/icra056" canonical-json -- \
+  config/icra27/p4_g0c_protocol_v3.json \
+  config/icra27/p4_threshold_registry_v3.json \
+  config/icra27/p4_g0c_runtime_dependencies_v3.json \
+  config/icra27/p4_g0c_replacement_lineage_v3.json
+git diff --check
+```
+
 The historical one-shot command, stdout/stderr, exit, immutable input audit and
 bounded output hashes are retained below `results/icra27/icra034/`; do not rerun
 that command.

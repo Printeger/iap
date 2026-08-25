@@ -1201,10 +1201,188 @@ _EXPECTED_OUTPUT_SEMANTICS = {
     "launch_command_path", "run_manifest_path", "runtime_root_dir",
     "stdout_log_path",
 }
+
+
+def _named_function(tree: ast.Module, name: str) -> ast.FunctionDef:
+    matches = [
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == name
+    ]
+    if len(matches) != 1:
+        raise SurfaceClassificationError(f"container function mismatch:{name}")
+    return matches[0]
+
+
+def _simple_assignments(function: ast.FunctionDef) -> dict[str, str]:
+    assignments: dict[str, str] = {}
+    for node in ast.walk(function):
+        if (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+        ):
+            assignments[node.targets[0].id] = ast.unparse(node.value)
+    return assignments
+
+
+def _returned_mapping(function: ast.FunctionDef) -> dict[str, ast.AST]:
+    returns = [node for node in ast.walk(function) if isinstance(node, ast.Return)]
+    if len(returns) != 1 or not isinstance(returns[0].value, ast.Dict):
+        raise SurfaceClassificationError(
+            f"container return mapping mismatch:{function.name}"
+        )
+    result: dict[str, ast.AST] = {}
+    for key, value in zip(returns[0].value.keys, returns[0].value.values):
+        if not isinstance(key, ast.Constant) or not isinstance(key.value, str):
+            raise SurfaceClassificationError(
+                f"container return key mismatch:{function.name}"
+            )
+        result[key.value] = value
+    return result
+
+
+def _nested_mapping(node: ast.AST, label: str) -> dict[str, ast.AST]:
+    if not isinstance(node, ast.Dict):
+        raise SurfaceClassificationError(f"container nested mapping mismatch:{label}")
+    result: dict[str, ast.AST] = {}
+    for key, value in zip(node.keys, node.values):
+        if not isinstance(key, ast.Constant) or not isinstance(key.value, str):
+            raise SurfaceClassificationError(f"container key mismatch:{label}")
+        result[key.value] = value
+    return result
+
+
+def _is_canonical_literal_descendant(node: ast.AST, root: str) -> bool:
+    if (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "str"
+        and len(node.args) == 1
+    ):
+        node = node.args[0]
+    components = 0
+    while isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+        if not (
+            isinstance(node.right, ast.Constant)
+            and isinstance(node.right.value, str)
+            and node.right.value not in {"", ".", ".."}
+            and not Path(node.right.value).is_absolute()
+            and len(Path(node.right.value).parts) == 1
+        ):
+            return False
+        components += 1
+        node = node.left
+    return components > 0 and isinstance(node, ast.Name) and node.id == root
+
+
+def classify_runner_container_contract(
+    runner_source: str, protocol_source: str
+) -> list[dict[str, object]]:
+    """Prove the sole fresh runs-root container from production ASTs."""
+    runner_tree = ast.parse(runner_source)
+    protocol_tree = ast.parse(protocol_source)
+    run_function = _named_function(runner_tree, "run")
+    run_assignments = _simple_assignments(run_function)
+    required_assignments = {
+        "requested_root": "Path(runs_root).expanduser()",
+        "runs_root": "requested_root.resolve()",
+        "plan": "expand_run_plan(bundle.protocol, runs_root)",
+        "preflight_path": "runs_root / 'preflight'",
+        "run_dir": "Path(record['run_dir'])",
+    }
+    if any(
+        run_assignments.get(name) != expression
+        for name, expression in required_assignments.items()
+    ):
+        raise SurfaceClassificationError("runs_root canonical ownership mismatch")
+    run_calls = {ast.unparse(node) for node in ast.walk(run_function) if isinstance(node, ast.Call)}
+    if not {
+        "requested_root.is_symlink()", "runs_root.is_dir()",
+        "runs_root.is_symlink()", "runs_root.iterdir()", "run_dir.mkdir(parents=True, exist_ok=False)",
+    }.issubset(run_calls):
+        raise SurfaceClassificationError("runs_root freshness guard mismatch")
+    run_literals = {
+        node.value for node in ast.walk(run_function)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    }
+    if "dirty runs root is forbidden: " not in run_literals:
+        raise SurfaceClassificationError("runs_root dirty-reuse guard missing")
+
+    persist_function = _named_function(runner_tree, "_persist_result")
+    persist_calls = {
+        ast.unparse(node.func) for node in ast.walk(persist_function)
+        if isinstance(node, ast.Call)
+    }
+    if "(runs_root / 'p4_g0c_runner_state.json').write_text" not in persist_calls:
+        raise SurfaceClassificationError("runner-state child mismatch")
+
+    derive_function = _named_function(
+        runner_tree, "derive_launch_environment_inventory"
+    )
+    if _simple_assignments(derive_function).get("root") != "Path(runs_root).resolve()":
+        raise SurfaceClassificationError("launch-environment root mismatch")
+
+    expand_function = _named_function(protocol_tree, "expand_run_plan")
+    expand_mapping_nodes = [
+        node for node in ast.walk(expand_function) if isinstance(node, ast.Dict)
+        and any(
+            isinstance(key, ast.Constant) and key.value == "run_dir"
+            for key in node.keys
+        )
+    ]
+    if len(expand_mapping_nodes) != 1:
+        raise SurfaceClassificationError("run directory mapping mismatch")
+    expand_mapping = _nested_mapping(expand_mapping_nodes[0], "run_dir")
+    if ast.unparse(expand_mapping["run_dir"]) != "str(root / run_id)":
+        raise SurfaceClassificationError("run directory is not a container child")
+
+    binding_function = _named_function(
+        protocol_tree, "expected_launch_environment_binding"
+    )
+    binding_assignments = _simple_assignments(binding_function)
+    if binding_assignments.get("root") != "Path(runs_root).resolve()" or (
+        binding_assignments.get("run") != "Path(run_dir).resolve()"
+        or binding_assignments.get("environment_root")
+        != "root / 'launch_environment'"
+    ):
+        raise SurfaceClassificationError("container binding roots mismatch")
+    binding = _returned_mapping(binding_function)
+    child_environment = _nested_mapping(
+        binding.get("child_environment"), "child_environment"
+    )
+    mutable_outputs = _nested_mapping(
+        binding.get("mutable_output_paths"), "mutable_output_paths"
+    )
+    if set(child_environment) != _EXPECTED_CHILD_ENVIRONMENT or not all(
+        _is_canonical_literal_descendant(value, "environment_root")
+        for value in child_environment.values()
+    ):
+        raise SurfaceClassificationError("child environment descendants mismatch")
+    if set(mutable_outputs) != _EXPECTED_OUTPUT_SEMANTICS or not all(
+        _is_canonical_literal_descendant(value, "run")
+        for value in mutable_outputs.values()
+    ):
+        raise SurfaceClassificationError("mutable output descendants mismatch")
+    return [{
+        "canonical_descendants": {
+            "launch_environment", "preflight", "run_dir",
+        },
+        "child_environment": set(child_environment),
+        "output_semantics": set(mutable_outputs),
+        "ownership_guards": {
+            "canonicalize", "reject_dirty", "reject_symlink",
+            "reject_wrong_type",
+        },
+        "runner_state_child": "p4_g0c_runner_state.json",
+        "semantic_root": "runs_root",
+    }]
+
+
 def validate_production_contract(
     environment_actions: list[dict[str, object]],
     mutations: list[dict[str, object]],
     runner_launch_bindings: Mapping[str, object],
+    containers: object,
 ) -> dict[str, object]:
     """Reject any semantic root outside the exact r3 environment/output seam."""
     child_environment = runner_launch_bindings.get("child_environment")
@@ -1223,8 +1401,27 @@ def validate_production_contract(
         raise SurfaceClassificationError(
             f"environment action contract mismatch:{action_names}"
         )
+    if not isinstance(containers, list) or len(containers) != 1:
+        raise SurfaceClassificationError("runs_root container count mismatch")
+    container = containers[0]
+    expected_container = {
+        "canonical_descendants": {
+            "launch_environment", "preflight", "run_dir",
+        },
+        "child_environment": _EXPECTED_CHILD_ENVIRONMENT,
+        "output_semantics": _EXPECTED_OUTPUT_SEMANTICS,
+        "ownership_guards": {
+            "canonicalize", "reject_dirty", "reject_symlink",
+            "reject_wrong_type",
+        },
+        "runner_state_child": "p4_g0c_runner_state.json",
+        "semantic_root": "runs_root",
+    }
+    if not isinstance(container, dict) or container != expected_container:
+        raise SurfaceClassificationError("runs_root container contract mismatch")
     output_semantics: set[str] = set()
     environment_semantics: set[str] = set()
+    container_semantics: set[str] = set()
     for record in mutations:
         classification = record.get("classification")
         if not isinstance(classification, str):
@@ -1240,6 +1437,8 @@ def validate_production_contract(
             output_semantics.add(root)
         elif root in _EXPECTED_CHILD_ENVIRONMENT:
             environment_semantics.add(root)
+        elif root == "runs_root":
+            container_semantics.add(root)
         else:
             raise SurfaceClassificationError(
                 f"unexpected production semantic root:{root}"
@@ -1248,10 +1447,18 @@ def validate_production_contract(
         raise SurfaceClassificationError(
             f"output contract mismatch:{output_semantics}"
         )
+    if container_semantics != {"runs_root"}:
+        raise SurfaceClassificationError(
+            f"container semantic mismatch:{container_semantics}"
+        )
     return {
+        "canonical_descendants": container["canonical_descendants"],
         "child_environment": actual_child_environment,
+        "container_semantics": container_semantics,
         "environment_mutation_semantics": environment_semantics,
+        "ownership_guards": container["ownership_guards"],
         "output_semantics": output_semantics,
+        "runner_state_child": container["runner_state_child"],
     }
 
 
@@ -1262,9 +1469,16 @@ def production_surface_inventory(repository_root: Path) -> dict[str, object]:
         repository_root / "scripts" / "dev_planner"
         / "run_p4_g0c_calibration.py"
     )
+    protocol_path = (
+        repository_root / "scripts" / "dev_planner" / "p4_g0c_protocol.py"
+    )
     environment_actions = classify_environment_actions(launch_path.read_text())
     runner_source = runner_path.read_text()
     launch_source = launch_path.read_text()
+    protocol_source = protocol_path.read_text()
+    containers = classify_runner_container_contract(
+        runner_source, protocol_source
+    )
     mutations = classify_mutations(
         runner_source,
         source_name="runner",
@@ -1291,6 +1505,7 @@ def production_surface_inventory(repository_root: Path) -> dict[str, object]:
     )
     mutations.extend(runner_launch_mutations)
     return {
+        "containers": containers,
         "environment_actions": environment_actions,
         "mutations": mutations,
         "runner_launch_bindings": runner_launch_bindings,
@@ -1304,5 +1519,6 @@ def production_surface(repository_root: Path) -> dict[str, object]:
         surface["environment_actions"],
         surface["mutations"],
         surface["runner_launch_bindings"],
+        surface["containers"],
     )
     return surface

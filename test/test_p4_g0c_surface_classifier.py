@@ -10,6 +10,7 @@ from scripts.dev_planner.p4_g0c_surface_classifier import (  # noqa: E402
     classify_environment_actions,
     classify_mutations,
     classify_process_output_arguments,
+    classify_runner_container_contract,
     production_surface,
     production_surface_inventory,
     validate_production_contract,
@@ -764,24 +765,124 @@ class P4G0CSurfaceClassifierTest(unittest.TestCase):
                 surface["environment_actions"],
                 unexpected,
                 surface["runner_launch_bindings"],
+                surface["containers"],
             )
+        validated = production_surface(REPO)["contract"]
+        self.assertEqual(validated["container_semantics"], {"runs_root"})
+        self.assertEqual(
+            validated["runner_state_child"], "p4_g0c_runner_state.json"
+        )
+        self.assertEqual(validated["canonical_descendants"], {
+            "launch_environment", "preflight", "run_dir",
+        })
+        self.assertEqual(validated["ownership_guards"], {
+            "canonicalize", "reject_dirty", "reject_symlink",
+            "reject_wrong_type",
+        })
+        self.assertEqual(validated["output_semantics"], expected)
+
+    def test_container_contract_adversaries_fail_closed(self):
+        surface = production_surface_inventory(REPO)
+        nominal = surface["containers"][0]
+
+        def changed(**updates):
+            candidate = {
+                key: set(value) if isinstance(value, set) else value
+                for key, value in nominal.items()
+            }
+            candidate.update(updates)
+            return candidate
+
+        cases = {
+            "missing_container": [],
+            "duplicate_container": [nominal, nominal],
+            "renamed_container": [changed(semantic_root="alternate_root")],
+            "wrong_runner_state_child": [changed(
+                runner_state_child="alternate_state.json"
+            )],
+            "second_container_root": [
+                nominal, changed(semantic_root="alternate_root"),
+            ],
+            "parent_escape": [changed(canonical_descendants={
+                "../preflight", "launch_environment", "run_dir",
+            })],
+            "sibling_escape": [changed(canonical_descendants={
+                "../launch_environment", "preflight", "run_dir",
+            })],
+        }
+        for case, containers in cases.items():
+            with self.subTest(case=case), self.assertRaises(
+                SurfaceClassificationError
+            ):
+                validate_production_contract(
+                    surface["environment_actions"],
+                    surface["mutations"],
+                    surface["runner_launch_bindings"],
+                    containers,
+                )
         with self.assertRaisesRegex(
             SurfaceClassificationError,
-            "unexpected production semantic root:runs_root",
-        ):
-            production_surface(REPO)
-        with self.assertRaisesRegex(
-            SurfaceClassificationError,
-            "unexpected production semantic root:runs_root",
+            "unexpected production semantic root:extra_output",
         ):
             validate_production_contract(
                 surface["environment_actions"],
-                [
-                    {"classification": f"registered:{semantic}"}
-                    for semantic in expected
-                ] + [{"classification": "derived:runs_root"}],
+                [*surface["mutations"], {
+                    "classification": "registered:extra_output",
+                }],
                 surface["runner_launch_bindings"],
+                surface["containers"],
             )
+
+    def test_container_proof_rejects_changed_production_ownership(self):
+        runner = (REPO / "scripts/dev_planner/run_p4_g0c_calibration.py").read_text()
+        protocol = (REPO / "scripts/dev_planner/p4_g0c_protocol.py").read_text()
+        cases = {
+            "missing_symlink_guard": (
+                runner.replace("requested_root.is_symlink()", "False", 1),
+                protocol,
+            ),
+            "missing_dirty_guard": (
+                runner.replace(
+                    "dirty runs root is forbidden:", "dirty root accepted:", 1
+                ),
+                protocol,
+            ),
+            "wrong_runner_state_child": (
+                runner.replace(
+                    "p4_g0c_runner_state.json", "alternate_state.json", 1
+                ),
+                protocol,
+            ),
+            "parent_preflight": (
+                runner.replace(
+                    'runs_root / "preflight"',
+                    'runs_root.parent / "preflight"',
+                    1,
+                ),
+                protocol,
+            ),
+            "sibling_run_directory": (
+                runner,
+                protocol.replace(
+                    "str(root / run_id)", "str(root.parent / run_id)", 1
+                ),
+            ),
+            "parent_launch_environment": (
+                runner,
+                protocol.replace(
+                    'root / "launch_environment"',
+                    'root.parent / "launch_environment"',
+                    1,
+                ),
+            ),
+        }
+        for case, (runner_source, protocol_source) in cases.items():
+            with self.subTest(case=case), self.assertRaises(
+                SurfaceClassificationError
+            ):
+                classify_runner_container_contract(
+                    runner_source, protocol_source
+                )
 
     def test_runner_launch_path_arguments_are_complete_and_classified(self):
         bindings = production_surface_inventory(REPO)["runner_launch_bindings"]

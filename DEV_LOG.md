@@ -7337,3 +7337,36 @@ unmodified, untracked and unstaged at `1f07da56...44f6`; no task process
 remains. Final Builder result is
 `BLOCKED_PRODUCTION_SURFACE_EXCEEDS_EIGHT_OUTPUT_CONTRACT`. No next task is
 selected; control returns only to SUPERVISOR review and disposition.
+
+## 2026-08-25 — ICRA-056 container contract and r3 live task
+
+IAP-RQ-423. Synchronized `dev/icra` at reviewed head `74cb730`; the first
+handoff attempt stopped before work when two bounded `git fetch` calls failed.
+On re-dispatch fetch succeeded, divergence was `0 0`, no pull ran, and initial
+status contained only the protected untracked PDF. Available capacity was
+117,555,875,840 bytes; ICRA-056 was fresh and no task/required process existed.
+
+Phase A changes only the authorized launcher, classifier and focused tests.
+The launcher root is now ICRA-056. Public `production_surface()` accepts one
+`runs_root` container only after runner/protocol AST proof of canonicalization,
+symlink/wrong-type/dirty reuse rejection, exact runner-state child, and
+canonical preflight, launch-environment and run-directory descendants. The
+five environment and eight output-leaf semantics stay distinct. Missing,
+duplicate, renamed and second containers, wrong state child, parent/sibling
+escape, changed production ownership and extra output semantics reject.
+
+The required initial RED was production's former
+`unexpected production semantic root:runs_root`; nominal two-layer proof made
+classifier 16/16 GREEN. Container adversaries and production-source ownership
+checks extend final classifier coverage to 18/18. Formal hermetic verification
+passes bootstrap/comparator 8/8, focused 113/113, launch-contract 11/11,
+launch-golden 16/16 and full Python 468/468; syntax 6/6, fatal-only flake8,
+canonical JSON 4/4 and `git diff --check` pass. Full external inventories each
+contain 17,759 entries and hash to `82b029de...eee9`; cmp is 0, delta empty.
+
+Production launch/runner/protocol/registry/dependency/lineage/fixture bytes and
+all ICRA-046 through ICRA-055 evidence remain untouched. External `gnss_comm`
+is non-git/read-only and its pre-build content-tree aggregate is
+`de422a4b...16a`; protected PDF remains `1f07da56...44f6`. Phase A now awaits
+its required commit/push before the single fresh CUDA build. No build, GPU,
+ROS/live runner, identity, analyzer, threshold or qualification action has run.
