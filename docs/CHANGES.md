@@ -2402,3 +2402,21 @@ results/icra27/icra063/tdd_riskgrid/build/iap/test_risk_grid_map \
   --gtest_filter='RiskGridMapTest.R6TemporalEnvelopeSupportsObservedTailOnlyThroughThreeSeconds'
 git diff --check d0aa033...HEAD
 ```
+
+## 2026-08-25 (ICRA-063 readiness correction and frozen r6 candidate)
+
+- Corrected only v6 launch materialization so `p0.horizons_s` is compared as
+  its protocol-typed seven-float list, and made the nonregistered readiness
+  evidence parent explicit. Both earlier failures occurred before ROS and did
+  not consume the one true readiness or a registered identity.
+- Audited the final fresh 17-package merged non-symlink Release/CUDA install:
+  17 tests-off caches, six ELF libraries, no historical linkage, exact
+  source/install equality. The mandatory GPU proof remained PASS and was not
+  repeated.
+- Completed the one true r6 readiness with worker 4/4, max horizon 3.0 s,
+  admission release exactly once, 13 positive-snapshot metrics-only decisions,
+  200/200 coverage in both arms, healthy required processes and zero invalid
+  samples in every fail-closed category.
+- Froze the r6 candidate before the standalone dependency preflight and the
+  one-shot registered matrix. No threshold was applied and no G0C/G0D/P5
+  claim or execution occurred.

@@ -420,6 +420,11 @@ def _p4_g0c_binding(
             typed_values["p0.predictor.worker_count"] = int(
                 effective_values["p0.predictor.worker_count"]
             )
+        if version == 6:
+            typed_values["p0.horizons_s"] = [
+                float(item) for item in
+                str(effective_values["p0.horizons_s"]).split(",")
+            ]
     expected_protocol_schema = (
         f"p4_g0c_protocol_v{version}"
     )

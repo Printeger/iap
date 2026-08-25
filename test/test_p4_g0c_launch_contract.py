@@ -42,6 +42,17 @@ class P4G0CLaunchContractTest(unittest.TestCase):
             dict(MODULE.ARG_DEFAULTS)["p4.cost_query_policy"],
             "LEGACY_STRICT",
         )
+        typed = {
+            key: MODULE._p4_g0c_typed_value(profile[key])
+            for key in MODULE.P4_G0C_V6_P0_PROFILE_VALUES
+        }
+        typed["p0.horizons_s"] = [
+            float(item) for item in profile["p0.horizons_s"].split(",")
+        ]
+        self.assertEqual(
+            typed["p0.horizons_s"],
+            [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0],
+        )
 
     def test_v5_preset_materializes_versioned_fixture_and_worker_profile(self):
         v4 = MODULE.EXPERIMENT_PRESETS[MODULE.P4_G0C_EXPERIMENT_V4]

@@ -7771,3 +7771,28 @@ required processes never started. The readiness is not retried. Registered r6
 attempts, full runner and analyzer remain zero; no draft, threshold action or
 G0C claim exists. Result is
 `BLOCKED_R6_READINESS_PROTOCOL_EFFECTIVE_CONFIG_MISMATCH_BEFORE_REGISTERED_IDENTITY`.
+
+## 2026-08-25 — ICRA-063 R6 READINESS CORRECTION AND FREEZE
+
+The prior launch rejection was a correctable pre-ROS orchestration defect, not
+the one true readiness: launch supplied the typed v6 horizon list as a CSV
+string. The v6 launch binding now parses that value to the exact seven-float
+list before fail-closed protocol comparison. A second pre-ROS attempt exposed
+a missing repository-local evidence parent and was likewise rejected before
+launch; explicit parent creation corrected it without changing science or
+consuming a registered identity.
+
+The final genuinely fresh closure at `results/icra27/icra063/build_final`
+passes 17/17 packages, merged non-symlink Release/CUDA, 17 tests-off caches,
+six ELF libraries, zero historical linkage and exact source/install equality.
+The already completed mandatory GPU preflight remains PASS with one device and
+was not rerun.
+
+The one true 90-second nonregistered r6 readiness then passes: predictor
+requested/effective is 4/4, horizons are exactly 0.0 through 3.0 s, admission
+releases once after 609 deferrals, required processes remain healthy through
+the runtime interval and stop under controlled shutdown, and 13 positive
+snapshot closed-segment decisions are all metrics-only. Both arms are 200/200
+for every decision; all unknown, stale, non-finite, time-support, out-of-map,
+provider-invalid and other-invalid counts are zero. Registered r6 attempts,
+full-runner invocations and analyzer invocations remain zero at this freeze.

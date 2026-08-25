@@ -1285,3 +1285,12 @@ They do not convert historical `NO-GO-P2`, failed P0 Gate-0B evidence, the stati
 | IAP-RQ-423 | Require fresh CUDA and preflight before readiness | 17/17 merged nonsymlink Release/CUDA build, six ELF libraries, zero historical linkage and mandatory GPU device count 1 pass | **BUILD + GPU PASS** |
 | IAP-RQ-423 | Stop on the sole failed readiness without identity consumption | dependency 18/13/1/14/6 and P0 profile pass, but launch rejects effective config before ROS; required processes never start; readiness is not retried | **BLOCKED_R6_READINESS_PROTOCOL_EFFECTIVE_CONFIG_MISMATCH** |
 | IAP-RQ-423 | Preserve registered one-shot and authority boundaries | r6 attempts/completions/retries, full runner and analyzer are 0/0/0/0/0; no draft, threshold action, G0C/G0D/P5 claim | **SUPERVISOR REVIEW REQUIRED** |
+
+## 2026-08-25 ICRA-063 corrected readiness and freeze
+
+| Req ID | Requirement/evidence seam | Implementation and retained evidence | Status |
+|---|---|---|---|
+| IAP-RQ-320, IAP-RQ-322 | Materialize the exact r6 temporal profile | v6 launch parses the protocol horizon CSV to `[0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0]`; live manifest proves requested/effective worker `4/4` and preserves outer batch 1 | **LIVE-PROVEN** |
+| IAP-RQ-423 | Repair correctable pre-identity orchestration without consuming readiness | Initial typed-list mismatch and missing evidence parent both reject before ROS; neither starts a required process or registered identity | **CORRECTED IN-TASK** |
+| IAP-RQ-423 | Prove one true nonregistered r6 readiness | mandatory GPU proof remains PASS; admission releases once; 13 positive-snapshot closed-segment decisions are metrics-only with exact 200/200 arms and zero invalid categories; required processes are healthy with controlled shutdown | **READINESS PASS** |
+| IAP-RQ-423 | Freeze before registered work | final fresh build passes 17/17 merged non-symlink Release/CUDA, six ELF, zero historical linkage and source/install equality; runner/analyzer/registered attempts remain zero at freeze | **FROZEN; MATRIX PENDING** |
