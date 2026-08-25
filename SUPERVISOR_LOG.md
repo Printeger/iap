@@ -1,5 +1,60 @@
 # ICRA Supervisor Log
 
+## 2026-08-25 — ICRA-065 analyzer implementation PASS; Supervisor Q10 expectation corrected
+
+### Review identity and synchronization
+
+- Fixed review range: `d31a38271a0b31a18fc4f9eca552829290f39627...49730bfde7cbc63818ce6833b583c2191ae81592`.
+  The sole Builder commit `49730bf` binds `IAP-RQ-320`, `IAP-RQ-322` and `IAP-RQ-423`. Fetch succeeded;
+  HEAD and `origin/dev/icra` matched at divergence `0 0`; `git diff --check` passed.
+- The protected PDF remains the sole untracked file with unchanged SHA-256
+  `1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`. No task process remains and all
+  build/install products are retained.
+
+### Standards axis
+
+- No blocking standards violation. Scope, ownership, RQ-bound commit, pushed branch, v6 science/config/raw
+  immutability, offline-only execution, old-analysis preservation, build retention and PDF protection comply.
+- Medium nonblocking procedural deviation: initial Git synchronization and required-file reads preceded the
+  ICRA-065 ledger. The first mutation/freeze and all later task commands are recorded, and the deviation is
+  disclosed in `DEV_LOG.md`. This history is not reconstructable and is waived; it must not trigger another
+  format/evidence loop.
+- Low judgement-only possible duplicated-code smell exists in adversarial test setup. Refactoring it would not
+  affect the Gate and is out of scope. Standards count: zero blocking, one hard nonblocking, one smell.
+
+### Spec axis and Supervisor verification
+
+- Analyzer implementation passes: recovery-time historical alias A is bound to the exact frozen pre-recovery
+  inventory and preserved subtree; final alias B is independently checked by the narrow safe-alias contract.
+  Tamper, schema, root, hash, missing, escape, chain and replacement cases fail closed.
+- Individual floor-level rows remain structurally complete. Only after zero technical failures does the analyzer
+  compute deterministic Type-7 statistics and produce typed `REJECTED`, `SCIENTIFIC_NO_GO` or `DRAFT_ELIGIBLE`.
+  Scientific NO-GO creates no threshold draft.
+- Old analysis and its preserved copy both retain SHA `f584fc51...d7391`; runner, recovery inventory, transition
+  and original state retain their Supervisor hashes. The before/after manifests contain equal 103-file arrays
+  with no mismatches. No authoritative analyzer, GPU, ROS, runner, identity, draft, registry or downstream action
+  occurred.
+- Supervisor replay passes focused analyzer 41/41 and complete hermetic Python discovery 516/516, each with a
+  zero external ROS-log delta. Direct Python float parsing of all 192 CSV rows reproduces validation exactly:
+  Type-7 `h=19.1`, mean rank bounds both `0.000020000000000131024`, mean Q10 the same, and max Q10 `0`.
+- The prior Supervisor value `0.000304` was wrong: it came from `sort -n`, which did not numerically order the
+  scientific-notation values. Builder correctly stopped on the literal mismatch. This is a Supervisor spec
+  defect, not an analyzer, Builder, permission, GPU or scientific-data failure.
+- Spec count: one blocking missing authoritative output caused by the erroneous Supervisor expectation, one Low
+  procedure item, zero scope creep and zero wrong implementation. Implementation verdict:
+  `ICRA065_ANALYZER_IMPLEMENTATION_PASS_SUPERVISOR_EXPECTATION_CORRECTED`.
+
+### Required next action and artifact lifecycle
+
+- Unique next task is `ICRA-066 / P4_G0C_R6_AUTHORITATIVE_OFFLINE_NO_GO_OUTPUT`. It binds reviewed code and
+  frozen inputs, replaces the preserved obsolete analysis, and invokes the authoritative analyzer once. No
+  validation/test repetition, code change, GPU, ROS, runner, identity or tuning is allowed.
+- Correct expected gates are mean `0.000020000000000131024 > 1e-12` and max `0 <= 1e-12`. The required output
+  is `192/192`, zero technical failures and typed `SCIENTIFIC_NO_GO` solely on max improvement.
+- Overall Gate closure is pending the authoritative output, so delete no build/install now. After ICRA-066
+  Review PASS and pushed docs, reproducible completed-task build/install products may be removed; all scientific
+  and protected evidence remains.
+
 ## 2026-08-25 — ICRA-064 live matrix PASS; analyzer correction required; P4-G0C expected NO-GO
 
 ### Review identity and synchronization
