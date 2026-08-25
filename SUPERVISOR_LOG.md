@@ -1,5 +1,57 @@
 # ICRA Supervisor Log
 
+## 2026-08-25 — ICRA-062 diagnostic closure; r5 temporal support is the genuine blocker
+
+### Review identity and synchronization
+
+- Fixed review range: `c718f297a5dca35f0460103f1c148af5bb5ff59b...8d5f505229e584c94a5097110a16647c0b09974f`.
+  Builder commit `8d5f505` binds `IAP-RQ-320`, `IAP-RQ-322` and `IAP-RQ-423`. Fetch succeeded; HEAD and
+  `origin/dev/icra` matched at divergence `0 0` before this verdict. `git diff --check` passed.
+- The protected PDF remains the sole untracked user file with SHA-256
+  `1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`. No task ROS process remains.
+
+### Standards and Spec axes
+
+- Spec: engineering PASS and correct fail-closed stop. Worker requested/effective is now `4/4`; the synthetic
+  FSM friend/helper is removed; admission tests pass 3/3; fresh Release/CUDA closure is 17/17 with six
+  libraries; GPU, dependency and required-process checks pass. Admission releases once after 590 deferrals,
+  and 12 post-release decisions bind positive stable RiskGrid snapshots and closed segments.
+- The one r5 readiness does not reach 200/200. Across 12 identities and two arms of 200 samples, classification
+  is 3040 `POSITIVE_WEIGHT_OCCUPIED_SKIP` plus 10 `TIME_SUPPORT`; every other invalid category is zero. The ten
+  time failures are exactly risk-arm sample 199 in attempts 1-10 at `tau ~= 2.50208 s`, exceeding the frozen
+  `2.5 s` P0 horizon. Because ICRA-062 authorized occupied support only when no non-occupied category remained,
+  Builder correctly did not alter semantics, create r6 or consume a registered identity.
+- Standards: one Medium evidence-hygiene finding is folded into the next technical task. The raw expanded
+  classification JSON was force-tracked although compact evidence was required; ICRA-063 removes only its Git
+  tracking while preserving the ignored local artifact. One Low immutable deviation is waived: the first four
+  ledger actions predate recorder initialization and honestly use `UNRECOVERABLE_PRE_RECORDER_FIELD`. They are
+  not rerun or fabricated. Low maintenance smells are a repeated launch profile cascade and a literal occupied
+  source flag; only the literal is corrected if touched by the r6 work.
+- No scope creep, v1-v4 mutation, identity consumption, threshold application, P5 execution, credential
+  recurrence, external write or cleanup occurred. These evidence findings are not separate gates.
+
+### Supervisor verification and verdict
+
+- The exact retained Builder admission binary passed 3/3. The exact ledger-bound collision-guide binary and
+  install passed 16/16. An earlier Supervisor replay accidentally mixed a focused binary with a different
+  retained install and exited 139; using the exact recorded linkage resolved it and did not alter product
+  evidence. This confirms why build/install must remain available through Review.
+- Final ICRA-062 result is
+  `BLOCKED_R5_READINESS_TIME_SUPPORT_BEFORE_REGISTERED_IDENTITY`. Registered r5 attempts/completions/retries,
+  full-runner calls and analyzer calls are all zero. This is a real temporal-support contract mismatch, not a
+  GPU, permission, build, formatting or procedural blocker.
+- Verdict: `ICRA062_ENGINEERING_PASS_R5_TEMPORAL_SUPPORT_REQUEST_CHANGES`. Unique next task is `ICRA-063 /
+  P4_G0C_R6_TEMPORAL_AND_OCCUPIED_SUPPORT_LIVE`. It versions the change as r6, extends the existing 0.5-second
+  horizon cadence once to `3.0 s`, and adds P4-only conservative occupied cost support while keeping occupied
+  collision and integrity validity fail-closed. One passing readiness continues directly to 15 registered
+  runs and analyzer in the same task; there is no intermediate Review.
+
+### Artifact lifecycle
+
+- Review is not qualification PASS, so no build/install directory is deleted. Retain ICRA-056/059/060/061/062
+  and future ICRA-063 build/install products through the next Supervisor Review. After ICRA-063 passes and its
+  code/docs are pushed, delete only those reproducible build/install directories; retain evidence and PDF.
+
 ## 2026-08-25 — ICRA-061 closed segment achieved; wrong P0 worker profile invalidates blocker verdict
 
 ### Review identity and synchronization
