@@ -326,6 +326,11 @@ _SUBPROCESS_READ_ONLY_KEYWORDS = {
     "restore_signals", "shell", "start_new_session", "startupinfo",
     "stdin", "text", "timeout", "universal_newlines",
 }
+_UNKNOWN_MODULE_MUTATION_METHODS = {
+    "chmod", "chown", "copy", "copy2", "copyfile", "copytree", "link",
+    "makedirs", "move", "remove", "removedirs", "renames", "rmdir",
+    "rmtree", "symlink", "truncate", "utime",
+}
 
 
 def _semantic_root(classification: str) -> str:
@@ -353,7 +358,19 @@ def _resolve_mutation_target(
         base = _resolve_mutation_target(
             node.left, function, assignments, root_bindings, seen
         )
-        if base is None:
+        component = node.right
+        if isinstance(component, ast.Name):
+            if component.id in seen or component.id not in assignments:
+                return None
+            component = assignments[component.id]
+        if not (
+            base is not None
+            and isinstance(component, ast.Constant)
+            and isinstance(component.value, str)
+            and component.value not in {"", ".", ".."}
+            and not Path(component.value).is_absolute()
+            and len(Path(component.value).parts) == 1
+        ):
             return None
         return f"derived:{_semantic_root(base)}"
     if isinstance(node, ast.Call):
@@ -371,9 +388,18 @@ def _resolve_mutation_target(
             if base is None:
                 return None
             if node.func.attr in {"with_name", "with_suffix"}:
+                if not (
+                    len(node.args) == 1
+                    and isinstance(node.args[0], ast.Constant)
+                    and isinstance(node.args[0].value, str)
+                    and node.args[0].value not in {"", ".", ".."}
+                    and not Path(node.args[0].value).is_absolute()
+                    and len(Path(node.args[0].value).parts) == 1
+                ):
+                    return None
                 return f"derived:{_semantic_root(base)}"
             return base
-    if isinstance(node, ast.Attribute) and node.attr in {"name", "parent"}:
+    if isinstance(node, ast.Attribute) and node.attr == "name":
         return _resolve_mutation_target(
             node.value, function, assignments, root_bindings, seen
         )
@@ -409,9 +435,9 @@ def _os_open_is_write(
             assignments[node.id], assignments, seen | {node.id}
         )
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
-        return _os_open_is_write(
-            node.left, assignments, seen
-        ) or _os_open_is_write(node.right, assignments, seen)
+        left_is_write = _os_open_is_write(node.left, assignments, seen)
+        right_is_write = _os_open_is_write(node.right, assignments, seen)
+        return left_is_write or right_is_write
     if isinstance(node, ast.Attribute):
         flag = _call_name(node)
         if flag in {
@@ -489,7 +515,9 @@ def _dynamic_namespace_call(
     if _normalized_call_name(lookup.func, aliases) != "getattr" or not lookup.args:
         return None
     namespace = _normalized_call_name(lookup.args[0], aliases)
-    if namespace in {"os", "shutil", "subprocess", "pathlib", "Path"}:
+    if namespace in {"os", "shutil", "subprocess", "pathlib", "Path"} or (
+        namespace.startswith(("os.", "shutil.", "subprocess.", "pathlib."))
+    ):
         return namespace
     return None
 
@@ -608,6 +636,14 @@ def classify_mutations(
                 raise SurfaceClassificationError(
                     f"{source_name}:unknown pathlib member:{name}"
                 )
+            if (
+                isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name)
+                and node.func.attr in _UNKNOWN_MODULE_MUTATION_METHODS
+            ):
+                raise SurfaceClassificationError(
+                    f"{source_name}:unknown module-qualified mutation:{name}"
+                )
             if isinstance(node.func, ast.Attribute):
                 method = node.func.attr
                 if method == "open":
@@ -627,7 +663,11 @@ def classify_mutations(
                 if method in _PATH_MUTATION_METHODS:
                     if method == "replace" and len(node.args) >= 2:
                         continue
-                    if receiver is None:
+                    api = _PATH_MUTATION_METHODS[method]
+                    policy_key = (
+                        scope_name, api, ast.unparse(node.func.value)
+                    )
+                    if receiver is None and policy_key not in target_policies:
                         raise SurfaceClassificationError(
                             f"{source_name}:unresolved Path mutation receiver:"
                             f"{scope_name}:{method}"
@@ -638,7 +678,7 @@ def classify_mutations(
                         else None
                     )
                     _record_mutation(
-                        records, api=_PATH_MUTATION_METHODS[method],
+                        records, api=api,
                         target=node.func.value, secondary=secondary, node=node,
                         function=scope_name, assignments=assignments,
                         root_bindings=root_bindings,
@@ -672,6 +712,65 @@ def classify_process_output_arguments(
         "config_path", "gate0.candidate_events_path", "gate0.control_points_path",
         "gate0.evidence_manifest_path", "manifest_path", "p1.evidence_manifest_path",
     }
+
+    def command_outputs(
+        command: ast.AST | None,
+        prefix: str,
+        assignments: Mapping[str, ast.AST],
+        *,
+        reject_dynamic_flags: bool,
+    ) -> list[tuple[str, ast.AST]]:
+        if not isinstance(command, (ast.List, ast.Tuple)):
+            return []
+        found: list[tuple[str, ast.AST]] = []
+        index = 0
+        while index < len(command.elts):
+            item = command.elts[index]
+            resolved = item
+            if isinstance(item, ast.Name) and item.id in assignments:
+                resolved = assignments[item.id]
+            value = (
+                resolved.value
+                if isinstance(resolved, ast.Constant)
+                and isinstance(resolved.value, str)
+                else None
+            )
+            if value in {"--bag-output", "--manifest"}:
+                if index + 1 >= len(command.elts):
+                    raise SurfaceClassificationError(
+                        f"recognized process path flag lacks target:{prefix}:{value}"
+                    )
+                found.append((f"{prefix}.{value}", command.elts[index + 1]))
+                index += 2
+                continue
+            if (
+                value is not None
+                and value.startswith("-")
+                and any(
+                    token in value.lower()
+                    for token in ("dir", "file", "manifest", "output", "path")
+                )
+            ):
+                raise SurfaceClassificationError(
+                    f"unknown process path flag:{prefix}:{value}"
+                )
+            if reject_dynamic_flags and isinstance(item, ast.Name):
+                raise SurfaceClassificationError(
+                    f"unresolved subprocess flag or argument:{prefix}:{item.id}"
+                )
+            index += 1
+        return found
+
+    def is_memory_stream(node: ast.AST) -> bool:
+        return (
+            isinstance(node, ast.Constant) and node.value is None
+        ) or (
+            isinstance(node, ast.Attribute)
+            and _normalized_call_name(node, aliases) in {
+                "subprocess.DEVNULL", "subprocess.PIPE", "subprocess.STDOUT",
+            }
+        )
+
     for scope_name, scope in _scopes(tree):
         assignments = _function_assignments(scope)
         for node in _scope_nodes(scope):
@@ -685,15 +784,23 @@ def classify_process_output_arguments(
             name = _normalized_call_name(node.func, aliases)
             candidates: list[tuple[str, ast.AST]] = []
             if name in _SUBPROCESS_HELPERS:
+                positional_streams: dict[str, ast.AST] = {}
+                if name == "subprocess.Popen":
+                    if len(node.args) > 4:
+                        positional_streams["stdout"] = node.args[4]
+                    if len(node.args) > 5:
+                        positional_streams["stderr"] = node.args[5]
+                for stream_name, stream in positional_streams.items():
+                    if not is_memory_stream(stream):
+                        candidates.append((f"{name}.{stream_name}", stream))
                 for keyword in node.keywords:
                     if keyword.arg in {"stdout", "stderr"}:
-                        if (
-                            isinstance(keyword.value, ast.Attribute)
-                            and _normalized_call_name(keyword.value, aliases) in {
-                                "subprocess.DEVNULL", "subprocess.PIPE",
-                                "subprocess.STDOUT",
-                            }
-                        ):
+                        if keyword.arg in positional_streams:
+                            raise SurfaceClassificationError(
+                                f"conflicting subprocess stream:{name}:"
+                                f"{keyword.arg}"
+                            )
+                        if is_memory_stream(keyword.value):
                             continue
                         candidates.append((
                             f"{name}.{keyword.arg}", keyword.value,
@@ -703,30 +810,12 @@ def classify_process_output_arguments(
                             f"unknown subprocess output keyword:{name}:"
                             f"{keyword.arg}"
                         )
-                command = node.args[0] if node.args else None
-                if isinstance(command, (ast.List, ast.Tuple)):
-                    for index, item in enumerate(command.elts[:-1]):
-                        if (
-                            isinstance(item, ast.Constant)
-                            and item.value in {"--bag-output", "--manifest"}
-                        ):
-                            candidates.append((
-                                f"{name}.{item.value}", command.elts[index + 1]
-                            ))
-                        elif (
-                            isinstance(item, ast.Constant)
-                            and isinstance(item.value, str)
-                            and item.value.startswith("-")
-                            and any(
-                                token in item.value.lower()
-                                for token in (
-                                    "dir", "file", "manifest", "output", "path"
-                                )
-                            )
-                        ):
-                            raise SurfaceClassificationError(
-                                f"unknown subprocess path flag:{name}:{item.value}"
-                            )
+                candidates.extend(command_outputs(
+                    node.args[0] if node.args else None,
+                    name,
+                    assignments,
+                    reject_dynamic_flags=True,
+                ))
             elif name.startswith("subprocess."):
                 raise SurfaceClassificationError(
                     f"unknown subprocess member:{name}"
@@ -743,27 +832,12 @@ def classify_process_output_arguments(
                     raise SurfaceClassificationError(
                         "unresolved ExecuteProcess command"
                     )
-                for index, item in enumerate(command.elts[:-1]):
-                    if (
-                        isinstance(item, ast.Constant)
-                        and item.value in {"--bag-output", "--manifest"}
-                    ):
-                        candidates.append((
-                            f"ExecuteProcess.{item.value}",
-                            command.elts[index + 1],
-                        ))
-                    elif (
-                        isinstance(item, ast.Constant)
-                        and isinstance(item.value, str)
-                        and item.value.startswith("-")
-                        and any(
-                            token in item.value.lower()
-                            for token in ("dir", "file", "manifest", "output", "path")
-                        )
-                    ):
-                        raise SurfaceClassificationError(
-                            f"unknown ExecuteProcess path flag:{item.value}"
-                        )
+                candidates.extend(command_outputs(
+                    command,
+                    "ExecuteProcess",
+                    assignments,
+                    reject_dynamic_flags=False,
+                ))
             elif name == "Node":
                 parameters = next(
                     (
@@ -1134,6 +1208,74 @@ _LAUNCH_TARGET_POLICIES = {
     ): "derived:runtime_root_dir",
 }
 
+_EXPECTED_CHILD_ENVIRONMENT = {
+    "HOME", "ROS_HOME", "ROS_LOG_DIR", "TMPDIR", "XDG_RUNTIME_DIR",
+}
+_EXPECTED_OUTPUT_SEMANTICS = {
+    "bag_output_dir", "decision_csv_path", "export_root_dir", "iap_log_root",
+    "launch_command_path", "run_manifest_path", "runtime_root_dir",
+    "stdout_log_path",
+}
+_RUNNER_CONTROL_ROOTS = {"runs_root"}
+
+
+def validate_production_contract(
+    environment_actions: list[dict[str, object]],
+    mutations: list[dict[str, object]],
+    runner_launch_bindings: Mapping[str, object],
+) -> dict[str, object]:
+    """Reject any semantic root outside the exact r3 environment/output seam."""
+    child_environment = runner_launch_bindings.get("child_environment")
+    if not isinstance(child_environment, dict):
+        raise SurfaceClassificationError("missing runner child environment")
+    actual_child_environment = set(child_environment.values())
+    if actual_child_environment != _EXPECTED_CHILD_ENVIRONMENT:
+        raise SurfaceClassificationError(
+            f"child environment contract mismatch:{actual_child_environment}"
+        )
+    action_names = [str(item.get("name")) for item in environment_actions]
+    if sorted(action_names) != sorted([
+        "FASTRTPS_DEFAULT_PROFILES_FILE", "QT_X11_NO_MITSHM",
+        "XDG_RUNTIME_DIR", "XDG_RUNTIME_DIR",
+    ]):
+        raise SurfaceClassificationError(
+            f"environment action contract mismatch:{action_names}"
+        )
+    output_semantics: set[str] = set()
+    environment_semantics: set[str] = set()
+    control_roots: set[str] = set()
+    for record in mutations:
+        classification = record.get("classification")
+        if not isinstance(classification, str):
+            raise SurfaceClassificationError("mutation classification is not text")
+        if classification == "immutable_read_only_path":
+            continue
+        if ":" not in classification:
+            raise SurfaceClassificationError(
+                f"unresolved production classification:{classification}"
+            )
+        root = _semantic_root(classification)
+        if root in _EXPECTED_OUTPUT_SEMANTICS:
+            output_semantics.add(root)
+        elif root in _EXPECTED_CHILD_ENVIRONMENT:
+            environment_semantics.add(root)
+        elif root in _RUNNER_CONTROL_ROOTS:
+            control_roots.add(root)
+        else:
+            raise SurfaceClassificationError(
+                f"unexpected production semantic root:{root}"
+            )
+    if output_semantics != _EXPECTED_OUTPUT_SEMANTICS:
+        raise SurfaceClassificationError(
+            f"output contract mismatch:{output_semantics}"
+        )
+    return {
+        "child_environment": actual_child_environment,
+        "environment_mutation_semantics": environment_semantics,
+        "output_semantics": output_semantics,
+        "runner_control_roots": control_roots,
+    }
+
 
 def production_surface(repository_root: Path) -> dict[str, object]:
     launch_path = repository_root / "launch" / "test_planner.launch.py"
@@ -1169,7 +1311,11 @@ def production_surface(repository_root: Path) -> dict[str, object]:
         _classify_runner_launch_bindings(runner_source)
     )
     mutations.extend(runner_launch_mutations)
+    contract = validate_production_contract(
+        environment_actions, mutations, runner_launch_bindings
+    )
     return {
+        "contract": contract,
         "environment_actions": environment_actions,
         "mutations": mutations,
         "runner_launch_bindings": runner_launch_bindings,

@@ -2041,8 +2041,14 @@ permitted after the sole invocation was consumed.
   rejects unknown namespace members, dynamic attributes, unresolved modes,
   flags, keywords, receivers and targets. `source_name` is retained in typed
   mutation records and diagnostics.
-- Formal hermetic verification passes focused 109/109, launch-contract 11/11,
-  launch-golden 16/16 and full Python 464/464; syntax 6/6, fatal-only flake8,
+- Review remediation proves every joined target is a single canonical child,
+  covers positional subprocess streams and final/dynamic flags, rejects unknown
+  nested namespaces, requires an invoked top-level import guard, and validates
+  the exact five-root/four-action/eight-output production contract without
+  filtering unexpected semantics. `runs_root` remains the registered runner
+  control root, not a ninth output.
+- Formal hermetic verification passes focused 111/111, launch-contract 11/11,
+  launch-golden 16/16 and full Python 466/466; syntax 6/6, fatal-only flake8,
   canonical JSON 4/4 and diff checks pass. Every launcher result reports the
   same 17,759-entry external inventory; final before/after SHA-256 is
   `82b029de...eee9`, cmp 0, delta empty.
@@ -2051,3 +2057,42 @@ permitted after the sole invocation was consumed.
   No build, GPU, ROS/live flow, smoke or qualification ran. Result is
   `P4_G0C_R3_HERMETIC_CLASSIFIER_READY_FOR_REVIEW`, never live-ready or G0C
   PASS.
+
+Reproduce the ICRA-055 synthetic verification from the repository root with
+the controlled launcher (all commands use the same explicit task root):
+
+```bash
+python3 scripts/dev_planner/run_p4_g0c_tests.py \
+  --task-root "$PWD/results/icra27/icra055" unittest -- \
+  discover -s test -p 'test_p4_g0c_*.py' -v
+python3 scripts/dev_planner/run_p4_g0c_tests.py \
+  --task-root "$PWD/results/icra27/icra055" unittest -- \
+  discover -s test -p 'test_p4_g0c_launch_contract.py' -v
+python3 scripts/dev_planner/run_p4_g0c_tests.py \
+  --task-root "$PWD/results/icra27/icra055" unittest -- \
+  discover -s test -p 'test_test_planner_launch.py' -v
+python3 scripts/dev_planner/run_p4_g0c_tests.py \
+  --task-root "$PWD/results/icra27/icra055" unittest -- \
+  discover -s test -p 'test_*.py'
+python3 scripts/dev_planner/run_p4_g0c_tests.py \
+  --task-root "$PWD/results/icra27/icra055" syntax -- \
+  scripts/dev_planner/run_p4_g0c_tests.py \
+  scripts/dev_planner/p4_g0c_surface_classifier.py \
+  test/test_p4_g0c_hermetic_tests.py \
+  test/test_p4_g0c_surface_classifier.py \
+  test/test_p4_g0c_launch_contract.py test/test_test_planner_launch.py
+python3 scripts/dev_planner/run_p4_g0c_tests.py \
+  --task-root "$PWD/results/icra27/icra055" flake8 -- \
+  scripts/dev_planner/run_p4_g0c_tests.py \
+  scripts/dev_planner/p4_g0c_surface_classifier.py \
+  test/test_p4_g0c_hermetic_tests.py \
+  test/test_p4_g0c_surface_classifier.py \
+  test/test_p4_g0c_launch_contract.py test/test_test_planner_launch.py
+python3 scripts/dev_planner/run_p4_g0c_tests.py \
+  --task-root "$PWD/results/icra27/icra055" canonical-json -- \
+  config/icra27/p4_g0c_protocol_v3.json \
+  config/icra27/p4_threshold_registry_v3.json \
+  config/icra27/p4_g0c_runtime_dependencies_v3.json \
+  config/icra27/p4_g0c_replacement_lineage_v3.json
+git diff --check
+```

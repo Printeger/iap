@@ -5,6 +5,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import textwrap
 import unittest
 from pathlib import Path
 
@@ -23,6 +24,29 @@ from run_p4_g0c_tests import (  # noqa: E402
 
 
 class P4G0CHermeticTests(unittest.TestCase):
+    @staticmethod
+    def _top_level_guard_precedes_launch_import(source):
+        tree = ast.parse(source)
+        guarded = False
+        for node in tree.body:
+            if (
+                isinstance(node, ast.Expr)
+                and isinstance(node.value, ast.Call)
+                and isinstance(node.value.func, ast.Name)
+                and node.value.func.id == "require_hermetic_test_environment"
+            ):
+                guarded = True
+            if (
+                isinstance(node, ast.Import)
+                and any(alias.name == "launch" for alias in node.names)
+            ) or (
+                isinstance(node, ast.ImportFrom)
+                and node.module is not None
+                and (node.module == "launch" or node.module.startswith("launch."))
+            ):
+                return guarded
+        return True
+
     @staticmethod
     def _external_log_inventory():
         return external_log_inventory()
@@ -176,29 +200,21 @@ class P4G0CHermeticTests(unittest.TestCase):
 
     def test_every_launch_import_has_the_hermetic_guard_first(self):
         for path in sorted((REPO / "test").glob("*.py")):
-            tree = ast.parse(path.read_text(), filename=str(path))
-            launch_import_lines = [
-                node.lineno for node in ast.walk(tree)
-                if (
-                    isinstance(node, ast.Import)
-                    and any(alias.name == "launch" for alias in node.names)
-                ) or (
-                    isinstance(node, ast.ImportFrom)
-                    and node.module is not None
-                    and (node.module == "launch" or node.module.startswith("launch."))
-                )
-            ]
-            if not launch_import_lines:
-                continue
-            guard_lines = [
-                node.lineno for node in ast.walk(tree)
-                if isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Name)
-                and node.func.id == "require_hermetic_test_environment"
-            ]
             with self.subTest(path=path.name):
-                self.assertTrue(guard_lines, "launch import lacks hermetic guard")
-                self.assertLess(min(guard_lines), min(launch_import_lines))
+                self.assertTrue(
+                    self._top_level_guard_precedes_launch_import(
+                        path.read_text()
+                    ),
+                    "launch import lacks an invoked top-level hermetic guard",
+                )
+        uninvoked_guard = textwrap.dedent("""
+            def guard_later():
+                require_hermetic_test_environment()
+            from launch import LaunchContext
+        """)
+        self.assertFalse(
+            self._top_level_guard_precedes_launch_import(uninvoked_guard)
+        )
 
     def test_child_failure_exit_and_external_result_are_distinct(self):
         before = self._external_log_inventory()

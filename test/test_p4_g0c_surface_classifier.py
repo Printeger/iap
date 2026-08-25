@@ -11,6 +11,7 @@ from scripts.dev_planner.p4_g0c_surface_classifier import (  # noqa: E402
     classify_mutations,
     classify_process_output_arguments,
     production_surface,
+    validate_production_contract,
 )
 
 
@@ -331,6 +332,38 @@ class P4G0CSurfaceClassifierTest(unittest.TestCase):
                     },
                 )
 
+    def test_canonical_descendant_and_complete_flags_are_required(self):
+        cases = {
+            "absolute_rhs": "(root / '/external').write_text('x')",
+            "parent_rhs": "(root / '..' / 'escape').write_text('x')",
+            "parent_attribute": "(root.parent / 'escape').write_text('x')",
+            "unsafe_with_name": "root.with_name('../escape').write_text('x')",
+            "short_circuit_flags": (
+                "os.open(root / 'output', os.O_WRONLY | UNKNOWN_FLAG)"
+            ),
+            "unknown_module_qualified": (
+                "customfs.remove(root / 'output')"
+            ),
+            "dynamic_nested_namespace": (
+                "getattr(os.path, 'remove')(root / 'output')"
+            ),
+        }
+        for case, expression in cases.items():
+            with self.subTest(case=case), self.assertRaises(
+                SurfaceClassificationError
+            ):
+                classify_mutations(
+                    textwrap.dedent(f"""
+                        import os
+                        def mutate(root):
+                            {expression}
+                    """),
+                    source_name=case,
+                    root_bindings={
+                        ("mutate", "root"): "registered:meta_root"
+                    },
+                )
+
     def test_all_subprocess_helpers_classify_stdout_and_stderr(self):
         source = textwrap.dedent("""
             import subprocess
@@ -382,6 +415,48 @@ class P4G0CSurfaceClassifierTest(unittest.TestCase):
             ),
             "dynamic_member": (
                 "getattr(subprocess, 'run')(command, stdout=root / 'output')"
+            ),
+        }
+        for case, expression in cases.items():
+            with self.subTest(case=case), self.assertRaises(
+                SurfaceClassificationError
+            ):
+                classify_process_output_arguments(
+                    textwrap.dedent(f"""
+                        import subprocess
+                        def launch(root):
+                            {expression}
+                    """),
+                    target_policies={},
+                    root_bindings={
+                        ("launch", "root"): "registered:meta_root"
+                    },
+                )
+
+    def test_subprocess_positional_and_list_flags_are_complete(self):
+        positional = classify_process_output_arguments(
+            textwrap.dedent("""
+                import subprocess
+                def launch(root):
+                    subprocess.Popen(
+                        command, -1, None, None,
+                        root / 'stdout', root / 'stderr')
+            """),
+            target_policies={},
+            root_bindings={("launch", "root"): "registered:meta_root"},
+        )
+        self.assertEqual({item["api"] for item in positional}, {
+            "subprocess.Popen.stdout", "subprocess.Popen.stderr",
+        })
+        cases = {
+            "recognized_flag_without_target": (
+                "subprocess.run(['tool', '--manifest'])"
+            ),
+            "unknown_final_flag": (
+                "subprocess.run(['tool', '--new-output-dir'])"
+            ),
+            "dynamic_flag": (
+                "subprocess.run(['tool', output_flag, root / 'output'])"
             ),
         }
         for case, expression in cases.items():
@@ -664,13 +739,26 @@ class P4G0CSurfaceClassifierTest(unittest.TestCase):
             "runtime_root_dir", "stdout_log_path",
         }
         surface = production_surface(REPO)
-        actual = {
-            item["classification"].split(":", 1)[1]
-            for item in surface["mutations"]
-            if ":" in item["classification"]
-            and item["classification"].split(":", 1)[1] in expected
-        }
-        self.assertEqual(actual, expected)
+        self.assertEqual(surface["contract"]["output_semantics"], expected)
+        self.assertEqual(surface["contract"]["child_environment"], {
+            "HOME", "ROS_HOME", "ROS_LOG_DIR", "TMPDIR", "XDG_RUNTIME_DIR",
+        })
+        self.assertEqual(
+            surface["contract"]["environment_mutation_semantics"],
+            {"XDG_RUNTIME_DIR"},
+        )
+        self.assertEqual(
+            surface["contract"]["runner_control_roots"], {"runs_root"}
+        )
+        unexpected = list(surface["mutations"]) + [{
+            "classification": "derived:unexpected_root",
+        }]
+        with self.assertRaises(SurfaceClassificationError):
+            validate_production_contract(
+                surface["environment_actions"],
+                unexpected,
+                surface["runner_launch_bindings"],
+            )
 
     def test_runner_launch_path_arguments_are_complete_and_classified(self):
         bindings = production_surface(REPO)["runner_launch_bindings"]

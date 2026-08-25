@@ -28,18 +28,32 @@ Classifier closure:
 - os, shutil, pathlib/Path and subprocess aliases are normalized; unknown
   namespace members, dynamic lookup, modes, flags, targets and output keywords
   reject;
+- canonical descendants reject absolute, parent, empty and multi-component
+  operands; subprocess positional streams, final/dynamic flags and unknown
+  module-qualified mutation calls also reject;
 - 32 mutation-family cases and all five subprocess helpers are covered;
-- production surface remains exactly 50 path records, five environment keys
-  and eight output semantics.
+- production surface validation requires exactly 50 path records, five child
+  environment roots, four environment actions and eight output semantics;
+  `runs_root` is the registered runner control root, not a ninth output.
+
+Independent review remediation:
+- the initial Standards review found one blocking command-provenance gap and
+  three nonblocking architecture observations; the complete reproducible
+  command block now closes the blocker without broad refactoring;
+- the initial Spec review found five classifier/test blockers plus the pending
+  final handoff: canonical-child proof, dynamic/unknown mutation coverage,
+  subprocess positional/final/dynamic flags, invoked top-level guard proof and
+  an eight-output assertion that filtered extras. Focused RED/GREEN tests and
+  exact production-contract validation close all implementation blockers.
 
 Formal commands all used run_p4_g0c_tests.py with the exact ICRA-055 root:
-- unittest discover -s test -p 'test_p4_g0c_*.py' -v: 109/109, exit 0;
+- unittest discover -s test -p 'test_p4_g0c_*.py' -v: 111/111, exit 0;
 - unittest launch-contract discovery: 11/11, exit 0;
 - unittest launch-golden discovery: 16/16, exit 0;
 - syntax: 6/6, exit 0;
 - fatal-only flake8: exit 0;
 - canonical JSON: 4/4, exit 0;
-- unittest discover -s test -p 'test_*.py': 464/464, exit 0;
+- unittest discover -s test -p 'test_*.py': 466/466, exit 0;
 - git diff --check: exit 0.
 
 No build/install/log product, compiled test, CTest, GPU preflight, ROS process,
