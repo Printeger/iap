@@ -69,8 +69,18 @@ class IcraP0P5LiveRunnerTest(unittest.TestCase):
                 json.dumps({"icra_p0_p5_qualification": manifest}) + "\n"
             )
             (bag / "metadata.yaml").write_text("metadata\n")
+            (bag / "evidence.db3").write_bytes(b"bag")
+            for name in (
+                "process_result.json", "capture_ready.json",
+                "launch_command.json", "stdout.log",
+            ):
+                (run_dir / name).write_text("evidence\n")
             process_result = {
                 "required_processes_ok": True,
+                "controlled_shutdown": True,
+                "orphan_check_passed": True,
+                "forced_orphan_cleanup": False,
+                "remaining_process_group_pids": [],
                 "required_processes": {
                     name: {"seen": True, "runtime_failure": False}
                     for name in RUNNER.REQUIRED_PROCESSES
@@ -119,6 +129,16 @@ class IcraP0P5LiveRunnerTest(unittest.TestCase):
                     self.contract, self.contract_path, "RUNTIME_FAIL",
                     "fixed-run", run_dir, process_result, "a" * 40,
                 )
+                process_result["required_processes"][
+                    next(iter(RUNNER.REQUIRED_PROCESSES))
+                ]["seen"] = False
+                with self.assertRaisesRegex(
+                    RUNNER.LiveRunnerError, "required_process_lifecycle_mismatch"
+                ):
+                    RUNNER.normalize_live_run(
+                        self.contract, self.contract_path, "RUNTIME_FAIL",
+                        "fixed-run", run_dir, process_result, "a" * 40,
+                    )
         self.assertFalse(normalized["validation_only"])
         self.assertEqual(
             [event["type"] for event in normalized["events"]],
@@ -126,6 +146,71 @@ class IcraP0P5LiveRunnerTest(unittest.TestCase):
         )
         self.assertEqual(normalized["events"][-1]["action"], "EMERGENCY_STOP")
         self.assertEqual(normalized["events"][-1]["reason"], "future_unknown_timeout")
+        self.assertTrue(any(path.endswith("evidence.db3") for path in normalized["raw_sources"]))
+        self.assertTrue(any(path.endswith("process_result.json") for path in normalized["raw_sources"]))
+
+    def test_event_normalization_rejects_duplicates_and_early_runtime(self):
+        accepted = {
+            "bag_time_s": 2.0, "phase": "final_candidate", "action": "OK",
+            "final_candidate_traj_id": 7, "final_candidate_rejected": False,
+            "parse_error": "",
+        }
+        with self.assertRaisesRegex(
+            RUNNER.LiveRunnerError, "final_accept_event_cardinality_mismatch"
+        ):
+            RUNNER._normalize_events(
+                "SAFE_NORMAL", self.contract, [accepted, dict(accepted)],
+                [{"bag_time_s": 3.0, "traj_id": 7}],
+            )
+        early = {
+            "bag_time_s": 1.0, "phase": "runtime_committed",
+            "action": "REQUEST_EMERGENCY_STOP_CANDIDATE",
+            "reason": "future_unknown", "future_unknown_duration_s": 2.0,
+            "parse_error": "",
+        }
+        with self.assertRaisesRegex(
+            RUNNER.LiveRunnerError, "future_unknown_emergency_before_threshold"
+        ):
+            RUNNER._normalize_events(
+                "RUNTIME_FAIL", self.contract, [accepted, early],
+                [{"bag_time_s": 3.0, "traj_id": 7}],
+            )
+
+    def test_live_environment_rejects_caller_overlay(self):
+        with mock.patch.dict(RUNNER.os.environ, {}, clear=True):
+            with self.assertRaisesRegex(
+                RUNNER.LiveRunnerError, "live_environment_mismatch"
+            ):
+                RUNNER.validate_live_environment()
+
+    def test_top_level_early_exit_is_runtime_failure_not_success(self):
+        launch = mock.Mock(pid=987654)
+        launch.wait.return_value = 0
+        monitor = mock.Mock()
+        monitor.finish.return_value = {
+            "required_processes_ok": True,
+            "process_failures": [],
+            "required_processes": {
+                name: {"seen": True, "runtime_failure": False}
+                for name in RUNNER.REQUIRED_PROCESSES
+            },
+        }
+        with tempfile.TemporaryDirectory(dir=REPO / "results/icra27/icra068") as tmp:
+            with mock.patch.object(
+                RUNNER.subprocess, "Popen", return_value=launch
+            ), mock.patch.object(
+                RUNNER.GATE_RUNNER, "RequiredProcessMonitor", return_value=monitor
+            ):
+                exit_code, result = RUNNER._run_launch(
+                    ["ros2", "launch"], Path(tmp) / "stdout.log"
+                )
+        self.assertEqual(exit_code, 0)
+        self.assertFalse(result["required_processes_ok"])
+        self.assertFalse(result["controlled_shutdown"])
+        self.assertTrue(any(
+            item["reason"] == "top_level_launch_exited_before_controlled_shutdown"
+            for item in result["process_failures"]
+        ))
 
     def test_run_matrix_stops_after_first_failure_and_never_retries(self):
         calls = []

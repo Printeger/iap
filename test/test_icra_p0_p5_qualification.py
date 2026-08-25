@@ -266,6 +266,30 @@ class IcraP0P5QualificationTest(unittest.TestCase):
             )
         with tempfile.TemporaryDirectory(dir=REPO) as tmp:
             root = Path(tmp)
+            for run in runs:
+                raw = root / "sources" / run["run_id"]
+                raw.mkdir(parents=True)
+                process = {
+                    "required_processes_ok": True,
+                    "controlled_shutdown": True,
+                    "orphan_check_passed": True,
+                    "forced_orphan_cleanup": False,
+                    "remaining_process_group_pids": [],
+                    "required_processes": {
+                        name: {"seen": True, "runtime_failure": False}
+                        for name in self.contract["required_processes"]
+                    },
+                }
+                (raw / "process_result.json").write_text(json.dumps(process) + "\n")
+                for name in (
+                    "capture_ready.json", "launch_command.json", "stdout.log",
+                    "metadata.yaml",
+                ):
+                    (raw / name).write_text("evidence\n")
+                (raw / "evidence.db3").write_bytes(b"bag")
+                run["raw_sources"] = [
+                    str(path.relative_to(REPO)) for path in sorted(raw.iterdir())
+                ]
             install = root / "install_manifest.json"
             install.write_text(json.dumps({
                 "git_commit": "1" * 40, "closure_ready": True,
@@ -286,6 +310,20 @@ class IcraP0P5QualificationTest(unittest.TestCase):
             result = MODULE.analyze_live_bundle(
                 self.contract, bundle, CONTRACT_PATH, REPO
             )
+            output = root / "live_result.json"
+            self.assertEqual(MODULE.main([
+                "analyze-live", "--contract", str(CONTRACT_PATH),
+                "--input", str(evidence), "--output", str(output),
+                "--repository-root", str(REPO),
+            ]), 0)
+            with self.assertRaisesRegex(
+                MODULE.ContractError, "already exists"
+            ):
+                MODULE.main([
+                    "analyze-live", "--contract", str(CONTRACT_PATH),
+                    "--input", str(evidence), "--output", str(output),
+                    "--repository-root", str(REPO),
+                ])
         self.assertEqual(result["status"], "P5_PROSPECTIVE_QUALIFICATION_PASS")
         self.assertTrue(result["qualification_claim"])
 

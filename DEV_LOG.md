@@ -8042,3 +8042,20 @@ passed 536/536 with the 17,762-entry external ROS inventory unchanged. GPU,
 ROS, live attempts and authoritative analyzer calls remain zero. The final
 source commit will be installed into the existing isolated build, followed by
 one dependency/install manifest freeze before Phase D.
+
+Pre-live two-axis review found three Standards and five Spec blockers. The
+remediation makes the launch its own process-group leader, treats every
+top-level early exit as runtime failure, signals and audits only that owned
+group, and blocks any forced cleanup or remaining PID. Normalization now
+requires every monitor row to be seen/nonfailed, binds `process_result.json`,
+capture/command/stdout/export files and every bag metadata/payload file, and
+retains raw bag timestamps/cardinalities instead of inventing an idealized
+event order. The analyzer independently rechecks those lifecycle/raw binds and
+claims an exclusive invocation marker before its sole live call. The runner
+also rejects an existing preflight root, revalidates the frozen install and
+requires exact repository-local HOME/ROS paths plus isolated prefixes before
+GPU. Updated focused suites pass 19/19 and complete hermetic discovery passes
+539/539, with the 17,762-entry external ROS inventory unchanged.
+GPU/ROS/live/analyzer counts remain zero; the earlier static install manifest
+is stale after this remediation and will be replaced once by the final
+committed install identity.

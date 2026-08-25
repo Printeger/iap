@@ -22,11 +22,6 @@ INSTALL_ROOT = TASK_ROOT / "install"
 CONTRACT_PATH = REPOSITORY / "config/icra27/icra_p0_p5_qualification_v1.json"
 INSTALL_MANIFEST_PATH = TASK_ROOT / "icra068_install_manifest.json"
 MIN_FREE_BYTES = 40 * 1024 ** 3
-LIVE_IDENTITIES = (
-    ("SAFE_NORMAL", "icra-p0-p5-live-safe-normal-001"),
-    ("FINAL_REJECT", "icra-p0-p5-live-final-reject-001"),
-    ("RUNTIME_FAIL", "icra-p0-p5-live-runtime-fail-001"),
-)
 INSTALLED_ALIASES = {
     "share/iap/launch/test_planner.launch.py": "launch/test_planner.launch.py",
     "share/iap/launch/icra_p0_p5_qualification.py": "launch/icra_p0_p5_qualification.py",
@@ -101,6 +96,7 @@ SAFETY_ANALYZER = _load(
     "icra_p0_p5_safety_analyzer",
     REPOSITORY / "scripts/dev_planner/analyze_safety_planner_run.py",
 )
+LIVE_IDENTITIES = tuple(QUALIFICATION.LIVE_RUN_IDENTITIES.items())
 
 
 REQUIRED_PROCESSES = {
@@ -275,6 +271,34 @@ def audit_and_freeze_install(
     return result
 
 
+def validate_frozen_install_manifest(path: Path, git_commit: str) -> dict:
+    """Revalidate the frozen closure without rewriting it before GPU/ROS."""
+    path = Path(path).resolve()
+    if not path.is_file() or path.is_symlink():
+        raise LiveRunnerError("install_manifest_missing_or_symlink")
+    try:
+        manifest = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        raise LiveRunnerError("install_manifest_malformed") from exc
+    if manifest.get("schema_version") != "icra068_qualification_install_manifest_v1" \
+            or manifest.get("closure_ready") is not True \
+            or manifest.get("git_commit") != git_commit:
+        raise LiveRunnerError("install_manifest_identity_mismatch")
+    if manifest.get("active_prefixes") != os.environ.get(
+        "AMENT_PREFIX_PATH", ""
+    ).split(":"):
+        raise LiveRunnerError("install_manifest_active_prefix_mismatch")
+    aliases = verify_installed_aliases(INSTALL_ROOT)
+    if manifest.get("installed_aliases") != aliases:
+        raise LiveRunnerError("install_manifest_alias_drift")
+    for relative, expected_hash in (manifest.get("file_hashes") or {}).items():
+        file_path = Path(relative) if Path(relative).is_absolute() else INSTALL_ROOT / relative
+        if not file_path.is_file() or file_path.is_symlink() \
+                or _sha256(file_path) != expected_hash:
+            raise LiveRunnerError(f"install_manifest_file_drift:{relative}")
+    return manifest
+
+
 def live_config(
     contract: dict, case_id: str, run_id: str, run_dir: Path
 ) -> dict[str, object]:
@@ -297,6 +321,49 @@ def live_config(
         "bag_output_dir": str(run_dir / "bags"),
         "iap_log_root": str(run_dir / "runtime/iap_logs"),
     }
+
+
+def expected_live_environment() -> dict[str, str]:
+    environment_root = TASK_ROOT / "live_environment"
+    return {
+        "HOME": str(environment_root / "home"),
+        "ROS_HOME": str(environment_root / "ros_home"),
+        "ROS_LOG_DIR": str(environment_root / "ros_logs"),
+        "TMPDIR": str(environment_root / "tmp"),
+        "XDG_RUNTIME_DIR": str(environment_root / "xdg_runtime"),
+        "AMENT_PREFIX_PATH": ":".join((
+            str(INSTALL_ROOT), "/root/ros2_ws/install", "/opt/ros/jazzy",
+        )),
+        "CMAKE_PREFIX_PATH": ":".join((
+            str(INSTALL_ROOT), "/root/ros2_ws/install/glim_ros",
+            "/root/ros2_ws/install/glim", "/opt/ros/jazzy",
+        )),
+        "LD_LIBRARY_PATH": ":".join((
+            str(INSTALL_ROOT / "lib"), "/root/ros2_ws/install/glim_ros/lib",
+            "/root/ros2_ws/install/glim/lib", "/opt/ros/jazzy/lib",
+            "/opt/ros/jazzy/lib/x86_64-linux-gnu",
+        )),
+    }
+
+
+def validate_live_environment() -> dict[str, str]:
+    expected = expected_live_environment()
+    mismatches = [
+        key for key, value in expected.items() if os.environ.get(key) != value
+    ]
+    if mismatches:
+        raise LiveRunnerError(
+            "live_environment_mismatch:" + ",".join(mismatches)
+        )
+    for key in ("HOME", "ROS_HOME", "ROS_LOG_DIR", "TMPDIR", "XDG_RUNTIME_DIR"):
+        path = Path(expected[key])
+        try:
+            path.relative_to(REPOSITORY)
+        except ValueError as exc:
+            raise LiveRunnerError(f"live_environment_not_repository_local:{key}") from exc
+        path.mkdir(parents=True, exist_ok=True)
+    Path(expected["XDG_RUNTIME_DIR"]).chmod(0o700)
+    return expected
 
 
 def _one_file(root: Path, pattern: str, label: str) -> Path:
@@ -331,22 +398,33 @@ def _normalize_events(
         if str(row.get("action", "")) == "OK"
         and row.get("final_candidate_rejected") is not True
     ]
+    emergency = [
+        row for row in p5_rows
+        if row.get("phase") == "runtime_committed"
+        and str(row.get("action", "")) == "REQUEST_EMERGENCY_STOP_CANDIDATE"
+    ]
+
+    def sequence(row: dict) -> int:
+        stamp = float(row.get("bag_time_s", 0.0))
+        if stamp <= 0.0:
+            raise LiveRunnerError("event_bag_time_missing")
+        return int(round(stamp * 1_000_000_000.0))
+
     if case_id == "FINAL_REJECT":
-        if not rejected:
-            raise LiveRunnerError("registered_final_rejection_missing")
+        if len(rejected) != 1 or accepted or emergency:
+            raise LiveRunnerError("final_reject_event_cardinality_mismatch")
         row = rejected[0]
         candidate = _candidate_id(row)
         raw_id = row.get("final_candidate_traj_id")
         if any(item.get("traj_id") == raw_id for item in bspline_rows):
             raise LiveRunnerError("rejected_candidate_was_published")
         return [{
-            "sequence": 1, "type": "FINAL_REJECT",
+            "sequence": sequence(row), "raw_bag_time_s": row["bag_time_s"],
+            "type": "FINAL_REJECT",
             "candidate_id": candidate, "reason": "p5_7_rejected_trajectory",
         }]
-    if rejected and case_id == "SAFE_NORMAL":
-        raise LiveRunnerError("safe_case_observed_final_rejection")
-    if not accepted:
-        raise LiveRunnerError("final_accept_missing")
+    if rejected or len(accepted) != 1:
+        raise LiveRunnerError("final_accept_event_cardinality_mismatch")
     accept = accepted[0]
     raw_id = accept.get("final_candidate_traj_id")
     candidate = _candidate_id(accept)
@@ -355,31 +433,37 @@ def _normalize_events(
         if row.get("traj_id") == raw_id
         and float(row.get("bag_time_s", 0.0)) >= float(accept.get("bag_time_s", 0.0))
     ]
-    if not published:
-        raise LiveRunnerError("matching_normal_publication_missing")
+    if len(published) != 1:
+        raise LiveRunnerError("matching_normal_publication_cardinality_mismatch")
+    publish = published[0]
+    if sequence(accept) >= sequence(publish):
+        raise LiveRunnerError("normal_publication_not_after_accept")
     events = [
-        {"sequence": 1, "type": "FINAL_ACCEPT", "candidate_id": candidate},
-        {"sequence": 2, "type": "NORMAL_PUBLISH", "candidate_id": candidate},
-    ]
-    runtime = [
-        row for row in p5_rows
-        if row.get("phase") == "runtime_committed"
-        and str(row.get("action", "")) == "REQUEST_EMERGENCY_STOP_CANDIDATE"
-        and "future_unknown" in str(row.get("reason", ""))
+        {"sequence": sequence(accept), "raw_bag_time_s": accept["bag_time_s"],
+         "type": "FINAL_ACCEPT", "candidate_id": candidate},
+        {"sequence": sequence(publish), "raw_bag_time_s": publish["bag_time_s"],
+         "type": "NORMAL_PUBLISH", "candidate_id": candidate},
     ]
     if case_id == "RUNTIME_FAIL":
-        if not runtime:
+        if not emergency or any(
+            "future_unknown" not in str(row.get("reason", ""))
+            for row in emergency
+        ):
             raise LiveRunnerError("future_unknown_emergency_missing")
         threshold = float(contract["p5_thresholds"]["p5.future_unknown_to_emergency_s"])
-        duration = float(runtime[0].get("future_unknown_duration_s", threshold))
-        if duration < threshold:
+        first_runtime = emergency[0]
+        duration = float(first_runtime.get("future_unknown_duration_s", threshold))
+        if duration < threshold or sequence(first_runtime) <= sequence(publish):
             raise LiveRunnerError("future_unknown_emergency_before_threshold")
         events.append({
-            "sequence": 3, "type": "RUNTIME_ACTION",
+            "sequence": sequence(first_runtime),
+            "raw_bag_time_s": first_runtime["bag_time_s"],
+            "type": "RUNTIME_ACTION",
             "candidate_id": candidate, "action": "EMERGENCY_STOP",
             "reason": "future_unknown_timeout",
+            "raw_matching_status_count": len(emergency),
         })
-    elif runtime:
+    elif emergency:
         raise LiveRunnerError("false_runtime_emergency")
     return events
 
@@ -414,6 +498,17 @@ def normalize_live_run(
     observed = process_result.get("required_processes", {})
     if set(observed) != set(REQUIRED_PROCESSES):
         raise LiveRunnerError("required_process_identity_mismatch")
+    if process_result.get("controlled_shutdown") is not True \
+            or process_result.get("orphan_check_passed") is not True \
+            or process_result.get("forced_orphan_cleanup") is not False \
+            or process_result.get("remaining_process_group_pids") != [] \
+            or any(
+        not isinstance(value, dict)
+        or value.get("seen") is not True
+        or value.get("runtime_failure") is not False
+        for value in observed.values()
+    ):
+        raise LiveRunnerError("required_process_lifecycle_mismatch")
     metadata = SAFETY_ANALYZER.read_bag_metadata(bag_dir)
     topic_counts = {
         topic: int((metadata.get("topic_counts", {}) or {}).get(topic, 0) or 0)
@@ -453,6 +548,32 @@ def normalize_live_run(
         }
         for index, row in enumerate(stable_rows, 1)
     ]
+    raw_paths = []
+    for path in sorted(run_dir.iterdir()):
+        if path.is_file() and path.name != "normalized_run.json":
+            raw_paths.append(path)
+        elif path.is_symlink():
+            raise LiveRunnerError(f"raw_topology_symlink:{path.name}")
+    for root_name in ("bags", "exports"):
+        root = run_dir / root_name
+        for path in sorted(root.rglob("*")):
+            if path.is_symlink():
+                raise LiveRunnerError(
+                    f"raw_topology_symlink:{path.relative_to(run_dir)}"
+                )
+            if path.is_file():
+                raw_paths.append(path)
+    relative_sources = [
+        str(path.relative_to(REPOSITORY)) for path in dict.fromkeys(raw_paths)
+    ]
+    required_source_names = {
+        "process_result.json", "capture_ready.json", "launch_command.json",
+        "stdout.log", "metadata.yaml",
+    }
+    if not required_source_names.issubset({Path(path).name for path in relative_sources}):
+        raise LiveRunnerError("required_raw_source_missing")
+    if not any(Path(path).suffix in {".db3", ".mcap"} for path in relative_sources):
+        raise LiveRunnerError("bag_payload_missing")
     return {
         "validation_only": False,
         "case_id": case_id,
@@ -467,10 +588,7 @@ def normalize_live_run(
         "topic_counts": topic_counts,
         "p0_samples": p0_samples,
         "events": _normalize_events(case_id, contract, p5_rows, bspline_rows),
-        "raw_sources": {
-            "launch_manifest": str(manifest_path.relative_to(REPOSITORY)),
-            "bag_metadata": str(bag_metadata_path.relative_to(REPOSITORY)),
-        },
+        "raw_sources": relative_sources,
     }
 
 
@@ -495,24 +613,87 @@ def run_ordered_attempts(execute) -> dict:
 
 
 def _run_launch(command: list[str], stdout_path: Path) -> tuple[int, dict]:
+    def signal_group(pgid: int, signum: int) -> None:
+        try:
+            os.killpg(pgid, signum)
+        except ProcessLookupError:
+            pass
+
+    def group_members(pgid: int) -> list[int]:
+        import psutil
+
+        members = []
+        for process in psutil.process_iter(["pid"]):
+            try:
+                if os.getpgid(process.pid) == pgid:
+                    members.append(int(process.pid))
+            except (OSError, psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+        return members
+
     with stdout_path.open("w") as output:
-        launch = subprocess.Popen(command, stdout=output, stderr=subprocess.STDOUT)
+        launch = subprocess.Popen(
+            command, stdout=output, stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+        pgid = launch.pid
         monitor = GATE_RUNNER.RequiredProcessMonitor(
             launch.pid, REQUIRED_PROCESSES, 90.0
         )
         monitor.start()
         monitor.launch_running = True
+        early_exit = False
+        forced_orphan_cleanup = False
         try:
             exit_code = launch.wait(timeout=89.5)
         except subprocess.TimeoutExpired:
             monitor.mark_controlled_shutdown()
-            launch.send_signal(signal.SIGINT)
+            signal_group(pgid, signal.SIGINT)
             try:
                 exit_code = launch.wait(timeout=10.0)
             except subprocess.TimeoutExpired:
-                launch.kill()
+                signal_group(pgid, signal.SIGKILL)
                 exit_code = launch.wait(timeout=10.0)
-        return exit_code, monitor.finish()
+        else:
+            early_exit = True
+            monitor._record_failure(
+                "ros2_launch", "top_level_launch_exited_before_controlled_shutdown",
+                exit_code, "runtime",
+            )
+            monitor.mark_controlled_shutdown()
+            signal_group(pgid, signal.SIGINT)
+        deadline = time.monotonic() + 10.0
+        remaining = group_members(pgid)
+        while remaining and time.monotonic() < deadline:
+            time.sleep(0.05)
+            remaining = group_members(pgid)
+        if remaining:
+            forced_orphan_cleanup = True
+            signal_group(pgid, signal.SIGKILL)
+            deadline = time.monotonic() + 5.0
+            while group_members(pgid) and time.monotonic() < deadline:
+                time.sleep(0.05)
+        final_members = group_members(pgid)
+        result = monitor.finish()
+        result.update({
+            "controlled_shutdown": not early_exit,
+            "process_group_id": pgid,
+            "orphan_check_passed": not final_members and not forced_orphan_cleanup,
+            "forced_orphan_cleanup": forced_orphan_cleanup,
+            "remaining_process_group_pids": final_members,
+        })
+        if early_exit or forced_orphan_cleanup or final_members:
+            result["required_processes_ok"] = False
+            result["process_failures"].append({
+                "process_name": "process_group",
+                "phase": "runtime" if early_exit else "post_shutdown",
+                "reason": (
+                    "top_level_launch_exited_before_controlled_shutdown"
+                    if early_exit else "task_process_orphan_after_shutdown"
+                ),
+                "exit_code_signal": exit_code,
+            })
+        return exit_code, result
 
 
 def _execute_live_attempt(
@@ -583,23 +764,36 @@ def main() -> int:
         print("ICRA068_INSTALL_CLOSURE_PASS")
         return 0
     live_root = args.live_root.resolve()
+    install_manifest_path = args.install_manifest.resolve()
+    if live_root != (TASK_ROOT / "live").resolve():
+        raise LiveRunnerError("live_root_identity_mismatch")
+    if install_manifest_path != INSTALL_MANIFEST_PATH.resolve():
+        raise LiveRunnerError("install_manifest_path_mismatch")
     if live_root.exists() or live_root.is_symlink():
         raise LiveRunnerError("live_root_already_exists")
-    install_manifest = json.loads(args.install_manifest.read_text())
+    preflight_root = TASK_ROOT / "preflight"
+    if preflight_root.exists() or preflight_root.is_symlink():
+        raise LiveRunnerError("gpu_preflight_evidence_already_exists")
     git_commit = subprocess.check_output(
         ["git", "rev-parse", "HEAD"], cwd=REPOSITORY, text=True
     ).strip()
-    if install_manifest.get("git_commit") != git_commit:
-        raise LiveRunnerError("install_manifest_commit_mismatch")
+    live_environment = validate_live_environment()
+    validate_frozen_install_manifest(
+        install_manifest_path, git_commit
+    )
+    contract = QUALIFICATION.load_contract(CONTRACT_PATH)
+    if tuple(contract["required_processes"]) != tuple(REQUIRED_PROCESSES):
+        raise LiveRunnerError("required_process_marker_contract_mismatch")
+    if tuple(contract["cases"]) != tuple(case_id for case_id, _ in LIVE_IDENTITIES):
+        raise LiveRunnerError("live_identity_contract_mismatch")
     free_bytes = shutil.disk_usage(REPOSITORY).free
     if free_bytes < MIN_FREE_BYTES:
         raise LiveRunnerError(f"disk_free_below_40_gib:{free_bytes}")
     live_root.mkdir(parents=True)
-    preflight = GATE_RUNNER.run_gpu_preflight(TASK_ROOT / "preflight")
+    preflight = GATE_RUNNER.run_gpu_preflight(preflight_root)
     if preflight.get("gpu_ready") is not True:
         print("GPU_NOT_READY")
         return 3
-    contract = QUALIFICATION.load_contract(CONTRACT_PATH)
     normalized: list[dict] = []
 
     def execute(case_id: str, run_id: str) -> dict:
@@ -616,13 +810,16 @@ def main() -> int:
         "gpu_preflight_invocations": 1,
         "launch_invocations": len(state["attempted"]),
         "registered": [run_id for _, run_id in LIVE_IDENTITIES],
+        "free_bytes_before_gpu": free_bytes,
+        "live_environment": live_environment,
+        "install_manifest_sha256": _sha256(install_manifest_path),
     })
     _write_json(live_root / "runner_state.json", state)
     if state["state"] != "COMPLETE":
         return 4
     QUALIFICATION.write_live_bundle(
         contract, CONTRACT_PATH, normalized, git_commit,
-        args.install_manifest.resolve(), live_root / "icra_p0_p5_evidence_v1.json",
+        install_manifest_path, live_root / "icra_p0_p5_evidence_v1.json",
     )
     return 0
 

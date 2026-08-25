@@ -2634,9 +2634,17 @@ Requirements: `IAP-RQ-320`, `IAP-RQ-421`, `IAP-RQ-422`, `IAP-RQ-423`.
 - Added authoritative live-bundle support. Synthetic `validation_only=true`
   input is a typed technical blocker; PASS requires exact isolated-install,
   runner-state, raw-source, process/topic, profile and ordered behavior binds.
-- Verification: live runner 5/5, qualification analyzer/contract 11/11, and
-  full repository-local hermetic discovery 536/536, with no external ROS-log
-  delta.
+- Verification after review remediation: focused live runner plus
+  qualification analyzer/contract 19/19 and full repository-local hermetic
+  discovery 539/539, with the 17,762-entry external ROS-log inventory
+  unchanged.
+- Pre-live two-axis review blockers are closed: early top-level launch exit is
+  a runtime failure; the owned process group is shutdown/audited without
+  touching unrelated processes; every per-process lifecycle row and complete
+  bag payload inventory is hashed; raw event times/cardinalities cannot be
+  rewritten into an ideal sequence; exact repository-local child environment
+  and prefixes are revalidated before GPU; and preflight/analyzer outputs are
+  exclusive one-shot claims.
 
 Reproduce the non-live checks only with:
 
@@ -2645,6 +2653,51 @@ source /home/dev/ws_iap/install/setup.bash
 python3 scripts/dev_planner/run_p4_g0c_tests.py \
   --task-root "$PWD/results/icra27/icra063/icra068_phase_c_full" \
   unittest discover -s test -p 'test_*.py'
+```
+
+After the final implementation commit, reproduce the isolated install freeze,
+the single guarded live runner, and the sole analyzer with these exact commands
+(the last two are live/authoritative and must not be repeated):
+
+```bash
+cmake --install "$PWD/results/icra27/icra068/build/iap"
+
+env -i \
+  HOME="$PWD/results/icra27/icra068/live_environment/home" \
+  ROS_HOME="$PWD/results/icra27/icra068/live_environment/ros_home" \
+  ROS_LOG_DIR="$PWD/results/icra27/icra068/live_environment/ros_logs" \
+  TMPDIR="$PWD/results/icra27/icra068/live_environment/tmp" \
+  XDG_RUNTIME_DIR="$PWD/results/icra27/icra068/live_environment/xdg_runtime" \
+  PATH="/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+  LANG=C.UTF-8 LC_ALL=C.UTF-8 \
+  GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory \
+  GIT_CONFIG_VALUE_0=/home/dev/ws_iap/src/iap \
+  AMENT_PREFIX_PATH="$PWD/results/icra27/icra068/install:/root/ros2_ws/install:/opt/ros/jazzy" \
+  CMAKE_PREFIX_PATH="$PWD/results/icra27/icra068/install:/root/ros2_ws/install/glim_ros:/root/ros2_ws/install/glim:/opt/ros/jazzy" \
+  LD_LIBRARY_PATH="$PWD/results/icra27/icra068/install/lib:/root/ros2_ws/install/glim_ros/lib:/root/ros2_ws/install/glim/lib:/opt/ros/jazzy/lib:/opt/ros/jazzy/lib/x86_64-linux-gnu" \
+  python3 scripts/dev_planner/run_icra_p0_p5_qualification.py \
+    --freeze-install-only
+
+# Same exact env -i assignments and prefix values as above:
+env -i HOME="$PWD/results/icra27/icra068/live_environment/home" \
+  ROS_HOME="$PWD/results/icra27/icra068/live_environment/ros_home" \
+  ROS_LOG_DIR="$PWD/results/icra27/icra068/live_environment/ros_logs" \
+  TMPDIR="$PWD/results/icra27/icra068/live_environment/tmp" \
+  XDG_RUNTIME_DIR="$PWD/results/icra27/icra068/live_environment/xdg_runtime" \
+  PATH="/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+  LANG=C.UTF-8 LC_ALL=C.UTF-8 \
+  GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory \
+  GIT_CONFIG_VALUE_0=/home/dev/ws_iap/src/iap \
+  AMENT_PREFIX_PATH="$PWD/results/icra27/icra068/install:/root/ros2_ws/install:/opt/ros/jazzy" \
+  CMAKE_PREFIX_PATH="$PWD/results/icra27/icra068/install:/root/ros2_ws/install/glim_ros:/root/ros2_ws/install/glim:/opt/ros/jazzy" \
+  LD_LIBRARY_PATH="$PWD/results/icra27/icra068/install/lib:/root/ros2_ws/install/glim_ros/lib:/root/ros2_ws/install/glim/lib:/opt/ros/jazzy/lib:/opt/ros/jazzy/lib/x86_64-linux-gnu" \
+  python3 scripts/dev_planner/run_icra_p0_p5_qualification.py
+
+python3 launch/icra_p0_p5_qualification.py analyze-live \
+  --contract config/icra27/icra_p0_p5_qualification_v1.json \
+  --input results/icra27/icra068/live/icra_p0_p5_evidence_v1.json \
+  --output results/icra27/icra068/compact/icra_p0_p5_analysis_v1.json \
+  --repository-root /home/dev/ws_iap/src/iap
 ```
 
 ## 2026-08-25 (ICRA-068 historical P4 test-fixture decoupling)

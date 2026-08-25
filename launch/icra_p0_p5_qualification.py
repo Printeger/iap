@@ -5,7 +5,9 @@ import argparse
 import hashlib
 import json
 import math
+import os
 import re
+import time
 from pathlib import Path
 
 
@@ -375,7 +377,7 @@ def analyze_bundle(contract, bundle, contract_path, repository_root=None):
                 else:
                     try:
                         raw_payload = json.loads(path.read_text())
-                    except (OSError, json.JSONDecodeError):
+                    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
                         raw_payload = None
                     if raw_payload == run_by_id.get(run_id):
                         raw_run_bound = True
@@ -565,7 +567,10 @@ def write_live_bundle(
         artifacts = {
             str(raw_path.relative_to(repository_root)): _sha256(raw_path),
         }
-        for relative in (run.get("raw_sources") or {}).values():
+        sources = run.get("raw_sources")
+        if not isinstance(sources, list) or len(sources) != len(set(sources)):
+            raise ContractError("live raw source inventory is malformed")
+        for relative in sources:
             path = repository_root / relative
             if not path.is_file() or path.is_symlink():
                 raise ContractError(f"live raw source unavailable: {relative}")
@@ -622,6 +627,52 @@ def analyze_live_bundle(
     manifest = bundle.get("manifest") if isinstance(bundle.get("manifest"), dict) else {}
     if manifest.get("run_identities") != LIVE_RUN_IDENTITIES:
         technical.append("live fixed identity binding mismatch")
+    raw_hashes = manifest.get("raw_artifact_hashes") \
+        if isinstance(manifest.get("raw_artifact_hashes"), dict) else {}
+    for run in runs:
+        if not isinstance(run, dict):
+            continue
+        run_id = run.get("run_id")
+        sources = run.get("raw_sources")
+        artifacts = raw_hashes.get(run_id, {}) if isinstance(raw_hashes, dict) else {}
+        if not isinstance(sources, list) or len(sources) != len(set(sources)) \
+                or not set(sources).issubset(set(artifacts)):
+            technical.append(f"run[{run_id}]: raw source inventory mismatch")
+            continue
+        names = {Path(relative).name for relative in sources}
+        if not {
+            "process_result.json", "capture_ready.json", "launch_command.json",
+            "stdout.log", "metadata.yaml",
+        }.issubset(names) or not any(
+            Path(relative).suffix in {".db3", ".mcap"} for relative in sources
+        ):
+            technical.append(f"run[{run_id}]: complete live raw sources missing")
+        process_paths = [
+            repository_root / relative for relative in sources
+            if Path(relative).name == "process_result.json"
+        ]
+        if len(process_paths) != 1:
+            technical.append(f"run[{run_id}]: process result identity mismatch")
+            continue
+        try:
+            process = json.loads(process_paths[0].read_text())
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            process = {}
+        process_rows = process.get("required_processes", {})
+        if not (
+            process.get("required_processes_ok") is True
+            and process.get("controlled_shutdown") is True
+            and process.get("orphan_check_passed") is True
+            and process.get("forced_orphan_cleanup") is False
+            and process.get("remaining_process_group_pids") == []
+            and set(process_rows) == set(contract["required_processes"])
+            and all(
+                isinstance(value, dict) and value.get("seen") is True
+                and value.get("runtime_failure") is False
+                for value in process_rows.values()
+            )
+        ):
+            technical.append(f"run[{run_id}]: process lifecycle evidence mismatch")
     for key in ("install_manifest_path", "runner_state_path"):
         relative = manifest.get(key)
         path = repository_root / relative if isinstance(relative, str) else repository_root
@@ -701,6 +752,31 @@ def _within(path, root):
         return False
 
 
+def _claim_live_analyzer_once(output_path, input_path, contract_path):
+    output_path = Path(output_path)
+    marker = output_path.with_name(output_path.name + ".invocation.json")
+    if output_path.exists() or output_path.is_symlink() \
+            or marker.exists() or marker.is_symlink():
+        raise ContractError("live analyzer invocation/output already exists")
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps({
+        "schema_version": "icra_p0_p5_live_analyzer_invocation_v1",
+        "claimed_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "input_path": str(Path(input_path).resolve()),
+        "input_sha256": _sha256(input_path),
+        "contract_path": str(Path(contract_path).resolve()),
+        "contract_sha256": _sha256(contract_path),
+    }, indent=2, sort_keys=True) + "\n"
+    descriptor = os.open(
+        marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644
+    )
+    try:
+        os.write(descriptor, payload.encode("utf-8"))
+    finally:
+        os.close(descriptor)
+    return marker
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -746,6 +822,8 @@ def main(argv=None):
             indent=2, sort_keys=True, allow_nan=False,
         ) + "\n")
         return 0
+    if args.command == "analyze-live":
+        _claim_live_analyzer_once(args.output, args.input, args.contract)
     try:
         bundle = json.loads(Path(args.input).read_text(), parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value)))
     except (OSError, json.JSONDecodeError, ValueError) as exc:
