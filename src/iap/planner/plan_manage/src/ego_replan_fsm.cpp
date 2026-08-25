@@ -32,6 +32,7 @@ namespace ego_planner
     node_->declare_parameter("fsm/emergency_time", 1.0);
     node_->declare_parameter("fsm/realworld_experiment", false);
     node_->declare_parameter("fsm/fail_safe", true);
+    node_->declare_parameter("p4.require_risk_grid_ready_before_planning", false);
 
     node_->get_parameter("fsm/flight_type", target_type_);
     node_->get_parameter("fsm/thresh_replan_time", replan_thresh_);
@@ -41,6 +42,8 @@ namespace ego_planner
     node_->get_parameter("fsm/emergency_time", emergency_time_);
     node_->get_parameter("fsm/realworld_experiment", flag_realworld_experiment_);
     node_->get_parameter("fsm/fail_safe", enable_fail_safe_);
+    node_->get_parameter("p4.require_risk_grid_ready_before_planning",
+                         p4_require_risk_grid_ready_before_planning_);
 
     have_trigger_ = !flag_realworld_experiment_;
 
@@ -582,11 +585,13 @@ namespace ego_planner
           }
           else
           {
-            if (!p5_waiting_for_p0_ready_)
+            if (!p4_waiting_for_risk_grid_ready_ &&
+                !p5_waiting_for_p0_ready_)
             {
               RCLCPP_ERROR(node_->get_logger(), "Failed to generate the first trajectory!!!");
             }
-            changeFSMExecState(SEQUENTIAL_START, "FSM");
+            if (!p4_waiting_for_risk_grid_ready_)
+              changeFSMExecState(SEQUENTIAL_START, "FSM");
           }
         }
         else
@@ -610,7 +615,11 @@ namespace ego_planner
       }
       else
       {
-        if (p5_final_gate_emergency_candidate_)
+        if (p4_waiting_for_risk_grid_ready_)
+        {
+          break;
+        }
+        else if (p5_final_gate_emergency_candidate_)
         {
           p5_final_gate_emergency_candidate_ = false;
           flag_escape_emergency_ = true;
@@ -634,7 +643,11 @@ namespace ego_planner
       }
       else
       {
-        if (p5_final_gate_emergency_candidate_)
+        if (p4_waiting_for_risk_grid_ready_)
+        {
+          break;
+        }
+        else if (p5_final_gate_emergency_candidate_)
         {
           p5_final_gate_emergency_candidate_ = false;
           flag_escape_emergency_ = true;
@@ -765,6 +778,63 @@ namespace ego_planner
     return true;
   }
 
+  bool EGOReplanFSM::shouldDeferP4PlanningForRiskGridReady()
+  {
+    if (!p4_require_risk_grid_ready_before_planning_)
+    {
+      p4_waiting_for_risk_grid_ready_ = false;
+      p4_admitted_risk_grid_snapshot_.reset();
+      return false;
+    }
+
+    P4RiskGridPlanningAdmission::Inputs inputs;
+    inputs.enabled = true;
+    const auto snapshot = planner_manager_
+                              ? planner_manager_->acquireRiskGridSnapshot()
+                              : nullptr;
+    inputs.snapshot_owned = static_cast<bool>(snapshot);
+    if (snapshot)
+    {
+      const auto health = snapshot->health();
+      inputs.health_ready = health.ready;
+      inputs.health_stale = health.stale;
+      inputs.generation_id = snapshot->generation_id();
+      inputs.stamp_s = snapshot->stamp_s();
+      inputs.frame_id = snapshot->params().frame_id;
+    }
+
+    const auto decision = p4_risk_grid_planning_admission_.admit(inputs);
+    if (!decision.allow_planning)
+    {
+      p4_waiting_for_risk_grid_ready_ = true;
+      p4_admitted_risk_grid_snapshot_.reset();
+      RCLCPP_WARN_THROTTLE(
+          node_->get_logger(), *node_->get_clock(), 1000,
+          "Deferring P4 planning until risk grid is ready: reason=%s snapshot_owned=%d ready=%d stale=%d generation_id=%lu stamp_s=%.9f frame=%s defer_count=%lu",
+          decision.reason.c_str(), static_cast<int>(inputs.snapshot_owned),
+          static_cast<int>(inputs.health_ready),
+          static_cast<int>(inputs.health_stale),
+          static_cast<unsigned long>(inputs.generation_id), inputs.stamp_s,
+          inputs.frame_id.c_str(),
+          static_cast<unsigned long>(p4_risk_grid_planning_admission_.deferCount()));
+      return true;
+    }
+    p4_waiting_for_risk_grid_ready_ = false;
+    p4_admitted_risk_grid_snapshot_ = snapshot;
+    if (decision.released_now)
+    {
+      RCLCPP_INFO(
+          node_->get_logger(),
+          "P4 risk-grid planning admission released: release_stamp_s=%.9f release_generation_id=%lu defer_count=%lu",
+          p4_risk_grid_planning_admission_.releaseStampS(),
+          static_cast<unsigned long>(
+              p4_risk_grid_planning_admission_.releaseGenerationId()),
+          static_cast<unsigned long>(
+              p4_risk_grid_planning_admission_.deferCountAtRelease()));
+    }
+    return false;
+  }
+
   int EGOReplanFSM::globalTrajTrialLimitForP5FinalGate() const
   {
     if (planner_manager_ && planner_manager_->p5_integrity_gate_ &&
@@ -777,6 +847,9 @@ namespace ego_planner
 
   bool EGOReplanFSM::planFromGlobalTraj(const int trial_times /*=1*/) // zx-todo
   {
+    if (shouldDeferP4PlanningForRiskGridReady())
+      return false;
+
     if (shouldDeferP5FinalGateForP0Ready())
     {
       p5_final_gate_emergency_candidate_ = false;
@@ -809,6 +882,8 @@ namespace ego_planner
 
   bool EGOReplanFSM::planFromCurrentTraj(const int trial_times /*=1*/)
   {
+    if (shouldDeferP4PlanningForRiskGridReady())
+      return false;
 
     LocalTrajData *info = &planner_manager_->local_data_;
     // ros::Time time_now = ros::Time::now();
@@ -982,10 +1057,14 @@ namespace ego_planner
     const bool p5_owns_admission = planner_manager_->p5_integrity_gate_ &&
         (planner_manager_->p5_integrity_gate_->runtimeEnabled() ||
          planner_manager_->p5_integrity_gate_->finalGateEnabled());
-    std::shared_ptr<const iap::RiskGridSnapshot> admitted_snapshot;
+    std::shared_ptr<const iap::RiskGridSnapshot> admitted_snapshot =
+        p4_require_risk_grid_ready_before_planning_
+            ? p4_admitted_risk_grid_snapshot_
+            : nullptr;
     bool acquire_p1_context = true;
     uint64_t p1_planning_attempt_id = 0;
-    if (planner_manager_->p1AdmissionEnabled() && !p5_owns_admission)
+    if (!p4_require_risk_grid_ready_before_planning_ &&
+        planner_manager_->p1AdmissionEnabled() && !p5_owns_admission)
     {
       admitted_snapshot = planner_manager_->acquireRiskGridSnapshot();
       const auto health = admitted_snapshot ? admitted_snapshot->health()
@@ -1017,7 +1096,10 @@ namespace ego_planner
       }
     }
 
-    if (planner_manager_->p1AdmissionEnabled() && !p5_owns_admission)
+    if (p4_require_risk_grid_ready_before_planning_)
+      planner_manager_->beginPlanningRiskContextWithSnapshot(
+          plannerNow().seconds(), admitted_snapshot);
+    else if (planner_manager_->p1AdmissionEnabled() && !p5_owns_admission)
       planner_manager_->beginPlanningRiskContextWithSnapshot(
           plannerNow().seconds(),
           acquire_p1_context ? admitted_snapshot : nullptr,

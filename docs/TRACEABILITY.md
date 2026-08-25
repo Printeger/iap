@@ -1244,3 +1244,13 @@ They do not convert historical `NO-GO-P2`, failed P0 Gate-0B evidence, the stati
 | IAP-RQ-320, IAP-RQ-322 | Prove the exact accepted P0 profile reaches runtime | Readiness manifests carry exact typed `0.01` and `legacy_iap_rq320_baseline_v1`; P0 reaches `ready=1`, generation 19 and finite stamps | **P0 PRODUCER READY AT BOUNDARY** |
 | IAP-RQ-423 | Require a P4 request to receive a positive RiskGrid snapshot before any r4 identity | Nonregistered 20-second readiness produces 15 P4 rows, all generation zero / `snapshot_unavailable`; positive snapshot rows = 0 | **BLOCKED_R4_READINESS_NO_P4_POSITIVE_SNAPSHOT** |
 | IAP-RQ-423 | Preserve one-shot calibration identities after readiness failure | Phase-C dependency/full runner/analyzer invocations = 0; r4 attempts/completions/retries = 0/0/0; no threshold action or G0C claim | **FAIL-CLOSED; SUPERVISOR REVIEW** |
+
+## 2026-08-25 ICRA-060 deterministic RiskGrid admission and readiness
+
+| Req ID | Requirement/evidence seam | Implementation and retained evidence | Status |
+|---|---|---|---|
+| IAP-RQ-320, IAP-RQ-322 | Preserve the qualified P0 covariance-growth contract while gating P4 planning | v4/r4 alone enables the new barrier; exact sigma `0.01`, profile `legacy_iap_rq320_baseline_v1`, producer behavior and v1-v3 bytes remain unchanged | **PRESERVED** |
+| IAP-RQ-423 | Admit planning only from one valid typed RiskGrid snapshot | default-false admission requires ownership, ready/non-stale health, positive generation, finite-positive stamp and nonempty frame; waiting is throttled and release stamp/generation/defer count are recorded once | **IMPLEMENTED; C++ 3/3 PASS** |
+| IAP-RQ-423 | Prove repository-local CUDA/readiness closure before registered r4 work | fresh final attempt 04 builds 17/17 sequential merged non-symlink Release/CUDA packages; static closure, GPU preflight, required-process monitoring and hermetic 477/477 Python tests pass | **DEVELOPMENTAL CLOSURE PASS** |
+| IAP-RQ-423 | Require at least one positive post-release P4 row before formal dependency/live | final disjoint readiness releases at generation 1, binds 9,600 positive available planning contexts and emits zero pre-release rows, but frozen collision scanning returns `OPEN_ENDED_COLLISION` before P4 guide collection and emits zero post-release rows | **BLOCKED_P4_OPEN_ENDED_COLLISION_BEFORE_GUIDE_REQUEST** |
+| IAP-RQ-423 | Preserve the one-shot boundary and forbid unsupported remediation | formal dependency/full runner/analyzer = 0/0/0; registered r4 attempts/completions/retries = 0/0/0; no forbidden `bspline_opt`, scenario, science or threshold change was made | **FAIL-CLOSED; SUPERVISOR REVIEW** |

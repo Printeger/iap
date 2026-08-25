@@ -2295,3 +2295,25 @@ python3 scripts/dev_planner/run_p4_g0c_tests.py \
   config/icra27/p4_g0c_replacement_lineage_v3.json
 git diff --check
 ```
+
+## 2026-08-25 (ICRA-060 deterministic RiskGrid planning admission)
+
+- Added default-false `p4.require_risk_grid_ready_before_planning`, enabled
+  only by the v4/r4 preset and recorded in requested/effective manifests.
+- Added a fail-closed admission value seam and FSM integration requiring one
+  owned, ready, non-stale, positive-generation, finite-positive-stamp,
+  nonempty-frame RiskGrid snapshot before planning. Waiting is throttled and
+  does not advance the FSM failure state; release identity is recorded once.
+- Added focused C++ and launch-contract tests. Final hermetic discovery passes
+  477/477; admission C++ passes 3/3; syntax, fatal-only flake8, canonical JSON,
+  static closure and diff checks pass.
+- Rebound only v4 mechanical launch/dependency/protocol/registry hashes and
+  restored ICRA-059 Phase-A compact evidence to commit `7ec1f94`; v1-v3 and
+  all P0/P4 science and registered r4 identities remain unchanged.
+- Final GPU-backed nonregistered readiness releases the barrier at generation
+  1 and binds all 9,600 later planning contexts to a positive available
+  snapshot, but produces no post-release P4 row: the frozen scanner returns
+  `OPEN_ENDED_COLLISION` before its guide-request seam. The task stops
+  fail-closed as `BLOCKED_P4_OPEN_ENDED_COLLISION_BEFORE_GUIDE_REQUEST` without
+  formal dependency, full runner, registered identity, analyzer or threshold
+  action.

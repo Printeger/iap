@@ -3,7 +3,10 @@
 
 #include <Eigen/Eigen>
 #include <algorithm>
+#include <cmath>
+#include <cstdint>
 #include <iostream>
+#include <string>
 #include "nav_msgs/msg/path.hpp"
 #include "nav_msgs/msg/odometry.hpp"
 #include "sensor_msgs/msg/imu.hpp"
@@ -26,6 +29,77 @@ using std::vector;
 
 namespace ego_planner
 {
+  class P4RiskGridPlanningAdmission
+  {
+  public:
+    struct Inputs
+    {
+      bool enabled = false;
+      bool snapshot_owned = false;
+      bool health_ready = false;
+      bool health_stale = true;
+      uint64_t generation_id = 0;
+      double stamp_s = 0.0;
+      std::string frame_id;
+    };
+
+    struct Decision
+    {
+      bool allow_planning = true;
+      bool released_now = false;
+      uint64_t generation_id = 0;
+      std::string reason = "barrier_disabled";
+    };
+
+    Decision admit(const Inputs &inputs)
+    {
+      if (!inputs.enabled)
+        return {};
+
+      std::string reason;
+      if (!inputs.snapshot_owned)
+        reason = "snapshot_unavailable";
+      else if (!inputs.health_ready)
+        reason = "health_not_ready";
+      else if (inputs.health_stale)
+        reason = "health_stale";
+      else if (inputs.generation_id == 0)
+        reason = "generation_not_positive";
+      else if (!std::isfinite(inputs.stamp_s) || inputs.stamp_s <= 0.0)
+        reason = "stamp_not_finite_positive";
+      else if (inputs.frame_id.empty())
+        reason = "frame_empty";
+
+      if (!reason.empty())
+      {
+        ++defer_count_;
+        return {false, false, 0, reason};
+      }
+
+      const bool released_now = !released_;
+      if (released_now)
+      {
+        released_ = true;
+        release_stamp_s_ = inputs.stamp_s;
+        release_generation_id_ = inputs.generation_id;
+        defer_count_at_release_ = defer_count_;
+      }
+      return {true, released_now, inputs.generation_id,
+              released_now ? "risk_grid_ready_released" : "risk_grid_ready"};
+    }
+    uint64_t deferCount() const { return defer_count_; }
+    bool released() const { return released_; }
+    double releaseStampS() const { return release_stamp_s_; }
+    uint64_t releaseGenerationId() const { return release_generation_id_; }
+    uint64_t deferCountAtRelease() const { return defer_count_at_release_; }
+
+  private:
+    uint64_t defer_count_ = 0;
+    bool released_ = false;
+    double release_stamp_s_ = 0.0;
+    uint64_t release_generation_id_ = 0;
+    uint64_t defer_count_at_release_ = 0;
+  };
 
   class EGOReplanFSM
   {
@@ -83,6 +157,10 @@ namespace ego_planner
     bool flag_escape_emergency_ = false;
     bool p5_final_gate_emergency_candidate_ = false;
     bool p5_waiting_for_p0_ready_ = false;
+    bool p4_waiting_for_risk_grid_ready_ = false;
+    bool p4_require_risk_grid_ready_before_planning_ = false;
+    std::shared_ptr<const iap::RiskGridSnapshot> p4_admitted_risk_grid_snapshot_;
+    P4RiskGridPlanningAdmission p4_risk_grid_planning_admission_;
     P1ReplanAdmission p1_replan_admission_;
     uint64_t p1_formal_observation_attempt_id_ = 0;
 
@@ -116,6 +194,7 @@ namespace ego_planner
 
     void readGivenWps();
     void planNextWaypoint(const Eigen::Vector3d next_wp);
+    bool shouldDeferP4PlanningForRiskGridReady();
     bool shouldDeferP5FinalGateForP0Ready();
     int globalTrajTrialLimitForP5FinalGate() const;
     void getLocalTarget();

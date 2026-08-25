@@ -88,10 +88,10 @@ P4_G0C_REGISTRY_V3_TRUSTED_SHA256 = (
     "8825c70c3814b574ba4709a94aac4d5d85d37d617b453a3aaefb4b80da5d82c8"
 )
 P4_G0C_PROTOCOL_V4_TRUSTED_SHA256 = (
-    "971124a2433fc7d994e64d065f03b27cb32c53bf698eee081bf6da1884492ddc"
+    "17fe1420b7aa7a0511827d37c6f8a47a8bc1c295c90d22c085f2aa4298c9960a"
 )
 P4_G0C_REGISTRY_V4_TRUSTED_SHA256 = (
-    "1a7c57bbedff0f5a64d0cb8402884932a05838160ad78600facc0f6a92a15f97"
+    "c760c217ce8dee4bd379c6048e7909f40ea3a08adb99dd4f9b21eba2189f7d91"
 )
 LAUNCH_ENVIRONMENT_SCHEMA = "p4_g0c_launch_environment_v1"
 LAUNCH_ENVIRONMENT_KEYS = (
@@ -388,6 +388,14 @@ def validate_test_planner_effective_contract(
         ):
             raise ProtocolError(
                 f"test-planner top-level effective mismatch: {manifest_key}"
+            )
+    if bundle.protocol.get("schema_version") == PROTOCOL_SCHEMA_V4:
+        barrier_key = "p4.require_risk_grid_ready_before_planning"
+        if not exact_json_equal(
+            launch_manifest.get(barrier_key), protocol_effective[barrier_key]
+        ):
+            raise ProtocolError(
+                f"test-planner top-level effective mismatch: {barrier_key}"
             )
 
 
@@ -823,6 +831,7 @@ def validate_protocol(protocol: dict[str, Any]) -> None:
             "p0.predictor.sigma_growth_profile": (
                 "legacy_iap_rq320_baseline_v1"
             ),
+            "p4.require_risk_grid_ready_before_planning": True,
         })
     if set(effective) != set(required):
         raise ProtocolError("effective protocol values must match the exact frozen set")

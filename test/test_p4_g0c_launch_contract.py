@@ -38,6 +38,15 @@ class P4G0CLaunchContractTest(unittest.TestCase):
             profile["p0.predictor.sigma_growth_profile"],
             "legacy_iap_rq320_baseline_v1",
         )
+        self.assertEqual(
+            dict(MODULE.ARG_DEFAULTS)[
+                "p4.require_risk_grid_ready_before_planning"
+            ],
+            "false",
+        )
+        self.assertEqual(
+            profile["p4.require_risk_grid_ready_before_planning"], "true"
+        )
         MODULE._validate_p4_g0c_profile_values(
             MODULE.P4_G0C_EXPERIMENT_V4, profile, set()
         )

@@ -1,0 +1,86 @@
+{
+  "commands": [
+    {
+      "argv": ["bash", "results/icra27/icra060/build_attempt_04/run_build.sh"],
+      "cwd": "/home/dev/ws_iap/src/iap",
+      "end_utc": "2026-08-25T08:32:52Z",
+      "environment_allowlist": ["AMENT_PREFIX_PATH", "CMAKE_PREFIX_PATH", "CUDA_HOME", "HOME", "LANG", "LD_LIBRARY_PATH", "PATH", "PYTHONPATH", "ROS_DISTRO", "ROS_HOME", "ROS_LOG_DIR", "ROS_PYTHON_VERSION", "ROS_VERSION", "TMPDIR", "XDG_RUNTIME_DIR"],
+      "exit_code": 0,
+      "name": "fresh_cuda_build_attempt_04",
+      "start_utc": "2026-08-25T08:28:04Z"
+    },
+    {
+      "argv": ["bash", "results/icra27/icra060/final_audits/static_closure.sh"],
+      "cwd": "/home/dev/ws_iap/src/iap",
+      "environment_allowlist": [],
+      "exit_code": 0,
+      "name": "static_closure",
+      "timing_source": "results/icra27/icra060/final_audits/static_closure_command.json"
+    },
+    {
+      "argv_evidence": "readiness_attempt_01/preflight/gpu/gpu_preflight.json commands array (nvidia-smi) plus in-process CUDA driver probe",
+      "checked_utc": "2026-08-25T08:06:42Z",
+      "cwd": "/home/dev/ws_iap/src/iap",
+      "environment_allowlist": ["HOME", "PATH", "ROS_HOME", "ROS_LOG_DIR", "TMPDIR", "XDG_RUNTIME_DIR"],
+      "exit_code": 0,
+      "name": "gpu_preflight_attempt_01"
+    },
+    {
+      "argv_evidence": "readiness_attempt_02/preflight/gpu/gpu_preflight.json commands array (nvidia-smi) plus in-process CUDA driver probe",
+      "checked_utc": "2026-08-25T08:17:19Z",
+      "cwd": "/home/dev/ws_iap/src/iap",
+      "environment_allowlist": ["HOME", "PATH", "ROS_HOME", "ROS_LOG_DIR", "TMPDIR", "XDG_RUNTIME_DIR"],
+      "exit_code": 0,
+      "name": "gpu_preflight_attempt_02"
+    },
+    {
+      "argv_evidence": "readiness_attempt_01 run manifest and stdout.log",
+      "cwd": "/home/dev/ws_iap/src/iap",
+      "end_utc": "2026-08-25T08:08:11.175510Z",
+      "environment_allowlist": ["AMENT_PREFIX_PATH", "CMAKE_PREFIX_PATH", "HOME", "LD_LIBRARY_PATH", "PATH", "PYTHONPATH", "ROS_HOME", "ROS_LOG_DIR", "TMPDIR", "XDG_RUNTIME_DIR"],
+      "exit_code": 0,
+      "name": "nonregistered_readiness_attempt_01",
+      "requested_duration_s": 20,
+      "start_utc": "2026-08-25T08:07:50.197097Z"
+    },
+    {
+      "argv_evidence": "readiness_attempt_02 run manifest and stdout.log",
+      "cwd": "/home/dev/ws_iap/src/iap",
+      "end_utc": "2026-08-25T08:18:14.097075Z",
+      "environment_allowlist": ["AMENT_PREFIX_PATH", "CMAKE_PREFIX_PATH", "HOME", "LD_LIBRARY_PATH", "PATH", "PYTHONPATH", "ROS_HOME", "ROS_LOG_DIR", "TMPDIR", "XDG_RUNTIME_DIR"],
+      "exit_code": 0,
+      "name": "nonregistered_readiness_attempt_02",
+      "requested_duration_s": 20,
+      "start_utc": "2026-08-25T08:17:52.989629Z"
+    },
+    {
+      "argv": ["bash", "results/icra27/icra060/cpp_tests_attempt_02/run_tests.sh"],
+      "cwd": "/home/dev/ws_iap/src/iap",
+      "end_utc": "2026-08-25T08:33:47Z",
+      "environment_allowlist": ["HOME", "ROS_HOME", "ROS_LOG_DIR", "TMPDIR", "XDG_RUNTIME_DIR"],
+      "exit_code": 0,
+      "name": "cpp_admission_tests",
+      "start_utc": "2026-08-25T08:33:22Z"
+    },
+    {
+      "argv": ["bash", "results/icra27/icra060/readiness_attempt_04/run_readiness.sh"],
+      "cwd": "/home/dev/ws_iap/src/iap",
+      "end_utc": "2026-08-25T08:36:12Z",
+      "environment_allowlist": ["AMENT_PREFIX_PATH", "CMAKE_PREFIX_PATH", "HOME", "LD_LIBRARY_PATH", "PATH", "PYTHONPATH", "ROS_HOME", "ROS_LOG_DIR", "TMPDIR", "XDG_RUNTIME_DIR"],
+      "exit_code": 0,
+      "name": "nonregistered_readiness_attempt_04",
+      "start_utc": "2026-08-25T08:35:51Z"
+    },
+    {
+      "argv": ["python3", "scripts/dev_planner/run_p4_g0c_tests.py", "--task-root", "/home/dev/ws_iap/src/iap/results/icra27/icra060/hermetic_tests", "unittest", "--", "discover", "-s", "test", "-p", "test_*.py"],
+      "cwd": "/home/dev/ws_iap/src/iap",
+      "end_utc": "2026-08-25T08:39:14Z",
+      "environment_allowlist": ["HOME", "ROS_HOME", "ROS_LOG_DIR", "TMPDIR", "XDG_RUNTIME_DIR"],
+      "exit_code": 0,
+      "name": "full_python_discovery",
+      "start_utc": "2026-08-25T08:38:40Z"
+    }
+  ],
+  "not_invoked": ["formal_v4_dependency_preflight", "full_v4_runner", "registered_r4_identity", "analyzer"],
+  "schema_version": "icra060_command_ledger_v1"
+}

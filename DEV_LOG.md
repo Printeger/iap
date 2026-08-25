@@ -7638,3 +7638,36 @@ boundary, while all 15 P4 decisions retain generation zero and producer reason
 This is `BLOCKED_R4_READINESS_NO_P4_POSITIVE_SNAPSHOT`. Per fail-closed rules,
 no readiness retry, standalone Phase-C dependency, full runner, registered r4
 identity or analyzer was invoked. No threshold action or G0C PASS is claimed.
+
+## 2026-08-25 — ICRA-060 RISKGRID ADMISSION READY; P4 GUIDE REQUEST BLOCKED
+
+IAP-RQ-320, IAP-RQ-322 and IAP-RQ-423. Added the exact default-false
+`p4.require_risk_grid_ready_before_planning` contract and enabled it only in
+v4/r4. The FSM now defers before planning-context/trial/P4 creation until one
+owned snapshot is ready, non-stale, positive-generation, finite-positive-stamp
+and nonempty-frame. It emits throttled diagnostics, preserves the current FSM
+state while waiting and records one deterministic release with stamp,
+generation and defer count. Focused C++ admission tests pass 3/3.
+
+Fresh final build attempt 04 passes 17/17 packages in a sequential merged
+non-symlink Release/CUDA closure with tests OFF, OpenCV/viewer OFF and the
+registered nvcc. Static closure proves 17 indexes, zero symlinks, six ordinary
+ELF libraries, no missing/historical linkage and exact installed/source launch
+bytes. Hermetic final verification passes 477/477 Python tests, syntax 4/4,
+fatal-only flake8 and four canonical v4 JSON checks with empty external-log
+delta. ICRA-059 Phase-A compact evidence is restored exactly to commit
+`7ec1f94` (`7a375f36…abd5`).
+
+The final disjoint 20-second nonregistered readiness attempt passes GPU
+preflight and required-process monitoring. The barrier releases exactly once
+at generation 1 after 881 deferrals, and no P4 row is emitted while waiting.
+All 9,600 later planning contexts bind an available positive-generation
+snapshot. After release, however,
+`BsplineOptimizer::initControlPoints()` continually reports
+`OPEN_ENDED_COLLISION` and returns before `collectP4GuidesForSegments()`, so no
+P4 request or decision row can meet the required post-release condition.
+Repair requires forbidden `bspline_opt` or frozen scenario/science changes.
+Result is `BLOCKED_P4_OPEN_ENDED_COLLISION_BEFORE_GUIDE_REQUEST`; formal v4
+dependency, full runner, all 15 registered r4 identities and analyzer remain
+uninvoked. No threshold action or G0C PASS is claimed; control returns to
+SUPERVISOR review with raw products retained.

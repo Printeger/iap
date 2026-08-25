@@ -87,6 +87,7 @@ P4_G0C_ARTIFACT_PRESET_V4 = {
 P4_G0C_V4_P0_PROFILE_VALUES = {
     "p0.predictor.sigma_grow_m_sqrt_s": "0.01",
     "p0.predictor.sigma_growth_profile": "legacy_iap_rq320_baseline_v1",
+    "p4.require_risk_grid_ready_before_planning": "true",
 }
 P4_G0C_FROZEN_LAUNCH_VALUES = {
     "planner_safety_profile": "p4",
@@ -1640,6 +1641,7 @@ ARG_DEFAULTS = [
     ("p4.max_extra_path_ratio", "1.3"),
     ("p4.fallback_to_original_when_risk_not_ready", "true"),
     ("p4.debug_csv_enable", "false"),
+    ("p4.require_risk_grid_ready_before_planning", "false"),
     ("p4.debug_csv_path", ""),
     ("p4.g0c.protocol_path", ""),
     ("p4.g0c.protocol_sha256", ""),
@@ -2330,6 +2332,8 @@ def _ego_planner_node(context, drone_id, planner_odom_topic, cloud_topic, camera
             {"grid_map/pose_type": 1},
             {"grid_map/frame_id": "map"},
             {"p0.enable_risk_grid": p0_enabled},
+            {"p4.require_risk_grid_ready_before_planning": _param_bool(
+                context, "p4.require_risk_grid_ready_before_planning")},
             {"p0.resolution_m": _param_float(context, "p0.resolution_m")},
             {"p0.size_x_m": _param_float(context, "p0.size_x_m")},
             {"p0.size_y_m": _param_float(context, "p0.size_y_m")},
@@ -3082,6 +3086,8 @@ def _launch_setup(context):
             context, "planner_enable_all_safety"),
         "fsm.thresh_no_replan_meter": _fixed_lattice_no_replan_threshold(safety_enabled),
         "p0.enable_risk_grid": p0_enabled,
+        "p4.require_risk_grid_ready_before_planning": _param_bool(
+            context, "p4.require_risk_grid_ready_before_planning"),
         "p1.use_integrity_cost": p1_use_for_manifest,
         "p1.metrics_only": p1_metrics_only_for_manifest,
         "p1.lambda_integrity": _param_float(context, "p1.lambda_integrity"),

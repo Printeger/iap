@@ -1,0 +1,116 @@
+{
+  "admission": {
+    "default_enabled": false,
+    "parameter": "p4.require_risk_grid_ready_before_planning",
+    "required_snapshot_fields": [
+      "owned",
+      "health.ready=true",
+      "health.stale=false",
+      "generation_id>0",
+      "finite_positive_stamp",
+      "nonempty_frame"
+    ],
+    "v4_enabled": true
+  },
+  "build": {
+    "adopted_attempt": 4,
+    "build_testing": false,
+    "build_type": "Release",
+    "build_with_cuda": true,
+    "cuda_compiler": "/usr/local/cuda/bin/nvcc",
+    "executor": "sequential",
+    "merged_non_symlink": true,
+    "opencv": false,
+    "package_count": 17,
+    "viewer": false
+  },
+  "downstream": {
+    "analyzer_invocations": 0,
+    "formal_dependency_invocations": 0,
+    "full_runner_invocations": 0,
+    "g0c_pass_claimed": false,
+    "registered_r4_attempts": 0,
+    "registered_r4_completions": 0,
+    "registered_r4_retries": 0,
+    "threshold_actions": 0
+  },
+  "final_artifacts": {
+    "dependency_v4_sha256": "b027675f4efd408b77b3903780714c02e534d486652a66b37cd614e8514afefb",
+    "launch_sha256": "d0d0743334869b9d9671bf2ad9ddadd62d7ff8bc6ef188c713f8530203d7f02a",
+    "lineage_v4_sha256": "31eceb3558ca4f417783a5582c3809e632bc197637f2a1c29327bd81e13971fd",
+    "protocol_v4_sha256": "17fe1420b7aa7a0511827d37c6f8a47a8bc1c295c90d22c085f2aa4298c9960a",
+    "registry_v4_sha256": "c760c217ce8dee4bd379c6048e7909f40ea3a08adb99dd4f9b21eba2189f7d91"
+  },
+  "preservation": {
+    "icra059_phase_a_commit": "7ec1f94",
+    "icra059_phase_a_results_sha256": "7a375f3642625103fe19f590629cb7c1cc69aa9d8b66f3e2321f031b472babd5",
+    "p0_profile": "legacy_iap_rq320_baseline_v1",
+    "p0_sigma_grow_m_sqrt_s": 0.01,
+    "protected_pdf_sha256": "1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6",
+    "registered_r4_identities_consumed": 0,
+    "v1_v3_artifacts_changed": false
+  },
+  "readiness": {
+    "attempts": [
+      {
+        "barrier_defer_count": 712,
+        "barrier_release_count": 1,
+        "gpu_ready": true,
+        "identity": "p4-g0c-r4-readiness-icra060-attempt01",
+        "p4_decision_rows": 0,
+        "p4_requests_after_release": 0,
+        "release_generation_id": 1,
+        "release_stamp_s": 1657065606.4991221,
+        "requested_duration_s": 20,
+        "terminal_scan_status": "OPEN_ENDED_COLLISION"
+      },
+      {
+        "barrier_defer_count": 682,
+        "barrier_release_count": 1,
+        "gpu_ready": true,
+        "identity": "p4-g0c-r4-readiness-icra060-attempt02",
+        "p4_decision_rows": 0,
+        "p4_requests_after_release": 0,
+        "release_generation_id": 1,
+        "release_stamp_s": 1657065606.4910398,
+        "requested_duration_s": 20,
+        "terminal_scan_status": "OPEN_ENDED_COLLISION"
+      },
+      {
+        "barrier_defer_count": 881,
+        "barrier_release_count": 1,
+        "gpu_ready": true,
+        "identity": "p4-g0c-r4-readiness-icra060-attempt04",
+        "p4_decision_rows": 0,
+        "p4_requests_after_release": 0,
+        "planning_risk_context_count": 9600,
+        "planning_risk_context_invalid_identity_count": 0,
+        "release_generation_id": 1,
+        "release_stamp_s": 1657065608.4861078,
+        "requested_duration_s": 20,
+        "required_processes_ok": true,
+        "terminal_scan_status": "OPEN_ENDED_COLLISION"
+      }
+    ],
+    "diagnosis": "BsplineOptimizer::initControlPoints returns on OPEN_ENDED_COLLISION before collectP4GuidesForSegments; remediation requires forbidden bspline_opt or frozen scenario/science changes",
+    "required_positive_post_release_rows": 1,
+    "typed_result": "BLOCKED_P4_OPEN_ENDED_COLLISION_BEFORE_GUIDE_REQUEST"
+  },
+  "requirements": [
+    "IAP-RQ-320",
+    "IAP-RQ-322",
+    "IAP-RQ-423"
+  ],
+  "result": "BLOCKED_P4_OPEN_ENDED_COLLISION_BEFORE_GUIDE_REQUEST",
+  "schema_version": "icra060_compact_result_v1",
+  "task_id": "ICRA-060",
+  "verification": {
+    "canonical_v4_json": "PASS_4_OF_4",
+    "cpp_admission_tests": "PASS_3_OF_3",
+    "external_ros_inventory_delta": 0,
+    "fatal_only_flake8": "PASS",
+    "full_python_discovery": "PASS_477_OF_477",
+    "static_closure": "PASS",
+    "syntax": "PASS_4_OF_4"
+  }
+}

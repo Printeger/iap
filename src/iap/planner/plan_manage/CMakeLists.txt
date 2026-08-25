@@ -129,6 +129,15 @@ if(BUILD_TESTING)
     test/test_p1_replan_admission.cpp
     src/p1_replan_admission.cpp
   )
+  ament_add_gtest(test_p4_risk_grid_planning_admission
+    test/test_p4_risk_grid_planning_admission.cpp
+  )
+  ament_target_dependencies(test_p4_risk_grid_planning_admission
+    rclcpp nav_msgs geometry_msgs std_msgs sensor_msgs visualization_msgs
+    quadrotor_msgs traj_utils bspline_opt plan_env path_searching cv_bridge
+    pcl_conversions gnss_comm iap
+  )
+  target_link_libraries(test_p4_risk_grid_planning_admission iap::iap)
   ament_add_gtest(test_p1_candidate_selection
     test/test_p1_candidate_selection.cpp
     src/p1_candidate_selection.cpp
