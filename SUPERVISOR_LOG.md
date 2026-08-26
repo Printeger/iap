@@ -84,8 +84,15 @@ Verdict: **REQUEST_CHANGES / LIVE GATE FAIL.**
 
 ### Supervisor window disposition
 
-- Post-push audit is pending. The Review changeset will be pushed first; §8.6 disposition and its exact handoff
-  anchor will be recorded in a separate minimal Supervisor-only commit.
+- Disposition: `ROTATE_RECOMMENDED`.
+- Reason: `ICRA072_REPEATED_REPAIR_AND_SELECTION_TRIGGER_CONTRACT`. This window has reviewed multiple ICRA-072
+  repair iterations and now freezes a new development-only selection-trigger boundary alongside the deferred
+  scientific inverse-corridor contract. Continuing in the same context would increase the risk of treating an
+  old blocker or the engineering trigger as current scientific authority.
+- Post-push audit: Review changeset `95f143abbfcc0bd5bcb37362a2f475ff318757a2` was pushed normally; pre-push
+  passed and fetch/divergence was `0 0`. This minimal Supervisor-only record binds that exact changeset as the
+  handoff anchor. The next Supervisor window is read-only until the ICRA-072 Builder handoff and must recover
+  solely from current pushed repository authority.
 
 ## 2026-08-26 — ICRA-072 Review REQUEST_CHANGES; lineage repair and replacement smoke authorized
 

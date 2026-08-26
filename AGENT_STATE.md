@@ -34,13 +34,13 @@ next_after_icra072_review_pass: ICRA-073_EFFECT_DIAGNOSTICS
 recovery_roadmap: docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md
 guard_plan: docs/icra27/ICRA_CROSS_LAYER_GUARD_PLAN.md
 artifact_retention: ICRA068_ICRA070_ICRA072_BUILD_INSTALL_RAW_EVIDENCE_AND_PDF_RETAINED_NO_CLEANUP
-window_disposition: PENDING_POST_PUSH_AUDIT
-rotation_reason: PENDING_REVIEW_CHANGESET_PUSH
-window_handoff_anchor: PENDING_REVIEW_CHANGESET_PUSH
+window_disposition: ROTATE_RECOMMENDED
+rotation_reason: ICRA072_REPEATED_REPAIR_AND_SELECTION_TRIGGER_CONTRACT
+window_handoff_anchor: 95f143abbfcc0bd5bcb37362a2f475ff318757a2
 window_next_role: SUPERVISOR
 window_next_review_task: ICRA-072
 window_bootstrap_source: REPOSITORY_AUTHORITY_ONLY
-updated_utc: 2026-08-26T13:08:26Z
+updated_utc: 2026-08-26T13:10:40Z
 ```
 
 The active user-owned route remains `P0_P4_V2_P5`; P0+P5 is the matched control. P4-v1 remains an immutable
