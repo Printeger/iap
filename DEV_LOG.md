@@ -8291,9 +8291,17 @@ The full-sensor scenario path changed only from the failed `install` root to
 the complete `install_v2` root across the three authorized source aliases.
 GNSS/ARAIM + IMU + LiDAR, 16 processes, ten topics, RINEX/timing, P0 worker 4,
 sigma 0.01, legacy baseline and all P5 fixtures/thresholds/actions remain exact.
-Current focused results are contract 15/15, runner 53/53 and launch 21/21;
-complete hermetic discovery passes 589/589 with all 17,770 external ROS-log
+Current focused results are contract 15/15, runner 56/56 and launch 21/21;
+complete hermetic discovery passes 592/592 with all 17,770 external ROS-log
 entries unchanged. An earlier historical-harness pass exposed and corrected
 ambient `GIT_CONFIG_*` leakage in the negative trust control; it is explicitly
 non-authoritative scratch. Replacement/parser/GPU/live/analyzer have not been
 invoked at this checkpoint.
+
+Spec review then required explicit adversaries for every named preflight and an
+authoritative task-local static record. Added tests now prove mismatched trust,
+relative and alternate repositories, dirty tracked status, source-cache drift
+and pre-existing v3 evidence fail closed. `static_verification_v3.json` is
+required below ICRA-070 before the replacement entrypoint and must bind these
+exact commands, environments, exits, source hashes, both review axes and zero
+runtime invocations.

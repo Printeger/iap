@@ -179,6 +179,18 @@ class IcraP0P5LiveRunnerTest(unittest.TestCase):
         )
         self.assertEqual(untrusted.returncode, 128)
         self.assertIn("dubious ownership", untrusted.stderr)
+        mismatched = RUNNER.subprocess.run(
+            [
+                "git", "-c", "safe.directory=/tmp/not-the-iap-repository",
+                "-C", str(REPO), "status", "--porcelain",
+            ],
+            env=environment,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(mismatched.returncode, 128)
+        self.assertIn("dubious ownership", mismatched.stderr)
         result = RUNNER.trusted_git(
             ["rev-parse", "--show-toplevel"],
             repository=REPO,
@@ -196,6 +208,41 @@ class IcraP0P5LiveRunnerTest(unittest.TestCase):
                 RUNNER.LiveRunnerError, "git_repository_not_canonical"
             ):
                 RUNNER.trusted_git(["status"], repository=alias)
+            for invalid in (Path("."), Path(tmp)):
+                with self.assertRaisesRegex(
+                    RUNNER.LiveRunnerError, "git_repository_not_canonical"
+                ):
+                    RUNNER.trusted_git(["status"], repository=invalid)
+
+    def test_complete_replacement_preflight_rejects_dirty_tracked_status(self):
+        with self.assertRaisesRegex(
+            RUNNER.LiveRunnerError, "tracked_worktree_not_clean"
+        ):
+            RUNNER.validate_trusted_worktree(
+                "a" * 40, "a" * 40, " M tracked.py"
+            )
+
+    def test_complete_replacement_rejects_source_cache_mutation(self):
+        changed = {
+            "directories": ["__pycache__"],
+            "files": [dict(RUNNER.EXPECTED_SOURCE_CACHE_INVENTORY["files"][0])],
+        }
+        changed["files"][0]["sha256"] = "0" * 64
+        with self.assertRaisesRegex(
+            RUNNER.LiveRunnerError, "source_cache_inventory_mismatch"
+        ):
+            RUNNER.validate_source_cache_inventory(changed)
+
+    def test_complete_replacement_rejects_preexisting_v3_evidence(self):
+        with tempfile.TemporaryDirectory(dir=REPO / "results/icra27") as tmp:
+            existing = Path(tmp) / "icra070_overlay_manifest_v3.json"
+            existing.write_text("{}\n")
+            with self.assertRaisesRegex(
+                RUNNER.LiveRunnerError, "overlay_manifest_v3_already_exists"
+            ):
+                RUNNER.require_complete_replacement_outputs_absent({
+                    "overlay_manifest_v3": existing,
+                })
 
     def test_complete_overlay_copies_full_non_cache_set_modes_and_aliases(self):
         with tempfile.TemporaryDirectory(dir=REPO / "results/icra27") as tmp:

@@ -43,6 +43,7 @@ COMPLETE_REPLACEMENT_EVIDENCE_PATH = (
 )
 OVERLAY_MANIFEST_V3_PATH = TASK_ROOT / "compact/icra070_overlay_manifest_v3.json"
 ADOPTION_MANIFEST_V3_PATH = TASK_ROOT / "compact/icra070_adoption_manifest_v3.json"
+STATIC_VERIFICATION_V3_PATH = TASK_ROOT / "static_verification_v3.json"
 DEPENDENCY_PREFLIGHT_PATH = TASK_ROOT / "compact/gnss_dependency_preflight.json"
 OVERLAY_COMMAND_PATH = TASK_ROOT / "compact/overlay_install_command.json"
 OVERLAY_INSTALL_DRIVER_PATH = TASK_ROOT / "overlay_install_driver.cmake"
@@ -1275,6 +1276,28 @@ def trusted_git(
     return completed
 
 
+def validate_trusted_worktree(
+    expected_commit: str, observed_commit: str, tracked_status: str,
+) -> None:
+    if observed_commit != expected_commit:
+        raise LiveRunnerError("replacement_head_mismatch")
+    if tracked_status.strip():
+        raise LiveRunnerError("tracked_worktree_not_clean")
+
+
+def validate_source_cache_inventory(observed: dict[str, object]) -> None:
+    if observed != EXPECTED_SOURCE_CACHE_INVENTORY:
+        raise LiveRunnerError("source_cache_inventory_mismatch")
+
+
+def require_complete_replacement_outputs_absent(
+    outputs: dict[str, Path],
+) -> None:
+    for label, path in outputs.items():
+        if path.exists() or path.is_symlink():
+            raise LiveRunnerError(f"{label}_already_exists")
+
+
 def replacement_command_binding(expected_commit: str) -> dict[str, object]:
     return {
         "argv": [
@@ -1287,6 +1310,56 @@ def replacement_command_binding(expected_commit: str) -> dict[str, object]:
         "cwd": str(REPOSITORY),
         "environment": expected_live_environment(),
         "outer_exit_recorded_externally": True,
+    }
+
+
+def verify_authoritative_static_record_v3() -> dict[str, object]:
+    if not STATIC_VERIFICATION_V3_PATH.is_file() \
+            or STATIC_VERIFICATION_V3_PATH.is_symlink():
+        raise LiveRunnerError("static_verification_v3_missing_or_symlink")
+    try:
+        record = json.loads(STATIC_VERIFICATION_V3_PATH.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        raise LiveRunnerError("static_verification_v3_malformed") from exc
+    expected_files = {
+        relative: _sha256(REPOSITORY / relative)
+        for relative in (
+            "scripts/dev_planner/run_icra_p0_p5_qualification.py",
+            "launch/icra_p0_p5_qualification.py",
+            "launch/test_planner.launch.py",
+            "config/icra27/icra_p0_p5_qualification_v1.json",
+            "test/test_run_icra_p0_p5_qualification.py",
+            "test/test_test_planner_launch.py",
+        )
+    }
+    commands = record.get("commands")
+    results = [row.get("result") for row in commands] \
+        if isinstance(commands, list) else []
+    if not (
+        record.get("schema_version") == "icra070_static_verification_v3"
+        and record.get("status") == "STATIC_PASS"
+        and record.get("qualification_claim") is False
+        and re.fullmatch(r"[0-9a-f]{40}", record.get("implementation_commit", ""))
+        and record.get("implementation_file_sha256") == expected_files
+        and results == [
+            "15/15 PASS", "56/56 PASS", "21/21 PASS", "592/592 PASS",
+        ]
+        and all(row.get("exit_code") == 0 for row in commands)
+        and record.get("external_ros_inventory_entries") == 17770
+        and record.get("code_review") == {"standards": "PASS", "spec": "PASS"}
+        and record.get("invocation_counts") == {
+            "replacement": 0,
+            "installed_parser": 0,
+            "gpu_preflight": 0,
+            "live_launch": 0,
+            "analyzer": 0,
+        }
+    ):
+        raise LiveRunnerError("static_verification_v3_binding_mismatch")
+    return {
+        "path": str(STATIC_VERIFICATION_V3_PATH.relative_to(REPOSITORY)),
+        "sha256": _sha256(STATIC_VERIFICATION_V3_PATH),
+        "implementation_commit": record["implementation_commit"],
     }
 
 
@@ -1311,8 +1384,7 @@ def verify_reviewed_pre_replacement_inputs() -> dict[str, object]:
     if failed != EXPECTED_FAILED_OVERLAY_INVENTORY:
         raise LiveRunnerError("failed_overlay_frozen_inventory_mismatch")
     source_cache = python_cache_inventory(REPOSITORY / "launch")
-    if source_cache != EXPECTED_SOURCE_CACHE_INVENTORY:
-        raise LiveRunnerError("source_cache_inventory_mismatch")
+    validate_source_cache_inventory(source_cache)
     if not PROTECTED_PDF_PATH.is_file() or PROTECTED_PDF_PATH.is_symlink() \
             or _sha256(PROTECTED_PDF_PATH) != PROTECTED_PDF_SHA256:
         raise LiveRunnerError("protected_pdf_mismatch")
@@ -1400,28 +1472,26 @@ def prepare_complete_overlay(expected_commit: str) -> dict[str, object]:
     """Construct the one authorized complete non-overwriting replacement."""
     if re.fullmatch(r"[0-9a-f]{40}", expected_commit or "") is None:
         raise LiveRunnerError("expected_replacement_commit_malformed")
-    for path, label in (
-        (COMPLETE_OVERLAY_INSTALL_ROOT, "replacement_root"),
-        (COMPLETE_OVERLAY_PARTIAL_ROOT, "replacement_partial_root"),
-        (COMPLETE_REPLACEMENT_EVIDENCE_PATH, "replacement_evidence"),
-        (OVERLAY_MANIFEST_V3_PATH, "overlay_manifest_v3"),
-        (ADOPTION_MANIFEST_V3_PATH, "adoption_manifest_v3"),
-    ):
-        if path.exists() or path.is_symlink():
-            raise LiveRunnerError(f"{label}_already_exists")
+    require_complete_replacement_outputs_absent({
+        "replacement_root": COMPLETE_OVERLAY_INSTALL_ROOT,
+        "replacement_partial_root": COMPLETE_OVERLAY_PARTIAL_ROOT,
+        "replacement_evidence": COMPLETE_REPLACEMENT_EVIDENCE_PATH,
+        "overlay_manifest_v3": OVERLAY_MANIFEST_V3_PATH,
+        "adoption_manifest_v3": ADOPTION_MANIFEST_V3_PATH,
+    })
     environment = validate_live_environment()
     observed_commit = trusted_git(
         ["rev-parse", "HEAD"], environment=environment
     ).stdout.strip()
-    if observed_commit != expected_commit:
-        raise LiveRunnerError("replacement_head_mismatch")
     dirty = trusted_git(
         ["status", "--porcelain", "--untracked-files=no"],
         environment=environment,
     ).stdout.strip()
-    if dirty:
-        raise LiveRunnerError("tracked_worktree_not_clean")
+    validate_trusted_worktree(expected_commit, observed_commit, dirty)
     preconditions = verify_reviewed_pre_replacement_inputs()
+    preconditions["static_verification_v3"] = (
+        verify_authoritative_static_record_v3()
+    )
     source_cache = preconditions["source_cache_inventory"]
     replacement_proof = construct_complete_overlay(
         INSTALL_ROOT.resolve(), COMPLETE_OVERLAY_INSTALL_ROOT.resolve(),
@@ -1443,8 +1513,12 @@ def prepare_complete_overlay(expected_commit: str) -> dict[str, object]:
     )
     if post_probe_proof != replacement_proof:
         raise LiveRunnerError("replacement_changed_by_import_probe")
-    if python_cache_inventory(REPOSITORY / "launch") != source_cache:
-        raise LiveRunnerError("source_cache_mutated_by_replacement")
+    try:
+        validate_source_cache_inventory(
+            python_cache_inventory(REPOSITORY / "launch")
+        )
+    except LiveRunnerError as exc:
+        raise LiveRunnerError("source_cache_mutated_by_replacement") from exc
     contract = QUALIFICATION.load_contract(CONTRACT_PATH)
     dependency = resolve_gnss_dependencies(
         contract, INSTALL_ROOT, COMPLETE_OVERLAY_INSTALL_ROOT
@@ -1524,6 +1598,9 @@ def validate_complete_overlay_manifest_v3(
             )
     if preconditions.get("original_blocker") != verify_original_blocker_evidence():
         raise LiveRunnerError("original_blocker_binding_mismatch")
+    if preconditions.get("static_verification_v3") \
+            != verify_authoritative_static_record_v3():
+        raise LiveRunnerError("static_verification_v3_evidence_binding_mismatch")
     for relative, expected_hash in REVIEWED_TERMINAL_SHA256.items():
         path = REPOSITORY / relative
         if not path.is_file() or path.is_symlink() \
@@ -1535,9 +1612,9 @@ def validate_complete_overlay_manifest_v3(
     if inventory_summary(tree_byte_inventory(OVERLAY_INSTALL_ROOT)) \
             != EXPECTED_FAILED_OVERLAY_INVENTORY:
         raise LiveRunnerError("failed_overlay_frozen_inventory_mismatch")
-    if python_cache_inventory(REPOSITORY / "launch") \
-            != EXPECTED_SOURCE_CACHE_INVENTORY:
-        raise LiveRunnerError("source_cache_inventory_mismatch")
+    validate_source_cache_inventory(
+        python_cache_inventory(REPOSITORY / "launch")
+    )
     if not PROTECTED_PDF_PATH.is_file() or PROTECTED_PDF_PATH.is_symlink() \
             or _sha256(PROTECTED_PDF_PATH) != PROTECTED_PDF_SHA256:
         raise LiveRunnerError("protected_pdf_mismatch")

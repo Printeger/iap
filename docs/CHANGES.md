@@ -3025,7 +3025,12 @@ Requirements: `IAP-RQ-000`, `IAP-RQ-020`, `IAP-RQ-030`, `IAP-RQ-040`,
   overlay/PDF/source-cache preconditions, installed no-bytecode probe and
   exclusive replacement/overlay/adoption v3 provenance.
 - Project the unchanged full-sensor contract through the new root. Focused
-  contract, runner and launch tests pass 15/15, 53/53 and 21/21; complete
-  hermetic discovery passes 589/589 with the 17,770 external ROS entries
+  contract, runner and launch tests pass 15/15, 56/56 and 21/21; complete
+  hermetic discovery passes 592/592 with the 17,770 external ROS entries
   unchanged. No replacement, parser, GPU, live arm or analyzer has run at this
   static checkpoint.
+- Add explicit adversaries for mismatched trust, relative/alternate repository,
+  dirty tracked status, source-cache mutation and pre-existing v3 evidence.
+  Require a new authoritative `results/icra27/icra070/static_verification_v3.json`
+  binding exact commands/exits, reviewed source hashes and zero runtime calls
+  before replacement construction.
