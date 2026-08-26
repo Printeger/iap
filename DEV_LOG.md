@@ -8223,3 +8223,23 @@ the 17,770-entry external ROS inventory unchanged. Harness scratch remains in
 the historical ICRA-063 namespace and is explicitly non-authoritative; new
 ICRA-070 v2 compact command/result evidence will be authoritative. No repair,
 reinstall, compile, installed parser, GPU, live identity or analyzer ran.
+
+## 2026-08-26 — ICRA-070 cache-repair review correction
+
+IAP-RQ-000 and IAP-RQ-423. Independent Standards/Spec review rejected the
+first repair implementation before its one-shot invocation. The corrected
+preflight now compares both directions of the complete non-cache ICRA-068
+install set, never labels an overlay-only subset complete, and requires an
+exclusive pre-mutation journal containing every cache path, size and SHA-256
+before any unlink. The phase record no longer predicts the enclosing CLI exit;
+that exit belongs to a post-process command ledger.
+
+Read-only inspection found 2,079 non-cache files in the ICRA-068 install and
+469 in the failed overlay: 1,610 base files are absent, with no overlay-only
+non-cache file. Since NEXT_TASK permits only removal of enumerated caches and
+forbids reinstall/compile, the corrected entrypoint will durably journal this
+condition and stop before mutation. Static tests prove the missing-from-start
+case leaves the cache byte present. Contract/runner tests pass 58/58, launch
+passes 21/21, and complete hermetic discovery passes 579/579 with the 17,770
+external ROS entries unchanged. Repair/parser/GPU/live/analyzer invocations
+remain zero pending the corrected static review.

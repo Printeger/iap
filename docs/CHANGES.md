@@ -2966,3 +2966,22 @@ Requirements: `IAP-RQ-000`, `IAP-RQ-020`, `IAP-RQ-030`, `IAP-RQ-040`,
   are non-authoritative scratch; authoritative continuation records are under
   ICRA-070. At this checkpoint repair/parser/GPU/live/analyzer invocations are
   all zero and the original blocker evidence is unchanged.
+
+## 2026-08-26 (ICRA-070 full-file-set and durable-journal correction)
+
+Requirements: `IAP-RQ-000`, `IAP-RQ-423`.
+
+- Compare the complete non-cache ICRA-068 install and overlay file sets in both
+  directions before repair. Missing base files, overlay extras, symlinks,
+  unauthorized byte drift and alias/source drift are typed blockers.
+- Exclusively persist a v2 pre-mutation journal containing the full cache
+  path/size/SHA-256 inventory and file-set result before the first unlink.
+  Direct repair without a recorder is rejected.
+- Do not predeclare the outer repair command exit in in-process evidence; bind
+  it only after the process returns. New adversarial coverage proves a base
+  file missing from the initial overlay is journaled and no cache is removed.
+- Corrected static verification passes 58/58 focused contract/runner tests,
+  21/21 launch tests and 579/579 complete hermetic discovery. The real frozen
+  sets are 2,079 base versus 469 overlay non-cache files, so the authorized
+  cache-only entrypoint is expected to stop before mutation rather than fill
+  the 1,610-file deficit by a forbidden reinstall/copy.

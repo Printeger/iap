@@ -75,9 +75,12 @@ class IcraP0P5LiveRunnerTest(unittest.TestCase):
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes(data)
             before = RUNNER.tree_byte_inventory(overlay)
+            journal = []
             proof = RUNNER.repair_overlay_cache_boundary(
-                overlay, base, source, aliases, before
+                overlay, base, source, aliases, before,
+                pre_mutation_recorder=journal.append,
             )
+            self.assertEqual(journal[0]["phase_status"], "READY")
             self.assertEqual(
                 set(proof["removed_cache_files"]), set(cache_rows)
             )
@@ -117,6 +120,45 @@ class IcraP0P5LiveRunnerTest(unittest.TestCase):
                         overlay, base, source, {}, expected
                     )
 
+    def test_cache_repair_journals_initially_missing_base_file_before_unlink(self):
+        with tempfile.TemporaryDirectory(dir=REPO / "results/icra27") as tmp:
+            root = Path(tmp)
+            base, overlay, source = root / "base", root / "overlay", root / "source"
+            for parent in (base, overlay):
+                (parent / "lib").mkdir(parents=True)
+                (parent / "lib/libiap.so").write_bytes(b"binary")
+            (base / "include").mkdir()
+            (base / "include/missing.h").write_text("required\n")
+            cache = overlay / "share/iap/launch/__pycache__/stale.pyc"
+            cache.parent.mkdir(parents=True)
+            cache.write_bytes(b"cache")
+            expected = RUNNER.tree_byte_inventory(overlay)
+            journal = []
+            with self.assertRaisesRegex(
+                RUNNER.LiveRunnerError,
+                "full_base_file_set_missing:include/missing.h",
+            ):
+                RUNNER.repair_overlay_cache_boundary(
+                    overlay, base, source, {}, expected,
+                    pre_mutation_recorder=journal.append,
+                )
+            self.assertTrue(cache.is_file())
+            self.assertEqual(len(journal), 1)
+            self.assertEqual(journal[0]["phase_status"], "BLOCKED")
+            self.assertEqual(
+                journal[0]["full_file_set_preflight"]["missing_base_files"],
+                ["include/missing.h"],
+            )
+            self.assertEqual(
+                journal[0]["cache_inventory"]["files"][0]["path"],
+                "share/iap/launch/__pycache__/stale.pyc",
+            )
+
+    def test_repair_phase_command_never_predeclares_outer_exit(self):
+        binding = RUNNER.repair_command_binding()
+        self.assertNotIn("exit_code", binding)
+        self.assertEqual(binding["outer_exit_recorded_externally"], True)
+
     def test_cache_repair_rejects_binary_and_alias_drift(self):
         for mutation, error in (
             ("binary", "unauthorized_overlay_difference"),
@@ -149,8 +191,8 @@ class IcraP0P5LiveRunnerTest(unittest.TestCase):
                 expected = RUNNER.tree_byte_inventory(overlay)
                 with self.assertRaisesRegex(RUNNER.LiveRunnerError, error):
                     RUNNER.repair_overlay_cache_boundary(
-                        overlay, base, source,
-                        {relative: source_relative}, expected,
+                        overlay, base, source, {relative: source_relative},
+                        expected, pre_mutation_recorder=lambda record: None,
                     )
 
     def test_cache_repair_rejects_source_cache_mutation(self):

@@ -1409,6 +1409,14 @@ They do not convert historical `NO-GO-P2`, failed P0 Gate-0B evidence, the stati
 | IAP-RQ-020 / IAP-RQ-030 / IAP-RQ-040 / IAP-RQ-220 / IAP-RQ-320 | Installed proof and later runtime cannot recreate bytecode while retaining full GNSS+IMU+LiDAR target | `-B` import probe, `PYTHONDONTWRITEBYTECODE=1` parser/GPU/live/analyzer bindings, cross-layer 16-process/10-topic/full-source test | **IMPLEMENTED; 56/56 FOCUSED + 21/21 LAUNCH PASS** |
 | IAP-RQ-421 / IAP-RQ-422 | Cache repair cannot alter P5 behavior or fixtures | unchanged canonical contract/launch values and existing event/fixture regressions; full hermetic discovery 577/577 | **STATIC PASS; LIVE STILL FORBIDDEN UNTIL REPAIR PASS** |
 
+## 2026-08-26 ICRA-070 repair review correction
+
+| Requirement | Verification target | Implementation / test | Status |
+|---|---|---|---|
+| IAP-RQ-000 / IAP-RQ-423 | A cache-only repair must not conceal an initially incomplete base/overlay file set | `full_file_set_preflight` compares all non-cache paths base-to-overlay and overlay-to-base; `test_cache_repair_journals_initially_missing_base_file_before_unlink` proves typed failure with the cache untouched | **IMPLEMENTED; 1,610 REAL BASE FILES MISSING** |
+| IAP-RQ-423 | Every removal candidate must be durable before mutation and evidence must not predict its own exit | exclusive `overlay_cache_repair_preflight_v2.json`, mandatory recorder seam and `repair_command_binding`; focused runner tests include journal-before-unlink and no-predeclared-exit adversaries | **STATIC PASS; 43/43 RUNNER** |
+| IAP-RQ-423 | Preserve fail-closed scope while determining whether repair is executable | 15/15 contract, 43/43 runner, 21/21 launch and 579/579 full hermetic discovery; external ROS inventory 17,770 unchanged; zero repair/parser/GPU/live/analyzer invocation | **REVIEW CORRECTION READY** |
+
 ## 2026-08-26 ICRA-070 Supervisor review and pre-campaign guard freeze
 
 | Req ID | Reviewed/authorized seam | Evidence or controlling document | Status |

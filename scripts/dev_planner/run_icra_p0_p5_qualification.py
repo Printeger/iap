@@ -32,6 +32,9 @@ PRODUCT_SUBINSTALL_DRIVER_SHA256 = (
 )
 OVERLAY_MANIFEST_PATH = TASK_ROOT / "compact/icra070_overlay_manifest_v2.json"
 REPAIR_EVIDENCE_PATH = TASK_ROOT / "compact/overlay_cache_repair_v1.json"
+REPAIR_PREFLIGHT_PATH = (
+    TASK_ROOT / "compact/overlay_cache_repair_preflight_v2.json"
+)
 ADOPTION_MANIFEST_PATH = TASK_ROOT / "compact/icra070_adoption_manifest_v2.json"
 DEPENDENCY_PREFLIGHT_PATH = TASK_ROOT / "compact/gnss_dependency_preflight.json"
 OVERLAY_COMMAND_PATH = TASK_ROOT / "compact/overlay_install_command.json"
@@ -492,6 +495,101 @@ def python_cache_inventory(root: Path) -> dict[str, object]:
     return {"files": files, "directories": directories}
 
 
+def full_file_set_preflight(
+    overlay_root: Path, base_root: Path, source_root: Path,
+    allowed_differences: dict[str, str], overlay_inventory: dict,
+) -> dict[str, object]:
+    """Compare both directions of the complete non-cache install file set."""
+    overlay_root = Path(overlay_root).resolve()
+    base_root = Path(base_root).resolve()
+    source_root = Path(source_root).resolve()
+    base_inventory = tree_byte_inventory(base_root)
+    overlay_non_cache = {
+        relative: row for relative, row in overlay_inventory.items()
+        if not is_python_cache_path(relative)
+    }
+    base_non_cache = {
+        relative: row for relative, row in base_inventory.items()
+        if not is_python_cache_path(relative)
+    }
+    missing = sorted(set(base_non_cache) - set(overlay_non_cache))
+    extra = sorted(set(overlay_non_cache) - set(base_non_cache))
+    overlay_symlinks = sorted(
+        relative for relative, row in overlay_non_cache.items()
+        if row.get("type") == "symlink"
+    )
+    base_symlinks = sorted(
+        relative for relative, row in base_non_cache.items()
+        if row.get("type") == "symlink"
+    )
+    unauthorized_differences = []
+    alias_source_mismatches = []
+    authorized_differences = []
+    for relative in sorted(set(overlay_non_cache) & set(base_non_cache)):
+        overlay_row = overlay_non_cache[relative]
+        base_row = base_non_cache[relative]
+        if overlay_row == base_row:
+            continue
+        if relative not in allowed_differences:
+            unauthorized_differences.append(relative)
+            continue
+        overlay_path = overlay_root / relative
+        source_path = source_root / allowed_differences[relative]
+        if not source_path.is_file() or source_path.is_symlink() \
+                or _sha256(source_path) != overlay_row.get("sha256") \
+                or source_path.read_bytes() != overlay_path.read_bytes():
+            alias_source_mismatches.append(relative)
+            continue
+        authorized_differences.append(relative)
+    blockers = (
+        missing or extra or overlay_symlinks or base_symlinks
+        or unauthorized_differences or alias_source_mismatches
+    )
+    return {
+        "phase_status": "BLOCKED" if blockers else "READY",
+        "base_inventory": inventory_summary(base_inventory),
+        "base_non_cache_file_count": len(base_non_cache),
+        "overlay_non_cache_file_count": len(overlay_non_cache),
+        "missing_base_files": missing,
+        "extra_overlay_files": extra,
+        "overlay_symlinks": overlay_symlinks,
+        "base_symlinks": base_symlinks,
+        "unauthorized_differences": unauthorized_differences,
+        "alias_source_mismatches": alias_source_mismatches,
+        "authorized_differences": authorized_differences,
+        "full_file_set_complete": not blockers,
+    }
+
+
+def raise_full_file_set_blocker(preflight: dict[str, object]) -> None:
+    checks = (
+        ("missing_base_files", "full_base_file_set_missing"),
+        ("extra_overlay_files", "full_overlay_file_set_extra"),
+        ("overlay_symlinks", "repaired_overlay_contains_symlink"),
+        ("base_symlinks", "base_install_contains_symlink"),
+        ("unauthorized_differences", "unauthorized_overlay_difference"),
+        ("alias_source_mismatches", "overlay_alias_source_mismatch"),
+    )
+    for field, label in checks:
+        values = preflight.get(field)
+        if values:
+            raise LiveRunnerError(f"{label}:{values[0]}")
+
+
+def repair_command_binding() -> dict[str, object]:
+    """Describe the phase command without claiming its eventual outer exit."""
+    return {
+        "argv": [
+            "python3",
+            "scripts/dev_planner/run_icra_p0_p5_qualification.py",
+            "--repair-overlay-cache",
+        ],
+        "cwd": str(REPOSITORY),
+        "environment": expected_live_environment(),
+        "outer_exit_recorded_externally": True,
+    }
+
+
 def inventory_overlay_v2(
     overlay_root: Path, base_root: Path, source_root: Path,
     allowed_differences: dict[str, str], expected_pre_repair: dict,
@@ -521,6 +619,10 @@ def inventory_overlay_v2(
         label = missing[0] if missing else extra[0]
         kind = "missing" if missing else "extra"
         raise LiveRunnerError(f"repaired_overlay_file_set_{kind}:{label}")
+    preflight = full_file_set_preflight(
+        overlay_root, base_root, source_root, allowed_differences, observed,
+    )
+    raise_full_file_set_blocker(preflight)
     hashes = {}
     base_hashes = {}
     differences = []
@@ -552,7 +654,8 @@ def inventory_overlay_v2(
         "file_sha256": hashes,
         "base_file_sha256": base_hashes,
         "authorized_differences": sorted(differences),
-        "non_cache_file_set_complete": True,
+        "non_cache_file_set_complete": preflight["full_file_set_complete"],
+        "full_file_set_preflight": preflight,
         "binary_library_bytes_equal": True,
         "symlink_count": 0,
     }
@@ -562,6 +665,7 @@ def repair_overlay_cache_boundary(
     overlay_root: Path, base_root: Path, source_root: Path,
     allowed_differences: dict[str, str], expected_pre_repair: dict,
     expected_source_cache: dict | None = None,
+    pre_mutation_recorder=None,
 ) -> dict:
     """Remove only enumerated cache artifacts from one frozen failed overlay."""
     overlay_root = Path(overlay_root).resolve()
@@ -574,6 +678,23 @@ def repair_overlay_cache_boundary(
     cache_files, cache_directories = enumerate_python_cache(overlay_root)
     if not cache_files:
         raise LiveRunnerError("failed_overlay_cache_inventory_empty")
+    file_set_preflight = full_file_set_preflight(
+        overlay_root, base_root, source_root,
+        allowed_differences, expected_pre_repair,
+    )
+    journal = {
+        "phase_status": file_set_preflight["phase_status"],
+        "cache_inventory": {
+            "files": cache_files,
+            "directories": cache_directories,
+        },
+        "full_file_set_preflight": file_set_preflight,
+        "mutation_started_at_record_time": False,
+    }
+    if pre_mutation_recorder is None:
+        raise LiveRunnerError("pre_mutation_recorder_required")
+    pre_mutation_recorder(journal)
+    raise_full_file_set_blocker(file_set_preflight)
     for row in cache_files:
         path = overlay_root / row["path"]
         if not path.is_file() or path.is_symlink() \
@@ -991,7 +1112,8 @@ def repair_probe_environment() -> dict[str, str]:
 def repair_overlay_cache() -> dict:
     """Perform the single authorized cache-only repair and freeze v2 proof."""
     require_repair_outputs_absent([
-        REPAIR_EVIDENCE_PATH, OVERLAY_MANIFEST_PATH, ADOPTION_MANIFEST_PATH,
+        REPAIR_PREFLIGHT_PATH, REPAIR_EVIDENCE_PATH,
+        OVERLAY_MANIFEST_PATH, ADOPTION_MANIFEST_PATH,
     ])
     validate_live_environment()
     dirty = subprocess.check_output(
@@ -1013,10 +1135,28 @@ def repair_overlay_cache() -> dict:
     if pre_repair_summary != EXPECTED_FAILED_OVERLAY_INVENTORY:
         raise LiveRunnerError("failed_overlay_frozen_inventory_mismatch")
     source_cache = python_cache_inventory(REPOSITORY / "launch")
+
+    def record_pre_mutation_journal(journal: dict) -> None:
+        _write_json_exclusive(REPAIR_PREFLIGHT_PATH, {
+            "schema_version": "icra070_overlay_cache_repair_preflight_v2",
+            "task_id": "ICRA-070",
+            "git_commit": current_commit,
+            "command": repair_command_binding(),
+            "original_blocker": original_blocker,
+            "retained_icra068": retained_before,
+            "failed_overlay": {
+                "root": str(OVERLAY_INSTALL_ROOT.relative_to(REPOSITORY)),
+                "summary": pre_repair_summary,
+            },
+            "source_cache_inventory": source_cache,
+            **journal,
+        })
+
     repair_proof = repair_overlay_cache_boundary(
         OVERLAY_INSTALL_ROOT, INSTALL_ROOT, REPOSITORY,
         INSTALLED_ALIASES, pre_repair_inventory,
         expected_source_cache=source_cache,
+        pre_mutation_recorder=record_pre_mutation_journal,
     )
     retained_after = inventory_summary(tree_byte_inventory(PRODUCT_TASK_ROOT))
     if retained_after != retained_before:
@@ -1045,18 +1185,13 @@ def repair_overlay_cache() -> dict:
     package_resolution = verify_runtime_package_resolution()
     repair_record = {
         "schema_version": "icra070_overlay_cache_repair_v1",
-        "status": "PASS",
+        "phase_status": "CACHE_REPAIR_AND_PROBE_COMPLETE",
         "task_id": "ICRA-070",
         "git_commit": current_commit,
-        "command": {
-            "argv": [
-                "python3",
-                "scripts/dev_planner/run_icra_p0_p5_qualification.py",
-                "--repair-overlay-cache",
-            ],
-            "cwd": str(REPOSITORY),
-            "environment": expected_live_environment(),
-            "exit_code": 0,
+        "command": repair_command_binding(),
+        "pre_mutation_journal": {
+            "path": str(REPAIR_PREFLIGHT_PATH.relative_to(REPOSITORY)),
+            "sha256": _sha256(REPAIR_PREFLIGHT_PATH),
         },
         "original_blocker": original_blocker,
         "retained_icra068": {
@@ -1126,6 +1261,7 @@ def validate_overlay_manifest(current_commit: str) -> dict:
     except (OSError, json.JSONDecodeError) as exc:
         raise LiveRunnerError("overlay_manifest_malformed") from exc
     for path, label in (
+        (REPAIR_PREFLIGHT_PATH, "cache_repair_preflight"),
         (REPAIR_EVIDENCE_PATH, "cache_repair_evidence"),
         (DEPENDENCY_PREFLIGHT_PATH, "dependency_preflight"),
         (OVERLAY_COMMAND_PATH, "original_overlay_install_command"),
@@ -1138,12 +1274,23 @@ def validate_overlay_manifest(current_commit: str) -> dict:
     except (OSError, json.JSONDecodeError) as exc:
         raise LiveRunnerError("cache_repair_evidence_malformed") from exc
     original_blocker = verify_original_blocker_evidence()
+    try:
+        repair_preflight = json.loads(REPAIR_PREFLIGHT_PATH.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        raise LiveRunnerError("cache_repair_preflight_malformed") from exc
     retained_summary = inventory_summary(tree_byte_inventory(PRODUCT_TASK_ROOT))
     pre_repair = repair.get("failed_overlay", {}).get("pre_repair_inventory")
     source_cache = repair.get("source_cache_inventory")
     if not (
         repair.get("schema_version") == "icra070_overlay_cache_repair_v1"
-        and repair.get("status") == "PASS"
+        and repair.get("phase_status") == "CACHE_REPAIR_AND_PROBE_COMPLETE"
+        and repair.get("command") == repair_command_binding()
+        and repair.get("pre_mutation_journal") == {
+            "path": str(REPAIR_PREFLIGHT_PATH.relative_to(REPOSITORY)),
+            "sha256": _sha256(REPAIR_PREFLIGHT_PATH),
+        }
+        and repair_preflight.get("phase_status") == "READY"
+        and repair_preflight.get("mutation_started_at_record_time") is False
         and repair.get("git_commit") == current_commit
         and repair.get("original_blocker") == original_blocker
         and repair.get("failed_overlay", {}).get("pre_repair_summary")
@@ -1167,16 +1314,18 @@ def validate_overlay_manifest(current_commit: str) -> dict:
         OVERLAY_INSTALL_ROOT, INSTALL_ROOT, REPOSITORY,
         INSTALLED_ALIASES, pre_repair,
     )
-    if inventory != repair.get("repair_proof"):
-        repair_proof = dict(repair.get("repair_proof") or {})
-        for key in (
-            "removed_cache_files", "removed_cache_inventory",
-            "removed_cache_directories", "source_cache_inventory",
-            "source_cache_unchanged",
-        ):
-            repair_proof.pop(key, None)
-        if inventory != repair_proof:
-            raise LiveRunnerError("repaired_overlay_inventory_binding_mismatch")
+    recorded_repair_proof = repair.get("repair_proof")
+    if not isinstance(recorded_repair_proof, dict):
+        raise LiveRunnerError("repaired_overlay_inventory_binding_mismatch")
+    inventory_core = dict(recorded_repair_proof)
+    for key in (
+        "removed_cache_files", "removed_cache_inventory",
+        "removed_cache_directories", "source_cache_inventory",
+        "source_cache_unchanged",
+    ):
+        inventory_core.pop(key, None)
+    if inventory != inventory_core:
+        raise LiveRunnerError("repaired_overlay_inventory_binding_mismatch")
     current_overlay_summary = inventory_summary(
         tree_byte_inventory(OVERLAY_INSTALL_ROOT)
     )
@@ -1221,7 +1370,7 @@ def validate_overlay_manifest(current_commit: str) -> dict:
         "sha256": _sha256(REPAIR_EVIDENCE_PATH),
     }
     expected = build_overlay_manifest_payload(
-        current_commit, dependency, inventory, aliases,
+        current_commit, dependency, recorded_repair_proof, aliases,
         evidence_bindings, retained_artifacts,
         repair_binding, probe,
     )
