@@ -1,5 +1,17 @@
 # ICRA 2027 Conference Scope — User-owned P0 -> P4-v2 -> P5 recovery
 
+## Development-first acceleration — 2026-08-26
+
+User decision `USER-ICRA-ROUTE-20260826-002`, bound to pushed anchor
+`b24a330d79d6e85e8080cf2a359bb1a18765e5a5`, keeps `P0_P4_V2_P5`, all required modules, the provider-only
+interior maximum-risk primary claim, formal arms and user-owned campaign barrier unchanged. It changes only the
+development order: first build a runnable end-to-end vertical slice and run one development live smoke in the
+same task, then diagnose effect size and optimize. ICRA-071 repair is retained as a non-blocking backlog item.
+
+“Runnable first” does not mean “qualified”: the vertical slice may use provisional development-only parameters
+and makes no effect, qualification or campaign claim. GPU preflight, required-process health, occupancy/EGO/P5
+authority, fail-closed behavior and retained-artifact protection remain mandatory.
+
 ## User route restoration — 2026-08-26
 
 The user has explicitly restored P4 as the indispensable conference treatment and frozen the active route as
@@ -24,10 +36,9 @@ ICRA-070 is `SUPERSEDED_UNQUALIFIED_BY_USER_ROUTE_DECISION`. Its P0+P5 code/evid
 future matched control; replacement/parser/GPU/live/analyzer are still `0/0/0/0/0`, so it is neither
 qualification PASS nor scientific FAIL. Existing build/install and all raw evidence remain retained.
 
-The only next implementation task is ICRA-071 repository-local user-route guard hardening. It performs no P4
-product change, ROS/GPU/live execution or campaign. P4-v2 implementation starts only after ICRA-071 Review
-PASS. Campaign remains blocked through P4-v2 confirmatory, G0D lineage, prospective P5 integration and a new
-explicit user campaign decision.
+The only next implementation task is now ICRA-072 end-to-end vertical-slice development. ICRA-071 remains
+`REQUEST_CHANGES` but no longer blocks product integration under user decision 002. Campaign remains blocked
+through P4-v2 confirmatory, G0D lineage, prospective P5 integration and a new explicit user campaign decision.
 
 The former P0+P5 contingency section below is preserved as historical evidence. Where it conflicts with this
 restoration or the route lock, it has no active-task authority.

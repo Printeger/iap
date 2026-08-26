@@ -1,5 +1,17 @@
 # ICRA 2027 P0 -> P4-v2 -> P5 科学纠偏实施计划
 
+## Development-first acceleration — 2026-08-26
+
+用户决定 `USER-ICRA-ROUTE-20260826-002`（pushed anchor
+`b24a330d79d6e85e8080cf2a359bb1a18765e5a5`）保持研究问题、required modules、primary claim、arms、
+fallback 与 campaign authority 不变，但把早期多轮审核合并进 ICRA-072：同一任务完成可运行的
+`P0 -> P4-v2 -> EGO -> P5` vertical slice 和一次 development live smoke。效果诊断、针对性优化、
+power/preregistration/held-out 均后置。ICRA-071 repair 保留为非阻塞 backlog。
+
+开发优先不等于科学 PASS。ICRA-072/073 只能证明接口、进程和 lineage 跑通；不得声称降低风险、
+qualification 或 campaign readiness。GPU preflight、required-process fail-closed、occupancy/EGO/P5 authority
+与 artifact retention 继续强制。
+
 ## User-owned active plan — 2026-08-26
 
 用户以 `USER-ICRA-ROUTE-20260826-001` 恢复 `P0_P4_V2_P5` 为唯一研究主线。决策绑定 pushed
@@ -10,11 +22,10 @@ anchor `48caa9ddf24990accb65e2ad230d12821487793c`；偏差证据、P4-v2 科学�
 执行顺序冻结为：
 
 ```text
-ICRA-071 user-route repository guard
-  -> ICRA-072 source decomposition / snapshot replay
-    -> ICRA-073 controllable primary/mirror/null fixtures
-      -> ICRA-074 bottleneck + time-aware P4-v2
-        -> ICRA-075 exploratory / power inputs
+ICRA-072 end-to-end vertical slice + development live smoke
+  -> ICRA-073 effect diagnostics
+    -> ICRA-074 targeted optimization
+      -> ICRA-075 exploratory / power inputs
           -> ICRA-076 preregistration freeze
             -> ICRA-077 held-out confirmation
               -> ICRA-078 G0D lineage
@@ -30,7 +41,8 @@ mean/length/latency 为 secondary，whole-path maximum 为 non-inferiority。确
 ICRA-070 以 `SUPERSEDED_UNQUALIFIED_BY_USER_ROUTE_DECISION` 关闭，不取得 P5 qualification verdict；
 其 P0+P5 实现和证据作为 matched control 保留。当前 build/install、raw evidence 与受保护 PDF 不清理。
 原 P0+P5 专用 ICRA-071 计划在激活前被本计划取代；新 ICRA-071 只实现 user-route/state/doc/RQ 本地
-守卫，Review PASS 前不得修改 P4 产品代码。
+守卫。其 Review PASS 前不得修改 P4 产品代码是 decision 001 的旧顺序；decision 002 已明确由
+ICRA-072 独立授权 bounded P4-v2 development surface。
 
 研究路线、required modules、primary claim、arms、fallback 和 campaign activation 的所有权为 USER。
 Supervisor 遇到科学 NO_GO 只能进入 `BLOCKED_AWAITING_USER_RESEARCH_DECISION` 并提出建议，不能自动
@@ -83,9 +95,9 @@ non-overwriting complete overlay：从 retained ICRA-068 复制全部 non-cache 
 aliases；静态闭合后才可执行尚未使用的 parser/GPU/`-003` live/analyzer sequence。该未完成资格现由用户
 路线决定 supersede；build/install、raw evidence 与未跟踪 PDF 继续保留，不得清理。
 
-在被 supersede 前的计划中，ICRA-070 PASS 后仍不得启动 campaign，而要先执行纯静态 guard。当前新的
-ICRA-071 按 `docs/icra27/ICRA_CROSS_LAYER_GUARD_PLAN.md` 建立 user-route/state/plan/RQ 一致性 verifier、
-relative hooks 和 adversarial tests；Review PASS 只允许另行签发 ICRA-072，不允许签发 campaign。
+在被 supersede 前的计划中，ICRA-070 PASS 后仍不得启动 campaign，而要先执行纯静态 guard。当前
+ICRA-071 已实现但 Review REQUEST_CHANGES。用户决定 002 将其 repair 降为非阻塞 backlog，并直接授权
+ICRA-072 vertical slice；这不是 ICRA-071 PASS，也不允许签发 campaign。
 
 下方 P0 -> P4 -> P5 计划保留为 P4-v1 的审计记录。其 authority separation、collision contract 和
 metrics-only 隔离继续适用；v1 objective、G0C estimand、fallback ownership 和任务顺序由上方 P4-v2

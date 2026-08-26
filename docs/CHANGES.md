@@ -3,6 +3,16 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- docs(icra-development-first): IAP-RQ-000 / IAP-RQ-423 / IAP-RQ-424 — user decision
+  `USER-ICRA-ROUTE-20260826-002`, bound to pushed anchor `b24a330d`, keeps the active
+  `P0_P4_V2_P5` route, research contract and campaign authority unchanged while replacing the review-heavy
+  early sequence with one ICRA-072 end-to-end vertical slice and development live smoke. ICRA-071 repair is
+  retained as non-blocking governance backlog; effect diagnosis and targeted optimization move to ICRA-073/074.
+  Occupancy/EGO/P5 authority, GPU/process preflight, fail-closed evidence and artifact retention remain mandatory;
+  no effect, qualification or campaign claim is authorized. Current repository verifier and hooksPath check
+  pass; the decision-001/task-071-coupled guard suite is truthfully 21/33 after the decision change and remains
+  non-blocking governance debt.
+
 - review(icra-071-route-guard): IAP-RQ-000 / IAP-RQ-423 / IAP-RQ-424 — Supervisor Review of
   `9b813b0...96c5cd8` returns `REQUEST_CHANGES`. Focused guard tests pass 33/33, but the mandatory full discovery
   is 614/616; the pre-commit ownership rule deadlocks the required Supervisor §8.6 handoff, active max-risk

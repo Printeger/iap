@@ -1,5 +1,16 @@
 # ICRA 2027 P0 -> P4-v2 -> P5 计划复审
 
+## Development-first user decision — 2026-08-26
+
+User decision `USER-ICRA-ROUTE-20260826-002` at pushed anchor
+`b24a330d79d6e85e8080cf2a359bb1a18765e5a5` accepts the engineering risk of deferring nonessential early
+reviews. The reviewed plan now combines one end-to-end P0/P4-v2/EGO/P5 vertical slice and one development live
+smoke in ICRA-072 before effect optimization. ICRA-071 remains REQUEST_CHANGES as a non-blocking governance backlog.
+
+This decision does not relax runtime safety or scientific claim boundaries: required-process/GPU fail-closed,
+occupancy and EGO feasibility authority, P5 final/runtime gates, artifact retention, held-out separation and
+explicit user campaign approval remain mandatory.
+
 ## User-owned recovery verdict — 2026-08-26
 
 **Verdict: retain the top-level P0 -> P4 -> EGO -> P5 architecture; supersede the P0+P5 main-route decision;
@@ -26,9 +37,10 @@ ownership even though `564dd6a` conformed to that old text. The USER now exclusi
 required modules, claim, arms, route and fallback activation. A future scientific NO_GO stops at
 `BLOCKED_AWAITING_USER_RESEARCH_DECISION`; it cannot create an automatic alternate task.
 
-ICRA-070 is superseded unqualified and retained as control-arm engineering. The next gate is the new
-ICRA-071 repository-local user-route guard; it must pass Review before any P4-v2 product work. G0D, P5
-integration and campaign remain forbidden until the roadmap gates and explicit user campaign approval.
+ICRA-070 is superseded unqualified and retained as control-arm engineering. Decision 002 supersedes the former
+ICRA-071-first ordering: that guard repair remains non-blocking backlog while ICRA-072 starts the development
+P4-v2 vertical slice. Formal G0D, prospective P5 qualification and campaign remain forbidden until the roadmap
+gates and explicit user campaign approval.
 
 ## Superseded final P4-v1 verdict and contingency decision — 2026-08-25
 

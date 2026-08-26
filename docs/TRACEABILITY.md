@@ -1,12 +1,20 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-26 development-first full-flow decision
+
+| Req ID | Decision seam | Controlling evidence and disposition | Status |
+|---|---|---|---|
+| IAP-RQ-000 / IAP-RQ-424 | Remove unnecessary early Review blocking without falsely accepting the current guard | User decision `USER-ICRA-ROUTE-20260826-002`, anchor `b24a330d`; current verifier/hooksPath PASS, while decision-001/task-071-coupled focused tests are 21/33; ICRA-071 remains `REQUEST_CHANGES` as non-blocking governance backlog | **DEFERRED / NONBLOCKING** |
+| IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 | Run the active P0 -> P4-v2 -> EGO -> P5 path before effect optimization | Route lock, `AGENT_STATE.md`, `NEXT_TASK.md`, active scope/plan/review and system flow authorize one ICRA-072 vertical slice, focused build/tests and final registered development smoke without intermediate Supervisor Review | **ICRA-072 TASK_READY / DEVELOPMENT ONLY** |
+| IAP-RQ-423 / IAP-RQ-424 | Retain hard authority and scientific boundary | Occupancy before risk; EGO feasibility; P5 final before publish and runtime; GPU/process preflight; fail-closed evidence; no effect/qualification/campaign claim | **MANDATORY / CAMPAIGN BLOCKED** |
+
 ## 2026-08-26 ICRA-071 Supervisor Review
 
 | Req ID | Reviewed seam | Supervisor evidence and disposition | Status |
 |---|---|---|---|
 | IAP-RQ-000 / IAP-RQ-424 | Repository-local hook and Supervisor Review lifecycle | Current verifier/hook-path PASS and focused 33/33; temporary §8.6 handoff fails `BUILDER_SUPERVISOR_FILE_STAGED`; unknown `IAP-RQ-999` is accepted | **REQUEST_CHANGES** |
 | IAP-RQ-423 / IAP-RQ-424 | Route/claim protection | Temporary active-scope max/bottleneck-to-mean drift returns repository-consistent PASS | **REQUEST_CHANGES** |
-| IAP-RQ-000 / IAP-RQ-424 | Complete hermetic discovery | Builder's sole full discovery is 614/616, exit 1; two ICRA-070 tests depend on retained live state and must be fixture-isolated without artifact mutation | **BLOCKED / REPAIR AUTHORIZED** |
+| IAP-RQ-000 / IAP-RQ-424 | Complete hermetic discovery | Builder's sole full discovery is 614/616, exit 1; two ICRA-070 tests depend on retained live state and must be fixture-isolated without artifact mutation | **REPAIR DEFERRED / NONBLOCKING FOR ICRA-072** |
 
 ## 2026-08-26 ICRA-071 repository-local route guard implementation
 
@@ -25,7 +33,7 @@
 | IAP-RQ-423 / IAP-RQ-424 | Preserve the P0 -> P4 -> EGO -> P5 authority architecture while correcting P4-v1 internal science | Audit of r6 15/15 runs, 192/192 decisions, max `136/56/0`, mean `174/17/1`, 57 unique path pairs; occupied-support, guide-domain, objective/estimand and pseudo-replication diagnosis | **P4-v1 NO_GO RETAINED / P4-v2 REQUIRED** |
 | IAP-RQ-000 / IAP-RQ-424 | A scientific NO-GO cannot automatically activate a contingency | `AGENTS.md` §8.7; route-lock `scientific_no_go_transition`; ICRA-071 guard plan and `NEXT_TASK.md` | **RULE FROZEN / GUARD IMPLEMENTATION AUTHORIZED** |
 | IAP-RQ-000 / IAP-RQ-424 | Repository-local route/state/doc/RQ guards prevent ordinary automation drift | ICRA-071 implementation at `56b2fdb`; relative `.githooks` installed; Supervisor Review finds lifecycle/claim/RQ/full-discovery defects and reissues a bounded same-Gate repair | **IMPLEMENTED / REVIEW REQUEST_CHANGES** |
-| IAP-RQ-423 / IAP-RQ-424 | P4-v2 confirmation precedes G0D/P5/campaign | Roadmap ICRA-072..080; provider-only interior `D_peak`, `b=2r`, SESOI/repeatability threshold, independent 30–60 seed-runs per scene and exact one-sided gate | **PLANNED / CAMPAIGN BLOCKED** |
+| IAP-RQ-423 / IAP-RQ-424 | Development flow precedes effect diagnosis, optimization and confirmation; confirmation still precedes G0D/campaign | Decision 002 roadmap ICRA-072..080; ICRA-072 flow, ICRA-073 diagnostics, ICRA-074 optimization, then provider-only interior `D_peak`, `b=2r`, SESOI/repeatability and independent confirmation | **ICRA-072 TASK_READY / CAMPAIGN BLOCKED** |
 | IAP-RQ-000 / IAP-RQ-424 | Preserve unqualified control engineering and user/scientific artifacts | ICRA-070 `SUPERSEDED_UNQUALIFIED`; replacement/parser/GPU/live/analyzer `0/0/0/0/0`; ICRA-068/070 build/install, raw evidence and PDF retained | **NO CLEANUP** |
 
 ## Superseded historical record — 2026-08-26 ICRA-070 static-repair Supervisor review

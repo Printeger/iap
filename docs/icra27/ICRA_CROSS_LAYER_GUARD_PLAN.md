@@ -1,6 +1,6 @@
 # ICRA-071 user-owned research-route guard plan
 
-Status: **Supervisor-frozen task plan / active only through `NEXT_TASK.md`**
+Status: **Implemented / Review REQUEST_CHANGES / non-blocking backlog under user decision 002**
 Requirements: `IAP-RQ-000`, `IAP-RQ-423`, `IAP-RQ-424`
 
 ## Purpose and authority boundary
@@ -19,7 +19,10 @@ USER route lock
     -> pre-commit + pre-push + commit-msg guards
       -> focused mutation tests
         -> Supervisor Review
-          -> only then ICRA-072 P4-v2 observability work
+          -> governance backlog repair
+
+USER decision 002
+  -> ICRA-072 development vertical slice may proceed independently of that backlog
 ```
 
 ## Canonical route-lock parser
@@ -52,7 +55,8 @@ It requires no ROS, GPU, build/install, network or untracked input and checks:
 1. `AGENT_STATE.md.conference_route` equals `active_route` and the required modules/claim/campaign barrier agree
    with the route lock and active scope/plan headers.
 2. Only one task and role are active. `TASK_READY` points to the same task/gate/owner in `NEXT_TASK.md`.
-3. ICRA-071 permits only governance files. P4 product code remains forbidden until ICRA-071 Review PASS.
+3. While ICRA-071 itself is active it permits only governance files. Under decision 002, ICRA-072 independently
+   permits only the bounded development vertical-slice product surface in its task; this does not mark the guard PASS.
 4. P0+P5 is named only as `P0_P5_CONTROL` or immutable history, never as the active conference route.
 5. P4-v1 remains `SCIENTIFIC_NO_GO`; P4-v2 remains unqualified. No document may relabel old evidence.
 6. Campaign state remains blocked before ICRA-079 Review PASS and a distinct user campaign decision.
@@ -138,8 +142,9 @@ ICRA-071 passes Builder handoff only when:
 6. focused tests and complete hermetic static discovery pass;
 7. no P4 product, ROS, GPU, live, campaign, build/install or retained evidence mutation occurs.
 
-Supervisor Review still decides PASS. A PASS authorizes only ICRA-072 observability/decomposition planning,
-not P4-v2 application, G0D, P5 qualification or campaign.
+User decision `USER-ICRA-ROUTE-20260826-002` no longer makes this Review PASS a prerequisite for ICRA-072.
+The repair remains required governance debt, but ICRA-072 may build the development-only end-to-end vertical
+slice. This does not authorize a scientific/effect claim, G0D qualification, P5 qualification or campaign.
 
 ## Local-enforcement limitation
 

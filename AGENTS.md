@@ -167,9 +167,11 @@ Implementation must follow docs/spec/conventions.md and docs/spec/talk_spec.md a
   结果降级 required module、claim、arm 或 evidence contract。
 - 用户明确决定后，Supervisor 才能在同一个路线恢复 changeset 中更新 route lock、scope/plan/state、
   requirement/traceability 和下一任务。若用户没有批准 fallback，旧路线保持 blocked，而不是被删除。
-- ICRA-071 必须提供 repository-local verifier 和相同语义的 pre-commit、pre-push、commit-msg guards，
-  检查 route/state/plan 一致性、代码文档同步和 requirement IDs。guard 未通过 Review 前不得开始 P4-v2
-  产品开发。
+- ICRA-071 提供 repository-local verifier 和 pre-commit、pre-push、commit-msg guards，检查
+  route/state/plan 一致性、代码文档同步和 requirement IDs。用户决定
+  `USER-ICRA-ROUTE-20260826-002` 将其未完成 repair 降为非阻塞 governance backlog，并明确允许先执行
+  ICRA-072 端到端 P4-v2 vertical slice；这不把当前 guard 标记为 Review PASS，也不授权 campaign 或
+  scientific/effect claim。
 - repository-local hook 是防误操作机制，不是安全边界：具有仓库写权限的进程可修改 hook 或使用
   `--no-verify`。只有 protected remote branch 加独立用户审批身份才能提供不可由同权限 Agent 绕过的
   强制；在未部署该外部门前，任何文档不得把本地 guard 宣称为 cryptographic/security enforcement。

@@ -25,9 +25,11 @@
 ### IAP-RQ-000: Repo guardrails
 - [x] 本仓库内加入 AGENTS.md（禁止改 ../glim，强制维护 CHANGES/TRACEABILITY）
 - [x] 加入 docs/CHANGES.md、docs/TRACEABILITY.md、docs/REQS.md（本文件）
-- [ ] 完成 repository-local guard 验收：ICRA-071 已安装 relative `.githooks` 并通过 focused 33/33，
+- [ ] 完成 repository-local guard 验收：ICRA-071 handoff 时 relative `.githooks` 与 focused 33/33 已实现，
   但 Supervisor Review 发现 §8.6 handoff deadlock、active claim/RQ-ID 漏检及 full discovery 614/616；
-  同 Gate repair 通过前保持未验收
+  decision 002 后当前 verifier 仍 PASS，但写死 decision 001/task 071 的 focused suite 为 21/33。repair
+  仍未验收；用户决策 `USER-ICRA-ROUTE-20260826-002` 将其保留为 non-blocking governance backlog，不再
+  阻塞 ICRA-072 开发性全流程垂直切片
 
 Acceptance:
 - 能在本地 commit/push 前被相同语义的 hook 拦截；无 bypass 环境变量；明确本地 hook 不是同权限
@@ -456,7 +458,7 @@ Acceptance:
 - Planner chooses safer path even if longer when integrity violated.
 
 ### IAP-RQ-423 P4 collision-guide planning and P5 lineage
-Status: **PLANNED / NOT_IMPLEMENTED**
+Status: **P4-v1 SCIENTIFIC_NO_GO RETAINED / P4-v2 DEVELOPMENT AUTHORIZED**
 
 Source: `docs/icra27/ICRA_SCOPE.md` and the 2026-08-20 Supervisor scope pivot. This requirement extends collision-guide planning evidence; it does not replace or verify the IAP-RQ-422 PL/AL admission rule.
 
@@ -479,10 +481,10 @@ Acceptance:
 - The selected decision/hash reaches the final B-spline, and a P5 final rejection produces zero normal publication.
 
 ### IAP-RQ-424 User-owned ICRA research route and P4-v2 scientific recovery
-Status: **ROUTE LOCK DOCUMENTED / REPOSITORY GUARD IMPLEMENTED / REVIEW REQUEST_CHANGES**
+Status: **DEVELOPMENT-FIRST ROUTE LOCKED / ICRA-072 TASK_READY / GUARD REPAIR NONBLOCKING**
 
 Source: `docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md` and user decision
-`USER-ICRA-ROUTE-20260826-001` bound to `48caa9ddf24990accb65e2ad230d12821487793c`.
+`USER-ICRA-ROUTE-20260826-002` bound to `b24a330d79d6e85e8080cf2a359bb1a18765e5a5`.
 
 - [x] Freeze `route_owner=USER`, active `P0_P4_V2_P5`, required modules, research question, primary claim,
   formal arms, gate sequence, fallback policy and campaign-approval boundary in one machine-readable Markdown
@@ -490,13 +492,14 @@ Source: `docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md` and 
 - [x] Preserve P4-v1 G0C as immutable `SCIENTIFIC_NO_GO`; never relabel it as PASS or reuse it as P4-v2
   confirmatory evidence.
 - [x] Define NO-GO transition as `BLOCKED_AWAITING_USER_RESEARCH_DECISION`, with no automatic contingency task.
-- [ ] Complete ICRA-071 acceptance for the implemented strict parser/verifier/staged guard: repair Supervisor
-  handoff, exact active claim/module binding and nonexistent requirement-ID rejection.
+- [ ] Complete the non-blocking ICRA-071 governance backlog: repair Supervisor handoff, exact active
+  claim/module binding and nonexistent requirement-ID rejection. It is no longer a prerequisite for ICRA-072.
 - [x] Install and verify repository-relative pre-commit, pre-push and commit-msg hooks with no bypass variable.
 - [ ] Complete adversarial coverage and one zero-failure hermetic discovery; focused coverage is 33/33, but
   Review reproduced claim/RQ-ID gaps and the current full discovery is 614/616.
-- [ ] Add P4-v2 provider/occupied/unknown support decomposition while preserving the v1 scalar query for replay.
-- [ ] Implement provider-only interior bottleneck/lexicographic time-aware P4-v2 and its controllability fixtures.
+- [ ] In ICRA-072, add P4-v2 provider/occupied/unknown support decomposition while preserving the v1 scalar
+  query for replay, implement the minimal provider-only interior bottleneck/lexicographic time-aware search,
+  and run the P0 -> P4-v2 -> EGO -> P5 development vertical slice before effect optimization.
 - [ ] Freeze SESOI, endpoint buffer `b=2r`, independent 30–60 seed-run sample size per scene and held-out protocol
   before confirmatory execution.
 

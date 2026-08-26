@@ -1,5 +1,9 @@
 # ICRA System Flow — User-owned P0 -> P4-v2 -> P5 recovery
 
+> Development-first update 2026-08-26: user decision `USER-ICRA-ROUTE-20260826-002`, anchored at
+> `b24a330d79d6e85e8080cf2a359bb1a18765e5a5`, authorizes ICRA-072 to connect this complete vertical slice before
+> effect optimization. ICRA-071 repair is non-blocking backlog; campaign and scientific claims remain blocked.
+
 > User route restored 2026-08-26 by `USER-ICRA-ROUTE-20260826-001`, bound to pushed anchor `48caa9d`.
 
 > Current status: P0 Gate-0B `PASS`; P4-v1 `G0C SCIENTIFIC_NO_GO / IMMUTABLE`; P4-v2 `NOT_STARTED`;
@@ -10,7 +14,7 @@
 
 The active target is again `P0 advisory snapshot -> P4-v2 collision-guide preference -> EGO planning/refinement
 -> P5 final -> normal publish -> P5 runtime`. The diagram below retains the valid external P4 seam and authority
-split. Orange P4 internals remain planned until ICRA-071 governance Review PASS and the later P4-v2 tasks.
+split. Orange P4 internals are the active ICRA-072 development surface; their effect remains unqualified.
 
 P4-v2 changes the internal risk decomposition, objective, time-aware search labels, controllable guide domain
 and statistical estimand. It does not let risk override occupancy, EGO feasibility or P5 hard gates. The exact
@@ -61,7 +65,7 @@ flowchart TB
     PAIR --> ORIGINAL --> PROFILE
     PAIR --> RISK --> PROFILE
     PROFILE --> DECISION
-    DECISION -->|held-out P4-v2 gates pass| RISK_SELECTED["Risk guide selected"]:::advisory
+    DECISION -->|tagged development profile<br/>or held-out P4-v2 gates pass| RISK_SELECTED["Risk guide selected"]:::advisory
     DECISION -->|fallback or metrics-only| FALLBACK
     DECISION -->|identity / occupancy epoch mismatch| SAFE
   end
@@ -171,15 +175,15 @@ The existing `p4` profile does not enable P5. The existing `all` profile enables
 | P4-G0A | P0 Gate-0B PASS; red fixture reviewed | Closed/no/open/multi scan cases PASS | `PASS` (historical closed route) |
 | P4-G0B | G0A PASS | Metrics-only pair, identity and 200/200 profiles; no application | `PASS` (historical closed route) |
 | P4-G0C | G0B PASS | Metrics-only calibration and positive mean/max improvement | P4-v1 `SCIENTIFIC_NO_GO`: max improvement Q10 = 0; v1 route closed, v2 remains prospective |
-| User-route guard | User route lock, recovery audit and `ICRA-071` task agree | Route/state/plan verifier, relative hooks, requirement-ID/docs checks and adversarial tests PASS | `ICRA-071` is the authorized next task; activation is controlled only by `AGENT_STATE.md` |
+| Development vertical slice | User route lock and decision 002 agree with state/task/plan | P0/P4-v2/EGO/P5 focused checks and one registered development smoke preserve full lineage | `ICRA-072 TASK_READY`; effect and qualification remain unclaimed |
 | P4-G0D | P4-v2 held-out confirmatory PASS | Post-freeze selected hash reaches B-spline and P5 | Planned as `ICRA-078`; P4-v1 G0D remains unauthorized |
 | P5 system gate | ICRA-078 Review PASS and a separately issued prospective integration task | Treatment/control SAFE_NORMAL, final reject/no-publish and runtime-fail identities PASS | Planned as `ICRA-079`; ICRA-070 is superseded unqualified and retained only as control-arm engineering |
 | Campaign | ICRA-079 Supervisor Review PASS plus a distinct user decision | Fresh GPU and `≥40 GiB` free plus frozen ICRA-080 task | Explicitly blocked; no automatic transition from any scientific or qualification gate |
 
 Passing one row authorizes only Supervisor review and the next explicit task. It does not automatically move a later row to PASS.
 
-ICRA-004 remains P0-only. P1/P2/P3/P4/P5 stayed disabled in its smoke. P0 Gate-0B has passed; current P4-v2
-product work is additionally blocked until ICRA-071 Review PASS.
+ICRA-004 remains P0-only. P1/P2/P3/P4/P5 stayed disabled in its smoke. P0 Gate-0B has passed; decision 002
+authorizes current P4-v2 product work in ICRA-072 without accepting the ICRA-071 guard repair.
 
 ## Identity and fallback flow
 
@@ -195,17 +199,23 @@ P5 may acquire a later P0 generation. Evidence stores P4 and P5 generation IDs s
 
 ## Configuration flow
 
-The planned composite profile enables P0, P4, P5 final and P5 runtime. It fixes `planner_enable_all_safety=false` and `manager/use_distinctive_trajs=false`.
+The ICRA-072 development composite profile enables P0, P4-v2, P5 final and P5 runtime. It fixes
+`planner_enable_all_safety=false` and `manager/use_distinctive_trajs=false`.
 
 P1, P2 and P3 are disabled at both high- and low-level switches. Their metrics, debug, fanout and RViz paths are also off, while source, tests, targets and legacy profiles remain.
 
 G0B and G0C force `p4.metrics_only=true` and `selection_applied=false`. They record both guides while injecting the original guide.
 
-Only G0D and the frozen treatment may set `p4.metrics_only=false`. They must bind the frozen threshold-registry hash before applying the risk guide.
+ICRA-072 may set `p4.metrics_only=false` only in its explicitly tagged development profile to prove flow and
+lineage; this is not G0D or a qualified treatment. G0D and the later frozen treatment must separately bind the
+frozen threshold-registry hash before any formal application.
 
-The resolver must fail on an explicit override that violates this profile. Neither the composite profile nor `p4.metrics_only` exists at the audited commit.
+The resolver must fail on an explicit override that violates this profile. The ICRA-072 task creates the new
+development profile prospectively; it does not rewrite the audited historical state.
 
-The only permitted metrics-only override belongs to registered G0B/G0C qualification arms. G0D and formal treatment require metrics-only false and a frozen threshold hash.
+The only historical qualification metrics-only override belongs to registered G0B/G0C arms. ICRA-072 may use
+false only in the tagged development profile without a science claim; G0D and formal treatment separately
+require metrics-only false and a frozen threshold hash.
 
 ## Historical result placement
 

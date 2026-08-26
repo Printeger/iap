@@ -1,8 +1,21 @@
 # ICRA P0 -> P4 -> P5 deviation audit and scientific recovery roadmap
 
-Status: **USER-OWNED ROUTE LOCK / SUPERVISOR AUDIT / P4-v2 RECOVERY REQUIRED**
+Status: **USER-OWNED ROUTE LOCK / DEVELOPMENT-FIRST P4-v2 END-TO-END RECOVERY**
 Decision date: 2026-08-26
 Requirements: `IAP-RQ-000`, `IAP-RQ-423`, `IAP-RQ-424`
+
+## Development-first acceleration decision — 2026-08-26
+
+User decision `USER-ICRA-ROUTE-20260826-002`, bound to pushed anchor
+`b24a330d79d6e85e8080cf2a359bb1a18765e5a5`, keeps the research question, required modules, primary claim,
+formal arms, scenes, fallback and campaign authority unchanged, but replaces the review-heavy early gate sequence.
+The immediate objective is a runnable `P0 -> P4-v2 -> EGO -> P5` vertical slice and then one development live
+smoke. Effect-size diagnosis, targeted optimization, power inputs and confirmatory science follow only after the
+flow works. ICRA-071 repair remains a non-blocking governance backlog item.
+
+This acceleration does not authorize a campaign or a scientific/effect claim. GPU preflight, required-process
+health, occupancy-before-risk, EGO motion-feasibility authority, P5 final/runtime gates, fail-closed evidence and
+artifact retention remain mandatory.
 
 ## 1. Audit identity and immutable anchors
 
@@ -60,10 +73,9 @@ its protected research fields.
     "FLAT_NULL"
   ],
   "gate_sequence": [
-    "ICRA-071_ROUTE_GUARD",
-    "ICRA-072_RISK_DECOMPOSITION_AND_REPLAY",
-    "ICRA-073_CONTROLLABILITY_FIXTURES",
-    "ICRA-074_P4_V2_SEARCH",
+    "ICRA-072_END_TO_END_VERTICAL_SLICE_AND_LIVE_SMOKE",
+    "ICRA-073_EFFECT_DIAGNOSTICS",
+    "ICRA-074_TARGETED_OPTIMIZATION",
     "ICRA-075_EXPLORATORY_AND_POWER_INPUTS",
     "ICRA-076_PREREGISTRATION_FREEZE",
     "ICRA-077_HELD_OUT_CONFIRMATION",
@@ -75,25 +87,26 @@ its protected research fields.
   "fallback_policy": "PROPOSAL_ONLY_USER_ACTIVATION_REQUIRED",
   "scientific_no_go_transition": "BLOCKED_AWAITING_USER_RESEARCH_DECISION",
   "campaign_activation": "USER_APPROVAL_AFTER_ICRA079_REVIEW_PASS",
-  "approval_anchor": "48caa9ddf24990accb65e2ad230d12821487793c",
-  "user_decision_id": "USER-ICRA-ROUTE-20260826-001",
+  "approval_anchor": "b24a330d79d6e85e8080cf2a359bb1a18765e5a5",
+  "user_decision_id": "USER-ICRA-ROUTE-20260826-002",
   "protected_transition": {
-    "from_anchor": "48caa9ddf24990accb65e2ad230d12821487793c",
+    "from_anchor": "b24a330d79d6e85e8080cf2a359bb1a18765e5a5",
     "changes": [
       {
         "field": "route_owner",
-        "old": "SUPERVISOR",
+        "old": "USER",
         "new": "USER"
       },
       {
         "field": "active_route",
-        "old": "P0_P5_CONTINGENCY",
+        "old": "P0_P4_V2_P5",
         "new": "P0_P4_V2_P5"
       },
       {
         "field": "required_modules",
         "old": [
           "P0_ADVISORY_RISK_FIELD",
+          "P4_V2_COLLISION_GUIDE",
           "EGO_MOTION_FEASIBILITY_AUTHORITY",
           "P5_FINAL_AND_RUNTIME_HARD_GATES"
         ],
@@ -106,17 +119,22 @@ its protected research fields.
       },
       {
         "field": "research_question",
-        "old": "No active P4 treatment question; qualify the P0+P5 contingency system.",
+        "old": "Can an immutable future-risk field guide collision-triggered local search toward a lower provider-only predicted-integrity-risk bottleneck while EGO retains motion-feasibility authority and P5 independently blocks unsafe final or executing trajectories?",
         "new": "Can an immutable future-risk field guide collision-triggered local search toward a lower provider-only predicted-integrity-risk bottleneck while EGO retains motion-feasibility authority and P5 independently blocks unsafe final or executing trajectories?"
       },
       {
         "field": "primary_claim",
-        "old": null,
+        "old": "P4-v2 lowers the controllable-interior maximum provider-only predicted integrity risk beyond a preregistered scientifically meaningful and repeatability-derived threshold.",
         "new": "P4-v2 lowers the controllable-interior maximum provider-only predicted integrity risk beyond a preregistered scientifically meaningful and repeatability-derived threshold."
       },
       {
         "field": "secondary_claims",
-        "old": null,
+        "old": [
+          "controllable-interior provider-only mean risk is non-inferior and its improvement is reported",
+          "whole-path maximum risk is non-inferior",
+          "path length, latency, coverage and fallback remain within preregistered limits",
+          "the selected guide retains identity through EGO refinement and P5 evaluation"
+        ],
         "new": [
           "controllable-interior provider-only mean risk is non-inferior and its improvement is reported",
           "whole-path maximum risk is non-inferior",
@@ -127,7 +145,8 @@ its protected research fields.
       {
         "field": "formal_arms",
         "old": [
-          "P0_P5_CONTINGENCY"
+          "P0_P5_CONTROL",
+          "P0_P4_V2_P5_TREATMENT"
         ],
         "new": [
           "P0_P5_CONTROL",
@@ -137,9 +156,9 @@ its protected research fields.
       {
         "field": "qualification_scenes",
         "old": [
-          "SAFE_NORMAL",
-          "FINAL_REJECT",
-          "RUNTIME_FAIL"
+          "PRIMARY",
+          "EXACT_MIRROR",
+          "FLAT_NULL"
         ],
         "new": [
           "PRIMARY",
@@ -150,11 +169,6 @@ its protected research fields.
       {
         "field": "gate_sequence",
         "old": [
-          "ICRA-070_P0_P5_PROSPECTIVE_QUALIFICATION",
-          "ICRA-071_CROSS_LAYER_GUARD",
-          "SUPERVISOR_CAMPAIGN_AUTHORIZATION"
-        ],
-        "new": [
           "ICRA-071_ROUTE_GUARD",
           "ICRA-072_RISK_DECOMPOSITION_AND_REPLAY",
           "ICRA-073_CONTROLLABILITY_FIXTURES",
@@ -166,31 +180,43 @@ its protected research fields.
           "ICRA-079_PROSPECTIVE_P5_QUALIFICATION",
           "USER_CAMPAIGN_APPROVAL",
           "ICRA-080_60_RUN_CAMPAIGN"
+        ],
+        "new": [
+          "ICRA-072_END_TO_END_VERTICAL_SLICE_AND_LIVE_SMOKE",
+          "ICRA-073_EFFECT_DIAGNOSTICS",
+          "ICRA-074_TARGETED_OPTIMIZATION",
+          "ICRA-075_EXPLORATORY_AND_POWER_INPUTS",
+          "ICRA-076_PREREGISTRATION_FREEZE",
+          "ICRA-077_HELD_OUT_CONFIRMATION",
+          "ICRA-078_G0D_LINEAGE",
+          "ICRA-079_PROSPECTIVE_P5_QUALIFICATION",
+          "USER_CAMPAIGN_APPROVAL",
+          "ICRA-080_60_RUN_CAMPAIGN"
         ]
       },
       {
         "field": "fallback_policy",
-        "old": "SUPERVISOR_CONTINGENCY_ACTIVATION",
+        "old": "PROPOSAL_ONLY_USER_ACTIVATION_REQUIRED",
         "new": "PROPOSAL_ONLY_USER_ACTIVATION_REQUIRED"
       },
       {
         "field": "scientific_no_go_transition",
-        "old": "SUPERVISOR_MAY_ACTIVATE_CONTINGENCY",
+        "old": "BLOCKED_AWAITING_USER_RESEARCH_DECISION",
         "new": "BLOCKED_AWAITING_USER_RESEARCH_DECISION"
       },
       {
         "field": "campaign_activation",
-        "old": "SUPERVISOR_AUTHORIZATION_AFTER_CROSS_LAYER_GUARD",
+        "old": "USER_APPROVAL_AFTER_ICRA079_REVIEW_PASS",
         "new": "USER_APPROVAL_AFTER_ICRA079_REVIEW_PASS"
       }
     ]
   },
   "user_decision": {
-    "route_disposition": "FREEZE_P0_P5_QUALIFICATION_AND_RETURN_TO_P4_V2",
+    "route_disposition": "DEVELOPMENT_FIRST_END_TO_END_VERTICAL_SLICE_BEFORE_EFFECT_OPTIMIZATION",
     "p0_p5_disposition": "RETAIN_AS_MATCHED_CONTROL_ASSET",
     "p4_primary_endpoint": "MAX_PROVIDER_ONLY_INTERIOR_RISK",
     "confirmatory_size": "PREREGISTERED_ADAPTIVE_30_TO_60_INDEPENDENT_SEED_RUNS_PER_SCENE",
-    "enforcement": "REPOSITORY_LOCAL_PROCEDURAL_GUARD"
+    "enforcement": "LEAN_MANDATORY_SAFETY_GATES_WITH_DEFERRED_SCIENCE_REVIEWS"
   },
   "guard_strength": "ACCIDENT_PREVENTION_NOT_A_SECURITY_BOUNDARY"
 }
@@ -443,26 +469,25 @@ No contingency becomes active and no alternative `TASK_READY` may exist until a 
 recorded against an exact pushed anchor. Supervisor and Builder commits cannot self-authorize protected field
 changes.
 
-ICRA-071 will implement a repository-local verifier plus pre-commit, pre-push and commit-message hooks. It will
-remove bypass variables from the tracked hooks, repair root-relative path matching, validate route/state/plan
-consistency, and test unauthorized route/module/claim/fallback mutations. Because the user selected a local
-guard, this is accident prevention, not a security boundary: a process with repository write permission can
-still edit hooks or use `--no-verify`. Truly non-bypassable enforcement requires a protected remote branch and
-an independent user approval identity.
+ICRA-071 implemented a repository-local verifier plus pre-commit, pre-push and commit-message hooks, but Review
+found lifecycle, exact-claim/RQ and full-discovery defects. Decision 002 retains that repair as non-blocking
+governance backlog. Because the user selected a local guard, this is accident prevention, not a security
+boundary: a process with repository write permission can still edit hooks or use `--no-verify`. Truly
+non-bypassable enforcement requires a protected remote branch and an independent user approval identity.
 
 ## 9. Corrective roadmap and gates
 
 | Task | Authorized result | Stop line |
 |---|---|---|
 | Supervisor recovery changeset | publish this audit, restore `P0_P4_V2_P5`, supersede unqualified ICRA-070 | no product/runtime change |
-| ICRA-071 | implement and test user-route/state/doc/RQ local guards | no P4 product change, ROS, GPU or campaign |
-| ICRA-072 | risk decomposition, complete trace and serialized snapshot replay | exploratory evidence only |
-| ICRA-073 | same-occupancy provider-only primary/mirror/null controllability fixtures | both homotopies must be reachable |
-| ICRA-074 | TDD bottleneck/lexicographic time-aware P4-v2 search | preserve occupancy/EGO/P5 authority |
+| ICRA-071 backlog | repair user-route/state/doc/RQ local guards | non-blocking after user decision 002; no security claim |
+| ICRA-072 | development-first end-to-end P0 -> P4-v2 -> EGO -> P5 vertical slice plus live smoke | runnable integration, no effect claim |
+| ICRA-073 | effect diagnostics after flow closure | no held-out access or claim |
+| ICRA-074 | targeted optimization from ICRA-073 evidence | no held-out access or threshold tuning |
 | ICRA-075 | exploratory objective/source/domain ablation and power inputs | no held-out access or claim |
 | ICRA-076 | freeze protocol, SESOI, hashes, seeds and 30–60 sample size per scene | no confirmatory run before Review PASS |
 | ICRA-077 | primary/mirror/null held-out confirmatory | no retry/exclusion; primary exact gate |
-| ICRA-078 | G0D risk-guide application and B-spline/P5 lineage | confirmatory PASS required |
+| ICRA-078 | formal G0D lineage qualification | held-out confirmation required |
 | ICRA-079 | prospective P0+P4+P5 treatment and P0+P5 control P5 qualification | campaign remains blocked |
 | ICRA-080 | original 2 arms x 3 scenes x 10 seeds campaign | separate user approval required |
 
