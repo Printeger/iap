@@ -8380,3 +8380,13 @@ Policy inventory now uses `--no-renames`, so renames are always checked as
 delete-plus-add. A hook renamed onto an allowed path and a historical product
 renamed into the ICRA-071 evidence namespace both fail. Focused verification
 passes 33/33.
+
+After final Standards/Spec implementation review returned PASS/PASS, wrote the
+exclusive compact blocker record
+`results/icra27/icra071/compact/route_guard_static_v1.json` at SHA-256
+`8d5567de15e7cb62d45cbbdb1f4ef9450577af0f3b7ac72abc6ac2a0f722e22a`.
+It binds implementation commit `56b2fdb`, route/verifier/test/hook hashes, the
+relative hook path, exact focused/full commands and exits, the earlier tested
+full-suite implementation identity, external inventory evidence, retained
+ICRA-070 hashes, PDF hash and zero forbidden runtime invocations. Its status is
+BLOCKED and it makes no route, gate, qualification or security claim.

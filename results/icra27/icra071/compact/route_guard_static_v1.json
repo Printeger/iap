@@ -1,0 +1,88 @@
+{
+  "schema_version": "icra071_route_guard_static_v1",
+  "task_id": "ICRA-071",
+  "gate": "USER_RESEARCH_ROUTE_AUTHORITY_GUARD",
+  "status": "BLOCKED_FULL_DISCOVERY_RETAINED_ICRA070_STATE",
+  "qualification_claim": false,
+  "implementation_commit": "56b2fdb5546bf42dbb2c5df3790f77afb4ff5756",
+  "implementation_review": {
+    "standards": "PASS",
+    "spec": "PASS",
+    "review_range": "9b813b0a52f405d874ce324f99f618221b5b7b8c...56b2fdb5546bf42dbb2c5df3790f77afb4ff5756"
+  },
+  "file_sha256": {
+    "docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md": "673c369a5465fcd4443ff798ed8dc3640606afaf722c18323b25cda0a2ed3957",
+    "scripts/dev_planner/verify_icra_research_route.py": "3a52977631881673af04a5a955359e907ded0b1f0f21117f4e5d2ff1a163476d",
+    "test/test_verify_icra_research_route.py": "4b20b9046156ac4503a938bb7bc6ae503718f74038c613202fdb34cb0c3ce813",
+    ".githooks/pre-commit": "50211b252038a39a931dc1138e8af95cb2d42a84efb008f49bc2b236c2c382d0",
+    ".githooks/pre-push": "ac535cf9fc64d91eccb67951c9b27919e9a7782adf2337ffc8f2a61a7b5704c2",
+    ".githooks/commit-msg": "0eca86fa652d3c855c6465deb703b44c2614f0ea71e1ad0b948a485edd8b3932"
+  },
+  "hook_path": {
+    "scope": "local",
+    "value": ".githooks",
+    "absolute": false,
+    "global_value_before": null,
+    "global_value_after": null,
+    "security_boundary": false
+  },
+  "commands": [
+    {
+      "argv": ["python3", "scripts/dev_planner/verify_icra_research_route.py"],
+      "environment": {"PYTHONDONTWRITEBYTECODE": "1"},
+      "cwd": "/home/dev/ws_iap/src/iap",
+      "exit_code": 0,
+      "result": "ICRA_ROUTE_GUARD_PASS:REPOSITORY_CONSISTENT_NOT_USER_AUTHENTICATION"
+    },
+    {
+      "argv": ["python3", "-m", "unittest", "discover", "-s", "test", "-p", "test_verify_icra_research_route.py"],
+      "environment": {"PYTHONDONTWRITEBYTECODE": "1"},
+      "cwd": "/home/dev/ws_iap/src/iap",
+      "exit_code": 0,
+      "result": "33/33 PASS",
+      "implementation_commit": "56b2fdb5546bf42dbb2c5df3790f77afb4ff5756"
+    },
+    {
+      "argv": ["python3", "scripts/dev_planner/run_p4_g0c_tests.py", "--task-root", "/home/dev/ws_iap/src/iap/results/icra27/icra063/icra071_authoritative_full", "unittest", "discover", "-s", "test", "-p", "test_*.py"],
+      "environment": {
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONPYCACHEPREFIX": "/home/dev/ws_iap/src/iap/results/icra27/icra063/icra071_authoritative_full/pycache"
+      },
+      "cwd": "/home/dev/ws_iap/src/iap",
+      "exit_code": 1,
+      "result": "614/616 PASS; 1 FAILURE; 1 ERROR",
+      "tested_implementation_commit": "891a33bfc6d88bc4592d03959eee8aaba023e530",
+      "external_ros_inventory_entries": 17770,
+      "external_inventory_evidence": "results/icra27/icra063/icra071_authoritative_full/external_inventory/unittest-3858546-result.json",
+      "external_inventory_evidence_sha256": "763df659b89c481401a1660654c869f664f4f6f66cfe7996fc5b8475f450be03",
+      "retry_count": 0
+    }
+  ],
+  "blockers": [
+    {
+      "typed_reason": "ICRA071_FULL_DISCOVERY_RETAINED_ICRA070_STATE_MISMATCH",
+      "test": "test_complete_replacement_inputs_freeze_old_terminal_state",
+      "observed": "pre_replacement_compact_inventory_mismatch"
+    },
+    {
+      "typed_reason": "ICRA071_FULL_DISCOVERY_RETAINED_ICRA070_REPLACEMENT_EXISTS",
+      "test": "test_complete_overlay_wrong_head_fails_before_root_creation",
+      "observed": "replacement_root_already_exists"
+    }
+  ],
+  "retained_icra070_sha256": {
+    "results/icra27/icra070/compact/icra070_complete_overlay_replacement_v3.json": "f329f2e7255218da3c140185cef6a210fd854e6149ff9fce1b1517bcbfd5ed82",
+    "results/icra27/icra070/compact/icra070_overlay_manifest_v3.json": "a304b2b8c6d45b63aeba3bd72f21b229125e185551e8aa9559b7116102e8ad1f",
+    "results/icra27/icra070/compact/icra070_adoption_manifest_v3.json": "a8c81b90c950b719aa6c67628c87e538546a0c4e7dffdaeaca334e37c7c73ead"
+  },
+  "protected_pdf_sha256": "1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6",
+  "forbidden_command_invocations": {
+    "ros_or_launch": 0,
+    "gpu_preflight": 0,
+    "build_or_install": 0,
+    "live": 0,
+    "analyzer": 0,
+    "campaign": 0
+  },
+  "recorded_at_utc": "2026-08-26T09:23:01Z"
+}

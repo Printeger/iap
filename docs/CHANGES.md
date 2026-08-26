@@ -20,7 +20,9 @@
   passing and two retained ICRA-070 pre-replacement tests failing because `install_v2`/v3 replacement artifacts
   already exist and the frozen compact inventory changed. ICRA-071 forbids cleanup, relabelling or rewriting
   those retained artifacts, so this checkpoint is fail-closed pending Supervisor review; no ROS/GPU/build/live/
-  analyzer or campaign command ran.
+  analyzer or campaign command ran. Compact blocker evidence is
+  `results/icra27/icra071/compact/route_guard_static_v1.json` SHA-256
+  `8d5567de15e7cb62d45cbbdb1f4ef9450577af0f3b7ac72abc6ac2a0f722e22a`.
 
 - docs(icra-user-route-recovery): IAP-RQ-000 / IAP-RQ-423 / IAP-RQ-424 — bind the complete route-deviation
   audit to original approval `73cbdddd`, source baseline `bd3858a7`, first divergence `564dd6a` and current
