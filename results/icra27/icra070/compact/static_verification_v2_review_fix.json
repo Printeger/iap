@@ -1,0 +1,74 @@
+{
+  "schema_version": "icra070_static_verification_v2_review_fix",
+  "task_id": "ICRA-070",
+  "git_commit": "5cd3891f78f277554ff21baf876fa8d273cc53f6",
+  "status": "STATIC_REVIEW_FIX_READY",
+  "qualification_claim": false,
+  "changed_file_sha256": {
+    "CMakeLists.txt": "b025895acf9572ff87052a76e2796c444db3efefaa28498e6ad13746581bebc8",
+    "scripts/dev_planner/run_icra_p0_p5_qualification.py": "85e116192f32c3df047879f57cbb188caa01c2900fa379429dab2322a58374c3",
+    "test/test_run_icra_p0_p5_qualification.py": "5848d53e152818163a6efd75d89c6d20e2006c474eb1b56c9ab2287e442bad91"
+  },
+  "commands": [
+    {
+      "argv": ["python3", "-m", "unittest", "discover", "-s", "test", "-p", "test_icra_p0_p5_qualification.py"],
+      "environment": {"PYTHONDONTWRITEBYTECODE": "1"},
+      "exit_code": 0,
+      "result": "15/15 PASS"
+    },
+    {
+      "argv": ["python3", "-m", "unittest", "discover", "-s", "test", "-p", "test_run_icra_p0_p5_qualification.py"],
+      "environment": {"PYTHONDONTWRITEBYTECODE": "1"},
+      "exit_code": 0,
+      "result": "43/43 PASS"
+    },
+    {
+      "argv": ["python3", "scripts/dev_planner/run_p4_g0c_tests.py", "--task-root", "results/icra27/icra063/icra070_review_fix_launch", "unittest", "discover", "-s", "test", "-p", "test_test_planner_launch.py"],
+      "environment": {"PYTHONDONTWRITEBYTECODE": "1", "PYTHONPYCACHEPREFIX": "results/icra27/icra063/icra070_review_fix_launch/pycache"},
+      "exit_code": 0,
+      "result": "21/21 PASS",
+      "scratch_classification": "NON_AUTHORITATIVE_HISTORICAL_HARNESS_NAMESPACE",
+      "external_inventory_evidence": "results/icra27/icra063/icra070_review_fix_launch/external_inventory/unittest-3660745-result.json"
+    },
+    {
+      "argv": ["python3", "scripts/dev_planner/run_p4_g0c_tests.py", "--task-root", "results/icra27/icra063/icra070_review_fix_full", "unittest", "discover", "-s", "test", "-p", "test_*.py"],
+      "environment": {"PYTHONDONTWRITEBYTECODE": "1", "PYTHONPYCACHEPREFIX": "results/icra27/icra063/icra070_review_fix_full/pycache"},
+      "exit_code": 0,
+      "result": "579/579 PASS",
+      "scratch_classification": "NON_AUTHORITATIVE_HISTORICAL_HARNESS_NAMESPACE",
+      "external_inventory_evidence": "results/icra27/icra063/icra070_review_fix_full/external_inventory/unittest-3660852-result.json"
+    }
+  ],
+  "full_file_set_read_only_precheck": {
+    "base_non_cache_file_count": 2079,
+    "overlay_non_cache_file_count": 469,
+    "missing_base_file_count": 1610,
+    "extra_overlay_file_count": 0,
+    "expected_entrypoint_result": "BLOCKED_BEFORE_MUTATION",
+    "forbidden_workaround": "REINSTALL_COMPILE_OR_COPY_MISSING_BASE_FILES"
+  },
+  "review_findings_corrected": {
+    "standards_predeclared_outer_exit": true,
+    "spec_full_base_file_set": true,
+    "spec_durable_pre_mutation_cache_inventory": true
+  },
+  "frozen_preconditions": {
+    "original_blocker_files_preserved": true,
+    "failed_overlay_file_count": 474,
+    "failed_overlay_inventory_sha256": "9381cb03d7cff06a517f8da9fcde0c179cc4cf130b61a2e04750dfe683acec89",
+    "retained_icra068_entry_count": 7364,
+    "retained_icra068_inventory_sha256": "fdeb47e3d025bbc7c442b86521e6808d1452d928178a52df0b2f9e03aace4858",
+    "protected_pdf_sha256": "1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6"
+  },
+  "invocation_counts": {
+    "repair": 0,
+    "reinstall": 0,
+    "compile": 0,
+    "installed_parser": 0,
+    "gpu_preflight": 0,
+    "live_launch": 0,
+    "analyzer": 0
+  },
+  "external_ros_inventory_entries": 17770,
+  "recorded_at_utc": "2026-08-26T06:05:43Z"
+}
