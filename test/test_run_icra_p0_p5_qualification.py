@@ -244,6 +244,44 @@ class IcraP0P5LiveRunnerTest(unittest.TestCase):
                     "overlay_manifest_v3": existing,
                 })
 
+    def test_static_v3_record_rejects_commit_argv_and_environment_drift(self):
+        commit = "a" * 40
+        record = {
+            "schema_version": "icra070_static_verification_v3",
+            "task_id": "ICRA-070",
+            "implementation_commit": commit,
+            "status": "STATIC_PASS",
+            "qualification_claim": False,
+            "authoritative_record_root": "results/icra27/icra070",
+            "implementation_file_sha256": (
+                RUNNER.current_static_implementation_hashes()
+            ),
+            "commands": RUNNER.expected_static_verification_commands_v3(),
+            "external_ros_inventory_entries": 17770,
+            "invocation_counts": {
+                "replacement": 0,
+                "installed_parser": 0,
+                "gpu_preflight": 0,
+                "live_launch": 0,
+                "analyzer": 0,
+            },
+            "recorded_at_utc": "2026-08-26T00:00:00Z",
+        }
+        RUNNER.validate_static_record_payload_v3(record, commit)
+        for mutation in ("commit", "argv", "environment"):
+            changed = json.loads(json.dumps(record))
+            if mutation == "commit":
+                changed["implementation_commit"] = "b" * 40
+            elif mutation == "argv":
+                changed["commands"][0]["argv"].append("--unexpected")
+            else:
+                changed["commands"][0]["environment"]["HOME"] = "/tmp"
+            with self.subTest(mutation=mutation), self.assertRaisesRegex(
+                RUNNER.LiveRunnerError,
+                "static_verification_v3_binding_mismatch",
+            ):
+                RUNNER.validate_static_record_payload_v3(changed, commit)
+
     def test_complete_overlay_copies_full_non_cache_set_modes_and_aliases(self):
         with tempfile.TemporaryDirectory(dir=REPO / "results/icra27") as tmp:
             root = Path(tmp)

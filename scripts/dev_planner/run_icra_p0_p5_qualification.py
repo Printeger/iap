@@ -44,6 +44,12 @@ COMPLETE_REPLACEMENT_EVIDENCE_PATH = (
 OVERLAY_MANIFEST_V3_PATH = TASK_ROOT / "compact/icra070_overlay_manifest_v3.json"
 ADOPTION_MANIFEST_V3_PATH = TASK_ROOT / "compact/icra070_adoption_manifest_v3.json"
 STATIC_VERIFICATION_V3_PATH = TASK_ROOT / "static_verification_v3.json"
+STATIC_LAUNCH_TEST_ROOT = (
+    REPOSITORY / "results/icra27/icra063/icra070_v3_authoritative_launch"
+)
+STATIC_FULL_TEST_ROOT = (
+    REPOSITORY / "results/icra27/icra063/icra070_v3_authoritative_full"
+)
 DEPENDENCY_PREFLIGHT_PATH = TASK_ROOT / "compact/gnss_dependency_preflight.json"
 OVERLAY_COMMAND_PATH = TASK_ROOT / "compact/overlay_install_command.json"
 OVERLAY_INSTALL_DRIVER_PATH = TASK_ROOT / "overlay_install_driver.cmake"
@@ -1313,15 +1319,8 @@ def replacement_command_binding(expected_commit: str) -> dict[str, object]:
     }
 
 
-def verify_authoritative_static_record_v3() -> dict[str, object]:
-    if not STATIC_VERIFICATION_V3_PATH.is_file() \
-            or STATIC_VERIFICATION_V3_PATH.is_symlink():
-        raise LiveRunnerError("static_verification_v3_missing_or_symlink")
-    try:
-        record = json.loads(STATIC_VERIFICATION_V3_PATH.read_text())
-    except (OSError, json.JSONDecodeError) as exc:
-        raise LiveRunnerError("static_verification_v3_malformed") from exc
-    expected_files = {
+def current_static_implementation_hashes() -> dict[str, str]:
+    return {
         relative: _sha256(REPOSITORY / relative)
         for relative in (
             "scripts/dev_planner/run_icra_p0_p5_qualification.py",
@@ -1332,21 +1331,92 @@ def verify_authoritative_static_record_v3() -> dict[str, object]:
             "test/test_test_planner_launch.py",
         )
     }
-    commands = record.get("commands")
-    results = [row.get("result") for row in commands] \
-        if isinstance(commands, list) else []
-    if not (
-        record.get("schema_version") == "icra070_static_verification_v3"
+
+
+def expected_static_verification_commands_v3() -> list[dict[str, object]]:
+    no_bytecode = {"PYTHONDONTWRITEBYTECODE": "1"}
+    return [
+        {
+            "argv": [
+                "python3", "-m", "unittest", "discover", "-s", "test",
+                "-p", "test_icra_p0_p5_qualification.py",
+            ],
+            "cwd": str(REPOSITORY),
+            "environment": no_bytecode,
+            "exit_code": 0,
+            "result": "15/15 PASS",
+        },
+        {
+            "argv": [
+                "python3", "-m", "unittest", "discover", "-s", "test",
+                "-p", "test_run_icra_p0_p5_qualification.py",
+            ],
+            "cwd": str(REPOSITORY),
+            "environment": no_bytecode,
+            "exit_code": 0,
+            "result": "57/57 PASS",
+        },
+        {
+            "argv": [
+                "python3", "scripts/dev_planner/run_p4_g0c_tests.py",
+                "--task-root", str(STATIC_LAUNCH_TEST_ROOT), "unittest",
+                "discover", "-s", "test", "-p",
+                "test_test_planner_launch.py",
+            ],
+            "cwd": str(REPOSITORY),
+            "environment": {
+                "PYTHONDONTWRITEBYTECODE": "1",
+                "PYTHONPYCACHEPREFIX": str(STATIC_LAUNCH_TEST_ROOT / "pycache"),
+            },
+            "exit_code": 0,
+            "result": "21/21 PASS",
+            "scratch_classification": (
+                "NON_AUTHORITATIVE_HISTORICAL_HARNESS_NAMESPACE"
+            ),
+        },
+        {
+            "argv": [
+                "python3", "scripts/dev_planner/run_p4_g0c_tests.py",
+                "--task-root", str(STATIC_FULL_TEST_ROOT), "unittest",
+                "discover", "-s", "test", "-p", "test_*.py",
+            ],
+            "cwd": str(REPOSITORY),
+            "environment": {
+                "PYTHONDONTWRITEBYTECODE": "1",
+                "PYTHONPYCACHEPREFIX": str(STATIC_FULL_TEST_ROOT / "pycache"),
+            },
+            "exit_code": 0,
+            "result": "593/593 PASS",
+            "scratch_classification": (
+                "NON_AUTHORITATIVE_HISTORICAL_HARNESS_NAMESPACE"
+            ),
+        },
+    ]
+
+
+def validate_static_record_payload_v3(
+    record: object, expected_commit: str,
+) -> None:
+    expected_keys = {
+        "schema_version", "task_id", "implementation_commit", "status",
+        "qualification_claim", "authoritative_record_root",
+        "implementation_file_sha256", "commands",
+        "external_ros_inventory_entries", "invocation_counts",
+        "recorded_at_utc",
+    }
+    if not isinstance(record, dict) or not (
+        set(record) == expected_keys
+        and record.get("schema_version") == "icra070_static_verification_v3"
+        and record.get("task_id") == "ICRA-070"
+        and re.fullmatch(r"[0-9a-f]{40}", expected_commit or "") is not None
+        and record.get("implementation_commit") == expected_commit
         and record.get("status") == "STATIC_PASS"
         and record.get("qualification_claim") is False
-        and re.fullmatch(r"[0-9a-f]{40}", record.get("implementation_commit", ""))
-        and record.get("implementation_file_sha256") == expected_files
-        and results == [
-            "15/15 PASS", "56/56 PASS", "21/21 PASS", "592/592 PASS",
-        ]
-        and all(row.get("exit_code") == 0 for row in commands)
+        and record.get("authoritative_record_root") == "results/icra27/icra070"
+        and record.get("implementation_file_sha256")
+        == current_static_implementation_hashes()
+        and record.get("commands") == expected_static_verification_commands_v3()
         and record.get("external_ros_inventory_entries") == 17770
-        and record.get("code_review") == {"standards": "PASS", "spec": "PASS"}
         and record.get("invocation_counts") == {
             "replacement": 0,
             "installed_parser": 0,
@@ -1354,12 +1424,30 @@ def verify_authoritative_static_record_v3() -> dict[str, object]:
             "live_launch": 0,
             "analyzer": 0,
         }
+        and isinstance(record.get("recorded_at_utc"), str)
+        and re.fullmatch(
+            r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z",
+            record["recorded_at_utc"],
+        ) is not None
     ):
         raise LiveRunnerError("static_verification_v3_binding_mismatch")
+
+
+def verify_authoritative_static_record_v3(
+    expected_commit: str,
+) -> dict[str, object]:
+    if not STATIC_VERIFICATION_V3_PATH.is_file() \
+            or STATIC_VERIFICATION_V3_PATH.is_symlink():
+        raise LiveRunnerError("static_verification_v3_missing_or_symlink")
+    try:
+        record = json.loads(STATIC_VERIFICATION_V3_PATH.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        raise LiveRunnerError("static_verification_v3_malformed") from exc
+    validate_static_record_payload_v3(record, expected_commit)
     return {
         "path": str(STATIC_VERIFICATION_V3_PATH.relative_to(REPOSITORY)),
         "sha256": _sha256(STATIC_VERIFICATION_V3_PATH),
-        "implementation_commit": record["implementation_commit"],
+        "implementation_commit": expected_commit,
     }
 
 
@@ -1490,7 +1578,7 @@ def prepare_complete_overlay(expected_commit: str) -> dict[str, object]:
     validate_trusted_worktree(expected_commit, observed_commit, dirty)
     preconditions = verify_reviewed_pre_replacement_inputs()
     preconditions["static_verification_v3"] = (
-        verify_authoritative_static_record_v3()
+        verify_authoritative_static_record_v3(expected_commit)
     )
     source_cache = preconditions["source_cache_inventory"]
     replacement_proof = construct_complete_overlay(
@@ -1599,7 +1687,7 @@ def validate_complete_overlay_manifest_v3(
     if preconditions.get("original_blocker") != verify_original_blocker_evidence():
         raise LiveRunnerError("original_blocker_binding_mismatch")
     if preconditions.get("static_verification_v3") \
-            != verify_authoritative_static_record_v3():
+            != verify_authoritative_static_record_v3(current_commit):
         raise LiveRunnerError("static_verification_v3_evidence_binding_mismatch")
     for relative, expected_hash in REVIEWED_TERMINAL_SHA256.items():
         path = REPOSITORY / relative
