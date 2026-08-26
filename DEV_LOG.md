@@ -8488,10 +8488,15 @@ nonempty P4 debug path used by the planner. Runner/analyzer identity advanced
 immutably to `icra072-dev-smoke-002`; missing, empty, non-file and external P4
 bindings fail with distinct reasons.
 
-TDD retained RED evidence under task-local `repair_tdd_red_*` roots. Final
-fresh build/install `attempt_13` completed 6/6 packages. Focused C++ tests
-passed 138/138 (49+9+20+19+8+33), launch tests 23/23 and ICRA-072 tool tests
-5/5. Installed validation proved finite exact sigma `0.01`, exact profile
+TDD retained RED evidence under task-local `repair_tdd_red_*` roots. The sole
+live smoke used fresh build/install `attempt_13`. Post-smoke Spec review found
+that its snapshot-release guard also cleared the persisted lineage before the
+FSM writer and that an epoch change could bypass invalidation on a
+no-collision return. Those static defects were corrected without another live
+run. `attempt_14` retained a compile-time test enum typo; final fresh
+build/install `attempt_15` completed 6/6 packages. Focused C++ tests passed
+139/139 (49+9+20+19+9+33), launch tests 23/23 and ICRA-072 tool tests 5/5.
+Installed validation proved finite exact sigma `0.01`, exact profile
 `legacy_iap_rq320_baseline_v1`, P1/P2/P3 disabled, P4-v2 enabled, P5
 final/runtime enabled and the exact task-local P4 CSV. External ROS-log
 inventory SHA-256 remained
@@ -8509,4 +8514,6 @@ P4 file, which contained 1,464 v2 decisions, but naturally produced zero
 or committed-runtime binding existed. The analyzer was invoked exactly once
 and failed closed with those six typed absences. No retry, fixture/threshold/
 objective tuning, effect diagnosis, benchmark, qualification or campaign was
-performed. Final Builder status is truthful BLOCKED pending Supervisor review.
+performed. The final `attempt_15` bytes have not been exercised live because
+the one-shot authorization was already consumed. Final Builder status is
+truthful BLOCKED pending Supervisor review.

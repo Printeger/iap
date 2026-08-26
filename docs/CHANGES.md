@@ -3137,8 +3137,11 @@ Requirements: `IAP-RQ-000`, `IAP-RQ-020`, `IAP-RQ-030`, `IAP-RQ-040`,
 - Bind the effective launch manifest to the planner's exact nonempty P4 CSV,
   type missing/empty/non-file analyzer failures, and isolate immutable runner
   identity `icra072-dev-smoke-002`.
-- Fresh `attempt_13` passes 6/6 packages, 138/138 focused C++, 23/23 launch and
-  5/5 tool tests. The sole replacement smoke passed GPU and 15/15 process
+- The sole smoke used `attempt_13`. Review then separated snapshot release from
+  explicit attempt reset and added no-collision epoch invalidation. Final fresh
+  `attempt_15` passes 6/6 packages, 139/139 focused C++, 23/23 launch and 5/5
+  tool tests; it was not run live after the one-shot authorization was spent.
+  The sole replacement smoke passed GPU and 15/15 process
   health with 123 valid P0 samples, but naturally selected zero P4-v2 risk
   guides; its sole analyzer invocation therefore failed closed. Evidence is
   retained, no retry or tuning occurred, and the gate remains BLOCKED.

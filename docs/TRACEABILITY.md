@@ -1513,7 +1513,7 @@ They do not convert historical `NO-GO-P2`, failed P0 Gate-0B evidence, the stati
 
 | Requirement | Evidence | Status |
 |---|---|---|
-| IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-423 | `BsplineOptimizer` attempt-bound lineage, EGO final-lineage writer and focused no-collision/attempt/epoch regressions; fresh `attempt_13` focused C++ 138/138 | **STATIC REPAIR PASS** |
+| IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-423 | `BsplineOptimizer` attempt-bound lineage, snapshot-release/attempt-reset split, EGO final-lineage writer and focused no-collision/attempt/epoch regressions; final fresh `attempt_15` focused C++ 139/139 | **STATIC REPAIR PASS; FINAL BYTES NOT LIVE-EXERCISED** |
 | IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 | Effective manifest shares the planner P4 path; analyzer types missing/empty/non-file bindings and binds final/P5/publish/runtime identity; launch 23/23 and tools 5/5 | **STATIC CONTRACT PASS** |
 | IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-423 / IAP-RQ-424 | Sole `icra072-dev-smoke-002`: GPU PASS, 15/15 processes, P0 ready 123 (max generation 56), 1,464 P4-v2 rows but zero risk-selected guides; sole analyzer FAIL with no final/P5/publish/runtime lineage | **BLOCKED; EVIDENCE RETAINED, NO RETRY/TUNING** |
 

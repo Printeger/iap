@@ -593,15 +593,20 @@ namespace ego_planner
     a_star_->setRiskSnapshot(p4_risk_snapshot_, query_base_time_s);
   }
 
-  void BsplineOptimizer::clearP4RiskSnapshot()
+  void BsplineOptimizer::releaseP4RiskSnapshot()
   {
-    p4_attempt_lineage_.clear();
     p4_risk_snapshot_.reset();
     p4_query_base_time_s_ = 0.0;
     p4_occupancy_epoch_ = 0;
-    active_p4_attempt_id_ = 0;
     if (a_star_)
       a_star_->clearRiskSnapshot();
+  }
+
+  void BsplineOptimizer::clearP4RiskSnapshot()
+  {
+    releaseP4RiskSnapshot();
+    p4_attempt_lineage_.clear();
+    active_p4_attempt_id_ = 0;
   }
 
   uint64_t BsplineOptimizer::p4SegmentId(const std::pair<int, int> &segment) const
@@ -1359,6 +1364,12 @@ namespace ego_planner
     }
 
     last_collision_scan_result_ = scanCollisionSegments(init_points);
+    if (!p4_attempt_lineage_.empty() && grid_map_ &&
+        grid_map_->occupancyGeneration() != p4_occupancy_epoch_)
+    {
+      p4_attempt_lineage_.clear();
+      last_collision_scan_result_ = CollisionScanResult{};
+    }
     if (collisionScanFailsClosed(last_collision_scan_result_.status))
       p4_attempt_lineage_.clear();
     if (last_collision_scan_result_.status !=
@@ -2128,6 +2139,12 @@ namespace ego_planner
   {
     last_p4_guides_.clear();
     last_collision_scan_result_ = scanCollisionSegments(cps_.points);
+    if (!p4_attempt_lineage_.empty() && grid_map_ &&
+        grid_map_->occupancyGeneration() != p4_occupancy_epoch_)
+    {
+      p4_attempt_lineage_.clear();
+      last_collision_scan_result_ = CollisionScanResult{};
+    }
     if (collisionScanFailsClosed(last_collision_scan_result_.status))
     {
       p4_attempt_lineage_.clear();

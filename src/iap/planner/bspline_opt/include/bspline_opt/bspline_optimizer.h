@@ -419,6 +419,7 @@ namespace ego_planner
     void setP4RiskSnapshot(std::shared_ptr<const iap::RiskGridSnapshot> snapshot,
                            double query_base_time_s,
                            uint64_t planning_attempt_id);
+    void releaseP4RiskSnapshot();
     void clearP4RiskSnapshot();
 
     // optional inputs

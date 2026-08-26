@@ -930,7 +930,7 @@ namespace ego_planner
       {
         if (optimizer)
         {
-          optimizer->clearP4RiskSnapshot();
+          optimizer->releaseP4RiskSnapshot();
         }
       }
     } p4_risk_snapshot_guard{bspline_optimizer_.get()};
