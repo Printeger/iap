@@ -11,6 +11,16 @@ RUNNER_PATH = REPO / "scripts/dev_planner/run_icra_p0_p5_qualification.py"
 SPEC = importlib.util.spec_from_file_location("icra_p0_p5_live_runner", RUNNER_PATH)
 RUNNER = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(RUNNER)
+EMPTY_DEFAULT_KEYS = {
+    "p1.debug_csv_path", "p2.debug_csv_path", "p3.debug_csv_path",
+    "p4.debug_csv_path", "p4.profile_trace_path", "p4.g0c.protocol_path",
+    "p4.g0c.protocol_sha256", "p4.g0c.registry_path",
+    "p4.g0c.registry_sha256", "p4.g0c.fixture_path",
+    "p4.g0c.fixture_sha256", "p4.g0c.run_id",
+    "p4.g0c.run_manifest_path", "p4.g0c.csv_path", "p4.g0c.child_home",
+    "p4.g0c.child_ros_home", "p4.g0c.child_ros_log_dir",
+    "p4.g0c.child_tmpdir", "p4.g0c.child_xdg_runtime_dir",
+}
 
 
 class IcraP0P5LiveRunnerTest(unittest.TestCase):
@@ -22,9 +32,9 @@ class IcraP0P5LiveRunnerTest(unittest.TestCase):
         self.assertEqual(
             RUNNER.LIVE_IDENTITIES,
             (
-                ("SAFE_NORMAL", "icra-p0-p5-live-safe-normal-001"),
-                ("FINAL_REJECT", "icra-p0-p5-live-final-reject-001"),
-                ("RUNTIME_FAIL", "icra-p0-p5-live-runtime-fail-001"),
+                ("SAFE_NORMAL", "icra-p0-p5-live-safe-normal-002"),
+                ("FINAL_REJECT", "icra-p0-p5-live-final-reject-002"),
+                ("RUNTIME_FAIL", "icra-p0-p5-live-runtime-fail-002"),
             ),
         )
         required = set(self.contract["required_processes"])
@@ -35,7 +45,7 @@ class IcraP0P5LiveRunnerTest(unittest.TestCase):
         self.assertIn("test_planner_bag_recorder", required)
 
     def test_live_config_is_repository_local_and_frozen(self):
-        with tempfile.TemporaryDirectory(dir=REPO / "results/icra27/icra068") as tmp:
+        with tempfile.TemporaryDirectory(dir=REPO / "results/icra27") as tmp:
             run_dir = Path(tmp) / "run"
             config = RUNNER.live_config(
                 self.contract, "SAFE_NORMAL", "fixed-run", run_dir
@@ -51,8 +61,110 @@ class IcraP0P5LiveRunnerTest(unittest.TestCase):
         self.assertEqual(config["gate0.evidence_run_id"], "fixed-run")
         self.assertTrue(config["runtime_root_dir"].startswith(str(REPO)))
 
+    def test_exact_commands_omit_only_registered_empty_defaults(self):
+        for case_id, run_id in RUNNER.LIVE_IDENTITIES:
+            with self.subTest(case_id=case_id):
+                run_dir = REPO / "results/icra27/icra069/live" / run_id
+                config = RUNNER.live_config(
+                    self.contract, case_id, run_id, run_dir
+                )
+                command, omitted = RUNNER.render_live_launch_command(
+                    config, EMPTY_DEFAULT_KEYS
+                )
+                self.assertEqual(set(omitted), EMPTY_DEFAULT_KEYS)
+                self.assertFalse(any(token.endswith(":=") for token in command))
+                rendered_names = [
+                    token.split(":=", 1)[0] for token in command[4:]
+                ]
+                expected_nonempty = {
+                    key for key, value in config.items() if value != ""
+                }
+                self.assertEqual(set(rendered_names), expected_nonempty)
+                self.assertEqual(len(rendered_names), len(set(rendered_names)))
+                self.assertIn("planner_enable_all_safety:=false", command)
+                self.assertIn("p1.lambda_integrity:=0.0", command)
+
+    def test_command_renderer_rejects_unregistered_empty_and_duplicates(self):
+        with self.assertRaisesRegex(
+            RUNNER.LiveRunnerError, "unregistered_empty_override"
+        ):
+            RUNNER.render_live_launch_command(
+                [("experiment", "")], EMPTY_DEFAULT_KEYS
+            )
+        with self.assertRaisesRegex(
+            RUNNER.LiveRunnerError, "duplicate_override"
+        ):
+            RUNNER.render_live_launch_command(
+                [("record_bag", True), ("record_bag", False)],
+                EMPTY_DEFAULT_KEYS,
+            )
+
+    def test_adoption_payload_separates_product_and_runner_provenance(self):
+        current_commit = "b" * 40
+        changed = [
+            "scripts/dev_planner/run_icra_p0_p5_qualification.py",
+            "test/test_run_icra_p0_p5_qualification.py",
+        ]
+        payload = RUNNER.build_adoption_payload(current_commit, changed)
+        self.assertEqual(
+            payload["product_install"]["git_commit"], RUNNER.PRODUCT_COMMIT
+        )
+        self.assertEqual(
+            payload["product_install"]["manifest_sha256"],
+            RUNNER.PRODUCT_MANIFEST_SHA256,
+        )
+        self.assertEqual(payload["runner_analyzer"]["git_commit"], current_commit)
+        self.assertEqual(payload["post_product_changed_files"], changed)
+        self.assertEqual(payload["installed_runtime_source_overlap"], [])
+        self.assertTrue(payload["product_runtime_unchanged"])
+
+    def test_adoption_rejects_wrong_product_manifest_hash(self):
+        with mock.patch.object(RUNNER, "_sha256", return_value="0" * 64):
+            with self.assertRaisesRegex(
+                RUNNER.LiveRunnerError, "product_manifest_sha256_mismatch"
+            ):
+                RUNNER.build_adoption_payload("b" * 40, [])
+
+    def test_parse_only_command_preserves_rendered_overrides(self):
+        rendered = [
+            "ros2", "launch", "iap", "test_planner.launch.py",
+            "record_bag:=true", "run_duration_s:=90",
+        ]
+        self.assertEqual(
+            RUNNER.parse_only_command(rendered),
+            [
+                "ros2", "launch", "--show-args", "iap",
+                "test_planner.launch.py", "record_bag:=true",
+                "run_duration_s:=90",
+            ],
+        )
+
+    def test_replacement_analysis_reconciles_only_proven_commit_split(self):
+        base = {
+            "technical_failures": ["install manifest commit mismatch"],
+            "behavioral_failures": [],
+        }
+        accepted = RUNNER.reconcile_replacement_analysis(base, [])
+        self.assertEqual(
+            accepted["status"], "P5_PROSPECTIVE_QUALIFICATION_PASS"
+        )
+        self.assertTrue(accepted["qualification_claim"])
+
+        forged = {
+            "technical_failures": [
+                "install manifest commit mismatch", "raw artifact hash mismatch",
+            ],
+            "behavioral_failures": [],
+        }
+        rejected = RUNNER.reconcile_replacement_analysis(forged, [])
+        self.assertEqual(
+            rejected["status"],
+            "P5_PROSPECTIVE_QUALIFICATION_TECHNICAL_BLOCKER",
+        )
+        self.assertIn("raw artifact hash mismatch", rejected["technical_failures"])
+
     def test_normalizer_binds_real_bag_and_p5_rows(self):
-        with tempfile.TemporaryDirectory(dir=REPO / "results/icra27/icra068") as tmp:
+        with tempfile.TemporaryDirectory(dir=REPO / "results/icra27") as tmp:
             run_dir = Path(tmp) / "run"
             export = run_dir / "exports/one"
             bag = run_dir / "bags/one"
@@ -295,7 +407,7 @@ class IcraP0P5LiveRunnerTest(unittest.TestCase):
                 for name in RUNNER.REQUIRED_PROCESSES
             },
         }
-        with tempfile.TemporaryDirectory(dir=REPO / "results/icra27/icra068") as tmp:
+        with tempfile.TemporaryDirectory(dir=REPO / "results/icra27") as tmp:
             with mock.patch.object(
                 RUNNER.subprocess, "Popen", return_value=launch
             ), mock.patch.object(
@@ -326,7 +438,7 @@ class IcraP0P5LiveRunnerTest(unittest.TestCase):
         self.assertEqual(result["retries"], 0)
 
     def test_install_alias_audit_rejects_source_install_mismatch(self):
-        with tempfile.TemporaryDirectory(dir=REPO / "results/icra27/icra068") as tmp:
+        with tempfile.TemporaryDirectory(dir=REPO / "results/icra27") as tmp:
             install = Path(tmp)
             for relative, source in RUNNER.INSTALLED_ALIASES.items():
                 target = install / relative
@@ -344,7 +456,7 @@ class IcraP0P5LiveRunnerTest(unittest.TestCase):
         manifest = json.loads(retained.read_text())
         manifest["git_commit"] = "a" * 40
         manifest["file_hashes"] = {}
-        with tempfile.TemporaryDirectory(dir=REPO / "results/icra27/icra068") as tmp:
+        with tempfile.TemporaryDirectory(dir=REPO / "results/icra27") as tmp:
             path = Path(tmp) / "manifest.json"
             path.write_text(json.dumps(manifest) + "\n")
             with mock.patch.dict(

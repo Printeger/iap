@@ -8085,3 +8085,36 @@ completed 0, launch invocations 1 and retries 0. FINAL_REJECT and RUNTIME_FAIL
 were not attempted. Per fail-closed policy, no identity was retried and the
 authoritative analyzer was not invoked. Terminal result:
 `BLOCKED_ICRA068_SAFE_NORMAL_MALFORMED_LAUNCH_ARGUMENT`.
+
+## 2026-08-26 — ICRA-069 launch serialization repair and replacement harness
+
+IAP-RQ-320, IAP-RQ-421, IAP-RQ-422 and IAP-RQ-423. Synchronized
+`dev/icra` with `origin/dev/icra` at task activation with `0 0` divergence and
+preserved untracked `docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf`. ICRA-068 product
+build/install, manifest, preflight, live and compact evidence remain untouched.
+
+TDD first reproduced the consumed SAFE_NORMAL failure at the public argv
+renderer seam. The ICRA-069 runner now freezes only the three `-002`
+identities, omits exactly the registered 19 inactive empty defaults, preserves
+every nonempty value including `false` and numeric zero, and rejects malformed
+names/tokens, duplicates, unregistered empty values or any bare `:=` token.
+The same rendered commands feed both installed ROS `--show-args` proof and live
+execution.
+
+The runner adopts the immutable ICRA-068 product install without rebuild,
+reinstall or copy. A compact dual-provenance manifest binds product commit
+`005ce1a`, frozen manifest SHA `7662a2c4...34d420`, current runner/analyzer
+commit and hashes, post-product changed files and zero installed-runtime source
+overlap. The replacement analyzer independently requires that adoption bind;
+it can reconcile only the expected product/current commit split and never
+removes another technical failure.
+
+Each parse-only command runs as a task-owned process-group leader, records
+exact argv/stdout/stderr/exit code and audits required children plus remaining
+PIDs. Adoption and all three parser proofs run before the ICRA-069 live root,
+GPU preflight or runner-state identity registration. Focused runner/analyzer
+tests pass 29/29 and launch tests pass 20/20; both hermetic invocations report
+the 17,770-entry external ROS inventory unchanged. Complete hermetic discovery
+passes 549/549 with that inventory unchanged. At this static checkpoint, real
+installed parser, GPU, live identity and authoritative analyzer calls all
+remain zero.

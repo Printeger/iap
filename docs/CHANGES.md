@@ -2740,6 +2740,41 @@ Requirements: `IAP-RQ-320`, `IAP-RQ-421`, `IAP-RQ-422`, `IAP-RQ-423`.
   verification; all raw/live/bag/log/manifest/compact/scientific evidence and
   the protected PDF remain retained.
 
+## 2026-08-26 (ICRA-069 replacement live launch serialization)
+
+Requirements: `IAP-RQ-320`, `IAP-RQ-421`, `IAP-RQ-422`, `IAP-RQ-423`.
+
+- Replaced only the live harness identity set with the three registered `-002`
+  IDs. The command renderer omits exactly the 19 canonical inactive empty
+  defaults that ROS cannot accept as bare `name:=` tokens, while retaining
+  false, zero and every other nonempty effective value exactly once.
+- Added fail-closed validation for unregistered omissions, malformed or
+  duplicate overrides and bare empty tokens. The exact rendered live argv is
+  reused for three installed `ros2 launch --show-args` proofs before GPU or
+  identity registration, with per-command stdout/stderr/exit and task-owned
+  process audits.
+- Adopted the unchanged ICRA-068 install through explicit dual provenance:
+  product commit `005ce1a` and manifest `7662a2c4...34d420` remain distinct
+  from current runner/analyzer commit and hashes. The authoritative wrapper may
+  reconcile only this independently proven commit split; all other technical
+  failures remain blockers.
+- Static verification passes 29/29 focused runner/analyzer tests and 20/20
+  launch tests plus 549/549 complete hermetic discovery, with the 17,770-entry
+  external ROS inventory unchanged. No real installed parser, GPU preflight,
+  live identity or authoritative analyzer was invoked at this checkpoint.
+
+Static verification commands:
+
+```bash
+source /home/dev/ws_iap/install/setup.bash
+python3 scripts/dev_planner/run_p4_g0c_tests.py \
+  --task-root "$PWD/results/icra27/icra063/icra069_focused_all" \
+  unittest discover -s test -p 'test_*icra_p0_p5_qualification.py'
+python3 scripts/dev_planner/run_p4_g0c_tests.py \
+  --task-root "$PWD/results/icra27/icra063/icra069_launch_focused" \
+  unittest discover -s test -p 'test_test_planner_launch.py'
+```
+
 ## 2026-08-25 (ICRA-068 historical P4 test-fixture decoupling)
 
 Requirements: `IAP-RQ-423`.

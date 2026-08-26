@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One-shot ICRA-068 P0+P5 live runner and raw-evidence normalizer."""
+"""One-shot ICRA-069 replacement P0+P5 runner and evidence normalizer."""
 
 from __future__ import annotations
 
@@ -18,10 +18,15 @@ from pathlib import Path
 
 
 REPOSITORY = Path(__file__).resolve().parents[2]
-TASK_ROOT = REPOSITORY / "results/icra27/icra068"
-INSTALL_ROOT = TASK_ROOT / "install"
+TASK_ROOT = REPOSITORY / "results/icra27/icra069"
+PRODUCT_TASK_ROOT = REPOSITORY / "results/icra27/icra068"
+INSTALL_ROOT = PRODUCT_TASK_ROOT / "install"
 CONTRACT_PATH = REPOSITORY / "config/icra27/icra_p0_p5_qualification_v1.json"
-INSTALL_MANIFEST_PATH = TASK_ROOT / "icra068_install_manifest.json"
+INSTALL_MANIFEST_PATH = PRODUCT_TASK_ROOT / "icra068_install_manifest.json"
+PRODUCT_COMMIT = "005ce1a9dc20109dfb9600d62a8a9085aa11cb45"
+PRODUCT_MANIFEST_SHA256 = (
+    "7662a2c4aa4840dac2d80aac8cdf87041555f9114ca86dd844e862462134d420"
+)
 MIN_FREE_BYTES = 40 * 1024 ** 3
 INSTALLED_ALIASES = {
     "share/iap/launch/test_planner.launch.py": "launch/test_planner.launch.py",
@@ -86,6 +91,21 @@ INSTALL_MANIFEST_KEYS = {
     "packages", "installed_aliases", "runtime_libraries", "file_hashes",
     "linkage_output_sha256", "build_profile", "closure_ready",
 }
+REGISTERED_EMPTY_DEFAULT_KEYS = {
+    "p1.debug_csv_path", "p2.debug_csv_path", "p3.debug_csv_path",
+    "p4.debug_csv_path", "p4.profile_trace_path", "p4.g0c.protocol_path",
+    "p4.g0c.protocol_sha256", "p4.g0c.registry_path",
+    "p4.g0c.registry_sha256", "p4.g0c.fixture_path",
+    "p4.g0c.fixture_sha256", "p4.g0c.run_id",
+    "p4.g0c.run_manifest_path", "p4.g0c.csv_path", "p4.g0c.child_home",
+    "p4.g0c.child_ros_home", "p4.g0c.child_ros_log_dir",
+    "p4.g0c.child_tmpdir", "p4.g0c.child_xdg_runtime_dir",
+}
+REPLACEMENT_LIVE_RUN_IDENTITIES = {
+    "SAFE_NORMAL": "icra-p0-p5-live-safe-normal-002",
+    "FINAL_REJECT": "icra-p0-p5-live-final-reject-002",
+    "RUNTIME_FAIL": "icra-p0-p5-live-runtime-fail-002",
+}
 
 
 def _load(name: str, path: Path):
@@ -107,6 +127,7 @@ SAFETY_ANALYZER = _load(
     "icra_p0_p5_safety_analyzer",
     REPOSITORY / "scripts/dev_planner/analyze_safety_planner_run.py",
 )
+QUALIFICATION.LIVE_RUN_IDENTITIES = dict(REPLACEMENT_LIVE_RUN_IDENTITIES)
 LIVE_IDENTITIES = tuple(QUALIFICATION.LIVE_RUN_IDENTITIES.items())
 
 
@@ -193,6 +214,239 @@ def linkage_inventory_matches(
 def _write_json(path: Path, value: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n")
+
+
+def canonical_empty_defaults(contract: dict) -> set[str]:
+    observed = []
+    for case_id, _ in LIVE_IDENTITIES:
+        values = QUALIFICATION.resolve_launch_values(contract, case_id, {})
+        observed.append({key for key, value in values.items() if value == ""})
+    if any(keys != REGISTERED_EMPTY_DEFAULT_KEYS for keys in observed):
+        raise LiveRunnerError("canonical_empty_default_set_mismatch")
+    return set(REGISTERED_EMPTY_DEFAULT_KEYS)
+
+
+def render_live_launch_command(
+    config, allowed_empty_keys: set[str]
+) -> tuple[list[str], list[str]]:
+    """Render unique ROS overrides while omitting only registered empty defaults."""
+    items = list(config.items()) if isinstance(config, dict) else list(config)
+    command = ["ros2", "launch", "iap", "test_planner.launch.py"]
+    omitted = []
+    seen = set()
+    for name, value in items:
+        if not isinstance(name, str) or re.fullmatch(r"[A-Za-z0-9_./-]+", name) is None:
+            raise LiveRunnerError(f"malformed_override_name:{name}")
+        if name in seen:
+            raise LiveRunnerError(f"duplicate_override:{name}")
+        seen.add(name)
+        if value == "":
+            if name not in allowed_empty_keys:
+                raise LiveRunnerError(f"unregistered_empty_override:{name}")
+            omitted.append(name)
+            continue
+        rendered = "true" if value is True else "false" if value is False else str(value)
+        token = f"{name}:={rendered}"
+        if token.endswith(":=") or token.count(":=") != 1:
+            raise LiveRunnerError(f"malformed_override_token:{name}")
+        command.append(token)
+    unregistered_omissions = set(omitted) - set(allowed_empty_keys)
+    if unregistered_omissions:
+        raise LiveRunnerError("unregistered_omission")
+    return command, omitted
+
+
+def build_adoption_payload(
+    current_commit: str, changed_files: list[str]
+) -> dict:
+    if re.fullmatch(r"[0-9a-f]{40}", current_commit) is None:
+        raise LiveRunnerError("runner_commit_malformed")
+    if not INSTALL_MANIFEST_PATH.is_file() or INSTALL_MANIFEST_PATH.is_symlink():
+        raise LiveRunnerError("product_manifest_missing_or_symlink")
+    manifest_hash = _sha256(INSTALL_MANIFEST_PATH)
+    if manifest_hash != PRODUCT_MANIFEST_SHA256:
+        raise LiveRunnerError("product_manifest_sha256_mismatch")
+    try:
+        product_manifest = json.loads(INSTALL_MANIFEST_PATH.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        raise LiveRunnerError("product_manifest_malformed") from exc
+    if product_manifest.get("git_commit") != PRODUCT_COMMIT:
+        raise LiveRunnerError("product_manifest_commit_mismatch")
+    alias_sources = set(INSTALLED_ALIASES.values())
+    overlap = sorted(alias_sources.intersection(changed_files))
+    if overlap:
+        raise LiveRunnerError("installed_runtime_source_changed:" + overlap[0])
+    changed_hashes = {
+        relative: _sha256(REPOSITORY / relative)
+        for relative in changed_files
+        if (REPOSITORY / relative).is_file()
+        and not (REPOSITORY / relative).is_symlink()
+    }
+    return {
+        "schema_version": "icra069_immutable_install_adoption_v1",
+        "product_install": {
+            "task_id": "ICRA-068",
+            "git_commit": PRODUCT_COMMIT,
+            "manifest_path": str(INSTALL_MANIFEST_PATH.relative_to(REPOSITORY)),
+            "manifest_sha256": manifest_hash,
+            "install_root": str(INSTALL_ROOT),
+            "installed_aliases": product_manifest.get("installed_aliases"),
+            "runtime_library_count": len(
+                product_manifest.get("runtime_libraries", [])
+            ),
+            "file_hash_count": len(product_manifest.get("file_hashes", {})),
+        },
+        "runner_analyzer": {
+            "task_id": "ICRA-069",
+            "git_commit": current_commit,
+            "runner_path": str(Path(__file__).resolve().relative_to(REPOSITORY)),
+            "runner_sha256": _sha256(Path(__file__).resolve()),
+            "analyzer_path": str(
+                (REPOSITORY / "launch/icra_p0_p5_qualification.py").relative_to(
+                    REPOSITORY
+                )
+            ),
+            "analyzer_sha256": _sha256(
+                REPOSITORY / "launch/icra_p0_p5_qualification.py"
+            ),
+        },
+        "post_product_changed_files": list(changed_files),
+        "post_product_file_sha256": changed_hashes,
+        "installed_runtime_source_overlap": overlap,
+        "product_runtime_unchanged": not overlap,
+    }
+
+
+def parse_only_command(rendered_command: list[str]) -> list[str]:
+    if rendered_command[:4] != [
+        "ros2", "launch", "iap", "test_planner.launch.py"
+    ]:
+        raise LiveRunnerError("parse_command_launch_identity_mismatch")
+    if any(token.endswith(":=") for token in rendered_command[4:]):
+        raise LiveRunnerError("parse_command_contains_bare_empty_override")
+    return [
+        "ros2", "launch", "--show-args", *rendered_command[2:]
+    ]
+
+
+def _process_group_rows(pgid: int) -> list[dict[str, object]]:
+    import psutil
+
+    rows = []
+    for process in psutil.process_iter(["pid", "cmdline"]):
+        try:
+            if os.getpgid(process.pid) != pgid:
+                continue
+            rows.append({
+                "pid": int(process.pid),
+                "cmdline": " ".join(process.cmdline() or []),
+            })
+        except (OSError, psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    return rows
+
+
+def _run_parse_only(command: list[str], output_root: Path) -> dict:
+    stdout_path = output_root / "stdout.log"
+    stderr_path = output_root / "stderr.log"
+    observed_required = set()
+    observed_group_pids = set()
+    timed_out = False
+    with stdout_path.open("w") as stdout, stderr_path.open("w") as stderr:
+        process = subprocess.Popen(
+            command, stdout=stdout, stderr=stderr, start_new_session=True,
+        )
+        pgid = process.pid
+        deadline = time.monotonic() + 30.0
+        while process.poll() is None and time.monotonic() < deadline:
+            for row in _process_group_rows(pgid):
+                observed_group_pids.add(int(row["pid"]))
+                cmdline = str(row["cmdline"])
+                for identity, markers in REQUIRED_PROCESSES.items():
+                    if int(row["pid"]) != process.pid and any(
+                        marker in cmdline for marker in markers
+                    ):
+                        observed_required.add(identity)
+            time.sleep(0.01)
+        if process.poll() is None:
+            timed_out = True
+            os.killpg(pgid, signal.SIGKILL)
+        exit_code = process.wait(timeout=5.0)
+    remaining = _process_group_rows(pgid)
+    result = {
+        "argv": command,
+        "exit_code": exit_code,
+        "timed_out": timed_out,
+        "observed_process_group_pids": sorted(observed_group_pids),
+        "observed_required_processes": sorted(observed_required),
+        "remaining_process_group_pids": sorted(
+            int(row["pid"]) for row in remaining
+        ),
+        "task_owned_process_audit_passed": (
+            not timed_out and not observed_required and not remaining
+        ),
+        "stdout_path": str(stdout_path.relative_to(REPOSITORY)),
+        "stdout_sha256": _sha256(stdout_path),
+        "stderr_path": str(stderr_path.relative_to(REPOSITORY)),
+        "stderr_sha256": _sha256(stderr_path),
+    }
+    result["parse_passed"] = (
+        exit_code == 0 and result["task_owned_process_audit_passed"]
+    )
+    return result
+
+
+def run_parse_only_proofs(contract: dict, parse_root: Path) -> dict:
+    parse_root = Path(parse_root).resolve()
+    if parse_root != (TASK_ROOT / "parse_only").resolve():
+        raise LiveRunnerError("parse_root_identity_mismatch")
+    if parse_root.exists() or parse_root.is_symlink():
+        raise LiveRunnerError("parse_evidence_already_exists")
+    parse_root.mkdir(parents=True)
+    allowed_empty = canonical_empty_defaults(contract)
+    cases = []
+    for case_id, run_id in LIVE_IDENTITIES:
+        case_root = parse_root / case_id.lower()
+        case_root.mkdir()
+        render_dir = TASK_ROOT / "live" / run_id
+        config = live_config(contract, case_id, run_id, render_dir)
+        rendered, omitted = render_live_launch_command(config, allowed_empty)
+        command = parse_only_command(rendered)
+        result = _run_parse_only(command, case_root)
+        result.update({
+            "case_id": case_id,
+            "replacement_run_id": run_id,
+            "rendered_live_argv": rendered,
+            "omitted_empty_defaults": omitted,
+        })
+        cases.append(result)
+    summary = {
+        "schema_version": "icra069_ros_launch_parser_proof_v1",
+        "case_order": [case_id for case_id, _ in LIVE_IDENTITIES],
+        "cases": cases,
+        "parse_invocations": len(cases),
+        "main_flow_child_invocations": sum(
+            len(case["observed_required_processes"]) for case in cases
+        ),
+        "parse_ready": len(cases) == 3 and all(
+            case["parse_passed"] for case in cases
+        ),
+    }
+    _write_json(parse_root / "parser_proof.json", summary)
+    return summary
+
+
+def write_adoption_manifest(current_commit: str) -> tuple[Path, dict]:
+    output = TASK_ROOT / "compact/icra069_adoption_manifest.json"
+    if output.exists() or output.is_symlink():
+        raise LiveRunnerError("adoption_manifest_already_exists")
+    changed = subprocess.check_output(
+        ["git", "diff", "--name-only", f"{PRODUCT_COMMIT}..{current_commit}"],
+        cwd=REPOSITORY, text=True,
+    ).splitlines()
+    payload = build_adoption_payload(current_commit, changed)
+    _write_json(output, payload)
+    return output, payload
 
 
 def verify_installed_aliases(install_root: Path) -> dict[str, dict[str, str]]:
@@ -841,8 +1095,12 @@ def _execute_live_attempt(
         raise LiveRunnerError(f"identity_already_exists:{run_id}")
     run_dir.mkdir(parents=True)
     config = live_config(contract, case_id, run_id, run_dir)
-    command = GATE_RUNNER.launch_command(config)
-    _write_json(run_dir / "launch_command.json", {"argv": command})
+    command, omitted = render_live_launch_command(
+        config, canonical_empty_defaults(contract)
+    )
+    _write_json(run_dir / "launch_command.json", {
+        "argv": command, "omitted_empty_defaults": omitted,
+    })
     ready_path = run_dir / "capture_ready.json"
     capture_command = [
         sys.executable,
@@ -890,16 +1148,141 @@ def _execute_live_attempt(
     return {"completed": True, "normalized_run": normalized}
 
 
+def write_replacement_live_bundle(
+    contract: dict, normalized: list[dict], current_commit: str,
+    adoption_path: Path, output_path: Path,
+) -> dict:
+    bundle = QUALIFICATION.write_live_bundle(
+        contract, CONTRACT_PATH, normalized, current_commit,
+        INSTALL_MANIFEST_PATH, output_path,
+    )
+    bundle["manifest"].update({
+        "product_install_git_commit": PRODUCT_COMMIT,
+        "runner_analyzer_git_commit": current_commit,
+        "adoption_manifest_path": str(adoption_path.relative_to(REPOSITORY)),
+        "adoption_manifest_sha256": _sha256(adoption_path),
+    })
+    _write_json(output_path, bundle)
+    return bundle
+
+
+def reconcile_replacement_analysis(
+    base_result: dict, dual_provenance_failures: list[str]
+) -> dict:
+    result = dict(base_result)
+    technical = list(result.get("technical_failures", []))
+    split_marker = "install manifest commit mismatch"
+    if split_marker in technical and not dual_provenance_failures:
+        technical.remove(split_marker)
+    technical.extend(dual_provenance_failures)
+    behavioral = list(result.get("behavioral_failures", []))
+    if technical:
+        status = "P5_PROSPECTIVE_QUALIFICATION_TECHNICAL_BLOCKER"
+    elif behavioral:
+        status = "P5_PROSPECTIVE_QUALIFICATION_FAIL"
+    else:
+        status = "P5_PROSPECTIVE_QUALIFICATION_PASS"
+    result.update({
+        "status": status,
+        "qualification_claim": status == "P5_PROSPECTIVE_QUALIFICATION_PASS",
+        "technical_failures": technical,
+        "behavioral_failures": behavioral,
+    })
+    return result
+
+
+def analyze_replacement_live(input_path: Path, output_path: Path) -> int:
+    input_path = Path(input_path).resolve()
+    output_path = Path(output_path).resolve()
+    expected_input = (TASK_ROOT / "live/icra_p0_p5_evidence_v1.json").resolve()
+    expected_output = (
+        TASK_ROOT / "compact/icra_p0_p5_analysis_v1.json"
+    ).resolve()
+    if input_path != expected_input or output_path != expected_output:
+        raise LiveRunnerError("replacement_analyzer_path_mismatch")
+    QUALIFICATION._claim_live_analyzer_once(
+        output_path, input_path, CONTRACT_PATH
+    )
+    try:
+        bundle = json.loads(input_path.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        raise LiveRunnerError("replacement_live_bundle_malformed") from exc
+    manifest = bundle.get("manifest", {})
+    adoption_relative = manifest.get("adoption_manifest_path")
+    adoption_path = (
+        REPOSITORY / adoption_relative
+        if isinstance(adoption_relative, str) else REPOSITORY
+    )
+    dual_failures = []
+    if not (
+        isinstance(adoption_relative, str)
+        and not Path(adoption_relative).is_absolute()
+        and adoption_path.resolve()
+        == (TASK_ROOT / "compact/icra069_adoption_manifest.json").resolve()
+        and adoption_path.is_file() and not adoption_path.is_symlink()
+        and _sha256(adoption_path) == manifest.get("adoption_manifest_sha256")
+    ):
+        dual_failures.append("dual provenance adoption manifest binding mismatch")
+        adoption = {}
+    else:
+        try:
+            adoption = json.loads(adoption_path.read_text())
+        except (OSError, json.JSONDecodeError):
+            adoption = {}
+    current_commit = manifest.get("runner_analyzer_git_commit", "")
+    if manifest.get("product_install_git_commit") != PRODUCT_COMMIT \
+            or manifest.get("git_commit") != current_commit:
+        dual_failures.append("dual provenance commit binding mismatch")
+    if isinstance(adoption, dict) and adoption:
+        changed = adoption.get("post_product_changed_files", [])
+        try:
+            expected_adoption = build_adoption_payload(current_commit, changed)
+        except LiveRunnerError as exc:
+            dual_failures.append(f"dual provenance validation failed:{exc}")
+        else:
+            if adoption != expected_adoption:
+                dual_failures.append("dual provenance adoption payload mismatch")
+    result = QUALIFICATION.analyze_live_bundle(
+        QUALIFICATION.load_contract(CONTRACT_PATH), bundle,
+        CONTRACT_PATH, REPOSITORY,
+    )
+    result = reconcile_replacement_analysis(result, dual_failures)
+    status = result["status"]
+    result.update({
+        "dual_provenance": {
+            "validated": not dual_failures,
+            "product_install_git_commit": PRODUCT_COMMIT,
+            "runner_analyzer_git_commit": current_commit,
+            "adoption_manifest_sha256": manifest.get(
+                "adoption_manifest_sha256"
+            ),
+        },
+    })
+    _write_json(output_path, result)
+    return 0 if status == "P5_PROSPECTIVE_QUALIFICATION_PASS" else 2
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--live-root", type=Path, default=TASK_ROOT / "live")
     parser.add_argument("--install-manifest", type=Path, default=INSTALL_MANIFEST_PATH)
     parser.add_argument("--freeze-install-only", action="store_true")
+    parser.add_argument("--analyze-replacement-live", action="store_true")
+    parser.add_argument(
+        "--analysis-input", type=Path,
+        default=TASK_ROOT / "live/icra_p0_p5_evidence_v1.json",
+    )
+    parser.add_argument(
+        "--analysis-output", type=Path,
+        default=TASK_ROOT / "compact/icra_p0_p5_analysis_v1.json",
+    )
     args = parser.parse_args()
     if args.freeze_install_only:
-        audit_and_freeze_install(INSTALL_ROOT, args.install_manifest)
-        print("ICRA068_INSTALL_CLOSURE_PASS")
-        return 0
+        raise LiveRunnerError("icra069_product_install_is_immutable")
+    if args.analyze_replacement_live:
+        return analyze_replacement_live(
+            args.analysis_input, args.analysis_output
+        )
     live_root = args.live_root.resolve()
     install_manifest_path = args.install_manifest.resolve()
     if live_root != (TASK_ROOT / "live").resolve():
@@ -915,14 +1298,27 @@ def main() -> int:
         ["git", "rev-parse", "HEAD"], cwd=REPOSITORY, text=True
     ).strip()
     live_environment = validate_live_environment()
+    if _sha256(install_manifest_path) != PRODUCT_MANIFEST_SHA256:
+        raise LiveRunnerError("product_manifest_sha256_mismatch")
     validate_frozen_install_manifest(
-        install_manifest_path, git_commit
+        install_manifest_path, PRODUCT_COMMIT
     )
+    dirty = subprocess.check_output(
+        ["git", "status", "--porcelain", "--untracked-files=no"],
+        cwd=REPOSITORY, text=True,
+    ).strip()
+    if dirty:
+        raise LiveRunnerError("tracked_worktree_not_clean")
     contract = QUALIFICATION.load_contract(CONTRACT_PATH)
     if tuple(contract["required_processes"]) != tuple(REQUIRED_PROCESSES):
         raise LiveRunnerError("required_process_marker_contract_mismatch")
     if tuple(contract["cases"]) != tuple(case_id for case_id, _ in LIVE_IDENTITIES):
         raise LiveRunnerError("live_identity_contract_mismatch")
+    adoption_path, _ = write_adoption_manifest(git_commit)
+    parse_summary = run_parse_only_proofs(contract, TASK_ROOT / "parse_only")
+    if parse_summary.get("parse_ready") is not True:
+        print("ROS_LAUNCH_PARSER_NOT_READY")
+        return 2
     free_bytes = shutil.disk_usage(REPOSITORY).free
     if free_bytes < MIN_FREE_BYTES:
         raise LiveRunnerError(f"disk_free_below_40_gib:{free_bytes}")
@@ -950,13 +1346,23 @@ def main() -> int:
         "free_bytes_before_gpu": free_bytes,
         "live_environment": live_environment,
         "install_manifest_sha256": _sha256(install_manifest_path),
+        "product_install_git_commit": PRODUCT_COMMIT,
+        "runner_analyzer_git_commit": git_commit,
+        "adoption_manifest_path": str(adoption_path.relative_to(REPOSITORY)),
+        "adoption_manifest_sha256": _sha256(adoption_path),
+        "parse_proof_path": str(
+            (TASK_ROOT / "parse_only/parser_proof.json").relative_to(REPOSITORY)
+        ),
+        "parse_proof_sha256": _sha256(
+            TASK_ROOT / "parse_only/parser_proof.json"
+        ),
     })
     _write_json(live_root / "runner_state.json", state)
     if state["state"] != "COMPLETE":
         return 4
-    QUALIFICATION.write_live_bundle(
-        contract, CONTRACT_PATH, normalized, git_commit,
-        install_manifest_path, live_root / "icra_p0_p5_evidence_v1.json",
+    write_replacement_live_bundle(
+        contract, normalized, git_commit, adoption_path,
+        live_root / "icra_p0_p5_evidence_v1.json",
     )
     return 0
 
