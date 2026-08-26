@@ -3,6 +3,19 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- review(icra-072-final-flow-closure): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 /
+  IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — Review
+  `32a1c65...3dc3106` returns `REQUEST_CHANGES`. The immutable `-002` run fixes P0 startup (123 ready rows) and
+  exact P4 path binding, but 1,464 P4 decisions contain zero risk selections and zero valid original-guide
+  provider samples; final/P5/publish/runtime lineage remains zero. Final `attempt_15` is statically green but was
+  built after the live run. Review also finds an unvalidated post-release occupancy-epoch window and no real
+  manager/FSM/P5/runtime regression. Reissue ICRA-072 for terminal revalidation, production-chain coverage, a
+  separately named development-only selection trigger and exactly one immutable `icra072-dev-smoke-003`.
+  ICRA-073, inverse-corridor implementation, effect claims, optimization, qualification, cleanup and campaign
+  remain blocked. The known ICRA-071 lifecycle guard rejects this valid Supervisor handoff from a prior
+  `active_role=DEEPSEEK` HEAD as `BUILDER_SUPERVISOR_FILE_STAGED`; explicit route/staged/message checks and the
+  normal pre-push guard remain mandatory, and no guard byte is changed.
+
 - docs(icra-p4-v2-inverse-corridor-design): IAP-RQ-423 / IAP-RQ-424 — freeze
   `ICRA_P4_V2_INVERSE_CORRIDOR_FIXTURE_V1` in
   `docs/icra27/dev/ICRA_P4_V2_INVERSE_CORRIDOR_FIXTURE.md`. The deferred ICRA-073 design fixes two feasible
@@ -22,6 +35,22 @@
   lineage-lifetime/path-binding repair, fresh post-`attempt_11` build and exactly one immutable
   `icra072-dev-smoke-002`; ICRA-073, optimization, formal science, qualification, cleanup and campaign remain
   blocked.
+
+The immutable `icra072-dev-smoke-002` execution used the following repository-root commands and `attempt_13`;
+they are retained for reproduction disclosure and must not be rerun against the existing non-overwritable root:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/dev_planner/run_icra072_vertical_slice.py \
+  --run-root /home/dev/ws_iap/src/iap/results/icra27/icra072/icra072-dev-smoke-002 \
+  --install-root /home/dev/ws_iap/src/iap/results/icra27/icra072/install/attempt_13 \
+  --duration-s 45
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/dev_planner/analyze_icra072_vertical_slice.py \
+  --run-root /home/dev/ws_iap/src/iap/results/icra27/icra072/icra072-dev-smoke-002
+```
+
+The runner owns GPU preflight, task-local `ROS_LOG_DIR`, capture, ROS launch, required-process monitoring and
+controlled shutdown. Runner exit was `0`; the sole analyzer invocation exited `1` with the retained six-condition
+live-lineage failure.
 
 - docs(icra-development-first): IAP-RQ-000 / IAP-RQ-423 / IAP-RQ-424 — user decision
   `USER-ICRA-ROUTE-20260826-002`, bound to pushed anchor `b24a330d`, keeps the active

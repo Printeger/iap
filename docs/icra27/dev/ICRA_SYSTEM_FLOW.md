@@ -6,8 +6,8 @@
 
 > User route restored 2026-08-26 by `USER-ICRA-ROUTE-20260826-001`, bound to pushed anchor `48caa9d`.
 
-> Current status: P0 Gate-0B `PASS`; P4-v1 `G0C SCIENTIFIC_NO_GO / IMMUTABLE`; P4-v2 `NOT_STARTED`;
-> P5 `IMPLEMENTED-BUT-UNQUALIFIED`.
+> Current status: P0 Gate-0B `PASS`; P4-v1 `G0C SCIENTIFIC_NO_GO / IMMUTABLE`; P4-v2 core/static checks
+> implemented but ICRA-072 live lineage `REQUEST_CHANGES`; P5 `IMPLEMENTED-BUT-UNQUALIFIED`.
 
 > ICRA-070 is `SUPERSEDED_UNQUALIFIED_BY_USER_ROUTE_DECISION`. Its P0+P5 implementation/evidence remains the
 > future matched control; replacement/parser/GPU/live/analyzer remain uninvoked and no cleanup is authorized.
@@ -20,6 +20,13 @@ P4-v2 changes the internal risk decomposition, objective, time-aware search labe
 and statistical estimand. It does not let risk override occupancy, EGO feasibility or P5 hard gates. The exact
 route lock and recovery gates are in
 `docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md`.
+
+The frozen inverse-corridor design is
+`docs/icra27/dev/ICRA_P4_V2_INVERSE_CORRIDOR_FIXTURE.md`. Its independent oracle is outside the runtime graph:
+after a normal publication identity exists, the evaluation plane may read the frozen scene truth and the same
+committed final B-spline to produce diagnostics. No oracle centre line, tube label, expected route or risk truth
+may flow into P0, P4, EGO or P5. The design remains deferred to ICRA-073; the current ICRA-072 selection trigger
+is a distinct development fixture and carries no scientific effect authority.
 
 > Scope pivot: 2026-08-20. Source audit: `dev/icra` at `bd3858a72ba06b7eb1551006876c55362c979bab`.
 
@@ -175,7 +182,8 @@ The existing `p4` profile does not enable P5. The existing `all` profile enables
 | P4-G0A | P0 Gate-0B PASS; red fixture reviewed | Closed/no/open/multi scan cases PASS | `PASS` (historical closed route) |
 | P4-G0B | G0A PASS | Metrics-only pair, identity and 200/200 profiles; no application | `PASS` (historical closed route) |
 | P4-G0C | G0B PASS | Metrics-only calibration and positive mean/max improvement | P4-v1 `SCIENTIFIC_NO_GO`: max improvement Q10 = 0; v1 route closed, v2 remains prospective |
-| Development vertical slice | User route lock and decision 002 agree with state/task/plan | P0/P4-v2/EGO/P5 focused checks and one registered development smoke preserve full lineage | `ICRA-072 TASK_READY`; effect and qualification remain unclaimed |
+| Development vertical slice | User route lock and decision 002 agree with state/task/plan | P0/P4-v2/EGO/P5 focused checks and one registered development smoke preserve full lineage | `ICRA-072 REQUEST_CHANGES / continuation TASK_READY`; static checks pass, but provider support and terminal lineage remain open |
+| Inverse-corridor effect diagnostic | ICRA-072 full-lineage Review PASS and separately issued ICRA-073 | PRIMARY/MIRROR/NULL paired control/treatment with oracle-isolated final-trajectory diagnostics | Design frozen; implementation deferred, no effect claim |
 | P4-G0D | P4-v2 held-out confirmatory PASS | Post-freeze selected hash reaches B-spline and P5 | Planned as `ICRA-078`; P4-v1 G0D remains unauthorized |
 | P5 system gate | ICRA-078 Review PASS and a separately issued prospective integration task | Treatment/control SAFE_NORMAL, final reject/no-publish and runtime-fail identities PASS | Planned as `ICRA-079`; ICRA-070 is superseded unqualified and retained only as control-arm engineering |
 | Campaign | ICRA-079 Supervisor Review PASS plus a distinct user decision | Fresh GPU and `≥40 GiB` free plus frozen ICRA-080 task | Explicitly blocked; no automatic transition from any scientific or qualification gate |

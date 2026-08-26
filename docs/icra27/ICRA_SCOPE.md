@@ -12,6 +12,21 @@ same task, then diagnose effect size and optimize. ICRA-071 repair is retained a
 and makes no effect, qualification or campaign claim. GPU preflight, required-process health, occupancy/EGO/P5
 authority, fail-closed behavior and retained-artifact protection remain mandatory.
 
+## Frozen inverse-corridor diagnostic design — implementation still deferred
+
+`docs/icra27/dev/ICRA_P4_V2_INVERSE_CORRIDOR_FIXTURE.md` freezes
+`ICRA_P4_V2_INVERSE_CORRIDOR_FIXTURE_V1`: PRIMARY, EXACT_MIRROR and FLAT_NULL construct two non-straight,
+occupancy-feasible corridors and evaluate the committed final B-spline with an independent provider-risk oracle.
+The oracle is an evaluation-only bypass. Its centre lines, tube labels and ground truth are forbidden inputs to
+P0, P4, EGO and P5 decisions.
+
+The design is queued, not implemented. The latest ICRA-072 Review remains `REQUEST_CHANGES`; therefore the
+current task may add only a separately named development selection-trigger scene needed to close the existing
+vertical slice. That trigger is not the inverse-corridor scientific fixture and cannot provide effect evidence.
+Only a later ICRA-072 Review PASS may issue ICRA-073 to implement the frozen three-variant fixture, paired
+control/treatment diagnostics and independent oracle. ICRA-073 must measure without tuning; targeted changes
+from its retained results belong exclusively to ICRA-074.
+
 ## User route restoration — 2026-08-26
 
 The user has explicitly restored P4 as the indispensable conference treatment and frozen the active route as

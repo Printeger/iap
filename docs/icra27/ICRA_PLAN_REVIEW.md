@@ -11,6 +11,27 @@ This decision does not relax runtime safety or scientific claim boundaries: requ
 occupancy and EGO feasibility authority, P5 final/runtime gates, artifact retention, held-out separation and
 explicit user campaign approval remain mandatory.
 
+## Latest ICRA-072 Review and inverse-corridor disposition — 2026-08-26
+
+**Verdict: `REQUEST_CHANGES`.** Static implementation evidence passes, but immutable live run
+`icra072-dev-smoke-002` selected no risk guide because the original guide had zero complete provider-risk
+support in every decision. It therefore produced no selected-guide lineage through the committed final
+B-spline, P5 final, publication and P5 runtime. The released-snapshot lineage also lacks a terminal occupancy-
+epoch revalidation, and the required production-shaped regression is absent. This is an integration blocker,
+not evidence that P4-v2 has no effect.
+
+The same ICRA-072 Gate receives one final bounded closure task: repair terminal epoch/lineage validation,
+consolidate invalidation, add the real manager/FSM-to-P5/runtime regression, diagnose the retained `-002`
+support failure offline, and use a separately named development-only selection trigger for exactly one fresh
+smoke. ICRA-073 is not yet issued.
+
+The separately frozen design
+`docs/icra27/dev/ICRA_P4_V2_INVERSE_CORRIDOR_FIXTURE.md` remains
+`DESIGN_FROZEN / IMPLEMENTATION_DEFERRED_TO_ICRA-073`. After an ICRA-072 PASS, ICRA-073 will implement
+PRIMARY/EXACT_MIRROR/FLAT_NULL, paired control/treatment and an independent evaluation oracle. Oracle geometry,
+labels and truth may never enter P0, P4, EGO or P5 decisions. ICRA-073 measures without tuning; targeted
+optimization from its retained results is restricted to ICRA-074.
+
 ## User-owned recovery verdict — 2026-08-26
 
 **Verdict: retain the top-level P0 -> P4 -> EGO -> P5 architecture; supersede the P0+P5 main-route decision;

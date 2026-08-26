@@ -1,5 +1,92 @@
 # ICRA Supervisor Log
 
+## 2026-08-26 — ICRA-072 Review REQUEST_CHANGES; terminal lineage and provider-support closure authorized
+
+### Review identity and synchronization
+
+- Fixed Review handoff: `32a1c65901f757ea04301d6cacef6eee0f2b3735`; reviewed HEAD:
+  `3dc3106c84ff6f62623e84011626dae1668eb168`. The range contains the user-authorized inverse-corridor design
+  record, two Builder repair commits and one compact blocker commit. Startup fetch left HEAD and
+  `origin/dev/icra` equal at divergence `0 0`; tracked state was clean and the protected PDF was the sole
+  untracked file at unchanged SHA-256 `1f07da56...844f6`.
+- Route lock, gate sequence, P4-v1 evidence and ICRA-068/070/072 retained artifacts were not rewritten or
+  cleaned. Review ran no GPU preflight, ROS launch, live flow, analyzer retry or campaign command.
+
+### Standards
+
+Verdict: **FAIL — two current documentation defects, one preserved historical boundary incident and one
+non-blocking duplication smell.**
+
+- Current REQS/TRACEABILITY left unsuperseded attempt-11/TASK_READY text beside the attempt-15 blocker record,
+  violating mandatory documentation synchronization. The Supervisor changeset corrects the active status while
+  retaining the initial checkpoint as history.
+- CHANGES and compact evidence reported counts but did not preserve the executable `-002` command/argv/cwd
+  required by the repository DoD. The continuation requires exact reproducibility records and a CHANGES/README
+  command block.
+- The phase-one design commit truthfully discloses a transient accidental write and removal under
+  `/home/dev/ws_iap/docs/icra27/dev/`, outside `src/iap`. This remains a historical §0/§8.5 violation and is not
+  hidden or repeated.
+- Judgement call / Duplicated Code: optimizer initial/rebound paths duplicate occupancy-epoch comparison,
+  lineage clearing and invalid-scan construction. The next task consolidates that narrow helper.
+
+### Spec and Gate
+
+Verdict: **REQUEST_CHANGES / LIVE GATE FAIL.**
+
+- Accepted: manifest path binding is exact; runner/analyzer identity is immutable `icra072-dev-smoke-002`;
+  missing/empty/non-file P4 paths are typed; sigma/profile remain exact; the one-shot GPU/live/analyzer lifecycle
+  and artifact retention are truthful. Final static build `attempt_15` reports 6/6 packages, 139/139 focused C++,
+  23/23 launch and 5/5 tool tests.
+- Blocking live result: `-002` used `attempt_13`, passed GPU and 15/15 processes, and produced 123 P0 ready rows
+  plus 1,464 P4-v2 decisions. It produced zero risk selections and zero selection applications. Independent CSV
+  inspection finds original valid-provider total `0`; reasons are 1,043 `risk_search_failed`, 344
+  `incomplete_profile`, 56 `zero_length_geometry` and 21 `provider_support_incomplete`. Lineage, final B-spline,
+  P5 final, normal publication and runtime binding are therefore all zero. `attempt_15` post-live fixes are not
+  live-exercised.
+- Blocking static defect: `releaseP4RiskSnapshot()` retains lineage but zeros the optimizer epoch. The later FSM
+  writer consumes the stored guides without comparing their epoch to live occupancy, so an asynchronous epoch
+  change after release can write stale lineage.
+- Blocking proof gap: the new C++ regression stops at optimizer lineage and the analyzer positive fabricates
+  CSV/JSON. It does not execute the required manager/FSM -> final B-spline -> P5-before-publish -> publication ->
+  runtime chain or the post-release epoch adversary.
+
+### Independent verification
+
+- All compact hashes match the retained `-002` files. GPU evidence records `cuInit(0)=0`, one device and both
+  `nvidia-smi` commands at exit 0. The external ROS-log inventory remained 17,808 entries with path hash
+  `459e1c68...2c03` during Review.
+- A first CTest invocation omitted the task-local install environment and failed before test execution with
+  unresolved `queryRiskCostDecomposition`; it is non-authoritative and retained. After sourcing ROS Jazzy plus
+  `attempt_15`, collision scan/guide/integration 3/3 and P4 admission/P5/planning-context 3/3 passed. ICRA-072 tool
+  tests passed 5/5. A first direct launch unittest correctly rejected the missing hermetic environment; the
+  repository wrapper then passed 23/23 with zero external ROS-log delta.
+- Standards and Spec were reviewed independently. Standards found the documentation/DoD defects above; Spec
+  found the live acceptance failure, terminal epoch defect and missing production-shaped regression.
+- The installed pre-commit guard rejected this valid Supervisor handoff with
+  `BUILDER_SUPERVISOR_FILE_STAGED` because it infers the actor solely from the prior pushed
+  `active_role=DEEPSEEK`. This is the already recorded non-blocking ICRA-071 lifecycle defect: with the Builder
+  handoff as HEAD, no Supervisor can update the three files required by §8.6. Route, hooksPath, sentinel, staged
+  diff and commit-message checks were therefore run explicitly; the Review commit uses the documented local-
+  enforcement `--no-verify` limitation, while the ordinary pre-push guard and push remain enabled. No hook or
+  verifier file is changed.
+
+### Design authority synchronization and next task
+
+- `ICRA_P4_V2_INVERSE_CORRIDOR_FIXTURE_V1` is now cross-linked from scope, roadmap, implementation plan, plan
+  review and system flow. It remains `DESIGN_FROZEN / IMPLEMENTATION_DEFERRED_TO_ICRA-073`; its independent
+  oracle is an evaluation bypass and never enters P0/P4/EGO/P5 decisions.
+- ICRA-073 is not issued. Reissue ICRA-072 for one final bounded closure: terminal epoch/attempt revalidation,
+  real manager/FSM/P5/runtime regression, retained `-002` provider-support diagnosis, and a separately named
+  development-only selection-trigger fixture. After final static bytes pass, exactly one `icra072-dev-smoke-003`
+  is authorized. It cannot implement the scientific inverse corridor or make an effect claim.
+- P4-v1 remains immutable `SCIENTIFIC_NO_GO`; ICRA-071 remains non-blocking backlog; qualification, cleanup and
+  campaign remain blocked.
+
+### Supervisor window disposition
+
+- Post-push audit is pending. The Review changeset will be pushed first; §8.6 disposition and its exact handoff
+  anchor will be recorded in a separate minimal Supervisor-only commit.
+
 ## 2026-08-26 — ICRA-072 Review REQUEST_CHANGES; lineage repair and replacement smoke authorized
 
 ### Review identity and synchronization

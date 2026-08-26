@@ -1,5 +1,15 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-26 latest ICRA-072 Supervisor Review
+
+| Req ID | Reviewed seam | Evidence and disposition | Status |
+|---|---|---|---|
+| IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-423 | P0 and provider support in the sole `-002` live run | GPU/15-process PASS; 123 P0 ready rows through generation 56; 1,464 P4-v2 decisions; independent CSV inspection finds original valid-provider total `0`, risk selections `0` and selection applications `0` | **P0 RUNNING / P4 SELECTION BLOCKED** |
+| IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-423 | Terminal attempt/snapshot/epoch lineage | `releaseP4RiskSnapshot()` retains selected records but zeros the active epoch; FSM-stage writer does not compare stored epoch to current occupancy. Existing test stops at optimizer state | **REQUEST_CHANGES / STALE-LINEAGE WINDOW** |
+| IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 | Actual final B-spline -> P5 -> publish -> runtime chain | `-002` lineage/final/P5/runtime counts are all zero; positive analyzer rows are synthetic and no production manager/FSM regression covers the chain | **NOT PROVEN / LIVE GATE FAIL** |
+| IAP-RQ-423 / IAP-RQ-424 | Current same-Gate task | `NEXT_TASK.md`: terminal revalidation, production-shaped chain regression, provider-support diagnosis, separate development-only selection trigger and exactly one immutable `icra072-dev-smoke-003` | **ICRA-072 TASK_READY / DEVELOPMENT ONLY** |
+| IAP-RQ-423 / IAP-RQ-424 | Inverse-corridor design authority | `docs/icra27/dev/ICRA_P4_V2_INVERSE_CORRIDOR_FIXTURE.md` is cross-linked from active authority docs; oracle remains evaluation-only | **DESIGN FROZEN / IMPLEMENTATION DEFERRED TO ICRA-073** |
+
 ## 2026-08-26 P4-v2 inverse-corridor design freeze
 
 | Req ID | Design seam | Frozen record and boundary | Status |
@@ -1517,7 +1527,7 @@ They do not convert historical `NO-GO-P2`, failed P0 Gate-0B evidence, the stati
 | IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 | Effective manifest shares the planner P4 path; analyzer types missing/empty/non-file bindings and binds final/P5/publish/runtime identity; launch 23/23 and tools 5/5 | **STATIC CONTRACT PASS** |
 | IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-423 / IAP-RQ-424 | Sole `icra072-dev-smoke-002`: GPU PASS, 15/15 processes, P0 ready 123 (max generation 56), 1,464 P4-v2 rows but zero risk-selected guides; sole analyzer FAIL with no final/P5/publish/runtime lineage | **BLOCKED; EVIDENCE RETAINED, NO RETRY/TUNING** |
 
-Final static verification uses fresh build `attempt_11`: 137/137 focused C++,
+The initial ICRA-072 checkpoint used fresh build `attempt_11`: 137/137 focused C++,
 22/22 hermetic launch and 3/3 runner/analyzer tool tests pass; all final
 hermetic checks retain an unchanged 17,808-entry external ROS-log inventory.
 An earlier direct C++ invocation's ambient rclcpp-log delta is retained and

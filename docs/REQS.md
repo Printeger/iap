@@ -458,7 +458,7 @@ Acceptance:
 - Planner chooses safer path even if longer when integrity violated.
 
 ### IAP-RQ-423 P4 collision-guide planning and P5 lineage
-Status: **P4-v1 SCIENTIFIC_NO_GO RETAINED / P4-v2 ICRA-072 REQUEST_CHANGES /
+Status: **P4-v1 SCIENTIFIC_NO_GO RETAINED / P4-v2 ICRA-072 TERMINAL-LINEAGE AND PROVIDER-SUPPORT CLOSURE /
 INVERSE-CORRIDOR DESIGN FROZEN, IMPLEMENTATION NOT STARTED**
 
 Source: `docs/icra27/ICRA_SCOPE.md` and the 2026-08-20 Supervisor scope pivot. This requirement extends collision-guide planning evidence; it does not replace or verify the IAP-RQ-422 PL/AL admission rule.
@@ -487,7 +487,7 @@ Acceptance:
 - The selected decision/hash reaches the final B-spline, and a P5 final rejection produces zero normal publication.
 
 ### IAP-RQ-424 User-owned ICRA research route and P4-v2 scientific recovery
-Status: **DEVELOPMENT-FIRST ROUTE LOCKED / ICRA-072 LINEAGE REPAIR TASK_READY / GUARD REPAIR NONBLOCKING /
+Status: **DEVELOPMENT-FIRST ROUTE LOCKED / ICRA-072 FINAL FLOW CLOSURE TASK_READY / GUARD REPAIR NONBLOCKING /
 INVERSE-CORRIDOR DESIGN FROZEN, IMPLEMENTATION NOT STARTED**
 
 Source: `docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md` and user decision
@@ -523,7 +523,7 @@ Acceptance:
 - G0D/P5 lineage passes before a separate user decision may authorize the 60-run formal campaign.
 
 ---
-ICRA-072 Review note (2026-08-26): the provider-only decomposition, time-aware
+Initial ICRA-072 Review note (2026-08-26): the provider-only decomposition, time-aware
 P4-v2 bottleneck search and static EGO/P5 seams are implemented with final
 build `attempt_11`, 137/137 focused C++ tests, 22/22 launch tests and 3/3
 runner/analyzer tool tests. The sole registered development smoke remains
@@ -536,3 +536,15 @@ by final lineage, and the launch manifest lost the explicit P4 evidence path.
 ICRA-072 is reissued for the bounded lineage/path repair, fresh build and
 exactly one `icra072-dev-smoke-002`. All mapped requirements remain
 unqualified; no effect, optimization, qualification or campaign claim is made.
+
+Latest ICRA-072 Review note (2026-08-26): the replacement fixed P0 startup and
+the exact manifest path. The immutable `icra072-dev-smoke-002` passed GPU and
+15/15 process health, produced 123 ready P0 rows and 1,464 P4-v2 decisions, but
+all original guides had zero valid provider samples. Risk selection, final
+B-spline, P5 and runtime lineage therefore remained zero. Final static
+`attempt_15` passes focused tests but was built after the sole live run.
+Review also finds that terminal lineage is not revalidated against live
+occupancy after snapshot release and that the required manager/FSM/P5/runtime
+regression is absent. ICRA-072 is reissued for one final bounded closure and
+one non-overwriting `icra072-dev-smoke-003`; ICRA-073 and inverse-corridor
+implementation remain unauthorized until full live Review PASS.

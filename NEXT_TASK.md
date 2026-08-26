@@ -1,100 +1,116 @@
-# ICRA-072 — Persist P4-v2 lineage and run one replacement development smoke
+# ICRA-072 — Close terminal lineage and provider support; run one final development smoke
 
 > Active gate: `P4_V2_END_TO_END_VERTICAL_SLICE_AND_LIVE_SMOKE`
 > Owner: `DEEPSEEK`
 > Activation: `TASK_READY`
 > Conference route: `P0_P4_V2_P5`
-> Review base: `1a9db300c59671652b70d2df9b0a058da022b057`
-> Reviewed Builder HEAD: `1505a004f99a64fba440b47b38753d6719321471`
+> Review base: `32a1c65901f757ea04301d6cacef6eee0f2b3735`
+> Reviewed Builder HEAD: `3dc3106c84ff6f62623e84011626dae1668eb168`
 > User decision: `USER-ICRA-ROUTE-20260826-002`
 > Requirement mapping: `IAP-RQ-320`, `IAP-RQ-321`, `IAP-RQ-400`, `IAP-RQ-410`, `IAP-RQ-421`, `IAP-RQ-422`, `IAP-RQ-423`, `IAP-RQ-424`
-> One task: close the identified lineage/evidence blockers and execute exactly one fresh registered smoke
+> One task: close terminal lineage validity and deterministic provider support, then execute one final registered development smoke
 
 ## Review disposition and goal
 
-ICRA-072 Review is `REQUEST_CHANGES`, not Gate PASS. Retain `icra072-dev-smoke-001` as immutable failed
-evidence. It proved GPU readiness and 15/15 required-process health, but P0 remained at generation zero and the
-required P4/EGO/P5/publication lineage was never exercised. It used install `attempt_06`; final static corrections
-and build `attempt_11` were not exercised live.
+ICRA-072 Review remains `REQUEST_CHANGES`; ICRA-073 is not authorized. Retain both prior registered runs as
+immutable FAIL evidence. `icra072-dev-smoke-002` fixed P0 startup and produced 123 ready samples plus 1,464
+P4-v2 decisions, but every original guide had zero valid provider samples. Consequently no risk guide was
+selected and the required final B-spline/P5/publication/runtime chain remained absent.
 
-Complete the smallest same-Gate continuation that makes selected P4-v2 guide identity survive EGO refinement,
-binds its evidence path truthfully, and runs the corrected development profile once. This remains a runnable-flow
-task, not effect diagnosis or optimization.
+Complete one bounded development closure. Fix terminal lineage validation, prove the real manager/FSM/P5 chain,
+make the existing development profile naturally provide complete finite provider support to both guides, and run
+one final non-overwriting smoke. This task proves runnable flow only; it cannot claim effect or implement the
+scientific inverse-corridor fixture.
 
-## Required repair
+## Required terminal-lineage repair
 
-1. Persist the selected P4-v2 decision/guide lineage for the complete planning attempt. A subsequent
-   `NO_COLLISION` refinement may report no new collision decision, but must not erase the earlier selected guide
-   required by final B-spline, P5 and publication evidence. A new planning attempt, invalid request/epoch,
-   failed-closed outcome or explicit attempt reset must not reuse stale lineage.
-2. Add a production-shaped regression that selects a P4-v2 guide, then enters a no-collision refinement and
-   proves the same attempt/segment/request/snapshot/epoch/selected-guide identity reaches control points, final
-   B-spline, P5-before-publish and committed runtime binding. Also prove stale-attempt and invalidation clearing.
-3. Make the effective launch manifest record the exact nonempty task-local `p4.debug_csv_path` supplied by the
-   runner. The analyzer must reject missing/empty/non-file bindings with a typed reason and must never interpret
-   an empty string as directory `.`.
-4. Give the replacement runner/analyzer a new immutable identity, `icra072-dev-smoke-002`. They must reject
-   reuse or overwrite of `-001` and any pre-existing `-002` output root.
-5. Preserve the already committed development profile values exactly:
-   `p0.predictor.sigma_grow_m_sqrt_s=0.01` and
-   `p0.predictor.sigma_growth_profile=legacy_iap_rq320_baseline_v1`. These values are the existing provisional
-   compatibility baseline, not a calibration or effect result.
+1. Make the attempt lineage a typed durable record that retains attempt, segment, request, snapshot generation,
+   snapshot configuration, occupancy epoch and selected-guide identity after the search snapshot is released.
+2. Every `recordP4VerticalSliceLineage()` stage must revalidate the record against the active planning-attempt ID
+   and the live current occupancy epoch immediately before writing. Mismatch must clear/invalidate lineage, write
+   no success row and block final/P5/publish/runtime progression. Snapshot release must not erase valid same-attempt
+   lineage, but it must not erase the epoch required for terminal validation.
+3. Keep new attempt, invalid request, epoch change, failed-closed scan/decision and explicit reset clearing exact.
+   Consolidate duplicated epoch/lineage invalidation into one production helper.
+4. Add one production-shaped regression that uses the actual manager/FSM evidence path, not fabricated CSV/JSON:
+   selected guide -> same-attempt no-collision refinement -> control points -> final B-spline -> P5 final before
+   publish -> normal publish authorization -> committed runtime binding. Add an adversary that changes occupancy
+   after snapshot release but before the first FSM writer and proves zero downstream success rows/publication.
 
-## Verification and fresh build
+## Required provider-support and selection-trigger closure
 
-- Use TDD for the lineage-loss and empty-path defects. Run the smallest focused C++ tests covering P4 decision,
-  initial/rebound/no-collision refinement, EGO/P5 ordering and runtime binding, plus the launch and ICRA-072 tool
-  tests. Record exact executed/pass counts and exits.
-- Every command capable of creating ROS/rclcpp logs must set a new task-local `ROS_LOG_DIR`. Inventory the known
-  external ROS-log root before and after; any new external entry fails the verification and must be retained,
-  not deleted.
-- After source/installable launch/tool changes, make one fresh task-local configure/build/install identity later
-  than `attempt_11`; do not reuse any prior build/install/log root. Inspect direct and ament dependency resolution.
-- Validate before live use that the installed profile has exact finite `0.01`, exact legacy profile identity,
-  P1/P2/P3 disabled, P4-v2 selection enabled, P5 final/runtime enabled, and a nonempty task-local P4 debug path.
+1. Analyze retained `icra072-dev-smoke-002` only; do not rerun it. Freeze a reason/support summary including
+   `1464` decisions, `0` risk selections, original valid-provider total `0`, and the observed typed reasons. Add
+   analyzer coverage so future evidence reports original/risk support completeness and selection blockers.
+2. Determine why the live P0 snapshot gives no complete original-guide provider profile. Fix only the smallest
+   development configuration/scene projection needed for full support; do not weaken unknown/stale/non-finite
+   rejection, occupied hard rejection, the provider-bottleneck objective, timeout or path-ratio gates.
+3. Add a separately named `icra072_p4_selection_trigger_v1` development-only fixture/profile. Through production
+   P0 snapshot and production A*, both original and risk guides must be collision-feasible and have finite complete
+   controllable-interior provider support; the risk guide must naturally pass the existing bottleneck and length
+   gates at least once. P4 may see only occupancy and P0 snapshot—no expected route, label or oracle injection.
+4. This trigger is flow-test infrastructure and is ineligible for effect, calibration, qualification or paper
+   evidence. It must not implement, rename or partially substitute
+   `ICRA_P4_V2_INVERSE_CORRIDOR_FIXTURE_V1`; PRIMARY/EXACT_MIRROR/FLAT_NULL remain deferred to ICRA-073.
 
-## Exactly one authorized replacement smoke
+## Documentation and reproducibility repair
 
-After all static checks, fresh build/install, installed-profile validation and command/process inspection pass:
+- Mark attempt-11 statements as the initial ICRA-072 checkpoint and make attempt 15 / smoke `-002` the current
+  reviewed state in REQS/TRACEABILITY/CHANGES.
+- Record exact executable commands, argv, cwd, relevant environment and exits for static tests, build, GPU
+  preflight, runner and analyzer. `docs/CHANGES.md` or README must contain a reproducible command block.
+- Preserve the `0.01` / `legacy_iap_rq320_baseline_v1` development profile exactly.
 
-1. Run and retain one fresh GPU preflight covering `nvidia-smi`, CUDA `cuInit(0)` and `device_count >= 1`.
-   Failure reports `GPU_NOT_READY` and forbids ROS launch.
-2. Execute exactly one new registered development smoke with run ID `icra072-dev-smoke-002`, using only its new
-   task-local log/export/evidence roots and the fresh post-repair install. Do not rerun, overwrite or relabel
-   `-001`; do not retry `-002` after any launch or analyzer failure.
-3. PASS requires all required processes healthy through the runtime; at least one valid immutable P0 generation;
-   at least one truthful closed collision and P4-v2 selected decision; the same selected guide identity through
-   EGO control/refinement and a final B-spline; P5 final before normal publish; and P5 runtime bound to the exact
-   committed trajectory. Missing or mixed identity, epoch invalidation or required-process death fails closed.
-4. Run the analyzer once. Report descriptive provider-risk values only if naturally produced. Do not tune the
-   fixture, thresholds, risk objective or algorithm against the smoke outcome.
+## Static verification and fresh build
+
+- Use TDD at the terminal epoch/FSM and provider-support seams. Run focused collision-guide, manager/FSM, P5,
+  runtime, launch, runner and analyzer tests. Every command capable of rclcpp/ROS logs must use a new task-local
+  `ROS_LOG_DIR`; exact external ROS-log inventory must remain unchanged.
+- Create one fresh task-local build/install later than `attempt_15`, validate linkage and the installed profile,
+  and run every final focused test against those exact final bytes before any live command.
+- Static admission must prove at least one production-shaped risk selection and the complete downstream identity
+  chain, plus the post-release epoch adversary. Synthetic evidence may not satisfy the final live Gate.
+
+## Exactly one final registered development smoke
+
+Only after all static checks pass:
+
+1. Run one fresh GPU preflight (`nvidia-smi`, `cuInit(0)`, `device_count >= 1`). Failure stops before ROS.
+2. Run exactly one new identity `icra072-dev-smoke-003` from the final fresh install. Reject any pre-existing root,
+   reuse, overwrite or retry. Use only new task-local log/export/evidence roots.
+3. Invoke the analyzer exactly once. PASS requires healthy required processes; at least one valid immutable P0
+   generation; one truthful closed collision; one natural P4-v2 risk selection with complete provider support;
+   identical attempt/request/snapshot/epoch/selected-guide identity through control points, no-collision
+   refinement, final B-spline, P5 final-before-publish, normal publication and P5 runtime committed binding.
+4. Any missing identity, support, selection, final stage, required process or analyzer condition is `BLOCKED`.
+   Stop without retry or tuning and return to Supervisor.
 
 ## Allowed scope
 
-- The smallest P4 selected-lineage lifetime repair in bspline optimizer/planner manager and directly affected
-  EGO/P5 evidence seam; focused tests; launch manifest binding; ICRA-072 runner/analyzer/capture tests and minimal
-  build/install wiring.
-- Builder-owned `DEV_LOG.md`, `docs/CHANGES.md`, `docs/TRACEABILITY.md`, `docs/REQS.md`, relevant developer flow
-  documentation, and new non-overwriting ICRA-072 compact/raw evidence.
-- Task-local build/install/log products required by this repair and replacement smoke.
+- The smallest terminal-lineage validity helper and production manager/FSM/P5/runtime regression.
+- The smallest development-only P0 support/scene projection and `icra072_p4_selection_trigger_v1` needed to
+  exercise existing P4-v2 selection without changing its objective or gates.
+- ICRA-072 runner/analyzer/launch/config and focused tests; exact reproducibility documentation; one fresh
+  build/install and one non-overwriting `-003` evidence root.
+- Builder-owned `DEV_LOG.md`, `docs/CHANGES.md`, `docs/TRACEABILITY.md`, `docs/REQS.md` and relevant developer-flow
+  documentation.
 
 ## Forbidden
 
-- No route-lock, `AGENTS.md`, `AGENT_STATE.md`, `NEXT_TASK.md`, `SUPERVISOR_LOG.md`, scope/plan/review or guard-plan
-  edit; no ICRA-071 verifier/hook repair or weakening.
-- No P0/P4/P5 objective, threshold, scene or science tuning beyond the exact lineage/evidence fixes above. If an
-  unrelated algorithm change appears necessary, stop and return a typed blocker for Supervisor decision.
-- No P1/P2/P3 activation, effect diagnosis, targeted optimization, formal/held-out run, SESOI/power freeze, G0D,
-  prospective qualification, campaign or scientific/effect claim.
+- No route-lock, `AGENTS.md`, `AGENT_STATE.md`, `NEXT_TASK.md`, `SUPERVISOR_LOG.md`, scope/roadmap/plan/review or
+  guard-plan edit; no ICRA-071 repair or hook weakening.
+- No implementation of `ICRA_P4_V2_INVERSE_CORRIDOR_FIXTURE_V1`; no PRIMARY/MIRROR/NULL effect run, ICRA-073,
+  targeted optimization, threshold/SESOI freeze, held-out access, G0D, prospective qualification or campaign.
+- No objective, timeout, path-ratio, support-validity, occupancy, P5 threshold/action or scientific acceptance
+  weakening. If flow requires such a change, stop with a typed blocker.
 - No deletion, cleanup, overwrite or relabelling of ICRA-068/070/072 build/install, compact/raw evidence, P4-v1
   evidence, earlier logs or the protected untracked `docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf`.
 
 ## Handoff and acceptance
 
-Explicitly stage only allowed files, inspect the staged diff, use applicable existing `IAP-RQ-*` IDs in every
-code/config commit and push normally. Return `ICRA072_REPLACEMENT_FLOW_READY_FOR_REVIEW` only if all focused
-checks pass and the sole registered `icra072-dev-smoke-002` satisfies the complete lineage contract. Otherwise
-return one truthful `BLOCKED` handoff with all evidence retained and no retry.
+Explicitly stage only authorized files, inspect the staged diff, use applicable requirement IDs, commit and push
+normally. Return `ICRA072_FINAL_FLOW_READY_FOR_REVIEW` only if the sole `-003` run satisfies the complete live
+contract. Otherwise return one truthful `BLOCKED` handoff with all evidence retained and no retry.
 
-Supervisor Review PASS may issue only ICRA-073 effect diagnostics. It cannot authorize optimization, formal
+Only a later Supervisor Review PASS may issue ICRA-073. It cannot directly authorize optimization, formal
 science, G0D, prospective qualification, cleanup or campaign.

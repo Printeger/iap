@@ -44,6 +44,21 @@ ICRA-070 以 `SUPERSEDED_UNQUALIFIED_BY_USER_ROUTE_DECISION` 关闭，不取得 
 守卫。其 Review PASS 前不得修改 P4 产品代码是 decision 001 的旧顺序；decision 002 已明确由
 ICRA-072 独立授权 bounded P4-v2 development surface。
 
+### Inverse-corridor design freeze and task boundary
+
+`docs/icra27/dev/ICRA_P4_V2_INVERSE_CORRIDOR_FIXTURE.md` 已冻结
+`ICRA_P4_V2_INVERSE_CORRIDOR_FIXTURE_V1`，但当前状态仍是
+`DESIGN_FROZEN / IMPLEMENTATION_DEFERRED_TO_ICRA-073`。ICRA-072 最新 Review 为 `REQUEST_CHANGES`，
+所以当前 continuation 只可修复 terminal lineage、补齐真实 production-shaped 回归，并使用一个独立命名的
+development-only selection trigger 令既有 vertical slice 自然产生完整 provider support。该 trigger 不得
+复用 inverse-corridor 名称、几何或科学效果身份。
+
+只有 ICRA-072 full-lineage Review PASS 才能签发 ICRA-073。ICRA-073 才实现 PRIMARY、EXACT_MIRROR、
+FLAT_NULL，运行 paired P0+P5 control / P0+P4-v2+P5 treatment，并以独立 oracle 诊断已提交 final
+B-spline。Oracle 仅属旁路 evaluation plane，不得进入 P0 snapshot、P4 search/selection、EGO feasibility
+或 P5 final/runtime 的决策输入。ICRA-073 只测量并保留结果，不得边测边调；所有依据其结果的针对性优化
+只能由后续 ICRA-074 显式授权。
+
 研究路线、required modules、primary claim、arms、fallback 和 campaign activation 的所有权为 USER。
 Supervisor 遇到科学 NO_GO 只能进入 `BLOCKED_AWAITING_USER_RESEARCH_DECISION` 并提出建议，不能自动
 激活 contingency。

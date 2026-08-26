@@ -477,13 +477,20 @@ non-bypassable enforcement requires a protected remote branch and an independent
 
 ## 9. Corrective roadmap and gates
 
+The frozen inverse-corridor diagnostic design is
+`docs/icra27/dev/ICRA_P4_V2_INVERSE_CORRIDOR_FIXTURE.md`
+(`ICRA_P4_V2_INVERSE_CORRIDOR_FIXTURE_V1`). It is still implementation-deferred because ICRA-072 has not
+received Review PASS. Its independent oracle is an evaluation-only bypass and may never feed P0, P4, EGO or
+P5 decisions. A development-only selection trigger used to close ICRA-072 is a distinct engineering fixture
+and cannot be relabelled as inverse-corridor effect evidence.
+
 | Task | Authorized result | Stop line |
 |---|---|---|
 | Supervisor recovery changeset | publish this audit, restore `P0_P4_V2_P5`, supersede unqualified ICRA-070 | no product/runtime change |
 | ICRA-071 backlog | repair user-route/state/doc/RQ local guards | non-blocking after user decision 002; no security claim |
 | ICRA-072 | development-first end-to-end P0 -> P4-v2 -> EGO -> P5 vertical slice plus live smoke | runnable integration, no effect claim |
-| ICRA-073 | effect diagnostics after flow closure | no held-out access or claim |
-| ICRA-074 | targeted optimization from ICRA-073 evidence | no held-out access or threshold tuning |
+| ICRA-073 | implement PRIMARY/MIRROR/NULL inverse corridors, paired control/treatment and independent-oracle effect diagnostics after flow closure | measure retained evidence only; no tuning, held-out access or claim |
+| ICRA-074 | targeted optimization derived from retained ICRA-073 evidence | no tune-during-ICRA-073, held-out access or threshold tuning |
 | ICRA-075 | exploratory objective/source/domain ablation and power inputs | no held-out access or claim |
 | ICRA-076 | freeze protocol, SESOI, hashes, seeds and 30–60 sample size per scene | no confirmatory run before Review PASS |
 | ICRA-077 | primary/mirror/null held-out confirmatory | no retry/exclusion; primary exact gate |
