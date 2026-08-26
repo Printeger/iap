@@ -51,6 +51,15 @@
 - This authority changeset is committed and pushed before deletion. Deletion occurs only after literal-path,
   repository-boundary, symlink, tracked-file and live-process checks are repeated; actual released bytes and
   final disk state are recorded in a follow-up Supervisor commit.
+- Inventory commit `3f06a455d3b4ca6539f44e674bb3907fea72a16d` was pushed before execution. All 61 roots
+  revalidated at `122694791115` logical bytes and zero tracked/symlink/out-of-boundary/process hits. After
+  deletion and `sync`, `0/61` remained; filesystem used space fell by `123042209792` bytes and available space
+  rose from `27112198144` to `150154407936` bytes. The logical/block-accounting difference is retained in the
+  inventory record. Shared build/install/log sizes and the protected PDF hash remained exact; raw/compact/live/
+  scientific evidence and ordinary logs remain present.
+- The executor rejected an initial `rm -rf` form before process creation, so it changed nothing. Cleanup then
+  used the same revalidated literal list with non-following `find -depth -delete`; this is disclosed rather than
+  hidden.
 
 ### Enforcement disclosure and window disposition
 

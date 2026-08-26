@@ -12,7 +12,9 @@
   scope/roadmap/plan/review/system-flow, and issue ICRA-072A iterative integration. Inventory 61 exact
   regenerable build/install roots totaling `122694791115` bytes for deletion only after this inventory is pushed;
   retain raw/compact/registered-live/P4-v1 evidence, ordinary logs, shared workspace artifacts and the protected
-  PDF. This Supervisor changeset modifies no product, runner, analyzer, hook or evidence byte.
+  PDF. Inventory commit `3f06a45` was pushed before all 61 roots were revalidated and deleted; `0/61` remain,
+  filesystem available space increased by `123042209792` bytes to `150154407936`, and every retention check
+  passed. This Supervisor changeset modifies no product, runner, analyzer, hook or evidence byte.
 
 - fix(icra-072-final-flow-closure): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 /
   IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — retain typed P4-v2 lineage across snapshot release,

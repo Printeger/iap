@@ -1,6 +1,6 @@
 # ICRA regenerable build/install retirement inventory — 2026-08-26
 
-Status: **AUTHORIZED / INVENTORY BEFORE DELETION**
+Status: **COMPLETED / 61 REGENERABLE ROOTS RETIRED**
 
 Authority: user-directed four-layer workflow; `IAP-RQ-424`
 
@@ -87,4 +87,37 @@ Pre-deletion filesystem state: `/dev/nvme0n1p4` size `694831472640`, used `63234
 
 ## Post-deletion record
 
-Pending execution after this inventory is committed and pushed.
+The inventory was committed and pushed at `3f06a455d3b4ca6539f44e674bb3907fea72a16d` before deletion. Immediately
+before deletion, all 61 roots still matched the literal inventory, resolved below
+`/home/dev/ws_iap/src/iap/results/icra27/`, were directories rather than symlinks, contained zero tracked files,
+and totaled `122694791115` logical bytes. No colcon/CMake/ROS process was active. The protected PDF hash and all
+three shared workspace roots passed their preconditions.
+
+An initial `rm -rf` form was rejected by the command executor before process creation and changed no path. The
+same checks were repeated, then each validated literal root was removed with non-following `find -depth -delete`.
+Post-delete verification found `0/61` roots remaining.
+
+Filesystem observations (`df -B1`):
+
+| Point | Size | Used | Available |
+|---|---:|---:|---:|
+| Immediately before deletion | 694831472640 | 632348499968 | 27112198144 |
+| Immediately after deletion and `sync` | 694831472640 | 509306290176 | 150154407936 |
+
+Observed available-space increase and used-space decrease were both `123042209792` bytes. This filesystem block
+accounting differs from the summed logical candidate size by `347418677` bytes; both values are recorded rather
+than conflated.
+
+Preservation checks after deletion:
+
+- shared build `/home/dev/ws_iap/build`: `4026917714` bytes;
+- shared install `/home/dev/ws_iap/install`: `361883196` bytes;
+- shared log `/home/dev/ws_iap/log`: `174476233` bytes;
+- protected PDF SHA-256:
+  `1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`;
+- ICRA-068 live/compact, ICRA-070 compact, ICRA-072 compact, all three registered development smokes and ordinary
+  logs remain present.
+
+The deleted roots are permanently absent and can be recovered only by rebuilding from retained source and
+commands. No Git-tracked file, raw/compact/live evidence, ordinary log, shared workspace directory or protected
+PDF was deleted.
