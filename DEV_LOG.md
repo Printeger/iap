@@ -8444,3 +8444,31 @@ cleaned. The final 137/137 rerun bound `ROS_LOG_DIR` to the ICRA-072 task root;
 its before/after external inventory count stayed 17,808 and its canonical
 inventory SHA-256 stayed
 `fa4573b32439654d2793eab2ecaeb6d2fbbc463f1224ca632f5da99c7dfb5aea`.
+
+## 2026-08-26 — P4-v2 inverse-corridor phase-one design persistence
+
+Requirements: IAP-RQ-423 and IAP-RQ-424.
+
+Persisted the user-approved design record
+`ICRA_P4_V2_INVERSE_CORRIDOR_FIXTURE_V1` at
+`docs/icra27/dev/ICRA_P4_V2_INVERSE_CORRIDOR_FIXTURE.md`. It freezes the exact
+two-corridor geometry, `0.01 m` curve-approximation bound, `0.50 m` guard bands,
+central straight-seed obstacle, required third-homotopy closure, GNSS-only
+risky mask, symmetric LiDAR policy, PRIMARY/EXACT_MIRROR/FLAT_NULL controls,
+planner/oracle data-plane isolation and future fixture/200-point final-B-spline
+analysis interfaces.
+
+This phase is documentation only: `DESIGN_FROZEN /
+IMPLEMENTATION_DEFERRED_TO_ICRA-073`. It does not edit the current fixture,
+algorithm, runner, analyzer, ICRA-072 evidence, route lock, task, state or gate
+sequence; it does not run ROS/GPU/live commands and makes no effect,
+qualification, threshold or campaign claim. ICRA-073 implementation remains
+blocked until ICRA-072 receives Supervisor Review PASS and a separate task is
+issued. The concurrent ICRA-072 lineage-repair worktree and the protected
+untracked system-flow PDF were left unstaged and unchanged.
+
+During authoring, the first new-file patch resolved relative to the workspace
+root and briefly created `/home/dev/ws_iap/docs/icra27/dev/` instead of the
+repository path. The newly created file and its two empty directories were
+immediately removed; no pre-existing workspace file was changed. The design
+was then created only at the canonical repository path above.

@@ -458,7 +458,8 @@ Acceptance:
 - Planner chooses safer path even if longer when integrity violated.
 
 ### IAP-RQ-423 P4 collision-guide planning and P5 lineage
-Status: **P4-v1 SCIENTIFIC_NO_GO RETAINED / P4-v2 ICRA-072 REQUEST_CHANGES**
+Status: **P4-v1 SCIENTIFIC_NO_GO RETAINED / P4-v2 ICRA-072 REQUEST_CHANGES /
+INVERSE-CORRIDOR DESIGN FROZEN, IMPLEMENTATION NOT STARTED**
 
 Source: `docs/icra27/ICRA_SCOPE.md` and the 2026-08-20 Supervisor scope pivot. This requirement extends collision-guide planning evidence; it does not replace or verify the IAP-RQ-422 PL/AL admission rule.
 
@@ -473,6 +474,11 @@ Source: `docs/icra27/ICRA_SCOPE.md` and the 2026-08-20 Supervisor scope pivot. T
 - [ ] The selected guide and hash remain traceable through control-point constraints, rebound optimization, refinement, feasibility, and the final B-spline.
 - [ ] P5 final remains the hard integrity gate before normal publish; P5 runtime remains active after publish. P4 and P5 record snapshot generations separately.
 - [ ] P4 remains advisory. EGO occupancy/dynamics keep motion-feasibility authority, and P5 remains the IAP hard integrity gate.
+- [ ] After ICRA-072 Review PASS, implement the frozen
+  `ICRA_P4_V2_INVERSE_CORRIDOR_FIXTURE_V1` PRIMARY/EXACT_MIRROR/FLAT_NULL geometry and evaluate only the
+  committed final B-spline through an independent oracle. The design is frozen in
+  `docs/icra27/dev/ICRA_P4_V2_INVERSE_CORRIDOR_FIXTURE.md`; implementation has not started and is deferred to
+  ICRA-073.
 
 Acceptance:
 
@@ -481,7 +487,8 @@ Acceptance:
 - The selected decision/hash reaches the final B-spline, and a P5 final rejection produces zero normal publication.
 
 ### IAP-RQ-424 User-owned ICRA research route and P4-v2 scientific recovery
-Status: **DEVELOPMENT-FIRST ROUTE LOCKED / ICRA-072 LINEAGE REPAIR TASK_READY / GUARD REPAIR NONBLOCKING**
+Status: **DEVELOPMENT-FIRST ROUTE LOCKED / ICRA-072 LINEAGE REPAIR TASK_READY / GUARD REPAIR NONBLOCKING /
+INVERSE-CORRIDOR DESIGN FROZEN, IMPLEMENTATION NOT STARTED**
 
 Source: `docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md` and user decision
 `USER-ICRA-ROUTE-20260826-002` bound to `b24a330d79d6e85e8080cf2a359bb1a18765e5a5`.
@@ -500,6 +507,10 @@ Source: `docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md` and 
 - [ ] In ICRA-072, add P4-v2 provider/occupied/unknown support decomposition while preserving the v1 scalar
   query for replay, implement the minimal provider-only interior bottleneck/lexicographic time-aware search,
   and run the P0 -> P4-v2 -> EGO -> P5 development vertical slice before effect optimization.
+- [x] Freeze `ICRA_P4_V2_INVERSE_CORRIDOR_FIXTURE_V1` as a deferred ICRA-073 design with two feasible curved
+  homotopies, PRIMARY/EXACT_MIRROR/FLAT_NULL causal controls, independent-oracle isolation and a 200-point
+  final-B-spline analysis contract. This documentation checkbox does not mark fixture implementation or effect
+  validation complete.
 - [ ] Freeze SESOI, endpoint buffer `b=2r`, independent 30–60 seed-run sample size per scene and held-out protocol
   before confirmatory execution.
 

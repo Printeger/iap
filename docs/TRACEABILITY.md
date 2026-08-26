@@ -1,5 +1,14 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-26 P4-v2 inverse-corridor design freeze
+
+| Req ID | Design seam | Frozen record and boundary | Status |
+|---|---|---|---|
+| IAP-RQ-423 | Construct two occupancy-feasible, non-straight homotopies around a straight-seed closed collision | `docs/icra27/dev/ICRA_P4_V2_INVERSE_CORRIDOR_FIXTURE.md`; exact start/goal, sinusoidal centre lines with `0.01 m` approximation bound, `0.75 m` tubes plus `0.50 m` guard bands, central cuboid, GNSS-only risky overhead mask and symmetric LiDAR policy | **DESIGN_FROZEN / IMPLEMENTATION NOT STARTED** |
+| IAP-RQ-423 / IAP-RQ-424 | Separate planner inputs from the safety oracle and preserve causal controls | `ICRA_P4_V2_INVERSE_CORRIDOR_FIXTURE_V1`; PRIMARY, geometric `y -> -y` EXACT_MIRROR and finite full-support FLAT_NULL; P4 sees only occupancy and P0 snapshot | **DESIGN_FROZEN / DEFERRED TO ICRA-073** |
+| IAP-RQ-423 / IAP-RQ-424 | Evaluate the actual committed trajectory without changing the formal primary | Future `p4_v2_inverse_corridor_analysis_v1`: 200-point final-B-spline tube diagnostics, independent peak/mean provider risk, `AL-PL`, P5 and publication identity; `safe_tube_fraction` is diagnostic and route-lock `D_peak` remains primary | **INTERFACE FROZEN / NO EFFECT OR QUALIFICATION CLAIM** |
+| IAP-RQ-424 | Preserve current authority and gate ordering | Phase one changes developer documentation only; ICRA-072 repair/task bytes and route lock remain unchanged. Implementation requires ICRA-072 Review PASS and a separately issued ICRA-073 task; SESOI remains ICRA-076 | **ICRA-072 UNCHANGED / ICRA-073 NOT AUTHORIZED** |
+
 ## 2026-08-26 ICRA-072 Supervisor Review
 
 | Req ID | Reviewed seam | Supervisor evidence and disposition | Status |

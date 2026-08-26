@@ -3,6 +3,16 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- docs(icra-p4-v2-inverse-corridor-design): IAP-RQ-423 / IAP-RQ-424 — freeze
+  `ICRA_P4_V2_INVERSE_CORRIDOR_FIXTURE_V1` in
+  `docs/icra27/dev/ICRA_P4_V2_INVERSE_CORRIDOR_FIXTURE.md`. The deferred ICRA-073 design fixes two feasible
+  non-straight corridor centre lines, `0.01 m` approximation bound, tube/guard/obstacle/occlusion geometry,
+  required third-homotopy closure, PRIMARY/EXACT_MIRROR/FLAT_NULL causal variants, strict oracle isolation and
+  future fixture/200-point final-B-spline analysis schemas. This docs-only
+  changeset does not modify the current fixture, P0/P4/EGO/P5 algorithms, ICRA-072 task/authority bytes, route
+  lock, gate sequence, live evidence or campaign status; implementation remains not started and requires an
+  ICRA-072 Review PASS followed by a separately issued ICRA-073.
+
 - review(icra-072-vertical-slice): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 /
   IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — Supervisor Review of
   `1a9db30...1505a00` returns `REQUEST_CHANGES`. Final static build and focused suites pass, but the sole
