@@ -424,6 +424,60 @@ TEST(P4CollisionGuideIntegration,
   EXPECT_EQ(rebound.selected.canonical_hash, rebound.risk.canonical_hash);
 }
 
+TEST(P4CollisionGuideIntegration,
+  ProviderBottleneckV2LineageSurvivesNoCollisionWithinAttemptAndClearsAtBoundaries)
+{
+  const auto snapshot = makeSnapshot();
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureGuideFixture(map.get());
+  auto optimizer = makeOptimizer(
+    map, snapshot, true, false,
+    P4RiskObjective::PROVIDER_BOTTLENECK_V2);
+  Eigen::MatrixXd seed = guideSeedMatrix();
+
+  ASSERT_EQ(
+    optimizer->initControlPoints(seed, true).status,
+    ego_planner::CollisionScanStatus::CLOSED_SEGMENTS);
+  ASSERT_EQ(optimizer->getP4AttemptLineage().size(), 1U);
+  const auto selected = optimizer->getP4AttemptLineage().front();
+  ASSERT_TRUE(selected.selection_applied);
+  ASSERT_EQ(
+    selected.status, ego_planner::P4GuideDecisionStatus::RISK_SELECTED);
+
+  GridMapTestAccess::configureGuideFixture(map.get(), false);
+  bool stopped_for_error = false;
+  EXPECT_FALSE(optimizer->checkCollisionAndReboundForTest(&stopped_for_error));
+  EXPECT_FALSE(stopped_for_error);
+  EXPECT_TRUE(optimizer->getLastP4GuideViz().empty());
+  ASSERT_EQ(optimizer->getP4AttemptLineage().size(), 1U);
+  const auto persisted = optimizer->getP4AttemptLineage().front();
+  EXPECT_EQ(persisted.planning_attempt_id, selected.planning_attempt_id);
+  EXPECT_EQ(persisted.collision_segment_id, selected.collision_segment_id);
+  EXPECT_EQ(persisted.request_hash, selected.request_hash);
+  EXPECT_EQ(persisted.snapshot_generation, selected.snapshot_generation);
+  EXPECT_EQ(persisted.snapshot_config_hash, selected.snapshot_config_hash);
+  EXPECT_EQ(persisted.occupancy_epoch, selected.occupancy_epoch);
+  EXPECT_EQ(
+    persisted.selected.canonical_hash, selected.selected.canonical_hash);
+
+  optimizer->setP4RiskSnapshot(snapshot, 10.0, 74);
+  EXPECT_TRUE(optimizer->getP4AttemptLineage().empty());
+
+  GridMapTestAccess::configureGuideFixture(map.get());
+  optimizer->setP4RiskSnapshot(snapshot, 10.0, 74);
+  Eigen::MatrixXd replacement_seed = guideSeedMatrix();
+  ASSERT_EQ(
+    optimizer->initControlPoints(replacement_seed, true).status,
+    ego_planner::CollisionScanStatus::CLOSED_SEGMENTS);
+  ASSERT_EQ(optimizer->getP4AttemptLineage().size(), 1U);
+  GridMapTestAccess::advanceOccupancyEpoch(map.get());
+  optimizer->setP4RiskSnapshot(snapshot, 10.0, 74);
+  EXPECT_TRUE(optimizer->getP4AttemptLineage().empty());
+
+  optimizer->clearP4RiskSnapshot();
+  EXPECT_TRUE(optimizer->getP4AttemptLineage().empty());
+}
+
 TEST(P4CollisionGuideIntegration, NonG0BContextPreservesFalseMetricsBoundary)
 {
   const auto snapshot = makeSnapshot();

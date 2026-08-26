@@ -8472,3 +8472,41 @@ root and briefly created `/home/dev/ws_iap/docs/icra27/dev/` instead of the
 repository path. The newly created file and its two empty directories were
 immediately removed; no pre-existing workspace file was changed. The design
 was then created only at the canonical repository path above.
+
+## 2026-08-26 — ICRA-072 replacement lineage repair and one-shot smoke
+
+Requirements: IAP-RQ-320, IAP-RQ-321, IAP-RQ-400, IAP-RQ-410,
+IAP-RQ-421, IAP-RQ-422, IAP-RQ-423 and IAP-RQ-424.
+
+Persisted successful P4-v2 decisions for the lifetime of their planning
+attempt instead of treating the latest collision scan as final lineage. A
+same-attempt no-collision refinement now leaves selected identity available to
+the final B-spline/P5/publication writer; attempt change, snapshot/context
+change, occupancy-epoch change, invalid scan, failed-closed decision and
+explicit reset clear it. The effective launch manifest now records the same
+nonempty P4 debug path used by the planner. Runner/analyzer identity advanced
+immutably to `icra072-dev-smoke-002`; missing, empty, non-file and external P4
+bindings fail with distinct reasons.
+
+TDD retained RED evidence under task-local `repair_tdd_red_*` roots. Final
+fresh build/install `attempt_13` completed 6/6 packages. Focused C++ tests
+passed 138/138 (49+9+20+19+8+33), launch tests 23/23 and ICRA-072 tool tests
+5/5. Installed validation proved finite exact sigma `0.01`, exact profile
+`legacy_iap_rq320_baseline_v1`, P1/P2/P3 disabled, P4-v2 enabled, P5
+final/runtime enabled and the exact task-local P4 CSV. External ROS-log
+inventory SHA-256 remained
+`40a7aad5e3bd576af04a62cf5d7cf2ffd30a1d7e82a870d993c4dcce0a19a568`;
+the protected PDF remained SHA-256
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+
+The sole authorized replacement used one GPU preflight (`cuInit(0)=0`, one
+device), ran 45 seconds, observed all 15 required processes without runtime
+failure and retained clean process-group ownership. P0 produced 123 valid
+ready samples through generation 56. The corrected manifest bound the exact
+P4 file, which contained 1,464 v2 decisions, but naturally produced zero
+`RISK_SELECTED` / `selection_applied` decisions (1,408 original selections and
+56 invalid decisions). Consequently no lineage CSV, normal B-spline, P5 final
+or committed-runtime binding existed. The analyzer was invoked exactly once
+and failed closed with those six typed absences. No retry, fixture/threshold/
+objective tuning, effect diagnosis, benchmark, qualification or campaign was
+performed. Final Builder status is truthful BLOCKED pending Supervisor review.

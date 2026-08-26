@@ -476,6 +476,9 @@ namespace ego_planner
     std::string p1AcceptedTrajectoryRiskProfileContextPath() const;
     const P4RiskAStarConfig &getP4RiskAStarConfig() const { return p4_config_; }
     const std::vector<P4GuideViz> &getLastP4GuideViz() const { return last_p4_guides_; }
+    const std::vector<P4GuideViz> &getP4AttemptLineage() const {
+      return p4_attempt_lineage_;
+    }
     bool hasP4RiskSnapshotForTest() const { return static_cast<bool>(p4_risk_snapshot_); }
     bool p4DecisionReadyForInjectionForTest(
         P4GuideDecision *decision, const Eigen::MatrixXd &points,
@@ -597,6 +600,7 @@ namespace ego_planner
     P1IntegrityMetrics last_p1_metrics_;
     std::vector<P1IntegrityVizSample> last_p1_viz_samples_;
     std::vector<P4GuideViz> last_p4_guides_;
+    std::vector<P4GuideViz> p4_attempt_lineage_;
     OptimizerCostBreakdown last_optimizer_cost_breakdown_;
     P1OptimizationTrace last_p1_optimization_trace_;
     P1BasePrepassTrace last_p1_base_prepass_trace_;

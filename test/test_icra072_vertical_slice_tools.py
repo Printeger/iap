@@ -20,7 +20,7 @@ class Icra072VerticalSliceToolsTest(unittest.TestCase):
             export.mkdir(parents=True)
             p4_path = export / "planner_p4_risk_astar_debug.csv"
             (root / "run_manifest.json").write_text(json.dumps({
-                "run_id": "icra072-dev-smoke-001", "registered": True,
+                "run_id": "icra072-dev-smoke-002", "registered": True,
                 "gpu_ready": True, "launch_started": True,
                 "launch_early_exit": False,
                 "process_result": {"required_processes_ok": True},
@@ -138,6 +138,64 @@ class Icra072VerticalSliceToolsTest(unittest.TestCase):
         self.assertIn("_task_local(args.run_root", runner)
         self.assertIn("_task_local(args.output", capture)
         self.assertIn("_task_local(args.ready_file", capture)
+
+    def test_analyzer_types_missing_empty_and_non_file_p4_bindings(self):
+        cases = (
+            ("missing", None, "p4_debug_path_missing"),
+            ("empty", "", "p4_debug_path_empty"),
+            ("non_file", "exports/not_a_file.csv", "p4_debug_path_not_file"),
+        )
+        for name, binding, expected in cases:
+            with self.subTest(name=name), tempfile.TemporaryDirectory(
+                    dir=TASK_RESULTS_ROOT) as directory:
+                root = Path(directory)
+                export = root / "exports/run"
+                export.mkdir(parents=True)
+                (root / "run_manifest.json").write_text(json.dumps({
+                    "run_id": "icra072-dev-smoke-002", "registered": True,
+                }))
+                launch = {}
+                if binding is not None:
+                    launch["p4.debug_csv_path"] = (
+                        str(root / binding) if binding else binding)
+                (export / "test_planner_manifest.json").write_text(
+                    json.dumps(launch))
+                (root / "lineage_capture.jsonl").write_text("")
+                completed = subprocess.run(
+                    [sys.executable, str(ANALYZER), "--run-root", str(root)],
+                    capture_output=True, text=True, check=False)
+                self.assertNotEqual(completed.returncode, 0)
+                analysis = json.loads((root / "analysis.json").read_text())
+                self.assertIn(expected, analysis["failures"])
+                if name == "empty":
+                    self.assertNotIn(
+                        "p4_debug_path_outside_run_root", analysis["failures"])
+
+    def test_replacement_runner_identity_is_immutable_and_non_reusable(self):
+        runner_path = REPO / "scripts/dev_planner/run_icra072_vertical_slice.py"
+        runner = runner_path.read_text()
+        self.assertIn('RUN_ID = "icra072-dev-smoke-002"', runner)
+        with tempfile.TemporaryDirectory(dir=TASK_RESULTS_ROOT) as directory:
+            root = Path(directory)
+            install = root / "install"
+            install.mkdir()
+            old_root = root / "icra072-dev-smoke-001"
+            completed = subprocess.run(
+                [sys.executable, str(runner_path), "--run-root", str(old_root),
+                 "--install-root", str(install), "--duration-s", "30"],
+                capture_output=True, text=True, check=False)
+            self.assertNotEqual(completed.returncode, 0)
+            self.assertIn("run root must end with icra072-dev-smoke-002",
+                          completed.stderr)
+
+            replacement = root / "icra072-dev-smoke-002"
+            replacement.mkdir()
+            completed = subprocess.run(
+                [sys.executable, str(runner_path), "--run-root", str(replacement),
+                 "--install-root", str(install), "--duration-s", "30"],
+                capture_output=True, text=True, check=False)
+            self.assertNotEqual(completed.returncode, 0)
+            self.assertIn("replacement run root already exists", completed.stderr)
 
     def test_runner_and_publish_path_are_fail_closed(self):
         runner = (REPO / "scripts/dev_planner/run_icra072_vertical_slice.py").read_text()

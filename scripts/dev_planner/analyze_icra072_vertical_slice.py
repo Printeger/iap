@@ -70,7 +70,7 @@ def main() -> int:
             failures.append(f"launch_manifest_malformed:{exc}")
             launch = {}
 
-    if run.get("run_id") != "icra072-dev-smoke-001" or not run.get("registered"):
+    if run.get("run_id") != "icra072-dev-smoke-002" or not run.get("registered"):
         failures.append("registered_run_identity_mismatch")
     if not run.get("gpu_ready") or not run.get("launch_started"):
         failures.append("gpu_or_launch_admission_failed")
@@ -112,12 +112,22 @@ def main() -> int:
     if not ready_health:
         failures.append("p0_valid_immutable_generation_missing")
 
-    p4_path_raw = str(launch.get("p4.debug_csv_path", ""))
-    if not p4_path_raw:
-        failures.append("p4_debug_path_unbound")
-    p4_path = Path(p4_path_raw).resolve() if p4_path_raw else None
-    if p4_path is None or not _contained(p4_path, root):
+    p4_binding = launch.get("p4.debug_csv_path")
+    if "p4.debug_csv_path" not in launch:
+        failures.append("p4_debug_path_missing")
+        p4_path = None
+    elif not isinstance(p4_binding, str) or not p4_binding.strip():
+        failures.append("p4_debug_path_empty")
+        p4_path = None
+    else:
+        p4_path = Path(p4_binding).resolve()
+    if p4_path is not None and not _contained(p4_path, root):
         failures.append("p4_debug_path_outside_run_root")
+        p4, lineage = [], []
+    elif p4_path is None:
+        p4, lineage = [], []
+    elif not p4_path.is_file():
+        failures.append("p4_debug_path_not_file")
         p4, lineage = [], []
     else:
         lineage_path = Path(str(p4_path) + ".lineage.csv")

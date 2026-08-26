@@ -3127,3 +3127,18 @@ Requirements: `IAP-RQ-000`, `IAP-RQ-020`, `IAP-RQ-030`, `IAP-RQ-040`,
   explicit P4 CSV, makes lineage write failure block publication, binds the
   immutable snapshot configuration, compares the controllable interior for
   the v2 risk objective and proves same-trajectory final/P5/runtime ordering.
+
+## 2026-08-26 (ICRA-072 replacement lineage repair)
+
+- Preserve selected P4-v2 identity across same-attempt no-collision
+  refinement, while clearing it at attempt/context/epoch/reset and
+  failed-closed boundaries; final EGO/P5/publication evidence reads that
+  attempt-bound lineage.
+- Bind the effective launch manifest to the planner's exact nonempty P4 CSV,
+  type missing/empty/non-file analyzer failures, and isolate immutable runner
+  identity `icra072-dev-smoke-002`.
+- Fresh `attempt_13` passes 6/6 packages, 138/138 focused C++, 23/23 launch and
+  5/5 tool tests. The sole replacement smoke passed GPU and 15/15 process
+  health with 123 valid P0 samples, but naturally selected zero P4-v2 risk
+  guides; its sole analyzer invocation therefore failed closed. Evidence is
+  retained, no retry or tuning occurred, and the gate remains BLOCKED.

@@ -1509,6 +1509,14 @@ They do not convert historical `NO-GO-P2`, failed P0 Gate-0B evidence, the stati
 | IAP-RQ-421 / IAP-RQ-422 | Keep P5 final before normal publication and runtime bound to the committed trajectory | EGO FSM ordering, versioned lineage CSV, three-topic capture and fail-closed analyzer | **STATIC IMPLEMENTED; LIVE LINEAGE NOT REACHED** |
 | IAP-RQ-423 / IAP-RQ-424 | Run only P0/P4-v2/EGO/P5 and retain one truthful registered development smoke | `icra_p0_p4_v2_p5_dev`, runner/capture/analyzer and `results/icra27/icra072/compact/builder_result.json`; GPU PASS, 15/15 processes, P0 ready 0/140, downstream lineage 0 | **BLOCKED: INVALID P0 COVARIANCE-GROWTH PROFILE IN REGISTERED SMOKE; CORRECTED STATIC PROFILE AWAITS NEW AUTHORIZATION** |
 
+### ICRA-072 replacement continuation
+
+| Requirement | Evidence | Status |
+|---|---|---|
+| IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-423 | `BsplineOptimizer` attempt-bound lineage, EGO final-lineage writer and focused no-collision/attempt/epoch regressions; fresh `attempt_13` focused C++ 138/138 | **STATIC REPAIR PASS** |
+| IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 | Effective manifest shares the planner P4 path; analyzer types missing/empty/non-file bindings and binds final/P5/publish/runtime identity; launch 23/23 and tools 5/5 | **STATIC CONTRACT PASS** |
+| IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-423 / IAP-RQ-424 | Sole `icra072-dev-smoke-002`: GPU PASS, 15/15 processes, P0 ready 123 (max generation 56), 1,464 P4-v2 rows but zero risk-selected guides; sole analyzer FAIL with no final/P5/publish/runtime lineage | **BLOCKED; EVIDENCE RETAINED, NO RETRY/TUNING** |
+
 Final static verification uses fresh build `attempt_11`: 137/137 focused C++,
 22/22 hermetic launch and 3/3 runner/analyzer tool tests pass; all final
 hermetic checks retain an unchanged 17,808-entry external ROS-log inventory.

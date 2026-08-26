@@ -442,6 +442,21 @@ class TestPlannerLaunchTest(unittest.TestCase):
                 "false",
             )
 
+    def test_p4_debug_manifest_binding_matches_effective_node_path(self):
+        source = Path(MODULE.__file__).read_text()
+        self.assertIn(
+            '"p4.debug_csv_path": p4_debug_path_for_manifest', source)
+        self.assertIn(
+            'p4_debug_path_for_manifest = '
+            'LaunchConfiguration("p4.debug_csv_path").perform(context)',
+            source,
+        )
+        self.assertIn(
+            'p4_debug_path_for_manifest = str('
+            'Path(export_dir) / "planner_p4_risk_astar_debug.csv")',
+            source,
+        )
+
     def test_icra_p0_p5_all_cases_resolve_exact_full_sensor_scenario(self):
         frozen = {
             "use_gnss": "true",

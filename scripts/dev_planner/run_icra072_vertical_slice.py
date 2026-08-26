@@ -18,7 +18,7 @@ from pathlib import Path
 
 REPOSITORY = Path(__file__).resolve().parents[2]
 TASK_RESULTS_ROOT = (REPOSITORY / "results/icra27/icra072").resolve()
-RUN_ID = "icra072-dev-smoke-001"
+RUN_ID = "icra072-dev-smoke-002"
 REQUIRED_PROCESSES = {
     "corridor_map": ["test_planner_corridor_map_publisher"],
     "pcl_render": ["drone_0_pcl_render_node"],
@@ -117,6 +117,10 @@ def main() -> int:
     args = parser.parse_args()
     run_root = _task_local(args.run_root, "run root")
     install_root = _task_local(args.install_root, "install root")
+    if run_root.name != RUN_ID:
+        raise SystemExit(f"run root must end with {RUN_ID}")
+    if run_root.exists():
+        raise SystemExit("replacement run root already exists")
     if not install_root.is_dir():
         raise SystemExit("install root must be an existing task-local directory")
     if args.duration_s < 30.0:
@@ -125,7 +129,8 @@ def main() -> int:
     exports = run_root / "exports"
     runtime = run_root / "runtime"
     bags = run_root / "bags"
-    for path in (exports, runtime, bags):
+    ros_logs = runtime / "ros_logs"
+    for path in (exports, runtime, bags, ros_logs):
         path.mkdir(parents=True)
 
     gate = _load_gate_runner()
@@ -157,9 +162,10 @@ def main() -> int:
         "--duration-s", str(args.duration_s + 15.0),
     ]
     capture_log = (run_root / "capture_stdout.log").open("x")
+    child_environment = {**os.environ, "ROS_LOG_DIR": str(ros_logs)}
     capture = subprocess.Popen(
         capture_command, stdout=capture_log, stderr=subprocess.STDOUT,
-        start_new_session=True)
+        start_new_session=True, env=child_environment)
     atexit.register(_stop_owned, capture)
     readiness = _wait_ready(capture, run_root / "capture_ready.json")
     manifest["capture_readiness"] = readiness
@@ -198,7 +204,8 @@ def main() -> int:
     launch_log = (run_root / "stdout.log").open("x")
     launch = subprocess.Popen(
         ["bash", "-lc", shell_command], stdout=launch_log,
-        stderr=subprocess.STDOUT, start_new_session=True)
+        stderr=subprocess.STDOUT, start_new_session=True,
+        env=child_environment)
     atexit.register(_stop_owned, launch)
     monitor = gate.RequiredProcessMonitor(
         launch.pid, REQUIRED_PROCESSES, args.duration_s)

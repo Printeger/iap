@@ -3208,6 +3208,9 @@ def _launch_setup(context):
     p1_debug_path_for_manifest = LaunchConfiguration("p1.debug_csv_path").perform(context)
     if not p1_debug_path_for_manifest:
         p1_debug_path_for_manifest = str(Path(export_dir) / "planner_p1_integrity_cost_debug.csv")
+    p4_debug_path_for_manifest = LaunchConfiguration("p4.debug_csv_path").perform(context)
+    if not p4_debug_path_for_manifest:
+        p4_debug_path_for_manifest = str(Path(export_dir) / "planner_p4_risk_astar_debug.csv")
     p1_accepted_profile_path_for_manifest = str(
         Path(p1_debug_path_for_manifest).with_name("planner_p1_accepted_trajectory_risk_profile.csv")
     )
@@ -3474,8 +3477,7 @@ def _launch_setup(context):
         "p4.metrics_only": p4_metrics_only_for_manifest,
         "p4.objective": LaunchConfiguration("p4.objective").perform(context),
         "p4.debug_csv_enable": _param_bool(context, "p4.debug_csv_enable"),
-        "p4.debug_csv_path": LaunchConfiguration(
-            "p4.debug_csv_path").perform(context),
+        "p4.debug_csv_path": p4_debug_path_for_manifest,
         "p4.profile_trace_enable": _param_bool(
             context, "p4.profile_trace_enable"),
         "p4.profile_trace_path": LaunchConfiguration(

@@ -757,7 +757,7 @@ namespace ego_planner
     if (!config.enable_risk_aware_astar ||
         config.objective != P4RiskObjective::PROVIDER_BOTTLENECK_V2)
       return true;
-    const auto &guides = bspline_optimizer_->getLastP4GuideViz();
+    const auto &guides = bspline_optimizer_->getP4AttemptLineage();
     if (!config.debug_csv_enable || config.debug_csv_path.empty() || guides.empty())
       return false;
     const std::string path = config.debug_csv_path + ".lineage.csv";
