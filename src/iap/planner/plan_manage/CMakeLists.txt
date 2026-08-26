@@ -191,10 +191,12 @@ if(BUILD_TESTING)
 
   ament_add_gtest(test_planning_risk_context
     test/test_planning_risk_context.cpp
+    src/ego_replan_fsm.cpp
     src/gate0_qualification_writer.cpp
     src/planner_manager.cpp
     src/p0_risk_grid_runtime.cpp
     src/p0_occupancy_epoch_adapter.cpp
+    src/p1_replan_admission.cpp
     src/p1_candidate_selection.cpp
     src/p2_candidate_ranking.cpp
     src/p3_reference_bias.cpp

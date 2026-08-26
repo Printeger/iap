@@ -1,5 +1,15 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-26 ICRA-072 final closure Builder handoff
+
+| Req ID | Implemented/tested seam | Evidence and disposition | Status |
+|---|---|---|---|
+| IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-423 | Named development-only provider-support trigger | Installed-effective P0 `0.75 / 30x30x6 / exact 0..6 horizons / stale 1`, occupancy map `0.1 / 30x30x3.5`, P4 ratio `1.3` and speed `2.0` are parity-tested; production `RiskGridMap` snapshot + production A* naturally selects the risk guide with complete finite support in static admission | **STATIC PASS / LIVE SUPPORT PROVEN** |
+| IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-423 | Attempt-bound terminal lineage and post-release epoch validity | Typed lineage survives same-attempt no-collision refinement but is revalidated before every terminal writer; actual FSM success publishes through manager-owned P5/runtime, while the post-release epoch adversary fails at the first writer with zero rows/publication | **IMPLEMENTED / FOCUSED PASS** |
+| IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 | Fresh exact bytes and focused verification | `attempt_19` builds 6/6; task libraries resolve to its install; installed/source launch SHA-256 `a1aa383e...2fb3`; C++ 199/199 and Python 29/29 pass; hermetic external ROS inventory stays 17,808 with empty delta | **STATIC ADMISSION PASS** |
+| IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-423 / IAP-RQ-424 | Sole immutable `icra072-dev-smoke-003` | One GPU preflight passes (`cuInit=0`, device count 1), 15/15 processes remain healthy, P0 ready 124, P4 risk-selected 76, both-guide-complete 339 | **RUNNER PASS / DEVELOPMENT ONLY** |
+| IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 | Sole analyzer and final Gate | Analyzer invoked exactly once and exits 1: lineage 0, P5-final 0, runtime-bound 0, normal B-spline 0; failures are `p4_ego_p5_publish_lineage_identity_mismatch`, `p5_final_before_publish_pass_missing`, `p5_runtime_committed_binding_missing`, `normal_bspline_publish_missing` | **BLOCKED / NO RETRY OR TUNING** |
+
 ## 2026-08-26 latest ICRA-072 Supervisor Review
 
 | Req ID | Reviewed seam | Evidence and disposition | Status |

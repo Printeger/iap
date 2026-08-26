@@ -8517,3 +8517,53 @@ objective tuning, effect diagnosis, benchmark, qualification or campaign was
 performed. The final `attempt_15` bytes have not been exercised live because
 the one-shot authorization was already consumed. Final Builder status is
 truthful BLOCKED pending Supervisor review.
+
+## 2026-08-26 — ICRA-072 final terminal/provider closure and immutable smoke -003
+
+Requirements: IAP-RQ-320, IAP-RQ-321, IAP-RQ-400, IAP-RQ-410,
+IAP-RQ-421, IAP-RQ-422, IAP-RQ-423 and IAP-RQ-424.
+
+Closed the reviewed static gaps without changing the P4-v2 objective, timeout,
+path ratio, validity rules or P5 authority. `P4AttemptLineageRecord` now binds
+attempt/segment/request, immutable snapshot/config, live occupancy epoch,
+original/risk/selected hashes and the truthful closed-collision plus later
+no-collision-refinement observations. Snapshot release preserves the epoch for
+terminal revalidation; attempt, context or live-epoch mismatch invalidates the
+whole lineage. Manager writers revalidate immediately before their stage.
+Actual FSM regressions execute the unchanged post-success path through
+manager-owned P5 final, prepare-publish, real ROS B-spline publication and
+runtime committed binding; advancing occupancy after release fails at the
+first writer and proves zero downstream rows/publication.
+
+Added `icra072_p4_selection_trigger_v1` as development-only flow infrastructure.
+Static parity binds its installed effective P0 `0.75 m`, `30x30x6 m`, exact
+0..6 s horizons, 1 s staleness, 0.1 m occupancy map, P4 1.3 ratio and 2 m/s
+query speed. Production `RiskGridMap` snapshot and production A* yield a
+natural risk selection with finite complete support for both guides; the
+deterministic provider is static input only and makes no live/effect claim.
+The retained `-002` support summary records 1,464 decisions, zero selection and
+zero valid original-provider samples without mutating prior evidence.
+
+The first post-freeze fresh build root, `attempt_18`, failed before product
+compilation because the intentionally cleared environment omitted the external
+`gnss_comm` underlay; it is retained as non-final evidence. A new, nonoverwriting
+`attempt_19`, sourced only from ROS plus the required workspace underlay, built
+6/6 packages. Task libraries resolve to `attempt_19`; source and installed
+launch bytes share SHA-256 `a1aa383e6a95d0e0aec461942f62c8ad3ed9b4274f17c731d205c9a24a362fb3`.
+Final exact-byte suites pass: collision guide 20/20, scan 19/19, risk A* 9/9,
+integration 11/11, manager/FSM 28/28, P5 runtime 33/33 and P0 runtime 79/79;
+tool tests pass 5/5 and launch tests 24/24. Hermetic inventories remain 17,808
+external ROS entries with empty delta. The protected PDF remains unchanged at
+SHA-256 `1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+
+Exactly one runner invocation created `icra072-dev-smoke-003`. Its internal
+GPU preflight passed `nvidia-smi`, `cuInit(0)=0` and device count 1; the 45 s
+run observed all 15 required processes without runtime failure and cleaned its
+owned process groups. The sole analyzer invocation exits 1/FAIL. Positive
+evidence is P0 ready 124, natural P4 risk-selected 76, decision total 1,586 and
+both-guide-complete 339. Terminal evidence is absent: lineage 0, P5-final 0,
+runtime-bound 0 and normal B-spline 0, with four exact failure reasons retained
+in `icra072-dev-smoke-003/analysis.json`. Per fail-closed/no-retry rules no
+rerun, tuning, ICRA-073, effect, benchmark, qualification or campaign command
+followed. Final status is `ICRA072_BLOCKED_TERMINAL_CHAIN_MISSING`, pending
+Supervisor review.

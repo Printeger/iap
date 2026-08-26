@@ -1,5 +1,7 @@
 #include <ego_planner/planner_manager.h>
+#include <ego_planner/ego_replan_fsm.h>
 #include <ego_planner/p1_soft_fallback_policy.h>
+#include <ego_planner/p5_runtime_integrity_gate.h>
 #include <ego_planner/trajectory_command_qos.h>
 
 #include <gtest/gtest.h>
@@ -8,8 +10,13 @@
 #include <rclcpp/executors/single_threaded_executor.hpp>
 #include <traj_utils/msg/bspline.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <memory>
 #include <string>
 #include <thread>
@@ -79,6 +86,322 @@ void ensureRclcpp() {
 }
 
 }  // namespace
+
+struct GridMapTestAccess {
+  static void configureP4SelectionTrigger(GridMap* map) {
+    constexpr double resolution = 0.25;
+    map->mp_.map_origin_ = Eigen::Vector3d(-5.0, -3.0, -1.0);
+    map->mp_.map_size_ = Eigen::Vector3d(10.0, 6.0, 2.0);
+    map->mp_.map_min_boundary_ = map->mp_.map_origin_;
+    map->mp_.map_max_boundary_ = map->mp_.map_origin_ + map->mp_.map_size_;
+    map->mp_.map_voxel_num_ = Eigen::Vector3i(40, 24, 8);
+    map->mp_.resolution_ = resolution;
+    map->mp_.resolution_inv_ = 1.0 / resolution;
+    map->mp_.obstacles_inflation_ = 0.0;
+    map->mp_.min_occupancy_log_ = 0.5;
+    map->mp_.clamp_min_log_ = -2.0;
+    map->mp_.unknown_flag_ = 0.01;
+    map->mp_.frame_id_ = "map";
+    const std::size_t count = 40U * 24U * 8U;
+    map->md_.occupancy_buffer_.assign(count, -2.01);
+    map->md_.occupancy_buffer_inflate_.assign(count, 0);
+    map->md_.occupancy_buffer_raw_cloud_.assign(count, 0);
+    for (int x = 0; x < 40; ++x) {
+      const double px = -5.0 + (static_cast<double>(x) + 0.5) * resolution;
+      if (px < -1.0 || px > 1.0) continue;
+      for (int y = 0; y < 24; ++y) {
+        const double py = -3.0 + (static_cast<double>(y) + 0.5) * resolution;
+        if (py < -1.0 || py > 1.0) continue;
+        for (int z = 0; z < 8; ++z) {
+          map->md_.occupancy_buffer_inflate_[static_cast<std::size_t>(
+              map->toAddress(Eigen::Vector3i(x, y, z)))] = 1;
+        }
+      }
+    }
+  }
+
+  static void advanceOccupancyEpoch(GridMap* map) {
+    map->occupancy_update_sequence_.fetch_add(2, std::memory_order_acq_rel);
+  }
+
+};
+
+namespace {
+
+class P4CorridorProvider final : public iap::RiskPredictionProvider {
+ public:
+  bool batchQuery(const std::vector<iap::RiskPredictionQuery>& queries,
+                  std::vector<iap::RiskPredictionResult>* results) override {
+    if (!results) return false;
+    results->clear();
+    for (const auto& query : queries) {
+      iap::RiskPredictionResult result;
+      result.available = true;
+      result.valid = true;
+      result.stale = false;
+      result.hpl_pred =
+          std::abs(query.position_w.x()) < 2.5 && query.position_w.y() < 0.0
+              ? 20.0 : 1.0;
+      result.vpl_pred = result.hpl_pred;
+      result.reason = "ok";
+      results->push_back(result);
+    }
+    return true;
+  }
+};
+
+std::shared_ptr<const iap::RiskGridSnapshot> makeP4SelectionSnapshot() {
+  iap::RiskGridMapParams params;
+  params.frame_id = "map";
+  params.resolution_m = 0.5;
+  params.size_x_m = 24.0;
+  params.size_y_m = 12.0;
+  params.size_z_m = 4.0;
+  params.horizons_s = {0.0, 5.0, 10.0};
+  params.stale_timeout_s = 100.0;
+  params.skip_occupied_voxels = false;
+  iap::RiskGridMap grid(params);
+  P4CorridorProvider provider;
+  std::string reason;
+  EXPECT_TRUE(grid.refreshFromProvider(
+      Eigen::Vector3d::Zero(), 10.0, provider, &reason)) << reason;
+  return grid.acquireSnapshot();
+}
+
+Eigen::MatrixXd p4Seed() {
+  Eigen::MatrixXd seed(3, 9);
+  for (Eigen::Index i = 0; i < seed.cols(); ++i)
+    seed.col(i) = Eigen::Vector3d(static_cast<double>(i) - 4.0, 0.0, 0.0);
+  return seed;
+}
+
+Eigen::MatrixXd p4RefinedControlPoints() {
+  Eigen::MatrixXd points = p4Seed();
+  points(1, 2) = 1.25;
+  points(1, 3) = 1.5;
+  points(1, 4) = 1.5;
+  points(1, 5) = 1.5;
+  points(1, 6) = 1.25;
+  return points;
+}
+
+ego_planner::BsplineOptimizer::Ptr makeP4Optimizer(
+    const GridMap::Ptr& map,
+    const std::shared_ptr<const iap::RiskGridSnapshot>& snapshot,
+    const std::string& debug_path,
+    const uint64_t planning_attempt_id = 73) {
+  ensureRclcpp();
+  rclcpp::NodeOptions options;
+  options.parameter_overrides({
+      rclcpp::Parameter("optimization/lambda_smooth", 1.0),
+      rclcpp::Parameter("optimization/lambda_collision", 0.5),
+      rclcpp::Parameter("optimization/lambda_feasibility", 0.1),
+      rclcpp::Parameter("optimization/lambda_fitness", 1.0),
+      rclcpp::Parameter("optimization/dist0", 0.5),
+      rclcpp::Parameter("optimization/swarm_clearance", 0.5),
+      rclcpp::Parameter("optimization/max_vel", 10.0),
+      rclcpp::Parameter("optimization/max_acc", 10.0),
+      rclcpp::Parameter("optimization/order", 3),
+  });
+  auto node = std::make_shared<rclcpp::Node>(
+      "p4_terminal_lineage_production_test", options);
+  auto optimizer = std::make_unique<ego_planner::BsplineOptimizer>();
+  optimizer->setParam(node);
+  optimizer->setEnvironment(map);
+  optimizer->a_star_ = std::make_shared<AStar>();
+  optimizer->a_star_->initGridMap(map, Eigen::Vector3i(200, 100, 30));
+  ego_planner::BsplineOptimizer::P1IntegrityConfig p1_config;
+  p1_config.debug_csv_path = debug_path + ".p1.csv";
+  optimizer->setP1IntegrityConfigForTest(p1_config);
+  P4RiskAStarConfig config;
+  config.enable_risk_aware_astar = true;
+  config.metrics_only = false;
+  config.objective = P4RiskObjective::PROVIDER_BOTTLENECK_V2;
+  config.max_extra_path_ratio = 1.30;
+  config.query_speed_mps = 10.0;
+  config.debug_csv_enable = true;
+  config.debug_csv_path = debug_path;
+  optimizer->setP4RiskAStarConfigForTest(config);
+  optimizer->setP4RiskSnapshot(
+      snapshot, 10.0, planning_attempt_id);
+  return optimizer;
+}
+
+std::filesystem::path p4LineageTestPath(const std::string& name) {
+  const char* root = std::getenv("ROS_LOG_DIR");
+  EXPECT_NE(root, nullptr);
+  return std::filesystem::path(root ? root : ".") / name;
+}
+
+iap::msg::IntegrityReport p4IntegrityReport() {
+  iap::msg::IntegrityReport report;
+  report.header.stamp.sec = 10;
+  report.hpl = 1.0;
+  report.vpl = 1.0;
+  report.hal = 100.0;
+  report.val = 100.0;
+  report.im = 99.0;
+  report.hal_invalid = false;
+  report.val_invalid = false;
+  report.im_invalid = false;
+  return report;
+}
+
+}  // namespace
+
+TEST(P4VerticalSliceTerminalLineageTest,
+     ProductionFsmPublishesCompleteSameAttemptManagerP5RuntimeChain) {
+  const auto snapshot = makeP4SelectionSnapshot();
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureP4SelectionTrigger(map.get());
+  const auto debug_path = p4LineageTestPath("terminal_success.csv");
+  auto optimizer = makeP4Optimizer(map, snapshot, debug_path.string(), 1);
+  Eigen::MatrixXd seed = p4Seed();
+  ASSERT_EQ(optimizer->initControlPoints(seed, true).status,
+            ego_planner::CollisionScanStatus::CLOSED_SEGMENTS);
+  ASSERT_EQ(optimizer->getP4AttemptLineage().size(), 1U);
+  ASSERT_TRUE(optimizer->getP4AttemptLineage().front().selection_applied);
+
+  const Eigen::MatrixXd refined = p4RefinedControlPoints();
+  optimizer->setControlPoints(refined);
+  bool stopped_for_error = false;
+  EXPECT_FALSE(optimizer->checkCollisionAndReboundForTest(&stopped_for_error));
+  EXPECT_FALSE(stopped_for_error);
+  ASSERT_EQ(optimizer->getP4AttemptLineage().size(), 1U);
+  optimizer->releaseP4RiskSnapshot();
+
+  auto manager = std::make_unique<ego_planner::EGOPlannerManager>();
+  manager->setP4VerticalSliceOptimizerForTest(std::move(optimizer), map);
+  manager->setLatestRiskSnapshotForTest(snapshot);
+  manager->setTimeProvider(
+      []() { return rclcpp::Time(10, 0, RCL_ROS_TIME); });
+  manager->local_data_.position_traj_ =
+      ego_planner::UniformBspline(refined, 3, 0.5);
+  manager->local_data_.velocity_traj_ =
+      manager->local_data_.position_traj_.getDerivative();
+  manager->local_data_.acceleration_traj_ =
+      manager->local_data_.velocity_traj_.getDerivative();
+  manager->local_data_.traj_id_ = 9;
+  manager->local_data_.start_time_ = rclcpp::Time(10, 0, RCL_ROS_TIME);
+  manager->local_data_.duration_ = 3.0;
+
+  ego_planner::P5RuntimeIntegrityGate::Config p5_config;
+  p5_config.enable_runtime_gate = true;
+  p5_config.enable_final_gate = true;
+  p5_config.horizon_s = 1.0;
+  p5_config.sample_dt_s = 0.25;
+  p5_config.current_stale_to_replan_s = 100.0;
+  p5_config.current_stale_to_emergency_s = 100.0;
+  manager->p5_integrity_gate_ =
+      std::make_unique<ego_planner::P5RuntimeIntegrityGate>(
+          nullptr, p5_config, false);
+  manager->p5_integrity_gate_->setCurrentIntegrityForTest(
+      p4IntegrityReport());
+
+  auto node = std::make_shared<rclcpp::Node>("p4_terminal_fsm_success");
+  auto publisher = node->create_publisher<traj_utils::msg::Bspline>(
+      "p4_terminal_bspline", rclcpp::QoS(10));
+  std::atomic<int> publish_count{0};
+  std::atomic<int> published_trajectory_id{-1};
+  auto subscription = node->create_subscription<traj_utils::msg::Bspline>(
+      "p4_terminal_bspline", rclcpp::QoS(10),
+      [&publish_count, &published_trajectory_id](
+          const traj_utils::msg::Bspline& message) {
+        published_trajectory_id.store(message.traj_id);
+        publish_count.fetch_add(1);
+      });
+  auto* manager_observer = manager.get();
+  ego_planner::EGOReplanFSM fsm;
+  fsm.setP4TerminalFlowForTest(
+      std::move(manager), node, publisher, snapshot,
+      rclcpp::Time(10, 0, RCL_ROS_TIME), []() { return true; });
+  ASSERT_TRUE(fsm.callReboundReplanForTest());
+  rclcpp::executors::SingleThreadedExecutor executor;
+  executor.add_node(node);
+  for (int i = 0; i < 20 && publish_count.load() == 0; ++i) {
+    executor.spin_some();
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+  EXPECT_EQ(publish_count.load(), 1);
+  EXPECT_EQ(published_trajectory_id.load(), 9);
+
+  const auto runtime_status = manager_observer->p5_integrity_gate_->evaluateRuntime(
+      manager_observer->local_data_, snapshot, 10.2, 1.0);
+  ASSERT_EQ(runtime_status.action, ego_planner::P5GateAction::OK);
+  ASSERT_FALSE(runtime_status.viz_samples.empty());
+  EXPECT_TRUE(std::all_of(
+      runtime_status.viz_samples.begin(), runtime_status.viz_samples.end(),
+      [](const ego_planner::SafetyVizTrajectorySample& sample) {
+        return sample.trajectory_sample_source == "runtime_committed";
+      }));
+
+  const auto lineage_path = std::filesystem::path(
+      debug_path.string() + ".lineage.csv");
+  std::ifstream stream(lineage_path);
+  ASSERT_TRUE(stream.good());
+  const std::string contents(
+      (std::istreambuf_iterator<char>(stream)),
+      std::istreambuf_iterator<char>());
+  EXPECT_NE(contents.find("final_bspline_before_p5"), std::string::npos);
+  EXPECT_NE(contents.find("p5_final_pass_before_publish"), std::string::npos);
+  EXPECT_NE(contents.find("normal_publish_authorized"), std::string::npos);
+  EXPECT_NE(contents.find(",1,1,9,"), std::string::npos);
+  EXPECT_NE(contents.find(",1,"), std::string::npos);
+}
+
+TEST(P4VerticalSliceTerminalLineageTest,
+     OccupancyChangeAfterReleaseBlocksFirstManagerWriterAndDownstreamRows) {
+  const auto snapshot = makeP4SelectionSnapshot();
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureP4SelectionTrigger(map.get());
+  const auto debug_path = p4LineageTestPath("terminal_epoch_adversary.csv");
+  auto optimizer = makeP4Optimizer(map, snapshot, debug_path.string(), 1);
+  Eigen::MatrixXd seed = p4Seed();
+  ASSERT_EQ(optimizer->initControlPoints(seed, true).status,
+            ego_planner::CollisionScanStatus::CLOSED_SEGMENTS);
+  ASSERT_EQ(optimizer->getP4AttemptLineage().size(), 1U);
+  optimizer->releaseP4RiskSnapshot();
+  GridMapTestAccess::advanceOccupancyEpoch(map.get());
+
+  auto manager = std::make_unique<ego_planner::EGOPlannerManager>();
+  auto* optimizer_observer = optimizer.get();
+  manager->setP4VerticalSliceOptimizerForTest(std::move(optimizer), map);
+  manager->setLatestRiskSnapshotForTest(snapshot);
+  manager->setTimeProvider(
+      []() { return rclcpp::Time(10, 0, RCL_ROS_TIME); });
+  manager->local_data_.position_traj_ =
+      ego_planner::UniformBspline(seed, 3, 0.5);
+  manager->local_data_.traj_id_ = 10;
+  manager->local_data_.start_time_ = rclcpp::Time(10, 0, RCL_ROS_TIME);
+  ego_planner::P5RuntimeIntegrityGate::Config p5_config;
+  p5_config.enable_runtime_gate = true;
+  p5_config.enable_final_gate = true;
+  manager->p5_integrity_gate_ =
+      std::make_unique<ego_planner::P5RuntimeIntegrityGate>(
+          nullptr, p5_config, false);
+
+  auto node = std::make_shared<rclcpp::Node>("p4_terminal_fsm_adversary");
+  auto publisher = node->create_publisher<traj_utils::msg::Bspline>(
+      "p4_terminal_adversary_bspline", rclcpp::QoS(10));
+  std::atomic<int> publish_count{0};
+  auto subscription = node->create_subscription<traj_utils::msg::Bspline>(
+      "p4_terminal_adversary_bspline", rclcpp::QoS(10),
+      [&publish_count](const traj_utils::msg::Bspline&) {
+        publish_count.fetch_add(1);
+      });
+  ego_planner::EGOReplanFSM fsm;
+  fsm.setP4TerminalFlowForTest(
+      std::move(manager), node, publisher, snapshot,
+      rclcpp::Time(10, 0, RCL_ROS_TIME), []() { return true; });
+  EXPECT_FALSE(fsm.callReboundReplanForTest());
+  rclcpp::executors::SingleThreadedExecutor executor;
+  executor.add_node(node);
+  executor.spin_some();
+  EXPECT_EQ(publish_count.load(), 0);
+  EXPECT_TRUE(optimizer_observer->getP4AttemptLineage().empty());
+  EXPECT_FALSE(std::filesystem::exists(
+      std::filesystem::path(debug_path.string() + ".lineage.csv")));
+}
 
 TEST(PlanningRiskContextTest, ManualContextKeepsGenerationUntilClear) {
   ego_planner::EGOPlannerManager manager;

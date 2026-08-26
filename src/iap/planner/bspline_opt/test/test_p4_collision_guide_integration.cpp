@@ -132,6 +132,42 @@ struct GridMapTestAccess
   {
     map->occupancy_update_sequence_.fetch_add(2, std::memory_order_acq_rel);
   }
+
+  static void configureIcra072SelectionTrigger(GridMap * map)
+  {
+    constexpr double resolution = 0.1;
+    map->mp_.map_origin_ = Eigen::Vector3d(-15.0, -15.0, 0.0);
+    map->mp_.map_size_ = Eigen::Vector3d(30.0, 30.0, 3.5);
+    map->mp_.map_min_boundary_ = map->mp_.map_origin_;
+    map->mp_.map_max_boundary_ = map->mp_.map_origin_ + map->mp_.map_size_;
+    map->mp_.map_voxel_num_ = Eigen::Vector3i(300, 300, 35);
+    map->mp_.resolution_ = resolution;
+    map->mp_.resolution_inv_ = 1.0 / resolution;
+    map->mp_.obstacles_inflation_ = 0.0;
+    map->mp_.min_occupancy_log_ = 0.5;
+    map->mp_.clamp_min_log_ = -2.0;
+    map->mp_.unknown_flag_ = 0.01;
+    map->mp_.frame_id_ = "map";
+    const std::size_t count = 300U * 300U * 35U;
+    map->md_.occupancy_buffer_.assign(count, -2.01);
+    map->md_.occupancy_buffer_inflate_.assign(count, 0);
+    map->md_.occupancy_buffer_raw_cloud_.assign(count, 0);
+    for (int x_index = 0; x_index < 300; ++x_index) {
+      const double x = -15.0 +
+        (static_cast<double>(x_index) + 0.5) * resolution;
+      if (x < -9.0 || x > -7.0) continue;
+      for (int y_index = 0; y_index < 300; ++y_index) {
+        const double y = -15.0 +
+          (static_cast<double>(y_index) + 0.5) * resolution;
+        if (y < -0.65 || y > 0.65) continue;
+        for (int z_index = 0; z_index < 28; ++z_index) {
+          map->md_.occupancy_buffer_inflate_[static_cast<std::size_t>(
+              map->toAddress(Eigen::Vector3i(
+                x_index, y_index, z_index)))] = 1;
+        }
+      }
+    }
+  }
 };
 
 namespace
@@ -157,6 +193,34 @@ public:
       const bool high_corridor =
         std::abs(query.position_w.x()) < 2.5 && query.position_w.y() < 0.0;
       result.hpl_pred = high_corridor ? 20.0 : 1.0;
+      result.vpl_pred = result.hpl_pred;
+      result.reason = "ok";
+      results->push_back(result);
+    }
+    return true;
+  }
+};
+
+class Icra072SelectionTriggerProvider final :
+  public iap::RiskPredictionProvider
+{
+public:
+  bool batchQuery(
+    const std::vector<iap::RiskPredictionQuery> & queries,
+    std::vector<iap::RiskPredictionResult> * results) override
+  {
+    if (!results) return false;
+    results->clear();
+    results->reserve(queries.size());
+    for (const auto & query : queries) {
+      iap::RiskPredictionResult result;
+      result.available = true;
+      result.valid = true;
+      result.stale = false;
+      const bool projected_risky_lane =
+        query.position_w.x() >= -10.0 &&
+        query.position_w.x() <= -6.0 && query.position_w.y() < 0.0;
+      result.hpl_pred = projected_risky_lane ? 20.0 : 1.0;
       result.vpl_pred = result.hpl_pred;
       result.reason = "ok";
       results->push_back(result);
@@ -217,14 +281,50 @@ std::shared_ptr<const iap::RiskGridSnapshot> makeSnapshot()
   return grid.acquireSnapshot();
 }
 
+std::shared_ptr<const iap::RiskGridSnapshot> makeSelectionTriggerSnapshot()
+{
+  iap::RiskGridMapParams params;
+  params.frame_id = "map";
+  params.lattice_anchor_w = Eigen::Vector3d::Zero();
+  params.resolution_m = 0.75;
+  params.size_x_m = 30.0;
+  params.size_y_m = 30.0;
+  params.size_z_m = 6.0;
+  params.horizons_s = {0.0, 0.5, 1.0, 1.5, 2.0, 2.5,
+    3.0, 4.0, 5.0, 6.0};
+  params.stale_timeout_s = 1.0;
+  params.skip_occupied_voxels = false;
+  iap::RiskGridMap grid(params);
+  Icra072SelectionTriggerProvider provider;
+  const auto occupancy = [](const Eigen::Vector3d &point) {
+      iap::RiskOccupancyDiagnostic diagnostic;
+      diagnostic.available = true;
+      diagnostic.raw_occupied =
+          point.x() >= -9.0 && point.x() <= -7.0 &&
+          point.y() >= -0.65 && point.y() <= 0.65 &&
+          point.z() <= 2.8;
+      diagnostic.inflated_occupied = diagnostic.raw_occupied;
+      diagnostic.frame_id = "map";
+      diagnostic.cloud_stamp_s = 10.0;
+      diagnostic.occupancy_generation = 1;
+      diagnostic.source = "occupancy_snapshot";
+      return diagnostic;
+    };
+  std::string reason;
+  EXPECT_TRUE(grid.refreshFromProvider(
+      Eigen::Vector3d(-8.0, 0.0, 1.5), 10.0,
+      provider, occupancy, &reason)) << reason;
+  return grid.acquireSnapshot();
+}
+
 P4RiskAStarConfig p4Config(bool enabled, bool metrics_only = false)
 {
   P4RiskAStarConfig config;
   config.enable_risk_aware_astar = enabled;
   config.metrics_only = metrics_only;
-  config.lambda_p4_risk = 0.2;
+  config.lambda_p4_risk = 0.05;
   config.max_extra_path_ratio = 1.30;
-  config.query_speed_mps = 10.0;
+  config.query_speed_mps = 2.0;
   return config;
 }
 
@@ -382,6 +482,46 @@ TEST(P4CollisionGuideIntegration,
 }
 
 TEST(P4CollisionGuideIntegration,
+  Icra072P4SelectionTriggerUsesProductionP0SnapshotAndProductionAStar)
+{
+  const auto snapshot = makeSelectionTriggerSnapshot();
+  ASSERT_NE(snapshot, nullptr);
+  EXPECT_FALSE(snapshot->params().skip_occupied_voxels);
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureIcra072SelectionTrigger(map.get());
+  const uint64_t epoch = map->occupancyGeneration();
+  auto astar = std::make_shared<AStar>();
+  astar->initGridMap(map, Eigen::Vector3i(200, 100, 30));
+  ego_planner::P4AStarGuideSearch search(astar);
+  ego_planner::P4CollisionGuidePlanner planner(search);
+  const ego_planner::P4GuideRequest request(
+    172, 1, Eigen::Vector3d(-10.0, 0.0, 1.5),
+    Eigen::Vector3d(-6.0, 0.0, 1.5), true, snapshot, 10.0, epoch,
+    [epoch]() {return epoch;}, p4V2Config());
+
+  const auto decision = planner.planCollisionGuide(request);
+  ASSERT_EQ(
+    decision.status, ego_planner::P4GuideDecisionStatus::RISK_SELECTED)
+    << ego_planner::p4GuideDecisionReasonName(decision.reason);
+  EXPECT_EQ(
+    decision.reason,
+    ego_planner::P4GuideDecisionReason::PROVIDER_BOTTLENECK_SELECTED);
+  EXPECT_TRUE(decision.selection_applied);
+  EXPECT_TRUE(decision.original.risk_profile.complete());
+  EXPECT_TRUE(decision.risk.risk_profile.complete());
+  EXPECT_EQ(
+    decision.original.risk_profile.valid_count,
+    decision.original.risk_profile.sample_count);
+  EXPECT_EQ(
+    decision.risk.risk_profile.valid_count,
+    decision.risk.risk_profile.sample_count);
+  for (const auto &point : decision.original.complete_path)
+    EXPECT_EQ(map->getInflateOccupancy(point), 0);
+  for (const auto &point : decision.risk.complete_path)
+    EXPECT_EQ(map->getInflateOccupancy(point), 0);
+}
+
+TEST(P4CollisionGuideIntegration,
   ProviderBottleneckV2InjectsSelectedGuideInInitialAndReboundSeams)
 {
   const auto snapshot = makeSnapshot();
@@ -442,7 +582,8 @@ TEST(P4CollisionGuideIntegration,
   const auto selected = optimizer->getP4AttemptLineage().front();
   ASSERT_TRUE(selected.selection_applied);
   ASSERT_EQ(
-    selected.status, ego_planner::P4GuideDecisionStatus::RISK_SELECTED);
+    selected.selected_status,
+    ego_planner::P4GuideDecisionStatus::RISK_SELECTED);
 
   GridMapTestAccess::configureGuideFixture(map.get(), false);
   bool stopped_for_error = false;
@@ -458,7 +599,7 @@ TEST(P4CollisionGuideIntegration,
   EXPECT_EQ(persisted.snapshot_config_hash, selected.snapshot_config_hash);
   EXPECT_EQ(persisted.occupancy_epoch, selected.occupancy_epoch);
   EXPECT_EQ(
-    persisted.selected.canonical_hash, selected.selected.canonical_hash);
+    persisted.selected_guide_hash, selected.selected_guide_hash);
 
   optimizer->releaseP4RiskSnapshot();
   EXPECT_FALSE(optimizer->hasP4RiskSnapshotForTest());
@@ -508,6 +649,39 @@ TEST(P4CollisionGuideIntegration,
   EXPECT_EQ(
     optimizer->lastCollisionScanResult().status,
     ego_planner::CollisionScanStatus::INVALID_INPUT);
+  EXPECT_TRUE(optimizer->getP4AttemptLineage().empty());
+}
+
+TEST(P4CollisionGuideIntegration,
+  ReleasedSnapshotLineageRevalidatesAttemptAndLiveOccupancyBeforeTerminalUse)
+{
+  const auto snapshot = makeSnapshot();
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureGuideFixture(map.get());
+  auto optimizer = makeOptimizer(
+    map, snapshot, true, false,
+    P4RiskObjective::PROVIDER_BOTTLENECK_V2);
+  Eigen::MatrixXd seed = guideSeedMatrix();
+  ASSERT_EQ(
+    optimizer->initControlPoints(seed, true).status,
+    ego_planner::CollisionScanStatus::CLOSED_SEGMENTS);
+  ASSERT_EQ(optimizer->getP4AttemptLineage().size(), 1U);
+
+  optimizer->releaseP4RiskSnapshot();
+  EXPECT_TRUE(optimizer->validateP4AttemptLineage(73));
+  ASSERT_EQ(optimizer->getP4AttemptLineage().size(), 1U);
+
+  GridMapTestAccess::advanceOccupancyEpoch(map.get());
+  EXPECT_FALSE(optimizer->validateP4AttemptLineage(73));
+  EXPECT_TRUE(optimizer->getP4AttemptLineage().empty());
+
+  optimizer->setP4RiskSnapshot(snapshot, 10.0, 74);
+  Eigen::MatrixXd replacement_seed = guideSeedMatrix();
+  ASSERT_EQ(
+    optimizer->initControlPoints(replacement_seed, true).status,
+    ego_planner::CollisionScanStatus::CLOSED_SEGMENTS);
+  optimizer->releaseP4RiskSnapshot();
+  EXPECT_FALSE(optimizer->validateP4AttemptLineage(73));
   EXPECT_TRUE(optimizer->getP4AttemptLineage().empty());
 }
 

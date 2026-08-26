@@ -395,6 +395,24 @@ namespace ego_planner
 
     using P4GuideViz = P4GuideDecision;
 
+    struct P4AttemptLineageRecord
+    {
+      uint64_t planning_attempt_id = 0;
+      uint64_t collision_segment_id = 0;
+      std::string request_hash;
+      uint64_t snapshot_generation = 0;
+      std::string snapshot_config_hash;
+      uint64_t occupancy_epoch = 0;
+      P4GuideDecisionStatus selected_status =
+          P4GuideDecisionStatus::DECISION_INVALID_REPLAN_REQUIRED;
+      std::string original_guide_hash;
+      std::string risk_guide_hash;
+      std::string selected_guide_hash;
+      bool selection_applied = false;
+      bool closed_collision_observed = false;
+      bool no_collision_refinement_observed = false;
+    };
+
     BsplineOptimizer() {}
     ~BsplineOptimizer() {}
 
@@ -421,6 +439,7 @@ namespace ego_planner
                            uint64_t planning_attempt_id);
     void releaseP4RiskSnapshot();
     void clearP4RiskSnapshot();
+    bool validateP4AttemptLineage(uint64_t planning_attempt_id);
 
     // optional inputs
     void setGuidePath(const vector<Eigen::Vector3d> &guide_pt);
@@ -477,7 +496,7 @@ namespace ego_planner
     std::string p1AcceptedTrajectoryRiskProfileContextPath() const;
     const P4RiskAStarConfig &getP4RiskAStarConfig() const { return p4_config_; }
     const std::vector<P4GuideViz> &getLastP4GuideViz() const { return last_p4_guides_; }
-    const std::vector<P4GuideViz> &getP4AttemptLineage() const {
+    const std::vector<P4AttemptLineageRecord> &getP4AttemptLineage() const {
       return p4_attempt_lineage_;
     }
     bool hasP4RiskSnapshotForTest() const { return static_cast<bool>(p4_risk_snapshot_); }
@@ -601,7 +620,7 @@ namespace ego_planner
     P1IntegrityMetrics last_p1_metrics_;
     std::vector<P1IntegrityVizSample> last_p1_viz_samples_;
     std::vector<P4GuideViz> last_p4_guides_;
-    std::vector<P4GuideViz> p4_attempt_lineage_;
+    std::vector<P4AttemptLineageRecord> p4_attempt_lineage_;
     OptimizerCostBreakdown last_optimizer_cost_breakdown_;
     P1OptimizationTrace last_p1_optimization_trace_;
     P1BasePrepassTrace last_p1_base_prepass_trace_;
@@ -629,6 +648,9 @@ namespace ego_planner
     double p4_query_base_time_s_{0.0};
     uint64_t p4_occupancy_epoch_{0};
     uint64_t active_p4_attempt_id_{0};
+    void invalidateP4AttemptLineage();
+    static P4AttemptLineageRecord makeP4AttemptLineageRecord(
+        const P4GuideDecision &decision);
     P1PlanningRiskContext p1_risk_context_;
     bool p1_debug_csv_header_written_{false};
     struct P1PreOptimizationTrace

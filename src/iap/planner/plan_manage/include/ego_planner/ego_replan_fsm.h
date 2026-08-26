@@ -221,8 +221,31 @@ namespace ego_planner
     }
 
     void init(rclcpp::Node::SharedPtr &node);
+    void setP4TerminalFlowForTest(
+        EGOPlannerManager::Ptr planner_manager,
+        rclcpp::Node::SharedPtr node,
+        rclcpp::Publisher<traj_utils::msg::Bspline>::SharedPtr publisher,
+        std::shared_ptr<const iap::RiskGridSnapshot> admitted_snapshot,
+        rclcpp::Time planning_time,
+        std::function<bool()> rebound_planner)
+    {
+      planner_manager_ = std::move(planner_manager);
+      node_ = std::move(node);
+      bspline_pub_ = std::move(publisher);
+      p4_require_risk_grid_ready_before_planning_ = true;
+      p4_admitted_risk_grid_snapshot_ = std::move(admitted_snapshot);
+      latest_odom_stamp_ = planning_time;
+      rebound_planner_for_test_ = std::move(rebound_planner);
+    }
+    bool callReboundReplanForTest()
+    {
+      return callReboundReplan(false, false);
+    }
 
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+
+  private:
+    std::function<bool()> rebound_planner_for_test_;
   };
 
 } // namespace ego_planner

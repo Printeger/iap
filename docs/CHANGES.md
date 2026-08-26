@@ -3,6 +3,91 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(icra-072-final-flow-closure): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 /
+  IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — retain typed P4-v2 lineage across snapshot release,
+  revalidate attempt and live occupancy epoch immediately before terminal writers, and exercise the actual
+  production FSM post-success/P5/publish/runtime branch plus an epoch-change zero-publication adversary. Add the
+  development-only `icra072_p4_selection_trigger_v1`, exact installed-effective P0/map/P4 parity assertions,
+  complete provider-support analyzer accounting, and frozen `-002` reason/support summary. Fresh `attempt_19`
+  builds 6/6 and final focused tests pass 199/199 C++ plus 29/29 Python. The sole `-003` runner passes one GPU
+  preflight and 15/15 process monitoring, with P0 ready 124, natural risk selections 76 and both-complete support
+  339. The sole analyzer nevertheless exits 1: terminal lineage, P5 final, committed runtime binding and normal
+  publication are all zero. Status is **BLOCKED**, with no retry or tuning; ICRA-073/effect/qualification/campaign
+  remain prohibited.
+
+  Exact repository-root reproduction disclosure (the immutable live root must not be rerun or overwritten):
+
+  ```bash
+  cd /home/dev/ws_iap/src/iap
+  unset AMENT_PREFIX_PATH CMAKE_PREFIX_PATH COLCON_PREFIX_PATH PYTHONPATH LD_LIBRARY_PATH
+  source /opt/ros/jazzy/setup.bash
+  source /home/dev/ws_iap/install/setup.bash
+  export ROS_LOG_DIR="$PWD/results/icra27/icra072/static_attempt_19/build_ros_logs"
+  colcon --log-base results/icra27/icra072/log/build_attempt_19 build \
+    --paths . src/iap/planner/plan_env src/iap/planner/traj_utils \
+      src/iap/planner/path_searching src/iap/planner/bspline_opt src/iap/planner/plan_manage \
+    --packages-select iap plan_env traj_utils path_searching bspline_opt ego_planner \
+    --build-base results/icra27/icra072/build/attempt_19 \
+    --install-base results/icra27/icra072/install/attempt_19 \
+    --cmake-args -DBUILD_TESTING=ON
+  python3 scripts/dev_planner/run_icra072_vertical_slice.py \
+    --run-root "$PWD/results/icra27/icra072/icra072-dev-smoke-003" \
+    --install-root "$PWD/results/icra27/icra072/install/attempt_19" \
+    --duration-s 45
+  python3 scripts/dev_planner/analyze_icra072_vertical_slice.py \
+    --run-root "$PWD/results/icra27/icra072/icra072-dev-smoke-003"
+  ```
+
+  Executed final verification ledger (all commands used cwd `/home/dev/ws_iap/src/iap`). The C++ commands used
+  the exact `attempt_19` libraries and a different new task-local ROS log directory per process:
+
+  ```bash
+  export ICRA072_INSTALL="$PWD/results/icra27/icra072/install/attempt_19"
+  export LD_LIBRARY_PATH="$ICRA072_INSTALL/ego_planner/lib:$ICRA072_INSTALL/bspline_opt/lib:$ICRA072_INSTALL/path_searching/lib:$ICRA072_INSTALL/plan_env/lib:$ICRA072_INSTALL/iap/lib:$ICRA072_INSTALL/traj_utils/lib:${LD_LIBRARY_PATH:-}"
+
+  ROS_LOG_DIR="$PWD/results/icra27/icra072/static_attempt_19/tests/p4_guide/ros_logs" \
+    results/icra27/icra072/build/attempt_19/bspline_opt/test_p4_collision_guide
+  # exit 0; 20/20
+  ROS_LOG_DIR="$PWD/results/icra27/icra072/static_attempt_19/tests/p4_scan/ros_logs" \
+    results/icra27/icra072/build/attempt_19/bspline_opt/test_p4_collision_scan_contract
+  # exit 0; 19/19
+  ROS_LOG_DIR="$PWD/results/icra27/icra072/static_attempt_19/tests/p4_astar/ros_logs" \
+    results/icra27/icra072/build/attempt_19/path_searching/test_p4_risk_astar
+  # exit 0; 9/9
+  ROS_LOG_DIR="$PWD/results/icra27/icra072/static_attempt_19/tests/p4_integration/ros_logs" \
+    results/icra27/icra072/build/attempt_19/bspline_opt/test_p4_collision_guide_integration
+  # exit 0; 11/11
+  ROS_LOG_DIR="$PWD/results/icra27/icra072/static_attempt_19/tests/planning_fsm/ros_logs" \
+    results/icra27/icra072/build/attempt_19/ego_planner/test_planning_risk_context
+  # exit 0; 28/28
+  ROS_LOG_DIR="$PWD/results/icra27/icra072/static_attempt_19/tests/p5_runtime/ros_logs" \
+    results/icra27/icra072/build/attempt_19/ego_planner/test_p5_runtime_integrity_gate
+  # exit 0; 33/33
+  ROS_LOG_DIR="$PWD/results/icra27/icra072/static_attempt_19/tests/p0_runtime/ros_logs" \
+    results/icra27/icra072/build/attempt_19/ego_planner/test_p0_risk_grid_runtime
+  # exit 0; 79/79, one pre-existing disabled test
+
+  ROS_LOG_DIR="$PWD/results/icra27/icra072/static_attempt_19/tests/python_tools/ros_logs" \
+    python3 scripts/dev_planner/run_p4_g0c_tests.py \
+      --task-root "$PWD/results/icra27/icra072/static_attempt_19/tests/python_tools" \
+      unittest discover -s test -p test_icra072_vertical_slice_tools.py
+  # exit 0; 5/5; wrapper-owned HOME/ROS_HOME/TMPDIR/XDG_RUNTIME_DIR; external delta []
+  ROS_LOG_DIR="$PWD/results/icra27/icra072/static_attempt_19/tests/launch_contract/ros_logs" \
+    python3 scripts/dev_planner/run_p4_g0c_tests.py \
+      --task-root "$PWD/results/icra27/icra072/static_attempt_19/tests/launch_contract" \
+      unittest discover -s test -p test_test_planner_launch.py
+  # exit 0; 24/24; wrapper-owned HOME/ROS_HOME/TMPDIR/XDG_RUNTIME_DIR; external delta []
+  ```
+
+  The final build command above exited 0 with 6/6 packages. The runner command above exited 0 and internally
+  executed exactly one preflight: argv `nvidia-smi -L` exit 0; argv
+  `nvidia-smi --query-gpu=index,name,uuid,driver_version --format=csv,noheader` exit 0; CUDA Driver API library
+  `libcuda.so.1` loaded, `cuInit(0)` returned 0 and `cuDeviceGetCount` returned 0 with count 1. Child ROS logs were
+  rooted at `results/icra27/icra072/icra072-dev-smoke-003/runtime/ros_logs`. The analyzer command above was its
+  sole invocation and exited 1/FAIL. Complete argv/stdout/stderr and timestamps are retained in
+  `icra072-dev-smoke-003/preflight/gpu_preflight.json`, while exact runner/analyzer outputs are retained under the
+  task root. These lines disclose the consumed run and are not authorization to rerun it.
+
 - review(icra-072-final-flow-closure): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 /
   IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — Review
   `32a1c65...3dc3106` returns `REQUEST_CHANGES`. The immutable `-002` run fixes P0 startup (123 ready rows) and

@@ -128,6 +128,17 @@ namespace ego_planner
     void recordGate0NormalBsplinePublish(double stamp_s);
     bool recordP4VerticalSliceLineage(const std::string &stage,
                                       double stamp_s);
+    void setP4VerticalSliceOptimizerForTest(
+        BsplineOptimizer::Ptr optimizer, GridMap::Ptr grid_map)
+    {
+      bspline_optimizer_ = std::move(optimizer);
+      grid_map_ = std::move(grid_map);
+    }
+    void setLatestRiskSnapshotForTest(
+        std::shared_ptr<const iap::RiskGridSnapshot> snapshot)
+    {
+      latest_risk_snapshot_for_test_ = std::move(snapshot);
+    }
 
     PlanParameters pp_;
     LocalTrajData local_data_;
@@ -163,6 +174,8 @@ namespace ego_planner
     int gate0_bspline_publish_count_{0};
     PlanningRiskContext planning_risk_context_;
     TimeProvider time_provider_;
+    std::shared_ptr<const iap::RiskGridSnapshot>
+        latest_risk_snapshot_for_test_;
     std::string trajectory_frame_id_{"map"};
     std::string last_p1_rejection_reason_;
     bool last_p1_rejection_requires_new_generation_{false};

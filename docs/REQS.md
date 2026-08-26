@@ -458,7 +458,7 @@ Acceptance:
 - Planner chooses safer path even if longer when integrity violated.
 
 ### IAP-RQ-423 P4 collision-guide planning and P5 lineage
-Status: **P4-v1 SCIENTIFIC_NO_GO RETAINED / P4-v2 ICRA-072 TERMINAL-LINEAGE AND PROVIDER-SUPPORT CLOSURE /
+Status: **P4-v1 SCIENTIFIC_NO_GO RETAINED / P4-v2 ICRA-072 FINAL LIVE TERMINAL CHAIN BLOCKED /
 INVERSE-CORRIDOR DESIGN FROZEN, IMPLEMENTATION NOT STARTED**
 
 Source: `docs/icra27/ICRA_SCOPE.md` and the 2026-08-20 Supervisor scope pivot. This requirement extends collision-guide planning evidence; it does not replace or verify the IAP-RQ-422 PL/AL admission rule.
@@ -487,7 +487,7 @@ Acceptance:
 - The selected decision/hash reaches the final B-spline, and a P5 final rejection produces zero normal publication.
 
 ### IAP-RQ-424 User-owned ICRA research route and P4-v2 scientific recovery
-Status: **DEVELOPMENT-FIRST ROUTE LOCKED / ICRA-072 FINAL FLOW CLOSURE TASK_READY / GUARD REPAIR NONBLOCKING /
+Status: **DEVELOPMENT-FIRST ROUTE LOCKED / ICRA-072 FINAL FLOW BLOCKED PENDING SUPERVISOR REVIEW / GUARD REPAIR NONBLOCKING /
 INVERSE-CORRIDOR DESIGN FROZEN, IMPLEMENTATION NOT STARTED**
 
 Source: `docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md` and user decision
@@ -548,3 +548,16 @@ occupancy after snapshot release and that the required manager/FSM/P5/runtime
 regression is absent. ICRA-072 is reissued for one final bounded closure and
 one non-overwriting `icra072-dev-smoke-003`; ICRA-073 and inverse-corridor
 implementation remain unauthorized until full live Review PASS.
+
+Final ICRA-072 Builder note (2026-08-26): terminal attempt/snapshot/epoch
+revalidation, actual production FSM/P5/publish/runtime regression, analyzer
+support accounting and the separately named development-only selection trigger
+are implemented. Fresh `attempt_19` passes 199/199 focused C++ and 29/29
+Python checks. The sole immutable `icra072-dev-smoke-003` passed one GPU
+preflight and all 15 required processes, produced 124 ready P0 rows, 76 natural
+risk selections and 339 decisions with complete provider support for both
+guides. Its analyzer was invoked exactly once and failed closed: terminal
+lineage, P5-final pass, committed runtime binding and normal B-spline
+publication counts were all zero. No retry or tuning is permitted. ICRA-072 is
+therefore BLOCKED pending Supervisor review; ICRA-073 and all effect,
+qualification and campaign work remain unauthorized.

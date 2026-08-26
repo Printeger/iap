@@ -1128,10 +1128,15 @@ namespace ego_planner
     const uint64_t p1_admission_generation =
         planner_manager_->currentPlanningGenerationId();
 
-    getLocalTarget();
+    if (!rebound_planner_for_test_)
+      getLocalTarget();
 
-    bool plan_and_refine_success =
-        planner_manager_->reboundReplan(start_pt_, start_vel_, start_acc_, local_target_pt_, local_target_vel_, (have_new_target_ || flag_use_poly_init), flag_randomPolyTraj);
+    bool plan_and_refine_success = rebound_planner_for_test_
+        ? rebound_planner_for_test_()
+        : planner_manager_->reboundReplan(
+              start_pt_, start_vel_, start_acc_, local_target_pt_,
+              local_target_vel_, (have_new_target_ || flag_use_poly_init),
+              flag_randomPolyTraj);
     have_new_target_ = false;
 
     cout << "refine_success=" << plan_and_refine_success << endl;
@@ -1284,7 +1289,9 @@ namespace ego_planner
       /* 2. publish traj to the next drone of swarm */
 
       /* 3. publish traj for visualization */
-      visualization_->displayOptimalList(info->position_traj_.get_control_points(), 0);
+      if (visualization_)
+        visualization_->displayOptimalList(
+            info->position_traj_.get_control_points(), 0);
     }
 
     return plan_and_refine_success;

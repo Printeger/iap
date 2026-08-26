@@ -259,6 +259,55 @@ class TestPlannerLaunchTest(unittest.TestCase):
             ["p1_fixture_central_obstacle_enabled"],
             "true",
         )
+
+    def test_icra072_selection_trigger_is_separately_named_and_provider_complete(self):
+        fixture_name = "icra072_p4_selection_trigger_v1"
+        self.assertIn(fixture_name, MODULE.SCENARIO_PRESETS)
+        fixture = MODULE.SCENARIO_PRESETS[fixture_name]
+        self.assertEqual(fixture["p1_map_fixture"], fixture_name)
+        self.assertEqual(fixture["p1_fixture_central_obstacle_enabled"], "true")
+        self.assertEqual(fixture["p0.skip_occupied_voxels"], "false")
+        self.assertEqual(fixture["forest_size_x_m"], "28.0")
+        self.assertEqual(fixture["forest_size_y_m"], "10.0")
+        self.assertEqual(fixture["corridor_x_min_m"], "-14.0")
+        self.assertEqual(fixture["corridor_x_max_m"], "14.0")
+        self.assertEqual(fixture["corridor_half_width_y_m"], "5.0")
+        self.assertEqual(fixture["p1_fixture_central_x_min_m"], "-9.0")
+        self.assertEqual(fixture["p1_fixture_central_x_max_m"], "-7.0")
+        self.assertEqual(fixture["p1_fixture_central_y_half_width_m"], "0.65")
+        self.assertEqual(fixture["p1_fixture_central_z_max_m"], "2.8")
+        self.assertEqual(fixture["p1_fixture_lane_center_m"], "2.0")
+        self.assertEqual(fixture["p1_fixture_safe_tree_density_per_m2"], "0.25")
+        self.assertEqual(fixture["p1_fixture_risky_tree_density_per_m2"], "0.75")
+        self.assertEqual(fixture["p1_fixture_safe_canopy_probability"], "0.05")
+        self.assertEqual(fixture["p1_fixture_risky_canopy_probability"], "0.85")
+        self.assertEqual(fixture["integrity_fusion_mode"], "max_pl")
+        self.assertEqual(fixture["enable_gnss_integrity"], "true")
+        self.assertEqual(fixture["enable_lidar_integrity"], "true")
+        self.assertNotIn("inverse_corridor", fixture_name)
+        profile = MODULE.EXPERIMENT_PRESETS["icra_p0_p4_v2_p5_dev"]
+        defaults = dict(MODULE.ARG_DEFAULTS)
+        self.assertEqual(profile["scenario"], fixture_name)
+        self.assertEqual(
+            profile["p0.predictor.sigma_grow_m_sqrt_s"], "0.01")
+        self.assertEqual(
+            profile["p0.predictor.sigma_growth_profile"],
+            "legacy_iap_rq320_baseline_v1")
+        self.assertEqual(defaults["p0.resolution_m"], "0.75")
+        self.assertEqual(defaults["p0.size_x_m"], "30.0")
+        self.assertEqual(defaults["p0.size_y_m"], "30.0")
+        self.assertEqual(defaults["p0.size_z_m"], "6.0")
+        self.assertEqual(defaults["p0.stale_timeout_s"], "1.0")
+        self.assertEqual(
+            profile["p0.horizons_s"],
+            "0.0,0.5,1.0,1.5,2.0,2.5,3.0,4.0,5.0,6.0")
+        self.assertEqual(defaults["map_size_x"], "30.0")
+        self.assertEqual(defaults["map_size_y"], "30.0")
+        self.assertEqual(defaults["map_size_z"], "3.5")
+        self.assertEqual(defaults["p4.lambda_p4_risk"], "0.05")
+        self.assertEqual(defaults["p4.max_extra_path_ratio"], "1.3")
+        self.assertEqual(defaults["manager/max_vel"], "2.0")
+
     def test_fork_and_mirror_share_geometry_identity_except_mirror_flag(self):
         primary = MODULE.SCENARIO_PRESETS["p1_fork_fused_v1"]
         mirror = MODULE.SCENARIO_PRESETS["p1_fork_fused_mirror_v1"]
@@ -412,7 +461,7 @@ class TestPlannerLaunchTest(unittest.TestCase):
                 MODULE._resolve_safety_switches(context, applied)
             )
         self.assertEqual(selected, experiment)
-        self.assertEqual(scenario, "icra_p0_p4_v2_p5_dev_fixture_v1")
+        self.assertEqual(scenario, "icra072_p4_selection_trigger_v1")
         self.assertEqual(profile, "icra_p0_p4_v2_p5_dev")
         self.assertEqual(enabled, {
             "p1": False, "p2": False, "p3_local": False,

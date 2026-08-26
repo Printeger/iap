@@ -20,14 +20,14 @@ class Icra072VerticalSliceToolsTest(unittest.TestCase):
             export.mkdir(parents=True)
             p4_path = export / "planner_p4_risk_astar_debug.csv"
             (root / "run_manifest.json").write_text(json.dumps({
-                "run_id": "icra072-dev-smoke-002", "registered": True,
+                "run_id": "icra072-dev-smoke-003", "registered": True,
                 "gpu_ready": True, "launch_started": True,
                 "launch_early_exit": False,
                 "process_result": {"required_processes_ok": True},
             }))
             launch = {
                 "experiment": "icra_p0_p4_v2_p5_dev",
-                "scenario": "icra_p0_p4_v2_p5_dev_fixture_v1",
+                "scenario": "icra072_p4_selection_trigger_v1",
                 "planner_safety_profile": "icra_p0_p4_v2_p5_dev",
                 "p0.enable_risk_grid": True,
                 "p1.use_integrity_cost": False,
@@ -48,7 +48,12 @@ class Icra072VerticalSliceToolsTest(unittest.TestCase):
                     "planning_attempt_id", "collision_segment_id",
                     "request_hash", "snapshot_generation_id",
                     "snapshot_config_hash", "occupancy_epoch",
-                    "original_hash", "risk_hash", "selected_hash"])
+                    "original_hash", "risk_hash", "selected_hash",
+                    "original_sample_count", "original_valid_count",
+                    "original_unknown_count", "original_stale_count",
+                    "original_non_finite_count", "risk_sample_count",
+                    "risk_valid_count", "risk_unknown_count",
+                    "risk_stale_count", "risk_non_finite_count", "reason"])
                 writer.writeheader()
                 writer.writerow({
                     "schema_version": "p4_collision_guide_decision_v2",
@@ -59,6 +64,15 @@ class Icra072VerticalSliceToolsTest(unittest.TestCase):
                     "snapshot_config_hash": "cfg",
                     "original_hash": "original", "risk_hash": "risk",
                     "selected_hash": "guide",
+                    "original_sample_count": "200",
+                    "original_valid_count": "200",
+                    "original_unknown_count": "0",
+                    "original_stale_count": "0",
+                    "original_non_finite_count": "0",
+                    "risk_sample_count": "200", "risk_valid_count": "200",
+                    "risk_unknown_count": "0", "risk_stale_count": "0",
+                    "risk_non_finite_count": "0",
+                    "reason": "provider_bottleneck_selected",
                 })
             lineage_fields = [
                 "stage", "stamp_s", "planning_attempt_id",
@@ -66,7 +80,9 @@ class Icra072VerticalSliceToolsTest(unittest.TestCase):
                 "snapshot_generation_id", "snapshot_config_hash",
                 "occupancy_epoch", "original_guide_hash", "risk_guide_hash",
                 "selected_guide_hash",
-                "selection_applied", "control_points_hash", "trajectory_id",
+                "selection_applied", "control_points_hash",
+                "closed_collision_observed",
+                "no_collision_refinement_observed", "trajectory_id",
                 "final_bspline_identity",
             ]
             with Path(str(p4_path) + ".lineage.csv").open(
@@ -81,6 +97,8 @@ class Icra072VerticalSliceToolsTest(unittest.TestCase):
                     "risk_guide_hash": "risk",
                     "selected_guide_hash": "guide", "selection_applied": "1",
                     "control_points_hash": "cp", "trajectory_id": "9",
+                    "closed_collision_observed": "1",
+                    "no_collision_refinement_observed": "1",
                     "final_bspline_identity": "bs",
                 }
                 for stage, stamp in (
@@ -111,8 +129,15 @@ class Icra072VerticalSliceToolsTest(unittest.TestCase):
                 [sys.executable, str(ANALYZER), "--run-root", str(root)],
                 capture_output=True, text=True, check=False)
             self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
-            self.assertEqual(json.loads((root / "analysis.json").read_text())["result"],
-                             "PASS")
+            analysis = json.loads((root / "analysis.json").read_text())
+            self.assertEqual(analysis["result"], "PASS")
+            self.assertEqual(analysis["provider_support"], {
+                "decision_count": 1,
+                "original_complete_count": 1,
+                "risk_complete_count": 1,
+                "both_complete_count": 1,
+                "selection_blockers": {},
+            })
             lineage_path = Path(str(p4_path) + ".lineage.csv")
             lineage_path.write_text(
                 lineage_path.read_text().replace(",req,", ",mixed_request,"))
@@ -125,6 +150,29 @@ class Icra072VerticalSliceToolsTest(unittest.TestCase):
             self.assertIn(
                 "p4_ego_p5_publish_lineage_identity_mismatch",
                 json.loads(mixed_output.read_text())["failures"])
+
+            # A selected row is not admissible unless every typed support
+            # counter is present and proves complete finite support.
+            lineage_path.write_text(
+                lineage_path.read_text().replace(",mixed_request,", ",req,"))
+            with p4_path.open(newline="") as stream:
+                rows = list(csv.DictReader(stream))
+            fields = [field for field in rows[0]
+                      if field != "risk_unknown_count"]
+            with p4_path.open("w", newline="") as stream:
+                writer = csv.DictWriter(stream, fieldnames=fields)
+                writer.writeheader()
+                writer.writerows({field: row[field] for field in fields}
+                                 for row in rows)
+            missing_support_output = root / "analysis_missing_support.json"
+            completed = subprocess.run(
+                [sys.executable, str(ANALYZER), "--run-root", str(root),
+                 "--output", str(missing_support_output)],
+                capture_output=True, text=True, check=False)
+            self.assertNotEqual(completed.returncode, 0)
+            self.assertIn(
+                "p4_v2_selected_guide_with_complete_support_missing",
+                json.loads(missing_support_output.read_text())["failures"])
 
     def test_tools_reject_repository_external_evidence_roots(self):
         outside = Path("/tmp/icra072_external_evidence_forbidden")
@@ -152,7 +200,7 @@ class Icra072VerticalSliceToolsTest(unittest.TestCase):
                 export = root / "exports/run"
                 export.mkdir(parents=True)
                 (root / "run_manifest.json").write_text(json.dumps({
-                    "run_id": "icra072-dev-smoke-002", "registered": True,
+                    "run_id": "icra072-dev-smoke-003", "registered": True,
                 }))
                 launch = {}
                 if binding is not None:
@@ -174,7 +222,7 @@ class Icra072VerticalSliceToolsTest(unittest.TestCase):
     def test_replacement_runner_identity_is_immutable_and_non_reusable(self):
         runner_path = REPO / "scripts/dev_planner/run_icra072_vertical_slice.py"
         runner = runner_path.read_text()
-        self.assertIn('RUN_ID = "icra072-dev-smoke-002"', runner)
+        self.assertIn('RUN_ID = "icra072-dev-smoke-003"', runner)
         with tempfile.TemporaryDirectory(dir=TASK_RESULTS_ROOT) as directory:
             root = Path(directory)
             install = root / "install"
@@ -185,17 +233,17 @@ class Icra072VerticalSliceToolsTest(unittest.TestCase):
                  "--install-root", str(install), "--duration-s", "30"],
                 capture_output=True, text=True, check=False)
             self.assertNotEqual(completed.returncode, 0)
-            self.assertIn("run root must end with icra072-dev-smoke-002",
+            self.assertIn("run root must end with icra072-dev-smoke-003",
                           completed.stderr)
 
-            replacement = root / "icra072-dev-smoke-002"
+            replacement = root / "icra072-dev-smoke-003"
             replacement.mkdir()
             completed = subprocess.run(
                 [sys.executable, str(runner_path), "--run-root", str(replacement),
                  "--install-root", str(install), "--duration-s", "30"],
                 capture_output=True, text=True, check=False)
             self.assertNotEqual(completed.returncode, 0)
-            self.assertIn("replacement run root already exists", completed.stderr)
+            self.assertIn("final run root already exists", completed.stderr)
 
     def test_runner_and_publish_path_are_fail_closed(self):
         runner = (REPO / "scripts/dev_planner/run_icra072_vertical_slice.py").read_text()

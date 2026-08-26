@@ -1285,6 +1285,17 @@ SCENARIO_PRESETS = {
         "p1_fixture_central_x_min_m": "-9.0",
         "p1_fixture_central_x_max_m": "-7.0",
     },
+    "icra072_p4_selection_trigger_v1": {
+        **P1_FORK_MAP_PRESET, **P1_FUSED_SENSOR_PRESET,
+        "p1_map_fixture": "icra072_p4_selection_trigger_v1",
+        "p1_fixture_central_obstacle_enabled": "true",
+        "p1_fixture_central_x_min_m": "-9.0",
+        "p1_fixture_central_x_max_m": "-7.0",
+        # Development-only P4 flow trigger: provider values are projected at
+        # every P0 lattice corner. P4 still rejects live occupied positions
+        # before querying provider risk.
+        "p0.skip_occupied_voxels": "false",
+    },
 }
 
 
@@ -1471,7 +1482,7 @@ EXPERIMENT_PRESETS = {
         "safety_viz.enable_p4_viz": "true",
     },
     "icra_p0_p4_v2_p5_dev": {
-        "scenario": "icra_p0_p4_v2_p5_dev_fixture_v1",
+        "scenario": "icra072_p4_selection_trigger_v1",
         "planner_safety_profile": "icra_p0_p4_v2_p5_dev",
         "planner_start_delay_s": "10.0",
         "planner_enable_p1": "false",

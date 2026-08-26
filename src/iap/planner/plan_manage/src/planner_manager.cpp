@@ -337,7 +337,7 @@ namespace ego_planner
   {
     if (!p0_risk_grid_runtime_)
     {
-      return nullptr;
+      return latest_risk_snapshot_for_test_;
     }
     return p0_risk_grid_runtime_->acquireSnapshot();
   }
@@ -757,6 +757,9 @@ namespace ego_planner
     if (!config.enable_risk_aware_astar ||
         config.objective != P4RiskObjective::PROVIDER_BOTTLENECK_V2)
       return true;
+    if (!bspline_optimizer_->validateP4AttemptLineage(
+            planning_risk_context_.planning_attempt_id))
+      return false;
     const auto &guides = bspline_optimizer_->getP4AttemptLineage();
     if (!config.debug_csv_enable || config.debug_csv_path.empty() || guides.empty())
       return false;
@@ -772,6 +775,7 @@ namespace ego_planner
       csv << "schema_version,stage,stamp_s,planning_attempt_id,collision_segment_id,"
              "request_hash,snapshot_generation_id,snapshot_config_hash,occupancy_epoch,original_guide_hash,"
              "risk_guide_hash,selected_guide_hash,selection_applied,control_points_hash,"
+             "closed_collision_observed,no_collision_refinement_observed,"
              "trajectory_id,trajectory_start_s,final_bspline_identity\n";
     const Eigen::MatrixXd control_points =
         local_data_.position_traj_.getControlPoint();
@@ -795,9 +799,11 @@ namespace ego_planner
           << guide.planning_attempt_id << ',' << guide.collision_segment_id << ','
           << guide.request_hash << ',' << guide.snapshot_generation << ','
           << guide.snapshot_config_hash << ',' << guide.occupancy_epoch << ','
-          << guide.original.canonical_hash << ','
-          << guide.risk.canonical_hash << ',' << guide.selected.canonical_hash << ','
+          << guide.original_guide_hash << ','
+          << guide.risk_guide_hash << ',' << guide.selected_guide_hash << ','
           << (guide.selection_applied ? 1 : 0) << ',' << control_hash << ','
+          << (guide.closed_collision_observed ? 1 : 0) << ','
+          << (guide.no_collision_refinement_observed ? 1 : 0) << ','
           << local_data_.traj_id_ << ',' << local_data_.start_time_.seconds()
           << ',' << identity.str() << '\n';
     }

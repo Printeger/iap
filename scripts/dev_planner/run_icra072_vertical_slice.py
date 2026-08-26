@@ -18,7 +18,7 @@ from pathlib import Path
 
 REPOSITORY = Path(__file__).resolve().parents[2]
 TASK_RESULTS_ROOT = (REPOSITORY / "results/icra27/icra072").resolve()
-RUN_ID = "icra072-dev-smoke-002"
+RUN_ID = "icra072-dev-smoke-003"
 REQUIRED_PROCESSES = {
     "corridor_map": ["test_planner_corridor_map_publisher"],
     "pcl_render": ["drone_0_pcl_render_node"],
@@ -120,7 +120,7 @@ def main() -> int:
     if run_root.name != RUN_ID:
         raise SystemExit(f"run root must end with {RUN_ID}")
     if run_root.exists():
-        raise SystemExit("replacement run root already exists")
+        raise SystemExit("final run root already exists")
     if not install_root.is_dir():
         raise SystemExit("install root must be an existing task-local directory")
     if args.duration_s < 30.0:
@@ -178,6 +178,7 @@ def main() -> int:
 
     launch_args = [
         "experiment:=icra_p0_p4_v2_p5_dev",
+        "scenario:=icra072_p4_selection_trigger_v1",
         f"run_duration_s:={args.duration_s + 30.0}",
         f"validation_duration_s:={args.duration_s + 20.0}",
         f"runtime_root_dir:={runtime}",
@@ -199,7 +200,7 @@ def main() -> int:
     _write(run_root / "launch_command.json", {
         "argv": ["bash", "-lc", shell_command],
         "profile": "icra_p0_p4_v2_p5_dev",
-        "scenario": "icra_p0_p4_v2_p5_dev_fixture_v1",
+        "scenario": "icra072_p4_selection_trigger_v1",
     })
     launch_log = (run_root / "stdout.log").open("x")
     launch = subprocess.Popen(

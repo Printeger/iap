@@ -6,7 +6,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-from collections import defaultdict
+from collections import Counter, defaultdict
 from pathlib import Path
 
 
@@ -70,7 +70,7 @@ def main() -> int:
             failures.append(f"launch_manifest_malformed:{exc}")
             launch = {}
 
-    if run.get("run_id") != "icra072-dev-smoke-002" or not run.get("registered"):
+    if run.get("run_id") != "icra072-dev-smoke-003" or not run.get("registered"):
         failures.append("registered_run_identity_mismatch")
     if not run.get("gpu_ready") or not run.get("launch_started"):
         failures.append("gpu_or_launch_admission_failed")
@@ -80,7 +80,7 @@ def main() -> int:
         failures.append("required_process_set_unhealthy")
     expected_launch = {
         "experiment": "icra_p0_p4_v2_p5_dev",
-        "scenario": "icra_p0_p4_v2_p5_dev_fixture_v1",
+        "scenario": "icra072_p4_selection_trigger_v1",
         "planner_safety_profile": "icra_p0_p4_v2_p5_dev",
         "p0.enable_risk_grid": True,
         "p1.use_integrity_cost": False,
@@ -146,8 +146,43 @@ def main() -> int:
                     "snapshot_generation_id", "snapshot_config_hash",
                     "occupancy_epoch", "original_hash", "risk_hash",
                     "selected_hash"))]
+
+    def complete_support(row: dict[str, str], prefix: str) -> bool:
+        fields = tuple(f"{prefix}_{suffix}" for suffix in (
+            "sample_count", "valid_count", "unknown_count", "stale_count",
+            "non_finite_count"))
+        if any(field not in row or row[field] == "" for field in fields):
+            return False
+        try:
+            sample_count = int(row.get(f"{prefix}_sample_count", "0"))
+            valid_count = int(row.get(f"{prefix}_valid_count", "0"))
+            unknown_count = int(row.get(f"{prefix}_unknown_count", "0"))
+            stale_count = int(row.get(f"{prefix}_stale_count", "0"))
+            non_finite_count = int(
+                row.get(f"{prefix}_non_finite_count", "0"))
+        except ValueError:
+            return False
+        return (sample_count > 0 and valid_count == sample_count and
+                unknown_count == 0 and stale_count == 0 and
+                non_finite_count == 0)
+
+    original_complete = [row for row in p4
+                         if complete_support(row, "original")]
+    risk_complete = [row for row in p4 if complete_support(row, "risk")]
+    both_complete = [row for row in p4
+                     if complete_support(row, "original") and
+                     complete_support(row, "risk")]
+    selected = [row for row in selected
+                if complete_support(row, "original") and
+                complete_support(row, "risk")]
+    selection_blockers = dict(sorted(Counter(
+        row.get("reason", "missing_reason") or "missing_reason"
+        for row in p4
+        if not (row.get("status") == "RISK_SELECTED" and
+                row.get("selection_applied") == "1")
+    ).items()))
     if not selected:
-        failures.append("p4_v2_selected_guide_missing")
+        failures.append("p4_v2_selected_guide_with_complete_support_missing")
 
     decision_fields = (
         "planning_attempt_id", "collision_segment_id", "request_hash",
@@ -177,7 +212,9 @@ def main() -> int:
             "control_points_hash", "trajectory_id",
             "final_bspline_identity",
         ))
-        groups[key].append(row)
+        if (row.get("closed_collision_observed") == "1" and
+                row.get("no_collision_refinement_observed") == "1"):
+            groups[key].append(row)
     complete_groups = [
         (key, rows) for key, rows in groups.items()
         if {row.get("stage") for row in rows} == stages
@@ -257,6 +294,13 @@ def main() -> int:
             "lineage": len(linked), "p5_final_ok": len(final_ok),
             "p5_runtime_bound": len(runtime_bound),
             "normal_bspline": len(bsplines),
+        },
+        "provider_support": {
+            "decision_count": len(p4),
+            "original_complete_count": len(original_complete),
+            "risk_complete_count": len(risk_complete),
+            "both_complete_count": len(both_complete),
+            "selection_blockers": selection_blockers,
         },
     }
     output.parent.mkdir(parents=True, exist_ok=True)
