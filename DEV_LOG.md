@@ -8059,9 +8059,11 @@ contradictory runtime-failure rows and insufficient registered-fixture
 attribution. The closure now inventories and rehashes every task-local shared
 library, binds that exact manifest SHA through runner and analyzer, rejects any
 runtime-phase failure, and requires exact P5-7/P5-6 fixture source,
-space/time/reason and bad/unknown evidence. Updated focused suites pass 22/22
-and complete hermetic discovery passes 542/542, with the 17,762-entry external
-ROS inventory unchanged.
+space/time/reason and bad/unknown evidence. Final review further binds each
+fixture sample to the exact rejection/emergency row and freezes canonicalized
+address-independent `ldd` identities for every library. Updated focused suites
+pass 23/23 and complete hermetic discovery passes 543/543, with the
+17,762-entry external ROS inventory unchanged.
 GPU/ROS/live/analyzer counts remain zero; the earlier static install manifest
 is stale after this remediation and will be replaced once by the final
 committed install identity.

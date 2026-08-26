@@ -2634,9 +2634,9 @@ Requirements: `IAP-RQ-320`, `IAP-RQ-421`, `IAP-RQ-422`, `IAP-RQ-423`.
 - Added authoritative live-bundle support. Synthetic `validation_only=true`
   input is a typed technical blocker; PASS requires exact isolated-install,
   runner-state, raw-source, process/topic, profile and ordered behavior binds.
-- Verification after both review-remediation rounds: focused live runner plus
-  qualification analyzer/contract 22/22 and full repository-local hermetic
-  discovery 542/542, with the 17,762-entry external ROS-log inventory
+- Verification after all review-remediation rounds: focused live runner plus
+  qualification analyzer/contract 23/23 and full repository-local hermetic
+  discovery 543/543, with the 17,762-entry external ROS-log inventory
   unchanged.
 - Pre-live two-axis review blockers are closed: early top-level launch exit is
   a runtime failure; the owned process group is shutdown/audited without
@@ -2650,6 +2650,10 @@ Requirements: `IAP-RQ-320`, `IAP-RQ-421`, `IAP-RQ-422`, `IAP-RQ-423`.
   Contradictory runtime failure rows are blockers, and P5-7/P5-6 acceptance now
   requires exact registered-fixture sample source, geometry/tau, attribution
   and bad/unknown evidence rather than a coincidental rejection/emergency.
+- Final review binds that fixture sample to the same selected behavioral row
+  and compares canonical, address-independent `ldd` hashes during freeze,
+  pre-GPU revalidation and authoritative analysis; cross-row attribution and
+  one-nibble linkage mutations are rejected.
 
 Reproduce the non-live checks only with:
 

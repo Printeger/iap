@@ -222,6 +222,48 @@ class IcraP0P5LiveRunnerTest(unittest.TestCase):
             RUNNER._normalize_events(
                 "FINAL_REJECT", self.contract, [rejected], []
             )
+        fixture_only = dict(rejected)
+        fixture_only.update(
+            action="OK", final_candidate_rejected=False,
+            final_candidate_traj_id=6,
+        )
+        unrelated_reject = dict(rejected)
+        unrelated_reject["samples"] = []
+        with self.assertRaisesRegex(
+            RUNNER.LiveRunnerError, "registered_fixture_evidence_mismatch"
+        ):
+            RUNNER._normalize_events(
+                "FINAL_REJECT", self.contract,
+                [fixture_only, unrelated_reject], [],
+            )
+        accepted = {
+            "bag_time_s": 1.0, "phase": "final_candidate", "action": "OK",
+            "final_candidate_traj_id": 9, "final_candidate_rejected": False,
+        }
+        fixture_runtime = {
+            "bag_time_s": 2.0, "phase": "runtime_committed", "action": "OK",
+            "samples": [{
+                "trajectory_sample_source": "runtime_committed",
+                "fixture_match": True,
+                "fixture_expected_reason": "future_unknown",
+                "reason": "future_unknown", "unknown": True,
+                "x": 1.0, "y": 0.0, "z": 0.0, "query_tau_s": 1.0,
+            }],
+        }
+        unrelated_emergency = {
+            "bag_time_s": 4.0, "phase": "runtime_committed",
+            "action": "REQUEST_EMERGENCY_STOP_CANDIDATE",
+            "reason": "future_unknown_timeout", "future_unknown_duration_s": 2.0,
+            "samples": [],
+        }
+        with self.assertRaisesRegex(
+            RUNNER.LiveRunnerError, "registered_fixture_evidence_mismatch"
+        ):
+            RUNNER._normalize_events(
+                "RUNTIME_FAIL", self.contract,
+                [accepted, fixture_runtime, unrelated_emergency],
+                [{"bag_time_s": 1.5, "traj_id": 9}],
+            )
 
     def test_live_environment_rejects_caller_overlay(self):
         with mock.patch.dict(RUNNER.os.environ, {}, clear=True):
@@ -302,6 +344,16 @@ class IcraP0P5LiveRunnerTest(unittest.TestCase):
                 RUNNER.LiveRunnerError, "install_manifest_inventory_mismatch"
             ):
                 RUNNER.validate_frozen_install_manifest(path, "a" * 40)
+
+    def test_linkage_inventory_rejects_one_nibble_drift(self):
+        libraries = ("lib/libiap.so",)
+        with mock.patch.object(
+            RUNNER, "_linkage_ready", return_value="a" * 64
+        ):
+            self.assertFalse(RUNNER.linkage_inventory_matches(
+                {libraries[0]: "b" + "a" * 63}, libraries,
+                RUNNER.INSTALL_ROOT, {},
+            ))
 
 
 if __name__ == "__main__":

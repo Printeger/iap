@@ -7,6 +7,7 @@ import json
 import math
 import os
 import re
+import subprocess
 import time
 from pathlib import Path
 
@@ -691,6 +692,27 @@ def live_process_lifecycle_exact(process, required_processes) -> bool:
     )
 
 
+def live_linkage_sha(path, environment) -> str | None:
+    completed = subprocess.run(
+        ["ldd", str(path)], capture_output=True, text=True,
+        check=False, env=environment,
+    )
+    output = completed.stdout + completed.stderr
+    if completed.returncode != 0 or "not found" in output \
+            or any(forbidden in output for forbidden in (
+                "/home/dev/ws_iap/build", "/home/dev/ws_iap/install",
+                "/home/dev/ws_iap/src/iap/build",
+                "/home/dev/ws_iap/src/iap/install",
+            )):
+        return None
+    canonical_lines = sorted(
+        re.sub(r"\s+\(0x[0-9a-fA-F]+\)$", "", line.strip())
+        for line in output.splitlines() if line.strip()
+    )
+    canonical = "\n".join(canonical_lines) + "\n"
+    return hashlib.sha256(canonical.encode()).hexdigest()
+
+
 def live_install_manifest_exact(manifest, repository_root) -> bool:
     repository_root = Path(repository_root).resolve()
     install_root = repository_root / "results/icra27/icra068/install"
@@ -756,6 +778,17 @@ def live_install_manifest_exact(manifest, repository_root) -> bool:
             and installed.is_file() and not installed.is_symlink()
             and _sha256(installed) == row.get("installed_sha256")
         ):
+            return False
+    linkage_environment = dict(os.environ)
+    linkage_environment["LD_LIBRARY_PATH"] = ":".join((
+        str(install_root / "lib"), "/root/ros2_ws/install/glim_ros/lib",
+        "/root/ros2_ws/install/glim/lib", "/opt/ros/jazzy/lib",
+        "/opt/ros/jazzy/lib/x86_64-linux-gnu",
+    ))
+    for relative in runtime_libraries:
+        if live_linkage_sha(
+            install_root / relative, linkage_environment
+        ) != linkage[relative]:
             return False
     return True
 

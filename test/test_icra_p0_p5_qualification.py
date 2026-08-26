@@ -323,15 +323,31 @@ class IcraP0P5QualificationTest(unittest.TestCase):
             )
             retained["git_commit"] = "1" * 40
             retained["runtime_libraries"] = runtime_libraries
+            linkage_environment = dict(__import__("os").environ)
+            linkage_environment["LD_LIBRARY_PATH"] = ":".join((
+                str(install_root / "lib"),
+                "/root/ros2_ws/install/glim_ros/lib",
+                "/root/ros2_ws/install/glim/lib", "/opt/ros/jazzy/lib",
+                "/opt/ros/jazzy/lib/x86_64-linux-gnu",
+            ))
             retained["linkage_output_sha256"] = {
-                relative: retained.get("linkage_output_sha256", {}).get(
-                    relative, "0" * 64
+                relative: MODULE.live_linkage_sha(
+                    install_root / relative, linkage_environment
                 ) for relative in runtime_libraries
             }
             for relative in runtime_libraries:
                 retained["file_hashes"][relative] = MODULE._sha256(
                     install_root / relative
                 )
+            self.assertTrue(MODULE.live_install_manifest_exact(retained, REPO))
+            first_linkage = runtime_libraries[0]
+            original_linkage = retained["linkage_output_sha256"][first_linkage]
+            retained["linkage_output_sha256"][first_linkage] = (
+                ("0" if original_linkage[0] != "0" else "1")
+                + original_linkage[1:]
+            )
+            self.assertFalse(MODULE.live_install_manifest_exact(retained, REPO))
+            retained["linkage_output_sha256"][first_linkage] = original_linkage
             install.write_text(json.dumps(retained) + "\n")
             runner = root / "runner_state.json"
             identities = list(MODULE.LIVE_RUN_IDENTITIES.values())

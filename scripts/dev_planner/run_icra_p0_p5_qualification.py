@@ -8,6 +8,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -170,7 +171,23 @@ def _linkage_ready(relative: str, install_root: Path, environment: dict) -> str:
     if completed.returncode != 0 or "not found" in text_output \
             or any(forbidden in text_output for forbidden in FORBIDDEN_OVERLAYS):
         raise LiveRunnerError(f"runtime_linkage_not_ready:{relative}")
-    return hashlib.sha256(text_output.encode()).hexdigest()
+    canonical_lines = sorted(
+        re.sub(r"\s+\(0x[0-9a-fA-F]+\)$", "", line.strip())
+        for line in text_output.splitlines() if line.strip()
+    )
+    canonical = "\n".join(canonical_lines) + "\n"
+    return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+def linkage_inventory_matches(
+    expected: dict, runtime_libraries: tuple[str, ...],
+    install_root: Path, environment: dict,
+) -> bool:
+    return all(
+        _linkage_ready(relative, install_root, environment)
+        == expected.get(relative)
+        for relative in runtime_libraries
+    )
 
 
 def _write_json(path: Path, value: object) -> None:
@@ -360,8 +377,10 @@ def validate_frozen_install_manifest(path: Path, git_commit: str) -> dict:
     clean_environment["LD_LIBRARY_PATH"] = expected_live_environment()[
         "LD_LIBRARY_PATH"
     ]
-    for relative in runtime_libraries:
-        _linkage_ready(relative, INSTALL_ROOT, clean_environment)
+    if not linkage_inventory_matches(
+        linkage, runtime_libraries, INSTALL_ROOT, clean_environment
+    ):
+        raise LiveRunnerError("install_manifest_linkage_drift")
     return manifest
 
 
@@ -525,7 +544,8 @@ def _normalize_events(
         if row.get("phase") == "runtime_committed"
         and str(row.get("action", "")) == "REQUEST_EMERGENCY_STOP_CANDIDATE"
     ]
-    if not _registered_fixture_evidence_present(case_id, contract, p5_rows):
+    fixture_rows = rejected if case_id == "FINAL_REJECT" else emergency
+    if not _registered_fixture_evidence_present(case_id, contract, fixture_rows):
         raise LiveRunnerError("registered_fixture_evidence_mismatch")
 
     def sequence(row: dict) -> int:
