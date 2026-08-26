@@ -78,12 +78,16 @@
 - Existing ICRA-068/070 build/install, raw/scientific evidence and protected PDF remain retained. ICRA-070 did
   not receive Review PASS, so no cleanup condition is satisfied.
 
-### Supervisor window disposition — pending pushed-anchor audit
+### Supervisor window disposition
 
-- Route, claim boundary, authority and gate all change, and the working context has compacted. These are
-  mandatory `ROTATE_RECOMMENDED` triggers under `AGENTS.md` §8.6.
-- The final post-push handoff anchor and divergence proof will be appended in a minimal Supervisor-only
-  rotation record after this recovery changeset becomes the pushed authority.
+- Disposition: `ROTATE_RECOMMENDED`.
+- Reason: `ROUTE_CLAIM_AUTHORITY_AND_GATE_CHANGED_CONTEXT_COMPACTED`. Route, claim boundary, authority and gate
+  all changed, and the working context compacted; each is a mandatory trigger under `AGENTS.md` §8.6.
+- Recovery changeset `0db8faac27dda58ef31aa57ad7033f294e758ebc` was pushed normally. Post-push fetch
+  confirmed `HEAD == origin/dev/icra` and divergence `0 0`; the PDF remained untracked with its protected hash.
+- This minimal rotation record activates `DEEPSEEK` / `ICRA-071 TASK_READY`. The next Supervisor window is
+  read-only until Builder handoff, and its next Review task is ICRA-071. Rotation does not authorize ICRA-072,
+  P4-v2 product work, ROS/GPU/live execution, cleanup or campaign.
 
 ## 2026-08-26 — ICRA-070 review: static repair accepted, one-shot stopped before mutation
 

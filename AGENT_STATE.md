@@ -3,10 +3,10 @@
 ```yaml
 schema_version: icra_single_branch_two_agent_v3_user_route_owner
 branch: dev/icra
-active_role: SUPERVISOR
-status: ROUTE_RECOVERY_CHANGESET_READY_TO_PUSH
+active_role: DEEPSEEK
+status: TASK_READY
 gate: USER_RESEARCH_ROUTE_AUTHORITY_GUARD
-task_id: NONE
+task_id: ICRA-071
 review_base: 1b3c6617732787b10c778a64fe43d37f29d84ffe
 reviewed_head: 48caa9ddf24990accb65e2ad230d12821487793c
 conference_route: P0_P4_V2_P5
@@ -14,7 +14,7 @@ route_owner: USER
 route_lock: docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md
 user_decision_id: USER-ICRA-ROUTE-20260826-001
 user_approval_anchor: 48caa9ddf24990accb65e2ad230d12821487793c
-route_status: USER_RESTORED_P4_V2_GOVERNANCE_GUARD_PENDING_POST_PUSH_HANDOFF
+route_status: USER_RESTORED_P4_V2_GOVERNANCE_GUARD_TASK_READY
 historical_gate0a_verdict: NO_GO_P2
 p0_gate0b_status: PASS
 p0_gate0b_worker_count: 4
@@ -23,23 +23,22 @@ p4_v2_status: NOT_STARTED_BLOCKED_UNTIL_ICRA071_REVIEW_PASS
 p5_status: IMPLEMENTED_BUT_NO_CURRENT_PROSPECTIVE_QUALIFICATION_PASS
 icra070_status: SUPERSEDED_UNQUALIFIED_BY_USER_ROUTE_DECISION
 supervisor_verdict: P0_P4_V2_P5_USER_ROUTE_RESTORED_ICRA070_SUPERSEDED_UNQUALIFIED
-review_disposition: ICRA071_USER_ROUTE_REPOSITORY_GUARD_AUTHORIZED_PENDING_POST_PUSH_ROTATION_RECORD
+review_disposition: ICRA071_USER_ROUTE_REPOSITORY_GUARD_AUTHORIZED
 qualification_claim: false
 campaign_status: BLOCKED_UNTIL_ICRA079_REVIEW_PASS_AND_DISTINCT_USER_APPROVAL
-handoff_status: SUPERVISOR_RECOVERY_CHANGESET_PENDING_PUSH
-next_task: NONE
-prepared_next_task: NEXT_TASK.md
+handoff_status: TASK_READY
+next_task: NEXT_TASK.md
 next_after_icra071_pass: ICRA-072_P4_V2_RISK_DECOMPOSITION_AND_SNAPSHOT_REPLAY
 recovery_roadmap: docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md
 guard_plan: docs/icra27/ICRA_CROSS_LAYER_GUARD_PLAN.md
 artifact_retention: ICRA068_ICRA070_BUILD_INSTALL_RAW_EVIDENCE_AND_PDF_RETAINED_NO_CLEANUP
 window_disposition: ROTATE_RECOMMENDED
 rotation_reason: ROUTE_CLAIM_AUTHORITY_AND_GATE_CHANGED_CONTEXT_COMPACTED
-window_handoff_anchor: PENDING_POST_PUSH_ROUTE_RECOVERY_CHANGESET
+window_handoff_anchor: 0db8faac27dda58ef31aa57ad7033f294e758ebc
 window_next_role: SUPERVISOR
 window_next_review_task: ICRA-071
 window_bootstrap_source: REPOSITORY_AUTHORITY_ONLY
-updated_utc: 2026-08-26T08:41:18Z
+updated_utc: 2026-08-26T08:42:48Z
 ```
 
 The user explicitly restored P4 as the indispensable treatment. The active route is now
@@ -58,12 +57,10 @@ work is retained as control engineering; replacement/parser/GPU/live/analyzer we
 070 build/install, raw/scientific evidence and the protected PDF remain retained because no cleanup condition
 was met.
 
-ICRA-071 is the sole prepared Builder task, but it is not active before the recovery changeset is pushed and
-the post-push rotation record performs the handoff. It implements only the repository-local route/state/
-document/requirement guard and tests. It performs no P4 product work, ROS/GPU/live execution, build/install
-creation or campaign action. ICRA-072 can be issued only after ICRA-071 Builder handoff and Supervisor Review
-PASS.
+ICRA-071 is the sole active Builder task. It implements only the repository-local route/state/document/
+requirement guard and tests. It performs no P4 product work, ROS/GPU/live execution, build/install creation or
+campaign action. ICRA-072 can be issued only after ICRA-071 Builder handoff and Supervisor Review PASS.
 
 This recovery changes route, claim boundary, authority and gate after context compaction, so the mandatory
-window result is `ROTATE_RECOMMENDED`. The exact pushed handoff anchor is recorded by the post-push rotation
-record; until then this state does not imply that a new UI window has actually opened.
+window result is `ROTATE_RECOMMENDED`. Recovery changeset `0db8faac27dda58ef31aa57ad7033f294e758ebc`
+is the exact substantive handoff anchor. This state does not imply that a new UI window has actually opened.

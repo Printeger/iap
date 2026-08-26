@@ -2,8 +2,9 @@
 
 > Active gate: `USER_RESEARCH_ROUTE_AUTHORITY_GUARD`
 > Owner: `DEEPSEEK`
-> Activation: `PENDING_POST_PUSH_ROTATION_RECORD`
+> Activation: `TASK_READY`
 > Supervisor audit anchor: `48caa9ddf24990accb65e2ad230d12821487793c`
+> Supervisor recovery changeset: `0db8faac27dda58ef31aa57ad7033f294e758ebc`
 > User decision: `USER-ICRA-ROUTE-20260826-001`
 > Requirement mapping: `IAP-RQ-000`, `IAP-RQ-423`, `IAP-RQ-424`
 > One task: route-lock parser -> state/plan verifier -> local hooks -> adversarial tests; no P4 product work
