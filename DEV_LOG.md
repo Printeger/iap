@@ -8243,3 +8243,21 @@ case leaves the cache byte present. Contract/runner tests pass 58/58, launch
 passes 21/21, and complete hermetic discovery passes 579/579 with the 17,770
 external ROS entries unchanged. Repair/parser/GPU/live/analyzer invocations
 remain zero pending the corrected static review.
+
+## 2026-08-26 — ICRA-070 one-shot repair terminal blocker
+
+IAP-RQ-000 and IAP-RQ-423. Standards and Spec re-review both passed fixed
+range `1b3c661...5981a8d`, and the reviewed commits were pushed at `0 0`
+divergence. The authorized `--repair-overlay-cache` entrypoint was then invoked
+exactly once with the manifest-bound repository-local environment. It exited 1
+before cache enumeration because the task-local `HOME` had no Git
+`safe.directory` registration, so the internal tracked-worktree check returned
+128 with `fatal: detected dubious ownership`.
+
+No retry was attempted. The overlay remains exactly 474 entries at
+`9381cb03...c89`; all five cache files retain their original sizes and hashes;
+ICRA-068 remains 7,364 entries at `fdeb47e3...e4858`. No pre-mutation journal,
+repair evidence or v2 overlay manifest was created, and parser/GPU/live/
+analyzer counts remain zero. New non-overwriting `command_ledger_v2.json` and
+`final_result_v2.json` freeze terminal status
+`BLOCKED_ICRA070_REPAIR_GIT_SAFE_DIRECTORY` for Supervisor review.

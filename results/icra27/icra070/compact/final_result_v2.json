@@ -1,0 +1,66 @@
+{
+  "schema_version": "icra070_final_result_v2",
+  "task_id": "ICRA-070",
+  "git_commit": "5981a8d20275a1c79dda2e63b3aac20cb28f5523",
+  "status": "BLOCKED_ICRA070_REPAIR_GIT_SAFE_DIRECTORY",
+  "qualification_claim": false,
+  "command_ledger": {
+    "path": "results/icra27/icra070/compact/command_ledger_v2.json",
+    "sha256": "1ff656c19925a70f009c96605269fdd82fb213ada86ea626eb6769ed847e651d"
+  },
+  "static_verification": {
+    "path": "results/icra27/icra070/compact/static_verification_v2_review_fix.json",
+    "sha256": "2857e9d87de4f0d5adf4a8ed991b52eb57ca111fb948df992df76064cee3ffce",
+    "standards_review": "PASS",
+    "spec_review": "PASS"
+  },
+  "blocker": {
+    "phase": "REPAIR_ENTRYPOINT_TRACKED_WORKTREE_PREFLIGHT",
+    "reason": "task-local HOME did not contain a Git safe.directory registration for the repository",
+    "typed_result": "BLOCKED_ICRA070_REPAIR_GIT_SAFE_DIRECTORY",
+    "entrypoint_exit_code": 1,
+    "repair_phase_reached": false,
+    "mutation_started": false,
+    "retry_authorized": false
+  },
+  "post_attempt_integrity": {
+    "failed_overlay": {
+      "entry_count": 474,
+      "inventory_sha256": "9381cb03d7cff06a517f8da9fcde0c179cc4cf130b61a2e04750dfe683acec89",
+      "unchanged": true
+    },
+    "retained_icra068": {
+      "entry_count": 7364,
+      "inventory_sha256": "fdeb47e3d025bbc7c442b86521e6808d1452d928178a52df0b2f9e03aace4858",
+      "unchanged": true
+    },
+    "overlay_cache_inventory": {
+      "directory": "share/iap/launch/__pycache__",
+      "files": [
+        {"path": "share/iap/launch/__pycache__/demo11_araim_only.launch.cpython-312.pyc", "size": 38169, "sha256": "f54855757f9bafb237eddd394dc6f3745f145486538a28abfaff883bc390debc"},
+        {"path": "share/iap/launch/__pycache__/icra_p0_p5_qualification.cpython-312.pyc", "size": 65195, "sha256": "ed06637091364d4fe27479be985e506ed82d2d2ed4381fed54518ab088fae189"},
+        {"path": "share/iap/launch/__pycache__/test_araim.launch.cpython-312.pyc", "size": 71044, "sha256": "23e0b350a121f34e53dfd270f909cbbe9fe9657532356eed1d16ca304228bc00"},
+        {"path": "share/iap/launch/__pycache__/test_planner.launch.cpython-312.pyc", "size": 165301, "sha256": "affb2139c7952a78ddf86eaa82566385bec9e32b2e601596ebe2c1ed46c24d22"},
+        {"path": "share/iap/launch/__pycache__/test_predictor.launch.cpython-312.pyc", "size": 28046, "sha256": "9b30899e5dc58657cb236cb429006baeb944b70b0084ce55a1cba3d4d8c10270"}
+      ],
+      "removed_file_count": 0,
+      "unchanged": true
+    },
+    "pre_mutation_journal_created": false,
+    "repair_evidence_created": false,
+    "overlay_manifest_v2_created": false,
+    "protected_pdf_sha256": "1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6"
+  },
+  "invocation_counts": {
+    "repair_entrypoint": 1,
+    "repair_retry": 0,
+    "reinstall": 0,
+    "compile": 0,
+    "installed_parser": 0,
+    "gpu_preflight": 0,
+    "live_launch": 0,
+    "analyzer": 0
+  },
+  "terminal_handoff": "SUPERVISOR_REVIEW_REQUIRED",
+  "recorded_at_utc": "2026-08-26T06:09:20Z"
+}

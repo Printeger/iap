@@ -2985,3 +2985,17 @@ Requirements: `IAP-RQ-000`, `IAP-RQ-423`.
   sets are 2,079 base versus 469 overlay non-cache files, so the authorized
   cache-only entrypoint is expected to stop before mutation rather than fill
   the 1,610-file deficit by a forbidden reinstall/copy.
+
+## 2026-08-26 (ICRA-070 one-shot repair blocked before mutation)
+
+Requirements: `IAP-RQ-000`, `IAP-RQ-423`.
+
+- Invoked the reviewed cache-repair entrypoint exactly once. Its repository-
+  local `HOME` lacked a Git `safe.directory` entry, so the tracked-worktree
+  preflight exited before cache enumeration or mutation. The entrypoint was
+  not retried.
+- Preserved the 474-entry failed overlay, all five cache bytes, the 7,364-entry
+  ICRA-068 tree, original blocker records and protected PDF unchanged. Parser,
+  GPU, live and analyzer invocations remain zero.
+- Added only non-overwriting v2 command/final evidence. Terminal result is
+  `BLOCKED_ICRA070_REPAIR_GIT_SAFE_DIRECTORY`; Supervisor review is required.

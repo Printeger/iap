@@ -1,0 +1,48 @@
+{
+  "schema_version": "icra070_command_ledger_v2",
+  "task_id": "ICRA-070",
+  "git_commit": "5981a8d20275a1c79dda2e63b3aac20cb28f5523",
+  "terminal_status": "BLOCKED_ICRA070_REPAIR_GIT_SAFE_DIRECTORY",
+  "commands": [
+    {
+      "sequence": 1,
+      "mode": "repair_overlay_cache",
+      "argv": [
+        "python3",
+        "scripts/dev_planner/run_icra_p0_p5_qualification.py",
+        "--repair-overlay-cache"
+      ],
+      "cwd": "/home/dev/ws_iap/src/iap",
+      "environment": {
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "HOME": "/home/dev/ws_iap/src/iap/results/icra27/icra070/live_environment/home",
+        "ROS_HOME": "/home/dev/ws_iap/src/iap/results/icra27/icra070/live_environment/ros_home",
+        "ROS_LOG_DIR": "/home/dev/ws_iap/src/iap/results/icra27/icra070/live_environment/ros_logs",
+        "TMPDIR": "/home/dev/ws_iap/src/iap/results/icra27/icra070/live_environment/tmp",
+        "XDG_RUNTIME_DIR": "/home/dev/ws_iap/src/iap/results/icra27/icra070/live_environment/xdg_runtime",
+        "AMENT_PREFIX_PATH": "/home/dev/ws_iap/src/iap/results/icra27/icra070/install:/home/dev/ws_iap/src/iap/results/icra27/icra068/install:/root/ros2_ws/install:/opt/ros/jazzy",
+        "CMAKE_PREFIX_PATH": "/home/dev/ws_iap/src/iap/results/icra27/icra070/install:/home/dev/ws_iap/src/iap/results/icra27/icra068/install:/root/ros2_ws/install/glim_ros:/root/ros2_ws/install/glim:/opt/ros/jazzy",
+        "LD_LIBRARY_PATH": "/home/dev/ws_iap/src/iap/results/icra27/icra070/install/lib:/home/dev/ws_iap/src/iap/results/icra27/icra068/install/lib:/root/ros2_ws/install/glim_ros/lib:/root/ros2_ws/install/glim/lib:/opt/ros/jazzy/lib:/opt/ros/jazzy/lib/x86_64-linux-gnu",
+        "COLCON_PREFIX_PATH": "/home/dev/ws_iap/src/iap/results/icra27/icra070/install:/home/dev/ws_iap/src/iap/results/icra27/icra068/install:/root/ros2_ws/install",
+        "PYTHONPATH": "/home/dev/ws_iap/src/iap/results/icra27/icra070/install/lib/python3.12/site-packages:/home/dev/ws_iap/src/iap/results/icra27/icra068/install/lib/python3.12/site-packages:/opt/ros/jazzy/lib/python3.12/site-packages"
+      },
+      "exit_code": 1,
+      "stdout": "",
+      "stderr": "fatal: detected dubious ownership in repository at '/home/dev/ws_iap/src/iap'\nTo add an exception for this directory, call:\n\n\tgit config --global --add safe.directory /home/dev/ws_iap/src/iap\nTraceback (most recent call last):\n  File \"/home/dev/ws_iap/src/iap/scripts/dev_planner/run_icra_p0_p5_qualification.py\", line 2920, in <module>\n    raise SystemExit(main())\n                     ^^^^^^\n  File \"/home/dev/ws_iap/src/iap/scripts/dev_planner/run_icra_p0_p5_qualification.py\", line 2816, in main\n    repair_overlay_cache()\n  File \"/home/dev/ws_iap/src/iap/scripts/dev_planner/run_icra_p0_p5_qualification.py\", line 1119, in repair_overlay_cache\n    dirty = subprocess.check_output(\n            ^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/lib/python3.12/subprocess.py\", line 466, in check_output\n    return run(*popenargs, stdout=PIPE, timeout=timeout, check=True,\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/lib/python3.12/subprocess.py\", line 571, in run\n    raise CalledProcessError(retcode, process.args,\nsubprocess.CalledProcessError: Command '['git', 'status', '--porcelain', '--untracked-files=no']' returned non-zero exit status 128.\n",
+      "typed_result": "BLOCKED_ICRA070_REPAIR_GIT_SAFE_DIRECTORY",
+      "mutation_started": false,
+      "retry_count": 0
+    }
+  ],
+  "invocation_counts": {
+    "repair_entrypoint": 1,
+    "repair_retry": 0,
+    "reinstall": 0,
+    "compile": 0,
+    "installed_parser": 0,
+    "gpu_preflight": 0,
+    "live_launch": 0,
+    "analyzer": 0
+  },
+  "recorded_at_utc": "2026-08-26T06:09:20Z"
+}

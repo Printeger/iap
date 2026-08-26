@@ -1417,6 +1417,13 @@ They do not convert historical `NO-GO-P2`, failed P0 Gate-0B evidence, the stati
 | IAP-RQ-423 | Every removal candidate must be durable before mutation and evidence must not predict its own exit | exclusive `overlay_cache_repair_preflight_v2.json`, mandatory recorder seam and `repair_command_binding`; focused runner tests include journal-before-unlink and no-predeclared-exit adversaries | **STATIC PASS; 43/43 RUNNER** |
 | IAP-RQ-423 | Preserve fail-closed scope while determining whether repair is executable | 15/15 contract, 43/43 runner, 21/21 launch and 579/579 full hermetic discovery; external ROS inventory 17,770 unchanged; zero repair/parser/GPU/live/analyzer invocation | **REVIEW CORRECTION READY** |
 
+## 2026-08-26 ICRA-070 one-shot repair outcome
+
+| Requirement | Verification target | Implementation / evidence | Status |
+|---|---|---|---|
+| IAP-RQ-000 / IAP-RQ-423 | Execute the reviewed repair no more than once and stop at the first blocker | `results/icra27/icra070/compact/command_ledger_v2.json` records one entrypoint, exit 1, zero retry and the task-local Git safe-directory failure | **BLOCKED BEFORE MUTATION** |
+| IAP-RQ-423 | Preserve immutable inputs and prohibit later qualification phases after repair failure | `final_result_v2.json` binds overlay 474/`9381cb03...c89`, ICRA-068 7,364/`fdeb47e3...e4858`, all five cache hashes, zero removals and zero parser/GPU/live/analyzer | **FAIL-CLOSED; SUPERVISOR REVIEW REQUIRED** |
+
 ## 2026-08-26 ICRA-070 Supervisor review and pre-campaign guard freeze
 
 | Req ID | Reviewed/authorized seam | Evidence or controlling document | Status |
