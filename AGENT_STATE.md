@@ -38,13 +38,13 @@ recovery_roadmap: docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP
 four_layer_workflow: docs/icra27/ICRA_FOUR_LAYER_DEVELOPMENT_WORKFLOW.md
 guard_plan: docs/icra27/ICRA_CROSS_LAYER_GUARD_PLAN.md
 artifact_retention: RAW_COMPACT_REGISTERED_LIVE_P4V1_LOGS_SHARED_WORKSPACE_AND_PROTECTED_PDF_RETAINED_61_REGENERABLE_TASK_BUILDS_RETIRED
-window_disposition: PENDING_POST_PUSH_AUDIT
-rotation_reason: PENDING_POST_PUSH_AUDIT
-window_handoff_anchor: PENDING_POST_PUSH_AUDIT
+window_disposition: ROTATE_RECOMMENDED
+rotation_reason: USER_FOUR_LAYER_WORKFLOW_AND_ARTIFACT_LIFECYCLE_CHANGE
+window_handoff_anchor: d40f870301570130e7d46335df7ee72a18e7823b
 window_next_role: SUPERVISOR
 window_next_review_task: ICRA-072A
 window_bootstrap_source: REPOSITORY_AUTHORITY_ONLY
-updated_utc: 2026-08-26T14:54:00Z
+updated_utc: 2026-08-26T14:57:35Z
 ```
 
 The Builder handoff at `6a6bdd3e674dd58fafae4153e5a2b5cb5225d730` is archived exactly as found. Static

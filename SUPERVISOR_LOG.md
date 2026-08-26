@@ -61,14 +61,29 @@
   used the same revalidated literal list with non-following `find -depth -delete`; this is disclosed rather than
   hidden.
 
-### Enforcement disclosure and window disposition
+### Enforcement disclosure
 
 - Route-lock sentinel and protected Gate sequence bytes are unchanged. The current pre-commit actor inference is
   expected to reject valid Supervisor authority files while pushed HEAD says `active_role=DEEPSEEK`; the known
   ICRA-071 lifecycle defect remains non-blocking. Route, hooksPath, staged-file, requirement-ID and commit-message
   checks are therefore executed explicitly before the disclosed Supervisor-only `--no-verify`; ordinary
   pre-push remains enabled.
-- Window disposition is completed only after the inventory deletion record is pushed, as required by §8.6.
+- Independent final two-axis review from fixed point `6a6bdd3` reports Spec PASS with zero missing, scope-creep
+  or wrong-behavior findings. Standards initially found the old unconditional §8.5 cleanup rule inconsistent
+  with the user's explicit workflow; `d40f870` resolves it with a narrow, non-transferable USER-authorized
+  exception and synchronizes the ICRA-072A -> ICRA-072B -> ICRA-073 prerequisite. Standards re-review finds no
+  remaining violation or smell except the intentionally pending §8.6 rotation record completed below.
+
+### Supervisor window disposition
+
+- Disposition: `ROTATE_RECOMMENDED`.
+- Reason: `USER_FOUR_LAYER_WORKFLOW_AND_ARTIFACT_LIFECYCLE_CHANGE`. This Review changes the canonical development
+  process and artifact lifecycle, and its context has been compacted; both require rotation under §8.6 even
+  though active role remains DEEPSEEK and the protected Gate is unchanged.
+- Post-push audit anchor: `d40f870301570130e7d46335df7ee72a18e7823b`. It was pushed with the normal
+  pre-push guard, then fetched at divergence `0 0`. This minimal Supervisor-only record binds that pushed
+  authority. The next Supervisor window is read-only until the ICRA-072A Builder handoff and must recover solely
+  from current pushed repository authority.
 
 ## 2026-08-26 — ICRA-072 Review REQUEST_CHANGES; terminal lineage and provider-support closure authorized
 
