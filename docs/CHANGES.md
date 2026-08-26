@@ -2790,12 +2790,60 @@ Static verification commands:
 ```bash
 source /home/dev/ws_iap/install/setup.bash
 python3 scripts/dev_planner/run_p4_g0c_tests.py \
-  --task-root "$PWD/results/icra27/icra063/icra069_focused_all" \
+  --task-root "$PWD/results/icra27/icra063/icra069_final_focused_all" \
   unittest discover -s test -p 'test_*icra_p0_p5_qualification.py'
 python3 scripts/dev_planner/run_p4_g0c_tests.py \
-  --task-root "$PWD/results/icra27/icra063/icra069_launch_focused" \
+  --task-root "$PWD/results/icra27/icra063/icra069_final_launch" \
   unittest discover -s test -p 'test_test_planner_launch.py'
+python3 scripts/dev_planner/run_p4_g0c_tests.py \
+  --task-root "$PWD/results/icra27/icra063/icra069_final_full" \
+  unittest discover -s test -p 'test_*.py'
 ```
+
+The original shell wrapper used for the one-shot live runner was not retained;
+its argv, effective environment, parser/GPU/live child commands and exits are
+retained in the ICRA-069 raw evidence. This is a documentation deviation and
+must not be hidden by inventing history. The equivalent guarded invocation is
+shown below for audit only; the ICRA-069 markers and `-002` identity make it
+intentionally non-repeatable:
+
+```bash
+env -i \
+  HOME="$PWD/results/icra27/icra069/live_environment/home" \
+  ROS_HOME="$PWD/results/icra27/icra069/live_environment/ros_home" \
+  ROS_LOG_DIR="$PWD/results/icra27/icra069/live_environment/ros_logs" \
+  TMPDIR="$PWD/results/icra27/icra069/live_environment/tmp" \
+  XDG_RUNTIME_DIR="$PWD/results/icra27/icra069/live_environment/xdg_runtime" \
+  PATH="/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+  LANG=C.UTF-8 LC_ALL=C.UTF-8 \
+  GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory \
+  GIT_CONFIG_VALUE_0=/home/dev/ws_iap/src/iap \
+  AMENT_PREFIX_PATH="$PWD/results/icra27/icra068/install:/root/ros2_ws/install:/opt/ros/jazzy" \
+  CMAKE_PREFIX_PATH="$PWD/results/icra27/icra068/install:/root/ros2_ws/install/glim_ros:/root/ros2_ws/install/glim:/opt/ros/jazzy" \
+  LD_LIBRARY_PATH="$PWD/results/icra27/icra068/install/lib:/root/ros2_ws/install/glim_ros/lib:/root/ros2_ws/install/glim/lib:/opt/ros/jazzy/lib:/opt/ros/jazzy/lib/x86_64-linux-gnu" \
+  python3 scripts/dev_planner/run_icra_p0_p5_qualification.py
+```
+
+### 2026-08-26 Supervisor Review and ICRA-070 authorization
+
+Requirements: `IAP-RQ-320`, `IAP-RQ-421`, `IAP-RQ-422`, `IAP-RQ-423`.
+
+- Supervisor independently reran complete hermetic discovery: 553/553 pass in
+  37.738 seconds, child exit 0 and the 17,770-entry external ROS inventory is
+  unchanged. Serialization, installed parser proof, GPU preflight, immutable
+  evidence and stop/no-retry behavior pass.
+- The 15/16 stop is a Supervisor process-contract contradiction, not a Builder
+  failure: all fixed qualification scenarios set `use_gnss=false`, and launch
+  conditionally omits `test_planner_gnss_sim_node`, while the signed contract
+  incorrectly requires it. SAFE_NORMAL `-002` is consumed and the complete
+  `-002` set is retired.
+- ICRA-070 corrects only that process truth to the 15 launchable nodes,
+  strengthens complete-inventory provenance, installs a no-recompile isolated
+  overlay from the retained build, and executes fresh `-003` parser/GPU/live/
+  analyzer closure in one task. Sensor modes, scenarios, algorithms,
+  thresholds and acceptance semantics remain unchanged.
+- ICRA-069 has no build/install. Its raw/live/bag/log evidence remains retained;
+  adopted ICRA-068 build/install also remain because the Gate has not passed.
 
 ## 2026-08-25 (ICRA-068 historical P4 test-fixture decoupling)
 

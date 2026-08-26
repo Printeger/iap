@@ -15,10 +15,19 @@ ICRA-067 passed profile and validation-only harness review. ICRA-068 then passed
 543/543 tests, isolated install closure and GPU preflight, but its runner emitted 19 malformed empty ROS launch
 arguments. SAFE_NORMAL stopped before any required child started; the complete `-001` registration is retired.
 
-ICRA-069 is the only authorized live gate: repair empty-argument serialization, prove all three commands with
+ICRA-069 was authorized to repair empty-argument serialization, prove all three commands with
 the real non-executing ROS parser, adopt the unchanged isolated product install with dual provenance, then run
 fresh SAFE_NORMAL, FINAL_REJECT and RUNTIME_FAIL `-002` identities exactly once. No product/scope change is
 authorized and P5 remains unqualified until the authoritative analyzer passes.
+
+ICRA-069 closes the serialization and parser/GPU blockers, but exposes an impossible Supervisor process
+contract: every fixed case resolves `use_gnss=false`, so launch intentionally omits the GNSS simulator while the
+contract requires it. SAFE_NORMAL therefore stops at 15/16 after its sole `-002` attempt. The result is not a
+Builder, GPU or node-start failure, and the complete `-002` set is retired.
+
+ICRA-070 is the only authorized live gate. It corrects required-process truth to the 15 nodes launch can create,
+preserves the fixed sensor modes/scenarios, installs a no-recompile isolated overlay with complete provenance,
+and executes fresh `-003` cases once. No algorithm, threshold or scientific acceptance change is authorized.
 
 The conditional P0 → P4 → P5 scope below is retained as the audited failed route. Where it conflicts with this
 activation, this section and root `AGENT_STATE.md`/`NEXT_TASK.md` are authoritative.

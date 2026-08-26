@@ -15,8 +15,16 @@ ICRA-067 的隔离 profile、canonical contract 和 synthetic harness 已通过 
 preflight 均通过；live qualification 被 runner 生成的 19 个 malformed empty ROS arguments 阻塞，
 在任何 required process 启动前停止。该缺陷不改变 P0/P5 verdict，且 `-001` 注册集不再复用。
 
-ICRA-069 直接修复命令生成并加入真实 parser-level proof，然后以不变 install 和新 `-002` identities
+ICRA-069 的签发范围是直接修复命令生成并加入真实 parser-level proof，然后以不变 install 和新 `-002` identities
 完成三场景 one-shot live gate。没有修复后单独审计轮次；在权威 analyzer PASS 前，P5 仍 unqualified。
+
+ICRA-069 的 serialization、真实 parser `0/0/0` 和 GPU preflight 已通过，但 SAFE_NORMAL 以 15/16
+required processes 停止。Review 证明缺少的 GNSS simulator 不是启动失败：固定三个 case 的 scenario
+均解析 `use_gnss=false`，launch condition 必然不创建该 node，而 Supervisor contract 错误地要求它。
+Builder 的 fail-closed、`1/0/1/0`、零 retry/orphan 是正确行为。
+
+ICRA-070 修正 process contract 为 launch-derived 15 nodes，保持 GNSS-disabled sensor modes 不变，并以
+no-recompile overlay、complete provenance 和新 `-003` identities 完成同一 live gate。P5 仍未 qualified。
 
 以下 P0 → P4 → P5 复审正文作为决策历史保留，不再授权后续 P4 Gate。
 

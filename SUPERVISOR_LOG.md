@@ -1,5 +1,58 @@
 # ICRA Supervisor Log
 
+## 2026-08-26 — ICRA-069 serialization PASS; Supervisor 16-process contract contradicted launch truth
+
+### Review identity and synchronization
+
+- Fixed review range: `2d02a07ab25f5ca05f68483a791e6a8df70ffec9...4473050c455612e2c861cb254b5f8533e242be4e`.
+  Builder commits `0521527`, `d982276` and `4473050` bind applicable `IAP-RQ-320`, `IAP-RQ-421`,
+  `IAP-RQ-422` and `IAP-RQ-423`. Fetch succeeds; HEAD equals `origin/dev/icra` at divergence `0 0`; fixed diff
+  is limited to the authorized runner/test, Builder docs and compact evidence. The protected PDF remains the sole
+  untracked file with unchanged SHA `1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+
+### Standards
+
+- Two Medium documentation findings are corrected by this Supervisor changeset instead of creating a Builder
+  formatting loop: ICRA-069 `docs/CHANGES.md` lacked the full-discovery and guarded live reproduction commands,
+  and its traceability rows lacked explicit implementation/test/evidence paths. The original wrapper shell was
+  not retained, so the reproducible equivalent is documented with an explicit historical disclosure rather than
+  fabricated as the exact executed shell line.
+- Medium judgement-only Divergent Change remains in the large live runner, and Low possible Feature Envy remains
+  where it uses private capture/analyzer helpers. Both are deferred until after the one-shot Gate; refactoring now
+  would expand risk and does not explain the live stop. Standards count before Supervisor correction: two hard
+  Medium findings and two smells (one Medium, one Low); no scope, ownership, commit-ID or artifact violation.
+
+### Spec
+
+- Serialization, parser, install adoption, GPU and fail-closed lifecycle implementation pass. Parser proof is
+  ordered `0/0/0`, precedes registration/GPU, starts zero main-flow child and leaves zero remnant. GPU passes two
+  `nvidia-smi` commands, `cuInit(0)==0` and `device_count=1`. ICRA-068 product manifest remains
+  `7662a2c4...34d420`; `-001` is unchanged and only the registered SAFE_NORMAL `-002` is attempted.
+- One High incomplete Gate item is real: only SAFE_NORMAL runs, so FINAL_REJECT, RUNTIME_FAIL and analyzer remain
+  absent. Its cause is a Supervisor spec contradiction. The fixed SAFE/FINAL scenario `lidar_corridor_degenerate`
+  and fixed runtime scenario `fallback_only` both set `use_gnss=false`; launch therefore conditionally omits
+  `test_planner_gnss_sim_node`, while the Supervisor-frozen contract requires it. The 90-second run sees 15/16,
+  then correctly freezes `1/0/1/0`, stops without retry and leaves no task process.
+- One Medium provenance-proof weakness is accepted for ICRA-069 and made mandatory in ICRA-070: changed-source
+  overlap was checked against only three installed aliases, not independently across the complete 83-file/54-lib
+  runtime inventory. Direct diff shows no installed product change, but the next manifest must prove this
+  generically. One Low stale count/pending wording issue is corrected in traceability.
+- Supervisor full hermetic discovery passes 553/553 in 37.738 seconds, child exit 0, with the 17,770-entry external
+  ROS inventory unchanged. Spec count: two missing/partial items, zero scope creep and one wrong requirement
+  implementation; worst severity High. The process mismatch belongs to the signed specification, not Builder.
+
+### Verdict, next task and artifact lifecycle
+
+- Verdict: `ICRA069_IMPLEMENTATION_PASS_GATE_BLOCKED_SUPERVISOR_CONTRACT_MISMATCH`. This is real progress: the
+  empty-argument blocker is closed, parser and GPU pass, and SAFE_NORMAL produces 152 P0 generations and 18
+  normal publications. It is not yet P5 qualification and `-002` may not be reused.
+- `ICRA-070 / P0_P5_ACTUAL_PROCESS_CONTRACT_AND_REPLACEMENT_QUALIFICATION` corrects only the canonical process
+  truth to the 15 launchable nodes, keeps the fixed GNSS-disabled sensor modes, creates a no-recompile isolated
+  overlay with complete provenance, then runs fresh `-003` parser/GPU/live/analyzer closure in one task.
+- ICRA-069 has no build/install of its own. Its 857 MiB raw/live/bag/log evidence remains. The adopted ICRA-068
+  build (`1.2G`) and install (`462M`) are retained because the Gate is blocked. No reproducible directory is
+  deleted until ICRA-070 passes Review and code/docs are pushed.
+
 ## 2026-08-26 — ICRA-068 runner BLOCKED before main flow; single repair-and-live task authorized
 
 ### Review identity and synchronization
