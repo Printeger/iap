@@ -2943,3 +2943,26 @@ Requirements: `IAP-RQ-020`, `IAP-RQ-030`, `IAP-RQ-040`, `IAP-RQ-220`,
   frozen ICRA-068 cache. No overlay/adoption manifest, parser, GPU preflight,
   live identity or analyzer followed, and no retry ran. Final state is
   **BLOCKED_ICRA070_UNAUTHORIZED_OVERLAY_PYC_DIFFERENCE**.
+
+## 2026-08-26 (ICRA-070 single cache-boundary repair continuation)
+
+Requirements: `IAP-RQ-000`, `IAP-RQ-020`, `IAP-RQ-030`, `IAP-RQ-040`,
+`IAP-RQ-220`, `IAP-RQ-320`, `IAP-RQ-421`, `IAP-RQ-422`, `IAP-RQ-423`.
+
+- Permanently exclude `__pycache__`, `*.pyc`, `*.pyo` and `*.pyd` from IAP
+  launch/config install directories; generated caches are never authorized
+  aliases.
+- Add one non-overwriting `--repair-overlay-cache` continuation. It binds the
+  original blocker bytes, exact 474-file failed overlay, immutable 7,364-entry
+  ICRA-068 tree and source caches before removing only enumerated task-install
+  caches. Full-set validation rejects missing/extra non-cache files, symlinks,
+  binary/library drift, alias drift, source-cache changes and re-entry.
+- Add exclusive repair/overlay/adoption v2 provenance and an installed
+  non-executing launch/helper probe. All parser/GPU/live/analyzer subprocess
+  evidence binds `PYTHONDONTWRITEBYTECODE=1`; the probe must leave the full
+  install inventory unchanged.
+- Static verification passes 56/56 focused contract/runner tests, 21/21 launch
+  tests and 577/577 full hermetic discovery. Historical ICRA-063 harness roots
+  are non-authoritative scratch; authoritative continuation records are under
+  ICRA-070. At this checkpoint repair/parser/GPU/live/analyzer invocations are
+  all zero and the original blocker evidence is unchanged.

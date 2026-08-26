@@ -616,8 +616,18 @@ if(DEFINED ENV{ROS_VERSION})
       scripts/dev_planner/run_gate0_qualification.py
       DESTINATION lib/iap
     )
-    install(DIRECTORY launch DESTINATION share/iap)
-    install(DIRECTORY config DESTINATION share/iap)
+    install(DIRECTORY launch DESTINATION share/iap
+      PATTERN "__pycache__" EXCLUDE
+      PATTERN "*.pyc" EXCLUDE
+      PATTERN "*.pyo" EXCLUDE
+      PATTERN "*.pyd" EXCLUDE
+    )
+    install(DIRECTORY config DESTINATION share/iap
+      PATTERN "__pycache__" EXCLUDE
+      PATTERN "*.pyc" EXCLUDE
+      PATTERN "*.pyo" EXCLUDE
+      PATTERN "*.pyd" EXCLUDE
+    )
 
     ## Tests (IAP-RQ-241–246, RQ-200, RQ-131)
     if(BUILD_TESTING)
@@ -751,6 +761,11 @@ if(DEFINED ENV{ROS_VERSION})
       INCLUDE_DIRS include
       LIBRARIES ${iap_LIBRARIES} ${GTSAM_LIBRARIES} fmt spdlog::spdlog
     )
-    install(DIRECTORY config DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION})
+    install(DIRECTORY config DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
+      PATTERN "__pycache__" EXCLUDE
+      PATTERN "*.pyc" EXCLUDE
+      PATTERN "*.pyo" EXCLUDE
+      PATTERN "*.pyd" EXCLUDE
+    )
   endif()
 endif()

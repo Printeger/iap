@@ -30,7 +30,9 @@ PRODUCT_INSTALL_DRIVER_SHA256 = (
 PRODUCT_SUBINSTALL_DRIVER_SHA256 = (
     "86a3b5482fb7225b2a443338d18fb54024f3f520fad2a97facd44d9c97c2c874"
 )
-OVERLAY_MANIFEST_PATH = TASK_ROOT / "compact/icra070_overlay_manifest.json"
+OVERLAY_MANIFEST_PATH = TASK_ROOT / "compact/icra070_overlay_manifest_v2.json"
+REPAIR_EVIDENCE_PATH = TASK_ROOT / "compact/overlay_cache_repair_v1.json"
+ADOPTION_MANIFEST_PATH = TASK_ROOT / "compact/icra070_adoption_manifest_v2.json"
 DEPENDENCY_PREFLIGHT_PATH = TASK_ROOT / "compact/gnss_dependency_preflight.json"
 OVERLAY_COMMAND_PATH = TASK_ROOT / "compact/overlay_install_command.json"
 OVERLAY_INSTALL_DRIVER_PATH = TASK_ROOT / "overlay_install_driver.cmake"
@@ -40,6 +42,35 @@ PRODUCT_COMMIT = "005ce1a9dc20109dfb9600d62a8a9085aa11cb45"
 PRODUCT_MANIFEST_SHA256 = (
     "7662a2c4aa4840dac2d80aac8cdf87041555f9114ca86dd844e862462134d420"
 )
+EXPECTED_RETAINED_TASK_INVENTORY = {
+    "entry_count": 7364,
+    "inventory_sha256": (
+        "fdeb47e3d025bbc7c442b86521e6808d1452d928178a52df0b2f9e03aace4858"
+    ),
+}
+EXPECTED_FAILED_OVERLAY_INVENTORY = {
+    "entry_count": 474,
+    "inventory_sha256": (
+        "9381cb03d7cff06a517f8da9fcde0c179cc4cf130b61a2e04750dfe683acec89"
+    ),
+}
+ORIGINAL_BLOCKER_SHA256 = {
+    "results/icra27/icra070/compact/final_result.json": (
+        "ebb95f8f6dc05bf72d7ed3ee3e65af1a8d7279a27e02a6c8efa691e5e374b26b"
+    ),
+    "results/icra27/icra070/compact/command_ledger.json": (
+        "6bc56ea8d2d4a3e61c8a572a380a35da86e6d1035c2791e3848b917db48e6898"
+    ),
+    "results/icra27/icra070/compact/gnss_dependency_preflight.json": (
+        "b35afeb83fb119efacc5ea40ef93ce24360ba65e2f57ec9a002d2f4824426ece"
+    ),
+    "results/icra27/icra070/compact/overlay_install_command.json": (
+        "f9c48b12c4170122f58eb49c6fced267d5d4b19fd8633495b8ef1962b389e16f"
+    ),
+    "results/icra27/icra070/overlay_install_driver.cmake": (
+        "cac3da758800fa42172b43caef6551f39f45fcc350c2a7270a2191167ef45581"
+    ),
+}
 RINEX_EPHEMERIS_PATH = Path(
     "/home/dev/ws_iap/src/LIGO./Data/BRDM00DLR_S_20221870000_01D_MN.rnx"
 )
@@ -232,6 +263,38 @@ def _write_json(path: Path, value: object) -> None:
     path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n")
 
 
+def _write_json_exclusive(path: Path, value: object) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with path.open("x") as stream:
+            json.dump(value, stream, indent=2, sort_keys=True)
+            stream.write("\n")
+    except FileExistsError as exc:
+        raise LiveRunnerError(f"exclusive_evidence_exists:{path.name}") from exc
+
+
+def verify_original_blocker_evidence() -> dict:
+    observed = {}
+    for relative, expected_hash in ORIGINAL_BLOCKER_SHA256.items():
+        path = REPOSITORY / relative
+        if not path.is_file() or path.is_symlink():
+            raise LiveRunnerError(f"original_blocker_missing_or_symlink:{relative}")
+        observed_hash = _sha256(path)
+        if observed_hash != expected_hash:
+            raise LiveRunnerError(f"original_blocker_hash_mismatch:{relative}")
+        observed[relative] = observed_hash
+    return {
+        "file_sha256": observed,
+        "all_original_blocker_bytes_preserved": True,
+    }
+
+
+def require_repair_outputs_absent(paths: list[Path]) -> None:
+    for path in paths:
+        if Path(path).exists() or Path(path).is_symlink():
+            raise LiveRunnerError(f"repair_evidence_already_exists:{Path(path).name}")
+
+
 def _dependency_file(path: Path, executable: bool = False) -> dict:
     path = Path(path).resolve()
     if not path.is_file() or path.is_symlink() or not os.access(path, os.R_OK):
@@ -393,6 +456,216 @@ def inventory_summary(inventory: dict) -> dict[str, object]:
     }
 
 
+PYTHON_CACHE_SUFFIXES = {".pyc", ".pyo", ".pyd"}
+
+
+def is_python_cache_path(relative: Path | str) -> bool:
+    relative = Path(relative)
+    if relative.is_absolute() or ".." in relative.parts:
+        raise LiveRunnerError(f"cache_path_not_relative:{relative}")
+    return "__pycache__" in relative.parts \
+        or relative.suffix.lower() in PYTHON_CACHE_SUFFIXES
+
+
+def enumerate_python_cache(root: Path) -> tuple[list[dict], list[str]]:
+    root = Path(root).resolve()
+    files = []
+    directories = []
+    for path in sorted(root.rglob("*")):
+        relative = path.relative_to(root)
+        if path.is_symlink() and is_python_cache_path(relative):
+            raise LiveRunnerError(f"cache_path_is_symlink:{relative}")
+        if path.is_file() and is_python_cache_path(relative):
+            files.append({
+                "path": str(relative),
+                "size": path.stat().st_size,
+                "sha256": _sha256(path),
+            })
+        if path.is_dir() and not path.is_symlink() \
+                and path.name == "__pycache__":
+            directories.append(str(relative))
+    return files, sorted(directories)
+
+
+def python_cache_inventory(root: Path) -> dict[str, object]:
+    files, directories = enumerate_python_cache(root)
+    return {"files": files, "directories": directories}
+
+
+def inventory_overlay_v2(
+    overlay_root: Path, base_root: Path, source_root: Path,
+    allowed_differences: dict[str, str], expected_pre_repair: dict,
+) -> dict:
+    """Prove the repaired overlay is the frozen failed set minus caches."""
+    overlay_root = Path(overlay_root).resolve()
+    base_root = Path(base_root).resolve()
+    source_root = Path(source_root).resolve()
+    if any(is_python_cache_path(relative) for relative in allowed_differences):
+        raise LiveRunnerError("python_cache_cannot_be_authorized")
+    if any(row.get("type") == "symlink" for row in expected_pre_repair.values()):
+        raise LiveRunnerError("pre_repair_overlay_contains_symlink")
+    observed = tree_byte_inventory(overlay_root)
+    if any(row.get("type") == "symlink" for row in observed.values()):
+        raise LiveRunnerError("repaired_overlay_contains_symlink")
+    cache_paths = sorted(
+        relative for relative in expected_pre_repair
+        if is_python_cache_path(relative)
+    )
+    expected_files = {
+        relative: row for relative, row in expected_pre_repair.items()
+        if relative not in cache_paths
+    }
+    if set(observed) != set(expected_files):
+        missing = sorted(set(expected_files) - set(observed))
+        extra = sorted(set(observed) - set(expected_files))
+        label = missing[0] if missing else extra[0]
+        kind = "missing" if missing else "extra"
+        raise LiveRunnerError(f"repaired_overlay_file_set_{kind}:{label}")
+    hashes = {}
+    base_hashes = {}
+    differences = []
+    for relative in sorted(observed):
+        if observed[relative] != expected_files[relative]:
+            raise LiveRunnerError(f"non_cache_overlay_mutated:{relative}")
+        overlay = overlay_root / relative
+        base = base_root / relative
+        if not base.is_file() or base.is_symlink():
+            raise LiveRunnerError(f"overlay_file_missing_from_base:{relative}")
+        overlay_hash = _sha256(overlay)
+        base_hash = _sha256(base)
+        hashes[relative] = overlay_hash
+        base_hashes[relative] = base_hash
+        if overlay_hash == base_hash and overlay.read_bytes() == base.read_bytes():
+            continue
+        if relative not in allowed_differences:
+            raise LiveRunnerError(f"unauthorized_overlay_difference:{relative}")
+        source = source_root / allowed_differences[relative]
+        if not source.is_file() or source.is_symlink() \
+                or _sha256(source) != overlay_hash \
+                or source.read_bytes() != overlay.read_bytes():
+            raise LiveRunnerError(f"overlay_alias_source_mismatch:{relative}")
+        differences.append(relative)
+    return {
+        "pre_repair_file_count": len(expected_pre_repair),
+        "file_count": len(observed),
+        "omitted_cache_artifacts": cache_paths,
+        "file_sha256": hashes,
+        "base_file_sha256": base_hashes,
+        "authorized_differences": sorted(differences),
+        "non_cache_file_set_complete": True,
+        "binary_library_bytes_equal": True,
+        "symlink_count": 0,
+    }
+
+
+def repair_overlay_cache_boundary(
+    overlay_root: Path, base_root: Path, source_root: Path,
+    allowed_differences: dict[str, str], expected_pre_repair: dict,
+    expected_source_cache: dict | None = None,
+) -> dict:
+    """Remove only enumerated cache artifacts from one frozen failed overlay."""
+    overlay_root = Path(overlay_root).resolve()
+    source_root = Path(source_root).resolve()
+    if expected_source_cache is not None \
+            and python_cache_inventory(source_root) != expected_source_cache:
+        raise LiveRunnerError("source_cache_inventory_mismatch")
+    if tree_byte_inventory(overlay_root) != expected_pre_repair:
+        raise LiveRunnerError("failed_overlay_pre_repair_inventory_mismatch")
+    cache_files, cache_directories = enumerate_python_cache(overlay_root)
+    if not cache_files:
+        raise LiveRunnerError("failed_overlay_cache_inventory_empty")
+    for row in cache_files:
+        path = overlay_root / row["path"]
+        if not path.is_file() or path.is_symlink() \
+                or path.stat().st_size != row["size"] \
+                or _sha256(path) != row["sha256"]:
+            raise LiveRunnerError(f"cache_changed_before_removal:{row['path']}")
+        path.unlink()
+    for relative in sorted(
+        cache_directories, key=lambda value: len(Path(value).parts), reverse=True
+    ):
+        path = overlay_root / relative
+        try:
+            path.rmdir()
+        except OSError as exc:
+            raise LiveRunnerError(
+                f"cache_directory_not_empty_after_removal:{relative}"
+            ) from exc
+    remaining_cache, remaining_directories = enumerate_python_cache(overlay_root)
+    if remaining_cache or remaining_directories:
+        raise LiveRunnerError("python_cache_remained_after_repair")
+    proof = inventory_overlay_v2(
+        overlay_root, base_root, source_root,
+        allowed_differences, expected_pre_repair,
+    )
+    if expected_source_cache is not None \
+            and python_cache_inventory(source_root) != expected_source_cache:
+        raise LiveRunnerError("source_cache_mutated_by_repair")
+    proof.update({
+        "removed_cache_files": [row["path"] for row in cache_files],
+        "removed_cache_inventory": cache_files,
+        "removed_cache_directories": cache_directories,
+        "source_cache_inventory": expected_source_cache,
+        "source_cache_unchanged": expected_source_cache is not None,
+    })
+    return proof
+
+
+def run_no_bytecode_import_probe(
+    install_root: Path, module_paths: list[Path], environment: dict[str, str],
+) -> dict:
+    install_root = Path(install_root).resolve()
+    if environment.get("PYTHONDONTWRITEBYTECODE") != "1":
+        raise LiveRunnerError("import_probe_bytecode_not_disabled")
+    resolved_modules = []
+    for path in module_paths:
+        path = Path(path).resolve()
+        try:
+            path.relative_to(install_root)
+        except ValueError as exc:
+            raise LiveRunnerError("import_probe_module_outside_install") from exc
+        if not path.is_file() or path.is_symlink():
+            raise LiveRunnerError(f"import_probe_module_missing:{path}")
+        resolved_modules.append(path)
+    before = tree_byte_inventory(install_root)
+    code = (
+        "import runpy,sys; sys.dont_write_bytecode=True; "
+        "[runpy.run_path(path) for path in sys.argv[1:]]"
+    )
+    command = ["/usr/bin/python3", "-B", "-c", code] + [
+        str(path) for path in resolved_modules
+    ]
+    completed = subprocess.run(
+        command, cwd=REPOSITORY, env=dict(environment),
+        text=True, capture_output=True, check=False,
+    )
+    after = tree_byte_inventory(install_root)
+    proof = {
+        "argv": command,
+        "cwd": str(REPOSITORY),
+        "environment": dict(environment),
+        "exit_code": completed.returncode,
+        "stdout": completed.stdout,
+        "stdout_sha256": hashlib.sha256(completed.stdout.encode()).hexdigest(),
+        "stderr": completed.stderr,
+        "stderr_sha256": hashlib.sha256(completed.stderr.encode()).hexdigest(),
+        "module_paths": [str(path) for path in resolved_modules],
+        "install_inventory_before": inventory_summary(before),
+        "install_inventory_after": inventory_summary(after),
+        "install_inventory_unchanged": before == after,
+        "python_cache_absent_after": python_cache_inventory(install_root) == {
+            "files": [], "directories": [],
+        },
+    }
+    if not (
+        completed.returncode == 0
+        and before == after
+        and proof["python_cache_absent_after"] is True
+    ):
+        raise LiveRunnerError("installed_import_probe_not_cache_safe")
+    return proof
+
+
 def inventory_overlay(
     overlay_root: Path, base_root: Path, allowed_differences: dict[str, str],
     source_root: Path = REPOSITORY,
@@ -447,6 +720,8 @@ def build_overlay_manifest_payload(
     installed_aliases: dict | None = None,
     evidence_bindings: dict | None = None,
     retained_artifacts: dict | None = None,
+    repair_binding: dict | None = None,
+    import_probe: dict | None = None,
 ) -> dict:
     if re.fullmatch(r"[0-9a-f]{40}", current_commit) is None:
         raise LiveRunnerError("overlay_commit_malformed")
@@ -456,7 +731,7 @@ def build_overlay_manifest_payload(
         "config/icra27/icra_p0_p5_qualification_v1.json",
     )
     return {
-        "schema_version": "icra070_isolated_overlay_manifest_v1",
+        "schema_version": "icra070_isolated_overlay_manifest_v2",
         "product_build": {
             "task_id": "ICRA-068",
             "git_commit": PRODUCT_COMMIT,
@@ -494,6 +769,13 @@ def build_overlay_manifest_payload(
         "dependency_preflight": dependency,
         "evidence_bindings": dict(evidence_bindings or {}),
         "retained_artifacts": dict(retained_artifacts or {}),
+        "cache_boundary": {
+            "all_python_cache_excluded": True,
+            "python_cache_allowlist": [],
+            "pythondontwritebytecode": "1",
+            "repair_binding": dict(repair_binding or {}),
+            "installed_import_probe": dict(import_probe or {}),
+        },
         "overlay_inventory": inventory,
         "installed_aliases": dict(installed_aliases or {}),
         "binary_library_bytes_equal": (
@@ -611,7 +893,12 @@ def _current_commit() -> str:
 
 
 def prepare_overlay() -> dict:
-    """Install the retained ICRA-068 build into the isolated ICRA-070 prefix."""
+    """The original one-shot installer is frozen after its preserved blocker."""
+    raise LiveRunnerError("overlay_prepare_superseded_by_single_cache_repair")
+
+
+def _superseded_prepare_overlay_implementation() -> dict:
+    """Preserved implementation; unreachable after the reviewed v1 blocker."""
     if OVERLAY_INSTALL_ROOT.exists() or OVERLAY_INSTALL_ROOT.is_symlink():
         raise LiveRunnerError("overlay_install_already_exists")
     for path in (OVERLAY_MANIFEST_PATH, DEPENDENCY_PREFLIGHT_PATH, OVERLAY_COMMAND_PATH):
@@ -692,6 +979,145 @@ def prepare_overlay() -> dict:
     return manifest
 
 
+def repair_probe_environment() -> dict[str, str]:
+    return {
+        **expected_live_environment(),
+        "PATH": "/usr/bin:/bin",
+        "LANG": "C.UTF-8",
+        "LC_ALL": "C.UTF-8",
+    }
+
+
+def repair_overlay_cache() -> dict:
+    """Perform the single authorized cache-only repair and freeze v2 proof."""
+    require_repair_outputs_absent([
+        REPAIR_EVIDENCE_PATH, OVERLAY_MANIFEST_PATH, ADOPTION_MANIFEST_PATH,
+    ])
+    validate_live_environment()
+    dirty = subprocess.check_output(
+        ["git", "status", "--porcelain", "--untracked-files=no"],
+        cwd=REPOSITORY, text=True,
+    ).strip()
+    if dirty:
+        raise LiveRunnerError("tracked_worktree_not_clean")
+    current_commit = _current_commit()
+    original_blocker = verify_original_blocker_evidence()
+    retained_before_inventory = tree_byte_inventory(PRODUCT_TASK_ROOT)
+    retained_before = inventory_summary(retained_before_inventory)
+    if retained_before != EXPECTED_RETAINED_TASK_INVENTORY:
+        raise LiveRunnerError("retained_icra068_inventory_mismatch")
+    if not OVERLAY_INSTALL_ROOT.is_dir() or OVERLAY_INSTALL_ROOT.is_symlink():
+        raise LiveRunnerError("failed_overlay_missing_or_symlink")
+    pre_repair_inventory = tree_byte_inventory(OVERLAY_INSTALL_ROOT)
+    pre_repair_summary = inventory_summary(pre_repair_inventory)
+    if pre_repair_summary != EXPECTED_FAILED_OVERLAY_INVENTORY:
+        raise LiveRunnerError("failed_overlay_frozen_inventory_mismatch")
+    source_cache = python_cache_inventory(REPOSITORY / "launch")
+    repair_proof = repair_overlay_cache_boundary(
+        OVERLAY_INSTALL_ROOT, INSTALL_ROOT, REPOSITORY,
+        INSTALLED_ALIASES, pre_repair_inventory,
+        expected_source_cache=source_cache,
+    )
+    retained_after = inventory_summary(tree_byte_inventory(PRODUCT_TASK_ROOT))
+    if retained_after != retained_before:
+        raise LiveRunnerError("retained_icra068_mutated_by_cache_repair")
+    import_probe = run_no_bytecode_import_probe(
+        OVERLAY_INSTALL_ROOT,
+        [
+            OVERLAY_INSTALL_ROOT
+            / "share/iap/launch/icra_p0_p5_qualification.py",
+            OVERLAY_INSTALL_ROOT / "share/iap/launch/test_planner.launch.py",
+        ],
+        repair_probe_environment(),
+    )
+    post_probe_inventory = tree_byte_inventory(OVERLAY_INSTALL_ROOT)
+    if inventory_summary(post_probe_inventory) != import_probe[
+            "install_inventory_after"]:
+        raise LiveRunnerError("import_probe_post_inventory_binding_mismatch")
+    contract = QUALIFICATION.load_contract(CONTRACT_PATH)
+    dependency = resolve_gnss_dependencies(
+        contract, INSTALL_ROOT, OVERLAY_INSTALL_ROOT
+    )
+    dependency_record = json.loads(DEPENDENCY_PREFLIGHT_PATH.read_text())
+    if dependency_record != dependency:
+        raise LiveRunnerError("preserved_dependency_preflight_mismatch")
+    aliases = verify_installed_aliases(OVERLAY_INSTALL_ROOT)
+    package_resolution = verify_runtime_package_resolution()
+    repair_record = {
+        "schema_version": "icra070_overlay_cache_repair_v1",
+        "status": "PASS",
+        "task_id": "ICRA-070",
+        "git_commit": current_commit,
+        "command": {
+            "argv": [
+                "python3",
+                "scripts/dev_planner/run_icra_p0_p5_qualification.py",
+                "--repair-overlay-cache",
+            ],
+            "cwd": str(REPOSITORY),
+            "environment": expected_live_environment(),
+            "exit_code": 0,
+        },
+        "original_blocker": original_blocker,
+        "retained_icra068": {
+            "root": str(PRODUCT_TASK_ROOT.relative_to(REPOSITORY)),
+            "before": retained_before,
+            "after": retained_after,
+            "byte_inventory_equal": retained_before == retained_after,
+        },
+        "failed_overlay": {
+            "root": str(OVERLAY_INSTALL_ROOT.relative_to(REPOSITORY)),
+            "pre_repair_summary": pre_repair_summary,
+            "pre_repair_inventory": pre_repair_inventory,
+        },
+        "repair_proof": repair_proof,
+        "installed_import_probe": import_probe,
+        "post_probe_inventory": post_probe_inventory,
+        "source_cache_inventory": source_cache,
+        "source_cache_unchanged": (
+            python_cache_inventory(REPOSITORY / "launch") == source_cache
+        ),
+        "dependency_preflight_sha256": _sha256(DEPENDENCY_PREFLIGHT_PATH),
+        "package_resolution": package_resolution,
+        "reinstall_invocations": 0,
+        "compile_invocations": 0,
+        "repair_invocations": 1,
+    }
+    if repair_record["source_cache_unchanged"] is not True:
+        raise LiveRunnerError("source_cache_mutated_by_repair_or_probe")
+    _write_json_exclusive(REPAIR_EVIDENCE_PATH, repair_record)
+    retained_binding = {
+        "root": str(PRODUCT_TASK_ROOT.relative_to(REPOSITORY)),
+        "before": retained_before,
+        "after": retained_after,
+        "byte_inventory_equal": True,
+    }
+    evidence_bindings = {
+        "dependency_preflight_path": str(
+            DEPENDENCY_PREFLIGHT_PATH.relative_to(REPOSITORY)
+        ),
+        "dependency_preflight_sha256": _sha256(DEPENDENCY_PREFLIGHT_PATH),
+        "original_overlay_command_path": str(
+            OVERLAY_COMMAND_PATH.relative_to(REPOSITORY)
+        ),
+        "original_overlay_command_sha256": _sha256(OVERLAY_COMMAND_PATH),
+    }
+    repair_binding = {
+        "path": str(REPAIR_EVIDENCE_PATH.relative_to(REPOSITORY)),
+        "sha256": _sha256(REPAIR_EVIDENCE_PATH),
+    }
+    manifest = build_overlay_manifest_payload(
+        current_commit, dependency, repair_proof, aliases,
+        evidence_bindings, retained_binding,
+        repair_binding, import_probe,
+    )
+    manifest["verified_package_resolution"] = package_resolution
+    _write_json_exclusive(OVERLAY_MANIFEST_PATH, manifest)
+    if validate_overlay_manifest(current_commit) != manifest:
+        raise LiveRunnerError("overlay_manifest_v2_self_validation_mismatch")
+    return manifest
+
+
 def validate_overlay_manifest(current_commit: str) -> dict:
     if not OVERLAY_MANIFEST_PATH.is_file() or OVERLAY_MANIFEST_PATH.is_symlink():
         raise LiveRunnerError("overlay_manifest_missing_or_symlink")
@@ -700,79 +1126,108 @@ def validate_overlay_manifest(current_commit: str) -> dict:
     except (OSError, json.JSONDecodeError) as exc:
         raise LiveRunnerError("overlay_manifest_malformed") from exc
     for path, label in (
+        (REPAIR_EVIDENCE_PATH, "cache_repair_evidence"),
         (DEPENDENCY_PREFLIGHT_PATH, "dependency_preflight"),
-        (OVERLAY_COMMAND_PATH, "overlay_install_command"),
-        (OVERLAY_INSTALL_DRIVER_PATH, "overlay_install_driver"),
+        (OVERLAY_COMMAND_PATH, "original_overlay_install_command"),
+        (OVERLAY_INSTALL_DRIVER_PATH, "original_overlay_install_driver"),
     ):
         if not path.is_file() or path.is_symlink():
             raise LiveRunnerError(f"{label}_missing_or_symlink")
+    try:
+        repair = json.loads(REPAIR_EVIDENCE_PATH.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        raise LiveRunnerError("cache_repair_evidence_malformed") from exc
+    original_blocker = verify_original_blocker_evidence()
+    retained_summary = inventory_summary(tree_byte_inventory(PRODUCT_TASK_ROOT))
+    pre_repair = repair.get("failed_overlay", {}).get("pre_repair_inventory")
+    source_cache = repair.get("source_cache_inventory")
+    if not (
+        repair.get("schema_version") == "icra070_overlay_cache_repair_v1"
+        and repair.get("status") == "PASS"
+        and repair.get("git_commit") == current_commit
+        and repair.get("original_blocker") == original_blocker
+        and repair.get("failed_overlay", {}).get("pre_repair_summary")
+        == EXPECTED_FAILED_OVERLAY_INVENTORY
+        and isinstance(pre_repair, dict)
+        and inventory_summary(pre_repair) == EXPECTED_FAILED_OVERLAY_INVENTORY
+        and repair.get("retained_icra068", {}).get("before")
+        == EXPECTED_RETAINED_TASK_INVENTORY
+        and repair.get("retained_icra068", {}).get("after")
+        == EXPECTED_RETAINED_TASK_INVENTORY
+        and repair.get("retained_icra068", {}).get("byte_inventory_equal") is True
+        and retained_summary == EXPECTED_RETAINED_TASK_INVENTORY
+        and repair.get("source_cache_unchanged") is True
+        and python_cache_inventory(REPOSITORY / "launch") == source_cache
+        and repair.get("compile_invocations") == 0
+        and repair.get("reinstall_invocations") == 0
+        and repair.get("repair_invocations") == 1
+    ):
+        raise LiveRunnerError("cache_repair_evidence_binding_mismatch")
+    inventory = inventory_overlay_v2(
+        OVERLAY_INSTALL_ROOT, INSTALL_ROOT, REPOSITORY,
+        INSTALLED_ALIASES, pre_repair,
+    )
+    if inventory != repair.get("repair_proof"):
+        repair_proof = dict(repair.get("repair_proof") or {})
+        for key in (
+            "removed_cache_files", "removed_cache_inventory",
+            "removed_cache_directories", "source_cache_inventory",
+            "source_cache_unchanged",
+        ):
+            repair_proof.pop(key, None)
+        if inventory != repair_proof:
+            raise LiveRunnerError("repaired_overlay_inventory_binding_mismatch")
+    current_overlay_summary = inventory_summary(
+        tree_byte_inventory(OVERLAY_INSTALL_ROOT)
+    )
+    probe = repair.get("installed_import_probe")
+    if not (
+        isinstance(probe, dict)
+        and probe.get("exit_code") == 0
+        and probe.get("environment", {}).get("PYTHONDONTWRITEBYTECODE") == "1"
+        and probe.get("install_inventory_unchanged") is True
+        and probe.get("python_cache_absent_after") is True
+        and probe.get("install_inventory_after") == current_overlay_summary
+        and repair.get("post_probe_inventory")
+        == tree_byte_inventory(OVERLAY_INSTALL_ROOT)
+    ):
+        raise LiveRunnerError("installed_import_probe_binding_mismatch")
     contract = QUALIFICATION.load_contract(CONTRACT_PATH)
     dependency = resolve_gnss_dependencies(
         contract, INSTALL_ROOT, OVERLAY_INSTALL_ROOT
     )
-    inventory = inventory_overlay(
-        OVERLAY_INSTALL_ROOT, INSTALL_ROOT, INSTALLED_ALIASES
-    )
+    if json.loads(DEPENDENCY_PREFLIGHT_PATH.read_text()) != dependency:
+        raise LiveRunnerError("dependency_preflight_binding_mismatch")
     aliases = verify_installed_aliases(OVERLAY_INSTALL_ROOT)
     package_resolution = verify_runtime_package_resolution()
-    try:
-        command_record = json.loads(OVERLAY_COMMAND_PATH.read_text())
-    except (OSError, json.JSONDecodeError) as exc:
-        raise LiveRunnerError("overlay_install_command_malformed") from exc
-    current_retained = inventory_summary(tree_byte_inventory(PRODUCT_TASK_ROOT))
-    retained_artifacts = command_record.get("retained_artifacts")
-    if not (
-        command_record.get("schema_version")
-        == "icra070_overlay_install_command_v1"
-        and command_record.get("argv") == overlay_install_command()
-        and command_record.get("cwd") == str(REPOSITORY)
-        and command_record.get("environment") == overlay_install_environment()
-        and command_record.get("exit_code") == 0
-        and command_record.get("compile_invocations") == 0
-        and isinstance(retained_artifacts, dict)
-        and retained_artifacts.get("root")
-        == str(PRODUCT_TASK_ROOT.relative_to(REPOSITORY))
-        and retained_artifacts.get("before") == current_retained
-        and retained_artifacts.get("after") == current_retained
-        and retained_artifacts.get("byte_inventory_equal") is True
-    ):
-        raise LiveRunnerError("overlay_install_command_binding_mismatch")
-    driver = command_record.get("install_driver")
-    if not (
-        isinstance(driver, dict)
-        and driver.get("source_sha256") == PRODUCT_INSTALL_DRIVER_SHA256
-        and driver.get("task_driver_sha256")
-        == _sha256(OVERLAY_INSTALL_DRIVER_PATH)
-        and driver.get("included_driver_sha256") == {
-            str(
-                (PRODUCT_BUILD_ROOT / "iap_msgs__py/cmake_install.cmake")
-                .relative_to(REPOSITORY)
-            ): PRODUCT_SUBINSTALL_DRIVER_SHA256,
-        }
-        and driver.get("compileall_block_removed") is True
-        and driver.get("product_build_manifest_write_removed") is True
-    ):
-        raise LiveRunnerError("overlay_install_driver_binding_mismatch")
+    retained_artifacts = {
+        "root": str(PRODUCT_TASK_ROOT.relative_to(REPOSITORY)),
+        "before": retained_summary,
+        "after": retained_summary,
+        "byte_inventory_equal": True,
+    }
     evidence_bindings = {
         "dependency_preflight_path": str(
             DEPENDENCY_PREFLIGHT_PATH.relative_to(REPOSITORY)
         ),
         "dependency_preflight_sha256": _sha256(DEPENDENCY_PREFLIGHT_PATH),
-        "overlay_install_command_path": str(
+        "original_overlay_command_path": str(
             OVERLAY_COMMAND_PATH.relative_to(REPOSITORY)
         ),
-        "overlay_install_command_sha256": _sha256(OVERLAY_COMMAND_PATH),
+        "original_overlay_command_sha256": _sha256(OVERLAY_COMMAND_PATH),
+    }
+    repair_binding = {
+        "path": str(REPAIR_EVIDENCE_PATH.relative_to(REPOSITORY)),
+        "sha256": _sha256(REPAIR_EVIDENCE_PATH),
     }
     expected = build_overlay_manifest_payload(
         current_commit, dependency, inventory, aliases,
         evidence_bindings, retained_artifacts,
+        repair_binding, probe,
     )
     expected["verified_package_resolution"] = package_resolution
     if observed != expected:
         raise LiveRunnerError("overlay_manifest_payload_mismatch")
-    if not DEPENDENCY_PREFLIGHT_PATH.is_file() \
-            or json.loads(DEPENDENCY_PREFLIGHT_PATH.read_text()) != dependency:
-        raise LiveRunnerError("dependency_preflight_binding_mismatch")
     return observed
 
 
@@ -849,7 +1304,7 @@ def build_adoption_payload(
         overlay_manifest = validate_overlay_manifest(current_commit)
         overlay_manifest_sha256 = _sha256(OVERLAY_MANIFEST_PATH)
     if overlay_manifest.get("schema_version") \
-            != "icra070_isolated_overlay_manifest_v1" \
+            != "icra070_isolated_overlay_manifest_v2" \
             or overlay_manifest.get("runner", {}).get("git_commit") \
             != current_commit \
             or not isinstance(overlay_manifest_sha256, str) \
@@ -864,7 +1319,7 @@ def build_adoption_payload(
         and not (REPOSITORY / relative).is_symlink()
     }
     return {
-        "schema_version": "icra070_overlay_adoption_v1",
+        "schema_version": "icra070_overlay_adoption_v2",
         "product_install": {
             "task_id": "ICRA-068",
             "git_commit": PRODUCT_COMMIT,
@@ -1002,9 +1457,13 @@ def _run_parse_only(command: list[str], output_root: Path) -> dict:
     observed_required = set()
     observed_group_pids = set()
     timed_out = False
+    if os.environ.get("PYTHONDONTWRITEBYTECODE") != "1":
+        raise LiveRunnerError("parse_bytecode_not_disabled")
+    child_environment = os.environ.copy()
     with stdout_path.open("w") as stdout, stderr_path.open("w") as stderr:
         process = subprocess.Popen(
             command, stdout=stdout, stderr=stderr, start_new_session=True,
+            env=child_environment,
         )
         pgid = process.pid
         deadline = time.monotonic() + 30.0
@@ -1035,6 +1494,7 @@ def _run_parse_only(command: list[str], output_root: Path) -> dict:
         "task_owned_process_audit_passed": (
             not timed_out and not observed_required and not remaining
         ),
+        "subprocess_environment": {"PYTHONDONTWRITEBYTECODE": "1"},
         "stdout_path": str(stdout_path.relative_to(REPOSITORY)),
         "stdout_sha256": _sha256(stdout_path),
         "stderr_path": str(stderr_path.relative_to(REPOSITORY)),
@@ -1159,6 +1619,8 @@ def parse_proof_failures(
             and case.get("remaining_process_group_pids") == []
             and case.get("task_owned_process_audit_passed") is True
             and case.get("parse_passed") is True
+            and case.get("subprocess_environment")
+            == {"PYTHONDONTWRITEBYTECODE": "1"}
         ):
             failures.append(f"parse case[{case_id}] outcome mismatch")
         case_root = parse_root / case_id.lower()
@@ -1180,7 +1642,7 @@ def parse_proof_failures(
 
 
 def write_adoption_manifest(current_commit: str) -> tuple[Path, dict]:
-    output = TASK_ROOT / "compact/icra070_adoption_manifest.json"
+    output = ADOPTION_MANIFEST_PATH
     if output.exists() or output.is_symlink():
         raise LiveRunnerError("adoption_manifest_already_exists")
     changed = subprocess.check_output(
@@ -1188,7 +1650,7 @@ def write_adoption_manifest(current_commit: str) -> tuple[Path, dict]:
         cwd=REPOSITORY, text=True,
     ).splitlines()
     payload = build_adoption_payload(current_commit, changed)
-    _write_json(output, payload)
+    _write_json_exclusive(output, payload)
     return output, payload
 
 
@@ -1429,6 +1891,7 @@ def live_config(
 def expected_live_environment() -> dict[str, str]:
     environment_root = TASK_ROOT / "live_environment"
     return {
+        "PYTHONDONTWRITEBYTECODE": "1",
         "HOME": str(environment_root / "home"),
         "ROS_HOME": str(environment_root / "ros_home"),
         "ROS_LOG_DIR": str(environment_root / "ros_logs"),
@@ -1845,7 +2308,7 @@ def _run_launch(command: list[str], stdout_path: Path) -> tuple[int, dict]:
     with stdout_path.open("w") as output:
         launch = subprocess.Popen(
             command, stdout=output, stderr=subprocess.STDOUT,
-            start_new_session=True,
+            start_new_session=True, env=os.environ.copy(),
         )
         pgid = launch.pid
         monitor = GATE_RUNNER.RequiredProcessMonitor(
@@ -1920,6 +2383,7 @@ def _execute_live_attempt(
     )
     _write_json(run_dir / "launch_command.json", {
         "argv": command, "omitted_empty_defaults": omitted,
+        "subprocess_environment": {"PYTHONDONTWRITEBYTECODE": "1"},
     })
     ready_path = run_dir / "capture_ready.json"
     capture_command = [
@@ -1950,6 +2414,7 @@ def _execute_live_attempt(
         "launch_exit_code": launch_exit,
         "capture_exit_code": capture_exit,
         "capture_readiness": readiness,
+        "subprocess_environment": {"PYTHONDONTWRITEBYTECODE": "1"},
         **process_result,
     })
     if launch_exit != 0 or process_result.get("required_processes_ok") is not True:
@@ -2116,6 +2581,7 @@ def analyze_replacement_live(input_path: Path, output_path: Path) -> int:
         raise LiveRunnerError("replacement_live_bundle_malformed") from exc
     contract = QUALIFICATION.load_contract(CONTRACT_PATH)
     require_replacement_evidence_ready(bundle, contract)
+    analyzer_environment = validate_live_environment()
     QUALIFICATION._claim_live_analyzer_once(
         output_path, input_path, CONTRACT_PATH
     )
@@ -2130,7 +2596,7 @@ def analyze_replacement_live(input_path: Path, output_path: Path) -> int:
         isinstance(adoption_relative, str)
         and not Path(adoption_relative).is_absolute()
         and adoption_path.resolve()
-        == (TASK_ROOT / "compact/icra070_adoption_manifest.json").resolve()
+        == ADOPTION_MANIFEST_PATH.resolve()
         and adoption_path.is_file() and not adoption_path.is_symlink()
         and _sha256(adoption_path) == manifest.get("adoption_manifest_sha256")
     ):
@@ -2161,6 +2627,7 @@ def analyze_replacement_live(input_path: Path, output_path: Path) -> int:
     result = reconcile_replacement_analysis(result, dual_failures)
     status = result["status"]
     result.update({
+        "analyzer_environment": analyzer_environment,
         "dual_provenance": {
             "validated": not dual_failures,
             "product_install_git_commit": PRODUCT_COMMIT,
@@ -2180,6 +2647,7 @@ def main() -> int:
     parser.add_argument("--install-manifest", type=Path, default=INSTALL_MANIFEST_PATH)
     parser.add_argument("--freeze-install-only", action="store_true")
     parser.add_argument("--prepare-overlay", action="store_true")
+    parser.add_argument("--repair-overlay-cache", action="store_true")
     parser.add_argument("--analyze-replacement-live", action="store_true")
     parser.add_argument(
         "--analysis-input", type=Path,
@@ -2190,6 +2658,14 @@ def main() -> int:
         default=TASK_ROOT / "compact/icra_p0_p5_analysis_v1.json",
     )
     args = parser.parse_args()
+    if sum(bool(value) for value in (
+        args.freeze_install_only, args.prepare_overlay,
+        args.repair_overlay_cache, args.analyze_replacement_live,
+    )) > 1:
+        raise LiveRunnerError("conflicting_runner_modes")
+    if args.repair_overlay_cache:
+        repair_overlay_cache()
+        return 0
     if args.prepare_overlay:
         prepare_overlay()
         return 0
@@ -2258,6 +2734,9 @@ def main() -> int:
     state.update({
         "schema_version": "icra_p0_p5_live_runner_state_v1",
         "gpu_preflight_invocations": 1,
+        "gpu_preflight_environment": {
+            "PYTHONDONTWRITEBYTECODE": "1"
+        },
         "launch_invocations": len(state["attempted"]),
         "registered": [run_id for _, run_id in LIVE_IDENTITIES],
         "free_bytes_before_gpu": free_bytes,

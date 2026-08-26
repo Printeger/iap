@@ -8190,3 +8190,36 @@ identities and analyzer remained at zero invocations; no retry occurred.
 Compact result: `results/icra27/icra070/compact/final_result.json`. ICRA-070 is
 terminally `BLOCKED_ICRA070_UNAUTHORIZED_OVERLAY_PYC_DIFFERENCE` pending
 Supervisor review.
+
+## 2026-08-26 — ICRA-070 single Python-cache boundary repair implementation
+
+IAP-RQ-000, IAP-RQ-020, IAP-RQ-030, IAP-RQ-040, IAP-RQ-220, IAP-RQ-320,
+IAP-RQ-421, IAP-RQ-422 and IAP-RQ-423. Resumed the reviewed ICRA-070 blocker at
+`d88d42b` with `0 0` divergence. The four committed blocker JSON files retain
+their exact hashes, the original overlay install driver remains
+`cac3da75...5581`, the failed overlay remains 474 files at inventory
+`9381cb03...c89`, and ICRA-068 remains 7,364 entries at
+`fdeb47e3...e4858`. Five overlay launch caches were enumerated; none has yet
+been removed at this static checkpoint.
+
+The ROS2 and ROS1 product `install(DIRECTORY ...)` boundaries now exclude every
+`__pycache__`, `*.pyc`, `*.pyo` and `*.pyd`. A new exclusive
+`--repair-overlay-cache` entry point freezes the old blocker and failed-overlay
+inventories, removes only enumerated task-install caches, rejects missing/extra
+non-cache files, symlinks, binary/alias drift and source-cache mutation, and
+creates only v2 repair/overlay/adoption evidence. It cannot reinstall or
+compile. The installed helper/launch import probe uses `-B` plus
+`PYTHONDONTWRITEBYTECODE=1` and requires the complete overlay inventory to stay
+unchanged; parser, capture/live, GPU and analyzer environment evidence carries
+the same no-bytecode binding.
+
+Adversarial tests include both known stale cache names, an unrelated nested
+cache, `.pyo`/`.pyd`, cache allowlist rejection, missing/extra files,
+binary/alias drift, source-cache drift and second invocation. The cross-layer
+test keeps all 16 processes, ten topics, GNSS/ARAIM + IMU + LiDAR, `max_pl`,
+worker 4, sigma 0.01 and legacy baseline exact. Focused contract/runner tests
+pass 56/56; launch passes 21/21; full hermetic discovery passes 577/577 with
+the 17,770-entry external ROS inventory unchanged. Harness scratch remains in
+the historical ICRA-063 namespace and is explicitly non-authoritative; new
+ICRA-070 v2 compact command/result evidence will be authoritative. No repair,
+reinstall, compile, installed parser, GPU, live identity or analyzer ran.

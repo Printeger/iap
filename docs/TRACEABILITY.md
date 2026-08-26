@@ -1400,6 +1400,15 @@ They do not convert historical `NO-GO-P2`, failed P0 Gate-0B evidence, the stati
 | IAP-RQ-421 / IAP-RQ-422 | Preserve P5 route, fixture and event semantics under corrected sensor binding | unchanged P5 thresholds/fixture values; all cases share only the corrected sensor scenario; existing and extended event-order tests | **IMPLEMENTED; 21/21 LAUNCH PASS** |
 | IAP-RQ-423 | Reuse immutable product bytes through a repository-local no-compile overlay | fixed-hash sanitized driver and closed environment passed with 7,364 retained ICRA-068 entries byte-identical; first overlay inventory difference was installed `share/iap/launch/__pycache__/icra_p0_p5_qualification.cpython-312.pyc` (base `49920bc7...cf8d`, overlay `ed066370...e189`) | **BLOCKED_ICRA070_UNAUTHORIZED_OVERLAY_PYC_DIFFERENCE; NO PARSER/GPU/LIVE/ANALYZER** |
 
+## 2026-08-26 ICRA-070 cache-boundary repair continuation
+
+| Requirement | Verification target | Implementation / test | Status |
+|---|---|---|---|
+| IAP-RQ-000 / IAP-RQ-423 | Generated Python caches never cross the product or repair install boundary | `CMakeLists.txt` excludes `__pycache__` and `*.py[cod]`; runner cache classifier rejects allowlisting; adversarial nested/extension tests | **IMPLEMENTED; STATIC PASS** |
+| IAP-RQ-423 | One repair preserves old evidence/ICRA-068/source bytes and changes only enumerated overlay caches | exclusive `--repair-overlay-cache`, frozen old hashes and 474/7,364 inventories, cache-only unlink/rmdir, full pre/post file-set validator; missing/extra/symlink/binary/alias/source/re-entry tests | **IMPLEMENTED; REPAIR NOT YET INVOKED** |
+| IAP-RQ-020 / IAP-RQ-030 / IAP-RQ-040 / IAP-RQ-220 / IAP-RQ-320 | Installed proof and later runtime cannot recreate bytecode while retaining full GNSS+IMU+LiDAR target | `-B` import probe, `PYTHONDONTWRITEBYTECODE=1` parser/GPU/live/analyzer bindings, cross-layer 16-process/10-topic/full-source test | **IMPLEMENTED; 56/56 FOCUSED + 21/21 LAUNCH PASS** |
+| IAP-RQ-421 / IAP-RQ-422 | Cache repair cannot alter P5 behavior or fixtures | unchanged canonical contract/launch values and existing event/fixture regressions; full hermetic discovery 577/577 | **STATIC PASS; LIVE STILL FORBIDDEN UNTIL REPAIR PASS** |
+
 ## 2026-08-26 ICRA-070 Supervisor review and pre-campaign guard freeze
 
 | Req ID | Reviewed/authorized seam | Evidence or controlling document | Status |

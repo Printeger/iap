@@ -29,6 +29,223 @@ class IcraP0P5LiveRunnerTest(unittest.TestCase):
         self.contract_path = REPO / "config/icra27/icra_p0_p5_qualification_v1.json"
         self.contract = RUNNER.QUALIFICATION.load_contract(self.contract_path)
 
+    def test_product_install_boundary_excludes_all_python_caches(self):
+        cmake = (REPO / "CMakeLists.txt").read_text()
+        for directory in ("launch", "config"):
+            self.assertRegex(
+                cmake,
+                rf"install\(DIRECTORY {directory} DESTINATION share/iap\s+"
+                r"PATTERN \"__pycache__\" EXCLUDE\s+"
+                r"PATTERN \"\*\.pyc\" EXCLUDE\s+"
+                r"PATTERN \"\*\.pyo\" EXCLUDE\s+"
+                r"PATTERN \"\*\.pyd\" EXCLUDE\s*\)",
+            )
+
+    def test_cache_repair_removes_every_cache_and_preserves_non_cache_files(self):
+        with tempfile.TemporaryDirectory(dir=REPO / "results/icra27") as tmp:
+            root = Path(tmp)
+            base, overlay, source = root / "base", root / "overlay", root / "source"
+            aliases = {
+                "share/iap/launch/test_planner.launch.py": (
+                    "launch/test_planner.launch.py"
+                ),
+                "share/iap/launch/icra_p0_p5_qualification.py": (
+                    "launch/icra_p0_p5_qualification.py"
+                ),
+            }
+            for relative, source_relative in aliases.items():
+                (base / relative).parent.mkdir(parents=True, exist_ok=True)
+                (overlay / relative).parent.mkdir(parents=True, exist_ok=True)
+                (source / source_relative).parent.mkdir(parents=True, exist_ok=True)
+                (base / relative).write_text("frozen\n")
+                (overlay / relative).write_text("current\n")
+                (source / source_relative).write_text("current\n")
+            for parent in (base, overlay):
+                (parent / "lib").mkdir(parents=True)
+                (parent / "lib/libiap.so").write_bytes(b"binary")
+            cache_rows = {
+                "share/iap/launch/__pycache__/icra_p0_p5_qualification.cpython-312.pyc": b"a",
+                "share/iap/launch/__pycache__/test_planner.launch.cpython-312.pyc": b"b",
+                "share/iap/config/nested/__pycache__/unrelated.cpython-312.pyc": b"c",
+                "share/iap/config/legacy.pyo": b"d",
+                "share/iap/config/native.pyd": b"e",
+            }
+            for relative, data in cache_rows.items():
+                path = overlay / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(data)
+            before = RUNNER.tree_byte_inventory(overlay)
+            proof = RUNNER.repair_overlay_cache_boundary(
+                overlay, base, source, aliases, before
+            )
+            self.assertEqual(
+                set(proof["removed_cache_files"]), set(cache_rows)
+            )
+            self.assertFalse(any(
+                RUNNER.is_python_cache_path(path.relative_to(overlay))
+                for path in overlay.rglob("*")
+            ))
+            self.assertEqual((overlay / "lib/libiap.so").read_bytes(), b"binary")
+            self.assertTrue(proof["binary_library_bytes_equal"])
+            self.assertTrue(proof["non_cache_file_set_complete"])
+
+    def test_cache_repair_rejects_missing_or_extra_non_cache_file(self):
+        for mutation, error in (
+            ("missing", "failed_overlay_pre_repair_inventory_mismatch"),
+            ("extra", "failed_overlay_pre_repair_inventory_mismatch"),
+        ):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory(
+                dir=REPO / "results/icra27"
+            ) as tmp:
+                root = Path(tmp)
+                base, overlay, source = (
+                    root / "base", root / "overlay", root / "source"
+                )
+                for parent in (base, overlay):
+                    (parent / "lib").mkdir(parents=True)
+                    (parent / "lib/libiap.so").write_bytes(b"binary")
+                cache = overlay / "share/iap/launch/__pycache__/stale.pyc"
+                cache.parent.mkdir(parents=True)
+                cache.write_bytes(b"cache")
+                expected = RUNNER.tree_byte_inventory(overlay)
+                if mutation == "missing":
+                    (overlay / "lib/libiap.so").unlink()
+                else:
+                    (overlay / "extra.txt").write_text("extra")
+                with self.assertRaisesRegex(RUNNER.LiveRunnerError, error):
+                    RUNNER.repair_overlay_cache_boundary(
+                        overlay, base, source, {}, expected
+                    )
+
+    def test_cache_repair_rejects_binary_and_alias_drift(self):
+        for mutation, error in (
+            ("binary", "unauthorized_overlay_difference"),
+            ("alias", "overlay_alias_source_mismatch"),
+        ):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory(
+                dir=REPO / "results/icra27"
+            ) as tmp:
+                root = Path(tmp)
+                base, overlay, source = (
+                    root / "base", root / "overlay", root / "source"
+                )
+                relative = "share/iap/launch/test_planner.launch.py"
+                source_relative = "launch/test_planner.launch.py"
+                for parent in (base, overlay):
+                    (parent / "lib").mkdir(parents=True)
+                    (parent / relative).parent.mkdir(parents=True)
+                    (parent / "lib/libiap.so").write_bytes(b"binary")
+                (source / source_relative).parent.mkdir(parents=True)
+                (base / relative).write_text("old")
+                (overlay / relative).write_text("current")
+                (source / source_relative).write_text("current")
+                if mutation == "binary":
+                    (overlay / "lib/libiap.so").write_bytes(b"changed")
+                else:
+                    (source / source_relative).write_text("different")
+                cache = overlay / "share/iap/launch/__pycache__/stale.pyc"
+                cache.parent.mkdir(parents=True)
+                cache.write_bytes(b"cache")
+                expected = RUNNER.tree_byte_inventory(overlay)
+                with self.assertRaisesRegex(RUNNER.LiveRunnerError, error):
+                    RUNNER.repair_overlay_cache_boundary(
+                        overlay, base, source,
+                        {relative: source_relative}, expected,
+                    )
+
+    def test_cache_repair_rejects_source_cache_mutation(self):
+        with tempfile.TemporaryDirectory(dir=REPO / "results/icra27") as tmp:
+            root = Path(tmp)
+            base, overlay, source = root / "base", root / "overlay", root / "source"
+            for parent in (base, overlay):
+                (parent / "lib").mkdir(parents=True)
+                (parent / "lib/libiap.so").write_bytes(b"binary")
+            overlay_cache = overlay / "share/iap/launch/__pycache__/stale.pyc"
+            overlay_cache.parent.mkdir(parents=True)
+            overlay_cache.write_bytes(b"overlay")
+            source_cache = source / "launch/__pycache__/source.pyc"
+            source_cache.parent.mkdir(parents=True)
+            source_cache.write_bytes(b"before")
+            expected_overlay = RUNNER.tree_byte_inventory(overlay)
+            expected_source = RUNNER.python_cache_inventory(source)
+            source_cache.write_bytes(b"after!")
+            with self.assertRaisesRegex(
+                RUNNER.LiveRunnerError, "source_cache_inventory_mismatch"
+            ):
+                RUNNER.repair_overlay_cache_boundary(
+                    overlay, base, source, {}, expected_overlay,
+                    expected_source_cache=expected_source,
+                )
+
+    def test_installed_import_probe_cannot_recreate_python_cache(self):
+        with tempfile.TemporaryDirectory(dir=REPO / "results/icra27") as tmp:
+            install = Path(tmp) / "install"
+            helper = install / "share/iap/launch/helper.py"
+            planner = install / "share/iap/launch/planner.py"
+            helper.parent.mkdir(parents=True)
+            helper.write_text("VALUE = 1\n")
+            planner.write_text("VALUE = 2\n")
+            proof = RUNNER.run_no_bytecode_import_probe(
+                install, [helper, planner],
+                {"PATH": "/usr/bin:/bin", "PYTHONDONTWRITEBYTECODE": "1"},
+            )
+            self.assertEqual(proof["exit_code"], 0)
+            self.assertTrue(proof["install_inventory_unchanged"])
+            self.assertEqual(RUNNER.python_cache_inventory(install), {
+                "files": [], "directories": [],
+            })
+
+    def test_original_blocker_is_frozen_and_v2_outputs_are_non_overwriting(self):
+        frozen = RUNNER.verify_original_blocker_evidence()
+        self.assertEqual(frozen["file_sha256"], {
+            "results/icra27/icra070/compact/final_result.json": (
+                "ebb95f8f6dc05bf72d7ed3ee3e65af1a8d7279a27e02a6c8efa691e5e374b26b"
+            ),
+            "results/icra27/icra070/compact/command_ledger.json": (
+                "6bc56ea8d2d4a3e61c8a572a380a35da86e6d1035c2791e3848b917db48e6898"
+            ),
+            "results/icra27/icra070/compact/gnss_dependency_preflight.json": (
+                "b35afeb83fb119efacc5ea40ef93ce24360ba65e2f57ec9a002d2f4824426ece"
+            ),
+            "results/icra27/icra070/compact/overlay_install_command.json": (
+                "f9c48b12c4170122f58eb49c6fced267d5d4b19fd8633495b8ef1962b389e16f"
+            ),
+            "results/icra27/icra070/overlay_install_driver.cmake": (
+                "cac3da758800fa42172b43caef6551f39f45fcc350c2a7270a2191167ef45581"
+            ),
+        })
+        self.assertEqual(
+            RUNNER.OVERLAY_MANIFEST_PATH.name,
+            "icra070_overlay_manifest_v2.json",
+        )
+        self.assertEqual(
+            RUNNER.REPAIR_EVIDENCE_PATH.name, "overlay_cache_repair_v1.json"
+        )
+
+    def test_existing_repair_evidence_rejects_second_invocation(self):
+        with tempfile.TemporaryDirectory(dir=REPO / "results/icra27") as tmp:
+            existing = Path(tmp) / "repair.json"
+            existing.write_text("{}\n")
+            with self.assertRaisesRegex(
+                RUNNER.LiveRunnerError, "repair_evidence_already_exists"
+            ):
+                RUNNER.require_repair_outputs_absent([existing])
+
+    def test_python_cache_can_never_be_an_authorized_alias(self):
+        with tempfile.TemporaryDirectory(dir=REPO / "results/icra27") as tmp:
+            root = Path(tmp)
+            overlay, base, source = root / "overlay", root / "base", root / "source"
+            for parent in (overlay, base, source):
+                parent.mkdir()
+            with self.assertRaisesRegex(
+                RUNNER.LiveRunnerError, "python_cache_cannot_be_authorized"
+            ):
+                RUNNER.inventory_overlay_v2(
+                    overlay, base, source,
+                    {"share/iap/launch/__pycache__/bad.pyc": "launch/bad.pyc"},
+                    {},
+                )
+
     def test_fixed_identities_and_full_process_contract(self):
         self.assertEqual(
             RUNNER.LIVE_IDENTITIES,
@@ -44,6 +261,29 @@ class IcraP0P5LiveRunnerTest(unittest.TestCase):
         self.assertIn("test_planner_corridor_map_publisher", required)
         self.assertIn("test_planner_so3_control_container", required)
         self.assertIn("test_planner_bag_recorder", required)
+
+    def test_cross_layer_route_remains_exact_full_sensor_target(self):
+        self.assertEqual(len(self.contract["required_processes"]), 16)
+        self.assertEqual(len(self.contract["required_topics"]), 10)
+        self.assertIn(
+            "test_planner_gnss_sim_node", self.contract["required_processes"]
+        )
+        self.assertIn("/sim/drone_0/imu", self.contract["required_topics"])
+        self.assertIn("/sim/drone_0/lidar", self.contract["required_topics"])
+        self.assertIn("/ublox_driver/range_meas", self.contract["required_topics"])
+        for case_id, _ in RUNNER.LIVE_IDENTITIES:
+            values = RUNNER.QUALIFICATION.resolve_launch_values(
+                self.contract, case_id, {}
+            )
+            self.assertTrue(values["use_gnss"])
+            self.assertTrue(values["use_araim"])
+            self.assertEqual(values["integrity_fusion_mode"], "max_pl")
+            self.assertEqual(values["p0.predictor.worker_count"], 4)
+            self.assertEqual(values["p0.predictor.sigma_grow_m_sqrt_s"], 0.01)
+            self.assertEqual(
+                values["p0.predictor.sigma_growth_profile"],
+                "legacy_iap_rq320_baseline_v1",
+            )
 
     def test_live_config_is_repository_local_and_frozen(self):
         with tempfile.TemporaryDirectory(dir=REPO / "results/icra27") as tmp:
@@ -150,7 +390,7 @@ class IcraP0P5LiveRunnerTest(unittest.TestCase):
             "test/test_run_icra_p0_p5_qualification.py",
         ]
         overlay = {
-            "schema_version": "icra070_isolated_overlay_manifest_v1",
+            "schema_version": "icra070_isolated_overlay_manifest_v2",
             "runner": {"git_commit": current_commit},
             "overlay_inventory": {"authorized_differences": []},
             "binary_library_bytes_equal": True,
@@ -328,6 +568,7 @@ file(WRITE "/base/build/${CMAKE_INSTALL_MANIFEST}" "x")
 
     def test_live_environment_prefers_overlay_then_immutable_base(self):
         environment = RUNNER.expected_live_environment()
+        self.assertEqual(environment["PYTHONDONTWRITEBYTECODE"], "1")
         self.assertEqual(environment["AMENT_PREFIX_PATH"].split(":"), [
             str(RUNNER.OVERLAY_INSTALL_ROOT), str(RUNNER.INSTALL_ROOT),
             "/root/ros2_ws/install", "/opt/ros/jazzy",
@@ -355,12 +596,20 @@ file(WRITE "/base/build/${CMAKE_INSTALL_MANIFEST}" "x")
                 "dependency_preflight_sha256": "d" * 64,
             },
             retained_artifacts={"byte_inventory_equal": True},
+            repair_binding={
+                "path": "results/icra27/icra070/compact/overlay_cache_repair_v1.json",
+                "sha256": "e" * 64,
+            },
+            import_probe={"install_inventory_unchanged": True},
         )
         self.assertEqual(
             payload["product_build"]["git_commit"], RUNNER.PRODUCT_COMMIT
         )
         self.assertEqual(
             payload["corrected_full_sensor_contract"]["git_commit"], "b" * 40
+        )
+        self.assertEqual(
+            payload["schema_version"], "icra070_isolated_overlay_manifest_v2"
         )
         self.assertEqual(payload["runner"]["git_commit"], "b" * 40)
         self.assertTrue(payload["binary_library_bytes_equal"])
@@ -369,6 +618,18 @@ file(WRITE "/base/build/${CMAKE_INSTALL_MANIFEST}" "x")
             "c" * 64,
         )
         self.assertTrue(payload["retained_artifacts"]["byte_inventory_equal"])
+        self.assertEqual(payload["cache_boundary"], {
+            "all_python_cache_excluded": True,
+            "python_cache_allowlist": [],
+            "pythondontwritebytecode": "1",
+            "repair_binding": {
+                "path": "results/icra27/icra070/compact/overlay_cache_repair_v1.json",
+                "sha256": "e" * 64,
+            },
+            "installed_import_probe": {
+                "install_inventory_unchanged": True
+            },
+        })
         self.assertEqual(payload["runtime_prefix_order"][:2], [
             str(RUNNER.OVERLAY_INSTALL_ROOT), str(RUNNER.INSTALL_ROOT),
         ])
@@ -456,6 +717,9 @@ file(WRITE "/base/build/${CMAKE_INSTALL_MANIFEST}" "x")
                 "stderr_path": str(stderr_path.relative_to(REPO)),
                 "stderr_sha256": RUNNER._sha256(stderr_path),
                 "parse_passed": True,
+                "subprocess_environment": {
+                    "PYTHONDONTWRITEBYTECODE": "1"
+                },
                 "full_sensor_overrides": RUNNER.full_sensor_launch_overrides(
                     self.contract
                 ),
