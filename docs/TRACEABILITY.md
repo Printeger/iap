@@ -1407,3 +1407,9 @@ They do not convert historical `NO-GO-P2`, failed P0 Gate-0B evidence, the stati
 | IAP-RQ-020, IAP-RQ-030, IAP-RQ-040, IAP-RQ-220, IAP-RQ-320, IAP-RQ-421, IAP-RQ-422, IAP-RQ-423 | Cross-layer system target -> effective case -> launch process/topic projection -> monitor -> evidence review | `SUPERVISOR_LOG.md`; independent 567/567 hermetic review evidence; `config/icra27/icra_p0_p5_qualification_v1.json`; `launch/test_planner.launch.py`; qualification helper/runner and focused tests | **STATIC FULL-SENSOR CORRECTION ACCEPTED; QUALIFICATION NOT PASS** |
 | IAP-RQ-000, IAP-RQ-423 | Remove generated cache from install/overlay authority without hiding the first blocker | `NEXT_TASK.md` requires permanent cache exclusion, exact ICRA-068 rehash, full file-set comparison, preserved v1 blocker evidence, non-overwriting v2 repair manifest and no-bytecode parser/live environment | **ICRA070 SINGLE REPAIR CONTINUATION TASK_READY** |
 | IAP-RQ-000, IAP-RQ-020, IAP-RQ-030, IAP-RQ-040, IAP-RQ-220, IAP-RQ-320, IAP-RQ-421, IAP-RQ-422, IAP-RQ-423 | Prevent future route/config/process/evidence drift before campaign | `docs/icra27/ICRA_CROSS_LAYER_GUARD_PLAN.md` freezes canonical v2 target, typed resolver, mutation verifier, sustained raw-evidence audit, relative hooks, commit guard and CI | **ICRA071 FROZEN NEXT GATE; CAMPAIGN BLOCKED** |
+
+## 2026-08-26 Supervisor window-rotation protocol
+
+| Req ID | Control-plane requirement | Implementation / evidence | Status |
+|---|---|---|---|
+| IAP-RQ-000 | Close every Supervisor Review through pushed state and an explicit window decision | `AGENTS.md` section 8.6 defines the mandatory seven-step closure, rotation criteria, final-response wording and repository-only bootstrap; `AGENT_STATE.md` records disposition/reason/anchor/next role/task; latest `SUPERVISOR_LOG.md` records the current decision | **ROTATE_RECOMMENDED; BUILDER ACTIVE TASK UNCHANGED** |

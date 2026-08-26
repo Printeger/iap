@@ -3,6 +3,13 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- docs(icra-supervisor-window-rotation): IAP-RQ-000 — make window lifecycle a mandatory Supervisor capability.
+  Every Review must update and push state/task/log, audit whether to keep or rotate the Supervisor window,
+  persist `window_disposition` and `rotation_reason`, state the decision in the final reply, and generate a
+  repository-anchored copy/paste bootstrap prompt when rotation is recommended. Rotation never changes
+  `active_role`, never authorizes a task/campaign and cannot rely on old chat history. This changes only
+  control-plane documentation and explicitly excludes the concurrent ICRA-070 Builder WIP and protected PDF.
+
 - docs(icra-070-supervisor-review-and-guard-freeze): IAP-RQ-000 / IAP-RQ-020 / IAP-RQ-030 / IAP-RQ-040 /
   IAP-RQ-220 / IAP-RQ-320 / IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 — review
   `3c8fffe...d88d42b` on Standards, Spec and the cross-layer target-to-evidence chain. Accept the full-sensor

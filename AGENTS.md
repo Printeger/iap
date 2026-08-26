@@ -116,3 +116,37 @@ Implementation must follow docs/spec/conventions.md and docs/spec/talk_spec.md a
 - 发现权限、范围、真实输入或 required-process blocker 时，保留证据并报告 `BLOCKED`，不得调参、扩场景或修改算法来绕过 gate。
 - 任何启动 IAP 主流程的 ICRA smoke、qualification 或实验，必须在启动 ROS/launch 前执行 GPU preflight。PASS 至少要求 `nvidia-smi` 成功发现 GPU，且 CUDA Driver API `cuInit(0)` 成功并返回 `device_count >= 1`；仅存在 `/dev/nvidia*` 或能加载 `libcuda.so.1` 不算 PASS。
 - GPU preflight 失败时必须输出 `GPU_NOT_READY`，记录命令、stdout/stderr 与 exit code，立即报告 `BLOCKED` 并终止本次任务；不得启动 ROS、不得把 CPU mapping backend 当作整个 IAP 主流程无需 GPU 的证明，也不得在同一任务中循环等待或重试。
+
+### 8.6 Supervisor Review 闭环与窗口轮换（强制）
+
+每次 `SUPERVISOR` Review 必须完成以下闭环，Review 不能在中途状态结束：
+
+1. 完成 Standards、Spec、Gate 和适用的跨层目标检查，形成明确 verdict。
+2. 更新 `AGENT_STATE.md`、`NEXT_TASK.md`、`SUPERVISOR_LOG.md`；代码/接口/配置相关裁决还必须同步
+   `docs/CHANGES.md` 与 `docs/TRACEABILITY.md`。
+3. 显式 stage Supervisor-owned 文件，复核 staged diff，提交并普通 push；确认 HEAD 与
+   `origin/dev/icra` divergence 为 `0 0`。不得暂存 Builder WIP、raw/bag/log/build/install 或未跟踪 PDF。
+4. 只在上述 pushed HEAD 成为权威 handoff 后执行一次窗口轮换审计。结果只能是
+   `KEEP_WINDOW` 或 `ROTATE_RECOMMENDED`。
+5. 把 `window_disposition`、`rotation_reason`、handoff anchor、下一 Review task/role 写入
+   `AGENT_STATE.md`，并在 `SUPERVISOR_LOG.md` 当前 Review 下追加 `Supervisor window disposition`。
+   若第 3 步的 Review changeset 尚未包含最终轮换结果，必须再做一个最小 Supervisor-only
+   rotation-record commit 并 push，重新确认 divergence `0 0`。
+6. 最终回复必须逐字明确包含“继续当前 Supervisor 窗口”或“建议新开 Supervisor 窗口”。不得省略
+   窗口处置，也不得只把它留在仓库文件中。
+7. 当结果为 `ROTATE_RECOMMENDED` 时，最终回复必须同时生成一段可直接复制的新窗口启动指令。
+   新窗口只能从最新 pushed HEAD、`AGENTS.md`、`AGENT_STATE.md`、`NEXT_TASK.md`、
+   `SUPERVISOR_LOG.md` 和当前 scope/plan/gate 文档恢复；不得依赖旧聊天记录或旧窗口总结。
+
+窗口轮换判定：
+
+- 以下任一条件成立时必须为 `ROTATE_RECOMMENDED`：重要 Gate PASS 并将切换 Gate；scope/route/系统
+  目标改变；canonical contract/schema 或 claim boundary 改变；即将签发 campaign/正式实验/结果冻结；
+  当前上下文已经 compact 且 Review 依赖不再完整可见的历史；同一窗口经历多轮 Review/repair 循环，
+  继续使用会提高把历史 blocker 当成当前目标的风险。
+- 只有仍在同一 Gate 的局部 repair、无 scope/contract/claim/authority 变化、当前上下文和权威文件均
+  完整清晰时，才可选择 `KEEP_WINDOW`。
+- 窗口轮换不改变 `active_role`，也不授权下一任务或 campaign。若 `active_role=DEEPSEEK`，新的
+  Supervisor 窗口只能为下一次 Review 做只读接手，不得执行 Builder task。
+- Codex 不能自动打开或关闭 UI 窗口；Supervisor 的责任是自动判断、持久化、提醒并生成 handoff
+  prompt。用户未实际换窗时，现窗口不得假装新窗口已经接手。

@@ -24,7 +24,13 @@ handoff_status: TASK_READY
 next_task: NEXT_TASK.md
 next_after_icra070_pass: ICRA-071_STATIC_CROSS_LAYER_GUARD_HARDENING
 guard_plan: docs/icra27/ICRA_CROSS_LAYER_GUARD_PLAN.md
-updated_utc: 2026-08-26T05:27:08Z
+window_disposition: ROTATE_RECOMMENDED
+rotation_reason: REVIEW_BOUNDARY_FROZEN_AND_CONTEXT_COMPACTED_MULTIPLE_TIMES
+window_handoff_anchor: origin/dev/icra
+window_next_role: SUPERVISOR
+window_next_review_task: ICRA-070
+window_bootstrap_source: REPOSITORY_AUTHORITY_ONLY
+updated_utc: 2026-08-26T05:42:46Z
 ```
 
 ICRA-070 correctly restores the GNSS pseudorange+doppler + IMU + LiDAR target in all three qualification
@@ -41,3 +47,7 @@ freezes a new non-overwriting overlay manifest.
 Campaign remains forbidden. After repaired ICRA-070 reaches `P5_PROSPECTIVE_QUALIFICATION_PASS` and passes
 Supervisor review, the next task is the pure-static ICRA-071 cross-layer guard hardening defined by
 `docs/icra27/ICRA_CROSS_LAYER_GUARD_PLAN.md`. Campaign may start only after ICRA-071 itself passes review.
+
+The current Supervisor window disposition is `ROTATE_RECOMMENDED`: this Review boundary is pushed and the
+conversation has crossed multiple context compactions. The replacement Supervisor window is for the next
+ICRA-070 Review only; while `active_role=DEEPSEEK`, it must not execute or modify the active Builder task.

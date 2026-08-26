@@ -60,6 +60,19 @@
   frozen in `docs/icra27/ICRA_CROSS_LAYER_GUARD_PLAN.md`; only its Supervisor PASS can authorize a separate
   campaign task.
 
+### Supervisor window disposition
+
+- Disposition: `ROTATE_RECOMMENDED`.
+- Reason: `REVIEW_BOUNDARY_FROZEN_AND_CONTEXT_COMPACTED_MULTIPLE_TIMES`. This window has carried repeated
+  Review/repair history and multiple context compactions; continuing it would increase the risk of confusing a
+  historical observed mode with the current system target.
+- Handoff anchor: latest pushed `origin/dev/icra` after the Supervisor window-policy changeset. The exact commit
+  is reported after push; repository state, not this conversation, is authoritative.
+- Next window: role `SUPERVISOR`, next review task `ICRA-070`. It must read `AGENTS.md`, `AGENT_STATE.md`,
+  `NEXT_TASK.md`, the latest `SUPERVISOR_LOG.md`, active ICRA scope/plan/review/system-flow and cross-layer guard
+  plan. While state remains `active_role=DEEPSEEK`, it performs no Builder work and waits for the implementation
+  handoff.
+
 ## 2026-08-26 — ICRA-070 command corrected to the full GNSS + IMU + LiDAR system target
 
 ### Correction
