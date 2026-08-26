@@ -150,3 +150,26 @@ Implementation must follow docs/spec/conventions.md and docs/spec/talk_spec.md a
   Supervisor 窗口只能为下一次 Review 做只读接手，不得执行 Builder task。
 - Codex 不能自动打开或关闭 UI 窗口；Supervisor 的责任是自动判断、持久化、提醒并生成 handoff
   prompt。用户未实际换窗时，现窗口不得假装新窗口已经接手。
+
+### 8.7 研究路线所有权与 NO-GO 状态机（强制）
+
+- ICRA 研究路线所有者固定为 `USER`。当前机器可读 route lock 位于
+  `docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md` 的
+  `ICRA_USER_ROUTE_LOCK_V1` sentinel 区间。
+- 只有用户能够批准修改 research question、required modules、primary claim、formal arms、gate
+  sequence、active route、fallback activation 或 campaign activation。`SUPERVISOR` 可以裁决证据、
+  关闭 gate 和提出备选路线，但提案不是批准；`DEEPSEEK` 不得修改 route lock 或用户决定记录。
+- 每个用户路线决定必须绑定一个 distinct `user_decision_id`、精确 pushed approval anchor、旧/新值及
+  用户选择。Supervisor/Builder 的 commit、verdict、状态更新或实验结果均不能自行充当用户批准。
+- 任一科学 gate 得到 `SCIENTIFIC_NO_GO` 时，唯一允许的立即状态为：
+  `active_role=SUPERVISOR`、`status=BLOCKED_AWAITING_USER_RESEARCH_DECISION`、`next_task=NONE`。
+  不得自动激活 contingency，不得为替代路线创建 `TASK_READY`，不得让 runner/analyzer/config 根据失败
+  结果降级 required module、claim、arm 或 evidence contract。
+- 用户明确决定后，Supervisor 才能在同一个路线恢复 changeset 中更新 route lock、scope/plan/state、
+  requirement/traceability 和下一任务。若用户没有批准 fallback，旧路线保持 blocked，而不是被删除。
+- ICRA-071 必须提供 repository-local verifier 和相同语义的 pre-commit、pre-push、commit-msg guards，
+  检查 route/state/plan 一致性、代码文档同步和 requirement IDs。guard 未通过 Review 前不得开始 P4-v2
+  产品开发。
+- repository-local hook 是防误操作机制，不是安全边界：具有仓库写权限的进程可修改 hook 或使用
+  `--no-verify`。只有 protected remote branch 加独立用户审批身份才能提供不可由同权限 Agent 绕过的
+  强制；在未部署该外部门前，任何文档不得把本地 guard 宣称为 cryptographic/security enforcement。

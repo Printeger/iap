@@ -3,6 +3,18 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- docs(icra-user-route-recovery): IAP-RQ-000 / IAP-RQ-423 / IAP-RQ-424 — bind the complete route-deviation
+  audit to original approval `73cbdddd`, source baseline `bd3858a7`, first divergence `564dd6a` and current
+  pushed anchor `48caa9d`; restore `P0_P4_V2_P5` under user decision
+  `USER-ICRA-ROUTE-20260826-001`. Preserve P4-v1 G0C as immutable `SCIENTIFIC_NO_GO`, quantify the separate
+  57% gate-goal, 33% active-stage, 100% novelty-claim and 100% formal-evidence deviations, and freeze P4-v2 as
+  provider-only interior bottleneck science with independent 30–60 seed-run confirmation per scene. Add
+  `AGENTS.md` §8.7 so scientific NO-GO blocks for a user decision instead of automatically activating a
+  fallback. Supersede ICRA-070 unqualified while retaining its P0+P5 work as the matched control and preserving
+  all build/install/raw/PDF artifacts. Reissue ICRA-071 as a pure repository-local route/state/doc/RQ guard;
+  no product/runtime code, ROS/GPU/live evidence, build/install or campaign is changed by this Supervisor
+  changeset. Local hooks are explicitly procedural and not a same-permission security boundary.
+
 - docs(icra-070-supervisor-repair-review): IAP-RQ-000 / IAP-RQ-020 / IAP-RQ-030 / IAP-RQ-040 /
   IAP-RQ-220 / IAP-RQ-320 / IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 — review the fixed Builder range
   `1b3c661...24d3e16`. Accept the permanent Python-cache exclusion and fail-closed static repair

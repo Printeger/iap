@@ -1,58 +1,69 @@
 # ICRA Agent State
 
 ```yaml
-schema_version: icra_single_branch_two_agent_v2
+schema_version: icra_single_branch_two_agent_v3_user_route_owner
 branch: dev/icra
-active_role: DEEPSEEK
-status: TASK_READY
-gate: P0_P5_FUSED_SENSOR_CONTRACT_AND_REPLACEMENT_QUALIFICATION
-task_id: ICRA-070
+active_role: SUPERVISOR
+status: ROUTE_RECOVERY_CHANGESET_READY_TO_PUSH
+gate: USER_RESEARCH_ROUTE_AUTHORITY_GUARD
+task_id: NONE
 review_base: 1b3c6617732787b10c778a64fe43d37f29d84ffe
-reviewed_head: 24d3e1623d966d9a3fcdd71d99f3cf30d390cc10
-conference_route: P0_P5_CONTINGENCY
-route_status: FULL_SENSOR_STATIC_BINDING_PASS_COMPLETE_REPLACEMENT_OVERLAY_READY
+reviewed_head: 48caa9ddf24990accb65e2ad230d12821487793c
+conference_route: P0_P4_V2_P5
+route_owner: USER
+route_lock: docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md
+user_decision_id: USER-ICRA-ROUTE-20260826-001
+user_approval_anchor: 48caa9ddf24990accb65e2ad230d12821487793c
+route_status: USER_RESTORED_P4_V2_GOVERNANCE_GUARD_PENDING_POST_PUSH_HANDOFF
 historical_gate0a_verdict: NO_GO_P2
 p0_gate0b_status: PASS
 p0_gate0b_worker_count: 4
-p4_status: G0A_PASS_G0B_PASS_G0C_SCIENTIFIC_NO_GO_CLOSED
-p5_status: QUALIFICATION_BLOCKED_BEFORE_REPAIR_PARSER_GPU_LIVE_BY_GIT_SAFE_DIRECTORY_AND_INCOMPLETE_OVERLAY
-supervisor_verdict: ICRA070_STATIC_REPAIR_IMPLEMENTATION_PASS_GATE_BLOCKED_ONE_SHOT_ENVIRONMENT_AND_INCOMPLETE_OVERLAY
-review_disposition: ICRA070_NONOVERWRITING_COMPLETE_REPLACEMENT_OVERLAY_CONTINUATION_READY_ICRA071_DEFERRED
+p4_v1_status: G0A_PASS_G0B_PASS_G0C_SCIENTIFIC_NO_GO_IMMUTABLE
+p4_v2_status: NOT_STARTED_BLOCKED_UNTIL_ICRA071_REVIEW_PASS
+p5_status: IMPLEMENTED_BUT_NO_CURRENT_PROSPECTIVE_QUALIFICATION_PASS
+icra070_status: SUPERSEDED_UNQUALIFIED_BY_USER_ROUTE_DECISION
+supervisor_verdict: P0_P4_V2_P5_USER_ROUTE_RESTORED_ICRA070_SUPERSEDED_UNQUALIFIED
+review_disposition: ICRA071_USER_ROUTE_REPOSITORY_GUARD_AUTHORIZED_PENDING_POST_PUSH_ROTATION_RECORD
 qualification_claim: false
-campaign_status: BLOCKED_UNTIL_ICRA070_PASS_AND_ICRA071_STATIC_GUARD_PASS
-handoff_status: TASK_READY
-next_task: NEXT_TASK.md
-next_after_icra070_pass: ICRA-071_STATIC_CROSS_LAYER_GUARD_HARDENING
+campaign_status: BLOCKED_UNTIL_ICRA079_REVIEW_PASS_AND_DISTINCT_USER_APPROVAL
+handoff_status: SUPERVISOR_RECOVERY_CHANGESET_PENDING_PUSH
+next_task: NONE
+prepared_next_task: NEXT_TASK.md
+next_after_icra071_pass: ICRA-072_P4_V2_RISK_DECOMPOSITION_AND_SNAPSHOT_REPLAY
+recovery_roadmap: docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md
 guard_plan: docs/icra27/ICRA_CROSS_LAYER_GUARD_PLAN.md
-window_disposition: KEEP_WINDOW
-rotation_reason: SAME_GATE_LOCAL_REPLACEMENT_OVERLAY_REPAIR_NO_SCOPE_CONTRACT_CLAIM_OR_AUTHORITY_CHANGE_CONTEXT_COMPLETE
-window_handoff_anchor: origin/dev/icra
+artifact_retention: ICRA068_ICRA070_BUILD_INSTALL_RAW_EVIDENCE_AND_PDF_RETAINED_NO_CLEANUP
+window_disposition: ROTATE_RECOMMENDED
+rotation_reason: ROUTE_CLAIM_AUTHORITY_AND_GATE_CHANGED_CONTEXT_COMPACTED
+window_handoff_anchor: PENDING_POST_PUSH_ROUTE_RECOVERY_CHANGESET
 window_next_role: SUPERVISOR
-window_next_review_task: ICRA-070
+window_next_review_task: ICRA-071
 window_bootstrap_source: REPOSITORY_AUTHORITY_ONLY
-updated_utc: 2026-08-26T06:58:25Z
+updated_utc: 2026-08-26T08:41:18Z
 ```
 
-Supervisor review of `1b3c661...24d3e16` accepts the permanent cache exclusion, full-file-set verifier,
-durable pre-mutation journal design and fail-closed static implementation. Independent focused tests pass
-`15/15`, `43/43` and `21/21`; complete hermetic discovery exits zero with all 17,770 external ROS-log entries
-unchanged. ICRA-068 and the failed ICRA-070 overlay retain their exact recorded inventories, the protected PDF
-is unchanged and unstaged, and no task-owned live process remains.
+The user explicitly restored P4 as the indispensable treatment. The active route is now
+`P0_P4_V2_P5`; P0+P5 is retained only as the matched control. The canonical research question, required
+modules, primary maximum-risk claim, arms, fallback policy, sample-size policy and approval anchor are frozen
+in the machine-readable route lock. Supervisor and Builder roles cannot change those fields without a new
+distinct user decision.
 
-ICRA-070 is not a gate PASS. Its sole authorized repair entrypoint exited before mutation because the
-task-local `HOME` did not trust the repository as a Git `safe.directory`. The deeper read-only verifier also
-proves the old overlay is not repairable in place: it contains 469 non-cache entries versus 2,079 in the
-ICRA-068 base and is missing 1,610 required files. Repair/parser/GPU/live/analyzer counts are `1/0/0/0/0`, no
-cache was removed, and no v2 repair/overlay/adoption manifest exists. This is an orchestration and overlay
-construction blocker, not a GNSS, GPU, P5, algorithm or scientific failure.
+P4-v1 remains a valid `SCIENTIFIC_NO_GO`. Its 15/15 runs and 192/192 decisions are immutable and are not
+relabelled. The failure does not justify deleting P4: the audit localizes provider/occupied-support metric
+contamination, guide-domain non-identifiability, integral-objective versus max-gate mismatch, shared endpoint
+maxima and pseudo-replication. P4-v2 is prospective and unqualified.
 
-The next bounded ICRA-070 continuation must preserve the exhausted repair evidence and old overlay, use
-command-local Git trust under the isolated environment, create a new complete non-overwriting overlay from
-the retained ICRA-068 non-cache file set, apply only the three authorized aliases, and then complete the still
-unused parser/GPU/three `-003` arms/analyzer sequence. Existing build/install trees remain retained through
-development and Review because the gate did not pass.
+ICRA-070 is superseded unqualified, not passed or reclassified as a scientific failure. Current P0+P5 static
+work is retained as control engineering; replacement/parser/GPU/live/analyzer were not invoked. All ICRA-068/
+070 build/install, raw/scientific evidence and the protected PDF remain retained because no cleanup condition
+was met.
 
-ICRA-071 and campaign remain forbidden. The post-push window audit records `KEEP_WINDOW`: this is a local
-repair in the same Gate with no scope, canonical-contract, claim or authority change, and the current Review
-context is complete. While `active_role=DEEPSEEK`, this Supervisor window performs no Builder work and waits
-for the next ICRA-070 implementation handoff.
+ICRA-071 is the sole prepared Builder task, but it is not active before the recovery changeset is pushed and
+the post-push rotation record performs the handoff. It implements only the repository-local route/state/
+document/requirement guard and tests. It performs no P4 product work, ROS/GPU/live execution, build/install
+creation or campaign action. ICRA-072 can be issued only after ICRA-071 Builder handoff and Supervisor Review
+PASS.
+
+This recovery changes route, claim boundary, authority and gate after context compaction, so the mandatory
+window result is `ROTATE_RECOMMENDED`. The exact pushed handoff anchor is recorded by the post-push rotation
+record; until then this state does not imply that a new UI window has actually opened.

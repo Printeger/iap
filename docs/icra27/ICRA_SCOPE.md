@@ -1,15 +1,48 @@
-# ICRA 2027 Conference Scope — Active P0 + P5 contingency
+# ICRA 2027 Conference Scope — User-owned P0 -> P4-v2 -> P5 recovery
 
-## Contingency activation — 2026-08-25
+## User route restoration — 2026-08-26
+
+The user has explicitly restored P4 as the indispensable conference treatment and frozen the active route as
+`P0_P4_V2_P5`. The complete decision, deviation audit and machine-readable route lock are authoritative in
+`docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md`, bound to pushed approval anchor
+`48caa9ddf24990accb65e2ad230d12821487793c` and decision `USER-ICRA-ROUTE-20260826-001`.
+
+The top-level authority architecture remains:
+
+```text
+P0 immutable provider-risk advisory
+  -> P4-v2 collision-guide preference
+    -> EGO optimization/refinement/feasibility authority
+      -> P5 final -> normal publish -> P5 runtime
+```
+
+P4-v1 G0C remains an immutable, technically valid `SCIENTIFIC_NO_GO`; it is not retried, tuned or relabelled.
+P4-v2 is a prospective method that separates provider-only integrity cost from occupied support, optimizes an
+interior bottleneck objective and uses independent exploratory/preregistered/held-out evidence.
+
+ICRA-070 is `SUPERSEDED_UNQUALIFIED_BY_USER_ROUTE_DECISION`. Its P0+P5 code/evidence remain retained as the
+future matched control; replacement/parser/GPU/live/analyzer are still `0/0/0/0/0`, so it is neither
+qualification PASS nor scientific FAIL. Existing build/install and all raw evidence remain retained.
+
+The only next implementation task is ICRA-071 repository-local user-route guard hardening. It performs no P4
+product change, ROS/GPU/live execution or campaign. P4-v2 implementation starts only after ICRA-071 Review
+PASS. Campaign remains blocked through P4-v2 confirmatory, G0D lineage, prospective P5 integration and a new
+explicit user campaign decision.
+
+The former P0+P5 contingency section below is preserved as historical evidence. Where it conflicts with this
+restoration or the route lock, it has no active-task authority.
+
+## Superseded contingency activation — 2026-08-25
 
 ICRA-066 authoritatively closes P4-G0C as `SCIENTIFIC_NO_GO`: all 15 runs and 192 decisions are technically
 valid, but the registered Type-7 Q10 maximum-risk improvement is `0`, not above the `1e-12` floor. P4-G0D and
 the P0+P4+P5 treatment are therefore closed for the conference route; P4 source and evidence remain retained.
 
-The explicitly preregistered `P0+P5` contingency is now active by Supervisor decision. P0 remains advisory,
-original EGO planning retains motion-feasibility authority, and P5 final/runtime remain the only IAP hard gates.
-P1/P2/P3/P4 stay present but disabled. The immediate work order is an isolated fail-closed `icra_p0_p5`
-profile and prospective P5 system qualification; historical P5 artifacts are not relabelled as qualification.
+Under the then-current governance, the explicitly preregistered `P0+P5` contingency was activated by a
+Supervisor decision. P0 remained advisory, original EGO planning retained motion-feasibility authority, and
+P5 final/runtime remained the only IAP hard gates. P1/P2/P3/P4 stayed present but disabled. That historical
+work order was an isolated fail-closed `icra_p0_p5` profile and prospective P5 system qualification; historical
+P5 artifacts were not relabelled as qualification.
 
 ICRA-067 passed profile and validation-only harness review. ICRA-068 then passed historical-fixture decoupling,
 543/543 tests, isolated install closure and GPU preflight, but its runner emitted 19 malformed empty ROS launch
@@ -26,7 +59,7 @@ system and canonical contract require it. SAFE_NORMAL stops fail-closed at 15/16
 The result is not a Builder, GPU or node-start failure, and the complete `-002` set is retired.
 
 The first ICRA-070 command at `d335665` incorrectly proposed changing the system contract to 15 processes. It is
-withdrawn. ICRA-070 remains the only authorized live gate, but now corrects all three cases to one dedicated
+withdrawn. ICRA-070 was then the only authorized live gate and corrected all three cases to one dedicated
 full-sensor scenario: existing corridor geometry plus existing degraded GNSS, GNSS/ARAIM and LiDAR integrity,
 IMU/LiDAR estimation and `max_pl` fusion. The canonical 16 processes remain mandatory. It adds source/topic
 evidence, installs a no-compile isolated overlay with complete provenance, and executes fresh `-003` cases once.
@@ -43,22 +76,23 @@ fail-closed static repair implementation but again does not pass the gate. The s
 before mutation because task-local Git did not trust the repository as a safe directory. Independently, the
 complete file-set verifier proves the old overlay is structurally incomplete: 469 non-cache entries versus
 2,079 in the ICRA-068 base, with 1,610 missing. The old repair is exhausted and the old overlay is retained.
-One same-Gate ICRA-070 continuation is authorized to create a new complete non-overwriting overlay from the
+One same-Gate ICRA-070 continuation was authorized to create a new complete non-overwriting overlay from the
 retained ICRA-068 non-cache file set, apply only the three current aliases, and then run the unused `-003`
-parser/GPU/live/analyzer sequence. This does not change the system target, claim boundary or campaign barrier.
+parser/GPU/live/analyzer sequence. The user route decision later superseded that unfinished qualification
+without changing or relabelling its evidence.
 
-Even after an ICRA-070 qualification PASS, campaign does not start. The next gate is the pure-static ICRA-071
-cross-layer guard hardening in `docs/icra27/ICRA_CROSS_LAYER_GUARD_PLAN.md`. It centralizes the target contract,
-checks target -> effective config -> launch/process/topic projection -> monitor/analyzer evidence, hardens
-hook/CI enforcement and re-audits sustained use in retained raw evidence. Campaign requires separate Supervisor
-authorization after ICRA-071 PASS.
+The superseded plan would not have started a campaign even after an ICRA-070 qualification PASS: it first
+required a pure-static cross-layer guard. The active ICRA-071 now implements the stronger user-route guard in
+`docs/icra27/ICRA_CROSS_LAYER_GUARD_PLAN.md`; its PASS authorizes only a separately issued ICRA-072 task, not a
+campaign.
 
-The conditional P0 → P4 → P5 scope below is retained as the audited failed route. Where it conflicts with this
-activation, this section and root `AGENT_STATE.md`/`NEXT_TASK.md` are authoritative.
+The conditional P0 -> P4 -> P5 scope below is retained as the audited P4-v1 design record. Its authority
+boundaries remain applicable, but its v1 objective, G0C estimand and Supervisor-owned fallback rule are
+superseded by the user-owned P4-v2 route lock and recovery roadmap above.
 
 > Scope pivot authorized 2026-08-20. Source audit is bound to `dev/icra` commit `bd3858a72ba06b7eb1551006876c55362c979bab`.
 
-> Current state: **P0 `BLOCKED/UNQUALIFIED` → P4 `NOT_QUALIFIED` → P5 `IMPLEMENTED-BUT-UNQUALIFIED`**.
+> State at the 2026-08-20 route approval: **P0 `BLOCKED/UNQUALIFIED` → P4 `NOT_QUALIFIED` → P5 `IMPLEMENTED-BUT-UNQUALIFIED`**.
 
 > Historical Gate 0A remains `NO_GO_P2`. The scope pivot does not convert that result into a P4 result and does not qualify any stage of the new route.
 
@@ -153,7 +187,8 @@ The ICRA treatment profile must disable both their high-level switches and lower
 
 The P0-only ICRA-004 prerequisite is not a P4 experiment arm and retains its frozen smoke configuration unchanged.
 
-P2 remains historically frozen by `NO_GO_P2`. Re-enabling it requires a separate Supervisor decision and is not a fallback inside this route.
+P2 remains historically frozen by `NO_GO_P2`. Re-enabling it requires a separate user research-route decision
+and is not a fallback inside this route.
 
 ## Excluded scope
 
@@ -172,9 +207,9 @@ P2 remains historically frozen by `NO_GO_P2`. Re-enabling it requires a separate
 4. **P4-G0B:** metrics-only same-event original/risk guides, immutable identity, final-path resampling and truthful fallback evidence.
 5. **P4-G0C:** metrics-only calibration, frozen thresholds, zero search timeout and complete 200/200 path coverage.
 6. **P4-G0D:** enable application only after threshold freeze; prove selected-guide lineage through B-spline and P5 final/runtime behavior.
-7. **Campaign:** the historical P4 route is closed; the active P0+P5 contingency additionally requires reviewed
-   ICRA-070 qualification PASS and reviewed ICRA-071 static-guard PASS before a fresh GPU and `≥40 GiB` storage
-   preflight can authorize a separate campaign task.
+7. **Campaign (P4-v1 historical stop):** v1 stopped at G0C. The active P4-v2 route instead follows
+   ICRA-071..079 in the recovery roadmap and requires a distinct user decision before ICRA-080, plus fresh GPU
+   and `>=40 GiB` storage preflight.
 
 ICRA-004 remains the P0-only prerequisite. Its smoke keeps P1/P2/P3/P4/P5 disabled and cannot authorize P4 work or the fixed 60-second Gate-0B run.
 
@@ -184,7 +219,9 @@ The primary comparison is `P0+P5` versus `P0+P4+P5` over primary, exact-mirror a
 
 EGO baseline, P4 metrics-only, and P0+P4 with P5 off are qualification or mechanism diagnostics. They do not replace the primary comparison.
 
-If a P4 gate fails, P4 is `BLOCKED`. `P0+P5` remains an explicit contingency and becomes the main route only after a new Supervisor decision.
+The historical rule allowed P0+P5 to become the main route after a Supervisor decision. It is superseded.
+Under the active route lock, a P4 scientific NO-GO becomes `BLOCKED_AWAITING_USER_RESEARCH_DECISION`; only the
+user can activate a fallback.
 
 ## Historical evidence interpretation
 

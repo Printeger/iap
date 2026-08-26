@@ -1,13 +1,43 @@
-# ICRA 2027 P0 + P5 contingency 计划复审
+# ICRA 2027 P0 -> P4-v2 -> P5 计划复审
 
-## Final P4 verdict and contingency decision — 2026-08-25
+## User-owned recovery verdict — 2026-08-26
+
+**Verdict: retain the top-level P0 -> P4 -> EGO -> P5 architecture; supersede the P0+P5 main-route decision;
+redesign and prospectively requalify P4 as P4-v2.**
+
+The authoritative audit is
+`docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md`. It binds original approval
+`73cbdddd`, source baseline `bd3858a7`, first divergence `564dd6a`, current pushed anchor `48caa9d`, and user
+decision `USER-ICRA-ROUTE-20260826-001`.
+
+P4-v1 G0C remains a legitimate `SCIENTIFIC_NO_GO`. The evidence does not justify deleting P4: 136/192 rows
+strictly improve maximum risk, 56 tie and none regress. The failure is attributable to P4-v1 internal and
+experimental design: occupied-support values dominate the scalar metric, the realized guide domain does not
+reach the intended corridor contrast, the A* integral objective does not optimize the maximum-risk gate,
+shared endpoints can fix the whole-path maximum, and repeated rows are not independent.
+
+The P4 external seam and authority split pass re-review. P4-v2 must instead expose provider-only risk and
+support decomposition, use an interior bottleneck/lexicographic time-aware search, preregister endpoint buffer
+`b=2r`, use `D_peak` as the sole primary and derive SESOI from domain meaning plus repeatability. Exploratory
+evidence selects and freezes 30–60 independent held-out seed-runs per scene before confirmation.
+
+The old process allowed a Supervisor to activate contingency and is therefore inadequate for research-route
+ownership even though `564dd6a` conformed to that old text. The USER now exclusively owns research question,
+required modules, claim, arms, route and fallback activation. A future scientific NO_GO stops at
+`BLOCKED_AWAITING_USER_RESEARCH_DECISION`; it cannot create an automatic alternate task.
+
+ICRA-070 is superseded unqualified and retained as control-arm engineering. The next gate is the new
+ICRA-071 repository-local user-route guard; it must pass Review before any P4-v2 product work. G0D, P5
+integration and campaign remain forbidden until the roadmap gates and explicit user campaign approval.
+
+## Superseded final P4-v1 verdict and contingency decision — 2026-08-25
 
 P4-G0C 的 prospective calibration 技术闭环通过，但科学门失败：Type-7 mean-improvement Q10 为
 `0.000020000000000131024`，max-improvement Q10 为 `0`。后者不大于冻结 floor，故原
 `CONDITIONAL GO` 正式收敛为 `NO_GO_P4`，而不是继续调参或扩场景。
 
-按本评审预注册的 fallback，P0+P5 现在成为唯一 active conference route。它的工程风险较低但
-novelty 必须单独、保守表述；当前只授权隔离 profile 与 prospective P5 system qualification，
+按本评审当时预注册的 fallback，P0+P5 曾成为唯一 active conference route。它的工程风险较低但
+novelty 必须单独、保守表述；当时只授权隔离 profile 与 prospective P5 system qualification，
 不因历史 P5 测试而自称 qualified，也不自动启动 campaign。
 
 ICRA-067 的隔离 profile、canonical contract 和 synthetic harness 已通过 Review，但仍明确
@@ -39,21 +69,22 @@ LiDAR integrity 和 `max_pl` fusion 均有真实证据，再以 no-compile overl
 pre-mutation journal 的静态实现，但正式 one-shot 在任何 mutation 前因隔离 `HOME` 下 Git
 `safe.directory` 缺失而退出。更深的 read-only proof 显示旧 overlay 缺少 1,610/2,079 个 base non-cache
 entries，故原地删除 cache 也必然 fail closed。该 entrypoint 已耗尽且不得 retry；旧 overlay 和 terminal
-evidence 保留。下一步仍是 ICRA-070，不是 ICRA-071：以新 root 从 retained ICRA-068 构造完整无 cache
-overlay，仅应用三个 current aliases，再完成 unused `-003` parser/GPU/live/analyzer。该决定不改变
-full-sensor target、P5 fixture/threshold、claim 或 campaign barrier。
+evidence 保留。当时的下一步仍是 ICRA-070，而不是当时定义的 ICRA-071：以新 root 从 retained ICRA-068
+构造完整无 cache overlay，仅应用三个 current aliases，再完成 unused `-003` parser/GPU/live/analyzer。
+该未完成资格后来由用户路线决定 supersede，证据不被重标。
 
-本 Review 同时冻结 campaign 前的额外控制门：070 PASS 后只允许纯静态 ICRA-071，不直接 campaign。
-071 按 `docs/icra27/ICRA_CROSS_LAYER_GUARD_PLAN.md` 消除 JSON/helper/launch/runner/test 多真源，验证完整
-target-to-evidence projection，修复无效 hook/缺失 CI，并对 070 raw evidence 执行带 warm-up/coverage 的
-sustained-use audit。只有 071 Review PASS 才能讨论 campaign。
+本历史 Review 同时冻结过 campaign 前的额外控制门：070 PASS 后只允许纯静态 guard，不直接 campaign。
+当前 ICRA-071 的范围已由用户路线恢复决定重定义；它只实现 route/state/plan/RQ 本地守卫，PASS 后也只能
+签发 ICRA-072，不能讨论或签发 campaign。
 
-以下 P0 → P4 → P5 复审正文作为决策历史保留，不再授权后续 P4 Gate。
+以下 P0 -> P4 -> P5 复审正文作为 P4-v1 决策历史保留。其 authority split 继续适用，但不授权
+重跑 v1 G0C；后续 P4-v2 Gate 只由文件顶部 verdict 与 recovery roadmap 授权。
 
-## Active re-review declaration — 2026-08-20
+## Historical P4-v1 re-review declaration — 2026-08-20
 
-本节至 `# Superseded historical review — P0 + P2 + P5` 为当前唯一有效复审。
-评审基线为 dev/icra@bd3858a72ba0，依据静态代码、Gate-0 artifacts 与 P4 audit；它不是 P4 实验结果。
+本节至 `# Superseded historical review — P0 + P2 + P5` 为 P4-v1 复审历史。
+评审基线为 dev/icra@bd3858a72ba0，依据静态代码、Gate-0 artifacts 与 P4 audit；它不是 P4-v2
+实验结果，也不覆盖文件顶部的 user-owned recovery verdict。
 
 下方 P0 + P2 + P5 评审按原文保留。它记录旧路线的风险与当时判断，
 不得被改写成支持 P4 的证据，也不得继续授权 P2 工作。
@@ -258,8 +289,8 @@ certified integrity、always lower risk 或 end-to-end validated 等措辞。
 6. composite profiles 证明 P1/P2/P3 双层关闭、distinctive-off 和 P5 开启。
 7. calibration freeze 通过，GPU 与容量 preflight 通过。
 
-任一前置条件失败，P0 → P4 → P5 标记 BLOCKED。P0+P5 只是 contingency，
-是否切换必须由新的 Supervisor decision 决定。
+按 P4-v1 的历史规则，任一前置条件失败时 P0 → P4 → P5 标记 BLOCKED，P0+P5 contingency 是否切换
+由新的 Supervisor decision 决定。该规则现已 supersede；当前必须等待明确的用户研究路线决定。
 
 ---
 

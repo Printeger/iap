@@ -1,12 +1,48 @@
-# ICRA 2027 P0 + P5 contingency 正式开发实施计划
+# ICRA 2027 P0 -> P4-v2 -> P5 科学纠偏实施计划
 
-## Contingency activation — 2026-08-25
+## User-owned active plan — 2026-08-26
+
+用户以 `USER-ICRA-ROUTE-20260826-001` 恢复 `P0_P4_V2_P5` 为唯一研究主线。决策绑定 pushed
+anchor `48caa9ddf24990accb65e2ad230d12821487793c`；偏差证据、P4-v2 科学设计、机器可读 route lock
+和 ICRA-071..080 gate 顺序统一定义在
+`docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md`。
+
+执行顺序冻结为：
+
+```text
+ICRA-071 user-route repository guard
+  -> ICRA-072 source decomposition / snapshot replay
+    -> ICRA-073 controllable primary/mirror/null fixtures
+      -> ICRA-074 bottleneck + time-aware P4-v2
+        -> ICRA-075 exploratory / power inputs
+          -> ICRA-076 preregistration freeze
+            -> ICRA-077 held-out confirmation
+              -> ICRA-078 G0D lineage
+                -> ICRA-079 prospective P5 integration
+                  -> explicit USER campaign decision -> ICRA-080
+```
+
+P4-v1 G0C 的 `SCIENTIFIC_NO_GO`、输入 hashes 和 raw evidence 永久保留，不得改门、重跑成 PASS 或用
+旧 confirmatory seeds 调参。P4-v2 primary 固定为 controllable interior 的 provider-only maximum risk；
+mean/length/latency 为 secondary，whole-path maximum 为 non-inferiority。确认样本数只能在 exploratory
+后、查看 held-out 数据前按预注册 power rule 冻结为每类 30–60 个独立 seed-run。
+
+ICRA-070 以 `SUPERSEDED_UNQUALIFIED_BY_USER_ROUTE_DECISION` 关闭，不取得 P5 qualification verdict；
+其 P0+P5 实现和证据作为 matched control 保留。当前 build/install、raw evidence 与受保护 PDF 不清理。
+原 P0+P5 专用 ICRA-071 计划在激活前被本计划取代；新 ICRA-071 只实现 user-route/state/doc/RQ 本地
+守卫，Review PASS 前不得修改 P4 产品代码。
+
+研究路线、required modules、primary claim、arms、fallback 和 campaign activation 的所有权为 USER。
+Supervisor 遇到科学 NO_GO 只能进入 `BLOCKED_AWAITING_USER_RESEARCH_DECISION` 并提出建议，不能自动
+激活 contingency。
+
+## Superseded contingency activation — 2026-08-25
 
 ICRA-066 以权威 analyzer 关闭 P4-G0C：技术证据 `15/15/15 runs`、`192/192 decisions` 全部有效，
 但 Type-7 `Q10(max_original-max_risk)=0`，未超过 `1e-12` numerical-noise floor。因此 P4 为
 `SCIENTIFIC_NO_GO`，不得冻结应用阈值、进入 G0D、创建 r7 或把失败结果包装成 treatment。
 
-预注册的 P0+P5 contingency 现由 Supervisor 显式激活。开发顺序改为：隔离且 fail-closed 的
+在当时治理规则下，预注册的 P0+P5 contingency 曾由 Supervisor 显式激活。其历史开发顺序为：隔离且 fail-closed 的
 `icra_p0_p5` profile → prospective P5 final/runtime system qualification → 仅在资格通过后冻结
 contingency campaign。P0 Gate-0B 保持 PASS；P1/P2/P3/P4 仅保留源码/回归，不进入会议 profile。
 
@@ -26,7 +62,7 @@ RUNTIME 的 `fallback_only` 都令 `use_gnss=false`，因此 conditional `test_p
 设计不启动。这不是 Builder/node/GPU failure，而是 qualification case 没有实例化目标传感器系统。
 
 首版 ICRA-070 在 `d335665` 错误地把缩减运行模式写成 15-process system contract，现已撤销。ICRA-070
-仍是唯一 active task：保留 canonical 16 processes，新增一个由现有 corridor geometry 与现有
+当时仍是唯一 active task：保留 canonical 16 processes，新增一个由现有 corridor geometry 与现有
 degraded-GNSS preset 组合出的 qualification-specific full-sensor scenario，并令三个 case 都启用
 GNSS pseudorange+doppler、IMU/LiDAR estimator、GNSS/ARAIM + LiDAR integrity 与 `max_pl` fusion。任务先
 静态证明 sensor/source contract 和 GNSS 依赖，再使用 retained build 创建 no-compile isolated overlay，
@@ -42,23 +78,25 @@ ICRA-070 在静态 full-sensor 修正和 567/567 tests 后，首次 overlay prep
 上述 repair continuation 的 `1b3c661...24d3e16` 静态实现经 Supervisor 接受，但 one-shot 入口在 mutation
 前因 task-local Git `safe.directory` 缺失退出。完整 file-set 检查同时证明旧 overlay 只有 469 个 non-cache
 entries，相对 ICRA-068 install 的 2,079 个缺 1,610 个，因此删除 cache 也不能把旧 overlay 修复为完整产品。
-旧入口不得 retry，旧 overlay 与全部 terminal evidence 保留。当前仍属 ICRA-070 同一 Gate，只授权一个新的
+旧入口不得 retry，旧 overlay 与全部 terminal evidence 保留。当时仍属 ICRA-070 同一 Gate，只授权一个新的
 non-overwriting complete overlay：从 retained ICRA-068 复制全部 non-cache bytes/modes，再只替换三个 current
-aliases；静态闭合后才可执行尚未使用的 parser/GPU/`-003` live/analyzer sequence。build/install 在本次
-BLOCKED Review 后不得清理。
+aliases；静态闭合后才可执行尚未使用的 parser/GPU/`-003` live/analyzer sequence。该未完成资格现由用户
+路线决定 supersede；build/install、raw evidence 与未跟踪 PDF 继续保留，不得清理。
 
-ICRA-070 PASS 后仍不得启动 campaign。下一步固定为纯静态 ICRA-071，按
-`docs/icra27/ICRA_CROSS_LAYER_GUARD_PLAN.md` 建立唯一 v2 target、typed effective resolver、跨层静态
-verifier、sustained raw-evidence audit、relative hooks 和 CI。ICRA-071 经 Supervisor PASS 后，才可另行
-签发 campaign。
+在被 supersede 前的计划中，ICRA-070 PASS 后仍不得启动 campaign，而要先执行纯静态 guard。当前新的
+ICRA-071 按 `docs/icra27/ICRA_CROSS_LAYER_GUARD_PLAN.md` 建立 user-route/state/plan/RQ 一致性 verifier、
+relative hooks 和 adversarial tests；Review PASS 只允许另行签发 ICRA-072，不允许签发 campaign。
 
-下方 P0 → P4 → P5 计划保留为失败路线的审计记录，不再授权 P4 工作。冲突时以本 activation、
-根 `AGENT_STATE.md` 和 `NEXT_TASK.md` 为准。
+下方 P0 -> P4 -> P5 计划保留为 P4-v1 的审计记录。其 authority separation、collision contract 和
+metrics-only 隔离继续适用；v1 objective、G0C estimand、fallback ownership 和任务顺序由上方 P4-v2
+计划与 user route lock 取代。冲突时以本 active plan、route lock、根 `AGENT_STATE.md` 和
+`NEXT_TASK.md` 为准。
 
-## Active-plan declaration — 2026-08-20
+## Historical P4-v1 active-plan declaration — 2026-08-20
 
-本节至 `# Superseded historical record — P0 + P2 + P5` 为 ICRA 分支唯一有效的实施计划。
-审阅基线为 dev/icra@bd3858a72ba0。下方旧正文仅保留历史原文，不再授权任务、配置、实验或论文主张。
+本节至 `# Superseded historical record — P0 + P2 + P5` 为 P4-v1 实施计划的完整历史记录。
+审阅基线为 dev/icra@bd3858a72ba0。它不再覆盖文件顶部的 P4-v2 active plan，也不再单独授权任务、
+配置、实验或论文主张。
 
 历史 Gate 0A 结论永久保留：9 个固定运行的 378/378 个成功优化 attempt 均为 singleton，
 裁决仍为 NO_GO_P2。该结果只否定当时的 P2 treatment domain，既不是 GO_P4，也不是完整系统资格证明。
@@ -392,8 +430,9 @@ seed、scenario、arm、artifact manifest 和 analyzer version。失败 run 不�
 campaign 前必须通过 GPU preflight 和可用空间不少于 40 GiB 的容量门。
 不满足时 runner fail closed，不自动清理、不降级录包、不开始正式运行。
 
-P4 任一资格门失败时，active target 标记 BLOCKED。P0+P5 仅保留为显式 contingency；
-切换论文主线必须另有 Supervisor decision，不能由 runner 或实现者自动降级。
+P4-v1 的历史规则要求任一资格门失败时把 active target 标记 BLOCKED，并允许另一个 Supervisor
+decision 激活 P0+P5 contingency。该 fallback authority 已被本文件顶部的 user route lock 取代；当前
+必须进入 `BLOCKED_AWAITING_USER_RESEARCH_DECISION`，不能由 Supervisor、runner 或实现者自动降级。
 
 ## 8. Tests and acceptance
 

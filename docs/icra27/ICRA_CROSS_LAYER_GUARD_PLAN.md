@@ -1,150 +1,149 @@
-# ICRA P0+P5 cross-layer contract and guard-hardening plan
+# ICRA-071 user-owned research-route guard plan
 
-Status: **Supervisor-frozen plan; ICRA-071 is not active until ICRA-070 reaches qualification PASS and passes review**
-Requirements: `IAP-RQ-000`, `IAP-RQ-020`, `IAP-RQ-030`, `IAP-RQ-040`, `IAP-RQ-220`, `IAP-RQ-320`,
-`IAP-RQ-421`, `IAP-RQ-422`, `IAP-RQ-423`
+Status: **Supervisor-frozen task plan / active only through `NEXT_TASK.md`**
+Requirements: `IAP-RQ-000`, `IAP-RQ-423`, `IAP-RQ-424`
 
-## Purpose and campaign barrier
+## Purpose and authority boundary
 
-This plan prevents a launchable diagnostic mode from silently replacing the intended ICRA system target.
-The frozen route is P0+P5 with GNSS pseudorange+doppler, IMU and LiDAR; GNSS/ARAIM and LiDAR integrity;
-GPU mapping; P0 fusion; P5 final/runtime; and P1/P2/P3/P4 disabled. A reduced sensor/process/backend mode is a
-diagnostic mode and cannot make a qualification or campaign claim.
+ICRA-071 prevents an implementation agent, Supervisor verdict or runner outcome from silently changing the
+user's research route. Its canonical input is the `ICRA_USER_ROUTE_LOCK_V1` JSON block in
+`docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md`.
 
-The required order is:
-
-```text
-ICRA-070 full-sensor qualification PASS + Supervisor review
-  -> ICRA-071 pure-static guard hardening PASS + Supervisor review
-    -> separate campaign authorization
-```
-
-ICRA-071 may not start ROS, perform GPU preflight, create a build/install, rerun live qualification or launch a
-campaign. It must statically re-evaluate the retained ICRA-070 raw evidence under the hardened evidence rules.
-If that evidence does not satisfy the stronger rules, campaign stays blocked and a separate live requalification
-requires explicit Supervisor authorization.
-
-## One canonical design target
-
-Create a versioned v2 machine-readable design contract. It is the sole normative truth for:
-
-- route, claim scope and mandatory sensor modalities;
-- GPU backend and required GNSS ephemeris/timing policy;
-- P0/P5 enabled state and P1/P2/P3/P4 disabled state;
-- qualification case geometry and exact P5-6/P5-7 fixtures;
-- conditional process specifications and required topic identities;
-- full-sensor evidence semantics and terminal verdict vocabulary.
-
-Runtime paths, resolved package locations and file hashes belong in a generated effective contract, not the
-enduring design target. The v1 contract remains read-only historical input or is migrated explicitly; it cannot
-remain a second active truth source. Python literal mirrors of normative JSON values are forbidden.
-
-Any proposed reduction of a mandatory sensor, process, topic, backend, evidence invariant, fixture or claim
-scope must produce `SCOPE_CHANGE_REQUIRES_USER_APPROVAL`. It cannot be treated as an ordinary config change.
-
-## Typed resolver and projection chain
-
-Provide one pure resolver with a typed result equivalent to:
+The frozen route is `P0_P4_V2_P5`. P0+P5 remains a matched control, not an alternate main route. ICRA-071 is
+pure repository governance: it changes no P0/P4/P5 algorithm, starts no ROS process, runs no GPU preflight,
+creates no product build/install and issues no campaign.
 
 ```text
-resolveQualificationCase(target, case_id, runtime_inputs)
-  -> EffectiveQualificationContract
+USER route lock
+  -> static route/state/plan verifier
+    -> pre-commit + pre-push + commit-msg guards
+      -> focused mutation tests
+        -> Supervisor Review
+          -> only then ICRA-072 P4-v2 observability work
 ```
 
-The result includes typed effective values, resolved runtime artifact paths/hashes, enabled processes, required
-topics, evidence rules, case identity and a deterministic contract hash. Launch, runner and analyzer consume
-this result instead of independently reimplementing target values.
+## Canonical route-lock parser
 
-The static verifier must check the complete chain in one direction:
+Add one parser that reads exactly one JSON object between the begin/end sentinels. It must reject:
 
-```text
-system target
-  -> effective case config
-    -> launch process/topic projection
-      -> process/topic monitor contract
-        -> normalizer/analyzer evidence contract
-```
+- absent, duplicated, nested or reversed sentinels;
+- invalid JSON, duplicate keys, unknown/missing schema fields or noncanonical value types;
+- `route_owner != USER`, an empty `user_decision_id`, a non-40-hex approval anchor, or an anchor not reachable
+  from the current repository history;
+- duplicate required modules/arms/scenes, an empty research question/claim or unsupported guard strength;
+- a protected route-lock edit made by the active Builder task.
 
-The target process set is not inferred from whichever processes a launch happened to create. Conditional
-processes are projected from final effective values such as `use_gnss`, `run_validator`, `record_bag` and
-`start_planner`, then compared exactly with the target and monitor sets. A generic `icra_p0_p5` profile combined
-with a LiDAR-only, fallback-only, open-sky or other diagnostic scenario must be ineligible for qualification.
+The parser exposes a typed immutable value. Other guards consume it; they may not maintain literal mirrors of
+the route, modules, claim or arms.
 
-## Static verifier and adversarial matrix
+## Route, state and task verifier
 
-Add a deterministic repository-local command equivalent to:
+Provide one deterministic repository-local command equivalent to:
 
 ```bash
-python3 scripts/dev_planner/verify_icra_route_contract.py \
-  --route icra_p0_p5 --all-cases
+python3 scripts/dev_planner/verify_icra_research_route.py \
+  --route-lock docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md \
+  --state AGENT_STATE.md \
+  --task NEXT_TASK.md
 ```
 
-It must require no ROS graph, GPU, build/install or network and must finish fast enough for pre-commit and CI.
-It emits a typed failure and nonzero exit for at least these mutations:
+It requires no ROS, GPU, build/install, network or untracked input and checks:
 
-- GNSS, IMU, LiDAR, ARAIM or either integrity source disabled;
-- GNSS process removed or made optional;
-- `lidar_only`, `fallback_only`, open-sky or incompatible scenario/profile binding;
-- CPU mapping backend or synthetic ephemeris fallback;
-- required process/topic gap or unexpected conditional projection;
-- stale/invalid GNSS, zero GNSS use, zero LiDAR use, zero fused horizons or `n_sv_used=0`;
-- RINEX/scenario path or SHA drift;
-- route geometry, wall/floor/resolution, P5-6/P5-7 fixture, threshold/action or case-order drift;
-- target/effective/launch/monitor/analyzer contract-hash mismatch.
+1. `AGENT_STATE.md.conference_route` equals `active_route` and the required modules/claim/campaign barrier agree
+   with the route lock and active scope/plan headers.
+2. Only one task and role are active. `TASK_READY` points to the same task/gate/owner in `NEXT_TASK.md`.
+3. ICRA-071 permits only governance files. P4 product code remains forbidden until ICRA-071 Review PASS.
+4. P0+P5 is named only as `P0_P5_CONTROL` or immutable history, never as the active conference route.
+5. P4-v1 remains `SCIENTIFIC_NO_GO`; P4-v2 remains unqualified. No document may relabel old evidence.
+6. Campaign state remains blocked before ICRA-079 Review PASS and a distinct user campaign decision.
+7. A state containing `SCIENTIFIC_NO_GO` cannot simultaneously activate a different route/task unless the
+   canonical lock contains a new user decision bound to the exact prior pushed anchor.
+8. Without such a decision, the only NO-GO transition is
+   `BLOCKED_AWAITING_USER_RESEARCH_DECISION`, `active_role=SUPERVISOR`, `next_task=NONE`.
 
-Tests must prove the current three full-sensor cases pass and the historical GNSS-disabled bindings fail for the
-correct reason. Mutations must be generated from one valid fixture so changing literal copies together cannot
-make a bad route test-green.
+The verifier emits a stable typed reason and nonzero exit for each failure. Passing it proves repository
+consistency only; it does not authenticate that a same-permission process is the human user.
 
-## Sustained runtime-evidence semantics
+## Staged-diff research authority guard
 
-Retained live evidence must not be qualified by cherry-picking a small number of good samples. ICRA-071 must
-define and freeze an explicit startup/warm-up boundary using captured monotonic timestamps. For the complete
-post-warm-up observation window it must retain total, eligible, good, bad and omitted counts, time span and
-coverage ratios for P0 health and IntegrityReport rows.
+The pre-commit path compares the staged route-lock protected fields with `HEAD`. If any protected field changes,
+it requires all of the following in the staged state:
 
-Every post-warm-up ready/non-stale P0 generation must show fresh valid GNSS, positive GNSS and LiDAR predictor
-use, and positive fused horizons. Every aligned IntegrityReport row must be finite/valid with `n_sv_used>0`.
-Startup transients may be excluded only by the frozen warm-up rule; arbitrary later rows may not be filtered
-out. The analyzer independently checks the raw rows, hashes, denominators and coverage rather than trusting a
-normalized subset. ICRA-071 applies these rules statically to ICRA-070 raw evidence before campaign.
+- a distinct `user_decision_id` and exact old/new values;
+- an approval anchor equal to the pushed pre-change HEAD;
+- synchronized scope, implementation plan, plan review, state, task, Supervisor log, requirements,
+  traceability and changes documentation;
+- `active_role=SUPERVISOR` until the route changeset and post-push rotation audit complete;
+- no product/config/experiment or evidence file in the same staged changeset.
 
-## Repository enforcement
+The Builder task must always fail if it stages the route-lock sentinel block, `AGENT_STATE.md`, `NEXT_TASK.md`
+or a user-decision record. The Supervisor may stage them only for a user-directed route decision.
 
-ICRA-071 must make the same verifier unavoidable at the repository control plane:
+## Repository hooks
 
-- set a repository-relative `core.hooksPath=.githooks` for this workspace and provide a read-only verification
-  command that fails when the path is absent or absolute/stale;
-- fix pre-commit matching for repository-root paths including `launch/`, `config/`, `scripts/`, `test/`,
-  `src/`, `include/`, `CMakeLists.txt` and `package.xml`;
-- retain the mandatory `docs/CHANGES.md` and `docs/TRACEABILITY.md` synchronization rule;
-- add a commit-message guard for one or more applicable `IAP-RQ-XXX` IDs;
-- add tracked CI invoking the same route verifier and focused tests, without a separate implementation;
-- add tests proving relevant staged paths trigger the guard and documentation-only/history files do not
-  incorrectly authorize a campaign.
+ICRA-071 replaces the current ineffective hook setup:
 
-The current absolute hooks path `/home/dev/code/ws_iap/src/iap/.git/hooks` and the current `src/iap/...`
-pre-commit matcher are known invalid configurations and are not accepted as satisfying `IAP-RQ-000`.
+- add a repository-local installation/check command for `git config --local core.hooksPath .githooks`;
+- reject absent, absolute or stale `core.hooksPath`;
+- repair pre-commit matching for root-relative `src/`, `include/`, `apps/`, `msg/`, `cmake/`, `launch/`,
+  `config/`, `scripts/`, `test/`, `tests/`, `tools/`, `docker/`, `data/`, `thirdparty/`, `.githooks/`, root
+  `CMakeLists.txt`, `package.xml` and toolchain/build/config files;
+- add an extension/category fallback outside generated/evidence trees so a new source/interface/config root
+  cannot bypass synchronization solely because its directory is absent from the enumerated set;
+- code/interface/config changes require staged `DEV_LOG.md`, `docs/CHANGES.md` and
+  `docs/TRACEABILITY.md`;
+- route/scope/claim files invoke the route verifier and staged-diff authority guard;
+- add pre-push to re-run the clean-tree route verifier against the commits being pushed;
+- add commit-msg validation requiring at least one valid `IAP-RQ-NNN` for every commit;
+- remove `IAP_SKIP_DOCS` and add no replacement bypass environment variable.
 
-## State, provenance and supersession
+The hooks must preserve unrelated tracked/untracked work and never stage files themselves.
 
-The generated effective contract hash, design-contract hash, claim scope and invariant set must be recorded in
-qualification manifests and the Supervisor handoff. A Supervisor verdict records which target/evidence hashes
-it reviewed. Later contract versions must declare what they supersede; historical evidence remains immutable
-and cannot silently inherit a newer claim.
+## Adversarial test matrix
 
-`AGENT_STATE.md` remains Supervisor-owned. Builder tooling may emit a proposed machine-readable handoff report,
-but may not edit gate status or authorize campaign. A passing static verifier authorizes only Supervisor review,
-not the next state transition.
+Tests construct mutations from one valid temporary repository fixture and prove typed failure for:
 
-## ICRA-071 acceptance
+- active route changed to P0+P5 with no new user decision;
+- P4 removed from required modules or treatment arms;
+- primary max-risk claim changed to mean/CVaR or weakened to pure numerical noise;
+- contingency/campaign activated by Supervisor verdict, runner output or Builder handoff;
+- scientific NO_GO followed directly by an alternate `TASK_READY`;
+- forged stale approval anchor, reused decision ID or unsynchronized plan/state/task;
+- Builder staging route lock, Supervisor state or task files;
+- every enumerated code/interface/config root and a new-root extension fallback without all three synchronized
+  development documents;
+- commit message without a valid requirement ID;
+- missing/absolute hooks path, direct stale hook matcher and second installation;
+- documentation-only historical text that does not alter protected active fields.
 
-ICRA-071 passes only when:
+Positive cases cover the current user decision, an unchanged route with a normal Builder handoff, the required
+NO-GO blocked state, and a synthetic Supervisor route proposal that does not activate anything.
 
-1. the v2 target and typed resolver are the sole active truth;
-2. all three target cases pass the cross-layer verifier and every registered mutation fails closed;
-3. retained ICRA-070 raw evidence passes the frozen sustained-evidence audit, or campaign remains explicitly
-   blocked without relabelling the ICRA-070 result;
-4. repository-relative hooks and CI invoke the same verifier;
-5. focused and complete hermetic static tests pass with no ROS/GPU/build/install/campaign invocation;
-6. Supervisor review records the exact contract hashes and explicitly decides whether campaign may be issued.
+## Documentation and evidence
+
+The Builder records exact commands/exits and focused/full hermetic results in `DEV_LOG.md`, `docs/CHANGES.md`,
+`docs/TRACEABILITY.md` and compact ICRA-071 evidence. Evidence binds the route-lock hash, verifier/hook hashes,
+test inventory, current commit and `core.hooksPath` result. It must not edit the route-lock sentinel, Supervisor
+state/task/verdict or historical r6 artifacts.
+
+## Acceptance
+
+ICRA-071 passes Builder handoff only when:
+
+1. the canonical route-lock parser and route/state/task verifier pass the current repository;
+2. every registered route/claim/authority mutation fails for its exact typed reason;
+3. pre-commit, pre-push and commit-msg use the same implementation and contain no bypass variable;
+4. root-relative code matching and three-document synchronization are proven;
+5. repository-local `core.hooksPath=.githooks` is installed and verified without global Git mutation;
+6. focused tests and complete hermetic static discovery pass;
+7. no P4 product, ROS, GPU, live, campaign, build/install or retained evidence mutation occurs.
+
+Supervisor Review still decides PASS. A PASS authorizes only ICRA-072 observability/decomposition planning,
+not P4-v2 application, G0D, P5 qualification or campaign.
+
+## Local-enforcement limitation
+
+The user selected repository-local protection. It prevents ordinary automation mistakes but is not a security
+boundary: a process with the same filesystem/Git authority can edit hooks or use `--no-verify`. Documentation,
+tests and verdicts must state this limitation. Non-bypassable enforcement would require a protected GitHub
+branch and an independent user approval identity, which are outside ICRA-071.

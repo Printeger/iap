@@ -25,11 +25,12 @@
 ### IAP-RQ-000: Repo guardrails
 - [x] 本仓库内加入 AGENTS.md（禁止改 ../glim，强制维护 CHANGES/TRACEABILITY）
 - [x] 加入 docs/CHANGES.md、docs/TRACEABILITY.md、docs/REQS.md（本文件）
-- [ ] 恢复 doc-guard：当前 absolute `core.hooksPath` 已失效、hook 的 `src/iap/...` matcher 与仓库根路径
-  不匹配且没有 tracked CI；由 ICRA-071 统一接入 cross-layer verifier 后重新验收
+- [ ] 恢复 repository-local guard：当前 absolute `core.hooksPath` 已失效、hook 的 `src/iap/...` matcher
+  与仓库根路径不匹配；由 ICRA-071 接入 user-route verifier、pre-commit、pre-push 和 commit-msg 后验收
 
 Acceptance:
-- 能在本地提交前被 hook 拦截；PR 中被 CI 拦截。
+- 能在本地 commit/push 前被相同语义的 hook 拦截；无 bypass 环境变量；明确本地 hook 不是同权限
+  Agent 无法绕过的安全边界。
 
 ### IAP-RQ-001: Rename ROS2 package name to "iap"
 - [x] package.xml 的 `<name>` 改为 `iap`
@@ -475,5 +476,35 @@ Acceptance:
 - Deterministic fixtures cover no collision, closed collision, open-ended collision, multiple obstacles, free endpoints, fallback, and occupancy-epoch change.
 - One event yields auditable original/risk/selected guides with `200/200` valid samples, frozen risk/length/latency gates, and no A* timeout.
 - The selected decision/hash reaches the final B-spline, and a P5 final rejection produces zero normal publication.
+
+### IAP-RQ-424 User-owned ICRA research route and P4-v2 scientific recovery
+Status: **ROUTE LOCK DOCUMENTED / REPOSITORY GUARD NOT_IMPLEMENTED**
+
+Source: `docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md` and user decision
+`USER-ICRA-ROUTE-20260826-001` bound to `48caa9ddf24990accb65e2ad230d12821487793c`.
+
+- [x] Freeze `route_owner=USER`, active `P0_P4_V2_P5`, required modules, research question, primary claim,
+  formal arms, gate sequence, fallback policy and campaign-approval boundary in one machine-readable Markdown
+  route lock.
+- [x] Preserve P4-v1 G0C as immutable `SCIENTIFIC_NO_GO`; never relabel it as PASS or reuse it as P4-v2
+  confirmatory evidence.
+- [x] Define NO-GO transition as `BLOCKED_AWAITING_USER_RESEARCH_DECISION`, with no automatic contingency task.
+- [ ] Implement the ICRA-071 strict route-lock parser, state/task/scope/plan verifier and staged-diff authority
+  guard.
+- [ ] Install and verify repository-relative pre-commit, pre-push and commit-msg hooks with no bypass variable.
+- [ ] Add adversarial tests for route/module/claim/arm/fallback/campaign drift, stale approvals, Builder ownership,
+  code-document synchronization and requirement IDs.
+- [ ] Add P4-v2 provider/occupied/unknown support decomposition while preserving the v1 scalar query for replay.
+- [ ] Implement provider-only interior bottleneck/lexicographic time-aware P4-v2 and its controllability fixtures.
+- [ ] Freeze SESOI, endpoint buffer `b=2r`, independent 30–60 seed-run sample size per scene and held-out protocol
+  before confirmatory execution.
+
+Acceptance:
+
+- The local guard rejects any protected route change without a distinct user decision bound to the exact pushed
+  anchor; documentation states that local hooks are procedural rather than a security boundary.
+- P4-v2 confirmation uses provider-only `D_peak` as the sole primary, counts independent run/seed units, and
+  passes the preregistered exact one-sided gate before G0D.
+- G0D/P5 lineage passes before a separate user decision may authorize the 60-run formal campaign.
 
 ---

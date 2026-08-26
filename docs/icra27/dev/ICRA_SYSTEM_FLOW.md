@@ -1,21 +1,27 @@
-# ICRA System Flow — Active P0 + P5 contingency
+# ICRA System Flow — User-owned P0 -> P4-v2 -> P5 recovery
 
-> Contingency activated 2026-08-25 after authoritative P4-G0C `SCIENTIFIC_NO_GO`.
+> User route restored 2026-08-26 by `USER-ICRA-ROUTE-20260826-001`, bound to pushed anchor `48caa9d`.
 
-> Current status: P0 Gate-0B `PASS`; P4 `G0C NO_GO / DISABLED`; P5 `IMPLEMENTED-BUT-UNQUALIFIED`.
+> Current status: P0 Gate-0B `PASS`; P4-v1 `G0C SCIENTIFIC_NO_GO / IMMUTABLE`; P4-v2 `NOT_STARTED`;
+> P5 `IMPLEMENTED-BUT-UNQUALIFIED`.
 
-> ICRA-070 update: the cache-repair implementation is statically accepted, but its sole entrypoint stopped
-> before mutation under task-local Git `safe.directory`. The old overlay is also missing 1,610 of 2,079 base
-> non-cache entries and cannot be repaired in place. A new complete non-overwriting overlay continuation is
-> `TASK_READY`; parser/GPU/live/analyzer remain uninvoked.
+> ICRA-070 is `SUPERSEDED_UNQUALIFIED_BY_USER_ROUTE_DECISION`. Its P0+P5 implementation/evidence remains the
+> future matched control; replacement/parser/GPU/live/analyzer remain uninvoked and no cleanup is authorized.
 
-The active flow is now `P0 advisory snapshot -> original EGO planning/refinement -> P5 final -> normal publish
--> P5 runtime`. P1/P2/P3/P4 are disabled in the conference profile. The detailed P4 diagram below is retained
-as the audited failed route and does not authorize P4 application or G0D.
+The active target is again `P0 advisory snapshot -> P4-v2 collision-guide preference -> EGO planning/refinement
+-> P5 final -> normal publish -> P5 runtime`. The diagram below retains the valid external P4 seam and authority
+split. Orange P4 internals remain planned until ICRA-071 governance Review PASS and the later P4-v2 tasks.
+
+P4-v2 changes the internal risk decomposition, objective, time-aware search labels, controllable guide domain
+and statistical estimand. It does not let risk override occupancy, EGO feasibility or P5 hard gates. The exact
+route lock and recovery gates are in
+`docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md`.
 
 > Scope pivot: 2026-08-20. Source audit: `dev/icra` at `bd3858a72ba06b7eb1551006876c55362c979bab`.
 
-> Status: P0 `BLOCKED/UNQUALIFIED`; P4 `NOT_QUALIFIED`; P5 `IMPLEMENTED-BUT-UNQUALIFIED`. Historical Gate 0A remains `NO_GO_P2`.
+> Historical status at the 2026-08-20 source-audit baseline: P0 `BLOCKED/UNQUALIFIED`; P4 `NOT_QUALIFIED`;
+> P5 `IMPLEMENTED-BUT-UNQUALIFIED`. It does not override the current status above. Historical Gate 0A remains
+> `NO_GO_P2`.
 
 This document is the living route diagram. Solid arrows show required runtime flow. Dashed orange nodes identify planned seams or unresolved gaps, not completed implementation.
 
@@ -47,15 +53,15 @@ flowchart TB
   subgraph P4S["Conditional P4 guide preference"]
     PAIR["planCollisionGuide(request)<br/>same free endpoints, occupancy epoch,<br/>snapshot and query-time model"]:::planned
     ORIGINAL["Original occupancy-only A*"]:::ego
-    RISK["Risk-aware A*<br/>occupied hard reject<br/>risk in edge cost only"]:::advisory
-    PROFILE["200-point equal-arc profiles<br/>mean / max / validity / length / latency"]:::planned
+    RISK["P4-v2 time-aware search<br/>occupied hard reject<br/>provider-only bottleneck objective"]:::planned
+    PROFILE["Fixed equal-arc evidence<br/>interior provider max / mean<br/>support / length / latency"]:::planned
     DECISION{"P4GuideDecision"}:::planned
     FALLBACK["Current-epoch original fallback<br/>unknown, stale, non-finite,<br/>timeout, coverage or ratio failure"]:::ego
 
     PAIR --> ORIGINAL --> PROFILE
     PAIR --> RISK --> PROFILE
     PROFILE --> DECISION
-    DECISION -->|risk passes frozen gates| RISK_SELECTED["Risk guide selected"]:::advisory
+    DECISION -->|held-out P4-v2 gates pass| RISK_SELECTED["Risk guide selected"]:::advisory
     DECISION -->|fallback or metrics-only| FALLBACK
     DECISION -->|identity / occupancy epoch mismatch| SAFE
   end
@@ -159,20 +165,21 @@ The existing `p4` profile does not enable P5. The existing `all` profile enables
 
 | Gate/event | Entry condition | Exit evidence | Current state |
 |---|---|---|---|
-| Scope pivot | Supervisor authorizes new route | Docs, requirement, state and task agree | `CONDITIONAL_GO` for preparation |
+| User route recovery | User decision binds the exact pushed prior anchor | Route lock, docs, requirements and Supervisor state agree | `USER_RESTORED_P4_V2`; ICRA-071 handoff governed by `AGENT_STATE.md` |
 | ICRA-004 smoke | Supervisor changeset handed off and functional GPU preflight | Valid integrity, one real P0 generation, 76,800 queries | `PASS`; reviewed at `3de0892` |
-| P0 Gate-0B | Reviewed smoke PASS | ≥20 generations and p95 `≤400 ms` | `ICRA-005 TASK_READY`; benchmark pending |
+| P0 Gate-0B | Reviewed smoke PASS | ≥20 generations and p95 `≤400 ms` | `PASS` (ICRA-035) |
 | P4-G0A | P0 Gate-0B PASS; red fixture reviewed | Closed/no/open/multi scan cases PASS | `PASS` (historical closed route) |
 | P4-G0B | G0A PASS | Metrics-only pair, identity and 200/200 profiles; no application | `PASS` (historical closed route) |
-| P4-G0C | G0B PASS | Metrics-only calibration and positive mean/max improvement | `SCIENTIFIC_NO_GO`: max improvement Q10 = 0; route closed |
-| P4-G0D | G0C scientific GO | Post-freeze selected hash reaches B-spline and P5 | Permanently unauthorized for this conference route |
-| P5 system gate | Reviewed P0+P5 full-sensor profile, zero-failure tests, immutable install, parser `0/0/0`, GPU PASS, all 16 processes, GNSS+IMU+LiDAR topics and positive GNSS/LiDAR P0 use | SAFE_NORMAL, final reject/no-publish and runtime-fail prospective identities PASS | ICRA-070 static repair implementation PASS; one-shot stopped before mutation on task-local Git trust and the old overlay is missing 1,610 base files; complete non-overwriting replacement-overlay continuation `TASK_READY` |
-| Cross-layer guard | ICRA-070 qualification PASS and Supervisor review | Canonical v2 target, typed resolver, target-to-evidence verifier, sustained raw-evidence audit, relative hooks and CI all PASS | `ICRA-071` frozen next gate; not active before ICRA-070 PASS |
-| Campaign | ICRA-071 Supervisor PASS | Fresh GPU and `≥40 GiB` free plus separate campaign task | Explicitly blocked; no automatic transition from ICRA-070 |
+| P4-G0C | G0B PASS | Metrics-only calibration and positive mean/max improvement | P4-v1 `SCIENTIFIC_NO_GO`: max improvement Q10 = 0; v1 route closed, v2 remains prospective |
+| User-route guard | User route lock, recovery audit and `ICRA-071` task agree | Route/state/plan verifier, relative hooks, requirement-ID/docs checks and adversarial tests PASS | `ICRA-071` is the authorized next task; activation is controlled only by `AGENT_STATE.md` |
+| P4-G0D | P4-v2 held-out confirmatory PASS | Post-freeze selected hash reaches B-spline and P5 | Planned as `ICRA-078`; P4-v1 G0D remains unauthorized |
+| P5 system gate | ICRA-078 Review PASS and a separately issued prospective integration task | Treatment/control SAFE_NORMAL, final reject/no-publish and runtime-fail identities PASS | Planned as `ICRA-079`; ICRA-070 is superseded unqualified and retained only as control-arm engineering |
+| Campaign | ICRA-079 Supervisor Review PASS plus a distinct user decision | Fresh GPU and `≥40 GiB` free plus frozen ICRA-080 task | Explicitly blocked; no automatic transition from any scientific or qualification gate |
 
 Passing one row authorizes only Supervisor review and the next explicit task. It does not automatically move a later row to PASS.
 
-ICRA-004 remains P0-only. P1/P2/P3/P4/P5 stay disabled in its smoke, and no P4 production change is allowed before reviewed P0 Gate-0B completion.
+ICRA-004 remains P0-only. P1/P2/P3/P4/P5 stayed disabled in its smoke. P0 Gate-0B has passed; current P4-v2
+product work is additionally blocked until ICRA-071 Review PASS.
 
 ## Identity and fallback flow
 

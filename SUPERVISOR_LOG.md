@@ -1,5 +1,90 @@
 # ICRA Supervisor Log
 
+## 2026-08-26 — user restores P0 -> P4-v2 -> P5; deviation audit and ICRA-071 authorization
+
+### Decision identity and synchronization
+
+- User decision `USER-ICRA-ROUTE-20260826-001` explicitly freezes the active route as `P0_P4_V2_P5`, keeps
+  P0+P5 only as the matched control, retains maximum provider-only interior risk as the primary and selects a
+  preregistered adaptive 30–60 independent seed-run sample size per scene.
+- The decision is bound to pushed pre-change anchor
+  `48caa9ddf24990accb65e2ad230d12821487793c`. At audit start, HEAD and `origin/dev/icra` matched with
+  divergence `0 0`; the protected PDF was the only worktree entry and retained SHA-256
+  `1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+- Original route approval is `73cbdddd0f44165f61138dcd74c61ab8dd96ebae`; its source audit baseline is
+  `bd3858a72ba06b7eb1551006876c55362c979bab`. First active-route divergence is
+  `564dd6ad8c864f496b63a1b09afd3febe31eef21`.
+
+### Standards axis
+
+- Historical audit finds four commits without the mandatory requirement ID: `363be826`, `5f6b6494`,
+  `2bd5ba4f`, `79add9cb`.
+- Nine code/config commits omit one or more mandatory synchronized documents: `20d3c5d`, `544451f`,
+  `f2119f6`, `32bd497`, `79add9c`, `e59d090`, `b629a8a`, `0346fd2`, `005ce1a`.
+- Maintenance risks are the six-generation P4 protocol/runner/analyzer cascade, multi-responsibility P0 runtime,
+  multi-responsibility P0+P5 runner and repeated P4 identity/occupancy guards. They do not rewrite historical
+  evidence and are not mixed into the next bounded task.
+- The current absolute `core.hooksPath` and root-mismatched tracked pre-commit are ineffective. This explains
+  how documented rules lacked enforcement; it does not prove a malicious bypass.
+
+### Spec and route-authority axis
+
+- P4-G0C at `6e37b9e` is a legitimate preregistered `SCIENTIFIC_NO_GO`: 15/15/15 runs and 192/192 decisions are
+  technically complete, mean Q10 is positive and max Q10 is zero.
+- `564dd6a` was a Supervisor decision, not a Builder or runner auto-switch. It conformed to the old scope text,
+  which allowed contingency activation by a new Supervisor decision, but it has no distinct user approval
+  record. Verdict: old-process conformant and user-authority inadequate.
+- The `d335665` 15-process/GNSS-disabled contraction was genuinely outside the full-sensor target and was
+  withdrawn by `3c8fffe`; it is not present in the current target.
+- ICRA-070 has current static 593/593 evidence but replacement/parser/GPU/live/analyzer remain `0/0/0/0/0`.
+  It is superseded unqualified, not passed or relabelled as a scientific failure. Its code/evidence remains the
+  matched P0+P5 control asset.
+
+### P4 scientific verdict
+
+- Maximum-risk rows are 136 positive, 56 zero and zero negative; mean-risk rows are 174 positive, 17 zero and
+  one negative. Only 57 unique path pairs exist, and repeated same-state rows cannot be independent samples.
+- Retained readiness traces show occupied-support substitution contributes approximately 78.8%–86.9% of
+  maxima; provider-only values along the main guides are nearly flat and the realized guide domain does not
+  reach the fixture's intended `|y|=2` corridor centres.
+- Current A* minimizes integrated weighted risk, not the maximum-risk bottleneck. Shared endpoints can also
+  fix whole-path maxima. These facts require a P4-v2 internal/search/fixture/estimand redesign; they do not
+  justify deleting P4 or changing the P0 -> P4 -> EGO -> P5 authority architecture.
+- P4-v1 NO_GO and hashes remain immutable. P4-v2 uses provider-only decomposition, an interior bottleneck/
+  lexicographic time-aware objective, endpoint buffer `b=2r`, domain/repeatability SESOI and independent
+  held-out confirmation. G0D remains forbidden until confirmatory PASS.
+
+### Recovery changeset review
+
+- Independent staged Standards review is PASS after resolving every current/historical state ambiguity,
+  retaining `active_role=SUPERVISOR` through the first push and recording the complete machine-readable
+  protected-field transition. No documented Standards violation remains.
+- Independent Spec review is PASS. It verifies all requested anchors and deviation dimensions, route-change
+  accountability, immutable r6 evidence, P4-v2 API/search/fixture/statistical/test design, USER ownership,
+  repository-local guard scope, ICRA-071..080 roadmap and artifact lifecycle.
+- Strict duplicate-key JSON parsing, protected-transition coverage, anchor existence, staged diff checking,
+  active route/state/task/plan/flow consistency and protected-path staging checks pass. The PDF is
+  untracked and unstaged; CMake, qualification runner and its test are unchanged.
+
+### Verdict, next task and artifact lifecycle
+
+- Verdict: `P0_P4_V2_P5_USER_ROUTE_RESTORED_ICRA070_SUPERSEDED_UNQUALIFIED`.
+- `AGENTS.md` §8.7 now assigns research question, required modules, claim, arms, route, fallback and campaign
+  activation to the USER. A future scientific NO-GO stops at `BLOCKED_AWAITING_USER_RESEARCH_DECISION` with
+  no alternate `TASK_READY`.
+- The only task is ICRA-071 `USER_RESEARCH_ROUTE_AUTHORITY_GUARD`: strict route-lock parser, route/state/task
+  verifier, repository-relative pre-commit/pre-push/commit-msg hooks and adversarial tests. It performs no P4
+  product work, ROS/GPU/live run, build/install or campaign action.
+- Existing ICRA-068/070 build/install, raw/scientific evidence and protected PDF remain retained. ICRA-070 did
+  not receive Review PASS, so no cleanup condition is satisfied.
+
+### Supervisor window disposition — pending pushed-anchor audit
+
+- Route, claim boundary, authority and gate all change, and the working context has compacted. These are
+  mandatory `ROTATE_RECOMMENDED` triggers under `AGENTS.md` §8.6.
+- The final post-push handoff anchor and divergence proof will be appended in a minimal Supervisor-only
+  rotation record after this recovery changeset becomes the pushed authority.
+
 ## 2026-08-26 — ICRA-070 review: static repair accepted, one-shot stopped before mutation
 
 ### Review identity and synchronization
