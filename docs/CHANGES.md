@@ -3,6 +3,16 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- review(icra-072-vertical-slice): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 /
+  IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — Supervisor Review of
+  `1a9db30...1505a00` returns `REQUEST_CHANGES`. Final static build and focused suites pass, but the sole
+  registered smoke has P0 generation zero and no P4/EGO/P5/publication lineage. Review also finds that a later
+  no-collision rebound can clear the transient selected-guide vector required by final lineage, and that the
+  exported manifest loses the runner's explicit P4 debug path. Reissue the same ICRA-072 Gate for a bounded
+  lineage-lifetime/path-binding repair, fresh post-`attempt_11` build and exactly one immutable
+  `icra072-dev-smoke-002`; ICRA-073, optimization, formal science, qualification, cleanup and campaign remain
+  blocked.
+
 - docs(icra-development-first): IAP-RQ-000 / IAP-RQ-423 / IAP-RQ-424 — user decision
   `USER-ICRA-ROUTE-20260826-002`, bound to pushed anchor `b24a330d`, keeps the active
   `P0_P4_V2_P5` route, research contract and campaign authority unchanged while replacing the review-heavy

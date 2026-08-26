@@ -458,7 +458,7 @@ Acceptance:
 - Planner chooses safer path even if longer when integrity violated.
 
 ### IAP-RQ-423 P4 collision-guide planning and P5 lineage
-Status: **P4-v1 SCIENTIFIC_NO_GO RETAINED / P4-v2 DEVELOPMENT AUTHORIZED**
+Status: **P4-v1 SCIENTIFIC_NO_GO RETAINED / P4-v2 ICRA-072 REQUEST_CHANGES**
 
 Source: `docs/icra27/ICRA_SCOPE.md` and the 2026-08-20 Supervisor scope pivot. This requirement extends collision-guide planning evidence; it does not replace or verify the IAP-RQ-422 PL/AL admission rule.
 
@@ -481,7 +481,7 @@ Acceptance:
 - The selected decision/hash reaches the final B-spline, and a P5 final rejection produces zero normal publication.
 
 ### IAP-RQ-424 User-owned ICRA research route and P4-v2 scientific recovery
-Status: **DEVELOPMENT-FIRST ROUTE LOCKED / ICRA-072 TASK_READY / GUARD REPAIR NONBLOCKING**
+Status: **DEVELOPMENT-FIRST ROUTE LOCKED / ICRA-072 LINEAGE REPAIR TASK_READY / GUARD REPAIR NONBLOCKING**
 
 Source: `docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md` and user decision
 `USER-ICRA-ROUTE-20260826-002` bound to `b24a330d79d6e85e8080cf2a359bb1a18765e5a5`.
@@ -512,13 +512,16 @@ Acceptance:
 - G0D/P5 lineage passes before a separate user decision may authorize the 60-run formal campaign.
 
 ---
-ICRA-072 development note (2026-08-26): the provider-only decomposition,
-time-aware P4-v2 bottleneck search, EGO injection/lineage and P5 ordering seams
-are implemented with final fresh build `attempt_11`, 137/137 focused C++ tests,
-22/22 hermetic launch tests and 3/3 runner/analyzer tool tests.
-The sole registered development smoke is not acceptance evidence: P0 remained
-at generation zero because the dev profile inherited the fail-closed
-unconfigured covariance-growth value. The profile now explicitly binds the
-existing 0.01 legacy baseline, but no live retry was authorized. Therefore
-IAP-RQ-320/321/400/410/421/422/423/424 remain unqualified and ICRA-072 is
-BLOCKED for Supervisor review; no effect or qualification claim is made.
+ICRA-072 Review note (2026-08-26): the provider-only decomposition, time-aware
+P4-v2 bottleneck search and static EGO/P5 seams are implemented with final
+build `attempt_11`, 137/137 focused C++ tests, 22/22 launch tests and 3/3
+runner/analyzer tool tests. The sole registered development smoke remains
+immutable FAIL evidence: P0 generation was zero, and P4 selection, EGO
+lineage, P5 final/runtime binding and normal publication were all zero. The
+profile now statically binds the existing 0.01 legacy baseline, but that fix
+was not exercised live. Review additionally found that a subsequent
+no-collision refinement can clear the transient selected-guide vector required
+by final lineage, and the launch manifest lost the explicit P4 evidence path.
+ICRA-072 is reissued for the bounded lineage/path repair, fresh build and
+exactly one `icra072-dev-smoke-002`. All mapped requirements remain
+unqualified; no effect, optimization, qualification or campaign claim is made.

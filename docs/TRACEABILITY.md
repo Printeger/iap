@@ -1,5 +1,15 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-26 ICRA-072 Supervisor Review
+
+| Req ID | Reviewed seam | Supervisor evidence and disposition | Status |
+|---|---|---|---|
+| IAP-RQ-320 / IAP-RQ-321 | P0 development-profile generation | Sole registered smoke has 0/140 ready rows and 105/140 `invalid_covariance_growth_parameter`; explicit existing `0.01` / `legacy_iap_rq320_baseline_v1` correction passes static launch tests but has no live evidence | **REQUEST_CHANGES / NO RETROACTIVE PASS** |
+| IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-423 | Selected P4-v2 guide through EGO refinement | Initial/rebound code clears transient `last_p4_guides_`; a following `NO_COLLISION` refinement can erase the guide required by final lineage. Focused tests do not execute that production-shaped transition | **BLOCKING LINEAGE REPAIR** |
+| IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 | Final B-spline, P5-before-publish and runtime binding | Registered smoke has P4 selection, EGO lineage, P5 final/runtime and normal B-spline counts all zero; launch manifest also loses the explicit nonempty P4 evidence path | **NOT PROVEN / FAIL CLOSED** |
+| IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 | Same-Gate recovery | ICRA-072 continuation requires persistent per-attempt lineage, no-collision/stale regression, typed exact path binding, fresh build and exactly one immutable `icra072-dev-smoke-002` after GPU preflight | **TASK_READY / DEVELOPMENT ONLY** |
+| IAP-RQ-423 / IAP-RQ-424 | Downstream authority | ICRA-073, optimization, G0D, formal/held-out runs, prospective qualification and campaign remain prohibited until full-flow Review PASS | **BLOCKED** |
+
 ## 2026-08-26 development-first full-flow decision
 
 | Req ID | Decision seam | Controlling evidence and disposition | Status |

@@ -1,5 +1,91 @@
 # ICRA Supervisor Log
 
+## 2026-08-26 — ICRA-072 Review REQUEST_CHANGES; lineage repair and replacement smoke authorized
+
+### Review identity and synchronization
+
+- Fixed Review base: `1a9db300c59671652b70d2df9b0a058da022b057`; reviewed Builder HEAD:
+  `1505a004f99a64fba440b47b38753d6719321471`. The range is one 26-file ICRA-072 implementation commit with
+  existing applicable requirement IDs. Startup tracked state was clean, the protected PDF was the sole untracked
+  file, `git fetch origin` left divergence `0 0`, and its SHA-256 remained
+  `1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+- `git diff --check` passes. Current route consistency and relative `.githooks` path checks pass. The reviewed
+  range does not edit the route lock, Supervisor-owned authority, ICRA-071 guard, protected PDF or retained
+  ICRA-068/070 artifacts.
+
+### Standards
+
+Verdict: **FAIL — one hard repository-boundary violation; three maintainability smells.**
+
+- Hard: Builder's disclosed direct C++ invocations created seven ambient rclcpp log entries outside the
+  repository, changing the external inventory from 17,801 to 17,808. This violates `AGENTS.md` §8.5. Retaining
+  rather than deleting those historical entries is correct; all continuation commands must use task-local
+  `ROS_LOG_DIR` and exact pre/post inventory.
+- Judgement call / Duplicated Code: FNV-style identity hashing is repeated in `planner_manager.cpp` and
+  `p4_collision_guide.cpp`.
+- Judgement call / Feature Envy and Divergent Change: planner manager probes optimizer guides/trajectory state,
+  owns lineage CSV schema, hashing and file I/O. A deeper evidence component is preferable after the runnable
+  flow is closed.
+- Judgement call / Primitive Obsession and Data Clumps: the analyzer transports its nine-field stage contract
+  as free-form strings/tuples. This is not expanded into a refactor prerequisite for the bounded continuation.
+- No additional `conventions.md` or `talk_spec.md` violation was found; source/document requirement IDs and
+  Builder document synchronization are present.
+
+### Spec
+
+Verdict: **FAIL — one critical acceptance failure, one high lineage defect and one medium proof gap.**
+
+- Critical: the sole registered smoke `icra072-dev-smoke-001` is FAIL. GPU preflight and 15/15 required-process
+  health passed, but P0 ready generation, P4 selected decisions, EGO lineage, P5 final/runtime binding and normal
+  B-spline publication are all zero. P0 health has 0/140 ready rows and 105/140
+  `invalid_covariance_growth_parameter`. This violates the explicit full-lineage acceptance contract.
+- High: `initControlPoints()` and `check_collision_and_rebound()` each clear `last_p4_guides_`; the rebound path
+  then returns immediately on `NO_COLLISION`. Final `recordP4VerticalSliceLineage()` requires that same transient
+  vector to be nonempty. A guide that successfully removes collision can therefore be erased by later normal
+  refinement and block final P5/publication instead of preserving attempt lineage.
+- Medium: focused tests cover the isolated initial/rebound P4 seam and synthetic CSV/source ordering, but do not
+  execute the production-shaped selected-guide -> no-collision refinement -> final B-spline -> P5/runtime chain.
+  The registered manifest also records empty `p4.debug_csv_path`, while the runner supplied an explicit task-local
+  path; the analyzer consequently treated `.` as a file and did not provide a precise binding failure.
+- No material scope creep was found.
+
+### Gate and independent verification
+
+- Gate verdict: `ICRA072_REQUEST_CHANGES_REGISTERED_SMOKE_FAIL`. Static implementation is materially present,
+  but runnable full-flow acceptance is not established. ICRA-073 is not authorized.
+- Final Builder build `attempt_11` reports 6/6 packages and exit 0. Supervisor reran 137/137 focused C++ tests,
+  22/22 launch tests, 3/3 ICRA-072 tool tests and Python syntax successfully. Correct hermetic runs retained an
+  unchanged 17,808-entry external ROS-log inventory under ignored task-local Review evidence.
+- Review command disclosure: one direct unittest discovery lacked its required hermetic environment and exited
+  before test execution; one wrapper attempt used a relative task root and failed its absolute-path precondition;
+  one verifier command initially used a nonexistent short path. Correct task-local/absolute invocations then
+  passed. No ROS, GPU, launch, product mutation or cleanup occurred during Review.
+- Raw smoke hashes match the compact record. The smoke used install `attempt_06`, whereas the explicit `0.01` /
+  `legacy_iap_rq320_baseline_v1` profile correction and final static build are in `attempt_11`; there was correctly
+  no unauthorized live retry.
+
+### Next task and artifact lifecycle
+
+- Reissue ICRA-072 in the same Gate. The Builder must persist selected-guide identity across no-collision
+  refinement with stale-attempt/invalidation clearing, add the production-shaped regression, fix exact nonempty
+  launch-manifest/analyzer P4 path binding, version runner/analyzer to immutable
+  `icra072-dev-smoke-002`, make one fresh post-`attempt_11` build/install, and run exactly one replacement smoke
+  after static checks and GPU preflight.
+- The continuation cannot tune objectives, thresholds, algorithms or scene against the result. It cannot start
+  effect diagnostics/optimization, formal science, G0D, qualification or campaign. PASS may still issue only
+  ICRA-073.
+- All ICRA-068/070/072 build/install, compact/raw evidence, ambient violation evidence, P4-v1 history and the
+  protected PDF remain retained and ineligible for staging or cleanup.
+
+### Supervisor window disposition
+
+- Disposition: `ROTATE_RECOMMENDED`.
+- Reason: `P4_V2_CANONICAL_DECISION_AND_LINEAGE_SCHEMA_REVIEWED_WITH_BLOCKING_REPAIR`. The reviewed change
+  introduces canonical cross-layer decision/lineage schemas and the Review identifies a blocking lifetime
+  correction, which is a mandatory §8.6 rotation trigger even though the next task remains in the same Gate.
+- Post-push audit: pending. A minimal Supervisor-only record will bind the exact pushed Review changeset as the
+  handoff anchor. The next Supervisor window is read-only until the ICRA-072 continuation Builder handoff.
+
 ## 2026-08-26 — user accelerates development-first full-flow recovery; ICRA-072 authorized
 
 ### Decision identity and synchronization
