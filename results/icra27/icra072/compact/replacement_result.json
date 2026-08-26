@@ -1,0 +1,117 @@
+{
+  "schema_version": "icra072_replacement_result_v1",
+  "task_id": "ICRA-072",
+  "implementation_commit": "749fafd6bd4b805f7e0e5d705c5d151b312d6287",
+  "live_implementation_commit": "d3b3375231218a8d1d6c7bf1cccba4cc174cb176",
+  "final_static_implementation_commit": "749fafd6bd4b805f7e0e5d705c5d151b312d6287",
+  "status": "BLOCKED",
+  "handoff": "ICRA072_REPLACEMENT_FLOW_BLOCKED",
+  "development_only": true,
+  "effect_claim": false,
+  "fresh_build": {
+    "identity": "attempt_15",
+    "packages_finished": 6,
+    "packages_failed": 0,
+    "direct_packages": [
+      "iap",
+      "plan_env",
+      "traj_utils",
+      "path_searching",
+      "bspline_opt",
+      "ego_planner"
+    ]
+  },
+  "focused_tests": {
+    "cpp": {
+      "executed": 139,
+      "passed": 139,
+      "exit": 0,
+      "suite_counts": [49, 9, 20, 19, 9, 33]
+    },
+    "launch": {
+      "executed": 23,
+      "passed": 23,
+      "exit": 0
+    },
+    "icra072_tools": {
+      "executed": 5,
+      "passed": 5,
+      "exit": 0
+    }
+  },
+  "installed_profile": {
+    "path": "results/icra27/icra072/log/installed_profile_attempt_15/profile_contract.json",
+    "sha256": "2baebeb01437fccb038b508d4c1285defe390b367f25a6b9855362f33f9fd740",
+    "sigma_grow_m_sqrt_s": 0.01,
+    "sigma_growth_profile": "legacy_iap_rq320_baseline_v1",
+    "p1_p2_p3_disabled": true,
+    "p4_v2_enabled": true,
+    "p5_final_runtime_enabled": true,
+    "debug_csv_task_local_nonempty": true
+  },
+  "registered_execution": {
+    "run_id": "icra072-dev-smoke-002",
+    "gpu_preflight_invocations": 1,
+    "live_launch_invocations": 1,
+    "analyzer_invocations": 1,
+    "retry_count": 0,
+    "duration_s": 45.0,
+    "gpu_ready": true,
+    "cuda_init_result": 0,
+    "device_count": 1,
+    "required_processes_seen": 15,
+    "required_processes_total": 15,
+    "required_process_runtime_failures": 0,
+    "owned_process_groups_cleared": true,
+    "p0_ready_count": 123,
+    "p0_max_generation": 56,
+    "p4_v2_rows": 1464,
+    "p4_original_selected": 1408,
+    "p4_invalid": 56,
+    "p4_risk_selected": 0,
+    "p4_selection_applied": 0,
+    "lineage_count": 0,
+    "normal_bspline_count": 0,
+    "p5_final_ok_count": 0,
+    "p5_runtime_bound_count": 0,
+    "analysis_result": "FAIL",
+    "live_install_identity": "attempt_13",
+    "final_static_install_identity": "attempt_15",
+    "final_static_install_live_exercised": false,
+    "analysis_failures": [
+      "p4_evidence_missing",
+      "p4_v2_selected_guide_missing",
+      "p4_ego_p5_publish_lineage_identity_mismatch",
+      "p5_final_before_publish_pass_missing",
+      "p5_runtime_committed_binding_missing",
+      "normal_bspline_publish_missing"
+    ]
+  },
+  "artifact_hashes": {
+    "run_manifest.json": "97bb0feb7f0bb26ccaddde936130cc9ab903d00bb26b85053a54d2dbff5052fd",
+    "gpu_preflight.json": "ba2ab43a2ad83d6de9e8cb95ff2b4ec0303c86c0d3c0872df75936546b09c749",
+    "analysis.json": "4a6c68d0208b6aa5a84f4536ac360264803779e6f02f61e96fc767723c89c4d7",
+    "lineage_capture.jsonl": "72c728b018a96a25230cff78dbe2658ec15dba5035877a6974142117994a9cc2",
+    "planner_p4_risk_astar_debug.csv": "c9718a510c20734baebc75d837938dc7e37ef0e7034193e026160971c4825d34"
+  },
+  "external_ros_log_inventory": {
+    "wrapper_entry_count": 17808,
+    "relative_path_inventory_sha256": "40a7aad5e3bd576af04a62cf5d7cf2ffd30a1d7e82a870d993c4dcce0a19a568",
+    "new_external_entries": 0
+  },
+  "protected_pdf": {
+    "path": "docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf",
+    "sha256": "1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6",
+    "tracked": false,
+    "modified": false
+  },
+  "forbidden_actions": {
+    "smoke_retry": 0,
+    "benchmark_60s": 0,
+    "effect_diagnosis": 0,
+    "fixture_or_threshold_tuning": 0,
+    "qualification": 0,
+    "campaign": 0
+  },
+  "blocker": "The sole authorized replacement produced valid P0 generations and truthful P4-v2 rows but no naturally selected risk guide, so the required final B-spline/P5/publication/runtime lineage was absent. Retry and tuning are forbidden."
+}
