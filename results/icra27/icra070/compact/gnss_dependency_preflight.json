@@ -1,0 +1,42 @@
+{
+  "dependency_ready": true,
+  "gnss_simulator": {
+    "executable": true,
+    "path": "/home/dev/ws_iap/src/iap/results/icra27/icra068/install/lib/gnss_sim/gnss_sim_node",
+    "readable": true,
+    "sha256": "31a49d8f0fc654f6c0d5a4401da77cc5afd50e3ca9961880a5733f39d7b95565",
+    "size": 2323032
+  },
+  "rinex_ephemeris": {
+    "executable": false,
+    "path": "/home/dev/ws_iap/src/LIGO./Data/BRDM00DLR_S_20221870000_01D_MN.rnx",
+    "readable": true,
+    "sha256": "42e87bd2edff3bb66e6d58b01c1710e9547270cfe795203ce947b8d88356bd32",
+    "size": 7630974
+  },
+  "scenario": {
+    "executable": false,
+    "path": "/home/dev/ws_iap/src/iap/results/icra27/icra070/install/share/iap/config/gnss_sim/demo7_skymask_nlos.yaml",
+    "readable": true,
+    "sha256": "d0b283b33333d3686bd49acb301b7cc7780dc21a00ca5233e3836911f9032c3e",
+    "size": 287
+  },
+  "schema_version": "icra070_gnss_dependency_preflight_v1",
+  "sensor_model": {
+    "constellations": [
+      "GPS",
+      "BDS",
+      "GAL",
+      "GLO"
+    ],
+    "doppler_noise_std_mps": 0.5,
+    "fallback_to_synthetic_on_rinex_error": false,
+    "map_occlusion": true,
+    "multipath": true,
+    "nlos": true,
+    "pseudorange_noise_std_m": 5.0,
+    "skymask": true,
+    "time_source": "trigger_topic",
+    "trigger_topic": "/sim/drone_0/lidar"
+  }
+}

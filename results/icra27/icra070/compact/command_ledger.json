@@ -1,0 +1,72 @@
+{
+  "schema_version": "icra070_command_ledger_v1",
+  "task_id": "ICRA-070",
+  "git_commit": "380c0133c80c7a478c613b1ae6bb5097c9674ebd",
+  "cwd": "/home/dev/ws_iap/src/iap",
+  "commands": [
+    {
+      "phase": "focused_contract",
+      "argv": ["python3", "-m", "unittest", "discover", "-s", "test", "-p", "test_icra_p0_p5_qualification.py"],
+      "exit_code": 0,
+      "result": "15/15 PASS"
+    },
+    {
+      "phase": "focused_runner",
+      "argv": ["python3", "-m", "unittest", "discover", "-s", "test", "-p", "test_run_icra_p0_p5_qualification.py"],
+      "exit_code": 0,
+      "result": "31/31 PASS"
+    },
+    {
+      "phase": "launch_hermetic",
+      "argv": ["python3", "scripts/dev_planner/run_p4_g0c_tests.py", "--task-root", "/home/dev/ws_iap/src/iap/results/icra27/icra063/icra070_reviewfix_launch2", "unittest", "discover", "-s", "test", "-p", "test_test_planner_launch.py"],
+      "exit_code": 0,
+      "result": "21/21 PASS",
+      "evidence_path": "results/icra27/icra063/icra070_reviewfix_launch2/external_inventory/unittest-3560750-result.json"
+    },
+    {
+      "phase": "full_hermetic",
+      "argv": ["python3", "scripts/dev_planner/run_p4_g0c_tests.py", "--task-root", "/home/dev/ws_iap/src/iap/results/icra27/icra063/icra070_reviewfix_full", "unittest", "discover", "-s", "test", "-p", "test_*.py"],
+      "exit_code": 0,
+      "result": "567/567 PASS",
+      "evidence_path": "results/icra27/icra063/icra070_reviewfix_full/external_inventory/unittest-3567470-result.json"
+    },
+    {
+      "phase": "dependency_and_overlay_prepare",
+      "argv": ["python3", "scripts/dev_planner/run_icra_p0_p5_qualification.py", "--prepare-overlay"],
+      "environment": {
+        "HOME": "/home/dev/ws_iap/src/iap/results/icra27/icra070/live_environment/home",
+        "ROS_HOME": "/home/dev/ws_iap/src/iap/results/icra27/icra070/live_environment/ros_home",
+        "ROS_LOG_DIR": "/home/dev/ws_iap/src/iap/results/icra27/icra070/live_environment/ros_logs",
+        "TMPDIR": "/home/dev/ws_iap/src/iap/results/icra27/icra070/live_environment/tmp",
+        "XDG_RUNTIME_DIR": "/home/dev/ws_iap/src/iap/results/icra27/icra070/live_environment/xdg_runtime",
+        "AMENT_PREFIX_PATH": "/home/dev/ws_iap/src/iap/results/icra27/icra070/install:/home/dev/ws_iap/src/iap/results/icra27/icra068/install:/root/ros2_ws/install:/opt/ros/jazzy",
+        "CMAKE_PREFIX_PATH": "/home/dev/ws_iap/src/iap/results/icra27/icra070/install:/home/dev/ws_iap/src/iap/results/icra27/icra068/install:/root/ros2_ws/install/glim_ros:/root/ros2_ws/install/glim:/opt/ros/jazzy",
+        "LD_LIBRARY_PATH": "/home/dev/ws_iap/src/iap/results/icra27/icra070/install/lib:/home/dev/ws_iap/src/iap/results/icra27/icra068/install/lib:/root/ros2_ws/install/glim_ros/lib:/root/ros2_ws/install/glim/lib:/opt/ros/jazzy/lib:/opt/ros/jazzy/lib/x86_64-linux-gnu",
+        "COLCON_PREFIX_PATH": "/home/dev/ws_iap/src/iap/results/icra27/icra070/install:/home/dev/ws_iap/src/iap/results/icra27/icra068/install:/root/ros2_ws/install",
+        "PYTHONPATH": "/home/dev/ws_iap/src/iap/results/icra27/icra070/install/lib/python3.12/site-packages:/home/dev/ws_iap/src/iap/results/icra27/icra068/install/lib/python3.12/site-packages:/opt/ros/jazzy/lib/python3.12/site-packages"
+      },
+      "exit_code": 1,
+      "result": "BLOCKED_UNAUTHORIZED_OVERLAY_DIFFERENCE",
+      "evidence_paths": [
+        "results/icra27/icra070/compact/overlay_install_command.json",
+        "results/icra27/icra070/compact/gnss_dependency_preflight.json",
+        "results/icra27/icra070/compact/final_result.json"
+      ]
+    },
+    {
+      "phase": "parser",
+      "invocations": 0,
+      "reason": "not authorized after Phase B blocker"
+    },
+    {
+      "phase": "gpu_and_live_runner",
+      "invocations": 0,
+      "reason": "not authorized after Phase B blocker"
+    },
+    {
+      "phase": "analyzer",
+      "invocations": 0,
+      "reason": "not authorized without three complete live arms"
+    }
+  ]
+}

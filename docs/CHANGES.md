@@ -2916,3 +2916,12 @@ Requirements: `IAP-RQ-020`, `IAP-RQ-030`, `IAP-RQ-040`, `IAP-RQ-220`,
   21/21 launch tests and complete hermetic discovery 567/567. The 17,770
   external ROS entries remain unchanged. No overlay, real parser, GPU, live arm
   or analyzer has been invoked at this checkpoint.
+- The reviewed overlay preparation was invoked exactly once. GNSS dependency
+  preflight and the no-compile CMake install passed, with all 7,364 retained
+  ICRA-068 entries byte-identical before/after. Inventory then stopped on the
+  unauthorized installed Python cache
+  `share/iap/launch/__pycache__/icra_p0_p5_qualification.cpython-312.pyc`:
+  its overlay byte hash matches the current source cache but differs from the
+  frozen ICRA-068 cache. No overlay/adoption manifest, parser, GPU preflight,
+  live identity or analyzer followed, and no retry ran. Final state is
+  **BLOCKED_ICRA070_UNAUTHORIZED_OVERLAY_PYC_DIFFERENCE**.

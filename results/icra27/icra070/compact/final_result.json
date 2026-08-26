@@ -1,0 +1,71 @@
+{
+  "schema_version": "icra070_final_result_v1",
+  "task_id": "ICRA-070",
+  "gate": "P0_P5_FUSED_SENSOR_CONTRACT_AND_REPLACEMENT_QUALIFICATION",
+  "git_commit": "380c0133c80c7a478c613b1ae6bb5097c9674ebd",
+  "status": "BLOCKED_ICRA070_UNAUTHORIZED_OVERLAY_PYC_DIFFERENCE",
+  "qualification_claim": false,
+  "typed_blocker": "unauthorized_overlay_difference:share/iap/launch/__pycache__/icra_p0_p5_qualification.cpython-312.pyc",
+  "stopped_at_phase": "PHASE_B_OVERLAY_INVENTORY",
+  "one_shot_execution": {
+    "prepare_overlay_invocations": 1,
+    "prepare_overlay_exit_code": 1,
+    "overlay_install_invocations": 1,
+    "overlay_install_exit_code": 0,
+    "parser_invocations": 0,
+    "gpu_preflight_invocations": 0,
+    "live_launch_invocations": 0,
+    "registered_live_identities": [],
+    "attempted_live_identities": [],
+    "analyzer_invocations": 0,
+    "retries": 0
+  },
+  "static_verification": {
+    "focused_runner_contract": "46/46 PASS",
+    "launch": "21/21 PASS",
+    "hermetic_full": "567/567 PASS",
+    "external_ros_inventory_entries": 17770,
+    "standards_review": "PASS",
+    "spec_review": "PASS"
+  },
+  "dependency_preflight": {
+    "ready": true,
+    "path": "results/icra27/icra070/compact/gnss_dependency_preflight.json",
+    "sha256": "b35afeb83fb119efacc5ea40ef93ce24360ba65e2f57ec9a002d2f4824426ece"
+  },
+  "overlay_install": {
+    "retained_icra068_entry_count": 7364,
+    "retained_icra068_inventory_before_sha256": "fdeb47e3d025bbc7c442b86521e6808d1452d928178a52df0b2f9e03aace4858",
+    "retained_icra068_inventory_after_sha256": "fdeb47e3d025bbc7c442b86521e6808d1452d928178a52df0b2f9e03aace4858",
+    "retained_icra068_bytes_unchanged": true,
+    "compile_invocations": 0,
+    "installed_file_count": 474,
+    "installed_symlink_count": 0,
+    "command_record_path": "results/icra27/icra070/compact/overlay_install_command.json",
+    "command_record_sha256": "f9c48b12c4170122f58eb49c6fced267d5d4b19fd8633495b8ef1962b389e16f",
+    "driver_path": "results/icra27/icra070/overlay_install_driver.cmake",
+    "driver_sha256": "cac3da758800fa42172b43caef6551f39f45fcc350c2a7270a2191167ef45581"
+  },
+  "unauthorized_difference": {
+    "relative_path": "share/iap/launch/__pycache__/icra_p0_p5_qualification.cpython-312.pyc",
+    "base_size": 59618,
+    "base_sha256": "49920bc705c8af56dcf78b3df2aea5c9d60e53ee82265a178edce09d04c7cf8d",
+    "overlay_size": 65195,
+    "overlay_sha256": "ed06637091364d4fe27479be985e506ed82d2d2ed4381fed54518ab088fae189",
+    "current_source_sha256": "ed06637091364d4fe27479be985e506ed82d2d2ed4381fed54518ab088fae189"
+  },
+  "absent_evidence": [
+    "results/icra27/icra070/compact/icra070_overlay_manifest.json",
+    "results/icra27/icra070/compact/icra070_adoption_manifest.json",
+    "results/icra27/icra070/parse_only",
+    "results/icra27/icra070/preflight",
+    "results/icra27/icra070/live"
+  ],
+  "protected_pdf": {
+    "path": "docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf",
+    "sha256": "1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6",
+    "tracked": false,
+    "staged": false
+  },
+  "recorded_at_utc": "2026-08-26T04:45:47Z"
+}

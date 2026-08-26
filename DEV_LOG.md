@@ -8176,3 +8176,17 @@ passes 21/21. Complete hermetic discovery passes 567/567; every run reports the
 17,770-entry external ROS inventory unchanged. No ICRA-070 overlay, installed
 parser, GPU preflight, live identity or authoritative analyzer has been invoked
 at this static checkpoint.
+
+The reviewed static commits `7b51eb6` and `380c013` were pushed at `0 0`
+divergence. The authorized `--prepare-overlay` invocation then ran exactly once.
+GNSS dependency preflight passed and the closed CMake install exited 0 with
+zero compile invocations; the complete 7,364-entry ICRA-068 byte inventory was
+identical before/after (`fdeb47e3...e4858`). Overlay inventory stopped
+fail-closed on the first unauthorized byte difference:
+`share/iap/launch/__pycache__/icra_p0_p5_qualification.cpython-312.pyc`
+(base `49920bc7...cf8d`, overlay/current source `ed066370...e189`). No overlay
+manifest/adoption manifest was issued. Parser, GPU preflight, all `-003` live
+identities and analyzer remained at zero invocations; no retry occurred.
+Compact result: `results/icra27/icra070/compact/final_result.json`. ICRA-070 is
+terminally `BLOCKED_ICRA070_UNAUTHORIZED_OVERLAY_PYC_DIFFERENCE` pending
+Supervisor review.
