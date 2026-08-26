@@ -111,6 +111,10 @@ Implementation must follow docs/spec/conventions.md and docs/spec/talk_spec.md a
 ### 8.5 安全与范围
 
 - 仓库边界仍以本文件第 0 节为最高约束。不得在仓库外创建/chmod backup、归档或证据；不得进行磁盘清理、移动或压缩用户数据。
+- 唯一的可再生 artifact 清理例外必须由 USER 对精确范围显式授权，并由 Supervisor 先提交、push
+  逐路径/大小清单，再逐项证明目标位于本仓库、不是 symlink、不含 tracked 文件、未被进程占用，且
+  不包含 raw/compact/live/scientific evidence、manifest、analysis、普通日志、共享工作区 build/install/log
+  或受保护 PDF。删除后必须记录实际释放空间和保留项检查；该例外不得从一次授权推定到其他路径。
 - 不得修改 `src/glim` 或其他工作区仓库；不得把既有外部 artifact 删除或“修复”来掩盖历史越界。
 - 运行结束必须检查并清理本任务启动的 ROS 进程；不得终止无法证明由本任务启动的用户进程。
 - 发现权限、范围、真实输入或 required-process blocker 时，保留证据并报告 `BLOCKED`，不得调参、扩场景或修改算法来绕过 gate。

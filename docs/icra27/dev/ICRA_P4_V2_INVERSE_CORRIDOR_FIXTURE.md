@@ -14,8 +14,9 @@ compared with an independently defined safe tube instead of relying only on the 
 
 This record is a development-design freeze. It is not a route-lock change, an ICRA-072 scene change, an effect
 result, a qualification result, a preregistration, or campaign authorization. Implementation starts only in a
-separately issued ICRA-073 task after ICRA-072 receives Supervisor Review PASS. If ICRA-072 receives another
-`REQUEST_CHANGES`, this design remains queued and no fixture code, runner, analyzer, or live execution begins.
+separately issued ICRA-073 task after ICRA-072A integration and ICRA-072B stabilization close ICRA-072. If either
+layer receives `REQUEST_CHANGES`, this design remains queued and no fixture code, runner, analyzer, or live
+execution begins.
 
 The fixture must distinguish integrity-aware choice from ordinary obstacle avoidance. PRIMARY therefore has two
 collision-feasible curved homotopies with the same endpoints: a longer provider-safe corridor and a shorter
@@ -184,6 +185,6 @@ ICRA-068/070/072 artifacts and `docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf` untouched.
 
 This phase-one record intentionally does not edit the user route lock, gate sequence, `AGENT_STATE.md`,
 `NEXT_TASK.md`, `SUPERVISOR_LOG.md`, scope, roadmap, implementation plan, plan review, system flow, product code,
-fixture code, runner, analyzer, or live evidence. After the current ICRA-072 Builder handoff, the Supervisor will
-cross-link this record into the authority documents during Review. Only an ICRA-072 full-lineage Review PASS may
-issue ICRA-073.
+fixture code, runner, analyzer, or live evidence. The Supervisor cross-linked this record into the authority
+documents while adopting the four-layer workflow. ICRA-072A full-lineage PASS may issue only ICRA-072B; only an
+ICRA-072B stabilization Review PASS may close ICRA-072 and issue ICRA-073.

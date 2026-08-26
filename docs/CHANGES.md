@@ -3,6 +3,12 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- docs(icra-artifact-authority): IAP-RQ-000 / IAP-RQ-424 — reconcile the user-authorized cleanup workflow with
+  `AGENTS.md` by adding one narrow, non-transferable exception for an explicit USER decision, pushed literal
+  inventory, repository/symlink/tracked/process checks and strict evidence/shared-workspace/PDF exclusions.
+  Clarify outside the unchanged route-lock sentinel that ICRA-072A PASS issues only ICRA-072B and only ICRA-072B
+  stabilization PASS may close ICRA-072 and issue ICRA-073.
+
 - review(icra-four-layer-workflow): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 /
   IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — archive Builder HEAD `6a6bdd3` exactly as found:
   static admission and natural P4 selection pass, but the sole `icra072-dev-smoke-003` analyzer exits 1 with no
