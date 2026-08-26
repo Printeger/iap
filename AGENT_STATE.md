@@ -7,17 +7,17 @@ active_role: DEEPSEEK
 status: TASK_READY
 gate: P0_P5_FUSED_SENSOR_CONTRACT_AND_REPLACEMENT_QUALIFICATION
 task_id: ICRA-070
-review_base: 3c8fffe8be003e1e8b9c81d7d0ba7736484fac69
-reviewed_head: d88d42bc5445411e4c4d7ad1a8fecbf2dabe20e1
+review_base: 1b3c6617732787b10c778a64fe43d37f29d84ffe
+reviewed_head: 24d3e1623d966d9a3fcdd71d99f3cf30d390cc10
 conference_route: P0_P5_CONTINGENCY
-route_status: FULL_SENSOR_STATIC_BINDING_PASS_OVERLAY_CACHE_REMEDIATION_READY
+route_status: FULL_SENSOR_STATIC_BINDING_PASS_COMPLETE_REPLACEMENT_OVERLAY_READY
 historical_gate0a_verdict: NO_GO_P2
 p0_gate0b_status: PASS
 p0_gate0b_worker_count: 4
 p4_status: G0A_PASS_G0B_PASS_G0C_SCIENTIFIC_NO_GO_CLOSED
-p5_status: QUALIFICATION_BLOCKED_BEFORE_PARSER_GPU_LIVE_BY_OVERLAY_PYCACHE_BOUNDARY
-supervisor_verdict: ICRA070_STATIC_IMPLEMENTATION_PASS_GATE_BLOCKED_AVOIDABLE_PYTHON_CACHE_PACKAGING
-review_disposition: ICRA070_SINGLE_REPAIR_CONTINUATION_READY_ICRA071_DEFERRED_UNTIL_070_PASS
+p5_status: QUALIFICATION_BLOCKED_BEFORE_REPAIR_PARSER_GPU_LIVE_BY_GIT_SAFE_DIRECTORY_AND_INCOMPLETE_OVERLAY
+supervisor_verdict: ICRA070_STATIC_REPAIR_IMPLEMENTATION_PASS_GATE_BLOCKED_ONE_SHOT_ENVIRONMENT_AND_INCOMPLETE_OVERLAY
+review_disposition: ICRA070_NONOVERWRITING_COMPLETE_REPLACEMENT_OVERLAY_CONTINUATION_READY_ICRA071_DEFERRED
 qualification_claim: false
 campaign_status: BLOCKED_UNTIL_ICRA070_PASS_AND_ICRA071_STATIC_GUARD_PASS
 handoff_status: TASK_READY
@@ -30,24 +30,27 @@ window_handoff_anchor: origin/dev/icra
 window_next_role: SUPERVISOR
 window_next_review_task: ICRA-070
 window_bootstrap_source: REPOSITORY_AUTHORITY_ONLY
-updated_utc: 2026-08-26T05:42:46Z
+updated_utc: 2026-08-26T06:52:39Z
 ```
 
-ICRA-070 correctly restores the GNSS pseudorange+doppler + IMU + LiDAR target in all three qualification
-cases. The Supervisor reran complete hermetic discovery at 567/567 and confirmed that ICRA-068 remained
-byte-identical, the dependency preflight passed, and parser/GPU/live/analyzer invocation counts stayed zero.
+Supervisor review of `1b3c661...24d3e16` accepts the permanent cache exclusion, full-file-set verifier,
+durable pre-mutation journal design and fail-closed static implementation. Independent focused tests pass
+`15/15`, `43/43` and `21/21`; complete hermetic discovery exits zero with all 17,770 external ROS-log entries
+unchanged. ICRA-068 and the failed ICRA-070 overlay retain their exact recorded inventories, the protected PDF
+is unchanged and unstaged, and no task-owned live process remains.
 
-ICRA-070 is not a gate PASS. The retained CMake install driver recursively copied ignored source
-`launch/__pycache__` files into the task overlay. At least two generated `.pyc` files differ from ICRA-068, so
-the overlay inventory correctly stopped fail-closed before any live action. This is an avoidable packaging
-boundary defect, not a GNSS, GPU, algorithm or environment failure. The same unused `-003` live identities may
-be used only after the single repair continuation in `NEXT_TASK.md` excludes all Python cache artifacts and
-freezes a new non-overwriting overlay manifest.
+ICRA-070 is not a gate PASS. Its sole authorized repair entrypoint exited before mutation because the
+task-local `HOME` did not trust the repository as a Git `safe.directory`. The deeper read-only verifier also
+proves the old overlay is not repairable in place: it contains 469 non-cache entries versus 2,079 in the
+ICRA-068 base and is missing 1,610 required files. Repair/parser/GPU/live/analyzer counts are `1/0/0/0/0`, no
+cache was removed, and no v2 repair/overlay/adoption manifest exists. This is an orchestration and overlay
+construction blocker, not a GNSS, GPU, P5, algorithm or scientific failure.
 
-Campaign remains forbidden. After repaired ICRA-070 reaches `P5_PROSPECTIVE_QUALIFICATION_PASS` and passes
-Supervisor review, the next task is the pure-static ICRA-071 cross-layer guard hardening defined by
-`docs/icra27/ICRA_CROSS_LAYER_GUARD_PLAN.md`. Campaign may start only after ICRA-071 itself passes review.
+The next bounded ICRA-070 continuation must preserve the exhausted repair evidence and old overlay, use
+command-local Git trust under the isolated environment, create a new complete non-overwriting overlay from
+the retained ICRA-068 non-cache file set, apply only the three authorized aliases, and then complete the still
+unused parser/GPU/three `-003` arms/analyzer sequence. Existing build/install trees remain retained through
+development and Review because the gate did not pass.
 
-The current Supervisor window disposition is `ROTATE_RECOMMENDED`: this Review boundary is pushed and the
-conversation has crossed multiple context compactions. The replacement Supervisor window is for the next
-ICRA-070 Review only; while `active_role=DEEPSEEK`, it must not execute or modify the active Builder task.
+ICRA-071 and campaign remain forbidden. The window fields above retain the prior Review disposition until the
+mandatory post-push audit records the final disposition for this Review in a minimal Supervisor-only commit.

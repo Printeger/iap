@@ -38,6 +38,15 @@ files differ from ICRA-068, so overlay inventory correctly stopped before parser
 ICRA-070 continuation is authorized to exclude every generated Python cache, preserve the blocker evidence,
 freeze non-overwriting v2 provenance and then use the still-unregistered `-003` identities exactly once.
 
+Supervisor review of the resulting `1b3c661...24d3e16` changes accepts the permanent cache exclusion and
+fail-closed static repair implementation but again does not pass the gate. The sole repair entrypoint stopped
+before mutation because task-local Git did not trust the repository as a safe directory. Independently, the
+complete file-set verifier proves the old overlay is structurally incomplete: 469 non-cache entries versus
+2,079 in the ICRA-068 base, with 1,610 missing. The old repair is exhausted and the old overlay is retained.
+One same-Gate ICRA-070 continuation is authorized to create a new complete non-overwriting overlay from the
+retained ICRA-068 non-cache file set, apply only the three current aliases, and then run the unused `-003`
+parser/GPU/live/analyzer sequence. This does not change the system target, claim boundary or campaign barrier.
+
 Even after an ICRA-070 qualification PASS, campaign does not start. The next gate is the pure-static ICRA-071
 cross-layer guard hardening in `docs/icra27/ICRA_CROSS_LAYER_GUARD_PLAN.md`. It centralizes the target contract,
 checks target -> effective config -> launch/process/topic projection -> monitor/analyzer evidence, hardens

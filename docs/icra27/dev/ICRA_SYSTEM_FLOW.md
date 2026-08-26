@@ -4,6 +4,11 @@
 
 > Current status: P0 Gate-0B `PASS`; P4 `G0C NO_GO / DISABLED`; P5 `IMPLEMENTED-BUT-UNQUALIFIED`.
 
+> ICRA-070 update: the cache-repair implementation is statically accepted, but its sole entrypoint stopped
+> before mutation under task-local Git `safe.directory`. The old overlay is also missing 1,610 of 2,079 base
+> non-cache entries and cannot be repaired in place. A new complete non-overwriting overlay continuation is
+> `TASK_READY`; parser/GPU/live/analyzer remain uninvoked.
+
 The active flow is now `P0 advisory snapshot -> original EGO planning/refinement -> P5 final -> normal publish
 -> P5 runtime`. P1/P2/P3/P4 are disabled in the conference profile. The detailed P4 diagram below is retained
 as the audited failed route and does not authorize P4 application or G0D.
@@ -161,7 +166,7 @@ The existing `p4` profile does not enable P5. The existing `all` profile enables
 | P4-G0B | G0A PASS | Metrics-only pair, identity and 200/200 profiles; no application | `PASS` (historical closed route) |
 | P4-G0C | G0B PASS | Metrics-only calibration and positive mean/max improvement | `SCIENTIFIC_NO_GO`: max improvement Q10 = 0; route closed |
 | P4-G0D | G0C scientific GO | Post-freeze selected hash reaches B-spline and P5 | Permanently unauthorized for this conference route |
-| P5 system gate | Reviewed P0+P5 full-sensor profile, zero-failure tests, immutable install, parser `0/0/0`, GPU PASS, all 16 processes, GNSS+IMU+LiDAR topics and positive GNSS/LiDAR P0 use | SAFE_NORMAL, final reject/no-publish and runtime-fail prospective identities PASS | ICRA-070 static binding PASS; overlay stopped before parser/GPU/live on copied `__pycache__`; one cache-boundary repair continuation `TASK_READY` |
+| P5 system gate | Reviewed P0+P5 full-sensor profile, zero-failure tests, immutable install, parser `0/0/0`, GPU PASS, all 16 processes, GNSS+IMU+LiDAR topics and positive GNSS/LiDAR P0 use | SAFE_NORMAL, final reject/no-publish and runtime-fail prospective identities PASS | ICRA-070 static repair implementation PASS; one-shot stopped before mutation on task-local Git trust and the old overlay is missing 1,610 base files; complete non-overwriting replacement-overlay continuation `TASK_READY` |
 | Cross-layer guard | ICRA-070 qualification PASS and Supervisor review | Canonical v2 target, typed resolver, target-to-evidence verifier, sustained raw-evidence audit, relative hooks and CI all PASS | `ICRA-071` frozen next gate; not active before ICRA-070 PASS |
 | Campaign | ICRA-071 Supervisor PASS | Fresh GPU and `≥40 GiB` free plus separate campaign task | Explicitly blocked; no automatic transition from ICRA-070 |
 

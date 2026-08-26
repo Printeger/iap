@@ -39,6 +39,14 @@ ICRA-070 在静态 full-sensor 修正和 567/567 tests 后，首次 overlay prep
 不覆盖旧证据的 v2 provenance，然后才运行仍未使用的 `-003` sequence。不得 whitelist `.pyc`，也不得
 把该 packaging defect 解释为 GNSS/GPU/算法失败。
 
+上述 repair continuation 的 `1b3c661...24d3e16` 静态实现经 Supervisor 接受，但 one-shot 入口在 mutation
+前因 task-local Git `safe.directory` 缺失退出。完整 file-set 检查同时证明旧 overlay 只有 469 个 non-cache
+entries，相对 ICRA-068 install 的 2,079 个缺 1,610 个，因此删除 cache 也不能把旧 overlay 修复为完整产品。
+旧入口不得 retry，旧 overlay 与全部 terminal evidence 保留。当前仍属 ICRA-070 同一 Gate，只授权一个新的
+non-overwriting complete overlay：从 retained ICRA-068 复制全部 non-cache bytes/modes，再只替换三个 current
+aliases；静态闭合后才可执行尚未使用的 parser/GPU/`-003` live/analyzer sequence。build/install 在本次
+BLOCKED Review 后不得清理。
+
 ICRA-070 PASS 后仍不得启动 campaign。下一步固定为纯静态 ICRA-071，按
 `docs/icra27/ICRA_CROSS_LAYER_GUARD_PLAN.md` 建立唯一 v2 target、typed effective resolver、跨层静态
 verifier、sustained raw-evidence audit、relative hooks 和 CI。ICRA-071 经 Supervisor PASS 后，才可另行

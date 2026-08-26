@@ -35,6 +35,14 @@ LiDAR integrity 和 `max_pl` fusion 均有真实证据，再以 no-compile overl
 现有 fail-closed stop 正确，但 blocker 可由 packaging boundary 一次性修复。ICRA-070 continuation 必须
 排除全部 cache、保留 v1 blocker evidence，并在新 v2 manifest 下完成仍未启动的 parser/GPU/live/analyzer。
 
+对该 continuation 的 `1b3c661...24d3e16` Review 接受 permanent exclusion、full-file-set verifier 与
+pre-mutation journal 的静态实现，但正式 one-shot 在任何 mutation 前因隔离 `HOME` 下 Git
+`safe.directory` 缺失而退出。更深的 read-only proof 显示旧 overlay 缺少 1,610/2,079 个 base non-cache
+entries，故原地删除 cache 也必然 fail closed。该 entrypoint 已耗尽且不得 retry；旧 overlay 和 terminal
+evidence 保留。下一步仍是 ICRA-070，不是 ICRA-071：以新 root 从 retained ICRA-068 构造完整无 cache
+overlay，仅应用三个 current aliases，再完成 unused `-003` parser/GPU/live/analyzer。该决定不改变
+full-sensor target、P5 fixture/threshold、claim 或 campaign barrier。
+
 本 Review 同时冻结 campaign 前的额外控制门：070 PASS 后只允许纯静态 ICRA-071，不直接 campaign。
 071 按 `docs/icra27/ICRA_CROSS_LAYER_GUARD_PLAN.md` 消除 JSON/helper/launch/runner/test 多真源，验证完整
 target-to-evidence projection，修复无效 hook/缺失 CI，并对 070 raw evidence 执行带 warm-up/coverage 的

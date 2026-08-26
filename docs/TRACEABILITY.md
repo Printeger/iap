@@ -1,5 +1,14 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-26 ICRA-070 static-repair Supervisor review
+
+| Req ID | Reviewed/authorized seam | Evidence or controlling document | Status |
+|---|---|---|---|
+| IAP-RQ-000 / IAP-RQ-423 | Permanent cache exclusion, immutable prior evidence and fail-closed repair implementation | Review range `1b3c661...24d3e16`; `CMakeLists.txt`; runner/tests; focused Supervisor reruns `15/15`, `43/43`, `21/21`; complete hermetic exit 0 with 17,770-entry external inventory and empty delta | **STATIC IMPLEMENTATION PASS** |
+| IAP-RQ-000 / IAP-RQ-423 | A repair must pass the actual isolated environment and complete base/overlay file-set contract before mutation | `command_ledger_v2.json`, `final_result_v2.json`, independent isolated-`HOME` Git reproduction and inventory check: entrypoint exit 1 before mutation; base/overlay non-cache `2,079/469`; 1,610 missing; five caches retained | **GATE BLOCKED; OLD REPAIR EXHAUSTED** |
+| IAP-RQ-020 / IAP-RQ-030 / IAP-RQ-040 / IAP-RQ-220 / IAP-RQ-320 / IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 | Complete full-sensor qualification chain and raw/runtime evidence | Parser/GPU/live/analyzer counts `0/0/0/0`; no `P5_PROSPECTIVE_QUALIFICATION_PASS`; `NEXT_TASK.md` authorizes one complete non-overwriting replacement overlay and the still-unused `-003` sequence | **ICRA-070 CONTINUATION TASK_READY** |
+| IAP-RQ-000 / IAP-RQ-423 | Preserve artifact lifecycle and downstream authority | ICRA-068 build/install, failed ICRA-070 install, terminal evidence and PDF retained; `AGENT_STATE.md` and `NEXT_TASK.md` keep ICRA-071 inactive and campaign blocked | **NO CLEANUP / NO CAMPAIGN** |
+
 ## 2026-08-24 ICRA-040 P4-G0B review repair
 
 | Req ID | Requirement/evidence seam | Implementation and focused evidence | Status |

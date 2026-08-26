@@ -1,5 +1,60 @@
 # ICRA Supervisor Log
 
+## 2026-08-26 — ICRA-070 review: static repair accepted, one-shot stopped before mutation
+
+### Review identity and synchronization
+
+- Fixed range: `1b3c6617732787b10c778a64fe43d37f29d84ffe...24d3e1623d966d9a3fcdd71d99f3cf30d390cc10`.
+  Five Builder commits are pushed and each binds applicable `IAP-RQ-*` IDs. Before Review, HEAD and
+  `origin/dev/icra` had divergence `0 0`; the only worktree entry was the protected untracked PDF.
+- Builder changes stay within the active task ownership and allowed files. Prior blocker records, ICRA-068,
+  the failed ICRA-070 install and the PDF were not staged or rewritten. The PDF remains SHA-256
+  `1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+
+### Standards axis
+
+- No hard documented Standards violation was found. Requirement IDs, Builder documentation synchronization,
+  repository-local evidence, ownership and explicit staging boundaries conform to `AGENTS.md`.
+- Judgment-call smells remain in the 2,920-line runner: an unreachable preserved overlay implementation,
+  divergent orchestration/repair/evidence responsibilities, repeated overlay comparison logic and a repeated
+  overlay context parameter clump. They are nonblocking for this fail-closed repair result and must not be
+  expanded during the bounded continuation.
+
+### Spec, Gate and independent verification
+
+- Permanent CMake exclusion covers every `__pycache__`, `*.pyc`, `*.pyo` and `*.pyd` under installed launch
+  and config trees. The runner implements cache classification, durable pre-mutation recording, full file-set
+  comparison and no-bytecode subprocess environments. Static implementation scope is accepted.
+- Supervisor focused reruns pass contract `15/15`, runner `43/43` and launch `21/21`. Complete hermetic Python
+  discovery exits zero; its external inventory result records `child_exit=0`, `final_exit=0`, 17,770 entries
+  and an empty external delta. `git diff --check` passes and no ICRA-070 live/ROS process remains.
+- Independent inventory reproduces ICRA-068 task `7,364 / fdeb47e3...e4858` and failed overlay
+  `474 / 9381cb03...acec89`. The complete install comparison is BLOCKED: ICRA-068 has 2,079 non-cache entries,
+  the overlay has 469, 1,610 base entries are missing and no overlay extra exists. Five cache files remain.
+- The sole authorized `--repair-overlay-cache` invocation exited 1 before mutation. With the exact task-local
+  `HOME`, `git status` reproducibly exits 128 for dubious ownership; a read-only command-local canonical
+  `safe.directory` invocation exits 0. No Git config was changed.
+- Repair/parser/GPU/live/analyzer counts are `1/0/0/0/0`. No cache was removed, no pre-mutation journal or
+  successful v2 repair/overlay/adoption manifest was created, and all `-003` identities remain unused.
+
+### Verdict, next task and artifact lifecycle
+
+- Verdict:
+  `ICRA070_STATIC_REPAIR_IMPLEMENTATION_PASS_GATE_BLOCKED_ONE_SHOT_ENVIRONMENT_AND_INCOMPLETE_OVERLAY`.
+  `qualification_claim=false`; ICRA-070 did not reach `P5_PROSPECTIVE_QUALIFICATION_PASS`.
+- The exhausted repair may not be retried. `NEXT_TASK.md` authorizes one same-Gate ICRA-070 continuation that
+  preserves the old overlay and terminal evidence, uses command-local Git trust, creates a new complete
+  non-overwriting overlay from every ICRA-068 non-cache file, applies only the three current aliases, and then
+  runs the still-unused parser/GPU/three-arm/analyzer sequence.
+- ICRA-071 remains inactive and campaign remains forbidden. Existing ICRA-068 build/install and the failed
+  ICRA-070 install are retained because this Review is not PASS. No cleanup is authorized.
+
+### Supervisor window disposition
+
+- The final disposition is intentionally deferred until the Review changeset is pushed and divergence is
+  confirmed `0 0`, as required by `AGENTS.md` section 8.6. A minimal Supervisor-only rotation record will then
+  append the authoritative disposition and handoff anchor; this Review will not end before that push.
+
 ## 2026-08-26 — ICRA-070 review: static correction accepted, qualification blocked before live
 
 ### Review identity and independent verification

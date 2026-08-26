@@ -3,6 +3,16 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- docs(icra-070-supervisor-repair-review): IAP-RQ-000 / IAP-RQ-020 / IAP-RQ-030 / IAP-RQ-040 /
+  IAP-RQ-220 / IAP-RQ-320 / IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 — review the fixed Builder range
+  `1b3c661...24d3e16`. Accept the permanent Python-cache exclusion and fail-closed static repair
+  implementation; independently pass contract 15/15, runner 43/43, launch 21/21 and complete hermetic
+  discovery with zero external ROS-log delta. Keep ICRA-070 unqualified because the sole repair entrypoint
+  exited before mutation under task-local Git `safe.directory`, while the full-file-set proof independently
+  shows the old overlay is missing 1,610 of 2,079 required non-cache base entries. Preserve all build/install
+  and terminal evidence; authorize a non-overwriting complete replacement overlay with command-local Git
+  trust and the still-unused `-003` parser/GPU/live/analyzer sequence. ICRA-071 and campaign remain blocked.
+
 - docs(icra-supervisor-window-rotation): IAP-RQ-000 — make window lifecycle a mandatory Supervisor capability.
   Every Review must update and push state/task/log, audit whether to keep or rotate the Supervisor window,
   persist `window_disposition` and `rotation_reason`, state the decision in the final reply, and generate a

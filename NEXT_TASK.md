@@ -1,129 +1,137 @@
-# ICRA-070 — Single cache-boundary repair continuation and full-sensor qualification completion
+# ICRA-070 — Non-overwriting complete-overlay replacement and qualification continuation
 
 > Active gate: `P0_P5_FUSED_SENSOR_CONTRACT_AND_REPLACEMENT_QUALIFICATION`
 > Owner: `DEEPSEEK`
 > Activation: `TASK_READY`
-> Supervisor verdict: `ICRA070_STATIC_IMPLEMENTATION_PASS_GATE_BLOCKED_AVOIDABLE_PYTHON_CACHE_PACKAGING`
+> Supervisor review range: `1b3c6617732787b10c778a64fe43d37f29d84ffe...24d3e1623d966d9a3fcdd71d99f3cf30d390cc10`
+> Supervisor verdict: `ICRA070_STATIC_REPAIR_IMPLEMENTATION_PASS_GATE_BLOCKED_ONE_SHOT_ENVIRONMENT_AND_INCOMPLETE_OVERLAY`
 > Requirement mapping: `IAP-RQ-000`, `IAP-RQ-020`, `IAP-RQ-030`, `IAP-RQ-040`, `IAP-RQ-220`, `IAP-RQ-320`, `IAP-RQ-421`, `IAP-RQ-422`, `IAP-RQ-423`
-> One task: eliminate generated Python caches from the overlay boundary -> freeze new non-overwriting provenance -> parser/GPU -> three unused `-003` arms -> analyzer
+> One task: preserve the exhausted repair -> create one complete replacement overlay -> parser/GPU -> three unused `-003` arms -> analyzer
 
 ## Why ICRA-070 continues instead of advancing to ICRA-071
 
-Supervisor review of `3c8fffe...d88d42b` accepts the full-sensor static correction and reruns complete
-hermetic discovery at 567/567. It also confirms the dependency preflight, zero parser/GPU/live/analyzer calls,
-unused `-003` identities, preserved PDF, and unchanged 7,364-entry ICRA-068 task inventory
-`fdeb47e3...e4858`.
+Supervisor review accepts the permanent CMake cache exclusion, fail-closed cache classifier, durable
+pre-mutation journal design and static full-file-set verifier. Independent focused tests pass `15/15`, `43/43`
+and `21/21`; complete hermetic discovery exits zero with all 17,770 external ROS-log entries unchanged.
 
-The gate is nevertheless not PASS. The no-compile install copied ignored source `launch/__pycache__` into the
-overlay. Two generated cache files are already known to differ from ICRA-068:
+The gate is nevertheless blocked before qualification. The sole `--repair-overlay-cache` invocation exited
+before mutation because the required task-local `HOME` did not contain a Git `safe.directory` registration.
+The read-only full-file-set verifier also establishes that the old overlay cannot be repaired by deleting
+caches: ICRA-068 contains 2,079 non-cache install entries, while the overlay contains 469 and is missing 1,610.
+No cache was removed, no v2 repair/overlay/adoption manifest was created, and parser/GPU/live/analyzer counts
+remain zero. The old repair entrypoint is exhausted and must never be retried.
 
-- `share/iap/launch/__pycache__/icra_p0_p5_qualification.cpython-312.pyc`
-- `share/iap/launch/__pycache__/test_planner.launch.cpython-312.pyc`
+This is an orchestration and overlay-construction blocker, not a GNSS, GPU, algorithm, P5 or scientific
+failure. ICRA-071 remains reserved for the later pure-static cross-layer guard and cannot start until this
+task reaches `P5_PROSPECTIVE_QUALIFICATION_PASS` and receives Supervisor review. Campaign remains forbidden.
 
-The first-difference stop was correct and must remain preserved. The defect is the packaging boundary, not the
-GNSS system, GPU, algorithms or live environment. Do not whitelist either file and do not fix only the first
-reported path. ICRA-071 is reserved for the subsequent pure-static cross-layer guard hardening and cannot start
-until this task produces `P5_PROSPECTIVE_QUALIFICATION_PASS` and receives Supervisor review. Campaign is
-forbidden in this task.
+## Phase A — Preserve terminal evidence and construct one complete replacement overlay
 
-## Phase A — Permanent cache exclusion and one non-overwriting repair
-
-1. Preserve byte-for-byte the four committed blocker records in `results/icra27/icra070/compact/` and the
-   existing `results/icra27/icra070/overlay_install_driver.cmake`. Do not rewrite, relabel or delete them.
-2. Add an install-boundary exclusion for every `__pycache__` directory and `*.pyc`, `*.pyo`, `*.pyd` file.
-   The source CMake install rule and the ICRA-070 overlay path must both enforce it. Generated Python cache is
-   never a product/runtime alias and can never appear in an allowlist.
-3. Add exactly one explicit repair entry point. Before mutation it must:
-   - verify the committed blocker records and their hashes;
-   - verify the failed overlay exists at `results/icra27/icra070/install`;
-   - rehash the complete ICRA-068 task tree and require 7,364 entries with inventory
+1. Preserve byte-for-byte all existing ICRA-068 and ICRA-070 compact/raw evidence, the old
+   `results/icra27/icra070/install`, the ICRA-068 build/install, and all prior manifests/drivers. Do not rewrite,
+   relabel, delete or adopt the failed overlay as complete.
+2. Do not invoke `--repair-overlay-cache` again. Add exactly one new replacement entrypoint and a new absent,
+   non-symlink output root such as `results/icra27/icra070/install_v2`. Every new evidence path must be exclusive
+   and non-overwriting.
+3. Make all Git identity/worktree queries function inside the exact isolated task environment without editing
+   global or repository Git configuration. Use command-local canonical trust equivalent to
+   `git -c safe.directory=<canonical repository> ...`; reject a mismatched, relative, aliased or untrusted
+   repository path. Add a real subprocess regression using the recorded task-local `HOME`, not only mocks.
+4. Before creating the replacement root, verify:
+   - the complete frozen ICRA-068 task tree is exactly 7,364 entries with inventory
      `fdeb47e3d025bbc7c442b86521e6808d1452d928178a52df0b2f9e03aace4858`;
-   - enumerate every cache path below the task-owned ICRA-070 install and record its path, size and SHA-256.
-4. The repair may remove only those enumerated generated cache files and their now-empty `__pycache__`
-   directories from `results/icra27/icra070/install`. It must not reinstall, compile, mutate ICRA-068, modify
-   source caches, touch raw/bag/log evidence, or write outside this repository.
-5. After repair, compare full file sets, not only overlay-present files. Every non-cache ICRA-068 base file must
-   exist in the overlay; the overlay may omit only cache artifacts and may differ only at the three already
-   authorized current aliases:
+   - the failed overlay is exactly 474 entries with inventory
+     `9381cb03d7cff06a517f8da9fcde0c179cc4cf130b61a2e04750dfe683acec89`;
+   - the command ledger/final result and every original blocker record retain their reviewed hashes;
+   - source caches and the protected PDF retain their reviewed inventories/hashes.
+5. Create the replacement overlay without compile, build or CMake reinstall. Copy every non-cache file from
+   the retained ICRA-068 install byte-for-byte with its executable/permission mode, omitting every
+   `__pycache__` directory and `*.pyc`, `*.pyo`, `*.pyd` file. The source and destination must be canonical,
+   repository-local, non-symlink trees; no hard link or symlink is allowed.
+6. Replace exactly these three copied base files with the current source bytes and no other difference:
    - `share/iap/launch/test_planner.launch.py`
    - `share/iap/launch/icra_p0_p5_qualification.py`
    - `share/iap/config/icra27/icra_p0_p5_qualification_v1.json`
-   All binaries and libraries must remain byte-identical to ICRA-068. No symlink or additional file is allowed.
-6. Set and manifest-bind `PYTHONDONTWRITEBYTECODE=1` in every installed parser, GPU preflight/live runner and
-   analyzer subprocess environment. Any cache prefix, if used by static tests, must be repository-local and
-   outside the install. Re-inventory the overlay after an installed non-executing import/parser probe and prove
-   it did not change.
-7. Write only new repair evidence, for example
-   `compact/overlay_cache_repair_v1.json`, `compact/icra070_overlay_manifest_v2.json` and
-   `compact/icra070_adoption_manifest_v2.json`. Use exclusive creation and bind the original blocker hashes,
-   repair command, removed-cache inventory, current source commit, three alias hashes, full file-set proof,
-   package resolution and immutable ICRA-068 inventory. Never overwrite the v1 blocker evidence.
+7. Compare complete file sets in both directions. Every ICRA-068 non-cache file must exist; no extra file is
+   allowed; all non-alias bytes and modes must equal ICRA-068; the three aliases must equal source; all
+   binaries/libraries must be byte-identical; cache/symlink/hard-link counts must be zero. Run the installed
+   non-executing `-B` import/parser probe with `PYTHONDONTWRITEBYTECODE=1`, then prove the complete inventory did
+   not change.
+8. Freeze new replacement evidence and manifests with a new schema/name (for example
+   `compact/icra070_complete_overlay_replacement_v3.json`, `compact/icra070_overlay_manifest_v3.json` and
+   `compact/icra070_adoption_manifest_v3.json`). Bind the old terminal blocker hashes, construction command,
+   base/failed/replacement inventories, file modes, three aliases, package resolution, current commit and
+   no-bytecode probe. Do not create a successful v2 cache-repair record for an operation that never occurred.
 
-## Phase B — Static regressions and cross-layer pre-live check
+## Phase B — Static regressions and cross-layer pre-live gate
 
-- Add adversarial tests with both known stale cache files plus an unrelated nested `__pycache__`. Prove all are
-  excluded, cannot be whitelisted, and cannot reappear after importing the installed launch/helper.
-- Prove a missing non-cache base file, extra overlay file, binary/library drift, alias drift, source cache
-  mutation, existing repair evidence or second repair invocation fails closed.
-- Recheck all three cases through the current cross-layer route:
-  system full-sensor target -> canonical case -> effective launch values -> conditional GNSS process projection
-  -> exact 16-process monitor -> ten required topics -> GNSS/LiDAR/fusion/satellite evidence contract.
-- Keep the registered corridor geometry, P5-6/P5-7 fixtures, thresholds/actions, P0 worker 4, sigma 0.01,
-  legacy baseline, full-sensor scenario, RINEX and GNSS timing unchanged. No target value may be reduced to make
-  the repair pass.
+- Prove the actual isolated-`HOME` Git command succeeds only through command-local canonical trust and never
+  writes Git config. Missing/mismatched trust, dirty tracked worktree, alternate repository or changed HEAD
+  fails before replacement creation.
+- Prove missing base files, extra files, mode drift, binary/library drift, alias drift, cache artifacts,
+  source-cache mutation, symlink/hard-link, pre-existing replacement/evidence, partial copy and second
+  invocation all fail closed without mutating ICRA-068 or the old failed overlay.
+- Recheck all three cases through the frozen chain:
+  system full-sensor target -> canonical case -> effective launch values -> conditional GNSS process
+  projection -> exact 16-process monitor -> ten required topics -> GNSS/LiDAR/fusion/satellite evidence.
+- Keep route geometry, P5-6/P5-7 fixtures, thresholds/actions, worker 4, sigma 0.01, legacy baseline,
+  full-sensor scenario, RINEX and GNSS timing unchanged. No target value may be reduced.
 - Run focused contract/runner/launch tests and complete hermetic discovery with zero failures. Authoritative
-  command/result records must be below `results/icra27/icra070`. Existing generic hermetic scratch may remain in
-  its historical harness namespace only when explicitly labelled non-authoritative; it cannot be cited as the
-  task's compact/live qualification artifact or changed to masquerade as ICRA-070 evidence.
+  records belong below `results/icra27/icra070`; historical-harness scratch stays explicitly non-authoritative.
 
 ## Phase C — Complete the still-unused qualification sequence
 
 Only after Phases A/B pass:
 
 1. Run the three exact installed `--show-args` parser proofs once, in SAFE_NORMAL -> FINAL_REJECT ->
-   RUNTIME_FAIL order. Require exit `0/0/0`, full-sensor resolved values, zero main-flow child and zero remnant.
+   RUNTIME_FAIL order. Require exit `0/0/0`, full-sensor values, zero main-flow child and zero remnant.
 2. Run exactly one fresh GPU preflight. PASS requires both `nvidia-smi` checks, `cuInit(0)==0` and
    `device_count>=1`. On failure output `GPU_NOT_READY`, start no ROS process and stop without retry.
-3. Require at least 40 GiB free, then register and execute exactly these still-unused identities once, in order,
-   with maximum 90 seconds per arm:
+3. Require at least 40 GiB free, then register and execute exactly these still-unused identities once, in
+   order, with maximum 90 seconds per arm:
    - `icra-p0-p5-live-safe-normal-003`
    - `icra-p0-p5-live-final-reject-003`
    - `icra-p0-p5-live-runtime-fail-003`
 4. Require all 16 processes alive until controlled shutdown; positive GNSS/IMU/LiDAR/P0/P5 topic evidence;
-   valid/fresh GNSS epochs; positive GNSS and LiDAR predictor use, fused horizons and `n_sv_used`; exact P5 event
-   semantics; zero orphan/forced cleanup. Stop at the first failure with no retry or later-arm continuation.
+   valid/fresh GNSS epochs; positive GNSS and LiDAR predictor use, fused horizons and `n_sv_used`; exact P5
+   event semantics; zero orphan/forced cleanup. Stop at the first failure with no retry or later-arm run.
 5. Invoke the authoritative live analyzer exactly once only after all three arms complete. PASS is only
-   `P5_PROSPECTIVE_QUALIFICATION_PASS`. Any other result is a typed blocker or
+   `P5_PROSPECTIVE_QUALIFICATION_PASS`; any other result is a typed blocker or
    `P5_PROSPECTIVE_QUALIFICATION_FAIL`.
 
-## Phase D — Documentation, handoff and evidence lifecycle
+## Phase D — Documentation, handoff and artifact lifecycle
 
-- Update Builder-owned `DEV_LOG.md`, `docs/CHANGES.md`, `docs/TRACEABILITY.md` and new compact v2 evidence with
-  exact commands, environment, exit codes, invocation counts, identities, hashes and terminal result.
-- Commit with applicable requirement IDs and push normally. Explicitly stage only task files; do not stage the
-  untracked PDF, install, raw/live/bag/log files or static test scratch.
-- Retain ICRA-068 build/install and the repaired ICRA-070 install through development and Supervisor review.
-  After a future Supervisor PASS and verified pushed code/docs, the Supervisor—not Builder—will delete only
-  the reproducible ICRA-068 build/install and ICRA-070 install. Preserve compact manifests/results/ledgers and
-  all scientific/raw evidence.
+- Update Builder-owned `DEV_LOG.md`, `docs/CHANGES.md`, `docs/TRACEABILITY.md` and new compact evidence with
+  exact commands, environment, exits, invocation counts, identities, hashes and terminal result.
+- Commit with applicable requirement IDs and push normally. Explicitly stage only task files; never stage the
+  PDF, old/replacement install, build, raw/live/bag/log or historical-harness scratch.
+- Retain ICRA-068 build/install, the failed ICRA-070 install and the replacement install through development
+  and Supervisor review. Only after a future Supervisor PASS and verified pushed code/docs may the Supervisor
+  delete those reproducible build/install trees. Preserve compact manifests/results/ledgers and all raw or
+  scientific evidence.
 - Return immediately after the authoritative result or first typed blocker. Do not create ICRA-071 state,
   start campaign, or claim that passing ICRA-070 alone authorizes campaign.
 
 ## Allowed files
 
-- `CMakeLists.txt`, only for permanent Python-cache exclusion from installed launch/config directories.
-- `scripts/dev_planner/run_icra_p0_p5_qualification.py`,
-  `launch/icra_p0_p5_qualification.py`, and their focused tests, only for the repair entry point, full-file-set
-  provenance, no-bytecode environment and non-overwriting v2 evidence.
-- `test/test_test_planner_launch.py` only if required to prove the install/cache boundary or current cross-layer
-  projection; no launch behavior change.
-- Builder-owned `DEV_LOG.md`, `docs/CHANGES.md`, `docs/TRACEABILITY.md` and new compact ICRA-070 v2 files.
+- `scripts/dev_planner/run_icra_p0_p5_qualification.py` and
+  `test/test_run_icra_p0_p5_qualification.py` for command-local Git trust, complete replacement construction,
+  provenance, no-bytecode proof and one-shot orchestration.
+- `CMakeLists.txt` only if a focused regression proves the permanent cache exclusion still needs correction;
+  no install-scope expansion.
+- `launch/icra_p0_p5_qualification.py`, `test/test_icra_p0_p5_qualification.py`,
+  `launch/test_planner.launch.py` and `test/test_test_planner_launch.py` only for a demonstrated existing
+  cross-layer verification defect; no target/fixture/behavior change.
+- Builder-owned `DEV_LOG.md`, `docs/CHANGES.md`, `docs/TRACEABILITY.md` and new non-overwriting compact
+  ICRA-070 v3 evidence.
 
 ## Forbidden actions
 
+- No retry or mutation of the old cache-repair entrypoint, failed overlay, ICRA-068, prior evidence or
+  `-001`/`-002` artifacts; no successful-v2 evidence fabrication.
+- No global/local Git config mutation, global `safe.directory`, rebuild, compile, CMake reinstall, hard link,
+  symlink, cache allowlist, source-cache staging or alternate sensor scenario.
 - No algorithm, C++ runtime, estimator/factor, risk/P5 formula, threshold/action/query, worker, GPU backend,
-  route geometry, sensor mode, P1/P2/P3/P4, campaign or scientific-acceptance change.
-- No `.pyc` allowlist, source-cache staging, compile/rebuild/reinstall, alternate sensor scenario, GNSS removal,
-  CPU fallback, retry, replacement live identity, or rewriting of prior evidence.
-- No mutation of ICRA-068, `-001`/`-002` artifacts, `src/glim`, workspace-global build/install, external files,
-  credentials, PDF, raw/bag/log data, or processes not proven task-owned.
+  route geometry, P1/P2/P3/P4, campaign or scientific-acceptance change.
+- No CPU fallback, live retry, replacement live identity, deletion of retained build/install, modification of
+  `src/glim`, workspace-global products, credentials, PDF, raw/bag/log data or unrelated processes.
