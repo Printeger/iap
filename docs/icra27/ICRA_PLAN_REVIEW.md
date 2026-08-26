@@ -11,8 +11,12 @@ novelty 必须单独、保守表述；当前只授权隔离 profile 与 prospect
 不因历史 P5 测试而自称 qualified，也不自动启动 campaign。
 
 ICRA-067 的隔离 profile、canonical contract 和 synthetic harness 已通过 Review，但仍明确
-`qualification_claim=false`。ICRA-068 将在历史 P4 test-oracle 与当前 launch 解耦且全量测试归零后，
-直接执行三个首次 prospective live identities；在权威 live analyzer PASS 前，P5 仍为 unqualified。
+`qualification_claim=false`。ICRA-068 的历史 test-oracle、543/543 tests、isolated install 和 GPU
+preflight 均通过；live qualification 被 runner 生成的 19 个 malformed empty ROS arguments 阻塞，
+在任何 required process 启动前停止。该缺陷不改变 P0/P5 verdict，且 `-001` 注册集不再复用。
+
+ICRA-069 直接修复命令生成并加入真实 parser-level proof，然后以不变 install 和新 `-002` identities
+完成三场景 one-shot live gate。没有修复后单独审计轮次；在权威 analyzer PASS 前，P5 仍 unqualified。
 
 以下 P0 → P4 → P5 复审正文作为决策历史保留，不再授权后续 P4 Gate。
 

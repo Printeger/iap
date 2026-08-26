@@ -2718,6 +2718,28 @@ python3 launch/icra_p0_p5_qualification.py analyze-live \
   --repository-root /home/dev/ws_iap/src/iap
 ```
 
+### 2026-08-26 Supervisor Review and ICRA-069 authorization
+
+Requirements: `IAP-RQ-320`, `IAP-RQ-421`, `IAP-RQ-422`, `IAP-RQ-423`.
+
+- Supervisor review fixes the Builder range at `881cf4a...0cb5c50` and accepts
+  the historical fixture repair, 543/543 hermetic tests, immutable install,
+  GPU preflight and fail-closed stop/no-retry behavior.
+- Qualification remains blocked by one High runner defect: 19 canonical
+  inactive empty strings were serialized as bare `name:=` tokens. ROS rejected
+  SAFE_NORMAL before 0/16 required children started. This is not a GPU, P0/P5
+  algorithm or scientific failure; the complete registered `-001` set is
+  retired and immutable.
+- ICRA-069 is one repair-and-execute task: omit only registered empty
+  overrides, prove the three rendered commands with the real non-executing ROS
+  parser, adopt the unchanged ICRA-068 product install with separate product
+  and runner provenance, then execute fresh `-002` identities once. No
+  intermediate review or product/threshold/scenario change is authorized.
+- The ICRA-068 build/install are retained because Review is not PASS. They may
+  be deleted only after ICRA-069 PASS, pushed code/docs and Supervisor
+  verification; all raw/live/bag/log/manifest/compact/scientific evidence and
+  the protected PDF remain retained.
+
 ## 2026-08-25 (ICRA-068 historical P4 test-fixture decoupling)
 
 Requirements: `IAP-RQ-423`.

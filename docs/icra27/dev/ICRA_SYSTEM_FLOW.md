@@ -161,7 +161,7 @@ The existing `p4` profile does not enable P5. The existing `all` profile enables
 | P4-G0B | G0A PASS | Metrics-only pair, identity and 200/200 profiles; no application | `PASS` (historical closed route) |
 | P4-G0C | G0B PASS | Metrics-only calibration and positive mean/max improvement | `SCIENTIFIC_NO_GO`: max improvement Q10 = 0; route closed |
 | P4-G0D | G0C scientific GO | Post-freeze selected hash reaches B-spline and P5 | Permanently unauthorized for this conference route |
-| P5 system gate | Reviewed isolated P0+P5 profile and zero-failure active tests | SAFE_NORMAL, final reject/no-publish and runtime-fail prospective identities PASS | `ICRA-067 harness PASS`; ICRA-068 live qualification TASK_READY |
+| P5 system gate | Reviewed isolated P0+P5 profile, 543/543 tests, immutable install and parser-valid rendered commands | SAFE_NORMAL, final reject/no-publish and runtime-fail prospective identities PASS | `ICRA-068 BLOCKED` before 0/16 children by malformed empty ROS args; ICRA-069 repair + `-002` live qualification TASK_READY |
 | Campaign | All technical gates PASS | GPU ready and `≥40 GiB` free | Storage gate remains external |
 
 Passing one row authorizes only Supervisor review and the next explicit task. It does not automatically move a later row to PASS.

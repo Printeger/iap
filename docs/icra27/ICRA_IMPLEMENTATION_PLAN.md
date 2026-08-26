@@ -11,9 +11,14 @@ ICRA-066 以权威 analyzer 关闭 P4-G0C：技术证据 `15/15/15 runs`、`192/
 contingency campaign。P0 Gate-0B 保持 PASS；P1/P2/P3/P4 仅保留源码/回归，不进入会议 profile。
 
 ICRA-067 已完成并通过 Supervisor 的 profile/synthetic-harness Review：三类 synthetic case 均为
-`VALIDATION_ONLY_PASS`，不构成 live qualification。ICRA-068 先一次性解除历史 P4 测试夹具对当前
-launch 的错误绑定，再在同一任务内执行 isolated build、GPU preflight 和三个 prospective live case。
-这四个历史测试失败不是 P0/P5 产品失败，也不授权修改任何 P4 冻结证据。
+`VALIDATION_ONLY_PASS`，不构成 live qualification。ICRA-068 已完成历史 P4 测试夹具解耦、543/543
+测试、isolated build/install 和 GPU preflight，但 live runner 把 19 个 inactive empty values 编码成
+非法 ROS token（例如 `p1.debug_csv_path:=`），因此 SAFE_NORMAL 在 0/16 required processes 启动前停止。
+这不是 GPU、P0/P5 产品或科学结果失败；`-001` 注册集冻结并退役。
+
+ICRA-069 是唯一 active task：修复 empty-argument serialization，以真实 ROS parser 在 GPU 前验证三条
+命令，采用不变的 ICRA-068 product install 并分离 product/runner provenance，然后用新 `-002` identities
+一次完成三场景 live qualification。修复与执行之间不安排 intermediate review，不授权产品或阈值变更。
 
 下方 P0 → P4 → P5 计划保留为失败路线的审计记录，不再授权 P4 工作。冲突时以本 activation、
 根 `AGENT_STATE.md` 和 `NEXT_TASK.md` 为准。

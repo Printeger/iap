@@ -1,5 +1,58 @@
 # ICRA Supervisor Log
 
+## 2026-08-26 — ICRA-068 runner BLOCKED before main flow; single repair-and-live task authorized
+
+### Review identity and synchronization
+
+- Fixed review range: `881cf4a3e993042a95f842bde733036b60f1bf54...0cb5c50beb8198cdb4a315f35091304e94b7f74b`.
+  Builder commits `9432749`, `2d8ca5d`, `8b4170b`, `7ded327`, `2e60c47`, `005ce1a` and `0cb5c50`
+  bind applicable `IAP-RQ-320`, `IAP-RQ-421`, `IAP-RQ-422` and `IAP-RQ-423`. Fetch succeeded; HEAD and
+  `origin/dev/icra` matched at divergence `0 0`; `git diff --check` passed. The protected PDF remains the sole
+  untracked file with unchanged SHA-256 `1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+- The historical P4 test fixture is correctly decoupled from current launch evolution. The reviewed changes do
+  not alter P4 product/protocol/manifest/raw/science, P0/P5 decisions, thresholds or scenario geometry.
+
+### Standards
+
+- One Medium blocking traceability defect was found: the ICRA-068 rows named generic components but did not
+  consistently give explicit implementation, test and retained-evidence paths. This Supervisor changeset
+  corrects the rows directly; it does not send Builder through a documentation-only loop.
+- One historical Medium commit-atomicity deviation is waived: commit `005ce1a` changed runner/tests before the
+  final Builder documentation commit `0cb5c50`. Final content is present, and pushed history must not be
+  rewritten. Three Low judgement-only smells—duplicated linkage checks, private helper coupling and a broad
+  runner module—are deferred outside this live-gate repair.
+- Standards count before the Supervisor traceability correction: one blocking hard finding, one nonblocking
+  historical hard finding and three judgement smells; worst severity Medium.
+
+### Spec
+
+- Historical test repair, focused suites, complete hermetic discovery, isolated Release/CUDA install freeze,
+  GPU preflight, evidence immutability and fail-closed lifecycle behavior meet the task. Supervisor replay passes
+  runner 11/11, analyzer/contract 12/12 and full discovery 543/543. The frozen install manifest retains SHA
+  `7662a2c4aa4840dac2d80aac8cdf87041555f9114ca86dd844e862462134d420`, 18 package identities, 54 runtime
+  libraries and 83 file hashes.
+- One High implemented-but-wrong finding blocks qualification: the live runner sends every contract value to
+  the generic launch serializer, including 19 inactive empty strings. The resulting command contains malformed
+  tokens such as `p1.debug_csv_path:=`; ROS rejects the command before any main-flow child starts. Existing tests
+  compare the config dictionary but never render and parse the real command.
+- GPU is ready and is not the cause: the sole preflight passes both `nvidia-smi` checks, `cuInit(0)==0` and
+  `device_count=1`. SAFE_NORMAL accounting is exactly attempted/completed/launch/retry `1/0/1/0`, required
+  processes observed `0/16`, orphan audit passes, later arms and analyzer are correctly absent. Stop/no-retry is
+  compliant. Spec count: zero missing/partial, zero scope creep and one wrong implementation; worst severity High.
+
+### Verdict, next task and artifact lifecycle
+
+- Verdict: `ICRA068_BLOCKED_MALFORMED_EMPTY_LAUNCH_ARGUMENT`. This is a deterministic runner serialization and
+  missing parser-regression defect, not a GPU, dependency, P0/P5 algorithm, scientific or field-runtime failure.
+  SAFE_NORMAL `-001` is consumed; the complete registered `-001` set is retired and immutable.
+- `ICRA-069 / P0_P5_LIVE_LAUNCH_REPAIR_AND_REPLACEMENT_QUALIFICATION` is one non-intermediate task. It omits only
+  canonical empty overrides, proves all three rendered commands with the real ROS parser before GPU, adopts the
+  unchanged ICRA-068 product install with dual product/runner provenance, then runs fresh `-002` identities once
+  and invokes the analyzer once. No product, process-set, threshold, fixture or scenario change is authorized.
+- ICRA-068 Review is not PASS, so its reproducible build (`1.2G`) and install (`462M`) are retained for repair,
+  parser/linkage validation and ICRA-069 execution. They may be deleted only after ICRA-069 passes Supervisor
+  Review and its code/docs are pushed. Raw/live/bag/log/manifest/compact/scientific evidence and the PDF remain.
+
 ## 2026-08-25 — ICRA-067 profile/harness PASS; historical P4 test binding waived once
 
 ### Review identity and synchronization
