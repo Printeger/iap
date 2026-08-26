@@ -1,0 +1,93 @@
+{
+  "analyzer": {
+    "invocation_marker_present": false,
+    "invocations": 0,
+    "output_present": false,
+    "reason_not_invoked": "runner_state_not_complete"
+  },
+  "completed_utc": "2026-08-26T03:29:36Z",
+  "failure_boundary": {
+    "capture_exit_code": 1,
+    "capture_ready": true,
+    "failed_identity": "icra-p0-p5-live-safe-normal-002",
+    "failure_reason": "launch_or_process_failure",
+    "launch_exit_code": 0,
+    "required_process_failure": {
+      "phase": "launch",
+      "process_name": "test_planner_gnss_sim_node",
+      "reason": "required_process_never_started"
+    },
+    "required_processes_seen": 15,
+    "required_processes_total": 16
+  },
+  "gate": "P0_P5_LIVE_LAUNCH_REPAIR_AND_REPLACEMENT_QUALIFICATION",
+  "gpu_preflight": {
+    "cuInit_result": 0,
+    "device_count": 1,
+    "gpu_ready": true,
+    "invocations": 1,
+    "nvidia_smi_commands_passed": 2,
+    "sha256": "ea4eda26a6923856633ccf55c71fb43765a9c9ac59c9659fc331670ab34c5953"
+  },
+  "immutable_product": {
+    "adoption_manifest_sha256": "dc7a10b98117f724307500cba05f277171e1e02163b8dc15271f7a633a1ac8b1",
+    "file_hash_count": 83,
+    "install_manifest_sha256": "7662a2c4aa4840dac2d80aac8cdf87041555f9114ca86dd844e862462134d420",
+    "package_count": 18,
+    "product_git_commit": "005ce1a9dc20109dfb9600d62a8a9085aa11cb45",
+    "product_runtime_unchanged": true,
+    "runner_analyzer_git_commit": "d9822760887cd8ef08e886a7329e0e4025c9a99d",
+    "runtime_library_count": 54
+  },
+  "parser_proof": {
+    "case_order": [
+      "SAFE_NORMAL",
+      "FINAL_REJECT",
+      "RUNTIME_FAIL"
+    ],
+    "exit_codes": [
+      0,
+      0,
+      0
+    ],
+    "invocations": 3,
+    "main_flow_child_invocations": 0,
+    "parse_ready": true,
+    "remaining_process_group_pid_counts": [
+      0,
+      0,
+      0
+    ],
+    "sha256": "b2983502d31789e1a8ad1d54019a6e58ca972b2737a23dfe829b4ba603922566"
+  },
+  "protected_pdf": {
+    "path": "docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf",
+    "sha256": "1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6",
+    "tracked": false,
+    "untouched": true
+  },
+  "qualification_claim": false,
+  "raw_evidence_retained": true,
+  "runner": {
+    "attempted": [
+      "icra-p0-p5-live-safe-normal-002"
+    ],
+    "completed": [],
+    "exit_code": 4,
+    "free_bytes_before_gpu": 110836318208,
+    "invocations": 1,
+    "launch_invocations": 1,
+    "process_result_sha256": "850ea9f0e2bc6c143144c5e8eb463b5dae947725c23a3d6fa1bcb3883edbc379",
+    "registered": [
+      "icra-p0-p5-live-safe-normal-002",
+      "icra-p0-p5-live-final-reject-002",
+      "icra-p0-p5-live-runtime-fail-002"
+    ],
+    "retries": 0,
+    "runner_state": "FAILED",
+    "runner_state_sha256": "0e964003007cb0a18727fe83a1ff55854368b0e0d36fb4fabaf993fe061d2ca3"
+  },
+  "schema_version": "icra069_compact_final_result_v1",
+  "status": "BLOCKED_ICRA069_SAFE_NORMAL_REQUIRED_PROCESS_NEVER_STARTED",
+  "task_id": "ICRA-069"
+}

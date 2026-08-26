@@ -2768,6 +2768,23 @@ Requirements: `IAP-RQ-320`, `IAP-RQ-421`, `IAP-RQ-422`, `IAP-RQ-423`.
   external ROS inventory unchanged. No real installed parser, GPU preflight,
   live identity or authoritative analyzer was invoked at this checkpoint.
 
+The committed one-shot execution then completed all three installed
+`--show-args` parser proofs with exit codes `0/0/0`, zero main-flow children,
+zero remnants and parser-proof SHA `b2983502...922566`. The sole GPU preflight
+passed both `nvidia-smi` commands, `cuInit(0)==0` and one device; its evidence
+SHA is `ea4eda26...c5953`.
+
+The only live runner invocation exited `4` after the first arm. SAFE_NORMAL
+ran for the fixed 90-second window and top-level launch exited `0`, but the
+required-process monitor saw only 15/16 identities:
+`test_planner_gnss_sim_node` never started. Capture readiness was established
+but capture exited `1`. Controlled shutdown and orphan audit passed, with no
+forced cleanup or remaining PID. Runner state SHA `0e964003...d2ca3` records
+attempted/completed/launch/retry counts `1/0/1/0`; FINAL_REJECT and
+RUNTIME_FAIL were not attempted. The analyzer and its invocation marker remain
+absent. Terminal result:
+`BLOCKED_ICRA069_SAFE_NORMAL_REQUIRED_PROCESS_NEVER_STARTED`.
+
 Static verification commands:
 
 ```bash

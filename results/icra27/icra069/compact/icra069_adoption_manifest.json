@@ -1,0 +1,69 @@
+{
+  "installed_runtime_source_overlap": [],
+  "post_product_changed_files": [
+    "AGENT_STATE.md",
+    "DEV_LOG.md",
+    "NEXT_TASK.md",
+    "SUPERVISOR_LOG.md",
+    "docs/CHANGES.md",
+    "docs/TRACEABILITY.md",
+    "docs/icra27/ICRA_IMPLEMENTATION_PLAN.md",
+    "docs/icra27/ICRA_PLAN_REVIEW.md",
+    "docs/icra27/ICRA_SCOPE.md",
+    "docs/icra27/dev/ICRA_SYSTEM_FLOW.md",
+    "results/icra27/icra068/compact/final_result.json",
+    "scripts/dev_planner/run_icra_p0_p5_qualification.py",
+    "test/test_run_icra_p0_p5_qualification.py"
+  ],
+  "post_product_file_sha256": {
+    "AGENT_STATE.md": "51150c0cf87c3ac184ea8c4663365f3042925a9ff6378f341cb6c66a485072a7",
+    "DEV_LOG.md": "01a34c99debe0967fad4153e71ea807d7c0063d14e15e2e81f74ff96873d0725",
+    "NEXT_TASK.md": "c7c76089f5bbdddcb38e2fdc0f1ebeae14b5df1c322d6595c279b8425e190370",
+    "SUPERVISOR_LOG.md": "00bdb02b5460eee9bd738fdd0defd6619b3362ed79b0be9c59067c155dc78c48",
+    "docs/CHANGES.md": "3dffeff7b294085619ce9747fb2582040d7aef43a0ca339f2e160da0d5a2676e",
+    "docs/TRACEABILITY.md": "2b6bfbf601ced2b36abad06684b88fcc81f608610d70b419004d99d23c76043f",
+    "docs/icra27/ICRA_IMPLEMENTATION_PLAN.md": "f4d57b3db55bdf91bc569ba4185821d7d31a185b2ca57a4bae234dc3a94b36c1",
+    "docs/icra27/ICRA_PLAN_REVIEW.md": "525811d84747509e81f17d0eeb31c054c77ec20b83d1391b576402eb79498d21",
+    "docs/icra27/ICRA_SCOPE.md": "5f0c0434d59d02445b276104cad45013e463433ed55ab5feeb6774ab303d34ec",
+    "docs/icra27/dev/ICRA_SYSTEM_FLOW.md": "a1699a189647c65fab7c638588263b640e0d13a443b0d0112ee74ceea6b85abb",
+    "results/icra27/icra068/compact/final_result.json": "f8d22fbd2fe9ec9db1db897c812773ea8a9365968cfb0fbb5ed0e25eb9d9953e",
+    "scripts/dev_planner/run_icra_p0_p5_qualification.py": "f55cb20385a1653233da7f892ba93bfe8f1eb0d6c823db949bc24959ec46ae6e",
+    "test/test_run_icra_p0_p5_qualification.py": "e397449b2b587f7890a282f650abfb835d7c50deb5f54f2398ae1a151a048398"
+  },
+  "product_install": {
+    "file_hash_count": 83,
+    "git_commit": "005ce1a9dc20109dfb9600d62a8a9085aa11cb45",
+    "install_root": "/home/dev/ws_iap/src/iap/results/icra27/icra068/install",
+    "installed_aliases": {
+      "share/iap/config/icra27/icra_p0_p5_qualification_v1.json": {
+        "installed_sha256": "ab025e9234106da34db71f87a7fb90ae67fdb7305a891ab3552b32c0e8619709",
+        "source_path": "config/icra27/icra_p0_p5_qualification_v1.json",
+        "source_sha256": "ab025e9234106da34db71f87a7fb90ae67fdb7305a891ab3552b32c0e8619709"
+      },
+      "share/iap/launch/icra_p0_p5_qualification.py": {
+        "installed_sha256": "f28d0f1716233cdc94d8c500d584c62c051dbeb466a8f60eda23b3c822548f6c",
+        "source_path": "launch/icra_p0_p5_qualification.py",
+        "source_sha256": "f28d0f1716233cdc94d8c500d584c62c051dbeb466a8f60eda23b3c822548f6c"
+      },
+      "share/iap/launch/test_planner.launch.py": {
+        "installed_sha256": "36319db09fb955343e78a5562c226bcaeb964032794f2f2bc6df164ef80512b2",
+        "source_path": "launch/test_planner.launch.py",
+        "source_sha256": "36319db09fb955343e78a5562c226bcaeb964032794f2f2bc6df164ef80512b2"
+      }
+    },
+    "manifest_path": "results/icra27/icra068/icra068_install_manifest.json",
+    "manifest_sha256": "7662a2c4aa4840dac2d80aac8cdf87041555f9114ca86dd844e862462134d420",
+    "runtime_library_count": 54,
+    "task_id": "ICRA-068"
+  },
+  "product_runtime_unchanged": true,
+  "runner_analyzer": {
+    "analyzer_path": "launch/icra_p0_p5_qualification.py",
+    "analyzer_sha256": "f28d0f1716233cdc94d8c500d584c62c051dbeb466a8f60eda23b3c822548f6c",
+    "git_commit": "d9822760887cd8ef08e886a7329e0e4025c9a99d",
+    "runner_path": "scripts/dev_planner/run_icra_p0_p5_qualification.py",
+    "runner_sha256": "f55cb20385a1653233da7f892ba93bfe8f1eb0d6c823db949bc24959ec46ae6e",
+    "task_id": "ICRA-069"
+  },
+  "schema_version": "icra069_immutable_install_adoption_v1"
+}

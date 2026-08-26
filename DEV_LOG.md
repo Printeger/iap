@@ -8121,3 +8121,24 @@ hermetic invocations report the 17,770-entry external ROS inventory unchanged.
 Complete hermetic discovery passes 553/553 with that inventory unchanged. At this static checkpoint, real
 installed parser, GPU, live identity and authoritative analyzer calls all
 remain zero.
+
+After the reviewed implementation was committed and pushed at `d982276`, the
+single authorized runner invocation executed without retry. All three real
+installed parse-only commands passed (`0/0/0`), started no required child and
+left no process-group member; proof SHA is `b2983502...922566`. The one GPU
+preflight passed two `nvidia-smi` checks, `cuInit(0)==0` and device count 1;
+evidence SHA is `ea4eda26...c5953`. Immutable adoption manifest SHA is
+`dc7a10b9...ac8b1` and still binds ICRA-068 manifest
+`7662a2c4...34d420`, 18 packages, 54 runtime libraries and 83 files with zero
+installed-source overlap.
+
+SAFE_NORMAL `icra-p0-p5-live-safe-normal-002` was the sole live attempt. The
+90-second top-level launch exited 0 and capture was ready, but process evidence
+SHA `850ea9f0...bc379` records only 15/16 required processes seen:
+`test_planner_gnss_sim_node` has the launch-phase reason
+`required_process_never_started`; capture exit was 1. Controlled shutdown and
+orphan audit passed, forced cleanup was false and remaining PID inventory was
+empty. Runner exit 4 and state SHA `0e964003...d2ca3` freeze counts at
+attempted/completed/launch/retry `1/0/1/0`. Later arms were not attempted and
+the authoritative analyzer/marker were not created. ICRA-069 is terminally
+`BLOCKED_ICRA069_SAFE_NORMAL_REQUIRED_PROCESS_NEVER_STARTED`.
