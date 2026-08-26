@@ -544,7 +544,7 @@ def _normalize_events(
         if row.get("phase") == "runtime_committed"
         and str(row.get("action", "")) == "REQUEST_EMERGENCY_STOP_CANDIDATE"
     ]
-    fixture_rows = rejected if case_id == "FINAL_REJECT" else emergency
+    fixture_rows = rejected if case_id == "FINAL_REJECT" else emergency[:1]
     if not _registered_fixture_evidence_present(case_id, contract, fixture_rows):
         raise LiveRunnerError("registered_fixture_evidence_mismatch")
 
@@ -589,11 +589,11 @@ def _normalize_events(
          "type": "NORMAL_PUBLISH", "candidate_id": candidate},
     ]
     if case_id == "RUNTIME_FAIL":
-        if not emergency or any(
+        if len(emergency) != 1 or any(
             "future_unknown" not in str(row.get("reason", ""))
             for row in emergency
         ):
-            raise LiveRunnerError("future_unknown_emergency_missing")
+            raise LiveRunnerError("future_unknown_emergency_cardinality_mismatch")
         threshold = float(contract["p5_thresholds"]["p5.future_unknown_to_emergency_s"])
         first_runtime = emergency[0]
         duration = float(first_runtime.get("future_unknown_duration_s", threshold))

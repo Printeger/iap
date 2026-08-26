@@ -264,6 +264,17 @@ class IcraP0P5LiveRunnerTest(unittest.TestCase):
                 [accepted, fixture_runtime, unrelated_emergency],
                 [{"bag_time_s": 1.5, "traj_id": 9}],
             )
+        attributed_emergency = dict(unrelated_emergency)
+        attributed_emergency["bag_time_s"] = 5.0
+        attributed_emergency["samples"] = fixture_runtime["samples"]
+        with self.assertRaisesRegex(
+            RUNNER.LiveRunnerError, "registered_fixture_evidence_mismatch"
+        ):
+            RUNNER._normalize_events(
+                "RUNTIME_FAIL", self.contract,
+                [accepted, unrelated_emergency, attributed_emergency],
+                [{"bag_time_s": 1.5, "traj_id": 9}],
+            )
 
     def test_live_environment_rejects_caller_overlay(self):
         with mock.patch.dict(RUNNER.os.environ, {}, clear=True):
