@@ -20,14 +20,17 @@ the real non-executing ROS parser, adopt the unchanged isolated product install 
 fresh SAFE_NORMAL, FINAL_REJECT and RUNTIME_FAIL `-002` identities exactly once. No product/scope change is
 authorized and P5 remains unqualified until the authoritative analyzer passes.
 
-ICRA-069 closes the serialization and parser/GPU blockers, but exposes an impossible Supervisor process
-contract: every fixed case resolves `use_gnss=false`, so launch intentionally omits the GNSS simulator while the
-contract requires it. SAFE_NORMAL therefore stops at 15/16 after its sole `-002` attempt. The result is not a
-Builder, GPU or node-start failure, and the complete `-002` set is retired.
+ICRA-069 closes the serialization and parser/GPU blockers, then reveals a qualification sensor-binding defect:
+every fixed case resolves `use_gnss=false`, so launch correctly omits the GNSS simulator even though the target
+system and canonical contract require it. SAFE_NORMAL stops fail-closed at 15/16 after its sole `-002` attempt.
+The result is not a Builder, GPU or node-start failure, and the complete `-002` set is retired.
 
-ICRA-070 is the only authorized live gate. It corrects required-process truth to the 15 nodes launch can create,
-preserves the fixed sensor modes/scenarios, installs a no-recompile isolated overlay with complete provenance,
-and executes fresh `-003` cases once. No algorithm, threshold or scientific acceptance change is authorized.
+The first ICRA-070 command at `d335665` incorrectly proposed changing the system contract to 15 processes. It is
+withdrawn. ICRA-070 remains the only authorized live gate, but now corrects all three cases to one dedicated
+full-sensor scenario: existing corridor geometry plus existing degraded GNSS, GNSS/ARAIM and LiDAR integrity,
+IMU/LiDAR estimation and `max_pl` fusion. The canonical 16 processes remain mandatory. It adds source/topic
+evidence, installs a no-compile isolated overlay with complete provenance, and executes fresh `-003` cases once.
+P5 fixtures, route geometry, algorithms, thresholds and scientific acceptance remain unchanged.
 
 The conditional P0 → P4 → P5 scope below is retained as the audited failed route. Where it conflicts with this
 activation, this section and root `AGENT_STATE.md`/`NEXT_TASK.md` are authoritative.

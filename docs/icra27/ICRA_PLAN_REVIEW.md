@@ -20,11 +20,15 @@ ICRA-069 的签发范围是直接修复命令生成并加入真实 parser-level 
 
 ICRA-069 的 serialization、真实 parser `0/0/0` 和 GPU preflight 已通过，但 SAFE_NORMAL 以 15/16
 required processes 停止。Review 证明缺少的 GNSS simulator 不是启动失败：固定三个 case 的 scenario
-均解析 `use_gnss=false`，launch condition 必然不创建该 node，而 Supervisor contract 错误地要求它。
-Builder 的 fail-closed、`1/0/1/0`、零 retry/orphan 是正确行为。
+均解析 `use_gnss=false`，launch condition 必然不创建该 node。Builder 的 fail-closed、`1/0/1/0`、
+零 retry/orphan 是正确行为。
 
-ICRA-070 修正 process contract 为 launch-derived 15 nodes，保持 GNSS-disabled sensor modes 不变，并以
-no-recompile overlay、complete provenance 和新 `-003` identities 完成同一 live gate。P5 仍未 qualified。
+进一步按系统设计目标复审后，canonical 16-process contract 是正确的；错误的是 qualification case
+绑定了 LiDAR-only/fallback scenario。首版 ICRA-070 在 `d335665` 把观察到的缩减模式误作系统目标，现已
+撤销。修订版 ICRA-070 保留 16 nodes，把三类 case 统一绑定到“既有 corridor geometry + 既有 degraded
+GNSS”的专用 full-sensor scenario，要求 GNSS pseudorange+doppler、IMU、LiDAR、GNSS/ARAIM integrity、
+LiDAR integrity 和 `max_pl` fusion 均有真实证据，再以 no-compile overlay、complete provenance 和新
+`-003` identities 完成同一 live gate。P5 仍未 qualified。
 
 以下 P0 → P4 → P5 复审正文作为决策历史保留，不再授权后续 P4 Gate。
 

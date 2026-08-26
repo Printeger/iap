@@ -1,6 +1,36 @@
 # ICRA Supervisor Log
 
-## 2026-08-26 — ICRA-069 serialization PASS; Supervisor 16-process contract contradicted launch truth
+## 2026-08-26 — ICRA-070 command corrected to the full GNSS + IMU + LiDAR system target
+
+### Correction
+
+- The first ICRA-070 instruction at commit `d335665` is withdrawn before Builder execution. It incorrectly
+  treated the 15 processes observed from GNSS-disabled cases as the system contract and proposed deleting
+  `test_planner_gnss_sim_node`. That conclusion contradicts `AGENTS.md`, `docs/REQS.md`, conventions and talk
+  specification, all of which define the target estimator/integrity pipeline as GNSS pseudorange+doppler + IMU
+  + LiDAR. This was a Supervisor judgement error, not a Builder failure.
+- Re-review preserves ICRA-069's implementation PASS and fail-closed 15/16 result, but changes the blocker
+  classification: the canonical 16-process contract is correct; the three qualification cases are wrong because
+  they inherit LiDAR-only/fallback scenarios that force `use_gnss=false`.
+
+### Revised ICRA-070
+
+- `ICRA-070 / P0_P5_FUSED_SENSOR_CONTRACT_AND_REPLACEMENT_QUALIFICATION` now creates one dedicated
+  qualification scenario from the existing corridor geometry and existing degraded-GNSS model. All three cases
+  must run GNSS/ARAIM + IMU/LiDAR estimation + LiDAR integrity with `max_pl` fusion and both sources required.
+- The live gate keeps all 16 processes and adds evidence gates for pseudorange/diagnostic, IMU and LiDAR topics,
+  valid/fresh GNSS epochs, `n_sv_used>0`, positive GNSS and LiDAR Predictor use and positive horizon fusion.
+  P5 fixtures, route geometry, actions, thresholds and scientific acceptance remain frozen.
+- To avoid another documentation-only loop, the same task performs static scenario/contract tests, exact GNSS
+  dependency preflight, no-compile isolated overlay/provenance, parser `0/0/0`, one GPU preflight and the ordered
+  `-003` live/analyzer gate. The old 15-process instruction must not be executed.
+- Supervisor read-only feasibility checks confirm the configured RINEX file and degraded-GNSS scenario are
+  readable, retained ICRA-068 `gnss_sim_node` is executable and 103 GiB is free. No GPU preflight or ROS process
+  was started; Builder must still freeze exact hashes before its single live preflight.
+- ICRA-068 build/install and all ICRA-069 evidence remain retained through revised ICRA-070 Review. The protected
+  PDF remains unstaged and unchanged.
+
+## 2026-08-26 — Superseded ICRA-069 interpretation: proposed 15-process correction
 
 ### Review identity and synchronization
 

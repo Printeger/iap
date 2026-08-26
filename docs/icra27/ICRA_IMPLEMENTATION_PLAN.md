@@ -21,13 +21,17 @@ ICRA-069 的签发任务是：修复 empty-argument serialization，以真实 RO
 一次完成三场景 live qualification。修复与执行之间不安排 intermediate review，不授权产品或阈值变更。
 
 ICRA-069 已关闭 serialization blocker：三条 installed parser proof 为 `0/0/0`，GPU PASS。SAFE_NORMAL
-运行 90 秒后因 Supervisor contract 要求 16 processes 而实际只启动 15 个停止。固定 SAFE/FINAL 的
-`lidar_corridor_degenerate` 和 RUNTIME 的 `fallback_only` 都令 `use_gnss=false`，因此 conditional
-`test_planner_gnss_sim_node` 按设计不启动。这是签发规格矛盾，不是 Builder/node/GPU failure。
+运行 90 秒后在 15/16 required processes 停止。固定 SAFE/FINAL 的 `lidar_corridor_degenerate` 和
+RUNTIME 的 `fallback_only` 都令 `use_gnss=false`，因此 conditional `test_planner_gnss_sim_node` 按 launch
+设计不启动。这不是 Builder/node/GPU failure，而是 qualification case 没有实例化目标传感器系统。
 
-ICRA-070 现为唯一 active task：只把 canonical required-process truth 修正为实际 15 个，保持固定
-sensor modes/scenarios，使用 retained build 创建 no-recompile isolated overlay 并强化 complete provenance，
-随后用 `-003` identities 在同一任务完成 parser、GPU、三场景和 analyzer。`-002` 全集冻结退役。
+首版 ICRA-070 在 `d335665` 错误地把缩减运行模式写成 15-process system contract，现已撤销。ICRA-070
+仍是唯一 active task：保留 canonical 16 processes，新增一个由现有 corridor geometry 与现有
+degraded-GNSS preset 组合出的 qualification-specific full-sensor scenario，并令三个 case 都启用
+GNSS pseudorange+doppler、IMU/LiDAR estimator、GNSS/ARAIM + LiDAR integrity 与 `max_pl` fusion。任务先
+静态证明 sensor/source contract 和 GNSS 依赖，再使用 retained build 创建 no-compile isolated overlay，
+随后以 `-003` identities 一次完成 parser、GPU、三场景和 analyzer。P5 fixture/threshold/action 不变，
+`-002` 全集冻结退役。
 
 下方 P0 → P4 → P5 计划保留为失败路线的审计记录，不再授权 P4 工作。冲突时以本 activation、
 根 `AGENT_STATE.md` 和 `NEXT_TASK.md` 为准。

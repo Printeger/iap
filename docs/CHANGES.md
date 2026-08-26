@@ -3,6 +3,8 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- docs(icra-070-supervisor-command-correction): IAP-RQ-020 / IAP-RQ-030 / IAP-RQ-040 / IAP-RQ-220 / IAP-RQ-320 / IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 — withdraw the first ICRA-070 15-process/GNSS-disabled instruction at `d335665` and reissue ICRA-070 against the repository's actual GNSS pseudorange+doppler + IMU + LiDAR system target. Re-review keeps ICRA-069 implementation PASS and its fail-closed 15/16 evidence, but reclassifies the blocker: the canonical 16-process contract is correct and the qualification cases are wrong because they inherit LiDAR-only/fallback scenarios. Revised ICRA-070 preserves the P5 route geometry, fixture values, thresholds/actions and one-shot `-003` identities; creates a dedicated scenario from the existing corridor geometry and degraded-GNSS preset; requires GNSS/ARAIM and LiDAR integrity with `max_pl` fusion; adds fail-closed GNSS/IMU/LiDAR topic, satellite and P0 source-use evidence; and proceeds in one task through static proof, GNSS dependency preflight, no-compile overlay/provenance, parser, GPU, three live arms and analyzer. No product C++, risk/P5 algorithm, threshold, prior evidence or artifact was modified or deleted.
+
 - fix(icra-040-p4-g0b-review-repair): IAP-RQ-423 — make request/occupancy invalidation authoritative immediately after original A* returns, before interpreting original failure, timeout or duplicate/zero-length geometry. Epoch changes during each outcome now return `DECISION_INVALID_REPLAN_REQUIRED` with no guide and no risk search, while stable failure/timeout/geometry outcomes retain their typed results. Remove the snapshot setter's silent `metrics_only=true` rewrite: registered G0B tests now opt in explicitly, and a risk-enabled non-G0B `metrics_only=false` context remains false, records a better measured risk guide, returns `SELECTION_NOT_AUTHORIZED`, selects original and keeps `selection_applied=false`. Fresh task-local builds/installations pass focused precedence 3/3, boundary 1/1, decision 15/15, integration 5/5, collision 17/17, P1 39/39, path P4 5/5, occupancy 6/6 and plan-manager 9/9 (186 active plus one existing disabled). Exact linkage uses ICRA-040 bspline and retained ICRA-039 IAP/plan-env/path-searching; no application, thresholds/calibration/G0C/G0D, GPU, ROS/live flow, smoke, benchmark, qualification or P5 work ran. Result: `P4_G0B_REPAIR_READY_FOR_REVIEW`.
 
 Reproduce the deterministic ICRA-040 verification from the repository root
@@ -2824,7 +2826,7 @@ env -i \
   python3 scripts/dev_planner/run_icra_p0_p5_qualification.py
 ```
 
-### 2026-08-26 Supervisor Review and ICRA-070 authorization
+### 2026-08-26 Superseded first ICRA-070 authorization
 
 Requirements: `IAP-RQ-320`, `IAP-RQ-421`, `IAP-RQ-422`, `IAP-RQ-423`.
 
@@ -2844,6 +2846,24 @@ Requirements: `IAP-RQ-320`, `IAP-RQ-421`, `IAP-RQ-422`, `IAP-RQ-423`.
   thresholds and acceptance semantics remain unchanged.
 - ICRA-069 has no build/install. Its raw/live/bag/log evidence remains retained;
   adopted ICRA-068 build/install also remain because the Gate has not passed.
+
+### 2026-08-26 Revised ICRA-070 full-sensor authorization
+
+Requirements: `IAP-RQ-020`, `IAP-RQ-030`, `IAP-RQ-040`, `IAP-RQ-220`,
+`IAP-RQ-320`, `IAP-RQ-421`, `IAP-RQ-422`, `IAP-RQ-423`.
+
+- The immediately preceding 15-process authorization is retained above as an
+  audit record but is superseded and must not be executed. It mistook the
+  launch truth of three GNSS-disabled cases for the target system contract.
+- The system specification requires GNSS pseudorange+doppler, IMU and LiDAR.
+  Revised ICRA-070 therefore keeps all 16 required processes and corrects the
+  cases to a dedicated fused degraded-GNSS/corridor scenario. It requires
+  positive GNSS/IMU/LiDAR topic evidence, valid/fresh GNSS epochs,
+  `n_sv_used>0`, positive GNSS and LiDAR Predictor use and horizon fusion.
+- Route geometry, P5-6/P5-7 fixtures, thresholds, actions, event semantics,
+  `-003` identities, no-retry policy and artifact lifecycle remain frozen.
+  Static proof, dependency preflight, no-compile overlay, parser/GPU/live and
+  analyzer stay in one task to avoid another nontechnical review loop.
 
 ## 2026-08-25 (ICRA-068 historical P4 test-fixture decoupling)
 
