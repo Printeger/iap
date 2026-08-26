@@ -2654,6 +2654,14 @@ Requirements: `IAP-RQ-320`, `IAP-RQ-421`, `IAP-RQ-422`, `IAP-RQ-423`.
   and compares canonical, address-independent `ldd` hashes during freeze,
   pre-GPU revalidation and authoritative analysis; cross-row attribution and
   one-nibble linkage mutations are rejected.
+- Final isolated manifest `7662a2c4...34d420` binds commit `005ce1a`, 18
+  package identities, 54 task-local libraries and 83 file hashes. The single
+  GPU preflight passed. The sole runner then stopped on SAFE_NORMAL with exit
+  4 because `ros2 launch` rejected empty argument `p1.debug_csv_path:=` before
+  any of 16 required children started. Attempted/completed/launch/retry counts
+  are 1/0/1/0, the owned process group has no orphan, later identities were not
+  attempted and the authoritative analyzer was not invoked. Terminal status:
+  `BLOCKED_ICRA068_SAFE_NORMAL_MALFORMED_LAUNCH_ARGUMENT`.
 
 Reproduce the non-live checks only with:
 
@@ -2664,9 +2672,10 @@ python3 scripts/dev_planner/run_p4_g0c_tests.py \
   unittest discover -s test -p 'test_*.py'
 ```
 
-After the final implementation commit, reproduce the isolated install freeze,
-the single guarded live runner, and the sole analyzer with these exact commands
-(the last two are live/authoritative and must not be repeated):
+The authorized commands are retained below for audit. The install freeze and
+guarded live runner were each executed once. Because the runner stopped on its
+first identity, **do not repeat either live command and do not execute the
+analyzer command**:
 
 ```bash
 cmake --install "$PWD/results/icra27/icra068/build/iap"

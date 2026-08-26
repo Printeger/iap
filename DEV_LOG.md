@@ -8064,6 +8064,24 @@ fixture sample to the exact rejection/emergency row and freezes canonicalized
 address-independent `ldd` identities for every library. Updated focused suites
 pass 23/23 and complete hermetic discovery passes 543/543, with the
 17,762-entry external ROS inventory unchanged.
-GPU/ROS/live/analyzer counts remain zero; the earlier static install manifest
-is stale after this remediation and will be replaced once by the final
-committed install identity.
+At that pre-live checkpoint, GPU/ROS/live/analyzer counts remained zero; the
+earlier static install manifest was then replaced by the final committed
+install identity.
+
+Final static review passed both Standards and Spec. The isolated install was
+updated at `005ce1a`, and its sole manifest SHA is
+`7662a2c4...34d420` with 18 package identities, 54 task-local shared libraries
+and 83 hashed files. Before GPU, free space was 111,543,840,768 bytes. The
+single GPU preflight passed both `nvidia-smi` commands, `cuInit(0)==0` and one
+device; evidence SHA is `59258810...dad24`.
+
+The only live runner invocation exited 4 on the first registered identity,
+`icra-p0-p5-live-safe-normal-001`. `ros2 launch` exited 1 after 0.16 s with
+`malformed launch argument 'p1.debug_csv_path:=', expected format
+'<name>:=<value>'`. Capture readiness was established, but 0/16 required
+processes started. The owned process-group orphan audit passed with no
+remaining PID. Runner state SHA `88ce6016...5ccf24` records attempted 1,
+completed 0, launch invocations 1 and retries 0. FINAL_REJECT and RUNTIME_FAIL
+were not attempted. Per fail-closed policy, no identity was retried and the
+authoritative analyzer was not invoked. Terminal result:
+`BLOCKED_ICRA068_SAFE_NORMAL_MALFORMED_LAUNCH_ARGUMENT`.

@@ -1,0 +1,73 @@
+{
+  "schema_version": "icra068_compact_final_result_v1",
+  "task_id": "ICRA-068",
+  "gate": "P0_P5_PROSPECTIVE_LIVE_QUALIFICATION",
+  "status": "BLOCKED_ICRA068_SAFE_NORMAL_MALFORMED_LAUNCH_ARGUMENT",
+  "git_commit": "005ce1a9dc20109dfb9600d62a8a9085aa11cb45",
+  "install": {
+    "manifest_path": "results/icra27/icra068/icra068_install_manifest.json",
+    "manifest_sha256": "7662a2c4aa4840dac2d80aac8cdf87041555f9114ca86dd844e862462134d420",
+    "package_identity_count": 18,
+    "runtime_library_count": 54,
+    "file_hash_count": 83
+  },
+  "preflight": {
+    "invocations": 1,
+    "gpu_ready": true,
+    "nvidia_smi_checks_passed": 2,
+    "cu_init_result": 0,
+    "device_count": 1,
+    "evidence_path": "results/icra27/icra068/preflight/gpu_preflight.json",
+    "evidence_sha256": "59258810545f627efb82cb87fe6ba0cb23caf53e5f617ce6b5bfb096fafdad24"
+  },
+  "execution": {
+    "runner_exit_code": 4,
+    "runner_state": "FAILED",
+    "registered": [
+      "icra-p0-p5-live-safe-normal-001",
+      "icra-p0-p5-live-final-reject-001",
+      "icra-p0-p5-live-runtime-fail-001"
+    ],
+    "attempted": [
+      "icra-p0-p5-live-safe-normal-001"
+    ],
+    "completed": [],
+    "launch_invocations": 1,
+    "retries": 0,
+    "continued_after_failure": false,
+    "runner_state_path": "results/icra27/icra068/live/runner_state.json",
+    "runner_state_sha256": "88ce60167a43849331e6e5c6f03569a301bc523015816a0a4ce9649f795ccf24"
+  },
+  "failure": {
+    "case_id": "SAFE_NORMAL",
+    "run_id": "icra-p0-p5-live-safe-normal-001",
+    "typed_reason": "launch_or_process_failure",
+    "launch_exit_code": 1,
+    "capture_ready": true,
+    "capture_exit_code": 1,
+    "required_processes_seen": 0,
+    "required_processes_total": 16,
+    "orphan_check_passed": true,
+    "remaining_process_group_pids": [],
+    "stderr_summary": "malformed launch argument 'p1.debug_csv_path:=', expected format '<name>:=<value>'",
+    "process_result_sha256": "db33b0d890077fefa41f9993dbffe919ea8a6e08d3b299bee296cd16ac147984",
+    "capture_ready_sha256": "8aaeed6718af1b57a405d1a8c4108b18e23a4c29164a580c99c1bbcd67b56525",
+    "launch_command_sha256": "d7d2939294fec2bf945be3cc8e10398d03e67dd56102ed449474d99838396325",
+    "stdout_sha256": "e977e8895b3ced36183c22612c0f5129a82ca7ead6fb9503aeb90edb21df8ee4"
+  },
+  "acceptance": {
+    "authoritative_analyzer_invocations": 0,
+    "qualification_claim": false,
+    "safe_normal_complete": false,
+    "final_reject_attempted": false,
+    "runtime_fail_attempted": false
+  },
+  "verification": {
+    "focused_tests": "23/23 PASS",
+    "full_hermetic_tests": "543/543 PASS",
+    "external_ros_inventory_entries": 17762,
+    "external_ros_inventory_changed": false,
+    "standards_review": "PASS",
+    "spec_review": "PASS"
+  }
+}
