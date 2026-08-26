@@ -23,6 +23,8 @@ TASK_ROOT = REPOSITORY / "results/icra27/icra070"
 PRODUCT_TASK_ROOT = REPOSITORY / "results/icra27/icra068"
 INSTALL_ROOT = PRODUCT_TASK_ROOT / "install"
 OVERLAY_INSTALL_ROOT = TASK_ROOT / "install"
+COMPLETE_OVERLAY_INSTALL_ROOT = TASK_ROOT / "install_v2"
+COMPLETE_OVERLAY_PARTIAL_ROOT = TASK_ROOT / "install_v2.partial"
 PRODUCT_BUILD_ROOT = PRODUCT_TASK_ROOT / "build/iap"
 PRODUCT_INSTALL_DRIVER_SHA256 = (
     "2c773421a1625a6304f9f8c7dae68f256f7c363735fb6aaf9a241f8d17392f0c"
@@ -36,6 +38,11 @@ REPAIR_PREFLIGHT_PATH = (
     TASK_ROOT / "compact/overlay_cache_repair_preflight_v2.json"
 )
 ADOPTION_MANIFEST_PATH = TASK_ROOT / "compact/icra070_adoption_manifest_v2.json"
+COMPLETE_REPLACEMENT_EVIDENCE_PATH = (
+    TASK_ROOT / "compact/icra070_complete_overlay_replacement_v3.json"
+)
+OVERLAY_MANIFEST_V3_PATH = TASK_ROOT / "compact/icra070_overlay_manifest_v3.json"
+ADOPTION_MANIFEST_V3_PATH = TASK_ROOT / "compact/icra070_adoption_manifest_v3.json"
 DEPENDENCY_PREFLIGHT_PATH = TASK_ROOT / "compact/gnss_dependency_preflight.json"
 OVERLAY_COMMAND_PATH = TASK_ROOT / "compact/overlay_install_command.json"
 OVERLAY_INSTALL_DRIVER_PATH = TASK_ROOT / "overlay_install_driver.cmake"
@@ -73,6 +80,60 @@ ORIGINAL_BLOCKER_SHA256 = {
     "results/icra27/icra070/overlay_install_driver.cmake": (
         "cac3da758800fa42172b43caef6551f39f45fcc350c2a7270a2191167ef45581"
     ),
+}
+REVIEWED_TERMINAL_SHA256 = {
+    "results/icra27/icra070/compact/command_ledger_v2.json": (
+        "1ff656c19925a70f009c96605269fdd82fb213ada86ea626eb6769ed847e651d"
+    ),
+    "results/icra27/icra070/compact/final_result_v2.json": (
+        "1fbcab65102d34f9c249efcdf8600034a86ef17c018d1e02cce1083a5abf9d7b"
+    ),
+}
+EXPECTED_PRE_REPLACEMENT_COMPACT_INVENTORY = {
+    "entry_count": 8,
+    "inventory_sha256": (
+        "33ae4cd9c12045d54d507d878915f085fdf04836c7da0b21f9235c8c3df203d1"
+    ),
+}
+PROTECTED_PDF_PATH = REPOSITORY / "docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf"
+PROTECTED_PDF_SHA256 = (
+    "1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6"
+)
+EXPECTED_SOURCE_LAUNCH_INVENTORY = {
+    "entry_count": 27,
+    "inventory_sha256": (
+        "d21f5aca2e2b7a49e581bfcb080fda11327468e69f4b5d72dc7f256650e8712c"
+    ),
+}
+EXPECTED_SOURCE_CACHE_INVENTORY = {
+    "directories": ["__pycache__"],
+    "files": [
+        {
+            "path": "__pycache__/demo11_araim_only.launch.cpython-312.pyc",
+            "size": 38169,
+            "sha256": "f54855757f9bafb237eddd394dc6f3745f145486538a28abfaff883bc390debc",
+        },
+        {
+            "path": "__pycache__/icra_p0_p5_qualification.cpython-312.pyc",
+            "size": 65195,
+            "sha256": "ed06637091364d4fe27479be985e506ed82d2d2ed4381fed54518ab088fae189",
+        },
+        {
+            "path": "__pycache__/test_araim.launch.cpython-312.pyc",
+            "size": 71044,
+            "sha256": "23e0b350a121f34e53dfd270f909cbbe9fe9657532356eed1d16ca304228bc00",
+        },
+        {
+            "path": "__pycache__/test_planner.launch.cpython-312.pyc",
+            "size": 165301,
+            "sha256": "affb2139c7952a78ddf86eaa82566385bec9e32b2e601596ebe2c1ed46c24d22",
+        },
+        {
+            "path": "__pycache__/test_predictor.launch.cpython-312.pyc",
+            "size": 28046,
+            "sha256": "9b30899e5dc58657cb236cb429006baeb944b70b0084ce55a1cba3d4d8c10270",
+        },
+    ],
 }
 RINEX_EPHEMERIS_PATH = Path(
     "/home/dev/ws_iap/src/LIGO./Data/BRDM00DLR_S_20221870000_01D_MN.rnx"
@@ -323,8 +384,13 @@ def resolve_gnss_dependencies(
         raise LiveRunnerError("full_sensor_dependency_contract_mismatch")
     install_root = Path(install_root).resolve()
     iap_install_root = Path(iap_install_root or install_root).resolve()
+    runtime_install_root = (
+        iap_install_root
+        if (iap_install_root / "lib/gnss_sim/gnss_sim_node").is_file()
+        else install_root
+    )
     simulator = _dependency_file(
-        install_root / "lib/gnss_sim/gnss_sim_node", executable=True
+        runtime_install_root / "lib/gnss_sim/gnss_sim_node", executable=True
     )
     case_values = [
         QUALIFICATION.resolve_launch_values(contract, case_id, {})
@@ -338,7 +404,8 @@ def resolve_gnss_dependencies(
     ):
         raise LiveRunnerError("full_sensor_case_resolution_mismatch")
     selected_scenario_path = (
-        OVERLAY_INSTALL_ROOT / "share/iap/config/gnss_sim/demo7_skymask_nlos.yaml"
+        COMPLETE_OVERLAY_INSTALL_ROOT
+        / "share/iap/config/gnss_sim/demo7_skymask_nlos.yaml"
     )
     if frozen["gnss_scenario_file"] != str(selected_scenario_path):
         raise LiveRunnerError("full_sensor_scenario_path_mismatch")
@@ -447,6 +514,26 @@ def tree_byte_inventory(root: Path) -> dict[str, dict[str, object]]:
         elif path.is_file():
             inventory[relative] = {
                 "type": "file", "size": path.stat().st_size, "sha256": _sha256(path),
+            }
+    return inventory
+
+
+def tree_mode_inventory(root: Path) -> dict[str, dict[str, object]]:
+    """Hash every file and include its permission mode for replacement proof."""
+    root = Path(root).resolve()
+    inventory = {}
+    for path in sorted(root.rglob("*")):
+        relative = str(path.relative_to(root))
+        if path.is_symlink():
+            inventory[relative] = {
+                "type": "symlink", "target": os.readlink(path),
+            }
+        elif path.is_file():
+            inventory[relative] = {
+                "type": "file",
+                "size": path.stat().st_size,
+                "sha256": _sha256(path),
+                "mode": path.stat().st_mode & 0o7777,
             }
     return inventory
 
@@ -588,6 +675,144 @@ def repair_command_binding() -> dict[str, object]:
         "environment": expected_live_environment(),
         "outer_exit_recorded_externally": True,
     }
+
+
+def _require_canonical_repository_tree(path: Path, label: str) -> Path:
+    path = Path(path)
+    if not path.is_absolute() or not path.is_dir() or path.is_symlink() \
+            or path != path.resolve(strict=True):
+        raise LiveRunnerError(f"{label}_not_canonical_directory")
+    try:
+        path.relative_to(REPOSITORY.resolve(strict=True))
+    except ValueError as exc:
+        raise LiveRunnerError(f"{label}_outside_repository") from exc
+    return path
+
+
+def audit_complete_overlay(
+    base_root: Path, replacement_root: Path, source_root: Path,
+    aliases: dict[str, str],
+) -> dict[str, object]:
+    """Fail closed unless replacement is a complete independent file copy."""
+    base_root = _require_canonical_repository_tree(base_root, "base_root")
+    replacement_root = _require_canonical_repository_tree(
+        replacement_root, "replacement_root"
+    )
+    source_root = _require_canonical_repository_tree(source_root, "source_root")
+    base_inventory = tree_mode_inventory(base_root)
+    source_inventory = tree_mode_inventory(source_root)
+    observed = tree_mode_inventory(replacement_root)
+    if any(row.get("type") == "symlink" for row in base_inventory.values()):
+        raise LiveRunnerError("base_install_contains_symlink")
+    if any(is_python_cache_path(relative) for relative in aliases):
+        raise LiveRunnerError("python_cache_cannot_be_authorized")
+    expected_paths = {
+        relative for relative in base_inventory
+        if not is_python_cache_path(relative)
+    }
+    if set(observed) != expected_paths:
+        missing = sorted(expected_paths - set(observed))
+        extra = sorted(set(observed) - expected_paths)
+        if missing:
+            raise LiveRunnerError(f"replacement_file_set_missing:{missing[0]}")
+        raise LiveRunnerError(f"replacement_file_set_extra:{extra[0]}")
+    hard_links = []
+    for relative in sorted(observed):
+        replacement_path = replacement_root / relative
+        if relative in aliases:
+            source_relative = aliases[relative]
+            expected = source_inventory.get(source_relative)
+            comparison_path = source_root / source_relative
+            label = "alias"
+        else:
+            expected = base_inventory[relative]
+            comparison_path = base_root / relative
+            label = "base"
+        if expected is None or observed[relative] != expected:
+            raise LiveRunnerError(
+                f"replacement_{label}_bytes_or_mode_drift:{relative}"
+            )
+        replacement_stat = replacement_path.stat()
+        comparison_stat = comparison_path.stat()
+        if replacement_stat.st_nlink != 1 or (
+            replacement_stat.st_dev == comparison_stat.st_dev
+            and replacement_stat.st_ino == comparison_stat.st_ino
+        ):
+            hard_links.append(relative)
+    cache_files, cache_directories = enumerate_python_cache(replacement_root)
+    symlinks = [
+        relative for relative, row in observed.items()
+        if row.get("type") == "symlink"
+    ]
+    if cache_files or cache_directories:
+        raise LiveRunnerError("replacement_contains_python_cache")
+    if symlinks:
+        raise LiveRunnerError(f"replacement_contains_symlink:{symlinks[0]}")
+    if hard_links:
+        raise LiveRunnerError(f"replacement_contains_hard_link:{hard_links[0]}")
+    return {
+        "base_non_cache_file_count": len(expected_paths),
+        "replacement_file_count": len(observed),
+        "replacement_inventory": observed,
+        "replacement_inventory_summary": inventory_summary(observed),
+        "authorized_differences": sorted(aliases),
+        "full_file_set_complete": True,
+        "binary_library_bytes_equal": True,
+        "cache_file_count": 0,
+        "cache_directory_count": 0,
+        "symlink_count": 0,
+        "hard_link_count": 0,
+    }
+
+
+def construct_complete_overlay(
+    base_root: Path, replacement_root: Path, source_root: Path,
+    aliases: dict[str, str],
+) -> dict[str, object]:
+    """Create one complete non-cache replacement through an atomic final rename."""
+    base_root = _require_canonical_repository_tree(base_root, "base_root")
+    source_root = _require_canonical_repository_tree(source_root, "source_root")
+    replacement_root = Path(replacement_root)
+    if not replacement_root.is_absolute() \
+            or replacement_root.parent != replacement_root.parent.resolve(strict=True):
+        raise LiveRunnerError("replacement_root_not_canonical")
+    try:
+        replacement_root.relative_to(REPOSITORY.resolve(strict=True))
+    except ValueError as exc:
+        raise LiveRunnerError("replacement_root_outside_repository") from exc
+    partial_root = replacement_root.with_name(replacement_root.name + ".partial")
+    for path, label in (
+        (replacement_root, "replacement_root"),
+        (partial_root, "replacement_partial_root"),
+    ):
+        if path.exists() or path.is_symlink():
+            raise LiveRunnerError(f"{label}_already_exists")
+    base_inventory = tree_mode_inventory(base_root)
+    if any(row.get("type") == "symlink" for row in base_inventory.values()):
+        raise LiveRunnerError("base_install_contains_symlink")
+    if any(is_python_cache_path(relative) for relative in aliases):
+        raise LiveRunnerError("python_cache_cannot_be_authorized")
+    partial_root.mkdir()
+    for relative, row in base_inventory.items():
+        if is_python_cache_path(relative):
+            continue
+        source = base_root / relative
+        destination = partial_root / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination, follow_symlinks=False)
+    for relative, source_relative in aliases.items():
+        source = source_root / source_relative
+        if not source.is_file() or source.is_symlink():
+            raise LiveRunnerError(f"replacement_alias_source_not_ready:{relative}")
+        destination = partial_root / relative
+        if not destination.is_file() or destination.is_symlink():
+            raise LiveRunnerError(f"replacement_alias_base_missing:{relative}")
+        shutil.copy2(source, destination, follow_symlinks=False)
+    proof = audit_complete_overlay(
+        base_root, partial_root, source_root, aliases
+    )
+    partial_root.rename(replacement_root)
+    return proof
 
 
 def inventory_overlay_v2(
@@ -941,9 +1166,12 @@ def verify_package_identities(
     return result
 
 
-def verify_runtime_package_resolution() -> dict:
+def verify_runtime_package_resolution(
+    overlay_root: Path = OVERLAY_INSTALL_ROOT,
+) -> dict:
+    overlay_root = Path(overlay_root).resolve()
     overlay_index = (
-        OVERLAY_INSTALL_ROOT / "share/ament_index/resource_index/packages"
+        overlay_root / "share/ament_index/resource_index/packages"
     )
     if not overlay_index.is_dir() or overlay_index.is_symlink():
         raise LiveRunnerError("overlay_package_index_missing")
@@ -951,7 +1179,9 @@ def verify_runtime_package_resolution() -> dict:
         path.name for path in overlay_index.iterdir()
         if path.is_file() and not path.is_symlink()
     )
-    if overlay_packages != ["iap"]:
+    complete = overlay_root == COMPLETE_OVERLAY_INSTALL_ROOT.resolve()
+    expected_overlay_packages = sorted(LOCAL_PACKAGES) if complete else ["iap"]
+    if overlay_packages != expected_overlay_packages:
         raise LiveRunnerError(
             "overlay_package_identity_mismatch:" + ",".join(overlay_packages)
         )
@@ -964,8 +1194,8 @@ def verify_runtime_package_resolution() -> dict:
     ]
     expected_identities = {
         package: (
-            (OVERLAY_INSTALL_ROOT, INSTALL_ROOT)
-            if package == "iap" else INSTALL_ROOT
+            (overlay_root, INSTALL_ROOT)
+            if complete or package == "iap" else INSTALL_ROOT
         )
         for package in LOCAL_PACKAGES
     }
@@ -988,7 +1218,7 @@ def verify_runtime_package_resolution() -> dict:
     )
     executable_resolution = {}
     for package, names in RUNTIME_EXECUTABLES.items():
-        root = OVERLAY_INSTALL_ROOT if package == "iap" else INSTALL_ROOT
+        root = overlay_root if complete or package == "iap" else INSTALL_ROOT
         for name in names:
             path = root / "lib" / package / name
             if not path.is_file() or path.is_symlink() \
@@ -999,7 +1229,7 @@ def verify_runtime_package_resolution() -> dict:
             executable_resolution[f"{package}/{name}"] = str(path)
     return {
         "overlay_packages": overlay_packages,
-        "iap_prefix": str(OVERLAY_INSTALL_ROOT),
+        "iap_prefix": str(overlay_root),
         "unchanged_local_prefix": str(INSTALL_ROOT),
         "ament_resolution": ament_resolution,
         "glim_resolution": glim_resolution,
@@ -1011,6 +1241,363 @@ def _current_commit() -> str:
     return subprocess.check_output(
         ["git", "rev-parse", "HEAD"], cwd=REPOSITORY, text=True
     ).strip()
+
+
+def trusted_git(
+    arguments: list[str], repository: Path = REPOSITORY,
+    environment: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess:
+    """Run a read-only Git query with command-local canonical trust."""
+    repository = Path(repository)
+    canonical = REPOSITORY.resolve(strict=True)
+    if not repository.is_absolute() \
+            or repository != repository.resolve(strict=True) \
+            or repository != canonical:
+        raise LiveRunnerError("git_repository_not_canonical")
+    if not arguments or arguments[0] not in {"rev-parse", "status", "diff"} \
+            or any(value in {"config", "-c", "-C", "--git-dir"}
+                   for value in arguments):
+        raise LiveRunnerError("git_query_not_read_only")
+    completed = subprocess.run(
+        ["git", "-c", f"safe.directory={canonical}", "-C", str(canonical),
+         *arguments],
+        cwd=canonical,
+        env=dict(environment) if environment is not None else None,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise LiveRunnerError(
+            f"trusted_git_query_failed:{arguments[0]}:{completed.returncode}:"
+            f"{completed.stderr.strip()}"
+        )
+    return completed
+
+
+def replacement_command_binding(expected_commit: str) -> dict[str, object]:
+    return {
+        "argv": [
+            "python3",
+            "scripts/dev_planner/run_icra_p0_p5_qualification.py",
+            "--prepare-complete-overlay",
+            "--expected-replacement-commit",
+            expected_commit,
+        ],
+        "cwd": str(REPOSITORY),
+        "environment": expected_live_environment(),
+        "outer_exit_recorded_externally": True,
+    }
+
+
+def verify_reviewed_pre_replacement_inputs() -> dict[str, object]:
+    compact_root = TASK_ROOT / "compact"
+    compact_inventory = tree_byte_inventory(compact_root)
+    if inventory_summary(compact_inventory) \
+            != EXPECTED_PRE_REPLACEMENT_COMPACT_INVENTORY:
+        raise LiveRunnerError("pre_replacement_compact_inventory_mismatch")
+    terminal = {}
+    for relative, expected_hash in REVIEWED_TERMINAL_SHA256.items():
+        path = REPOSITORY / relative
+        if not path.is_file() or path.is_symlink() \
+                or _sha256(path) != expected_hash:
+            raise LiveRunnerError(f"reviewed_terminal_evidence_mismatch:{relative}")
+        terminal[relative] = expected_hash
+    original = verify_original_blocker_evidence()
+    retained = inventory_summary(tree_byte_inventory(PRODUCT_TASK_ROOT))
+    if retained != EXPECTED_RETAINED_TASK_INVENTORY:
+        raise LiveRunnerError("retained_icra068_inventory_mismatch")
+    failed = inventory_summary(tree_byte_inventory(OVERLAY_INSTALL_ROOT))
+    if failed != EXPECTED_FAILED_OVERLAY_INVENTORY:
+        raise LiveRunnerError("failed_overlay_frozen_inventory_mismatch")
+    source_cache = python_cache_inventory(REPOSITORY / "launch")
+    if source_cache != EXPECTED_SOURCE_CACHE_INVENTORY:
+        raise LiveRunnerError("source_cache_inventory_mismatch")
+    if not PROTECTED_PDF_PATH.is_file() or PROTECTED_PDF_PATH.is_symlink() \
+            or _sha256(PROTECTED_PDF_PATH) != PROTECTED_PDF_SHA256:
+        raise LiveRunnerError("protected_pdf_mismatch")
+    return {
+        "preexisting_compact_inventory": compact_inventory,
+        "preexisting_compact_summary": inventory_summary(compact_inventory),
+        "reviewed_terminal_sha256": terminal,
+        "original_blocker": original,
+        "retained_icra068": retained,
+        "failed_overlay": failed,
+        "source_cache_inventory": source_cache,
+        "protected_pdf_sha256": PROTECTED_PDF_SHA256,
+    }
+
+
+def build_complete_overlay_manifest_v3(
+    current_commit: str, replacement_proof: dict,
+    replacement_evidence_sha256: str, dependency: dict,
+    aliases: dict, package_resolution: dict, import_probe: dict,
+) -> dict[str, object]:
+    if re.fullmatch(r"[0-9a-f]{40}", current_commit) is None \
+            or not _is_sha256(replacement_evidence_sha256):
+        raise LiveRunnerError("complete_overlay_manifest_identity_malformed")
+    return {
+        "schema_version": "icra070_complete_overlay_manifest_v3",
+        "task_id": "ICRA-070",
+        "git_commit": current_commit,
+        "install_root": str(COMPLETE_OVERLAY_INSTALL_ROOT),
+        "base_install_root": str(INSTALL_ROOT),
+        "failed_overlay_root": str(OVERLAY_INSTALL_ROOT),
+        "replacement_evidence": {
+            "path": str(
+                COMPLETE_REPLACEMENT_EVIDENCE_PATH.relative_to(REPOSITORY)
+            ),
+            "sha256": replacement_evidence_sha256,
+        },
+        "replacement_inventory": replacement_proof,
+        "dependency_preflight": dependency,
+        "installed_aliases": aliases,
+        "package_resolution": package_resolution,
+        "installed_import_probe": import_probe,
+        "cache_boundary": {
+            "all_python_cache_excluded": True,
+            "python_cache_allowlist": [],
+            "pythondontwritebytecode": "1",
+        },
+        "full_file_set_complete": True,
+        "binary_library_bytes_equal": True,
+        "no_compile_build_or_reinstall": True,
+    }
+
+
+def build_complete_adoption_payload_v3(
+    current_commit: str, changed_files: list[str], manifest_sha256: str,
+) -> dict[str, object]:
+    if re.fullmatch(r"[0-9a-f]{40}", current_commit) is None \
+            or not _is_sha256(manifest_sha256):
+        raise LiveRunnerError("complete_adoption_identity_malformed")
+    changed_hashes = {
+        relative: _sha256(REPOSITORY / relative)
+        for relative in changed_files
+        if (REPOSITORY / relative).is_file()
+        and not (REPOSITORY / relative).is_symlink()
+    }
+    return {
+        "schema_version": "icra070_complete_overlay_adoption_v3",
+        "task_id": "ICRA-070",
+        "git_commit": current_commit,
+        "product_install_git_commit": PRODUCT_COMMIT,
+        "product_manifest_sha256": PRODUCT_MANIFEST_SHA256,
+        "overlay_manifest": {
+            "path": str(OVERLAY_MANIFEST_V3_PATH.relative_to(REPOSITORY)),
+            "sha256": manifest_sha256,
+        },
+        "install_root": str(COMPLETE_OVERLAY_INSTALL_ROOT),
+        "authorized_aliases": dict(INSTALLED_ALIASES),
+        "post_product_changed_files": list(changed_files),
+        "post_product_file_sha256": changed_hashes,
+        "product_binary_runtime_unchanged": True,
+        "qualification_claim": False,
+    }
+
+
+def prepare_complete_overlay(expected_commit: str) -> dict[str, object]:
+    """Construct the one authorized complete non-overwriting replacement."""
+    if re.fullmatch(r"[0-9a-f]{40}", expected_commit or "") is None:
+        raise LiveRunnerError("expected_replacement_commit_malformed")
+    for path, label in (
+        (COMPLETE_OVERLAY_INSTALL_ROOT, "replacement_root"),
+        (COMPLETE_OVERLAY_PARTIAL_ROOT, "replacement_partial_root"),
+        (COMPLETE_REPLACEMENT_EVIDENCE_PATH, "replacement_evidence"),
+        (OVERLAY_MANIFEST_V3_PATH, "overlay_manifest_v3"),
+        (ADOPTION_MANIFEST_V3_PATH, "adoption_manifest_v3"),
+    ):
+        if path.exists() or path.is_symlink():
+            raise LiveRunnerError(f"{label}_already_exists")
+    environment = validate_live_environment()
+    observed_commit = trusted_git(
+        ["rev-parse", "HEAD"], environment=environment
+    ).stdout.strip()
+    if observed_commit != expected_commit:
+        raise LiveRunnerError("replacement_head_mismatch")
+    dirty = trusted_git(
+        ["status", "--porcelain", "--untracked-files=no"],
+        environment=environment,
+    ).stdout.strip()
+    if dirty:
+        raise LiveRunnerError("tracked_worktree_not_clean")
+    preconditions = verify_reviewed_pre_replacement_inputs()
+    source_cache = preconditions["source_cache_inventory"]
+    replacement_proof = construct_complete_overlay(
+        INSTALL_ROOT.resolve(), COMPLETE_OVERLAY_INSTALL_ROOT.resolve(),
+        REPOSITORY.resolve(), INSTALLED_ALIASES,
+    )
+    import_probe = run_no_bytecode_import_probe(
+        COMPLETE_OVERLAY_INSTALL_ROOT,
+        [
+            COMPLETE_OVERLAY_INSTALL_ROOT
+            / "share/iap/launch/icra_p0_p5_qualification.py",
+            COMPLETE_OVERLAY_INSTALL_ROOT
+            / "share/iap/launch/test_planner.launch.py",
+        ],
+        environment,
+    )
+    post_probe_proof = audit_complete_overlay(
+        INSTALL_ROOT.resolve(), COMPLETE_OVERLAY_INSTALL_ROOT.resolve(),
+        REPOSITORY.resolve(), INSTALLED_ALIASES,
+    )
+    if post_probe_proof != replacement_proof:
+        raise LiveRunnerError("replacement_changed_by_import_probe")
+    if python_cache_inventory(REPOSITORY / "launch") != source_cache:
+        raise LiveRunnerError("source_cache_mutated_by_replacement")
+    contract = QUALIFICATION.load_contract(CONTRACT_PATH)
+    dependency = resolve_gnss_dependencies(
+        contract, INSTALL_ROOT, COMPLETE_OVERLAY_INSTALL_ROOT
+    )
+    aliases = verify_installed_aliases(COMPLETE_OVERLAY_INSTALL_ROOT)
+    package_resolution = verify_runtime_package_resolution(
+        COMPLETE_OVERLAY_INSTALL_ROOT
+    )
+    replacement_record = {
+        "schema_version": "icra070_complete_overlay_replacement_v3",
+        "phase_status": "CONSTRUCTION_AND_PROBE_COMPLETE",
+        "task_id": "ICRA-070",
+        "git_commit": expected_commit,
+        "command": replacement_command_binding(expected_commit),
+        "preconditions": preconditions,
+        "replacement_proof": replacement_proof,
+        "installed_import_probe": import_probe,
+        "source_cache_unchanged": True,
+        "dependency_preflight": dependency,
+        "installed_aliases": aliases,
+        "package_resolution": package_resolution,
+        "compile_invocations": 0,
+        "build_invocations": 0,
+        "cmake_reinstall_invocations": 0,
+        "replacement_invocations": 1,
+    }
+    _write_json_exclusive(COMPLETE_REPLACEMENT_EVIDENCE_PATH, replacement_record)
+    manifest = build_complete_overlay_manifest_v3(
+        expected_commit, replacement_proof,
+        _sha256(COMPLETE_REPLACEMENT_EVIDENCE_PATH), dependency,
+        aliases, package_resolution, import_probe,
+    )
+    _write_json_exclusive(OVERLAY_MANIFEST_V3_PATH, manifest)
+    changed = trusted_git(
+        ["diff", "--name-only", f"{PRODUCT_COMMIT}..{expected_commit}"],
+        environment=environment,
+    ).stdout.splitlines()
+    adoption = build_complete_adoption_payload_v3(
+        expected_commit, changed, _sha256(OVERLAY_MANIFEST_V3_PATH)
+    )
+    _write_json_exclusive(ADOPTION_MANIFEST_V3_PATH, adoption)
+    validate_complete_overlay_manifest_v3(expected_commit)
+    return manifest
+
+
+def validate_complete_overlay_manifest_v3(
+    current_commit: str,
+) -> dict[str, object]:
+    for path, label in (
+        (COMPLETE_REPLACEMENT_EVIDENCE_PATH, "replacement_evidence"),
+        (OVERLAY_MANIFEST_V3_PATH, "overlay_manifest_v3"),
+        (ADOPTION_MANIFEST_V3_PATH, "adoption_manifest_v3"),
+    ):
+        if not path.is_file() or path.is_symlink():
+            raise LiveRunnerError(f"{label}_missing_or_symlink")
+    try:
+        replacement = json.loads(COMPLETE_REPLACEMENT_EVIDENCE_PATH.read_text())
+        observed_manifest = json.loads(OVERLAY_MANIFEST_V3_PATH.read_text())
+        observed_adoption = json.loads(ADOPTION_MANIFEST_V3_PATH.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        raise LiveRunnerError("complete_overlay_v3_evidence_malformed") from exc
+    preconditions = replacement.get("preconditions")
+    preexisting = (
+        preconditions.get("preexisting_compact_inventory")
+        if isinstance(preconditions, dict) else None
+    )
+    if not isinstance(preexisting, dict) \
+            or inventory_summary(preexisting) \
+            != EXPECTED_PRE_REPLACEMENT_COMPACT_INVENTORY:
+        raise LiveRunnerError("replacement_precondition_binding_mismatch")
+    for relative, row in preexisting.items():
+        path = TASK_ROOT / "compact" / relative
+        observed = tree_byte_inventory(path.parent).get(path.name)
+        if observed != row:
+            raise LiveRunnerError(
+                f"preexisting_compact_evidence_mutated:{relative}"
+            )
+    if preconditions.get("original_blocker") != verify_original_blocker_evidence():
+        raise LiveRunnerError("original_blocker_binding_mismatch")
+    for relative, expected_hash in REVIEWED_TERMINAL_SHA256.items():
+        path = REPOSITORY / relative
+        if not path.is_file() or path.is_symlink() \
+                or _sha256(path) != expected_hash:
+            raise LiveRunnerError(f"reviewed_terminal_evidence_mismatch:{relative}")
+    if inventory_summary(tree_byte_inventory(PRODUCT_TASK_ROOT)) \
+            != EXPECTED_RETAINED_TASK_INVENTORY:
+        raise LiveRunnerError("retained_icra068_inventory_mismatch")
+    if inventory_summary(tree_byte_inventory(OVERLAY_INSTALL_ROOT)) \
+            != EXPECTED_FAILED_OVERLAY_INVENTORY:
+        raise LiveRunnerError("failed_overlay_frozen_inventory_mismatch")
+    if python_cache_inventory(REPOSITORY / "launch") \
+            != EXPECTED_SOURCE_CACHE_INVENTORY:
+        raise LiveRunnerError("source_cache_inventory_mismatch")
+    if not PROTECTED_PDF_PATH.is_file() or PROTECTED_PDF_PATH.is_symlink() \
+            or _sha256(PROTECTED_PDF_PATH) != PROTECTED_PDF_SHA256:
+        raise LiveRunnerError("protected_pdf_mismatch")
+    proof = audit_complete_overlay(
+        INSTALL_ROOT.resolve(), COMPLETE_OVERLAY_INSTALL_ROOT.resolve(),
+        REPOSITORY.resolve(), INSTALLED_ALIASES,
+    )
+    probe = replacement.get("installed_import_probe")
+    current_summary = inventory_summary(
+        tree_byte_inventory(COMPLETE_OVERLAY_INSTALL_ROOT)
+    )
+    if not (
+        replacement.get("schema_version")
+        == "icra070_complete_overlay_replacement_v3"
+        and replacement.get("phase_status") == "CONSTRUCTION_AND_PROBE_COMPLETE"
+        and replacement.get("git_commit") == current_commit
+        and replacement.get("command") == replacement_command_binding(current_commit)
+        and replacement.get("replacement_proof") == proof
+        and replacement.get("source_cache_unchanged") is True
+        and replacement.get("compile_invocations") == 0
+        and replacement.get("build_invocations") == 0
+        and replacement.get("cmake_reinstall_invocations") == 0
+        and replacement.get("replacement_invocations") == 1
+        and isinstance(probe, dict)
+        and probe.get("exit_code") == 0
+        and probe.get("environment", {}).get("PYTHONDONTWRITEBYTECODE") == "1"
+        and probe.get("install_inventory_unchanged") is True
+        and probe.get("python_cache_absent_after") is True
+        and probe.get("install_inventory_after") == current_summary
+    ):
+        raise LiveRunnerError("replacement_evidence_binding_mismatch")
+    contract = QUALIFICATION.load_contract(CONTRACT_PATH)
+    dependency = resolve_gnss_dependencies(
+        contract, INSTALL_ROOT, COMPLETE_OVERLAY_INSTALL_ROOT
+    )
+    aliases = verify_installed_aliases(COMPLETE_OVERLAY_INSTALL_ROOT)
+    package_resolution = verify_runtime_package_resolution(
+        COMPLETE_OVERLAY_INSTALL_ROOT
+    )
+    if replacement.get("dependency_preflight") != dependency \
+            or replacement.get("installed_aliases") != aliases \
+            or replacement.get("package_resolution") != package_resolution:
+        raise LiveRunnerError("replacement_runtime_binding_mismatch")
+    expected_manifest = build_complete_overlay_manifest_v3(
+        current_commit, proof, _sha256(COMPLETE_REPLACEMENT_EVIDENCE_PATH),
+        dependency, aliases, package_resolution, probe,
+    )
+    if observed_manifest != expected_manifest:
+        raise LiveRunnerError("complete_overlay_manifest_v3_payload_mismatch")
+    environment = expected_live_environment()
+    changed = trusted_git(
+        ["diff", "--name-only", f"{PRODUCT_COMMIT}..{current_commit}"],
+        environment=environment,
+    ).stdout.splitlines()
+    expected_adoption = build_complete_adoption_payload_v3(
+        current_commit, changed, _sha256(OVERLAY_MANIFEST_V3_PATH)
+    )
+    if observed_adoption != expected_adoption:
+        raise LiveRunnerError("complete_adoption_manifest_v3_payload_mismatch")
+    return observed_manifest
 
 
 def prepare_overlay() -> dict:
@@ -1791,16 +2378,12 @@ def parse_proof_failures(
 
 
 def write_adoption_manifest(current_commit: str) -> tuple[Path, dict]:
-    output = ADOPTION_MANIFEST_PATH
-    if output.exists() or output.is_symlink():
-        raise LiveRunnerError("adoption_manifest_already_exists")
-    changed = subprocess.check_output(
-        ["git", "diff", "--name-only", f"{PRODUCT_COMMIT}..{current_commit}"],
-        cwd=REPOSITORY, text=True,
-    ).splitlines()
-    payload = build_adoption_payload(current_commit, changed)
-    _write_json_exclusive(output, payload)
-    return output, payload
+    validate_complete_overlay_manifest_v3(current_commit)
+    try:
+        payload = json.loads(ADOPTION_MANIFEST_V3_PATH.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        raise LiveRunnerError("adoption_manifest_v3_malformed") from exc
+    return ADOPTION_MANIFEST_V3_PATH, payload
 
 
 def verify_installed_aliases(install_root: Path) -> dict[str, dict[str, str]]:
@@ -1948,7 +2531,7 @@ def validate_frozen_install_manifest(path: Path, git_commit: str) -> dict:
     expected_prefixes = [str(INSTALL_ROOT), "/root/ros2_ws/install", "/opt/ros/jazzy"]
     active_prefixes = os.environ.get("AMENT_PREFIX_PATH", "").split(":")
     expected_active_prefixes = [
-        str(OVERLAY_INSTALL_ROOT), *expected_prefixes,
+        str(COMPLETE_OVERLAY_INSTALL_ROOT), *expected_prefixes,
     ]
     expected_packages = {
         package: str(INSTALL_ROOT) for package in LOCAL_PACKAGES
@@ -2014,7 +2597,8 @@ def live_config(
     run_dir = Path(run_dir).resolve()
     values = QUALIFICATION.resolve_launch_values(contract, case_id, {})
     expected_scenario = str(
-        OVERLAY_INSTALL_ROOT / "share/iap/config/gnss_sim/demo7_skymask_nlos.yaml"
+        COMPLETE_OVERLAY_INSTALL_ROOT
+        / "share/iap/config/gnss_sim/demo7_skymask_nlos.yaml"
     )
     if values.get("gnss_scenario_file") != expected_scenario:
         raise LiveRunnerError("live_gnss_scenario_path_mismatch")
@@ -2047,26 +2631,27 @@ def expected_live_environment() -> dict[str, str]:
         "TMPDIR": str(environment_root / "tmp"),
         "XDG_RUNTIME_DIR": str(environment_root / "xdg_runtime"),
         "AMENT_PREFIX_PATH": ":".join((
-            str(OVERLAY_INSTALL_ROOT), str(INSTALL_ROOT),
+            str(COMPLETE_OVERLAY_INSTALL_ROOT), str(INSTALL_ROOT),
             "/root/ros2_ws/install", "/opt/ros/jazzy",
         )),
         "CMAKE_PREFIX_PATH": ":".join((
-            str(OVERLAY_INSTALL_ROOT), str(INSTALL_ROOT),
+            str(COMPLETE_OVERLAY_INSTALL_ROOT), str(INSTALL_ROOT),
             "/root/ros2_ws/install/glim_ros",
             "/root/ros2_ws/install/glim", "/opt/ros/jazzy",
         )),
         "LD_LIBRARY_PATH": ":".join((
-            str(OVERLAY_INSTALL_ROOT / "lib"), str(INSTALL_ROOT / "lib"),
+            str(COMPLETE_OVERLAY_INSTALL_ROOT / "lib"),
+            str(INSTALL_ROOT / "lib"),
             "/root/ros2_ws/install/glim_ros/lib",
             "/root/ros2_ws/install/glim/lib", "/opt/ros/jazzy/lib",
             "/opt/ros/jazzy/lib/x86_64-linux-gnu",
         )),
         "COLCON_PREFIX_PATH": ":".join((
-            str(OVERLAY_INSTALL_ROOT), str(INSTALL_ROOT),
+            str(COMPLETE_OVERLAY_INSTALL_ROOT), str(INSTALL_ROOT),
             "/root/ros2_ws/install",
         )),
         "PYTHONPATH": ":".join((
-            str(OVERLAY_INSTALL_ROOT / "lib/python3.12/site-packages"),
+            str(COMPLETE_OVERLAY_INSTALL_ROOT / "lib/python3.12/site-packages"),
             str(INSTALL_ROOT / "lib/python3.12/site-packages"),
             "/opt/ros/jazzy/lib/python3.12/site-packages",
         )),
@@ -2596,9 +3181,9 @@ def write_replacement_live_bundle(
         "adoption_manifest_path": str(adoption_path.relative_to(REPOSITORY)),
         "adoption_manifest_sha256": _sha256(adoption_path),
         "overlay_manifest_path": str(
-            OVERLAY_MANIFEST_PATH.relative_to(REPOSITORY)
+            OVERLAY_MANIFEST_V3_PATH.relative_to(REPOSITORY)
         ),
-        "overlay_manifest_sha256": _sha256(OVERLAY_MANIFEST_PATH),
+        "overlay_manifest_sha256": _sha256(OVERLAY_MANIFEST_V3_PATH),
     })
     _write_json(output_path, bundle)
     return bundle
@@ -2674,21 +3259,21 @@ def require_replacement_evidence_ready(bundle: object, contract: dict) -> None:
         failures.append("replacement runner is not exact COMPLETE one-shot evidence")
     runner_commit = runner_state.get("runner_analyzer_git_commit", "")
     expected_overlay_relative = str(
-        OVERLAY_MANIFEST_PATH.relative_to(REPOSITORY)
+        OVERLAY_MANIFEST_V3_PATH.relative_to(REPOSITORY)
     )
     if not (
         manifest.get("overlay_manifest_path") == expected_overlay_relative
         and runner_state.get("overlay_manifest_path")
         == expected_overlay_relative
-        and OVERLAY_MANIFEST_PATH.is_file()
-        and not OVERLAY_MANIFEST_PATH.is_symlink()
+        and OVERLAY_MANIFEST_V3_PATH.is_file()
+        and not OVERLAY_MANIFEST_V3_PATH.is_symlink()
         and manifest.get("overlay_manifest_sha256")
         == runner_state.get("overlay_manifest_sha256")
-        == _sha256(OVERLAY_MANIFEST_PATH)
+        == _sha256(OVERLAY_MANIFEST_V3_PATH)
     ):
         failures.append("overlay manifest binding mismatch")
     try:
-        validate_overlay_manifest(runner_commit)
+        validate_complete_overlay_manifest_v3(runner_commit)
     except LiveRunnerError as exc:
         failures.append(f"overlay manifest validation failed:{exc}")
     expected_proof_path = TASK_ROOT / "parse_only/parser_proof.json"
@@ -2745,7 +3330,7 @@ def analyze_replacement_live(input_path: Path, output_path: Path) -> int:
         isinstance(adoption_relative, str)
         and not Path(adoption_relative).is_absolute()
         and adoption_path.resolve()
-        == ADOPTION_MANIFEST_PATH.resolve()
+        == ADOPTION_MANIFEST_V3_PATH.resolve()
         and adoption_path.is_file() and not adoption_path.is_symlink()
         and _sha256(adoption_path) == manifest.get("adoption_manifest_sha256")
     ):
@@ -2763,7 +3348,9 @@ def analyze_replacement_live(input_path: Path, output_path: Path) -> int:
     if isinstance(adoption, dict) and adoption:
         changed = adoption.get("post_product_changed_files", [])
         try:
-            expected_adoption = build_adoption_payload(current_commit, changed)
+            expected_adoption = build_complete_adoption_payload_v3(
+                current_commit, changed, _sha256(OVERLAY_MANIFEST_V3_PATH)
+            )
         except LiveRunnerError as exc:
             dual_failures.append(f"dual provenance validation failed:{exc}")
         else:
@@ -2797,6 +3384,8 @@ def main() -> int:
     parser.add_argument("--freeze-install-only", action="store_true")
     parser.add_argument("--prepare-overlay", action="store_true")
     parser.add_argument("--repair-overlay-cache", action="store_true")
+    parser.add_argument("--prepare-complete-overlay", action="store_true")
+    parser.add_argument("--expected-replacement-commit", default="")
     parser.add_argument("--analyze-replacement-live", action="store_true")
     parser.add_argument(
         "--analysis-input", type=Path,
@@ -2809,9 +3398,15 @@ def main() -> int:
     args = parser.parse_args()
     if sum(bool(value) for value in (
         args.freeze_install_only, args.prepare_overlay,
-        args.repair_overlay_cache, args.analyze_replacement_live,
+        args.repair_overlay_cache, args.prepare_complete_overlay,
+        args.analyze_replacement_live,
     )) > 1:
         raise LiveRunnerError("conflicting_runner_modes")
+    if args.prepare_complete_overlay:
+        prepare_complete_overlay(args.expected_replacement_commit)
+        return 0
+    if args.expected_replacement_commit:
+        raise LiveRunnerError("replacement_commit_without_prepare_mode")
     if args.repair_overlay_cache:
         repair_overlay_cache()
         return 0
@@ -2835,23 +3430,23 @@ def main() -> int:
     preflight_root = TASK_ROOT / "preflight"
     if preflight_root.exists() or preflight_root.is_symlink():
         raise LiveRunnerError("gpu_preflight_evidence_already_exists")
-    git_commit = subprocess.check_output(
-        ["git", "rev-parse", "HEAD"], cwd=REPOSITORY, text=True
-    ).strip()
     live_environment = validate_live_environment()
+    git_commit = trusted_git(
+        ["rev-parse", "HEAD"], environment=live_environment
+    ).stdout.strip()
     if _sha256(install_manifest_path) != PRODUCT_MANIFEST_SHA256:
         raise LiveRunnerError("product_manifest_sha256_mismatch")
     validate_frozen_install_manifest(
         install_manifest_path, PRODUCT_COMMIT
     )
-    dirty = subprocess.check_output(
-        ["git", "status", "--porcelain", "--untracked-files=no"],
-        cwd=REPOSITORY, text=True,
-    ).strip()
+    dirty = trusted_git(
+        ["status", "--porcelain", "--untracked-files=no"],
+        environment=live_environment,
+    ).stdout.strip()
     if dirty:
         raise LiveRunnerError("tracked_worktree_not_clean")
     contract = QUALIFICATION.load_contract(CONTRACT_PATH)
-    validate_overlay_manifest(git_commit)
+    validate_complete_overlay_manifest_v3(git_commit)
     if tuple(contract["required_processes"]) != tuple(REQUIRED_PROCESSES):
         raise LiveRunnerError("required_process_marker_contract_mismatch")
     if tuple(contract["cases"]) != tuple(case_id for case_id, _ in LIVE_IDENTITIES):
@@ -2896,9 +3491,9 @@ def main() -> int:
         "adoption_manifest_path": str(adoption_path.relative_to(REPOSITORY)),
         "adoption_manifest_sha256": _sha256(adoption_path),
         "overlay_manifest_path": str(
-            OVERLAY_MANIFEST_PATH.relative_to(REPOSITORY)
+            OVERLAY_MANIFEST_V3_PATH.relative_to(REPOSITORY)
         ),
-        "overlay_manifest_sha256": _sha256(OVERLAY_MANIFEST_PATH),
+        "overlay_manifest_sha256": _sha256(OVERLAY_MANIFEST_V3_PATH),
         "parse_proof_path": str(
             (TASK_ROOT / "parse_only/parser_proof.json").relative_to(REPOSITORY)
         ),

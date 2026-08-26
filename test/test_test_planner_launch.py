@@ -416,7 +416,7 @@ class TestPlannerLaunchTest(unittest.TestCase):
             "gnss_time_source": "trigger_topic",
             "gnss_ephemeris_source": "rinex",
             "gnss_scenario_file": str(
-                REPO / "results/icra27/icra070/install/share/iap/"
+                REPO / "results/icra27/icra070/install_v2/share/iap/"
                 "config/gnss_sim/demo7_skymask_nlos.yaml"
             ),
             "gnss_rinex_nav_file": (

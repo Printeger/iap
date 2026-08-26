@@ -1236,7 +1236,7 @@ SCENARIO_PRESETS = {
         "use_araim": "true",
         "gnss_time_source": "trigger_topic",
         "gnss_scenario_file": (
-            "/home/dev/ws_iap/src/iap/results/icra27/icra070/install/"
+            "/home/dev/ws_iap/src/iap/results/icra27/icra070/install_v2/"
             "share/iap/config/gnss_sim/demo7_skymask_nlos.yaml"
         ),
         "gnss_trigger_topic": "/sim/drone_0/lidar",

@@ -3009,3 +3009,23 @@ Requirements: `IAP-RQ-000`, `IAP-RQ-423`.
   GPU, live and analyzer invocations remain zero.
 - Added only non-overwriting v2 command/final evidence. Terminal result is
   `BLOCKED_ICRA070_REPAIR_GIT_SAFE_DIRECTORY`; Supervisor review is required.
+
+## 2026-08-26 (ICRA-070 complete replacement overlay v3)
+
+Requirements: `IAP-RQ-000`, `IAP-RQ-020`, `IAP-RQ-030`, `IAP-RQ-040`,
+`IAP-RQ-220`, `IAP-RQ-320`, `IAP-RQ-421`, `IAP-RQ-422`, `IAP-RQ-423`.
+
+- Add one non-overwriting complete-overlay entrypoint bound to a reviewed HEAD.
+  Read-only Git queries use command-local canonical `safe.directory` trust and
+  do not mutate global, repository or task-local Git configuration.
+- Construct `install_v2` from the complete ICRA-068 non-cache file set without
+  build, compile, CMake reinstall, symlink or hard link. Preserve file modes and
+  replace only the three authorized current aliases.
+- Add complete bidirectional file/mode/byte auditing, old-evidence/base/failed-
+  overlay/PDF/source-cache preconditions, installed no-bytecode probe and
+  exclusive replacement/overlay/adoption v3 provenance.
+- Project the unchanged full-sensor contract through the new root. Focused
+  contract, runner and launch tests pass 15/15, 53/53 and 21/21; complete
+  hermetic discovery passes 589/589 with the 17,770 external ROS entries
+  unchanged. No replacement, parser, GPU, live arm or analyzer has run at this
+  static checkpoint.

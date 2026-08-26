@@ -159,6 +159,235 @@ class IcraP0P5LiveRunnerTest(unittest.TestCase):
         self.assertNotIn("exit_code", binding)
         self.assertEqual(binding["outer_exit_recorded_externally"], True)
 
+    def test_command_local_git_trust_works_with_real_isolated_home(self):
+        isolated_home = (
+            REPO / "results/icra27/icra070/live_environment/home"
+        )
+        self.assertTrue(isolated_home.is_dir())
+        self.assertFalse((isolated_home / ".gitconfig").exists())
+        environment = {
+            key: value for key, value in RUNNER.os.environ.items()
+            if not key.startswith("GIT_CONFIG_")
+        }
+        environment["HOME"] = str(isolated_home)
+        untrusted = RUNNER.subprocess.run(
+            ["git", "-C", str(REPO), "status", "--porcelain"],
+            env=environment,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(untrusted.returncode, 128)
+        self.assertIn("dubious ownership", untrusted.stderr)
+        result = RUNNER.trusted_git(
+            ["rev-parse", "--show-toplevel"],
+            repository=REPO,
+            environment=environment,
+        )
+        self.assertEqual(result.stdout.strip(), str(REPO.resolve()))
+        self.assertEqual(result.returncode, 0)
+        self.assertFalse((isolated_home / ".gitconfig").exists())
+
+    def test_command_local_git_trust_rejects_aliased_repository(self):
+        with tempfile.TemporaryDirectory(dir=REPO / "results/icra27") as tmp:
+            alias = Path(tmp) / "repository_alias"
+            alias.symlink_to(REPO, target_is_directory=True)
+            with self.assertRaisesRegex(
+                RUNNER.LiveRunnerError, "git_repository_not_canonical"
+            ):
+                RUNNER.trusted_git(["status"], repository=alias)
+
+    def test_complete_overlay_copies_full_non_cache_set_modes_and_aliases(self):
+        with tempfile.TemporaryDirectory(dir=REPO / "results/icra27") as tmp:
+            root = Path(tmp)
+            base, replacement, source = (
+                root / "base", root / "install_v2", root / "source"
+            )
+            binary = base / "lib/libiap.so"
+            binary.parent.mkdir(parents=True)
+            binary.write_bytes(b"binary")
+            binary.chmod(0o755)
+            relative = "share/iap/launch/test_planner.launch.py"
+            source_relative = "launch/test_planner.launch.py"
+            (base / relative).parent.mkdir(parents=True)
+            (base / relative).write_text("old\n")
+            (source / source_relative).parent.mkdir(parents=True)
+            (source / source_relative).write_text("current\n")
+            cache = base / "share/iap/launch/__pycache__/stale.pyc"
+            cache.parent.mkdir(parents=True)
+            cache.write_bytes(b"cache")
+
+            proof = RUNNER.construct_complete_overlay(
+                base, replacement, source,
+                {relative: source_relative},
+            )
+
+            self.assertEqual((replacement / relative).read_text(), "current\n")
+            self.assertEqual((replacement / "lib/libiap.so").read_bytes(), b"binary")
+            self.assertEqual(
+                (replacement / "lib/libiap.so").stat().st_mode & 0o777,
+                0o755,
+            )
+            self.assertNotEqual(
+                (replacement / "lib/libiap.so").stat().st_ino,
+                binary.stat().st_ino,
+            )
+            self.assertFalse((replacement / cache.relative_to(base)).exists())
+            self.assertTrue(proof["full_file_set_complete"])
+            self.assertEqual(proof["cache_file_count"], 0)
+            self.assertEqual(proof["symlink_count"], 0)
+            self.assertEqual(proof["hard_link_count"], 0)
+
+    def test_complete_overlay_audit_rejects_post_copy_file_and_mode_drift(self):
+        for mutation, error in (
+            ("missing", "replacement_file_set_missing"),
+            ("extra", "replacement_file_set_extra"),
+            ("mode", "replacement_base_bytes_or_mode_drift"),
+            ("binary", "replacement_base_bytes_or_mode_drift"),
+            ("cache", "replacement_file_set_extra"),
+            ("symlink", "replacement_file_set_extra"),
+            ("hard_link", "replacement_contains_hard_link"),
+        ):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory(
+                dir=REPO / "results/icra27"
+            ) as tmp:
+                root = Path(tmp)
+                base, replacement, source = (
+                    root / "base", root / "install_v2", root / "source"
+                )
+                (base / "lib").mkdir(parents=True)
+                (base / "lib/libiap.so").write_bytes(b"binary")
+                source.mkdir()
+                RUNNER.construct_complete_overlay(
+                    base, replacement, source, {}
+                )
+                installed = replacement / "lib/libiap.so"
+                if mutation == "missing":
+                    installed.unlink()
+                elif mutation == "extra":
+                    (replacement / "extra.txt").write_text("extra")
+                elif mutation == "mode":
+                    installed.chmod(0o755)
+                elif mutation == "binary":
+                    installed.write_bytes(b"changed")
+                elif mutation == "cache":
+                    cache = replacement / "lib/__pycache__/stale.pyc"
+                    cache.parent.mkdir()
+                    cache.write_bytes(b"cache")
+                elif mutation == "symlink":
+                    (replacement / "link").symlink_to("lib/libiap.so")
+                else:
+                    installed.unlink()
+                    RUNNER.os.link(base / "lib/libiap.so", installed)
+                with self.assertRaisesRegex(RUNNER.LiveRunnerError, error):
+                    RUNNER.audit_complete_overlay(
+                        base, replacement, source, {}
+                    )
+
+    def test_complete_overlay_cli_requires_bound_reviewed_commit(self):
+        with mock.patch.object(
+            RUNNER.sys,
+            "argv",
+            [
+                "run_icra_p0_p5_qualification.py",
+                "--prepare-complete-overlay",
+                "--expected-replacement-commit",
+                "not-a-commit",
+            ],
+        ):
+            with self.assertRaisesRegex(
+                RUNNER.LiveRunnerError,
+                "expected_replacement_commit_malformed",
+            ):
+                RUNNER.main()
+
+    def test_complete_overlay_v3_payloads_bind_new_root_and_no_claim(self):
+        commit = "a" * 40
+        proof = {
+            "full_file_set_complete": True,
+            "binary_library_bytes_equal": True,
+        }
+        manifest = RUNNER.build_complete_overlay_manifest_v3(
+            commit, proof, "b" * 64, {"dependency_ready": True},
+            {"alias": {"sha256": "c" * 64}},
+            {"iap_prefix": str(RUNNER.COMPLETE_OVERLAY_INSTALL_ROOT)},
+            {"exit_code": 0},
+        )
+        adoption = RUNNER.build_complete_adoption_payload_v3(
+            commit, [], "d" * 64
+        )
+        self.assertEqual(
+            manifest["install_root"],
+            str(RUNNER.COMPLETE_OVERLAY_INSTALL_ROOT),
+        )
+        self.assertEqual(
+            manifest["schema_version"],
+            "icra070_complete_overlay_manifest_v3",
+        )
+        self.assertEqual(adoption["qualification_claim"], False)
+        self.assertEqual(adoption["install_root"], manifest["install_root"])
+
+    def test_complete_overlay_rejects_partial_or_second_construction(self):
+        for state, error in (
+            ("partial", "replacement_partial_root_already_exists"),
+            ("second", "replacement_root_already_exists"),
+        ):
+            with self.subTest(state=state), tempfile.TemporaryDirectory(
+                dir=REPO / "results/icra27"
+            ) as tmp:
+                root = Path(tmp)
+                base, replacement, source = (
+                    root / "base", root / "install_v2", root / "source"
+                )
+                (base / "lib").mkdir(parents=True)
+                (base / "lib/libiap.so").write_bytes(b"binary")
+                source.mkdir()
+                if state == "partial":
+                    replacement.with_name("install_v2.partial").mkdir()
+                else:
+                    RUNNER.construct_complete_overlay(
+                        base, replacement, source, {}
+                    )
+                with self.assertRaisesRegex(RUNNER.LiveRunnerError, error):
+                    RUNNER.construct_complete_overlay(
+                        base, replacement, source, {}
+                    )
+
+    def test_complete_overlay_audit_rejects_alias_drift(self):
+        with tempfile.TemporaryDirectory(dir=REPO / "results/icra27") as tmp:
+            root = Path(tmp)
+            base, replacement, source = (
+                root / "base", root / "install_v2", root / "source"
+            )
+            relative = "share/iap/launch/test_planner.launch.py"
+            source_relative = "launch/test_planner.launch.py"
+            (base / relative).parent.mkdir(parents=True)
+            (base / relative).write_text("old\n")
+            (source / source_relative).parent.mkdir(parents=True)
+            (source / source_relative).write_text("current\n")
+            aliases = {relative: source_relative}
+            RUNNER.construct_complete_overlay(
+                base, replacement, source, aliases
+            )
+            (replacement / relative).write_text("drift\n")
+            with self.assertRaisesRegex(
+                RUNNER.LiveRunnerError,
+                "replacement_alias_bytes_or_mode_drift",
+            ):
+                RUNNER.audit_complete_overlay(
+                    base, replacement, source, aliases
+                )
+
+    def test_complete_overlay_wrong_head_fails_before_root_creation(self):
+        environment = RUNNER.expected_live_environment()
+        with mock.patch.dict(RUNNER.os.environ, environment, clear=False):
+            with self.assertRaisesRegex(
+                RUNNER.LiveRunnerError, "replacement_head_mismatch"
+            ):
+                RUNNER.prepare_complete_overlay("0" * 40)
+        self.assertFalse(RUNNER.COMPLETE_OVERLAY_INSTALL_ROOT.exists())
+        self.assertFalse(RUNNER.COMPLETE_OVERLAY_PARTIAL_ROOT.exists())
+
     def test_cache_repair_rejects_binary_and_alias_drift(self):
         for mutation, error in (
             ("binary", "unauthorized_overlay_difference"),
@@ -264,6 +493,25 @@ class IcraP0P5LiveRunnerTest(unittest.TestCase):
             RUNNER.REPAIR_EVIDENCE_PATH.name, "overlay_cache_repair_v1.json"
         )
 
+    def test_complete_replacement_inputs_freeze_old_terminal_state(self):
+        proof = RUNNER.verify_reviewed_pre_replacement_inputs()
+        self.assertEqual(
+            proof["preexisting_compact_summary"],
+            {
+                "entry_count": 8,
+                "inventory_sha256": (
+                    "33ae4cd9c12045d54d507d878915f085"
+                    "fdf04836c7da0b21f9235c8c3df203d1"
+                ),
+            },
+        )
+        self.assertEqual(proof["retained_icra068"]["entry_count"], 7364)
+        self.assertEqual(proof["failed_overlay"]["entry_count"], 474)
+        self.assertEqual(
+            proof["protected_pdf_sha256"],
+            "1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6",
+        )
+
     def test_existing_repair_evidence_rejects_second_invocation(self):
         with tempfile.TemporaryDirectory(dir=REPO / "results/icra27") as tmp:
             existing = Path(tmp) / "repair.json"
@@ -340,7 +588,7 @@ class IcraP0P5LiveRunnerTest(unittest.TestCase):
             if key == "gnss_scenario_file":
                 self.assertEqual(
                     config[key],
-                    str(RUNNER.OVERLAY_INSTALL_ROOT / "share/iap" / value),
+                    str(RUNNER.COMPLETE_OVERLAY_INSTALL_ROOT / "share/iap" / value),
                 )
             else:
                 self.assertEqual(config[key], value)
@@ -375,7 +623,7 @@ class IcraP0P5LiveRunnerTest(unittest.TestCase):
                 self.assertIn(
                     "gnss_scenario_file:="
                     + str(
-                        RUNNER.OVERLAY_INSTALL_ROOT
+                        RUNNER.COMPLETE_OVERLAY_INSTALL_ROOT
                         / "share/iap/config/gnss_sim/demo7_skymask_nlos.yaml"
                     ),
                     command,
@@ -612,11 +860,11 @@ file(WRITE "/base/build/${CMAKE_INSTALL_MANIFEST}" "x")
         environment = RUNNER.expected_live_environment()
         self.assertEqual(environment["PYTHONDONTWRITEBYTECODE"], "1")
         self.assertEqual(environment["AMENT_PREFIX_PATH"].split(":"), [
-            str(RUNNER.OVERLAY_INSTALL_ROOT), str(RUNNER.INSTALL_ROOT),
+            str(RUNNER.COMPLETE_OVERLAY_INSTALL_ROOT), str(RUNNER.INSTALL_ROOT),
             "/root/ros2_ws/install", "/opt/ros/jazzy",
         ])
         self.assertEqual(environment["LD_LIBRARY_PATH"].split(":")[:2], [
-            str(RUNNER.OVERLAY_INSTALL_ROOT / "lib"),
+            str(RUNNER.COMPLETE_OVERLAY_INSTALL_ROOT / "lib"),
             str(RUNNER.INSTALL_ROOT / "lib"),
         ])
 

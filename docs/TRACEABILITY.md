@@ -1433,6 +1433,15 @@ They do not convert historical `NO-GO-P2`, failed P0 Gate-0B evidence, the stati
 | IAP-RQ-000 / IAP-RQ-423 | Execute the reviewed repair no more than once and stop at the first blocker | `results/icra27/icra070/compact/command_ledger_v2.json` records one entrypoint, exit 1, zero retry and the task-local Git safe-directory failure | **BLOCKED BEFORE MUTATION** |
 | IAP-RQ-423 | Preserve immutable inputs and prohibit later qualification phases after repair failure | `final_result_v2.json` binds overlay 474/`9381cb03...c89`, ICRA-068 7,364/`fdeb47e3...e4858`, all five cache hashes, zero removals and zero parser/GPU/live/analyzer | **FAIL-CLOSED; SUPERVISOR REVIEW REQUIRED** |
 
+## 2026-08-26 ICRA-070 complete replacement overlay continuation
+
+| Requirement | Verification target | Implementation / test | Status |
+|---|---|---|---|
+| IAP-RQ-000 / IAP-RQ-423 | Isolated Git identity succeeds without persistent trust mutation | `trusted_git`, reviewed-HEAD/clean-worktree preflight and the real recorded-`HOME` subprocess regression in `test_run_icra_p0_p5_qualification.py` | **IMPLEMENTED; RAW GIT 128 / COMMAND-LOCAL TRUST PASS** |
+| IAP-RQ-423 | Replacement contains every base non-cache file, only three current aliases, exact modes and independent bytes | `construct_complete_overlay`, `audit_complete_overlay`; adversaries cover missing/extra/mode/binary/alias/cache/symlink/hard-link/partial/second construction | **IMPLEMENTED; 53/53 RUNNER PASS** |
+| IAP-RQ-020 / IAP-RQ-030 / IAP-RQ-040 / IAP-RQ-220 / IAP-RQ-320 | Preserve GNSS pseudorange+doppler + IMU + LiDAR under the complete replacement prefix | contract/helper/test-planner aliases point only to `install_v2`; contract and launch regressions retain 16 processes, ten topics, source-use gates, worker 4, sigma 0.01 and legacy baseline | **15/15 CONTRACT + 21/21 LAUNCH PASS** |
+| IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 | Freeze non-overwriting v3 provenance before parser/GPU/live | v3 replacement/overlay/adoption builders and validators bind old evidence, inventories, modes, aliases, dependency/package resolution and no-bytecode probe; complete hermetic discovery 589/589 with external inventory 17,770 unchanged | **STATIC IMPLEMENTATION READY; RUNTIME COUNTS ZERO** |
+
 ## 2026-08-26 ICRA-070 Supervisor review and pre-campaign guard freeze
 
 | Req ID | Reviewed/authorized seam | Evidence or controlling document | Status |

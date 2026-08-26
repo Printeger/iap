@@ -8261,3 +8261,39 @@ repair evidence or v2 overlay manifest was created, and parser/GPU/live/
 analyzer counts remain zero. New non-overwriting `command_ledger_v2.json` and
 `final_result_v2.json` freeze terminal status
 `BLOCKED_ICRA070_REPAIR_GIT_SAFE_DIRECTORY` for Supervisor review.
+
+## 2026-08-26 — ICRA-070 complete replacement overlay v3 implementation
+
+IAP-RQ-000, IAP-RQ-020, IAP-RQ-030, IAP-RQ-040, IAP-RQ-220, IAP-RQ-320,
+IAP-RQ-421, IAP-RQ-422 and IAP-RQ-423. Resumed reviewed HEAD `877fd18` at
+`0 0` divergence while preserving the unstaged PDF. The exhausted cache repair,
+474-entry failed overlay, 7,364-entry ICRA-068 tree and eight pre-replacement
+compact records remain immutable.
+
+The new exclusive `--prepare-complete-overlay` mode requires a 40-hex reviewed
+HEAD and performs all Git identity/status/diff queries with command-local trust
+for the canonical repository. A real subprocess regression uses the recorded
+task-local `HOME`: raw Git still exits 128 for dubious ownership, the trusted
+query succeeds, and no `.gitconfig` is created. Relative, aliased or alternate
+repository paths and a changed HEAD fail before output creation.
+
+The constructor copies every ICRA-068 non-cache file through an exclusive
+`install_v2.partial` tree, preserves file modes, never follows links, replaces
+exactly the three authorized launch/helper/contract aliases, audits both file-
+set directions and rejects byte/mode/cache/symlink/hard-link drift before the
+atomic final rename. The installed `-B` helper/planner probe binds
+`PYTHONDONTWRITEBYTECODE=1` and must leave the complete inventory unchanged.
+New v3 replacement/overlay/adoption records bind old terminal evidence, base,
+failed and replacement inventories, modes, dependency/package resolution,
+aliases, probe and current commit without claiming qualification.
+
+The full-sensor scenario path changed only from the failed `install` root to
+the complete `install_v2` root across the three authorized source aliases.
+GNSS/ARAIM + IMU + LiDAR, 16 processes, ten topics, RINEX/timing, P0 worker 4,
+sigma 0.01, legacy baseline and all P5 fixtures/thresholds/actions remain exact.
+Current focused results are contract 15/15, runner 53/53 and launch 21/21;
+complete hermetic discovery passes 589/589 with all 17,770 external ROS-log
+entries unchanged. An earlier historical-harness pass exposed and corrected
+ambient `GIT_CONFIG_*` leakage in the negative trust control; it is explicitly
+non-authoritative scratch. Replacement/parser/GPU/live/analyzer have not been
+invoked at this checkpoint.
