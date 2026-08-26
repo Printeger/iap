@@ -59,8 +59,14 @@
 
 - Disposition: `ROTATE_RECOMMENDED`.
 - Reason: `USER_CHANGED_PROTECTED_GATE_SEQUENCE_AND_DEVELOPMENT_ORDER`. This is a mandatory rotation trigger
-  under `AGENTS.md` §8.6. The exact pushed route changeset will be recorded in a minimal post-push rotation
-  record; the next Supervisor window is read-only until the ICRA-072 Builder handoff.
+  under `AGENTS.md` §8.6.
+- Post-push audit: route changeset `d7cefbe63ed6c50baffff6daf4d307d595d2faa3` was pushed normally and its
+  pre-push verifier passed. This minimal record binds that exact changeset as the rotation handoff anchor; the
+  next Supervisor window is read-only until the ICRA-072 Builder handoff.
+- The exact two-file post-push record again makes current pre-commit exit 2 with
+  `BUILDER_SUPERVISOR_FILE_STAGED`, because HEAD's active role must now remain DEEPSEEK for Builder handoff.
+  The record therefore uses the second disclosed Supervisor-only `--no-verify`; its normal pre-push check remains
+  mandatory.
 
 ## 2026-08-26 — ICRA-071 Review REQUEST_CHANGES; same-Gate guard repair authorized
 

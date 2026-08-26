@@ -36,11 +36,11 @@ guard_plan: docs/icra27/ICRA_CROSS_LAYER_GUARD_PLAN.md
 artifact_retention: ICRA068_ICRA070_BUILD_INSTALL_RAW_EVIDENCE_AND_PDF_RETAINED_NO_CLEANUP
 window_disposition: ROTATE_RECOMMENDED
 rotation_reason: USER_CHANGED_GATE_SEQUENCE_AND_DEVELOPMENT_ORDER
-window_handoff_anchor: PENDING_POST_PUSH_ROUTE_CHANGESET
+window_handoff_anchor: d7cefbe63ed6c50baffff6daf4d307d595d2faa3
 window_next_role: SUPERVISOR
 window_next_review_task: ICRA-072
 window_bootstrap_source: REPOSITORY_AUTHORITY_ONLY
-updated_utc: 2026-08-26T09:55:36Z
+updated_utc: 2026-08-26T09:56:10Z
 ```
 
 The user explicitly restored P4 as the indispensable treatment. The active route is now
