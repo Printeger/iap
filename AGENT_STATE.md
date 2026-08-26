@@ -36,11 +36,11 @@ guard_plan: docs/icra27/ICRA_CROSS_LAYER_GUARD_PLAN.md
 artifact_retention: ICRA068_ICRA070_ICRA072_BUILD_INSTALL_RAW_EVIDENCE_AND_PDF_RETAINED_NO_CLEANUP
 window_disposition: ROTATE_RECOMMENDED
 rotation_reason: P4_V2_CANONICAL_DECISION_AND_LINEAGE_SCHEMA_REVIEWED_WITH_BLOCKING_REPAIR
-window_handoff_anchor: PENDING_REVIEW_PUSH
+window_handoff_anchor: 2882b03c82147fe45275d1ccdfc12d6b1bfd3540
 window_next_role: SUPERVISOR
 window_next_review_task: ICRA-072
 window_bootstrap_source: REPOSITORY_AUTHORITY_ONLY
-updated_utc: 2026-08-26T11:43:58Z
+updated_utc: 2026-08-26T11:48:32Z
 ```
 
 The active user-owned route remains `P0_P4_V2_P5`; P0+P5 is the matched control. P4-v1 remains an immutable

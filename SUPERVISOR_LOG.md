@@ -83,8 +83,10 @@ Verdict: **FAIL — one critical acceptance failure, one high lineage defect and
 - Reason: `P4_V2_CANONICAL_DECISION_AND_LINEAGE_SCHEMA_REVIEWED_WITH_BLOCKING_REPAIR`. The reviewed change
   introduces canonical cross-layer decision/lineage schemas and the Review identifies a blocking lifetime
   correction, which is a mandatory §8.6 rotation trigger even though the next task remains in the same Gate.
-- Post-push audit: pending. A minimal Supervisor-only record will bind the exact pushed Review changeset as the
-  handoff anchor. The next Supervisor window is read-only until the ICRA-072 continuation Builder handoff.
+- Post-push audit: Review changeset `2882b03c82147fe45275d1ccdfc12d6b1bfd3540` was pushed normally; its
+  pre-push verifier passed and fetch/divergence was `0 0`. This minimal Supervisor-only record binds that exact
+  changeset as the handoff anchor. The next Supervisor window is read-only until the ICRA-072 continuation
+  Builder handoff.
 
 ## 2026-08-26 — user accelerates development-first full-flow recovery; ICRA-072 authorized
 
