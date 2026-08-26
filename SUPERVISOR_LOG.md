@@ -51,9 +51,15 @@
 
 ### Supervisor window disposition
 
-- The final disposition is intentionally deferred until the Review changeset is pushed and divergence is
-  confirmed `0 0`, as required by `AGENTS.md` section 8.6. A minimal Supervisor-only rotation record will then
-  append the authoritative disposition and handoff anchor; this Review will not end before that push.
+- Disposition: `KEEP_WINDOW`.
+- Reason: `SAME_GATE_LOCAL_REPLACEMENT_OVERLAY_REPAIR_NO_SCOPE_CONTRACT_CLAIM_OR_AUTHORITY_CHANGE_CONTEXT_COMPLETE`.
+  The next task stays within the same ICRA-070 Gate and changes only the local overlay/orchestration repair;
+  system target, canonical contract, claim boundary, authority and campaign barrier are unchanged. This
+  Supervisor window has one Review with complete repository and conversation context, so rotation is not
+  required yet.
+- Handoff anchor: pushed Review commit `80116505a315ec4112a14727f4ae8df86b12b63b`; divergence was confirmed
+  `0 0` before this audit. Next Review role/task remain `SUPERVISOR` / `ICRA-070`. While
+  `active_role=DEEPSEEK`, the current window does not execute Builder work.
 
 ## 2026-08-26 — ICRA-070 review: static correction accepted, qualification blocked before live
 

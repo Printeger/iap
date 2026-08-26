@@ -24,13 +24,13 @@ handoff_status: TASK_READY
 next_task: NEXT_TASK.md
 next_after_icra070_pass: ICRA-071_STATIC_CROSS_LAYER_GUARD_HARDENING
 guard_plan: docs/icra27/ICRA_CROSS_LAYER_GUARD_PLAN.md
-window_disposition: ROTATE_RECOMMENDED
-rotation_reason: REVIEW_BOUNDARY_FROZEN_AND_CONTEXT_COMPACTED_MULTIPLE_TIMES
-window_handoff_anchor: origin/dev/icra
+window_disposition: KEEP_WINDOW
+rotation_reason: SAME_GATE_LOCAL_REPLACEMENT_OVERLAY_REPAIR_NO_SCOPE_CONTRACT_CLAIM_OR_AUTHORITY_CHANGE_CONTEXT_COMPLETE
+window_handoff_anchor: 80116505a315ec4112a14727f4ae8df86b12b63b
 window_next_role: SUPERVISOR
 window_next_review_task: ICRA-070
 window_bootstrap_source: REPOSITORY_AUTHORITY_ONLY
-updated_utc: 2026-08-26T06:52:39Z
+updated_utc: 2026-08-26T06:57:39Z
 ```
 
 Supervisor review of `1b3c661...24d3e16` accepts the permanent cache exclusion, full-file-set verifier,
@@ -52,5 +52,7 @@ the retained ICRA-068 non-cache file set, apply only the three authorized aliase
 unused parser/GPU/three `-003` arms/analyzer sequence. Existing build/install trees remain retained through
 development and Review because the gate did not pass.
 
-ICRA-071 and campaign remain forbidden. The window fields above retain the prior Review disposition until the
-mandatory post-push audit records the final disposition for this Review in a minimal Supervisor-only commit.
+ICRA-071 and campaign remain forbidden. The post-push window audit records `KEEP_WINDOW`: this is a local
+repair in the same Gate with no scope, canonical-contract, claim or authority change, and the current Review
+context is complete. While `active_role=DEEPSEEK`, this Supervisor window performs no Builder work and waits
+for the next ICRA-070 implementation handoff.
