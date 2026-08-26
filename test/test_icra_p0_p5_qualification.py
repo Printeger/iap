@@ -27,8 +27,20 @@ def synthetic_bundle(contract, raw_directory):
         "controlled_shutdown": True,
         "topic_counts": {name: 3 for name in contract["required_topics"]},
         "p0_samples": [
-            {"sequence": 1, "ready": True, "stable": True, "refresh_s": 0.2},
-            {"sequence": 2, "ready": True, "stable": True, "refresh_s": 0.21},
+            {"sequence": 1, "ready": True, "stable": True, "refresh_s": 0.2,
+             "gnss_epoch_seen": True, "gnss_epoch_valid": True,
+             "gnss_epoch_fresh": True, "predictor_gnss_used_count": 4,
+             "predictor_lidar_used_count": 4,
+             "predictor_horizon_fusion_count": 6},
+            {"sequence": 2, "ready": True, "stable": True, "refresh_s": 0.21,
+             "gnss_epoch_seen": True, "gnss_epoch_valid": True,
+             "gnss_epoch_fresh": True, "predictor_gnss_used_count": 5,
+             "predictor_lidar_used_count": 5,
+             "predictor_horizon_fusion_count": 6},
+        ],
+        "integrity_samples": [
+            {"sequence": 1, "valid": True, "n_sv_used": 8},
+            {"sequence": 2, "valid": True, "n_sv_used": 9},
         ],
     }
     runs = [
@@ -125,6 +137,38 @@ class IcraP0P5QualificationTest(unittest.TestCase):
         self.assertEqual(values["p0.predictor.sigma_grow_m_sqrt_s"], 0.01)
         self.assertEqual(values["p0.predictor.sigma_growth_profile"], "legacy_iap_rq320_baseline_v1")
 
+    def test_all_cases_bind_same_full_sensor_scenario_and_topics(self):
+        scenario = "icra_p0_p5_fused_degraded_corridor_v1"
+        self.assertEqual(
+            [self.contract["cases"][case]["scenario"] for case in MODULE.CASE_IDS],
+            [scenario, scenario, scenario],
+        )
+        self.assertEqual(set(self.contract["required_topics"]), {
+            "/planning/risk_grid_health",
+            "/planning/integrity_gate_status",
+            "/drone_0_planning/bspline",
+            "/sim/drone_0/imu",
+            "/sim/drone_0/imu_iap",
+            "/sim/drone_0/lidar",
+            "/sim/drone_0/lidar_body",
+            "/ublox_driver/range_meas",
+            "/gnss_sim/diagnostics",
+            "/iap/integrity",
+        })
+        self.assertEqual(len(self.contract["required_processes"]), 16)
+        self.assertIn("test_planner_gnss_sim_node", self.contract["required_processes"])
+
+    def test_contract_rejects_reduced_sensor_qualification(self):
+        reduced = copy.deepcopy(self.contract)
+        reduced["qualification_values"]["use_gnss"] = False
+        with tempfile.TemporaryDirectory(dir=REPO) as tmp:
+            path = Path(tmp) / "contract.json"
+            path.write_text(json.dumps(reduced) + "\n")
+            with self.assertRaisesRegex(
+                MODULE.ContractError, "full-sensor qualification"
+            ):
+                MODULE.load_contract(path)
+
     def test_conflicting_profile_and_fixture_overrides_fail_closed(self):
         malicious = (
             ("planner_enable_all_safety", True),
@@ -185,6 +229,11 @@ class IcraP0P5QualificationTest(unittest.TestCase):
         mutations["nonfinite"] = lambda b: b["runs"][0]["p0_samples"][0].update(refresh_s=math.nan)
         mutations["topic gap"] = lambda b: b["runs"][0]["topic_counts"].update({"/planning/bspline": 0})
         mutations["unstable p0"] = lambda b: b["runs"][0]["p0_samples"][0].update(stable=False)
+        mutations["stale gnss epoch"] = lambda b: b["runs"][0]["p0_samples"][0].update(gnss_epoch_fresh=False)
+        mutations["zero gnss prediction"] = lambda b: b["runs"][0]["p0_samples"][0].update(predictor_gnss_used_count=0)
+        mutations["zero lidar prediction"] = lambda b: b["runs"][0]["p0_samples"][0].update(predictor_lidar_used_count=0)
+        mutations["zero fused horizon"] = lambda b: b["runs"][0]["p0_samples"][0].update(predictor_horizon_fusion_count=0)
+        mutations["zero satellites"] = lambda b: b["runs"][0]["integrity_samples"][0].update(n_sv_used=0)
         mutations["wrong config"] = lambda b: b["runs"][0]["launch_binding"]["effective_values"].update({"planner_enable_p1": True})
         mutations["wrong hash"] = lambda b: b["manifest"].update(contract_sha256="0" * 64)
         mutations["wrong raw hash"] = lambda b: b["manifest"]["raw_artifact_hashes"]["icra-p0-p5-safe-001"].update({next(iter(b["manifest"]["raw_artifact_hashes"]["icra-p0-p5-safe-001"])): "0" * 64})
@@ -200,6 +249,37 @@ class IcraP0P5QualificationTest(unittest.TestCase):
                 result = MODULE.analyze_bundle(self.contract, bundle, CONTRACT_PATH)
                 self.assertEqual(result["status"], "VALIDATION_ONLY_FAIL")
                 self.assertTrue(result["failures"])
+
+    def test_analyzer_rejects_hash_consistent_reduced_sensor_evidence(self):
+        mutations = {
+            "stale gnss epoch": lambda run: run["p0_samples"][0].update(
+                gnss_epoch_fresh=False
+            ),
+            "zero gnss prediction": lambda run: run["p0_samples"][0].update(
+                predictor_gnss_used_count=0
+            ),
+            "zero lidar prediction": lambda run: run["p0_samples"][0].update(
+                predictor_lidar_used_count=0
+            ),
+            "zero fused horizon": lambda run: run["p0_samples"][0].update(
+                predictor_horizon_fusion_count=0
+            ),
+            "zero satellites": lambda run: run["integrity_samples"][0].update(
+                n_sv_used=0
+            ),
+        }
+        for label, mutate in mutations.items():
+            with self.subTest(label=label):
+                bundle = synthetic_bundle(self.contract, self.raw_directory)
+                mutate(bundle["runs"][0])
+                MODULE.bind_run_artifacts(bundle, REPO, self.raw_directory)
+                result = MODULE.analyze_bundle(
+                    self.contract, bundle, CONTRACT_PATH
+                )
+                self.assertEqual(result["status"], "VALIDATION_ONLY_FAIL")
+                self.assertTrue(any(
+                    "full-sensor" in failure for failure in result["failures"]
+                ), result["failures"])
 
     def test_final_reject_allows_publication_of_an_unrelated_candidate(self):
         bundle = synthetic_bundle(self.contract, self.raw_directory)

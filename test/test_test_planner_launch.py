@@ -390,7 +390,7 @@ class TestPlannerLaunchTest(unittest.TestCase):
                 context, applied
             )
         self.assertEqual(selected, experiment)
-        self.assertEqual(scenario, "lidar_corridor_degenerate")
+        self.assertEqual(scenario, "icra_p0_p5_fused_degraded_corridor_v1")
         self.assertEqual(profile, "icra_p0_p5")
         self.assertEqual(enabled, {
             "p1": False, "p2": False, "p3_local": False,
@@ -402,6 +402,58 @@ class TestPlannerLaunchTest(unittest.TestCase):
         self.assertEqual(context.launch_configurations["p0.predictor.worker_count"], "4")
         self.assertEqual(context.launch_configurations["p5_7.fixture.enabled"], "true")
         self.assertEqual(context.launch_configurations["p5_6.fixture.enabled"], "false")
+
+    def test_icra_p0_p5_all_cases_resolve_exact_full_sensor_scenario(self):
+        frozen = {
+            "use_gnss": "true",
+            "use_araim": "true",
+            "enable_gnss_integrity": "true",
+            "enable_gnss_araim": "true",
+            "enable_lidar_integrity": "true",
+            "integrity_fusion_mode": "max_pl",
+            "validator_require_gnss_valid": "true",
+            "validator_require_lidar_valid": "true",
+            "gnss_time_source": "trigger_topic",
+            "gnss_ephemeris_source": "rinex",
+            "gnss_scenario_file": str(
+                REPO / "config/gnss_sim/demo7_skymask_nlos.yaml"
+            ),
+            "gnss_pr_noise_base": "5.0",
+            "gnss_dop_noise_base": "0.5",
+            "gnss_enable_map_occlusion": "true",
+            "gnss_enable_skymask": "true",
+            "gnss_enable_nlos": "true",
+            "gnss_enable_multipath": "true",
+            "gnss_enable_fault_injection": "false",
+            "init_x": "-12.0",
+            "init_y": "0.0",
+            "init_z": "1.2",
+            "goal_x": "12.0",
+            "goal_y": "0.0",
+            "goal_z": "1.2",
+            "corridor_x_min_m": "-14.0",
+            "corridor_x_max_m": "14.0",
+            "corridor_half_width_y_m": "2.0",
+        }
+        experiments = (
+            "icra_p0_p5_qualification_safe_normal",
+            "icra_p0_p5_qualification_final_reject",
+            "icra_p0_p5_qualification_runtime_fail",
+        )
+        for experiment in experiments:
+            with self.subTest(experiment=experiment):
+                context = self._launch_context_with_defaults(experiment=experiment)
+                with mock.patch.object(
+                    sys, "argv", ["test", f"experiment:={experiment}"]
+                ):
+                    scenario, _, _ = MODULE._apply_presets(context, REPO)
+                self.assertEqual(
+                    scenario, "icra_p0_p5_fused_degraded_corridor_v1"
+                )
+                for key, expected in frozen.items():
+                    self.assertEqual(
+                        context.launch_configurations[key], expected, key
+                    )
 
     def test_icra_p0_p5_launch_rejects_equal_level_and_lower_level_conflicts(self):
         experiment = "icra_p0_p5_qualification_safe_normal"

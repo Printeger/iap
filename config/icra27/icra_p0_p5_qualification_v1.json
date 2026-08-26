@@ -26,7 +26,14 @@
   "required_topics": [
     "/planning/risk_grid_health",
     "/planning/integrity_gate_status",
-    "/drone_0_planning/bspline"
+    "/drone_0_planning/bspline",
+    "/sim/drone_0/imu",
+    "/sim/drone_0/imu_iap",
+    "/sim/drone_0/lidar",
+    "/sim/drone_0/lidar_body",
+    "/ublox_driver/range_meas",
+    "/gnss_sim/diagnostics",
+    "/iap/integrity"
   ],
   "profile_values": {
     "planner_safety_profile": "icra_p0_p5",
@@ -107,6 +114,54 @@
     "p5.debug_metrics_enable": true,
     "gate0.qualification_evidence_enable": true
   },
+  "qualification_values": {
+    "use_gnss": true,
+    "use_araim": true,
+    "enable_gnss_integrity": true,
+    "enable_gnss_araim": true,
+    "enable_lidar_integrity": true,
+    "integrity_fusion_mode": "max_pl",
+    "validator_require_gnss_valid": true,
+    "validator_require_lidar_valid": true,
+    "gnss_time_source": "trigger_topic",
+    "gnss_ephemeris_source": "rinex",
+    "gnss_enabled_constellations": "GPS,BDS,GAL,GLO",
+    "gnss_pr_noise_base": 5.0,
+    "gnss_dop_noise_base": 0.5,
+    "gnss_enable_map_occlusion": true,
+    "gnss_enable_skymask": true,
+    "gnss_enable_nlos": true,
+    "gnss_enable_multipath": true,
+    "gnss_enable_fault_injection": false,
+    "init_x": -12.0,
+    "init_y": 0.0,
+    "init_z": 1.2,
+    "goal_x": 12.0,
+    "goal_y": 0.0,
+    "goal_z": 1.2,
+    "point_num": 1,
+    "forest_size_x_m": 30.0,
+    "forest_size_y_m": 6.0,
+    "tree_density_lower_left_per_m2": 0.0,
+    "tree_density_lower_right_per_m2": 0.0,
+    "tree_density_upper_left_per_m2": 0.0,
+    "tree_density_upper_right_per_m2": 0.0,
+    "canopy_density_lower_left": 0.0,
+    "canopy_density_lower_right": 0.0,
+    "canopy_density_upper_left": 0.0,
+    "canopy_density_upper_right": 0.0,
+    "terminal_wall_enabled": false,
+    "corridor_walls_enabled": true,
+    "corridor_floor_enabled": true,
+    "corridor_x_min_m": -14.0,
+    "corridor_x_max_m": 14.0,
+    "corridor_half_width_y_m": 2.0,
+    "corridor_wall_z_min_m": 0.0,
+    "corridor_wall_z_max_m": 3.0,
+    "corridor_wall_thickness_y_m": 0.1,
+    "corridor_floor_thickness_z_m": 0.05,
+    "corridor_surface_resolution_m": 0.1
+  },
   "p5_thresholds": {
     "p5.horizon_s": 2.0,
     "p5.sample_dt_s": 0.2,
@@ -148,13 +203,13 @@
   "cases": {
     "SAFE_NORMAL": {
       "experiment": "icra_p0_p5_qualification_safe_normal",
-      "scenario": "lidar_corridor_degenerate",
+      "scenario": "icra_p0_p5_fused_degraded_corridor_v1",
       "fixture_alias": "none_v1",
       "fixture_values": {}
     },
     "FINAL_REJECT": {
       "experiment": "icra_p0_p5_qualification_final_reject",
-      "scenario": "lidar_corridor_degenerate",
+      "scenario": "icra_p0_p5_fused_degraded_corridor_v1",
       "fixture_alias": "p5_7_rejected_trajectory_zone_v1",
       "fixture_values": {
         "p5_7.fixture.enabled": true,
@@ -173,7 +228,7 @@
     },
     "RUNTIME_FAIL": {
       "experiment": "icra_p0_p5_qualification_runtime_fail",
-      "scenario": "fallback_only",
+      "scenario": "icra_p0_p5_fused_degraded_corridor_v1",
       "fixture_alias": "p5_6_future_unknown_zone_v1",
       "fixture_values": {
         "p5_6.fixture.enabled": true,

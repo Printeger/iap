@@ -2888,3 +2888,29 @@ python3 scripts/dev_planner/run_p4_g0c_tests.py \
   --task-root "$PWD/results/icra27/icra063/icra068_phase_a_full" \
   unittest discover -s test -p 'test_*.py'
 ```
+
+## 2026-08-26 (ICRA-070 full-sensor qualification correction)
+
+Requirements: `IAP-RQ-020`, `IAP-RQ-030`, `IAP-RQ-040`, `IAP-RQ-220`,
+`IAP-RQ-320`, `IAP-RQ-421`, `IAP-RQ-422`, `IAP-RQ-423`.
+
+- Added the qualification-only `icra_p0_p5_fused_degraded_corridor_v1`
+  scenario. All three canonical cases retain the registered corridor route and
+  P5-6/P5-7 fixtures while enabling the existing degraded-GNSS model,
+  trigger-topic timing, GNSS/ARAIM, LiDAR integrity and `max_pl` fusion.
+- Expanded live acceptance to the complete GNSS + IMU + LiDAR topic set.
+  Normalization and analysis reject stale or invalid GNSS epochs, zero
+  GNSS/LiDAR/fused-horizon predictor use, zero satellites, reduced modes,
+  missing topics or any of the 16 required processes.
+- Added repository-local dependency hashing and an isolated ICRA-070
+  no-compile overlay workflow. Its task-local CMake driver suppresses writes
+  back into the retained ICRA-068 build, whose complete before/after stat
+  inventory must remain identical. Overlay bytes may differ only for the three
+  authorized current launch/helper/contract aliases; every binary/library must
+  equal ICRA-068.
+- Fresh identities are exactly the ordered `-003` set. Parser proof binds the
+  full-sensor resolution and analyzer readiness binds the overlay manifest.
+- Static verification passes 41/41 focused runner/analyzer/contract tests,
+  21/21 launch tests and complete hermetic discovery with exit 0. The 17,770
+  external ROS entries remain unchanged. No overlay, real parser, GPU, live arm
+  or analyzer has been invoked at this checkpoint.

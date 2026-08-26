@@ -33,9 +33,9 @@ class IcraP0P5LiveRunnerTest(unittest.TestCase):
         self.assertEqual(
             RUNNER.LIVE_IDENTITIES,
             (
-                ("SAFE_NORMAL", "icra-p0-p5-live-safe-normal-002"),
-                ("FINAL_REJECT", "icra-p0-p5-live-final-reject-002"),
-                ("RUNTIME_FAIL", "icra-p0-p5-live-runtime-fail-002"),
+                ("SAFE_NORMAL", "icra-p0-p5-live-safe-normal-003"),
+                ("FINAL_REJECT", "icra-p0-p5-live-final-reject-003"),
+                ("RUNTIME_FAIL", "icra-p0-p5-live-runtime-fail-003"),
             ),
         )
         required = set(self.contract["required_processes"])
@@ -65,7 +65,7 @@ class IcraP0P5LiveRunnerTest(unittest.TestCase):
     def test_exact_commands_omit_only_registered_empty_defaults(self):
         for case_id, run_id in RUNNER.LIVE_IDENTITIES:
             with self.subTest(case_id=case_id):
-                run_dir = REPO / "results/icra27/icra069/live" / run_id
+                run_dir = REPO / "results/icra27/icra070/live" / run_id
                 config = RUNNER.live_config(
                     self.contract, case_id, run_id, run_dir
                 )
@@ -127,7 +127,15 @@ class IcraP0P5LiveRunnerTest(unittest.TestCase):
             "scripts/dev_planner/run_icra_p0_p5_qualification.py",
             "test/test_run_icra_p0_p5_qualification.py",
         ]
-        payload = RUNNER.build_adoption_payload(current_commit, changed)
+        overlay = {
+            "schema_version": "icra070_isolated_overlay_manifest_v1",
+            "runner": {"git_commit": current_commit},
+            "overlay_inventory": {"authorized_differences": []},
+            "binary_library_bytes_equal": True,
+        }
+        payload = RUNNER.build_adoption_payload(
+            current_commit, changed, overlay, "c" * 64
+        )
         self.assertEqual(
             payload["product_install"]["git_commit"], RUNNER.PRODUCT_COMMIT
         )
@@ -138,7 +146,7 @@ class IcraP0P5LiveRunnerTest(unittest.TestCase):
         self.assertEqual(payload["runner_analyzer"]["git_commit"], current_commit)
         self.assertEqual(payload["post_product_changed_files"], changed)
         self.assertEqual(payload["installed_runtime_source_overlap"], [])
-        self.assertTrue(payload["product_runtime_unchanged"])
+        self.assertTrue(payload["product_binary_runtime_unchanged"])
 
     def test_adoption_rejects_wrong_product_manifest_hash(self):
         with mock.patch.object(RUNNER, "_sha256", return_value="0" * 64):
@@ -146,6 +154,116 @@ class IcraP0P5LiveRunnerTest(unittest.TestCase):
                 RUNNER.LiveRunnerError, "product_manifest_sha256_mismatch"
             ):
                 RUNNER.build_adoption_payload("b" * 40, [])
+
+    def test_gnss_dependency_preflight_resolves_exact_frozen_inputs(self):
+        result = RUNNER.resolve_gnss_dependencies(
+            self.contract, RUNNER.INSTALL_ROOT
+        )
+        self.assertTrue(result["dependency_ready"])
+        self.assertEqual(
+            result["gnss_simulator"]["path"],
+            str(RUNNER.INSTALL_ROOT / "lib/gnss_sim/gnss_sim_node"),
+        )
+        self.assertTrue(result["gnss_simulator"]["executable"])
+        self.assertEqual(
+            result["scenario"]["path"],
+            str(RUNNER.INSTALL_ROOT / "share/iap/config/gnss_sim/demo7_skymask_nlos.yaml"),
+        )
+        self.assertEqual(
+            result["rinex_ephemeris"]["path"],
+            "/home/dev/ws_iap/src/LIGO./Data/BRDM00DLR_S_20221870000_01D_MN.rnx",
+        )
+        self.assertEqual(result["sensor_model"], {
+            "constellations": ["GPS", "BDS", "GAL", "GLO"],
+            "pseudorange_noise_std_m": 5.0,
+            "doppler_noise_std_mps": 0.5,
+            "map_occlusion": True,
+            "skymask": True,
+            "nlos": True,
+            "multipath": True,
+            "time_source": "trigger_topic",
+            "trigger_topic": "/sim/drone_0/lidar",
+        })
+
+    def test_overlay_install_command_is_no_compile_and_repository_local(self):
+        command = RUNNER.overlay_install_command()
+        self.assertEqual(command, [
+            "cmake",
+            f"-DCMAKE_INSTALL_PREFIX={RUNNER.OVERLAY_INSTALL_ROOT}",
+            "-P", str(RUNNER.OVERLAY_INSTALL_DRIVER_PATH),
+        ])
+        self.assertNotIn("--build", command)
+        self.assertTrue(str(RUNNER.OVERLAY_INSTALL_ROOT).startswith(str(REPO)))
+
+    def test_overlay_inventory_allows_only_registered_current_alias_changes(self):
+        with tempfile.TemporaryDirectory(dir=REPO / "results/icra27") as tmp:
+            root = Path(tmp)
+            base = root / "base"
+            overlay = root / "overlay"
+            source = root / "source"
+            for parent in (base, overlay, source):
+                (parent / "lib").mkdir(parents=True)
+                (parent / "share/iap/launch").mkdir(parents=True)
+            (source / "launch").mkdir(parents=True)
+            (base / "lib/libiap.so").write_bytes(b"binary")
+            (overlay / "lib/libiap.so").write_bytes(b"binary")
+            relative = "share/iap/launch/test_planner.launch.py"
+            (base / relative).write_text("old\n")
+            (overlay / relative).write_text("current\n")
+            (source / "launch/test_planner.launch.py").write_text("current\n")
+            inventory = RUNNER.inventory_overlay(
+                overlay, base,
+                {relative: "launch/test_planner.launch.py"},
+                source_root=source,
+            )
+            self.assertEqual(inventory["authorized_differences"], [relative])
+            self.assertTrue(inventory["binary_library_bytes_equal"])
+            (overlay / "lib/libiap.so").write_bytes(b"changed")
+            with self.assertRaisesRegex(
+                RUNNER.LiveRunnerError, "unauthorized_overlay_difference"
+            ):
+                RUNNER.inventory_overlay(
+                    overlay, base,
+                    {relative: "launch/test_planner.launch.py"},
+                    source_root=source,
+                )
+
+    def test_live_environment_prefers_overlay_then_immutable_base(self):
+        environment = RUNNER.expected_live_environment()
+        self.assertEqual(environment["AMENT_PREFIX_PATH"].split(":"), [
+            str(RUNNER.OVERLAY_INSTALL_ROOT), str(RUNNER.INSTALL_ROOT),
+            "/root/ros2_ws/install", "/opt/ros/jazzy",
+        ])
+        self.assertEqual(environment["LD_LIBRARY_PATH"].split(":")[:2], [
+            str(RUNNER.OVERLAY_INSTALL_ROOT / "lib"),
+            str(RUNNER.INSTALL_ROOT / "lib"),
+        ])
+
+    def test_overlay_manifest_separates_three_provenance_layers(self):
+        dependency = {"dependency_ready": True, "schema_version": "dep-v1"}
+        inventory = {
+            "file_count": 3,
+            "file_sha256": {"lib/libiap.so": "a" * 64},
+            "base_file_sha256": {"lib/libiap.so": "a" * 64},
+            "authorized_differences": [
+                "share/iap/launch/test_planner.launch.py"
+            ],
+            "binary_library_bytes_equal": True,
+        }
+        payload = RUNNER.build_overlay_manifest_payload(
+            "b" * 40, dependency, inventory
+        )
+        self.assertEqual(
+            payload["product_build"]["git_commit"], RUNNER.PRODUCT_COMMIT
+        )
+        self.assertEqual(
+            payload["corrected_full_sensor_contract"]["git_commit"], "b" * 40
+        )
+        self.assertEqual(payload["runner"]["git_commit"], "b" * 40)
+        self.assertTrue(payload["binary_library_bytes_equal"])
+        self.assertEqual(payload["runtime_prefix_order"][:2], [
+            str(RUNNER.OVERLAY_INSTALL_ROOT), str(RUNNER.INSTALL_ROOT),
+        ])
 
     def test_parse_only_command_preserves_rendered_overrides(self):
         rendered = [
@@ -232,12 +350,15 @@ class IcraP0P5LiveRunnerTest(unittest.TestCase):
                 "parse_passed": True,
             })
         return {
-            "schema_version": "icra069_ros_launch_parser_proof_v1",
+            "schema_version": "icra070_ros_launch_parser_proof_v1",
             "case_order": [case_id for case_id, _ in RUNNER.LIVE_IDENTITIES],
             "cases": cases,
             "parse_invocations": 3,
             "main_flow_child_invocations": 0,
             "parse_ready": True,
+            "full_sensor_resolution": RUNNER.full_sensor_resolution(
+                self.contract
+            ),
         }
 
     def test_parser_proof_validation_rejects_omission_and_tamper(self):
@@ -316,6 +437,10 @@ class IcraP0P5LiveRunnerTest(unittest.TestCase):
                 "launch_command.json", "stdout.log",
             ):
                 (run_dir / name).write_text("evidence\n")
+            (run_dir / "integrity_report.jsonl").write_text(
+                json.dumps({"valid": True, "n_sv_used": 8}) + "\n"
+                + json.dumps({"valid": True, "n_sv_used": 9}) + "\n"
+            )
             process_result = {
                 "required_processes_ok": True,
                 "controlled_shutdown": True,
@@ -335,10 +460,20 @@ class IcraP0P5LiveRunnerTest(unittest.TestCase):
                 {"ready": True, "stale": False, "generation_id": 4,
                  "predictor_requested_worker_count": 4,
                  "predictor_effective_worker_count": 4,
+                 "gnss_epoch_seen": True, "gnss_epoch_valid": True,
+                 "gnss_epoch_fresh": True,
+                 "predictor_gnss_used_count": 4,
+                 "predictor_lidar_used_count": 4,
+                 "predictor_horizon_fusion_count": 6,
                  "refresh_duration_ms": 12.0},
                 {"ready": True, "stale": False, "generation_id": 5,
                  "predictor_requested_worker_count": 4,
                  "predictor_effective_worker_count": 4,
+                 "gnss_epoch_seen": True, "gnss_epoch_valid": True,
+                 "gnss_epoch_fresh": True,
+                 "predictor_gnss_used_count": 5,
+                 "predictor_lidar_used_count": 5,
+                 "predictor_horizon_fusion_count": 6,
                  "refresh_duration_ms": 11.0},
             ]
             p5_rows = [
@@ -378,6 +513,15 @@ class IcraP0P5LiveRunnerTest(unittest.TestCase):
                     self.contract, self.contract_path, "RUNTIME_FAIL",
                     "fixed-run", run_dir, process_result, "a" * 40,
                 )
+                p0_rows[0]["gnss_epoch_fresh"] = False
+                with self.assertRaisesRegex(
+                    RUNNER.LiveRunnerError, "full_sensor_p0_rows_missing"
+                ):
+                    RUNNER.normalize_live_run(
+                        self.contract, self.contract_path, "RUNTIME_FAIL",
+                        "fixed-run", run_dir, process_result, "a" * 40,
+                    )
+                p0_rows[0]["gnss_epoch_fresh"] = True
                 process_result["required_processes"][
                     next(iter(RUNNER.REQUIRED_PROCESSES))
                 ]["seen"] = False
@@ -409,6 +553,9 @@ class IcraP0P5LiveRunnerTest(unittest.TestCase):
         )
         self.assertEqual(normalized["events"][-1]["action"], "EMERGENCY_STOP")
         self.assertEqual(normalized["events"][-1]["reason"], "future_unknown_timeout")
+        self.assertGreater(normalized["p0_samples"][0]["predictor_gnss_used_count"], 0)
+        self.assertGreater(normalized["p0_samples"][0]["predictor_lidar_used_count"], 0)
+        self.assertGreater(normalized["integrity_samples"][0]["n_sv_used"], 0)
         self.assertTrue(any(path.endswith("evidence.db3") for path in normalized["raw_sources"]))
         self.assertTrue(any(path.endswith("process_result.json") for path in normalized["raw_sources"]))
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One-shot ICRA-069 replacement P0+P5 runner and evidence normalizer."""
+"""One-shot ICRA-070 fused-sensor P0+P5 runner and evidence normalizer."""
 
 from __future__ import annotations
 
@@ -19,14 +19,23 @@ from pathlib import Path
 
 
 REPOSITORY = Path(__file__).resolve().parents[2]
-TASK_ROOT = REPOSITORY / "results/icra27/icra069"
+TASK_ROOT = REPOSITORY / "results/icra27/icra070"
 PRODUCT_TASK_ROOT = REPOSITORY / "results/icra27/icra068"
 INSTALL_ROOT = PRODUCT_TASK_ROOT / "install"
+OVERLAY_INSTALL_ROOT = TASK_ROOT / "install"
+PRODUCT_BUILD_ROOT = PRODUCT_TASK_ROOT / "build/iap"
+OVERLAY_MANIFEST_PATH = TASK_ROOT / "compact/icra070_overlay_manifest.json"
+DEPENDENCY_PREFLIGHT_PATH = TASK_ROOT / "compact/gnss_dependency_preflight.json"
+OVERLAY_COMMAND_PATH = TASK_ROOT / "compact/overlay_install_command.json"
+OVERLAY_INSTALL_DRIVER_PATH = TASK_ROOT / "overlay_install_driver.cmake"
 CONTRACT_PATH = REPOSITORY / "config/icra27/icra_p0_p5_qualification_v1.json"
 INSTALL_MANIFEST_PATH = PRODUCT_TASK_ROOT / "icra068_install_manifest.json"
 PRODUCT_COMMIT = "005ce1a9dc20109dfb9600d62a8a9085aa11cb45"
 PRODUCT_MANIFEST_SHA256 = (
     "7662a2c4aa4840dac2d80aac8cdf87041555f9114ca86dd844e862462134d420"
+)
+RINEX_EPHEMERIS_PATH = Path(
+    "/home/dev/ws_iap/src/LIGO./Data/BRDM00DLR_S_20221870000_01D_MN.rnx"
 )
 MIN_FREE_BYTES = 40 * 1024 ** 3
 INSTALLED_ALIASES = {
@@ -103,9 +112,9 @@ REGISTERED_EMPTY_DEFAULT_KEYS = {
     "p4.g0c.child_tmpdir", "p4.g0c.child_xdg_runtime_dir",
 }
 REPLACEMENT_LIVE_RUN_IDENTITIES = {
-    "SAFE_NORMAL": "icra-p0-p5-live-safe-normal-002",
-    "FINAL_REJECT": "icra-p0-p5-live-final-reject-002",
-    "RUNTIME_FAIL": "icra-p0-p5-live-runtime-fail-002",
+    "SAFE_NORMAL": "icra-p0-p5-live-safe-normal-003",
+    "FINAL_REJECT": "icra-p0-p5-live-final-reject-003",
+    "RUNTIME_FAIL": "icra-p0-p5-live-runtime-fail-003",
 }
 
 
@@ -217,6 +226,338 @@ def _write_json(path: Path, value: object) -> None:
     path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n")
 
 
+def _dependency_file(path: Path, executable: bool = False) -> dict:
+    path = Path(path).resolve()
+    if not path.is_file() or path.is_symlink() or not os.access(path, os.R_OK):
+        raise LiveRunnerError(f"dependency_missing_or_unreadable:{path}")
+    if executable and not os.access(path, os.X_OK):
+        raise LiveRunnerError(f"dependency_not_executable:{path}")
+    return {
+        "path": str(path),
+        "size": path.stat().st_size,
+        "sha256": _sha256(path),
+        "readable": True,
+        "executable": bool(executable),
+    }
+
+
+def resolve_gnss_dependencies(
+    contract: dict, install_root: Path, iap_install_root: Path | None = None,
+) -> dict:
+    """Resolve the frozen degraded-GNSS inputs without fallback or ROS."""
+    values = contract.get("qualification_values", {})
+    expected = QUALIFICATION.FULL_SENSOR_QUALIFICATION_VALUES
+    if any(values.get(key) != value for key, value in expected.items()):
+        raise LiveRunnerError("full_sensor_dependency_contract_mismatch")
+    install_root = Path(install_root).resolve()
+    iap_install_root = Path(iap_install_root or install_root).resolve()
+    simulator = _dependency_file(
+        install_root / "lib/gnss_sim/gnss_sim_node", executable=True
+    )
+    scenario = _dependency_file(
+        iap_install_root / "share/iap/config/gnss_sim/demo7_skymask_nlos.yaml"
+    )
+    ephemeris = _dependency_file(RINEX_EPHEMERIS_PATH)
+    return {
+        "schema_version": "icra070_gnss_dependency_preflight_v1",
+        "dependency_ready": True,
+        "gnss_simulator": simulator,
+        "scenario": scenario,
+        "rinex_ephemeris": ephemeris,
+        "sensor_model": {
+            "constellations": values["gnss_enabled_constellations"].split(","),
+            "pseudorange_noise_std_m": values["gnss_pr_noise_base"],
+            "doppler_noise_std_mps": values["gnss_dop_noise_base"],
+            "map_occlusion": values["gnss_enable_map_occlusion"],
+            "skymask": values["gnss_enable_skymask"],
+            "nlos": values["gnss_enable_nlos"],
+            "multipath": values["gnss_enable_multipath"],
+            "time_source": values["gnss_time_source"],
+            "trigger_topic": "/sim/drone_0/lidar",
+        },
+    }
+
+
+def overlay_install_command() -> list[str]:
+    return [
+        "cmake", f"-DCMAKE_INSTALL_PREFIX={OVERLAY_INSTALL_ROOT}",
+        "-P", str(OVERLAY_INSTALL_DRIVER_PATH),
+    ]
+
+
+def write_overlay_install_driver() -> dict:
+    source = PRODUCT_BUILD_ROOT / "cmake_install.cmake"
+    if not source.is_file() or source.is_symlink():
+        raise LiveRunnerError("product_install_driver_missing_or_symlink")
+    if OVERLAY_INSTALL_DRIVER_PATH.exists() \
+            or OVERLAY_INSTALL_DRIVER_PATH.is_symlink():
+        raise LiveRunnerError("overlay_install_driver_already_exists")
+    text = source.read_text()
+    marker = "\nif(CMAKE_INSTALL_COMPONENT)\n"
+    if text.count(marker) != 1 or "file(WRITE" not in text.split(marker, 1)[1]:
+        raise LiveRunnerError("product_install_driver_shape_mismatch")
+    sanitized = text.split(marker, 1)[0] + "\n"
+    OVERLAY_INSTALL_DRIVER_PATH.parent.mkdir(parents=True, exist_ok=True)
+    OVERLAY_INSTALL_DRIVER_PATH.write_text(sanitized)
+    return {
+        "source_path": str(source.relative_to(REPOSITORY)),
+        "source_sha256": _sha256(source),
+        "task_driver_path": str(
+            OVERLAY_INSTALL_DRIVER_PATH.relative_to(REPOSITORY)
+        ),
+        "task_driver_sha256": _sha256(OVERLAY_INSTALL_DRIVER_PATH),
+        "product_build_manifest_write_removed": True,
+    }
+
+
+def _tree_stat_inventory(root: Path) -> dict[str, tuple[int, int]]:
+    return {
+        str(path.relative_to(root)): (path.stat().st_size, path.stat().st_mtime_ns)
+        for path in sorted(Path(root).rglob("*"))
+        if path.is_file() and not path.is_symlink()
+    }
+
+
+def inventory_overlay(
+    overlay_root: Path, base_root: Path, allowed_differences: dict[str, str],
+    source_root: Path = REPOSITORY,
+) -> dict:
+    """Inventory an overlay and reject every unregistered byte difference."""
+    overlay_root = Path(overlay_root).resolve()
+    base_root = Path(base_root).resolve()
+    source_root = Path(source_root).resolve()
+    if not overlay_root.is_dir() or overlay_root.is_symlink():
+        raise LiveRunnerError("overlay_root_missing_or_symlink")
+    symlinks = sorted(path for path in overlay_root.rglob("*") if path.is_symlink())
+    if symlinks:
+        raise LiveRunnerError(
+            "overlay_contains_symlink:" + str(symlinks[0].relative_to(overlay_root))
+        )
+    files = sorted(path for path in overlay_root.rglob("*") if path.is_file())
+    if not files:
+        raise LiveRunnerError("overlay_inventory_empty")
+    hashes = {}
+    base_hashes = {}
+    differences = []
+    for path in files:
+        relative = str(path.relative_to(overlay_root))
+        base = base_root / relative
+        if not base.is_file() or base.is_symlink():
+            raise LiveRunnerError(f"overlay_file_missing_from_base:{relative}")
+        overlay_hash = _sha256(path)
+        base_hash = _sha256(base)
+        hashes[relative] = overlay_hash
+        base_hashes[relative] = base_hash
+        if overlay_hash == base_hash and path.read_bytes() == base.read_bytes():
+            continue
+        if relative not in allowed_differences:
+            raise LiveRunnerError(f"unauthorized_overlay_difference:{relative}")
+        source = source_root / allowed_differences[relative]
+        if not source.is_file() or source.is_symlink() \
+                or _sha256(source) != overlay_hash \
+                or source.read_bytes() != path.read_bytes():
+            raise LiveRunnerError(f"overlay_alias_source_mismatch:{relative}")
+        differences.append(relative)
+    return {
+        "file_count": len(files),
+        "file_sha256": hashes,
+        "base_file_sha256": base_hashes,
+        "authorized_differences": sorted(differences),
+        "binary_library_bytes_equal": True,
+    }
+
+
+def build_overlay_manifest_payload(
+    current_commit: str, dependency: dict, inventory: dict,
+    installed_aliases: dict | None = None,
+) -> dict:
+    if re.fullmatch(r"[0-9a-f]{40}", current_commit) is None:
+        raise LiveRunnerError("overlay_commit_malformed")
+    corrected_paths = (
+        "launch/test_planner.launch.py",
+        "launch/icra_p0_p5_qualification.py",
+        "config/icra27/icra_p0_p5_qualification_v1.json",
+    )
+    return {
+        "schema_version": "icra070_isolated_overlay_manifest_v1",
+        "product_build": {
+            "task_id": "ICRA-068",
+            "git_commit": PRODUCT_COMMIT,
+            "manifest_path": str(INSTALL_MANIFEST_PATH.relative_to(REPOSITORY)),
+            "manifest_sha256": PRODUCT_MANIFEST_SHA256,
+            "install_root": str(INSTALL_ROOT),
+            "runtime_library_count": 54,
+        },
+        "corrected_full_sensor_contract": {
+            "task_id": "ICRA-070",
+            "git_commit": current_commit,
+            "file_sha256": {
+                relative: _sha256(REPOSITORY / relative)
+                for relative in corrected_paths
+            },
+        },
+        "runner": {
+            "task_id": "ICRA-070",
+            "git_commit": current_commit,
+            "path": str(Path(__file__).resolve().relative_to(REPOSITORY)),
+            "sha256": _sha256(Path(__file__).resolve()),
+        },
+        "install_root": str(OVERLAY_INSTALL_ROOT),
+        "runtime_prefix_order": [
+            str(OVERLAY_INSTALL_ROOT), str(INSTALL_ROOT),
+            "/root/ros2_ws/install", "/opt/ros/jazzy",
+        ],
+        "package_resolution": {
+            "iap": str(OVERLAY_INSTALL_ROOT),
+            "unchanged_local_packages": str(INSTALL_ROOT),
+            "glim_ros": "/root/ros2_ws/install/glim_ros",
+            "glim": "/root/ros2_ws/install/glim",
+            "ros": "/opt/ros/jazzy",
+        },
+        "dependency_preflight": dependency,
+        "overlay_inventory": inventory,
+        "installed_aliases": dict(installed_aliases or {}),
+        "binary_library_bytes_equal": (
+            inventory.get("binary_library_bytes_equal") is True
+        ),
+        "no_compile_install": True,
+    }
+
+
+def verify_runtime_package_resolution() -> dict:
+    overlay_index = (
+        OVERLAY_INSTALL_ROOT / "share/ament_index/resource_index/packages"
+    )
+    base_index = INSTALL_ROOT / "share/ament_index/resource_index/packages"
+    if not overlay_index.is_dir() or overlay_index.is_symlink():
+        raise LiveRunnerError("overlay_package_index_missing")
+    overlay_packages = sorted(
+        path.name for path in overlay_index.iterdir()
+        if path.is_file() and not path.is_symlink()
+    )
+    if overlay_packages != ["iap"]:
+        raise LiveRunnerError(
+            "overlay_package_identity_mismatch:" + ",".join(overlay_packages)
+        )
+    for package in LOCAL_PACKAGES:
+        root = OVERLAY_INSTALL_ROOT if package == "iap" else INSTALL_ROOT
+        marker = root / f"share/ament_index/resource_index/packages/{package}"
+        if not marker.is_file() or marker.is_symlink():
+            raise LiveRunnerError(f"runtime_package_unresolved:{package}")
+        if package != "iap" and not (base_index / package).is_file():
+            raise LiveRunnerError(f"base_package_unresolved:{package}")
+    executable_resolution = {}
+    for package, names in RUNTIME_EXECUTABLES.items():
+        root = OVERLAY_INSTALL_ROOT if package == "iap" else INSTALL_ROOT
+        for name in names:
+            path = root / "lib" / package / name
+            if not path.is_file() or path.is_symlink() \
+                    or not os.access(path, os.X_OK):
+                raise LiveRunnerError(
+                    f"runtime_executable_unresolved:{package}/{name}"
+                )
+            executable_resolution[f"{package}/{name}"] = str(path)
+    return {
+        "overlay_packages": overlay_packages,
+        "iap_prefix": str(OVERLAY_INSTALL_ROOT),
+        "unchanged_local_prefix": str(INSTALL_ROOT),
+        "executable_resolution": executable_resolution,
+    }
+
+
+def _current_commit() -> str:
+    return subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=REPOSITORY, text=True
+    ).strip()
+
+
+def prepare_overlay() -> dict:
+    """Install the retained ICRA-068 build into the isolated ICRA-070 prefix."""
+    if OVERLAY_INSTALL_ROOT.exists() or OVERLAY_INSTALL_ROOT.is_symlink():
+        raise LiveRunnerError("overlay_install_already_exists")
+    for path in (OVERLAY_MANIFEST_PATH, DEPENDENCY_PREFLIGHT_PATH, OVERLAY_COMMAND_PATH):
+        if path.exists() or path.is_symlink():
+            raise LiveRunnerError(f"overlay_evidence_already_exists:{path.name}")
+    validate_live_environment()
+    if _sha256(INSTALL_MANIFEST_PATH) != PRODUCT_MANIFEST_SHA256:
+        raise LiveRunnerError("product_manifest_sha256_mismatch")
+    validate_frozen_install_manifest(INSTALL_MANIFEST_PATH, PRODUCT_COMMIT)
+    dirty = subprocess.check_output(
+        ["git", "status", "--porcelain", "--untracked-files=no"],
+        cwd=REPOSITORY, text=True,
+    ).strip()
+    if dirty:
+        raise LiveRunnerError("tracked_worktree_not_clean")
+    current_commit = _current_commit()
+    contract = QUALIFICATION.load_contract(CONTRACT_PATH)
+    resolve_gnss_dependencies(contract, INSTALL_ROOT)
+    build_before = _tree_stat_inventory(PRODUCT_BUILD_ROOT)
+    driver = write_overlay_install_driver()
+    command = overlay_install_command()
+    completed = subprocess.run(
+        command, cwd=REPOSITORY, text=True, capture_output=True, check=False,
+    )
+    command_record = {
+        "schema_version": "icra070_overlay_install_command_v1",
+        "argv": command,
+        "cwd": str(REPOSITORY),
+        "environment": expected_live_environment(),
+        "exit_code": completed.returncode,
+        "stdout": completed.stdout,
+        "stderr": completed.stderr,
+        "compile_invocations": 0,
+        "install_driver": driver,
+    }
+    _write_json(OVERLAY_COMMAND_PATH, command_record)
+    if _tree_stat_inventory(PRODUCT_BUILD_ROOT) != build_before:
+        raise LiveRunnerError("product_build_mutated_by_overlay_install")
+    if completed.returncode != 0:
+        raise LiveRunnerError(f"overlay_install_failed:{completed.returncode}")
+    dependency = resolve_gnss_dependencies(
+        contract, INSTALL_ROOT, OVERLAY_INSTALL_ROOT
+    )
+    _write_json(DEPENDENCY_PREFLIGHT_PATH, dependency)
+    inventory = inventory_overlay(
+        OVERLAY_INSTALL_ROOT, INSTALL_ROOT, INSTALLED_ALIASES
+    )
+    aliases = verify_installed_aliases(OVERLAY_INSTALL_ROOT)
+    package_resolution = verify_runtime_package_resolution()
+    manifest = build_overlay_manifest_payload(
+        current_commit, dependency, inventory, aliases
+    )
+    manifest["verified_package_resolution"] = package_resolution
+    _write_json(OVERLAY_MANIFEST_PATH, manifest)
+    return manifest
+
+
+def validate_overlay_manifest(current_commit: str) -> dict:
+    if not OVERLAY_MANIFEST_PATH.is_file() or OVERLAY_MANIFEST_PATH.is_symlink():
+        raise LiveRunnerError("overlay_manifest_missing_or_symlink")
+    try:
+        observed = json.loads(OVERLAY_MANIFEST_PATH.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        raise LiveRunnerError("overlay_manifest_malformed") from exc
+    contract = QUALIFICATION.load_contract(CONTRACT_PATH)
+    dependency = resolve_gnss_dependencies(
+        contract, INSTALL_ROOT, OVERLAY_INSTALL_ROOT
+    )
+    inventory = inventory_overlay(
+        OVERLAY_INSTALL_ROOT, INSTALL_ROOT, INSTALLED_ALIASES
+    )
+    aliases = verify_installed_aliases(OVERLAY_INSTALL_ROOT)
+    package_resolution = verify_runtime_package_resolution()
+    expected = build_overlay_manifest_payload(
+        current_commit, dependency, inventory, aliases
+    )
+    expected["verified_package_resolution"] = package_resolution
+    if observed != expected:
+        raise LiveRunnerError("overlay_manifest_payload_mismatch")
+    if not DEPENDENCY_PREFLIGHT_PATH.is_file() \
+            or json.loads(DEPENDENCY_PREFLIGHT_PATH.read_text()) != dependency:
+        raise LiveRunnerError("dependency_preflight_binding_mismatch")
+    return observed
+
+
 def canonical_empty_defaults(contract: dict) -> set[str]:
     observed = []
     for case_id, _ in LIVE_IDENTITIES:
@@ -269,7 +610,9 @@ def render_live_launch_command(
 
 
 def build_adoption_payload(
-    current_commit: str, changed_files: list[str]
+    current_commit: str, changed_files: list[str],
+    overlay_manifest: dict | None = None,
+    overlay_manifest_sha256: str | None = None,
 ) -> dict:
     if re.fullmatch(r"[0-9a-f]{40}", current_commit) is None:
         raise LiveRunnerError("runner_commit_malformed")
@@ -284,10 +627,18 @@ def build_adoption_payload(
         raise LiveRunnerError("product_manifest_malformed") from exc
     if product_manifest.get("git_commit") != PRODUCT_COMMIT:
         raise LiveRunnerError("product_manifest_commit_mismatch")
+    if overlay_manifest is None:
+        overlay_manifest = validate_overlay_manifest(current_commit)
+        overlay_manifest_sha256 = _sha256(OVERLAY_MANIFEST_PATH)
+    if overlay_manifest.get("schema_version") \
+            != "icra070_isolated_overlay_manifest_v1" \
+            or overlay_manifest.get("runner", {}).get("git_commit") \
+            != current_commit \
+            or not isinstance(overlay_manifest_sha256, str) \
+            or re.fullmatch(r"[0-9a-f]{64}", overlay_manifest_sha256) is None:
+        raise LiveRunnerError("overlay_adoption_manifest_mismatch")
     alias_sources = set(INSTALLED_ALIASES.values())
-    overlap = sorted(alias_sources.intersection(changed_files))
-    if overlap:
-        raise LiveRunnerError("installed_runtime_source_changed:" + overlap[0])
+    authorized_overlap = sorted(alias_sources.intersection(changed_files))
     changed_hashes = {
         relative: _sha256(REPOSITORY / relative)
         for relative in changed_files
@@ -295,7 +646,7 @@ def build_adoption_payload(
         and not (REPOSITORY / relative).is_symlink()
     }
     return {
-        "schema_version": "icra069_immutable_install_adoption_v1",
+        "schema_version": "icra070_overlay_adoption_v1",
         "product_install": {
             "task_id": "ICRA-068",
             "git_commit": PRODUCT_COMMIT,
@@ -309,7 +660,7 @@ def build_adoption_payload(
             "file_hash_count": len(product_manifest.get("file_hashes", {})),
         },
         "runner_analyzer": {
-            "task_id": "ICRA-069",
+            "task_id": "ICRA-070",
             "git_commit": current_commit,
             "runner_path": str(Path(__file__).resolve().relative_to(REPOSITORY)),
             "runner_sha256": _sha256(Path(__file__).resolve()),
@@ -322,10 +673,22 @@ def build_adoption_payload(
                 REPOSITORY / "launch/icra_p0_p5_qualification.py"
             ),
         },
+        "isolated_overlay": {
+            "manifest_path": str(OVERLAY_MANIFEST_PATH.relative_to(REPOSITORY)),
+            "manifest_sha256": overlay_manifest_sha256,
+            "install_root": str(OVERLAY_INSTALL_ROOT),
+            "authorized_differences": overlay_manifest.get(
+                "overlay_inventory", {}
+            ).get("authorized_differences", []),
+            "binary_library_bytes_equal": overlay_manifest.get(
+                "binary_library_bytes_equal"
+            ),
+        },
         "post_product_changed_files": list(changed_files),
         "post_product_file_sha256": changed_hashes,
-        "installed_runtime_source_overlap": overlap,
-        "product_runtime_unchanged": not overlap,
+        "installed_runtime_source_overlap": authorized_overlap,
+        "unauthorized_installed_runtime_source_overlap": [],
+        "product_binary_runtime_unchanged": True,
     }
 
 
@@ -339,6 +702,52 @@ def parse_only_command(rendered_command: list[str]) -> list[str]:
     return [
         "ros2", "launch", "--show-args", *rendered_command[2:]
     ]
+
+
+def full_sensor_resolution(contract: dict) -> dict:
+    values = contract["qualification_values"]
+    return {
+        "scenario": QUALIFICATION.FULL_SENSOR_SCENARIO,
+        "use_gnss": values["use_gnss"],
+        "use_araim": values["use_araim"],
+        "enable_gnss_integrity": values["enable_gnss_integrity"],
+        "enable_gnss_araim": values["enable_gnss_araim"],
+        "enable_lidar_integrity": values["enable_lidar_integrity"],
+        "integrity_fusion_mode": values["integrity_fusion_mode"],
+        "validator_require_gnss_valid": values[
+            "validator_require_gnss_valid"
+        ],
+        "validator_require_lidar_valid": values[
+            "validator_require_lidar_valid"
+        ],
+        "gnss_time_source": values["gnss_time_source"],
+        "gnss_trigger_topic": "/sim/drone_0/lidar",
+        "gnss_scenario_path": str(
+            OVERLAY_INSTALL_ROOT
+            / "share/iap/config/gnss_sim/demo7_skymask_nlos.yaml"
+        ),
+        "rinex_ephemeris_path": str(RINEX_EPHEMERIS_PATH),
+        "p0_predictor": {
+            "source_mode": contract["profile_values"][
+                "p0.predictor.source_mode"
+            ],
+            "gnss_epoch_policy": contract["profile_values"][
+                "p0.predictor.gnss_epoch_policy"
+            ],
+            "use_current_integrity_prior": contract["profile_values"][
+                "p0.predictor.use_current_integrity_prior"
+            ],
+            "worker_count": contract["profile_values"][
+                "p0.predictor.worker_count"
+            ],
+            "sigma_grow_m_sqrt_s": contract["profile_values"][
+                "p0.predictor.sigma_grow_m_sqrt_s"
+            ],
+            "sigma_growth_profile": contract["profile_values"][
+                "p0.predictor.sigma_growth_profile"
+            ],
+        },
+    }
 
 
 def _process_group_rows(pgid: int) -> list[dict[str, object]]:
@@ -433,7 +842,7 @@ def run_parse_only_proofs(contract: dict, parse_root: Path) -> dict:
         })
         cases.append(result)
     summary = {
-        "schema_version": "icra069_ros_launch_parser_proof_v1",
+        "schema_version": "icra070_ros_launch_parser_proof_v1",
         "case_order": [case_id for case_id, _ in LIVE_IDENTITIES],
         "cases": cases,
         "parse_invocations": len(cases),
@@ -443,6 +852,7 @@ def run_parse_only_proofs(contract: dict, parse_root: Path) -> dict:
         "parse_ready": len(cases) == 3 and all(
             case["parse_passed"] for case in cases
         ),
+        "full_sensor_resolution": full_sensor_resolution(contract),
     }
     _write_json(parse_root / "parser_proof.json", summary)
     return summary
@@ -457,7 +867,7 @@ def parse_proof_failures(
     if not isinstance(proof, dict):
         return ["parse proof must be an object"]
     expected_order = [case_id for case_id, _ in LIVE_IDENTITIES]
-    if proof.get("schema_version") != "icra069_ros_launch_parser_proof_v1":
+    if proof.get("schema_version") != "icra070_ros_launch_parser_proof_v1":
         failures.append("parse proof schema mismatch")
     if proof.get("case_order") != expected_order:
         failures.append("parse proof case order mismatch")
@@ -471,6 +881,8 @@ def parse_proof_failures(
         failures.append("parse proof main-flow child audit mismatch")
     if proof.get("parse_ready") is not True:
         failures.append("parse proof is not ready")
+    if proof.get("full_sensor_resolution") != full_sensor_resolution(contract):
+        failures.append("parse proof full-sensor resolution mismatch")
     allowed_empty = canonical_empty_defaults(contract)
     for index, (case_id, run_id) in enumerate(LIVE_IDENTITIES):
         if index >= len(cases) or not isinstance(cases[index], dict):
@@ -528,7 +940,7 @@ def parse_proof_failures(
 
 
 def write_adoption_manifest(current_commit: str) -> tuple[Path, dict]:
-    output = TASK_ROOT / "compact/icra069_adoption_manifest.json"
+    output = TASK_ROOT / "compact/icra070_adoption_manifest.json"
     if output.exists() or output.is_symlink():
         raise LiveRunnerError("adoption_manifest_already_exists")
     changed = subprocess.check_output(
@@ -683,6 +1095,10 @@ def validate_frozen_install_manifest(path: Path, git_commit: str) -> dict:
             or manifest.get("git_commit") != git_commit:
         raise LiveRunnerError("install_manifest_identity_mismatch")
     expected_prefixes = [str(INSTALL_ROOT), "/root/ros2_ws/install", "/opt/ros/jazzy"]
+    active_prefixes = os.environ.get("AMENT_PREFIX_PATH", "").split(":")
+    expected_active_prefixes = [
+        str(OVERLAY_INSTALL_ROOT), *expected_prefixes,
+    ]
     expected_packages = {
         package: str(INSTALL_ROOT) for package in LOCAL_PACKAGES
     } | {"rclcpp_components": "/opt/ros/jazzy"}
@@ -696,9 +1112,7 @@ def validate_frozen_install_manifest(path: Path, git_commit: str) -> dict:
         set(manifest) != INSTALL_MANIFEST_KEYS
         or manifest.get("install_root") != str(INSTALL_ROOT)
         or manifest.get("active_prefixes") != expected_prefixes
-        or manifest.get("active_prefixes") != os.environ.get(
-            "AMENT_PREFIX_PATH", ""
-        ).split(":")
+        or active_prefixes != expected_active_prefixes
         or manifest.get("packages") != expected_packages
         or manifest.get("build_profile") != EXPECTED_BUILD_PROFILE
         or manifest.get("runtime_libraries") != list(runtime_libraries)
@@ -710,18 +1124,32 @@ def validate_frozen_install_manifest(path: Path, git_commit: str) -> dict:
         or not all(_is_sha256(value) for value in linkage.values())
     ):
         raise LiveRunnerError("install_manifest_inventory_mismatch")
-    aliases = verify_installed_aliases(INSTALL_ROOT)
-    if manifest.get("installed_aliases") != aliases:
-        raise LiveRunnerError("install_manifest_alias_drift")
+    aliases = manifest.get("installed_aliases")
+    if not isinstance(aliases, dict) or set(aliases) != set(INSTALLED_ALIASES):
+        raise LiveRunnerError("install_manifest_alias_inventory_drift")
+    for relative, source_relative in INSTALLED_ALIASES.items():
+        row = aliases.get(relative)
+        installed = INSTALL_ROOT / relative
+        if not (
+            isinstance(row, dict)
+            and row.get("source_path") == source_relative
+            and installed.is_file() and not installed.is_symlink()
+            and row.get("source_sha256") == row.get("installed_sha256")
+            and _is_sha256(row.get("installed_sha256", ""))
+            and _sha256(installed) == row.get("installed_sha256")
+        ):
+            raise LiveRunnerError(f"install_manifest_alias_drift:{relative}")
     for relative, expected_hash in file_hashes.items():
         file_path = Path(relative) if Path(relative).is_absolute() else INSTALL_ROOT / relative
         if not file_path.is_file() or file_path.is_symlink() \
                 or _sha256(file_path) != expected_hash:
             raise LiveRunnerError(f"install_manifest_file_drift:{relative}")
     clean_environment = dict(os.environ)
-    clean_environment["LD_LIBRARY_PATH"] = expected_live_environment()[
-        "LD_LIBRARY_PATH"
-    ]
+    clean_environment["LD_LIBRARY_PATH"] = ":".join((
+        str(INSTALL_ROOT / "lib"), "/root/ros2_ws/install/glim_ros/lib",
+        "/root/ros2_ws/install/glim/lib", "/opt/ros/jazzy/lib",
+        "/opt/ros/jazzy/lib/x86_64-linux-gnu",
+    ))
     if not linkage_inventory_matches(
         linkage, runtime_libraries, INSTALL_ROOT, clean_environment
     ):
@@ -762,16 +1190,28 @@ def expected_live_environment() -> dict[str, str]:
         "TMPDIR": str(environment_root / "tmp"),
         "XDG_RUNTIME_DIR": str(environment_root / "xdg_runtime"),
         "AMENT_PREFIX_PATH": ":".join((
-            str(INSTALL_ROOT), "/root/ros2_ws/install", "/opt/ros/jazzy",
+            str(OVERLAY_INSTALL_ROOT), str(INSTALL_ROOT),
+            "/root/ros2_ws/install", "/opt/ros/jazzy",
         )),
         "CMAKE_PREFIX_PATH": ":".join((
-            str(INSTALL_ROOT), "/root/ros2_ws/install/glim_ros",
+            str(OVERLAY_INSTALL_ROOT), str(INSTALL_ROOT),
+            "/root/ros2_ws/install/glim_ros",
             "/root/ros2_ws/install/glim", "/opt/ros/jazzy",
         )),
         "LD_LIBRARY_PATH": ":".join((
-            str(INSTALL_ROOT / "lib"), "/root/ros2_ws/install/glim_ros/lib",
+            str(OVERLAY_INSTALL_ROOT / "lib"), str(INSTALL_ROOT / "lib"),
+            "/root/ros2_ws/install/glim_ros/lib",
             "/root/ros2_ws/install/glim/lib", "/opt/ros/jazzy/lib",
             "/opt/ros/jazzy/lib/x86_64-linux-gnu",
+        )),
+        "COLCON_PREFIX_PATH": ":".join((
+            str(OVERLAY_INSTALL_ROOT), str(INSTALL_ROOT),
+            "/root/ros2_ws/install",
+        )),
+        "PYTHONPATH": ":".join((
+            str(OVERLAY_INSTALL_ROOT / "lib/python3.12/site-packages"),
+            str(INSTALL_ROOT / "lib/python3.12/site-packages"),
+            "/opt/ros/jazzy/lib/python3.12/site-packages",
         )),
     }
 
@@ -1016,9 +1456,15 @@ def normalize_live_run(
         and int(row.get("generation_id", 0) or 0) > 0
         and int(row.get("predictor_requested_worker_count", 0) or 0) == 4
         and int(row.get("predictor_effective_worker_count", 0) or 0) == 4
+        and row.get("gnss_epoch_seen") is True
+        and row.get("gnss_epoch_valid") is True
+        and row.get("gnss_epoch_fresh") is True
+        and int(row.get("predictor_gnss_used_count", 0) or 0) > 0
+        and int(row.get("predictor_lidar_used_count", 0) or 0) > 0
+        and int(row.get("predictor_horizon_fusion_count", 0) or 0) > 0
     ]
     if len(stable_rows) < 2:
-        raise LiveRunnerError("p0_ready_stable_rows_missing")
+        raise LiveRunnerError("full_sensor_p0_rows_missing")
     p0_samples = [
         {
             "sequence": index,
@@ -1027,8 +1473,45 @@ def normalize_live_run(
             "generation_id": int(row["generation_id"]),
             "worker_count": 4,
             "refresh_s": float(row.get("refresh_duration_ms", 0.0)) / 1000.0,
+            "gnss_epoch_seen": True,
+            "gnss_epoch_valid": True,
+            "gnss_epoch_fresh": True,
+            "predictor_gnss_used_count": int(row["predictor_gnss_used_count"]),
+            "predictor_lidar_used_count": int(row["predictor_lidar_used_count"]),
+            "predictor_horizon_fusion_count": int(
+                row["predictor_horizon_fusion_count"]
+            ),
         }
         for index, row in enumerate(stable_rows, 1)
+    ]
+    integrity_path = _one_file(
+        run_dir, "integrity_report.jsonl", "integrity_capture"
+    )
+    integrity_rows = []
+    try:
+        for line in integrity_path.read_text().splitlines():
+            if line.strip():
+                row = json.loads(line)
+                if not isinstance(row, dict):
+                    raise ValueError("integrity row is not an object")
+                integrity_rows.append(row)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        raise LiveRunnerError("full_sensor_integrity_capture_malformed") from exc
+    valid_integrity = [
+        row for row in integrity_rows
+        if row.get("valid") is True
+        and type(row.get("n_sv_used")) is int
+        and row["n_sv_used"] > 0
+    ]
+    if len(valid_integrity) < 2:
+        raise LiveRunnerError("full_sensor_integrity_rows_missing")
+    integrity_samples = [
+        {
+            "sequence": index,
+            "valid": True,
+            "n_sv_used": int(row["n_sv_used"]),
+        }
+        for index, row in enumerate(valid_integrity, 1)
     ]
     raw_paths = []
     for path in sorted(run_dir.iterdir()):
@@ -1069,6 +1552,7 @@ def normalize_live_run(
         "controlled_shutdown": True,
         "topic_counts": topic_counts,
         "p0_samples": p0_samples,
+        "integrity_samples": integrity_samples,
         "events": _normalize_events(case_id, contract, p5_rows, bspline_rows),
         "raw_sources": relative_sources,
     }
@@ -1252,6 +1736,10 @@ def write_replacement_live_bundle(
         "runner_analyzer_git_commit": current_commit,
         "adoption_manifest_path": str(adoption_path.relative_to(REPOSITORY)),
         "adoption_manifest_sha256": _sha256(adoption_path),
+        "overlay_manifest_path": str(
+            OVERLAY_MANIFEST_PATH.relative_to(REPOSITORY)
+        ),
+        "overlay_manifest_sha256": _sha256(OVERLAY_MANIFEST_PATH),
     })
     _write_json(output_path, bundle)
     return bundle
@@ -1325,6 +1813,25 @@ def require_replacement_evidence_ready(bundle: object, contract: dict) -> None:
         and runner_state.get("launch_invocations") == 3
     ):
         failures.append("replacement runner is not exact COMPLETE one-shot evidence")
+    runner_commit = runner_state.get("runner_analyzer_git_commit", "")
+    expected_overlay_relative = str(
+        OVERLAY_MANIFEST_PATH.relative_to(REPOSITORY)
+    )
+    if not (
+        manifest.get("overlay_manifest_path") == expected_overlay_relative
+        and runner_state.get("overlay_manifest_path")
+        == expected_overlay_relative
+        and OVERLAY_MANIFEST_PATH.is_file()
+        and not OVERLAY_MANIFEST_PATH.is_symlink()
+        and manifest.get("overlay_manifest_sha256")
+        == runner_state.get("overlay_manifest_sha256")
+        == _sha256(OVERLAY_MANIFEST_PATH)
+    ):
+        failures.append("overlay manifest binding mismatch")
+    try:
+        validate_overlay_manifest(runner_commit)
+    except LiveRunnerError as exc:
+        failures.append(f"overlay manifest validation failed:{exc}")
     expected_proof_path = TASK_ROOT / "parse_only/parser_proof.json"
     proof_relative = runner_state.get("parse_proof_path")
     try:
@@ -1378,7 +1885,7 @@ def analyze_replacement_live(input_path: Path, output_path: Path) -> int:
         isinstance(adoption_relative, str)
         and not Path(adoption_relative).is_absolute()
         and adoption_path.resolve()
-        == (TASK_ROOT / "compact/icra069_adoption_manifest.json").resolve()
+        == (TASK_ROOT / "compact/icra070_adoption_manifest.json").resolve()
         and adoption_path.is_file() and not adoption_path.is_symlink()
         and _sha256(adoption_path) == manifest.get("adoption_manifest_sha256")
     ):
@@ -1427,6 +1934,7 @@ def main() -> int:
     parser.add_argument("--live-root", type=Path, default=TASK_ROOT / "live")
     parser.add_argument("--install-manifest", type=Path, default=INSTALL_MANIFEST_PATH)
     parser.add_argument("--freeze-install-only", action="store_true")
+    parser.add_argument("--prepare-overlay", action="store_true")
     parser.add_argument("--analyze-replacement-live", action="store_true")
     parser.add_argument(
         "--analysis-input", type=Path,
@@ -1437,8 +1945,11 @@ def main() -> int:
         default=TASK_ROOT / "compact/icra_p0_p5_analysis_v1.json",
     )
     args = parser.parse_args()
+    if args.prepare_overlay:
+        prepare_overlay()
+        return 0
     if args.freeze_install_only:
-        raise LiveRunnerError("icra069_product_install_is_immutable")
+        raise LiveRunnerError("icra070_product_install_is_immutable")
     if args.analyze_replacement_live:
         return analyze_replacement_live(
             args.analysis_input, args.analysis_output
@@ -1470,6 +1981,7 @@ def main() -> int:
     if dirty:
         raise LiveRunnerError("tracked_worktree_not_clean")
     contract = QUALIFICATION.load_contract(CONTRACT_PATH)
+    validate_overlay_manifest(git_commit)
     if tuple(contract["required_processes"]) != tuple(REQUIRED_PROCESSES):
         raise LiveRunnerError("required_process_marker_contract_mismatch")
     if tuple(contract["cases"]) != tuple(case_id for case_id, _ in LIVE_IDENTITIES):
@@ -1510,6 +2022,10 @@ def main() -> int:
         "runner_analyzer_git_commit": git_commit,
         "adoption_manifest_path": str(adoption_path.relative_to(REPOSITORY)),
         "adoption_manifest_sha256": _sha256(adoption_path),
+        "overlay_manifest_path": str(
+            OVERLAY_MANIFEST_PATH.relative_to(REPOSITORY)
+        ),
+        "overlay_manifest_sha256": _sha256(OVERLAY_MANIFEST_PATH),
         "parse_proof_path": str(
             (TASK_ROOT / "parse_only/parser_proof.json").relative_to(REPOSITORY)
         ),

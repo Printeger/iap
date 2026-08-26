@@ -18,6 +18,39 @@ RESULT_SCHEMA = "icra_p0_p5_validation_result_v1"
 LIVE_EVIDENCE_SCHEMA = "icra_p0_p5_live_evidence_v1"
 LIVE_RESULT_SCHEMA = "icra_p0_p5_live_result_v1"
 CASE_IDS = ("SAFE_NORMAL", "FINAL_REJECT", "RUNTIME_FAIL")
+FULL_SENSOR_SCENARIO = "icra_p0_p5_fused_degraded_corridor_v1"
+FULL_SENSOR_TOPICS = (
+    "/planning/risk_grid_health", "/planning/integrity_gate_status",
+    "/drone_0_planning/bspline", "/sim/drone_0/imu",
+    "/sim/drone_0/imu_iap", "/sim/drone_0/lidar",
+    "/sim/drone_0/lidar_body", "/ublox_driver/range_meas",
+    "/gnss_sim/diagnostics", "/iap/integrity",
+)
+FULL_SENSOR_QUALIFICATION_VALUES = {
+    "use_gnss": True, "use_araim": True,
+    "enable_gnss_integrity": True, "enable_gnss_araim": True,
+    "enable_lidar_integrity": True, "integrity_fusion_mode": "max_pl",
+    "validator_require_gnss_valid": True,
+    "validator_require_lidar_valid": True,
+    "gnss_time_source": "trigger_topic", "gnss_ephemeris_source": "rinex",
+    "gnss_enabled_constellations": "GPS,BDS,GAL,GLO",
+    "gnss_pr_noise_base": 5.0, "gnss_dop_noise_base": 0.5,
+    "gnss_enable_map_occlusion": True, "gnss_enable_skymask": True,
+    "gnss_enable_nlos": True, "gnss_enable_multipath": True,
+    "gnss_enable_fault_injection": False,
+}
+FULL_SENSOR_PROFILE_VALUES = {
+    "p0.predictor.source_mode": "fusion",
+    "p0.predictor.gnss_epoch_policy": "auto",
+    "p0.predictor.use_current_integrity_prior": True,
+    "p0.predictor.worker_count": 4,
+    "p0.predictor.sigma_grow_m_sqrt_s": 0.01,
+    "p0.predictor.sigma_growth_profile": "legacy_iap_rq320_baseline_v1",
+    "planner_enable_p1": False, "planner_enable_p2": False,
+    "planner_enable_p3_local": False, "planner_enable_p3_global": False,
+    "planner_enable_p4": False, "planner_enable_p5_runtime": True,
+    "planner_enable_p5_final": True,
+}
 LIVE_RUN_IDENTITIES = {
     "SAFE_NORMAL": "icra-p0-p5-live-safe-normal-001",
     "FINAL_REJECT": "icra-p0-p5-live-final-reject-001",
@@ -172,13 +205,29 @@ def load_contract(path):
     for key in (
         "route_id", "profile_name", "qualification_family", "analyzer_version",
         "contract_path",
-        "profile_values", "p5_thresholds", "fixture_switches",
+        "profile_values", "qualification_values", "p5_thresholds", "fixture_switches",
         "required_processes", "required_topics",
     ):
         if key not in contract:
             raise ContractError(f"contract missing {key}")
     if contract["profile_name"] != "icra_p0_p5":
         raise ContractError("contract profile_name is not icra_p0_p5")
+    if tuple(contract["required_topics"]) != FULL_SENSOR_TOPICS \
+            or len(contract["required_processes"]) != 16 \
+            or "test_planner_gnss_sim_node" not in contract["required_processes"] \
+            or any(
+                contract["cases"][case_id].get("scenario") != FULL_SENSOR_SCENARIO
+                for case_id in CASE_IDS
+            ) \
+            or any(
+                contract["qualification_values"].get(key) != expected
+                for key, expected in FULL_SENSOR_QUALIFICATION_VALUES.items()
+            ) \
+            or any(
+                contract["profile_values"].get(key) != expected
+                for key, expected in FULL_SENSOR_PROFILE_VALUES.items()
+            ):
+        raise ContractError("contract full-sensor qualification mismatch")
     return contract
 
 
@@ -195,6 +244,7 @@ def _case_values(contract, case_id):
     if case_id not in cases:
         raise ContractError(f"unregistered qualification case {case_id!r}")
     values = _profile_values(contract)
+    values.update(contract["qualification_values"])
     values.update(cases[case_id].get("fixture_values", {}))
     values["scenario"] = cases[case_id]["scenario"]
     values["experiment"] = cases[case_id]["experiment"]
@@ -292,8 +342,37 @@ def _validate_common_run(contract, run, failures):
                 failures.append(f"{prefix}: unstable P0")
             if type(refresh_s) not in (int, float) or not math.isfinite(refresh_s) or refresh_s < 0:
                 failures.append(f"{prefix}: malformed or non-finite P0 row")
+            if not (
+                sample.get("gnss_epoch_seen") is True
+                and sample.get("gnss_epoch_valid") is True
+                and sample.get("gnss_epoch_fresh") is True
+                and type(sample.get("predictor_gnss_used_count")) is int
+                and sample["predictor_gnss_used_count"] > 0
+                and type(sample.get("predictor_lidar_used_count")) is int
+                and sample["predictor_lidar_used_count"] > 0
+                and type(sample.get("predictor_horizon_fusion_count")) is int
+                and sample["predictor_horizon_fusion_count"] > 0
+            ):
+                failures.append(f"{prefix}: full-sensor P0 evidence mismatch")
         if any(type(value) is not int for value in sequences) or sequences != sorted(set(sequences)):
             failures.append(f"{prefix}: malformed or duplicate P0 sequence")
+    integrity_samples = run.get("integrity_samples")
+    if not isinstance(integrity_samples, list) or not integrity_samples:
+        failures.append(f"{prefix}: missing full-sensor integrity evidence")
+    else:
+        integrity_sequences = []
+        for sample in integrity_samples:
+            if not isinstance(sample, dict):
+                failures.append(f"{prefix}: malformed full-sensor integrity row")
+                continue
+            integrity_sequences.append(sample.get("sequence"))
+            if sample.get("valid") is not True \
+                    or type(sample.get("n_sv_used")) is not int \
+                    or sample["n_sv_used"] <= 0:
+                failures.append(f"{prefix}: full-sensor satellite evidence mismatch")
+        if any(type(value) is not int for value in integrity_sequences) \
+                or integrity_sequences != sorted(set(integrity_sequences)):
+            failures.append(f"{prefix}: malformed full-sensor integrity sequence")
     events = run.get("events")
     if not isinstance(events, list):
         failures.append(f"{prefix}: malformed events")
@@ -501,8 +580,20 @@ def build_synthetic_validation_bundle(contract, contract_path, git_commit):
         "controlled_shutdown": True,
         "topic_counts": {name: 3 for name in contract["required_topics"]},
         "p0_samples": [
-            {"sequence": 1, "ready": True, "stable": True, "refresh_s": 0.20},
-            {"sequence": 2, "ready": True, "stable": True, "refresh_s": 0.21},
+            {"sequence": 1, "ready": True, "stable": True, "refresh_s": 0.20,
+             "gnss_epoch_seen": True, "gnss_epoch_valid": True,
+             "gnss_epoch_fresh": True, "predictor_gnss_used_count": 4,
+             "predictor_lidar_used_count": 4,
+             "predictor_horizon_fusion_count": 6},
+            {"sequence": 2, "ready": True, "stable": True, "refresh_s": 0.21,
+             "gnss_epoch_seen": True, "gnss_epoch_valid": True,
+             "gnss_epoch_fresh": True, "predictor_gnss_used_count": 5,
+             "predictor_lidar_used_count": 5,
+             "predictor_horizon_fusion_count": 6},
+        ],
+        "integrity_samples": [
+            {"sequence": 1, "valid": True, "n_sv_used": 8},
+            {"sequence": 2, "valid": True, "n_sv_used": 9},
         ],
     }
     runs = [

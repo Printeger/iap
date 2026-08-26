@@ -8142,3 +8142,35 @@ empty. Runner exit 4 and state SHA `0e964003...d2ca3` freeze counts at
 attempted/completed/launch/retry `1/0/1/0`. Later arms were not attempted and
 the authoritative analyzer/marker were not created. ICRA-069 is terminally
 `BLOCKED_ICRA069_SAFE_NORMAL_REQUIRED_PROCESS_NEVER_STARTED`.
+
+## 2026-08-26 — ICRA-070 full GNSS + IMU + LiDAR qualification repair
+
+IAP-RQ-020, IAP-RQ-030, IAP-RQ-040, IAP-RQ-220, IAP-RQ-320, IAP-RQ-421,
+IAP-RQ-422 and IAP-RQ-423. Synchronized `dev/icra` at `0 0` divergence and
+preserved the untracked PDF with SHA `1f07da56...c844f6`. The withdrawn
+15-process instruction was not executed; the canonical 16-process contract,
+route geometry, thresholds, actions and exact P5-6/P5-7 fixtures remain.
+
+TDD reproduced all three reduced-sensor case bindings. The new
+`icra_p0_p5_fused_degraded_corridor_v1` combines only the existing corridor
+geometry and degraded-GNSS preset: GNSS/ARAIM and LiDAR integrity are enabled,
+fusion is `max_pl`, both sources are required, GNSS timing remains
+`trigger_topic`, and P0 remains fusion/auto/current-prior/worker-4/sigma-0.01/
+legacy-baseline. The contract now names ten required topics covering risk/P5,
+IMU, LiDAR, GNSS and IntegrityReport evidence.
+
+Hash-consistent adversarial tests prove the analyzer rejects stale/absent GNSS,
+zero GNSS or LiDAR predictor use, zero fused horizons and `n_sv_used<=0`.
+The normalizer accepts only stable rows carrying all those positive source
+signals. Dependency interfaces resolve and hash the retained GNSS executable,
+degraded scenario and fixed RINEX input. The isolated overlay installer uses a
+task-local sanitized CMake install driver and compares the complete retained
+build tree before/after so the source build cannot be mutated; overlay bytes
+may differ from ICRA-068 only for the authorized current launch, helper and
+contract aliases.
+
+Focused runner/analyzer/contract discovery passes 41/41 and launch discovery
+passes 21/21. Complete hermetic discovery exits 0; every run reports the
+17,770-entry external ROS inventory unchanged. No ICRA-070 overlay, installed
+parser, GPU preflight, live identity or authoritative analyzer has been invoked
+at this pre-commit checkpoint.

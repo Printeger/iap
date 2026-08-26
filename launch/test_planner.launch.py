@@ -1228,6 +1228,21 @@ SCENARIO_PRESETS = {
         "validator_require_lidar_valid": "true",
         "validator_required_final_source": "",
     },
+    "icra_p0_p5_fused_degraded_corridor_v1": {
+        **DEFAULT_ROUTE_PRESET,
+        **CORRIDOR_DEGENERATE_MAP_PRESET,
+        **GNSS_DEGRADED_PRESET,
+        "use_gnss": "true",
+        "use_araim": "true",
+        "gnss_time_source": "trigger_topic",
+        "enable_gnss_integrity": "true",
+        "enable_gnss_araim": "true",
+        "enable_lidar_integrity": "true",
+        "integrity_fusion_mode": "max_pl",
+        "validator_require_gnss_valid": "true",
+        "validator_require_lidar_valid": "true",
+        "validator_required_final_source": "",
+    },
     "p1_fork_fused_v1": {
         **P1_FORK_MAP_PRESET, **P1_FUSED_SENSOR_PRESET,
         "p1_map_fixture": "p1_fork_fused_v1",
@@ -1361,15 +1376,15 @@ EXPERIMENT_PRESETS = {
         "p5_6.fixture.tau_max": "2.0",
     },
     "icra_p0_p5_qualification_safe_normal": {
-        "scenario": "lidar_corridor_degenerate",
+        "scenario": "icra_p0_p5_fused_degraded_corridor_v1",
         "planner_safety_profile": "icra_p0_p5",
     },
     "icra_p0_p5_qualification_final_reject": {
-        "scenario": "lidar_corridor_degenerate",
+        "scenario": "icra_p0_p5_fused_degraded_corridor_v1",
         "planner_safety_profile": "icra_p0_p5",
     },
     "icra_p0_p5_qualification_runtime_fail": {
-        "scenario": "fallback_only",
+        "scenario": "icra_p0_p5_fused_degraded_corridor_v1",
         "planner_safety_profile": "icra_p0_p5",
     },
     "p1_degraded_lidar_good": {
