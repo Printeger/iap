@@ -1,5 +1,65 @@
 # ICRA Supervisor Log
 
+## 2026-08-26 — ICRA-070 review: static correction accepted, qualification blocked before live
+
+### Review identity and independent verification
+
+- Fixed range: `3c8fffe8be003e1e8b9c81d7d0ba7736484fac69...d88d42bc5445411e4c4d7ad1a8fecbf2dabe20e1`.
+  Commits `7b51eb6`, `380c013` and `d88d42b` all bind applicable `IAP-RQ-*` IDs and are pushed; HEAD and
+  `origin/dev/icra` have divergence `0 0`.
+- The changes stay within Builder ownership. `AGENT_STATE.md`, `NEXT_TASK.md` and Supervisor scope/verdict files
+  were untouched by Builder. The protected PDF remains the only untracked file, unstaged, with SHA-256
+  `1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+- Supervisor complete hermetic discovery passes 567/567 in 37.948 seconds with all 17,770 external ROS-log
+  entries unchanged. `git diff --check` passes. No ROS main flow, GPU preflight, live identity or analyzer was
+  invoked during review.
+- The dependency preflight is valid and hash-binds the executable, degraded-GNSS scenario and RINEX file.
+  ICRA-068 remains exactly 7,364 entries with inventory
+  `fdeb47e3d025bbc7c442b86521e6808d1452d928178a52df0b2f9e03aace4858` before and after install.
+
+### Cross-layer target review
+
+- **System target:** repository requirements specify GNSS pseudorange+doppler + IMU + LiDAR, GNSS/ARAIM and
+  LiDAR integrity, P0 fusion and P5 final/runtime; a LiDAR-only/fallback route is not the qualification target.
+- **Effective config:** all SAFE_NORMAL, FINAL_REJECT and RUNTIME_FAIL cases now resolve the dedicated fused
+  degraded-corridor scenario with GNSS enabled, trigger-topic RINEX timing, both integrity sources, `max_pl`,
+  worker 4, sigma 0.01 and the legacy baseline.
+- **Launch projection:** `use_gnss=true` projects the conditional GNSS simulator; existing route geometry and
+  P5-6/P5-7 fixtures remain unchanged. P1/P2/P3/P4 stay disabled.
+- **Monitor/evidence:** the runner retains the exact 16-process set and ten required topics, while the normalizer
+  and analyzer require fresh/valid GNSS plus positive GNSS/LiDAR/fusion/satellite samples. Static mutations for
+  missing sources/topics fail closed.
+- The static cross-layer correction is accepted, but duplicated truth remains across JSON, helper, launch,
+  runner and tests. The current normalizer can also select two good rows while discarding later bad raw rows.
+  These are frozen for pure-static ICRA-071 before any campaign; they are not permission to reduce ICRA-070's
+  current target.
+
+### Standards and Spec findings
+
+- Standards: 2 High and 3 Medium actionable findings. High findings are the generated-cache packaging boundary
+  and insufficient sustained-use semantics. Medium findings are multi-source contract truth, inactive/miswired
+  hooks with no CI, and new static test evidence placed under a historical ICRA-063 namespace.
+- Spec: 1 High, 2 Medium and 1 Low. Full-sensor static binding passes, but Phase B lacks an overlay manifest and
+  every Phase C/D execution result is absent. Exact geometry mutation coverage and sustained raw-row coverage
+  are partial; static evidence namespace hygiene is weak.
+- The observed blocker is correctly fail-closed but avoidable. The retained install driver recursively copied
+  ignored source caches. At least two generated files differ:
+  `icra_p0_p5_qualification.cpython-312.pyc` and `test_planner.launch.cpython-312.pyc`. Whitelisting the first
+  would simply stop on the second and is forbidden.
+
+### Verdict and next gate
+
+- Verdict:
+  `ICRA070_STATIC_IMPLEMENTATION_PASS_GATE_BLOCKED_AVOIDABLE_PYTHON_CACHE_PACKAGING`.
+  `qualification_claim=false`; parser/GPU/live/analyzer counts are `0/0/0/0`; all `-003` identities remain
+  unregistered. ICRA-070 cannot be marked PASS and no build/install is deleted.
+- One ICRA-070 continuation is authorized in `NEXT_TASK.md`: exclude every Python cache at both permanent and
+  current overlay boundaries, preserve v1 blocker evidence, freeze a non-overwriting v2 manifest, then run the
+  still-unused parser/GPU/three-live/analyzer sequence without an intermediate review.
+- The campaign barrier is now explicit. After repaired ICRA-070 PASS, the next task is pure-static ICRA-071 as
+  frozen in `docs/icra27/ICRA_CROSS_LAYER_GUARD_PLAN.md`; only its Supervisor PASS can authorize a separate
+  campaign task.
+
 ## 2026-08-26 — ICRA-070 command corrected to the full GNSS + IMU + LiDAR system target
 
 ### Correction

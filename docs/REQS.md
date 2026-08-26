@@ -25,7 +25,8 @@
 ### IAP-RQ-000: Repo guardrails
 - [x] 本仓库内加入 AGENTS.md（禁止改 ../glim，强制维护 CHANGES/TRACEABILITY）
 - [x] 加入 docs/CHANGES.md、docs/TRACEABILITY.md、docs/REQS.md（本文件）
-- [x] 加入 doc-guard：改代码必须同步更新 CHANGES + TRACEABILITY（git hook + CI）
+- [ ] 恢复 doc-guard：当前 absolute `core.hooksPath` 已失效、hook 的 `src/iap/...` matcher 与仓库根路径
+  不匹配且没有 tracked CI；由 ICRA-071 统一接入 cross-layer verifier 后重新验收
 
 Acceptance:
 - 能在本地提交前被 hook 拦截；PR 中被 CI 拦截。

@@ -161,8 +161,9 @@ The existing `p4` profile does not enable P5. The existing `all` profile enables
 | P4-G0B | G0A PASS | Metrics-only pair, identity and 200/200 profiles; no application | `PASS` (historical closed route) |
 | P4-G0C | G0B PASS | Metrics-only calibration and positive mean/max improvement | `SCIENTIFIC_NO_GO`: max improvement Q10 = 0; route closed |
 | P4-G0D | G0C scientific GO | Post-freeze selected hash reaches B-spline and P5 | Permanently unauthorized for this conference route |
-| P5 system gate | Reviewed P0+P5 full-sensor profile, zero-failure tests, immutable install, parser `0/0/0`, GPU PASS, all 16 processes, GNSS+IMU+LiDAR topics and positive GNSS/LiDAR P0 use | SAFE_NORMAL, final reject/no-publish and runtime-fail prospective identities PASS | `ICRA-069 BLOCKED` because cases resolved GNSS-disabled; revised ICRA-070 full-sensor correction + `-003` live qualification `TASK_READY` |
-| Campaign | All technical gates PASS | GPU ready and `≥40 GiB` free | Storage gate remains external |
+| P5 system gate | Reviewed P0+P5 full-sensor profile, zero-failure tests, immutable install, parser `0/0/0`, GPU PASS, all 16 processes, GNSS+IMU+LiDAR topics and positive GNSS/LiDAR P0 use | SAFE_NORMAL, final reject/no-publish and runtime-fail prospective identities PASS | ICRA-070 static binding PASS; overlay stopped before parser/GPU/live on copied `__pycache__`; one cache-boundary repair continuation `TASK_READY` |
+| Cross-layer guard | ICRA-070 qualification PASS and Supervisor review | Canonical v2 target, typed resolver, target-to-evidence verifier, sustained raw-evidence audit, relative hooks and CI all PASS | `ICRA-071` frozen next gate; not active before ICRA-070 PASS |
+| Campaign | ICRA-071 Supervisor PASS | Fresh GPU and `≥40 GiB` free plus separate campaign task | Explicitly blocked; no automatic transition from ICRA-070 |
 
 Passing one row authorizes only Supervisor review and the next explicit task. It does not automatically move a later row to PASS.
 

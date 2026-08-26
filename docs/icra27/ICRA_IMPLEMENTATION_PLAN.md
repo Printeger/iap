@@ -33,6 +33,17 @@ GNSS pseudorange+doppler、IMU/LiDAR estimator、GNSS/ARAIM + LiDAR integrity �
 随后以 `-003` identities 一次完成 parser、GPU、三场景和 analyzer。P5 fixture/threshold/action 不变，
 `-002` 全集冻结退役。
 
+ICRA-070 在静态 full-sensor 修正和 567/567 tests 后，首次 overlay preparation 被安装边界携带的
+`launch/__pycache__/*.pyc` 阻塞。ICRA-068 的 7,364-entry inventory 保持不变，parser/GPU/live/analyzer
+仍为零次，因此只授权一次同任务 continuation：排除所有 Python cache、保留原 blocker evidence、生成
+不覆盖旧证据的 v2 provenance，然后才运行仍未使用的 `-003` sequence。不得 whitelist `.pyc`，也不得
+把该 packaging defect 解释为 GNSS/GPU/算法失败。
+
+ICRA-070 PASS 后仍不得启动 campaign。下一步固定为纯静态 ICRA-071，按
+`docs/icra27/ICRA_CROSS_LAYER_GUARD_PLAN.md` 建立唯一 v2 target、typed effective resolver、跨层静态
+verifier、sustained raw-evidence audit、relative hooks 和 CI。ICRA-071 经 Supervisor PASS 后，才可另行
+签发 campaign。
+
 下方 P0 → P4 → P5 计划保留为失败路线的审计记录，不再授权 P4 工作。冲突时以本 activation、
 根 `AGENT_STATE.md` 和 `NEXT_TASK.md` 为准。
 

@@ -30,6 +30,16 @@ GNSS”的专用 full-sensor scenario，要求 GNSS pseudorange+doppler、IMU、
 LiDAR integrity 和 `max_pl` fusion 均有真实证据，再以 no-compile overlay、complete provenance 和新
 `-003` identities 完成同一 live gate。P5 仍未 qualified。
 
+对 `3c8fffe...d88d42b` 的 Supervisor Review 接受 full-sensor 静态实现，但 gate 仍为 BLOCKED。安装脚本
+复制整个 source `launch/`，把 ignored `__pycache__` 当成 overlay 输入；已确认至少两个 `.pyc` drift。
+现有 fail-closed stop 正确，但 blocker 可由 packaging boundary 一次性修复。ICRA-070 continuation 必须
+排除全部 cache、保留 v1 blocker evidence，并在新 v2 manifest 下完成仍未启动的 parser/GPU/live/analyzer。
+
+本 Review 同时冻结 campaign 前的额外控制门：070 PASS 后只允许纯静态 ICRA-071，不直接 campaign。
+071 按 `docs/icra27/ICRA_CROSS_LAYER_GUARD_PLAN.md` 消除 JSON/helper/launch/runner/test 多真源，验证完整
+target-to-evidence projection，修复无效 hook/缺失 CI，并对 070 raw evidence 执行带 warm-up/coverage 的
+sustained-use audit。只有 071 Review PASS 才能讨论 campaign。
+
 以下 P0 → P4 → P5 复审正文作为决策历史保留，不再授权后续 P4 Gate。
 
 ## Active re-review declaration — 2026-08-20

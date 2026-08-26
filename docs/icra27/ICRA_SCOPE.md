@@ -32,6 +32,18 @@ IMU/LiDAR estimation and `max_pl` fusion. The canonical 16 processes remain mand
 evidence, installs a no-compile isolated overlay with complete provenance, and executes fresh `-003` cases once.
 P5 fixtures, route geometry, algorithms, thresholds and scientific acceptance remain unchanged.
 
+Supervisor review at `d88d42b` accepts the static full-sensor binding and 567/567 hermetic tests but does not
+pass the gate. The no-compile install recursively copied ignored `launch/__pycache__` bytes; at least two `.pyc`
+files differ from ICRA-068, so overlay inventory correctly stopped before parser, GPU, live or analyzer. One
+ICRA-070 continuation is authorized to exclude every generated Python cache, preserve the blocker evidence,
+freeze non-overwriting v2 provenance and then use the still-unregistered `-003` identities exactly once.
+
+Even after an ICRA-070 qualification PASS, campaign does not start. The next gate is the pure-static ICRA-071
+cross-layer guard hardening in `docs/icra27/ICRA_CROSS_LAYER_GUARD_PLAN.md`. It centralizes the target contract,
+checks target -> effective config -> launch/process/topic projection -> monitor/analyzer evidence, hardens
+hook/CI enforcement and re-audits sustained use in retained raw evidence. Campaign requires separate Supervisor
+authorization after ICRA-071 PASS.
+
 The conditional P0 → P4 → P5 scope below is retained as the audited failed route. Where it conflicts with this
 activation, this section and root `AGENT_STATE.md`/`NEXT_TASK.md` are authoritative.
 
@@ -151,7 +163,9 @@ P2 remains historically frozen by `NO_GO_P2`. Re-enabling it requires a separate
 4. **P4-G0B:** metrics-only same-event original/risk guides, immutable identity, final-path resampling and truthful fallback evidence.
 5. **P4-G0C:** metrics-only calibration, frozen thresholds, zero search timeout and complete 200/200 path coverage.
 6. **P4-G0D:** enable application only after threshold freeze; prove selected-guide lineage through B-spline and P5 final/runtime behavior.
-7. **Campaign:** only after GPU and `≥40 GiB` storage preflight pass.
+7. **Campaign:** the historical P4 route is closed; the active P0+P5 contingency additionally requires reviewed
+   ICRA-070 qualification PASS and reviewed ICRA-071 static-guard PASS before a fresh GPU and `≥40 GiB` storage
+   preflight can authorize a separate campaign task.
 
 ICRA-004 remains the P0-only prerequisite. Its smoke keeps P1/P2/P3/P4/P5 disabled and cannot authorize P4 work or the fixed 60-second Gate-0B run.
 

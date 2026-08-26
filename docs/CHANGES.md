@@ -3,6 +3,17 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- docs(icra-070-supervisor-review-and-guard-freeze): IAP-RQ-000 / IAP-RQ-020 / IAP-RQ-030 / IAP-RQ-040 /
+  IAP-RQ-220 / IAP-RQ-320 / IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 — review
+  `3c8fffe...d88d42b` on Standards, Spec and the cross-layer target-to-evidence chain. Accept the full-sensor
+  static correction and independent 567/567 hermetic pass, but keep qualification blocked because the retained
+  install copied ignored source `__pycache__` bytes into the overlay. Freeze one ICRA-070 continuation that
+  excludes all Python cache artifacts, preserves the first blocker evidence, creates non-overwriting v2
+  provenance and only then runs the unused `-003` parser/GPU/live/analyzer sequence. Record the permanent
+  campaign barrier and ICRA-071 pure-static plan: one canonical v2 target, typed resolver, cross-layer mutation
+  verifier, sustained raw-evidence audit, repository-relative hooks and CI. No product/runtime code, live
+  evidence, build/install or PDF was changed or deleted by this Supervisor changeset.
+
 - docs(icra-070-supervisor-command-correction): IAP-RQ-020 / IAP-RQ-030 / IAP-RQ-040 / IAP-RQ-220 / IAP-RQ-320 / IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 — withdraw the first ICRA-070 15-process/GNSS-disabled instruction at `d335665` and reissue ICRA-070 against the repository's actual GNSS pseudorange+doppler + IMU + LiDAR system target. Re-review keeps ICRA-069 implementation PASS and its fail-closed 15/16 evidence, but reclassifies the blocker: the canonical 16-process contract is correct and the qualification cases are wrong because they inherit LiDAR-only/fallback scenarios. Revised ICRA-070 preserves the P5 route geometry, fixture values, thresholds/actions and one-shot `-003` identities; creates a dedicated scenario from the existing corridor geometry and degraded-GNSS preset; requires GNSS/ARAIM and LiDAR integrity with `max_pl` fusion; adds fail-closed GNSS/IMU/LiDAR topic, satellite and P0 source-use evidence; and proceeds in one task through static proof, GNSS dependency preflight, no-compile overlay/provenance, parser, GPU, three live arms and analyzer. No product C++, risk/P5 algorithm, threshold, prior evidence or artifact was modified or deleted.
 
 - fix(icra-040-p4-g0b-review-repair): IAP-RQ-423 — make request/occupancy invalidation authoritative immediately after original A* returns, before interpreting original failure, timeout or duplicate/zero-length geometry. Epoch changes during each outcome now return `DECISION_INVALID_REPLAN_REQUIRED` with no guide and no risk search, while stable failure/timeout/geometry outcomes retain their typed results. Remove the snapshot setter's silent `metrics_only=true` rewrite: registered G0B tests now opt in explicitly, and a risk-enabled non-G0B `metrics_only=false` context remains false, records a better measured risk guide, returns `SELECTION_NOT_AUTHORIZED`, selects original and keeps `selection_applied=false`. Fresh task-local builds/installations pass focused precedence 3/3, boundary 1/1, decision 15/15, integration 5/5, collision 17/17, P1 39/39, path P4 5/5, occupancy 6/6 and plan-manager 9/9 (186 active plus one existing disabled). Exact linkage uses ICRA-040 bspline and retained ICRA-039 IAP/plan-env/path-searching; no application, thresholds/calibration/G0C/G0D, GPU, ROS/live flow, smoke, benchmark, qualification or P5 work ran. Result: `P4_G0B_REPAIR_READY_FOR_REVIEW`.
