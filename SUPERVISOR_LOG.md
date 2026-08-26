@@ -57,9 +57,10 @@
   system target, canonical contract, claim boundary, authority and campaign barrier are unchanged. This
   Supervisor window has one Review with complete repository and conversation context, so rotation is not
   required yet.
-- Handoff anchor: pushed Review commit `80116505a315ec4112a14727f4ae8df86b12b63b`; divergence was confirmed
-  `0 0` before this audit. Next Review role/task remain `SUPERVISOR` / `ICRA-070`. While
-  `active_role=DEEPSEEK`, the current window does not execute Builder work.
+- Review changeset: `80116505a315ec4112a14727f4ae8df86b12b63b`. Authoritative handoff anchor:
+  `origin/dev/icra` after the minimal rotation record; divergence is re-confirmed `0 0` after each push. Next
+  Review role/task remain `SUPERVISOR` / `ICRA-070`. While `active_role=DEEPSEEK`, the current window does not
+  execute Builder work.
 
 ## 2026-08-26 — ICRA-070 review: static correction accepted, qualification blocked before live
 

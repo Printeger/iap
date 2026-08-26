@@ -26,11 +26,11 @@ next_after_icra070_pass: ICRA-071_STATIC_CROSS_LAYER_GUARD_HARDENING
 guard_plan: docs/icra27/ICRA_CROSS_LAYER_GUARD_PLAN.md
 window_disposition: KEEP_WINDOW
 rotation_reason: SAME_GATE_LOCAL_REPLACEMENT_OVERLAY_REPAIR_NO_SCOPE_CONTRACT_CLAIM_OR_AUTHORITY_CHANGE_CONTEXT_COMPLETE
-window_handoff_anchor: 80116505a315ec4112a14727f4ae8df86b12b63b
+window_handoff_anchor: origin/dev/icra
 window_next_role: SUPERVISOR
 window_next_review_task: ICRA-070
 window_bootstrap_source: REPOSITORY_AUTHORITY_ONLY
-updated_utc: 2026-08-26T06:57:39Z
+updated_utc: 2026-08-26T06:58:25Z
 ```
 
 Supervisor review of `1b3c661...24d3e16` accepts the permanent cache exclusion, full-file-set verifier,
