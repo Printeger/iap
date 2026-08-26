@@ -8054,8 +8054,14 @@ event order. The analyzer independently rechecks those lifecycle/raw binds and
 claims an exclusive invocation marker before its sole live call. The runner
 also rejects an existing preflight root, revalidates the frozen install and
 requires exact repository-local HOME/ROS paths plus isolated prefixes before
-GPU. Updated focused suites pass 19/19 and complete hermetic discovery passes
-539/539, with the 17,762-entry external ROS inventory unchanged.
+GPU. A second two-axis review then found reduced install inventories,
+contradictory runtime-failure rows and insufficient registered-fixture
+attribution. The closure now inventories and rehashes every task-local shared
+library, binds that exact manifest SHA through runner and analyzer, rejects any
+runtime-phase failure, and requires exact P5-7/P5-6 fixture source,
+space/time/reason and bad/unknown evidence. Updated focused suites pass 22/22
+and complete hermetic discovery passes 542/542, with the 17,762-entry external
+ROS inventory unchanged.
 GPU/ROS/live/analyzer counts remain zero; the earlier static install manifest
 is stale after this remediation and will be replaced once by the final
 committed install identity.

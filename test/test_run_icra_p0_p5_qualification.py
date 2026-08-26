@@ -110,6 +110,14 @@ class IcraP0P5LiveRunnerTest(unittest.TestCase):
                 {"bag_time_s": 4.5, "phase": "runtime_committed",
                  "action": "REQUEST_EMERGENCY_STOP_CANDIDATE",
                  "reason": "future_unknown_timeout", "final_candidate_traj_id": 7,
+                 "future_unknown_duration_s": 2.5,
+                 "samples": [{
+                     "trajectory_sample_source": "runtime_committed",
+                     "fixture_match": True,
+                     "fixture_expected_reason": "future_unknown",
+                     "reason": "future_unknown", "unknown": True,
+                     "x": 1.0, "y": 0.0, "z": 0.0, "query_tau_s": 1.0,
+                 }],
                  "parse_error": ""},
             ]
             bsplines = [{"bag_time_s": 1.5, "traj_id": 7}]
@@ -132,6 +140,20 @@ class IcraP0P5LiveRunnerTest(unittest.TestCase):
                 process_result["required_processes"][
                     next(iter(RUNNER.REQUIRED_PROCESSES))
                 ]["seen"] = False
+                with self.assertRaisesRegex(
+                    RUNNER.LiveRunnerError, "required_process_lifecycle_mismatch"
+                ):
+                    RUNNER.normalize_live_run(
+                        self.contract, self.contract_path, "RUNTIME_FAIL",
+                        "fixed-run", run_dir, process_result, "a" * 40,
+                    )
+                process_result["required_processes"][
+                    next(iter(RUNNER.REQUIRED_PROCESSES))
+                ]["seen"] = True
+                process_result["process_failures"] = [{
+                    "process_name": next(iter(RUNNER.REQUIRED_PROCESSES)),
+                    "phase": "runtime", "reason": "required_process_died",
+                }]
                 with self.assertRaisesRegex(
                     RUNNER.LiveRunnerError, "required_process_lifecycle_mismatch"
                 ):
@@ -166,6 +188,13 @@ class IcraP0P5LiveRunnerTest(unittest.TestCase):
             "bag_time_s": 1.0, "phase": "runtime_committed",
             "action": "REQUEST_EMERGENCY_STOP_CANDIDATE",
             "reason": "future_unknown", "future_unknown_duration_s": 2.0,
+            "samples": [{
+                "trajectory_sample_source": "runtime_committed",
+                "fixture_match": True,
+                "fixture_expected_reason": "future_unknown",
+                "reason": "future_unknown", "unknown": True,
+                "x": 1.0, "y": 0.0, "z": 0.0, "query_tau_s": 1.0,
+            }],
             "parse_error": "",
         }
         with self.assertRaisesRegex(
@@ -174,6 +203,24 @@ class IcraP0P5LiveRunnerTest(unittest.TestCase):
             RUNNER._normalize_events(
                 "RUNTIME_FAIL", self.contract, [accepted, early],
                 [{"bag_time_s": 3.0, "traj_id": 7}],
+            )
+
+    def test_event_normalization_rejects_unregistered_fixture_attribution(self):
+        rejected = {
+            "bag_time_s": 2.0, "phase": "final_candidate", "action": "REPLAN",
+            "final_candidate_traj_id": 7, "final_candidate_rejected": True,
+            "samples": [{
+                "trajectory_sample_source": "final_candidate",
+                "fixture_match": True, "fixture_expected_reason": "unrelated",
+                "reason": "unrelated", "bad": True,
+                "x": -10.0, "y": 0.0, "z": 1.1, "query_tau_s": 1.0,
+            }],
+        }
+        with self.assertRaisesRegex(
+            RUNNER.LiveRunnerError, "registered_fixture_evidence_mismatch"
+        ):
+            RUNNER._normalize_events(
+                "FINAL_REJECT", self.contract, [rejected], []
             )
 
     def test_live_environment_rejects_caller_overlay(self):
@@ -238,6 +285,23 @@ class IcraP0P5LiveRunnerTest(unittest.TestCase):
                 RUNNER.LiveRunnerError, "installed_source_mismatch"
             ):
                 RUNNER.verify_installed_aliases(install)
+
+    def test_install_manifest_revalidation_rejects_reduced_inventory(self):
+        retained = REPO / "results/icra27/icra068/icra068_install_manifest.json"
+        manifest = json.loads(retained.read_text())
+        manifest["git_commit"] = "a" * 40
+        manifest["file_hashes"] = {}
+        with tempfile.TemporaryDirectory(dir=REPO / "results/icra27/icra068") as tmp:
+            path = Path(tmp) / "manifest.json"
+            path.write_text(json.dumps(manifest) + "\n")
+            with mock.patch.dict(
+                RUNNER.os.environ,
+                {"AMENT_PREFIX_PATH": ":".join(manifest["active_prefixes"])},
+                clear=False,
+            ), self.assertRaisesRegex(
+                RUNNER.LiveRunnerError, "install_manifest_inventory_mismatch"
+            ):
+                RUNNER.validate_frozen_install_manifest(path, "a" * 40)
 
 
 if __name__ == "__main__":

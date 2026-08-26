@@ -48,7 +48,7 @@ RUNTIME_EXECUTABLES = {
     "poscmd_2_odom": ("poscmd_2_odom",),
     "so3_quadrotor_simulator": ("so3_quadrotor_simulator",),
 }
-RUNTIME_LIBRARIES = (
+RUNTIME_LIBRARY_ROOTS = (
     "lib/libglobal_mapping.so", "lib/libgnss_extension.so",
     "lib/libintegrity_extension.so", "lib/libodometry_estimation_gpu.so",
     "lib/libsim_extension.so", "lib/libsub_mapping.so",
@@ -75,6 +75,16 @@ FORBIDDEN_OVERLAYS = (
     "/home/dev/ws_iap/build", "/home/dev/ws_iap/install",
     "/home/dev/ws_iap/src/iap/build", "/home/dev/ws_iap/src/iap/install",
 )
+EXPECTED_BUILD_PROFILE = {
+    "package_count": len(LOCAL_PACKAGES), "cmake_build_type": "Release",
+    "build_testing": False, "build_with_cuda": True,
+    "merge_install": True, "symlink_install": False,
+}
+INSTALL_MANIFEST_KEYS = {
+    "schema_version", "git_commit", "install_root", "active_prefixes",
+    "packages", "installed_aliases", "runtime_libraries", "file_hashes",
+    "linkage_output_sha256", "build_profile", "closure_ready",
+}
 
 
 def _load(name: str, path: Path):
@@ -125,6 +135,42 @@ class LiveRunnerError(RuntimeError):
 
 def _sha256(path: Path) -> str:
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def _is_sha256(value: object) -> bool:
+    return isinstance(value, str) and len(value) == 64 and all(
+        character in "0123456789abcdef" for character in value
+    )
+
+
+def installed_runtime_libraries(install_root: Path) -> tuple[str, ...]:
+    """Return every task-local shared library emitted by the proven closure."""
+    install_root = Path(install_root)
+    return tuple(sorted(
+        str(path.relative_to(install_root))
+        for path in (install_root / "lib").glob("*.so")
+        if path.is_file() and not path.is_symlink()
+    ))
+
+
+def runtime_executable_paths() -> tuple[str, ...]:
+    return tuple(
+        f"lib/{package}/{executable}"
+        for package, executables in RUNTIME_EXECUTABLES.items()
+        for executable in executables
+    )
+
+
+def _linkage_ready(relative: str, install_root: Path, environment: dict) -> str:
+    completed = subprocess.run(
+        ["ldd", str(install_root / relative)], capture_output=True,
+        text=True, check=False, env=environment,
+    )
+    text_output = completed.stdout + completed.stderr
+    if completed.returncode != 0 or "not found" in text_output \
+            or any(forbidden in text_output for forbidden in FORBIDDEN_OVERLAYS):
+        raise LiveRunnerError(f"runtime_linkage_not_ready:{relative}")
+    return hashlib.sha256(text_output.encode()).hexdigest()
 
 
 def _write_json(path: Path, value: object) -> None:
@@ -218,18 +264,19 @@ def audit_and_freeze_install(
             raise LiveRunnerError(f"duplicate_or_missing_package_identity:{package}")
         packages[package] = resolved
     file_hashes = {}
-    for package, executables in RUNTIME_EXECUTABLES.items():
-        for executable in executables:
-            relative = f"lib/{package}/{executable}"
-            path = install_root / relative
-            if not path.is_file() or path.is_symlink() or not os.access(path, os.X_OK):
-                raise LiveRunnerError(f"runtime_executable_not_ready:{relative}")
-            file_hashes[relative] = _sha256(path)
+    for relative in runtime_executable_paths():
+        path = install_root / relative
+        if not path.is_file() or path.is_symlink() or not os.access(path, os.X_OK):
+            raise LiveRunnerError(f"runtime_executable_not_ready:{relative}")
+        file_hashes[relative] = _sha256(path)
     component = Path("/opt/ros/jazzy/lib/rclcpp_components/component_container")
     if not component.is_file() or not os.access(component, os.X_OK):
         raise LiveRunnerError("component_container_not_ready")
     file_hashes[str(component)] = _sha256(component)
-    for relative in (*RUNTIME_LIBRARIES, *RUNTIME_CONFIGS):
+    runtime_libraries = installed_runtime_libraries(install_root)
+    if not set(RUNTIME_LIBRARY_ROOTS).issubset(runtime_libraries):
+        raise LiveRunnerError("runtime_library_root_missing")
+    for relative in (*runtime_libraries, *RUNTIME_CONFIGS):
         path = install_root / relative
         if not path.is_file() or path.is_symlink():
             raise LiveRunnerError(f"runtime_file_not_ready:{relative}")
@@ -241,16 +288,8 @@ def audit_and_freeze_install(
         "/opt/ros/jazzy/lib/x86_64-linux-gnu",
     ))
     linkage = {}
-    for relative in RUNTIME_LIBRARIES:
-        completed = subprocess.run(
-            ["ldd", str(install_root / relative)], capture_output=True,
-            text=True, check=False, env=clean_env,
-        )
-        text_output = completed.stdout + completed.stderr
-        if completed.returncode != 0 or "not found" in text_output \
-                or any(forbidden in text_output for forbidden in FORBIDDEN_OVERLAYS):
-            raise LiveRunnerError(f"runtime_linkage_not_ready:{relative}")
-        linkage[relative] = hashlib.sha256(text_output.encode()).hexdigest()
+    for relative in runtime_libraries:
+        linkage[relative] = _linkage_ready(relative, install_root, clean_env)
     result = {
         "schema_version": "icra068_qualification_install_manifest_v1",
         "git_commit": git_commit,
@@ -258,13 +297,10 @@ def audit_and_freeze_install(
         "active_prefixes": active_prefixes,
         "packages": packages,
         "installed_aliases": aliases,
+        "runtime_libraries": list(runtime_libraries),
         "file_hashes": file_hashes,
         "linkage_output_sha256": linkage,
-        "build_profile": {
-            "package_count": len(LOCAL_PACKAGES), "cmake_build_type": "Release",
-            "build_testing": False, "build_with_cuda": True,
-            "merge_install": True, "symlink_install": False,
-        },
+        "build_profile": EXPECTED_BUILD_PROFILE,
         "closure_ready": True,
     }
     _write_json(output_path, result)
@@ -284,18 +320,48 @@ def validate_frozen_install_manifest(path: Path, git_commit: str) -> dict:
             or manifest.get("closure_ready") is not True \
             or manifest.get("git_commit") != git_commit:
         raise LiveRunnerError("install_manifest_identity_mismatch")
-    if manifest.get("active_prefixes") != os.environ.get(
-        "AMENT_PREFIX_PATH", ""
-    ).split(":"):
-        raise LiveRunnerError("install_manifest_active_prefix_mismatch")
+    expected_prefixes = [str(INSTALL_ROOT), "/root/ros2_ws/install", "/opt/ros/jazzy"]
+    expected_packages = {
+        package: str(INSTALL_ROOT) for package in LOCAL_PACKAGES
+    } | {"rclcpp_components": "/opt/ros/jazzy"}
+    runtime_libraries = installed_runtime_libraries(INSTALL_ROOT)
+    expected_file_keys = set(runtime_executable_paths()) | set(runtime_libraries) \
+        | set(RUNTIME_CONFIGS) \
+        | {"/opt/ros/jazzy/lib/rclcpp_components/component_container"}
+    file_hashes = manifest.get("file_hashes")
+    linkage = manifest.get("linkage_output_sha256")
+    if (
+        set(manifest) != INSTALL_MANIFEST_KEYS
+        or manifest.get("install_root") != str(INSTALL_ROOT)
+        or manifest.get("active_prefixes") != expected_prefixes
+        or manifest.get("active_prefixes") != os.environ.get(
+            "AMENT_PREFIX_PATH", ""
+        ).split(":")
+        or manifest.get("packages") != expected_packages
+        or manifest.get("build_profile") != EXPECTED_BUILD_PROFILE
+        or manifest.get("runtime_libraries") != list(runtime_libraries)
+        or not isinstance(file_hashes, dict)
+        or set(file_hashes) != expected_file_keys
+        or not all(_is_sha256(value) for value in file_hashes.values())
+        or not isinstance(linkage, dict)
+        or set(linkage) != set(runtime_libraries)
+        or not all(_is_sha256(value) for value in linkage.values())
+    ):
+        raise LiveRunnerError("install_manifest_inventory_mismatch")
     aliases = verify_installed_aliases(INSTALL_ROOT)
     if manifest.get("installed_aliases") != aliases:
         raise LiveRunnerError("install_manifest_alias_drift")
-    for relative, expected_hash in (manifest.get("file_hashes") or {}).items():
+    for relative, expected_hash in file_hashes.items():
         file_path = Path(relative) if Path(relative).is_absolute() else INSTALL_ROOT / relative
         if not file_path.is_file() or file_path.is_symlink() \
                 or _sha256(file_path) != expected_hash:
             raise LiveRunnerError(f"install_manifest_file_drift:{relative}")
+    clean_environment = dict(os.environ)
+    clean_environment["LD_LIBRARY_PATH"] = expected_live_environment()[
+        "LD_LIBRARY_PATH"
+    ]
+    for relative in runtime_libraries:
+        _linkage_ready(relative, INSTALL_ROOT, clean_environment)
     return manifest
 
 
@@ -380,6 +446,62 @@ def _candidate_id(row: dict) -> str:
     return f"traj-{value}"
 
 
+def _registered_fixture_evidence_present(
+    case_id: str, contract: dict, p5_rows: list[dict]
+) -> bool:
+    if case_id == "SAFE_NORMAL":
+        return True
+    fixture = contract["cases"][case_id]["fixture_values"]
+    prefix = "p5_7" if case_id == "FINAL_REJECT" else "p5_6"
+    expected_reason = (
+        "p5_7_rejected_trajectory" if case_id == "FINAL_REJECT"
+        else "future_unknown"
+    )
+    expected_source = (
+        "final_candidate" if case_id == "FINAL_REJECT"
+        else "runtime_committed"
+    )
+
+    def finite(value: object) -> float | None:
+        try:
+            result = float(value)
+        except (TypeError, ValueError):
+            return None
+        return result if result == result and abs(result) != float("inf") else None
+
+    def within(sample: dict, field: str, low: str, high: str) -> bool:
+        value = finite(sample.get(field))
+        return value is not None and float(fixture[low]) <= value <= float(fixture[high])
+
+    for row in p5_rows:
+        for sample in SAFETY_ANALYZER.p5_3_sample_list(row):
+            base_match = (
+                sample.get("fixture_match") is True
+                and sample.get("trajectory_sample_source") == expected_source
+                and sample.get("fixture_expected_reason") == expected_reason
+                and expected_reason in str(sample.get("reason", ""))
+                and within(sample, "x", f"{prefix}.fixture.x_min", f"{prefix}.fixture.x_max")
+                and within(sample, "y", f"{prefix}.fixture.y_min", f"{prefix}.fixture.y_max")
+                and within(sample, "z", f"{prefix}.fixture.z_min", f"{prefix}.fixture.z_max")
+                and within(sample, "query_tau_s", f"{prefix}.fixture.tau_min", f"{prefix}.fixture.tau_max")
+            )
+            if case_id == "FINAL_REJECT":
+                expected_hpl = float(fixture["p5_7.fixture.hpl_pred_m"])
+                expected_vpl = float(fixture["p5_7.fixture.vpl_pred_m"])
+                if base_match and sample.get("bad") is True and all(
+                    finite(sample.get(field)) == expected
+                    for field, expected in (
+                        ("fixture_expected_hpl", expected_hpl),
+                        ("fixture_expected_vpl", expected_vpl),
+                        ("hpl", expected_hpl), ("vpl", expected_vpl),
+                    )
+                ):
+                    return True
+            elif base_match and sample.get("unknown") is True:
+                return True
+    return False
+
+
 def _normalize_events(
     case_id: str, contract: dict, p5_rows: list[dict], bspline_rows: list[dict]
 ) -> list[dict]:
@@ -403,6 +525,8 @@ def _normalize_events(
         if row.get("phase") == "runtime_committed"
         and str(row.get("action", "")) == "REQUEST_EMERGENCY_STOP_CANDIDATE"
     ]
+    if not _registered_fixture_evidence_present(case_id, contract, p5_rows):
+        raise LiveRunnerError("registered_fixture_evidence_mismatch")
 
     def sequence(row: dict) -> int:
         stamp = float(row.get("bag_time_s", 0.0))
@@ -498,15 +622,8 @@ def normalize_live_run(
     observed = process_result.get("required_processes", {})
     if set(observed) != set(REQUIRED_PROCESSES):
         raise LiveRunnerError("required_process_identity_mismatch")
-    if process_result.get("controlled_shutdown") is not True \
-            or process_result.get("orphan_check_passed") is not True \
-            or process_result.get("forced_orphan_cleanup") is not False \
-            or process_result.get("remaining_process_group_pids") != [] \
-            or any(
-        not isinstance(value, dict)
-        or value.get("seen") is not True
-        or value.get("runtime_failure") is not False
-        for value in observed.values()
+    if not QUALIFICATION.live_process_lifecycle_exact(
+        process_result, tuple(REQUIRED_PROCESSES)
     ):
         raise LiveRunnerError("required_process_lifecycle_mismatch")
     metadata = SAFETY_ANALYZER.read_bag_metadata(bag_dir)

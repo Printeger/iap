@@ -252,6 +252,26 @@ class IcraP0P5QualificationTest(unittest.TestCase):
             for failure in result["technical_failures"]
         ))
 
+    def test_live_lifecycle_rejects_contradictory_runtime_failure(self):
+        process = {
+            "required_processes_ok": True,
+            "controlled_shutdown": True,
+            "orphan_check_passed": True,
+            "forced_orphan_cleanup": False,
+            "remaining_process_group_pids": [],
+            "required_processes": {
+                name: {"seen": True, "runtime_failure": False}
+                for name in self.contract["required_processes"]
+            },
+            "process_failures": [{
+                "process_name": self.contract["required_processes"][0],
+                "phase": "runtime", "reason": "required_process_died",
+            }],
+        }
+        self.assertFalse(MODULE.live_process_lifecycle_exact(
+            process, self.contract["required_processes"]
+        ))
+
     def test_live_analyzer_accepts_exact_one_shot_real_bundle(self):
         source = synthetic_bundle(self.contract, self.raw_directory)
         runs = source["runs"]
@@ -279,6 +299,7 @@ class IcraP0P5QualificationTest(unittest.TestCase):
                         name: {"seen": True, "runtime_failure": False}
                         for name in self.contract["required_processes"]
                     },
+                    "process_failures": [],
                 }
                 (raw / "process_result.json").write_text(json.dumps(process) + "\n")
                 for name in (
@@ -291,9 +312,27 @@ class IcraP0P5QualificationTest(unittest.TestCase):
                     str(path.relative_to(REPO)) for path in sorted(raw.iterdir())
                 ]
             install = root / "install_manifest.json"
-            install.write_text(json.dumps({
-                "git_commit": "1" * 40, "closure_ready": True,
-            }) + "\n")
+            retained = json.loads((
+                REPO / "results/icra27/icra068/icra068_install_manifest.json"
+            ).read_text())
+            install_root = REPO / "results/icra27/icra068/install"
+            runtime_libraries = sorted(
+                str(path.relative_to(install_root))
+                for path in (install_root / "lib").glob("*.so")
+                if path.is_file() and not path.is_symlink()
+            )
+            retained["git_commit"] = "1" * 40
+            retained["runtime_libraries"] = runtime_libraries
+            retained["linkage_output_sha256"] = {
+                relative: retained.get("linkage_output_sha256", {}).get(
+                    relative, "0" * 64
+                ) for relative in runtime_libraries
+            }
+            for relative in runtime_libraries:
+                retained["file_hashes"][relative] = MODULE._sha256(
+                    install_root / relative
+                )
+            install.write_text(json.dumps(retained) + "\n")
             runner = root / "runner_state.json"
             identities = list(MODULE.LIVE_RUN_IDENTITIES.values())
             runner.write_text(json.dumps({
@@ -301,6 +340,7 @@ class IcraP0P5QualificationTest(unittest.TestCase):
                 "attempted": identities, "completed": identities,
                 "retries": 0, "gpu_preflight_invocations": 1,
                 "launch_invocations": 3,
+                "install_manifest_sha256": MODULE._sha256(install),
             }) + "\n")
             evidence = root / "live.json"
             bundle = MODULE.write_live_bundle(

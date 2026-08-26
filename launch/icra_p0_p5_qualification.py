@@ -24,6 +24,59 @@ LIVE_RUN_IDENTITIES = {
 }
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 SOURCE_REPOSITORY = Path(__file__).resolve().parents[1]
+ICRA068_LOCAL_PACKAGES = (
+    "iap", "bspline_opt", "path_searching", "plan_env", "ego_planner",
+    "traj_utils", "cmake_utils", "odom_visualization", "pose_utils",
+    "quadrotor_msgs", "uav_utils", "poscmd_2_odom", "gnss_sim",
+    "local_sensing", "so3_control", "so3_quadrotor_simulator", "gnss_comm",
+)
+ICRA068_EXECUTABLE_PATHS = (
+    "lib/iap/demo11_corridor_map_publisher", "lib/iap/demo4_lidar_body_bridge",
+    "lib/iap/iap_rosnode", "lib/iap/planner_evidence_provenance_publisher.py",
+    "lib/iap/test_araim_validator.py",
+    "lib/iap/planner_bag_recorder_with_finalizer.py",
+    "lib/ego_planner/ego_planner_node", "lib/ego_planner/traj_server",
+    "lib/gnss_sim/gnss_sim_node", "lib/local_sensing/pcl_render_node",
+    "lib/odom_visualization/odom_visualization",
+    "lib/poscmd_2_odom/poscmd_2_odom",
+    "lib/so3_quadrotor_simulator/so3_quadrotor_simulator",
+)
+ICRA068_CONFIG_PATHS = (
+    "share/iap/config/config_odometry_gpu.json",
+    "share/iap/config/gnss_sim/demo7_skymask_nlos.yaml",
+    "share/iap/config/sim_demo11/config.json",
+    "share/iap/config/sim_demo11/config_gnss.json",
+    "share/iap/config/sim_demo11/config_ros.json",
+    "share/iap/config/sim_ego/config_global_mapping_gpu.json",
+    "share/iap/config/sim_ego/config_logging.json",
+    "share/iap/config/sim_ego/config_sensors.json",
+    "share/iap/config/sim_ego/config_sub_mapping_gpu.json",
+    "share/iap/config/sim_ego/config_viewer.json",
+    "share/iap/config/sim_ego/fastdds_udp_only.xml",
+    "share/local_sensing/config/camera.yaml",
+    "share/so3_control/config/corrections_hummingbird.yaml",
+    "share/so3_control/config/gains_hummingbird.yaml",
+    "share/iap/config/icra27/icra_p0_p5_qualification_v1.json",
+)
+ICRA068_ALIAS_PATHS = {
+    "share/iap/launch/test_planner.launch.py": "launch/test_planner.launch.py",
+    "share/iap/launch/icra_p0_p5_qualification.py": "launch/icra_p0_p5_qualification.py",
+    "share/iap/config/icra27/icra_p0_p5_qualification_v1.json": (
+        "config/icra27/icra_p0_p5_qualification_v1.json"
+    ),
+}
+ICRA068_LIBRARY_ROOTS = {
+    "lib/libglobal_mapping.so", "lib/libgnss_extension.so",
+    "lib/libintegrity_extension.so", "lib/libodometry_estimation_gpu.so",
+    "lib/libsim_extension.so", "lib/libsub_mapping.so",
+    "lib/libso3_control_component.so", "lib/libiap.so",
+    "lib/libgnss_comm_lib.so",
+}
+ICRA068_MANIFEST_KEYS = {
+    "schema_version", "git_commit", "install_root", "active_prefixes",
+    "packages", "installed_aliases", "runtime_libraries", "file_hashes",
+    "linkage_output_sha256", "build_profile", "closure_ready",
+}
 
 
 class ContractError(RuntimeError):
@@ -608,6 +661,105 @@ def write_live_bundle(
     return bundle
 
 
+def live_process_lifecycle_exact(process, required_processes) -> bool:
+    process_rows = process.get("required_processes", {}) \
+        if isinstance(process, dict) else {}
+    failures = process.get("process_failures", []) \
+        if isinstance(process, dict) else None
+    controlled_failures_only = isinstance(failures, list) and all(
+        isinstance(item, dict)
+        and item.get("phase") == "controlled_shutdown"
+        and item.get("reason")
+        == "required_process_stopped_during_controlled_shutdown"
+        and item.get("process_name") in required_processes
+        for item in failures
+    )
+    return bool(
+        isinstance(process, dict)
+        and process.get("required_processes_ok") is True
+        and process.get("controlled_shutdown") is True
+        and process.get("orphan_check_passed") is True
+        and process.get("forced_orphan_cleanup") is False
+        and process.get("remaining_process_group_pids") == []
+        and set(process_rows) == set(required_processes)
+        and all(
+            isinstance(value, dict) and value.get("seen") is True
+            and value.get("runtime_failure") is False
+            for value in process_rows.values()
+        )
+        and controlled_failures_only
+    )
+
+
+def live_install_manifest_exact(manifest, repository_root) -> bool:
+    repository_root = Path(repository_root).resolve()
+    install_root = repository_root / "results/icra27/icra068/install"
+    expected_prefixes = [
+        str(install_root), "/root/ros2_ws/install", "/opt/ros/jazzy",
+    ]
+    expected_packages = {
+        package: str(install_root) for package in ICRA068_LOCAL_PACKAGES
+    } | {"rclcpp_components": "/opt/ros/jazzy"}
+    runtime_libraries = tuple(sorted(
+        str(path.relative_to(install_root))
+        for path in (install_root / "lib").glob("*.so")
+        if path.is_file() and not path.is_symlink()
+    ))
+    expected_file_keys = set(ICRA068_EXECUTABLE_PATHS) \
+        | set(ICRA068_CONFIG_PATHS) | set(runtime_libraries) \
+        | {"/opt/ros/jazzy/lib/rclcpp_components/component_container"}
+    file_hashes = manifest.get("file_hashes") if isinstance(manifest, dict) else None
+    linkage = manifest.get("linkage_output_sha256") \
+        if isinstance(manifest, dict) else None
+    aliases = manifest.get("installed_aliases") \
+        if isinstance(manifest, dict) else None
+    build_profile = {
+        "package_count": len(ICRA068_LOCAL_PACKAGES),
+        "cmake_build_type": "Release", "build_testing": False,
+        "build_with_cuda": True, "merge_install": True,
+        "symlink_install": False,
+    }
+    if not (
+        isinstance(manifest, dict)
+        and set(manifest) == ICRA068_MANIFEST_KEYS
+        and manifest.get("schema_version")
+        == "icra068_qualification_install_manifest_v1"
+        and manifest.get("closure_ready") is True
+        and manifest.get("install_root") == str(install_root)
+        and manifest.get("active_prefixes") == expected_prefixes
+        and manifest.get("packages") == expected_packages
+        and manifest.get("build_profile") == build_profile
+        and manifest.get("runtime_libraries") == list(runtime_libraries)
+        and set(runtime_libraries).issuperset(ICRA068_LIBRARY_ROOTS)
+        and isinstance(file_hashes, dict)
+        and set(file_hashes) == expected_file_keys
+        and all(SHA256_RE.fullmatch(value or "") for value in file_hashes.values())
+        and isinstance(linkage, dict)
+        and set(linkage) == set(runtime_libraries)
+        and all(SHA256_RE.fullmatch(value or "") for value in linkage.values())
+        and isinstance(aliases, dict)
+        and set(aliases) == set(ICRA068_ALIAS_PATHS)
+    ):
+        return False
+    for relative, expected_hash in file_hashes.items():
+        path = Path(relative) if Path(relative).is_absolute() else install_root / relative
+        if not path.is_file() or path.is_symlink() or _sha256(path) != expected_hash:
+            return False
+    for relative, source_relative in ICRA068_ALIAS_PATHS.items():
+        row = aliases.get(relative)
+        installed = install_root / relative
+        if not (
+            isinstance(row, dict)
+            and row.get("source_path") == source_relative
+            and SHA256_RE.fullmatch(row.get("source_sha256", ""))
+            and row.get("source_sha256") == row.get("installed_sha256")
+            and installed.is_file() and not installed.is_symlink()
+            and _sha256(installed) == row.get("installed_sha256")
+        ):
+            return False
+    return True
+
+
 def analyze_live_bundle(
     contract, bundle, contract_path, repository_root=None
 ):
@@ -658,19 +810,8 @@ def analyze_live_bundle(
             process = json.loads(process_paths[0].read_text())
         except (OSError, UnicodeDecodeError, json.JSONDecodeError):
             process = {}
-        process_rows = process.get("required_processes", {})
-        if not (
-            process.get("required_processes_ok") is True
-            and process.get("controlled_shutdown") is True
-            and process.get("orphan_check_passed") is True
-            and process.get("forced_orphan_cleanup") is False
-            and process.get("remaining_process_group_pids") == []
-            and set(process_rows) == set(contract["required_processes"])
-            and all(
-                isinstance(value, dict) and value.get("seen") is True
-                and value.get("runtime_failure") is False
-                for value in process_rows.values()
-            )
+        if not live_process_lifecycle_exact(
+            process, contract["required_processes"]
         ):
             technical.append(f"run[{run_id}]: process lifecycle evidence mismatch")
     for key in ("install_manifest_path", "runner_state_path"):
@@ -689,8 +830,8 @@ def analyze_live_bundle(
             install_manifest = {}
         if install_manifest.get("git_commit") != manifest.get("git_commit"):
             technical.append("install manifest commit mismatch")
-        if install_manifest.get("closure_ready") is not True:
-            technical.append("install closure is not ready")
+        if not live_install_manifest_exact(install_manifest, repository_root):
+            technical.append("install closure inventory is not exact")
     runner_path = repository_root / str(manifest.get("runner_state_path", ""))
     if runner_path.is_file():
         try:
@@ -706,6 +847,8 @@ def analyze_live_bundle(
             and runner_state.get("retries") == 0
             and runner_state.get("gpu_preflight_invocations") == 1
             and runner_state.get("launch_invocations") == 3
+            and runner_state.get("install_manifest_sha256")
+            == manifest.get("install_manifest_sha256")
         ):
             technical.append("runner state is not exact complete one-shot evidence")
     validation_input = json.loads(json.dumps(bundle))
