@@ -354,6 +354,32 @@ TEST(P5RuntimeIntegrityGateTest, CurrentInvalidIsExplicit) {
 }
 
 TEST(P5RuntimeIntegrityGateTest,
+     ExplicitLidarCertifiedCurrentSourceIsValidAndFailsClosed) {
+  auto config = baseConfig();
+  config.current_pl_source = "LIDAR_CERTIFIED";
+  ego_planner::P5RuntimeIntegrityGate gate(nullptr, config, false);
+  auto msg = integrityMsg(0.0, 20.0, 30.0, 10.0, 20.0);
+  msg.lidar_valid = true;
+  msg.lidar_hpl = 2.0;
+  msg.lidar_vpl = 3.0;
+  gate.setCurrentIntegrityForTest(msg);
+  auto traj = makeTrajectory();
+  auto snapshot = makeSnapshot(1.0, 1.0);
+
+  auto safe = gate.evaluateFinal(traj, snapshot, 0.0, 1.0);
+  EXPECT_EQ(safe.action, ego_planner::P5GateAction::OK);
+  EXPECT_DOUBLE_EQ(safe.current_im_h, 8.0);
+  EXPECT_DOUBLE_EQ(safe.current_im_v, 17.0);
+
+  msg.lidar_valid = false;
+  gate.setCurrentIntegrityForTest(msg);
+  auto invalid = gate.evaluateFinal(traj, snapshot, 0.0, 1.0);
+  EXPECT_EQ(invalid.action,
+            ego_planner::P5GateAction::REQUEST_REPLAN);
+  EXPECT_EQ(invalid.reason, ego_planner::P5GateReason::CURRENT_INVALID);
+}
+
+TEST(P5RuntimeIntegrityGateTest,
      FutureUnknownRequestsReplanThenEscalatesAfterThreshold) {
   auto config = baseConfig();
   config.current_stale_to_replan_s = 100.0;

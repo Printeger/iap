@@ -8567,3 +8567,49 @@ in `icra072-dev-smoke-003/analysis.json`. Per fail-closed/no-retry rules no
 rerun, tuning, ICRA-073, effect, benchmark, qualification or campaign command
 followed. Final status is `ICRA072_BLOCKED_TERMINAL_CHAIN_MISSING`, pending
 Supervisor review.
+
+## 2026-08-26 — ICRA-072A Layer 1 iterative full-flow completion
+
+Requirements: IAP-RQ-320, IAP-RQ-321, IAP-RQ-400, IAP-RQ-410,
+IAP-RQ-421, IAP-RQ-422, IAP-RQ-423 and IAP-RQ-424.
+
+Added the exact shared six-package `build_iap_dev.sh` entry and converted the
+runner, capture and analyzer to repository-local, non-overwriting Layer 1
+development runs. GPU admission remains before ROS, required-process health
+and owned process groups remain fail-closed, and the analyzer reports the
+first missing stage in the frozen seven-stage order while retaining every
+typed failure. Focused RED/GREEN coverage includes build roots/arguments,
+path and install rejection, GPU early stop, cleanup/manifest observations,
+complete terminal identity and runtime start-time mismatch.
+
+The smallest terminal integration corrections preserve production authority:
+P5 accepts an explicit `LIDAR_CERTIFIED` current-PL source only when the LiDAR
+report is valid and finite, otherwise it requests replan; its default remains
+`FUSED`. Terminal lineage writes epoch seconds with 17-digit precision and the
+analyzer binds the serialized runtime start within 20 ms. The separately named
+development fixture keeps production occupancy and P0 inputs, uses no route,
+label, centerline, oracle or analyzer feedback, and increases natural planning
+opportunities through 1 m/s limits and a 0.2 s production-FSM replan period.
+
+All retained live attempts are immutable. First-missing history is:
+`run-001` capture-not-ready/no analyzer; `run-002` EGO; `run-003` EGO plus
+process health; `run-004` EGO; `run-005` P5 final; `run-006` EGO; `run-007`
+EGO; `run-008` EGO; `run-009` P5 final; `run-010` EGO; `run-011` P4 selection;
+`run-012` EGO plus process health; `run-013` EGO; `run-014` EGO plus process
+health; `run-015` P0; and `run-016`, `run-017`, `run-018` EGO. `run-019`
+contained all seven stages, but independent Spec review found its runner had
+returned failure with `owned_process_groups_cleared=false`; the original
+analysis therefore was a false PASS and is retained unchanged. The analyzer
+now rejects cleanup/runner failure, cleanup has a real stubborn-child process-
+group regression, completed cleanup is idempotent, and `atexit` is unregistered
+only after every owned group is confirmed cleared; failed cleanup retains its
+exit-time recovery callback. Repository-relative paths resolve from the repository.
+`run-020` is the first runner-and-analyzer PASS, so the live loop stopped.
+
+The successful analyzer has no failures and all seven stage booleans true. It
+records P0 ready 54, 33 P4 decisions, 18 decisions with complete support for
+both guides, 7 natural selected guides, one three-row selected terminal
+lineage, 17 P5-final OK records, 17 normal B-spline publications and 70
+committed-runtime observations. This is development-only Layer 1 evidence and
+makes no effect, threshold, qualification or campaign claim. ICRA-072B is not
+self-authorized and awaits Supervisor review.

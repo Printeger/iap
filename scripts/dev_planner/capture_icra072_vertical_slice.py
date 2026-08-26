@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import time
 from pathlib import Path
 
@@ -17,16 +18,25 @@ from traj_utils.msg import Bspline
 
 
 REPOSITORY = Path(__file__).resolve().parents[2]
-TASK_RESULTS_ROOT = (REPOSITORY / "results/icra27/icra072").resolve()
+DEV_RUNS_ROOT = (REPOSITORY / "results/icra27/dev_runs/layer1").resolve()
+RUN_ID_PATTERN = re.compile(r"run-[0-9]{3,}")
 
 
-def _task_local(path: Path, label: str) -> Path:
-    resolved = path.resolve()
-    try:
-        resolved.relative_to(TASK_RESULTS_ROOT)
-    except ValueError as exc:
-        raise SystemExit(f"{label} must be under {TASK_RESULTS_ROOT}") from exc
-    return resolved
+def validate_capture_paths(output: Path, ready: Path) -> tuple[Path, Path]:
+    resolved_output = (output if output.is_absolute()
+                       else REPOSITORY / output).resolve()
+    resolved_ready = (ready if ready.is_absolute()
+                      else REPOSITORY / ready).resolve()
+    run_root = resolved_output.parent
+    if (run_root.parent != DEV_RUNS_ROOT or
+            RUN_ID_PATTERN.fullmatch(run_root.name) is None or
+            not run_root.is_dir()):
+        raise SystemExit(
+            f"capture output must be inside an existing {DEV_RUNS_ROOT}/"
+            "run-[0-9]{3,}")
+    if resolved_ready.parent != run_root:
+        raise SystemExit("capture readiness file must share the run root")
+    return resolved_output, resolved_ready
 
 
 class VerticalSliceCapture(Node):
@@ -93,8 +103,7 @@ def main() -> int:
     parser.add_argument("--ready-file", type=Path, required=True)
     parser.add_argument("--duration-s", type=float, required=True)
     args = parser.parse_args()
-    output = _task_local(args.output, "capture output")
-    ready_file = _task_local(args.ready_file, "capture readiness file")
+    output, ready_file = validate_capture_paths(args.output, args.ready_file)
     if output.exists() or ready_file.exists():
         raise SystemExit("capture output already exists")
     rclpy.init()

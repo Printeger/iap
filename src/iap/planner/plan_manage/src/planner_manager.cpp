@@ -777,6 +777,7 @@ namespace ego_planner
              "risk_guide_hash,selected_guide_hash,selection_applied,control_points_hash,"
              "closed_collision_observed,no_collision_refinement_observed,"
              "trajectory_id,trajectory_start_s,final_bspline_identity\n";
+    csv << std::setprecision(17);
     const Eigen::MatrixXd control_points =
         local_data_.position_traj_.getControlPoint();
     const std::string control_hash = p4ControlPointHash(control_points);

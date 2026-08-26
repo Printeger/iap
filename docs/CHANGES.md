@@ -3,6 +3,21 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(icra-072a-layer1-flow): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 /
+  IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — add the exact shared six-package development build,
+  iterative repository-local runner/capture/analyzer and fixed first-missing-stage diagnostics. Preserve
+  fail-closed P4 identity through full-precision terminal lineage, add an explicit fail-closed certified-LiDAR
+  current-PL source for the development profile, and use production FSM periodic replanning without exposing a
+  route or oracle to P4. Independent review caught that content-complete `run-019` failed process-group cleanup;
+  the analyzer now requires runner PASS plus cleared owned groups, cleanup has an actual stubborn-child test,
+  completed cleanup is idempotent, unregisters its `atexit` callbacks only after every owned group is confirmed
+  cleared, and retains exit-time recovery after failed cleanup; relative
+  evidence paths resolve from the repository. Retained `run-001` through `run-019` remain truthful
+  failed iterations; `run-020` is the first runner-and-analyzer PASS with all seven ordered stages, 7 natural
+  selected guides, 17 P5-final passes/publications and 70 committed-runtime observations. This is
+  development-only Layer 1 evidence; ICRA-072B and all effect,
+  qualification and campaign work remain subject to Supervisor review.
+
 - docs(icra-artifact-authority): IAP-RQ-000 / IAP-RQ-424 — reconcile the user-authorized cleanup workflow with
   `AGENTS.md` by adding one narrow, non-transferable exception for an explicit USER decision, pushed literal
   inventory, repository/symlink/tracked/process checks and strict evidence/shared-workspace/PDF exclusions.

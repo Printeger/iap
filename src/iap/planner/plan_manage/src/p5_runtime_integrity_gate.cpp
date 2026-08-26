@@ -502,6 +502,8 @@ P5RuntimeIntegrityGate::Config P5RuntimeIntegrityGate::declareAndReadConfig(
   config.integrity_topic =
       node->declare_parameter<std::string>("p5.integrity_topic",
                                            "/iap/integrity");
+  config.current_pl_source = node->declare_parameter<std::string>(
+      "p5.current_pl_source", "FUSED");
   config.status_topic =
       node->declare_parameter<std::string>("p5.status_topic",
                                            "planning/integrity_gate_status");
@@ -1237,19 +1239,35 @@ bool P5RuntimeIntegrityGate::finite(double value) {
 }
 
 P5RuntimeIntegrityGate::CurrentIntegrity
-P5RuntimeIntegrityGate::currentFromMsg(const iap::msg::IntegrityReport& msg) {
+P5RuntimeIntegrityGate::currentFromMsg(
+    const iap::msg::IntegrityReport& msg) const {
   CurrentIntegrity current;
   current.received = true;
   current.stamp_s = stampToSec(msg.header.stamp);
-  current.hpl = msg.hpl;
-  current.vpl = msg.vpl;
   current.hal = msg.hal;
   current.val = msg.val;
-  current.im = msg.im;
+  bool source_valid = true;
+  bool source_numerical_failure = false;
+  if (config_.current_pl_source == "LIDAR_CERTIFIED") {
+    current.hpl = msg.lidar_hpl;
+    current.vpl = msg.lidar_vpl;
+    current.im = std::min(current.hal - current.hpl,
+                          current.val - current.vpl);
+    source_valid = msg.lidar_valid;
+    source_numerical_failure = msg.lidar_integrity_invalid;
+  } else if (config_.current_pl_source == "FUSED") {
+    current.hpl = msg.hpl;
+    current.vpl = msg.vpl;
+    current.im = msg.im;
+    source_numerical_failure = msg.im_invalid;
+  } else {
+    source_valid = false;
+  }
   current.valid = finite(current.stamp_s) && finite(current.hpl) &&
                   finite(current.vpl) && finite(current.hal) &&
                   finite(current.val) && finite(current.im) &&
-                  !msg.hal_invalid && !msg.val_invalid && !msg.im_invalid;
+                  source_valid && !source_numerical_failure &&
+                  !msg.hal_invalid && !msg.val_invalid;
   return current;
 }
 

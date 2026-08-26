@@ -282,7 +282,8 @@ TEST(P4VerticalSliceTerminalLineageTest,
   manager->local_data_.acceleration_traj_ =
       manager->local_data_.velocity_traj_.getDerivative();
   manager->local_data_.traj_id_ = 9;
-  manager->local_data_.start_time_ = rclcpp::Time(10, 0, RCL_ROS_TIME);
+  manager->local_data_.start_time_ =
+      rclcpp::Time(1657065614, 14278400, RCL_ROS_TIME);
   manager->local_data_.duration_ = 3.0;
 
   ego_planner::P5RuntimeIntegrityGate::Config p5_config;
@@ -347,6 +348,7 @@ TEST(P4VerticalSliceTerminalLineageTest,
   EXPECT_NE(contents.find("normal_publish_authorized"), std::string::npos);
   EXPECT_NE(contents.find(",1,1,9,"), std::string::npos);
   EXPECT_NE(contents.find(",1,"), std::string::npos);
+  EXPECT_NE(contents.find(",1657065614.0142784,"), std::string::npos);
 }
 
 TEST(P4VerticalSliceTerminalLineageTest,

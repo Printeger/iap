@@ -174,6 +174,7 @@ class P5RuntimeIntegrityGate {
     double max_unknown_ratio = 0.30;
     int bad_tick_to_replan = 2;
     int good_tick_to_clear = 2;
+    std::string current_pl_source = "FUSED";
     PredAlertLimitProvider::Config pred_alert_limit;
     std::string integrity_topic = "/iap/integrity";
     std::string status_topic = "planning/integrity_gate_status";
@@ -236,7 +237,8 @@ class P5RuntimeIntegrityGate {
   void integrityCallback(const iap::msg::IntegrityReport::ConstSharedPtr msg);
   static double stampToSec(const builtin_interfaces::msg::Time& stamp);
   static bool finite(double value);
-  static CurrentIntegrity currentFromMsg(const iap::msg::IntegrityReport& msg);
+  CurrentIntegrity currentFromMsg(
+      const iap::msg::IntegrityReport& msg) const;
 
   P5GateStatus evaluate(
       LocalTrajData& local_data,

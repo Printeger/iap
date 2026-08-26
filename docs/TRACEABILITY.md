@@ -1,5 +1,14 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-26 ICRA-072A Layer 1 successful flow handoff
+
+| Req ID | Implemented/tested seam | Evidence and disposition | Status |
+|---|---|---|---|
+| IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-423 | Immutable P0/provider support and natural P4-v2 selection | Shared six-package build; production occupancy/P0 snapshot inputs; `run-020` has P0 ready 54, 33 decisions, 18 both-complete decisions and 7 selected guides | **LAYER 1 DEVELOPMENT PASS** |
+| IAP-RQ-400 / IAP-RQ-410 | Same-attempt/request/snapshot/epoch/guide/final-trajectory lineage | Full-precision terminal CSV and fail-closed analyzer bind one selected guide through EGO final B-spline; focused terminal tests pass | **LAYER 1 DEVELOPMENT PASS** |
+| IAP-RQ-421 / IAP-RQ-422 | P5 final-before-publish and same committed runtime trajectory | `run-020`: lineage 3, P5 final OK 17, normal B-spline 17 and runtime-bound 70; all seven fixed stages true, no analyzer failures | **LAYER 1 DEVELOPMENT PASS** |
+| IAP-RQ-423 / IAP-RQ-424 | Iterative evidence and layer boundary | `run-001`..`run-019` retain failures; review caught `run-019` cleanup false despite content completeness; `run-020` is the first runner/analyzer PASS with owned groups cleared; idempotent cleanup unregisters `atexit` only after every owned group is confirmed cleared and retains recovery after failed cleanup | **READY FOR SUPERVISOR REVIEW; ICRA-072B NOT SELF-AUTHORIZED** |
+
 ## 2026-08-26 four-layer workflow and ICRA-072A authorization
 
 | Req ID | Workflow/review seam | Evidence and disposition | Status |

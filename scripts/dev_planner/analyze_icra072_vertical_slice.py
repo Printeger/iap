@@ -1,17 +1,24 @@
 #!/usr/bin/env python3
-"""Fail-closed analyzer for the registered ICRA-072 development smoke."""
+"""Fail-closed analyzer for one ICRA-072A Layer-1 development run."""
 
 from __future__ import annotations
 
 import argparse
 import csv
 import json
+import re
 from collections import Counter, defaultdict
 from pathlib import Path
 
 
 REPOSITORY = Path(__file__).resolve().parents[2]
-TASK_RESULTS_ROOT = (REPOSITORY / "results/icra27/icra072").resolve()
+DEV_RUNS_ROOT = (REPOSITORY / "results/icra27/dev_runs/layer1").resolve()
+RUN_ID_PATTERN = re.compile(r"run-[0-9]{3,}")
+STAGE_ORDER = (
+    "p0_snapshot", "closed_collision", "p4_selection_application",
+    "ego_final_bspline", "p5_final_pass_before_publish",
+    "normal_publication", "p5_runtime_committed",
+)
 
 
 def _contained(path: Path, root: Path) -> bool:
@@ -23,9 +30,9 @@ def _contained(path: Path, root: Path) -> bool:
 
 
 def _task_local(path: Path, label: str) -> Path:
-    resolved = path.resolve()
-    if not _contained(resolved, TASK_RESULTS_ROOT):
-        raise SystemExit(f"{label} must be under {TASK_RESULTS_ROOT}")
+    resolved = (path if path.is_absolute() else REPOSITORY / path).resolve()
+    if not _contained(resolved, DEV_RUNS_ROOT):
+        raise SystemExit(f"{label} must be under {DEV_RUNS_ROOT}")
     return resolved
 
 
@@ -44,8 +51,11 @@ def main() -> int:
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     root = _task_local(args.run_root, "run root")
-    if not root.is_dir():
-        raise SystemExit("run root must be an existing task-local directory")
+    if (root.parent != DEV_RUNS_ROOT or
+            RUN_ID_PATTERN.fullmatch(root.name) is None or
+            not root.is_dir()):
+        raise SystemExit(
+            "run root must be an existing direct run-[0-9]{3,} directory")
     output = _task_local(args.output, "analysis output") if args.output else (
         root / "analysis.json")
     if not _contained(output, root):
@@ -70,14 +80,19 @@ def main() -> int:
             failures.append(f"launch_manifest_malformed:{exc}")
             launch = {}
 
-    if run.get("run_id") != "icra072-dev-smoke-003" or not run.get("registered"):
-        failures.append("registered_run_identity_mismatch")
+    if (run.get("schema_version") != "icra072_layer1_dev_run_v1" or
+            run.get("run_id") != root.name or
+            run.get("iterative_development") is not True):
+        failures.append("development_run_identity_mismatch")
     if not run.get("gpu_ready") or not run.get("launch_started"):
         failures.append("gpu_or_launch_admission_failed")
     if run.get("launch_early_exit") is not False:
         failures.append("launch_ended_before_registered_duration")
     if not run.get("process_result", {}).get("required_processes_ok"):
         failures.append("required_process_set_unhealthy")
+    if (run.get("owned_process_groups_cleared") is not True or
+            run.get("result") != "PASS"):
+        failures.append("owned_process_group_cleanup_failed")
     expected_launch = {
         "experiment": "icra_p0_p4_v2_p5_dev",
         "scenario": "icra072_p4_selection_trigger_v1",
@@ -92,6 +107,7 @@ def main() -> int:
         "p4.objective": "PROVIDER_BOTTLENECK_V2",
         "p5.enable_runtime_gate": True,
         "p5.enable_final_gate": True,
+        "p5.current_pl_source": "LIDAR_CERTIFIED",
     }
     for key, value in expected_launch.items():
         if launch.get(key) != value:
@@ -109,8 +125,6 @@ def main() -> int:
     ready_health = [row for row in health if row.get("ready") is True
                     and row.get("stale") is False
                     and int(row.get("generation_id", 0)) > 0]
-    if not ready_health:
-        failures.append("p0_valid_immutable_generation_missing")
 
     p4_binding = launch.get("p4.debug_csv_path")
     if "p4.debug_csv_path" not in launch:
@@ -181,9 +195,6 @@ def main() -> int:
         if not (row.get("status") == "RISK_SELECTED" and
                 row.get("selection_applied") == "1")
     ).items()))
-    if not selected:
-        failures.append("p4_v2_selected_guide_with_complete_support_missing")
-
     decision_fields = (
         "planning_attempt_id", "collision_segment_id", "request_hash",
         "snapshot_generation_id", "snapshot_config_hash", "occupancy_epoch",
@@ -194,12 +205,16 @@ def main() -> int:
         for row in selected
     }
 
-    stages = {
+    lineage_stages = {
         "final_bspline_before_p5", "p5_final_pass_before_publish",
         "normal_publish_authorized",
     }
+    closed_collision = any(
+        row.get("closed_collision_observed") == "1" and
+        row.get("no_collision_refinement_observed") == "1"
+        for row in lineage)
     selected_lineage = [
-        row for row in lineage if row.get("stage") in stages
+        row for row in lineage if row.get("stage") in lineage_stages
         and row.get("selection_applied") == "1"]
     groups: dict[tuple[str, ...], list[dict[str, str]]] = defaultdict(list)
     for row in selected_lineage:
@@ -215,21 +230,27 @@ def main() -> int:
         if (row.get("closed_collision_observed") == "1" and
                 row.get("no_collision_refinement_observed") == "1"):
             groups[key].append(row)
-    complete_groups = [
+    identity_groups = [
         (key, rows) for key, rows in groups.items()
-        if {row.get("stage") for row in rows} == stages
-        and key[:len(decision_fields)] in selected_by_key]
-    if not complete_groups:
+        if key[:len(decision_fields)] in selected_by_key]
+    ego_groups = [
+        (key, rows) for key, rows in identity_groups
+        if "final_bspline_before_p5" in
+        {row.get("stage") for row in rows}]
+    if selected and not ego_groups:
         failures.append("p4_ego_p5_publish_lineage_identity_mismatch")
-    linked_key, linked = complete_groups[-1] if complete_groups else ((), [])
+    linked_key, linked = ego_groups[-1] if ego_groups else ((), [])
     linked_decision = selected_by_key.get(
         linked_key[:len(decision_fields)]) if linked_key else None
+    generation_identity_ok = True
     if linked_decision:
         generation = linked_decision.get("snapshot_generation_id")
         if generation not in {str(row.get("generation_id")) for row in ready_health}:
             failures.append("p0_p4_generation_identity_mismatch")
+            generation_identity_ok = False
     trajectory_ids = {row.get("trajectory_id") for row in linked}
-    if linked:
+    linked_stages = {row.get("stage") for row in linked}
+    if lineage_stages.issubset(linked_stages):
         lineage_stamps = {
             row["stage"]: float(row["stamp_s"]) for row in linked}
         if not (lineage_stamps["final_bspline_before_p5"] <=
@@ -248,16 +269,13 @@ def main() -> int:
                                == "runtime_committed"
                                for sample in row["payload"].get("samples", []))]
     runtime_bound = [row["payload"] for row in runtime_records]
-    if not final_ok:
-        failures.append("p5_final_before_publish_pass_missing")
-    if not runtime_bound:
-        failures.append("p5_runtime_committed_binding_missing")
     bsplines = [row["payload"] for row in captured
                 if row.get("kind") == "normal_bspline"]
     bspline_records = [row for row in captured
                        if row.get("kind") == "normal_bspline"]
-    if not bsplines:
-        failures.append("normal_bspline_publish_missing")
+    matching_final: list[dict] = []
+    matching_bspline: list[dict] = []
+    matching_runtime: list[dict] = []
     if len(trajectory_ids) == 1:
         expected_id = int(next(iter(trajectory_ids)))
         if not any(row.get("trajectory_id") == expected_id for row in bsplines):
@@ -265,30 +283,79 @@ def main() -> int:
         if final_ok and not any(row.get("final_candidate_traj_id") == expected_id
                                 for row in final_ok):
             failures.append("lineage_p5_final_trajectory_id_mismatch")
-        matching_runtime = [
-            row for row in runtime_records
-            if row["payload"].get("final_candidate_traj_id") == expected_id]
-        if not matching_runtime:
-            failures.append("lineage_p5_runtime_trajectory_id_mismatch")
         matching_final = [
             row for row in final_records
             if row["payload"].get("final_candidate_traj_id") == expected_id]
         matching_bspline = [
             row for row in bspline_records
             if row["payload"].get("trajectory_id") == expected_id]
+        try:
+            lineage_starts = {
+                float(row["trajectory_start_s"]) for row in linked}
+            published_starts = {
+                float(row["payload"]["start_time_s"])
+                for row in matching_bspline}
+        except (KeyError, TypeError, ValueError):
+            lineage_starts, published_starts = set(), set()
+        expected_starts = lineage_starts & published_starts
+        matching_runtime = [
+            row for row in runtime_records
+            if any(
+                sample.get("trajectory_sample_source") ==
+                "runtime_committed" and
+                any(abs(float(sample["trajectory_start_time_s"]) - start)
+                    <= 0.02 for start in expected_starts)
+                for sample in row["payload"].get("samples", [])
+                if isinstance(sample.get("trajectory_start_time_s"),
+                              (int, float)))]
+        if not matching_runtime:
+            failures.append("lineage_p5_runtime_trajectory_id_mismatch")
         if (matching_final and matching_bspline and matching_runtime and
             not (matching_final[-1]["receive_steady_s"] <=
                  matching_bspline[0]["receive_steady_s"] <=
                  matching_runtime[-1]["receive_steady_s"])):
             failures.append("p5_publish_runtime_capture_order_invalid")
 
+    stage_status = {
+        "p0_snapshot": bool(ready_health),
+        "closed_collision": closed_collision,
+        "p4_selection_application": bool(selected),
+        "ego_final_bspline": bool(ego_groups) and generation_identity_ok,
+        "p5_final_pass_before_publish": (
+            "p5_final_pass_before_publish" in linked_stages and
+            bool(matching_final)),
+        "normal_publication": (
+            "normal_publish_authorized" in linked_stages and
+            bool(matching_bspline)),
+        "p5_runtime_committed": bool(matching_runtime),
+    }
+    stage_failures = {
+        "p0_snapshot": "p0_valid_immutable_generation_missing",
+        "closed_collision": "truthful_closed_collision_missing",
+        "p4_selection_application":
+            "p4_v2_selected_guide_with_complete_support_missing",
+        "ego_final_bspline": "ego_final_bspline_lineage_missing",
+        "p5_final_pass_before_publish":
+            "p5_final_before_publish_pass_missing",
+        "normal_publication": "normal_bspline_publish_missing",
+        "p5_runtime_committed": "p5_runtime_committed_binding_missing",
+    }
+    for stage in STAGE_ORDER:
+        if not stage_status[stage] and stage_failures[stage] not in failures:
+            failures.append(stage_failures[stage])
+    first_missing_stage = next(
+        (stage for stage in STAGE_ORDER if not stage_status[stage]), None)
+
     result = {
-        "schema_version": "icra072_vertical_slice_analysis_v1",
+        "schema_version": "icra072_layer1_analysis_v1",
         "run_id": run.get("run_id", ""),
         "development_only": True,
         "effect_claim": False,
         "result": "PASS" if not failures else "FAIL",
         "failures": failures,
+        "stage_order": list(STAGE_ORDER),
+        "stage_status": stage_status,
+        "first_missing_stage": first_missing_stage,
         "counts": {
             "p0_ready": len(ready_health), "p4_selected": len(selected),
             "lineage": len(linked), "p5_final_ok": len(final_ok),

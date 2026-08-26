@@ -274,7 +274,7 @@ class TestPlannerLaunchTest(unittest.TestCase):
         self.assertEqual(fixture["corridor_half_width_y_m"], "5.0")
         self.assertEqual(fixture["p1_fixture_central_x_min_m"], "-9.0")
         self.assertEqual(fixture["p1_fixture_central_x_max_m"], "-7.0")
-        self.assertEqual(fixture["p1_fixture_central_y_half_width_m"], "0.65")
+        self.assertEqual(fixture["p1_fixture_central_y_half_width_m"], "0.4")
         self.assertEqual(fixture["p1_fixture_central_z_max_m"], "2.8")
         self.assertEqual(fixture["p1_fixture_lane_center_m"], "2.0")
         self.assertEqual(fixture["p1_fixture_safe_tree_density_per_m2"], "0.25")
@@ -284,9 +284,24 @@ class TestPlannerLaunchTest(unittest.TestCase):
         self.assertEqual(fixture["integrity_fusion_mode"], "max_pl")
         self.assertEqual(fixture["enable_gnss_integrity"], "true")
         self.assertEqual(fixture["enable_lidar_integrity"], "true")
+        self.assertEqual(fixture["lidar_sensing_rate_hz"], "2.0")
+        self.assertEqual(fixture["gnss_scenario_file"],
+                         "config/gnss_sim/demo7_skymask_nlos.yaml")
+        self.assertEqual(fixture["gnss_pr_noise_base"], "5.0")
+        self.assertEqual(fixture["gnss_dop_noise_base"], "0.5")
+        self.assertEqual(fixture["gnss_enable_nlos"], "true")
+        self.assertEqual(fixture["p0.predictor.use_current_integrity_prior"],
+                         "true")
+        self.assertEqual(fixture["p5.current_pl_source"],
+                         "LIDAR_CERTIFIED")
+        self.assertEqual(fixture["fsm.thresh_replan_time"], "0.2")
+        self.assertEqual(fixture["manager/max_vel"], "1.0")
+        self.assertEqual(fixture["optimization/max_vel"], "1.0")
+        self.assertEqual(fixture["bspline/limit_vel"], "1.0")
         self.assertNotIn("inverse_corridor", fixture_name)
         profile = MODULE.EXPERIMENT_PRESETS["icra_p0_p4_v2_p5_dev"]
         defaults = dict(MODULE.ARG_DEFAULTS)
+        self.assertEqual(defaults["p5.current_pl_source"], "FUSED")
         self.assertEqual(profile["scenario"], fixture_name)
         self.assertEqual(
             profile["p0.predictor.sigma_grow_m_sqrt_s"], "0.01")

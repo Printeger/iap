@@ -1288,13 +1288,26 @@ SCENARIO_PRESETS = {
     "icra072_p4_selection_trigger_v1": {
         **P1_FORK_MAP_PRESET, **P1_FUSED_SENSOR_PRESET,
         "p1_map_fixture": "icra072_p4_selection_trigger_v1",
+        "integrity_fusion_mode": "max_pl",
+        "gnss_pr_noise_base": "5.0",
+        "gnss_dop_noise_base": "0.5",
+        "p0.predictor.use_current_integrity_prior": "true",
+        "p5.current_pl_source": "LIDAR_CERTIFIED",
+        "fsm.thresh_replan_time": "0.2",
+        "manager/max_vel": "1.0",
+        "optimization/max_vel": "1.0",
+        "bspline/limit_vel": "1.0",
         "p1_fixture_central_obstacle_enabled": "true",
         "p1_fixture_central_x_min_m": "-9.0",
         "p1_fixture_central_x_max_m": "-7.0",
+        "p1_fixture_central_y_half_width_m": "0.4",
         # Development-only P4 flow trigger: provider values are projected at
         # every P0 lattice corner. P4 still rejects live occupied positions
         # before querying provider risk.
         "p0.skip_occupied_voxels": "false",
+        # Keep the live occupancy epoch stable long enough for one complete
+        # development planning transaction; occupancy remains authoritative.
+        "lidar_sensing_rate_hz": "2.0",
     },
 }
 
@@ -1643,6 +1656,7 @@ ARG_DEFAULTS = [
     ("map_size_z", "3.5"),
     ("corridor_map_resolution_m", "0.1"),
     ("corridor_map_publish_rate_hz", "2.0"),
+    ("lidar_sensing_rate_hz", "10.0"),
     ("forest_size_x_m", "20.0"),
     ("forest_size_y_m", "20.0"),
     ("tree_density_lower_left_per_m2", "0.5"),
@@ -1921,6 +1935,7 @@ ARG_DEFAULTS = [
     ("p5.current_stale_to_replan_s", "0.5"),
     ("p5.current_stale_to_emergency_s", "2.0"),
     ("p5.current_low_margin_to_emergency_s", "2.0"),
+    ("p5.current_pl_source", "FUSED"),
     ("p5.future_unknown_to_emergency_s", "2.0"),
     ("p5.final_gate_max_consecutive_failures", "3"),
     ("p5.final_gate_max_failure_duration_s", "1.0"),
@@ -2855,6 +2870,7 @@ def _ego_planner_node(context, drone_id, planner_odom_topic, cloud_topic, camera
             {"p5.current_stale_to_replan_s": _param_float(context, "p5.current_stale_to_replan_s")},
             {"p5.current_stale_to_emergency_s": _param_float(context, "p5.current_stale_to_emergency_s")},
             {"p5.current_low_margin_to_emergency_s": _param_float(context, "p5.current_low_margin_to_emergency_s")},
+            {"p5.current_pl_source": LaunchConfiguration("p5.current_pl_source").perform(context)},
             {"p5.future_unknown_to_emergency_s": _param_float(context, "p5.future_unknown_to_emergency_s")},
             {"p5.final_gate_max_consecutive_failures": _param_int(context, "p5.final_gate_max_consecutive_failures")},
             {"p5.final_gate_max_failure_duration_s": _param_float(context, "p5.final_gate_max_failure_duration_s")},
@@ -3622,6 +3638,7 @@ def _launch_setup(context):
         "p5_7.fixture.expected_im_m": p5_7_expected_im,
         "p5.current_stale_to_replan_s": _param_float(context, "p5.current_stale_to_replan_s"),
         "p5.current_stale_to_emergency_s": _param_float(context, "p5.current_stale_to_emergency_s"),
+        "p5.current_pl_source": LaunchConfiguration("p5.current_pl_source").perform(context),
         "p5.future_unknown_to_emergency_s": _param_float(context, "p5.future_unknown_to_emergency_s"),
         "p5.pred_alert_limit_mode": p5_pred_al_mode,
         "p5.future_replan_margin_m": _param_float(context, "p5.future_replan_margin_m"),
@@ -3854,7 +3871,7 @@ def _launch_setup(context):
         ],
         parameters=[
             {"sensing_horizon": 10.0},
-            {"sensing_rate": 10.0},
+            {"sensing_rate": _param_float(context, "lidar_sensing_rate_hz")},
             {"estimation_rate": 15.0},
             {"map/x_size": map_size[0]},
             {"map/y_size": map_size[1]},
