@@ -512,3 +512,13 @@ Acceptance:
 - G0D/P5 lineage passes before a separate user decision may authorize the 60-run formal campaign.
 
 ---
+ICRA-072 development note (2026-08-26): the provider-only decomposition,
+time-aware P4-v2 bottleneck search, EGO injection/lineage and P5 ordering seams
+are implemented with final fresh build `attempt_11`, 137/137 focused C++ tests,
+22/22 hermetic launch tests and 3/3 runner/analyzer tool tests.
+The sole registered development smoke is not acceptance evidence: P0 remained
+at generation zero because the dev profile inherited the fail-closed
+unconfigured covariance-growth value. The profile now explicitly binds the
+existing 0.01 legacy baseline, but no live retry was authorized. Therefore
+IAP-RQ-320/321/400/410/421/422/423/424 remain unqualified and ICRA-072 is
+BLOCKED for Supervisor review; no effect or qualification claim is made.

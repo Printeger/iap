@@ -8390,3 +8390,57 @@ relative hook path, exact focused/full commands and exits, the earlier tested
 full-suite implementation identity, external inventory evidence, retained
 ICRA-070 hashes, PDF hash and zero forbidden runtime invocations. Its status is
 BLOCKED and it makes no route, gate, qualification or security claim.
+
+## 2026-08-26 — ICRA-072 P0 -> P4-v2 -> EGO -> P5 development slice
+
+Requirements: IAP-RQ-320, IAP-RQ-321, IAP-RQ-400, IAP-RQ-410,
+IAP-RQ-421, IAP-RQ-422, IAP-RQ-423 and IAP-RQ-424.
+
+Added a versioned provider-only P0 risk decomposition while preserving the v1
+scalar query. P4-v2 uses a time-aware provider-bottleneck-first search with
+deterministic integral/length tie breaks, occupied-before-risk rejection,
+0.2 s timeout and 1.30 path-ratio limits. V2 request/decision identity binds
+the immutable P0 generation and occupancy epoch; typed fallback retains the
+current-epoch original guide. Risk-selected guides can enter the existing
+initial/rebound injection seam. New lineage CSV rows bind selected guide,
+control points, final B-spline, P5 final-before-publish and normal publication.
+The explicit `icra_p0_p4_v2_p5_dev` profile disables P1/P2/P3 and all P5
+science fixtures.
+
+Final fresh task-local build `attempt_11` completed 6/6 packages. Focused
+suites pass 137/137 C++, 22/22 launch assertions and 3/3 runner/analyzer tool
+tests; final hermetic attempt-11 checks record 17,808 unchanged external ROS
+log entries. Review remediation added process-group/atexit cleanup, an explicit
+P4 CSV, publication-blocking durable lineage, immutable snapshot-configuration
+identity, controllable-interior v2 selection and same-trajectory analyzer
+ordering checks. The sole registered development smoke
+`icra072-dev-smoke-001` passed one GPU preflight (CUDA device count 1), ran
+45 seconds and observed all 15 required processes without runtime death.
+It failed the vertical-slice gate: 140 P0 health rows contained zero ready
+generations; 105 reported `invalid_covariance_growth_parameter`, so P4 was
+correctly deferred and P4/EGO/P5/publish lineage counts were all zero.
+
+The dev profile had inherited the intentional `nan/unconfigured_fail_closed`
+covariance-growth default. It now explicitly carries the existing reviewed
+`0.01` / `legacy_iap_rq320_baseline_v1` values, with 22/22 hermetic profile
+tests passing after correction. The failed registered smoke is retained and
+was neither overwritten nor relabelled; no live retry, effect run,
+qualification or benchmark was performed. Final status is BLOCKED pending
+Supervisor authorization of a new development smoke. Compact truth is in
+`results/icra27/icra072/compact/builder_result.json`.
+
+Retained corrective history is not acceptance evidence: build attempt 05
+failed const correctness; attempt 06 passed before review remediation;
+attempts 07 and 08 were explicitly aborted after source updates; launch
+attempt 05 passed 22 assertions but returned 86 for external ROS-log mutation;
+one incorrect unittest invocation and the first 0.1 m production P4-v2
+integration run failed before their corrected invocations. Exact identities
+and exits are inventoried in the compact result.
+
+Direct C++ invocations before the final hermetic rerun created or updated
+ambient rclcpp log state (the external inventory grew from the previously
+observed 17,801 entries to 17,808). Those logs are retained and were not
+cleaned. The final 137/137 rerun bound `ROS_LOG_DIR` to the ICRA-072 task root;
+its before/after external inventory count stayed 17,808 and its canonical
+inventory SHA-256 stayed
+`fa4573b32439654d2793eab2ecaeb6d2fbbc463f1224ca632f5da99c7dfb5aea`.

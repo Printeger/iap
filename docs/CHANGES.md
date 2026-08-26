@@ -3085,3 +3085,25 @@ Requirements: `IAP-RQ-000`, `IAP-RQ-020`, `IAP-RQ-030`, `IAP-RQ-040`,
   implementation hashes and zero runtime calls before replacement construction.
   Standards/spec review remains a separate process gate and is not self-attested
   by that record.
+
+## 2026-08-26 (ICRA-072 development vertical slice)
+
+- Add versioned provider-only risk decomposition and a production-shaped,
+  time-aware P4-v2 bottleneck search without changing the historical v1 scalar
+  query or P4-v1 evidence semantics.
+- Permit identity-checked risk-guide injection through initial/rebound EGO
+  seams and record selected-guide -> control-point -> final-B-spline -> P5
+  final-before-publish -> normal-publish lineage.
+- Add the isolated `icra_p0_p4_v2_p5_dev` profile, task runner, three-topic
+  capture and fail-closed analyzer. P1/P2/P3, distinctive behavior and all P5
+  science fixtures remain disabled.
+- Final fresh build `attempt_11` passes 6/6 packages; focused tests pass
+  137/137 C++, 22/22 hermetic launch assertions and 3/3 runner/analyzer tools.
+  The sole registered 45-second smoke had GPU PASS
+  and 15/15 healthy processes but BLOCKED with P0 generation zero because the
+  profile omitted the explicit covariance-growth baseline. The profile is
+  corrected and statically retested; no live retry was made.
+- Review hardening makes runner cleanup process-group/atexit safe, requires an
+  explicit P4 CSV, makes lineage write failure block publication, binds the
+  immutable snapshot configuration, compares the controllable interior for
+  the v2 risk objective and proves same-trajectory final/P5/runtime ordering.

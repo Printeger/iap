@@ -403,6 +403,45 @@ class TestPlannerLaunchTest(unittest.TestCase):
         self.assertEqual(context.launch_configurations["p5_7.fixture.enabled"], "true")
         self.assertEqual(context.launch_configurations["p5_6.fixture.enabled"], "false")
 
+    def test_icra_p0_p4_v2_p5_dev_profile_enables_only_active_vertical_slice(self):
+        experiment = "icra_p0_p4_v2_p5_dev"
+        context = self._launch_context_with_defaults(experiment=experiment)
+        with mock.patch.object(sys, "argv", ["test", f"experiment:={experiment}"]):
+            scenario, selected, applied = MODULE._apply_presets(context, REPO)
+            profile, enabled, p0_enabled, conflict, _ = (
+                MODULE._resolve_safety_switches(context, applied)
+            )
+        self.assertEqual(selected, experiment)
+        self.assertEqual(scenario, "icra_p0_p4_v2_p5_dev_fixture_v1")
+        self.assertEqual(profile, "icra_p0_p4_v2_p5_dev")
+        self.assertEqual(enabled, {
+            "p1": False, "p2": False, "p3_local": False,
+            "p3_global": False, "p4": True,
+            "p5_runtime": True, "p5_final": True,
+        })
+        self.assertTrue(p0_enabled)
+        self.assertFalse(conflict)
+        self.assertEqual(
+            context.launch_configurations["p4.objective"],
+            "PROVIDER_BOTTLENECK_V2",
+        )
+        self.assertEqual(context.launch_configurations["p4.metrics_only"], "false")
+        self.assertEqual(
+            context.launch_configurations["p0.predictor.sigma_grow_m_sqrt_s"],
+            "0.01",
+        )
+        self.assertEqual(
+            context.launch_configurations["p0.predictor.sigma_growth_profile"],
+            "legacy_iap_rq320_baseline_v1",
+        )
+        self.assertEqual(context.launch_configurations["record_bag"], "false")
+        self.assertEqual(context.launch_configurations["start_rviz"], "false")
+        for fixture in ("p5_3", "p5_4", "p5_5", "p5_6", "p5_7"):
+            self.assertEqual(
+                context.launch_configurations[f"{fixture}.fixture.enabled"],
+                "false",
+            )
+
     def test_icra_p0_p5_all_cases_resolve_exact_full_sensor_scenario(self):
         frozen = {
             "use_gnss": "true",

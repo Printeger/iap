@@ -155,6 +155,22 @@ struct RiskCostSample {
   std::string reason = "not_evaluated";
 };
 
+inline constexpr char RISK_COST_DECOMPOSITION_SCHEMA_V2[] =
+    "risk_cost_decomposition_v2";
+
+// Versioned P4-v2 query result. Provider risk is kept separate from map
+// occupancy and unavailable support so neither can masquerade as c_pi.
+struct RiskCostDecomposition {
+  std::string schema_version = RISK_COST_DECOMPOSITION_SCHEMA_V2;
+  bool valid = false;
+  double provider_c_pi = std::numeric_limits<double>::quiet_NaN();
+  double provider_support_weight = 0.0;
+  double occupied_support_weight = 0.0;
+  double unknown_support_weight = 0.0;
+  uint64_t generation_id = 0;
+  std::string reason = "not_evaluated";
+};
+
 struct RiskOccupancyDiagnostic {
   bool available = false;
   bool raw_occupied = false;
@@ -278,6 +294,10 @@ class RiskGridSnapshot {
                  RiskCostSample* out,
                  RiskCostQueryPolicy policy,
                  RiskCostQueryTrace* trace) const;
+
+  bool queryRiskCostDecomposition(const Eigen::Vector3d& p_w,
+                                  double query_time_s,
+                                  RiskCostDecomposition* out) const;
 
   bool queryPredictedPL(const Eigen::Vector3d& p_w,
                         double query_time_s,

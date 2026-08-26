@@ -25,7 +25,7 @@ HERMETIC_ROOT_ENVIRONMENT = "P4_G0C_HERMETIC_TEST_ROOT"
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 ALLOWED_RESULTS_ROOTS = tuple(
     REPOSITORY_ROOT / "results" / "icra27" / task
-    for task in ("icra062", "icra063")
+    for task in ("icra062", "icra063", "icra072")
 )
 EXTERNAL_ROS_LOG_ROOT = Path("/root/.ros/log")
 EXTERNAL_DELTA_EXIT = 86

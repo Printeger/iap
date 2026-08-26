@@ -152,6 +152,22 @@ TEST(P4RiskAStarTest, DisabledUsesOriginalEdgeCost) {
   EXPECT_EQ(astar.getLastP4Metrics().risk_query_count, 0);
 }
 
+TEST(P4RiskAStarTest, V2CostUsesBottleneckThenIntegralThenLength) {
+  const P4V2LexicographicCost lower_peak{4.0, 100.0, 20.0};
+  const P4V2LexicographicCost higher_peak{5.0, 1.0, 1.0};
+  EXPECT_TRUE(p4V2CostLess(lower_peak, higher_peak));
+  EXPECT_FALSE(p4V2CostLess(higher_peak, lower_peak));
+
+  const P4V2LexicographicCost lower_integral{4.0, 9.0, 20.0};
+  const P4V2LexicographicCost higher_integral{4.0, 10.0, 1.0};
+  EXPECT_TRUE(p4V2CostLess(lower_integral, higher_integral));
+
+  const P4V2LexicographicCost shorter{4.0, 9.0, 8.0};
+  const P4V2LexicographicCost longer{4.0, 9.0, 9.0};
+  EXPECT_TRUE(p4V2CostLess(shorter, longer));
+  EXPECT_FALSE(p4V2CostLess(shorter, shorter));
+}
+
 TEST(P4RiskAStarTest, RiskAwareEdgeCostUsesQueryCost) {
   ConstantRiskProvider provider(4.0);
   auto snapshot = makeSnapshot(provider);
@@ -228,6 +244,27 @@ TEST(P4RiskAStarTest, QueryTimeUsesFrozenCumulativeTravelDistance) {
 
   EXPECT_DOUBLE_EQ(astar.queryTimeFromCumulativeDistanceForTest(0.0), 10.0);
   EXPECT_DOUBLE_EQ(astar.queryTimeFromCumulativeDistanceForTest(7.0), 13.5);
+}
+
+TEST(P4RiskAStarTest, V2MidpointOccupancyRejectsBeforeProviderRiskQuery) {
+  ConstantRiskProvider provider(4.0);
+  auto snapshot = makeSnapshot(provider);
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureBarrier(map.get());
+
+  AStar astar;
+  auto config = enabledConfig();
+  config.objective = P4RiskObjective::PROVIDER_BOTTLENECK_V2;
+  astar.setP4Config(config);
+  astar.setRiskSnapshot(snapshot, 10.0);
+  astar.initGridMap(map, Eigen::Vector3i(14, 14, 6));
+  double provider_cost = 0.0;
+
+  EXPECT_FALSE(astar.queryProviderRiskForV2EdgeForTest(
+      Eigen::Vector3d(-0.5, 0.0, 0.0),
+      Eigen::Vector3d(0.5, 0.0, 0.0), 1.0, &provider_cost));
+  EXPECT_EQ(astar.getLastP4Metrics().occupied_reject_count, 1);
+  EXPECT_EQ(astar.getLastP4Metrics().risk_query_count, 0);
 }
 
 TEST(P4RiskAStarTest, ConservativeSearchRejectsOccupiedBarrierAndReturnsFreePath) {

@@ -1174,6 +1174,15 @@ namespace ego_planner
         bspline.knots.push_back(knots(i));
       }
 
+      if (!planner_manager_->recordP4VerticalSliceLineage(
+              "final_bspline_before_p5", plannerNow().seconds()))
+      {
+        RCLCPP_ERROR(node_->get_logger(),
+                     "P4-v2 final lineage write failed before P5");
+        planner_manager_->local_data_ = previous_local_data;
+        return false;
+      }
+
       if (planner_manager_->p5_integrity_gate_ &&
           planner_manager_->p5_integrity_gate_->finalGateEnabled())
       {
@@ -1206,6 +1215,16 @@ namespace ego_planner
                       P5RuntimeIntegrityGate::reasonName(p5_status.reason),
                       static_cast<unsigned long>(planning_generation_id),
                       static_cast<unsigned long>(final_gate_generation_id));
+          planner_manager_->recordP4VerticalSliceLineage(
+              "p5_final_rejected", plannerNow().seconds());
+          planner_manager_->local_data_ = previous_local_data;
+          return false;
+        }
+        if (!planner_manager_->recordP4VerticalSliceLineage(
+                "p5_final_pass_before_publish", plannerNow().seconds()))
+        {
+          RCLCPP_ERROR(node_->get_logger(),
+                       "P4-v2 P5-pass lineage write failed before publish");
           planner_manager_->local_data_ = previous_local_data;
           return false;
         }
@@ -1228,6 +1247,15 @@ namespace ego_planner
               freshness_reason, plannerNow().seconds());
           p1_replan_admission_.recordStaleRejection(p1_admission_generation);
         }
+        planner_manager_->local_data_ = previous_local_data;
+        return false;
+      }
+
+      if (!planner_manager_->recordP4VerticalSliceLineage(
+              "normal_publish_authorized", plannerNow().seconds()))
+      {
+        RCLCPP_ERROR(node_->get_logger(),
+                     "P4-v2 publish-authorization lineage write failed");
         planner_manager_->local_data_ = previous_local_data;
         return false;
       }

@@ -12,10 +12,27 @@
 #include <string>
 #include <iap/planner/risk_grid_map.hpp>
 
+enum class P4RiskObjective
+{
+	LEGACY_INTEGRAL_V1 = 0,
+	PROVIDER_BOTTLENECK_V2,
+};
+
+struct P4V2LexicographicCost
+{
+	double bottleneck = 0.0;
+	double integral = 0.0;
+	double path_length = 0.0;
+};
+
+bool p4V2CostLess(const P4V2LexicographicCost &lhs,
+				  const P4V2LexicographicCost &rhs);
+
 struct P4RiskAStarConfig
 {
 	bool enable_risk_aware_astar = false;
 	bool metrics_only = false;
+	P4RiskObjective objective = P4RiskObjective::LEGACY_INTEGRAL_V1;
 	double lambda_p4_risk = 0.05;
 	double risk_cost_max = 100.0;
 	double unknown_edge_penalty = 1.0;
@@ -45,6 +62,10 @@ struct P4AStarMetrics
 	double path_mean_cost = 0.0;
 	double path_max_cost = 0.0;
 	bool risk_enabled = false;
+	double provider_bottleneck = 0.0;
+	double provider_integral = 0.0;
+	int provider_incomplete_reject_count = 0;
+	int time_state_count = 0;
 };
 
 constexpr double inf = 1 >> 20;
@@ -104,6 +125,11 @@ private:
 
 	std::vector<GridNodePtr> retrievePath(GridNodePtr current);
 	bool astarSearchImpl(const double step_size, Eigen::Vector3d start_pt, Eigen::Vector3d end_pt, bool use_risk);
+	bool astarSearchProviderBottleneckV2(const double step_size,
+		Eigen::Vector3d start_pt, Eigen::Vector3d end_pt);
+	bool queryProviderRiskForV2Edge(const Eigen::Vector3d &current_pos,
+		const Eigen::Vector3d &next_pos, double travel_distance_m,
+		double *provider_cost);
 	double edgeCostWithRisk(const Eigen::Vector3d &current_pos, const Eigen::Vector3d &neighbor_pos, double geometric_cost, double query_time_s);
 	double queryTimeForEdge(const GridNodePtr current, double geometric_cost) const;
 
@@ -114,6 +140,7 @@ private:
 	const double tie_breaker_ = 1.0 + 1.0 / 10000;
 
 	std::vector<GridNodePtr> gridPath_;
+	std::vector<Eigen::Vector3d> v2_path_;
 
 	GridNodePtr ***GridNodeMap_{nullptr};
 	std::priority_queue<GridNodePtr, std::vector<GridNodePtr>, NodeComparator> openSet_;
@@ -125,6 +152,7 @@ private:
 	double risk_query_base_time_s_{0.0};
 	double p4_valid_cost_sum_{0.0};
 	int p4_valid_cost_count_{0};
+	double p4_v2_reference_path_length_m_{0.0};
 
 public:
 	typedef std::shared_ptr<AStar> Ptr;
@@ -146,12 +174,23 @@ public:
 	bool hasRiskSnapshot() const { return static_cast<bool>(risk_snapshot_); }
 	const P4AStarMetrics &getLastP4Metrics() const { return last_p4_metrics_; }
 	void recordP4GuideMetrics(const P4AStarMetrics &metrics) { last_p4_metrics_ = metrics; }
+	void setP4V2ReferencePathLength(double length_m)
+	{
+		p4_v2_reference_path_length_m_ = length_m;
+	}
 	double edgeCostWithRiskForTest(const Eigen::Vector3d &current_pos, const Eigen::Vector3d &neighbor_pos,
 	                               double geometric_cost, double query_time_s)
 	{
 		return edgeCostWithRisk(current_pos, neighbor_pos, geometric_cost, query_time_s);
 	}
 	bool isOccupiedForTest(const Eigen::Vector3d &pos) { return checkOccupancy(pos); }
+	bool queryProviderRiskForV2EdgeForTest(
+		const Eigen::Vector3d &current_pos, const Eigen::Vector3d &next_pos,
+		double travel_distance_m, double *provider_cost)
+	{
+		return queryProviderRiskForV2Edge(
+			current_pos, next_pos, travel_distance_m, provider_cost);
+	}
 	double queryTimeFromCumulativeDistanceForTest(double distance_m) const
 	{
 		const double speed = std::isfinite(p4_config_.query_speed_mps) && p4_config_.query_speed_mps > 1.0e-3

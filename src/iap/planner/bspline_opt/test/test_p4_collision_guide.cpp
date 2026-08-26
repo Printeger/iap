@@ -61,11 +61,12 @@ private:
   ProviderMode mode_;
 };
 
-std::shared_ptr<const iap::RiskGridSnapshot> makeSnapshot(ProviderMode mode)
+std::shared_ptr<const iap::RiskGridSnapshot> makeSnapshot(
+  ProviderMode mode, double resolution_m = 0.5)
 {
   iap::RiskGridMapParams params;
   params.frame_id = "map";
-  params.resolution_m = 0.5;
+  params.resolution_m = resolution_m;
   params.size_x_m = 16.0;
   params.size_y_m = 16.0;
   params.size_z_m = 4.0;
@@ -117,6 +118,14 @@ P4RiskAStarConfig metricsOnlyConfig()
   config.unknown_edge_penalty = 5.0;
   config.max_extra_path_ratio = 1.30;
   config.query_speed_mps = 2.0;
+  return config;
+}
+
+P4RiskAStarConfig providerBottleneckV2Config()
+{
+  auto config = metricsOnlyConfig();
+  config.metrics_only = false;
+  config.objective = P4RiskObjective::PROVIDER_BOTTLENECK_V2;
   return config;
 }
 
@@ -209,6 +218,8 @@ TEST(P4CollisionGuideDecision, ScriptedPathsExerciseMetricsOnlyDecisionContract)
   EXPECT_EQ(first.original.equal_arc_samples.size(), 200U);
   EXPECT_EQ(first.risk.equal_arc_samples.size(), 200U);
   EXPECT_EQ(first.selected.equal_arc_samples.size(), 200U);
+  EXPECT_DOUBLE_EQ(
+    first.original.controllable_length_m, first.original.length_m);
   EXPECT_TRUE(first.original.risk_profile.complete());
   EXPECT_TRUE(first.risk.risk_profile.complete());
   EXPECT_LT(first.risk.risk_profile.mean, first.original.risk_profile.mean);
@@ -229,6 +240,52 @@ TEST(P4CollisionGuideDecision, ScriptedPathsExerciseMetricsOnlyDecisionContract)
   EXPECT_EQ(repeat.original.canonical_hash, first.original.canonical_hash);
   EXPECT_EQ(repeat.risk.canonical_hash, first.risk.canonical_hash);
   EXPECT_EQ(repeat.selected.canonical_hash, first.selected.canonical_hash);
+}
+
+TEST(P4CollisionGuideDecision, ProviderBottleneckV2SelectsLowerPeakRiskGuide)
+{
+  uint64_t epoch = 9;
+  const auto snapshot = makeSnapshot(ProviderMode::SPATIAL);
+  auto search = successfulSearch();
+  ego_planner::P4CollisionGuidePlanner planner(search);
+  const auto request = makeRequest(
+    snapshot, epoch, &epoch, providerBottleneckV2Config());
+  const auto decision = planner.planCollisionGuide(request);
+
+  EXPECT_EQ(decision.schema_version, "p4_collision_guide_decision_v2");
+  EXPECT_EQ(
+    decision.status, ego_planner::P4GuideDecisionStatus::RISK_SELECTED);
+  EXPECT_EQ(
+    decision.reason,
+    ego_planner::P4GuideDecisionReason::PROVIDER_BOTTLENECK_SELECTED);
+  EXPECT_TRUE(decision.selection_applied);
+  EXPECT_FALSE(decision.snapshot_config_hash.empty());
+  EXPECT_EQ(decision.snapshot_config_hash, request.snapshotConfigHash());
+  EXPECT_LT(
+    decision.original.controllable_length_m, decision.original.length_m);
+  EXPECT_LT(decision.risk.controllable_length_m, decision.risk.length_m);
+  EXPECT_LT(decision.original.risk_profile.sample_count, 200U);
+  EXPECT_LT(decision.risk.risk_profile.sample_count, 200U);
+  EXPECT_EQ(decision.selected.canonical_hash, decision.risk.canonical_hash);
+  EXPECT_LT(decision.risk.risk_profile.max,
+            decision.original.risk_profile.max);
+  ego_planner::P4GuideDecisionReason reason;
+  EXPECT_TRUE(ego_planner::p4GuideDecisionReadyForInjection(
+      decision, request, &reason));
+}
+
+TEST(P4CollisionGuideDecision, V2IdentityBindsImmutableSnapshotConfiguration)
+{
+  uint64_t epoch = 9;
+  const auto coarse = makeSnapshot(ProviderMode::SPATIAL, 0.5);
+  const auto fine = makeSnapshot(ProviderMode::SPATIAL, 0.4);
+  const auto coarse_request = makeRequest(
+    coarse, epoch, &epoch, providerBottleneckV2Config());
+  const auto fine_request = makeRequest(
+    fine, epoch, &epoch, providerBottleneckV2Config());
+  EXPECT_NE(coarse_request.snapshotConfigHash(), fine_request.snapshotConfigHash());
+  EXPECT_NE(coarse_request.canonicalIdentityHash(),
+            fine_request.canonicalIdentityHash());
 }
 
 TEST(P4CollisionGuideDecision, ProfileTraceDoesNotChangeIdentityOrDecision)
@@ -464,6 +521,21 @@ TEST(P4CollisionGuideDecision, RiskFailureAndTimeoutAreDistinctFallbacks)
   expectOriginalFallback(
     timeout_planner.planCollisionGuide(makeRequest(snapshot, epoch, &epoch)),
     ego_planner::P4GuideDecisionReason::RISK_SEARCH_TIMEOUT);
+}
+
+TEST(P4CollisionGuideDecision, ProviderSupportFailureHasTypedV2Fallback)
+{
+  uint64_t epoch = 8;
+  const auto snapshot = makeSnapshot(ProviderMode::SPATIAL);
+  auto search = successfulSearch();
+  search.risk.success = false;
+  search.risk.path.clear();
+  search.risk.reason = "provider_support_incomplete";
+  ego_planner::P4CollisionGuidePlanner planner(search);
+  expectOriginalFallback(
+    planner.planCollisionGuide(makeRequest(
+      snapshot, epoch, &epoch, providerBottleneckV2Config())),
+    ego_planner::P4GuideDecisionReason::PROVIDER_SUPPORT_INCOMPLETE);
 }
 
 TEST(P4CollisionGuideDecision, IncompleteSupportAndRatioHaveExactFallbacks)

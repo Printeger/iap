@@ -11,6 +11,7 @@
 #include <fstream>
 #include <iomanip>
 #include <limits>
+#include <sstream>
 #include <thread>
 #include <utility>
 #include "visualization_msgs/msg/marker.hpp" // zx-todo
@@ -19,6 +20,26 @@ namespace ego_planner
 {
   namespace
   {
+    std::string p4ControlPointHash(const Eigen::MatrixXd &points)
+    {
+      std::ostringstream canonical;
+      canonical << points.rows() << ';' << points.cols() << ';';
+      for (int column = 0; column < points.cols(); ++column)
+      {
+        for (int row = 0; row < points.rows(); ++row)
+          canonical << std::hexfloat << points(row, column) << ';';
+      }
+      uint64_t hash = 1469598103934665603ULL;
+      for (const unsigned char byte : canonical.str())
+      {
+        hash ^= static_cast<uint64_t>(byte);
+        hash *= 1099511628211ULL;
+      }
+      std::ostringstream output;
+      output << std::hex << std::setfill('0') << std::setw(16) << hash;
+      return output.str();
+    }
+
     std::vector<Eigen::Vector3d> matrixColumnsToPoints(const Eigen::MatrixXd &points)
     {
       std::vector<Eigen::Vector3d> out;
@@ -725,6 +746,66 @@ namespace ego_planner
     event.bspline_publish_count = ++gate0_bspline_publish_count_;
     event.reason = "published";
     gate0_writer_->appendEvent(event);
+  }
+
+  bool EGOPlannerManager::recordP4VerticalSliceLineage(
+      const std::string &stage, const double stamp_s)
+  {
+    if (!bspline_optimizer_)
+      return false;
+    const auto &config = bspline_optimizer_->getP4RiskAStarConfig();
+    if (!config.enable_risk_aware_astar ||
+        config.objective != P4RiskObjective::PROVIDER_BOTTLENECK_V2)
+      return true;
+    const auto &guides = bspline_optimizer_->getLastP4GuideViz();
+    if (!config.debug_csv_enable || config.debug_csv_path.empty() || guides.empty())
+      return false;
+    const std::string path = config.debug_csv_path + ".lineage.csv";
+    std::ifstream existing(path);
+    const bool header = !existing.good() ||
+        existing.peek() == std::ifstream::traits_type::eof();
+    existing.close();
+    std::ofstream csv(path, std::ios::app);
+    if (!csv.good())
+      return false;
+    if (header)
+      csv << "schema_version,stage,stamp_s,planning_attempt_id,collision_segment_id,"
+             "request_hash,snapshot_generation_id,snapshot_config_hash,occupancy_epoch,original_guide_hash,"
+             "risk_guide_hash,selected_guide_hash,selection_applied,control_points_hash,"
+             "trajectory_id,trajectory_start_s,final_bspline_identity\n";
+    const Eigen::MatrixXd control_points =
+        local_data_.position_traj_.getControlPoint();
+    const std::string control_hash = p4ControlPointHash(control_points);
+    for (const auto &guide : guides)
+    {
+      std::ostringstream trajectory_identity;
+      trajectory_identity << local_data_.traj_id_ << ';' << std::hexfloat
+                          << local_data_.start_time_.seconds() << ';'
+                          << control_hash;
+      uint64_t identity_hash = 1469598103934665603ULL;
+      for (const unsigned char byte : trajectory_identity.str())
+      {
+        identity_hash ^= static_cast<uint64_t>(byte);
+        identity_hash *= 1099511628211ULL;
+      }
+      std::ostringstream identity;
+      identity << std::hex << std::setfill('0') << std::setw(16)
+               << identity_hash;
+      csv << "p4_v2_end_to_end_lineage_v1," << stage << ',' << stamp_s << ','
+          << guide.planning_attempt_id << ',' << guide.collision_segment_id << ','
+          << guide.request_hash << ',' << guide.snapshot_generation << ','
+          << guide.snapshot_config_hash << ',' << guide.occupancy_epoch << ','
+          << guide.original.canonical_hash << ','
+          << guide.risk.canonical_hash << ',' << guide.selected.canonical_hash << ','
+          << (guide.selection_applied ? 1 : 0) << ',' << control_hash << ','
+          << local_data_.traj_id_ << ',' << local_data_.start_time_.seconds()
+          << ',' << identity.str() << '\n';
+    }
+    csv.flush();
+    if (!csv.good())
+      return false;
+    csv.close();
+    return !csv.fail();
   }
 
   void EGOPlannerManager::setPlanningRiskContextForTest(

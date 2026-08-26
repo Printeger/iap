@@ -1,0 +1,136 @@
+{
+  "schema_version": "icra072_builder_result_v1",
+  "task_id": "ICRA-072",
+  "status": "BLOCKED",
+  "handoff": "SUPERVISOR_REVIEW_REQUIRED",
+  "claim_scope": "development_vertical_slice_only",
+  "effect_claim": false,
+  "qualification_claim": false,
+  "build": {
+    "fresh_attempt": "attempt_11",
+    "packages_finished": 6,
+    "exit_code": 0,
+    "selected_packages": [
+      "iap",
+      "plan_env",
+      "traj_utils",
+      "path_searching",
+      "bspline_opt",
+      "ego_planner"
+    ],
+    "dependency_resolution": "traj_utils+plan_env -> iap -> path_searching -> bspline_opt -> ego_planner",
+    "command": "source /opt/ros/jazzy/setup.bash; source /home/dev/ws_iap/install/setup.bash; colcon --log-base /home/dev/ws_iap/src/iap/results/icra27/icra072/log/build_attempt_11 build --paths /home/dev/ws_iap/src/iap /home/dev/ws_iap/src/iap/src/iap/planner/plan_env /home/dev/ws_iap/src/iap/src/iap/planner/traj_utils /home/dev/ws_iap/src/iap/src/iap/planner/path_searching /home/dev/ws_iap/src/iap/src/iap/planner/bspline_opt /home/dev/ws_iap/src/iap/src/iap/planner/plan_manage --packages-select iap plan_env traj_utils path_searching bspline_opt ego_planner --build-base /home/dev/ws_iap/src/iap/results/icra27/icra072/build/attempt_11 --install-base /home/dev/ws_iap/src/iap/results/icra27/icra072/install/attempt_11 --cmake-args -DBUILD_TESTING=ON"
+  },
+  "retained_corrective_attempts": [
+    {
+      "identity": "build_attempt_05",
+      "exit_code": 2,
+      "result": "FAILED_CONST_CORRECTNESS"
+    },
+    {
+      "identity": "build_attempt_06",
+      "exit_code": 0,
+      "result": "PASSED_BEFORE_REVIEW_REMEDIATION"
+    },
+    {
+      "identity": "build_attempt_07",
+      "exit_code": 2,
+      "result": "ABORTED_AFTER_SOURCE_REVIEW_UPDATE"
+    },
+    {
+      "identity": "build_attempt_08",
+      "exit_code": 2,
+      "result": "ABORTED_AFTER_CONTROLLABLE_LENGTH_UPDATE"
+    },
+    {
+      "identity": "launch_attempt_05",
+      "exit_code": 86,
+      "result": "TESTS_22_PASS_BUT_EXTERNAL_ROS_LOG_DELTA_RETAINED"
+    },
+    {
+      "identity": "incorrect_unittest_module_invocation",
+      "exit_code": 1,
+      "result": "FAILED_AND_RETAINED"
+    },
+    {
+      "identity": "initial_production_p4_v2_integration_test",
+      "exit_code": 1,
+      "result": "FAILED_0_1_M_TIMEOUT_THEN_CORRECTED_TO_P0_RESOLUTION"
+    },
+    {
+      "identity": "focused_attempt_10_initial_v2_injection_assertions",
+      "exit_code": 1,
+      "result": "FAILED_TEST_FIXTURE_ASSUMPTIONS_THEN_CORRECTED"
+    },
+    {
+      "identity": "direct_cpp_invocations_before_final_hermetic_rerun",
+      "exit_code": 0,
+      "result": "AMBIENT_RCLCPP_LOG_DELTA_DISCLOSED_AND_NOT_DELETED"
+    }
+  ],
+  "focused_tests": {
+    "cpp_executed": 137,
+    "cpp_passed": 137,
+    "cpp_suite_counts": {
+      "test_risk_grid_map": 49,
+      "test_p4_risk_astar": 9,
+      "test_p4_collision_guide": 20,
+      "test_p4_collision_scan_contract": 19,
+      "test_p4_collision_guide_integration": 7,
+      "test_p5_runtime_integrity_gate": 33
+    },
+    "launch_executed": 22,
+    "launch_passed": 22,
+    "tools_executed": 3,
+    "tools_passed": 3,
+    "python_syntax_passed": true,
+    "hermetic_external_ros_log_unchanged": true,
+    "external_ros_log_inventory_entries": 17808,
+    "final_cpp_external_inventory_before_sha256": "fa4573b32439654d2793eab2ecaeb6d2fbbc463f1224ca632f5da99c7dfb5aea",
+    "final_cpp_external_inventory_after_sha256": "fa4573b32439654d2793eab2ecaeb6d2fbbc463f1224ca632f5da99c7dfb5aea",
+    "ambient_external_ros_log_delta_disclosed": true,
+    "commands": [
+      "source /opt/ros/jazzy/setup.bash; source /home/dev/ws_iap/install/setup.bash; source /home/dev/ws_iap/src/iap/results/icra27/icra072/install/attempt_11/setup.bash; export ROS_LOG_DIR=/home/dev/ws_iap/src/iap/results/icra27/icra072/log/cpp_attempt_11_hermetic/ros_logs; results/icra27/icra072/build/attempt_11/iap/test_risk_grid_map --gtest_brief=1; results/icra27/icra072/build/attempt_11/path_searching/test_p4_risk_astar --gtest_brief=1; results/icra27/icra072/build/attempt_11/bspline_opt/test_p4_collision_guide --gtest_brief=1; results/icra27/icra072/build/attempt_11/bspline_opt/test_p4_collision_scan_contract --gtest_brief=1; results/icra27/icra072/build/attempt_11/bspline_opt/test_p4_collision_guide_integration --gtest_brief=1; results/icra27/icra072/build/attempt_11/ego_planner/test_p5_runtime_integrity_gate --gtest_brief=1",
+      "python3 scripts/dev_planner/run_p4_g0c_tests.py --task-root results/icra27/icra072/log/launch_attempt_11_hermetic unittest discover -s test -p test_test_planner_launch.py",
+      "python3 scripts/dev_planner/run_p4_g0c_tests.py --task-root results/icra27/icra072/log/tools_attempt_13_hermetic unittest discover -s test -p test_icra072_vertical_slice_tools.py",
+      "python3 scripts/dev_planner/run_p4_g0c_tests.py --task-root results/icra27/icra072/log/syntax_attempt_13_hermetic syntax scripts/dev_planner/run_icra072_vertical_slice.py scripts/dev_planner/capture_icra072_vertical_slice.py scripts/dev_planner/analyze_icra072_vertical_slice.py"
+    ]
+  },
+  "registered_smoke": {
+    "run_id": "icra072-dev-smoke-001",
+    "launch_count": 1,
+    "gpu_preflight_count": 1,
+    "gpu_ready": true,
+    "cuda_device_count": 1,
+    "required_processes_seen": 15,
+    "required_process_runtime_failures": 0,
+    "duration_s": 45.0,
+    "p0_health_rows": 140,
+    "p0_ready_rows": 0,
+    "p4_v2_selected_rows": 0,
+    "ego_lineage_rows": 0,
+    "p5_final_pass_rows": 0,
+    "p5_runtime_bound_rows": 0,
+    "normal_bspline_rows": 0,
+    "result": "FAIL",
+    "blocker": "P0 generation remained zero; dominant health failure invalid_covariance_growth_parameter (105/140 rows) because the dev profile inherited the fail-closed nan covariance-growth default"
+  },
+  "post_smoke_correction": {
+    "profile_sigma_grow_m_sqrt_s": 0.01,
+    "profile_sigma_growth_profile": "legacy_iap_rq320_baseline_v1",
+    "hermetic_launch_tests": "22/22 PASS",
+    "live_retry_count": 0,
+    "review_required_for_new_smoke": true
+  },
+  "evidence_sha256": {
+    "gpu_preflight.json": "c36a53da76a3f434db374f92c9b3261596c5cf9b7dc8c48ef877b3da4622a968",
+    "run_manifest.json": "05df0b3253cc264bbcc95366303422a7deb9b67ca9026bbac053c56d3a2e00d7",
+    "lineage_capture.jsonl": "032083e6aebf746616a9bce23353c0b867c9bc252cd7e7cd73ac616e9751becf",
+    "analysis_corrected.json": "6b2f25577e0d0fcd66b156d6f8aae51bbc90e13390ae0136d51bc56d6f6e7af3",
+    "analysis_corrected_v2.json": "9040f1533d27815e9d53f9781362e4884307c6f4413a4cf187ab696450627860",
+    "launch_attempt_11_result.json": "2840c09ead1dbfbe9a324366d8937bfca13d21132cf5d308180ad1c7bc2106f8",
+    "tools_attempt_13_result.json": "652235eb7ce54446d4229cd365bae091b84ad15c33cc9bf2aa53339d6461b239",
+    "syntax_attempt_13_result.json": "2ac4b6a89a64840ff9671ff001ca8e8bd82dd43bfa41df18603cec931c6205d5"
+  },
+  "protected_pdf_sha256": "1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6"
+}

@@ -738,6 +738,75 @@ bool RiskGridSnapshot::queryCost(const Eigen::Vector3d& p_w,
   return true;
 }
 
+bool RiskGridSnapshot::queryRiskCostDecomposition(
+    const Eigen::Vector3d& p_w, const double query_time_s,
+    RiskCostDecomposition* out) const {
+  if (out == nullptr) {
+    return false;
+  }
+  *out = RiskCostDecomposition{};
+  out->generation_id = generation_id();
+
+  RiskCostSample compatibility_sample;
+  RiskCostQueryTrace trace;
+  const bool scalar_supported = queryCost(
+      p_w, query_time_s, &compatibility_sample,
+      RiskCostQueryPolicy::CONSERVATIVE_OCCUPIED_COST_SUPPORT, &trace);
+  if (trace.corners.empty()) {
+    out->reason = trace.reason.empty() ? compatibility_sample.reason
+                                       : trace.reason;
+    return false;
+  }
+
+  double provider_weighted_sum = 0.0;
+  std::string first_invalid_reason;
+  for (const auto& corner : trace.corners) {
+    const double weight = corner.temporal_weight * corner.spatial_weight;
+    if (!std::isfinite(weight) || weight <= 0.0) {
+      continue;
+    }
+    if (corner.valid && !corner.stale && !corner.unknown &&
+        std::isfinite(corner.c_pi)) {
+      out->provider_support_weight += weight;
+      provider_weighted_sum += weight * corner.c_pi;
+    } else if (corner.invalid_reason == "occupied" ||
+               (corner.source_flags == RISK_GRID_SOURCE_OCCUPIED_SKIP &&
+                corner.unknown && !corner.stale)) {
+      out->occupied_support_weight += weight;
+    } else {
+      out->unknown_support_weight += weight;
+      if (first_invalid_reason.empty()) {
+        first_invalid_reason = corner.invalid_reason;
+      }
+    }
+  }
+
+  constexpr double kSupportTolerance = 1.0e-12;
+  if (out->provider_support_weight > kSupportTolerance) {
+    out->provider_c_pi =
+        provider_weighted_sum / out->provider_support_weight;
+  }
+  if (out->occupied_support_weight > kSupportTolerance) {
+    out->reason = "occupied_support";
+    return false;
+  }
+  if (out->unknown_support_weight > kSupportTolerance ||
+      std::abs(out->provider_support_weight - 1.0) > kSupportTolerance ||
+      !std::isfinite(out->provider_c_pi)) {
+    out->reason = first_invalid_reason.find("stale") != std::string::npos
+                      ? "stale_provider_support"
+                      : "insufficient_provider_support";
+    return false;
+  }
+  if (!scalar_supported && !compatibility_sample.valid) {
+    out->reason = compatibility_sample.reason;
+    return false;
+  }
+  out->valid = true;
+  out->reason = "ok";
+  return true;
+}
+
 bool RiskGridSnapshot::queryPredictedPL(const Eigen::Vector3d& p_w,
                                         const double query_time_s,
                                         PredictedPLSample* out,

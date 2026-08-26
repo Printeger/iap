@@ -1278,6 +1278,13 @@ SCENARIO_PRESETS = {
         "p1_map_fixture": "p1_fork_fused_v1",
         "p1_fixture_central_obstacle_enabled": "true",
     },
+    "icra_p0_p4_v2_p5_dev_fixture_v1": {
+        **P1_FORK_MAP_PRESET, **P1_FUSED_SENSOR_PRESET,
+        "p1_map_fixture": "icra_p0_p4_v2_p5_dev_fixture_v1",
+        "p1_fixture_central_obstacle_enabled": "true",
+        "p1_fixture_central_x_min_m": "-9.0",
+        "p1_fixture_central_x_max_m": "-7.0",
+    },
 }
 
 
@@ -1462,6 +1469,40 @@ EXPERIMENT_PRESETS = {
         "planner_safety_profile": "p4",
         "p4.debug_csv_enable": "true",
         "safety_viz.enable_p4_viz": "true",
+    },
+    "icra_p0_p4_v2_p5_dev": {
+        "scenario": "icra_p0_p4_v2_p5_dev_fixture_v1",
+        "planner_safety_profile": "icra_p0_p4_v2_p5_dev",
+        "planner_start_delay_s": "10.0",
+        "planner_enable_p1": "false",
+        "planner_enable_p2": "false",
+        "planner_enable_p3_local": "false",
+        "planner_enable_p3_global": "false",
+        "planner_enable_p4": "true",
+        "planner_enable_p5_runtime": "true",
+        "planner_enable_p5_final": "true",
+        "p0.enable_risk_grid": "true",
+        "p0.debug_metrics_enable": "true",
+        "p0.predictor.worker_count": "4",
+        "p0.horizons_s": "0.0,0.5,1.0,1.5,2.0,2.5,3.0,4.0,5.0,6.0",
+        "p0.predictor.sigma_grow_m_sqrt_s": "0.01",
+        "p0.predictor.sigma_growth_profile": "legacy_iap_rq320_baseline_v1",
+        "p4.require_risk_grid_ready_before_planning": "true",
+        "p4.enable_risk_aware_astar": "true",
+        "p4.metrics_only": "false",
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "p4.debug_csv_enable": "true",
+        "p4.profile_trace_enable": "false",
+        "p5.debug_metrics_enable": "true",
+        "p5_3.fixture.enabled": "false",
+        "p5_4.fixture.enabled": "false",
+        "p5_5.fixture.enabled": "false",
+        "p5_6.fixture.enabled": "false",
+        "p5_7.fixture.enabled": "false",
+        "manager/use_distinctive_trajs": "false",
+        "record_bag": "false",
+        "start_rviz": "false",
+        "run_validator": "true",
     },
     "p4_g0c_metrics_calibration_v1": {
         **P4_G0C_FROZEN_LAUNCH_VALUES,
@@ -1833,6 +1874,7 @@ ARG_DEFAULTS = [
     ("p3.debug_csv_path", ""),
     ("p4.enable_risk_aware_astar", "false"),
     ("p4.metrics_only", "false"),
+    ("p4.objective", "LEGACY_INTEGRAL_V1"),
     ("p4.lambda_p4_risk", "0.05"),
     ("p4.risk_cost_max", "100.0"),
     ("p4.unknown_edge_penalty", "1.0"),
@@ -2384,7 +2426,7 @@ def _resolve_safety_switches(context, preset_keys=None):
     profile = LaunchConfiguration("planner_safety_profile").perform(context).strip().lower() or "off"
     if _as_bool(LaunchConfiguration("planner_enable_all_safety").perform(context)):
         profile = "all"
-    valid_profiles = {"off", "p1", "p2", "p3", "p4", "p5", "all", "icra_p0_p5"}
+    valid_profiles = {"off", "p1", "p2", "p3", "p4", "p5", "all", "icra_p0_p5", "icra_p0_p4_v2_p5_dev"}
     if profile not in valid_profiles:
         raise RuntimeError(f"unknown planner_safety_profile '{profile}'. Valid: {', '.join(sorted(valid_profiles))}")
 
@@ -2393,9 +2435,9 @@ def _resolve_safety_switches(context, preset_keys=None):
         "p2": profile in ("p2", "all"),
         "p3_local": profile in ("p3", "all"),
         "p3_global": profile in ("p3", "all"),
-        "p4": profile in ("p4", "all"),
-        "p5_runtime": profile in ("p5", "all", "icra_p0_p5"),
-        "p5_final": profile in ("p5", "all", "icra_p0_p5"),
+        "p4": profile in ("p4", "all", "icra_p0_p4_v2_p5_dev"),
+        "p5_runtime": profile in ("p5", "all", "icra_p0_p5", "icra_p0_p4_v2_p5_dev"),
+        "p5_final": profile in ("p5", "all", "icra_p0_p5", "icra_p0_p4_v2_p5_dev"),
     }
     arg_names = {
         "p1": "planner_enable_p1",
@@ -2562,6 +2604,7 @@ def _ego_planner_node(context, drone_id, planner_odom_topic, cloud_topic, camera
         "p4.profile_trace_path").perform(context)
     p4_cost_query_policy = LaunchConfiguration(
         "p4.cost_query_policy").perform(context)
+    p4_objective = LaunchConfiguration("p4.objective").perform(context)
 
     map_size_x, map_size_y, map_size_z = map_size
     goal_x, goal_y, goal_z = goal
@@ -2783,6 +2826,7 @@ def _ego_planner_node(context, drone_id, planner_odom_topic, cloud_topic, camera
             {"p3.debug_csv_path": p3_debug_path},
             {"p4.enable_risk_aware_astar": p4_use},
             {"p4.metrics_only": p4_metrics_only},
+            {"p4.objective": p4_objective},
             {"p4.lambda_p4_risk": _param_float(context, "p4.lambda_p4_risk")},
             {"p4.risk_cost_max": _param_float(context, "p4.risk_cost_max")},
             {"p4.unknown_edge_penalty": _param_float(context, "p4.unknown_edge_penalty")},
@@ -3428,6 +3472,7 @@ def _launch_setup(context):
         "p3.debug_csv_enable": _param_bool(context, "p3.debug_csv_enable"),
         "p4.enable_risk_aware_astar": p4_use_for_manifest,
         "p4.metrics_only": p4_metrics_only_for_manifest,
+        "p4.objective": LaunchConfiguration("p4.objective").perform(context),
         "p4.debug_csv_enable": _param_bool(context, "p4.debug_csv_enable"),
         "p4.debug_csv_path": LaunchConfiguration(
             "p4.debug_csv_path").perform(context),

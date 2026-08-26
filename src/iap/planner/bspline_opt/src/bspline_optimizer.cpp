@@ -237,12 +237,14 @@ namespace ego_planner
       {
         csv << "schema_version,stamp,planning_attempt_id,collision_segment_id,"
                "request_hash,snapshot_generation_id,snapshot_stamp_s,snapshot_frame,"
+               "snapshot_config_hash,"
                "query_base_time_s,occupancy_epoch,status,reason,selection_applied,"
                "original_hash,risk_hash,selected_hash,original_sample_count,"
                "original_valid_count,original_unknown_count,original_stale_count,"
                "original_non_finite_count,original_mean,original_max,risk_sample_count,"
                "risk_valid_count,risk_unknown_count,risk_stale_count,risk_non_finite_count,"
-               "risk_mean,risk_max,original_path_length,risk_path_length,path_length_ratio,"
+               "risk_mean,risk_max,original_path_length,risk_path_length,"
+               "original_controllable_length,risk_controllable_length,path_length_ratio,"
                "original_search_latency_ms,risk_search_latency_ms,total_search_latency_ms\n";
       }
       const auto &original = decision.original.risk_profile;
@@ -251,7 +253,8 @@ namespace ego_planner
           << decision.planning_attempt_id << ','
           << decision.collision_segment_id << ',' << decision.request_hash << ','
           << decision.snapshot_generation << ',' << decision.snapshot_stamp_s << ','
-          << decision.snapshot_frame << ',' << decision.query_base_time_s << ','
+          << decision.snapshot_frame << ',' << decision.snapshot_config_hash << ','
+          << decision.query_base_time_s << ','
           << decision.occupancy_epoch << ','
           << p4GuideDecisionStatusName(decision.status) << ','
           << p4GuideDecisionReasonName(decision.reason) << ','
@@ -266,6 +269,8 @@ namespace ego_planner
           << risk.unknown_count << ',' << risk.stale_count << ','
           << risk.non_finite_count << ',' << risk.mean << ',' << risk.max << ','
           << decision.original.length_m << ',' << decision.risk.length_m << ','
+          << decision.original.controllable_length_m << ','
+          << decision.risk.controllable_length_m << ','
           << decision.risk_original_length_ratio << ','
           << decision.original_search_latency_ms << ','
           << decision.risk_search_latency_ms << ','
@@ -384,6 +389,7 @@ namespace ego_planner
     node->declare_parameter("p1.normalization_budget_fraction", 0.30);
     node->declare_parameter("p4.enable_risk_aware_astar", false);
     node->declare_parameter("p4.metrics_only", false);
+    node->declare_parameter("p4.objective", std::string("LEGACY_INTEGRAL_V1"));
     node->declare_parameter("p4.lambda_p4_risk", 0.05);
     node->declare_parameter("p4.risk_cost_max", 100.0);
     node->declare_parameter("p4.unknown_edge_penalty", 1.0);
@@ -476,6 +482,19 @@ namespace ego_planner
     }
     node->get_parameter("p4.enable_risk_aware_astar", p4_config_.enable_risk_aware_astar);
     node->get_parameter("p4.metrics_only", p4_config_.metrics_only);
+    std::string p4_objective;
+    node->get_parameter("p4.objective", p4_objective);
+    if (p4_objective == "PROVIDER_BOTTLENECK_V2") {
+      p4_config_.objective = P4RiskObjective::PROVIDER_BOTTLENECK_V2;
+    } else {
+      if (p4_objective != "LEGACY_INTEGRAL_V1") {
+        RCLCPP_WARN(
+          rclcpp::get_logger("BsplineOptimizer"),
+          "unsupported p4.objective '%s'; using LEGACY_INTEGRAL_V1",
+          p4_objective.c_str());
+      }
+      p4_config_.objective = P4RiskObjective::LEGACY_INTEGRAL_V1;
+    }
     node->get_parameter("p4.lambda_p4_risk", p4_config_.lambda_p4_risk);
     node->get_parameter("p4.risk_cost_max", p4_config_.risk_cost_max);
     node->get_parameter("p4.unknown_edge_penalty", p4_config_.unknown_edge_penalty);
@@ -644,7 +663,8 @@ namespace ego_planner
       writeP4ProfileTraceCsv(p4_config_, decision);
       last_p4_guides_.push_back(std::move(decision));
       const auto &stored = last_p4_guides_.back();
-      if (stored.status != P4GuideDecisionStatus::ORIGINAL_SELECTED ||
+      if ((stored.status != P4GuideDecisionStatus::ORIGINAL_SELECTED &&
+           stored.status != P4GuideDecisionStatus::RISK_SELECTED) ||
           !stored.selected.returned)
       {
         RCLCPP_ERROR(

@@ -63,11 +63,56 @@ bool sameSnapshotIdentity(
          lhs->params().frame_id == rhs->params().frame_id;
 }
 
+std::string riskGridConfigHash(const iap::RiskGridMapParams & params)
+{
+  std::ostringstream stream;
+  stream << "risk_grid_config_v1;" << params.frame_id << ';';
+  for (int axis = 0; axis < 3; ++axis)
+    appendCanonicalDouble(stream, params.lattice_anchor_w(axis));
+  appendCanonicalDouble(stream, params.resolution_m);
+  appendCanonicalDouble(stream, params.size_x_m);
+  appendCanonicalDouble(stream, params.size_y_m);
+  appendCanonicalDouble(stream, params.size_z_m);
+  stream << params.horizons_s.size() << ';';
+  for (const double horizon : params.horizons_s)
+    appendCanonicalDouble(stream, horizon);
+  appendCanonicalDouble(stream, params.refresh_period_s);
+  appendCanonicalDouble(stream, params.stale_timeout_s);
+  appendCanonicalDouble(stream, params.unknown_cost);
+  appendCanonicalDouble(stream, params.cost_max);
+  stream << params.skip_occupied_voxels << ';'
+         << params.use_predictor_batch_query << ';';
+  const auto append_box = [&stream](const auto & fixture) {
+      stream << fixture.enabled << ';' << fixture.name << ';';
+      appendCanonicalDouble(stream, fixture.x_min_m);
+      appendCanonicalDouble(stream, fixture.x_max_m);
+      appendCanonicalDouble(stream, fixture.y_min_m);
+      appendCanonicalDouble(stream, fixture.y_max_m);
+      appendCanonicalDouble(stream, fixture.z_min_m);
+      appendCanonicalDouble(stream, fixture.z_max_m);
+      appendCanonicalDouble(stream, fixture.tau_min_s);
+      appendCanonicalDouble(stream, fixture.tau_max_s);
+    };
+  append_box(params.p5_3_fixture);
+  appendCanonicalDouble(stream, params.p5_3_fixture.hpl_pred_m);
+  appendCanonicalDouble(stream, params.p5_3_fixture.vpl_pred_m);
+  append_box(params.p5_4_fixture);
+  appendCanonicalDouble(stream, params.p5_4_fixture.hpl_pred_m);
+  appendCanonicalDouble(stream, params.p5_4_fixture.vpl_pred_m);
+  append_box(params.p5_6_fixture);
+  append_box(params.p5_7_fixture);
+  stream << params.p5_7_fixture.effective_enabled << ';';
+  appendCanonicalDouble(stream, params.p5_7_fixture.hpl_pred_m);
+  appendCanonicalDouble(stream, params.p5_7_fixture.vpl_pred_m);
+  return hashHex(fnv1aAppend(kFnvOffset, stream.str()));
+}
+
 bool buildGuideRecord(
   const std::vector<Eigen::Vector3d> & path,
   const std::shared_ptr<const iap::RiskGridSnapshot> & snapshot,
   double query_base_time_s, double query_speed_mps,
   iap::RiskCostQueryPolicy cost_query_policy,
+  P4RiskObjective objective,
   bool profile_trace_enable,
   P4GuideRecord * record)
 {
@@ -100,9 +145,14 @@ bool buildGuideRecord(
   built.returned = true;
   built.complete_path = path;
   built.length_m = total_length;
+  built.controllable_length_m = total_length;
+  if (snapshot && objective == P4RiskObjective::PROVIDER_BOTTLENECK_V2) {
+    built.controllable_length_m = std::max(
+      0.0, total_length - 4.0 * snapshot->params().resolution_m);
+  }
   built.canonical_hash = canonicalP4GuideHash(path);
   built.equal_arc_samples.reserve(kP4FinalGuideSampleCount);
-  built.risk_profile.sample_count = kP4FinalGuideSampleCount;
+  built.risk_profile.sample_count = 0;
   double valid_sum = 0.0;
   double valid_max = -std::numeric_limits<double>::infinity();
   std::size_t segment_index = 1;
@@ -127,6 +177,16 @@ bool buildGuideRecord(
       segment_fraction * path[segment_index];
     built.equal_arc_samples.push_back(point);
 
+    const double endpoint_buffer_m = snapshot &&
+      objective == P4RiskObjective::PROVIDER_BOTTLENECK_V2 ?
+      2.0 * snapshot->params().resolution_m : 0.0;
+    if (distance + kGeometryEpsilon < endpoint_buffer_m ||
+      total_length - distance + kGeometryEpsilon < endpoint_buffer_m)
+    {
+      continue;
+    }
+    ++built.risk_profile.sample_count;
+
     if (!snapshot) {
       ++built.risk_profile.unknown_count;
       if (built.risk_profile.first_invalid_reason.empty()) {
@@ -138,10 +198,21 @@ bool buildGuideRecord(
     iap::RiskCostQueryTrace query_trace;
     const double query_time_s =
       query_base_time_s + distance / query_speed_mps;
-    const bool hit = snapshot->queryCost(
-      point, query_time_s, &sample,
-      cost_query_policy,
-      profile_trace_enable ? &query_trace : nullptr);
+    bool hit = false;
+    if (objective == P4RiskObjective::PROVIDER_BOTTLENECK_V2) {
+      iap::RiskCostDecomposition decomposition;
+      hit = snapshot->queryRiskCostDecomposition(
+        point, query_time_s, &decomposition);
+      sample.valid = decomposition.valid;
+      sample.stale = decomposition.reason.find("stale") != std::string::npos;
+      sample.cost = decomposition.provider_c_pi;
+      sample.generation_id = decomposition.generation_id;
+      sample.reason = decomposition.reason;
+    } else {
+      hit = snapshot->queryCost(
+        point, query_time_s, &sample, cost_query_policy,
+        profile_trace_enable ? &query_trace : nullptr);
+    }
     if (profile_trace_enable) {
       P4GuideRecord::SampleTrace trace;
       trace.sample_index = sample_index;
@@ -237,6 +308,8 @@ const char * p4GuideDecisionStatusName(P4GuideDecisionStatus status)
   switch (status) {
     case P4GuideDecisionStatus::ORIGINAL_SELECTED:
       return "ORIGINAL_SELECTED";
+    case P4GuideDecisionStatus::RISK_SELECTED:
+      return "RISK_SELECTED";
     case P4GuideDecisionStatus::PLANNER_FAILURE:
       return "PLANNER_FAILURE";
     case P4GuideDecisionStatus::DECISION_INVALID_REPLAN_REQUIRED:
@@ -277,6 +350,10 @@ const char * p4GuideDecisionReasonName(P4GuideDecisionReason reason)
       return "request_identity_mismatch";
     case P4GuideDecisionReason::ZERO_LENGTH_GEOMETRY:
       return "zero_length_geometry";
+    case P4GuideDecisionReason::PROVIDER_SUPPORT_INCOMPLETE:
+      return "provider_support_incomplete";
+    case P4GuideDecisionReason::PROVIDER_BOTTLENECK_SELECTED:
+      return "provider_bottleneck_selected";
   }
   return "unknown";
 }
@@ -337,6 +414,11 @@ bool P4GuideRequest::valid(std::string * reason) const
   {
     return fail("invalid_cost_query_policy");
   }
+  if (config_.objective != P4RiskObjective::LEGACY_INTEGRAL_V1 &&
+    config_.objective != P4RiskObjective::PROVIDER_BOTTLENECK_V2)
+  {
+    return fail("invalid_risk_objective");
+  }
   if (snapshot_ &&
     (snapshot_->generation_id() == 0 ||
     !std::isfinite(snapshot_->stamp_s()) ||
@@ -353,7 +435,10 @@ bool P4GuideRequest::valid(std::string * reason) const
 std::string P4GuideRequest::canonicalIdentityHash() const
 {
   std::ostringstream stream;
-  stream << kP4GuideDecisionSchema << ';' << planning_attempt_id_ << ';' <<
+  const char * schema = config_.objective ==
+    P4RiskObjective::PROVIDER_BOTTLENECK_V2 ?
+    kP4GuideDecisionSchemaV2 : kP4GuideDecisionSchema;
+  stream << schema << ';' << planning_attempt_id_ << ';' <<
     collision_segment_id_ << ';';
   for (int axis = 0; axis < 3; ++axis) {
     appendCanonicalDouble(stream, start_(axis));
@@ -370,6 +455,10 @@ std::string P4GuideRequest::canonicalIdentityHash() const
   appendCanonicalDouble(stream, query_base_time_s_);
   stream << occupancy_epoch_ << ';' << config_.enable_risk_aware_astar << ';' <<
     config_.metrics_only << ';';
+  if (config_.objective == P4RiskObjective::PROVIDER_BOTTLENECK_V2) {
+    stream << static_cast<int>(config_.objective) << ';'
+           << snapshotConfigHash() << ';';
+  }
   appendCanonicalDouble(stream, config_.lambda_p4_risk);
   appendCanonicalDouble(stream, config_.risk_cost_max);
   appendCanonicalDouble(stream, config_.unknown_edge_penalty);
@@ -379,6 +468,11 @@ std::string P4GuideRequest::canonicalIdentityHash() const
   stream << config_.fallback_to_original_when_risk_not_ready << ';' <<
     config_.debug_csv_enable << ';' << config_.debug_csv_path;
   return hashHex(fnv1aAppend(kFnvOffset, stream.str()));
+}
+
+std::string P4GuideRequest::snapshotConfigHash() const
+{
+  return snapshot_ ? riskGridConfigHash(snapshot_->params()) : "";
 }
 
 P4GuideSearchOutcome P4AStarGuideSearch::searchOriginal(
@@ -397,6 +491,11 @@ P4GuideSearchOutcome P4AStarGuideSearch::searchOriginal(
   outcome.reason = outcome.metrics.fallback_reason;
   if (outcome.success) {
     outcome.path = a_star_->getPath();
+    original_path_length_m_ = 0.0;
+    for (std::size_t index = 1; index < outcome.path.size(); ++index) {
+      original_path_length_m_ +=
+        (outcome.path[index] - outcome.path[index - 1]).norm();
+    }
   }
   return outcome;
 }
@@ -411,8 +510,12 @@ P4GuideSearchOutcome P4AStarGuideSearch::searchRiskAware(
   }
   a_star_->setP4Config(request.config());
   a_star_->setRiskSnapshot(request.snapshot(), request.queryBaseTimeS());
+  a_star_->setP4V2ReferencePathLength(original_path_length_m_);
+  const double search_step = request.config().objective ==
+    P4RiskObjective::PROVIDER_BOTTLENECK_V2 ?
+    std::max(0.1, request.snapshot()->params().resolution_m) : 0.1;
   outcome.success = a_star_->AstarSearchRiskAware(
-    0.1, request.start(), request.end());
+    search_step, request.start(), request.end());
   outcome.metrics = a_star_->getLastP4Metrics();
   outcome.timed_out = outcome.metrics.fallback_reason == "timeout";
   outcome.reason = outcome.metrics.fallback_reason;
@@ -426,6 +529,11 @@ P4GuideDecision P4CollisionGuidePlanner::planCollisionGuide(
   const P4GuideRequest & request)
 {
   P4GuideDecision decision;
+  if (request.config().objective ==
+    P4RiskObjective::PROVIDER_BOTTLENECK_V2)
+  {
+    decision.schema_version = kP4GuideDecisionSchemaV2;
+  }
   decision.planning_attempt_id = request.planningAttemptId();
   decision.collision_segment_id = request.collisionSegmentId();
   decision.segment_start = request.start();
@@ -439,6 +547,7 @@ P4GuideDecision P4CollisionGuidePlanner::planCollisionGuide(
     request.snapshot()->stamp_s() : std::numeric_limits<double>::quiet_NaN();
   decision.snapshot_frame = request.snapshot() ?
     request.snapshot()->params().frame_id : "";
+  decision.snapshot_config_hash = request.snapshotConfigHash();
   decision.request_hash = request.canonicalIdentityHash();
 
   std::string validation_reason;
@@ -477,6 +586,7 @@ P4GuideDecision P4CollisionGuidePlanner::planCollisionGuide(
       original.path, request.snapshot(), request.queryBaseTimeS(),
       request.config().query_speed_mps,
       request.config().cost_query_policy,
+      request.config().objective,
       request.config().profile_trace_enable, &decision.original))
   {
     decision.status = P4GuideDecisionStatus::PLANNER_FAILURE;
@@ -517,15 +627,19 @@ P4GuideDecision P4CollisionGuidePlanner::planCollisionGuide(
     return decision;
   }
   if (!risk.success) {
-    selectOriginal(
-      risk.timed_out ? P4GuideDecisionReason::RISK_SEARCH_TIMEOUT :
-      P4GuideDecisionReason::RISK_SEARCH_FAILED, &decision);
+    const P4GuideDecisionReason reason = risk.timed_out ?
+      P4GuideDecisionReason::RISK_SEARCH_TIMEOUT :
+      (risk.reason == "provider_support_incomplete" ?
+       P4GuideDecisionReason::PROVIDER_SUPPORT_INCOMPLETE :
+       P4GuideDecisionReason::RISK_SEARCH_FAILED);
+    selectOriginal(reason, &decision);
     return decision;
   }
   if (!buildGuideRecord(
       risk.path, request.snapshot(), request.queryBaseTimeS(),
       request.config().query_speed_mps,
       request.config().cost_query_policy,
+      request.config().objective,
       request.config().profile_trace_enable, &decision.risk))
   {
     decision.reason = P4GuideDecisionReason::ZERO_LENGTH_GEOMETRY;
@@ -552,6 +666,36 @@ P4GuideDecision P4CollisionGuidePlanner::planCollisionGuide(
     return decision;
   }
 
+  if (request.config().objective ==
+    P4RiskObjective::PROVIDER_BOTTLENECK_V2)
+  {
+    if (request.config().metrics_only) {
+      selectOriginal(P4GuideDecisionReason::METRICS_ONLY, &decision);
+      return decision;
+    }
+    const auto risk_cost = std::make_tuple(
+      decision.risk.risk_profile.max,
+      decision.risk.risk_profile.mean * decision.risk.controllable_length_m,
+      decision.risk.length_m,
+      decision.risk.canonical_hash);
+    const auto original_cost = std::make_tuple(
+      decision.original.risk_profile.max,
+      decision.original.risk_profile.mean *
+      decision.original.controllable_length_m,
+      decision.original.length_m,
+      decision.original.canonical_hash);
+    if (risk_cost < original_cost) {
+      decision.status = P4GuideDecisionStatus::RISK_SELECTED;
+      decision.reason = P4GuideDecisionReason::PROVIDER_BOTTLENECK_SELECTED;
+      decision.selected = decision.risk;
+      decision.selection_applied = true;
+      return decision;
+    }
+    selectOriginal(P4GuideDecisionReason::PROVIDER_BOTTLENECK_SELECTED,
+      &decision);
+    return decision;
+  }
+
   selectOriginal(
     request.config().metrics_only ? P4GuideDecisionReason::METRICS_ONLY :
     P4GuideDecisionReason::SELECTION_NOT_AUTHORIZED, &decision);
@@ -569,15 +713,27 @@ bool p4GuideDecisionReadyForInjection(
       }
       return false;
     };
-  if (decision.status != P4GuideDecisionStatus::ORIGINAL_SELECTED ||
+  const bool original_selected =
+    decision.status == P4GuideDecisionStatus::ORIGINAL_SELECTED &&
+    decision.selected.canonical_hash == decision.original.canonical_hash &&
+    !decision.selection_applied;
+  const bool risk_selected =
+    decision.status == P4GuideDecisionStatus::RISK_SELECTED &&
+    decision.risk.returned &&
+    decision.selected.canonical_hash == decision.risk.canonical_hash &&
+    decision.selection_applied;
+  if ((!original_selected && !risk_selected) ||
     !decision.original.returned || !decision.selected.returned ||
-    decision.selected.canonical_hash != decision.original.canonical_hash ||
-    decision.selection_applied)
+    decision.schema_version !=
+      (expected_request.config().objective ==
+       P4RiskObjective::PROVIDER_BOTTLENECK_V2 ?
+       kP4GuideDecisionSchemaV2 : kP4GuideDecisionSchema))
   {
     return fail(P4GuideDecisionReason::REQUEST_IDENTITY_MISMATCH);
   }
   if (!expected_request.valid() ||
     decision.request_hash != expected_request.canonicalIdentityHash() ||
+    decision.snapshot_config_hash != expected_request.snapshotConfigHash() ||
     decision.planning_attempt_id != expected_request.planningAttemptId() ||
     decision.collision_segment_id != expected_request.collisionSegmentId() ||
     !sameDouble(decision.query_base_time_s, expected_request.queryBaseTimeS()) ||

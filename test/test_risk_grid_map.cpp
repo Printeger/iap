@@ -705,6 +705,66 @@ TEST(RiskGridMapTest,
 }
 
 TEST(RiskGridMapTest,
+     RiskCostDecompositionSeparatesProviderAndOccupiedSupport) {
+  iap::RiskGridMapParams params = base_params();
+  params.skip_occupied_voxels = true;
+  iap::RiskGridMap grid(params);
+  AffineProvider provider;
+  std::string reason;
+  ASSERT_TRUE(grid.refreshFromProvider(
+      Eigen::Vector3d::Zero(), 10.0, provider,
+      [](const Eigen::Vector3d& p) { return p.x() > 0.0; }, &reason))
+      << reason;
+  const auto snapshot = grid.acquireSnapshot();
+  ASSERT_NE(snapshot, nullptr);
+
+  const Eigen::Vector3d query = Eigen::Vector3d::Zero();
+  iap::RiskCostSample legacy_before;
+  EXPECT_FALSE(snapshot->queryCost(query, 10.0, &legacy_before));
+  EXPECT_EQ(legacy_before.reason, "occupied");
+
+  iap::RiskCostDecomposition decomposition;
+  EXPECT_FALSE(snapshot->queryRiskCostDecomposition(
+      query, 10.0, &decomposition));
+  EXPECT_EQ(decomposition.schema_version, "risk_cost_decomposition_v2");
+  EXPECT_FALSE(decomposition.valid);
+  EXPECT_GT(decomposition.provider_support_weight, 0.0);
+  EXPECT_GT(decomposition.occupied_support_weight, 0.0);
+  EXPECT_DOUBLE_EQ(decomposition.unknown_support_weight, 0.0);
+  EXPECT_TRUE(std::isfinite(decomposition.provider_c_pi));
+  EXPECT_EQ(decomposition.generation_id, snapshot->generation_id());
+  EXPECT_EQ(decomposition.reason, "occupied_support");
+
+  iap::RiskCostSample legacy_after;
+  EXPECT_FALSE(snapshot->queryCost(query, 10.0, &legacy_after));
+  EXPECT_EQ(legacy_after.valid, legacy_before.valid);
+  EXPECT_EQ(legacy_after.stale, legacy_before.stale);
+  EXPECT_DOUBLE_EQ(legacy_after.cost, legacy_before.cost);
+  EXPECT_EQ(legacy_after.reason, legacy_before.reason);
+}
+
+TEST(RiskGridMapTest, RiskCostDecompositionRequiresCompleteProviderSupport) {
+  iap::RiskGridMapParams params = base_params();
+  iap::RiskGridMap grid(params);
+  AffineProvider provider;
+  provider.mark_unknown = true;
+  ASSERT_TRUE(grid.refreshFromProvider(
+      Eigen::Vector3d::Zero(), 10.0, provider));
+  const auto snapshot = grid.acquireSnapshot();
+  ASSERT_NE(snapshot, nullptr);
+
+  iap::RiskCostDecomposition decomposition;
+  EXPECT_FALSE(snapshot->queryRiskCostDecomposition(
+      Eigen::Vector3d::Zero(), 10.0, &decomposition));
+  EXPECT_FALSE(decomposition.valid);
+  EXPECT_DOUBLE_EQ(decomposition.provider_support_weight, 0.0);
+  EXPECT_DOUBLE_EQ(decomposition.occupied_support_weight, 0.0);
+  EXPECT_DOUBLE_EQ(decomposition.unknown_support_weight, 1.0);
+  EXPECT_FALSE(std::isfinite(decomposition.provider_c_pi));
+  EXPECT_EQ(decomposition.reason, "insufficient_provider_support");
+}
+
+TEST(RiskGridMapTest,
      ConservativeOccupiedCostSupportIgnoresOnlyExactZeroWeightCorners) {
   iap::RiskGridMapParams params = base_params();
   params.skip_occupied_voxels = true;

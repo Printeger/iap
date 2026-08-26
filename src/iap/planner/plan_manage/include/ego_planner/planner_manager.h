@@ -126,6 +126,8 @@ namespace ego_planner
         std::shared_ptr<const iap::RiskGridSnapshot> snapshot);
     void recordP1StaleRejection(const std::string &reason, double stamp_s);
     void recordGate0NormalBsplinePublish(double stamp_s);
+    bool recordP4VerticalSliceLineage(const std::string &stage,
+                                      double stamp_s);
 
     PlanParameters pp_;
     LocalTrajData local_data_;

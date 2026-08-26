@@ -1481,6 +1481,21 @@ They do not convert historical `NO-GO-P2`, failed P0 Gate-0B evidence, the stati
 | IAP-RQ-020 / IAP-RQ-030 / IAP-RQ-040 / IAP-RQ-220 / IAP-RQ-320 | Preserve GNSS pseudorange+doppler + IMU + LiDAR under the complete replacement prefix | contract/helper/test-planner aliases point only to `install_v2`; contract and launch regressions retain 16 processes, ten topics, source-use gates, worker 4, sigma 0.01 and legacy baseline | **15/15 CONTRACT + 21/21 LAUNCH PASS** |
 | IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 | Freeze non-overwriting v3 provenance before parser/GPU/live | v3 replacement/overlay/adoption builders and validators bind old evidence, an exact-commit/argv/cwd/environment `static_verification_v3.json`, inventories, modes, aliases, dependency/package resolution and no-bytecode probe; independent standards/spec review remains a separate gate; complete hermetic discovery 593/593 with external inventory 17,770 unchanged | **STATIC IMPLEMENTATION READY; RUNTIME COUNTS ZERO** |
 
+## 2026-08-26 ICRA-072 development vertical slice
+
+| Req ID | Requirement/evidence seam | Implementation and retained evidence | Status |
+|---|---|---|---|
+| IAP-RQ-320 / IAP-RQ-321 | Separate provider-only predicted risk from occupied/unknown support while retaining compatibility | `RiskCostDecomposition`, `queryRiskCostDecomposition`, focused risk-grid tests; v1 `queryCost` unchanged | **IMPLEMENTED; 2/2 FOCUSED PASS** |
+| IAP-RQ-400 / IAP-RQ-410 | Time-aware controllable-interior bottleneck search with deterministic tie and hard bounds | `dyn_a_star.*`, P4 decision/injection code and production-shaped integration fixture | **IMPLEMENTED; P4 SUITES 55/55 PASS** |
+| IAP-RQ-421 / IAP-RQ-422 | Keep P5 final before normal publication and runtime bound to the committed trajectory | EGO FSM ordering, versioned lineage CSV, three-topic capture and fail-closed analyzer | **STATIC IMPLEMENTED; LIVE LINEAGE NOT REACHED** |
+| IAP-RQ-423 / IAP-RQ-424 | Run only P0/P4-v2/EGO/P5 and retain one truthful registered development smoke | `icra_p0_p4_v2_p5_dev`, runner/capture/analyzer and `results/icra27/icra072/compact/builder_result.json`; GPU PASS, 15/15 processes, P0 ready 0/140, downstream lineage 0 | **BLOCKED: INVALID P0 COVARIANCE-GROWTH PROFILE IN REGISTERED SMOKE; CORRECTED STATIC PROFILE AWAITS NEW AUTHORIZATION** |
+
+Final static verification uses fresh build `attempt_11`: 137/137 focused C++,
+22/22 hermetic launch and 3/3 runner/analyzer tool tests pass; all final
+hermetic checks retain an unchanged 17,808-entry external ROS-log inventory.
+An earlier direct C++ invocation's ambient rclcpp-log delta is retained and
+disclosed; the final task-local rerun has identical before/after inventory hash.
+
 ## 2026-08-26 ICRA-070 Supervisor review and pre-campaign guard freeze
 
 | Req ID | Reviewed/authorized seam | Evidence or controlling document | Status |

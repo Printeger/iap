@@ -21,12 +21,15 @@ namespace ego_planner
 
   inline constexpr char kP4GuideDecisionSchema[] =
     "p4_collision_guide_decision_v1";
+  inline constexpr char kP4GuideDecisionSchemaV2[] =
+    "p4_collision_guide_decision_v2";
   inline constexpr std::size_t kP4FinalGuideSampleCount = 200;
   inline constexpr double kP4PathLengthRatioHardCap = 1.30;
 
   enum class P4GuideDecisionStatus
   {
     ORIGINAL_SELECTED = 0,
+    RISK_SELECTED,
     PLANNER_FAILURE,
     DECISION_INVALID_REPLAN_REQUIRED,
   };
@@ -51,6 +54,8 @@ namespace ego_planner
     REQUEST_INVALID,
     REQUEST_IDENTITY_MISMATCH,
     ZERO_LENGTH_GEOMETRY,
+    PROVIDER_SUPPORT_INCOMPLETE,
+    PROVIDER_BOTTLENECK_SELECTED,
   };
 
   const char * p4GuideDecisionStatusName(P4GuideDecisionStatus status);
@@ -69,8 +74,7 @@ namespace ego_planner
 
     bool complete() const
     {
-      return sample_count == kP4FinalGuideSampleCount &&
-             valid_count == kP4FinalGuideSampleCount &&
+      return sample_count > 0 && valid_count == sample_count &&
              unknown_count == 0 && stale_count == 0 &&
              non_finite_count == 0 && std::isfinite(mean) &&
              std::isfinite(max);
@@ -84,6 +88,7 @@ namespace ego_planner
     std::vector < Eigen::Vector3d > equal_arc_samples;
     std::string canonical_hash;
     double length_m = 0.0;
+    double controllable_length_m = 0.0;
     P4GuideRiskProfile risk_profile;
     struct SampleTrace
     {
@@ -132,6 +137,7 @@ public:
     const P4RiskAStarConfig & config() const {return config_;}
 
     bool valid(std::string * reason = nullptr) const;
+    std::string snapshotConfigHash() const;
     std::string canonicalIdentityHash() const;
 
 private:
@@ -180,6 +186,7 @@ public:
 
 private:
     AStar::Ptr a_star_;
+    double original_path_length_m_ = 0.0;
   };
 
   struct P4GuideDecision
@@ -195,6 +202,7 @@ private:
     uint64_t snapshot_generation = 0;
     double snapshot_stamp_s = std::numeric_limits < double > ::quiet_NaN();
     std::string snapshot_frame;
+    std::string snapshot_config_hash;
     double query_base_time_s = std::numeric_limits < double > ::quiet_NaN();
     uint64_t occupancy_epoch = 0;
     std::string request_hash;
