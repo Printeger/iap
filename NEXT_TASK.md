@@ -1,107 +1,105 @@
-# ICRA-071 — User-owned research-route repository guard
+# ICRA-071 — User-route guard Review repair
 
 > Active gate: `USER_RESEARCH_ROUTE_AUTHORITY_GUARD`
 > Owner: `DEEPSEEK`
 > Activation: `TASK_READY`
-> Supervisor audit anchor: `48caa9ddf24990accb65e2ad230d12821487793c`
-> Supervisor recovery changeset: `0db8faac27dda58ef31aa57ad7033f294e758ebc`
+> Supervisor Review base: `9b813b0a52f405d874ce324f99f618221b5b7b8c`
+> Reviewed Builder HEAD: `96c5cd85e37892eb4f565ce1181d57e62b817e0a`
 > User decision: `USER-ICRA-ROUTE-20260826-001`
 > Requirement mapping: `IAP-RQ-000`, `IAP-RQ-423`, `IAP-RQ-424`
-> One task: route-lock parser -> state/plan verifier -> local hooks -> adversarial tests; no P4 product work
+> One task: repair the rejected ICRA-071 guard and obtain a zero-failure hermetic static discovery
 
-## User decision and Supervisor task issuance
+## Review verdict and retained boundary
 
-The user restored `P0_P4_V2_P5` as the sole research route and retained P0+P5 only as the matched control.
-The canonical machine-readable decision is the `ICRA_USER_ROUTE_LOCK_V1` block in
-`docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md`.
+ICRA-071 is `REQUEST_CHANGES`; ICRA-072 is not authorized. The route lock and active route remain unchanged:
+`P0_P4_V2_P5`, with P0+P5 only as the matched control. P4-v1 remains immutable `SCIENTIFIC_NO_GO`, P4-v2
+remains blocked, and campaign activation remains user-owned and forbidden.
 
-P4-v1 G0C remains an immutable, technically valid `SCIENTIFIC_NO_GO`; it is not retried or relabelled.
-ICRA-070 is `SUPERSEDED_UNQUALIFIED_BY_USER_ROUTE_DECISION`: its static implementation and evidence remain
-retained, but replacement/parser/GPU/live/analyzer were not invoked and no P5 qualification claim exists.
-Existing ICRA-068/070 build/install, raw evidence and the protected PDF remain untouched.
+The Review independently reproduced the current verifier and hook-path PASS plus focused 33/33 PASS. It also
+reproduced four blocking defects:
 
-The old process incorrectly gave the Supervisor enough authority to activate a fallback without a distinct
-user approval record. ICRA-071 closes that procedural gap before P4-v2 work. It is pure governance code and
-tests. It does not implement risk decomposition, change P4 algorithms, run ROS/GPU/live qualification or
-authorize a campaign.
+1. A legitimate Supervisor §8.6 Review changeset from a HEAD whose state records `active_role=DEEPSEEK` fails
+   `BUILDER_SUPERVISOR_FILE_STAGED`; the current hook therefore makes its own required review closure impossible.
+2. Replacing the active scope's provider-only interior bottleneck/max-risk statement with a mean-risk statement
+   still returns repository-consistent PASS.
+3. `IAP-RQ-999` passes commit-message validation even though no such requirement exists in `docs/REQS.md`.
+4. The sole complete hermetic discovery exited 1 with 614/616: two ICRA-070 tests read retained live repository
+   state instead of an isolated fixture. Retained build/install/evidence must not be changed to make them pass.
 
-## 1. Parse the canonical route lock once
+The current requirements and traceability text also contains contradictory current rows: implementation is
+recorded as focused PASS while older active rows still say `NOT_IMPLEMENTED` and that the hook remains absolute.
 
-- Add one strict parser for exactly one JSON object between the route-lock sentinels. Reject missing/duplicate/
-  reordered sentinels, duplicate JSON keys, unknown/missing fields, invalid types, invalid decision/anchor,
-  empty/duplicate modules/arms/scenes and any route owner other than `USER`.
-- Resolve the approval anchor through repository history without network access. The current lock must bind
-  exact anchor `48caa9ddf24990accb65e2ad230d12821487793c` and decision
-  `USER-ICRA-ROUTE-20260826-001`.
-- Expose an immutable typed value to the verifier and hook entrypoints. Do not mirror active route, required
-  modules, claim, arms or fallback as Python/shell literals.
+## Required repair
 
-## 2. Verify route, state, task and protected transitions
+### 1. Close the Supervisor transition without weakening Builder protection
 
-- Add `scripts/dev_planner/verify_icra_research_route.py` as the single pure verifier described by
-  `docs/icra27/ICRA_CROSS_LAYER_GUARD_PLAN.md`.
-- Require current state/task/scope/plan to agree on `P0_P4_V2_P5`, ICRA-071 and the campaign barrier. P0+P5 may
-  appear only as the control or immutable history.
-- Reject removal of P4, max-risk claim drift, alternate arms, automatic fallback/campaign activation, stale or
-  reused decision identity, and an unauthorized route-lock edit.
-- Encode the NO-GO state machine: without a new canonical user decision, scientific NO_GO permits only
-  `BLOCKED_AWAITING_USER_RESEARCH_DECISION`, `active_role=SUPERVISOR`, `next_task=NONE`.
-- Emit stable typed reasons and nonzero exits. A PASS proves repository consistency, not cryptographic user
-  identity.
+- Add a narrowly validated, repository-local Supervisor Review transition that lets §8.6 stage/commit the exact
+  Supervisor-owned review set after a Builder handoff even when HEAD still records `DEEPSEEK`.
+- The transition must bind the reviewed HEAD, unchanged route decision/anchor, one review verdict, same-task
+  repair or next-task metadata, and no product/route-lock/evidence mutation. Generic or partial staging of
+  Supervisor-owned files must still fail.
+- State explicitly in code/tests/docs that this is procedural validation, not actor authentication; do not add
+  a bypass environment variable, hidden token, global Git config or security claim.
+- Add a positive adversarial fixture for a complete Supervisor Review transition and negatives for partial,
+  stale-head, route-changing and product-mixed variants. Future §8.6 must not require `--no-verify`.
 
-## 3. Repair repository-local hooks
+### 2. Verify exact active contract and real requirement IDs
 
-- Replace the tracked pre-commit implementation with one that uses repository-root paths and invokes the same
-  Python verifier for route/scope/claim changes.
-- Code/interface/config paths under `src/`, `include/`, `apps/`, `msg/`, `cmake/`, `launch/`, `config/`,
-  `scripts/`, `test/`, `tests/`, `tools/`, `docker/`, `data/`, `thirdparty/` and `.githooks/`, plus root
-  build/package/toolchain files, require staged `DEV_LOG.md`, `docs/CHANGES.md` and `docs/TRACEABILITY.md`.
-  Add an extension/category fallback outside generated/evidence trees so a newly introduced source root cannot
-  evade synchronization merely because its directory name is not yet enumerated.
-- Add pre-push route/state verification and commit-msg validation requiring one or more `IAP-RQ-NNN` IDs.
-- Remove `IAP_SKIP_DOCS`; add no bypass environment variable. Hooks never stage or rewrite files.
-- Add an idempotent repository-local installer/checker that sets only
-  `git config --local core.hooksPath .githooks`, rejects absolute/stale paths and never changes global config.
-  This local-config mutation is explicitly authorized for ICRA-071.
+- Make active scope/plan verification reject primary max-risk claim drift and required-module drift with stable
+  typed reasons derived from the canonical route lock; do not mirror route/module/claim/arm literals in Python
+  or shell.
+- If machine-readable active-document bindings are needed, this task explicitly permits the smallest synchronized
+  binding-only edits to `ICRA_SCOPE.md`, `ICRA_IMPLEMENTATION_PLAN.md` and `ICRA_PLAN_REVIEW.md`. They may only
+  restate/point to the unchanged lock and must not alter route, claim, modules, arms, gates or authority.
+- Parse the repository requirement inventory and reject every commit-message ID absent from `docs/REQS.md`;
+  retain support for one or more existing `IAP-RQ-NNN` IDs.
+- Convert the existing claim-drift and root-coverage helpers into end-to-end verifier/hook assertions for exact
+  typed failures, rather than testing only a helper predicate.
 
-## 4. Adversarial tests and acceptance
+### 3. Restore hermetic full discovery without touching retained state
 
-- Build one valid temporary repository fixture and derive all mutations from it. Cover every negative and
-  positive case frozen in the guard plan, including Builder ownership, no-go transition, stale approval,
-  every enumerated code/interface/config root, the new-root extension fallback, synchronized docs, commit
-  messages and hook-path installation.
-- Prove documentation-only historical text does not accidentally activate a route or campaign.
-- Run focused parser/verifier/hook tests, then complete hermetic Python discovery. No ROS/GPU/build/install/live
-  command is permitted.
-- Produce compact static evidence binding route-lock/verifier/hook/test hashes, exact commands/exits and the
-  verified relative hook path. Do not treat hook PASS as external security enforcement.
+- Repair only the two failing ICRA-070 tests so they derive replacement roots and compact inventories from a
+  temporary repository fixture. Do not edit ICRA-070 runner/product behavior, constants, retained install trees,
+  compact/raw evidence or expected historical verdicts.
+- Prove the tests fail/pass on fixture state, not on whether the real retained `install_v2` or later compact
+  artifacts exist.
+- Run focused guard tests, focused repaired ICRA-070 tests, then exactly one fresh complete hermetic Python
+  discovery under a new ICRA-071 repair evidence root. It must exit 0 with zero failures/errors and retain an
+  empty external delta. Do not reuse or overwrite the prior 614/616 record.
 
-## Documentation and handoff
+### 4. Synchronize documentation truthfully
 
-- Update Builder-owned `DEV_LOG.md`, `docs/CHANGES.md`, `docs/TRACEABILITY.md` and new compact ICRA-071 static
-  evidence with applicable requirement IDs.
-- Explicitly stage only authorized files, review the staged diff, commit with applicable `IAP-RQ-*` IDs and
-  push normally. Never stage the PDF, existing build/install, raw evidence or Supervisor-owned documents.
-- Return `ICRA071_ROUTE_GUARD_READY_FOR_REVIEW` or one typed blocker. Do not issue ICRA-072 yourself.
+- Update `DEV_LOG.md`, `docs/CHANGES.md`, `docs/TRACEABILITY.md` and `docs/REQS.md` so one current disposition is
+  visible: implementation exists, Review requested changes, and acceptance remains pending until the repaired
+  zero-failure discovery and Supervisor Review.
+- Add compact non-overwriting repair evidence binding exact HEAD, hashes, commands/exits, hook path, transition/
+  claim/RQ adversaries, full discovery and the unchanged protected PDF hash.
 
 ## Allowed files
 
-- New route-lock parser/verifier and smallest hook installer/checker below `scripts/dev_planner/`.
-- Focused tests below `test/`.
-- `.githooks/pre-commit`, new `.githooks/pre-push` and `.githooks/commit-msg`.
-- Builder-owned `DEV_LOG.md`, `docs/CHANGES.md`, `docs/TRACEABILITY.md` and compact ICRA-071 evidence.
-- Repository-local `.git/config` only for exact `core.hooksPath=.githooks`; it is not staged.
+- `scripts/dev_planner/verify_icra_research_route.py`.
+- `.githooks/pre-commit`, `.githooks/pre-push`, `.githooks/commit-msg` only if required by the repair.
+- `test/test_verify_icra_research_route.py` and the smallest fixture-only repair in
+  `test/test_run_icra_p0_p5_qualification.py`.
+- Binding-only active-document edits described above.
+- Builder-owned `DEV_LOG.md`, `docs/CHANGES.md`, `docs/TRACEABILITY.md`, `docs/REQS.md` and new compact
+  `results/icra27/icra071/` repair evidence.
+- Repository-local `.git/config` only to retain exact `core.hooksPath=.githooks`; no global config mutation.
 
 ## Forbidden
 
-- No edit to `AGENT_STATE.md`, `NEXT_TASK.md`, `SUPERVISOR_LOG.md`, the route-lock/audit document, ICRA scope/
-  plan/review/guard plan or user decision record.
-- No P0/P4/P5 product, public runtime interface, launch/config/experiment, threshold, objective, fixture,
-  scenario, evidence semantics or campaign change.
-- No ROS/launch, GPU preflight, live identity, analyzer, build/install creation or cleanup.
-- No retry/relabel of P4-v1 G0C or ICRA-070; no historical evidence, raw/bag/log/PDF/external-repository change.
-- No global Git config, bypass variable, `--no-verify` use in acceptance evidence, force-push, reset, clean,
-  stash or unrelated process termination.
+- No route-lock sentinel/user decision, `AGENT_STATE.md`, `NEXT_TASK.md` or `SUPERVISOR_LOG.md` edit.
+- No P0/P4/P5 product, runtime interface, launch/config/scenario, algorithm, threshold, objective or campaign work.
+- No ROS/launch, GPU preflight, live identity, analyzer, build/install creation, retry or cleanup.
+- No mutation/deletion/relabel of ICRA-068/070 build/install, compact/raw evidence, logs or the protected PDF.
+- No weakening/removal of exact P4-v1 NO-GO, P4-v2 block, user route/fallback/campaign ownership or local-hook
+  limitation; no bypass variable, `--no-verify` acceptance run, force-push, reset, clean or stash.
 
-ICRA-071 Review PASS authorizes only a separately issued ICRA-072 observability/decomposition task. It does not
-authorize P4-v2 application, G0D, prospective P5 qualification or campaign.
+## Handoff and acceptance
+
+Explicitly stage only allowed files, review the staged diff, commit with existing applicable requirement IDs
+and push normally. Return `ICRA071_ROUTE_GUARD_REPAIR_READY_FOR_REVIEW` only after all focused suites and the
+single fresh complete hermetic discovery exit 0. Any failure returns one typed blocker without retry.
+
+Supervisor Review PASS may issue only ICRA-072. It still cannot authorize P4-v2 application, ROS/GPU/live work,
+G0D, prospective P5 qualification, cleanup or campaign.

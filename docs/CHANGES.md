@@ -3,6 +3,12 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- review(icra-071-route-guard): IAP-RQ-000 / IAP-RQ-423 / IAP-RQ-424 — Supervisor Review of
+  `9b813b0...96c5cd8` returns `REQUEST_CHANGES`. Focused guard tests pass 33/33, but the mandatory full discovery
+  is 614/616; the pre-commit ownership rule deadlocks the required Supervisor §8.6 handoff, active max-risk
+  claim drift and nonexistent requirement IDs pass, and current requirement/traceability rows conflict. Reissue
+  one same-Gate ICRA-071 repair; ICRA-072, P4-v2 product work, ROS/GPU/live, cleanup and campaign remain blocked.
+
 - feat(icra-071-route-guard): IAP-RQ-000 / IAP-RQ-423 / IAP-RQ-424 — add the strict typed
   `ICRA_USER_ROUTE_LOCK_V1` parser, offline approval-history binding, route/state/task/active-document verifier,
   protected-transition authority checks and stable fail-closed reasons. Replace the stale absolute hook with

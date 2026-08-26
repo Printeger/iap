@@ -1,5 +1,89 @@
 # ICRA Supervisor Log
 
+## 2026-08-26 — ICRA-071 Review REQUEST_CHANGES; same-Gate guard repair authorized
+
+### Review identity and synchronization
+
+- Review base: `9b813b0a52f405d874ce324f99f618221b5b7b8c`.
+- Reviewed HEAD: `96c5cd85e37892eb4f565ce1181d57e62b817e0a`.
+- Reviewed commits: `56b2fdb` and `96c5cd8`; both commit bodies bind existing applicable
+  `IAP-RQ-000`/`IAP-RQ-424`, and the implementation commit also binds `IAP-RQ-423`.
+- Startup `git status --short --branch` retained only untracked
+  `docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf`; after `git fetch origin`, divergence was `0 0` and the PDF SHA-256
+  remained `1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+- The diff is limited to the verifier, three hooks, focused tests, Builder documents and compact ICRA-071
+  evidence. `git diff --check 9b813b0...96c5cd8` passes. No P4 product, ROS/GPU/live, build/install, retained
+  evidence, route-lock, Supervisor-owned input or campaign change is present.
+
+### Standards
+
+Verdict: **FAIL — one hard documentation-sync violation and two judgement-call smells.**
+
+- Hard: `docs/TRACEABILITY.md` simultaneously marks ICRA-071 implemented/focused PASS and, in the still-current
+  recovery table, says the same guard is `PLANNED / NOT_IMPLEMENTED` and the absolute hook remains stale. This
+  violates `AGENTS.md` §2.2 synchronized traceability.
+- Judgement call / Duplicated Code: strict sentinel/fenced-JSON decoding is repeated in `parse_route_lock()` and
+  `_route_json_document()`.
+- Judgement call / Primitive Obsession and Data Clumps: state/task authority remains raw string dictionaries and
+  seven document paths travel positionally through the verifier.
+
+No other documented Standards breach was found in the reviewed diff; formatting/tool-enforced items are not
+duplicated here.
+
+### Spec
+
+Verdict: **FAIL — three blocking implementation/acceptance defects and one documentation defect.**
+
+- Critical: `run_pre_commit_guard()` treats HEAD's `active_role=DEEPSEEK` as actor identity and rejects every
+  staged Supervisor-owned Review file. A complete temporary-repository §8.6 transition returned exit 2,
+  `BUILDER_SUPERVISOR_FILE_STAGED`. The Supervisor cannot close a Review without bypassing the new hook.
+- High: active-document claim agreement is not enforced. A temporary active-scope mutation from the frozen
+  provider-only interior bottleneck/max-risk objective to mean-risk returned exit 0 and
+  `ICRA_ROUTE_GUARD_PASS`; the existing adversary tests only the helper that notices route-lock field changes.
+- High: mandatory complete hermetic discovery did not pass. The sole Builder record is 614/616, exit 1, with
+  one failure and one error caused by two ICRA-070 tests reading retained repository state. The compact record
+  also binds that full run to tested implementation `891a33b`, not final implementation `56b2fdb`/reviewed HEAD.
+- Medium: commit-message validation checks only the regex shape. A temporary message containing nonexistent
+  `IAP-RQ-999` returned exit 0. `docs/REQS.md` and `docs/TRACEABILITY.md` also retain contradictory current
+  not-implemented/implemented states.
+
+No unauthorized P4/runtime/campaign scope creep was found.
+
+### Supervisor verification and gate verdict
+
+- Current verifier: exit 0, `ICRA_ROUTE_GUARD_PASS:REPOSITORY_CONSISTENT_NOT_USER_AUTHENTICATION`.
+- Local hook-path checker: exit 0, exact `.githooks`; global hook path remains absent.
+- An initial module-addressed unittest command selected no importable package and exited 1 before running the
+  suite; the corrected authoritative focused discovery
+  `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s test -p 'test_verify_icra_research_route.py' -v`
+  passes 33/33.
+- File hashes in `route_guard_static_v1.json` match the route lock, verifier, focused test and three hooks; the
+  compact file's own SHA-256 matches `8d5567de...22e22a`.
+- The Builder's 614/616 complete discovery was not retried, and no retained ICRA-070 artifact was changed to
+  satisfy its non-hermetic assertions.
+
+Overall verdict: `ICRA071_REQUEST_CHANGES`. Gate `USER_RESEARCH_ROUTE_AUTHORITY_GUARD` remains open. ICRA-072,
+P4-v2 product work, ROS/GPU/live execution, cleanup and campaign remain unauthorized.
+
+### Required next action
+
+- Reissue the same task ID `ICRA-071` as one bounded repair: add a narrowly validated Supervisor Review
+  transition, bind active required modules/max-risk claim to the canonical lock, reject nonexistent requirement
+  IDs, isolate the two retained-state ICRA-070 tests, reconcile REQS/TRACEABILITY, and obtain one fresh complete
+  zero-failure hermetic static discovery.
+- Existing ICRA-068/070 build/install, compact/raw evidence and the protected PDF remain untouched.
+
+### Supervisor window disposition
+
+- Disposition: `KEEP_WINDOW`.
+- Reason: `SAME_GATE_LOCAL_REPAIR_NO_ROUTE_CLAIM_CONTRACT_OR_AUTHORITY_CHANGE`. This is a bounded repair within
+  the same gate; the route lock, claim, canonical contract and user authority are unchanged, and the current
+  Supervisor context is complete.
+- The reviewed hook cannot permit this mandatory §8.6 Supervisor changeset because of the Critical finding
+  above. The Review commit therefore requires one explicitly disclosed Supervisor-only hook bypass; no product,
+  guard implementation or retained artifact is included. The next repair must make future §8.6 closure pass
+  normally without a bypass.
+
 ## 2026-08-26 — user restores P0 -> P4-v2 -> P5; deviation audit and ICRA-071 authorization
 
 ### Decision identity and synchronization

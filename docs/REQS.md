@@ -25,8 +25,9 @@
 ### IAP-RQ-000: Repo guardrails
 - [x] 本仓库内加入 AGENTS.md（禁止改 ../glim，强制维护 CHANGES/TRACEABILITY）
 - [x] 加入 docs/CHANGES.md、docs/TRACEABILITY.md、docs/REQS.md（本文件）
-- [ ] 恢复 repository-local guard：当前 absolute `core.hooksPath` 已失效、hook 的 `src/iap/...` matcher
-  与仓库根路径不匹配；由 ICRA-071 接入 user-route verifier、pre-commit、pre-push 和 commit-msg 后验收
+- [ ] 完成 repository-local guard 验收：ICRA-071 已安装 relative `.githooks` 并通过 focused 33/33，
+  但 Supervisor Review 发现 §8.6 handoff deadlock、active claim/RQ-ID 漏检及 full discovery 614/616；
+  同 Gate repair 通过前保持未验收
 
 Acceptance:
 - 能在本地 commit/push 前被相同语义的 hook 拦截；无 bypass 环境变量；明确本地 hook 不是同权限
@@ -478,7 +479,7 @@ Acceptance:
 - The selected decision/hash reaches the final B-spline, and a P5 final rejection produces zero normal publication.
 
 ### IAP-RQ-424 User-owned ICRA research route and P4-v2 scientific recovery
-Status: **ROUTE LOCK DOCUMENTED / REPOSITORY GUARD NOT_IMPLEMENTED**
+Status: **ROUTE LOCK DOCUMENTED / REPOSITORY GUARD IMPLEMENTED / REVIEW REQUEST_CHANGES**
 
 Source: `docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md` and user decision
 `USER-ICRA-ROUTE-20260826-001` bound to `48caa9ddf24990accb65e2ad230d12821487793c`.
@@ -489,11 +490,11 @@ Source: `docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md` and 
 - [x] Preserve P4-v1 G0C as immutable `SCIENTIFIC_NO_GO`; never relabel it as PASS or reuse it as P4-v2
   confirmatory evidence.
 - [x] Define NO-GO transition as `BLOCKED_AWAITING_USER_RESEARCH_DECISION`, with no automatic contingency task.
-- [ ] Implement the ICRA-071 strict route-lock parser, state/task/scope/plan verifier and staged-diff authority
-  guard.
-- [ ] Install and verify repository-relative pre-commit, pre-push and commit-msg hooks with no bypass variable.
-- [ ] Add adversarial tests for route/module/claim/arm/fallback/campaign drift, stale approvals, Builder ownership,
-  code-document synchronization and requirement IDs.
+- [ ] Complete ICRA-071 acceptance for the implemented strict parser/verifier/staged guard: repair Supervisor
+  handoff, exact active claim/module binding and nonexistent requirement-ID rejection.
+- [x] Install and verify repository-relative pre-commit, pre-push and commit-msg hooks with no bypass variable.
+- [ ] Complete adversarial coverage and one zero-failure hermetic discovery; focused coverage is 33/33, but
+  Review reproduced claim/RQ-ID gaps and the current full discovery is 614/616.
 - [ ] Add P4-v2 provider/occupied/unknown support decomposition while preserving the v1 scalar query for replay.
 - [ ] Implement provider-only interior bottleneck/lexicographic time-aware P4-v2 and its controllability fixtures.
 - [ ] Freeze SESOI, endpoint buffer `b=2r`, independent 30–60 seed-run sample size per scene and held-out protocol

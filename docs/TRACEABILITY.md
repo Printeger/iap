@@ -1,5 +1,13 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-26 ICRA-071 Supervisor Review
+
+| Req ID | Reviewed seam | Supervisor evidence and disposition | Status |
+|---|---|---|---|
+| IAP-RQ-000 / IAP-RQ-424 | Repository-local hook and Supervisor Review lifecycle | Current verifier/hook-path PASS and focused 33/33; temporary §8.6 handoff fails `BUILDER_SUPERVISOR_FILE_STAGED`; unknown `IAP-RQ-999` is accepted | **REQUEST_CHANGES** |
+| IAP-RQ-423 / IAP-RQ-424 | Route/claim protection | Temporary active-scope max/bottleneck-to-mean drift returns repository-consistent PASS | **REQUEST_CHANGES** |
+| IAP-RQ-000 / IAP-RQ-424 | Complete hermetic discovery | Builder's sole full discovery is 614/616, exit 1; two ICRA-070 tests depend on retained live state and must be fixture-isolated without artifact mutation | **BLOCKED / REPAIR AUTHORIZED** |
+
 ## 2026-08-26 ICRA-071 repository-local route guard implementation
 
 | Req ID | Requirement/evidence seam | Implementation and verification | Status |
@@ -16,7 +24,7 @@
 | IAP-RQ-424 | User exclusively owns route, required modules, research question, primary claim, arms, gate sequence, fallback and campaign activation | `ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md`; route-lock schema `icra_user_route_lock_v1`; decision `USER-ICRA-ROUTE-20260826-001`; approval anchor `48caa9d` | **DOCUMENTED / USER-LOCKED** |
 | IAP-RQ-423 / IAP-RQ-424 | Preserve the P0 -> P4 -> EGO -> P5 authority architecture while correcting P4-v1 internal science | Audit of r6 15/15 runs, 192/192 decisions, max `136/56/0`, mean `174/17/1`, 57 unique path pairs; occupied-support, guide-domain, objective/estimand and pseudo-replication diagnosis | **P4-v1 NO_GO RETAINED / P4-v2 REQUIRED** |
 | IAP-RQ-000 / IAP-RQ-424 | A scientific NO-GO cannot automatically activate a contingency | `AGENTS.md` §8.7; route-lock `scientific_no_go_transition`; ICRA-071 guard plan and `NEXT_TASK.md` | **RULE FROZEN / GUARD IMPLEMENTATION AUTHORIZED** |
-| IAP-RQ-000 / IAP-RQ-424 | Repository-local route/state/doc/RQ guards prevent ordinary automation drift | ICRA-071 scope: strict parser/verifier, root-relative pre-commit, pre-push, commit-msg and adversarial tests; current stale absolute hook remains known | **PLANNED / NOT_IMPLEMENTED** |
+| IAP-RQ-000 / IAP-RQ-424 | Repository-local route/state/doc/RQ guards prevent ordinary automation drift | ICRA-071 implementation at `56b2fdb`; relative `.githooks` installed; Supervisor Review finds lifecycle/claim/RQ/full-discovery defects and reissues a bounded same-Gate repair | **IMPLEMENTED / REVIEW REQUEST_CHANGES** |
 | IAP-RQ-423 / IAP-RQ-424 | P4-v2 confirmation precedes G0D/P5/campaign | Roadmap ICRA-072..080; provider-only interior `D_peak`, `b=2r`, SESOI/repeatability threshold, independent 30–60 seed-runs per scene and exact one-sided gate | **PLANNED / CAMPAIGN BLOCKED** |
 | IAP-RQ-000 / IAP-RQ-424 | Preserve unqualified control engineering and user/scientific artifacts | ICRA-070 `SUPERSEDED_UNQUALIFIED`; replacement/parser/GPU/live/analyzer `0/0/0/0/0`; ICRA-068/070 build/install, raw evidence and PDF retained | **NO CLEANUP** |
 
