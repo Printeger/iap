@@ -1,5 +1,21 @@
 # ICRA 2027 P0 -> P4-v2 -> P5 计划复审
 
+## Four-layer workflow Review — 2026-08-26
+
+**Verdict: adopt the four-layer workflow and archive the old one-shot process as found.** Builder checkpoint
+`6a6bdd3e674dd58fafae4153e5a2b5cb5225d730` passes focused static checks and makes P0/P4 selection observable
+live (`P0 ready=124`, `RISK_SELECTED=76`, `15/15` processes), but terminal lineage, P5 final/runtime and normal
+publication remain zero. This is the Layer 1 integration target, not a reason to add another immutable smoke.
+
+ICRA-072A now permits iterative development runs and shared incremental build/install until one complete live
+identity passes. ICRA-072B then stabilizes it with automated happy-path and fail-closed regressions. ICRA-073..075
+remain diagnostic/exploratory; ICRA-076..079 retain all formal one-shot, hash, held-out and qualification rules.
+The exact process and retention boundaries are in `docs/icra27/ICRA_FOUR_LAYER_DEVELOPMENT_WORKFLOW.md`.
+
+This workflow change does not weaken occupancy, EGO or P5 authority and does not alter the route-lock sentinel.
+It authorizes deletion only of the exact regenerable build/install roots in the pushed retirement inventory;
+raw/compact/live/scientific evidence, logs and the protected PDF stay retained.
+
 ## Development-first user decision — 2026-08-26
 
 User decision `USER-ICRA-ROUTE-20260826-002` at pushed anchor
@@ -20,14 +36,14 @@ B-spline, P5 final, publication and P5 runtime. The released-snapshot lineage al
 epoch revalidation, and the required production-shaped regression is absent. This is an integration blocker,
 not evidence that P4-v2 has no effect.
 
-The same ICRA-072 Gate receives one final bounded closure task: repair terminal epoch/lineage validation,
-consolidate invalidation, add the real manager/FSM-to-P5/runtime regression, diagnose the retained `-002`
-support failure offline, and use a separately named development-only selection trigger for exactly one fresh
-smoke. ICRA-073 is not yet issued.
+That bounded one-shot process ended at Builder HEAD `6a6bdd3` and is archived as a terminal-chain blocker. The
+same ICRA-072 Gate now runs as ICRA-072A iterative integration with shared builds and unique repeatable run IDs;
+its PASS can issue only ICRA-072B stabilization. ICRA-073 is not yet issued.
 
 The separately frozen design
 `docs/icra27/dev/ICRA_P4_V2_INVERSE_CORRIDOR_FIXTURE.md` remains
-`DESIGN_FROZEN / IMPLEMENTATION_DEFERRED_TO_ICRA-073`. After an ICRA-072 PASS, ICRA-073 will implement
+`DESIGN_FROZEN / IMPLEMENTATION_DEFERRED_TO_ICRA-073`. After ICRA-072A integration and ICRA-072B stabilization
+close ICRA-072, ICRA-073 will implement
 PRIMARY/EXACT_MIRROR/FLAT_NULL, paired control/treatment and an independent evaluation oracle. Oracle geometry,
 labels and truth may never enter P0, P4, EGO or P5 decisions. ICRA-073 measures without tuning; targeted
 optimization from its retained results is restricted to ICRA-074.

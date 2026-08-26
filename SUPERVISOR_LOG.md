@@ -1,5 +1,66 @@
 # ICRA Supervisor Log
 
+## 2026-08-26 — ICRA-072 checkpoint archived; four-layer workflow adopted; Layer 1 authorized
+
+### Review identity and truthful archive
+
+- Review base is `4f86360368d4b2d38046e8f06458729ca80d3414`; reviewed Builder HEAD is
+  `6a6bdd3e674dd58fafae4153e5a2b5cb5225d730`. Startup fetch left HEAD and `origin/dev/icra` equal at divergence
+  `0 0`; tracked state was clean and the protected PDF was the sole untracked file at unchanged SHA-256
+  `1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+- Archive verdict is **`ARCHIVED_AS_FOUND / BLOCKED_TERMINAL_CHAIN_MISSING`**, not PASS. Builder static admission
+  is 6/6 packages, 199/199 focused C++ and 29/29 Python tests. The sole `icra072-dev-smoke-003` passed GPU and
+  15/15 required-process health, produced 124 ready P0 rows, 76 natural risk selections and 339 decisions with
+  complete support for both guides.
+- Its sole analyzer exited 1: terminal lineage, P5-final PASS, committed runtime binding and normal B-spline
+  publication were all zero. The four retained failures are the lineage identity mismatch, missing P5 final
+  before publish, missing committed runtime binding and missing normal B-spline publication. The run is retained
+  immutable and is neither retried nor relabelled.
+
+### User workflow decision and four layers
+
+- User workflow decision `USER-ICRA-WORKFLOW-20260826-001` groups the unchanged protected Gate sequence into
+  Layer 1 ICRA-072A iterative integration, Layer 2 ICRA-072B stabilization, Layer 3 ICRA-073..075 effect
+  diagnosis/targeted optimization/exploratory work, and Layer 4 ICRA-076..079 formal freeze/held-out/lineage/
+  qualification. ICRA-080 remains a separately approved campaign.
+- `docs/icra27/ICRA_FOUR_LAYER_DEVELOPMENT_WORKFLOW.md` is the single process authority. README owns the only
+  copyable shared-build and Layer 1 run commands. Scope, roadmap, implementation plan, plan review and system
+  flow link to that authority rather than duplicating the procedure.
+- Layers 1–3 reuse `/home/dev/ws_iap/{build,install,log}`. Development runs are unique and non-overwriting, but
+  may repeat after diagnosis and code/config repair. Full hashes, one-shot/no-retry, frozen SESOI/thresholds/seeds,
+  held-out access and qualification controls begin only in Layer 4.
+
+### Layer 1 task
+
+- `NEXT_TASK.md` reissues the existing ICRA-072 Gate as milestone ICRA-072A. It requires a tested shared-build
+  entry, a bounded iterative runner, ordered first-missing-stage analysis and the smallest terminal integration
+  repair. One real identity must traverse P0 snapshot -> closed collision -> natural P4 selection/application ->
+  EGO final B-spline -> P5 final PASS-before-publish -> normal publish -> committed P5 runtime.
+- There is no intermediate Supervisor Review inside Layer 1. Builder retains each run, incrementally rebuilds
+  the six packages and stops after the first complete chain. A Layer 1 PASS may issue only ICRA-072B; ICRA-072
+  closes only after Layer 2.
+- PRIMARY/EXACT_MIRROR/FLAT_NULL, effect claims, optimization, formal validation, prospective qualification and
+  campaign remain unauthorized. P4 receives no route labels or oracle output.
+
+### Artifact lifecycle
+
+- Before deletion, the exact 61-root inventory at
+  `docs/icra27/dev/ICRA_REGENERABLE_BUILD_RETIREMENT_20260826.md` totals `122694791115` regenerable bytes. It
+  contains no tracked file and excludes every raw/compact/registered-live/scientific/log artifact, shared
+  workspace root and the protected PDF.
+- This authority changeset is committed and pushed before deletion. Deletion occurs only after literal-path,
+  repository-boundary, symlink, tracked-file and live-process checks are repeated; actual released bytes and
+  final disk state are recorded in a follow-up Supervisor commit.
+
+### Enforcement disclosure and window disposition
+
+- Route-lock sentinel and protected Gate sequence bytes are unchanged. The current pre-commit actor inference is
+  expected to reject valid Supervisor authority files while pushed HEAD says `active_role=DEEPSEEK`; the known
+  ICRA-071 lifecycle defect remains non-blocking. Route, hooksPath, staged-file, requirement-ID and commit-message
+  checks are therefore executed explicitly before the disclosed Supervisor-only `--no-verify`; ordinary
+  pre-push remains enabled.
+- Window disposition is completed only after the inventory deletion record is pushed, as required by §8.6.
+
 ## 2026-08-26 — ICRA-072 Review REQUEST_CHANGES; terminal lineage and provider-support closure authorized
 
 ### Review identity and synchronization

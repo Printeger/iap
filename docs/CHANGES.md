@@ -3,6 +3,17 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- review(icra-four-layer-workflow): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 /
+  IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — archive Builder HEAD `6a6bdd3` exactly as found:
+  static admission and natural P4 selection pass, but the sole `icra072-dev-smoke-003` analyzer exits 1 with no
+  terminal EGO/P5/publication/runtime chain. Adopt user workflow decision `USER-ICRA-WORKFLOW-20260826-001`
+  without changing the route-lock sentinel or protected Gate sequence. Add the four-layer process authority,
+  centralize shared `/home/dev/ws_iap/{build,install,log}` and Layer 1 commands in README, cross-link active
+  scope/roadmap/plan/review/system-flow, and issue ICRA-072A iterative integration. Inventory 61 exact
+  regenerable build/install roots totaling `122694791115` bytes for deletion only after this inventory is pushed;
+  retain raw/compact/registered-live/P4-v1 evidence, ordinary logs, shared workspace artifacts and the protected
+  PDF. This Supervisor changeset modifies no product, runner, analyzer, hook or evidence byte.
+
 - fix(icra-072-final-flow-closure): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 /
   IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — retain typed P4-v2 lineage across snapshot release,
   revalidate attempt and live occupancy epoch immediately before terminal writers, and exercise the actual

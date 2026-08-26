@@ -477,6 +477,11 @@ non-bypassable enforcement requires a protected remote branch and an independent
 
 ## 9. Corrective roadmap and gates
 
+The active execution grouping is `docs/icra27/ICRA_FOUR_LAYER_DEVELOPMENT_WORKFLOW.md`: ICRA-072A iterative
+integration, ICRA-072B stabilization, ICRA-073..075 effect diagnosis/improvement and ICRA-076..079 formal
+verification. This grouping leaves the machine-readable route lock and gate sequence above byte-for-byte
+unchanged. Development one-shot and per-task build/install controls do not apply in Layers 1–3.
+
 The frozen inverse-corridor diagnostic design is
 `docs/icra27/dev/ICRA_P4_V2_INVERSE_CORRIDOR_FIXTURE.md`
 (`ICRA_P4_V2_INVERSE_CORRIDOR_FIXTURE_V1`). It is still implementation-deferred because ICRA-072 has not
@@ -504,8 +509,11 @@ the task identifier is retained for the higher-priority user-route guard.
 
 ## 10. Artifact lifecycle and claim limits
 
-- Preserve the protected PDF, all raw/scientific evidence and existing ICRA-068/070 build/install trees.
-- ICRA-070 did not receive Review PASS, so this route correction authorizes no cleanup.
+- Preserve the protected PDF and all raw/compact/registered-live/scientific evidence and ordinary logs.
+- User workflow decision `USER-ICRA-WORKFLOW-20260826-001` authorizes permanent retirement of only the exact
+  regenerable build/install roots inventoried in
+  `docs/icra27/dev/ICRA_REGENERABLE_BUILD_RETIREMENT_20260826.md`. This does not relabel or delete evidence.
+- Layers 1–3 reuse `/home/dev/ws_iap/{build,install,log}` and may not create per-task or per-run build/install.
 - A later task may delete only its reproducible build/install after its own Review PASS, pushed code/docs and
   verified `0 0` divergence. Raw, compact, manifest, log and scientific evidence remain retained.
 - P4-v1 remains `SCIENTIFIC_NO_GO`; P4-v2 is a new prospective method, not a reanalysis that makes v1 pass.

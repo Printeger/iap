@@ -52,6 +52,52 @@ source install/setup.bash
 
 注意：`build_iap_sim.sh` 主要覆盖基础仿真和 IAP；如果要跑 `demo7` 或单独使用 `gnss_sim`，请确认 `gnss_comm` 和 `gnss_sim` 也已经构建。
 
+### 1.2.1 ICRA Layer 1 共享开发构建与联调
+
+ICRA Layer 1–3 固定复用工作区的 `build/`、`install/`、`log/`，不为 task、attempt 或 run 新建
+build/install。当前 Builder task 会把下面的构建命令收口到
+`src/iap/scripts/dev_planner/build_iap_dev.sh`；脚本落库前可直接执行其等价命令：
+
+```bash
+cd /home/dev/ws_iap
+unset AMENT_PREFIX_PATH CMAKE_PREFIX_PATH COLCON_PREFIX_PATH PYTHONPATH LD_LIBRARY_PATH
+source /opt/ros/jazzy/setup.bash
+source /home/dev/ws_iap/install/setup.bash
+
+colcon --log-base /home/dev/ws_iap/log build \
+  --paths \
+    /home/dev/ws_iap/src/iap \
+    /home/dev/ws_iap/src/iap/src/iap/planner/plan_env \
+    /home/dev/ws_iap/src/iap/src/iap/planner/traj_utils \
+    /home/dev/ws_iap/src/iap/src/iap/planner/path_searching \
+    /home/dev/ws_iap/src/iap/src/iap/planner/bspline_opt \
+    /home/dev/ws_iap/src/iap/src/iap/planner/plan_manage \
+  --packages-select iap plan_env traj_utils path_searching bspline_opt ego_planner \
+  --build-base /home/dev/ws_iap/build \
+  --install-base /home/dev/ws_iap/install \
+  --symlink-install \
+  --cmake-args -DBUILD_TESTING=ON
+
+source /home/dev/ws_iap/install/setup.bash
+```
+
+ICRA-072A 改造 runner 后，开发联调使用唯一新 run 目录并可在失败修复后递增编号重跑：
+
+```bash
+cd /home/dev/ws_iap/src/iap
+
+python3 scripts/dev_planner/run_icra072_vertical_slice.py \
+  --run-root results/icra27/dev_runs/layer1/run-001 \
+  --install-root /home/dev/ws_iap/install \
+  --duration-s 45
+
+python3 scripts/dev_planner/analyze_icra072_vertical_slice.py \
+  --run-root results/icra27/dev_runs/layer1/run-001
+```
+
+`run-001` 已存在时使用 `run-002`，不得覆盖；这不是 one-shot 正式实验。完整层级、退出条件和证据
+保留规则见 `docs/icra27/ICRA_FOUR_LAYER_DEVELOPMENT_WORKFLOW.md`。
+
 ### 1.3 运行一个最小检查
 
 ```bash

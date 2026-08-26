@@ -1,5 +1,21 @@
 # ICRA 2027 P0 -> P4-v2 -> P5 科学纠偏实施计划
 
+## Four-layer implementation workflow — 2026-08-26
+
+用户工作流决定 `USER-ICRA-WORKFLOW-20260826-001` 在 Builder handoff
+`6a6bdd3e674dd58fafae4153e5a2b5cb5225d730` 后生效。唯一流程权威为
+`docs/icra27/ICRA_FOUR_LAYER_DEVELOPMENT_WORKFLOW.md`；route-lock sentinel 与 ICRA-072..080 gate sequence
+不变。
+
+当前只执行 Layer 1 / ICRA-072A：使用共享 `/home/dev/ws_iap/{build,install,log}` 增量构建，允许新的
+development run identity 重复运行，直到一条轨迹完成 P0 -> P4 -> EGO final -> P5 final -> publish ->
+P5 runtime。Layer 1 内失败可直接修复、重建、再运行，不设 one-shot，也不做中间 Supervisor Review。
+成功后才进入 ICRA-072B 自动回归；之后才依次进入 inverse-corridor diagnostics 和 formal verification。
+
+`6a6bdd3` 的 `-003` 以 BLOCKED 实况封存。历史 build/install 可再生树按已推送清单删除；raw、compact、
+registered live、普通日志、科学证据和 PDF 不删除。精确开发命令集中在 README，其他权威文档只链接，
+避免重复维护。
+
 ## Development-first acceleration — 2026-08-26
 
 用户决定 `USER-ICRA-ROUTE-20260826-002`（pushed anchor
@@ -19,11 +35,12 @@ anchor `48caa9ddf24990accb65e2ad230d12821487793c`；偏差证据、P4-v2 科学�
 和 ICRA-071..080 gate 顺序统一定义在
 `docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md`。
 
-执行顺序冻结为：
+受四层工作流修订后的执行顺序为：
 
 ```text
-ICRA-072 end-to-end vertical slice + development live smoke
-  -> ICRA-073 effect diagnostics
+ICRA-072A iterative end-to-end integration
+  -> ICRA-072B stabilization and ICRA-072 closure
+    -> ICRA-073 effect diagnostics
     -> ICRA-074 targeted optimization
       -> ICRA-075 exploratory / power inputs
           -> ICRA-076 preregistration freeze
@@ -53,7 +70,8 @@ ICRA-072 独立授权 bounded P4-v2 development surface。
 development-only selection trigger 令既有 vertical slice 自然产生完整 provider support。该 trigger 不得
 复用 inverse-corridor 名称、几何或科学效果身份。
 
-只有 ICRA-072 full-lineage Review PASS 才能签发 ICRA-073。ICRA-073 才实现 PRIMARY、EXACT_MIRROR、
+ICRA-072A full-lineage Review PASS 只能签发 ICRA-072B；只有 ICRA-072B 稳定层 Review PASS 才能关闭
+ICRA-072 并签发 ICRA-073。ICRA-073 才实现 PRIMARY、EXACT_MIRROR、
 FLAT_NULL，运行 paired P0+P5 control / P0+P4-v2+P5 treatment，并以独立 oracle 诊断已提交 final
 B-spline。Oracle 仅属旁路 evaluation plane，不得进入 P0 snapshot、P4 search/selection、EGO feasibility
 或 P5 final/runtime 的决策输入。ICRA-073 只测量并保留结果，不得边测边调；所有依据其结果的针对性优化

@@ -1,5 +1,21 @@
 # ICRA 2027 Conference Scope — User-owned P0 -> P4-v2 -> P5 recovery
 
+## Four-layer workflow — 2026-08-26
+
+User workflow decision `USER-ICRA-WORKFLOW-20260826-001`, applied at Builder handoff
+`6a6bdd3e674dd58fafae4153e5a2b5cb5225d730`, replaces premature one-shot development controls with the
+four-layer process in `docs/icra27/ICRA_FOUR_LAYER_DEVELOPMENT_WORKFLOW.md`. The route-lock sentinel and gate
+sequence are unchanged.
+
+ICRA-072 is split into Layer 1 iterative integration and Layer 2 stabilization. Layer 1 may repeat development
+runs and incrementally reuse `/home/dev/ws_iap/{build,install,log}` until one real trajectory reaches P5 runtime;
+Layer 2 then automates the success and fail-closed boundaries. ICRA-073..075 form the inverse-corridor diagnostic
+and improvement layer. ICRA-076..079 alone enable formal freeze, held-out and qualification controls.
+
+The pre-workflow `-003` result is archived as found, not passed: P0 and P4 selection ran, but terminal lineage,
+P5 and normal publication remained absent. Exact regenerable historical build/install products may be retired
+under the pushed inventory, while raw/compact/live/scientific evidence, logs and the protected PDF remain.
+
 ## Development-first acceleration — 2026-08-26
 
 User decision `USER-ICRA-ROUTE-20260826-002`, bound to pushed anchor
@@ -20,12 +36,12 @@ occupancy-feasible corridors and evaluate the committed final B-spline with an i
 The oracle is an evaluation-only bypass. Its centre lines, tube labels and ground truth are forbidden inputs to
 P0, P4, EGO and P5 decisions.
 
-The design is queued, not implemented. The latest ICRA-072 Review remains `REQUEST_CHANGES`; therefore the
-current task may add only a separately named development selection-trigger scene needed to close the existing
-vertical slice. That trigger is not the inverse-corridor scientific fixture and cannot provide effect evidence.
-Only a later ICRA-072 Review PASS may issue ICRA-073 to implement the frozen three-variant fixture, paired
-control/treatment diagnostics and independent oracle. ICRA-073 must measure without tuning; targeted changes
-from its retained results belong exclusively to ICRA-074.
+The design is queued, not implemented. The active ICRA-072A task may use only the separately named development
+selection trigger needed to close the existing vertical slice. That trigger is not the inverse-corridor
+scientific fixture and cannot provide effect evidence. ICRA-072A Review PASS issues only ICRA-072B stabilization;
+only a later ICRA-072B Review PASS may close ICRA-072 and issue ICRA-073 to implement the frozen three-variant
+fixture, paired control/treatment diagnostics and independent oracle. ICRA-073 must measure without tuning;
+targeted changes from its retained results belong exclusively to ICRA-074.
 
 ## User route restoration — 2026-08-26
 

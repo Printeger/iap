@@ -458,8 +458,8 @@ Acceptance:
 - Planner chooses safer path even if longer when integrity violated.
 
 ### IAP-RQ-423 P4 collision-guide planning and P5 lineage
-Status: **P4-v1 SCIENTIFIC_NO_GO RETAINED / P4-v2 ICRA-072 FINAL LIVE TERMINAL CHAIN BLOCKED /
-INVERSE-CORRIDOR DESIGN FROZEN, IMPLEMENTATION NOT STARTED**
+Status: **P4-v1 SCIENTIFIC_NO_GO RETAINED / ICRA-072A LAYER 1 ITERATIVE TERMINAL INTEGRATION TASK_READY /
+INVERSE-CORRIDOR DESIGN FROZEN FOR LAYER 3, IMPLEMENTATION NOT STARTED**
 
 Source: `docs/icra27/ICRA_SCOPE.md` and the 2026-08-20 Supervisor scope pivot. This requirement extends collision-guide planning evidence; it does not replace or verify the IAP-RQ-422 PL/AL admission rule.
 
@@ -474,7 +474,7 @@ Source: `docs/icra27/ICRA_SCOPE.md` and the 2026-08-20 Supervisor scope pivot. T
 - [ ] The selected guide and hash remain traceable through control-point constraints, rebound optimization, refinement, feasibility, and the final B-spline.
 - [ ] P5 final remains the hard integrity gate before normal publish; P5 runtime remains active after publish. P4 and P5 record snapshot generations separately.
 - [ ] P4 remains advisory. EGO occupancy/dynamics keep motion-feasibility authority, and P5 remains the IAP hard integrity gate.
-- [ ] After ICRA-072 Review PASS, implement the frozen
+- [ ] After ICRA-072A integration and ICRA-072B stabilization close ICRA-072, implement the frozen
   `ICRA_P4_V2_INVERSE_CORRIDOR_FIXTURE_V1` PRIMARY/EXACT_MIRROR/FLAT_NULL geometry and evaluate only the
   committed final B-spline through an independent oracle. The design is frozen in
   `docs/icra27/dev/ICRA_P4_V2_INVERSE_CORRIDOR_FIXTURE.md`; implementation has not started and is deferred to
@@ -487,8 +487,8 @@ Acceptance:
 - The selected decision/hash reaches the final B-spline, and a P5 final rejection produces zero normal publication.
 
 ### IAP-RQ-424 User-owned ICRA research route and P4-v2 scientific recovery
-Status: **DEVELOPMENT-FIRST ROUTE LOCKED / ICRA-072 FINAL FLOW BLOCKED PENDING SUPERVISOR REVIEW / GUARD REPAIR NONBLOCKING /
-INVERSE-CORRIDOR DESIGN FROZEN, IMPLEMENTATION NOT STARTED**
+Status: **DEVELOPMENT-FIRST ROUTE LOCKED / FOUR-LAYER WORKFLOW ACTIVE / ICRA-072A TASK_READY /
+GUARD REPAIR NONBLOCKING / INVERSE-CORRIDOR DESIGN FROZEN, IMPLEMENTATION NOT STARTED**
 
 Source: `docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md` and user decision
 `USER-ICRA-ROUTE-20260826-002` bound to `b24a330d79d6e85e8080cf2a359bb1a18765e5a5`.
@@ -504,9 +504,12 @@ Source: `docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md` and 
 - [x] Install and verify repository-relative pre-commit, pre-push and commit-msg hooks with no bypass variable.
 - [ ] Complete adversarial coverage and one zero-failure hermetic discovery; focused coverage is 33/33, but
   Review reproduced claim/RQ-ID gaps and the current full discovery is 614/616.
-- [ ] In ICRA-072, add P4-v2 provider/occupied/unknown support decomposition while preserving the v1 scalar
-  query for replay, implement the minimal provider-only interior bottleneck/lexicographic time-aware search,
-  and run the P0 -> P4-v2 -> EGO -> P5 development vertical slice before effect optimization.
+- [x] In ICRA-072, add P4-v2 provider/occupied/unknown support decomposition while preserving the v1 scalar
+  query for replay and implement the minimal provider-only interior bottleneck/lexicographic time-aware search.
+  Builder HEAD `6a6bdd3` proves natural live P4 selection but not the terminal EGO/P5/publication/runtime chain.
+- [ ] Complete ICRA-072A Layer 1 using shared incremental build roots and unique repeatable development runs;
+  then complete ICRA-072B production-shaped regression before closing ICRA-072. The controlling process is
+  `docs/icra27/ICRA_FOUR_LAYER_DEVELOPMENT_WORKFLOW.md`.
 - [x] Freeze `ICRA_P4_V2_INVERSE_CORRIDOR_FIXTURE_V1` as a deferred ICRA-073 design with two feasible curved
   homotopies, PRIMARY/EXACT_MIRROR/FLAT_NULL causal controls, independent-oracle isolation and a 200-point
   final-B-spline analysis contract. This documentation checkbox does not mark fixture implementation or effect
@@ -561,3 +564,13 @@ lineage, P5-final pass, committed runtime binding and normal B-spline
 publication counts were all zero. No retry or tuning is permitted. ICRA-072 is
 therefore BLOCKED pending Supervisor review; ICRA-073 and all effect,
 qualification and campaign work remain unauthorized.
+
+Four-layer Supervisor disposition (2026-08-26): checkpoint `6a6bdd3` is
+`ARCHIVED_AS_FOUND / BLOCKED_TERMINAL_CHAIN_MISSING`. User workflow decision
+`USER-ICRA-WORKFLOW-20260826-001` authorizes ICRA-072A to iterate with shared
+workspace build/install roots until one real identity reaches EGO final,
+P5-final-before-publish, normal publication and P5 runtime. Failed development
+runs may be fixed and repeated under new run IDs without intermediate Review.
+ICRA-072B then stabilizes that chain; only its later Review PASS may issue
+ICRA-073 inverse-corridor effect diagnostics. Formal hashes, one-shot rules,
+held-out and qualification remain Layer 4.
