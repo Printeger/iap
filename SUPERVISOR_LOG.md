@@ -83,6 +83,10 @@ P4-v2 product work, ROS/GPU/live execution, cleanup and campaign remain unauthor
   above. The Review commit therefore requires one explicitly disclosed Supervisor-only hook bypass; no product,
   guard implementation or retained artifact is included. The next repair must make future §8.6 closure pass
   normally without a bypass.
+- Post-push audit: Review changeset `6e0e7328835064ecb665bc6476a6254924ff371d` was pushed normally after the
+  disclosed commit-hook bypass; its pre-push guard passed. Final disposition remains `KEEP_WINDOW`, handoff
+  anchor is `6e0e7328835064ecb665bc6476a6254924ff371d`, next Review role/task are
+  `SUPERVISOR` / `ICRA-071`, and the protected PDF remains untracked and unstaged.
 
 ## 2026-08-26 — user restores P0 -> P4-v2 -> P5; deviation audit and ICRA-071 authorization
 

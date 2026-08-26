@@ -9,6 +9,7 @@ gate: USER_RESEARCH_ROUTE_AUTHORITY_GUARD
 task_id: ICRA-071
 review_base: 9b813b0a52f405d874ce324f99f618221b5b7b8c
 reviewed_head: 96c5cd85e37892eb4f565ce1181d57e62b817e0a
+repair_review_base: 6e0e7328835064ecb665bc6476a6254924ff371d
 conference_route: P0_P4_V2_P5
 route_owner: USER
 route_lock: docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md
@@ -35,11 +36,11 @@ guard_plan: docs/icra27/ICRA_CROSS_LAYER_GUARD_PLAN.md
 artifact_retention: ICRA068_ICRA070_BUILD_INSTALL_RAW_EVIDENCE_AND_PDF_RETAINED_NO_CLEANUP
 window_disposition: KEEP_WINDOW
 rotation_reason: SAME_GATE_LOCAL_REPAIR_NO_ROUTE_CLAIM_CONTRACT_OR_AUTHORITY_CHANGE
-window_handoff_anchor: PENDING_POST_PUSH_REVIEW_CHANGESET
+window_handoff_anchor: 6e0e7328835064ecb665bc6476a6254924ff371d
 window_next_role: SUPERVISOR
 window_next_review_task: ICRA-071
 window_bootstrap_source: CURRENT_COMPLETE_SUPERVISOR_CONTEXT
-updated_utc: 2026-08-26T09:38:11Z
+updated_utc: 2026-08-26T09:41:27Z
 ```
 
 The user explicitly restored P4 as the indispensable treatment. The active route is now
@@ -66,4 +67,5 @@ ICRA-071 repair receives Supervisor Review PASS.
 
 This Review remains in the same gate and changes no route, claim, canonical contract or authority. The window
 result is therefore `KEEP_WINDOW`; the current complete Supervisor context will review the bounded repair.
-The exact pushed Review changeset is recorded by the post-push rotation record.
+Review changeset `6e0e7328835064ecb665bc6476a6254924ff371d` is the exact substantive handoff
+anchor; the post-push rotation record changes no task, route or verdict.
