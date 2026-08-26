@@ -3,6 +3,25 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(icra-071-route-guard): IAP-RQ-000 / IAP-RQ-423 / IAP-RQ-424 — add the strict typed
+  `ICRA_USER_ROUTE_LOCK_V1` parser, offline approval-history binding, route/state/task/active-document verifier,
+  protected-transition authority checks and stable fail-closed reasons. Replace the stale absolute hook with
+  repository-relative pre-commit/pre-push/commit-msg wrappers over the same verifier; require all three Builder
+  documents for code/interface/config changes, reject Builder-owned authority edits and NO-GO alternate-task
+  activation, require `IAP-RQ-NNN`, and install/check only local `core.hooksPath=.githooks`. The guard states
+  explicitly that it is procedural accident prevention, not user authentication or a security boundary.
+  Focused adversarial verification passes 33/33. Review fixes use no-rename staged inventory so every rename
+  remains a source deletion plus destination addition; prohibit deletion/rename of the verifier/hooks/focused
+  test/three required Builder documents; bind every staged authority input to identical
+  index/worktree bytes, bind pre-push stdin refs to a clean checked-out HEAD, require active documents to cite
+  the canonical decision source, require future protected values in synchronized active scope/plan text, and
+  reject every non-governance/product path while the active task remains ICRA-071 even when all docs are staged.
+  The sole complete hermetic discovery ran 616 tests with 614
+  passing and two retained ICRA-070 pre-replacement tests failing because `install_v2`/v3 replacement artifacts
+  already exist and the frozen compact inventory changed. ICRA-071 forbids cleanup, relabelling or rewriting
+  those retained artifacts, so this checkpoint is fail-closed pending Supervisor review; no ROS/GPU/build/live/
+  analyzer or campaign command ran.
+
 - docs(icra-user-route-recovery): IAP-RQ-000 / IAP-RQ-423 / IAP-RQ-424 — bind the complete route-deviation
   audit to original approval `73cbdddd`, source baseline `bd3858a7`, first divergence `564dd6a` and current
   pushed anchor `48caa9d`; restore `P0_P4_V2_P5` under user decision

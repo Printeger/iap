@@ -8306,3 +8306,77 @@ required below ICRA-070 before the replacement entrypoint and must bind these
 exact implementation commit, commands, working directories, environments,
 exits, source hashes and zero runtime invocations. Standards and Spec review
 remain independent process gates and are not self-attested by this record.
+
+## 2026-08-26 — ICRA-071 user-owned research-route repository guard
+
+IAP-RQ-000, IAP-RQ-423 and IAP-RQ-424. Synced `dev/icra` at `9b813b0` with
+`HEAD...origin/dev/icra = 0 0`, a clean tracked worktree and only the protected
+unstaged PDF. No ICRA runner, ROS or planner process was present. Read the full
+user route lock, guard plan, current state/task and repository conventions
+before changing only the ICRA-071 allowlist.
+
+Added one strict offline parser/verifier at
+`scripts/dev_planner/verify_icra_research_route.py`. It exposes an immutable
+typed route lock and rejects sentinel, duplicate-key, schema/type, owner,
+decision, anchor/history, list and protected-transition drift. The CLI derives
+route/module/claim/arm values from the lock, verifies state/task and active
+scope/plan/review preludes, preserves the P4-v1 `SCIENTIFIC_NO_GO`, accepts the
+required Supervisor/NONE blocked state, and keeps P4-v2/campaign inactive.
+Stable reasons also cover Builder authority staging, NO-GO alternate task,
+development-document synchronization, and Supervisor route changes without a
+distinct decision, exact pre-change HEAD anchor and complete governance set.
+
+Replaced the ineffective `src/iap/`-prefixed pre-commit with root-relative
+pre-commit/pre-push/commit-msg wrappers over the same verifier. All enumerated
+code/interface/config roots and an extension fallback require staged
+`DEV_LOG.md`, `docs/CHANGES.md` and `docs/TRACEABILITY.md`; generated/evidence
+trees are excluded. Commit messages require `IAP-RQ-NNN`. The installer changed
+only local `core.hooksPath` from the stale absolute path to `.githooks`; the
+global value was absent before and after, and a second install is idempotent.
+No bypass variable exists. This is explicitly accident prevention, not a
+security boundary or authentication of a same-permission process.
+
+Final focused command
+`PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s test -p
+test_verify_icra_research_route.py` initially exited 0 with 23/23. Shell syntax,
+repository-local no-bytecode compile, current verifier, pre-commit and pre-push
+checks also exit 0. The sole complete hermetic discovery command used task root
+`results/icra27/icra063/icra071_authoritative_full` and external inventory
+17,770, but exits 1 with 614/616 passing. The two failures are old ICRA-070
+pre-replacement assumptions: retained `install_v2` already exists and the
+compact inventory no longer matches the pre-replacement freeze. ICRA-071
+forbids deleting, rewriting or relabelling those artifacts and forbids changing
+old P0/P5 behavior to mask them, so no full-suite retry was made. No ROS, GPU,
+build/install, live, analyzer, P4 product or campaign command ran. Builder
+handoff is fail-closed pending Supervisor review of this retained-state blocker.
+
+Independent Standards/Spec review then found that the first hook revision read
+worktree authority after inspecting only selected index metadata, and pre-push
+did not consume outbound refs. The repair requires every staged authority file
+to be byte-identical between index and worktree before the common verifier,
+requires a clean tracked tree, parses Git pre-push stdin, and accepts only the
+checked-out HEAD as the validated outbound commit. It also binds state to the
+canonical route-lock path, requires active documents to cite that decision
+source, and requires a future protected field's new value plus distinct
+decision/HEAD anchor to appear in staged active scope/plan. Focused regressions
+now pass 27/27, including the exact staged/worktree split, outbound other-ref,
+and non-activating Supervisor proposal. Per the one-complete-discovery rule,
+the blocked 616-test command was not retried. Final Spec re-review additionally
+required the active ICRA-071 hook to distinguish document synchronization from
+scope authorization. The guard now permits only its verifier, three hooks,
+focused test, Builder documents and ICRA-071 compact evidence while this task
+is active; a staged P4 product file fails even with all three documents.
+Focused verification then passed 28/28. Final Standards review found that the
+staged-path query excluded deletions. The final guard covers `ACMRD`, prohibits
+deleting its verifier/hooks/focused test, and applies documentation/scope rules
+to product deletions. Adversaries delete a retained fixture product and stage a
+hook deletion while recreating a valid unstaged worktree copy; both fail
+closed. A final combination adversary modifies the allowed verifier while
+deleting all three nominally staged Builder documents; required-document
+deletion is now explicitly forbidden rather than counted as synchronization.
+Focused verification then passed 31/31. Rename review found that Git's rename
+detection could hide the source deletion and expose only an allowed destination.
+Policy inventory now uses `--no-renames`, so renames are always checked as
+delete-plus-add. A hook renamed onto an allowed path and a historical product
+renamed into the ICRA-071 evidence namespace both fail. Focused verification
+passes 33/33.
