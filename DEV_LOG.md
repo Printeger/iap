@@ -8112,9 +8112,12 @@ removes another technical failure.
 Each parse-only command runs as a task-owned process-group leader, records
 exact argv/stdout/stderr/exit code and audits required children plus remaining
 PIDs. Adoption and all three parser proofs run before the ICRA-069 live root,
-GPU preflight or runner-state identity registration. Focused runner/analyzer
-tests pass 29/29 and launch tests pass 20/20; both hermetic invocations report
-the 17,770-entry external ROS inventory unchanged. Complete hermetic discovery
-passes 549/549 with that inventory unchanged. At this static checkpoint, real
+GPU preflight or runner-state identity registration. Review remediation also
+rejects non-scalar/non-finite/control-bearing override values and makes the
+replacement analyzer validate the exact COMPLETE runner state plus the three
+ordered path/hash-bound parser proofs before claiming its one-shot marker.
+Focused runner/analyzer tests pass 33/33 and launch tests pass 20/20; both
+hermetic invocations report the 17,770-entry external ROS inventory unchanged.
+Complete hermetic discovery passes 553/553 with that inventory unchanged. At this static checkpoint, real
 installed parser, GPU, live identity and authoritative analyzer calls all
 remain zero.

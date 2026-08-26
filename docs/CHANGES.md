@@ -2748,8 +2748,9 @@ Requirements: `IAP-RQ-320`, `IAP-RQ-421`, `IAP-RQ-422`, `IAP-RQ-423`.
   IDs. The command renderer omits exactly the 19 canonical inactive empty
   defaults that ROS cannot accept as bare `name:=` tokens, while retaining
   false, zero and every other nonempty effective value exactly once.
-- Added fail-closed validation for unregistered omissions, malformed or
-  duplicate overrides and bare empty tokens. The exact rendered live argv is
+- Added fail-closed validation for unregistered omissions, malformed names or
+  values (including non-scalars, non-finite numbers, control bytes and nested
+  assignments), duplicate overrides and bare empty tokens. The exact rendered live argv is
   reused for three installed `ros2 launch --show-args` proofs before GPU or
   identity registration, with per-command stdout/stderr/exit and task-owned
   process audits.
@@ -2758,8 +2759,12 @@ Requirements: `IAP-RQ-320`, `IAP-RQ-421`, `IAP-RQ-422`, `IAP-RQ-423`.
   from current runner/analyzer commit and hashes. The authoritative wrapper may
   reconcile only this independently proven commit split; all other technical
   failures remain blockers.
-- Static verification passes 29/29 focused runner/analyzer tests and 20/20
-  launch tests plus 549/549 complete hermetic discovery, with the 17,770-entry
+- The authoritative analyzer now refuses to claim its one-shot marker until
+  the runner state is exact COMPLETE evidence and all three parser proofs are
+  path/hash-bound, ordered, untimed-out and free of main-flow children or
+  remnants. Missing, forged or tampered parser evidence fails closed.
+- Static verification passes 33/33 focused runner/analyzer tests and 20/20
+  launch tests plus 553/553 complete hermetic discovery, with the 17,770-entry
   external ROS inventory unchanged. No real installed parser, GPU preflight,
   live identity or authoritative analyzer was invoked at this checkpoint.
 

@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import importlib.util
 import json
+import math
 import os
 import re
 import shutil
@@ -245,7 +246,18 @@ def render_live_launch_command(
                 raise LiveRunnerError(f"unregistered_empty_override:{name}")
             omitted.append(name)
             continue
-        rendered = "true" if value is True else "false" if value is False else str(value)
+        if isinstance(value, bool):
+            rendered = "true" if value else "false"
+        elif isinstance(value, int):
+            rendered = str(value)
+        elif isinstance(value, float) and math.isfinite(value):
+            rendered = str(value)
+        elif isinstance(value, str) and not any(
+            ord(character) < 32 or ord(character) == 127 for character in value
+        ) and ":=" not in value:
+            rendered = value
+        else:
+            raise LiveRunnerError(f"malformed_override_value:{name}")
         token = f"{name}:={rendered}"
         if token.endswith(":=") or token.count(":=") != 1:
             raise LiveRunnerError(f"malformed_override_token:{name}")
@@ -434,6 +446,85 @@ def run_parse_only_proofs(contract: dict, parse_root: Path) -> dict:
     }
     _write_json(parse_root / "parser_proof.json", summary)
     return summary
+
+
+def parse_proof_failures(
+    proof: object, contract: dict, parse_root: Path | None = None,
+) -> list[str]:
+    """Validate the exact three-case installed-parser proof and its raw output."""
+    parse_root = Path(parse_root or (TASK_ROOT / "parse_only")).resolve()
+    failures = []
+    if not isinstance(proof, dict):
+        return ["parse proof must be an object"]
+    expected_order = [case_id for case_id, _ in LIVE_IDENTITIES]
+    if proof.get("schema_version") != "icra069_ros_launch_parser_proof_v1":
+        failures.append("parse proof schema mismatch")
+    if proof.get("case_order") != expected_order:
+        failures.append("parse proof case order mismatch")
+    cases = proof.get("cases")
+    if not isinstance(cases, list) or len(cases) != len(LIVE_IDENTITIES):
+        failures.append("parse proof case cardinality mismatch")
+        cases = []
+    if proof.get("parse_invocations") != 3:
+        failures.append("parse proof invocation count mismatch")
+    if proof.get("main_flow_child_invocations") != 0:
+        failures.append("parse proof main-flow child audit mismatch")
+    if proof.get("parse_ready") is not True:
+        failures.append("parse proof is not ready")
+    allowed_empty = canonical_empty_defaults(contract)
+    for index, (case_id, run_id) in enumerate(LIVE_IDENTITIES):
+        if index >= len(cases) or not isinstance(cases[index], dict):
+            failures.append(f"parse case[{case_id}] missing or malformed")
+            continue
+        case = cases[index]
+        config = live_config(
+            contract, case_id, run_id, TASK_ROOT / "live" / run_id
+        )
+        expected_live, expected_omitted = render_live_launch_command(
+            config, allowed_empty
+        )
+        expected_parse = parse_only_command(expected_live)
+        if case.get("case_id") != case_id \
+                or case.get("replacement_run_id") != run_id:
+            failures.append(f"parse case[{case_id}] identity mismatch")
+        if case.get("rendered_live_argv") != expected_live:
+            failures.append(f"parse case[{case_id}] live argv mismatch")
+        if case.get("omitted_empty_defaults") != expected_omitted:
+            failures.append(f"parse case[{case_id}] omission set mismatch")
+        if case.get("argv") != expected_parse:
+            failures.append(f"parse case[{case_id}] argv mismatch")
+        observed_pids = case.get("observed_process_group_pids")
+        if not (
+            isinstance(observed_pids, list)
+            and len(observed_pids) == len(set(observed_pids))
+            and all(isinstance(pid, int) and pid > 0 for pid in observed_pids)
+        ):
+            failures.append(f"parse case[{case_id}] process inventory malformed")
+        if not (
+            case.get("exit_code") == 0
+            and case.get("timed_out") is False
+            and case.get("observed_required_processes") == []
+            and case.get("remaining_process_group_pids") == []
+            and case.get("task_owned_process_audit_passed") is True
+            and case.get("parse_passed") is True
+        ):
+            failures.append(f"parse case[{case_id}] outcome mismatch")
+        case_root = parse_root / case_id.lower()
+        for stream_name in ("stdout", "stderr"):
+            stream_path = case_root / f"{stream_name}.log"
+            try:
+                relative = str(stream_path.relative_to(REPOSITORY))
+            except ValueError:
+                relative = ""
+            if not (
+                case.get(f"{stream_name}_path") == relative
+                and stream_path.is_file() and not stream_path.is_symlink()
+                and case.get(f"{stream_name}_sha256") == _sha256(stream_path)
+            ):
+                failures.append(
+                    f"parse case[{case_id}] {stream_name} binding mismatch"
+                )
+    return failures
 
 
 def write_adoption_manifest(current_commit: str) -> tuple[Path, dict]:
@@ -1172,7 +1263,12 @@ def reconcile_replacement_analysis(
     result = dict(base_result)
     technical = list(result.get("technical_failures", []))
     split_marker = "install manifest commit mismatch"
-    if split_marker in technical and not dual_provenance_failures:
+    split_count = technical.count(split_marker)
+    if split_count == 0:
+        technical.append("expected product/runner commit split marker missing")
+    elif split_count > 1:
+        technical.append("expected product/runner commit split marker cardinality mismatch")
+    elif not dual_provenance_failures:
         technical.remove(split_marker)
     technical.extend(dual_provenance_failures)
     behavioral = list(result.get("behavioral_failures", []))
@@ -1191,6 +1287,68 @@ def reconcile_replacement_analysis(
     return result
 
 
+def require_replacement_evidence_ready(bundle: object, contract: dict) -> None:
+    """Fail before analyzer invocation unless runner and parser proof are exact."""
+    failures = []
+    manifest = bundle.get("manifest") if isinstance(bundle, dict) else None
+    if not isinstance(manifest, dict):
+        manifest = {}
+        failures.append("replacement manifest missing")
+    expected_runner_path = TASK_ROOT / "live/runner_state.json"
+    runner_relative = manifest.get("runner_state_path")
+    try:
+        canonical_runner_relative = str(expected_runner_path.relative_to(REPOSITORY))
+    except ValueError:
+        canonical_runner_relative = ""
+    if not (
+        runner_relative == canonical_runner_relative
+        and expected_runner_path.is_file()
+        and not expected_runner_path.is_symlink()
+        and manifest.get("runner_state_sha256") == _sha256(expected_runner_path)
+    ):
+        failures.append("runner state binding mismatch")
+        runner_state = {}
+    else:
+        try:
+            runner_state = json.loads(expected_runner_path.read_text())
+        except (OSError, json.JSONDecodeError):
+            runner_state = {}
+            failures.append("runner state malformed")
+    expected_ids = [run_id for _, run_id in LIVE_IDENTITIES]
+    if not (
+        runner_state.get("state") == "COMPLETE"
+        and runner_state.get("registered") == expected_ids
+        and runner_state.get("attempted") == expected_ids
+        and runner_state.get("completed") == expected_ids
+        and runner_state.get("retries") == 0
+        and runner_state.get("gpu_preflight_invocations") == 1
+        and runner_state.get("launch_invocations") == 3
+    ):
+        failures.append("replacement runner is not exact COMPLETE one-shot evidence")
+    expected_proof_path = TASK_ROOT / "parse_only/parser_proof.json"
+    proof_relative = runner_state.get("parse_proof_path")
+    try:
+        canonical_proof_relative = str(expected_proof_path.relative_to(REPOSITORY))
+    except ValueError:
+        canonical_proof_relative = ""
+    if not (
+        proof_relative == canonical_proof_relative
+        and expected_proof_path.is_file()
+        and not expected_proof_path.is_symlink()
+        and runner_state.get("parse_proof_sha256") == _sha256(expected_proof_path)
+    ):
+        failures.append("parse proof binding mismatch")
+    else:
+        try:
+            proof = json.loads(expected_proof_path.read_text())
+        except (OSError, json.JSONDecodeError):
+            failures.append("parse proof malformed")
+        else:
+            failures.extend(parse_proof_failures(proof, contract))
+    if failures:
+        raise LiveRunnerError("replacement_evidence_not_ready:" + failures[0])
+
+
 def analyze_replacement_live(input_path: Path, output_path: Path) -> int:
     input_path = Path(input_path).resolve()
     output_path = Path(output_path).resolve()
@@ -1200,13 +1358,15 @@ def analyze_replacement_live(input_path: Path, output_path: Path) -> int:
     ).resolve()
     if input_path != expected_input or output_path != expected_output:
         raise LiveRunnerError("replacement_analyzer_path_mismatch")
-    QUALIFICATION._claim_live_analyzer_once(
-        output_path, input_path, CONTRACT_PATH
-    )
     try:
         bundle = json.loads(input_path.read_text())
     except (OSError, json.JSONDecodeError) as exc:
         raise LiveRunnerError("replacement_live_bundle_malformed") from exc
+    contract = QUALIFICATION.load_contract(CONTRACT_PATH)
+    require_replacement_evidence_ready(bundle, contract)
+    QUALIFICATION._claim_live_analyzer_once(
+        output_path, input_path, CONTRACT_PATH
+    )
     manifest = bundle.get("manifest", {})
     adoption_relative = manifest.get("adoption_manifest_path")
     adoption_path = (
@@ -1243,7 +1403,7 @@ def analyze_replacement_live(input_path: Path, output_path: Path) -> int:
             if adoption != expected_adoption:
                 dual_failures.append("dual provenance adoption payload mismatch")
     result = QUALIFICATION.analyze_live_bundle(
-        QUALIFICATION.load_contract(CONTRACT_PATH), bundle,
+        contract, bundle,
         CONTRACT_PATH, REPOSITORY,
     )
     result = reconcile_replacement_analysis(result, dual_failures)

@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import math
 import tempfile
 import unittest
 from pathlib import Path
@@ -99,6 +100,27 @@ class IcraP0P5LiveRunnerTest(unittest.TestCase):
                 EMPTY_DEFAULT_KEYS,
             )
 
+    def test_command_renderer_rejects_malformed_names_and_values(self):
+        malformed = (
+            ("bad name", "value"),
+            ("record_bag", None),
+            ("record_bag", []),
+            ("record_bag", {}),
+            ("run_duration_s", math.nan),
+            ("run_duration_s", math.inf),
+            ("runtime_root_dir", "line\nbreak"),
+            ("runtime_root_dir", "nul\x00byte"),
+            ("runtime_root_dir", "embedded:=override"),
+        )
+        for name, value in malformed:
+            with self.subTest(name=name, value=repr(value)):
+                with self.assertRaisesRegex(
+                    RUNNER.LiveRunnerError, "malformed_override_(name|value|token)"
+                ):
+                    RUNNER.render_live_launch_command(
+                        [(name, value)], EMPTY_DEFAULT_KEYS
+                    )
+
     def test_adoption_payload_separates_product_and_runner_provenance(self):
         current_commit = "b" * 40
         changed = [
@@ -162,6 +184,113 @@ class IcraP0P5LiveRunnerTest(unittest.TestCase):
             "P5_PROSPECTIVE_QUALIFICATION_TECHNICAL_BLOCKER",
         )
         self.assertIn("raw artifact hash mismatch", rejected["technical_failures"])
+
+        missing_split = RUNNER.reconcile_replacement_analysis(
+            {"technical_failures": [], "behavioral_failures": []}, []
+        )
+        self.assertEqual(
+            missing_split["status"],
+            "P5_PROSPECTIVE_QUALIFICATION_TECHNICAL_BLOCKER",
+        )
+        self.assertIn(
+            "expected product/runner commit split marker missing",
+            missing_split["technical_failures"],
+        )
+
+    def _valid_parser_proof(self, parse_root):
+        cases = []
+        for case_id, run_id in RUNNER.LIVE_IDENTITIES:
+            case_root = parse_root / case_id.lower()
+            case_root.mkdir(parents=True)
+            stdout_path = case_root / "stdout.log"
+            stderr_path = case_root / "stderr.log"
+            stdout_path.write_text("args\n")
+            stderr_path.write_text("")
+            run_dir = RUNNER.TASK_ROOT / "live" / run_id
+            config = RUNNER.live_config(
+                self.contract, case_id, run_id, run_dir
+            )
+            rendered, omitted = RUNNER.render_live_launch_command(
+                config, EMPTY_DEFAULT_KEYS
+            )
+            cases.append({
+                "case_id": case_id,
+                "replacement_run_id": run_id,
+                "rendered_live_argv": rendered,
+                "omitted_empty_defaults": omitted,
+                "argv": RUNNER.parse_only_command(rendered),
+                "exit_code": 0,
+                "timed_out": False,
+                "observed_process_group_pids": [123],
+                "observed_required_processes": [],
+                "remaining_process_group_pids": [],
+                "task_owned_process_audit_passed": True,
+                "stdout_path": str(stdout_path.relative_to(REPO)),
+                "stdout_sha256": RUNNER._sha256(stdout_path),
+                "stderr_path": str(stderr_path.relative_to(REPO)),
+                "stderr_sha256": RUNNER._sha256(stderr_path),
+                "parse_passed": True,
+            })
+        return {
+            "schema_version": "icra069_ros_launch_parser_proof_v1",
+            "case_order": [case_id for case_id, _ in RUNNER.LIVE_IDENTITIES],
+            "cases": cases,
+            "parse_invocations": 3,
+            "main_flow_child_invocations": 0,
+            "parse_ready": True,
+        }
+
+    def test_parser_proof_validation_rejects_omission_and_tamper(self):
+        with tempfile.TemporaryDirectory(dir=REPO / "results/icra27") as tmp:
+            parse_root = Path(tmp)
+            proof = self._valid_parser_proof(parse_root)
+            self.assertEqual(
+                RUNNER.parse_proof_failures(
+                    proof, self.contract, parse_root=parse_root
+                ), []
+            )
+
+            omitted = json.loads(json.dumps(proof))
+            del omitted["cases"][0]["stdout_sha256"]
+            self.assertIn(
+                "parse case[SAFE_NORMAL] stdout binding mismatch",
+                RUNNER.parse_proof_failures(
+                    omitted, self.contract, parse_root=parse_root
+                ),
+            )
+
+            tampered = json.loads(json.dumps(proof))
+            tampered["cases"][1]["argv"][-1] += "-tampered"
+            self.assertIn(
+                "parse case[FINAL_REJECT] argv mismatch",
+                RUNNER.parse_proof_failures(
+                    tampered, self.contract, parse_root=parse_root
+                ),
+            )
+
+    def test_replacement_readiness_rejects_incomplete_runner_before_claim(self):
+        bundle = {"manifest": {}}
+        with self.assertRaisesRegex(
+            RUNNER.LiveRunnerError, "replacement_evidence_not_ready"
+        ):
+            RUNNER.require_replacement_evidence_ready(bundle, self.contract)
+
+    def test_replacement_analyzer_does_not_claim_incomplete_evidence(self):
+        with tempfile.TemporaryDirectory(dir=REPO / "results/icra27") as tmp:
+            task_root = Path(tmp)
+            input_path = task_root / "live/icra_p0_p5_evidence_v1.json"
+            output_path = task_root / "compact/icra_p0_p5_analysis_v1.json"
+            input_path.parent.mkdir(parents=True)
+            input_path.write_text(json.dumps({"manifest": {}}) + "\n")
+            with mock.patch.object(RUNNER, "TASK_ROOT", task_root), \
+                    mock.patch.object(
+                        RUNNER.QUALIFICATION, "_claim_live_analyzer_once"
+                    ) as claim:
+                with self.assertRaisesRegex(
+                    RUNNER.LiveRunnerError, "replacement_evidence_not_ready"
+                ):
+                    RUNNER.analyze_replacement_live(input_path, output_path)
+            claim.assert_not_called()
 
     def test_normalizer_binds_real_bag_and_p5_rows(self):
         with tempfile.TemporaryDirectory(dir=REPO / "results/icra27") as tmp:
