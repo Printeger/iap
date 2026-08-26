@@ -8163,14 +8163,16 @@ Hash-consistent adversarial tests prove the analyzer rejects stale/absent GNSS,
 zero GNSS or LiDAR predictor use, zero fused horizons and `n_sv_used<=0`.
 The normalizer accepts only stable rows carrying all those positive source
 signals. Dependency interfaces resolve and hash the retained GNSS executable,
-degraded scenario and fixed RINEX input. The isolated overlay installer uses a
-task-local sanitized CMake install driver and compares the complete retained
-build tree before/after so the source build cannot be mutated; overlay bytes
-may differ from ICRA-068 only for the authorized current launch, helper and
-contract aliases.
+degraded scenario and fixed RINEX input, and exact argv binds scenario, RINEX,
+trigger topic and synthetic fallback=false. The isolated overlay installer
+uses a fixed-hash CMake driver with compileall/manifest writes removed, a closed
+environment, and compares the complete retained ICRA-068 task tree by SHA-256
+before/after. Overlay bytes may differ only for the authorized current launch,
+helper and contract aliases. Actual ament resolution and every active-prefix
+identity, including GLIM's CMake identities, are fail-closed and manifest-bound.
 
-Focused runner/analyzer/contract discovery passes 41/41 and launch discovery
-passes 21/21. Complete hermetic discovery exits 0; every run reports the
+Focused runner/analyzer/contract discovery passes 46/46 and launch discovery
+passes 21/21. Complete hermetic discovery passes 567/567; every run reports the
 17,770-entry external ROS inventory unchanged. No ICRA-070 overlay, installed
 parser, GPU preflight, live identity or authoritative analyzer has been invoked
-at this pre-commit checkpoint.
+at this static checkpoint.

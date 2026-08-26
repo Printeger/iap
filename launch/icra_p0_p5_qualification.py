@@ -33,6 +33,15 @@ FULL_SENSOR_QUALIFICATION_VALUES = {
     "validator_require_gnss_valid": True,
     "validator_require_lidar_valid": True,
     "gnss_time_source": "trigger_topic", "gnss_ephemeris_source": "rinex",
+    "gnss_scenario_file": (
+        "/home/dev/ws_iap/src/iap/results/icra27/icra070/install/"
+        "share/iap/config/gnss_sim/demo7_skymask_nlos.yaml"
+    ),
+    "gnss_rinex_nav_file": (
+        "/home/dev/ws_iap/src/LIGO./Data/BRDM00DLR_S_20221870000_01D_MN.rnx"
+    ),
+    "gnss_trigger_topic": "/sim/drone_0/lidar",
+    "gnss_fallback_to_synthetic_on_rinex_error": False,
     "gnss_enabled_constellations": "GPS,BDS,GAL,GLO",
     "gnss_pr_noise_base": 5.0, "gnss_dop_noise_base": 0.5,
     "gnss_enable_map_occlusion": True, "gnss_enable_skymask": True,

@@ -55,7 +55,13 @@ class IcraP0P5LiveRunnerTest(unittest.TestCase):
             self.contract, "SAFE_NORMAL", {}
         )
         for key, value in expected.items():
-            self.assertEqual(config[key], value)
+            if key == "gnss_scenario_file":
+                self.assertEqual(
+                    config[key],
+                    str(RUNNER.OVERLAY_INSTALL_ROOT / "share/iap" / value),
+                )
+            else:
+                self.assertEqual(config[key], value)
         self.assertTrue(config["record_bag"])
         self.assertFalse(config["start_rviz"])
         self.assertEqual(config["run_duration_s"], 90)
@@ -84,6 +90,22 @@ class IcraP0P5LiveRunnerTest(unittest.TestCase):
                 self.assertEqual(len(rendered_names), len(set(rendered_names)))
                 self.assertIn("planner_enable_all_safety:=false", command)
                 self.assertIn("p1.lambda_integrity:=0.0", command)
+                self.assertIn(
+                    "gnss_scenario_file:="
+                    + str(
+                        RUNNER.OVERLAY_INSTALL_ROOT
+                        / "share/iap/config/gnss_sim/demo7_skymask_nlos.yaml"
+                    ),
+                    command,
+                )
+                self.assertIn(
+                    "gnss_rinex_nav_file:=" + str(RUNNER.RINEX_EPHEMERIS_PATH),
+                    command,
+                )
+                self.assertIn("gnss_trigger_topic:=/sim/drone_0/lidar", command)
+                self.assertIn(
+                    "gnss_fallback_to_synthetic_on_rinex_error:=false", command
+                )
 
     def test_command_renderer_rejects_unregistered_empty_and_duplicates(self):
         with self.assertRaisesRegex(
@@ -183,7 +205,83 @@ class IcraP0P5LiveRunnerTest(unittest.TestCase):
             "multipath": True,
             "time_source": "trigger_topic",
             "trigger_topic": "/sim/drone_0/lidar",
+            "fallback_to_synthetic_on_rinex_error": False,
         })
+
+    def test_dependency_preflight_rejects_case_or_path_drift(self):
+        drift = json.loads(json.dumps(self.contract))
+        drift["qualification_values"][
+            "gnss_fallback_to_synthetic_on_rinex_error"
+        ] = True
+        with self.assertRaisesRegex(
+            RUNNER.LiveRunnerError, "full_sensor_dependency_contract_mismatch"
+        ):
+            RUNNER.resolve_gnss_dependencies(drift, RUNNER.INSTALL_ROOT)
+
+    def test_byte_inventory_detects_same_size_and_mtime_content_change(self):
+        with tempfile.TemporaryDirectory(dir=REPO / "results/icra27") as tmp:
+            path = Path(tmp) / "artifact"
+            path.write_bytes(b"before")
+            before = RUNNER.tree_byte_inventory(Path(tmp))
+            stat = path.stat()
+            path.write_bytes(b"after!")
+            path.touch()
+            import os
+            os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+            after = RUNNER.tree_byte_inventory(Path(tmp))
+            self.assertNotEqual(before, after)
+
+    def test_install_environment_removes_external_write_controls(self):
+        with mock.patch.dict(
+            "os.environ",
+            {"DESTDIR": "/tmp/escape", "CMAKE_INSTALL_COMPONENT": "bad"},
+            clear=False,
+        ):
+            environment = RUNNER.overlay_install_environment()
+        self.assertNotIn("DESTDIR", environment)
+        self.assertNotIn("CMAKE_INSTALL_PREFIX", environment)
+        self.assertNotIn("CMAKE_INSTALL_COMPONENT", environment)
+        self.assertEqual(environment["PATH"], "/usr/bin:/bin")
+
+    def test_install_driver_sanitizer_removes_compile_and_manifest_writes(self):
+        source = '''file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/lib" TYPE FILE FILES "/base/lib.so")
+if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT)
+  execute_process(
+    COMMAND "/usr/bin/python3" "-m" "compileall" "/base/install/python"
+  )
+endif()
+if(CMAKE_INSTALL_COMPONENT)
+  set(CMAKE_INSTALL_MANIFEST "install_manifest_${CMAKE_INSTALL_COMPONENT}.txt")
+else()
+  set(CMAKE_INSTALL_MANIFEST "install_manifest.txt")
+endif()
+file(WRITE "/base/build/${CMAKE_INSTALL_MANIFEST}" "x")
+'''
+        sanitized = RUNNER.sanitize_install_driver_text(source)
+        self.assertIn("file(INSTALL", sanitized)
+        self.assertNotIn("compileall", sanitized)
+        self.assertNotIn("file(WRITE", sanitized)
+        self.assertNotIn("/base/install/python", sanitized)
+
+    def test_package_resolution_rejects_duplicate_identity(self):
+        with tempfile.TemporaryDirectory(dir=REPO / "results/icra27") as tmp:
+            root = Path(tmp)
+            first, second = root / "first", root / "second"
+            marker = "share/ament_index/resource_index/packages/iap"
+            (first / marker).parent.mkdir(parents=True)
+            (second / marker).parent.mkdir(parents=True)
+            (first / marker).write_text("")
+            resolution = RUNNER.verify_package_identities(
+                [first, second], {"iap": first}, lambda _: str(first)
+            )
+            self.assertEqual(resolution["iap"]["resolved_prefix"], str(first))
+            (second / marker).write_text("")
+            with self.assertRaisesRegex(
+                RUNNER.LiveRunnerError, "duplicate_or_stale_package_identity"
+            ):
+                RUNNER.verify_package_identities(
+                    [first, second], {"iap": first}, lambda _: str(first)
+                )
 
     def test_overlay_install_command_is_no_compile_and_repository_local(self):
         command = RUNNER.overlay_install_command()
@@ -251,7 +349,12 @@ class IcraP0P5LiveRunnerTest(unittest.TestCase):
             "binary_library_bytes_equal": True,
         }
         payload = RUNNER.build_overlay_manifest_payload(
-            "b" * 40, dependency, inventory
+            "b" * 40, dependency, inventory,
+            evidence_bindings={
+                "overlay_install_command_sha256": "c" * 64,
+                "dependency_preflight_sha256": "d" * 64,
+            },
+            retained_artifacts={"byte_inventory_equal": True},
         )
         self.assertEqual(
             payload["product_build"]["git_commit"], RUNNER.PRODUCT_COMMIT
@@ -261,6 +364,11 @@ class IcraP0P5LiveRunnerTest(unittest.TestCase):
         )
         self.assertEqual(payload["runner"]["git_commit"], "b" * 40)
         self.assertTrue(payload["binary_library_bytes_equal"])
+        self.assertEqual(
+            payload["evidence_bindings"]["overlay_install_command_sha256"],
+            "c" * 64,
+        )
+        self.assertTrue(payload["retained_artifacts"]["byte_inventory_equal"])
         self.assertEqual(payload["runtime_prefix_order"][:2], [
             str(RUNNER.OVERLAY_INSTALL_ROOT), str(RUNNER.INSTALL_ROOT),
         ])
@@ -348,6 +456,9 @@ class IcraP0P5LiveRunnerTest(unittest.TestCase):
                 "stderr_path": str(stderr_path.relative_to(REPO)),
                 "stderr_sha256": RUNNER._sha256(stderr_path),
                 "parse_passed": True,
+                "full_sensor_overrides": RUNNER.full_sensor_launch_overrides(
+                    self.contract
+                ),
             })
         return {
             "schema_version": "icra070_ros_launch_parser_proof_v1",
@@ -358,6 +469,9 @@ class IcraP0P5LiveRunnerTest(unittest.TestCase):
             "parse_ready": True,
             "full_sensor_resolution": RUNNER.full_sensor_resolution(
                 self.contract
+            ),
+            "required_full_sensor_overrides": (
+                RUNNER.full_sensor_launch_overrides(self.contract)
             ),
         }
 
@@ -386,6 +500,17 @@ class IcraP0P5LiveRunnerTest(unittest.TestCase):
                 "parse case[FINAL_REJECT] argv mismatch",
                 RUNNER.parse_proof_failures(
                     tampered, self.contract, parse_root=parse_root
+                ),
+            )
+
+            sensor_drift = json.loads(json.dumps(proof))
+            sensor_drift["cases"][2]["full_sensor_overrides"][
+                "gnss_fallback_to_synthetic_on_rinex_error"
+            ] = "true"
+            self.assertIn(
+                "parse case[RUNTIME_FAIL] full-sensor argv mismatch",
+                RUNNER.parse_proof_failures(
+                    sensor_drift, self.contract, parse_root=parse_root
                 ),
             )
 

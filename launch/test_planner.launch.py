@@ -1235,6 +1235,16 @@ SCENARIO_PRESETS = {
         "use_gnss": "true",
         "use_araim": "true",
         "gnss_time_source": "trigger_topic",
+        "gnss_scenario_file": (
+            "/home/dev/ws_iap/src/iap/results/icra27/icra070/install/"
+            "share/iap/config/gnss_sim/demo7_skymask_nlos.yaml"
+        ),
+        "gnss_trigger_topic": "/sim/drone_0/lidar",
+        "gnss_rinex_nav_file": (
+            "/home/dev/ws_iap/src/LIGO./Data/"
+            "BRDM00DLR_S_20221870000_01D_MN.rnx"
+        ),
+        "gnss_fallback_to_synthetic_on_rinex_error": "false",
         "enable_gnss_integrity": "true",
         "enable_gnss_araim": "true",
         "enable_lidar_integrity": "true",
@@ -1646,6 +1656,7 @@ ARG_DEFAULTS = [
     ("gnss_random_seed", "20260429"),
     ("gnss_ephemeris_source", "rinex"),
     ("gnss_time_source", "trigger_topic"),
+    ("gnss_trigger_topic", "/sim/drone_0/lidar"),
     ("gnss_enabled_constellations", "GPS,BDS,GAL,GLO"),
     ("gnss_scenario_file", "config/gnss_sim/demo7_skymask_nlos.yaml"),
     ("gnss_rinex_nav_file", "/home/dev/ws_iap/src/LIGO./Data/BRDM00DLR_S_20221870000_01D_MN.rnx"),
@@ -2933,6 +2944,7 @@ def _launch_setup(context):
 
     gnss_ephemeris_source = LaunchConfiguration("gnss_ephemeris_source").perform(context)
     gnss_time_source = LaunchConfiguration("gnss_time_source").perform(context)
+    gnss_trigger_topic = LaunchConfiguration("gnss_trigger_topic").perform(context)
     gnss_enabled_constellations = LaunchConfiguration("gnss_enabled_constellations").perform(context)
     gnss_scenario_file = LaunchConfiguration("gnss_scenario_file").perform(context)
     gnss_rinex_nav_file = LaunchConfiguration("gnss_rinex_nav_file").perform(context)
@@ -3968,7 +3980,7 @@ def _launch_setup(context):
                 {"doppler_noise_std_mps": _param_float(context, "gnss_dop_noise_base")},
                 {"random_seed": _param_int(context, "gnss_random_seed")},
                 {"time_source": gnss_time_source},
-                {"trigger_topic": sim_lidar_topic},
+                {"trigger_topic": gnss_trigger_topic},
                 {"scenario_file": gnss_scenario_file},
                 {"num_gps_sats": 24},
                 {"gps_prn_min": 1},

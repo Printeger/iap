@@ -2903,14 +2903,16 @@ Requirements: `IAP-RQ-020`, `IAP-RQ-030`, `IAP-RQ-040`, `IAP-RQ-220`,
   GNSS/LiDAR/fused-horizon predictor use, zero satellites, reduced modes,
   missing topics or any of the 16 required processes.
 - Added repository-local dependency hashing and an isolated ICRA-070
-  no-compile overlay workflow. Its task-local CMake driver suppresses writes
-  back into the retained ICRA-068 build, whose complete before/after stat
-  inventory must remain identical. Overlay bytes may differ only for the three
+  no-compile overlay workflow. Its fixed-hash CMake driver removes compileall
+  and manifest writes, runs in a closed environment, and requires the complete
+  retained-task before/after byte/SHA inventory to remain identical. Overlay
+  bytes may differ only for the three
   authorized current launch/helper/contract aliases; every binary/library must
   equal ICRA-068.
-- Fresh identities are exactly the ordered `-003` set. Parser proof binds the
-  full-sensor resolution and analyzer readiness binds the overlay manifest.
-- Static verification passes 41/41 focused runner/analyzer/contract tests,
-  21/21 launch tests and complete hermetic discovery with exit 0. The 17,770
+- Fresh identities are exactly the ordered `-003` set. Exact argv and parser
+  proof bind scenario, RINEX, trigger topic and synthetic fallback=false;
+  actual ament/CMake resolution and duplicate identity audits are manifest-bound.
+- Static verification passes 46/46 focused runner/analyzer/contract tests,
+  21/21 launch tests and complete hermetic discovery 567/567. The 17,770
   external ROS entries remain unchanged. No overlay, real parser, GPU, live arm
   or analyzer has been invoked at this checkpoint.
