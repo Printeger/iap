@@ -58,8 +58,14 @@ required success and zero-publication adversaries; analyzer fixtures are complem
 
 ### Supervisor window disposition
 
-- **Pending the mandatory post-push audit.** The final disposition and handoff anchor will be recorded only after
-  this Review commit is pushed and divergence is reconfirmed, per `AGENTS.md` section 8.6.
+- Review commit `7549e559f6e11eab60a8391d80b40520d94234b8` was pushed normally; pre-push passed and fetch reconfirmed
+  divergence `0 0`. Repository consistency and hooks-path checks pass. The normal commit attempt truthfully hit
+  the known `BUILDER_SUPERVISOR_FILE_STAGED` lifecycle guard, so the Supervisor used the section 8.6 controlled
+  `--no-verify` commit path; no Builder or protected evidence path was staged.
+- **`ROTATE_RECOMMENDED`**. Reason: `ICRA072B_REQUEST_CHANGES_COMPACTED_REVIEW`. This Review depended on a
+  compacted context and issued a new exact canonical-repair contract. A fresh Supervisor window must later review
+  the Builder repair from repository authority only. Rotation does not change `active_role=DEEPSEEK`, the same
+  ICRA-072B Gate or the bounded `NEXT_TASK.md` scope.
 
 ## 2026-08-27 — ICRA-072A Review PASS; ICRA-072B stabilization issued
 
