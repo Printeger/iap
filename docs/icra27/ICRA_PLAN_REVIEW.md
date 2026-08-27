@@ -1,5 +1,12 @@
 # ICRA 2027 P0 -> P4-v2 -> P5 计划复审
 
+## ICRA-075 Supervisor Review — 2026-08-27
+
+**Verdict: `REQUEST_CHANGES / BLOCKED / NOT PASS`.** Fixed range `77522559..e5d625ab` has a real P5
+`current_low_margin` terminal blocker: 0/40 rows, no EGO final/publication/runtime chain and no power inputs.
+Standards also rejects metrics-only lineage/writer fail-open publication behavior; Spec rejects the missing
+post-analyzer source recheck. ICRA-076 awaits a distinct user repair-or-bypass decision.
+
 ## ICRA-074 Supervisor Review — 2026-08-27
 
 **Verdict: `PASS / ICRA075_TASK_READY`.** Fixed range `f6f7832a..ee9774a1` passes Standards and Spec with

@@ -1,5 +1,13 @@
 # ICRA P0 -> P4 -> P5 deviation audit and scientific recovery roadmap
 
+## ICRA-075 Review BLOCKED / awaiting user decision — 2026-08-27
+
+Supervisor Review of `77522559..e5d625ab` closes ICRA-075 as REQUEST_CHANGES/BLOCKED/NOT PASS. The first control
+row has 2,137 P5 final `current_low_margin` rejections and no EGO final/publication/runtime identity; the exact
+matrix is 0/40 and no power inputs exist. Metrics-only lineage/writer failures are fail-open and source is not
+rechecked after analyzer execution. Route lock is unchanged. ICRA-076 is not active until the user explicitly
+chooses bounded ICRA-075 repair or accepts the missing exploratory/power/safety basis and bypasses.
+
 ## ICRA-074 PASS and ICRA-075 issuance — 2026-08-27
 
 Supervisor Review of `f6f7832a..ee9774a1` passes Standards and Spec with independent offline 51/51. V2 geometry

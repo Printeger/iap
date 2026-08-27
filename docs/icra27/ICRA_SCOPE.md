@@ -1,5 +1,12 @@
 # ICRA 2027 Conference Scope — User-owned P0 -> P4-v2 -> P5 recovery
 
+## ICRA-075 Review BLOCKED — 2026-08-27
+
+ICRA-075 is REQUEST_CHANGES/NOT PASS: the first control row is blocked by genuine P5 `current_low_margin`, leaving
+0/40 rows, no complete terminal identity and no exploratory power inputs. Review also finds metrics-only
+lineage/writer fail-open behavior and a missing post-analyzer source recheck. No Builder task or ICRA-076 is active;
+the user must explicitly choose bounded ICRA-075 repair or accept the missing scientific/safety basis and bypass.
+
 ## ICRA-074 PASS and ICRA-075 activation — 2026-08-27
 
 ICRA-074 passes its exact V2 geometry and offline production-seam contract at 51/51 with no production/config

@@ -3,13 +3,13 @@
 ```yaml
 schema_version: icra_single_branch_two_agent_v3_user_route_owner
 branch: dev/icra
-active_role: DEEPSEEK
-status: TASK_READY
+active_role: SUPERVISOR
+status: BLOCKED_AWAITING_USER_RESEARCH_DECISION
 gate: ICRA-075_EXPLORATORY_AND_POWER_INPUTS
-task_id: ICRA-075
+task_id: NONE
 milestone: ICRA-075_LAYER3_EXPLORATORY_ABLATION_AND_POWER_INPUTS
-review_base: f6f7832aec987b94f559e7e50219f239691c8727
-reviewed_head: ee9774a1fad637a4147036006d91f08b96d5f8b2
+review_base: 7752255987504bdf961d01a32029769eaf512d80
+reviewed_head: e5d625ab6f3d922d563425fcf01969c3d1b4b0a4
 mandated_lineage_review_base: 3b5199e0cf8efc904f124cdb73156a3209eb6d80
 icra071_repair_review_base: 6e0e7328835064ecb665bc6476a6254924ff371d
 conference_route: P0_P4_V2_P5
@@ -18,12 +18,12 @@ route_lock: docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md
 user_decision_id: USER-ICRA-ROUTE-20260827-004
 user_approval_anchor: b126b2f5f9f0a3617346d75275b7aa703939263a
 workflow_decision_id: USER-ICRA-WORKFLOW-20260826-001
-route_status: ICRA074_PASS_ICRA075_TASK_READY
+route_status: ICRA075_BLOCKED_AWAITING_USER_DECISION_REPAIR_OR_BYPASS_TO_ICRA076
 historical_gate0a_verdict: NO_GO_P2
 p0_gate0b_status: PASS
 p0_gate0b_worker_count: 4
 p4_v1_status: G0A_PASS_G0B_PASS_G0C_SCIENTIFIC_NO_GO_IMMUTABLE
-p4_v2_status: DEVELOPMENT_LAYER1_PASS_LAYER2_BLOCKED_BYPASSED_LAYER3_SCIENTIFICALLY_NOT_STARTED_BLOCKED_DEBT_ICRA074_PASS_ICRA075_ACTIVE
+p4_v2_status: DEVELOPMENT_LAYER1_PASS_LAYER2_BLOCKED_BYPASSED_LAYER3_SCIENTIFICALLY_NOT_STARTED_BLOCKED_ICRA075_INCOMPLETE
 p5_status: IMPLEMENTED_BUT_NO_CURRENT_PROSPECTIVE_QUALIFICATION_PASS
 icra070_status: SUPERSEDED_UNQUALIFIED_BY_USER_ROUTE_DECISION
 icra071_status: REQUEST_CHANGES_DEFERRED_NONBLOCKING_BY_USER_DECISION_002
@@ -31,34 +31,34 @@ icra072a_status: PASS_SOURCE_BOUND_COMPLETE_LIVE_IDENTITY
 icra072b_status: BLOCKED_HIDDEN_UNTRACKED_SOURCE_USER_ACCEPTED_BYPASS_NOT_PASS
 icra073_status: BLOCKED_USER_ACCEPTED_BYPASS_NOT_PASS
 icra074_status: PASS_OFFLINE_CONTRACT_PRODUCTION_UNCHANGED_NO_EFFECT_CLAIM
-icra075_status: TASK_READY_EXPLORATORY_ABLATION_AND_POWER_INPUTS
-supervisor_verdict: ICRA074_PASS_STANDARDS_PASS_SPEC_PASS
-review_disposition: ICRA075_ISSUED_NO_BLOCKERS
+icra075_status: BLOCKED_CONTROL_P5_CURRENT_LOW_MARGIN_0_OF_40_NO_POWER_INPUTS_NOT_PASS
+supervisor_verdict: ICRA075_REQUEST_CHANGES_STANDARDS_AND_SPEC_BLOCKED
+review_disposition: AWAITING_USER_DECISION_REPAIR_ICRA075_OR_BYPASS_TO_ICRA076
 qualification_claim: false
 campaign_status: BLOCKED_UNTIL_ICRA079_REVIEW_PASS_AND_DISTINCT_USER_APPROVAL
-handoff_status: TASK_READY
-next_task: NEXT_TASK.md
-next_after_icra075_pass: ICRA-076_PREREGISTRATION_FREEZE
+handoff_status: BLOCKED_AWAITING_USER_RESEARCH_DECISION
+next_task: NONE
+next_after_user_decision: PENDING_USER_DECISION
 recovery_roadmap: docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md
 four_layer_workflow: docs/icra27/ICRA_FOUR_LAYER_DEVELOPMENT_WORKFLOW.md
 guard_plan: docs/icra27/ICRA_CROSS_LAYER_GUARD_PLAN.md
 artifact_retention: ALL_ICRA072_EVIDENCE_SHARED_ROOTS_HIDDEN_USER_ARTIFACTS_AND_PROTECTED_PDF_RETAINED
-window_disposition: ROTATE_RECOMMENDED
-rotation_reason: ICRA074_PASS_GATE_CHANGE_TO_ICRA075
-window_handoff_anchor: 2084242af64721b2212c1bd2f129cc7a35f0bae5
+window_disposition: PENDING_POST_PUSH_AUDIT
+rotation_reason: PENDING_POST_PUSH_AUDIT
+window_handoff_anchor: PENDING_REVIEW_PUSH
 window_next_role: SUPERVISOR
-window_next_review_task: ICRA-075
+window_next_review_task: ICRA-075_USER_DECISION
 window_bootstrap_source: REPOSITORY_AUTHORITY_ONLY
-updated_utc: 2026-08-27T11:38:13Z
+updated_utc: 2026-08-27T13:07:37Z
 ```
 
-ICRA-074 Builder HEAD `ee9774a1fad637a4147036006d91f08b96d5f8b2` passes Review against fixed handoff
-`f6f7832aec987b94f559e7e50219f239691c8727`. V2 geometry changes only risky amplitude/required identities and
-proves `1.371035122 m >= 1.349 m`. Supervisor offline reruns pass 51/51. Production P4/config remains unchanged
-because focused production-seam tests demonstrate the existing provider-bottleneck contract. Standards PASS and
-Spec PASS; two duplicated test-helper smells are low/non-blocking. No effect, source-bound, qualification or
-campaign claim follows.
+ICRA-075 Builder HEAD `e5d625ab6f3d922d563425fcf01969c3d1b4b0a4` is REQUEST_CHANGES/BLOCKED against
+fixed handoff `7752255987504bdf961d01a32029769eaf512d80`. The first scientific control row reaches healthy P0 but
+all 2,137 P5 final observations reject `current_low_margin`; no EGO final/publication/P5 runtime exists, so the
+matrix is 0/40 and no power inputs exist. Builder correctly stopped without forbidden risk/provider/threshold
+tuning.
 
-ICRA-075 is TASK_READY for development-only exploratory ablation and power inputs. ICRA-073 accepted debt remains
-BLOCKED/NOT PASS and is not retroactively repaired. Formal freeze, held-out confirmation and ICRA-076 remain
-unauthorized until later Review.
+Review also finds two engineering blockers: metrics-only lineage/CSV failures are allowed to return success and
+therefore change the pre-publication fail-closed boundary; source is not rechecked after analyzer execution.
+ICRA-075 is NOT PASS. No Builder task or ICRA-076 is authorized until the user explicitly chooses bounded ICRA-075
+repair or accepts these missing exploratory/power/safety bases and bypasses to ICRA-076.

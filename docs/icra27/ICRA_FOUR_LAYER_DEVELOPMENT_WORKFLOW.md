@@ -1,14 +1,14 @@
 # ICRA four-layer development and validation workflow
 
-Status: **ACTIVE — LAYER 3 ICRA-075 EXPLORATORY AND POWER INPUTS**
+Status: **BLOCKED — LAYER 3 ICRA-075 AWAITING USER DECISION**
 
 Requirements: `IAP-RQ-320`, `IAP-RQ-321`, `IAP-RQ-400`, `IAP-RQ-410`, `IAP-RQ-421`, `IAP-RQ-422`,
 `IAP-RQ-423`, `IAP-RQ-424`
 
-Current disposition: ICRA-072A passed; ICRA-072B/073 remain blocked/user-bypassed/NOT PASS; ICRA-074 passes the
-offline V2 geometry/production-seam contract without product change or effect claim. ICRA-075 is TASK_READY for
-development runtime exploratory ablations and non-freezing power inputs. Formal Layer 4 and campaign remain
-blocked.
+Current disposition: ICRA-072A passed; ICRA-072B/073 remain blocked/user-bypassed/NOT PASS; ICRA-074 passes its
+offline contract. ICRA-075 is BLOCKED/NOT PASS at 0/40 after P5 rejects the first row; no power inputs exist and
+two fail-closed engineering defects remain. No Builder task is active. Formal Layer 4 and campaign remain blocked
+pending explicit user decision.
 
 ## 1. Purpose
 

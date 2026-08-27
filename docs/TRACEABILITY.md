@@ -1,5 +1,14 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-27 ICRA-075 Supervisor Review
+
+| Req ID | Reviewed seam | Evidence and disposition | Status |
+|---|---|---|---|
+| IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 | Runtime matrix/identity | First control row has healthy P0 but 2,137/2,137 P5 final `current_low_margin` rejections; no EGO final/publication/runtime; 0/40 complete | **BLOCKED / NOT PASS** |
+| IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-423 / IAP-RQ-424 | Power/claim exit | No complete row and `power_inputs_produced=false`; no effect, SESOI, sample-size or formal claim | **MISSING / BLOCKED** |
+| IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-423 | Evidence-only publication boundary | Metrics-only lineage/identity/writer failures return success before P5/publication | **REQUEST_CHANGES / FAIL-OPEN** |
+| IAP-RQ-423 / IAP-RQ-424 | Source-change closure | Final source capture precedes analyzer and no post-analyzer source recheck exists | **REQUEST_CHANGES** |
+
 ## 2026-08-27 ICRA-075 exploratory ablation and power inputs
 
 | Req ID | Implemented/tested seam | Evidence and disposition | Status |

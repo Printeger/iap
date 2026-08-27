@@ -3,10 +3,10 @@
 > Purpose: 把 talk《Integrity-Aware Active Perception》的“优化版 pipeline”拆成可实现、可验收、可追溯的工程需求。
 > Scope: 仅修改本仓库 src/iap；禁止修改 ../glim（可参考其代码但不得提交改动）。
 
-> Current ICRA disposition (2026-08-27): ICRA-074 passes its offline geometry/production-seam contract at 51/51;
-> production remains unchanged and no effect claim follows. ICRA-073 debt remains blocked/user-bypassed/NOT PASS.
-> ICRA-075 attempted its development exploratory matrix and is now
-> `BLOCKED_ICRA075_CONTROL_P5_CURRENT_LOW_MARGIN`; formal Layer 4 and campaign remain unauthorized.
+> Current ICRA disposition (2026-08-27): ICRA-075 Supervisor Review is `REQUEST_CHANGES / BLOCKED / NOT PASS`.
+> The matrix is 0/40 with no power record after P5 rejects every first-row final candidate `current_low_margin`.
+> Metrics-only lineage failure is also fail-open before publication and the runner lacks a post-analyzer source
+> recheck. ICRA-076, formal Layer 4 and campaign remain unauthorized pending explicit user decision.
 
 ICRA-075 Builder implementation adds exact V2 runtime map/GNSS assets, a 40-row development-only runner,
 committed-final/P5/publication capture, independent fixed-200 equal-arc analysis and deterministic non-freezing
@@ -14,8 +14,9 @@ power inputs. Pre-live focused tests passed 11/11 and the required shared builds
 lineage, certified equal-arc error evidence, independent geometry/dynamics safety and per-scene flat-null
 repeatability/zero-mass/cross-seed correlation sensitivity are fail-closed; unavailable within-run correlation is
 reported rather than substituted. Development seeds `75001..75005` are
-permanently excluded from held-out use. No P0/P4/EGO/P5 behavior, provider truth, AL/PL, threshold, SESOI,
-formal sample size or success verdict is changed or frozen. This paragraph records the pre-live implementation
+permanently excluded from held-out use. Builder did not intentionally tune provider truth, AL/PL, threshold,
+SESOI, formal sample size or success verdict. Review nevertheless finds that metrics-only lineage/writer failures
+now return success before publication, a prohibited behavior-boundary change. This paragraph records the pre-live implementation
 checkpoint; the retained GPU/live attempts and terminal disposition are reported immediately below.
 
 `matrix-001` retained a GPU PASS but no ROS launch/scientific row: the runner compared its valid ICRA-075 capture

@@ -3,6 +3,14 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- review(icra-075-blocked): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 /
+  IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — review `e5d625ab` against fixed `77522559`. Offline tooling passes
+  14/14 and retained GPU/process/cleanup evidence conforms, but the first control row has 2,137/2,137 P5 final
+  rejections at `current_low_margin`; zero of 40 rows complete, no EGO final/publication/runtime identity exists,
+  and no power record is produced. Also reject metrics-only lineage/writer fail-open publication behavior and the
+  missing post-analyzer source recheck. Close ICRA-075 BLOCKED/NOT PASS pending explicit user repair-or-bypass
+  decision; do not issue ICRA-076 or make an effect/formal claim.
+
 - feat(icra-075-exploratory-power-inputs): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 /
   IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — add deterministic V2 PRIMARY/MIRROR/NULL runtime
   map/GNSS assets, a dedicated public-map launch substitution, exact 40-row development runner, complete

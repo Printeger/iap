@@ -1,5 +1,49 @@
 # ICRA Supervisor Log
 
+## 2026-08-27 — ICRA-075 Review BLOCKED; awaiting user decision
+
+### Review identity and preservation
+
+- Fixed Review base `7752255987504bdf961d01a32029769eaf512d80`; reviewed Builder HEAD
+  `e5d625ab6f3d922d563425fcf01969c3d1b4b0a4`. Fetch confirms divergence `0 0`; only the protected PDF is visible
+  untracked. Review ran no build, ROS, GPU or live flow and preserved shared roots/evidence/logs/hidden artifacts.
+- Supervisor independently ran the offline ICRA-075 contract suite: 14/14 PASS. Builder records shared build PASS,
+  pushed-before-live source, GPU PASS, 15/15 required processes and owned cleanup PASS.
+
+### Standards
+
+Verdict: **REQUEST_CHANGES — one P1 hard violation.**
+
+- `planner_manager.cpp` makes metrics-only terminal-lineage identity/guide/writer failures return success. The FSM
+  consumes this boolean before P5/publication, so the change weakens an existing fail-closed publication boundary
+  and violates the evidence-only/no-decision-change scope. Tests omit a metrics-only writer/identity adversary;
+  REQS/CHANGES consequently overstate that no behavior changed.
+- Judgement-only smell: the 604-line exploratory module combines protocol, asset admission, spline numerics,
+  geometry/safety, oracle and power statistics. This is maintainability debt, not the gate blocker.
+
+### Spec
+
+Verdict: **REQUEST_CHANGES / BLOCKED.**
+
+- Critical: only the first of 40 required rows was attempted and zero rows completed. P5 rejected every one of
+  2,137 final candidates as `current_low_margin`; current GNSS-dominant HPL/VPL were about `24.37..27.73 m` and
+  `68.82..86.69 m` versus `10/20 m` alert limits. No EGO final/publication/P5 runtime identity or power record exists.
+  The Builder correctly stopped instead of tuning frozen provider/risk/threshold inputs.
+- High: source admission is captured before analyzer execution but not after it, so a source change during analyzer
+  work can escape the task's final typed fail-closed evidence.
+
+### Gate disposition
+
+- ICRA-075 is BLOCKED/NOT PASS. ICRA-076 is not issued automatically. `active_role=SUPERVISOR`, `task_id=NONE`,
+  `next_task=NONE` pending the user's explicit choice: bounded same-gate repair (recommended), or acceptance of the
+  missing matrix/power/safety basis and unresolved fail-closed defects followed by bypass to ICRA-076.
+- No effect, formal freeze, held-out, qualification or campaign claim is authorized. Earlier user-bypassed debt
+  remains NOT PASS.
+
+### Supervisor window disposition
+
+- Pending the pushed Review changeset and mandatory post-push rotation audit.
+
 ## 2026-08-27 — ICRA-074 Review PASS; ICRA-075 issued
 
 ### Review identity and preservation

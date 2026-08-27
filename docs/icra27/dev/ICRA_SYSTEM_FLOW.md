@@ -1,5 +1,10 @@
 # ICRA System Flow — User-owned P0 -> P4-v2 -> P5 recovery
 
+> ICRA-075 Review update 2026-08-27: first-row P5 `current_low_margin` prevents EGO final, publication and runtime;
+> the matrix is 0/40 and no power record exists. Metrics-only terminal-lineage failures are fail-open before
+> publication and analyzer lacks a final source recheck. ICRA-075 is BLOCKED/NOT PASS with `next_task=NONE` pending
+> an explicit user repair-or-bypass decision; ICRA-076/formal Layer 4 remains unauthorized.
+
 > ICRA-074 Review update 2026-08-27: V2 geometry and offline production P4-v2 seams pass 51/51; production/config
 > remains unchanged and no effect claim follows. ICRA-075 is TASK_READY to materialize V2 runtime scenes and
 > collect development exploratory/power inputs. Runtime authority split is unchanged; formal Layer 4 is blocked.

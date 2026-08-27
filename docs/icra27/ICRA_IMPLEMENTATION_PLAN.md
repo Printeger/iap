@@ -1,5 +1,12 @@
 # ICRA 2027 P0 -> P4-v2 -> P5 科学纠偏实施计划
 
+## ICRA-075 Review BLOCKED / user decision required — 2026-08-27
+
+ICRA-075 第一条 control row 被 P5 `current_low_margin` 真实阻断，矩阵 0/40、无 EGO final/publication/runtime
+identity、无 power inputs。另有 metrics-only lineage fail-open 与 analyzer 后缺少 source recheck 两项工程
+blocker。当前 `next_task=NONE`；ICRA-076 不得自动签发，须由用户明确选择同 Gate bounded repair 或接受
+缺失 exploratory/power basis 后 bypass。
+
 ## ICRA-074 Review PASS / ICRA-075 active — 2026-08-27
 
 ICRA-074 V2 geometry 与 production P4-v2 offline contract 经 Supervisor 独立复跑 51/51 PASS；没有产品或
