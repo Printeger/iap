@@ -8710,3 +8710,22 @@ rule. That file was created only by this task and was immediately removed with
 an exact `unlink`; it is not retained evidence and no later command uses an
 external output path. The repository-local test roots and canonical shared
 build/install/log roots remain the authoritative verification outputs.
+
+Implementation commit `c59de16e864701f6da5291f51aebfbc48388d92a`
+was pushed and verified at `HEAD...origin/dev/icra = 0 0` before any new live
+work. Fresh `run-023` then passed GPU admission, its initial/pre-ROS/final
+source checks all bound the same pushed commit, all required processes stayed
+healthy, and both runner-owned process groups cleared. Runner exit and the sole
+automatic analyzer exit were zero, so the loop stopped and `run-024` was not
+created.
+
+The analyzer reports no failures, no first-missing stage and all seven ordered
+stages true: P0 ready 56, P4 decisions 78, both-complete 49, natural selected
+35, linked lineage 3, final OK/publications 14 and runtime-bound records 57.
+The accepted selected terminal is trajectory ID `6`, start
+`1657065614522279439 ns`, final identity `4388eac04c2cc922`. Its authoritative
+fused final margins are H `4.6995420912 m` and V `5.60549867666 m`; all four
+matching runtime records have the same positive minima, effective/raw action
+`OK`, effective/raw reason `ok`, empty active/current/future reasons and no
+rejection. This remains development-only Layer 1 evidence with no effect,
+qualification or campaign claim.

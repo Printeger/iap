@@ -11,8 +11,11 @@
   later unselected publication. Move gate import, Git source capture, GPU preflight and all later orchestration
   under the consumed-attempt finalization boundary. Add a committed-source admission record that requires clean
   tracked bytes and exact `HEAD == origin/dev/icra`, then rechecks the binding after GPU/before ROS and after
-  runner-owned cleanup. The
-  implementation must be committed and pushed at `0 0` before any fresh `run-023+` live attempt.
+  runner-owned cleanup. Implementation commit `c59de16` was pushed at divergence `0 0` before fresh `run-023`.
+  That first attempt is runner/analyzer PASS with all seven stages, healthy required processes and cleanup. Its
+  accepted selected terminal is ID `6`, start `1657065614522279439 ns`, final identity `4388eac04c2cc922`;
+  authoritative fused final/runtime margins remain positive and all four exact-identity runtime records have
+  effective/raw `OK` with empty reject reasons. The loop stopped without creating `run-024`.
 
 - review(icra-072a-acceptance): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 /
   IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — reject Builder HEAD `e728fff` as formal Layer 1
