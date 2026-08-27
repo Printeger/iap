@@ -8762,5 +8762,25 @@ Verification at the pre-live implementation checkpoint:
 
 No historical `/tmp` output was recreated or touched. Run001 through run023,
 shared roots, ordinary evidence/logs and the protected PDF remain unchanged.
-Fresh run024+ awaits the mandatory commit/push and divergence `0 0` proof; no
-effect, P5 product, qualification or campaign work ran.
+Implementation commit `b7b5357c6459ccbd07aa68a146a3ecb4fbf65b71` was
+pushed and fetch verified at `HEAD...origin/dev/icra = 0 0` before live work.
+Fresh `run-024` was the first and only continuation and returned runner/analyzer
+exit 0, so the loop stopped. All seven stages are true with no failures or
+first-missing stage: P0 ready 54, P4 decisions 37, both-complete 20, natural
+selected 11, lineage 3, P5-final/normal publication 16 and runtime-bound 65.
+
+The accepted selected terminal is trajectory ID `12`, start
+`1657065616411275703 ns`, final identity `36cb40d791d9b347`. Its fused final
+decision is effective/raw `OK/OK`, reason `ok/ok`, no rejection, current minimum
+integrity margin `4.95986188233` and sampled future minimum `8.37337069957`.
+Four matching fused runtime records contain 44/44 committed samples, all on the
+exact same ID/start; every record has effective/raw `OK`, empty active/current/
+future reasons and no rejection, with minimum sampled integrity margin
+`8.3747726285`. All 15 required processes were observed without runtime failure,
+controlled shutdown was accepted, and both owned process groups cleared.
+
+Initial, pre-ROS and final source bindings all accept schema v2 at pushed commit
+`b7b5357`, observe only the protected PDF with its exact allowlisted hash, and
+record empty rejected tracked/untracked paths. No second live attempt, effect,
+P5 product, qualification or campaign work ran. ICRA-072A is ready for
+Supervisor review; ICRA-072B remains unauthorized.

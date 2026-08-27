@@ -589,8 +589,11 @@ Source binding v2 inspects full status and permits only the protected PDF at exa
 allowlisted, observed and rejected paths; arbitrary untracked source and every tracked/staged state reject.
 Focused initial/pre-ROS/final source-change coverage includes a complete mocked final-change lifecycle with typed
 outcomes and owned-group cleanup. Shared build is 6/6, tools 17/17, retained C++ is 64/64 and hermetic launch is
-24/24. Fresh run024+ remains unauthorized until this implementation is committed, pushed and verified at
-divergence `0 0`; ICRA-072B and Layer 3/4 remain unauthorized.
+24/24. Implementation `b7b5357` was then committed/pushed and verified at divergence `0 0` before fresh
+`run-024`. That first attempt is runner/analyzer PASS with all seven stages, accepted selected ID `12`, start
+`1657065616411275703 ns`, final identity `36cb40d791d9b347`, four exact fused-safe runtime rows, 15/15 required
+process health and complete owned cleanup. The loop stopped. ICRA-072B and Layer 3/4 remain unauthorized pending
+Supervisor review.
 
 Four-layer Supervisor disposition (2026-08-26): checkpoint `6a6bdd3` is
 `ARCHIVED_AS_FOUND / BLOCKED_TERMINAL_CHAIN_MISSING`. User workflow decision

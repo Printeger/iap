@@ -12,8 +12,11 @@
   Focused lifecycle coverage proves a final source change produces typed manifest/analysis/outcome evidence and
   clears only runner-owned groups. Shared build passes 6/6, tools 17/17, focused C++ 64/64 and hermetic launch
   24/24; complete replacement C++ output is retained under
-  `results/icra27/icra072/final_acceptance_repair_verification/cpp/`. Fresh run024+ remains pending the required
-  clean implementation commit/push and divergence `0 0` proof.
+  `results/icra27/icra072/final_acceptance_repair_verification/cpp/`. Implementation `b7b5357` was pushed and
+  verified at divergence `0 0` before fresh `run-024`; that first attempt passed runner/analyzer, all seven stages,
+  15/15 process health and cleanup. Its accepted selected terminal is ID `12`, start `1657065616411275703 ns`,
+  final identity `36cb40d791d9b347`, with fused effective/raw OK and exact identity across all 44 samples in four
+  accepted runtime records. The live loop stopped.
 
 - review(icra-072a-exact-admission): IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 / IAP-RQ-422 /
   IAP-RQ-423 / IAP-RQ-424 — reject Builder HEAD `b607b97` as formal Layer 1 completion while retaining
