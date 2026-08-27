@@ -508,7 +508,7 @@ Acceptance:
 
 ### IAP-RQ-423 P4 collision-guide planning and P5 lineage
 Status: **P4-v1 SCIENTIFIC_NO_GO RETAINED / ICRA-072A LAYER 1 PASS / ICRA-072B BLOCKED USER BYPASS /
-ICRA-073 INVERSE-CORRIDOR EFFECT DIAGNOSTICS TASK_READY**
+ICRA-073 BLOCKED USER BYPASS / ICRA-075 BLOCKED USER BYPASS / ICRA-076 PREREGISTRATION FREEZE**
 
 Source: `docs/icra27/ICRA_SCOPE.md` and the 2026-08-20 Supervisor scope pivot. This requirement extends collision-guide planning evidence; it does not replace or verify the IAP-RQ-422 PL/AL admission rule.
 
@@ -526,6 +526,9 @@ Source: `docs/icra27/ICRA_SCOPE.md` and the 2026-08-20 Supervisor scope pivot. T
 - [ ] Under user decision 003, implement the frozen `ICRA_P4_V2_INVERSE_CORRIDOR_FIXTURE_V1`
   PRIMARY/EXACT_MIRROR/FLAT_NULL geometry and evaluate only the committed final B-spline through an independent
   oracle. ICRA-072B remains blocked/NOT PASS; its explicit bypass does not qualify this diagnostic.
+- [x] Freeze the outcome-blind ICRA-076 estimand, SESOI/repeatability-derived `delta_peak`, exact-binomial rule,
+  disjoint seeds, complete paired order, missing-data policy, relevant source inventory and exact shared six-package
+  install inventory before any ICRA-077 outcome access.
 
 Acceptance:
 
@@ -535,7 +538,7 @@ Acceptance:
 
 ### IAP-RQ-424 User-owned ICRA research route and P4-v2 scientific recovery
 Status: **DEVELOPMENT-FIRST ROUTE LOCKED / FOUR-LAYER WORKFLOW ACTIVE / ICRA-072B BLOCKED USER BYPASS /
-ICRA-073 EFFECT DIAGNOSTICS TASK_READY / GUARD REPAIR NONBLOCKING**
+ICRA-073 AND ICRA-075 BLOCKED USER BYPASS / ICRA-076 PREREGISTRATION FREEZE / GUARD REPAIR NONBLOCKING**
 
 Source: `docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md` and user decision
 `USER-ICRA-ROUTE-20260827-003` bound to `a30468e4ca991dacfe24a10c45040c51efd74ce7`.
@@ -561,8 +564,9 @@ Source: `docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md` and 
   homotopies, PRIMARY/EXACT_MIRROR/FLAT_NULL causal controls, independent-oracle isolation and a 200-point
   final-B-spline analysis contract. This documentation checkbox does not mark fixture implementation or effect
   validation complete.
-- [ ] Freeze SESOI, endpoint buffer `b=2r`, independent 30–60 seed-run sample size per scene and held-out protocol
-  before confirmatory execution.
+- [x] Freeze SESOI `0.3 m`, endpoint buffer `b=2r=1.5 m`, conservative `n=60` independent seed runs per scene,
+  exact 59/60 passing rule, disjoint seeds/order and byte inventories before confirmatory execution. No empirical
+  power claim exists, and ICRA-077 remains blocked until Supervisor Review PASS.
 
 Acceptance:
 

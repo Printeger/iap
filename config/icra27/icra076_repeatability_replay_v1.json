@@ -1,0 +1,36 @@
+{
+  "schema_version": "icra076_byte_identical_snapshot_replay_v1",
+  "outcome_blind": true,
+  "held_out": false,
+  "unit": "m",
+  "replay_count": 60,
+  "sample_count": 200,
+  "serialized_snapshot": {
+    "schema_version": "p4_risk_grid_snapshot_replay_v1",
+    "fixture": "icra074_offline_two_homotopy_v1",
+    "provider_truth": "FLAT_NULL",
+    "resolution_m": 0.5,
+    "original_interior_provider_c_pi_m": 1.0,
+    "risk_interior_provider_c_pi_m": 1.0
+  },
+  "admissibility": {
+    "retained_non_held_out_evidence_path": "results/icra27/icra074/offline-targeted-001.json",
+    "retained_non_held_out_evidence_sha256": "79989ac8c128977e37d91f0f3cd30ec3a0618f3818b44d34da53981893fefc67",
+    "fixture_source_path": "src/iap/planner/bspline_opt/test/icra074_targeted_optimization_fixture.hpp",
+    "fixture_source_sha256": "a6ca85fee0cdc3e08c1af28af07cbf1e90a6dd3ab7ba2f1c7eba77a6c8f9b91d",
+    "decision_test_path": "src/iap/planner/bspline_opt/test/test_p4_collision_guide.cpp",
+    "decision_test_sha256": "79c48fb43cb9f3a3ef4467611f137e220d0d0ca5d7f3a838b0b7bbab97eeafe0",
+    "integration_test_path": "src/iap/planner/bspline_opt/test/test_p4_collision_guide_integration.cpp",
+    "integration_test_sha256": "4bcdf31a8a96019e839fac520e7cbb8c73a3be040714e7b2784c1d993fb36fda",
+    "required_replay_command": [
+      "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+      "--gtest_filter=P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash",
+      "--gtest_repeat=60"
+    ]
+  },
+  "calculation": {
+    "metric": "abs((B_original-B_risk)_replay-(B_original-B_risk)_reference)",
+    "u95_method": "nearest_rank_ceil_0.95_n",
+    "expected_u95_repeatability_m": 0.0
+  }
+}

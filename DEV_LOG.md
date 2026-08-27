@@ -1,5 +1,30 @@
 # DeepSeek Development Log — DEEPSEEK-owned
 
+## 2026-08-27 — ICRA-076 outcome-blind preregistration and byte freeze
+
+Requirements: IAP-RQ-320, IAP-RQ-321, IAP-RQ-400, IAP-RQ-410,
+IAP-RQ-421, IAP-RQ-422, IAP-RQ-423 and IAP-RQ-424.
+
+The TASK_READY handoff was fetch-confirmed at pushed `8105a16` with divergence `0 0`; the only visible ambient
+path was the protected untracked PDF. Outcome-blind TDD freezes the provider-only controllable-interior estimand
+`D_peak=B_original-B_risk`, endpoint buffer `b=2r=1.5 m`, domain SESOI `0.3 m`, byte-identical flat-null replay
+U95 `0.0 m`, and therefore `delta_peak=0.3 m`. The conservative route ceiling is 60 independent seeds per scene,
+paired across two arms in PRIMARY/EXACT_MIRROR/FLAT_NULL. Exact one-sided binomial testing at `p0=0.9` and
+`alpha=0.05` requires 59/60 successes; this sample size has no empirical power claim.
+
+Three disjoint confirmatory ranges start at `100000001`, `100000101` and `100000201`; historical values are
+excluded by a reserved `[0,99999999]` range and bound source hashes. The deterministic 360-row expanded order has
+SHA-256 `fbbeca3193fcf9fb9e8c8a011247947175fb5836079c7a3663d21c4ce25feae6`. Schema, protocol, registry,
+repeatability input, validators and freeze writer fail closed on downgrade, omission, seed/arm/scene/order or
+threshold drift, held-out path tokens, non-finite/wrong units, disabled/skipped/failed verification, external or
+overwriting output, symlink parents, and post-freeze source/install byte drift.
+
+Focused ICRA-073/074/075 regression passes 24/24, ICRA-076 adversarial tests pass 10/10, protocol validation
+passes, and the required production flat-null test passes 60/60 repeated invocations. A recoverable move of only
+the six authorized build/install package directories preceded the canonical shared rebuild; all six packages
+finished successfully using `/home/dev/ws_iap/{build,install,log}`. No held-out path, ROS, GPU, live flow,
+ICRA-077, qualification or campaign work ran. ICRA-075 remains BLOCKED/user-bypassed/NOT PASS at 0/40.
+
 ## 2026-08-27 — ICRA-075 bounded fail-closed repair and P5 compatibility diagnosis
 
 Requirements: IAP-RQ-320, IAP-RQ-321, IAP-RQ-400, IAP-RQ-410,

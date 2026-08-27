@@ -3,6 +3,12 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(icra-076-preregistration-freeze): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 /
+  IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — add an outcome-blind Layer-4 schema, protocol, historical-seed registry,
+  byte-identical repeatability input, deterministic 360-row order, exact-binomial 59/60 rule, fail-closed
+  validator and non-overwriting repository-local source/install freeze writer. Conservative `n=60` carries no
+  empirical power claim; ICRA-075 remains BLOCKED/user-bypassed/NOT PASS and ICRA-077 remains unauthorized.
+
 - route(user-decision-006-issue-icra076): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 /
   IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — record user acceptance of ICRA-075 frozen incompatibility, 0/40, absent
   power inputs and two P1 defects without relabelling PASS. Issue outcome-blind ICRA-076 preregistration/byte

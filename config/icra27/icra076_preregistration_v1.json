@@ -1,0 +1,154 @@
+{
+  "schema_version": "icra076_preregistration_v1",
+  "task": "ICRA-076",
+  "outcome_blind": true,
+  "held_out_access": false,
+  "empirical_power_claim": false,
+  "formal_arms": ["P0_P5_CONTROL", "P0_P4_V2_P5_TREATMENT"],
+  "scenes": ["PRIMARY", "EXACT_MIRROR", "FLAT_NULL"],
+  "estimand": {
+    "primary": "D_peak=B_original-B_risk",
+    "risk_quantity": "provider_only_predicted_c_pi",
+    "domain": "controllable_interior",
+    "risk_grid_resolution_m": 0.75,
+    "endpoint_buffer_rule": "b=2r",
+    "endpoint_buffer_m": 1.5,
+    "one_primary_event_per_independent_run_seed": true,
+    "unit": "m",
+    "resolution_authority": {
+      "path": "launch/test_planner.launch.py",
+      "key": "p0.resolution_m",
+      "value": 0.75,
+      "sha256": "48a756004bb2ae12a03306bba6eb1ace0a86c182382ccd4fbd6adeb9dfb154ca"
+    }
+  },
+  "domain_sesoi": {
+    "value": 0.3,
+    "unit": "m",
+    "derivation": "existing minimum actionable P5 current integrity margin; one full frozen safety buffer",
+    "authority": {
+      "path": "launch/test_planner.launch.py",
+      "key": "p5.current_replan_margin_m",
+      "value": 0.3,
+      "sha256": "48a756004bb2ae12a03306bba6eb1ace0a86c182382ccd4fbd6adeb9dfb154ca"
+    },
+    "outcome_derived": false
+  },
+  "repeatability": {
+    "input_path": "config/icra27/icra076_repeatability_replay_v1.json",
+    "input_canonical_sha256": "a217061071fd7f44a3c64f83cbc7a440ccd3286a3a7c63b50fe6119ed63a4dc0",
+    "u95_repeatability": 0.0,
+    "unit": "m",
+    "flat_null_runtime_evidence": "UNAVAILABLE_ICRA075_0_OF_40",
+    "admissible_basis": "BYTE_IDENTICAL_SERIALIZED_SNAPSHOT_REPLAY",
+    "outcome_derived": false
+  },
+  "delta_peak": {
+    "formula": "max(domain_SESOI,U95_repeatability)",
+    "value": 0.3,
+    "unit": "m"
+  },
+  "sample_size": {
+    "independent_seed_runs_per_scene": 60,
+    "paired_arms_per_seed": 2,
+    "total_seed_runs": 180,
+    "total_arm_runs": 360,
+    "basis": "USER_DECISION_006_CONSERVATIVE_ROUTE_CEILING",
+    "empirical_power_demonstrated": false
+  },
+  "exact_binomial_rule": {
+    "alternative": "Pr(D_peak>delta_peak)>0.9",
+    "null_probability": 0.9,
+    "alpha_one_sided": 0.05,
+    "n": 60,
+    "minimum_success_count": 59,
+    "failure_count_allowed": 1,
+    "calculation": "exact_binomial_upper_tail"
+  },
+  "execution_order": {
+    "scene_cycle": ["PRIMARY", "EXACT_MIRROR", "FLAT_NULL"],
+    "rounds": 60,
+    "round_scene_rotation": "left_rotate_by_round_mod_3",
+    "paired_arm_order": "CONTROL_FIRST_IF_(round+scene_index)_EVEN_ELSE_TREATMENT_FIRST",
+    "expanded_order_sha256": "fbbeca3193fcf9fb9e8c8a011247947175fb5836079c7a3663d21c4ce25feae6",
+    "no_retry": true
+  },
+  "seed_registry": {
+    "path": "config/icra27/icra076_seed_registry_v1.json",
+    "canonical_sha256": "c5630457300e7d84e6f22ff7c1c358bd2d42f48d2d068fd507ccb8e69e16caeb"
+  },
+  "formal_gates": {
+    "PRIMARY": {
+      "primary_success_count_min": 59,
+      "mirror_direction": "NOT_APPLICABLE"
+    },
+    "EXACT_MIRROR": {
+      "primary_success_count_min": 59,
+      "mirror_direction": "treatment_safe_homotopy_y_sign_negative_and_effect_direction_positive"
+    },
+    "FLAT_NULL": {
+      "absolute_D_peak_max_m": 0.0,
+      "provider_risk_selection_count_max": 0,
+      "complete_pairs_required": 60
+    },
+    "secondary": {
+      "D_mean_noninferiority_min_m": 0.0,
+      "whole_path_D_peak_noninferiority_min_m": 0.0,
+      "path_length_ratio_max": 1.3,
+      "per_search_timeout_s": 0.2,
+      "provider_support": "FINITE_COMPLETE",
+      "coverage": "COMPLETE",
+      "timeout_count_max": 0,
+      "fallback_count_max": 0,
+      "collision_count_max": 0,
+      "dynamics_failure_count_max": 0,
+      "p5_final": "PASS",
+      "normal_publication_identity": "MATCH",
+      "p5_runtime_identity": "MATCH"
+    }
+  },
+  "missing_data_policy": {
+    "missing_or_incomplete_run": "FAIL_AND_RETAIN_IN_DENOMINATOR",
+    "exclusion_allowed": false,
+    "retry_allowed": false,
+    "extra_primary_events": "DESCRIPTIVE_ONLY_RUN_CLUSTERED_NO_N_INCREMENT",
+    "disabled_or_skipped_required_test": "FAIL_BEFORE_RESULT_CREATION"
+  },
+  "byte_freeze": {
+    "source_inventory_roots": [
+      "config/icra27/icra076_preregistration_schema_v1.json",
+      "config/icra27/icra076_preregistration_v1.json",
+      "config/icra27/icra076_seed_registry_v1.json",
+      "config/icra27/icra076_repeatability_replay_v1.json",
+      "scripts/dev_planner/icra076_preregistration.py",
+      "scripts/dev_planner/validate_icra076_preregistration.py",
+      "scripts/dev_planner/freeze_icra076_preregistration.py",
+      "scripts/dev_planner/icra073_inverse_corridor_fixture.py",
+      "scripts/dev_planner/icra075_exploratory.py",
+      "scripts/dev_planner/analyze_icra075_exploratory.py",
+      "scripts/dev_planner/run_icra075_exploratory.py",
+      "launch/test_planner.launch.py",
+      "launch/icra075_exploratory.launch.py",
+      "src/uav_simulator/map_generator/config/icra075_inverse_corridor_v2.json",
+      "src/uav_simulator/map_generator/scripts/icra075_inverse_corridor_map_publisher.py",
+      "src/uav_simulator/gnss_sim/config/icra075_inverse_corridor_provider_v2.json",
+      "src/iap/integrity",
+      "src/iap/predictor",
+      "src/iap/planner/plan_env",
+      "src/iap/planner/traj_utils",
+      "src/iap/planner/path_searching",
+      "src/iap/planner/bspline_opt",
+      "src/iap/planner/plan_manage"
+    ],
+    "shared_install_root": "/home/dev/ws_iap/install",
+    "installed_packages": ["iap", "plan_env", "traj_utils", "path_searching", "bspline_opt", "ego_planner"],
+    "inventory_record_fields": ["path", "type", "size_bytes", "sha256"],
+    "drift_policy": "INVALIDATE_BEFORE_ICRA077"
+  },
+  "output_policy": {
+    "allowed_root": "results/icra27/icra076",
+    "non_overwriting": true,
+    "reject_symlink_components": true,
+    "forbidden_input_tokens": ["held_out", "held-out", "icra077", "formal_results"]
+  }
+}

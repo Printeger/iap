@@ -1,0 +1,34 @@
+{
+  "schema_version": "icra076_preregistration_schema_v1",
+  "protocol_schema_version": "icra076_preregistration_v1",
+  "additional_properties": false,
+  "required_top_level_fields": [
+    "schema_version",
+    "task",
+    "outcome_blind",
+    "held_out_access",
+    "empirical_power_claim",
+    "formal_arms",
+    "scenes",
+    "estimand",
+    "domain_sesoi",
+    "repeatability",
+    "delta_peak",
+    "sample_size",
+    "exact_binomial_rule",
+    "execution_order",
+    "seed_registry",
+    "formal_gates",
+    "missing_data_policy",
+    "byte_freeze",
+    "output_policy"
+  ],
+  "allowed_arms": ["P0_P5_CONTROL", "P0_P4_V2_P5_TREATMENT"],
+  "allowed_scenes": ["PRIMARY", "EXACT_MIRROR", "FLAT_NULL"],
+  "units": {
+    "provider_risk": "m",
+    "distance": "m",
+    "latency": "s",
+    "probability": "dimensionless"
+  }
+}
