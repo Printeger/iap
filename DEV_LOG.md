@@ -8847,5 +8847,29 @@ sets pass 8/8, 17/17 and 3/3.
 
 No ROS launch graph, GPU preflight, live scenario, run-025, bag, effect,
 qualification or campaign ran. The one canonical execution is intentionally
-pending until this final implementation/test/documentation state is committed,
+sequenced after this implementation/test/documentation state was committed,
 pushed and fetch-confirmed at divergence `0 0`.
+
+### Canonical one-time outcome
+
+Implementation commit `8b75d81db69f1e716e9667d27de525ae8fae4507`
+was pushed and fetch-confirmed at divergence `0 0`; full porcelain status then
+contained only the protected PDF at its exact hash. The canonical command was
+invoked exactly once. Production terminal 8/8, P4 decision 2/2, P4 integration
+2/2 and P5 runtime 4/4 exited zero. Tools observed all 17 tests but exited 1:
+eight tests call `git rev-parse HEAD`, while the suite environment replaces
+`HOME` with `final_logs/environment/home`. That repository-local empty home
+cannot see the ambient `/root/.gitconfig` safe-directory entry; Git rejects the
+UID-1000-owned repository as dubious ownership and returns 128. A read-only
+diagnostic reproduced the same exact failure under the recorded HOME. No Git
+configuration was changed and the canonical command was not retried.
+
+Retained `results/icra27/icra072b/final_summary.json` reports FAIL with SHA-256
+`2669167ad2cfaa95100b0da01602a8d92c6ca7f1512e5d9383428595f11dc624`.
+All five complete suite logs are retained under `final_logs/`. Row and suite
+cardinality are each exactly one and all named assertions were observed; only
+`final_trajectory_identity`, `p5_runtime_authority` and
+`operational_closure` fail because they require the nonzero tools suite.
+Terminal disposition is `BLOCKED_ICRA072B_HERMETIC_GIT_SAFE_DIRECTORY` pending
+Supervisor review. No launch, GPU preflight, live flow, retry, scientific,
+qualification or campaign action followed.

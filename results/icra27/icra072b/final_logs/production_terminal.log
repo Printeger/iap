@@ -1,0 +1,71 @@
+Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc
+Note: Google Test filter = P4VerticalSliceTerminalLineageTest.*
+[==========] Running 8 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 8 tests from P4VerticalSliceTerminalLineageTest
+[ RUN      ] P4VerticalSliceTerminalLineageTest.ProductionFsmPublishesCompleteSameAttemptManagerP5RuntimeChain
+[RiskContext] planning_generation_id=1, query_base_time_s=10, snapshot_available=1
+refine_success=1
+[       OK ] P4VerticalSliceTerminalLineageTest.ProductionFsmPublishesCompleteSameAttemptManagerP5RuntimeChain (70 ms)
+[ RUN      ] P4VerticalSliceTerminalLineageTest.ProductionFsmPublishesNothingWhenFusedCurrentIsUnsafeDespiteSafeLidar
+[RiskContext] planning_generation_id=1, query_base_time_s=10, snapshot_available=1
+refine_success=1
+[       OK ] P4VerticalSliceTerminalLineageTest.ProductionFsmPublishesNothingWhenFusedCurrentIsUnsafeDespiteSafeLidar (35 ms)
+[ RUN      ] P4VerticalSliceTerminalLineageTest.OccupancyChangeAfterReleaseBlocksFirstManagerWriterAndDownstreamRows
+[RiskContext] planning_generation_id=1, query_base_time_s=10, snapshot_available=1
+refine_success=1
+[       OK ] P4VerticalSliceTerminalLineageTest.OccupancyChangeAfterReleaseBlocksFirstManagerWriterAndDownstreamRows (35 ms)
+[ RUN      ] P4VerticalSliceTerminalLineageTest.MismatchedAttemptBlocksFinalLineageAndPublication
+[RiskContext] planning_generation_id=1, query_base_time_s=10, snapshot_available=1
+refine_success=1
+[       OK ] P4VerticalSliceTerminalLineageTest.MismatchedAttemptBlocksFinalLineageAndPublication (35 ms)
+[ RUN      ] P4VerticalSliceTerminalLineageTest.InvalidTrajectoryIdentityBlocksFinalLineageAndPublication
+[RiskContext] planning_generation_id=1, query_base_time_s=10, snapshot_available=1
+refine_success=1
+[RiskContext] planning_generation_id=1, query_base_time_s=10, snapshot_available=1
+refine_success=1
+[RiskContext] planning_generation_id=1, query_base_time_s=10, snapshot_available=1
+refine_success=1
+[RiskContext] planning_generation_id=1, query_base_time_s=10, snapshot_available=1
+refine_success=1
+[       OK ] P4VerticalSliceTerminalLineageTest.InvalidTrajectoryIdentityBlocksFinalLineageAndPublication (141 ms)
+[ RUN      ] P4VerticalSliceTerminalLineageTest.MalformedControlPointsBlockTheProductionTerminalWriter
+[       OK ] P4VerticalSliceTerminalLineageTest.MalformedControlPointsBlockTheProductionTerminalWriter (93 ms)
+[ RUN      ] P4VerticalSliceTerminalLineageTest.MismatchedSegmentOrRequestBlocksFinalLineageAndPublication
+[RiskContext] planning_generation_id=1, query_base_time_s=10, snapshot_available=1
+refine_success=1
+[RiskContext] planning_generation_id=1, query_base_time_s=10, snapshot_available=1
+refine_success=1
+[       OK ] P4VerticalSliceTerminalLineageTest.MismatchedSegmentOrRequestBlocksFinalLineageAndPublication (70 ms)
+[ RUN      ] P4VerticalSliceTerminalLineageTest.MismatchedSnapshotOrGuideBlocksFinalLineageAndPublication
+[RiskContext] planning_generation_id=1, query_base_time_s=10, snapshot_available=1
+refine_success=1
+[RiskContext] planning_generation_id=1, query_base_time_s=10, snapshot_available=1
+refine_success=1
+[RiskContext] planning_generation_id=1, query_base_time_s=10, snapshot_available=1
+refine_success=1
+[RiskContext] planning_generation_id=1, query_base_time_s=10, snapshot_available=1
+refine_success=1
+[RiskContext] planning_generation_id=1, query_base_time_s=10, snapshot_available=1
+refine_success=1
+[       OK ] P4VerticalSliceTerminalLineageTest.MismatchedSnapshotOrGuideBlocksFinalLineageAndPublication (177 ms)
+[----------] 8 tests from P4VerticalSliceTerminalLineageTest (659 ms total)
+
+[----------] Global test environment tear-down
+[==========] 8 tests from 1 test suite ran. (659 ms total)
+[  PASSED  ] 8 tests.
+[WARN] [1787813488.049932640] [p4_terminal_fsm_success]: P1 published fresh bspline but could not write accepted-profile evidence
+[WARN] [1787813488.091952233] [p4_terminal_fused_unsafe]: P5 final gate blocked trajectory: action=REQUEST_REPLAN reason=current_low_margin planning_generation_id=1 final_gate_generation_id=1
+[ERROR] [1787813488.127034365] [p4_terminal_fsm_adversary]: P4-v2 final lineage write failed before P5
+[ERROR] [1787813488.162158931] [terminal_attempt_mismatch_node]: P4-v2 final lineage write failed before P5
+[ERROR] [1787813488.197967158] [terminal_missing_trajectory_identity_node]: P4-v2 final lineage write failed before P5
+[ERROR] [1787813488.233034099] [terminal_sentinel_trajectory_identity_node]: P4-v2 final lineage write failed before P5
+[ERROR] [1787813488.268123354] [terminal_missing_trajectory_start_node]: P4-v2 final lineage write failed before P5
+[ERROR] [1787813488.303906800] [terminal_non_finite_control_point_node]: P4-v2 final lineage write failed before P5
+[ERROR] [1787813488.432574829] [terminal_segment_mismatch_node]: P4-v2 final lineage write failed before P5
+[ERROR] [1787813488.467840223] [terminal_request_mismatch_node]: P4-v2 final lineage write failed before P5
+[ERROR] [1787813488.503017491] [terminal_snapshot_generation_mismatch_node]: P4-v2 final lineage write failed before P5
+[ERROR] [1787813488.538424020] [terminal_snapshot_config_mismatch_node]: P4-v2 final lineage write failed before P5
+[ERROR] [1787813488.574187368] [terminal_original_guide_mismatch_node]: P4-v2 final lineage write failed before P5
+[ERROR] [1787813488.610087904] [terminal_risk_guide_mismatch_node]: P4-v2 final lineage write failed before P5
+[ERROR] [1787813488.645446864] [terminal_selected_guide_mismatch_node]: P4-v2 final lineage write failed before P5

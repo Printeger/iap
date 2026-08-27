@@ -610,6 +610,18 @@ suites pass 8+2+2+4 C++ and 17+3 Python tests. The summary binds every assertion
 on missing/duplicate rows or suites and absent explicit counts. No ROS launch, GPU, live run, effect or
 qualification work ran. The retained canonical summary remains pending the mandatory clean implementation push.
 
+ICRA-072B canonical outcome (2026-08-27): pushed implementation `8b75d81` was
+fetch-confirmed at divergence `0 0` with only the exact protected PDF untracked.
+The sole canonical offline run passed production/P4/P5 C++ suites
+8/8 + 2/2 + 2/2 + 4/4, but its isolated repository-local HOME omitted ambient
+Git safe-directory trust. Eight tools tests therefore received Git dubious-
+ownership exit 128; tools observed 17 tests but exited 1, and the summary failed
+closed. The command was not retried. Retained summary SHA-256 is
+`2669167ad2cfaa95100b0da01602a8d92c6ca7f1512e5d9383428595f11dc624` with all
+five logs under `results/icra27/icra072b/final_logs/`. Status is
+`BLOCKED_ICRA072B_HERMETIC_GIT_SAFE_DIRECTORY` pending Supervisor review; no
+live, GPU, effect, qualification or campaign work followed.
+
 ICRA-072A Layer 1 Supervisor PASS (2026-08-27): reviewed Builder HEAD `ac7f923`; Standards and Spec axes pass.
 Shared build is 6/6 and independent Supervisor reruns pass tools 17/17, hermetic launch 24/24 and focused C++
 64/64. Fresh `run-024` binds pushed implementation `b7b5357` at initial/pre-ROS/final checks, passes GPU, 15/15

@@ -1,0 +1,134 @@
+test_analyzer_accepts_one_complete_identity_ordered_end_to_end (__main__.Icra072VerticalSliceToolsTest.test_analyzer_accepts_one_complete_identity_ordered_end_to_end) ... ERROR
+test_analyzer_types_missing_empty_and_non_file_p4_bindings (__main__.Icra072VerticalSliceToolsTest.test_analyzer_types_missing_empty_and_non_file_p4_bindings) ... ok
+test_cleanup_callback_is_retained_until_every_group_is_cleared (__main__.Icra072VerticalSliceToolsTest.test_cleanup_callback_is_retained_until_every_group_is_cleared) ... ok
+test_iteration_index_classifies_retained_runs_without_rewriting_them (__main__.Icra072VerticalSliceToolsTest.test_iteration_index_classifies_retained_runs_without_rewriting_them) ... ok
+test_iterative_runner_accepts_only_fresh_layer1_run_and_shared_install (__main__.Icra072VerticalSliceToolsTest.test_iterative_runner_accepts_only_fresh_layer1_run_and_shared_install) ... ERROR
+test_repository_relative_roots_resolve_from_repository_not_cwd (__main__.Icra072VerticalSliceToolsTest.test_repository_relative_roots_resolve_from_repository_not_cwd) ... ok
+test_runner_and_publish_path_are_fail_closed (__main__.Icra072VerticalSliceToolsTest.test_runner_and_publish_path_are_fail_closed) ... ok
+test_runner_finalizes_capture_spawn_exception (__main__.Icra072VerticalSliceToolsTest.test_runner_finalizes_capture_spawn_exception) ... ERROR
+test_runner_finalizes_gate_import_exception_before_gpu_or_ros (__main__.Icra072VerticalSliceToolsTest.test_runner_finalizes_gate_import_exception_before_gpu_or_ros) ... ERROR
+test_runner_finalizes_preflight_exception_before_ros (__main__.Icra072VerticalSliceToolsTest.test_runner_finalizes_preflight_exception_before_ros) ... ERROR
+test_runner_finalizes_source_change_after_owned_cleanup (__main__.Icra072VerticalSliceToolsTest.test_runner_finalizes_source_change_after_owned_cleanup) ... ERROR
+test_runner_rechecks_source_binding_before_ros (__main__.Icra072VerticalSliceToolsTest.test_runner_rechecks_source_binding_before_ros) ... ERROR
+test_runner_rejects_unbound_source_before_gpu_or_ros (__main__.Icra072VerticalSliceToolsTest.test_runner_rejects_unbound_source_before_gpu_or_ros) ... ERROR
+test_shared_dev_build_entry_has_exact_packages_and_workspace_roots (__main__.Icra072VerticalSliceToolsTest.test_shared_dev_build_entry_has_exact_packages_and_workspace_roots) ... ok
+test_source_binding_allows_only_exact_protected_pdf (__main__.Icra072VerticalSliceToolsTest.test_source_binding_allows_only_exact_protected_pdf) ... ok
+test_stop_owned_clears_an_actual_child_process_group (__main__.Icra072VerticalSliceToolsTest.test_stop_owned_clears_an_actual_child_process_group) ... ok
+test_tools_reject_repository_external_evidence_roots (__main__.Icra072VerticalSliceToolsTest.test_tools_reject_repository_external_evidence_roots) ... ok
+
+======================================================================
+ERROR: test_analyzer_accepts_one_complete_identity_ordered_end_to_end (__main__.Icra072VerticalSliceToolsTest.test_analyzer_accepts_one_complete_identity_ordered_end_to_end)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/dev/ws_iap/src/iap/test/test_icra072_vertical_slice_tools.py", line 176, in test_analyzer_accepts_one_complete_identity_ordered_end_to_end
+    source_binding = self._accepted_source_binding()
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/dev/ws_iap/src/iap/test/test_icra072_vertical_slice_tools.py", line 61, in _accepted_source_binding
+    commit = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['git', 'rev-parse', 'HEAD']' returned non-zero exit status 128.
+
+======================================================================
+ERROR: test_iterative_runner_accepts_only_fresh_layer1_run_and_shared_install (__main__.Icra072VerticalSliceToolsTest.test_iterative_runner_accepts_only_fresh_layer1_run_and_shared_install)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/dev/ws_iap/src/iap/test/test_icra072_vertical_slice_tools.py", line 892, in test_iterative_runner_accepts_only_fresh_layer1_run_and_shared_install
+    return_value=self._accepted_source_binding()), \
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/dev/ws_iap/src/iap/test/test_icra072_vertical_slice_tools.py", line 61, in _accepted_source_binding
+    commit = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['git', 'rev-parse', 'HEAD']' returned non-zero exit status 128.
+
+======================================================================
+ERROR: test_runner_finalizes_capture_spawn_exception (__main__.Icra072VerticalSliceToolsTest.test_runner_finalizes_capture_spawn_exception)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/dev/ws_iap/src/iap/test/test_icra072_vertical_slice_tools.py", line 950, in test_runner_finalizes_capture_spawn_exception
+    return_value=self._accepted_source_binding()), \
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/dev/ws_iap/src/iap/test/test_icra072_vertical_slice_tools.py", line 61, in _accepted_source_binding
+    commit = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['git', 'rev-parse', 'HEAD']' returned non-zero exit status 128.
+
+======================================================================
+ERROR: test_runner_finalizes_gate_import_exception_before_gpu_or_ros (__main__.Icra072VerticalSliceToolsTest.test_runner_finalizes_gate_import_exception_before_gpu_or_ros)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/dev/ws_iap/src/iap/test/test_icra072_vertical_slice_tools.py", line 980, in test_runner_finalizes_gate_import_exception_before_gpu_or_ros
+    return_value=self._accepted_source_binding()), \
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/dev/ws_iap/src/iap/test/test_icra072_vertical_slice_tools.py", line 61, in _accepted_source_binding
+    commit = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['git', 'rev-parse', 'HEAD']' returned non-zero exit status 128.
+
+======================================================================
+ERROR: test_runner_finalizes_preflight_exception_before_ros (__main__.Icra072VerticalSliceToolsTest.test_runner_finalizes_preflight_exception_before_ros)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/dev/ws_iap/src/iap/test/test_icra072_vertical_slice_tools.py", line 1054, in test_runner_finalizes_preflight_exception_before_ros
+    return_value=self._accepted_source_binding()), \
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/dev/ws_iap/src/iap/test/test_icra072_vertical_slice_tools.py", line 61, in _accepted_source_binding
+    commit = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['git', 'rev-parse', 'HEAD']' returned non-zero exit status 128.
+
+======================================================================
+ERROR: test_runner_finalizes_source_change_after_owned_cleanup (__main__.Icra072VerticalSliceToolsTest.test_runner_finalizes_source_change_after_owned_cleanup)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/dev/ws_iap/src/iap/test/test_icra072_vertical_slice_tools.py", line 1110, in test_runner_finalizes_source_change_after_owned_cleanup
+    accepted = self._accepted_source_binding()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/dev/ws_iap/src/iap/test/test_icra072_vertical_slice_tools.py", line 61, in _accepted_source_binding
+    commit = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['git', 'rev-parse', 'HEAD']' returned non-zero exit status 128.
+
+======================================================================
+ERROR: test_runner_rechecks_source_binding_before_ros (__main__.Icra072VerticalSliceToolsTest.test_runner_rechecks_source_binding_before_ros)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/dev/ws_iap/src/iap/test/test_icra072_vertical_slice_tools.py", line 1075, in test_runner_rechecks_source_binding_before_ros
+    accepted = self._accepted_source_binding()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/dev/ws_iap/src/iap/test/test_icra072_vertical_slice_tools.py", line 61, in _accepted_source_binding
+    commit = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['git', 'rev-parse', 'HEAD']' returned non-zero exit status 128.
+
+======================================================================
+ERROR: test_runner_rejects_unbound_source_before_gpu_or_ros (__main__.Icra072VerticalSliceToolsTest.test_runner_rejects_unbound_source_before_gpu_or_ros)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/dev/ws_iap/src/iap/test/test_icra072_vertical_slice_tools.py", line 1009, in test_runner_rejects_unbound_source_before_gpu_or_ros
+    **self._accepted_source_binding(),
+      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/dev/ws_iap/src/iap/test/test_icra072_vertical_slice_tools.py", line 61, in _accepted_source_binding
+    commit = subprocess.run(
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['git', 'rev-parse', 'HEAD']' returned non-zero exit status 128.
+
+----------------------------------------------------------------------
+Ran 17 tests in 0.177s
+
+FAILED (errors=8)

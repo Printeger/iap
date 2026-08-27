@@ -1,0 +1,14 @@
+Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc
+Note: Google Test filter = P4CollisionGuideIntegration.ReleasedSnapshotLineageRevalidatesAttemptAndLiveOccupancyBeforeTerminalUse:P4CollisionGuideIntegration.InjectionEpochMismatchInvalidatesDecision
+[==========] Running 2 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 2 tests from P4CollisionGuideIntegration
+[ RUN      ] P4CollisionGuideIntegration.ReleasedSnapshotLineageRevalidatesAttemptAndLiveOccupancyBeforeTerminalUse
+[       OK ] P4CollisionGuideIntegration.ReleasedSnapshotLineageRevalidatesAttemptAndLiveOccupancyBeforeTerminalUse (59 ms)
+[ RUN      ] P4CollisionGuideIntegration.InjectionEpochMismatchInvalidatesDecision
+[       OK ] P4CollisionGuideIntegration.InjectionEpochMismatchInvalidatesDecision (21 ms)
+[----------] 2 tests from P4CollisionGuideIntegration (81 ms total)
+
+[----------] Global test environment tear-down
+[==========] 2 tests from 1 test suite ran. (81 ms total)
+[  PASSED  ] 2 tests.

@@ -1,0 +1,390 @@
+{
+  "development_stabilization_only": true,
+  "matrix_rows": [
+    {
+      "assertions": [
+        {
+          "name": "P4VerticalSliceTerminalLineageTest.ProductionFsmPublishesCompleteSameAttemptManagerP5RuntimeChain",
+          "suite": "production_terminal"
+        }
+      ],
+      "missing_assertions": [],
+      "name": "happy_path",
+      "required_suites": [
+        "production_terminal"
+      ],
+      "result": "PASS"
+    },
+    {
+      "assertions": [
+        {
+          "name": "P4VerticalSliceTerminalLineageTest.OccupancyChangeAfterReleaseBlocksFirstManagerWriterAndDownstreamRows",
+          "suite": "production_terminal"
+        }
+      ],
+      "missing_assertions": [],
+      "name": "occupancy_epoch",
+      "required_suites": [
+        "production_terminal"
+      ],
+      "result": "PASS"
+    },
+    {
+      "assertions": [
+        {
+          "name": "P4VerticalSliceTerminalLineageTest.MismatchedAttemptBlocksFinalLineageAndPublication",
+          "suite": "production_terminal"
+        },
+        {
+          "name": "P4VerticalSliceTerminalLineageTest.MismatchedSegmentOrRequestBlocksFinalLineageAndPublication",
+          "suite": "production_terminal"
+        },
+        {
+          "name": "P4CollisionGuideDecision.InjectionRechecksRequestAndEpochIdentity",
+          "suite": "p4_identity_decision"
+        }
+      ],
+      "missing_assertions": [],
+      "name": "attempt_request_identity",
+      "required_suites": [
+        "production_terminal",
+        "p4_identity_decision"
+      ],
+      "result": "PASS"
+    },
+    {
+      "assertions": [
+        {
+          "name": "P4VerticalSliceTerminalLineageTest.MismatchedSnapshotOrGuideBlocksFinalLineageAndPublication",
+          "suite": "production_terminal"
+        },
+        {
+          "name": "P4CollisionGuideDecision.V2IdentityBindsImmutableSnapshotConfiguration",
+          "suite": "p4_identity_decision"
+        },
+        {
+          "name": "P4CollisionGuideIntegration.InjectionEpochMismatchInvalidatesDecision",
+          "suite": "p4_identity_integration"
+        },
+        {
+          "name": "P4CollisionGuideIntegration.ReleasedSnapshotLineageRevalidatesAttemptAndLiveOccupancyBeforeTerminalUse",
+          "suite": "p4_identity_integration"
+        }
+      ],
+      "missing_assertions": [],
+      "name": "snapshot_guide_lineage",
+      "required_suites": [
+        "production_terminal",
+        "p4_identity_decision",
+        "p4_identity_integration"
+      ],
+      "result": "PASS"
+    },
+    {
+      "assertions": [
+        {
+          "name": "P4VerticalSliceTerminalLineageTest.InvalidTrajectoryIdentityBlocksFinalLineageAndPublication",
+          "suite": "production_terminal"
+        },
+        {
+          "name": "P4VerticalSliceTerminalLineageTest.MalformedControlPointsBlockTheProductionTerminalWriter",
+          "suite": "production_terminal"
+        },
+        {
+          "name": "Icra072VerticalSliceToolsTest.test_analyzer_accepts_one_complete_identity_ordered_end_to_end",
+          "suite": "tools"
+        }
+      ],
+      "missing_assertions": [],
+      "name": "final_trajectory_identity",
+      "required_suites": [
+        "production_terminal",
+        "tools"
+      ],
+      "result": "FAIL"
+    },
+    {
+      "assertions": [
+        {
+          "name": "P4VerticalSliceTerminalLineageTest.ProductionFsmPublishesNothingWhenFusedCurrentIsUnsafeDespiteSafeLidar",
+          "suite": "production_terminal"
+        }
+      ],
+      "missing_assertions": [],
+      "name": "p5_final_authority",
+      "required_suites": [
+        "production_terminal"
+      ],
+      "result": "PASS"
+    },
+    {
+      "assertions": [
+        {
+          "name": "P5RuntimeIntegrityGateTest.AuthoritativeFusedCurrentRejectsUnsafeDespiteValidFiniteLidar",
+          "suite": "p5_runtime"
+        },
+        {
+          "name": "P5RuntimeIntegrityGateTest.FutureBadInsideEmergencyTimeRequestsCandidate",
+          "suite": "p5_runtime"
+        },
+        {
+          "name": "P5RuntimeIntegrityGateTest.RuntimeSustainedCurrentLowMarginEscalates",
+          "suite": "p5_runtime"
+        },
+        {
+          "name": "P5RuntimeIntegrityGateTest.RuntimeAndFinalCarryExactTrajectoryIdAndNanosecondStart",
+          "suite": "p5_runtime"
+        },
+        {
+          "name": "Icra072VerticalSliceToolsTest.test_analyzer_accepts_one_complete_identity_ordered_end_to_end",
+          "suite": "tools"
+        }
+      ],
+      "missing_assertions": [],
+      "name": "p5_runtime_authority",
+      "required_suites": [
+        "p5_runtime",
+        "tools"
+      ],
+      "result": "FAIL"
+    },
+    {
+      "assertions": [
+        {
+          "name": "Icra072VerticalSliceToolsTest.test_analyzer_accepts_one_complete_identity_ordered_end_to_end",
+          "suite": "tools"
+        },
+        {
+          "name": "Icra072VerticalSliceToolsTest.test_iterative_runner_accepts_only_fresh_layer1_run_and_shared_install",
+          "suite": "tools"
+        },
+        {
+          "name": "Icra072VerticalSliceToolsTest.test_source_binding_allows_only_exact_protected_pdf",
+          "suite": "tools"
+        },
+        {
+          "name": "Icra072VerticalSliceToolsTest.test_runner_finalizes_source_change_after_owned_cleanup",
+          "suite": "tools"
+        },
+        {
+          "name": "Icra072VerticalSliceToolsTest.test_stop_owned_clears_an_actual_child_process_group",
+          "suite": "tools"
+        }
+      ],
+      "missing_assertions": [],
+      "name": "operational_closure",
+      "required_suites": [
+        "tools"
+      ],
+      "result": "FAIL"
+    }
+  ],
+  "qualification_claim": false,
+  "required_row_cardinality": {
+    "attempt_request_identity": 1,
+    "final_trajectory_identity": 1,
+    "happy_path": 1,
+    "occupancy_epoch": 1,
+    "operational_closure": 1,
+    "p5_final_authority": 1,
+    "p5_runtime_authority": 1,
+    "snapshot_guide_lineage": 1
+  },
+  "required_suite_cardinality": {
+    "p4_identity_decision": 1,
+    "p4_identity_integration": 1,
+    "p5_runtime": 1,
+    "production_terminal": 1,
+    "tools": 1
+  },
+  "result": "FAIL",
+  "schema_version": "icra072b_stabilization_summary_v1",
+  "scientific_effect_claim": false,
+  "source_binding": {
+    "accepted": true,
+    "checks": [
+      {
+        "argv": [
+          "git",
+          "rev-parse",
+          "HEAD"
+        ],
+        "exit_code": 0,
+        "stderr": "",
+        "stdout": "8b75d81db69f1e716e9667d27de525ae8fae4507\n"
+      },
+      {
+        "argv": [
+          "git",
+          "rev-parse",
+          "origin/dev/icra"
+        ],
+        "exit_code": 0,
+        "stderr": "",
+        "stdout": "8b75d81db69f1e716e9667d27de525ae8fae4507\n"
+      },
+      {
+        "argv": [
+          "git",
+          "status",
+          "--porcelain=v1",
+          "--untracked-files=all"
+        ],
+        "exit_code": 0,
+        "stderr": "",
+        "stdout": "?? docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf\n"
+      }
+    ],
+    "head_commit": "8b75d81db69f1e716e9667d27de525ae8fae4507",
+    "origin_dev_icra_commit": "8b75d81db69f1e716e9667d27de525ae8fae4507",
+    "protected_pdf": {
+      "expected_sha256": "1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6",
+      "observed_sha256": "1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6",
+      "path": "docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf"
+    },
+    "schema_version": "icra072b_source_binding_v1",
+    "status_porcelain": "?? docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf\n"
+  },
+  "source_head": "8b75d81db69f1e716e9667d27de525ae8fae4507",
+  "suites": [
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/ego_planner/test_planning_risk_context",
+        "--gtest_filter=P4VerticalSliceTerminalLineageTest.*"
+      ],
+      "cwd": "/home/dev/ws_iap/src/iap",
+      "environment": {
+        "HOME": "/home/dev/ws_iap/src/iap/results/icra27/icra072b/final_logs/environment/home",
+        "ROS_HOME": "/home/dev/ws_iap/src/iap/results/icra27/icra072b/final_logs/environment/ros_home",
+        "ROS_LOG_DIR": "/home/dev/ws_iap/src/iap/results/icra27/icra072b/final_logs/environment/ros_logs",
+        "TMPDIR": "/home/dev/ws_iap/src/iap/results/icra27/icra072b/final_logs/environment/tmp",
+        "XDG_RUNTIME_DIR": "/home/dev/ws_iap/src/iap/results/icra27/icra072b/final_logs/environment/xdg_runtime"
+      },
+      "exit_code": 0,
+      "expected_test_count": 8,
+      "log_path": "results/icra27/icra072b/final_logs/production_terminal.log",
+      "name": "production_terminal",
+      "observed_assertions": [
+        "P4VerticalSliceTerminalLineageTest.InvalidTrajectoryIdentityBlocksFinalLineageAndPublication",
+        "P4VerticalSliceTerminalLineageTest.MalformedControlPointsBlockTheProductionTerminalWriter",
+        "P4VerticalSliceTerminalLineageTest.MismatchedAttemptBlocksFinalLineageAndPublication",
+        "P4VerticalSliceTerminalLineageTest.MismatchedSegmentOrRequestBlocksFinalLineageAndPublication",
+        "P4VerticalSliceTerminalLineageTest.MismatchedSnapshotOrGuideBlocksFinalLineageAndPublication",
+        "P4VerticalSliceTerminalLineageTest.OccupancyChangeAfterReleaseBlocksFirstManagerWriterAndDownstreamRows",
+        "P4VerticalSliceTerminalLineageTest.ProductionFsmPublishesCompleteSameAttemptManagerP5RuntimeChain",
+        "P4VerticalSliceTerminalLineageTest.ProductionFsmPublishesNothingWhenFusedCurrentIsUnsafeDespiteSafeLidar"
+      ],
+      "test_count": 8
+    },
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+        "--gtest_filter=P4CollisionGuideDecision.V2IdentityBindsImmutableSnapshotConfiguration:P4CollisionGuideDecision.InjectionRechecksRequestAndEpochIdentity"
+      ],
+      "cwd": "/home/dev/ws_iap/src/iap",
+      "environment": {
+        "HOME": "/home/dev/ws_iap/src/iap/results/icra27/icra072b/final_logs/environment/home",
+        "ROS_HOME": "/home/dev/ws_iap/src/iap/results/icra27/icra072b/final_logs/environment/ros_home",
+        "ROS_LOG_DIR": "/home/dev/ws_iap/src/iap/results/icra27/icra072b/final_logs/environment/ros_logs",
+        "TMPDIR": "/home/dev/ws_iap/src/iap/results/icra27/icra072b/final_logs/environment/tmp",
+        "XDG_RUNTIME_DIR": "/home/dev/ws_iap/src/iap/results/icra27/icra072b/final_logs/environment/xdg_runtime"
+      },
+      "exit_code": 0,
+      "expected_test_count": 2,
+      "log_path": "results/icra27/icra072b/final_logs/p4_identity_decision.log",
+      "name": "p4_identity_decision",
+      "observed_assertions": [
+        "P4CollisionGuideDecision.InjectionRechecksRequestAndEpochIdentity",
+        "P4CollisionGuideDecision.V2IdentityBindsImmutableSnapshotConfiguration"
+      ],
+      "test_count": 2
+    },
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide_integration",
+        "--gtest_filter=P4CollisionGuideIntegration.ReleasedSnapshotLineageRevalidatesAttemptAndLiveOccupancyBeforeTerminalUse:P4CollisionGuideIntegration.InjectionEpochMismatchInvalidatesDecision"
+      ],
+      "cwd": "/home/dev/ws_iap/src/iap",
+      "environment": {
+        "HOME": "/home/dev/ws_iap/src/iap/results/icra27/icra072b/final_logs/environment/home",
+        "ROS_HOME": "/home/dev/ws_iap/src/iap/results/icra27/icra072b/final_logs/environment/ros_home",
+        "ROS_LOG_DIR": "/home/dev/ws_iap/src/iap/results/icra27/icra072b/final_logs/environment/ros_logs",
+        "TMPDIR": "/home/dev/ws_iap/src/iap/results/icra27/icra072b/final_logs/environment/tmp",
+        "XDG_RUNTIME_DIR": "/home/dev/ws_iap/src/iap/results/icra27/icra072b/final_logs/environment/xdg_runtime"
+      },
+      "exit_code": 0,
+      "expected_test_count": 2,
+      "log_path": "results/icra27/icra072b/final_logs/p4_identity_integration.log",
+      "name": "p4_identity_integration",
+      "observed_assertions": [
+        "P4CollisionGuideIntegration.InjectionEpochMismatchInvalidatesDecision",
+        "P4CollisionGuideIntegration.ReleasedSnapshotLineageRevalidatesAttemptAndLiveOccupancyBeforeTerminalUse"
+      ],
+      "test_count": 2
+    },
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/ego_planner/test_p5_runtime_integrity_gate",
+        "--gtest_filter=P5RuntimeIntegrityGateTest.AuthoritativeFusedCurrentRejectsUnsafeDespiteValidFiniteLidar:P5RuntimeIntegrityGateTest.FutureBadInsideEmergencyTimeRequestsCandidate:P5RuntimeIntegrityGateTest.RuntimeSustainedCurrentLowMarginEscalates:P5RuntimeIntegrityGateTest.RuntimeAndFinalCarryExactTrajectoryIdAndNanosecondStart"
+      ],
+      "cwd": "/home/dev/ws_iap/src/iap",
+      "environment": {
+        "HOME": "/home/dev/ws_iap/src/iap/results/icra27/icra072b/final_logs/environment/home",
+        "ROS_HOME": "/home/dev/ws_iap/src/iap/results/icra27/icra072b/final_logs/environment/ros_home",
+        "ROS_LOG_DIR": "/home/dev/ws_iap/src/iap/results/icra27/icra072b/final_logs/environment/ros_logs",
+        "TMPDIR": "/home/dev/ws_iap/src/iap/results/icra27/icra072b/final_logs/environment/tmp",
+        "XDG_RUNTIME_DIR": "/home/dev/ws_iap/src/iap/results/icra27/icra072b/final_logs/environment/xdg_runtime"
+      },
+      "exit_code": 0,
+      "expected_test_count": 4,
+      "log_path": "results/icra27/icra072b/final_logs/p5_runtime.log",
+      "name": "p5_runtime",
+      "observed_assertions": [
+        "P5RuntimeIntegrityGateTest.AuthoritativeFusedCurrentRejectsUnsafeDespiteValidFiniteLidar",
+        "P5RuntimeIntegrityGateTest.FutureBadInsideEmergencyTimeRequestsCandidate",
+        "P5RuntimeIntegrityGateTest.RuntimeAndFinalCarryExactTrajectoryIdAndNanosecondStart",
+        "P5RuntimeIntegrityGateTest.RuntimeSustainedCurrentLowMarginEscalates"
+      ],
+      "test_count": 4
+    },
+    {
+      "argv": [
+        "/usr/bin/python3",
+        "/home/dev/ws_iap/src/iap/test/test_icra072_vertical_slice_tools.py",
+        "-v"
+      ],
+      "cwd": "/home/dev/ws_iap/src/iap",
+      "environment": {
+        "HOME": "/home/dev/ws_iap/src/iap/results/icra27/icra072b/final_logs/environment/home",
+        "ROS_HOME": "/home/dev/ws_iap/src/iap/results/icra27/icra072b/final_logs/environment/ros_home",
+        "ROS_LOG_DIR": "/home/dev/ws_iap/src/iap/results/icra27/icra072b/final_logs/environment/ros_logs",
+        "TMPDIR": "/home/dev/ws_iap/src/iap/results/icra27/icra072b/final_logs/environment/tmp",
+        "XDG_RUNTIME_DIR": "/home/dev/ws_iap/src/iap/results/icra27/icra072b/final_logs/environment/xdg_runtime"
+      },
+      "exit_code": 1,
+      "expected_test_count": 17,
+      "log_path": "results/icra27/icra072b/final_logs/tools.log",
+      "name": "tools",
+      "observed_assertions": [
+        "Icra072VerticalSliceToolsTest.test_analyzer_accepts_one_complete_identity_ordered_end_to_end",
+        "Icra072VerticalSliceToolsTest.test_analyzer_types_missing_empty_and_non_file_p4_bindings",
+        "Icra072VerticalSliceToolsTest.test_cleanup_callback_is_retained_until_every_group_is_cleared",
+        "Icra072VerticalSliceToolsTest.test_iteration_index_classifies_retained_runs_without_rewriting_them",
+        "Icra072VerticalSliceToolsTest.test_iterative_runner_accepts_only_fresh_layer1_run_and_shared_install",
+        "Icra072VerticalSliceToolsTest.test_repository_relative_roots_resolve_from_repository_not_cwd",
+        "Icra072VerticalSliceToolsTest.test_runner_and_publish_path_are_fail_closed",
+        "Icra072VerticalSliceToolsTest.test_runner_finalizes_capture_spawn_exception",
+        "Icra072VerticalSliceToolsTest.test_runner_finalizes_gate_import_exception_before_gpu_or_ros",
+        "Icra072VerticalSliceToolsTest.test_runner_finalizes_preflight_exception_before_ros",
+        "Icra072VerticalSliceToolsTest.test_runner_finalizes_source_change_after_owned_cleanup",
+        "Icra072VerticalSliceToolsTest.test_runner_rechecks_source_binding_before_ros",
+        "Icra072VerticalSliceToolsTest.test_runner_rejects_unbound_source_before_gpu_or_ros",
+        "Icra072VerticalSliceToolsTest.test_shared_dev_build_entry_has_exact_packages_and_workspace_roots",
+        "Icra072VerticalSliceToolsTest.test_source_binding_allows_only_exact_protected_pdf",
+        "Icra072VerticalSliceToolsTest.test_stop_owned_clears_an_actual_child_process_group",
+        "Icra072VerticalSliceToolsTest.test_tools_reject_repository_external_evidence_roots"
+      ],
+      "test_count": 17
+    }
+  ]
+}

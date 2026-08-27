@@ -1,0 +1,18 @@
+Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc
+Note: Google Test filter = P5RuntimeIntegrityGateTest.AuthoritativeFusedCurrentRejectsUnsafeDespiteValidFiniteLidar:P5RuntimeIntegrityGateTest.FutureBadInsideEmergencyTimeRequestsCandidate:P5RuntimeIntegrityGateTest.RuntimeSustainedCurrentLowMarginEscalates:P5RuntimeIntegrityGateTest.RuntimeAndFinalCarryExactTrajectoryIdAndNanosecondStart
+[==========] Running 4 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 4 tests from P5RuntimeIntegrityGateTest
+[ RUN      ] P5RuntimeIntegrityGateTest.AuthoritativeFusedCurrentRejectsUnsafeDespiteValidFiniteLidar
+[       OK ] P5RuntimeIntegrityGateTest.AuthoritativeFusedCurrentRejectsUnsafeDespiteValidFiniteLidar (0 ms)
+[ RUN      ] P5RuntimeIntegrityGateTest.FutureBadInsideEmergencyTimeRequestsCandidate
+[       OK ] P5RuntimeIntegrityGateTest.FutureBadInsideEmergencyTimeRequestsCandidate (0 ms)
+[ RUN      ] P5RuntimeIntegrityGateTest.RuntimeSustainedCurrentLowMarginEscalates
+[       OK ] P5RuntimeIntegrityGateTest.RuntimeSustainedCurrentLowMarginEscalates (0 ms)
+[ RUN      ] P5RuntimeIntegrityGateTest.RuntimeAndFinalCarryExactTrajectoryIdAndNanosecondStart
+[       OK ] P5RuntimeIntegrityGateTest.RuntimeAndFinalCarryExactTrajectoryIdAndNanosecondStart (0 ms)
+[----------] 4 tests from P5RuntimeIntegrityGateTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 4 tests from 1 test suite ran. (0 ms total)
+[  PASSED  ] 4 tests.

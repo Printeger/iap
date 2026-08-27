@@ -16,8 +16,12 @@
   record before any terminal row. The canonical runner requires exact pushed source plus the
   protected PDF allowlist, retains complete suite logs, and fails on absent/duplicate/skipped/nonzero/count-mismatch
   rows, binds every assertion to its declared suite and requires explicit expected counts. Final shared build and
-  pre-canonical suites pass 6/6 and 8+2+2+4 C++ plus 17+3 Python tests; the one
-  canonical execution remains sequenced after the clean implementation push.
+  pre-canonical suites pass 6/6 and 8+2+2+4 C++ plus 17+3 Python tests. The sole
+  canonical execution retained all five logs and passed the four C++ suites,
+  but tools exited 1 because its isolated repository-local HOME omitted the
+  ambient Git safe-directory trust and eight tests could not `rev-parse` the
+  differently owned repository. It was not retried; Layer 2 is
+  `BLOCKED_ICRA072B_HERMETIC_GIT_SAFE_DIRECTORY` pending Supervisor review.
 
 - review(icra-072a-layer1-pass): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 /
   IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — accept Builder HEAD `ac7f923` and source-bound
