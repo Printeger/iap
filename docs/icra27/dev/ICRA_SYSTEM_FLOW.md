@@ -1,5 +1,10 @@
 # ICRA System Flow — User-owned P0 -> P4-v2 -> P5 recovery
 
+> User decision 005 update 2026-08-27: ICRA-075 repair is TASK_READY. Restore fail-closed lineage/source gates and
+> diagnose the retained P5 low margin. The runtime graph may change only to correct a proven miswire of existing
+> frozen semantics; no risk/provider/AL/PL/fusion/P5 threshold or authority edge may be weakened. ICRA-076 remains
+> blocked.
+
 > ICRA-075 Review update 2026-08-27: first-row P5 `current_low_margin` prevents EGO final, publication and runtime;
 > the matrix is 0/40 and no power record exists. Metrics-only terminal-lineage failures are fail-open before
 > publication and analyzer lacks a final source recheck. ICRA-075 is BLOCKED/NOT PASS with `next_task=NONE` pending

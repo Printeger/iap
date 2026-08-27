@@ -3,6 +3,13 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- route(icra-075-bounded-repair): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 /
+  IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — record user decision 005 at pushed anchor `66cff244`: repair rather
+  than bypass ICRA-075. Issue one same-Gate task to restore metrics-only lineage and post-analyzer source
+  fail-closed behavior, classify P5 compatibility from retained evidence, and repair only a proven miswire of an
+  already-frozen value/semantic. Preserve attempts 001/002 and forbid provider/risk/AL/PL/fusion/P5/scene/arm/
+  claim tuning; ICRA-076 remains blocked.
+
 - review(icra-075-blocked): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 /
   IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — review `e5d625ab` against fixed `77522559`. Offline tooling passes
   14/14 and retained GPU/process/cleanup evidence conforms, but the first control row has 2,137/2,137 P5 final

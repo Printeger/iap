@@ -6,7 +6,8 @@
 > Current ICRA disposition (2026-08-27): ICRA-075 Supervisor Review is `REQUEST_CHANGES / BLOCKED / NOT PASS`.
 > The matrix is 0/40 with no power record after P5 rejects every first-row final candidate `current_low_margin`.
 > Metrics-only lineage failure is also fail-open before publication and the runner lacks a post-analyzer source
-> recheck. ICRA-076, formal Layer 4 and campaign remain unauthorized pending explicit user decision.
+> recheck. User decision 005 now authorizes a bounded same-Gate repair, not a bypass. ICRA-076, formal Layer 4 and
+> campaign remain unauthorized pending successful repair evidence and later Review.
 
 ICRA-075 Builder implementation adds exact V2 runtime map/GNSS assets, a 40-row development-only runner,
 committed-final/P5/publication capture, independent fixed-200 equal-arc analysis and deterministic non-freezing

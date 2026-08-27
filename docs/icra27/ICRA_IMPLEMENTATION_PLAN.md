@@ -1,5 +1,13 @@
 # ICRA 2027 P0 -> P4-v2 -> P5 科学纠偏实施计划
 
+## User decision 005 / bounded ICRA-075 repair — 2026-08-27
+
+用户决定 `USER-ICRA-ROUTE-20260827-005` 选择修复而非 bypass；唯一 route authority 仍为
+`ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md`。唯一 Builder task 恢复 metrics-only lineage 与 analyzer 后 source fail-closed，
+并从 retained evidence 分类 P5 low-margin 根因。只有已冻结 value/semantic 的 wiring/materialization defect
+可以修；若必须改变 provider/risk/AL/PL/fusion/P5 threshold/scene/arm，则在 GPU/ROS 前 BLOCKED 停止。
+ICRA-076 继续禁止。
+
 ## ICRA-075 Review BLOCKED / user decision required — 2026-08-27
 
 ICRA-075 第一条 control row 被 P5 `current_low_margin` 真实阻断，矩阵 0/40、无 EGO final/publication/runtime

@@ -1,5 +1,23 @@
 # ICRA Supervisor Log
 
+## 2026-08-27 — user decision 005 authorizes bounded ICRA-075 repair
+
+### Decision and task boundary
+
+- The user explicitly selects repair, not bypass. Decision `USER-ICRA-ROUTE-20260827-005` binds pushed approval
+  anchor `66cff244a3c6786e1447b68f42de95d01610a8e2`; all protected route fields remain byte-for-byte unchanged.
+- ICRA-075 is `TASK_READY` for exactly three repairs: restore metrics-only terminal-lineage fail-closed behavior,
+  add post-analyzer/final source checks, and classify the P5 `current_low_margin` root cause from retained evidence.
+  Product/config repair is allowed only for a proven miswire of an already-frozen semantic/value. A frozen-contract
+  incompatibility must stop before GPU/ROS.
+- No provider/risk truth, AL/PL, `max_pl` fusion, P5 threshold/timer, scene, arm, objective, claim or gate change is
+  authorized. `matrix-001/002` stay immutable; any legitimate continuation starts at `matrix-003`. ICRA-076 remains
+  blocked pending complete ICRA-075 evidence and later Review.
+
+### Supervisor window disposition
+
+- Pending pushed decision/task changeset and mandatory post-push audit.
+
 ## 2026-08-27 — ICRA-075 Review BLOCKED; awaiting user decision
 
 ### Review identity and preservation

@@ -1,14 +1,13 @@
 # ICRA four-layer development and validation workflow
 
-Status: **BLOCKED — LAYER 3 ICRA-075 AWAITING USER DECISION**
+Status: **ACTIVE — LAYER 3 ICRA-075 BOUNDED REPAIR**
 
 Requirements: `IAP-RQ-320`, `IAP-RQ-321`, `IAP-RQ-400`, `IAP-RQ-410`, `IAP-RQ-421`, `IAP-RQ-422`,
 `IAP-RQ-423`, `IAP-RQ-424`
 
-Current disposition: ICRA-072A passed; ICRA-072B/073 remain blocked/user-bypassed/NOT PASS; ICRA-074 passes its
-offline contract. ICRA-075 is BLOCKED/NOT PASS at 0/40 after P5 rejects the first row; no power inputs exist and
-two fail-closed engineering defects remain. No Builder task is active. Formal Layer 4 and campaign remain blocked
-pending explicit user decision.
+Current disposition: ICRA-075 remains NOT PASS at 0/40, but user decision 005 authorizes a bounded same-Gate
+repair of its two fail-closed defects and a pre-live P5 compatibility diagnosis. Only proven frozen-contract
+miswiring may be repaired; tuning remains forbidden. Formal Layer 4 and campaign stay blocked.
 
 ## 1. Purpose
 

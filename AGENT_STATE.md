@@ -3,10 +3,10 @@
 ```yaml
 schema_version: icra_single_branch_two_agent_v3_user_route_owner
 branch: dev/icra
-active_role: SUPERVISOR
-status: BLOCKED_AWAITING_USER_RESEARCH_DECISION
+active_role: DEEPSEEK
+status: TASK_READY
 gate: ICRA-075_EXPLORATORY_AND_POWER_INPUTS
-task_id: NONE
+task_id: ICRA-075
 milestone: ICRA-075_LAYER3_EXPLORATORY_ABLATION_AND_POWER_INPUTS
 review_base: 7752255987504bdf961d01a32029769eaf512d80
 reviewed_head: e5d625ab6f3d922d563425fcf01969c3d1b4b0a4
@@ -15,15 +15,15 @@ icra071_repair_review_base: 6e0e7328835064ecb665bc6476a6254924ff371d
 conference_route: P0_P4_V2_P5
 route_owner: USER
 route_lock: docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md
-user_decision_id: USER-ICRA-ROUTE-20260827-004
-user_approval_anchor: b126b2f5f9f0a3617346d75275b7aa703939263a
+user_decision_id: USER-ICRA-ROUTE-20260827-005
+user_approval_anchor: 66cff244a3c6786e1447b68f42de95d01610a8e2
 workflow_decision_id: USER-ICRA-WORKFLOW-20260826-001
-route_status: ICRA075_BLOCKED_AWAITING_USER_DECISION_REPAIR_OR_BYPASS_TO_ICRA076
+route_status: ICRA075_BOUNDED_REPAIR_TASK_READY_USER_DECISION005
 historical_gate0a_verdict: NO_GO_P2
 p0_gate0b_status: PASS
 p0_gate0b_worker_count: 4
 p4_v1_status: G0A_PASS_G0B_PASS_G0C_SCIENTIFIC_NO_GO_IMMUTABLE
-p4_v2_status: DEVELOPMENT_LAYER1_PASS_LAYER2_BLOCKED_BYPASSED_LAYER3_SCIENTIFICALLY_NOT_STARTED_BLOCKED_ICRA075_INCOMPLETE
+p4_v2_status: DEVELOPMENT_LAYER1_PASS_LAYER2_BLOCKED_BYPASSED_LAYER3_SCIENTIFICALLY_NOT_STARTED_BLOCKED_ICRA075_REPAIR_ACTIVE
 p5_status: IMPLEMENTED_BUT_NO_CURRENT_PROSPECTIVE_QUALIFICATION_PASS
 icra070_status: SUPERSEDED_UNQUALIFIED_BY_USER_ROUTE_DECISION
 icra071_status: REQUEST_CHANGES_DEFERRED_NONBLOCKING_BY_USER_DECISION_002
@@ -31,34 +31,33 @@ icra072a_status: PASS_SOURCE_BOUND_COMPLETE_LIVE_IDENTITY
 icra072b_status: BLOCKED_HIDDEN_UNTRACKED_SOURCE_USER_ACCEPTED_BYPASS_NOT_PASS
 icra073_status: BLOCKED_USER_ACCEPTED_BYPASS_NOT_PASS
 icra074_status: PASS_OFFLINE_CONTRACT_PRODUCTION_UNCHANGED_NO_EFFECT_CLAIM
-icra075_status: BLOCKED_CONTROL_P5_CURRENT_LOW_MARGIN_0_OF_40_NO_POWER_INPUTS_NOT_PASS
-supervisor_verdict: ICRA075_REQUEST_CHANGES_STANDARDS_AND_SPEC_BLOCKED
-review_disposition: AWAITING_USER_DECISION_REPAIR_ICRA075_OR_BYPASS_TO_ICRA076
+icra075_status: TASK_READY_BOUNDED_FAIL_CLOSED_AND_P5_COMPATIBILITY_REPAIR
+supervisor_verdict: ICRA075_REQUEST_CHANGES_USER_AUTHORIZED_BOUNDED_REPAIR
+review_disposition: SAME_GATE_BOUNDED_REPAIR_ISSUED_NO_BYPASS
 qualification_claim: false
 campaign_status: BLOCKED_UNTIL_ICRA079_REVIEW_PASS_AND_DISTINCT_USER_APPROVAL
-handoff_status: BLOCKED_AWAITING_USER_RESEARCH_DECISION
-next_task: NONE
-next_after_user_decision: PENDING_USER_DECISION
+handoff_status: TASK_READY
+next_task: NEXT_TASK.md
+next_after_icra075_pass: ICRA-076_PREREGISTRATION_FREEZE
 recovery_roadmap: docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md
 four_layer_workflow: docs/icra27/ICRA_FOUR_LAYER_DEVELOPMENT_WORKFLOW.md
 guard_plan: docs/icra27/ICRA_CROSS_LAYER_GUARD_PLAN.md
 artifact_retention: ALL_ICRA072_EVIDENCE_SHARED_ROOTS_HIDDEN_USER_ARTIFACTS_AND_PROTECTED_PDF_RETAINED
-window_disposition: ROTATE_RECOMMENDED
-rotation_reason: ICRA075_BLOCKED_USER_DECISION_AND_CONTEXT_COMPACTED
-window_handoff_anchor: 779b243b0a8885ff466ff3a1f3cb6e7ec544aab1
+window_disposition: PENDING_POST_PUSH_AUDIT
+rotation_reason: PENDING_POST_PUSH_AUDIT
+window_handoff_anchor: PENDING_DECISION_PUSH
 window_next_role: SUPERVISOR
-window_next_review_task: ICRA-075_USER_DECISION
+window_next_review_task: ICRA-075
 window_bootstrap_source: REPOSITORY_AUTHORITY_ONLY
-updated_utc: 2026-08-27T13:08:12Z
+updated_utc: 2026-08-27T13:13:24Z
 ```
 
-ICRA-075 Builder HEAD `e5d625ab6f3d922d563425fcf01969c3d1b4b0a4` is REQUEST_CHANGES/BLOCKED against
-fixed handoff `7752255987504bdf961d01a32029769eaf512d80`. The first scientific control row reaches healthy P0 but
-all 2,137 P5 final observations reject `current_low_margin`; no EGO final/publication/P5 runtime exists, so the
-matrix is 0/40 and no power inputs exist. Builder correctly stopped without forbidden risk/provider/threshold
-tuning.
+User decision `USER-ICRA-ROUTE-20260827-005`, anchored at pushed
+`66cff244a3c6786e1447b68f42de95d01610a8e2`, chooses bounded same-Gate ICRA-075 repair. The task must restore
+metrics-only fail-closed lineage, add post-analyzer source rechecks and determine whether P5 `current_low_margin`
+comes from a genuine implementation/wiring defect or an incompatible frozen contract. It may repair only the
+former and must stop on the latter.
 
-Review also finds two engineering blockers: metrics-only lineage/CSV failures are allowed to return success and
-therefore change the pre-publication fail-closed boundary; source is not rechecked after analyzer execution.
-ICRA-075 is NOT PASS. No Builder task or ICRA-076 is authorized until the user explicitly chooses bounded ICRA-075
-repair or accepts these missing exploratory/power/safety bases and bypasses to ICRA-076.
+ICRA-075 remains NOT PASS until a later Review. No AL/PL, provider truth, P5 threshold, fusion, formal arm, scene,
+claim or route tuning is authorized. ICRA-076 remains blocked. The first two attempts and all shared/evidence/log
+artifacts remain immutable and retained.

@@ -1,5 +1,14 @@
 # ICRA P0 -> P4 -> P5 deviation audit and scientific recovery roadmap
 
+## User decision 005 — bounded ICRA-075 repair — 2026-08-27
+
+The user explicitly chooses repair rather than bypass after the ICRA-075 BLOCKED Review. Decision
+`USER-ICRA-ROUTE-20260827-005` is bound to pushed approval anchor
+`66cff244a3c6786e1447b68f42de95d01610a8e2`. It preserves every protected route field and authorizes only a
+same-Gate repair: restore fail-closed lineage/source checks, classify the P5 low-margin root cause, and repair it
+only if an existing frozen value/semantic is miswired or mis-materialized. Contract, provider/risk truth, AL/PL,
+fusion, P5 thresholds, scenes, arms, claims and gate sequence remain unchanged. ICRA-076 stays blocked.
+
 ## ICRA-075 Review BLOCKED / awaiting user decision — 2026-08-27
 
 Supervisor Review of `77522559..e5d625ab` closes ICRA-075 as REQUEST_CHANGES/BLOCKED/NOT PASS. The first control
@@ -136,10 +145,10 @@ its protected research fields.
   "fallback_policy": "PROPOSAL_ONLY_USER_ACTIVATION_REQUIRED",
   "scientific_no_go_transition": "BLOCKED_AWAITING_USER_RESEARCH_DECISION",
   "campaign_activation": "USER_APPROVAL_AFTER_ICRA079_REVIEW_PASS",
-  "approval_anchor": "b126b2f5f9f0a3617346d75275b7aa703939263a",
-  "user_decision_id": "USER-ICRA-ROUTE-20260827-004",
+  "approval_anchor": "66cff244a3c6786e1447b68f42de95d01610a8e2",
+  "user_decision_id": "USER-ICRA-ROUTE-20260827-005",
   "protected_transition": {
-    "from_anchor": "b126b2f5f9f0a3617346d75275b7aa703939263a",
+    "from_anchor": "66cff244a3c6786e1447b68f42de95d01610a8e2",
     "changes": [
       {
         "field": "route_owner",
@@ -260,11 +269,11 @@ its protected research fields.
     ]
   },
   "user_decision": {
-    "route_disposition": "USER_ACCEPTED_ICRA073_BLOCKED_BYPASS_TO_ICRA074_TARGETED_OPTIMIZATION",
+    "route_disposition": "USER_CHOSE_BOUNDED_ICRA075_REPAIR_AFTER_BLOCKED_REVIEW",
     "p0_p5_disposition": "RETAIN_AS_MATCHED_CONTROL_ASSET",
     "p4_primary_endpoint": "MAX_PROVIDER_ONLY_INTERIOR_RISK",
     "confirmatory_size": "PREREGISTERED_ADAPTIVE_30_TO_60_INDEPENDENT_SEED_RUNS_PER_SCENE",
-    "enforcement": "ONLY_ICRA073_FROZEN_GEOMETRY_REPAIRED_ALL_OTHER_ICRA073_BLOCKERS_ACCEPTED_AS_DEBT"
+    "enforcement": "REPAIR_FAIL_CLOSED_DEFECTS_AND_ONLY_PROVEN_FROZEN_CONTRACT_MISWIRING_NO_TUNING_NO_ICRA076_BYPASS"
   },
   "guard_strength": "ACCIDENT_PREVENTION_NOT_A_SECURITY_BOUNDARY"
 }

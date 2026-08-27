@@ -1,5 +1,13 @@
 # ICRA 2027 Conference Scope — User-owned P0 -> P4-v2 -> P5 recovery
 
+## User decision 005 / ICRA-075 bounded repair active — 2026-08-27
+
+The user chooses repair rather than bypass under `USER-ICRA-ROUTE-20260827-005` at pushed anchor `66cff244`.
+The unchanged route authority is `ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md`. ICRA-075 may restore its two fail-closed
+defects and diagnose P5 compatibility. Only a proven wiring/materialization error against an already-frozen value
+may be corrected; otherwise it must stop pre-live. Provider/risk truth, AL/PL, fusion, P5 thresholds, scenes,
+formal arms, claims and route remain frozen. ICRA-076 is not active.
+
 ## ICRA-075 Review BLOCKED — 2026-08-27
 
 ICRA-075 is REQUEST_CHANGES/NOT PASS: the first control row is blocked by genuine P5 `current_low_margin`, leaving

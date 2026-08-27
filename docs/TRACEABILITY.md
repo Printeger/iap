@@ -1,5 +1,14 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-27 user decision 005 and ICRA-075 repair issuance
+
+| Req ID | Decision/task seam | Evidence and disposition | Status |
+|---|---|---|---|
+| IAP-RQ-423 / IAP-RQ-424 | Route-owner choice | User selects same-Gate repair at pushed anchor `66cff244`; protected route fields unchanged | **USER DECISION 005** |
+| IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-423 | Publication/source fail-closed | Restore metrics-only lineage failure and post-analyzer/final source admission with adversarial tests | **ICRA-075 TASK_READY** |
+| IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 | P5 compatibility | Diagnose retained low margin; repair only proven frozen-value wiring/materialization defect, otherwise stop pre-live | **BOUNDED / NO TUNING** |
+| IAP-RQ-423 / IAP-RQ-424 | Formal boundary | Attempts 001/002 retained; ICRA-076/held-out/freeze remain blocked | **UNCHANGED** |
+
 ## 2026-08-27 ICRA-075 Supervisor Review
 
 | Req ID | Reviewed seam | Evidence and disposition | Status |
