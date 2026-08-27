@@ -76,12 +76,19 @@ Verdict: **REQUEST_CHANGES — two High contract failures and one Medium handoff
 - Route consistency, hooks-path, staged-path, whitespace and commit-message checks pass explicitly. The installed
   pre-commit still exits 2 with `ICRA_ROUTE_GUARD_FAIL:BUILDER_SUPERVISOR_FILE_STAGED` because the valid handoff
   correctly retains `active_role=DEEPSEEK`; this is the documented ICRA-071 lifecycle defect. The Supervisor-only
-  Review commit therefore uses the disclosed `--no-verify`; the normal pre-push guard remains enabled.
+  Review commit and minimal rotation-record commit therefore use the disclosed `--no-verify`; the normal pre-push
+  guard remains enabled for both pushes.
 
 ### Supervisor window disposition
 
-- Pending the mandatory post-push audit. This section will be completed only after the Review changeset is pushed
-  and confirmed at divergence `0 0`, as required by `AGENTS.md` §8.6.
+- Disposition: `ROTATE_RECOMMENDED`.
+- Reason: `ICRA072A_FAIL_CLOSED_ACCEPTANCE_REPAIR_AFTER_COMPACTED_REPEAT_REVIEW`. This context was compacted and
+  ICRA-072A has crossed another Review/repair cycle on runtime safety, exact identity, automatic outcome and source
+  provenance. A fresh repository-authority recovery reduces the risk of confusing run022's real structural chain
+  with formal Gate completion.
+- Post-push audit anchor: `d0ee0afe58c9519578a6cfeff2647ae0012cc608`. The Review changeset was pushed with
+  the normal pre-push guard, fetched and confirmed at divergence `0 0` before this one-time audit. This minimal
+  Supervisor-only record does not change role, Gate, task scope or Builder authorization.
 
 ## 2026-08-27 — ICRA-072A Review REQUEST_CHANGES; authoritative P5 and exact identity repair issued
 
