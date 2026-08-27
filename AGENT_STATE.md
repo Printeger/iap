@@ -42,13 +42,13 @@ recovery_roadmap: docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP
 four_layer_workflow: docs/icra27/ICRA_FOUR_LAYER_DEVELOPMENT_WORKFLOW.md
 guard_plan: docs/icra27/ICRA_CROSS_LAYER_GUARD_PLAN.md
 artifact_retention: ALL_ICRA072_EVIDENCE_SHARED_ROOTS_HIDDEN_USER_ARTIFACTS_AND_PROTECTED_PDF_RETAINED
-window_disposition: PENDING_POST_PUSH_AUDIT
-rotation_reason: PENDING_POST_PUSH_AUDIT
-window_handoff_anchor: PENDING_ROUTE_PUSH
+window_disposition: ROTATE_RECOMMENDED
+rotation_reason: USER_DECISION004_GATE_CHANGE_ICRA073_TO_ICRA074
+window_handoff_anchor: 5f898d0e28f1eb8929788acb4d03d2f06f709979
 window_next_role: SUPERVISOR
 window_next_review_task: ICRA-074
 window_bootstrap_source: REPOSITORY_AUTHORITY_ONLY
-updated_utc: 2026-08-27T10:42:58Z
+updated_utc: 2026-08-27T10:43:55Z
 ```
 
 User decision `USER-ICRA-ROUTE-20260827-004`, bound to pushed anchor `b126b2f5`, directs only the frozen geometry

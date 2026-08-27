@@ -24,7 +24,15 @@
 
 ### Supervisor window disposition
 
-- Pending the mandatory post-push audit; the route/task changeset must first become the pushed handoff.
+- Route/task changeset `5f898d0e28f1eb8929788acb4d03d2f06f709979` was pushed; pre-push passed and fetch confirmed
+  divergence `0 0`. The normal commit was blocked by `ROUTE_CHANGE_SUPERVISOR_NOT_ACTIVE`, because the known
+  local transition guard cannot both require staged `active_role=SUPERVISOR` and issue a DEEPSEEK task in one
+  synchronized changeset. After repository consistency PASS and exact 14-file staging inspection, Supervisor
+  used the controlled section 8.6 `--no-verify` path. The protected PDF remained untracked.
+- **`ROTATE_RECOMMENDED`**. Reason: `USER_DECISION004_GATE_CHANGE_ICRA073_TO_ICRA074`. This is a user-owned Gate
+  transition and changes the active task from blocked ICRA-073 to ICRA-074. A fresh Supervisor window may later
+  review Builder completion from pushed repository authority. Rotation does not change `active_role=DEEPSEEK`
+  or authorize any work beyond `NEXT_TASK.md`.
 
 ## 2026-08-27 — ICRA-073 Review BLOCKED; frozen fixture decision required
 
