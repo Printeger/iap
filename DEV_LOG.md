@@ -40,6 +40,12 @@ fixture/roadmap/workflow/guard authorities. Installed coverage includes the six 
 launched map/GNSS/LiDAR/visualization/control runtime packages. U95 consumes 60 indexed byte-identical serialized
 snapshot observations, and all four required command argv vectors are exact rather than self-selected.
 
+Repair implementation `a8c6cc43910f30c28260d6261cdbb5122f7c6cff` was pushed and fetch-confirmed at
+divergence `0 0` before the fresh non-overwriting canonical candidate was created. Independent validation of
+`results/icra27/icra076/preregistration-freeze-002.json` passes with 949 complete source/authority entries,
+957 shared runtime-install entries and 360 execution rows. The 527,858-byte record has SHA-256
+`c0b4953a05a161271b2f3f4ab1e88095b8dc092036b8e90803120217bbc87631` and keeps `icra077_authorized=false`.
+
 ## 2026-08-27 — ICRA-075 bounded fail-closed repair and P5 compatibility diagnosis
 
 Requirements: IAP-RQ-320, IAP-RQ-321, IAP-RQ-400, IAP-RQ-410,

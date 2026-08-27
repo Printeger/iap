@@ -10,7 +10,8 @@
   empirical power claim. Retain review-rejected `preregistration-freeze-001.json` (`51464dff…60582`) without
   overwrite; repair pre-access path admission, exact four-field inventories, complete source/runtime installed
   coverage, 60 explicit replay observations and exact required-command binding before a new canonical freeze.
-  ICRA-075 remains BLOCKED/user-bypassed/NOT PASS and ICRA-077 remains unauthorized.
+  Canonical `preregistration-freeze-002.json` binds pushed repair `a8c6cc4`, source 949/install 957/order 360 and
+  SHA-256 `c0b4953a…87631`; ICRA-075 remains BLOCKED/user-bypassed/NOT PASS and ICRA-077 remains unauthorized.
 
 - route(user-decision-006-issue-icra076): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 /
   IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — record user acceptance of ICRA-075 frozen incompatibility, 0/40, absent
