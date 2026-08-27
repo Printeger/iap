@@ -75,8 +75,13 @@ No unasked scope creep was found. Runs `run-001` through `run-023` remain contig
 
 ### Supervisor window disposition
 
-- Pending the mandatory post-push audit. This Review changeset must first become the pushed authoritative handoff;
-  any final `KEEP_WINDOW` or `ROTATE_RECOMMENDED` record follows in a minimal Supervisor-only commit if required.
+- Disposition: `ROTATE_RECOMMENDED`.
+- Reason: `ICRA072A_EXACT_ADMISSION_REPAIR_AFTER_COMPACTED_REPEAT_REVIEW`. The Review context was compacted and
+  ICRA-072A has crossed repeated repair cycles at the runtime/source acceptance boundary. Recovering only from the
+  newly pushed authority reduces the risk of confusing run023's real integration success with formal Layer 1 PASS.
+- Post-push audit anchor: `924a80a980e80704716aa43cdd2bdb3a749e70ac`. That Review changeset was pushed with
+  the normal pre-push guard, fetched and confirmed at divergence `0 0` before this one-time audit. Rotation changes
+  neither `active_role=DEEPSEEK` nor the same-Gate task authorization.
 
 ## 2026-08-27 — ICRA-072A Review REQUEST_CHANGES; Layer 1 acceptance repair reissued
 
