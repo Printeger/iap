@@ -3,6 +3,17 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(icra-072a-fail-closed-acceptance): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 /
+  IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — require authoritative `FUSED` runtime effective/raw
+  `action=OK` with no active reject reason on an explicit positive trajectory ID and integer-nanosecond start;
+  reject missing, malformed, float, sentinel and inconsistent lineage-v2 identity, including empty control-point
+  or final-B-spline identity, before comparison. Report the actual selected terminal identity instead of a
+  later unselected publication. Move gate import, Git source capture, GPU preflight and all later orchestration
+  under the consumed-attempt finalization boundary. Add a committed-source admission record that requires clean
+  tracked bytes and exact `HEAD == origin/dev/icra`, then rechecks the binding after GPU/before ROS and after
+  runner-owned cleanup. The
+  implementation must be committed and pushed at `0 0` before any fresh `run-023+` live attempt.
+
 - review(icra-072a-acceptance): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 /
   IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — reject Builder HEAD `e728fff` as formal Layer 1
   completion while retaining run022 as strong structural module-integration evidence. Authoritative fused P5,
@@ -26,9 +37,10 @@
   classifying cleanup and authority rejections without modifying original evidence. Its superseded v1 draft is
   retained and disclosed. `run-021` truthfully fails at fused P5 under degraded GNSS. The smallest
   development-only input correction reuses the existing open-sky GNSS preset while preserving `max_pl`, AL/P5
-  thresholds and P4 oracle isolation. `run-022` is the first acceptable continuation PASS with all seven stages,
-  positive fused final margins, terminal ID `17` / start `1657065614997223065`, 17 publications and 70 exact
-  runtime observations. ICRA-072B, effect, qualification and campaign remain unauthorized pending Review.
+  thresholds and P4 oracle isolation. The original Builder handoff incorrectly called the later unselected
+  trajectory `17` terminal; retained `run-022`'s actual last complete selected chain is trajectory `8`, start
+  `1657065613066228089`, final identity `293c997b3471ab7e`. The run remains structural evidence rather than an
+  accepted source-bound PASS. ICRA-072B, effect, qualification and campaign remain unauthorized pending Review.
 
 - review(icra-072a-layer1-flow): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 /
   IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — reject Builder HEAD `cd56257` as Layer 1 completion.

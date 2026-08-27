@@ -55,6 +55,23 @@ class Icra072VerticalSliceToolsTest(unittest.TestCase):
         spec.loader.exec_module(module)
         return module
 
+    @staticmethod
+    def _accepted_source_binding():
+        commit = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=REPO, check=True,
+            capture_output=True, text=True).stdout.strip()
+        return {
+            "schema_version": "icra072_source_binding_v1",
+            "repository": str(REPO),
+            "head_commit": commit,
+            "origin_dev_icra_commit": commit,
+            "tracked_status": "",
+            "tracked_worktree_clean": True,
+            "head_matches_origin": True,
+            "accepted": True,
+            "failure_reasons": [],
+        }
+
     def test_shared_dev_build_entry_has_exact_packages_and_workspace_roots(self):
         source = BUILD_ENTRY.read_text()
         self.assertIn("source /opt/ros/jazzy/setup.bash", source)
@@ -76,9 +93,16 @@ class Icra072VerticalSliceToolsTest(unittest.TestCase):
             export = root / "exports/run"
             export.mkdir(parents=True)
             p4_path = export / "planner_p4_risk_astar_debug.csv"
+            source_binding = self._accepted_source_binding()
+            (root / "source_binding.json").write_text(
+                json.dumps(source_binding))
             (root / "run_manifest.json").write_text(json.dumps({
                 "schema_version": "icra072_layer1_dev_run_v1",
                 "run_id": root.name, "iterative_development": True,
+                "commit": source_binding["head_commit"],
+                "source_binding": source_binding,
+                "source_binding_recheck": source_binding,
+                "source_binding_final": source_binding,
                 "gpu_ready": True, "launch_started": True,
                 "launch_early_exit": False,
                 "owned_process_groups_cleared": True,
@@ -135,7 +159,7 @@ class Icra072VerticalSliceToolsTest(unittest.TestCase):
                     "reason": "provider_bottleneck_selected",
                 })
             lineage_fields = [
-                "stage", "stamp_s", "planning_attempt_id",
+                "schema_version", "stage", "stamp_s", "planning_attempt_id",
                 "collision_segment_id", "request_hash",
                 "snapshot_generation_id", "snapshot_config_hash",
                 "occupancy_epoch", "original_guide_hash", "risk_guide_hash",
@@ -152,6 +176,7 @@ class Icra072VerticalSliceToolsTest(unittest.TestCase):
                 writer = csv.DictWriter(stream, fieldnames=lineage_fields)
                 writer.writeheader()
                 common = {
+                    "schema_version": "p4_v2_end_to_end_lineage_v2",
                     "planning_attempt_id": "2", "collision_segment_id": "3",
                     "request_hash": "req", "snapshot_generation_id": "7",
                     "snapshot_config_hash": "cfg", "occupancy_epoch": "4",
@@ -187,6 +212,9 @@ class Icra072VerticalSliceToolsTest(unittest.TestCase):
                              "start_time_ns": 123504278000}},
                 {"kind": "p5_status", "receive_steady_s": 4.0,
                  "payload": {"phase": "runtime", "action": "OK",
+                             "raw_action": "OK", "reason": "ok",
+                             "raw_reason": "ok", "active_reasons": [],
+                             "current_reason": "", "future_reason": "",
                              "final_candidate_traj_id": -1,
                              "current_integrity_source": "FUSED",
                              "samples": [{"trajectory_sample_source":
@@ -212,6 +240,246 @@ class Icra072VerticalSliceToolsTest(unittest.TestCase):
                 "both_complete_count": 1,
                 "selection_blockers": {},
             })
+            self.assertEqual(analysis["exercised_commit"],
+                             source_binding["head_commit"])
+            mismatched_binding = {
+                **source_binding,
+                "origin_dev_icra_commit": "0" * 40,
+                "head_matches_origin": False,
+            }
+            (root / "source_binding.json").write_text(
+                json.dumps(mismatched_binding))
+            source_output = root / "analysis_source_mismatch.json"
+            completed = subprocess.run(
+                [sys.executable, str(ANALYZER), "--run-root", str(root),
+                 "--output", str(source_output)],
+                capture_output=True, text=True, check=False)
+            self.assertNotEqual(completed.returncode, 0)
+            self.assertIn(
+                "source_binding_manifest_mismatch",
+                json.loads(source_output.read_text())["failures"])
+            (root / "source_binding.json").write_text(
+                json.dumps(source_binding))
+            capture_path = root / "lineage_capture.jsonl"
+            captured_rows = [json.loads(line) for line in
+                             capture_path.read_text().splitlines()]
+            runtime_row = next(
+                row for row in captured_rows
+                if row.get("kind") == "p5_status"
+                and row["payload"].get("phase") == "runtime")
+            for action in ("REQUEST_REPLAN",
+                           "REQUEST_EMERGENCY_STOP_CANDIDATE"):
+                with self.subTest(runtime_action=action):
+                    runtime_row["payload"]["action"] = action
+                    capture_path.write_text(
+                        "".join(json.dumps(row, sort_keys=True) + "\n"
+                                for row in captured_rows))
+                    rejected_runtime_output = (
+                        root / f"analysis_runtime_{action.lower()}.json")
+                    completed = subprocess.run(
+                        [sys.executable, str(ANALYZER), "--run-root",
+                         str(root), "--output", str(rejected_runtime_output)],
+                        capture_output=True, text=True, check=False)
+                    self.assertNotEqual(completed.returncode, 0)
+                    rejected_runtime = json.loads(
+                        rejected_runtime_output.read_text())
+                    self.assertFalse(rejected_runtime["stage_status"][
+                        "p5_runtime_committed"])
+                    self.assertIn("p5_runtime_action_not_ok",
+                                  rejected_runtime["failures"])
+            runtime_row["payload"]["action"] = "OK"
+            runtime_row["payload"]["raw_action"] = "REQUEST_REPLAN"
+            capture_path.write_text(
+                "".join(json.dumps(row, sort_keys=True) + "\n"
+                        for row in captured_rows))
+            latent_output = root / "analysis_runtime_latent_replan.json"
+            completed = subprocess.run(
+                [sys.executable, str(ANALYZER), "--run-root", str(root),
+                 "--output", str(latent_output)],
+                capture_output=True, text=True, check=False)
+            self.assertNotEqual(completed.returncode, 0)
+            self.assertIn("p5_runtime_action_not_ok",
+                          json.loads(latent_output.read_text())["failures"])
+            runtime_row["payload"]["raw_action"] = "OK"
+            later_emergency = json.loads(json.dumps(runtime_row))
+            later_emergency["receive_steady_s"] = 4.5
+            later_emergency["payload"]["action"] = (
+                "REQUEST_EMERGENCY_STOP_CANDIDATE")
+            later_emergency["payload"]["raw_action"] = (
+                "REQUEST_EMERGENCY_STOP_CANDIDATE")
+            capture_path.write_text(
+                "".join(json.dumps(row, sort_keys=True) + "\n"
+                        for row in captured_rows + [later_emergency]))
+            later_emergency_output = (
+                root / "analysis_runtime_later_emergency.json")
+            completed = subprocess.run(
+                [sys.executable, str(ANALYZER), "--run-root", str(root),
+                 "--output", str(later_emergency_output)],
+                capture_output=True, text=True, check=False)
+            self.assertNotEqual(completed.returncode, 0)
+            self.assertIn(
+                "p5_runtime_action_not_ok",
+                json.loads(later_emergency_output.read_text())["failures"])
+            capture_path.write_text(
+                "".join(json.dumps(row, sort_keys=True) + "\n"
+                        for row in captured_rows))
+            lineage_path = Path(str(p4_path) + ".lineage.csv")
+            with lineage_path.open(newline="") as stream:
+                original_lineage = list(csv.DictReader(stream))
+            lineage_fieldnames = list(original_lineage[0])
+            original_capture = json.loads(json.dumps(captured_rows))
+            sentinel = -9223372036854775808
+            for case in ("missing", "malformed", "sentinel", "mismatched",
+                         "control_points", "final_identity"):
+                with self.subTest(identity_case=case):
+                    lineage_rows = json.loads(json.dumps(original_lineage))
+                    capture_rows = json.loads(json.dumps(original_capture))
+                    if case == "missing":
+                        for row in lineage_rows:
+                            row["trajectory_start_ns"] = ""
+                        for row in capture_rows:
+                            payload = row.get("payload", {})
+                            payload.pop("final_candidate_start_time_ns", None)
+                            payload.pop("start_time_ns", None)
+                            for sample in payload.get("samples", []):
+                                sample.pop("trajectory_start_time_ns", None)
+                    elif case == "malformed":
+                        for row in lineage_rows:
+                            row["trajectory_start_ns"] = "not-a-nanosecond"
+                    elif case == "sentinel":
+                        for row in lineage_rows:
+                            row["trajectory_start_ns"] = str(sentinel)
+                        for row in capture_rows:
+                            payload = row.get("payload", {})
+                            if payload.get("phase") == "final":
+                                payload["final_candidate_start_time_ns"] = sentinel
+                            if row.get("kind") == "normal_bspline":
+                                payload["start_time_ns"] = sentinel
+                            for sample in payload.get("samples", []):
+                                sample["trajectory_start_time_ns"] = sentinel
+                    else:
+                        if case == "mismatched":
+                            lineage_rows[-1]["trajectory_start_ns"] = (
+                                "123504278001")
+                        elif case == "control_points":
+                            for row in lineage_rows:
+                                row["control_points_hash"] = ""
+                        else:
+                            for row in lineage_rows:
+                                row["final_bspline_identity"] = ""
+                    with lineage_path.open("w", newline="") as stream:
+                        writer = csv.DictWriter(
+                            stream, fieldnames=lineage_fieldnames)
+                        writer.writeheader()
+                        writer.writerows(lineage_rows)
+                    capture_path.write_text(
+                        "".join(json.dumps(row, sort_keys=True) + "\n"
+                                for row in capture_rows))
+                    identity_output = root / f"analysis_identity_{case}.json"
+                    completed = subprocess.run(
+                        [sys.executable, str(ANALYZER), "--run-root",
+                         str(root), "--output", str(identity_output)],
+                        capture_output=True, text=True, check=False)
+                    self.assertNotEqual(completed.returncode, 0)
+                    identity_analysis = json.loads(identity_output.read_text())
+                    expected_failure = (
+                        "lineage_trajectory_identity_inconsistent"
+                        if case == "mismatched" else
+                        "lineage_trajectory_identity_missing_or_invalid")
+                    self.assertIn(expected_failure,
+                                  identity_analysis["failures"])
+                    self.assertEqual(identity_analysis["first_missing_stage"],
+                                     "ego_final_bspline")
+            with lineage_path.open("w", newline="") as stream:
+                writer = csv.DictWriter(stream, fieldnames=lineage_fieldnames)
+                writer.writeheader()
+                writer.writerows(original_lineage)
+            capture_path.write_text(
+                "".join(json.dumps(row, sort_keys=True) + "\n"
+                        for row in original_capture))
+            float_capture = json.loads(json.dumps(original_capture))
+            for row in float_capture:
+                payload = row.get("payload", {})
+                if payload.get("phase") == "final":
+                    payload["final_candidate_start_time_ns"] = 123504278000.0
+                if row.get("kind") == "normal_bspline":
+                    payload["start_time_ns"] = 123504278000.0
+                for sample in payload.get("samples", []):
+                    sample["trajectory_start_time_ns"] = 123504278000.0
+            capture_path.write_text(
+                "".join(json.dumps(row, sort_keys=True) + "\n"
+                        for row in float_capture))
+            float_output = root / "analysis_identity_float.json"
+            completed = subprocess.run(
+                [sys.executable, str(ANALYZER), "--run-root", str(root),
+                 "--output", str(float_output)],
+                capture_output=True, text=True, check=False)
+            self.assertNotEqual(completed.returncode, 0)
+            self.assertEqual(
+                json.loads(float_output.read_text())["first_missing_stage"],
+                "p5_final_pass_before_publish")
+            capture_path.write_text(
+                "".join(json.dumps(row, sort_keys=True) + "\n"
+                        for row in original_capture))
+            unselected = {
+                **original_lineage[0],
+                "planning_attempt_id": "99",
+                "request_hash": "unselected-request",
+                "selection_applied": "0",
+                "trajectory_id": "17",
+                "trajectory_start_ns": "123504279000",
+                "final_bspline_identity": "unselected-bs",
+            }
+            with lineage_path.open("a", newline="") as stream:
+                writer = csv.DictWriter(stream, fieldnames=lineage_fieldnames)
+                for stage, stamp in (
+                        ("final_bspline_before_p5", 11.0),
+                        ("p5_final_pass_before_publish", 11.1),
+                        ("normal_publish_authorized", 11.2)):
+                    writer.writerow({**unselected, "stage": stage,
+                                     "stamp_s": stamp})
+            later_capture = original_capture + [
+                {"kind": "p5_status", "receive_steady_s": 5.0,
+                 "payload": {"phase": "final", "action": "OK",
+                             "final_candidate_rejected": False,
+                             "final_candidate_traj_id": 17,
+                             "final_candidate_start_time_ns": 123504279000,
+                             "current_integrity_source": "FUSED"}},
+                {"kind": "normal_bspline", "receive_steady_s": 6.0,
+                 "payload": {"trajectory_id": 17,
+                             "start_time_ns": 123504279000}},
+                {"kind": "p5_status", "receive_steady_s": 7.0,
+                 "payload": {"phase": "runtime", "action": "OK",
+                             "current_integrity_source": "FUSED",
+                             "samples": [{"trajectory_sample_source":
+                                          "runtime_committed",
+                                          "trajectory_id": 17,
+                                          "trajectory_start_time_ns":
+                                              123504279000}]}},
+            ]
+            capture_path.write_text(
+                "".join(json.dumps(row, sort_keys=True) + "\n"
+                        for row in later_capture))
+            selected_output = root / "analysis_selected_terminal.json"
+            completed = subprocess.run(
+                [sys.executable, str(ANALYZER), "--run-root", str(root),
+                 "--output", str(selected_output)],
+                capture_output=True, text=True, check=False)
+            self.assertEqual(completed.returncode, 0)
+            selected_analysis = json.loads(selected_output.read_text())
+            self.assertEqual(selected_analysis["accepted_terminal_identity"], {
+                "trajectory_id": 9,
+                "trajectory_start_ns": 123504278000,
+                "final_bspline_identity": "bs",
+                "selection_applied": True,
+            })
+            with lineage_path.open("w", newline="") as stream:
+                writer = csv.DictWriter(stream, fieldnames=lineage_fieldnames)
+                writer.writeheader()
+                writer.writerows(original_lineage)
+            capture_path.write_text(
+                "".join(json.dumps(row, sort_keys=True) + "\n"
+                        for row in original_capture))
             launch["p5.current_pl_source"] = "LIDAR_CERTIFIED"
             (export / "test_planner_manifest.json").write_text(
                 json.dumps(launch))
@@ -248,7 +516,6 @@ class Icra072VerticalSliceToolsTest(unittest.TestCase):
             manifest["owned_process_groups_cleared"] = True
             manifest["result"] = "PASS"
             manifest_path.write_text(json.dumps(manifest))
-            capture_path = root / "lineage_capture.jsonl"
             capture_path.write_text(
                 capture_path.read_text().replace(
                     '"trajectory_start_time_ns": 123504278000',
@@ -291,7 +558,6 @@ class Icra072VerticalSliceToolsTest(unittest.TestCase):
             capture_path.write_text(
                 "".join(json.dumps(row, sort_keys=True) + "\n"
                         for row in captured_rows))
-            lineage_path = Path(str(p4_path) + ".lineage.csv")
             lineage_path.write_text(
                 lineage_path.read_text().replace(",1,1,9,bs", ",0,1,9,bs"))
             closed_output = root / "analysis_closed_missing.json"
@@ -458,6 +724,8 @@ class Icra072VerticalSliceToolsTest(unittest.TestCase):
                 "--install-root", str(SHARED_INSTALL), "--duration-s", "30"]
         try:
             with mock.patch.object(sys, "argv", argv), \
+                    mock.patch.object(module, "_capture_source_binding",
+                                      return_value=self._accepted_source_binding()), \
                     mock.patch.object(module, "_load_gate_runner",
                                       return_value=fake_gate), \
                     mock.patch.object(module, "_start_process", popen):
@@ -514,6 +782,8 @@ class Icra072VerticalSliceToolsTest(unittest.TestCase):
                 "--install-root", str(SHARED_INSTALL), "--duration-s", "30"]
         try:
             with mock.patch.object(sys, "argv", argv), \
+                    mock.patch.object(module, "_capture_source_binding",
+                                      return_value=self._accepted_source_binding()), \
                     mock.patch.object(module, "_load_gate_runner",
                                       return_value=fake_gate), \
                     mock.patch.object(module, "_start_process",
@@ -529,6 +799,142 @@ class Icra072VerticalSliceToolsTest(unittest.TestCase):
             self.assertEqual(outcome["runner_exit_code"], 8)
             self.assertEqual(outcome["result"], "FAIL")
             self.assertIn("runner_exception:OSError", outcome["failures"])
+        finally:
+            shutil.rmtree(run_root, ignore_errors=True)
+
+    def test_runner_finalizes_gate_import_exception_before_gpu_or_ros(self):
+        module = self._load_runner()
+        DEV_RUNS_ROOT.mkdir(parents=True, exist_ok=True)
+        run_root = DEV_RUNS_ROOT / f"run-{os.getpid()}002"
+        shutil.rmtree(run_root, ignore_errors=True)
+        popen = mock.Mock(side_effect=AssertionError("ROS must not start"))
+        argv = [str(RUNNER), "--run-root", str(run_root.relative_to(REPO)),
+                "--install-root", str(SHARED_INSTALL), "--duration-s", "30"]
+        try:
+            with mock.patch.object(sys, "argv", argv), \
+                    mock.patch.object(module, "_capture_source_binding",
+                                      return_value=self._accepted_source_binding()), \
+                    mock.patch.object(module, "_load_gate_runner",
+                                      side_effect=ImportError("gate missing")), \
+                    mock.patch.object(module, "_start_process", popen):
+                self.assertEqual(module.main(), 8)
+            popen.assert_not_called()
+            manifest = json.loads((run_root / "run_manifest.json").read_text())
+            self.assertEqual(manifest["result"], "RUNNER_EXCEPTION")
+            self.assertEqual(manifest["runner_exception"]["type"],
+                             "ImportError")
+            self.assertFalse(manifest["gpu_ready"])
+            invocation = json.loads(
+                (run_root / "analyzer_invocation.json").read_text())
+            self.assertIsInstance(invocation["exit_code"], int)
+            outcome = json.loads(
+                (run_root / "orchestration_outcome.json").read_text())
+            self.assertEqual(outcome["runner_exit_code"], 8)
+            self.assertEqual(outcome["result"], "FAIL")
+        finally:
+            shutil.rmtree(run_root, ignore_errors=True)
+
+    def test_runner_rejects_unbound_source_before_gpu_or_ros(self):
+        module = self._load_runner()
+        DEV_RUNS_ROOT.mkdir(parents=True, exist_ok=True)
+        run_root = DEV_RUNS_ROOT / f"run-{os.getpid()}003"
+        shutil.rmtree(run_root, ignore_errors=True)
+        gate = mock.Mock()
+        popen = mock.Mock(side_effect=AssertionError("ROS must not start"))
+        rejected_binding = {
+            **self._accepted_source_binding(),
+            "tracked_status": " M scripts/dev_planner/example.py",
+            "tracked_worktree_clean": False,
+            "accepted": False,
+            "failure_reasons": ["tracked_worktree_dirty"],
+        }
+        argv = [str(RUNNER), "--run-root", str(run_root.relative_to(REPO)),
+                "--install-root", str(SHARED_INSTALL), "--duration-s", "30"]
+        try:
+            with mock.patch.object(sys, "argv", argv), \
+                    mock.patch.object(module, "_capture_source_binding",
+                                      return_value=rejected_binding), \
+                    mock.patch.object(module, "_load_gate_runner",
+                                      return_value=gate), \
+                    mock.patch.object(module, "_start_process", popen):
+                self.assertEqual(module.main(), 8)
+            gate.run_gpu_preflight.assert_not_called()
+            popen.assert_not_called()
+            manifest = json.loads((run_root / "run_manifest.json").read_text())
+            self.assertFalse(manifest["source_binding"]["accepted"])
+            binding = json.loads((run_root / "source_binding.json").read_text())
+            self.assertEqual(binding["failure_reasons"],
+                             ["tracked_worktree_dirty"])
+            outcome = json.loads(
+                (run_root / "orchestration_outcome.json").read_text())
+            self.assertEqual(outcome["result"], "FAIL")
+            self.assertIn("runner_exception:RuntimeError",
+                          outcome["failures"])
+        finally:
+            shutil.rmtree(run_root, ignore_errors=True)
+
+    def test_runner_finalizes_preflight_exception_before_ros(self):
+        module = self._load_runner()
+        DEV_RUNS_ROOT.mkdir(parents=True, exist_ok=True)
+        run_root = DEV_RUNS_ROOT / f"run-{os.getpid()}004"
+        shutil.rmtree(run_root, ignore_errors=True)
+        gate = types.SimpleNamespace(
+            run_gpu_preflight=mock.Mock(
+                side_effect=OSError("preflight evidence unavailable")))
+        popen = mock.Mock(side_effect=AssertionError("ROS must not start"))
+        argv = [str(RUNNER), "--run-root", str(run_root.relative_to(REPO)),
+                "--install-root", str(SHARED_INSTALL), "--duration-s", "30"]
+        try:
+            with mock.patch.object(sys, "argv", argv), \
+                    mock.patch.object(module, "_capture_source_binding",
+                                      return_value=self._accepted_source_binding()), \
+                    mock.patch.object(module, "_load_gate_runner",
+                                      return_value=gate), \
+                    mock.patch.object(module, "_start_process", popen), \
+                    mock.patch("builtins.print") as print_mock:
+                self.assertEqual(module.main(), 8)
+            print_mock.assert_any_call("GPU_NOT_READY")
+            popen.assert_not_called()
+            manifest = json.loads((run_root / "run_manifest.json").read_text())
+            self.assertEqual(manifest["runner_exception"]["type"], "OSError")
+            self.assertFalse(manifest["gpu_ready"])
+            self.assertTrue(
+                (run_root / "orchestration_outcome.json").is_file())
+        finally:
+            shutil.rmtree(run_root, ignore_errors=True)
+
+    def test_runner_rechecks_source_binding_before_ros(self):
+        module = self._load_runner()
+        DEV_RUNS_ROOT.mkdir(parents=True, exist_ok=True)
+        run_root = DEV_RUNS_ROOT / f"run-{os.getpid()}005"
+        shutil.rmtree(run_root, ignore_errors=True)
+        accepted = self._accepted_source_binding()
+        changed = {
+            **accepted,
+            "head_commit": "1" * 40,
+            "head_matches_origin": False,
+            "accepted": False,
+            "failure_reasons": ["head_origin_mismatch"],
+        }
+        gate = types.SimpleNamespace(
+            run_gpu_preflight=lambda _root: {"gpu_ready": True})
+        popen = mock.Mock(side_effect=AssertionError("ROS must not start"))
+        argv = [str(RUNNER), "--run-root", str(run_root.relative_to(REPO)),
+                "--install-root", str(SHARED_INSTALL), "--duration-s", "30"]
+        try:
+            with mock.patch.object(sys, "argv", argv), \
+                    mock.patch.object(module, "_capture_source_binding",
+                                      side_effect=(accepted, changed)), \
+                    mock.patch.object(module, "_load_gate_runner",
+                                      return_value=gate), \
+                    mock.patch.object(module, "_start_process", popen):
+                self.assertEqual(module.main(), 8)
+            popen.assert_not_called()
+            manifest = json.loads((run_root / "run_manifest.json").read_text())
+            self.assertEqual(
+                manifest["runner_exception"]["message"],
+                "source_binding_changed_before_ros")
+            self.assertFalse(manifest["source_binding_recheck"]["accepted"])
         finally:
             shutil.rmtree(run_root, ignore_errors=True)
 

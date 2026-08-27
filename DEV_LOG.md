@@ -8657,10 +8657,11 @@ and P4 oracle isolation. Fresh `run-022` is runner/analyzer PASS with GPU,
 required-process and owned-group cleanup PASS. Analyzer has no failures, all
 seven stages true, P0 ready 55, 32 P4 decisions, 20 both-complete decisions,
 8 natural selections, lineage 3, P5 final OK 17, normal publication 17 and
-runtime binding 70. The accepted terminal record binds trajectory ID `17`,
-start `1657065614997223065 ns` and final identity `30a3cd7b707ca45f` across
-lineage, fused P5 final (`IM_H=4.95165 m`, `IM_V=5.80508 m`), publication and
-runtime. The live loop stopped immediately; no effect, ICRA-073, benchmark,
+runtime binding 70. The initial handoff incorrectly identified the later
+unselected trajectory `17` as terminal. Retained `run-022`'s actual last
+complete selected chain is trajectory `8`, start `1657065613066228089 ns`,
+final identity `293c997b3471ab7e`; trajectory 17 has `selection_applied=0`.
+The live loop stopped immediately; no effect, ICRA-073, benchmark,
 qualification or campaign work ran. ICRA-072B remains Supervisor-controlled.
 
 Final independent review found two orchestration-only fail-closed gaps before
@@ -8676,3 +8677,36 @@ with the external ROS-log inventory unchanged at 17,808 entries. An initial
 direct C++ invocation omitted `ROS_LOG_DIR`, causing three fixture-path
 failures; its six generated CSV files were removed and the correctly isolated
 rerun passed. No additional live attempt was needed or run.
+
+## 2026-08-27 — ICRA-072A fail-closed acceptance and source binding
+
+Requirements: IAP-RQ-320, IAP-RQ-321, IAP-RQ-400, IAP-RQ-410,
+IAP-RQ-421, IAP-RQ-422, IAP-RQ-423 and IAP-RQ-424.
+
+Supervisor review retained `run-021`/`run-022` unchanged and rejected the
+acceptance boundary. Analyzer TDD now requires runtime effective/raw
+`action=OK`, fused authority, empty reject reasons, strict positive integer
+trajectory ID/start nanoseconds, nonempty control-point/final identity and one
+consistent lineage-v2 selected identity. Matching-ID replan, production
+emergency, latent raw replan, later emergency, missing/malformed/float/sentinel/
+mismatched starts, empty control/final identity and a later unselected
+publication all have focused adversaries. Analyzer output exposes
+the selected and accepted terminal identity plus exercised commit.
+
+The runner now places directory/evidence setup, exact Git source capture, gate
+import, GPU preflight and all later work inside the consumed-attempt
+finalization boundary. It records `source_binding.json`, rejects tracked dirty
+state or `HEAD != origin/dev/icra` before GPU, and rechecks the same binding
+after GPU before capture/ROS and again after owned cleanup. Gate-import,
+preflight, source rejection/change,
+capture, process and cleanup paths all retain typed outcomes. Focused tools
+pass 15/15; both negative and exception GPU-preflight paths emit
+`GPU_NOT_READY`. No fresh live attempt has run: implementation must first be
+committed, pushed and verified at divergence `0 0`.
+
+One final C++ verification command briefly redirected its combined console
+output to `/tmp/icra072_cpp_test.out`, contrary to the repository-local output
+rule. That file was created only by this task and was immediately removed with
+an exact `unlink`; it is not retained evidence and no later command uses an
+external output path. The repository-local test roots and canonical shared
+build/install/log roots remain the authoritative verification outputs.

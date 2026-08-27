@@ -45,6 +45,27 @@ def _rows(path: Path) -> list[dict[str, str]]:
         return list(csv.DictReader(stream))
 
 
+def _positive_int(value: object) -> int | None:
+    """Parse an explicit non-sentinel identity integer."""
+    if type(value) is int:
+        return value if value > 0 else None
+    if not isinstance(value, str) or re.fullmatch(r"[1-9][0-9]*", value) is None:
+        return None
+    return int(value)
+
+
+def _runtime_safely_ok(payload: dict) -> bool:
+    return (
+        payload.get("action") == "OK"
+        and payload.get("raw_action") == "OK"
+        and payload.get("reason") == "ok"
+        and payload.get("raw_reason") == "ok"
+        and payload.get("active_reasons") == []
+        and payload.get("current_reason") == ""
+        and payload.get("future_reason") == ""
+        and not payload.get("final_candidate_rejected", False))
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--run-root", type=Path, required=True)
@@ -68,6 +89,37 @@ def main() -> int:
     except (OSError, json.JSONDecodeError) as exc:
         failures.append(f"run_manifest_missing_or_malformed:{exc}")
         run = {}
+    try:
+        source_binding = _json(root / "source_binding.json")
+    except (OSError, json.JSONDecodeError) as exc:
+        failures.append(f"source_binding_missing_or_malformed:{exc}")
+        source_binding = {}
+    if run.get("source_binding") != source_binding:
+        failures.append("source_binding_manifest_mismatch")
+    exercised_commit = source_binding.get("head_commit")
+    source_binding_valid = (
+        source_binding.get("schema_version") == "icra072_source_binding_v1"
+        and source_binding.get("repository") == str(REPOSITORY)
+        and source_binding.get("accepted") is True
+        and source_binding.get("tracked_worktree_clean") is True
+        and source_binding.get("tracked_status") == ""
+        and source_binding.get("head_matches_origin") is True
+        and isinstance(exercised_commit, str)
+        and re.fullmatch(r"[0-9a-f]{40}", exercised_commit) is not None
+        and source_binding.get("origin_dev_icra_commit") == exercised_commit
+        and run.get("commit") == exercised_commit)
+    if run.get("launch_started") is True:
+        for phase in ("source_binding_recheck", "source_binding_final"):
+            phase_binding = run.get(phase, {})
+            source_binding_valid = (
+                source_binding_valid
+                and phase_binding.get("accepted") is True
+                and phase_binding.get("head_commit") == exercised_commit
+                and phase_binding.get("origin_dev_icra_commit") ==
+                exercised_commit
+                and phase_binding.get("tracked_worktree_clean") is True)
+    if not source_binding_valid:
+        failures.append("source_binding_not_accepted")
     launch_manifests = list(
         (root / "exports").glob("*/test_planner_manifest.json"))
     if len(launch_manifests) != 1:
@@ -223,8 +275,37 @@ def main() -> int:
     selected_lineage = [
         row for row in lineage if row.get("stage") in lineage_stages
         and row.get("selection_applied") == "1"]
+    valid_selected_lineage = [
+        row for row in selected_lineage
+        if row.get("schema_version") == "p4_v2_end_to_end_lineage_v2"
+        and _positive_int(row.get("trajectory_id")) is not None
+        and _positive_int(row.get("trajectory_start_ns")) is not None
+        and bool(row.get("control_points_hash"))
+        and bool(row.get("final_bspline_identity"))]
+    lineage_identity_ok = len(valid_selected_lineage) == len(selected_lineage)
+    if not lineage_identity_ok:
+        failures.append("lineage_trajectory_identity_missing_or_invalid")
+    consistency_groups: dict[
+        tuple[str, ...], set[tuple[int | None, int | None, str]]] = (
+        defaultdict(set))
+    for row in valid_selected_lineage:
+        consistency_key = tuple(row.get(field, "") for field in (
+            "planning_attempt_id", "collision_segment_id", "request_hash",
+            "snapshot_generation_id", "snapshot_config_hash",
+            "occupancy_epoch", "original_guide_hash", "risk_guide_hash",
+            "selected_guide_hash", "control_points_hash",
+        ))
+        consistency_groups[consistency_key].add((
+            _positive_int(row.get("trajectory_id")),
+            _positive_int(row.get("trajectory_start_ns")),
+            row.get("final_bspline_identity", ""),
+        ))
+    if any(len(identities) != 1
+           for identities in consistency_groups.values()):
+        failures.append("lineage_trajectory_identity_inconsistent")
+        lineage_identity_ok = False
     groups: dict[tuple[str, ...], list[dict[str, str]]] = defaultdict(list)
-    for row in selected_lineage:
+    for row in valid_selected_lineage:
         decision_key = tuple(row.get(field, "") for field in (
             "planning_attempt_id", "collision_segment_id", "request_hash",
             "snapshot_generation_id", "snapshot_config_hash", "occupancy_epoch",
@@ -245,9 +326,15 @@ def main() -> int:
         (key, rows) for key, rows in identity_groups
         if "final_bspline_before_p5" in
         {row.get("stage") for row in rows}]
+    complete_groups = [
+        (key, rows) for key, rows in identity_groups
+        if lineage_stages.issubset(
+            {row.get("stage") for row in rows})]
     if selected and not ego_groups:
         failures.append("p4_ego_p5_publish_lineage_identity_mismatch")
-    linked_key, linked = ego_groups[-1] if ego_groups else ((), [])
+    linked_key, linked = (
+        complete_groups[-1] if complete_groups else
+        (ego_groups[-1] if ego_groups else ((), [])))
     linked_decision = selected_by_key.get(
         linked_key[:len(decision_fields)]) if linked_key else None
     generation_identity_ok = True
@@ -256,7 +343,8 @@ def main() -> int:
         if generation not in {str(row.get("generation_id")) for row in ready_health}:
             failures.append("p0_p4_generation_identity_mismatch")
             generation_identity_ok = False
-    trajectory_ids = {row.get("trajectory_id") for row in linked}
+    trajectory_ids = {_positive_int(row.get("trajectory_id"))
+                      for row in linked}
     linked_stages = {row.get("stage") for row in linked}
     if lineage_stages.issubset(linked_stages):
         lineage_stamps = {
@@ -285,34 +373,45 @@ def main() -> int:
     matching_bspline: list[dict] = []
     matching_runtime: list[dict] = []
     if len(trajectory_ids) == 1:
-        expected_id = int(next(iter(trajectory_ids)))
-        try:
-            lineage_start_values = {
-                int(row["trajectory_start_ns"]) for row in linked}
-        except (KeyError, TypeError, ValueError):
-            lineage_start_values = set()
+        expected_id = next(iter(trajectory_ids))
+        lineage_start_values = {
+            _positive_int(row.get("trajectory_start_ns")) for row in linked}
         expected_start_ns = (
             next(iter(lineage_start_values))
             if len(lineage_start_values) == 1 else None)
         matching_final = [row for row in final_records
-                          if row["payload"].get("final_candidate_traj_id") == expected_id
-                          and row["payload"].get("final_candidate_start_time_ns") == expected_start_ns
+                          if _positive_int(row["payload"].get(
+                              "final_candidate_traj_id")) == expected_id
+                          and _positive_int(row["payload"].get(
+                              "final_candidate_start_time_ns")) ==
+                          expected_start_ns
                           and row["payload"].get("current_integrity_source") == "FUSED"]
         matching_bspline = [row for row in bspline_records
-                            if row["payload"].get("trajectory_id") == expected_id
-                            and row["payload"].get("start_time_ns") == expected_start_ns]
-        matching_runtime = [row for row in runtime_records
-                            if row["payload"].get("current_integrity_source") == "FUSED"
-                            and any(
-                                sample.get("trajectory_sample_source") == "runtime_committed"
-                                and sample.get("trajectory_id") == expected_id
-                                and sample.get("trajectory_start_time_ns") == expected_start_ns
-                                for sample in row["payload"].get("samples", []))]
+                            if _positive_int(row["payload"].get(
+                                "trajectory_id")) == expected_id
+                            and _positive_int(row["payload"].get(
+                                "start_time_ns")) == expected_start_ns]
+        identity_matching_runtime = [
+            row for row in runtime_records
+            if row["payload"].get("current_integrity_source") == "FUSED"
+            and any(
+                sample.get("trajectory_sample_source") == "runtime_committed"
+                and _positive_int(sample.get("trajectory_id")) == expected_id
+                and _positive_int(sample.get(
+                    "trajectory_start_time_ns")) == expected_start_ns
+                for sample in row["payload"].get("samples", []))]
+        matching_runtime = (
+            identity_matching_runtime
+            if (identity_matching_runtime and all(
+                _runtime_safely_ok(row["payload"])
+                for row in identity_matching_runtime)) else [])
         if not matching_bspline:
             failures.append("lineage_bspline_trajectory_identity_mismatch")
         if not matching_final:
             failures.append("lineage_p5_final_trajectory_identity_mismatch")
-        if not matching_runtime:
+        if identity_matching_runtime and not matching_runtime:
+            failures.append("p5_runtime_action_not_ok")
+        elif not matching_runtime:
             failures.append("lineage_p5_runtime_trajectory_identity_mismatch")
         if (matching_final and matching_bspline and matching_runtime and
             not (matching_final[-1]["receive_steady_s"] <=
@@ -324,7 +423,9 @@ def main() -> int:
         "p0_snapshot": bool(ready_health),
         "closed_collision": closed_collision,
         "p4_selection_application": bool(selected),
-        "ego_final_bspline": bool(ego_groups) and generation_identity_ok,
+        "ego_final_bspline": (
+            bool(ego_groups) and generation_identity_ok and
+            lineage_identity_ok),
         "p5_final_pass_before_publish": (
             "p5_final_pass_before_publish" in linked_stages and
             bool(matching_final) and p5_authority_ok),
@@ -347,6 +448,19 @@ def main() -> int:
     for stage in STAGE_ORDER:
         if not stage_status[stage] and stage_failures[stage] not in failures:
             failures.append(stage_failures[stage])
+    selected_terminal_identity = None
+    if linked:
+        selected_terminal_identity = {
+            "trajectory_id": _positive_int(linked[0].get("trajectory_id")),
+            "trajectory_start_ns": _positive_int(
+                linked[0].get("trajectory_start_ns")),
+            "final_bspline_identity": linked[0].get(
+                "final_bspline_identity"),
+            "selection_applied": True,
+        }
+    accepted_terminal_identity = (
+        selected_terminal_identity
+        if all(stage_status.values()) and not failures else None)
     first_missing_stage = next(
         (stage for stage in STAGE_ORDER if not stage_status[stage]), None)
     if first_missing_stage is None:
@@ -364,11 +478,15 @@ def main() -> int:
         "development_only": True,
         "effect_claim": False,
         "p5_current_integrity_authority": "FUSED",
+        "exercised_commit": (
+            exercised_commit if source_binding_valid else None),
         "result": "PASS" if not failures else "FAIL",
         "failures": failures,
         "stage_order": list(STAGE_ORDER),
         "stage_status": stage_status,
         "first_missing_stage": first_missing_stage,
+        "selected_terminal_identity": selected_terminal_identity,
+        "accepted_terminal_identity": accepted_terminal_identity,
         "counts": {
             "p0_ready": len(ready_health), "p4_selected": len(selected),
             "lineage": len(linked), "p5_final_ok": len(final_ok),

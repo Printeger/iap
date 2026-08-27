@@ -1,5 +1,14 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-27 ICRA-072A fail-closed acceptance implementation
+
+| Req ID | Implemented/tested seam | Evidence and disposition | Status |
+|---|---|---|---|
+| IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 | Runtime safety acceptance | Analyzer admits runtime only when every exact-identity record has effective/raw `action=OK`, authoritative `FUSED`, empty active/current/future rejection reasons and no final rejection. Matching-ID replan, production emergency, latent raw replan and later emergency fixtures all fail the runtime stage | **STATIC TDD PASS; FRESH SOURCE-BOUND RUN PENDING** |
+| IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-423 | Explicit exact identity and selected terminal | Lineage must be v2 with strict positive integer ID/start, nonempty control-point/final identity and one consistent identity across the selected three-stage chain. Missing, malformed, float, sentinel, empty and mismatched fixtures fail; a later unselected trajectory does not replace `accepted_terminal_identity` | **STATIC TDD PASS** |
+| IAP-RQ-423 / IAP-RQ-424 | Consumed-attempt closure and source binding | Runner finalizes gate-import/GPU-preflight and later exceptions, records analyzer/outcome, requires clean tracked source with exact pushed HEAD, and rechecks after GPU/before ROS and after cleanup. Source rejection, gate import and preflight exception fixtures start no ROS | **STATIC TDD PASS; IMPLEMENTATION PUSH REQUIRED BEFORE LIVE** |
+| IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-423 / IAP-RQ-424 | Correct retained run022 interpretation | Original bytes remain unchanged. The actual last complete selected lineage is ID `8`, start `1657065613066228089`, final identity `293c997b3471ab7e`; later ID `17` has `selection_applied=0` | **BUILDER CLAIM CORRECTED; NOT ACCEPTED LIVE EVIDENCE** |
+
 ## 2026-08-27 ICRA-072A fail-closed acceptance Supervisor Review
 
 | Req ID | Reviewed seam | Evidence and disposition | Status |
@@ -16,7 +25,7 @@
 | Req ID | Implemented/tested seam | Evidence and disposition | Status |
 |---|---|---|---|
 | IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-421 / IAP-RQ-422 | Authoritative current integrity | Removed the configurable/LiDAR-only P5 source seam. Production-shaped regression proves unsafe fused current rejects despite finite safe LiDAR and publishes zero; `run-021` records the expected fused rejection, while open-sky development input makes `run-022` fused margins positive without changing max-PL authority, AL or P5 thresholds | **LAYER 1 READY FOR REVIEW** |
-| IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 / IAP-RQ-422 | Exact final/publish/runtime identity | Lineage v2, final P5 status, normal B-spline capture and runtime samples carry exact trajectory ID plus integer nanosecond start. Analyzer has no time tolerance and `run-022` binds terminal ID `17`, start `1657065614997223065` and final identity `30a3cd7b707ca45f` end to end | **EXACT IDENTITY PASS** |
+| IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 / IAP-RQ-422 | Exact final/publish/runtime identity | Lineage v2, final P5 status, normal B-spline capture and runtime samples carry exact trajectory ID plus integer nanosecond start. The original Builder interpretation incorrectly selected later ID `17`; Supervisor review establishes the actual last complete selected chain as ID `8`, start `1657065613066228089`, final identity `293c997b3471ab7e` | **STRUCTURAL IDENTITY OBSERVED; SOURCE-BOUND ACCEPTANCE PENDING** |
 | IAP-RQ-423 / IAP-RQ-424 | Automatic attempt outcome and immutable history | Runner automatically invokes analyzer on every exit path and writes a typed orchestration outcome, including capture/launch/monitor exceptions after preflight. Complete-chain process and cleanup failures map to explicit operational first-missing stages. Corrected immutable index `iteration_index_run-001_through_run-020_v2.json` SHA-256 `15838959c6eff6b5f8343be8e91d3118844853ad2284c5da64e3e13318f78141` preserves earlier pipeline first-missing stages, then classifies `run-019` cleanup rejection and `run-020` authority bypass. Superseded v1 remains retained and disclosed | **EVIDENCE COMPLETE; ORIGINAL RUNS UNCHANGED** |
 | IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 | First acceptable continuation run | `run-022` runner/analyzer PASS, all seven ordered stages true, P0 ready 55, both-complete 20, natural selected 8, lineage 3, P5 final/publish 17 and runtime-bound 70; required processes and cleanup PASS | **READY FOR SUPERVISOR REVIEW; ICRA-072B NOT SELF-AUTHORIZED** |
 

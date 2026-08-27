@@ -133,13 +133,66 @@ def validate_cli_paths(run_root: Path, install_root: Path) -> tuple[Path, Path]:
     return resolved_run, resolved_install
 
 
-def _git_commit() -> str:
-    completed = subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=REPOSITORY,
-        capture_output=True, text=True, check=False)
-    if completed.returncode != 0:
-        raise SystemExit("cannot resolve repository commit")
-    return completed.stdout.strip()
+def _capture_source_binding() -> dict:
+    """Capture the committed, pushed tracked source admitted for a live run."""
+    checks = {}
+    for name, argv in (
+            ("head", ["git", "rev-parse", "HEAD"]),
+            ("origin_dev_icra",
+             ["git", "rev-parse", "origin/dev/icra"]),
+            ("tracked_status",
+             ["git", "status", "--porcelain", "--untracked-files=no"])):
+        try:
+            completed = subprocess.run(
+                argv, cwd=REPOSITORY, capture_output=True, text=True,
+                check=False)
+            checks[name] = {
+                "argv": argv,
+                "exit_code": completed.returncode,
+                "stdout": completed.stdout,
+                "stderr": completed.stderr,
+            }
+        except OSError as exc:
+            checks[name] = {
+                "argv": argv, "exit_code": 127, "stdout": "",
+                "stderr": f"{type(exc).__name__}: {exc}",
+            }
+    head = checks["head"]["stdout"].strip()
+    origin = checks["origin_dev_icra"]["stdout"].strip()
+    tracked_status = checks["tracked_status"]["stdout"]
+    failures = []
+    if checks["head"]["exit_code"] != 0 or not re.fullmatch(
+            r"[0-9a-f]{40}", head):
+        failures.append("head_commit_unavailable")
+    if (checks["origin_dev_icra"]["exit_code"] != 0 or
+            not re.fullmatch(r"[0-9a-f]{40}", origin)):
+        failures.append("origin_dev_icra_unavailable")
+    if checks["tracked_status"]["exit_code"] != 0:
+        failures.append("tracked_status_unavailable")
+    elif tracked_status:
+        failures.append("tracked_worktree_dirty")
+    if head and origin and head != origin:
+        failures.append("head_origin_mismatch")
+    return {
+        "schema_version": "icra072_source_binding_v1",
+        "repository": str(REPOSITORY),
+        "head_commit": head,
+        "origin_dev_icra_commit": origin,
+        "tracked_status": tracked_status,
+        "tracked_worktree_clean": not tracked_status,
+        "head_matches_origin": bool(head) and head == origin,
+        "accepted": not failures,
+        "failure_reasons": failures,
+        "checks": checks,
+    }
+
+
+def _same_accepted_source(initial: dict, current: dict) -> bool:
+    return (
+        current.get("accepted") is True
+        and current.get("head_commit") == initial.get("head_commit")
+        and current.get("origin_dev_icra_commit") ==
+        initial.get("origin_dev_icra_commit"))
 
 
 def _start_process(*args, **kwargs) -> subprocess.Popen:
@@ -255,7 +308,7 @@ def _finalize_runner_exception(
         capture: subprocess.Popen | None = None,
         launch: subprocess.Popen | None = None,
         capture_log=None, launch_log=None, monitor=None) -> int:
-    """Fail closed after any post-preflight orchestration exception."""
+    """Fail closed after any consumed-attempt orchestration exception."""
     cleanup_errors: list[str] = []
     process_result = {
         "required_processes_ok": False,
@@ -318,16 +371,10 @@ def main() -> int:
         args.run_root, args.install_root)
     if args.duration_s < 30.0:
         raise SystemExit("duration must be at least 30 seconds")
-    run_root.mkdir(parents=True, exist_ok=False)
     exports = run_root / "exports"
     runtime = run_root / "runtime"
     bags = run_root / "bags"
     ros_logs = runtime / "ros_logs"
-    for path in (exports, runtime, bags, ros_logs):
-        path.mkdir(parents=True)
-
-    gate = _load_gate_runner()
-    preflight = gate.run_gpu_preflight(run_root / "preflight")
     manifest = {
         "schema_version": "icra072_layer1_dev_run_v1",
         "run_id": run_root.name,
@@ -337,24 +384,49 @@ def main() -> int:
         "install_root": str(install_root),
         "argv": list(sys.argv),
         "cwd": str(Path.cwd().resolve()),
-        "commit": _git_commit(),
+        "commit": None,
         "duration_s": args.duration_s,
-        "gpu_ready": bool(preflight.get("gpu_ready")),
+        "gpu_ready": False,
         "launch_started": False,
         "required_process_set": list(REQUIRED_PROCESSES),
         "stage_observations": {},
     }
-    if not preflight.get("gpu_ready"):
-        manifest["result"] = "GPU_NOT_READY"
-        print("GPU_NOT_READY")
-        return _finalize_attempt(run_root, manifest, 4)
-
+    run_root.mkdir(parents=True, exist_ok=False)
     capture = None
     launch = None
     capture_log = None
     launch_log = None
     monitor = None
     try:
+        for path in (exports, runtime, bags, ros_logs):
+            path.mkdir(parents=True)
+        source_binding = _capture_source_binding()
+        manifest["source_binding"] = source_binding
+        manifest["commit"] = source_binding.get("head_commit")
+        _write(run_root / "source_binding.json", source_binding)
+        if source_binding.get("accepted") is not True:
+            raise RuntimeError("source_binding_rejected:" + ",".join(
+                source_binding.get("failure_reasons", [])))
+        gate = _load_gate_runner()
+        try:
+            preflight = gate.run_gpu_preflight(run_root / "preflight")
+        except Exception as exc:
+            manifest["gpu_preflight_exception"] = {
+                "type": type(exc).__name__, "message": str(exc)}
+            print("GPU_NOT_READY")
+            raise
+        manifest["gpu_ready"] = bool(preflight.get("gpu_ready"))
+        if not preflight.get("gpu_ready"):
+            manifest["result"] = "GPU_NOT_READY"
+            print("GPU_NOT_READY")
+            return _finalize_attempt(run_root, manifest, 4)
+
+        source_binding_recheck = _capture_source_binding()
+        manifest["source_binding_recheck"] = source_binding_recheck
+        if not _same_accepted_source(
+                source_binding, source_binding_recheck):
+            raise RuntimeError("source_binding_changed_before_ros")
+
         capture_command = [
             sys.executable,
             str(REPOSITORY / "scripts/dev_planner/capture_icra072_vertical_slice.py"),
@@ -428,6 +500,10 @@ def main() -> int:
         launch_log.close()
         capture_log.close()
         _unregister_cleanup_if_cleared(launch, capture)
+        source_binding_final = _capture_source_binding()
+        manifest["source_binding_final"] = source_binding_final
+        if not _same_accepted_source(source_binding, source_binding_final):
+            raise RuntimeError("source_binding_changed_during_run")
     except Exception as exc:
         return _finalize_runner_exception(
             run_root, manifest, exc, capture, launch,
