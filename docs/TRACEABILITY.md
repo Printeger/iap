@@ -1,5 +1,14 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-27 ICRA-074 Supervisor Review
+
+| Req ID | Reviewed seam | Evidence and disposition | Status |
+|---|---|---|---|
+| IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-423 | V2 geometry | Independent rerun confirms exact amplitude-only amendment, pinned identities and `1.371035122 m >= 1.349 m`; V1 3/3 retained | **PASS** |
+| IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 / IAP-RQ-422 | Production P4-v2 contract | Risk A* 9/9, decision 24/24 and integration 13/13; occupancy/provider/lexicographic/tie-break/fail-closed/identity seams conform; production unchanged | **PASS** |
+| IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-423 / IAP-RQ-424 | Standards/evidence/claim | Authorized diff, RQ/docs, pushed-before-evidence, retention and offline boundary pass; two duplicated test helpers are non-blocking | **STANDARDS PASS / SPEC PASS** |
+| IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 | Gate transition | ICRA-074 closes as offline-contract PASS without effect claim; ICRA-075 issues exploratory ablation and non-freezing power inputs | **ICRA-075 TASK_READY** |
+
 ## 2026-08-27 ICRA-074 V2 geometry and offline targeted optimization
 
 | Req ID | Implemented/tested seam | Evidence and disposition | Status |
@@ -17,7 +26,7 @@
 | IAP-RQ-423 / IAP-RQ-424 | User route authority | Explicit user instruction binds decision `USER-ICRA-ROUTE-20260827-004` to pushed `b126b2f5`; protected route/modules/claims/arms/gates/campaign barrier unchanged | **USER DECISION RECORDED** |
 | IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-423 | Sole inherited repair | V2 changes risky amplitude only from magnitude `2.10 m` to `2.20 m`; expected raw cuboid clearance `~1.371035 m >= 1.349 m`; every other fixture value unchanged | **ICRA-074 TASK REQUIREMENT** |
 | IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-424 | Accepted ICRA-073 debt | Source/output guards, mirror coverage, reachability/oracle gates, paired diagnostics and runtime identity remain absent; none is relabelled PASS | **ICRA-073 BLOCKED / USER BYPASS / NOT PASS** |
-| IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 | Next task | Geometry amendment then bounded offline production P4-v2 bottleneck TDD/optimization; no ROS/GPU/live, tuning, held-out or claim | **ICRA-074 TASK_READY** |
+| IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 | Historical ICRA-074 issuance | Geometry amendment then bounded offline production P4-v2 bottleneck TDD/optimization; later Review PASS | **HISTORICAL TASK / NOW PASS** |
 
 ## 2026-08-27 ICRA-073 frozen fixture Supervisor Review
 

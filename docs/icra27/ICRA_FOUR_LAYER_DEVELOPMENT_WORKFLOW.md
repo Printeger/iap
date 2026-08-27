@@ -1,13 +1,13 @@
 # ICRA four-layer development and validation workflow
 
-Status: **ACTIVE — LAYER 3 ICRA-074 OFFLINE TARGETED OPTIMIZATION**
+Status: **ACTIVE — LAYER 3 ICRA-075 EXPLORATORY AND POWER INPUTS**
 
 Requirements: `IAP-RQ-320`, `IAP-RQ-321`, `IAP-RQ-400`, `IAP-RQ-410`, `IAP-RQ-421`, `IAP-RQ-422`,
 `IAP-RQ-423`, `IAP-RQ-424`
 
-Current disposition: ICRA-072A passed; ICRA-072B and ICRA-073 remain blocked/user-bypassed/NOT PASS. Decision 004
-authorizes only V2 risky-amplitude geometry repair and skips every other ICRA-073 blocker. ICRA-074 is TASK_READY
-for bounded offline targeted optimization without paired effect evidence. Formal Layer 4 and campaign work remain
+Current disposition: ICRA-072A passed; ICRA-072B/073 remain blocked/user-bypassed/NOT PASS; ICRA-074 passes the
+offline V2 geometry/production-seam contract without product change or effect claim. ICRA-075 is TASK_READY for
+development runtime exploratory ablations and non-freezing power inputs. Formal Layer 4 and campaign remain
 blocked.
 
 ## 1. Purpose

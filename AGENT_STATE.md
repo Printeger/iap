@@ -5,11 +5,11 @@ schema_version: icra_single_branch_two_agent_v3_user_route_owner
 branch: dev/icra
 active_role: DEEPSEEK
 status: TASK_READY
-gate: ICRA-074_TARGETED_OPTIMIZATION
-task_id: ICRA-074
-milestone: ICRA-074_LAYER3_GEOMETRY_REPAIR_AND_TARGETED_OPTIMIZATION
-review_base: b126b2f5f9f0a3617346d75275b7aa703939263a
-reviewed_head: b126b2f5f9f0a3617346d75275b7aa703939263a
+gate: ICRA-075_EXPLORATORY_AND_POWER_INPUTS
+task_id: ICRA-075
+milestone: ICRA-075_LAYER3_EXPLORATORY_ABLATION_AND_POWER_INPUTS
+review_base: f6f7832aec987b94f559e7e50219f239691c8727
+reviewed_head: ee9774a1fad637a4147036006d91f08b96d5f8b2
 mandated_lineage_review_base: 3b5199e0cf8efc904f124cdb73156a3209eb6d80
 icra071_repair_review_base: 6e0e7328835064ecb665bc6476a6254924ff371d
 conference_route: P0_P4_V2_P5
@@ -18,45 +18,47 @@ route_lock: docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md
 user_decision_id: USER-ICRA-ROUTE-20260827-004
 user_approval_anchor: b126b2f5f9f0a3617346d75275b7aa703939263a
 workflow_decision_id: USER-ICRA-WORKFLOW-20260826-001
-route_status: USER_ACCEPTED_ICRA073_BLOCKED_BYPASS_ICRA074_TASK_READY
+route_status: ICRA074_PASS_ICRA075_TASK_READY
 historical_gate0a_verdict: NO_GO_P2
 p0_gate0b_status: PASS
 p0_gate0b_worker_count: 4
 p4_v1_status: G0A_PASS_G0B_PASS_G0C_SCIENTIFIC_NO_GO_IMMUTABLE
-p4_v2_status: DEVELOPMENT_LAYER1_PASS_LAYER2_BLOCKED_BYPASSED_LAYER3_SCIENTIFICALLY_NOT_STARTED_BLOCKED_DEBT_ICRA074_ACTIVE
+p4_v2_status: DEVELOPMENT_LAYER1_PASS_LAYER2_BLOCKED_BYPASSED_LAYER3_SCIENTIFICALLY_NOT_STARTED_BLOCKED_DEBT_ICRA074_PASS_ICRA075_ACTIVE
 p5_status: IMPLEMENTED_BUT_NO_CURRENT_PROSPECTIVE_QUALIFICATION_PASS
 icra070_status: SUPERSEDED_UNQUALIFIED_BY_USER_ROUTE_DECISION
 icra071_status: REQUEST_CHANGES_DEFERRED_NONBLOCKING_BY_USER_DECISION_002
 icra072a_status: PASS_SOURCE_BOUND_COMPLETE_LIVE_IDENTITY
 icra072b_status: BLOCKED_HIDDEN_UNTRACKED_SOURCE_USER_ACCEPTED_BYPASS_NOT_PASS
 icra073_status: BLOCKED_USER_ACCEPTED_BYPASS_NOT_PASS
-icra074_status: TASK_READY_GEOMETRY_ONLY_REPAIR_THEN_TARGETED_OPTIMIZATION
-supervisor_verdict: USER_DECISION004_ACCEPTED_ICRA073_BYPASS_TO_ICRA074
-review_disposition: ICRA074_AUTHORIZED_WITH_ONLY_GEOMETRY_BLOCKER_REPAIR
+icra074_status: PASS_OFFLINE_CONTRACT_PRODUCTION_UNCHANGED_NO_EFFECT_CLAIM
+icra075_status: TASK_READY_EXPLORATORY_ABLATION_AND_POWER_INPUTS
+supervisor_verdict: ICRA074_PASS_STANDARDS_PASS_SPEC_PASS
+review_disposition: ICRA075_ISSUED_NO_BLOCKERS
 qualification_claim: false
 campaign_status: BLOCKED_UNTIL_ICRA079_REVIEW_PASS_AND_DISTINCT_USER_APPROVAL
 handoff_status: TASK_READY
 next_task: NEXT_TASK.md
-next_after_icra074_pass: ICRA-075_EXPLORATORY_AND_POWER_INPUTS
+next_after_icra075_pass: ICRA-076_PREREGISTRATION_FREEZE
 recovery_roadmap: docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md
 four_layer_workflow: docs/icra27/ICRA_FOUR_LAYER_DEVELOPMENT_WORKFLOW.md
 guard_plan: docs/icra27/ICRA_CROSS_LAYER_GUARD_PLAN.md
 artifact_retention: ALL_ICRA072_EVIDENCE_SHARED_ROOTS_HIDDEN_USER_ARTIFACTS_AND_PROTECTED_PDF_RETAINED
-window_disposition: ROTATE_RECOMMENDED
-rotation_reason: USER_DECISION004_GATE_CHANGE_ICRA073_TO_ICRA074
-window_handoff_anchor: 5f898d0e28f1eb8929788acb4d03d2f06f709979
+window_disposition: PENDING_POST_PUSH_AUDIT
+rotation_reason: PENDING_POST_PUSH_AUDIT
+window_handoff_anchor: PENDING_REVIEW_PUSH
 window_next_role: SUPERVISOR
-window_next_review_task: ICRA-074
+window_next_review_task: ICRA-075
 window_bootstrap_source: REPOSITORY_AUTHORITY_ONLY
-updated_utc: 2026-08-27T10:43:55Z
+updated_utc: 2026-08-27T11:37:32Z
 ```
 
-User decision `USER-ICRA-ROUTE-20260827-004`, bound to pushed anchor `b126b2f5`, directs only the frozen geometry
-conflict to be repaired and explicitly accepts bypass of every other ICRA-073 blocker. ICRA-073 remains
-BLOCKED/USER-ACCEPTED BYPASS/NOT PASS; its source/output guard defects, incomplete invariant coverage and missing
-oracle/paired/runtime diagnostics remain disclosed debt rather than PASS evidence.
+ICRA-074 Builder HEAD `ee9774a1fad637a4147036006d91f08b96d5f8b2` passes Review against fixed handoff
+`f6f7832aec987b94f559e7e50219f239691c8727`. V2 geometry changes only risky amplitude/required identities and
+proves `1.371035122 m >= 1.349 m`. Supervisor offline reruns pass 51/51. Production P4/config remains unchanged
+because focused production-seam tests demonstrate the existing provider-bottleneck contract. Standards PASS and
+Spec PASS; two duplicated test-helper smells are low/non-blocking. No effect, source-bound, qualification or
+campaign claim follows.
 
-ICRA-074 is TASK_READY. Its first step implements the user-approved geometry-only amendment: risky amplitude
-`-2.20 m` in PRIMARY/FLAT_NULL and `+2.20 m` in EXACT_MIRROR, with all other frozen geometry unchanged. It then
-performs bounded offline targeted optimization against the production P4-v2 provider-bottleneck seam. This
-authorization makes no effect, qualification or campaign claim and does not weaken occupancy/EGO/P5 authority.
+ICRA-075 is TASK_READY for development-only exploratory ablation and power inputs. ICRA-073 accepted debt remains
+BLOCKED/NOT PASS and is not retroactively repaired. Formal freeze, held-out confirmation and ICRA-076 remain
+unauthorized until later Review.

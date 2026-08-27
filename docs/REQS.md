@@ -3,9 +3,10 @@
 > Purpose: 把 talk《Integrity-Aware Active Perception》的“优化版 pipeline”拆成可实现、可验收、可追溯的工程需求。
 > Scope: 仅修改本仓库 src/iap；禁止修改 ../glim（可参考其代码但不得提交改动）。
 
-> Current ICRA disposition (2026-08-27): decision 004 keeps ICRA-073 BLOCKED/user-bypassed/NOT PASS and repairs
-> only risky amplitude to `±2.20 m` in V2. All other 073 debt remains accepted. ICRA-074 is TASK_READY for bounded
-> offline production P4-v2 optimization; no effect, qualification or campaign claim is authorized.
+> Current ICRA disposition (2026-08-27): ICRA-074 passes its offline geometry/production-seam contract at 51/51;
+> production remains unchanged and no effect claim follows. ICRA-073 debt remains blocked/user-bypassed/NOT PASS.
+> ICRA-075 is TASK_READY for development exploratory ablations and non-freezing power inputs; formal Layer 4 and
+> campaign remain unauthorized.
 
 ICRA-074 Builder implementation (2026-08-27): V2 derives from retained V1 and changes only risky amplitude
 (`-2.20 m` PRIMARY/FLAT_NULL, `+2.20 m` mirror) plus required descriptor identities/hash. An independent dense

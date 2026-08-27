@@ -1,5 +1,12 @@
 # ICRA 2027 P0 -> P4-v2 -> P5 计划复审
 
+## ICRA-074 Supervisor Review — 2026-08-27
+
+**Verdict: `PASS / ICRA075_TASK_READY`.** Fixed range `f6f7832a..ee9774a1` passes Standards and Spec with
+Supervisor offline rerun 51/51. V2 changes only the authorized risky amplitude/identities; production decision/A*
+contracts pass without product change. Two duplicated test helpers are low/non-blocking. ICRA-075 now owns
+development exploratory ablations and non-freezing power inputs; no held-out/formal/qualification claim.
+
 ## User decision 004 — issue ICRA-074 — 2026-08-27
 
 **Verdict: `ICRA073_BLOCKED_USER_ACCEPTED_BYPASS / ICRA074_TASK_READY`.** Decision

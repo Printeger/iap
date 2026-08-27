@@ -1,11 +1,18 @@
 # ICRA 2027 P0 -> P4-v2 -> P5 科学纠偏实施计划
 
+## ICRA-074 Review PASS / ICRA-075 active — 2026-08-27
+
+ICRA-074 V2 geometry 与 production P4-v2 offline contract 经 Supervisor 独立复跑 51/51 PASS；没有产品或
+config 改动，也没有 effect claim。当前唯一任务 ICRA-075 将 V2 materialize 为 development runtime scene，
+运行 PRIMARY/MIRROR/NULL exploratory matched arms/ablations，并输出不冻结的 variance/power inputs。不得
+访问 held-out、冻结 SESOI/sample size、进入 qualification 或 campaign。
+
 ## User decision 004 and ICRA-074 task — 2026-08-27
 
 用户决定 `USER-ICRA-ROUTE-20260827-004`，绑定 pushed anchor
 `b126b2f5f9f0a3617346d75275b7aa703939263a`，只修复 risky amplitude `2.10 m -> 2.20 m`，接受并跳过其余
-ICRA-073 blockers。ICRA-073 保持 BLOCKED/NOT PASS；当前唯一 Builder task 是 ICRA-074 offline targeted
-optimization。不得把缺失 paired/oracle evidence 包装为 effect，不得进入 live、Layer 4 或 campaign。
+ICRA-073 blockers。ICRA-073 保持 BLOCKED/NOT PASS；该决定签发的 ICRA-074 已通过 offline Review，当前
+唯一 Builder task 是 ICRA-075。不得把缺失 paired/oracle evidence 包装为既有 PASS 或进入 Layer 4/campaign。
 
 ## Current Layer 3 disposition — 2026-08-27
 

@@ -1,5 +1,12 @@
 # ICRA P0 -> P4 -> P5 deviation audit and scientific recovery roadmap
 
+## ICRA-074 PASS and ICRA-075 issuance — 2026-08-27
+
+Supervisor Review of `f6f7832a..ee9774a1` passes Standards and Spec with independent offline 51/51. V2 geometry
+is exact; production P4/config remains unchanged because the existing provider-bottleneck contract passes the
+targeted seams. ICRA-074 closes as offline-contract PASS without effect claim. ICRA-075 is TASK_READY for
+development-only exploratory ablations and non-freezing power inputs; ICRA-076 formal freeze remains blocked.
+
 ## User-directed geometry-only repair and ICRA-073 bypass — 2026-08-27
 
 User decision `USER-ICRA-ROUTE-20260827-004`, bound to pushed approval anchor
@@ -530,8 +537,8 @@ distinct engineering fixture and cannot be relabelled as inverse-corridor effect
 | ICRA-072A | iterative P0 -> P4-v2 -> EGO -> P5 vertical slice against shared build/install | one complete live identity; no effect claim |
 | ICRA-072B | stabilize the successful chain and canonical source admission | BLOCKED / USER-ACCEPTED BYPASS / NOT PASS; debt retained |
 | ICRA-073 | implement PRIMARY/MIRROR/NULL inverse corridors, paired control/treatment and independent-oracle effect diagnostics | BLOCKED / USER-ACCEPTED BYPASS / NOT PASS; only geometry debt carries into ICRA-074 for repair |
-| ICRA-074 | V2 geometry repair then bounded offline targeted P4-v2 optimization | TASK_READY by decision 004; no ICRA-073 effect basis, live work, held-out access, threshold tuning or claim |
-| ICRA-075 | exploratory objective/source/domain ablation and power inputs | no held-out access or claim |
+| ICRA-074 | V2 geometry repair then bounded offline targeted P4-v2 optimization | PASS: exact geometry and production-seam contract, production unchanged, no effect claim |
+| ICRA-075 | exploratory objective/source/domain ablation and power inputs | TASK_READY; development seeds/runs only, no held-out access, freeze or claim |
 | ICRA-076 | freeze protocol, SESOI, hashes, seeds and 30–60 sample size per scene | no confirmatory run before Review PASS |
 | ICRA-077 | primary/mirror/null held-out confirmatory | no retry/exclusion; primary exact gate |
 | ICRA-078 | formal G0D lineage qualification | held-out confirmation required |

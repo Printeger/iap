@@ -1,5 +1,52 @@
 # ICRA Supervisor Log
 
+## 2026-08-27 — ICRA-074 Review PASS; ICRA-075 issued
+
+### Review identity and preservation
+
+- Fixed Review base `f6f7832aec987b94f559e7e50219f239691c8727`; reviewed Builder HEAD
+  `ee9774a1fad637a4147036006d91f08b96d5f8b2`. Two RQ-bound commits change 11 authorized fixture/test/evidence and
+  Builder-doc paths. Fetch confirms divergence `0 0`; `git diff --check` passes; only the protected PDF is visible
+  untracked.
+- `offline-targeted-001.json` SHA-256 is `79989ac8c128977e37d91f0f3cd30ec3a0618f3818b44d34da53981893fefc67`
+  and binds pushed implementation/test HEAD `07ca00a6`. V1 evidence and the PDF/local JSON/ignored backup hashes
+  remain unchanged. Review ran no build, ROS, GPU or live flow.
+- Supervisor independently reran V2 geometry 2/2, retained V1 3/3, risk A* 9/9, collision-guide 24/24 and
+  integration 13/13: total 51/51 PASS.
+
+### Standards axis
+
+Verdict: **PASS — zero hard violations; two non-blocking duplicated-test-helper smells.**
+
+- Paths, RQ commits, Builder-doc synchronization, shared test-target use, pushed-before-evidence ordering,
+  non-overwriting retention and offline/claim boundaries conform.
+- Low: the geometry test repeats its variant-amplitude mapping; decision and integration tests duplicate a small
+  provider-state response shape. Both remain clear test code and are excluded from ICRA-075 scope.
+
+### Spec, Gate and cross-layer axes
+
+Verdict: **PASS — zero missing, scope-creep or implemented-wrong findings.**
+
+- V2 changes only risky amplitude plus required identities/hash and independently proves
+  `1.371035122 m >= 1.349 m` for PRIMARY/MIRROR/NULL while retaining V1.
+- Focused production decision/A* seams prove occupancy rejection, provider peak→integral→length→hash ordering,
+  longer lower-bottleneck selection, FLAT_NULL non-risk tie-break, invalid-support fail-closed behavior and
+  request/snapshot/epoch/selected-guide/injection identity. No product/config defect remained, so production
+  bytes and the conditional six-package build correctly remain unchanged.
+- RED/GREEN observations, commands/exits, pushed HEAD, clearance, production disposition, cleanup and first
+  missing stage are retained. ICRA-073 debt remains BLOCKED/bypassed/NOT PASS; no source-bound, effect,
+  qualification or campaign claim is made.
+
+### Gate disposition
+
+- ICRA-074 closes `PASS_OFFLINE_CONTRACT_PRODUCTION_UNCHANGED_NO_EFFECT_CLAIM`. There is no blocker to waive.
+- ICRA-075 is `TASK_READY` for development-only V2 runtime exploratory ablations and non-freezing power inputs.
+  Formal freeze, held-out, qualification, campaign and ICRA-076 remain unauthorized pending later Review.
+
+### Supervisor window disposition
+
+- Pending the required post-push audit; this section will be finalized after the Review/task changeset is pushed.
+
 ## 2026-08-27 — user decision 004 repairs geometry only and issues ICRA-074
 
 ### User decision and exact amendment

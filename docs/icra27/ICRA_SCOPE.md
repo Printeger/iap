@@ -1,12 +1,19 @@
 # ICRA 2027 Conference Scope — User-owned P0 -> P4-v2 -> P5 recovery
 
+## ICRA-074 PASS and ICRA-075 activation — 2026-08-27
+
+ICRA-074 passes its exact V2 geometry and offline production-seam contract at 51/51 with no production/config
+change and no effect claim. Two duplicated test helpers are non-blocking. ICRA-075 is now the sole active Builder
+scope: development-only V2 runtime exploratory ablations and non-freezing power inputs. ICRA-073 debt remains
+blocked/user-bypassed/NOT PASS; held-out, formal freeze, qualification and campaign remain prohibited.
+
 ## User decision 004 — geometry-only repair and ICRA-074 activation — 2026-08-27
 
 User decision `USER-ICRA-ROUTE-20260827-004`, anchored at pushed
 `b126b2f5f9f0a3617346d75275b7aa703939263a`, keeps `P0_P4_V2_P5` and every protected research field unchanged.
 It authorizes only the V2 risky-amplitude repair (`2.10 m -> 2.20 m`) and accepts every other ICRA-073 blocker as
-debt. ICRA-073 remains BLOCKED/NOT PASS; ICRA-074 is TASK_READY for bounded offline targeted optimization with no
-effect, qualification or campaign claim.
+debt. ICRA-073 remains BLOCKED/NOT PASS; this decision issued ICRA-074, which now passes its offline contract.
+ICRA-075 is the active development task with no qualification or campaign claim.
 
 ## Four-layer workflow — 2026-08-26
 
@@ -40,7 +47,7 @@ same task, then diagnose effect size and optimize. ICRA-071 repair is retained a
 and makes no effect, qualification or campaign claim. GPU preflight, required-process health, occupancy/EGO/P5
 authority, fail-closed behavior and retained-artifact protection remain mandatory.
 
-## Frozen inverse-corridor diagnostic design — ICRA-073 bypassed / ICRA-074 active
+## Frozen inverse-corridor diagnostic design — ICRA-073 bypassed / V2 active in ICRA-075
 
 `docs/icra27/dev/ICRA_P4_V2_INVERSE_CORRIDOR_FIXTURE.md` freezes
 `ICRA_P4_V2_INVERSE_CORRIDOR_FIXTURE_V1`: PRIMARY, EXACT_MIRROR and FLAT_NULL construct two non-straight,

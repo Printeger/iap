@@ -3,6 +3,14 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- review(icra-074-pass-issue-icra075): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 /
+  IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — review `ee9774a1` against fixed `f6f7832a`.
+  Standards PASS and Spec PASS; Supervisor offline rerun passes 51/51. V2 exact geometry, production-seam
+  lexicographic/occupancy/provider/identity contracts, pushed evidence and offline claim boundary conform;
+  production/config remains unchanged. Two duplicated test-helper smells are low/non-blocking. Close ICRA-074 as
+  offline-contract PASS only and issue ICRA-075 development exploratory ablation/power inputs; no held-out,
+  formal freeze, qualification or campaign authority.
+
 - test(icra-074-v2-geometry-targeted-p4): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 /
   IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — retain V1 descriptor behavior and add the exact V2
   risky-amplitude-only builder with pinned hashes and dense analytic clearance `~1.371035 m >= 1.349 m`. Add one
