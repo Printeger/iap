@@ -1,5 +1,14 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-27 ICRA-072B exact control-artifact admission blocker
+
+| Req ID | Implemented/tested seam | Evidence and disposition | Status |
+|---|---|---|---|
+| IAP-RQ-423 / IAP-RQ-424 | Exact two-artifact prototype | Exact path/classification/type/size/hash evaluator reached RED→GREEN and local runner 7/7, but synthetic porcelain rejection tests did not prove ignore-blind discovery; prototype withdrawn before commit | **REVIEW FINDING / NOT RETAINED** |
+| IAP-RQ-423 / IAP-RQ-424 | Hidden third untracked source | Ignore-blind `git ls-files --others` exposes `src/uav_simulator/local_sensing/CMakeModules/FindEigen.cmake~`, a 2962-byte regular untracked file at `29a73228…2028`; `.gitignore:59` `*~` hides it from ordinary porcelain | **BLOCKED / EXACT TWO-ARTIFACT PROOF FALSE** |
+| IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 | Preserved boundary | Existing offline tools pass 17/17. No product/shared build/ROS/GPU/live/scientific path or retained artifact changed; runner/test return to reviewed HEAD bytes | **FAIL-CLOSED / SCOPE PRESERVED** |
+| IAP-RQ-423 / IAP-RQ-424 | Fresh result identity | The prior pre-output source stop did not consume `repair-001`, but the newly proven third source-tree artifact prevents a compliant repair/push; canonical was not invoked | **BLOCKED_ICRA072B_HIDDEN_THIRD_UNTRACKED_SOURCE** |
+
 ## 2026-08-27 ICRA-072B exact-harness Supervisor Review
 
 | Req ID | Reviewed seam | Evidence and disposition | Status |

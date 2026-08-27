@@ -3,6 +3,18 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- docs(icra-072b-exact-admission-blocker): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 /
+  IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — preserve the truthful earlier pre-output stop and confirm
+  it did not consume `repair-001`. A RED/GREEN prototype bound the protected PDF and local-control JSON to exact
+  path/type/size/hash and passed runner 7/7 plus offline tools 17/17, but mandatory two-axis review rejected it:
+  ordinary porcelain still honors repository ignore rules and therefore cannot prove that arbitrary untracked
+  source/config is absent. Ignore-blind inspection found an actual third untracked source-tree file,
+  `src/uav_simulator/local_sensing/CMakeModules/FindEigen.cmake~`, hidden by the repository `*~` rule (2962-byte
+  regular file, SHA-256 `29a73228…2028`). The task forbids ignore-based concealment and broader allowlists and
+  does not authorize mutating that file, so the prototype code/tests were withdrawn and canonical was not run.
+  Builder docs record `BLOCKED_ICRA072B_HIDDEN_THIRD_UNTRACKED_SOURCE`; no artifact, product, shared build,
+  ROS/GPU/live, effect, qualification or campaign path changed.
+
 - review(icra-072b-exact-admission): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 /
   IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — review `af7c804` against `2e0c2b3`. The trust and
   skipped/disabled repairs pass independent 5/5 + 17/17 offline checks, but canonical PASS is absent because
@@ -22,10 +34,11 @@
   are separately typed, skipped assertions are excluded from successful observations, and suite plus dependent
   matrix rows fail on any skip/disabled count even when names and total counts otherwise match. RED/GREEN runner
   tests pass 5/5 and the existing tools suite passes 17/17 under the isolated environment. No product, build,
-  ROS/GPU/live or scientific path changed. Pushed repair `7a5aa58` consumed the sole `repair-001` command, which
+  ROS/GPU/live or scientific path changed. After pushed repair `7a5aa58`, the attempted `repair-001` invocation
   correctly failed source binding before outputs/suites because exact status exposed untracked
   `.claude/settings.local.json` previously hidden by ambient `/root/.config/git/ignore`. The user file and all
-  immutable evidence remain untouched; no retry is authorized. Status is
+  immutable evidence remain untouched. Because no result identity or log root was created, Supervisor confirmed
+  that the identity was not consumed and authorized the bounded exact-admission continuation. Historical status was
   `BLOCKED_ICRA072B_UNTRACKED_SOURCE_NOT_ALLOWLISTED` pending Supervisor review.
 
 - review(icra-072b-request-changes): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 /

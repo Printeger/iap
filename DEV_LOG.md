@@ -8914,7 +8914,7 @@ effect, qualification or campaign work ran. The sole `repair-001` canonical
 execution remains pending until this repair/documentation changeset is reviewed,
 committed, pushed and fetch-confirmed at divergence `0 0`.
 
-### Sole repair-001 canonical outcome
+### Pre-output repair-001 source-admission stop
 
 Repair commit `7a5aa5840cb65fc17067fed993019d2a6cc9118d` was
 pushed and fetch-confirmed at divergence `0 0`; ambient porcelain showed only
@@ -8939,3 +8939,63 @@ Terminal status is `BLOCKED_ICRA072B_UNTRACKED_SOURCE_NOT_ALLOWLISTED` pending
 Supervisor review. Immutable `final_*`, all historical evidence, shared roots
 and protected PDF remain unchanged. No suite, shared build, ROS, GPU, live,
 run-025, scientific, qualification or campaign action followed.
+
+Supervisor subsequently ruled that the pre-output invocation did not consume a
+result identity because neither output path was created and no suite ran. The
+fresh non-overwriting `repair-001` identity remains authorized after an exact
+two-artifact admission repair is committed, pushed and divergence-confirmed.
+
+## 2026-08-27 — ICRA-072B exact control-artifact admission
+
+Requirements: IAP-RQ-320, IAP-RQ-321, IAP-RQ-400, IAP-RQ-410,
+IAP-RQ-421, IAP-RQ-422, IAP-RQ-423 and IAP-RQ-424.
+
+Starting HEAD `8f360a4fbb0ad34a9c65dfaf38ff2752b3488f9c` was fetch-confirmed at
+divergence `0 0`. Exact isolated porcelain exposed only the two retained
+untracked artifacts. Read-only `lstat`, size and SHA-256 checks confirmed:
+
+- `.claude/settings.local.json`: ordinary non-symlink regular file, 72 bytes,
+  `27aac0ccca0ad0ab573578864cf27b9560d3f819bdeeae62378f8c20e62a8f64`,
+  classified `local_agent_control_not_runtime_source`.
+- `docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf`: ordinary non-symlink regular file,
+  243368 bytes,
+  `1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`,
+  classified `protected_system_flow_reference_not_runtime_source`.
+
+The RED run failed 2/7 because the declarations/evaluator did not yet exist.
+The minimal GREEN adds exact path/classification/type/size/hash observations
+while retaining full porcelain visibility. It rejects missing/hash/size
+changes, symlink, non-regular file, third untracked path, tracked/staged change,
+rename and deletion. The artifacts' content is not emitted.
+
+Offline verification only:
+
+- `python3 -m py_compile scripts/dev_planner/run_icra072b_stabilization.py test/test_icra072b_stabilization.py`: exit 0.
+- `python3 test/test_icra072b_stabilization.py -v`: 7/7 PASS, exit 0.
+- `test/test_icra072_vertical_slice_tools.py -v` under isolated repository-local HOME/ROS/TMP/XDG plus exact command-local Git trust: 17/17 PASS, exit 0. Its printed `GPU_NOT_READY` is a mocked fail-closed unit branch; no GPU preflight ran.
+
+Neither retained artifact was edited, chmodded, staged, moved or deleted. No
+shared build, ROS launch, GPU preflight, live/main flow, run-025, product,
+effect, qualification or campaign work ran. Canonical `repair-001` remains
+pending the required repair commit/push and fetch-confirmed divergence `0 0`.
+
+### Two-axis review blocker and fail-closed disposition
+
+Standards and Spec review both rejected the prototype because
+`git status --porcelain=v1 --untracked-files=all` still honors repository
+ignore rules; synthetic evaluator tests therefore could not prove real
+ignore-blind discovery. Read-only `git ls-files --others` inspection exposed
+an actual third untracked source-tree file that ordinary porcelain hides:
+
+- `src/uav_simulator/local_sensing/CMakeModules/FindEigen.cmake~`: ordinary
+  regular file, 2962 bytes, mode 777, SHA-256
+  `29a73228c1d58d5c4983dc217230d6cbc6ff6e295a77a004d8e6a207fd242028`;
+  ignored by `.gitignore:59` pattern `*~`, and not tracked.
+
+The active task explicitly forbids `.gitignore` concealment and broader
+allowlists, and does not authorize editing, deleting, moving or staging this
+third file. Therefore exact two-artifact admission cannot be proven within
+scope. The prototype runner/tests were reverted to starting-HEAD bytes. The
+17/17 offline tools result remains a diagnostic only; no canonical output/log
+path was created and `repair-001` was not invoked. Terminal Builder status is
+`BLOCKED_ICRA072B_HIDDEN_THIRD_UNTRACKED_SOURCE` pending Supervisor review.

@@ -655,6 +655,15 @@ ICRA-072B exact-harness Supervisor Review (2026-08-27): exact Git trust and skip
 Builder cannot impose a retry prohibition. Continue only with an exact two-artifact path/type/size/hash admission,
 then push and produce the still-available all-green `repair-001`. ICRA-073 remains unauthorized.
 
+ICRA-072B exact control-artifact admission Builder blocker (2026-08-27): a RED/GREEN prototype for the exact PDF
+and JSON metadata passed runner 7/7 and existing tools 17/17, but two-axis review found that ordinary porcelain
+still honors repository ignore rules and cannot prove absence of hidden source/config. Ignore-blind inspection
+then exposed the actual third untracked source-tree file
+`src/uav_simulator/local_sensing/CMakeModules/FindEigen.cmake~`, hidden by `.gitignore` `*~` (2962-byte regular
+file, SHA-256 `29a73228…2028`). The active task forbids ignore concealment and broader allowlists and does not
+authorize modifying that file. The prototype was withdrawn, runner/test remain at reviewed bytes, and canonical
+was not invoked. Status is `BLOCKED_ICRA072B_HIDDEN_THIRD_UNTRACKED_SOURCE` for Supervisor adjudication.
+
 ICRA-072A Layer 1 Supervisor PASS (2026-08-27): reviewed Builder HEAD `ac7f923`; Standards and Spec axes pass.
 Shared build is 6/6 and independent Supervisor reruns pass tools 17/17, hermetic launch 24/24 and focused C++
 64/64. Fresh `run-024` binds pushed implementation `b7b5357` at initial/pre-ROS/final checks, passes GPU, 15/15

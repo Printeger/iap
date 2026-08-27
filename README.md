@@ -83,7 +83,8 @@ Runner 会在 GPU、capture、process/cleanup 失败及正常结束路径自动�
 
 Layer 2 不启动 ROS launch graph、GPU preflight 或 live scenario。原始 `final_summary.json` / `final_logs`
 是不可变的失败记录，不得重跑或覆盖。canonical repair 必须先提交并推送代码/测试状态，确认
-`HEAD...origin/dev/icra` 为 `0 0` 且工作树仅保留受保护 PDF，再执行一次新输出：
+`HEAD...origin/dev/icra` 为 `0 0`、tracked state 干净，且 exact 隔离状态只包含下述两个精确保留
+artifact，再执行一次新输出：
 
 ```bash
 cd /home/dev/ws_iap/src/iap
@@ -93,14 +94,23 @@ python3 scripts/dev_planner/run_icra072b_stabilization.py \
   --log-root results/icra27/icra072b/repair-001_logs
 ```
 
-输出和 log root 必须尚不存在；runner 会验证 pushed source、精确 PDF allowlist、隔离 HOME 下的精确
-command-local Git trust、五个聚焦 suite 及八行稳定化矩阵，并在任一 required row 缺失、重复、跳过、
-disabled、计数不符或退出非零时 fail closed。该结果仅为 development stabilization evidence，不是
-scientific-effect 或 qualification manifest。
+输出和 log root 必须尚不存在。获准 repair 需要验证 pushed source、隔离 HOME 下的精确 command-local
+Git trust，以及恰好两个普通非 symlink artifact：72-byte
+`.claude/settings.local.json`（`local_agent_control_not_runtime_source`）和 243368-byte 受保护 PDF，二者
+均绑定固定路径/大小/SHA-256。缺失、内容或大小变化、symlink、非普通文件、第三个 untracked path，
+以及任一 tracked/staged/rename/delete 状态都会 fail closed。随后五个聚焦 suite 和八行稳定化矩阵在
+任一 required row 缺失、重复、跳过、disabled、计数不符或退出非零时同样 fail closed。该结果仅为
+development stabilization evidence，不是 scientific-effect 或 qualification manifest。
 
-`repair-001` 的一次性授权已在 source binding 阶段消耗：exact 隔离环境发现 ambient global ignore 曾
-隐藏的未跟踪 `.claude/settings.local.json`，因此命令以 `SOURCE_BINDING_NOT_READY` / exit 2 停止且没有
-创建 summary/log。不得重跑、删除或改写该用户文件；等待 Supervisor 后续裁定。
+此前的 invocation 在 source binding 阶段以 `SOURCE_BINDING_NOT_READY` / exit 2 停止，且没有创建
+summary/log 或运行 suite，因此没有消耗 result identity。Supervisor 已确认 `repair-001` 仍是获准的
+fresh non-overwriting identity；只有 exact-admission 修复先提交、推送并确认 `0 0` 后才能运行一次。
+不得删除、改写、chmod、移动或暂存上述两个保留 artifact。
+
+当前 repair 因 ignore-blind 审计发现第三个被仓库 `*~` 规则隐藏的未跟踪 source-tree 文件
+`src/uav_simulator/local_sensing/CMakeModules/FindEigen.cmake~` 而 BLOCKED。任务既不允许通过 ignore 或
+broader allowlist 隐藏它，也未授权修改该文件；因此 runner 尚未切换到双 artifact admission，且在
+Supervisor 重新裁定前禁止执行上述 canonical 命令。
 
 ### 1.3 运行一个最小检查
 
