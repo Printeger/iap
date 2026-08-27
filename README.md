@@ -98,6 +98,10 @@ command-local Git trust、五个聚焦 suite 及八行稳定化矩阵，并在�
 disabled、计数不符或退出非零时 fail closed。该结果仅为 development stabilization evidence，不是
 scientific-effect 或 qualification manifest。
 
+`repair-001` 的一次性授权已在 source binding 阶段消耗：exact 隔离环境发现 ambient global ignore 曾
+隐藏的未跟踪 `.claude/settings.local.json`，因此命令以 `SOURCE_BINDING_NOT_READY` / exit 2 停止且没有
+创建 summary/log。不得重跑、删除或改写该用户文件；等待 Supervisor 后续裁定。
+
 ### 1.3 运行一个最小检查
 
 ```bash

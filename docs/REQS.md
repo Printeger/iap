@@ -642,7 +642,12 @@ ambient forced-disabled execution is removed, and any nonzero or `DISABLED_*` ob
 dependent rows even if total counts match. Focused
 runner tests pass 5/5 and existing tools pass 17/17 in the repaired isolated environment. Product C++, production
 tests, shared build, ROS/GPU/live and scientific paths remain unchanged. Immutable `final_*` remains the truthful
-failure; fresh `repair-001` is pending the mandatory clean pushed repair commit.
+failure. Repair `7a5aa58` was pushed and divergence-confirmed `0 0` before the sole `repair-001` command. The
+exact isolated source check exposed untracked `.claude/settings.local.json`, previously hidden from ambient status
+by `/root/.config/git/ignore`; because it is outside the protected-PDF allowlist, source admission exited 2 before
+creating summary/log or running a suite. The 72-byte regular file (SHA-256
+`27aac0ccca0ad0ab573578864cf27b9560d3f819bdeeae62378f8c20e62a8f64`) remains untouched and unstaged. No retry
+is authorized; ICRA-072B is `BLOCKED_ICRA072B_UNTRACKED_SOURCE_NOT_ALLOWLISTED` pending Supervisor review.
 
 ICRA-072A Layer 1 Supervisor PASS (2026-08-27): reviewed Builder HEAD `ac7f923`; Standards and Spec axes pass.
 Shared build is 6/6 and independent Supervisor reruns pass tools 17/17, hermetic launch 24/24 and focused C++

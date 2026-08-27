@@ -8913,3 +8913,29 @@ No shared rebuild, ROS launch, GPU preflight, live run, run-025, product change,
 effect, qualification or campaign work ran. The sole `repair-001` canonical
 execution remains pending until this repair/documentation changeset is reviewed,
 committed, pushed and fetch-confirmed at divergence `0 0`.
+
+### Sole repair-001 canonical outcome
+
+Repair commit `7a5aa5840cb65fc17067fed993019d2a6cc9118d` was
+pushed and fetch-confirmed at divergence `0 0`; ambient porcelain showed only
+the protected PDF because `/root/.config/git/ignore` hides
+`**/.claude/settings.local.json`. Both `repair-001` output paths were absent.
+The exact command was invoked once and returned 2 with
+`SOURCE_BINDING_NOT_READY` before creating either output or running a suite.
+
+Read-only diagnosis under the same scrubbed command-local environment showed
+HEAD/origin exact at `7a5aa58`, all Git commands exit 0, trust accepted and PDF
+hash exact, but full status contained both the PDF and untracked
+`.claude/settings.local.json`. The latter is a regular root-owned 72-byte file,
+mode 777, SHA-256
+`27aac0ccca0ad0ab573578864cf27b9560d3f819bdeeae62378f8c20e62a8f64`;
+it is not tracked and is outside the sole PDF allowlist. The fail-closed source
+rejection is therefore correct. Only metadata and SHA-256 were read; content
+was not displayed or interpreted. The file was not modified, staged, deleted
+or re-ignored. `repair-001_summary.json` and
+`repair-001_logs/` remain absent, and the command was not retried.
+
+Terminal status is `BLOCKED_ICRA072B_UNTRACKED_SOURCE_NOT_ALLOWLISTED` pending
+Supervisor review. Immutable `final_*`, all historical evidence, shared roots
+and protected PDF remain unchanged. No suite, shared build, ROS, GPU, live,
+run-025, scientific, qualification or campaign action followed.

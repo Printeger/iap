@@ -14,8 +14,11 @@
   are separately typed, skipped assertions are excluded from successful observations, and suite plus dependent
   matrix rows fail on any skip/disabled count even when names and total counts otherwise match. RED/GREEN runner
   tests pass 5/5 and the existing tools suite passes 17/17 under the isolated environment. No product, build,
-  ROS/GPU/live or scientific path changed; the one `repair-001` canonical run remains pending the required clean
-  pushed repair commit.
+  ROS/GPU/live or scientific path changed. Pushed repair `7a5aa58` consumed the sole `repair-001` command, which
+  correctly failed source binding before outputs/suites because exact status exposed untracked
+  `.claude/settings.local.json` previously hidden by ambient `/root/.config/git/ignore`. The user file and all
+  immutable evidence remain untouched; no retry is authorized. Status is
+  `BLOCKED_ICRA072B_UNTRACKED_SOURCE_NOT_ALLOWLISTED` pending Supervisor review.
 
 - review(icra-072b-request-changes): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 /
   IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — review Builder HEAD `a63d3cc` against fixed base
