@@ -6,9 +6,10 @@ Requirements: `IAP-RQ-320`, `IAP-RQ-321`, `IAP-RQ-400`, `IAP-RQ-410`, `IAP-RQ-42
 `IAP-RQ-423`, `IAP-RQ-424`
 
 Current disposition: ICRA-072A Layer 1 passed Supervisor Review on 2026-08-27 with source-bound `run-024`.
-ICRA-072B is the only authorized next task and must automate the production-shaped success path plus its
-epoch/attempt/lineage/P5 fail-closed boundaries. It does not authorize another live run, effect work or a
-scientific/qualification claim.
+ICRA-072B's first retained canonical result is `FAIL` despite green product suites: hermetic Git ownership
+admission fails and skipped required tests are not parsed fail closed. ICRA-072B remains the only active task for
+the bounded non-overwriting canonical repair in `NEXT_TASK.md`. It does not authorize a product change, another
+live run, effect work or a scientific/qualification claim.
 
 ## 1. Purpose
 

@@ -1,5 +1,14 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-27 ICRA-072B Supervisor Review
+
+| Req ID | Reviewed seam | Evidence and disposition | Status |
+|---|---|---|---|
+| IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 | Production identity and safety matrix | Actual manager/FSM/P4/P5/publication suites pass 8/8 + 2/2 + 2/2 + 4/4; complete lineage shadow and terminal identity validation match the active contract | **PRODUCT-SHAPED MATRIX GREEN** |
+| IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-423 / IAP-RQ-424 | Shared build and canonical execution | Exact six shared packages build/install at rc=0, but immutable `final_summary.json` is FAIL because isolated HOME lacks explicit Git safe-directory trust; tools exit 1 and three rows fail | **REQUEST_CHANGES / CANONICAL EXIT NOT MET** |
+| IAP-RQ-423 / IAP-RQ-424 | Required-row skip admission | Verbose unittest skipped cases still match assertion-name and count parsing; no typed skip rejection exists. Require Python and gtest skipped/disabled observations to fail suites and dependent rows | **REQUEST_CHANGES / FAIL-OPEN** |
+| IAP-RQ-423 / IAP-RQ-424 | Bounded continuation | Preserve immutable `final_*`; repair only command-local exact Git trust and skipped/disabled parsing with TDD, push first, then retain non-overwriting `repair-001` all-row PASS | **ICRA-072B TASK_READY / ICRA-073 BLOCKED** |
+
 ## 2026-08-27 ICRA-072B production stabilization implementation
 
 | Req ID | Stabilization row/seam | Implementation and focused evidence | Status |

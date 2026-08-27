@@ -3,6 +3,15 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- review(icra-072b-request-changes): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 /
+  IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — review Builder HEAD `a63d3cc` against fixed base
+  `9212bfe`. Standards PASS with two non-blocking maintainability smells; Spec REQUEST_CHANGES because the
+  retained canonical summary is FAIL under hermetic Git ownership admission and because skipped required
+  Python tests can be counted as observed. Shared build is 6/6 and four product/P4/P5 suites pass
+  8+2+2+4; Supervisor diagnostics with exact command-local trust pass tools 17/17 but cannot replace canonical
+  evidence. Continue only the same ICRA-072B Gate with runner TDD and immutable `repair-001` evidence; no
+  product, shared-build, ROS/GPU/live, Layer 3, qualification or campaign work is authorized.
+
 - feat(icra-072b-stabilization): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 /
   IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — add one offline production-shaped Layer 2 regression
   entrypoint with eight named happy/fail-closed matrix rows and a retained machine-readable summary contract.

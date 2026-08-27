@@ -1,5 +1,66 @@
 # ICRA Supervisor Log
 
+## 2026-08-27 — ICRA-072B Review REQUEST_CHANGES; bounded canonical repair issued
+
+### Review identity and preservation
+
+- Fixed Review base is `9212bfef7c78b61aa841a0b6a33169804d9c448b`; reviewed Builder HEAD is
+  `a63d3cc1098ce13baf28326dce5bf044ee7bd466`. The range contains two Builder commits and 19 changed files.
+  Fetch confirmed divergence `0 0`; the protected PDF is the sole untracked path and remains SHA-256
+  `1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+- Review preserved `/home/dev/ws_iap/{build,install,log}`, `run-001` through `run-024`, raw/compact/live/scientific
+  evidence, the retained ICRA-072B result/logs, ordinary logs and the PDF. It ran no ROS, GPU or live flow and
+  did not overwrite retained evidence. `git diff --check` passes.
+- The latest shared log `build_2026-08-27_06-46-55` records exactly the six authorized packages; each package's
+  build and install command returns zero. The canonical summary is bound to pushed implementation `8b75d81` and
+  remains immutable at SHA-256 `2669167ad2cfaa95100b0da01602a8d92c6ca7f1512e5d9383428595f11dc624`.
+
+### Standards axis
+
+Verdict: **PASS — zero hard standards violations; two non-blocking maintainability smells.**
+
+- Both commits bind all eight applicable requirement IDs, all changed paths are in Builder scope, governance and
+  route authority are untouched, shared roots and retained artifacts are preserved, and no live/scientific work
+  entered the changeset.
+- Low / duplicated definition: suite/assertion identities occur in both `MATRIX_ROWS` and `_suite_definitions()`,
+  creating a future shotgun-surgery risk. Low / naming: `same_identity` compares the entire admitted lineage
+  record, including status flags, so `same_admitted_lineage_record` would be clearer. Neither smell is added to
+  the bounded repair scope.
+
+### Spec axis
+
+Verdict: **REQUEST_CHANGES — two Gate-blocking canonical-contract findings.**
+
+1. **High — canonical exit contract is not met.** `final_summary.json` is `FAIL`: four C++ suites pass
+   8/8 + 2/2 + 2/2 + 4/4, but tools exit 1 because isolated `HOME` lacks exact Git safe-directory trust. Eight
+   tool tests error on `git rev-parse HEAD`; `final_trajectory_identity`, `p5_runtime_authority` and
+   `operational_closure` consequently fail. A green build or noncanonical diagnostic rerun cannot substitute for
+   the required retained all-row PASS.
+2. **Medium — required skipped Python tests are fail-open.** The runner counts verbose unittest names and
+   `Ran N tests`, but a skipped test matches both. It does not parse skip observations, so a skipped required
+   assertion can still satisfy a matrix row. Equivalent gtest skipped/disabled behavior must also be explicit and
+   fail closed.
+
+No scope creep or product-chain mismatch was found. The actual manager/FSM/P4/P5/publication seams drive the
+required success and zero-publication adversaries; analyzer fixtures are complementary only.
+
+### Independent verification and Gate verdict
+
+- Supervisor offline diagnostics retained under `results/icra27/icra072b/supervisor_review_a63/` pass the four
+  C++ suites and tools 17/17 when isolated `HOME` receives exact command-local safe-directory trust. Runner
+  self-tests pass 3/3. This isolates the observed tools failure but is not canonical Builder evidence.
+- Gate verdict is **`ICRA072B_REQUEST_CHANGES`**. ICRA-072A Layer 1 remains PASS, but ICRA-072B Layer 2 is not
+  complete, ICRA-072 remains open and ICRA-073 is unauthorized.
+- The same Gate is `TASK_READY` for a runner-only repair: TDD exact non-persistent command-local Git trust and
+  skipped/disabled-test fail-closed parsing; push the repair first; then create immutable
+  `repair-001_summary.json` plus `repair-001_logs/`. Product C++, shared rebuild, ROS/GPU/live and Layer 3 work are
+  forbidden. Existing `final_*` failure evidence remains unchanged.
+
+### Supervisor window disposition
+
+- **Pending the mandatory post-push audit.** The final disposition and handoff anchor will be recorded only after
+  this Review commit is pushed and divergence is reconfirmed, per `AGENTS.md` section 8.6.
+
 ## 2026-08-27 — ICRA-072A Review PASS; ICRA-072B stabilization issued
 
 ### Review identity and preservation

@@ -1,5 +1,17 @@
 # ICRA 2027 P0 -> P4-v2 -> P5 计划复审
 
+## ICRA-072B Layer 2 canonical Review — 2026-08-27
+
+**Verdict: `REQUEST_CHANGES — ICRA072B_CANONICAL_REPAIR`.** Builder HEAD `a63d3cc` keeps scope and authority
+clean; the shared six-package build and production/P4/P5 suites pass 6/6 and 8+2+2+4. However, retained
+`final_summary.json` is `FAIL`: isolated HOME lacks exact Git safe-directory trust, tools exit 1 and three matrix
+rows fail. The runner also treats skipped verbose Python unittests as observed, so the required no-skip contract
+is fail-open.
+
+Continue the same Gate with only command-local, non-persistent exact repository trust plus Python/gtest
+skipped/disabled fail-closed TDD. Preserve `final_*`, push the repair first, and produce one new immutable
+`repair-001` result. Product C++, shared rebuild, ROS/GPU/live and ICRA-073 remain unauthorized.
+
 ## ICRA-072A Layer 1 completion Review — 2026-08-27
 
 **Verdict: `PASS — ICRA072A_PASS_SOURCE_BOUND_COMPLETE_LIVE_IDENTITY`.** Builder HEAD `ac7f923` repairs the
