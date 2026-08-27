@@ -3,6 +3,11 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- route(user-decision-007-repair-icra076): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 /
+  IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — user rejects bypass and authorizes a bounded same-Gate repair for real
+  production-emitted repeatability, route-correct `|D_peak|` U95, repository-local verification evidence and
+  complete mandatory-test source freeze. Preserve rejected attempts and forbid held-out/ICRA-077 until Review PASS.
+
 - review(icra-076-invalid-freeze): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 /
   IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — review `aeb5eb0e` against fixed `8105a16a`. Focused 13/13, validator,
   inventories and shared build are internally green, but repeatability B values are synthesized from fixture

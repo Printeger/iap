@@ -1,5 +1,10 @@
 # ICRA System Flow — User-owned P0 -> P4-v2 -> P5 recovery
 
+> User decision 007 update 2026-08-27: repair ICRA-076 offline rather than bypass. The runtime graph is unchanged;
+> the task only replaces synthetic replay evidence with production-emitted B measurements, corrects `|D_peak|`
+> U95, localizes verification evidence and completes test-source byte freeze. No held-out ICRA-077, qualification
+> or campaign work is authorized before Review PASS.
+
 > ICRA-076 Review update 2026-08-27: freeze-003 is validator-green but rejected because repeatability snapshots
 > are synthesized, U95 uses the wrong statistic, verification evidence is external and required verification-test
 > bytes are not fully frozen. Runtime graph remains unchanged. ICRA-076 is BLOCKED/NOT PASS; no held-out ICRA-077,

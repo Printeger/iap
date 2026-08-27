@@ -1,5 +1,13 @@
 # ICRA 2027 P0 -> P4-v2 -> P5 科学纠偏实施计划
 
+## User decision 007 / bounded ICRA-076 repair — 2026-08-27
+
+用户以 `USER-ICRA-ROUTE-20260827-007` 选择修复而非 bypass。唯一 Builder task 用 production-emitted B
+measurement 替换合成 snapshot，按 60 个 `|D_peak|` 计算 U95，把 verification evidence 移入仓库，并完整
+冻结 073/074/075/076 tests/probe/scripts。ICRA-076 仍未 PASS；held-out ICRA-077 禁止。权威仍为
+`ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md`；route `P0_P4_V2_P5`、P4-v1
+`SCIENTIFIC_NO_GO`、P4-v2、ICRA-071 与 campaign barrier 不变。
+
 ## ICRA-076 Review BLOCKED — 2026-08-27
 
 `8105a16..aeb5eb0` 的 freeze-003 不能成为 formal authority：repeatability B 值来自 fixture constants 而非

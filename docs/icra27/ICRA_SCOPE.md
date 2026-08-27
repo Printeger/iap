@@ -1,5 +1,13 @@
 # ICRA 2027 Conference Scope — User-owned P0 -> P4-v2 -> P5 recovery
 
+## User decision 007 / bounded ICRA-076 repair active — 2026-08-27
+
+Under `USER-ICRA-ROUTE-20260827-007`, the user chooses repair rather than bypass. ICRA-076 may replace synthetic
+replay with production-emitted B measurements, correct U95 to route-locked `|D_peak|`, make verification evidence
+repository-local and freeze every mandatory test byte. ICRA-076 remains NOT PASS; held-out ICRA-077 stays blocked.
+Authority remains `ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md`; route `P0_P4_V2_P5`, P4-v1
+`SCIENTIFIC_NO_GO`, P4-v2, ICRA-071 and campaign authority remain unchanged.
+
 ## ICRA-076 Review BLOCKED / user decision required — 2026-08-27
 
 Review rejects freeze-003: repeatability snapshots are synthesized from fixture constants, U95 uses the wrong

@@ -1,5 +1,13 @@
 # ICRA 2027 P0 -> P4-v2 -> P5 计划复审
 
+## User decision 007 — repair ICRA-076 — 2026-08-27
+
+**Disposition: `ICRA076_BOUNDED_REPAIR_TASK_READY / NO_BYPASS`.** Under
+`USER-ICRA-ROUTE-20260827-007`, repair only the three rejected freeze boundaries: actual production replay and
+route-correct `|D_peak|` U95, repository-local verification evidence, and complete mandatory-test byte freeze.
+Authority remains `ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md`; P4-v1 `SCIENTIFIC_NO_GO`, P4-v2,
+ICRA-071 and campaign barrier remain unchanged. ICRA-077 requires later Review PASS.
+
 ## ICRA-076 Supervisor Review — 2026-08-27
 
 **Verdict: `STANDARDS REQUEST_CHANGES / SPEC REQUEST_CHANGES / GATE BLOCKED / NOT PASS`.** Freeze-003 is

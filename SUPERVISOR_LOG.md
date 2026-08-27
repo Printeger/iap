@@ -1,5 +1,24 @@
 # ICRA Supervisor Log
 
+## 2026-08-27 — user decision 007 issues bounded ICRA-076 repair
+
+### Decision and repair boundary
+
+- The user explicitly says do not bypass and requests a task to correct the Review errors. Decision
+  `USER-ICRA-ROUTE-20260827-007` binds pushed approval anchor
+  `dd5e96a602061ab4c4bac384c72fec0f43255e01`; protected route fields remain unchanged.
+- ICRA-076 is `TASK_READY` for exactly three same-Gate repairs: replace synthesized B values with measured
+  production-seam snapshot output and route-correct `|D_peak|` U95; move verification evidence under the repository
+  result root; freeze every mandatory 073/074/075/076 verification-test byte.
+- The repair is offline-only and must use fresh replay-002-or-later, verification and freeze-004-or-later identities
+  after pushed source and the exact shared six-package build. Freeze-001/002/003 and replay-001 remain rejected,
+  immutable history. No held-out, ICRA-077, ROS/GPU/live, threshold tuning, qualification or campaign is authorized.
+
+### Supervisor window disposition
+
+- Pending post-push audit. Final disposition and pushed handoff anchor will be recorded after the route/task
+  changeset becomes repository authority.
+
 ## 2026-08-27 — ICRA-076 Review BLOCKED; invalid repeatability freeze
 
 ### Review identity and preservation

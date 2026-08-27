@@ -1,5 +1,14 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-27 user decision 007 and ICRA-076 repair issuance
+
+| Req ID | Decision/task seam | Evidence and disposition | Status |
+|---|---|---|---|
+| IAP-RQ-423 / IAP-RQ-424 | Route-owner choice | User chooses repair, not bypass, at pushed `dd5e96a`; protected route fields unchanged | **USER DECISION 007** |
+| IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 | Repeatability/U95 | Require production-emitted B values and nearest-rank U95 over 60 `|D_peak|` observations | **ICRA-076 REPAIR TASK** |
+| IAP-RQ-423 / IAP-RQ-424 | Evidence/source freeze | Repository-local verification record and complete 073/074/075/076 test/probe/script byte inventory | **ICRA-076 REPAIR TASK** |
+| IAP-RQ-423 / IAP-RQ-424 | Formal boundary | Attempts 001–003/replay-001 retained; no held-out or ICRA-077 before Review PASS | **UNCHANGED / BLOCKED** |
+
 ## 2026-08-27 ICRA-076 Supervisor Review
 
 | Req ID | Reviewed seam | Evidence and disposition | Status |

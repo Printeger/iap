@@ -3,10 +3,10 @@
 > Purpose: 把 talk《Integrity-Aware Active Perception》的“优化版 pipeline”拆成可实现、可验收、可追溯的工程需求。
 > Scope: 仅修改本仓库 src/iap；禁止修改 ../glim（可参考其代码但不得提交改动）。
 
-> Current ICRA disposition (2026-08-27): ICRA-076 Review is `REQUEST_CHANGES / BLOCKED / NOT PASS`. Freeze-003 is
-> internally validator-green but its B values are synthesized from fixture constants and U95 computes deviation
-> from the first replay instead of route-locked `|D_peak|`; external verification evidence and incomplete frozen
-> test sources also violate the contract. No formal freeze or ICRA-077 is active pending user repair-or-bypass.
+> Current ICRA disposition (2026-08-27): user decision 007 selects bounded ICRA-076 repair, not bypass. The sole
+> task must obtain production-emitted B measurements, calculate U95 from 60 route-locked `|D_peak|` observations,
+> retain verification evidence inside the repository and freeze all mandatory test bytes. ICRA-076 remains NOT
+> PASS; held-out ICRA-077 and campaign remain unauthorized pending repair Review PASS.
 
 ICRA-075 bounded repair result (2026-08-27): all enabled P4 objectives, including metrics-only, now block normal
 publication on invalid terminal/attempt/guide identity or lineage CSV open/write/flush failure; explicit disabled

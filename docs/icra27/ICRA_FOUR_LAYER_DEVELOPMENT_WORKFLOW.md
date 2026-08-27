@@ -1,13 +1,13 @@
 # ICRA four-layer development and validation workflow
 
-Status: **BLOCKED — LAYER 4 ICRA-076 INVALID PREREGISTRATION FREEZE**
+Status: **ACTIVE — LAYER 4 ICRA-076 BOUNDED FREEZE REPAIR**
 
 Requirements: `IAP-RQ-320`, `IAP-RQ-321`, `IAP-RQ-400`, `IAP-RQ-410`, `IAP-RQ-421`, `IAP-RQ-422`,
 `IAP-RQ-423`, `IAP-RQ-424`
 
-Current disposition: ICRA-076 freeze-003 is retained but rejected because its repeatability evidence is synthesized,
-its U95 statistic is wrong, verification evidence is external and mandatory verification-test bytes are not all
-frozen. ICRA-076 remains BLOCKED/NOT PASS; no held-out ICRA-077 task is active pending user decision.
+Current disposition: user decision 007 chooses bounded repair, not bypass. Replace synthesized repeatability with
+production-emitted measurement, compute route-correct `|D_peak|` U95, retain verification evidence locally and
+complete the mandatory-test source freeze. ICRA-076 remains NOT PASS while repair is active; ICRA-077 is blocked.
 
 ## 1. Purpose
 
