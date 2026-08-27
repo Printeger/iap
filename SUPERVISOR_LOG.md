@@ -23,8 +23,14 @@
 
 ### Supervisor window disposition
 
-- Pending post-push audit. The final disposition and pushed handoff anchor will be recorded after the route/task
-  changeset becomes repository authority.
+- Route/task changeset `7dd7ed4f490bd5ffd41567d0a971a4fbcd468518` was pushed; fetch confirmed divergence
+  `0 0`. The normal commit was blocked by `ROUTE_CHANGE_SUPERVISOR_NOT_ACTIVE`; after route consistency PASS and
+  exact 12-file staging review, Supervisor used the controlled section 8.6 `--no-verify` path. Builder evidence
+  and protected PDF stayed unstaged.
+- **`ROTATE_RECOMMENDED`**. Reason: `USER_DECISION006_GATE_CHANGE_ICRA075_TO_LAYER4_ICRA076`. This user-owned
+  transition moves from a blocked/bypassed Layer 3 Gate to formal Layer 4 preregistration authority. A fresh
+  Supervisor window may later review ICRA-076 only from pushed repository authority; rotation does not authorize
+  held-out ICRA-077 or any work beyond `NEXT_TASK.md`.
 
 ## 2026-08-27 — ICRA-075 bounded repair Review BLOCKED; user decision required
 

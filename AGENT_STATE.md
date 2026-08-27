@@ -44,13 +44,13 @@ recovery_roadmap: docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP
 four_layer_workflow: docs/icra27/ICRA_FOUR_LAYER_DEVELOPMENT_WORKFLOW.md
 guard_plan: docs/icra27/ICRA_CROSS_LAYER_GUARD_PLAN.md
 artifact_retention: ALL_ICRA072_EVIDENCE_SHARED_ROOTS_HIDDEN_USER_ARTIFACTS_AND_PROTECTED_PDF_RETAINED
-window_disposition: PENDING_POST_PUSH_AUDIT
-rotation_reason: PENDING_POST_PUSH_AUDIT
-window_handoff_anchor: PENDING_TASK_CHANGESET
+window_disposition: ROTATE_RECOMMENDED
+rotation_reason: USER_DECISION006_GATE_CHANGE_ICRA075_TO_LAYER4_ICRA076
+window_handoff_anchor: 7dd7ed4f490bd5ffd41567d0a971a4fbcd468518
 window_next_role: SUPERVISOR
 window_next_review_task: ICRA-076
 window_bootstrap_source: REPOSITORY_AUTHORITY_ONLY
-updated_utc: 2026-08-27T15:06:09Z
+updated_utc: 2026-08-27T15:09:46Z
 ```
 
 User decision 006, anchored at pushed `111010126a3b5216cce51c567c5835fec976f87a`, explicitly accepts and bypasses
