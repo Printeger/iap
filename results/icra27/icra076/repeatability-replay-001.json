@@ -1,0 +1,1157 @@
+{
+  "decision_test": {
+    "path": "src/iap/planner/bspline_opt/test/test_p4_collision_guide.cpp",
+    "sha256": "79c48fb43cb9f3a3ef4467611f137e220d0d0ca5d7f3a838b0b7bbab97eeafe0"
+  },
+  "fixture": {
+    "path": "src/iap/planner/bspline_opt/test/icra074_targeted_optimization_fixture.hpp",
+    "sha256": "a6ca85fee0cdc3e08c1af28af07cbf1e90a6dd3ab7ba2f1c7eba77a6c8f9b91d"
+  },
+  "held_out_accessed": false,
+  "observation_count": 60,
+  "observations": [
+    {
+      "command": [
+        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+        "--gtest_filter=P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash",
+        "--gtest_repeat=1"
+      ],
+      "exit_code": 0,
+      "replay_index": 1,
+      "serialized_snapshot": {
+        "original_interior_provider_c_pi_m": 1.0,
+        "provider_truth": "FLAT_NULL",
+        "resolution_m": 0.5,
+        "risk_interior_provider_c_pi_m": 1.0,
+        "schema_version": "p4_risk_grid_snapshot_replay_v1"
+      },
+      "serialized_snapshot_sha256": "f7e156df2488729358c055afbbca9f1ddf8be849427f77cdb5064b8f8f8f5eea",
+      "transcript": "Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc\nNote: Google Test filter = P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from P4CollisionGuideDecision\n[ RUN      ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[       OK ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash (6 ms)\n[----------] 1 test from P4CollisionGuideDecision (6 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (6 ms total)\n[  PASSED  ] 1 test.\n",
+      "transcript_sha256": "6b9e2655119ae0a42e845f2739a38d478fec0df23a0e3b012b462c79598f5ebd"
+    },
+    {
+      "command": [
+        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+        "--gtest_filter=P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash",
+        "--gtest_repeat=1"
+      ],
+      "exit_code": 0,
+      "replay_index": 2,
+      "serialized_snapshot": {
+        "original_interior_provider_c_pi_m": 1.0,
+        "provider_truth": "FLAT_NULL",
+        "resolution_m": 0.5,
+        "risk_interior_provider_c_pi_m": 1.0,
+        "schema_version": "p4_risk_grid_snapshot_replay_v1"
+      },
+      "serialized_snapshot_sha256": "f7e156df2488729358c055afbbca9f1ddf8be849427f77cdb5064b8f8f8f5eea",
+      "transcript": "Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc\nNote: Google Test filter = P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from P4CollisionGuideDecision\n[ RUN      ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[       OK ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash (5 ms)\n[----------] 1 test from P4CollisionGuideDecision (5 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (5 ms total)\n[  PASSED  ] 1 test.\n",
+      "transcript_sha256": "c3ae2f8d2435f9aab5527c227738c25f4ff754efce1aad57118d80b7ad33cfee"
+    },
+    {
+      "command": [
+        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+        "--gtest_filter=P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash",
+        "--gtest_repeat=1"
+      ],
+      "exit_code": 0,
+      "replay_index": 3,
+      "serialized_snapshot": {
+        "original_interior_provider_c_pi_m": 1.0,
+        "provider_truth": "FLAT_NULL",
+        "resolution_m": 0.5,
+        "risk_interior_provider_c_pi_m": 1.0,
+        "schema_version": "p4_risk_grid_snapshot_replay_v1"
+      },
+      "serialized_snapshot_sha256": "f7e156df2488729358c055afbbca9f1ddf8be849427f77cdb5064b8f8f8f5eea",
+      "transcript": "Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc\nNote: Google Test filter = P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from P4CollisionGuideDecision\n[ RUN      ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[       OK ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash (5 ms)\n[----------] 1 test from P4CollisionGuideDecision (5 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (5 ms total)\n[  PASSED  ] 1 test.\n",
+      "transcript_sha256": "c3ae2f8d2435f9aab5527c227738c25f4ff754efce1aad57118d80b7ad33cfee"
+    },
+    {
+      "command": [
+        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+        "--gtest_filter=P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash",
+        "--gtest_repeat=1"
+      ],
+      "exit_code": 0,
+      "replay_index": 4,
+      "serialized_snapshot": {
+        "original_interior_provider_c_pi_m": 1.0,
+        "provider_truth": "FLAT_NULL",
+        "resolution_m": 0.5,
+        "risk_interior_provider_c_pi_m": 1.0,
+        "schema_version": "p4_risk_grid_snapshot_replay_v1"
+      },
+      "serialized_snapshot_sha256": "f7e156df2488729358c055afbbca9f1ddf8be849427f77cdb5064b8f8f8f5eea",
+      "transcript": "Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc\nNote: Google Test filter = P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from P4CollisionGuideDecision\n[ RUN      ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[       OK ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash (6 ms)\n[----------] 1 test from P4CollisionGuideDecision (6 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (6 ms total)\n[  PASSED  ] 1 test.\n",
+      "transcript_sha256": "6b9e2655119ae0a42e845f2739a38d478fec0df23a0e3b012b462c79598f5ebd"
+    },
+    {
+      "command": [
+        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+        "--gtest_filter=P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash",
+        "--gtest_repeat=1"
+      ],
+      "exit_code": 0,
+      "replay_index": 5,
+      "serialized_snapshot": {
+        "original_interior_provider_c_pi_m": 1.0,
+        "provider_truth": "FLAT_NULL",
+        "resolution_m": 0.5,
+        "risk_interior_provider_c_pi_m": 1.0,
+        "schema_version": "p4_risk_grid_snapshot_replay_v1"
+      },
+      "serialized_snapshot_sha256": "f7e156df2488729358c055afbbca9f1ddf8be849427f77cdb5064b8f8f8f5eea",
+      "transcript": "Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc\nNote: Google Test filter = P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from P4CollisionGuideDecision\n[ RUN      ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[       OK ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash (5 ms)\n[----------] 1 test from P4CollisionGuideDecision (5 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (5 ms total)\n[  PASSED  ] 1 test.\n",
+      "transcript_sha256": "c3ae2f8d2435f9aab5527c227738c25f4ff754efce1aad57118d80b7ad33cfee"
+    },
+    {
+      "command": [
+        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+        "--gtest_filter=P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash",
+        "--gtest_repeat=1"
+      ],
+      "exit_code": 0,
+      "replay_index": 6,
+      "serialized_snapshot": {
+        "original_interior_provider_c_pi_m": 1.0,
+        "provider_truth": "FLAT_NULL",
+        "resolution_m": 0.5,
+        "risk_interior_provider_c_pi_m": 1.0,
+        "schema_version": "p4_risk_grid_snapshot_replay_v1"
+      },
+      "serialized_snapshot_sha256": "f7e156df2488729358c055afbbca9f1ddf8be849427f77cdb5064b8f8f8f5eea",
+      "transcript": "Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc\nNote: Google Test filter = P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from P4CollisionGuideDecision\n[ RUN      ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[       OK ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash (6 ms)\n[----------] 1 test from P4CollisionGuideDecision (6 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (6 ms total)\n[  PASSED  ] 1 test.\n",
+      "transcript_sha256": "6b9e2655119ae0a42e845f2739a38d478fec0df23a0e3b012b462c79598f5ebd"
+    },
+    {
+      "command": [
+        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+        "--gtest_filter=P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash",
+        "--gtest_repeat=1"
+      ],
+      "exit_code": 0,
+      "replay_index": 7,
+      "serialized_snapshot": {
+        "original_interior_provider_c_pi_m": 1.0,
+        "provider_truth": "FLAT_NULL",
+        "resolution_m": 0.5,
+        "risk_interior_provider_c_pi_m": 1.0,
+        "schema_version": "p4_risk_grid_snapshot_replay_v1"
+      },
+      "serialized_snapshot_sha256": "f7e156df2488729358c055afbbca9f1ddf8be849427f77cdb5064b8f8f8f5eea",
+      "transcript": "Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc\nNote: Google Test filter = P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from P4CollisionGuideDecision\n[ RUN      ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[       OK ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash (5 ms)\n[----------] 1 test from P4CollisionGuideDecision (5 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (5 ms total)\n[  PASSED  ] 1 test.\n",
+      "transcript_sha256": "c3ae2f8d2435f9aab5527c227738c25f4ff754efce1aad57118d80b7ad33cfee"
+    },
+    {
+      "command": [
+        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+        "--gtest_filter=P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash",
+        "--gtest_repeat=1"
+      ],
+      "exit_code": 0,
+      "replay_index": 8,
+      "serialized_snapshot": {
+        "original_interior_provider_c_pi_m": 1.0,
+        "provider_truth": "FLAT_NULL",
+        "resolution_m": 0.5,
+        "risk_interior_provider_c_pi_m": 1.0,
+        "schema_version": "p4_risk_grid_snapshot_replay_v1"
+      },
+      "serialized_snapshot_sha256": "f7e156df2488729358c055afbbca9f1ddf8be849427f77cdb5064b8f8f8f5eea",
+      "transcript": "Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc\nNote: Google Test filter = P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from P4CollisionGuideDecision\n[ RUN      ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[       OK ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash (5 ms)\n[----------] 1 test from P4CollisionGuideDecision (5 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (5 ms total)\n[  PASSED  ] 1 test.\n",
+      "transcript_sha256": "c3ae2f8d2435f9aab5527c227738c25f4ff754efce1aad57118d80b7ad33cfee"
+    },
+    {
+      "command": [
+        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+        "--gtest_filter=P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash",
+        "--gtest_repeat=1"
+      ],
+      "exit_code": 0,
+      "replay_index": 9,
+      "serialized_snapshot": {
+        "original_interior_provider_c_pi_m": 1.0,
+        "provider_truth": "FLAT_NULL",
+        "resolution_m": 0.5,
+        "risk_interior_provider_c_pi_m": 1.0,
+        "schema_version": "p4_risk_grid_snapshot_replay_v1"
+      },
+      "serialized_snapshot_sha256": "f7e156df2488729358c055afbbca9f1ddf8be849427f77cdb5064b8f8f8f5eea",
+      "transcript": "Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc\nNote: Google Test filter = P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from P4CollisionGuideDecision\n[ RUN      ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[       OK ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash (5 ms)\n[----------] 1 test from P4CollisionGuideDecision (5 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (5 ms total)\n[  PASSED  ] 1 test.\n",
+      "transcript_sha256": "c3ae2f8d2435f9aab5527c227738c25f4ff754efce1aad57118d80b7ad33cfee"
+    },
+    {
+      "command": [
+        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+        "--gtest_filter=P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash",
+        "--gtest_repeat=1"
+      ],
+      "exit_code": 0,
+      "replay_index": 10,
+      "serialized_snapshot": {
+        "original_interior_provider_c_pi_m": 1.0,
+        "provider_truth": "FLAT_NULL",
+        "resolution_m": 0.5,
+        "risk_interior_provider_c_pi_m": 1.0,
+        "schema_version": "p4_risk_grid_snapshot_replay_v1"
+      },
+      "serialized_snapshot_sha256": "f7e156df2488729358c055afbbca9f1ddf8be849427f77cdb5064b8f8f8f5eea",
+      "transcript": "Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc\nNote: Google Test filter = P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from P4CollisionGuideDecision\n[ RUN      ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[       OK ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash (5 ms)\n[----------] 1 test from P4CollisionGuideDecision (5 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (5 ms total)\n[  PASSED  ] 1 test.\n",
+      "transcript_sha256": "c3ae2f8d2435f9aab5527c227738c25f4ff754efce1aad57118d80b7ad33cfee"
+    },
+    {
+      "command": [
+        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+        "--gtest_filter=P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash",
+        "--gtest_repeat=1"
+      ],
+      "exit_code": 0,
+      "replay_index": 11,
+      "serialized_snapshot": {
+        "original_interior_provider_c_pi_m": 1.0,
+        "provider_truth": "FLAT_NULL",
+        "resolution_m": 0.5,
+        "risk_interior_provider_c_pi_m": 1.0,
+        "schema_version": "p4_risk_grid_snapshot_replay_v1"
+      },
+      "serialized_snapshot_sha256": "f7e156df2488729358c055afbbca9f1ddf8be849427f77cdb5064b8f8f8f5eea",
+      "transcript": "Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc\nNote: Google Test filter = P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from P4CollisionGuideDecision\n[ RUN      ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[       OK ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash (5 ms)\n[----------] 1 test from P4CollisionGuideDecision (5 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (6 ms total)\n[  PASSED  ] 1 test.\n",
+      "transcript_sha256": "a562e24137880b0415f08d8badd8ce8c1b3d78cc897f7b7a767936af43e5c476"
+    },
+    {
+      "command": [
+        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+        "--gtest_filter=P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash",
+        "--gtest_repeat=1"
+      ],
+      "exit_code": 0,
+      "replay_index": 12,
+      "serialized_snapshot": {
+        "original_interior_provider_c_pi_m": 1.0,
+        "provider_truth": "FLAT_NULL",
+        "resolution_m": 0.5,
+        "risk_interior_provider_c_pi_m": 1.0,
+        "schema_version": "p4_risk_grid_snapshot_replay_v1"
+      },
+      "serialized_snapshot_sha256": "f7e156df2488729358c055afbbca9f1ddf8be849427f77cdb5064b8f8f8f5eea",
+      "transcript": "Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc\nNote: Google Test filter = P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from P4CollisionGuideDecision\n[ RUN      ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[       OK ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash (5 ms)\n[----------] 1 test from P4CollisionGuideDecision (5 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (5 ms total)\n[  PASSED  ] 1 test.\n",
+      "transcript_sha256": "c3ae2f8d2435f9aab5527c227738c25f4ff754efce1aad57118d80b7ad33cfee"
+    },
+    {
+      "command": [
+        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+        "--gtest_filter=P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash",
+        "--gtest_repeat=1"
+      ],
+      "exit_code": 0,
+      "replay_index": 13,
+      "serialized_snapshot": {
+        "original_interior_provider_c_pi_m": 1.0,
+        "provider_truth": "FLAT_NULL",
+        "resolution_m": 0.5,
+        "risk_interior_provider_c_pi_m": 1.0,
+        "schema_version": "p4_risk_grid_snapshot_replay_v1"
+      },
+      "serialized_snapshot_sha256": "f7e156df2488729358c055afbbca9f1ddf8be849427f77cdb5064b8f8f8f5eea",
+      "transcript": "Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc\nNote: Google Test filter = P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from P4CollisionGuideDecision\n[ RUN      ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[       OK ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash (5 ms)\n[----------] 1 test from P4CollisionGuideDecision (5 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (5 ms total)\n[  PASSED  ] 1 test.\n",
+      "transcript_sha256": "c3ae2f8d2435f9aab5527c227738c25f4ff754efce1aad57118d80b7ad33cfee"
+    },
+    {
+      "command": [
+        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+        "--gtest_filter=P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash",
+        "--gtest_repeat=1"
+      ],
+      "exit_code": 0,
+      "replay_index": 14,
+      "serialized_snapshot": {
+        "original_interior_provider_c_pi_m": 1.0,
+        "provider_truth": "FLAT_NULL",
+        "resolution_m": 0.5,
+        "risk_interior_provider_c_pi_m": 1.0,
+        "schema_version": "p4_risk_grid_snapshot_replay_v1"
+      },
+      "serialized_snapshot_sha256": "f7e156df2488729358c055afbbca9f1ddf8be849427f77cdb5064b8f8f8f5eea",
+      "transcript": "Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc\nNote: Google Test filter = P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from P4CollisionGuideDecision\n[ RUN      ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[       OK ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash (5 ms)\n[----------] 1 test from P4CollisionGuideDecision (5 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (5 ms total)\n[  PASSED  ] 1 test.\n",
+      "transcript_sha256": "c3ae2f8d2435f9aab5527c227738c25f4ff754efce1aad57118d80b7ad33cfee"
+    },
+    {
+      "command": [
+        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+        "--gtest_filter=P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash",
+        "--gtest_repeat=1"
+      ],
+      "exit_code": 0,
+      "replay_index": 15,
+      "serialized_snapshot": {
+        "original_interior_provider_c_pi_m": 1.0,
+        "provider_truth": "FLAT_NULL",
+        "resolution_m": 0.5,
+        "risk_interior_provider_c_pi_m": 1.0,
+        "schema_version": "p4_risk_grid_snapshot_replay_v1"
+      },
+      "serialized_snapshot_sha256": "f7e156df2488729358c055afbbca9f1ddf8be849427f77cdb5064b8f8f8f5eea",
+      "transcript": "Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc\nNote: Google Test filter = P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from P4CollisionGuideDecision\n[ RUN      ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[       OK ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash (5 ms)\n[----------] 1 test from P4CollisionGuideDecision (5 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (5 ms total)\n[  PASSED  ] 1 test.\n",
+      "transcript_sha256": "c3ae2f8d2435f9aab5527c227738c25f4ff754efce1aad57118d80b7ad33cfee"
+    },
+    {
+      "command": [
+        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+        "--gtest_filter=P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash",
+        "--gtest_repeat=1"
+      ],
+      "exit_code": 0,
+      "replay_index": 16,
+      "serialized_snapshot": {
+        "original_interior_provider_c_pi_m": 1.0,
+        "provider_truth": "FLAT_NULL",
+        "resolution_m": 0.5,
+        "risk_interior_provider_c_pi_m": 1.0,
+        "schema_version": "p4_risk_grid_snapshot_replay_v1"
+      },
+      "serialized_snapshot_sha256": "f7e156df2488729358c055afbbca9f1ddf8be849427f77cdb5064b8f8f8f5eea",
+      "transcript": "Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc\nNote: Google Test filter = P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from P4CollisionGuideDecision\n[ RUN      ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[       OK ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash (5 ms)\n[----------] 1 test from P4CollisionGuideDecision (5 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (5 ms total)\n[  PASSED  ] 1 test.\n",
+      "transcript_sha256": "c3ae2f8d2435f9aab5527c227738c25f4ff754efce1aad57118d80b7ad33cfee"
+    },
+    {
+      "command": [
+        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+        "--gtest_filter=P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash",
+        "--gtest_repeat=1"
+      ],
+      "exit_code": 0,
+      "replay_index": 17,
+      "serialized_snapshot": {
+        "original_interior_provider_c_pi_m": 1.0,
+        "provider_truth": "FLAT_NULL",
+        "resolution_m": 0.5,
+        "risk_interior_provider_c_pi_m": 1.0,
+        "schema_version": "p4_risk_grid_snapshot_replay_v1"
+      },
+      "serialized_snapshot_sha256": "f7e156df2488729358c055afbbca9f1ddf8be849427f77cdb5064b8f8f8f5eea",
+      "transcript": "Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc\nNote: Google Test filter = P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from P4CollisionGuideDecision\n[ RUN      ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[       OK ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash (5 ms)\n[----------] 1 test from P4CollisionGuideDecision (5 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (5 ms total)\n[  PASSED  ] 1 test.\n",
+      "transcript_sha256": "c3ae2f8d2435f9aab5527c227738c25f4ff754efce1aad57118d80b7ad33cfee"
+    },
+    {
+      "command": [
+        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+        "--gtest_filter=P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash",
+        "--gtest_repeat=1"
+      ],
+      "exit_code": 0,
+      "replay_index": 18,
+      "serialized_snapshot": {
+        "original_interior_provider_c_pi_m": 1.0,
+        "provider_truth": "FLAT_NULL",
+        "resolution_m": 0.5,
+        "risk_interior_provider_c_pi_m": 1.0,
+        "schema_version": "p4_risk_grid_snapshot_replay_v1"
+      },
+      "serialized_snapshot_sha256": "f7e156df2488729358c055afbbca9f1ddf8be849427f77cdb5064b8f8f8f5eea",
+      "transcript": "Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc\nNote: Google Test filter = P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from P4CollisionGuideDecision\n[ RUN      ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[       OK ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash (5 ms)\n[----------] 1 test from P4CollisionGuideDecision (5 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (5 ms total)\n[  PASSED  ] 1 test.\n",
+      "transcript_sha256": "c3ae2f8d2435f9aab5527c227738c25f4ff754efce1aad57118d80b7ad33cfee"
+    },
+    {
+      "command": [
+        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+        "--gtest_filter=P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash",
+        "--gtest_repeat=1"
+      ],
+      "exit_code": 0,
+      "replay_index": 19,
+      "serialized_snapshot": {
+        "original_interior_provider_c_pi_m": 1.0,
+        "provider_truth": "FLAT_NULL",
+        "resolution_m": 0.5,
+        "risk_interior_provider_c_pi_m": 1.0,
+        "schema_version": "p4_risk_grid_snapshot_replay_v1"
+      },
+      "serialized_snapshot_sha256": "f7e156df2488729358c055afbbca9f1ddf8be849427f77cdb5064b8f8f8f5eea",
+      "transcript": "Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc\nNote: Google Test filter = P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from P4CollisionGuideDecision\n[ RUN      ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[       OK ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash (5 ms)\n[----------] 1 test from P4CollisionGuideDecision (5 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (5 ms total)\n[  PASSED  ] 1 test.\n",
+      "transcript_sha256": "c3ae2f8d2435f9aab5527c227738c25f4ff754efce1aad57118d80b7ad33cfee"
+    },
+    {
+      "command": [
+        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+        "--gtest_filter=P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash",
+        "--gtest_repeat=1"
+      ],
+      "exit_code": 0,
+      "replay_index": 20,
+      "serialized_snapshot": {
+        "original_interior_provider_c_pi_m": 1.0,
+        "provider_truth": "FLAT_NULL",
+        "resolution_m": 0.5,
+        "risk_interior_provider_c_pi_m": 1.0,
+        "schema_version": "p4_risk_grid_snapshot_replay_v1"
+      },
+      "serialized_snapshot_sha256": "f7e156df2488729358c055afbbca9f1ddf8be849427f77cdb5064b8f8f8f5eea",
+      "transcript": "Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc\nNote: Google Test filter = P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from P4CollisionGuideDecision\n[ RUN      ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[       OK ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash (5 ms)\n[----------] 1 test from P4CollisionGuideDecision (5 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (5 ms total)\n[  PASSED  ] 1 test.\n",
+      "transcript_sha256": "c3ae2f8d2435f9aab5527c227738c25f4ff754efce1aad57118d80b7ad33cfee"
+    },
+    {
+      "command": [
+        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+        "--gtest_filter=P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash",
+        "--gtest_repeat=1"
+      ],
+      "exit_code": 0,
+      "replay_index": 21,
+      "serialized_snapshot": {
+        "original_interior_provider_c_pi_m": 1.0,
+        "provider_truth": "FLAT_NULL",
+        "resolution_m": 0.5,
+        "risk_interior_provider_c_pi_m": 1.0,
+        "schema_version": "p4_risk_grid_snapshot_replay_v1"
+      },
+      "serialized_snapshot_sha256": "f7e156df2488729358c055afbbca9f1ddf8be849427f77cdb5064b8f8f8f5eea",
+      "transcript": "Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc\nNote: Google Test filter = P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from P4CollisionGuideDecision\n[ RUN      ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[       OK ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash (5 ms)\n[----------] 1 test from P4CollisionGuideDecision (5 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (5 ms total)\n[  PASSED  ] 1 test.\n",
+      "transcript_sha256": "c3ae2f8d2435f9aab5527c227738c25f4ff754efce1aad57118d80b7ad33cfee"
+    },
+    {
+      "command": [
+        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+        "--gtest_filter=P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash",
+        "--gtest_repeat=1"
+      ],
+      "exit_code": 0,
+      "replay_index": 22,
+      "serialized_snapshot": {
+        "original_interior_provider_c_pi_m": 1.0,
+        "provider_truth": "FLAT_NULL",
+        "resolution_m": 0.5,
+        "risk_interior_provider_c_pi_m": 1.0,
+        "schema_version": "p4_risk_grid_snapshot_replay_v1"
+      },
+      "serialized_snapshot_sha256": "f7e156df2488729358c055afbbca9f1ddf8be849427f77cdb5064b8f8f8f5eea",
+      "transcript": "Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc\nNote: Google Test filter = P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from P4CollisionGuideDecision\n[ RUN      ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[       OK ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash (5 ms)\n[----------] 1 test from P4CollisionGuideDecision (5 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (5 ms total)\n[  PASSED  ] 1 test.\n",
+      "transcript_sha256": "c3ae2f8d2435f9aab5527c227738c25f4ff754efce1aad57118d80b7ad33cfee"
+    },
+    {
+      "command": [
+        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+        "--gtest_filter=P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash",
+        "--gtest_repeat=1"
+      ],
+      "exit_code": 0,
+      "replay_index": 23,
+      "serialized_snapshot": {
+        "original_interior_provider_c_pi_m": 1.0,
+        "provider_truth": "FLAT_NULL",
+        "resolution_m": 0.5,
+        "risk_interior_provider_c_pi_m": 1.0,
+        "schema_version": "p4_risk_grid_snapshot_replay_v1"
+      },
+      "serialized_snapshot_sha256": "f7e156df2488729358c055afbbca9f1ddf8be849427f77cdb5064b8f8f8f5eea",
+      "transcript": "Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc\nNote: Google Test filter = P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from P4CollisionGuideDecision\n[ RUN      ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[       OK ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash (5 ms)\n[----------] 1 test from P4CollisionGuideDecision (5 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (5 ms total)\n[  PASSED  ] 1 test.\n",
+      "transcript_sha256": "c3ae2f8d2435f9aab5527c227738c25f4ff754efce1aad57118d80b7ad33cfee"
+    },
+    {
+      "command": [
+        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+        "--gtest_filter=P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash",
+        "--gtest_repeat=1"
+      ],
+      "exit_code": 0,
+      "replay_index": 24,
+      "serialized_snapshot": {
+        "original_interior_provider_c_pi_m": 1.0,
+        "provider_truth": "FLAT_NULL",
+        "resolution_m": 0.5,
+        "risk_interior_provider_c_pi_m": 1.0,
+        "schema_version": "p4_risk_grid_snapshot_replay_v1"
+      },
+      "serialized_snapshot_sha256": "f7e156df2488729358c055afbbca9f1ddf8be849427f77cdb5064b8f8f8f5eea",
+      "transcript": "Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc\nNote: Google Test filter = P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from P4CollisionGuideDecision\n[ RUN      ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[       OK ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash (5 ms)\n[----------] 1 test from P4CollisionGuideDecision (5 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (5 ms total)\n[  PASSED  ] 1 test.\n",
+      "transcript_sha256": "c3ae2f8d2435f9aab5527c227738c25f4ff754efce1aad57118d80b7ad33cfee"
+    },
+    {
+      "command": [
+        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+        "--gtest_filter=P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash",
+        "--gtest_repeat=1"
+      ],
+      "exit_code": 0,
+      "replay_index": 25,
+      "serialized_snapshot": {
+        "original_interior_provider_c_pi_m": 1.0,
+        "provider_truth": "FLAT_NULL",
+        "resolution_m": 0.5,
+        "risk_interior_provider_c_pi_m": 1.0,
+        "schema_version": "p4_risk_grid_snapshot_replay_v1"
+      },
+      "serialized_snapshot_sha256": "f7e156df2488729358c055afbbca9f1ddf8be849427f77cdb5064b8f8f8f5eea",
+      "transcript": "Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc\nNote: Google Test filter = P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from P4CollisionGuideDecision\n[ RUN      ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[       OK ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash (5 ms)\n[----------] 1 test from P4CollisionGuideDecision (5 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (5 ms total)\n[  PASSED  ] 1 test.\n",
+      "transcript_sha256": "c3ae2f8d2435f9aab5527c227738c25f4ff754efce1aad57118d80b7ad33cfee"
+    },
+    {
+      "command": [
+        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+        "--gtest_filter=P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash",
+        "--gtest_repeat=1"
+      ],
+      "exit_code": 0,
+      "replay_index": 26,
+      "serialized_snapshot": {
+        "original_interior_provider_c_pi_m": 1.0,
+        "provider_truth": "FLAT_NULL",
+        "resolution_m": 0.5,
+        "risk_interior_provider_c_pi_m": 1.0,
+        "schema_version": "p4_risk_grid_snapshot_replay_v1"
+      },
+      "serialized_snapshot_sha256": "f7e156df2488729358c055afbbca9f1ddf8be849427f77cdb5064b8f8f8f5eea",
+      "transcript": "Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc\nNote: Google Test filter = P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from P4CollisionGuideDecision\n[ RUN      ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[       OK ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash (6 ms)\n[----------] 1 test from P4CollisionGuideDecision (6 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (6 ms total)\n[  PASSED  ] 1 test.\n",
+      "transcript_sha256": "6b9e2655119ae0a42e845f2739a38d478fec0df23a0e3b012b462c79598f5ebd"
+    },
+    {
+      "command": [
+        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+        "--gtest_filter=P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash",
+        "--gtest_repeat=1"
+      ],
+      "exit_code": 0,
+      "replay_index": 27,
+      "serialized_snapshot": {
+        "original_interior_provider_c_pi_m": 1.0,
+        "provider_truth": "FLAT_NULL",
+        "resolution_m": 0.5,
+        "risk_interior_provider_c_pi_m": 1.0,
+        "schema_version": "p4_risk_grid_snapshot_replay_v1"
+      },
+      "serialized_snapshot_sha256": "f7e156df2488729358c055afbbca9f1ddf8be849427f77cdb5064b8f8f8f5eea",
+      "transcript": "Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc\nNote: Google Test filter = P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from P4CollisionGuideDecision\n[ RUN      ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[       OK ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash (5 ms)\n[----------] 1 test from P4CollisionGuideDecision (5 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (5 ms total)\n[  PASSED  ] 1 test.\n",
+      "transcript_sha256": "c3ae2f8d2435f9aab5527c227738c25f4ff754efce1aad57118d80b7ad33cfee"
+    },
+    {
+      "command": [
+        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+        "--gtest_filter=P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash",
+        "--gtest_repeat=1"
+      ],
+      "exit_code": 0,
+      "replay_index": 28,
+      "serialized_snapshot": {
+        "original_interior_provider_c_pi_m": 1.0,
+        "provider_truth": "FLAT_NULL",
+        "resolution_m": 0.5,
+        "risk_interior_provider_c_pi_m": 1.0,
+        "schema_version": "p4_risk_grid_snapshot_replay_v1"
+      },
+      "serialized_snapshot_sha256": "f7e156df2488729358c055afbbca9f1ddf8be849427f77cdb5064b8f8f8f5eea",
+      "transcript": "Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc\nNote: Google Test filter = P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from P4CollisionGuideDecision\n[ RUN      ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[       OK ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash (5 ms)\n[----------] 1 test from P4CollisionGuideDecision (5 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (5 ms total)\n[  PASSED  ] 1 test.\n",
+      "transcript_sha256": "c3ae2f8d2435f9aab5527c227738c25f4ff754efce1aad57118d80b7ad33cfee"
+    },
+    {
+      "command": [
+        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+        "--gtest_filter=P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash",
+        "--gtest_repeat=1"
+      ],
+      "exit_code": 0,
+      "replay_index": 29,
+      "serialized_snapshot": {
+        "original_interior_provider_c_pi_m": 1.0,
+        "provider_truth": "FLAT_NULL",
+        "resolution_m": 0.5,
+        "risk_interior_provider_c_pi_m": 1.0,
+        "schema_version": "p4_risk_grid_snapshot_replay_v1"
+      },
+      "serialized_snapshot_sha256": "f7e156df2488729358c055afbbca9f1ddf8be849427f77cdb5064b8f8f8f5eea",
+      "transcript": "Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc\nNote: Google Test filter = P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from P4CollisionGuideDecision\n[ RUN      ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[       OK ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash (5 ms)\n[----------] 1 test from P4CollisionGuideDecision (5 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (5 ms total)\n[  PASSED  ] 1 test.\n",
+      "transcript_sha256": "c3ae2f8d2435f9aab5527c227738c25f4ff754efce1aad57118d80b7ad33cfee"
+    },
+    {
+      "command": [
+        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+        "--gtest_filter=P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash",
+        "--gtest_repeat=1"
+      ],
+      "exit_code": 0,
+      "replay_index": 30,
+      "serialized_snapshot": {
+        "original_interior_provider_c_pi_m": 1.0,
+        "provider_truth": "FLAT_NULL",
+        "resolution_m": 0.5,
+        "risk_interior_provider_c_pi_m": 1.0,
+        "schema_version": "p4_risk_grid_snapshot_replay_v1"
+      },
+      "serialized_snapshot_sha256": "f7e156df2488729358c055afbbca9f1ddf8be849427f77cdb5064b8f8f8f5eea",
+      "transcript": "Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc\nNote: Google Test filter = P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from P4CollisionGuideDecision\n[ RUN      ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[       OK ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash (5 ms)\n[----------] 1 test from P4CollisionGuideDecision (5 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (5 ms total)\n[  PASSED  ] 1 test.\n",
+      "transcript_sha256": "c3ae2f8d2435f9aab5527c227738c25f4ff754efce1aad57118d80b7ad33cfee"
+    },
+    {
+      "command": [
+        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+        "--gtest_filter=P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash",
+        "--gtest_repeat=1"
+      ],
+      "exit_code": 0,
+      "replay_index": 31,
+      "serialized_snapshot": {
+        "original_interior_provider_c_pi_m": 1.0,
+        "provider_truth": "FLAT_NULL",
+        "resolution_m": 0.5,
+        "risk_interior_provider_c_pi_m": 1.0,
+        "schema_version": "p4_risk_grid_snapshot_replay_v1"
+      },
+      "serialized_snapshot_sha256": "f7e156df2488729358c055afbbca9f1ddf8be849427f77cdb5064b8f8f8f5eea",
+      "transcript": "Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc\nNote: Google Test filter = P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from P4CollisionGuideDecision\n[ RUN      ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[       OK ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash (5 ms)\n[----------] 1 test from P4CollisionGuideDecision (5 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (5 ms total)\n[  PASSED  ] 1 test.\n",
+      "transcript_sha256": "c3ae2f8d2435f9aab5527c227738c25f4ff754efce1aad57118d80b7ad33cfee"
+    },
+    {
+      "command": [
+        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+        "--gtest_filter=P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash",
+        "--gtest_repeat=1"
+      ],
+      "exit_code": 0,
+      "replay_index": 32,
+      "serialized_snapshot": {
+        "original_interior_provider_c_pi_m": 1.0,
+        "provider_truth": "FLAT_NULL",
+        "resolution_m": 0.5,
+        "risk_interior_provider_c_pi_m": 1.0,
+        "schema_version": "p4_risk_grid_snapshot_replay_v1"
+      },
+      "serialized_snapshot_sha256": "f7e156df2488729358c055afbbca9f1ddf8be849427f77cdb5064b8f8f8f5eea",
+      "transcript": "Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc\nNote: Google Test filter = P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from P4CollisionGuideDecision\n[ RUN      ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[       OK ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash (5 ms)\n[----------] 1 test from P4CollisionGuideDecision (5 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (5 ms total)\n[  PASSED  ] 1 test.\n",
+      "transcript_sha256": "c3ae2f8d2435f9aab5527c227738c25f4ff754efce1aad57118d80b7ad33cfee"
+    },
+    {
+      "command": [
+        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+        "--gtest_filter=P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash",
+        "--gtest_repeat=1"
+      ],
+      "exit_code": 0,
+      "replay_index": 33,
+      "serialized_snapshot": {
+        "original_interior_provider_c_pi_m": 1.0,
+        "provider_truth": "FLAT_NULL",
+        "resolution_m": 0.5,
+        "risk_interior_provider_c_pi_m": 1.0,
+        "schema_version": "p4_risk_grid_snapshot_replay_v1"
+      },
+      "serialized_snapshot_sha256": "f7e156df2488729358c055afbbca9f1ddf8be849427f77cdb5064b8f8f8f5eea",
+      "transcript": "Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc\nNote: Google Test filter = P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from P4CollisionGuideDecision\n[ RUN      ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[       OK ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash (5 ms)\n[----------] 1 test from P4CollisionGuideDecision (5 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (5 ms total)\n[  PASSED  ] 1 test.\n",
+      "transcript_sha256": "c3ae2f8d2435f9aab5527c227738c25f4ff754efce1aad57118d80b7ad33cfee"
+    },
+    {
+      "command": [
+        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+        "--gtest_filter=P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash",
+        "--gtest_repeat=1"
+      ],
+      "exit_code": 0,
+      "replay_index": 34,
+      "serialized_snapshot": {
+        "original_interior_provider_c_pi_m": 1.0,
+        "provider_truth": "FLAT_NULL",
+        "resolution_m": 0.5,
+        "risk_interior_provider_c_pi_m": 1.0,
+        "schema_version": "p4_risk_grid_snapshot_replay_v1"
+      },
+      "serialized_snapshot_sha256": "f7e156df2488729358c055afbbca9f1ddf8be849427f77cdb5064b8f8f8f5eea",
+      "transcript": "Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc\nNote: Google Test filter = P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from P4CollisionGuideDecision\n[ RUN      ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[       OK ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash (5 ms)\n[----------] 1 test from P4CollisionGuideDecision (5 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (5 ms total)\n[  PASSED  ] 1 test.\n",
+      "transcript_sha256": "c3ae2f8d2435f9aab5527c227738c25f4ff754efce1aad57118d80b7ad33cfee"
+    },
+    {
+      "command": [
+        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+        "--gtest_filter=P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash",
+        "--gtest_repeat=1"
+      ],
+      "exit_code": 0,
+      "replay_index": 35,
+      "serialized_snapshot": {
+        "original_interior_provider_c_pi_m": 1.0,
+        "provider_truth": "FLAT_NULL",
+        "resolution_m": 0.5,
+        "risk_interior_provider_c_pi_m": 1.0,
+        "schema_version": "p4_risk_grid_snapshot_replay_v1"
+      },
+      "serialized_snapshot_sha256": "f7e156df2488729358c055afbbca9f1ddf8be849427f77cdb5064b8f8f8f5eea",
+      "transcript": "Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc\nNote: Google Test filter = P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from P4CollisionGuideDecision\n[ RUN      ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[       OK ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash (5 ms)\n[----------] 1 test from P4CollisionGuideDecision (5 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (5 ms total)\n[  PASSED  ] 1 test.\n",
+      "transcript_sha256": "c3ae2f8d2435f9aab5527c227738c25f4ff754efce1aad57118d80b7ad33cfee"
+    },
+    {
+      "command": [
+        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+        "--gtest_filter=P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash",
+        "--gtest_repeat=1"
+      ],
+      "exit_code": 0,
+      "replay_index": 36,
+      "serialized_snapshot": {
+        "original_interior_provider_c_pi_m": 1.0,
+        "provider_truth": "FLAT_NULL",
+        "resolution_m": 0.5,
+        "risk_interior_provider_c_pi_m": 1.0,
+        "schema_version": "p4_risk_grid_snapshot_replay_v1"
+      },
+      "serialized_snapshot_sha256": "f7e156df2488729358c055afbbca9f1ddf8be849427f77cdb5064b8f8f8f5eea",
+      "transcript": "Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc\nNote: Google Test filter = P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from P4CollisionGuideDecision\n[ RUN      ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[       OK ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash (5 ms)\n[----------] 1 test from P4CollisionGuideDecision (5 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (5 ms total)\n[  PASSED  ] 1 test.\n",
+      "transcript_sha256": "c3ae2f8d2435f9aab5527c227738c25f4ff754efce1aad57118d80b7ad33cfee"
+    },
+    {
+      "command": [
+        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+        "--gtest_filter=P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash",
+        "--gtest_repeat=1"
+      ],
+      "exit_code": 0,
+      "replay_index": 37,
+      "serialized_snapshot": {
+        "original_interior_provider_c_pi_m": 1.0,
+        "provider_truth": "FLAT_NULL",
+        "resolution_m": 0.5,
+        "risk_interior_provider_c_pi_m": 1.0,
+        "schema_version": "p4_risk_grid_snapshot_replay_v1"
+      },
+      "serialized_snapshot_sha256": "f7e156df2488729358c055afbbca9f1ddf8be849427f77cdb5064b8f8f8f5eea",
+      "transcript": "Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc\nNote: Google Test filter = P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from P4CollisionGuideDecision\n[ RUN      ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[       OK ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash (5 ms)\n[----------] 1 test from P4CollisionGuideDecision (5 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (5 ms total)\n[  PASSED  ] 1 test.\n",
+      "transcript_sha256": "c3ae2f8d2435f9aab5527c227738c25f4ff754efce1aad57118d80b7ad33cfee"
+    },
+    {
+      "command": [
+        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+        "--gtest_filter=P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash",
+        "--gtest_repeat=1"
+      ],
+      "exit_code": 0,
+      "replay_index": 38,
+      "serialized_snapshot": {
+        "original_interior_provider_c_pi_m": 1.0,
+        "provider_truth": "FLAT_NULL",
+        "resolution_m": 0.5,
+        "risk_interior_provider_c_pi_m": 1.0,
+        "schema_version": "p4_risk_grid_snapshot_replay_v1"
+      },
+      "serialized_snapshot_sha256": "f7e156df2488729358c055afbbca9f1ddf8be849427f77cdb5064b8f8f8f5eea",
+      "transcript": "Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc\nNote: Google Test filter = P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from P4CollisionGuideDecision\n[ RUN      ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[       OK ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash (5 ms)\n[----------] 1 test from P4CollisionGuideDecision (5 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (5 ms total)\n[  PASSED  ] 1 test.\n",
+      "transcript_sha256": "c3ae2f8d2435f9aab5527c227738c25f4ff754efce1aad57118d80b7ad33cfee"
+    },
+    {
+      "command": [
+        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+        "--gtest_filter=P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash",
+        "--gtest_repeat=1"
+      ],
+      "exit_code": 0,
+      "replay_index": 39,
+      "serialized_snapshot": {
+        "original_interior_provider_c_pi_m": 1.0,
+        "provider_truth": "FLAT_NULL",
+        "resolution_m": 0.5,
+        "risk_interior_provider_c_pi_m": 1.0,
+        "schema_version": "p4_risk_grid_snapshot_replay_v1"
+      },
+      "serialized_snapshot_sha256": "f7e156df2488729358c055afbbca9f1ddf8be849427f77cdb5064b8f8f8f5eea",
+      "transcript": "Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc\nNote: Google Test filter = P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from P4CollisionGuideDecision\n[ RUN      ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[       OK ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash (5 ms)\n[----------] 1 test from P4CollisionGuideDecision (5 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (5 ms total)\n[  PASSED  ] 1 test.\n",
+      "transcript_sha256": "c3ae2f8d2435f9aab5527c227738c25f4ff754efce1aad57118d80b7ad33cfee"
+    },
+    {
+      "command": [
+        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+        "--gtest_filter=P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash",
+        "--gtest_repeat=1"
+      ],
+      "exit_code": 0,
+      "replay_index": 40,
+      "serialized_snapshot": {
+        "original_interior_provider_c_pi_m": 1.0,
+        "provider_truth": "FLAT_NULL",
+        "resolution_m": 0.5,
+        "risk_interior_provider_c_pi_m": 1.0,
+        "schema_version": "p4_risk_grid_snapshot_replay_v1"
+      },
+      "serialized_snapshot_sha256": "f7e156df2488729358c055afbbca9f1ddf8be849427f77cdb5064b8f8f8f5eea",
+      "transcript": "Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc\nNote: Google Test filter = P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from P4CollisionGuideDecision\n[ RUN      ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[       OK ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash (5 ms)\n[----------] 1 test from P4CollisionGuideDecision (5 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (5 ms total)\n[  PASSED  ] 1 test.\n",
+      "transcript_sha256": "c3ae2f8d2435f9aab5527c227738c25f4ff754efce1aad57118d80b7ad33cfee"
+    },
+    {
+      "command": [
+        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+        "--gtest_filter=P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash",
+        "--gtest_repeat=1"
+      ],
+      "exit_code": 0,
+      "replay_index": 41,
+      "serialized_snapshot": {
+        "original_interior_provider_c_pi_m": 1.0,
+        "provider_truth": "FLAT_NULL",
+        "resolution_m": 0.5,
+        "risk_interior_provider_c_pi_m": 1.0,
+        "schema_version": "p4_risk_grid_snapshot_replay_v1"
+      },
+      "serialized_snapshot_sha256": "f7e156df2488729358c055afbbca9f1ddf8be849427f77cdb5064b8f8f8f5eea",
+      "transcript": "Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc\nNote: Google Test filter = P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from P4CollisionGuideDecision\n[ RUN      ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[       OK ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash (5 ms)\n[----------] 1 test from P4CollisionGuideDecision (5 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (5 ms total)\n[  PASSED  ] 1 test.\n",
+      "transcript_sha256": "c3ae2f8d2435f9aab5527c227738c25f4ff754efce1aad57118d80b7ad33cfee"
+    },
+    {
+      "command": [
+        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+        "--gtest_filter=P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash",
+        "--gtest_repeat=1"
+      ],
+      "exit_code": 0,
+      "replay_index": 42,
+      "serialized_snapshot": {
+        "original_interior_provider_c_pi_m": 1.0,
+        "provider_truth": "FLAT_NULL",
+        "resolution_m": 0.5,
+        "risk_interior_provider_c_pi_m": 1.0,
+        "schema_version": "p4_risk_grid_snapshot_replay_v1"
+      },
+      "serialized_snapshot_sha256": "f7e156df2488729358c055afbbca9f1ddf8be849427f77cdb5064b8f8f8f5eea",
+      "transcript": "Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc\nNote: Google Test filter = P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from P4CollisionGuideDecision\n[ RUN      ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[       OK ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash (5 ms)\n[----------] 1 test from P4CollisionGuideDecision (5 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (5 ms total)\n[  PASSED  ] 1 test.\n",
+      "transcript_sha256": "c3ae2f8d2435f9aab5527c227738c25f4ff754efce1aad57118d80b7ad33cfee"
+    },
+    {
+      "command": [
+        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+        "--gtest_filter=P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash",
+        "--gtest_repeat=1"
+      ],
+      "exit_code": 0,
+      "replay_index": 43,
+      "serialized_snapshot": {
+        "original_interior_provider_c_pi_m": 1.0,
+        "provider_truth": "FLAT_NULL",
+        "resolution_m": 0.5,
+        "risk_interior_provider_c_pi_m": 1.0,
+        "schema_version": "p4_risk_grid_snapshot_replay_v1"
+      },
+      "serialized_snapshot_sha256": "f7e156df2488729358c055afbbca9f1ddf8be849427f77cdb5064b8f8f8f5eea",
+      "transcript": "Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc\nNote: Google Test filter = P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from P4CollisionGuideDecision\n[ RUN      ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[       OK ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash (5 ms)\n[----------] 1 test from P4CollisionGuideDecision (5 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (5 ms total)\n[  PASSED  ] 1 test.\n",
+      "transcript_sha256": "c3ae2f8d2435f9aab5527c227738c25f4ff754efce1aad57118d80b7ad33cfee"
+    },
+    {
+      "command": [
+        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+        "--gtest_filter=P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash",
+        "--gtest_repeat=1"
+      ],
+      "exit_code": 0,
+      "replay_index": 44,
+      "serialized_snapshot": {
+        "original_interior_provider_c_pi_m": 1.0,
+        "provider_truth": "FLAT_NULL",
+        "resolution_m": 0.5,
+        "risk_interior_provider_c_pi_m": 1.0,
+        "schema_version": "p4_risk_grid_snapshot_replay_v1"
+      },
+      "serialized_snapshot_sha256": "f7e156df2488729358c055afbbca9f1ddf8be849427f77cdb5064b8f8f8f5eea",
+      "transcript": "Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc\nNote: Google Test filter = P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from P4CollisionGuideDecision\n[ RUN      ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[       OK ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash (5 ms)\n[----------] 1 test from P4CollisionGuideDecision (5 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (5 ms total)\n[  PASSED  ] 1 test.\n",
+      "transcript_sha256": "c3ae2f8d2435f9aab5527c227738c25f4ff754efce1aad57118d80b7ad33cfee"
+    },
+    {
+      "command": [
+        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+        "--gtest_filter=P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash",
+        "--gtest_repeat=1"
+      ],
+      "exit_code": 0,
+      "replay_index": 45,
+      "serialized_snapshot": {
+        "original_interior_provider_c_pi_m": 1.0,
+        "provider_truth": "FLAT_NULL",
+        "resolution_m": 0.5,
+        "risk_interior_provider_c_pi_m": 1.0,
+        "schema_version": "p4_risk_grid_snapshot_replay_v1"
+      },
+      "serialized_snapshot_sha256": "f7e156df2488729358c055afbbca9f1ddf8be849427f77cdb5064b8f8f8f5eea",
+      "transcript": "Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc\nNote: Google Test filter = P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from P4CollisionGuideDecision\n[ RUN      ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[       OK ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash (5 ms)\n[----------] 1 test from P4CollisionGuideDecision (5 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (5 ms total)\n[  PASSED  ] 1 test.\n",
+      "transcript_sha256": "c3ae2f8d2435f9aab5527c227738c25f4ff754efce1aad57118d80b7ad33cfee"
+    },
+    {
+      "command": [
+        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+        "--gtest_filter=P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash",
+        "--gtest_repeat=1"
+      ],
+      "exit_code": 0,
+      "replay_index": 46,
+      "serialized_snapshot": {
+        "original_interior_provider_c_pi_m": 1.0,
+        "provider_truth": "FLAT_NULL",
+        "resolution_m": 0.5,
+        "risk_interior_provider_c_pi_m": 1.0,
+        "schema_version": "p4_risk_grid_snapshot_replay_v1"
+      },
+      "serialized_snapshot_sha256": "f7e156df2488729358c055afbbca9f1ddf8be849427f77cdb5064b8f8f8f5eea",
+      "transcript": "Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc\nNote: Google Test filter = P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from P4CollisionGuideDecision\n[ RUN      ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[       OK ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash (5 ms)\n[----------] 1 test from P4CollisionGuideDecision (5 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (5 ms total)\n[  PASSED  ] 1 test.\n",
+      "transcript_sha256": "c3ae2f8d2435f9aab5527c227738c25f4ff754efce1aad57118d80b7ad33cfee"
+    },
+    {
+      "command": [
+        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+        "--gtest_filter=P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash",
+        "--gtest_repeat=1"
+      ],
+      "exit_code": 0,
+      "replay_index": 47,
+      "serialized_snapshot": {
+        "original_interior_provider_c_pi_m": 1.0,
+        "provider_truth": "FLAT_NULL",
+        "resolution_m": 0.5,
+        "risk_interior_provider_c_pi_m": 1.0,
+        "schema_version": "p4_risk_grid_snapshot_replay_v1"
+      },
+      "serialized_snapshot_sha256": "f7e156df2488729358c055afbbca9f1ddf8be849427f77cdb5064b8f8f8f5eea",
+      "transcript": "Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc\nNote: Google Test filter = P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from P4CollisionGuideDecision\n[ RUN      ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[       OK ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash (5 ms)\n[----------] 1 test from P4CollisionGuideDecision (5 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (5 ms total)\n[  PASSED  ] 1 test.\n",
+      "transcript_sha256": "c3ae2f8d2435f9aab5527c227738c25f4ff754efce1aad57118d80b7ad33cfee"
+    },
+    {
+      "command": [
+        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+        "--gtest_filter=P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash",
+        "--gtest_repeat=1"
+      ],
+      "exit_code": 0,
+      "replay_index": 48,
+      "serialized_snapshot": {
+        "original_interior_provider_c_pi_m": 1.0,
+        "provider_truth": "FLAT_NULL",
+        "resolution_m": 0.5,
+        "risk_interior_provider_c_pi_m": 1.0,
+        "schema_version": "p4_risk_grid_snapshot_replay_v1"
+      },
+      "serialized_snapshot_sha256": "f7e156df2488729358c055afbbca9f1ddf8be849427f77cdb5064b8f8f8f5eea",
+      "transcript": "Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc\nNote: Google Test filter = P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from P4CollisionGuideDecision\n[ RUN      ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[       OK ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash (5 ms)\n[----------] 1 test from P4CollisionGuideDecision (5 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (5 ms total)\n[  PASSED  ] 1 test.\n",
+      "transcript_sha256": "c3ae2f8d2435f9aab5527c227738c25f4ff754efce1aad57118d80b7ad33cfee"
+    },
+    {
+      "command": [
+        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+        "--gtest_filter=P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash",
+        "--gtest_repeat=1"
+      ],
+      "exit_code": 0,
+      "replay_index": 49,
+      "serialized_snapshot": {
+        "original_interior_provider_c_pi_m": 1.0,
+        "provider_truth": "FLAT_NULL",
+        "resolution_m": 0.5,
+        "risk_interior_provider_c_pi_m": 1.0,
+        "schema_version": "p4_risk_grid_snapshot_replay_v1"
+      },
+      "serialized_snapshot_sha256": "f7e156df2488729358c055afbbca9f1ddf8be849427f77cdb5064b8f8f8f5eea",
+      "transcript": "Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc\nNote: Google Test filter = P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from P4CollisionGuideDecision\n[ RUN      ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[       OK ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash (5 ms)\n[----------] 1 test from P4CollisionGuideDecision (5 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (5 ms total)\n[  PASSED  ] 1 test.\n",
+      "transcript_sha256": "c3ae2f8d2435f9aab5527c227738c25f4ff754efce1aad57118d80b7ad33cfee"
+    },
+    {
+      "command": [
+        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+        "--gtest_filter=P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash",
+        "--gtest_repeat=1"
+      ],
+      "exit_code": 0,
+      "replay_index": 50,
+      "serialized_snapshot": {
+        "original_interior_provider_c_pi_m": 1.0,
+        "provider_truth": "FLAT_NULL",
+        "resolution_m": 0.5,
+        "risk_interior_provider_c_pi_m": 1.0,
+        "schema_version": "p4_risk_grid_snapshot_replay_v1"
+      },
+      "serialized_snapshot_sha256": "f7e156df2488729358c055afbbca9f1ddf8be849427f77cdb5064b8f8f8f5eea",
+      "transcript": "Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc\nNote: Google Test filter = P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from P4CollisionGuideDecision\n[ RUN      ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[       OK ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash (5 ms)\n[----------] 1 test from P4CollisionGuideDecision (5 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (5 ms total)\n[  PASSED  ] 1 test.\n",
+      "transcript_sha256": "c3ae2f8d2435f9aab5527c227738c25f4ff754efce1aad57118d80b7ad33cfee"
+    },
+    {
+      "command": [
+        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+        "--gtest_filter=P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash",
+        "--gtest_repeat=1"
+      ],
+      "exit_code": 0,
+      "replay_index": 51,
+      "serialized_snapshot": {
+        "original_interior_provider_c_pi_m": 1.0,
+        "provider_truth": "FLAT_NULL",
+        "resolution_m": 0.5,
+        "risk_interior_provider_c_pi_m": 1.0,
+        "schema_version": "p4_risk_grid_snapshot_replay_v1"
+      },
+      "serialized_snapshot_sha256": "f7e156df2488729358c055afbbca9f1ddf8be849427f77cdb5064b8f8f8f5eea",
+      "transcript": "Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc\nNote: Google Test filter = P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from P4CollisionGuideDecision\n[ RUN      ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[       OK ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash (5 ms)\n[----------] 1 test from P4CollisionGuideDecision (5 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (5 ms total)\n[  PASSED  ] 1 test.\n",
+      "transcript_sha256": "c3ae2f8d2435f9aab5527c227738c25f4ff754efce1aad57118d80b7ad33cfee"
+    },
+    {
+      "command": [
+        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+        "--gtest_filter=P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash",
+        "--gtest_repeat=1"
+      ],
+      "exit_code": 0,
+      "replay_index": 52,
+      "serialized_snapshot": {
+        "original_interior_provider_c_pi_m": 1.0,
+        "provider_truth": "FLAT_NULL",
+        "resolution_m": 0.5,
+        "risk_interior_provider_c_pi_m": 1.0,
+        "schema_version": "p4_risk_grid_snapshot_replay_v1"
+      },
+      "serialized_snapshot_sha256": "f7e156df2488729358c055afbbca9f1ddf8be849427f77cdb5064b8f8f8f5eea",
+      "transcript": "Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc\nNote: Google Test filter = P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from P4CollisionGuideDecision\n[ RUN      ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[       OK ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash (5 ms)\n[----------] 1 test from P4CollisionGuideDecision (5 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (5 ms total)\n[  PASSED  ] 1 test.\n",
+      "transcript_sha256": "c3ae2f8d2435f9aab5527c227738c25f4ff754efce1aad57118d80b7ad33cfee"
+    },
+    {
+      "command": [
+        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+        "--gtest_filter=P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash",
+        "--gtest_repeat=1"
+      ],
+      "exit_code": 0,
+      "replay_index": 53,
+      "serialized_snapshot": {
+        "original_interior_provider_c_pi_m": 1.0,
+        "provider_truth": "FLAT_NULL",
+        "resolution_m": 0.5,
+        "risk_interior_provider_c_pi_m": 1.0,
+        "schema_version": "p4_risk_grid_snapshot_replay_v1"
+      },
+      "serialized_snapshot_sha256": "f7e156df2488729358c055afbbca9f1ddf8be849427f77cdb5064b8f8f8f5eea",
+      "transcript": "Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc\nNote: Google Test filter = P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from P4CollisionGuideDecision\n[ RUN      ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[       OK ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash (5 ms)\n[----------] 1 test from P4CollisionGuideDecision (5 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (5 ms total)\n[  PASSED  ] 1 test.\n",
+      "transcript_sha256": "c3ae2f8d2435f9aab5527c227738c25f4ff754efce1aad57118d80b7ad33cfee"
+    },
+    {
+      "command": [
+        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+        "--gtest_filter=P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash",
+        "--gtest_repeat=1"
+      ],
+      "exit_code": 0,
+      "replay_index": 54,
+      "serialized_snapshot": {
+        "original_interior_provider_c_pi_m": 1.0,
+        "provider_truth": "FLAT_NULL",
+        "resolution_m": 0.5,
+        "risk_interior_provider_c_pi_m": 1.0,
+        "schema_version": "p4_risk_grid_snapshot_replay_v1"
+      },
+      "serialized_snapshot_sha256": "f7e156df2488729358c055afbbca9f1ddf8be849427f77cdb5064b8f8f8f5eea",
+      "transcript": "Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc\nNote: Google Test filter = P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from P4CollisionGuideDecision\n[ RUN      ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[       OK ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash (5 ms)\n[----------] 1 test from P4CollisionGuideDecision (5 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (5 ms total)\n[  PASSED  ] 1 test.\n",
+      "transcript_sha256": "c3ae2f8d2435f9aab5527c227738c25f4ff754efce1aad57118d80b7ad33cfee"
+    },
+    {
+      "command": [
+        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+        "--gtest_filter=P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash",
+        "--gtest_repeat=1"
+      ],
+      "exit_code": 0,
+      "replay_index": 55,
+      "serialized_snapshot": {
+        "original_interior_provider_c_pi_m": 1.0,
+        "provider_truth": "FLAT_NULL",
+        "resolution_m": 0.5,
+        "risk_interior_provider_c_pi_m": 1.0,
+        "schema_version": "p4_risk_grid_snapshot_replay_v1"
+      },
+      "serialized_snapshot_sha256": "f7e156df2488729358c055afbbca9f1ddf8be849427f77cdb5064b8f8f8f5eea",
+      "transcript": "Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc\nNote: Google Test filter = P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from P4CollisionGuideDecision\n[ RUN      ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[       OK ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash (5 ms)\n[----------] 1 test from P4CollisionGuideDecision (5 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (5 ms total)\n[  PASSED  ] 1 test.\n",
+      "transcript_sha256": "c3ae2f8d2435f9aab5527c227738c25f4ff754efce1aad57118d80b7ad33cfee"
+    },
+    {
+      "command": [
+        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+        "--gtest_filter=P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash",
+        "--gtest_repeat=1"
+      ],
+      "exit_code": 0,
+      "replay_index": 56,
+      "serialized_snapshot": {
+        "original_interior_provider_c_pi_m": 1.0,
+        "provider_truth": "FLAT_NULL",
+        "resolution_m": 0.5,
+        "risk_interior_provider_c_pi_m": 1.0,
+        "schema_version": "p4_risk_grid_snapshot_replay_v1"
+      },
+      "serialized_snapshot_sha256": "f7e156df2488729358c055afbbca9f1ddf8be849427f77cdb5064b8f8f8f5eea",
+      "transcript": "Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc\nNote: Google Test filter = P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from P4CollisionGuideDecision\n[ RUN      ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[       OK ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash (5 ms)\n[----------] 1 test from P4CollisionGuideDecision (5 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (5 ms total)\n[  PASSED  ] 1 test.\n",
+      "transcript_sha256": "c3ae2f8d2435f9aab5527c227738c25f4ff754efce1aad57118d80b7ad33cfee"
+    },
+    {
+      "command": [
+        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+        "--gtest_filter=P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash",
+        "--gtest_repeat=1"
+      ],
+      "exit_code": 0,
+      "replay_index": 57,
+      "serialized_snapshot": {
+        "original_interior_provider_c_pi_m": 1.0,
+        "provider_truth": "FLAT_NULL",
+        "resolution_m": 0.5,
+        "risk_interior_provider_c_pi_m": 1.0,
+        "schema_version": "p4_risk_grid_snapshot_replay_v1"
+      },
+      "serialized_snapshot_sha256": "f7e156df2488729358c055afbbca9f1ddf8be849427f77cdb5064b8f8f8f5eea",
+      "transcript": "Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc\nNote: Google Test filter = P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from P4CollisionGuideDecision\n[ RUN      ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[       OK ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash (5 ms)\n[----------] 1 test from P4CollisionGuideDecision (5 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (5 ms total)\n[  PASSED  ] 1 test.\n",
+      "transcript_sha256": "c3ae2f8d2435f9aab5527c227738c25f4ff754efce1aad57118d80b7ad33cfee"
+    },
+    {
+      "command": [
+        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+        "--gtest_filter=P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash",
+        "--gtest_repeat=1"
+      ],
+      "exit_code": 0,
+      "replay_index": 58,
+      "serialized_snapshot": {
+        "original_interior_provider_c_pi_m": 1.0,
+        "provider_truth": "FLAT_NULL",
+        "resolution_m": 0.5,
+        "risk_interior_provider_c_pi_m": 1.0,
+        "schema_version": "p4_risk_grid_snapshot_replay_v1"
+      },
+      "serialized_snapshot_sha256": "f7e156df2488729358c055afbbca9f1ddf8be849427f77cdb5064b8f8f8f5eea",
+      "transcript": "Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc\nNote: Google Test filter = P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from P4CollisionGuideDecision\n[ RUN      ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[       OK ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash (5 ms)\n[----------] 1 test from P4CollisionGuideDecision (5 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (5 ms total)\n[  PASSED  ] 1 test.\n",
+      "transcript_sha256": "c3ae2f8d2435f9aab5527c227738c25f4ff754efce1aad57118d80b7ad33cfee"
+    },
+    {
+      "command": [
+        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+        "--gtest_filter=P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash",
+        "--gtest_repeat=1"
+      ],
+      "exit_code": 0,
+      "replay_index": 59,
+      "serialized_snapshot": {
+        "original_interior_provider_c_pi_m": 1.0,
+        "provider_truth": "FLAT_NULL",
+        "resolution_m": 0.5,
+        "risk_interior_provider_c_pi_m": 1.0,
+        "schema_version": "p4_risk_grid_snapshot_replay_v1"
+      },
+      "serialized_snapshot_sha256": "f7e156df2488729358c055afbbca9f1ddf8be849427f77cdb5064b8f8f8f5eea",
+      "transcript": "Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc\nNote: Google Test filter = P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from P4CollisionGuideDecision\n[ RUN      ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[       OK ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash (5 ms)\n[----------] 1 test from P4CollisionGuideDecision (5 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (5 ms total)\n[  PASSED  ] 1 test.\n",
+      "transcript_sha256": "c3ae2f8d2435f9aab5527c227738c25f4ff754efce1aad57118d80b7ad33cfee"
+    },
+    {
+      "command": [
+        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+        "--gtest_filter=P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash",
+        "--gtest_repeat=1"
+      ],
+      "exit_code": 0,
+      "replay_index": 60,
+      "serialized_snapshot": {
+        "original_interior_provider_c_pi_m": 1.0,
+        "provider_truth": "FLAT_NULL",
+        "resolution_m": 0.5,
+        "risk_interior_provider_c_pi_m": 1.0,
+        "schema_version": "p4_risk_grid_snapshot_replay_v1"
+      },
+      "serialized_snapshot_sha256": "f7e156df2488729358c055afbbca9f1ddf8be849427f77cdb5064b8f8f8f5eea",
+      "transcript": "Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc\nNote: Google Test filter = P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[==========] Running 1 test from 1 test suite.\n[----------] Global test environment set-up.\n[----------] 1 test from P4CollisionGuideDecision\n[ RUN      ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash\n[       OK ] P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash (5 ms)\n[----------] 1 test from P4CollisionGuideDecision (5 ms total)\n\n[----------] Global test environment tear-down\n[==========] 1 test from 1 test suite ran. (5 ms total)\n[  PASSED  ] 1 test.\n",
+      "transcript_sha256": "c3ae2f8d2435f9aab5527c227738c25f4ff754efce1aad57118d80b7ad33cfee"
+    }
+  ],
+  "outcome_blind": true,
+  "schema_version": "icra076_measured_repeatability_replay_v1",
+  "task": "ICRA-076"
+}

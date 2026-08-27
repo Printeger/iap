@@ -67,18 +67,29 @@ def _reject_forbidden_path_tokens(path: Path) -> None:
         _fail("HELD_OUT_PATH_FORBIDDEN", str(path))
 
 
+def _admit_input_path(path: Path) -> Path:
+    """Reject forbidden aliases and every symlink component before file read."""
+    _reject_forbidden_path_tokens(path)
+    absolute = path.absolute()
+    resolved = absolute.resolve(strict=False)
+    _reject_forbidden_path_tokens(resolved)
+    current = Path(absolute.anchor)
+    for part in absolute.parts[1:]:
+        current /= part
+        if current.is_symlink():
+            _fail("INPUT_SYMLINK_FORBIDDEN", str(current))
+    return absolute
+
+
 def _repository_input_path(path: Path, repository: Path) -> Path:
     """Admit a repository-local regular input before opening it."""
-    _reject_forbidden_path_tokens(path)
     repository = repository.resolve()
     candidate = path if path.is_absolute() else repository / path
-    absolute = candidate.absolute()
+    absolute = _admit_input_path(candidate)
     try:
         absolute.relative_to(repository)
     except ValueError:
         _fail("EXTERNAL_INPUT_PATH_FORBIDDEN", str(path))
-    if absolute.is_symlink():
-        _fail("INPUT_SYMLINK_FORBIDDEN", str(path))
     try:
         absolute.resolve().relative_to(repository)
     except ValueError:
@@ -88,10 +99,7 @@ def _repository_input_path(path: Path, repository: Path) -> Path:
 
 def load_verification(path: Path) -> dict[str, Any]:
     """Load the external command manifest only after held-out-token rejection."""
-    _reject_forbidden_path_tokens(path)
-    if path.is_symlink():
-        _fail("INPUT_SYMLINK_FORBIDDEN", str(path))
-    return _json(path)
+    return _json(_admit_input_path(path))
 
 
 def _finite_number(value: Any, code: str) -> float:
@@ -110,12 +118,7 @@ def _repository_path(repository: Path, relative: str) -> Path:
     candidate = Path(relative)
     if candidate.is_absolute() or ".." in candidate.parts:
         _fail("EXTERNAL_INPUT_PATH_FORBIDDEN", relative)
-    resolved = (repository / candidate).resolve()
-    try:
-        resolved.relative_to(repository.resolve())
-    except ValueError:
-        _fail("EXTERNAL_INPUT_PATH_FORBIDDEN", relative)
-    return resolved
+    return _repository_input_path(candidate, repository)
 
 
 def validate_output_path(output: Path, repository: Path,
@@ -214,10 +217,9 @@ def expected_verification_argv() -> dict[str, list[str]]:
             "--install-base", "/home/dev/ws_iap/install",
             "--symlink-install", "--cmake-args", "-DBUILD_TESTING=ON"],
         "REPEATABILITY_REPLAY": [
-            "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
-            ("--gtest_filter=P4CollisionGuideDecision."
-             "Icra074FlatNullEqualCostsAndLengthUseStableHash"),
-            "--gtest_repeat=60"],
+            "python3", "scripts/dev_planner/icra076_repeatability_replay.py",
+            "--output",
+            "results/icra27/icra076/repeatability-replay-001.json"],
     }
 
 
@@ -295,10 +297,10 @@ def exact_binomial_passing_rule(n: int, probability: float,
 
 def _repeatability_bound(replay: dict[str, Any], repository: Path) -> dict[str, Any]:
     if set(replay) != {"schema_version", "outcome_blind", "held_out", "unit",
-                       "replay_count", "sample_count", "serialized_snapshot_replays",
+                       "replay_count", "sample_count", "measured_replay_evidence",
                        "admissibility", "calculation"}:
         _fail("REPEATABILITY_FIELDS_INVALID")
-    if replay.get("schema_version") != "icra076_byte_identical_snapshot_replay_v1":
+    if replay.get("schema_version") != "icra076_measured_snapshot_replay_binding_v1":
         _fail("REPEATABILITY_SCHEMA_MISMATCH")
     if replay.get("outcome_blind") is not True or replay.get("held_out") is not False:
         _fail("REPEATABILITY_ADMISSION_INVALID")
@@ -307,7 +309,20 @@ def _repeatability_bound(replay: dict[str, Any], repository: Path) -> dict[str, 
     count = replay.get("replay_count")
     if count != 60 or replay.get("sample_count") != 200:
         _fail("REPEATABILITY_CARDINALITY_INVALID")
-    snapshots = replay.get("serialized_snapshot_replays")
+    evidence_binding = replay.get("measured_replay_evidence", {})
+    if set(evidence_binding) != {"path", "sha256"}:
+        _fail("REPEATABILITY_EVIDENCE_IDENTITY_INVALID")
+    _verify_bound_file(repository, evidence_binding)
+    evidence_path = _repository_path(repository, evidence_binding["path"])
+    evidence = _json(evidence_path)
+    if (evidence.get("schema_version") !=
+            "icra076_measured_repeatability_replay_v1" or
+            evidence.get("task") != "ICRA-076" or
+            evidence.get("outcome_blind") is not True or
+            evidence.get("held_out_accessed") is not False or
+            evidence.get("observation_count") != count):
+        _fail("REPEATABILITY_EVIDENCE_CONTRACT_INVALID")
+    snapshots = evidence.get("observations")
     if not isinstance(snapshots, list) or len(snapshots) != count:
         _fail("REPEATABILITY_OBSERVATIONS_INVALID")
     expected_snapshot_fields = {
@@ -315,10 +330,33 @@ def _repeatability_bound(replay: dict[str, Any], repository: Path) -> dict[str, 
         "original_interior_provider_c_pi_m", "risk_interior_provider_c_pi_m"}
     observed_d_peak: list[float] = []
     snapshot_bytes: list[bytes] = []
-    for index, snapshot in enumerate(snapshots, start=1):
-        if not isinstance(snapshot, dict) or set(snapshot) != expected_snapshot_fields:
+    replay_base_command = [
+        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+        ("--gtest_filter=P4CollisionGuideDecision."
+         "Icra074FlatNullEqualCostsAndLengthUseStableHash"),
+        "--gtest_repeat=1"]
+    for index, observation in enumerate(snapshots, start=1):
+        if not isinstance(observation, dict) or set(observation) != {
+                "replay_index", "command", "exit_code", "transcript",
+                "transcript_sha256", "serialized_snapshot",
+                "serialized_snapshot_sha256"}:
             _fail("REPEATABILITY_OBSERVATIONS_INVALID")
-        if (snapshot.get("replay_index") != index or
+        transcript = observation.get("transcript")
+        if (observation.get("replay_index") != index or
+                observation.get("command") != replay_base_command or
+                observation.get("exit_code") != 0 or
+                not isinstance(transcript, str) or
+                "[  PASSED  ] 1 test." not in transcript or
+                observation.get("transcript_sha256") != hashlib.sha256(
+                    transcript.encode("utf-8")).hexdigest()):
+            _fail("REPEATABILITY_MEASUREMENT_INVALID")
+        snapshot = observation.get("serialized_snapshot")
+        if (not isinstance(snapshot, dict) or
+                set(snapshot) != expected_snapshot_fields - {"replay_index"} or
+                observation.get("serialized_snapshot_sha256") !=
+                canonical_sha256(snapshot)):
+            _fail("REPEATABILITY_OBSERVATIONS_INVALID")
+        if (
                 snapshot.get("schema_version") !=
                 "p4_risk_grid_snapshot_replay_v1"):
             _fail("SERIALIZED_SNAPSHOT_SCHEMA_MISMATCH")
@@ -333,9 +371,7 @@ def _repeatability_bound(replay: dict[str, Any], repository: Path) -> dict[str, 
         if resolution <= 0.0 or snapshot.get("provider_truth") != "FLAT_NULL":
             _fail("SERIALIZED_SNAPSHOT_CONTRACT_INVALID")
         observed_d_peak.append(original - risk)
-        replay_payload = dict(snapshot)
-        replay_payload.pop("replay_index")
-        snapshot_bytes.append(canonical_bytes(replay_payload))
+        snapshot_bytes.append(canonical_bytes(snapshot))
     if len(set(snapshot_bytes)) != 1:
         _fail("REPEATABILITY_SNAPSHOT_NOT_BYTE_IDENTICAL")
     admissibility = replay.get("admissibility", {})
@@ -347,10 +383,8 @@ def _repeatability_bound(replay: dict[str, Any], repository: Path) -> dict[str, 
             "integration_test_sha256", "required_replay_command"}:
         _fail("REPEATABILITY_ADMISSIBILITY_INVALID")
     required_replay_command = [
-        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
-        ("--gtest_filter=P4CollisionGuideDecision."
-         "Icra074FlatNullEqualCostsAndLengthUseStableHash"),
-        "--gtest_repeat=60",
+        "python3", "scripts/dev_planner/icra076_repeatability_replay.py",
+        "--output", "results/icra27/icra076/repeatability-replay-001.json",
     ]
     if admissibility.get("required_replay_command") != required_replay_command:
         _fail("REPEATABILITY_COMMAND_DRIFT")
@@ -366,6 +400,13 @@ def _repeatability_bound(replay: dict[str, Any], repository: Path) -> dict[str, 
     )
     for record in records:
         _verify_bound_file(repository, record)
+    if (evidence.get("fixture") != {
+            "path": admissibility["fixture_source_path"],
+            "sha256": admissibility["fixture_source_sha256"]} or
+            evidence.get("decision_test") != {
+                "path": admissibility["decision_test_path"],
+                "sha256": admissibility["decision_test_sha256"]}):
+        _fail("REPEATABILITY_EVIDENCE_SOURCE_MISMATCH")
     reference = observed_d_peak[0]
     absolute_deltas = [abs(value - reference) for value in observed_d_peak]
     rank = math.ceil(0.95 * count)

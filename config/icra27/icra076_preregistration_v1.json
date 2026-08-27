@@ -36,7 +36,7 @@
   },
   "repeatability": {
     "input_path": "config/icra27/icra076_repeatability_replay_v1.json",
-    "input_canonical_sha256": "cad0b832028bf648f6ea8a560d30403173ffe4d90c78bb1a088c34386b8aaaa5",
+    "input_canonical_sha256": "824eb49377f23cf513166caa203923088fec02d4bd358e54207e4827dcb9767c",
     "u95_repeatability": 0.0,
     "unit": "m",
     "flat_null_runtime_evidence": "UNAVAILABLE_ICRA075_0_OF_40",

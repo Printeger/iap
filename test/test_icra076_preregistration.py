@@ -150,6 +150,28 @@ class Icra076PreregistrationTest(unittest.TestCase):
         with self.assertRaises(module.Icra076Error) as verification:
             module.load_verification(Path("/tmp/held-out-do-not-open.json"))
         self.assertEqual(verification.exception.code, "HELD_OUT_PATH_FORBIDDEN")
+        with tempfile.TemporaryDirectory(prefix="icra076-alias-", dir=REPOSITORY) as temporary:
+            root = Path(temporary)
+            held_out = root / "held_out"
+            held_out.mkdir()
+            (held_out / "input.json").write_text("{}")
+            alias = root / "alias"
+            alias.symlink_to(held_out, target_is_directory=True)
+            with self.assertRaises(module.Icra076Error) as parent_alias:
+                module.validate_preregistration(alias / "input.json", REGISTRY_PATH)
+            self.assertEqual(parent_alias.exception.code,
+                             "HELD_OUT_PATH_FORBIDDEN")
+        with tempfile.TemporaryDirectory(prefix="icra076-external-alias-") as temporary:
+            root = Path(temporary)
+            held_out = root / "held-out"
+            held_out.mkdir()
+            (held_out / "verification.json").write_text("{}")
+            alias = root / "alias"
+            alias.symlink_to(held_out, target_is_directory=True)
+            with self.assertRaises(module.Icra076Error) as external_alias:
+                module.load_verification(alias / "verification.json")
+            self.assertEqual(external_alias.exception.code,
+                             "HELD_OUT_PATH_FORBIDDEN")
 
     def test_output_must_be_repository_local_fresh_and_non_symlinked(self):
         module = load_module()
@@ -229,22 +251,33 @@ class Icra076PreregistrationTest(unittest.TestCase):
         module = load_module()
         replay = json.loads((REPOSITORY / "config/icra27/"
                              "icra076_repeatability_replay_v1.json").read_text())
-        observations = replay["serialized_snapshot_replays"]
+        evidence = json.loads((REPOSITORY /
+            replay["measured_replay_evidence"]["path"]).read_text())
+        observations = evidence["observations"]
         self.assertEqual(len(observations), 60)
         self.assertEqual([item["replay_index"] for item in observations],
                          list(range(1, 61)))
-        mutated = copy.deepcopy(replay)
-        mutated["serialized_snapshot_replays"][59][
-            "risk_interior_provider_c_pi_m"] += 0.5
+        mutated_evidence = copy.deepcopy(evidence)
+        snapshot = mutated_evidence["observations"][59]["serialized_snapshot"]
+        snapshot["risk_interior_provider_c_pi_m"] += 0.5
+        mutated_evidence["observations"][59]["serialized_snapshot_sha256"] = (
+            module.canonical_sha256(snapshot))
         with tempfile.TemporaryDirectory(prefix="icra076-replay-", dir=REPOSITORY) as temporary:
-            path = Path(temporary) / "replay.json"
-            path.write_text(json.dumps(mutated))
+            root = Path(temporary)
+            evidence_path = root / "evidence.json"
+            evidence_path.write_text(json.dumps(mutated_evidence))
+            mutated_replay = copy.deepcopy(replay)
+            mutated_replay["measured_replay_evidence"] = {
+                "path": str(evidence_path.relative_to(REPOSITORY)),
+                "sha256": module.file_sha256(evidence_path),
+            }
+            path = root / "replay.json"
+            path.write_text(json.dumps(mutated_replay))
             with self.assertRaises(module.Icra076Error) as caught:
                 module.validate_preregistration(
                     PROTOCOL_PATH, REGISTRY_PATH, replay_path=path)
-        self.assertIn(caught.exception.code, {
-            "REPEATABILITY_SNAPSHOT_NOT_BYTE_IDENTICAL",
-            "REPEATABILITY_CONTRACT_MISMATCH"})
+        self.assertEqual(caught.exception.code,
+                         "REPEATABILITY_SNAPSHOT_NOT_BYTE_IDENTICAL")
 
     def test_skipped_disabled_or_failed_verification_is_rejected(self):
         module = load_module()

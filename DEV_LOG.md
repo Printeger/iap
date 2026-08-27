@@ -45,6 +45,17 @@ divergence `0 0` before the fresh non-overwriting canonical candidate was create
 `results/icra27/icra076/preregistration-freeze-002.json` passes with 949 complete source/authority entries,
 957 shared runtime-install entries and 360 execution rows. The 527,858-byte record has SHA-256
 `c0b4953a05a161271b2f3f4ab1e88095b8dc092036b8e90803120217bbc87631` and keeps `icra077_authorized=false`.
+Second standards review nevertheless rejected this candidate because parent-directory symlink aliases remained
+possible and the 60 rows were still committed declarations rather than bound replay output. Freeze-002 remains
+immutable review history and is not canonical.
+
+The next repair resolves every input path before read, rejects forbidden tokens in both caller and resolved
+spellings, and rejects every symlink component. `icra076_repeatability_replay.py` actually invokes the production
+flat-null decision test 60 separate times, requiring one PASS each, and retains each exact command, exit,
+transcript/hash and fixture-derived serialized snapshot/hash. The non-overwriting 88,280-byte measured input
+`repeatability-replay-001.json` has SHA-256
+`ad28c5b93974227c3147a2863cf452f8e79fdbc314e7b885fee1e2d9e04a668c`; U95 is calculated only from its 60
+bound observations.
 
 ## 2026-08-27 — ICRA-075 bounded fail-closed repair and P5 compatibility diagnosis
 

@@ -222,9 +222,8 @@ python3 test/test_icra075_exploratory.py -v
 python3 test/test_icra076_preregistration.py -v
 python3 scripts/dev_planner/validate_icra076_preregistration.py
 
-/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide \
-  --gtest_filter=P4CollisionGuideDecision.Icra074FlatNullEqualCostsAndLengthUseStableHash \
-  --gtest_repeat=60
+python3 scripts/dev_planner/icra076_repeatability_replay.py \
+  --output results/icra27/icra076/repeatability-replay-NNN.json
 
 # implementation/config/tests push 且 HEAD...origin/dev/icra 为 0 0 后，使用全新 output identity：
 python3 scripts/dev_planner/freeze_icra076_preregistration.py \
@@ -239,10 +238,10 @@ python3 scripts/dev_planner/validate_icra076_preregistration.py \
 和 pushed source commit。后续任一相关 source/install drift 都会在 ICRA-077 前 fail closed；本节不授权
 ICRA-077。`results/icra27/icra076/preregistration-freeze-001.json`（`51464dff…60582`）是首轮 review
 拒绝的历史 attempt，不是 canonical freeze；它因 pre-access/inventory/coverage/replay/command-binding 缺陷
-保留且不得覆盖。Canonical candidate 是 `preregistration-freeze-002.json`，绑定 pushed repair
-`a8c6cc43910f30c28260d6261cdbb5122f7c6cff`、949 个 source/authority entries、957 个 runtime-install
-entries 与 360 rows；文件 SHA-256 为
-`c0b4953a05a161271b2f3f4ab1e88095b8dc092036b8e90803120217bbc87631`。
+保留且不得覆盖。第二轮 standards review 又拒绝 `preregistration-freeze-002.json`（`c0b4953a…87631`）：
+父 symlink alias admission 与 measured replay evidence binding 仍不完整，因此它也不是 canonical freeze。
+后续 canonical identity 必须绑定真实运行 60 次 production test 后保存的 transcript/hash/snapshot evidence，
+以及已推送的最终修复 bytes。
 
 ### 1.3 运行一个最小检查
 
