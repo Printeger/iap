@@ -3,6 +3,17 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(icra-075-bounded-fail-closed): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 /
+  IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — make invalid identity/evidence/writer failure publication-blocking for
+  every enabled P4 objective, including metrics-only, while preserving explicit disabled behavior. Re-admit the
+  pushed source after each row analyzer, after the power analyzer and at final batch success; successful and
+  failed analyzer source-change adversaries both fail closed with typed `SOURCE_CHANGED_*` evidence. Offline
+  `matrix-002` diagnosis binds topic/config/frame/stamp/units and exact AL/PL sources, and classifies
+  `FROZEN_CONTRACT_INCOMPATIBLE`: GNSS-selected `max_pl` HPL/VPL exceed frozen HAL/VAL for every retained epoch.
+  Focused Python passes 19/19, affected post-build CTest passes 4/4 and the canonical shared six-package build
+  passes 6/6. The diagnosis SHA-256 is `f19395a4890fae44b76673a6c7cbc97651ef0a1cce08aa99af2b4be015460be5`.
+  No GPU/ROS, matrix-003, tuning, power, ICRA-076 or claim work ran; ICRA-075 stays BLOCKED/NOT PASS.
+
 - route(icra-075-bounded-repair): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 /
   IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — record user decision 005 at pushed anchor `66cff244`: repair rather
   than bypass ICRA-075. Issue one same-Gate task to restore metrics-only lineage and post-analyzer source

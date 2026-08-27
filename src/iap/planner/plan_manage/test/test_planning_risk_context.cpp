@@ -574,7 +574,8 @@ void expectTerminalIdentityRejectedBeforePublication(
     const int32_t trajectory_id, const int32_t start_sec,
     const std::function<void(ego_planner::BsplineOptimizer*)>&
         lineage_mutation = {},
-    const bool non_finite_control_point = false) {
+    const bool non_finite_control_point = false,
+    const std::function<void(P4RiskAStarConfig&)>& config_mutation = {}) {
   const auto snapshot = makeP4SelectionSnapshot();
   auto map = std::make_shared<GridMap>();
   GridMapTestAccess::configureP4SelectionTrigger(map.get());
@@ -591,6 +592,11 @@ void expectTerminalIdentityRejectedBeforePublication(
   optimizer->releaseP4RiskSnapshot();
   if (lineage_mutation)
     lineage_mutation(optimizer.get());
+  if (config_mutation) {
+    auto config = optimizer->getP4RiskAStarConfig();
+    config_mutation(config);
+    optimizer->setP4RiskAStarConfigForTest(config);
+  }
 
   auto manager = std::make_unique<ego_planner::EGOPlannerManager>();
   manager->setP4VerticalSliceOptimizerForTest(std::move(optimizer), map);
@@ -662,6 +668,27 @@ TEST(P4VerticalSliceTerminalLineageTest,
 }
 
 TEST(P4VerticalSliceTerminalLineageTest,
+     MetricsOnlyInvalidIdentityBlocksNormalPublication) {
+  expectTerminalIdentityRejectedBeforePublication(
+      "terminal_metrics_only_identity", 73, 9, 10, {}, false,
+      [](P4RiskAStarConfig& config) {
+        config.objective = P4RiskObjective::PROVIDER_BOTTLENECK_V2;
+        config.metrics_only = true;
+      });
+}
+
+TEST(P4VerticalSliceTerminalLineageTest,
+     MetricsOnlyWriterFailureBlocksNormalPublication) {
+  expectTerminalIdentityRejectedBeforePublication(
+      "terminal_metrics_only_writer", 1, 9, 10, {}, false,
+      [](P4RiskAStarConfig& config) {
+        config.objective = P4RiskObjective::PROVIDER_BOTTLENECK_V2;
+        config.metrics_only = true;
+        config.debug_csv_path += "/missing/lineage";
+      });
+}
+
+TEST(P4VerticalSliceTerminalLineageTest,
      MalformedControlPointsBlockTheProductionTerminalWriter) {
   const std::vector<std::pair<std::string, Eigen::MatrixXd>> cases = {
       {"empty", Eigen::MatrixXd(3, 0)},
@@ -722,7 +749,7 @@ TEST(P4VerticalSliceTerminalLineageTest,
       ego_planner::UniformBspline(Eigen::MatrixXd(3, 0), 3, 0.5);
   manager.local_data_.traj_id_ = 9;
   manager.local_data_.start_time_ = rclcpp::Time(10, 0, RCL_ROS_TIME);
-  EXPECT_TRUE(manager.recordP4VerticalSliceLineage(
+  EXPECT_FALSE(manager.recordP4VerticalSliceLineage(
       "final_bspline_before_p5", 10.0));
   EXPECT_FALSE(std::filesystem::exists(
       std::filesystem::path(debug_path.string() + ".lineage.csv")));

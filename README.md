@@ -201,6 +201,12 @@ equal-arc samples；不会消费 P4 guide/route/objective evidence 作为 oracle
 记录（2,117 个唯一 `(traj_id,start_time)` candidate identity）全部因 `current_low_margin` 被拒绝，没有 committed publication/runtime identity。矩阵按 fail-closed
 规则停止，状态为 `BLOCKED_ICRA075_CONTROL_P5_CURRENT_LOW_MARGIN`；没有重试、调阈值或生成 power verdict。
 
+后续有界修复已恢复所有 enabled P4（含 metrics-only）的终端 lineage fail-closed，并在每个 analyzer、
+power analyzer 及最终 batch 后重新核验 source。对保留的 `matrix-002` 作 repository-local 离线诊断后，
+结论为 `FROZEN_CONTRACT_INCOMPATIBLE`：预期的 `max_pl` 链路选择 GNSS，实际 HPL/VPL 全部高于冻结的
+HAL/VAL `10/20 m`。因此按 Gate 在 GPU/ROS 和 `matrix-003` 前停止；ICRA-075 仍为 BLOCKED/NOT PASS，
+不得把该诊断称为矩阵或 P5 PASS。
+
 ### 1.3 运行一个最小检查
 
 ```bash

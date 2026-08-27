@@ -9,6 +9,15 @@
 > recheck. User decision 005 now authorizes a bounded same-Gate repair, not a bypass. ICRA-076, formal Layer 4 and
 > campaign remain unauthorized pending successful repair evidence and later Review.
 
+ICRA-075 bounded repair result (2026-08-27): all enabled P4 objectives, including metrics-only, now block normal
+publication on invalid terminal/attempt/guide identity or lineage CSV open/write/flush failure; explicit disabled
+P4 remains exempt. Row analyzers, the power analyzer and final batch success each have post-invocation source
+admission, with success/failure source-change adversaries covered. Offline `matrix-002` diagnosis binds exact
+authorities and reports `FROZEN_CONTRACT_INCOMPATIBLE`: `max_pl` correctly selects GNSS HPL
+`24.3673612..27.733391 m` and VPL `68.8205779..86.6898998 m`, above frozen HAL/VAL `10/20 m`, while future
+margin is positive. Focused 19/19, affected CTest 4/4 and shared build 6/6 pass. Because passing requires a
+forbidden contract change, no GPU/ROS or matrix-003 ran and ICRA-075 remains BLOCKED/NOT PASS.
+
 ICRA-075 Builder implementation adds exact V2 runtime map/GNSS assets, a 40-row development-only runner,
 committed-final/P5/publication capture, independent fixed-200 equal-arc analysis and deterministic non-freezing
 power inputs. Pre-live focused tests passed 11/11 and the required shared builds pass. Runtime scene/hash capture, treatment

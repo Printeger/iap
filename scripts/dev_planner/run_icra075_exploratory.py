@@ -114,18 +114,47 @@ def _wait_capture_ready(process: subprocess.Popen, path: Path) -> dict:
     return {"ready": False, "reason": "capture_readiness_timeout"}
 
 
-def _finalize_row(root: Path, manifest: dict, runner_code: int) -> int:
+SOURCE_CHANGED_EXIT_CODE = 10
+
+
+def _invoke_analyzer_with_source_admission(
+        command: list[str], invocation_path: Path, matrix_root: Path,
+        expected_source: dict, changed_stage: str) -> dict:
+    completed = subprocess.run(command, cwd=REPOSITORY, capture_output=True,
+                               text=True, check=False)
+    source_after = _capture_source_binding(matrix_root)
+    source_unchanged = _same_source(expected_source, source_after)
+    result = {
+        "argv": command, "cwd": str(REPOSITORY),
+        "exit_code": completed.returncode,
+        "analyzer_exit_code": completed.returncode,
+        "effective_exit_code": (completed.returncode if source_unchanged
+                                else SOURCE_CHANGED_EXIT_CODE),
+        "stdout": completed.stdout, "stderr": completed.stderr,
+        "source_binding_after": source_after,
+        "source_unchanged": source_unchanged,
+        "first_missing_stage": None if source_unchanged else changed_stage,
+    }
+    _write(invocation_path, result)
+    return result
+
+
+def _finalize_row(root: Path, manifest: dict, runner_code: int,
+                  matrix_root: Path, source: dict) -> int:
     _write(root / "run_manifest.json", manifest)
     command = [sys.executable,
                str(REPOSITORY / "scripts/dev_planner/analyze_icra075_exploratory.py"),
                "--run-root", str(root)]
-    completed = subprocess.run(command, cwd=REPOSITORY, capture_output=True,
-                               text=True, check=False)
-    _write(root / "analyzer_invocation.json", {
-        "argv": command, "cwd": str(REPOSITORY), "exit_code": completed.returncode,
-        "stdout": completed.stdout, "stderr": completed.stderr,
-    })
-    return runner_code if runner_code else completed.returncode
+    invocation = _invoke_analyzer_with_source_admission(
+        command, root / "analyzer_invocation.json", matrix_root, source,
+        "SOURCE_CHANGED_AFTER_ANALYZER")
+    manifest["source_binding_after_analyzer"] = invocation["source_binding_after"]
+    if not invocation["source_unchanged"]:
+        manifest["result"] = "FAIL"
+        manifest["first_missing_stage"] = invocation["first_missing_stage"]
+        _write(root / "run_manifest.json", manifest)
+        return invocation["effective_exit_code"]
+    return runner_code if runner_code else invocation["analyzer_exit_code"]
 
 
 def _run_row(matrix_root: Path, row: dict, duration_s: float,
@@ -163,7 +192,7 @@ def _run_row(matrix_root: Path, row: dict, duration_s: float,
     recheck = _capture_source_binding(matrix_root)
     if not _same_source(source, recheck):
         manifest["first_missing_stage"] = "SOURCE_CHANGED_BEFORE_ROW"
-        return _finalize_row(root, manifest, 3)
+        return _finalize_row(root, manifest, 3, matrix_root, source)
     capture = launch = None
     capture_log = launch_log = None
     monitor = None
@@ -190,7 +219,7 @@ def _run_row(matrix_root: Path, row: dict, duration_s: float,
             capture_log.close()
             manifest["owned_process_groups_cleared"] = BASE._owned_group_cleared(capture.pid)
             manifest["first_missing_stage"] = "CAPTURE_NOT_READY"
-            return _finalize_row(root, manifest, 5)
+            return _finalize_row(root, manifest, 5, matrix_root, source)
         gnss_config = (SHARED_INSTALL /
                        "gnss_sim/share/gnss_sim/config/icra075_inverse_corridor_provider_v2.json")
         launch_args = [
@@ -263,7 +292,8 @@ def _run_row(matrix_root: Path, row: dict, duration_s: float,
                 "SOURCE_CHANGED_DURING_ROW" if not source_ok else
                 "REQUIRED_PROCESS_OR_CLEANUP_FAILURE"),
         })
-        return _finalize_row(root, manifest, 0 if passed else 6)
+        return _finalize_row(root, manifest, 0 if passed else 6,
+                             matrix_root, source)
     except Exception as exc:
         for process in (launch, capture):
             if process is not None:
@@ -278,7 +308,7 @@ def _run_row(matrix_root: Path, row: dict, duration_s: float,
             "first_missing_stage": "RUNNER_EXCEPTION",
             "runner_exception": {"type": type(exc).__name__, "message": str(exc)},
         })
-        return _finalize_row(root, manifest, 8)
+        return _finalize_row(root, manifest, 8, matrix_root, source)
 
 
 def main() -> int:
@@ -340,22 +370,36 @@ def main() -> int:
     power_command = [
         sys.executable, str(REPOSITORY / "scripts/dev_planner/analyze_icra075_exploratory.py"),
         "--matrix-root", str(root)]
-    power = subprocess.run(power_command, cwd=REPOSITORY, capture_output=True,
-                           text=True, check=False)
-    _write(root / "power_analyzer_invocation.json", {
-        "argv": power_command, "exit_code": power.returncode,
-        "stdout": power.stdout, "stderr": power.stderr,
-    })
+    power = _invoke_analyzer_with_source_admission(
+        power_command, root / "power_analyzer_invocation.json", root, source,
+        "SOURCE_CHANGED_AFTER_POWER_ANALYZER")
+    source_after_power = power["source_binding_after"]
     final_source = _capture_source_binding(root)
-    complete = (power.returncode == 0 and len(batch["attempts"]) == 40 and
-                _same_source(source, final_source))
+    final_source_unchanged = _same_source(source, final_source)
+    complete = (power["analyzer_exit_code"] == 0 and
+                power["source_unchanged"] and len(batch["attempts"]) == 40 and
+                final_source_unchanged)
+    first_missing = None
+    if not power["source_unchanged"]:
+        first_missing = "SOURCE_CHANGED_AFTER_POWER_ANALYZER"
+    elif power["analyzer_exit_code"] != 0:
+        first_missing = "POWER_INPUTS"
+    elif not final_source_unchanged:
+        first_missing = "SOURCE_CHANGED_AT_FINAL_BATCH_CHECK"
+    elif len(batch["attempts"]) != 40:
+        first_missing = "MATRIX_INCOMPLETE"
     batch.update({
         "result": "PASS" if complete else "FAIL",
-        "first_missing_stage": None if complete else "POWER_INPUTS_OR_FINAL_SOURCE",
+        "first_missing_stage": first_missing,
+        "source_binding_after_power_analyzer": source_after_power,
         "source_binding_final": final_source,
     })
     _write(root / "batch_manifest.json", batch)
-    return 0 if complete else 9
+    if complete:
+        return 0
+    if not power["source_unchanged"] or not final_source_unchanged:
+        return SOURCE_CHANGED_EXIT_CODE
+    return 9
 
 
 def _read_analysis(path: Path) -> dict:

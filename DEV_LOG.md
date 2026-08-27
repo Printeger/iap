@@ -1,5 +1,36 @@
 # DeepSeek Development Log — DEEPSEEK-owned
 
+## 2026-08-27 — ICRA-075 bounded fail-closed repair and P5 compatibility diagnosis
+
+Requirements: IAP-RQ-320, IAP-RQ-321, IAP-RQ-400, IAP-RQ-410,
+IAP-RQ-421, IAP-RQ-422, IAP-RQ-423 and IAP-RQ-424.
+
+The continuation handoff was fetch-confirmed at pushed `32283d0` with divergence `0 0`; the only visible
+ambient path was the protected untracked PDF. Focused RED tests proved that metrics-only invalid final identity
+and lineage-writer failure still allowed one normal publication, and that no post-analyzer source-admission helper
+existed. GREEN makes every enabled P4 objective fail closed on invalid final/attempt/guide identity and CSV
+open/write/flush failure; only explicitly disabled P4 has no terminal lineage obligation. The matrix runner now
+rechecks the admitted source immediately after every row analyzer, after the power analyzer, and at final batch
+admission. A source change overrides either analyzer success or failure with typed exit 10 and a precise
+`SOURCE_CHANGED_*` first-missing stage while retaining analyzer output.
+
+Before any new live work, deterministic offline diagnosis of immutable `matrix-002` found 2,137 P5 final
+observations over 2,117 candidate identities, all `REQUEST_REPLAN/current_low_margin`. Fused `max_pl` selected
+GNSS for all 426 validation epochs: HPL is `24.3673612..27.733391 m` and VPL is
+`68.8205779..86.6898998 m`, already above frozen HAL/VAL `10/20 m`; future margin remains positive at
+`8.51960866011..8.54174607877 m`. Topic, map frame, monitor stamp, metre units, launch/config materialization and
+freshness are the intended authorities. Passing would therefore require a forbidden provider/PL/fusion/AL or P5
+threshold change, not a wiring repair. The repository-local
+`results/icra27/icra075/p5-compatibility-diagnosis-001.json` uses schema
+`icra075_p5_compatibility_diagnosis_v1`, classifies `FROZEN_CONTRACT_INCOMPATIBLE`, and has SHA-256
+`f19395a4890fae44b76673a6c7cbc97651ef0a1cce08aa99af2b4be015460be5`.
+
+Focused Python tests pass 19/19. Post-build manager/FSM/P4/P5/lineage CTest targets pass 4/4, and the canonical
+shared six-package build passes 6/6 using only `/home/dev/ws_iap/{build,install,log}`. Per the classification gate,
+no GPU preflight, ROS/main flow, `matrix-003`, power record, tuning, ICRA-076, effect or qualification work ran.
+Attempts 001/002, ICRA-072B/073 status, shared roots, hidden artifacts and protected PDF remain unchanged.
+ICRA-075 remains BLOCKED/NOT PASS with terminal blocker `FROZEN_CONTRACT_INCOMPATIBLE` for Supervisor Review.
+
 ## 2026-08-27 — ICRA-075 exploratory ablation and power-input tooling
 
 Requirements: IAP-RQ-320, IAP-RQ-321, IAP-RQ-400, IAP-RQ-410,

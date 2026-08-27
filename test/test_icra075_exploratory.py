@@ -7,6 +7,7 @@ import json
 import math
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -14,6 +15,7 @@ REPO = Path(__file__).resolve().parents[1]
 MODULE_PATH = REPO / "scripts/dev_planner/icra075_exploratory.py"
 ANALYZER_PATH = REPO / "scripts/dev_planner/analyze_icra075_exploratory.py"
 RUNNER_PATH = REPO / "scripts/dev_planner/run_icra075_exploratory.py"
+COMPATIBILITY_PATH = REPO / "scripts/dev_planner/icra075_p5_compatibility.py"
 
 
 def load_module():
@@ -34,6 +36,15 @@ def load_analyzer():
 
 def load_runner():
     spec = importlib.util.spec_from_file_location("icra075_runner", RUNNER_PATH)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_compatibility():
+    spec = importlib.util.spec_from_file_location(
+        "icra075_p5_compatibility", COMPATIBILITY_PATH)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     spec.loader.exec_module(module)
@@ -83,6 +94,86 @@ class Icra075ExploratoryContractTest(unittest.TestCase):
             5, {"result": "FAIL", "first_missing_stage": "CAPTURE_NOT_READY"},
             {"result": "FAIL", "first_missing_stage": "P0_SNAPSHOT_MISSING"}),
             "CAPTURE_NOT_READY")
+
+    def test_successful_analyzer_source_change_is_typed_and_fail_closed(self):
+        self._assert_analyzer_source_change_is_fail_closed(0)
+
+    def test_failed_analyzer_source_change_is_typed_and_fail_closed(self):
+        self._assert_analyzer_source_change_is_fail_closed(1)
+
+    def _assert_analyzer_source_change_is_fail_closed(self, analyzer_code):
+        runner = load_runner()
+        baseline = {
+            "accepted": True, "head_commit": "a", "origin_dev_icra_commit": "a",
+            "known_retained_inventory": [],
+        }
+        changed = {
+            "accepted": True, "head_commit": "b", "origin_dev_icra_commit": "b",
+            "known_retained_inventory": [],
+        }
+        completed = mock.Mock(returncode=analyzer_code, stdout="out", stderr="err")
+        with tempfile.TemporaryDirectory() as temporary, \
+                mock.patch.object(runner.subprocess, "run", return_value=completed), \
+                mock.patch.object(runner, "_capture_source_binding", return_value=changed):
+            invocation = Path(temporary) / "analyzer_invocation.json"
+            result = runner._invoke_analyzer_with_source_admission(
+                ["analyzer"], invocation, Path(temporary), baseline,
+                "SOURCE_CHANGED_AFTER_ANALYZER")
+            retained = json.loads(invocation.read_text())
+        self.assertEqual(result["effective_exit_code"], 10)
+        self.assertEqual(result["exit_code"], analyzer_code)
+        self.assertEqual(result["analyzer_exit_code"], analyzer_code)
+        self.assertEqual(result["first_missing_stage"],
+                         "SOURCE_CHANGED_AFTER_ANALYZER")
+        self.assertFalse(result["source_unchanged"])
+        self.assertEqual(retained["first_missing_stage"],
+                         "SOURCE_CHANGED_AFTER_ANALYZER")
+
+    def test_power_and_final_batch_source_admission_are_typed(self):
+        source = RUNNER_PATH.read_text()
+        self.assertIn('"SOURCE_CHANGED_AFTER_POWER_ANALYZER"', source)
+        self.assertIn('"SOURCE_CHANGED_AT_FINAL_BATCH_CHECK"', source)
+        self.assertIn('source_binding_after_power_analyzer', source)
+        self.assertIn('if not power["source_unchanged"] or not final_source_unchanged:',
+                      source)
+
+    def test_retained_matrix_002_classifies_frozen_p5_contract_incompatibility(self):
+        module = load_compatibility()
+        result = module.diagnose(module.DEFAULT_RUN_ROOT)
+        self.assertEqual(result["schema_version"],
+                         "icra075_p5_compatibility_diagnosis_v1")
+        self.assertEqual(result["classification"],
+                         "FROZEN_CONTRACT_INCOMPATIBLE")
+        self.assertEqual(result["p5_final_status_count"], 2137)
+        self.assertEqual(result["unique_candidate_identity_count"], 2117)
+        self.assertEqual(result["current_integrity_source_counts"], {"FUSED": 2137})
+        self.assertEqual(result["fusion_mode_counts"], {"max_pl": 426})
+        self.assertEqual(result["final_hpl_source_counts"], {"GNSS": 426})
+        self.assertEqual(result["final_vpl_source_counts"], {"GNSS": 426})
+        self.assertAlmostEqual(result["alert_limits_m"]["hal"], 10.0)
+        self.assertAlmostEqual(result["alert_limits_m"]["val"], 20.0)
+        self.assertAlmostEqual(result["observed_current_pl_m"]["hpl_min"],
+                               24.3673612)
+        self.assertAlmostEqual(result["observed_current_pl_m"]["hpl_max"],
+                               27.733391)
+        self.assertAlmostEqual(result["observed_current_pl_m"]["vpl_min"],
+                               68.8205779)
+        self.assertAlmostEqual(result["observed_current_pl_m"]["vpl_max"],
+                               86.6898998)
+        self.assertGreater(result["future_margin_m"]["minimum"], 8.5)
+        self.assertEqual(result["frame_authority"], "map")
+        self.assertEqual(result["stamp_authority"],
+                         "IntegrityReport.header.stamp from monitor report stamp")
+        self.assertTrue(result["requires_forbidden_contract_change_to_pass"])
+
+    def test_compatibility_diagnosis_refuses_to_overwrite_evidence(self):
+        module = load_compatibility()
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "diagnosis.json"
+            module._write_new(output, {"first": True})
+            with self.assertRaises(FileExistsError):
+                module._write_new(output, {"second": True})
+            self.assertEqual(json.loads(output.read_text()), {"first": True})
 
     def test_runner_uses_v2_development_scene_not_layer1_trigger(self):
         source = RUNNER_PATH.read_text()
