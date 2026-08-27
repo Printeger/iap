@@ -77,8 +77,11 @@ Verdict: **PASS — no missing requirement, scope creep or implemented-but-wrong
 
 ### Supervisor window disposition
 
-- Pending the mandatory post-push audit. The Layer 1 PASS and Layer 2 authorization must first become the pushed
-  authoritative handoff; the final rotation result will be recorded afterward in a minimal Supervisor-only commit.
+- **`ROTATE_RECOMMENDED`** after pushed authoritative handoff
+  `7b272f1da1703662b1ba5760fff3bd1dbc8ff4a3`. Reason:
+  `ICRA072A_LAYER1_PASS_TO_LAYER2_STABILIZATION`. This Review closes an important Layer 1 Gate and changes the
+  milestone to ICRA-072B Layer 2; a fresh Supervisor window must take the next Builder completion read-only from
+  repository authority. Rotation does not change `active_role=DEEPSEEK` or authorize work beyond `NEXT_TASK.md`.
 
 ## 2026-08-27 — ICRA-072A Review REQUEST_CHANGES; final exact-admission repair reissued
 
