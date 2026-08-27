@@ -5,11 +5,11 @@
 ICRA-072A Layer 1 已通过 Supervisor Review。source-bound `run-024` 在共享 6-package build 上完成同一
 committed trajectory identity 的 P0 -> P4 selection -> EGO final -> authoritative fused P5 final -> publish ->
 P5 runtime；精确 source admission、GPU/process fail-closed、first-missing-stage 和 owned cleanup 均通过。
-ICRA-072B 初次 canonical 结果为 `FAIL`：四个 production/P4/P5 C++ suites 已通过，但隔离 HOME 缺少
-显式 command-local Git safe-directory trust，tools suite 退出 1；同时 runner 对 skipped required unittest
-存在 fail-open。当前唯一授权任务是 `NEXT_TASK.md` 中的 runner-only 修复、先 commit/push，再生成新的
-不可覆盖 `repair-001` canonical evidence。不得修改 product C++、重建共享包、新增 live run，或开始
-Layer 3/4、效果、qualification、campaign 工作。
+ICRA-072B 的 command-local trust 与 skipped/disabled 修复已通过 Review 检查，但 canonical PASS 仍缺失：
+exact isolated status 在 output/suite 前发现 retained `.claude/settings.local.json`。当前唯一授权任务是
+按精确 path/type/size/hash 将其作为 non-runtime local agent-control artifact 与 PDF 一起透明 admission，
+先 commit/push，再生成尚未被创建的 `repair-001` evidence。不得修改 product C++、重建共享包、新增
+live run，或开始 Layer 3/4、效果、qualification、campaign 工作。
 
 ## Four-layer implementation workflow — 2026-08-26
 
@@ -18,8 +18,8 @@ Layer 3/4、效果、qualification、campaign 工作。
 `docs/icra27/ICRA_FOUR_LAYER_DEVELOPMENT_WORKFLOW.md`；route-lock sentinel 与 ICRA-072..080 gate sequence
 不变。
 
-Layer 1 / ICRA-072A 已由 `run-024` 完成。当前只执行 Layer 2 / ICRA-072B 的 canonical fail-closed
-修复；共享 `/home/dev/ws_iap/{build,install,log}` 和既有失败 evidence 保留不动。ICRA-072B Review PASS 后才可关闭 ICRA-072 并签发 ICRA-073；之后才依次
+Layer 1 / ICRA-072A 已由 `run-024` 完成。当前只执行 Layer 2 / ICRA-072B 的 exact two-artifact admission
+与 canonical closure；共享 `/home/dev/ws_iap/{build,install,log}` 和既有失败 evidence 保留不动。ICRA-072B Review PASS 后才可关闭 ICRA-072 并签发 ICRA-073；之后才依次
 进入 inverse-corridor diagnostics 和 formal verification。
 
 `6a6bdd3` 的 `-003` 以 BLOCKED 实况封存。历史 build/install 可再生树按已推送清单删除；raw、compact、

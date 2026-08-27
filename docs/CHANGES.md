@@ -3,6 +3,14 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- review(icra-072b-exact-admission): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 /
+  IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — review `af7c804` against `2e0c2b3`. The trust and
+  skipped/disabled repairs pass independent 5/5 + 17/17 offline checks, but canonical PASS is absent because
+  exact source admission exposed retained `.claude/settings.local.json` before output/suite creation. Standards
+  also rejects Builder's unsupported claim that the unused `repair-001` result identity was consumed. Continue
+  the same Gate with an exact path/type/size/hash two-artifact allowlist and then the still-available
+  non-overwriting `repair-001`; ICRA-073 remains blocked.
+
 - fix(icra-072b-canonical-repair): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 /
   IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — keep the failed `final_*` result immutable and repair only
   the offline canonical harness. Every suite now runs under a repository-local isolated HOME with exact

@@ -458,7 +458,7 @@ Acceptance:
 - Planner chooses safer path even if longer when integrity violated.
 
 ### IAP-RQ-423 P4 collision-guide planning and P5 lineage
-Status: **P4-v1 SCIENTIFIC_NO_GO RETAINED / ICRA-072A LAYER 1 PASS / ICRA-072B CANONICAL REPAIR TASK_READY /
+Status: **P4-v1 SCIENTIFIC_NO_GO RETAINED / ICRA-072A LAYER 1 PASS / ICRA-072B EXACT ADMISSION TASK_READY /
 INVERSE-CORRIDOR DESIGN FROZEN FOR LAYER 3, IMPLEMENTATION NOT STARTED**
 
 Source: `docs/icra27/ICRA_SCOPE.md` and the 2026-08-20 Supervisor scope pivot. This requirement extends collision-guide planning evidence; it does not replace or verify the IAP-RQ-422 PL/AL admission rule.
@@ -488,7 +488,7 @@ Acceptance:
 
 ### IAP-RQ-424 User-owned ICRA research route and P4-v2 scientific recovery
 Status: **DEVELOPMENT-FIRST ROUTE LOCKED / FOUR-LAYER WORKFLOW ACTIVE / ICRA-072A LAYER 1 PASS /
-ICRA-072B CANONICAL REPAIR TASK_READY /
+ICRA-072B EXACT ADMISSION TASK_READY /
 GUARD REPAIR NONBLOCKING / INVERSE-CORRIDOR DESIGN FROZEN, IMPLEMENTATION NOT STARTED**
 
 Source: `docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md` and user decision
@@ -648,6 +648,12 @@ by `/root/.config/git/ignore`; because it is outside the protected-PDF allowlist
 creating summary/log or running a suite. The 72-byte regular file (SHA-256
 `27aac0ccca0ad0ab573578864cf27b9560d3f819bdeeae62378f8c20e62a8f64`) remains untouched and unstaged. No retry
 is authorized; ICRA-072B is `BLOCKED_ICRA072B_UNTRACKED_SOURCE_NOT_ALLOWLISTED` pending Supervisor review.
+
+ICRA-072B exact-harness Supervisor Review (2026-08-27): exact Git trust and skip/disabled repairs pass independent
+5/5 + 17/17 offline checks, but the canonical result is absent because isolated source admission exposed retained
+`.claude/settings.local.json` before output creation. The pre-output invocation did not consume `repair-001`;
+Builder cannot impose a retry prohibition. Continue only with an exact two-artifact path/type/size/hash admission,
+then push and produce the still-available all-green `repair-001`. ICRA-073 remains unauthorized.
 
 ICRA-072A Layer 1 Supervisor PASS (2026-08-27): reviewed Builder HEAD `ac7f923`; Standards and Spec axes pass.
 Shared build is 6/6 and independent Supervisor reruns pass tools 17/17, hermetic launch 24/24 and focused C++

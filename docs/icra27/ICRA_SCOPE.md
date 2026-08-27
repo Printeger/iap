@@ -12,10 +12,10 @@ runs and incrementally reuse `/home/dev/ws_iap/{build,install,log}` until one re
 Layer 2 then automates the success and fail-closed boundaries. ICRA-073..075 form the inverse-corridor diagnostic
 and improvement layer. ICRA-076..079 alone enable formal freeze, held-out and qualification controls.
 
-Current Layer 2 Review disposition (2026-08-27): ICRA-072B remains active as `REQUEST_CHANGES`. The production
-identity/P5 suites and shared build are green, but the retained canonical result fails under hermetic Git
-ownership admission and the runner can count a skipped required unittest as observed. The only active scope is
-the bounded runner-only canonical repair in `NEXT_TASK.md`; ICRA-073 remains unauthorized.
+Current Layer 2 Review disposition (2026-08-27): trust and skip/disabled repairs are accepted, but canonical PASS
+is absent because exact isolated status exposed retained `.claude/settings.local.json`. The only active scope is
+exact path/type/size/hash admission of that non-runtime local agent-control artifact beside the protected PDF,
+followed by the still-available `repair-001` result. ICRA-073 remains unauthorized.
 
 The pre-workflow `-003` result is archived as found, not passed: P0 and P4 selection ran, but terminal lineage,
 P5 and normal publication remained absent. Exact regenerable historical build/install products may be retired
@@ -43,8 +43,8 @@ P0, P4, EGO and P5 decisions.
 
 The design is queued, not implemented. ICRA-072A Layer 1 passed Review with source-bound `run-024`; its separately
 named development selection trigger is not the inverse-corridor scientific fixture and provides no effect
-evidence. The active ICRA-072B repair may only make hermetic Git admission and skipped/disabled-test detection
-fail closed, then retain a fresh non-overwriting canonical result. Only a later ICRA-072B Review PASS may close ICRA-072 and issue ICRA-073 to implement the frozen
+evidence. The active ICRA-072B repair may only complete exact two-artifact source admission and retain a fresh
+non-overwriting canonical result. Only a later ICRA-072B Review PASS may close ICRA-072 and issue ICRA-073 to implement the frozen
 three-variant fixture, paired control/treatment diagnostics and independent oracle. ICRA-073 must measure
 without tuning; targeted changes from its retained results belong exclusively to ICRA-074.
 

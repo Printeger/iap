@@ -1,5 +1,50 @@
 # ICRA Supervisor Log
 
+## 2026-08-27 — ICRA-072B exact-harness Review REQUEST_CHANGES; two-artifact admission issued
+
+### Identity, preservation and verification
+
+- Fixed handoff base: `2e0c2b3930a37b99b1bdaf9d9e08a950117b37f4`; reviewed Builder HEAD:
+  `af7c80480a64eb45828e035f3725c18056ba10b8`. The range is two commits and seven authorized files. Fetch
+  confirmed divergence `0 0`; ambient status shows only the protected PDF because the historical global exclude
+  hides `.claude/settings.local.json`. Exact isolated status sees both retained files.
+- Review ran no build, ROS, GPU or live flow and changed no retained evidence. `final_summary.json` remains
+  SHA-256 `2669167a…624`; PDF remains `1f07da56…844f6`; the 72-byte ordinary JSON remains
+  `27aac0cc…8f64`. Neither `repair-001_summary.json` nor `repair-001_logs/` exists.
+- Supervisor offline reruns pass runner 5/5 and exact isolated tools 17/17. Source binding independently returns
+  false with pushed HEAD `af7c804` and exact observed paths PDF plus `.claude/settings.local.json`, confirming the
+  retained blocker before suite/output creation.
+
+### Standards axis
+
+Verdict: **REQUEST_CHANGES — one hard authority/documentation violation; one non-blocking smell.**
+
+- Builder correctly preserved the newly exposed user file and stopped fail closed, but README and synchronized
+  Builder docs declared that the `repair-001` authorization was consumed and prohibited retry. No result or log
+  root was created. Under the repeatable Layer 1–3 workflow and `AGENTS.md` sections 8.1/8.4, only Supervisor may
+  adjudicate that task boundary. The next task requires a truthful correction while retaining the historical stop.
+- Low / Duplicated Code: skipped and disabled typed-zero checks share a small logic shape in `_suite_failures`.
+  It remains clear and is not added to repair scope. All paths, RQ bindings, retention and no-external-write
+  requirements otherwise pass.
+
+### Spec axis and Gate
+
+Verdict: **REQUEST_CHANGES — one High missing exit artifact; repair implementation itself conforms.**
+
+- Exact trust, no-config mutation, wrong/missing trust rejection, isolated environment and Python/gtest
+  skipped/disabled parsing are correctly implemented with no scope creep. Product/shared-build/live paths are
+  unchanged.
+- The required canonical all-green result is absent. Source admission correctly rejected the non-allowlisted
+  local agent-control JSON before any suite, so ICRA-072B cannot PASS and ICRA-073 is not authorized.
+- Gate stays ICRA-072B `TASK_READY` for one exact contract repair: transparently admit only the PDF and the local
+  agent-control JSON at exact path/type/size/hash, reject every other source state, push first, then use the still
+  available `repair-001` identity. This preserves the user file without hiding or publishing it.
+
+### Supervisor window disposition
+
+- **Pending mandatory post-push audit.** Final KEEP/ROTATE and handoff anchor will be recorded after the Review
+  changeset is pushed and divergence is reconfirmed.
+
 ## 2026-08-27 — ICRA-072B Review REQUEST_CHANGES; bounded canonical repair issued
 
 ### Review identity and preservation

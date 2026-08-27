@@ -1,5 +1,15 @@
 # ICRA 2027 P0 -> P4-v2 -> P5 计划复审
 
+## ICRA-072B exact source-admission Review — 2026-08-27
+
+**Verdict: `REQUEST_CHANGES`.** Builder's hermetic Git and skipped/disabled repairs pass 5/5 + 17/17 independent
+offline checks. Canonical output is nevertheless absent because isolated status exposed retained
+`.claude/settings.local.json` before result/log creation. The invocation did not consume a result identity;
+Builder's contrary retry prohibition is not authoritative.
+
+Continue only with an exact two-artifact path/type/size/hash admission and then the still-available
+`repair-001`. No product/build/live/scientific work or ICRA-073 is authorized.
+
 ## ICRA-072B Layer 2 canonical Review — 2026-08-27
 
 **Verdict: `REQUEST_CHANGES — ICRA072B_CANONICAL_REPAIR`.** Builder HEAD `a63d3cc` keeps scope and authority

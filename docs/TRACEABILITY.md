@@ -1,5 +1,14 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-27 ICRA-072B exact-harness Supervisor Review
+
+| Req ID | Reviewed seam | Evidence and disposition | Status |
+|---|---|---|---|
+| IAP-RQ-423 / IAP-RQ-424 | Hermetic trust and skip admission | Independent runner 5/5 and tools 17/17 pass; exact command-local trust, no config mutation and Python/gtest skip/disabled rejection conform | **REPAIR ACCEPTED** |
+| IAP-RQ-423 / IAP-RQ-424 | Exact source admission | Isolated status sees PDF plus retained 72-byte `.claude/settings.local.json`; sole-PDF contract correctly returns 2 before output/suites. Both repair-001 paths are absent | **REQUEST_CHANGES / CANONICAL PASS ABSENT** |
+| IAP-RQ-423 / IAP-RQ-424 | Result identity authority | Builder's “repair-001 consumed/no retry” statement exceeds its authority; no result exists and Layers 1–3 are repeatable | **SUPERVISOR CORRECTION / REPAIR-001 AVAILABLE** |
+| IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 | Same-Gate continuation | Admit only exact PDF and local agent-control JSON metadata, reject all other states, push, then produce all-green repair-001 | **ICRA-072B TASK_READY / ICRA-073 BLOCKED** |
+
 ## 2026-08-27 ICRA-072B canonical fail-closed repair
 
 | Req ID | Repair seam | Implementation and focused evidence | Status |
