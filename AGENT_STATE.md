@@ -44,13 +44,13 @@ recovery_roadmap: docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP
 four_layer_workflow: docs/icra27/ICRA_FOUR_LAYER_DEVELOPMENT_WORKFLOW.md
 guard_plan: docs/icra27/ICRA_CROSS_LAYER_GUARD_PLAN.md
 artifact_retention: ALL_ICRA072_EVIDENCE_SHARED_ROOTS_HIDDEN_USER_ARTIFACTS_AND_PROTECTED_PDF_RETAINED
-window_disposition: PENDING_POST_PUSH_AUDIT
-rotation_reason: PENDING_POST_PUSH_AUDIT
-window_handoff_anchor: PENDING_TASK_CHANGESET
+window_disposition: ROTATE_RECOMMENDED
+rotation_reason: USER_DECISION007_FORMAL_FREEZE_REPAIR_BEFORE_HELD_OUT_AND_CONTEXT_COMPACTED
+window_handoff_anchor: aa0244453c1e137b75bd394e7504852c7012fcdf
 window_next_role: SUPERVISOR
 window_next_review_task: ICRA-076
 window_bootstrap_source: REPOSITORY_AUTHORITY_ONLY
-updated_utc: 2026-08-27T16:34:56Z
+updated_utc: 2026-08-27T16:37:47Z
 ```
 
 User decision 007, anchored at pushed `dd5e96a602061ab4c4bac384c72fec0f43255e01`, explicitly chooses same-Gate
