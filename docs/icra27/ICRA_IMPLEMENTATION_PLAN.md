@@ -1,5 +1,15 @@
 # ICRA 2027 P0 -> P4-v2 -> P5 科学纠偏实施计划
 
+## User decision 006 / ICRA-076 preregistration freeze — 2026-08-27
+
+用户以 `USER-ICRA-ROUTE-20260827-006` 明确接受并 bypass ICRA-075 的 frozen-contract incompatibility、
+0/40、无 power inputs 和两个 P1；
+ICRA-075 保持 BLOCKED/NOT PASS。当前唯一 Builder task 是 ICRA-076：在 outcome-blind 边界内冻结 formal
+estimand/domain、可辩护 SESOI/repeatability、每 scene 保守 `n=60`、精确通过计数、disjoint seeds/order 与
+source/install hashes。不得声称已有 90% power，不得访问 held-out、运行 ICRA-077、qualification 或 campaign。
+权威仍为 `ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md`，route `P0_P4_V2_P5`、P4-v1
+`SCIENTIFIC_NO_GO`、P4-v2、ICRA-071 backlog 与 campaign barrier 均不变。
+
 ## ICRA-075 bounded repair Review BLOCKED — 2026-08-27
 
 `32283d0..6678e7d` 的 bounded repair 已修复 metrics-only publication fail-open，并以 retained matrix-002

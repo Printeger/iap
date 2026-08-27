@@ -1,5 +1,15 @@
 # ICRA 2027 P0 -> P4-v2 -> P5 计划复审
 
+## User decision 006 — bypass ICRA-075 and issue ICRA-076 — 2026-08-27
+
+**Disposition: `ICRA075_BLOCKED_USER_ACCEPTED_BYPASS / ICRA076_TASK_READY`.** Under
+`USER-ICRA-ROUTE-20260827-006`, the user explicitly accepts the
+frozen-contract blocker, 0/40, absent power inputs and two P1 defects. ICRA-075 does not become PASS. ICRA-076
+must perform outcome-blind preregistration and exact byte freeze; absent empirical power forces conservative
+`n=60` per scene with no demonstrated-power claim. Authority remains
+`ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md`; P4-v1 `SCIENTIFIC_NO_GO`, P4-v2, ICRA-071 and the
+campaign barrier remain unchanged. ICRA-077 remains blocked until Supervisor Review PASS.
+
 ## ICRA-075 bounded repair Supervisor Review — 2026-08-27
 
 **Verdict: `SPEC PASS / STANDARDS REQUEST_CHANGES / GATE BLOCKED / NOT PASS`.** Fixed range

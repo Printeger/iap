@@ -1,14 +1,14 @@
 # ICRA four-layer development and validation workflow
 
-Status: **BLOCKED — LAYER 3 ICRA-075 FROZEN CONTRACT / USER DECISION REQUIRED**
+Status: **ACTIVE — LAYER 4 ICRA-076 PREREGISTRATION FREEZE**
 
 Requirements: `IAP-RQ-320`, `IAP-RQ-321`, `IAP-RQ-400`, `IAP-RQ-410`, `IAP-RQ-421`, `IAP-RQ-422`,
 `IAP-RQ-423`, `IAP-RQ-424`
 
-Current disposition: the bounded repair closes the prior metrics-only publication defect and correctly diagnoses
-`FROZEN_CONTRACT_INCOMPATIBLE`, then stops before GPU/ROS/live. Standards still finds overwritten earliest
-source-change stages and unrestricted diagnosis output. ICRA-075 remains NOT PASS at 0/40 with no power inputs;
-no Layer 4 task is active pending an explicit user revise/re-freeze or bypass decision.
+Current disposition: user decision 006 accepts ICRA-075's frozen incompatibility, 0/40, absent power inputs and
+two P1 defects without converting it to PASS. ICRA-076 activates Layer 4 for outcome-blind preregistration and
+source/install byte freeze. With no empirical power record, it uses conservative `n=60` per scene and makes no
+demonstrated-power claim. Held-out ICRA-077 remains blocked until Review PASS.
 
 ## 1. Purpose
 

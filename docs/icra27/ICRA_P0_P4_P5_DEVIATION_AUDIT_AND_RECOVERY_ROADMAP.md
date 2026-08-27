@@ -1,5 +1,17 @@
 # ICRA P0 -> P4 -> P5 deviation audit and scientific recovery roadmap
 
+## User decision 006 — accept ICRA-075 debt and issue ICRA-076 — 2026-08-27
+
+The user explicitly accepts ICRA-075's `FROZEN_CONTRACT_INCOMPATIBLE`, 0/40 matrix, absent power inputs and two
+P1 engineering defects, and directs progression to ICRA-076. Decision `USER-ICRA-ROUTE-20260827-006` is bound to
+pushed approval anchor `111010126a3b5216cce51c567c5835fec976f87a`. ICRA-075 remains BLOCKED/user-bypassed/
+NOT PASS; no missing evidence is relabelled.
+
+All protected research fields and the gate order remain unchanged. ICRA-076 is active only for outcome-blind
+preregistration and source/install byte freeze. With no empirical power record, its conservative sample size is
+the existing route ceiling of 60 independent seed-runs per scene, without a demonstrated-90%-power claim.
+Held-out ICRA-077 remains blocked until ICRA-076 Supervisor Review PASS.
+
 ## ICRA-075 bounded repair Review BLOCKED / awaiting user decision — 2026-08-27
 
 Supervisor Review of `32283d0..6678e7d` accepts the bounded task's metrics-only repair and pre-live diagnosis,
@@ -154,10 +166,10 @@ its protected research fields.
   "fallback_policy": "PROPOSAL_ONLY_USER_ACTIVATION_REQUIRED",
   "scientific_no_go_transition": "BLOCKED_AWAITING_USER_RESEARCH_DECISION",
   "campaign_activation": "USER_APPROVAL_AFTER_ICRA079_REVIEW_PASS",
-  "approval_anchor": "66cff244a3c6786e1447b68f42de95d01610a8e2",
-  "user_decision_id": "USER-ICRA-ROUTE-20260827-005",
+  "approval_anchor": "111010126a3b5216cce51c567c5835fec976f87a",
+  "user_decision_id": "USER-ICRA-ROUTE-20260827-006",
   "protected_transition": {
-    "from_anchor": "66cff244a3c6786e1447b68f42de95d01610a8e2",
+    "from_anchor": "111010126a3b5216cce51c567c5835fec976f87a",
     "changes": [
       {
         "field": "route_owner",
@@ -278,11 +290,11 @@ its protected research fields.
     ]
   },
   "user_decision": {
-    "route_disposition": "USER_CHOSE_BOUNDED_ICRA075_REPAIR_AFTER_BLOCKED_REVIEW",
+    "route_disposition": "USER_ACCEPTED_ICRA075_BLOCKERS_AND_BYPASSED_TO_ICRA076",
     "p0_p5_disposition": "RETAIN_AS_MATCHED_CONTROL_ASSET",
     "p4_primary_endpoint": "MAX_PROVIDER_ONLY_INTERIOR_RISK",
-    "confirmatory_size": "PREREGISTERED_ADAPTIVE_30_TO_60_INDEPENDENT_SEED_RUNS_PER_SCENE",
-    "enforcement": "REPAIR_FAIL_CLOSED_DEFECTS_AND_ONLY_PROVEN_FROZEN_CONTRACT_MISWIRING_NO_TUNING_NO_ICRA076_BYPASS"
+    "confirmatory_size": "PREREGISTERED_CONSERVATIVE_60_INDEPENDENT_SEED_RUNS_PER_SCENE_NO_EMPIRICAL_POWER_CLAIM",
+    "enforcement": "ICRA075_REMAINS_NOT_PASS_ICRA076_OUTCOME_BLIND_FREEZE_N60_NO_EMPIRICAL_POWER_CLAIM_NO_ICRA077_BEFORE_REVIEW_PASS"
   },
   "guard_strength": "ACCIDENT_PREVENTION_NOT_A_SECURITY_BOUNDARY"
 }
@@ -544,10 +556,10 @@ non-bypassable enforcement requires a protected remote branch and an independent
 ## 9. Corrective roadmap and gates
 
 The execution grouping is `docs/icra27/ICRA_FOUR_LAYER_DEVELOPMENT_WORKFLOW.md`: ICRA-072A integration,
-blocked/user-bypassed ICRA-072B, currently blocked ICRA-073 effect diagnostics, ICRA-074..075 improvement/exploration and
-ICRA-076..079 formal verification. Decision 003 leaves protected research values and ordered task names
-unchanged while explicitly waiving the Layer 2 PASS transition precondition. Development one-shot and per-task
-build/install controls do not apply in Layers 1–3.
+blocked/user-bypassed ICRA-072B/073, ICRA-074 PASS, blocked/user-bypassed ICRA-075, and active ICRA-076 followed
+by ICRA-077..079 formal verification. Decisions 003, 004 and 006 leave protected research values and ordered task
+names unchanged while explicitly waiving their named transition preconditions. Development one-shot and per-task
+build/install controls do not apply in Layers 1–3; Layer 4 freeze controls now apply.
 
 The frozen inverse-corridor diagnostic design is
 `docs/icra27/dev/ICRA_P4_V2_INVERSE_CORRIDOR_FIXTURE.md`
@@ -564,8 +576,8 @@ distinct engineering fixture and cannot be relabelled as inverse-corridor effect
 | ICRA-072B | stabilize the successful chain and canonical source admission | BLOCKED / USER-ACCEPTED BYPASS / NOT PASS; debt retained |
 | ICRA-073 | implement PRIMARY/MIRROR/NULL inverse corridors, paired control/treatment and independent-oracle effect diagnostics | BLOCKED / USER-ACCEPTED BYPASS / NOT PASS; only geometry debt carries into ICRA-074 for repair |
 | ICRA-074 | V2 geometry repair then bounded offline targeted P4-v2 optimization | PASS: exact geometry and production-seam contract, production unchanged, no effect claim |
-| ICRA-075 | exploratory objective/source/domain ablation and power inputs | TASK_READY; development seeds/runs only, no held-out access, freeze or claim |
-| ICRA-076 | freeze protocol, SESOI, hashes, seeds and 30–60 sample size per scene | no confirmatory run before Review PASS |
+| ICRA-075 | exploratory objective/source/domain ablation and power inputs | BLOCKED / USER-ACCEPTED BYPASS / NOT PASS; 0/40, no power inputs and two P1 defects retained |
+| ICRA-076 | freeze protocol, SESOI, hashes, seeds and conservative `n=60` per scene | TASK_READY; no empirical-power claim or confirmatory run before Review PASS |
 | ICRA-077 | primary/mirror/null held-out confirmatory | no retry/exclusion; primary exact gate |
 | ICRA-078 | formal G0D lineage qualification | held-out confirmation required |
 | ICRA-079 | prospective P0+P4+P5 treatment and P0+P5 control P5 qualification | campaign remains blocked |

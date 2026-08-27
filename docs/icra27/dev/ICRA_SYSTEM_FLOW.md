@@ -1,5 +1,10 @@
 # ICRA System Flow — User-owned P0 -> P4-v2 -> P5 recovery
 
+> User decision 006 update 2026-08-27: ICRA-075 remains BLOCKED/user-bypassed/NOT PASS with 0/40, no power inputs
+> and two accepted P1 defects. ICRA-076 is TASK_READY to freeze the unchanged runtime graph's formal protocol,
+> threshold rule, conservative `n=60`, seeds/order and exact source/install identities. No held-out execution,
+> ICRA-077, qualification or campaign is authorized before Review PASS.
+
 > ICRA-075 bounded repair Review update 2026-08-27: metrics-only terminal publication now fails closed and the
 > retained matrix-002 diagnosis correctly proves `FROZEN_CONTRACT_INCOMPATIBLE`, so Builder stopped before
 > GPU/ROS/live. Standards still rejects overwritten earliest source-change evidence and unrestricted diagnosis

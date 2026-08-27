@@ -1,5 +1,31 @@
 # ICRA Supervisor Log
 
+## 2026-08-27 — user decision 006 bypasses ICRA-075 and issues ICRA-076
+
+### User decision and retained debt
+
+- The user explicitly accepts ICRA-075's `FROZEN_CONTRACT_INCOMPATIBLE`, 0/40 matrix, absent power inputs and two
+  P1 engineering defects, and directs progression to ICRA-076. Decision `USER-ICRA-ROUTE-20260827-006` binds
+  pushed approval anchor `111010126a3b5216cce51c567c5835fec976f87a`.
+- ICRA-075 remains `BLOCKED / USER-ACCEPTED BYPASS / NOT PASS`. No missing matrix, power, first-missing-stage or
+  repository-output evidence becomes PASS, and no empirical power/effect claim is created. The protected route,
+  modules, claims, arms, scenes, gate order and campaign barrier remain unchanged.
+
+### ICRA-076 issuance
+
+- ICRA-076 is `TASK_READY` for Layer 4 preregistration and source/install byte freeze only. Because the user accepts
+  absent power inputs, the outcome-blind conservative sample size is the existing route ceiling, 60 independent
+  seed-runs per scene, paired across both formal arms; no demonstrated-90%-power claim is authorized.
+- The Builder must freeze a defensible domain SESOI and admissible non-held-out repeatability bound, exact primary
+  rule/passing count, disjoint confirmatory seeds/order, all exclusion/failure rules and complete source/install
+  identities. Any missing finite/unit-bound threshold input fails closed. No held-out access, GPU/ROS/live,
+  ICRA-077, result analysis, qualification or campaign work is authorized.
+
+### Supervisor window disposition
+
+- Pending post-push audit. The final disposition and pushed handoff anchor will be recorded after the route/task
+  changeset becomes repository authority.
+
 ## 2026-08-27 — ICRA-075 bounded repair Review BLOCKED; user decision required
 
 ### Review identity and preservation

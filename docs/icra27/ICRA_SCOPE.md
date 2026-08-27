@@ -1,5 +1,16 @@
 # ICRA 2027 Conference Scope — User-owned P0 -> P4-v2 -> P5 recovery
 
+## User decision 006 / ICRA-076 active — 2026-08-27
+
+Under `USER-ICRA-ROUTE-20260827-006`, the user accepts and bypasses ICRA-075's frozen incompatibility, 0/40,
+absent power inputs and two P1 defects.
+ICRA-075 remains BLOCKED/NOT PASS. ICRA-076 is now the sole Builder scope: freeze the outcome-blind formal
+protocol, defensible SESOI/repeatability threshold, conservative `n=60` per scene, disjoint seeds/order and exact
+source/install bytes. No empirical-power claim, held-out access, ICRA-077 execution, qualification or campaign is
+authorized. Authority remains `ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md`; route `P0_P4_V2_P5`,
+P4-v1 `SCIENTIFIC_NO_GO`, P4-v2, the ICRA-071 backlog, required modules, claims, arms, scenes, gate ordering and
+campaign barrier remain unchanged.
+
 ## ICRA-075 bounded repair Review / user decision required — 2026-08-27
 
 The bounded repair closes the prior metrics-only publication defect and correctly stops pre-live after proving

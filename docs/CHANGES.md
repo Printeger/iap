@@ -3,6 +3,12 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- route(user-decision-006-issue-icra076): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 /
+  IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — record user acceptance of ICRA-075 frozen incompatibility, 0/40, absent
+  power inputs and two P1 defects without relabelling PASS. Issue outcome-blind ICRA-076 preregistration/byte
+  freeze. With no empirical power record, fix the conservative route ceiling `n=60` per scene and forbid a 90%
+  power claim; held-out, ICRA-077, qualification and campaign remain blocked pending Review PASS.
+
 - review(icra-075-bounded-repair-blocked): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 /
   IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — review `6678e7d6` against fixed `32283d0`. The bounded repair correctly
   closes metrics-only publication failure, passes focused offline 19/19 and classifies retained matrix-002 as

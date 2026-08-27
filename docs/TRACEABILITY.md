@@ -1,5 +1,14 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-27 user decision 006 and ICRA-076 issuance
+
+| Req ID | Decision/task seam | Evidence and disposition | Status |
+|---|---|---|---|
+| IAP-RQ-423 / IAP-RQ-424 | Route-owner transition | User accepts ICRA-075 frozen incompatibility, 0/40, absent power and two P1 defects at pushed `11101012`; protected route fields unchanged | **USER DECISION 006** |
+| IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-423 / IAP-RQ-424 | ICRA-075 debt | No matrix/power/effect evidence is inferred; ICRA-075 remains BLOCKED/user-bypassed/NOT PASS | **RETAINED DEBT** |
+| IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 | Formal preregistration | Freeze estimand/domain/SESOI/repeatability/rule, `n=60` per scene, exact seeds/order and source/install hashes before outcomes | **ICRA-076 TASK_READY** |
+| IAP-RQ-423 / IAP-RQ-424 | Held-out/claim boundary | No empirical 90% power claim; ICRA-077 cannot run before ICRA-076 Review PASS | **BLOCKED** |
+
 ## 2026-08-27 ICRA-075 bounded repair Supervisor Review
 
 | Req ID | Reviewed seam | Evidence and disposition | Status |
