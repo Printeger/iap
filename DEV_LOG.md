@@ -39,10 +39,15 @@ configuration changed, so no six-package product build is required; only the
 existing shared-build C++ test targets were rebuilt. No ROS, GPU, live,
 held-out, effect, qualification or campaign action ran.
 
-Pending pushed-source binding and the non-overwriting ICRA-074 record, Builder
-disposition is `PRODUCTION_P4_V2_UNCHANGED_TARGETED_TESTS_GREEN`. The first
-missing downstream scientific stage remains ICRA-075 exploratory/power inputs,
-which is not authorized before Supervisor Review.
+Implementation/test bytes were pushed at
+`07ca00a6d435b874e0f6b9529975974fd0f51d70` and fetch-confirmed at divergence
+`0 0` before final verification. The non-overwriting pushed-source record is
+`results/icra27/icra074/offline-targeted-001.json` with SHA-256
+`79989ac8c128977e37d91f0f3cd30ec3a0618f3818b44d34da53981893fefc67`.
+It explicitly carries skipped ICRA-073 source-guard debt and makes no
+source-bound or scientific claim. Builder disposition is
+`ICRA074_TARGETED_OPTIMIZATION_READY_FOR_REVIEW`; the first missing downstream
+scientific stage remains unauthorized ICRA-075 exploratory/power inputs.
 
 ## 2026-08-27 — USER DECISION 004 / ICRA-074 TASK READY
 

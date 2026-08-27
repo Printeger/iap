@@ -14,7 +14,10 @@ exercises actual production P4-v2 occupancy/provider/decision/injection seams an
 regression 51/51. Peak/integral/length/hash ordering, longer lower-bottleneck selection, FLAT_NULL tie-break,
 invalid provider rejection and boundary identity are covered. No production/config defect remained after test-contract
 correction, so production is unchanged and no six-package product build was needed. ICRA-073 remains BLOCKED/
-user-bypassed/NOT PASS; no ROS/GPU/live or scientific/qualification/campaign claim exists.
+user-bypassed/NOT PASS; no ROS/GPU/live or scientific/qualification/campaign claim exists. Pushed source
+`07ca00a6d435b874e0f6b9529975974fd0f51d70` is retained in
+`results/icra27/icra074/offline-targeted-001.json` (SHA-256
+`79989ac8c128977e37d91f0f3cd30ec3a0618f3818b44d34da53981893fefc67`) and is ready for Supervisor review.
 
 ## 0. 术语与约定（强制一致）
 - Estimator: 滑窗/因子图估计器（紧耦合 GNSS+IMU+LiDAR），基于现有 GLIM 框架演进

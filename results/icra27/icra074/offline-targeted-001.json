@@ -1,0 +1,157 @@
+{
+  "schema_version": "icra074_offline_targeted_optimization_v1",
+  "task": "ICRA-074",
+  "milestone": "ICRA-074_LAYER3_OFFLINE_PRODUCTION_P4_V2_TARGETED_OPTIMIZATION",
+  "recorded_utc": "2026-08-27T11:12:02Z",
+  "user_decision": "USER-ICRA-ROUTE-20260827-004",
+  "unique_handoff": "f6f7832aec987b94f559e7e50219f239691c8727",
+  "pushed_source": {
+    "head": "07ca00a6d435b874e0f6b9529975974fd0f51d70",
+    "remote": "origin/dev/icra",
+    "left_right_divergence": [0, 0]
+  },
+  "geometry_amendment": {
+    "scope": "V2_RISKY_AMPLITUDE_ONLY_PLUS_REQUIRED_IDENTITIES_AND_HASH",
+    "primary_risky_amplitude_m": -2.2,
+    "exact_mirror_risky_amplitude_m": 2.2,
+    "flat_null_risky_amplitude_m": -2.2,
+    "dense_positions_per_variant": 1000001,
+    "dense_raw_cuboid_clearance_m": {
+      "PRIMARY": 1.371035122046432,
+      "EXACT_MIRROR": 1.371035122046432,
+      "FLAT_NULL": 1.371035122046432
+    },
+    "required_clearance_m": 1.349,
+    "descriptor_sha256": {
+      "PRIMARY": "41ab7001c7c60e78cdcf8a670efdcba7545bcd7c93e06081745a090b57f0f06d",
+      "EXACT_MIRROR": "3bd25208dba3bbd03857104758878e30d647b7f8bfdfc43e7654f78b569caf33",
+      "FLAT_NULL": "89074561a7263268e121c2439ceccaca2b3c7285f665432ebdc07ab5668e8513"
+    },
+    "v1_evidence_rewritten": false,
+    "skipped_icra073_source_guard_debt": true,
+    "source_bound_claim": false,
+    "scientific_claim": false
+  },
+  "targeted_optimization": {
+    "production_disposition": "UNCHANGED_TARGETED_TESTS_GREEN",
+    "production_or_configuration_bytes_changed": false,
+    "fixture": "icra074_offline_two_homotopy_v1",
+    "decision_seam": "planCollisionGuide",
+    "verified_contracts": [
+      "OCCUPANCY_REJECTION_BEFORE_PROVIDER_RISK",
+      "PROVIDER_PEAK_THEN_INTEGRAL_THEN_PATH_LENGTH_THEN_STABLE_HASH",
+      "LONGER_LOWER_BOTTLENECK_GUIDE_SELECTED",
+      "FLAT_NULL_DETERMINISTIC_NON_RISK_TIE_BREAK",
+      "INCOMPLETE_STALE_NON_FINITE_PROVIDER_SUPPORT_FAILS_CLOSED",
+      "REQUEST_SNAPSHOT_OCCUPANCY_EPOCH_SELECTED_GUIDE_INJECTION_IDENTITY",
+      "NO_ORACLE_TUBE_OR_EXPECTED_ROUTE_DECISION_INPUT"
+    ]
+  },
+  "verification": {
+    "commands": [
+      {
+        "command": "python3 -m py_compile scripts/dev_planner/icra073_inverse_corridor_fixture.py test/test_icra074_geometry.py",
+        "exit_code": 0
+      },
+      {
+        "command": "python3 test/test_icra074_geometry.py -v",
+        "exit_code": 0,
+        "passed": 2,
+        "failed": 0
+      },
+      {
+        "command": "python3 test/test_icra073_inverse_corridor.py -v",
+        "exit_code": 0,
+        "passed": 3,
+        "failed": 0
+      },
+      {
+        "command": "cmake --build /home/dev/ws_iap/build/bspline_opt --target test_p4_collision_guide test_p4_collision_guide_integration -j2",
+        "exit_code": 0
+      },
+      {
+        "command": "/home/dev/ws_iap/build/path_searching/test_p4_risk_astar",
+        "exit_code": 0,
+        "passed": 9,
+        "failed": 0
+      },
+      {
+        "command": "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+        "exit_code": 0,
+        "passed": 24,
+        "failed": 0
+      },
+      {
+        "command": "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide_integration",
+        "exit_code": 0,
+        "passed": 13,
+        "failed": 0
+      },
+      {
+        "command": "git diff --check",
+        "exit_code": 0
+      }
+    ],
+    "focused_icra074": {
+      "passed": 8,
+      "failed": 0
+    },
+    "complete_relevant_regression": {
+      "passed": 51,
+      "failed": 0,
+      "breakdown": {
+        "v2_geometry": 2,
+        "retained_v1": 3,
+        "risk_astar": 9,
+        "collision_guide_decision": 24,
+        "collision_guide_integration": 13
+      }
+    },
+    "standards_review": "PASS_0_ACTIONABLE_FINDINGS",
+    "spec_review": "PASS_0_ACTIONABLE_FINDINGS"
+  },
+  "build": {
+    "canonical_six_package_build": "NOT_REQUIRED_NO_COMPILED_PRODUCT_BYTES_CHANGED",
+    "shared_root": "/home/dev/ws_iap/build",
+    "shared_test_targets_rebuilt": true,
+    "task_local_build_or_install_created": false
+  },
+  "retention": {
+    "protected_untracked_files": [
+      {
+        "path": "docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf",
+        "size_bytes": 243368,
+        "sha256": "1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6"
+      },
+      {
+        "path": ".claude/settings.local.json",
+        "size_bytes": 72,
+        "sha256": "27aac0ccca0ad0ab573578864cf27b9560d3f819bdeeae62378f8c20e62a8f64"
+      },
+      {
+        "path": "src/uav_simulator/local_sensing/CMakeModules/FindEigen.cmake~",
+        "size_bytes": 2962,
+        "sha256": "29a73228c1d58d5c4983dc217230d6cbc6ff6e295a77a004d8e6a207fd242028"
+      }
+    ],
+    "historical_evidence_modified_or_deleted": false,
+    "shared_roots_modified_outside_target_rebuild": false
+  },
+  "scope_boundary": {
+    "icra073_disposition": "BLOCKED_USER_BYPASSED_NOT_PASS",
+    "icra073_other_blockers_repaired": false,
+    "ros": "NOT_RUN_OFFLINE_ONLY",
+    "gpu": "NOT_RUN_OFFLINE_ONLY",
+    "live": "NOT_RUN_OFFLINE_ONLY",
+    "held_out": "NOT_ACCESSED",
+    "effect_size_claim": false,
+    "qualification_claim": false,
+    "campaign_readiness_claim": false,
+    "first_missing_downstream_scientific_stage": "ICRA-075_EXPLORATORY_AND_POWER_INPUTS_NOT_AUTHORIZED"
+  },
+  "processes": {
+    "owned_ros_gpu_or_live_processes_started": false,
+    "owned_offline_processes_remaining": false
+  },
+  "builder_disposition": "ICRA074_TARGETED_OPTIMIZATION_READY_FOR_REVIEW"
+}

@@ -11,7 +11,9 @@
   tie-breaking, invalid provider fail-closed behavior and boundary identity. Focused ICRA-074 tests pass 8/8 and
   relevant regressions pass 51/51. Production P4/config is unchanged because no real production defect remained
   after correcting test setup/semantic assumptions. No six-package product build, ROS, GPU, live or claim work ran;
-  all skipped ICRA-073 debt remains BLOCKED/NOT PASS.
+  all skipped ICRA-073 debt remains BLOCKED/NOT PASS. Pushed source `07ca00a6d435b874e0f6b9529975974fd0f51d70`
+  is bound by `results/icra27/icra074/offline-targeted-001.json` (SHA-256
+  `79989ac8c128977e37d91f0f3cd30ec3a0618f3818b44d34da53981893fefc67`).
 
 - route(user-decision-004-issue-icra074): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 /
   IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — user decision 004 at pushed `b126b2f5` directs only the

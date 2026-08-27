@@ -158,6 +158,10 @@ cmake --build /home/dev/ws_iap/build/bspline_opt \
 
 这些命令不启动 ROS、GPU 或 live flow。ICRA-073 的 source/output guards、oracle、paired diagnostics 和
 runtime identity 仍是用户接受的 BLOCKED/NOT PASS debt，不得借 ICRA-074 测试改写为 PASS。
+Pushed-source 离线记录为 `results/icra27/icra074/offline-targeted-001.json`，绑定 source HEAD
+`07ca00a6d435b874e0f6b9529975974fd0f51d70`，文件 SHA-256 为
+`79989ac8c128977e37d91f0f3cd30ec3a0618f3818b44d34da53981893fefc67`；该记录不构成 source-guard、
+effect、qualification 或 campaign claim。
 
 ### 1.3 运行一个最小检查
 
