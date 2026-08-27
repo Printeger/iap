@@ -14,9 +14,13 @@
   failures remain observational so they cannot change publication. Collision/dynamics are independently
   calculated, certified equal-arc sampling discloses a control-hull-derived bound, and power inputs report
   flat-null repeatability/zero-mass/cross-seed sensitivity while typing intra-run correlation unavailable. Focused
-  TDD passes 11/11, affected lineage tests pass 34/34, and shared map/GNSS install plus canonical six-package
+  Pre-live TDD passed 11/11, affected lineage tests pass 34/34, and shared map/GNSS install plus canonical six-package
   build pass. Per-row/final source checks permit only the active matrix output and revalidate all three retained
   artifact type/size/hashes. No P0/P4/EGO/P5 algorithm, risk truth, AL/PL, threshold or prior evidence changed.
+  Retained `matrix-001` passed GPU but stopped before ROS because its valid ICRA-075 capture-ready record was
+  checked by the ICRA-072 schema waiter. The repair uses the correct schema, derives ROS-start truth from an actual
+  successfully spawned row manifest and preserves the runner's typed first-missing stage; focused tooling now
+  passes 13/13 including the post-command/pre-spawn exception adversary.
 
 - review(icra-074-pass-issue-icra075): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 /
   IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — review `ee9774a1` against fixed `f6f7832a`.

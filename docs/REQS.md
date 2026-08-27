@@ -10,13 +10,18 @@
 
 ICRA-075 Builder implementation adds exact V2 runtime map/GNSS assets, a 40-row development-only runner,
 committed-final/P5/publication capture, independent fixed-200 equal-arc analysis and deterministic non-freezing
-power inputs. Focused tests pass 11/11 and the required shared builds pass. Runtime scene/hash capture, treatment
+power inputs. Pre-live focused tests passed 11/11 and the required shared builds pass. Runtime scene/hash capture, treatment
 lineage, certified equal-arc error evidence, independent geometry/dynamics safety and per-scene flat-null
 repeatability/zero-mass/cross-seed correlation sensitivity are fail-closed; unavailable within-run correlation is
 reported rather than substituted. Development seeds `75001..75005` are
 permanently excluded from held-out use. No P0/P4/EGO/P5 behavior, provider truth, AL/PL, threshold, SESOI,
 formal sample size or success verdict is changed or frozen; live matrix execution remains pending pushed-source
 GPU admission.
+
+`matrix-001` retained a GPU PASS but no ROS launch/scientific row: the runner compared its valid ICRA-075 capture
+readiness against the ICRA-072 schema and timed out. The corrected waiter/ROS-start/first-missing evidence contract
+passes focused 13/13, including a post-command/pre-spawn adversary, and requires a new pushed-source `matrix-002`;
+`matrix-001` is never overwritten or relabelled.
 
 ICRA-074 Builder implementation (2026-08-27): V2 derives from retained V1 and changes only risky amplitude
 (`-2.20 m` PRIMARY/FLAT_NULL, `+2.20 m` mirror) plus required descriptor identities/hash. An independent dense

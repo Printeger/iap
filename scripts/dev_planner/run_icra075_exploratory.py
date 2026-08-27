@@ -97,6 +97,23 @@ def _capture_source_binding(matrix_root: Path) -> dict:
     }
 
 
+def _wait_capture_ready(process: subprocess.Popen, path: Path) -> dict:
+    deadline = time.monotonic() + 10.0
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            return {"ready": False, "reason": "capture_exited_before_ready"}
+        if path.exists():
+            try:
+                payload = json.loads(path.read_text())
+            except (OSError, json.JSONDecodeError):
+                payload = {}
+            if (payload.get("schema_version") == "icra075_capture_readiness_v1" and
+                    payload.get("ready") is True):
+                return payload
+        time.sleep(0.05)
+    return {"ready": False, "reason": "capture_readiness_timeout"}
+
+
 def _finalize_row(root: Path, manifest: dict, runner_code: int) -> int:
     _write(root / "run_manifest.json", manifest)
     command = [sys.executable,
@@ -165,7 +182,7 @@ def _run_row(matrix_root: Path, row: dict, duration_s: float,
                                       stderr=subprocess.STDOUT,
                                       start_new_session=True, env=environment)
         atexit.register(BASE._stop_owned, capture)
-        readiness = BASE._wait_ready(capture, root / "capture_ready.json")
+        readiness = _wait_capture_ready(capture, root / "capture_ready.json")
         manifest["capture_readiness"] = readiness
         if readiness.get("ready") is not True:
             BASE._stop_owned(capture, 5.0)
@@ -303,19 +320,22 @@ def main() -> int:
         _write(root / "batch_manifest.json", batch)
         print("GPU_NOT_READY")
         return 4
-    batch["ros_started"] = True
     for row in matrix:
         code = _run_row(root, row, args.duration_s, source)
         analysis_path = root / row["run_id"] / "analysis.json"
         analysis = _read_analysis(analysis_path)
+        row_manifest = _read_analysis(root / row["run_id"] / "run_manifest.json")
+        first_missing = (row_manifest.get("first_missing_stage") if code != 0 else
+                         analysis.get("first_missing_stage"))
+        batch["ros_started"] = _batch_ros_started(root, matrix)
         batch["attempts"].append({
             "run_id": row["run_id"], "exit_code": code,
             "result": analysis.get("result", "FAIL"),
-            "first_missing_stage": analysis.get("first_missing_stage"),
+            "first_missing_stage": first_missing,
         })
         _write(root / "batch_manifest.json", batch)
         if code != 0:
-            batch["first_missing_stage"] = analysis.get("first_missing_stage") or "ROW_FAILURE"
+            batch["first_missing_stage"] = first_missing or "ROW_FAILURE"
             _write(root / "batch_manifest.json", batch)
             return code
     power_command = [
@@ -345,6 +365,13 @@ def _read_analysis(path: Path) -> dict:
         return value if isinstance(value, dict) else {}
     except (OSError, json.JSONDecodeError):
         return {}
+
+
+def _batch_ros_started(root: Path, matrix: list[dict]) -> bool:
+    return any(
+        _read_analysis(root / item["run_id"] / "run_manifest.json").get(
+            "launch_started") is True
+        for item in matrix)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,116 @@
+{
+  "capture_readiness": {
+    "ready": false,
+    "reason": "capture_readiness_timeout"
+  },
+  "development_only": true,
+  "effect_claim": false,
+  "first_missing_stage": "CAPTURE_NOT_READY",
+  "launch_contract": {
+    "manager/feasibility_tolerance": 0.05,
+    "manager/max_acc": 3.0,
+    "manager/max_vel": 1.0,
+    "p4.metrics_only": false,
+    "p4.objective": "PROVIDER_BOTTLENECK_V2",
+    "planner_enable_p4": false
+  },
+  "matrix_row": {
+    "comparison_kind": "FORMAL_ARM",
+    "configuration": "P0_P5_CONTROL",
+    "descriptor_sha256": "41ab7001c7c60e78cdcf8a670efdcba7545bcd7c93e06081745a090b57f0f06d",
+    "goal_m": [
+      12.0,
+      0.0,
+      1.5
+    ],
+    "held_out_eligible": false,
+    "overrides": {
+      "p4.metrics_only": false,
+      "p4.objective": "PROVIDER_BOTTLENECK_V2",
+      "planner_enable_p4": false
+    },
+    "run_id": "primary-75001-p0_p5_control",
+    "scene": "PRIMARY",
+    "scene_identity": "icra074-primary-seed-73001",
+    "seed": 75001,
+    "start_m": [
+      -12.0,
+      0.0,
+      1.5
+    ]
+  },
+  "owned_process_groups_cleared": true,
+  "result": "FAIL",
+  "schema_version": "icra075_development_row_v1",
+  "skipped_icra073_source_admission_debt": true,
+  "source_binding": {
+    "accepted": true,
+    "allowed_repository_output_prefix": "results/icra27/icra075/matrix-001/",
+    "checks": {
+      "head": {
+        "argv": [
+          "git",
+          "rev-parse",
+          "HEAD"
+        ],
+        "exit_code": 0,
+        "stderr": "",
+        "stdout": "07bf4b5aae26d362fc202a703ee69cea2f8363fd\n"
+      },
+      "origin": {
+        "argv": [
+          "git",
+          "rev-parse",
+          "origin/dev/icra"
+        ],
+        "exit_code": 0,
+        "stderr": "",
+        "stdout": "07bf4b5aae26d362fc202a703ee69cea2f8363fd\n"
+      },
+      "status": {
+        "argv": [
+          "git",
+          "status",
+          "--porcelain=v1",
+          "--untracked-files=all"
+        ],
+        "exit_code": 0,
+        "stderr": "",
+        "stdout": "?? docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf\n"
+      }
+    },
+    "head_commit": "07bf4b5aae26d362fc202a703ee69cea2f8363fd",
+    "known_retained_inventory": [
+      {
+        "accepted": true,
+        "expected_sha256": "27aac0ccca0ad0ab573578864cf27b9560d3f819bdeeae62378f8c20e62a8f64",
+        "expected_size_bytes": 72,
+        "observed_sha256": "27aac0ccca0ad0ab573578864cf27b9560d3f819bdeeae62378f8c20e62a8f64",
+        "observed_size_bytes": 72,
+        "path": ".claude/settings.local.json"
+      },
+      {
+        "accepted": true,
+        "expected_sha256": "29a73228c1d58d5c4983dc217230d6cbc6ff6e295a77a004d8e6a207fd242028",
+        "expected_size_bytes": 2962,
+        "observed_sha256": "29a73228c1d58d5c4983dc217230d6cbc6ff6e295a77a004d8e6a207fd242028",
+        "observed_size_bytes": 2962,
+        "path": "src/uav_simulator/local_sensing/CMakeModules/FindEigen.cmake~"
+      },
+      {
+        "accepted": true,
+        "expected_sha256": "1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6",
+        "expected_size_bytes": 243368,
+        "observed_sha256": "1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6",
+        "observed_size_bytes": 243368,
+        "path": "docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf"
+      }
+    ],
+    "origin_dev_icra_commit": "07bf4b5aae26d362fc202a703ee69cea2f8363fd",
+    "rejected_untracked_paths": [],
+    "schema_version": "icra075_development_source_binding_v1",
+    "skipped_icra073_source_admission_debt": true,
+    "tracked_entries": []
+  },
+  "source_bound_claim": false
+}

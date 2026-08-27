@@ -1,0 +1,24 @@
+{
+  "configuration": "P0_P5_CONTROL",
+  "development_only": true,
+  "effect_claim": false,
+  "failures": [
+    "CAPTURE_SCENE_DESCRIPTOR_BINDING_MISMATCH",
+    "P0_SNAPSHOT_MISSING",
+    "RUNNER_OR_CLEANUP_NOT_PASS"
+  ],
+  "first_missing_stage": "P0_SNAPSHOT_MISSING",
+  "result": "FAIL",
+  "run_id": "primary-75001-p0_p5_control",
+  "scene": "PRIMARY",
+  "schema_version": "p4_v2_inverse_corridor_analysis_v1",
+  "seed": 75001,
+  "stage_status": {
+    "ego_final": false,
+    "p0_snapshot": false,
+    "p4_selection": true,
+    "p5_final": false,
+    "p5_runtime": false,
+    "publication": false
+  }
+}

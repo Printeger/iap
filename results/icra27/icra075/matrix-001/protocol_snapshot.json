@@ -1,0 +1,74 @@
+{
+  "ablation_allowed_override_keys": [
+    "planner_enable_p4",
+    "p4.metrics_only",
+    "p4.objective"
+  ],
+  "candidate_confirmatory_sample_size_range": [
+    30,
+    60
+  ],
+  "configuration_overrides": {
+    "LEGACY_INTEGRAL_V1": {
+      "p4.metrics_only": false,
+      "p4.objective": "LEGACY_INTEGRAL_V1",
+      "planner_enable_p4": true
+    },
+    "P0_P4_V2_P5_TREATMENT": {
+      "p4.metrics_only": false,
+      "p4.objective": "PROVIDER_BOTTLENECK_V2",
+      "planner_enable_p4": true
+    },
+    "P0_P5_CONTROL": {
+      "p4.metrics_only": false,
+      "p4.objective": "PROVIDER_BOTTLENECK_V2",
+      "planner_enable_p4": false
+    },
+    "PROVIDER_BOTTLENECK_V2_METRICS_ONLY": {
+      "p4.metrics_only": true,
+      "p4.objective": "PROVIDER_BOTTLENECK_V2",
+      "planner_enable_p4": true
+    }
+  },
+  "development_only": true,
+  "development_seeds": [
+    75001,
+    75002,
+    75003,
+    75004,
+    75005
+  ],
+  "formal_configurations": [
+    "P0_P5_CONTROL",
+    "P0_P4_V2_P5_TREATMENT"
+  ],
+  "formal_freeze": false,
+  "future_held_out_excluded_seeds": [
+    75001,
+    75002,
+    75003,
+    75004,
+    75005
+  ],
+  "goal_m": [
+    12.0,
+    0.0,
+    1.5
+  ],
+  "primary_exploratory_configurations": [
+    "LEGACY_INTEGRAL_V1",
+    "PROVIDER_BOTTLENECK_V2_METRICS_ONLY"
+  ],
+  "sample_count": 200,
+  "scenes": [
+    "PRIMARY",
+    "EXACT_MIRROR",
+    "FLAT_NULL"
+  ],
+  "schema_version": "icra075_exploratory_protocol_v1",
+  "start_m": [
+    -12.0,
+    0.0,
+    1.5
+  ]
+}

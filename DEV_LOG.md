@@ -15,7 +15,7 @@ binding, fixed-density arc approximation and pooled/misnamed power summaries. GR
 40-row development matrix (30 formal control/treatment rows plus 10 PRIMARY ablations), permanent exclusion of
 seeds `75001..75005`, V2 descriptor/runtime-asset binding, forbidden decision-plane checks, 200-point equal-arc
 committed-final analysis, P4-output-independent oracle values, paired identity, ablation isolation, typed
-first-missing stages and deterministic non-freezing power inputs. The final focused suite passes 11/11. Its actual
+first-missing stages and deterministic non-freezing power inputs. The pre-live focused suite passed 11/11. Its actual
 row-analyzer adversary proves identical oracle values for a P4-enabled treatment with its P4 evidence deleted;
 completeness correctly fails in the deletion case. Curved B-spline sampling uses deterministic midpoint-speed
 inversion with a certified arc-position bound derived from the second-derivative control-hull Lipschitz bound.
@@ -48,6 +48,24 @@ sample size or a success verdict.
 Batch source checks allow only the active repository-local matrix output prefix and the protected PDF path while
 rejecting tracked/other-untracked changes. Every initial/per-row/final check also recomputes and compares exact
 regular-file/non-symlink size/hash inventory for the PDF and both hidden retained artifacts.
+
+### Retained matrix-001 orchestration defect
+
+Pushed implementation `07bf4b5aae26d362fc202a703ee69cea2f8363fd` was fetch-confirmed at divergence `0 0`
+before the first new matrix identity. `matrix-001` GPU preflight passed (`nvidia-smi`, `cuInit(0)`, one device),
+then the first capture wrote a valid `icra075_capture_readiness_v1` record in under one second. The runner reused
+the ICRA-072 waiter, which accepted only `icra072_capture_readiness_v1`, and therefore timed out after 10 seconds.
+It exited 5 and cleaned the capture process group. No `launch_command.json` exists, the capture JSONL is empty,
+and no ROS/main flow or scientific row ran.
+
+The retained pre-fix batch manifest prematurely says `ros_started=true` and reports analyzer-derived
+`P0_SNAPSHOT_MISSING`; the row manifest correctly says `CAPTURE_NOT_READY`. These historical bytes are retained
+without rewrite. The repair adds an ICRA-075 readiness waiter, derives `ros_started` only from an actual launch
+command and preserves the runner's earlier typed first-missing stage. A focused executable readiness regression
+raises the final suite to 12/12. Any continuation must use new non-overwriting identity `matrix-002` after this
+repair/evidence commit is pushed and divergence-confirmed. Review then required `ros_started` to derive from the
+row manifest's post-spawn `launch_started=true`, not command-file existence; an explicit spawn-exception adversary
+raises the repaired focused suite to 13/13.
 
 ## 2026-08-27 — ICRA-074 V2 geometry and offline targeted optimization
 

@@ -32,7 +32,47 @@ def load_analyzer():
     return module
 
 
+def load_runner():
+    spec = importlib.util.spec_from_file_location("icra075_runner", RUNNER_PATH)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
 class Icra075ExploratoryContractTest(unittest.TestCase):
+    def test_capture_readiness_uses_icra075_schema(self):
+        runner = load_runner()
+
+        class RunningProcess:
+            @staticmethod
+            def poll():
+                return None
+
+        with tempfile.TemporaryDirectory() as temporary:
+            ready = Path(temporary) / "ready.json"
+            ready.write_text(json.dumps({
+                "schema_version": "icra075_capture_readiness_v1", "ready": True,
+            }))
+            self.assertTrue(runner._wait_capture_ready(RunningProcess(), ready)["ready"])
+
+    def test_batch_ros_started_requires_successful_process_spawn_manifest(self):
+        runner = load_runner()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            row_root = root / "row-1"
+            row_root.mkdir()
+            matrix = [{"run_id": "row-1"}]
+            (row_root / "launch_command.json").write_text("{}\n")
+            (row_root / "run_manifest.json").write_text(json.dumps({
+                "first_missing_stage": "RUNNER_EXCEPTION",
+            }))
+            self.assertFalse(runner._batch_ros_started(root, matrix))
+            (row_root / "run_manifest.json").write_text(json.dumps({
+                "launch_started": True,
+            }))
+            self.assertTrue(runner._batch_ros_started(root, matrix))
+
     def test_runner_uses_v2_development_scene_not_layer1_trigger(self):
         source = RUNNER_PATH.read_text()
         self.assertIn('"scenario:=icra_p0_p4_v2_p5_dev_fixture_v1"', source)
@@ -42,6 +82,12 @@ class Icra075ExploratoryContractTest(unittest.TestCase):
         self.assertNotIn("BASE._capture_source_binding()", source)
         self.assertIn("inventory = CORE.known_retained_inventory()", source)
         self.assertIn('first.get("known_retained_inventory") ==', source)
+        self.assertIn('payload.get("schema_version") == "icra075_capture_readiness_v1"',
+                      source)
+        self.assertNotIn("BASE._wait_ready(capture", source)
+        self.assertNotIn('batch["ros_started"] = True', source)
+        self.assertIn('batch["ros_started"] = _batch_ros_started(root, matrix)', source)
+        self.assertIn('row_manifest.get("first_missing_stage")', source)
         manager_source = (REPO / "src/iap/planner/plan_manage/src/planner_manager.cpp").read_text()
         lineage_function = manager_source.split(
             "bool EGOPlannerManager::recordP4VerticalSliceLineage", 1)[1].split(

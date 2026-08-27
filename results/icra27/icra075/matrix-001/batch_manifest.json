@@ -1,0 +1,1140 @@
+{
+  "attempts": [
+    {
+      "exit_code": 5,
+      "first_missing_stage": "P0_SNAPSHOT_MISSING",
+      "result": "FAIL",
+      "run_id": "primary-75001-p0_p5_control"
+    }
+  ],
+  "development_only": true,
+  "effect_claim": false,
+  "first_missing_stage": "P0_SNAPSHOT_MISSING",
+  "gpu_ready": true,
+  "known_retained_inventory": [
+    {
+      "accepted": true,
+      "expected_sha256": "27aac0ccca0ad0ab573578864cf27b9560d3f819bdeeae62378f8c20e62a8f64",
+      "expected_size_bytes": 72,
+      "observed_sha256": "27aac0ccca0ad0ab573578864cf27b9560d3f819bdeeae62378f8c20e62a8f64",
+      "observed_size_bytes": 72,
+      "path": ".claude/settings.local.json"
+    },
+    {
+      "accepted": true,
+      "expected_sha256": "29a73228c1d58d5c4983dc217230d6cbc6ff6e295a77a004d8e6a207fd242028",
+      "expected_size_bytes": 2962,
+      "observed_sha256": "29a73228c1d58d5c4983dc217230d6cbc6ff6e295a77a004d8e6a207fd242028",
+      "observed_size_bytes": 2962,
+      "path": "src/uav_simulator/local_sensing/CMakeModules/FindEigen.cmake~"
+    },
+    {
+      "accepted": true,
+      "expected_sha256": "1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6",
+      "expected_size_bytes": 243368,
+      "observed_sha256": "1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6",
+      "observed_size_bytes": 243368,
+      "path": "docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf"
+    }
+  ],
+  "matrix": [
+    {
+      "comparison_kind": "FORMAL_ARM",
+      "configuration": "P0_P5_CONTROL",
+      "descriptor_sha256": "41ab7001c7c60e78cdcf8a670efdcba7545bcd7c93e06081745a090b57f0f06d",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": false
+      },
+      "run_id": "primary-75001-p0_p5_control",
+      "scene": "PRIMARY",
+      "scene_identity": "icra074-primary-seed-73001",
+      "seed": 75001,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "FORMAL_ARM",
+      "configuration": "P0_P4_V2_P5_TREATMENT",
+      "descriptor_sha256": "41ab7001c7c60e78cdcf8a670efdcba7545bcd7c93e06081745a090b57f0f06d",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": true
+      },
+      "run_id": "primary-75001-p0_p4_v2_p5_treatment",
+      "scene": "PRIMARY",
+      "scene_identity": "icra074-primary-seed-73001",
+      "seed": 75001,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "FORMAL_ARM",
+      "configuration": "P0_P5_CONTROL",
+      "descriptor_sha256": "41ab7001c7c60e78cdcf8a670efdcba7545bcd7c93e06081745a090b57f0f06d",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": false
+      },
+      "run_id": "primary-75002-p0_p5_control",
+      "scene": "PRIMARY",
+      "scene_identity": "icra074-primary-seed-73001",
+      "seed": 75002,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "FORMAL_ARM",
+      "configuration": "P0_P4_V2_P5_TREATMENT",
+      "descriptor_sha256": "41ab7001c7c60e78cdcf8a670efdcba7545bcd7c93e06081745a090b57f0f06d",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": true
+      },
+      "run_id": "primary-75002-p0_p4_v2_p5_treatment",
+      "scene": "PRIMARY",
+      "scene_identity": "icra074-primary-seed-73001",
+      "seed": 75002,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "FORMAL_ARM",
+      "configuration": "P0_P5_CONTROL",
+      "descriptor_sha256": "41ab7001c7c60e78cdcf8a670efdcba7545bcd7c93e06081745a090b57f0f06d",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": false
+      },
+      "run_id": "primary-75003-p0_p5_control",
+      "scene": "PRIMARY",
+      "scene_identity": "icra074-primary-seed-73001",
+      "seed": 75003,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "FORMAL_ARM",
+      "configuration": "P0_P4_V2_P5_TREATMENT",
+      "descriptor_sha256": "41ab7001c7c60e78cdcf8a670efdcba7545bcd7c93e06081745a090b57f0f06d",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": true
+      },
+      "run_id": "primary-75003-p0_p4_v2_p5_treatment",
+      "scene": "PRIMARY",
+      "scene_identity": "icra074-primary-seed-73001",
+      "seed": 75003,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "FORMAL_ARM",
+      "configuration": "P0_P5_CONTROL",
+      "descriptor_sha256": "41ab7001c7c60e78cdcf8a670efdcba7545bcd7c93e06081745a090b57f0f06d",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": false
+      },
+      "run_id": "primary-75004-p0_p5_control",
+      "scene": "PRIMARY",
+      "scene_identity": "icra074-primary-seed-73001",
+      "seed": 75004,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "FORMAL_ARM",
+      "configuration": "P0_P4_V2_P5_TREATMENT",
+      "descriptor_sha256": "41ab7001c7c60e78cdcf8a670efdcba7545bcd7c93e06081745a090b57f0f06d",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": true
+      },
+      "run_id": "primary-75004-p0_p4_v2_p5_treatment",
+      "scene": "PRIMARY",
+      "scene_identity": "icra074-primary-seed-73001",
+      "seed": 75004,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "FORMAL_ARM",
+      "configuration": "P0_P5_CONTROL",
+      "descriptor_sha256": "41ab7001c7c60e78cdcf8a670efdcba7545bcd7c93e06081745a090b57f0f06d",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": false
+      },
+      "run_id": "primary-75005-p0_p5_control",
+      "scene": "PRIMARY",
+      "scene_identity": "icra074-primary-seed-73001",
+      "seed": 75005,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "FORMAL_ARM",
+      "configuration": "P0_P4_V2_P5_TREATMENT",
+      "descriptor_sha256": "41ab7001c7c60e78cdcf8a670efdcba7545bcd7c93e06081745a090b57f0f06d",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": true
+      },
+      "run_id": "primary-75005-p0_p4_v2_p5_treatment",
+      "scene": "PRIMARY",
+      "scene_identity": "icra074-primary-seed-73001",
+      "seed": 75005,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "FORMAL_ARM",
+      "configuration": "P0_P5_CONTROL",
+      "descriptor_sha256": "3bd25208dba3bbd03857104758878e30d647b7f8bfdfc43e7654f78b569caf33",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": false
+      },
+      "run_id": "exact_mirror-75001-p0_p5_control",
+      "scene": "EXACT_MIRROR",
+      "scene_identity": "icra074-exact_mirror-seed-73001",
+      "seed": 75001,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "FORMAL_ARM",
+      "configuration": "P0_P4_V2_P5_TREATMENT",
+      "descriptor_sha256": "3bd25208dba3bbd03857104758878e30d647b7f8bfdfc43e7654f78b569caf33",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": true
+      },
+      "run_id": "exact_mirror-75001-p0_p4_v2_p5_treatment",
+      "scene": "EXACT_MIRROR",
+      "scene_identity": "icra074-exact_mirror-seed-73001",
+      "seed": 75001,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "FORMAL_ARM",
+      "configuration": "P0_P5_CONTROL",
+      "descriptor_sha256": "3bd25208dba3bbd03857104758878e30d647b7f8bfdfc43e7654f78b569caf33",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": false
+      },
+      "run_id": "exact_mirror-75002-p0_p5_control",
+      "scene": "EXACT_MIRROR",
+      "scene_identity": "icra074-exact_mirror-seed-73001",
+      "seed": 75002,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "FORMAL_ARM",
+      "configuration": "P0_P4_V2_P5_TREATMENT",
+      "descriptor_sha256": "3bd25208dba3bbd03857104758878e30d647b7f8bfdfc43e7654f78b569caf33",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": true
+      },
+      "run_id": "exact_mirror-75002-p0_p4_v2_p5_treatment",
+      "scene": "EXACT_MIRROR",
+      "scene_identity": "icra074-exact_mirror-seed-73001",
+      "seed": 75002,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "FORMAL_ARM",
+      "configuration": "P0_P5_CONTROL",
+      "descriptor_sha256": "3bd25208dba3bbd03857104758878e30d647b7f8bfdfc43e7654f78b569caf33",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": false
+      },
+      "run_id": "exact_mirror-75003-p0_p5_control",
+      "scene": "EXACT_MIRROR",
+      "scene_identity": "icra074-exact_mirror-seed-73001",
+      "seed": 75003,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "FORMAL_ARM",
+      "configuration": "P0_P4_V2_P5_TREATMENT",
+      "descriptor_sha256": "3bd25208dba3bbd03857104758878e30d647b7f8bfdfc43e7654f78b569caf33",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": true
+      },
+      "run_id": "exact_mirror-75003-p0_p4_v2_p5_treatment",
+      "scene": "EXACT_MIRROR",
+      "scene_identity": "icra074-exact_mirror-seed-73001",
+      "seed": 75003,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "FORMAL_ARM",
+      "configuration": "P0_P5_CONTROL",
+      "descriptor_sha256": "3bd25208dba3bbd03857104758878e30d647b7f8bfdfc43e7654f78b569caf33",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": false
+      },
+      "run_id": "exact_mirror-75004-p0_p5_control",
+      "scene": "EXACT_MIRROR",
+      "scene_identity": "icra074-exact_mirror-seed-73001",
+      "seed": 75004,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "FORMAL_ARM",
+      "configuration": "P0_P4_V2_P5_TREATMENT",
+      "descriptor_sha256": "3bd25208dba3bbd03857104758878e30d647b7f8bfdfc43e7654f78b569caf33",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": true
+      },
+      "run_id": "exact_mirror-75004-p0_p4_v2_p5_treatment",
+      "scene": "EXACT_MIRROR",
+      "scene_identity": "icra074-exact_mirror-seed-73001",
+      "seed": 75004,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "FORMAL_ARM",
+      "configuration": "P0_P5_CONTROL",
+      "descriptor_sha256": "3bd25208dba3bbd03857104758878e30d647b7f8bfdfc43e7654f78b569caf33",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": false
+      },
+      "run_id": "exact_mirror-75005-p0_p5_control",
+      "scene": "EXACT_MIRROR",
+      "scene_identity": "icra074-exact_mirror-seed-73001",
+      "seed": 75005,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "FORMAL_ARM",
+      "configuration": "P0_P4_V2_P5_TREATMENT",
+      "descriptor_sha256": "3bd25208dba3bbd03857104758878e30d647b7f8bfdfc43e7654f78b569caf33",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": true
+      },
+      "run_id": "exact_mirror-75005-p0_p4_v2_p5_treatment",
+      "scene": "EXACT_MIRROR",
+      "scene_identity": "icra074-exact_mirror-seed-73001",
+      "seed": 75005,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "FORMAL_ARM",
+      "configuration": "P0_P5_CONTROL",
+      "descriptor_sha256": "89074561a7263268e121c2439ceccaca2b3c7285f665432ebdc07ab5668e8513",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": false
+      },
+      "run_id": "flat_null-75001-p0_p5_control",
+      "scene": "FLAT_NULL",
+      "scene_identity": "icra074-flat_null-seed-73001",
+      "seed": 75001,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "FORMAL_ARM",
+      "configuration": "P0_P4_V2_P5_TREATMENT",
+      "descriptor_sha256": "89074561a7263268e121c2439ceccaca2b3c7285f665432ebdc07ab5668e8513",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": true
+      },
+      "run_id": "flat_null-75001-p0_p4_v2_p5_treatment",
+      "scene": "FLAT_NULL",
+      "scene_identity": "icra074-flat_null-seed-73001",
+      "seed": 75001,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "FORMAL_ARM",
+      "configuration": "P0_P5_CONTROL",
+      "descriptor_sha256": "89074561a7263268e121c2439ceccaca2b3c7285f665432ebdc07ab5668e8513",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": false
+      },
+      "run_id": "flat_null-75002-p0_p5_control",
+      "scene": "FLAT_NULL",
+      "scene_identity": "icra074-flat_null-seed-73001",
+      "seed": 75002,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "FORMAL_ARM",
+      "configuration": "P0_P4_V2_P5_TREATMENT",
+      "descriptor_sha256": "89074561a7263268e121c2439ceccaca2b3c7285f665432ebdc07ab5668e8513",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": true
+      },
+      "run_id": "flat_null-75002-p0_p4_v2_p5_treatment",
+      "scene": "FLAT_NULL",
+      "scene_identity": "icra074-flat_null-seed-73001",
+      "seed": 75002,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "FORMAL_ARM",
+      "configuration": "P0_P5_CONTROL",
+      "descriptor_sha256": "89074561a7263268e121c2439ceccaca2b3c7285f665432ebdc07ab5668e8513",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": false
+      },
+      "run_id": "flat_null-75003-p0_p5_control",
+      "scene": "FLAT_NULL",
+      "scene_identity": "icra074-flat_null-seed-73001",
+      "seed": 75003,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "FORMAL_ARM",
+      "configuration": "P0_P4_V2_P5_TREATMENT",
+      "descriptor_sha256": "89074561a7263268e121c2439ceccaca2b3c7285f665432ebdc07ab5668e8513",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": true
+      },
+      "run_id": "flat_null-75003-p0_p4_v2_p5_treatment",
+      "scene": "FLAT_NULL",
+      "scene_identity": "icra074-flat_null-seed-73001",
+      "seed": 75003,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "FORMAL_ARM",
+      "configuration": "P0_P5_CONTROL",
+      "descriptor_sha256": "89074561a7263268e121c2439ceccaca2b3c7285f665432ebdc07ab5668e8513",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": false
+      },
+      "run_id": "flat_null-75004-p0_p5_control",
+      "scene": "FLAT_NULL",
+      "scene_identity": "icra074-flat_null-seed-73001",
+      "seed": 75004,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "FORMAL_ARM",
+      "configuration": "P0_P4_V2_P5_TREATMENT",
+      "descriptor_sha256": "89074561a7263268e121c2439ceccaca2b3c7285f665432ebdc07ab5668e8513",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": true
+      },
+      "run_id": "flat_null-75004-p0_p4_v2_p5_treatment",
+      "scene": "FLAT_NULL",
+      "scene_identity": "icra074-flat_null-seed-73001",
+      "seed": 75004,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "FORMAL_ARM",
+      "configuration": "P0_P5_CONTROL",
+      "descriptor_sha256": "89074561a7263268e121c2439ceccaca2b3c7285f665432ebdc07ab5668e8513",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": false
+      },
+      "run_id": "flat_null-75005-p0_p5_control",
+      "scene": "FLAT_NULL",
+      "scene_identity": "icra074-flat_null-seed-73001",
+      "seed": 75005,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "FORMAL_ARM",
+      "configuration": "P0_P4_V2_P5_TREATMENT",
+      "descriptor_sha256": "89074561a7263268e121c2439ceccaca2b3c7285f665432ebdc07ab5668e8513",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": true
+      },
+      "run_id": "flat_null-75005-p0_p4_v2_p5_treatment",
+      "scene": "FLAT_NULL",
+      "scene_identity": "icra074-flat_null-seed-73001",
+      "seed": 75005,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "EXPLORATORY_ABLATION",
+      "configuration": "LEGACY_INTEGRAL_V1",
+      "descriptor_sha256": "41ab7001c7c60e78cdcf8a670efdcba7545bcd7c93e06081745a090b57f0f06d",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "LEGACY_INTEGRAL_V1",
+        "planner_enable_p4": true
+      },
+      "run_id": "primary-75001-legacy_integral_v1",
+      "scene": "PRIMARY",
+      "scene_identity": "icra074-primary-seed-73001",
+      "seed": 75001,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "EXPLORATORY_ABLATION",
+      "configuration": "PROVIDER_BOTTLENECK_V2_METRICS_ONLY",
+      "descriptor_sha256": "41ab7001c7c60e78cdcf8a670efdcba7545bcd7c93e06081745a090b57f0f06d",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": true,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": true
+      },
+      "run_id": "primary-75001-provider_bottleneck_v2_metrics_only",
+      "scene": "PRIMARY",
+      "scene_identity": "icra074-primary-seed-73001",
+      "seed": 75001,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "EXPLORATORY_ABLATION",
+      "configuration": "LEGACY_INTEGRAL_V1",
+      "descriptor_sha256": "41ab7001c7c60e78cdcf8a670efdcba7545bcd7c93e06081745a090b57f0f06d",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "LEGACY_INTEGRAL_V1",
+        "planner_enable_p4": true
+      },
+      "run_id": "primary-75002-legacy_integral_v1",
+      "scene": "PRIMARY",
+      "scene_identity": "icra074-primary-seed-73001",
+      "seed": 75002,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "EXPLORATORY_ABLATION",
+      "configuration": "PROVIDER_BOTTLENECK_V2_METRICS_ONLY",
+      "descriptor_sha256": "41ab7001c7c60e78cdcf8a670efdcba7545bcd7c93e06081745a090b57f0f06d",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": true,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": true
+      },
+      "run_id": "primary-75002-provider_bottleneck_v2_metrics_only",
+      "scene": "PRIMARY",
+      "scene_identity": "icra074-primary-seed-73001",
+      "seed": 75002,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "EXPLORATORY_ABLATION",
+      "configuration": "LEGACY_INTEGRAL_V1",
+      "descriptor_sha256": "41ab7001c7c60e78cdcf8a670efdcba7545bcd7c93e06081745a090b57f0f06d",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "LEGACY_INTEGRAL_V1",
+        "planner_enable_p4": true
+      },
+      "run_id": "primary-75003-legacy_integral_v1",
+      "scene": "PRIMARY",
+      "scene_identity": "icra074-primary-seed-73001",
+      "seed": 75003,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "EXPLORATORY_ABLATION",
+      "configuration": "PROVIDER_BOTTLENECK_V2_METRICS_ONLY",
+      "descriptor_sha256": "41ab7001c7c60e78cdcf8a670efdcba7545bcd7c93e06081745a090b57f0f06d",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": true,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": true
+      },
+      "run_id": "primary-75003-provider_bottleneck_v2_metrics_only",
+      "scene": "PRIMARY",
+      "scene_identity": "icra074-primary-seed-73001",
+      "seed": 75003,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "EXPLORATORY_ABLATION",
+      "configuration": "LEGACY_INTEGRAL_V1",
+      "descriptor_sha256": "41ab7001c7c60e78cdcf8a670efdcba7545bcd7c93e06081745a090b57f0f06d",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "LEGACY_INTEGRAL_V1",
+        "planner_enable_p4": true
+      },
+      "run_id": "primary-75004-legacy_integral_v1",
+      "scene": "PRIMARY",
+      "scene_identity": "icra074-primary-seed-73001",
+      "seed": 75004,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "EXPLORATORY_ABLATION",
+      "configuration": "PROVIDER_BOTTLENECK_V2_METRICS_ONLY",
+      "descriptor_sha256": "41ab7001c7c60e78cdcf8a670efdcba7545bcd7c93e06081745a090b57f0f06d",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": true,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": true
+      },
+      "run_id": "primary-75004-provider_bottleneck_v2_metrics_only",
+      "scene": "PRIMARY",
+      "scene_identity": "icra074-primary-seed-73001",
+      "seed": 75004,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "EXPLORATORY_ABLATION",
+      "configuration": "LEGACY_INTEGRAL_V1",
+      "descriptor_sha256": "41ab7001c7c60e78cdcf8a670efdcba7545bcd7c93e06081745a090b57f0f06d",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "LEGACY_INTEGRAL_V1",
+        "planner_enable_p4": true
+      },
+      "run_id": "primary-75005-legacy_integral_v1",
+      "scene": "PRIMARY",
+      "scene_identity": "icra074-primary-seed-73001",
+      "seed": 75005,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "EXPLORATORY_ABLATION",
+      "configuration": "PROVIDER_BOTTLENECK_V2_METRICS_ONLY",
+      "descriptor_sha256": "41ab7001c7c60e78cdcf8a670efdcba7545bcd7c93e06081745a090b57f0f06d",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": true,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": true
+      },
+      "run_id": "primary-75005-provider_bottleneck_v2_metrics_only",
+      "scene": "PRIMARY",
+      "scene_identity": "icra074-primary-seed-73001",
+      "seed": 75005,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    }
+  ],
+  "matrix_cardinality": 40,
+  "result": "FAIL",
+  "ros_started": true,
+  "scene_binding": {
+    "decision_plane_inputs": [
+      "immutable_p0_snapshot",
+      "ordinary_occupancy"
+    ],
+    "descriptor_sha256": {
+      "EXACT_MIRROR": "3bd25208dba3bbd03857104758878e30d647b7f8bfdfc43e7654f78b569caf33",
+      "FLAT_NULL": "89074561a7263268e121c2439ceccaca2b3c7285f665432ebdc07ab5668e8513",
+      "PRIMARY": "41ab7001c7c60e78cdcf8a670efdcba7545bcd7c93e06081745a090b57f0f06d"
+    },
+    "forbidden_decision_fields_present": [],
+    "gnss_asset_sha256": "6fac5a21d8bb491e7ac0e0b098b8bf3c00e1416b74e0019791a23b868fd05671",
+    "gnss_mask_enabled": {
+      "EXACT_MIRROR": true,
+      "FLAT_NULL": false,
+      "PRIMARY": true
+    },
+    "map_asset_sha256": "48736b2d76882c2cfdc41ff072286e29611ea986ec84d4c3ad8618d9a1a3f7b4",
+    "result": "PASS",
+    "runtime_asset_contains_route_or_oracle_truth": false,
+    "schema_version": "icra075_scene_asset_binding_v1"
+  },
+  "schema_version": "icra075_development_matrix_v1",
+  "skipped_icra073_source_admission_debt": true,
+  "source_binding": {
+    "accepted": true,
+    "allowed_repository_output_prefix": "results/icra27/icra075/matrix-001/",
+    "checks": {
+      "head": {
+        "argv": [
+          "git",
+          "rev-parse",
+          "HEAD"
+        ],
+        "exit_code": 0,
+        "stderr": "",
+        "stdout": "07bf4b5aae26d362fc202a703ee69cea2f8363fd\n"
+      },
+      "origin": {
+        "argv": [
+          "git",
+          "rev-parse",
+          "origin/dev/icra"
+        ],
+        "exit_code": 0,
+        "stderr": "",
+        "stdout": "07bf4b5aae26d362fc202a703ee69cea2f8363fd\n"
+      },
+      "status": {
+        "argv": [
+          "git",
+          "status",
+          "--porcelain=v1",
+          "--untracked-files=all"
+        ],
+        "exit_code": 0,
+        "stderr": "",
+        "stdout": "?? docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf\n"
+      }
+    },
+    "head_commit": "07bf4b5aae26d362fc202a703ee69cea2f8363fd",
+    "known_retained_inventory": [
+      {
+        "accepted": true,
+        "expected_sha256": "27aac0ccca0ad0ab573578864cf27b9560d3f819bdeeae62378f8c20e62a8f64",
+        "expected_size_bytes": 72,
+        "observed_sha256": "27aac0ccca0ad0ab573578864cf27b9560d3f819bdeeae62378f8c20e62a8f64",
+        "observed_size_bytes": 72,
+        "path": ".claude/settings.local.json"
+      },
+      {
+        "accepted": true,
+        "expected_sha256": "29a73228c1d58d5c4983dc217230d6cbc6ff6e295a77a004d8e6a207fd242028",
+        "expected_size_bytes": 2962,
+        "observed_sha256": "29a73228c1d58d5c4983dc217230d6cbc6ff6e295a77a004d8e6a207fd242028",
+        "observed_size_bytes": 2962,
+        "path": "src/uav_simulator/local_sensing/CMakeModules/FindEigen.cmake~"
+      },
+      {
+        "accepted": true,
+        "expected_sha256": "1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6",
+        "expected_size_bytes": 243368,
+        "observed_sha256": "1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6",
+        "observed_size_bytes": 243368,
+        "path": "docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf"
+      }
+    ],
+    "origin_dev_icra_commit": "07bf4b5aae26d362fc202a703ee69cea2f8363fd",
+    "rejected_untracked_paths": [],
+    "schema_version": "icra075_development_source_binding_v1",
+    "skipped_icra073_source_admission_debt": true,
+    "tracked_entries": []
+  },
+  "source_bound_claim": false,
+  "task": "ICRA-075"
+}
