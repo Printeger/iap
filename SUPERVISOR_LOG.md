@@ -42,8 +42,14 @@ Verdict: **REQUEST_CHANGES / BLOCKED — one High missing canonical contract; no
 
 ### Supervisor window disposition
 
-- **Pending mandatory post-push audit.** Final disposition and handoff anchor follow only after the route
-  decision/review commit is pushed and divergence is reconfirmed.
+- Route/review commit `0ac9482c17faa90bea0b8d66ba952b7c076c8d7b` was pushed normally; pre-push passed
+  and fetch reconfirmed divergence `0 0`. The normal commit attempt hit `BUILDER_ROUTE_LOCK_STAGED` because the
+  prior active role was DEEPSEEK; Supervisor used the controlled section 8.6 `--no-verify` path after full route
+  consistency PASS and explicit staging of only the 13 synchronized authority/adjudication documents.
+- **`ROTATE_RECOMMENDED`**. Reason: `USER_DECISION_003_GATE_CHANGE_ICRA072B_TO_ICRA073`. This is an explicit
+  user route transition, changes the active Gate/scope from blocked Layer 2 to Layer 3 and authorizes live
+  diagnostics. A fresh Supervisor window must later review ICRA-073 from repository authority. Rotation does not
+  change `active_role=DEEPSEEK` or broaden `NEXT_TASK.md`.
 
 ## 2026-08-27 — ICRA-072B exact-harness Review REQUEST_CHANGES; two-artifact admission issued
 

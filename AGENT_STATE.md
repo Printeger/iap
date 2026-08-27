@@ -40,13 +40,13 @@ recovery_roadmap: docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP
 four_layer_workflow: docs/icra27/ICRA_FOUR_LAYER_DEVELOPMENT_WORKFLOW.md
 guard_plan: docs/icra27/ICRA_CROSS_LAYER_GUARD_PLAN.md
 artifact_retention: ALL_ICRA072_EVIDENCE_SHARED_ROOTS_HIDDEN_USER_ARTIFACTS_AND_PROTECTED_PDF_RETAINED
-window_disposition: PENDING_POST_PUSH_AUDIT
-rotation_reason: PENDING_POST_PUSH_AUDIT
-window_handoff_anchor: PENDING_POST_PUSH_AUDIT
+window_disposition: ROTATE_RECOMMENDED
+rotation_reason: USER_DECISION_003_GATE_CHANGE_ICRA072B_TO_ICRA073
+window_handoff_anchor: 0ac9482c17faa90bea0b8d66ba952b7c076c8d7b
 window_next_role: SUPERVISOR
 window_next_review_task: ICRA-073
 window_bootstrap_source: REPOSITORY_AUTHORITY_ONLY
-updated_utc: 2026-08-27T09:00:00Z
+updated_utc: 2026-08-27T09:10:00Z
 ```
 
 Builder HEAD `a30468e4ca991dacfe24a10c45040c51efd74ce7` correctly stops ICRA-072B fail closed after ignore-blind
