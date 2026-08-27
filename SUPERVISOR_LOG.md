@@ -52,8 +52,14 @@ Verdict: **BLOCKED / NOT PASS — one frozen-contract blocker; no Builder bypass
 
 ### Supervisor window disposition
 
-- Pending the required post-push audit. This section will be finalized only after the Review changeset is pushed
-  and becomes the authoritative handoff.
+- Review changeset `89d602c285120dd5ef81be5ba9e037dc20a4ad60` was pushed; pre-push passed and fetch confirmed
+  divergence `0 0`. The normal commit attempt hit `BUILDER_SUPERVISOR_FILE_STAGED` because the pre-commit
+  lifecycle check read the prior DEEPSEEK handoff; after route consistency PASS and exact staged-file inspection,
+  Supervisor used the controlled section 8.6 `--no-verify` path. The protected PDF remained untracked.
+- **`ROTATE_RECOMMENDED`**. Reason: `CONTEXT_COMPACTED_AND_ICRA073_USER_DECISION_BOUNDARY`. This Review depended
+  on compacted historical context and ends at a route-owner choice between fixture revision and bypass. A fresh
+  Supervisor window must consume the user's explicit choice from the latest pushed authority; rotation itself
+  authorizes no Builder task and leaves `active_role=SUPERVISOR`, `next_task=NONE`.
 
 ## 2026-08-27 — ICRA-072B BLOCKED; user-accepted bypass activates ICRA-073
 

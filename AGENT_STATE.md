@@ -41,13 +41,13 @@ recovery_roadmap: docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP
 four_layer_workflow: docs/icra27/ICRA_FOUR_LAYER_DEVELOPMENT_WORKFLOW.md
 guard_plan: docs/icra27/ICRA_CROSS_LAYER_GUARD_PLAN.md
 artifact_retention: ALL_ICRA072_EVIDENCE_SHARED_ROOTS_HIDDEN_USER_ARTIFACTS_AND_PROTECTED_PDF_RETAINED
-window_disposition: PENDING_POST_PUSH_AUDIT
-rotation_reason: PENDING_POST_PUSH_AUDIT
-window_handoff_anchor: PENDING_REVIEW_PUSH
+window_disposition: ROTATE_RECOMMENDED
+rotation_reason: CONTEXT_COMPACTED_AND_ICRA073_USER_DECISION_BOUNDARY
+window_handoff_anchor: 89d602c285120dd5ef81be5ba9e037dc20a4ad60
 window_next_role: SUPERVISOR
-window_next_review_task: ICRA-073
+window_next_review_task: ICRA-073_USER_DECISION_HANDLING
 window_bootstrap_source: REPOSITORY_AUTHORITY_ONLY
-updated_utc: 2026-08-27T10:05:02Z
+updated_utc: 2026-08-27T10:21:49Z
 ```
 
 Builder HEAD `4f5bb302920f869e45a8ac240f192a81f28162c7` correctly stops ICRA-073 fail closed before live work. The
