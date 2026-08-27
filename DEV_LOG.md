@@ -25,6 +25,12 @@ the six authorized build/install package directories preceded the canonical shar
 finished successfully using `/home/dev/ws_iap/{build,install,log}`. No held-out path, ROS, GPU, live flow,
 ICRA-077, qualification or campaign work ran. ICRA-075 remains BLOCKED/user-bypassed/NOT PASS at 0/40.
 
+Implementation `acdb35e8d2c22fffa5dc8144abcb724f70420722` was pushed and fetch-confirmed at divergence `0 0`
+before the sole fresh freeze output was created. `results/icra27/icra076/preregistration-freeze-001.json` binds
+119 relevant tracked source entries, 767 exact shared-install entries and all 360 execution rows; independent
+freeze validation passes. The 339,801-byte record has SHA-256
+`51464dff7fd4e0254cb5eb86929a064dd04909e768cc220637265381b7e60582`.
+
 ## 2026-08-27 — ICRA-075 bounded fail-closed repair and P5 compatibility diagnosis
 
 Requirements: IAP-RQ-320, IAP-RQ-321, IAP-RQ-400, IAP-RQ-410,
