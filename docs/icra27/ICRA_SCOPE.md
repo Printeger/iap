@@ -12,10 +12,10 @@ runs and incrementally reuse `/home/dev/ws_iap/{build,install,log}` until one re
 Layer 2 then automates the success and fail-closed boundaries. ICRA-073..075 form the inverse-corridor diagnostic
 and improvement layer. ICRA-076..079 alone enable formal freeze, held-out and qualification controls.
 
-Current Layer 2 Review disposition (2026-08-27): trust and skip/disabled repairs are accepted, but canonical PASS
-is absent because exact isolated status exposed retained `.claude/settings.local.json`. The only active scope is
-exact path/type/size/hash admission of that non-runtime local agent-control artifact beside the protected PDF,
-followed by the still-available `repair-001` result. ICRA-073 remains unauthorized.
+User decision `USER-ICRA-ROUTE-20260827-003` explicitly accepts the blocked ICRA-072B stabilization/source-
+admission debt and directs progression regardless. ICRA-072B remains BLOCKED/NOT PASS; the active scope is now
+ICRA-073 Layer 3 inverse-corridor effect diagnostics. This bypass does not support a scientific or qualification
+claim and does not weaken runtime safety or formal Layer 4 controls.
 
 The pre-workflow `-003` result is archived as found, not passed: P0 and P4 selection ran, but terminal lineage,
 P5 and normal publication remained absent. Exact regenerable historical build/install products may be retired
@@ -33,7 +33,7 @@ same task, then diagnose effect size and optimize. ICRA-071 repair is retained a
 and makes no effect, qualification or campaign claim. GPU preflight, required-process health, occupancy/EGO/P5
 authority, fail-closed behavior and retained-artifact protection remain mandatory.
 
-## Frozen inverse-corridor diagnostic design — implementation still deferred
+## Frozen inverse-corridor diagnostic design — ICRA-073 active
 
 `docs/icra27/dev/ICRA_P4_V2_INVERSE_CORRIDOR_FIXTURE.md` freezes
 `ICRA_P4_V2_INVERSE_CORRIDOR_FIXTURE_V1`: PRIMARY, EXACT_MIRROR and FLAT_NULL construct two non-straight,
@@ -41,10 +41,9 @@ occupancy-feasible corridors and evaluate the committed final B-spline with an i
 The oracle is an evaluation-only bypass. Its centre lines, tube labels and ground truth are forbidden inputs to
 P0, P4, EGO and P5 decisions.
 
-The design is queued, not implemented. ICRA-072A Layer 1 passed Review with source-bound `run-024`; its separately
+The design is now authorized for implementation by user decision 003. ICRA-072A Layer 1 passed Review with source-bound `run-024`; its separately
 named development selection trigger is not the inverse-corridor scientific fixture and provides no effect
-evidence. The active ICRA-072B repair may only complete exact two-artifact source admission and retain a fresh
-non-overwriting canonical result. Only a later ICRA-072B Review PASS may close ICRA-072 and issue ICRA-073 to implement the frozen
+evidence. ICRA-072B remains a disclosed blocked debt. Active ICRA-073 implements the frozen
 three-variant fixture, paired control/treatment diagnostics and independent oracle. ICRA-073 must measure
 without tuning; targeted changes from its retained results belong exclusively to ICRA-074.
 

@@ -1,8 +1,21 @@
 # ICRA P0 -> P4 -> P5 deviation audit and scientific recovery roadmap
 
 Status: **USER-OWNED ROUTE LOCK / DEVELOPMENT-FIRST P4-v2 END-TO-END RECOVERY**
-Decision date: 2026-08-26
+Decision date: 2026-08-27
 Requirements: `IAP-RQ-000`, `IAP-RQ-423`, `IAP-RQ-424`
+
+## User-directed ICRA-072B bypass and ICRA-073 activation — 2026-08-27
+
+User decision `USER-ICRA-ROUTE-20260827-003`, bound to pushed approval anchor
+`a30468e4ca991dacfe24a10c45040c51efd74ce7`, explicitly directs development to proceed to ICRA-073 regardless
+of the remaining ICRA-072B source-admission blocker. ICRA-072B is retained as `BLOCKED / USER-ACCEPTED BYPASS`,
+not relabelled PASS. Its missing canonical result remains engineering debt and cannot support a scientific,
+qualification or campaign claim.
+
+The route, required modules, research question, claims, arms, scenes and ordered task names remain unchanged.
+Only the transition precondition from ICRA-072B to ICRA-073 is waived by the route owner. Runtime occupancy/EGO/
+P5 authority, GPU/process/cleanup fail-closed behavior, oracle isolation, artifact retention and every Layer 4
+formal control remain mandatory.
 
 ## Development-first acceleration decision — 2026-08-26
 
@@ -87,10 +100,10 @@ its protected research fields.
   "fallback_policy": "PROPOSAL_ONLY_USER_ACTIVATION_REQUIRED",
   "scientific_no_go_transition": "BLOCKED_AWAITING_USER_RESEARCH_DECISION",
   "campaign_activation": "USER_APPROVAL_AFTER_ICRA079_REVIEW_PASS",
-  "approval_anchor": "b24a330d79d6e85e8080cf2a359bb1a18765e5a5",
-  "user_decision_id": "USER-ICRA-ROUTE-20260826-002",
+  "approval_anchor": "a30468e4ca991dacfe24a10c45040c51efd74ce7",
+  "user_decision_id": "USER-ICRA-ROUTE-20260827-003",
   "protected_transition": {
-    "from_anchor": "b24a330d79d6e85e8080cf2a359bb1a18765e5a5",
+    "from_anchor": "a30468e4ca991dacfe24a10c45040c51efd74ce7",
     "changes": [
       {
         "field": "route_owner",
@@ -169,10 +182,9 @@ its protected research fields.
       {
         "field": "gate_sequence",
         "old": [
-          "ICRA-071_ROUTE_GUARD",
-          "ICRA-072_RISK_DECOMPOSITION_AND_REPLAY",
-          "ICRA-073_CONTROLLABILITY_FIXTURES",
-          "ICRA-074_P4_V2_SEARCH",
+          "ICRA-072_END_TO_END_VERTICAL_SLICE_AND_LIVE_SMOKE",
+          "ICRA-073_EFFECT_DIAGNOSTICS",
+          "ICRA-074_TARGETED_OPTIMIZATION",
           "ICRA-075_EXPLORATORY_AND_POWER_INPUTS",
           "ICRA-076_PREREGISTRATION_FREEZE",
           "ICRA-077_HELD_OUT_CONFIRMATION",
@@ -212,11 +224,11 @@ its protected research fields.
     ]
   },
   "user_decision": {
-    "route_disposition": "DEVELOPMENT_FIRST_END_TO_END_VERTICAL_SLICE_BEFORE_EFFECT_OPTIMIZATION",
+    "route_disposition": "USER_ACCEPTED_ICRA072B_BLOCKED_BYPASS_TO_ICRA073_EFFECT_DIAGNOSTICS",
     "p0_p5_disposition": "RETAIN_AS_MATCHED_CONTROL_ASSET",
     "p4_primary_endpoint": "MAX_PROVIDER_ONLY_INTERIOR_RISK",
     "confirmatory_size": "PREREGISTERED_ADAPTIVE_30_TO_60_INDEPENDENT_SEED_RUNS_PER_SCENE",
-    "enforcement": "LEAN_MANDATORY_SAFETY_GATES_WITH_DEFERRED_SCIENCE_REVIEWS"
+    "enforcement": "MANDATORY_RUNTIME_SAFETY_WITH_ICRA072B_STABILIZATION_DEBT_ACCEPTED_FOR_LAYER3"
   },
   "guard_strength": "ACCIDENT_PREVENTION_NOT_A_SECURITY_BOUNDARY"
 }
@@ -477,17 +489,16 @@ non-bypassable enforcement requires a protected remote branch and an independent
 
 ## 9. Corrective roadmap and gates
 
-The active execution grouping is `docs/icra27/ICRA_FOUR_LAYER_DEVELOPMENT_WORKFLOW.md`: ICRA-072A iterative
-integration, ICRA-072B stabilization, ICRA-073..075 effect diagnosis/improvement and ICRA-076..079 formal
-verification. This grouping leaves the machine-readable route lock and gate sequence above byte-for-byte
-unchanged. Development one-shot and per-task build/install controls do not apply in Layers 1–3.
+The active execution grouping is `docs/icra27/ICRA_FOUR_LAYER_DEVELOPMENT_WORKFLOW.md`: ICRA-072A integration,
+blocked/user-bypassed ICRA-072B, active ICRA-073 effect diagnostics, ICRA-074..075 improvement/exploration and
+ICRA-076..079 formal verification. Decision 003 leaves protected research values and ordered task names
+unchanged while explicitly waiving the Layer 2 PASS transition precondition. Development one-shot and per-task
+build/install controls do not apply in Layers 1–3.
 
 The frozen inverse-corridor diagnostic design is
 `docs/icra27/dev/ICRA_P4_V2_INVERSE_CORRIDOR_FIXTURE.md`
-(`ICRA_P4_V2_INVERSE_CORRIDOR_FIXTURE_V1`). It is still implementation-deferred: ICRA-072A integration passed,
-but ICRA-072B stabilization has not yet closed ICRA-072. Trust and skip parsing are repaired, but canonical PASS
-is absent pending exact admission of one retained non-runtime local agent-control artifact; only that same-Gate
-closure is active. Its independent oracle is an evaluation-only bypass and
+(`ICRA_P4_V2_INVERSE_CORRIDOR_FIXTURE_V1`). It is active under ICRA-073 by explicit user decision 003 even though
+ICRA-072B remains blocked/NOT PASS. Its independent oracle is an evaluation-only bypass and
 may never feed P0, P4, EGO or P5 decisions. A development-only selection trigger used to close ICRA-072 is a
 distinct engineering fixture and cannot be relabelled as inverse-corridor effect evidence.
 
@@ -496,8 +507,8 @@ distinct engineering fixture and cannot be relabelled as inverse-corridor effect
 | Supervisor recovery changeset | publish this audit, restore `P0_P4_V2_P5`, supersede unqualified ICRA-070 | no product/runtime change |
 | ICRA-071 backlog | repair user-route/state/doc/RQ local guards | non-blocking after user decision 002; no security claim |
 | ICRA-072A | iterative P0 -> P4-v2 -> EGO -> P5 vertical slice against shared build/install | one complete live identity; no effect claim |
-| ICRA-072B | stabilize the successful chain; complete exact two-artifact source admission and a fresh non-overwriting canonical result | current REQUEST_CHANGES; only Review PASS closes ICRA-072 and may issue ICRA-073 |
-| ICRA-073 | implement PRIMARY/MIRROR/NULL inverse corridors, paired control/treatment and independent-oracle effect diagnostics after flow closure | measure retained evidence only; no tuning, held-out access or claim |
+| ICRA-072B | stabilize the successful chain and canonical source admission | BLOCKED / USER-ACCEPTED BYPASS / NOT PASS; debt retained |
+| ICRA-073 | implement PRIMARY/MIRROR/NULL inverse corridors, paired control/treatment and independent-oracle effect diagnostics | TASK_READY by decision 003; measure retained evidence only, no tuning, held-out access or claim |
 | ICRA-074 | targeted optimization derived from retained ICRA-073 evidence | no tune-during-ICRA-073, held-out access or threshold tuning |
 | ICRA-075 | exploratory objective/source/domain ablation and power inputs | no held-out access or claim |
 | ICRA-076 | freeze protocol, SESOI, hashes, seeds and 30–60 sample size per scene | no confirmatory run before Review PASS |

@@ -1,5 +1,50 @@
 # ICRA Supervisor Log
 
+## 2026-08-27 — ICRA-072B BLOCKED; user-accepted bypass activates ICRA-073
+
+### Review identity and retained blocker
+
+- Fixed Review base is `8f360a4fbb0ad34a9c65dfaf38ff2752b3488f9c`; reviewed Builder HEAD is
+  `a30468e4ca991dacfe24a10c45040c51efd74ce7`. It is one documentation-only commit touching five allowed Builder
+  documents. Fetch confirmed divergence `0 0`; runner/test bytes equal the fixed base and no `repair-001` output
+  exists. `git diff --check` passes.
+- Builder truthfully withdrew its prototype after ignore-blind discovery found retained
+  `src/uav_simulator/local_sensing/CMakeModules/FindEigen.cmake~`, 2962 bytes, SHA-256 `29a73228…2028`, hidden by
+  `.gitignore` `*~`. The local agent JSON, backup file, protected PDF, `final_*`, all evidence and shared roots are
+  preserved. Review ran no build, ROS, GPU or live flow.
+
+### Standards axis
+
+Verdict: **PASS — zero documented violations and zero baseline smells.**
+
+- Only authorized Builder docs changed; prototype code/tests were fully reverted; RQ/CHANGES/TRACE/DEV_LOG are
+  synchronized; blocker metadata and absence of canonical outputs are truthful. No scope, ownership, retention,
+  external-write or evidence violation was found.
+
+### Spec axis
+
+Verdict: **REQUEST_CHANGES / BLOCKED — one High missing canonical contract; no implemented-wrong finding.**
+
+- Exact two-artifact implementation, tests and all-green `repair-001` required by the old task are absent. The
+  third ignored source-tree file makes the task premise false. Stopping, reverting the prototype and reporting the
+  blocker follows the old fail-closed stop line; it is not a code defect or scope creep.
+
+### User route decision and Gate disposition
+
+- The user explicitly ordered progression to ICRA-073 regardless of any ICRA-072B blocker. As route owner, this
+  is recorded as `USER-ICRA-ROUTE-20260827-003`, approval anchor
+  `a30468e4ca991dacfe24a10c45040c51efd74ce7`.
+- ICRA-072B remains **`BLOCKED / USER-ACCEPTED BYPASS / NOT PASS`**. Missing stabilization/source admission is
+  retained engineering debt and cannot be cited as scientific, qualification or campaign evidence.
+- Gate transitions to `ICRA-073_EFFECT_DIAGNOSTICS`, `TASK_READY`. The task implements the frozen
+  PRIMARY/EXACT_MIRROR/FLAT_NULL fixture, independent 200-sample committed-trajectory oracle and paired P0+P5 /
+  P0+P4-v2+P5 development diagnostics. Runtime safety and Layer 4 controls remain mandatory; no tuning or claim.
+
+### Supervisor window disposition
+
+- **Pending mandatory post-push audit.** Final disposition and handoff anchor follow only after the route
+  decision/review commit is pushed and divergence is reconfirmed.
+
 ## 2026-08-27 — ICRA-072B exact-harness Review REQUEST_CHANGES; two-artifact admission issued
 
 ### Identity, preservation and verification

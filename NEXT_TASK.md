@@ -1,83 +1,93 @@
-# ICRA-072 — exact local-control artifact admission and canonical closure (ICRA-072B)
+# ICRA-073 — inverse-corridor effect diagnostics
 
-> Active gate: `P4_V2_END_TO_END_VERTICAL_SLICE_AND_LIVE_SMOKE`
+> Active gate: `ICRA-073_EFFECT_DIAGNOSTICS`
 > Owner: `DEEPSEEK`
 > Activation: `TASK_READY`
 > Conference route: `P0_P4_V2_P5`
-> Milestone: `ICRA-072B_LAYER2_STABILIZATION`
-> Review base: `2e0c2b3930a37b99b1bdaf9d9e08a950117b37f4`
-> Reviewed Builder HEAD: `af7c80480a64eb45828e035f3725c18056ba10b8`
-> User decision: `USER-ICRA-ROUTE-20260826-002`
-> Workflow decision: `USER-ICRA-WORKFLOW-20260826-001`
+> Milestone: `ICRA-073_LAYER3_INVERSE_CORRIDOR_EFFECT_DIAGNOSTICS`
+> Reviewed ICRA-072B Builder HEAD: `a30468e4ca991dacfe24a10c45040c51efd74ce7`
+> User decision: `USER-ICRA-ROUTE-20260827-003`
+> User approval anchor: `a30468e4ca991dacfe24a10c45040c51efd74ce7`
+> Frozen design: `docs/icra27/dev/ICRA_P4_V2_INVERSE_CORRIDOR_FIXTURE.md`
 > Requirement mapping: `IAP-RQ-320`, `IAP-RQ-321`, `IAP-RQ-400`, `IAP-RQ-410`, `IAP-RQ-421`, `IAP-RQ-422`, `IAP-RQ-423`, `IAP-RQ-424`
-> One task: admit exactly the retained local agent-control artifact without hiding arbitrary source, then produce the required canonical PASS
+> One task: implement the frozen three-variant fixture, independent oracle and paired development diagnostics without tuning
 
-## Accepted repair and remaining blocker
+## User-authorized starting boundary
 
-The bounded harness repair at `7a5aa5840cb65fc17067fed993019d2a6cc9118d` is accepted. Exact command-local
-Git trust, isolated HOME/XDG, absence/wrong-trust rejection, no Git-config mutation, and Python/gtest
-skipped/disabled fail-closed behavior pass focused Review. Supervisor reruns pass runner 5/5 and tools 17/17.
-Do not rework these seams or touch product C++, production tests or shared build roots.
+ICRA-072A Layer 1 remains PASS. ICRA-072B is `BLOCKED / USER-ACCEPTED BYPASS`, not PASS: hidden untracked-source
+admission prevents its canonical result. Preserve that debt and all evidence unchanged. The user explicitly
+authorizes ICRA-073 to proceed regardless. ICRA-073 output is development diagnostic evidence only and cannot
+retroactively pass ICRA-072B or support a formal scientific/qualification/campaign claim.
 
-The attempted `repair-001` command exited 2 at source admission before output/log-root creation and before any
-suite. It discovered two untracked paths in the exact isolated environment:
+## Required implementation
 
-- `docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf`, SHA-256
-  `1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
-- `.claude/settings.local.json`, 72-byte retained local agent-control file, SHA-256
-  `27aac0ccca0ad0ab573578864cf27b9560d3f819bdeeae62378f8c20e62a8f64`.
+Implement `ICRA_P4_V2_INVERSE_CORRIDOR_FIXTURE_V1` exactly as frozen:
 
-Layers 1–3 are repeatable and neither `repair-001_summary.json` nor `repair-001_logs/` exists. Therefore no
-canonical result identity was consumed. Correct Builder documentation that asserted a retry prohibition, without
-rewriting or concealing the truthful historical source-admission stop.
+1. Versioned immutable descriptors for `PRIMARY`, geometric `EXACT_MIRROR` (`y -> -y`) and `FLAT_NULL`, with
+   exact start/goal, analytic centre lines, `0.75 m` tubes, `0.50 m` guard bands, central cuboid, GNSS-only
+   overhead mask, symmetric LiDAR landmarks, outer-tree third-homotopy closure, UAV radius/inflation identity,
+   deterministic seed and descriptor hash.
+2. Fail-closed preflight proving straight-seed closed collision; both curved tubes and guards occupancy-clear and
+   reachable; polyline Hausdorff error at most `0.01 m`; PRIMARY finite complete provider support and safe/risky
+   ordering; exact geometric mirror; and finite identical FLAT_NULL truth.
+3. Independent `p4_v2_inverse_corridor_analysis_v1` oracle. It reads frozen scene truth plus the committed final
+   B-spline only, samples exactly 200 deterministic equal-arc positions including endpoints, and records tube
+   metrics, typed route, provider-only interior peak/mean, minimum AL-PL, collision/dynamics, P5 final/runtime and
+   exact publication identity. Withholding/changing P4 output must not change oracle values for the same scene and
+   final trajectory.
+4. One repository-local paired runner for matched `P0_P5_CONTROL` and `P0_P4_V2_P5_TREATMENT` across all three
+   variants. Non-P4 configuration, seed, initial state, goal and scene identity must match within each pair.
+   Occupancy and EGO retain motion-feasibility authority; authoritative fused P5 final precedes publication and
+   P5 runtime remains bound to the same positive ID/start.
+5. Machine-readable retained manifests/analyses under `results/icra27/icra073/`, with commands, pushed tracked
+   HEAD, known retained untracked-artifact inventory, fixture/arm/run identities, process/GPU/cleanup status,
+   completeness and first missing stage. The user bypass means ICRA-072B exact-source canonical admission is not
+   an ICRA-073 precondition; disclose the known debt rather than hiding or repairing it.
 
-## Required exact-admission repair
+## TDD, build and diagnostic execution
 
-1. Extend source admission to accept exactly the two paths and hashes above. Classify the JSON as a local agent
-   control artifact that is not runtime source. Require both artifacts to be ordinary non-symlink files with the
-   exact path, byte size and SHA-256; record their classification and observed metadata in source binding and the
-   canonical summary.
-2. Reject any missing/changed artifact, symlink, non-regular file, third untracked path, tracked/staged change,
-   rename or deletion. Do not use `.gitignore`, ambient excludes, wildcard allowlists, `--untracked-files=no` or
-   any mechanism that hides arbitrary source/config paths.
-3. Add focused RED/GREEN tests for exact two-artifact acceptance and every rejection class above. Preserve all
-   existing trust, skip/disabled, row/suite cardinality, count and pushed-source checks.
-4. Do not edit, chmod, track, move or delete `.claude/settings.local.json` or the PDF. Do not expose their content
-   in evidence; path/classification/size/hash are sufficient.
-5. Correct README and Builder-owned adjudication docs: the earlier invocation stopped before result creation;
-   `repair-001` remains the authorized fresh non-overwriting identity.
-6. Commit and push the repair first, fetch and prove divergence `0 0`, then run the canonical command once using:
-   `results/icra27/icra072b/repair-001_summary.json` and
-   `results/icra27/icra072b/repair-001_logs/`.
+- Add RED/GREEN focused tests for every frozen invariant and data-plane isolation requirement before live work.
+- Use only shared `/home/dev/ws_iap/{build,install,log}` and the canonical exact six-package build if compiled
+  fixture/instrumentation bytes change: `iap`, `plan_env`, `traj_utils`, `path_searching`, `bspline_opt`,
+  `ego_planner`. No task-local build/install tree.
+- Commit and push final implementation/test bytes and confirm divergence `0 0` before development diagnostic
+  execution. Record pushed tracked HEAD and the known retained untracked inventory without mutating it.
+- Before any ROS/main-flow attempt, run mandatory GPU preflight. On failure, emit `GPU_NOT_READY` and stop without
+  ROS. Required-process death, source change after start, preflight/invariant failure or owned cleanup failure is
+  typed and fail closed.
+- Use unique non-overwriting run identities. Layers 1–3 may repair code/config defects and retry under a new run
+  identity, retaining every attempt. Do not tune fixture geometry, P4 objective/thresholds or provider truth in
+  response to observed arm effects. Stop after one structurally complete matched pair per variant is retained.
 
 ## Allowed scope
 
-- `scripts/dev_planner/run_icra072b_stabilization.py`.
-- `test/test_icra072b_stabilization.py`.
+- Frozen-fixture implementation under `src/uav_simulator/map_generator/` and, only for the frozen GNSS mask/
+  provider-truth fixture input, `src/uav_simulator/gnss_sim/`.
+- `scripts/dev_planner/` ICRA-073 fixture/preflight/runner/analyzer tools and focused tests.
+- `launch/icra073*`, `config/icra27/icra073*` and focused `test/test_icra073*` files needed to switch only the P4
+  arm and scene variant.
+- Minimal evidence-only instrumentation needed to expose committed final-trajectory identity; no decision change.
 - `README.md`, `DEV_LOG.md`, `docs/CHANGES.md`, `docs/TRACEABILITY.md`, `docs/REQS.md`.
-- New immutable `repair-001_summary.json` and `repair-001_logs/` under `results/icra27/icra072b/`.
-
-Do not edit product C++, production tests, `.claude/settings.local.json`, the PDF, Supervisor files, route/scope/
-plan/workflow/system-flow authority or shared workspace roots. If exact admission cannot be proven without a
-broader allowlist or artifact mutation, stop and return the blocker.
+- Retained text/JSON/CSV/log evidence under `results/icra27/icra073/`.
 
 ## Forbidden and retention
 
-- No shared rebuild, ROS launch, GPU preflight, live run, `run-025`, bag, algorithm, inverse-corridor, effect,
-  optimization, qualification or campaign work.
-- Preserve immutable `final_summary.json`, `final_logs`, all `run-001` through `run-024`, raw/compact/live/
-  scientific/Supervisor evidence, ordinary logs and `/home/dev/ws_iap/{build,install,log}`.
-- No deletion, cleanup, chmod, move, archive, backup or external output is authorized.
-- Do not weaken source, occupancy, EGO, fused-P5, required-process, GPU or cleanup fail-closed behavior.
+- No P0/P4/EGO/P5 algorithm, objective, risk-source, AL/VAL, threshold or fusion tuning in ICRA-073.
+- No oracle/centre-line/tube/route label or expected answer may enter P0, P4, EGO or P5 decision inputs.
+- No SESOI, power, formal hash freeze, held-out claim, optimization, qualification or campaign work. ICRA-074
+  alone may later make targeted changes based on retained diagnostics.
+- Do not delete, move, chmod, stage, relabel or conceal `.claude/settings.local.json`,
+  `src/uav_simulator/local_sensing/CMakeModules/FindEigen.cmake~`, the protected PDF, any ICRA-072/raw/compact/
+  live/scientific/Supervisor evidence, ordinary log or shared workspace root. No cleanup is authorized.
+- Do not edit Supervisor/route/scope/plan/workflow/system-flow authority.
 
 ## Exit and handoff
 
-Layer 2 exits only when pushed-source-bound `repair-001_summary.json` exists and reports exactly five suites at
-8 + 2 + 2 + 4 + 17, all eight required rows PASS, zero skip/disabled, exact two-artifact admission, and no
-missing/duplicate/nonzero/count/source condition. Focused runner tests must pass; retained shared build remains
-6/6; tracked state is clean; exact isolated source status sees only the two admitted artifacts; pushed divergence
-is `0 0`.
+Return `ICRA073_EFFECT_DIAGNOSTICS_READY_FOR_REVIEW` only when focused invariants/oracle isolation pass, any needed
+shared six-package build is green, pushed source is recorded, and one complete matched control/treatment pair for
+each PRIMARY/EXACT_MIRROR/FLAT_NULL is retained with exact committed final/P5/publication/runtime identity and
+owned cleanup. Report observed diagnostics without success threshold, tuning or claim.
 
-Return `ICRA072B_EXACT_ADMISSION_READY_FOR_REVIEW` with pushed HEAD, test counts, summary/log path and hash,
-suite/row verdicts, exact admitted-artifact metadata and source-binding result. Only a later Supervisor Review
-PASS may close ICRA-072 and issue ICRA-073.
+Commit/push authorized files normally, fetch and prove divergence `0 0`, then hand back exact HEAD, build/tests,
+run inventory, per-pair completeness, first-missing stages and evidence hashes. A later Supervisor Review may
+issue only ICRA-074 targeted optimization; it cannot qualify an effect or campaign.

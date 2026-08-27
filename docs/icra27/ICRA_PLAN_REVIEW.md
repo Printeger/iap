@@ -1,5 +1,15 @@
 # ICRA 2027 P0 -> P4-v2 -> P5 计划复审
 
+## User-directed ICRA-072B bypass and ICRA-073 issuance — 2026-08-27
+
+**Verdict: `ICRA072B_BLOCKED_USER_ACCEPTED_BYPASS / ICRA073_TASK_READY`.** Latest Builder Standards PASS and
+Spec BLOCKED: hidden ignored source prevents the required canonical result, and no prototype remains. The user
+explicitly orders progression regardless under `USER-ICRA-ROUTE-20260827-003`.
+
+ICRA-072B is not relabelled PASS. ICRA-073 now implements frozen three-variant paired diagnostics and the
+independent committed-final oracle. Occupancy/EGO/P5, GPU/process/cleanup, retention, no-tuning and no-claim
+boundaries remain mandatory; ICRA-074 and formal Layer 4 are not yet authorized.
+
 ## ICRA-072B exact source-admission Review — 2026-08-27
 
 **Verdict: `REQUEST_CHANGES`.** Builder's hermetic Git and skipped/disabled repairs pass 5/5 + 17/17 independent

@@ -1,15 +1,14 @@
 # ICRA four-layer development and validation workflow
 
-Status: **ACTIVE — LAYER 2 STABILIZATION**
+Status: **ACTIVE — LAYER 3 EFFECT DIAGNOSTICS**
 
 Requirements: `IAP-RQ-320`, `IAP-RQ-321`, `IAP-RQ-400`, `IAP-RQ-410`, `IAP-RQ-421`, `IAP-RQ-422`,
 `IAP-RQ-423`, `IAP-RQ-424`
 
-Current disposition: ICRA-072A Layer 1 passed Supervisor Review on 2026-08-27 with source-bound `run-024`.
-ICRA-072B's retained `final_*` result remains FAIL. Trust and skipped/disabled repairs are now green, but exact
-status exposed one retained local agent-control artifact before `repair-001` output creation. ICRA-072B remains
-the only active task for exact two-artifact admission and canonical closure in `NEXT_TASK.md`. It does not authorize a product change, another
-live run, effect work or a scientific/qualification claim.
+Current disposition: ICRA-072A Layer 1 passed; ICRA-072B remains blocked without canonical PASS. User decision
+`USER-ICRA-ROUTE-20260827-003` explicitly accepts that debt and activates ICRA-073 Layer 3. The active task may
+implement and run frozen inverse-corridor development diagnostics, but not tune, qualify an effect or enter
+formal Layer 4/campaign work.
 
 ## 1. Purpose
 
@@ -87,8 +86,8 @@ source or installed-byte change invalidates the formal freeze and returns work t
 - Builder code commits still bind applicable requirements and synchronize `DEV_LOG.md`, `docs/CHANGES.md` and
   `docs/TRACEABILITY.md` once per logical layer changeset. Per-run commands are machine-recorded, not copied into
   multiple authority documents.
-- Supervisor Review occurs once at a layer boundary. Layer 1 PASS authorizes only Layer 2; Layer 2 PASS may close
-  ICRA-072 and issue ICRA-073. Layer 3 does not become a scientific claim without Layer 4.
+- Supervisor Review normally occurs once at a layer boundary. User decision 003 explicitly bypasses blocked
+  Layer 2 into Layer 3 without converting it to PASS. Layer 3 does not become a scientific claim without Layer 4.
 - Layer 4 alone enables full hashes, frozen SESOI/thresholds/seeds, held-out separation, non-retry and
   qualification controls.
 

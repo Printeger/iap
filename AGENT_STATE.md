@@ -5,58 +5,56 @@ schema_version: icra_single_branch_two_agent_v3_user_route_owner
 branch: dev/icra
 active_role: DEEPSEEK
 status: TASK_READY
-gate: P4_V2_END_TO_END_VERTICAL_SLICE_AND_LIVE_SMOKE
-task_id: ICRA-072
-milestone: ICRA-072B_LAYER2_STABILIZATION
-review_base: 2e0c2b3930a37b99b1bdaf9d9e08a950117b37f4
-reviewed_head: af7c80480a64eb45828e035f3725c18056ba10b8
+gate: ICRA-073_EFFECT_DIAGNOSTICS
+task_id: ICRA-073
+milestone: ICRA-073_LAYER3_INVERSE_CORRIDOR_EFFECT_DIAGNOSTICS
+review_base: 8f360a4fbb0ad34a9c65dfaf38ff2752b3488f9c
+reviewed_head: a30468e4ca991dacfe24a10c45040c51efd74ce7
 mandated_lineage_review_base: 3b5199e0cf8efc904f124cdb73156a3209eb6d80
 icra071_repair_review_base: 6e0e7328835064ecb665bc6476a6254924ff371d
 conference_route: P0_P4_V2_P5
 route_owner: USER
 route_lock: docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md
-user_decision_id: USER-ICRA-ROUTE-20260826-002
-user_approval_anchor: b24a330d79d6e85e8080cf2a359bb1a18765e5a5
+user_decision_id: USER-ICRA-ROUTE-20260827-003
+user_approval_anchor: a30468e4ca991dacfe24a10c45040c51efd74ce7
 workflow_decision_id: USER-ICRA-WORKFLOW-20260826-001
-route_status: USER_FOUR_LAYER_WORKFLOW_LAYER1_PASS_LAYER2_EXACT_CONTROL_ARTIFACT_ADMISSION_TASK_READY
+route_status: USER_ACCEPTED_ICRA072B_BLOCKED_BYPASS_ICRA073_TASK_READY
 historical_gate0a_verdict: NO_GO_P2
 p0_gate0b_status: PASS
 p0_gate0b_worker_count: 4
 p4_v1_status: G0A_PASS_G0B_PASS_G0C_SCIENTIFIC_NO_GO_IMMUTABLE
-p4_v2_status: DEVELOPMENT_LAYER1_SOURCE_BOUND_PASS_LAYER2_REQUEST_CHANGES_EXACT_CONTROL_ARTIFACT_ADMISSION_SCIENTIFICALLY_NOT_STARTED_BLOCKED
+p4_v2_status: DEVELOPMENT_LAYER1_SOURCE_BOUND_PASS_LAYER2_BLOCKED_USER_ACCEPTED_BYPASS_LAYER3_ACTIVE_SCIENTIFICALLY_NOT_STARTED_BLOCKED
 p5_status: IMPLEMENTED_BUT_NO_CURRENT_PROSPECTIVE_QUALIFICATION_PASS
 icra070_status: SUPERSEDED_UNQUALIFIED_BY_USER_ROUTE_DECISION
 icra071_status: REQUEST_CHANGES_DEFERRED_NONBLOCKING_BY_USER_DECISION_002
 icra072a_status: PASS_SOURCE_BOUND_COMPLETE_LIVE_IDENTITY
-icra072b_status: REQUEST_CHANGES_UNTRACKED_LOCAL_AGENT_CONTROL_NOT_ADMITTED
-supervisor_verdict: ICRA072B_REQUEST_CHANGES
-review_disposition: ICRA072B_SAME_GATE_EXACT_CONTROL_ARTIFACT_ADMISSION_AUTHORIZED
+icra072b_status: BLOCKED_HIDDEN_UNTRACKED_SOURCE_USER_ACCEPTED_BYPASS_NOT_PASS
+supervisor_verdict: ICRA072B_BLOCKED_USER_ACCEPTED_BYPASS_TO_ICRA073
+review_disposition: ICRA073_EFFECT_DIAGNOSTICS_AUTHORIZED_BY_USER_DECISION_003
 qualification_claim: false
 campaign_status: BLOCKED_UNTIL_ICRA079_REVIEW_PASS_AND_DISTINCT_USER_APPROVAL
 handoff_status: TASK_READY
 next_task: NEXT_TASK.md
-next_after_icra072b_pass: ICRA-073_EFFECT_DIAGNOSTICS
+next_after_icra073_pass: ICRA-074_TARGETED_OPTIMIZATION
 recovery_roadmap: docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md
 four_layer_workflow: docs/icra27/ICRA_FOUR_LAYER_DEVELOPMENT_WORKFLOW.md
 guard_plan: docs/icra27/ICRA_CROSS_LAYER_GUARD_PLAN.md
-artifact_retention: RAW_COMPACT_REGISTERED_LIVE_P4V1_LOGS_SHARED_WORKSPACE_ICRA072B_FINAL_FAIL_LOCAL_AGENT_CONTROL_AND_PROTECTED_PDF_RETAINED
-window_disposition: ROTATE_RECOMMENDED
-rotation_reason: ICRA072B_EXACT_ARTIFACT_CANONICAL_CONTRACT_CHANGE
-window_handoff_anchor: 57bde4416c2cb08f338ae8e804cac886ef5f781c
+artifact_retention: ALL_ICRA072_EVIDENCE_SHARED_ROOTS_HIDDEN_USER_ARTIFACTS_AND_PROTECTED_PDF_RETAINED
+window_disposition: PENDING_POST_PUSH_AUDIT
+rotation_reason: PENDING_POST_PUSH_AUDIT
+window_handoff_anchor: PENDING_POST_PUSH_AUDIT
 window_next_role: SUPERVISOR
-window_next_review_task: ICRA-072B
+window_next_review_task: ICRA-073
 window_bootstrap_source: REPOSITORY_AUTHORITY_ONLY
-updated_utc: 2026-08-27T08:23:00Z
+updated_utc: 2026-08-27T09:00:00Z
 ```
 
-Review of Builder HEAD `af7c80480a64eb45828e035f3725c18056ba10b8` against fixed handoff
-`2e0c2b3930a37b99b1bdaf9d9e08a950117b37f4` is `REQUEST_CHANGES`. The command-local Git trust and
-Python/gtest skipped/disabled fail-closed repairs are correct; Supervisor independently passes runner 5/5 and
-tools 17/17. No product, build, ROS/GPU/live or scientific path changed.
+Builder HEAD `a30468e4ca991dacfe24a10c45040c51efd74ce7` correctly stops ICRA-072B fail closed after ignore-blind
+discovery of a third untracked source-tree backup file. Standards PASS; Spec remains BLOCKED because no exact
+admission implementation or canonical PASS exists. ICRA-072B is not PASS and its stabilization/source-admission
+debt remains retained.
 
-Layer 2 still lacks canonical PASS because exact isolated source status discovered the retained untracked local
-agent-control file `.claude/settings.local.json` in addition to the protected PDF. Source admission correctly
-stopped before creating `repair-001` outputs or running suites. The pre-output invocation did not consume a result
-identity; Builder's contrary retry prohibition exceeded Builder authority. The same Gate now authorizes only an
-exact two-artifact admission repair, followed by the still-available non-overwriting `repair-001` canonical run.
-ICRA-073 remains unauthorized until a later ICRA-072B Review PASS.
+The user, as route owner, explicitly directs progression regardless of that blocker. Decision
+`USER-ICRA-ROUTE-20260827-003` therefore marks ICRA-072B `BLOCKED / USER-ACCEPTED BYPASS` and activates only
+ICRA-073 Layer 3 effect diagnostics. This waiver does not relax runtime safety, oracle isolation, retention or
+Layer 4 formal controls and cannot support an effect, qualification or campaign claim.

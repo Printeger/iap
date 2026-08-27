@@ -2,7 +2,7 @@
 
 > Design record: `ICRA_P4_V2_INVERSE_CORRIDOR_FIXTURE_V1`
 >
-> Status: **DESIGN_FROZEN / IMPLEMENTATION_DEFERRED_TO_ICRA-073**
+> Status: **DESIGN_FROZEN / ICRA-073 IMPLEMENTATION ACTIVE**
 >
 > Requirements: `IAP-RQ-423`, `IAP-RQ-424`
 
@@ -12,11 +12,10 @@ The inverse-corridor fixture makes P4-v2 behavior interpretable by constructing 
 first and then placing occupancy and provider occlusion around it. The final UAV trajectory can therefore be
 compared with an independently defined safe tube instead of relying only on the planner's own risk output.
 
-This record is a development-design freeze. It is not a route-lock change, an ICRA-072 scene change, an effect
-result, a qualification result, a preregistration, or campaign authorization. Implementation starts only in a
-separately issued ICRA-073 task after ICRA-072A integration and ICRA-072B stabilization close ICRA-072. If either
-layer receives `REQUEST_CHANGES`, this design remains queued and no fixture code, runner, analyzer, or live
-execution begins.
+This record is a development-design freeze. It is not an effect result, qualification result, preregistration or
+campaign authorization. User decision `USER-ICRA-ROUTE-20260827-003` explicitly accepts the blocked ICRA-072B
+debt and activates the separately issued ICRA-073 task. That bypass does not alter this geometry, oracle boundary,
+runtime safety or formal controls.
 
 The fixture must distinguish integrity-aware choice from ordinary obstacle avoidance. PRIMARY therefore has two
 collision-feasible curved homotopies with the same endpoints: a longer provider-safe corridor and a shorter
@@ -183,8 +182,5 @@ ICRA-068/070/072 artifacts and `docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf` untouched.
 
 ## 7. Deferred authority synchronization
 
-This phase-one record intentionally does not edit the user route lock, gate sequence, `AGENT_STATE.md`,
-`NEXT_TASK.md`, `SUPERVISOR_LOG.md`, scope, roadmap, implementation plan, plan review, system flow, product code,
-fixture code, runner, analyzer, or live evidence. The Supervisor cross-linked this record into the authority
-documents while adopting the four-layer workflow. ICRA-072A full-lineage PASS may issue only ICRA-072B; only an
-ICRA-072B stabilization Review PASS may close ICRA-072 and issue ICRA-073.
+The frozen interface is now active only through `NEXT_TASK.md`. User decision 003 bypasses blocked ICRA-072B
+without relabelling it PASS; it does not authorize changes beyond ICRA-073 or any scientific/qualification claim.

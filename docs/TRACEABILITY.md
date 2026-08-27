@@ -1,5 +1,14 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-27 user-directed ICRA-072B bypass and ICRA-073 activation
+
+| Req ID | Decision/review seam | Evidence and disposition | Status |
+|---|---|---|---|
+| IAP-RQ-423 / IAP-RQ-424 | Latest ICRA-072B Builder review | Standards PASS; Spec BLOCKED because exact implementation/canonical result are absent and a third ignored source-tree file invalidates the two-artifact premise | **BLOCKED / NOT PASS** |
+| IAP-RQ-000 / IAP-RQ-424 | User route authority | Explicit instruction to proceed regardless, decision `USER-ICRA-ROUTE-20260827-003`, approval anchor `a30468e`; no protected research field value or task ordering changes | **USER-ACCEPTED BYPASS** |
+| IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 | ICRA-073 task | Frozen three-variant inverse corridor, matched control/treatment, independent 200-sample committed-final oracle and development diagnostics; runtime safety remains hard | **ICRA-073 TASK_READY** |
+| IAP-RQ-423 / IAP-RQ-424 | Claim/retention boundary | ICRA-072B debt and all artifacts remain; ICRA-073 cannot retroactively pass it or support qualification/campaign claims | **MANDATORY** |
+
 ## 2026-08-27 ICRA-072B exact control-artifact admission blocker
 
 | Req ID | Implemented/tested seam | Evidence and disposition | Status |

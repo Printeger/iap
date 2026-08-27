@@ -3,6 +3,13 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- review(user-bypass-icra072b-issue-icra073): IAP-RQ-000 / IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 /
+  IAP-RQ-410 / IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — Standards PASS and Spec BLOCKED for Builder
+  `a30468e`: prototype reverted and the hidden third source-tree backup truthfully prevents canonical PASS. User
+  decision `USER-ICRA-ROUTE-20260827-003` explicitly accepts that engineering debt and directs progression
+  regardless. Preserve ICRA-072B as BLOCKED/NOT PASS, activate ICRA-073 inverse-corridor effect diagnostics, and
+  retain runtime safety, oracle isolation, no-tuning, no-claim and formal Layer 4 boundaries.
+
 - docs(icra-072b-exact-admission-blocker): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 /
   IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — preserve the truthful earlier pre-output stop and confirm
   it did not consume `repair-001`. A RED/GREEN prototype bound the protected PDF and local-control JSON to exact
