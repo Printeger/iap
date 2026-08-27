@@ -81,20 +81,22 @@ Runner 会在 GPU、capture、process/cleanup 失败及正常结束路径自动�
 
 ### 1.2.2 ICRA-072B Layer 2 离线稳定化回归
 
-Layer 2 不启动 ROS launch graph、GPU preflight 或 live scenario。先提交并推送最终代码/测试状态，确认
-`HEAD...origin/dev/icra` 为 `0 0` 且工作树仅保留受保护 PDF，再执行一次：
+Layer 2 不启动 ROS launch graph、GPU preflight 或 live scenario。原始 `final_summary.json` / `final_logs`
+是不可变的失败记录，不得重跑或覆盖。canonical repair 必须先提交并推送代码/测试状态，确认
+`HEAD...origin/dev/icra` 为 `0 0` 且工作树仅保留受保护 PDF，再执行一次新输出：
 
 ```bash
 cd /home/dev/ws_iap/src/iap
 
 python3 scripts/dev_planner/run_icra072b_stabilization.py \
-  --output results/icra27/icra072b/final_summary.json \
-  --log-root results/icra27/icra072b/final_logs
+  --output results/icra27/icra072b/repair-001_summary.json \
+  --log-root results/icra27/icra072b/repair-001_logs
 ```
 
-输出和 log root 必须尚不存在；runner 会验证 pushed source、精确 PDF allowlist、五个聚焦 suite 及八行
-稳定化矩阵，并在任一 required row 缺失、重复、跳过、计数不符或退出非零时 fail closed。该结果仅为
-development stabilization evidence，不是 scientific-effect 或 qualification manifest。
+输出和 log root 必须尚不存在；runner 会验证 pushed source、精确 PDF allowlist、隔离 HOME 下的精确
+command-local Git trust、五个聚焦 suite 及八行稳定化矩阵，并在任一 required row 缺失、重复、跳过、
+disabled、计数不符或退出非零时 fail closed。该结果仅为 development stabilization evidence，不是
+scientific-effect 或 qualification manifest。
 
 ### 1.3 运行一个最小检查
 

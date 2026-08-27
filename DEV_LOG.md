@@ -8873,3 +8873,43 @@ cardinality are each exactly one and all named assertions were observed; only
 Terminal disposition is `BLOCKED_ICRA072B_HERMETIC_GIT_SAFE_DIRECTORY` pending
 Supervisor review. No launch, GPU preflight, live flow, retry, scientific,
 qualification or campaign action followed.
+
+## 2026-08-27 — ICRA-072B canonical fail-closed repair
+
+Requirements: IAP-RQ-320, IAP-RQ-321, IAP-RQ-400, IAP-RQ-410,
+IAP-RQ-421, IAP-RQ-422, IAP-RQ-423 and IAP-RQ-424.
+
+The Supervisor-authorized continuation preserves `final_summary.json`,
+`final_logs`, all product C++/production tests and shared roots unchanged. The
+first focused RED proved no suite-environment API supplied exact repository
+trust. `build_suite_environment` now clears inherited Git-config overrides,
+including `GIT_CONFIG_PARAMETERS`, uses repository-local HOME/ROS/TMP/XDG paths
+and supplies exactly one
+command-local `safe.directory=/home/dev/ws_iap/src/iap` entry with system Git
+config disabled. Source binding and all five suites use and retain the same
+provenance. Real `git rev-parse HEAD` commands pass only for the exact
+entry and fail for absent/wrong trust; `git config --show-origin` exposes one
+command-line path and no wildcard. Repository/worktree config hashes remain
+fixed and the side-effect-free contract test creates no
+isolated root or config file.
+
+The second RED showed `_observations` counted a verbose skipped unittest as a
+successful assertion. It now types Python/gtest skipped and disabled assertions
+and counts independently, excludes skips from observed successes, and records
+suite `failure_reasons`. Any nonzero skip/disabled count fails the suite and all
+dependent rows even when assertion names and total counts otherwise match.
+The suite environment removes ambient `GTEST_ALSO_RUN_DISABLED_TESTS`, and the
+parser still types a forced successful `DISABLED_*` name as disabled.
+
+Offline verification only:
+
+- `python3 test/test_icra072b_stabilization.py -v`: 5/5 PASS, exit 0.
+- Existing `test_icra072_vertical_slice_tools.py -v` under repository-local
+  HOME/ROS/TMP/XDG plus the exact four Git trust environment keys: 17/17 PASS,
+  exit 0. Its printed `GPU_NOT_READY` is a mocked fail-closed unit-test branch;
+  no GPU preflight was executed.
+
+No shared rebuild, ROS launch, GPU preflight, live run, run-025, product change,
+effect, qualification or campaign work ran. The sole `repair-001` canonical
+execution remains pending until this repair/documentation changeset is reviewed,
+committed, pushed and fetch-confirmed at divergence `0 0`.

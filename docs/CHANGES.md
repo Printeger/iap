@@ -3,6 +3,20 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(icra-072b-canonical-repair): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 /
+  IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — keep the failed `final_*` result immutable and repair only
+  the offline canonical harness. Every suite now runs under a repository-local isolated HOME with exact
+  command-local `safe.directory=/home/dev/ws_iap/src/iap` supplied through one Git config environment entry;
+  inherited count/key/value, file-selector and `GIT_CONFIG_PARAMETERS` overrides are removed, HOME/XDG config
+  roots are repository-local, system config is disabled, and exact non-secret provenance is retained for source admission and every suite
+  without writing a Git config file. Ambient forced-disabled gtest execution is removed. Python unittest and
+  C++/gtest skip/disabled observations
+  are separately typed, skipped assertions are excluded from successful observations, and suite plus dependent
+  matrix rows fail on any skip/disabled count even when names and total counts otherwise match. RED/GREEN runner
+  tests pass 5/5 and the existing tools suite passes 17/17 under the isolated environment. No product, build,
+  ROS/GPU/live or scientific path changed; the one `repair-001` canonical run remains pending the required clean
+  pushed repair commit.
+
 - review(icra-072b-request-changes): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 /
   IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — review Builder HEAD `a63d3cc` against fixed base
   `9212bfe`. Standards PASS with two non-blocking maintainability smells; Spec REQUEST_CHANGES because the

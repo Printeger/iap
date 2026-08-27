@@ -630,6 +630,20 @@ same Layer 2 Gate with only exact non-persistent command-local Git trust and Pyt
 the repair before one new immutable `repair-001` run. ICRA-073 and all scientific/qualification work remain
 unauthorized.
 
+ICRA-072B canonical-repair Builder checkpoint (2026-08-27): the bounded runner-only repair supplies one exact
+command-local Git `safe.directory=/home/dev/ws_iap/src/iap` entry to every suite under its isolated
+repository-local HOME/XDG config roots, removes inherited count/key/value, file-selector and
+`GIT_CONFIG_PARAMETERS` overrides and disables system config without creating or modifying a Git configuration
+file. Source admission and all suites share that environment/provenance. Real Git probes prove exactly one
+command-line origin and reject missing/wrong trust. Summary admission
+requires that exact typed provenance. Python unittest and
+C++/gtest skip/disabled output is separately counted and named; skipped assertions cannot satisfy required rows,
+ambient forced-disabled execution is removed, and any nonzero or `DISABLED_*` observation fails its suite plus
+dependent rows even if total counts match. Focused
+runner tests pass 5/5 and existing tools pass 17/17 in the repaired isolated environment. Product C++, production
+tests, shared build, ROS/GPU/live and scientific paths remain unchanged. Immutable `final_*` remains the truthful
+failure; fresh `repair-001` is pending the mandatory clean pushed repair commit.
+
 ICRA-072A Layer 1 Supervisor PASS (2026-08-27): reviewed Builder HEAD `ac7f923`; Standards and Spec axes pass.
 Shared build is 6/6 and independent Supervisor reruns pass tools 17/17, hermetic launch 24/24 and focused C++
 64/64. Fresh `run-024` binds pushed implementation `b7b5357` at initial/pre-ROS/final checks, passes GPU, 15/15

@@ -129,6 +129,16 @@ REQUIRED_ROWS = (
 REQUIRED_SUITES = (
     "production_terminal", "p4_identity_decision",
     "p4_identity_integration", "p5_runtime", "tools")
+COMMAND_LOCAL_GIT_CONFIG = {
+    "GIT_CONFIG_COUNT": "1",
+    "GIT_CONFIG_KEY_0": "safe.directory",
+    "GIT_CONFIG_VALUE_0": str(REPOSITORY),
+    "GIT_CONFIG_NOSYSTEM": "1",
+}
+GIT_TRUST_KEYS = tuple(COMMAND_LOCAL_GIT_CONFIG)
+GIT_CONFIG_FILE_SELECTORS = {
+    "GIT_CONFIG", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM",
+    "GIT_CONFIG_PARAMETERS"}
 
 
 def matrix_description() -> dict:
@@ -140,12 +150,47 @@ def _assertion_observed(expected: str, observed: set[str]) -> bool:
                for item in observed)
 
 
+def _suite_trust_accepted(suite: dict) -> bool:
+    return suite.get("command_local_git_trust") == (
+        command_local_git_trust(COMMAND_LOCAL_GIT_CONFIG))
+
+
+def _suite_failures(suite: dict) -> list[str]:
+    failures = []
+    if suite.get("exit_code") != 0:
+        failures.append("suite_exit_nonzero")
+    if not _suite_trust_accepted(suite):
+        failures.append("command_local_git_trust_invalid")
+    if "expected_test_count" not in suite:
+        failures.append("expected_test_count_missing")
+    elif (suite.get("test_count", 0) <= 0 or
+          suite.get("test_count") != suite.get("expected_test_count")):
+        failures.append("test_count_mismatch")
+    if not isinstance(suite.get("skipped_test_count"), int):
+        failures.append("skipped_test_observation_missing")
+    elif suite.get("skipped_test_count") != 0:
+        failures.append("required_test_skipped")
+    if not isinstance(suite.get("disabled_test_count"), int):
+        failures.append("disabled_test_observation_missing")
+    elif suite.get("disabled_test_count") != 0:
+        failures.append("required_test_disabled")
+    return failures
+
+
 def build_summary(source_head: str, suites: list[dict]) -> dict:
     """Build a fail-closed matrix verdict from typed suite observations."""
+    evaluated_suites = []
+    for suite in suites:
+        failures = _suite_failures(suite)
+        evaluated_suites.append({
+            **suite,
+            "failure_reasons": failures,
+            "result": "PASS" if not failures else "FAIL",
+        })
     suite_cardinality = {
-        name: sum(suite.get("name") == name for suite in suites)
+        name: sum(suite.get("name") == name for suite in evaluated_suites)
         for name in REQUIRED_SUITES}
-    by_name = {suite.get("name"): suite for suite in suites
+    by_name = {suite.get("name"): suite for suite in evaluated_suites
                if suite.get("name") in REQUIRED_SUITES}
     row_cardinality = {
         name: sum(row.get("name") == name for row in MATRIX_ROWS)
@@ -162,11 +207,7 @@ def build_summary(source_head: str, suites: list[dict]) -> dict:
                     "observed_assertions", [])))]
         suites_ok = all(
             suite_cardinality[name] == 1
-            and by_name[name].get("exit_code") == 0
-            and by_name[name].get("test_count", 0) > 0
-            and "expected_test_count" in by_name[name]
-            and by_name[name].get("test_count") ==
-            by_name[name].get("expected_test_count")
+            and by_name[name].get("result") == "PASS"
             for name in required_suites)
         rows.append({
             **declaration,
@@ -176,7 +217,7 @@ def build_summary(source_head: str, suites: list[dict]) -> dict:
         })
     source_ok = re.fullmatch(r"[0-9a-f]{40}", source_head) is not None
     suite_set_ok = (
-        len(suites) == len(REQUIRED_SUITES)
+        len(evaluated_suites) == len(REQUIRED_SUITES)
         and all(count == 1 for count in suite_cardinality.values()))
     row_set_ok = (
         len(MATRIX_ROWS) == len(REQUIRED_ROWS)
@@ -192,7 +233,7 @@ def build_summary(source_head: str, suites: list[dict]) -> dict:
         "source_head": source_head,
         "required_row_cardinality": row_cardinality,
         "required_suite_cardinality": suite_cardinality,
-        "suites": suites,
+        "suites": evaluated_suites,
         "matrix_rows": rows,
         "result": result,
     }
@@ -217,7 +258,56 @@ def validate_output_paths(output: Path, log_root: Path) -> tuple[Path, Path]:
     return resolved_output, resolved_logs
 
 
-def _source_binding() -> dict:
+def command_local_git_trust(environment: dict[str, str]) -> dict:
+    accepted = (
+        environment.get("GIT_CONFIG_COUNT") == "1"
+        and environment.get("GIT_CONFIG_KEY_0") == "safe.directory"
+        and environment.get("GIT_CONFIG_VALUE_0") == str(REPOSITORY)
+        and environment.get("GIT_CONFIG_NOSYSTEM") == "1")
+    return {
+        "schema_version": "icra072b_command_local_git_trust_v1",
+        "mechanism": "git_config_environment",
+        "safe_directory": environment.get("GIT_CONFIG_VALUE_0"),
+        "config_count": 1 if environment.get(
+            "GIT_CONFIG_COUNT") == "1" else None,
+        "system_config_disabled": (
+            environment.get("GIT_CONFIG_NOSYSTEM") == "1"),
+        "accepted": accepted,
+    }
+
+
+def build_suite_environment(
+        environment_root: Path) -> tuple[dict[str, str], dict]:
+    environment = dict(os.environ)
+    for key in tuple(environment):
+        if (key in GIT_TRUST_KEYS or key in GIT_CONFIG_FILE_SELECTORS
+                or re.fullmatch(r"GIT_CONFIG_(?:KEY|VALUE)_[0-9]+", key)):
+            environment.pop(key)
+    environment.pop("GTEST_ALSO_RUN_DISABLED_TESTS", None)
+    environment.update({
+        "HOME": str(environment_root / "home"),
+        "ROS_HOME": str(environment_root / "ros_home"),
+        "ROS_LOG_DIR": str(environment_root / "ros_logs"),
+        "TMPDIR": str(environment_root / "tmp"),
+        "XDG_CONFIG_HOME": str(environment_root / "xdg_config"),
+        "XDG_RUNTIME_DIR": str(environment_root / "xdg_runtime"),
+        **COMMAND_LOCAL_GIT_CONFIG,
+    })
+    return environment, command_local_git_trust(environment)
+
+
+def _prepare_suite_environment_root(environment_root: Path) -> None:
+    for name in (
+            "home", "ros_home", "ros_logs", "tmp", "xdg_config",
+            "xdg_runtime"):
+        path = environment_root / name
+        path.mkdir(parents=True)
+        if name == "xdg_runtime":
+            path.chmod(0o700)
+
+
+def _source_binding(
+        environment: dict[str, str], git_trust: dict) -> dict:
     checks = []
     for argv in (["git", "rev-parse", "HEAD"],
                  ["git", "rev-parse", "origin/dev/icra"],
@@ -225,7 +315,7 @@ def _source_binding() -> dict:
                   "--untracked-files=all"]):
         completed = subprocess.run(
             argv, cwd=REPOSITORY, capture_output=True, text=True,
-            check=False)
+            env=environment, check=False)
         checks.append({
             "argv": argv, "exit_code": completed.returncode,
             "stdout": completed.stdout, "stderr": completed.stderr})
@@ -252,8 +342,10 @@ def _source_binding() -> dict:
             "expected_sha256": PROTECTED_PDF_SHA256,
             "observed_sha256": observed_hash,
         },
+        "command_local_git_trust": git_trust,
         "checks": checks,
-        "accepted": accepted,
+        "accepted": accepted and _suite_trust_accepted({
+            "command_local_git_trust": git_trust}),
     }
 
 
@@ -307,35 +399,69 @@ def _suite_definitions() -> tuple[dict, ...]:
     )
 
 
-def _observations(output: str) -> tuple[int, list[str]]:
-    assertions = set(re.findall(
-        r"^\[\s+OK\s+\] ([^ ]+)", output, flags=re.MULTILINE))
-    for method, class_name in re.findall(
+def _observations(output: str) -> dict:
+    gtest_ok_candidates = {
+        name for name in re.findall(
+            r"^\[\s+OK\s+\] (\S+)", output, flags=re.MULTILINE)
+        if "." in name}
+    gtest_skipped = {
+        name for name in re.findall(
+            r"^\[\s+SKIPPED\s+\] (\S+)", output,
+            flags=re.MULTILINE)
+        if "." in name}
+    gtest_disabled = {
+        name for name in re.findall(
+            r"^\[\s+DISABLED\s+\] (\S+)", output,
+            flags=re.MULTILINE)
+        if "." in name}
+    gtest_disabled.update(
+        name for name in gtest_ok_candidates
+        if re.search(r"(?:^|[./])DISABLED_", name))
+    gtest_ok = gtest_ok_candidates - gtest_disabled
+    python_all = {
+        f"{class_name}.{method}"
+        for method, class_name in re.findall(
             r"^(test_[A-Za-z0-9_]+) \(__main__\.([A-Za-z0-9_]+)\.",
-            output, flags=re.MULTILINE):
-        assertions.add(f"{class_name}.{method}")
-    counts = [int(value) for value in re.findall(
-        r"\[  PASSED  \] ([0-9]+) tests?\.", output)]
-    counts.extend(int(value) for value in re.findall(
-        r"^Ran ([0-9]+) tests? in ", output, flags=re.MULTILINE))
-    return (counts[-1] if counts else 0), sorted(assertions)
+            output, flags=re.MULTILINE)}
+    python_skipped = {
+        f"{class_name}.{method}"
+        for method, class_name in re.findall(
+            r"^(test_[A-Za-z0-9_]+) \(__main__\.([A-Za-z0-9_]+)\."
+            r"[^)]*\) \.\.\. skipped(?: |$)",
+            output, flags=re.MULTILINE)}
+    assertions = (gtest_ok | python_all) - gtest_skipped - python_skipped
+
+    python_counts = [int(value) for value in re.findall(
+        r"^Ran ([0-9]+) tests? in ", output, flags=re.MULTILINE)]
+    gtest_counts = [int(value) for value in re.findall(
+        r"^\[==========\] ([0-9]+) tests? from [^\n]+ ran\.", output,
+        flags=re.MULTILINE)]
+    skipped_counts = [len(gtest_skipped), len(python_skipped)]
+    skipped_counts.extend(int(value) for value in re.findall(
+        r"^\[\s+SKIPPED\s+\] ([0-9]+) tests?", output,
+        flags=re.MULTILINE))
+    skipped_counts.extend(int(value) for value in re.findall(
+        r"\bskipped=([0-9]+)\b", output))
+    disabled_counts = [len(gtest_disabled)]
+    disabled_counts.extend(int(value) for value in re.findall(
+        r"YOU HAVE ([0-9]+) DISABLED TESTS?", output))
+    return {
+        "test_count": (
+            python_counts[-1] if python_counts else
+            gtest_counts[-1] if gtest_counts else 0),
+        "observed_assertions": sorted(assertions),
+        "skipped_test_count": max(skipped_counts),
+        "skipped_assertions": sorted(gtest_skipped | python_skipped),
+        "disabled_test_count": max(disabled_counts),
+        "disabled_assertions": sorted(gtest_disabled),
+    }
 
 
-def _run_suites(log_root: Path) -> list[dict]:
+def _run_suites(
+        log_root: Path, environment: dict[str, str],
+        git_trust: dict) -> list[dict]:
     environment_root = log_root / "environment"
-    environment = dict(os.environ)
-    for name in ("home", "ros_home", "ros_logs", "tmp", "xdg_runtime"):
-        path = environment_root / name
-        path.mkdir(parents=True)
-        if name == "xdg_runtime":
-            path.chmod(0o700)
-    environment.update({
-        "HOME": str(environment_root / "home"),
-        "ROS_HOME": str(environment_root / "ros_home"),
-        "ROS_LOG_DIR": str(environment_root / "ros_logs"),
-        "TMPDIR": str(environment_root / "tmp"),
-        "XDG_RUNTIME_DIR": str(environment_root / "xdg_runtime"),
-    })
+    _prepare_suite_environment_root(environment_root)
     results = []
     for suite in _suite_definitions():
         completed = subprocess.run(
@@ -344,31 +470,37 @@ def _run_suites(log_root: Path) -> list[dict]:
         combined = completed.stdout + completed.stderr
         log_path = log_root / f"{suite['name']}.log"
         log_path.write_text(combined)
-        count, assertions = _observations(combined)
+        observations = _observations(combined)
         results.append({
             **suite,
             "cwd": str(REPOSITORY),
             "environment": {
                 key: environment[key] for key in
                 ("HOME", "ROS_HOME", "ROS_LOG_DIR", "TMPDIR",
-                 "XDG_RUNTIME_DIR")},
+                 "XDG_CONFIG_HOME", "XDG_RUNTIME_DIR", *GIT_TRUST_KEYS)},
+            "command_local_git_trust": git_trust,
             "exit_code": completed.returncode,
-            "test_count": count,
-            "observed_assertions": assertions,
+            **observations,
             "log_path": str(log_path.relative_to(REPOSITORY)),
         })
-        print(f"{suite['name']} exit={completed.returncode} tests={count}")
+        print(
+            f"{suite['name']} exit={completed.returncode} "
+            f"tests={observations['test_count']} "
+            f"skipped={observations['skipped_test_count']} "
+            f"disabled={observations['disabled_test_count']}")
     return results
 
 
 def run(output: Path, log_root: Path) -> int:
     output, log_root = validate_output_paths(output, log_root)
-    source = _source_binding()
+    environment, git_trust = build_suite_environment(
+        log_root / "environment")
+    source = _source_binding(environment, git_trust)
     if source["accepted"] is not True:
         print("SOURCE_BINDING_NOT_READY", file=sys.stderr)
         return 2
     log_root.mkdir()
-    suites = _run_suites(log_root)
+    suites = _run_suites(log_root, environment, git_trust)
     summary = build_summary(source["head_commit"], suites)
     summary["source_binding"] = source
     output.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")
