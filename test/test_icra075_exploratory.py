@@ -169,6 +169,14 @@ class Icra075ExploratoryContractTest(unittest.TestCase):
                          "integrity.integrity_fusion_mode")
         self.assertEqual(hpl_authority["provider_launch_argument_key"],
                          "gnss_scenario_file")
+        self.assertEqual(
+            hpl_authority["provider_launch_argument_value"],
+            "/home/dev/ws_iap/install/gnss_sim/share/gnss_sim/config/"
+            "icra075_inverse_corridor_provider_v2.json")
+        self.assertEqual(
+            hpl_authority["provider_config_resolved_path"],
+            str((REPO / "src/uav_simulator/gnss_sim/config/"
+                 "icra075_inverse_corridor_provider_v2.json").resolve()))
         self.assertEqual(len(hpl_authority["provider_config_sha256"]), 64)
         self.assertEqual(result["frame_authority_binding"]["source_path"],
                          "src/iap/integrity/integrity_extension.cpp")

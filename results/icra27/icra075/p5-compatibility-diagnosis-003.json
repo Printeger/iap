@@ -1,0 +1,171 @@
+{
+  "action_reason_counts": {
+    "REQUEST_REPLAN/current_low_margin": 2137
+  },
+  "alert_limits_m": {
+    "hal": 10.0,
+    "val": 20.0
+  },
+  "authority_source_sha256": {
+    "launch/icra075_exploratory.launch.py": "3f9b1e52f6b812b06dc0a40ae997f857b06a7de6cd3cd2910642a68821b3efe7",
+    "launch/test_planner.launch.py": "48a756004bb2ae12a03306bba6eb1ace0a86c182382ccd4fbd6adeb9dfb154ca",
+    "src/iap/integrity/integrity_extension.cpp": "a00aebf9c6e9a37e8a22c6fc7fb46e6d8d473809bcc6e8c4ef72616d24741c42",
+    "src/iap/integrity/integrity_monitor.cpp": "6636ededd8d695bc6be6d777c58d41fbd86cb509b57c26fe5e70e7a36b1be563",
+    "src/iap/planner/plan_manage/src/p5_runtime_integrity_gate.cpp": "9ccbe768bc8c77b60b7834cf2a039a298f9f13f6854d49f3965e7221caba7882"
+  },
+  "classification": "FROZEN_CONTRACT_INCOMPATIBLE",
+  "current_integrity_source_counts": {
+    "FUSED": 2137
+  },
+  "current_margin_m": {
+    "maximum": -48.8461625003,
+    "minimum": -66.6898997929
+  },
+  "development_only": true,
+  "evidence_sha256": {
+    "results/icra27/icra075/matrix-002/primary-75001-p0_p5_control/exports/test_planner_icra_p0_p4_v2_p5_dev_icra_p0_p4_v2_p5_dev_fixture_v1_1690352_1787834749466/test_planner_integrity_validation.csv": "b7d91d38c27da34da4dfe22fe10c6136af1847c59faff0e5d13faf3f10ce82d2",
+    "results/icra27/icra075/matrix-002/primary-75001-p0_p5_control/exports/test_planner_icra_p0_p4_v2_p5_dev_icra_p0_p4_v2_p5_dev_fixture_v1_1690352_1787834749466/test_planner_manifest.json": "dee0001c0e7c061ae2eb70c2d81c38411d64595cf602511c89b2ad8a338df912",
+    "results/icra27/icra075/matrix-002/primary-75001-p0_p5_control/launch_command.json": "696f4d26b011d267ec9361780a6b1c47f55ea778e0d7849b845afc69f35d66c4",
+    "results/icra27/icra075/matrix-002/primary-75001-p0_p5_control/lineage_capture.jsonl": "7650dc4321de72e4784cd24103b4872eaa03c8194aafa8a352bab557ee09df97",
+    "results/icra27/icra075/matrix-002/primary-75001-p0_p5_control/run_manifest.json": "168c0b124514ea9bd11e6740af80131d03d93a174eaa1e56fcb5cd41f22ef65b",
+    "results/icra27/icra075/matrix-002/primary-75001-p0_p5_control/runtime/iap_logs/20260827T124549Z_667/export/iap_araim.csv": "8f314e0cc3ef6a4ac041f822831b15ed57222f020e906447d39f2358f285ea35",
+    "results/icra27/icra075/matrix-002/primary-75001-p0_p5_control/runtime/iap_logs/20260827T124549Z_667/metadata/config/config_gnss.json": "40070b543bdda9c1fad0b5a5ea6bccd9f92bbc60b6efe25b01acabd214adc7b0"
+  },
+  "exercised_source_head": "0eb739913e01d7c2acc8da38d24169f05f5424da",
+  "final_hpl_source_counts": {
+    "GNSS": 426
+  },
+  "final_vpl_source_counts": {
+    "GNSS": 426
+  },
+  "frame_authority": "map",
+  "frame_authority_binding": {
+    "source_path": "src/iap/integrity/integrity_extension.cpp",
+    "source_sha256": "a00aebf9c6e9a37e8a22c6fc7fb46e6d8d473809bcc6e8c4ef72616d24741c42",
+    "source_symbol": "IntegrityExtension::publishIntegrity",
+    "value": "map"
+  },
+  "fusion_mode_counts": {
+    "max_pl": 426
+  },
+  "future_margin_m": {
+    "maximum": 8.54174607877,
+    "minimum": 8.51960866011
+  },
+  "launch_arguments": [
+    "experiment:=icra_p0_p4_v2_p5_dev",
+    "scenario:=icra_p0_p4_v2_p5_dev_fixture_v1",
+    "icra075_scene_variant:=PRIMARY",
+    "icra075_descriptor_sha256:=41ab7001c7c60e78cdcf8a670efdcba7545bcd7c93e06081745a090b57f0f06d",
+    "forest_random_seed:=75001",
+    "init_x:=-12.0",
+    "init_y:=0.0",
+    "init_z:=1.5",
+    "goal_x:=12.0",
+    "goal_y:=0.0",
+    "goal_z:=1.5",
+    "manager/max_vel:=1.0",
+    "optimization/max_vel:=1.0",
+    "bspline/limit_vel:=1.0",
+    "manager/max_acc:=3.0",
+    "optimization/max_acc:=3.0",
+    "bspline/limit_acc:=3.0",
+    "planner_enable_p4:=false",
+    "p4.metrics_only:=false",
+    "p4.objective:=PROVIDER_BOTTLENECK_V2",
+    "gnss_scenario_file:=/home/dev/ws_iap/install/gnss_sim/share/gnss_sim/config/icra075_inverse_corridor_provider_v2.json",
+    "gnss_enable_map_occlusion:=true",
+    "run_duration_s:=75.0",
+    "validation_duration_s:=65.0",
+    "runtime_root_dir:=/home/dev/ws_iap/src/iap/results/icra27/icra075/matrix-002/primary-75001-p0_p5_control/runtime",
+    "export_root_dir:=/home/dev/ws_iap/src/iap/results/icra27/icra075/matrix-002/primary-75001-p0_p5_control/exports",
+    "iap_log_root:=/home/dev/ws_iap/src/iap/results/icra27/icra075/matrix-002/primary-75001-p0_p5_control/runtime/iap_logs",
+    "bag_output_dir:=/home/dev/ws_iap/src/iap/results/icra27/icra075/matrix-002/primary-75001-p0_p5_control/bags",
+    "p4.debug_csv_path:=/home/dev/ws_iap/src/iap/results/icra27/icra075/matrix-002/primary-75001-p0_p5_control/exports/planner_p4_risk_astar_debug.csv",
+    "record_bag:=false",
+    "start_rviz:=false"
+  ],
+  "observed_current_pl_m": {
+    "hpl_max": 27.733391,
+    "hpl_min": 24.3673612,
+    "vpl_max": 86.6898998,
+    "vpl_min": 68.8205779
+  },
+  "p5_current_replan_margin_m": 0.3,
+  "p5_final_status_count": 2137,
+  "reason": "The current P5 gate consumes the intended fresh map-frame fused monitor report. Its frozen max_pl policy truthfully selects GNSS PL, whose minimum HPL/VPL already exceeds the frozen 10/20 m alert limits; all future samples remain above the replan margin. Passing therefore requires a forbidden contract change, not correction of a misrouted, misframed, mis-united, stale, or wrong-file value.",
+  "repairable_miswiring_found": false,
+  "required_change_classes": [
+    "GNSS/provider truth or PL definition/value",
+    "max_pl fusion policy/source",
+    "HAL/VAL definition/value",
+    "P5 current margin/action threshold or hard-gate weakening"
+  ],
+  "requires_forbidden_contract_change_to_pass": true,
+  "schema_version": "icra075_p5_compatibility_diagnosis_v1",
+  "stamp_authority": "IntegrityReport.header.stamp from monitor report stamp",
+  "stamp_authority_binding": {
+    "message_source_path": "src/iap/integrity/integrity_extension.cpp",
+    "message_source_sha256": "a00aebf9c6e9a37e8a22c6fc7fb46e6d8d473809bcc6e8c4ef72616d24741c42",
+    "message_source_symbol": "IntegrityExtension::publishIntegrity",
+    "report_source_path": "src/iap/integrity/integrity_monitor.cpp",
+    "report_source_sha256": "6636ededd8d695bc6be6d777c58d41fbd86cb509b57c26fe5e70e7a36b1be563",
+    "report_source_symbol": "IntegrityMonitor::processFrame",
+    "value": "IntegrityReport.header.stamp from monitor report stamp"
+  },
+  "task": "ICRA-075",
+  "unique_candidate_identity_count": 2117,
+  "units": "metres for AL, PL and integrity margins; seconds for stamps/ages",
+  "value_authority": {
+    "current_hal_val": {
+      "message_fields": [
+        "IntegrityReport.hal",
+        "IntegrityReport.val"
+      ],
+      "retained_csv": "results/icra27/icra075/matrix-002/primary-75001-p0_p5_control/runtime/iap_logs/20260827T124549Z_667/export/iap_araim.csv",
+      "retained_csv_sha256": "8f314e0cc3ef6a4ac041f822831b15ed57222f020e906447d39f2358f285ea35",
+      "runtime_config": "results/icra27/icra075/matrix-002/primary-75001-p0_p5_control/runtime/iap_logs/20260827T124549Z_667/metadata/config/config_gnss.json",
+      "runtime_config_sha256": "40070b543bdda9c1fad0b5a5ea6bccd9f92bbc60b6efe25b01acabd214adc7b0",
+      "runtime_keys": [
+        "integrity.HAL_trunk_default",
+        "integrity.VAL_default"
+      ]
+    },
+    "current_hpl_vpl": {
+      "fusion": "max_pl",
+      "fusion_config_key": "integrity.integrity_fusion_mode",
+      "fusion_config_path": "results/icra27/icra075/matrix-002/primary-75001-p0_p5_control/runtime/iap_logs/20260827T124549Z_667/metadata/config/config_gnss.json",
+      "fusion_config_sha256": "40070b543bdda9c1fad0b5a5ea6bccd9f92bbc60b6efe25b01acabd214adc7b0",
+      "message_fields": [
+        "IntegrityReport.hpl",
+        "IntegrityReport.vpl"
+      ],
+      "provider_config_resolved_path": "/home/dev/ws_iap/src/iap/src/uav_simulator/gnss_sim/config/icra075_inverse_corridor_provider_v2.json",
+      "provider_config_sha256": "6fac5a21d8bb491e7ac0e0b098b8bf3c00e1416b74e0019791a23b868fd05671",
+      "provider_launch_argument_key": "gnss_scenario_file",
+      "provider_launch_argument_value": "/home/dev/ws_iap/install/gnss_sim/share/gnss_sim/config/icra075_inverse_corridor_provider_v2.json",
+      "retained_csv": "results/icra27/icra075/matrix-002/primary-75001-p0_p5_control/exports/test_planner_icra_p0_p4_v2_p5_dev_icra_p0_p4_v2_p5_dev_fixture_v1_1690352_1787834749466/test_planner_integrity_validation.csv",
+      "retained_csv_sha256": "b7d91d38c27da34da4dfe22fe10c6136af1847c59faff0e5d13faf3f10ce82d2",
+      "selected_source": "GNSS"
+    },
+    "p5_current_gate": {
+      "integrity_topic": "/iap/integrity",
+      "launch_command": "results/icra27/icra075/matrix-002/primary-75001-p0_p5_control/launch_command.json",
+      "launch_command_sha256": "696f4d26b011d267ec9361780a6b1c47f55ea778e0d7849b845afc69f35d66c4",
+      "launch_wrapper": "launch/icra075_exploratory.launch.py",
+      "launch_wrapper_sha256": "3f9b1e52f6b812b06dc0a40ae997f857b06a7de6cd3cd2910642a68821b3efe7",
+      "production_manifest": "results/icra27/icra075/matrix-002/primary-75001-p0_p5_control/exports/test_planner_icra_p0_p4_v2_p5_dev_icra_p0_p4_v2_p5_dev_fixture_v1_1690352_1787834749466/test_planner_manifest.json",
+      "production_manifest_sha256": "dee0001c0e7c061ae2eb70c2d81c38411d64595cf602511c89b2ad8a338df912",
+      "source_fields": [
+        "hpl",
+        "vpl",
+        "hal",
+        "val",
+        "im"
+      ],
+      "threshold_key": "p5.current_replan_margin_m",
+      "threshold_source_path": "launch/test_planner.launch.py",
+      "threshold_source_sha256": "48a756004bb2ae12a03306bba6eb1ace0a86c182382ccd4fbd6adeb9dfb154ca"
+    }
+  }
+}

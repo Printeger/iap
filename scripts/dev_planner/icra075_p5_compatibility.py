@@ -74,7 +74,8 @@ def diagnose(run_root: Path) -> dict:
     row_manifest = json.loads(manifest_path.read_text())
     launch_arguments = dict(argument.split(":=", 1)
                             for argument in launch["launch_arguments"])
-    gnss_scenario_path = Path(launch_arguments["gnss_scenario_file"]).resolve()
+    gnss_scenario_argument = launch_arguments["gnss_scenario_file"]
+    gnss_scenario_path = Path(gnss_scenario_argument).resolve()
     if not gnss_scenario_path.is_file():
         raise ValueError("retained GNSS scenario path is unavailable")
     hal = {float(row["HAL"]) for row in araim}
@@ -159,7 +160,8 @@ def diagnose(run_root: Path) -> dict:
                 "fusion_config_key": "integrity.integrity_fusion_mode",
                 "fusion_config_sha256": _sha256(runtime_config_path),
                 "provider_launch_argument_key": "gnss_scenario_file",
-                "provider_launch_argument_value": str(gnss_scenario_path),
+                "provider_launch_argument_value": gnss_scenario_argument,
+                "provider_config_resolved_path": str(gnss_scenario_path),
                 "provider_config_sha256": _sha256(gnss_scenario_path),
                 "retained_csv": _relative(validation_path),
                 "retained_csv_sha256": _sha256(validation_path),

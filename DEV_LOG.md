@@ -21,11 +21,11 @@ GNSS for all 426 validation epochs: HPL is `24.3673612..27.733391 m` and VPL is
 `8.51960866011..8.54174607877 m`. Topic, map frame, monitor stamp, metre units, launch/config materialization and
 freshness are the intended authorities. Passing would therefore require a forbidden provider/PL/fusion/AL or P5
 threshold change, not a wiring repair. The repository-local
-`results/icra27/icra075/p5-compatibility-diagnosis-002.json` uses schema
+`results/icra27/icra075/p5-compatibility-diagnosis-003.json` uses schema
 `icra075_p5_compatibility_diagnosis_v1`, classifies `FROZEN_CONTRACT_INCOMPATIBLE`, and has SHA-256
-`cedeaafd044654965d30863c5e93fc1268eff63b30bbec581a91917d129045a5`. It explicitly binds each value to
-its retained config/CSV or launch/source path, key and SHA-256. The earlier diagnosis-001 remains retained and
-unchanged as the pre-review record.
+`70fdddfaac929112b1845871e69d50c35447c3bebcf411da8021464de9ca4124`. It explicitly binds each value to
+its retained config/CSV or launch/source path, key and SHA-256, preserving both the literal installed GNSS launch
+argument and its resolved source materialization. Earlier diagnosis-001/002 remain retained and unchanged.
 
 Focused Python tests pass 19/19. Post-build manager/FSM/P4/P5/lineage CTest targets pass 4/4, and the canonical
 shared six-package build passes 6/6 using only `/home/dev/ws_iap/{build,install,log}`. Per the classification gate,

@@ -6,7 +6,7 @@
 |---|---|---|---|
 | IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-423 | Terminal publication boundary | Every enabled P4 objective blocks invalid final/attempt/guide identity and lineage writer failure; metrics-only identity/writer adversaries observe zero normal publication; disabled remains explicit | **RED→GREEN / FAIL-CLOSED** |
 | IAP-RQ-423 / IAP-RQ-424 | Source admission | Source is checked immediately after every row analyzer, after power analysis and at final batch admission; changed source overrides analyzer success or failure with typed exit/stage | **19/19 FOCUSED PASS** |
-| IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 | P5 compatibility | Non-overwriting diagnosis-002 binds 2,137 final observations, frozen HAL/VAL `10/20 m`, GNSS-selected `max_pl` HPL `24.3673612..27.733391 m`, VPL `68.8205779..86.6898998 m`, map frame, monitor stamp, metre units and each launch/config/source path, key and hash; SHA-256 `cedeaafd…045a5`; diagnosis-001 retained | **FROZEN_CONTRACT_INCOMPATIBLE** |
+| IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 | P5 compatibility | Non-overwriting diagnosis-003 binds 2,137 final observations, frozen HAL/VAL `10/20 m`, GNSS-selected `max_pl` HPL `24.3673612..27.733391 m`, VPL `68.8205779..86.6898998 m`, map frame, monitor stamp, metre units and each launch/config/source path, key and hash; SHA-256 `70fdddfa…a4124`; diagnosis-001/002 retained | **FROZEN_CONTRACT_INCOMPATIBLE** |
 | IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-423 / IAP-RQ-424 | Build/stop boundary | Shared exact build 6/6 and affected CTest 4/4 pass; classification requires stop before GPU/ROS, matrix-003, power and ICRA-076 | **BLOCKED / NOT PASS** |
 
 ## 2026-08-27 user decision 005 and ICRA-075 repair issuance
