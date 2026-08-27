@@ -1,5 +1,83 @@
 # ICRA Supervisor Log
 
+## 2026-08-27 — ICRA-072A Review REQUEST_CHANGES; final exact-admission repair reissued
+
+### Review identity and retained evidence
+
+- User-mandated lineage base is `3b5199e0cf8efc904f124cdb73156a3209eb6d80`. The immediately preceding
+  Supervisor handoff is `8ee1d7d443c8226dae383eec951293192abd79e7`; reviewed Builder HEAD is
+  `b607b976d283a077855c590b9374da94880fb29e`. The current increment is two Builder commits and six changed files.
+  Fetch left HEAD and `origin/dev/icra` equal at divergence `0 0`; the protected untracked PDF remains at SHA-256
+  `1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+- Review preserved `/home/dev/ws_iap/{build,install,log}`, `run-001` through `run-023`, all raw/compact/live
+  evidence, ordinary logs and the PDF. It started no ROS, GPU preflight or live run and did not replay an analyzer
+  into retained evidence. `git diff --check` passes.
+- Shared log `build_2026-08-27_04-28-29` records all six exact packages at `rc=0`. Supervisor offline checks pass
+  runner/analyzer tools 15/15 and hermetic launch tests 24/24; the wrapper reports 17,809 external ROS-log entries
+  unchanged. Ignored Supervisor test output is retained under
+  `results/icra27/icra072/supervisor_review_b607_launch`.
+- `run-023` is materially strong module-integration evidence. It binds pushed implementation `c59de16` at the
+  initial, pre-ROS and final checks; runner/analyzer both pass; all seven stages are true; 15/15 required processes
+  stay healthy; owned groups clear. Selected terminal ID `6`, start `1657065614522279439`, final identity
+  `4388eac04c2cc922` and all 44 samples across its four fused runtime records are exact and safe. This actual run
+  fact does not cure the general acceptance defects below.
+
+### Standards axis
+
+Verdict: **REQUEST_CHANGES — two hard procedural/source-admission violations and one non-blocking smell.**
+
+1. **High — arbitrary untracked source is admitted.** Source binding uses
+   `git status --porcelain --untracked-files=no`; an untracked Python/config file can affect exercised bytes while
+   the runner emits `accepted=true`. Exact source admission must inspect all paths and allowlist only the protected
+   PDF at its exact hash. This is required by the active exact-source contract and AGENTS.md section 8.4.
+2. **High — external output was created and deleted.** `DEV_LOG.md` discloses writing C++ verification output to
+   `/tmp/icra072_cpp_test.out` and unlinking it. That violates AGENTS.md sections 0 and 8.5. The history must remain
+   disclosed; remediation is a repeated verification with repository-local retained output, not concealment or
+   further cleanup.
+3. **Low / Duplicated Code.** Analyzer lineage consistency and decision identities are built as overlapping tuples.
+   One bounded canonical identity helper may reduce drift but is not independently required.
+
+All other reviewed scope, requirement mapping, Builder-owned documentation, shared roots, retained runs and
+protected authority conform to documented standards.
+
+### Spec axis
+
+Verdict: **REQUEST_CHANGES — one High acceptance failure and one Medium TDD gap.**
+
+1. **High — mixed runtime identity remains fail-open.** Analyzer lines 394-407 admit a runtime record when any
+   `runtime_committed` sample matches ID/start, then validate only record-level safety. One matching sample plus
+   missing, sentinel or mismatched committed samples can therefore satisfy `p5_runtime_committed`. The current
+   negative fixture mutates the sole sample and does not exercise a mixed record. This contradicts the requirement
+   that every accepted record be exact-identity end to end and overstates the claim in TRACEABILITY.
+2. **Medium — changed-during-run repair lacks required TDD.** The runner implements the final source check and
+   `source_binding_changed_during_run` exception, but the only source-change test exercises the pre-ROS check. No
+   focused test proves typed outcome plus owned cleanup for a final change, despite the task's RED/GREEN requirement
+   for every repair.
+
+No unasked scope creep was found. Runs `run-001` through `run-023` remain contiguous and retained.
+
+### Gate, architecture and next action
+
+- Gate verdict is
+  **`ICRA072A_REQUEST_CHANGES_MIXED_RUNTIME_IDENTITY_SOURCE_ADMISSION_TDD_AND_RETENTION`**. Stage 1 / Layer 1 is
+  not formally complete, so ICRA-072B is not issued. The run proves the modules can interoperate, not that the
+  automatic fail-closed acceptance contract is complete.
+- The active profile enables IMU and LiDAR inputs in GLIM, inserts the GNSS extension/factors, enables both GNSS
+  and LiDAR integrity, and fuses their protection levels with authoritative `max_pl`. P0 and P5 therefore assess
+  both GNSS and LiDAR risk. This development integration does not constitute localization or integrity
+  qualification.
+- Continue the same Gate with only the mixed-sample all-exact check, full untracked inspection with exact PDF
+  allowlist, final source-change regression and repository-local retained verification output. Preserve fused P5,
+  thresholds, product algorithms and every retained artifact.
+- These changes alter the admitted analyzer/source-binding implementation. Commit and push them cleanly at
+  divergence `0 0`, then use fresh `run-024` or later; do not relabel or replay `run-023` as the repaired-source
+  PASS. A future ICRA-072A PASS may issue only ICRA-072B stabilization.
+
+### Supervisor window disposition
+
+- Pending the mandatory post-push audit. This Review changeset must first become the pushed authoritative handoff;
+  any final `KEEP_WINDOW` or `ROTATE_RECOMMENDED` record follows in a minimal Supervisor-only commit if required.
+
 ## 2026-08-27 — ICRA-072A Review REQUEST_CHANGES; Layer 1 acceptance repair reissued
 
 ### Review identity and synchronization

@@ -1,5 +1,18 @@
 # ICRA 2027 P0 -> P4-v2 -> P5 计划复审
 
+## ICRA-072A exact-admission Review — 2026-08-27
+
+**Verdict: `REQUEST_CHANGES`.** `run-023` is the first pushed tracked-source-bound development run with all seven ordered
+P0/P4/EGO/fused-P5/publish/runtime stages, safe actual selected samples, healthy required processes and complete
+cleanup. It is accepted as strong module-integration evidence, not Layer 1 completion. The analyzer's `any` sample
+match permits mixed committed identities, source admission hides all untracked paths rather than only allowing the
+protected PDF, the final source-change branch lacks required TDD, and external temporary test output violated
+repository-local retention.
+
+The same ICRA-072A Gate remains active for this bounded acceptance repair and a fresh clean-source `run-024` or
+later. No product algorithm, fused authority, threshold, inverse-corridor, scientific-effect, qualification or
+campaign work is authorized. Only a later ICRA-072A Review PASS may issue ICRA-072B.
+
 ## Four-layer workflow Review — 2026-08-26
 
 **Verdict: adopt the four-layer workflow and archive the old one-shot process as found.** Builder checkpoint

@@ -1,5 +1,14 @@
 # ICRA 2027 P0 -> P4-v2 -> P5 科学纠偏实施计划
 
+## Current Layer 1 disposition — 2026-08-27
+
+`run-023` 已完成实际 P0 -> P4 -> EGO final -> authoritative fused P5 final -> publish -> P5 runtime
+链路，共享 6-package build、required-process health 和 cleanup 也通过，因此模块联调的实际运行已被观测。
+但 ICRA-072A Review 仍为 `REQUEST_CHANGES`：analyzer 对 mixed runtime samples 使用 `any` 匹配，
+source admission 忽略全部 untracked paths，run-end source-change 分支缺少 TDD，且已披露一次
+仓库外测试输出创建/删除。当前只允许修复这些验收边界，clean push 后使用新的 `run-024`
+或更高 identity。不得开始 ICRA-072B 或 Layer 3/4。
+
 ## Four-layer implementation workflow — 2026-08-26
 
 用户工作流决定 `USER-ICRA-WORKFLOW-20260826-001` 在 Builder handoff

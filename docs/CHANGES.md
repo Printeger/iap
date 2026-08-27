@@ -3,6 +3,18 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- review(icra-072a-exact-admission): IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 / IAP-RQ-422 /
+  IAP-RQ-423 / IAP-RQ-424 — reject Builder HEAD `b607b97` as formal Layer 1 completion while retaining
+  `run-023` as strong tracked-source-bound module-integration evidence. The actual run has all seven ordered stages,
+  authoritative fused-safe final/runtime decisions, exact selected ID/start across all observed samples, healthy
+  15/15 required processes and complete owned cleanup. The general analyzer still accepts a mixed runtime record
+  when any one committed sample matches; the runner hides arbitrary untracked source during admission; and the
+  final changed-during-run source rejection lacks required TDD. Builder also disclosed an AGENTS.md section 8.5
+  breach by creating and deleting external `/tmp` test output. Continue the same ICRA-072A Gate with all-sample
+  exact identity, a hash-bound protected-PDF-only untracked allowlist, final source-change regression and retained
+  repository-local replacement verification. Commit/push the repaired source before fresh `run-024` or later.
+  ICRA-072B, effect, qualification and campaign remain unauthorized.
+
 - fix(icra-072a-fail-closed-acceptance): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 /
   IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — require authoritative `FUSED` runtime effective/raw
   `action=OK` with no active reject reason on an explicit positive trajectory ID and integer-nanosecond start;

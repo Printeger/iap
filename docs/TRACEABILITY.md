@@ -1,5 +1,16 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-27 ICRA-072A exact-admission Supervisor Review
+
+| Req ID | Reviewed seam | Evidence and disposition | Status |
+|---|---|---|---|
+| IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-423 | Runtime identity admission | Actual `run-023` selected-runtime samples all match ID `6` / start `1657065614522279439`, but the analyzer accepts a record on `any(...)` matching sample and does not reject mixed committed identities | **REQUEST_CHANGES / FAIL-OPEN GENERAL CONTRACT** |
+| IAP-RQ-423 / IAP-RQ-424 | Exact committed source | `run-023` binds tracked commit `c59de16` three times, but source capture suppresses all untracked files. Require full status and allow only the protected PDF at exact SHA-256; reject all other untracked paths | **REQUEST_CHANGES / SOURCE ADMISSION INCOMPLETE** |
+| IAP-RQ-423 / IAP-RQ-424 | Attempt finalization TDD | Final `source_binding_changed_during_run` code exists; no regression drives that branch and proves typed outcome plus owned cleanup | **REQUEST_CHANGES / TEST GAP** |
+| IAP-RQ-424 | Repository-local evidence retention | Builder disclosed creating and unlinking `/tmp/icra072_cpp_test.out`, contrary to AGENTS.md sections 0/8.5. Preserve disclosure and retain a repository-local replacement verification log | **REQUEST_CHANGES / PROCEDURAL BREACH** |
+| IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 | Observed module integration | `run-023` has the seven-stage P0/P4/EGO/fused-P5/publish/runtime chain, all actual selected-identity samples safe, 15/15 process health and cleanup; shared build is 6/6, focused tools 15/15 and hermetic launch 24/24 | **STRONG DEVELOPMENT INTEGRATION EVIDENCE; NOT LAYER 1 PASS** |
+| IAP-RQ-423 / IAP-RQ-424 | Gate disposition | Preserve run001..run023; repair, commit/push clean source, then use fresh run024+ because admitted analyzer/source binding changes | **ICRA-072A TASK_READY / ICRA-072B UNAUTHORIZED** |
+
 ## 2026-08-27 ICRA-072A fail-closed acceptance implementation
 
 | Req ID | Implemented/tested seam | Evidence and disposition | Status |

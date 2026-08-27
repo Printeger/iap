@@ -574,6 +574,15 @@ every retained iteration has a machine first-missing-stage outcome. Verdict is `
 same Gate at `run-021` with fused P5 authority, exact runtime identity and complete typed iteration records.
 ICRA-072B and all Layer 3/4 work remain unauthorized.
 
+Latest ICRA-072A Supervisor Review note (2026-08-27): Builder HEAD `b607b97` and fresh `run-023` prove strong
+development integration: pushed-source checks, all seven P0/P4/EGO/fused-P5/publish/runtime stages, exact actual
+selected samples, 15/15 process health and cleanup all pass. Layer 1 remains `REQUEST_CHANGES` because a mixed
+runtime record can pass when only one committed sample matches, source admission suppresses arbitrary untracked
+files, and the final changed-during-run source branch lacks required TDD. Builder also disclosed external `/tmp`
+verification output and deletion contrary to repository-local retention. Continue ICRA-072A with the bounded
+exact-admission repair and fresh `run-024` or later after a clean pushed implementation. ICRA-072B and all Layer
+3/4 work remain unauthorized.
+
 Four-layer Supervisor disposition (2026-08-26): checkpoint `6a6bdd3` is
 `ARCHIVED_AS_FOUND / BLOCKED_TERMINAL_CHAIN_MISSING`. User workflow decision
 `USER-ICRA-WORKFLOW-20260826-001` authorizes ICRA-072A to iterate with shared
