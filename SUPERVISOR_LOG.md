@@ -16,7 +16,14 @@
 
 ### Supervisor window disposition
 
-- Pending pushed decision/task changeset and mandatory post-push audit.
+- Decision/task changeset `8879f84d9ce94ff00bf7b693959d1118dae9bb27` was pushed; fetch confirmed
+  divergence `0 0`. Normal commit was blocked by the known `ROUTE_CHANGE_SUPERVISOR_NOT_ACTIVE` transition
+  deadlock; after route consistency PASS and exact 12-file staging inspection, Supervisor used the controlled
+  section 8.6 `--no-verify` path. Builder evidence and protected PDF remained unstaged.
+- **`ROTATE_RECOMMENDED`**. Reason: `USER_DECISION005_ACTIVATES_ICRA075_BOUNDED_REPAIR`. A route-owner decision
+  changes the repository from blocked Supervisor custody to a DEEPSEEK TASK_READY handoff, and the current context
+  has compacted. A fresh Supervisor window may later review the repair from pushed authority; rotation does not
+  expand `NEXT_TASK.md` or authorize ICRA-076.
 
 ## 2026-08-27 — ICRA-075 Review BLOCKED; awaiting user decision
 
