@@ -19,7 +19,9 @@
   ICRA-073 is `BLOCKED_ICRA073_FROZEN_GUARD_INFLATION_CONFLICT`. No oracle/paired runner, shared
   build, GPU, ROS/live diagnostic, tuning, effect, qualification or campaign work followed; ICRA-072B remains
   BLOCKED/user-bypassed, never PASS. Retain and disclose the pre-fix rejected RED forged-source artifact by exact
-  path/size/hash; it is not accepted source-bound evidence.
+  path/size/hash; it is not accepted source-bound evidence. Pushed implementation `29cc2dc` produced the sole
+  canonical static record `preflight-001.json` (SHA-256 `1a8449e25cdd4f7fe096e3509d8b711286f75b938bd7a065338127fb2b13330d`),
+  exit 2 with accepted source binding and only the frozen guard failure. Standards/Spec re-review: 0 actionable.
 
 - review(user-bypass-icra072b-issue-icra073): IAP-RQ-000 / IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 /
   IAP-RQ-410 / IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — Standards PASS and Spec BLOCKED for Builder

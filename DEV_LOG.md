@@ -9054,7 +9054,18 @@ It is retained without rewrite as `REJECTED_PRE_FIX_RED_EVIDENCE_RETAINED`,
 not accepted source-bound evidence, and is part of the later canonical
 preflight's exact retained-untracked inventory.
 
-Pending the mandatory implementation commit/push and repository-local static
-preflight record, terminal Builder status is
-`BLOCKED_ICRA073_FROZEN_GUARD_INFLATION_CONFLICT`. All ICRA-072 evidence,
-shared roots, hidden user files and protected PDF remain untouched.
+Implementation/test/docs commit `29cc2dca46058216e9a99c6dea0987bff7885344`
+was pushed and fetch-confirmed at divergence `0 0`. Exactly one canonical
+static invocation then wrote
+`results/icra27/icra073/preflight-001.json` (8027 bytes, SHA-256
+`1a8449e25cdd4f7fe096e3509d8b711286f75b938bd7a065338127fb2b13330d`)
+and exited 2. Its source binding is accepted at that pushed HEAD, its only
+failure reason is `curved_tubes_and_guards_occupancy_clear`, and all subsequent
+checks are listed as incomplete/not evaluated. It records GPU preflight as
+`NOT_RUN_FIXTURE_PREFLIGHT_FAILED` and ROS as `NOT_STARTED`.
+
+Terminal Builder status is
+`BLOCKED_ICRA073_FROZEN_GUARD_INFLATION_CONFLICT`. Standards and Spec reviews
+both report zero actionable findings on the implementation/preflight contract.
+All ICRA-072 evidence, shared roots, hidden user files and protected PDF remain
+untouched.

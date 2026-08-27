@@ -1,0 +1,182 @@
+{
+  "argv": [
+    "/home/dev/ws_iap/src/iap/scripts/dev_planner/icra073_inverse_corridor_fixture.py",
+    "--preflight-all",
+    "--source-head",
+    "0000000000000000000000000000000000000000",
+    "--output",
+    "/home/dev/ws_iap/src/iap/results/icra27/icra073/forged-source-1338727.json"
+  ],
+  "campaign_claim": false,
+  "checks": {
+    "common_endpoints_and_nonstraight": {
+      "accepted": true
+    },
+    "curved_routes_reachable": {
+      "accepted": false,
+      "definition": "continuous_endpoint_connected_clear_corridor"
+    },
+    "curved_tubes_and_guards_occupancy_clear": {
+      "accepted": false,
+      "variants": {
+        "EXACT_MIRROR": {
+          "risky": {
+            "minimum_raw_occupancy_clearance_m": 1.275072583313184,
+            "required_guard_plus_inflation_m": 1.349
+          },
+          "safe": {
+            "minimum_raw_occupancy_clearance_m": 2.609269049419026,
+            "required_guard_plus_inflation_m": 1.349
+          }
+        },
+        "FLAT_NULL": {
+          "risky": {
+            "minimum_raw_occupancy_clearance_m": 1.275072583313184,
+            "required_guard_plus_inflation_m": 1.349
+          },
+          "safe": {
+            "minimum_raw_occupancy_clearance_m": 2.609269049419026,
+            "required_guard_plus_inflation_m": 1.349
+          }
+        },
+        "PRIMARY": {
+          "risky": {
+            "minimum_raw_occupancy_clearance_m": 1.275072583313184,
+            "required_guard_plus_inflation_m": 1.349
+          },
+          "safe": {
+            "minimum_raw_occupancy_clearance_m": 2.609269049419026,
+            "required_guard_plus_inflation_m": 1.349
+          }
+        }
+      }
+    },
+    "decision_and_oracle_data_planes_isolated": {
+      "accepted": true
+    },
+    "descriptor_hash_exact": {
+      "accepted": true,
+      "descriptors": {
+        "EXACT_MIRROR": {
+          "observed": "982986d516991aeb29931e23a46f851164756ac8235fc258e76e2550ffac5785",
+          "recomputed": "982986d516991aeb29931e23a46f851164756ac8235fc258e76e2550ffac5785"
+        },
+        "FLAT_NULL": {
+          "observed": "b837e998c662d231f839a9db3efee5fe873295bbd6b29bad04103cafdf129038",
+          "recomputed": "b837e998c662d231f839a9db3efee5fe873295bbd6b29bad04103cafdf129038"
+        },
+        "PRIMARY": {
+          "observed": "aec18e1e72dc6a732727a155c7e69c9c475badd334db59abed355b362feb7295",
+          "recomputed": "aec18e1e72dc6a732727a155c7e69c9c475badd334db59abed355b362feb7295"
+        }
+      }
+    },
+    "exact_mirror_geometric_y_negation": {
+      "accepted": true
+    },
+    "flat_null_truth_finite_complete_identical": {
+      "accepted": true,
+      "values": {
+        "risky": 1.0,
+        "safe": 1.0
+      }
+    },
+    "lidar_landmarks_symmetric": {
+      "accepted": true,
+      "minimum_route_clearance_m": {
+        "EXACT_MIRROR": 1.75,
+        "FLAT_NULL": 1.75,
+        "PRIMARY": 1.75
+      }
+    },
+    "outer_trees_close_only_third_homotopy": {
+      "accepted": true,
+      "variants": {
+        "EXACT_MIRROR": {
+          "minimum_m": 2.6034003328965905,
+          "required_m": 1.449
+        },
+        "FLAT_NULL": {
+          "minimum_m": 2.6034003328965905,
+          "required_m": 1.449
+        },
+        "PRIMARY": {
+          "minimum_m": 2.6034003328965905,
+          "required_m": 1.449
+        }
+      }
+    },
+    "polyline_hausdorff_within_0_01_m": {
+      "accepted": true,
+      "maximum_observed_error_m": 7.496223294051519e-05,
+      "per_variant_route_m": {
+        "EXACT_MIRROR": {
+          "risky": 4.4977469171492855e-05,
+          "safe": 7.496223294051519e-05
+        },
+        "FLAT_NULL": {
+          "risky": 4.4977469171492855e-05,
+          "safe": 7.496223294051519e-05
+        },
+        "PRIMARY": {
+          "risky": 4.4977469171492855e-05,
+          "safe": 7.496223294051519e-05
+        }
+      }
+    },
+    "primary_provider_support_finite_complete_and_ordered": {
+      "accepted": true,
+      "values": {
+        "risky": 4.0,
+        "safe": 1.0
+      }
+    },
+    "straight_seed_closed_collision_with_free_entry_exit": {
+      "accepted": true,
+      "variants": {
+        "EXACT_MIRROR": {
+          "collision": true,
+          "entry_exit_free": true
+        },
+        "FLAT_NULL": {
+          "collision": true,
+          "entry_exit_free": true
+        },
+        "PRIMARY": {
+          "collision": true,
+          "entry_exit_free": true
+        }
+      }
+    }
+  },
+  "cwd": "/home/dev/ws_iap/src/iap",
+  "descriptor_bindings": {
+    "EXACT_MIRROR": {
+      "descriptor_sha256": "982986d516991aeb29931e23a46f851164756ac8235fc258e76e2550ffac5785",
+      "scene_identity": "icra073-exact_mirror-seed-73001"
+    },
+    "FLAT_NULL": {
+      "descriptor_sha256": "b837e998c662d231f839a9db3efee5fe873295bbd6b29bad04103cafdf129038",
+      "scene_identity": "icra073-flat_null-seed-73001"
+    },
+    "PRIMARY": {
+      "descriptor_sha256": "aec18e1e72dc6a732727a155c7e69c9c475badd334db59abed355b362feb7295",
+      "scene_identity": "icra073-primary-seed-73001"
+    }
+  },
+  "development_only": true,
+  "effect_claim": false,
+  "failure_reasons": [
+    "curved_tubes_and_guards_occupancy_clear",
+    "curved_routes_reachable"
+  ],
+  "gpu_preflight": "NOT_RUN_FIXTURE_PREFLIGHT_FAILED",
+  "icra072b_status": "BLOCKED_USER_ACCEPTED_BYPASS_NOT_PASS",
+  "milestone": "ICRA-073_LAYER3_INVERSE_CORRIDOR_EFFECT_DIAGNOSTICS",
+  "qualification_claim": false,
+  "result": "FAIL",
+  "ros_main_flow": "NOT_STARTED",
+  "schema_version": "icra073_fixture_preflight_v1",
+  "source_head": "0000000000000000000000000000000000000000",
+  "task_id": "ICRA-073"
+}

@@ -682,6 +682,10 @@ and no effect/qualification/campaign claim exists. The evidence CLI must bind ac
 untracked bytes before writing. ICRA-072B remains bypassed BLOCKED, not PASS.
 The pre-fix rejected RED artifact `results/icra27/icra073/forged-source-1338727.json` is retained by exact
 size/hash and must not be interpreted as source-bound evidence.
+The sole canonical static record `results/icra27/icra073/preflight-001.json` binds pushed implementation
+`29cc2dca46058216e9a99c6dea0987bff7885344`, SHA-256
+`1a8449e25cdd4f7fe096e3509d8b711286f75b938bd7a065338127fb2b13330d`, exits 2 on the guard failure, and records
+GPU not run plus ROS not started.
 
 ICRA-072A Layer 1 Supervisor PASS (2026-08-27): reviewed Builder HEAD `ac7f923`; Standards and Spec axes pass.
 Shared build is 6/6 and independent Supervisor reruns pass tools 17/17, hermetic launch 24/24 and focused C++

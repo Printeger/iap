@@ -9,6 +9,7 @@
 | IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-424 | Pre-live stop | Focused tests 3/3 and py_compile pass; source binding is fail-closed before evidence write. Freeze forbids geometry/inflation/tube repair, so no shared build, GPU preflight, ROS/main flow, oracle, paired run or effect diagnostic executed | **BLOCKED_ICRA073_FROZEN_GUARD_INFLATION_CONFLICT** |
 | IAP-RQ-423 / IAP-RQ-424 | Route/claim boundary | ICRA-072B remains BLOCKED/user-accepted bypass/NOT PASS; ICRA-073 emits no effect, qualification or campaign claim | **PRESERVED** |
 | IAP-RQ-423 / IAP-RQ-424 | Retained RED attempt | `results/icra27/icra073/forged-source-1338727.json`, 5600 bytes, SHA-256 `3a22a352eb9329f660384e901e42bfd3bce11ab74ff3718c7d1a0c35c87ac8dc`; pre-fix forged source, retained without rewrite and inventory-bound by the later canonical record | **REJECTED RED / NOT ACCEPTED EVIDENCE** |
+| IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 | Sole canonical static attempt | `results/icra27/icra073/preflight-001.json`, 8027 bytes, SHA-256 `1a8449e25cdd4f7fe096e3509d8b711286f75b938bd7a065338127fb2b13330d`; binds pushed source `29cc2dca46058216e9a99c6dea0987bff7885344` at divergence `0 0`, source binding accepted, exit 2, GPU not run, ROS not started | **BLOCKED / RETAINED** |
 
 ## 2026-08-27 user-directed ICRA-072B bypass and ICRA-073 activation
 

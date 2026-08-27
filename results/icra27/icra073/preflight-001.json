@@ -1,0 +1,224 @@
+{
+  "argv": [
+    "scripts/dev_planner/icra073_inverse_corridor_fixture.py",
+    "--preflight-all",
+    "--source-head",
+    "29cc2dca46058216e9a99c6dea0987bff7885344",
+    "--output",
+    "results/icra27/icra073/preflight-001.json"
+  ],
+  "campaign_claim": false,
+  "checks": {
+    "common_endpoints_and_nonstraight": {
+      "accepted": true
+    },
+    "curved_routes_reachable": {
+      "accepted": null,
+      "reason": "full_occupancy_including_outer_trees_not_evaluated",
+      "status": "NOT_EVALUATED_BLOCKED_BY_GEOMETRY"
+    },
+    "curved_tubes_and_guards_occupancy_clear": {
+      "accepted": false,
+      "variants": {
+        "EXACT_MIRROR": {
+          "risky": {
+            "minimum_raw_occupancy_clearance_m": 1.275072583313184,
+            "required_guard_plus_inflation_m": 1.349
+          },
+          "safe": {
+            "minimum_raw_occupancy_clearance_m": 2.609269049419026,
+            "required_guard_plus_inflation_m": 1.349
+          }
+        },
+        "FLAT_NULL": {
+          "risky": {
+            "minimum_raw_occupancy_clearance_m": 1.275072583313184,
+            "required_guard_plus_inflation_m": 1.349
+          },
+          "safe": {
+            "minimum_raw_occupancy_clearance_m": 2.609269049419026,
+            "required_guard_plus_inflation_m": 1.349
+          }
+        },
+        "PRIMARY": {
+          "risky": {
+            "minimum_raw_occupancy_clearance_m": 1.275072583313184,
+            "required_guard_plus_inflation_m": 1.349
+          },
+          "safe": {
+            "minimum_raw_occupancy_clearance_m": 2.609269049419026,
+            "required_guard_plus_inflation_m": 1.349
+          }
+        }
+      }
+    },
+    "decision_and_oracle_data_planes_isolated": {
+      "accepted": null,
+      "status": "NOT_EVALUATED_BLOCKED_BY_GEOMETRY"
+    },
+    "descriptor_hash_exact": {
+      "accepted": true,
+      "descriptors": {
+        "EXACT_MIRROR": {
+          "observed": "e7e33fa4dc5419f8ef17a2f81a33d074c0b6c676c34aa796ad8486de3dcb2f69",
+          "recomputed": "e7e33fa4dc5419f8ef17a2f81a33d074c0b6c676c34aa796ad8486de3dcb2f69"
+        },
+        "FLAT_NULL": {
+          "observed": "cd66f46149c7ab858a6223b0908b80ca7c00dad864d05adc030e01ae0a54443e",
+          "recomputed": "cd66f46149c7ab858a6223b0908b80ca7c00dad864d05adc030e01ae0a54443e"
+        },
+        "PRIMARY": {
+          "observed": "525b29ea7ef5014d653ccf3079c09ba1906f39cce9d9d305493538486abfbb97",
+          "recomputed": "525b29ea7ef5014d653ccf3079c09ba1906f39cce9d9d305493538486abfbb97"
+        }
+      }
+    },
+    "exact_mirror_geometric_y_negation": {
+      "accepted": null,
+      "status": "NOT_EVALUATED_BLOCKED_BY_GEOMETRY"
+    },
+    "flat_null_truth_finite_complete_identical": {
+      "accepted": null,
+      "status": "NOT_EVALUATED_BLOCKED_BY_GEOMETRY"
+    },
+    "lidar_landmarks_symmetric": {
+      "accepted": null,
+      "status": "NOT_EVALUATED_BLOCKED_BY_GEOMETRY"
+    },
+    "outer_trees_close_only_third_homotopy": {
+      "accepted": null,
+      "status": "NOT_EVALUATED_BLOCKED_BY_GEOMETRY"
+    },
+    "polyline_hausdorff_within_0_01_m": {
+      "accepted": null,
+      "status": "NOT_EVALUATED_BLOCKED_BY_GEOMETRY"
+    },
+    "primary_provider_support_finite_complete_and_ordered": {
+      "accepted": null,
+      "status": "NOT_EVALUATED_BLOCKED_BY_GEOMETRY"
+    },
+    "straight_seed_closed_collision_with_free_entry_exit": {
+      "accepted": true,
+      "variants": {
+        "EXACT_MIRROR": {
+          "collision": true,
+          "entry_exit_free": true
+        },
+        "FLAT_NULL": {
+          "collision": true,
+          "entry_exit_free": true
+        },
+        "PRIMARY": {
+          "collision": true,
+          "entry_exit_free": true
+        }
+      }
+    }
+  },
+  "cwd": "/home/dev/ws_iap/src/iap",
+  "descriptor_bindings": {
+    "EXACT_MIRROR": {
+      "descriptor_sha256": "e7e33fa4dc5419f8ef17a2f81a33d074c0b6c676c34aa796ad8486de3dcb2f69",
+      "scene_identity": "icra073-exact_mirror-seed-73001"
+    },
+    "FLAT_NULL": {
+      "descriptor_sha256": "cd66f46149c7ab858a6223b0908b80ca7c00dad864d05adc030e01ae0a54443e",
+      "scene_identity": "icra073-flat_null-seed-73001"
+    },
+    "PRIMARY": {
+      "descriptor_sha256": "525b29ea7ef5014d653ccf3079c09ba1906f39cce9d9d305493538486abfbb97",
+      "scene_identity": "icra073-primary-seed-73001"
+    }
+  },
+  "development_only": true,
+  "effect_claim": false,
+  "failure_reasons": [
+    "curved_tubes_and_guards_occupancy_clear"
+  ],
+  "gpu_preflight": "NOT_RUN_FIXTURE_PREFLIGHT_FAILED",
+  "icra072b_status": "BLOCKED_USER_ACCEPTED_BYPASS_NOT_PASS",
+  "incomplete_checks": [
+    "curved_routes_reachable",
+    "polyline_hausdorff_within_0_01_m",
+    "lidar_landmarks_symmetric",
+    "outer_trees_close_only_third_homotopy",
+    "primary_provider_support_finite_complete_and_ordered",
+    "exact_mirror_geometric_y_negation",
+    "flat_null_truth_finite_complete_identical",
+    "decision_and_oracle_data_planes_isolated"
+  ],
+  "milestone": "ICRA-073_LAYER3_INVERSE_CORRIDOR_EFFECT_DIAGNOSTICS",
+  "qualification_claim": false,
+  "result": "FAIL",
+  "ros_main_flow": "NOT_STARTED",
+  "schema_version": "icra073_fixture_preflight_v1",
+  "source_binding": {
+    "accepted": true,
+    "divergence_left_right": "0\t0",
+    "git_commands_ok": true,
+    "known_retained_untracked": [
+      {
+        "accepted": true,
+        "disposition": "PROTECTED_RETAINED",
+        "exists": true,
+        "expected_sha256": "27aac0ccca0ad0ab573578864cf27b9560d3f819bdeeae62378f8c20e62a8f64",
+        "expected_size_bytes": 72,
+        "ignore_blind_untracked": true,
+        "observed_sha256": "27aac0ccca0ad0ab573578864cf27b9560d3f819bdeeae62378f8c20e62a8f64",
+        "observed_size_bytes": 72,
+        "path": ".claude/settings.local.json",
+        "regular_non_symlink": true
+      },
+      {
+        "accepted": true,
+        "disposition": "PROTECTED_RETAINED",
+        "exists": true,
+        "expected_sha256": "1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6",
+        "expected_size_bytes": 243368,
+        "ignore_blind_untracked": true,
+        "observed_sha256": "1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6",
+        "observed_size_bytes": 243368,
+        "path": "docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf",
+        "regular_non_symlink": true
+      },
+      {
+        "accepted": true,
+        "disposition": "PROTECTED_RETAINED",
+        "exists": true,
+        "expected_sha256": "29a73228c1d58d5c4983dc217230d6cbc6ff6e295a77a004d8e6a207fd242028",
+        "expected_size_bytes": 2962,
+        "ignore_blind_untracked": true,
+        "observed_sha256": "29a73228c1d58d5c4983dc217230d6cbc6ff6e295a77a004d8e6a207fd242028",
+        "observed_size_bytes": 2962,
+        "path": "src/uav_simulator/local_sensing/CMakeModules/FindEigen.cmake~",
+        "regular_non_symlink": true
+      },
+      {
+        "accepted": true,
+        "disposition": "REJECTED_PRE_FIX_RED_EVIDENCE_RETAINED",
+        "exists": true,
+        "expected_sha256": "3a22a352eb9329f660384e901e42bfd3bce11ab74ff3718c7d1a0c35c87ac8dc",
+        "expected_size_bytes": 5600,
+        "ignore_blind_untracked": true,
+        "observed_sha256": "3a22a352eb9329f660384e901e42bfd3bce11ab74ff3718c7d1a0c35c87ac8dc",
+        "observed_size_bytes": 5600,
+        "path": "results/icra27/icra073/forged-source-1338727.json",
+        "regular_non_symlink": true
+      }
+    ],
+    "observed_head": "29cc2dca46058216e9a99c6dea0987bff7885344",
+    "observed_origin_dev_icra": "29cc2dca46058216e9a99c6dea0987bff7885344",
+    "requested_head": "29cc2dca46058216e9a99c6dea0987bff7885344",
+    "required_head_tracked_paths": {
+      "scripts/dev_planner/icra073_inverse_corridor_fixture.py": true,
+      "test/test_icra073_inverse_corridor.py": true
+    },
+    "tracked_status_entries": [],
+    "unexpected_visible_untracked_entries": [],
+    "visible_untracked_entries": [
+      "docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf"
+    ]
+  },
+  "source_head": "29cc2dca46058216e9a99c6dea0987bff7885344",
+  "task_id": "ICRA-073"
+}
