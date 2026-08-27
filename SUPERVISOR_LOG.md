@@ -48,8 +48,14 @@ Verdict: **REQUEST_CHANGES — one Critical blocker; no scope creep.**
 
 ### Supervisor window disposition
 
-- Pending post-push audit. Final disposition and pushed handoff anchor will be recorded after this Review changeset
-  becomes repository authority.
+- Review changeset `a68ef961ba9c86f6c373dc59721a926a72f7002c` was pushed; fetch confirmed divergence `0 0`.
+  Normal commit was blocked by `BUILDER_SUPERVISOR_FILE_STAGED`; after route consistency PASS and exact 12-file
+  staging review, Supervisor used the controlled section 8.6 `--no-verify` path. Builder evidence and protected
+  PDF stayed unstaged.
+- **`ROTATE_RECOMMENDED`**. Reason: `ICRA076_FORMAL_FREEZE_BLOCKED_USER_DECISION_BEFORE_HELD_OUT`. This Review
+  rejects a formal freeze immediately before a possible held-out Gate and requires a route-owner decision. A fresh
+  Supervisor window must restore only from pushed repository authority; rotation does not issue ICRA-077 or
+  authorize Builder work.
 
 ## 2026-08-27 — user decision 006 bypasses ICRA-075 and issues ICRA-076
 
