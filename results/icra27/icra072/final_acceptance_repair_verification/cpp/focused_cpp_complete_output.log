@@ -1,0 +1,171 @@
+Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc
+[==========] Running 35 tests from 2 test suites.
+[----------] Global test environment set-up.
+[----------] 5 tests from PredAlertLimitProviderTest
+[ RUN      ] PredAlertLimitProviderTest.OccupancyClearanceUsesNearestInflatedObstacle
+[       OK ] PredAlertLimitProviderTest.OccupancyClearanceUsesNearestInflatedObstacle (0 ms)
+[ RUN      ] PredAlertLimitProviderTest.OccupancyClearanceUsesMaxWhenNoObstacleFound
+[       OK ] PredAlertLimitProviderTest.OccupancyClearanceUsesMaxWhenNoObstacleFound (0 ms)
+[ RUN      ] PredAlertLimitProviderTest.PositionDependentModesFailWithoutMap
+[       OK ] PredAlertLimitProviderTest.PositionDependentModesFailWithoutMap (0 ms)
+[ RUN      ] PredAlertLimitProviderTest.VerticalBoundOnlyUsesHeightMargin
+[       OK ] PredAlertLimitProviderTest.VerticalBoundOnlyUsesHeightMargin (0 ms)
+[ RUN      ] PredAlertLimitProviderTest.PositionDependentModesRejectMapOutsidePosition
+[       OK ] PredAlertLimitProviderTest.PositionDependentModesRejectMapOutsidePosition (0 ms)
+[----------] 5 tests from PredAlertLimitProviderTest (0 ms total)
+
+[----------] 30 tests from P5RuntimeIntegrityGateTest
+[ RUN      ] P5RuntimeIntegrityGateTest.DisabledConfigCreatesNoRuntimeObject
+[       OK ] P5RuntimeIntegrityGateTest.DisabledConfigCreatesNoRuntimeObject (16 ms)
+[ RUN      ] P5RuntimeIntegrityGateTest.CurrentStaleEscalates
+[       OK ] P5RuntimeIntegrityGateTest.CurrentStaleEscalates (0 ms)
+[ RUN      ] P5RuntimeIntegrityGateTest.CurrentInvalidIsExplicit
+[       OK ] P5RuntimeIntegrityGateTest.CurrentInvalidIsExplicit (0 ms)
+[ RUN      ] P5RuntimeIntegrityGateTest.AuthoritativeFusedCurrentRejectsUnsafeDespiteValidFiniteLidar
+[       OK ] P5RuntimeIntegrityGateTest.AuthoritativeFusedCurrentRejectsUnsafeDespiteValidFiniteLidar (0 ms)
+[ RUN      ] P5RuntimeIntegrityGateTest.FutureUnknownRequestsReplanThenEscalatesAfterThreshold
+[       OK ] P5RuntimeIntegrityGateTest.FutureUnknownRequestsReplanThenEscalatesAfterThreshold (0 ms)
+[ RUN      ] P5RuntimeIntegrityGateTest.SnapshotUnavailableRemainsStartupReplanEvidenceOnly
+[       OK ] P5RuntimeIntegrityGateTest.SnapshotUnavailableRemainsStartupReplanEvidenceOnly (0 ms)
+[ RUN      ] P5RuntimeIntegrityGateTest.FutureBadInsideEmergencyTimeRequestsCandidate
+[       OK ] P5RuntimeIntegrityGateTest.FutureBadInsideEmergencyTimeRequestsCandidate (0 ms)
+[ RUN      ] P5RuntimeIntegrityGateTest.ConcurrentCurrentLowMarginAndFutureBadCarryBothReasons
+[       OK ] P5RuntimeIntegrityGateTest.ConcurrentCurrentLowMarginAndFutureBadCarryBothReasons (0 ms)
+[ RUN      ] P5RuntimeIntegrityGateTest.CurrentLowMarginDoesNotForgeFutureReason
+[       OK ] P5RuntimeIntegrityGateTest.CurrentLowMarginDoesNotForgeFutureReason (0 ms)
+[ RUN      ] P5RuntimeIntegrityGateTest.CurrentMsgConstantModeMatchesLegacyFutureAL
+[       OK ] P5RuntimeIntegrityGateTest.CurrentMsgConstantModeMatchesLegacyFutureAL (0 ms)
+[ RUN      ] P5RuntimeIntegrityGateTest.PredictionHorizonTailUsesCoveredSafeSamples
+[       OK ] P5RuntimeIntegrityGateTest.PredictionHorizonTailUsesCoveredSafeSamples (0 ms)
+[ RUN      ] P5RuntimeIntegrityGateTest.ConfigConstantModeCanTriggerFutureBad
+[       OK ] P5RuntimeIntegrityGateTest.ConfigConstantModeCanTriggerFutureBad (0 ms)
+[ RUN      ] P5RuntimeIntegrityGateTest.VerticalBoundOnlyModeCanTriggerFutureBad
+[       OK ] P5RuntimeIntegrityGateTest.VerticalBoundOnlyModeCanTriggerFutureBad (0 ms)
+[ RUN      ] P5RuntimeIntegrityGateTest.InvalidPredictedALCountsAsUnknown
+[       OK ] P5RuntimeIntegrityGateTest.InvalidPredictedALCountsAsUnknown (0 ms)
+[ RUN      ] P5RuntimeIntegrityGateTest.FinalGateFailureIsReturnedBeforePublishPath
+[       OK ] P5RuntimeIntegrityGateTest.FinalGateFailureIsReturnedBeforePublishPath (0 ms)
+[ RUN      ] P5RuntimeIntegrityGateTest.StartupSnapshotUnavailableDoesNotEscalateFinalGateFailure
+[       OK ] P5RuntimeIntegrityGateTest.StartupSnapshotUnavailableDoesNotEscalateFinalGateFailure (0 ms)
+[ RUN      ] P5RuntimeIntegrityGateTest.TransientCurrentStaleDoesNotEscalateFinalGateFailure
+[       OK ] P5RuntimeIntegrityGateTest.TransientCurrentStaleDoesNotEscalateFinalGateFailure (0 ms)
+[ RUN      ] P5RuntimeIntegrityGateTest.FutureUnknownDurationClearsAfterFieldRecovery
+[       OK ] P5RuntimeIntegrityGateTest.FutureUnknownDurationClearsAfterFieldRecovery (0 ms)
+[ RUN      ] P5RuntimeIntegrityGateTest.FinalGateLightRiskCurrentLowMarginDoesNotAccumulateFailureBudget
+[       OK ] P5RuntimeIntegrityGateTest.FinalGateLightRiskCurrentLowMarginDoesNotAccumulateFailureBudget (0 ms)
+[ RUN      ] P5RuntimeIntegrityGateTest.RuntimeSustainedCurrentLowMarginEscalates
+[       OK ] P5RuntimeIntegrityGateTest.RuntimeSustainedCurrentLowMarginEscalates (0 ms)
+[ RUN      ] P5RuntimeIntegrityGateTest.FinalGateFailureCountEscalatesForFutureLowMarginReplan
+[       OK ] P5RuntimeIntegrityGateTest.FinalGateFailureCountEscalatesForFutureLowMarginReplan (0 ms)
+[ RUN      ] P5RuntimeIntegrityGateTest.FinalGatePassResetsFailureBudget
+[       OK ] P5RuntimeIntegrityGateTest.FinalGatePassResetsFailureBudget (0 ms)
+[ RUN      ] P5RuntimeIntegrityGateTest.NominalFinalGateKeepsFailureCountZero
+[       OK ] P5RuntimeIntegrityGateTest.NominalFinalGateKeepsFailureCountZero (0 ms)
+[ RUN      ] P5RuntimeIntegrityGateTest.FutureSamplesCarryTrajectoryTiming
+[       OK ] P5RuntimeIntegrityGateTest.FutureSamplesCarryTrajectoryTiming (0 ms)
+[ RUN      ] P5RuntimeIntegrityGateTest.RuntimeAndFinalCarryExactTrajectoryIdAndNanosecondStart
+[       OK ] P5RuntimeIntegrityGateTest.RuntimeAndFinalCarryExactTrajectoryIdAndNanosecondStart (0 ms)
+[ RUN      ] P5RuntimeIntegrityGateTest.P5_7FixtureRejectsFinalCandidateWithoutRuntimeContamination
+[       OK ] P5RuntimeIntegrityGateTest.P5_7FixtureRejectsFinalCandidateWithoutRuntimeContamination (0 ms)
+[ RUN      ] P5RuntimeIntegrityGateTest.P5_7FixtureEnabledButIneffectiveDoesNotRejectFinalCandidate
+[       OK ] P5RuntimeIntegrityGateTest.P5_7FixtureEnabledButIneffectiveDoesNotRejectFinalCandidate (0 ms)
+[ RUN      ] P5RuntimeIntegrityGateTest.NoFutureTrajectoryWindowIsDiagnosticUnknown
+[       OK ] P5RuntimeIntegrityGateTest.NoFutureTrajectoryWindowIsDiagnosticUnknown (0 ms)
+[ RUN      ] P5RuntimeIntegrityGateTest.PublishedStatusJsonIncludesSampleDiagnostics
+[       OK ] P5RuntimeIntegrityGateTest.PublishedStatusJsonIncludesSampleDiagnostics (13 ms)
+[ RUN      ] P5RuntimeIntegrityGateTest.StatusCarriesVizSamplesAndMarkers
+[       OK ] P5RuntimeIntegrityGateTest.StatusCarriesVizSamplesAndMarkers (0 ms)
+[----------] 30 tests from P5RuntimeIntegrityGateTest (31 ms total)
+
+[----------] Global test environment tear-down
+[==========] 35 tests from 2 test suites ran. (31 ms total)
+[  PASSED  ] 35 tests.
+Running main() from /opt/ros/jazzy/src/gtest_vendor/src/gtest_main.cc
+[==========] Running 29 tests from 5 test suites.
+[----------] Global test environment set-up.
+[----------] 3 tests from P4VerticalSliceTerminalLineageTest
+[ RUN      ] P4VerticalSliceTerminalLineageTest.ProductionFsmPublishesCompleteSameAttemptManagerP5RuntimeChain
+[RiskContext] planning_generation_id=1, query_base_time_s=10, snapshot_available=1
+refine_success=1
+[WARN] [1787808554.395841002] [p4_terminal_fsm_success]: P1 published fresh bspline but could not write accepted-profile evidence
+[       OK ] P4VerticalSliceTerminalLineageTest.ProductionFsmPublishesCompleteSameAttemptManagerP5RuntimeChain (72 ms)
+[ RUN      ] P4VerticalSliceTerminalLineageTest.ProductionFsmPublishesNothingWhenFusedCurrentIsUnsafeDespiteSafeLidar
+[RiskContext] planning_generation_id=1, query_base_time_s=10, snapshot_available=1
+refine_success=1
+[WARN] [1787808554.437758867] [p4_terminal_fused_unsafe]: P5 final gate blocked trajectory: action=REQUEST_REPLAN reason=current_low_margin planning_generation_id=1 final_gate_generation_id=1
+[       OK ] P4VerticalSliceTerminalLineageTest.ProductionFsmPublishesNothingWhenFusedCurrentIsUnsafeDespiteSafeLidar (36 ms)
+[ RUN      ] P4VerticalSliceTerminalLineageTest.OccupancyChangeAfterReleaseBlocksFirstManagerWriterAndDownstreamRows
+[RiskContext] planning_generation_id=1, query_base_time_s=10, snapshot_available=1
+refine_success=1
+[ERROR] [1787808554.473103866] [p4_terminal_fsm_adversary]: P4-v2 final lineage write failed before P5
+[       OK ] P4VerticalSliceTerminalLineageTest.OccupancyChangeAfterReleaseBlocksFirstManagerWriterAndDownstreamRows (36 ms)
+[----------] 3 tests from P4VerticalSliceTerminalLineageTest (144 ms total)
+
+[----------] 4 tests from PlanningRiskContextTest
+[ RUN      ] PlanningRiskContextTest.ManualContextKeepsGenerationUntilClear
+[       OK ] PlanningRiskContextTest.ManualContextKeepsGenerationUntilClear (0 ms)
+[ RUN      ] PlanningRiskContextTest.BeginWithoutP0RuntimeCreatesDeterministicNullContext
+[RiskContext] planning_generation_id=0, query_base_time_s=42.5, snapshot_available=0
+[       OK ] PlanningRiskContextTest.BeginWithoutP0RuntimeCreatesDeterministicNullContext (0 ms)
+[ RUN      ] PlanningRiskContextTest.TrajectoryCommandSurvivesLateSubscriber
+[       OK ] PlanningRiskContextTest.TrajectoryCommandSurvivesLateSubscriber (85 ms)
+[ RUN      ] PlanningRiskContextTest.StaleContextFailsClosedAgainstItsImmutableSnapshot
+[       OK ] PlanningRiskContextTest.StaleContextFailsClosedAgainstItsImmutableSnapshot (0 ms)
+[----------] 4 tests from PlanningRiskContextTest (86 ms total)
+
+[----------] 3 tests from P1AcceptedContextValidationTest
+[ RUN      ] P1AcceptedContextValidationTest.SeparatesStrictSpatialInteriorFromTemporalHorizon
+[       OK ] P1AcceptedContextValidationTest.SeparatesStrictSpatialInteriorFromTemporalHorizon (0 ms)
+[ RUN      ] P1AcceptedContextValidationTest.EnforcesFrameGenerationFreshnessAndCoverageBinding
+[       OK ] P1AcceptedContextValidationTest.EnforcesFrameGenerationFreshnessAndCoverageBinding (0 ms)
+[ RUN      ] P1AcceptedContextValidationTest.RejectsMapEdgeThatCannotSupportTrilinearInterpolation
+[       OK ] P1AcceptedContextValidationTest.RejectsMapEdgeThatCannotSupportTrilinearInterpolation (0 ms)
+[----------] 3 tests from P1AcceptedContextValidationTest (0 ms total)
+
+[----------] 18 tests from P1SoftFallbackPolicyTest
+[ RUN      ] P1SoftFallbackPolicyTest.MetricsOnlyNeverRejectsBaseCandidateForTemporalHorizon
+[       OK ] P1SoftFallbackPolicyTest.MetricsOnlyNeverRejectsBaseCandidateForTemporalHorizon (0 ms)
+[ RUN      ] P1SoftFallbackPolicyTest.EnabledModeFallsBackToBaseCandidateWhenContextCannotCoverTrajectory
+[       OK ] P1SoftFallbackPolicyTest.EnabledModeFallsBackToBaseCandidateWhenContextCannotCoverTrajectory (0 ms)
+[ RUN      ] P1SoftFallbackPolicyTest.FixedDurationOutsideSnapshotHorizonCannotEnterBasePrepass
+[       OK ] P1SoftFallbackPolicyTest.FixedDurationOutsideSnapshotHorizonCannotEnterBasePrepass (0 ms)
+[ RUN      ] P1SoftFallbackPolicyTest.OccupiedSingletonGetsSymmetricGeometricFanout
+[       OK ] P1SoftFallbackPolicyTest.OccupiedSingletonGetsSymmetricGeometricFanout (0 ms)
+[ RUN      ] P1SoftFallbackPolicyTest.FormalFanoutPreservesBothChordHomotopiesAndMirrorsCandidateIdentity
+[       OK ] P1SoftFallbackPolicyTest.FormalFanoutPreservesBothChordHomotopiesAndMirrorsCandidateIdentity (0 ms)
+[ RUN      ] P1SoftFallbackPolicyTest.FormalEvidenceFanoutDoesNotDependOnPlannerReturningEmptySegments
+[       OK ] P1SoftFallbackPolicyTest.FormalEvidenceFanoutDoesNotDependOnPlannerReturningEmptySegments (0 ms)
+[ RUN      ] P1SoftFallbackPolicyTest.FormalMetricsOnlyReferenceUsesMirrorBoundCanonicalArm
+[       OK ] P1SoftFallbackPolicyTest.FormalMetricsOnlyReferenceUsesMirrorBoundCanonicalArm (0 ms)
+[ RUN      ] P1SoftFallbackPolicyTest.FormalEvidenceFanoutNeutralizesCommittedEndpointSide
+[       OK ] P1SoftFallbackPolicyTest.FormalEvidenceFanoutNeutralizesCommittedEndpointSide (0 ms)
+[ RUN      ] P1SoftFallbackPolicyTest.MetricsOnlyReferenceObservationIsOncePerTrajectoryInsideHorizon
+[       OK ] P1SoftFallbackPolicyTest.MetricsOnlyReferenceObservationIsOncePerTrajectoryInsideHorizon (0 ms)
+[ RUN      ] P1SoftFallbackPolicyTest.FormalCheckpointObservationCoversEnabledRetainedIncumbent
+[       OK ] P1SoftFallbackPolicyTest.FormalCheckpointObservationCoversEnabledRetainedIncumbent (0 ms)
+[ RUN      ] P1SoftFallbackPolicyTest.ExecutingTrajectoryMayObserveWithoutRequestingAReplan
+[       OK ] P1SoftFallbackPolicyTest.ExecutingTrajectoryMayObserveWithoutRequestingAReplan (0 ms)
+[ RUN      ] P1SoftFallbackPolicyTest.IncumbentExecutionIsIndependentOfTransientFsmReplanState
+[       OK ] P1SoftFallbackPolicyTest.IncumbentExecutionIsIndependentOfTransientFsmReplanState (0 ms)
+[ RUN      ] P1SoftFallbackPolicyTest.FormalCheckpointApproachDefersOnlyPeriodicReplanning
+[       OK ] P1SoftFallbackPolicyTest.FormalCheckpointApproachDefersOnlyPeriodicReplanning (0 ms)
+[ RUN      ] P1SoftFallbackPolicyTest.PostOptimizationInvalidityKeepsExistingOrDefersBaseInitialFallback
+[       OK ] P1SoftFallbackPolicyTest.PostOptimizationInvalidityKeepsExistingOrDefersBaseInitialFallback (0 ms)
+[ RUN      ] P1SoftFallbackPolicyTest.SuccessfulBasePrepassWithoutFullSupportPublishesInitialBaseCandidate
+[       OK ] P1SoftFallbackPolicyTest.SuccessfulBasePrepassWithoutFullSupportPublishesInitialBaseCandidate (0 ms)
+[ RUN      ] P1SoftFallbackPolicyTest.SuccessfulBasePrepassWithoutFullSupportAdvancesRecedingHorizon
+[       OK ] P1SoftFallbackPolicyTest.SuccessfulBasePrepassWithoutFullSupportAdvancesRecedingHorizon (0 ms)
+[ RUN      ] P1SoftFallbackPolicyTest.UnsupportedBasePrepassCannotOverwriteP1Incumbent
+[       OK ] P1SoftFallbackPolicyTest.UnsupportedBasePrepassCannotOverwriteP1Incumbent (0 ms)
+[ RUN      ] P1SoftFallbackPolicyTest.FullSupportAdmitsNormalizedP1Stage
+[       OK ] P1SoftFallbackPolicyTest.FullSupportAdmitsNormalizedP1Stage (0 ms)
+[----------] 18 tests from P1SoftFallbackPolicyTest (0 ms total)
+
+[----------] 1 test from PlanningTimeProviderTest
+[ RUN      ] PlanningTimeProviderTest.EmergencyStopUsesProvidedSimStamp
+[       OK ] PlanningTimeProviderTest.EmergencyStopUsesProvidedSimStamp (0 ms)
+[----------] 1 test from PlanningTimeProviderTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 29 tests from 5 test suites ran. (231 ms total)
+[  PASSED  ] 29 tests.

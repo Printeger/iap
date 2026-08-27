@@ -1,5 +1,6 @@
 import csv
 import contextlib
+import hashlib
 import importlib.util
 import json
 import os
@@ -61,16 +62,95 @@ class Icra072VerticalSliceToolsTest(unittest.TestCase):
             ["git", "rev-parse", "HEAD"], cwd=REPO, check=True,
             capture_output=True, text=True).stdout.strip()
         return {
-            "schema_version": "icra072_source_binding_v1",
+            "schema_version": "icra072_source_binding_v2",
             "repository": str(REPO),
             "head_commit": commit,
             "origin_dev_icra_commit": commit,
+            "status_porcelain": (
+                "?? docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf\n"),
             "tracked_status": "",
             "tracked_worktree_clean": True,
+            "untracked_allowlist": [{
+                "path": "docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf",
+                "sha256": (
+                    "1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6"),
+            }],
+            "observed_untracked_paths": [
+                "docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf"],
+            "observed_protected_pdf_sha256": (
+                "1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6"),
+            "rejected_untracked_paths": [],
+            "rejected_tracked_entries": [],
             "head_matches_origin": True,
             "accepted": True,
             "failure_reasons": [],
         }
+
+    def test_source_binding_allows_only_exact_protected_pdf(self):
+        module = self._load_runner()
+        commit = "a" * 40
+
+        def capture(status):
+            responses = iter((
+                types.SimpleNamespace(returncode=0, stdout=commit + "\n",
+                                      stderr=""),
+                types.SimpleNamespace(returncode=0, stdout=commit + "\n",
+                                      stderr=""),
+                types.SimpleNamespace(returncode=0, stdout=status,
+                                      stderr=""),
+            ))
+            with mock.patch.object(module.subprocess, "run",
+                                   side_effect=lambda *args, **kwargs:
+                                   next(responses)):
+                return module._capture_source_binding()
+
+        protected = "docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf"
+        accepted = capture(f"?? {protected}\n")
+        self.assertTrue(accepted["accepted"])
+        self.assertEqual(accepted["observed_untracked_paths"], [protected])
+        self.assertEqual(accepted["untracked_allowlist"], [{
+            "path": protected,
+            "sha256": hashlib.sha256(
+                (REPO / protected).read_bytes()).hexdigest(),
+        }])
+        self.assertEqual(accepted["rejected_untracked_paths"], [])
+        self.assertEqual(accepted["rejected_tracked_entries"], [])
+        self.assertEqual(
+            accepted["observed_protected_pdf_sha256"],
+            accepted["untracked_allowlist"][0]["sha256"])
+
+        with mock.patch.object(module.hashlib, "sha256") as sha256:
+            sha256.return_value.hexdigest.return_value = "0" * 64
+            wrong_hash = capture(f"?? {protected}\n")
+        self.assertFalse(wrong_hash["accepted"])
+        self.assertEqual(wrong_hash["observed_protected_pdf_sha256"],
+                         "0" * 64)
+        self.assertEqual(wrong_hash["rejected_untracked_paths"], [protected])
+        self.assertIn("protected_pdf_missing_or_hash_mismatch",
+                      wrong_hash["failure_reasons"])
+
+        for status, rejected_path in (
+                (f"?? {protected}\n?? rogue.py\n", "rogue.py"),
+                (f"?? {protected}\n?? config/rogue.yaml\n",
+                 "config/rogue.yaml")):
+            with self.subTest(status=status):
+                rejected = capture(status)
+                self.assertFalse(rejected["accepted"])
+                self.assertEqual(rejected["rejected_untracked_paths"],
+                                 [rejected_path])
+                self.assertIn("untracked_path_not_allowlisted",
+                              rejected["failure_reasons"])
+
+        for entry in (" M scripts/dev_planner/example.py",
+                      "M  scripts/dev_planner/example.py",
+                      "R  old.py -> new.py", " D deleted.py"):
+            with self.subTest(entry=entry):
+                rejected = capture(f"?? {protected}\n{entry}\n")
+                self.assertFalse(rejected["accepted"])
+                self.assertEqual(rejected["rejected_tracked_entries"],
+                                 [entry])
+                self.assertIn("tracked_worktree_dirty",
+                              rejected["failure_reasons"])
 
     def test_shared_dev_build_entry_has_exact_packages_and_workspace_roots(self):
         source = BUILD_ENTRY.read_text()
@@ -320,6 +400,56 @@ class Icra072VerticalSliceToolsTest(unittest.TestCase):
             self.assertIn(
                 "p5_runtime_action_not_ok",
                 json.loads(later_emergency_output.read_text())["failures"])
+            mixed_identity_cases = {
+                "missing": {"trajectory_sample_source": "runtime_committed"},
+                "malformed": {
+                    "trajectory_sample_source": "runtime_committed",
+                    "trajectory_id": "not-an-id",
+                    "trajectory_start_time_ns": 123504278000,
+                },
+                "sentinel": {
+                    "trajectory_sample_source": "runtime_committed",
+                    "trajectory_id": -1,
+                    "trajectory_start_time_ns": -9223372036854775808,
+                },
+                "mismatched_id": {
+                    "trajectory_sample_source": "runtime_committed",
+                    "trajectory_id": 10,
+                    "trajectory_start_time_ns": 123504278000,
+                },
+                "mismatched_start": {
+                    "trajectory_sample_source": "runtime_committed",
+                    "trajectory_id": 9,
+                    "trajectory_start_time_ns": 123504278001,
+                },
+            }
+            for case, additional_sample in mixed_identity_cases.items():
+                with self.subTest(mixed_runtime_identity=case):
+                    mixed_rows = json.loads(json.dumps(captured_rows))
+                    mixed_runtime = next(
+                        row for row in mixed_rows
+                        if row.get("kind") == "p5_status"
+                        and row["payload"].get("phase") == "runtime")
+                    mixed_runtime["payload"]["samples"].append(
+                        additional_sample)
+                    capture_path.write_text(
+                        "".join(json.dumps(row, sort_keys=True) + "\n"
+                                for row in mixed_rows))
+                    mixed_identity_output = (
+                        root / f"analysis_runtime_mixed_{case}.json")
+                    completed = subprocess.run(
+                        [sys.executable, str(ANALYZER), "--run-root",
+                         str(root), "--output", str(mixed_identity_output)],
+                        capture_output=True, text=True, check=False)
+                    self.assertNotEqual(completed.returncode, 0)
+                    mixed_analysis = json.loads(
+                        mixed_identity_output.read_text())
+                    self.assertFalse(
+                        mixed_analysis["stage_status"]
+                        ["p5_runtime_committed"])
+                    self.assertIn(
+                        "p5_runtime_mixed_committed_identity",
+                        mixed_analysis["failures"])
             capture_path.write_text(
                 "".join(json.dumps(row, sort_keys=True) + "\n"
                         for row in captured_rows))
@@ -937,6 +1067,93 @@ class Icra072VerticalSliceToolsTest(unittest.TestCase):
             self.assertFalse(manifest["source_binding_recheck"]["accepted"])
         finally:
             shutil.rmtree(run_root, ignore_errors=True)
+
+    def test_runner_finalizes_source_change_after_owned_cleanup(self):
+        module = self._load_runner()
+        DEV_RUNS_ROOT.mkdir(parents=True, exist_ok=True)
+        run_root = DEV_RUNS_ROOT / f"run-{os.getpid()}006"
+        self.assertFalse(run_root.exists())
+        accepted = self._accepted_source_binding()
+        changed = {
+            **accepted,
+            "status_porcelain": (
+                accepted["status_porcelain"] + "?? rogue_config.yaml\n"),
+            "observed_untracked_paths": (
+                accepted["observed_untracked_paths"]
+                + ["rogue_config.yaml"]),
+            "rejected_untracked_paths": ["rogue_config.yaml"],
+            "accepted": False,
+            "failure_reasons": ["untracked_path_not_allowlisted"],
+        }
+
+        class FakeProcess:
+            def __init__(self, pid):
+                self.pid = pid
+                self.returncode = 0
+                self._icra072_group_cleared = False
+
+            def poll(self):
+                return None
+
+        capture = FakeProcess(72001)
+        launch = FakeProcess(72002)
+        stopped = []
+
+        def stop_owned(process, _timeout_s=10.0):
+            stopped.append(process)
+            process._icra072_group_cleared = True
+            return 0
+
+        monitor = mock.Mock()
+        monitor.finish.return_value = {"required_processes_ok": True}
+        gate = types.SimpleNamespace(
+            run_gpu_preflight=lambda _root: {"gpu_ready": True},
+            RequiredProcessMonitor=mock.Mock(return_value=monitor))
+        argv = [str(RUNNER), "--run-root", str(run_root.relative_to(REPO)),
+                "--install-root", str(SHARED_INSTALL), "--duration-s", "30"]
+        try:
+            with mock.patch.object(sys, "argv", argv), \
+                    mock.patch.object(module, "_capture_source_binding",
+                                      side_effect=(accepted, accepted,
+                                                   changed)), \
+                    mock.patch.object(module, "_load_gate_runner",
+                                      return_value=gate), \
+                    mock.patch.object(module, "_start_process",
+                                      side_effect=(capture, launch)), \
+                    mock.patch.object(module, "_wait_ready", return_value={
+                        "schema_version": "icra072_capture_readiness_v1",
+                        "ready": True}), \
+                    mock.patch.object(module, "_stop_owned",
+                                      side_effect=stop_owned), \
+                    mock.patch.object(module, "_owned_group_cleared",
+                                      side_effect=lambda pid: pid in {
+                                          capture.pid, launch.pid}), \
+                    mock.patch.object(module.time, "monotonic",
+                                      side_effect=(0.0, 31.0)):
+                self.assertEqual(module.main(), 8)
+            self.assertEqual(set(stopped), {capture, launch})
+            self.assertTrue(capture._icra072_group_cleared)
+            self.assertTrue(launch._icra072_group_cleared)
+            manifest = json.loads((run_root / "run_manifest.json").read_text())
+            self.assertEqual(manifest["runner_exception"]["message"],
+                             "source_binding_changed_during_run")
+            self.assertTrue(manifest["owned_process_groups_cleared"])
+            self.assertEqual(manifest["cleanup_errors"], [])
+            analysis = json.loads((run_root / "analysis.json").read_text())
+            outcome = json.loads(
+                (run_root / "orchestration_outcome.json").read_text())
+            self.assertIn("source_binding_changed_during_run",
+                          analysis["failures"])
+            self.assertIn("source_binding_changed_during_run",
+                          outcome["failures"])
+            self.assertEqual(outcome["runner_exit_code"], 8)
+            self.assertEqual(outcome["result"], "FAIL")
+        finally:
+            if run_root.is_dir():
+                manifest = json.loads(
+                    (run_root / "run_manifest.json").read_text())
+                self.assertEqual(manifest.get("run_id"), run_root.name)
+                shutil.rmtree(run_root)
 
     def test_runner_and_publish_path_are_fail_closed(self):
         runner = (REPO / "scripts/dev_planner/run_icra072_vertical_slice.py").read_text()

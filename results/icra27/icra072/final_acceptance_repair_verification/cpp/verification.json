@@ -1,0 +1,11 @@
+{
+  "schema_version": "icra072_cpp_replacement_verification_v1",
+  "command": "set -o pipefail; ROS_LOG_DIR=\"$PWD/results/icra27/icra072/final_acceptance_repair_verification/cpp/ros_logs\" LD_LIBRARY_PATH=\"/home/dev/ws_iap/install/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}\" bash -c '/home/dev/ws_iap/build/ego_planner/test_p5_runtime_integrity_gate && /home/dev/ws_iap/build/ego_planner/test_planning_risk_context' 2>&1 | tee results/icra27/icra072/final_acceptance_repair_verification/cpp/focused_cpp_complete_output.log",
+  "cwd": "/home/dev/ws_iap/src/iap",
+  "exit_code": 0,
+  "p5_runtime_integrity_gate_tests": 35,
+  "planning_risk_context_tests": 29,
+  "result": "PASS",
+  "retained_output": "results/icra27/icra072/final_acceptance_repair_verification/cpp/focused_cpp_complete_output.log",
+  "total_tests": 64
+}

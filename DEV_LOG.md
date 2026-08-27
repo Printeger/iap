@@ -8729,3 +8729,38 @@ matching runtime records have the same positive minima, effective/raw action
 `OK`, effective/raw reason `ok`, empty active/current/future reasons and no
 rejection. This remains development-only Layer 1 evidence with no effect,
 qualification or campaign claim.
+
+## 2026-08-27 — ICRA-072A exact runtime/source admission closure
+
+Requirements: IAP-RQ-400, IAP-RQ-410, IAP-RQ-421, IAP-RQ-422,
+IAP-RQ-423 and IAP-RQ-424.
+
+Analyzer TDD reproduced all five fail-open mixed-row cases: one exact committed
+sample plus missing, malformed, sentinel, mismatched-ID or mismatched-start
+committed identity passed before the repair. The analyzer now accepts a counted
+fused runtime row only when every committed sample resolves to the same explicit
+positive selected ID and integer-nanosecond start; all record-level effective/raw
+OK, empty reason and no-rejection conditions remain mandatory.
+
+Source binding schema v2 replaces suppressed untracked inspection with full
+`git status --porcelain=v1 --untracked-files=all`. The only admitted untracked
+entry is `docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf` at SHA-256
+`1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+Evidence records the allowlist, observed untracked paths and rejected tracked/
+untracked entries. Focused cases reject arbitrary Python/config and tracked,
+staged, rename or delete state. Existing initial and pre-ROS tests plus the new
+complete final-check lifecycle cover all three bindings. The final-change case
+uses no ROS/GPU, returns 8, retains typed manifest/analysis/outcome and proves
+only its capture and launch groups were cleared.
+
+Verification at the pre-live implementation checkpoint:
+
+- `scripts/dev_planner/build_iap_dev.sh`: exit 0, shared exact six packages 6/6.
+- `python3 test/test_icra072_vertical_slice_tools.py`: exit 0, 17/17.
+- `set -o pipefail; ROS_LOG_DIR="$PWD/results/icra27/icra072/final_acceptance_repair_verification/cpp/ros_logs" LD_LIBRARY_PATH="/home/dev/ws_iap/install/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" bash -c '/home/dev/ws_iap/build/ego_planner/test_p5_runtime_integrity_gate && /home/dev/ws_iap/build/ego_planner/test_planning_risk_context' 2>&1 | tee results/icra27/icra072/final_acceptance_repair_verification/cpp/focused_cpp_complete_output.log`: exit 0, 35/35 + 29/29 = 64/64; complete combined output retained at that repository-local path, with matching command/exit metadata in sibling `verification.json`.
+- `python3 scripts/dev_planner/run_p4_g0c_tests.py --task-root "$PWD/results/icra27/icra072/final_acceptance_repair_verification/hermetic" unittest discover -s test -p test_test_planner_launch.py -v`: exit 0, 24/24; external ROS inventory unchanged at 17,809 entries.
+
+No historical `/tmp` output was recreated or touched. Run001 through run023,
+shared roots, ordinary evidence/logs and the protected PDF remain unchanged.
+Fresh run024+ awaits the mandatory commit/push and divergence `0 0` proof; no
+effect, P5 product, qualification or campaign work ran.

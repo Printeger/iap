@@ -14,6 +14,9 @@ from pathlib import Path
 REPOSITORY = Path(__file__).resolve().parents[2]
 DEV_RUNS_ROOT = (REPOSITORY / "results/icra27/dev_runs/layer1").resolve()
 RUN_ID_PATTERN = re.compile(r"run-[0-9]{3,}")
+PROTECTED_UNTRACKED_PATH = "docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf"
+PROTECTED_UNTRACKED_SHA256 = (
+    "1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6")
 STAGE_ORDER = (
     "p0_snapshot", "closed_collision", "p4_selection_application",
     "ego_final_bspline", "p5_final_pass_before_publish",
@@ -66,6 +69,45 @@ def _runtime_safely_ok(payload: dict) -> bool:
         and not payload.get("final_candidate_rejected", False))
 
 
+def _source_worktree_admitted(binding: dict) -> bool:
+    return (
+        binding.get("schema_version") == "icra072_source_binding_v2"
+        and binding.get("repository") == str(REPOSITORY)
+        and binding.get("accepted") is True
+        and binding.get("tracked_worktree_clean") is True
+        and binding.get("tracked_status") == ""
+        and binding.get("status_porcelain") ==
+        f"?? {PROTECTED_UNTRACKED_PATH}\n"
+        and binding.get("untracked_allowlist") == [{
+            "path": PROTECTED_UNTRACKED_PATH,
+            "sha256": PROTECTED_UNTRACKED_SHA256,
+        }]
+        and binding.get("observed_untracked_paths") == [
+            PROTECTED_UNTRACKED_PATH]
+        and binding.get("observed_protected_pdf_sha256") ==
+        PROTECTED_UNTRACKED_SHA256
+        and binding.get("rejected_untracked_paths") == []
+        and binding.get("rejected_tracked_entries") == [])
+
+
+def _committed_runtime_identity(payload: dict) -> tuple[int, int] | None:
+    """Return the one identity carried by every committed runtime sample."""
+    committed = [
+        sample for sample in payload.get("samples", [])
+        if sample.get("trajectory_sample_source") == "runtime_committed"]
+    if not committed:
+        return None
+    identities = [
+        (_positive_int(sample.get("trajectory_id")),
+         _positive_int(sample.get("trajectory_start_time_ns")))
+        for sample in committed]
+    if any(trajectory_id is None or start_ns is None
+           for trajectory_id, start_ns in identities):
+        return None
+    distinct = set(identities)
+    return next(iter(distinct)) if len(distinct) == 1 else None
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--run-root", type=Path, required=True)
@@ -98,11 +140,7 @@ def main() -> int:
         failures.append("source_binding_manifest_mismatch")
     exercised_commit = source_binding.get("head_commit")
     source_binding_valid = (
-        source_binding.get("schema_version") == "icra072_source_binding_v1"
-        and source_binding.get("repository") == str(REPOSITORY)
-        and source_binding.get("accepted") is True
-        and source_binding.get("tracked_worktree_clean") is True
-        and source_binding.get("tracked_status") == ""
+        _source_worktree_admitted(source_binding)
         and source_binding.get("head_matches_origin") is True
         and isinstance(exercised_commit, str)
         and re.fullmatch(r"[0-9a-f]{40}", exercised_commit) is not None
@@ -113,7 +151,7 @@ def main() -> int:
             phase_binding = run.get(phase, {})
             source_binding_valid = (
                 source_binding_valid
-                and phase_binding.get("accepted") is True
+                and _source_worktree_admitted(phase_binding)
                 and phase_binding.get("head_commit") == exercised_commit
                 and phase_binding.get("origin_dev_icra_commit") ==
                 exercised_commit
@@ -147,6 +185,9 @@ def main() -> int:
         failures.append("owned_process_group_cleanup_failed")
     runner_exception = run.get("runner_exception")
     if isinstance(runner_exception, dict):
+        if runner_exception.get("message") == (
+                "source_binding_changed_during_run"):
+            failures.append("source_binding_changed_during_run")
         failures.append(
             "runner_exception:"
             + str(runner_exception.get("type", "unknown")))
@@ -391,7 +432,7 @@ def main() -> int:
                                 "trajectory_id")) == expected_id
                             and _positive_int(row["payload"].get(
                                 "start_time_ns")) == expected_start_ns]
-        identity_matching_runtime = [
+        identity_candidate_runtime = [
             row for row in runtime_records
             if row["payload"].get("current_integrity_source") == "FUSED"
             and any(
@@ -400,16 +441,22 @@ def main() -> int:
                 and _positive_int(sample.get(
                     "trajectory_start_time_ns")) == expected_start_ns
                 for sample in row["payload"].get("samples", []))]
+        runtime_identity_complete = bool(identity_candidate_runtime) and all(
+            _committed_runtime_identity(row["payload"]) ==
+            (expected_id, expected_start_ns)
+            for row in identity_candidate_runtime)
         matching_runtime = (
-            identity_matching_runtime
-            if (identity_matching_runtime and all(
+            identity_candidate_runtime
+            if (runtime_identity_complete and all(
                 _runtime_safely_ok(row["payload"])
-                for row in identity_matching_runtime)) else [])
+                for row in identity_candidate_runtime)) else [])
         if not matching_bspline:
             failures.append("lineage_bspline_trajectory_identity_mismatch")
         if not matching_final:
             failures.append("lineage_p5_final_trajectory_identity_mismatch")
-        if identity_matching_runtime and not matching_runtime:
+        if identity_candidate_runtime and not runtime_identity_complete:
+            failures.append("p5_runtime_mixed_committed_identity")
+        elif identity_candidate_runtime and not matching_runtime:
             failures.append("p5_runtime_action_not_ok")
         elif not matching_runtime:
             failures.append("lineage_p5_runtime_trajectory_identity_mismatch")

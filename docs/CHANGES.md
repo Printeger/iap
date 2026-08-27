@@ -3,6 +3,18 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(icra-072a-exact-admission): IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 / IAP-RQ-422 /
+  IAP-RQ-423 / IAP-RQ-424 — require every `runtime_committed` sample in each counted fused runtime row to carry
+  the same explicit positive trajectory ID and integer-nanosecond start; mixed missing, malformed, sentinel,
+  mismatched-ID and mismatched-start rows fail closed. Source binding schema v2 inspects full porcelain status,
+  rejects every tracked/staged/rename/delete entry and every untracked path except the protected PDF at its exact
+  path and SHA-256, and retains allowlist/observed/rejected path evidence at initial, pre-ROS and final checks.
+  Focused lifecycle coverage proves a final source change produces typed manifest/analysis/outcome evidence and
+  clears only runner-owned groups. Shared build passes 6/6, tools 17/17, focused C++ 64/64 and hermetic launch
+  24/24; complete replacement C++ output is retained under
+  `results/icra27/icra072/final_acceptance_repair_verification/cpp/`. Fresh run024+ remains pending the required
+  clean implementation commit/push and divergence `0 0` proof.
+
 - review(icra-072a-exact-admission): IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 / IAP-RQ-422 /
   IAP-RQ-423 / IAP-RQ-424 — reject Builder HEAD `b607b97` as formal Layer 1 completion while retaining
   `run-023` as strong tracked-source-bound module-integration evidence. The actual run has all seven ordered stages,

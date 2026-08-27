@@ -1,5 +1,15 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-27 ICRA-072A exact-admission repair implementation
+
+| Req ID | Implemented/tested seam | Evidence and disposition | Status |
+|---|---|---|---|
+| IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 | Exact runtime identity | Analyzer requires all committed samples in every counted fused row to equal one explicit positive selected ID/start. Matching-plus-missing/malformed/sentinel/mismatched-ID/mismatched-start adversaries all reject while record-level effective/raw OK, empty reasons and no-rejection remain required | **FOCUSED PASS** |
+| IAP-RQ-423 / IAP-RQ-424 | Exact source admission | Source schema v2 captures full porcelain status; only `docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf` SHA-256 `1f07da56…844f6` is allowlisted. Arbitrary Python/config, tracked/staged/rename/delete entries and initial/pre-ROS/final changes reject; evidence carries allowlist, observed and rejected paths | **FOCUSED PASS** |
+| IAP-RQ-423 / IAP-RQ-424 | Final source-change lifecycle | Mocked complete GPU/capture/launch/monitor lifecycle returns 8 on `source_binding_changed_during_run`, emits typed manifest/analysis/orchestration outcome and confirms only its two owned groups cleared | **FOCUSED PASS** |
+| IAP-RQ-423 / IAP-RQ-424 | Static verification and retention | Shared six-package build 6/6; tools 17/17; C++ 64/64 with complete output and command/exit metadata retained under `results/icra27/icra072/final_acceptance_repair_verification/cpp/`; hermetic launch 24/24 with 17,809 external ROS entries unchanged | **IMPLEMENTATION READY TO COMMIT/PUSH** |
+| IAP-RQ-423 / IAP-RQ-424 | Live sequencing | Preserve run001..run023; fresh run024+ is forbidden until repaired implementation/docs are committed, pushed and divergence is `0 0` | **LIVE PENDING SOURCE FREEZE** |
+
 ## 2026-08-27 ICRA-072A exact-admission Supervisor Review
 
 | Req ID | Reviewed seam | Evidence and disposition | Status |

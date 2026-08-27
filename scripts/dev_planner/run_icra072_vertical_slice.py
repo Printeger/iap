@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import atexit
 import importlib.util
+import hashlib
 import json
 import os
 import re
@@ -39,6 +40,9 @@ REQUIRED_PROCESSES = {
     "provenance": ["test_planner_evidence_provenance"],
     "validator": ["test_planner_integrity_validator"],
 }
+PROTECTED_UNTRACKED_PATH = "docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf"
+PROTECTED_UNTRACKED_SHA256 = (
+    "1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6")
 
 
 def _load_gate_runner():
@@ -140,8 +144,8 @@ def _capture_source_binding() -> dict:
             ("head", ["git", "rev-parse", "HEAD"]),
             ("origin_dev_icra",
              ["git", "rev-parse", "origin/dev/icra"]),
-            ("tracked_status",
-             ["git", "status", "--porcelain", "--untracked-files=no"])):
+            ("status",
+             ["git", "status", "--porcelain=v1", "--untracked-files=all"])):
         try:
             completed = subprocess.run(
                 argv, cwd=REPOSITORY, capture_output=True, text=True,
@@ -159,7 +163,25 @@ def _capture_source_binding() -> dict:
             }
     head = checks["head"]["stdout"].strip()
     origin = checks["origin_dev_icra"]["stdout"].strip()
-    tracked_status = checks["tracked_status"]["stdout"]
+    status_porcelain = checks["status"]["stdout"]
+    status_entries = status_porcelain.splitlines()
+    untracked_paths = [entry[3:] for entry in status_entries
+                       if entry.startswith("?? ")]
+    tracked_entries = [entry for entry in status_entries
+                       if not entry.startswith("?? ")]
+    rejected_untracked = [path for path in untracked_paths
+                          if path != PROTECTED_UNTRACKED_PATH]
+    protected_path = REPOSITORY / PROTECTED_UNTRACKED_PATH
+    protected_hash = None
+    if (protected_path.is_file() and not protected_path.is_symlink()):
+        protected_hash = hashlib.sha256(protected_path.read_bytes()).hexdigest()
+    protected_exact = (
+        untracked_paths.count(PROTECTED_UNTRACKED_PATH) == 1
+        and protected_hash == PROTECTED_UNTRACKED_SHA256)
+    if (PROTECTED_UNTRACKED_PATH in untracked_paths
+            and protected_hash != PROTECTED_UNTRACKED_SHA256):
+        rejected_untracked.append(PROTECTED_UNTRACKED_PATH)
+    tracked_status = "".join(entry + "\n" for entry in tracked_entries)
     failures = []
     if checks["head"]["exit_code"] != 0 or not re.fullmatch(
             r"[0-9a-f]{40}", head):
@@ -167,19 +189,33 @@ def _capture_source_binding() -> dict:
     if (checks["origin_dev_icra"]["exit_code"] != 0 or
             not re.fullmatch(r"[0-9a-f]{40}", origin)):
         failures.append("origin_dev_icra_unavailable")
-    if checks["tracked_status"]["exit_code"] != 0:
-        failures.append("tracked_status_unavailable")
-    elif tracked_status:
-        failures.append("tracked_worktree_dirty")
+    if checks["status"]["exit_code"] != 0:
+        failures.append("worktree_status_unavailable")
+    else:
+        if tracked_entries:
+            failures.append("tracked_worktree_dirty")
+        if rejected_untracked:
+            failures.append("untracked_path_not_allowlisted")
+        if not protected_exact:
+            failures.append("protected_pdf_missing_or_hash_mismatch")
     if head and origin and head != origin:
         failures.append("head_origin_mismatch")
     return {
-        "schema_version": "icra072_source_binding_v1",
+        "schema_version": "icra072_source_binding_v2",
         "repository": str(REPOSITORY),
         "head_commit": head,
         "origin_dev_icra_commit": origin,
+        "status_porcelain": status_porcelain,
         "tracked_status": tracked_status,
-        "tracked_worktree_clean": not tracked_status,
+        "tracked_worktree_clean": not tracked_entries,
+        "untracked_allowlist": [{
+            "path": PROTECTED_UNTRACKED_PATH,
+            "sha256": PROTECTED_UNTRACKED_SHA256,
+        }],
+        "observed_untracked_paths": untracked_paths,
+        "observed_protected_pdf_sha256": protected_hash,
+        "rejected_untracked_paths": rejected_untracked,
+        "rejected_tracked_entries": tracked_entries,
         "head_matches_origin": bool(head) and head == origin,
         "accepted": not failures,
         "failure_reasons": failures,

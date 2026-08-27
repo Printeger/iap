@@ -583,6 +583,15 @@ verification output and deletion contrary to repository-local retention. Continu
 exact-admission repair and fresh `run-024` or later after a clean pushed implementation. ICRA-072B and all Layer
 3/4 work remain unauthorized.
 
+ICRA-072A exact-admission Builder checkpoint (2026-08-27): the bounded repair now rejects a counted fused runtime
+row unless every committed sample carries the same explicit positive selected ID and integer-nanosecond start.
+Source binding v2 inspects full status and permits only the protected PDF at exact path/hash while recording
+allowlisted, observed and rejected paths; arbitrary untracked source and every tracked/staged state reject.
+Focused initial/pre-ROS/final source-change coverage includes a complete mocked final-change lifecycle with typed
+outcomes and owned-group cleanup. Shared build is 6/6, tools 17/17, retained C++ is 64/64 and hermetic launch is
+24/24. Fresh run024+ remains unauthorized until this implementation is committed, pushed and verified at
+divergence `0 0`; ICRA-072B and Layer 3/4 remain unauthorized.
+
 Four-layer Supervisor disposition (2026-08-26): checkpoint `6a6bdd3` is
 `ARCHIVED_AS_FOUND / BLOCKED_TERMINAL_CHAIN_MISSING`. User workflow decision
 `USER-ICRA-WORKFLOW-20260826-001` authorizes ICRA-072A to iterate with shared
