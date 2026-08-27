@@ -118,6 +118,7 @@ struct P5GateStatus {
   P5GateReason raw_reason = P5GateReason::DISABLED;
   std::string current_reason;
   std::string future_reason;
+  std::string current_integrity_source = "FUSED";
   std::vector<std::string> active_reasons;
   double current_im_h = std::numeric_limits<double>::quiet_NaN();
   double current_im_v = std::numeric_limits<double>::quiet_NaN();
@@ -138,6 +139,8 @@ struct P5GateStatus {
   int final_candidate_traj_id = -1;
   double final_candidate_start_time_s =
       std::numeric_limits<double>::quiet_NaN();
+  int64_t final_candidate_start_time_ns =
+      std::numeric_limits<int64_t>::min();
   double final_candidate_duration_s =
       std::numeric_limits<double>::quiet_NaN();
   bool final_candidate_rejected = false;
@@ -174,7 +177,6 @@ class P5RuntimeIntegrityGate {
     double max_unknown_ratio = 0.30;
     int bad_tick_to_replan = 2;
     int good_tick_to_clear = 2;
-    std::string current_pl_source = "FUSED";
     PredAlertLimitProvider::Config pred_alert_limit;
     std::string integrity_topic = "/iap/integrity";
     std::string status_topic = "planning/integrity_gate_status";

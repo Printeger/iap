@@ -776,7 +776,7 @@ namespace ego_planner
              "request_hash,snapshot_generation_id,snapshot_config_hash,occupancy_epoch,original_guide_hash,"
              "risk_guide_hash,selected_guide_hash,selection_applied,control_points_hash,"
              "closed_collision_observed,no_collision_refinement_observed,"
-             "trajectory_id,trajectory_start_s,final_bspline_identity\n";
+             "trajectory_id,trajectory_start_s,trajectory_start_ns,final_bspline_identity\n";
     csv << std::setprecision(17);
     const Eigen::MatrixXd control_points =
         local_data_.position_traj_.getControlPoint();
@@ -784,8 +784,8 @@ namespace ego_planner
     for (const auto &guide : guides)
     {
       std::ostringstream trajectory_identity;
-      trajectory_identity << local_data_.traj_id_ << ';' << std::hexfloat
-                          << local_data_.start_time_.seconds() << ';'
+      trajectory_identity << local_data_.traj_id_ << ';'
+                          << local_data_.start_time_.nanoseconds() << ';'
                           << control_hash;
       uint64_t identity_hash = 1469598103934665603ULL;
       for (const unsigned char byte : trajectory_identity.str())
@@ -796,7 +796,7 @@ namespace ego_planner
       std::ostringstream identity;
       identity << std::hex << std::setfill('0') << std::setw(16)
                << identity_hash;
-      csv << "p4_v2_end_to_end_lineage_v1," << stage << ',' << stamp_s << ','
+      csv << "p4_v2_end_to_end_lineage_v2," << stage << ',' << stamp_s << ','
           << guide.planning_attempt_id << ',' << guide.collision_segment_id << ','
           << guide.request_hash << ',' << guide.snapshot_generation << ','
           << guide.snapshot_config_hash << ',' << guide.occupancy_epoch << ','
@@ -806,7 +806,8 @@ namespace ego_planner
           << (guide.closed_collision_observed ? 1 : 0) << ','
           << (guide.no_collision_refinement_observed ? 1 : 0) << ','
           << local_data_.traj_id_ << ',' << local_data_.start_time_.seconds()
-          << ',' << identity.str() << '\n';
+          << ',' << local_data_.start_time_.nanoseconds() << ','
+          << identity.str() << '\n';
     }
     csv.flush();
     if (!csv.good())

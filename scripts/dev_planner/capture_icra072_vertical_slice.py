@@ -74,12 +74,17 @@ class VerticalSliceCapture(Node):
         self._write(kind, payload)
 
     def _record_bspline(self, message: Bspline) -> None:
+        start_time_ns = (
+            int(message.start_time.sec) * 1_000_000_000
+            + int(message.start_time.nanosec)
+        )
         self._write("normal_bspline", {
             "trajectory_id": int(message.traj_id),
             "start_time_s": (
                 float(message.start_time.sec)
                 + 1e-9 * float(message.start_time.nanosec)
             ),
+            "start_time_ns": start_time_ns,
             "order": int(message.order),
             "position_control_point_count": len(message.pos_pts),
             "knot_count": len(message.knots),

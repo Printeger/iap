@@ -316,9 +316,9 @@ TEST(P4VerticalSliceTerminalLineageTest,
   fsm.setP4TerminalFlowForTest(
       std::move(manager), node, publisher, snapshot,
       rclcpp::Time(10, 0, RCL_ROS_TIME), []() { return true; });
-  ASSERT_TRUE(fsm.callReboundReplanForTest());
   rclcpp::executors::SingleThreadedExecutor executor;
   executor.add_node(node);
+  ASSERT_TRUE(fsm.callReboundReplanForTest());
   for (int i = 0; i < 20 && publish_count.load() == 0; ++i) {
     executor.spin_some();
     std::this_thread::sleep_for(std::chrono::milliseconds(5));
@@ -349,6 +349,84 @@ TEST(P4VerticalSliceTerminalLineageTest,
   EXPECT_NE(contents.find(",1,1,9,"), std::string::npos);
   EXPECT_NE(contents.find(",1,"), std::string::npos);
   EXPECT_NE(contents.find(",1657065614.0142784,"), std::string::npos);
+  EXPECT_NE(contents.find(",1657065614014278400,"), std::string::npos);
+}
+
+TEST(P4VerticalSliceTerminalLineageTest,
+     ProductionFsmPublishesNothingWhenFusedCurrentIsUnsafeDespiteSafeLidar) {
+  const auto snapshot = makeP4SelectionSnapshot();
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureP4SelectionTrigger(map.get());
+  const auto debug_path = p4LineageTestPath("terminal_fused_unsafe.csv");
+  auto optimizer = makeP4Optimizer(map, snapshot, debug_path.string(), 1);
+  Eigen::MatrixXd seed = p4Seed();
+  ASSERT_EQ(optimizer->initControlPoints(seed, true).status,
+            ego_planner::CollisionScanStatus::CLOSED_SEGMENTS);
+  const Eigen::MatrixXd refined = p4RefinedControlPoints();
+  optimizer->setControlPoints(refined);
+  bool stopped_for_error = false;
+  EXPECT_FALSE(optimizer->checkCollisionAndReboundForTest(&stopped_for_error));
+  EXPECT_FALSE(stopped_for_error);
+  optimizer->releaseP4RiskSnapshot();
+
+  auto manager = std::make_unique<ego_planner::EGOPlannerManager>();
+  manager->setP4VerticalSliceOptimizerForTest(std::move(optimizer), map);
+  manager->setLatestRiskSnapshotForTest(snapshot);
+  manager->setTimeProvider(
+      []() { return rclcpp::Time(10, 0, RCL_ROS_TIME); });
+  manager->local_data_.position_traj_ =
+      ego_planner::UniformBspline(refined, 3, 0.5);
+  manager->local_data_.velocity_traj_ =
+      manager->local_data_.position_traj_.getDerivative();
+  manager->local_data_.acceleration_traj_ =
+      manager->local_data_.velocity_traj_.getDerivative();
+  manager->local_data_.traj_id_ = 19;
+  manager->local_data_.start_time_ = rclcpp::Time(10, 0, RCL_ROS_TIME);
+  manager->local_data_.duration_ = 3.0;
+
+  ego_planner::P5RuntimeIntegrityGate::Config p5_config;
+  p5_config.enable_runtime_gate = true;
+  p5_config.enable_final_gate = true;
+  manager->p5_integrity_gate_ =
+      std::make_unique<ego_planner::P5RuntimeIntegrityGate>(
+          nullptr, p5_config, false);
+  auto unsafe_fused = p4IntegrityReport();
+  unsafe_fused.hpl = 110.0;
+  unsafe_fused.vpl = 120.0;
+  unsafe_fused.im = -20.0;
+  unsafe_fused.lidar_valid = true;
+  unsafe_fused.lidar_hpl = 2.0;
+  unsafe_fused.lidar_vpl = 3.0;
+  manager->p5_integrity_gate_->setCurrentIntegrityForTest(unsafe_fused);
+
+  auto node = std::make_shared<rclcpp::Node>("p4_terminal_fused_unsafe");
+  auto publisher = node->create_publisher<traj_utils::msg::Bspline>(
+      "p4_terminal_fused_unsafe_bspline", rclcpp::QoS(10));
+  std::atomic<int> publish_count{0};
+  auto subscription = node->create_subscription<traj_utils::msg::Bspline>(
+      "p4_terminal_fused_unsafe_bspline", rclcpp::QoS(10),
+      [&publish_count](const traj_utils::msg::Bspline&) {
+        publish_count.fetch_add(1);
+      });
+  ego_planner::EGOReplanFSM fsm;
+  fsm.setP4TerminalFlowForTest(
+      std::move(manager), node, publisher, snapshot,
+      rclcpp::Time(10, 0, RCL_ROS_TIME), []() { return true; });
+  EXPECT_FALSE(fsm.callReboundReplanForTest());
+  rclcpp::executors::SingleThreadedExecutor executor;
+  executor.add_node(node);
+  executor.spin_some();
+  EXPECT_EQ(publish_count.load(), 0);
+
+  const auto lineage_path = std::filesystem::path(
+      debug_path.string() + ".lineage.csv");
+  std::ifstream stream(lineage_path);
+  ASSERT_TRUE(stream.good());
+  const std::string contents(
+      (std::istreambuf_iterator<char>(stream)),
+      std::istreambuf_iterator<char>());
+  EXPECT_NE(contents.find("p5_final_rejected"), std::string::npos);
+  EXPECT_EQ(contents.find("normal_publish_authorized"), std::string::npos);
 }
 
 TEST(P4VerticalSliceTerminalLineageTest,

@@ -93,6 +93,11 @@ def main() -> int:
     if (run.get("owned_process_groups_cleared") is not True or
             run.get("result") != "PASS"):
         failures.append("owned_process_group_cleanup_failed")
+    runner_exception = run.get("runner_exception")
+    if isinstance(runner_exception, dict):
+        failures.append(
+            "runner_exception:"
+            + str(runner_exception.get("type", "unknown")))
     expected_launch = {
         "experiment": "icra_p0_p4_v2_p5_dev",
         "scenario": "icra072_p4_selection_trigger_v1",
@@ -107,11 +112,13 @@ def main() -> int:
         "p4.objective": "PROVIDER_BOTTLENECK_V2",
         "p5.enable_runtime_gate": True,
         "p5.enable_final_gate": True,
-        "p5.current_pl_source": "LIDAR_CERTIFIED",
     }
     for key, value in expected_launch.items():
         if launch.get(key) != value:
             failures.append(f"launch_contract_mismatch:{key}")
+    p5_authority_ok = "p5.current_pl_source" not in launch
+    if not p5_authority_ok:
+        failures.append("p5_authoritative_fused_current_bypassed")
 
     captured: list[dict] = []
     try:
@@ -225,6 +232,7 @@ def main() -> int:
         ))
         key = decision_key + tuple(row.get(field, "") for field in (
             "control_points_hash", "trajectory_id",
+            "trajectory_start_ns",
             "final_bspline_identity",
         ))
         if (row.get("closed_collision_observed") == "1" and
@@ -278,38 +286,34 @@ def main() -> int:
     matching_runtime: list[dict] = []
     if len(trajectory_ids) == 1:
         expected_id = int(next(iter(trajectory_ids)))
-        if not any(row.get("trajectory_id") == expected_id for row in bsplines):
-            failures.append("lineage_bspline_trajectory_id_mismatch")
-        if final_ok and not any(row.get("final_candidate_traj_id") == expected_id
-                                for row in final_ok):
-            failures.append("lineage_p5_final_trajectory_id_mismatch")
-        matching_final = [
-            row for row in final_records
-            if row["payload"].get("final_candidate_traj_id") == expected_id]
-        matching_bspline = [
-            row for row in bspline_records
-            if row["payload"].get("trajectory_id") == expected_id]
         try:
-            lineage_starts = {
-                float(row["trajectory_start_s"]) for row in linked}
-            published_starts = {
-                float(row["payload"]["start_time_s"])
-                for row in matching_bspline}
+            lineage_start_values = {
+                int(row["trajectory_start_ns"]) for row in linked}
         except (KeyError, TypeError, ValueError):
-            lineage_starts, published_starts = set(), set()
-        expected_starts = lineage_starts & published_starts
-        matching_runtime = [
-            row for row in runtime_records
-            if any(
-                sample.get("trajectory_sample_source") ==
-                "runtime_committed" and
-                any(abs(float(sample["trajectory_start_time_s"]) - start)
-                    <= 0.02 for start in expected_starts)
-                for sample in row["payload"].get("samples", [])
-                if isinstance(sample.get("trajectory_start_time_s"),
-                              (int, float)))]
+            lineage_start_values = set()
+        expected_start_ns = (
+            next(iter(lineage_start_values))
+            if len(lineage_start_values) == 1 else None)
+        matching_final = [row for row in final_records
+                          if row["payload"].get("final_candidate_traj_id") == expected_id
+                          and row["payload"].get("final_candidate_start_time_ns") == expected_start_ns
+                          and row["payload"].get("current_integrity_source") == "FUSED"]
+        matching_bspline = [row for row in bspline_records
+                            if row["payload"].get("trajectory_id") == expected_id
+                            and row["payload"].get("start_time_ns") == expected_start_ns]
+        matching_runtime = [row for row in runtime_records
+                            if row["payload"].get("current_integrity_source") == "FUSED"
+                            and any(
+                                sample.get("trajectory_sample_source") == "runtime_committed"
+                                and sample.get("trajectory_id") == expected_id
+                                and sample.get("trajectory_start_time_ns") == expected_start_ns
+                                for sample in row["payload"].get("samples", []))]
+        if not matching_bspline:
+            failures.append("lineage_bspline_trajectory_identity_mismatch")
+        if not matching_final:
+            failures.append("lineage_p5_final_trajectory_identity_mismatch")
         if not matching_runtime:
-            failures.append("lineage_p5_runtime_trajectory_id_mismatch")
+            failures.append("lineage_p5_runtime_trajectory_identity_mismatch")
         if (matching_final and matching_bspline and matching_runtime and
             not (matching_final[-1]["receive_steady_s"] <=
                  matching_bspline[0]["receive_steady_s"] <=
@@ -323,7 +327,7 @@ def main() -> int:
         "ego_final_bspline": bool(ego_groups) and generation_identity_ok,
         "p5_final_pass_before_publish": (
             "p5_final_pass_before_publish" in linked_stages and
-            bool(matching_final)),
+            bool(matching_final) and p5_authority_ok),
         "normal_publication": (
             "normal_publish_authorized" in linked_stages and
             bool(matching_bspline)),
@@ -345,12 +349,21 @@ def main() -> int:
             failures.append(stage_failures[stage])
     first_missing_stage = next(
         (stage for stage in STAGE_ORDER if not stage_status[stage]), None)
+    if first_missing_stage is None:
+        if (run.get("launch_early_exit") is not False or
+                not run.get("process_result", {}).get(
+                    "required_processes_ok")):
+            first_missing_stage = "required_process_health"
+        elif (run.get("owned_process_groups_cleared") is not True or
+              run.get("result") != "PASS"):
+            first_missing_stage = "runner_cleanup"
 
     result = {
         "schema_version": "icra072_layer1_analysis_v1",
         "run_id": run.get("run_id", ""),
         "development_only": True,
         "effect_claim": False,
+        "p5_current_integrity_authority": "FUSED",
         "result": "PASS" if not failures else "FAIL",
         "failures": failures,
         "stage_order": list(STAGE_ORDER),

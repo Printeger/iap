@@ -14,6 +14,7 @@ import signal
 import subprocess
 import sys
 import time
+from types import SimpleNamespace
 from pathlib import Path
 
 
@@ -52,6 +53,67 @@ def _load_gate_runner():
 
 def _write(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+
+
+def _finalize_attempt(run_root: Path, manifest: dict,
+                      runner_exit_code: int) -> int:
+    manifest_path = run_root / "run_manifest.json"
+    _write(manifest_path, manifest)
+    command = [
+        sys.executable,
+        str(REPOSITORY / "scripts/dev_planner/analyze_icra072_vertical_slice.py"),
+        "--run-root", str(run_root),
+    ]
+    try:
+        completed = subprocess.run(
+            command, cwd=REPOSITORY, capture_output=True, text=True,
+            check=False)
+    except OSError as exc:
+        completed = SimpleNamespace(
+            returncode=127, stdout="", stderr=f"{type(exc).__name__}: {exc}")
+    _write(run_root / "analyzer_invocation.json", {
+        "argv": command,
+        "cwd": str(REPOSITORY),
+        "exit_code": completed.returncode,
+        "stdout": completed.stdout,
+        "stderr": completed.stderr,
+    })
+    try:
+        analysis = json.loads((run_root / "analysis.json").read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        analysis = {
+            "schema_version": "icra072_layer1_analysis_v1",
+            "run_id": run_root.name,
+            "result": "FAIL",
+            "first_missing_stage": "p0_snapshot",
+            "failures": [f"automatic_analyzer_failed:{exc}"],
+        }
+        if not (run_root / "analysis.json").exists():
+            _write(run_root / "analysis.json", analysis)
+    outcome = {
+        "schema_version": "icra072_layer1_orchestration_outcome_v1",
+        "run_id": run_root.name,
+        "runner_result": manifest.get("result", "FAIL"),
+        "runner_exit_code": runner_exit_code,
+        "analyzer_result": analysis.get("result", "FAIL"),
+        "analyzer_exit_code": completed.returncode,
+        "first_missing_stage": analysis.get("first_missing_stage"),
+        "failures": analysis.get("failures", []),
+        "result": (
+            "PASS" if runner_exit_code == 0 and completed.returncode == 0
+            else "FAIL"),
+    }
+    _write(run_root / "orchestration_outcome.json", outcome)
+    manifest["automatic_analyzer"] = {
+        "argv": command,
+        "exit_code": completed.returncode,
+        "result": outcome["analyzer_result"],
+        "first_missing_stage": outcome["first_missing_stage"],
+    }
+    _write(manifest_path, manifest)
+    if runner_exit_code != 0:
+        return runner_exit_code
+    return 0 if completed.returncode == 0 else 7
 
 
 def validate_cli_paths(run_root: Path, install_root: Path) -> tuple[Path, Path]:
@@ -188,6 +250,64 @@ def _wait_ready(process: subprocess.Popen, path: Path) -> dict:
     return {"ready": False, "reason": "capture_readiness_timeout"}
 
 
+def _finalize_runner_exception(
+        run_root: Path, manifest: dict, exc: Exception,
+        capture: subprocess.Popen | None = None,
+        launch: subprocess.Popen | None = None,
+        capture_log=None, launch_log=None, monitor=None) -> int:
+    """Fail closed after any post-preflight orchestration exception."""
+    cleanup_errors: list[str] = []
+    process_result = {
+        "required_processes_ok": False,
+        "failure_reason": "runner_exception",
+    }
+    if monitor is not None:
+        try:
+            monitor.mark_controlled_shutdown()
+            process_result = monitor.finish()
+        except Exception as cleanup_exc:  # preserve the initiating failure
+            cleanup_errors.append(
+                f"monitor:{type(cleanup_exc).__name__}:{cleanup_exc}")
+    exit_codes = {}
+    for name, process, timeout_s in (
+            ("launch", launch, 15.0), ("capture", capture, 5.0)):
+        if process is None:
+            continue
+        try:
+            exit_codes[name] = _stop_owned(process, timeout_s)
+        except Exception as cleanup_exc:  # still emit typed evidence
+            cleanup_errors.append(
+                f"{name}:{type(cleanup_exc).__name__}:{cleanup_exc}")
+    for stream in (launch_log, capture_log):
+        if stream is not None:
+            try:
+                stream.close()
+            except OSError as cleanup_exc:
+                cleanup_errors.append(
+                    f"log:{type(cleanup_exc).__name__}:{cleanup_exc}")
+    processes = tuple(process for process in (launch, capture)
+                      if process is not None)
+    if processes:
+        _unregister_cleanup_if_cleared(*processes)
+    groups_cleared = all(
+        _owned_group_cleared(process.pid) for process in processes)
+    manifest.update({
+        "launch_early_exit": bool(manifest.get("launch_started")),
+        "launch_exit_code": exit_codes.get("launch"),
+        "capture_exit_code": exit_codes.get("capture"),
+        "owned_process_groups_cleared": groups_cleared,
+        "process_result": process_result,
+        "stage_observations": _stage_observations(run_root),
+        "runner_exception": {
+            "type": type(exc).__name__,
+            "message": str(exc),
+        },
+        "cleanup_errors": cleanup_errors,
+        "result": "RUNNER_EXCEPTION",
+    })
+    return _finalize_attempt(run_root, manifest, 8)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--run-root", type=Path, required=True)
@@ -224,70 +344,73 @@ def main() -> int:
         "required_process_set": list(REQUIRED_PROCESSES),
         "stage_observations": {},
     }
-    manifest_path = run_root / "run_manifest.json"
     if not preflight.get("gpu_ready"):
         manifest["result"] = "GPU_NOT_READY"
-        _write(manifest_path, manifest)
         print("GPU_NOT_READY")
-        return 4
+        return _finalize_attempt(run_root, manifest, 4)
 
-    capture_command = [
-        sys.executable,
-        str(REPOSITORY / "scripts/dev_planner/capture_icra072_vertical_slice.py"),
-        "--output", str(run_root / "lineage_capture.jsonl"),
-        "--ready-file", str(run_root / "capture_ready.json"),
-        "--duration-s", str(args.duration_s + 15.0),
-    ]
-    capture_log = (run_root / "capture_stdout.log").open("x")
-    child_environment = {**os.environ, "ROS_LOG_DIR": str(ros_logs)}
-    capture = _start_process(
-        capture_command, stdout=capture_log, stderr=subprocess.STDOUT,
-        start_new_session=True, env=child_environment)
-    atexit.register(_stop_owned, capture)
-    readiness = _wait_ready(capture, run_root / "capture_ready.json")
-    manifest["capture_readiness"] = readiness
-    if readiness.get("ready") is not True:
-        _stop_owned(capture)
-        _unregister_cleanup_if_cleared(capture)
-        capture_log.close()
-        manifest["result"] = "CAPTURE_NOT_READY"
-        _write(manifest_path, manifest)
-        return 5
-
-    launch_args = [
-        "experiment:=icra_p0_p4_v2_p5_dev",
-        "scenario:=icra072_p4_selection_trigger_v1",
-        f"run_duration_s:={args.duration_s + 30.0}",
-        f"validation_duration_s:={args.duration_s + 20.0}",
-        f"runtime_root_dir:={runtime}",
-        f"export_root_dir:={exports}",
-        f"iap_log_root:={runtime / 'iap_logs'}",
-        f"bag_output_dir:={bags}",
-        f"p4.debug_csv_path:={exports / 'planner_p4_risk_astar_debug.csv'}",
-        "record_bag:=false",
-        "start_rviz:=false",
-    ]
-    setup = install_root / "setup.bash"
-    shell_command = (
-        "source /opt/ros/jazzy/setup.bash && "
-        f"source {shlex.quote(str(setup))} && exec "
-        + shlex.join([
-            "ros2", "launch", "iap", "test_planner.launch.py", *launch_args])
-    )
-    _write(run_root / "launch_command.json", {
-        "argv": ["bash", "-lc", shell_command],
-        "profile": "icra_p0_p4_v2_p5_dev",
-        "scenario": "icra072_p4_selection_trigger_v1",
-    })
-    launch_log = (run_root / "stdout.log").open("x")
-    launch = _start_process(
-        ["bash", "-lc", shell_command], stdout=launch_log,
-        stderr=subprocess.STDOUT, start_new_session=True,
-        env=child_environment)
-    atexit.register(_stop_owned, launch)
-    monitor = gate.RequiredProcessMonitor(
-        launch.pid, REQUIRED_PROCESSES, args.duration_s)
+    capture = None
+    launch = None
+    capture_log = None
+    launch_log = None
+    monitor = None
     try:
+        capture_command = [
+            sys.executable,
+            str(REPOSITORY / "scripts/dev_planner/capture_icra072_vertical_slice.py"),
+            "--output", str(run_root / "lineage_capture.jsonl"),
+            "--ready-file", str(run_root / "capture_ready.json"),
+            "--duration-s", str(args.duration_s + 15.0),
+        ]
+        capture_log = (run_root / "capture_stdout.log").open("x")
+        child_environment = {**os.environ, "ROS_LOG_DIR": str(ros_logs)}
+        capture = _start_process(
+            capture_command, stdout=capture_log, stderr=subprocess.STDOUT,
+            start_new_session=True, env=child_environment)
+        atexit.register(_stop_owned, capture)
+        readiness = _wait_ready(capture, run_root / "capture_ready.json")
+        manifest["capture_readiness"] = readiness
+        if readiness.get("ready") is not True:
+            _stop_owned(capture)
+            _unregister_cleanup_if_cleared(capture)
+            capture_log.close()
+            manifest["result"] = "CAPTURE_NOT_READY"
+            return _finalize_attempt(run_root, manifest, 5)
+
+        launch_args = [
+            "experiment:=icra_p0_p4_v2_p5_dev",
+            "scenario:=icra072_p4_selection_trigger_v1",
+            f"run_duration_s:={args.duration_s + 30.0}",
+            f"validation_duration_s:={args.duration_s + 20.0}",
+            f"runtime_root_dir:={runtime}",
+            f"export_root_dir:={exports}",
+            f"iap_log_root:={runtime / 'iap_logs'}",
+            f"bag_output_dir:={bags}",
+            f"p4.debug_csv_path:={exports / 'planner_p4_risk_astar_debug.csv'}",
+            "record_bag:=false",
+            "start_rviz:=false",
+        ]
+        setup = install_root / "setup.bash"
+        shell_command = (
+            "source /opt/ros/jazzy/setup.bash && "
+            f"source {shlex.quote(str(setup))} && exec "
+            + shlex.join([
+                "ros2", "launch", "iap", "test_planner.launch.py",
+                *launch_args])
+        )
+        _write(run_root / "launch_command.json", {
+            "argv": ["bash", "-lc", shell_command],
+            "profile": "icra_p0_p4_v2_p5_dev",
+            "scenario": "icra072_p4_selection_trigger_v1",
+        })
+        launch_log = (run_root / "stdout.log").open("x")
+        launch = _start_process(
+            ["bash", "-lc", shell_command], stdout=launch_log,
+            stderr=subprocess.STDOUT, start_new_session=True,
+            env=child_environment)
+        atexit.register(_stop_owned, launch)
+        monitor = gate.RequiredProcessMonitor(
+            launch.pid, REQUIRED_PROCESSES, args.duration_s)
         monitor.start()
         monitor.launch_running = True
         manifest["launch_started"] = True
@@ -298,7 +421,6 @@ def main() -> int:
                 early_exit = True
                 break
             time.sleep(0.1)
-    finally:
         monitor.mark_controlled_shutdown()
         exit_code = _stop_owned(launch, 15.0)
         process_result = monitor.finish()
@@ -306,6 +428,10 @@ def main() -> int:
         launch_log.close()
         capture_log.close()
         _unregister_cleanup_if_cleared(launch, capture)
+    except Exception as exc:
+        return _finalize_runner_exception(
+            run_root, manifest, exc, capture, launch,
+            capture_log, launch_log, monitor)
     groups_cleared = (
         _owned_group_cleared(launch.pid) and
         _owned_group_cleared(capture.pid))
@@ -320,8 +446,7 @@ def main() -> int:
         "stage_observations": _stage_observations(run_root),
         "result": "PASS" if runner_ok else "FAIL",
     })
-    _write(manifest_path, manifest)
-    return 0 if runner_ok else 6
+    return _finalize_attempt(run_root, manifest, 0 if runner_ok else 6)
 
 
 if __name__ == "__main__":

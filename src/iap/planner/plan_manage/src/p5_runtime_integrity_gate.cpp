@@ -74,8 +74,11 @@ std::string jsonTrajectorySamples(
     oss << "{"
         << "\"tau_s\":" << jsonNumber(sample.tau_s)
         << ",\"query_tau_s\":" << jsonNumber(sample.query_tau_s)
+        << ",\"trajectory_id\":" << sample.trajectory_id
         << ",\"trajectory_start_time_s\":"
         << jsonNumber(sample.trajectory_start_time_s)
+        << ",\"trajectory_start_time_ns\":"
+        << sample.trajectory_start_time_ns
         << ",\"trajectory_duration_s\":"
         << jsonNumber(sample.trajectory_duration_s)
         << ",\"trajectory_t_cur_s\":"
@@ -502,8 +505,6 @@ P5RuntimeIntegrityGate::Config P5RuntimeIntegrityGate::declareAndReadConfig(
   config.integrity_topic =
       node->declare_parameter<std::string>("p5.integrity_topic",
                                            "/iap/integrity");
-  config.current_pl_source = node->declare_parameter<std::string>(
-      "p5.current_pl_source", "FUSED");
   config.status_topic =
       node->declare_parameter<std::string>("p5.status_topic",
                                            "planning/integrity_gate_status");
@@ -810,10 +811,12 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateFutureGate(
                                             : context.now_s - snapshot->stamp_s();
 
   const double trajectory_start_time_s = local_data.start_time_.seconds();
+  const int64_t trajectory_start_time_ns = local_data.start_time_.nanoseconds();
   const double duration = std::max(0.0, local_data.duration_);
   if (context.final_gate) {
     status.final_candidate_traj_id = local_data.traj_id_;
     status.final_candidate_start_time_s = trajectory_start_time_s;
+    status.final_candidate_start_time_ns = trajectory_start_time_ns;
     status.final_candidate_duration_s = duration;
   }
   double t_cur = context.now_s - trajectory_start_time_s;
@@ -829,6 +832,8 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateFutureGate(
       return;
     }
     sample->trajectory_start_time_s = trajectory_start_time_s;
+    sample->trajectory_id = local_data.traj_id_;
+    sample->trajectory_start_time_ns = trajectory_start_time_ns;
     sample->trajectory_duration_s = duration;
     sample->trajectory_t_cur_s = t_cur;
     sample->trajectory_t_end_s = t_end;
@@ -997,6 +1002,7 @@ P5GateStatus P5RuntimeIntegrityGate::merge(const P5GateStatus& a,
   out.future_unknown_duration_s = b.future_unknown_duration_s;
   out.final_candidate_traj_id = b.final_candidate_traj_id;
   out.final_candidate_start_time_s = b.final_candidate_start_time_s;
+  out.final_candidate_start_time_ns = b.final_candidate_start_time_ns;
   out.final_candidate_duration_s = b.final_candidate_duration_s;
   out.final_candidate_rejected = b.final_candidate_rejected;
   out.pred_al_mode = b.pred_al_mode;
@@ -1184,6 +1190,8 @@ std::string P5RuntimeIntegrityGate::toJson(
       << ",\"raw_reason\":" << jsonString(reasonName(status.raw_reason))
       << ",\"current_reason\":" << jsonString(status.current_reason)
       << ",\"future_reason\":" << jsonString(status.future_reason)
+      << ",\"current_integrity_source\":"
+      << jsonString(status.current_integrity_source)
       << ",\"active_reasons\":" << jsonStringArray(status.active_reasons)
       << ",\"current_im_h\":" << jsonNumber(status.current_im_h)
       << ",\"current_im_v\":" << jsonNumber(status.current_im_v)
@@ -1211,6 +1219,8 @@ std::string P5RuntimeIntegrityGate::toJson(
       << status.final_candidate_traj_id
       << ",\"final_candidate_start_time_s\":"
       << jsonNumber(status.final_candidate_start_time_s)
+      << ",\"final_candidate_start_time_ns\":"
+      << status.final_candidate_start_time_ns
       << ",\"final_candidate_duration_s\":"
       << jsonNumber(status.final_candidate_duration_s)
       << ",\"final_candidate_rejected\":"
@@ -1246,27 +1256,13 @@ P5RuntimeIntegrityGate::currentFromMsg(
   current.stamp_s = stampToSec(msg.header.stamp);
   current.hal = msg.hal;
   current.val = msg.val;
-  bool source_valid = true;
-  bool source_numerical_failure = false;
-  if (config_.current_pl_source == "LIDAR_CERTIFIED") {
-    current.hpl = msg.lidar_hpl;
-    current.vpl = msg.lidar_vpl;
-    current.im = std::min(current.hal - current.hpl,
-                          current.val - current.vpl);
-    source_valid = msg.lidar_valid;
-    source_numerical_failure = msg.lidar_integrity_invalid;
-  } else if (config_.current_pl_source == "FUSED") {
-    current.hpl = msg.hpl;
-    current.vpl = msg.vpl;
-    current.im = msg.im;
-    source_numerical_failure = msg.im_invalid;
-  } else {
-    source_valid = false;
-  }
+  current.hpl = msg.hpl;
+  current.vpl = msg.vpl;
+  current.im = msg.im;
   current.valid = finite(current.stamp_s) && finite(current.hpl) &&
                   finite(current.vpl) && finite(current.hal) &&
                   finite(current.val) && finite(current.im) &&
-                  source_valid && !source_numerical_failure &&
+                  !msg.im_invalid &&
                   !msg.hal_invalid && !msg.val_invalid;
   return current;
 }

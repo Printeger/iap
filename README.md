@@ -72,11 +72,10 @@ python3 scripts/dev_planner/run_icra072_vertical_slice.py \
   --run-root results/icra27/dev_runs/layer1/run-NNN \
   --install-root /home/dev/ws_iap/install \
   --duration-s 45
-
-python3 scripts/dev_planner/analyze_icra072_vertical_slice.py \
-  --run-root results/icra27/dev_runs/layer1/run-NNN
 ```
 
+Runner 会在 GPU、capture、process/cleanup 失败及正常结束路径自动执行一次 analyzer，并写入
+`analysis.json`、`analyzer_invocation.json` 与 `orchestration_outcome.json`；不得再手动重复分析同一 run。
 已有编号不得覆盖；这不是 one-shot 正式实验。完整层级、退出条件和证据
 保留规则见 `docs/icra27/ICRA_FOUR_LAYER_DEVELOPMENT_WORKFLOW.md`。
 

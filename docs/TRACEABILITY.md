@@ -1,5 +1,14 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-27 ICRA-072A authoritative-P5 repair handoff
+
+| Req ID | Implemented/tested seam | Evidence and disposition | Status |
+|---|---|---|---|
+| IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-421 / IAP-RQ-422 | Authoritative current integrity | Removed the configurable/LiDAR-only P5 source seam. Production-shaped regression proves unsafe fused current rejects despite finite safe LiDAR and publishes zero; `run-021` records the expected fused rejection, while open-sky development input makes `run-022` fused margins positive without changing max-PL authority, AL or P5 thresholds | **LAYER 1 READY FOR REVIEW** |
+| IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 / IAP-RQ-422 | Exact final/publish/runtime identity | Lineage v2, final P5 status, normal B-spline capture and runtime samples carry exact trajectory ID plus integer nanosecond start. Analyzer has no time tolerance and `run-022` binds terminal ID `17`, start `1657065614997223065` and final identity `30a3cd7b707ca45f` end to end | **EXACT IDENTITY PASS** |
+| IAP-RQ-423 / IAP-RQ-424 | Automatic attempt outcome and immutable history | Runner automatically invokes analyzer on every exit path and writes a typed orchestration outcome, including capture/launch/monitor exceptions after preflight. Complete-chain process and cleanup failures map to explicit operational first-missing stages. Corrected immutable index `iteration_index_run-001_through_run-020_v2.json` SHA-256 `15838959c6eff6b5f8343be8e91d3118844853ad2284c5da64e3e13318f78141` preserves earlier pipeline first-missing stages, then classifies `run-019` cleanup rejection and `run-020` authority bypass. Superseded v1 remains retained and disclosed | **EVIDENCE COMPLETE; ORIGINAL RUNS UNCHANGED** |
+| IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 | First acceptable continuation run | `run-022` runner/analyzer PASS, all seven ordered stages true, P0 ready 55, both-complete 20, natural selected 8, lineage 3, P5 final/publish 17 and runtime-bound 70; required processes and cleanup PASS | **READY FOR SUPERVISOR REVIEW; ICRA-072B NOT SELF-AUTHORIZED** |
+
 ## 2026-08-27 ICRA-072A Layer 1 Supervisor Review
 
 | Req ID | Reviewed seam | Evidence and disposition | Status |

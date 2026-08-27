@@ -15,6 +15,7 @@ from unittest import mock
 REPO = Path(__file__).resolve().parents[1]
 ANALYZER = REPO / "scripts/dev_planner/analyze_icra072_vertical_slice.py"
 RUNNER = REPO / "scripts/dev_planner/run_icra072_vertical_slice.py"
+INDEXER = REPO / "scripts/dev_planner/index_icra072_layer1_iterations.py"
 TASK_RESULTS_ROOT = REPO / "results/icra27/icra072"
 BUILD_ENTRY = REPO / "scripts/dev_planner/build_iap_dev.sh"
 DEV_RUNS_ROOT = REPO / "results/icra27/dev_runs/layer1"
@@ -99,7 +100,6 @@ class Icra072VerticalSliceToolsTest(unittest.TestCase):
                 "p4.debug_csv_path": str(p4_path),
                 "p5.enable_runtime_gate": True,
                 "p5.enable_final_gate": True,
-                "p5.current_pl_source": "LIDAR_CERTIFIED",
             }
             (export / "test_planner_manifest.json").write_text(json.dumps(launch))
             with p4_path.open("w", newline="") as stream:
@@ -145,6 +145,7 @@ class Icra072VerticalSliceToolsTest(unittest.TestCase):
                 "no_collision_refinement_observed", "trajectory_id",
                 "final_bspline_identity",
                 "trajectory_start_s",
+                "trajectory_start_ns",
             ]
             with Path(str(p4_path) + ".lineage.csv").open(
                     "w", newline="") as stream:
@@ -162,6 +163,7 @@ class Icra072VerticalSliceToolsTest(unittest.TestCase):
                     "no_collision_refinement_observed": "1",
                     "final_bspline_identity": "bs",
                     "trajectory_start_s": "123.504278",
+                    "trajectory_start_ns": "123504278000",
                 }
                 for stage, stamp in (
                     ("final_bspline_before_p5", 10.0),
@@ -176,16 +178,23 @@ class Icra072VerticalSliceToolsTest(unittest.TestCase):
                 {"kind": "p5_status", "receive_steady_s": 2.0,
                  "payload": {"phase": "final", "action": "OK",
                              "final_candidate_rejected": False,
-                             "final_candidate_traj_id": 9}},
+                             "final_candidate_traj_id": 9,
+                             "final_candidate_start_time_ns": 123504278000,
+                             "current_integrity_source": "FUSED"}},
                 {"kind": "normal_bspline", "receive_steady_s": 3.0,
                  "payload": {"trajectory_id": 9,
-                             "start_time_s": 123.504278}},
+                             "start_time_s": 123.504278,
+                             "start_time_ns": 123504278000}},
                 {"kind": "p5_status", "receive_steady_s": 4.0,
                  "payload": {"phase": "runtime", "action": "OK",
                              "final_candidate_traj_id": -1,
+                             "current_integrity_source": "FUSED",
                              "samples": [{"trajectory_sample_source":
                                           "runtime_committed",
-                                          "trajectory_start_time_s": 123.50}]}},
+                                          "trajectory_id": 9,
+                                          "trajectory_start_time_s": 123.51,
+                                          "trajectory_start_time_ns":
+                                              123504278000}]}},
             ]
             (root / "lineage_capture.jsonl").write_text(
                 "".join(json.dumps(row) + "\n" for row in capture))
@@ -203,6 +212,23 @@ class Icra072VerticalSliceToolsTest(unittest.TestCase):
                 "both_complete_count": 1,
                 "selection_blockers": {},
             })
+            launch["p5.current_pl_source"] = "LIDAR_CERTIFIED"
+            (export / "test_planner_manifest.json").write_text(
+                json.dumps(launch))
+            authority_output = root / "analysis_p5_authority_bypass.json"
+            completed = subprocess.run(
+                [sys.executable, str(ANALYZER), "--run-root", str(root),
+                 "--output", str(authority_output)],
+                capture_output=True, text=True, check=False)
+            self.assertNotEqual(completed.returncode, 0)
+            authority_analysis = json.loads(authority_output.read_text())
+            self.assertEqual(authority_analysis["first_missing_stage"],
+                             "p5_final_pass_before_publish")
+            self.assertIn("p5_authoritative_fused_current_bypassed",
+                          authority_analysis["failures"])
+            launch.pop("p5.current_pl_source")
+            (export / "test_planner_manifest.json").write_text(
+                json.dumps(launch))
             manifest_path = root / "run_manifest.json"
             manifest = json.loads(manifest_path.read_text())
             manifest["owned_process_groups_cleared"] = False
@@ -214,16 +240,42 @@ class Icra072VerticalSliceToolsTest(unittest.TestCase):
                  "--output", str(cleanup_output)],
                 capture_output=True, text=True, check=False)
             self.assertNotEqual(completed.returncode, 0)
+            cleanup_analysis = json.loads(cleanup_output.read_text())
             self.assertIn("owned_process_group_cleanup_failed",
-                          json.loads(cleanup_output.read_text())["failures"])
+                          cleanup_analysis["failures"])
+            self.assertEqual(cleanup_analysis["first_missing_stage"],
+                             "runner_cleanup")
             manifest["owned_process_groups_cleared"] = True
             manifest["result"] = "PASS"
             manifest_path.write_text(json.dumps(manifest))
             capture_path = root / "lineage_capture.jsonl"
             capture_path.write_text(
                 capture_path.read_text().replace(
-                    '"trajectory_start_time_s": 123.5',
-                    '"trajectory_start_time_s": 124.5'))
+                    '"trajectory_start_time_ns": 123504278000',
+                    '"trajectory_start_time_ns": 123504278001'))
+            exact_output = root / "analysis_runtime_exact_mismatch.json"
+            completed = subprocess.run(
+                [sys.executable, str(ANALYZER), "--run-root", str(root),
+                 "--output", str(exact_output)],
+                capture_output=True, text=True, check=False)
+            self.assertNotEqual(completed.returncode, 0)
+            self.assertIn(
+                "lineage_p5_runtime_trajectory_identity_mismatch",
+                json.loads(exact_output.read_text())["failures"])
+            capture_path.write_text(
+                capture_path.read_text().replace(
+                    '"trajectory_start_time_ns": 123504278001',
+                    '"trajectory_start_time_ns": 123504278000'))
+            captured_rows = [json.loads(line) for line in
+                             capture_path.read_text().splitlines()]
+            runtime_row = next(
+                row for row in captured_rows
+                if row.get("kind") == "p5_status"
+                and row["payload"].get("phase") == "runtime")
+            runtime_row["payload"]["samples"][0].pop("trajectory_id")
+            capture_path.write_text(
+                "".join(json.dumps(row, sort_keys=True) + "\n"
+                        for row in captured_rows))
             runtime_output = root / "analysis_runtime_mismatch.json"
             completed = subprocess.run(
                 [sys.executable, str(ANALYZER), "--run-root", str(root),
@@ -233,12 +285,12 @@ class Icra072VerticalSliceToolsTest(unittest.TestCase):
             runtime_analysis = json.loads(runtime_output.read_text())
             self.assertEqual(runtime_analysis["first_missing_stage"],
                              "p5_runtime_committed")
-            self.assertIn("lineage_p5_runtime_trajectory_id_mismatch",
+            self.assertIn("lineage_p5_runtime_trajectory_identity_mismatch",
                           runtime_analysis["failures"])
+            runtime_row["payload"]["samples"][0]["trajectory_id"] = 9
             capture_path.write_text(
-                capture_path.read_text().replace(
-                    '"trajectory_start_time_s": 124.5',
-                    '"trajectory_start_time_s": 123.5'))
+                "".join(json.dumps(row, sort_keys=True) + "\n"
+                        for row in captured_rows))
             lineage_path = Path(str(p4_path) + ".lineage.csv")
             lineage_path.write_text(
                 lineage_path.read_text().replace(",1,1,9,bs", ",0,1,9,bs"))
@@ -343,6 +395,57 @@ class Icra072VerticalSliceToolsTest(unittest.TestCase):
                     self.assertNotIn(
                         "p4_debug_path_outside_run_root", analysis["failures"])
 
+    def test_iteration_index_classifies_retained_runs_without_rewriting_them(self):
+        output = DEV_RUNS_ROOT / f"iteration_index_test_{os.getpid()}.json"
+        self.assertFalse(output.exists())
+        before = {
+            run_id: (DEV_RUNS_ROOT / run_id / "run_manifest.json").read_bytes()
+            for run_id in ("run-001", "run-019", "run-020")
+        }
+        try:
+            completed = subprocess.run(
+                [sys.executable, str(INDEXER), "--runs-root",
+                 str(DEV_RUNS_ROOT), "--through-run", "20", "--output",
+                 str(output)], capture_output=True, text=True, check=False)
+            self.assertEqual(
+                completed.returncode, 0, completed.stdout + completed.stderr)
+            payload = json.loads(output.read_text())
+            self.assertEqual(len(payload["iterations"]), 20)
+            by_id = {row["run_id"]: row for row in payload["iterations"]}
+            self.assertEqual(by_id["run-001"]["classification"],
+                             "CAPTURE_NOT_READY")
+            self.assertEqual(by_id["run-001"]["first_missing_stage"],
+                             "p0_snapshot")
+            self.assertEqual(by_id["run-011"]["classification"],
+                             "FAILED_STAGE")
+            self.assertEqual(by_id["run-011"]["first_missing_stage"],
+                             "p4_selection_application")
+            self.assertEqual(by_id["run-016"]["classification"],
+                             "FAILED_STAGE")
+            self.assertEqual(by_id["run-016"]["first_missing_stage"],
+                             "ego_final_bspline")
+            self.assertEqual(by_id["run-019"]["classification"],
+                             "REJECTED_RUNNER_CLEANUP")
+            self.assertEqual(by_id["run-019"]["first_missing_stage"],
+                             "runner_cleanup")
+            self.assertEqual(by_id["run-020"]["classification"],
+                             "REJECTED_P5_AUTHORITY_BYPASS")
+            self.assertEqual(by_id["run-020"]["first_missing_stage"],
+                             "p5_final_pass_before_publish")
+            repeated = subprocess.run(
+                [sys.executable, str(INDEXER), "--runs-root",
+                 str(DEV_RUNS_ROOT), "--through-run", "20", "--output",
+                 str(output)], capture_output=True, text=True, check=False)
+            self.assertNotEqual(repeated.returncode, 0)
+            self.assertIn("already exists", repeated.stderr)
+            for run_id, content in before.items():
+                self.assertEqual(
+                    (DEV_RUNS_ROOT / run_id / "run_manifest.json").read_bytes(),
+                    content)
+        finally:
+            if output.exists():
+                output.unlink()
+
     def test_iterative_runner_accepts_only_fresh_layer1_run_and_shared_install(self):
         module = self._load_runner()
         DEV_RUNS_ROOT.mkdir(parents=True, exist_ok=True)
@@ -370,6 +473,14 @@ class Icra072VerticalSliceToolsTest(unittest.TestCase):
             self.assertTrue(manifest["commit"])
             self.assertEqual(manifest["stage_observations"], {})
             self.assertFalse(manifest["launch_started"])
+            analysis = json.loads((run_root / "analysis.json").read_text())
+            self.assertEqual(analysis["result"], "FAIL")
+            self.assertEqual(analysis["first_missing_stage"], "p0_snapshot")
+            outcome = json.loads(
+                (run_root / "orchestration_outcome.json").read_text())
+            self.assertEqual(outcome["runner_result"], "GPU_NOT_READY")
+            self.assertEqual(outcome["analyzer_result"], "FAIL")
+            self.assertEqual(outcome["first_missing_stage"], "p0_snapshot")
         finally:
             shutil.rmtree(run_root, ignore_errors=True)
 
@@ -391,6 +502,35 @@ class Icra072VerticalSliceToolsTest(unittest.TestCase):
                 module.validate_cli_paths(existing, SHARED_INSTALL)
         finally:
             existing.rmdir()
+
+    def test_runner_finalizes_capture_spawn_exception(self):
+        module = self._load_runner()
+        DEV_RUNS_ROOT.mkdir(parents=True, exist_ok=True)
+        run_root = DEV_RUNS_ROOT / f"run-{os.getpid()}001"
+        shutil.rmtree(run_root, ignore_errors=True)
+        fake_gate = types.SimpleNamespace(
+            run_gpu_preflight=lambda _root: {"gpu_ready": True})
+        argv = [str(RUNNER), "--run-root", str(run_root.relative_to(REPO)),
+                "--install-root", str(SHARED_INSTALL), "--duration-s", "30"]
+        try:
+            with mock.patch.object(sys, "argv", argv), \
+                    mock.patch.object(module, "_load_gate_runner",
+                                      return_value=fake_gate), \
+                    mock.patch.object(module, "_start_process",
+                                      side_effect=OSError("spawn denied")):
+                self.assertEqual(module.main(), 8)
+            manifest = json.loads((run_root / "run_manifest.json").read_text())
+            self.assertEqual(manifest["result"], "RUNNER_EXCEPTION")
+            self.assertEqual(manifest["runner_exception"]["type"], "OSError")
+            analysis = json.loads((run_root / "analysis.json").read_text())
+            self.assertEqual(analysis["first_missing_stage"], "p0_snapshot")
+            outcome = json.loads(
+                (run_root / "orchestration_outcome.json").read_text())
+            self.assertEqual(outcome["runner_exit_code"], 8)
+            self.assertEqual(outcome["result"], "FAIL")
+            self.assertIn("runner_exception:OSError", outcome["failures"])
+        finally:
+            shutil.rmtree(run_root, ignore_errors=True)
 
     def test_runner_and_publish_path_are_fail_closed(self):
         runner = (REPO / "scripts/dev_planner/run_icra072_vertical_slice.py").read_text()

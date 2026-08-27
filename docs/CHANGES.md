@@ -3,6 +3,22 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(icra-072a-authoritative-p5): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 /
+  IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — remove the unauthorized configurable/LiDAR-only P5
+  current source and restore fixed fused `hpl/vpl/im` authority. Carry exact trajectory ID and integer-nanosecond
+  start through lineage v2, final P5, normal publication capture and runtime P5; remove the analyzer's 20 ms
+  tolerance. Make the runner invoke the analyzer once on every exit path and retain a typed orchestration outcome;
+  post-preflight capture/launch/monitor exceptions are caught, owned children are cleaned up, and the initiating
+  exception type is retained in both the manifest and analyzer failures. Process-health and cleanup failures after
+  a complete seven-stage chain now receive explicit `required_process_health` / `runner_cleanup` first-missing
+  classifications. Add a hash-bound, non-overwriting `run-001`..`run-020` v2 index that preserves earlier pipeline failures before
+  classifying cleanup and authority rejections without modifying original evidence. Its superseded v1 draft is
+  retained and disclosed. `run-021` truthfully fails at fused P5 under degraded GNSS. The smallest
+  development-only input correction reuses the existing open-sky GNSS preset while preserving `max_pl`, AL/P5
+  thresholds and P4 oracle isolation. `run-022` is the first acceptable continuation PASS with all seven stages,
+  positive fused final margins, terminal ID `17` / start `1657065614997223065`, 17 publications and 70 exact
+  runtime observations. ICRA-072B, effect, qualification and campaign remain unauthorized pending Review.
+
 - review(icra-072a-layer1-flow): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 /
   IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — reject Builder HEAD `cd56257` as Layer 1 completion.
   The shared build, iterative tooling, cleanup and structural seven-stage `run-020` chain are materially present,

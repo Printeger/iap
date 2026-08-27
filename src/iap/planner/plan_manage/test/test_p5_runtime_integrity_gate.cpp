@@ -354,9 +354,8 @@ TEST(P5RuntimeIntegrityGateTest, CurrentInvalidIsExplicit) {
 }
 
 TEST(P5RuntimeIntegrityGateTest,
-     ExplicitLidarCertifiedCurrentSourceIsValidAndFailsClosed) {
+     AuthoritativeFusedCurrentRejectsUnsafeDespiteValidFiniteLidar) {
   auto config = baseConfig();
-  config.current_pl_source = "LIDAR_CERTIFIED";
   ego_planner::P5RuntimeIntegrityGate gate(nullptr, config, false);
   auto msg = integrityMsg(0.0, 20.0, 30.0, 10.0, 20.0);
   msg.lidar_valid = true;
@@ -366,17 +365,12 @@ TEST(P5RuntimeIntegrityGateTest,
   auto traj = makeTrajectory();
   auto snapshot = makeSnapshot(1.0, 1.0);
 
-  auto safe = gate.evaluateFinal(traj, snapshot, 0.0, 1.0);
-  EXPECT_EQ(safe.action, ego_planner::P5GateAction::OK);
-  EXPECT_DOUBLE_EQ(safe.current_im_h, 8.0);
-  EXPECT_DOUBLE_EQ(safe.current_im_v, 17.0);
-
-  msg.lidar_valid = false;
-  gate.setCurrentIntegrityForTest(msg);
-  auto invalid = gate.evaluateFinal(traj, snapshot, 0.0, 1.0);
-  EXPECT_EQ(invalid.action,
+  auto rejected = gate.evaluateFinal(traj, snapshot, 0.0, 1.0);
+  EXPECT_EQ(rejected.action,
             ego_planner::P5GateAction::REQUEST_REPLAN);
-  EXPECT_EQ(invalid.reason, ego_planner::P5GateReason::CURRENT_INVALID);
+  EXPECT_EQ(rejected.reason, ego_planner::P5GateReason::CURRENT_LOW_MARGIN);
+  EXPECT_DOUBLE_EQ(rejected.current_im_h, -10.0);
+  EXPECT_DOUBLE_EQ(rejected.current_im_v, -10.0);
 }
 
 TEST(P5RuntimeIntegrityGateTest,
@@ -857,6 +851,8 @@ TEST(P5RuntimeIntegrityGateTest, FutureSamplesCarryTrajectoryTiming) {
   ASSERT_GE(status.viz_samples.size(), 5u);
   EXPECT_NEAR(status.viz_samples.front().trajectory_start_time_s, 0.0,
               1.0e-9);
+  EXPECT_EQ(status.viz_samples.front().trajectory_id, 1);
+  EXPECT_EQ(status.viz_samples.front().trajectory_start_time_ns, 0);
   EXPECT_NEAR(status.viz_samples.front().trajectory_duration_s, 3.0,
               1.0e-9);
   EXPECT_NEAR(status.viz_samples.front().trajectory_t_cur_s, 0.0,
@@ -875,6 +871,35 @@ TEST(P5RuntimeIntegrityGateTest, FutureSamplesCarryTrajectoryTiming) {
   ASSERT_FALSE(final_status.viz_samples.empty());
   EXPECT_EQ(final_status.viz_samples.front().trajectory_sample_source,
             "final_candidate");
+}
+
+TEST(P5RuntimeIntegrityGateTest,
+     RuntimeAndFinalCarryExactTrajectoryIdAndNanosecondStart) {
+  auto config = baseConfig();
+  config.current_stale_to_replan_s = 1.0e12;
+  config.current_stale_to_emergency_s = 1.0e12;
+  ego_planner::P5RuntimeIntegrityGate gate(nullptr, config, false);
+  auto report = integrityMsg(0.0, 1.0, 1.0, 10.0, 10.0);
+  report.header.stamp.sec = 0;
+  report.header.stamp.nanosec = 14278400;
+  gate.setCurrentIntegrityForTest(report);
+  auto traj = makeTrajectory();
+  traj.traj_id_ = 42;
+  traj.start_time_ = rclcpp::Time(
+      0, 14278400, RCL_SYSTEM_TIME);
+  constexpr int64_t kStartNs = 14278400LL;
+  const double now_s = traj.start_time_.seconds() + 0.1;
+
+  const auto runtime = gate.evaluateRuntime(
+      traj, makeSnapshot(1.0, 1.0), now_s, 1.0);
+  ASSERT_FALSE(runtime.viz_samples.empty());
+  EXPECT_EQ(runtime.viz_samples.front().trajectory_id, 42);
+  EXPECT_EQ(runtime.viz_samples.front().trajectory_start_time_ns, kStartNs);
+
+  const auto final = gate.evaluateFinal(
+      traj, makeSnapshot(1.0, 1.0), now_s, 1.0);
+  EXPECT_EQ(final.final_candidate_traj_id, 42);
+  EXPECT_EQ(final.final_candidate_start_time_ns, kStartNs);
 }
 
 TEST(P5RuntimeIntegrityGateTest,
@@ -1037,6 +1062,9 @@ TEST(P5RuntimeIntegrityGateTest, PublishedStatusJsonIncludesSampleDiagnostics) {
   EXPECT_NE(payload.find("\"tau_s\":"), std::string::npos);
   EXPECT_NE(payload.find("\"query_tau_s\":"), std::string::npos);
   EXPECT_NE(payload.find("\"trajectory_start_time_s\":"), std::string::npos);
+  EXPECT_NE(payload.find("\"trajectory_id\":1"), std::string::npos);
+  EXPECT_NE(payload.find("\"trajectory_start_time_ns\":0"),
+            std::string::npos);
   EXPECT_NE(payload.find("\"trajectory_duration_s\":"), std::string::npos);
   EXPECT_NE(payload.find("\"trajectory_t_cur_s\":"), std::string::npos);
   EXPECT_NE(payload.find("\"trajectory_t_end_s\":"), std::string::npos);
@@ -1053,6 +1081,10 @@ TEST(P5RuntimeIntegrityGateTest, PublishedStatusJsonIncludesSampleDiagnostics) {
   EXPECT_NE(payload.find("\"final_candidate_traj_id\":"),
             std::string::npos);
   EXPECT_NE(payload.find("\"final_candidate_start_time_s\":"),
+            std::string::npos);
+  EXPECT_NE(payload.find("\"final_candidate_start_time_ns\":"),
+            std::string::npos);
+  EXPECT_NE(payload.find("\"current_integrity_source\":\"FUSED\""),
             std::string::npos);
   EXPECT_NE(payload.find("\"final_candidate_duration_s\":"),
             std::string::npos);

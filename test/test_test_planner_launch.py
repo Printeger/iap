@@ -286,14 +286,16 @@ class TestPlannerLaunchTest(unittest.TestCase):
         self.assertEqual(fixture["enable_lidar_integrity"], "true")
         self.assertEqual(fixture["lidar_sensing_rate_hz"], "2.0")
         self.assertEqual(fixture["gnss_scenario_file"],
-                         "config/gnss_sim/demo7_skymask_nlos.yaml")
-        self.assertEqual(fixture["gnss_pr_noise_base"], "5.0")
-        self.assertEqual(fixture["gnss_dop_noise_base"], "0.5")
-        self.assertEqual(fixture["gnss_enable_nlos"], "true")
+                         "config/gnss_sim/demo7_open_sky.yaml")
+        self.assertEqual(fixture["gnss_pr_noise_base"], "1.0")
+        self.assertEqual(fixture["gnss_dop_noise_base"], "0.03")
+        self.assertEqual(fixture["gnss_enable_map_occlusion"], "false")
+        self.assertEqual(fixture["gnss_enable_skymask"], "false")
+        self.assertEqual(fixture["gnss_enable_nlos"], "false")
+        self.assertEqual(fixture["gnss_enable_multipath"], "false")
         self.assertEqual(fixture["p0.predictor.use_current_integrity_prior"],
                          "true")
-        self.assertEqual(fixture["p5.current_pl_source"],
-                         "LIDAR_CERTIFIED")
+        self.assertNotIn("p5.current_pl_source", fixture)
         self.assertEqual(fixture["fsm.thresh_replan_time"], "0.2")
         self.assertEqual(fixture["manager/max_vel"], "1.0")
         self.assertEqual(fixture["optimization/max_vel"], "1.0")
@@ -301,7 +303,7 @@ class TestPlannerLaunchTest(unittest.TestCase):
         self.assertNotIn("inverse_corridor", fixture_name)
         profile = MODULE.EXPERIMENT_PRESETS["icra_p0_p4_v2_p5_dev"]
         defaults = dict(MODULE.ARG_DEFAULTS)
-        self.assertEqual(defaults["p5.current_pl_source"], "FUSED")
+        self.assertNotIn("p5.current_pl_source", defaults)
         self.assertEqual(profile["scenario"], fixture_name)
         self.assertEqual(
             profile["p0.predictor.sigma_grow_m_sqrt_s"], "0.01")

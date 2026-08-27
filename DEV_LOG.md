@@ -8613,3 +8613,66 @@ lineage, 17 P5-final OK records, 17 normal B-spline publications and 70
 committed-runtime observations. This is development-only Layer 1 evidence and
 makes no effect, threshold, qualification or campaign claim. ICRA-072B is not
 self-authorized and awaits Supervisor review.
+
+## 2026-08-27 — ICRA-072A authoritative fused P5 and exact runtime identity repair
+
+Requirements: IAP-RQ-320, IAP-RQ-321, IAP-RQ-400, IAP-RQ-410,
+IAP-RQ-421, IAP-RQ-422, IAP-RQ-423 and IAP-RQ-424.
+
+Closed the three Supervisor blockers without modifying `run-001` through
+`run-020`. P5 now has one fixed current-integrity contract: fused report
+`hpl/vpl/im`; the configurable `current_pl_source` and development LiDAR-only
+override are removed. A production-FSM regression supplies unsafe fused PL
+alongside finite safe LiDAR PL and proves P5 rejects with zero corresponding
+normal publication. Final lineage schema v2, P5 final/runtime JSON and B-spline
+capture carry exact trajectory ID and integer-nanosecond start time; the
+analyzer requires equality of both and has no time tolerance.
+
+Runner completion now automatically invokes the analyzer once for GPU,
+capture, process/cleanup and normal paths, then writes one typed
+`orchestration_outcome.json`. The non-overwriting retained-history index
+`iteration_index_run-001_through_run-020_v2.json` has SHA-256
+`15838959c6eff6b5f8343be8e91d3118844853ad2284c5da64e3e13318f78141`.
+It binds original manifest/analysis/launch hashes, preserves every earlier
+pipeline first-missing stage, and classifies `run-001` as
+capture-not-ready, `run-019` as runner-cleanup rejection and `run-020` as
+P5-authority bypass, without changing any original run byte.
+The first generated index draft, SHA-256
+`acc70484694a93ff4ee9a85e3992336e4bfd29e8e1b6626acdbe0fc6c93ea435`,
+is retained unchanged and superseded because it gave cleanup/source rejection
+precedence over the earlier pipeline absence in several failed runs.
+
+Shared `build_iap_dev.sh` completed all six packages after each incremental
+change. Final focused suites pass manager/FSM 29/29, P5 runtime 35/35,
+ICRA-072 tools 11/11 and hermetic launch 24/24 with unchanged 17,808-entry
+external ROS-log inventory. `run-021` runner/process/cleanup passed but its
+automatic analyzer failed first at P5 final: degraded GNSS made authoritative
+fused margins negative (observed H `-17.8264 m`, V `-49.1645 m`) while P4
+still naturally selected 502 guides. It is retained unchanged.
+
+The smallest allowed development input correction reused the existing
+open-sky GNSS preset for the separately named fixture. It preserved `max_pl`
+fusion authority, HAL/VAL, every P5 threshold, production occupancy/P0 inputs
+and P4 oracle isolation. Fresh `run-022` is runner/analyzer PASS with GPU,
+required-process and owned-group cleanup PASS. Analyzer has no failures, all
+seven stages true, P0 ready 55, 32 P4 decisions, 20 both-complete decisions,
+8 natural selections, lineage 3, P5 final OK 17, normal publication 17 and
+runtime binding 70. The accepted terminal record binds trajectory ID `17`,
+start `1657065614997223065 ns` and final identity `30a3cd7b707ca45f` across
+lineage, fused P5 final (`IM_H=4.95165 m`, `IM_V=5.80508 m`), publication and
+runtime. The live loop stopped immediately; no effect, ICRA-073, benchmark,
+qualification or campaign work ran. ICRA-072B remains Supervisor-controlled.
+
+Final independent review found two orchestration-only fail-closed gaps before
+push. The analyzer now classifies a content-complete attempt with unhealthy
+required processes as `required_process_health` and failed runner cleanup as
+`runner_cleanup`. The runner catches every post-GPU capture, launch and monitor
+exception, attempts owned-process cleanup, preserves the exception type and
+cleanup errors, and still emits analyzer invocation plus typed orchestration
+outcome. Focused regressions cover completed-chain cleanup failure and capture
+spawn failure. The final shared build is 6/6; repository-local reruns pass
+manager/FSM 29/29, P5 runtime 35/35, tools 11/11 and hermetic launch 24/24,
+with the external ROS-log inventory unchanged at 17,808 entries. An initial
+direct C++ invocation omitted `ROS_LOG_DIR`, causing three fixture-path
+failures; its six generated CSV files were removed and the correctly isolated
+rerun passed. No additional live attempt was needed or run.
