@@ -667,6 +667,22 @@ ICRA-072B as BLOCKED/NOT PASS and accepts its source-admission/stabilization deb
 implements frozen PRIMARY/EXACT_MIRROR/FLAT_NULL paired diagnostics and an independent committed-final oracle.
 Runtime safety, no-tuning, retention, Layer 4 formal controls and the campaign barrier remain mandatory.
 
+ICRA-073 frozen fixture Builder blocker (2026-08-27): the versioned descriptor tool canonically binds all three
+variants, exact frozen centre lines/tubes/guards/cuboid/mask, symmetric LiDAR/outer-tree primitives, provider
+truth, shared UAV/inflation identity, seed and data-plane exclusions. Focused RED/GREEN tests pass 3/3. The
+fail-closed analytic preflight nevertheless proves a frozen-contract conflict: minimum Euclidean clearance from
+the risky curve to the central cuboid is `1.275072535 m`, while the 0.75 m tube + 0.50 m guard + 0.099 m current
+occupancy inflation require `1.349 m`. The freeze explicitly forbids moving the cuboid, shrinking inflation or
+changing tube/guard geometry. Local central-cuboid tube clearance does not prove complete-scene reachability
+including outer trees; overall route reachability is explicitly not evaluated after the earlier guard failure.
+The proven blocker is specifically the guard invariant. Status is
+`BLOCKED_ICRA073_FROZEN_GUARD_INFLATION_CONFLICT`; oracle/runner/live
+work stops before GPU/ROS, later topology/provider/mirror/null/isolation gates remain explicitly not evaluated,
+and no effect/qualification/campaign claim exists. The evidence CLI must bind actual/pushed source and retained
+untracked bytes before writing. ICRA-072B remains bypassed BLOCKED, not PASS.
+The pre-fix rejected RED artifact `results/icra27/icra073/forged-source-1338727.json` is retained by exact
+size/hash and must not be interpreted as source-bound evidence.
+
 ICRA-072A Layer 1 Supervisor PASS (2026-08-27): reviewed Builder HEAD `ac7f923`; Standards and Spec axes pass.
 Shared build is 6/6 and independent Supervisor reruns pass tools 17/17, hermetic launch 24/24 and focused C++
 64/64. Fresh `run-024` binds pushed implementation `b7b5357` at initial/pre-ROS/final checks, passes GPU, 15/15

@@ -3,6 +3,24 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(icra-073-frozen-fixture-preflight): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 /
+  IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — add a deterministic public descriptor/preflight tool for
+  frozen PRIMARY, geometric EXACT_MIRROR and finite-identical FLAT_NULL. Canonical hashes bind exact endpoints,
+  analytic centre lines, 0.75 m tubes, 0.50 m guards, central cuboid, GNSS-only overhead-mask truth, symmetric
+  LiDAR landmarks, outer trees, shared UAV/inflation identity, seed and forbidden data planes. Its source gate
+  binds requested/actual/origin HEAD, zero divergence, tracked cleanliness and exact retained-untracked bytes
+  before any evidence write. RED→GREEN tests pass 3/3; the preflight passes descriptor/endpoint/straight-collision
+  gates and then surfaces the fail-closed geometry conflict: the risky
+  analytic curve is only `1.275072535 m` from the cuboid, less than the `1.349 m` protected radius plus current
+  occupancy inflation. The local cuboid tube bound is insufficient to prove complete-scene reachability, so that
+  gate and all later topology/provider/mirror/null/isolation checks remain explicitly not evaluated.
+  Because the freeze prohibits moving the obstacle, shrinking inflation or changing the
+  tube/guard,
+  ICRA-073 is `BLOCKED_ICRA073_FROZEN_GUARD_INFLATION_CONFLICT`. No oracle/paired runner, shared
+  build, GPU, ROS/live diagnostic, tuning, effect, qualification or campaign work followed; ICRA-072B remains
+  BLOCKED/user-bypassed, never PASS. Retain and disclose the pre-fix rejected RED forged-source artifact by exact
+  path/size/hash; it is not accepted source-bound evidence.
+
 - review(user-bypass-icra072b-issue-icra073): IAP-RQ-000 / IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 /
   IAP-RQ-410 / IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — Standards PASS and Spec BLOCKED for Builder
   `a30468e`: prototype reverted and the hidden third source-tree backup truthfully prevents canonical PASS. User

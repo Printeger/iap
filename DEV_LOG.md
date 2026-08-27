@@ -8999,3 +8999,62 @@ scope. The prototype runner/tests were reverted to starting-HEAD bytes. The
 17/17 offline tools result remains a diagnostic only; no canonical output/log
 path was created and `repair-001` was not invoked. Terminal Builder status is
 `BLOCKED_ICRA072B_HIDDEN_THIRD_UNTRACKED_SOURCE` pending Supervisor review.
+
+## 2026-08-27 — ICRA-073 inverse-corridor frozen preflight
+
+Requirements: IAP-RQ-320, IAP-RQ-321, IAP-RQ-400, IAP-RQ-410,
+IAP-RQ-421, IAP-RQ-422, IAP-RQ-423 and IAP-RQ-424.
+
+Starting pushed HEAD `347c9111f1f6618b678a0c62942b561ac94e7814` was
+fetch-confirmed at divergence `0 0`; ambient status contained only the protected
+PDF. User decision 003 keeps ICRA-072B as BLOCKED/user-accepted bypass/NOT PASS
+and authorizes only ICRA-073 Layer 3 diagnostics.
+
+The first RED failed because the public fixture descriptor tool did not exist.
+The minimal GREEN adds canonical PRIMARY, geometric `y -> -y` EXACT_MIRROR and
+finite-identical FLAT_NULL descriptors. Hash input binds exact start/goal,
+analytic curves, 0.75 m tubes, 0.50 m guard bands, central cuboid, GNSS-only
+overhead mask truth, symmetric LiDAR landmarks, outer trees, UAV radius 0.35 m,
+shared occupancy inflation 0.099 m, optimizer clearance identity, seed,
+provider truth and decision/oracle forbidden inputs.
+
+The next RED requested the fail-closed frozen preflight. Implementation passes
+descriptor hashes, endpoints/non-straight curves and straight-seed collision
+with free entry/exit, then truthfully fails curved tube/guard occupancy
+clearance at the guard boundary:
+
+- independent 2,000,001-position calculation: minimum risky curve→cuboid
+  distance `1.275072535146 m` at approximately `u=0.412723`;
+- required protected distance: `0.75 + 0.50 + 0.099 = 1.349 m`;
+- inflated-guard deficit: `0.073927464854 m` (raw guard margin only
+  `0.025072535146 m`).
+
+The risky curve clears the central cuboid's local
+`0.75 + 0.099 = 0.849 m` tube-plus-inflation bound, but that does not prove
+reachability through the complete occupancy scene including outer trees.
+Therefore overall curved-route reachability is explicitly
+`NOT_EVALUATED_BLOCKED_BY_GEOMETRY`, not PASS or FAIL.
+
+The frozen design forbids moving the obstacle, shrinking inflation or changing
+tube/guard geometry. Therefore the test contract was corrected to retain this
+typed fail-closed truth rather than encode a false PASS. All later polyline,
+LiDAR, tree/topology, provider, mirror/null and decision/oracle-isolation checks
+are explicitly `NOT_EVALUATED_BLOCKED_BY_GEOMETRY`; no downstream claim is
+made. The CLI source gate independently binds requested/actual/origin HEAD,
+zero divergence, tracked-clean status and the exact retained-untracked
+inventory before it may write evidence. `python3 -m py_compile` and focused
+tests pass 3/3. No shared build was needed because only Python
+fixture/preflight bytes changed. No GPU preflight, ROS/main flow, oracle,
+paired diagnostic, tuning, effect, qualification or campaign action ran.
+
+The initial RED forged-source regression exposed the pre-fix behavior by
+creating `results/icra27/icra073/forged-source-1338727.json` (5600 bytes,
+SHA-256 `3a22a352eb9329f660384e901e42bfd3bce11ab74ff3718c7d1a0c35c87ac8dc`).
+It is retained without rewrite as `REJECTED_PRE_FIX_RED_EVIDENCE_RETAINED`,
+not accepted source-bound evidence, and is part of the later canonical
+preflight's exact retained-untracked inventory.
+
+Pending the mandatory implementation commit/push and repository-local static
+preflight record, terminal Builder status is
+`BLOCKED_ICRA073_FROZEN_GUARD_INFLATION_CONFLICT`. All ICRA-072 evidence,
+shared roots, hidden user files and protected PDF remain untouched.

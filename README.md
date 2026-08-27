@@ -109,8 +109,29 @@ fresh non-overwriting identity；只有 exact-admission 修复先提交、推送
 
 当前 repair 因 ignore-blind 审计发现第三个被仓库 `*~` 规则隐藏的未跟踪 source-tree 文件
 `src/uav_simulator/local_sensing/CMakeModules/FindEigen.cmake~` 而 BLOCKED。任务既不允许通过 ignore 或
-broader allowlist 隐藏它，也未授权修改该文件；因此 runner 尚未切换到双 artifact admission，且在
-Supervisor 重新裁定前禁止执行上述 canonical 命令。
+broader allowlist 隐藏它，也未授权修改该文件；因此 runner 尚未切换到双 artifact admission。
+用户决定 `USER-ICRA-ROUTE-20260827-003` 接受该 blocker 并绕过到 ICRA-073，但没有把 ICRA-072B
+改写为 PASS，也没有重新授权上述 canonical 命令。
+
+### 1.2.3 ICRA-073 inverse-corridor 静态 fixture preflight
+
+ICRA-073 必须在任何 GPU/ROS/main-flow diagnostic 前运行冻结 fixture 的 repository-local 静态
+preflight。命令必须绑定已推送且与 `origin/dev/icra` 一致的 tracked HEAD，输出路径不得覆盖：
+
+```bash
+cd /home/dev/ws_iap/src/iap
+
+python3 scripts/dev_planner/icra073_inverse_corridor_fixture.py \
+  --preflight-all \
+  --source-head "$(git rev-parse HEAD)" \
+  --output results/icra27/icra073/preflight-001.json
+```
+
+冻结 PRIMARY/EXACT_MIRROR/FLAT_NULL descriptor 和 hash 可分别用 `--variant` 只读输出。当前冻结中央
+cuboid 与 risky analytic curve 的最小欧氏间距为约 `1.275072535 m`，小于 guard `1.25 m` 加 shared
+occupancy inflation `0.099 m` 所需的 `1.349 m`；preflight 因此应以 exit 2 和 typed fixture failure
+停止。不得移动障碍、缩小 inflation、改变 tube/guard，且在 authority 修订前不得执行 GPU/ROS/live
+paired diagnostics。
 
 ### 1.3 运行一个最小检查
 

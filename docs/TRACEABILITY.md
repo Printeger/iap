@@ -1,5 +1,15 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-27 ICRA-073 frozen fixture preflight blocker
+
+| Req ID | Implemented/tested seam | Evidence and disposition | Status |
+|---|---|---|---|
+| IAP-RQ-423 / IAP-RQ-424 | Versioned three-variant descriptor | `icra073_inverse_corridor_fixture.py` canonically hashes exact frozen geometry, provider truth, symmetric LiDAR/outer-tree primitives, seed, shared radius/inflation identity and oracle/decision forbidden inputs; PRIMARY/MIRROR/NULL descriptor tests pass | **RED→GREEN / DESCRIPTOR PASS** |
+| IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-423 | Occupancy preflight | Hash/endpoint/straight-collision gates pass. Minimum Euclidean risky-centre-line→cuboid clearance is `1.275072535 m`; required tube+guard+inflation clearance is `0.75+0.50+0.099=1.349 m`, deficit `0.073927465 m`. Complete-scene reachability (including outer trees) and all later polyline/LiDAR/tree/provider/mirror/null/isolation gates are explicitly not evaluated | **FAIL-CLOSED / FROZEN GUARD INVARIANT CONFLICT** |
+| IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-424 | Pre-live stop | Focused tests 3/3 and py_compile pass; source binding is fail-closed before evidence write. Freeze forbids geometry/inflation/tube repair, so no shared build, GPU preflight, ROS/main flow, oracle, paired run or effect diagnostic executed | **BLOCKED_ICRA073_FROZEN_GUARD_INFLATION_CONFLICT** |
+| IAP-RQ-423 / IAP-RQ-424 | Route/claim boundary | ICRA-072B remains BLOCKED/user-accepted bypass/NOT PASS; ICRA-073 emits no effect, qualification or campaign claim | **PRESERVED** |
+| IAP-RQ-423 / IAP-RQ-424 | Retained RED attempt | `results/icra27/icra073/forged-source-1338727.json`, 5600 bytes, SHA-256 `3a22a352eb9329f660384e901e42bfd3bce11ab74ff3718c7d1a0c35c87ac8dc`; pre-fix forged source, retained without rewrite and inventory-bound by the later canonical record | **REJECTED RED / NOT ACCEPTED EVIDENCE** |
+
 ## 2026-08-27 user-directed ICRA-072B bypass and ICRA-073 activation
 
 | Req ID | Decision/review seam | Evidence and disposition | Status |
