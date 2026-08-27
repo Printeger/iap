@@ -1,14 +1,20 @@
 # ICRA 2027 P0 -> P4-v2 -> P5 科学纠偏实施计划
 
+## ICRA-073 Review stop — 2026-08-27
+
+当前 `active_role=SUPERVISOR`、`next_task=NONE`。冻结 risky corridor 的 cuboid raw clearance 为
+`1.275072583 m`，小于 tube+guard+inflation 要求 `1.349 m`；preflight 另有 hidden-untracked admission
+fail-open 与 variant output 可越界覆盖问题。ICRA-073 未进入 oracle、paired runner、shared build 或 live。
+下一实现计划必须由用户明确选择修订/修复并继续 073，或接受缺失诊断并 bypass 到 ICRA-074。
+
 ## Current Layer 3 disposition — 2026-08-27
 
 ICRA-072A Layer 1 已通过 Supervisor Review。source-bound `run-024` 在共享 6-package build 上完成同一
 committed trajectory identity 的 P0 -> P4 selection -> EGO final -> authoritative fused P5 final -> publish ->
 P5 runtime；精确 source admission、GPU/process fail-closed、first-missing-stage 和 owned cleanup 均通过。
 ICRA-072B 因 hidden untracked source admission 保持 BLOCKED/NOT PASS。用户决定
-`USER-ICRA-ROUTE-20260827-003` 明确接受该工程债并要求立即进入 ICRA-073。当前唯一授权任务是实现冻结
-PRIMARY/EXACT_MIRROR/FLAT_NULL fixture、paired P0+P5/P0+P4-v2+P5 runner 与 independent committed-final
-oracle，运行 development effect diagnostics，且不得边测边调、声称科学 PASS 或进入 Layer 4/campaign。
+`USER-ICRA-ROUTE-20260827-003` 接受该工程债并启动了 ICRA-073；当前 Review 已因冻结 geometry 和
+preflight guard 缺陷将其置为 BLOCKED/NOT PASS。没有唯一授权 Builder task，等待用户新决定。
 
 ## Four-layer implementation workflow — 2026-08-26
 
@@ -17,9 +23,9 @@ oracle，运行 development effect diagnostics，且不得边测边调、声称�
 `docs/icra27/ICRA_FOUR_LAYER_DEVELOPMENT_WORKFLOW.md`；route-lock sentinel 与 ICRA-072..080 gate sequence
 不变。
 
-Layer 1 / ICRA-072A 已由 `run-024` 完成；Layer 2 / ICRA-072B debt 保留。当前执行 Layer 3 / ICRA-073，
-共享 `/home/dev/ws_iap/{build,install,log}` 和既有失败 evidence 保留不动。ICRA-073 Review 后才可签发
-ICRA-074 targeted optimization；formal verification 仍从 ICRA-076 开始。
+Layer 1 / ICRA-072A 已由 `run-024` 完成；Layer 2 / ICRA-072B debt 保留。Layer 3 / ICRA-073 当前 blocked，
+共享 `/home/dev/ws_iap/{build,install,log}` 和既有失败 evidence 保留不动。只有用户明确选择 bypass 后才
+可签发 ICRA-074；formal verification 仍从 ICRA-076 开始。
 
 `6a6bdd3` 的 `-003` 以 BLOCKED 实况封存。历史 build/install 可再生树按已推送清单删除；raw、compact、
 registered live、普通日志、科学证据和 PDF 不删除。精确开发命令集中在 README，其他权威文档只链接，

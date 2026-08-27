@@ -3,6 +3,10 @@
 > Purpose: 把 talk《Integrity-Aware Active Perception》的“优化版 pipeline”拆成可实现、可验收、可追溯的工程需求。
 > Scope: 仅修改本仓库 src/iap；禁止修改 ../glim（可参考其代码但不得提交改动）。
 
+> Current ICRA disposition (2026-08-27): ICRA-073 is `BLOCKED / NOT PASS`. Frozen risky cuboid clearance is
+> `1.275072583 m` versus `1.349 m` required tube+guard+inflation; source/output guards also need repair and no
+> oracle/paired/live diagnostic was reached. `active_role=SUPERVISOR`, `next_task=NONE` pending user decision.
+
 ## 0. 术语与约定（强制一致）
 - Estimator: 滑窗/因子图估计器（紧耦合 GNSS+IMU+LiDAR），基于现有 GLIM 框架演进
 - Integrity: 完整性监测输出 PL/AL/IM，安全条件 **PL < AL**

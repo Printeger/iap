@@ -3,13 +3,13 @@
 ```yaml
 schema_version: icra_single_branch_two_agent_v3_user_route_owner
 branch: dev/icra
-active_role: DEEPSEEK
-status: TASK_READY
+active_role: SUPERVISOR
+status: BLOCKED_AWAITING_USER_RESEARCH_DECISION
 gate: ICRA-073_EFFECT_DIAGNOSTICS
-task_id: ICRA-073
+task_id: NONE
 milestone: ICRA-073_LAYER3_INVERSE_CORRIDOR_EFFECT_DIAGNOSTICS
-review_base: 8f360a4fbb0ad34a9c65dfaf38ff2752b3488f9c
-reviewed_head: a30468e4ca991dacfe24a10c45040c51efd74ce7
+review_base: 347c9111f1f6618b678a0c62942b561ac94e7814
+reviewed_head: 4f5bb302920f869e45a8ac240f192a81f28162c7
 mandated_lineage_review_base: 3b5199e0cf8efc904f124cdb73156a3209eb6d80
 icra071_repair_review_base: 6e0e7328835064ecb665bc6476a6254924ff371d
 conference_route: P0_P4_V2_P5
@@ -18,43 +18,45 @@ route_lock: docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md
 user_decision_id: USER-ICRA-ROUTE-20260827-003
 user_approval_anchor: a30468e4ca991dacfe24a10c45040c51efd74ce7
 workflow_decision_id: USER-ICRA-WORKFLOW-20260826-001
-route_status: USER_ACCEPTED_ICRA072B_BLOCKED_BYPASS_ICRA073_TASK_READY
+route_status: ICRA073_FROZEN_GUARD_INFLATION_CONFLICT_AWAITING_USER_DECISION
 historical_gate0a_verdict: NO_GO_P2
 p0_gate0b_status: PASS
 p0_gate0b_worker_count: 4
 p4_v1_status: G0A_PASS_G0B_PASS_G0C_SCIENTIFIC_NO_GO_IMMUTABLE
-p4_v2_status: DEVELOPMENT_LAYER1_SOURCE_BOUND_PASS_LAYER2_BLOCKED_USER_ACCEPTED_BYPASS_LAYER3_ACTIVE_SCIENTIFICALLY_NOT_STARTED_BLOCKED
+p4_v2_status: DEVELOPMENT_LAYER1_SOURCE_BOUND_PASS_LAYER2_BLOCKED_USER_ACCEPTED_BYPASS_LAYER3_SCIENTIFICALLY_NOT_STARTED_BLOCKED_FROZEN_FIXTURE_CONFLICT
 p5_status: IMPLEMENTED_BUT_NO_CURRENT_PROSPECTIVE_QUALIFICATION_PASS
 icra070_status: SUPERSEDED_UNQUALIFIED_BY_USER_ROUTE_DECISION
 icra071_status: REQUEST_CHANGES_DEFERRED_NONBLOCKING_BY_USER_DECISION_002
 icra072a_status: PASS_SOURCE_BOUND_COMPLETE_LIVE_IDENTITY
 icra072b_status: BLOCKED_HIDDEN_UNTRACKED_SOURCE_USER_ACCEPTED_BYPASS_NOT_PASS
-supervisor_verdict: ICRA072B_BLOCKED_USER_ACCEPTED_BYPASS_TO_ICRA073
-review_disposition: ICRA073_EFFECT_DIAGNOSTICS_AUTHORIZED_BY_USER_DECISION_003
+icra073_status: BLOCKED_FROZEN_GUARD_INFLATION_CONFLICT_NOT_PASS
+supervisor_verdict: ICRA073_REQUEST_CHANGES_BLOCKED_GEOMETRY_AND_PREFLIGHT_GUARDS
+review_disposition: AWAITING_USER_DECISION_REVISE_FIXTURE_OR_BYPASS_TO_ICRA074
 qualification_claim: false
 campaign_status: BLOCKED_UNTIL_ICRA079_REVIEW_PASS_AND_DISTINCT_USER_APPROVAL
-handoff_status: TASK_READY
-next_task: NEXT_TASK.md
-next_after_icra073_pass: ICRA-074_TARGETED_OPTIMIZATION
+handoff_status: BLOCKED_AWAITING_USER_RESEARCH_DECISION
+next_task: NONE
+next_after_user_decision: PENDING_USER_DECISION
 recovery_roadmap: docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md
 four_layer_workflow: docs/icra27/ICRA_FOUR_LAYER_DEVELOPMENT_WORKFLOW.md
 guard_plan: docs/icra27/ICRA_CROSS_LAYER_GUARD_PLAN.md
 artifact_retention: ALL_ICRA072_EVIDENCE_SHARED_ROOTS_HIDDEN_USER_ARTIFACTS_AND_PROTECTED_PDF_RETAINED
-window_disposition: ROTATE_RECOMMENDED
-rotation_reason: USER_DECISION_003_GATE_CHANGE_ICRA072B_TO_ICRA073
-window_handoff_anchor: 0ac9482c17faa90bea0b8d66ba952b7c076c8d7b
+window_disposition: PENDING_POST_PUSH_AUDIT
+rotation_reason: PENDING_POST_PUSH_AUDIT
+window_handoff_anchor: PENDING_REVIEW_PUSH
 window_next_role: SUPERVISOR
 window_next_review_task: ICRA-073
 window_bootstrap_source: REPOSITORY_AUTHORITY_ONLY
-updated_utc: 2026-08-27T09:10:00Z
+updated_utc: 2026-08-27T10:05:02Z
 ```
 
-Builder HEAD `a30468e4ca991dacfe24a10c45040c51efd74ce7` correctly stops ICRA-072B fail closed after ignore-blind
-discovery of a third untracked source-tree backup file. Standards PASS; Spec remains BLOCKED because no exact
-admission implementation or canonical PASS exists. ICRA-072B is not PASS and its stabilization/source-admission
-debt remains retained.
+Builder HEAD `4f5bb302920f869e45a8ac240f192a81f28162c7` correctly stops ICRA-073 fail closed before live work. The
+frozen risky centre line has only `1.275072583 m` raw clearance to the central cuboid, while the frozen tube plus
+guard and current occupancy inflation require `1.349 m`; the `0.073927417 m` deficit makes the frozen contract
+internally unsatisfiable. Review also finds fail-open full ignored-file admission and unrestricted overwriting
+variant output. Descriptor tests pass, but reachability, oracle isolation, paired control/treatment diagnostics
+and runtime identity were not reached. ICRA-073 is REQUEST_CHANGES/BLOCKED/NOT PASS.
 
-The user, as route owner, explicitly directs progression regardless of that blocker. Decision
-`USER-ICRA-ROUTE-20260827-003` therefore marks ICRA-072B `BLOCKED / USER-ACCEPTED BYPASS` and activates only
-ICRA-073 Layer 3 effect diagnostics. This waiver does not relax runtime safety, oracle isolation, retention or
-Layer 4 formal controls and cannot support an effect, qualification or campaign claim.
+No Builder task is active. The user must explicitly choose either a bounded revision of the frozen fixture and
+continuation of ICRA-073, or acceptance of the missing diagnostic basis and bypass to ICRA-074. Decision 003
+remains the latest route decision and does not pre-authorize either choice.

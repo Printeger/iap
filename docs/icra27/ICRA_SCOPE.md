@@ -1,5 +1,12 @@
 # ICRA 2027 Conference Scope — User-owned P0 -> P4-v2 -> P5 recovery
 
+## ICRA-073 Review blocker — 2026-08-27
+
+ICRA-073 is `BLOCKED / NOT PASS`: the frozen risky centre line provides `1.275072583 m` cuboid clearance while
+tube+guard+current inflation requires `1.349 m`. The preflight tool also has fail-open hidden-untracked admission
+and an unrestricted overwriting `--variant --output` path. No paired effect diagnostic exists. Scope remains
+`P0_P4_V2_P5`; no Builder task or ICRA-074 is authorized pending a distinct user decision.
+
 ## Four-layer workflow — 2026-08-26
 
 User workflow decision `USER-ICRA-WORKFLOW-20260826-001`, applied at Builder handoff
@@ -33,7 +40,7 @@ same task, then diagnose effect size and optimize. ICRA-071 repair is retained a
 and makes no effect, qualification or campaign claim. GPU preflight, required-process health, occupancy/EGO/P5
 authority, fail-closed behavior and retained-artifact protection remain mandatory.
 
-## Frozen inverse-corridor diagnostic design — ICRA-073 active
+## Frozen inverse-corridor diagnostic design — ICRA-073 blocked pending user decision
 
 `docs/icra27/dev/ICRA_P4_V2_INVERSE_CORRIDOR_FIXTURE.md` freezes
 `ICRA_P4_V2_INVERSE_CORRIDOR_FIXTURE_V1`: PRIMARY, EXACT_MIRROR and FLAT_NULL construct two non-straight,
@@ -41,11 +48,10 @@ occupancy-feasible corridors and evaluate the committed final B-spline with an i
 The oracle is an evaluation-only bypass. Its centre lines, tube labels and ground truth are forbidden inputs to
 P0, P4, EGO and P5 decisions.
 
-The design is now authorized for implementation by user decision 003. ICRA-072A Layer 1 passed Review with source-bound `run-024`; its separately
+The design was authorized for implementation by user decision 003 and is now blocked by the Review finding above. ICRA-072A Layer 1 passed Review with source-bound `run-024`; its separately
 named development selection trigger is not the inverse-corridor scientific fixture and provides no effect
-evidence. ICRA-072B remains a disclosed blocked debt. Active ICRA-073 implements the frozen
-three-variant fixture, paired control/treatment diagnostics and independent oracle. ICRA-073 must measure
-without tuning; targeted changes from its retained results belong exclusively to ICRA-074.
+evidence. ICRA-072B remains a disclosed blocked debt. ICRA-073 implemented only the descriptor/preflight before
+stopping; no paired control/treatment diagnostic or independent oracle result exists. ICRA-074 remains inactive.
 
 ## User route restoration — 2026-08-26
 

@@ -1,5 +1,14 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-27 ICRA-073 frozen fixture Supervisor Review
+
+| Req ID | Reviewed seam | Evidence and disposition | Status |
+|---|---|---|---|
+| IAP-RQ-423 / IAP-RQ-424 | Source/output contract | Fixed-base diff and independent tests pass, but source admission does not globally reject new ignored files and variant output permits external/overwriting writes | **STANDARDS REQUEST_CHANGES** |
+| IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-423 | Frozen occupancy invariant | Risky raw cuboid clearance `1.275072583 m` versus required tube+guard+inflation `1.349 m`, deficit `0.073927417 m`; frozen values cannot satisfy the gate | **SPEC/GATE BLOCKED / NOT PASS** |
+| IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-424 | Cross-layer completion | Correct pre-live stop; reachability and later invariant/oracle gates not evaluated; mirror/mutation coverage is incomplete; no paired three-variant runs or complete P0→P4→EGO→P5→publish→runtime evidence | **ICRA-073 INCOMPLETE** |
+| IAP-RQ-423 / IAP-RQ-424 | Next-task authority | Decision 003 does not waive ICRA-073; Supervisor retains `next_task=NONE` pending a distinct user fixture-revision or ICRA-074-bypass decision | **BLOCKED_AWAITING_USER_RESEARCH_DECISION** |
+
 ## 2026-08-27 ICRA-073 frozen fixture preflight blocker
 
 | Req ID | Implemented/tested seam | Evidence and disposition | Status |
@@ -17,7 +26,7 @@
 |---|---|---|---|
 | IAP-RQ-423 / IAP-RQ-424 | Latest ICRA-072B Builder review | Standards PASS; Spec BLOCKED because exact implementation/canonical result are absent and a third ignored source-tree file invalidates the two-artifact premise | **BLOCKED / NOT PASS** |
 | IAP-RQ-000 / IAP-RQ-424 | User route authority | Explicit instruction to proceed regardless, decision `USER-ICRA-ROUTE-20260827-003`, approval anchor `a30468e`; no protected research field value or task ordering changes | **USER-ACCEPTED BYPASS** |
-| IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 | ICRA-073 task | Frozen three-variant inverse corridor, matched control/treatment, independent 200-sample committed-final oracle and development diagnostics; runtime safety remains hard | **ICRA-073 TASK_READY** |
+| IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 | Historical ICRA-073 issuance | Decision 003 issued frozen three-variant diagnostics; current Review supersedes TASK_READY with BLOCKED/NOT PASS before paired execution | **HISTORICAL ISSUANCE / NOW BLOCKED** |
 | IAP-RQ-423 / IAP-RQ-424 | Claim/retention boundary | ICRA-072B debt and all artifacts remain; ICRA-073 cannot retroactively pass it or support qualification/campaign claims | **MANDATORY** |
 
 ## 2026-08-27 ICRA-072B exact control-artifact admission blocker

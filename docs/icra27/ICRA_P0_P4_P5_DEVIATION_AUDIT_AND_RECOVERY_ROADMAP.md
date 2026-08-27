@@ -1,5 +1,13 @@
 # ICRA P0 -> P4 -> P5 deviation audit and scientific recovery roadmap
 
+## ICRA-073 frozen fixture blocker — 2026-08-27
+
+Supervisor Review of fixed range `347c9111..4f5bb302` sets ICRA-073 to `BLOCKED / NOT PASS`. The exact frozen
+risky centre line clears the cuboid by `1.275072583 m`, below the required `1.349 m` tube+guard+current-inflation
+radius; two preflight source/output guard defects also require repair if work continues. Builder stopped before
+live execution, leaving no independent-oracle paired diagnostic. Decision 003 bypassed ICRA-072B only. Route
+remains `P0_P4_V2_P5`, `active_role=SUPERVISOR`, `next_task=NONE` pending a distinct user decision.
+
 Status: **USER-OWNED ROUTE LOCK / DEVELOPMENT-FIRST P4-v2 END-TO-END RECOVERY**
 Decision date: 2026-08-27
 Requirements: `IAP-RQ-000`, `IAP-RQ-423`, `IAP-RQ-424`
@@ -489,16 +497,16 @@ non-bypassable enforcement requires a protected remote branch and an independent
 
 ## 9. Corrective roadmap and gates
 
-The active execution grouping is `docs/icra27/ICRA_FOUR_LAYER_DEVELOPMENT_WORKFLOW.md`: ICRA-072A integration,
-blocked/user-bypassed ICRA-072B, active ICRA-073 effect diagnostics, ICRA-074..075 improvement/exploration and
+The execution grouping is `docs/icra27/ICRA_FOUR_LAYER_DEVELOPMENT_WORKFLOW.md`: ICRA-072A integration,
+blocked/user-bypassed ICRA-072B, currently blocked ICRA-073 effect diagnostics, ICRA-074..075 improvement/exploration and
 ICRA-076..079 formal verification. Decision 003 leaves protected research values and ordered task names
 unchanged while explicitly waiving the Layer 2 PASS transition precondition. Development one-shot and per-task
 build/install controls do not apply in Layers 1–3.
 
 The frozen inverse-corridor diagnostic design is
 `docs/icra27/dev/ICRA_P4_V2_INVERSE_CORRIDOR_FIXTURE.md`
-(`ICRA_P4_V2_INVERSE_CORRIDOR_FIXTURE_V1`). It is active under ICRA-073 by explicit user decision 003 even though
-ICRA-072B remains blocked/NOT PASS. Its independent oracle is an evaluation-only bypass and
+(`ICRA_P4_V2_INVERSE_CORRIDOR_FIXTURE_V1`). Decision 003 activated it despite blocked ICRA-072B, but the current
+fixture conflict now leaves ICRA-073 blocked/NOT PASS. Its independent oracle is an evaluation-only bypass and
 may never feed P0, P4, EGO or P5 decisions. A development-only selection trigger used to close ICRA-072 is a
 distinct engineering fixture and cannot be relabelled as inverse-corridor effect evidence.
 
@@ -508,7 +516,7 @@ distinct engineering fixture and cannot be relabelled as inverse-corridor effect
 | ICRA-071 backlog | repair user-route/state/doc/RQ local guards | non-blocking after user decision 002; no security claim |
 | ICRA-072A | iterative P0 -> P4-v2 -> EGO -> P5 vertical slice against shared build/install | one complete live identity; no effect claim |
 | ICRA-072B | stabilize the successful chain and canonical source admission | BLOCKED / USER-ACCEPTED BYPASS / NOT PASS; debt retained |
-| ICRA-073 | implement PRIMARY/MIRROR/NULL inverse corridors, paired control/treatment and independent-oracle effect diagnostics | TASK_READY by decision 003; measure retained evidence only, no tuning, held-out access or claim |
+| ICRA-073 | implement PRIMARY/MIRROR/NULL inverse corridors, paired control/treatment and independent-oracle effect diagnostics | BLOCKED/NOT PASS pending user fixture-revision or bypass decision; no paired diagnostic exists |
 | ICRA-074 | targeted optimization derived from retained ICRA-073 evidence | no tune-during-ICRA-073, held-out access or threshold tuning |
 | ICRA-075 | exploratory objective/source/domain ablation and power inputs | no held-out access or claim |
 | ICRA-076 | freeze protocol, SESOI, hashes, seeds and 30–60 sample size per scene | no confirmatory run before Review PASS |

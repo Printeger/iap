@@ -2,9 +2,14 @@
 
 > Design record: `ICRA_P4_V2_INVERSE_CORRIDOR_FIXTURE_V1`
 >
-> Status: **DESIGN_FROZEN / ICRA-073 IMPLEMENTATION ACTIVE**
+> Status: **DESIGN_FROZEN / ICRA-073 BLOCKED BY INTERNAL GUARD-INFLATION CONFLICT**
 >
 > Requirements: `IAP-RQ-423`, `IAP-RQ-424`
+
+Supervisor Review note 2026-08-27: the exact risky curve has only `1.275072583 m` raw clearance to the frozen
+central cuboid, but the tube (`0.75 m`) plus guard (`0.50 m`) plus current occupancy inflation (`0.099 m`)
+requires `1.349 m`. The design cannot satisfy its own mandatory preflight as written. No value is changed here;
+the user must explicitly authorize a revision or bypass.
 
 ## 1. Purpose and claim boundary
 

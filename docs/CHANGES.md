@@ -3,6 +3,15 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- review(icra-073-frozen-fixture-blocker): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 /
+  IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — review Builder `4f5bb302` against fixed base `347c9111`.
+  Standards REQUEST_CHANGES for fail-open global ignored-file admission and unrestricted overwriting variant
+  output. Spec/Gate BLOCKED on the frozen conflict, with correct Builder stop behavior. Independent tests pass 3/3 and confirm
+  the source-bound preflight correctly stops because `1.275072583 m` risky raw clearance is below the frozen
+  `1.349 m` tube+guard+inflation requirement. No downstream reachability/oracle/paired/live/runtime evidence
+  exists; dormant mirror/mutation coverage is also incomplete. Set `active_role=SUPERVISOR`, `next_task=NONE`
+  pending a distinct user choice to revise/repair ICRA-073 or accept the missing diagnostic basis and bypass.
+
 - feat(icra-073-frozen-fixture-preflight): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 /
   IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — add a deterministic public descriptor/preflight tool for
   frozen PRIMARY, geometric EXACT_MIRROR and finite-identical FLAT_NULL. Canonical hashes bind exact endpoints,

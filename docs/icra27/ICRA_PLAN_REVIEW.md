@@ -1,5 +1,12 @@
 # ICRA 2027 P0 -> P4-v2 -> P5 计划复审
 
+## ICRA-073 frozen fixture Review — 2026-08-27
+
+**Verdict: `REQUEST_CHANGES / ICRA073_BLOCKED / NOT PASS`.** Spec/Gate 的首要 blocker 是冻结 risky raw
+cuboid clearance `1.275072583 m` 小于 `1.349 m` 要求；Builder 对此正确 fail-closed。Standards 另发现两个
+High：source binding 未全量排除 ignored extra，且 `--variant --output` 可写仓库外并覆盖文件。Oracle、
+paired diagnostics 和 runtime identity 均未产生。`next_task=NONE`，等待用户明确继续修复 073 或 bypass。
+
 ## User-directed ICRA-072B bypass and ICRA-073 issuance — 2026-08-27
 
 **Verdict: `ICRA072B_BLOCKED_USER_ACCEPTED_BYPASS / ICRA073_TASK_READY`.** Latest Builder Standards PASS and

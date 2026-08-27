@@ -1,14 +1,14 @@
 # ICRA four-layer development and validation workflow
 
-Status: **ACTIVE — LAYER 3 EFFECT DIAGNOSTICS**
+Status: **BLOCKED — LAYER 3 FROZEN FIXTURE DECISION REQUIRED**
 
 Requirements: `IAP-RQ-320`, `IAP-RQ-321`, `IAP-RQ-400`, `IAP-RQ-410`, `IAP-RQ-421`, `IAP-RQ-422`,
 `IAP-RQ-423`, `IAP-RQ-424`
 
-Current disposition: ICRA-072A Layer 1 passed; ICRA-072B remains blocked without canonical PASS. User decision
-`USER-ICRA-ROUTE-20260827-003` explicitly accepts that debt and activates ICRA-073 Layer 3. The active task may
-implement and run frozen inverse-corridor development diagnostics, but not tune, qualify an effect or enter
-formal Layer 4/campaign work.
+Current disposition: ICRA-072A Layer 1 passed; ICRA-072B remains blocked without canonical PASS. Decision 003
+accepted that debt and activated ICRA-073, but ICRA-073 is now BLOCKED/NOT PASS: its frozen risky corridor has
+`1.275072583 m` raw cuboid clearance against a required `1.349 m`; source/output guards also need repair. No
+paired diagnostic was reached. No Builder task, ICRA-074, formal Layer 4 or campaign work is currently active.
 
 ## 1. Purpose
 

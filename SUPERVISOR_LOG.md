@@ -1,5 +1,60 @@
 # ICRA Supervisor Log
 
+## 2026-08-27 — ICRA-073 Review BLOCKED; frozen fixture decision required
+
+### Review identity and preservation
+
+- Fixed Review base is `347c9111f1f6618b678a0c62942b561ac94e7814`; reviewed Builder HEAD is
+  `4f5bb302920f869e45a8ac240f192a81f28162c7`, with implementation commit `29cc2dca` and retained-evidence commit
+  `4f5bb302`. Fetch confirmed divergence `0 0`; `git diff --check` passes.
+- Review preserved shared `/home/dev/ws_iap/{build,install,log}`, all retained raw/compact/live/scientific and
+  Supervisor evidence, ordinary logs, the protected PDF, local agent JSON and ignored backup. It ran no shared
+  build, ROS, GPU or live flow.
+- Supervisor independently reran Python compile plus focused tests 3/3. Canonical `preflight-001.json` has accepted
+  source binding to pushed `29cc2dca`, and retained forged-source evidence remains rejected.
+
+### Standards axis
+
+Verdict: **REQUEST_CHANGES — two High defects; one non-blocking smell.**
+
+- `bind_source()` compares ambient porcelain plus four hard-coded ignore-blind paths, but never compares the full
+  ignore-blind untracked set to the allowlist. A new ignored fifth file can therefore pass source admission.
+- The `--variant --output` path bypasses the repository-local/new-file checks used by `--preflight-all`; it can
+  write outside the repository and overwrite existing source/evidence, violating boundary and retention rules.
+- Non-blocking Divergent Change: the 659-line tool combines schema construction, geometry validation, Git
+  provenance and evidence I/O. Authorized paths, RQ bindings, current artifact preservation and the pre-live
+  stop otherwise conform. Builder's “Standards/Spec re-review” wording is non-authoritative.
+
+### Spec, Gate and cross-layer axes
+
+Verdict: **BLOCKED / NOT PASS — one frozen-contract blocker; no Builder bypass/tuning finding.**
+
+- The risky analytic centre line reaches only `1.275072583 m` raw clearance from the central cuboid. Frozen tube
+  plus guard plus current occupancy inflation requires `0.75 + 0.50 + 0.099 = 1.349 m`, a `0.073927417 m`
+  deficit. The exact frozen contract therefore cannot pass its mandatory occupancy-clear invariant.
+- Builder correctly stopped fail closed rather than moving the obstacle, changing the curve, shrinking the guard
+  or inflation, or starting live work. Descriptor hash, endpoints and straight collision pass; full reachability
+  and all later topology/provider/mirror/null/isolation gates are explicitly not evaluated.
+- The independent 200-sample final-trajectory oracle, paired runner, PRIMARY/MIRROR/NULL control-treatment runs,
+  shared build, GPU/process/cleanup evidence and P5-final/publication/runtime identity are absent. Thus no effect,
+  optimization, qualification or campaign inference is available and ICRA-074 cannot be automatically issued.
+- Dormant coverage is incomplete: the mirror check does not prove every frozen geometry field is a `y -> -y`
+  transform, and downstream mutation tests can pass because the earlier guard conflict already makes the whole
+  preflight fail. This must be strengthened if ICRA-073 continues.
+
+### Gate disposition
+
+- ICRA-073 becomes `BLOCKED_FROZEN_GUARD_INFLATION_CONFLICT / NOT PASS`. Active role is `SUPERVISOR`, status is
+  `BLOCKED_AWAITING_USER_RESEARCH_DECISION`, and `next_task=NONE`.
+- The user must make a distinct decision: revise and re-freeze the fixture for bounded ICRA-073 continuation, or
+  explicitly accept the missing diagnostic basis and bypass to ICRA-074. Decision 003 bypassed only ICRA-072B and
+  does not authorize this transition.
+
+### Supervisor window disposition
+
+- Pending the required post-push audit. This section will be finalized only after the Review changeset is pushed
+  and becomes the authoritative handoff.
+
 ## 2026-08-27 — ICRA-072B BLOCKED; user-accepted bypass activates ICRA-073
 
 ### Review identity and retained blocker
