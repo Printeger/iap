@@ -79,9 +79,14 @@ Verdict: **REQUEST_CHANGES — two High contract failures and one Medium evidenc
 
 ### Supervisor window disposition
 
-- Disposition: `PENDING_POST_PUSH_AUDIT`.
-- Per §8.6, the final `KEEP_WINDOW` or `ROTATE_RECOMMENDED` decision is made only after this Review changeset is
-  pushed and becomes the authoritative handoff.
+- Disposition: `ROTATE_RECOMMENDED`.
+- Reason: `ICRA072A_P5_AUTHORITY_AND_EXACT_IDENTITY_REPAIR_AFTER_COMPACTED_REVIEW`. This Review context was
+  compacted, ICRA-072A has already crossed repeated integration/repair iterations, and the remaining blockers sit
+  on the critical P5-authority and exact-runtime-identity boundary. A fresh recovery from repository authority
+  reduces the risk of carrying the rejected structural false PASS into the next adjudication.
+- Post-push audit anchor: `e39b41f6441516ea0f645348f496ecdc0a7575f7`. It was pushed with the normal
+  pre-push guard, then fetched at divergence `0 0`. This minimal Supervisor-only record binds that pushed Review.
+  The fresh Supervisor window remains read-only until the next ICRA-072A Builder handoff.
 
 ### Enforcement disclosure
 

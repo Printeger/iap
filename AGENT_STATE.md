@@ -38,13 +38,13 @@ recovery_roadmap: docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP
 four_layer_workflow: docs/icra27/ICRA_FOUR_LAYER_DEVELOPMENT_WORKFLOW.md
 guard_plan: docs/icra27/ICRA_CROSS_LAYER_GUARD_PLAN.md
 artifact_retention: RAW_COMPACT_REGISTERED_LIVE_P4V1_LOGS_SHARED_WORKSPACE_AND_PROTECTED_PDF_RETAINED_61_REGENERABLE_TASK_BUILDS_RETIRED
-window_disposition: PENDING_POST_PUSH_AUDIT
-rotation_reason: PENDING_REVIEW_CHANGESET_PUSH
-window_handoff_anchor: PENDING_REVIEW_CHANGESET_PUSH
+window_disposition: ROTATE_RECOMMENDED
+rotation_reason: ICRA072A_P5_AUTHORITY_AND_EXACT_IDENTITY_REPAIR_AFTER_COMPACTED_REVIEW
+window_handoff_anchor: e39b41f6441516ea0f645348f496ecdc0a7575f7
 window_next_role: SUPERVISOR
 window_next_review_task: ICRA-072A
 window_bootstrap_source: REPOSITORY_AUTHORITY_ONLY
-updated_utc: 2026-08-27T02:36:48Z
+updated_utc: 2026-08-27T02:44:50Z
 ```
 
 Review of Builder HEAD `cd562572eeddb3a12ab7a374f724a98f9a6a3310` against fixed base
