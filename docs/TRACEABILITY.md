@@ -1,5 +1,15 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-27 ICRA-072A Layer 1 Supervisor Review
+
+| Req ID | Reviewed seam | Evidence and disposition | Status |
+|---|---|---|---|
+| IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-423 | Shared build, P0 and natural P4-v2 structural flow | Exact six-package shared build returns 0; `run-020` has P0 ready 54, 18 both-complete decisions and 7 selected guides | **STRUCTURAL/TOOLING PASS; NOT LAYER 1 PASS** |
+| IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-423 | Selected-guide through final B-spline lineage | Terminal CSV carries same attempt/request/snapshot/config/epoch/guide/control-point/final identity; analyzer reports a linked three-stage group | **STRUCTURAL IDENTITY OBSERVED** |
+| IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 | P5 hard authority | Raw fused monitor is `UNSAFE` (`28.904/75.079` versus `HAL/VAL 10/20`), but profile switches P5 to lower LiDAR-only PL and publishes | **REQUEST_CHANGES / AUTHORITY BYPASS** |
+| IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 / IAP-RQ-422 | Exact committed runtime identity | Analyzer tolerates 20 ms start-time mismatch and does not require runtime trajectory ID | **REQUEST_CHANGES / NOT FAIL-CLOSED EXACT** |
+| IAP-RQ-423 / IAP-RQ-424 | Iterative evidence completeness and next layer | `run-001` has no analysis; `run-019` retains cleanup-blind false PASS; all runs remain immutable and need a non-overwriting typed index. Continue ICRA-072A at `run-021`; do not issue ICRA-072B | **TASK_READY / SAME GATE** |
+
 ## 2026-08-26 ICRA-072A Layer 1 successful flow handoff
 
 | Req ID | Implemented/tested seam | Evidence and disposition | Status |

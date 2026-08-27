@@ -458,7 +458,7 @@ Acceptance:
 - Planner chooses safer path even if longer when integrity violated.
 
 ### IAP-RQ-423 P4 collision-guide planning and P5 lineage
-Status: **P4-v1 SCIENTIFIC_NO_GO RETAINED / ICRA-072A LAYER 1 FLOW READY FOR REVIEW /
+Status: **P4-v1 SCIENTIFIC_NO_GO RETAINED / ICRA-072A LAYER 1 REQUEST_CHANGES /
 INVERSE-CORRIDOR DESIGN FROZEN FOR LAYER 3, IMPLEMENTATION NOT STARTED**
 
 Source: `docs/icra27/ICRA_SCOPE.md` and the 2026-08-20 Supervisor scope pivot. This requirement extends collision-guide planning evidence; it does not replace or verify the IAP-RQ-422 PL/AL admission rule.
@@ -487,7 +487,7 @@ Acceptance:
 - The selected decision/hash reaches the final B-spline, and a P5 final rejection produces zero normal publication.
 
 ### IAP-RQ-424 User-owned ICRA research route and P4-v2 scientific recovery
-Status: **DEVELOPMENT-FIRST ROUTE LOCKED / FOUR-LAYER WORKFLOW ACTIVE / ICRA-072A LAYER 1 READY FOR REVIEW /
+Status: **DEVELOPMENT-FIRST ROUTE LOCKED / FOUR-LAYER WORKFLOW ACTIVE / ICRA-072A LAYER 1 REQUEST_CHANGES /
 GUARD REPAIR NONBLOCKING / INVERSE-CORRIDOR DESIGN FROZEN, IMPLEMENTATION NOT STARTED**
 
 Source: `docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md` and user decision
@@ -507,7 +507,7 @@ Source: `docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md` and 
 - [x] In ICRA-072, add P4-v2 provider/occupied/unknown support decomposition while preserving the v1 scalar
   query for replay and implement the minimal provider-only interior bottleneck/lexicographic time-aware search.
   Builder HEAD `6a6bdd3` proves natural live P4 selection but not the terminal EGO/P5/publication/runtime chain.
-- [x] Complete ICRA-072A Layer 1 using shared incremental build roots and unique repeatable development runs;
+- [ ] Complete ICRA-072A Layer 1 using shared incremental build roots and unique repeatable development runs;
   then complete ICRA-072B production-shaped regression before closing ICRA-072. The controlling process is
   `docs/icra27/ICRA_FOUR_LAYER_DEVELOPMENT_WORKFLOW.md`.
 - [x] Freeze `ICRA_P4_V2_INVERSE_CORRIDOR_FIXTURE_V1` as a deferred ICRA-073 design with two feasible curved
@@ -564,6 +564,15 @@ lineage, P5-final pass, committed runtime binding and normal B-spline
 publication counts were all zero. No retry or tuning is permitted. ICRA-072 is
 therefore BLOCKED pending Supervisor review; ICRA-073 and all effect,
 qualification and campaign work remain unauthorized.
+
+ICRA-072A Supervisor Review note (2026-08-27): Builder HEAD `cd56257` adds the shared six-package development
+build, iterative tooling and a structurally complete `run-020`; those parts are retained. Layer 1 is not complete.
+The development profile keeps `max_pl` fusion but changes P5 to `LIDAR_CERTIFIED`, so P5 reports final `OK` and
+publishes while raw output labels the authoritative fused monitor `UNSAFE` (`HPL/VPL 28.904/75.079` versus
+`HAL/VAL 10/20`). Runtime analysis also accepts a 20 ms start mismatch without a runtime trajectory ID, and not
+every retained iteration has a machine first-missing-stage outcome. Verdict is `REQUEST_CHANGES`; continue the
+same Gate at `run-021` with fused P5 authority, exact runtime identity and complete typed iteration records.
+ICRA-072B and all Layer 3/4 work remain unauthorized.
 
 Four-layer Supervisor disposition (2026-08-26): checkpoint `6a6bdd3` is
 `ARCHIVED_AS_FOUND / BLOCKED_TERMINAL_CHAIN_MISSING`. User workflow decision

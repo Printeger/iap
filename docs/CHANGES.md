@@ -3,6 +3,16 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- review(icra-072a-layer1-flow): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 /
+  IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — reject Builder HEAD `cd56257` as Layer 1 completion.
+  The shared build, iterative tooling, cleanup and structural seven-stage `run-020` chain are materially present,
+  but the development profile bypasses the authoritative unsafe fused current monitor by making P5 consume
+  LiDAR-only PL. Runtime binding also accepts a 20 ms start-time tolerance without a runtime trajectory ID, and
+  not every retained run has an automatic machine first-missing-stage result. Retain `run-001`..`run-020`
+  unchanged, classify `run-020` as structural/tooling evidence only, and continue ICRA-072A at `run-021` with
+  authoritative fused P5, exact runtime identity and complete typed iteration outcomes. ICRA-072B and all
+  scientific, qualification and campaign work remain unauthorized.
+
 - feat(icra-072a-layer1-flow): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 /
   IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — add the exact shared six-package development build,
   iterative repository-local runner/capture/analyzer and fixed first-missing-stage diagnostics. Preserve
