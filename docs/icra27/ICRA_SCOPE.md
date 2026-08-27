@@ -1,5 +1,13 @@
 # ICRA 2027 Conference Scope — User-owned P0 -> P4-v2 -> P5 recovery
 
+## ICRA-076 Review BLOCKED / user decision required — 2026-08-27
+
+Review rejects freeze-003: repeatability snapshots are synthesized from fixture constants, U95 uses the wrong
+statistic, canonical verification evidence is external, and required verification-test sources are incompletely
+frozen. ICRA-076 remains BLOCKED/NOT PASS and no ICRA-077 task is active. Under unchanged
+`USER-ICRA-ROUTE-20260827-006` and `ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md`, route
+`P0_P4_V2_P5`, P4-v1 `SCIENTIFIC_NO_GO`, P4-v2, ICRA-071 and campaign authority remain unchanged.
+
 ## User decision 006 / ICRA-076 active — 2026-08-27
 
 Under `USER-ICRA-ROUTE-20260827-006`, the user accepts and bypasses ICRA-075's frozen incompatibility, 0/40,

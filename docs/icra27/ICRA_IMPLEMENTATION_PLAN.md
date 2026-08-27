@@ -1,5 +1,14 @@
 # ICRA 2027 P0 -> P4-v2 -> P5 科学纠偏实施计划
 
+## ICRA-076 Review BLOCKED — 2026-08-27
+
+`8105a16..aeb5eb0` 的 freeze-003 不能成为 formal authority：repeatability B 值来自 fixture constants 而非
+production-emitted measurement，U95 又计算 `abs(D_replay-D_reference)` 而不是 route-locked `|D_peak|`；
+canonical verification 还使用仓库外 `/tmp` manifest，且必需的 073/074/075 test bytes 未冻结。当前
+`next_task=NONE`，ICRA-077 等待用户明确 repair 或接受债务后 bypass。权威仍为
+`ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md`；route `P0_P4_V2_P5`、P4-v1
+`SCIENTIFIC_NO_GO`、P4-v2、ICRA-071 和 campaign barrier 不变。
+
 ## User decision 006 / ICRA-076 preregistration freeze — 2026-08-27
 
 用户以 `USER-ICRA-ROUTE-20260827-006` 明确接受并 bypass ICRA-075 的 frozen-contract incompatibility、

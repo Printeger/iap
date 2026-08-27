@@ -1,5 +1,14 @@
 # ICRA 2027 P0 -> P4-v2 -> P5 计划复审
 
+## ICRA-076 Supervisor Review — 2026-08-27
+
+**Verdict: `STANDARDS REQUEST_CHANGES / SPEC REQUEST_CHANGES / GATE BLOCKED / NOT PASS`.** Freeze-003 is
+internally validator-green but does not contain measured serialized-snapshot repeatability, computes the wrong
+U95 statistic, consumes an external verification manifest and omits mandatory verification-test bytes from the
+freeze. No scope creep is found. Under `USER-ICRA-ROUTE-20260827-006` and unchanged
+`ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md`, P4-v1 `SCIENTIFIC_NO_GO`, P4-v2, ICRA-071 and campaign
+barrier remain. ICRA-077 awaits a distinct user repair-or-bypass decision.
+
 ## User decision 006 — bypass ICRA-075 and issue ICRA-076 — 2026-08-27
 
 **Disposition: `ICRA075_BLOCKED_USER_ACCEPTED_BYPASS / ICRA076_TASK_READY`.** Under

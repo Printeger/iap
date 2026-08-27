@@ -1,5 +1,15 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-27 ICRA-076 Supervisor Review
+
+| Req ID | Reviewed seam | Evidence and disposition | Status |
+|---|---|---|---|
+| IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 | Repeatability measurement | GTest transcript contains no B values; runner synthesizes snapshots from constants and computes deviation from first replay, not `|D_peak|` | **CRITICAL / REQUEST_CHANGES** |
+| IAP-RQ-423 / IAP-RQ-424 | Evidence locality | Canonical command consumes `/tmp/icra076-verification.json` | **HIGH / REQUEST_CHANGES** |
+| IAP-RQ-423 / IAP-RQ-424 | Freeze completeness | Required 073/074/075 verification-test bytes are absent from source inventory | **HIGH / REQUEST_CHANGES** |
+| IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 | Other formal inputs | 13/13, validator, n=60, 59/60, seeds/order, source/install counts and shared build are internally green | **PARTIAL / NOT FREEZE PASS** |
+| IAP-RQ-423 / IAP-RQ-424 | Gate/claim boundary | Freeze-003 retained/rejected; no held-out or ICRA-077 authority | **BLOCKED / NOT PASS** |
+
 ## 2026-08-27 ICRA-076 outcome-blind preregistration and byte freeze
 
 | Req ID | Implemented/tested seam | Evidence and disposition | Status |

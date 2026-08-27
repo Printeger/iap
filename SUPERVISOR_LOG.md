@@ -1,5 +1,56 @@
 # ICRA Supervisor Log
 
+## 2026-08-27 — ICRA-076 Review BLOCKED; invalid repeatability freeze
+
+### Review identity and preservation
+
+- Fixed Review base `8105a16aa5801a1f4c373d842a4e8598594596cf`; reviewed Builder HEAD
+  `aeb5eb0ef26566c62c18aa8dfdae6d03293a8803`; merge-base matches the base, fetch confirms divergence `0 0`, and
+  `git diff --check` passes. The six RQ-bound commits change 18 authorized code/config/evidence/doc paths.
+- Review ran no build, ROS, GPU, live or held-out flow. Supervisor independently validates freeze-003 and reruns
+  the focused ICRA-076 suite 13/13 PASS. Retained build log `build_2026-08-27_15-37-31` records all six selected
+  packages ending `rc=0`. Shared roots, all freeze/replay attempts, evidence/logs, hidden artifacts and protected
+  PDF remain unchanged.
+- Freeze-003 SHA-256 is `4c31a57f4a5f3fb858998178c07a809c661eb90fdc32d6c239cd4a5e7204e2b3`;
+  measured-replay candidate SHA-256 is `ad28c5b93974227c3147a2863cf452f8e79fdbc314e7b885fee1e2d9e04a668c`.
+
+### Standards
+
+Verdict: **REQUEST_CHANGES — one Critical and two High hard violations.**
+
+- Critical: the replay process runs a generic PASS GTest, then synthesizes each serialized snapshot from fixture
+  constants. No transcript contains measured `B_original/B_risk`, yet the validator and docs treat 60 constructed
+  dictionaries as measured observations and derive U95=0.
+- High: canonical README invocation creates/consumes `/tmp/icra076-verification.json`; the loader explicitly admits
+  that repository-external evidence manifest, contrary to AGENTS §8.5 and the task's repository-local boundary.
+- High: required verification invokes tests 073/074/075, but only test 076 is in source inventory roots. Those
+  mandatory test semantics can drift without invalidating the freeze.
+- Judgement-only smell: Divergent Change in the roughly 951-line preregistration module, which combines path
+  security, Git admission, inventory, statistics, schema/protocol validation and freeze validation.
+
+### Spec
+
+Verdict: **REQUEST_CHANGES — one Critical blocker; no scope creep.**
+
+- The route defines U95 as the 95% upper bound of `|D_peak|`. Implementation instead calculates
+  `abs(D_replay-D_reference)` and obtains each B value from constants, not the production replay result. Therefore
+  `U95=0`, `delta_peak=0.3 m` and freeze-003 PASS lack the required evidence basis.
+- Arms/scenes, `b=2r`, `n=60`, exact 59/60 binomial count, seeds/order, inventories, mutation tests, shared build
+  and no-live boundary otherwise appear compliant.
+
+### Gate disposition
+
+- ICRA-076 is BLOCKED/NOT PASS; freeze-001/002/003 and replay-001 remain immutable rejected candidates. No ICRA-077
+  is issued. `active_role=SUPERVISOR`, `task_id=NONE`, `next_task=NONE` pending user choice: bounded offline repair
+  of the three findings (recommended), or explicit acceptance of the invalid repeatability/threshold and source/
+  evidence debt followed by bypass to held-out ICRA-077.
+- No formal freeze, held-out, qualification or campaign claim is authorized.
+
+### Supervisor window disposition
+
+- Pending post-push audit. Final disposition and pushed handoff anchor will be recorded after this Review changeset
+  becomes repository authority.
+
 ## 2026-08-27 — user decision 006 bypasses ICRA-075 and issues ICRA-076
 
 ### User decision and retained debt

@@ -1,5 +1,13 @@
 # ICRA P0 -> P4 -> P5 deviation audit and scientific recovery roadmap
 
+## ICRA-076 Review BLOCKED / awaiting user decision — 2026-08-27
+
+Supervisor Review of `8105a16..aeb5eb0` rejects freeze-003 as formal authority. Its replay runner synthesizes B
+values from fixture constants and calculates U95 as deviation from the first replay, not route-locked `|D_peak|`.
+It also consumes repository-external verification evidence and incompletely freezes required verification-test
+sources. Route lock fields remain unchanged. ICRA-076 is BLOCKED/NOT PASS; ICRA-077 is inactive until the user
+chooses bounded repair or explicitly accepts the invalid freeze basis and bypasses.
+
 ## User decision 006 — accept ICRA-075 debt and issue ICRA-076 — 2026-08-27
 
 The user explicitly accepts ICRA-075's `FROZEN_CONTRACT_INCOMPATIBLE`, 0/40 matrix, absent power inputs and two

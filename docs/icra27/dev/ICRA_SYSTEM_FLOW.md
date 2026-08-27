@@ -1,5 +1,10 @@
 # ICRA System Flow — User-owned P0 -> P4-v2 -> P5 recovery
 
+> ICRA-076 Review update 2026-08-27: freeze-003 is validator-green but rejected because repeatability snapshots
+> are synthesized, U95 uses the wrong statistic, verification evidence is external and required verification-test
+> bytes are not fully frozen. Runtime graph remains unchanged. ICRA-076 is BLOCKED/NOT PASS; no held-out ICRA-077,
+> qualification or campaign task is active pending user decision.
+
 > User decision 006 update 2026-08-27: ICRA-075 remains BLOCKED/user-bypassed/NOT PASS with 0/40, no power inputs
 > and two accepted P1 defects. ICRA-076 is TASK_READY to freeze the unchanged runtime graph's formal protocol,
 > threshold rule, conservative `n=60`, seeds/order and exact source/install identities. No held-out execution,
