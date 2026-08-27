@@ -3,11 +3,11 @@
 > Purpose: 把 talk《Integrity-Aware Active Perception》的“优化版 pipeline”拆成可实现、可验收、可追溯的工程需求。
 > Scope: 仅修改本仓库 src/iap；禁止修改 ../glim（可参考其代码但不得提交改动）。
 
-> Current ICRA disposition (2026-08-27): ICRA-075 Supervisor Review is `REQUEST_CHANGES / BLOCKED / NOT PASS`.
-> The matrix is 0/40 with no power record after P5 rejects every first-row final candidate `current_low_margin`.
-> Metrics-only lineage failure is also fail-open before publication and the runner lacks a post-analyzer source
-> recheck. User decision 005 now authorizes a bounded same-Gate repair, not a bypass. ICRA-076, formal Layer 4 and
-> campaign remain unauthorized pending successful repair evidence and later Review.
+> Current ICRA disposition (2026-08-27): review of bounded repair `32283d0..6678e7d` is
+> `SPEC PASS / STANDARDS REQUEST_CHANGES / GATE BLOCKED / NOT PASS`. Metrics-only publication failure is closed
+> and diagnosis correctly stops pre-live on `FROZEN_CONTRACT_INCOMPATIBLE`, but the runner overwrites an earlier
+> source-change first-missing stage and the diagnosis writer permits external output. The matrix remains 0/40 with
+> no power record. No ICRA-076, formal Layer 4 or campaign work is authorized pending explicit user decision.
 
 ICRA-075 bounded repair result (2026-08-27): all enabled P4 objectives, including metrics-only, now block normal
 publication on invalid terminal/attempt/guide identity or lineage CSV open/write/flush failure; explicit disabled

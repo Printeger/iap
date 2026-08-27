@@ -3,6 +3,13 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- review(icra-075-bounded-repair-blocked): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 /
+  IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — review `6678e7d6` against fixed `32283d0`. The bounded repair correctly
+  closes metrics-only publication failure, passes focused offline 19/19 and classifies retained matrix-002 as
+  `FROZEN_CONTRACT_INCOMPATIBLE`, stopping before GPU/ROS/live. Standards rejects two P1 boundaries: earlier
+  source-change stages are overwritten after analyzer, and diagnosis output is not constrained to the repository
+  evidence root. ICRA-075 remains 0/40 with no power record; no ICRA-076 is issued pending user decision.
+
 - fix(icra-075-bounded-fail-closed): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 /
   IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — make invalid identity/evidence/writer failure publication-blocking for
   every enabled P4 objective, including metrics-only, while preserving explicit disabled behavior. Re-admit the

@@ -1,13 +1,14 @@
 # ICRA four-layer development and validation workflow
 
-Status: **ACTIVE — LAYER 3 ICRA-075 BOUNDED REPAIR**
+Status: **BLOCKED — LAYER 3 ICRA-075 FROZEN CONTRACT / USER DECISION REQUIRED**
 
 Requirements: `IAP-RQ-320`, `IAP-RQ-321`, `IAP-RQ-400`, `IAP-RQ-410`, `IAP-RQ-421`, `IAP-RQ-422`,
 `IAP-RQ-423`, `IAP-RQ-424`
 
-Current disposition: ICRA-075 remains NOT PASS at 0/40, but user decision 005 authorizes a bounded same-Gate
-repair of its two fail-closed defects and a pre-live P5 compatibility diagnosis. Only proven frozen-contract
-miswiring may be repaired; tuning remains forbidden. Formal Layer 4 and campaign stay blocked.
+Current disposition: the bounded repair closes the prior metrics-only publication defect and correctly diagnoses
+`FROZEN_CONTRACT_INCOMPATIBLE`, then stops before GPU/ROS/live. Standards still finds overwritten earliest
+source-change stages and unrestricted diagnosis output. ICRA-075 remains NOT PASS at 0/40 with no power inputs;
+no Layer 4 task is active pending an explicit user revise/re-freeze or bypass decision.
 
 ## 1. Purpose
 

@@ -1,5 +1,13 @@
 # ICRA 2027 Conference Scope — User-owned P0 -> P4-v2 -> P5 recovery
 
+## ICRA-075 bounded repair Review / user decision required — 2026-08-27
+
+The bounded repair closes the prior metrics-only publication defect and correctly stops pre-live after proving
+`FROZEN_CONTRACT_INCOMPATIBLE`; Spec passes that bounded task. Standards still rejects overwritten earliest
+source-change stages and an unrestricted diagnosis output path. The scientific Gate remains BLOCKED/NOT PASS at
+0/40 with no power record. No Builder task or ICRA-076 is active until the user explicitly revises/re-freezes the
+protected contract or accepts the missing basis and engineering debt for a bypass.
+
 ## User decision 005 / ICRA-075 bounded repair active — 2026-08-27
 
 The user chooses repair rather than bypass under `USER-ICRA-ROUTE-20260827-005` at pushed anchor `66cff244`.

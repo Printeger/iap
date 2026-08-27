@@ -1,5 +1,15 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-27 ICRA-075 bounded repair Supervisor Review
+
+| Req ID | Reviewed seam | Evidence and disposition | Status |
+|---|---|---|---|
+| IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-423 | Metrics-only terminal publication | Invalid identity/guide/lineage writer failures now block publication; focused adversaries pass | **REPAIR ACCEPTED** |
+| IAP-RQ-423 / IAP-RQ-424 | First-missing/source closure | Earlier before/during-row source stages are overwritten by the post-analyzer stage | **P1 REQUEST_CHANGES** |
+| IAP-RQ-423 / IAP-RQ-424 | Repository evidence boundary | Canonical diagnosis-003 is valid/local, but `--output` permits arbitrary external parents | **P1 REQUEST_CHANGES** |
+| IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 | Frozen P5 compatibility | GNSS-selected `max_pl` HPL/VPL exceed `10/20 m` HAL/VAL for every retained epoch; no miswire found; correct pre-live stop | **FROZEN_CONTRACT_INCOMPATIBLE** |
+| IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-423 / IAP-RQ-424 | Gate/claim boundary | Focused 19/19 and retained build 6/6 pass, but matrix is 0/40 and no power record exists | **BLOCKED / NOT PASS** |
+
 ## 2026-08-27 ICRA-075 bounded repair and compatibility blocker
 
 | Req ID | Implemented/tested seam | Evidence and disposition | Status |

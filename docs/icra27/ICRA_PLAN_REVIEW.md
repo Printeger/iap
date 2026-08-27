@@ -1,5 +1,13 @@
 # ICRA 2027 P0 -> P4-v2 -> P5 计划复审
 
+## ICRA-075 bounded repair Supervisor Review — 2026-08-27
+
+**Verdict: `SPEC PASS / STANDARDS REQUEST_CHANGES / GATE BLOCKED / NOT PASS`.** Fixed range
+`32283d0..6678e7d` correctly closes metrics-only publication failure and classifies retained evidence as
+`FROZEN_CONTRACT_INCOMPATIBLE`, with no GPU/ROS/live continuation. Two P1 violations remain: earliest
+source-change evidence can be overwritten after analyzer, and diagnosis output is not repository-contained.
+Matrix 0/40 and absent power inputs prevent ICRA-075 PASS. ICRA-076 awaits an explicit user decision.
+
 ## User decision 005 — repair ICRA-075 — 2026-08-27
 
 **Disposition: `ICRA075_BOUNDED_REPAIR_TASK_READY`.** Under `USER-ICRA-ROUTE-20260827-005`, with unchanged

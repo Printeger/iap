@@ -1,5 +1,13 @@
 # ICRA 2027 P0 -> P4-v2 -> P5 科学纠偏实施计划
 
+## ICRA-075 bounded repair Review BLOCKED — 2026-08-27
+
+`32283d0..6678e7d` 的 bounded repair 已修复 metrics-only publication fail-open，并以 retained matrix-002
+证明 `FROZEN_CONTRACT_INCOMPATIBLE` 后正确在 GPU/ROS/live 前停止。Standards 仍发现两个 P1：更早的
+source-change first-missing stage 会被 analyzer 后阶段覆盖，diagnosis `--output` 未限制在仓库 evidence root。
+ICRA-075 仍为 0/40、无 power inputs、NOT PASS；当前无 Builder task，ICRA-076 等待用户明确 revise/re-freeze
+或接受上述 scientific/engineering debt 后 bypass。
+
 ## User decision 005 / bounded ICRA-075 repair — 2026-08-27
 
 用户决定 `USER-ICRA-ROUTE-20260827-005` 选择修复而非 bypass；唯一 route authority 仍为

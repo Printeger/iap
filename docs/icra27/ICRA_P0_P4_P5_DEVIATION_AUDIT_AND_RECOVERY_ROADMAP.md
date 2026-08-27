@@ -1,5 +1,14 @@
 # ICRA P0 -> P4 -> P5 deviation audit and scientific recovery roadmap
 
+## ICRA-075 bounded repair Review BLOCKED / awaiting user decision — 2026-08-27
+
+Supervisor Review of `32283d0..6678e7d` accepts the bounded task's metrics-only repair and pre-live diagnosis,
+which proves `FROZEN_CONTRACT_INCOMPATIBLE`: frozen GNSS-selected `max_pl` exceeds HAL/VAL throughout retained
+matrix-002 and no permitted miswire exists. Standards rejects overwritten earliest source-change stages and
+unrestricted diagnosis output. ICRA-075 remains 0/40, without power inputs and NOT PASS. The route lock is
+unchanged; ICRA-076 is inactive until the user explicitly authorizes contract revision/re-freeze or accepts the
+missing basis and engineering debt for bypass.
+
 ## User decision 005 — bounded ICRA-075 repair — 2026-08-27
 
 The user explicitly chooses repair rather than bypass after the ICRA-075 BLOCKED Review. Decision

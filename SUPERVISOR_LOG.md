@@ -1,5 +1,58 @@
 # ICRA Supervisor Log
 
+## 2026-08-27 — ICRA-075 bounded repair Review BLOCKED; user decision required
+
+### Review identity and preservation
+
+- Fixed Review base `32283d0fee784089896895f2cf907363561bbaa2`; reviewed Builder HEAD
+  `6678e7d6afc3f0663e33179bea41516bebed9bb9`; merge-base matches the fixed base and fetch confirms divergence
+  `0 0`. The 13-file Builder range has 998 insertions and 36 deletions; `git diff --check` passes.
+- Review ran no build, ROS, GPU or live flow. Supervisor independently reran the focused offline suite 19/19 PASS
+  and inspected the retained shared six-package build and affected CTest PASS records. Shared roots, all retained
+  evidence/logs, hidden artifacts, ignored backup and the protected PDF remain unchanged.
+- Canonical `p5-compatibility-diagnosis-003.json` is repository-local, non-overwriting and SHA-256
+  `70fdddfaac929112b1845871e69d50c35447c3bebcf411da8021464de9ca4124`; attempts 001/002 are retained.
+
+### Standards
+
+Verdict: **REQUEST_CHANGES — two P1 hard violations.**
+
+- `_finalize_row()` invokes the analyzer after an earlier `SOURCE_CHANGED_BEFORE_ROW` or
+  `SOURCE_CHANGED_DURING_ROW`, then overwrites that first blocker with `SOURCE_CHANGED_AFTER_ANALYZER`. This
+  violates the required precise, retained first-missing-stage contract; focused tests do not cover the integrated
+  earlier-source-change path.
+- `icra075_p5_compatibility.py` resolves and creates arbitrary `--output` parent paths without constraining them
+  to `results/icra27/icra075/`; its test exercises an external temporary directory. This violates the required
+  repository-local evidence boundary.
+- The prior metrics-only terminal identity/writer fail-open is correctly closed. Documentation, ownership,
+  retention and the canonical diagnosis authority hashes otherwise conform. Judgement-only smell: source bindings
+  and first-missing stages remain primitive string/dictionary bundles.
+
+### Spec
+
+Verdict: **PASS for the bounded repair task; ICRA-075 itself remains BLOCKED/NOT PASS.**
+
+- The repair adds publication-blocking metrics-only adversaries, post-analyzer/power/final source checks, exact
+  shared build evidence and a retained pre-live compatibility diagnosis. Builder correctly stopped without
+  matrix-003 or forbidden tuning after the required classification.
+- Diagnosis proves `FROZEN_CONTRACT_INCOMPATIBLE`: all 426 validation rows select GNSS under frozen `max_pl`;
+  HPL is `24.3673612..27.733391 m` and VPL is `68.8205779..86.6898998 m` versus HAL/VAL `10/20 m`. Current margin
+  is `-66.6898997929..-48.8461625003 m`; no repairable miswire exists in the exercised frozen authorities.
+
+### Gate disposition
+
+- ICRA-075 remains 0/40, has no power input record, and cannot PASS without a user-authorized protected-contract
+  change. No ICRA-076 task is issued. `active_role=SUPERVISOR`, `task_id=NONE`, `next_task=NONE` pending a distinct
+  user choice: revise/re-freeze the incompatible contract after repairing the two P1 defects, or explicitly accept
+  the scientific and engineering debt and bypass to ICRA-076.
+- No effect, formal freeze, held-out, qualification or campaign claim is authorized. Earlier bypassed debt remains
+  NOT PASS.
+
+### Supervisor window disposition
+
+- Pending post-push audit. The final disposition and pushed handoff anchor will be recorded after this Review
+  changeset becomes repository authority.
+
 ## 2026-08-27 — user decision 005 authorizes bounded ICRA-075 repair
 
 ### Decision and task boundary

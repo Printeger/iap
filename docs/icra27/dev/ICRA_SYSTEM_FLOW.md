@@ -1,5 +1,11 @@
 # ICRA System Flow — User-owned P0 -> P4-v2 -> P5 recovery
 
+> ICRA-075 bounded repair Review update 2026-08-27: metrics-only terminal publication now fails closed and the
+> retained matrix-002 diagnosis correctly proves `FROZEN_CONTRACT_INCOMPATIBLE`, so Builder stopped before
+> GPU/ROS/live. Standards still rejects overwritten earliest source-change evidence and unrestricted diagnosis
+> output. The matrix remains 0/40 with no power inputs; no ICRA-076 task is active pending user decision. Runtime
+> authority and route lock are unchanged.
+
 > User decision 005 update 2026-08-27: ICRA-075 repair is TASK_READY. Restore fail-closed lineage/source gates and
 > diagnose the retained P5 low margin. The runtime graph may change only to correct a proven miswire of existing
 > frozen semantics; no risk/provider/AL/PL/fusion/P5 threshold or authority edge may be weakened. ICRA-076 remains
