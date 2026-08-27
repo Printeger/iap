@@ -3,6 +3,22 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(icra-072b-stabilization): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 /
+  IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — add one offline production-shaped Layer 2 regression
+  entrypoint with eight named happy/fail-closed matrix rows and a retained machine-readable summary contract.
+  Existing manager/FSM/P5 publication tests remain the authority for the happy, occupancy-epoch and unsafe-fused
+  zero-publication paths; P4 request/snapshot/guide injection tests and Layer 1 analyzer/runner tests cover the
+  remaining identity/runtime/operational boundaries. New production adversaries prove mismatched attempts,
+  segment/request identity, snapshot/config/guide identity, non-positive trajectory ID/start and malformed
+  control points cannot write final lineage or publish. ID/start first began RED at the terminal writer; the
+  full-lineage cases then began RED because validation checked only attempt and occupancy epoch. The smallest
+  product fixes reject invalid final identity and compare every current lineage field with the admitted decision
+  record before any terminal row. The canonical runner requires exact pushed source plus the
+  protected PDF allowlist, retains complete suite logs, and fails on absent/duplicate/skipped/nonzero/count-mismatch
+  rows, binds every assertion to its declared suite and requires explicit expected counts. Final shared build and
+  pre-canonical suites pass 6/6 and 8+2+2+4 C++ plus 17+3 Python tests; the one
+  canonical execution remains sequenced after the clean implementation push.
+
 - review(icra-072a-layer1-pass): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 /
   IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — accept Builder HEAD `ac7f923` and source-bound
   `run-024` as ICRA-072A Layer 1 development-integration PASS. Standards and Spec axes pass; shared build is 6/6;

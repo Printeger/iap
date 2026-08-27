@@ -596,6 +596,20 @@ outcomes and owned-group cleanup. Shared build is 6/6, tools 17/17, retained C++
 process health and complete owned cleanup. The loop stopped. ICRA-072B and Layer 3/4 remain unauthorized pending
 Supervisor review.
 
+ICRA-072B stabilization Builder checkpoint (2026-08-27): one canonical offline entrypoint now maps eight required
+Layer 2 boundaries onto the actual production manager/FSM/P4/P5 seams plus the existing operational tool suite.
+The happy test carries a naturally selected P4-v2 guide through fused final PASS, exactly one publication and
+runtime while parsing all three terminal rows and comparing their complete identity and runtime ID/start.
+Production adversaries prove occupancy-epoch change, mismatched attempt/segment/request,
+snapshot-generation/config/guide identity, invalid final trajectory identity and unsafe fused final authority
+cannot publish. ID/start zero first reached the lineage writer, and later full-lineage corruption first passed when
+only attempt/epoch were revalidated. The minimal repairs reject invalid final identity and compare the terminal
+lineage field-for-field with its admitted decision record. Analyzer cases explicitly cover malformed/mixed runtime
+identity, active rejection reasons and unhealthy required processes. Shared build is 6/6 and pre-canonical focused
+suites pass 8+2+2+4 C++ and 17+3 Python tests. The summary binds every assertion to its declared suite and fails
+on missing/duplicate rows or suites and absent explicit counts. No ROS launch, GPU, live run, effect or
+qualification work ran. The retained canonical summary remains pending the mandatory clean implementation push.
+
 ICRA-072A Layer 1 Supervisor PASS (2026-08-27): reviewed Builder HEAD `ac7f923`; Standards and Spec axes pass.
 Shared build is 6/6 and independent Supervisor reruns pass tools 17/17, hermetic launch 24/24 and focused C++
 64/64. Fresh `run-024` binds pushed implementation `b7b5357` at initial/pre-ROS/final checks, passes GPU, 15/15

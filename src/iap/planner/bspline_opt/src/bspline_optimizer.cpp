@@ -604,6 +604,12 @@ namespace ego_planner
   void BsplineOptimizer::invalidateP4AttemptLineage()
   {
     p4_attempt_lineage_.clear();
+    p4_admitted_lineage_.clear();
+  }
+
+  void BsplineOptimizer::syncP4AdmittedLineage()
+  {
+    p4_admitted_lineage_ = p4_attempt_lineage_;
   }
 
   BsplineOptimizer::P4AttemptLineageRecord
@@ -631,9 +637,31 @@ namespace ego_planner
   {
     const uint64_t live_occupancy_epoch =
         grid_map_ ? grid_map_->occupancyGeneration() : 0;
+    const auto same_identity = [](
+        const P4AttemptLineageRecord &current,
+        const P4AttemptLineageRecord &admitted) {
+      return current.planning_attempt_id == admitted.planning_attempt_id &&
+          current.collision_segment_id == admitted.collision_segment_id &&
+          current.request_hash == admitted.request_hash &&
+          current.snapshot_generation == admitted.snapshot_generation &&
+          current.snapshot_config_hash == admitted.snapshot_config_hash &&
+          current.occupancy_epoch == admitted.occupancy_epoch &&
+          current.selected_status == admitted.selected_status &&
+          current.original_guide_hash == admitted.original_guide_hash &&
+          current.risk_guide_hash == admitted.risk_guide_hash &&
+          current.selected_guide_hash == admitted.selected_guide_hash &&
+          current.selection_applied == admitted.selection_applied &&
+          current.closed_collision_observed ==
+              admitted.closed_collision_observed &&
+          current.no_collision_refinement_observed ==
+              admitted.no_collision_refinement_observed;
+    };
     const bool valid = planning_attempt_id != 0 &&
         planning_attempt_id == active_p4_attempt_id_ &&
         !p4_attempt_lineage_.empty() &&
+        p4_attempt_lineage_.size() == p4_admitted_lineage_.size() &&
+        std::equal(p4_attempt_lineage_.begin(), p4_attempt_lineage_.end(),
+                   p4_admitted_lineage_.begin(), same_identity) &&
         std::all_of(
             p4_attempt_lineage_.begin(), p4_attempt_lineage_.end(),
             [planning_attempt_id, live_occupancy_epoch](
@@ -764,6 +792,7 @@ namespace ego_planner
       else
         *existing = makeP4AttemptLineageRecord(decision);
     }
+    syncP4AdmittedLineage();
     return true;
   }
 
@@ -2201,6 +2230,7 @@ namespace ego_planner
     {
       for (auto &lineage : p4_attempt_lineage_)
         lineage.no_collision_refinement_observed = true;
+      syncP4AdmittedLineage();
       return false;
     }
 
@@ -2253,6 +2283,7 @@ namespace ego_planner
       last_collision_scan_result_.closed_segments.clear();
       for (auto &lineage : p4_attempt_lineage_)
         lineage.no_collision_refinement_observed = true;
+      syncP4AdmittedLineage();
       return false;
     }
     last_collision_scan_result_.closed_segments = segment_ids;

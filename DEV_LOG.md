@@ -8784,3 +8784,68 @@ Initial, pre-ROS and final source bindings all accept schema v2 at pushed commit
 record empty rejected tracked/untracked paths. No second live attempt, effect,
 P5 product, qualification or campaign work ran. ICRA-072A is ready for
 Supervisor review; ICRA-072B remains unauthorized.
+
+## 2026-08-27 — ICRA-072B Layer 2 production-shaped stabilization
+
+Requirements: IAP-RQ-320, IAP-RQ-321, IAP-RQ-400, IAP-RQ-410,
+IAP-RQ-421, IAP-RQ-422, IAP-RQ-423 and IAP-RQ-424.
+
+Added the canonical offline `run_icra072b_stabilization.py` entrypoint and its
+focused CLI/summary tests. The entrypoint admits only a new output/log root below
+`results/icra27/icra072b/`, requires exact pushed `HEAD == origin/dev/icra` with
+only the protected PDF/hash untracked, executes five exact suites, retains their
+complete output and matches successful named assertions to each of the eight
+required matrix rows. Missing/duplicate suites, absent assertions, zero or
+unexpected test counts and nonzero exits fail the summary. The schema explicitly
+sets development stabilization true and scientific-effect/qualification claims
+false.
+
+Production coverage reuses actual seams rather than reconstructing JSON. The
+manager/FSM test drives a naturally selected P4-v2 decision through control
+points, final B-spline, fused P5 final, exactly one in-process ROS publication
+and committed runtime. It parses the three terminal CSV rows and compares the
+full admitted attempt/segment/request, snapshot/config, epoch, guide,
+control-point/final identity and positive ID/start tuple; runtime samples must
+carry the same exact ID/start. Existing full-path adversaries prove post-release
+epoch change and unsafe fused integrity despite safe LiDAR publish nothing. New
+full-path cases separately corrupt attempt, segment/request, snapshot
+generation/configuration and original/risk/selected guide identity; each writes
+no lineage and publishes zero.
+
+The non-positive trajectory identity case was RED: ID/start zero reached
+`final_bspline_before_p5` before later P5 rejection. The smallest product repair
+adds terminal-writer admission for positive ID/start and nonempty finite 3-D
+control points. The same full FSM test then turned GREEN with zero lineage and
+zero publication. The full-lineage cases then began RED: validation checked
+only attempt and live occupancy epoch, so all seven altered identity cases
+published once. The minimal repair retains the admitted optimizer decision and
+compares every lineage field at terminal use; all cases turned GREEN with zero
+lineage/publication. Empty, wrong-dimension and Inf control points also fail the
+production writer. Analyzer cases explicitly cover serialization-only malformed,
+sentinel and mixed identity, active rejection reasons, later unsafe runtime and
+unhealthy required processes. Review additionally exposed cross-suite assertion
+attribution; the summary now binds every assertion to its declared suite and
+requires exact row/suite cardinality plus explicit expected counts.
+
+Pre-canonical verification used repository-local ROS/home/tmp roots only:
+
+- `scripts/dev_planner/build_iap_dev.sh`: shared exact packages 6/6, exit 0.
+- Production terminal GTest filter: 8/8, exit 0.
+- P4 decision identity filter: 2/2, exit 0.
+- P4 integration identity filter: 2/2, exit 0.
+- P5 authority/runtime filter: 4/4, exit 0.
+- `python3 test/test_icra072_vertical_slice_tools.py`: 17/17, exit 0.
+- `python3 test/test_icra072b_stabilization.py`: 3/3, exit 0.
+
+The retained repository-local RED/GREEN roots are
+`results/icra27/icra072b/tdd_lineage_red` and `tdd_lineage_green`; the former
+passed invalid final identity 1/1 but failed the two new full-lineage groups
+after observable publication, and the latter passed all three groups 3/3 with
+zero publication. Post-review focused reruns are retained under
+`focused_postreview` and `focused_final`; the latest production/tools/runner
+sets pass 8/8, 17/17 and 3/3.
+
+No ROS launch graph, GPU preflight, live scenario, run-025, bag, effect,
+qualification or campaign ran. The one canonical execution is intentionally
+pending until this final implementation/test/documentation state is committed,
+pushed and fetch-confirmed at divergence `0 0`.

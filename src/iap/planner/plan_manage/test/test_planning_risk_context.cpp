@@ -17,9 +17,13 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <functional>
+#include <limits>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 namespace {
@@ -249,6 +253,39 @@ iap::msg::IntegrityReport p4IntegrityReport() {
 
 }  // namespace
 
+namespace {
+
+std::vector<std::string> splitCsv(const std::string& line) {
+  std::vector<std::string> fields;
+  std::stringstream stream(line);
+  std::string field;
+  while (std::getline(stream, field, ','))
+    fields.push_back(field);
+  return fields;
+}
+
+std::vector<std::unordered_map<std::string, std::string>> readCsvRows(
+    const std::filesystem::path& path) {
+  std::ifstream stream(path);
+  std::string line;
+  if (!std::getline(stream, line))
+    return {};
+  const auto header = splitCsv(line);
+  std::vector<std::unordered_map<std::string, std::string>> rows;
+  while (std::getline(stream, line)) {
+    const auto values = splitCsv(line);
+    if (values.size() != header.size())
+      return {};
+    std::unordered_map<std::string, std::string> row;
+    for (size_t index = 0; index < header.size(); ++index)
+      row.emplace(header[index], values[index]);
+    rows.push_back(std::move(row));
+  }
+  return rows;
+}
+
+}  // namespace
+
 TEST(P4VerticalSliceTerminalLineageTest,
      ProductionFsmPublishesCompleteSameAttemptManagerP5RuntimeChain) {
   const auto snapshot = makeP4SelectionSnapshot();
@@ -261,6 +298,7 @@ TEST(P4VerticalSliceTerminalLineageTest,
             ego_planner::CollisionScanStatus::CLOSED_SEGMENTS);
   ASSERT_EQ(optimizer->getP4AttemptLineage().size(), 1U);
   ASSERT_TRUE(optimizer->getP4AttemptLineage().front().selection_applied);
+  const auto admitted_lineage = optimizer->getP4AttemptLineage().front();
 
   const Eigen::MatrixXd refined = p4RefinedControlPoints();
   optimizer->setControlPoints(refined);
@@ -333,7 +371,9 @@ TEST(P4VerticalSliceTerminalLineageTest,
   EXPECT_TRUE(std::all_of(
       runtime_status.viz_samples.begin(), runtime_status.viz_samples.end(),
       [](const ego_planner::SafetyVizTrajectorySample& sample) {
-        return sample.trajectory_sample_source == "runtime_committed";
+        return sample.trajectory_sample_source == "runtime_committed" &&
+            sample.trajectory_id == 9 &&
+            sample.trajectory_start_time_ns == 1657065614014278400LL;
       }));
 
   const auto lineage_path = std::filesystem::path(
@@ -350,6 +390,44 @@ TEST(P4VerticalSliceTerminalLineageTest,
   EXPECT_NE(contents.find(",1,"), std::string::npos);
   EXPECT_NE(contents.find(",1657065614.0142784,"), std::string::npos);
   EXPECT_NE(contents.find(",1657065614014278400,"), std::string::npos);
+  const auto rows = readCsvRows(lineage_path);
+  ASSERT_EQ(rows.size(), 3U);
+  const std::vector<std::string> expected_stages = {
+      "final_bspline_before_p5", "p5_final_pass_before_publish",
+      "normal_publish_authorized"};
+  const std::string expected_control_hash = rows.front().at(
+      "control_points_hash");
+  const std::string expected_final_identity = rows.front().at(
+      "final_bspline_identity");
+  ASSERT_FALSE(expected_control_hash.empty());
+  ASSERT_FALSE(expected_final_identity.empty());
+  for (size_t index = 0; index < rows.size(); ++index) {
+    const auto& row = rows[index];
+    EXPECT_EQ(row.at("stage"), expected_stages[index]);
+    EXPECT_EQ(row.at("planning_attempt_id"),
+              std::to_string(admitted_lineage.planning_attempt_id));
+    EXPECT_EQ(row.at("collision_segment_id"),
+              std::to_string(admitted_lineage.collision_segment_id));
+    EXPECT_EQ(row.at("request_hash"), admitted_lineage.request_hash);
+    EXPECT_EQ(row.at("snapshot_generation_id"),
+              std::to_string(admitted_lineage.snapshot_generation));
+    EXPECT_EQ(row.at("snapshot_config_hash"),
+              admitted_lineage.snapshot_config_hash);
+    EXPECT_EQ(row.at("occupancy_epoch"),
+              std::to_string(admitted_lineage.occupancy_epoch));
+    EXPECT_EQ(row.at("original_guide_hash"),
+              admitted_lineage.original_guide_hash);
+    EXPECT_EQ(row.at("risk_guide_hash"), admitted_lineage.risk_guide_hash);
+    EXPECT_EQ(row.at("selected_guide_hash"),
+              admitted_lineage.selected_guide_hash);
+    EXPECT_EQ(row.at("selection_applied"), "1");
+    EXPECT_EQ(row.at("closed_collision_observed"), "1");
+    EXPECT_EQ(row.at("no_collision_refinement_observed"), "1");
+    EXPECT_EQ(row.at("control_points_hash"), expected_control_hash);
+    EXPECT_EQ(row.at("trajectory_id"), "9");
+    EXPECT_EQ(row.at("trajectory_start_ns"), "1657065614014278400");
+    EXPECT_EQ(row.at("final_bspline_identity"), expected_final_identity);
+  }
 }
 
 TEST(P4VerticalSliceTerminalLineageTest,
@@ -481,6 +559,193 @@ TEST(P4VerticalSliceTerminalLineageTest,
   EXPECT_TRUE(optimizer_observer->getP4AttemptLineage().empty());
   EXPECT_FALSE(std::filesystem::exists(
       std::filesystem::path(debug_path.string() + ".lineage.csv")));
+}
+
+namespace {
+
+void expectTerminalIdentityRejectedBeforePublication(
+    const std::string& case_name, const uint64_t optimizer_attempt_id,
+    const int32_t trajectory_id, const int32_t start_sec,
+    const std::function<void(ego_planner::BsplineOptimizer*)>&
+        lineage_mutation = {},
+    const bool non_finite_control_point = false) {
+  const auto snapshot = makeP4SelectionSnapshot();
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureP4SelectionTrigger(map.get());
+  const auto debug_path = p4LineageTestPath(case_name + ".csv");
+  auto optimizer = makeP4Optimizer(
+      map, snapshot, debug_path.string(), optimizer_attempt_id);
+  Eigen::MatrixXd seed = p4Seed();
+  ASSERT_EQ(optimizer->initControlPoints(seed, true).status,
+            ego_planner::CollisionScanStatus::CLOSED_SEGMENTS);
+  optimizer->setControlPoints(p4RefinedControlPoints());
+  bool stopped_for_error = false;
+  EXPECT_FALSE(optimizer->checkCollisionAndReboundForTest(&stopped_for_error));
+  EXPECT_FALSE(stopped_for_error);
+  optimizer->releaseP4RiskSnapshot();
+  if (lineage_mutation)
+    lineage_mutation(optimizer.get());
+
+  auto manager = std::make_unique<ego_planner::EGOPlannerManager>();
+  manager->setP4VerticalSliceOptimizerForTest(std::move(optimizer), map);
+  manager->setLatestRiskSnapshotForTest(snapshot);
+  manager->setTimeProvider(
+      []() { return rclcpp::Time(10, 0, RCL_ROS_TIME); });
+  Eigen::MatrixXd refined = p4RefinedControlPoints();
+  if (non_finite_control_point)
+    refined(1, 4) = std::numeric_limits<double>::quiet_NaN();
+  manager->local_data_.position_traj_ =
+      ego_planner::UniformBspline(refined, 3, 0.5);
+  manager->local_data_.velocity_traj_ =
+      manager->local_data_.position_traj_.getDerivative();
+  manager->local_data_.acceleration_traj_ =
+      manager->local_data_.velocity_traj_.getDerivative();
+  manager->local_data_.traj_id_ = trajectory_id;
+  manager->local_data_.start_time_ =
+      rclcpp::Time(start_sec, 0, RCL_ROS_TIME);
+  manager->local_data_.duration_ = 3.0;
+  ego_planner::P5RuntimeIntegrityGate::Config p5_config;
+  p5_config.enable_runtime_gate = true;
+  p5_config.enable_final_gate = true;
+  manager->p5_integrity_gate_ =
+      std::make_unique<ego_planner::P5RuntimeIntegrityGate>(
+          nullptr, p5_config, false);
+  manager->p5_integrity_gate_->setCurrentIntegrityForTest(
+      p4IntegrityReport());
+
+  auto node = std::make_shared<rclcpp::Node>(case_name + "_node");
+  auto publisher = node->create_publisher<traj_utils::msg::Bspline>(
+      case_name + "_bspline", rclcpp::QoS(10));
+  std::atomic<int> publish_count{0};
+  auto subscription = node->create_subscription<traj_utils::msg::Bspline>(
+      case_name + "_bspline", rclcpp::QoS(10),
+      [&publish_count](const traj_utils::msg::Bspline&) {
+        publish_count.fetch_add(1);
+      });
+  ego_planner::EGOReplanFSM fsm;
+  fsm.setP4TerminalFlowForTest(
+      std::move(manager), node, publisher, snapshot,
+      rclcpp::Time(10, 0, RCL_ROS_TIME), []() { return true; });
+  EXPECT_FALSE(fsm.callReboundReplanForTest());
+  rclcpp::executors::SingleThreadedExecutor executor;
+  executor.add_node(node);
+  executor.spin_some();
+  EXPECT_EQ(publish_count.load(), 0);
+  EXPECT_FALSE(std::filesystem::exists(
+      std::filesystem::path(debug_path.string() + ".lineage.csv")));
+}
+
+}  // namespace
+
+TEST(P4VerticalSliceTerminalLineageTest,
+     MismatchedAttemptBlocksFinalLineageAndPublication) {
+  expectTerminalIdentityRejectedBeforePublication(
+      "terminal_attempt_mismatch", 73, 9, 10);
+}
+
+TEST(P4VerticalSliceTerminalLineageTest,
+     InvalidTrajectoryIdentityBlocksFinalLineageAndPublication) {
+  expectTerminalIdentityRejectedBeforePublication(
+      "terminal_missing_trajectory_identity", 1, 0, 10);
+  expectTerminalIdentityRejectedBeforePublication(
+      "terminal_sentinel_trajectory_identity", 1, -1, 10);
+  expectTerminalIdentityRejectedBeforePublication(
+      "terminal_missing_trajectory_start", 1, 9, 0);
+  expectTerminalIdentityRejectedBeforePublication(
+      "terminal_non_finite_control_point", 1, 9, 10, {}, true);
+}
+
+TEST(P4VerticalSliceTerminalLineageTest,
+     MalformedControlPointsBlockTheProductionTerminalWriter) {
+  const std::vector<std::pair<std::string, Eigen::MatrixXd>> cases = {
+      {"empty", Eigen::MatrixXd(3, 0)},
+      {"wrong_dimension", Eigen::MatrixXd::Zero(2, 8)},
+      {"infinite", [] {
+         Eigen::MatrixXd points = p4RefinedControlPoints();
+         points(0, 3) = std::numeric_limits<double>::infinity();
+         return points;
+       }()},
+  };
+  for (const auto& [name, control_points] : cases) {
+    const auto snapshot = makeP4SelectionSnapshot();
+    auto map = std::make_shared<GridMap>();
+    GridMapTestAccess::configureP4SelectionTrigger(map.get());
+    const auto debug_path = p4LineageTestPath(
+        "terminal_malformed_control_points_" + name + ".csv");
+    auto optimizer = makeP4Optimizer(
+        map, snapshot, debug_path.string(), 1);
+    Eigen::MatrixXd seed = p4Seed();
+    ASSERT_EQ(optimizer->initControlPoints(seed, true).status,
+              ego_planner::CollisionScanStatus::CLOSED_SEGMENTS);
+    optimizer->setControlPoints(p4RefinedControlPoints());
+    bool stopped_for_error = false;
+    EXPECT_FALSE(
+        optimizer->checkCollisionAndReboundForTest(&stopped_for_error));
+    EXPECT_FALSE(stopped_for_error);
+    optimizer->releaseP4RiskSnapshot();
+
+    ego_planner::EGOPlannerManager manager;
+    manager.setP4VerticalSliceOptimizerForTest(std::move(optimizer), map);
+    manager.local_data_.position_traj_ =
+        ego_planner::UniformBspline(control_points, 3, 0.5);
+    manager.local_data_.traj_id_ = 9;
+    manager.local_data_.start_time_ =
+        rclcpp::Time(10, 0, RCL_ROS_TIME);
+    EXPECT_FALSE(manager.recordP4VerticalSliceLineage(
+        "final_bspline_before_p5", 10.0));
+    EXPECT_FALSE(std::filesystem::exists(
+        std::filesystem::path(debug_path.string() + ".lineage.csv")));
+  }
+}
+
+TEST(P4VerticalSliceTerminalLineageTest,
+     MismatchedSegmentOrRequestBlocksFinalLineageAndPublication) {
+  expectTerminalIdentityRejectedBeforePublication(
+      "terminal_segment_mismatch", 1, 9, 10,
+      [](ego_planner::BsplineOptimizer* optimizer) {
+        optimizer->mutateP4AttemptLineageForTest(
+            [](ego_planner::BsplineOptimizer::P4AttemptLineageRecord& row) {
+              ++row.collision_segment_id;
+            });
+      });
+  expectTerminalIdentityRejectedBeforePublication(
+      "terminal_request_mismatch", 1, 9, 10,
+      [](ego_planner::BsplineOptimizer* optimizer) {
+        optimizer->mutateP4AttemptLineageForTest(
+            [](ego_planner::BsplineOptimizer::P4AttemptLineageRecord& row) {
+              row.request_hash = "mismatched-request";
+            });
+      });
+}
+
+TEST(P4VerticalSliceTerminalLineageTest,
+     MismatchedSnapshotOrGuideBlocksFinalLineageAndPublication) {
+  using Record = ego_planner::BsplineOptimizer::P4AttemptLineageRecord;
+  const std::vector<std::pair<std::string, std::function<void(Record&)>>>
+      mutations = {
+          {"snapshot_generation", [](Record& row) {
+             ++row.snapshot_generation;
+           }},
+          {"snapshot_config", [](Record& row) {
+             row.snapshot_config_hash = "mismatched-config";
+           }},
+          {"original_guide", [](Record& row) {
+             row.original_guide_hash = "mismatched-original";
+           }},
+          {"risk_guide", [](Record& row) {
+             row.risk_guide_hash = "mismatched-risk";
+           }},
+          {"selected_guide", [](Record& row) {
+             row.selected_guide_hash = "mismatched-selected";
+           }},
+      };
+  for (const auto& [name, mutation] : mutations) {
+    expectTerminalIdentityRejectedBeforePublication(
+        "terminal_" + name + "_mismatch", 1, 9, 10,
+        [&mutation](ego_planner::BsplineOptimizer* optimizer) {
+          optimizer->mutateP4AttemptLineageForTest(mutation);
+        });
+  }
 }
 
 TEST(PlanningRiskContextTest, ManualContextKeepsGenerationUntilClear) {

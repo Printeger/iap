@@ -499,6 +499,11 @@ namespace ego_planner
     const std::vector<P4AttemptLineageRecord> &getP4AttemptLineage() const {
       return p4_attempt_lineage_;
     }
+    void mutateP4AttemptLineageForTest(
+        const std::function<void(P4AttemptLineageRecord &)> &mutation) {
+      if (!p4_attempt_lineage_.empty())
+        mutation(p4_attempt_lineage_.front());
+    }
     bool hasP4RiskSnapshotForTest() const { return static_cast<bool>(p4_risk_snapshot_); }
     bool p4DecisionReadyForInjectionForTest(
         P4GuideDecision *decision, const Eigen::MatrixXd &points,
@@ -621,6 +626,7 @@ namespace ego_planner
     std::vector<P1IntegrityVizSample> last_p1_viz_samples_;
     std::vector<P4GuideViz> last_p4_guides_;
     std::vector<P4AttemptLineageRecord> p4_attempt_lineage_;
+    std::vector<P4AttemptLineageRecord> p4_admitted_lineage_;
     OptimizerCostBreakdown last_optimizer_cost_breakdown_;
     P1OptimizationTrace last_p1_optimization_trace_;
     P1BasePrepassTrace last_p1_base_prepass_trace_;
@@ -649,6 +655,7 @@ namespace ego_planner
     uint64_t p4_occupancy_epoch_{0};
     uint64_t active_p4_attempt_id_{0};
     void invalidateP4AttemptLineage();
+    void syncP4AdmittedLineage();
     static P4AttemptLineageRecord makeP4AttemptLineageRecord(
         const P4GuideDecision &decision);
     P1PlanningRiskContext p1_risk_context_;

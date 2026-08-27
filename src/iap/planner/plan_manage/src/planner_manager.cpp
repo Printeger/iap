@@ -757,6 +757,13 @@ namespace ego_planner
     if (!config.enable_risk_aware_astar ||
         config.objective != P4RiskObjective::PROVIDER_BOTTLENECK_V2)
       return true;
+    const Eigen::MatrixXd control_points =
+        local_data_.position_traj_.getControlPoint();
+    if (local_data_.traj_id_ <= 0 ||
+        local_data_.start_time_.nanoseconds() <= 0 ||
+        control_points.rows() != 3 || control_points.cols() == 0 ||
+        !control_points.allFinite())
+      return false;
     if (!bspline_optimizer_->validateP4AttemptLineage(
             planning_risk_context_.planning_attempt_id))
       return false;
@@ -778,8 +785,6 @@ namespace ego_planner
              "closed_collision_observed,no_collision_refinement_observed,"
              "trajectory_id,trajectory_start_s,trajectory_start_ns,final_bspline_identity\n";
     csv << std::setprecision(17);
-    const Eigen::MatrixXd control_points =
-        local_data_.position_traj_.getControlPoint();
     const std::string control_hash = p4ControlPointHash(control_points);
     for (const auto &guide : guides)
     {

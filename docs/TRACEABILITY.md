@@ -1,5 +1,16 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-27 ICRA-072B production stabilization implementation
+
+| Req ID | Stabilization row/seam | Implementation and focused evidence | Status |
+|---|---|---|---|
+| IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 | Happy path | `P4VerticalSliceTerminalLineageTest.ProductionFsmPublishesCompleteSameAttemptManagerP5RuntimeChain` drives actual optimizer/manager/FSM, fused final gate, one ROS in-process publication and committed runtime on one complete lineage tuple | **PRE-CANONICAL PASS** |
+| IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-423 | Occupancy epoch and attempt/request identity | Existing post-release epoch adversary plus full terminal adversaries for mismatched attempt, segment and request emit zero publication/terminal lineage; P4 injection independently rejects the same identities | **RED→GREEN / PRE-CANONICAL PASS** |
+| IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-423 | Snapshot/guide and final trajectory identity | Full terminal adversaries separately corrupt snapshot generation/config and original/risk/selected guide hashes and emit zero publication/lineage. Invalid ID/start and NaN cases fail in the FSM; empty/wrong-dimension/Inf control points fail at the same production writer. `BsplineOptimizer` retains an admitted decision shadow and terminal validation compares every lineage field; analyzer adversaries complement serialization-only malformed/sentinel/mixed identity | **RED→GREEN / PRE-CANONICAL PASS** |
+| IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 | P5 final/runtime authority | Existing production FSM proves unsafe fused current rejects with safe LiDAR and zero publication. Focused P5 gate plus analyzer cases reject unsafe/replan/emergency/reasons/mixed identity/later unsafe runtime | **PRE-CANONICAL PASS** |
+| IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-423 / IAP-RQ-424 | Operational closure and canonical gate | Existing 17-test runner/analyzer suite explicitly drives GPU/source/required-process/cleanup failures. New `run_icra072b_stabilization.py` validates exact pushed source/PDF, eight row/five suite cardinalities and explicit counts, matches each assertion only inside its declared suite, retains logs and emits no qualification/effect claim | **IMPLEMENTATION READY TO FREEZE** |
+
+
 ## 2026-08-27 ICRA-072A Layer 1 PASS Supervisor Review
 
 | Req ID | Reviewed seam | Evidence and disposition | Status |

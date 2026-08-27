@@ -603,10 +603,30 @@ TEST(P4CollisionGuideDecision, InjectionRechecksRequestAndEpochIdentity)
       decision, wrong_attempt, &reason));
   EXPECT_EQ(
     reason, ego_planner::P4GuideDecisionReason::REQUEST_IDENTITY_MISMATCH);
+  const ego_planner::P4GuideRequest wrong_segment(
+    11, 99, Eigen::Vector3d(-4.0, 0.0, 0.0),
+    Eigen::Vector3d(4.0, 0.0, 0.0), true, snapshot, 10.0, epoch,
+    [&epoch]() {return epoch;}, metricsOnlyConfig());
+  EXPECT_FALSE(ego_planner::p4GuideDecisionReadyForInjection(
+      decision, wrong_segment, &reason));
+  EXPECT_EQ(
+    reason, ego_planner::P4GuideDecisionReason::REQUEST_IDENTITY_MISMATCH);
   auto corrupt_hash = decision;
   corrupt_hash.request_hash = "corrupt";
   EXPECT_FALSE(ego_planner::p4GuideDecisionReadyForInjection(
       corrupt_hash, makeRequest(snapshot, epoch, &epoch), &reason));
+  EXPECT_EQ(
+    reason, ego_planner::P4GuideDecisionReason::REQUEST_IDENTITY_MISMATCH);
+  auto corrupt_snapshot_config = decision;
+  corrupt_snapshot_config.snapshot_config_hash = "corrupt";
+  EXPECT_FALSE(ego_planner::p4GuideDecisionReadyForInjection(
+      corrupt_snapshot_config, makeRequest(snapshot, epoch, &epoch), &reason));
+  EXPECT_EQ(
+    reason, ego_planner::P4GuideDecisionReason::REQUEST_IDENTITY_MISMATCH);
+  auto corrupt_selected_guide = decision;
+  corrupt_selected_guide.selected.canonical_hash = "corrupt";
+  EXPECT_FALSE(ego_planner::p4GuideDecisionReadyForInjection(
+      corrupt_selected_guide, makeRequest(snapshot, epoch, &epoch), &reason));
   EXPECT_EQ(
     reason, ego_planner::P4GuideDecisionReason::REQUEST_IDENTITY_MISMATCH);
   ++epoch;

@@ -381,6 +381,26 @@ class Icra072VerticalSliceToolsTest(unittest.TestCase):
             self.assertIn("p5_runtime_action_not_ok",
                           json.loads(latent_output.read_text())["failures"])
             runtime_row["payload"]["raw_action"] = "OK"
+            for field, value in (
+                    ("active_reasons", ["current_low_margin"]),
+                    ("current_reason", "current_low_margin"),
+                    ("future_reason", "future_bad_inside_emergency_time")):
+                with self.subTest(active_runtime_rejection_field=field):
+                    runtime_row["payload"][field] = value
+                    capture_path.write_text(
+                        "".join(json.dumps(row, sort_keys=True) + "\n"
+                                for row in captured_rows))
+                    reason_output = root / f"analysis_runtime_{field}.json"
+                    completed = subprocess.run(
+                        [sys.executable, str(ANALYZER), "--run-root",
+                         str(root), "--output", str(reason_output)],
+                        capture_output=True, text=True, check=False)
+                    self.assertNotEqual(completed.returncode, 0)
+                    self.assertIn(
+                        "p5_runtime_action_not_ok",
+                        json.loads(reason_output.read_text())["failures"])
+                    runtime_row["payload"][field] = [] if field == (
+                        "active_reasons") else ""
             later_emergency = json.loads(json.dumps(runtime_row))
             later_emergency["receive_steady_s"] = 4.5
             later_emergency["payload"]["action"] = (
@@ -629,6 +649,20 @@ class Icra072VerticalSliceToolsTest(unittest.TestCase):
                 json.dumps(launch))
             manifest_path = root / "run_manifest.json"
             manifest = json.loads(manifest_path.read_text())
+            manifest["process_result"]["required_processes_ok"] = False
+            manifest_path.write_text(json.dumps(manifest))
+            process_output = root / "analysis_required_process_failed.json"
+            completed = subprocess.run(
+                [sys.executable, str(ANALYZER), "--run-root", str(root),
+                 "--output", str(process_output)],
+                capture_output=True, text=True, check=False)
+            self.assertNotEqual(completed.returncode, 0)
+            process_analysis = json.loads(process_output.read_text())
+            self.assertIn("required_process_set_unhealthy",
+                          process_analysis["failures"])
+            self.assertEqual(process_analysis["first_missing_stage"],
+                             "required_process_health")
+            manifest["process_result"]["required_processes_ok"] = True
             manifest["owned_process_groups_cleared"] = False
             manifest["result"] = "FAIL"
             manifest_path.write_text(json.dumps(manifest))

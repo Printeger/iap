@@ -79,6 +79,23 @@ Runner 会在 GPU、capture、process/cleanup 失败及正常结束路径自动�
 已有编号不得覆盖；这不是 one-shot 正式实验。完整层级、退出条件和证据
 保留规则见 `docs/icra27/ICRA_FOUR_LAYER_DEVELOPMENT_WORKFLOW.md`。
 
+### 1.2.2 ICRA-072B Layer 2 离线稳定化回归
+
+Layer 2 不启动 ROS launch graph、GPU preflight 或 live scenario。先提交并推送最终代码/测试状态，确认
+`HEAD...origin/dev/icra` 为 `0 0` 且工作树仅保留受保护 PDF，再执行一次：
+
+```bash
+cd /home/dev/ws_iap/src/iap
+
+python3 scripts/dev_planner/run_icra072b_stabilization.py \
+  --output results/icra27/icra072b/final_summary.json \
+  --log-root results/icra27/icra072b/final_logs
+```
+
+输出和 log root 必须尚不存在；runner 会验证 pushed source、精确 PDF allowlist、五个聚焦 suite 及八行
+稳定化矩阵，并在任一 required row 缺失、重复、跳过、计数不符或退出非零时 fail closed。该结果仅为
+development stabilization evidence，不是 scientific-effect 或 qualification manifest。
+
 ### 1.3 运行一个最小检查
 
 ```bash
