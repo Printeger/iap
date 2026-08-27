@@ -45,7 +45,15 @@ Verdict: **PASS — zero missing, scope-creep or implemented-wrong findings.**
 
 ### Supervisor window disposition
 
-- Pending the required post-push audit; this section will be finalized after the Review/task changeset is pushed.
+- Review/task changeset `2084242af64721b2212c1bd2f129cc7a35f0bae5` was pushed; pre-push passed and fetch
+  confirmed divergence `0 0`. The normal commit hit `BUILDER_SUPERVISOR_FILE_STAGED` because the pre-commit
+  lifecycle check read the prior DEEPSEEK handoff; after route consistency PASS and exact 13-file staging
+  inspection, Supervisor used the controlled section 8.6 `--no-verify` path. Builder evidence and the protected
+  PDF remained unstaged.
+- **`ROTATE_RECOMMENDED`**. Reason: `ICRA074_PASS_GATE_CHANGE_TO_ICRA075`. This is a Gate PASS and task/scope
+  transition from offline targeted verification to runtime exploratory/power work. A fresh Supervisor window may
+  later review ICRA-075 from pushed authority. Rotation leaves `active_role=DEEPSEEK` and authorizes nothing beyond
+  `NEXT_TASK.md`.
 
 ## 2026-08-27 — user decision 004 repairs geometry only and issues ICRA-074
 

@@ -43,13 +43,13 @@ recovery_roadmap: docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP
 four_layer_workflow: docs/icra27/ICRA_FOUR_LAYER_DEVELOPMENT_WORKFLOW.md
 guard_plan: docs/icra27/ICRA_CROSS_LAYER_GUARD_PLAN.md
 artifact_retention: ALL_ICRA072_EVIDENCE_SHARED_ROOTS_HIDDEN_USER_ARTIFACTS_AND_PROTECTED_PDF_RETAINED
-window_disposition: PENDING_POST_PUSH_AUDIT
-rotation_reason: PENDING_POST_PUSH_AUDIT
-window_handoff_anchor: PENDING_REVIEW_PUSH
+window_disposition: ROTATE_RECOMMENDED
+rotation_reason: ICRA074_PASS_GATE_CHANGE_TO_ICRA075
+window_handoff_anchor: 2084242af64721b2212c1bd2f129cc7a35f0bae5
 window_next_role: SUPERVISOR
 window_next_review_task: ICRA-075
 window_bootstrap_source: REPOSITORY_AUTHORITY_ONLY
-updated_utc: 2026-08-27T11:37:32Z
+updated_utc: 2026-08-27T11:38:13Z
 ```
 
 ICRA-074 Builder HEAD `ee9774a1fad637a4147036006d91f08b96d5f8b2` passes Review against fixed handoff
