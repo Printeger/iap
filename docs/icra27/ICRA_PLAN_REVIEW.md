@@ -1,5 +1,17 @@
 # ICRA 2027 P0 -> P4-v2 -> P5 计划复审
 
+## ICRA-072A Layer 1 completion Review — 2026-08-27
+
+**Verdict: `PASS — ICRA072A_PASS_SOURCE_BOUND_COMPLETE_LIVE_IDENTITY`.** Builder HEAD `ac7f923` repairs the
+exact-source and committed-runtime admission boundaries, and source-bound `run-024` proves one ordered P0 ->
+P4 selection -> EGO final -> authoritative fused P5 final -> normal publish -> P5 runtime identity. The shared
+six-package build, GPU/process preflight, first-missing-stage reporting and owned-process cleanup all pass.
+
+This is a development integration PASS only. It makes no scientific-effect, qualification or campaign claim.
+The only authorized next task is ICRA-072B Layer 2 stabilization: automate the production-shaped happy path and
+epoch/attempt/lineage/P5 fail-closed boundaries without another ROS/GPU/live run. Only its later Review PASS may
+close ICRA-072 and issue ICRA-073.
+
 ## ICRA-072A exact-admission Review — 2026-08-27
 
 **Verdict: `REQUEST_CHANGES`.** `run-023` is the first pushed tracked-source-bound development run with all seven ordered

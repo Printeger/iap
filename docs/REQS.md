@@ -458,7 +458,7 @@ Acceptance:
 - Planner chooses safer path even if longer when integrity violated.
 
 ### IAP-RQ-423 P4 collision-guide planning and P5 lineage
-Status: **P4-v1 SCIENTIFIC_NO_GO RETAINED / ICRA-072A LAYER 1 REQUEST_CHANGES: ACCEPTANCE FAIL-OPEN /
+Status: **P4-v1 SCIENTIFIC_NO_GO RETAINED / ICRA-072A LAYER 1 PASS / ICRA-072B STABILIZATION TASK_READY /
 INVERSE-CORRIDOR DESIGN FROZEN FOR LAYER 3, IMPLEMENTATION NOT STARTED**
 
 Source: `docs/icra27/ICRA_SCOPE.md` and the 2026-08-20 Supervisor scope pivot. This requirement extends collision-guide planning evidence; it does not replace or verify the IAP-RQ-422 PL/AL admission rule.
@@ -487,7 +487,8 @@ Acceptance:
 - The selected decision/hash reaches the final B-spline, and a P5 final rejection produces zero normal publication.
 
 ### IAP-RQ-424 User-owned ICRA research route and P4-v2 scientific recovery
-Status: **DEVELOPMENT-FIRST ROUTE LOCKED / FOUR-LAYER WORKFLOW ACTIVE / ICRA-072A LAYER 1 REQUEST_CHANGES /
+Status: **DEVELOPMENT-FIRST ROUTE LOCKED / FOUR-LAYER WORKFLOW ACTIVE / ICRA-072A LAYER 1 PASS /
+ICRA-072B STABILIZATION TASK_READY /
 GUARD REPAIR NONBLOCKING / INVERSE-CORRIDOR DESIGN FROZEN, IMPLEMENTATION NOT STARTED**
 
 Source: `docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md` and user decision
@@ -594,6 +595,15 @@ outcomes and owned-group cleanup. Shared build is 6/6, tools 17/17, retained C++
 `1657065616411275703 ns`, final identity `36cb40d791d9b347`, four exact fused-safe runtime rows, 15/15 required
 process health and complete owned cleanup. The loop stopped. ICRA-072B and Layer 3/4 remain unauthorized pending
 Supervisor review.
+
+ICRA-072A Layer 1 Supervisor PASS (2026-08-27): reviewed Builder HEAD `ac7f923`; Standards and Spec axes pass.
+Shared build is 6/6 and independent Supervisor reruns pass tools 17/17, hermetic launch 24/24 and focused C++
+64/64. Fresh `run-024` binds pushed implementation `b7b5357` at initial/pre-ROS/final checks, passes GPU, 15/15
+required-process health and owned cleanup, and reports all seven stages with no failures or first-missing stage.
+Selected ID `12`, start `1657065616411275703`, final identity `36cb40d791d9b347` agree; all 44 samples in four
+fused runtime rows are exact and safe. ICRA-072A is complete only as development integration. ICRA-072B is now the
+sole active task; it must stabilize the happy path and epoch/attempt/lineage/P5 fail-closed boundaries before
+ICRA-072 can close or ICRA-073 can be issued. No scientific, qualification or campaign claim is made.
 
 Four-layer Supervisor disposition (2026-08-26): checkpoint `6a6bdd3` is
 `ARCHIVED_AS_FOUND / BLOCKED_TERMINAL_CHAIN_MISSING`. User workflow decision

@@ -1,13 +1,13 @@
 # ICRA 2027 P0 -> P4-v2 -> P5 科学纠偏实施计划
 
-## Current Layer 1 disposition — 2026-08-27
+## Current Layer 2 disposition — 2026-08-27
 
-`run-023` 已完成实际 P0 -> P4 -> EGO final -> authoritative fused P5 final -> publish -> P5 runtime
-链路，共享 6-package build、required-process health 和 cleanup 也通过，因此模块联调的实际运行已被观测。
-但 ICRA-072A Review 仍为 `REQUEST_CHANGES`：analyzer 对 mixed runtime samples 使用 `any` 匹配，
-source admission 忽略全部 untracked paths，run-end source-change 分支缺少 TDD，且已披露一次
-仓库外测试输出创建/删除。当前只允许修复这些验收边界，clean push 后使用新的 `run-024`
-或更高 identity。不得开始 ICRA-072B 或 Layer 3/4。
+ICRA-072A Layer 1 已通过 Supervisor Review。source-bound `run-024` 在共享 6-package build 上完成同一
+committed trajectory identity 的 P0 -> P4 selection -> EGO final -> authoritative fused P5 final -> publish ->
+P5 runtime；精确 source admission、GPU/process fail-closed、first-missing-stage 和 owned cleanup 均通过。
+当前唯一授权任务为 ICRA-072B：用一个 repository-local、production-shaped 的离线回归入口自动覆盖
+成功链与 epoch/attempt/lineage/P5 fail-closed 边界。不得新增 live run，也不得开始 Layer 3/4、效果、
+qualification 或 campaign 工作。
 
 ## Four-layer implementation workflow — 2026-08-26
 
@@ -16,10 +16,10 @@ source admission 忽略全部 untracked paths，run-end source-change 分支缺�
 `docs/icra27/ICRA_FOUR_LAYER_DEVELOPMENT_WORKFLOW.md`；route-lock sentinel 与 ICRA-072..080 gate sequence
 不变。
 
-当前只执行 Layer 1 / ICRA-072A：使用共享 `/home/dev/ws_iap/{build,install,log}` 增量构建，允许新的
-development run identity 重复运行，直到一条轨迹完成 P0 -> P4 -> EGO final -> P5 final -> publish ->
-P5 runtime。Layer 1 内失败可直接修复、重建、再运行，不设 one-shot，也不做中间 Supervisor Review。
-成功后才进入 ICRA-072B 自动回归；之后才依次进入 inverse-corridor diagnostics 和 formal verification。
+Layer 1 / ICRA-072A 已由 `run-024` 完成。当前只执行 Layer 2 / ICRA-072B：使用共享
+`/home/dev/ws_iap/{build,install,log}`，把已通过的完整链与 epoch/attempt/lineage/P5 fail-closed 边界固化为
+production-shaped 自动回归。ICRA-072B Review PASS 后才可关闭 ICRA-072 并签发 ICRA-073；之后才依次
+进入 inverse-corridor diagnostics 和 formal verification。
 
 `6a6bdd3` 的 `-003` 以 BLOCKED 实况封存。历史 build/install 可再生树按已推送清单删除；raw、compact、
 registered live、普通日志、科学证据和 PDF 不删除。精确开发命令集中在 README，其他权威文档只链接，
@@ -74,10 +74,10 @@ ICRA-072 独立授权 bounded P4-v2 development surface。
 
 `docs/icra27/dev/ICRA_P4_V2_INVERSE_CORRIDOR_FIXTURE.md` 已冻结
 `ICRA_P4_V2_INVERSE_CORRIDOR_FIXTURE_V1`，但当前状态仍是
-`DESIGN_FROZEN / IMPLEMENTATION_DEFERRED_TO_ICRA-073`。ICRA-072 最新 Review 为 `REQUEST_CHANGES`，
-所以当前 continuation 只可修复 terminal lineage、补齐真实 production-shaped 回归，并使用一个独立命名的
-development-only selection trigger 令既有 vertical slice 自然产生完整 provider support。该 trigger 不得
-复用 inverse-corridor 名称、几何或科学效果身份。
+`DESIGN_FROZEN / IMPLEMENTATION_DEFERRED_TO_ICRA-073`。ICRA-072A Layer 1 已通过 Review，当前
+ICRA-072B continuation 只能把成功链和 terminal identity、epoch/attempt/lineage/P5 fail-closed 边界固化为
+production-shaped 自动回归。既有 development-only selection trigger 不得复用 inverse-corridor 名称、
+几何或科学效果身份。
 
 ICRA-072A full-lineage Review PASS 只能签发 ICRA-072B；只有 ICRA-072B 稳定层 Review PASS 才能关闭
 ICRA-072 并签发 ICRA-073。ICRA-073 才实现 PRIMARY、EXACT_MIRROR、

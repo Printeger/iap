@@ -3,6 +3,16 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- review(icra-072a-layer1-pass): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 /
+  IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — accept Builder HEAD `ac7f923` and source-bound
+  `run-024` as ICRA-072A Layer 1 development-integration PASS. Standards and Spec axes pass; shared build is 6/6;
+  Supervisor reruns tools 17/17, hermetic launch 24/24 and focused C++ 64/64. Run024 binds pushed implementation
+  `b7b5357` at all three source checks, passes GPU, 15/15 required processes and cleanup, and has no analyzer
+  failure or first-missing stage. One selected ID `12` / start `1657065616411275703` / final identity
+  `36cb40d791d9b347` agrees through P0/P4/EGO/fused-P5-final/publication and four runtime records with 44/44 exact
+  safe samples. Issue only ICRA-072B production-shaped automated stabilization; ICRA-072 remains open and no
+  effect, qualification or campaign claim is authorized.
+
 - fix(icra-072a-exact-admission): IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 / IAP-RQ-422 /
   IAP-RQ-423 / IAP-RQ-424 — require every `runtime_committed` sample in each counted fused runtime row to carry
   the same explicit positive trajectory ID and integer-nanosecond start; mixed missing, malformed, sentinel,

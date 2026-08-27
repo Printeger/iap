@@ -484,8 +484,8 @@ unchanged. Development one-shot and per-task build/install controls do not apply
 
 The frozen inverse-corridor diagnostic design is
 `docs/icra27/dev/ICRA_P4_V2_INVERSE_CORRIDOR_FIXTURE.md`
-(`ICRA_P4_V2_INVERSE_CORRIDOR_FIXTURE_V1`). It is still implementation-deferred because ICRA-072A integration
-and ICRA-072B stabilization have not closed ICRA-072. Its independent oracle is an evaluation-only bypass and
+(`ICRA_P4_V2_INVERSE_CORRIDOR_FIXTURE_V1`). It is still implementation-deferred: ICRA-072A integration passed,
+but ICRA-072B stabilization has not yet closed ICRA-072. Its independent oracle is an evaluation-only bypass and
 may never feed P0, P4, EGO or P5 decisions. A development-only selection trigger used to close ICRA-072 is a
 distinct engineering fixture and cannot be relabelled as inverse-corridor effect evidence.
 

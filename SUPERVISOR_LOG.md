@@ -1,5 +1,85 @@
 # ICRA Supervisor Log
 
+## 2026-08-27 — ICRA-072A Review PASS; ICRA-072B stabilization issued
+
+### Review identity and preservation
+
+- Fixed incremental Review base: `dc77aa9864887abcf993d9ddfae3b140718f1eca`; reviewed Builder HEAD:
+  `ac7f923aef8e637d4228c52634291cf311122743`. The range is two Builder commits and ten changed files. The full
+  route lineage remains anchored at user-named `3b5199e0cf8efc904f124cdb73156a3209eb6d80`. Startup fetch confirmed
+  HEAD and `origin/dev/icra` at divergence `0 0`; tracked state was clean and the protected PDF was the sole
+  untracked path at unchanged SHA-256 `1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+- Review preserved `/home/dev/ws_iap/{build,install,log}`, `run-001` through `run-024`, all raw/compact/live/
+  scientific evidence, ordinary logs and the PDF. It started no ROS launch, GPU preflight or live flow and did not
+  rewrite retained evidence. `git diff --check` passes.
+- The repository has no issue-tracker routing file; the exact active repository spec `NEXT_TASK.md` is therefore
+  the Spec source. No issue-tracker setup mutation was needed for this bounded Review.
+
+### Standards axis
+
+Verdict: **PASS with one non-blocking maintainability smell; no documented-standard violation.**
+
+- Both commit bodies map `IAP-RQ-400/410/421/422/423/424`; Builder synchronized `DEV_LOG.md`, `docs/CHANGES.md`,
+  `docs/TRACEABILITY.md` and `docs/REQS.md`, stayed inside the allowlist, retained all evidence, used shared roots
+  and changed no Supervisor/route authority or canonical Layer 1 command.
+- Repository-local replacement C++ output, command and exit metadata are tracked under
+  `results/icra27/icra072/final_acceptance_repair_verification/cpp/`; no historical external output was recreated
+  or concealed.
+- **Low / Duplicated Code and Shotgun Surgery risk:** the protected PDF path/hash contract is repeated in runner,
+  analyzer and fixture. Independent analyzer validation makes the explicit duplication defensible; a future
+  contract change should consider a small immutable shared definition. This is not added to Layer 2 scope.
+
+### Spec axis
+
+Verdict: **PASS — no missing requirement, scope creep or implemented-but-wrong finding.**
+
+- Analyzer requires every committed sample in each counted fused runtime record to resolve to one explicit
+  positive selected ID/start. Five matching-plus-missing/malformed/sentinel/mismatched adversaries fail closed;
+  effective/raw action, reasons and rejection checks remain enforced.
+- Source-binding v2 inspects full porcelain status, records allowlisted/observed/rejected paths, admits only the
+  exact protected PDF/hash and rejects arbitrary untracked Python/config plus tracked, staged, rename and deletion
+  states. Initial, pre-ROS and final binding paths are covered.
+- The final changed-during-run lifecycle test emits typed manifest/analysis/outcome, returns nonzero and proves its
+  two owned groups clear. Complete replacement C++ output is repository-local and retained.
+- All changed paths are authorized. No P5 source/fusion/threshold, product algorithm, route, scope, Supervisor
+  authority, inverse-corridor, scientific or qualification work entered the diff.
+
+### Build, offline regression and live Gate evidence
+
+- Latest shared build log `build_2026-08-27_05-28-00` records exactly `iap`, `plan_env`, `traj_utils`,
+  `path_searching`, `bspline_opt`, `ego_planner`; each package's build/install commands return zero.
+- Builder evidence reports tools 17/17, hermetic launch 24/24 and focused C++ 64/64. Supervisor independently
+  reran the same 17/17 tools, 24/24 hermetic launch and 64/64 C++ tests with all exit codes zero. Hermetic inventory
+  reports the external ROS-log set unchanged at 17,809 entries. Ignored Supervisor roots are retained under
+  `results/icra27/icra072/supervisor_review_ac7_{launch,cpp}`.
+- `run-024` initial/pre-ROS/final source bindings all accept schema v2 at pushed implementation
+  `b7b5357c6459ccbd07aa68a146a3ecb4fbf65b71`, with only the protected PDF/hash observed and empty rejected path
+  lists. GPU preflight passes `nvidia-smi`, `cuInit(0)` and device count 1. All 15 required processes are seen with
+  no runtime failure; controlled shutdown is separately classified; both owned groups clear.
+- Runner and analyzer exit zero, failures are empty, first missing stage is null and all seven stage booleans are
+  true. Counts are P0 54, P4 decisions 37, both-complete 20, natural selected 11, lineage 3, P5-final/publication
+  16 and runtime-bound 65.
+- The accepted selected terminal is ID `12`, start `1657065616411275703`, final identity `36cb40d791d9b347`.
+  Independent CSV/JSON inspection confirms one consistent attempt/segment/request, snapshot generation/config,
+  epoch, guide/control/final identity and ordered final-before-publication-before-runtime. Its fused final is
+  effective/raw `OK`; four fused runtime records carry 44/44 exact committed samples, effective/raw `OK`, empty
+  reasons and no rejection.
+
+### Gate verdict and next action
+
+- Gate verdict is **`ICRA072A_PASS_SOURCE_BOUND_COMPLETE_LIVE_IDENTITY`**. ICRA-072A Layer 1 is complete as
+  development integration. It is not a scientific-effect, qualification, certification or campaign PASS.
+- The only authorized next task is `ICRA-072B_LAYER2_STABILIZATION`. It converts the accepted happy path plus
+  epoch/attempt/request/snapshot/guide/final-identity/P5/operational failure boundaries into one canonical
+  production-shaped offline regression gate. It starts no live run and changes no research claim.
+- ICRA-072 remains open. Only an ICRA-072B Supervisor Review PASS may close it and issue ICRA-073 effect
+  diagnostics; Layer 4 and campaign remain blocked.
+
+### Supervisor window disposition
+
+- Pending the mandatory post-push audit. The Layer 1 PASS and Layer 2 authorization must first become the pushed
+  authoritative handoff; the final rotation result will be recorded afterward in a minimal Supervisor-only commit.
+
 ## 2026-08-27 — ICRA-072A Review REQUEST_CHANGES; final exact-admission repair reissued
 
 ### Review identity and retained evidence

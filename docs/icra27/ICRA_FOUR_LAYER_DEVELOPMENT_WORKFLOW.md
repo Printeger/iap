@@ -1,9 +1,14 @@
 # ICRA four-layer development and validation workflow
 
-Status: **ACTIVE — LAYER 1 ITERATIVE INTEGRATION**
+Status: **ACTIVE — LAYER 2 STABILIZATION**
 
 Requirements: `IAP-RQ-320`, `IAP-RQ-321`, `IAP-RQ-400`, `IAP-RQ-410`, `IAP-RQ-421`, `IAP-RQ-422`,
 `IAP-RQ-423`, `IAP-RQ-424`
+
+Current disposition: ICRA-072A Layer 1 passed Supervisor Review on 2026-08-27 with source-bound `run-024`.
+ICRA-072B is the only authorized next task and must automate the production-shaped success path plus its
+epoch/attempt/lineage/P5 fail-closed boundaries. It does not authorize another live run, effect work or a
+scientific/qualification claim.
 
 ## 1. Purpose
 

@@ -1,5 +1,15 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-27 ICRA-072A Layer 1 PASS Supervisor Review
+
+| Req ID | Reviewed seam | Evidence and disposition | Status |
+|---|---|---|---|
+| IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 | Complete selected identity | `run-024`: attempt/segment/request, snapshot generation/config, epoch, selected/control/final identity and ID `12` / start `1657065616411275703` agree through ordered final-P5, publication and runtime; four fused runtime rows carry 44/44 exact committed samples, effective/raw OK, empty reasons and no rejection | **ICRA-072A LAYER 1 PASS** |
+| IAP-RQ-423 / IAP-RQ-424 | Exact source and operational closure | Initial/pre-ROS/final schema-v2 bindings name pushed `b7b5357`, observe only the exact protected PDF/hash and reject nothing. GPU passes; 15/15 required processes have no runtime failure; controlled shutdown is separate; owned groups clear; runner/analyzer exit zero with no failures/first-missing stage | **SOURCE-BOUND LIVE PASS** |
+| IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-421 / IAP-RQ-422 | Build and regression | Shared exact six-package build 6/6; independent Supervisor tools 17/17, hermetic launch 24/24 and focused C++ 64/64 pass | **REVIEW PASS** |
+| IAP-RQ-423 / IAP-RQ-424 | Two-axis scope/conformance | Standards PASS with one non-blocking duplicated-contract smell; Spec PASS with no missing, scope-creep or wrong-behavior finding | **PASS** |
+| IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 | Next layer | `NEXT_TASK.md` issues only ICRA-072B production-shaped offline stabilization of happy plus epoch/attempt/lineage/P5/operational fail-closed boundaries | **ICRA-072B TASK_READY; ICRA-072 OPEN** |
+
 ## 2026-08-27 ICRA-072A exact-admission repair implementation
 
 | Req ID | Implemented/tested seam | Evidence and disposition | Status |

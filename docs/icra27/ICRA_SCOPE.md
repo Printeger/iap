@@ -36,12 +36,12 @@ occupancy-feasible corridors and evaluate the committed final B-spline with an i
 The oracle is an evaluation-only bypass. Its centre lines, tube labels and ground truth are forbidden inputs to
 P0, P4, EGO and P5 decisions.
 
-The design is queued, not implemented. The active ICRA-072A task may use only the separately named development
-selection trigger needed to close the existing vertical slice. That trigger is not the inverse-corridor
-scientific fixture and cannot provide effect evidence. ICRA-072A Review PASS issues only ICRA-072B stabilization;
-only a later ICRA-072B Review PASS may close ICRA-072 and issue ICRA-073 to implement the frozen three-variant
-fixture, paired control/treatment diagnostics and independent oracle. ICRA-073 must measure without tuning;
-targeted changes from its retained results belong exclusively to ICRA-074.
+The design is queued, not implemented. ICRA-072A Layer 1 passed Review with source-bound `run-024`; its separately
+named development selection trigger is not the inverse-corridor scientific fixture and provides no effect
+evidence. The active ICRA-072B task may only automate the successful production-shaped chain and its fail-closed
+boundaries. Only a later ICRA-072B Review PASS may close ICRA-072 and issue ICRA-073 to implement the frozen
+three-variant fixture, paired control/treatment diagnostics and independent oracle. ICRA-073 must measure
+without tuning; targeted changes from its retained results belong exclusively to ICRA-074.
 
 ## User route restoration — 2026-08-26
 

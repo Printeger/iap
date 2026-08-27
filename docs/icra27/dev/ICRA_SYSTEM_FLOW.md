@@ -1,9 +1,9 @@
 # ICRA System Flow — User-owned P0 -> P4-v2 -> P5 recovery
 
 > Four-layer workflow update 2026-08-26: `docs/icra27/ICRA_FOUR_LAYER_DEVELOPMENT_WORKFLOW.md` groups the
-> unchanged gates into iterative integration, stabilization, effect diagnosis and formal verification. Current
-> milestone is ICRA-072A Layer 1; development runs may repeat from the shared workspace build until the solid
-> runtime flow below completes once.
+> unchanged gates into iterative integration, stabilization, effect diagnosis and formal verification. ICRA-072A
+> Layer 1 passed with source-bound `run-024`; the current milestone is ICRA-072B Layer 2 production-shaped
+> stabilization, with no additional live run authorized.
 
 > Development-first update 2026-08-26: user decision `USER-ICRA-ROUTE-20260826-002`, anchored at
 > `b24a330d79d6e85e8080cf2a359bb1a18765e5a5`, authorizes ICRA-072 to connect this complete vertical slice before
@@ -11,9 +11,9 @@
 
 > User route restored 2026-08-26 by `USER-ICRA-ROUTE-20260826-001`, bound to pushed anchor `48caa9d`.
 
-> Current status: P0 Gate-0B `PASS`; P4-v1 `G0C SCIENTIFIC_NO_GO / IMMUTABLE`; `run-023` observes the complete
-> P4-v2/EGO/fused-P5/publication/runtime integration chain, but ICRA-072A remains `REQUEST_CHANGES` on mixed-sample
-> identity and exact source admission; P5 is `IMPLEMENTED-BUT-UNQUALIFIED`.
+> Current status: P0 Gate-0B `PASS`; P4-v1 `G0C SCIENTIFIC_NO_GO / IMMUTABLE`; source-bound `run-024` passes the
+> complete P4-v2/EGO/fused-P5/publication/runtime identity chain and closes ICRA-072A Layer 1; ICRA-072B is
+> `TASK_READY`; P5 remains `IMPLEMENTED-BUT-UNQUALIFIED`.
 
 > ICRA-070 is `SUPERSEDED_UNQUALIFIED_BY_USER_ROUTE_DECISION`. Its P0+P5 implementation/evidence remains the
 > future matched control; replacement/parser/GPU/live/analyzer remain uninvoked. Only the exact regenerable
@@ -189,8 +189,8 @@ The existing `p4` profile does not enable P5. The existing `all` profile enables
 | P4-G0A | P0 Gate-0B PASS; red fixture reviewed | Closed/no/open/multi scan cases PASS | `PASS` (historical closed route) |
 | P4-G0B | G0A PASS | Metrics-only pair, identity and 200/200 profiles; no application | `PASS` (historical closed route) |
 | P4-G0C | G0B PASS | Metrics-only calibration and positive mean/max improvement | P4-v1 `SCIENTIFIC_NO_GO`: max improvement Q10 = 0; v1 route closed, v2 remains prospective |
-| Layer 1 iterative integration | User route lock, decision 002 and four-layer workflow agree with state/task/plan | One repeatable-development run preserves a real P0/P4-v2/EGO/P5-final/publish/runtime identity | `ICRA-072A REQUEST_CHANGES / TASK_READY`; run023 observes the complete chain, while mixed-sample identity, exact untracked-source admission and final-source-change TDD remain open |
-| Layer 2 stabilization | ICRA-072A boundary Review PASS | Production-shaped happy-path regression plus epoch/attempt/lineage/P5 fail-closed boundaries | Planned as `ICRA-072B`; only its PASS closes ICRA-072 |
+| Layer 1 iterative integration | User route lock, decision 002 and four-layer workflow agree with state/task/plan | One repeatable-development run preserves a real P0/P4-v2/EGO/P5-final/publish/runtime identity | `PASS`; source-bound `run-024` preserves one ordered committed identity with exact source admission and operational closure |
+| Layer 2 stabilization | ICRA-072A boundary Review PASS | Production-shaped happy-path regression plus epoch/attempt/lineage/P5 fail-closed boundaries | `ICRA-072B TASK_READY`; only its Review PASS closes ICRA-072 |
 | Inverse-corridor effect diagnostic | ICRA-072B Review PASS and separately issued ICRA-073 | PRIMARY/MIRROR/NULL paired control/treatment with oracle-isolated final-trajectory diagnostics | Layer 3 design frozen; implementation deferred, no effect claim |
 | P4-G0D | P4-v2 held-out confirmatory PASS | Post-freeze selected hash reaches B-spline and P5 | Planned as `ICRA-078`; P4-v1 G0D remains unauthorized |
 | P5 system gate | ICRA-078 Review PASS and a separately issued prospective integration task | Treatment/control SAFE_NORMAL, final reject/no-publish and runtime-fail identities PASS | Planned as `ICRA-079`; ICRA-070 is superseded unqualified and retained only as control-arm engineering |
