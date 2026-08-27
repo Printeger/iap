@@ -72,6 +72,11 @@ def diagnose(run_root: Path) -> dict:
     production_manifest = json.loads(production_manifest_path.read_text())
     launch = json.loads(launch_path.read_text())
     row_manifest = json.loads(manifest_path.read_text())
+    launch_arguments = dict(argument.split(":=", 1)
+                            for argument in launch["launch_arguments"])
+    gnss_scenario_path = Path(launch_arguments["gnss_scenario_file"]).resolve()
+    if not gnss_scenario_path.is_file():
+        raise ValueError("retained GNSS scenario path is unavailable")
     hal = {float(row["HAL"]) for row in araim}
     val = {float(row["VAL"]) for row in araim}
     if hal != {10.0} or val != {20.0}:
@@ -127,28 +132,61 @@ def diagnose(run_root: Path) -> dict:
         "units": "metres for AL, PL and integrity margins; seconds for stamps/ages",
         "frame_authority": "map",
         "stamp_authority": "IntegrityReport.header.stamp from monitor report stamp",
+        "frame_authority_binding": {
+            "value": "map",
+            "source_path": "src/iap/integrity/integrity_extension.cpp",
+            "source_symbol": "IntegrityExtension::publishIntegrity",
+            "source_sha256": _sha256(
+                REPOSITORY / "src/iap/integrity/integrity_extension.cpp"),
+        },
+        "stamp_authority_binding": {
+            "value": "IntegrityReport.header.stamp from monitor report stamp",
+            "report_source_path": "src/iap/integrity/integrity_monitor.cpp",
+            "report_source_symbol": "IntegrityMonitor::processFrame",
+            "report_source_sha256": _sha256(
+                REPOSITORY / "src/iap/integrity/integrity_monitor.cpp"),
+            "message_source_path": "src/iap/integrity/integrity_extension.cpp",
+            "message_source_symbol": "IntegrityExtension::publishIntegrity",
+            "message_source_sha256": _sha256(
+                REPOSITORY / "src/iap/integrity/integrity_extension.cpp"),
+        },
         "value_authority": {
             "current_hpl_vpl": {
                 "message_fields": ["IntegrityReport.hpl", "IntegrityReport.vpl"],
                 "fusion": "max_pl",
                 "selected_source": "GNSS",
+                "fusion_config_path": _relative(runtime_config_path),
+                "fusion_config_key": "integrity.integrity_fusion_mode",
+                "fusion_config_sha256": _sha256(runtime_config_path),
+                "provider_launch_argument_key": "gnss_scenario_file",
+                "provider_launch_argument_value": str(gnss_scenario_path),
+                "provider_config_sha256": _sha256(gnss_scenario_path),
                 "retained_csv": _relative(validation_path),
+                "retained_csv_sha256": _sha256(validation_path),
             },
             "current_hal_val": {
                 "message_fields": ["IntegrityReport.hal", "IntegrityReport.val"],
                 "runtime_config": _relative(runtime_config_path),
                 "runtime_keys": ["integrity.HAL_trunk_default",
                                  "integrity.VAL_default"],
+                "runtime_config_sha256": _sha256(runtime_config_path),
                 "retained_csv": _relative(araim_path),
+                "retained_csv_sha256": _sha256(araim_path),
             },
             "p5_current_gate": {
                 "integrity_topic": "/iap/integrity",
                 "source_fields": ["hpl", "vpl", "hal", "val", "im"],
-                "threshold_source": "launch/test_planner.launch.py ARG_DEFAULTS",
+                "threshold_source_path": "launch/test_planner.launch.py",
+                "threshold_source_sha256": _sha256(
+                    REPOSITORY / "launch/test_planner.launch.py"),
                 "threshold_key": "p5.current_replan_margin_m",
                 "launch_wrapper": "launch/icra075_exploratory.launch.py",
+                "launch_wrapper_sha256": _sha256(
+                    REPOSITORY / "launch/icra075_exploratory.launch.py"),
                 "launch_command": _relative(launch_path),
+                "launch_command_sha256": _sha256(launch_path),
                 "production_manifest": _relative(production_manifest_path),
+                "production_manifest_sha256": _sha256(production_manifest_path),
             },
         },
         "launch_arguments": launch["launch_arguments"],

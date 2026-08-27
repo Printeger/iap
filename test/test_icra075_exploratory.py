@@ -164,6 +164,16 @@ class Icra075ExploratoryContractTest(unittest.TestCase):
         self.assertEqual(result["frame_authority"], "map")
         self.assertEqual(result["stamp_authority"],
                          "IntegrityReport.header.stamp from monitor report stamp")
+        hpl_authority = result["value_authority"]["current_hpl_vpl"]
+        self.assertEqual(hpl_authority["fusion_config_key"],
+                         "integrity.integrity_fusion_mode")
+        self.assertEqual(hpl_authority["provider_launch_argument_key"],
+                         "gnss_scenario_file")
+        self.assertEqual(len(hpl_authority["provider_config_sha256"]), 64)
+        self.assertEqual(result["frame_authority_binding"]["source_path"],
+                         "src/iap/integrity/integrity_extension.cpp")
+        self.assertEqual(result["stamp_authority_binding"]["report_source_path"],
+                         "src/iap/integrity/integrity_monitor.cpp")
         self.assertTrue(result["requires_forbidden_contract_change_to_pass"])
 
     def test_compatibility_diagnosis_refuses_to_overwrite_evidence(self):

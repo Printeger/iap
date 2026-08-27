@@ -11,7 +11,8 @@
   `matrix-002` diagnosis binds topic/config/frame/stamp/units and exact AL/PL sources, and classifies
   `FROZEN_CONTRACT_INCOMPATIBLE`: GNSS-selected `max_pl` HPL/VPL exceed frozen HAL/VAL for every retained epoch.
   Focused Python passes 19/19, affected post-build CTest passes 4/4 and the canonical shared six-package build
-  passes 6/6. The diagnosis SHA-256 is `f19395a4890fae44b76673a6c7cbc97651ef0a1cce08aa99af2b4be015460be5`.
+  passes 6/6. Non-overwriting diagnosis-002 explicitly binds each value's path/key/hash and has SHA-256
+  `cedeaafd044654965d30863c5e93fc1268eff63b30bbec581a91917d129045a5`; diagnosis-001 remains retained.
   No GPU/ROS, matrix-003, tuning, power, ICRA-076 or claim work ran; ICRA-075 stays BLOCKED/NOT PASS.
 
 - route(icra-075-bounded-repair): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 /
