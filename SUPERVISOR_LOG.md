@@ -42,7 +42,14 @@ Verdict: **REQUEST_CHANGES / BLOCKED.**
 
 ### Supervisor window disposition
 
-- Pending the pushed Review changeset and mandatory post-push rotation audit.
+- Review changeset `779b243b0a8885ff466ff3a1f3cb6e7ec544aab1` was pushed; fetch confirmed divergence
+  `0 0`. The normal commit was blocked by `BUILDER_SUPERVISOR_FILE_STAGED`; after route consistency PASS and exact
+  12-file staging inspection, Supervisor used the controlled section 8.6 `--no-verify` path. Builder evidence and
+  the protected PDF remained unstaged.
+- **`ROTATE_RECOMMENDED`**. Reason: `ICRA075_BLOCKED_USER_DECISION_AND_CONTEXT_COMPACTED`. The Review closes a
+  failed Gate and now awaits a route-owner repair-or-bypass choice; the current context has also compacted. A fresh
+  Supervisor window must restore only from the latest pushed repository authority. Rotation does not activate a
+  Builder task or authorize ICRA-076.
 
 ## 2026-08-27 — ICRA-074 Review PASS; ICRA-075 issued
 

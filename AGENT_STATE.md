@@ -43,13 +43,13 @@ recovery_roadmap: docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP
 four_layer_workflow: docs/icra27/ICRA_FOUR_LAYER_DEVELOPMENT_WORKFLOW.md
 guard_plan: docs/icra27/ICRA_CROSS_LAYER_GUARD_PLAN.md
 artifact_retention: ALL_ICRA072_EVIDENCE_SHARED_ROOTS_HIDDEN_USER_ARTIFACTS_AND_PROTECTED_PDF_RETAINED
-window_disposition: PENDING_POST_PUSH_AUDIT
-rotation_reason: PENDING_POST_PUSH_AUDIT
-window_handoff_anchor: PENDING_REVIEW_PUSH
+window_disposition: ROTATE_RECOMMENDED
+rotation_reason: ICRA075_BLOCKED_USER_DECISION_AND_CONTEXT_COMPACTED
+window_handoff_anchor: 779b243b0a8885ff466ff3a1f3cb6e7ec544aab1
 window_next_role: SUPERVISOR
 window_next_review_task: ICRA-075_USER_DECISION
 window_bootstrap_source: REPOSITORY_AUTHORITY_ONLY
-updated_utc: 2026-08-27T13:07:37Z
+updated_utc: 2026-08-27T13:08:12Z
 ```
 
 ICRA-075 Builder HEAD `e5d625ab6f3d922d563425fcf01969c3d1b4b0a4` is REQUEST_CHANGES/BLOCKED against
