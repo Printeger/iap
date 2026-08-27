@@ -1,5 +1,14 @@
 # DeepSeek Development Log — DEEPSEEK-owned
 
+## 2026-08-27 — USER DECISION 004 / ICRA-074 TASK READY
+
+- User decision `USER-ICRA-ROUTE-20260827-004` binds pushed anchor `b126b2f5` and directs only frozen geometry
+  repair, with every other ICRA-073 blocker accepted for bypass. ICRA-073 remains BLOCKED/NOT PASS.
+- Active V2 changes only risky amplitude `±2.10 m -> ±2.20 m`; expected raw cuboid clearance is approximately
+  `1.371035 m`, above unchanged `1.349 m`. V1 evidence remains immutable.
+- ICRA-074 is issued for offline production P4-v2 bottleneck TDD/targeted optimization. No ROS/GPU/live, missing
+  ICRA-073 completion, tuning, held-out, qualification or campaign work is authorized.
+
 ## 2026-08-27T10:05:02Z — ICRA-073 SUPERVISOR REVIEW BLOCKED
 
 - Fixed Review base `347c9111f1f6618b678a0c62942b561ac94e7814`; Builder HEAD

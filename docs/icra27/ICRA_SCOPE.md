@@ -1,11 +1,12 @@
 # ICRA 2027 Conference Scope — User-owned P0 -> P4-v2 -> P5 recovery
 
-## ICRA-073 Review blocker — 2026-08-27
+## User decision 004 — geometry-only repair and ICRA-074 activation — 2026-08-27
 
-ICRA-073 is `BLOCKED / NOT PASS`: the frozen risky centre line provides `1.275072583 m` cuboid clearance while
-tube+guard+current inflation requires `1.349 m`. The preflight tool also has fail-open hidden-untracked admission
-and an unrestricted overwriting `--variant --output` path. No paired effect diagnostic exists. Scope remains
-`P0_P4_V2_P5`; no Builder task or ICRA-074 is authorized pending a distinct user decision.
+User decision `USER-ICRA-ROUTE-20260827-004`, anchored at pushed
+`b126b2f5f9f0a3617346d75275b7aa703939263a`, keeps `P0_P4_V2_P5` and every protected research field unchanged.
+It authorizes only the V2 risky-amplitude repair (`2.10 m -> 2.20 m`) and accepts every other ICRA-073 blocker as
+debt. ICRA-073 remains BLOCKED/NOT PASS; ICRA-074 is TASK_READY for bounded offline targeted optimization with no
+effect, qualification or campaign claim.
 
 ## Four-layer workflow — 2026-08-26
 
@@ -19,10 +20,9 @@ runs and incrementally reuse `/home/dev/ws_iap/{build,install,log}` until one re
 Layer 2 then automates the success and fail-closed boundaries. ICRA-073..075 form the inverse-corridor diagnostic
 and improvement layer. ICRA-076..079 alone enable formal freeze, held-out and qualification controls.
 
-User decision `USER-ICRA-ROUTE-20260827-003` explicitly accepts the blocked ICRA-072B stabilization/source-
-admission debt and directs progression regardless. ICRA-072B remains BLOCKED/NOT PASS; the active scope is now
-ICRA-073 Layer 3 inverse-corridor effect diagnostics. This bypass does not support a scientific or qualification
-claim and does not weaken runtime safety or formal Layer 4 controls.
+Decision 003 accepted the blocked ICRA-072B debt. Decision 004 now also accepts blocked ICRA-073 except for its
+geometry-only V2 repair and activates ICRA-074. Neither bypass supports a scientific or qualification claim or
+weakens runtime safety and formal Layer 4 controls.
 
 The pre-workflow `-003` result is archived as found, not passed: P0 and P4 selection ran, but terminal lineage,
 P5 and normal publication remained absent. Exact regenerable historical build/install products may be retired
@@ -40,7 +40,7 @@ same task, then diagnose effect size and optimize. ICRA-071 repair is retained a
 and makes no effect, qualification or campaign claim. GPU preflight, required-process health, occupancy/EGO/P5
 authority, fail-closed behavior and retained-artifact protection remain mandatory.
 
-## Frozen inverse-corridor diagnostic design — ICRA-073 blocked pending user decision
+## Frozen inverse-corridor diagnostic design — ICRA-073 bypassed / ICRA-074 active
 
 `docs/icra27/dev/ICRA_P4_V2_INVERSE_CORRIDOR_FIXTURE.md` freezes
 `ICRA_P4_V2_INVERSE_CORRIDOR_FIXTURE_V1`: PRIMARY, EXACT_MIRROR and FLAT_NULL construct two non-straight,
@@ -51,7 +51,8 @@ P0, P4, EGO and P5 decisions.
 The design was authorized for implementation by user decision 003 and is now blocked by the Review finding above. ICRA-072A Layer 1 passed Review with source-bound `run-024`; its separately
 named development selection trigger is not the inverse-corridor scientific fixture and provides no effect
 evidence. ICRA-072B remains a disclosed blocked debt. ICRA-073 implemented only the descriptor/preflight before
-stopping; no paired control/treatment diagnostic or independent oracle result exists. ICRA-074 remains inactive.
+stopping; no paired control/treatment diagnostic or independent oracle result exists. Decision 004 nevertheless
+activates ICRA-074 as an explicitly debt-bearing offline task.
 
 ## User route restoration — 2026-08-26
 

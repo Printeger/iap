@@ -1,5 +1,31 @@
 # ICRA Supervisor Log
 
+## 2026-08-27 — user decision 004 repairs geometry only and issues ICRA-074
+
+### User decision and exact amendment
+
+- The user explicitly directs: repair only the ICRA-073 frozen geometry conflict, skip every other blocker, then
+  issue ICRA-074. This is recorded as `USER-ICRA-ROUTE-20260827-004`, approval anchor
+  `b126b2f5f9f0a3617346d75275b7aa703939263a`.
+- ICRA-073 remains `BLOCKED / USER-ACCEPTED BYPASS / NOT PASS`. Its ignored-source admission, external/overwriting
+  variant output, dormant mirror coverage, absent oracle/paired diagnostics and missing runtime identity are
+  retained debt. The decision does not convert any of them to PASS.
+- The sole V2 fixture amendment is risky amplitude magnitude `2.10 m -> 2.20 m`: PRIMARY/FLAT_NULL `-2.20 m`,
+  EXACT_MIRROR `+2.20 m`. Dense calculation gives expected raw cuboid clearance about `1.371035 m`, above the
+  unchanged `1.349 m` tube+guard+inflation requirement. All other fixture values remain frozen.
+
+### ICRA-074 issuance
+
+- ICRA-074 is `TASK_READY` for geometry amendment implementation followed by bounded offline TDD against the
+  production `PROVIDER_BOTTLENECK_V2` search/guide seam. It must use the lexicographic provider-only bottleneck
+  contract, preserve occupancy/EGO/P5 authority and change production bytes only after focused RED.
+- No ROS/GPU/live, ICRA-073 oracle/runner completion, threshold/provider-truth tuning, held-out, effect claim,
+  qualification or campaign work is authorized. ICRA-075 remains blocked pending ICRA-074 Review.
+
+### Supervisor window disposition
+
+- Pending the mandatory post-push audit; the route/task changeset must first become the pushed handoff.
+
 ## 2026-08-27 — ICRA-073 Review BLOCKED; frozen fixture decision required
 
 ### Review identity and preservation

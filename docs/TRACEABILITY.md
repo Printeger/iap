@@ -1,5 +1,14 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-27 user decision 004 and ICRA-074 issuance
+
+| Req ID | Decision/task seam | Evidence and disposition | Status |
+|---|---|---|---|
+| IAP-RQ-423 / IAP-RQ-424 | User route authority | Explicit user instruction binds decision `USER-ICRA-ROUTE-20260827-004` to pushed `b126b2f5`; protected route/modules/claims/arms/gates/campaign barrier unchanged | **USER DECISION RECORDED** |
+| IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-423 | Sole inherited repair | V2 changes risky amplitude only from magnitude `2.10 m` to `2.20 m`; expected raw cuboid clearance `~1.371035 m >= 1.349 m`; every other fixture value unchanged | **ICRA-074 TASK REQUIREMENT** |
+| IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-424 | Accepted ICRA-073 debt | Source/output guards, mirror coverage, reachability/oracle gates, paired diagnostics and runtime identity remain absent; none is relabelled PASS | **ICRA-073 BLOCKED / USER BYPASS / NOT PASS** |
+| IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 | Next task | Geometry amendment then bounded offline production P4-v2 bottleneck TDD/optimization; no ROS/GPU/live, tuning, held-out or claim | **ICRA-074 TASK_READY** |
+
 ## 2026-08-27 ICRA-073 frozen fixture Supervisor Review
 
 | Req ID | Reviewed seam | Evidence and disposition | Status |
@@ -7,7 +16,7 @@
 | IAP-RQ-423 / IAP-RQ-424 | Source/output contract | Fixed-base diff and independent tests pass, but source admission does not globally reject new ignored files and variant output permits external/overwriting writes | **STANDARDS REQUEST_CHANGES** |
 | IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-423 | Frozen occupancy invariant | Risky raw cuboid clearance `1.275072583 m` versus required tube+guard+inflation `1.349 m`, deficit `0.073927417 m`; frozen values cannot satisfy the gate | **SPEC/GATE BLOCKED / NOT PASS** |
 | IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-424 | Cross-layer completion | Correct pre-live stop; reachability and later invariant/oracle gates not evaluated; mirror/mutation coverage is incomplete; no paired three-variant runs or complete P0→P4→EGO→P5→publish→runtime evidence | **ICRA-073 INCOMPLETE** |
-| IAP-RQ-423 / IAP-RQ-424 | Next-task authority | Decision 003 does not waive ICRA-073; Supervisor retains `next_task=NONE` pending a distinct user fixture-revision or ICRA-074-bypass decision | **BLOCKED_AWAITING_USER_RESEARCH_DECISION** |
+| IAP-RQ-423 / IAP-RQ-424 | Historical next-task authority | Decision 003 did not waive ICRA-073; this waiting state was later superseded by user decision 004 | **HISTORICAL / SUPERSEDED** |
 
 ## 2026-08-27 ICRA-073 frozen fixture preflight blocker
 

@@ -1,11 +1,19 @@
 # ICRA 2027 P0 -> P4-v2 -> P5 计划复审
 
+## User decision 004 — issue ICRA-074 — 2026-08-27
+
+**Verdict: `ICRA073_BLOCKED_USER_ACCEPTED_BYPASS / ICRA074_TASK_READY`.** Decision
+`USER-ICRA-ROUTE-20260827-004`, anchor `b126b2f5`, authorizes only risky-amplitude V2 repair (`±2.20 m`) and
+explicitly skips all other 073 blockers. ICRA-074 runs bounded offline production-seam TDD/optimization; missing
+073 oracle/paired evidence remains debt, so no effect or downstream formal claim is available.
+
 ## ICRA-073 frozen fixture Review — 2026-08-27
 
 **Verdict: `REQUEST_CHANGES / ICRA073_BLOCKED / NOT PASS`.** Spec/Gate 的首要 blocker 是冻结 risky raw
 cuboid clearance `1.275072583 m` 小于 `1.349 m` 要求；Builder 对此正确 fail-closed。Standards 另发现两个
 High：source binding 未全量排除 ignored extra，且 `--variant --output` 可写仓库外并覆盖文件。Oracle、
-paired diagnostics 和 runtime identity 均未产生。`next_task=NONE`，等待用户明确继续修复 073 或 bypass。
+paired diagnostics 和 runtime identity 均未产生。该状态已由 decision 004 的 user-accepted bypass 取代，
+但没有转为 PASS。
 
 ## User-directed ICRA-072B bypass and ICRA-073 issuance — 2026-08-27
 
@@ -15,7 +23,8 @@ explicitly orders progression regardless under `USER-ICRA-ROUTE-20260827-003`.
 
 ICRA-072B is not relabelled PASS. ICRA-073 now implements frozen three-variant paired diagnostics and the
 independent committed-final oracle. Occupancy/EGO/P5, GPU/process/cleanup, retention, no-tuning and no-claim
-boundaries remain mandatory; ICRA-074 and formal Layer 4 are not yet authorized.
+boundaries remain mandatory; at that Review ICRA-074 and formal Layer 4 were not yet authorized. Decision 004
+later activates only ICRA-074.
 
 ## ICRA-072B exact source-admission Review — 2026-08-27
 

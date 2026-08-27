@@ -3,6 +3,13 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- route(user-decision-004-issue-icra074): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 /
+  IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — user decision 004 at pushed `b126b2f5` directs only the
+  frozen risky-amplitude conflict to be repaired and skips every other ICRA-073 blocker. Freeze V2 at risky
+  amplitude `±2.20 m` for expected raw clearance about `1.371035 m` versus unchanged `1.349 m`; retain V1 evidence.
+  ICRA-073 stays BLOCKED/user-bypassed/NOT PASS. Issue offline-only ICRA-074 targeted production-seam optimization;
+  no missing debt becomes PASS and no effect, qualification, held-out or campaign work is authorized.
+
 - review(icra-073-frozen-fixture-blocker): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 /
   IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — review Builder `4f5bb302` against fixed base `347c9111`.
   Standards REQUEST_CHANGES for fail-open global ignored-file admission and unrestricted overwriting variant

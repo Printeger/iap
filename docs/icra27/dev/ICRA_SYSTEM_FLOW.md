@@ -1,9 +1,9 @@
 # ICRA System Flow — User-owned P0 -> P4-v2 -> P5 recovery
 
-> ICRA-073 Review update 2026-08-27: the frozen risky corridor has `1.275072583 m` raw clearance to the central
-> cuboid versus `1.349 m` required tube+guard+inflation. Preflight stopped before live flow and also needs exact
-> hidden-untracked admission and safe non-overwriting output repair. ICRA-073 is BLOCKED/NOT PASS; no Builder
-> task or ICRA-074 is active pending a distinct user decision.
+> User decision 004 update 2026-08-27: ICRA-073 remains BLOCKED/user-bypassed/NOT PASS. Only risky amplitude is
+> amended to `±2.20 m` for expected `1.371035 m` raw cuboid clearance; every other 073 blocker remains accepted
+> debt. ICRA-074 is TASK_READY for offline P4-v2 production-seam optimization. Runtime architecture is unchanged;
+> no effect, qualification or campaign claim is authorized.
 
 > Four-layer workflow update 2026-08-26: `docs/icra27/ICRA_FOUR_LAYER_DEVELOPMENT_WORKFLOW.md` groups the
 > unchanged gates into iterative integration, stabilization, effect diagnosis and formal verification. ICRA-072A
@@ -19,7 +19,8 @@
 
 > Current status: P0 Gate-0B `PASS`; P4-v1 `G0C SCIENTIFIC_NO_GO / IMMUTABLE`; source-bound `run-024` passes the
 > complete P4-v2/EGO/fused-P5/publication/runtime identity chain and closes ICRA-072A Layer 1; ICRA-072B is
-> `BLOCKED / USER-ACCEPTED BYPASS / NOT PASS`; ICRA-073 is `BLOCKED / NOT PASS`. P5 remains
+> `BLOCKED / USER-ACCEPTED BYPASS / NOT PASS`; ICRA-073 is also `BLOCKED / USER-ACCEPTED BYPASS / NOT PASS`;
+> ICRA-074 is `TASK_READY`. P5 remains
 > `IMPLEMENTED-BUT-UNQUALIFIED`.
 
 > ICRA-070 is `SUPERSEDED_UNQUALIFIED_BY_USER_ROUTE_DECISION`. Its P0+P5 implementation/evidence remains the
@@ -199,7 +200,8 @@ The existing `p4` profile does not enable P5. The existing `all` profile enables
 | P4-G0C | G0B PASS | Metrics-only calibration and positive mean/max improvement | P4-v1 `SCIENTIFIC_NO_GO`: max improvement Q10 = 0; v1 route closed, v2 remains prospective |
 | Layer 1 iterative integration | User route lock, decision 002 and four-layer workflow agree with state/task/plan | One repeatable-development run preserves a real P0/P4-v2/EGO/P5-final/publish/runtime identity | `PASS`; source-bound `run-024` preserves one ordered committed identity with exact source admission and operational closure |
 | Layer 2 stabilization | ICRA-072A boundary Review PASS | Production-shaped happy-path regression plus epoch/attempt/lineage/P5 fail-closed boundaries | `BLOCKED / USER-ACCEPTED BYPASS / NOT PASS`; debt retained |
-| Inverse-corridor effect diagnostic | User decision 003 and issued ICRA-073 | PRIMARY/MIRROR/NULL paired control/treatment with oracle-isolated final-trajectory diagnostics | `ICRA-073 BLOCKED/NOT PASS`; no paired diagnostic; awaiting user decision |
+| Inverse-corridor effect diagnostic | User decision 003 and issued ICRA-073 | PRIMARY/MIRROR/NULL paired control/treatment with oracle-isolated final-trajectory diagnostics | `ICRA-073 BLOCKED / USER BYPASS / NOT PASS`; no paired diagnostic |
+| Targeted optimization | User decision 004 and issued ICRA-074 | V2 geometry-only amendment followed by offline production P4-v2 bottleneck TDD | `ICRA-074 TASK_READY`; accepted debt, no effect claim |
 | P4-G0D | P4-v2 held-out confirmatory PASS | Post-freeze selected hash reaches B-spline and P5 | Planned as `ICRA-078`; P4-v1 G0D remains unauthorized |
 | P5 system gate | ICRA-078 Review PASS and a separately issued prospective integration task | Treatment/control SAFE_NORMAL, final reject/no-publish and runtime-fail identities PASS | Planned as `ICRA-079`; ICRA-070 is superseded unqualified and retained only as control-arm engineering |
 | Campaign | ICRA-079 Supervisor Review PASS plus a distinct user decision | Fresh GPU and `≥40 GiB` free plus frozen ICRA-080 task | Explicitly blocked; no automatic transition from any scientific or qualification gate |

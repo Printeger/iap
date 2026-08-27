@@ -1,11 +1,11 @@
 # ICRA 2027 P0 -> P4-v2 -> P5 科学纠偏实施计划
 
-## ICRA-073 Review stop — 2026-08-27
+## User decision 004 and ICRA-074 task — 2026-08-27
 
-当前 `active_role=SUPERVISOR`、`next_task=NONE`。冻结 risky corridor 的 cuboid raw clearance 为
-`1.275072583 m`，小于 tube+guard+inflation 要求 `1.349 m`；preflight 另有 hidden-untracked admission
-fail-open 与 variant output 可越界覆盖问题。ICRA-073 未进入 oracle、paired runner、shared build 或 live。
-下一实现计划必须由用户明确选择修订/修复并继续 073，或接受缺失诊断并 bypass 到 ICRA-074。
+用户决定 `USER-ICRA-ROUTE-20260827-004`，绑定 pushed anchor
+`b126b2f5f9f0a3617346d75275b7aa703939263a`，只修复 risky amplitude `2.10 m -> 2.20 m`，接受并跳过其余
+ICRA-073 blockers。ICRA-073 保持 BLOCKED/NOT PASS；当前唯一 Builder task 是 ICRA-074 offline targeted
+optimization。不得把缺失 paired/oracle evidence 包装为 effect，不得进入 live、Layer 4 或 campaign。
 
 ## Current Layer 3 disposition — 2026-08-27
 
@@ -13,8 +13,8 @@ ICRA-072A Layer 1 已通过 Supervisor Review。source-bound `run-024` 在共享
 committed trajectory identity 的 P0 -> P4 selection -> EGO final -> authoritative fused P5 final -> publish ->
 P5 runtime；精确 source admission、GPU/process fail-closed、first-missing-stage 和 owned cleanup 均通过。
 ICRA-072B 因 hidden untracked source admission 保持 BLOCKED/NOT PASS。用户决定
-`USER-ICRA-ROUTE-20260827-003` 接受该工程债并启动了 ICRA-073；当前 Review 已因冻结 geometry 和
-preflight guard 缺陷将其置为 BLOCKED/NOT PASS。没有唯一授权 Builder task，等待用户新决定。
+`USER-ICRA-ROUTE-20260827-003` 接受该工程债并启动了 ICRA-073；decision 004 又接受 ICRA-073 非几何
+债务并签发 ICRA-074。ICRA-074 先实现 V2 geometry，再以 production P4-v2 seam 做 bounded offline TDD。
 
 ## Four-layer implementation workflow — 2026-08-26
 
@@ -23,9 +23,9 @@ preflight guard 缺陷将其置为 BLOCKED/NOT PASS。没有唯一授权 Builder
 `docs/icra27/ICRA_FOUR_LAYER_DEVELOPMENT_WORKFLOW.md`；route-lock sentinel 与 ICRA-072..080 gate sequence
 不变。
 
-Layer 1 / ICRA-072A 已由 `run-024` 完成；Layer 2 / ICRA-072B debt 保留。Layer 3 / ICRA-073 当前 blocked，
-共享 `/home/dev/ws_iap/{build,install,log}` 和既有失败 evidence 保留不动。只有用户明确选择 bypass 后才
-可签发 ICRA-074；formal verification 仍从 ICRA-076 开始。
+Layer 1 / ICRA-072A 已由 `run-024` 完成；Layer 2 / ICRA-072B debt 保留；Layer 3 / ICRA-073 被用户 bypass
+且不转 PASS。当前执行 ICRA-074，保留共享 `/home/dev/ws_iap/{build,install,log}` 和全部 evidence；formal
+verification 仍从 ICRA-076 开始。
 
 `6a6bdd3` 的 `-003` 以 BLOCKED 实况封存。历史 build/install 可再生树按已推送清单删除；raw、compact、
 registered live、普通日志、科学证据和 PDF 不删除。精确开发命令集中在 README，其他权威文档只链接，

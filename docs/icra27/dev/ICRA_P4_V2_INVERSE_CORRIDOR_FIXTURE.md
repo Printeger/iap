@@ -1,15 +1,15 @@
 # ICRA P4-v2 Inverse Corridor Fixture
 
-> Design record: `ICRA_P4_V2_INVERSE_CORRIDOR_FIXTURE_V1`
+> Active design record: `ICRA_P4_V2_INVERSE_CORRIDOR_FIXTURE_V2`
 >
-> Status: **DESIGN_FROZEN / ICRA-073 BLOCKED BY INTERNAL GUARD-INFLATION CONFLICT**
+> Status: **USER-AMENDED GEOMETRY / ICRA-074 IMPLEMENTATION TASK READY**
 >
 > Requirements: `IAP-RQ-423`, `IAP-RQ-424`
 
-Supervisor Review note 2026-08-27: the exact risky curve has only `1.275072583 m` raw clearance to the frozen
-central cuboid, but the tube (`0.75 m`) plus guard (`0.50 m`) plus current occupancy inflation (`0.099 m`)
-requires `1.349 m`. The design cannot satisfy its own mandatory preflight as written. No value is changed here;
-the user must explicitly authorize a revision or bypass.
+User amendment `USER-ICRA-ROUTE-20260827-004`, anchored at pushed `b126b2f5`, supersedes V1 only for the risky
+amplitude: PRIMARY/FLAT_NULL use `-2.20 m` and EXACT_MIRROR uses `+2.20 m`. This is the sole geometry change;
+all other frozen values remain unchanged. The expected raw cuboid clearance is approximately `1.371035 m`,
+above the unchanged `1.349 m` tube+guard+inflation requirement. V1 and its failing evidence remain retained.
 
 ## 1. Purpose and claim boundary
 
@@ -42,7 +42,7 @@ The analytic corridor centre lines are
 
 ```text
 safe(u)  = (-12 + 24u, +3.5 sin(pi u), 1.5)
-risky(u) = (-12 + 24u, -2.1 sin(pi u), 1.5)
+risky(u) = (-12 + 24u, -2.20 sin(pi u), 1.5)
 ```
 
 Both are non-straight, share the exact start and goal, and have a closed tube of radius `0.75 m`. Tube membership

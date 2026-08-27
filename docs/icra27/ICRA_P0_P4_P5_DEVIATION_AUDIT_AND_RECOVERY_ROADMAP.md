@@ -1,12 +1,25 @@
 # ICRA P0 -> P4 -> P5 deviation audit and scientific recovery roadmap
 
-## ICRA-073 frozen fixture blocker — 2026-08-27
+## User-directed geometry-only repair and ICRA-073 bypass — 2026-08-27
+
+User decision `USER-ICRA-ROUTE-20260827-004`, bound to pushed approval anchor
+`b126b2f5f9f0a3617346d75275b7aa703939263a`, directs only the frozen geometry conflict to be repaired and all
+other ICRA-073 blockers to be skipped for progression to ICRA-074. The active route, required modules, research
+question, claims, formal arms, scenes, gate ordering, fallback and campaign barrier remain unchanged.
+
+ICRA-073 remains `BLOCKED / USER-ACCEPTED BYPASS / NOT PASS`; no missing oracle, paired diagnostic or source/
+output guard is relabelled PASS. The V2 fixture amendment changes only risky amplitude from magnitude `2.10 m`
+to `2.20 m`, giving expected raw cuboid clearance about `1.371035 m` against the unchanged `1.349 m` requirement.
+ICRA-074 is development-only targeted optimization without an ICRA-073 effect basis and cannot make an effect,
+qualification or campaign claim.
+
+## ICRA-073 frozen fixture blocker — 2026-08-27 (superseded disposition)
 
 Supervisor Review of fixed range `347c9111..4f5bb302` sets ICRA-073 to `BLOCKED / NOT PASS`. The exact frozen
 risky centre line clears the cuboid by `1.275072583 m`, below the required `1.349 m` tube+guard+current-inflation
 radius; two preflight source/output guard defects also require repair if work continues. Builder stopped before
 live execution, leaving no independent-oracle paired diagnostic. Decision 003 bypassed ICRA-072B only. Route
-remains `P0_P4_V2_P5`, `active_role=SUPERVISOR`, `next_task=NONE` pending a distinct user decision.
+remains `P0_P4_V2_P5`. This waiting state was superseded by user decision 004 above; the blocker remains NOT PASS.
 
 Status: **USER-OWNED ROUTE LOCK / DEVELOPMENT-FIRST P4-v2 END-TO-END RECOVERY**
 Decision date: 2026-08-27
@@ -108,10 +121,10 @@ its protected research fields.
   "fallback_policy": "PROPOSAL_ONLY_USER_ACTIVATION_REQUIRED",
   "scientific_no_go_transition": "BLOCKED_AWAITING_USER_RESEARCH_DECISION",
   "campaign_activation": "USER_APPROVAL_AFTER_ICRA079_REVIEW_PASS",
-  "approval_anchor": "a30468e4ca991dacfe24a10c45040c51efd74ce7",
-  "user_decision_id": "USER-ICRA-ROUTE-20260827-003",
+  "approval_anchor": "b126b2f5f9f0a3617346d75275b7aa703939263a",
+  "user_decision_id": "USER-ICRA-ROUTE-20260827-004",
   "protected_transition": {
-    "from_anchor": "a30468e4ca991dacfe24a10c45040c51efd74ce7",
+    "from_anchor": "b126b2f5f9f0a3617346d75275b7aa703939263a",
     "changes": [
       {
         "field": "route_owner",
@@ -232,11 +245,11 @@ its protected research fields.
     ]
   },
   "user_decision": {
-    "route_disposition": "USER_ACCEPTED_ICRA072B_BLOCKED_BYPASS_TO_ICRA073_EFFECT_DIAGNOSTICS",
+    "route_disposition": "USER_ACCEPTED_ICRA073_BLOCKED_BYPASS_TO_ICRA074_TARGETED_OPTIMIZATION",
     "p0_p5_disposition": "RETAIN_AS_MATCHED_CONTROL_ASSET",
     "p4_primary_endpoint": "MAX_PROVIDER_ONLY_INTERIOR_RISK",
     "confirmatory_size": "PREREGISTERED_ADAPTIVE_30_TO_60_INDEPENDENT_SEED_RUNS_PER_SCENE",
-    "enforcement": "MANDATORY_RUNTIME_SAFETY_WITH_ICRA072B_STABILIZATION_DEBT_ACCEPTED_FOR_LAYER3"
+    "enforcement": "ONLY_ICRA073_FROZEN_GEOMETRY_REPAIRED_ALL_OTHER_ICRA073_BLOCKERS_ACCEPTED_AS_DEBT"
   },
   "guard_strength": "ACCIDENT_PREVENTION_NOT_A_SECURITY_BOUNDARY"
 }
@@ -516,8 +529,8 @@ distinct engineering fixture and cannot be relabelled as inverse-corridor effect
 | ICRA-071 backlog | repair user-route/state/doc/RQ local guards | non-blocking after user decision 002; no security claim |
 | ICRA-072A | iterative P0 -> P4-v2 -> EGO -> P5 vertical slice against shared build/install | one complete live identity; no effect claim |
 | ICRA-072B | stabilize the successful chain and canonical source admission | BLOCKED / USER-ACCEPTED BYPASS / NOT PASS; debt retained |
-| ICRA-073 | implement PRIMARY/MIRROR/NULL inverse corridors, paired control/treatment and independent-oracle effect diagnostics | BLOCKED/NOT PASS pending user fixture-revision or bypass decision; no paired diagnostic exists |
-| ICRA-074 | targeted optimization derived from retained ICRA-073 evidence | no tune-during-ICRA-073, held-out access or threshold tuning |
+| ICRA-073 | implement PRIMARY/MIRROR/NULL inverse corridors, paired control/treatment and independent-oracle effect diagnostics | BLOCKED / USER-ACCEPTED BYPASS / NOT PASS; only geometry debt carries into ICRA-074 for repair |
+| ICRA-074 | V2 geometry repair then bounded offline targeted P4-v2 optimization | TASK_READY by decision 004; no ICRA-073 effect basis, live work, held-out access, threshold tuning or claim |
 | ICRA-075 | exploratory objective/source/domain ablation and power inputs | no held-out access or claim |
 | ICRA-076 | freeze protocol, SESOI, hashes, seeds and 30–60 sample size per scene | no confirmatory run before Review PASS |
 | ICRA-077 | primary/mirror/null held-out confirmatory | no retry/exclusion; primary exact gate |

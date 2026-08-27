@@ -1,14 +1,14 @@
 # ICRA four-layer development and validation workflow
 
-Status: **BLOCKED — LAYER 3 FROZEN FIXTURE DECISION REQUIRED**
+Status: **ACTIVE — LAYER 3 ICRA-074 OFFLINE TARGETED OPTIMIZATION**
 
 Requirements: `IAP-RQ-320`, `IAP-RQ-321`, `IAP-RQ-400`, `IAP-RQ-410`, `IAP-RQ-421`, `IAP-RQ-422`,
 `IAP-RQ-423`, `IAP-RQ-424`
 
-Current disposition: ICRA-072A Layer 1 passed; ICRA-072B remains blocked without canonical PASS. Decision 003
-accepted that debt and activated ICRA-073, but ICRA-073 is now BLOCKED/NOT PASS: its frozen risky corridor has
-`1.275072583 m` raw cuboid clearance against a required `1.349 m`; source/output guards also need repair. No
-paired diagnostic was reached. No Builder task, ICRA-074, formal Layer 4 or campaign work is currently active.
+Current disposition: ICRA-072A passed; ICRA-072B and ICRA-073 remain blocked/user-bypassed/NOT PASS. Decision 004
+authorizes only V2 risky-amplitude geometry repair and skips every other ICRA-073 blocker. ICRA-074 is TASK_READY
+for bounded offline targeted optimization without paired effect evidence. Formal Layer 4 and campaign work remain
+blocked.
 
 ## 1. Purpose
 
