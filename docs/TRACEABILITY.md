@@ -1,5 +1,16 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-27 ICRA-072A fail-closed acceptance Supervisor Review
+
+| Req ID | Reviewed seam | Evidence and disposition | Status |
+|---|---|---|---|
+| IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-421 / IAP-RQ-422 | Authoritative fused integration | run021 rejects unsafe fused current; run022 uses GNSS+LiDAR `max_pl`, positive fused margins and an actual all-`OK` runtime chain; shared six-package build and focused tests pass | **STRUCTURAL MODULE INTEGRATION OBSERVED** |
+| IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 | Runtime P5 safety acceptance | Analyzer filters runtime by phase/source/identity but not `action=OK`; matching `REQUEST_REPLAN` or emergency can satisfy the stage | **REQUEST_CHANGES / FAIL-OPEN** |
+| IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-423 | Exact explicit identity | Invalid/missing lineage start becomes `None`, and absent final/publication/runtime start fields also compare equal to `None`; explicit non-sentinel presence is not required | **REQUEST_CHANGES / FAIL-OPEN** |
+| IAP-RQ-423 / IAP-RQ-424 | Automatic attempt closure | Gate import/GPU preflight execute outside the runner exception boundary after the run root is consumed; some exceptions leave no typed outcome | **REQUEST_CHANGES / INCOMPLETE** |
+| IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-423 / IAP-RQ-424 | Selected identity and source provenance | Retained run022's last complete selected lineage is ID 8/start `1657065613066228089`, not claimed ID 17; run021/run022 record parent `04986cd` while exercising uncommitted implementation | **REQUEST_CHANGES / HANDOFF AND SOURCE BINDING** |
+| IAP-RQ-423 / IAP-RQ-424 | Gate disposition | Preserve run001..run022 and indexes; repair same Gate, commit/push clean source before fresh run023+, and allow only ICRA-072B after a later Review PASS | **ICRA-072A TASK_READY / ICRA-072B UNAUTHORIZED** |
+
 ## 2026-08-27 ICRA-072A authoritative-P5 repair handoff
 
 | Req ID | Implemented/tested seam | Evidence and disposition | Status |

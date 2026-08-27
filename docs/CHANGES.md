@@ -3,6 +3,17 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- review(icra-072a-acceptance): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 /
+  IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — reject Builder HEAD `e728fff` as formal Layer 1
+  completion while retaining run022 as strong structural module-integration evidence. Authoritative fused P5,
+  shared 6/6 build, process/cleanup controls and a safe full run022 chain are materially present. The analyzer can
+  nevertheless count matching-identity runtime `REQUEST_REPLAN`/emergency records as PASS and can accept entirely
+  missing nanosecond identity through `None == None`; gate import/GPU-preflight exceptions can escape before the
+  typed outcome boundary. Builder docs also name unselected trajectory 17 instead of selected trajectory 8, and
+  run021/run022 bind only parent commit `04986cd` while exercising uncommitted implementation bytes. Preserve all
+  retained evidence and continue ICRA-072A at fresh `run-023` or later after fail-closed tests and a clean pushed
+  source binding. Do not issue ICRA-072B or authorize effect, qualification or campaign work.
+
 - fix(icra-072a-authoritative-p5): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 /
   IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — remove the unauthorized configurable/LiDAR-only P5
   current source and restore fixed fused `hpl/vpl/im` authority. Carry exact trajectory ID and integer-nanosecond

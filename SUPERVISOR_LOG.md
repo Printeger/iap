@@ -1,5 +1,88 @@
 # ICRA Supervisor Log
 
+## 2026-08-27 — ICRA-072A Review REQUEST_CHANGES; Layer 1 acceptance repair reissued
+
+### Review identity and synchronization
+
+- Fixed Review base: `04986cd83e6a9b77c8ca72ad90093cf6f8ad65fe`; reviewed Builder HEAD:
+  `e728fff332c382b25ef36b8608927788bf9603b4`. The range is one 18-file Builder changeset. Startup fetch left
+  HEAD and `origin/dev/icra` equal at divergence `0 0`; tracked state was clean and the protected untracked PDF
+  remained at SHA-256 `1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6`.
+- `/home/dev/ws_iap/{build,install,log}`, `run-001` through `run-022`, all other raw/compact/live evidence and
+  ordinary logs were preserved. Review started no new live flow or GPU preflight. Ignored hermetic Supervisor
+  test roots are retained under `results/icra27/icra072/supervisor_review_e728_{launch,cpp}`.
+- `git diff --check` passed. Final shared log `build_2026-08-27_03-34-55` records all six exact packages at
+  `rc=0`. Focused runner/analyzer tests pass 11/11; hermetic launch tests pass 24/24; focused
+  `test_p5_runtime_integrity_gate` and `test_planning_risk_context` CTests pass 2/2.
+
+### Standards axis
+
+Verdict: **PASS with one low maintainability finding; no hard documented-standard violation.**
+
+- The Builder stayed inside the authorized file set, changed no Supervisor/route-lock authority, restored fused
+  `hpl/vpl/im` semantics, preserved shared roots/evidence, mapped real requirement IDs and synchronized all
+  Builder-owned records.
+- Low / Data Clumps: exact trajectory identity is repeatedly carried as parallel ID/start primitives across
+  safety publisher, P5 gate and analyzer. A later bounded value type/helper could reduce partial-update risk; it
+  is not a blocker and is not added to this repair.
+
+### Spec axis
+
+Verdict: **REQUEST_CHANGES — two High contract failures and one Medium handoff failure.**
+
+1. **High — GPU-admission exceptions can escape without automatic outcome.** The runner creates the fresh run
+   root, then performs gate import and GPU preflight outside the exception-finalization boundary. An import,
+   preflight or early evidence-write exception can consume an attempt without `run_manifest.json`, analyzer
+   invocation or typed orchestration outcome. A normal `gpu_ready=false` path is covered, but the task requires
+   automatic typed closure for every future attempt.
+2. **High — analyzer can certify an unsafe runtime decision.** Runtime records require phase, fused source and
+   exact identity, but not `action=OK`. A matching `REQUEST_REPLAN` or emergency runtime record can therefore
+   satisfy `p5_runtime_committed`, contrary to the required safe final/runtime chain.
+3. **Medium — handoff names an unselected identity.** Builder docs claim terminal trajectory 17/start
+   `1657065614997223065`, but its run022 lineage has `selection_applied=0`. The analyzer's actual last complete
+   risk-selected lineage is trajectory 8/start `1657065613066228089` with final identity `293c997b3471ab7e`.
+
+### Gate and cross-layer findings
+
+- **High — missing exact identity can match itself.** When any lineage start field is absent/malformed, the
+  analyzer assigns `expected_start_ns=None`; final/publication/runtime comparisons use `.get(...) == None`.
+  If all corresponding fields are absent, all three channels match and the seven-stage chain can pass. Exact
+  identity must require explicit, parseable, non-sentinel trajectory ID and nanosecond start before comparison.
+- **Medium — retained live source is not commit-bound.** Both run021 and run022 manifests record parent commit
+  `04986cd...`, while the fused-authority/exact-identity implementation was still uncommitted and final Builder
+  HEAD is `e728fff...`. The later 6/6 build and offline tests validate the final tree, and retained run022 data is
+  useful, but the live evidence cannot identify the exercised source bytes by commit as the Layer 1 workflow
+  requires.
+- The retained live facts themselves are strong: run021 correctly rejects authoritative fused unsafe integrity;
+  run022 uses GNSS+LiDAR `max_pl`, records positive fused final margins, all runtime rows are actually `OK`, all
+  seven structural stages are present, 15/15 required processes are healthy and owned groups clear. The valid
+  selected identity is trajectory 8. These facts prove the modules can interoperate, but cannot override the
+  fail-open acceptance and source-binding defects.
+
+### Verdict and required next action
+
+- Gate verdict is
+  **`ICRA072A_REQUEST_CHANGES_RUNTIME_SAFETY_OUTCOME_IDENTITY_AND_SOURCE_BINDING`**. ICRA-072A is not formally
+  complete; ICRA-072B, ICRA-073, effect claims, qualification and campaign remain unauthorized.
+- Continue the same Gate without changing fused authority, thresholds, fixture inputs or oracle isolation. Require
+  runtime `OK`, reject missing/sentinel identities, finalize all post-run-root GPU/preflight exceptions, report the
+  actual selected identity, and bind the exact clean pushed source revision.
+- Preserve run001..run022 and the two iteration indexes unchanged. After RED/GREEN coverage and a clean pushed
+  implementation, rebuild only the shared six packages and run fresh `run-023` or later. Stop at the first
+  source-bound complete PASS. A later Supervisor PASS may still issue only ICRA-072B stabilization.
+
+### Enforcement disclosure
+
+- Route consistency, hooks-path, staged-path, whitespace and commit-message checks pass explicitly. The installed
+  pre-commit still exits 2 with `ICRA_ROUTE_GUARD_FAIL:BUILDER_SUPERVISOR_FILE_STAGED` because the valid handoff
+  correctly retains `active_role=DEEPSEEK`; this is the documented ICRA-071 lifecycle defect. The Supervisor-only
+  Review commit therefore uses the disclosed `--no-verify`; the normal pre-push guard remains enabled.
+
+### Supervisor window disposition
+
+- Pending the mandatory post-push audit. This section will be completed only after the Review changeset is pushed
+  and confirmed at divergence `0 0`, as required by `AGENTS.md` §8.6.
+
 ## 2026-08-27 — ICRA-072A Review REQUEST_CHANGES; authoritative P5 and exact identity repair issued
 
 ### Review identity and synchronization
