@@ -7,6 +7,15 @@
 > only risky amplitude to `±2.20 m` in V2. All other 073 debt remains accepted. ICRA-074 is TASK_READY for bounded
 > offline production P4-v2 optimization; no effect, qualification or campaign claim is authorized.
 
+ICRA-074 Builder implementation (2026-08-27): V2 derives from retained V1 and changes only risky amplitude
+(`-2.20 m` PRIMARY/FLAT_NULL, `+2.20 m` mirror) plus required descriptor identities/hash. An independent dense
+test proves risky cuboid clearance `~1.371035 m >= 1.349 m`. The deterministic offline two-homotopy fixture
+exercises actual production P4-v2 occupancy/provider/decision/injection seams and passes targeted 8/8 plus relevant
+regression 51/51. Peak/integral/length/hash ordering, longer lower-bottleneck selection, FLAT_NULL tie-break,
+invalid provider rejection and boundary identity are covered. No production/config defect remained after test-contract
+correction, so production is unchanged and no six-package product build was needed. ICRA-073 remains BLOCKED/
+user-bypassed/NOT PASS; no ROS/GPU/live or scientific/qualification/campaign claim exists.
+
 ## 0. 术语与约定（强制一致）
 - Estimator: 滑窗/因子图估计器（紧耦合 GNSS+IMU+LiDAR），基于现有 GLIM 框架演进
 - Integrity: 完整性监测输出 PL/AL/IM，安全条件 **PL < AL**

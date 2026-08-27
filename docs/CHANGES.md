@@ -3,6 +3,16 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- test(icra-074-v2-geometry-targeted-p4): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 /
+  IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — retain V1 descriptor behavior and add the exact V2
+  risky-amplitude-only builder with pinned hashes and dense analytic clearance `~1.371035 m >= 1.349 m`. Add one
+  offline two-homotopy fixture at the production `planCollisionGuide`/A* seams. It proves occupied-cell authority,
+  provider peak→integral→length→stable-hash ordering, longer lower-bottleneck selection, FLAT_NULL non-risk
+  tie-breaking, invalid provider fail-closed behavior and boundary identity. Focused ICRA-074 tests pass 8/8 and
+  relevant regressions pass 51/51. Production P4/config is unchanged because no real production defect remained
+  after correcting test setup/semantic assumptions. No six-package product build, ROS, GPU, live or claim work ran;
+  all skipped ICRA-073 debt remains BLOCKED/NOT PASS.
+
 - route(user-decision-004-issue-icra074): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 /
   IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — user decision 004 at pushed `b126b2f5` directs only the
   frozen risky-amplitude conflict to be repaired and skips every other ICRA-073 blocker. Freeze V2 at risky

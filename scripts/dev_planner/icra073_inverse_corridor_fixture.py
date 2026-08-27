@@ -16,6 +16,7 @@ from pathlib import Path
 
 
 SCHEMA_VERSION = "p4_v2_inverse_corridor_fixture_v1"
+SCHEMA_VERSION_V2 = "p4_v2_inverse_corridor_fixture_v2"
 VARIANTS = ("PRIMARY", "EXACT_MIRROR", "FLAT_NULL")
 FIXTURE_SEED = 73001
 REPOSITORY = Path(__file__).resolve().parents[2]
@@ -178,6 +179,20 @@ def build_descriptor(variant: str) -> dict:
     }
     descriptor["descriptor_hash_input_fields"] = sorted(
         (*descriptor.keys(), "descriptor_hash_input_fields"))
+    descriptor["descriptor_sha256"] = _sha256(descriptor)
+    return descriptor
+
+
+def build_v2_descriptor(variant: str) -> dict:
+    """Return the user-amended V2 descriptor while retaining V1 bytes."""
+    descriptor = build_descriptor(variant)
+    descriptor["schema_version"] = SCHEMA_VERSION_V2
+    descriptor["design_record"] = "ICRA_P4_V2_INVERSE_CORRIDOR_FIXTURE_V2"
+    descriptor["centre_lines"]["risky"]["amplitude_y_m"] = (
+        2.20 if variant == "EXACT_MIRROR" else -2.20)
+    descriptor["scene_identity"] = (
+        f"icra074-{variant.lower()}-seed-{FIXTURE_SEED}")
+    descriptor.pop("descriptor_sha256")
     descriptor["descriptor_sha256"] = _sha256(descriptor)
     return descriptor
 

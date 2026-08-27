@@ -1,5 +1,6 @@
 #include "p4_collision_scan_fixture.hpp"
 #include "p4_collision_guide_fixture.hpp"
+#include "icra074_targeted_optimization_fixture.hpp"
 
 #include <bspline_opt/bspline_optimizer.h>
 #include <gtest/gtest.h>
@@ -7,12 +8,14 @@
 #include <plan_env/grid_map.h>
 #include <rclcpp/rclcpp.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <iomanip>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -168,6 +171,64 @@ struct GridMapTestAccess
       }
     }
   }
+
+  static void configureIcra074TargetedFixture(GridMap * map)
+  {
+    constexpr double resolution =
+      icra074_targeted_optimization_fixture::kResolutionM;
+    map->mp_.map_origin_ = Eigen::Vector3d(-5.0, -4.0, -1.0);
+    map->mp_.map_size_ = Eigen::Vector3d(10.0, 8.0, 2.0);
+    map->mp_.map_min_boundary_ = map->mp_.map_origin_;
+    map->mp_.map_max_boundary_ = map->mp_.map_origin_ + map->mp_.map_size_;
+    map->mp_.map_voxel_num_ = Eigen::Vector3i(
+      icra074_targeted_optimization_fixture::kXCells,
+      icra074_targeted_optimization_fixture::kYCells,
+      icra074_targeted_optimization_fixture::kZCells);
+    map->mp_.resolution_ = resolution;
+    map->mp_.resolution_inv_ = 1.0 / resolution;
+    map->mp_.obstacles_inflation_ = 0.0;
+    map->mp_.min_occupancy_log_ = 0.5;
+    map->mp_.clamp_min_log_ = -2.0;
+    map->mp_.unknown_flag_ = 0.01;
+    map->mp_.frame_id_ = "map";
+    const std::size_t count = static_cast<std::size_t>(
+      icra074_targeted_optimization_fixture::kXCells *
+      icra074_targeted_optimization_fixture::kYCells *
+      icra074_targeted_optimization_fixture::kZCells);
+    map->md_.occupancy_buffer_.assign(count, -2.01);
+    map->md_.occupancy_buffer_inflate_.assign(count, 0);
+    map->md_.occupancy_buffer_raw_cloud_.assign(count, 0);
+    for (int x_index = 0;
+      x_index < icra074_targeted_optimization_fixture::kXCells; ++x_index)
+    {
+      const double x = -5.0 +
+        (static_cast<double>(x_index) + 0.5) * resolution;
+      if (x < icra074_targeted_optimization_fixture::kObstacleXMin ||
+        x > icra074_targeted_optimization_fixture::kObstacleXMax)
+      {
+        continue;
+      }
+      for (int y_index = 0;
+        y_index < icra074_targeted_optimization_fixture::kYCells; ++y_index)
+      {
+        const double y = -4.0 +
+          (static_cast<double>(y_index) + 0.5) * resolution;
+        if (y < icra074_targeted_optimization_fixture::kObstacleYMin ||
+          y > icra074_targeted_optimization_fixture::kObstacleYMax)
+        {
+          continue;
+        }
+        for (int z_index = 0;
+          z_index < icra074_targeted_optimization_fixture::kZCells;
+          ++z_index)
+        {
+          map->md_.occupancy_buffer_inflate_[static_cast<std::size_t>(
+              map->toAddress(Eigen::Vector3i(
+                x_index, y_index, z_index)))] = 1;
+        }
+      }
+    }
+  }
 };
 
 namespace
@@ -227,6 +288,55 @@ public:
     }
     return true;
   }
+};
+
+class Icra074TargetedProvider final : public iap::RiskPredictionProvider
+{
+public:
+  explicit Icra074TargetedProvider(
+    icra074_targeted_optimization_fixture::ProviderTruth truth)
+  : truth_(truth) {}
+
+  bool batchQuery(
+    const std::vector<iap::RiskPredictionQuery> & queries,
+    std::vector<iap::RiskPredictionResult> * results) override
+  {
+    if (!results) return false;
+    results->clear();
+    results->reserve(queries.size());
+    for (const auto & query : queries) {
+      iap::RiskPredictionResult result;
+      result.available = truth_ !=
+        icra074_targeted_optimization_fixture::ProviderTruth::INCOMPLETE;
+      result.valid = result.available;
+      result.stale = truth_ ==
+        icra074_targeted_optimization_fixture::ProviderTruth::STALE;
+      result.reason = !result.available ? "provider_incomplete" :
+        result.stale ? "provider_stale" :
+        truth_ == icra074_targeted_optimization_fixture::
+        ProviderTruth::NON_FINITE ? "provider_non_finite" : "ok";
+      double cost = icra074_targeted_optimization_fixture::kFlatCost;
+      if (truth_ ==
+        icra074_targeted_optimization_fixture::ProviderTruth::ORDERED)
+      {
+        cost = query.position_w.y() < 0.0 ?
+          icra074_targeted_optimization_fixture::kRiskyCost :
+          icra074_targeted_optimization_fixture::kSafeCost;
+      }
+      if (truth_ ==
+        icra074_targeted_optimization_fixture::ProviderTruth::NON_FINITE)
+      {
+        cost = std::numeric_limits<double>::quiet_NaN();
+      }
+      result.hpl_pred = cost;
+      result.vpl_pred = cost;
+      results->push_back(result);
+    }
+    return true;
+  }
+
+private:
+  icra074_targeted_optimization_fixture::ProviderTruth truth_;
 };
 
 void ensureRclcpp()
@@ -317,6 +427,27 @@ std::shared_ptr<const iap::RiskGridSnapshot> makeSelectionTriggerSnapshot()
   return grid.acquireSnapshot();
 }
 
+std::shared_ptr<const iap::RiskGridSnapshot> makeIcra074TargetedSnapshot(
+  icra074_targeted_optimization_fixture::ProviderTruth truth)
+{
+  iap::RiskGridMapParams params;
+  params.frame_id = "map";
+  params.lattice_anchor_w = Eigen::Vector3d::Zero();
+  params.resolution_m =
+    icra074_targeted_optimization_fixture::kResolutionM;
+  params.size_x_m = 10.0;
+  params.size_y_m = 8.0;
+  params.size_z_m = 2.0;
+  params.horizons_s = {0.0, 5.0, 10.0};
+  params.stale_timeout_s = 100.0;
+  iap::RiskGridMap grid(params);
+  Icra074TargetedProvider provider(truth);
+  std::string reason;
+  EXPECT_TRUE(grid.refreshFromProvider(
+      Eigen::Vector3d::Zero(), 10.0, provider, &reason)) << reason;
+  return grid.acquireSnapshot();
+}
+
 P4RiskAStarConfig p4Config(bool enabled, bool metrics_only = false)
 {
   P4RiskAStarConfig config;
@@ -333,6 +464,25 @@ P4RiskAStarConfig p4V2Config()
   auto config = p4Config(true, false);
   config.objective = P4RiskObjective::PROVIDER_BOTTLENECK_V2;
   return config;
+}
+
+ego_planner::P4GuideDecision runIcra074TargetedFixture(
+  const GridMap::Ptr & map,
+  const std::shared_ptr<const iap::RiskGridSnapshot> & snapshot,
+  uint64_t * epoch,
+  std::unique_ptr<ego_planner::P4GuideRequest> * retained_request = nullptr)
+{
+  auto astar = std::make_shared<AStar>();
+  astar->initGridMap(map, Eigen::Vector3i(120, 100, 30));
+  ego_planner::P4AStarGuideSearch search(astar);
+  ego_planner::P4CollisionGuidePlanner planner(search);
+  auto request = std::make_unique<ego_planner::P4GuideRequest>(
+    174, 1, icra074_targeted_optimization_fixture::start(),
+    icra074_targeted_optimization_fixture::goal(), true, snapshot, 10.0,
+    *epoch, [epoch]() {return *epoch;}, p4V2Config());
+  const auto decision = planner.planCollisionGuide(*request);
+  if (retained_request) *retained_request = std::move(request);
+  return decision;
 }
 
 std::unique_ptr<ego_planner::BsplineOptimizer> makeOptimizer(
@@ -392,6 +542,29 @@ std::string constraintHash(const ego_planner::ControlPoints & points)
   std::ostringstream output;
   output << std::hex << std::setfill('0') << std::setw(16) << hash;
   return output.str();
+}
+
+void expectDenseSweptPathFree(
+  const GridMap::Ptr & map,
+  const std::vector<Eigen::Vector3d> & path)
+{
+  ASSERT_FALSE(path.empty());
+  constexpr int subdivisions_per_voxel = 20;
+  for (std::size_t index = 1; index < path.size(); ++index) {
+    const Eigen::Vector3d delta = path[index] - path[index - 1];
+    const int subdivisions = std::max(1, static_cast<int>(std::ceil(
+      delta.norm() /
+      (icra074_targeted_optimization_fixture::kResolutionM /
+      subdivisions_per_voxel))));
+    for (int subdivision = 0; subdivision <= subdivisions; ++subdivision) {
+      const double fraction = static_cast<double>(subdivision) /
+        static_cast<double>(subdivisions);
+      const Eigen::Vector3d point = path[index - 1] + fraction * delta;
+      EXPECT_EQ(map->getInflateOccupancy(point), 0)
+        << "segment=" << index - 1 << " subdivision=" << subdivision
+        << " point=" << point.transpose();
+    }
+  }
 }
 
 }  // namespace
@@ -479,6 +652,99 @@ TEST(P4CollisionGuideIntegration,
   ego_planner::P4GuideDecisionReason reason;
   EXPECT_TRUE(ego_planner::p4GuideDecisionReadyForInjection(
       decision, request, &reason));
+}
+
+TEST(P4CollisionGuideIntegration,
+  Icra074OfflineFixtureSelectsLowerBottleneckWithoutCrossingOccupancy)
+{
+  ASSERT_EQ(
+    icra074_targeted_optimization_fixture::kName,
+    "icra074_offline_two_homotopy_v1");
+  const auto snapshot = makeIcra074TargetedSnapshot(
+    icra074_targeted_optimization_fixture::ProviderTruth::ORDERED);
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureIcra074TargetedFixture(map.get());
+  uint64_t epoch = map->occupancyGeneration();
+  std::unique_ptr<ego_planner::P4GuideRequest> request;
+
+  const auto decision = runIcra074TargetedFixture(
+    map, snapshot, &epoch, &request);
+
+  ASSERT_EQ(
+    decision.status, ego_planner::P4GuideDecisionStatus::RISK_SELECTED)
+    << ego_planner::p4GuideDecisionReasonName(decision.reason);
+  EXPECT_EQ(
+    decision.reason,
+    ego_planner::P4GuideDecisionReason::PROVIDER_BOTTLENECK_SELECTED);
+  EXPECT_LT(
+    decision.risk.risk_profile.max,
+    decision.original.risk_profile.max);
+  EXPECT_LE(decision.risk_original_length_ratio, 1.30);
+  expectDenseSweptPathFree(map, decision.original.complete_path);
+  expectDenseSweptPathFree(map, decision.risk.complete_path);
+  EXPECT_EQ(decision.planning_attempt_id, request->planningAttemptId());
+  EXPECT_EQ(decision.collision_segment_id, request->collisionSegmentId());
+  EXPECT_EQ(decision.snapshot_generation, snapshot->generation_id());
+  EXPECT_EQ(decision.occupancy_epoch, epoch);
+  EXPECT_EQ(decision.selected.canonical_hash, decision.risk.canonical_hash);
+  ego_planner::P4GuideDecisionReason reason;
+  EXPECT_TRUE(ego_planner::p4GuideDecisionReadyForInjection(
+      decision, *request, &reason));
+}
+
+TEST(P4CollisionGuideIntegration,
+  Icra074OfflineFixtureFlatNullAndInvalidProviderSupportFailClosed)
+{
+  {
+    auto map = std::make_shared<GridMap>();
+    GridMapTestAccess::configureIcra074TargetedFixture(map.get());
+    uint64_t epoch = map->occupancyGeneration();
+    const auto decision = runIcra074TargetedFixture(
+      map, makeIcra074TargetedSnapshot(
+        icra074_targeted_optimization_fixture::ProviderTruth::FLAT_NULL),
+      &epoch);
+    ASSERT_TRUE(decision.original.risk_profile.complete());
+    ASSERT_TRUE(decision.risk.risk_profile.complete());
+    EXPECT_DOUBLE_EQ(
+      decision.original.risk_profile.max,
+      decision.risk.risk_profile.max);
+    EXPECT_DOUBLE_EQ(
+      decision.original.risk_profile.mean,
+      decision.risk.risk_profile.mean);
+    const auto original_tie_break = std::make_pair(
+      decision.original.length_m, decision.original.canonical_hash);
+    const auto risk_tie_break = std::make_pair(
+      decision.risk.length_m, decision.risk.canonical_hash);
+    const auto & expected = risk_tie_break < original_tie_break ?
+      decision.risk : decision.original;
+    EXPECT_EQ(decision.selected.canonical_hash, expected.canonical_hash);
+  }
+
+  for (const auto truth : {
+      icra074_targeted_optimization_fixture::ProviderTruth::INCOMPLETE,
+      icra074_targeted_optimization_fixture::ProviderTruth::STALE,
+      icra074_targeted_optimization_fixture::ProviderTruth::NON_FINITE})
+  {
+    auto map = std::make_shared<GridMap>();
+    GridMapTestAccess::configureIcra074TargetedFixture(map.get());
+    uint64_t epoch = map->occupancyGeneration();
+    const auto decision = runIcra074TargetedFixture(
+      map, makeIcra074TargetedSnapshot(truth), &epoch);
+    EXPECT_EQ(
+      decision.status,
+      ego_planner::P4GuideDecisionStatus::ORIGINAL_SELECTED)
+      << static_cast<int>(truth) << ' '
+      << ego_planner::p4GuideDecisionReasonName(decision.reason);
+    EXPECT_FALSE(decision.selection_applied);
+    EXPECT_EQ(
+      decision.selected.canonical_hash,
+      decision.original.canonical_hash);
+    EXPECT_EQ(
+      decision.reason,
+      ego_planner::P4GuideDecisionReason::PROVIDER_SUPPORT_INCOMPLETE);
+    EXPECT_FALSE(decision.original.risk_profile.complete());
+    EXPECT_FALSE(decision.risk.returned);
+  }
 }
 
 TEST(P4CollisionGuideIntegration,

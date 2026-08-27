@@ -1,5 +1,15 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-27 ICRA-074 V2 geometry and offline targeted optimization
+
+| Req ID | Implemented/tested seam | Evidence and disposition | Status |
+|---|---|---|---|
+| IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-423 | V2 geometry-only amendment | `build_v2_descriptor()` derives from retained V1 and changes only risky amplitude plus required schema/design/scene identities/hash; pinned three-variant hashes and independent 1,000,001-position clearance test (`~1.371035 m >= 1.349 m`) | **PASS / V1 RETAINED** |
+| IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 / IAP-RQ-422 | Production P4-v2 targeted seam | `icra074_targeted_optimization_fixture.hpp`, collision-guide decision/integration tests and existing risk-A* comparator cover occupancy-before-risk, peak/integral/length/hash ordering, longer lower-bottleneck selection, FLAT_NULL tie-break and invalid support | **FOCUSED 8/8; PRODUCTION UNCHANGED** |
+| IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 | Boundary identity | Actual production A* plus `planCollisionGuide` and `p4GuideDecisionReadyForInjection` preserve request, snapshot generation/config, occupancy epoch and selected-guide identity; fixture supplies no oracle/tube/expected-route decision field | **PASS** |
+| IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-423 / IAP-RQ-424 | Offline/claim boundary | Relevant regression 51/51; shared build used only for test targets; no production/config change, six-package build, ROS, GPU, live, effect, qualification or campaign | **DEVELOPMENT ONLY** |
+| IAP-RQ-423 / IAP-RQ-424 | Accepted debt boundary | ICRA-073 source/output guards, full invariants, oracle, paired diagnostics and runtime identity remain skipped BLOCKED/user-bypassed/NOT PASS | **UNCHANGED** |
+
 ## 2026-08-27 user decision 004 and ICRA-074 issuance
 
 | Req ID | Decision/task seam | Evidence and disposition | Status |

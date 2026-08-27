@@ -1,4 +1,5 @@
 #include "p4_collision_guide_fixture.hpp"
+#include "icra074_targeted_optimization_fixture.hpp"
 
 #include <bspline_opt/p4_collision_guide.h>
 #include <gtest/gtest.h>
@@ -18,6 +19,9 @@ namespace
 enum class ProviderMode
 {
   SPATIAL,
+  EQUAL_PEAK_LOWER_INTEGRAL,
+  FLAT_NULL,
+  ZERO_PROVIDER,
   UNKNOWN,
   STALE,
   NON_FINITE,
@@ -46,9 +50,20 @@ public:
       result.reason = mode_ == ProviderMode::UNKNOWN ? "unknown_risk" :
         mode_ == ProviderMode::STALE ? "stale_risk" :
         mode_ == ProviderMode::NON_FINITE ? "non_finite_risk" : "ok";
-      const double cost = query.position_w.y() < 0.0 ?
+      double cost = query.position_w.y() < 0.0 ?
         p4_collision_guide_fixture::kHighCorridorCost :
         p4_collision_guide_fixture::kLowCorridorCost;
+      if (mode_ == ProviderMode::EQUAL_PEAK_LOWER_INTEGRAL &&
+        query.position_w.y() >= 0.0 &&
+        std::abs(query.position_w.x()) < 0.5)
+      {
+        cost = p4_collision_guide_fixture::kHighCorridorCost;
+      }
+      if (mode_ == ProviderMode::FLAT_NULL) {
+        cost = icra074_targeted_optimization_fixture::kFlatCost;
+      } else if (mode_ == ProviderMode::ZERO_PROVIDER) {
+        cost = 0.0;
+      }
       result.hpl_pred = mode_ == ProviderMode::NON_FINITE ?
         std::numeric_limits<double>::quiet_NaN() : cost;
       result.vpl_pred = result.hpl_pred;
@@ -272,6 +287,125 @@ TEST(P4CollisionGuideDecision, ProviderBottleneckV2SelectsLowerPeakRiskGuide)
   ego_planner::P4GuideDecisionReason reason;
   EXPECT_TRUE(ego_planner::p4GuideDecisionReadyForInjection(
       decision, request, &reason));
+}
+
+TEST(P4CollisionGuideDecision,
+  Icra074LowerBottleneckWinsDespiteLongerDeterministicGuide)
+{
+  uint64_t epoch = 74;
+  const auto snapshot = makeSnapshot(ProviderMode::SPATIAL);
+  auto search = successfulSearch();
+  search.original.path =
+    icra074_targeted_optimization_fixture::shorterRiskyGuide();
+  search.risk.path =
+    icra074_targeted_optimization_fixture::longerSafeGuide();
+  ego_planner::P4CollisionGuidePlanner planner(search);
+  const auto request = makeRequest(
+    snapshot, epoch, &epoch, providerBottleneckV2Config());
+
+  const auto decision = planner.planCollisionGuide(request);
+
+  ASSERT_EQ(
+    decision.status, ego_planner::P4GuideDecisionStatus::RISK_SELECTED);
+  EXPECT_GT(decision.risk.length_m, decision.original.length_m);
+  EXPECT_LE(decision.risk_original_length_ratio, 1.30);
+  EXPECT_LT(
+    decision.risk.risk_profile.max,
+    decision.original.risk_profile.max);
+  EXPECT_EQ(decision.selected.canonical_hash, decision.risk.canonical_hash);
+  ego_planner::P4GuideDecisionReason reason;
+  EXPECT_TRUE(ego_planner::p4GuideDecisionReadyForInjection(
+      decision, request, &reason));
+}
+
+TEST(P4CollisionGuideDecision,
+  Icra074EqualPeakUsesProviderIntegralBeforeLengthAndStableHash)
+{
+  uint64_t epoch = 75;
+  const auto snapshot = makeSnapshot(
+    ProviderMode::EQUAL_PEAK_LOWER_INTEGRAL);
+  auto search = successfulSearch();
+  search.original.path =
+    icra074_targeted_optimization_fixture::shorterRiskyGuide();
+  search.risk.path =
+    icra074_targeted_optimization_fixture::longerSafeGuide();
+  ego_planner::P4CollisionGuidePlanner planner(search);
+
+  const auto decision = planner.planCollisionGuide(makeRequest(
+      snapshot, epoch, &epoch, providerBottleneckV2Config()));
+
+  ASSERT_TRUE(decision.original.risk_profile.complete());
+  ASSERT_TRUE(decision.risk.risk_profile.complete());
+  EXPECT_DOUBLE_EQ(
+    decision.risk.risk_profile.max,
+    decision.original.risk_profile.max);
+  EXPECT_LT(
+    decision.risk.risk_profile.mean * decision.risk.controllable_length_m,
+    decision.original.risk_profile.mean *
+    decision.original.controllable_length_m);
+  EXPECT_GT(decision.risk.length_m, decision.original.length_m);
+  EXPECT_EQ(
+    decision.status, ego_planner::P4GuideDecisionStatus::RISK_SELECTED);
+  EXPECT_EQ(decision.selected.canonical_hash, decision.risk.canonical_hash);
+}
+
+TEST(P4CollisionGuideDecision,
+  Icra074PathLengthBreaksZeroProviderTieBeforeStableHash)
+{
+  uint64_t epoch = 76;
+  const auto snapshot = makeSnapshot(ProviderMode::ZERO_PROVIDER);
+  auto search = successfulSearch();
+  search.original.path =
+    icra074_targeted_optimization_fixture::shorterRiskyGuide();
+  search.risk.path =
+    icra074_targeted_optimization_fixture::longerSafeGuide();
+  ego_planner::P4CollisionGuidePlanner planner(search);
+
+  const auto decision = planner.planCollisionGuide(makeRequest(
+      snapshot, epoch, &epoch, providerBottleneckV2Config()));
+
+  ASSERT_TRUE(decision.original.risk_profile.complete());
+  ASSERT_TRUE(decision.risk.risk_profile.complete());
+  EXPECT_DOUBLE_EQ(
+    decision.original.risk_profile.max, decision.risk.risk_profile.max);
+  EXPECT_DOUBLE_EQ(
+    decision.original.risk_profile.mean *
+    decision.original.controllable_length_m,
+    decision.risk.risk_profile.mean * decision.risk.controllable_length_m);
+  EXPECT_LT(decision.original.length_m, decision.risk.length_m);
+  EXPECT_EQ(
+    decision.status, ego_planner::P4GuideDecisionStatus::ORIGINAL_SELECTED);
+  EXPECT_EQ(
+    decision.selected.canonical_hash, decision.original.canonical_hash);
+}
+
+TEST(P4CollisionGuideDecision,
+  Icra074FlatNullEqualCostsAndLengthUseStableHash)
+{
+  uint64_t epoch = 77;
+  const auto snapshot = makeSnapshot(ProviderMode::FLAT_NULL);
+  auto search = successfulSearch();
+  search.original.path =
+    icra074_targeted_optimization_fixture::shorterRiskyGuide();
+  search.risk.path =
+    icra074_targeted_optimization_fixture::symmetricSafeGuide();
+  ego_planner::P4CollisionGuidePlanner planner(search);
+
+  const auto decision = planner.planCollisionGuide(makeRequest(
+      snapshot, epoch, &epoch, providerBottleneckV2Config()));
+
+  ASSERT_TRUE(decision.original.risk_profile.complete());
+  ASSERT_TRUE(decision.risk.risk_profile.complete());
+  EXPECT_DOUBLE_EQ(
+    decision.original.risk_profile.max, decision.risk.risk_profile.max);
+  EXPECT_DOUBLE_EQ(
+    decision.original.risk_profile.mean *
+    decision.original.controllable_length_m,
+    decision.risk.risk_profile.mean * decision.risk.controllable_length_m);
+  EXPECT_DOUBLE_EQ(decision.original.length_m, decision.risk.length_m);
+  const auto & expected = decision.risk.canonical_hash <
+    decision.original.canonical_hash ? decision.risk : decision.original;
+  EXPECT_EQ(decision.selected.canonical_hash, expected.canonical_hash);
 }
 
 TEST(P4CollisionGuideDecision, V2IdentityBindsImmutableSnapshotConfiguration)

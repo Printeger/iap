@@ -133,6 +133,32 @@ occupancy inflation `0.099 m` 所需的 `1.349 m`；preflight 因此应以 exit 
 停止。不得移动障碍、缩小 inflation、改变 tube/guard，且在 authority 修订前不得执行 GPU/ROS/live
 paired diagnostics。
 
+### 1.2.4 ICRA-074 V2 geometry 与 offline P4-v2 targeted tests
+
+ICRA-074 只运行离线测试。V2 geometry test 同时保留 V1 regression，并以 1,000,001 个等间隔解析位置
+独立检查 risky curve 到冻结 cuboid 的 clearance：
+
+```bash
+cd /home/dev/ws_iap/src/iap
+python3 test/test_icra074_geometry.py -v
+python3 test/test_icra073_inverse_corridor.py -v
+```
+
+Production P4-v2 targeted fixture 使用共享 build root 编译已有测试目标，不创建 task-local build/install：
+
+```bash
+cd /home/dev/ws_iap/src/iap
+cmake --build /home/dev/ws_iap/build/bspline_opt \
+  --target test_p4_collision_guide test_p4_collision_guide_integration -j2
+
+/home/dev/ws_iap/build/path_searching/test_p4_risk_astar
+/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide
+/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide_integration
+```
+
+这些命令不启动 ROS、GPU 或 live flow。ICRA-073 的 source/output guards、oracle、paired diagnostics 和
+runtime identity 仍是用户接受的 BLOCKED/NOT PASS debt，不得借 ICRA-074 测试改写为 PASS。
+
 ### 1.3 运行一个最小检查
 
 ```bash

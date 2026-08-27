@@ -1,5 +1,49 @@
 # DeepSeek Development Log — DEEPSEEK-owned
 
+## 2026-08-27 — ICRA-074 V2 geometry and offline targeted optimization
+
+Requirements: IAP-RQ-320, IAP-RQ-321, IAP-RQ-400, IAP-RQ-410,
+IAP-RQ-421, IAP-RQ-422, IAP-RQ-423 and IAP-RQ-424.
+
+The unique handoff `f6f7832aec987b94f559e7e50219f239691c8727` was
+fetch-confirmed at divergence `0 0`; ambient status contained only the
+protected untracked PDF. User decision 004 authorizes only the risky-amplitude
+V2 amendment and bounded offline P4-v2 targeted optimization. ICRA-073 remains
+BLOCKED/user-bypassed/NOT PASS with every other listed blocker unchanged.
+
+Geometry TDD began RED because no V2 descriptor builder existed. The minimal
+GREEN keeps `build_descriptor()` and all V1 evidence immutable and adds
+`build_v2_descriptor()`: PRIMARY/FLAT_NULL risky amplitude `-2.20 m`, mirror
+`+2.20 m`, V2 schema/design/scene identities and new pinned canonical hashes.
+The focused test compares normalized V1/V2 descriptors so no other fixture
+field may change. Its independent 1,000,001-position analytic calculation
+observes approximately `1.371035 m`, above the unchanged `1.349 m` guard plus
+inflation requirement, for all three variants.
+
+Production TDD first RED-compiled against a missing ICRA-074 fixture asset.
+After adding the deterministic offline two-homotopy asset, a too-small A* test
+pool truthfully failed endpoint admission and was corrected without product
+change. The next behavioral RED showed that actual A* discretizations do not
+make the lower-risk returned path longer in this small map and that FLAT_NULL
+selects by the existing path-length/hash tie-break. The contract was narrowed,
+not tuned: the same fixture proves longer-lower-bottleneck selection through
+the production `planCollisionGuide` seam with fixed guides, while actual A*
+separately proves occupancy rejection, ordered provider selection, FLAT_NULL
+non-risk tie-breaking, incomplete/stale/non-finite fail-closed behavior and
+request/snapshot/epoch/selected-guide/injection identity.
+
+The focused ICRA-074 set passes 8/8. The complete relevant regression passes
+51/51: V2 geometry 2/2, retained V1 Python 3/3, P4 risk A* 9/9, collision-guide
+decision 24/24 and production integration 13/13. No production P4 source or
+configuration changed, so no six-package product build is required; only the
+existing shared-build C++ test targets were rebuilt. No ROS, GPU, live,
+held-out, effect, qualification or campaign action ran.
+
+Pending pushed-source binding and the non-overwriting ICRA-074 record, Builder
+disposition is `PRODUCTION_P4_V2_UNCHANGED_TARGETED_TESTS_GREEN`. The first
+missing downstream scientific stage remains ICRA-075 exploratory/power inputs,
+which is not authorized before Supervisor Review.
+
 ## 2026-08-27 — USER DECISION 004 / ICRA-074 TASK READY
 
 - User decision `USER-ICRA-ROUTE-20260827-004` binds pushed anchor `b126b2f5` and directs only frozen geometry
