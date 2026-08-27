@@ -1,0 +1,89 @@
+{
+  /*** Keyframe-based VGICP odometry estimation ***
+  // --- Initialization ---
+  // initialization_mode         : "LOOSE" performs loose coupling-based IMU state initialization that takes a few seconds
+  //                             : "NAIVE" simply uses the linear acceleration direction as the gravity direction
+  // initialization_window_size  : Initialization window size for the "LOOSE" initialization mode
+  // init_pose_damping_scale     : Damping scale for the initial pose (to fix the gauge freedom)
+  //
+  // --- Optimization params ---
+  // smoother_lag                : Fixed-lag smoothing window size [sec]
+  // use_isam2_dogleg            : Use the dogleg optimizer as the backend of ISAM2 that is slow but more robust
+  // isam2_relinearize_skip      :
+  // isam2_relinearize_thresh    :
+  // clock_owner_mode            : "dual" | "odometry" | "gnss" (symbol family 'c' ownership)
+  // fix_imu_bias                : If true, disable IMU bias estimation and use the initial IMU bias
+  //
+  // --- Voxel params ---
+  // voxel_resolution            : Base resolution for VGICP voxels
+  // voxel_resolution_max        : Maximum base resolution for VGICP voxels.
+  //                             : When voxel_resolution_max > voxel_resolution, the voxel resolution is adaptively increased
+  //                             : depending on the median of point distances clamped by dmin and dmax.
+  // voxelmap_levels             : Multi-resolution voxelmap levels
+  // voxelmap_scaling_factor     : Multi-resolution voxelmap scaling factor
+  // full_connection_window_size : Latest sensor pose variable is connected with all of the past $full_connection_window_size poses
+  //                             : Must be >1. Increase this param for aggressive motion data (3~5)
+  //
+  // --- Keyframe params ---
+  // keyframe_update_strategy    : "OVERLAP" / "DISPLACEMENT" / "ENTROPY"
+  // max_num_keyframes           : Maximum number of keyframes
+  // keyframe_min_overlap        : Keyframes that overlap to the latest keyframe with a rate smaller than this will be eliminated
+  // keyframe_max_overlap        : If the overlap between the latest frame and keyframes is smaller than this,
+  //                             : it is inserted into the keyframe list (lager = more frequent keyframe insertion)
+  // keyframe_delta_(trans|rot)  : Keyframe displacement threshold [m / rad]
+  //
+  // --- MISC ---
+  // validate_imu                 : If true, perform IMU validation and log the validation results
+  // save_imu_rate_trajectory     : If true, save the IMU rate trajectory
+  // num_threads                  : Number of threads for odometry estimation
+  */
+  "odometry_estimation": {
+    "so_name": "libodometry_estimation_gpu.so",
+    // Initialization params
+    "initialization_mode": "LOOSE",
+    "initialization_window_size": 1.0,
+    "init_pose_damping_scale": 1e10,
+    // Optimization params
+    "smoother_lag": 5.0,
+    "use_isam2_dogleg": false,
+    // isam2_relinearize_skip increased from 1 to 5: batches relinearization, reduces sync-mode warnings
+    "isam2_relinearize_skip": 5,
+    "isam2_relinearize_thresh": 0.1,
+    "clock_owner_mode": "gnss",
+    "fix_imu_bias": false,
+    // Clock bias/drift process noise (IAP-RQ-010): units m/sqrt(s) and m/s/sqrt(s)
+    "clk_bias_noise": 100,
+    "clk_drift_noise": 1,
+    // Per-type iSAM2 relinearization thresholds for clock state (IAP-RQ-010)
+    // Clock bias can jump ~drift*dt = 61*0.1 = 6m/frame at cold-start, far exceeding
+    // the global threshold 0.1 and causing sync-mode GPU linearization every frame.
+    "clk_bias_relin_thresh": 500.0,
+    "clk_drift_relin_thresh": 5.0,
+    // Voxel params
+    "voxel_resolution": 0.25,
+    "voxel_resolution_max": 0.5,
+    "voxel_resolution_dmin": 5.0,
+    "voxel_resolution_dmax": 20.0,
+    "voxelmap_levels": 2,
+    "voxelmap_scaling_factor": 2.0,
+    "full_connection_window_size": 2,
+    // Keyframe params
+    "keyframe_update_strategy": "OVERLAP",
+    "max_num_keyframes": 15,
+    "keyframe_min_overlap": 0.01,
+    "keyframe_max_overlap": 0.7,
+    "keyframe_delta_trans": 2.0,
+    "keyframe_delta_rot": 0.5,
+    "keyframe_entropy_thresh": 0.99,
+    // ICP quality / health (IAP-RQ-040)
+    "icp_cond_threshold": 500.0,
+    "gamma_lidar_max": 10.0,
+    // ICP quality CSV (IAP-RQ-040 observability)
+    "enable_icp_csv": true,
+    "icp_csv_path": "/home/dev/ws_iap/src/iap/log/res/iap_icp.csv",
+    // MISC
+    "validate_imu": true,
+    "save_imu_rate_trajectory": true,
+    "num_threads": 2
+  }
+}

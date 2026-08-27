@@ -1,0 +1,29 @@
+[2026-08-27 12:45:49.669] [glim] [info] config_path: /home/dev/ws_iap/src/iap/results/icra27/icra075/matrix-002/primary-75001-p0_p5_control/runtime/iap_sim_demo11_test_planner_1690352_1787834749466/sim_demo11
+[2026-08-27 12:45:49.670] [glim] [info] run_dir: /home/dev/ws_iap/src/iap/results/icra27/icra075/matrix-002/primary-75001-p0_p5_control/runtime/iap_logs/20260827T124549Z_667
+[2026-08-27 12:45:49.670] [glim] [info] registered GPU linearization hook
+[2026-08-27 12:45:49.670] [glim] [info] dump_path: /home/dev/ws_iap/src/iap/results/icra27/icra075/matrix-002/primary-75001-p0_p5_control/runtime/iap_logs/20260827T124549Z_667/export/dump (legacy config value: /home/dev/ws_iap/src/iap/results/icra27/icra075/matrix-002/primary-75001-p0_p5_control/runtime/iap_sim_demo11_test_planner_1690352_1787834749466/dump)
+[2026-08-27 12:45:49.670] [glim] [info] load libodometry_estimation_gpu.so
+[2026-08-27 12:45:49.670] [glim] [warning] param odometry_estimation/sigma_p_update_scope not found
+[2026-08-27 12:45:49.670] [glim] [warning] use default_value=current
+[2026-08-27 12:45:49.670] [glim] [warning] param odometry_estimation/icp_quality_stride not found
+[2026-08-27 12:45:49.670] [glim] [warning] use default_value=1
+[2026-08-27 12:45:49.670] [glim] [info] [odometry_gpu] icp_quality_stride=1 enable_icp_csv=true icp_csv_path=/home/dev/ws_iap/src/iap/results/icra27/icra075/matrix-002/primary-75001-p0_p5_control/runtime/iap_logs/20260827T124549Z_667/export/iap_icp.csv
+[2026-08-27 12:45:49.788] [glim] [info] load libsub_mapping.so
+[2026-08-27 12:45:49.789] [glim] [info] load libglobal_mapping.so
+[2026-08-27 12:45:49.789] [glim] [info] load libgnss_extension.so
+[2026-08-27 12:45:49.797] [glim] [info] load libintegrity_extension.so
+[2026-08-27 12:45:49.799] [glim] [info] [araim_debug] CSV logging to: /home/dev/ws_iap/src/iap/results/icra27/icra075/matrix-002/primary-75001-p0_p5_control/runtime/iap_logs/20260827T124549Z_667/export/iap_araim.csv
+[2026-08-27 12:45:49.799] [glim] [info] load libsim_extension.so
+[2026-08-27 12:45:49.801] [glim] [warning] param glim_ros/sim/ not found
+[2026-08-27 12:45:49.801] [glim] [warning] use default_value=0.05
+[2026-08-27 12:45:49.801] [glim] [warning] param glim_ros/sim/ not found
+[2026-08-27 12:45:49.801] [glim] [warning] use default_value=2
+[2026-08-27 12:45:49.942] [glim] [info] meta/imu_frame_id=imu
+[2026-08-27 12:45:49.942] [glim] [info] meta/base_frame_id=imu
+[2026-08-27 12:45:49.942] [glim] [info] auto-detected acc_scale=1.00000
+[2026-08-27 12:45:50.367] [glim] [info] meta/lidar_frame_id=lidar
+[2026-08-27 12:45:50.367] [glim] [warning] per-point timestamps are not given!!
+[2026-08-27 12:45:50.367] [glim] [warning] use pseudo per-point timestamps based on the order of points
+[2026-08-27 12:46:34.100] [glim] [info] waiting for odometry estimation
+[2026-08-27 12:46:34.102] [glim] [info] waiting for local mapping
+[2026-08-27 12:46:34.114] [glim] [info] waiting for global mapping

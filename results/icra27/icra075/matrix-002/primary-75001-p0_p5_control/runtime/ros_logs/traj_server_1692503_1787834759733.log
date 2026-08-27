@@ -1,0 +1,2 @@
+[WARN] [1787834760.744434990] [drone_0_traj_server]: [Traj server]: ready.
+[INFO] [1787834794.099938325] [rclcpp]: signal_handler(SIGINT/SIGTERM)

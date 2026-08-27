@@ -1,0 +1,5 @@
+[2026-08-27 12:45:49.789] [global] [info] multiscan_window=3: global_mapping will only connect submaps within 3 recent neighbors
+[2026-08-27 12:46:34.123] [global] [info] saving to /home/dev/ws_iap/src/iap/results/icra27/icra075/matrix-002/primary-75001-p0_p5_control/runtime/iap_logs/20260827T124549Z_667/export/dump...
+[2026-08-27 12:46:34.123] [global] [info] serializing factor graph to /home/dev/ws_iap/src/iap/results/icra27/icra075/matrix-002/primary-75001-p0_p5_control/runtime/iap_logs/20260827T124549Z_667/export/dump/graph.bin
+[2026-08-27 12:46:34.123] [global] [info] saving config snapshot
+[2026-08-27 12:46:34.124] [global] [info] saved

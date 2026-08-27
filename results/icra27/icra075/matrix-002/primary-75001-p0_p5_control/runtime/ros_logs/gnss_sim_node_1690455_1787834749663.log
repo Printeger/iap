@@ -1,0 +1,5 @@
+[INFO] [1787834749.675149871] [test_planner_gnss_sim_node]: Loaded GNSS scenario file: /home/dev/ws_iap/install/gnss_sim/share/gnss_sim/config/icra075_inverse_corridor_provider_v2.json
+[INFO] [1787834749.675540845] [test_planner_gnss_sim_node]: GNSS sim config: scenario_file=/home/dev/ws_iap/install/gnss_sim/share/gnss_sim/config/icra075_inverse_corridor_provider_v2.json ephemeris_source=rinex enabled_constellations=GPS,BDS,GAL,GLO enable_fault_injection=false fault_count=0
+[INFO] [1787834749.683312536] [test_planner_gnss_sim_node]: gnss_sim_node v2 started: truth_odom_topic=/sim/drone_0/truth_odom time_source=odom_stamp origin_lla=[31.2304000, 121.4737000, 25.00]
+[INFO] [1787834749.818657370] [test_planner_gnss_sim_node]: Loaded 3017 GPS/BDS/GAL and 1070 GLONASS ephemeris records from RINEX NAV file: /home/dev/ws_iap/src/LIGO./Data/BRDM00DLR_S_20221870000_01D_MN.rnx
+[INFO] [1787834794.099889679] [rclcpp]: signal_handler(SIGINT/SIGTERM)

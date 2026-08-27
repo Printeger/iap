@@ -196,6 +196,11 @@ Runner 在任何 ROS/main flow 前只执行一次 GPU preflight；失败时输�
 不重试/排除完成行。独立 analyzer 只从 frozen descriptor 与 committed-final/publication identity 生成 200 个
 equal-arc samples；不会消费 P4 guide/route/objective evidence 作为 oracle 输入。
 
+当前保留结果：`matrix-001` 在 GPU PASS 后因 capture readiness schema 缺陷于 ROS 前停止；修复并推送后的
+`matrix-002` 首个 control 行通过 GPU、15/15 process health、P0 readiness 与 cleanup，但 2,137 条 P5 final-status
+记录（2,117 个唯一 `(traj_id,start_time)` candidate identity）全部因 `current_low_margin` 被拒绝，没有 committed publication/runtime identity。矩阵按 fail-closed
+规则停止，状态为 `BLOCKED_ICRA075_CONTROL_P5_CURRENT_LOW_MARGIN`；没有重试、调阈值或生成 power verdict。
+
 ### 1.3 运行一个最小检查
 
 ```bash

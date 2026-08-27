@@ -1,0 +1,62 @@
+{
+  "glim_ros": {
+    "acc_scale": 0.0,
+    "base_frame_id": "",
+    "dump_path": "/home/dev/ws_iap/src/iap/results/icra27/icra075/matrix-002/primary-75001-p0_p5_control/runtime/iap_sim_demo11_test_planner_1690352_1787834749466/dump",
+    "enable_global_mapping": true,
+    "enable_local_mapping": true,
+    "extension_modules": [
+      "libgnss_extension.so",
+      "libintegrity_extension.so",
+      "libsim_extension.so"
+    ],
+    "image_qos": {
+      "depth": 10,
+      "durability": "volatile",
+      "history": "keep_last",
+      "profile": "sensor_data",
+      "reliability": "best_effort"
+    },
+    "image_topic": "/camera/infra1/image_rect_raw",
+    "imu_frame_id": "",
+    "imu_qos": {
+      "depth": 1000,
+      "durability": "volatile",
+      "history": "keep_last",
+      "profile": "sensor_data",
+      "reliability": "best_effort"
+    },
+    "imu_time_offset": 0.0,
+    "imu_topic": "/sim/drone_0/imu_iap",
+    "keep_raw_points": false,
+    "lidar_frame_id": "",
+    "map_frame_id": "map",
+    "odom_frame_id": "odom",
+    "points_qos": {
+      "depth": 10,
+      "durability": "volatile",
+      "history": "keep_last",
+      "profile": "sensor_data",
+      "reliability": "best_effort"
+    },
+    "points_time_offset": 0.0,
+    "points_topic": "/sim/drone_0/lidar_body",
+    "publish_imu2lidar": true,
+    "sim": {
+      "align_planner_odom_to_truth": true,
+      "alignment_est_speed_thresh": 0.05,
+      "alignment_max_duration": 8.0,
+      "alignment_min_samples": 20,
+      "alignment_mode": "static_window",
+      "alignment_publish_before_ready": false,
+      "alignment_truth_speed_thresh": 0.05,
+      "enable_metrics_csv": true,
+      "metrics_csv_path": "/home/dev/ws_iap/src/iap/results/icra27/icra075/matrix-002/primary-75001-p0_p5_control/exports/test_planner_icra_p0_p4_v2_p5_dev_icra_p0_p4_v2_p5_dev_fixture_v1_1690352_1787834749466/iap_sim_truth_vs_est.csv",
+      "planner_body_frame_id": "imu",
+      "planner_odom_frame_id": "map",
+      "planner_odom_topic": "/drone_0_visual_slam/odom",
+      "truth_odom_topic": "/sim/drone_0/truth_odom"
+    },
+    "tf_time_offset": 1e-06
+  }
+}

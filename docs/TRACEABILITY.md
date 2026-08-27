@@ -5,9 +5,9 @@
 | Req ID | Implemented/tested seam | Evidence and disposition | Status |
 |---|---|---|---|
 | IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-423 | V2 runtime scene binding | Exact map/GNSS assets bind all three V2 descriptor hashes; NULL has no route mask; safe/risky provider/oracle values remain descriptor/analyzer-only; public decision plane exposes public GNSS measurements, ordinary occupancy and immutable P0 snapshot | **IMPLEMENTED / 11/11 FOCUSED GREEN** |
-| IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 | Development matrix/identity | `icra075_exploratory_protocol_v1`, runner and capture fix 30 formal-arm rows plus 10 PRIMARY ablations; minimal evidence-only instrumentation binds every enabled objective; `matrix-001` GPU PASS then stopped before ROS on a readiness-schema defect, retained and repaired for new identity | **IMPLEMENTED / MATRIX-002 PENDING PUSH** |
+| IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 | Development matrix/identity | `matrix-001` GPU PASS then stopped before ROS on retained readiness defect; pushed `matrix-002` ran one 45 s control row with 15/15 process health, 134 ready P0 records and cleanup, but all 2,137 P5 final-status records (2,117 unique `(traj_id,start_time)` candidate identities) were rejected `current_low_margin`; no committed final/publication/runtime | **BLOCKED_ICRA075_CONTROL_P5_CURRENT_LOW_MARGIN** |
 | IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 | Independent analysis | Analyzer samples exactly 200 certified equal-arc positions including endpoints, independently evaluates collision/dynamics, validates lineage and proves treatment-oracle invariance when P4 evidence is deleted | **IMPLEMENTED / FOCUSED GREEN** |
-| IAP-RQ-423 / IAP-RQ-424 | Power/claim boundary | Per-scene paired D_peak/D_mean, flat-null repeatability proxy, zero mass, variance, matched-arm cross-seed correlation, explicitly unavailable intra-run correlation and 30–60 sensitivity freeze no SESOI, threshold, sample size or verdict | **DEVELOPMENT ONLY / MATRIX PENDING** |
+| IAP-RQ-423 / IAP-RQ-424 | Power/claim boundary | Per-scene power tooling is static only; matrix stopped on its first control row, so no 40-row power record, effect claim, freeze or verdict exists | **BLOCKED / NOT PRODUCED** |
 
 
 ## 2026-08-27 ICRA-074 Supervisor Review

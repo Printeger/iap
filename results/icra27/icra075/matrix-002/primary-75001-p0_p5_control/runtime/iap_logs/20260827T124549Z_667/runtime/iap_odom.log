@@ -1,0 +1,22 @@
+[2026-08-27 12:45:49.672] [odom] [info] clock_owner_mode=gnss odometry_owns_clock=false
+[2026-08-27 12:45:49.672] [odom] [info] relinearization policy {b:dim=6:th=[0.100,0.100,0.100,0.100,0.100,0.100], c:dim=2:th=[500.000,5.000], e:dim=3:th=[0.100,0.100,0.100], l:dim=2:th=[0.100,0.100], r:dim=3:th=[0.100,0.100,0.100], v:dim=3:th=[0.100,0.100,0.100], x:dim=6:th=[0.100,0.100,0.100,0.100,0.100,0.100]}
+[2026-08-27 12:45:51.468] [odom] [info] estimate initial IMU state
+[2026-08-27 12:45:51.471] [odom] [info] initial IMU state estimation result
+[2026-08-27 12:45:51.471] [odom] [info] T_world_imu=se3(0.000492,-0.000373,0.070732,-0.000038,-0.000307,-0.000006,1.000000)
+[2026-08-27 12:45:51.471] [odom] [info] v_world_imu=vec(-0.002366,0.000160,0.039681)
+[2026-08-27 12:45:51.471] [odom] [info] imu_bias=vec(-0.000035,0.000011,0.000101,-0.000016,0.000494,0.000008)
+[2026-08-27 12:45:51.482] [odom] [info] update_frames: clock not ready for current frame 0, skip read [count=1]
+[2026-08-27 12:45:51.482] [odom] [info] [icp_csv] skip write: no IntegratedVGICPFactorGPU in new_factors (new_factors=3)
+[2026-08-27 12:45:51.482] [odom] [info] [lifecycle] events=10 stamp=1657065601.728 {b:{writes=odometry=1;missing=;expected=odometry;conflicts=0;violations=0}, c:{writes=;missing=;expected=gnss;conflicts=0;violations=0}, e:{writes=;missing=;expected=gnss;conflicts=0;violations=0}, r:{writes=;missing=;expected=gnss;conflicts=0;violations=0}, v:{writes=odometry=1;missing=;expected=odometry;conflicts=0;violations=0}, x:{writes=odometry=1;missing=;expected=odometry;conflicts=0;violations=0}}
+[2026-08-27 12:45:51.583] [odom] [info] [icp_csv] first row written -> /home/dev/ws_iap/src/iap/results/icra27/icra075/matrix-002/primary-75001-p0_p5_control/runtime/iap_logs/20260827T124549Z_667/export/iap_icp.csv
+[2026-08-27 12:46:01.189] [odom] [info] [lifecycle] events=400 stamp=1657065611.428 {b:{writes=odometry=98;missing=;expected=odometry;conflicts=0;violations=0}, c:{writes=gnss=97;missing=;expected=gnss;conflicts=0;violations=0}, e:{writes=gnss=1;missing=;expected=gnss;conflicts=0;violations=0}, r:{writes=gnss=1;missing=;expected=gnss;conflicts=0;violations=0}, v:{writes=odometry=98;missing=;expected=odometry;conflicts=0;violations=0}, x:{writes=odometry=98;missing=;expected=odometry;conflicts=0;violations=0}}
+[2026-08-27 12:46:01.995] [odom] [warning] IMU prediction is not good.
+[2026-08-27 12:46:01.995] [odom] [warning] Possibly T_lidar_imu is not accurate or IMU bias is not well estimated.
+[2026-08-27 12:46:01.995] [odom] [warning] IMU validation results:
+[2026-08-27 12:46:01.995] [odom] [warning] num_validations=64
+[2026-08-27 12:46:01.995] [odom] [warning] No-IMU errors rot=0.036 +- 0.023 deg, trans=0.004 +- 0.003 m, vel=0.007 +- 0.011 m/s
+[2026-08-27 12:46:01.995] [odom] [warning] IMU errors rot=0.036 +- 0.022 deg, trans=0.004 +- 0.003 m, vel=0.010 +- 0.011 m/s
+[2026-08-27 12:46:01.995] [odom] [warning] IMU better ratios rot=0.53, trans=0.16, vel=0.11
+[2026-08-27 12:46:11.191] [odom] [info] [lifecycle] events=800 stamp=1657065621.428 {b:{writes=odometry=198;missing=;expected=odometry;conflicts=0;violations=0}, c:{writes=gnss=197;missing=;expected=gnss;conflicts=0;violations=0}, e:{writes=gnss=1;missing=;expected=gnss;conflicts=0;violations=0}, r:{writes=gnss=1;missing=;expected=gnss;conflicts=0;violations=0}, v:{writes=odometry=198;missing=;expected=odometry;conflicts=0;violations=0}, x:{writes=odometry=198;missing=;expected=odometry;conflicts=0;violations=0}}
+[2026-08-27 12:46:21.173] [odom] [info] [lifecycle] events=1200 stamp=1657065631.428 {b:{writes=odometry=298;missing=;expected=odometry;conflicts=0;violations=0}, c:{writes=gnss=297;missing=;expected=gnss;conflicts=0;violations=0}, e:{writes=gnss=1;missing=;expected=gnss;conflicts=0;violations=0}, r:{writes=gnss=1;missing=;expected=gnss;conflicts=0;violations=0}, v:{writes=odometry=298;missing=;expected=odometry;conflicts=0;violations=0}, x:{writes=odometry=298;missing=;expected=odometry;conflicts=0;violations=0}}
+[2026-08-27 12:46:31.191] [odom] [info] [lifecycle] events=1600 stamp=1657065641.429 {b:{writes=odometry=398;missing=;expected=odometry;conflicts=0;violations=0}, c:{writes=gnss=397;missing=;expected=gnss;conflicts=0;violations=0}, e:{writes=gnss=1;missing=;expected=gnss;conflicts=0;violations=0}, r:{writes=gnss=1;missing=;expected=gnss;conflicts=0;violations=0}, v:{writes=odometry=398;missing=;expected=odometry;conflicts=0;violations=0}, x:{writes=odometry=398;missing=;expected=odometry;conflicts=0;violations=0}}

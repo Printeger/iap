@@ -5,8 +5,8 @@
 
 > Current ICRA disposition (2026-08-27): ICRA-074 passes its offline geometry/production-seam contract at 51/51;
 > production remains unchanged and no effect claim follows. ICRA-073 debt remains blocked/user-bypassed/NOT PASS.
-> ICRA-075 is TASK_READY for development exploratory ablations and non-freezing power inputs; formal Layer 4 and
-> campaign remain unauthorized.
+> ICRA-075 attempted its development exploratory matrix and is now
+> `BLOCKED_ICRA075_CONTROL_P5_CURRENT_LOW_MARGIN`; formal Layer 4 and campaign remain unauthorized.
 
 ICRA-075 Builder implementation adds exact V2 runtime map/GNSS assets, a 40-row development-only runner,
 committed-final/P5/publication capture, independent fixed-200 equal-arc analysis and deterministic non-freezing
@@ -15,13 +15,20 @@ lineage, certified equal-arc error evidence, independent geometry/dynamics safet
 repeatability/zero-mass/cross-seed correlation sensitivity are fail-closed; unavailable within-run correlation is
 reported rather than substituted. Development seeds `75001..75005` are
 permanently excluded from held-out use. No P0/P4/EGO/P5 behavior, provider truth, AL/PL, threshold, SESOI,
-formal sample size or success verdict is changed or frozen; live matrix execution remains pending pushed-source
-GPU admission.
+formal sample size or success verdict is changed or frozen. This paragraph records the pre-live implementation
+checkpoint; the retained GPU/live attempts and terminal disposition are reported immediately below.
 
 `matrix-001` retained a GPU PASS but no ROS launch/scientific row: the runner compared its valid ICRA-075 capture
 readiness against the ICRA-072 schema and timed out. The corrected waiter/ROS-start/first-missing evidence contract
 passes focused 13/13, including a post-command/pre-spawn adversary, and requires a new pushed-source `matrix-002`;
 `matrix-001` is never overwritten or relabelled.
+
+Pushed-source `matrix-002` passed GPU, source, 15/15 required-process health and cleanup, and retained 134
+ready/non-stale P0 records. All 2,137 P5 final-status records, spanning 2,117 unique
+`(traj_id,start_time)` candidate identities, were rejected `current_low_margin`; no committed
+publication/runtime identity exists, so the analyzer fails at `EGO_FINAL_MISSING` and the exact matrix stops after
+one row. Focused aggregation repair passes 14/14 but does not rerun science. ICRA-075 is
+`BLOCKED_ICRA075_CONTROL_P5_CURRENT_LOW_MARGIN`; forbidden AL/PL/provider/P5 tuning was not performed.
 
 ICRA-074 Builder implementation (2026-08-27): V2 derives from retained V1 and changes only risky amplitude
 (`-2.20 m` PRIMARY/FLAT_NULL, `+2.20 m` mirror) plus required descriptor identities/hash. An independent dense

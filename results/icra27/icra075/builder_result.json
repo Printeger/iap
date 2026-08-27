@@ -1,0 +1,72 @@
+{
+  "schema_version": "icra075_builder_result_v1",
+  "task": "ICRA-075",
+  "result": "BLOCKED_ICRA075_CONTROL_P5_CURRENT_LOW_MARGIN",
+  "development_only": true,
+  "effect_claim": false,
+  "power_inputs_produced": false,
+  "completed_matrix_rows": 0,
+  "attempted_matrix_rows": 1,
+  "not_started_matrix_rows": 39,
+  "first_missing_stage": "EGO_FINAL_MISSING",
+  "attempts": [
+    {
+      "matrix_identity": "matrix-001",
+      "exercised_source_head": "07bf4b5aae26d362fc202a703ee69cea2f8363fd",
+      "gpu_ready": true,
+      "actual_ros_started": false,
+      "exit_code": 5,
+      "first_missing_stage": "CAPTURE_NOT_READY",
+      "disposition": "RETAINED_ORCHESTRATION_SCHEMA_DEFECT",
+      "historical_batch_manifest_anomalies": [
+        "ros_started_was_prematurely_recorded_true",
+        "batch_first_missing_was_overwritten_as_P0_SNAPSHOT_MISSING"
+      ]
+    },
+    {
+      "matrix_identity": "matrix-002",
+      "exercised_source_head": "0eb739913e01d7c2acc8da38d24169f05f5424da",
+      "gpu_ready": true,
+      "actual_ros_started": true,
+      "exit_code": 1,
+      "runner_result": "PASS",
+      "analyzer_result": "FAIL",
+      "first_missing_stage": "EGO_FINAL_MISSING",
+      "required_processes_seen": 15,
+      "required_processes_ok": true,
+      "owned_process_groups_cleared": true,
+      "p0_health_count": 135,
+      "p0_ready_non_stale_count": 134,
+      "maximum_p0_generation_id": 67,
+      "p5_final_count": 2137,
+      "p5_final_action_counts": {
+        "REQUEST_REPLAN/current_low_margin": 2137
+      },
+      "normal_bspline_count": 0,
+      "p5_runtime_committed_count": 0,
+      "historical_batch_manifest_anomalies": [
+        "batch_first_missing_was_generic_ROW_FAILURE"
+      ],
+      "disposition": "TERMINAL_FORBIDDEN_TUNING_REQUIRED"
+    }
+  ],
+  "evidence_hashes": {
+    "matrix_002_batch_manifest_sha256": "6c5df6a4671d9fb7a9f303d3132f8eb798e1b5a54e28617856e1d94b2c71051f",
+    "matrix_002_gpu_preflight_sha256": "bde4cd1e3da8bce02979b62bcbb6f8d1999f5e304f84f3f9986c79b5fd8b9eb2",
+    "matrix_002_row_manifest_sha256": "168c0b124514ea9bd11e6740af80131d03d93a174eaa1e56fcb5cd41f22ef65b",
+    "matrix_002_analysis_sha256": "e2d67f046aac4f43324187ca57d7ffb9f6e466a9ce7a83a4131ef03527ec7295"
+  },
+  "accepted_debt": [
+    "ICRA-072B remains BLOCKED/user-bypassed/NOT PASS",
+    "ICRA-073 remains BLOCKED/user-bypassed/NOT PASS",
+    "source_bound_claim remains false"
+  ],
+  "forbidden_actions_not_taken": [
+    "no AL/PL tuning",
+    "no P5 threshold tuning",
+    "no provider-truth tuning",
+    "no objective tuning",
+    "no retry of the completed scientific row",
+    "no held-out, qualification or campaign work"
+  ]
+}

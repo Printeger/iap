@@ -1,0 +1,12 @@
+{
+  "descriptor_sha256": "41ab7001c7c60e78cdcf8a670efdcba7545bcd7c93e06081745a090b57f0f06d",
+  "pid": 1690330,
+  "ready": true,
+  "scene": "PRIMARY",
+  "schema_version": "icra075_capture_readiness_v1",
+  "topics": [
+    "/planning/risk_grid_health",
+    "/planning/integrity_gate_status",
+    "/drone_0_planning/bspline"
+  ]
+}

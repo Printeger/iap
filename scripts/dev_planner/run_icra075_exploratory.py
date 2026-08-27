@@ -325,8 +325,7 @@ def main() -> int:
         analysis_path = root / row["run_id"] / "analysis.json"
         analysis = _read_analysis(analysis_path)
         row_manifest = _read_analysis(root / row["run_id"] / "run_manifest.json")
-        first_missing = (row_manifest.get("first_missing_stage") if code != 0 else
-                         analysis.get("first_missing_stage"))
+        first_missing = _row_first_missing(code, row_manifest, analysis)
         batch["ros_started"] = _batch_ros_started(root, matrix)
         batch["attempts"].append({
             "run_id": row["run_id"], "exit_code": code,
@@ -372,6 +371,13 @@ def _batch_ros_started(root: Path, matrix: list[dict]) -> bool:
         _read_analysis(root / item["run_id"] / "run_manifest.json").get(
             "launch_started") is True
         for item in matrix)
+
+
+def _row_first_missing(code: int, row_manifest: dict, analysis: dict):
+    if code == 0:
+        return analysis.get("first_missing_stage")
+    return (row_manifest.get("first_missing_stage") or
+            analysis.get("first_missing_stage") or "ROW_FAILURE")
 
 
 if __name__ == "__main__":

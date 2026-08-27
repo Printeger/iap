@@ -1,0 +1,1004 @@
+{
+  "rows": [
+    {
+      "comparison_kind": "FORMAL_ARM",
+      "configuration": "P0_P5_CONTROL",
+      "descriptor_sha256": "41ab7001c7c60e78cdcf8a670efdcba7545bcd7c93e06081745a090b57f0f06d",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": false
+      },
+      "run_id": "primary-75001-p0_p5_control",
+      "scene": "PRIMARY",
+      "scene_identity": "icra074-primary-seed-73001",
+      "seed": 75001,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "FORMAL_ARM",
+      "configuration": "P0_P4_V2_P5_TREATMENT",
+      "descriptor_sha256": "41ab7001c7c60e78cdcf8a670efdcba7545bcd7c93e06081745a090b57f0f06d",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": true
+      },
+      "run_id": "primary-75001-p0_p4_v2_p5_treatment",
+      "scene": "PRIMARY",
+      "scene_identity": "icra074-primary-seed-73001",
+      "seed": 75001,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "FORMAL_ARM",
+      "configuration": "P0_P5_CONTROL",
+      "descriptor_sha256": "41ab7001c7c60e78cdcf8a670efdcba7545bcd7c93e06081745a090b57f0f06d",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": false
+      },
+      "run_id": "primary-75002-p0_p5_control",
+      "scene": "PRIMARY",
+      "scene_identity": "icra074-primary-seed-73001",
+      "seed": 75002,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "FORMAL_ARM",
+      "configuration": "P0_P4_V2_P5_TREATMENT",
+      "descriptor_sha256": "41ab7001c7c60e78cdcf8a670efdcba7545bcd7c93e06081745a090b57f0f06d",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": true
+      },
+      "run_id": "primary-75002-p0_p4_v2_p5_treatment",
+      "scene": "PRIMARY",
+      "scene_identity": "icra074-primary-seed-73001",
+      "seed": 75002,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "FORMAL_ARM",
+      "configuration": "P0_P5_CONTROL",
+      "descriptor_sha256": "41ab7001c7c60e78cdcf8a670efdcba7545bcd7c93e06081745a090b57f0f06d",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": false
+      },
+      "run_id": "primary-75003-p0_p5_control",
+      "scene": "PRIMARY",
+      "scene_identity": "icra074-primary-seed-73001",
+      "seed": 75003,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "FORMAL_ARM",
+      "configuration": "P0_P4_V2_P5_TREATMENT",
+      "descriptor_sha256": "41ab7001c7c60e78cdcf8a670efdcba7545bcd7c93e06081745a090b57f0f06d",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": true
+      },
+      "run_id": "primary-75003-p0_p4_v2_p5_treatment",
+      "scene": "PRIMARY",
+      "scene_identity": "icra074-primary-seed-73001",
+      "seed": 75003,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "FORMAL_ARM",
+      "configuration": "P0_P5_CONTROL",
+      "descriptor_sha256": "41ab7001c7c60e78cdcf8a670efdcba7545bcd7c93e06081745a090b57f0f06d",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": false
+      },
+      "run_id": "primary-75004-p0_p5_control",
+      "scene": "PRIMARY",
+      "scene_identity": "icra074-primary-seed-73001",
+      "seed": 75004,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "FORMAL_ARM",
+      "configuration": "P0_P4_V2_P5_TREATMENT",
+      "descriptor_sha256": "41ab7001c7c60e78cdcf8a670efdcba7545bcd7c93e06081745a090b57f0f06d",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": true
+      },
+      "run_id": "primary-75004-p0_p4_v2_p5_treatment",
+      "scene": "PRIMARY",
+      "scene_identity": "icra074-primary-seed-73001",
+      "seed": 75004,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "FORMAL_ARM",
+      "configuration": "P0_P5_CONTROL",
+      "descriptor_sha256": "41ab7001c7c60e78cdcf8a670efdcba7545bcd7c93e06081745a090b57f0f06d",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": false
+      },
+      "run_id": "primary-75005-p0_p5_control",
+      "scene": "PRIMARY",
+      "scene_identity": "icra074-primary-seed-73001",
+      "seed": 75005,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "FORMAL_ARM",
+      "configuration": "P0_P4_V2_P5_TREATMENT",
+      "descriptor_sha256": "41ab7001c7c60e78cdcf8a670efdcba7545bcd7c93e06081745a090b57f0f06d",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": true
+      },
+      "run_id": "primary-75005-p0_p4_v2_p5_treatment",
+      "scene": "PRIMARY",
+      "scene_identity": "icra074-primary-seed-73001",
+      "seed": 75005,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "FORMAL_ARM",
+      "configuration": "P0_P5_CONTROL",
+      "descriptor_sha256": "3bd25208dba3bbd03857104758878e30d647b7f8bfdfc43e7654f78b569caf33",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": false
+      },
+      "run_id": "exact_mirror-75001-p0_p5_control",
+      "scene": "EXACT_MIRROR",
+      "scene_identity": "icra074-exact_mirror-seed-73001",
+      "seed": 75001,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "FORMAL_ARM",
+      "configuration": "P0_P4_V2_P5_TREATMENT",
+      "descriptor_sha256": "3bd25208dba3bbd03857104758878e30d647b7f8bfdfc43e7654f78b569caf33",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": true
+      },
+      "run_id": "exact_mirror-75001-p0_p4_v2_p5_treatment",
+      "scene": "EXACT_MIRROR",
+      "scene_identity": "icra074-exact_mirror-seed-73001",
+      "seed": 75001,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "FORMAL_ARM",
+      "configuration": "P0_P5_CONTROL",
+      "descriptor_sha256": "3bd25208dba3bbd03857104758878e30d647b7f8bfdfc43e7654f78b569caf33",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": false
+      },
+      "run_id": "exact_mirror-75002-p0_p5_control",
+      "scene": "EXACT_MIRROR",
+      "scene_identity": "icra074-exact_mirror-seed-73001",
+      "seed": 75002,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "FORMAL_ARM",
+      "configuration": "P0_P4_V2_P5_TREATMENT",
+      "descriptor_sha256": "3bd25208dba3bbd03857104758878e30d647b7f8bfdfc43e7654f78b569caf33",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": true
+      },
+      "run_id": "exact_mirror-75002-p0_p4_v2_p5_treatment",
+      "scene": "EXACT_MIRROR",
+      "scene_identity": "icra074-exact_mirror-seed-73001",
+      "seed": 75002,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "FORMAL_ARM",
+      "configuration": "P0_P5_CONTROL",
+      "descriptor_sha256": "3bd25208dba3bbd03857104758878e30d647b7f8bfdfc43e7654f78b569caf33",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": false
+      },
+      "run_id": "exact_mirror-75003-p0_p5_control",
+      "scene": "EXACT_MIRROR",
+      "scene_identity": "icra074-exact_mirror-seed-73001",
+      "seed": 75003,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "FORMAL_ARM",
+      "configuration": "P0_P4_V2_P5_TREATMENT",
+      "descriptor_sha256": "3bd25208dba3bbd03857104758878e30d647b7f8bfdfc43e7654f78b569caf33",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": true
+      },
+      "run_id": "exact_mirror-75003-p0_p4_v2_p5_treatment",
+      "scene": "EXACT_MIRROR",
+      "scene_identity": "icra074-exact_mirror-seed-73001",
+      "seed": 75003,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "FORMAL_ARM",
+      "configuration": "P0_P5_CONTROL",
+      "descriptor_sha256": "3bd25208dba3bbd03857104758878e30d647b7f8bfdfc43e7654f78b569caf33",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": false
+      },
+      "run_id": "exact_mirror-75004-p0_p5_control",
+      "scene": "EXACT_MIRROR",
+      "scene_identity": "icra074-exact_mirror-seed-73001",
+      "seed": 75004,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "FORMAL_ARM",
+      "configuration": "P0_P4_V2_P5_TREATMENT",
+      "descriptor_sha256": "3bd25208dba3bbd03857104758878e30d647b7f8bfdfc43e7654f78b569caf33",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": true
+      },
+      "run_id": "exact_mirror-75004-p0_p4_v2_p5_treatment",
+      "scene": "EXACT_MIRROR",
+      "scene_identity": "icra074-exact_mirror-seed-73001",
+      "seed": 75004,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "FORMAL_ARM",
+      "configuration": "P0_P5_CONTROL",
+      "descriptor_sha256": "3bd25208dba3bbd03857104758878e30d647b7f8bfdfc43e7654f78b569caf33",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": false
+      },
+      "run_id": "exact_mirror-75005-p0_p5_control",
+      "scene": "EXACT_MIRROR",
+      "scene_identity": "icra074-exact_mirror-seed-73001",
+      "seed": 75005,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "FORMAL_ARM",
+      "configuration": "P0_P4_V2_P5_TREATMENT",
+      "descriptor_sha256": "3bd25208dba3bbd03857104758878e30d647b7f8bfdfc43e7654f78b569caf33",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": true
+      },
+      "run_id": "exact_mirror-75005-p0_p4_v2_p5_treatment",
+      "scene": "EXACT_MIRROR",
+      "scene_identity": "icra074-exact_mirror-seed-73001",
+      "seed": 75005,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "FORMAL_ARM",
+      "configuration": "P0_P5_CONTROL",
+      "descriptor_sha256": "89074561a7263268e121c2439ceccaca2b3c7285f665432ebdc07ab5668e8513",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": false
+      },
+      "run_id": "flat_null-75001-p0_p5_control",
+      "scene": "FLAT_NULL",
+      "scene_identity": "icra074-flat_null-seed-73001",
+      "seed": 75001,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "FORMAL_ARM",
+      "configuration": "P0_P4_V2_P5_TREATMENT",
+      "descriptor_sha256": "89074561a7263268e121c2439ceccaca2b3c7285f665432ebdc07ab5668e8513",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": true
+      },
+      "run_id": "flat_null-75001-p0_p4_v2_p5_treatment",
+      "scene": "FLAT_NULL",
+      "scene_identity": "icra074-flat_null-seed-73001",
+      "seed": 75001,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "FORMAL_ARM",
+      "configuration": "P0_P5_CONTROL",
+      "descriptor_sha256": "89074561a7263268e121c2439ceccaca2b3c7285f665432ebdc07ab5668e8513",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": false
+      },
+      "run_id": "flat_null-75002-p0_p5_control",
+      "scene": "FLAT_NULL",
+      "scene_identity": "icra074-flat_null-seed-73001",
+      "seed": 75002,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "FORMAL_ARM",
+      "configuration": "P0_P4_V2_P5_TREATMENT",
+      "descriptor_sha256": "89074561a7263268e121c2439ceccaca2b3c7285f665432ebdc07ab5668e8513",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": true
+      },
+      "run_id": "flat_null-75002-p0_p4_v2_p5_treatment",
+      "scene": "FLAT_NULL",
+      "scene_identity": "icra074-flat_null-seed-73001",
+      "seed": 75002,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "FORMAL_ARM",
+      "configuration": "P0_P5_CONTROL",
+      "descriptor_sha256": "89074561a7263268e121c2439ceccaca2b3c7285f665432ebdc07ab5668e8513",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": false
+      },
+      "run_id": "flat_null-75003-p0_p5_control",
+      "scene": "FLAT_NULL",
+      "scene_identity": "icra074-flat_null-seed-73001",
+      "seed": 75003,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "FORMAL_ARM",
+      "configuration": "P0_P4_V2_P5_TREATMENT",
+      "descriptor_sha256": "89074561a7263268e121c2439ceccaca2b3c7285f665432ebdc07ab5668e8513",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": true
+      },
+      "run_id": "flat_null-75003-p0_p4_v2_p5_treatment",
+      "scene": "FLAT_NULL",
+      "scene_identity": "icra074-flat_null-seed-73001",
+      "seed": 75003,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "FORMAL_ARM",
+      "configuration": "P0_P5_CONTROL",
+      "descriptor_sha256": "89074561a7263268e121c2439ceccaca2b3c7285f665432ebdc07ab5668e8513",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": false
+      },
+      "run_id": "flat_null-75004-p0_p5_control",
+      "scene": "FLAT_NULL",
+      "scene_identity": "icra074-flat_null-seed-73001",
+      "seed": 75004,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "FORMAL_ARM",
+      "configuration": "P0_P4_V2_P5_TREATMENT",
+      "descriptor_sha256": "89074561a7263268e121c2439ceccaca2b3c7285f665432ebdc07ab5668e8513",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": true
+      },
+      "run_id": "flat_null-75004-p0_p4_v2_p5_treatment",
+      "scene": "FLAT_NULL",
+      "scene_identity": "icra074-flat_null-seed-73001",
+      "seed": 75004,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "FORMAL_ARM",
+      "configuration": "P0_P5_CONTROL",
+      "descriptor_sha256": "89074561a7263268e121c2439ceccaca2b3c7285f665432ebdc07ab5668e8513",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": false
+      },
+      "run_id": "flat_null-75005-p0_p5_control",
+      "scene": "FLAT_NULL",
+      "scene_identity": "icra074-flat_null-seed-73001",
+      "seed": 75005,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "FORMAL_ARM",
+      "configuration": "P0_P4_V2_P5_TREATMENT",
+      "descriptor_sha256": "89074561a7263268e121c2439ceccaca2b3c7285f665432ebdc07ab5668e8513",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": true
+      },
+      "run_id": "flat_null-75005-p0_p4_v2_p5_treatment",
+      "scene": "FLAT_NULL",
+      "scene_identity": "icra074-flat_null-seed-73001",
+      "seed": 75005,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "EXPLORATORY_ABLATION",
+      "configuration": "LEGACY_INTEGRAL_V1",
+      "descriptor_sha256": "41ab7001c7c60e78cdcf8a670efdcba7545bcd7c93e06081745a090b57f0f06d",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "LEGACY_INTEGRAL_V1",
+        "planner_enable_p4": true
+      },
+      "run_id": "primary-75001-legacy_integral_v1",
+      "scene": "PRIMARY",
+      "scene_identity": "icra074-primary-seed-73001",
+      "seed": 75001,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "EXPLORATORY_ABLATION",
+      "configuration": "PROVIDER_BOTTLENECK_V2_METRICS_ONLY",
+      "descriptor_sha256": "41ab7001c7c60e78cdcf8a670efdcba7545bcd7c93e06081745a090b57f0f06d",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": true,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": true
+      },
+      "run_id": "primary-75001-provider_bottleneck_v2_metrics_only",
+      "scene": "PRIMARY",
+      "scene_identity": "icra074-primary-seed-73001",
+      "seed": 75001,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "EXPLORATORY_ABLATION",
+      "configuration": "LEGACY_INTEGRAL_V1",
+      "descriptor_sha256": "41ab7001c7c60e78cdcf8a670efdcba7545bcd7c93e06081745a090b57f0f06d",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "LEGACY_INTEGRAL_V1",
+        "planner_enable_p4": true
+      },
+      "run_id": "primary-75002-legacy_integral_v1",
+      "scene": "PRIMARY",
+      "scene_identity": "icra074-primary-seed-73001",
+      "seed": 75002,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "EXPLORATORY_ABLATION",
+      "configuration": "PROVIDER_BOTTLENECK_V2_METRICS_ONLY",
+      "descriptor_sha256": "41ab7001c7c60e78cdcf8a670efdcba7545bcd7c93e06081745a090b57f0f06d",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": true,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": true
+      },
+      "run_id": "primary-75002-provider_bottleneck_v2_metrics_only",
+      "scene": "PRIMARY",
+      "scene_identity": "icra074-primary-seed-73001",
+      "seed": 75002,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "EXPLORATORY_ABLATION",
+      "configuration": "LEGACY_INTEGRAL_V1",
+      "descriptor_sha256": "41ab7001c7c60e78cdcf8a670efdcba7545bcd7c93e06081745a090b57f0f06d",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "LEGACY_INTEGRAL_V1",
+        "planner_enable_p4": true
+      },
+      "run_id": "primary-75003-legacy_integral_v1",
+      "scene": "PRIMARY",
+      "scene_identity": "icra074-primary-seed-73001",
+      "seed": 75003,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "EXPLORATORY_ABLATION",
+      "configuration": "PROVIDER_BOTTLENECK_V2_METRICS_ONLY",
+      "descriptor_sha256": "41ab7001c7c60e78cdcf8a670efdcba7545bcd7c93e06081745a090b57f0f06d",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": true,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": true
+      },
+      "run_id": "primary-75003-provider_bottleneck_v2_metrics_only",
+      "scene": "PRIMARY",
+      "scene_identity": "icra074-primary-seed-73001",
+      "seed": 75003,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "EXPLORATORY_ABLATION",
+      "configuration": "LEGACY_INTEGRAL_V1",
+      "descriptor_sha256": "41ab7001c7c60e78cdcf8a670efdcba7545bcd7c93e06081745a090b57f0f06d",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "LEGACY_INTEGRAL_V1",
+        "planner_enable_p4": true
+      },
+      "run_id": "primary-75004-legacy_integral_v1",
+      "scene": "PRIMARY",
+      "scene_identity": "icra074-primary-seed-73001",
+      "seed": 75004,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "EXPLORATORY_ABLATION",
+      "configuration": "PROVIDER_BOTTLENECK_V2_METRICS_ONLY",
+      "descriptor_sha256": "41ab7001c7c60e78cdcf8a670efdcba7545bcd7c93e06081745a090b57f0f06d",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": true,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": true
+      },
+      "run_id": "primary-75004-provider_bottleneck_v2_metrics_only",
+      "scene": "PRIMARY",
+      "scene_identity": "icra074-primary-seed-73001",
+      "seed": 75004,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "EXPLORATORY_ABLATION",
+      "configuration": "LEGACY_INTEGRAL_V1",
+      "descriptor_sha256": "41ab7001c7c60e78cdcf8a670efdcba7545bcd7c93e06081745a090b57f0f06d",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": false,
+        "p4.objective": "LEGACY_INTEGRAL_V1",
+        "planner_enable_p4": true
+      },
+      "run_id": "primary-75005-legacy_integral_v1",
+      "scene": "PRIMARY",
+      "scene_identity": "icra074-primary-seed-73001",
+      "seed": 75005,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    },
+    {
+      "comparison_kind": "EXPLORATORY_ABLATION",
+      "configuration": "PROVIDER_BOTTLENECK_V2_METRICS_ONLY",
+      "descriptor_sha256": "41ab7001c7c60e78cdcf8a670efdcba7545bcd7c93e06081745a090b57f0f06d",
+      "goal_m": [
+        12.0,
+        0.0,
+        1.5
+      ],
+      "held_out_eligible": false,
+      "overrides": {
+        "p4.metrics_only": true,
+        "p4.objective": "PROVIDER_BOTTLENECK_V2",
+        "planner_enable_p4": true
+      },
+      "run_id": "primary-75005-provider_bottleneck_v2_metrics_only",
+      "scene": "PRIMARY",
+      "scene_identity": "icra074-primary-seed-73001",
+      "seed": 75005,
+      "start_m": [
+        -12.0,
+        0.0,
+        1.5
+      ]
+    }
+  ]
+}

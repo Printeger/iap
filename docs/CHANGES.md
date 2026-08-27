@@ -21,6 +21,11 @@
   checked by the ICRA-072 schema waiter. The repair uses the correct schema, derives ROS-start truth from an actual
   successfully spawned row manifest and preserves the runner's typed first-missing stage; focused tooling now
   passes 13/13 including the post-command/pre-spawn exception adversary.
+  Pushed `matrix-002` then passed GPU/source/process/cleanup and reached 134 ready P0 records, but all 2,137 P5
+  final-status records (2,117 unique `(traj_id,start_time)` candidate identities) were rejected
+  `current_low_margin`; no committed publication/runtime identity exists and the
+  analyzer stops at `EGO_FINAL_MISSING`. A final aggregation-only fix preserves that analyzer stage (14/14 focused);
+  no retry or forbidden AL/PL/provider/P5 tuning is performed.
 
 - review(icra-074-pass-issue-icra075): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 /
   IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — review `ee9774a1` against fixed `f6f7832a`.

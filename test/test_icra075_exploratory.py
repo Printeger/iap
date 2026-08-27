@@ -73,6 +73,17 @@ class Icra075ExploratoryContractTest(unittest.TestCase):
             }))
             self.assertTrue(runner._batch_ros_started(root, matrix))
 
+    def test_batch_first_missing_falls_back_to_failed_analyzer_stage(self):
+        runner = load_runner()
+        self.assertEqual(runner._row_first_missing(
+            1, {"result": "PASS", "first_missing_stage": None},
+            {"result": "FAIL", "first_missing_stage": "EGO_FINAL_MISSING"}),
+            "EGO_FINAL_MISSING")
+        self.assertEqual(runner._row_first_missing(
+            5, {"result": "FAIL", "first_missing_stage": "CAPTURE_NOT_READY"},
+            {"result": "FAIL", "first_missing_stage": "P0_SNAPSHOT_MISSING"}),
+            "CAPTURE_NOT_READY")
+
     def test_runner_uses_v2_development_scene_not_layer1_trigger(self):
         source = RUNNER_PATH.read_text()
         self.assertIn('"scenario:=icra_p0_p4_v2_p5_dev_fixture_v1"', source)
@@ -87,7 +98,7 @@ class Icra075ExploratoryContractTest(unittest.TestCase):
         self.assertNotIn("BASE._wait_ready(capture", source)
         self.assertNotIn('batch["ros_started"] = True', source)
         self.assertIn('batch["ros_started"] = _batch_ros_started(root, matrix)', source)
-        self.assertIn('row_manifest.get("first_missing_stage")', source)
+        self.assertIn("first_missing = _row_first_missing", source)
         manager_source = (REPO / "src/iap/planner/plan_manage/src/planner_manager.cpp").read_text()
         lineage_function = manager_source.split(
             "bool EGOPlannerManager::recordP4VerticalSliceLineage", 1)[1].split(

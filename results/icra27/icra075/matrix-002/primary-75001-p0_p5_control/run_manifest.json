@@ -1,0 +1,376 @@
+{
+  "capture_exit_code": -2,
+  "capture_readiness": {
+    "descriptor_sha256": "41ab7001c7c60e78cdcf8a670efdcba7545bcd7c93e06081745a090b57f0f06d",
+    "pid": 1690330,
+    "ready": true,
+    "scene": "PRIMARY",
+    "schema_version": "icra075_capture_readiness_v1",
+    "topics": [
+      "/planning/risk_grid_health",
+      "/planning/integrity_gate_status",
+      "/drone_0_planning/bspline"
+    ]
+  },
+  "development_only": true,
+  "effect_claim": false,
+  "first_missing_stage": null,
+  "launch_contract": {
+    "manager/feasibility_tolerance": 0.05,
+    "manager/max_acc": 3.0,
+    "manager/max_vel": 1.0,
+    "p4.metrics_only": false,
+    "p4.objective": "PROVIDER_BOTTLENECK_V2",
+    "planner_enable_p4": false
+  },
+  "launch_early_exit": false,
+  "launch_exit_code": 0,
+  "launch_started": true,
+  "matrix_row": {
+    "comparison_kind": "FORMAL_ARM",
+    "configuration": "P0_P5_CONTROL",
+    "descriptor_sha256": "41ab7001c7c60e78cdcf8a670efdcba7545bcd7c93e06081745a090b57f0f06d",
+    "goal_m": [
+      12.0,
+      0.0,
+      1.5
+    ],
+    "held_out_eligible": false,
+    "overrides": {
+      "p4.metrics_only": false,
+      "p4.objective": "PROVIDER_BOTTLENECK_V2",
+      "planner_enable_p4": false
+    },
+    "run_id": "primary-75001-p0_p5_control",
+    "scene": "PRIMARY",
+    "scene_identity": "icra074-primary-seed-73001",
+    "seed": 75001,
+    "start_m": [
+      -12.0,
+      0.0,
+      1.5
+    ]
+  },
+  "owned_process_groups_cleared": true,
+  "process_result": {
+    "process_failures": [
+      {
+        "elapsed_s": 45.250645491993055,
+        "exit_code_signal": null,
+        "phase": "controlled_shutdown",
+        "process_name": "corridor_map",
+        "reason": "required_process_stopped_during_controlled_shutdown"
+      },
+      {
+        "elapsed_s": 45.25573136098683,
+        "exit_code_signal": null,
+        "phase": "controlled_shutdown",
+        "process_name": "pcl_render",
+        "reason": "required_process_stopped_during_controlled_shutdown"
+      },
+      {
+        "elapsed_s": 45.25573882390745,
+        "exit_code_signal": null,
+        "phase": "controlled_shutdown",
+        "process_name": "pcl_render",
+        "reason": "required_process_stopped_during_controlled_shutdown"
+      },
+      {
+        "elapsed_s": 45.26058654394001,
+        "exit_code_signal": null,
+        "phase": "controlled_shutdown",
+        "process_name": "lidar_bridge",
+        "reason": "required_process_stopped_during_controlled_shutdown"
+      },
+      {
+        "elapsed_s": 45.265196091961116,
+        "exit_code_signal": null,
+        "phase": "controlled_shutdown",
+        "process_name": "iap",
+        "reason": "required_process_stopped_during_controlled_shutdown"
+      },
+      {
+        "elapsed_s": 45.26981033501215,
+        "exit_code_signal": null,
+        "phase": "controlled_shutdown",
+        "process_name": "odom_bridge",
+        "reason": "required_process_stopped_during_controlled_shutdown"
+      },
+      {
+        "elapsed_s": 45.27449018298648,
+        "exit_code_signal": null,
+        "phase": "controlled_shutdown",
+        "process_name": "iap_odom_viz",
+        "reason": "required_process_stopped_during_controlled_shutdown"
+      },
+      {
+        "elapsed_s": 45.27927490789443,
+        "exit_code_signal": null,
+        "phase": "controlled_shutdown",
+        "process_name": "truth_odom_viz",
+        "reason": "required_process_stopped_during_controlled_shutdown"
+      },
+      {
+        "elapsed_s": 45.28368294099346,
+        "exit_code_signal": null,
+        "phase": "controlled_shutdown",
+        "process_name": "desired_odom_viz",
+        "reason": "required_process_stopped_during_controlled_shutdown"
+      },
+      {
+        "elapsed_s": 45.28777759685181,
+        "exit_code_signal": null,
+        "phase": "controlled_shutdown",
+        "process_name": "gnss_sim",
+        "reason": "required_process_stopped_during_controlled_shutdown"
+      },
+      {
+        "elapsed_s": 45.29188461881131,
+        "exit_code_signal": null,
+        "phase": "controlled_shutdown",
+        "process_name": "simulator",
+        "reason": "required_process_stopped_during_controlled_shutdown"
+      },
+      {
+        "elapsed_s": 45.29597837780602,
+        "exit_code_signal": null,
+        "phase": "controlled_shutdown",
+        "process_name": "controller",
+        "reason": "required_process_stopped_during_controlled_shutdown"
+      },
+      {
+        "elapsed_s": 45.300168700981885,
+        "exit_code_signal": null,
+        "phase": "controlled_shutdown",
+        "process_name": "ego",
+        "reason": "required_process_stopped_during_controlled_shutdown"
+      },
+      {
+        "elapsed_s": 45.30489304987714,
+        "exit_code_signal": null,
+        "phase": "controlled_shutdown",
+        "process_name": "traj_server",
+        "reason": "required_process_stopped_during_controlled_shutdown"
+      },
+      {
+        "elapsed_s": 45.30982350790873,
+        "exit_code_signal": null,
+        "phase": "controlled_shutdown",
+        "process_name": "provenance",
+        "reason": "required_process_stopped_during_controlled_shutdown"
+      },
+      {
+        "elapsed_s": 45.31482620583847,
+        "exit_code_signal": null,
+        "phase": "controlled_shutdown",
+        "process_name": "validator",
+        "reason": "required_process_stopped_during_controlled_shutdown"
+      }
+    ],
+    "required_processes": {
+      "controller": {
+        "runtime_failure": false,
+        "seen": true
+      },
+      "corridor_map": {
+        "runtime_failure": false,
+        "seen": true
+      },
+      "desired_odom_viz": {
+        "runtime_failure": false,
+        "seen": true
+      },
+      "ego": {
+        "runtime_failure": false,
+        "seen": true
+      },
+      "gnss_sim": {
+        "runtime_failure": false,
+        "seen": true
+      },
+      "iap": {
+        "runtime_failure": false,
+        "seen": true
+      },
+      "iap_odom_viz": {
+        "runtime_failure": false,
+        "seen": true
+      },
+      "lidar_bridge": {
+        "runtime_failure": false,
+        "seen": true
+      },
+      "odom_bridge": {
+        "runtime_failure": false,
+        "seen": true
+      },
+      "pcl_render": {
+        "runtime_failure": false,
+        "seen": true
+      },
+      "provenance": {
+        "runtime_failure": false,
+        "seen": true
+      },
+      "simulator": {
+        "runtime_failure": false,
+        "seen": true
+      },
+      "traj_server": {
+        "runtime_failure": false,
+        "seen": true
+      },
+      "truth_odom_viz": {
+        "runtime_failure": false,
+        "seen": true
+      },
+      "validator": {
+        "runtime_failure": false,
+        "seen": true
+      }
+    },
+    "required_processes_ok": true
+  },
+  "result": "PASS",
+  "schema_version": "icra075_development_row_v1",
+  "skipped_icra073_source_admission_debt": true,
+  "source_binding": {
+    "accepted": true,
+    "allowed_repository_output_prefix": "results/icra27/icra075/matrix-002/",
+    "checks": {
+      "head": {
+        "argv": [
+          "git",
+          "rev-parse",
+          "HEAD"
+        ],
+        "exit_code": 0,
+        "stderr": "",
+        "stdout": "0eb739913e01d7c2acc8da38d24169f05f5424da\n"
+      },
+      "origin": {
+        "argv": [
+          "git",
+          "rev-parse",
+          "origin/dev/icra"
+        ],
+        "exit_code": 0,
+        "stderr": "",
+        "stdout": "0eb739913e01d7c2acc8da38d24169f05f5424da\n"
+      },
+      "status": {
+        "argv": [
+          "git",
+          "status",
+          "--porcelain=v1",
+          "--untracked-files=all"
+        ],
+        "exit_code": 0,
+        "stderr": "",
+        "stdout": "?? docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf\n"
+      }
+    },
+    "head_commit": "0eb739913e01d7c2acc8da38d24169f05f5424da",
+    "known_retained_inventory": [
+      {
+        "accepted": true,
+        "expected_sha256": "27aac0ccca0ad0ab573578864cf27b9560d3f819bdeeae62378f8c20e62a8f64",
+        "expected_size_bytes": 72,
+        "observed_sha256": "27aac0ccca0ad0ab573578864cf27b9560d3f819bdeeae62378f8c20e62a8f64",
+        "observed_size_bytes": 72,
+        "path": ".claude/settings.local.json"
+      },
+      {
+        "accepted": true,
+        "expected_sha256": "29a73228c1d58d5c4983dc217230d6cbc6ff6e295a77a004d8e6a207fd242028",
+        "expected_size_bytes": 2962,
+        "observed_sha256": "29a73228c1d58d5c4983dc217230d6cbc6ff6e295a77a004d8e6a207fd242028",
+        "observed_size_bytes": 2962,
+        "path": "src/uav_simulator/local_sensing/CMakeModules/FindEigen.cmake~"
+      },
+      {
+        "accepted": true,
+        "expected_sha256": "1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6",
+        "expected_size_bytes": 243368,
+        "observed_sha256": "1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6",
+        "observed_size_bytes": 243368,
+        "path": "docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf"
+      }
+    ],
+    "origin_dev_icra_commit": "0eb739913e01d7c2acc8da38d24169f05f5424da",
+    "rejected_untracked_paths": [],
+    "schema_version": "icra075_development_source_binding_v1",
+    "skipped_icra073_source_admission_debt": true,
+    "tracked_entries": []
+  },
+  "source_binding_final": {
+    "accepted": true,
+    "allowed_repository_output_prefix": "results/icra27/icra075/matrix-002/",
+    "checks": {
+      "head": {
+        "argv": [
+          "git",
+          "rev-parse",
+          "HEAD"
+        ],
+        "exit_code": 0,
+        "stderr": "",
+        "stdout": "0eb739913e01d7c2acc8da38d24169f05f5424da\n"
+      },
+      "origin": {
+        "argv": [
+          "git",
+          "rev-parse",
+          "origin/dev/icra"
+        ],
+        "exit_code": 0,
+        "stderr": "",
+        "stdout": "0eb739913e01d7c2acc8da38d24169f05f5424da\n"
+      },
+      "status": {
+        "argv": [
+          "git",
+          "status",
+          "--porcelain=v1",
+          "--untracked-files=all"
+        ],
+        "exit_code": 0,
+        "stderr": "",
+        "stdout": "?? docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf\n"
+      }
+    },
+    "head_commit": "0eb739913e01d7c2acc8da38d24169f05f5424da",
+    "known_retained_inventory": [
+      {
+        "accepted": true,
+        "expected_sha256": "27aac0ccca0ad0ab573578864cf27b9560d3f819bdeeae62378f8c20e62a8f64",
+        "expected_size_bytes": 72,
+        "observed_sha256": "27aac0ccca0ad0ab573578864cf27b9560d3f819bdeeae62378f8c20e62a8f64",
+        "observed_size_bytes": 72,
+        "path": ".claude/settings.local.json"
+      },
+      {
+        "accepted": true,
+        "expected_sha256": "29a73228c1d58d5c4983dc217230d6cbc6ff6e295a77a004d8e6a207fd242028",
+        "expected_size_bytes": 2962,
+        "observed_sha256": "29a73228c1d58d5c4983dc217230d6cbc6ff6e295a77a004d8e6a207fd242028",
+        "observed_size_bytes": 2962,
+        "path": "src/uav_simulator/local_sensing/CMakeModules/FindEigen.cmake~"
+      },
+      {
+        "accepted": true,
+        "expected_sha256": "1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6",
+        "expected_size_bytes": 243368,
+        "observed_sha256": "1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6",
+        "observed_size_bytes": 243368,
+        "path": "docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf"
+      }
+    ],
+    "origin_dev_icra_commit": "0eb739913e01d7c2acc8da38d24169f05f5424da",
+    "rejected_untracked_paths": [],
+    "schema_version": "icra075_development_source_binding_v1",
+    "skipped_icra073_source_admission_debt": true,
+    "tracked_entries": []
+  },
+  "source_bound_claim": false
+}

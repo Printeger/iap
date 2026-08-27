@@ -1,0 +1,3 @@
+[INFO] [1787834749.659409193] [test_planner_lidar_body_bridge]: demo4 lidar body bridge ready cloud=/sim/drone_0/lidar odom=/sim/drone_0/truth_odom output=/sim/drone_0/lidar_body frame=lidar max_odom_lookup_dt=0.050
+[INFO] [1787834750.367325283] [test_planner_lidar_body_bridge]: first body cloud stamp=1657065600.628271 points=620 frame_id=lidar input_frame=map
+[INFO] [1787834794.099896101] [rclcpp]: signal_handler(SIGINT/SIGTERM)

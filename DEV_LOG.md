@@ -41,9 +41,10 @@ single-test invocation used the shared ordinary log directory and observed six a
 three rows from that invocation; it exited 1. Re-running the same byte-identical test with a fresh log root passed,
 and the final full suite also passed. No scientific row identity or repository evidence path was consumed.
 
-Implementation bytes must be pushed and divergence rechecked before the single batch GPU preflight. No ROS/GPU
-preflight or matrix row has run yet. The result remains development-only and cannot freeze SESOI, threshold,
-sample size or a success verdict.
+Pre-live checkpoint: implementation bytes still had to be pushed and divergence rechecked before the single batch
+GPU preflight; at that point no ROS/GPU preflight or matrix row had run. The later retained attempts below supersede
+that execution status. The result remains development-only and cannot freeze SESOI, threshold, sample size or a
+success verdict.
 
 Batch source checks allow only the active repository-local matrix output prefix and the protected PDF path while
 rejecting tracked/other-untracked changes. Every initial/per-row/final check also recomputes and compares exact
@@ -66,6 +67,23 @@ raises the final suite to 12/12. Any continuation must use new non-overwriting i
 repair/evidence commit is pushed and divergence-confirmed. Review then required `ros_started` to derive from the
 row manifest's post-spawn `launch_started=true`, not command-file existence; an explicit spawn-exception adversary
 raises the repaired focused suite to 13/13.
+
+### Retained matrix-002 terminal blocker
+
+Repair/evidence commit `0eb739913e01d7c2acc8da38d24169f05f5424da` was pushed and fetch-confirmed at
+divergence `0 0` before new identity `matrix-002`. GPU preflight passed again. The first control row ran the full
+45 seconds with all 15 required processes seen and no runtime failure; source remained accepted, and both owned
+process groups were cleared. Capture retained 135 P0 health records, 134 ready/non-stale with generations through
+67, and 2,137 P5 final records. Every final record is `REQUEST_REPLAN/current_low_margin` with the candidate
+rejected. No normal B-spline or runtime-committed record exists. The analyzer therefore fails closed at
+`EGO_FINAL_MISSING`; the second row and all later rows were never started.
+
+The pre-fix `matrix-002/batch_manifest.json` says generic `ROW_FAILURE` because its aggregation preferred the
+runner's null first-missing value over the analyzer's typed value. Historical evidence is retained unchanged. The
+final aggregation helper now chooses an earlier runner failure when present and otherwise the analyzer stage; its
+focused regression raises tooling to 14/14. This evidence-only repair does not authorize another scientific row.
+Correcting `current_low_margin` would require forbidden AL/PL, P5 threshold, provider-truth or decision tuning.
+ICRA-075 is therefore `BLOCKED_ICRA075_CONTROL_P5_CURRENT_LOW_MARGIN` with ICRA-072B/073 debt still NOT PASS.
 
 ## 2026-08-27 — ICRA-074 V2 geometry and offline targeted optimization
 

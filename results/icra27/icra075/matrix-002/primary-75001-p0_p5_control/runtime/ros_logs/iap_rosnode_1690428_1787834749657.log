@@ -1,0 +1,35 @@
+[INFO] [1787834749.666669216] [test_planner_iap_rosnode]: iap init stage=config path=/home/dev/ws_iap/src/iap/results/icra27/icra075/matrix-002/primary-75001-p0_p5_control/runtime/iap_sim_demo11_test_planner_1690352_1787834749466/sim_demo11
+[INFO] [1787834749.669726336] [test_planner_iap_rosnode]: iap init stage=run_logs ready dir=/home/dev/ws_iap/src/iap/results/icra27/icra075/matrix-002/primary-75001-p0_p5_control/runtime/iap_logs/20260827T124549Z_667
+[INFO] [1787834749.670219314] [test_planner_iap_rosnode]: iap init stage=load_core_modules
+[INFO] [1787834749.789967181] [test_planner_iap_rosnode]: iap init stage=load_extension_modules
+[INFO] [1787834749.802995798] [test_planner_iap_rosnode]: iap init stage=create_core_subscriptions
+[INFO] [1787834749.803384066] [test_planner_iap_rosnode]: iap subscribed imu_topic=/sim/drone_0/imu_iap points_topic=/sim/drone_0/lidar_body
+[INFO] [1787834749.803707159] [test_planner_iap_rosnode]: iap init stage=create_input_status_timer
+[INFO] [1787834749.803724378] [test_planner_iap_rosnode]: iap init stage=queue_thread_start
+[INFO] [1787834749.803780187] [test_planner_iap_rosnode]: iap init stage=ready
+[INFO] [1787834749.942803493] [test_planner_iap_rosnode]: iap input first imu stamp=1657065600.264293 frame_id=imu
+[INFO] [1787834750.367592006] [test_planner_iap_rosnode]: iap input first points stamp=1657065600.628271 frame_id=lidar width=620 height=1 fields=3
+[INFO] [1787834750.368644608] [test_planner_iap_rosnode]: iap input first preprocessed frame stamp=1657065600.628271 points=620 scan_end=1657065600.628271
+[INFO] [1787834751.803806612] [test_planner_iap_rosnode]: iap input status imu_count=1862 points_count=15 accepted_frames=15 dropped_points=0 imu_publishers=1 points_publishers=1
+[INFO] [1787834753.803784408] [test_planner_iap_rosnode]: iap input status imu_count=3862 points_count=35 accepted_frames=35 dropped_points=0 imu_publishers=1 points_publishers=1
+[INFO] [1787834755.803743245] [test_planner_iap_rosnode]: iap input status imu_count=5861 points_count=55 accepted_frames=55 dropped_points=0 imu_publishers=1 points_publishers=1
+[INFO] [1787834757.803801798] [test_planner_iap_rosnode]: iap input status imu_count=7862 points_count=75 accepted_frames=75 dropped_points=0 imu_publishers=1 points_publishers=1
+[INFO] [1787834759.803790347] [test_planner_iap_rosnode]: iap input status imu_count=9862 points_count=95 accepted_frames=95 dropped_points=0 imu_publishers=1 points_publishers=1
+[INFO] [1787834761.803800211] [test_planner_iap_rosnode]: iap input status imu_count=11862 points_count=115 accepted_frames=115 dropped_points=0 imu_publishers=1 points_publishers=1
+[INFO] [1787834763.803785046] [test_planner_iap_rosnode]: iap input status imu_count=13862 points_count=135 accepted_frames=135 dropped_points=0 imu_publishers=1 points_publishers=1
+[INFO] [1787834765.803766556] [test_planner_iap_rosnode]: iap input status imu_count=15858 points_count=155 accepted_frames=155 dropped_points=0 imu_publishers=1 points_publishers=1
+[INFO] [1787834767.803796269] [test_planner_iap_rosnode]: iap input status imu_count=17859 points_count=175 accepted_frames=175 dropped_points=0 imu_publishers=1 points_publishers=1
+[INFO] [1787834769.803782199] [test_planner_iap_rosnode]: iap input status imu_count=19858 points_count=195 accepted_frames=195 dropped_points=0 imu_publishers=1 points_publishers=1
+[INFO] [1787834771.803763653] [test_planner_iap_rosnode]: iap input status imu_count=21858 points_count=215 accepted_frames=215 dropped_points=0 imu_publishers=1 points_publishers=1
+[INFO] [1787834773.803729595] [test_planner_iap_rosnode]: iap input status imu_count=23859 points_count=235 accepted_frames=235 dropped_points=0 imu_publishers=1 points_publishers=1
+[INFO] [1787834775.803747390] [test_planner_iap_rosnode]: iap input status imu_count=25858 points_count=255 accepted_frames=255 dropped_points=0 imu_publishers=1 points_publishers=1
+[INFO] [1787834777.803759754] [test_planner_iap_rosnode]: iap input status imu_count=27858 points_count=275 accepted_frames=275 dropped_points=0 imu_publishers=1 points_publishers=1
+[INFO] [1787834779.803750979] [test_planner_iap_rosnode]: iap input status imu_count=29858 points_count=295 accepted_frames=295 dropped_points=0 imu_publishers=1 points_publishers=1
+[INFO] [1787834781.803789340] [test_planner_iap_rosnode]: iap input status imu_count=31858 points_count=315 accepted_frames=315 dropped_points=0 imu_publishers=1 points_publishers=1
+[INFO] [1787834783.803789310] [test_planner_iap_rosnode]: iap input status imu_count=33856 points_count=335 accepted_frames=335 dropped_points=0 imu_publishers=1 points_publishers=1
+[INFO] [1787834785.803804029] [test_planner_iap_rosnode]: iap input status imu_count=35856 points_count=355 accepted_frames=355 dropped_points=0 imu_publishers=1 points_publishers=1
+[INFO] [1787834787.803794027] [test_planner_iap_rosnode]: iap input status imu_count=37856 points_count=375 accepted_frames=375 dropped_points=0 imu_publishers=1 points_publishers=1
+[INFO] [1787834789.803791144] [test_planner_iap_rosnode]: iap input status imu_count=39856 points_count=395 accepted_frames=395 dropped_points=0 imu_publishers=1 points_publishers=1
+[INFO] [1787834791.803777506] [test_planner_iap_rosnode]: iap input status imu_count=41856 points_count=415 accepted_frames=415 dropped_points=0 imu_publishers=1 points_publishers=1
+[INFO] [1787834793.803799958] [test_planner_iap_rosnode]: iap input status imu_count=43856 points_count=435 accepted_frames=435 dropped_points=0 imu_publishers=1 points_publishers=1
+[INFO] [1787834794.099927533] [rclcpp]: signal_handler(SIGINT/SIGTERM)

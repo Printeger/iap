@@ -1,0 +1,5 @@
+[INFO] [1787834749.666192857] [drone_0_pcl_render_node]: pcl_render ready cloud_topic=pcl_render_node/cloud sensing_horizon=10.000 sensing_rate=10.000 map_resolution=0.100
+[INFO] [1787834749.886453588] [pcl_render_node]: first odometry stamp=1657065600.203158 frame_id=map
+[WARN] [1787834750.286821365] [rcvGlobalPointCloudCallBack]: Global Pointcloud received..
+[INFO] [1787834750.366935036] [pcl_render_node]: first lidar publish stamp=1657065600.628271 points=620 frame_id=map
+[INFO] [1787834794.099903545] [rclcpp]: signal_handler(SIGINT/SIGTERM)

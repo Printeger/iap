@@ -1,0 +1,66 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Enabled: true
+      Name: Grid
+      Plane: XY
+      Plane Cell Count: 30
+      Reference Frame: <Fixed Frame>
+    - Class: rviz_default_plugins/PointCloud2
+      Enabled: true
+      Name: ON Integrity Cost Samples
+      Topic:
+        Value: /demo11/on/integrity_cost_field
+      Style: Points
+      Size (Pixels): 5
+      Color Transformer: Intensity
+      Channel Name: cost
+      Min Color: 0; 140; 255
+      Max Color: 255; 40; 40
+      Alpha: 0.8
+      Autocompute Intensity Bounds: true
+    - Class: rviz_default_plugins/Path
+      Enabled: true
+      Name: OFF Path
+      Topic:
+        Value: /demo11/off/path
+      Color: 150; 150; 150
+      Line Style: Lines
+      Line Width: 0.08
+    - Class: rviz_default_plugins/Path
+      Enabled: true
+      Name: ON Path
+      Topic:
+        Value: /demo11/on/path
+      Color: 40; 140; 255
+      Line Style: Lines
+      Line Width: 0.08
+  Enabled: true
+  Global Options:
+    Background Color: 18; 18; 22
+    Fixed Frame: map
+    Frame Rate: 30
+  Name: root
+  Tools:
+    - Class: rviz_default_plugins/Interact
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Distance: 28
+      Focal Point:
+        X: 0
+        Y: -1
+        Z: 1
+      Name: Current View
+      Pitch: 1.0
+      Target Frame: <Fixed Frame>
+      Yaw: 0.0
+Window Geometry:
+  Height: 900
+  Width: 1400

@@ -1,0 +1,1292 @@
+[2026-08-27 12:45:51.585] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.867 >= HAL=10.000
+[2026-08-27 12:45:51.585] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=72.110 >= VAL=20.000
+[2026-08-27 12:45:51.585] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.867 vs HAL=10.000 (im_h=-14.867), VPL=72.110 vs VAL=20.000 (im_v=-52.110), IM=-52.110
+[2026-08-27 12:45:51.671] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.467 >= HAL=10.000
+[2026-08-27 12:45:51.671] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=73.314 >= VAL=20.000
+[2026-08-27 12:45:51.671] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.467 vs HAL=10.000 (im_h=-14.467), VPL=73.314 vs VAL=20.000 (im_v=-53.314), IM=-53.314
+[2026-08-27 12:45:51.771] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.066 >= HAL=10.000
+[2026-08-27 12:45:51.771] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=73.012 >= VAL=20.000
+[2026-08-27 12:45:51.771] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.066 vs HAL=10.000 (im_h=-15.066), VPL=73.012 vs VAL=20.000 (im_v=-53.012), IM=-53.012
+[2026-08-27 12:45:51.870] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.935 >= HAL=10.000
+[2026-08-27 12:45:51.870] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=72.140 >= VAL=20.000
+[2026-08-27 12:45:51.870] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.935 vs HAL=10.000 (im_h=-14.935), VPL=72.140 vs VAL=20.000 (im_v=-52.140), IM=-52.140
+[2026-08-27 12:45:51.971] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.885 >= HAL=10.000
+[2026-08-27 12:45:51.971] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=72.139 >= VAL=20.000
+[2026-08-27 12:45:51.971] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.885 vs HAL=10.000 (im_h=-16.885), VPL=72.139 vs VAL=20.000 (im_v=-52.139), IM=-52.139
+[2026-08-27 12:45:52.071] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.505 >= HAL=10.000
+[2026-08-27 12:45:52.071] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.978 >= VAL=20.000
+[2026-08-27 12:45:52.071] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.505 vs HAL=10.000 (im_h=-15.505), VPL=71.978 vs VAL=20.000 (im_v=-51.978), IM=-51.978
+[2026-08-27 12:45:52.174] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.397 >= HAL=10.000
+[2026-08-27 12:45:52.174] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=73.945 >= VAL=20.000
+[2026-08-27 12:45:52.174] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.397 vs HAL=10.000 (im_h=-15.397), VPL=73.945 vs VAL=20.000 (im_v=-53.945), IM=-53.945
+[2026-08-27 12:45:52.273] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.106 >= HAL=10.000
+[2026-08-27 12:45:52.273] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=69.749 >= VAL=20.000
+[2026-08-27 12:45:52.273] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.106 vs HAL=10.000 (im_h=-15.106), VPL=69.749 vs VAL=20.000 (im_v=-49.749), IM=-49.749
+[2026-08-27 12:45:52.371] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.283 >= HAL=10.000
+[2026-08-27 12:45:52.371] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=76.547 >= VAL=20.000
+[2026-08-27 12:45:52.371] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.283 vs HAL=10.000 (im_h=-15.283), VPL=76.547 vs VAL=20.000 (im_v=-56.547), IM=-56.547
+[2026-08-27 12:45:52.475] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.432 >= HAL=10.000
+[2026-08-27 12:45:52.475] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=72.851 >= VAL=20.000
+[2026-08-27 12:45:52.475] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.432 vs HAL=10.000 (im_h=-15.432), VPL=72.851 vs VAL=20.000 (im_v=-52.851), IM=-52.851
+[2026-08-27 12:45:52.572] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.332 >= HAL=10.000
+[2026-08-27 12:45:52.572] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=74.200 >= VAL=20.000
+[2026-08-27 12:45:52.572] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.332 vs HAL=10.000 (im_h=-15.332), VPL=74.200 vs VAL=20.000 (im_v=-54.200), IM=-54.200
+[2026-08-27 12:45:52.676] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.392 >= HAL=10.000
+[2026-08-27 12:45:52.676] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=68.821 >= VAL=20.000
+[2026-08-27 12:45:52.676] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.392 vs HAL=10.000 (im_h=-15.392), VPL=68.821 vs VAL=20.000 (im_v=-48.821), IM=-48.821
+[2026-08-27 12:45:52.776] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.016 >= HAL=10.000
+[2026-08-27 12:45:52.776] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=72.986 >= VAL=20.000
+[2026-08-27 12:45:52.776] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.016 vs HAL=10.000 (im_h=-15.016), VPL=72.986 vs VAL=20.000 (im_v=-52.986), IM=-52.986
+[2026-08-27 12:45:52.871] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.367 >= HAL=10.000
+[2026-08-27 12:45:52.871] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=70.781 >= VAL=20.000
+[2026-08-27 12:45:52.871] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.367 vs HAL=10.000 (im_h=-14.367), VPL=70.781 vs VAL=20.000 (im_v=-50.781), IM=-50.781
+[2026-08-27 12:45:52.975] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.011 >= HAL=10.000
+[2026-08-27 12:45:52.975] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=76.140 >= VAL=20.000
+[2026-08-27 12:45:52.975] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.011 vs HAL=10.000 (im_h=-15.011), VPL=76.140 vs VAL=20.000 (im_v=-56.140), IM=-56.140
+[2026-08-27 12:45:53.071] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.300 >= HAL=10.000
+[2026-08-27 12:45:53.071] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=74.766 >= VAL=20.000
+[2026-08-27 12:45:53.071] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.300 vs HAL=10.000 (im_h=-15.300), VPL=74.766 vs VAL=20.000 (im_v=-54.766), IM=-54.766
+[2026-08-27 12:45:53.178] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.378 >= HAL=10.000
+[2026-08-27 12:45:53.178] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.346 >= VAL=20.000
+[2026-08-27 12:45:53.178] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.378 vs HAL=10.000 (im_h=-15.378), VPL=71.346 vs VAL=20.000 (im_v=-51.346), IM=-51.346
+[2026-08-27 12:45:53.278] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.224 >= HAL=10.000
+[2026-08-27 12:45:53.278] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=70.224 >= VAL=20.000
+[2026-08-27 12:45:53.278] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.224 vs HAL=10.000 (im_h=-15.224), VPL=70.224 vs VAL=20.000 (im_v=-50.224), IM=-50.224
+[2026-08-27 12:45:53.371] [integrity] [warning] NIS gating: sat 41 NIS_pr=9.11 > 6.63 -- downweighted
+[2026-08-27 12:45:53.372] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.666 >= HAL=10.000
+[2026-08-27 12:45:53.372] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=74.323 >= VAL=20.000
+[2026-08-27 12:45:53.372] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.666 vs HAL=10.000 (im_h=-16.666), VPL=74.323 vs VAL=20.000 (im_v=-54.323), IM=-54.323
+[2026-08-27 12:45:53.477] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.857 >= HAL=10.000
+[2026-08-27 12:45:53.477] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=69.668 >= VAL=20.000
+[2026-08-27 12:45:53.477] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.857 vs HAL=10.000 (im_h=-15.857), VPL=69.668 vs VAL=20.000 (im_v=-49.668), IM=-49.668
+[2026-08-27 12:45:53.571] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.201 >= HAL=10.000
+[2026-08-27 12:45:53.571] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=70.535 >= VAL=20.000
+[2026-08-27 12:45:53.571] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.201 vs HAL=10.000 (im_h=-16.201), VPL=70.535 vs VAL=20.000 (im_v=-50.535), IM=-50.535
+[2026-08-27 12:45:53.681] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.577 >= HAL=10.000
+[2026-08-27 12:45:53.681] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.029 >= VAL=20.000
+[2026-08-27 12:45:53.681] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.577 vs HAL=10.000 (im_h=-16.577), VPL=71.029 vs VAL=20.000 (im_v=-51.029), IM=-51.029
+[2026-08-27 12:45:53.781] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.823 >= HAL=10.000
+[2026-08-27 12:45:53.781] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=72.960 >= VAL=20.000
+[2026-08-27 12:45:53.781] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.823 vs HAL=10.000 (im_h=-14.823), VPL=72.960 vs VAL=20.000 (im_v=-52.960), IM=-52.960
+[2026-08-27 12:45:53.872] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.356 >= HAL=10.000
+[2026-08-27 12:45:53.872] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=72.833 >= VAL=20.000
+[2026-08-27 12:45:53.872] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.356 vs HAL=10.000 (im_h=-15.356), VPL=72.833 vs VAL=20.000 (im_v=-52.833), IM=-52.833
+[2026-08-27 12:45:53.979] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.589 >= HAL=10.000
+[2026-08-27 12:45:53.979] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=76.575 >= VAL=20.000
+[2026-08-27 12:45:53.979] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.589 vs HAL=10.000 (im_h=-14.589), VPL=76.575 vs VAL=20.000 (im_v=-56.575), IM=-56.575
+[2026-08-27 12:45:54.071] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.849 >= HAL=10.000
+[2026-08-27 12:45:54.071] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.522 >= VAL=20.000
+[2026-08-27 12:45:54.071] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.849 vs HAL=10.000 (im_h=-14.849), VPL=71.522 vs VAL=20.000 (im_v=-51.522), IM=-51.522
+[2026-08-27 12:45:54.180] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.155 >= HAL=10.000
+[2026-08-27 12:45:54.180] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=73.515 >= VAL=20.000
+[2026-08-27 12:45:54.180] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.155 vs HAL=10.000 (im_h=-16.155), VPL=73.515 vs VAL=20.000 (im_v=-53.515), IM=-53.515
+[2026-08-27 12:45:54.283] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.969 >= HAL=10.000
+[2026-08-27 12:45:54.283] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=69.235 >= VAL=20.000
+[2026-08-27 12:45:54.283] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.969 vs HAL=10.000 (im_h=-15.969), VPL=69.235 vs VAL=20.000 (im_v=-49.235), IM=-49.235
+[2026-08-27 12:45:54.372] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.416 >= HAL=10.000
+[2026-08-27 12:45:54.372] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.600 >= VAL=20.000
+[2026-08-27 12:45:54.372] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.416 vs HAL=10.000 (im_h=-16.416), VPL=71.600 vs VAL=20.000 (im_v=-51.600), IM=-51.600
+[2026-08-27 12:45:54.481] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.884 >= HAL=10.000
+[2026-08-27 12:45:54.481] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=74.739 >= VAL=20.000
+[2026-08-27 12:45:54.481] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.884 vs HAL=10.000 (im_h=-15.884), VPL=74.739 vs VAL=20.000 (im_v=-54.739), IM=-54.739
+[2026-08-27 12:45:54.572] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=27.733 >= HAL=10.000
+[2026-08-27 12:45:54.572] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=74.718 >= VAL=20.000
+[2026-08-27 12:45:54.572] [integrity] [warning] INTEGRITY UNSAFE: HPL=27.733 vs HAL=10.000 (im_h=-17.733), VPL=74.718 vs VAL=20.000 (im_v=-54.718), IM=-54.718
+[2026-08-27 12:45:54.688] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.125 >= HAL=10.000
+[2026-08-27 12:45:54.688] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=69.881 >= VAL=20.000
+[2026-08-27 12:45:54.688] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.125 vs HAL=10.000 (im_h=-15.125), VPL=69.881 vs VAL=20.000 (im_v=-49.881), IM=-49.881
+[2026-08-27 12:45:54.786] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.483 >= HAL=10.000
+[2026-08-27 12:45:54.786] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=75.980 >= VAL=20.000
+[2026-08-27 12:45:54.786] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.483 vs HAL=10.000 (im_h=-15.483), VPL=75.980 vs VAL=20.000 (im_v=-55.980), IM=-55.980
+[2026-08-27 12:45:54.873] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.144 >= HAL=10.000
+[2026-08-27 12:45:54.873] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.691 >= VAL=20.000
+[2026-08-27 12:45:54.873] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.144 vs HAL=10.000 (im_h=-15.144), VPL=71.691 vs VAL=20.000 (im_v=-51.691), IM=-51.691
+[2026-08-27 12:45:54.985] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.733 >= HAL=10.000
+[2026-08-27 12:45:54.985] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=70.947 >= VAL=20.000
+[2026-08-27 12:45:54.985] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.733 vs HAL=10.000 (im_h=-14.733), VPL=70.947 vs VAL=20.000 (im_v=-50.947), IM=-50.947
+[2026-08-27 12:45:55.072] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.978 >= HAL=10.000
+[2026-08-27 12:45:55.072] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=72.475 >= VAL=20.000
+[2026-08-27 12:45:55.072] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.978 vs HAL=10.000 (im_h=-14.978), VPL=72.475 vs VAL=20.000 (im_v=-52.475), IM=-52.475
+[2026-08-27 12:45:55.191] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.490 >= HAL=10.000
+[2026-08-27 12:45:55.191] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=69.249 >= VAL=20.000
+[2026-08-27 12:45:55.191] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.490 vs HAL=10.000 (im_h=-14.490), VPL=69.249 vs VAL=20.000 (im_v=-49.249), IM=-49.249
+[2026-08-27 12:45:55.290] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.636 >= HAL=10.000
+[2026-08-27 12:45:55.290] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=76.684 >= VAL=20.000
+[2026-08-27 12:45:55.290] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.636 vs HAL=10.000 (im_h=-15.636), VPL=76.684 vs VAL=20.000 (im_v=-56.684), IM=-56.684
+[2026-08-27 12:45:55.373] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.131 >= HAL=10.000
+[2026-08-27 12:45:55.373] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=70.792 >= VAL=20.000
+[2026-08-27 12:45:55.373] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.131 vs HAL=10.000 (im_h=-15.131), VPL=70.792 vs VAL=20.000 (im_v=-50.792), IM=-50.792
+[2026-08-27 12:45:55.488] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.422 >= HAL=10.000
+[2026-08-27 12:45:55.488] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=76.601 >= VAL=20.000
+[2026-08-27 12:45:55.488] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.422 vs HAL=10.000 (im_h=-15.422), VPL=76.601 vs VAL=20.000 (im_v=-56.601), IM=-56.601
+[2026-08-27 12:45:55.573] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=27.470 >= HAL=10.000
+[2026-08-27 12:45:55.573] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=74.374 >= VAL=20.000
+[2026-08-27 12:45:55.573] [integrity] [warning] INTEGRITY UNSAFE: HPL=27.470 vs HAL=10.000 (im_h=-17.470), VPL=74.374 vs VAL=20.000 (im_v=-54.374), IM=-54.374
+[2026-08-27 12:45:55.673] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.627 >= HAL=10.000
+[2026-08-27 12:45:55.673] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.740 >= VAL=20.000
+[2026-08-27 12:45:55.673] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.627 vs HAL=10.000 (im_h=-14.627), VPL=71.740 vs VAL=20.000 (im_v=-51.740), IM=-51.740
+[2026-08-27 12:45:55.771] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.181 >= HAL=10.000
+[2026-08-27 12:45:55.771] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=72.215 >= VAL=20.000
+[2026-08-27 12:45:55.771] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.181 vs HAL=10.000 (im_h=-15.181), VPL=72.215 vs VAL=20.000 (im_v=-52.215), IM=-52.215
+[2026-08-27 12:45:55.872] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.073 >= HAL=10.000
+[2026-08-27 12:45:55.872] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=69.155 >= VAL=20.000
+[2026-08-27 12:45:55.872] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.073 vs HAL=10.000 (im_h=-16.073), VPL=69.155 vs VAL=20.000 (im_v=-49.155), IM=-49.155
+[2026-08-27 12:45:55.998] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.992 >= HAL=10.000
+[2026-08-27 12:45:55.998] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=74.996 >= VAL=20.000
+[2026-08-27 12:45:55.998] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.992 vs HAL=10.000 (im_h=-15.992), VPL=74.996 vs VAL=20.000 (im_v=-54.996), IM=-54.996
+[2026-08-27 12:45:56.073] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.898 >= HAL=10.000
+[2026-08-27 12:45:56.073] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=70.851 >= VAL=20.000
+[2026-08-27 12:45:56.073] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.898 vs HAL=10.000 (im_h=-14.898), VPL=70.851 vs VAL=20.000 (im_v=-50.851), IM=-50.851
+[2026-08-27 12:45:56.200] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.722 >= HAL=10.000
+[2026-08-27 12:45:56.200] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=69.996 >= VAL=20.000
+[2026-08-27 12:45:56.200] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.722 vs HAL=10.000 (im_h=-14.722), VPL=69.996 vs VAL=20.000 (im_v=-49.996), IM=-49.996
+[2026-08-27 12:45:56.298] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.382 >= HAL=10.000
+[2026-08-27 12:45:56.298] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=68.960 >= VAL=20.000
+[2026-08-27 12:45:56.298] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.382 vs HAL=10.000 (im_h=-15.382), VPL=68.960 vs VAL=20.000 (im_v=-48.960), IM=-48.960
+[2026-08-27 12:45:56.375] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.535 >= HAL=10.000
+[2026-08-27 12:45:56.375] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=74.491 >= VAL=20.000
+[2026-08-27 12:45:56.375] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.535 vs HAL=10.000 (im_h=-14.535), VPL=74.491 vs VAL=20.000 (im_v=-54.491), IM=-54.491
+[2026-08-27 12:45:56.494] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.436 >= HAL=10.000
+[2026-08-27 12:45:56.494] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=74.721 >= VAL=20.000
+[2026-08-27 12:45:56.494] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.436 vs HAL=10.000 (im_h=-14.436), VPL=74.721 vs VAL=20.000 (im_v=-54.721), IM=-54.721
+[2026-08-27 12:45:56.595] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.076 >= HAL=10.000
+[2026-08-27 12:45:56.595] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=70.631 >= VAL=20.000
+[2026-08-27 12:45:56.595] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.076 vs HAL=10.000 (im_h=-15.076), VPL=70.631 vs VAL=20.000 (im_v=-50.631), IM=-50.631
+[2026-08-27 12:45:56.698] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.695 >= HAL=10.000
+[2026-08-27 12:45:56.698] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=68.904 >= VAL=20.000
+[2026-08-27 12:45:56.698] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.695 vs HAL=10.000 (im_h=-14.695), VPL=68.904 vs VAL=20.000 (im_v=-48.904), IM=-48.904
+[2026-08-27 12:45:56.778] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.964 >= HAL=10.000
+[2026-08-27 12:45:56.778] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=73.395 >= VAL=20.000
+[2026-08-27 12:45:56.778] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.964 vs HAL=10.000 (im_h=-15.964), VPL=73.395 vs VAL=20.000 (im_v=-53.395), IM=-53.395
+[2026-08-27 12:45:56.892] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.958 >= HAL=10.000
+[2026-08-27 12:45:56.892] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=74.489 >= VAL=20.000
+[2026-08-27 12:45:56.892] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.958 vs HAL=10.000 (im_h=-15.958), VPL=74.489 vs VAL=20.000 (im_v=-54.489), IM=-54.489
+[2026-08-27 12:45:56.991] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.827 >= HAL=10.000
+[2026-08-27 12:45:56.991] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=72.359 >= VAL=20.000
+[2026-08-27 12:45:56.991] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.827 vs HAL=10.000 (im_h=-15.827), VPL=72.359 vs VAL=20.000 (im_v=-52.359), IM=-52.359
+[2026-08-27 12:45:57.098] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.252 >= HAL=10.000
+[2026-08-27 12:45:57.098] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=73.397 >= VAL=20.000
+[2026-08-27 12:45:57.098] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.252 vs HAL=10.000 (im_h=-15.252), VPL=73.397 vs VAL=20.000 (im_v=-53.397), IM=-53.397
+[2026-08-27 12:45:57.191] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.986 >= HAL=10.000
+[2026-08-27 12:45:57.191] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=75.649 >= VAL=20.000
+[2026-08-27 12:45:57.191] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.986 vs HAL=10.000 (im_h=-15.986), VPL=75.649 vs VAL=20.000 (im_v=-55.649), IM=-55.649
+[2026-08-27 12:45:57.298] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.217 >= HAL=10.000
+[2026-08-27 12:45:57.298] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=68.839 >= VAL=20.000
+[2026-08-27 12:45:57.298] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.217 vs HAL=10.000 (im_h=-15.217), VPL=68.839 vs VAL=20.000 (im_v=-48.839), IM=-48.839
+[2026-08-27 12:45:57.391] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.082 >= HAL=10.000
+[2026-08-27 12:45:57.391] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=79.162 >= VAL=20.000
+[2026-08-27 12:45:57.391] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.082 vs HAL=10.000 (im_h=-15.082), VPL=79.162 vs VAL=20.000 (im_v=-59.162), IM=-59.162
+[2026-08-27 12:45:57.497] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.867 >= HAL=10.000
+[2026-08-27 12:45:57.497] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=70.908 >= VAL=20.000
+[2026-08-27 12:45:57.497] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.867 vs HAL=10.000 (im_h=-14.867), VPL=70.908 vs VAL=20.000 (im_v=-50.908), IM=-50.908
+[2026-08-27 12:45:57.575] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.113 >= HAL=10.000
+[2026-08-27 12:45:57.575] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=75.529 >= VAL=20.000
+[2026-08-27 12:45:57.575] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.113 vs HAL=10.000 (im_h=-16.113), VPL=75.529 vs VAL=20.000 (im_v=-55.529), IM=-55.529
+[2026-08-27 12:45:57.698] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.882 >= HAL=10.000
+[2026-08-27 12:45:57.698] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=70.107 >= VAL=20.000
+[2026-08-27 12:45:57.698] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.882 vs HAL=10.000 (im_h=-15.882), VPL=70.107 vs VAL=20.000 (im_v=-50.107), IM=-50.107
+[2026-08-27 12:45:57.798] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.442 >= HAL=10.000
+[2026-08-27 12:45:57.798] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=70.360 >= VAL=20.000
+[2026-08-27 12:45:57.798] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.442 vs HAL=10.000 (im_h=-14.442), VPL=70.360 vs VAL=20.000 (im_v=-50.360), IM=-50.360
+[2026-08-27 12:45:57.898] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.200 >= HAL=10.000
+[2026-08-27 12:45:57.898] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=72.993 >= VAL=20.000
+[2026-08-27 12:45:57.898] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.200 vs HAL=10.000 (im_h=-15.200), VPL=72.993 vs VAL=20.000 (im_v=-52.993), IM=-52.993
+[2026-08-27 12:45:57.997] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.772 >= HAL=10.000
+[2026-08-27 12:45:57.997] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=70.390 >= VAL=20.000
+[2026-08-27 12:45:57.997] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.772 vs HAL=10.000 (im_h=-15.772), VPL=70.390 vs VAL=20.000 (im_v=-50.390), IM=-50.390
+[2026-08-27 12:45:58.089] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.021 >= HAL=10.000
+[2026-08-27 12:45:58.089] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=69.409 >= VAL=20.000
+[2026-08-27 12:45:58.089] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.021 vs HAL=10.000 (im_h=-15.021), VPL=69.409 vs VAL=20.000 (im_v=-49.409), IM=-49.409
+[2026-08-27 12:45:58.175] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.865 >= HAL=10.000
+[2026-08-27 12:45:58.175] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=79.549 >= VAL=20.000
+[2026-08-27 12:45:58.175] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.865 vs HAL=10.000 (im_h=-15.865), VPL=79.549 vs VAL=20.000 (im_v=-59.549), IM=-59.549
+[2026-08-27 12:45:58.296] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.501 >= HAL=10.000
+[2026-08-27 12:45:58.296] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.943 >= VAL=20.000
+[2026-08-27 12:45:58.296] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.501 vs HAL=10.000 (im_h=-16.501), VPL=71.943 vs VAL=20.000 (im_v=-51.943), IM=-51.943
+[2026-08-27 12:45:58.396] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.115 >= HAL=10.000
+[2026-08-27 12:45:58.396] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=69.397 >= VAL=20.000
+[2026-08-27 12:45:58.396] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.115 vs HAL=10.000 (im_h=-15.115), VPL=69.397 vs VAL=20.000 (im_v=-49.397), IM=-49.397
+[2026-08-27 12:45:58.489] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.012 >= HAL=10.000
+[2026-08-27 12:45:58.489] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=73.800 >= VAL=20.000
+[2026-08-27 12:45:58.489] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.012 vs HAL=10.000 (im_h=-16.012), VPL=73.800 vs VAL=20.000 (im_v=-53.800), IM=-53.800
+[2026-08-27 12:45:58.596] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.380 >= HAL=10.000
+[2026-08-27 12:45:58.596] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=76.255 >= VAL=20.000
+[2026-08-27 12:45:58.596] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.380 vs HAL=10.000 (im_h=-15.380), VPL=76.255 vs VAL=20.000 (im_v=-56.255), IM=-56.255
+[2026-08-27 12:45:58.673] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.888 >= HAL=10.000
+[2026-08-27 12:45:58.673] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=69.586 >= VAL=20.000
+[2026-08-27 12:45:58.673] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.888 vs HAL=10.000 (im_h=-14.888), VPL=69.586 vs VAL=20.000 (im_v=-49.586), IM=-49.586
+[2026-08-27 12:45:58.796] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.391 >= HAL=10.000
+[2026-08-27 12:45:58.796] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=75.358 >= VAL=20.000
+[2026-08-27 12:45:58.796] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.391 vs HAL=10.000 (im_h=-15.391), VPL=75.358 vs VAL=20.000 (im_v=-55.358), IM=-55.358
+[2026-08-27 12:45:58.896] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.749 >= HAL=10.000
+[2026-08-27 12:45:58.896] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=74.420 >= VAL=20.000
+[2026-08-27 12:45:58.896] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.749 vs HAL=10.000 (im_h=-14.749), VPL=74.420 vs VAL=20.000 (im_v=-54.420), IM=-54.420
+[2026-08-27 12:45:58.973] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.669 >= HAL=10.000
+[2026-08-27 12:45:58.973] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=70.762 >= VAL=20.000
+[2026-08-27 12:45:58.973] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.669 vs HAL=10.000 (im_h=-16.669), VPL=70.762 vs VAL=20.000 (im_v=-50.762), IM=-50.762
+[2026-08-27 12:45:59.095] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.255 >= HAL=10.000
+[2026-08-27 12:45:59.095] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=73.086 >= VAL=20.000
+[2026-08-27 12:45:59.095] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.255 vs HAL=10.000 (im_h=-15.255), VPL=73.086 vs VAL=20.000 (im_v=-53.086), IM=-53.086
+[2026-08-27 12:45:59.188] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.208 >= HAL=10.000
+[2026-08-27 12:45:59.188] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.848 >= VAL=20.000
+[2026-08-27 12:45:59.188] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.208 vs HAL=10.000 (im_h=-15.208), VPL=71.848 vs VAL=20.000 (im_v=-51.848), IM=-51.848
+[2026-08-27 12:45:59.273] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.098 >= HAL=10.000
+[2026-08-27 12:45:59.273] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=70.381 >= VAL=20.000
+[2026-08-27 12:45:59.273] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.098 vs HAL=10.000 (im_h=-15.098), VPL=70.381 vs VAL=20.000 (im_v=-50.381), IM=-50.381
+[2026-08-27 12:45:59.389] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.239 >= HAL=10.000
+[2026-08-27 12:45:59.389] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=72.502 >= VAL=20.000
+[2026-08-27 12:45:59.389] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.239 vs HAL=10.000 (im_h=-16.239), VPL=72.502 vs VAL=20.000 (im_v=-52.502), IM=-52.502
+[2026-08-27 12:45:59.489] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.905 >= HAL=10.000
+[2026-08-27 12:45:59.489] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=75.683 >= VAL=20.000
+[2026-08-27 12:45:59.489] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.905 vs HAL=10.000 (im_h=-14.905), VPL=75.683 vs VAL=20.000 (im_v=-55.683), IM=-55.683
+[2026-08-27 12:45:59.595] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.360 >= HAL=10.000
+[2026-08-27 12:45:59.595] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=68.902 >= VAL=20.000
+[2026-08-27 12:45:59.595] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.360 vs HAL=10.000 (im_h=-15.360), VPL=68.902 vs VAL=20.000 (im_v=-48.902), IM=-48.902
+[2026-08-27 12:45:59.695] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.336 >= HAL=10.000
+[2026-08-27 12:45:59.695] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=75.221 >= VAL=20.000
+[2026-08-27 12:45:59.695] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.336 vs HAL=10.000 (im_h=-15.336), VPL=75.221 vs VAL=20.000 (im_v=-55.221), IM=-55.221
+[2026-08-27 12:45:59.796] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.395 >= HAL=10.000
+[2026-08-27 12:45:59.796] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=69.099 >= VAL=20.000
+[2026-08-27 12:45:59.796] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.395 vs HAL=10.000 (im_h=-15.395), VPL=69.099 vs VAL=20.000 (im_v=-49.099), IM=-49.099
+[2026-08-27 12:45:59.894] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.626 >= HAL=10.000
+[2026-08-27 12:45:59.894] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=69.278 >= VAL=20.000
+[2026-08-27 12:45:59.895] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.626 vs HAL=10.000 (im_h=-14.626), VPL=69.278 vs VAL=20.000 (im_v=-49.278), IM=-49.278
+[2026-08-27 12:45:59.988] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.257 >= HAL=10.000
+[2026-08-27 12:45:59.988] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=73.140 >= VAL=20.000
+[2026-08-27 12:45:59.988] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.257 vs HAL=10.000 (im_h=-15.257), VPL=73.140 vs VAL=20.000 (im_v=-53.140), IM=-53.140
+[2026-08-27 12:46:00.073] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.862 >= HAL=10.000
+[2026-08-27 12:46:00.073] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=72.007 >= VAL=20.000
+[2026-08-27 12:46:00.073] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.862 vs HAL=10.000 (im_h=-15.862), VPL=72.007 vs VAL=20.000 (im_v=-52.007), IM=-52.007
+[2026-08-27 12:46:00.195] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.236 >= HAL=10.000
+[2026-08-27 12:46:00.195] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=70.916 >= VAL=20.000
+[2026-08-27 12:46:00.195] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.236 vs HAL=10.000 (im_h=-15.236), VPL=70.916 vs VAL=20.000 (im_v=-50.916), IM=-50.916
+[2026-08-27 12:46:00.289] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.776 >= HAL=10.000
+[2026-08-27 12:46:00.289] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=76.217 >= VAL=20.000
+[2026-08-27 12:46:00.289] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.776 vs HAL=10.000 (im_h=-15.776), VPL=76.217 vs VAL=20.000 (im_v=-56.217), IM=-56.217
+[2026-08-27 12:46:00.389] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.363 >= HAL=10.000
+[2026-08-27 12:46:00.389] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=73.298 >= VAL=20.000
+[2026-08-27 12:46:00.389] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.363 vs HAL=10.000 (im_h=-15.363), VPL=73.298 vs VAL=20.000 (im_v=-53.298), IM=-53.298
+[2026-08-27 12:46:00.488] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.175 >= HAL=10.000
+[2026-08-27 12:46:00.488] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=72.257 >= VAL=20.000
+[2026-08-27 12:46:00.488] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.175 vs HAL=10.000 (im_h=-16.175), VPL=72.257 vs VAL=20.000 (im_v=-52.257), IM=-52.257
+[2026-08-27 12:46:00.596] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.456 >= HAL=10.000
+[2026-08-27 12:46:00.596] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=69.205 >= VAL=20.000
+[2026-08-27 12:46:00.596] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.456 vs HAL=10.000 (im_h=-15.456), VPL=69.205 vs VAL=20.000 (im_v=-49.205), IM=-49.205
+[2026-08-27 12:46:00.695] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.704 >= HAL=10.000
+[2026-08-27 12:46:00.695] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=73.404 >= VAL=20.000
+[2026-08-27 12:46:00.695] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.704 vs HAL=10.000 (im_h=-14.704), VPL=73.404 vs VAL=20.000 (im_v=-53.404), IM=-53.404
+[2026-08-27 12:46:00.774] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.774 >= HAL=10.000
+[2026-08-27 12:46:00.774] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=74.628 >= VAL=20.000
+[2026-08-27 12:46:00.774] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.774 vs HAL=10.000 (im_h=-15.774), VPL=74.628 vs VAL=20.000 (im_v=-54.628), IM=-54.628
+[2026-08-27 12:46:00.895] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.943 >= HAL=10.000
+[2026-08-27 12:46:00.895] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=69.946 >= VAL=20.000
+[2026-08-27 12:46:00.895] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.943 vs HAL=10.000 (im_h=-14.943), VPL=69.946 vs VAL=20.000 (im_v=-49.946), IM=-49.946
+[2026-08-27 12:46:00.988] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.425 >= HAL=10.000
+[2026-08-27 12:46:00.988] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=72.911 >= VAL=20.000
+[2026-08-27 12:46:00.988] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.425 vs HAL=10.000 (im_h=-14.425), VPL=72.911 vs VAL=20.000 (im_v=-52.911), IM=-52.911
+[2026-08-27 12:46:01.095] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.184 >= HAL=10.000
+[2026-08-27 12:46:01.095] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.759 >= VAL=20.000
+[2026-08-27 12:46:01.096] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.184 vs HAL=10.000 (im_h=-16.184), VPL=71.759 vs VAL=20.000 (im_v=-51.759), IM=-51.759
+[2026-08-27 12:46:01.189] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.087 >= HAL=10.000
+[2026-08-27 12:46:01.189] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=79.164 >= VAL=20.000
+[2026-08-27 12:46:01.189] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.087 vs HAL=10.000 (im_h=-15.087), VPL=79.164 vs VAL=20.000 (im_v=-59.164), IM=-59.164
+[2026-08-27 12:46:01.274] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.107 >= HAL=10.000
+[2026-08-27 12:46:01.274] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=72.900 >= VAL=20.000
+[2026-08-27 12:46:01.274] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.107 vs HAL=10.000 (im_h=-15.107), VPL=72.900 vs VAL=20.000 (im_v=-52.900), IM=-52.900
+[2026-08-27 12:46:01.398] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.630 >= HAL=10.000
+[2026-08-27 12:46:01.398] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=74.001 >= VAL=20.000
+[2026-08-27 12:46:01.398] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.630 vs HAL=10.000 (im_h=-15.630), VPL=74.001 vs VAL=20.000 (im_v=-54.001), IM=-54.001
+[2026-08-27 12:46:01.496] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.599 >= HAL=10.000
+[2026-08-27 12:46:01.496] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=70.224 >= VAL=20.000
+[2026-08-27 12:46:01.496] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.599 vs HAL=10.000 (im_h=-14.599), VPL=70.224 vs VAL=20.000 (im_v=-50.224), IM=-50.224
+[2026-08-27 12:46:01.574] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.614 >= HAL=10.000
+[2026-08-27 12:46:01.574] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=72.444 >= VAL=20.000
+[2026-08-27 12:46:01.574] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.614 vs HAL=10.000 (im_h=-14.614), VPL=72.444 vs VAL=20.000 (im_v=-52.444), IM=-52.444
+[2026-08-27 12:46:01.697] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.547 >= HAL=10.000
+[2026-08-27 12:46:01.697] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=76.622 >= VAL=20.000
+[2026-08-27 12:46:01.697] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.547 vs HAL=10.000 (im_h=-15.547), VPL=76.622 vs VAL=20.000 (im_v=-56.622), IM=-56.622
+[2026-08-27 12:46:01.799] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.441 >= HAL=10.000
+[2026-08-27 12:46:01.799] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=69.279 >= VAL=20.000
+[2026-08-27 12:46:01.799] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.441 vs HAL=10.000 (im_h=-14.441), VPL=69.279 vs VAL=20.000 (im_v=-49.279), IM=-49.279
+[2026-08-27 12:46:01.898] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.632 >= HAL=10.000
+[2026-08-27 12:46:01.898] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.601 >= VAL=20.000
+[2026-08-27 12:46:01.898] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.632 vs HAL=10.000 (im_h=-15.632), VPL=71.601 vs VAL=20.000 (im_v=-51.601), IM=-51.601
+[2026-08-27 12:46:01.996] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=27.195 >= HAL=10.000
+[2026-08-27 12:46:01.996] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=75.415 >= VAL=20.000
+[2026-08-27 12:46:01.996] [integrity] [warning] INTEGRITY UNSAFE: HPL=27.195 vs HAL=10.000 (im_h=-17.195), VPL=75.415 vs VAL=20.000 (im_v=-55.415), IM=-55.415
+[2026-08-27 12:46:02.074] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.778 >= HAL=10.000
+[2026-08-27 12:46:02.074] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=70.232 >= VAL=20.000
+[2026-08-27 12:46:02.074] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.778 vs HAL=10.000 (im_h=-16.778), VPL=70.232 vs VAL=20.000 (im_v=-50.232), IM=-50.232
+[2026-08-27 12:46:02.189] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.958 >= HAL=10.000
+[2026-08-27 12:46:02.189] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=69.325 >= VAL=20.000
+[2026-08-27 12:46:02.189] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.958 vs HAL=10.000 (im_h=-14.958), VPL=69.325 vs VAL=20.000 (im_v=-49.325), IM=-49.325
+[2026-08-27 12:46:02.290] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.456 >= HAL=10.000
+[2026-08-27 12:46:02.290] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.678 >= VAL=20.000
+[2026-08-27 12:46:02.290] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.456 vs HAL=10.000 (im_h=-14.456), VPL=71.678 vs VAL=20.000 (im_v=-51.678), IM=-51.678
+[2026-08-27 12:46:02.391] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.090 >= HAL=10.000
+[2026-08-27 12:46:02.391] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=79.256 >= VAL=20.000
+[2026-08-27 12:46:02.391] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.090 vs HAL=10.000 (im_h=-15.090), VPL=79.256 vs VAL=20.000 (im_v=-59.256), IM=-59.256
+[2026-08-27 12:46:02.496] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.375 >= HAL=10.000
+[2026-08-27 12:46:02.496] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.103 >= VAL=20.000
+[2026-08-27 12:46:02.496] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.375 vs HAL=10.000 (im_h=-15.375), VPL=71.103 vs VAL=20.000 (im_v=-51.103), IM=-51.103
+[2026-08-27 12:46:02.597] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.717 >= HAL=10.000
+[2026-08-27 12:46:02.597] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=69.347 >= VAL=20.000
+[2026-08-27 12:46:02.597] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.717 vs HAL=10.000 (im_h=-15.717), VPL=69.347 vs VAL=20.000 (im_v=-49.347), IM=-49.347
+[2026-08-27 12:46:02.699] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.908 >= HAL=10.000
+[2026-08-27 12:46:02.699] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=69.149 >= VAL=20.000
+[2026-08-27 12:46:02.699] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.908 vs HAL=10.000 (im_h=-14.908), VPL=69.149 vs VAL=20.000 (im_v=-49.149), IM=-49.149
+[2026-08-27 12:46:02.797] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.682 >= HAL=10.000
+[2026-08-27 12:46:02.797] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=70.122 >= VAL=20.000
+[2026-08-27 12:46:02.797] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.682 vs HAL=10.000 (im_h=-14.682), VPL=70.122 vs VAL=20.000 (im_v=-50.122), IM=-50.122
+[2026-08-27 12:46:02.876] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.771 >= HAL=10.000
+[2026-08-27 12:46:02.876] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=73.639 >= VAL=20.000
+[2026-08-27 12:46:02.876] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.771 vs HAL=10.000 (im_h=-14.771), VPL=73.639 vs VAL=20.000 (im_v=-53.639), IM=-53.639
+[2026-08-27 12:46:02.998] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.506 >= HAL=10.000
+[2026-08-27 12:46:02.998] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=72.388 >= VAL=20.000
+[2026-08-27 12:46:02.998] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.506 vs HAL=10.000 (im_h=-14.506), VPL=72.388 vs VAL=20.000 (im_v=-52.388), IM=-52.388
+[2026-08-27 12:46:03.096] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.803 >= HAL=10.000
+[2026-08-27 12:46:03.096] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=73.523 >= VAL=20.000
+[2026-08-27 12:46:03.096] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.803 vs HAL=10.000 (im_h=-16.803), VPL=73.523 vs VAL=20.000 (im_v=-53.523), IM=-53.523
+[2026-08-27 12:46:03.175] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.021 >= HAL=10.000
+[2026-08-27 12:46:03.175] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=70.103 >= VAL=20.000
+[2026-08-27 12:46:03.175] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.021 vs HAL=10.000 (im_h=-15.021), VPL=70.103 vs VAL=20.000 (im_v=-50.103), IM=-50.103
+[2026-08-27 12:46:03.289] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.447 >= HAL=10.000
+[2026-08-27 12:46:03.289] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=70.990 >= VAL=20.000
+[2026-08-27 12:46:03.289] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.447 vs HAL=10.000 (im_h=-14.447), VPL=70.990 vs VAL=20.000 (im_v=-50.990), IM=-50.990
+[2026-08-27 12:46:03.375] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.577 >= HAL=10.000
+[2026-08-27 12:46:03.375] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=72.678 >= VAL=20.000
+[2026-08-27 12:46:03.375] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.577 vs HAL=10.000 (im_h=-14.577), VPL=72.678 vs VAL=20.000 (im_v=-52.678), IM=-52.678
+[2026-08-27 12:46:03.498] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.946 >= HAL=10.000
+[2026-08-27 12:46:03.498] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=69.222 >= VAL=20.000
+[2026-08-27 12:46:03.498] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.946 vs HAL=10.000 (im_h=-14.946), VPL=69.222 vs VAL=20.000 (im_v=-49.222), IM=-49.222
+[2026-08-27 12:46:03.573] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.406 >= HAL=10.000
+[2026-08-27 12:46:03.573] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=74.711 >= VAL=20.000
+[2026-08-27 12:46:03.573] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.406 vs HAL=10.000 (im_h=-16.406), VPL=74.711 vs VAL=20.000 (im_v=-54.711), IM=-54.711
+[2026-08-27 12:46:03.696] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.637 >= HAL=10.000
+[2026-08-27 12:46:03.696] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=70.132 >= VAL=20.000
+[2026-08-27 12:46:03.696] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.637 vs HAL=10.000 (im_h=-14.637), VPL=70.132 vs VAL=20.000 (im_v=-50.132), IM=-50.132
+[2026-08-27 12:46:03.790] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.066 >= HAL=10.000
+[2026-08-27 12:46:03.790] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=76.613 >= VAL=20.000
+[2026-08-27 12:46:03.790] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.066 vs HAL=10.000 (im_h=-15.066), VPL=76.613 vs VAL=20.000 (im_v=-56.613), IM=-56.613
+[2026-08-27 12:46:03.891] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.823 >= HAL=10.000
+[2026-08-27 12:46:03.891] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=70.132 >= VAL=20.000
+[2026-08-27 12:46:03.891] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.823 vs HAL=10.000 (im_h=-14.823), VPL=70.132 vs VAL=20.000 (im_v=-50.132), IM=-50.132
+[2026-08-27 12:46:03.990] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.480 >= HAL=10.000
+[2026-08-27 12:46:03.990] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.264 >= VAL=20.000
+[2026-08-27 12:46:03.990] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.480 vs HAL=10.000 (im_h=-15.480), VPL=71.264 vs VAL=20.000 (im_v=-51.264), IM=-51.264
+[2026-08-27 12:46:04.096] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.836 >= HAL=10.000
+[2026-08-27 12:46:04.096] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.922 >= VAL=20.000
+[2026-08-27 12:46:04.096] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.836 vs HAL=10.000 (im_h=-14.836), VPL=71.922 vs VAL=20.000 (im_v=-51.922), IM=-51.922
+[2026-08-27 12:46:04.172] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.413 >= HAL=10.000
+[2026-08-27 12:46:04.172] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.841 >= VAL=20.000
+[2026-08-27 12:46:04.172] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.413 vs HAL=10.000 (im_h=-16.413), VPL=71.841 vs VAL=20.000 (im_v=-51.841), IM=-51.841
+[2026-08-27 12:46:04.297] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.570 >= HAL=10.000
+[2026-08-27 12:46:04.297] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=75.459 >= VAL=20.000
+[2026-08-27 12:46:04.297] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.570 vs HAL=10.000 (im_h=-15.570), VPL=75.459 vs VAL=20.000 (im_v=-55.459), IM=-55.459
+[2026-08-27 12:46:04.399] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.476 >= HAL=10.000
+[2026-08-27 12:46:04.399] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=74.244 >= VAL=20.000
+[2026-08-27 12:46:04.399] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.476 vs HAL=10.000 (im_h=-16.476), VPL=74.244 vs VAL=20.000 (im_v=-54.244), IM=-54.244
+[2026-08-27 12:46:04.498] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.300 >= HAL=10.000
+[2026-08-27 12:46:04.498] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.017 >= VAL=20.000
+[2026-08-27 12:46:04.498] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.300 vs HAL=10.000 (im_h=-15.300), VPL=71.017 vs VAL=20.000 (im_v=-51.017), IM=-51.017
+[2026-08-27 12:46:04.598] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.379 >= HAL=10.000
+[2026-08-27 12:46:04.598] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.463 >= VAL=20.000
+[2026-08-27 12:46:04.598] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.379 vs HAL=10.000 (im_h=-14.379), VPL=71.463 vs VAL=20.000 (im_v=-51.463), IM=-51.463
+[2026-08-27 12:46:04.690] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.139 >= HAL=10.000
+[2026-08-27 12:46:04.690] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=74.517 >= VAL=20.000
+[2026-08-27 12:46:04.690] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.139 vs HAL=10.000 (im_h=-15.139), VPL=74.517 vs VAL=20.000 (im_v=-54.517), IM=-54.517
+[2026-08-27 12:46:04.797] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.415 >= HAL=10.000
+[2026-08-27 12:46:04.797] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=73.634 >= VAL=20.000
+[2026-08-27 12:46:04.797] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.415 vs HAL=10.000 (im_h=-14.415), VPL=73.634 vs VAL=20.000 (im_v=-53.634), IM=-53.634
+[2026-08-27 12:46:04.875] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.791 >= HAL=10.000
+[2026-08-27 12:46:04.875] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.706 >= VAL=20.000
+[2026-08-27 12:46:04.875] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.791 vs HAL=10.000 (im_h=-16.791), VPL=71.706 vs VAL=20.000 (im_v=-51.706), IM=-51.706
+[2026-08-27 12:46:04.998] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.003 >= HAL=10.000
+[2026-08-27 12:46:04.998] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.486 >= VAL=20.000
+[2026-08-27 12:46:04.998] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.003 vs HAL=10.000 (im_h=-15.003), VPL=71.486 vs VAL=20.000 (im_v=-51.486), IM=-51.486
+[2026-08-27 12:46:05.091] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.376 >= HAL=10.000
+[2026-08-27 12:46:05.091] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=69.079 >= VAL=20.000
+[2026-08-27 12:46:05.091] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.376 vs HAL=10.000 (im_h=-15.376), VPL=69.079 vs VAL=20.000 (im_v=-49.079), IM=-49.079
+[2026-08-27 12:46:05.190] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.421 >= HAL=10.000
+[2026-08-27 12:46:05.190] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=69.545 >= VAL=20.000
+[2026-08-27 12:46:05.190] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.421 vs HAL=10.000 (im_h=-14.421), VPL=69.545 vs VAL=20.000 (im_v=-49.545), IM=-49.545
+[2026-08-27 12:46:05.290] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.191 >= HAL=10.000
+[2026-08-27 12:46:05.290] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=78.306 >= VAL=20.000
+[2026-08-27 12:46:05.290] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.191 vs HAL=10.000 (im_h=-15.191), VPL=78.306 vs VAL=20.000 (im_v=-58.306), IM=-58.306
+[2026-08-27 12:46:05.375] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.754 >= HAL=10.000
+[2026-08-27 12:46:05.375] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=74.399 >= VAL=20.000
+[2026-08-27 12:46:05.375] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.754 vs HAL=10.000 (im_h=-15.754), VPL=74.399 vs VAL=20.000 (im_v=-54.399), IM=-54.399
+[2026-08-27 12:46:05.498] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.954 >= HAL=10.000
+[2026-08-27 12:46:05.498] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=75.091 >= VAL=20.000
+[2026-08-27 12:46:05.498] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.954 vs HAL=10.000 (im_h=-14.954), VPL=75.091 vs VAL=20.000 (im_v=-55.091), IM=-55.091
+[2026-08-27 12:46:05.603] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.280 >= HAL=10.000
+[2026-08-27 12:46:05.603] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.275 >= VAL=20.000
+[2026-08-27 12:46:05.603] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.280 vs HAL=10.000 (im_h=-15.280), VPL=71.275 vs VAL=20.000 (im_v=-51.275), IM=-51.275
+[2026-08-27 12:46:05.697] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.528 >= HAL=10.000
+[2026-08-27 12:46:05.697] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=69.037 >= VAL=20.000
+[2026-08-27 12:46:05.697] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.528 vs HAL=10.000 (im_h=-15.528), VPL=69.037 vs VAL=20.000 (im_v=-49.037), IM=-49.037
+[2026-08-27 12:46:05.802] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.460 >= HAL=10.000
+[2026-08-27 12:46:05.802] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=73.565 >= VAL=20.000
+[2026-08-27 12:46:05.802] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.460 vs HAL=10.000 (im_h=-16.460), VPL=73.565 vs VAL=20.000 (im_v=-53.565), IM=-53.565
+[2026-08-27 12:46:05.902] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.855 >= HAL=10.000
+[2026-08-27 12:46:05.902] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=72.758 >= VAL=20.000
+[2026-08-27 12:46:05.902] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.855 vs HAL=10.000 (im_h=-14.855), VPL=72.758 vs VAL=20.000 (im_v=-52.758), IM=-52.758
+[2026-08-27 12:46:06.001] [integrity] [warning] NIS gating: sat 137 NIS_pr=7.06 > 6.63 -- downweighted
+[2026-08-27 12:46:06.001] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.685 >= HAL=10.000
+[2026-08-27 12:46:06.001] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=75.679 >= VAL=20.000
+[2026-08-27 12:46:06.001] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.685 vs HAL=10.000 (im_h=-15.685), VPL=75.679 vs VAL=20.000 (im_v=-55.679), IM=-55.679
+[2026-08-27 12:46:06.101] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.024 >= HAL=10.000
+[2026-08-27 12:46:06.101] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=70.492 >= VAL=20.000
+[2026-08-27 12:46:06.101] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.024 vs HAL=10.000 (im_h=-15.024), VPL=70.492 vs VAL=20.000 (im_v=-50.492), IM=-50.492
+[2026-08-27 12:46:06.201] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.510 >= HAL=10.000
+[2026-08-27 12:46:06.201] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=68.868 >= VAL=20.000
+[2026-08-27 12:46:06.201] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.510 vs HAL=10.000 (im_h=-14.510), VPL=68.868 vs VAL=20.000 (im_v=-48.868), IM=-48.868
+[2026-08-27 12:46:06.301] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.355 >= HAL=10.000
+[2026-08-27 12:46:06.301] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=73.500 >= VAL=20.000
+[2026-08-27 12:46:06.301] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.355 vs HAL=10.000 (im_h=-15.355), VPL=73.500 vs VAL=20.000 (im_v=-53.500), IM=-53.500
+[2026-08-27 12:46:06.376] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.789 >= HAL=10.000
+[2026-08-27 12:46:06.376] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=75.634 >= VAL=20.000
+[2026-08-27 12:46:06.376] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.789 vs HAL=10.000 (im_h=-14.789), VPL=75.634 vs VAL=20.000 (im_v=-55.634), IM=-55.634
+[2026-08-27 12:46:06.495] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.640 >= HAL=10.000
+[2026-08-27 12:46:06.495] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=72.688 >= VAL=20.000
+[2026-08-27 12:46:06.495] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.640 vs HAL=10.000 (im_h=-15.640), VPL=72.688 vs VAL=20.000 (im_v=-52.688), IM=-52.688
+[2026-08-27 12:46:06.601] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=27.013 >= HAL=10.000
+[2026-08-27 12:46:06.601] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.041 >= VAL=20.000
+[2026-08-27 12:46:06.601] [integrity] [warning] INTEGRITY UNSAFE: HPL=27.013 vs HAL=10.000 (im_h=-17.013), VPL=71.041 vs VAL=20.000 (im_v=-51.041), IM=-51.041
+[2026-08-27 12:46:06.692] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.599 >= HAL=10.000
+[2026-08-27 12:46:06.692] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=70.501 >= VAL=20.000
+[2026-08-27 12:46:06.692] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.599 vs HAL=10.000 (im_h=-15.599), VPL=70.501 vs VAL=20.000 (im_v=-50.501), IM=-50.501
+[2026-08-27 12:46:06.800] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.247 >= HAL=10.000
+[2026-08-27 12:46:06.800] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=69.663 >= VAL=20.000
+[2026-08-27 12:46:06.800] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.247 vs HAL=10.000 (im_h=-16.247), VPL=69.663 vs VAL=20.000 (im_v=-49.663), IM=-49.663
+[2026-08-27 12:46:06.901] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.693 >= HAL=10.000
+[2026-08-27 12:46:06.901] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=73.468 >= VAL=20.000
+[2026-08-27 12:46:06.901] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.693 vs HAL=10.000 (im_h=-16.693), VPL=73.468 vs VAL=20.000 (im_v=-53.468), IM=-53.468
+[2026-08-27 12:46:07.000] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.166 >= HAL=10.000
+[2026-08-27 12:46:07.000] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.872 >= VAL=20.000
+[2026-08-27 12:46:07.000] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.166 vs HAL=10.000 (im_h=-15.166), VPL=71.872 vs VAL=20.000 (im_v=-51.872), IM=-51.872
+[2026-08-27 12:46:07.100] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.278 >= HAL=10.000
+[2026-08-27 12:46:07.100] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=72.415 >= VAL=20.000
+[2026-08-27 12:46:07.100] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.278 vs HAL=10.000 (im_h=-15.278), VPL=72.415 vs VAL=20.000 (im_v=-52.415), IM=-52.415
+[2026-08-27 12:46:07.199] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.962 >= HAL=10.000
+[2026-08-27 12:46:07.199] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=70.717 >= VAL=20.000
+[2026-08-27 12:46:07.199] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.962 vs HAL=10.000 (im_h=-14.962), VPL=70.717 vs VAL=20.000 (im_v=-50.717), IM=-50.717
+[2026-08-27 12:46:07.291] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.615 >= HAL=10.000
+[2026-08-27 12:46:07.291] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=73.075 >= VAL=20.000
+[2026-08-27 12:46:07.291] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.615 vs HAL=10.000 (im_h=-14.615), VPL=73.075 vs VAL=20.000 (im_v=-53.075), IM=-53.075
+[2026-08-27 12:46:07.399] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.519 >= HAL=10.000
+[2026-08-27 12:46:07.399] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=75.048 >= VAL=20.000
+[2026-08-27 12:46:07.399] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.519 vs HAL=10.000 (im_h=-14.519), VPL=75.048 vs VAL=20.000 (im_v=-55.048), IM=-55.048
+[2026-08-27 12:46:07.498] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.562 >= HAL=10.000
+[2026-08-27 12:46:07.498] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=69.217 >= VAL=20.000
+[2026-08-27 12:46:07.498] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.562 vs HAL=10.000 (im_h=-14.562), VPL=69.217 vs VAL=20.000 (im_v=-49.217), IM=-49.217
+[2026-08-27 12:46:07.600] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.798 >= HAL=10.000
+[2026-08-27 12:46:07.600] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=69.587 >= VAL=20.000
+[2026-08-27 12:46:07.600] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.798 vs HAL=10.000 (im_h=-14.798), VPL=69.587 vs VAL=20.000 (im_v=-49.587), IM=-49.587
+[2026-08-27 12:46:07.697] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.494 >= HAL=10.000
+[2026-08-27 12:46:07.697] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=74.937 >= VAL=20.000
+[2026-08-27 12:46:07.697] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.494 vs HAL=10.000 (im_h=-14.494), VPL=74.937 vs VAL=20.000 (im_v=-54.937), IM=-54.937
+[2026-08-27 12:46:07.790] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.525 >= HAL=10.000
+[2026-08-27 12:46:07.790] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=72.681 >= VAL=20.000
+[2026-08-27 12:46:07.790] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.525 vs HAL=10.000 (im_h=-14.525), VPL=72.681 vs VAL=20.000 (im_v=-52.681), IM=-52.681
+[2026-08-27 12:46:07.890] [integrity] [warning] NIS gating: sat 1 NIS_pr=8.12 > 6.63 -- downweighted
+[2026-08-27 12:46:07.891] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.475 >= HAL=10.000
+[2026-08-27 12:46:07.891] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=79.210 >= VAL=20.000
+[2026-08-27 12:46:07.891] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.475 vs HAL=10.000 (im_h=-15.475), VPL=79.210 vs VAL=20.000 (im_v=-59.210), IM=-59.210
+[2026-08-27 12:46:07.998] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.405 >= HAL=10.000
+[2026-08-27 12:46:07.998] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=70.027 >= VAL=20.000
+[2026-08-27 12:46:07.998] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.405 vs HAL=10.000 (im_h=-14.405), VPL=70.027 vs VAL=20.000 (im_v=-50.027), IM=-50.027
+[2026-08-27 12:46:08.099] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.384 >= HAL=10.000
+[2026-08-27 12:46:08.099] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=73.272 >= VAL=20.000
+[2026-08-27 12:46:08.099] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.384 vs HAL=10.000 (im_h=-15.384), VPL=73.272 vs VAL=20.000 (im_v=-53.272), IM=-53.272
+[2026-08-27 12:46:08.197] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.805 >= HAL=10.000
+[2026-08-27 12:46:08.197] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=70.010 >= VAL=20.000
+[2026-08-27 12:46:08.197] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.805 vs HAL=10.000 (im_h=-15.805), VPL=70.010 vs VAL=20.000 (im_v=-50.010), IM=-50.010
+[2026-08-27 12:46:08.296] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.844 >= HAL=10.000
+[2026-08-27 12:46:08.296] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=69.046 >= VAL=20.000
+[2026-08-27 12:46:08.296] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.844 vs HAL=10.000 (im_h=-15.844), VPL=69.046 vs VAL=20.000 (im_v=-49.046), IM=-49.046
+[2026-08-27 12:46:08.398] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.546 >= HAL=10.000
+[2026-08-27 12:46:08.398] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=73.978 >= VAL=20.000
+[2026-08-27 12:46:08.398] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.546 vs HAL=10.000 (im_h=-16.546), VPL=73.978 vs VAL=20.000 (im_v=-53.978), IM=-53.978
+[2026-08-27 12:46:08.495] [integrity] [warning] NIS gating: sat 108 NIS_pr=6.66 > 6.63 -- downweighted
+[2026-08-27 12:46:08.496] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.120 >= HAL=10.000
+[2026-08-27 12:46:08.496] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=69.157 >= VAL=20.000
+[2026-08-27 12:46:08.496] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.120 vs HAL=10.000 (im_h=-16.120), VPL=69.157 vs VAL=20.000 (im_v=-49.157), IM=-49.157
+[2026-08-27 12:46:08.597] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.585 >= HAL=10.000
+[2026-08-27 12:46:08.597] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=74.359 >= VAL=20.000
+[2026-08-27 12:46:08.597] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.585 vs HAL=10.000 (im_h=-14.585), VPL=74.359 vs VAL=20.000 (im_v=-54.359), IM=-54.359
+[2026-08-27 12:46:08.696] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.602 >= HAL=10.000
+[2026-08-27 12:46:08.696] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.422 >= VAL=20.000
+[2026-08-27 12:46:08.696] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.602 vs HAL=10.000 (im_h=-14.602), VPL=71.422 vs VAL=20.000 (im_v=-51.422), IM=-51.422
+[2026-08-27 12:46:08.797] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.395 >= HAL=10.000
+[2026-08-27 12:46:08.797] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=73.484 >= VAL=20.000
+[2026-08-27 12:46:08.797] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.395 vs HAL=10.000 (im_h=-15.395), VPL=73.484 vs VAL=20.000 (im_v=-53.484), IM=-53.484
+[2026-08-27 12:46:08.891] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.736 >= HAL=10.000
+[2026-08-27 12:46:08.891] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=70.117 >= VAL=20.000
+[2026-08-27 12:46:08.891] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.736 vs HAL=10.000 (im_h=-15.736), VPL=70.117 vs VAL=20.000 (im_v=-50.117), IM=-50.117
+[2026-08-27 12:46:08.997] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.681 >= HAL=10.000
+[2026-08-27 12:46:08.997] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=69.147 >= VAL=20.000
+[2026-08-27 12:46:08.997] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.681 vs HAL=10.000 (im_h=-14.681), VPL=69.147 vs VAL=20.000 (im_v=-49.147), IM=-49.147
+[2026-08-27 12:46:09.098] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.928 >= HAL=10.000
+[2026-08-27 12:46:09.098] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=72.461 >= VAL=20.000
+[2026-08-27 12:46:09.098] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.928 vs HAL=10.000 (im_h=-15.928), VPL=72.461 vs VAL=20.000 (im_v=-52.461), IM=-52.461
+[2026-08-27 12:46:09.196] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.731 >= HAL=10.000
+[2026-08-27 12:46:09.196] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=77.656 >= VAL=20.000
+[2026-08-27 12:46:09.196] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.731 vs HAL=10.000 (im_h=-14.731), VPL=77.656 vs VAL=20.000 (im_v=-57.656), IM=-57.656
+[2026-08-27 12:46:09.297] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.353 >= HAL=10.000
+[2026-08-27 12:46:09.297] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=73.107 >= VAL=20.000
+[2026-08-27 12:46:09.297] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.353 vs HAL=10.000 (im_h=-16.353), VPL=73.107 vs VAL=20.000 (im_v=-53.107), IM=-53.107
+[2026-08-27 12:46:09.391] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=27.551 >= HAL=10.000
+[2026-08-27 12:46:09.391] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=69.560 >= VAL=20.000
+[2026-08-27 12:46:09.391] [integrity] [warning] INTEGRITY UNSAFE: HPL=27.551 vs HAL=10.000 (im_h=-17.551), VPL=69.560 vs VAL=20.000 (im_v=-49.560), IM=-49.560
+[2026-08-27 12:46:09.497] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.477 >= HAL=10.000
+[2026-08-27 12:46:09.497] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=74.747 >= VAL=20.000
+[2026-08-27 12:46:09.497] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.477 vs HAL=10.000 (im_h=-15.477), VPL=74.747 vs VAL=20.000 (im_v=-54.747), IM=-54.747
+[2026-08-27 12:46:09.598] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.322 >= HAL=10.000
+[2026-08-27 12:46:09.598] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=70.819 >= VAL=20.000
+[2026-08-27 12:46:09.598] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.322 vs HAL=10.000 (im_h=-16.322), VPL=70.819 vs VAL=20.000 (im_v=-50.819), IM=-50.819
+[2026-08-27 12:46:09.690] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.278 >= HAL=10.000
+[2026-08-27 12:46:09.690] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=70.366 >= VAL=20.000
+[2026-08-27 12:46:09.690] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.278 vs HAL=10.000 (im_h=-15.278), VPL=70.366 vs VAL=20.000 (im_v=-50.366), IM=-50.366
+[2026-08-27 12:46:09.796] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.737 >= HAL=10.000
+[2026-08-27 12:46:09.796] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.494 >= VAL=20.000
+[2026-08-27 12:46:09.796] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.737 vs HAL=10.000 (im_h=-15.737), VPL=71.494 vs VAL=20.000 (im_v=-51.494), IM=-51.494
+[2026-08-27 12:46:09.898] [integrity] [warning] NIS gating: sat 131 NIS_pr=6.73 > 6.63 -- downweighted
+[2026-08-27 12:46:09.899] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.981 >= HAL=10.000
+[2026-08-27 12:46:09.899] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=76.129 >= VAL=20.000
+[2026-08-27 12:46:09.899] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.981 vs HAL=10.000 (im_h=-14.981), VPL=76.129 vs VAL=20.000 (im_v=-56.129), IM=-56.129
+[2026-08-27 12:46:09.998] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.826 >= HAL=10.000
+[2026-08-27 12:46:09.998] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=68.861 >= VAL=20.000
+[2026-08-27 12:46:09.998] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.826 vs HAL=10.000 (im_h=-15.826), VPL=68.861 vs VAL=20.000 (im_v=-48.861), IM=-48.861
+[2026-08-27 12:46:10.098] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.296 >= HAL=10.000
+[2026-08-27 12:46:10.098] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=70.378 >= VAL=20.000
+[2026-08-27 12:46:10.098] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.296 vs HAL=10.000 (im_h=-16.296), VPL=70.378 vs VAL=20.000 (im_v=-50.378), IM=-50.378
+[2026-08-27 12:46:10.190] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.191 >= HAL=10.000
+[2026-08-27 12:46:10.190] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.126 >= VAL=20.000
+[2026-08-27 12:46:10.190] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.191 vs HAL=10.000 (im_h=-16.191), VPL=71.126 vs VAL=20.000 (im_v=-51.126), IM=-51.126
+[2026-08-27 12:46:10.297] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.043 >= HAL=10.000
+[2026-08-27 12:46:10.297] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=74.228 >= VAL=20.000
+[2026-08-27 12:46:10.297] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.043 vs HAL=10.000 (im_h=-15.043), VPL=74.228 vs VAL=20.000 (im_v=-54.228), IM=-54.228
+[2026-08-27 12:46:10.399] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.117 >= HAL=10.000
+[2026-08-27 12:46:10.399] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.283 >= VAL=20.000
+[2026-08-27 12:46:10.400] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.117 vs HAL=10.000 (im_h=-16.117), VPL=71.283 vs VAL=20.000 (im_v=-51.283), IM=-51.283
+[2026-08-27 12:46:10.489] [integrity] [warning] NIS gating: sat 1 NIS_pr=6.78 > 6.63 -- downweighted
+[2026-08-27 12:46:10.489] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.778 >= HAL=10.000
+[2026-08-27 12:46:10.489] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=81.766 >= VAL=20.000
+[2026-08-27 12:46:10.489] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.778 vs HAL=10.000 (im_h=-14.778), VPL=81.766 vs VAL=20.000 (im_v=-61.766), IM=-61.766
+[2026-08-27 12:46:10.599] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.883 >= HAL=10.000
+[2026-08-27 12:46:10.599] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=72.330 >= VAL=20.000
+[2026-08-27 12:46:10.599] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.883 vs HAL=10.000 (im_h=-15.883), VPL=72.330 vs VAL=20.000 (im_v=-52.330), IM=-52.330
+[2026-08-27 12:46:10.690] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.466 >= HAL=10.000
+[2026-08-27 12:46:10.690] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.465 >= VAL=20.000
+[2026-08-27 12:46:10.690] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.466 vs HAL=10.000 (im_h=-15.466), VPL=71.465 vs VAL=20.000 (im_v=-51.465), IM=-51.465
+[2026-08-27 12:46:10.774] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=27.254 >= HAL=10.000
+[2026-08-27 12:46:10.774] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=75.966 >= VAL=20.000
+[2026-08-27 12:46:10.774] [integrity] [warning] INTEGRITY UNSAFE: HPL=27.254 vs HAL=10.000 (im_h=-17.254), VPL=75.966 vs VAL=20.000 (im_v=-55.966), IM=-55.966
+[2026-08-27 12:46:10.891] [integrity] [warning] NIS gating: sat 52 NIS_pr=7.16 > 6.63 -- downweighted
+[2026-08-27 12:46:10.892] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.867 >= HAL=10.000
+[2026-08-27 12:46:10.892] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=69.619 >= VAL=20.000
+[2026-08-27 12:46:10.892] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.867 vs HAL=10.000 (im_h=-15.867), VPL=69.619 vs VAL=20.000 (im_v=-49.619), IM=-49.619
+[2026-08-27 12:46:10.997] [integrity] [warning] NIS gating: sat 131 NIS_pr=7.52 > 6.63 -- downweighted
+[2026-08-27 12:46:10.998] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.588 >= HAL=10.000
+[2026-08-27 12:46:10.998] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=68.866 >= VAL=20.000
+[2026-08-27 12:46:10.998] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.588 vs HAL=10.000 (im_h=-15.588), VPL=68.866 vs VAL=20.000 (im_v=-48.866), IM=-48.866
+[2026-08-27 12:46:11.090] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.698 >= HAL=10.000
+[2026-08-27 12:46:11.090] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=72.793 >= VAL=20.000
+[2026-08-27 12:46:11.090] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.698 vs HAL=10.000 (im_h=-14.698), VPL=72.793 vs VAL=20.000 (im_v=-52.793), IM=-52.793
+[2026-08-27 12:46:11.191] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.688 >= HAL=10.000
+[2026-08-27 12:46:11.191] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.657 >= VAL=20.000
+[2026-08-27 12:46:11.191] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.688 vs HAL=10.000 (im_h=-15.688), VPL=71.657 vs VAL=20.000 (im_v=-51.657), IM=-51.657
+[2026-08-27 12:46:11.297] [integrity] [warning] NIS gating: sat 1 NIS_pr=9.18 > 6.63 -- downweighted
+[2026-08-27 12:46:11.298] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.202 >= HAL=10.000
+[2026-08-27 12:46:11.298] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=83.965 >= VAL=20.000
+[2026-08-27 12:46:11.298] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.202 vs HAL=10.000 (im_h=-16.202), VPL=83.965 vs VAL=20.000 (im_v=-63.965), IM=-63.965
+[2026-08-27 12:46:11.391] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.598 >= HAL=10.000
+[2026-08-27 12:46:11.391] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=72.459 >= VAL=20.000
+[2026-08-27 12:46:11.391] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.598 vs HAL=10.000 (im_h=-15.598), VPL=72.459 vs VAL=20.000 (im_v=-52.459), IM=-52.459
+[2026-08-27 12:46:11.475] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.407 >= HAL=10.000
+[2026-08-27 12:46:11.475] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=70.257 >= VAL=20.000
+[2026-08-27 12:46:11.475] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.407 vs HAL=10.000 (im_h=-15.407), VPL=70.257 vs VAL=20.000 (im_v=-50.257), IM=-50.257
+[2026-08-27 12:46:11.598] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.272 >= HAL=10.000
+[2026-08-27 12:46:11.598] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.487 >= VAL=20.000
+[2026-08-27 12:46:11.598] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.272 vs HAL=10.000 (im_h=-16.272), VPL=71.487 vs VAL=20.000 (im_v=-51.487), IM=-51.487
+[2026-08-27 12:46:11.697] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.849 >= HAL=10.000
+[2026-08-27 12:46:11.698] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=70.827 >= VAL=20.000
+[2026-08-27 12:46:11.698] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.849 vs HAL=10.000 (im_h=-15.849), VPL=70.827 vs VAL=20.000 (im_v=-50.827), IM=-50.827
+[2026-08-27 12:46:11.798] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.097 >= HAL=10.000
+[2026-08-27 12:46:11.798] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.292 >= VAL=20.000
+[2026-08-27 12:46:11.798] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.097 vs HAL=10.000 (im_h=-15.097), VPL=71.292 vs VAL=20.000 (im_v=-51.292), IM=-51.292
+[2026-08-27 12:46:11.890] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.923 >= HAL=10.000
+[2026-08-27 12:46:11.890] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=72.373 >= VAL=20.000
+[2026-08-27 12:46:11.890] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.923 vs HAL=10.000 (im_h=-15.923), VPL=72.373 vs VAL=20.000 (im_v=-52.373), IM=-52.373
+[2026-08-27 12:46:11.975] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.291 >= HAL=10.000
+[2026-08-27 12:46:11.975] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=69.956 >= VAL=20.000
+[2026-08-27 12:46:11.975] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.291 vs HAL=10.000 (im_h=-15.291), VPL=69.956 vs VAL=20.000 (im_v=-49.956), IM=-49.956
+[2026-08-27 12:46:12.091] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.722 >= HAL=10.000
+[2026-08-27 12:46:12.091] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=75.840 >= VAL=20.000
+[2026-08-27 12:46:12.091] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.722 vs HAL=10.000 (im_h=-14.722), VPL=75.840 vs VAL=20.000 (im_v=-55.840), IM=-55.840
+[2026-08-27 12:46:12.197] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.853 >= HAL=10.000
+[2026-08-27 12:46:12.197] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.730 >= VAL=20.000
+[2026-08-27 12:46:12.197] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.853 vs HAL=10.000 (im_h=-16.853), VPL=71.730 vs VAL=20.000 (im_v=-51.730), IM=-51.730
+[2026-08-27 12:46:12.297] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.424 >= HAL=10.000
+[2026-08-27 12:46:12.297] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=76.852 >= VAL=20.000
+[2026-08-27 12:46:12.297] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.424 vs HAL=10.000 (im_h=-16.424), VPL=76.852 vs VAL=20.000 (im_v=-56.852), IM=-56.852
+[2026-08-27 12:46:12.399] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.392 >= HAL=10.000
+[2026-08-27 12:46:12.399] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=72.447 >= VAL=20.000
+[2026-08-27 12:46:12.399] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.392 vs HAL=10.000 (im_h=-14.392), VPL=72.447 vs VAL=20.000 (im_v=-52.447), IM=-52.447
+[2026-08-27 12:46:12.475] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.875 >= HAL=10.000
+[2026-08-27 12:46:12.475] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.363 >= VAL=20.000
+[2026-08-27 12:46:12.475] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.875 vs HAL=10.000 (im_h=-14.875), VPL=71.363 vs VAL=20.000 (im_v=-51.363), IM=-51.363
+[2026-08-27 12:46:12.599] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.755 >= HAL=10.000
+[2026-08-27 12:46:12.599] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=73.119 >= VAL=20.000
+[2026-08-27 12:46:12.599] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.755 vs HAL=10.000 (im_h=-14.755), VPL=73.119 vs VAL=20.000 (im_v=-53.119), IM=-53.119
+[2026-08-27 12:46:12.691] [integrity] [warning] NIS gating: sat 131 NIS_pr=6.63 > 6.63 -- downweighted
+[2026-08-27 12:46:12.692] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.983 >= HAL=10.000
+[2026-08-27 12:46:12.692] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=74.057 >= VAL=20.000
+[2026-08-27 12:46:12.692] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.983 vs HAL=10.000 (im_h=-14.983), VPL=74.057 vs VAL=20.000 (im_v=-54.057), IM=-54.057
+[2026-08-27 12:46:12.798] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.373 >= HAL=10.000
+[2026-08-27 12:46:12.798] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=68.859 >= VAL=20.000
+[2026-08-27 12:46:12.798] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.373 vs HAL=10.000 (im_h=-15.373), VPL=68.859 vs VAL=20.000 (im_v=-48.859), IM=-48.859
+[2026-08-27 12:46:12.891] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.843 >= HAL=10.000
+[2026-08-27 12:46:12.891] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=75.004 >= VAL=20.000
+[2026-08-27 12:46:12.891] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.843 vs HAL=10.000 (im_h=-14.843), VPL=75.004 vs VAL=20.000 (im_v=-55.004), IM=-55.004
+[2026-08-27 12:46:12.998] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.920 >= HAL=10.000
+[2026-08-27 12:46:12.998] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.030 >= VAL=20.000
+[2026-08-27 12:46:12.998] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.920 vs HAL=10.000 (im_h=-16.920), VPL=71.030 vs VAL=20.000 (im_v=-51.030), IM=-51.030
+[2026-08-27 12:46:13.090] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.909 >= HAL=10.000
+[2026-08-27 12:46:13.090] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=81.875 >= VAL=20.000
+[2026-08-27 12:46:13.090] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.909 vs HAL=10.000 (im_h=-14.909), VPL=81.875 vs VAL=20.000 (im_v=-61.875), IM=-61.875
+[2026-08-27 12:46:13.191] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.622 >= HAL=10.000
+[2026-08-27 12:46:13.191] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.970 >= VAL=20.000
+[2026-08-27 12:46:13.191] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.622 vs HAL=10.000 (im_h=-14.622), VPL=71.970 vs VAL=20.000 (im_v=-51.970), IM=-51.970
+[2026-08-27 12:46:13.298] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.751 >= HAL=10.000
+[2026-08-27 12:46:13.298] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=73.480 >= VAL=20.000
+[2026-08-27 12:46:13.298] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.751 vs HAL=10.000 (im_h=-14.751), VPL=73.480 vs VAL=20.000 (im_v=-53.480), IM=-53.480
+[2026-08-27 12:46:13.391] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.858 >= HAL=10.000
+[2026-08-27 12:46:13.391] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=70.013 >= VAL=20.000
+[2026-08-27 12:46:13.391] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.858 vs HAL=10.000 (im_h=-14.858), VPL=70.013 vs VAL=20.000 (im_v=-50.013), IM=-50.013
+[2026-08-27 12:46:13.474] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.872 >= HAL=10.000
+[2026-08-27 12:46:13.474] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=69.281 >= VAL=20.000
+[2026-08-27 12:46:13.474] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.872 vs HAL=10.000 (im_h=-14.872), VPL=69.281 vs VAL=20.000 (im_v=-49.281), IM=-49.281
+[2026-08-27 12:46:13.599] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.530 >= HAL=10.000
+[2026-08-27 12:46:13.599] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=74.632 >= VAL=20.000
+[2026-08-27 12:46:13.599] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.530 vs HAL=10.000 (im_h=-15.530), VPL=74.632 vs VAL=20.000 (im_v=-54.632), IM=-54.632
+[2026-08-27 12:46:13.698] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.975 >= HAL=10.000
+[2026-08-27 12:46:13.698] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=77.266 >= VAL=20.000
+[2026-08-27 12:46:13.698] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.975 vs HAL=10.000 (im_h=-14.975), VPL=77.266 vs VAL=20.000 (im_v=-57.266), IM=-57.266
+[2026-08-27 12:46:13.791] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.059 >= HAL=10.000
+[2026-08-27 12:46:13.791] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=75.052 >= VAL=20.000
+[2026-08-27 12:46:13.791] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.059 vs HAL=10.000 (im_h=-16.059), VPL=75.052 vs VAL=20.000 (im_v=-55.052), IM=-55.052
+[2026-08-27 12:46:13.898] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.748 >= HAL=10.000
+[2026-08-27 12:46:13.898] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=72.948 >= VAL=20.000
+[2026-08-27 12:46:13.898] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.748 vs HAL=10.000 (im_h=-15.748), VPL=72.948 vs VAL=20.000 (im_v=-52.948), IM=-52.948
+[2026-08-27 12:46:13.974] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.549 >= HAL=10.000
+[2026-08-27 12:46:13.974] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=74.747 >= VAL=20.000
+[2026-08-27 12:46:13.974] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.549 vs HAL=10.000 (im_h=-14.549), VPL=74.747 vs VAL=20.000 (im_v=-54.747), IM=-54.747
+[2026-08-27 12:46:14.100] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.878 >= HAL=10.000
+[2026-08-27 12:46:14.100] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.495 >= VAL=20.000
+[2026-08-27 12:46:14.100] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.878 vs HAL=10.000 (im_h=-16.878), VPL=71.495 vs VAL=20.000 (im_v=-51.495), IM=-51.495
+[2026-08-27 12:46:14.191] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.205 >= HAL=10.000
+[2026-08-27 12:46:14.191] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.315 >= VAL=20.000
+[2026-08-27 12:46:14.191] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.205 vs HAL=10.000 (im_h=-16.205), VPL=71.315 vs VAL=20.000 (im_v=-51.315), IM=-51.315
+[2026-08-27 12:46:14.299] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.841 >= HAL=10.000
+[2026-08-27 12:46:14.299] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=74.168 >= VAL=20.000
+[2026-08-27 12:46:14.299] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.841 vs HAL=10.000 (im_h=-14.841), VPL=74.168 vs VAL=20.000 (im_v=-54.168), IM=-54.168
+[2026-08-27 12:46:14.399] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.334 >= HAL=10.000
+[2026-08-27 12:46:14.399] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=72.624 >= VAL=20.000
+[2026-08-27 12:46:14.399] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.334 vs HAL=10.000 (im_h=-15.334), VPL=72.624 vs VAL=20.000 (im_v=-52.624), IM=-52.624
+[2026-08-27 12:46:14.475] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.267 >= HAL=10.000
+[2026-08-27 12:46:14.475] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=69.981 >= VAL=20.000
+[2026-08-27 12:46:14.475] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.267 vs HAL=10.000 (im_h=-15.267), VPL=69.981 vs VAL=20.000 (im_v=-49.981), IM=-49.981
+[2026-08-27 12:46:14.598] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.864 >= HAL=10.000
+[2026-08-27 12:46:14.598] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=69.415 >= VAL=20.000
+[2026-08-27 12:46:14.598] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.864 vs HAL=10.000 (im_h=-14.864), VPL=69.415 vs VAL=20.000 (im_v=-49.415), IM=-49.415
+[2026-08-27 12:46:14.698] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.661 >= HAL=10.000
+[2026-08-27 12:46:14.698] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.082 >= VAL=20.000
+[2026-08-27 12:46:14.698] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.661 vs HAL=10.000 (im_h=-14.661), VPL=71.082 vs VAL=20.000 (im_v=-51.082), IM=-51.082
+[2026-08-27 12:46:14.798] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.693 >= HAL=10.000
+[2026-08-27 12:46:14.798] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=72.561 >= VAL=20.000
+[2026-08-27 12:46:14.798] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.693 vs HAL=10.000 (im_h=-16.693), VPL=72.561 vs VAL=20.000 (im_v=-52.561), IM=-52.561
+[2026-08-27 12:46:14.891] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.882 >= HAL=10.000
+[2026-08-27 12:46:14.891] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.784 >= VAL=20.000
+[2026-08-27 12:46:14.891] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.882 vs HAL=10.000 (im_h=-16.882), VPL=71.784 vs VAL=20.000 (im_v=-51.784), IM=-51.784
+[2026-08-27 12:46:14.991] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.825 >= HAL=10.000
+[2026-08-27 12:46:14.991] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.924 >= VAL=20.000
+[2026-08-27 12:46:14.991] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.825 vs HAL=10.000 (im_h=-14.825), VPL=71.924 vs VAL=20.000 (im_v=-51.924), IM=-51.924
+[2026-08-27 12:46:15.091] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.987 >= HAL=10.000
+[2026-08-27 12:46:15.091] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=70.885 >= VAL=20.000
+[2026-08-27 12:46:15.091] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.987 vs HAL=10.000 (im_h=-15.987), VPL=70.885 vs VAL=20.000 (im_v=-50.885), IM=-50.885
+[2026-08-27 12:46:15.192] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.393 >= HAL=10.000
+[2026-08-27 12:46:15.192] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=73.985 >= VAL=20.000
+[2026-08-27 12:46:15.192] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.393 vs HAL=10.000 (im_h=-15.393), VPL=73.985 vs VAL=20.000 (im_v=-53.985), IM=-53.985
+[2026-08-27 12:46:15.275] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.957 >= HAL=10.000
+[2026-08-27 12:46:15.275] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=72.971 >= VAL=20.000
+[2026-08-27 12:46:15.275] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.957 vs HAL=10.000 (im_h=-14.957), VPL=72.971 vs VAL=20.000 (im_v=-52.971), IM=-52.971
+[2026-08-27 12:46:15.392] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.661 >= HAL=10.000
+[2026-08-27 12:46:15.392] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=74.174 >= VAL=20.000
+[2026-08-27 12:46:15.392] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.661 vs HAL=10.000 (im_h=-14.661), VPL=74.174 vs VAL=20.000 (im_v=-54.174), IM=-54.174
+[2026-08-27 12:46:15.491] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.670 >= HAL=10.000
+[2026-08-27 12:46:15.491] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=70.410 >= VAL=20.000
+[2026-08-27 12:46:15.491] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.670 vs HAL=10.000 (im_h=-15.670), VPL=70.410 vs VAL=20.000 (im_v=-50.410), IM=-50.410
+[2026-08-27 12:46:15.597] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.973 >= HAL=10.000
+[2026-08-27 12:46:15.597] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=75.352 >= VAL=20.000
+[2026-08-27 12:46:15.597] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.973 vs HAL=10.000 (im_h=-15.973), VPL=75.352 vs VAL=20.000 (im_v=-55.352), IM=-55.352
+[2026-08-27 12:46:15.674] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.570 >= HAL=10.000
+[2026-08-27 12:46:15.674] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=70.892 >= VAL=20.000
+[2026-08-27 12:46:15.674] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.570 vs HAL=10.000 (im_h=-14.570), VPL=70.892 vs VAL=20.000 (im_v=-50.892), IM=-50.892
+[2026-08-27 12:46:15.797] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.102 >= HAL=10.000
+[2026-08-27 12:46:15.797] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=74.506 >= VAL=20.000
+[2026-08-27 12:46:15.797] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.102 vs HAL=10.000 (im_h=-16.102), VPL=74.506 vs VAL=20.000 (im_v=-54.506), IM=-54.506
+[2026-08-27 12:46:15.899] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.497 >= HAL=10.000
+[2026-08-27 12:46:15.899] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.989 >= VAL=20.000
+[2026-08-27 12:46:15.899] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.497 vs HAL=10.000 (im_h=-15.497), VPL=71.989 vs VAL=20.000 (im_v=-51.989), IM=-51.989
+[2026-08-27 12:46:16.000] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.078 >= HAL=10.000
+[2026-08-27 12:46:16.000] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=72.922 >= VAL=20.000
+[2026-08-27 12:46:16.000] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.078 vs HAL=10.000 (im_h=-16.078), VPL=72.922 vs VAL=20.000 (im_v=-52.922), IM=-52.922
+[2026-08-27 12:46:16.099] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.513 >= HAL=10.000
+[2026-08-27 12:46:16.099] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.649 >= VAL=20.000
+[2026-08-27 12:46:16.099] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.513 vs HAL=10.000 (im_h=-14.513), VPL=71.649 vs VAL=20.000 (im_v=-51.649), IM=-51.649
+[2026-08-27 12:46:16.175] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.949 >= HAL=10.000
+[2026-08-27 12:46:16.175] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=74.145 >= VAL=20.000
+[2026-08-27 12:46:16.175] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.949 vs HAL=10.000 (im_h=-14.949), VPL=74.145 vs VAL=20.000 (im_v=-54.145), IM=-54.145
+[2026-08-27 12:46:16.290] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.014 >= HAL=10.000
+[2026-08-27 12:46:16.290] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=76.902 >= VAL=20.000
+[2026-08-27 12:46:16.290] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.014 vs HAL=10.000 (im_h=-15.014), VPL=76.902 vs VAL=20.000 (im_v=-56.902), IM=-56.902
+[2026-08-27 12:46:16.400] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.651 >= HAL=10.000
+[2026-08-27 12:46:16.400] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=69.742 >= VAL=20.000
+[2026-08-27 12:46:16.400] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.651 vs HAL=10.000 (im_h=-15.651), VPL=69.742 vs VAL=20.000 (im_v=-49.742), IM=-49.742
+[2026-08-27 12:46:16.475] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.865 >= HAL=10.000
+[2026-08-27 12:46:16.475] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.423 >= VAL=20.000
+[2026-08-27 12:46:16.475] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.865 vs HAL=10.000 (im_h=-15.865), VPL=71.423 vs VAL=20.000 (im_v=-51.423), IM=-51.423
+[2026-08-27 12:46:16.592] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.888 >= HAL=10.000
+[2026-08-27 12:46:16.592] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=76.613 >= VAL=20.000
+[2026-08-27 12:46:16.592] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.888 vs HAL=10.000 (im_h=-16.888), VPL=76.613 vs VAL=20.000 (im_v=-56.613), IM=-56.613
+[2026-08-27 12:46:16.701] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.639 >= HAL=10.000
+[2026-08-27 12:46:16.701] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=69.087 >= VAL=20.000
+[2026-08-27 12:46:16.701] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.639 vs HAL=10.000 (im_h=-15.639), VPL=69.087 vs VAL=20.000 (im_v=-49.087), IM=-49.087
+[2026-08-27 12:46:16.797] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.802 >= HAL=10.000
+[2026-08-27 12:46:16.797] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=73.851 >= VAL=20.000
+[2026-08-27 12:46:16.797] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.802 vs HAL=10.000 (im_h=-15.802), VPL=73.851 vs VAL=20.000 (im_v=-53.851), IM=-53.851
+[2026-08-27 12:46:16.875] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.797 >= HAL=10.000
+[2026-08-27 12:46:16.875] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=69.559 >= VAL=20.000
+[2026-08-27 12:46:16.875] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.797 vs HAL=10.000 (im_h=-15.797), VPL=69.559 vs VAL=20.000 (im_v=-49.559), IM=-49.559
+[2026-08-27 12:46:16.999] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.139 >= HAL=10.000
+[2026-08-27 12:46:16.999] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=69.914 >= VAL=20.000
+[2026-08-27 12:46:16.999] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.139 vs HAL=10.000 (im_h=-15.139), VPL=69.914 vs VAL=20.000 (im_v=-49.914), IM=-49.914
+[2026-08-27 12:46:17.091] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.047 >= HAL=10.000
+[2026-08-27 12:46:17.091] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=72.940 >= VAL=20.000
+[2026-08-27 12:46:17.091] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.047 vs HAL=10.000 (im_h=-16.047), VPL=72.940 vs VAL=20.000 (im_v=-52.940), IM=-52.940
+[2026-08-27 12:46:17.174] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.314 >= HAL=10.000
+[2026-08-27 12:46:17.174] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=70.882 >= VAL=20.000
+[2026-08-27 12:46:17.174] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.314 vs HAL=10.000 (im_h=-16.314), VPL=70.882 vs VAL=20.000 (im_v=-50.882), IM=-50.882
+[2026-08-27 12:46:17.303] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.650 >= HAL=10.000
+[2026-08-27 12:46:17.303] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=79.571 >= VAL=20.000
+[2026-08-27 12:46:17.303] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.650 vs HAL=10.000 (im_h=-14.650), VPL=79.571 vs VAL=20.000 (im_v=-59.571), IM=-59.571
+[2026-08-27 12:46:17.373] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.195 >= HAL=10.000
+[2026-08-27 12:46:17.373] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.396 >= VAL=20.000
+[2026-08-27 12:46:17.373] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.195 vs HAL=10.000 (im_h=-15.195), VPL=71.396 vs VAL=20.000 (im_v=-51.396), IM=-51.396
+[2026-08-27 12:46:17.498] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.666 >= HAL=10.000
+[2026-08-27 12:46:17.498] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=72.865 >= VAL=20.000
+[2026-08-27 12:46:17.498] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.666 vs HAL=10.000 (im_h=-15.666), VPL=72.865 vs VAL=20.000 (im_v=-52.865), IM=-52.865
+[2026-08-27 12:46:17.598] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.524 >= HAL=10.000
+[2026-08-27 12:46:17.598] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=75.145 >= VAL=20.000
+[2026-08-27 12:46:17.598] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.524 vs HAL=10.000 (im_h=-16.524), VPL=75.145 vs VAL=20.000 (im_v=-55.145), IM=-55.145
+[2026-08-27 12:46:17.697] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.591 >= HAL=10.000
+[2026-08-27 12:46:17.697] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.454 >= VAL=20.000
+[2026-08-27 12:46:17.697] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.591 vs HAL=10.000 (im_h=-14.591), VPL=71.454 vs VAL=20.000 (im_v=-51.454), IM=-51.454
+[2026-08-27 12:46:17.798] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.516 >= HAL=10.000
+[2026-08-27 12:46:17.798] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=70.541 >= VAL=20.000
+[2026-08-27 12:46:17.798] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.516 vs HAL=10.000 (im_h=-14.516), VPL=70.541 vs VAL=20.000 (im_v=-50.541), IM=-50.541
+[2026-08-27 12:46:17.892] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.302 >= HAL=10.000
+[2026-08-27 12:46:17.892] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.782 >= VAL=20.000
+[2026-08-27 12:46:17.892] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.302 vs HAL=10.000 (im_h=-16.302), VPL=71.782 vs VAL=20.000 (im_v=-51.782), IM=-51.782
+[2026-08-27 12:46:17.998] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.625 >= HAL=10.000
+[2026-08-27 12:46:17.998] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=70.399 >= VAL=20.000
+[2026-08-27 12:46:17.998] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.625 vs HAL=10.000 (im_h=-15.625), VPL=70.399 vs VAL=20.000 (im_v=-50.399), IM=-50.399
+[2026-08-27 12:46:18.073] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.304 >= HAL=10.000
+[2026-08-27 12:46:18.073] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=77.828 >= VAL=20.000
+[2026-08-27 12:46:18.073] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.304 vs HAL=10.000 (im_h=-16.304), VPL=77.828 vs VAL=20.000 (im_v=-57.828), IM=-57.828
+[2026-08-27 12:46:18.198] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.586 >= HAL=10.000
+[2026-08-27 12:46:18.198] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.789 >= VAL=20.000
+[2026-08-27 12:46:18.198] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.586 vs HAL=10.000 (im_h=-14.586), VPL=71.789 vs VAL=20.000 (im_v=-51.789), IM=-51.789
+[2026-08-27 12:46:18.290] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.728 >= HAL=10.000
+[2026-08-27 12:46:18.290] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=69.917 >= VAL=20.000
+[2026-08-27 12:46:18.290] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.728 vs HAL=10.000 (im_h=-14.728), VPL=69.917 vs VAL=20.000 (im_v=-49.917), IM=-49.917
+[2026-08-27 12:46:18.390] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.410 >= HAL=10.000
+[2026-08-27 12:46:18.390] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=70.312 >= VAL=20.000
+[2026-08-27 12:46:18.390] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.410 vs HAL=10.000 (im_h=-15.410), VPL=70.312 vs VAL=20.000 (im_v=-50.312), IM=-50.312
+[2026-08-27 12:46:18.474] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.623 >= HAL=10.000
+[2026-08-27 12:46:18.474] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=76.681 >= VAL=20.000
+[2026-08-27 12:46:18.474] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.623 vs HAL=10.000 (im_h=-14.623), VPL=76.681 vs VAL=20.000 (im_v=-56.681), IM=-56.681
+[2026-08-27 12:46:18.591] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.714 >= HAL=10.000
+[2026-08-27 12:46:18.591] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=74.714 >= VAL=20.000
+[2026-08-27 12:46:18.591] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.714 vs HAL=10.000 (im_h=-14.714), VPL=74.714 vs VAL=20.000 (im_v=-54.714), IM=-54.714
+[2026-08-27 12:46:18.673] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.616 >= HAL=10.000
+[2026-08-27 12:46:18.673] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.302 >= VAL=20.000
+[2026-08-27 12:46:18.673] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.616 vs HAL=10.000 (im_h=-15.616), VPL=71.302 vs VAL=20.000 (im_v=-51.302), IM=-51.302
+[2026-08-27 12:46:18.798] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.862 >= HAL=10.000
+[2026-08-27 12:46:18.798] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.267 >= VAL=20.000
+[2026-08-27 12:46:18.798] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.862 vs HAL=10.000 (im_h=-15.862), VPL=71.267 vs VAL=20.000 (im_v=-51.267), IM=-51.267
+[2026-08-27 12:46:18.899] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.800 >= HAL=10.000
+[2026-08-27 12:46:18.899] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=76.293 >= VAL=20.000
+[2026-08-27 12:46:18.899] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.800 vs HAL=10.000 (im_h=-15.800), VPL=76.293 vs VAL=20.000 (im_v=-56.293), IM=-56.293
+[2026-08-27 12:46:18.999] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.656 >= HAL=10.000
+[2026-08-27 12:46:18.999] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=72.235 >= VAL=20.000
+[2026-08-27 12:46:18.999] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.656 vs HAL=10.000 (im_h=-15.656), VPL=72.235 vs VAL=20.000 (im_v=-52.235), IM=-52.235
+[2026-08-27 12:46:19.075] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.102 >= HAL=10.000
+[2026-08-27 12:46:19.075] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=74.728 >= VAL=20.000
+[2026-08-27 12:46:19.075] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.102 vs HAL=10.000 (im_h=-16.102), VPL=74.728 vs VAL=20.000 (im_v=-54.728), IM=-54.728
+[2026-08-27 12:46:19.191] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.728 >= HAL=10.000
+[2026-08-27 12:46:19.191] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=70.945 >= VAL=20.000
+[2026-08-27 12:46:19.191] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.728 vs HAL=10.000 (im_h=-14.728), VPL=70.945 vs VAL=20.000 (im_v=-50.945), IM=-50.945
+[2026-08-27 12:46:19.298] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.304 >= HAL=10.000
+[2026-08-27 12:46:19.298] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=78.303 >= VAL=20.000
+[2026-08-27 12:46:19.298] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.304 vs HAL=10.000 (im_h=-15.304), VPL=78.303 vs VAL=20.000 (im_v=-58.303), IM=-58.303
+[2026-08-27 12:46:19.399] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.837 >= HAL=10.000
+[2026-08-27 12:46:19.399] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=70.315 >= VAL=20.000
+[2026-08-27 12:46:19.399] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.837 vs HAL=10.000 (im_h=-14.837), VPL=70.315 vs VAL=20.000 (im_v=-50.315), IM=-50.315
+[2026-08-27 12:46:19.491] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.422 >= HAL=10.000
+[2026-08-27 12:46:19.491] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.661 >= VAL=20.000
+[2026-08-27 12:46:19.491] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.422 vs HAL=10.000 (im_h=-15.422), VPL=71.661 vs VAL=20.000 (im_v=-51.661), IM=-51.661
+[2026-08-27 12:46:19.599] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.994 >= HAL=10.000
+[2026-08-27 12:46:19.599] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=68.846 >= VAL=20.000
+[2026-08-27 12:46:19.599] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.994 vs HAL=10.000 (im_h=-14.994), VPL=68.846 vs VAL=20.000 (im_v=-48.846), IM=-48.846
+[2026-08-27 12:46:19.673] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.734 >= HAL=10.000
+[2026-08-27 12:46:19.673] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.264 >= VAL=20.000
+[2026-08-27 12:46:19.673] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.734 vs HAL=10.000 (im_h=-15.734), VPL=71.264 vs VAL=20.000 (im_v=-51.264), IM=-51.264
+[2026-08-27 12:46:19.790] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.246 >= HAL=10.000
+[2026-08-27 12:46:19.790] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=73.814 >= VAL=20.000
+[2026-08-27 12:46:19.790] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.246 vs HAL=10.000 (im_h=-15.246), VPL=73.814 vs VAL=20.000 (im_v=-53.814), IM=-53.814
+[2026-08-27 12:46:19.873] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.889 >= HAL=10.000
+[2026-08-27 12:46:19.873] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=73.043 >= VAL=20.000
+[2026-08-27 12:46:19.873] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.889 vs HAL=10.000 (im_h=-14.889), VPL=73.043 vs VAL=20.000 (im_v=-53.043), IM=-53.043
+[2026-08-27 12:46:19.991] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.426 >= HAL=10.000
+[2026-08-27 12:46:19.991] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=74.298 >= VAL=20.000
+[2026-08-27 12:46:19.991] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.426 vs HAL=10.000 (im_h=-15.426), VPL=74.298 vs VAL=20.000 (im_v=-54.298), IM=-54.298
+[2026-08-27 12:46:20.075] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.970 >= HAL=10.000
+[2026-08-27 12:46:20.075] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=72.757 >= VAL=20.000
+[2026-08-27 12:46:20.075] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.970 vs HAL=10.000 (im_h=-14.970), VPL=72.757 vs VAL=20.000 (im_v=-52.757), IM=-52.757
+[2026-08-27 12:46:20.191] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.744 >= HAL=10.000
+[2026-08-27 12:46:20.191] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.630 >= VAL=20.000
+[2026-08-27 12:46:20.191] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.744 vs HAL=10.000 (im_h=-14.744), VPL=71.630 vs VAL=20.000 (im_v=-51.630), IM=-51.630
+[2026-08-27 12:46:20.289] [integrity] [warning] NIS gating: sat 41 NIS_pr=9.40 > 6.63 -- downweighted
+[2026-08-27 12:46:20.290] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.940 >= HAL=10.000
+[2026-08-27 12:46:20.290] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=76.378 >= VAL=20.000
+[2026-08-27 12:46:20.290] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.940 vs HAL=10.000 (im_h=-14.940), VPL=76.378 vs VAL=20.000 (im_v=-56.378), IM=-56.378
+[2026-08-27 12:46:20.376] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.701 >= HAL=10.000
+[2026-08-27 12:46:20.376] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=69.114 >= VAL=20.000
+[2026-08-27 12:46:20.376] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.701 vs HAL=10.000 (im_h=-14.701), VPL=69.114 vs VAL=20.000 (im_v=-49.114), IM=-49.114
+[2026-08-27 12:46:20.498] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.143 >= HAL=10.000
+[2026-08-27 12:46:20.498] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=75.314 >= VAL=20.000
+[2026-08-27 12:46:20.498] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.143 vs HAL=10.000 (im_h=-15.143), VPL=75.314 vs VAL=20.000 (im_v=-55.314), IM=-55.314
+[2026-08-27 12:46:20.598] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.522 >= HAL=10.000
+[2026-08-27 12:46:20.598] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=72.407 >= VAL=20.000
+[2026-08-27 12:46:20.598] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.522 vs HAL=10.000 (im_h=-14.522), VPL=72.407 vs VAL=20.000 (im_v=-52.407), IM=-52.407
+[2026-08-27 12:46:20.691] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.446 >= HAL=10.000
+[2026-08-27 12:46:20.691] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=72.153 >= VAL=20.000
+[2026-08-27 12:46:20.691] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.446 vs HAL=10.000 (im_h=-14.446), VPL=72.153 vs VAL=20.000 (im_v=-52.153), IM=-52.153
+[2026-08-27 12:46:20.798] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.925 >= HAL=10.000
+[2026-08-27 12:46:20.798] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=75.368 >= VAL=20.000
+[2026-08-27 12:46:20.798] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.925 vs HAL=10.000 (im_h=-14.925), VPL=75.368 vs VAL=20.000 (im_v=-55.368), IM=-55.368
+[2026-08-27 12:46:20.875] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.207 >= HAL=10.000
+[2026-08-27 12:46:20.875] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.097 >= VAL=20.000
+[2026-08-27 12:46:20.875] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.207 vs HAL=10.000 (im_h=-15.207), VPL=71.097 vs VAL=20.000 (im_v=-51.097), IM=-51.097
+[2026-08-27 12:46:20.998] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.866 >= HAL=10.000
+[2026-08-27 12:46:20.998] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=70.571 >= VAL=20.000
+[2026-08-27 12:46:20.998] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.866 vs HAL=10.000 (im_h=-14.866), VPL=70.571 vs VAL=20.000 (im_v=-50.571), IM=-50.571
+[2026-08-27 12:46:21.099] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.920 >= HAL=10.000
+[2026-08-27 12:46:21.099] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=76.647 >= VAL=20.000
+[2026-08-27 12:46:21.099] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.920 vs HAL=10.000 (im_h=-15.920), VPL=76.647 vs VAL=20.000 (im_v=-56.647), IM=-56.647
+[2026-08-27 12:46:21.173] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.568 >= HAL=10.000
+[2026-08-27 12:46:21.173] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=72.449 >= VAL=20.000
+[2026-08-27 12:46:21.173] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.568 vs HAL=10.000 (im_h=-14.568), VPL=72.449 vs VAL=20.000 (im_v=-52.449), IM=-52.449
+[2026-08-27 12:46:21.298] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.576 >= HAL=10.000
+[2026-08-27 12:46:21.298] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=72.175 >= VAL=20.000
+[2026-08-27 12:46:21.298] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.576 vs HAL=10.000 (im_h=-14.576), VPL=72.175 vs VAL=20.000 (im_v=-52.175), IM=-52.175
+[2026-08-27 12:46:21.375] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.452 >= HAL=10.000
+[2026-08-27 12:46:21.375] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=76.264 >= VAL=20.000
+[2026-08-27 12:46:21.375] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.452 vs HAL=10.000 (im_h=-15.452), VPL=76.264 vs VAL=20.000 (im_v=-56.264), IM=-56.264
+[2026-08-27 12:46:21.498] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.765 >= HAL=10.000
+[2026-08-27 12:46:21.498] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=74.765 >= VAL=20.000
+[2026-08-27 12:46:21.498] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.765 vs HAL=10.000 (im_h=-14.765), VPL=74.765 vs VAL=20.000 (im_v=-54.765), IM=-54.765
+[2026-08-27 12:46:21.598] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.823 >= HAL=10.000
+[2026-08-27 12:46:21.598] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=75.968 >= VAL=20.000
+[2026-08-27 12:46:21.598] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.823 vs HAL=10.000 (im_h=-15.823), VPL=75.968 vs VAL=20.000 (im_v=-55.968), IM=-55.968
+[2026-08-27 12:46:21.698] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=27.282 >= HAL=10.000
+[2026-08-27 12:46:21.698] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=75.589 >= VAL=20.000
+[2026-08-27 12:46:21.698] [integrity] [warning] INTEGRITY UNSAFE: HPL=27.282 vs HAL=10.000 (im_h=-17.282), VPL=75.589 vs VAL=20.000 (im_v=-55.589), IM=-55.589
+[2026-08-27 12:46:21.772] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.418 >= HAL=10.000
+[2026-08-27 12:46:21.772] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=74.948 >= VAL=20.000
+[2026-08-27 12:46:21.772] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.418 vs HAL=10.000 (im_h=-14.418), VPL=74.948 vs VAL=20.000 (im_v=-54.948), IM=-54.948
+[2026-08-27 12:46:21.891] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.548 >= HAL=10.000
+[2026-08-27 12:46:21.891] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=72.019 >= VAL=20.000
+[2026-08-27 12:46:21.891] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.548 vs HAL=10.000 (im_h=-14.548), VPL=72.019 vs VAL=20.000 (im_v=-52.019), IM=-52.019
+[2026-08-27 12:46:21.975] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.153 >= HAL=10.000
+[2026-08-27 12:46:21.975] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.731 >= VAL=20.000
+[2026-08-27 12:46:21.975] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.153 vs HAL=10.000 (im_h=-15.153), VPL=71.731 vs VAL=20.000 (im_v=-51.731), IM=-51.731
+[2026-08-27 12:46:22.099] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.716 >= HAL=10.000
+[2026-08-27 12:46:22.099] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=68.885 >= VAL=20.000
+[2026-08-27 12:46:22.099] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.716 vs HAL=10.000 (im_h=-14.716), VPL=68.885 vs VAL=20.000 (im_v=-48.885), IM=-48.885
+[2026-08-27 12:46:22.199] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.739 >= HAL=10.000
+[2026-08-27 12:46:22.199] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.685 >= VAL=20.000
+[2026-08-27 12:46:22.199] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.739 vs HAL=10.000 (im_h=-15.739), VPL=71.685 vs VAL=20.000 (im_v=-51.685), IM=-51.685
+[2026-08-27 12:46:22.300] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.630 >= HAL=10.000
+[2026-08-27 12:46:22.300] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.651 >= VAL=20.000
+[2026-08-27 12:46:22.300] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.630 vs HAL=10.000 (im_h=-14.630), VPL=71.651 vs VAL=20.000 (im_v=-51.651), IM=-51.651
+[2026-08-27 12:46:22.400] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.423 >= HAL=10.000
+[2026-08-27 12:46:22.400] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=73.331 >= VAL=20.000
+[2026-08-27 12:46:22.400] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.423 vs HAL=10.000 (im_h=-15.423), VPL=73.331 vs VAL=20.000 (im_v=-53.331), IM=-53.331
+[2026-08-27 12:46:22.500] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.730 >= HAL=10.000
+[2026-08-27 12:46:22.500] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.121 >= VAL=20.000
+[2026-08-27 12:46:22.500] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.730 vs HAL=10.000 (im_h=-15.730), VPL=71.121 vs VAL=20.000 (im_v=-51.121), IM=-51.121
+[2026-08-27 12:46:22.599] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.801 >= HAL=10.000
+[2026-08-27 12:46:22.599] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=74.391 >= VAL=20.000
+[2026-08-27 12:46:22.599] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.801 vs HAL=10.000 (im_h=-15.801), VPL=74.391 vs VAL=20.000 (im_v=-54.391), IM=-54.391
+[2026-08-27 12:46:22.691] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.050 >= HAL=10.000
+[2026-08-27 12:46:22.691] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=73.438 >= VAL=20.000
+[2026-08-27 12:46:22.691] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.050 vs HAL=10.000 (im_h=-16.050), VPL=73.438 vs VAL=20.000 (im_v=-53.438), IM=-53.438
+[2026-08-27 12:46:22.798] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=27.619 >= HAL=10.000
+[2026-08-27 12:46:22.798] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=74.869 >= VAL=20.000
+[2026-08-27 12:46:22.798] [integrity] [warning] INTEGRITY UNSAFE: HPL=27.619 vs HAL=10.000 (im_h=-17.619), VPL=74.869 vs VAL=20.000 (im_v=-54.869), IM=-54.869
+[2026-08-27 12:46:22.900] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.963 >= HAL=10.000
+[2026-08-27 12:46:22.900] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=72.541 >= VAL=20.000
+[2026-08-27 12:46:22.900] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.963 vs HAL=10.000 (im_h=-14.963), VPL=72.541 vs VAL=20.000 (im_v=-52.541), IM=-52.541
+[2026-08-27 12:46:22.999] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.586 >= HAL=10.000
+[2026-08-27 12:46:22.999] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=69.015 >= VAL=20.000
+[2026-08-27 12:46:22.999] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.586 vs HAL=10.000 (im_h=-14.586), VPL=69.015 vs VAL=20.000 (im_v=-49.015), IM=-49.015
+[2026-08-27 12:46:23.100] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.470 >= HAL=10.000
+[2026-08-27 12:46:23.100] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=70.262 >= VAL=20.000
+[2026-08-27 12:46:23.100] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.470 vs HAL=10.000 (im_h=-14.470), VPL=70.262 vs VAL=20.000 (im_v=-50.262), IM=-50.262
+[2026-08-27 12:46:23.199] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.723 >= HAL=10.000
+[2026-08-27 12:46:23.199] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.544 >= VAL=20.000
+[2026-08-27 12:46:23.199] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.723 vs HAL=10.000 (im_h=-14.723), VPL=71.544 vs VAL=20.000 (im_v=-51.544), IM=-51.544
+[2026-08-27 12:46:23.292] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.164 >= HAL=10.000
+[2026-08-27 12:46:23.292] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=73.928 >= VAL=20.000
+[2026-08-27 12:46:23.292] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.164 vs HAL=10.000 (im_h=-16.164), VPL=73.928 vs VAL=20.000 (im_v=-53.928), IM=-53.928
+[2026-08-27 12:46:23.374] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.221 >= HAL=10.000
+[2026-08-27 12:46:23.374] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=75.987 >= VAL=20.000
+[2026-08-27 12:46:23.374] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.221 vs HAL=10.000 (im_h=-15.221), VPL=75.987 vs VAL=20.000 (im_v=-55.987), IM=-55.987
+[2026-08-27 12:46:23.500] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.765 >= HAL=10.000
+[2026-08-27 12:46:23.500] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=70.617 >= VAL=20.000
+[2026-08-27 12:46:23.500] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.765 vs HAL=10.000 (im_h=-14.765), VPL=70.617 vs VAL=20.000 (im_v=-50.617), IM=-50.617
+[2026-08-27 12:46:23.575] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.893 >= HAL=10.000
+[2026-08-27 12:46:23.575] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=73.082 >= VAL=20.000
+[2026-08-27 12:46:23.575] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.893 vs HAL=10.000 (im_h=-15.893), VPL=73.082 vs VAL=20.000 (im_v=-53.082), IM=-53.082
+[2026-08-27 12:46:23.694] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.022 >= HAL=10.000
+[2026-08-27 12:46:23.694] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=74.010 >= VAL=20.000
+[2026-08-27 12:46:23.694] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.022 vs HAL=10.000 (im_h=-16.022), VPL=74.010 vs VAL=20.000 (im_v=-54.010), IM=-54.010
+[2026-08-27 12:46:23.793] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.721 >= HAL=10.000
+[2026-08-27 12:46:23.793] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.538 >= VAL=20.000
+[2026-08-27 12:46:23.793] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.721 vs HAL=10.000 (im_h=-15.721), VPL=71.538 vs VAL=20.000 (im_v=-51.538), IM=-51.538
+[2026-08-27 12:46:23.900] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.178 >= HAL=10.000
+[2026-08-27 12:46:23.900] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.876 >= VAL=20.000
+[2026-08-27 12:46:23.900] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.178 vs HAL=10.000 (im_h=-15.178), VPL=71.876 vs VAL=20.000 (im_v=-51.876), IM=-51.876
+[2026-08-27 12:46:24.000] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.555 >= HAL=10.000
+[2026-08-27 12:46:24.000] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=70.969 >= VAL=20.000
+[2026-08-27 12:46:24.000] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.555 vs HAL=10.000 (im_h=-14.555), VPL=70.969 vs VAL=20.000 (im_v=-50.969), IM=-50.969
+[2026-08-27 12:46:24.100] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.342 >= HAL=10.000
+[2026-08-27 12:46:24.100] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=69.620 >= VAL=20.000
+[2026-08-27 12:46:24.100] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.342 vs HAL=10.000 (im_h=-16.342), VPL=69.620 vs VAL=20.000 (im_v=-49.620), IM=-49.620
+[2026-08-27 12:46:24.191] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.503 >= HAL=10.000
+[2026-08-27 12:46:24.192] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=70.649 >= VAL=20.000
+[2026-08-27 12:46:24.192] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.503 vs HAL=10.000 (im_h=-15.503), VPL=70.649 vs VAL=20.000 (im_v=-50.649), IM=-50.649
+[2026-08-27 12:46:24.292] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.619 >= HAL=10.000
+[2026-08-27 12:46:24.292] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.257 >= VAL=20.000
+[2026-08-27 12:46:24.292] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.619 vs HAL=10.000 (im_h=-14.619), VPL=71.257 vs VAL=20.000 (im_v=-51.257), IM=-51.257
+[2026-08-27 12:46:24.392] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.843 >= HAL=10.000
+[2026-08-27 12:46:24.392] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=69.073 >= VAL=20.000
+[2026-08-27 12:46:24.392] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.843 vs HAL=10.000 (im_h=-16.843), VPL=69.073 vs VAL=20.000 (im_v=-49.073), IM=-49.073
+[2026-08-27 12:46:24.497] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.667 >= HAL=10.000
+[2026-08-27 12:46:24.497] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.351 >= VAL=20.000
+[2026-08-27 12:46:24.497] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.667 vs HAL=10.000 (im_h=-14.667), VPL=71.351 vs VAL=20.000 (im_v=-51.351), IM=-51.351
+[2026-08-27 12:46:24.599] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.582 >= HAL=10.000
+[2026-08-27 12:46:24.599] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=72.989 >= VAL=20.000
+[2026-08-27 12:46:24.599] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.582 vs HAL=10.000 (im_h=-14.582), VPL=72.989 vs VAL=20.000 (im_v=-52.989), IM=-52.989
+[2026-08-27 12:46:24.698] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.369 >= HAL=10.000
+[2026-08-27 12:46:24.698] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=73.125 >= VAL=20.000
+[2026-08-27 12:46:24.698] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.369 vs HAL=10.000 (im_h=-16.369), VPL=73.125 vs VAL=20.000 (im_v=-53.125), IM=-53.125
+[2026-08-27 12:46:24.798] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.343 >= HAL=10.000
+[2026-08-27 12:46:24.798] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=72.336 >= VAL=20.000
+[2026-08-27 12:46:24.798] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.343 vs HAL=10.000 (im_h=-15.343), VPL=72.336 vs VAL=20.000 (im_v=-52.336), IM=-52.336
+[2026-08-27 12:46:24.891] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.852 >= HAL=10.000
+[2026-08-27 12:46:24.891] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=74.726 >= VAL=20.000
+[2026-08-27 12:46:24.891] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.852 vs HAL=10.000 (im_h=-14.852), VPL=74.726 vs VAL=20.000 (im_v=-54.726), IM=-54.726
+[2026-08-27 12:46:24.997] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.871 >= HAL=10.000
+[2026-08-27 12:46:24.997] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.475 >= VAL=20.000
+[2026-08-27 12:46:24.997] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.871 vs HAL=10.000 (im_h=-15.871), VPL=71.475 vs VAL=20.000 (im_v=-51.475), IM=-51.475
+[2026-08-27 12:46:25.098] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.766 >= HAL=10.000
+[2026-08-27 12:46:25.098] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=69.962 >= VAL=20.000
+[2026-08-27 12:46:25.098] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.766 vs HAL=10.000 (im_h=-14.766), VPL=69.962 vs VAL=20.000 (im_v=-49.962), IM=-49.962
+[2026-08-27 12:46:25.198] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.777 >= HAL=10.000
+[2026-08-27 12:46:25.198] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=73.958 >= VAL=20.000
+[2026-08-27 12:46:25.198] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.777 vs HAL=10.000 (im_h=-15.777), VPL=73.958 vs VAL=20.000 (im_v=-53.958), IM=-53.958
+[2026-08-27 12:46:25.298] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.501 >= HAL=10.000
+[2026-08-27 12:46:25.298] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=72.308 >= VAL=20.000
+[2026-08-27 12:46:25.298] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.501 vs HAL=10.000 (im_h=-14.501), VPL=72.308 vs VAL=20.000 (im_v=-52.308), IM=-52.308
+[2026-08-27 12:46:25.398] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.307 >= HAL=10.000
+[2026-08-27 12:46:25.398] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=76.084 >= VAL=20.000
+[2026-08-27 12:46:25.398] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.307 vs HAL=10.000 (im_h=-16.307), VPL=76.084 vs VAL=20.000 (im_v=-56.084), IM=-56.084
+[2026-08-27 12:46:25.499] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.913 >= HAL=10.000
+[2026-08-27 12:46:25.499] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=73.178 >= VAL=20.000
+[2026-08-27 12:46:25.499] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.913 vs HAL=10.000 (im_h=-15.913), VPL=73.178 vs VAL=20.000 (im_v=-53.178), IM=-53.178
+[2026-08-27 12:46:25.597] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=27.053 >= HAL=10.000
+[2026-08-27 12:46:25.597] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=78.347 >= VAL=20.000
+[2026-08-27 12:46:25.597] [integrity] [warning] INTEGRITY UNSAFE: HPL=27.053 vs HAL=10.000 (im_h=-17.053), VPL=78.347 vs VAL=20.000 (im_v=-58.347), IM=-58.347
+[2026-08-27 12:46:25.690] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.432 >= HAL=10.000
+[2026-08-27 12:46:25.690] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=69.229 >= VAL=20.000
+[2026-08-27 12:46:25.690] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.432 vs HAL=10.000 (im_h=-15.432), VPL=69.229 vs VAL=20.000 (im_v=-49.229), IM=-49.229
+[2026-08-27 12:46:25.790] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.691 >= HAL=10.000
+[2026-08-27 12:46:25.790] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=70.672 >= VAL=20.000
+[2026-08-27 12:46:25.790] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.691 vs HAL=10.000 (im_h=-16.691), VPL=70.672 vs VAL=20.000 (im_v=-50.672), IM=-50.672
+[2026-08-27 12:46:25.899] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.878 >= HAL=10.000
+[2026-08-27 12:46:25.899] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=72.407 >= VAL=20.000
+[2026-08-27 12:46:25.899] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.878 vs HAL=10.000 (im_h=-14.878), VPL=72.407 vs VAL=20.000 (im_v=-52.407), IM=-52.407
+[2026-08-27 12:46:25.998] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=27.037 >= HAL=10.000
+[2026-08-27 12:46:25.998] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.926 >= VAL=20.000
+[2026-08-27 12:46:25.998] [integrity] [warning] INTEGRITY UNSAFE: HPL=27.037 vs HAL=10.000 (im_h=-17.037), VPL=71.926 vs VAL=20.000 (im_v=-51.926), IM=-51.926
+[2026-08-27 12:46:26.097] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.952 >= HAL=10.000
+[2026-08-27 12:46:26.097] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=77.363 >= VAL=20.000
+[2026-08-27 12:46:26.097] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.952 vs HAL=10.000 (im_h=-14.952), VPL=77.363 vs VAL=20.000 (im_v=-57.363), IM=-57.363
+[2026-08-27 12:46:26.191] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.249 >= HAL=10.000
+[2026-08-27 12:46:26.191] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=77.286 >= VAL=20.000
+[2026-08-27 12:46:26.191] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.249 vs HAL=10.000 (im_h=-15.249), VPL=77.286 vs VAL=20.000 (im_v=-57.286), IM=-57.286
+[2026-08-27 12:46:26.298] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.272 >= HAL=10.000
+[2026-08-27 12:46:26.298] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=70.397 >= VAL=20.000
+[2026-08-27 12:46:26.298] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.272 vs HAL=10.000 (im_h=-15.272), VPL=70.397 vs VAL=20.000 (im_v=-50.397), IM=-50.397
+[2026-08-27 12:46:26.398] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.941 >= HAL=10.000
+[2026-08-27 12:46:26.398] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=70.125 >= VAL=20.000
+[2026-08-27 12:46:26.398] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.941 vs HAL=10.000 (im_h=-14.941), VPL=70.125 vs VAL=20.000 (im_v=-50.125), IM=-50.125
+[2026-08-27 12:46:26.497] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.806 >= HAL=10.000
+[2026-08-27 12:46:26.497] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=70.728 >= VAL=20.000
+[2026-08-27 12:46:26.497] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.806 vs HAL=10.000 (im_h=-14.806), VPL=70.728 vs VAL=20.000 (im_v=-50.728), IM=-50.728
+[2026-08-27 12:46:26.598] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.411 >= HAL=10.000
+[2026-08-27 12:46:26.598] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=69.949 >= VAL=20.000
+[2026-08-27 12:46:26.598] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.411 vs HAL=10.000 (im_h=-14.411), VPL=69.949 vs VAL=20.000 (im_v=-49.949), IM=-49.949
+[2026-08-27 12:46:26.690] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.555 >= HAL=10.000
+[2026-08-27 12:46:26.690] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=73.599 >= VAL=20.000
+[2026-08-27 12:46:26.690] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.555 vs HAL=10.000 (im_h=-15.555), VPL=73.599 vs VAL=20.000 (im_v=-53.599), IM=-53.599
+[2026-08-27 12:46:26.790] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.562 >= HAL=10.000
+[2026-08-27 12:46:26.790] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=77.215 >= VAL=20.000
+[2026-08-27 12:46:26.790] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.562 vs HAL=10.000 (im_h=-15.562), VPL=77.215 vs VAL=20.000 (im_v=-57.215), IM=-57.215
+[2026-08-27 12:46:26.899] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.879 >= HAL=10.000
+[2026-08-27 12:46:26.899] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=72.172 >= VAL=20.000
+[2026-08-27 12:46:26.899] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.879 vs HAL=10.000 (im_h=-14.879), VPL=72.172 vs VAL=20.000 (im_v=-52.172), IM=-52.172
+[2026-08-27 12:46:26.997] [integrity] [warning] NIS gating: sat 1 NIS_pr=16.54 > 6.63 -- downweighted
+[2026-08-27 12:46:26.998] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.534 >= HAL=10.000
+[2026-08-27 12:46:26.998] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=86.690 >= VAL=20.000
+[2026-08-27 12:46:26.998] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.534 vs HAL=10.000 (im_h=-15.534), VPL=86.690 vs VAL=20.000 (im_v=-66.690), IM=-66.690
+[2026-08-27 12:46:27.099] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.674 >= HAL=10.000
+[2026-08-27 12:46:27.099] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=73.475 >= VAL=20.000
+[2026-08-27 12:46:27.099] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.674 vs HAL=10.000 (im_h=-14.674), VPL=73.475 vs VAL=20.000 (im_v=-53.475), IM=-53.475
+[2026-08-27 12:46:27.198] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.410 >= HAL=10.000
+[2026-08-27 12:46:27.198] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.145 >= VAL=20.000
+[2026-08-27 12:46:27.198] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.410 vs HAL=10.000 (im_h=-15.410), VPL=71.145 vs VAL=20.000 (im_v=-51.145), IM=-51.145
+[2026-08-27 12:46:27.297] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.280 >= HAL=10.000
+[2026-08-27 12:46:27.297] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=73.401 >= VAL=20.000
+[2026-08-27 12:46:27.297] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.280 vs HAL=10.000 (im_h=-16.280), VPL=73.401 vs VAL=20.000 (im_v=-53.401), IM=-53.401
+[2026-08-27 12:46:27.391] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.053 >= HAL=10.000
+[2026-08-27 12:46:27.391] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=75.990 >= VAL=20.000
+[2026-08-27 12:46:27.391] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.053 vs HAL=10.000 (im_h=-16.053), VPL=75.990 vs VAL=20.000 (im_v=-55.990), IM=-55.990
+[2026-08-27 12:46:27.492] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.629 >= HAL=10.000
+[2026-08-27 12:46:27.492] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=74.218 >= VAL=20.000
+[2026-08-27 12:46:27.492] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.629 vs HAL=10.000 (im_h=-16.629), VPL=74.218 vs VAL=20.000 (im_v=-54.218), IM=-54.218
+[2026-08-27 12:46:27.600] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.702 >= HAL=10.000
+[2026-08-27 12:46:27.600] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=74.484 >= VAL=20.000
+[2026-08-27 12:46:27.600] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.702 vs HAL=10.000 (im_h=-14.702), VPL=74.484 vs VAL=20.000 (im_v=-54.484), IM=-54.484
+[2026-08-27 12:46:27.692] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.741 >= HAL=10.000
+[2026-08-27 12:46:27.692] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=69.027 >= VAL=20.000
+[2026-08-27 12:46:27.692] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.741 vs HAL=10.000 (im_h=-14.741), VPL=69.027 vs VAL=20.000 (im_v=-49.027), IM=-49.027
+[2026-08-27 12:46:27.800] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.229 >= HAL=10.000
+[2026-08-27 12:46:27.800] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.946 >= VAL=20.000
+[2026-08-27 12:46:27.800] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.229 vs HAL=10.000 (im_h=-15.229), VPL=71.946 vs VAL=20.000 (im_v=-51.946), IM=-51.946
+[2026-08-27 12:46:27.892] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.368 >= HAL=10.000
+[2026-08-27 12:46:27.892] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=74.264 >= VAL=20.000
+[2026-08-27 12:46:27.892] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.368 vs HAL=10.000 (im_h=-15.368), VPL=74.264 vs VAL=20.000 (im_v=-54.264), IM=-54.264
+[2026-08-27 12:46:27.976] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.106 >= HAL=10.000
+[2026-08-27 12:46:27.976] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=72.052 >= VAL=20.000
+[2026-08-27 12:46:27.976] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.106 vs HAL=10.000 (im_h=-15.106), VPL=72.052 vs VAL=20.000 (im_v=-52.052), IM=-52.052
+[2026-08-27 12:46:28.100] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.039 >= HAL=10.000
+[2026-08-27 12:46:28.100] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=73.751 >= VAL=20.000
+[2026-08-27 12:46:28.100] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.039 vs HAL=10.000 (im_h=-15.039), VPL=73.751 vs VAL=20.000 (im_v=-53.751), IM=-53.751
+[2026-08-27 12:46:28.200] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.990 >= HAL=10.000
+[2026-08-27 12:46:28.200] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=73.315 >= VAL=20.000
+[2026-08-27 12:46:28.200] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.990 vs HAL=10.000 (im_h=-14.990), VPL=73.315 vs VAL=20.000 (im_v=-53.315), IM=-53.315
+[2026-08-27 12:46:28.299] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.055 >= HAL=10.000
+[2026-08-27 12:46:28.299] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=77.787 >= VAL=20.000
+[2026-08-27 12:46:28.299] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.055 vs HAL=10.000 (im_h=-15.055), VPL=77.787 vs VAL=20.000 (im_v=-57.787), IM=-57.787
+[2026-08-27 12:46:28.373] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.388 >= HAL=10.000
+[2026-08-27 12:46:28.373] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=72.546 >= VAL=20.000
+[2026-08-27 12:46:28.373] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.388 vs HAL=10.000 (im_h=-16.388), VPL=72.546 vs VAL=20.000 (im_v=-52.546), IM=-52.546
+[2026-08-27 12:46:28.499] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.103 >= HAL=10.000
+[2026-08-27 12:46:28.499] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=72.073 >= VAL=20.000
+[2026-08-27 12:46:28.499] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.103 vs HAL=10.000 (im_h=-16.103), VPL=72.073 vs VAL=20.000 (im_v=-52.073), IM=-52.073
+[2026-08-27 12:46:28.598] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.614 >= HAL=10.000
+[2026-08-27 12:46:28.598] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=74.845 >= VAL=20.000
+[2026-08-27 12:46:28.598] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.614 vs HAL=10.000 (im_h=-14.614), VPL=74.845 vs VAL=20.000 (im_v=-54.845), IM=-54.845
+[2026-08-27 12:46:28.698] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.508 >= HAL=10.000
+[2026-08-27 12:46:28.698] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=69.639 >= VAL=20.000
+[2026-08-27 12:46:28.698] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.508 vs HAL=10.000 (im_h=-15.508), VPL=69.639 vs VAL=20.000 (im_v=-49.639), IM=-49.639
+[2026-08-27 12:46:28.798] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.175 >= HAL=10.000
+[2026-08-27 12:46:28.798] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=77.439 >= VAL=20.000
+[2026-08-27 12:46:28.798] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.175 vs HAL=10.000 (im_h=-15.175), VPL=77.439 vs VAL=20.000 (im_v=-57.439), IM=-57.439
+[2026-08-27 12:46:28.901] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.790 >= HAL=10.000
+[2026-08-27 12:46:28.901] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=69.292 >= VAL=20.000
+[2026-08-27 12:46:28.901] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.790 vs HAL=10.000 (im_h=-14.790), VPL=69.292 vs VAL=20.000 (im_v=-49.292), IM=-49.292
+[2026-08-27 12:46:28.999] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.051 >= HAL=10.000
+[2026-08-27 12:46:28.999] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=73.382 >= VAL=20.000
+[2026-08-27 12:46:28.999] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.051 vs HAL=10.000 (im_h=-15.051), VPL=73.382 vs VAL=20.000 (im_v=-53.382), IM=-53.382
+[2026-08-27 12:46:29.101] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.960 >= HAL=10.000
+[2026-08-27 12:46:29.101] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=69.558 >= VAL=20.000
+[2026-08-27 12:46:29.101] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.960 vs HAL=10.000 (im_h=-16.960), VPL=69.558 vs VAL=20.000 (im_v=-49.558), IM=-49.558
+[2026-08-27 12:46:29.174] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.903 >= HAL=10.000
+[2026-08-27 12:46:29.174] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=74.292 >= VAL=20.000
+[2026-08-27 12:46:29.174] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.903 vs HAL=10.000 (im_h=-15.903), VPL=74.292 vs VAL=20.000 (im_v=-54.292), IM=-54.292
+[2026-08-27 12:46:29.298] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.279 >= HAL=10.000
+[2026-08-27 12:46:29.298] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=74.033 >= VAL=20.000
+[2026-08-27 12:46:29.298] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.279 vs HAL=10.000 (im_h=-16.279), VPL=74.033 vs VAL=20.000 (im_v=-54.033), IM=-54.033
+[2026-08-27 12:46:29.392] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.843 >= HAL=10.000
+[2026-08-27 12:46:29.392] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=69.140 >= VAL=20.000
+[2026-08-27 12:46:29.392] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.843 vs HAL=10.000 (im_h=-14.843), VPL=69.140 vs VAL=20.000 (im_v=-49.140), IM=-49.140
+[2026-08-27 12:46:29.475] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.795 >= HAL=10.000
+[2026-08-27 12:46:29.475] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=75.349 >= VAL=20.000
+[2026-08-27 12:46:29.475] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.795 vs HAL=10.000 (im_h=-15.795), VPL=75.349 vs VAL=20.000 (im_v=-55.349), IM=-55.349
+[2026-08-27 12:46:29.600] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.382 >= HAL=10.000
+[2026-08-27 12:46:29.600] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.507 >= VAL=20.000
+[2026-08-27 12:46:29.600] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.382 vs HAL=10.000 (im_h=-15.382), VPL=71.507 vs VAL=20.000 (im_v=-51.507), IM=-51.507
+[2026-08-27 12:46:29.698] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.806 >= HAL=10.000
+[2026-08-27 12:46:29.698] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.407 >= VAL=20.000
+[2026-08-27 12:46:29.698] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.806 vs HAL=10.000 (im_h=-14.806), VPL=71.407 vs VAL=20.000 (im_v=-51.407), IM=-51.407
+[2026-08-27 12:46:29.792] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.115 >= HAL=10.000
+[2026-08-27 12:46:29.792] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=73.775 >= VAL=20.000
+[2026-08-27 12:46:29.792] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.115 vs HAL=10.000 (im_h=-15.115), VPL=73.775 vs VAL=20.000 (im_v=-53.775), IM=-53.775
+[2026-08-27 12:46:29.892] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.008 >= HAL=10.000
+[2026-08-27 12:46:29.892] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=72.110 >= VAL=20.000
+[2026-08-27 12:46:29.892] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.008 vs HAL=10.000 (im_h=-15.008), VPL=72.110 vs VAL=20.000 (im_v=-52.110), IM=-52.110
+[2026-08-27 12:46:29.999] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.262 >= HAL=10.000
+[2026-08-27 12:46:29.999] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=70.234 >= VAL=20.000
+[2026-08-27 12:46:29.999] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.262 vs HAL=10.000 (im_h=-15.262), VPL=70.234 vs VAL=20.000 (im_v=-50.234), IM=-50.234
+[2026-08-27 12:46:30.075] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.443 >= HAL=10.000
+[2026-08-27 12:46:30.075] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=69.740 >= VAL=20.000
+[2026-08-27 12:46:30.075] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.443 vs HAL=10.000 (im_h=-14.443), VPL=69.740 vs VAL=20.000 (im_v=-49.740), IM=-49.740
+[2026-08-27 12:46:30.191] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.828 >= HAL=10.000
+[2026-08-27 12:46:30.191] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=70.811 >= VAL=20.000
+[2026-08-27 12:46:30.191] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.828 vs HAL=10.000 (im_h=-14.828), VPL=70.811 vs VAL=20.000 (im_v=-50.811), IM=-50.811
+[2026-08-27 12:46:30.274] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.402 >= HAL=10.000
+[2026-08-27 12:46:30.274] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.607 >= VAL=20.000
+[2026-08-27 12:46:30.274] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.402 vs HAL=10.000 (im_h=-16.402), VPL=71.607 vs VAL=20.000 (im_v=-51.607), IM=-51.607
+[2026-08-27 12:46:30.400] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.472 >= HAL=10.000
+[2026-08-27 12:46:30.400] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=72.586 >= VAL=20.000
+[2026-08-27 12:46:30.400] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.472 vs HAL=10.000 (im_h=-15.472), VPL=72.586 vs VAL=20.000 (im_v=-52.586), IM=-52.586
+[2026-08-27 12:46:30.498] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.846 >= HAL=10.000
+[2026-08-27 12:46:30.498] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=76.136 >= VAL=20.000
+[2026-08-27 12:46:30.498] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.846 vs HAL=10.000 (im_h=-14.846), VPL=76.136 vs VAL=20.000 (im_v=-56.136), IM=-56.136
+[2026-08-27 12:46:30.573] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.371 >= HAL=10.000
+[2026-08-27 12:46:30.573] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=69.901 >= VAL=20.000
+[2026-08-27 12:46:30.573] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.371 vs HAL=10.000 (im_h=-15.371), VPL=69.901 vs VAL=20.000 (im_v=-49.901), IM=-49.901
+[2026-08-27 12:46:30.698] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.438 >= HAL=10.000
+[2026-08-27 12:46:30.698] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.758 >= VAL=20.000
+[2026-08-27 12:46:30.698] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.438 vs HAL=10.000 (im_h=-14.438), VPL=71.758 vs VAL=20.000 (im_v=-51.758), IM=-51.758
+[2026-08-27 12:46:30.798] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.005 >= HAL=10.000
+[2026-08-27 12:46:30.798] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=70.934 >= VAL=20.000
+[2026-08-27 12:46:30.798] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.005 vs HAL=10.000 (im_h=-15.005), VPL=70.934 vs VAL=20.000 (im_v=-50.934), IM=-50.934
+[2026-08-27 12:46:30.876] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.576 >= HAL=10.000
+[2026-08-27 12:46:30.876] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=70.512 >= VAL=20.000
+[2026-08-27 12:46:30.876] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.576 vs HAL=10.000 (im_h=-14.576), VPL=70.512 vs VAL=20.000 (im_v=-50.512), IM=-50.512
+[2026-08-27 12:46:30.998] [integrity] [warning] NIS gating: sat 1 NIS_pr=8.47 > 6.63 -- downweighted
+[2026-08-27 12:46:30.999] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.718 >= HAL=10.000
+[2026-08-27 12:46:30.999] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=79.897 >= VAL=20.000
+[2026-08-27 12:46:30.999] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.718 vs HAL=10.000 (im_h=-14.718), VPL=79.897 vs VAL=20.000 (im_v=-59.897), IM=-59.897
+[2026-08-27 12:46:31.099] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.458 >= HAL=10.000
+[2026-08-27 12:46:31.099] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=73.859 >= VAL=20.000
+[2026-08-27 12:46:31.099] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.458 vs HAL=10.000 (im_h=-14.458), VPL=73.859 vs VAL=20.000 (im_v=-53.859), IM=-53.859
+[2026-08-27 12:46:31.191] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.774 >= HAL=10.000
+[2026-08-27 12:46:31.191] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=68.893 >= VAL=20.000
+[2026-08-27 12:46:31.191] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.774 vs HAL=10.000 (im_h=-15.774), VPL=68.893 vs VAL=20.000 (im_v=-48.893), IM=-48.893
+[2026-08-27 12:46:31.292] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.996 >= HAL=10.000
+[2026-08-27 12:46:31.292] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=70.140 >= VAL=20.000
+[2026-08-27 12:46:31.292] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.996 vs HAL=10.000 (im_h=-15.996), VPL=70.140 vs VAL=20.000 (im_v=-50.140), IM=-50.140
+[2026-08-27 12:46:31.400] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.611 >= HAL=10.000
+[2026-08-27 12:46:31.400] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=72.248 >= VAL=20.000
+[2026-08-27 12:46:31.400] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.611 vs HAL=10.000 (im_h=-15.611), VPL=72.248 vs VAL=20.000 (im_v=-52.248), IM=-52.248
+[2026-08-27 12:46:31.497] [integrity] [warning] NIS gating: sat 41 NIS_pr=10.64 > 6.63 -- downweighted
+[2026-08-27 12:46:31.498] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.016 >= HAL=10.000
+[2026-08-27 12:46:31.498] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=79.824 >= VAL=20.000
+[2026-08-27 12:46:31.498] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.016 vs HAL=10.000 (im_h=-15.016), VPL=79.824 vs VAL=20.000 (im_v=-59.824), IM=-59.824
+[2026-08-27 12:46:31.576] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.846 >= HAL=10.000
+[2026-08-27 12:46:31.576] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=78.868 >= VAL=20.000
+[2026-08-27 12:46:31.576] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.846 vs HAL=10.000 (im_h=-15.846), VPL=78.868 vs VAL=20.000 (im_v=-58.868), IM=-58.868
+[2026-08-27 12:46:31.699] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=27.346 >= HAL=10.000
+[2026-08-27 12:46:31.699] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=74.474 >= VAL=20.000
+[2026-08-27 12:46:31.699] [integrity] [warning] INTEGRITY UNSAFE: HPL=27.346 vs HAL=10.000 (im_h=-17.346), VPL=74.474 vs VAL=20.000 (im_v=-54.474), IM=-54.474
+[2026-08-27 12:46:31.799] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.588 >= HAL=10.000
+[2026-08-27 12:46:31.799] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=74.836 >= VAL=20.000
+[2026-08-27 12:46:31.799] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.588 vs HAL=10.000 (im_h=-15.588), VPL=74.836 vs VAL=20.000 (im_v=-54.836), IM=-54.836
+[2026-08-27 12:46:31.876] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.657 >= HAL=10.000
+[2026-08-27 12:46:31.876] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.709 >= VAL=20.000
+[2026-08-27 12:46:31.876] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.657 vs HAL=10.000 (im_h=-16.657), VPL=71.709 vs VAL=20.000 (im_v=-51.709), IM=-51.709
+[2026-08-27 12:46:31.999] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.451 >= HAL=10.000
+[2026-08-27 12:46:31.999] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=69.107 >= VAL=20.000
+[2026-08-27 12:46:31.999] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.451 vs HAL=10.000 (im_h=-14.451), VPL=69.107 vs VAL=20.000 (im_v=-49.107), IM=-49.107
+[2026-08-27 12:46:32.098] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.474 >= HAL=10.000
+[2026-08-27 12:46:32.098] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=78.812 >= VAL=20.000
+[2026-08-27 12:46:32.098] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.474 vs HAL=10.000 (im_h=-15.474), VPL=78.812 vs VAL=20.000 (im_v=-58.812), IM=-58.812
+[2026-08-27 12:46:32.175] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.601 >= HAL=10.000
+[2026-08-27 12:46:32.175] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.629 >= VAL=20.000
+[2026-08-27 12:46:32.175] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.601 vs HAL=10.000 (im_h=-14.601), VPL=71.629 vs VAL=20.000 (im_v=-51.629), IM=-51.629
+[2026-08-27 12:46:32.298] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.523 >= HAL=10.000
+[2026-08-27 12:46:32.298] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=73.605 >= VAL=20.000
+[2026-08-27 12:46:32.298] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.523 vs HAL=10.000 (im_h=-14.523), VPL=73.605 vs VAL=20.000 (im_v=-53.605), IM=-53.605
+[2026-08-27 12:46:32.374] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.857 >= HAL=10.000
+[2026-08-27 12:46:32.374] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=75.893 >= VAL=20.000
+[2026-08-27 12:46:32.374] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.857 vs HAL=10.000 (im_h=-14.857), VPL=75.893 vs VAL=20.000 (im_v=-55.893), IM=-55.893
+[2026-08-27 12:46:32.498] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.464 >= HAL=10.000
+[2026-08-27 12:46:32.498] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=69.274 >= VAL=20.000
+[2026-08-27 12:46:32.498] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.464 vs HAL=10.000 (im_h=-14.464), VPL=69.274 vs VAL=20.000 (im_v=-49.274), IM=-49.274
+[2026-08-27 12:46:32.575] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.759 >= HAL=10.000
+[2026-08-27 12:46:32.575] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=69.991 >= VAL=20.000
+[2026-08-27 12:46:32.575] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.759 vs HAL=10.000 (im_h=-14.759), VPL=69.991 vs VAL=20.000 (im_v=-49.991), IM=-49.991
+[2026-08-27 12:46:32.690] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.031 >= HAL=10.000
+[2026-08-27 12:46:32.690] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=70.218 >= VAL=20.000
+[2026-08-27 12:46:32.690] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.031 vs HAL=10.000 (im_h=-15.031), VPL=70.218 vs VAL=20.000 (im_v=-50.218), IM=-50.218
+[2026-08-27 12:46:32.799] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.584 >= HAL=10.000
+[2026-08-27 12:46:32.799] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.089 >= VAL=20.000
+[2026-08-27 12:46:32.799] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.584 vs HAL=10.000 (im_h=-15.584), VPL=71.089 vs VAL=20.000 (im_v=-51.089), IM=-51.089
+[2026-08-27 12:46:32.891] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.869 >= HAL=10.000
+[2026-08-27 12:46:32.891] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=76.570 >= VAL=20.000
+[2026-08-27 12:46:32.891] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.869 vs HAL=10.000 (im_h=-15.869), VPL=76.570 vs VAL=20.000 (im_v=-56.570), IM=-56.570
+[2026-08-27 12:46:32.999] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.920 >= HAL=10.000
+[2026-08-27 12:46:32.999] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=69.261 >= VAL=20.000
+[2026-08-27 12:46:32.999] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.920 vs HAL=10.000 (im_h=-14.920), VPL=69.261 vs VAL=20.000 (im_v=-49.261), IM=-49.261
+[2026-08-27 12:46:33.075] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.758 >= HAL=10.000
+[2026-08-27 12:46:33.075] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=76.007 >= VAL=20.000
+[2026-08-27 12:46:33.075] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.758 vs HAL=10.000 (im_h=-14.758), VPL=76.007 vs VAL=20.000 (im_v=-56.007), IM=-56.007
+[2026-08-27 12:46:33.198] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=26.422 >= HAL=10.000
+[2026-08-27 12:46:33.198] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=69.666 >= VAL=20.000
+[2026-08-27 12:46:33.199] [integrity] [warning] INTEGRITY UNSAFE: HPL=26.422 vs HAL=10.000 (im_h=-16.422), VPL=69.666 vs VAL=20.000 (im_v=-49.666), IM=-49.666
+[2026-08-27 12:46:33.291] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.637 >= HAL=10.000
+[2026-08-27 12:46:33.291] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.505 >= VAL=20.000
+[2026-08-27 12:46:33.291] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.637 vs HAL=10.000 (im_h=-14.637), VPL=71.505 vs VAL=20.000 (im_v=-51.505), IM=-51.505
+[2026-08-27 12:46:33.399] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.116 >= HAL=10.000
+[2026-08-27 12:46:33.399] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=71.096 >= VAL=20.000
+[2026-08-27 12:46:33.399] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.116 vs HAL=10.000 (im_h=-15.116), VPL=71.096 vs VAL=20.000 (im_v=-51.096), IM=-51.096
+[2026-08-27 12:46:33.475] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.995 >= HAL=10.000
+[2026-08-27 12:46:33.475] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=68.942 >= VAL=20.000
+[2026-08-27 12:46:33.475] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.995 vs HAL=10.000 (im_h=-15.995), VPL=68.942 vs VAL=20.000 (im_v=-48.942), IM=-48.942
+[2026-08-27 12:46:33.598] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.736 >= HAL=10.000
+[2026-08-27 12:46:33.598] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=73.588 >= VAL=20.000
+[2026-08-27 12:46:33.598] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.736 vs HAL=10.000 (im_h=-15.736), VPL=73.588 vs VAL=20.000 (im_v=-53.588), IM=-53.588
+[2026-08-27 12:46:33.673] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.691 >= HAL=10.000
+[2026-08-27 12:46:33.673] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=73.937 >= VAL=20.000
+[2026-08-27 12:46:33.673] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.691 vs HAL=10.000 (im_h=-14.691), VPL=73.937 vs VAL=20.000 (im_v=-53.937), IM=-53.937
+[2026-08-27 12:46:33.790] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.950 >= HAL=10.000
+[2026-08-27 12:46:33.790] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=72.603 >= VAL=20.000
+[2026-08-27 12:46:33.790] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.950 vs HAL=10.000 (im_h=-14.950), VPL=72.603 vs VAL=20.000 (im_v=-52.603), IM=-52.603
+[2026-08-27 12:46:33.876] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.151 >= HAL=10.000
+[2026-08-27 12:46:33.876] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=73.912 >= VAL=20.000
+[2026-08-27 12:46:33.876] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.151 vs HAL=10.000 (im_h=-15.151), VPL=73.912 vs VAL=20.000 (im_v=-53.912), IM=-53.912
+[2026-08-27 12:46:33.999] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=24.451 >= HAL=10.000
+[2026-08-27 12:46:33.999] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=76.078 >= VAL=20.000
+[2026-08-27 12:46:33.999] [integrity] [warning] INTEGRITY UNSAFE: HPL=24.451 vs HAL=10.000 (im_h=-14.451), VPL=76.078 vs VAL=20.000 (im_v=-56.078), IM=-56.078
+[2026-08-27 12:46:34.098] [integrity] [warning] INTEGRITY UNSAFE (horizontal): HPL=25.935 >= HAL=10.000
+[2026-08-27 12:46:34.098] [integrity] [warning] INTEGRITY UNSAFE (vertical): VPL=69.887 >= VAL=20.000
+[2026-08-27 12:46:34.098] [integrity] [warning] INTEGRITY UNSAFE: HPL=25.935 vs HAL=10.000 (im_h=-15.935), VPL=69.887 vs VAL=20.000 (im_v=-49.887), IM=-49.887

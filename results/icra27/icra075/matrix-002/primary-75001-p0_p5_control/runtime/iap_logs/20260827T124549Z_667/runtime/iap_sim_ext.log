@@ -1,0 +1,3 @@
+[2026-08-27 12:45:49.801] [sim_ext] [info] [sim_ext] truth_odom_topic=/sim/drone_0/truth_odom planner_odom_topic=/drone_0_visual_slam/odom align_to_truth=true alignment_max_dt=0.050s metrics_csv=/home/dev/ws_iap/src/iap/results/icra27/icra075/matrix-002/primary-75001-p0_p5_control/exports/test_planner_icra_p0_p4_v2_p5_dev_icra_p0_p4_v2_p5_dev_fixture_v1_1690352_1787834749466/iap_sim_truth_vs_est.csv
+[2026-08-27 12:45:49.802] [sim_ext] [info] [sim_ext] subscriptions created
+[2026-08-27 12:45:51.585] [sim_ext] [info] [sim_ext] initialized planner odom SE3 alignment truth_stamp=1657065601.828272 est_stamp=1657065601.828272 dt=0.000000s translation=[-11.999,0.007,1.411] rotation_deg=0.055

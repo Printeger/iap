@@ -1,0 +1,12 @@
+{
+  "argv": [
+    "/usr/bin/python3",
+    "/home/dev/ws_iap/src/iap/scripts/dev_planner/analyze_icra075_exploratory.py",
+    "--run-root",
+    "/home/dev/ws_iap/src/iap/results/icra27/icra075/matrix-002/primary-75001-p0_p5_control"
+  ],
+  "cwd": "/home/dev/ws_iap/src/iap",
+  "exit_code": 1,
+  "stderr": "",
+  "stdout": "FAIL\n"
+}

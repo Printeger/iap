@@ -1,0 +1,40 @@
+{
+  "argv": [
+    "bash",
+    "-lc",
+    "source /opt/ros/jazzy/setup.bash && source /home/dev/ws_iap/install/setup.bash && exec ros2 launch iap icra075_exploratory.launch.py experiment:=icra_p0_p4_v2_p5_dev scenario:=icra_p0_p4_v2_p5_dev_fixture_v1 icra075_scene_variant:=PRIMARY icra075_descriptor_sha256:=41ab7001c7c60e78cdcf8a670efdcba7545bcd7c93e06081745a090b57f0f06d forest_random_seed:=75001 init_x:=-12.0 init_y:=0.0 init_z:=1.5 goal_x:=12.0 goal_y:=0.0 goal_z:=1.5 manager/max_vel:=1.0 optimization/max_vel:=1.0 bspline/limit_vel:=1.0 manager/max_acc:=3.0 optimization/max_acc:=3.0 bspline/limit_acc:=3.0 planner_enable_p4:=false p4.metrics_only:=false p4.objective:=PROVIDER_BOTTLENECK_V2 gnss_scenario_file:=/home/dev/ws_iap/install/gnss_sim/share/gnss_sim/config/icra075_inverse_corridor_provider_v2.json gnss_enable_map_occlusion:=true run_duration_s:=75.0 validation_duration_s:=65.0 runtime_root_dir:=/home/dev/ws_iap/src/iap/results/icra27/icra075/matrix-002/primary-75001-p0_p5_control/runtime export_root_dir:=/home/dev/ws_iap/src/iap/results/icra27/icra075/matrix-002/primary-75001-p0_p5_control/exports iap_log_root:=/home/dev/ws_iap/src/iap/results/icra27/icra075/matrix-002/primary-75001-p0_p5_control/runtime/iap_logs bag_output_dir:=/home/dev/ws_iap/src/iap/results/icra27/icra075/matrix-002/primary-75001-p0_p5_control/bags p4.debug_csv_path:=/home/dev/ws_iap/src/iap/results/icra27/icra075/matrix-002/primary-75001-p0_p5_control/exports/planner_p4_risk_astar_debug.csv record_bag:=false start_rviz:=false"
+  ],
+  "launch_arguments": [
+    "experiment:=icra_p0_p4_v2_p5_dev",
+    "scenario:=icra_p0_p4_v2_p5_dev_fixture_v1",
+    "icra075_scene_variant:=PRIMARY",
+    "icra075_descriptor_sha256:=41ab7001c7c60e78cdcf8a670efdcba7545bcd7c93e06081745a090b57f0f06d",
+    "forest_random_seed:=75001",
+    "init_x:=-12.0",
+    "init_y:=0.0",
+    "init_z:=1.5",
+    "goal_x:=12.0",
+    "goal_y:=0.0",
+    "goal_z:=1.5",
+    "manager/max_vel:=1.0",
+    "optimization/max_vel:=1.0",
+    "bspline/limit_vel:=1.0",
+    "manager/max_acc:=3.0",
+    "optimization/max_acc:=3.0",
+    "bspline/limit_acc:=3.0",
+    "planner_enable_p4:=false",
+    "p4.metrics_only:=false",
+    "p4.objective:=PROVIDER_BOTTLENECK_V2",
+    "gnss_scenario_file:=/home/dev/ws_iap/install/gnss_sim/share/gnss_sim/config/icra075_inverse_corridor_provider_v2.json",
+    "gnss_enable_map_occlusion:=true",
+    "run_duration_s:=75.0",
+    "validation_duration_s:=65.0",
+    "runtime_root_dir:=/home/dev/ws_iap/src/iap/results/icra27/icra075/matrix-002/primary-75001-p0_p5_control/runtime",
+    "export_root_dir:=/home/dev/ws_iap/src/iap/results/icra27/icra075/matrix-002/primary-75001-p0_p5_control/exports",
+    "iap_log_root:=/home/dev/ws_iap/src/iap/results/icra27/icra075/matrix-002/primary-75001-p0_p5_control/runtime/iap_logs",
+    "bag_output_dir:=/home/dev/ws_iap/src/iap/results/icra27/icra075/matrix-002/primary-75001-p0_p5_control/bags",
+    "p4.debug_csv_path:=/home/dev/ws_iap/src/iap/results/icra27/icra075/matrix-002/primary-75001-p0_p5_control/exports/planner_p4_risk_astar_debug.csv",
+    "record_bag:=false",
+    "start_rviz:=false"
+  ]
+}

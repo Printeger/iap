@@ -1,0 +1,5 @@
+[INFO] [1787834749.880691843] [test_planner_so3_control_container]: Load Library: /home/dev/ws_iap/install/so3_control/lib/libso3_control_component.so
+[INFO] [1787834749.884854411] [test_planner_so3_control_container]: Found class: rclcpp_components::NodeFactoryTemplate<SO3ControlComponent>
+[INFO] [1787834749.884881976] [test_planner_so3_control_container]: Instantiate class: rclcpp_components::NodeFactoryTemplate<SO3ControlComponent>
+[INFO] [1787834749.889163609] [test_planner_so3_control_component]: start SO3ControlComponent
+[INFO] [1787834794.099890168] [rclcpp]: signal_handler(SIGINT/SIGTERM)
