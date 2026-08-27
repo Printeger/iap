@@ -42,8 +42,14 @@ Verdict: **REQUEST_CHANGES — one High missing exit artifact; repair implementa
 
 ### Supervisor window disposition
 
-- **Pending mandatory post-push audit.** Final KEEP/ROTATE and handoff anchor will be recorded after the Review
-  changeset is pushed and divergence is reconfirmed.
+- Review commit `57bde4416c2cb08f338ae8e804cac886ef5f781c` was pushed normally; pre-push passed and fetch reconfirmed
+  divergence `0 0`. The normal commit attempt hit the expected `BUILDER_SUPERVISOR_FILE_STAGED` lifecycle guard,
+  so Supervisor used the controlled section 8.6 `--no-verify` path; only the 12 declared Supervisor/adjudication
+  documents were staged and both untracked retained artifacts remained untouched.
+- **`ROTATE_RECOMMENDED`**. Reason: `ICRA072B_EXACT_ARTIFACT_CANONICAL_CONTRACT_CHANGE`. This Review changes the
+  canonical source-admission contract and the same window has now handled multiple repair cycles. A fresh
+  Supervisor window must later review the Builder completion from repository authority. Rotation does not change
+  `active_role=DEEPSEEK` or authorize anything beyond `NEXT_TASK.md`.
 
 ## 2026-08-27 — ICRA-072B Review REQUEST_CHANGES; bounded canonical repair issued
 
