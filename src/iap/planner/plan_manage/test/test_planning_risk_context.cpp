@@ -299,6 +299,12 @@ TEST(P4VerticalSliceTerminalLineageTest,
   ASSERT_EQ(optimizer->getP4AttemptLineage().size(), 1U);
   ASSERT_TRUE(optimizer->getP4AttemptLineage().front().selection_applied);
   const auto admitted_lineage = optimizer->getP4AttemptLineage().front();
+  // ICRA-075 evidence must remain terminally identity-bound for the legacy
+  // objective ablation too. Objective changes evidence eligibility only here;
+  // the already-admitted guide and every decision byte remain untouched.
+  auto legacy_evidence_config = optimizer->getP4RiskAStarConfig();
+  legacy_evidence_config.objective = P4RiskObjective::LEGACY_INTEGRAL_V1;
+  optimizer->setP4RiskAStarConfigForTest(legacy_evidence_config);
 
   const Eigen::MatrixXd refined = p4RefinedControlPoints();
   optimizer->setControlPoints(refined);
@@ -696,6 +702,30 @@ TEST(P4VerticalSliceTerminalLineageTest,
     EXPECT_FALSE(std::filesystem::exists(
         std::filesystem::path(debug_path.string() + ".lineage.csv")));
   }
+
+  const auto snapshot = makeP4SelectionSnapshot();
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureP4SelectionTrigger(map.get());
+  const auto debug_path = p4LineageTestPath(
+      "terminal_legacy_observational_failure.csv");
+  auto optimizer = makeP4Optimizer(map, snapshot, debug_path.string(), 1);
+  Eigen::MatrixXd seed = p4Seed();
+  ASSERT_EQ(optimizer->initControlPoints(seed, true).status,
+            ego_planner::CollisionScanStatus::CLOSED_SEGMENTS);
+  auto legacy_config = optimizer->getP4RiskAStarConfig();
+  legacy_config.objective = P4RiskObjective::LEGACY_INTEGRAL_V1;
+  optimizer->setP4RiskAStarConfigForTest(legacy_config);
+  optimizer->releaseP4RiskSnapshot();
+  ego_planner::EGOPlannerManager manager;
+  manager.setP4VerticalSliceOptimizerForTest(std::move(optimizer), map);
+  manager.local_data_.position_traj_ =
+      ego_planner::UniformBspline(Eigen::MatrixXd(3, 0), 3, 0.5);
+  manager.local_data_.traj_id_ = 9;
+  manager.local_data_.start_time_ = rclcpp::Time(10, 0, RCL_ROS_TIME);
+  EXPECT_TRUE(manager.recordP4VerticalSliceLineage(
+      "final_bspline_before_p5", 10.0));
+  EXPECT_FALSE(std::filesystem::exists(
+      std::filesystem::path(debug_path.string() + ".lineage.csv")));
 }
 
 TEST(P4VerticalSliceTerminalLineageTest,

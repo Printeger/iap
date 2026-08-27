@@ -163,6 +163,39 @@ Pushed-source 离线记录为 `results/icra27/icra074/offline-targeted-001.json`
 `79989ac8c128977e37d91f0f3cd30ec3a0618f3818b44d34da53981893fefc67`；该记录不构成 source-guard、
 effect、qualification 或 campaign claim。
 
+### 1.2.5 ICRA-075 development exploratory matrix
+
+ICRA-075 使用 V2 PRIMARY/EXACT_MIRROR/FLAT_NULL runtime assets、development seeds `75001..75005` 和固定
+40-row matrix。它只产生 exploratory/non-freezing power inputs；这些 seeds 永久排除于 future held-out。
+
+```bash
+cd /home/dev/ws_iap/src/iap
+python3 test/test_icra075_exploratory.py -v
+
+# 新 runtime/config bytes 使用共享 build/install/log；随后执行 canonical 六包构建。
+cd /home/dev/ws_iap
+source /opt/ros/jazzy/setup.bash
+source /home/dev/ws_iap/install/setup.bash
+colcon --log-base /home/dev/ws_iap/log build \
+  --paths /home/dev/ws_iap/src/iap/src/uav_simulator/map_generator \
+          /home/dev/ws_iap/src/iap/src/uav_simulator/gnss_sim \
+  --packages-select map_generator gnss_sim \
+  --build-base /home/dev/ws_iap/build --install-base /home/dev/ws_iap/install \
+  --symlink-install
+/home/dev/ws_iap/src/iap/scripts/dev_planner/build_iap_dev.sh
+
+# 仅在 implementation/test/config bytes 已 push 且 divergence 0 0 后运行；matrix-NNN 必须全新。
+cd /home/dev/ws_iap/src/iap
+scripts/dev_planner/run_icra075_exploratory.py \
+  --matrix-root results/icra27/icra075/matrix-NNN \
+  --duration-s 45
+```
+
+Runner 在任何 ROS/main flow 前只执行一次 GPU preflight；失败时输出 `GPU_NOT_READY`、保留 attempt 并停止。
+成功时严格运行 30 个 formal-arm development rows 与 PRIMARY 的 10 个显式 ablation rows，不增加 seed、
+不重试/排除完成行。独立 analyzer 只从 frozen descriptor 与 committed-final/publication identity 生成 200 个
+equal-arc samples；不会消费 P4 guide/route/objective evidence 作为 oracle 输入。
+
 ### 1.3 运行一个最小检查
 
 ```bash

@@ -1,5 +1,54 @@
 # DeepSeek Development Log — DEEPSEEK-owned
 
+## 2026-08-27 — ICRA-075 exploratory ablation and power-input tooling
+
+Requirements: IAP-RQ-320, IAP-RQ-321, IAP-RQ-400, IAP-RQ-410,
+IAP-RQ-421, IAP-RQ-422, IAP-RQ-423 and IAP-RQ-424.
+
+The TASK_READY handoff was fetch-confirmed at pushed `7752255987504bdf961d01a32029769eaf512d80`
+with divergence `0 0`; ambient status contained only the protected untracked PDF. ICRA-072B/073 remain
+BLOCKED/user-bypassed/NOT PASS. No source/output-guard debt was repaired and no prior evidence was rewritten.
+
+Focused TDD began RED with all six contracts failing because no ICRA-075 module existed. Review-driven REDs then
+exposed the Layer-1 trigger preset, a non-adversarial oracle test, constant safety flags, incomplete scene/provider
+binding, fixed-density arc approximation and pooled/misnamed power summaries. GREEN adds the exact
+40-row development matrix (30 formal control/treatment rows plus 10 PRIMARY ablations), permanent exclusion of
+seeds `75001..75005`, V2 descriptor/runtime-asset binding, forbidden decision-plane checks, 200-point equal-arc
+committed-final analysis, P4-output-independent oracle values, paired identity, ablation isolation, typed
+first-missing stages and deterministic non-freezing power inputs. The final focused suite passes 11/11. Its actual
+row-analyzer adversary proves identical oracle values for a P4-enabled treatment with its P4 evidence deleted;
+completeness correctly fails in the deletion case. Curved B-spline sampling uses deterministic midpoint-speed
+inversion with a certified arc-position bound derived from the second-derivative control-hull Lipschitz bound.
+
+Runtime materialization is additive: an exact ordinary-occupancy publisher under `map_generator`, a fault-free
+GNSS/provider fixture input under `gnss_sim`, and an `icra075` launch wrapper that reuses the production
+`test_planner` action graph while replacing only its map publisher node. Runtime rows use the V2 development
+fixture rather than the Layer-1 trigger; NULL disables the route-dependent GNSS mask. Safe/risky labels and
+provider/oracle values exist only in the frozen evaluation descriptor, never the runtime GNSS asset. The new
+capture binds scene/descriptor and retains complete control points/knots and publication
+identity. The analyzer validates treatment selection-to-EGO/P5/publication lineage and computes collision against
+the V2 ordinary geometry plus velocity/acceleration from exact B-spline derivatives; missing margin, latency,
+lineage or unsafe results fail closed. Minimal evidence-only instrumentation writes terminal lineage for every
+enabled P4 objective; disabled and metrics-only rows receive explicit bound stage types. New legacy/metrics
+evidence is observational: writer failure cannot block publication, while the analyzer still fails the scientific
+row. P0/P4/EGO/P5 algorithms, objectives, risk truth, AL/PL and thresholds are unchanged. Power inputs now
+disclose flat-null repeatability proxy distributions, zero mass, matched-arm cross-seed correlation, explicitly
+unavailable within-run correlation and per-scene 30--60 sensitivity. Shared `map_generator`/`gnss_sim` installation and the canonical exact
+six-package build both pass; no task-local build/install tree was created.
+
+The affected production lineage suite passes 34/34 from a fresh temporary ROS log root. One preceding direct
+single-test invocation used the shared ordinary log directory and observed six appended CSV rows instead of the
+three rows from that invocation; it exited 1. Re-running the same byte-identical test with a fresh log root passed,
+and the final full suite also passed. No scientific row identity or repository evidence path was consumed.
+
+Implementation bytes must be pushed and divergence rechecked before the single batch GPU preflight. No ROS/GPU
+preflight or matrix row has run yet. The result remains development-only and cannot freeze SESOI, threshold,
+sample size or a success verdict.
+
+Batch source checks allow only the active repository-local matrix output prefix and the protected PDF path while
+rejecting tracked/other-untracked changes. Every initial/per-row/final check also recomputes and compares exact
+regular-file/non-symlink size/hash inventory for the PDF and both hidden retained artifacts.
+
 ## 2026-08-27 — ICRA-074 V2 geometry and offline targeted optimization
 
 Requirements: IAP-RQ-320, IAP-RQ-321, IAP-RQ-400, IAP-RQ-410,

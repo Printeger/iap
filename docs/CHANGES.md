@@ -3,6 +3,21 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(icra-075-exploratory-power-inputs): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 /
+  IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — add deterministic V2 PRIMARY/MIRROR/NULL runtime
+  map/GNSS assets, a dedicated public-map launch substitution, exact 40-row development runner, complete
+  committed-final capture, independent fixed-200 equal-arc analyzer and deterministic non-freezing power-input
+  calculation. Seeds `75001..75005` are permanently non-held-out; ablations remain explicit PRIMARY-only
+  configurations and never become formal arms. The runtime no longer inherits the Layer-1 trigger; NULL removes
+  the route mask, while safe/risky provider/oracle values remain evaluation-only. Scene/hash and every enabled-P4
+  terminal lineage are checked; disabled/metrics-only stages are explicit, and added legacy/metrics evidence
+  failures remain observational so they cannot change publication. Collision/dynamics are independently
+  calculated, certified equal-arc sampling discloses a control-hull-derived bound, and power inputs report
+  flat-null repeatability/zero-mass/cross-seed sensitivity while typing intra-run correlation unavailable. Focused
+  TDD passes 11/11, affected lineage tests pass 34/34, and shared map/GNSS install plus canonical six-package
+  build pass. Per-row/final source checks permit only the active matrix output and revalidate all three retained
+  artifact type/size/hashes. No P0/P4/EGO/P5 algorithm, risk truth, AL/PL, threshold or prior evidence changed.
+
 - review(icra-074-pass-issue-icra075): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 /
   IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — review `ee9774a1` against fixed `f6f7832a`.
   Standards PASS and Spec PASS; Supervisor offline rerun passes 51/51. V2 exact geometry, production-seam

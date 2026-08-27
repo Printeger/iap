@@ -754,22 +754,28 @@ namespace ego_planner
     if (!bspline_optimizer_)
       return false;
     const auto &config = bspline_optimizer_->getP4RiskAStarConfig();
-    if (!config.enable_risk_aware_astar ||
-        config.objective != P4RiskObjective::PROVIDER_BOTTLENECK_V2)
+    // Evidence-only: every enabled P4 objective must bind its admitted guide
+    // to the same final/P5/publication identity. Only the existing production
+    // P4-v2 treatment makes writer failure publication-blocking; exploratory
+    // legacy/metrics evidence is observational and the analyzer fails its row.
+    if (!config.enable_risk_aware_astar)
       return true;
+    const bool strict_lineage_required =
+        config.objective == P4RiskObjective::PROVIDER_BOTTLENECK_V2 &&
+        !config.metrics_only;
     const Eigen::MatrixXd control_points =
         local_data_.position_traj_.getControlPoint();
     if (local_data_.traj_id_ <= 0 ||
         local_data_.start_time_.nanoseconds() <= 0 ||
         control_points.rows() != 3 || control_points.cols() == 0 ||
         !control_points.allFinite())
-      return false;
+      return !strict_lineage_required;
     if (!bspline_optimizer_->validateP4AttemptLineage(
             planning_risk_context_.planning_attempt_id))
-      return false;
+      return !strict_lineage_required;
     const auto &guides = bspline_optimizer_->getP4AttemptLineage();
     if (!config.debug_csv_enable || config.debug_csv_path.empty() || guides.empty())
-      return false;
+      return !strict_lineage_required;
     const std::string path = config.debug_csv_path + ".lineage.csv";
     std::ifstream existing(path);
     const bool header = !existing.good() ||
@@ -777,7 +783,7 @@ namespace ego_planner
     existing.close();
     std::ofstream csv(path, std::ios::app);
     if (!csv.good())
-      return false;
+      return !strict_lineage_required;
     if (header)
       csv << "schema_version,stage,stamp_s,planning_attempt_id,collision_segment_id,"
              "request_hash,snapshot_generation_id,snapshot_config_hash,occupancy_epoch,original_guide_hash,"
@@ -816,9 +822,9 @@ namespace ego_planner
     }
     csv.flush();
     if (!csv.good())
-      return false;
+      return !strict_lineage_required;
     csv.close();
-    return !csv.fail();
+    return !csv.fail() || !strict_lineage_required;
   }
 
   void EGOPlannerManager::setPlanningRiskContextForTest(

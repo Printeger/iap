@@ -1,0 +1,48 @@
+{
+  "schema_version": "icra075_runtime_map_fixture_v1",
+  "design_record": "ICRA_P4_V2_INVERSE_CORRIDOR_FIXTURE_V2",
+  "frame_id": "map",
+  "resolution_m": 0.1,
+  "descriptor_sha256": {
+    "PRIMARY": "41ab7001c7c60e78cdcf8a670efdcba7545bcd7c93e06081745a090b57f0f06d",
+    "EXACT_MIRROR": "3bd25208dba3bbd03857104758878e30d647b7f8bfdfc43e7654f78b569caf33",
+    "FLAT_NULL": "89074561a7263268e121c2439ceccaca2b3c7285f665432ebdc07ab5668e8513"
+  },
+  "central_cuboid_bounds_m": {
+    "x": [-2.0, 2.0],
+    "y": [-0.75, 0.75],
+    "z": [0.0, 2.8]
+  },
+  "outer_tree_centres_m": [
+    [-6.0, -6.0, 0.0], [-2.0, -6.0, 0.0],
+    [2.0, -6.0, 0.0], [6.0, -6.0, 0.0],
+    [-6.0, 6.0, 0.0], [-2.0, 6.0, 0.0],
+    [2.0, 6.0, 0.0], [6.0, 6.0, 0.0]
+  ],
+  "outer_tree_trunk_radius_m": 0.1,
+  "outer_tree_height_m": 3.0,
+  "lidar_landmark_pairs_m": [
+    [[-8.0, -5.25, 1.5], [-8.0, 5.25, 1.5]],
+    [[0.0, -5.25, 1.5], [0.0, 5.25, 1.5]],
+    [[8.0, -5.25, 1.5], [8.0, 5.25, 1.5]]
+  ],
+  "lidar_landmark_radius_m": 0.1,
+  "lidar_landmark_height_m": 3.0,
+  "gnss_only_mask": {
+    "enabled": {
+      "PRIMARY": true,
+      "EXACT_MIRROR": true,
+      "FLAT_NULL": false
+    },
+    "x_interval_m": [-8.0, 8.0],
+    "z_interval_m": [7.3, 7.55],
+    "projection_half_width_m": 0.75,
+    "risky_mask_amplitude_y_m": {
+      "PRIMARY": -2.2,
+      "EXACT_MIRROR": 2.2,
+      "FLAT_NULL": 0.0
+    }
+  },
+  "public_decision_plane_output": "ordinary_occupancy_point_cloud_only",
+  "decision_plane_inputs": ["immutable_p0_snapshot", "ordinary_occupancy"]
+}

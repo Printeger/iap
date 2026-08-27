@@ -57,4 +57,13 @@ install(TARGETS random_forest
   DESTINATION lib/${PROJECT_NAME}
 )
 
+install(PROGRAMS
+  scripts/icra075_inverse_corridor_map_publisher.py
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+install(DIRECTORY config
+  DESTINATION share/${PROJECT_NAME}
+)
+
 ament_package()

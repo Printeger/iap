@@ -1,0 +1,33 @@
+{
+  "icra075_binding": {
+    "schema_version": "icra075_runtime_provider_fixture_v1",
+    "descriptor_sha256": {
+      "PRIMARY": "41ab7001c7c60e78cdcf8a670efdcba7545bcd7c93e06081745a090b57f0f06d",
+      "EXACT_MIRROR": "3bd25208dba3bbd03857104758878e30d647b7f8bfdfc43e7654f78b569caf33",
+      "FLAT_NULL": "89074561a7263268e121c2439ceccaca2b3c7285f665432ebdc07ab5668e8513"
+    },
+    "finite_complete_route_support": {
+      "PRIMARY": true, "EXACT_MIRROR": true, "FLAT_NULL": true
+    },
+    "gnss_mask_enabled": {
+      "PRIMARY": true, "EXACT_MIRROR": true, "FLAT_NULL": false
+    },
+    "decision_plane_exposure": "public_gnss_measurements_and_ordinary_occupancy_only"
+  },
+  "anchor": {
+    "lat_deg": 31.2304,
+    "lon_deg": 121.4737,
+    "alt_m": 25.0
+  },
+  "skymask": {
+    "enabled": true,
+    "default_min_elevation_deg": 10.0,
+    "az_el_deg": [
+      {"az_deg": 0.0, "min_el_deg": 10.0},
+      {"az_deg": 90.0, "min_el_deg": 10.0},
+      {"az_deg": 180.0, "min_el_deg": 10.0},
+      {"az_deg": 270.0, "min_el_deg": 10.0}
+    ]
+  },
+  "faults": []
+}
