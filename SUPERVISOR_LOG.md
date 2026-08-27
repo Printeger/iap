@@ -50,8 +50,13 @@ Verdict: **PASS for the bounded repair task; ICRA-075 itself remains BLOCKED/NOT
 
 ### Supervisor window disposition
 
-- Pending post-push audit. The final disposition and pushed handoff anchor will be recorded after this Review
-  changeset becomes repository authority.
+- Review changeset `ba1a647f75b334165780f3afcad2210f38522418` was pushed; fetch confirmed divergence `0 0`. The normal commit
+  was blocked by `BUILDER_SUPERVISOR_FILE_STAGED`; after route consistency PASS and exact 12-file staging review,
+  Supervisor used the controlled section 8.6 `--no-verify` path. Builder evidence and protected PDF stayed unstaged.
+- **`ROTATE_RECOMMENDED`**. Reason: `ICRA075_FROZEN_CONTRACT_USER_DECISION_AND_CONTEXT_COMPACTED`. The Review
+  closes the bounded repair in a blocked route-owner decision state, and current context has compacted. A fresh
+  Supervisor window must restore only from the latest pushed repository authority; rotation does not issue
+  ICRA-076 or authorize Builder work.
 
 ## 2026-08-27 — user decision 005 authorizes bounded ICRA-075 repair
 
