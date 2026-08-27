@@ -141,6 +141,16 @@ class Icra076PreregistrationTest(unittest.TestCase):
                 retained_non_held_out_evidence_path="results/icra077/held_out.json"),
             "HELD_OUT_PATH_FORBIDDEN")
 
+    def test_top_level_held_out_inputs_are_rejected_before_access(self):
+        module = load_module()
+        forbidden = REPOSITORY / "held_out-do-not-open.json"
+        with self.assertRaises(module.Icra076Error) as protocol:
+            module.validate_preregistration(forbidden, REGISTRY_PATH)
+        self.assertEqual(protocol.exception.code, "HELD_OUT_PATH_FORBIDDEN")
+        with self.assertRaises(module.Icra076Error) as verification:
+            module.load_verification(Path("/tmp/held-out-do-not-open.json"))
+        self.assertEqual(verification.exception.code, "HELD_OUT_PATH_FORBIDDEN")
+
     def test_output_must_be_repository_local_fresh_and_non_symlinked(self):
         module = load_module()
         with tempfile.TemporaryDirectory(prefix="icra076-output-", dir=REPOSITORY) as temporary:
@@ -186,22 +196,69 @@ class Icra076PreregistrationTest(unittest.TestCase):
                 module.verify_inventory([install_record], root, "INSTALL")
             self.assertEqual(install_drift.exception.code, "INSTALL_BYTE_DRIFT")
 
+    def test_inventory_schema_and_source_coverage_are_complete(self):
+        module = load_module()
+        protocol = json.loads(PROTOCOL_PATH.read_text())
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            target = root / "target"
+            target.write_bytes(b"bytes")
+            link = root / "link"
+            link.symlink_to(target)
+            self.assertEqual(
+                set(module.inventory_path(link, root)),
+                set(protocol["byte_freeze"]["inventory_record_fields"]))
+        roots = protocol["byte_freeze"]["source_inventory_roots"]
+        for required in (
+                "include/iap", "src/iap", "src/uav_simulator", "launch",
+                "config", "scripts/dev_planner", "test/test_icra076_preregistration.py",
+                "scripts/dev_planner/build_iap_dev.sh",
+                "docs/icra27/dev/ICRA_P4_V2_INVERSE_CORRIDOR_FIXTURE.md",
+                "docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md",
+                "docs/icra27/ICRA_FOUR_LAYER_DEVELOPMENT_WORKFLOW.md",
+                "docs/icra27/ICRA_CROSS_LAYER_GUARD_PLAN.md"):
+            self.assertIn(required, roots)
+        self.assertEqual(
+            protocol["byte_freeze"]["rebuilt_packages"],
+            ["iap", "plan_env", "traj_utils", "path_searching",
+             "bspline_opt", "ego_planner"])
+        self.assertTrue({"gnss_sim", "local_sensing", "map_generator"}.issubset(
+            protocol["byte_freeze"]["runtime_install_packages"]))
+
+    def test_repeatability_consumes_sixty_serialized_observations(self):
+        module = load_module()
+        replay = json.loads((REPOSITORY / "config/icra27/"
+                             "icra076_repeatability_replay_v1.json").read_text())
+        observations = replay["serialized_snapshot_replays"]
+        self.assertEqual(len(observations), 60)
+        self.assertEqual([item["replay_index"] for item in observations],
+                         list(range(1, 61)))
+        mutated = copy.deepcopy(replay)
+        mutated["serialized_snapshot_replays"][59][
+            "risk_interior_provider_c_pi_m"] += 0.5
+        with tempfile.TemporaryDirectory(prefix="icra076-replay-", dir=REPOSITORY) as temporary:
+            path = Path(temporary) / "replay.json"
+            path.write_text(json.dumps(mutated))
+            with self.assertRaises(module.Icra076Error) as caught:
+                module.validate_preregistration(
+                    PROTOCOL_PATH, REGISTRY_PATH, replay_path=path)
+        self.assertIn(caught.exception.code, {
+            "REPEATABILITY_SNAPSHOT_NOT_BYTE_IDENTICAL",
+            "REPEATABILITY_CONTRACT_MISMATCH"})
+
     def test_skipped_disabled_or_failed_verification_is_rejected(self):
         module = load_module()
-        valid = {
-            "commands": [
-                {"category": "FOCUSED_TESTS", "argv": ["python3", "test.py"],
-                 "enabled": True, "skipped": False, "exit_code": 0},
-                {"category": "VALIDATOR", "argv": ["python3", "validate.py"],
-                 "enabled": True, "skipped": False, "exit_code": 0},
-                {"category": "SIX_PACKAGE_BUILD", "argv": ["build.sh"],
-                 "enabled": True, "skipped": False, "exit_code": 0},
-                {"category": "REPEATABILITY_REPLAY",
-                 "argv": ["replay", "--repeat=60"],
-                 "enabled": True, "skipped": False, "exit_code": 0},
-            ]
-        }
+        valid = {"commands": [
+            {"category": category, "argv": argv, "enabled": True,
+             "skipped": False, "exit_code": 0}
+            for category, argv in module.expected_verification_argv().items()]}
         module.validate_verification(valid)
+        wrong_command = copy.deepcopy(valid)
+        wrong_command["commands"][0]["argv"] = ["true"]
+        with self.assertRaises(module.Icra076Error) as command:
+            module.validate_verification(wrong_command)
+        self.assertEqual(command.exception.code,
+                         "REQUIRED_VERIFICATION_COMMAND_DRIFT")
         for field, value in (("skipped", True), ("enabled", False),
                              ("exit_code", 1)):
             mutated = copy.deepcopy(valid)

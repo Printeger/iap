@@ -21,7 +21,7 @@ def main() -> int:
     parser.add_argument("--verification", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    verification = json.loads(args.verification.read_text())
+    verification = CONTRACT.load_verification(args.verification)
     record = CONTRACT.create_freeze_record(
         args.protocol, args.seed_registry, args.output, verification)
     print(json.dumps({

@@ -26,10 +26,19 @@ finished successfully using `/home/dev/ws_iap/{build,install,log}`. No held-out 
 ICRA-077, qualification or campaign work ran. ICRA-075 remains BLOCKED/user-bypassed/NOT PASS at 0/40.
 
 Implementation `acdb35e8d2c22fffa5dc8144abcb724f70420722` was pushed and fetch-confirmed at divergence `0 0`
-before the sole fresh freeze output was created. `results/icra27/icra076/preregistration-freeze-001.json` binds
-119 relevant tracked source entries, 767 exact shared-install entries and all 360 execution rows; independent
-freeze validation passes. The 339,801-byte record has SHA-256
-`51464dff7fd4e0254cb5eb86929a064dd04909e768cc220637265381b7e60582`.
+before `results/icra27/icra076/preregistration-freeze-001.json` was created. The first review rejected that
+339,801-byte attempt (`51464dff…60582`): top-level paths could be opened before held-out rejection, symlink
+inventory records had an undeclared fifth field, source/runtime coverage was incomplete, replay U95 consumed
+declared constants rather than 60 explicit observations, and three verification command identities were not
+fixed. The record remains immutable historical evidence and is not the canonical freeze.
+
+Repair RED→GREEN raises focused adversarial coverage to 13/13. All top-level repository inputs and the external
+verification-manifest path reject forbidden held-out tokens before read; repository inputs also reject external or
+symlink resolution. Every inventory record is exactly path/type/size/SHA-256. Source coverage now includes full
+config/include/launch/dev-runner/IAP/uav-simulator trees, the focused test, canonical build script and frozen
+fixture/roadmap/workflow/guard authorities. Installed coverage includes the six rebuilt packages plus the seven
+launched map/GNSS/LiDAR/visualization/control runtime packages. U95 consumes 60 indexed byte-identical serialized
+snapshot observations, and all four required command argv vectors are exact rather than self-selected.
 
 ## 2026-08-27 — ICRA-075 bounded fail-closed repair and P5 compatibility diagnosis
 

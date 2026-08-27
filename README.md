@@ -237,9 +237,9 @@ python3 scripts/dev_planner/validate_icra076_preregistration.py \
 
 冻结 record 绑定 protocol/registry/order、完整相关 tracked source bytes、共享六包 install bytes、验证命令
 和 pushed source commit。后续任一相关 source/install drift 都会在 ICRA-077 前 fail closed；本节不授权
-ICRA-077。当前唯一记录为 `results/icra27/icra076/preregistration-freeze-001.json`，绑定 pushed source
-`acdb35e8d2c22fffa5dc8144abcb724f70420722`，文件 SHA-256 为
-`51464dff7fd4e0254cb5eb86929a064dd04909e768cc220637265381b7e60582`。
+ICRA-077。`results/icra27/icra076/preregistration-freeze-001.json`（`51464dff…60582`）是首轮 review
+拒绝的历史 attempt，不是 canonical freeze；它因 pre-access/inventory/coverage/replay/command-binding 缺陷
+保留且不得覆盖。后续必须使用新的非覆盖 identity，并绑定已推送的修复 bytes。
 
 ### 1.3 运行一个最小检查
 

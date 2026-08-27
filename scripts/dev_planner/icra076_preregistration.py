@@ -61,6 +61,39 @@ def _json(path: Path) -> dict[str, Any]:
     return value
 
 
+def _reject_forbidden_path_tokens(path: Path) -> None:
+    rendered = str(path).lower()
+    if any(token in rendered for token in FORBIDDEN_INPUT_TOKENS):
+        _fail("HELD_OUT_PATH_FORBIDDEN", str(path))
+
+
+def _repository_input_path(path: Path, repository: Path) -> Path:
+    """Admit a repository-local regular input before opening it."""
+    _reject_forbidden_path_tokens(path)
+    repository = repository.resolve()
+    candidate = path if path.is_absolute() else repository / path
+    absolute = candidate.absolute()
+    try:
+        absolute.relative_to(repository)
+    except ValueError:
+        _fail("EXTERNAL_INPUT_PATH_FORBIDDEN", str(path))
+    if absolute.is_symlink():
+        _fail("INPUT_SYMLINK_FORBIDDEN", str(path))
+    try:
+        absolute.resolve().relative_to(repository)
+    except ValueError:
+        _fail("EXTERNAL_INPUT_PATH_FORBIDDEN", str(path))
+    return absolute
+
+
+def load_verification(path: Path) -> dict[str, Any]:
+    """Load the external command manifest only after held-out-token rejection."""
+    _reject_forbidden_path_tokens(path)
+    if path.is_symlink():
+        _fail("INPUT_SYMLINK_FORBIDDEN", str(path))
+    return _json(path)
+
+
 def _finite_number(value: Any, code: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         _fail(code, "not numeric")
@@ -125,7 +158,6 @@ def inventory_path(path: Path, base: Path) -> dict[str, Any]:
             "type": "symlink_to_file",
             "size_bytes": target.stat().st_size,
             "sha256": file_sha256(target),
-            "link_target": str(Path(path_absolute.readlink())),
         }
     if not path_absolute.is_file():
         _fail("INVENTORY_TYPE_INVALID", relative)
@@ -158,12 +190,43 @@ def verify_inventory(records: list[dict[str, Any]], base: Path,
             _fail(expected_code, relative)
 
 
+def expected_verification_argv() -> dict[str, list[str]]:
+    return {
+        "FOCUSED_TESTS": [
+            "bash", "-lc",
+            ("python3 test/test_icra073_inverse_corridor.py -v && "
+             "python3 test/test_icra074_geometry.py -v && "
+             "python3 test/test_icra075_exploratory.py -v && "
+             "python3 test/test_icra076_preregistration.py -v")],
+        "VALIDATOR": [
+            "python3", "scripts/dev_planner/validate_icra076_preregistration.py"],
+        "SIX_PACKAGE_BUILD": [
+            "colcon", "--log-base", "/home/dev/ws_iap/log", "build",
+            "--paths", "/home/dev/ws_iap/src/iap",
+            "/home/dev/ws_iap/src/iap/src/iap/planner/plan_env",
+            "/home/dev/ws_iap/src/iap/src/iap/planner/traj_utils",
+            "/home/dev/ws_iap/src/iap/src/iap/planner/path_searching",
+            "/home/dev/ws_iap/src/iap/src/iap/planner/bspline_opt",
+            "/home/dev/ws_iap/src/iap/src/iap/planner/plan_manage",
+            "--packages-select", "iap", "plan_env", "traj_utils",
+            "path_searching", "bspline_opt", "ego_planner",
+            "--build-base", "/home/dev/ws_iap/build",
+            "--install-base", "/home/dev/ws_iap/install",
+            "--symlink-install", "--cmake-args", "-DBUILD_TESTING=ON"],
+        "REPEATABILITY_REPLAY": [
+            "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
+            ("--gtest_filter=P4CollisionGuideDecision."
+             "Icra074FlatNullEqualCostsAndLengthUseStableHash"),
+            "--gtest_repeat=60"],
+    }
+
+
 def validate_verification(verification: dict[str, Any]) -> None:
     commands = verification.get("commands")
     if not isinstance(commands, list):
         _fail("REQUIRED_VERIFICATION_NOT_PASS", "commands missing")
-    categories = {"FOCUSED_TESTS", "VALIDATOR", "SIX_PACKAGE_BUILD",
-                  "REPEATABILITY_REPLAY"}
+    expected = expected_verification_argv()
+    categories = set(expected)
     observed: set[str] = set()
     for command in commands:
         if not isinstance(command, dict):
@@ -179,6 +242,8 @@ def validate_verification(verification: dict[str, Any]) -> None:
                 command.get("skipped") is not False or
                 command.get("exit_code") != 0):
             _fail("REQUIRED_VERIFICATION_NOT_PASS", str(category))
+        if argv != expected[category]:
+            _fail("REQUIRED_VERIFICATION_COMMAND_DRIFT", str(category))
     if observed != categories:
         _fail("REQUIRED_VERIFICATION_NOT_PASS", "category missing")
 
@@ -230,7 +295,7 @@ def exact_binomial_passing_rule(n: int, probability: float,
 
 def _repeatability_bound(replay: dict[str, Any], repository: Path) -> dict[str, Any]:
     if set(replay) != {"schema_version", "outcome_blind", "held_out", "unit",
-                       "replay_count", "sample_count", "serialized_snapshot",
+                       "replay_count", "sample_count", "serialized_snapshot_replays",
                        "admissibility", "calculation"}:
         _fail("REPEATABILITY_FIELDS_INVALID")
     if replay.get("schema_version") != "icra076_byte_identical_snapshot_replay_v1":
@@ -242,18 +307,37 @@ def _repeatability_bound(replay: dict[str, Any], repository: Path) -> dict[str, 
     count = replay.get("replay_count")
     if count != 60 or replay.get("sample_count") != 200:
         _fail("REPEATABILITY_CARDINALITY_INVALID")
-    snapshot = replay.get("serialized_snapshot", {})
-    if snapshot.get("schema_version") != "p4_risk_grid_snapshot_replay_v1":
-        _fail("SERIALIZED_SNAPSHOT_SCHEMA_MISMATCH")
-    original = _finite_number(
-        snapshot.get("original_interior_provider_c_pi_m"),
-        "REPEATABILITY_VALUE_INVALID")
-    risk = _finite_number(snapshot.get("risk_interior_provider_c_pi_m"),
-                          "REPEATABILITY_VALUE_INVALID")
-    resolution = _finite_number(snapshot.get("resolution_m"),
-                                "REPEATABILITY_VALUE_INVALID")
-    if resolution <= 0.0 or snapshot.get("provider_truth") != "FLAT_NULL":
-        _fail("SERIALIZED_SNAPSHOT_CONTRACT_INVALID")
+    snapshots = replay.get("serialized_snapshot_replays")
+    if not isinstance(snapshots, list) or len(snapshots) != count:
+        _fail("REPEATABILITY_OBSERVATIONS_INVALID")
+    expected_snapshot_fields = {
+        "replay_index", "schema_version", "provider_truth", "resolution_m",
+        "original_interior_provider_c_pi_m", "risk_interior_provider_c_pi_m"}
+    observed_d_peak: list[float] = []
+    snapshot_bytes: list[bytes] = []
+    for index, snapshot in enumerate(snapshots, start=1):
+        if not isinstance(snapshot, dict) or set(snapshot) != expected_snapshot_fields:
+            _fail("REPEATABILITY_OBSERVATIONS_INVALID")
+        if (snapshot.get("replay_index") != index or
+                snapshot.get("schema_version") !=
+                "p4_risk_grid_snapshot_replay_v1"):
+            _fail("SERIALIZED_SNAPSHOT_SCHEMA_MISMATCH")
+        original = _finite_number(
+            snapshot.get("original_interior_provider_c_pi_m"),
+            "REPEATABILITY_VALUE_INVALID")
+        risk = _finite_number(
+            snapshot.get("risk_interior_provider_c_pi_m"),
+            "REPEATABILITY_VALUE_INVALID")
+        resolution = _finite_number(
+            snapshot.get("resolution_m"), "REPEATABILITY_VALUE_INVALID")
+        if resolution <= 0.0 or snapshot.get("provider_truth") != "FLAT_NULL":
+            _fail("SERIALIZED_SNAPSHOT_CONTRACT_INVALID")
+        observed_d_peak.append(original - risk)
+        replay_payload = dict(snapshot)
+        replay_payload.pop("replay_index")
+        snapshot_bytes.append(canonical_bytes(replay_payload))
+    if len(set(snapshot_bytes)) != 1:
+        _fail("REPEATABILITY_SNAPSHOT_NOT_BYTE_IDENTICAL")
     admissibility = replay.get("admissibility", {})
     if set(admissibility) != {
             "retained_non_held_out_evidence_path",
@@ -282,8 +366,8 @@ def _repeatability_bound(replay: dict[str, Any], repository: Path) -> dict[str, 
     )
     for record in records:
         _verify_bound_file(repository, record)
-    reference = original - risk
-    absolute_deltas = [abs((original - risk) - reference) for _ in range(count)]
+    reference = observed_d_peak[0]
+    absolute_deltas = [abs(value - reference) for value in observed_d_peak]
     rank = math.ceil(0.95 * count)
     u95 = sorted(absolute_deltas)[rank - 1]
     expected = _finite_number(
@@ -408,10 +492,18 @@ def validate_preregistration(
         repository: Path = REPOSITORY, schema_path: Path | None = None,
         replay_path: Path | None = None) -> dict[str, Any]:
     repository = repository.resolve()
+    protocol_path = _repository_input_path(protocol_path, repository)
+    registry_path = _repository_input_path(registry_path, repository)
+    schema_path = _repository_input_path(
+        schema_path or (repository / SCHEMA_PATH.relative_to(REPOSITORY)),
+        repository)
+    replay_path = _repository_input_path(
+        replay_path or (repository / REPLAY_PATH.relative_to(REPOSITORY)),
+        repository)
     protocol = _json(protocol_path)
     registry = _json(registry_path)
-    schema = _json(schema_path or (repository / SCHEMA_PATH.relative_to(REPOSITORY)))
-    replay = _json(replay_path or (repository / REPLAY_PATH.relative_to(REPOSITORY)))
+    schema = _json(schema_path)
+    replay = _json(replay_path)
     if schema.get("schema_version") != "icra076_preregistration_schema_v1":
         _fail("SCHEMA_DOWNGRADE_OR_MISMATCH")
     required = schema.get("required_top_level_fields")
@@ -437,7 +529,7 @@ def validate_preregistration(
     repeatability = _repeatability_bound(replay, repository)
     repeatability_contract = protocol.get("repeatability", {})
     if (repeatability_contract.get("input_path") !=
-            str((replay_path or repository / REPLAY_PATH.relative_to(REPOSITORY)).resolve().relative_to(repository)) or
+            str(replay_path.relative_to(repository)) or
             repeatability_contract.get("input_canonical_sha256") !=
             repeatability["input_canonical_sha256"] or
             repeatability_contract.get("u95_repeatability") !=
@@ -546,12 +638,17 @@ def validate_preregistration(
         _fail("MISSING_DATA_POLICY_INVALID")
     byte_freeze = protocol.get("byte_freeze", {})
     if (set(byte_freeze) != {"source_inventory_roots", "shared_install_root",
-                             "installed_packages", "inventory_record_fields",
-                             "drift_policy"} or
+                             "rebuilt_packages", "runtime_install_packages",
+                             "inventory_record_fields", "drift_policy"} or
             byte_freeze.get("shared_install_root") != "/home/dev/ws_iap/install" or
-            byte_freeze.get("installed_packages") != [
+            byte_freeze.get("rebuilt_packages") != [
                 "iap", "plan_env", "traj_utils", "path_searching",
                 "bspline_opt", "ego_planner"] or
+            byte_freeze.get("runtime_install_packages") != [
+                "iap", "plan_env", "traj_utils", "path_searching",
+                "bspline_opt", "ego_planner", "map_generator", "gnss_sim",
+                "local_sensing", "odom_visualization", "poscmd_2_odom",
+                "so3_quadrotor_simulator", "so3_control"] or
             byte_freeze.get("inventory_record_fields") != [
                 "path", "type", "size_bytes", "sha256"] or
             byte_freeze.get("drift_policy") != "INVALIDATE_BEFORE_ICRA077"):
@@ -659,9 +756,12 @@ def collect_source_inventory(protocol: dict[str, Any],
 def collect_install_inventory(protocol: dict[str, Any],
                               install_root: Path) -> list[dict[str, Any]]:
     freeze = protocol.get("byte_freeze", {})
-    packages = freeze.get("installed_packages")
-    if packages != ["iap", "plan_env", "traj_utils", "path_searching",
-                    "bspline_opt", "ego_planner"]:
+    packages = freeze.get("runtime_install_packages")
+    if packages != [
+            "iap", "plan_env", "traj_utils", "path_searching", "bspline_opt",
+            "ego_planner", "map_generator", "gnss_sim", "local_sensing",
+            "odom_visualization", "poscmd_2_odom", "so3_quadrotor_simulator",
+            "so3_control"]:
         _fail("INSTALL_PACKAGE_SET_INVALID")
     install_root = install_root.absolute()
     records: list[dict[str, Any]] = []
@@ -686,9 +786,11 @@ def create_freeze_record(
         verification: dict[str, Any], repository: Path = REPOSITORY,
         install_root: Path = Path("/home/dev/ws_iap/install")) -> dict[str, Any]:
     repository = repository.resolve()
-    protocol = _json(protocol_path)
     validated = validate_preregistration(
         protocol_path, registry_path, repository)
+    protocol_path = _repository_input_path(protocol_path, repository)
+    registry_path = _repository_input_path(registry_path, repository)
+    protocol = _json(protocol_path)
     validate_verification(verification)
     replay_command = next(
         command for command in verification["commands"]
@@ -749,6 +851,8 @@ def create_freeze_record(
 def validate_freeze_record(
         record_path: Path, repository: Path = REPOSITORY,
         install_root: Path = Path("/home/dev/ws_iap/install")) -> dict[str, Any]:
+    repository = repository.resolve()
+    record_path = _repository_input_path(record_path, repository)
     record = _json(record_path)
     if (record.get("schema_version") != "icra076_preregistration_freeze_v1" or
             record.get("task") != "ICRA-076" or record.get("result") != "PASS" or
