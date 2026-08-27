@@ -57,6 +57,12 @@ transcript/hash and fixture-derived serialized snapshot/hash. The non-overwritin
 `ad28c5b93974227c3147a2863cf452f8e79fdbc314e7b885fee1e2d9e04a668c`; U95 is calculated only from its 60
 bound observations.
 
+Final repair `bf6e8909649b1def1012dfa164f9cc243aacad56` was pushed and fetch-confirmed at divergence `0 0`
+before `preregistration-freeze-003.json` was created. Independent validation passes with 950 complete
+source/authority identities, 957 runtime-install identities and 360 execution rows. The 528,047-byte canonical
+candidate has SHA-256 `4c31a57f4a5f3fb858998178c07a809c661eb90fdc32d6c239cd4a5e7204e2b3` and explicitly leaves
+ICRA-077 unauthorized.
+
 ## 2026-08-27 — ICRA-075 bounded fail-closed repair and P5 compatibility diagnosis
 
 Requirements: IAP-RQ-320, IAP-RQ-321, IAP-RQ-400, IAP-RQ-410,

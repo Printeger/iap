@@ -13,7 +13,8 @@
   Retain second review-rejected `freeze-002` (`c0b4953a…87631`); close parent-symlink alias admission and replace
   repeated declarations with measured `repeatability-replay-001.json` (`ad28c5b9…a668c`), containing 60 actual
   production-test transcripts/exits and serialized snapshot hashes. ICRA-075 remains BLOCKED/user-bypassed/NOT
-  PASS and ICRA-077 remains unauthorized.
+  PASS. Canonical `freeze-003` binds pushed `bf6e890`, source 950/install 957/order 360 and SHA-256
+  `4c31a57f…4e2b3`; ICRA-077 remains unauthorized.
 
 - route(user-decision-006-issue-icra076): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 /
   IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — record user acceptance of ICRA-075 frozen incompatibility, 0/40, absent

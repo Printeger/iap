@@ -241,7 +241,10 @@ ICRA-077。`results/icra27/icra076/preregistration-freeze-001.json`（`51464dff�
 保留且不得覆盖。第二轮 standards review 又拒绝 `preregistration-freeze-002.json`（`c0b4953a…87631`）：
 父 symlink alias admission 与 measured replay evidence binding 仍不完整，因此它也不是 canonical freeze。
 后续 canonical identity 必须绑定真实运行 60 次 production test 后保存的 transcript/hash/snapshot evidence，
-以及已推送的最终修复 bytes。
+以及已推送的最终修复 bytes。当前 canonical candidate 是 `preregistration-freeze-003.json`，绑定 pushed
+`bf6e8909649b1def1012dfa164f9cc243aacad56`、measured replay `ad28c5b9…a668c`、950 个
+source/authority entries、957 个 runtime-install entries 与 360 rows；freeze SHA-256 为
+`4c31a57f4a5f3fb858998178c07a809c661eb90fdc32d6c239cd4a5e7204e2b3`。
 
 ### 1.3 运行一个最小检查
 

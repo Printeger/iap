@@ -6,7 +6,7 @@
 |---|---|---|---|
 | IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-423 | Estimand/threshold | Provider-only controllable-interior `D_peak`, `b=1.5 m`, SESOI `0.3 m`, flat-null replay U95 `0.0 m`, hence frozen `delta_peak=0.3 m`; no outcome input | **OUTCOME-BLIND FROZEN** |
 | IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-423 | Formal design | Three disjoint 60-seed scene ranges, paired two-arm 360-row order (`fbbeca31…feae6`), exact one-sided binomial minimum 59/60, complete missing/failure denominator | **VALIDATOR PASS** |
-| IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 | Byte identity | Review-rejected freeze-001/002 remain immutable; second repair rejects resolved/parent symlink aliases and binds 60 actual production replay transcripts/exits/snapshot hashes in `repeatability-replay-001.json` (`ad28c5b9…a668c`) | **13/13 GREEN; NEW CANONICAL FREEZE REQUIRED** |
+| IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 | Byte identity | Rejected freeze-001/002 remain immutable; measured replay `ad28c5b9…a668c`; canonical freeze-003 binds pushed `bf6e890`, source/authority 950, runtime-install 957 and order 360; SHA-256 `4c31a57f…4e2b3` | **13/13 GREEN; FREEZE VALIDATION PASS** |
 | IAP-RQ-423 / IAP-RQ-424 | Claim/gate boundary | Repeatability replay 60/60 and related regression 24/24 pass; no held-out/ROS/GPU/live access, no empirical power claim, ICRA-075 stays 0/40 BLOCKED/user-bypassed/NOT PASS, ICRA-077 unauthorized | **READY FOR FREEZE EVIDENCE** |
 
 ## 2026-08-27 user decision 006 and ICRA-076 issuance
