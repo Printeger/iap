@@ -34,10 +34,13 @@ source ordering, retention and no-live boundary otherwise conform.
 
 ### Supervisor window disposition
 
-- Pending post-push audit; final disposition and handoff anchor will be recorded after this Review is authority.
-  Normal Review commit hit the known `BUILDER_SUPERVISOR_FILE_STAGED` role-transition deadlock because the prior
+- Review changeset `6c34e69b9bdffbec1e51ed626f42d22cdea32ef5` is pushed and fetch-confirmed at divergence
+  `0 0`. Normal Review commit hit the known `BUILDER_SUPERVISOR_FILE_STAGED` role-transition deadlock because the prior
   authority still marked DEEPSEEK active. Route/hook checks, exact 12-file staging and diff checks passed, so the
   controlled `--no-verify` path is used without staging Builder evidence or the protected PDF.
+- **`KEEP_WINDOW`**. This is a bounded same-Gate freeze repair decision with no route, scope, contract, claim or
+  authority change, and the current Review context is complete. This Supervisor can issue the selected repair or
+  explicit bypass after the user decides; neither choice is pre-authorized by the Review.
 
 ## 2026-08-27 — user decision 007 issues bounded ICRA-076 repair
 

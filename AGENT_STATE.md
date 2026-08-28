@@ -44,13 +44,13 @@ recovery_roadmap: docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP
 four_layer_workflow: docs/icra27/ICRA_FOUR_LAYER_DEVELOPMENT_WORKFLOW.md
 guard_plan: docs/icra27/ICRA_CROSS_LAYER_GUARD_PLAN.md
 artifact_retention: ALL_ICRA072_EVIDENCE_SHARED_ROOTS_HIDDEN_USER_ARTIFACTS_AND_PROTECTED_PDF_RETAINED
-window_disposition: PENDING_POST_PUSH_AUDIT
-rotation_reason: PENDING_POST_PUSH_AUDIT
-window_handoff_anchor: PENDING_REVIEW_CHANGESET
+window_disposition: KEEP_WINDOW
+rotation_reason: ICRA076_LOCAL_FREEZE_REPAIR_DECISION_CONTEXT_COMPLETE
+window_handoff_anchor: 6c34e69b9bdffbec1e51ed626f42d22cdea32ef5
 window_next_role: SUPERVISOR
-window_next_review_task: ICRA-076
+window_next_review_task: USER_DECISION_ON_ICRA076
 window_bootstrap_source: REPOSITORY_AUTHORITY_ONLY
-updated_utc: 2026-08-28T04:00:00Z
+updated_utc: 2026-08-28T03:56:10Z
 ```
 
 Review of `f66fb73..ae79bc7` accepts the measured-output, `|D_peak|` U95 and repository-local evidence repairs but
