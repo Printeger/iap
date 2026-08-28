@@ -17,12 +17,17 @@
 
 ### Supervisor window disposition
 
-- Pending pushed task changeset and mandatory post-push §8.6 audit. Although this is same-Gate repair, it changes
-  canonical freeze schema/authority immediately before held-out access, so `ROTATE_RECOMMENDED` is required.
+- Task changeset `2a9475da768076621431a83aa3e1f4dae0637a88` is pushed and fetch-confirmed at divergence `0 0`.
+  **`ROTATE_RECOMMENDED`**: although this is same-Gate repair, it changes canonical freeze authority/schema
+  immediately before held-out access. A fresh Supervisor must bootstrap only from pushed repository authority
+  and later Review the repair; rotation neither executes ICRA-077A nor authorizes ICRA-077B/078.
 - The normal task commit was rejected by the known atomic-role-transition deadlock
   `ICRA_ROUTE_GUARD_FAIL:ROUTE_CHANGE_SUPERVISOR_NOT_ACTIVE` after the staged authority correctly assigned the
   new task to DEEPSEEK. Repository route/hook checks, exact 12-file staging and staged diff checks passed; a
   controlled `--no-verify` commit is used without staging Builder evidence, shared artifacts or the protected PDF.
+- The rotation-only commit then hit `ICRA_ROUTE_GUARD_FAIL:BUILDER_SUPERVISOR_FILE_STAGED` because pushed state
+  now correctly names DEEPSEEK. After confirming only `AGENT_STATE.md` and `SUPERVISOR_LOG.md` are staged and
+  route/diff checks pass, the same controlled procedure is used for this minimal §8.6 record.
 
 ## 2026-08-28 — ICRA-077A Review BLOCKED; user repair-or-bypass decision required
 

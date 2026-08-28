@@ -46,13 +46,13 @@ recovery_roadmap: docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP
 four_layer_workflow: docs/icra27/ICRA_FOUR_LAYER_DEVELOPMENT_WORKFLOW.md
 guard_plan: docs/icra27/ICRA_CROSS_LAYER_GUARD_PLAN.md
 artifact_retention: ALL_ICRA072_EVIDENCE_SHARED_ROOTS_HIDDEN_USER_ARTIFACTS_AND_PROTECTED_PDF_RETAINED
-window_disposition: PENDING_POST_PUSH_AUDIT
-rotation_reason: PENDING_POST_PUSH_AUDIT
-window_handoff_anchor: PENDING_TASK_CHANGESET
+window_disposition: ROTATE_RECOMMENDED
+rotation_reason: USER_DECISION010_CANONICAL_FREEZE_AUTHORITY_AND_SCHEMA_REPAIR_BEFORE_HELD_OUT
+window_handoff_anchor: 2a9475da768076621431a83aa3e1f4dae0637a88
 window_next_role: SUPERVISOR
 window_next_review_task: ICRA-077A_FORMAL_IDENTITY_REPAIR
 window_bootstrap_source: REPOSITORY_AUTHORITY_ONLY
-updated_utc: 2026-08-28T06:10:59Z
+updated_utc: 2026-08-28T06:12:00Z
 ```
 
 User decision 010 selects repair, not bypass. ICRA-077A is TASK_READY for exactly two offline boundaries: derive
