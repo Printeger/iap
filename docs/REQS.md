@@ -787,3 +787,7 @@ every execution-affecting source, runner, analyzer, test, probe/build input and
 shared-install byte under strict current validation. Both user-accepted
 ICRA-076 debts remain explicit. This closure authorizes no held-out outcome,
 GPU, ROS, live run, ICRA-077B, qualification or campaign.
+Fresh offline evidence replay-004/verification-003/freeze-006 binds pushed
+source `a76de0c`, both debts, exact governance blobs, protected-route
+fingerprint and shared install identity; independent freeze validation passes
+1017/958 source/install records.

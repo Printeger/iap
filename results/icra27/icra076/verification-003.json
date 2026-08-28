@@ -1,0 +1,116 @@
+{
+  "accepted_debt": {
+    "icra076_status": "BLOCKED_USER_BYPASSED_NOT_PASS",
+    "omitted_build_input_debt": "THIRDPARTY_JSON_INCLUDE_NOT_FROZEN",
+    "replay_domain_debt": "REPLAY_R_0.5_NOT_FROZEN_R_0.75_B_1.5_M",
+    "user_decision_id": "USER-ICRA-ROUTE-20260828-009"
+  },
+  "commands": [
+    {
+      "argv": [
+        "bash",
+        "-lc",
+        "python3 test/test_icra073_inverse_corridor.py -v && python3 test/test_icra074_geometry.py -v && python3 test/test_icra075_exploratory.py -v && python3 test/test_icra076_preregistration.py -v && python3 test/test_icra077a_governance_freeze.py -v && python3 scripts/dev_planner/verify_icra_research_route.py && python3 scripts/dev_planner/verify_icra_research_route.py --check-hooks"
+      ],
+      "category": "FOCUSED_TESTS",
+      "enabled": true,
+      "exit_code": 0,
+      "skipped": false
+    },
+    {
+      "argv": [
+        "python3",
+        "scripts/dev_planner/validate_icra076_preregistration.py"
+      ],
+      "category": "VALIDATOR",
+      "enabled": true,
+      "exit_code": 0,
+      "skipped": false
+    },
+    {
+      "argv": [
+        "colcon",
+        "--log-base",
+        "/home/dev/ws_iap/log",
+        "build",
+        "--paths",
+        "/home/dev/ws_iap/src/iap",
+        "/home/dev/ws_iap/src/iap/src/iap/planner/plan_env",
+        "/home/dev/ws_iap/src/iap/src/iap/planner/traj_utils",
+        "/home/dev/ws_iap/src/iap/src/iap/planner/path_searching",
+        "/home/dev/ws_iap/src/iap/src/iap/planner/bspline_opt",
+        "/home/dev/ws_iap/src/iap/src/iap/planner/plan_manage",
+        "--packages-select",
+        "iap",
+        "plan_env",
+        "traj_utils",
+        "path_searching",
+        "bspline_opt",
+        "ego_planner",
+        "--build-base",
+        "/home/dev/ws_iap/build",
+        "--install-base",
+        "/home/dev/ws_iap/install",
+        "--symlink-install",
+        "--cmake-args",
+        "-DBUILD_TESTING=ON"
+      ],
+      "category": "SIX_PACKAGE_BUILD",
+      "enabled": true,
+      "exit_code": 0,
+      "skipped": false
+    },
+    {
+      "argv": [
+        "python3",
+        "scripts/dev_planner/icra076_repeatability_replay.py",
+        "--snapshot",
+        "config/icra27/icra076_flat_null_snapshot_v1.json",
+        "--output-root",
+        "results/icra27/icra076/repeatability-replay-004"
+      ],
+      "category": "REPEATABILITY_REPLAY",
+      "enabled": true,
+      "exit_code": 0,
+      "skipped": false
+    }
+  ],
+  "governance_snapshot": {
+    "frozen_source_commit": "3a3486f793df1b8299a87bf3400d7e2c34979018",
+    "git_blobs": [
+      {
+        "frozen_source_commit": "3a3486f793df1b8299a87bf3400d7e2c34979018",
+        "git_blob_oid": "1f89f4567f9906154108cdad75a46053b4d64b3d",
+        "git_object_type": "blob",
+        "path": "docs/icra27/ICRA_IMPLEMENTATION_PLAN.md",
+        "sha256": "080c949d1543872fe052bb27f3fe5c19e7cf91e1e06227dba91770bf360c6b2e",
+        "size_bytes": 85372
+      },
+      {
+        "frozen_source_commit": "3a3486f793df1b8299a87bf3400d7e2c34979018",
+        "git_blob_oid": "2b522758acb91169927f7b16784fc9b8cd62f57c",
+        "git_object_type": "blob",
+        "path": "docs/icra27/ICRA_FOUR_LAYER_DEVELOPMENT_WORKFLOW.md",
+        "sha256": "8ee43dfd902c98762e2813f821ad3a937316f740981a3790b8a32813dd6f3ee0",
+        "size_bytes": 7249
+      },
+      {
+        "frozen_source_commit": "3a3486f793df1b8299a87bf3400d7e2c34979018",
+        "git_blob_oid": "7f5f5d6ad93d3e0c2e34de88bd749cddbbc88b98",
+        "git_object_type": "blob",
+        "path": "docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md",
+        "sha256": "00f3d0e2e15e404924765661ea7b27f4c7ad04a2f1a7b9cdec5d73e8f6700356",
+        "size_bytes": 37061
+      }
+    ],
+    "protected_route_fingerprint_sha256": "1e05d2763e588f4d7c148984a4df9a9e6c3cdd52e5b5859810fc638ac633e25a",
+    "schema_version": "icra077a_exact_governance_git_blob_snapshot_v1"
+  },
+  "schema_version": "icra077a_repository_local_verification_v2",
+  "shared_install": {
+    "inventory_count": 958,
+    "inventory_sha256": "3686c41cb4f331b5ebd2e928a97e0d1892209b665fb73aee7d80142d7fde50dc",
+    "root": "/home/dev/ws_iap/install"
+  },
+  "source_head": "a76de0ccc20bc043f5a4ba193de173799eb34db5"
+}

@@ -9389,3 +9389,18 @@ ICRA-076 PASS. Focused 076 tests pass 20/20, governance adversaries pass 5/5,
 and current route/hook verifiers pass. The unrelated deferred ICRA-071 unit
 suite retains stale historical decision/task assertions and is not modified.
 No held-out, GPU, ROS, live, ICRA-077B or ICRA-078 action ran.
+
+Bounded source commit `a76de0ccc20bc043f5a4ba193de173799eb34db5`
+was pushed and fetch-confirmed `0 0` before evidence creation. The exact shared
+six-package build passes 6/6. Fresh replay-004 retains 60/60 offline production-
+probe emissions with U95 `0.0 m`; the post-evidence exact focused command,
+route verifier, hook-path verifier and preregistration validator all pass.
+Verification-003 binds source, commands, accepted debts, protected-route/Git-
+blob snapshot and shared install 958 / `3686c41c…50dc`. Freeze-006 independently
+validates PASS with 1017 strict source records and 958 install records. The
+controlled later-Supervisor-prose fixture passes after freeze creation without
+modifying real authorities. Replay/verification/freeze SHA-256 values are
+`d7458c21450cfc33c826967f9d741486bcc3a02381cb4e191dc5f29962aa93d5`,
+`ea67682c56b379f7c7ed9dcabd1ecd8a05a41f8dfa2ff619889ce5d8ea3e487f`
+and `73c3e24ad792f85011bda3f3962b36b205c951d5ba16c0d3390672739aa471fc`.
+Prior blocker/replay/verification/freeze hashes remain unchanged.

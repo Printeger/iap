@@ -1126,3 +1126,6 @@ The bounded repair treats exactly three named governance documents as Git-blob
 snapshots from `3a3486f`, separately fingerprints protected research-route
 fields, and leaves every executable input/current install byte strict. Fresh
 004/003/006 evidence is offline-only; ICRA-077B remains unauthorized.
+Current Builder candidate replay-004/verification-003/freeze-006 validates
+against pushed source `a76de0c` with 1017 strict source and 958 install records.
+The protected-field later-prose fixture passes; Supervisor Review is required.

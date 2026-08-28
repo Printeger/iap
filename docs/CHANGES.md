@@ -3638,6 +3638,9 @@ Requirements: `IAP-RQ-000`, `IAP-RQ-020`, `IAP-RQ-030`, `IAP-RQ-040`,
 - Keep all execution-affecting source/test/config/runner/analyzer/probe and
   shared-install bytes strict, and bind both accepted ICRA-076 debts in fresh
   replay/verification/freeze evidence. No held-out execution is authorized.
+- Pushed source `a76de0c` produces replay-004/verification-003/freeze-006;
+  offline focused/route/hook validation and 6/6 shared build pass. Freeze-006
+  independently validates 1017 strict source and 958 install records.
 # 2026-08-28 user decision 008 / ICRA-077 issuance
 
 - User accepts the two ICRA-076 freeze blockers without converting ICRA-076 to PASS and authorizes the frozen,
