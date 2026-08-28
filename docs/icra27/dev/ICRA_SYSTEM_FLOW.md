@@ -1,5 +1,12 @@
 # ICRA System Flow — User-owned P0 -> P4-v2 -> P5 recovery
 
+> User decision 009 update 2026-08-28: runtime flow is unchanged. ICRA-077A only repairs offline freeze
+> identity for three mutable governance documents using pushed-commit Git blobs and protects route fields
+> independently. Product/install identity remains strict. No held-out, GPU, ROS, live, ICRA-077B, ICRA-078,
+> qualification or campaign is authorized before the required Review PASS. Route is `P0_P4_V2_P5`; P4-v1
+> remains `SCIENTIFIC_NO_GO`, with P4-v2 and ICRA-071 unchanged. Authority is
+> `ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md`.
+
 > User decision 008 update 2026-08-28: ICRA-076 remains BLOCKED/user-bypassed/NOT PASS with wrong-domain and
 > incomplete-source-freeze debt. ICRA-077 may execute the unchanged frozen 360-row held-out order once. Runtime
 > authority is unchanged; no retry, source/install change, ICRA-078, qualification or campaign is authorized.

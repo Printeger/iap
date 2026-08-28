@@ -1,5 +1,14 @@
 # ICRA 2027 P0 -> P4-v2 -> P5 科学纠偏实施计划
 
+## User decision 009 / ICRA-077A pre-access freeze closure — 2026-08-28
+
+`USER-ICRA-ROUTE-20260828-009` 仅签发 ICRA-077A：把 3 个 §8.6 必须持续更新的治理文档冻结为 pushed
+source commit 的精确 Git blob，并独立冻结 route-lock 保护字段；所有 product/config/launch/runner/analyzer/
+test/build-input/install 仍执行 current-byte strict validation。Builder 必须生成 fresh replay-004+、
+verification-003+、freeze-006+，但禁止 held-out、GPU、ROS、live、360 rows 与 ICRA-077B。只有 077A Review
+PASS 才能签发 077B。权威为 `ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md`；route
+`P0_P4_V2_P5`、P4-v1 `SCIENTIFIC_NO_GO`、P4-v2、ICRA-071 与 campaign barrier 不变。
+
 ## User decision 008 / ICRA-077 held-out confirmation — 2026-08-28
 
 用户明确接受 ICRA-076 的 wrong-domain 与 missing-JSON-freeze 两项 blocker，并以

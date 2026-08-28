@@ -1,5 +1,14 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-28 ICRA-077 pre-access blocker and user decision 009
+
+| Req ID | Decision/task seam | Evidence and disposition | Status |
+|---|---|---|---|
+| IAP-RQ-423 / IAP-RQ-424 | Pre-access identity | `pre-access-blocker-001.json`; three §8.6-mutable governance files drift after freeze-005; no held-out/GPU/ROS/live access | **BLOCKER ACCEPTED** |
+| IAP-RQ-423 / IAP-RQ-424 | Governance freeze model | Exact allowlist of three pushed-commit regular Git blobs plus independent protected-route fingerprint | **ICRA-077A TASK_READY** |
+| IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 | Executable identity | Product/config/launch/runner/analyzer/test/build-input and shared-install bytes remain current-byte strict | **MUST REMAIN FAIL-CLOSED** |
+| IAP-RQ-423 / IAP-RQ-424 | Outcome/downstream boundary | Fresh replay-004+, verification-003+, freeze-006+ required; no held-out/ICRA-077B before 077A Review PASS; no ICRA-078 before 077B Review PASS | **BLOCKED** |
+
 ## 2026-08-28 user decision 008 and ICRA-077 issuance
 
 | Req ID | Decision/task seam | Evidence and disposition | Status |

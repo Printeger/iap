@@ -1,13 +1,20 @@
 # ICRA four-layer development and validation workflow
 
-Status: **ACTIVE — LAYER 4 ICRA-077 DEBT-BEARING HELD-OUT CONFIRMATION**
+Status: **ACTIVE — LAYER 4 ICRA-077A PRE-ACCESS FREEZE CLOSURE; NO HELD-OUT**
+
+User decision 009: `USER-ICRA-ROUTE-20260828-009` authorizes only the offline correction of the governance-freeze
+boundary. Exactly three mutable Supervisor authorities use frozen pushed-commit Git blobs plus an independent
+protected-route fingerprint; all executable inputs and install bytes remain current-byte strict. ICRA-077B,
+held-out/GPU/ROS/live/360 rows and ICRA-078 are blocked until the required preceding Review PASS. Route
+`P0_P4_V2_P5`, P4-v1 `SCIENTIFIC_NO_GO`, P4-v2, ICRA-071 and campaign authority are unchanged under
+`ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md`.
 
 Requirements: `IAP-RQ-320`, `IAP-RQ-321`, `IAP-RQ-400`, `IAP-RQ-410`, `IAP-RQ-421`, `IAP-RQ-422`,
 `IAP-RQ-423`, `IAP-RQ-424`
 
-Current disposition: user decision 008 accepts the two ICRA-076 freeze blockers without making that Gate PASS.
-ICRA-077 is active for the unchanged frozen 360-row one-shot held-out confirmation. No retry, exclusion,
-source/install change or ICRA-078 is authorized before Review PASS.
+Current disposition: decision 009 preserves decision 008's ICRA-076 debt acceptance but pauses outcome access.
+ICRA-077A must first produce a non-self-invalidating offline freeze. ICRA-077B remains inactive until 077A
+Review PASS; no held-out, GPU, ROS, live, retry, exclusion, source/install weakening or ICRA-078 is authorized.
 
 ## 1. Purpose
 

@@ -3,6 +3,13 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- route(user-decision-009-issue-icra077a): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 /
+  IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — accept the correct pre-access stop on three legitimately updated
+  governance authorities and issue offline-only ICRA-077A. Replace current-worktree equality for exactly those
+  paths with frozen pushed-commit Git blobs, add a protected-route fingerprint, retain current-byte strictness for
+  executable inputs/install, and require fresh replay/verification/freeze identities. No held-out, GPU, ROS,
+  live, 360-row, ICRA-077B or ICRA-078 action before the required Review PASS.
+
 - route(user-decision-007-repair-icra076): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 /
   IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — user rejects bypass and authorizes a bounded same-Gate repair for real
   production-emitted repeatability, route-correct `|D_peak|` U95, repository-local verification evidence and

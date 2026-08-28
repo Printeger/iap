@@ -1,5 +1,15 @@
 # ICRA 2027 Conference Scope — User-owned P0 -> P4-v2 -> P5 recovery
 
+## User decision 009 / ICRA-077A pre-access freeze closure — 2026-08-28
+
+Under `USER-ICRA-ROUTE-20260828-009`, ICRA-077A is the only active Builder scope. It repairs the self-invalidating
+governance freeze by using exact frozen-commit Git blobs for exactly three mutable governance authorities while
+retaining independent protected-route fingerprints and current-byte validation for all executable inputs. No
+held-out, GPU, ROS, live or 360-row work is authorized. Only ICRA-077A Review PASS may issue ICRA-077B; ICRA-078
+still requires ICRA-077B Review PASS. Authority is
+`ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md`; route `P0_P4_V2_P5`, P4-v1 `SCIENTIFIC_NO_GO`, P4-v2,
+ICRA-071, required modules, claims and campaign activation remain unchanged.
+
 ## User decision 008 / ICRA-077 active — 2026-08-28
 
 Under `USER-ICRA-ROUTE-20260828-008`, the user accepts both disclosed ICRA-076 freeze blockers and authorizes

@@ -1,5 +1,16 @@
 # ICRA 2027 P0 -> P4-v2 -> P5 计划复审
 
+## ICRA-077 pre-access Review / user decision 009 — 2026-08-28
+
+**Disposition: `ICRA077_PRE_ACCESS_BLOCKER_ACCEPTED / ICRA077A_TASK_READY_NO_HELD_OUT`.** Review of
+`3bb8fc1..fd4c1ed` confirms the Builder correctly stopped before held-out/GPU/ROS/live when freeze-005 encountered
+governance drift. The complete conflict covers exactly implementation plan, four-layer workflow and recovery
+roadmap: all are legitimately mutable under §8.6, so current-worktree byte equality is self-invalidating.
+Decision `USER-ICRA-ROUTE-20260828-009` authorizes a bounded Git-blob snapshot model plus an independent protected
+route fingerprint, without weakening executable-input/install validation. Route authority is
+`ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md`; `P0_P4_V2_P5`, P4-v1 `SCIENTIFIC_NO_GO`, P4-v2,
+ICRA-071 and campaign authority remain unchanged. ICRA-077B and ICRA-078 remain blocked pending separate Reviews.
+
 ## User decision 008 — bypass ICRA-076 and issue ICRA-077 — 2026-08-28
 
 **Disposition: `ICRA076_BLOCKED_USER_BYPASS_NOT_PASS / ICRA077_TASK_READY`.** The user accepts the two invalid-
