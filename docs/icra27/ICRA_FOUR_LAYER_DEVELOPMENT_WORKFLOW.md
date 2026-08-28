@@ -1,6 +1,12 @@
 # ICRA four-layer development and validation workflow
 
-Status: **ACTIVE — LAYER 4 ICRA-077A PRE-ACCESS FREEZE CLOSURE; NO HELD-OUT**
+Status: **BLOCKED — LAYER 4 ICRA-077A REVIEW; USER REPAIR-OR-BYPASS DECISION REQUIRED**
+
+ICRA-077A Review finds an unanchored protected-route fingerprint and ambiguous freeze task/result identity.
+Freeze-007 is retained but is not Review PASS. No Builder task, held-out/GPU/ROS/live/360 rows, ICRA-077B or
+ICRA-078 is authorized until the user chooses repair or explicitly accepts both risks. Route `P0_P4_V2_P5`,
+P4-v1 `SCIENTIFIC_NO_GO`, P4-v2, ICRA-071 and campaign authority remain unchanged under
+`ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md`.
 
 User decision 009: `USER-ICRA-ROUTE-20260828-009` authorizes only the offline correction of the governance-freeze
 boundary. Exactly three mutable Supervisor authorities use frozen pushed-commit Git blobs plus an independent

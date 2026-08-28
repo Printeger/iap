@@ -1,5 +1,14 @@
 # ICRA 2027 P0 -> P4-v2 -> P5 科学纠偏实施计划
 
+## ICRA-077A Review BLOCKED / 等待用户决定 — 2026-08-28
+
+`e9aacf4..bdded38` 的 49/49、freeze-007 1017/958、exact-three blobs 与 no-held-out scope 均通过，但不能
+签发 ICRA-077B。Critical：route fingerprint 未从 frozen roadmap blob 派生，route+transition+config SHA
+可联合篡改并通过。High：`icra077a` evidence 仍写 `task=ICRA-076/result=PASS`，与同一记录的 ICRA-076
+BLOCKED/NOT PASS 形成形式身份歧义。当前 `next_task=NONE`，等待用户选择 bounded repair 或明确接受风险
+bypass。权威为 `ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md`；route `P0_P4_V2_P5`、P4-v1
+`SCIENTIFIC_NO_GO`、P4-v2、ICRA-071 与 campaign barrier 不变。
+
 ## User decision 009 / ICRA-077A pre-access freeze closure — 2026-08-28
 
 `USER-ICRA-ROUTE-20260828-009` 仅签发 ICRA-077A：把 3 个 §8.6 必须持续更新的治理文档冻结为 pushed

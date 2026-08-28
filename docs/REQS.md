@@ -3,6 +3,11 @@
 > Purpose: 把 talk《Integrity-Aware Active Perception》的“优化版 pipeline”拆成可实现、可验收、可追溯的工程需求。
 > Scope: 仅修改本仓库 src/iap；禁止修改 ../glim（可参考其代码但不得提交改动）。
 
+> ICRA-077A Review (2026-08-28): BLOCKED/NOT PASS. Current protected-route fingerprint is not independently
+> anchored to protected fields from the frozen Git blob, so paired route+transition+config-SHA tampering passes.
+> Freeze-007 also ambiguously labels an `icra077a` candidate as `task=ICRA-076/result=PASS` while retaining
+> ICRA-076 NOT PASS. No Builder task, held-out/ICRA-077B or ICRA-078 is authorized pending user repair-or-bypass.
+
 > Current ICRA disposition (2026-08-28): user decision 009 accepts the correctly retained pre-access blocker and
 > issues offline-only ICRA-077A. Exactly three mutable governance authorities must use frozen pushed-commit Git
 > blobs plus an independent protected-route fingerprint; executable inputs/install remain current-byte strict.

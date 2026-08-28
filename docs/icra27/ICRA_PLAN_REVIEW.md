@@ -1,5 +1,16 @@
 # ICRA 2027 P0 -> P4-v2 -> P5 计划复审
 
+## ICRA-077A Supervisor Review BLOCKED — 2026-08-28
+
+**Disposition: `STANDARDS_REQUEST_CHANGES / SPEC_REQUEST_CHANGES / GATE_BLOCKED`.** The current fingerprint is
+self-consistent with mutable route/config bytes but not independently cross-bound to protected fields derived
+from the frozen roadmap Git blob; coordinated tampering passes. Freeze-007 also ambiguously assigns an ICRA-077A
+schema to `task=ICRA-076/result=PASS` while retaining ICRA-076 NOT PASS. Exact-three blobs, source/install
+strictness, 49/49 tests, fresh evidence and no-held-out boundaries otherwise pass. No Builder task is active;
+ICRA-077B awaits user repair-or-explicit-bypass direction. Route authority is
+`ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md`; `P0_P4_V2_P5`, P4-v1 `SCIENTIFIC_NO_GO`, P4-v2,
+ICRA-071 and campaign authority remain unchanged.
+
 ## ICRA-077 pre-access Review / user decision 009 — 2026-08-28
 
 **Disposition: `ICRA077_PRE_ACCESS_BLOCKER_ACCEPTED / ICRA077A_TASK_READY_NO_HELD_OUT`.** Review of

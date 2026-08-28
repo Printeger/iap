@@ -1,5 +1,16 @@
 # ICRA P0 -> P4 -> P5 deviation audit and scientific recovery roadmap
 
+## ICRA-077A Review BLOCKED — user decision required — 2026-08-28
+
+Supervisor Review of `e9aacf4..bdded38` retains freeze-007 but rejects it as formal authority. The current route
+fingerprint is computed from current route bytes and compared only with a SHA in mutable config; coordinated
+route + protected-transition + config-SHA tampering passes because protected fields are never derived from and
+cross-compared with the frozen roadmap blob. The `icra077a` record also uses `task=ICRA-076/result=PASS` while its
+accepted debt correctly retains ICRA-076 BLOCKED/user-bypassed/NOT PASS, making formal task/result/authorization
+identity ambiguous. No held-out/GPU/ROS/live access occurred. No Builder task is active; ICRA-077B and ICRA-078
+await explicit user repair-or-bypass direction. Route `P0_P4_V2_P5`, required modules, research question, claims,
+arms, scenes, P4-v1 `SCIENTIFIC_NO_GO`, P4-v2, ICRA-071, gate order, fallback and campaign activation are unchanged.
+
 ## User decision 009 — repair ICRA-077 pre-access freeze boundary — 2026-08-28
 
 At pushed approval anchor `fd4c1ed0bd9c7eccd40eaf4bc06d500074d8c429`,
@@ -630,7 +641,7 @@ distinct engineering fixture and cannot be relabelled as inverse-corridor effect
 | ICRA-074 | V2 geometry repair then bounded offline targeted P4-v2 optimization | PASS: exact geometry and production-seam contract, production unchanged, no effect claim |
 | ICRA-075 | exploratory objective/source/domain ablation and power inputs | BLOCKED / USER-ACCEPTED BYPASS / NOT PASS; 0/40, no power inputs and two P1 defects retained |
 | ICRA-076 | repair measured repeatability, repository-local verification and complete source freeze; then freeze protocol, SESOI, hashes, seeds and conservative `n=60` per scene | BLOCKED / USER-ACCEPTED BYPASS / NOT PASS: wrong replay domain and missing third-party build inputs retained |
-| ICRA-077 | 077A pre-access governance-freeze closure, then 077B primary/mirror/null held-out confirmatory | ICRA-077A TASK_READY offline only; 077B blocked until 077A Review PASS; no held-out/GPU/ROS/live in 077A |
+| ICRA-077 | 077A pre-access governance-freeze closure, then 077B primary/mirror/null held-out confirmatory | ICRA-077A BLOCKED/NOT PASS: unanchored route fingerprint and ambiguous task identity; no task pending user repair-or-bypass choice |
 | ICRA-078 | formal G0D lineage qualification | held-out confirmation required |
 | ICRA-079 | prospective P0+P4+P5 treatment and P0+P5 control P5 qualification | campaign remains blocked |
 | ICRA-080 | original 2 arms x 3 scenes x 10 seeds campaign | separate user approval required |

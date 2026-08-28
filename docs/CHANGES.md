@@ -3,6 +3,14 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- review(icra-077a-freeze-closure-blocked): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 /
+  IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — review `bdded38d` against fixed `e9aacf4a`. Offline 49/49, exact-three
+  blobs, source/install inventories and freeze-007 validation pass, with no held-out/GPU/ROS/live access. Reject
+  the candidate because coordinated route+transition+config-fingerprint tampering is accepted instead of being
+  cross-bound to frozen-blob protected fields, and because active ICRA-077A evidence ambiguously reports
+  `task=ICRA-076/result=PASS` while retaining ICRA-076 NOT PASS. Preserve freeze-007; no ICRA-077B pending user
+  repair-or-explicit-bypass direction.
+
 - route(user-decision-009-issue-icra077a): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 /
   IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — accept the correct pre-access stop on three legitimately updated
   governance authorities and issue offline-only ICRA-077A. Replace current-worktree equality for exactly those

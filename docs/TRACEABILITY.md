@@ -1,5 +1,14 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-28 ICRA-077A Supervisor Review
+
+| Req ID | Reviewed boundary | Evidence and disposition | Status |
+|---|---|---|---|
+| IAP-RQ-423 / IAP-RQ-424 | Independent protected-route authority | Read-only paired tamper changes route + transition `new` + protocol SHA and returns `JOINT_TAMPER_ACCEPTED`; frozen blob fields are never cross-compared | **CRITICAL / REQUEST_CHANGES** |
+| IAP-RQ-423 / IAP-RQ-424 | Formal task/result identity | `icra077a` freeze-007 says `task=ICRA-076/result=PASS` while accepted debt retains ICRA-076 BLOCKED/NOT PASS | **HIGH / REQUEST_CHANGES** |
+| IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 | Other offline closure | 49/49, exact-three blob admission, route parser, strict source/install, fresh 005/004/007, later-prose fixture and no forbidden execution | **PASSING SUBSET / NOT GATE PASS** |
+| IAP-RQ-423 / IAP-RQ-424 | Downstream boundary | No active Builder task; ICRA-077B/held-out/ICRA-078 await explicit user repair-or-bypass decision | **BLOCKED** |
+
 ## 2026-08-28 ICRA-077 pre-access blocker and user decision 009
 
 | Req ID | Decision/task seam | Evidence and disposition | Status |
