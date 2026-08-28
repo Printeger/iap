@@ -3680,6 +3680,10 @@ Requirements: `IAP-RQ-000`, `IAP-RQ-020`, `IAP-RQ-030`, `IAP-RQ-040`,
 - Add coordinated and per-field route tamper plus evidence-identity adversaries.
   Preserve 004/005, 003/004 and 006/007 as immutable rejected history; require
   fresh replay-006/verification-005/freeze-008 after pushed repair source.
+- Pushed source `ef94154` produces fresh replay-006/verification-005/freeze-008.
+  Six-package shared build passes 6/6; post-evidence exact tests and guards pass;
+  freeze-008 independently validates 1017 source / 958 install / 360 order
+  records. This is offline contract validation, not scientific Gate PASS.
 # 2026-08-28 user decision 008 / ICRA-077 issuance
 
 - User accepts the two ICRA-076 freeze blockers without converting ICRA-076 to PASS and authorizes the frozen,

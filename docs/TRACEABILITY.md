@@ -1905,5 +1905,5 @@ disclosed; the final task-local rerun has identical before/after inventory hash.
 
 | Req ID | Boundary | Implementation / verification | Status |
 |---|---|---|---|
-| IAP-RQ-423 / IAP-RQ-424 | Frozen protected-route authority | `validate_governance_snapshot` reads verified Git blob bytes, canonical-parses frozen/current route independently and exact-matches all protected fields; joint/per-field/config/JSON adversaries 8/8 | **OFFLINE IMPLEMENTED; FRESH EVIDENCE PENDING PUSH** |
-| IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 / IAP-RQ-422 | Unambiguous fresh artifact identity | replay binding/manifest, verification and freeze v3 cross-bind exact active task, milestone, purpose, non-scientific validation, retained ICRA-076 disposition and false ICRA-077B authorization; 076 tests 21/21 | **NO HELD-OUT ACCESS; 006/005/008 PENDING** |
+| IAP-RQ-423 / IAP-RQ-424 | Frozen protected-route authority | `validate_governance_snapshot` reads verified Git blob bytes, canonical-parses frozen/current route independently and exact-matches all protected fields; joint/per-field/config/JSON adversaries 8/8 | **OFFLINE IMPLEMENTED AND BOUND IN FREEZE-008** |
+| IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 / IAP-RQ-422 | Unambiguous fresh artifact identity | replay-006/verification-005/freeze-008 cross-bind exact active task, milestone, purpose, non-scientific validation, retained ICRA-076 disposition and false ICRA-077B authorization; pushed `ef94154`; freeze 1017/958/360 | **READY FOR SUPERVISOR REVIEW; NO HELD-OUT ACCESS** |

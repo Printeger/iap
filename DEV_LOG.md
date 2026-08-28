@@ -9456,3 +9456,22 @@ NOT PASS disposition, and `icra077b_authorized=false`. Stale `task`, generic
 076 tests pass 21/21 and governance adversaries pass 8/8; current route/hook
 guards and static validator pass. Fresh 006/005/008 evidence remains pending a
 pushed source anchor. No held-out, GPU, ROS, live or 360-row action ran.
+
+Source commit `ef94154662c872270a979da164e38fb03efa6827` was pushed and
+fetch-confirmed `0 0` before evidence. The exact shared six-package build
+passes 6/6. Replay-006 retains 60/60 production-probe emissions with U95
+`0.0 m`; verification-005 binds the exact command exits, frozen-derived/current-
+matched route (`1e05d276…e25a`), both accepted debts, pushed source and shared
+install 958 / `2fe775ce…458d`. Freeze-008 independently validates 1017 strict
+source, 958 install and 360 order records with the non-scientific validation
+identity. Post-evidence 3+2+19+21+8 tests, route/hook guards, static validator,
+controlled later-Supervisor-prose fixture and independent freeze validator all
+pass. No forbidden legacy `task`, generic `result` or `icra077_authorized` key
+exists in the three fresh top-level artifacts.
+
+Replay-006, verification-005 and freeze-008 SHA-256 values are
+`f209d08c9cbf39ff652bc394a6def85e38f524fd40b5fdffe6341ce577c06fb5`,
+`95f777f033d169b473a0b89927a0d4480774163a297aa4de6c0f60cdbccb6d17`
+and `cb7e3cf8cba545e3e0102e93bba4c26073a574c64f4da51593a7cd387de2375f`.
+All earlier evidence remains unchanged. No held-out, GPU, ROS, live, 360-row,
+ICRA-077B or ICRA-078 action ran.

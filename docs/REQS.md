@@ -821,3 +821,9 @@ config cannot self-authorize coordinated route changes. IAP-RQ-320/321/400/410/
 milestone, ICRA-076 authority-repair purpose, a non-scientific validation
 result, retained ICRA-076 BLOCKED/bypassed/NOT PASS and false ICRA-077B
 authorization. No held-out access is authorized by this repair.
+
+Fresh replay-006/verification-005/freeze-008 now binds pushed `ef94154`, both
+accepted ICRA-076 debts, exact-three Git blobs, frozen-derived/current-matched
+route identity and 958-item shared install. Independent freeze validation passes
+1017/958/360 source/install/order records. Its validation result is explicitly
+non-scientific and `icra077b_authorized=false` pending Supervisor Review.
