@@ -3627,6 +3627,17 @@ Requirements: `IAP-RQ-000`, `IAP-RQ-020`, `IAP-RQ-030`, `IAP-RQ-040`,
 - Fresh replay-003/verification-002/freeze-005 satisfy the corrected bindings;
   the post-evidence focused suite passes 44/44 and independent freeze
   validation passes with 956 source / 958 install records.
+
+## 2026-08-28 (ICRA-077A pre-access governance-freeze closure)
+
+- Replace current-byte validation for exactly three mutable governance
+  authorities with exact Git blob snapshots from frozen pushed commit
+  `3a3486f`; no wildcard, fourth path or caller exemption exists.
+- Independently freeze protected route research fields while allowing later
+  governance prose/decision metadata to advance.
+- Keep all execution-affecting source/test/config/runner/analyzer/probe and
+  shared-install bytes strict, and bind both accepted ICRA-076 debts in fresh
+  replay/verification/freeze evidence. No held-out execution is authorized.
 # 2026-08-28 user decision 008 / ICRA-077 issuance
 
 - User accepts the two ICRA-076 freeze blockers without converting ICRA-076 to PASS and authorizes the frozen,

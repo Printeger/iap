@@ -19,6 +19,26 @@ REPLAY_PATH = REPOSITORY / "config/icra27/icra076_repeatability_replay_v1.json"
 ARMS = ("P0_P5_CONTROL", "P0_P4_V2_P5_TREATMENT")
 SCENES = ("PRIMARY", "EXACT_MIRROR", "FLAT_NULL")
 FORBIDDEN_INPUT_TOKENS = ("held_out", "held-out", "icra077", "formal_results")
+FROZEN_GOVERNANCE_COMMIT = "3a3486f793df1b8299a87bf3400d7e2c34979018"
+GOVERNANCE_SNAPSHOT_PATHS = (
+    "docs/icra27/ICRA_IMPLEMENTATION_PLAN.md",
+    "docs/icra27/ICRA_FOUR_LAYER_DEVELOPMENT_WORKFLOW.md",
+    "docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md",
+)
+PROTECTED_ROUTE_FIELDS = (
+    "route_owner", "active_route", "required_modules", "research_question",
+    "primary_claim", "secondary_claims", "formal_arms",
+    "qualification_scenes", "gate_sequence", "fallback_policy",
+    "scientific_no_go_transition", "campaign_activation",
+)
+ROUTE_BEGIN = "<!-- ICRA_USER_ROUTE_LOCK_V1_BEGIN -->"
+ROUTE_END = "<!-- ICRA_USER_ROUTE_LOCK_V1_END -->"
+ICRA076_ACCEPTED_DEBT = {
+    "icra076_status": "BLOCKED_USER_BYPASSED_NOT_PASS",
+    "replay_domain_debt": "REPLAY_R_0.5_NOT_FROZEN_R_0.75_B_1.5_M",
+    "omitted_build_input_debt": "THIRDPARTY_JSON_INCLUDE_NOT_FROZEN",
+    "user_decision_id": "USER-ICRA-ROUTE-20260828-009",
+}
 
 
 class Icra076Error(ValueError):
@@ -41,6 +61,135 @@ def canonical_bytes(value: Any) -> bytes:
 
 def canonical_sha256(value: Any) -> str:
     return hashlib.sha256(canonical_bytes(value)).hexdigest()
+
+
+def _protected_route_document(text: str) -> dict[str, Any]:
+    if text.count(ROUTE_BEGIN) != 1 or text.count(ROUTE_END) != 1:
+        _fail("PROTECTED_ROUTE_SENTINEL_INVALID")
+    payload = text.split(ROUTE_BEGIN, 1)[1].split(ROUTE_END, 1)[0].strip()
+    if not payload.startswith("```json\n") or not payload.endswith("\n```"):
+        _fail("PROTECTED_ROUTE_ENVELOPE_INVALID")
+    try:
+        document = json.loads(payload[len("```json\n"):-len("\n```")])
+    except json.JSONDecodeError:
+        _fail("PROTECTED_ROUTE_JSON_INVALID")
+    if not isinstance(document, dict) or any(
+            field not in document for field in PROTECTED_ROUTE_FIELDS):
+        _fail("PROTECTED_ROUTE_FIELDS_INVALID")
+    return {field: document[field] for field in PROTECTED_ROUTE_FIELDS}
+
+
+def validate_protected_route_fingerprint(
+        contract: dict[str, Any], route_text: str) -> dict[str, Any]:
+    if contract != {
+            "path": GOVERNANCE_SNAPSHOT_PATHS[2],
+            "fields": list(PROTECTED_ROUTE_FIELDS),
+            "sha256": contract.get("sha256")}:
+        _fail("PROTECTED_ROUTE_CONTRACT_INVALID")
+    protected = _protected_route_document(route_text)
+    observed = canonical_sha256(protected)
+    if contract.get("sha256") != observed:
+        _fail("PROTECTED_ROUTE_DRIFT")
+    return {"fields": protected, "sha256": observed}
+
+
+def _git_bytes(repository: Path, arguments: list[str]) -> bytes:
+    completed = subprocess.run(
+        ["git", *arguments], cwd=repository, capture_output=True, check=False)
+    if completed.returncode != 0:
+        _fail("GOVERNANCE_GIT_COMMAND_FAILED", " ".join(arguments))
+    return completed.stdout
+
+
+def validate_governance_commit_lineage(repository: Path, commit: str) -> dict[str, str]:
+    repository = repository.resolve()
+    if not isinstance(commit, str) or len(commit) != 40:
+        _fail("GOVERNANCE_FROZEN_COMMIT_INVALID")
+    exists = subprocess.run(
+        ["git", "cat-file", "-e", f"{commit}^{{commit}}"], cwd=repository,
+        capture_output=True, check=False)
+    if exists.returncode != 0:
+        _fail("GOVERNANCE_COMMIT_MISSING")
+    head = _run_git(repository, ["rev-parse", "HEAD"])
+    remote = _run_git(repository, ["rev-parse", "origin/dev/icra"])
+    if head != remote:
+        _fail("GOVERNANCE_LINEAGE_NOT_FETCH_CONFIRMED")
+    for descendant in (head, remote):
+        ancestor = subprocess.run(
+            ["git", "merge-base", "--is-ancestor", commit, descendant],
+            cwd=repository, capture_output=True, check=False)
+        if ancestor.returncode != 0:
+            _fail("GOVERNANCE_COMMIT_NOT_ANCESTOR")
+    return {"head": head, "remote": remote}
+
+
+def validate_governance_snapshot(
+        contract: dict[str, Any], repository: Path = REPOSITORY) -> dict[str, Any]:
+    repository = repository.resolve()
+    if set(contract) != {"schema_version", "frozen_source_commit",
+                         "git_blobs", "protected_route"} or contract.get(
+            "schema_version") != "icra077a_exact_governance_git_blob_snapshot_v1":
+        _fail("GOVERNANCE_SNAPSHOT_SCHEMA_INVALID")
+    commit = contract.get("frozen_source_commit")
+    if commit != FROZEN_GOVERNANCE_COMMIT:
+        _fail("GOVERNANCE_FROZEN_COMMIT_INVALID")
+    lineage = validate_governance_commit_lineage(repository, commit)
+    head = lineage["head"]
+    records = contract.get("git_blobs")
+    if (not isinstance(records, list) or
+            tuple(record.get("path") for record in records
+                  if isinstance(record, dict)) != GOVERNANCE_SNAPSHOT_PATHS):
+        _fail("GOVERNANCE_PATH_SET_INVALID")
+    validated: list[dict[str, Any]] = []
+    for path, record in zip(GOVERNANCE_SNAPSHOT_PATHS, records):
+        if not isinstance(record, dict) or set(record) != {
+                "path", "frozen_source_commit", "git_blob_oid",
+                "git_object_type", "size_bytes", "sha256"}:
+            _fail("GOVERNANCE_BLOB_IDENTITY_INVALID", path)
+        current = _repository_path(repository, path)
+        if not current.is_file() or current.is_symlink():
+            _fail("GOVERNANCE_WORKTREE_ALIAS_INVALID", path)
+        tree = _git_bytes(repository, ["ls-tree", commit, "--", path]).decode().strip()
+        parts = tree.split(None, 3)
+        if len(parts) != 4 or parts[0] != "100644" or parts[1] != "blob":
+            _fail("GOVERNANCE_BLOB_IDENTITY_INVALID", path)
+        oid = parts[2]
+        content = _git_bytes(repository, ["cat-file", "blob", oid])
+        actual = {
+            "path": path, "frozen_source_commit": commit,
+            "git_blob_oid": oid, "git_object_type": "blob",
+            "size_bytes": len(content),
+            "sha256": hashlib.sha256(content).hexdigest(),
+        }
+        if record != actual:
+            _fail("GOVERNANCE_BLOB_IDENTITY_INVALID", path)
+        validated.append(actual)
+    route_path = _repository_path(repository, GOVERNANCE_SNAPSHOT_PATHS[2])
+    protected = validate_protected_route_fingerprint(
+        contract.get("protected_route", {}), route_path.read_text())
+    return {
+        "schema_version": contract["schema_version"],
+        "frozen_source_commit": commit,
+        "git_blobs": validated,
+        "protected_route_fingerprint_sha256": protected["sha256"],
+    }
+
+
+def current_freeze_environment_binding(
+        protocol: dict[str, Any], repository: Path = REPOSITORY,
+        install_root: Path = Path("/home/dev/ws_iap/install")) -> dict[str, Any]:
+    governance = validate_governance_snapshot(
+        protocol["byte_freeze"]["governance_snapshot"], repository)
+    install_inventory = collect_install_inventory(protocol, install_root)
+    return {
+        "accepted_debt": ICRA076_ACCEPTED_DEBT,
+        "governance_snapshot": governance,
+        "shared_install": {
+            "root": str(install_root.absolute()),
+            "inventory_count": len(install_inventory),
+            "inventory_sha256": canonical_sha256(install_inventory),
+        },
+    }
 
 
 def file_sha256(path: Path) -> str:
@@ -200,7 +349,11 @@ def expected_verification_argv() -> dict[str, list[str]]:
             ("python3 test/test_icra073_inverse_corridor.py -v && "
              "python3 test/test_icra074_geometry.py -v && "
              "python3 test/test_icra075_exploratory.py -v && "
-             "python3 test/test_icra076_preregistration.py -v")],
+             "python3 test/test_icra076_preregistration.py -v && "
+             "python3 test/test_icra077a_governance_freeze.py -v && "
+             "python3 scripts/dev_planner/verify_icra_research_route.py && "
+             "python3 scripts/dev_planner/verify_icra_research_route.py "
+             "--check-hooks")],
         "VALIDATOR": [
             "python3", "scripts/dev_planner/validate_icra076_preregistration.py"],
         "SIX_PACKAGE_BUILD": [
@@ -220,16 +373,23 @@ def expected_verification_argv() -> dict[str, list[str]]:
             "python3", "scripts/dev_planner/icra076_repeatability_replay.py",
             "--snapshot", "config/icra27/icra076_flat_null_snapshot_v1.json",
             "--output-root",
-            "results/icra27/icra076/repeatability-replay-003"],
+            "results/icra27/icra076/repeatability-replay-004"],
     }
 
 
 def validate_verification(verification: dict[str, Any],
                           expected_source_head: str | None = None) -> None:
-    if set(verification) != {"schema_version", "source_head", "commands"} or \
+    if set(verification) != {"schema_version", "source_head", "commands",
+                             "accepted_debt", "governance_snapshot",
+                             "shared_install"} or \
             verification.get("schema_version") != \
-            "icra076_repository_local_verification_v1":
+            "icra077a_repository_local_verification_v2":
         _fail("REQUIRED_VERIFICATION_NOT_PASS", "schema")
+    protocol = _json(REPOSITORY / "config/icra27/icra076_preregistration_v1.json")
+    environment = current_freeze_environment_binding(protocol, REPOSITORY)
+    for field in ("accepted_debt", "governance_snapshot", "shared_install"):
+        if verification.get(field) != environment[field]:
+            _fail("REQUIRED_VERIFICATION_ENVIRONMENT_DRIFT", field)
     source_head = verification.get("source_head")
     if (not isinstance(source_head, str) or len(source_head) != 40 or
             any(c not in "0123456789abcdef" for c in source_head)):
@@ -443,7 +603,8 @@ def load_measured_replay_manifest(
     required_fields = {
         "schema_version", "task", "outcome_blind", "held_out_accessed",
         "source_head", "executable", "serialized_input", "measurement_count",
-        "measurements", "calculation"}
+        "measurements", "calculation", "accepted_debt",
+        "governance_snapshot", "shared_install"}
     if (set(manifest) != required_fields or
             manifest.get("schema_version") !=
             "icra076_production_measured_replay_manifest_v1" or
@@ -455,6 +616,11 @@ def load_measured_replay_manifest(
             (expected_source_head is not None and
              manifest["source_head"] != expected_source_head)):
         _fail("REPLAY_MANIFEST_CONTRACT_INVALID")
+    protocol = _json(repository / "config/icra27/icra076_preregistration_v1.json")
+    environment = current_freeze_environment_binding(protocol, repository)
+    for field in ("accepted_debt", "governance_snapshot", "shared_install"):
+        if manifest.get(field) != environment[field]:
+            _fail("REPLAY_ENVIRONMENT_DRIFT", field)
     _verify_absolute_file_record(manifest.get("executable", {}))
     serialized_input = manifest.get("serialized_input", {})
     if set(serialized_input) != {"path", "type", "size_bytes", "sha256"}:
@@ -513,6 +679,9 @@ def load_measured_replay_manifest(
         "manifest_sha256": file_sha256(manifest_path),
         "executable": manifest["executable"],
         "serialized_input": serialized_input,
+        "accepted_debt": manifest["accepted_debt"],
+        "governance_snapshot": manifest["governance_snapshot"],
+        "shared_install": manifest["shared_install"],
     }
 
 
@@ -536,7 +705,7 @@ def _repeatability_bound(replay: dict[str, Any], repository: Path) -> dict[str, 
     required_replay_command = [
         "python3", "scripts/dev_planner/icra076_repeatability_replay.py",
         "--snapshot", "config/icra27/icra076_flat_null_snapshot_v1.json",
-        "--output-root", "results/icra27/icra076/repeatability-replay-003",
+        "--output-root", "results/icra27/icra076/repeatability-replay-004",
     ]
     if replay.get("required_replay_command") != required_replay_command:
         _fail("REPEATABILITY_COMMAND_DRIFT")
@@ -555,7 +724,7 @@ def _repeatability_bound(replay: dict[str, Any], repository: Path) -> dict[str, 
     if isinstance(manifest_relative, str):
         _reject_forbidden_path_tokens(Path(manifest_relative))
     if manifest_relative != \
-            "results/icra27/icra076/repeatability-replay-003/manifest.json":
+            "results/icra27/icra076/repeatability-replay-004/manifest.json":
         _fail("REPEATABILITY_MANIFEST_IDENTITY_INVALID")
     manifest_path = _repository_path(repository, manifest_relative)
     if not manifest_path.exists():
@@ -641,6 +810,11 @@ def _validate_seed_registry(registry: dict[str, Any], repository: Path) -> None:
             expected_sources):
         _fail("HISTORICAL_SEED_SOURCES_INCOMPLETE")
     for record in bound_sources:
+        if record.get("path") == GOVERNANCE_SNAPSHOT_PATHS[0]:
+            if record.get("sha256") != \
+                    "080c949d1543872fe052bb27f3fe5c19e7cf91e1e06227dba91770bf360c6b2e":
+                _fail("GOVERNANCE_SEED_SOURCE_IDENTITY_INVALID")
+            continue
         _verify_bound_file(repository, record)
     known = exclusion.get("known_seed_values")
     expected_known = [
@@ -827,7 +1001,8 @@ def validate_preregistration(
     byte_freeze = protocol.get("byte_freeze", {})
     if (set(byte_freeze) != {"source_inventory_roots", "shared_install_root",
                              "rebuilt_packages", "runtime_install_packages",
-                             "inventory_record_fields", "drift_policy"} or
+                             "inventory_record_fields", "drift_policy",
+                             "governance_snapshot"} or
             byte_freeze.get("shared_install_root") != "/home/dev/ws_iap/install" or
             byte_freeze.get("rebuilt_packages") != [
                 "iap", "plan_env", "traj_utils", "path_searching",
@@ -841,6 +1016,8 @@ def validate_preregistration(
                 "path", "type", "size_bytes", "sha256"] or
             byte_freeze.get("drift_policy") != "INVALIDATE_BEFORE_ICRA077"):
         _fail("BYTE_FREEZE_CONTRACT_INVALID")
+    governance_snapshot = validate_governance_snapshot(
+        byte_freeze["governance_snapshot"], repository)
     output = protocol.get("output_policy", {})
     if output != {
             "allowed_root": "results/icra27/icra076",
@@ -861,6 +1038,7 @@ def validate_preregistration(
         "binomial_rule": computed_rule,
         "execution_order": order,
         "execution_order_sha256": canonical_sha256(order),
+        "governance_snapshot": governance_snapshot,
     }
 
 
@@ -936,7 +1114,9 @@ def collect_source_inventory(protocol: dict[str, Any],
         if not path.exists() or path.is_symlink():
             _fail("SOURCE_INVENTORY_ROOT_INVALID", relative)
     records = [inventory_path(path, repository)
-               for path in _tracked_paths(repository, roots)]
+               for path in _tracked_paths(repository, roots)
+               if str(path.relative_to(repository)) not in
+               GOVERNANCE_SNAPSHOT_PATHS]
     if len({record["path"] for record in records}) != len(records):
         _fail("SOURCE_INVENTORY_DUPLICATE")
     return records
@@ -1003,7 +1183,7 @@ def create_freeze_record(
     source_inventory = collect_source_inventory(protocol, repository)
     install_inventory = collect_install_inventory(protocol, install_root)
     record = {
-        "schema_version": "icra076_preregistration_freeze_v1",
+        "schema_version": "icra077a_preregistration_freeze_v2",
         "task": "ICRA-076",
         "result": "PASS",
         "outcome_blind": True,
@@ -1033,11 +1213,13 @@ def create_freeze_record(
         "execution_order_sha256": validated["execution_order_sha256"],
         "source_inventory": source_inventory,
         "source_inventory_sha256": canonical_sha256(source_inventory),
+        "governance_snapshot": validated["governance_snapshot"],
         "install_root": str(install_root.absolute()),
         "install_inventory": install_inventory,
         "install_inventory_sha256": canonical_sha256(install_inventory),
         "verification": verification,
         "verification_binding": verification_binding,
+        "accepted_debt": ICRA076_ACCEPTED_DEBT,
         "icra075_disposition": (
             "BLOCKED_USER_ACCEPTED_BYPASS_NOT_PASS_0_OF_40_NO_POWER_INPUTS"),
         "icra077_authorized": False,
@@ -1054,18 +1236,22 @@ def validate_freeze_record(
     repository = repository.resolve()
     record_path = _repository_input_path(record_path, repository)
     record = _json(record_path)
-    if (record.get("schema_version") != "icra076_preregistration_freeze_v1" or
+    if (record.get("schema_version") != "icra077a_preregistration_freeze_v2" or
             record.get("task") != "ICRA-076" or record.get("result") != "PASS" or
             record.get("outcome_blind") is not True or
             record.get("held_out_accessed") is not False or
             record.get("empirical_power_claim") is not False or
             record.get("icra077_authorized") is not False):
         _fail("FREEZE_RECORD_CONTRACT_INVALID")
+    if record.get("accepted_debt") != ICRA076_ACCEPTED_DEBT:
+        _fail("ACCEPTED_DEBT_DRIFT")
     protocol_binding = record.get("protocol", {})
     registry_binding = record.get("seed_registry", {})
     protocol_path = _repository_path(repository, protocol_binding.get("path", ""))
     registry_path = _repository_path(repository, registry_binding.get("path", ""))
     validated = validate_preregistration(protocol_path, registry_path, repository)
+    if record.get("governance_snapshot") != validated["governance_snapshot"]:
+        _fail("GOVERNANCE_SNAPSHOT_DRIFT")
     if (protocol_binding.get("canonical_sha256") !=
             validated["protocol_canonical_sha256"] or
             registry_binding.get("canonical_sha256") !=

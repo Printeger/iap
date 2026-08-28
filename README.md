@@ -1119,3 +1119,10 @@ implementation. This is a Builder candidate, not Supervisor PASS.
 That first candidate was review-rejected. The corrected current candidate is
 replay-003/verification-002/preregistration-freeze-005; its post-evidence exact
 suite and independent freeze validation pass. Supervisor Review is still required.
+
+ICRA-077A governance closure (2026-08-28): freeze-005 correctly blocked before
+held-out access when later Supervisor prose changed frozen authority bytes.
+The bounded repair treats exactly three named governance documents as Git-blob
+snapshots from `3a3486f`, separately fingerprints protected research-route
+fields, and leaves every executable input/current install byte strict. Fresh
+004/003/006 evidence is offline-only; ICRA-077B remains unauthorized.

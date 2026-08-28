@@ -777,3 +777,13 @@ Corrected source requires fresh replay-003/verification-002/freeze-005.
 Those fresh identities now exist: 60/60 measured emissions, U95 0.0 m,
 post-evidence tests 44/44 and independently validated source/install freeze
 956/958. Status remains Builder-ready-for-review, not Supervisor PASS.
+
+## ICRA-077A pre-access governance-freeze closure (2026-08-28)
+
+IAP-RQ-423/424 require exactly three mutable governance authorities to resolve
+from immutable Git blobs on the fetch-confirmed pushed lineage, plus an
+independent protected-route fingerprint. IAP-RQ-320/321/400/410/421/422 keep
+every execution-affecting source, runner, analyzer, test, probe/build input and
+shared-install byte under strict current validation. Both user-accepted
+ICRA-076 debts remain explicit. This closure authorizes no held-out outcome,
+GPU, ROS, live run, ICRA-077B, qualification or campaign.

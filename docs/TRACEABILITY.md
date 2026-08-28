@@ -1871,3 +1871,10 @@ disclosed; the final task-local rerun has identical before/after inventory hash.
 | IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 | Fresh pushed-source freeze candidate | replay-002 60/60, U95 0.0 m, delta_peak 0.3 m; verification-001; freeze-004 source 956/install 958 | **INDEPENDENT VALIDATION PASS; SUPERVISOR REVIEW REQUIRED** |
 | IAP-RQ-423 / IAP-RQ-424 | Two-axis correction of first candidate | Post-evidence test-state repair, executable/input/source cross-binding, standalone verification path/hash binding and freeze calculation revalidation | **FIRST CANDIDATE REJECTED; CORRECTED SOURCE READY FOR FRESH EVIDENCE** |
 | IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 | Corrected fresh candidate | replay-003 60/60/U95 0.0 m; post-evidence 44/44; verification-002; freeze-005 source 956/install 958 | **INDEPENDENT VALIDATION PASS; SUPERVISOR REVIEW REQUIRED** |
+
+## 2026-08-28 ICRA-077A governance-freeze closure
+
+| Req ID | Boundary | Implementation / verification | Status |
+|---|---|---|---|
+| IAP-RQ-423 / IAP-RQ-424 | Exactly three mutable governance documents | `governance_snapshot` in preregistration config; Git-object validator and 5/5 adversarial tests cover path/commit/OID/type/size/hash/lineage/fourth-path rejection | **OFFLINE IMPLEMENTED** |
+| IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 / IAP-RQ-422 | Protected research route and strict execution inputs | Protected-field fingerprint plus unchanged current-byte source/install inventory; 20/20 preregistration tests and current route/hook verifiers pass | **NO HELD-OUT ACCESS; FRESH EVIDENCE PENDING PUSHED SOURCE** |

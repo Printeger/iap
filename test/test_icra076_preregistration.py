@@ -36,6 +36,21 @@ def load_module():
 
 class Icra076PreregistrationTest(unittest.TestCase):
     @staticmethod
+    def _verification(module, source_head="0" * 40):
+        protocol = json.loads(PROTOCOL_PATH.read_text())
+        environment = module.current_freeze_environment_binding(
+            protocol, REPOSITORY)
+        return {
+            "schema_version": "icra077a_repository_local_verification_v2",
+            "source_head": source_head,
+            "commands": [
+                {"category": category, "argv": argv, "enabled": True,
+                 "skipped": False, "exit_code": 0}
+                for category, argv in module.expected_verification_argv().items()],
+            **environment,
+        }
+
+    @staticmethod
     def _measurement(index, d_peak):
         b_risk = 1.0
         b_original = b_risk + d_peak
@@ -155,6 +170,13 @@ class Icra076PreregistrationTest(unittest.TestCase):
                 module.load_measured_replay_manifest(manifest)
             self.assertEqual(input_path.exception.code,
                              "REPLAY_INVOCATION_IDENTITY_INVALID")
+            mutated = copy.deepcopy(original)
+            mutated["accepted_debt"]["icra076_status"] = "PASS"
+            manifest.write_text(json.dumps(mutated))
+            with self.assertRaises(module.Icra076Error) as environment:
+                module.load_measured_replay_manifest(manifest)
+            self.assertEqual(environment.exception.code,
+                             "REPLAY_ENVIRONMENT_DRIFT")
             manifest.write_text(json.dumps(original))
 
     def test_measured_replay_adversaries_fail_closed(self):
@@ -275,14 +297,8 @@ class Icra076PreregistrationTest(unittest.TestCase):
                          "icra076_production_measured_replay_binding_v2")
         self.assertEqual(replay["measured_replay_manifest_path"],
                          "results/icra27/icra076/"
-                         "repeatability-replay-003/manifest.json")
-        verification = {
-            "schema_version": "icra076_repository_local_verification_v1",
-            "source_head": "0" * 40,
-            "commands": [
-            {"category": category, "argv": argv, "enabled": True,
-             "skipped": False, "exit_code": 0}
-            for category, argv in module.expected_verification_argv().items()]}
+                         "repeatability-replay-004/manifest.json")
+        verification = self._verification(module)
         manifest = (REPOSITORY / replay["measured_replay_manifest_path"]).resolve()
         original_exists = Path.exists
         def exists_except_manifest(path):
@@ -466,13 +482,7 @@ class Icra076PreregistrationTest(unittest.TestCase):
 
     def test_skipped_disabled_or_failed_verification_is_rejected(self):
         module = load_module()
-        valid = {
-            "schema_version": "icra076_repository_local_verification_v1",
-            "source_head": "0" * 40,
-            "commands": [
-            {"category": category, "argv": argv, "enabled": True,
-             "skipped": False, "exit_code": 0}
-            for category, argv in module.expected_verification_argv().items()]}
+        valid = self._verification(module)
         module.validate_verification(valid)
         wrong_command = copy.deepcopy(valid)
         wrong_command["commands"][0]["argv"] = ["true"]
@@ -492,13 +502,7 @@ class Icra076PreregistrationTest(unittest.TestCase):
 
     def test_verification_is_repository_local_and_source_bound(self):
         module = load_module()
-        valid = {
-            "schema_version": "icra076_repository_local_verification_v1",
-            "source_head": "0" * 40,
-            "commands": [
-                {"category": category, "argv": argv, "enabled": True,
-                 "skipped": False, "exit_code": 0}
-                for category, argv in module.expected_verification_argv().items()]}
+        valid = self._verification(module)
         with tempfile.TemporaryDirectory(prefix="icra076-verification-") as root:
             external = Path(root) / "verification.json"
             external.write_text(json.dumps(valid))
@@ -511,6 +515,12 @@ class Icra076PreregistrationTest(unittest.TestCase):
             module.validate_verification(valid, "1" * 40)
         self.assertEqual(source.exception.code,
                          "REQUIRED_VERIFICATION_SOURCE_DRIFT")
+        changed = copy.deepcopy(valid)
+        changed["governance_snapshot"]["git_blobs"][0]["size_bytes"] += 1
+        with self.assertRaises(module.Icra076Error) as environment:
+            module.validate_verification(changed, "0" * 40)
+        self.assertEqual(environment.exception.code,
+                         "REQUIRED_VERIFICATION_ENVIRONMENT_DRIFT")
 
 
 if __name__ == "__main__":

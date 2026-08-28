@@ -43,6 +43,10 @@ def main() -> int:
     serialized_input = regular_file_record(
         snapshot, str(snapshot.relative_to(repository)))
     source_head = CONTRACT._run_git(repository, ["rev-parse", "HEAD"])
+    protocol = CONTRACT._json(
+        repository / "config/icra27/icra076_preregistration_v1.json")
+    environment = CONTRACT.current_freeze_environment_binding(
+        protocol, repository)
     output_root.mkdir(parents=True, exist_ok=False)
     records = []
     measurements = []
@@ -83,6 +87,7 @@ def main() -> int:
         "measurement_count": len(records),
         "measurements": records,
         "calculation": calculation,
+        **environment,
     }
     manifest_path = output_root / "manifest.json"
     with manifest_path.open("x") as stream:

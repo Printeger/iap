@@ -9364,3 +9364,28 @@ with 956 source and 958 install records. Replay manifest, verification and
 freeze hashes are `f7a64b449112168f93fde9f4f0477e436e50eb1a3c35d0c257da3f1ed53302d2`,
 `c35498d1177c649825f8faa54b4ed4b6cca5d346c904736a78e6893f9512d531`
 and `aee60ed05efb816254159ed51ab04fa4c5f2977ebf711e86384a53e91aeaf686`.
+
+## 2026-08-28 — ICRA-077A pre-access governance-freeze closure
+
+Requirements: IAP-RQ-320, IAP-RQ-321, IAP-RQ-400, IAP-RQ-410,
+IAP-RQ-421, IAP-RQ-422, IAP-RQ-423 and IAP-RQ-424.
+
+Starting HEAD `fd4c1ed0bd9c7eccd40eaf4bc06d500074d8c429` was
+fetch-confirmed at divergence `0 0`; only the protected PDF was ordinarily
+untracked. The retained pre-access blocker proves freeze-005 failed before any
+held-out/GPU/ROS/live/row/analysis action. User decision 009 authorizes only a
+bounded offline repair.
+
+The repair snapshots exactly three governance paths from pushed frozen source
+`3a3486f793df1b8299a87bf3400d7e2c34979018` using regular Git blob OID/type,
+size and SHA-256. Current working-tree bytes cannot supply frozen content.
+Protected route owner/route/modules/question/claims/arms/scenes/gates/fallback/
+NO-GO/campaign fields remain independently fingerprinted as
+`1e05d2763e588f4d7c148984a4df9a9e6c3cdd52e5b5859810fc638ac633e25a`.
+All other tracked source/test/config/runner/analyzer/probe bytes and shared
+install bytes remain strict. Replay, verification and freeze evidence bind the
+accepted replay-domain and omitted-thirdparty debts without relabeling
+ICRA-076 PASS. Focused 076 tests pass 20/20, governance adversaries pass 5/5,
+and current route/hook verifiers pass. The unrelated deferred ICRA-071 unit
+suite retains stale historical decision/task assertions and is not modified.
+No held-out, GPU, ROS, live, ICRA-077B or ICRA-078 action ran.

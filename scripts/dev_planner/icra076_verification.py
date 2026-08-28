@@ -22,6 +22,10 @@ def main() -> int:
     output = contract.validate_output_path(
         args.output, contract.REPOSITORY, allowed)
     admission = contract.source_admission(contract.REPOSITORY)
+    protocol = contract._json(
+        contract.REPOSITORY / "config/icra27/icra076_preregistration_v1.json")
+    environment = contract.current_freeze_environment_binding(
+        protocol, contract.REPOSITORY)
     exits = {
         "FOCUSED_TESTS": args.focused_tests_exit,
         "VALIDATOR": args.validator_exit,
@@ -29,13 +33,14 @@ def main() -> int:
         "REPEATABILITY_REPLAY": args.repeatability_replay_exit,
     }
     record = {
-        "schema_version": "icra076_repository_local_verification_v1",
+        "schema_version": "icra077a_repository_local_verification_v2",
         "source_head": admission["head_commit"],
         "commands": [
             {"category": category, "argv": argv, "enabled": True,
              "skipped": False, "exit_code": exits[category]}
             for category, argv in contract.expected_verification_argv().items()
         ],
+        **environment,
     }
     contract.validate_verification(record, admission["head_commit"])
     output.parent.mkdir(parents=True, exist_ok=True)
