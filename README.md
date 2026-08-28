@@ -210,7 +210,8 @@ HAL/VAL `10/20 m`。因此按 Gate 在 GPU/ROS 和 `matrix-003` 前停止；ICRA
 ### 1.2.6 ICRA-076 outcome-blind preregistration 与 byte freeze
 
 ICRA-076 只冻结后续 confirmatory protocol，不运行 held-out、ROS、GPU、main flow 或 ICRA-077。协议固定
-PRIMARY/EXACT_MIRROR/FLAT_NULL 每场景 60 个独立 seeds、两臂配对共 360 rows、`delta_peak=0.3 m`，以及
+PRIMARY/EXACT_MIRROR/FLAT_NULL 每场景 60 个独立 seeds、两臂配对共 360 rows；当前 measured
+`U95=0.0 m`，因此冻结公式给出 `delta_peak=0.3 m`，以及
 单侧 exact-binomial `n=60, p0=0.9, alpha=0.05` 的最低通过数 59。该保守样本量没有经验 power claim；
 ICRA-075 仍是 0/40、BLOCKED/user-bypassed/NOT PASS。
 
@@ -223,11 +224,12 @@ python3 test/test_icra076_preregistration.py -v
 python3 scripts/dev_planner/validate_icra076_preregistration.py
 
 python3 scripts/dev_planner/icra076_repeatability_replay.py \
-  --output results/icra27/icra076/repeatability-replay-NNN.json
+  --snapshot config/icra27/icra076_flat_null_snapshot_v1.json \
+  --output-root results/icra27/icra076/repeatability-replay-NNN
 
 # implementation/config/tests push 且 HEAD...origin/dev/icra 为 0 0 后，使用全新 output identity：
 python3 scripts/dev_planner/freeze_icra076_preregistration.py \
-  --verification /tmp/icra076-verification.json \
+  --verification results/icra27/icra076/verification-NNN.json \
   --output results/icra27/icra076/preregistration-freeze-NNN.json
 
 python3 scripts/dev_planner/validate_icra076_preregistration.py \

@@ -770,3 +770,6 @@ authorized by this repair.
 The fresh Builder candidate records replay-002 (60/60, U95 0.0 m),
 repository-local verification-001 and freeze-004 (956 source / 958 install
 records); independent validation passes, subject to Supervisor Review.
+Review subsequently rejected that candidate because the post-evidence exact
+suite failed and freeze-004 did not bind the standalone verification file.
+Corrected source requires fresh replay-003/verification-002/freeze-005.

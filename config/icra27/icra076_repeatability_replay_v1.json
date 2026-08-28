@@ -5,7 +5,7 @@
   "unit": "m",
   "replay_count": 60,
   "sample_count": 200,
-  "measured_replay_manifest_path": "results/icra27/icra076/repeatability-replay-002/manifest.json",
+  "measured_replay_manifest_path": "results/icra27/icra076/repeatability-replay-003/manifest.json",
   "probe_executable_path": "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe",
   "serialized_input_path": "config/icra27/icra076_flat_null_snapshot_v1.json",
   "required_replay_command": [
@@ -14,7 +14,7 @@
     "--snapshot",
     "config/icra27/icra076_flat_null_snapshot_v1.json",
     "--output-root",
-    "results/icra27/icra076/repeatability-replay-002"
+    "results/icra27/icra076/repeatability-replay-003"
   ],
   "calculation": {
     "metric": "abs(D_peak)",

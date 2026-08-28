@@ -220,7 +220,7 @@ def expected_verification_argv() -> dict[str, list[str]]:
             "python3", "scripts/dev_planner/icra076_repeatability_replay.py",
             "--snapshot", "config/icra27/icra076_flat_null_snapshot_v1.json",
             "--output-root",
-            "results/icra27/icra076/repeatability-replay-002"],
+            "results/icra27/icra076/repeatability-replay-003"],
     }
 
 
@@ -536,7 +536,7 @@ def _repeatability_bound(replay: dict[str, Any], repository: Path) -> dict[str, 
     required_replay_command = [
         "python3", "scripts/dev_planner/icra076_repeatability_replay.py",
         "--snapshot", "config/icra27/icra076_flat_null_snapshot_v1.json",
-        "--output-root", "results/icra27/icra076/repeatability-replay-002",
+        "--output-root", "results/icra27/icra076/repeatability-replay-003",
     ]
     if replay.get("required_replay_command") != required_replay_command:
         _fail("REPEATABILITY_COMMAND_DRIFT")
@@ -555,7 +555,7 @@ def _repeatability_bound(replay: dict[str, Any], repository: Path) -> dict[str, 
     if isinstance(manifest_relative, str):
         _reject_forbidden_path_tokens(Path(manifest_relative))
     if manifest_relative != \
-            "results/icra27/icra076/repeatability-replay-002/manifest.json":
+            "results/icra27/icra076/repeatability-replay-003/manifest.json":
         _fail("REPEATABILITY_MANIFEST_IDENTITY_INVALID")
     manifest_path = _repository_path(repository, manifest_relative)
     if not manifest_path.exists():
@@ -567,6 +567,12 @@ def _repeatability_bound(replay: dict[str, Any], repository: Path) -> dict[str, 
             "manifest_path": manifest_relative,
         }
     measured = load_measured_replay_manifest(manifest_path, repository=repository)
+    expected_executable = replay["probe_executable_path"]
+    expected_input = replay["serialized_input_path"]
+    if measured["executable"].get("path") != expected_executable:
+        _fail("REPLAY_EXECUTABLE_PATH_DRIFT")
+    if measured["serialized_input"].get("path") != expected_input:
+        _fail("REPLAY_SERIALIZED_INPUT_PATH_DRIFT")
     return {
         **measured,
         "pending": False,
@@ -967,6 +973,7 @@ def collect_install_inventory(protocol: dict[str, Any],
 def create_freeze_record(
         protocol_path: Path, registry_path: Path, output_path: Path,
         verification: dict[str, Any], repository: Path = REPOSITORY,
+        verification_path: Path | None = None,
         install_root: Path = Path("/home/dev/ws_iap/install")) -> dict[str, Any]:
     repository = repository.resolve()
     validated = validate_preregistration(
@@ -984,7 +991,13 @@ def create_freeze_record(
     if replay_command["argv"] != replay["required_replay_command"]:
         _fail("REPEATABILITY_VERIFICATION_MISMATCH")
     admission = source_admission(repository)
+    if validated["repeatability"].get("source_head") != admission["head_commit"]:
+        _fail("REPLAY_SOURCE_HEAD_DRIFT")
     validate_verification(verification, admission["head_commit"])
+    if verification_path is None:
+        _fail("VERIFICATION_BINDING_REQUIRED")
+    verification_path = _repository_input_path(verification_path, repository)
+    verification_binding = inventory_path(verification_path, repository)
     allowed_root = repository / protocol["output_policy"]["allowed_root"]
     output = validate_output_path(output_path, repository, allowed_root)
     source_inventory = collect_source_inventory(protocol, repository)
@@ -1024,6 +1037,7 @@ def create_freeze_record(
         "install_inventory": install_inventory,
         "install_inventory_sha256": canonical_sha256(install_inventory),
         "verification": verification,
+        "verification_binding": verification_binding,
         "icra075_disposition": (
             "BLOCKED_USER_ACCEPTED_BYPASS_NOT_PASS_0_OF_40_NO_POWER_INPUTS"),
         "icra077_authorized": False,
@@ -1074,6 +1088,15 @@ def validate_freeze_record(
     if ancestor.returncode != 0:
         _fail("FREEZE_SOURCE_HEAD_DRIFT")
     validate_verification(record.get("verification", {}), frozen_head)
+    verification_binding = record.get("verification_binding", {})
+    if not isinstance(verification_binding, dict):
+        _fail("VERIFICATION_BINDING_INVALID")
+    verification_path = _repository_path(
+        repository, verification_binding.get("path", ""))
+    if inventory_path(verification_path, repository) != verification_binding:
+        _fail("VERIFICATION_BYTE_DRIFT")
+    if load_verification(verification_path, repository) != record.get("verification"):
+        _fail("VERIFICATION_BYTE_DRIFT")
     protocol = _json(protocol_path)
     source_inventory = collect_source_inventory(protocol, repository)
     install_inventory = collect_install_inventory(protocol, install_root)
@@ -1086,6 +1109,19 @@ def validate_freeze_record(
             record.get("install_inventory_sha256") !=
             canonical_sha256(install_inventory)):
         _fail("INSTALL_BYTE_DRIFT")
+    expected_contract = {
+        "endpoint_buffer_m": validated["endpoint_buffer_m"],
+        "domain_sesoi_m": protocol["domain_sesoi"]["value"],
+        "u95_repeatability_m": validated["u95_repeatability_m"],
+        "delta_peak_m": validated["delta_peak_m"],
+        "sample_size": protocol["sample_size"],
+        "binomial_rule": validated["binomial_rule"],
+        "formal_gates": protocol["formal_gates"],
+        "missing_data_policy": protocol["missing_data_policy"],
+    }
+    if (record.get("validated_contract") != expected_contract or
+            record.get("repeatability_calculation") != validated["repeatability"]):
+        _fail("FREEZE_CALCULATION_DRIFT")
     return {
         "schema_version": "icra076_freeze_validation_v1",
         "result": "PASS",

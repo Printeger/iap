@@ -7,9 +7,11 @@ import importlib.util
 import copy
 import json
 import math
+import shutil
 import subprocess
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 
@@ -132,6 +134,27 @@ class Icra076PreregistrationTest(unittest.TestCase):
                         self.assertRaises(module.Icra076Error) as caught:
                     module.load_measured_replay_manifest(manifest)
                 self.assertEqual(caught.exception.code, code)
+            alternate_probe = Path(temporary) / "alternate-probe"
+            shutil.copy2(PROBE_PATH, alternate_probe)
+            mutated = copy.deepcopy(original)
+            mutated["executable"] = module.inventory_path(
+                alternate_probe, alternate_probe.parent)
+            mutated["executable"]["path"] = str(alternate_probe)
+            manifest.write_text(json.dumps(mutated))
+            with self.assertRaises(module.Icra076Error) as executable_path:
+                module.load_measured_replay_manifest(manifest)
+            self.assertEqual(executable_path.exception.code,
+                             "REPLAY_INVOCATION_IDENTITY_INVALID")
+            alternate_input = Path(temporary) / "alternate-input.json"
+            shutil.copy2(SNAPSHOT_INPUT_PATH, alternate_input)
+            mutated = copy.deepcopy(original)
+            mutated["serialized_input"] = module.inventory_path(
+                alternate_input, REPOSITORY)
+            manifest.write_text(json.dumps(mutated))
+            with self.assertRaises(module.Icra076Error) as input_path:
+                module.load_measured_replay_manifest(manifest)
+            self.assertEqual(input_path.exception.code,
+                             "REPLAY_INVOCATION_IDENTITY_INVALID")
             manifest.write_text(json.dumps(original))
 
     def test_measured_replay_adversaries_fail_closed(self):
@@ -221,9 +244,15 @@ class Icra076PreregistrationTest(unittest.TestCase):
         module = load_module()
         frozen = module.validate_preregistration(PROTOCOL_PATH, REGISTRY_PATH)
         self.assertEqual(frozen["endpoint_buffer_m"], 1.5)
-        self.assertTrue(frozen["repeatability_pending"])
-        self.assertIsNone(frozen["u95_repeatability_m"])
-        self.assertIsNone(frozen["delta_peak_m"])
+        replay = json.loads((REPOSITORY / "config/icra27/"
+                             "icra076_repeatability_replay_v1.json").read_text())
+        evidence_exists = (REPOSITORY /
+                           replay["measured_replay_manifest_path"]).exists()
+        self.assertEqual(frozen["repeatability_pending"], not evidence_exists)
+        self.assertEqual(frozen["u95_repeatability_m"],
+                         0.0 if evidence_exists else None)
+        self.assertEqual(frozen["delta_peak_m"],
+                         0.3 if evidence_exists else None)
         self.assertEqual(frozen["minimum_success_count"], 59)
         self.assertEqual(len(frozen["execution_order"]), 360)
         self.assertEqual(len({row["run_id"] for row in frozen["execution_order"]}),
@@ -246,7 +275,7 @@ class Icra076PreregistrationTest(unittest.TestCase):
                          "icra076_production_measured_replay_binding_v2")
         self.assertEqual(replay["measured_replay_manifest_path"],
                          "results/icra27/icra076/"
-                         "repeatability-replay-002/manifest.json")
+                         "repeatability-replay-003/manifest.json")
         verification = {
             "schema_version": "icra076_repository_local_verification_v1",
             "source_head": "0" * 40,
@@ -254,13 +283,24 @@ class Icra076PreregistrationTest(unittest.TestCase):
             {"category": category, "argv": argv, "enabled": True,
              "skipped": False, "exit_code": 0}
             for category, argv in module.expected_verification_argv().items()]}
-        with tempfile.TemporaryDirectory(
-                prefix="icra076-freeze-pending-", dir=REPOSITORY) as temporary:
+        manifest = (REPOSITORY / replay["measured_replay_manifest_path"]).resolve()
+        original_exists = Path.exists
+        def exists_except_manifest(path):
+            return False if path.resolve() == manifest else original_exists(path)
+        with unittest.mock.patch.object(Path, "exists", exists_except_manifest), \
+                tempfile.TemporaryDirectory(
+                    prefix="icra076-freeze-pending-", dir=REPOSITORY) as temporary:
             with self.assertRaises(module.Icra076Error) as caught:
                 module.create_freeze_record(
                     PROTOCOL_PATH, REGISTRY_PATH,
                     Path(temporary) / "freeze.json", verification)
         self.assertEqual(caught.exception.code, "MEASURED_REPLAY_REQUIRED")
+
+    def test_runner_has_no_measurement_constant_injection_seam(self):
+        source = REPLAY_RUNNER_PATH.read_text()
+        for forbidden in ("B_original_m", "B_risk_m", "D_peak_m",
+                          "fixture_source", "expected_u95"):
+            self.assertNotIn(forbidden, source)
 
     def test_schema_downgrade_is_typed_and_fail_closed(self):
         self._assert_mutation_rejected(

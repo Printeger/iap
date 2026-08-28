@@ -23,7 +23,8 @@ def main() -> int:
     args = parser.parse_args()
     verification = CONTRACT.load_verification(args.verification)
     record = CONTRACT.create_freeze_record(
-        args.protocol, args.seed_registry, args.output, verification)
+        args.protocol, args.seed_registry, args.output, verification,
+        verification_path=args.verification)
     print(json.dumps({
         "schema_version": record["schema_version"],
         "result": record["result"],

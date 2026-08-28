@@ -9345,3 +9345,12 @@ freeze SHA-256 values are respectively `e5701f1ce9ff460998da1830f2a4a1cfdfd4dedc
 `acfb326375cea47c6d3e6673d57c9c23160f1e88b6dd411f57d4b0b3525ed69a`
 and `35725a368f674f56bab8304f5b50d0ea4108b3139181608b85af5522b194ee07`.
 No ROS, GPU, live, held-out or ICRA-077 action ran.
+
+Final two-axis review rejected the first candidate because its post-evidence
+focused suite retained pending-state assertions and freeze-004 embedded, but
+did not path/hash-bind, verification-001. The repair makes tests valid both
+before and after evidence, cross-binds replay paths/source HEAD, binds the
+standalone verification record and recomputes frozen statistical fields during
+validation. Old replay-002/verification-001/freeze-004 remain immutable review-
+rejected history; fresh identities start at replay-003/verification-002/
+freeze-005 after the corrected source is pushed.
