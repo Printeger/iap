@@ -45,13 +45,13 @@ recovery_roadmap: docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP
 four_layer_workflow: docs/icra27/ICRA_FOUR_LAYER_DEVELOPMENT_WORKFLOW.md
 guard_plan: docs/icra27/ICRA_CROSS_LAYER_GUARD_PLAN.md
 artifact_retention: ALL_ICRA072_EVIDENCE_SHARED_ROOTS_HIDDEN_USER_ARTIFACTS_AND_PROTECTED_PDF_RETAINED
-window_disposition: PENDING_POST_PUSH_AUDIT
-rotation_reason: PENDING_POST_PUSH_AUDIT
-window_handoff_anchor: PENDING_TASK_CHANGESET
+window_disposition: ROTATE_RECOMMENDED
+rotation_reason: USER_DECISION008_GATE_CHANGE_TO_FORMAL_HELD_OUT_RESULTS
+window_handoff_anchor: 72e5615e8e7cc4ae9ccec9e84aad923a2711c550
 window_next_role: SUPERVISOR
 window_next_review_task: ICRA-077
 window_bootstrap_source: REPOSITORY_AUTHORITY_ONLY
-updated_utc: 2026-08-28T04:05:00Z
+updated_utc: 2026-08-28T04:10:11Z
 ```
 
 User decision 008 explicitly accepts and bypasses ICRA-076's wrong frozen replay domain and omitted tracked JSON

@@ -21,10 +21,15 @@
 
 ### Supervisor window disposition
 
-- Pending post-push audit. Final disposition and handoff anchor will be recorded after task issuance is authority.
+- Task changeset `72e5615e8e7cc4ae9ccec9e84aad923a2711c550` is pushed and fetch-confirmed at divergence `0 0`.
   Normal task commit hit the known `ROUTE_CHANGE_SUPERVISOR_NOT_ACTIVE` transition deadlock after task issuance
   changed `active_role` to DEEPSEEK. Route/hook checks, exact 12-file staging and diff checks passed; a controlled
-  `--no-verify` commit is used without staging Builder evidence or the protected PDF.
+  `--no-verify` commit is used without staging Builder evidence or the protected PDF. The final §8.6 record then
+  hit `BUILDER_SUPERVISOR_FILE_STAGED`; after confirming only `AGENT_STATE.md` and `SUPERVISOR_LOG.md` are staged,
+  the same controlled procedure is used for the rotation-only commit.
+- **`ROTATE_RECOMMENDED`**. Decision 008 changes Gate from preregistration freeze to formal held-out result
+  production. A fresh Supervisor must bootstrap only from pushed repository authority and later Review ICRA-077;
+  rotation does not authorize ICRA-078 or allow the Supervisor to execute the active Builder task.
 
 ## 2026-08-28 — ICRA-076 repair Review BLOCKED; user decision required
 
