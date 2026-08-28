@@ -767,3 +767,6 @@ computed from `|D_peak|`. IAP-RQ-421/422/423/424 require exact pushed-source,
 command, executable, serialized-input, emission, mandatory-test and shared-
 install byte identities. No ICRA-077, ROS, GPU, live or held-out action is
 authorized by this repair.
+The fresh Builder candidate records replay-002 (60/60, U95 0.0 m),
+repository-local verification-001 and freeze-004 (956 source / 958 install
+records); independent validation passes, subject to Supervisor Review.

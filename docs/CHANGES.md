@@ -3611,3 +3611,5 @@ Requirements: `IAP-RQ-000`, `IAP-RQ-020`, `IAP-RQ-030`, `IAP-RQ-040`,
   subtraction or Python-injected B values.
 - Require repository-local source-bound verification and complete mandatory
   test/source/config/script byte freezing.
+- Fresh replay-002 measures 60/60 emissions with U95 `0.0 m`; repository-local
+  verification-001 and preregistration-freeze-004 independently validate PASS.

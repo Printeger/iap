@@ -1,0 +1,1111 @@
+{
+  "calculation": {
+    "absolute_D_peak_m": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "nearest_rank": 57,
+    "replay_count": 60,
+    "schema_version": "icra076_measured_repeatability_calculation_v1",
+    "u95_repeatability_m": 0.0,
+    "unit": "m"
+  },
+  "executable": {
+    "path": "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe",
+    "sha256": "8f511c18c4304d2a1df850dd1e5b5fdc8946d8f17fb0133215eff55c32f76580",
+    "size_bytes": 10929664,
+    "type": "regular_file"
+  },
+  "held_out_accessed": false,
+  "measurement_count": 60,
+  "measurements": [
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe",
+        "--snapshot",
+        "/home/dev/ws_iap/src/iap/config/icra27/icra076_flat_null_snapshot_v1.json",
+        "--invocation-index",
+        "1"
+      ],
+      "exit_code": 0,
+      "invocation_index": 1,
+      "output": {
+        "path": "measurement-001.json",
+        "sha256": "a5da2d425e69f87b8e12cdbf7771df568317b64630458a4fa846b193cd18703a",
+        "size_bytes": 701,
+        "type": "regular_file"
+      }
+    },
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe",
+        "--snapshot",
+        "/home/dev/ws_iap/src/iap/config/icra27/icra076_flat_null_snapshot_v1.json",
+        "--invocation-index",
+        "2"
+      ],
+      "exit_code": 0,
+      "invocation_index": 2,
+      "output": {
+        "path": "measurement-002.json",
+        "sha256": "2e10f36e6573dc3ba80748ee6f455b23b5f95f876acd6bcc10f34e04c1c4ce75",
+        "size_bytes": 701,
+        "type": "regular_file"
+      }
+    },
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe",
+        "--snapshot",
+        "/home/dev/ws_iap/src/iap/config/icra27/icra076_flat_null_snapshot_v1.json",
+        "--invocation-index",
+        "3"
+      ],
+      "exit_code": 0,
+      "invocation_index": 3,
+      "output": {
+        "path": "measurement-003.json",
+        "sha256": "09547d12d57f50dbaf277a456a61b071d7507ea497edaf2d1a7154829a6b0bdd",
+        "size_bytes": 701,
+        "type": "regular_file"
+      }
+    },
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe",
+        "--snapshot",
+        "/home/dev/ws_iap/src/iap/config/icra27/icra076_flat_null_snapshot_v1.json",
+        "--invocation-index",
+        "4"
+      ],
+      "exit_code": 0,
+      "invocation_index": 4,
+      "output": {
+        "path": "measurement-004.json",
+        "sha256": "1d20123ca929b335632914fb8e201262d10d656bb680528bd86eb7083f698b97",
+        "size_bytes": 701,
+        "type": "regular_file"
+      }
+    },
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe",
+        "--snapshot",
+        "/home/dev/ws_iap/src/iap/config/icra27/icra076_flat_null_snapshot_v1.json",
+        "--invocation-index",
+        "5"
+      ],
+      "exit_code": 0,
+      "invocation_index": 5,
+      "output": {
+        "path": "measurement-005.json",
+        "sha256": "abdd5a17ddda9656e3faea4511d361fd61c9dd60c1690bfe976ec8059edde586",
+        "size_bytes": 701,
+        "type": "regular_file"
+      }
+    },
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe",
+        "--snapshot",
+        "/home/dev/ws_iap/src/iap/config/icra27/icra076_flat_null_snapshot_v1.json",
+        "--invocation-index",
+        "6"
+      ],
+      "exit_code": 0,
+      "invocation_index": 6,
+      "output": {
+        "path": "measurement-006.json",
+        "sha256": "523e7067dfaca9419194620b06398dc2d305b490c93cd07cd0cceb943ed7badf",
+        "size_bytes": 701,
+        "type": "regular_file"
+      }
+    },
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe",
+        "--snapshot",
+        "/home/dev/ws_iap/src/iap/config/icra27/icra076_flat_null_snapshot_v1.json",
+        "--invocation-index",
+        "7"
+      ],
+      "exit_code": 0,
+      "invocation_index": 7,
+      "output": {
+        "path": "measurement-007.json",
+        "sha256": "4ef230dcb45af941b72725f77a5b552caff5d5c9354a083d2647cc0c7fe79a95",
+        "size_bytes": 701,
+        "type": "regular_file"
+      }
+    },
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe",
+        "--snapshot",
+        "/home/dev/ws_iap/src/iap/config/icra27/icra076_flat_null_snapshot_v1.json",
+        "--invocation-index",
+        "8"
+      ],
+      "exit_code": 0,
+      "invocation_index": 8,
+      "output": {
+        "path": "measurement-008.json",
+        "sha256": "5a92d4c2ba69a54126dda9785c0874bd03f0a3d9a5b292d1c1bc4b60e60be4c5",
+        "size_bytes": 701,
+        "type": "regular_file"
+      }
+    },
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe",
+        "--snapshot",
+        "/home/dev/ws_iap/src/iap/config/icra27/icra076_flat_null_snapshot_v1.json",
+        "--invocation-index",
+        "9"
+      ],
+      "exit_code": 0,
+      "invocation_index": 9,
+      "output": {
+        "path": "measurement-009.json",
+        "sha256": "5b2e70a6b45c6bcf3dadb3ac6ea59ee1f0a19ca684ed403d3d1cf374ede0f127",
+        "size_bytes": 701,
+        "type": "regular_file"
+      }
+    },
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe",
+        "--snapshot",
+        "/home/dev/ws_iap/src/iap/config/icra27/icra076_flat_null_snapshot_v1.json",
+        "--invocation-index",
+        "10"
+      ],
+      "exit_code": 0,
+      "invocation_index": 10,
+      "output": {
+        "path": "measurement-010.json",
+        "sha256": "435dcbbb072f02906d063d5822707493caf4bfb930d8cd2bfa04fdb74c6042bb",
+        "size_bytes": 702,
+        "type": "regular_file"
+      }
+    },
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe",
+        "--snapshot",
+        "/home/dev/ws_iap/src/iap/config/icra27/icra076_flat_null_snapshot_v1.json",
+        "--invocation-index",
+        "11"
+      ],
+      "exit_code": 0,
+      "invocation_index": 11,
+      "output": {
+        "path": "measurement-011.json",
+        "sha256": "61bb955d4d534b1e99ab78c703be034c160b28b8faf9ade0f29615b9626524af",
+        "size_bytes": 702,
+        "type": "regular_file"
+      }
+    },
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe",
+        "--snapshot",
+        "/home/dev/ws_iap/src/iap/config/icra27/icra076_flat_null_snapshot_v1.json",
+        "--invocation-index",
+        "12"
+      ],
+      "exit_code": 0,
+      "invocation_index": 12,
+      "output": {
+        "path": "measurement-012.json",
+        "sha256": "26506aba5aee0d419fc8ae2b9e6a1c15f693567dde226d1e19da1e0ac54251f1",
+        "size_bytes": 702,
+        "type": "regular_file"
+      }
+    },
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe",
+        "--snapshot",
+        "/home/dev/ws_iap/src/iap/config/icra27/icra076_flat_null_snapshot_v1.json",
+        "--invocation-index",
+        "13"
+      ],
+      "exit_code": 0,
+      "invocation_index": 13,
+      "output": {
+        "path": "measurement-013.json",
+        "sha256": "f4c84d7531facdcfa22cbea1ea371d5ce8759b309bc74b1433587f64154d2b3b",
+        "size_bytes": 702,
+        "type": "regular_file"
+      }
+    },
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe",
+        "--snapshot",
+        "/home/dev/ws_iap/src/iap/config/icra27/icra076_flat_null_snapshot_v1.json",
+        "--invocation-index",
+        "14"
+      ],
+      "exit_code": 0,
+      "invocation_index": 14,
+      "output": {
+        "path": "measurement-014.json",
+        "sha256": "baef56599f3e06cbc03f1d8bbbbe503ce18db648af334058726b0cf61cef01b9",
+        "size_bytes": 702,
+        "type": "regular_file"
+      }
+    },
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe",
+        "--snapshot",
+        "/home/dev/ws_iap/src/iap/config/icra27/icra076_flat_null_snapshot_v1.json",
+        "--invocation-index",
+        "15"
+      ],
+      "exit_code": 0,
+      "invocation_index": 15,
+      "output": {
+        "path": "measurement-015.json",
+        "sha256": "67d13fe43674a5eea7fe6034e8c632d25fc007b9acd8a1faa59d8161d72b7827",
+        "size_bytes": 702,
+        "type": "regular_file"
+      }
+    },
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe",
+        "--snapshot",
+        "/home/dev/ws_iap/src/iap/config/icra27/icra076_flat_null_snapshot_v1.json",
+        "--invocation-index",
+        "16"
+      ],
+      "exit_code": 0,
+      "invocation_index": 16,
+      "output": {
+        "path": "measurement-016.json",
+        "sha256": "9587f1f290e1d8474e4803b06bc562160c161d4d7687084c7bfb261792e4eb42",
+        "size_bytes": 702,
+        "type": "regular_file"
+      }
+    },
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe",
+        "--snapshot",
+        "/home/dev/ws_iap/src/iap/config/icra27/icra076_flat_null_snapshot_v1.json",
+        "--invocation-index",
+        "17"
+      ],
+      "exit_code": 0,
+      "invocation_index": 17,
+      "output": {
+        "path": "measurement-017.json",
+        "sha256": "96e082f831604b037afad24ca669d687a34e45ab75efba08b844c8dde9630501",
+        "size_bytes": 702,
+        "type": "regular_file"
+      }
+    },
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe",
+        "--snapshot",
+        "/home/dev/ws_iap/src/iap/config/icra27/icra076_flat_null_snapshot_v1.json",
+        "--invocation-index",
+        "18"
+      ],
+      "exit_code": 0,
+      "invocation_index": 18,
+      "output": {
+        "path": "measurement-018.json",
+        "sha256": "3e27f0f37cd6e6c3694101d83c770dbf671b8a0408effc1df18fcc113a374ace",
+        "size_bytes": 702,
+        "type": "regular_file"
+      }
+    },
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe",
+        "--snapshot",
+        "/home/dev/ws_iap/src/iap/config/icra27/icra076_flat_null_snapshot_v1.json",
+        "--invocation-index",
+        "19"
+      ],
+      "exit_code": 0,
+      "invocation_index": 19,
+      "output": {
+        "path": "measurement-019.json",
+        "sha256": "5ce587bacfc1a5c95c82c9170c4942c489ba88adb175d3fbfc12c5e50c353b61",
+        "size_bytes": 702,
+        "type": "regular_file"
+      }
+    },
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe",
+        "--snapshot",
+        "/home/dev/ws_iap/src/iap/config/icra27/icra076_flat_null_snapshot_v1.json",
+        "--invocation-index",
+        "20"
+      ],
+      "exit_code": 0,
+      "invocation_index": 20,
+      "output": {
+        "path": "measurement-020.json",
+        "sha256": "12b94bc7b32db70c25b2ed196111e77e6c30f50f3845515ada75a370db73ffde",
+        "size_bytes": 702,
+        "type": "regular_file"
+      }
+    },
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe",
+        "--snapshot",
+        "/home/dev/ws_iap/src/iap/config/icra27/icra076_flat_null_snapshot_v1.json",
+        "--invocation-index",
+        "21"
+      ],
+      "exit_code": 0,
+      "invocation_index": 21,
+      "output": {
+        "path": "measurement-021.json",
+        "sha256": "4c71b09d2271c619800a60c73c22c8c676ab41f2d3d1d4f3795cc96e4d1ccd55",
+        "size_bytes": 702,
+        "type": "regular_file"
+      }
+    },
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe",
+        "--snapshot",
+        "/home/dev/ws_iap/src/iap/config/icra27/icra076_flat_null_snapshot_v1.json",
+        "--invocation-index",
+        "22"
+      ],
+      "exit_code": 0,
+      "invocation_index": 22,
+      "output": {
+        "path": "measurement-022.json",
+        "sha256": "d53dce9ebdb82ac85ae8b938007bbc76a4c27b07926a16ae12e8e00a6c1694ac",
+        "size_bytes": 702,
+        "type": "regular_file"
+      }
+    },
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe",
+        "--snapshot",
+        "/home/dev/ws_iap/src/iap/config/icra27/icra076_flat_null_snapshot_v1.json",
+        "--invocation-index",
+        "23"
+      ],
+      "exit_code": 0,
+      "invocation_index": 23,
+      "output": {
+        "path": "measurement-023.json",
+        "sha256": "1902351322f1095266587ed3fcc2e805e8f2b1c22a62b76b1107075e06a21127",
+        "size_bytes": 702,
+        "type": "regular_file"
+      }
+    },
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe",
+        "--snapshot",
+        "/home/dev/ws_iap/src/iap/config/icra27/icra076_flat_null_snapshot_v1.json",
+        "--invocation-index",
+        "24"
+      ],
+      "exit_code": 0,
+      "invocation_index": 24,
+      "output": {
+        "path": "measurement-024.json",
+        "sha256": "cef4b5d2f55d6e190f42d11e48b9308d0783cfe9545ba66b73c08417caf8f31c",
+        "size_bytes": 702,
+        "type": "regular_file"
+      }
+    },
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe",
+        "--snapshot",
+        "/home/dev/ws_iap/src/iap/config/icra27/icra076_flat_null_snapshot_v1.json",
+        "--invocation-index",
+        "25"
+      ],
+      "exit_code": 0,
+      "invocation_index": 25,
+      "output": {
+        "path": "measurement-025.json",
+        "sha256": "134b653b62b0faea7a7c37baacefb76fe85039a70687bbfbc4f6b16758ed6387",
+        "size_bytes": 702,
+        "type": "regular_file"
+      }
+    },
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe",
+        "--snapshot",
+        "/home/dev/ws_iap/src/iap/config/icra27/icra076_flat_null_snapshot_v1.json",
+        "--invocation-index",
+        "26"
+      ],
+      "exit_code": 0,
+      "invocation_index": 26,
+      "output": {
+        "path": "measurement-026.json",
+        "sha256": "dc2f89887dff1e54f7c51013456b289a9625a315cbb9da11d90c7dcab842640c",
+        "size_bytes": 702,
+        "type": "regular_file"
+      }
+    },
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe",
+        "--snapshot",
+        "/home/dev/ws_iap/src/iap/config/icra27/icra076_flat_null_snapshot_v1.json",
+        "--invocation-index",
+        "27"
+      ],
+      "exit_code": 0,
+      "invocation_index": 27,
+      "output": {
+        "path": "measurement-027.json",
+        "sha256": "40d5ff73861aecfa0f06ea4a09cc782b18efc272ff6afb5c215b458f9c0ca964",
+        "size_bytes": 702,
+        "type": "regular_file"
+      }
+    },
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe",
+        "--snapshot",
+        "/home/dev/ws_iap/src/iap/config/icra27/icra076_flat_null_snapshot_v1.json",
+        "--invocation-index",
+        "28"
+      ],
+      "exit_code": 0,
+      "invocation_index": 28,
+      "output": {
+        "path": "measurement-028.json",
+        "sha256": "cb405e62b4ed22f1889f23c507907c085467d3d272a4c31227413085fd746f66",
+        "size_bytes": 702,
+        "type": "regular_file"
+      }
+    },
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe",
+        "--snapshot",
+        "/home/dev/ws_iap/src/iap/config/icra27/icra076_flat_null_snapshot_v1.json",
+        "--invocation-index",
+        "29"
+      ],
+      "exit_code": 0,
+      "invocation_index": 29,
+      "output": {
+        "path": "measurement-029.json",
+        "sha256": "803792436d9ff4284b78ed186958a82b89ae1ac9323cad2f085cfaa7eab448dd",
+        "size_bytes": 702,
+        "type": "regular_file"
+      }
+    },
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe",
+        "--snapshot",
+        "/home/dev/ws_iap/src/iap/config/icra27/icra076_flat_null_snapshot_v1.json",
+        "--invocation-index",
+        "30"
+      ],
+      "exit_code": 0,
+      "invocation_index": 30,
+      "output": {
+        "path": "measurement-030.json",
+        "sha256": "5bbb9cdaed9232e0902ceeb235cf94d584e7a865a4240d9afcb3fb5435aa26bf",
+        "size_bytes": 702,
+        "type": "regular_file"
+      }
+    },
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe",
+        "--snapshot",
+        "/home/dev/ws_iap/src/iap/config/icra27/icra076_flat_null_snapshot_v1.json",
+        "--invocation-index",
+        "31"
+      ],
+      "exit_code": 0,
+      "invocation_index": 31,
+      "output": {
+        "path": "measurement-031.json",
+        "sha256": "4ee501634eaee9b43dee300b807d3ee472497f0a6564ea51b4d54ac8ddb71fe5",
+        "size_bytes": 702,
+        "type": "regular_file"
+      }
+    },
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe",
+        "--snapshot",
+        "/home/dev/ws_iap/src/iap/config/icra27/icra076_flat_null_snapshot_v1.json",
+        "--invocation-index",
+        "32"
+      ],
+      "exit_code": 0,
+      "invocation_index": 32,
+      "output": {
+        "path": "measurement-032.json",
+        "sha256": "53ae4f2008625a4d94abd4985af330472c3479f9b007c9fd4b8b5eeb255a44a6",
+        "size_bytes": 702,
+        "type": "regular_file"
+      }
+    },
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe",
+        "--snapshot",
+        "/home/dev/ws_iap/src/iap/config/icra27/icra076_flat_null_snapshot_v1.json",
+        "--invocation-index",
+        "33"
+      ],
+      "exit_code": 0,
+      "invocation_index": 33,
+      "output": {
+        "path": "measurement-033.json",
+        "sha256": "215d78dedfea49af92f4fab2279db9a7404302ca2f93cb89d53f79656088827b",
+        "size_bytes": 702,
+        "type": "regular_file"
+      }
+    },
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe",
+        "--snapshot",
+        "/home/dev/ws_iap/src/iap/config/icra27/icra076_flat_null_snapshot_v1.json",
+        "--invocation-index",
+        "34"
+      ],
+      "exit_code": 0,
+      "invocation_index": 34,
+      "output": {
+        "path": "measurement-034.json",
+        "sha256": "8c1e6b7f96578b21369f7b37d0b97cb91ddb3b7163608452058f9ea0d2f019b7",
+        "size_bytes": 702,
+        "type": "regular_file"
+      }
+    },
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe",
+        "--snapshot",
+        "/home/dev/ws_iap/src/iap/config/icra27/icra076_flat_null_snapshot_v1.json",
+        "--invocation-index",
+        "35"
+      ],
+      "exit_code": 0,
+      "invocation_index": 35,
+      "output": {
+        "path": "measurement-035.json",
+        "sha256": "c9e3d1bac38da2655031dd21953a2d63a72ded2aae5735281a4c0de0f65a3afa",
+        "size_bytes": 702,
+        "type": "regular_file"
+      }
+    },
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe",
+        "--snapshot",
+        "/home/dev/ws_iap/src/iap/config/icra27/icra076_flat_null_snapshot_v1.json",
+        "--invocation-index",
+        "36"
+      ],
+      "exit_code": 0,
+      "invocation_index": 36,
+      "output": {
+        "path": "measurement-036.json",
+        "sha256": "9a3601fce684428e3db07291eb1f21261e0182e7bb15bb00a345549d4c2c39d2",
+        "size_bytes": 702,
+        "type": "regular_file"
+      }
+    },
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe",
+        "--snapshot",
+        "/home/dev/ws_iap/src/iap/config/icra27/icra076_flat_null_snapshot_v1.json",
+        "--invocation-index",
+        "37"
+      ],
+      "exit_code": 0,
+      "invocation_index": 37,
+      "output": {
+        "path": "measurement-037.json",
+        "sha256": "1e55403b87507b99e4481504710044a260aac0a78e26d1ca120ab7256db24a77",
+        "size_bytes": 702,
+        "type": "regular_file"
+      }
+    },
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe",
+        "--snapshot",
+        "/home/dev/ws_iap/src/iap/config/icra27/icra076_flat_null_snapshot_v1.json",
+        "--invocation-index",
+        "38"
+      ],
+      "exit_code": 0,
+      "invocation_index": 38,
+      "output": {
+        "path": "measurement-038.json",
+        "sha256": "4851d6b94f80a6b2b928a03c9c7b98a30678b7f2285d5a0cecee1a2ac576b112",
+        "size_bytes": 702,
+        "type": "regular_file"
+      }
+    },
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe",
+        "--snapshot",
+        "/home/dev/ws_iap/src/iap/config/icra27/icra076_flat_null_snapshot_v1.json",
+        "--invocation-index",
+        "39"
+      ],
+      "exit_code": 0,
+      "invocation_index": 39,
+      "output": {
+        "path": "measurement-039.json",
+        "sha256": "01f5d22533328ad9e63f7dd3d2b4fa4f830a944467b1b30220e97c54e7811250",
+        "size_bytes": 702,
+        "type": "regular_file"
+      }
+    },
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe",
+        "--snapshot",
+        "/home/dev/ws_iap/src/iap/config/icra27/icra076_flat_null_snapshot_v1.json",
+        "--invocation-index",
+        "40"
+      ],
+      "exit_code": 0,
+      "invocation_index": 40,
+      "output": {
+        "path": "measurement-040.json",
+        "sha256": "33ea25fdc3a9efbdce1ad4de08f4313679a639c7d9a8fd100e17666c51a4800e",
+        "size_bytes": 702,
+        "type": "regular_file"
+      }
+    },
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe",
+        "--snapshot",
+        "/home/dev/ws_iap/src/iap/config/icra27/icra076_flat_null_snapshot_v1.json",
+        "--invocation-index",
+        "41"
+      ],
+      "exit_code": 0,
+      "invocation_index": 41,
+      "output": {
+        "path": "measurement-041.json",
+        "sha256": "400d27976ef471cd128aa455ff702990319ddf4145978e15cebaa0544042c4e1",
+        "size_bytes": 702,
+        "type": "regular_file"
+      }
+    },
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe",
+        "--snapshot",
+        "/home/dev/ws_iap/src/iap/config/icra27/icra076_flat_null_snapshot_v1.json",
+        "--invocation-index",
+        "42"
+      ],
+      "exit_code": 0,
+      "invocation_index": 42,
+      "output": {
+        "path": "measurement-042.json",
+        "sha256": "fb25f4738af1e25a8506f29e67ce45320fa0cec7c446fd657a5a0d40c15dadb4",
+        "size_bytes": 702,
+        "type": "regular_file"
+      }
+    },
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe",
+        "--snapshot",
+        "/home/dev/ws_iap/src/iap/config/icra27/icra076_flat_null_snapshot_v1.json",
+        "--invocation-index",
+        "43"
+      ],
+      "exit_code": 0,
+      "invocation_index": 43,
+      "output": {
+        "path": "measurement-043.json",
+        "sha256": "5e9a1d6c572ee8ee74e772c25762a0b7c82a5c794c7a50b7a1eaa79e4931f814",
+        "size_bytes": 702,
+        "type": "regular_file"
+      }
+    },
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe",
+        "--snapshot",
+        "/home/dev/ws_iap/src/iap/config/icra27/icra076_flat_null_snapshot_v1.json",
+        "--invocation-index",
+        "44"
+      ],
+      "exit_code": 0,
+      "invocation_index": 44,
+      "output": {
+        "path": "measurement-044.json",
+        "sha256": "ea25af9edc66209d0e03149972c5cce8c686c2e82381c13f7eea0934e5f51011",
+        "size_bytes": 702,
+        "type": "regular_file"
+      }
+    },
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe",
+        "--snapshot",
+        "/home/dev/ws_iap/src/iap/config/icra27/icra076_flat_null_snapshot_v1.json",
+        "--invocation-index",
+        "45"
+      ],
+      "exit_code": 0,
+      "invocation_index": 45,
+      "output": {
+        "path": "measurement-045.json",
+        "sha256": "d38ad6d44b6b332fef0284c4bb4badb031a7f17d697abcc23cc986cde4876d1b",
+        "size_bytes": 702,
+        "type": "regular_file"
+      }
+    },
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe",
+        "--snapshot",
+        "/home/dev/ws_iap/src/iap/config/icra27/icra076_flat_null_snapshot_v1.json",
+        "--invocation-index",
+        "46"
+      ],
+      "exit_code": 0,
+      "invocation_index": 46,
+      "output": {
+        "path": "measurement-046.json",
+        "sha256": "084ca4566a63a5bb9fb7b4dd018dd5b7bee2ffabf3442957666f911a90635d5d",
+        "size_bytes": 702,
+        "type": "regular_file"
+      }
+    },
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe",
+        "--snapshot",
+        "/home/dev/ws_iap/src/iap/config/icra27/icra076_flat_null_snapshot_v1.json",
+        "--invocation-index",
+        "47"
+      ],
+      "exit_code": 0,
+      "invocation_index": 47,
+      "output": {
+        "path": "measurement-047.json",
+        "sha256": "f3f2fc3d47b24f9953e8173c2aeac064255658773eb4e8b519723e4a5998f298",
+        "size_bytes": 702,
+        "type": "regular_file"
+      }
+    },
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe",
+        "--snapshot",
+        "/home/dev/ws_iap/src/iap/config/icra27/icra076_flat_null_snapshot_v1.json",
+        "--invocation-index",
+        "48"
+      ],
+      "exit_code": 0,
+      "invocation_index": 48,
+      "output": {
+        "path": "measurement-048.json",
+        "sha256": "5243efbb220760b63b89554ffa1af5cb79edaed6706072c4f53cc267d4d53860",
+        "size_bytes": 702,
+        "type": "regular_file"
+      }
+    },
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe",
+        "--snapshot",
+        "/home/dev/ws_iap/src/iap/config/icra27/icra076_flat_null_snapshot_v1.json",
+        "--invocation-index",
+        "49"
+      ],
+      "exit_code": 0,
+      "invocation_index": 49,
+      "output": {
+        "path": "measurement-049.json",
+        "sha256": "f1aa0d9aff575f8f166e9329333f832c0f55fb27457a9bed53e19b5ccd0e2384",
+        "size_bytes": 702,
+        "type": "regular_file"
+      }
+    },
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe",
+        "--snapshot",
+        "/home/dev/ws_iap/src/iap/config/icra27/icra076_flat_null_snapshot_v1.json",
+        "--invocation-index",
+        "50"
+      ],
+      "exit_code": 0,
+      "invocation_index": 50,
+      "output": {
+        "path": "measurement-050.json",
+        "sha256": "bfff3981a312c62f685a9880382b35df7c685d4e188bd71dd00a67d9b037726d",
+        "size_bytes": 702,
+        "type": "regular_file"
+      }
+    },
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe",
+        "--snapshot",
+        "/home/dev/ws_iap/src/iap/config/icra27/icra076_flat_null_snapshot_v1.json",
+        "--invocation-index",
+        "51"
+      ],
+      "exit_code": 0,
+      "invocation_index": 51,
+      "output": {
+        "path": "measurement-051.json",
+        "sha256": "a3a64cc1ceddaf78907e54b6feb16aa50abefcccf25598b03d1a725477e3ec6d",
+        "size_bytes": 702,
+        "type": "regular_file"
+      }
+    },
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe",
+        "--snapshot",
+        "/home/dev/ws_iap/src/iap/config/icra27/icra076_flat_null_snapshot_v1.json",
+        "--invocation-index",
+        "52"
+      ],
+      "exit_code": 0,
+      "invocation_index": 52,
+      "output": {
+        "path": "measurement-052.json",
+        "sha256": "8156b1cee3fcacfc65205816e752c0d8eb854b312f7199f2c90d4ad89f3f1b51",
+        "size_bytes": 702,
+        "type": "regular_file"
+      }
+    },
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe",
+        "--snapshot",
+        "/home/dev/ws_iap/src/iap/config/icra27/icra076_flat_null_snapshot_v1.json",
+        "--invocation-index",
+        "53"
+      ],
+      "exit_code": 0,
+      "invocation_index": 53,
+      "output": {
+        "path": "measurement-053.json",
+        "sha256": "8128b56b28e0b73866e27f0d661be3dd24061dabc2eb403b7ee093e3a931a2b0",
+        "size_bytes": 702,
+        "type": "regular_file"
+      }
+    },
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe",
+        "--snapshot",
+        "/home/dev/ws_iap/src/iap/config/icra27/icra076_flat_null_snapshot_v1.json",
+        "--invocation-index",
+        "54"
+      ],
+      "exit_code": 0,
+      "invocation_index": 54,
+      "output": {
+        "path": "measurement-054.json",
+        "sha256": "61a785b1c1ac6db75489eae0f6ed42b6d06642617c9ebaa11b5578634ce117a5",
+        "size_bytes": 702,
+        "type": "regular_file"
+      }
+    },
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe",
+        "--snapshot",
+        "/home/dev/ws_iap/src/iap/config/icra27/icra076_flat_null_snapshot_v1.json",
+        "--invocation-index",
+        "55"
+      ],
+      "exit_code": 0,
+      "invocation_index": 55,
+      "output": {
+        "path": "measurement-055.json",
+        "sha256": "3915e662b1bcdcc165438eb2033f807d8ba2c5cd89bc54f03216580459d59d67",
+        "size_bytes": 702,
+        "type": "regular_file"
+      }
+    },
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe",
+        "--snapshot",
+        "/home/dev/ws_iap/src/iap/config/icra27/icra076_flat_null_snapshot_v1.json",
+        "--invocation-index",
+        "56"
+      ],
+      "exit_code": 0,
+      "invocation_index": 56,
+      "output": {
+        "path": "measurement-056.json",
+        "sha256": "1e87ad71ce93082eede1e7ef1748396c5dc279b6fcfc29f5892c6adf80a30dff",
+        "size_bytes": 702,
+        "type": "regular_file"
+      }
+    },
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe",
+        "--snapshot",
+        "/home/dev/ws_iap/src/iap/config/icra27/icra076_flat_null_snapshot_v1.json",
+        "--invocation-index",
+        "57"
+      ],
+      "exit_code": 0,
+      "invocation_index": 57,
+      "output": {
+        "path": "measurement-057.json",
+        "sha256": "ca55ee07fdef3d1eef8116b4827c5a19b2b9b14ee91d5d787e8a25503741dccc",
+        "size_bytes": 702,
+        "type": "regular_file"
+      }
+    },
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe",
+        "--snapshot",
+        "/home/dev/ws_iap/src/iap/config/icra27/icra076_flat_null_snapshot_v1.json",
+        "--invocation-index",
+        "58"
+      ],
+      "exit_code": 0,
+      "invocation_index": 58,
+      "output": {
+        "path": "measurement-058.json",
+        "sha256": "a4aa2f8ba54b435abd25535f91d487f0daa499b0412a5f77feed7d32472fb8a4",
+        "size_bytes": 702,
+        "type": "regular_file"
+      }
+    },
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe",
+        "--snapshot",
+        "/home/dev/ws_iap/src/iap/config/icra27/icra076_flat_null_snapshot_v1.json",
+        "--invocation-index",
+        "59"
+      ],
+      "exit_code": 0,
+      "invocation_index": 59,
+      "output": {
+        "path": "measurement-059.json",
+        "sha256": "129d39e1b3ab0bd0f10e3f22b017dd2cc8e9d69ae36291a2290600017c22f710",
+        "size_bytes": 702,
+        "type": "regular_file"
+      }
+    },
+    {
+      "argv": [
+        "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe",
+        "--snapshot",
+        "/home/dev/ws_iap/src/iap/config/icra27/icra076_flat_null_snapshot_v1.json",
+        "--invocation-index",
+        "60"
+      ],
+      "exit_code": 0,
+      "invocation_index": 60,
+      "output": {
+        "path": "measurement-060.json",
+        "sha256": "57968d4ecd50845af8faafe41e14ffc5a7e325e7866e133b35319916e2ff22fd",
+        "size_bytes": 702,
+        "type": "regular_file"
+      }
+    }
+  ],
+  "outcome_blind": true,
+  "schema_version": "icra076_production_measured_replay_manifest_v1",
+  "serialized_input": {
+    "path": "config/icra27/icra076_flat_null_snapshot_v1.json",
+    "sha256": "f7ff9be93dcbfea211d3dec5f9e90b867e09e327738aa174bd17dac5a1c9980c",
+    "size_bytes": 944,
+    "type": "regular_file"
+  },
+  "source_head": "eeba64b177032077ca1d0cca39719d492d1a8e76",
+  "task": "ICRA-076"
+}

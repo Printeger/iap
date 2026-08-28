@@ -1111,3 +1111,6 @@ requires 60 machine measurements from an offline production-shaped P4 profile
 probe over one byte-identical serialized FLAT_NULL input. U95 is the
 nearest-rank 95% bound of observed `|D_peak|`; verification/freeze evidence
 must remain repository-local and bind pushed source. ICRA-077 is unauthorized.
+Fresh replay-002 retains 60/60 measurements (U95 `0.0 m`); verification-001
+and preregistration-freeze-004 independently validate against the pushed
+implementation. This is a Builder candidate, not Supervisor PASS.

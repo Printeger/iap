@@ -9333,3 +9333,15 @@ Verification is repository-local/source-bound and the inventory explicitly
 includes all ICRA-073/074/075/076 tests. Focused tests pass 43/43 and the exact
 shared six-package build passes 6/6. Evidence remains pending until the
 implementation commit is pushed and fetch-confirmed at divergence 0 0.
+
+Implementation commit `eeba64b177032077ca1d0cca39719d492d1a8e76` was
+pushed and fetch-confirmed at divergence `0 0` before evidence creation.
+`repeatability-replay-002` retains 60/60 production-probe emissions and yields
+U95 `0.0 m`; the frozen max formula yields delta_peak `0.3 m`.
+`verification-001.json` is repository-local and binds all four exact commands
+to that source HEAD. `preregistration-freeze-004.json` independently validates
+PASS with 956 source and 958 install inventory records. Manifest/verification/
+freeze SHA-256 values are respectively `e5701f1ce9ff460998da1830f2a4a1cfdfd4dedcc47bc8158941854b2d4d41e1`,
+`acfb326375cea47c6d3e6673d57c9c23160f1e88b6dd411f57d4b0b3525ed69a`
+and `35725a368f674f56bab8304f5b50d0ea4108b3139181608b85af5522b194ee07`.
+No ROS, GPU, live, held-out or ICRA-077 action ran.
