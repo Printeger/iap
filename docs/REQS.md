@@ -796,3 +796,8 @@ The 004/003/006 candidate is immutable review-rejected history: canonical
 duplicate/unknown route-key admission and malformed fourth snapshot elements
 were not fail-closed. IAP-RQ-423/424 require the hardened parser/record checks
 and fresh replay-005/verification-004/freeze-007 after pushed repair source.
+
+Fresh 005/004/007 now binds pushed repair source `b222c91`, exact-three Git
+blobs, protected-route fingerprint, both accepted debts and shared install
+identity. Offline validation passes 1017 source / 958 install records; this is
+a Builder candidate for ICRA-077A review and does not authorize ICRA-077B.

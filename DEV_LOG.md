@@ -9414,3 +9414,17 @@ requires exactly three object records before ordered path validation, and adds
 duplicate/unknown-key plus malformed-fourth-entry adversaries. Fresh
 replay-005/verification-004/freeze-007 is required after the repair source is
 pushed; no forbidden execution occurred during review or repair.
+
+Repair source `b222c9142730661ca7537032e42284dcdd357cac` was pushed and
+fetch-confirmed at divergence `0 0` before fresh evidence. The exact shared
+six-package build passes 6/6. Replay-005 retains 60/60 offline probe emissions
+with U95 `0.0 m`; the post-evidence 3+2+19+20+5 focused tests, current route
+guard, hook-path guard, static protocol validator and independent freeze
+validator all pass. Freeze-007 binds 1017 strict source records and 958 shared
+install records (`fc144cc0…0c52`). The controlled later-governance-prose fixture
+passes without modifying any real authority. Replay-005, verification-004 and
+freeze-007 SHA-256 values are
+`e82f32ee7f0460bc7f54d05cc38a0abe2c2041e252571b8015338a5bc8805da9`,
+`2562a1d5c0fb8bd13856d0dc9a7907979216e3d158d43065d974aa2889c1658f`
+and `aae06e43ab4a87e1d0bfc82d3889dd20228f4765e295d88416fbb9f9f39b9f69`.
+No held-out, GPU, ROS, live, 360-row, ICRA-077B or ICRA-078 action ran.

@@ -3646,6 +3646,11 @@ Requirements: `IAP-RQ-000`, `IAP-RQ-020`, `IAP-RQ-030`, `IAP-RQ-040`,
   malformed fourth snapshot entry could be ignored. Reuse the canonical route
   parser, require exactly three object records, add adversaries, and reserve
   fresh replay-005/verification-004/freeze-007 after pushed repair source.
+- Pushed repair source `b222c91` produces fresh replay-005/verification-004/
+  freeze-007. The exact shared build passes 6/6; post-evidence focused tests,
+  route/hook guards and both validators pass. Freeze-007 independently binds
+  1017 strict source and 958 shared-install records. No held-out access or live
+  execution is authorized.
 # 2026-08-28 user decision 008 / ICRA-077 issuance
 
 - User accepts the two ICRA-076 freeze blockers without converting ICRA-076 to PASS and authorizes the frozen,
