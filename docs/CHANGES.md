@@ -3641,6 +3641,11 @@ Requirements: `IAP-RQ-000`, `IAP-RQ-020`, `IAP-RQ-030`, `IAP-RQ-040`,
 - Pushed source `a76de0c` produces replay-004/verification-003/freeze-006;
   offline focused/route/hook validation and 6/6 shared build pass. Freeze-006
   independently validates 1017 strict source and 958 install records.
+- Two-axis review rejects 004/003/006 as immutable history: route JSON
+  admission did not enforce canonical duplicate/unknown-key rejection and a
+  malformed fourth snapshot entry could be ignored. Reuse the canonical route
+  parser, require exactly three object records, add adversaries, and reserve
+  fresh replay-005/verification-004/freeze-007 after pushed repair source.
 # 2026-08-28 user decision 008 / ICRA-077 issuance
 
 - User accepts the two ICRA-076 freeze blockers without converting ICRA-076 to PASS and authorizes the frozen,

@@ -9404,3 +9404,13 @@ modifying real authorities. Replay/verification/freeze SHA-256 values are
 `ea67682c56b379f7c7ed9dcabd1ecd8a05a41f8dfa2ff619889ce5d8ea3e487f`
 and `73c3e24ad792f85011bda3f3962b36b205c951d5ba16c0d3390672739aa471fc`.
 Prior blocker/replay/verification/freeze hashes remain unchanged.
+
+The mandatory two-axis review rejected the 004/003/006 candidate: protected
+route parsing accepted duplicate/unknown JSON fields instead of reusing the
+canonical route guard, and malformed non-object fourth `git_blobs` entries
+could be filtered out. Those evidence identities remain immutable rejected
+history. The repair now delegates route-lock admission to the canonical parser,
+requires exactly three object records before ordered path validation, and adds
+duplicate/unknown-key plus malformed-fourth-entry adversaries. Fresh
+replay-005/verification-004/freeze-007 is required after the repair source is
+pushed; no forbidden execution occurred during review or repair.

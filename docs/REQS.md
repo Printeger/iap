@@ -791,3 +791,8 @@ Fresh offline evidence replay-004/verification-003/freeze-006 binds pushed
 source `a76de0c`, both debts, exact governance blobs, protected-route
 fingerprint and shared install identity; independent freeze validation passes
 1017/958 source/install records.
+
+The 004/003/006 candidate is immutable review-rejected history: canonical
+duplicate/unknown route-key admission and malformed fourth snapshot elements
+were not fail-closed. IAP-RQ-423/424 require the hardened parser/record checks
+and fresh replay-005/verification-004/freeze-007 after pushed repair source.

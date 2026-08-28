@@ -199,9 +199,8 @@ def _require_reachable_anchor(repository: Path, anchor: str) -> None:
         raise RouteGuardError("ROUTE_APPROVAL_ANCHOR_NOT_REACHABLE")
 
 
-def parse_route_lock(path: Path, repository: Path) -> RouteLock:
-    """Parse exactly one canonical route lock and bind its approval history."""
-    text = Path(path).read_text()
+def parse_route_lock_text(text: str, repository: Path) -> RouteLock:
+    """Parse canonical route-lock text and bind its approval history."""
     begin_positions = [match.start() for match in re.finditer(re.escape(ROUTE_BEGIN), text)]
     end_positions = [match.start() for match in re.finditer(re.escape(ROUTE_END), text)]
     if not begin_positions or not end_positions:
@@ -299,6 +298,11 @@ def parse_route_lock(path: Path, repository: Path) -> RouteLock:
         document["campaign_activation"], anchor, decision_id, tuple(changes),
         decision_items, document["guard_strength"],
     )
+
+
+def parse_route_lock(path: Path, repository: Path) -> RouteLock:
+    """Parse exactly one canonical route lock file."""
+    return parse_route_lock_text(Path(path).read_text(), repository)
 
 
 def _parse_state_text(text: str) -> dict[str, str]:

@@ -221,6 +221,9 @@ python3 test/test_icra073_inverse_corridor.py -v
 python3 test/test_icra074_geometry.py -v
 python3 test/test_icra075_exploratory.py -v
 python3 test/test_icra076_preregistration.py -v
+python3 test/test_icra077a_governance_freeze.py -v
+python3 scripts/dev_planner/verify_icra_research_route.py
+python3 scripts/dev_planner/verify_icra_research_route.py --check-hooks
 python3 scripts/dev_planner/validate_icra076_preregistration.py
 
 python3 scripts/dev_planner/icra076_repeatability_replay.py \
@@ -242,11 +245,11 @@ ICRA-077。`results/icra27/icra076/preregistration-freeze-001.json`（`51464dff�
 拒绝的历史 attempt，不是 canonical freeze；它因 pre-access/inventory/coverage/replay/command-binding 缺陷
 保留且不得覆盖。第二轮 standards review 又拒绝 `preregistration-freeze-002.json`（`c0b4953a…87631`）：
 父 symlink alias admission 与 measured replay evidence binding 仍不完整，因此它也不是 canonical freeze。
-`preregistration-freeze-003.json` 以及后续首轮 repair 的 freeze-004 都是 review-rejected history。
-当前 Builder candidate 是 `preregistration-freeze-005.json`：它绑定 pushed corrected source
-`3a3486f793df1b8299a87bf3400d7e2c34979018`、60 次 production probe 的 replay-003、repository-local
-verification-002、956 个 source/authority entries、958 个 runtime-install entries 与 360 rows；freeze
-SHA-256 为 `aee60ed05efb816254159ed51ab04fa4c5f2977ebf711e86384a53e91aeaf686`。
+`preregistration-freeze-003.json` 到 freeze-006 都是历史或 review-rejected attempts；freeze-005 仍保留
+pre-access governance drift blocker，freeze-006 因弱 route JSON admission 与 malformed fourth-entry 缺口被
+Builder 双轴复核拒绝。当前修复要求 fresh replay-005、verification-004、freeze-007；其生成必须晚于修复
+source push，并继续绑定 60 次 production probe、repository-local verification、strict source/install 与
+exact-three governance Git blobs。
 
 ### 1.3 运行一个最小检查
 
@@ -1124,8 +1127,9 @@ ICRA-077A governance closure (2026-08-28): freeze-005 correctly blocked before
 held-out access when later Supervisor prose changed frozen authority bytes.
 The bounded repair treats exactly three named governance documents as Git-blob
 snapshots from `3a3486f`, separately fingerprints protected research-route
-fields, and leaves every executable input/current install byte strict. Fresh
-004/003/006 evidence is offline-only; ICRA-077B remains unauthorized.
-Current Builder candidate replay-004/verification-003/freeze-006 validates
-against pushed source `a76de0c` with 1017 strict source and 958 install records.
-The protected-field later-prose fixture passes; Supervisor Review is required.
+fields, and leaves every executable input/current install byte strict. The
+offline 004/003/006 candidate was review-rejected because route JSON admission
+was weaker than the canonical guard and malformed fourth snapshot entries could
+be ignored. It remains immutable history. Fresh 005/004/007 evidence must
+postdate the repair source push; ICRA-077B remains unauthorized and Supervisor
+Review is required.

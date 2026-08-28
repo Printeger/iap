@@ -36,7 +36,7 @@
   },
   "repeatability": {
     "input_path": "config/icra27/icra076_repeatability_replay_v1.json",
-    "input_canonical_sha256": "bcacf4c71a4c374106357c8e50db731ba95dd1d79ffa62f16713f2f6d4ed0570",
+    "input_canonical_sha256": "d3f5eb2d726ae5a524c90091d2d2c003b93073c9b9509e87d233420186700b1a",
     "u95_repeatability": "FROZEN_FROM_MEASURED_REPLAY_MANIFEST",
     "unit": "m",
     "flat_null_runtime_evidence": "UNAVAILABLE_ICRA075_0_OF_40",

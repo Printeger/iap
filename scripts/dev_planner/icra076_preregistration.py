@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import math
 import subprocess
@@ -64,19 +65,17 @@ def canonical_sha256(value: Any) -> str:
 
 
 def _protected_route_document(text: str) -> dict[str, Any]:
-    if text.count(ROUTE_BEGIN) != 1 or text.count(ROUTE_END) != 1:
-        _fail("PROTECTED_ROUTE_SENTINEL_INVALID")
-    payload = text.split(ROUTE_BEGIN, 1)[1].split(ROUTE_END, 1)[0].strip()
-    if not payload.startswith("```json\n") or not payload.endswith("\n```"):
-        _fail("PROTECTED_ROUTE_ENVELOPE_INVALID")
+    module_path = REPOSITORY / "scripts/dev_planner/verify_icra_research_route.py"
+    spec = importlib.util.spec_from_file_location("icra_route_guard", module_path)
+    if spec is None or spec.loader is None:
+        _fail("PROTECTED_ROUTE_PARSER_UNAVAILABLE")
+    route_guard = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(route_guard)
     try:
-        document = json.loads(payload[len("```json\n"):-len("\n```")])
-    except json.JSONDecodeError:
-        _fail("PROTECTED_ROUTE_JSON_INVALID")
-    if not isinstance(document, dict) or any(
-            field not in document for field in PROTECTED_ROUTE_FIELDS):
-        _fail("PROTECTED_ROUTE_FIELDS_INVALID")
-    return {field: document[field] for field in PROTECTED_ROUTE_FIELDS}
+        route = route_guard.parse_route_lock_text(text, REPOSITORY)
+    except (OSError, route_guard.RouteGuardError):
+        _fail("PROTECTED_ROUTE_DRIFT")
+    return {field: getattr(route, field) for field in PROTECTED_ROUTE_FIELDS}
 
 
 def validate_protected_route_fingerprint(
@@ -136,9 +135,10 @@ def validate_governance_snapshot(
     lineage = validate_governance_commit_lineage(repository, commit)
     head = lineage["head"]
     records = contract.get("git_blobs")
-    if (not isinstance(records, list) or
-            tuple(record.get("path") for record in records
-                  if isinstance(record, dict)) != GOVERNANCE_SNAPSHOT_PATHS):
+    if (not isinstance(records, list) or len(records) != 3 or
+            not all(isinstance(record, dict) for record in records) or
+            tuple(record.get("path") for record in records) !=
+            GOVERNANCE_SNAPSHOT_PATHS):
         _fail("GOVERNANCE_PATH_SET_INVALID")
     validated: list[dict[str, Any]] = []
     for path, record in zip(GOVERNANCE_SNAPSHOT_PATHS, records):
@@ -373,7 +373,7 @@ def expected_verification_argv() -> dict[str, list[str]]:
             "python3", "scripts/dev_planner/icra076_repeatability_replay.py",
             "--snapshot", "config/icra27/icra076_flat_null_snapshot_v1.json",
             "--output-root",
-            "results/icra27/icra076/repeatability-replay-004"],
+            "results/icra27/icra076/repeatability-replay-005"],
     }
 
 
@@ -705,7 +705,7 @@ def _repeatability_bound(replay: dict[str, Any], repository: Path) -> dict[str, 
     required_replay_command = [
         "python3", "scripts/dev_planner/icra076_repeatability_replay.py",
         "--snapshot", "config/icra27/icra076_flat_null_snapshot_v1.json",
-        "--output-root", "results/icra27/icra076/repeatability-replay-004",
+        "--output-root", "results/icra27/icra076/repeatability-replay-005",
     ]
     if replay.get("required_replay_command") != required_replay_command:
         _fail("REPEATABILITY_COMMAND_DRIFT")
@@ -724,7 +724,7 @@ def _repeatability_bound(replay: dict[str, Any], repository: Path) -> dict[str, 
     if isinstance(manifest_relative, str):
         _reject_forbidden_path_tokens(Path(manifest_relative))
     if manifest_relative != \
-            "results/icra27/icra076/repeatability-replay-004/manifest.json":
+            "results/icra27/icra076/repeatability-replay-005/manifest.json":
         _fail("REPEATABILITY_MANIFEST_IDENTITY_INVALID")
     manifest_path = _repository_path(repository, manifest_relative)
     if not manifest_path.exists():

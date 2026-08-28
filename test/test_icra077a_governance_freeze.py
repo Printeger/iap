@@ -77,6 +77,10 @@ class Icra077aGovernanceFreezeTest(unittest.TestCase):
         fourth["git_blobs"].append(copy.deepcopy(fourth["git_blobs"][0]))
         fourth["git_blobs"][-1]["path"] = "docs/icra27/ICRA_SCOPE.md"
         cases.append((fourth, "GOVERNANCE_PATH_SET_INVALID"))
+        for malformed in (None, "ignored", 7):
+            fourth = copy.deepcopy(self.contract)
+            fourth["git_blobs"].append(malformed)
+            cases.append((fourth, "GOVERNANCE_PATH_SET_INVALID"))
         for value, code in cases:
             with self.subTest(code=code), \
                     self.assertRaises(self.module.Icra076Error) as caught:
@@ -133,6 +137,19 @@ class Icra077aGovernanceFreezeTest(unittest.TestCase):
             self.module.validate_protected_route_fingerprint(
                 self.contract["protected_route"], changed)
         self.assertEqual(protected.exception.code, "PROTECTED_ROUTE_DRIFT")
+        duplicate = current.replace(
+            '"active_route": "P0_P4_V2_P5",',
+            ('"active_route": "P0_P4_V2_P5",\n'
+             '  "active_route": "P0_P4_V2_P5",'), 1)
+        unknown = current.replace(
+            '"schema_version": "icra_user_route_lock_v1",',
+            ('"schema_version": "icra_user_route_lock_v1",\n'
+             '  "unknown_route_field": "forbidden",'), 1)
+        for malformed in (duplicate, unknown):
+            with self.assertRaises(self.module.Icra076Error) as parsed:
+                self.module.validate_protected_route_fingerprint(
+                    self.contract["protected_route"], malformed)
+            self.assertEqual(parsed.exception.code, "PROTECTED_ROUTE_DRIFT")
 
     def test_non_governance_source_bytes_remain_strict(self):
         record = self.module.inventory_path(

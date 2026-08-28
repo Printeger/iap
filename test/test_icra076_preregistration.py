@@ -297,7 +297,7 @@ class Icra076PreregistrationTest(unittest.TestCase):
                          "icra076_production_measured_replay_binding_v2")
         self.assertEqual(replay["measured_replay_manifest_path"],
                          "results/icra27/icra076/"
-                         "repeatability-replay-004/manifest.json")
+                         "repeatability-replay-005/manifest.json")
         verification = self._verification(module)
         manifest = (REPOSITORY / replay["measured_replay_manifest_path"]).resolve()
         original_exists = Path.exists
