@@ -3617,3 +3617,6 @@ Requirements: `IAP-RQ-000`, `IAP-RQ-020`, `IAP-RQ-030`, `IAP-RQ-040`,
   the standalone verification record, recomputes freeze fields on validation,
   and replaces stale pending-only test assertions. The first candidate remains
   rejected history; fresh 003/002/005 identities are required.
+- Fresh replay-003/verification-002/freeze-005 satisfy the corrected bindings;
+  the post-evidence focused suite passes 44/44 and independent freeze
+  validation passes with 956 source / 958 install records.

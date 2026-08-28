@@ -773,3 +773,6 @@ records); independent validation passes, subject to Supervisor Review.
 Review subsequently rejected that candidate because the post-evidence exact
 suite failed and freeze-004 did not bind the standalone verification file.
 Corrected source requires fresh replay-003/verification-002/freeze-005.
+Those fresh identities now exist: 60/60 measured emissions, U95 0.0 m,
+post-evidence tests 44/44 and independently validated source/install freeze
+956/958. Status remains Builder-ready-for-review, not Supervisor PASS.

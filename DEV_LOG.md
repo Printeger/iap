@@ -9354,3 +9354,13 @@ standalone verification record and recomputes frozen statistical fields during
 validation. Old replay-002/verification-001/freeze-004 remain immutable review-
 rejected history; fresh identities start at replay-003/verification-002/
 freeze-005 after the corrected source is pushed.
+
+Corrected source commit `3a3486f793df1b8299a87bf3400d7e2c34979018`
+was pushed and fetch-confirmed `0 0`. Fresh replay-003 retains 60/60 measured
+emissions with U95 `0.0 m`; the post-evidence exact focused suite passes 44/44
+and the shared build passes 6/6. Repository-local verification-002 is now
+path/type/size/SHA-bound by freeze-005. Independent freeze validation passes
+with 956 source and 958 install records. Replay manifest, verification and
+freeze hashes are `f7a64b449112168f93fde9f4f0477e436e50eb1a3c35d0c257da3f1ed53302d2`,
+`c35498d1177c649825f8faa54b4ed4b6cca5d346c904736a78e6893f9512d531`
+and `aee60ed05efb816254159ed51ab04fa4c5f2977ebf711e86384a53e91aeaf686`.

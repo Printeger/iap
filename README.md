@@ -242,11 +242,11 @@ ICRA-077。`results/icra27/icra076/preregistration-freeze-001.json`（`51464dff�
 拒绝的历史 attempt，不是 canonical freeze；它因 pre-access/inventory/coverage/replay/command-binding 缺陷
 保留且不得覆盖。第二轮 standards review 又拒绝 `preregistration-freeze-002.json`（`c0b4953a…87631`）：
 父 symlink alias admission 与 measured replay evidence binding 仍不完整，因此它也不是 canonical freeze。
-后续 canonical identity 必须绑定真实运行 60 次 production test 后保存的 transcript/hash/snapshot evidence，
-以及已推送的最终修复 bytes。当前 canonical candidate 是 `preregistration-freeze-003.json`，绑定 pushed
-`bf6e8909649b1def1012dfa164f9cc243aacad56`、measured replay `ad28c5b9…a668c`、950 个
-source/authority entries、957 个 runtime-install entries 与 360 rows；freeze SHA-256 为
-`4c31a57f4a5f3fb858998178c07a809c661eb90fdc32d6c239cd4a5e7204e2b3`。
+`preregistration-freeze-003.json` 以及后续首轮 repair 的 freeze-004 都是 review-rejected history。
+当前 Builder candidate 是 `preregistration-freeze-005.json`：它绑定 pushed corrected source
+`3a3486f793df1b8299a87bf3400d7e2c34979018`、60 次 production probe 的 replay-003、repository-local
+verification-002、956 个 source/authority entries、958 个 runtime-install entries 与 360 rows；freeze
+SHA-256 为 `aee60ed05efb816254159ed51ab04fa4c5f2977ebf711e86384a53e91aeaf686`。
 
 ### 1.3 运行一个最小检查
 
@@ -1116,3 +1116,6 @@ must remain repository-local and bind pushed source. ICRA-077 is unauthorized.
 Fresh replay-002 retains 60/60 measurements (U95 `0.0 m`); verification-001
 and preregistration-freeze-004 independently validate against the pushed
 implementation. This is a Builder candidate, not Supervisor PASS.
+That first candidate was review-rejected. The corrected current candidate is
+replay-003/verification-002/preregistration-freeze-005; its post-evidence exact
+suite and independent freeze validation pass. Supervisor Review is still required.
