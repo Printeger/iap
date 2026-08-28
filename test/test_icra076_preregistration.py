@@ -7,6 +7,7 @@ import importlib.util
 import copy
 import json
 import math
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -16,6 +17,11 @@ REPOSITORY = Path(__file__).resolve().parents[1]
 MODULE_PATH = REPOSITORY / "scripts/dev_planner/icra076_preregistration.py"
 PROTOCOL_PATH = REPOSITORY / "config/icra27/icra076_preregistration_v1.json"
 REGISTRY_PATH = REPOSITORY / "config/icra27/icra076_seed_registry_v1.json"
+PROBE_PATH = Path("/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe")
+SNAPSHOT_INPUT_PATH = (
+    REPOSITORY / "config/icra27/icra076_flat_null_snapshot_v1.json")
+REPLAY_RUNNER_PATH = (
+    REPOSITORY / "scripts/dev_planner/icra076_repeatability_replay.py")
 
 
 def load_module():
@@ -27,6 +33,148 @@ def load_module():
 
 
 class Icra076PreregistrationTest(unittest.TestCase):
+    @staticmethod
+    def _measurement(index, d_peak):
+        b_risk = 1.0
+        b_original = b_risk + d_peak
+        return {
+            "schema_version": "icra076_production_replay_measurement_v1",
+            "status": "PASS",
+            "unit": "m",
+            "domain": "controllable_interior_b_equals_2r",
+            "measurement_source": "P4GuideDecision.risk_profile.max",
+            "invocation_index": index,
+            "snapshot_identity": {
+                "serialized_input_sha256": "a" * 64,
+                "snapshot_config_hash": "0123456789abcdef",
+                "snapshot_generation": 1,
+            },
+            "sample_identity": {
+                "equal_arc_lattice_count": 200,
+                "original_lattice_hash": "1111111111111111",
+                "risk_lattice_hash": "2222222222222222",
+                "original_controllable_sample_count": 174,
+                "risk_controllable_sample_count": 174,
+                "original_valid_count": 174,
+                "risk_valid_count": 174,
+            },
+            "B_original_m": b_original,
+            "B_risk_m": b_risk,
+            "D_peak_m": d_peak,
+        }
+
+    def test_measured_repeatability_uses_absolute_d_peak_not_reference_delta(self):
+        module = load_module()
+        values = [0.5] + [0.0] * 55 + [0.2, 0.3, 0.4, 0.5]
+        measurements = [self._measurement(index, value)
+                        for index, value in enumerate(values, start=1)]
+        result = module.calculate_measured_repeatability(measurements)
+        self.assertEqual(result["nearest_rank"], 57)
+        self.assertEqual(result["u95_repeatability_m"], 0.3)
+        self.assertEqual(result["absolute_D_peak_m"], [abs(v) for v in values])
+
+    def test_probe_parser_requires_machine_measurement_not_pass_transcript(self):
+        module = load_module()
+        transcript = "[==========] 1 test ran\n[  PASSED  ] 1 test.\n"
+        with self.assertRaises(module.Icra076Error) as transcript_only:
+            module.parse_probe_output(transcript.encode("utf-8"), 1)
+        self.assertEqual(transcript_only.exception.code,
+                         "PROBE_OUTPUT_NOT_MEASUREMENT")
+        raw = (json.dumps(self._measurement(1, 0.0), sort_keys=True) +
+               "\n").encode("utf-8")
+        parsed = module.parse_probe_output(raw, 1)
+        self.assertEqual(parsed["B_original_m"], 1.0)
+        self.assertEqual(parsed["B_risk_m"], 1.0)
+
+    def test_production_probe_emits_profile_measurement_from_serialized_input(self):
+        module = load_module()
+        completed = subprocess.run(
+            [str(PROBE_PATH), "--snapshot", str(SNAPSHOT_INPUT_PATH),
+             "--invocation-index", "1"],
+            cwd=REPOSITORY, capture_output=True, check=False)
+        self.assertEqual(completed.returncode, 0, completed.stderr.decode())
+        measurement = module.parse_probe_output(completed.stdout, 1)
+        self.assertEqual(measurement["measurement_source"],
+                         "P4GuideDecision.risk_profile.max")
+        self.assertEqual(measurement["sample_identity"][
+            "equal_arc_lattice_count"], 200)
+        self.assertEqual(measurement["B_original_m"], 1.0)
+        self.assertEqual(measurement["B_risk_m"], 1.0)
+        self.assertEqual(measurement["D_peak_m"], 0.0)
+
+    def test_replay_runner_retains_sixty_emissions_and_computes_u95(self):
+        module = load_module()
+        allowed = REPOSITORY / "results/icra27/icra076"
+        allowed.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(
+                prefix="icra076-runner-test-", dir=allowed) as temporary:
+            output_root = Path(temporary) / "repeatability-replay-test"
+            completed = subprocess.run(
+                ["python3", str(REPLAY_RUNNER_PATH),
+                 "--snapshot", str(SNAPSHOT_INPUT_PATH),
+                 "--output-root", str(output_root)],
+                cwd=REPOSITORY, capture_output=True, text=True, check=False)
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            manifest = output_root / "manifest.json"
+            result = module.load_measured_replay_manifest(manifest)
+            self.assertEqual(result["measurement_count"], 60)
+            self.assertEqual(result["u95_repeatability_m"], 0.0)
+            self.assertEqual(len(list(output_root.glob("measurement-*.json"))),
+                             60)
+            original = json.loads(manifest.read_text())
+            for section, code in (
+                    ("executable", "REPLAY_EXECUTABLE_OR_INPUT_DRIFT"),
+                    ("serialized_input", "REPLAY_EXECUTABLE_OR_INPUT_DRIFT")):
+                mutated = copy.deepcopy(original)
+                mutated[section]["sha256"] = "f" * 64
+                manifest.write_text(json.dumps(mutated))
+                with self.subTest(section=section), \
+                        self.assertRaises(module.Icra076Error) as caught:
+                    module.load_measured_replay_manifest(manifest)
+                self.assertEqual(caught.exception.code, code)
+            manifest.write_text(json.dumps(original))
+
+    def test_measured_replay_adversaries_fail_closed(self):
+        module = load_module()
+        valid = [self._measurement(index, 0.0)
+                 for index in range(1, 61)]
+        cases = []
+
+        changed_b = copy.deepcopy(valid)
+        changed_b[12]["B_original_m"] = 1.25
+        cases.append((changed_b, "REPEATABILITY_B_D_INCONSISTENT"))
+
+        wrong_unit = copy.deepcopy(valid)
+        wrong_unit[2]["unit"] = "risk_cost"
+        cases.append((wrong_unit, "REPEATABILITY_MEASUREMENT_INVALID"))
+
+        wrong_domain = copy.deepcopy(valid)
+        wrong_domain[3]["domain"] = "whole_path"
+        cases.append((wrong_domain, "REPEATABILITY_MEASUREMENT_INVALID"))
+
+        wrong_samples = copy.deepcopy(valid)
+        wrong_samples[4]["sample_identity"]["equal_arc_lattice_count"] = 199
+        cases.append((wrong_samples, "REPEATABILITY_SAMPLE_IDENTITY_INVALID"))
+
+        incomplete = copy.deepcopy(valid)
+        incomplete[5]["sample_identity"]["risk_valid_count"] = 173
+        cases.append((incomplete, "REPEATABILITY_SAMPLE_IDENTITY_INVALID"))
+
+        snapshot_drift = copy.deepcopy(valid)
+        snapshot_drift[6]["snapshot_identity"]["serialized_input_sha256"] = "b" * 64
+        cases.append((snapshot_drift, "REPEATABILITY_SNAPSHOT_IDENTITY_DRIFT"))
+
+        for measurements, code in cases:
+            with self.subTest(code=code):
+                with self.assertRaises(module.Icra076Error) as caught:
+                    module.calculate_measured_repeatability(measurements)
+                self.assertEqual(caught.exception.code, code)
+
+        with self.assertRaises(module.Icra076Error) as count:
+            module.calculate_measured_repeatability(valid[:-1])
+        self.assertEqual(count.exception.code,
+                         "REPEATABILITY_MEASUREMENT_COUNT_INVALID")
+
     def _assert_mutation_rejected(self, target, mutate, code,
                                   bind_mutated_inputs=True):
         module = load_module()
@@ -72,9 +220,10 @@ class Icra076PreregistrationTest(unittest.TestCase):
     def test_protocol_freezes_estimand_threshold_seeds_and_order(self):
         module = load_module()
         frozen = module.validate_preregistration(PROTOCOL_PATH, REGISTRY_PATH)
-        self.assertEqual(frozen["delta_peak_m"], 0.3)
         self.assertEqual(frozen["endpoint_buffer_m"], 1.5)
-        self.assertEqual(frozen["u95_repeatability_m"], 0.0)
+        self.assertTrue(frozen["repeatability_pending"])
+        self.assertIsNone(frozen["u95_repeatability_m"])
+        self.assertIsNone(frozen["delta_peak_m"])
         self.assertEqual(frozen["minimum_success_count"], 59)
         self.assertEqual(len(frozen["execution_order"]), 360)
         self.assertEqual(len({row["run_id"] for row in frozen["execution_order"]}),
@@ -88,6 +237,30 @@ class Icra076PreregistrationTest(unittest.TestCase):
                 self.assertEqual(
                     {row["arm"] for row in rows if row["seed"] == seed},
                     {"P0_P5_CONTROL", "P0_P4_V2_P5_TREATMENT"})
+
+    def test_freeze_requires_fresh_measured_replay_manifest(self):
+        module = load_module()
+        replay = json.loads((REPOSITORY / "config/icra27/"
+                             "icra076_repeatability_replay_v1.json").read_text())
+        self.assertEqual(replay["schema_version"],
+                         "icra076_production_measured_replay_binding_v2")
+        self.assertEqual(replay["measured_replay_manifest_path"],
+                         "results/icra27/icra076/"
+                         "repeatability-replay-002/manifest.json")
+        verification = {
+            "schema_version": "icra076_repository_local_verification_v1",
+            "source_head": "0" * 40,
+            "commands": [
+            {"category": category, "argv": argv, "enabled": True,
+             "skipped": False, "exit_code": 0}
+            for category, argv in module.expected_verification_argv().items()]}
+        with tempfile.TemporaryDirectory(
+                prefix="icra076-freeze-pending-", dir=REPOSITORY) as temporary:
+            with self.assertRaises(module.Icra076Error) as caught:
+                module.create_freeze_record(
+                    PROTOCOL_PATH, REGISTRY_PATH,
+                    Path(temporary) / "freeze.json", verification)
+        self.assertEqual(caught.exception.code, "MEASURED_REPLAY_REQUIRED")
 
     def test_schema_downgrade_is_typed_and_fail_closed(self):
         self._assert_mutation_rejected(
@@ -123,7 +296,7 @@ class Icra076PreregistrationTest(unittest.TestCase):
 
     def test_threshold_and_statistical_value_drift_are_rejected(self):
         self._assert_mutation_rejected(
-            "protocol", lambda value: value["delta_peak"].update(value=0.2),
+            "protocol", lambda value: value["delta_peak"].update(value="0.2"),
             "DELTA_PEAK_CONTRACT_INVALID")
         self._assert_mutation_rejected(
             "protocol", lambda value: value["exact_binomial_rule"].update(
@@ -137,8 +310,8 @@ class Icra076PreregistrationTest(unittest.TestCase):
 
     def test_held_out_reference_is_rejected_before_path_access(self):
         self._assert_mutation_rejected(
-            "replay", lambda value: value["admissibility"].update(
-                retained_non_held_out_evidence_path="results/icra077/held_out.json"),
+            "replay", lambda value: value.update(
+                measured_replay_manifest_path="results/icra077/held_out.json"),
             "HELD_OUT_PATH_FORBIDDEN")
 
     def test_top_level_held_out_inputs_are_rejected_before_access(self):
@@ -233,7 +406,11 @@ class Icra076PreregistrationTest(unittest.TestCase):
         roots = protocol["byte_freeze"]["source_inventory_roots"]
         for required in (
                 "include/iap", "src/iap", "src/uav_simulator", "launch",
-                "config", "scripts/dev_planner", "test/test_icra076_preregistration.py",
+                "config", "scripts/dev_planner",
+                "test/test_icra073_inverse_corridor.py",
+                "test/test_icra074_geometry.py",
+                "test/test_icra075_exploratory.py",
+                "test/test_icra076_preregistration.py",
                 "scripts/dev_planner/build_iap_dev.sh",
                 "docs/icra27/dev/ICRA_P4_V2_INVERSE_CORRIDOR_FIXTURE.md",
                 "docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md",
@@ -247,41 +424,12 @@ class Icra076PreregistrationTest(unittest.TestCase):
         self.assertTrue({"gnss_sim", "local_sensing", "map_generator"}.issubset(
             protocol["byte_freeze"]["runtime_install_packages"]))
 
-    def test_repeatability_consumes_sixty_serialized_observations(self):
-        module = load_module()
-        replay = json.loads((REPOSITORY / "config/icra27/"
-                             "icra076_repeatability_replay_v1.json").read_text())
-        evidence = json.loads((REPOSITORY /
-            replay["measured_replay_evidence"]["path"]).read_text())
-        observations = evidence["observations"]
-        self.assertEqual(len(observations), 60)
-        self.assertEqual([item["replay_index"] for item in observations],
-                         list(range(1, 61)))
-        mutated_evidence = copy.deepcopy(evidence)
-        snapshot = mutated_evidence["observations"][59]["serialized_snapshot"]
-        snapshot["risk_interior_provider_c_pi_m"] += 0.5
-        mutated_evidence["observations"][59]["serialized_snapshot_sha256"] = (
-            module.canonical_sha256(snapshot))
-        with tempfile.TemporaryDirectory(prefix="icra076-replay-", dir=REPOSITORY) as temporary:
-            root = Path(temporary)
-            evidence_path = root / "evidence.json"
-            evidence_path.write_text(json.dumps(mutated_evidence))
-            mutated_replay = copy.deepcopy(replay)
-            mutated_replay["measured_replay_evidence"] = {
-                "path": str(evidence_path.relative_to(REPOSITORY)),
-                "sha256": module.file_sha256(evidence_path),
-            }
-            path = root / "replay.json"
-            path.write_text(json.dumps(mutated_replay))
-            with self.assertRaises(module.Icra076Error) as caught:
-                module.validate_preregistration(
-                    PROTOCOL_PATH, REGISTRY_PATH, replay_path=path)
-        self.assertEqual(caught.exception.code,
-                         "REPEATABILITY_SNAPSHOT_NOT_BYTE_IDENTICAL")
-
     def test_skipped_disabled_or_failed_verification_is_rejected(self):
         module = load_module()
-        valid = {"commands": [
+        valid = {
+            "schema_version": "icra076_repository_local_verification_v1",
+            "source_head": "0" * 40,
+            "commands": [
             {"category": category, "argv": argv, "enabled": True,
              "skipped": False, "exit_code": 0}
             for category, argv in module.expected_verification_argv().items()]}
@@ -301,6 +449,28 @@ class Icra076PreregistrationTest(unittest.TestCase):
                 module.validate_verification(mutated)
             self.assertEqual(caught.exception.code,
                              "REQUIRED_VERIFICATION_NOT_PASS")
+
+    def test_verification_is_repository_local_and_source_bound(self):
+        module = load_module()
+        valid = {
+            "schema_version": "icra076_repository_local_verification_v1",
+            "source_head": "0" * 40,
+            "commands": [
+                {"category": category, "argv": argv, "enabled": True,
+                 "skipped": False, "exit_code": 0}
+                for category, argv in module.expected_verification_argv().items()]}
+        with tempfile.TemporaryDirectory(prefix="icra076-verification-") as root:
+            external = Path(root) / "verification.json"
+            external.write_text(json.dumps(valid))
+            with self.assertRaises(module.Icra076Error) as caught:
+                module.load_verification(external)
+            self.assertEqual(caught.exception.code,
+                             "EXTERNAL_INPUT_PATH_FORBIDDEN")
+        module.validate_verification(valid, "0" * 40)
+        with self.assertRaises(module.Icra076Error) as source:
+            module.validate_verification(valid, "1" * 40)
+        self.assertEqual(source.exception.code,
+                         "REQUIRED_VERIFICATION_SOURCE_DRIFT")
 
 
 if __name__ == "__main__":

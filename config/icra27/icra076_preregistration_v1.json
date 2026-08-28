@@ -36,8 +36,8 @@
   },
   "repeatability": {
     "input_path": "config/icra27/icra076_repeatability_replay_v1.json",
-    "input_canonical_sha256": "824eb49377f23cf513166caa203923088fec02d4bd358e54207e4827dcb9767c",
-    "u95_repeatability": 0.0,
+    "input_canonical_sha256": "10aa9e66a9d9baa7e6a666792a37b5ca0a6ac9b2a3bf7bff89efa189564fa65b",
+    "u95_repeatability": "FROZEN_FROM_MEASURED_REPLAY_MANIFEST",
     "unit": "m",
     "flat_null_runtime_evidence": "UNAVAILABLE_ICRA075_0_OF_40",
     "admissible_basis": "BYTE_IDENTICAL_SERIALIZED_SNAPSHOT_REPLAY",
@@ -45,7 +45,7 @@
   },
   "delta_peak": {
     "formula": "max(domain_SESOI,U95_repeatability)",
-    "value": 0.3,
+    "value": "FROZEN_FROM_MEASURED_REPLAY_MANIFEST",
     "unit": "m"
   },
   "sample_size": {
@@ -75,7 +75,7 @@
   },
   "seed_registry": {
     "path": "config/icra27/icra076_seed_registry_v1.json",
-    "canonical_sha256": "c5630457300e7d84e6f22ff7c1c358bd2d42f48d2d068fd507ccb8e69e16caeb"
+    "canonical_sha256": "1e5cc11449002e9802dd350832ca4531df89f00193a2a034915ec28a8c906078"
   },
   "formal_gates": {
     "PRIMARY": {
@@ -122,6 +122,9 @@
       "include/iap",
       "launch",
       "scripts/dev_planner",
+      "test/test_icra073_inverse_corridor.py",
+      "test/test_icra074_geometry.py",
+      "test/test_icra075_exploratory.py",
       "test/test_icra076_preregistration.py",
       "scripts/dev_planner/build_iap_dev.sh",
       "src/iap",

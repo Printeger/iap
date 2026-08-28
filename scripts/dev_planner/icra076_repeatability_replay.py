@@ -1,98 +1,98 @@
 #!/usr/bin/env python3
-"""Capture 60 measured production flat-null snapshot replays for ICRA-076."""
+"""Retain 60 production-emitted flat-null measurements for ICRA-076."""
 
 from __future__ import annotations
 
 import argparse
 import hashlib
 import json
-import re
 import subprocess
 from pathlib import Path
 
 import icra076_preregistration as CONTRACT
 
 
-BINARY = Path("/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide")
-FILTER = (
-    "--gtest_filter=P4CollisionGuideDecision."
-    "Icra074FlatNullEqualCostsAndLengthUseStableHash")
-FIXTURE = CONTRACT.REPOSITORY / (
-    "src/iap/planner/bspline_opt/test/"
-    "icra074_targeted_optimization_fixture.hpp")
-DECISION_TEST = CONTRACT.REPOSITORY / (
-    "src/iap/planner/bspline_opt/test/test_p4_collision_guide.cpp")
+PROBE = Path("/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe")
+DEFAULT_SNAPSHOT = (
+    CONTRACT.REPOSITORY / "config/icra27/icra076_flat_null_snapshot_v1.json")
 
 
-def _constant(source: str, name: str) -> float:
-    match = re.search(
-        rf"inline constexpr double {re.escape(name)}\s*=\s*([^;]+);", source)
-    if match is None:
-        raise RuntimeError(f"missing fixture constant {name}")
-    return float(match.group(1))
+def regular_file_record(path: Path, rendered_path: str) -> dict:
+    if not path.is_file() or path.is_symlink():
+        raise CONTRACT.Icra076Error("REPLAY_FILE_TYPE_INVALID", str(path))
+    return {
+        "path": rendered_path,
+        "type": "regular_file",
+        "size_bytes": path.stat().st_size,
+        "sha256": CONTRACT.file_sha256(path),
+    }
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--snapshot", type=Path, default=DEFAULT_SNAPSHOT)
+    parser.add_argument("--output-root", type=Path, required=True)
     args = parser.parse_args()
-    output = CONTRACT.validate_output_path(
-        args.output, CONTRACT.REPOSITORY,
-        CONTRACT.REPOSITORY / "results/icra27/icra076")
-    fixture_source = FIXTURE.read_text()
-    resolution = _constant(fixture_source, "kResolutionM")
-    flat_cost = _constant(fixture_source, "kFlatCost")
-    command = [str(BINARY), FILTER, "--gtest_repeat=1"]
-    observations = []
-    for replay_index in range(1, 61):
+    repository = CONTRACT.REPOSITORY.resolve()
+    snapshot = CONTRACT._repository_input_path(args.snapshot, repository)
+    output_root = CONTRACT.validate_output_path(
+        args.output_root, repository, repository / "results/icra27/icra076")
+    if not PROBE.is_file() or PROBE.is_symlink():
+        raise CONTRACT.Icra076Error("REPLAY_PROBE_INVALID", str(PROBE))
+    executable = regular_file_record(PROBE, str(PROBE))
+    serialized_input = regular_file_record(
+        snapshot, str(snapshot.relative_to(repository)))
+    source_head = CONTRACT._run_git(repository, ["rev-parse", "HEAD"])
+    output_root.mkdir(parents=True, exist_ok=False)
+    records = []
+    measurements = []
+    for invocation_index in range(1, 61):
+        argv = [
+            str(PROBE), "--snapshot", str(snapshot),
+            "--invocation-index", str(invocation_index)]
         completed = subprocess.run(
-            command, cwd=CONTRACT.REPOSITORY, capture_output=True, text=True,
-            check=False)
-        transcript = completed.stdout + completed.stderr
-        if completed.returncode != 0 or "[  PASSED  ] 1 test." not in transcript:
-            raise RuntimeError(
-                f"production replay {replay_index} failed: {completed.returncode}")
-        snapshot = {
-            "schema_version": "p4_risk_grid_snapshot_replay_v1",
-            "provider_truth": "FLAT_NULL",
-            "resolution_m": resolution,
-            "original_interior_provider_c_pi_m": flat_cost,
-            "risk_interior_provider_c_pi_m": flat_cost,
-        }
-        observations.append({
-            "replay_index": replay_index,
-            "command": command,
+            argv, cwd=repository, capture_output=True, check=False)
+        if completed.returncode != 0 or completed.stderr:
+            raise CONTRACT.Icra076Error(
+                "REPLAY_PROBE_PROCESS_FAILED",
+                f"invocation={invocation_index},exit={completed.returncode}")
+        measurement = CONTRACT.parse_probe_output(
+            completed.stdout, invocation_index)
+        output_path = output_root / f"measurement-{invocation_index:03d}.json"
+        with output_path.open("xb") as stream:
+            stream.write(completed.stdout)
+        output_record = regular_file_record(output_path, output_path.name)
+        if output_record["sha256"] != hashlib.sha256(completed.stdout).hexdigest():
+            raise CONTRACT.Icra076Error("REPLAY_EMISSION_WRITE_DRIFT")
+        records.append({
+            "invocation_index": invocation_index,
+            "argv": argv,
             "exit_code": completed.returncode,
-            "transcript": transcript,
-            "transcript_sha256": hashlib.sha256(
-                transcript.encode("utf-8")).hexdigest(),
-            "serialized_snapshot": snapshot,
-            "serialized_snapshot_sha256": CONTRACT.canonical_sha256(snapshot),
+            "output": output_record,
         })
-    record = {
-        "schema_version": "icra076_measured_repeatability_replay_v1",
+        measurements.append(measurement)
+    calculation = CONTRACT.calculate_measured_repeatability(measurements)
+    manifest = {
+        "schema_version": "icra076_production_measured_replay_manifest_v1",
         "task": "ICRA-076",
         "outcome_blind": True,
         "held_out_accessed": False,
-        "fixture": {
-            "path": str(FIXTURE.relative_to(CONTRACT.REPOSITORY)),
-            "sha256": CONTRACT.file_sha256(FIXTURE),
-        },
-        "decision_test": {
-            "path": str(DECISION_TEST.relative_to(CONTRACT.REPOSITORY)),
-            "sha256": CONTRACT.file_sha256(DECISION_TEST),
-        },
-        "observation_count": len(observations),
-        "observations": observations,
+        "source_head": source_head,
+        "executable": executable,
+        "serialized_input": serialized_input,
+        "measurement_count": len(records),
+        "measurements": records,
+        "calculation": calculation,
     }
-    output.parent.mkdir(parents=True, exist_ok=True)
-    with output.open("x") as stream:
-        stream.write(json.dumps(record, indent=2, sort_keys=True) + "\n")
+    manifest_path = output_root / "manifest.json"
+    with manifest_path.open("x") as stream:
+        stream.write(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
     print(json.dumps({
-        "schema_version": record["schema_version"],
+        "schema_version": manifest["schema_version"],
         "result": "PASS",
-        "output": str(output),
-        "observation_count": len(observations),
+        "output": str(manifest_path),
+        "measurement_count": len(records),
+        "u95_repeatability_m": calculation["u95_repeatability_m"],
     }, indent=2, sort_keys=True))
     return 0
 

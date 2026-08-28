@@ -97,9 +97,9 @@ def _repository_input_path(path: Path, repository: Path) -> Path:
     return absolute
 
 
-def load_verification(path: Path) -> dict[str, Any]:
-    """Load the external command manifest only after held-out-token rejection."""
-    return _json(_admit_input_path(path))
+def load_verification(path: Path, repository: Path = REPOSITORY) -> dict[str, Any]:
+    """Load a repository-local verification manifest fail-closed."""
+    return _json(_repository_input_path(path, repository.resolve()))
 
 
 def _finite_number(value: Any, code: str) -> float:
@@ -218,12 +218,24 @@ def expected_verification_argv() -> dict[str, list[str]]:
             "--symlink-install", "--cmake-args", "-DBUILD_TESTING=ON"],
         "REPEATABILITY_REPLAY": [
             "python3", "scripts/dev_planner/icra076_repeatability_replay.py",
-            "--output",
-            "results/icra27/icra076/repeatability-replay-001.json"],
+            "--snapshot", "config/icra27/icra076_flat_null_snapshot_v1.json",
+            "--output-root",
+            "results/icra27/icra076/repeatability-replay-002"],
     }
 
 
-def validate_verification(verification: dict[str, Any]) -> None:
+def validate_verification(verification: dict[str, Any],
+                          expected_source_head: str | None = None) -> None:
+    if set(verification) != {"schema_version", "source_head", "commands"} or \
+            verification.get("schema_version") != \
+            "icra076_repository_local_verification_v1":
+        _fail("REQUIRED_VERIFICATION_NOT_PASS", "schema")
+    source_head = verification.get("source_head")
+    if (not isinstance(source_head, str) or len(source_head) != 40 or
+            any(c not in "0123456789abcdef" for c in source_head)):
+        _fail("REQUIRED_VERIFICATION_SOURCE_INVALID")
+    if expected_source_head is not None and source_head != expected_source_head:
+        _fail("REQUIRED_VERIFICATION_SOURCE_DRIFT")
     commands = verification.get("commands")
     if not isinstance(commands, list):
         _fail("REQUIRED_VERIFICATION_NOT_PASS", "commands missing")
@@ -295,12 +307,224 @@ def exact_binomial_passing_rule(n: int, probability: float,
         }
 
 
+def calculate_measured_repeatability(
+        measurements: list[dict[str, Any]]) -> dict[str, Any]:
+    """Validate 60 production measurements and return nearest-rank U95(|D|)."""
+    if not isinstance(measurements, list) or len(measurements) != 60:
+        _fail("REPEATABILITY_MEASUREMENT_COUNT_INVALID")
+    absolute_d_peak: list[float] = []
+    frozen_snapshot_identity: dict[str, Any] | None = None
+    frozen_sample_identity: dict[str, Any] | None = None
+    measurement_fields = {
+        "schema_version", "status", "unit", "domain", "measurement_source",
+        "invocation_index", "snapshot_identity", "sample_identity",
+        "B_original_m", "B_risk_m", "D_peak_m"}
+    for expected_index, measurement in enumerate(measurements, start=1):
+        if (not isinstance(measurement, dict) or
+                set(measurement) != measurement_fields):
+            _fail("REPEATABILITY_MEASUREMENT_INVALID")
+        if (measurement.get("schema_version") !=
+                "icra076_production_replay_measurement_v1" or
+                measurement.get("status") != "PASS" or
+                measurement.get("unit") != "m" or
+                measurement.get("domain") !=
+                "controllable_interior_b_equals_2r" or
+                measurement.get("measurement_source") !=
+                "P4GuideDecision.risk_profile.max" or
+                measurement.get("invocation_index") != expected_index):
+            _fail("REPEATABILITY_MEASUREMENT_INVALID")
+        snapshot_identity = measurement.get("snapshot_identity")
+        if (not isinstance(snapshot_identity, dict) or
+                set(snapshot_identity) != {
+                    "serialized_input_sha256", "snapshot_config_hash",
+                    "snapshot_generation"} or
+                not isinstance(snapshot_identity.get("serialized_input_sha256"), str) or
+                len(snapshot_identity["serialized_input_sha256"]) != 64 or
+                not isinstance(snapshot_identity.get("snapshot_config_hash"), str) or
+                not snapshot_identity["snapshot_config_hash"] or
+                not isinstance(snapshot_identity.get("snapshot_generation"), int) or
+                isinstance(snapshot_identity.get("snapshot_generation"), bool) or
+                snapshot_identity["snapshot_generation"] <= 0):
+            _fail("REPEATABILITY_SNAPSHOT_IDENTITY_INVALID")
+        if frozen_snapshot_identity is None:
+            frozen_snapshot_identity = snapshot_identity
+        elif snapshot_identity != frozen_snapshot_identity:
+            _fail("REPEATABILITY_SNAPSHOT_IDENTITY_DRIFT")
+        sample_identity = measurement.get("sample_identity")
+        if (not isinstance(sample_identity, dict) or
+                set(sample_identity) != {
+                    "equal_arc_lattice_count", "original_lattice_hash",
+                    "risk_lattice_hash", "original_controllable_sample_count",
+                    "risk_controllable_sample_count", "original_valid_count",
+                    "risk_valid_count"} or
+                sample_identity.get("equal_arc_lattice_count") != 200 or
+                not isinstance(sample_identity.get("original_lattice_hash"), str) or
+                not sample_identity["original_lattice_hash"] or
+                not isinstance(sample_identity.get("risk_lattice_hash"), str) or
+                not sample_identity["risk_lattice_hash"]):
+            _fail("REPEATABILITY_SAMPLE_IDENTITY_INVALID")
+        original_count = sample_identity.get(
+            "original_controllable_sample_count")
+        risk_count = sample_identity.get("risk_controllable_sample_count")
+        if (not isinstance(original_count, int) or isinstance(original_count, bool) or
+                not isinstance(risk_count, int) or isinstance(risk_count, bool) or
+                not 0 < original_count <= 200 or not 0 < risk_count <= 200 or
+                sample_identity.get("original_valid_count") != original_count or
+                sample_identity.get("risk_valid_count") != risk_count):
+            _fail("REPEATABILITY_SAMPLE_IDENTITY_INVALID")
+        if frozen_sample_identity is None:
+            frozen_sample_identity = sample_identity
+        elif sample_identity != frozen_sample_identity:
+            _fail("REPEATABILITY_SAMPLE_IDENTITY_DRIFT")
+        b_original = _finite_number(
+            measurement.get("B_original_m"),
+            "REPEATABILITY_MEASUREMENT_INVALID")
+        b_risk = _finite_number(
+            measurement.get("B_risk_m"),
+            "REPEATABILITY_MEASUREMENT_INVALID")
+        d_peak = _finite_number(
+            measurement.get("D_peak_m"),
+            "REPEATABILITY_MEASUREMENT_INVALID")
+        if not math.isclose(
+                d_peak, b_original - b_risk, rel_tol=0.0, abs_tol=1.0e-12):
+            _fail("REPEATABILITY_B_D_INCONSISTENT")
+        absolute_d_peak.append(abs(d_peak))
+    rank = math.ceil(0.95 * len(absolute_d_peak))
+    u95 = sorted(absolute_d_peak)[rank - 1]
+    return {
+        "schema_version": "icra076_measured_repeatability_calculation_v1",
+        "unit": "m",
+        "replay_count": len(absolute_d_peak),
+        "nearest_rank": rank,
+        "absolute_D_peak_m": absolute_d_peak,
+        "u95_repeatability_m": u95,
+    }
+
+
+def parse_probe_output(raw: bytes, expected_index: int) -> dict[str, Any]:
+    """Parse exactly one machine-readable measurement emitted by the probe."""
+    try:
+        decoded = raw.decode("utf-8")
+        measurement = json.loads(decoded)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        _fail("PROBE_OUTPUT_NOT_MEASUREMENT")
+    if (not isinstance(measurement, dict) or
+            measurement.get("schema_version") !=
+            "icra076_production_replay_measurement_v1" or
+            measurement.get("invocation_index") != expected_index or
+            not all(field in measurement for field in (
+                "B_original_m", "B_risk_m", "D_peak_m",
+                "snapshot_identity", "sample_identity"))):
+        _fail("PROBE_OUTPUT_NOT_MEASUREMENT")
+    return measurement
+
+
+def _verify_absolute_file_record(record: dict[str, Any]) -> None:
+    if set(record) != {"path", "type", "size_bytes", "sha256"}:
+        _fail("REPLAY_FILE_IDENTITY_INVALID")
+    path = _admit_input_path(Path(record["path"]))
+    if (record.get("type") != "regular_file" or not path.is_file() or
+            path.is_symlink() or path.stat().st_size != record.get("size_bytes") or
+            file_sha256(path) != record.get("sha256")):
+        _fail("REPLAY_EXECUTABLE_OR_INPUT_DRIFT", str(path))
+
+
+def load_measured_replay_manifest(
+        manifest_path: Path, expected_source_head: str | None = None,
+        repository: Path = REPOSITORY) -> dict[str, Any]:
+    """Validate every retained probe emission and calculate U95(|D_peak|)."""
+    repository = repository.resolve()
+    manifest_path = _repository_input_path(manifest_path, repository)
+    try:
+        manifest_path.relative_to(repository / "results/icra27/icra076")
+    except ValueError:
+        _fail("REPLAY_MANIFEST_OUTSIDE_ALLOWED_ROOT")
+    manifest = _json(manifest_path)
+    required_fields = {
+        "schema_version", "task", "outcome_blind", "held_out_accessed",
+        "source_head", "executable", "serialized_input", "measurement_count",
+        "measurements", "calculation"}
+    if (set(manifest) != required_fields or
+            manifest.get("schema_version") !=
+            "icra076_production_measured_replay_manifest_v1" or
+            manifest.get("task") != "ICRA-076" or
+            manifest.get("outcome_blind") is not True or
+            manifest.get("held_out_accessed") is not False or
+            not isinstance(manifest.get("source_head"), str) or
+            len(manifest["source_head"]) != 40 or
+            (expected_source_head is not None and
+             manifest["source_head"] != expected_source_head)):
+        _fail("REPLAY_MANIFEST_CONTRACT_INVALID")
+    _verify_absolute_file_record(manifest.get("executable", {}))
+    serialized_input = manifest.get("serialized_input", {})
+    if set(serialized_input) != {"path", "type", "size_bytes", "sha256"}:
+        _fail("REPLAY_FILE_IDENTITY_INVALID")
+    input_path = _repository_path(repository, serialized_input["path"])
+    if (serialized_input.get("type") != "regular_file" or
+            not input_path.is_file() or input_path.is_symlink() or
+            input_path.stat().st_size != serialized_input.get("size_bytes") or
+            file_sha256(input_path) != serialized_input.get("sha256")):
+        _fail("REPLAY_EXECUTABLE_OR_INPUT_DRIFT", str(input_path))
+    records = manifest.get("measurements")
+    if (manifest.get("measurement_count") != 60 or
+            not isinstance(records, list) or len(records) != 60):
+        _fail("REPEATABILITY_MEASUREMENT_COUNT_INVALID")
+    measurements: list[dict[str, Any]] = []
+    manifest_root = manifest_path.parent
+    executable_path = manifest["executable"]["path"]
+    for index, record in enumerate(records, start=1):
+        expected_argv = [
+            executable_path, "--snapshot", str(input_path),
+            "--invocation-index", str(index)]
+        if (not isinstance(record, dict) or set(record) != {
+                "invocation_index", "argv", "exit_code", "output"} or
+                record.get("invocation_index") != index or
+                record.get("argv") != expected_argv or
+                record.get("exit_code") != 0):
+            _fail("REPLAY_INVOCATION_IDENTITY_INVALID")
+        output_record = record.get("output", {})
+        if (not isinstance(output_record, dict) or
+                set(output_record) != {"path", "type", "size_bytes", "sha256"} or
+                output_record.get("path") != f"measurement-{index:03d}.json"):
+            _fail("REPLAY_EMISSION_IDENTITY_INVALID")
+        output_path = _repository_input_path(
+            manifest_root / output_record["path"], repository)
+        try:
+            output_path.relative_to(manifest_root)
+        except ValueError:
+            _fail("REPLAY_EMISSION_IDENTITY_INVALID")
+        raw = output_path.read_bytes()
+        if (output_record.get("type") != "regular_file" or
+                output_path.is_symlink() or len(raw) != output_record.get("size_bytes") or
+                hashlib.sha256(raw).hexdigest() != output_record.get("sha256")):
+            _fail("REPLAY_EMISSION_BYTE_DRIFT", output_record["path"])
+        measurement = parse_probe_output(raw, index)
+        if (measurement["snapshot_identity"]["serialized_input_sha256"] !=
+                serialized_input["sha256"]):
+            _fail("REPLAY_SERIALIZED_INPUT_IDENTITY_MISMATCH")
+        measurements.append(measurement)
+    calculation = calculate_measured_repeatability(measurements)
+    if manifest.get("calculation") != calculation:
+        _fail("REPEATABILITY_CALCULATION_DRIFT")
+    return {
+        **calculation,
+        "measurement_count": len(measurements),
+        "source_head": manifest["source_head"],
+        "manifest_sha256": file_sha256(manifest_path),
+        "executable": manifest["executable"],
+        "serialized_input": serialized_input,
+    }
+
+
 def _repeatability_bound(replay: dict[str, Any], repository: Path) -> dict[str, Any]:
-    if set(replay) != {"schema_version", "outcome_blind", "held_out", "unit",
-                       "replay_count", "sample_count", "measured_replay_evidence",
-                       "admissibility", "calculation"}:
+    expected_fields = {
+        "schema_version", "outcome_blind", "held_out", "unit",
+        "replay_count", "sample_count", "measured_replay_manifest_path",
+        "probe_executable_path", "serialized_input_path",
+        "required_replay_command", "calculation"}
+    if set(replay) != expected_fields:
         _fail("REPEATABILITY_FIELDS_INVALID")
-    if replay.get("schema_version") != "icra076_measured_snapshot_replay_binding_v1":
+    if replay.get("schema_version") != "icra076_production_measured_replay_binding_v2":
         _fail("REPEATABILITY_SCHEMA_MISMATCH")
     if replay.get("outcome_blind") is not True or replay.get("held_out") is not False:
         _fail("REPEATABILITY_ADMISSION_INVALID")
@@ -309,128 +533,45 @@ def _repeatability_bound(replay: dict[str, Any], repository: Path) -> dict[str, 
     count = replay.get("replay_count")
     if count != 60 or replay.get("sample_count") != 200:
         _fail("REPEATABILITY_CARDINALITY_INVALID")
-    evidence_binding = replay.get("measured_replay_evidence", {})
-    if set(evidence_binding) != {"path", "sha256"}:
-        _fail("REPEATABILITY_EVIDENCE_IDENTITY_INVALID")
-    _verify_bound_file(repository, evidence_binding)
-    evidence_path = _repository_path(repository, evidence_binding["path"])
-    evidence = _json(evidence_path)
-    if (evidence.get("schema_version") !=
-            "icra076_measured_repeatability_replay_v1" or
-            evidence.get("task") != "ICRA-076" or
-            evidence.get("outcome_blind") is not True or
-            evidence.get("held_out_accessed") is not False or
-            evidence.get("observation_count") != count):
-        _fail("REPEATABILITY_EVIDENCE_CONTRACT_INVALID")
-    snapshots = evidence.get("observations")
-    if not isinstance(snapshots, list) or len(snapshots) != count:
-        _fail("REPEATABILITY_OBSERVATIONS_INVALID")
-    expected_snapshot_fields = {
-        "replay_index", "schema_version", "provider_truth", "resolution_m",
-        "original_interior_provider_c_pi_m", "risk_interior_provider_c_pi_m"}
-    observed_d_peak: list[float] = []
-    snapshot_bytes: list[bytes] = []
-    replay_base_command = [
-        "/home/dev/ws_iap/build/bspline_opt/test_p4_collision_guide",
-        ("--gtest_filter=P4CollisionGuideDecision."
-         "Icra074FlatNullEqualCostsAndLengthUseStableHash"),
-        "--gtest_repeat=1"]
-    for index, observation in enumerate(snapshots, start=1):
-        if not isinstance(observation, dict) or set(observation) != {
-                "replay_index", "command", "exit_code", "transcript",
-                "transcript_sha256", "serialized_snapshot",
-                "serialized_snapshot_sha256"}:
-            _fail("REPEATABILITY_OBSERVATIONS_INVALID")
-        transcript = observation.get("transcript")
-        if (observation.get("replay_index") != index or
-                observation.get("command") != replay_base_command or
-                observation.get("exit_code") != 0 or
-                not isinstance(transcript, str) or
-                "[  PASSED  ] 1 test." not in transcript or
-                observation.get("transcript_sha256") != hashlib.sha256(
-                    transcript.encode("utf-8")).hexdigest()):
-            _fail("REPEATABILITY_MEASUREMENT_INVALID")
-        snapshot = observation.get("serialized_snapshot")
-        if (not isinstance(snapshot, dict) or
-                set(snapshot) != expected_snapshot_fields - {"replay_index"} or
-                observation.get("serialized_snapshot_sha256") !=
-                canonical_sha256(snapshot)):
-            _fail("REPEATABILITY_OBSERVATIONS_INVALID")
-        if (
-                snapshot.get("schema_version") !=
-                "p4_risk_grid_snapshot_replay_v1"):
-            _fail("SERIALIZED_SNAPSHOT_SCHEMA_MISMATCH")
-        original = _finite_number(
-            snapshot.get("original_interior_provider_c_pi_m"),
-            "REPEATABILITY_VALUE_INVALID")
-        risk = _finite_number(
-            snapshot.get("risk_interior_provider_c_pi_m"),
-            "REPEATABILITY_VALUE_INVALID")
-        resolution = _finite_number(
-            snapshot.get("resolution_m"), "REPEATABILITY_VALUE_INVALID")
-        if resolution <= 0.0 or snapshot.get("provider_truth") != "FLAT_NULL":
-            _fail("SERIALIZED_SNAPSHOT_CONTRACT_INVALID")
-        observed_d_peak.append(original - risk)
-        snapshot_bytes.append(canonical_bytes(snapshot))
-    if len(set(snapshot_bytes)) != 1:
-        _fail("REPEATABILITY_SNAPSHOT_NOT_BYTE_IDENTICAL")
-    admissibility = replay.get("admissibility", {})
-    if set(admissibility) != {
-            "retained_non_held_out_evidence_path",
-            "retained_non_held_out_evidence_sha256", "fixture_source_path",
-            "fixture_source_sha256", "decision_test_path",
-            "decision_test_sha256", "integration_test_path",
-            "integration_test_sha256", "required_replay_command"}:
-        _fail("REPEATABILITY_ADMISSIBILITY_INVALID")
     required_replay_command = [
         "python3", "scripts/dev_planner/icra076_repeatability_replay.py",
-        "--output", "results/icra27/icra076/repeatability-replay-001.json",
+        "--snapshot", "config/icra27/icra076_flat_null_snapshot_v1.json",
+        "--output-root", "results/icra27/icra076/repeatability-replay-002",
     ]
-    if admissibility.get("required_replay_command") != required_replay_command:
+    if replay.get("required_replay_command") != required_replay_command:
         _fail("REPEATABILITY_COMMAND_DRIFT")
-    records = (
-        {"path": admissibility.get("retained_non_held_out_evidence_path"),
-         "sha256": admissibility.get("retained_non_held_out_evidence_sha256")},
-        {"path": admissibility.get("fixture_source_path"),
-         "sha256": admissibility.get("fixture_source_sha256")},
-        {"path": admissibility.get("decision_test_path"),
-         "sha256": admissibility.get("decision_test_sha256")},
-        {"path": admissibility.get("integration_test_path"),
-         "sha256": admissibility.get("integration_test_sha256")},
-    )
-    for record in records:
-        _verify_bound_file(repository, record)
-    if (evidence.get("fixture") != {
-            "path": admissibility["fixture_source_path"],
-            "sha256": admissibility["fixture_source_sha256"]} or
-            evidence.get("decision_test") != {
-                "path": admissibility["decision_test_path"],
-                "sha256": admissibility["decision_test_sha256"]}):
-        _fail("REPEATABILITY_EVIDENCE_SOURCE_MISMATCH")
-    reference = observed_d_peak[0]
-    absolute_deltas = [abs(value - reference) for value in observed_d_peak]
-    rank = math.ceil(0.95 * count)
-    u95 = sorted(absolute_deltas)[rank - 1]
-    expected = _finite_number(
-        replay.get("calculation", {}).get("expected_u95_repeatability_m"),
-        "REPEATABILITY_VALUE_INVALID")
     if replay.get("calculation") != {
-            "metric": (
-                "abs((B_original-B_risk)_replay-(B_original-B_risk)_reference)"),
+            "metric": "abs(D_peak)",
             "u95_method": "nearest_rank_ceil_0.95_n",
-            "expected_u95_repeatability_m": 0.0}:
+            "nearest_rank": 57}:
         _fail("REPEATABILITY_METHOD_INVALID")
-    if u95 != expected:
-        _fail("REPEATABILITY_BOUND_MISMATCH")
+    if replay.get("probe_executable_path") != \
+            "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe":
+        _fail("REPEATABILITY_PROBE_IDENTITY_INVALID")
+    if replay.get("serialized_input_path") != \
+            "config/icra27/icra076_flat_null_snapshot_v1.json":
+        _fail("REPEATABILITY_SERIALIZED_INPUT_IDENTITY_INVALID")
+    manifest_relative = replay.get("measured_replay_manifest_path")
+    if isinstance(manifest_relative, str):
+        _reject_forbidden_path_tokens(Path(manifest_relative))
+    if manifest_relative != \
+            "results/icra27/icra076/repeatability-replay-002/manifest.json":
+        _fail("REPEATABILITY_MANIFEST_IDENTITY_INVALID")
+    manifest_path = _repository_path(repository, manifest_relative)
+    if not manifest_path.exists():
+        return {
+            "schema_version": "icra076_repeatability_calculation_pending_v2",
+            "unit": "m", "replay_count": count, "nearest_rank": 57,
+            "pending": True, "u95_repeatability_m": None,
+            "input_canonical_sha256": canonical_sha256(replay),
+            "manifest_path": manifest_relative,
+        }
+    measured = load_measured_replay_manifest(manifest_path, repository=repository)
     return {
-        "schema_version": "icra076_repeatability_calculation_v1",
-        "unit": "m",
-        "replay_count": count,
-        "nearest_rank": rank,
-        "reference_D_peak_m": reference,
-        "absolute_replay_deltas_m": absolute_deltas,
-        "u95_repeatability_m": u95,
+        **measured,
+        "pending": False,
         "input_canonical_sha256": canonical_sha256(replay),
+        "manifest_path": manifest_relative,
     }
 
 
@@ -574,7 +715,7 @@ def validate_preregistration(
             repeatability_contract.get("input_canonical_sha256") !=
             repeatability["input_canonical_sha256"] or
             repeatability_contract.get("u95_repeatability") !=
-            repeatability["u95_repeatability_m"] or
+            "FROZEN_FROM_MEASURED_REPLAY_MANIFEST" or
             repeatability_contract.get("unit") != "m" or
             repeatability_contract.get("outcome_derived") is not False):
         _fail("REPEATABILITY_CONTRACT_MISMATCH")
@@ -604,11 +745,11 @@ def validate_preregistration(
         "path": sesoi.get("authority", {}).get("path"),
         "sha256": sesoi.get("authority", {}).get("sha256")})
     delta = protocol.get("delta_peak", {})
-    delta_value = _finite_number(delta.get("value"), "DELTA_PEAK_INVALID")
+    delta_value = (None if repeatability["pending"] else
+                   max(sesoi_value, repeatability["u95_repeatability_m"]))
     if (delta.get("formula") != "max(domain_SESOI,U95_repeatability)" or
             delta.get("unit") != "m" or
-            delta_value != max(
-                sesoi_value, repeatability["u95_repeatability_m"])):
+            delta.get("value") != "FROZEN_FROM_MEASURED_REPLAY_MANIFEST"):
         _fail("DELTA_PEAK_CONTRACT_INVALID")
     sample = protocol.get("sample_size", {})
     if sample != {
@@ -706,6 +847,7 @@ def validate_preregistration(
         "protocol_canonical_sha256": canonical_sha256(protocol),
         "registry_canonical_sha256": canonical_sha256(registry),
         "repeatability": repeatability,
+        "repeatability_pending": repeatability["pending"],
         "u95_repeatability_m": repeatability["u95_repeatability_m"],
         "delta_peak_m": delta_value,
         "endpoint_buffer_m": endpoint_buffer,
@@ -829,6 +971,8 @@ def create_freeze_record(
     repository = repository.resolve()
     validated = validate_preregistration(
         protocol_path, registry_path, repository)
+    if validated["repeatability_pending"]:
+        _fail("MEASURED_REPLAY_REQUIRED")
     protocol_path = _repository_input_path(protocol_path, repository)
     registry_path = _repository_input_path(registry_path, repository)
     protocol = _json(protocol_path)
@@ -837,9 +981,10 @@ def create_freeze_record(
         command for command in verification["commands"]
         if command["category"] == "REPEATABILITY_REPLAY")
     replay = _json(repository / REPLAY_PATH.relative_to(REPOSITORY))
-    if replay_command["argv"] != replay["admissibility"]["required_replay_command"]:
+    if replay_command["argv"] != replay["required_replay_command"]:
         _fail("REPEATABILITY_VERIFICATION_MISMATCH")
     admission = source_admission(repository)
+    validate_verification(verification, admission["head_commit"])
     allowed_root = repository / protocol["output_policy"]["allowed_root"]
     output = validate_output_path(output_path, repository, allowed_root)
     source_inventory = collect_source_inventory(protocol, repository)
@@ -928,7 +1073,7 @@ def validate_freeze_record(
         cwd=repository, capture_output=True, text=True, check=False)
     if ancestor.returncode != 0:
         _fail("FREEZE_SOURCE_HEAD_DRIFT")
-    validate_verification(record.get("verification", {}))
+    validate_verification(record.get("verification", {}), frozen_head)
     protocol = _json(protocol_path)
     source_inventory = collect_source_inventory(protocol, repository)
     install_inventory = collect_install_inventory(protocol, install_root)

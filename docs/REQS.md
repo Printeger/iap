@@ -758,3 +758,12 @@ runs may be fixed and repeated under new run IDs without intermediate Review.
 ICRA-072B then stabilizes that chain; only its later Review PASS may issue
 ICRA-073 inverse-corridor effect diagnostics. Formal hashes, one-shot rules,
 held-out and qualification remain Layer 4.
+
+## ICRA-076 measured-repeatability freeze repair (2026-08-28)
+
+IAP-RQ-320/321/400/410 require repeatability input from the actual offline
+provider-query/P4 profile seam, with 60 retained machine measurements and U95
+computed from `|D_peak|`. IAP-RQ-421/422/423/424 require exact pushed-source,
+command, executable, serialized-input, emission, mandatory-test and shared-
+install byte identities. No ICRA-077, ROS, GPU, live or held-out action is
+authorized by this repair.

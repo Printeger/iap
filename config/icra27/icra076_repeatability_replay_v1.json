@@ -1,33 +1,24 @@
 {
-  "schema_version": "icra076_measured_snapshot_replay_binding_v1",
+  "schema_version": "icra076_production_measured_replay_binding_v2",
   "outcome_blind": true,
   "held_out": false,
   "unit": "m",
   "replay_count": 60,
   "sample_count": 200,
-  "measured_replay_evidence": {
-    "path": "results/icra27/icra076/repeatability-replay-001.json",
-    "sha256": "ad28c5b93974227c3147a2863cf452f8e79fdbc314e7b885fee1e2d9e04a668c"
-  },
-  "admissibility": {
-    "retained_non_held_out_evidence_path": "results/icra27/icra074/offline-targeted-001.json",
-    "retained_non_held_out_evidence_sha256": "79989ac8c128977e37d91f0f3cd30ec3a0618f3818b44d34da53981893fefc67",
-    "fixture_source_path": "src/iap/planner/bspline_opt/test/icra074_targeted_optimization_fixture.hpp",
-    "fixture_source_sha256": "a6ca85fee0cdc3e08c1af28af07cbf1e90a6dd3ab7ba2f1c7eba77a6c8f9b91d",
-    "decision_test_path": "src/iap/planner/bspline_opt/test/test_p4_collision_guide.cpp",
-    "decision_test_sha256": "79c48fb43cb9f3a3ef4467611f137e220d0d0ca5d7f3a838b0b7bbab97eeafe0",
-    "integration_test_path": "src/iap/planner/bspline_opt/test/test_p4_collision_guide_integration.cpp",
-    "integration_test_sha256": "4bcdf31a8a96019e839fac520e7cbb8c73a3be040714e7b2784c1d993fb36fda",
-    "required_replay_command": [
-      "python3",
-      "scripts/dev_planner/icra076_repeatability_replay.py",
-      "--output",
-      "results/icra27/icra076/repeatability-replay-001.json"
-    ]
-  },
+  "measured_replay_manifest_path": "results/icra27/icra076/repeatability-replay-002/manifest.json",
+  "probe_executable_path": "/home/dev/ws_iap/build/bspline_opt/icra076_repeatability_probe",
+  "serialized_input_path": "config/icra27/icra076_flat_null_snapshot_v1.json",
+  "required_replay_command": [
+    "python3",
+    "scripts/dev_planner/icra076_repeatability_replay.py",
+    "--snapshot",
+    "config/icra27/icra076_flat_null_snapshot_v1.json",
+    "--output-root",
+    "results/icra27/icra076/repeatability-replay-002"
+  ],
   "calculation": {
-    "metric": "abs((B_original-B_risk)_replay-(B_original-B_risk)_reference)",
+    "metric": "abs(D_peak)",
     "u95_method": "nearest_rank_ceil_0.95_n",
-    "expected_u95_repeatability_m": 0.0
+    "nearest_rank": 57
   }
 }

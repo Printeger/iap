@@ -1105,3 +1105,9 @@ ros2 topic hz /ublox_driver/range_meas
 11. `demo11`：检查完整 IAP 系统闭环、integrity-aware EGO planner 和 baseline/full 对比。
 
 完成配置修改后，请重启对应 launch；IAP 配置在节点启动时读取，运行中修改 JSON/YAML 不会自动生效。
+
+ICRA-076 measured-repeatability repair (2026-08-28): preregistration now
+requires 60 machine measurements from an offline production-shaped P4 profile
+probe over one byte-identical serialized FLAT_NULL input. U95 is the
+nearest-rank 95% bound of observed `|D_peak|`; verification/freeze evidence
+must remain repository-local and bind pushed source. ICRA-077 is unauthorized.

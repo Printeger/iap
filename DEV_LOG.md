@@ -9319,3 +9319,17 @@ Terminal Builder status is
 both report zero actionable findings on the implementation/preflight contract.
 All ICRA-072 evidence, shared roots, hidden user files and protected PDF remain
 untouched.
+
+## 2026-08-28 — ICRA-076 measured-repeatability freeze repair (implementation)
+
+Requirements: IAP-RQ-320, IAP-RQ-321, IAP-RQ-400, IAP-RQ-410,
+IAP-RQ-421, IAP-RQ-422, IAP-RQ-423 and IAP-RQ-424.
+
+Replaced the rejected synthetic replay with an offline C++ probe that consumes
+one serialized FLAT_NULL input and emits measured production P4 profile maxima,
+D_peak, snapshot and 200-sample lattice identities. The runner retains 60
+independent emissions and computes nearest-rank U95 from observed `|D_peak|`.
+Verification is repository-local/source-bound and the inventory explicitly
+includes all ICRA-073/074/075/076 tests. Focused tests pass 43/43 and the exact
+shared six-package build passes 6/6. Evidence remains pending until the
+implementation commit is pushed and fetch-confirmed at divergence 0 0.

@@ -1,0 +1,38 @@
+{
+  "schema_version": "icra076_flat_null_serialized_snapshot_v1",
+  "snapshot_id": "icra076-flat-null-production-replay-v1",
+  "frame_id": "map",
+  "resolution_m": 0.5,
+  "size_m": [16.0, 16.0, 4.0],
+  "horizons_s": [0.0, 5.0, 10.0],
+  "stale_timeout_s": 100.0,
+  "unknown_cost": 50.0,
+  "cost_max": 100.0,
+  "refresh_center_m": [0.0, 0.0, 0.0],
+  "refresh_stamp_s": 10.0,
+  "provider": {
+    "mode": "FLAT_NULL",
+    "c_pi_m": 1.0
+  },
+  "request": {
+    "planning_attempt_id": 76,
+    "collision_segment_id": 1,
+    "occupancy_epoch": 77,
+    "query_base_time_s": 10.0,
+    "query_speed_mps": 2.0,
+    "equal_arc_lattice_count": 200,
+    "domain": "controllable_interior_b_equals_2r",
+    "original_path_m": [
+      [-4.0, 0.0, 0.0],
+      [-2.0, -1.25, 0.0],
+      [2.0, -1.25, 0.0],
+      [4.0, 0.0, 0.0]
+    ],
+    "risk_path_m": [
+      [-4.0, 0.0, 0.0],
+      [-2.0, 1.25, 0.0],
+      [2.0, 1.25, 0.0],
+      [4.0, 0.0, 0.0]
+    ]
+  }
+}

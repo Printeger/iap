@@ -1834,3 +1834,10 @@ disclosed; the final task-local rerun has identical before/after inventory hash.
 | Req ID | Control-plane requirement | Implementation / evidence | Status |
 |---|---|---|---|
 | IAP-RQ-000 | Close every Supervisor Review through pushed state and an explicit window decision | `AGENTS.md` section 8.6 defines the mandatory seven-step closure, rotation criteria, final-response wording and repository-only bootstrap; `AGENT_STATE.md` records disposition/reason/anchor/next role/task; latest `SUPERVISOR_LOG.md` records the current decision | **ROTATE_RECOMMENDED; BUILDER ACTIVE TASK UNCHANGED** |
+
+## 2026-08-28 ICRA-076 measured-repeatability freeze repair
+
+| Req ID | Verification target | Implementation / status |
+|---|---|---|
+| IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 | Actual P4 profile measurement and U95 of 60 observed `|D_peak|` values | Serialized-input C++ probe, retained-emission runner and adversaries; **IMPLEMENTED, 43/43 focused PASS** |
+| IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 | Repository-local source-bound verification and complete byte freeze | v2 replay/verification contracts and explicit 073/074/075/076 test roots; **6/6 shared build PASS, evidence pending pushed source** |

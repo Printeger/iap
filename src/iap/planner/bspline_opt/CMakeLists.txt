@@ -33,6 +33,7 @@ find_package(glog REQUIRED)
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   find_package(ament_cmake_gtest REQUIRED)
+  find_package(OpenSSL REQUIRED)
   # the following line skips the linter which checks for copyrights
   # comment the line when a copyright and license is added to all source files
   set(ament_cmake_copyright_FOUND TRUE)
@@ -112,6 +113,21 @@ if(BUILD_TESTING)
   target_link_libraries(test_p4_collision_guide_integration
     bspline_opt
     iap::iap
+  )
+
+  add_executable(icra076_repeatability_probe
+    test/icra076_repeatability_probe.cpp
+  )
+  target_include_directories(icra076_repeatability_probe PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../thirdparty/json/include
+  )
+  ament_target_dependencies(icra076_repeatability_probe
+    rclcpp Eigen3 iap path_searching
+  )
+  target_link_libraries(icra076_repeatability_probe
+    bspline_opt
+    iap::iap
+    OpenSSL::Crypto
   )
 endif()
 

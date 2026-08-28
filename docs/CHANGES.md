@@ -3602,3 +3602,12 @@ Requirements: `IAP-RQ-000`, `IAP-RQ-020`, `IAP-RQ-030`, `IAP-RQ-040`,
   health with 123 valid P0 samples, but naturally selected zero P4-v2 risk
   guides; its sole analyzer invocation therefore failed closed. Evidence is
   retained, no retry or tuning occurred, and the gate remains BLOCKED.
+
+## 2026-08-28 (ICRA-076 measured-repeatability freeze repair)
+
+- Add an offline production-shaped P4 profile probe and retain 60 exact
+  machine-readable emissions from one byte-identical FLAT_NULL input.
+- Compute nearest-rank U95 from observed `|D_peak|`, without reference
+  subtraction or Python-injected B values.
+- Require repository-local source-bound verification and complete mandatory
+  test/source/config/script byte freezing.

@@ -13,7 +13,7 @@
       {"path": "config/icra27/p4_g0c_protocol_v6.json", "sha256": "8fffeef30777043342be96213be30385226b1244607acd0dcf356f01009e80eb"},
       {"path": "config/icra27/icra075_exploratory_protocol_v1.json", "sha256": "0d1e1c36e5a5b66bc6535e811663a6ec195ed2913fc2eb40458a2469323705d4"},
       {"path": "docs/icra27/GATE0_QUALIFICATION_REPORT.md", "sha256": "fd67fc62044178a09d630bee95d1cd14d7cd376f4268f2c2d61cad6ba693d3d5"},
-      {"path": "docs/icra27/ICRA_IMPLEMENTATION_PLAN.md", "sha256": "d7c1ca1b02e02f1394d60ae713d7a48bd1f8bf0ea532149e29497777088b4748"}
+      {"path": "docs/icra27/ICRA_IMPLEMENTATION_PLAN.md", "sha256": "080c949d1543872fe052bb27f3fe5c19e7cf91e1e06227dba91770bf360c6b2e"}
     ],
     "known_seed_values": [
       1, 11, 23, 37, 53, 71, 89, 107, 127, 149, 173,
