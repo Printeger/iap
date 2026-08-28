@@ -1,5 +1,14 @@
 # ICRA 2027 Conference Scope — User-owned P0 -> P4-v2 -> P5 recovery
 
+## User decision 008 / ICRA-077 active — 2026-08-28
+
+Under `USER-ICRA-ROUTE-20260828-008`, the user accepts both disclosed ICRA-076 freeze blockers and authorizes
+debt-bearing ICRA-077. ICRA-076 remains
+BLOCKED/user-bypassed/NOT PASS; freeze-005 is not Review PASS. ICRA-077 alone may execute the unchanged frozen
+360-row held-out order once, without retry, exclusion, tuning or source/install change. Route authority, P4-v1
+`SCIENTIFIC_NO_GO`, P4-v2, ICRA-071 and campaign activation remain unchanged; ICRA-078 requires Review PASS.
+Authority is `ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md`; route `P0_P4_V2_P5` is unchanged.
+
 ## ICRA-076 repair Review BLOCKED — 2026-08-28
 
 Review of `f66fb73..ae79bc7` rejects freeze-005 as formal authority: replay measured the `r=0.5` production

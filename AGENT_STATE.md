@@ -3,11 +3,11 @@
 ```yaml
 schema_version: icra_single_branch_two_agent_v3_user_route_owner
 branch: dev/icra
-active_role: SUPERVISOR
-status: BLOCKED_AWAITING_USER_RESEARCH_DECISION
-gate: ICRA-076_PREREGISTRATION_FREEZE
-task_id: NONE
-milestone: ICRA-076_LAYER4_MEASURED_REPEATABILITY_FREEZE_REPAIR
+active_role: DEEPSEEK
+status: TASK_READY
+gate: ICRA-077_HELD_OUT_CONFIRMATION
+task_id: ICRA-077
+milestone: ICRA-077_LAYER4_DEBT_BEARING_HELD_OUT_CONFIRMATION
 review_base: f66fb7344798ba0c04d2d5b59d0be05183f3bfb1
 reviewed_head: ae79bc7c49928f8e7e5cc87ae5f0f33de39381fd
 mandated_lineage_review_base: 3b5199e0cf8efc904f124cdb73156a3209eb6d80
@@ -15,15 +15,15 @@ icra071_repair_review_base: 6e0e7328835064ecb665bc6476a6254924ff371d
 conference_route: P0_P4_V2_P5
 route_owner: USER
 route_lock: docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md
-user_decision_id: USER-ICRA-ROUTE-20260827-007
-user_approval_anchor: dd5e96a602061ab4c4bac384c72fec0f43255e01
+user_decision_id: USER-ICRA-ROUTE-20260828-008
+user_approval_anchor: f654cdb1c8f4b6dc2ed2f3c086db4c64b2df7dbb
 workflow_decision_id: USER-ICRA-WORKFLOW-20260826-001
-route_status: ICRA076_REPAIR_REVIEW_BLOCKED_WRONG_DOMAIN_AND_INCOMPLETE_SOURCE_FREEZE_AWAITING_USER
+route_status: ICRA076_TWO_FREEZE_BLOCKERS_USER_ACCEPTED_BYPASS_ICRA077_TASK_READY
 historical_gate0a_verdict: NO_GO_P2
 p0_gate0b_status: PASS
 p0_gate0b_worker_count: 4
 p4_v1_status: G0A_PASS_G0B_PASS_G0C_SCIENTIFIC_NO_GO_IMMUTABLE
-p4_v2_status: DEVELOPMENT_LAYER1_PASS_LAYER2_BLOCKED_BYPASSED_LAYER3_SCIENTIFICALLY_NOT_STARTED_BLOCKED_USER_BYPASSED_LAYER4_ICRA076_REPAIR_REVIEW_BLOCKED
+p4_v2_status: DEVELOPMENT_LAYER1_PASS_LAYER2_BLOCKED_BYPASSED_LAYER3_SCIENTIFICALLY_NOT_STARTED_BLOCKED_USER_BYPASSED_LAYER4_ICRA076_BLOCKED_BYPASSED_ICRA077_TASK_READY
 p5_status: IMPLEMENTED_BUT_NO_CURRENT_PROSPECTIVE_QUALIFICATION_PASS
 icra070_status: SUPERSEDED_UNQUALIFIED_BY_USER_ROUTE_DECISION
 icra071_status: REQUEST_CHANGES_DEFERRED_NONBLOCKING_BY_USER_DECISION_002
@@ -32,29 +32,29 @@ icra072b_status: BLOCKED_HIDDEN_UNTRACKED_SOURCE_USER_ACCEPTED_BYPASS_NOT_PASS
 icra073_status: BLOCKED_USER_ACCEPTED_BYPASS_NOT_PASS
 icra074_status: PASS_OFFLINE_CONTRACT_PRODUCTION_UNCHANGED_NO_EFFECT_CLAIM
 icra075_status: BLOCKED_FROZEN_CONTRACT_INCOMPATIBLE_0_OF_40_NO_POWER_INPUTS_USER_ACCEPTED_BYPASS_NOT_PASS
-icra076_status: BLOCKED_WRONG_FROZEN_DOMAIN_AND_THIRDPARTY_JSON_NOT_FROZEN_NOT_PASS
-supervisor_verdict: ICRA076_STANDARDS_REQUEST_CHANGES_SPEC_REQUEST_CHANGES_GATE_BLOCKED
-review_disposition: AWAITING_USER_DECISION_REPAIR_ICRA076_OR_EXPLICIT_BYPASS_TO_ICRA077
+icra076_status: BLOCKED_WRONG_FROZEN_DOMAIN_AND_THIRDPARTY_JSON_NOT_FROZEN_USER_ACCEPTED_BYPASS_NOT_PASS
+icra077_status: TASK_READY_DEBT_BEARING_HELD_OUT_CONFIRMATION_NOT_YET_RUN
+supervisor_verdict: ICRA076_STANDARDS_REQUEST_CHANGES_SPEC_REQUEST_CHANGES_GATE_USER_BYPASSED_NOT_PASS
+review_disposition: USER_ACCEPTED_TWO_ICRA076_FREEZE_BLOCKERS_AND_AUTHORIZED_ICRA077
 qualification_claim: false
 campaign_status: BLOCKED_UNTIL_ICRA079_REVIEW_PASS_AND_DISTINCT_USER_APPROVAL
-handoff_status: BLOCKED_AWAITING_USER_RESEARCH_DECISION
-next_task: NONE
-next_after_user_decision: REPAIR_ICRA076_OR_EXPLICIT_BYPASS_TO_ICRA077
+handoff_status: TASK_READY
+next_task: NEXT_TASK.md
+next_after_icra077_pass: ICRA-078_G0D_LINEAGE
 recovery_roadmap: docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md
 four_layer_workflow: docs/icra27/ICRA_FOUR_LAYER_DEVELOPMENT_WORKFLOW.md
 guard_plan: docs/icra27/ICRA_CROSS_LAYER_GUARD_PLAN.md
 artifact_retention: ALL_ICRA072_EVIDENCE_SHARED_ROOTS_HIDDEN_USER_ARTIFACTS_AND_PROTECTED_PDF_RETAINED
-window_disposition: KEEP_WINDOW
-rotation_reason: ICRA076_LOCAL_FREEZE_REPAIR_DECISION_CONTEXT_COMPLETE
-window_handoff_anchor: 6c34e69b9bdffbec1e51ed626f42d22cdea32ef5
+window_disposition: PENDING_POST_PUSH_AUDIT
+rotation_reason: PENDING_POST_PUSH_AUDIT
+window_handoff_anchor: PENDING_TASK_CHANGESET
 window_next_role: SUPERVISOR
-window_next_review_task: USER_DECISION_ON_ICRA076
+window_next_review_task: ICRA-077
 window_bootstrap_source: REPOSITORY_AUTHORITY_ONLY
-updated_utc: 2026-08-28T03:56:10Z
+updated_utc: 2026-08-28T04:05:00Z
 ```
 
-Review of `f66fb73..ae79bc7` accepts the measured-output, `|D_peak|` U95 and repository-local evidence repairs but
-finds two High freeze blockers. Replay uses snapshot `r=0.5` rather than frozen `r=0.75`, so its 154-sample
-interior is not the frozen `b=1.5 m` domain; validator does not cross-bind them. The probe also compiles against
-tracked `thirdparty/json/include` headers absent from freeze-005 source inventory. ICRA-076 remains NOT PASS and
-ICRA-077 is unauthorized pending an explicit user repair-or-bypass decision.
+User decision 008 explicitly accepts and bypasses ICRA-076's wrong frozen replay domain and omitted tracked JSON
+build-input blockers. ICRA-076 remains BLOCKED/user-bypassed/NOT PASS and freeze-005 remains debt-bearing rather
+than Review PASS. ICRA-077 is TASK_READY for the exact frozen 360-row held-out confirmation with no source/install,
+protocol, threshold, seed/order, retry or exclusion change. ICRA-078 remains unauthorized before Review PASS.

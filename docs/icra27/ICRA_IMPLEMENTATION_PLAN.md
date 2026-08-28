@@ -1,5 +1,13 @@
 # ICRA 2027 P0 -> P4-v2 -> P5 科学纠偏实施计划
 
+## User decision 008 / ICRA-077 held-out confirmation — 2026-08-28
+
+用户明确接受 ICRA-076 的 wrong-domain 与 missing-JSON-freeze 两项 blocker，并以
+`USER-ICRA-ROUTE-20260828-008` 签发 ICRA-077。ICRA-076 保持 BLOCKED/user-bypassed/NOT PASS。ICRA-077
+只能按 freeze-005 的 360-row order 做一次 debt-bearing held-out confirmation；禁止 retry、exclusion、调门、
+修改 source/install 或进入 ICRA-078。路线、P4-v1 `SCIENTIFIC_NO_GO`、P4-v2、ICRA-071 与 campaign 不变。
+权威为 `ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md`，route `P0_P4_V2_P5` 不变。
+
 ## ICRA-076 repair Review BLOCKED — 2026-08-28
 
 `f66fb73..ae79bc7` 已修复 measured B、`|D_peak|` U95、local verification 与必需测试冻结，但 freeze-005

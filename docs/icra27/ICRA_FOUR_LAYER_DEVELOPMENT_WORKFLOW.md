@@ -1,13 +1,13 @@
 # ICRA four-layer development and validation workflow
 
-Status: **BLOCKED — LAYER 4 ICRA-076 REPAIR REVIEW / USER DECISION REQUIRED**
+Status: **ACTIVE — LAYER 4 ICRA-077 DEBT-BEARING HELD-OUT CONFIRMATION**
 
 Requirements: `IAP-RQ-320`, `IAP-RQ-321`, `IAP-RQ-400`, `IAP-RQ-410`, `IAP-RQ-421`, `IAP-RQ-422`,
 `IAP-RQ-423`, `IAP-RQ-424`
 
-Current disposition: repaired measurement/U95/local-evidence paths pass offline, but replay measured `r=0.5`
-rather than frozen `r=0.75/b=1.5 m`, and the freeze omits tracked third-party JSON probe inputs. ICRA-076 remains
-NOT PASS; ICRA-077 is blocked pending user repair-or-bypass direction.
+Current disposition: user decision 008 accepts the two ICRA-076 freeze blockers without making that Gate PASS.
+ICRA-077 is active for the unchanged frozen 360-row one-shot held-out confirmation. No retry, exclusion,
+source/install change or ICRA-078 is authorized before Review PASS.
 
 ## 1. Purpose
 

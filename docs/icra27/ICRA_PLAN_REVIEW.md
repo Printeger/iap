@@ -1,5 +1,13 @@
 # ICRA 2027 P0 -> P4-v2 -> P5 计划复审
 
+## User decision 008 — bypass ICRA-076 and issue ICRA-077 — 2026-08-28
+
+**Disposition: `ICRA076_BLOCKED_USER_BYPASS_NOT_PASS / ICRA077_TASK_READY`.** The user accepts the two invalid-
+freeze risks without relabelling freeze-005. ICRA-077 is a frozen debt-bearing one-shot 360-row held-out task;
+no source/install mutation, retry, exclusion, ICRA-078, qualification or campaign action is authorized.
+Under `USER-ICRA-ROUTE-20260828-008` and `ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md`, route
+`P0_P4_V2_P5`, P4-v1 `SCIENTIFIC_NO_GO`, P4-v2 and the ICRA-071 backlog remain unchanged.
+
 ## ICRA-076 bounded repair Supervisor Review — 2026-08-28
 
 **Verdict: `STANDARDS REQUEST_CHANGES / SPEC REQUEST_CHANGES / GATE BLOCKED / NOT PASS`.** The repaired range

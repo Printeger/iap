@@ -1,5 +1,14 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-28 user decision 008 and ICRA-077 issuance
+
+| Req ID | Decision/task seam | Evidence and disposition | Status |
+|---|---|---|---|
+| IAP-RQ-423 / IAP-RQ-424 | Route-owner choice | User accepts both ICRA-076 freeze blockers at pushed `f654cdb`; protected fields unchanged | **USER DECISION 008** |
+| IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-423 | ICRA-076 debt | Wrong endpoint domain and omitted JSON build inputs retained; freeze-005 not promoted | **BLOCKED / USER BYPASS / NOT PASS** |
+| IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 | Held-out execution | Frozen three-scene, paired 360-row order, `delta_peak=0.3 m`, 59/60, one-shot/no retry | **ICRA-077 TASK_READY** |
+| IAP-RQ-423 / IAP-RQ-424 | Downstream boundary | No source/install change, ICRA-078, qualification or campaign before Review PASS | **BLOCKED** |
+
 ## 2026-08-28 ICRA-076 repair Supervisor Review
 
 | Req ID | Reviewed seam | Evidence and disposition | Status |

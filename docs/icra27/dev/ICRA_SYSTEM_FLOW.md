@@ -1,5 +1,9 @@
 # ICRA System Flow — User-owned P0 -> P4-v2 -> P5 recovery
 
+> User decision 008 update 2026-08-28: ICRA-076 remains BLOCKED/user-bypassed/NOT PASS with wrong-domain and
+> incomplete-source-freeze debt. ICRA-077 may execute the unchanged frozen 360-row held-out order once. Runtime
+> authority is unchanged; no retry, source/install change, ICRA-078, qualification or campaign is authorized.
+
 > ICRA-076 repair Review update 2026-08-28: measured replay/U95/local evidence pass, but replay uses `r=0.5`
 > instead of frozen `r=0.75/b=1.5 m`, and tracked third-party JSON probe inputs are absent from freeze-005.
 > Runtime graph is unchanged; ICRA-076 is NOT PASS and held-out ICRA-077 remains inactive pending user decision.
@@ -241,7 +245,8 @@ The existing `p4` profile does not enable P5. The existing `all` profile enables
 | Layer 2 stabilization | ICRA-072A boundary Review PASS | Production-shaped happy-path regression plus epoch/attempt/lineage/P5 fail-closed boundaries | `BLOCKED / USER-ACCEPTED BYPASS / NOT PASS`; debt retained |
 | Inverse-corridor effect diagnostic | User decision 003 and issued ICRA-073 | PRIMARY/MIRROR/NULL paired control/treatment with oracle-isolated final-trajectory diagnostics | `ICRA-073 BLOCKED / USER BYPASS / NOT PASS`; no paired diagnostic |
 | Targeted optimization | User decision 004 and ICRA-074 | V2 geometry-only amendment followed by offline production P4-v2 bottleneck TDD | `ICRA-074 PASS`; production unchanged, no effect claim |
-| Exploratory/power inputs | Issued ICRA-075 | V2 runtime scenes, development paired arms/ablations and non-freezing variance/power analysis | `ICRA-075 TASK_READY`; no held-out or formal claim |
+| Exploratory/power inputs | Issued ICRA-075 | V2 runtime scenes, development paired arms/ablations and non-freezing variance/power analysis | `ICRA-075 BLOCKED / USER BYPASS / NOT PASS`; 0/40 and no power inputs retained |
+| Held-out confirmation | User decision 008 after ICRA-076 user bypass | Frozen PRIMARY/MIRROR/NULL 360-row paired one-shot | `ICRA-077 TASK_READY`; debt-bearing, no retry/source-install change |
 | P4-G0D | P4-v2 held-out confirmatory PASS | Post-freeze selected hash reaches B-spline and P5 | Planned as `ICRA-078`; P4-v1 G0D remains unauthorized |
 | P5 system gate | ICRA-078 Review PASS and a separately issued prospective integration task | Treatment/control SAFE_NORMAL, final reject/no-publish and runtime-fail identities PASS | Planned as `ICRA-079`; ICRA-070 is superseded unqualified and retained only as control-arm engineering |
 | Campaign | ICRA-079 Supervisor Review PASS plus a distinct user decision | Fresh GPU and `≥40 GiB` free plus frozen ICRA-080 task | Explicitly blocked; no automatic transition from any scientific or qualification gate |

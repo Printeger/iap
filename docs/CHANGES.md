@@ -3620,6 +3620,12 @@ Requirements: `IAP-RQ-000`, `IAP-RQ-020`, `IAP-RQ-030`, `IAP-RQ-040`,
 - Fresh replay-003/verification-002/freeze-005 satisfy the corrected bindings;
   the post-evidence focused suite passes 44/44 and independent freeze
   validation passes with 956 source / 958 install records.
+# 2026-08-28 user decision 008 / ICRA-077 issuance
+
+- User accepts the two ICRA-076 freeze blockers without converting ICRA-076 to PASS and authorizes the frozen,
+  debt-bearing one-shot ICRA-077 held-out confirmation. No protected research value or product byte changes;
+  ICRA-078 remains blocked. (`IAP-RQ-320`–`IAP-RQ-424`)
+
 # 2026-08-28 ICRA-076 repair Review
 
 - Review `f66fb73..ae79bc7` is REQUEST_CHANGES: replay uses `r=0.5` rather than frozen `r=0.75/b=1.5 m`, and

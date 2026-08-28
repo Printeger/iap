@@ -3,9 +3,9 @@
 > Purpose: 把 talk《Integrity-Aware Active Perception》的“优化版 pipeline”拆成可实现、可验收、可追溯的工程需求。
 > Scope: 仅修改本仓库 src/iap；禁止修改 ../glim（可参考其代码但不得提交改动）。
 
-> Current ICRA disposition (2026-08-28): ICRA-076 repair Review remains REQUEST_CHANGES/NOT PASS. Replay measured
-> an `r=0.5` endpoint domain instead of frozen `r=0.75/b=1.5 m`, and freeze-005 omits tracked
-> `thirdparty/json/include` probe build inputs. ICRA-077 remains unauthorized pending user repair-or-bypass choice.
+> Current ICRA disposition (2026-08-28): user decision 008 explicitly accepts the wrong replay-domain and omitted
+> JSON-build-input blockers and bypasses ICRA-076 without making it PASS. ICRA-077 is TASK_READY for the frozen
+> debt-bearing 360-row one-shot held-out confirmation; no retry, exclusion, source/install change or ICRA-078.
 
 ICRA-075 bounded repair result (2026-08-27): all enabled P4 objectives, including metrics-only, now block normal
 publication on invalid terminal/attempt/guide identity or lineage CSV open/write/flush failure; explicit disabled

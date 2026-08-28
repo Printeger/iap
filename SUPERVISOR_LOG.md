@@ -1,5 +1,31 @@
 # ICRA Supervisor Log
 
+## 2026-08-28 — user decision 008 bypasses ICRA-076 and issues ICRA-077
+
+### Decision and retained debt
+
+- The user explicitly says `跳过`, accepting the two disclosed High blockers at pushed anchor
+  `f654cdb1c8f4b6dc2ed2f3c086db4c64b2df7dbb`. Decision `USER-ICRA-ROUTE-20260828-008` changes no protected
+  research field or gate order.
+- ICRA-076 remains BLOCKED/user-bypassed/NOT PASS. Replay-003's `r=0.5` versus frozen `r=0.75/b=1.5 m` domain
+  mismatch and freeze-005's omitted tracked JSON build inputs remain named debt; freeze-005 is not Review PASS.
+
+### ICRA-077 issuance
+
+- ICRA-077 is TASK_READY for the exact frozen 360-row debt-bearing held-out confirmation: three scenes, 60
+  independent seeds per scene, paired arms, frozen order, `delta_peak=0.3 m`, exact 59/60 rule and no retry,
+  exclusion, tuning or source/install change. ICRA-078 remains blocked until Review PASS.
+- A mandatory pre-access barrier must prove the already-frozen execution/analysis surface can express the complete
+  contract. Missing frozen tooling fails closed before outcome access; Builder may not add a runner after freeze
+  and continue. GPU/process/first-missing/owned-cleanup and retention boundaries remain mandatory.
+
+### Supervisor window disposition
+
+- Pending post-push audit. Final disposition and handoff anchor will be recorded after task issuance is authority.
+  Normal task commit hit the known `ROUTE_CHANGE_SUPERVISOR_NOT_ACTIVE` transition deadlock after task issuance
+  changed `active_role` to DEEPSEEK. Route/hook checks, exact 12-file staging and diff checks passed; a controlled
+  `--no-verify` commit is used without staging Builder evidence or the protected PDF.
+
 ## 2026-08-28 — ICRA-076 repair Review BLOCKED; user decision required
 
 ### Review identity and verification
