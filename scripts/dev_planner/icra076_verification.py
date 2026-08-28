@@ -33,7 +33,7 @@ def main() -> int:
         "REPEATABILITY_REPLAY": args.repeatability_replay_exit,
     }
     record = {
-        "schema_version": "icra077a_repository_local_verification_v2",
+        "schema_version": "icra077a_repository_local_verification_v3",
         "source_head": admission["head_commit"],
         "commands": [
             {"category": category, "argv": argv, "enabled": True,

@@ -247,9 +247,9 @@ ICRA-077。`results/icra27/icra076/preregistration-freeze-001.json`（`51464dff�
 父 symlink alias admission 与 measured replay evidence binding 仍不完整，因此它也不是 canonical freeze。
 `preregistration-freeze-003.json` 到 freeze-006 都是历史或 review-rejected attempts；freeze-005 仍保留
 pre-access governance drift blocker，freeze-006 因弱 route JSON admission 与 malformed fourth-entry 缺口被
-Builder 双轴复核拒绝。当前 fresh replay-005、verification-004、freeze-007 已晚于修复 source
-`b222c91` push 生成，并继续绑定 60 次 production probe、repository-local verification、strict
-source/install 与 exact-three governance Git blobs；这是 Builder candidate，仍需 Supervisor Review。
+Builder 双轴复核拒绝。replay-005、verification-004、freeze-007 随后也因 frozen-route authority 与
+formal evidence identity 歧义被 Supervisor Review 拒绝并保留为 immutable history。用户决定 010
+授权的 bounded repair 要求 fresh replay-006、verification-005、freeze-008；ICRA-077B 仍未授权。
 
 ### 1.3 运行一个最小检查
 
@@ -1134,5 +1134,7 @@ offline 004/003/006 candidate was review-rejected because route JSON admission
 was weaker than the canonical guard and malformed fourth snapshot entries could
 be ignored. It remains immutable history. Fresh 005/004/007 evidence postdates
 pushed repair source `b222c91`, passes the exact offline suite and independently
-validates 1017 source / 958 install records. ICRA-077B remains unauthorized and
-Supervisor Review is required.
+validates 1017 source / 958 install records, but Supervisor Review rejected it
+as formal authority. User decision 010 authorizes only frozen-blob route
+cross-binding and unambiguous evidence identity, followed by fresh 006/005/008.
+ICRA-077B remains unauthorized.

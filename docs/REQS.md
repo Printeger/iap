@@ -810,4 +810,14 @@ and fresh replay-005/verification-004/freeze-007 after pushed repair source.
 Fresh 005/004/007 now binds pushed repair source `b222c91`, exact-three Git
 blobs, protected-route fingerprint, both accepted debts and shared install
 identity. Offline validation passes 1017 source / 958 install records; this is
-a Builder candidate for ICRA-077A review and does not authorize ICRA-077B.
+immutable Review-rejected history and does not authorize ICRA-077B.
+
+## ICRA-077A formal-identity repair (2026-08-28)
+
+IAP-RQ-423/424 require protected route identity to be derived from the verified
+frozen roadmap blob and exact-matched against current canonical fields; mutable
+config cannot self-authorize coordinated route changes. IAP-RQ-320/321/400/410/
+421/422 require fresh evidence to name active ICRA-077, the exact ICRA-077A
+milestone, ICRA-076 authority-repair purpose, a non-scientific validation
+result, retained ICRA-076 BLOCKED/bypassed/NOT PASS and false ICRA-077B
+authorization. No held-out access is authorized by this repair.

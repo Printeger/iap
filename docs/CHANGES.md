@@ -3667,6 +3667,19 @@ Requirements: `IAP-RQ-000`, `IAP-RQ-020`, `IAP-RQ-030`, `IAP-RQ-040`,
   execution is authorized.
 - Correct stale README wording so replay-003/verification-002/freeze-005 is
   unambiguously immutable historical evidence, not the current candidate.
+
+## 2026-08-28 (ICRA-077A bounded formal-identity repair)
+
+- Derive protected route identity from the verified frozen roadmap Git blob,
+  then independently parse and exact-match current protected fields. The
+  configured SHA is now only a checked copy of frozen-derived authority.
+- Replace ambiguous fresh replay/verification/freeze task/result/authorization
+  fields with an exact cross-bound evidence identity naming active ICRA-077,
+  ICRA-077A milestone, ICRA-076 authority-repair purpose, non-scientific
+  validation, retained ICRA-076 disposition and false ICRA-077B authorization.
+- Add coordinated and per-field route tamper plus evidence-identity adversaries.
+  Preserve 004/005, 003/004 and 006/007 as immutable rejected history; require
+  fresh replay-006/verification-005/freeze-008 after pushed repair source.
 # 2026-08-28 user decision 008 / ICRA-077 issuance
 
 - User accepts the two ICRA-076 freeze blockers without converting ICRA-076 to PASS and authorizes the frozen,

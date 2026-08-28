@@ -26,8 +26,9 @@ def main() -> int:
         validated = CONTRACT.validate_preregistration(
             args.protocol, args.seed_registry)
         result = {
-            "schema_version": "icra076_protocol_validation_v1",
-            "result": "PASS",
+            "schema_version": "icra077a_protocol_validation_v2",
+            "validation_result":
+                CONTRACT.EVIDENCE_IDENTITY["validation_result"],
             "protocol_canonical_sha256": validated["protocol_canonical_sha256"],
             "execution_order_sha256": validated["execution_order_sha256"],
             "execution_order_count": len(validated["execution_order"]),

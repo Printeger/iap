@@ -38,6 +38,77 @@ class Icra077aGovernanceFreezeTest(unittest.TestCase):
         self.protocol = json.loads(PROTOCOL_PATH.read_text())
         self.contract = self.protocol["byte_freeze"]["governance_snapshot"]
 
+    def _coordinated_route_mutation(self, field, value):
+        current = (REPOSITORY / GOVERNANCE_PATHS[2]).read_text()
+        begin = current.index(self.module.ROUTE_BEGIN) + len(self.module.ROUTE_BEGIN)
+        end = current.index(self.module.ROUTE_END)
+        payload = current[begin:end].strip()
+        document = json.loads(payload[len("```json\n"):-len("\n```")])
+        document[field] = value
+        for change in document["protected_transition"]["changes"]:
+            if change["field"] == field:
+                change["new"] = value
+        rendered = "```json\n" + json.dumps(document, indent=2) + "\n```"
+        return current[:begin] + "\n" + rendered + "\n" + current[end:], document
+
+    def test_joint_current_transition_and_config_mutation_cannot_self_authorize(self):
+        current, document = self._coordinated_route_mutation(
+            "active_route", "P0_P5_CONTROL")
+        mutated = copy.deepcopy(self.contract)
+        protected = {
+            field: document[field] for field in self.module.PROTECTED_ROUTE_FIELDS}
+        mutated["protected_route"]["sha256"] = self.module.canonical_sha256(
+            protected)
+        with self.assertRaises(self.module.Icra076Error) as caught:
+            self.module.validate_governance_snapshot(
+                mutated, REPOSITORY, current_route_text=current)
+        self.assertEqual(caught.exception.code,
+                         "PROTECTED_ROUTE_FROZEN_FINGERPRINT_MISMATCH")
+
+    def test_every_protected_field_is_cross_bound_to_frozen_blob(self):
+        replacements = {
+            "route_owner": "BUILDER",
+            "active_route": "P0_P5_CONTROL",
+            "required_modules": ["P0_ADVISORY_RISK_FIELD"],
+            "research_question": "Changed research question",
+            "primary_claim": "Changed primary claim",
+            "secondary_claims": ["Changed secondary claim"],
+            "formal_arms": ["P0_P5_CONTROL"],
+            "qualification_scenes": ["PRIMARY"],
+            "gate_sequence": ["ICRA-077_HELD_OUT_CONFIRMATION"],
+            "fallback_policy": "AUTOMATIC",
+            "scientific_no_go_transition": "CONTINUE",
+            "campaign_activation": "BUILDER_APPROVAL",
+        }
+        for field, value in replacements.items():
+            current, document = self._coordinated_route_mutation(field, value)
+            with self.subTest(field=field, attack="current_plus_transition"), \
+                    self.assertRaises(self.module.Icra076Error) as drift:
+                self.module.validate_governance_snapshot(
+                    self.contract, REPOSITORY, current_route_text=current)
+            self.assertEqual(drift.exception.code, "PROTECTED_ROUTE_DRIFT")
+            mutated = copy.deepcopy(self.contract)
+            protected = {
+                name: document[name]
+                for name in self.module.PROTECTED_ROUTE_FIELDS}
+            mutated["protected_route"]["sha256"] = \
+                self.module.canonical_sha256(protected)
+            with self.subTest(field=field, attack="plus_config_sha"), \
+                    self.assertRaises(self.module.Icra076Error) as caught:
+                self.module.validate_governance_snapshot(
+                    mutated, REPOSITORY, current_route_text=current)
+            self.assertEqual(
+                caught.exception.code,
+                "PROTECTED_ROUTE_FROZEN_FINGERPRINT_MISMATCH")
+
+    def test_configured_fingerprint_must_match_frozen_blob(self):
+        mutated = copy.deepcopy(self.contract)
+        mutated["protected_route"]["sha256"] = "0" * 64
+        with self.assertRaises(self.module.Icra076Error) as caught:
+            self.module.validate_governance_snapshot(mutated, REPOSITORY)
+        self.assertEqual(caught.exception.code,
+                         "PROTECTED_ROUTE_FROZEN_FINGERPRINT_MISMATCH")
+
     def test_exact_three_current_drifts_pass_only_through_git_blob_snapshots(self):
         old = json.loads(FREEZE005_PATH.read_text())
         with self.assertRaises(self.module.Icra076Error) as legacy:
@@ -50,8 +121,11 @@ class Icra077aGovernanceFreezeTest(unittest.TestCase):
                          GOVERNANCE_PATHS)
         self.assertEqual(result["frozen_source_commit"],
                          "3a3486f793df1b8299a87bf3400d7e2c34979018")
-        self.assertEqual(result["protected_route_fingerprint_sha256"],
+        self.assertEqual(result["protected_route"]["frozen_derived_sha256"],
                          "1e05d2763e588f4d7c148984a4df9a9e6c3cdd52e5b5859810fc638ac633e25a")
+        self.assertEqual(result["protected_route"]["current_matched_sha256"],
+                         result["protected_route"]["frozen_derived_sha256"])
+        self.assertTrue(result["protected_route"]["protected_fields_match"])
         for record in result["git_blobs"]:
             frozen = subprocess.check_output(
                 ["git", "cat-file", "blob", record["git_blob_oid"]],
@@ -126,16 +200,16 @@ class Icra077aGovernanceFreezeTest(unittest.TestCase):
     def test_protected_route_mutation_rejects_but_later_prose_passes(self):
         current = (REPOSITORY / GOVERNANCE_PATHS[2]).read_text()
         prose = current + "\nLater Supervisor review prose only.\n"
-        result = self.module.validate_protected_route_fingerprint(
-            self.contract["protected_route"], prose)
-        self.assertEqual(result["sha256"],
+        result = self.module.validate_governance_snapshot(
+            self.contract, REPOSITORY, current_route_text=prose)
+        self.assertEqual(result["protected_route"]["current_matched_sha256"],
                          "1e05d2763e588f4d7c148984a4df9a9e6c3cdd52e5b5859810fc638ac633e25a")
         changed = current.replace(
             '"active_route": "P0_P4_V2_P5"',
             '"active_route": "P0_P5_CONTROL"', 1)
         with self.assertRaises(self.module.Icra076Error) as protected:
-            self.module.validate_protected_route_fingerprint(
-                self.contract["protected_route"], changed)
+            self.module.validate_governance_snapshot(
+                self.contract, REPOSITORY, current_route_text=changed)
         self.assertEqual(protected.exception.code, "PROTECTED_ROUTE_DRIFT")
         duplicate = current.replace(
             '"active_route": "P0_P4_V2_P5",',
@@ -147,8 +221,8 @@ class Icra077aGovernanceFreezeTest(unittest.TestCase):
              '  "unknown_route_field": "forbidden",'), 1)
         for malformed in (duplicate, unknown):
             with self.assertRaises(self.module.Icra076Error) as parsed:
-                self.module.validate_protected_route_fingerprint(
-                    self.contract["protected_route"], malformed)
+                self.module.validate_governance_snapshot(
+                    self.contract, REPOSITORY, current_route_text=malformed)
             self.assertEqual(parsed.exception.code, "PROTECTED_ROUTE_DRIFT")
 
     def test_non_governance_source_bytes_remain_strict(self):

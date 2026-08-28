@@ -27,7 +27,8 @@ def main() -> int:
         verification_path=args.verification)
     print(json.dumps({
         "schema_version": record["schema_version"],
-        "result": record["result"],
+        "validation_result":
+            record["evidence_identity"]["validation_result"],
         "output": str(args.output.resolve()),
         "source_head": record["source_admission"]["head_commit"],
         "source_inventory_count": len(record["source_inventory"]),

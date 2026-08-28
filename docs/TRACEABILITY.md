@@ -1899,4 +1899,11 @@ disclosed; the final task-local rerun has identical before/after inventory hash.
 | IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 | Fresh offline closure | replay-004 60/60/U95 0.0 m; verification-003; freeze-006 1017 source/958 install; controlled later-prose fixture PASS | **READY FOR SUPERVISOR REVIEW; NO HELD-OUT ACCESS** |
 | IAP-RQ-423 / IAP-RQ-424 | ICRA-077A two-axis review hardening | Canonical route parser rejects duplicate/unknown keys; snapshot validator rejects non-object/fourth records; 004/003/006 retained unchanged | **004/003/006 REVIEW-REJECTED; FRESH 005/004/007 REQUIRED** |
 | IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 | Hardened fresh offline closure | pushed `b222c91`; replay-005 60/60/U95 0.0 m; verification-004; freeze-007 1017 source/958 install; post-evidence suite and later-prose fixture PASS | **READY FOR SUPERVISOR REVIEW; NO HELD-OUT ACCESS** |
-| IAP-RQ-423 / IAP-RQ-424 | Candidate wording consistency | README labels 003/002/005 historical and 005/004/007 current Builder candidate | **STALE CURRENT-AUTHORITY CLAIM REMOVED** |
+| IAP-RQ-423 / IAP-RQ-424 | Candidate wording consistency | README labels 003/002/005 historical; later Review also retains 005/004/007 as rejected history | **STALE CURRENT-AUTHORITY CLAIM REMOVED** |
+
+## 2026-08-28 ICRA-077A formal-identity repair
+
+| Req ID | Boundary | Implementation / verification | Status |
+|---|---|---|---|
+| IAP-RQ-423 / IAP-RQ-424 | Frozen protected-route authority | `validate_governance_snapshot` reads verified Git blob bytes, canonical-parses frozen/current route independently and exact-matches all protected fields; joint/per-field/config/JSON adversaries 8/8 | **OFFLINE IMPLEMENTED; FRESH EVIDENCE PENDING PUSH** |
+| IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 / IAP-RQ-422 | Unambiguous fresh artifact identity | replay binding/manifest, verification and freeze v3 cross-bind exact active task, milestone, purpose, non-scientific validation, retained ICRA-076 disposition and false ICRA-077B authorization; 076 tests 21/21 | **NO HELD-OUT ACCESS; 006/005/008 PENDING** |

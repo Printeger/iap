@@ -9432,3 +9432,27 @@ No held-out, GPU, ROS, live, 360-row, ICRA-077B or ICRA-078 action ran.
 Final Standards re-review found one stale README phrase that called historical
 003/002/005 the current candidate. It is corrected to immutable historical
 evidence; no code, protocol, authority or evidence bytes changed.
+
+## 2026-08-28 — ICRA-077A bounded formal-identity repair
+
+Requirements: IAP-RQ-320, IAP-RQ-321, IAP-RQ-400, IAP-RQ-410,
+IAP-RQ-421, IAP-RQ-422, IAP-RQ-423 and IAP-RQ-424.
+
+Starting HEAD `5f0cceb7d452fb095305795327ce0e3d67469bc8` was
+fetch-confirmed at divergence `0 0`; the protected PDF was the only untracked
+file. User decision 010 authorizes exactly two offline repairs. The governance
+validator now derives protected route fields and SHA from the verified frozen
+roadmap Git blob, independently parses current route bytes with the canonical
+strict parser, and requires exact equality. Coordinated current route +
+transition + config-SHA mutation, every protected-field mutation, frozen/config
+mismatch, duplicate/unknown keys and non-governance drift fail closed; later
+prose remains allowed.
+
+Fresh artifact schemas use one exact evidence identity: active ICRA-077,
+milestone ICRA-077A formal-identity repair, ICRA-076 authority-repair purpose,
+non-scientific offline validation result, retained ICRA-076 BLOCKED/bypassed/
+NOT PASS disposition, and `icra077b_authorized=false`. Stale `task`, generic
+`result` and unsuffixed `icra077_authorized` fields are forbidden. Pre-evidence
+076 tests pass 21/21 and governance adversaries pass 8/8; current route/hook
+guards and static validator pass. Fresh 006/005/008 evidence remains pending a
+pushed source anchor. No held-out, GPU, ROS, live or 360-row action ran.

@@ -77,8 +77,7 @@ def main() -> int:
         measurements.append(measurement)
     calculation = CONTRACT.calculate_measured_repeatability(measurements)
     manifest = {
-        "schema_version": "icra076_production_measured_replay_manifest_v1",
-        "task": "ICRA-076",
+        "schema_version": "icra077a_production_measured_replay_manifest_v2",
         "outcome_blind": True,
         "held_out_accessed": False,
         "source_head": source_head,
@@ -94,7 +93,8 @@ def main() -> int:
         stream.write(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
     print(json.dumps({
         "schema_version": manifest["schema_version"],
-        "result": "PASS",
+        "validation_result":
+            CONTRACT.EVIDENCE_IDENTITY["validation_result"],
         "output": str(manifest_path),
         "measurement_count": len(records),
         "u95_repeatability_m": calculation["u95_repeatability_m"],

@@ -36,7 +36,7 @@
   },
   "repeatability": {
     "input_path": "config/icra27/icra076_repeatability_replay_v1.json",
-    "input_canonical_sha256": "d3f5eb2d726ae5a524c90091d2d2c003b93073c9b9509e87d233420186700b1a",
+    "input_canonical_sha256": "810407df2f0995a8e74302f48962b9d0cfea9ccd51940f557e0541f5800472d5",
     "u95_repeatability": "FROZEN_FROM_MEASURED_REPLAY_MANIFEST",
     "unit": "m",
     "flat_null_runtime_evidence": "UNAVAILABLE_ICRA075_0_OF_40",
@@ -141,7 +141,7 @@
     "inventory_record_fields": ["path", "type", "size_bytes", "sha256"],
     "drift_policy": "INVALIDATE_BEFORE_ICRA077",
     "governance_snapshot": {
-      "schema_version": "icra077a_exact_governance_git_blob_snapshot_v1",
+      "schema_version": "icra077a_exact_governance_git_blob_snapshot_v2",
       "frozen_source_commit": "3a3486f793df1b8299a87bf3400d7e2c34979018",
       "git_blobs": [
         {

@@ -35,13 +35,48 @@ def load_module():
 
 
 class Icra076PreregistrationTest(unittest.TestCase):
+    def test_unambiguous_icra077a_evidence_identity_fails_closed(self):
+        module = load_module()
+        expected = {
+            "active_task_id": "ICRA-077",
+            "active_milestone": "ICRA-077A_LAYER4_FORMAL_IDENTITY_REPAIR",
+            "artifact_purpose": "ICRA076_PREREGISTRATION_AUTHORITY_REPAIR",
+            "validation_result": (
+                "OFFLINE_CONTRACT_VALIDATION_PASS_NOT_SCIENTIFIC_GATE_PASS"),
+            "icra076_disposition": "BLOCKED_USER_BYPASSED_NOT_PASS",
+            "icra077b_authorized": False,
+        }
+        self.assertEqual(module.validate_evidence_identity(expected), expected)
+        mutations = {
+            "active_task_id": "ICRA-076",
+            "active_milestone": "ICRA-077A_LAYER4_PRE_ACCESS_FREEZE_CLOSURE",
+            "artifact_purpose": "HELD_OUT_CONFIRMATION",
+            "validation_result": "PASS",
+            "icra076_disposition": "PASS",
+            "icra077b_authorized": True,
+        }
+        for field, value in mutations.items():
+            changed = copy.deepcopy(expected)
+            changed[field] = value
+            with self.subTest(field=field), \
+                    self.assertRaises(module.Icra076Error) as caught:
+                module.validate_evidence_identity(changed)
+            self.assertEqual(caught.exception.code,
+                             "EVIDENCE_IDENTITY_INVALID")
+        for stale in ("task", "result", "icra077_authorized"):
+            changed = copy.deepcopy(expected)
+            changed[stale] = "PASS"
+            with self.subTest(stale=stale), \
+                    self.assertRaises(module.Icra076Error):
+                module.validate_evidence_identity(changed)
+
     @staticmethod
     def _verification(module, source_head="0" * 40):
         protocol = json.loads(PROTOCOL_PATH.read_text())
         environment = module.current_freeze_environment_binding(
             protocol, REPOSITORY)
         return {
-            "schema_version": "icra077a_repository_local_verification_v2",
+            "schema_version": "icra077a_repository_local_verification_v3",
             "source_head": source_head,
             "commands": [
                 {"category": category, "argv": argv, "enabled": True,
@@ -139,6 +174,10 @@ class Icra076PreregistrationTest(unittest.TestCase):
             self.assertEqual(len(list(output_root.glob("measurement-*.json"))),
                              60)
             original = json.loads(manifest.read_text())
+            self.assertEqual(original["evidence_identity"],
+                             module.EVIDENCE_IDENTITY)
+            self.assertTrue({"task", "result", "icra077_authorized"}.isdisjoint(
+                original))
             for section, code in (
                     ("executable", "REPLAY_EXECUTABLE_OR_INPUT_DRIFT"),
                     ("serialized_input", "REPLAY_EXECUTABLE_OR_INPUT_DRIFT")):
@@ -294,10 +333,10 @@ class Icra076PreregistrationTest(unittest.TestCase):
         replay = json.loads((REPOSITORY / "config/icra27/"
                              "icra076_repeatability_replay_v1.json").read_text())
         self.assertEqual(replay["schema_version"],
-                         "icra076_production_measured_replay_binding_v2")
+                         "icra077a_production_measured_replay_binding_v3")
         self.assertEqual(replay["measured_replay_manifest_path"],
                          "results/icra27/icra076/"
-                         "repeatability-replay-005/manifest.json")
+                         "repeatability-replay-006/manifest.json")
         verification = self._verification(module)
         manifest = (REPOSITORY / replay["measured_replay_manifest_path"]).resolve()
         original_exists = Path.exists
@@ -511,6 +550,9 @@ class Icra076PreregistrationTest(unittest.TestCase):
             self.assertEqual(caught.exception.code,
                              "EXTERNAL_INPUT_PATH_FORBIDDEN")
         module.validate_verification(valid, "0" * 40)
+        self.assertEqual(valid["evidence_identity"], module.EVIDENCE_IDENTITY)
+        self.assertTrue({"task", "result", "icra077_authorized"}.isdisjoint(
+            valid))
         with self.assertRaises(module.Icra076Error) as source:
             module.validate_verification(valid, "1" * 40)
         self.assertEqual(source.exception.code,
@@ -521,6 +563,11 @@ class Icra076PreregistrationTest(unittest.TestCase):
             module.validate_verification(changed, "0" * 40)
         self.assertEqual(environment.exception.code,
                          "REQUIRED_VERIFICATION_ENVIRONMENT_DRIFT")
+        changed = copy.deepcopy(valid)
+        changed["evidence_identity"]["icra077b_authorized"] = True
+        with self.assertRaises(module.Icra076Error) as identity:
+            module.validate_verification(changed, "0" * 40)
+        self.assertEqual(identity.exception.code, "EVIDENCE_IDENTITY_INVALID")
 
 
 if __name__ == "__main__":
