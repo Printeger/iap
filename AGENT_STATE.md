@@ -46,13 +46,13 @@ recovery_roadmap: docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP
 four_layer_workflow: docs/icra27/ICRA_FOUR_LAYER_DEVELOPMENT_WORKFLOW.md
 guard_plan: docs/icra27/ICRA_CROSS_LAYER_GUARD_PLAN.md
 artifact_retention: ALL_ICRA072_EVIDENCE_SHARED_ROOTS_HIDDEN_USER_ARTIFACTS_AND_PROTECTED_PDF_RETAINED
-window_disposition: PENDING_POST_PUSH_AUDIT
-rotation_reason: PENDING_POST_PUSH_AUDIT
-window_handoff_anchor: PENDING_TASK_CHANGESET
+window_disposition: ROTATE_RECOMMENDED
+rotation_reason: USER_DECISION009_CANONICAL_FREEZE_BOUNDARY_REPAIR_BEFORE_HELD_OUT
+window_handoff_anchor: eed32c6882d34fbef8296ad581cc241ce1c3864e
 window_next_role: SUPERVISOR
 window_next_review_task: ICRA-077A
 window_bootstrap_source: REPOSITORY_AUTHORITY_ONLY
-updated_utc: 2026-08-28T06:00:00Z
+updated_utc: 2026-08-28T04:26:22Z
 ```
 
 User decision 009 accepts the correctly retained ICRA-077 pre-access blocker and authorizes only ICRA-077A. The
