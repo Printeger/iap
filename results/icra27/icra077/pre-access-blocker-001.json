@@ -1,0 +1,48 @@
+{
+  "schema_version": "icra077_pre_access_blocker_v1",
+  "task": "ICRA-077",
+  "gate": "ICRA-077_HELD_OUT_CONFIRMATION",
+  "result": "BLOCKED",
+  "first_typed_blocker": "BOUND_FILE_DRIFT",
+  "blocker_detail": "docs/icra27/ICRA_IMPLEMENTATION_PLAN.md",
+  "source_admission": {
+    "head_commit": "3bb8fc1d52be34c9e54569459254aadbf2cbb9dc",
+    "origin_dev_icra_commit": "3bb8fc1d52be34c9e54569459254aadbf2cbb9dc",
+    "left_right_divergence": [0, 0],
+    "tracked_or_staged_changes": [],
+    "retained_untracked": [
+      {
+        "path": "docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf",
+        "type": "regular_file",
+        "sha256": "1f07da5631a6551a2f98c02d46fd45bc87f2f1e3e7c14e95f9a7f4a0bac844f6"
+      }
+    ]
+  },
+  "freeze_authority": {
+    "path": "results/icra27/icra076/preregistration-freeze-005.json",
+    "expected_sha256": "aee60ed05efb816254159ed51ab04fa4c5f2977ebf711e86384a53e91aeaf686",
+    "observed_sha256": "aee60ed05efb816254159ed51ab04fa4c5f2977ebf711e86384a53e91aeaf686",
+    "validator_argv": [
+      "python3",
+      "scripts/dev_planner/validate_icra076_preregistration.py",
+      "--freeze-record",
+      "results/icra27/icra076/preregistration-freeze-005.json"
+    ],
+    "validator_exit_code": 1,
+    "validator_first_error": "BOUND_FILE_DRIFT: docs/icra27/ICRA_IMPLEMENTATION_PLAN.md"
+  },
+  "drift": {
+    "path": "docs/icra27/ICRA_IMPLEMENTATION_PLAN.md",
+    "frozen_expected_sha256": "080c949d1543872fe052bb27f3fe5c19e7cf91e1e06227dba91770bf360c6b2e",
+    "current_sha256": "c23c34c530645a85824da66a58ecea66db01fcfec044e0364c306494cd0fff88"
+  },
+  "held_out_accessed": false,
+  "execution_surface_audited": false,
+  "output_authority_created": false,
+  "gpu_preflight_run": false,
+  "ros_started": false,
+  "confirmatory_rows_started": 0,
+  "analysis_run": false,
+  "icra078_started": false,
+  "disposition": "TERMINAL_PRE_ACCESS_FREEZE_DRIFT_RETURN_TO_SUPERVISOR"
+}
