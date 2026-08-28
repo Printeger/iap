@@ -42,8 +42,11 @@ conform.
 
 ### Supervisor window disposition
 
-- Pending pushed Review changeset and the mandatory post-push §8.6 audit. This is a bounded same-Gate decision
-  with complete local context, so `KEEP_WINDOW` is expected unless the pushed audit discovers a new condition.
+- Review changeset `05de1c4431ac1039cc44a0bef95d23a60aab046c` is pushed and fetch-confirmed at divergence
+  `0 0`; freeze-007 still validates after legitimate Supervisor governance prose updates. **`KEEP_WINDOW`**:
+  this is a bounded same-Gate repair-or-bypass decision with no protected route, claim, runtime authority or
+  campaign change, and the full blocker reproduction remains in current context. This Supervisor may issue the
+  user's selected repair or explicit bypass, but neither is pre-authorized.
 - The normal Review commit was rejected by the known role-transition deadlock
   `ICRA_ROUTE_GUARD_FAIL:BUILDER_SUPERVISOR_FILE_STAGED` because pushed HEAD still marks DEEPSEEK active while
   §8.6 requires Supervisor to close the Review atomically. Repository route/hook checks, exact 12-file staging

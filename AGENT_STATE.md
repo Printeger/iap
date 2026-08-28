@@ -46,13 +46,13 @@ recovery_roadmap: docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP
 four_layer_workflow: docs/icra27/ICRA_FOUR_LAYER_DEVELOPMENT_WORKFLOW.md
 guard_plan: docs/icra27/ICRA_CROSS_LAYER_GUARD_PLAN.md
 artifact_retention: ALL_ICRA072_EVIDENCE_SHARED_ROOTS_HIDDEN_USER_ARTIFACTS_AND_PROTECTED_PDF_RETAINED
-window_disposition: PENDING_POST_PUSH_AUDIT
-rotation_reason: PENDING_POST_PUSH_AUDIT
-window_handoff_anchor: PENDING_REVIEW_CHANGESET
+window_disposition: KEEP_WINDOW
+rotation_reason: ICRA077A_LOCAL_FREEZE_REPAIR_DECISION_CONTEXT_COMPLETE
+window_handoff_anchor: 05de1c4431ac1039cc44a0bef95d23a60aab046c
 window_next_role: SUPERVISOR
 window_next_review_task: USER_DECISION_ON_ICRA077A
 window_bootstrap_source: REPOSITORY_AUTHORITY_ONLY
-updated_utc: 2026-08-28T05:12:14Z
+updated_utc: 2026-08-28T05:13:12Z
 ```
 
 Review of `e9aacf4..bdded38` accepts exact-three Git blobs, strict executable/install bytes, pushed ordering,
