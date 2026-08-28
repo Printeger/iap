@@ -1119,9 +1119,11 @@ must remain repository-local and bind pushed source. ICRA-077 is unauthorized.
 Fresh replay-002 retains 60/60 measurements (U95 `0.0 m`); verification-001
 and preregistration-freeze-004 independently validate against the pushed
 implementation. This is a Builder candidate, not Supervisor PASS.
-That first candidate was review-rejected. The corrected current candidate is
-replay-003/verification-002/preregistration-freeze-005; its post-evidence exact
-suite and independent freeze validation pass. Supervisor Review is still required.
+That first candidate was review-rejected. Replay-003/verification-002/
+preregistration-freeze-005 is also immutable historical evidence: its local
+checks passed, but later review and the retained pre-access blocker prevent it
+from being current authority or PASS. The current ICRA-077A candidate is
+described below.
 
 ICRA-077A governance closure (2026-08-28): freeze-005 correctly blocked before
 held-out access when later Supervisor prose changed frozen authority bytes.

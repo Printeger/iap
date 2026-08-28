@@ -3651,6 +3651,8 @@ Requirements: `IAP-RQ-000`, `IAP-RQ-020`, `IAP-RQ-030`, `IAP-RQ-040`,
   route/hook guards and both validators pass. Freeze-007 independently binds
   1017 strict source and 958 shared-install records. No held-out access or live
   execution is authorized.
+- Correct stale README wording so replay-003/verification-002/freeze-005 is
+  unambiguously immutable historical evidence, not the current candidate.
 # 2026-08-28 user decision 008 / ICRA-077 issuance
 
 - User accepts the two ICRA-076 freeze blockers without converting ICRA-076 to PASS and authorizes the frozen,

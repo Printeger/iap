@@ -9428,3 +9428,7 @@ freeze-007 SHA-256 values are
 `2562a1d5c0fb8bd13856d0dc9a7907979216e3d158d43065d974aa2889c1658f`
 and `aae06e43ab4a87e1d0bfc82d3889dd20228f4765e295d88416fbb9f9f39b9f69`.
 No held-out, GPU, ROS, live, 360-row, ICRA-077B or ICRA-078 action ran.
+
+Final Standards re-review found one stale README phrase that called historical
+003/002/005 the current candidate. It is corrected to immutable historical
+evidence; no code, protocol, authority or evidence bytes changed.
