@@ -1,13 +1,13 @@
 # ICRA four-layer development and validation workflow
 
-Status: **ACTIVE — LAYER 4 ICRA-076 BOUNDED FREEZE REPAIR**
+Status: **BLOCKED — LAYER 4 ICRA-076 REPAIR REVIEW / USER DECISION REQUIRED**
 
 Requirements: `IAP-RQ-320`, `IAP-RQ-321`, `IAP-RQ-400`, `IAP-RQ-410`, `IAP-RQ-421`, `IAP-RQ-422`,
 `IAP-RQ-423`, `IAP-RQ-424`
 
-Current disposition: user decision 007 chooses bounded repair, not bypass. Replace synthesized repeatability with
-production-emitted measurement, compute route-correct `|D_peak|` U95, retain verification evidence locally and
-complete the mandatory-test source freeze. ICRA-076 remains NOT PASS while repair is active; ICRA-077 is blocked.
+Current disposition: repaired measurement/U95/local-evidence paths pass offline, but replay measured `r=0.5`
+rather than frozen `r=0.75/b=1.5 m`, and the freeze omits tracked third-party JSON probe inputs. ICRA-076 remains
+NOT PASS; ICRA-077 is blocked pending user repair-or-bypass direction.
 
 ## 1. Purpose
 

@@ -1,5 +1,44 @@
 # ICRA Supervisor Log
 
+## 2026-08-28 — ICRA-076 repair Review BLOCKED; user decision required
+
+### Review identity and verification
+
+- Fixed base `f66fb7344798ba0c04d2d5b59d0be05183f3bfb1`; reviewed pushed Builder HEAD
+  `ae79bc7c49928f8e7e5cc87ae5f0f33de39381fd`; merge-base matches, divergence is `0 0`, and only the protected
+  untracked system-flow PDF is visible. Review ran no build, ROS, GPU, live or held-out flow.
+- Supervisor reran the exact offline focused set 44/44, freeze-005 validator PASS with 956 source / 958 install /
+  360 order records, route guard PASS and `git diff --check` PASS. Retained replay-003/verification-002/freeze-005
+  hashes match Builder documentation.
+
+### Standards
+
+**REQUEST_CHANGES — two High hard violations.** Replay snapshot resolution `0.5 m` differs from frozen `0.75 m`,
+so production endpoint exclusion measures 154 samples over the wrong controllable interior while claiming the
+frozen `b=1.5 m` domain; validation never cross-binds these identities. The probe also compiles against 45 tracked
+`thirdparty/json/include` headers absent from freeze-005, so those bytes can drift without `SOURCE_BYTE_DRIFT`.
+Judgement-only smell: the 1,132-line preregistration module combines many validation responsibilities.
+
+### Spec
+
+**REQUEST_CHANGES — one High complete-source-freeze blocker; no scope creep.** The missing tracked JSON headers
+violate the requirement to freeze every replay probe dependency and mutation-invalidate the candidate. The real
+provider/P4 measurement seam, 60 observed `|D_peak|` nearest-rank calculation, repository-local evidence,
+source ordering, retention and no-live boundary otherwise conform.
+
+### Gate disposition
+
+- ICRA-076 is `BLOCKED / NOT PASS`; freeze-005 is retained but rejected as formal authority. ICRA-077 remains
+  inactive. The user must choose bounded repair (recommended) or explicitly accept both invalid-freeze risks and
+  bypass to held-out confirmation.
+
+### Supervisor window disposition
+
+- Pending post-push audit; final disposition and handoff anchor will be recorded after this Review is authority.
+  Normal Review commit hit the known `BUILDER_SUPERVISOR_FILE_STAGED` role-transition deadlock because the prior
+  authority still marked DEEPSEEK active. Route/hook checks, exact 12-file staging and diff checks passed, so the
+  controlled `--no-verify` path is used without staging Builder evidence or the protected PDF.
+
 ## 2026-08-27 — user decision 007 issues bounded ICRA-076 repair
 
 ### Decision and repair boundary

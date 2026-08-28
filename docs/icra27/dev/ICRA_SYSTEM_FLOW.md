@@ -1,5 +1,9 @@
 # ICRA System Flow — User-owned P0 -> P4-v2 -> P5 recovery
 
+> ICRA-076 repair Review update 2026-08-28: measured replay/U95/local evidence pass, but replay uses `r=0.5`
+> instead of frozen `r=0.75/b=1.5 m`, and tracked third-party JSON probe inputs are absent from freeze-005.
+> Runtime graph is unchanged; ICRA-076 is NOT PASS and held-out ICRA-077 remains inactive pending user decision.
+
 > User decision 007 update 2026-08-27: repair ICRA-076 offline rather than bypass. The runtime graph is unchanged;
 > the task only replaces synthetic replay evidence with production-emitted B measurements, corrects `|D_peak|`
 > U95, localizes verification evidence and completes test-source byte freeze. No held-out ICRA-077, qualification

@@ -1,5 +1,14 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-28 ICRA-076 repair Supervisor Review
+
+| Req ID | Reviewed seam | Evidence and disposition | Status |
+|---|---|---|---|
+| IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-423 | Frozen domain | Snapshot `r=0.5` drives a 154-sample interior instead of frozen `r=0.75/b=1.5 m`; validator lacks cross-binding | **HIGH / REQUEST_CHANGES** |
+| IAP-RQ-423 / IAP-RQ-424 | Complete source freeze | Probe's 45 tracked `thirdparty/json/include` headers are absent from freeze-005 | **HIGH / REQUEST_CHANGES** |
+| IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 | Other repaired boundaries | 44/44, measured 60 `|D_peak|`, local evidence and freeze validator otherwise pass | **PARTIAL / NOT FREEZE PASS** |
+| IAP-RQ-423 / IAP-RQ-424 | Held-out boundary | freeze-005 retained/rejected; ICRA-077 awaits user repair-or-bypass choice | **BLOCKED / NOT PASS** |
+
 ## 2026-08-27 user decision 007 and ICRA-076 repair issuance
 
 | Req ID | Decision/task seam | Evidence and disposition | Status |

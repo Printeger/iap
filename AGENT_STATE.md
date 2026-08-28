@@ -3,13 +3,13 @@
 ```yaml
 schema_version: icra_single_branch_two_agent_v3_user_route_owner
 branch: dev/icra
-active_role: DEEPSEEK
-status: TASK_READY
+active_role: SUPERVISOR
+status: BLOCKED_AWAITING_USER_RESEARCH_DECISION
 gate: ICRA-076_PREREGISTRATION_FREEZE
-task_id: ICRA-076
+task_id: NONE
 milestone: ICRA-076_LAYER4_MEASURED_REPEATABILITY_FREEZE_REPAIR
-review_base: 8105a16aa5801a1f4c373d842a4e8598594596cf
-reviewed_head: aeb5eb0ef26566c62c18aa8dfdae6d03293a8803
+review_base: f66fb7344798ba0c04d2d5b59d0be05183f3bfb1
+reviewed_head: ae79bc7c49928f8e7e5cc87ae5f0f33de39381fd
 mandated_lineage_review_base: 3b5199e0cf8efc904f124cdb73156a3209eb6d80
 icra071_repair_review_base: 6e0e7328835064ecb665bc6476a6254924ff371d
 conference_route: P0_P4_V2_P5
@@ -18,12 +18,12 @@ route_lock: docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md
 user_decision_id: USER-ICRA-ROUTE-20260827-007
 user_approval_anchor: dd5e96a602061ab4c4bac384c72fec0f43255e01
 workflow_decision_id: USER-ICRA-WORKFLOW-20260826-001
-route_status: ICRA076_BOUNDED_MEASURED_REPEATABILITY_REPAIR_TASK_READY_DECISION007
+route_status: ICRA076_REPAIR_REVIEW_BLOCKED_WRONG_DOMAIN_AND_INCOMPLETE_SOURCE_FREEZE_AWAITING_USER
 historical_gate0a_verdict: NO_GO_P2
 p0_gate0b_status: PASS
 p0_gate0b_worker_count: 4
 p4_v1_status: G0A_PASS_G0B_PASS_G0C_SCIENTIFIC_NO_GO_IMMUTABLE
-p4_v2_status: DEVELOPMENT_LAYER1_PASS_LAYER2_BLOCKED_BYPASSED_LAYER3_SCIENTIFICALLY_NOT_STARTED_BLOCKED_USER_BYPASSED_LAYER4_ICRA076_REPAIR_TASK_READY
+p4_v2_status: DEVELOPMENT_LAYER1_PASS_LAYER2_BLOCKED_BYPASSED_LAYER3_SCIENTIFICALLY_NOT_STARTED_BLOCKED_USER_BYPASSED_LAYER4_ICRA076_REPAIR_REVIEW_BLOCKED
 p5_status: IMPLEMENTED_BUT_NO_CURRENT_PROSPECTIVE_QUALIFICATION_PASS
 icra070_status: SUPERSEDED_UNQUALIFIED_BY_USER_ROUTE_DECISION
 icra071_status: REQUEST_CHANGES_DEFERRED_NONBLOCKING_BY_USER_DECISION_002
@@ -32,31 +32,29 @@ icra072b_status: BLOCKED_HIDDEN_UNTRACKED_SOURCE_USER_ACCEPTED_BYPASS_NOT_PASS
 icra073_status: BLOCKED_USER_ACCEPTED_BYPASS_NOT_PASS
 icra074_status: PASS_OFFLINE_CONTRACT_PRODUCTION_UNCHANGED_NO_EFFECT_CLAIM
 icra075_status: BLOCKED_FROZEN_CONTRACT_INCOMPATIBLE_0_OF_40_NO_POWER_INPUTS_USER_ACCEPTED_BYPASS_NOT_PASS
-icra076_status: TASK_READY_BOUNDED_MEASURED_REPEATABILITY_FREEZE_REPAIR_NOT_YET_PASS
+icra076_status: BLOCKED_WRONG_FROZEN_DOMAIN_AND_THIRDPARTY_JSON_NOT_FROZEN_NOT_PASS
 supervisor_verdict: ICRA076_STANDARDS_REQUEST_CHANGES_SPEC_REQUEST_CHANGES_GATE_BLOCKED
-review_disposition: USER_SELECTED_SAME_GATE_ICRA076_REPAIR_NO_BYPASS
+review_disposition: AWAITING_USER_DECISION_REPAIR_ICRA076_OR_EXPLICIT_BYPASS_TO_ICRA077
 qualification_claim: false
 campaign_status: BLOCKED_UNTIL_ICRA079_REVIEW_PASS_AND_DISTINCT_USER_APPROVAL
-handoff_status: TASK_READY
-next_task: NEXT_TASK.md
-next_after_icra076_pass: ICRA-077_HELD_OUT_CONFIRMATION
+handoff_status: BLOCKED_AWAITING_USER_RESEARCH_DECISION
+next_task: NONE
+next_after_user_decision: REPAIR_ICRA076_OR_EXPLICIT_BYPASS_TO_ICRA077
 recovery_roadmap: docs/icra27/ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md
 four_layer_workflow: docs/icra27/ICRA_FOUR_LAYER_DEVELOPMENT_WORKFLOW.md
 guard_plan: docs/icra27/ICRA_CROSS_LAYER_GUARD_PLAN.md
 artifact_retention: ALL_ICRA072_EVIDENCE_SHARED_ROOTS_HIDDEN_USER_ARTIFACTS_AND_PROTECTED_PDF_RETAINED
-window_disposition: ROTATE_RECOMMENDED
-rotation_reason: USER_DECISION007_FORMAL_FREEZE_REPAIR_BEFORE_HELD_OUT_AND_CONTEXT_COMPACTED
-window_handoff_anchor: aa0244453c1e137b75bd394e7504852c7012fcdf
+window_disposition: PENDING_POST_PUSH_AUDIT
+rotation_reason: PENDING_POST_PUSH_AUDIT
+window_handoff_anchor: PENDING_REVIEW_CHANGESET
 window_next_role: SUPERVISOR
 window_next_review_task: ICRA-076
 window_bootstrap_source: REPOSITORY_AUTHORITY_ONLY
-updated_utc: 2026-08-27T16:37:47Z
+updated_utc: 2026-08-28T04:00:00Z
 ```
 
-User decision 007, anchored at pushed `dd5e96a602061ab4c4bac384c72fec0f43255e01`, explicitly chooses same-Gate
-ICRA-076 repair and rejects bypass to held-out ICRA-077. ICRA-076 remains NOT PASS while repair is active.
-
-The sole Builder task replaces synthesized replay values with production-emitted measurements, computes U95 from
-the route-locked 60 `|D_peak|` observations, makes verification evidence repository-local and freezes every
-mandatory verification-test byte. It must push first, use fresh replay/verification/freeze identities and retain
-all rejected attempts. No ROS/GPU/live, held-out, ICRA-077, qualification or campaign work is authorized.
+Review of `f66fb73..ae79bc7` accepts the measured-output, `|D_peak|` U95 and repository-local evidence repairs but
+finds two High freeze blockers. Replay uses snapshot `r=0.5` rather than frozen `r=0.75`, so its 154-sample
+interior is not the frozen `b=1.5 m` domain; validator does not cross-bind them. The probe also compiles against
+tracked `thirdparty/json/include` headers absent from freeze-005 source inventory. ICRA-076 remains NOT PASS and
+ICRA-077 is unauthorized pending an explicit user repair-or-bypass decision.

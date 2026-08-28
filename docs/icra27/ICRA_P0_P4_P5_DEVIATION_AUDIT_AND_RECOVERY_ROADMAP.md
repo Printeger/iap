@@ -1,5 +1,12 @@
 # ICRA P0 -> P4 -> P5 deviation audit and scientific recovery roadmap
 
+## ICRA-076 bounded repair Review BLOCKED — 2026-08-28
+
+Supervisor Review of `f66fb73..ae79bc7` accepts real measured replay, route-correct `|D_peak|` U95 and local
+verification, but rejects freeze-005. The serialized snapshot uses `r=0.5` instead of the frozen
+`r=0.75/b=1.5 m` domain, and tracked `thirdparty/json/include` probe build inputs are missing from source freeze.
+The route lock is unchanged. ICRA-076 is NOT PASS and ICRA-077 awaits user repair-or-explicit-bypass direction.
+
 ## User decision 007 — repair ICRA-076, no bypass — 2026-08-27
 
 The user explicitly rejects bypass and authorizes a bounded same-gate repair of ICRA-076. Decision
@@ -598,8 +605,8 @@ distinct engineering fixture and cannot be relabelled as inverse-corridor effect
 | ICRA-073 | implement PRIMARY/MIRROR/NULL inverse corridors, paired control/treatment and independent-oracle effect diagnostics | BLOCKED / USER-ACCEPTED BYPASS / NOT PASS; only geometry debt carries into ICRA-074 for repair |
 | ICRA-074 | V2 geometry repair then bounded offline targeted P4-v2 optimization | PASS: exact geometry and production-seam contract, production unchanged, no effect claim |
 | ICRA-075 | exploratory objective/source/domain ablation and power inputs | BLOCKED / USER-ACCEPTED BYPASS / NOT PASS; 0/40, no power inputs and two P1 defects retained |
-| ICRA-076 | repair measured repeatability, repository-local verification and complete source freeze; then freeze protocol, SESOI, hashes, seeds and conservative `n=60` per scene | TASK_READY bounded same-gate repair; no empirical-power claim or confirmatory run before Review PASS |
-| ICRA-077 | primary/mirror/null held-out confirmatory | BLOCKED until repaired ICRA-076 Review PASS; no retry/exclusion; primary exact gate |
+| ICRA-076 | repair measured repeatability, repository-local verification and complete source freeze; then freeze protocol, SESOI, hashes, seeds and conservative `n=60` per scene | BLOCKED / NOT PASS: wrong frozen replay domain and missing third-party build inputs; awaiting user decision |
+| ICRA-077 | primary/mirror/null held-out confirmatory | INACTIVE pending ICRA-076 repair PASS or explicit user bypass; no retry/exclusion; primary exact gate |
 | ICRA-078 | formal G0D lineage qualification | held-out confirmation required |
 | ICRA-079 | prospective P0+P4+P5 treatment and P0+P5 control P5 qualification | campaign remains blocked |
 | ICRA-080 | original 2 arms x 3 scenes x 10 seeds campaign | separate user approval required |

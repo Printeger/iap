@@ -1,5 +1,12 @@
 # ICRA 2027 Conference Scope — User-owned P0 -> P4-v2 -> P5 recovery
 
+## ICRA-076 repair Review BLOCKED — 2026-08-28
+
+Review of `f66fb73..ae79bc7` rejects freeze-005 as formal authority: replay measured the `r=0.5` production
+endpoint domain rather than frozen `r=0.75/b=1.5 m`, and the source inventory omits tracked
+`thirdparty/json/include` probe build inputs. ICRA-076 is NOT PASS; held-out ICRA-077 waits for the user's repair
+or explicit bypass choice. The route lock, P4-v1 `SCIENTIFIC_NO_GO`, P4-v2 and campaign barrier are unchanged.
+
 ## User decision 007 / bounded ICRA-076 repair active — 2026-08-27
 
 Under `USER-ICRA-ROUTE-20260827-007`, the user chooses repair rather than bypass. ICRA-076 may replace synthetic

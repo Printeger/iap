@@ -1,5 +1,11 @@
 # ICRA 2027 P0 -> P4-v2 -> P5 计划复审
 
+## ICRA-076 bounded repair Supervisor Review — 2026-08-28
+
+**Verdict: `STANDARDS REQUEST_CHANGES / SPEC REQUEST_CHANGES / GATE BLOCKED / NOT PASS`.** The repaired range
+passes 44/44 and validator, but replay uses the wrong frozen resolution/domain and freeze-005 omits tracked JSON
+build headers. No scope creep or held-out access occurred. ICRA-077 awaits user repair-or-bypass direction.
+
 ## User decision 007 — repair ICRA-076 — 2026-08-27
 
 **Disposition: `ICRA076_BOUNDED_REPAIR_TASK_READY / NO_BYPASS`.** Under

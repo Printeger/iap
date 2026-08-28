@@ -1,5 +1,11 @@
 # ICRA 2027 P0 -> P4-v2 -> P5 科学纠偏实施计划
 
+## ICRA-076 repair Review BLOCKED — 2026-08-28
+
+`f66fb73..ae79bc7` 已修复 measured B、`|D_peak|` U95、local verification 与必需测试冻结，但 freeze-005
+仍不具 formal authority：snapshot `r=0.5` 不等于冻结的 `r=0.75/b=1.5 m`，且 probe 的
+`thirdparty/json/include` 编译输入未冻结。ICRA-077 禁止，等待用户选择 bounded repair 或明确 bypass。
+
 ## User decision 007 / bounded ICRA-076 repair — 2026-08-27
 
 用户以 `USER-ICRA-ROUTE-20260827-007` 选择修复而非 bypass。唯一 Builder task 用 production-emitted B

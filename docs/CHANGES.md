@@ -3620,3 +3620,8 @@ Requirements: `IAP-RQ-000`, `IAP-RQ-020`, `IAP-RQ-030`, `IAP-RQ-040`,
 - Fresh replay-003/verification-002/freeze-005 satisfy the corrected bindings;
   the post-evidence focused suite passes 44/44 and independent freeze
   validation passes with 956 source / 958 install records.
+# 2026-08-28 ICRA-076 repair Review
+
+- Review `f66fb73..ae79bc7` is REQUEST_CHANGES: replay uses `r=0.5` rather than frozen `r=0.75/b=1.5 m`, and
+  freeze-005 omits the probe's tracked `thirdparty/json/include` build inputs. ICRA-076 remains NOT PASS;
+  ICRA-077 awaits user repair-or-bypass direction. (`IAP-RQ-421`–`IAP-RQ-424`)
