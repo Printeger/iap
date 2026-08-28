@@ -1,5 +1,13 @@
 # ICRA 2027 Conference Scope — User-owned P0 -> P4-v2 -> P5 recovery
 
+## User decision 010 / bounded ICRA-077A repair active — 2026-08-28
+
+Under `USER-ICRA-ROUTE-20260828-010`, ICRA-077A may repair exactly the frozen-blob protected-route cross-binding
+and the ambiguous evidence task/result/authorization identity. Fresh offline evidence is required after pushed
+source; no held-out/GPU/ROS/live/360-row, ICRA-077B or ICRA-078 work is authorized before Review PASS. Authority
+is `ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md`; route `P0_P4_V2_P5`, P4-v1 `SCIENTIFIC_NO_GO`,
+P4-v2, ICRA-071, required modules, claims, thresholds, seeds/order and campaign activation remain unchanged.
+
 ## ICRA-077A Review BLOCKED / user decision required — 2026-08-28
 
 Review of `e9aacf4..bdded38` blocks ICRA-077A: the protected-route fingerprint can be jointly rewritten with the

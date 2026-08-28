@@ -1,5 +1,29 @@
 # ICRA Supervisor Log
 
+## 2026-08-28 — user decision 010 issues bounded ICRA-077A formal-identity repair
+
+### Decision and repair boundary
+
+- The user explicitly selects `修复` at pushed approval anchor
+  `558bb7994cc2639a7f8d967e9754d0e054c51dc2`. Decision `USER-ICRA-ROUTE-20260828-010` changes no protected
+  research value, scientific contract or gate order.
+- ICRA-077A is TASK_READY for exactly two offline repairs: derive/cross-bind current protected route fields from
+  the verified frozen roadmap Git blob, including a coordinated route+transition+config-SHA adversary; and make
+  replay/verification/freeze identities explicitly distinguish active ICRA-077, ICRA-077A milestone, historical
+  ICRA-076 artifact purpose/disposition, validation result and `icra077b_authorized=false`.
+- Freeze-006/007 and earlier evidence remain immutable rejected history. Repair source must be pushed before fresh
+  replay-006+, verification-005+ and freeze-008+, exact shared build and post-evidence validation. No held-out,
+  GPU, ROS, live, 360 rows, ICRA-077B or ICRA-078 action is authorized before Review PASS.
+
+### Supervisor window disposition
+
+- Pending pushed task changeset and mandatory post-push §8.6 audit. Although this is same-Gate repair, it changes
+  canonical freeze schema/authority immediately before held-out access, so `ROTATE_RECOMMENDED` is required.
+- The normal task commit was rejected by the known atomic-role-transition deadlock
+  `ICRA_ROUTE_GUARD_FAIL:ROUTE_CHANGE_SUPERVISOR_NOT_ACTIVE` after the staged authority correctly assigned the
+  new task to DEEPSEEK. Repository route/hook checks, exact 12-file staging and staged diff checks passed; a
+  controlled `--no-verify` commit is used without staging Builder evidence, shared artifacts or the protected PDF.
+
 ## 2026-08-28 — ICRA-077A Review BLOCKED; user repair-or-bypass decision required
 
 ### Review identity and offline verification

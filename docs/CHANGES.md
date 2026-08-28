@@ -3,6 +3,12 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- route(user-decision-010-repair-icra077a): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 /
+  IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — user selects bounded repair, not bypass. Cross-bind current protected
+  route fields to the identity derived from the verified frozen roadmap Git blob, replace ambiguous formal
+  evidence task/result/authorization fields, and require fresh replay-006+/verification-005+/freeze-008+ after
+  pushed repair source. Preserve freeze-007 and forbid held-out/GPU/ROS/live/360-row/ICRA-077B before Review PASS.
+
 - review(icra-077a-freeze-closure-blocked): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 /
   IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — review `bdded38d` against fixed `e9aacf4a`. Offline 49/49, exact-three
   blobs, source/install inventories and freeze-007 validation pass, with no held-out/GPU/ROS/live access. Reject

@@ -3,12 +3,17 @@
 > Purpose: 把 talk《Integrity-Aware Active Perception》的“优化版 pipeline”拆成可实现、可验收、可追溯的工程需求。
 > Scope: 仅修改本仓库 src/iap；禁止修改 ../glim（可参考其代码但不得提交改动）。
 
+> Current ICRA disposition (2026-08-28, decision 010): user selects bounded ICRA-077A repair, not bypass.
+> Protected route fields must be derived from the verified frozen roadmap blob and equal current protected
+> values; fresh evidence must distinguish active task/milestone, historical artifact purpose, validation result,
+> ICRA-076 disposition and ICRA-077B authorization. No held-out/GPU/ROS/live/360-row/077B before Review PASS.
+
 > ICRA-077A Review (2026-08-28): BLOCKED/NOT PASS. Current protected-route fingerprint is not independently
 > anchored to protected fields from the frozen Git blob, so paired route+transition+config-SHA tampering passes.
 > Freeze-007 also ambiguously labels an `icra077a` candidate as `task=ICRA-076/result=PASS` while retaining
 > ICRA-076 NOT PASS. No Builder task, held-out/ICRA-077B or ICRA-078 is authorized pending user repair-or-bypass.
 
-> Current ICRA disposition (2026-08-28): user decision 009 accepts the correctly retained pre-access blocker and
+> Prior ICRA disposition (2026-08-28): user decision 009 accepts the correctly retained pre-access blocker and
 > issues offline-only ICRA-077A. Exactly three mutable governance authorities must use frozen pushed-commit Git
 > blobs plus an independent protected-route fingerprint; executable inputs/install remain current-byte strict.
 > No held-out/GPU/ROS/live/360-row/ICRA-077B action is authorized before ICRA-077A Review PASS. ICRA-076 remains

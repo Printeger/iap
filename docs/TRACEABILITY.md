@@ -1,5 +1,14 @@
 # Traceability Matrix (IAP)
 
+## 2026-08-28 user decision 010 and ICRA-077A repair issuance
+
+| Req ID | Decision/task seam | Required repair | Status |
+|---|---|---|---|
+| IAP-RQ-423 / IAP-RQ-424 | User choice at pushed `558bb79` | Repair both Review blockers; no bypass and no protected route change | **USER DECISION 010** |
+| IAP-RQ-423 / IAP-RQ-424 | Protected route authority | Derive protected fields/hash from verified frozen roadmap blob; current exact match; reject paired route+transition+config mutation | **ICRA-077A TASK_READY** |
+| IAP-RQ-423 / IAP-RQ-424 | Evidence identity | Separate active ICRA-077, 077A milestone, ICRA-076 artifact purpose/disposition, validation result and `icra077b_authorized=false` | **ICRA-077A TASK_READY** |
+| IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 / IAP-RQ-422 / IAP-RQ-423 | Fresh closure/downstream | Pushed source then replay-006+/verification-005+/freeze-008+; no held-out/077B/078 before Reviews | **BLOCKED DOWNSTREAM** |
+
 ## 2026-08-28 ICRA-077A Supervisor Review
 
 | Req ID | Reviewed boundary | Evidence and disposition | Status |

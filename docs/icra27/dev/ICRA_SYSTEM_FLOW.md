@@ -1,5 +1,11 @@
 # ICRA System Flow — User-owned P0 -> P4-v2 -> P5 recovery
 
+> User decision 010 update 2026-08-28: runtime flow is unchanged. ICRA-077A is TASK_READY only for frozen-blob
+> protected-route cross-binding and exact evidence identity, followed by fresh offline freeze evidence. No
+> held-out/GPU/ROS/live/360-row, ICRA-077B, ICRA-078, qualification or campaign is authorized before Review PASS.
+> Route is `P0_P4_V2_P5`; P4-v1 remains `SCIENTIFIC_NO_GO`, with P4-v2 and ICRA-071 unchanged. Authority is
+> `ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md`.
+
 > ICRA-077A Review update 2026-08-28: runtime flow is unchanged and no held-out/GPU/ROS/live work ran. Offline
 > freeze-007 is BLOCKED because its protected-route fingerprint is not cross-bound to protected fields from the
 > frozen blob and its active-task/result identity is ambiguous. No Builder task, ICRA-077B, ICRA-078,

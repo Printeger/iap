@@ -1,5 +1,14 @@
 # ICRA 2027 P0 -> P4-v2 -> P5 科学纠偏实施计划
 
+## User decision 010 / bounded ICRA-077A repair — 2026-08-28
+
+用户以 `USER-ICRA-ROUTE-20260828-010` 选择修复：从 verified frozen roadmap blob 派生 protected fields
+并与 current route 严格相等；同时把 evidence 的 active ICRA-077、077A milestone、ICRA-076 artifact purpose/
+disposition、validation result 与 `icra077b_authorized=false` 分离。必须在 pushed repair source 后生成 fresh
+replay-006+、verification-005+、freeze-008+。禁止 held-out、GPU、ROS、live、360 rows、077B 与 078。权威为
+`ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md`；route `P0_P4_V2_P5`、P4-v1 `SCIENTIFIC_NO_GO`、
+P4-v2、ICRA-071 与 campaign barrier 不变。
+
 ## ICRA-077A Review BLOCKED / 等待用户决定 — 2026-08-28
 
 `e9aacf4..bdded38` 的 49/49、freeze-007 1017/958、exact-three blobs 与 no-held-out scope 均通过，但不能

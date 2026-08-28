@@ -1,5 +1,16 @@
 # ICRA P0 -> P4 -> P5 deviation audit and scientific recovery roadmap
 
+## User decision 010 — repair both ICRA-077A Review blockers — 2026-08-28
+
+At pushed approval anchor `558bb7994cc2639a7f8d967e9754d0e054c51dc2`,
+`USER-ICRA-ROUTE-20260828-010` selects bounded repair, not bypass. ICRA-077A may only cross-bind current protected
+route fields to the identity derived from the verified frozen roadmap Git blob and replace ambiguous evidence
+task/result/authorization fields with exact active-task, milestone, artifact-purpose, validation-result,
+ICRA-076-disposition and ICRA-077B-authorization identities. Fresh replay-006+, verification-005+ and freeze-008+
+must follow pushed repair source. No held-out/GPU/ROS/live/360-row, ICRA-077B or ICRA-078 work is authorized before
+Review PASS. Route `P0_P4_V2_P5`, required modules, research question, claims, arms, scenes, P4-v1
+`SCIENTIFIC_NO_GO`, P4-v2, ICRA-071, thresholds, seeds/order, fallback and campaign activation are unchanged.
+
 ## ICRA-077A Review BLOCKED — user decision required — 2026-08-28
 
 Supervisor Review of `e9aacf4..bdded38` retains freeze-007 but rejects it as formal authority. The current route
@@ -228,10 +239,10 @@ its protected research fields.
   "fallback_policy": "PROPOSAL_ONLY_USER_ACTIVATION_REQUIRED",
   "scientific_no_go_transition": "BLOCKED_AWAITING_USER_RESEARCH_DECISION",
   "campaign_activation": "USER_APPROVAL_AFTER_ICRA079_REVIEW_PASS",
-  "approval_anchor": "fd4c1ed0bd9c7eccd40eaf4bc06d500074d8c429",
-  "user_decision_id": "USER-ICRA-ROUTE-20260828-009",
+  "approval_anchor": "558bb7994cc2639a7f8d967e9754d0e054c51dc2",
+  "user_decision_id": "USER-ICRA-ROUTE-20260828-010",
   "protected_transition": {
-    "from_anchor": "fd4c1ed0bd9c7eccd40eaf4bc06d500074d8c429",
+    "from_anchor": "558bb7994cc2639a7f8d967e9754d0e054c51dc2",
     "changes": [
       {
         "field": "route_owner",
@@ -352,11 +363,11 @@ its protected research fields.
     ]
   },
   "user_decision": {
-    "route_disposition": "USER_AUTHORIZED_ICRA077A_PRE_ACCESS_FREEZE_BOUNDARY_REPAIR",
+    "route_disposition": "USER_SELECTED_BOUNDED_ICRA077A_FORMAL_IDENTITY_REPAIR_NO_BYPASS",
     "p0_p5_disposition": "RETAIN_AS_MATCHED_CONTROL_ASSET",
     "p4_primary_endpoint": "MAX_PROVIDER_ONLY_INTERIOR_RISK",
     "confirmatory_size": "PREREGISTERED_CONSERVATIVE_60_INDEPENDENT_SEED_RUNS_PER_SCENE_NO_EMPIRICAL_POWER_CLAIM",
-    "enforcement": "ICRA077A_OFFLINE_GIT_BLOB_GOVERNANCE_SNAPSHOT_REPAIR_NO_HELD_OUT_NO_ICRA077B_BEFORE_REVIEW_PASS"
+    "enforcement": "ICRA077A_FROZEN_BLOB_PROTECTED_ROUTE_CROSS_BIND_AND_EXACT_EVIDENCE_IDENTITY_NO_HELD_OUT_NO_ICRA077B_BEFORE_REVIEW_PASS"
   },
   "guard_strength": "ACCIDENT_PREVENTION_NOT_A_SECURITY_BOUNDARY"
 }
@@ -641,7 +652,7 @@ distinct engineering fixture and cannot be relabelled as inverse-corridor effect
 | ICRA-074 | V2 geometry repair then bounded offline targeted P4-v2 optimization | PASS: exact geometry and production-seam contract, production unchanged, no effect claim |
 | ICRA-075 | exploratory objective/source/domain ablation and power inputs | BLOCKED / USER-ACCEPTED BYPASS / NOT PASS; 0/40, no power inputs and two P1 defects retained |
 | ICRA-076 | repair measured repeatability, repository-local verification and complete source freeze; then freeze protocol, SESOI, hashes, seeds and conservative `n=60` per scene | BLOCKED / USER-ACCEPTED BYPASS / NOT PASS: wrong replay domain and missing third-party build inputs retained |
-| ICRA-077 | 077A pre-access governance-freeze closure, then 077B primary/mirror/null held-out confirmatory | ICRA-077A BLOCKED/NOT PASS: unanchored route fingerprint and ambiguous task identity; no task pending user repair-or-bypass choice |
+| ICRA-077 | 077A pre-access governance-freeze closure, then 077B primary/mirror/null held-out confirmatory | ICRA-077A TASK_READY bounded repair: frozen-blob route cross-binding plus exact evidence identity; no held-out/GPU/ROS/live |
 | ICRA-078 | formal G0D lineage qualification | held-out confirmation required |
 | ICRA-079 | prospective P0+P4+P5 treatment and P0+P5 control P5 qualification | campaign remains blocked |
 | ICRA-080 | original 2 arms x 3 scenes x 10 seeds campaign | separate user approval required |

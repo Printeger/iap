@@ -1,5 +1,14 @@
 # ICRA 2027 P0 -> P4-v2 -> P5 计划复审
 
+## User decision 010 — repair ICRA-077A, no bypass — 2026-08-28
+
+**Disposition: `ICRA077A_BOUNDED_REPAIR_TASK_READY_NO_HELD_OUT`.** Decision
+`USER-ICRA-ROUTE-20260828-010` authorizes only frozen-blob protected-route cross-binding and unambiguous evidence
+identity, with fresh replay/verification/freeze after pushed source. Freeze-007 remains rejected. ICRA-077B and
+ICRA-078 remain blocked until their required Reviews. Route authority is
+`ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md`; `P0_P4_V2_P5`, P4-v1 `SCIENTIFIC_NO_GO`, P4-v2,
+ICRA-071, thresholds, seeds/order and campaign authority remain unchanged.
+
 ## ICRA-077A Supervisor Review BLOCKED — 2026-08-28
 
 **Disposition: `STANDARDS_REQUEST_CHANGES / SPEC_REQUEST_CHANGES / GATE_BLOCKED`.** The current fingerprint is

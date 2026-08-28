@@ -1,6 +1,12 @@
 # ICRA four-layer development and validation workflow
 
-Status: **BLOCKED — LAYER 4 ICRA-077A REVIEW; USER REPAIR-OR-BYPASS DECISION REQUIRED**
+Status: **ACTIVE — LAYER 4 ICRA-077A BOUNDED FORMAL-IDENTITY REPAIR; NO HELD-OUT**
+
+User decision 010 selects repair, not bypass. The Builder may only cross-bind protected route fields to the
+verified frozen roadmap blob and make formal evidence identity unambiguous, followed by fresh offline evidence.
+ICRA-077B, held-out/GPU/ROS/live/360 rows and ICRA-078 remain blocked until Review PASS. Route `P0_P4_V2_P5`,
+P4-v1 `SCIENTIFIC_NO_GO`, P4-v2, ICRA-071 and campaign authority remain unchanged under
+`ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md`.
 
 ICRA-077A Review finds an unanchored protected-route fingerprint and ambiguous freeze task/result identity.
 Freeze-007 is retained but is not Review PASS. No Builder task, held-out/GPU/ROS/live/360 rows, ICRA-077B or
