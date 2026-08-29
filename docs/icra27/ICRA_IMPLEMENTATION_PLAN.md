@@ -1,5 +1,9 @@
 # ICRA 2027 P0 -> P4-v2 -> P5 科学纠偏实施计划
 
+> Workflow status 2026-08-29: this file is a technical/scientific plan and historical record only. It no longer
+> issues Builder/Supervisor tasks, decision/approval state, handoffs or mandatory Review gates. `AGENTS.md` is
+> the current development workflow; dated workflow statements below have no present authority.
+
 ## User decision 010 / bounded ICRA-077A repair — 2026-08-28
 
 用户以 `USER-ICRA-ROUTE-20260828-010` 选择修复：从 verified frozen roadmap blob 派生 protected fields

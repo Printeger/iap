@@ -1,5 +1,9 @@
 # Traceability Matrix (IAP)
 
+> Workflow status 2026-08-29: this matrix is optional product/history reference, not a commit gate. Historical
+> rows mentioning hooks, three-document synchronization, Builder/Supervisor ownership, decision IDs, approval
+> anchors or mandatory Reviews do not describe the current workflow. `AGENTS.md` supersedes those controls.
+
 ## 2026-08-28 user decision 010 and ICRA-077A repair issuance
 
 | Req ID | Decision/task seam | Required repair | Status |
@@ -378,24 +382,24 @@
 | IAP-RQ-423 / IAP-RQ-424 | Route/claim protection | Temporary active-scope max/bottleneck-to-mean drift returns repository-consistent PASS | **REQUEST_CHANGES** |
 | IAP-RQ-000 / IAP-RQ-424 | Complete hermetic discovery | Builder's sole full discovery is 614/616, exit 1; two ICRA-070 tests depend on retained live state and must be fixture-isolated without artifact mutation | **REPAIR DEFERRED / NONBLOCKING FOR ICRA-072** |
 
-## 2026-08-26 ICRA-071 repository-local route guard implementation
+## 2026-08-26 ICRA-071 repository-local route guard implementation — retired history
 
 | Req ID | Requirement/evidence seam | Implementation and verification | Status |
 |---|---|---|---|
-| IAP-RQ-424 | Parse one canonical user route lock without mirrored route/module/claim/arm values | `verify_icra_research_route.py`: strict sentinel, duplicate-key/schema/type/list/decision/anchor/history validation and immutable `RouteLock`; parser/adversarial tests | **IMPLEMENTED / FOCUSED PASS** |
-| IAP-RQ-000 / IAP-RQ-424 | Keep state/task/active scope-plan, NO-GO transition and campaign barrier consistent | Deterministic CLI, stable typed reasons, current/blocked-state positives and route/P4 verdict/campaign/task/document negatives | **IMPLEMENTED / FOCUSED PASS** |
-| IAP-RQ-000 / IAP-RQ-423 / IAP-RQ-424 | Prevent ordinary staged authority and documentation drift | Relative `.githooks/pre-commit`, `pre-push`, `commit-msg`; no-rename ACMRD coverage including guard/product/required-document deletion and evidence-namespace rename; 15 enumerated roots plus extension fallback; three-doc synchronization; ICRA-071 governance-only scope; index/worktree authority equality; outbound-ref/clean-HEAD binding; Builder ownership; Supervisor distinct-decision/HEAD-anchor/active-field/full-doc checks; local `.githooks` installer/checker | **33/33 PASS; PROCEDURAL, NOT SECURITY ENFORCEMENT** |
+| IAP-RQ-424 | Historical route-lock parser | Former `verify_icra_research_route.py` and its tests | **RETIRED / REMOVED 2026-08-29** |
+| IAP-RQ-000 / IAP-RQ-424 | Historical state/task consistency guard | Former deterministic CLI and state-machine tests | **RETIRED / REMOVED 2026-08-29** |
+| IAP-RQ-000 / IAP-RQ-423 / IAP-RQ-424 | Historical staged authority and documentation guard | Former repository hooks, three-document synchronization and role ownership checks | **RETIRED / REMOVED 2026-08-29** |
 | IAP-RQ-000 / IAP-RQ-424 | Complete hermetic Python discovery must have zero failures without mutating retained evidence | Sole authoritative discovery: 616 total, 614 pass; old ICRA-070 tests observe existing retained `install_v2` and changed pre-replacement compact inventory; compact blocker record `route_guard_static_v1.json` SHA `8d5567de…22e22a` | **BLOCKED; NO CLEANUP/RETRY/RELABEL AUTHORIZED** |
 
 ## 2026-08-26 user-owned P0 -> P4-v2 -> P5 recovery
 
 | Req ID | Requirement/evidence seam | Controlling evidence | Status |
 |---|---|---|---|
-| IAP-RQ-424 | User exclusively owns route, required modules, research question, primary claim, arms, gate sequence, fallback and campaign activation | `ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md`; route-lock schema `icra_user_route_lock_v1`; decision `USER-ICRA-ROUTE-20260826-001`; approval anchor `48caa9d` | **DOCUMENTED / USER-LOCKED** |
+| IAP-RQ-424 | Historical research-route record | Legacy roadmap route-lock, decision and approval metadata | **HISTORICAL — WORKFLOW LOCK RETIRED** |
 | IAP-RQ-423 / IAP-RQ-424 | Preserve the P0 -> P4 -> EGO -> P5 authority architecture while correcting P4-v1 internal science | Audit of r6 15/15 runs, 192/192 decisions, max `136/56/0`, mean `174/17/1`, 57 unique path pairs; occupied-support, guide-domain, objective/estimand and pseudo-replication diagnosis | **P4-v1 NO_GO RETAINED / P4-v2 REQUIRED** |
-| IAP-RQ-000 / IAP-RQ-424 | A scientific NO-GO cannot automatically activate a contingency | `AGENTS.md` §8.7; route-lock `scientific_no_go_transition`; ICRA-071 guard plan and `NEXT_TASK.md` | **RULE FROZEN / GUARD IMPLEMENTATION AUTHORIZED** |
-| IAP-RQ-000 / IAP-RQ-424 | Repository-local route/state/doc/RQ guards prevent ordinary automation drift | ICRA-071 implementation at `56b2fdb`; relative `.githooks` installed; Supervisor Review finds lifecycle/claim/RQ/full-discovery defects and reissues a bounded same-Gate repair | **IMPLEMENTED / REVIEW REQUEST_CHANGES** |
-| IAP-RQ-423 / IAP-RQ-424 | Development flow precedes effect diagnosis, optimization and confirmation; confirmation still precedes G0D/campaign | Decision 002 roadmap ICRA-072..080; ICRA-072 flow, ICRA-073 diagnostics, ICRA-074 optimization, then provider-only interior `D_peak`, `b=2r`, SESOI/repeatability and independent confirmation | **ICRA-072 TASK_READY / CAMPAIGN BLOCKED** |
+| IAP-RQ-000 / IAP-RQ-424 | Historical NO-GO workflow guard | Former `AGENTS.md` §8.7, route-lock and ICRA-071 plan | **WORKFLOW GUARD RETIRED** |
+| IAP-RQ-000 / IAP-RQ-424 | Historical repository route/state/doc guards | Former ICRA-071 hooks and role review flow | **RETIRED / REMOVED 2026-08-29** |
+| IAP-RQ-423 / IAP-RQ-424 | Development flow precedes formal confirmation | Historical ICRA-072..080 sequence and scientific prerequisites | **TECHNICAL HISTORY; NOT TASK AUTHORITY** |
 | IAP-RQ-000 / IAP-RQ-424 | Preserve unqualified control engineering and user/scientific artifacts | ICRA-070 `SUPERSEDED_UNQUALIFIED`; replacement/parser/GPU/live/analyzer `0/0/0/0/0`; ICRA-068/070 build/install, raw evidence and PDF retained | **NO CLEANUP** |
 
 ## Superseded historical record — 2026-08-26 ICRA-070 static-repair Supervisor review
@@ -1114,7 +1118,7 @@ They do not convert historical `NO-GO-P2`, failed P0 Gate-0B evidence, the stati
 
 | Req ID | 需求描述 | Talk/Idea 对照点 | Implementation（文件/模块） | Test/Experiment（如何验证） | Logs/Metrics（必须输出） | 状态 |
 |---|---|---|---|---|---|---|
-| IAP-RQ-000 | Repo guardrails：AGENTS.md、doc-guard（pre-commit hook + tools/doc_guard.py）、docs 三件套 | — | `AGENTS.md`, `.githooks/pre-commit`, `tools/doc_guard.py`, `docs/` | 提交代码时 hook 拦截缺失文档；`git config core.hooksPath` = `.githooks` | hook exit code | **DONE** |
+| IAP-RQ-000 | Repo guardrails：以小 Git commit 提供恢复点；不再强制 docs 三件套 | — | `AGENTS.md`, `.gitignore` | 按改动范围测试；显式 stage 并提交 | commit hash | **ACTIVE — LEGACY HOOKS REMOVED** |
 | IAP-RQ-001 | Rename ROS2 package to `iap` | — | `package.xml`, `CMakeLists.txt`, `src/iap/`, `include/iap/`, `cmake/iap-config.cmake.in` | `colcon build --packages-select iap` 成功；`ros2 pkg list \| grep iap` 可见 | build exit code 0 | **DONE** |
 | IAP-RQ-002 | Build artifacts + 模块耗时测量 | 开发基础设施; 实时性验证 | `apps/iap_status.cpp`, `launch/iap_demo.launch.py`, `.clangd`; **timing**: `gnss_extension.cpp` `on_smoother_update_finish_`, `integrity_monitor.cpp` `compute()`, `araim.cpp` `run()`, `trunk_detector.cpp` `detect()` — `std::chrono` + fopen/fprintf → `/tmp/iap_timing.csv` | `python3 tools/plot_icp_timing.py ... /tmp/iap_timing.csv` → Fig C2: 各模块 p99 < 50 ms | `stamp,module,elapsed_ms` in `/tmp/iap_timing.csv`; 4 modules | **DONE** |
 | IAP-RQ-002 | Demo4 SO3 dynamics smoke demo | 开发基础设施; 可运行仿真 demo | `launch/demo4.launch`, `apps/demo4_lidar_body_bridge.cpp`, `apps/iap_rosnode.cpp`, `config/sim_demo4/config.json`, `config/sim_demo4/config_ros.json`, `config/sim_ego/demo4.rviz`, `config/sim_ego/fastdds_udp_only.xml`, `sim/ego_planner_swarm_ws/src/uav_simulator/so3_quadrotor_simulator/src/quadrotor_simulator_so3.cpp`, `sim/ego_planner_swarm_ws/src/uav_simulator/fake_drone/src/hover_cmd_publisher.cpp`, `fake_drone/CMakeLists.txt` | `colcon build --base-paths src/iap/sim/ego_planner_swarm_ws/src --packages-select quadrotor_msgs poscmd_2_odom so3_quadrotor_simulator`; `colcon build --base-paths src/iap src/gnss_comm --packages-select iap`; `ros2 launch iap demo4.launch` | `/demo4/hover_position_cmd`, `/demo4/so3_cmd`, `/sim/drone_0/truth_odom`, `/sim/drone_0/imu`, `/sim/drone_0/imu_iap`, `/sim/drone_0/lidar`, `/sim/drone_0/lidar_body`; `load libodometry_estimation_gpu.so`; `iap input first imu`, `iap input first points`; no `libtrunk_extension.so` load; no `RTPS_TRANSPORT_SHM Error` | **DONE** |

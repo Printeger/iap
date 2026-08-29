@@ -654,8 +654,8 @@ the task identifier is retained for the higher-priority user-route guard.
   regenerable build/install roots inventoried in
   `docs/icra27/dev/ICRA_REGENERABLE_BUILD_RETIREMENT_20260826.md`. This does not relabel or delete evidence.
 - Layers 1–3 reuse `/home/dev/ws_iap/{build,install,log}` and may not create per-task or per-run build/install.
-- A later task may delete only its reproducible build/install after its own Review PASS, pushed code/docs and
-  verified `0 0` divergence. Raw, compact, manifest, log and scientific evidence remain retained.
+- Reproducible build/install trees, ordinary logs and failed development artifacts may be retired after the
+  exact targets are safety-checked. Formal scientific evidence remains governed by its explicit protocol.
 - P4-v1 remains `SCIENTIFIC_NO_GO`; P4-v2 is a new prospective method, not a reanalysis that makes v1 pass.
 - Even a successful P4-v2 may claim lower provider-only predicted risk in the frozen controllable domain and
   preserved downstream lineage. It may not claim certification, universal risk reduction, or replacement of

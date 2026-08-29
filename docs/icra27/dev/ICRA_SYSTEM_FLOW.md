@@ -1,5 +1,9 @@
 # ICRA System Flow — User-owned P0 -> P4-v2 -> P5 recovery
 
+> Workflow status 2026-08-29: this document describes the technical runtime flow and retains dated history only.
+> It no longer declares `TASK_READY`, Builder/Supervisor authority, approvals, handoffs or mandatory Review
+> gates. `AGENTS.md` is the current development workflow.
+
 > User decision 010 update 2026-08-28: runtime flow is unchanged. ICRA-077A is TASK_READY only for frozen-blob
 > protected-route cross-binding and exact evidence identity, followed by fresh offline freeze evidence. No
 > held-out/GPU/ROS/live/360-row, ICRA-077B, ICRA-078, qualification or campaign is authorized before Review PASS.

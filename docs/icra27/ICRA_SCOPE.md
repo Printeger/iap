@@ -1,5 +1,9 @@
 # ICRA 2027 Conference Scope — User-owned P0 -> P4-v2 -> P5 recovery
 
+> Workflow status 2026-08-29: this file preserves scientific scope and historical decisions only. It no longer
+> issues tasks, roles, ownership, approvals, handoffs or Review gates. `AGENTS.md` is the current development
+> workflow; dated sections below are historical records rather than active instructions.
+
 ## User decision 010 / bounded ICRA-077A repair active — 2026-08-28
 
 Under `USER-ICRA-ROUTE-20260828-010`, ICRA-077A may repair exactly the frozen-blob protected-route cross-binding

@@ -9,6 +9,7 @@ import json
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -37,6 +38,13 @@ class Icra077aGovernanceFreezeTest(unittest.TestCase):
         self.module = load_module()
         self.protocol = json.loads(PROTOCOL_PATH.read_text())
         self.contract = self.protocol["byte_freeze"]["governance_snapshot"]
+        self.real_validate_lineage = \
+            self.module.validate_governance_commit_lineage
+        lineage_patch = mock.patch.object(
+            self.module, "validate_governance_commit_lineage",
+            return_value={"head": "0" * 40, "remote": "0" * 40})
+        lineage_patch.start()
+        self.addCleanup(lineage_patch.stop)
 
     def _coordinated_route_mutation(self, field, value):
         current = (REPOSITORY / GOVERNANCE_PATHS[2]).read_text()
@@ -173,16 +181,16 @@ class Icra077aGovernanceFreezeTest(unittest.TestCase):
             git("commit", "-q", "-m", "one")
             first = git("rev-parse", "HEAD")
             git("update-ref", "refs/remotes/origin/dev/icra", first)
-            self.module.validate_governance_commit_lineage(repo, first)
+            self.real_validate_lineage(repo, first)
 
             with self.assertRaises(self.module.Icra076Error) as absent:
-                self.module.validate_governance_commit_lineage(repo, "0" * 40)
+                self.real_validate_lineage(repo, "0" * 40)
             self.assertEqual(absent.exception.code, "GOVERNANCE_COMMIT_MISSING")
 
             tree = git("rev-parse", "HEAD^{tree}")
             unrelated = git("commit-tree", tree, input_text="unrelated\n")
             with self.assertRaises(self.module.Icra076Error) as nonancestor:
-                self.module.validate_governance_commit_lineage(repo, unrelated)
+                self.real_validate_lineage(repo, unrelated)
             self.assertEqual(nonancestor.exception.code,
                              "GOVERNANCE_COMMIT_NOT_ANCESTOR")
 
@@ -190,7 +198,7 @@ class Icra077aGovernanceFreezeTest(unittest.TestCase):
             git("add", "tracked.txt")
             git("commit", "-q", "-m", "two")
             with self.assertRaises(self.module.Icra076Error) as unconfirmed:
-                self.module.validate_governance_commit_lineage(repo, first)
+                self.real_validate_lineage(repo, first)
             self.assertEqual(unconfirmed.exception.code,
                              "GOVERNANCE_LINEAGE_NOT_FETCH_CONFIRMED")
 

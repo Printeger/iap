@@ -1,5 +1,9 @@
 # ICRA 2027 P0 -> P4-v2 -> P5 计划复审
 
+> Workflow status 2026-08-29: all entries below are historical review records, not current development gates.
+> This file no longer activates tasks, roles, ownership, approvals or handoffs. Current work follows `AGENTS.md`
+> and may proceed without an independent Review after every change.
+
 ## User decision 010 — repair ICRA-077A, no bypass — 2026-08-28
 
 **Disposition: `ICRA077A_BOUNDED_REPAIR_TASK_READY_NO_HELD_OUT`.** Decision
