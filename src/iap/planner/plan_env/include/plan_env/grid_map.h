@@ -69,6 +69,7 @@ struct MappingParameters
 
   /* time out */
   double odom_depth_timeout_;
+  double independent_cloud_min_interval_s_ = 0.0;
 
   /* depth image projection filtering */
   double depth_filter_maxdist_, depth_filter_mindist_, depth_filter_tolerance_;
@@ -302,6 +303,7 @@ private:
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr indep_cloud_sub_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr indep_odom_sub_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr extrinsic_sub_;
+  rclcpp::CallbackGroup::SharedPtr independent_input_callback_group_;
 
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr map_pub_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr map_inf_pub_;
@@ -316,6 +318,8 @@ private:
   std::atomic<uint64_t> occupancy_update_sequence_{0};
   std::atomic<double> occupancy_cloud_stamp_s_{
       std::numeric_limits<double>::quiet_NaN()};
+  double last_independent_cloud_stamp_s_ =
+      std::numeric_limits<double>::quiet_NaN();
   mutable std::mutex occupancy_epoch_mutex_;
 };
 

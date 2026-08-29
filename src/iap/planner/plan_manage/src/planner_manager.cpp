@@ -754,10 +754,9 @@ namespace ego_planner
     if (!bspline_optimizer_)
       return false;
     const auto &config = bspline_optimizer_->getP4RiskAStarConfig();
-    // Evidence-only: every enabled P4 objective must bind its admitted guide
-    // to the same final/P5/publication identity. Missing identity or evidence
-    // is publication-blocking for treatment, legacy and metrics-only modes.
-    // Only an explicitly disabled P4 has no terminal lineage obligation.
+    // Every admitted P4 guide must bind to the same final/P5/publication
+    // identity. An explicit NO_COLLISION scan has no guide to bind; all other
+    // empty, invalid, or open-ended scan outcomes remain publication-blocking.
     if (!config.enable_risk_aware_astar)
       return true;
     const Eigen::MatrixXd control_points =
@@ -767,6 +766,11 @@ namespace ego_planner
         control_points.rows() != 3 || control_points.cols() == 0 ||
         !control_points.allFinite())
       return false;
+    const auto &guides_before_validation =
+        bspline_optimizer_->getP4AttemptLineage();
+    if (guides_before_validation.empty())
+      return bspline_optimizer_->lastCollisionScanResult().status ==
+          CollisionScanStatus::NO_COLLISION;
     if (!bspline_optimizer_->validateP4AttemptLineage(
             planning_risk_context_.planning_attempt_id))
       return false;

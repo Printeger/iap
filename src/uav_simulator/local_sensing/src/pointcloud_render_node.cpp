@@ -9,6 +9,7 @@
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <Eigen/Dense>
+#include <csignal>
 #include <fstream>
 #include <iostream>
 #include <pcl/search/impl/kdtree.hpp>
@@ -36,6 +37,12 @@ bool has_local_map = false;
 bool has_odom = false;
 bool logged_first_odom = false;
 bool logged_first_lidar_publish = false;
+volatile std::sig_atomic_t stop_requested = 0;
+
+void requestStop(int)
+{
+  stop_requested = 1;
+}
 
 nav_msgs::msg::Odometry _odom;
 
@@ -190,7 +197,11 @@ void rcvLocalPointCloudCallBack(
 
 int main(int argc, char** argv) {
   // 初始化ROS2
-  rclcpp::init(argc, argv);
+  rclcpp::init(
+      argc, argv, rclcpp::InitOptions(),
+      rclcpp::SignalHandlerOptions::None);
+  std::signal(SIGINT, requestStop);
+  std::signal(SIGTERM, requestStop);
 
   // 创建节点
   auto node = rclcpp::Node::make_shared("pcl_render");
@@ -246,13 +257,21 @@ int main(int argc, char** argv) {
   _GLZ_SIZE = static_cast<int>(_z_size * _inv_resolution);
 
   rclcpp::Rate rate(100);
-  bool status = rclcpp::ok();
-  while (status) {
-    rclcpp::spin_some(node);  
-    status = rclcpp::ok();
+  rclcpp::executors::SingleThreadedExecutor executor;
+  executor.add_node(node);
+  while (rclcpp::ok() && !stop_requested) {
+    executor.spin_some();
     rate.sleep();
   }
 
+  executor.cancel();
+  executor.remove_node(node);
+  local_sensing_timer.reset();
+  odom_sub.reset();
+  local_map_sub.reset();
+  global_map_sub.reset();
+  pub_cloud.reset();
+  node.reset();
   rclcpp::shutdown();
   return 0;
 }

@@ -614,6 +614,7 @@ if(DEFINED ENV{ROS_VERSION})
       scripts/dev_planner/gate0_capture_p0_health.py
       scripts/dev_planner/gate0_disk_audit.py
       scripts/dev_planner/run_gate0_qualification.py
+      scripts/dev_planner/run_icra_interface_integration.py
       DESTINATION lib/iap
     )
     install(DIRECTORY launch DESTINATION share/iap
@@ -676,6 +677,10 @@ if(DEFINED ENV{ROS_VERSION})
       target_link_libraries(test_unified_risk_grid iap)
       ament_add_gtest(test_odom_freshness test/test_odom_freshness.cpp)
       target_link_libraries(test_odom_freshness iap)
+      ament_add_gtest(test_initial_state_estimation
+        test/test_initial_state_estimation.cpp
+      )
+      target_link_libraries(test_initial_state_estimation iap)
       ament_add_gtest(test_alert_limit_model test/test_alert_limit_model.cpp)
       target_link_libraries(test_alert_limit_model iap)
       ament_add_gtest(test_run_log_manager test/test_run_log_manager.cpp)
@@ -748,6 +753,14 @@ if(DEFINED ENV{ROS_VERSION})
       add_test(
         NAME test_test_planner_launch
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_test_planner_launch.py
+      )
+      add_test(
+        NAME test_test_icra_launch
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_test_icra_launch.py
+      )
+      add_test(
+        NAME test_icra_interface_integration
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_icra_interface_integration.py
       )
     endif()
     ament_export_include_directories(include ${EIGEN3_INCLUDE_DIR} ${OpenCV_INCLUDE_DIRS})

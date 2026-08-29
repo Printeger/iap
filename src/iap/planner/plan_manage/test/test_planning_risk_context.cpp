@@ -124,6 +124,12 @@ struct GridMapTestAccess {
     }
   }
 
+  static void configureNoCollision(GridMap* map) {
+    configureP4SelectionTrigger(map);
+    std::fill(map->md_.occupancy_buffer_inflate_.begin(),
+              map->md_.occupancy_buffer_inflate_.end(), 0);
+  }
+
   static void advanceOccupancyEpoch(GridMap* map) {
     map->occupancy_update_sequence_.fetch_add(2, std::memory_order_acq_rel);
   }
@@ -434,6 +440,31 @@ TEST(P4VerticalSliceTerminalLineageTest,
     EXPECT_EQ(row.at("trajectory_start_ns"), "1657065614014278400");
     EXPECT_EQ(row.at("final_bspline_identity"), expected_final_identity);
   }
+}
+
+TEST(P4VerticalSliceTerminalLineageTest,
+     ExplicitNoCollisionAttemptNeedsNoGuideLineage) {
+  const auto snapshot = makeP4SelectionSnapshot();
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureNoCollision(map.get());
+  const auto debug_path = p4LineageTestPath("terminal_no_collision.csv");
+  auto optimizer = makeP4Optimizer(map, snapshot, debug_path.string(), 81);
+  Eigen::MatrixXd seed = p4Seed();
+  ASSERT_EQ(optimizer->initControlPoints(seed, true).status,
+            ego_planner::CollisionScanStatus::NO_COLLISION);
+  ASSERT_TRUE(optimizer->getP4AttemptLineage().empty());
+
+  ego_planner::EGOPlannerManager manager;
+  manager.setP4VerticalSliceOptimizerForTest(std::move(optimizer), map);
+  manager.local_data_.position_traj_ =
+      ego_planner::UniformBspline(seed, 3, 0.5);
+  manager.local_data_.traj_id_ = 11;
+  manager.local_data_.start_time_ = rclcpp::Time(10, 0, RCL_ROS_TIME);
+
+  EXPECT_TRUE(manager.recordP4VerticalSliceLineage(
+      "final_bspline_before_p5", 10.0));
+  EXPECT_FALSE(std::filesystem::exists(
+      std::filesystem::path(debug_path.string() + ".lineage.csv")));
 }
 
 TEST(P4VerticalSliceTerminalLineageTest,

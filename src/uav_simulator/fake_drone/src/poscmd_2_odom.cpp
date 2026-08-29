@@ -1,4 +1,5 @@
 #include <iostream>
+#include <csignal>
 #include <math.h>
 #include <random>
 #include <eigen3/Eigen/Dense>
@@ -15,6 +16,12 @@ quadrotor_msgs::msg::PositionCommand _cmd;
 double init_x, init_y, init_z;
 
 bool rcv_cmd = false;
+volatile std::sig_atomic_t stop_requested = 0;
+
+void requestStop(int)
+{
+    stop_requested = 1;
+}
 
 // 接收位置指令信息的回调函数
 void rcvPosCmdCallBack(const quadrotor_msgs::msg::PositionCommand cmd)
@@ -99,7 +106,11 @@ void pubOdom()
 int main(int argc, char *argv[])
 {
     // 初始化ROS节点
-    rclcpp::init(argc, argv);
+    rclcpp::init(
+        argc, argv, rclcpp::InitOptions(),
+        rclcpp::SignalHandlerOptions::None);
+    std::signal(SIGINT, requestStop);
+    std::signal(SIGTERM, requestStop);
     auto node = rclcpp::Node::make_shared("odom_generator");
 
     // 读取参数
@@ -117,15 +128,20 @@ int main(int argc, char *argv[])
 
     // 主循环，发布里程计信息
     rclcpp::Rate rate(100);  // 100Hz
-    bool status = rclcpp::ok();
-    while (status)
+    rclcpp::executors::SingleThreadedExecutor executor;
+    executor.add_node(node);
+    while (rclcpp::ok() && !stop_requested)
     {
         pubOdom();
-        rclcpp::spin_some(node);
-        status = rclcpp::ok();
+        executor.spin_some();
         rate.sleep();
     }
 
+    executor.cancel();
+    executor.remove_node(node);
+    _cmd_sub.reset();
+    _odom_pub.reset();
+    node.reset();
     rclcpp::shutdown();
     return 0;
 }

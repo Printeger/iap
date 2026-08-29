@@ -122,7 +122,8 @@ struct GridMapTestAccess {
     return map->md_.last_occ_update_time_.seconds();
   }
 
-  static void acceptPointCloud(GridMap* map, const int32_t source_stamp_s) {
+  static void acceptPointCloud(GridMap* map, const int32_t source_stamp_s,
+                               const uint32_t source_stamp_ns = 0U) {
     {
       std::lock_guard<std::mutex> lock(map->occupancy_epoch_mutex_);
       map->md_.has_odom_ = true;
@@ -133,7 +134,17 @@ struct GridMapTestAccess {
     auto message = std::make_shared<sensor_msgs::msg::PointCloud2>();
     pcl::toROSMsg(cloud, *message);
     message->header.stamp.sec = source_stamp_s;
+    message->header.stamp.nanosec = source_stamp_ns;
     map->cloudCallback(message);
+  }
+
+  static void setIndependentCloudMinInterval(GridMap* map,
+                                              const double interval_s) {
+    map->mp_.independent_cloud_min_interval_s_ = interval_s;
+  }
+
+  static uint64_t updateSequence(GridMap* map) {
+    return map->occupancy_update_sequence_.load(std::memory_order_acquire);
   }
 
   static void seed(GridMap* map,
@@ -251,6 +262,26 @@ TEST(GridMapOccupancyEpochTest,
   EXPECT_TRUE(epoch->diagnostic_query(
       Eigen::Vector3d(0.85, 0.3, 1.1)).raw_occupied);
   EXPECT_EQ(epoch->raw_occupied_voxel_centers->size(), 2u);
+}
+
+TEST(GridMapOccupancyEpochTest,
+     IndependentCloudThrottlePreservesTwoHertzOccupancyEpochs) {
+  GridMap map;
+  GridMapTestAccess::configureDepthFusion(&map);
+  GridMapTestAccess::setIndependentCloudMinInterval(&map, 0.5);
+
+  GridMapTestAccess::acceptPointCloud(&map, 10, 0U);
+  const uint64_t first_sequence = GridMapTestAccess::updateSequence(&map);
+  GridMapTestAccess::acceptPointCloud(&map, 10, 250000000U);
+  EXPECT_EQ(GridMapTestAccess::updateSequence(&map), first_sequence);
+  GridMapTestAccess::acceptPointCloud(&map, 10, 500000000U);
+  const uint64_t second_sequence = GridMapTestAccess::updateSequence(&map);
+  EXPECT_GT(second_sequence, first_sequence);
+
+  // A simulator or bag-loop clock reset starts a new throttle epoch instead
+  // of suppressing every subsequent cloud behind the previous timestamp.
+  GridMapTestAccess::acceptPointCloud(&map, 9, 0U);
+  EXPECT_GT(GridMapTestAccess::updateSequence(&map), second_sequence);
 }
 
 TEST(GridMapOccupancyEpochTest, InProgressOrPreCloudCaptureFailsClosed) {

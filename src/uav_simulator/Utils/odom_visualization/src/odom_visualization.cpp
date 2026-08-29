@@ -1,4 +1,5 @@
 #include <iostream>
+#include <csignal>
 #include <string>
 #include "rclcpp/rclcpp.hpp"
 #include "tf2_ros/transform_broadcaster.h"
@@ -65,6 +66,12 @@ rclcpp::Time debug_time_last = rclcpp::Clock().now();
 double time_gap = 0;
 std_msgs::msg::Float64 time_message;
 rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr timePub;
+volatile std::sig_atomic_t stop_requested = 0;
+
+void requestStop(int)
+{
+    stop_requested = 1;
+}
 
 void odom_callback(const nav_msgs::msg::Odometry::SharedPtr msg)
 {
@@ -521,7 +528,11 @@ void cmd_callback(const quadrotor_msgs::msg::PositionCommand cmd)
 
 int main(int argc, char **argv)
 {
-    rclcpp::init(argc, argv);
+    rclcpp::init(
+        argc, argv, rclcpp::InitOptions(),
+        rclcpp::SignalHandlerOptions::None);
+    std::signal(SIGINT, requestStop);
+    std::signal(SIGTERM, requestStop);
     auto node = rclcpp::Node::make_shared("odom_visualization");
 
     node->declare_parameter("mesh_resource", "package://odom_visualization/meshes/hummingbird.mesh");
@@ -587,7 +598,28 @@ int main(int argc, char **argv)
     
     broadcaster = std::make_shared<tf2_ros::TransformBroadcaster>(node);
 
-    rclcpp::spin(node);
+    rclcpp::executors::SingleThreadedExecutor executor;
+    executor.add_node(node);
+    while (rclcpp::ok() && !stop_requested)
+    {
+        executor.spin_once(std::chrono::milliseconds(20));
+    }
+    executor.cancel();
+    executor.remove_node(node);
+    sub_cmd.reset();
+    sub_odom.reset();
+    broadcaster.reset();
+    timePub.reset();
+    heightPub.reset();
+    meshPub.reset();
+    sensorPub.reset();
+    trajPub.reset();
+    covVelPub.reset();
+    covPub.reset();
+    velPub.reset();
+    pathPub.reset();
+    posePub.reset();
+    node.reset();
     rclcpp::shutdown();
     return 0;
 }

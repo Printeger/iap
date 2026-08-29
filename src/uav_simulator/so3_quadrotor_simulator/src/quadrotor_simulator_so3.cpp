@@ -1,5 +1,6 @@
 #include <Eigen/Geometry>
 #include <builtin_interfaces/msg/time.hpp>
+#include <csignal>
 #include <cmath>
 #include <ctime>
 #include <iomanip>
@@ -38,6 +39,12 @@ typedef struct _Disturbance
 } Disturbance;
 
 static Command command;
+static volatile std::sig_atomic_t stop_requested = 0;
+
+static void requestStop(int)
+{
+    stop_requested = 1;
+}
 static Disturbance disturbance;
 static bool command_received = false;
 
@@ -330,7 +337,11 @@ void quadToIapImuMsg(const QuadrotorSimulator::Quadrotor &quad, sensor_msgs::msg
 
 int main(int argc, char **argv)
 {
-    rclcpp::init(argc, argv);
+    rclcpp::init(
+        argc, argv, rclcpp::InitOptions(),
+        rclcpp::SignalHandlerOptions::None);
+    std::signal(SIGINT, requestStop);
+    std::signal(SIGTERM, requestStop);
 
     // 初始化节点
     auto node = rclcpp::Node::make_shared("quadrotor_simulator_so3");
@@ -432,9 +443,11 @@ int main(int argc, char **argv)
 
     const rclcpp::Time wall_start_time = node->now();
     rclcpp::Time next_odom_pub_time = wall_start_time;
-    while (rclcpp::ok())
+    rclcpp::executors::SingleThreadedExecutor executor;
+    executor.add_node(node);
+    while (rclcpp::ok() && !stop_requested)
     {
-        rclcpp::spin_some(node);
+        executor.spin_some();
 
         auto last = control;
         control = getControl(quad, command);
@@ -482,4 +495,16 @@ int main(int argc, char **argv)
 
         r.sleep();
     }
+
+    executor.cancel();
+    executor.remove_node(node);
+    iap_imu_pub_.reset();
+    m_sub_.reset();
+    f_sub_.reset();
+    cmd_sub_.reset();
+    imu_pub_.reset();
+    odom_pub_.reset();
+    node.reset();
+    rclcpp::shutdown();
+    return 0;
 }

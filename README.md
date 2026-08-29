@@ -1110,6 +1110,31 @@ ros2 topic hz /ublox_driver/range_meas
 
 完成配置修改后，请重启对应 launch；IAP 配置在节点启动时读取，运行中修改 JSON/YAML 不会自动生效。
 
+### ICRA 开发接口逐层集成
+
+`test_icra.launch.py` 是 ICRA 开发纵切面的入口。仿真显式使用 SI
+加速度缩放 `odometry_acc_scale:=1.0`；开发 profile
+`icra_p0_p4_v2_p5_dev` 固定使用 NAIVE 初始化、2 秒 LiDAR 延迟、10 秒规划器
+延迟，并隔离 P1/P2/P3。专用 RViz 配置只影响此入口。
+
+在已构建并 source 工作空间后，运行单层或逐层门禁：
+
+```bash
+python3 src/iap/scripts/dev_planner/run_icra_interface_integration.py \
+  --stage estimator --repetitions 3
+
+python3 src/iap/scripts/dev_planner/run_icra_interface_integration.py \
+  --through full --repetitions 3
+
+python3 src/iap/scripts/dev_planner/run_icra_interface_integration.py \
+  --stage full --repetitions 1 --rviz
+```
+
+阶段为 `estimator|p0|p4|p5-final|full|shutdown`。runner 在首个失败处停止，
+并将 launch 参数、stdout、ROS/IAP 日志、topic capture、退出状态和阶段摘要保存到
+`results/icra27/dev_runs/interface_integration/`。这些结果仅用于开发集成，不构成
+P4 科学效果或正式资格声明。
+
 ICRA-076 measured-repeatability repair (2026-08-28): preregistration now
 requires 60 machine measurements from an offline production-shaped P4 profile
 probe over one byte-identical serialized FLAT_NULL input. U95 is the

@@ -1,4 +1,5 @@
 #include <iostream>
+#include <csignal>
 #include <fstream>
 #include <vector>
 
@@ -71,6 +72,12 @@ bool has_local_map = false;
 bool has_odom = false;
 bool logged_first_odom = false;
 bool logged_first_lidar_publish = false;
+volatile std::sig_atomic_t stop_requested = 0;
+
+void requestStop(int)
+{
+  stop_requested = 1;
+}
 
 Eigen::Matrix4d cam02body;
 Eigen::Matrix4d cam2world;
@@ -384,7 +391,11 @@ void render_currentpose()
 
 int main(int argc, char **argv) {
   // Initialize ROS 2 node
-  rclcpp::init(argc, argv);
+  rclcpp::init(
+    argc, argv, rclcpp::InitOptions(),
+    rclcpp::SignalHandlerOptions::None);
+  std::signal(SIGINT, requestStop);
+  std::signal(SIGTERM, requestStop);
   rclcpp::Node::SharedPtr node = rclcpp::Node::make_shared("pcl_render");
 
   node->declare_parameter("cam_width", 640);
@@ -467,13 +478,25 @@ int main(int argc, char **argv) {
   _GLZ_SIZE = (int)(_z_size * _inv_resolution);
 
   rclcpp::Rate rate(100);
-  bool status = rclcpp::ok();
-  while (status) {
-    rclcpp::spin_some(node);  
-    status = rclcpp::ok();
+  rclcpp::executors::SingleThreadedExecutor executor;
+  executor.add_node(node);
+  while (rclcpp::ok() && !stop_requested) {
+    executor.spin_some();
     rate.sleep();
   }
 
+  executor.cancel();
+  executor.remove_node(node);
+  local_sensing_timer.reset();
+  estimation_timer.reset();
+  odom_sub.reset();
+  local_map_sub.reset();
+  global_map_sub.reset();
+  pub_pcl_world.reset();
+  pub_pose.reset();
+  pub_color.reset();
+  pub_depth.reset();
+  node.reset();
   rclcpp::shutdown();
   return 0;
 }

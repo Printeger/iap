@@ -1,0 +1,143 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Enabled: true
+      Name: Ground Grid
+      Plane: XY
+      Reference Frame: map
+    - Class: rviz_default_plugins/PointCloud2
+      Enabled: true
+      Name: Global Obstacle Map
+      Topic:
+        Depth: 5
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /map_generator/global_cloud
+    - Class: rviz_default_plugins/PointCloud2
+      Enabled: true
+      Name: Predicted PL Cloud
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /iap/rviz/predicted_pl_cloud
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Name: Risk Grid Health
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /iap/rviz/risk_grid_health
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Name: P4 AStar Guides
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /iap/rviz/p4_astar_guides
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Name: P5 Gate Status
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /iap/rviz/p5_gate_status
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Name: Current Trajectory Integrity
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /iap/rviz/current_traj_integrity_colored
+    - Class: rviz_default_plugins/Marker
+      Enabled: true
+      Name: Truth Vehicle
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /test_planner/truth/robot
+    - Class: rviz_default_plugins/Marker
+      Enabled: true
+      Name: IAP Vehicle
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /test_planner/drone/robot
+    - Class: rviz_default_plugins/Marker
+      Enabled: true
+      Name: Desired Vehicle
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /test_planner/desired/robot
+    - Class: rviz_default_plugins/Path
+      Enabled: true
+      Name: Truth Path
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /test_planner/truth/path
+    - Class: rviz_default_plugins/Path
+      Enabled: true
+      Name: IAP Path
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /test_planner/drone/path
+    - Class: rviz_default_plugins/Path
+      Enabled: true
+      Name: Desired Path
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /test_planner/desired/path
+  Enabled: true
+  Global Options:
+    Background Color: 18; 18; 22
+    Fixed Frame: map
+    Frame Rate: 30
+  Name: root
+  Tools:
+    - Class: rviz_default_plugins/Interact
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Distance: 36
+      Focal Point:
+        X: 0
+        Y: 0
+        Z: 1.5
+      Name: ICRA Overview
+      Pitch: 0.65
+      Yaw: 3.14
+Window Geometry:
+  Height: 900
+  Width: 1440

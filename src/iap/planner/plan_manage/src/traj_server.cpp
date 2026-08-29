@@ -6,6 +6,7 @@
 #include "std_msgs/msg/empty.hpp"
 #include "visualization_msgs/msg/marker.hpp"
 #include <algorithm>
+#include <csignal>
 #include <rclcpp/rclcpp.hpp>
 
 rclcpp::Publisher<quadrotor_msgs::msg::PositionCommand>::SharedPtr pos_cmd_pub;
@@ -24,6 +25,12 @@ rclcpp::Time start_time_;
 int traj_id_;
 rclcpp::Time latest_odom_stamp_(0, 0, RCL_ROS_TIME);
 bool have_odom_stamp_ = false;
+volatile std::sig_atomic_t stop_requested = 0;
+
+void requestStop(int)
+{
+  stop_requested = 1;
+}
 
 // yaw control
 double last_yaw_, last_yaw_dot_;
@@ -252,7 +259,11 @@ void cmdCallback()
 
 int main(int argc, char **argv)
 {
-  rclcpp::init(argc, argv);
+  rclcpp::init(
+      argc, argv, rclcpp::InitOptions(),
+      rclcpp::SignalHandlerOptions::None);
+  std::signal(SIGINT, requestStop);
+  std::signal(SIGTERM, requestStop);
   auto node = rclcpp::Node::make_shared("traj_server");
 
   auto bspline_sub = node->create_subscription<traj_utils::msg::Bspline>(
@@ -291,7 +302,19 @@ int main(int argc, char **argv)
 
   RCLCPP_WARN(node->get_logger(), "[Traj server]: ready.");
 
-  rclcpp::spin(node);
+  rclcpp::executors::SingleThreadedExecutor executor;
+  executor.add_node(node);
+  while (rclcpp::ok() && !stop_requested)
+  {
+    executor.spin_once(std::chrono::milliseconds(10));
+  }
+  executor.cancel();
+  executor.remove_node(node);
+  cmd_timer.reset();
+  bspline_sub.reset();
+  odom_sub.reset();
+  pos_cmd_pub.reset();
+  node.reset();
   rclcpp::shutdown();
 
   return 0;
