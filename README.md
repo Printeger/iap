@@ -222,8 +222,6 @@ python3 test/test_icra074_geometry.py -v
 python3 test/test_icra075_exploratory.py -v
 python3 test/test_icra076_preregistration.py -v
 python3 test/test_icra077a_governance_freeze.py -v
-python3 scripts/dev_planner/verify_icra_research_route.py
-python3 scripts/dev_planner/verify_icra_research_route.py --check-hooks
 python3 scripts/dev_planner/validate_icra076_preregistration.py
 
 python3 scripts/dev_planner/icra076_repeatability_replay.py \

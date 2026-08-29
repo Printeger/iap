@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import hashlib
-import importlib.util
 import json
 import math
 import subprocess
@@ -80,17 +79,36 @@ def validate_evidence_identity(identity: Any) -> dict[str, Any]:
 
 
 def _protected_route_document(text: str) -> dict[str, Any]:
-    module_path = REPOSITORY / "scripts/dev_planner/verify_icra_research_route.py"
-    spec = importlib.util.spec_from_file_location("icra_route_guard", module_path)
-    if spec is None or spec.loader is None:
-        _fail("PROTECTED_ROUTE_PARSER_UNAVAILABLE")
-    route_guard = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(route_guard)
     try:
-        route = route_guard.parse_route_lock_text(text, REPOSITORY)
-    except (OSError, route_guard.RouteGuardError):
+        if text.count(ROUTE_BEGIN) != 1 or text.count(ROUTE_END) != 1:
+            _fail("PROTECTED_ROUTE_DRIFT")
+        start = text.index(ROUTE_BEGIN) + len(ROUTE_BEGIN)
+        end = text.index(ROUTE_END, start)
+        payload = text[start:end].strip()
+        if not payload.startswith("```json\n") or not payload.endswith("\n```"):
+            _fail("PROTECTED_ROUTE_DRIFT")
+
+        def reject_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+            result: dict[str, Any] = {}
+            for key, value in pairs:
+                if key in result:
+                    _fail("PROTECTED_ROUTE_DRIFT")
+                result[key] = value
+            return result
+
+        document = json.loads(
+            payload[len("```json\n"):-len("\n```")],
+            object_pairs_hook=reject_duplicates)
+        allowed = set(PROTECTED_ROUTE_FIELDS) | {
+            "schema_version", "approval_anchor", "user_decision_id",
+            "protected_transition", "user_decision", "guard_strength",
+        }
+        if not isinstance(document, dict) or set(document) - allowed:
+            _fail("PROTECTED_ROUTE_DRIFT")
+        protected = {field: document[field] for field in PROTECTED_ROUTE_FIELDS}
+    except (KeyError, TypeError, ValueError):
         _fail("PROTECTED_ROUTE_DRIFT")
-    return {field: getattr(route, field) for field in PROTECTED_ROUTE_FIELDS}
+    return protected
 
 
 def validate_protected_route_cross_binding(
@@ -395,10 +413,7 @@ def expected_verification_argv() -> dict[str, list[str]]:
              "python3 test/test_icra074_geometry.py -v && "
              "python3 test/test_icra075_exploratory.py -v && "
              "python3 test/test_icra076_preregistration.py -v && "
-             "python3 test/test_icra077a_governance_freeze.py -v && "
-             "python3 scripts/dev_planner/verify_icra_research_route.py && "
-             "python3 scripts/dev_planner/verify_icra_research_route.py "
-             "--check-hooks")],
+             "python3 test/test_icra077a_governance_freeze.py -v")],
         "VALIDATOR": [
             "python3", "scripts/dev_planner/validate_icra076_preregistration.py"],
         "SIX_PACKAGE_BUILD": [

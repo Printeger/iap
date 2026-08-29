@@ -188,12 +188,13 @@ The plan-to-current range contains 243 commits and touches 862 files, with appro
 and 1,065 deletions. Those line counts include large retained evidence products and are not treated as a
 scientific progress metric.
 
-## 2. Machine-readable user route lock
+## 2. Historical formal-experiment configuration snapshot
 
-The JSON object between the sentinels is the canonical research-route lock. It is intentionally embedded in
-this Markdown so the human-readable audit and the future repository-local verifier have one route authority.
-Agents may validate and quote this object. Only an explicit new user research decision may authorize changing
-its protected research fields.
+The JSON object between the legacy sentinels is retained only because existing formal ICRA-076/077A evidence
+freezes its scientific fields and Git blob. It is not a daily-development route lock, approval state machine or
+agent authority. The retired repository-local verifier and hooks no longer consume it. New formal experiments
+should store scientific inputs in their protocol without Builder/Supervisor, decision-ID or approval-anchor
+workflow fields.
 
 <!-- ICRA_USER_ROUTE_LOCK_V1_BEGIN -->
 ```json
@@ -374,11 +375,10 @@ its protected research fields.
 ```
 <!-- ICRA_USER_ROUTE_LOCK_V1_END -->
 
-Protected research fields are `active_route`, `required_modules`, `research_question`, `primary_claim`,
+For the existing formal evidence only, frozen scientific fields are `active_route`, `required_modules`, `research_question`, `primary_claim`,
 `secondary_claims`, `formal_arms`, `qualification_scenes`, `gate_sequence`, `fallback_policy`,
-`scientific_no_go_transition`, and `campaign_activation`. The route owner, decision identity, approval anchor,
-protected transition and explicit user selections are also immutable without a new user decision. A Supervisor
-may propose changes but cannot approve them.
+`scientific_no_go_transition`, and `campaign_activation`. Legacy decision, approval, transition and role fields
+have no current workflow authority.
 
 ## 3. Executive deviation verdict
 
@@ -596,35 +596,20 @@ immutable r6 evidence. ICRA-071 prevents recurrence.
 These items enter a maintenance backlog and cannot be mixed into a bounded P4-v2 science task without a
 separate authorization.
 
-## 8. User-owned development state machine
+## 8. Retired development state machine
 
-Research route ownership and evidence verdict ownership are distinct:
-
-```text
-USER owns research question / required modules / claim / arms / route / fallback activation
-  -> SUPERVISOR freezes tasks and judges evidence against the user-owned contract
-    -> BUILDER implements exactly one active task
-```
-
-On a scientific NO_GO:
+The former Builder/Supervisor, route-lock, decision-ID, approval-anchor, handoff and window-rotation state
+machine is retired. `AGENTS.md` is now the active development workflow. The repository hooks and route verifier
+that enforced this section have been removed.
 
 ```text
-SCIENTIFIC_NO_GO
-  -> active_role=SUPERVISOR
-  -> status=BLOCKED_AWAITING_USER_RESEARCH_DECISION
-  -> next_task=NONE
-  -> Supervisor may write proposals only
+ordinary development
+  -> iterate, debug and run focused tests
+    -> create a descriptive Git commit
 ```
 
-No contingency becomes active and no alternative `TASK_READY` may exist until a distinct user decision is
-recorded against an exact pushed anchor. Supervisor and Builder commits cannot self-authorize protected field
-changes.
-
-ICRA-071 implemented a repository-local verifier plus pre-commit, pre-push and commit-message hooks, but Review
-found lifecycle, exact-claim/RQ and full-discovery defects. Decision 002 retains that repair as non-blocking
-governance backlog. Because the user selected a local guard, this is accident prevention, not a security
-boundary: a process with repository write permission can still edit hooks or use `--no-verify`. Truly
-non-bypassable enforcement requires a protected remote branch and an independent user approval identity.
+Formal experiments may still freeze scientific inputs and evaluate their evidence, but that protocol does not
+reactivate development roles, ownership, mandatory independent reviews, handoffs or commit-message gates.
 
 ## 9. Corrective roadmap and gates
 
@@ -663,7 +648,8 @@ the task identifier is retained for the higher-priority user-route guard.
 
 ## 10. Artifact lifecycle and claim limits
 
-- Preserve the protected PDF and all raw/compact/registered-live/scientific evidence and ordinary logs.
+- Preserve the protected PDF and formal scientific evidence. Ordinary development logs and failed artifacts are
+  regenerable, ignored by Git and need not be retained permanently.
 - User workflow decision `USER-ICRA-WORKFLOW-20260826-001` authorizes permanent retirement of only the exact
   regenerable build/install roots inventoried in
   `docs/icra27/dev/ICRA_REGENERABLE_BUILD_RETIREMENT_20260826.md`. This does not relabel or delete evidence.

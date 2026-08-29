@@ -13,19 +13,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Development Workflow
 
-Follow `AGENTS.md`. Daily development uses focused tests and small,
-descriptive Git commits as its recovery mechanism. Commits do not require an
-`IAP-RQ-XXX` identifier or synchronized updates to `DEV_LOG.md`,
-`docs/CHANGES.md`, or `docs/TRACEABILITY.md`. Builder/Supervisor handoffs,
-route-lock state, mandatory independent reviews and formal one-shot controls do
-not apply unless the user explicitly starts a formal experiment protocol.
+Follow `AGENTS.md`; it is the canonical repository workflow. This file only
+adds Claude-specific build, runtime, architecture, and style guidance.
 
 ---
 
 ## Build & Test
 
 ```bash
-# Build (from workspace root /home/dev/code/ws_iap)
+# Build (from workspace root /home/dev/ws_iap)
 colcon build --symlink-install \
   --packages-select iap \
   --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo
@@ -48,13 +44,13 @@ CPU-only build: edit `config/config.json` to replace `config_odometry_gpu.json` 
 RViz viewer and 3D standard viewer. No dependency on `glim_ros` package at runtime.
 
 ```bash
-source /home/dev/code/ws_iap/install/setup.bash  # IAP only — no glim_ros needed
+source /home/dev/ws_iap/install/setup.bash  # IAP only — no glim_ros needed
 
 # Real-time mapping (terminal 1)
 ros2 run iap iap_rosnode \
-  --ros-args -p config_path:=/home/dev/code/ws_iap/src/iap/config
+  --ros-args -p config_path:=/home/dev/ws_iap/src/iap/config
 # Real-time mapping (terminal 2)
-ros2 bag play /home/dev/code/ws_iap/src/iap/data/realsense_ros2
+ros2 bag play /home/dev/ws_iap/src/iap/data/realsense_ros2
 ```
 
 RViz topics (under `/glim_rosnode/` namespace):
@@ -67,16 +63,16 @@ RViz topics (under `/glim_rosnode/` namespace):
 
 ```bash
 source /root/ros2_ws/install/setup.bash         # provides glim_rosbag / glim_rosnode
-source /home/dev/code/ws_iap/install/setup.bash  # must come AFTER glim — prepends IAP libs
+source /home/dev/ws_iap/install/setup.bash  # must come AFTER glim — prepends IAP libs
 
 # Offline mapping
 ros2 run glim_ros glim_rosbag \
-  --ros-args -p config_path:=/home/dev/code/ws_iap/src/iap/config \
-  -- /home/dev/code/ws_iap/src/iap/data/realsense_ros2
+  --ros-args -p config_path:=/home/dev/ws_iap/src/iap/config \
+  -- /home/dev/ws_iap/src/iap/data/realsense_ros2
 
 # Real-time mapping
 ros2 run glim_ros glim_rosnode \
-  --ros-args -p config_path:=/home/dev/code/ws_iap/src/iap/config
+  --ros-args -p config_path:=/home/dev/ws_iap/src/iap/config
 ```
 
 Verify IAP loaded (legacy mode only): `echo $LD_LIBRARY_PATH | tr ':' '\n' | grep -E "iap|glim" | head -6` — IAP path must appear before `/root/ros2_ws`.
@@ -92,7 +88,7 @@ Verify IAP loaded (legacy mode only): `echo $LD_LIBRARY_PATH | tr ':' '\n' | gre
        ↓
 /root/ros2_ws           ← GLIM core library + glim_ros2 executables
        ↓
-/home/dev/code/ws_iap   ← IAP (overrides and extends GLIM via LD_LIBRARY_PATH)
+/home/dev/ws_iap        ← IAP (overrides and extends GLIM via LD_LIBRARY_PATH)
 ```
 
 ### Plugin Injection

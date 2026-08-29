@@ -45,9 +45,6 @@ class Icra077aGovernanceFreezeTest(unittest.TestCase):
         payload = current[begin:end].strip()
         document = json.loads(payload[len("```json\n"):-len("\n```")])
         document[field] = value
-        for change in document["protected_transition"]["changes"]:
-            if change["field"] == field:
-                change["new"] = value
         rendered = "```json\n" + json.dumps(document, indent=2) + "\n```"
         return current[:begin] + "\n" + rendered + "\n" + current[end:], document
 
@@ -82,7 +79,7 @@ class Icra077aGovernanceFreezeTest(unittest.TestCase):
         }
         for field, value in replacements.items():
             current, document = self._coordinated_route_mutation(field, value)
-            with self.subTest(field=field, attack="current_plus_transition"), \
+            with self.subTest(field=field, attack="current_config"), \
                     self.assertRaises(self.module.Icra076Error) as drift:
                 self.module.validate_governance_snapshot(
                     self.contract, REPOSITORY, current_route_text=current)

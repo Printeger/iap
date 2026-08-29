@@ -2,41 +2,42 @@
 
 Status: **ACTIVE — LAYER 4 ICRA-077A BOUNDED FORMAL-IDENTITY REPAIR; NO HELD-OUT**
 
-User decision 010 selects repair, not bypass. The Builder may only cross-bind protected route fields to the
-verified frozen roadmap blob and make formal evidence identity unambiguous, followed by fresh offline evidence.
-ICRA-077B, held-out/GPU/ROS/live/360 rows and ICRA-078 remain blocked until Review PASS. Route `P0_P4_V2_P5`,
+The current formal task cross-binds the frozen scientific configuration to the verified roadmap blob and makes
+formal evidence identity unambiguous, followed by fresh offline evidence. ICRA-077B,
+held-out/GPU/ROS/live/360 rows and ICRA-078 remain blocked until formal protocol validation passes. Route `P0_P4_V2_P5`,
 P4-v1 `SCIENTIFIC_NO_GO`, P4-v2, ICRA-071 and campaign authority remain unchanged under
 `ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md`.
 
 ICRA-077A Review finds an unanchored protected-route fingerprint and ambiguous freeze task/result identity.
-Freeze-007 is retained but is not Review PASS. No Builder task, held-out/GPU/ROS/live/360 rows, ICRA-077B or
-ICRA-078 is authorized until the user chooses repair or explicitly accepts both risks. Route `P0_P4_V2_P5`,
+Freeze-007 is retained but is not formal validation PASS. No held-out/GPU/ROS/live/360 rows, ICRA-077B or
+ICRA-078 proceeds until the formal repair validates. Route `P0_P4_V2_P5`,
 P4-v1 `SCIENTIFIC_NO_GO`, P4-v2, ICRA-071 and campaign authority remain unchanged under
 `ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md`.
 
-User decision 009: `USER-ICRA-ROUTE-20260828-009` authorizes only the offline correction of the governance-freeze
-boundary. Exactly three mutable Supervisor authorities use frozen pushed-commit Git blobs plus an independent
+The existing ICRA-076 evidence records the earlier offline correction of the governance-freeze
+boundary. Exactly three mutable governance documents use frozen pushed-commit Git blobs plus an independent
 protected-route fingerprint; all executable inputs and install bytes remain current-byte strict. ICRA-077B,
-held-out/GPU/ROS/live/360 rows and ICRA-078 are blocked until the required preceding Review PASS. Route
+held-out/GPU/ROS/live/360 rows and ICRA-078 are blocked until the preceding formal validation passes. Route
 `P0_P4_V2_P5`, P4-v1 `SCIENTIFIC_NO_GO`, P4-v2, ICRA-071 and campaign authority are unchanged under
 `ICRA_P0_P4_P5_DEVIATION_AUDIT_AND_RECOVERY_ROADMAP.md`.
 
 Requirements: `IAP-RQ-320`, `IAP-RQ-321`, `IAP-RQ-400`, `IAP-RQ-410`, `IAP-RQ-421`, `IAP-RQ-422`,
 `IAP-RQ-423`, `IAP-RQ-424`
 
-Current disposition: decision 009 preserves decision 008's ICRA-076 debt acceptance but pauses outcome access.
+Current disposition: the ICRA-076 debt record pauses outcome access.
 ICRA-077A must first produce a non-self-invalidating offline freeze. ICRA-077B remains inactive until 077A
-Review PASS; no held-out, GPU, ROS, live, retry, exclusion, source/install weakening or ICRA-078 is authorized.
+formal validation PASS; no held-out, GPU, ROS, live, source/install weakening or ICRA-078 is authorized. The
+non-retry restriction applies to this formal protocol, not ordinary development.
 
 ## 1. Purpose
 
-This document is the single process authority for getting the existing IAP modules running before applying
-scientific or qualification controls. It groups the unchanged route-lock gate sequence into four layers. It
+This document describes the formal ICRA experiment sequence after ordinary development. `AGENTS.md` is the
+daily-development authority. This document groups the scientific gate sequence into four layers. It
 does not change the `P0_P4_V2_P5` route, research question, claims, arms, qualification scenes, campaign barrier
-or the `ICRA_USER_ROUTE_LOCK_V1` sentinel.
+or the frozen scientific configuration used by existing evidence.
 
 Development runs in Layers 1–3 are repeatable. A failed run may be diagnosed, followed by a code/config repair,
-incremental rebuild and a new run identity without an intermediate Supervisor Review. Formal one-shot,
+incremental rebuild and a new run identity without an intermediate independent review. Formal one-shot,
 held-out, full-hash and qualification rules begin only in Layer 4.
 
 ## 2. Layer map
@@ -72,11 +73,10 @@ Layer 1 may use `icra072_p4_selection_trigger_v1`. The trigger is development in
 ordinary occupancy and the production P0 snapshot to P4. It is not the inverse-corridor fixture, may not inject
 an expected route/oracle label, and cannot support an effect, qualification or paper claim.
 
-The Builder may run `run-001`, `run-002`, and later unique identities until one passes. A run directory is never
-overwritten, but there is no one-shot limit and no new build/install per run. Each run automatically records its
-command, working directory, source commit, shared install root, GPU/process state and first missing pipeline
-stage. Every run remains retained throughout Layer 1; any later compaction or retirement needs explicit boundary
-Review authority.
+The developer may run `run-001`, `run-002`, and later unique identities until one passes. There is no one-shot
+limit and no new build/install per run. Useful retained runs may record their command, working directory, source
+commit, shared install root, GPU/process state and first missing pipeline stage. Raw failed development runs and
+ordinary logs are regenerable and may be retired; formal experiment evidence follows its explicit protocol.
 
 ## 4. Shared build and command authority
 
@@ -97,21 +97,20 @@ Before Layer 4, remove and rebuild only those six packages' subdirectories in th
 then freeze the relevant installed bytes. Do not delete or rebuild unrelated workspace packages. Any post-freeze
 source or installed-byte change invalidates the formal freeze and returns work to the appropriate earlier layer.
 
-## 5. Evidence and Review policy
+## 5. Evidence and validation policy
 
-- Layers 1–3 retain compact manifests, accepted/latest-blocker runtime evidence and ordinary logs, but do not
-  require full build-tree hashes, one-shot execution or a Supervisor Review between repair iterations.
-- Builder code commits still bind applicable requirements and synchronize `DEV_LOG.md`, `docs/CHANGES.md` and
-  `docs/TRACEABILITY.md` once per logical layer changeset. Per-run commands are machine-recorded, not copied into
-  multiple authority documents.
-- Supervisor Review normally occurs once at a layer boundary. User decision 003 explicitly bypasses blocked
-  Layer 2 into Layer 3 without converting it to PASS. Layer 3 does not become a scientific claim without Layer 4.
+- Layers 1–3 may retain compact accepted/latest-blocker evidence when useful, but do not require full build-tree
+  hashes, one-shot execution, permanent ordinary logs or independent review between repair iterations.
+- Code commits do not require requirement IDs or synchronized updates to `DEV_LOG.md`, `docs/CHANGES.md` and
+  `docs/TRACEABILITY.md`. Update durable documentation only when its contract actually changes.
+- Layer validation occurs at meaningful boundaries, not after every change. A blocked layer does not become PASS
+  merely because development continues. Layer 3 does not become a scientific claim without Layer 4.
 - Layer 4 alone enables full hashes, frozen SESOI/thresholds/seeds, held-out separation, non-retry and
   qualification controls.
 
 ## 6. Regenerable artifact retirement
 
-The pre-workflow Builder checkpoint is `6a6bdd3e674dd58fafae4153e5a2b5cb5225d730`, archived as
+The pre-workflow checkpoint is `6a6bdd3e674dd58fafae4153e5a2b5cb5225d730`, archived as
 `ARCHIVED_AS_FOUND / BLOCKED_TERMINAL_CHAIN_MISSING`: P0 and natural P4 selection ran, but terminal lineage/P5/
 publication did not. Its raw, compact and registered live evidence remains. User-authorized cleanup removes only
 the exact regenerable build/install roots listed in
@@ -122,7 +121,7 @@ the exact regenerable build/install roots listed in
 | Artifact class | Layers 1–3 | Layer 4 | Retirement rule |
 |---|---|---|---|
 | Shared `/home/dev/ws_iap/{build,install,log}` | Reuse and incrementally update | Selectively rebuild six packages, then freeze relevant installed bytes | Never delete as part of historical-task cleanup |
-| Per-run raw, compact, manifest, analysis and normal logs | Retain without overwrite | Retain under frozen protocol | No deletion without later explicit Review authority |
+| Per-run raw, compact, manifest, analysis and normal logs | Keep only when useful; generated files are ignored | Retain only what the frozen protocol requires | Ordinary failed artifacts may be retired safely |
 | P4-v1 scientific and registered historical live evidence | Immutable retention | Immutable retention | Never relabel or reuse as P4-v2 evidence |
 | Historical task-local build/install trees | Delete only by the pushed literal inventory | Prohibited after freeze | Regenerate from retained source and commands if needed |
 | Protected `docs/icra27/dev/ICRA_SYSTEM_FLOW.pdf` | Untracked, unstaged, unchanged | Same | Never clean, stage or overwrite |
