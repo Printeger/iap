@@ -11,15 +11,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ---
 
-## Mandatory Traceability (Enforced by Git Hook)
+## Development Workflow
 
-Every code change **must**:
-
-1. Reference at least one `IAP-RQ-XXX` requirement (see `docs/REQS.md` for the full list).
-2. Update `docs/CHANGES.md` — what changed, why, which IAP-RQ-XXX.
-3. Update `docs/TRACEABILITY.md` — requirement ↔ implementation file ↔ test/log mapping.
-
-Commit messages must include one or more `IAP-RQ-XXX` identifiers. The pre-commit git hook will block commits that skip documentation updates.
+Follow `AGENTS.md`. Daily development uses focused tests and small,
+descriptive Git commits as its recovery mechanism. Commits do not require an
+`IAP-RQ-XXX` identifier or synchronized updates to `DEV_LOG.md`,
+`docs/CHANGES.md`, or `docs/TRACEABILITY.md`. Builder/Supervisor handoffs,
+route-lock state, mandatory independent reviews and formal one-shot controls do
+not apply unless the user explicitly starts a formal experiment protocol.
 
 ---
 
