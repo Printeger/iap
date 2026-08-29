@@ -752,11 +752,21 @@ if(DEFINED ENV{ROS_VERSION})
       )
       add_test(
         NAME test_test_planner_launch
-        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_test_planner_launch.py
+        COMMAND
+          ${Python3_EXECUTABLE}
+          ${CMAKE_CURRENT_SOURCE_DIR}/scripts/dev_planner/run_p4_g0c_tests.py
+          --task-root ${CMAKE_CURRENT_SOURCE_DIR}/results/icra27/icra072/test_planner_launch_ctest
+          unittest -- discover -s ${CMAKE_CURRENT_SOURCE_DIR}/test
+          -p test_test_planner_launch.py
       )
       add_test(
         NAME test_test_icra_launch
-        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_test_icra_launch.py
+        COMMAND ${Python3_EXECUTABLE}
+          ${CMAKE_CURRENT_SOURCE_DIR}/scripts/dev_planner/run_p4_g0c_tests.py
+          --task-root
+          ${CMAKE_CURRENT_SOURCE_DIR}/results/icra27/icra072/test_icra_launch_ctest
+          unittest -- discover -s ${CMAKE_CURRENT_SOURCE_DIR}/test
+          -p test_test_icra_launch.py
       )
       add_test(
         NAME test_icra_interface_integration

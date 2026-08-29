@@ -1,14 +1,16 @@
 #ifndef EGO_PLANNER_TRAJECTORY_COMMAND_QOS_H_
 #define EGO_PLANNER_TRAJECTORY_COMMAND_QOS_H_
 
+#include <cstddef>
+
 #include <rclcpp/qos.hpp>
 
 namespace ego_planner
 {
 
-inline rclcpp::QoS trajectoryCommandQos()
+inline rclcpp::QoS trajectoryCommandQos(const std::size_t depth = 1u)
 {
-  return rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local();
+  return rclcpp::QoS(rclcpp::KeepLast(depth)).reliable().transient_local();
 }
 
 }  // namespace ego_planner

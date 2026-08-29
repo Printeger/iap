@@ -9,6 +9,7 @@
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <iostream>
 #include <cstdint>
+#include <deque>
 #include <limits>
 #include <mutex>
 #include <random>
@@ -70,6 +71,7 @@ struct MappingParameters
   /* time out */
   double odom_depth_timeout_;
   double independent_cloud_min_interval_s_ = 0.0;
+  double independent_cloud_clock_guard_s_ = 0.0;
 
   /* depth image projection filtering */
   double depth_filter_maxdist_, depth_filter_mindist_, depth_filter_tolerance_;
@@ -262,6 +264,11 @@ private:
                          const geometry_msgs::msg::PoseStamped::ConstPtr &pose);
   void extrinsicCallback(const nav_msgs::msg::Odometry::ConstPtr &odom);
   void depthOdomCallback(const sensor_msgs::msg::Image::ConstPtr &img, const nav_msgs::msg::Odometry::ConstPtr &odom);
+  void independentCloudInputCallback(
+      const sensor_msgs::msg::PointCloud2::ConstPtr &img);
+  sensor_msgs::msg::PointCloud2::ConstPtr
+  takeLatestIndependentCloudAtOrBefore(double clock_stamp_s);
+  void processLatestIndependentCloud();
   void cloudCallback(const sensor_msgs::msg::PointCloud2::ConstPtr &img);
   void odomCallback(const nav_msgs::msg::Odometry::SharedPtr odom);
 
@@ -303,13 +310,16 @@ private:
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr indep_cloud_sub_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr indep_odom_sub_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr extrinsic_sub_;
-  rclcpp::CallbackGroup::SharedPtr independent_input_callback_group_;
+  rclcpp::CallbackGroup::SharedPtr independent_cloud_callback_group_;
+  rclcpp::CallbackGroup::SharedPtr independent_cloud_input_callback_group_;
+  rclcpp::CallbackGroup::SharedPtr independent_odom_callback_group_;
 
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr map_pub_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr map_inf_pub_;
 
   rclcpp::TimerBase::SharedPtr occ_timer_;
   rclcpp::TimerBase::SharedPtr vis_timer_;
+  rclcpp::TimerBase::SharedPtr independent_cloud_timer_;
 
   //
   uniform_real_distribution<double> rand_noise_;
@@ -318,8 +328,13 @@ private:
   std::atomic<uint64_t> occupancy_update_sequence_{0};
   std::atomic<double> occupancy_cloud_stamp_s_{
       std::numeric_limits<double>::quiet_NaN()};
+  std::atomic<double> independent_odom_stamp_s_{
+      std::numeric_limits<double>::quiet_NaN()};
   double last_independent_cloud_stamp_s_ =
       std::numeric_limits<double>::quiet_NaN();
+  std::deque<sensor_msgs::msg::PointCloud2::ConstPtr>
+      pending_independent_clouds_;
+  mutable std::mutex independent_cloud_input_mutex_;
   mutable std::mutex occupancy_epoch_mutex_;
 };
 

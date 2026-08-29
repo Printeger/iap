@@ -144,6 +144,10 @@ struct P5GateStatus {
   double final_candidate_duration_s =
       std::numeric_limits<double>::quiet_NaN();
   bool final_candidate_rejected = false;
+  double final_evaluation_stamp_s =
+      std::numeric_limits<double>::quiet_NaN();
+  double final_publish_authorization_stamp_s =
+      std::numeric_limits<double>::quiet_NaN();
   std::string pred_al_mode;
   double pred_hal_min = std::numeric_limits<double>::quiet_NaN();
   double pred_val_min = std::numeric_limits<double>::quiet_NaN();
@@ -204,6 +208,9 @@ class P5RuntimeIntegrityGate {
       const std::shared_ptr<const iap::RiskGridSnapshot>& snapshot,
       double now_s,
       double emergency_time_s);
+
+  void publishFinalAdmission(P5GateStatus status,
+                             double publish_authorization_stamp_s);
 
   void publishStatus(const P5GateStatus& status, const std::string& phase);
 

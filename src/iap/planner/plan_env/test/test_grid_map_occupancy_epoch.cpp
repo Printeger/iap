@@ -129,13 +129,40 @@ struct GridMapTestAccess {
       map->md_.has_odom_ = true;
       map->md_.camera_pos_ = Eigen::Vector3d::Zero();
     }
+    map->cloudCallback(pointCloud(source_stamp_s, source_stamp_ns));
+  }
+
+  static sensor_msgs::msg::PointCloud2::SharedPtr pointCloud(
+      const int32_t source_stamp_s, const uint32_t source_stamp_ns = 0U) {
     pcl::PointCloud<pcl::PointXYZ> cloud;
     cloud.push_back(pcl::PointXYZ(0.0F, 0.0F, 1.0F));
     auto message = std::make_shared<sensor_msgs::msg::PointCloud2>();
     pcl::toROSMsg(cloud, *message);
     message->header.stamp.sec = source_stamp_s;
     message->header.stamp.nanosec = source_stamp_ns;
-    map->cloudCallback(message);
+    return message;
+  }
+
+  static void enqueueIndependentCloud(
+      GridMap* map, const int32_t source_stamp_s,
+      const uint32_t source_stamp_ns = 0U) {
+    map->independentCloudInputCallback(
+        pointCloud(source_stamp_s, source_stamp_ns));
+  }
+
+  static sensor_msgs::msg::PointCloud2::ConstPtr
+  takeIndependentCloudAtOrBefore(GridMap* map, const double clock_stamp_s) {
+    return map->takeLatestIndependentCloudAtOrBefore(clock_stamp_s);
+  }
+
+  static double acceptIndependentOdometry(GridMap* map,
+                                           const int32_t source_stamp_s,
+                                           const uint32_t source_stamp_ns) {
+    auto odom = cameraOdometry();
+    odom->header.stamp.sec = source_stamp_s;
+    odom->header.stamp.nanosec = source_stamp_ns;
+    map->odomCallback(odom);
+    return map->independent_odom_stamp_s_.load(std::memory_order_acquire);
   }
 
   static void setIndependentCloudMinInterval(GridMap* map,
@@ -292,6 +319,7 @@ TEST(GridMapOccupancyEpochTest, InProgressOrPreCloudCaptureFailsClosed) {
 
   GridMapTestAccess::seed(&map, 3u, 100.0);
   EXPECT_EQ(map.captureFrozenOccupancyEpoch(), nullptr);
+  EXPECT_EQ(map.occupancyGeneration(), 1u);
 
   GridMapTestAccess::seed(
       &map, 2u, std::numeric_limits<double>::quiet_NaN());
@@ -371,4 +399,34 @@ TEST(GridMapOccupancyEpochTest,
   ASSERT_NE(epoch, nullptr);
   EXPECT_EQ(epoch->generation, 1u);
   EXPECT_DOUBLE_EQ(epoch->cloud_stamp_s, 222.0);
+}
+
+TEST(GridMapOccupancyEpochTest,
+     IndependentCloudProducerDefersFutureSamplesUntilClockCatchesUp) {
+  GridMap map;
+  GridMapTestAccess::enqueueIndependentCloud(&map, 10, 0U);
+  GridMapTestAccess::enqueueIndependentCloud(&map, 10, 200000000U);
+  GridMapTestAccess::enqueueIndependentCloud(&map, 10, 400000000U);
+
+  const auto first =
+      GridMapTestAccess::takeIndependentCloudAtOrBefore(&map, 10.25);
+  ASSERT_NE(first, nullptr);
+  EXPECT_EQ(first->header.stamp.sec, 10);
+  EXPECT_EQ(first->header.stamp.nanosec, 200000000U);
+  EXPECT_EQ(GridMapTestAccess::takeIndependentCloudAtOrBefore(&map, 10.25),
+            nullptr);
+
+  const auto second =
+      GridMapTestAccess::takeIndependentCloudAtOrBefore(&map, 10.5);
+  ASSERT_NE(second, nullptr);
+  EXPECT_EQ(second->header.stamp.sec, 10);
+  EXPECT_EQ(second->header.stamp.nanosec, 400000000U);
+}
+
+TEST(GridMapOccupancyEpochTest,
+     IndependentCloudWatermarkUsesOdometryMessageTimeDomain) {
+  GridMap map;
+  EXPECT_DOUBLE_EQ(
+      GridMapTestAccess::acceptIndependentOdometry(&map, 42, 250000000U),
+      42.25);
 }

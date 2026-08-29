@@ -54,6 +54,7 @@ def selected_decision():
 
 def lineage_for(decision, trajectory_id, start_ns):
     common = {
+        "schema_version": "p4_v2_end_to_end_lineage_v2",
         "planning_attempt_id": decision["planning_attempt_id"],
         "collision_segment_id": decision["collision_segment_id"],
         "request_hash": decision["request_hash"],
@@ -70,12 +71,12 @@ def lineage_for(decision, trajectory_id, start_ns):
         "selection_applied": "1",
     }
     return [
-        {**common, "stage": stage}
-        for stage in (
+        {**common, "stage": stage, "stamp_s": str(10.0 + index)}
+        for index, stage in enumerate((
             "final_bspline_before_p5",
             "p5_final_pass_before_publish",
             "normal_publish_authorized",
-        )
+        ))
     ]
 
 
@@ -93,6 +94,37 @@ class TestStageContracts(unittest.TestCase):
         self.assertEqual(MODULE.STAGES["p4"].duration_s, 45.0)
         self.assertEqual(MODULE.STAGES["p5-final"].duration_s, 60.0)
         self.assertEqual(MODULE.STAGES["full"].duration_s, 75.0)
+
+        expected = {
+            "estimator": ("false", "false", "false", "false"),
+            "p0": ("true", "false", "false", "false"),
+            "p4": ("true", "true", "false", "false"),
+            "p5-final": ("true", "true", "true", "false"),
+            "full": ("true", "true", "true", "true"),
+            "shutdown": ("true", "true", "true", "true"),
+        }
+        keys = (
+            "start_planner", "planner_enable_p4",
+            "planner_enable_p5_final", "planner_enable_p5_runtime",
+        )
+        for stage, values in expected.items():
+            self.assertEqual(
+                tuple(MODULE.STAGES[stage].launch_args[key] for key in keys),
+                values,
+            )
+            self.assertEqual(
+                MODULE.STAGES[stage].launch_args["odometry_acc_scale"], "1.0")
+            self.assertEqual(
+                MODULE.STAGES[stage].launch_args[
+                    "odometry_initialization_mode"], "NAIVE")
+
+    def test_final_pass_is_reserved_for_full_plus_shutdown(self):
+        self.assertEqual(MODULE._successful_session_result(("full",)),
+                         "STAGE_PASS")
+        self.assertEqual(MODULE._successful_session_result(("shutdown",)),
+                         "STAGE_PASS")
+        self.assertEqual(MODULE._successful_session_result(
+            MODULE.STAGE_ORDER), "PASS")
 
 
 class TestStageAnalyzer(unittest.TestCase):
@@ -142,15 +174,24 @@ class TestStageAnalyzer(unittest.TestCase):
         self.assertEqual(summary["result"], "PASS")
         self.assertGreaterEqual(summary["window_span_s"], 15.0)
 
-    def test_p0_continuity_timer_restarts_after_startup_transient(self):
+    def test_p0_does_not_restart_after_first_healthy_generation(self):
         rows = [healthy(1, 0.0)]
         rows.append(healthy(1, 0.5))
         rows[-1]["payload"]["reason"] = "occupancy_stale"
         rows.extend(healthy(index + 2, 1.0 + index * 0.5)
                     for index in range(31))
         summary = MODULE.analyze_p0(rows)
-        self.assertEqual(summary["result"], "PASS")
-        self.assertGreaterEqual(summary["window_span_s"], 15.0)
+        self.assertEqual(summary["result"], "FAIL")
+        self.assertIn("p0_health_not_continuous", summary["failures"])
+
+    def test_p0_ignores_unhealthy_startup_before_first_generation(self):
+        rows = [healthy(0, 0.0)]
+        rows[0]["payload"].update({
+            "ready": False, "stale": True, "reason": "startup",
+        })
+        rows.extend(healthy(index + 1, 1.0 + index * 0.5)
+                    for index in range(31))
+        self.assertEqual(MODULE.analyze_p0(rows)["result"], "PASS")
 
     def test_p4_requires_selected_lineage_and_stable_publication(self):
         summary = MODULE.analyze_stage_records(
@@ -196,6 +237,7 @@ class TestStageAnalyzer(unittest.TestCase):
         lineage = lineage_for(decision, trajectory_id=12, start_ns=34)
         for row in lineage:
             row["closed_collision_observed"] = "1"
+            row["no_collision_refinement_observed"] = "1"
         bsplines = [
             {"receive_steady_s": 20.0 + index * 3.0,
              "payload": {"trajectory_id": 12, "start_time_ns": 34}}
@@ -215,6 +257,15 @@ class TestStageAnalyzer(unittest.TestCase):
                 "final_candidate_traj_id": 12,
                 "final_candidate_start_time_ns": 34,
                 "samples": [],
+            },
+        }, {
+            "receive_steady_s": 19.5,
+            "payload": {
+                **safe_common, "phase": "final_publish_authorized",
+                "final_candidate_traj_id": 12,
+                "final_candidate_start_time_ns": 34,
+                "final_evaluation_stamp_s": 18.0,
+                "final_publish_authorization_stamp_s": 19.0,
             },
         }, {
             "receive_steady_s": 21.0,
@@ -237,7 +288,7 @@ class TestStageAnalyzer(unittest.TestCase):
         self.assertTrue(all(summary["seven_stage"]["stage_status"].values()))
         self.assertEqual(summary["p5_runtime_committed_count"], 1)
 
-    def test_full_scopes_identity_linkage_to_the_capture_window(self):
+    def test_full_rejects_capture_missing_selected_terminal_identity(self):
         decision = selected_decision()
         lineage = lineage_for(decision, trajectory_id=12, start_ns=34)
         for row in lineage:
@@ -288,8 +339,53 @@ class TestStageAnalyzer(unittest.TestCase):
             decisions=[decision], lineage=lineage, bsplines=bsplines,
             p5_status=statuses,
             poscmd_times=[20.0 + index * 0.01 for index in range(601)])
-        self.assertEqual(summary["result"], "PASS")
-        self.assertEqual(summary["p5_runtime_ok_count"], 2)
+        self.assertEqual(summary["result"], "FAIL")
+        self.assertIn("p5_final_identity_or_status_invalid",
+                      summary["failures"])
+        self.assertIn("existing_seven_stage_analyzer_failed",
+                      summary["failures"])
+
+    def test_p5_final_ok_must_precede_same_identity_publication(self):
+        decision = selected_decision()
+        lineage = lineage_for(decision, trajectory_id=12, start_ns=34)
+        for row in lineage:
+            row["closed_collision_observed"] = "1"
+            row["no_collision_refinement_observed"] = "1"
+        bsplines = [
+            {"receive_steady_s": 20.0 + index * 3.0,
+             "payload": {"trajectory_id": 12, "start_time_ns": 34}}
+            for index in range(3)
+        ]
+        safe = {
+            "action": "OK", "raw_action": "OK",
+            "reason": "ok", "raw_reason": "ok", "active_reasons": [],
+            "current_reason": "", "future_reason": "",
+            "final_candidate_rejected": False,
+            "current_integrity_source": "FUSED",
+        }
+        statuses = [{
+            "receive_steady_s": 29.0,
+            "payload": {
+                **safe, "phase": "final", "final_candidate_traj_id": 12,
+                "final_candidate_start_time_ns": 34, "samples": [],
+            },
+        }, {
+            "receive_steady_s": 30.0,
+            "payload": {
+                **safe, "phase": "runtime", "samples": [{
+                    "trajectory_sample_source": "runtime_committed",
+                    "trajectory_id": 12, "trajectory_start_time_ns": 34,
+                }],
+            },
+        }]
+        summary = MODULE.analyze_stage_records(
+            "full", [healthy(index + 1, float(index)) for index in range(16)],
+            decisions=[decision], lineage=lineage, bsplines=bsplines,
+            p5_status=statuses,
+            poscmd_times=[20.0 + index * 0.01 for index in range(601)])
+        self.assertEqual(summary["result"], "FAIL")
+        self.assertIn("p5_published_candidate_without_prior_final_ok",
+                      summary["failures"])
 
     def test_shutdown_rejects_escalation_and_nonzero_process_exit(self):
         summary = MODULE.analyze_shutdown(

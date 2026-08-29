@@ -435,6 +435,8 @@ P0RiskGridRuntime::Config P0RiskGridRuntime::declareAndReadConfig(
       "p0.horizons_s", std::vector<double>{0.0, 0.5, 1.0, 1.5, 2.0});
   config.grid.refresh_period_s =
       node->declare_parameter<double>("p0.refresh_period_s", 0.5);
+  config.refresh_start_delay_s =
+      node->declare_parameter<double>("p0.refresh_start_delay_s", 0.0);
   config.grid.stale_timeout_s =
       node->declare_parameter<double>("p0.stale_timeout_s", 1.0);
   config.grid.skip_occupied_voxels =
@@ -931,14 +933,32 @@ void P0RiskGridRuntime::createRosInterfaces() {
       node_, SafetyRvizPublisher::declareAndReadConfig(node_));
   const double period_s =
       std::max(0.001, config_.grid.refresh_period_s);
+  const double refresh_start_delay_s =
+      std::max(0.0, config_.refresh_start_delay_s);
+  auto start_periodic_refresh = [this, period_s]() {
+    refresh_timer_ = node_->create_wall_timer(
+        std::chrono::duration<double>(period_s),
+        [this]() { refreshTimerCallback(); }, refresh_callback_group_);
+    refreshTimerCallback();
+  };
   {
     std::lock_guard<std::mutex> lock(health_state_mutex_);
-    next_refresh_scheduled_steady_s_ = steadyNowSeconds() + period_s;
+    next_refresh_scheduled_steady_s_ =
+        steadyNowSeconds() + period_s + refresh_start_delay_s;
   }
-  refresh_timer_ = node_->create_wall_timer(
-      std::chrono::duration<double>(period_s),
-      [this]() { refreshTimerCallback(); },
-      refresh_callback_group_);
+  if (refresh_start_delay_s > 0.0) {
+    refresh_start_timer_ = node_->create_wall_timer(
+        std::chrono::duration<double>(period_s + refresh_start_delay_s),
+        [this, start_periodic_refresh]() {
+          refresh_start_timer_->cancel();
+          start_periodic_refresh();
+        },
+        refresh_callback_group_);
+  } else {
+    refresh_timer_ = node_->create_wall_timer(
+        std::chrono::duration<double>(period_s),
+        [this]() { refreshTimerCallback(); }, refresh_callback_group_);
+  }
   // Health must remain observable while a full grid refresh is evaluating a
   // large predictor batch.  It intentionally publishes the latest snapshot
   // state rather than waiting for that batch to finish.
@@ -980,7 +1000,17 @@ void P0RiskGridRuntime::refreshTimerCallback() {
   }
   const auto refresh_start = std::chrono::steady_clock::now();
   const double refresh_start_steady_s = steadyNowSeconds();
-  const double now_s = liveNowSeconds();
+  double now_s = liveNowSeconds();
+  std::optional<P0OccupancyEpoch> occupancy_epoch;
+  P0OccupancyEpochCaptureStatus occupancy_capture_status =
+      P0OccupancyEpochCaptureStatus::VALID;
+  const bool occupancy_capture_attempted =
+      static_cast<bool>(occupancy_epoch_factory_);
+  if (occupancy_capture_attempted) {
+    P0OccupancyEpochCapture capture = occupancy_epoch_factory_();
+    occupancy_capture_status = capture.status;
+    occupancy_epoch = std::move(capture.epoch);
+  }
   const std::string pre_build_failure = snapshotFailureReason(now_s);
   const InputReadiness refresh_input_readiness = inputReadiness(now_s);
   const iap::RiskGridHealth active_health_at_start =
@@ -1129,21 +1159,19 @@ void P0RiskGridRuntime::refreshTimerCallback() {
     last_snapshot_failure_reason_ = "none";
   }
 
-  std::optional<P0OccupancyEpoch> occupancy_epoch;
-  if (occupancy_epoch_factory_) {
-    P0OccupancyEpochCapture capture = occupancy_epoch_factory_();
-    if (capture.status ==
+  if (occupancy_capture_attempted) {
+    if (occupancy_capture_status ==
         P0OccupancyEpochCaptureStatus::SNAPSHOT_UNAVAILABLE) {
       fail_semantic_refresh(
           P0SemanticFailure::OCCUPANCY_SNAPSHOT_UNAVAILABLE);
       return;
     }
-    if (capture.status == P0OccupancyEpochCaptureStatus::ADAPTER_INVALID ||
-        !capture.epoch.has_value()) {
+    if (occupancy_capture_status ==
+            P0OccupancyEpochCaptureStatus::ADAPTER_INVALID ||
+        !occupancy_epoch.has_value()) {
       fail_semantic_refresh(P0SemanticFailure::OCCUPANCY_LOS_ADAPTER_INVALID);
       return;
     }
-    occupancy_epoch = std::move(capture.epoch);
     if (!occupancy_epoch->diagnostic_query ||
         !occupancy_epoch->los_owner || !occupancy_epoch->source_owner ||
         !occupancy_epoch->live_source_owner ||
@@ -1162,6 +1190,13 @@ void P0RiskGridRuntime::refreshTimerCallback() {
         !std::isfinite(occupancy_age_s) || occupancy_age_s < 0.0 ||
         (config_.grid.stale_timeout_s >= 0.0 &&
          occupancy_age_s > config_.grid.stale_timeout_s)) {
+      RCLCPP_WARN(
+          node_->get_logger(),
+          "[p0] rejecting occupancy epoch generation=%lu stamp=%.9f "
+          "transaction_now=%.9f age=%.6f stale_timeout=%.6f",
+          static_cast<unsigned long>(occupancy_epoch->generation),
+          occupancy_epoch->cloud_stamp_s, now_s, occupancy_age_s,
+          config_.grid.stale_timeout_s);
       fail_semantic_refresh(P0SemanticFailure::OCCUPANCY_STALE);
       return;
     }
@@ -2499,6 +2534,13 @@ bool P0RiskGridRuntime::buildSnapshot(
   if (!odom_valid || !current_valid) {
     return false;
   }
+  double transaction_now_s = now_s;
+  if (std::isfinite(odom_stamp)) {
+    transaction_now_s = std::max(transaction_now_s, odom_stamp);
+  }
+  if (std::isfinite(current.stamp)) {
+    transaction_now_s = std::max(transaction_now_s, current.stamp);
+  }
   const auto age_valid = [](double stamp, double now_s, double max_age_s) {
     if (!std::isfinite(stamp) || !std::isfinite(now_s) || stamp <= 0.0) {
       return false;
@@ -2509,24 +2551,26 @@ bool P0RiskGridRuntime::buildSnapshot(
     }
     return max_age_s < 0.0 || age_s <= max_age_s;
   };
-  if (!age_valid(odom_stamp, now_s, config_.grid.stale_timeout_s)) {
+  if (!age_valid(odom_stamp, transaction_now_s,
+                 config_.grid.stale_timeout_s)) {
     return false;
   }
-  if (!age_valid(current.stamp, now_s, config_.grid.stale_timeout_s)) {
+  if (!age_valid(current.stamp, transaction_now_s,
+                 config_.grid.stale_timeout_s)) {
     return false;
   }
   if (epoch && !std::isfinite(epoch->stamp)) {
     return false;
   }
   iap::IntegritySnapshotBuilderInput input;
-  input.stamp = now_s;
+  input.stamp = transaction_now_s;
   input.has_pose = odom_valid;
   input.pose_stamp = odom_stamp;
   input.p_wb = odom_position;
   input.q_wb = odom_orientation;
   input.current = current;
   if (epoch) {
-    const double age_s = now_s - epoch->stamp;
+    const double age_s = transaction_now_s - epoch->stamp;
     if (std::isfinite(age_s) &&
         (config_.gnss_epoch_max_age_s < 0.0 || age_s <= config_.gnss_epoch_max_age_s)) {
       input.gnss_epoch = &*epoch;
@@ -2574,16 +2618,22 @@ double P0RiskGridRuntime::currentMessageStamp() const {
 }
 
 double P0RiskGridRuntime::liveNowSeconds() const {
+  const double message_stamp_s = currentMessageStamp();
   const bool use_sim_time =
       node_ && node_->has_parameter("use_sim_time") &&
       node_->get_parameter("use_sim_time").as_bool();
   if (use_sim_time) {
     const double now_s = node_->now().seconds();
     if (std::isfinite(now_s) && now_s > 0.0) {
-      return now_s;
+      // ROS delivery can expose a sensor/odom message a few milliseconds
+      // before the matching /clock sample. Keep one message time domain and
+      // never classify that valid newest input as being from the future.
+      return std::isfinite(message_stamp_s)
+          ? std::max(now_s, message_stamp_s)
+          : now_s;
     }
   }
-  return currentMessageStamp();
+  return message_stamp_s;
 }
 
 double P0RiskGridRuntime::currentRefreshStamp() const {

@@ -590,8 +590,13 @@ void P5RuntimeIntegrityGate::createRosInterfaces() {
       },
       subscription_options);
   if (config_.debug_metrics_enable) {
-    status_pub_ =
-        node_->create_publisher<std_msgs::msg::String>(config_.status_topic, 10);
+    // Final-gate and first-runtime records can be emitted immediately after
+    // the planner node starts. Retain the bounded debug history so integration
+    // evidence subscribers cannot miss the selected trajectory during DDS
+    // discovery.
+    status_pub_ = node_->create_publisher<std_msgs::msg::String>(
+        config_.status_topic,
+        rclcpp::QoS(rclcpp::KeepLast(200)).reliable().transient_local());
   }
   safety_viz_ = std::make_shared<SafetyRvizPublisher>(
       node_, SafetyRvizPublisher::declareAndReadConfig(node_));
@@ -658,11 +663,48 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateFinal(
   P5GateStatus status = evaluate(local_data, snapshot,
                                  EvalContext{true, now_s, emergency_time_s});
   status = applyFinalGateBudget(status, now_s);
+  status.final_evaluation_stamp_s = now_s;
   status.final_candidate_rejected =
       status.action != P5GateAction::OK &&
       status.final_candidate_traj_id >= 0;
   publishStatus(status, "final");
   return status;
+}
+
+void P5RuntimeIntegrityGate::publishFinalAdmission(
+    P5GateStatus status, const double publish_authorization_stamp_s) {
+  if (status.action != P5GateAction::OK ||
+      status.reason != P5GateReason::OK ||
+      !std::isfinite(status.final_evaluation_stamp_s) ||
+      !std::isfinite(publish_authorization_stamp_s) ||
+      publish_authorization_stamp_s < status.final_evaluation_stamp_s) {
+    return;
+  }
+  status.final_publish_authorization_stamp_s =
+      publish_authorization_stamp_s;
+  if (!status_pub_) {
+    return;
+  }
+  std::ostringstream oss;
+  oss << "{\"phase\":\"final_publish_authorized\""
+      << ",\"action\":\"OK\",\"raw_action\":\"OK\""
+      << ",\"reason\":\"ok\",\"raw_reason\":\"ok\""
+      << ",\"active_reasons\":[],\"current_reason\":\"\""
+      << ",\"future_reason\":\"\""
+      << ",\"final_candidate_rejected\":false"
+      << ",\"current_integrity_source\":"
+      << jsonString(status.current_integrity_source)
+      << ",\"final_candidate_traj_id\":"
+      << status.final_candidate_traj_id
+      << ",\"final_candidate_start_time_ns\":"
+      << status.final_candidate_start_time_ns
+      << ",\"final_evaluation_stamp_s\":"
+      << jsonNumber(status.final_evaluation_stamp_s)
+      << ",\"final_publish_authorization_stamp_s\":"
+      << jsonNumber(status.final_publish_authorization_stamp_s) << "}";
+  std_msgs::msg::String msg;
+  msg.data = oss.str();
+  status_pub_->publish(msg);
 }
 
 P5GateStatus P5RuntimeIntegrityGate::evaluate(
@@ -1225,6 +1267,10 @@ std::string P5RuntimeIntegrityGate::toJson(
       << jsonNumber(status.final_candidate_duration_s)
       << ",\"final_candidate_rejected\":"
       << (status.final_candidate_rejected ? "true" : "false")
+      << ",\"final_evaluation_stamp_s\":"
+      << jsonNumber(status.final_evaluation_stamp_s)
+      << ",\"final_publish_authorization_stamp_s\":"
+      << jsonNumber(status.final_publish_authorization_stamp_s)
       << ",\"pred_al_mode\":" << jsonString(status.pred_al_mode)
       << ",\"pred_hal_min\":" << jsonNumber(status.pred_hal_min)
       << ",\"pred_val_min\":" << jsonNumber(status.pred_val_min)

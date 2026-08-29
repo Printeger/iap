@@ -108,6 +108,186 @@ def _committed_runtime_identity(payload: dict) -> tuple[int, int] | None:
     return next(iter(distinct)) if len(distinct) == 1 else None
 
 
+def analyze_seven_stage_evidence(
+        health: list[dict], p4: list[dict], lineage: list[dict],
+        captured: list[dict]) -> dict:
+    """Apply the production seven-stage identity contract to live captures.
+
+    This is the artifact-independent core used by the layered integration
+    runner.  The formal analyzer below adds source-binding and run-manifest
+    admission around the same interface evidence.
+    """
+    failures: list[str] = []
+
+    def complete_support(row: dict, prefix: str) -> bool:
+        try:
+            samples = int(row[f"{prefix}_sample_count"])
+            valid = int(row[f"{prefix}_valid_count"])
+            unknown = int(row[f"{prefix}_unknown_count"])
+            stale = int(row[f"{prefix}_stale_count"])
+            non_finite = int(row[f"{prefix}_non_finite_count"])
+        except (KeyError, TypeError, ValueError):
+            return False
+        return (samples > 0 and valid == samples and unknown == 0 and
+                stale == 0 and non_finite == 0)
+
+    ready_generations = {
+        str(row.get("payload", row).get("generation_id"))
+        for row in health
+        if row.get("payload", row).get("ready") is True
+        and row.get("payload", row).get("stale") is False
+        and row.get("payload", row).get("reason") == "ok"
+    }
+    decision_fields = (
+        "planning_attempt_id", "collision_segment_id", "request_hash",
+        "snapshot_generation_id", "snapshot_config_hash", "occupancy_epoch",
+        "original_hash", "risk_hash", "selected_hash",
+    )
+    selected = [
+        row for row in p4
+        if row.get("status") == "RISK_SELECTED"
+        and row.get("selection_applied") == "1"
+        and all(row.get(field) for field in decision_fields)
+        and complete_support(row, "original")
+        and complete_support(row, "risk")
+    ]
+    selected_keys = {
+        tuple(row.get(field, "") for field in decision_fields): row
+        for row in selected
+    }
+    required_stages = {
+        "final_bspline_before_p5", "p5_final_pass_before_publish",
+        "normal_publish_authorized",
+    }
+    groups: dict[tuple[str, ...], list[dict]] = defaultdict(list)
+    lineage_identity_ok = True
+    for row in lineage:
+        if row.get("selection_applied") != "1":
+            continue
+        if (row.get("schema_version") != "p4_v2_end_to_end_lineage_v2" or
+                _positive_int(row.get("trajectory_id")) is None or
+                _positive_int(row.get("trajectory_start_ns")) is None or
+                not row.get("control_points_hash") or
+                not row.get("final_bspline_identity")):
+            lineage_identity_ok = False
+            continue
+        decision_key = tuple(row.get(field, "") for field in (
+            "planning_attempt_id", "collision_segment_id", "request_hash",
+            "snapshot_generation_id", "snapshot_config_hash",
+            "occupancy_epoch", "original_guide_hash", "risk_guide_hash",
+            "selected_guide_hash",
+        ))
+        identity = tuple(row.get(field, "") for field in (
+            "control_points_hash", "trajectory_id", "trajectory_start_ns",
+            "final_bspline_identity",
+        ))
+        groups[decision_key + identity].append(row)
+    if not lineage_identity_ok:
+        failures.append("lineage_trajectory_identity_missing_or_invalid")
+
+    complete_groups = []
+    for key, rows in groups.items():
+        if key[:len(decision_fields)] not in selected_keys:
+            continue
+        stages = {row.get("stage") for row in rows}
+        if not required_stages.issubset(stages):
+            continue
+        if not any(row.get("closed_collision_observed") == "1" and
+                   row.get("no_collision_refinement_observed") == "1"
+                   for row in rows):
+            continue
+        identities = {(row.get("trajectory_id"),
+                       row.get("trajectory_start_ns"),
+                       row.get("control_points_hash"),
+                       row.get("final_bspline_identity")) for row in rows}
+        if len(identities) != 1:
+            failures.append("lineage_trajectory_identity_inconsistent")
+            continue
+        stamps = {row["stage"]: float(row["stamp_s"]) for row in rows
+                  if row.get("stage") in required_stages}
+        if not (stamps["final_bspline_before_p5"] <=
+                stamps["p5_final_pass_before_publish"] <=
+                stamps["normal_publish_authorized"]):
+            failures.append("lineage_stage_order_invalid")
+            continue
+        complete_groups.append((key, rows))
+
+    linked_key, linked = complete_groups[-1] if complete_groups else ((), [])
+    linked_decision = selected_keys.get(linked_key[:len(decision_fields)])
+    generation_ok = bool(linked_decision) and str(
+        linked_decision.get("snapshot_generation_id")) in ready_generations
+    if linked_decision and not generation_ok:
+        failures.append("p0_p4_generation_identity_mismatch")
+    identity = None
+    if linked:
+        identity = (_positive_int(linked[0].get("trajectory_id")),
+                    _positive_int(linked[0].get("trajectory_start_ns")))
+
+    final_records = [
+        row for row in captured if row.get("kind") == "p5_status"
+        and row.get("payload", {}).get("phase") == "final"
+        and row.get("payload", {}).get("current_integrity_source") == "FUSED"
+        and _runtime_safely_ok(row.get("payload", {}))
+    ]
+    bspline_records = [row for row in captured
+                       if row.get("kind") == "normal_bspline"]
+    runtime_records = [
+        row for row in captured if row.get("kind") == "p5_status"
+        and row.get("payload", {}).get("phase") == "runtime"
+        and _committed_runtime_identity(row.get("payload", {})) is not None
+    ]
+    matching_final = []
+    matching_bspline = []
+    matching_runtime = []
+    if identity and all(value is not None for value in identity):
+        matching_final = [row for row in final_records if (
+            _positive_int(row["payload"].get("final_candidate_traj_id")),
+            _positive_int(row["payload"].get(
+                "final_candidate_start_time_ns"))) == identity]
+        matching_bspline = [row for row in bspline_records if (
+            _positive_int(row["payload"].get("trajectory_id")),
+            _positive_int(row["payload"].get("start_time_ns"))) == identity]
+        matching_runtime = [row for row in runtime_records
+                            if _committed_runtime_identity(row["payload"])
+                            == identity and
+                            _runtime_safely_ok(row["payload"]) and
+                            row["payload"].get(
+                                "current_integrity_source") == "FUSED"]
+    ordered_capture = bool(
+        matching_final and matching_bspline and matching_runtime and
+        min(row["receive_steady_s"] for row in matching_final) <=
+        min(row["receive_steady_s"] for row in matching_bspline) <=
+        max(row["receive_steady_s"] for row in matching_runtime)
+    )
+    if identity and not ordered_capture:
+        failures.append("p5_publish_runtime_capture_order_invalid")
+
+    stage_status = {
+        "p0_snapshot": bool(ready_generations),
+        "closed_collision": any(
+            row.get("closed_collision_observed") == "1" and
+            row.get("no_collision_refinement_observed") == "1"
+            for row in lineage),
+        "p4_selection_application": bool(selected),
+        "ego_final_bspline": bool(complete_groups) and generation_ok and
+        lineage_identity_ok,
+        "p5_final_pass_before_publish": bool(matching_final) and
+        ordered_capture,
+        "normal_publication": bool(matching_bspline) and ordered_capture,
+        "p5_runtime_committed": bool(matching_runtime) and ordered_capture,
+    }
+    first_missing = next(
+        (stage for stage in STAGE_ORDER if not stage_status[stage]), None)
+    return {
+        "stage_order": list(STAGE_ORDER),
+        "stage_status": stage_status,
+        "first_missing_stage": first_missing,
+        "selected_terminal_identity": list(identity) if identity else None,
+        "failures": list(dict.fromkeys(failures)),
+        "result": "PASS" if first_missing is None and not failures else "FAIL",
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--run-root", type=Path, required=True)

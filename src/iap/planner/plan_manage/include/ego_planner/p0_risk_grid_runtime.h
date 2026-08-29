@@ -53,6 +53,7 @@ class P0RiskGridRuntime {
   struct Config {
     bool enable_risk_grid = false;
     bool debug_metrics_enable = false;
+    double refresh_start_delay_s = 0.0;
     iap::RiskGridMapParams grid;
     std::string odom_topic = "/drone_0_visual_slam/odom";
     std::string integrity_topic = "/iap/integrity";
@@ -285,6 +286,7 @@ class P0RiskGridRuntime {
   rclcpp::CallbackGroup::SharedPtr input_callback_group_;
   rclcpp::CallbackGroup::SharedPtr refresh_callback_group_;
   rclcpp::CallbackGroup::SharedPtr health_callback_group_;
+  rclcpp::TimerBase::SharedPtr refresh_start_timer_;
   rclcpp::TimerBase::SharedPtr refresh_timer_;
   rclcpp::TimerBase::SharedPtr health_timer_;
   std::shared_ptr<SafetyRvizPublisher> safety_viz_;

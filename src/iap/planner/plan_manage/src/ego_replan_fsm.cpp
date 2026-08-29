@@ -6,6 +6,8 @@
 #include <ego_planner/trajectory_command_qos.h>
 #include <iap/planner/risk_grid_map.hpp>
 
+#include <optional>
+
 namespace ego_planner
 {
   namespace
@@ -127,7 +129,7 @@ namespace ego_planner
     // command so a traj_server that completes startup after the planner does
     // not miss the only publication and leave the vehicle stationary.
     bspline_pub_ = node_->create_publisher<traj_utils::msg::Bspline>(
-        "planning/bspline", trajectoryCommandQos());
+        "planning/bspline", trajectoryCommandQos(200u));
     data_disp_pub_ = node_->create_publisher<traj_utils::msg::DataDisp>("planning/data_display", 100);
 
     if (target_type_ == TARGET_TYPE::MANUAL_TARGET)
@@ -1188,6 +1190,7 @@ namespace ego_planner
         return false;
       }
 
+      std::optional<P5GateStatus> p5_final_status;
       if (planner_manager_->p5_integrity_gate_ &&
           planner_manager_->p5_integrity_gate_->finalGateEnabled())
       {
@@ -1225,6 +1228,7 @@ namespace ego_planner
           planner_manager_->local_data_ = previous_local_data;
           return false;
         }
+        p5_final_status = p5_status;
         if (!planner_manager_->recordP4VerticalSliceLineage(
                 "p5_final_pass_before_publish", plannerNow().seconds()))
         {
@@ -1263,6 +1267,12 @@ namespace ego_planner
                      "P4-v2 publish-authorization lineage write failed");
         planner_manager_->local_data_ = previous_local_data;
         return false;
+      }
+
+      if (p5_final_status && planner_manager_->p5_integrity_gate_)
+      {
+        planner_manager_->p5_integrity_gate_->publishFinalAdmission(
+            *p5_final_status, plannerNow().seconds());
       }
 
       /* 1. publish traj to traj_server */

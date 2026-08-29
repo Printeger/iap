@@ -61,6 +61,7 @@ void GridMap::initMap(rclcpp::Node::SharedPtr node)
   node_->declare_parameter("grid_map/ground_height", 1.0);
   node_->declare_parameter("grid_map/odom_depth_timeout", 1.0);
   node_->declare_parameter("grid_map/independent_cloud_min_interval_s", 0.0);
+  node_->declare_parameter("grid_map/independent_cloud_clock_guard_s", 0.0);
 
   node_->get_parameter("grid_map/resolution", mp_.resolution_);
   node_->get_parameter("grid_map/map_size_x", x_size);
@@ -100,8 +101,17 @@ void GridMap::initMap(rclcpp::Node::SharedPtr node)
   node_->get_parameter("grid_map/odom_depth_timeout", mp_.odom_depth_timeout_);
   node_->get_parameter("grid_map/independent_cloud_min_interval_s",
                        mp_.independent_cloud_min_interval_s_);
+  node_->get_parameter("grid_map/independent_cloud_clock_guard_s",
+                       mp_.independent_cloud_clock_guard_s_);
   mp_.independent_cloud_min_interval_s_ =
       std::max(0.0, mp_.independent_cloud_min_interval_s_);
+  mp_.independent_cloud_clock_guard_s_ =
+      std::max(0.0, mp_.independent_cloud_clock_guard_s_);
+  RCLCPP_INFO(node_->get_logger(),
+              "[grid_map] independent cloud interval=%.3f s "
+              "clock_guard=%.3f s",
+              mp_.independent_cloud_min_interval_s_,
+              mp_.independent_cloud_clock_guard_s_);
 
   if (mp_.virtual_ceil_height_ - mp_.ground_height_ > z_size)
   {
@@ -188,21 +198,43 @@ void GridMap::initMap(rclcpp::Node::SharedPtr node)
   // Keep occupancy production independent from the planner FSM callback
   // group. P4 replanning can otherwise delay the authoritative 2 Hz cloud
   // long enough for P0 to correctly reject it as stale.
-  independent_input_callback_group_ = node_->create_callback_group(
+  independent_cloud_callback_group_ = node_->create_callback_group(
       rclcpp::CallbackGroupType::MutuallyExclusive);
-  rclcpp::SubscriptionOptions independent_input_options;
-  independent_input_options.callback_group = independent_input_callback_group_;
+  independent_cloud_input_callback_group_ = node_->create_callback_group(
+      rclcpp::CallbackGroupType::MutuallyExclusive);
+  independent_odom_callback_group_ = node_->create_callback_group(
+      rclcpp::CallbackGroupType::MutuallyExclusive);
+  rclcpp::SubscriptionOptions independent_cloud_options;
+  independent_cloud_options.callback_group =
+      independent_cloud_input_callback_group_;
+  rclcpp::SubscriptionOptions independent_odom_options;
+  independent_odom_options.callback_group = independent_odom_callback_group_;
 
   // 使用独立的里程计和点云订阅
   indep_cloud_sub_ = node_->create_subscription<sensor_msgs::msg::PointCloud2>(
-      "grid_map/cloud", 10,
-      std::bind(&GridMap::cloudCallback, this, std::placeholders::_1),
-      independent_input_options);
+      "grid_map/cloud", rclcpp::SensorDataQoS().keep_last(1),
+      [this](const sensor_msgs::msg::PointCloud2::ConstPtr &message)
+      {
+        if (mp_.independent_cloud_min_interval_s_ > 0.0)
+          independentCloudInputCallback(message);
+        else
+          cloudCallback(message);
+      },
+      independent_cloud_options);
+
+  if (mp_.independent_cloud_min_interval_s_ > 0.0)
+  {
+    independent_cloud_timer_ = node_->create_wall_timer(
+        std::chrono::duration<double>(
+            mp_.independent_cloud_min_interval_s_),
+        std::bind(&GridMap::processLatestIndependentCloud, this),
+        independent_cloud_callback_group_);
+  }
 
   indep_odom_sub_ = node_->create_subscription<nav_msgs::msg::Odometry>(
       "grid_map/odom", 10,
       std::bind(&GridMap::odomCallback, this, std::placeholders::_1),
-      independent_input_options);
+      independent_odom_options);
 
   // 定时器
   occ_timer_ = node_->create_wall_timer(
@@ -874,6 +906,11 @@ void GridMap::depthPoseCallback(const sensor_msgs::msg::Image::ConstPtr &img,
 
 void GridMap::odomCallback(const nav_msgs::msg::Odometry::SharedPtr odom)
 {
+  double odom_stamp_s = std::numeric_limits<double>::quiet_NaN();
+  if (odom && sourceStampSeconds(odom->header.stamp, &odom_stamp_s))
+    independent_odom_stamp_s_.store(odom_stamp_s, std::memory_order_release);
+
+  std::lock_guard<std::mutex> occupancy_lock(occupancy_epoch_mutex_);
   if (md_.has_first_depth_)
     return;
 
@@ -884,12 +921,62 @@ void GridMap::odomCallback(const nav_msgs::msg::Odometry::SharedPtr odom)
   md_.has_odom_ = true;
 }
 
+void GridMap::independentCloudInputCallback(
+    const sensor_msgs::msg::PointCloud2::ConstPtr &img)
+{
+  if (!img)
+    return;
+  std::lock_guard<std::mutex> lock(independent_cloud_input_mutex_);
+  pending_independent_clouds_.push_back(img);
+  constexpr std::size_t kMaxPendingClouds = 32u;
+  while (pending_independent_clouds_.size() > kMaxPendingClouds)
+    pending_independent_clouds_.pop_front();
+}
+
+sensor_msgs::msg::PointCloud2::ConstPtr
+GridMap::takeLatestIndependentCloudAtOrBefore(const double clock_stamp_s)
+{
+  if (!std::isfinite(clock_stamp_s) || clock_stamp_s <= 0.0)
+    return {};
+
+  std::lock_guard<std::mutex> lock(independent_cloud_input_mutex_);
+  for (auto reverse_it = pending_independent_clouds_.rbegin();
+       reverse_it != pending_independent_clouds_.rend(); ++reverse_it)
+  {
+    double source_stamp_s = std::numeric_limits<double>::quiet_NaN();
+    if (!*reverse_it ||
+        !sourceStampSeconds((*reverse_it)->header.stamp, &source_stamp_s) ||
+        source_stamp_s > clock_stamp_s)
+      continue;
+
+    const auto selected_it = std::prev(reverse_it.base());
+    const auto selected = *selected_it;
+    pending_independent_clouds_.erase(
+        pending_independent_clouds_.begin(), std::next(selected_it));
+    return selected;
+  }
+  return {};
+}
+
+void GridMap::processLatestIndependentCloud()
+{
+  const double odom_stamp_s =
+      independent_odom_stamp_s_.load(std::memory_order_acquire);
+  const double clock_stamp_s =
+      std::isfinite(odom_stamp_s)
+          ? odom_stamp_s - mp_.independent_cloud_clock_guard_s_
+          : std::numeric_limits<double>::quiet_NaN();
+  const auto cloud = takeLatestIndependentCloudAtOrBefore(clock_stamp_s);
+  if (cloud)
+    cloudCallback(cloud);
+}
+
 void GridMap::cloudCallback(const sensor_msgs::msg::PointCloud2::ConstPtr &img)
 {
   double source_stamp_s = std::numeric_limits<double>::quiet_NaN();
   const bool valid_source_stamp =
       img && sourceStampSeconds(img->header.stamp, &source_stamp_s);
-  if (valid_source_stamp &&
+  if (!independent_cloud_timer_ && valid_source_stamp &&
       std::isfinite(last_independent_cloud_stamp_s_) &&
       source_stamp_s >= last_independent_cloud_stamp_s_ &&
       source_stamp_s - last_independent_cloud_stamp_s_ + 1e-9 <
@@ -901,6 +988,7 @@ void GridMap::cloudCallback(const sensor_msgs::msg::PointCloud2::ConstPtr &img)
   pcl::PointCloud<pcl::PointXYZ> latest_cloud;
   pcl::fromROSMsg(*img, latest_cloud);
 
+  std::lock_guard<std::mutex> occupancy_lock(occupancy_epoch_mutex_);
   md_.has_cloud_ = true;
 
   if (!md_.has_odom_)
@@ -915,7 +1003,6 @@ void GridMap::cloudCallback(const sensor_msgs::msg::PointCloud2::ConstPtr &img)
   if (isnan(md_.camera_pos_(0)) || isnan(md_.camera_pos_(1)) || isnan(md_.camera_pos_(2)))
     return;
 
-  std::lock_guard<std::mutex> occupancy_lock(occupancy_epoch_mutex_);
   occupancy_update_sequence_.fetch_add(1, std::memory_order_acq_rel);
 
   this->resetBuffer(md_.camera_pos_ - mp_.local_update_range_,
@@ -1127,7 +1214,10 @@ uint64_t GridMap::occupancyGeneration() const
 {
   const uint64_t sequence = occupancy_update_sequence_.load(
       std::memory_order_acquire);
-  return (sequence & 1u) == 0u ? sequence / 2u : 0u;
+  // During an in-progress write, the previous committed immutable epoch is
+  // still authoritative. Returning zero here falsely revoked a P0 refresh
+  // that had already captured that epoch.
+  return sequence / 2u;
 }
 
 GridMap::OccupancyDiagnostic GridMap::queryOccupancyDiagnostic(

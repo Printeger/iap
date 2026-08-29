@@ -1,11 +1,11 @@
 import json
 import hashlib
 import importlib.util
+import math
 import os
 import re
 import shutil
 import subprocess
-import sys
 import sys
 import time
 import uuid
@@ -1596,9 +1596,11 @@ ARG_DEFAULTS = [
     ("run_duration_s", "90"),
     ("validation_duration_s", "85"),
     ("allow_truth_alignment", "true"),
+    ("odometry_acc_scale", "1.0"),
     ("planner_start_delay_s", "0.0"),
     ("lidar_start_delay_s", "0.0"),
     ("odometry_initialization_mode", ""),
+    ("rviz_config", "config/sim_demo11/demo11_integrity_corridor.rviz"),
     ("corridor_map_stamp_authority_topic", "/sim/drone_0/truth_odom"),
     ("fsm.thresh_replan_time", "1.0"),
     ("enable_preflight_takeoff", "false"),
@@ -1715,6 +1717,9 @@ ARG_DEFAULTS = [
     ("p1_fixture_safe_canopy_probability", "0.05"),
     ("p1_fixture_risky_canopy_probability", "0.85"),
     ("grid_map/local_update_range_x", "5.5"),
+    ("grid_map/independent_cloud_min_interval_s", "0.0"),
+    ("grid_map/independent_cloud_clock_guard_s", "0.0"),
+    ("planner_occupancy_cloud_topic", "/map_generator/global_cloud"),
     ("gnss_pr_noise_base", "5.0"),
     ("gnss_dop_noise_base", "0.5"),
     ("gnss_random_seed", "20260429"),
@@ -1775,6 +1780,7 @@ ARG_DEFAULTS = [
     # degraded-LiDAR B-spline (about 2.1 s) before P1 can be admitted.
     ("p0.horizons_s", "0.0,0.5,1.0,1.5,2.0,2.5"),
     ("p0.refresh_period_s", "0.5"),
+    ("p0.refresh_start_delay_s", "0.0"),
     ("p0.stale_timeout_s", "1.0"),
     ("p0.skip_occupied_voxels", "true"),
     ("p0.debug_metrics_enable", "false"),
@@ -2207,6 +2213,20 @@ def _resolve_run_roots(config_name, experiment_name, scenario_name, run_token,
     return runtime_root, export_dir
 
 
+def _resolve_runtime_logging_roots(runtime_root, runtime_root_dir="",
+                                   iap_log_root=""):
+    runtime_root = Path(runtime_root).expanduser().resolve()
+    runtime_base = (
+        Path(runtime_root_dir).expanduser().resolve()
+        if str(runtime_root_dir).strip()
+        else runtime_root
+    )
+    requested_log_root = str(iap_log_root).strip() or str(
+        runtime_root / "iap_logs"
+    )
+    return runtime_base, requested_log_root
+
+
 def _override_odometry_initialization_mode(config_path, mode):
     """Patch GLIM's JSON-with-comments config without discarding its comments."""
     path = Path(config_path)
@@ -2306,10 +2326,13 @@ def _runtime_config(context, use_gnss, use_araim, allow_truth_alignment):
 
     config_ros_path = runtime_config_dir / "config_ros.json"
     config_gnss_path = runtime_config_dir / "config_gnss.json"
-    logging_effective = _materialize_iap_logging_config(
-        runtime_config_dir / "config.json",
-        Path(LaunchConfiguration("runtime_root_dir").perform(context).strip()).resolve(),
+    runtime_base, requested_log_root = _resolve_runtime_logging_roots(
+        runtime_root,
+        LaunchConfiguration("runtime_root_dir").perform(context),
         LaunchConfiguration("iap_log_root").perform(context),
+    )
+    logging_effective = _materialize_iap_logging_config(
+        runtime_config_dir / "config.json", runtime_base, requested_log_root
     )
 
     mapping_backend = _normalize_mapping_backend(
@@ -2378,6 +2401,14 @@ def _runtime_config(context, use_gnss, use_araim, allow_truth_alignment):
 
     with config_ros_path.open() as f:
         config_ros = json.load(f)
+    odometry_acc_scale = float(
+        LaunchConfiguration("odometry_acc_scale").perform(context)
+    )
+    if not math.isfinite(odometry_acc_scale) or odometry_acc_scale < 0.0:
+        raise RuntimeError(
+            "odometry_acc_scale must be finite and nonnegative; "
+            f"got {odometry_acc_scale}"
+        )
     modules = ["libsim_extension.so"]
     if use_gnss:
         modules.insert(0, "libgnss_extension.so")
@@ -2385,6 +2416,7 @@ def _runtime_config(context, use_gnss, use_araim, allow_truth_alignment):
         modules.insert(1 if use_gnss else 0, "libintegrity_extension.so")
     config_ros["glim_ros"]["extension_modules"] = modules
     config_ros["glim_ros"]["imu_topic"] = "/sim/drone_0/imu_iap"
+    config_ros["glim_ros"]["acc_scale"] = odometry_acc_scale
     config_ros["glim_ros"]["points_topic"] = "/sim/drone_0/lidar_body"
     config_ros["glim_ros"]["dump_path"] = str(runtime_root / "dump")
     config_ros["glim_ros"]["sim"]["align_planner_odom_to_truth"] = allow_truth_alignment
@@ -2685,6 +2717,10 @@ def _ego_planner_node(context, drone_id, planner_odom_topic, cloud_topic, camera
             {"grid_map/map_size_y": map_size_y},
             {"grid_map/map_size_z": map_size_z},
             {"grid_map/local_update_range_x": _param_float(context, "grid_map/local_update_range_x")},
+            {"grid_map/independent_cloud_min_interval_s": _param_float(
+                context, "grid_map/independent_cloud_min_interval_s")},
+            {"grid_map/independent_cloud_clock_guard_s": _param_float(
+                context, "grid_map/independent_cloud_clock_guard_s")},
             {"grid_map/local_update_range_y": 5.5},
             {"grid_map/local_update_range_z": 4.5},
             {"grid_map/obstacles_inflation": 0.099},
@@ -2722,6 +2758,8 @@ def _ego_planner_node(context, drone_id, planner_odom_topic, cloud_topic, camera
             {"p0.size_z_m": _param_float(context, "p0.size_z_m")},
             {"p0.horizons_s": _csv_floats(LaunchConfiguration("p0.horizons_s").perform(context))},
             {"p0.refresh_period_s": _param_float(context, "p0.refresh_period_s")},
+            {"p0.refresh_start_delay_s": _param_float(
+                context, "p0.refresh_start_delay_s")},
             {"p0.stale_timeout_s": _param_float(context, "p0.stale_timeout_s")},
             {"p0.skip_occupied_voxels": _param_bool(context, "p0.skip_occupied_voxels")},
             {"p0.debug_metrics_enable": _param_bool(context, "p0.debug_metrics_enable")},
@@ -3104,7 +3142,9 @@ def _launch_setup(context):
             context,
             drone_id,
             planner_odom_topic,
-            "/map_generator/global_cloud",
+            LaunchConfiguration("planner_occupancy_cloud_topic").perform(
+                context
+            ),
             camera_pose_topic,
             sim_depth_topic,
             bspline_topic,
@@ -3365,6 +3405,8 @@ def _launch_setup(context):
         "sensor_startup": {
             "lidar_start_delay_s": lidar_start_delay_s,
             "odometry_initialization_mode": odometry_initialization_mode,
+            "odometry_acc_scale": _param_float(
+                context, "odometry_acc_scale"),
             "odometry_initialization_window_s": 1.0,
             "required_strict_margin_s": lidar_start_delay_s - 1.0,
             "gnss_epoch_frame_binding": "nearest_single_epoch",
@@ -3442,6 +3484,13 @@ def _launch_setup(context):
             0.0, float(LaunchConfiguration("planner_start_delay_s").perform(context))
         ),
         "lidar_start_delay_s": lidar_start_delay_s,
+        "odometry_acc_scale": _param_float(context, "odometry_acc_scale"),
+        "planner_occupancy_cloud_topic": LaunchConfiguration(
+            "planner_occupancy_cloud_topic").perform(context),
+        "planner_occupancy_min_interval_s": _param_float(
+            context, "grid_map/independent_cloud_min_interval_s"),
+        "planner_occupancy_clock_guard_s": _param_float(
+            context, "grid_map/independent_cloud_clock_guard_s"),
         "manager/max_vel": _param_float(context, "manager/max_vel"),
         "manager/planning_horizon": _param_float(context, "manager/planning_horizon"),
         "manager/p1_collision_fanout_clearance_m": _param_float(
@@ -3546,6 +3595,8 @@ def _launch_setup(context):
         "p0.size_z_m": _param_float(context, "p0.size_z_m"),
         "p0.horizons_s": _csv_floats(LaunchConfiguration("p0.horizons_s").perform(context)),
         "p0.refresh_period_s": _param_float(context, "p0.refresh_period_s"),
+        "p0.refresh_start_delay_s": _param_float(
+            context, "p0.refresh_start_delay_s"),
         "p0.stale_timeout_s": _param_float(context, "p0.stale_timeout_s"),
         "p0.batch_worker_count": 1,
         "p0.predictor.requested_worker_count": _param_int(context, "p0.predictor.worker_count"),
@@ -4242,6 +4293,17 @@ def _launch_setup(context):
         actions.append(bag_recorder)
 
     if start_rviz:
+        requested_rviz_config = LaunchConfiguration("rviz_config").perform(
+            context
+        ).strip()
+        rviz_config_path = Path(requested_rviz_config).expanduser()
+        if not rviz_config_path.is_absolute():
+            rviz_config_path = Path(iap_share) / rviz_config_path
+        rviz_config_path = rviz_config_path.resolve()
+        if not rviz_config_path.is_file():
+            raise RuntimeError(
+                f"rviz_config does not exist: {rviz_config_path}"
+            )
         actions.append(
             Node(
                 package="rviz2",
@@ -4250,7 +4312,7 @@ def _launch_setup(context):
                 output="screen",
                 arguments=[
                     "-d",
-                    os.path.join(iap_share, "config", "sim_demo11", "demo11_integrity_corridor.rviz"),
+                    str(rviz_config_path),
                 ],
             )
         )

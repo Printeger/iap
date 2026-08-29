@@ -61,8 +61,11 @@ class TestIcraLaunchTest(unittest.TestCase):
         self.assertEqual(profile["safety_viz.enable_p4_viz"], "true")
         self.assertEqual(
             profile["grid_map/independent_cloud_min_interval_s"], "0.5")
+        self.assertEqual(
+            profile["grid_map/independent_cloud_clock_guard_s"], "0.5")
+        self.assertEqual(profile["p0.refresh_start_delay_s"], "0.05")
         scenario = MODULE.SCENARIO_PRESETS["icra072_p4_selection_trigger_v1"]
-        self.assertEqual(scenario["lidar_sensing_rate_hz"], "4.0")
+        self.assertEqual(scenario["lidar_sensing_rate_hz"], "10.0")
         self.assertEqual(
             {key: profile[key] for key in MODULE.ICRA_DEV_FIXED_VALUES},
             MODULE.ICRA_DEV_FIXED_VALUES,

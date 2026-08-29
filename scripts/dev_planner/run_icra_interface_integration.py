@@ -23,13 +23,20 @@ REPOSITORY = Path(__file__).resolve().parents[2]
 DEFAULT_RESULTS_ROOT = (
     REPOSITORY / "results/icra27/dev_runs/interface_integration"
 ).resolve()
-DEFAULT_INSTALL_ROOT = Path("/home/dev/ws_iap/install").resolve()
+DEFAULT_INSTALL_ROOT = (REPOSITORY.parents[1] / "install").resolve()
 STAGE_ORDER = ("estimator", "p0", "p4", "p5-final", "full", "shutdown")
 SEVEN_STAGE_ORDER = (
     "p0_snapshot", "closed_collision", "p4_selection_application",
     "ego_final_bspline", "p5_final_pass_before_publish",
     "normal_publication", "p5_runtime_committed",
 )
+_VERTICAL_ANALYZER_PATH = (
+    REPOSITORY / "scripts/dev_planner/analyze_icra072_vertical_slice.py")
+_VERTICAL_ANALYZER_SPEC = importlib.util.spec_from_file_location(
+    "icra072_vertical_slice_for_interface_runner", _VERTICAL_ANALYZER_PATH)
+_VERTICAL_ANALYZER = importlib.util.module_from_spec(_VERTICAL_ANALYZER_SPEC)
+assert _VERTICAL_ANALYZER_SPEC.loader is not None
+_VERTICAL_ANALYZER_SPEC.loader.exec_module(_VERTICAL_ANALYZER)
 FORBIDDEN_LAYER_ARGS = {
     "planner_enable_p1": "false",
     "planner_enable_p2": "false",
@@ -187,32 +194,18 @@ def analyze_p0(rows: list[dict], capture_start_s: float | None = None) -> dict:
     )
     if first_time - start_time > 15.0:
         failures.append("p0_first_healthy_generation_late")
+    # The contract starts at the first healthy generation.  A later healthy
+    # streak cannot erase a stale/unready report that occurred during the
+    # required following 15 seconds.
     window: list[tuple[float, dict]] = []
-    longest: list[tuple[float, dict]] = []
-    current: list[tuple[float, dict]] = []
-    continuity_broken = False
     for observation in observations[first_index:]:
-        if not _healthy(observation[1]):
-            continuity_broken = continuity_broken or bool(current)
-            current = []
-            continue
-        current.append(observation)
-        if (not longest or
-                current[-1][0] - current[0][0] >
-                longest[-1][0] - longest[0][0]):
-            longest = list(current)
-        if (len(current) >= 10 and
-                current[-1][0] - current[0][0] >= 15.0):
-            window = list(current)
+        window.append(observation)
+        if observation[0] - first_time >= 15.0:
             break
-    if not window:
-        window = longest
     span = window[-1][0] - window[0][0] if window else 0.0
     if len(window) < 10 or span < 15.0:
         failures.append("p0_healthy_window_too_short")
     if not window or any(not _healthy(payload) for _, payload in window):
-        failures.append("p0_health_not_continuous")
-    elif span < 15.0 and continuity_broken:
         failures.append("p0_health_not_continuous")
     generations = [int(payload.get("generation_id", 0) or 0)
                    for _, payload in window]
@@ -404,28 +397,52 @@ def analyze_stage_records(
         final_records = [row for row in p5_status
                          if row.get("payload", row).get("phase") == "final"
                          and _p5_safe(row.get("payload", row))]
-        # The terminal lineage writer runs synchronously after evaluateFinal()
-        # returns OK and before normal publication.  It is therefore the
-        # authoritative causal record for the selected P4 trajectory, even if
-        # DDS discovery makes the external status capture begin one trajectory
-        # later.  Captured publications are checked independently below against
-        # their exact final-status identities.
-        matched = final_groups
+        final_admissions = [
+            row for row in p5_status
+            if row.get("payload", row).get("phase") ==
+            "final_publish_authorized"
+            and _p5_safe(row.get("payload", row))
+            and _finite_number(row.get("payload", row).get(
+                "final_evaluation_stamp_s"))
+            and _finite_number(row.get("payload", row).get(
+                "final_publish_authorization_stamp_s"))
+            and float(row.get("payload", row)[
+                "final_evaluation_stamp_s"]) <= float(
+                    row.get("payload", row)[
+                        "final_publish_authorization_stamp_s"])
+        ]
+        matched = []
+        for group in final_groups:
+            identity = (group["trajectory_id"], group["start_ns"])
+            if any((
+                    int(payload.get("final_candidate_traj_id", 0) or 0),
+                    int(payload.get("final_candidate_start_time_ns", 0) or 0),
+                    ) == identity
+                   for row in final_records
+                   for payload in [row.get("payload", row)]):
+                matched.append(group)
         if not matched:
             failures.append("p5_final_identity_or_status_invalid")
         published_identities = {
             identity for row in bsplines
             if (identity := _message_identity(row)) is not None
         }
-        final_status_identities = {
-            (int(payload.get("final_candidate_traj_id", 0) or 0),
-             int(payload.get("final_candidate_start_time_ns", 0) or 0))
-            for row in final_records
-            for payload in [row.get("payload", row)]
-        }
+        admitted_identities: set[tuple[int, int]] = set()
+        for row in final_admissions:
+            payload = row.get("payload", row)
+            identity = (
+                int(payload.get("final_candidate_traj_id", 0) or 0),
+                int(payload.get("final_candidate_start_time_ns", 0) or 0),
+            )
+            if identity[0] > 0 and identity[1] > 0:
+                admitted_identities.add(identity)
         published_candidates_final_ok = (
             bool(published_identities)
-            and published_identities.issubset(final_status_identities)
+            and all(
+                identity in admitted_identities
+                for row in bsplines
+                if (identity := _message_identity(row)) is not None
+            )
         )
         if not published_candidates_final_ok:
             failures.append("p5_published_candidate_without_prior_final_ok")
@@ -470,36 +487,14 @@ def analyze_stage_records(
             if not runtime_ok:
                 failures.append("p5_runtime_identity_or_status_invalid")
 
-            ordered_terminal = any(
-                group["ordered_stages"].index("final_bspline_before_p5")
-                < group["ordered_stages"].index("p5_final_pass_before_publish")
-                < group["ordered_stages"].index("normal_publish_authorized")
-                for group in matched
-                if all(required in group["ordered_stages"] for required in (
-                    "final_bspline_before_p5",
-                    "p5_final_pass_before_publish",
-                    "normal_publish_authorized",
-                )))
-            stage_status = {
-                "p0_snapshot": p0["result"] == "PASS",
-                "closed_collision": any(
-                    group["closed_collision_observed"] for group in groups),
-                "p4_selection_application": bool(groups),
-                "ego_final_bspline": bool(published_groups) and stable,
-                "p5_final_pass_before_publish": (
-                    bool(matched) and published_candidates_final_ok),
-                "normal_publication": ordered_terminal,
-                "p5_runtime_committed": runtime_ok,
-            }
-            first_missing_stage = next(
-                (name for name in SEVEN_STAGE_ORDER
-                 if not stage_status[name]), None)
-            seven_stage = {
-                "stage_order": list(SEVEN_STAGE_ORDER),
-                "stage_status": stage_status,
-                "first_missing_stage": first_missing_stage,
-                "result": "PASS" if first_missing_stage is None else "FAIL",
-            }
+            seven_stage = _VERTICAL_ANALYZER.analyze_seven_stage_evidence(
+                health, decisions, lineage,
+                [{**row, "kind": row.get("kind", "normal_bspline")}
+                 for row in bsplines] +
+                [{**row, "kind": row.get("kind", "p5_status")}
+                 for row in p5_status])
+            if seven_stage["result"] != "PASS":
+                failures.append("existing_seven_stage_analyzer_failed")
         else:
             runtime_identities = set()
             runtime_ok = False
@@ -701,7 +696,10 @@ def _capture_main(args: argparse.Namespace) -> int:
     from nav_msgs.msg import Odometry
     from quadrotor_msgs.msg import PositionCommand
     from rclpy.node import Node
-    from rclpy.qos import QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
+    from rclpy.qos import (
+        DurabilityPolicy, QoSProfile, ReliabilityPolicy,
+        qos_profile_sensor_data,
+    )
     from sensor_msgs.msg import Imu, PointCloud2
     from std_msgs.msg import String
     from traj_utils.msg import Bspline
@@ -715,6 +713,9 @@ def _capture_main(args: argparse.Namespace) -> int:
             super().__init__("icra_interface_integration_capture")
             self.stream = output.open("x", buffering=1)
             reliable = QoSProfile(depth=200, reliability=ReliabilityPolicy.RELIABLE)
+            retained = QoSProfile(
+                depth=200, reliability=ReliabilityPolicy.RELIABLE,
+                durability=DurabilityPolicy.TRANSIENT_LOCAL)
             self.create_subscription(
                 String, "/planning/risk_grid_health",
                 lambda message: self.json_record("p0_health", message.data),
@@ -722,9 +723,9 @@ def _capture_main(args: argparse.Namespace) -> int:
             self.create_subscription(
                 String, "/planning/integrity_gate_status",
                 lambda message: self.json_record("p5_status", message.data),
-                reliable)
+                retained)
             self.create_subscription(
-                Bspline, "/drone_0_planning/bspline", self.bspline, reliable)
+                Bspline, "/drone_0_planning/bspline", self.bspline, retained)
             self.create_subscription(
                 PositionCommand, "/drone_0_planning/pos_cmd",
                 lambda _message: self.record("poscmd", {}), reliable)
@@ -905,7 +906,6 @@ def _launch_shell(install_root: Path, launch_args: dict[str, str]) -> str:
     argv = ["ros2", "launch", "iap", "test_icra.launch.py"]
     argv.extend(f"{key}:={value}" for key, value in launch_args.items())
     return (
-        "source /opt/ros/jazzy/setup.bash && "
         f"source {shlex.quote(str(install_root / 'setup.bash'))} && exec "
         + shlex.join(argv)
     )
@@ -1063,6 +1063,11 @@ def _session_root(results_root: Path) -> Path:
     return candidate
 
 
+def _successful_session_result(stages) -> str:
+    requested = set(stages)
+    return "PASS" if {"full", "shutdown"}.issubset(requested) else "STAGE_PASS"
+
+
 def _run_main(args: argparse.Namespace) -> int:
     install_root = args.install_root.resolve()
     if not (install_root / "setup.bash").is_file():
@@ -1118,9 +1123,13 @@ def _run_main(args: argparse.Namespace) -> int:
                     _json_write(session / "session_summary.json", session_summary)
                     print(f"FAIL {stage} {run_root}")
                     return 1
-    session_summary["result"] = "PASS"
+    session_summary["functional_gate_complete"] = "full" in stages
+    session_summary["shutdown_gate_complete"] = "shutdown" in stages
+    session_summary["acceptance_complete"] = {
+        "full", "shutdown"}.issubset(stages)
+    session_summary["result"] = _successful_session_result(stages)
     _json_write(session / "session_summary.json", session_summary)
-    print(f"PASS {session}")
+    print(f"{session_summary['result']} {session}")
     return 0
 
 
