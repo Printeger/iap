@@ -1132,8 +1132,10 @@ python3 src/iap/scripts/dev_planner/run_icra_interface_integration.py \
 
 阶段为 `estimator|p0|p4|p5-final|full|shutdown`。runner 在首个失败处停止，
 并将 launch 参数、stdout、ROS/IAP 日志、topic capture、退出状态和阶段摘要保存到
-`results/icra27/dev_runs/interface_integration/`。这些结果仅用于开发集成，不构成
-P4 科学效果或正式资格声明。
+`results/icra27/dev_runs/interface_integration/`。终端会在启动时打印 session、当前
+stage 和 `stdout.log` 路径，并每 5 秒报告一次运行进度。按 Ctrl+C 时 runner 会先
+清理本次拥有的 launch/capture 进程组，写入 `INTERRUPTED` 阶段与 session 摘要，
+然后以状态码 130 退出。这些结果仅用于开发集成，不构成 P4 科学效果或正式资格声明。
 
 ICRA-076 measured-repeatability repair (2026-08-28): preregistration now
 requires 60 machine measurements from an offline production-shaped P4 profile

@@ -17,6 +17,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Callable, TextIO
 
 
 REPOSITORY = Path(__file__).resolve().parents[2]
@@ -815,6 +816,10 @@ def _json_write(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
 
 
+def _emit(message: str) -> None:
+    print(f"[icra] {message}", flush=True)
+
+
 def _node_names(environment: dict[str, str]) -> set[str]:
     completed = subprocess.run(
         ["ros2", "node", "list"], cwd=REPOSITORY, env=environment,
@@ -902,6 +907,25 @@ def _wait_capture_ready(process: subprocess.Popen, path: Path) -> bool:
     return False
 
 
+def _wait_for_exit(
+        process: subprocess.Popen, deadline_s: float,
+        on_progress: Callable[[float], None], progress_interval_s: float = 5.0,
+        clock: Callable[[], float] | None = None,
+        sleep: Callable[[float], None] | None = None) -> bool:
+    clock = clock or time.monotonic
+    sleep = sleep or time.sleep
+    next_progress_s = clock() + progress_interval_s
+    while process.poll() is None:
+        now_s = clock()
+        if now_s >= deadline_s:
+            return False
+        if now_s >= next_progress_s:
+            on_progress(now_s)
+            next_progress_s = now_s + progress_interval_s
+        sleep(min(0.1, deadline_s - now_s))
+    return True
+
+
 def _launch_shell(install_root: Path, launch_args: dict[str, str]) -> str:
     argv = ["ros2", "launch", "iap", "test_icra.launch.py"]
     argv.extend(f"{key}:={value}" for key, value in launch_args.items())
@@ -911,9 +935,11 @@ def _launch_shell(install_root: Path, launch_args: dict[str, str]) -> str:
     )
 
 
-def _run_one(
+def _run_one_impl(
         stage: str, run_root: Path, install_root: Path,
-        start_rviz: bool = False, shutdown_variant: str | None = None) -> dict:
+        start_rviz: bool, shutdown_variant: str | None,
+        owned_processes: dict[str, subprocess.Popen],
+        owned_streams: dict[str, TextIO]) -> dict:
     spec = STAGES[stage]
     run_root.mkdir(parents=True, exist_ok=False)
     for child in ("runtime/ros_logs", "exports", "bags"):
@@ -927,10 +953,12 @@ def _run_one(
         "--capture-duration", str(spec.duration_s + 20.0),
     ]
     capture_stream = (run_root / "capture_stdout.log").open("x")
+    owned_streams["capture"] = capture_stream
     capture = subprocess.Popen(
         capture_command, cwd=REPOSITORY, env=environment,
         stdout=capture_stream, stderr=subprocess.STDOUT,
         start_new_session=True)
+    owned_processes["capture"] = capture
     if not _wait_capture_ready(capture, run_root / "capture_ready.json"):
         capture_code, capture_cleared, _capture_escalated = _stop_group(
             capture, 2.0)
@@ -975,29 +1003,33 @@ def _run_one(
     })
     stdout_path = run_root / "stdout.log"
     launch_stream = stdout_path.open("x")
+    owned_streams["launch"] = launch_stream
     launch = subprocess.Popen(
         ["bash", "-lc", shell_command], cwd=REPOSITORY, env=environment,
         stdout=launch_stream, stderr=subprocess.STDOUT,
         start_new_session=True)
+    owned_processes["launch"] = launch
     started = time.monotonic()
     _json_write(run_root / "launch_started.json", {
         "schema_version": "icra_interface_launch_started_v1",
         "started_steady_s": started,
     })
+
+    def report_progress(now_s: float) -> None:
+        _emit(
+            f"RUNNING stage={stage} elapsed={now_s - started:.0f}s/"
+            f"{spec.duration_s:g}s log={stdout_path}")
+
     early_exit = False
     if stage == "shutdown":
-        while time.monotonic() - started < spec.duration_s:
-            if launch.poll() is not None:
-                early_exit = True
-                break
-            time.sleep(0.1)
+        early_exit = _wait_for_exit(
+            launch, started + spec.duration_s, report_progress)
         launch_code, launch_cleared, launch_escalated = _stop_group(
             launch, 5.0, run_root / "shutdown_stacks.txt")
     else:
         deadline = started + spec.duration_s + 20.0
-        while launch.poll() is None and time.monotonic() < deadline:
-            time.sleep(0.1)
-        if launch.poll() is None:
+        exited = _wait_for_exit(launch, deadline, report_progress)
+        if not exited:
             launch_code, launch_cleared, launch_escalated = _stop_group(
                 launch, 5.0, run_root / "timeout_stacks.txt")
         else:
@@ -1045,6 +1077,63 @@ def _run_one(
     return summary
 
 
+def _run_one(
+        stage: str, run_root: Path, install_root: Path,
+        start_rviz: bool = False, shutdown_variant: str | None = None) -> dict:
+    owned_processes: dict[str, subprocess.Popen] = {}
+    owned_streams: dict[str, TextIO] = {}
+    started = time.monotonic()
+    try:
+        return _run_one_impl(
+            stage, run_root, install_root, start_rviz, shutdown_variant,
+            owned_processes, owned_streams)
+    except KeyboardInterrupt:
+        _emit(f"INTERRUPT stage={stage} cleanup=starting")
+        process_status = {
+            "launch": {"exit_code": None, "cleared": True,
+                       "escalated": False},
+            "capture": {"exit_code": None, "cleared": True,
+                        "escalated": False},
+        }
+        cleanup_failures = []
+        for role, timeout_s in (("launch", 5.0), ("capture", 3.0)):
+            process = owned_processes.get(role)
+            if process is None:
+                continue
+            code, cleared, escalated = _stop_group(
+                process, timeout_s,
+                run_root / f"interrupt_{role}_stacks.txt")
+            process_status[role] = {
+                "exit_code": code,
+                "cleared": cleared,
+                "escalated": escalated,
+            }
+            if not cleared:
+                cleanup_failures.append(f"{role}_process_group_remaining")
+        for stream in owned_streams.values():
+            stream.close()
+        run_root.mkdir(parents=True, exist_ok=True)
+        summary = _result(
+            ["interrupted", *cleanup_failures],
+            stage=stage,
+            shutdown_variant=shutdown_variant,
+            launch_exit_code=process_status["launch"]["exit_code"],
+            capture_exit_code=process_status["capture"]["exit_code"],
+            launch_group_cleared=process_status["launch"]["cleared"],
+            capture_group_cleared=process_status["capture"]["cleared"],
+            launch_runner_escalated=process_status["launch"]["escalated"],
+            capture_runner_escalated=process_status["capture"]["escalated"],
+            elapsed_s=time.monotonic() - started,
+        )
+        summary["result"] = "INTERRUPTED"
+        _json_write(run_root / "summary.json", summary)
+        _emit(
+            f"INTERRUPTED stage={stage} "
+            f"launch_cleared={str(summary['launch_group_cleared']).lower()} "
+            f"capture_cleared={str(summary['capture_group_cleared']).lower()}")
+        return summary
+
+
 def _gpu_preflight(root: Path) -> dict:
     path = REPOSITORY / "scripts/dev_planner/run_gate0_qualification.py"
     spec = importlib.util.spec_from_file_location("icra_interface_gpu", path)
@@ -1075,9 +1164,10 @@ def _run_main(args: argparse.Namespace) -> int:
     results_root = args.results_root.resolve()
     session = _session_root(results_root)
     session.mkdir(parents=True, exist_ok=False)
+    _emit(f"SESSION {session}")
     preflight = _gpu_preflight(session / "preflight")
     if preflight.get("gpu_ready") is not True:
-        print("GPU_NOT_READY")
+        _emit("GPU_NOT_READY")
         return 4
     requested = args.stage
     if args.through:
@@ -1098,15 +1188,22 @@ def _run_main(args: argparse.Namespace) -> int:
         # functional and shutdown repetition has finished successfully.
         "result": "RUNNING",
     }
+    _json_write(session / "session_summary.json", session_summary)
     for stage in stages:
         variants = ("baseline", "full") if stage == "shutdown" else (None,)
         for repetition in range(1, args.repetitions + 1):
             for variant in variants:
                 suffix = f"-{variant}" if variant else ""
                 run_root = session / f"{stage}-r{repetition:02d}{suffix}"
+                rviz_enabled = args.rviz and stage == "full"
+                _emit(
+                    f"START stage={stage} repetition={repetition}/"
+                    f"{args.repetitions} duration={STAGES[stage].duration_s:g}s "
+                    f"rviz={'true' if rviz_enabled else 'false'}")
+                _emit(f"LOG {run_root / 'stdout.log'}")
                 summary = _run_one(
                     stage, run_root, install_root,
-                    start_rviz=args.rviz and stage == "full",
+                    start_rviz=rviz_enabled,
                     shutdown_variant=variant)
                 session_summary["runs"].append({
                     "stage": stage,
@@ -1117,11 +1214,18 @@ def _run_main(args: argparse.Namespace) -> int:
                     "failures": summary["failures"],
                 })
                 _json_write(session / "session_summary.json", session_summary)
+                if summary["result"] == "INTERRUPTED":
+                    session_summary["result"] = "INTERRUPTED"
+                    session_summary["interrupted_stage"] = stage
+                    _json_write(
+                        session / "session_summary.json", session_summary)
+                    _emit(f"INTERRUPTED stage={stage} {run_root}")
+                    return 130
                 if summary["result"] != "PASS":
                     session_summary["result"] = "FAIL"
                     session_summary["first_failed_stage"] = stage
                     _json_write(session / "session_summary.json", session_summary)
-                    print(f"FAIL {stage} {run_root}")
+                    _emit(f"FAIL {stage} {run_root}")
                     return 1
     session_summary["functional_gate_complete"] = "full" in stages
     session_summary["shutdown_gate_complete"] = "shutdown" in stages
@@ -1129,7 +1233,7 @@ def _run_main(args: argparse.Namespace) -> int:
         "full", "shutdown"}.issubset(stages)
     session_summary["result"] = _successful_session_result(stages)
     _json_write(session / "session_summary.json", session_summary)
-    print(f"{session_summary['result']} {session}")
+    _emit(f"{session_summary['result']} {session}")
     return 0
 
 
@@ -1156,7 +1260,11 @@ def main() -> int:
         raise SystemExit("repetitions must be positive")
     if args.rviz and (args.stage != "full" or args.through):
         raise SystemExit("--rviz is valid only with --stage full")
-    return _run_main(args)
+    try:
+        return _run_main(args)
+    except KeyboardInterrupt:
+        _emit("INTERRUPTED")
+        return 130
 
 
 if __name__ == "__main__":

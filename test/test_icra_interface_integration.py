@@ -1,8 +1,12 @@
+import argparse
+import contextlib
 import importlib.util
+import io
 import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 REPO = Path(__file__).resolve().parents[1]
@@ -81,6 +85,12 @@ def lineage_for(decision, trajectory_id, start_ns):
 
 
 class TestStageContracts(unittest.TestCase):
+    def test_icra_rviz_uses_sensor_qos_for_predicted_pl_cloud(self):
+        rviz = (REPO / "config/sim_demo11/test_icra.rviz").read_text()
+        predicted_pl = rviz.split("Name: Predicted PL Cloud", 1)[1]
+        predicted_pl = predicted_pl.split("- Class:", 1)[0]
+        self.assertIn("Reliability Policy: Best Effort", predicted_pl)
+
     def test_stage_switches_keep_forbidden_layers_off(self):
         for stage in MODULE.STAGE_ORDER:
             spec = MODULE.STAGES[stage]
@@ -125,6 +135,127 @@ class TestStageContracts(unittest.TestCase):
                          "STAGE_PASS")
         self.assertEqual(MODULE._successful_session_result(
             MODULE.STAGE_ORDER), "PASS")
+
+
+class TestRunnerLifecycle(unittest.TestCase):
+    def test_cli_reports_session_stage_and_log_before_running(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            install_root = root / "install"
+            install_root.mkdir()
+            (install_root / "setup.bash").write_text("")
+            args = argparse.Namespace(
+                install_root=install_root,
+                results_root=root / "results",
+                stage="full",
+                through=None,
+                repetitions=1,
+                rviz=True,
+            )
+            output = io.StringIO()
+            with mock.patch.object(
+                    MODULE, "_gpu_preflight",
+                    return_value={"gpu_ready": True}), mock.patch.object(
+                        MODULE, "_run_one",
+                        return_value=MODULE._result([])), contextlib.redirect_stdout(output):
+                exit_code = MODULE._run_main(args)
+
+            self.assertEqual(exit_code, 0)
+            stdout = output.getvalue()
+            self.assertIn("[icra] SESSION ", stdout)
+            self.assertIn(
+                "[icra] START stage=full repetition=1/1 duration=75s rviz=true",
+                stdout,
+            )
+            self.assertIn("[icra] LOG ", stdout)
+            self.assertIn("/full-r01/stdout.log", stdout)
+
+    def test_process_wait_reports_progress_periodically(self):
+        now = [0.0]
+        progress = []
+
+        class Process:
+            def poll(self):
+                return None if now[0] < 5.0 else 0
+
+        exited = MODULE._wait_for_exit(
+            Process(), deadline_s=10.0,
+            on_progress=progress.append, progress_interval_s=2.0,
+            clock=lambda: now[0], sleep=lambda delay: now.__setitem__(
+                0, now[0] + delay),
+        )
+
+        self.assertTrue(exited)
+        self.assertEqual([round(value, 1) for value in progress], [2.0, 4.0])
+
+    def test_interrupt_cleans_owned_process_groups_and_writes_summary(self):
+        class Process:
+            def __init__(self, pid):
+                self.pid = pid
+                self.returncode = None
+
+            def poll(self):
+                return None
+
+        capture = Process(101)
+        launch = Process(202)
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            run_root = Path(temporary_directory) / "full-r01"
+            with mock.patch.object(
+                    MODULE, "_node_names", return_value=set()), mock.patch.object(
+                        MODULE.subprocess, "Popen",
+                        side_effect=[capture, launch]), mock.patch.object(
+                            MODULE, "_wait_capture_ready",
+                            return_value=True), mock.patch.object(
+                                MODULE, "_wait_for_exit",
+                                side_effect=KeyboardInterrupt), mock.patch.object(
+                                    MODULE, "_stop_group",
+                                    return_value=(-2, True, False)) as stop_group:
+                summary = MODULE._run_one(
+                    "full", run_root, Path(temporary_directory) / "install")
+
+            self.assertEqual(summary["result"], "INTERRUPTED")
+            self.assertEqual(summary["failures"], ["interrupted"])
+            self.assertTrue(summary["launch_group_cleared"])
+            self.assertTrue(summary["capture_group_cleared"])
+            self.assertEqual(
+                [call.args[0] for call in stop_group.call_args_list],
+                [launch, capture],
+            )
+            persisted = json.loads((run_root / "summary.json").read_text())
+            self.assertEqual(persisted["result"], "INTERRUPTED")
+
+    def test_cli_returns_130_and_persists_interrupted_session(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            install_root = root / "install"
+            install_root.mkdir()
+            (install_root / "setup.bash").write_text("")
+            args = argparse.Namespace(
+                install_root=install_root,
+                results_root=root / "results",
+                stage="full",
+                through=None,
+                repetitions=1,
+                rviz=False,
+            )
+            interrupted = MODULE._result(["interrupted"])
+            interrupted["result"] = "INTERRUPTED"
+            output = io.StringIO()
+            with mock.patch.object(
+                    MODULE, "_gpu_preflight",
+                    return_value={"gpu_ready": True}), mock.patch.object(
+                        MODULE, "_run_one",
+                        return_value=interrupted), contextlib.redirect_stdout(output):
+                exit_code = MODULE._run_main(args)
+
+            self.assertEqual(exit_code, 130)
+            session_path = next((root / "results").glob(
+                "run-*/session_summary.json"))
+            session = json.loads(session_path.read_text())
+            self.assertEqual(session["result"], "INTERRUPTED")
+            self.assertEqual(session["interrupted_stage"], "full")
+            self.assertIn("[icra] INTERRUPTED stage=full", output.getvalue())
 
 
 class TestStageAnalyzer(unittest.TestCase):
