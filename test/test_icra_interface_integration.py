@@ -138,20 +138,24 @@ class TestStageContracts(unittest.TestCase):
 
 
 class TestRunnerLifecycle(unittest.TestCase):
+    @staticmethod
+    def runner_args(root, *, through=None, rviz=False):
+        install_root = root / "install"
+        install_root.mkdir()
+        (install_root / "setup.bash").write_text("")
+        return argparse.Namespace(
+            install_root=install_root,
+            results_root=root / "results",
+            stage="full",
+            through=through,
+            repetitions=1,
+            rviz=rviz,
+        )
+
     def test_cli_reports_session_stage_and_log_before_running(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
-            install_root = root / "install"
-            install_root.mkdir()
-            (install_root / "setup.bash").write_text("")
-            args = argparse.Namespace(
-                install_root=install_root,
-                results_root=root / "results",
-                stage="full",
-                through=None,
-                repetitions=1,
-                rviz=True,
-            )
+            args = self.runner_args(root, rviz=True)
             output = io.StringIO()
             with mock.patch.object(
                     MODULE, "_gpu_preflight",
@@ -228,17 +232,7 @@ class TestRunnerLifecycle(unittest.TestCase):
     def test_cli_returns_130_and_persists_interrupted_session(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
-            install_root = root / "install"
-            install_root.mkdir()
-            (install_root / "setup.bash").write_text("")
-            args = argparse.Namespace(
-                install_root=install_root,
-                results_root=root / "results",
-                stage="full",
-                through=None,
-                repetitions=1,
-                rviz=False,
-            )
+            args = self.runner_args(root)
             interrupted = MODULE._result(["interrupted"])
             interrupted["result"] = "INTERRUPTED"
             output = io.StringIO()
@@ -256,6 +250,51 @@ class TestRunnerLifecycle(unittest.TestCase):
             self.assertEqual(session["result"], "INTERRUPTED")
             self.assertEqual(session["interrupted_stage"], "full")
             self.assertIn("[icra] INTERRUPTED stage=full", output.getvalue())
+
+    def test_preflight_interrupt_persists_interrupted_session(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            args = self.runner_args(root)
+            with mock.patch.object(
+                    MODULE, "_gpu_preflight",
+                    side_effect=KeyboardInterrupt):
+                exit_code = MODULE._run_main(args)
+
+            self.assertEqual(exit_code, 130)
+            session_path = next((root / "results").glob(
+                "run-*/session_summary.json"))
+            session = json.loads(session_path.read_text())
+            self.assertEqual(session["result"], "INTERRUPTED")
+            self.assertEqual(session["interrupted_stage"], "preflight")
+
+    def test_between_stage_interrupt_persists_completed_runs(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            args = self.runner_args(root, through="p0")
+            with mock.patch.object(
+                    MODULE, "_gpu_preflight",
+                    return_value={"gpu_ready": True}), mock.patch.object(
+                        MODULE, "_run_one",
+                        side_effect=[MODULE._result([]), KeyboardInterrupt]):
+                exit_code = MODULE._run_main(args)
+
+            self.assertEqual(exit_code, 130)
+            session_path = next((root / "results").glob(
+                "run-*/session_summary.json"))
+            session = json.loads(session_path.read_text())
+            self.assertEqual(session["result"], "INTERRUPTED")
+            self.assertEqual(session["interrupted_stage"], "p0")
+            self.assertEqual(len(session["runs"]), 1)
+            self.assertEqual(session["runs"][0]["stage"], "estimator")
+
+    def test_progress_after_nominal_duration_reports_waiting_for_exit(self):
+        message = MODULE._progress_message(
+            "full", elapsed_s=80.0, duration_s=75.0, timeout_s=95.0,
+            stdout_path=Path("/tmp/full/stdout.log"),
+        )
+        self.assertIn("WAITING_EXIT stage=full", message)
+        self.assertIn("elapsed=80s timeout=95s", message)
+        self.assertNotIn("80s/75s", message)
 
 
 class TestStageAnalyzer(unittest.TestCase):

@@ -926,6 +926,18 @@ def _wait_for_exit(
     return True
 
 
+def _progress_message(
+        stage: str, elapsed_s: float, duration_s: float, timeout_s: float,
+        stdout_path: Path) -> str:
+    if elapsed_s <= duration_s:
+        return (
+            f"RUNNING stage={stage} elapsed={elapsed_s:.0f}s "
+            f"target={duration_s:g}s log={stdout_path}")
+    return (
+        f"WAITING_EXIT stage={stage} elapsed={elapsed_s:.0f}s "
+        f"timeout={timeout_s:g}s log={stdout_path}")
+
+
 def _launch_shell(install_root: Path, launch_args: dict[str, str]) -> str:
     argv = ["ros2", "launch", "iap", "test_icra.launch.py"]
     argv.extend(f"{key}:={value}" for key, value in launch_args.items())
@@ -1014,11 +1026,12 @@ def _run_one_impl(
         "schema_version": "icra_interface_launch_started_v1",
         "started_steady_s": started,
     })
+    timeout_s = (
+        spec.duration_s if stage == "shutdown" else spec.duration_s + 20.0)
 
     def report_progress(now_s: float) -> None:
-        _emit(
-            f"RUNNING stage={stage} elapsed={now_s - started:.0f}s/"
-            f"{spec.duration_s:g}s log={stdout_path}")
+        _emit(_progress_message(
+            stage, now_s - started, spec.duration_s, timeout_s, stdout_path))
 
     early_exit = False
     if stage == "shutdown":
@@ -1157,24 +1170,28 @@ def _successful_session_result(stages) -> str:
     return "PASS" if {"full", "shutdown"}.issubset(requested) else "STAGE_PASS"
 
 
+def _persist_interrupted_session(
+        session: Path, session_summary: dict, stage: str) -> int:
+    session_summary["result"] = "INTERRUPTED"
+    session_summary["interrupted_stage"] = stage
+    _json_write(session / "session_summary.json", session_summary)
+    _emit(f"INTERRUPTED stage={stage} {session}")
+    return 130
+
+
 def _run_main(args: argparse.Namespace) -> int:
     install_root = args.install_root.resolve()
     if not (install_root / "setup.bash").is_file():
         raise SystemExit(f"install root is not ready: {install_root}")
+    requested = args.through or args.stage
+    if args.through:
+        stages = STAGE_ORDER[:STAGE_ORDER.index(requested) + 1]
+    else:
+        stages = (requested,)
     results_root = args.results_root.resolve()
     session = _session_root(results_root)
     session.mkdir(parents=True, exist_ok=False)
     _emit(f"SESSION {session}")
-    preflight = _gpu_preflight(session / "preflight")
-    if preflight.get("gpu_ready") is not True:
-        _emit("GPU_NOT_READY")
-        return 4
-    requested = args.stage
-    if args.through:
-        requested = args.through
-        stages = STAGE_ORDER[:STAGE_ORDER.index(requested) + 1]
-    else:
-        stages = (requested,)
     session_summary = {
         "schema_version": "icra_interface_integration_session_v1",
         "development_only": True,
@@ -1189,52 +1206,65 @@ def _run_main(args: argparse.Namespace) -> int:
         "result": "RUNNING",
     }
     _json_write(session / "session_summary.json", session_summary)
-    for stage in stages:
-        variants = ("baseline", "full") if stage == "shutdown" else (None,)
-        for repetition in range(1, args.repetitions + 1):
-            for variant in variants:
-                suffix = f"-{variant}" if variant else ""
-                run_root = session / f"{stage}-r{repetition:02d}{suffix}"
-                rviz_enabled = args.rviz and stage == "full"
-                _emit(
-                    f"START stage={stage} repetition={repetition}/"
-                    f"{args.repetitions} duration={STAGES[stage].duration_s:g}s "
-                    f"rviz={'true' if rviz_enabled else 'false'}")
-                _emit(f"LOG {run_root / 'stdout.log'}")
-                summary = _run_one(
-                    stage, run_root, install_root,
-                    start_rviz=rviz_enabled,
-                    shutdown_variant=variant)
-                session_summary["runs"].append({
-                    "stage": stage,
-                    "repetition": repetition,
-                    "variant": variant,
-                    "path": str(run_root),
-                    "result": summary["result"],
-                    "failures": summary["failures"],
-                })
-                _json_write(session / "session_summary.json", session_summary)
-                if summary["result"] == "INTERRUPTED":
-                    session_summary["result"] = "INTERRUPTED"
-                    session_summary["interrupted_stage"] = stage
+    current_stage = "preflight"
+    try:
+        preflight = _gpu_preflight(session / "preflight")
+        if preflight.get("gpu_ready") is not True:
+            session_summary["result"] = "GPU_NOT_READY"
+            _json_write(session / "session_summary.json", session_summary)
+            _emit("GPU_NOT_READY")
+            return 4
+        for stage in stages:
+            current_stage = stage
+            variants = (
+                ("baseline", "full") if stage == "shutdown" else (None,))
+            for repetition in range(1, args.repetitions + 1):
+                for variant in variants:
+                    suffix = f"-{variant}" if variant else ""
+                    run_root = session / f"{stage}-r{repetition:02d}{suffix}"
+                    rviz_enabled = args.rviz and stage == "full"
+                    _emit(
+                        f"START stage={stage} repetition={repetition}/"
+                        f"{args.repetitions} "
+                        f"duration={STAGES[stage].duration_s:g}s "
+                        f"rviz={'true' if rviz_enabled else 'false'}")
+                    _emit(f"LOG {run_root / 'stdout.log'}")
+                    summary = _run_one(
+                        stage, run_root, install_root,
+                        start_rviz=rviz_enabled,
+                        shutdown_variant=variant)
+                    session_summary["runs"].append({
+                        "stage": stage,
+                        "repetition": repetition,
+                        "variant": variant,
+                        "path": str(run_root),
+                        "result": summary["result"],
+                        "failures": summary["failures"],
+                    })
                     _json_write(
                         session / "session_summary.json", session_summary)
-                    _emit(f"INTERRUPTED stage={stage} {run_root}")
-                    return 130
-                if summary["result"] != "PASS":
-                    session_summary["result"] = "FAIL"
-                    session_summary["first_failed_stage"] = stage
-                    _json_write(session / "session_summary.json", session_summary)
-                    _emit(f"FAIL {stage} {run_root}")
-                    return 1
-    session_summary["functional_gate_complete"] = "full" in stages
-    session_summary["shutdown_gate_complete"] = "shutdown" in stages
-    session_summary["acceptance_complete"] = {
-        "full", "shutdown"}.issubset(stages)
-    session_summary["result"] = _successful_session_result(stages)
-    _json_write(session / "session_summary.json", session_summary)
-    _emit(f"{session_summary['result']} {session}")
-    return 0
+                    if summary["result"] == "INTERRUPTED":
+                        return _persist_interrupted_session(
+                            session, session_summary, stage)
+                    if summary["result"] != "PASS":
+                        session_summary["result"] = "FAIL"
+                        session_summary["first_failed_stage"] = stage
+                        _json_write(
+                            session / "session_summary.json", session_summary)
+                        _emit(f"FAIL {stage} {run_root}")
+                        return 1
+        current_stage = "session"
+        session_summary["functional_gate_complete"] = "full" in stages
+        session_summary["shutdown_gate_complete"] = "shutdown" in stages
+        session_summary["acceptance_complete"] = {
+            "full", "shutdown"}.issubset(stages)
+        session_summary["result"] = _successful_session_result(stages)
+        _json_write(session / "session_summary.json", session_summary)
+        _emit(f"{session_summary['result']} {session}")
+        return 0
+    except KeyboardInterrupt:
+        return _persist_interrupted_session(
+            session, session_summary, current_stage)
 
 
 def main() -> int:
