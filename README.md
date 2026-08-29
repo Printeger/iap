@@ -1175,8 +1175,10 @@ python3 src/iap/scripts/dev_planner/run_icra_interface_integration.py \
 不传 `--scenario` 时仍使用 `icra072_p4_selection_trigger_v1`。森林 preset 也保持
 规划 pose 来自 truth odometry；它是开发集成和可视化场景，不是科学效果或资格结论。
 
-阶段为 `estimator|p0|p4|p5-final|full|shutdown`。runner 在首个失败处停止，
-并将 launch 参数、stdout、ROS/IAP 日志、topic capture、退出状态和阶段摘要保存到
+阶段为 `estimator|p0|p4|p5-final|full|shutdown`。普通运行在首个失败处停止；
+`--forest-ab` 若 baseline 失败，会先完成同一 repetition 的 risk 变体以保留成对诊断，
+写完 `forest_pairs` 后仍返回失败。runner 将 launch 参数、stdout、ROS/IAP 日志、
+topic capture、退出状态和阶段摘要保存到
 `results/icra27/dev_runs/interface_integration/`。终端会在启动时打印 session、当前
 stage 和 `stdout.log` 路径，并每 5 秒报告一次运行进度。按 Ctrl+C 时 runner 会先
 清理本次拥有的 launch/capture 进程组，写入 `INTERRUPTED` 阶段与 session 摘要，
