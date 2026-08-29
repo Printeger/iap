@@ -138,6 +138,49 @@ class TestStageContracts(unittest.TestCase):
         self.assertEqual(MODULE._successful_session_result(
             MODULE.STAGE_ORDER), "PASS")
 
+    def test_forest_scenario_switch_preserves_icra072_default(self):
+        self.assertEqual(MODULE.DEFAULT_SCENARIO,
+                         "icra072_p4_selection_trigger_v1")
+        default_args = MODULE.stage_launch_args("full", MODULE.DEFAULT_SCENARIO)
+        self.assertEqual(default_args["scenario"], MODULE.DEFAULT_SCENARIO)
+
+        forest_args = MODULE.stage_launch_args(
+            "full", MODULE.FOREST_SCENARIO, forest_variant="risk")
+        self.assertEqual(forest_args["scenario"], MODULE.FOREST_SCENARIO)
+        self.assertEqual(forest_args["planner_enable_p4"], "true")
+        self.assertEqual(forest_args["planner_enable_p5_final"], "true")
+        self.assertEqual(forest_args["planner_enable_p5_runtime"], "true")
+
+        baseline = MODULE.stage_launch_args(
+            "full", MODULE.FOREST_SCENARIO, forest_variant="baseline")
+        self.assertEqual(baseline["planner_enable_p4"], "false")
+        self.assertEqual(baseline["planner_enable_p5_final"], "false")
+        self.assertEqual(baseline["planner_enable_p5_runtime"], "false")
+        self.assertEqual(baseline["p0.enable_risk_grid"], "true")
+
+    def test_forest_scene_contract_is_expanded_and_fingerprinted(self):
+        contract = MODULE.forest_scene_contract()
+        self.assertEqual(contract["schema_version"],
+                         "icra_dense_forest_four_fork_v1")
+        self.assertEqual(contract["forest_seed"], 41021)
+        self.assertEqual(contract["risk_seed"], 21)
+        self.assertEqual(contract["low_risk_y_signs"], [-1, 1, -1, 1])
+        self.assertEqual(contract["gnss"]["enabled_constellations"],
+                         ["GPS", "GAL", "GLO"])
+        self.assertEqual(contract["planner_executor_thread_count"], 8)
+        self.assertTrue(contract["p0_conservative_max_with_gnss"])
+        self.assertEqual([fork["x_min_m"] for fork in contract["forks"]],
+                         [-16.0, -8.0, 0.0, 8.0])
+        self.assertRegex(contract["fingerprint"], r"^sha256:[0-9a-f]{64}$")
+
+    def test_forest_full_runs_for_ninety_seconds(self):
+        self.assertEqual(MODULE.stage_duration_s(
+            "full", MODULE.FOREST_SCENARIO, "risk"), 90.0)
+        self.assertEqual(MODULE.stage_duration_s(
+            "full", MODULE.FOREST_SCENARIO, "baseline"), 90.0)
+        self.assertEqual(MODULE.stage_duration_s(
+            "full", MODULE.DEFAULT_SCENARIO), 75.0)
+
 
 class TestRunnerLifecycle(unittest.TestCase):
     @staticmethod
@@ -253,6 +296,31 @@ class TestRunnerLifecycle(unittest.TestCase):
             self.assertEqual(session["interrupted_stage"], "full")
             self.assertIn("[icra] INTERRUPTED stage=full", output.getvalue())
 
+    def test_forest_ab_runs_baseline_then_risk_with_frozen_contract(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            args = self.runner_args(root)
+            args.scenario = MODULE.FOREST_SCENARIO
+            args.forest_ab = True
+            with mock.patch.object(
+                    MODULE, "_gpu_preflight",
+                    return_value={"gpu_ready": True}), mock.patch.object(
+                        MODULE, "_run_one",
+                        return_value=MODULE._result([])) as run_one:
+                exit_code = MODULE._run_main(args)
+
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(
+                [call.kwargs["forest_variant"]
+                 for call in run_one.call_args_list],
+                ["baseline", "risk"],
+            )
+            session_path = next((root / "results").glob(
+                "run-*/session_summary.json"))
+            session = json.loads(session_path.read_text())
+            self.assertEqual(session["scenario"], MODULE.FOREST_SCENARIO)
+            self.assertEqual(session["forest_scene"]["forest_seed"], 41021)
+
     def test_preflight_interrupt_persists_interrupted_session(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
@@ -300,6 +368,78 @@ class TestRunnerLifecycle(unittest.TestCase):
 
 
 class TestStageAnalyzer(unittest.TestCase):
+    @staticmethod
+    def forest_generation(low_multiplier=0.8):
+        return {
+            "kind": "forest_risk_generation",
+            "payload": {
+                "generation_id": 7,
+                "forks": [{
+                    "fork_index": index,
+                    "low": {
+                        "valid_count": 20, "sample_count": 20,
+                        "mean_c_pi": 10.0 * low_multiplier,
+                        "max_c_pi": 12.0 * low_multiplier,
+                        "mean_pl": 7.0 * low_multiplier,
+                    },
+                    "high": {
+                        "valid_count": 20, "sample_count": 20,
+                        "mean_c_pi": 10.0, "max_c_pi": 12.0,
+                        "mean_pl": 7.0,
+                    },
+                } for index in range(4)],
+            },
+        }
+
+    def test_forest_risk_gate_requires_all_four_real_low_risk_arms(self):
+        passed = MODULE.analyze_forest_risk(
+            [self.forest_generation(low_multiplier=0.8)])
+        self.assertEqual(passed["result"], "PASS")
+        failed = MODULE.analyze_forest_risk(
+            [self.forest_generation(low_multiplier=0.95)])
+        self.assertEqual(failed["result"], "FAIL")
+        self.assertIn("forest_risk_contrast_missing", failed["failures"])
+
+    def test_forest_cloud_capture_reduces_points_by_generation_and_arm(self):
+        points = []
+        for fork in MODULE.forest_scene_contract()["forks"]:
+            x = fork["x_min_m"] + 0.5 * fork["length_m"]
+            for y, scale in (
+                (4.0 * fork["low_risk_y_sign"], 0.7),
+                (-2.8 * fork["low_risk_y_sign"], 1.0),
+            ):
+                points.append({
+                    "x": x, "y": y, "z": 1.5,
+                    "pl": 10.0 * scale, "hpl": 8.0 * scale,
+                    "vpl": 10.0 * scale, "c_pi": 10.0 * scale,
+                    "valid": 1, "unknown": 0, "stale": 0,
+                    "generation_id": 9,
+                })
+        summary = MODULE.summarize_forest_risk_cloud(points)
+        self.assertEqual(summary["generation_id"], 9)
+        self.assertEqual(len(summary["forks"]), 4)
+        self.assertTrue(all(
+            fork["low"]["mean_c_pi"] < fork["high"]["mean_c_pi"]
+            for fork in summary["forks"]))
+
+    def test_forest_path_gate_distinguishes_baseline_and_risk_variants(self):
+        contract = MODULE.forest_scene_contract()
+        low_points = []
+        high_points = []
+        for fork in contract["forks"]:
+            x = fork["x_min_m"] + 0.5 * fork["length_m"]
+            low_points.append([x, 4.0 * fork["low_risk_y_sign"], 1.5])
+            high_points.append([x, -2.8 * fork["low_risk_y_sign"], 1.5])
+        low = MODULE.analyze_forest_path([
+            {"kind": "poscmd", "payload": {"position_xyz": point}}
+            for point in low_points], "risk")
+        high = MODULE.analyze_forest_path([
+            {"kind": "poscmd", "payload": {"position_xyz": point}}
+            for point in high_points], "baseline")
+        self.assertEqual(low["result"], "PASS")
+        self.assertEqual(high["result"], "PASS")
+        self.assertEqual(low["selected_low_risk_forks"], 4)
+        self.assertEqual(high["selected_high_risk_forks"], 4)
     def test_p0_deadline_uses_launch_start_not_earlier_capture_start(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             run_root = Path(temporary_directory)

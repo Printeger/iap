@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import importlib.util
 import json
 import math
@@ -26,6 +27,8 @@ DEFAULT_RESULTS_ROOT = (
 ).resolve()
 DEFAULT_INSTALL_ROOT = (REPOSITORY.parents[1] / "install").resolve()
 STAGE_ORDER = ("estimator", "p0", "p4", "p5-final", "full", "shutdown")
+DEFAULT_SCENARIO = "icra072_p4_selection_trigger_v1"
+FOREST_SCENARIO = "icra_dense_forest_four_fork_v1"
 SEVEN_STAGE_ORDER = (
     "p0_snapshot", "closed_collision", "p4_selection_application",
     "ego_final_bspline", "p5_final_pass_before_publish",
@@ -46,7 +49,7 @@ FORBIDDEN_LAYER_ARGS = {
 }
 COMMON_ARGS = {
     "experiment": "icra_p0_p4_v2_p5_dev",
-    "scenario": "icra072_p4_selection_trigger_v1",
+    "scenario": DEFAULT_SCENARIO,
     "odometry_acc_scale": "1.0",
     "odometry_initialization_mode": "NAIVE",
     "lidar_start_delay_s": "2.0",
@@ -114,6 +117,92 @@ STAGES = {
 }
 
 
+def forest_scene_contract() -> dict:
+    """Return the frozen, expanded geometry used by the forest preset."""
+    signs = [-1, 1, -1, 1]
+    contract = {
+        "schema_version": FOREST_SCENARIO,
+        "forest_seed": 41021,
+        "risk_seed": 21,
+        "scene_bbox_m": {
+            "min": [-21.0, -11.0, 0.0],
+            "max": [21.0, 11.0, 8.0],
+        },
+        "start_xyz_m": [-18.0, 0.0, 1.5],
+        "goal_xyz_m": [18.0, 0.0, 1.5],
+        "low_risk_y_signs": signs,
+        "corridor_width_m": 2.4,
+        "junction_buffer_radius_m": 2.0,
+        "forest_density_per_m2": 0.25,
+        "stratified_cell_size_m": 2.0,
+        "canopy_probability": 0.65,
+        "canopy_radius_range_m": [0.8, 1.5],
+        "trunk_radius_m": 0.14,
+        "trunk_height_range_m": [3.2, 5.0],
+        "edge_tree_spacing_m": 0.5,
+        "flight_clearance_z_m": 2.8,
+        "side_boundary_tree_spacing_m": 0.28,
+        "p0_use_current_integrity_prior": True,
+        "p0_conservative_max_with_gnss": True,
+        "planner_executor_thread_count": 8,
+        "gnss": {
+            "ephemeris_source": "rinex",
+            "enabled_constellations": ["GPS", "GAL", "GLO"],
+            "map_occlusion": True,
+            "nlos": True,
+            "multipath": True,
+            "skymask": False,
+            "fault_injection": False,
+        },
+        "forks": [{
+            "fork_index": index,
+            "x_min_m": -16.0 + 8.0 * index,
+            "length_m": 8.0,
+            "low_risk_amplitude_m": 4.0,
+            "high_risk_amplitude_m": 2.8,
+            "low_risk_y_sign": sign,
+            "low_risk_side": "right" if sign < 0 else "left",
+        } for index, sign in enumerate(signs)],
+    }
+    canonical = json.dumps(contract, sort_keys=True, separators=(",", ":"))
+    contract["fingerprint"] = (
+        "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest())
+    return contract
+
+
+def stage_launch_args(
+        stage: str, scenario: str = DEFAULT_SCENARIO,
+        forest_variant: str | None = None) -> dict[str, str]:
+    if stage not in STAGES:
+        raise ValueError(f"unknown stage: {stage}")
+    if scenario not in (DEFAULT_SCENARIO, FOREST_SCENARIO):
+        raise ValueError(f"unsupported scenario: {scenario}")
+    if forest_variant not in (None, "risk", "baseline"):
+        raise ValueError(f"unsupported forest variant: {forest_variant}")
+    if forest_variant is not None and scenario != FOREST_SCENARIO:
+        raise ValueError("forest variants require the dense forest scenario")
+    launch_args = dict(STAGES[stage].launch_args)
+    launch_args["scenario"] = scenario
+    if forest_variant == "baseline":
+        launch_args.update({
+            "p0.enable_risk_grid": "true",
+            "planner_enable_p4": "false",
+            "planner_enable_p5_final": "false",
+            "planner_enable_p5_runtime": "false",
+        })
+    launch_args.update(FORBIDDEN_LAYER_ARGS)
+    return launch_args
+
+
+def stage_duration_s(
+        stage: str, scenario: str = DEFAULT_SCENARIO,
+        forest_variant: str | None = None) -> float:
+    if (stage == "full" and scenario == FOREST_SCENARIO
+            and forest_variant in ("risk", "baseline")):
+        return 90.0
+    return STAGES[stage].duration_s
+
+
 def _result(failures: list[str], **details) -> dict:
     unique = list(dict.fromkeys(failures))
     return {
@@ -129,6 +218,119 @@ def _result(failures: list[str], **details) -> dict:
 
 def _finite_number(value) -> bool:
     return isinstance(value, (int, float)) and math.isfinite(float(value))
+
+
+def analyze_forest_risk(records: list[dict]) -> dict:
+    """Require one complete generation with lower risk on all four open arms."""
+    generation_results = []
+    for row in records:
+        if row.get("kind") != "forest_risk_generation":
+            continue
+        payload = row.get("payload", row)
+        fork_results = []
+        for fork in payload.get("forks", []):
+            low = fork.get("low", {})
+            high = fork.get("high", {})
+            complete = all(
+                int(arm.get("sample_count", 0) or 0) > 0
+                and int(arm.get("valid_count", 0) or 0)
+                == int(arm.get("sample_count", 0) or 0)
+                for arm in (low, high))
+            finite = all(_finite_number(arm.get(field))
+                         for arm in (low, high)
+                         for field in ("mean_c_pi", "max_c_pi", "mean_pl"))
+            contrast = bool(complete and finite) and (
+                float(low["mean_c_pi"]) <= 0.9 * float(high["mean_c_pi"])
+                and float(low["max_c_pi"]) < float(high["max_c_pi"])
+                and float(low["mean_pl"]) < float(high["mean_pl"]))
+            fork_results.append({
+                "fork_index": fork.get("fork_index"),
+                "complete": complete,
+                "contrast_pass": contrast,
+                "low": low,
+                "high": high,
+            })
+        generation_results.append({
+            "generation_id": payload.get("generation_id"),
+            "forks": fork_results,
+            "pass": len(fork_results) == 4
+            and {item["fork_index"] for item in fork_results}
+            == {0, 1, 2, 3}
+            and all(item["contrast_pass"] for item in fork_results),
+        })
+    passing = next((item for item in generation_results if item["pass"]), None)
+    failures = [] if passing else ["forest_risk_contrast_missing"]
+    return _result(
+        failures,
+        generation_count=len(generation_results),
+        passing_generation_id=(
+            passing["generation_id"] if passing is not None else None),
+        generations=generation_results,
+    )
+
+
+def _forest_arm_centers(fork: dict, x_m: float) -> tuple[float, float]:
+    t = min(1.0, max(0.0, (
+        x_m - float(fork["x_min_m"])) / float(fork["length_m"])))
+    shape = math.sin(math.pi * t) ** 2
+    sign = float(fork["low_risk_y_sign"])
+    return (
+        sign * float(fork["low_risk_amplitude_m"]) * shape,
+        -sign * float(fork["high_risk_amplitude_m"]) * shape,
+    )
+
+
+def analyze_forest_path(records: list[dict], variant: str) -> dict:
+    """Classify captured trajectory samples by the nearer fork centerline."""
+    if variant not in ("risk", "baseline"):
+        raise ValueError(f"unsupported forest path variant: {variant}")
+    forks = forest_scene_contract()["forks"]
+    votes = {index: {"low": 0, "high": 0}
+             for index in range(len(forks))}
+    for row in records:
+        payload = row.get("payload", row)
+        point_sets = []
+        point = payload.get("position_xyz")
+        if isinstance(point, list):
+            point_sets.append(point)
+        points = payload.get("control_points_xyz")
+        if isinstance(points, list):
+            point_sets.extend(points)
+        for xyz in point_sets:
+            if not isinstance(xyz, list) or len(xyz) < 2:
+                continue
+            try:
+                x_m, y_m = float(xyz[0]), float(xyz[1])
+            except (TypeError, ValueError):
+                continue
+            for fork in forks:
+                x_min = float(fork["x_min_m"])
+                length = float(fork["length_m"])
+                t = (x_m - x_min) / length
+                if not 0.15 <= t <= 0.85:
+                    continue
+                low_y, high_y = _forest_arm_centers(fork, x_m)
+                arm = "low" if abs(y_m - low_y) < abs(y_m - high_y) else "high"
+                votes[int(fork["fork_index"])][arm] += 1
+                break
+    selected = {}
+    for index, arm_votes in votes.items():
+        if arm_votes["low"] == arm_votes["high"]:
+            selected[index] = "unresolved"
+        else:
+            selected[index] = (
+                "low" if arm_votes["low"] > arm_votes["high"] else "high")
+    low_count = sum(arm == "low" for arm in selected.values())
+    high_count = sum(arm == "high" for arm in selected.values())
+    passed = low_count == 4 if variant == "risk" else high_count >= 3
+    return _result(
+        [] if passed else [f"forest_{variant}_branch_selection_failed"],
+        forest_variant=variant,
+        selected_arms={str(key): value for key, value in selected.items()},
+        selected_low_risk_forks=low_count,
+        selected_high_risk_forks=high_count,
+        sample_votes={str(key): value for key, value in votes.items()},
+    )
 
 
 def analyze_estimator(metrics: dict) -> dict:
@@ -669,7 +871,9 @@ def _stage_start_steady_s(run_root: Path) -> float | None:
     return None
 
 
-def analyze_run(stage: str, run_root: Path) -> dict:
+def analyze_run(
+        stage: str, run_root: Path, scenario: str = DEFAULT_SCENARIO,
+        forest_variant: str | None = None) -> dict:
     records = _read_jsonl(run_root / "capture.jsonl")
     health = [row for row in records if row.get("kind") == "p0_health"]
     bsplines = [row for row in records if row.get("kind") == "normal_bspline"]
@@ -685,10 +889,119 @@ def analyze_run(stage: str, run_root: Path) -> dict:
     if stage == "p0":
         return analyze_p0(health, stage_start)
     if stage in ("p4", "p5-final", "full"):
-        return analyze_stage_records(
+        if scenario == FOREST_SCENARIO and forest_variant == "baseline":
+            p0 = analyze_p0(health, stage_start)
+            stable, bspline_span = _stable_bspline(bsplines)
+            poscmd_ok, poscmd_rate = _poscmd_sustained(poscmd_times)
+            path = analyze_forest_path(records, "baseline")
+            failures = list(p0["failures"])
+            if not stable:
+                failures.append("stable_bspline_missing")
+            if not poscmd_ok:
+                failures.append("poscmd_not_sustained")
+            failures.extend(path["failures"])
+            return _result(
+                failures, stage=stage, scenario=scenario,
+                forest_variant="baseline", p0=p0, forest_path=path,
+                bspline_count=len(bsplines), bspline_span_s=bspline_span,
+                poscmd_count=len(poscmd_times), poscmd_rate_hz=poscmd_rate,
+            )
+        base = analyze_stage_records(
             stage, health, decisions, lineage, bsplines, p5_status,
             poscmd_times, stage_start)
+        if scenario != FOREST_SCENARIO:
+            return base
+        risk = analyze_forest_risk(records)
+        path = analyze_forest_path(records, forest_variant or "risk")
+        failures = [*base["failures"], *risk["failures"], *path["failures"]]
+        return _result(
+            failures,
+            **{key: value for key, value in base.items()
+               if key not in ("result", "failures")},
+            scenario=scenario,
+            forest_variant=forest_variant or "risk",
+            forest_risk=risk,
+            forest_path=path,
+        )
     raise ValueError(f"unsupported functional stage: {stage}")
+
+
+def summarize_forest_risk_cloud(points: list[dict]) -> dict | None:
+    """Reduce a PL cloud to per-fork metrics without retaining cloud points."""
+    if not points:
+        return None
+    generation_ids = {
+        int(point.get("generation_id", 0) or 0) for point in points}
+    generation_ids.discard(0)
+    if len(generation_ids) != 1:
+        return None
+    forks = forest_scene_contract()["forks"]
+    buckets = {
+        (index, arm): [] for index in range(4) for arm in ("low", "high")}
+    for point in points:
+        try:
+            x_m = float(point["x"])
+            y_m = float(point["y"])
+            z_m = float(point["z"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if not all(math.isfinite(value) for value in (x_m, y_m, z_m)):
+            continue
+        if abs(z_m - 1.5) > 0.75:
+            continue
+        for fork in forks:
+            x_min = float(fork["x_min_m"])
+            length = float(fork["length_m"])
+            t = (x_m - x_min) / length
+            if not 0.2 <= t <= 0.8:
+                continue
+            low_y, high_y = _forest_arm_centers(fork, x_m)
+            distances = {"low": abs(y_m - low_y),
+                         "high": abs(y_m - high_y)}
+            arm = min(distances, key=distances.get)
+            if distances[arm] <= 1.25:
+                buckets[(int(fork["fork_index"]), arm)].append(point)
+            break
+
+    def arm_summary(rows: list[dict]) -> dict:
+        valid = [row for row in rows
+                 if int(row.get("valid", 0) or 0) == 1
+                 and int(row.get("unknown", 0) or 0) == 0
+                 and int(row.get("stale", 0) or 0) == 0]
+
+        def values(field: str) -> list[float]:
+            output = []
+            for row in valid:
+                try:
+                    value = float(row[field])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                if math.isfinite(value):
+                    output.append(value)
+            return output
+
+        c_pi = values("c_pi")
+        pl = values("pl")
+        hpl = values("hpl")
+        vpl = values("vpl")
+        return {
+            "sample_count": len(rows),
+            "valid_count": len(valid),
+            "mean_c_pi": statistics.fmean(c_pi) if c_pi else None,
+            "max_c_pi": max(c_pi) if c_pi else None,
+            "mean_pl": statistics.fmean(pl) if pl else None,
+            "mean_hpl": statistics.fmean(hpl) if hpl else None,
+            "mean_vpl": statistics.fmean(vpl) if vpl else None,
+        }
+
+    return {
+        "generation_id": next(iter(generation_ids)),
+        "forks": [{
+            "fork_index": index,
+            "low": arm_summary(buckets[(index, "low")]),
+            "high": arm_summary(buckets[(index, "high")]),
+        } for index in range(4)],
+    }
 
 
 def _capture_main(args: argparse.Namespace) -> int:
@@ -702,6 +1015,7 @@ def _capture_main(args: argparse.Namespace) -> int:
         qos_profile_sensor_data,
     )
     from sensor_msgs.msg import Imu, PointCloud2
+    from sensor_msgs_py import point_cloud2
     from std_msgs.msg import String
     from traj_utils.msg import Bspline
 
@@ -729,7 +1043,7 @@ def _capture_main(args: argparse.Namespace) -> int:
                 Bspline, "/drone_0_planning/bspline", self.bspline, retained)
             self.create_subscription(
                 PositionCommand, "/drone_0_planning/pos_cmd",
-                lambda _message: self.record("poscmd", {}), reliable)
+                self.poscmd, reliable)
             self.create_subscription(
                 Odometry, "/drone_0_visual_slam/odom",
                 lambda message: self.record("iap_odom", {
@@ -756,6 +1070,15 @@ def _capture_main(args: argparse.Namespace) -> int:
             self.create_subscription(
                 Imu, "/sim/drone_0/imu_iap", self.imu,
                 qos_profile_sensor_data)
+            self.scene_bbox_recorded = False
+            self.forest_risk_generations = set()
+            if args.capture_scenario == FOREST_SCENARIO:
+                self.create_subscription(
+                    PointCloud2, "/map_generator/global_cloud",
+                    self.scene_cloud, qos_profile_sensor_data)
+                self.create_subscription(
+                    PointCloud2, "/iap/rviz/predicted_pl_cloud",
+                    self.forest_risk_cloud, qos_profile_sensor_data)
             ready.write_text(json.dumps({
                 "schema_version": "icra_interface_capture_ready_v1",
                 "ready": True,
@@ -784,8 +1107,69 @@ def _capture_main(args: argparse.Namespace) -> int:
                 "start_time_ns": int(message.start_time.sec) * 1_000_000_000
                 + int(message.start_time.nanosec),
                 "control_point_count": len(message.pos_pts),
+                "control_points_xyz": [
+                    [float(point.x), float(point.y), float(point.z)]
+                    for point in message.pos_pts
+                ],
                 "knot_count": len(message.knots),
             })
+
+        def poscmd(self, message: PositionCommand) -> None:
+            self.record("poscmd", {
+                "position_xyz": [
+                    float(message.position.x), float(message.position.y),
+                    float(message.position.z),
+                ],
+            })
+
+        def scene_cloud(self, message: PointCloud2) -> None:
+            if self.scene_bbox_recorded:
+                return
+            points = point_cloud2.read_points(
+                message, field_names=("x", "y", "z"), skip_nans=True)
+            minima = [math.inf, math.inf, math.inf]
+            maxima = [-math.inf, -math.inf, -math.inf]
+            count = 0
+            for point in points:
+                values = [float(point[name]) for name in ("x", "y", "z")]
+                for index, value in enumerate(values):
+                    minima[index] = min(minima[index], value)
+                    maxima[index] = max(maxima[index], value)
+                count += 1
+            if count == 0:
+                return
+            self.scene_bbox_recorded = True
+            self.record("scene_cloud_bbox", {
+                "point_count": count, "min_xyz_m": minima,
+                "max_xyz_m": maxima,
+                "pointcloud_sha256": hashlib.sha256(
+                    bytes(message.data)).hexdigest(),
+            })
+
+        def forest_risk_cloud(self, message: PointCloud2) -> None:
+            required = (
+                "x", "y", "z", "pl", "hpl", "vpl", "c_pi", "valid",
+                "unknown", "stale", "generation_id")
+            if not set(required).issubset(
+                    {field.name for field in message.fields}):
+                self.record("forest_risk_cloud_error", {
+                    "reason": "required_fields_missing",
+                    "fields": [field.name for field in message.fields],
+                })
+                return
+            points = []
+            for point in point_cloud2.read_points(
+                    message, field_names=required, skip_nans=False):
+                points.append({
+                    name: (point[name].item() if hasattr(point[name], "item")
+                           else point[name]) for name in required
+                })
+            summary = summarize_forest_risk_cloud(points)
+            if (summary is not None
+                    and summary["generation_id"]
+                    not in self.forest_risk_generations):
+                self.forest_risk_generations.add(summary["generation_id"])
+                self.record("forest_risk_generation", summary)
 
         def imu(self, message: Imu) -> None:
             if self.imu_count >= 100:
@@ -804,7 +1188,10 @@ def _capture_main(args: argparse.Namespace) -> int:
     rclpy.init()
     node = Capture()
     try:
-        rclpy.spin(node)
+        try:
+            rclpy.spin(node)
+        except KeyboardInterrupt:
+            pass
     finally:
         node.destroy_node()
         if rclpy.ok():
@@ -951,8 +1338,11 @@ def _run_one_impl(
         stage: str, run_root: Path, install_root: Path,
         start_rviz: bool, shutdown_variant: str | None,
         owned_processes: dict[str, subprocess.Popen],
-        owned_streams: dict[str, TextIO]) -> dict:
+        owned_streams: dict[str, TextIO],
+        scenario: str = DEFAULT_SCENARIO,
+        forest_variant: str | None = None) -> dict:
     spec = STAGES[stage]
+    duration_s = stage_duration_s(stage, scenario, forest_variant)
     run_root.mkdir(parents=True, exist_ok=False)
     for child in ("runtime/ros_logs", "exports", "bags"):
         (run_root / child).mkdir(parents=True, exist_ok=True)
@@ -962,7 +1352,8 @@ def _run_one_impl(
         sys.executable, str(Path(__file__).resolve()),
         "--capture-output", str(run_root / "capture.jsonl"),
         "--capture-ready", str(run_root / "capture_ready.json"),
-        "--capture-duration", str(spec.duration_s + 20.0),
+        "--capture-duration", str(duration_s + 20.0),
+        "--capture-scenario", scenario,
     ]
     capture_stream = (run_root / "capture_stdout.log").open("x")
     owned_streams["capture"] = capture_stream
@@ -982,7 +1373,7 @@ def _run_one_impl(
         _json_write(run_root / "summary.json", summary)
         return summary
 
-    launch_args = dict(spec.launch_args)
+    launch_args = stage_launch_args(stage, scenario, forest_variant)
     if shutdown_variant == "baseline":
         launch_args.update({
             "experiment": "baseline_fused_nominal_off",
@@ -997,8 +1388,8 @@ def _run_one_impl(
         })
     launch_args.update({
         "start_rviz": "true" if start_rviz else "false",
-        "run_duration_s": "0" if stage == "shutdown" else str(spec.duration_s),
-        "validation_duration_s": str(max(5.0, spec.duration_s - 5.0)),
+        "run_duration_s": "0" if stage == "shutdown" else str(duration_s),
+        "validation_duration_s": str(max(5.0, duration_s - 5.0)),
         "runtime_root_dir": str(run_root / "runtime"),
         "export_root_dir": str(run_root / "exports"),
         "iap_log_root": str(run_root / "runtime/iap_logs"),
@@ -1009,6 +1400,10 @@ def _run_one_impl(
     shell_command = _launch_shell(install_root, launch_args)
     _json_write(run_root / "launch_command.json", {
         "stage": stage,
+        "scenario": scenario,
+        "forest_variant": forest_variant,
+        "forest_scene": (
+            forest_scene_contract() if scenario == FOREST_SCENARIO else None),
         "shutdown_variant": shutdown_variant,
         "argv": ["bash", "-lc", shell_command],
         "launch_args": launch_args,
@@ -1027,20 +1422,20 @@ def _run_one_impl(
         "started_steady_s": started,
     })
     timeout_s = (
-        spec.duration_s if stage == "shutdown" else spec.duration_s + 20.0)
+        duration_s if stage == "shutdown" else duration_s + 20.0)
 
     def report_progress(now_s: float) -> None:
         _emit(_progress_message(
-            stage, now_s - started, spec.duration_s, timeout_s, stdout_path))
+            stage, now_s - started, duration_s, timeout_s, stdout_path))
 
     early_exit = False
     if stage == "shutdown":
         early_exit = _wait_for_exit(
-            launch, started + spec.duration_s, report_progress)
+            launch, started + duration_s, report_progress)
         launch_code, launch_cleared, launch_escalated = _stop_group(
             launch, 5.0, run_root / "shutdown_stacks.txt")
     else:
-        deadline = started + spec.duration_s + 20.0
+        deadline = started + duration_s + 20.0
         exited = _wait_for_exit(launch, deadline, report_progress)
         if not exited:
             launch_code, launch_cleared, launch_escalated = _stop_group(
@@ -1049,7 +1444,7 @@ def _run_one_impl(
             launch_code = launch.returncode
             launch_cleared = _group_cleared(launch.pid)
             launch_escalated = False
-            early_exit = time.monotonic() - started < spec.duration_s - 1.0
+            early_exit = time.monotonic() - started < duration_s - 1.0
     capture_code, capture_cleared, capture_escalated = _stop_group(
         capture, 3.0, run_root / "capture_stacks.txt")
     launch_stream.close()
@@ -1062,7 +1457,7 @@ def _run_one_impl(
             launch_code, stdout, launch_cleared, residual_nodes,
             runner_escalated=launch_escalated)
     else:
-        summary = analyze_run(stage, run_root)
+        summary = analyze_run(stage, run_root, scenario, forest_variant)
         extra = []
         if early_exit:
             extra.append("launch_exited_early")
@@ -1076,6 +1471,13 @@ def _run_one_impl(
                if key not in ("result", "failures")})
     summary.update({
         "stage": stage,
+        "scenario": scenario,
+        "forest_variant": forest_variant,
+        "forest_scene": (
+            forest_scene_contract() if scenario == FOREST_SCENARIO else None),
+        "scene_cloud_bbox": next((
+            row.get("payload") for row in _read_jsonl(run_root / "capture.jsonl")
+            if row.get("kind") == "scene_cloud_bbox"), None),
         "shutdown_variant": shutdown_variant,
         "launch_exit_code": launch_code,
         "capture_exit_code": capture_code,
@@ -1092,14 +1494,16 @@ def _run_one_impl(
 
 def _run_one(
         stage: str, run_root: Path, install_root: Path,
-        start_rviz: bool = False, shutdown_variant: str | None = None) -> dict:
+        start_rviz: bool = False, shutdown_variant: str | None = None,
+        scenario: str = DEFAULT_SCENARIO,
+        forest_variant: str | None = None) -> dict:
     owned_processes: dict[str, subprocess.Popen] = {}
     owned_streams: dict[str, TextIO] = {}
     started = time.monotonic()
     try:
         return _run_one_impl(
             stage, run_root, install_root, start_rviz, shutdown_variant,
-            owned_processes, owned_streams)
+            owned_processes, owned_streams, scenario, forest_variant)
     except KeyboardInterrupt:
         _emit(f"INTERRUPT stage={stage} cleanup=starting")
         process_status = {
@@ -1129,6 +1533,8 @@ def _run_one(
         summary = _result(
             ["interrupted", *cleanup_failures],
             stage=stage,
+            scenario=scenario,
+            forest_variant=forest_variant,
             shutdown_variant=shutdown_variant,
             launch_exit_code=process_status["launch"]["exit_code"],
             capture_exit_code=process_status["capture"]["exit_code"],
@@ -1188,6 +1594,8 @@ def _run_main(args: argparse.Namespace) -> int:
         stages = STAGE_ORDER[:STAGE_ORDER.index(requested) + 1]
     else:
         stages = (requested,)
+    scenario = getattr(args, "scenario", DEFAULT_SCENARIO)
+    forest_ab = bool(getattr(args, "forest_ab", False))
     results_root = args.results_root.resolve()
     session = _session_root(results_root)
     session.mkdir(parents=True, exist_ok=False)
@@ -1198,6 +1606,10 @@ def _run_main(args: argparse.Namespace) -> int:
         "qualification_claim": False,
         "scientific_effect_claim": False,
         "stage_order": list(stages),
+        "scenario": scenario,
+        "forest_ab": forest_ab,
+        "forest_scene": (
+            forest_scene_contract() if scenario == FOREST_SCENARIO else None),
         "repetitions": args.repetitions,
         "runs": [],
         # Do not leave a partial or interrupted --through session looking like
@@ -1216,27 +1628,47 @@ def _run_main(args: argparse.Namespace) -> int:
             return 4
         for stage in stages:
             current_stage = stage
-            variants = (
-                ("baseline", "full") if stage == "shutdown" else (None,))
             for repetition in range(1, args.repetitions + 1):
-                for variant in variants:
+                if forest_ab and stage == "full":
+                    run_variants = (
+                        (None, "baseline"), (None, "risk"))
+                elif stage == "shutdown":
+                    run_variants = (("baseline", None), ("full", None))
+                else:
+                    forest_variant = (
+                        "risk" if scenario == FOREST_SCENARIO
+                        and stage in ("p4", "p5-final", "full") else None)
+                    run_variants = ((None, forest_variant),)
+                for shutdown_variant, forest_variant in run_variants:
+                    variant = forest_variant or shutdown_variant
                     suffix = f"-{variant}" if variant else ""
                     run_root = session / f"{stage}-r{repetition:02d}{suffix}"
-                    rviz_enabled = args.rviz and stage == "full"
-                    _emit(
+                    rviz_enabled = (
+                        args.rviz and stage == "full"
+                        and forest_variant != "baseline")
+                    duration_s = stage_duration_s(
+                        stage, scenario, forest_variant)
+                    start_message = (
                         f"START stage={stage} repetition={repetition}/"
-                        f"{args.repetitions} "
-                        f"duration={STAGES[stage].duration_s:g}s "
+                        f"{args.repetitions} duration={duration_s:g}s "
                         f"rviz={'true' if rviz_enabled else 'false'}")
+                    if scenario != DEFAULT_SCENARIO or variant is not None:
+                        start_message += (
+                            f" scenario={scenario} "
+                            f"variant={variant or 'default'}")
+                    _emit(start_message)
                     _emit(f"LOG {run_root / 'stdout.log'}")
                     summary = _run_one(
                         stage, run_root, install_root,
                         start_rviz=rviz_enabled,
-                        shutdown_variant=variant)
+                        shutdown_variant=shutdown_variant,
+                        scenario=scenario,
+                        forest_variant=forest_variant)
                     session_summary["runs"].append({
                         "stage": stage,
                         "repetition": repetition,
                         "variant": variant,
+                        "scenario": scenario,
                         "path": str(run_root),
                         "result": summary["result"],
                         "failures": summary["failures"],
@@ -1278,9 +1710,19 @@ def main() -> int:
     parser.add_argument("--install-root", type=Path,
                         default=DEFAULT_INSTALL_ROOT)
     parser.add_argument("--rviz", action="store_true")
+    parser.add_argument(
+        "--scenario", choices=(DEFAULT_SCENARIO, FOREST_SCENARIO),
+        default=DEFAULT_SCENARIO)
+    parser.add_argument(
+        "--forest-ab", action="store_true",
+        help=("run paired P4-off baseline and P4/P5-on risk variants; "
+              "requires the dense forest full stage"))
     parser.add_argument("--capture-output", type=Path)
     parser.add_argument("--capture-ready", type=Path)
     parser.add_argument("--capture-duration", type=float, default=120.0)
+    parser.add_argument(
+        "--capture-scenario", choices=(DEFAULT_SCENARIO, FOREST_SCENARIO),
+        default=DEFAULT_SCENARIO)
     args = parser.parse_args()
     if args.capture_output or args.capture_ready:
         if not args.capture_output or not args.capture_ready:
@@ -1290,6 +1732,12 @@ def main() -> int:
         raise SystemExit("repetitions must be positive")
     if args.rviz and (args.stage != "full" or args.through):
         raise SystemExit("--rviz is valid only with --stage full")
+    if args.forest_ab and (
+            args.scenario != FOREST_SCENARIO
+            or args.stage != "full" or args.through):
+        raise SystemExit(
+            "--forest-ab requires --scenario "
+            f"{FOREST_SCENARIO} --stage full")
     try:
         return _run_main(args)
     except KeyboardInterrupt:

@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <cstddef>
 #include <random>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -15,6 +16,7 @@
 
 #include <iap/planner/p1_fixture_geometry.hpp>
 #include <iap/sim/demo11_publication_stamp_authority.hpp>
+#include <iap/sim/forked_forest_geometry.hpp>
 
 namespace {
 
@@ -254,6 +256,38 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
         declare_parameter<double>("clear_corridor_x_min_m", -1.0e9);
     clear_corridor_x_max_m_ =
         declare_parameter<double>("clear_corridor_x_max_m", 1.0e9);
+    forest_layout_mode_ =
+        declare_parameter<std::string>("forest_layout_mode", "random_forest");
+    forked_forest_config_.fork_count =
+        declare_parameter<int>("forked_forest.fork_count", 4);
+    forked_forest_config_.fork_x_min_m =
+        declare_parameter<double>("forked_forest.fork_x_min_m", -16.0);
+    forked_forest_config_.fork_length_m =
+        declare_parameter<double>("forked_forest.fork_length_m", 8.0);
+    forked_forest_config_.low_risk_amplitude_m =
+        declare_parameter<double>("forked_forest.low_risk_amplitude_m", 4.0);
+    forked_forest_config_.high_risk_amplitude_m =
+        declare_parameter<double>("forked_forest.high_risk_amplitude_m", 2.8);
+    forked_forest_config_.corridor_half_width_m = 0.5 *
+        declare_parameter<double>("forked_forest.corridor_width_m", 2.4);
+    forked_forest_config_.junction_clearance_radius_m = declare_parameter<double>(
+        "forked_forest.junction_clearance_radius_m", 2.0);
+    forked_forest_config_.start_x_m =
+        declare_parameter<double>("forked_forest.start_x_m", -18.0);
+    forked_forest_config_.goal_x_m =
+        declare_parameter<double>("forked_forest.goal_x_m", 18.0);
+    forked_forest_config_.fork_risk_seed = static_cast<std::uint32_t>(
+        declare_parameter<int>("forked_forest.risk_seed", 21));
+    forked_forest_flight_clearance_z_m_ = declare_parameter<double>(
+        "forked_forest.flight_clearance_z_m", 2.8);
+    forked_forest_edge_tree_spacing_m_ = declare_parameter<double>(
+        "forked_forest.edge_tree_spacing_m", 1.0);
+    forked_forest_edge_tree_height_m_ = declare_parameter<double>(
+        "forked_forest.edge_tree_height_m", 3.2);
+    forked_forest_edge_canopy_radius_m_ = declare_parameter<double>(
+        "forked_forest.edge_canopy_radius_m", 1.5);
+    forked_forest_side_boundary_spacing_m_ = declare_parameter<double>(
+        "forked_forest.side_boundary_tree_spacing_m", 0.0);
     canopy_density_lower_left_ =
         declare_parameter<double>("canopy_density_lower_left", 0.5);
     canopy_density_lower_right_ =
@@ -443,6 +477,29 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
         p0_6_fixture_z_min_m_, p0_6_fixture_z_max_m_,
         groups_.p0_6_fixture.size(),
         resolution_, random_seed_);
+    if (forked_forest_enabled()) {
+      const auto signs = iap::sim::forkLowRiskSigns(forked_forest_config_);
+      RCLCPP_INFO(
+          get_logger(),
+          "Forked forest layout=%s forks=%d x_min=%.2f length=%.2f "
+          "corridor_width=%.2f low/high_amplitude=%.2f/%.2f "
+          "low_sides(y_sign)=%d,%d,%d,%d risk_seed=%u "
+          "flight_clearance_z=%.2f edge_canopy_base/radius=%.2f/%.2f "
+          "canopy_column_hit_rate_low/high=%.3f/%.3f",
+          forest_layout_mode_.c_str(), forked_forest_config_.fork_count,
+          forked_forest_config_.fork_x_min_m,
+          forked_forest_config_.fork_length_m,
+          2.0 * forked_forest_config_.corridor_half_width_m,
+          forked_forest_config_.low_risk_amplitude_m,
+          forked_forest_config_.high_risk_amplitude_m,
+          signs[0], signs[1], signs[2], signs[3],
+          forked_forest_config_.fork_risk_seed,
+          forked_forest_flight_clearance_z_m_,
+          forked_forest_edge_tree_height_m_,
+          forked_forest_edge_canopy_radius_m_,
+          fork_route_canopy_hit_rate(iap::sim::ForkArm::kLowRisk),
+          fork_route_canopy_hit_rate(iap::sim::ForkArm::kHighRisk));
+    }
     if (!p1_map_fixture_.empty()) {
       RCLCPP_INFO(
           get_logger(),
@@ -488,10 +545,9 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
     }
   }
 
-  void add_canopy(std::mt19937& rng, const TrunkInstance& trunk) {
-    std::uniform_real_distribution<double> canopy_radius_dist(
-        canopy_hemisphere_radius_min_m_, canopy_hemisphere_radius_max_m_);
-    const double canopy_radius = canopy_radius_dist(rng);
+  void add_canopy_with_radius(const TrunkInstance& trunk,
+                              const double canopy_radius,
+                              const bool count_region = true) {
     const double ball_spacing = std::max(
         canopy_resolution_m_, canopy_leaf_ball_radius_m_ * canopy_ball_spacing_ratio_);
     const int layer_count =
@@ -521,7 +577,15 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
         }
       }
     }
-    ++region_canopy_counts_[trunk.region_index];
+    if (count_region && trunk.region_index >= 0 && trunk.region_index < 4) {
+      ++region_canopy_counts_[trunk.region_index];
+    }
+  }
+
+  void add_canopy(std::mt19937& rng, const TrunkInstance& trunk) {
+    std::uniform_real_distribution<double> canopy_radius_dist(
+        canopy_hemisphere_radius_min_m_, canopy_hemisphere_radius_max_m_);
+    add_canopy_with_radius(trunk, canopy_radius_dist(rng));
   }
 
   void add_region_trees(std::mt19937& rng,
@@ -592,7 +656,7 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
             added = true;
             break;
           }
-          if (!added && !clear_corridor_enabled_) {
+          if (!added && !clear_corridor_enabled_ && !forked_forest_enabled()) {
             add_trunk(x_dist(rng), y_dist(rng), height_dist(rng), region_index);
             ++tree_count;
           }
@@ -603,6 +667,11 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
   }
 
   bool inside_clear_corridor(const double x, const double y) const {
+    if (forked_forest_enabled()) {
+      auto padded = forked_forest_config_;
+      padded.corridor_half_width_m += trunk_radius_m_;
+      return iap::sim::classifyForkCorridor(padded, x, y).insideAny();
+    }
     if (!clear_corridor_enabled_) {
       return false;
     }
@@ -611,6 +680,167 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
     }
     return std::abs(y - clear_corridor_center_y_m_) <=
            clear_corridor_half_width_y_m_ + trunk_radius_m_;
+  }
+
+  bool forked_forest_enabled() const {
+    return forest_layout_mode_ == "forked_s_forest_v1";
+  }
+
+  void add_forked_forest_edge_canopies() {
+    if (!forked_forest_enabled()) {
+      return;
+    }
+    const double offset = forked_forest_config_.corridor_half_width_m +
+                          trunk_radius_m_ + 0.05;
+    const int samples = std::max(
+        2, static_cast<int>(std::floor(
+               forked_forest_config_.fork_length_m /
+               forked_forest_edge_tree_spacing_m_)));
+    for (int fork = 0; fork < forked_forest_config_.fork_count; ++fork) {
+      const double x0 = forked_forest_config_.fork_x_min_m +
+                        static_cast<double>(fork) *
+                            forked_forest_config_.fork_length_m;
+      for (int sample = 1; sample < samples; ++sample) {
+        const double t = static_cast<double>(sample) /
+                         static_cast<double>(samples);
+        const double x = x0 + t * forked_forest_config_.fork_length_m;
+        for (const auto arm : {iap::sim::ForkArm::kLowRisk,
+                               iap::sim::ForkArm::kHighRisk}) {
+          const double y = iap::sim::forkArmCenterY(
+              forked_forest_config_, fork, arm, x);
+          const double slope = iap::sim::forkArmSlope(
+              forked_forest_config_, fork, arm, x);
+          const double normal_scale = 1.0 / std::hypot(1.0, slope);
+          const double nx = -slope * normal_scale;
+          const double ny = normal_scale;
+          for (const double side : {-1.0, 1.0}) {
+            const double tree_x = x + side * offset * nx;
+            const double tree_y = y + side * offset * ny;
+            auto padded = forked_forest_config_;
+            padded.corridor_half_width_m += trunk_radius_m_;
+            if (iap::sim::classifyForkCorridor(
+                    padded, tree_x, tree_y).insideAny()) {
+              continue;
+            }
+            const int region = (tree_x < 0.0 ? 0 : 1) +
+                               (tree_y < 0.0 ? 0 : 2);
+            const TrunkInstance trunk{
+                tree_x, tree_y, forked_forest_edge_tree_height_m_, region};
+            add_trunk(trunk.x, trunk.y, trunk.height, trunk.region_index);
+            if (arm == iap::sim::ForkArm::kHighRisk) {
+              add_canopy_with_radius(
+                  trunk, forked_forest_edge_canopy_radius_m_, false);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  void add_forked_forest_side_boundaries() {
+    if (!forked_forest_enabled() ||
+        forked_forest_side_boundary_spacing_m_ <= 0.0) {
+      return;
+    }
+    const double x_min = -0.5 * forest_size_x_m_ + trunk_radius_m_;
+    const double x_max = 0.5 * forest_size_x_m_ - trunk_radius_m_;
+    const double y_abs = 0.5 * forest_size_y_m_ - trunk_radius_m_;
+    const double spacing = std::max(
+        2.0 * trunk_radius_m_, forked_forest_side_boundary_spacing_m_);
+    const int intervals = std::max(
+        1, static_cast<int>(std::ceil((x_max - x_min) / spacing)));
+    for (int index = 0; index <= intervals; ++index) {
+      const double t = static_cast<double>(index) /
+                       static_cast<double>(intervals);
+      const double x = x_min + t * (x_max - x_min);
+      add_trunk(x, -y_abs, trunk_max_height_m_, x < 0.0 ? 0 : 1);
+      add_trunk(x, y_abs, trunk_max_height_m_, x < 0.0 ? 2 : 3);
+    }
+  }
+
+  template <typename Predicate>
+  static void erase_points(std::vector<Point>& points,
+                           Predicate should_erase) {
+    points.erase(
+        std::remove_if(points.begin(), points.end(), should_erase),
+        points.end());
+  }
+
+  void apply_forked_forest_clearance() {
+    if (!forked_forest_enabled()) {
+      return;
+    }
+    const double x_limit = 0.5 * forest_size_x_m_ + 1.0e-6;
+    const double y_limit = 0.5 * forest_size_y_m_ + 1.0e-6;
+    const auto outside_scene = [x_limit, y_limit](const Point& point) {
+      return std::abs(point.x) > x_limit || std::abs(point.y) > y_limit;
+    };
+    erase_points(groups_.trunks, [&](const Point& point) {
+      return outside_scene(point) ||
+          iap::sim::classifyForkCorridorEnvelope(
+              forked_forest_config_, point.x, point.y).insideAny();
+    });
+    erase_points(groups_.canopy, [&](const Point& point) {
+      if (outside_scene(point)) {
+        return true;
+      }
+      const auto corridor = iap::sim::classifyForkCorridorEnvelope(
+          forked_forest_config_, point.x, point.y);
+      if (corridor.inside_low || corridor.inside_buffer) {
+        return true;
+      }
+      return corridor.inside_high &&
+             point.z <= forked_forest_flight_clearance_z_m_;
+    });
+  }
+
+  void rebuild_global_cloud_points() {
+    groups_.all.clear();
+    const std::array<const std::vector<Point>*, 5> groups = {
+        &groups_.trunks, &groups_.canopy, &groups_.terminal_wall,
+        &groups_.p0_6_fixture, &groups_.p1_fixture};
+    std::size_t total = 0;
+    for (const auto* group : groups) {
+      total += group->size();
+    }
+    groups_.all.reserve(total);
+    for (const auto* group : groups) {
+      groups_.all.insert(groups_.all.end(), group->begin(), group->end());
+    }
+  }
+
+  double fork_route_canopy_hit_rate(const iap::sim::ForkArm arm) const {
+    constexpr int kSamplesPerFork = 21;
+    // P0 voxel support is 0.5 m in this profile; count a vertical canopy
+    // column when the centerline's containing support column is occupied.
+    constexpr double kColumnRadiusM = 0.50;
+    int hits = 0;
+    int samples = 0;
+    for (int fork = 0; fork < forked_forest_config_.fork_count; ++fork) {
+      const double x0 = forked_forest_config_.fork_x_min_m +
+                        static_cast<double>(fork) *
+                            forked_forest_config_.fork_length_m;
+      for (int index = 0; index < kSamplesPerFork; ++index) {
+        const double t = 0.1 + 0.8 * static_cast<double>(index) /
+                                   static_cast<double>(kSamplesPerFork - 1);
+        const double x = x0 + t * forked_forest_config_.fork_length_m;
+        const double y = iap::sim::forkArmCenterY(
+            forked_forest_config_, fork, arm, x);
+        const bool hit = std::any_of(
+            groups_.canopy.begin(), groups_.canopy.end(),
+            [x, y, kColumnRadiusM](const Point& point) {
+              return point.z >= 3.2f && point.z <= 6.5f &&
+                     std::hypot(static_cast<double>(point.x) - x,
+                                static_cast<double>(point.y) - y) <=
+                         kColumnRadiusM;
+            });
+        hits += hit ? 1 : 0;
+        ++samples;
+      }
+    }
+    return samples > 0 ? static_cast<double>(hits) /
+                             static_cast<double>(samples)
+                       : 0.0;
   }
 
   void add_corridor_degenerate_geometry() {
@@ -688,6 +918,40 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
     trunks_.clear();
     region_tree_counts_.fill(0);
     region_canopy_counts_.fill(0);
+
+    if (forest_layout_mode_ != "random_forest" &&
+        forest_layout_mode_ != "forked_s_forest_v1") {
+      throw std::runtime_error(
+          "forest_layout_mode must be random_forest or forked_s_forest_v1");
+    }
+    if (forked_forest_enabled() && forked_forest_config_.fork_count != 4) {
+      throw std::runtime_error(
+          "forked_s_forest_v1 requires exactly four forks");
+    }
+    forked_forest_config_.fork_length_m =
+        std::max(0.1, forked_forest_config_.fork_length_m);
+    forked_forest_config_.low_risk_amplitude_m =
+        std::max(0.0, forked_forest_config_.low_risk_amplitude_m);
+    forked_forest_config_.high_risk_amplitude_m =
+        std::max(0.0, forked_forest_config_.high_risk_amplitude_m);
+    forked_forest_config_.corridor_half_width_m =
+        std::max(0.1, forked_forest_config_.corridor_half_width_m);
+    forked_forest_config_.junction_clearance_radius_m =
+        std::max(forked_forest_config_.corridor_half_width_m,
+                 forked_forest_config_.junction_clearance_radius_m);
+    forked_forest_flight_clearance_z_m_ =
+        std::max(0.1, forked_forest_flight_clearance_z_m_);
+    forked_forest_edge_tree_spacing_m_ =
+        std::max(0.25, forked_forest_edge_tree_spacing_m_);
+    forked_forest_edge_tree_height_m_ = std::max(
+        forked_forest_flight_clearance_z_m_ + 0.1,
+        forked_forest_edge_tree_height_m_);
+    forked_forest_edge_canopy_radius_m_ =
+        std::max(0.25, forked_forest_edge_canopy_radius_m_);
+    if (forked_forest_side_boundary_spacing_m_ > 0.0) {
+      forked_forest_side_boundary_spacing_m_ = std::max(
+          2.0 * trunk_radius_m_, forked_forest_side_boundary_spacing_m_);
+    }
 
     forest_size_x_m_ = std::max(0.1, forest_size_x_m_);
     forest_size_y_m_ = std::max(0.1, forest_size_y_m_);
@@ -790,6 +1054,9 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
         add_canopy(rng, trunk);
       }
     }
+    add_forked_forest_side_boundaries();
+    add_forked_forest_edge_canopies();
+    apply_forked_forest_clearance();
 
     if (terminal_wall_enabled_) {
       add_terminal_wall(groups_.terminal_wall, groups_.all,
@@ -805,6 +1072,7 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
     add_corridor_degenerate_geometry();
     add_p0_6_fixture_geometry();
     add_p1_fixture_geometry();
+    rebuild_global_cloud_points();
   }
 
   sensor_msgs::msg::PointCloud2 make_cloud(const std::vector<Point>& points) const {
@@ -862,6 +1130,13 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
   double clear_corridor_half_width_y_m_ = 0.0;
   double clear_corridor_x_min_m_ = -1.0e9;
   double clear_corridor_x_max_m_ = 1.0e9;
+  std::string forest_layout_mode_ = "random_forest";
+  iap::sim::ForkedForestConfig forked_forest_config_;
+  double forked_forest_flight_clearance_z_m_ = 2.8;
+  double forked_forest_edge_tree_spacing_m_ = 1.0;
+  double forked_forest_edge_tree_height_m_ = 3.2;
+  double forked_forest_edge_canopy_radius_m_ = 1.5;
+  double forked_forest_side_boundary_spacing_m_ = 0.0;
   double canopy_density_lower_left_ = 0.5;
   double canopy_density_lower_right_ = 0.5;
   double canopy_density_upper_left_ = 0.5;

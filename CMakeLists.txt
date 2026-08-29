@@ -685,11 +685,15 @@ if(DEFINED ENV{ROS_VERSION})
       target_link_libraries(test_alert_limit_model iap)
       ament_add_gtest(test_run_log_manager test/test_run_log_manager.cpp)
       ament_add_gtest(test_p1_fixture_geometry test/test_p1_fixture_geometry.cpp)
+      ament_add_gtest(test_forked_forest_geometry
+        test/test_forked_forest_geometry.cpp
+      )
       ament_add_gtest(test_demo11_publication_stamp_authority
         test/test_demo11_publication_stamp_authority.cpp
       )
       target_link_libraries(test_run_log_manager iap)
       target_link_libraries(test_p1_fixture_geometry iap)
+      target_link_libraries(test_forked_forest_geometry iap)
       target_link_libraries(test_demo11_publication_stamp_authority iap)
       ament_target_dependencies(test_demo11_publication_stamp_authority
         sensor_msgs

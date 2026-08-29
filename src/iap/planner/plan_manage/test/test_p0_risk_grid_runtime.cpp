@@ -2051,6 +2051,18 @@ class P0RiskGridRuntimeStampTest : public ::testing::Test {
         runtime->lidar_predictor_input_mutex_);
     runtime->latest_lidar_stamp_ = stamp;
   }
+
+  static bool predictorInputsUseSeparateCallbackGroup(
+      const P0RiskGridRuntime& runtime) {
+    return runtime.input_callback_group_ != nullptr &&
+           runtime.predictor_input_callback_group_ != nullptr &&
+           runtime.map_input_callback_group_ != nullptr &&
+           runtime.input_callback_group_ !=
+               runtime.predictor_input_callback_group_ &&
+           runtime.input_callback_group_ != runtime.map_input_callback_group_ &&
+           runtime.predictor_input_callback_group_ !=
+               runtime.map_input_callback_group_;
+  }
 };
 
 }  // namespace ego_planner
@@ -2427,6 +2439,16 @@ TEST(SafetyRvizPublisherTest, AcceptedSnapshotCloudBypassesPeriodicThrottle) {
 }
 
 namespace ego_planner {
+
+TEST_F(P0RiskGridRuntimeStampTest,
+       PredictorWorkCannotBlockCriticalFreshnessCallbacks) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_predictor_callback_group_isolation_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  P0RiskGridRuntime runtime(node, enabledConfig());
+  EXPECT_TRUE(predictorInputsUseSeparateCallbackGroup(runtime));
+}
 
 TEST_F(P0RiskGridRuntimeStampTest, P0_6FixtureProducesOccupiedSkipHealth) {
   ensure_rclcpp();

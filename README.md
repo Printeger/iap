@@ -1141,6 +1141,34 @@ python3 src/iap/scripts/dev_planner/run_icra_interface_integration.py \
   --stage full --repetitions 1 --rviz
 ```
 
+可切换的茂密森林开发场景为 `icra_dense_forest_four_fork_v1`。它冻结
+`forest_random_seed=41021` 和 `fork_risk_seed=21`，四段开阔低风险侧依次为
+右、左、右、左；两侧都是由真实点云清出的 2.4 m 可通行曲线分支。GNSS 使用
+GPS+Galileo+GLONASS RINEX 子集（排除大规模 BDS 集）以兼顾实时地图遮挡与空间几何，风险差异来自地图遮挡/NLOS/multipath、
+冠层和 LiDAR 可观测性；P0 使用保守 GNSS max 融合，避免高 LiDAR 特征量掩盖
+GNSS 高 PL，不注入 fixture risk。
+直接观察完整链路：
+
+```bash
+python3 src/iap/scripts/dev_planner/run_icra_interface_integration.py \
+  --scenario icra_dense_forest_four_fork_v1 \
+  --stage full --repetitions 1 --rviz
+```
+
+配对验证会对每个 repetition 先运行 90 秒 P4/P5-off baseline，再运行 90 秒
+P4/P5-on 风险规划；默认连续 3 次。capture 只保存 B-spline/位置指令坐标、实际
+点云 bbox/hash，以及每个 P0 generation 的四分叉两侧 PL/c_pi/valid 汇总，不保存
+重复的完整风险点云：
+
+```bash
+python3 src/iap/scripts/dev_planner/run_icra_interface_integration.py \
+  --scenario icra_dense_forest_four_fork_v1 \
+  --stage full --forest-ab --repetitions 3
+```
+
+不传 `--scenario` 时仍使用 `icra072_p4_selection_trigger_v1`。森林 preset 也保持
+规划 pose 来自 truth odometry；它是开发集成和可视化场景，不是科学效果或资格结论。
+
 阶段为 `estimator|p0|p4|p5-final|full|shutdown`。runner 在首个失败处停止，
 并将 launch 参数、stdout、ROS/IAP 日志、topic capture、退出状态和阶段摘要保存到
 `results/icra27/dev_runs/interface_integration/`。终端会在启动时打印 session、当前

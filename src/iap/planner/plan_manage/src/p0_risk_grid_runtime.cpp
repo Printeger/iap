@@ -868,6 +868,10 @@ void P0RiskGridRuntime::createRosInterfaces() {
     return;
   }
   input_callback_group_ =
+      node_->create_callback_group(rclcpp::CallbackGroupType::Reentrant);
+  predictor_input_callback_group_ =
+      node_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+  map_input_callback_group_ =
       node_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
   refresh_callback_group_ =
       node_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
@@ -875,6 +879,11 @@ void P0RiskGridRuntime::createRosInterfaces() {
       node_->create_callback_group(rclcpp::CallbackGroupType::Reentrant);
   rclcpp::SubscriptionOptions subscription_options;
   subscription_options.callback_group = input_callback_group_;
+  rclcpp::SubscriptionOptions predictor_subscription_options;
+  predictor_subscription_options.callback_group =
+      predictor_input_callback_group_;
+  rclcpp::SubscriptionOptions map_subscription_options;
+  map_subscription_options.callback_group = map_input_callback_group_;
   const rclcpp::QoS qos(50);
   odom_sub_ = node_->create_subscription<nav_msgs::msg::Odometry>(
       config_.odom_topic, qos,
@@ -893,40 +902,40 @@ void P0RiskGridRuntime::createRosInterfaces() {
       [this](const gnss_comm::msg::GnssMeasMsg::ConstSharedPtr msg) {
         rangeCallback(msg);
       },
-      subscription_options);
+      predictor_subscription_options);
   ephem_sub_ = node_->create_subscription<gnss_comm::msg::GnssEphemMsg>(
       config_.ephem_topic, qos,
-      [this](const gnss_comm::msg::GnssEphemMsg::ConstSharedPtr msg) {
-        ephemCallback(msg);
-      },
-      subscription_options);
+          [this](const gnss_comm::msg::GnssEphemMsg::ConstSharedPtr msg) {
+            ephemCallback(msg);
+          },
+          predictor_subscription_options);
   glo_ephem_sub_ =
       node_->create_subscription<gnss_comm::msg::GnssGloEphemMsg>(
           config_.glo_ephem_topic, qos,
           [this](const gnss_comm::msg::GnssGloEphemMsg::ConstSharedPtr msg) {
             gloEphemCallback(msg);
           },
-          subscription_options);
+          predictor_subscription_options);
   receiver_lla_sub_ =
       node_->create_subscription<sensor_msgs::msg::NavSatFix>(
           config_.receiver_lla_topic, qos,
           [this](const sensor_msgs::msg::NavSatFix::ConstSharedPtr msg) {
             receiverLlaCallback(msg);
           },
-          subscription_options);
+          predictor_subscription_options);
   iono_sub_ =
       node_->create_subscription<gnss_comm::msg::GnssIonosphereParameter>(
           config_.iono_topic, qos,
           [this](const gnss_comm::msg::GnssIonosphereParameter::ConstSharedPtr msg) {
             ionoCallback(msg);
           },
-          subscription_options);
+          predictor_subscription_options);
   cloud_sub_ = node_->create_subscription<sensor_msgs::msg::PointCloud2>(
       config_.map_topic, rclcpp::QoS(2).transient_local().reliable(),
       [this](const sensor_msgs::msg::PointCloud2::ConstSharedPtr msg) {
         cloudCallback(msg);
       },
-      subscription_options);
+      map_subscription_options);
 
   // Do not couple the machine-readable health contract to RViz/debug flags.
   health_pub_ = node_->create_publisher<std_msgs::msg::String>(

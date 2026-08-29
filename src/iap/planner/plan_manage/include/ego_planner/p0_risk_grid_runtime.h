@@ -289,6 +289,11 @@ class P0RiskGridRuntime {
   // execution paths.  Refresh may take longer than a sensor period, but must
   // never prevent the next input state from being recorded.
   rclcpp::CallbackGroup::SharedPtr input_callback_group_;
+  // GNSS epoch construction and dense-map conversion can each be
+  // substantially more expensive than recording odometry/current integrity.
+  // Keep all three workloads independent so map refresh cannot stale GNSS.
+  rclcpp::CallbackGroup::SharedPtr predictor_input_callback_group_;
+  rclcpp::CallbackGroup::SharedPtr map_input_callback_group_;
   rclcpp::CallbackGroup::SharedPtr refresh_callback_group_;
   rclcpp::CallbackGroup::SharedPtr health_callback_group_;
   rclcpp::TimerBase::SharedPtr refresh_start_timer_;

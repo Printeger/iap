@@ -325,6 +325,60 @@ class TestPlannerLaunchTest(unittest.TestCase):
         self.assertEqual(defaults["p4.max_extra_path_ratio"], "1.3")
         self.assertEqual(defaults["manager/max_vel"], "2.0")
 
+    def test_dense_forest_four_fork_preset_is_real_sensor_driven_and_switchable(self):
+        name = "icra_dense_forest_four_fork_v1"
+        self.assertIn(name, MODULE.SCENARIO_PRESETS)
+        preset = MODULE.SCENARIO_PRESETS[name]
+        expected = {
+            "forest_layout_mode": "forked_s_forest_v1",
+            "map_size_x": "42.0",
+            "map_size_y": "22.0",
+            "map_size_z": "8.0",
+            "forest_size_x_m": "40.0",
+            "forest_size_y_m": "20.0",
+            "forest_random_seed": "41021",
+            "forked_forest.fork_count": "4",
+            "forked_forest.fork_x_min_m": "-16.0",
+            "forked_forest.fork_length_m": "8.0",
+            "forked_forest.low_risk_amplitude_m": "4.0",
+            "forked_forest.high_risk_amplitude_m": "2.8",
+            "forked_forest.corridor_width_m": "2.4",
+            "forked_forest.risk_seed": "21",
+            "forked_forest.edge_tree_spacing_m": "0.5",
+            "forked_forest.side_boundary_tree_spacing_m": "0.28",
+            "init_x": "-18.0",
+            "goal_x": "18.0",
+            "p0.skip_occupied_voxels": "true",
+            "p0.predictor.use_current_integrity_prior": "true",
+            "p0.predictor.conservative_max_with_gnss": "true",
+            "planner_executor_thread_count": "8",
+            "integrity_fusion_mode": "max_pl",
+            "gnss_enable_map_occlusion": "true",
+            "gnss_enabled_constellations": "GPS,GAL,GLO",
+            "gnss_enable_skymask": "false",
+            "gnss_enable_nlos": "true",
+            "gnss_enable_multipath": "true",
+            "gnss_enable_fault_injection": "false",
+        }
+        for key, value in expected.items():
+            self.assertEqual(preset[key], value, key)
+        self.assertEqual(preset["tree_density_lower_left_per_m2"], "0.25")
+        self.assertEqual(preset["canopy_density_upper_right"], "0.65")
+        self.assertEqual(preset["p1_map_fixture"], "")
+        self.assertNotIn("p5.current_pl_source", preset)
+
+        context = self._launch_context_with_defaults(
+            experiment="icra_p0_p4_v2_p5_dev", scenario=name)
+        with mock.patch.object(
+            sys, "argv",
+            ["test", "experiment:=icra_p0_p4_v2_p5_dev", f"scenario:={name}"],
+        ):
+            scenario, experiment, _ = MODULE._apply_presets(context, REPO)
+        self.assertEqual(scenario, name)
+        self.assertEqual(experiment, "icra_p0_p4_v2_p5_dev")
+        self.assertEqual(context.launch_configurations["forest_layout_mode"],
+                         "forked_s_forest_v1")
+
     def test_fork_and_mirror_share_geometry_identity_except_mirror_flag(self):
         primary = MODULE.SCENARIO_PRESETS["p1_fork_fused_v1"]
         mirror = MODULE.SCENARIO_PRESETS["p1_fork_fused_mirror_v1"]
