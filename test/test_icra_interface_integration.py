@@ -90,6 +90,8 @@ class TestStageContracts(unittest.TestCase):
         predicted_pl = rviz.split("Name: Predicted PL Cloud", 1)[1]
         predicted_pl = predicted_pl.split("- Class:", 1)[0]
         self.assertIn("Reliability Policy: Best Effort", predicted_pl)
+        self.assertIn("Style: Points", predicted_pl)
+        self.assertIn("Size (Pixels): 3", predicted_pl)
 
     def test_stage_switches_keep_forbidden_layers_off(self):
         for stage in MODULE.STAGE_ORDER:

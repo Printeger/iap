@@ -46,6 +46,8 @@ _BASE.EXPERIMENT_PRESETS["icra_p0_p4_v2_p5_dev"] = {
     "grid_map/independent_cloud_min_interval_s": "0.5",
     "grid_map/independent_cloud_clock_guard_s": "0.5",
     "p0.refresh_start_delay_s": "0.05",
+    "p0.fit_grid_to_map_cloud": "true",
+    "planner_executor_thread_count": "6",
     "planner_occupancy_cloud_topic": "/sim/drone_0/lidar",
     "safety_viz.enable_p4_viz": "true",
 }

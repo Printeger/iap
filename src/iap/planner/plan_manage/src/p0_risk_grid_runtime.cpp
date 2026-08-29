@@ -444,6 +444,8 @@ P0RiskGridRuntime::Config P0RiskGridRuntime::declareAndReadConfig(
                                     config.grid.skip_occupied_voxels);
   config.debug_metrics_enable =
       node->declare_parameter<bool>("p0.debug_metrics_enable", false);
+  config.fit_grid_to_map_cloud = node->declare_parameter<bool>(
+      "p0.fit_grid_to_map_cloud", false);
   config.odom_topic = node->declare_parameter<std::string>(
       "p0.odom_topic", "/drone_0_visual_slam/odom");
   config.integrity_topic =
@@ -2329,12 +2331,9 @@ void P0RiskGridRuntime::cloudCallback(
 
   const double source_stamp = stampToSec(msg->header.stamp);
 
-  {
+  if (!config_.fit_grid_to_map_cloud) {
     std::lock_guard<std::mutex> health_lock(health_state_mutex_);
     map_seen_ = true;
-  }
-  {
-    std::lock_guard<std::mutex> health_lock(health_state_mutex_);
     latest_map_stamp_ = source_stamp;
   }
 
@@ -2382,6 +2381,14 @@ void P0RiskGridRuntime::cloudCallback(
     return;
   }
 
+  std::string geometry_reason;
+  if (!initializeGridDimensionsFromMapCloud(
+          *points, msg->header.frame_id, &geometry_reason)) {
+    clear_lidar_inputs("invalid_scene_geometry:" + geometry_reason,
+                       source_stamp);
+    return;
+  }
+
   const std::shared_ptr<std::vector<Eigen::Vector3d>> predictor_normals =
       cloud_has_normals && normals->size() == points->size() ? normals
                                                              : nullptr;
@@ -2409,6 +2416,84 @@ void P0RiskGridRuntime::cloudCallback(
     advanceNonzeroGeneration(&latest_lidar_generation_);
     latest_lidar_stamp_ = source_stamp;
   }
+  if (config_.fit_grid_to_map_cloud) {
+    std::lock_guard<std::mutex> health_lock(health_state_mutex_);
+    map_seen_ = true;
+    latest_map_stamp_ = source_stamp;
+  }
+}
+
+bool P0RiskGridRuntime::initializeGridDimensionsFromMapCloud(
+    const std::vector<Eigen::Vector3d>& points,
+    const std::string& frame_id,
+    std::string* reason) {
+  if (!config_.fit_grid_to_map_cloud) {
+    if (reason) {
+      *reason = "disabled";
+    }
+    return true;
+  }
+  if (points.empty() || frame_id != config_.grid.frame_id) {
+    if (reason) {
+      *reason = points.empty() ? "empty_map_cloud" : "map_frame_mismatch";
+    }
+    return false;
+  }
+  {
+    std::lock_guard<std::mutex> health_lock(health_state_mutex_);
+    if (scene_grid_dimensions_ready_) {
+      if (reason) {
+        *reason = "already_fitted";
+      }
+      return true;
+    }
+  }
+
+  Eigen::Vector3d min_w = points.front();
+  Eigen::Vector3d max_w = points.front();
+  for (const auto& point : points) {
+    if (!point.allFinite()) {
+      continue;
+    }
+    min_w = min_w.cwiseMin(point);
+    max_w = max_w.cwiseMax(point);
+  }
+  const Eigen::Vector3d span = max_w - min_w;
+  if (!min_w.allFinite() || !max_w.allFinite() ||
+      (span.array() < 0.0).any()) {
+    if (reason) {
+      *reason = "non_finite_map_bounds";
+    }
+    return false;
+  }
+
+  iap::RiskGridMapParams fitted = config_.grid;
+  fitted.size_x_m = std::max(fitted.resolution_m, span.x());
+  fitted.size_y_m = std::max(fitted.resolution_m, span.y());
+  fitted.size_z_m = std::max(fitted.resolution_m, span.z());
+  std::string configure_reason;
+  if (!risk_grid_.configure(fitted, &configure_reason)) {
+    if (reason) {
+      *reason = "risk_grid_configure_failed:" + configure_reason;
+    }
+    return false;
+  }
+
+  {
+    std::lock_guard<std::mutex> health_lock(health_state_mutex_);
+    scene_grid_dimensions_ready_ = true;
+  }
+  RCLCPP_INFO(
+      node_->get_logger(),
+      "[p0] fitted RiskGridMap to scene cloud frame=%s min=(%.3f,%.3f,%.3f) "
+      "max=(%.3f,%.3f,%.3f) size=(%.3f,%.3f,%.3f) resolution=%.3f",
+      frame_id.c_str(), min_w.x(), min_w.y(), min_w.z(), max_w.x(),
+      max_w.y(), max_w.z(), fitted.size_x_m, fitted.size_y_m,
+      fitted.size_z_m, fitted.resolution_m);
+  if (reason) {
+    *reason = "fitted";
+  }
+  return true;
 }
 
 iap::CurrentIntegrityState P0RiskGridRuntime::currentFromMsg(

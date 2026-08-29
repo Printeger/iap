@@ -45,6 +45,7 @@ class TestIcraLaunchTest(unittest.TestCase):
     def test_simulation_acceleration_units_are_explicit(self):
         defaults = dict(MODULE.ARG_DEFAULTS)
         self.assertEqual(defaults["odometry_acc_scale"], "1.0")
+        self.assertEqual(defaults["planner_executor_thread_count"], "4")
 
     def test_icra_vertical_slice_uses_deterministic_initialization(self):
         profile = MODULE.EXPERIMENT_PRESETS["icra_p0_p4_v2_p5_dev"]
@@ -64,6 +65,8 @@ class TestIcraLaunchTest(unittest.TestCase):
         self.assertEqual(
             profile["grid_map/independent_cloud_clock_guard_s"], "0.5")
         self.assertEqual(profile["p0.refresh_start_delay_s"], "0.05")
+        self.assertEqual(profile["p0.fit_grid_to_map_cloud"], "true")
+        self.assertEqual(profile["planner_executor_thread_count"], "6")
         scenario = MODULE.SCENARIO_PRESETS["icra072_p4_selection_trigger_v1"]
         self.assertEqual(scenario["lidar_sensing_rate_hz"], "10.0")
         self.assertEqual(

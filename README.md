@@ -1117,6 +1117,17 @@ ros2 topic hz /ublox_driver/range_meas
 `icra_p0_p4_v2_p5_dev` 固定使用 NAIVE 初始化、2 秒 LiDAR 延迟、10 秒规划器
 延迟，并隔离 P1/P2/P3。专用 RViz 配置只影响此入口。
 
+该 profile 启用 `p0.fit_grid_to_map_cloud:=true`：P0 从第一幅合法的
+`/map_generator/global_cloud`（`map` frame）计算有限点包围盒跨度，并用该跨度初始化
+RiskGridMap 的 X/Y/Z 尺寸；网格中心仍按规划 odom 滚动，不固定在场景中心。空点云、
+非有限边界或 frame 不匹配会 fail closed。其他 profile 默认保持 `false`，继续使用
+显式 `p0.size_*_m`。ICRA profile 还将 `planner_executor_thread_count` 设为 6，为规划、
+点云输入/处理、里程计及 P0 refresh/health 回调留出执行槽；通用默认值仍为 4。
+
+当前基线的 `planner_odom_topic` 仍绑定 `/sim/drone_0/truth_odom`；上述场景自适应只改变
+风险网格尺寸来源，不改变 pose 来源。将规划 pose 切换为 IAP 估计里程计属于独立接口
+变更，需要重新执行 estimator 至 full 的分层验收。
+
 在已构建并 source 工作空间后，运行单层或逐层门禁：
 
 ```bash

@@ -53,6 +53,7 @@ class P0RiskGridRuntime {
   struct Config {
     bool enable_risk_grid = false;
     bool debug_metrics_enable = false;
+    bool fit_grid_to_map_cloud = false;
     double refresh_start_delay_s = 0.0;
     iap::RiskGridMapParams grid;
     std::string odom_topic = "/drone_0_visual_slam/odom";
@@ -230,6 +231,10 @@ class P0RiskGridRuntime {
   void ionoCallback(
       const gnss_comm::msg::GnssIonosphereParameter::ConstSharedPtr msg);
   void cloudCallback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr msg);
+  bool initializeGridDimensionsFromMapCloud(
+      const std::vector<Eigen::Vector3d>& points,
+      const std::string& frame_id,
+      std::string* reason = nullptr);
 
   iap::CurrentIntegrityState currentFromMsg(
       const iap::msg::IntegrityReport& msg) const;
@@ -312,6 +317,7 @@ class P0RiskGridRuntime {
   double latest_origin_stamp_ = std::numeric_limits<double>::quiet_NaN();
   double latest_map_stamp_ = std::numeric_limits<double>::quiet_NaN();
   bool map_seen_ = false;
+  bool scene_grid_dimensions_ready_ = false;
   iap::CurrentIntegrityState latest_current_;
   bool latest_current_valid_ = false;
   bool current_integrity_seen_ = false;

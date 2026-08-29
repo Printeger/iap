@@ -10,20 +10,30 @@ using namespace ego_planner;
 
 namespace
 {
-constexpr std::size_t kExecutorThreadCount = 4;
+constexpr int kDefaultExecutorThreadCount = 4;
 }
 
 int main(int argc, char **argv)
 {
   rclcpp::init(argc, argv);
   auto node = std::make_shared<rclcpp::Node>("ego_planner_node");
+  const int executor_thread_count = node->declare_parameter<int>(
+      "executor_thread_count", kDefaultExecutorThreadCount);
+  if (executor_thread_count < 1)
+  {
+    RCLCPP_FATAL(node->get_logger(),
+                 "executor_thread_count must be at least one, got %d",
+                 executor_thread_count);
+    rclcpp::shutdown();
+    return 2;
+  }
 
   EGOReplanFSM rebo_replan;
 
   rebo_replan.init(node);
 
   rclcpp::executors::MultiThreadedExecutor exec(rclcpp::ExecutorOptions(),
-                                                kExecutorThreadCount);
+      static_cast<std::size_t>(executor_thread_count));
   exec.add_node(node);
   exec.spin();
   rclcpp::shutdown();

@@ -12,6 +12,9 @@ Visualization Manager:
     - Class: rviz_default_plugins/PointCloud2
       Enabled: true
       Name: Global Obstacle Map
+      Size (Pixels): 3
+      Size (m): 0.01
+      Style: Points
       Topic:
         Depth: 5
         Durability Policy: Transient Local
@@ -21,6 +24,9 @@ Visualization Manager:
     - Class: rviz_default_plugins/PointCloud2
       Enabled: true
       Name: Predicted PL Cloud
+      Size (Pixels): 3
+      Size (m): 0.01
+      Style: Points
       Topic:
         Depth: 5
         Durability Policy: Volatile

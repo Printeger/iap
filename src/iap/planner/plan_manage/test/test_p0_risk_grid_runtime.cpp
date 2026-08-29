@@ -1550,6 +1550,12 @@ class P0RiskGridRuntimeStampTest : public ::testing::Test {
     runtime->latest_odom_stamp_ = stamp;
   }
 
+  static bool sceneGridDimensionsReady(
+      const P0RiskGridRuntime& runtime) {
+    std::lock_guard<std::mutex> lock(runtime.health_state_mutex_);
+    return runtime.scene_grid_dimensions_ready_;
+  }
+
   static void setOdomPosition(P0RiskGridRuntime* runtime,
                               const Eigen::Vector3d& position) {
     runtime->latest_odom_p_ = position;
@@ -2076,6 +2082,7 @@ TEST(P0RiskGridRuntimeTest, GnssEpochFreshnessDefaultIsTwoSeconds) {
   EXPECT_TRUE(config.predictor_use_current_integrity_prior);
   EXPECT_FALSE(config.predictor_conservative_max_with_gnss);
   EXPECT_TRUE(config.predictor_lidar_legacy_observability);
+  EXPECT_FALSE(config.fit_grid_to_map_cloud);
   EXPECT_DOUBLE_EQ(config.predictor_lidar_fim_radius_m,
                    iap::LidarObservabilityFim::Params{}.fim_radius_m);
   EXPECT_TRUE(std::isnan(config.predictor_sigma_grow_m_sqrt_s));
@@ -3370,6 +3377,80 @@ TEST_F(P0RiskGridRuntimeStampTest, PointCloudXyzParsingStoresFiniteMapPoints) {
   EXPECT_TRUE((*points)[1].isApprox(Eigen::Vector3d(4.0, 5.0, 6.0)));
   const auto health = runtime.health();
   EXPECT_EQ(health.predictor_lidar_map_point_count, 2u);
+}
+
+TEST_F(P0RiskGridRuntimeStampTest,
+       RiskGridDimensionsFitFirstValidSceneCloudAndKeepRollingCenter) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_scene_cloud_geometry_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  auto config = enabledConfig();
+  config.fit_grid_to_map_cloud = true;
+  config.grid.resolution_m = 0.75;
+  config.grid.size_x_m = 30.0;
+  config.grid.size_y_m = 30.0;
+  config.grid.size_z_m = 6.0;
+  P0RiskGridRuntime runtime(node, config, std::make_unique<FakeProvider>());
+  const auto scene = makePointCloud({
+      Eigen::Vector3d(-14.0, -5.0, 0.0),
+      Eigen::Vector3d(14.0, 5.0, 7.5),
+  });
+
+  sendCloud(&runtime, scene);
+  seedValidInputs(&runtime, 123.5, 123.5);
+  ASSERT_TRUE(refreshOnce(&runtime));
+  const auto first = runtime.acquireSnapshot();
+  ASSERT_NE(first, nullptr);
+  EXPECT_DOUBLE_EQ(first->params().size_x_m, 28.0);
+  EXPECT_DOUBLE_EQ(first->params().size_y_m, 10.0);
+  EXPECT_DOUBLE_EQ(first->params().size_z_m, 7.5);
+  EXPECT_EQ(first->voxelNum(), Eigen::Vector3i(38, 14, 10));
+
+  sendCloud(&runtime, scene);
+  setOdomPosition(&runtime, Eigen::Vector3d(3.0, 0.0, 0.0));
+  ASSERT_TRUE(refreshOnce(&runtime));
+  const auto second = runtime.acquireSnapshot();
+  ASSERT_NE(second, nullptr);
+  EXPECT_GT(second->generation_id(), first->generation_id());
+  EXPECT_NE(second->origin(), first->origin());
+  EXPECT_EQ(second->voxelNum(), first->voxelNum());
+}
+
+TEST_F(P0RiskGridRuntimeStampTest,
+       InvalidSceneFrameFailsClosedAndLaterValidCloudRecovers) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_scene_cloud_recovery_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  auto config = enabledConfig();
+  config.fit_grid_to_map_cloud = true;
+  P0RiskGridRuntime runtime(node, config, std::make_unique<FakeProvider>());
+  seedValidInputs(&runtime, 123.5, 123.5);
+  auto wrong_frame = makePointCloud({
+      Eigen::Vector3d(-14.0, -5.0, 0.0),
+      Eigen::Vector3d(14.0, 5.0, 7.5),
+  });
+  wrong_frame->header.frame_id = "odom";
+
+  sendCloud(&runtime, wrong_frame);
+  const auto rejected_readiness = inputReadiness(runtime, 123.5);
+  EXPECT_FALSE(rejected_readiness.map_seen);
+  EXPECT_FALSE(sceneGridDimensionsReady(runtime));
+  EXPECT_EQ(runtime.health().predictor_lidar_map_point_count, 0u);
+
+  wrong_frame->header.frame_id = "map";
+  sendCloud(&runtime, wrong_frame);
+  const auto recovered_readiness = inputReadiness(runtime, 123.5);
+  EXPECT_TRUE(recovered_readiness.map_seen);
+  EXPECT_TRUE(recovered_readiness.map_valid);
+  EXPECT_TRUE(sceneGridDimensionsReady(runtime));
+  ASSERT_TRUE(refreshOnce(&runtime));
+  const auto snapshot = runtime.acquireSnapshot();
+  ASSERT_NE(snapshot, nullptr);
+  EXPECT_DOUBLE_EQ(snapshot->params().size_x_m, 28.0);
+  EXPECT_DOUBLE_EQ(snapshot->params().size_y_m, 10.0);
+  EXPECT_DOUBLE_EQ(snapshot->params().size_z_m, 7.5);
 }
 
 TEST_F(P0RiskGridRuntimeStampTest,

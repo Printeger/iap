@@ -1597,6 +1597,7 @@ ARG_DEFAULTS = [
     ("validation_duration_s", "85"),
     ("allow_truth_alignment", "true"),
     ("odometry_acc_scale", "1.0"),
+    ("planner_executor_thread_count", "4"),
     ("planner_start_delay_s", "0.0"),
     ("lidar_start_delay_s", "0.0"),
     ("odometry_initialization_mode", ""),
@@ -1772,6 +1773,7 @@ ARG_DEFAULTS = [
     ("safety_viz.enable_p3_viz", "false"),
     ("safety_viz.enable_p4_viz", "false"),
     ("p0.enable_risk_grid", "false"),
+    ("p0.fit_grid_to_map_cloud", "false"),
     ("p0.resolution_m", "0.75"),
     ("p0.size_x_m", "30.0"),
     ("p0.size_y_m", "30.0"),
@@ -2698,6 +2700,8 @@ def _ego_planner_node(context, drone_id, planner_odom_topic, cloud_topic, camera
             ("grid_map/occupancy_inflate", f"/drone_{drone_id}_grid/grid_map/occupancy_inflate"),
         ],
         parameters=[
+            {"executor_thread_count": int(LaunchConfiguration(
+                "planner_executor_thread_count").perform(context))},
             {"fsm/flight_type": 2},
             {"fsm/thresh_replan_time": _param_float(context, "fsm.thresh_replan_time")},
             {"fsm/thresh_no_replan_meter": _fixed_lattice_no_replan_threshold(safety_enabled)},
@@ -2750,6 +2754,8 @@ def _ego_planner_node(context, drone_id, planner_odom_topic, cloud_topic, camera
             {"grid_map/pose_type": 1},
             {"grid_map/frame_id": "map"},
             {"p0.enable_risk_grid": p0_enabled},
+            {"p0.fit_grid_to_map_cloud": _param_bool(
+                context, "p0.fit_grid_to_map_cloud")},
             {"p4.require_risk_grid_ready_before_planning": _param_bool(
                 context, "p4.require_risk_grid_ready_before_planning")},
             {"p0.resolution_m": _param_float(context, "p0.resolution_m")},
@@ -3485,6 +3491,8 @@ def _launch_setup(context):
         ),
         "lidar_start_delay_s": lidar_start_delay_s,
         "odometry_acc_scale": _param_float(context, "odometry_acc_scale"),
+        "planner_executor_thread_count": int(LaunchConfiguration(
+            "planner_executor_thread_count").perform(context)),
         "planner_occupancy_cloud_topic": LaunchConfiguration(
             "planner_occupancy_cloud_topic").perform(context),
         "planner_occupancy_min_interval_s": _param_float(
@@ -3589,6 +3597,12 @@ def _launch_setup(context):
         "p1.formal_calibration": formal_calibration,
         "p1.reference_identity": "metrics_only_lambda_0.00001_not_applied",
         "p0.raw_health_topic": "/planning/risk_grid_health",
+        "p0.fit_grid_to_map_cloud": _param_bool(
+            context, "p0.fit_grid_to_map_cloud"),
+        "p0.size_source": (
+            "first_map_cloud_span" if _param_bool(
+                context, "p0.fit_grid_to_map_cloud") else "launch_parameters"
+        ),
         "p0.resolution_m": _param_float(context, "p0.resolution_m"),
         "p0.size_x_m": _param_float(context, "p0.size_x_m"),
         "p0.size_y_m": _param_float(context, "p0.size_y_m"),
