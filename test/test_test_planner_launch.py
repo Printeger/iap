@@ -351,7 +351,6 @@ class TestPlannerLaunchTest(unittest.TestCase):
             "p0.skip_occupied_voxels": "true",
             "p0.predictor.use_current_integrity_prior": "true",
             "p0.predictor.conservative_max_with_gnss": "true",
-            "planner_executor_thread_count": "8",
             "integrity_fusion_mode": "max_pl",
             "gnss_enable_map_occlusion": "true",
             "gnss_enabled_constellations": "GPS,GAL,GLO",

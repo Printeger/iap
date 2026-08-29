@@ -144,7 +144,7 @@ def forest_scene_contract() -> dict:
         "side_boundary_tree_spacing_m": 0.28,
         "p0_use_current_integrity_prior": True,
         "p0_conservative_max_with_gnss": True,
-        "planner_executor_thread_count": 8,
+        "planner_executor_thread_count": 6,
         "gnss": {
             "ephemeris_source": "rinex",
             "enabled_constellations": ["GPS", "GAL", "GLO"],
@@ -168,6 +168,97 @@ def forest_scene_contract() -> dict:
     contract["fingerprint"] = (
         "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest())
     return contract
+
+
+def forest_manifest_evidence(run_root: Path) -> dict:
+    """Bind analyzer assumptions to the effective launch manifest."""
+    manifests = sorted((run_root / "exports").glob(
+        "**/test_planner_manifest.json"))
+    if len(manifests) != 1:
+        return {
+            "matches_expected": False,
+            "failures": ["forest_effective_contract_missing"],
+            "manifest_count": len(manifests),
+        }
+    manifest_path = manifests[0]
+    try:
+        manifest = json.loads(manifest_path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {
+            "matches_expected": False,
+            "failures": ["forest_effective_contract_invalid"],
+            "manifest_path": str(manifest_path.relative_to(run_root)),
+        }
+    actual = manifest.get("scenario_contract")
+    scene_map = actual.get("scene_map", {}) if isinstance(actual, dict) else {}
+    geometry = actual.get("geometry", {}) if isinstance(actual, dict) else {}
+    gnss = actual.get("gnss", {}) if isinstance(actual, dict) else {}
+    p0 = actual.get("p0_prediction", {}) if isinstance(actual, dict) else {}
+    expected = forest_scene_contract()
+    expected_values = {
+        "layout_mode": "forked_s_forest_v1",
+        "map_size_m": [42.0, 22.0, 8.0],
+        "forest_size_m": [40.0, 20.0],
+        "forest_seed": expected["forest_seed"],
+        "fork_risk_seed": expected["risk_seed"],
+        "fork_count": len(expected["forks"]),
+        "fork_x_min_m": expected["forks"][0]["x_min_m"],
+        "fork_length_m": expected["forks"][0]["length_m"],
+        "low_risk_amplitude_m": expected["forks"][0][
+            "low_risk_amplitude_m"],
+        "high_risk_amplitude_m": expected["forks"][0][
+            "high_risk_amplitude_m"],
+        "corridor_width_m": expected["corridor_width_m"],
+        "junction_clearance_radius_m": expected[
+            "junction_buffer_radius_m"],
+        "flight_clearance_z_m": expected["flight_clearance_z_m"],
+        "side_boundary_tree_spacing_m": expected[
+            "side_boundary_tree_spacing_m"],
+        "expanded_low_risk_sides": [
+            fork["low_risk_side"] for fork in expected["forks"]],
+    }
+    comparisons = {
+        **{f"scene_map.{key}": (scene_map.get(key), value)
+           for key, value in expected_values.items()},
+        "geometry.start_m": (geometry.get("start_m"),
+                             expected["start_xyz_m"]),
+        "geometry.goal_m": (geometry.get("goal_m"),
+                            expected["goal_xyz_m"]),
+        "gnss.ephemeris_source": (
+            gnss.get("ephemeris_source"), "rinex"),
+        "gnss.enabled_constellations": (
+            gnss.get("enabled_constellations"),
+            ",".join(expected["gnss"]["enabled_constellations"])),
+        "gnss.map_occlusion": (gnss.get("map_occlusion"), True),
+        "gnss.skymask": (gnss.get("skymask"), False),
+        "gnss.nlos": (gnss.get("nlos"), True),
+        "gnss.multipath": (gnss.get("multipath"), True),
+        "p0.fit_grid_to_map_cloud": (
+            p0.get("fit_grid_to_map_cloud"), True),
+        "p0.skip_occupied_voxels": (
+            p0.get("skip_occupied_voxels"), True),
+        "p0.use_current_integrity_prior": (
+            p0.get("use_current_integrity_prior"), True),
+        "p0.conservative_max_with_gnss": (
+            p0.get("conservative_max_with_gnss"),
+            expected["p0_conservative_max_with_gnss"]),
+        "p0.executor_thread_count": (
+            p0.get("executor_thread_count"),
+            expected["planner_executor_thread_count"]),
+    }
+    mismatches = {
+        key: {"actual": values[0], "expected": values[1]}
+        for key, values in comparisons.items() if values[0] != values[1]
+    }
+    failures = ["forest_contract_mismatch"] if mismatches else []
+    return {
+        "matches_expected": not failures,
+        "failures": failures,
+        "manifest_path": str(manifest_path.relative_to(run_root)),
+        "scenario_fingerprint": manifest.get("scenario_fingerprint"),
+        "scenario_contract": actual,
+        "mismatches": mismatches,
+    }
 
 
 def stage_launch_args(
@@ -1469,12 +1560,21 @@ def _run_one_impl(
             [*summary["failures"], *extra],
             **{key: value for key, value in summary.items()
                if key not in ("result", "failures")})
+    forest_manifest = None
+    if scenario == FOREST_SCENARIO and shutdown_variant is None:
+        forest_manifest = forest_manifest_evidence(run_root)
+        if forest_manifest["failures"]:
+            summary = _result(
+                [*summary["failures"], *forest_manifest["failures"]],
+                **{key: value for key, value in summary.items()
+                   if key not in ("result", "failures")})
     summary.update({
         "stage": stage,
         "scenario": scenario,
         "forest_variant": forest_variant,
         "forest_scene": (
             forest_scene_contract() if scenario == FOREST_SCENARIO else None),
+        "forest_effective_manifest": forest_manifest,
         "scene_cloud_bbox": next((
             row.get("payload") for row in _read_jsonl(run_root / "capture.jsonl")
             if row.get("kind") == "scene_cloud_bbox"), None),
@@ -1576,6 +1676,42 @@ def _successful_session_result(stages) -> str:
     return "PASS" if {"full", "shutdown"}.issubset(requested) else "STAGE_PASS"
 
 
+def summarize_forest_pair(
+        baseline: dict, risk: dict, repetition: int) -> dict:
+    """Reduce one completed A/B pair to directly comparable evidence."""
+    baseline_path = baseline.get("forest_path", {})
+    risk_path = risk.get("forest_path", {})
+    risk_contrast = risk.get("forest_risk", {})
+    baseline_low = baseline_path.get("selected_low_risk_forks")
+    risk_low = risk_path.get("selected_low_risk_forks")
+    low_delta = (
+        int(risk_low) - int(baseline_low)
+        if isinstance(baseline_low, int) and isinstance(risk_low, int)
+        else None)
+    pair_pass = baseline.get("result") == "PASS" and risk.get("result") == "PASS"
+    return {
+        "repetition": repetition,
+        "baseline_result": baseline.get("result"),
+        "risk_result": risk.get("result"),
+        "baseline_failures": baseline.get("failures", []),
+        "risk_failures": risk.get("failures", []),
+        "baseline_selected_arms": baseline_path.get("selected_arms", {}),
+        "risk_selected_arms": risk_path.get("selected_arms", {}),
+        "baseline_selected_low_risk_forks": baseline_low,
+        "baseline_selected_high_risk_forks": baseline_path.get(
+            "selected_high_risk_forks"),
+        "risk_selected_low_risk_forks": risk_low,
+        "risk_selected_high_risk_forks": risk_path.get(
+            "selected_high_risk_forks"),
+        "delta_selected_low_risk_forks": low_delta,
+        "risk_contrast_generation_id": risk_contrast.get(
+            "passing_generation_id"),
+        "risk_selected_lineage_count": risk.get("selected_count"),
+        "risk_lineage_group_count": risk.get("lineage_group_count"),
+        "paired_pass": pair_pass,
+    }
+
+
 def _persist_interrupted_session(
         session: Path, session_summary: dict, stage: str) -> int:
     session_summary["result"] = "INTERRUPTED"
@@ -1612,6 +1748,7 @@ def _run_main(args: argparse.Namespace) -> int:
             forest_scene_contract() if scenario == FOREST_SCENARIO else None),
         "repetitions": args.repetitions,
         "runs": [],
+        "forest_pairs": [],
         # Do not leave a partial or interrupted --through session looking like
         # a completed acceptance.  PASS is written only after every requested
         # functional and shutdown repetition has finished successfully.
@@ -1629,6 +1766,7 @@ def _run_main(args: argparse.Namespace) -> int:
         for stage in stages:
             current_stage = stage
             for repetition in range(1, args.repetitions + 1):
+                forest_pair_runs = {}
                 if forest_ab and stage == "full":
                     run_variants = (
                         (None, "baseline"), (None, "risk"))
@@ -1673,17 +1811,40 @@ def _run_main(args: argparse.Namespace) -> int:
                         "result": summary["result"],
                         "failures": summary["failures"],
                     })
+                    if forest_ab and stage == "full":
+                        forest_pair_runs[forest_variant] = summary
+                        if forest_variant == "risk":
+                            pair = summarize_forest_pair(
+                                forest_pair_runs.get("baseline", {}),
+                                summary, repetition)
+                            session_summary["forest_pairs"].append(pair)
                     _json_write(
                         session / "session_summary.json", session_summary)
                     if summary["result"] == "INTERRUPTED":
                         return _persist_interrupted_session(
                             session, session_summary, stage)
                     if summary["result"] != "PASS":
+                        # A paired run remains diagnostically useful only when
+                        # both variants complete. Defer a baseline failure
+                        # until its matching risk run has written the delta.
+                        if (forest_ab and stage == "full"
+                                and forest_variant == "baseline"):
+                            continue
                         session_summary["result"] = "FAIL"
                         session_summary["first_failed_stage"] = stage
                         _json_write(
                             session / "session_summary.json", session_summary)
                         _emit(f"FAIL {stage} {run_root}")
+                        return 1
+                    if (forest_ab and stage == "full"
+                            and forest_variant == "risk"
+                            and forest_pair_runs.get("baseline", {}).get(
+                                "result") != "PASS"):
+                        session_summary["result"] = "FAIL"
+                        session_summary["first_failed_stage"] = stage
+                        _json_write(
+                            session / "session_summary.json", session_summary)
+                        _emit(f"FAIL {stage} paired-baseline")
                         return 1
         current_stage = "session"
         session_summary["functional_gate_complete"] = "full" in stages

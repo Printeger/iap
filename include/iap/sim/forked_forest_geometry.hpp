@@ -11,8 +11,9 @@ namespace iap::sim {
 
 enum class ForkArm { kLowRisk, kHighRisk };
 
+inline constexpr int kForkedForestForkCount = 4;
+
 struct ForkedForestConfig {
-  int fork_count = 4;
   double fork_x_min_m = -16.0;
   double fork_length_m = 8.0;
   double low_risk_amplitude_m = 4.0;
@@ -36,9 +37,9 @@ struct ForkCorridorMembership {
   }
 };
 
-inline std::array<int, 4> forkLowRiskSigns(
+inline std::array<int, kForkedForestForkCount> forkLowRiskSigns(
     const ForkedForestConfig& config) {
-  std::array<int, 4> signs{};
+  std::array<int, kForkedForestForkCount> signs{};
   std::mt19937 random(config.fork_risk_seed);
   for (int& sign : signs) {
     // Use the MT19937 output bit directly so the expanded preset is stable
@@ -52,7 +53,8 @@ inline int forkArmSign(const ForkedForestConfig& config,
                        const int fork_index,
                        const ForkArm arm) {
   const auto signs = forkLowRiskSigns(config);
-  const int bounded = std::clamp(fork_index, 0, config.fork_count - 1);
+  const int bounded =
+      std::clamp(fork_index, 0, kForkedForestForkCount - 1);
   const int low_sign = signs[static_cast<std::size_t>(bounded)];
   return arm == ForkArm::kLowRisk ? low_sign : -low_sign;
 }
@@ -163,7 +165,7 @@ inline ForkCorridorMembership classifyForkCorridor(
     const double x_m,
     const double y_m) {
   ForkCorridorMembership membership;
-  for (int index = 0; index <= config.fork_count; ++index) {
+  for (int index = 0; index <= kForkedForestForkCount; ++index) {
     const double junction_x = config.fork_x_min_m +
                               static_cast<double>(index) *
                                   config.fork_length_m;
@@ -177,7 +179,7 @@ inline ForkCorridorMembership classifyForkCorridor(
       std::hypot(x_m - config.goal_x_m, y_m) <=
           config.junction_clearance_radius_m;
 
-  for (int fork = 0; fork < config.fork_count; ++fork) {
+  for (int fork = 0; fork < kForkedForestForkCount; ++fork) {
     if (forkArmDistance(config, fork, ForkArm::kLowRisk, x_m, y_m) <=
         config.corridor_half_width_m) {
       membership.inside_low = true;
@@ -197,7 +199,7 @@ inline ForkCorridorMembership classifyForkCorridorEnvelope(
     const double x_m,
     const double y_m) {
   ForkCorridorMembership membership;
-  for (int index = 0; index <= config.fork_count; ++index) {
+  for (int index = 0; index <= kForkedForestForkCount; ++index) {
     const double junction_x = config.fork_x_min_m +
                               static_cast<double>(index) *
                                   config.fork_length_m;
@@ -212,10 +214,11 @@ inline ForkCorridorMembership classifyForkCorridorEnvelope(
           config.junction_clearance_radius_m;
 
   // A 32-segment local polyline has sub-centimetre sag error for this preset.
-  // The small guard prevents point-grid quantization from narrowing the 3 m
-  // tube without clearing the real trees rooted immediately outside it.
+  // The small guard prevents point-grid quantization from narrowing the
+  // configured tube without clearing the real trees rooted immediately
+  // outside it.
   constexpr double kDistanceGuardM = 0.02;
-  for (int fork = 0; fork < config.fork_count; ++fork) {
+  for (int fork = 0; fork < kForkedForestForkCount; ++fork) {
     const double x0 = config.fork_x_min_m +
                       static_cast<double>(fork) * config.fork_length_m;
     const double x1 = x0 + config.fork_length_m;

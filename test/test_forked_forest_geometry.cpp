@@ -12,13 +12,34 @@ using iap::sim::ForkedForestConfig;
 
 TEST(ForkedForestGeometry, SeedTwentyOneFreezesAlternatingLowRiskSides) {
   ForkedForestConfig config;
+  EXPECT_EQ(iap::sim::kForkedForestForkCount, 4);
   const auto signs = iap::sim::forkLowRiskSigns(config);
   EXPECT_EQ(signs, (std::array<int, 4>{-1, 1, -1, 1}));
 }
 
+TEST(ForkedForestGeometry, OutOfRangeArmIndicesRemainBounded) {
+  ForkedForestConfig config;
+  EXPECT_EQ(iap::sim::forkArmSign(config, -100, ForkArm::kLowRisk), -1);
+  EXPECT_EQ(iap::sim::forkArmSign(config, 100, ForkArm::kLowRisk), 1);
+}
+
+TEST(ForkedForestGeometry, DevelopmentWidthBalancesClearanceAndCanopyOverlap) {
+  ForkedForestConfig config;
+  constexpr double kTrunkRadiusM = 0.14;
+  constexpr double kRootGuardM = 0.05;
+  constexpr double kEdgeCanopyRadiusM = 1.5;
+  const double edge_root_offset = config.corridor_half_width_m +
+                                  kTrunkRadiusM + kRootGuardM;
+  EXPECT_GT(edge_root_offset, config.corridor_half_width_m);
+  EXPECT_LT(edge_root_offset, kEdgeCanopyRadiusM);
+  const double three_metre_edge_root_offset =
+      1.5 + kTrunkRadiusM + kRootGuardM;
+  EXPECT_GT(three_metre_edge_root_offset, kEdgeCanopyRadiusM);
+}
+
 TEST(ForkedForestGeometry, FourForkCenterlinesMeetSmoothlyAtJunctions) {
   ForkedForestConfig config;
-  for (int fork = 0; fork < config.fork_count; ++fork) {
+  for (int fork = 0; fork < iap::sim::kForkedForestForkCount; ++fork) {
     const double x0 = config.fork_x_min_m + fork * config.fork_length_m;
     const double x1 = x0 + config.fork_length_m;
     EXPECT_NEAR(iap::sim::forkArmCenterY(config, fork, ForkArm::kLowRisk, x0),

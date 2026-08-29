@@ -258,7 +258,7 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
         declare_parameter<double>("clear_corridor_x_max_m", 1.0e9);
     forest_layout_mode_ =
         declare_parameter<std::string>("forest_layout_mode", "random_forest");
-    forked_forest_config_.fork_count =
+    forked_forest_fork_count_ =
         declare_parameter<int>("forked_forest.fork_count", 4);
     forked_forest_config_.fork_x_min_m =
         declare_parameter<double>("forked_forest.fork_x_min_m", -16.0);
@@ -486,7 +486,7 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
           "low_sides(y_sign)=%d,%d,%d,%d risk_seed=%u "
           "flight_clearance_z=%.2f edge_canopy_base/radius=%.2f/%.2f "
           "canopy_column_hit_rate_low/high=%.3f/%.3f",
-          forest_layout_mode_.c_str(), forked_forest_config_.fork_count,
+          forest_layout_mode_.c_str(), iap::sim::kForkedForestForkCount,
           forked_forest_config_.fork_x_min_m,
           forked_forest_config_.fork_length_m,
           2.0 * forked_forest_config_.corridor_half_width_m,
@@ -696,7 +696,7 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
         2, static_cast<int>(std::floor(
                forked_forest_config_.fork_length_m /
                forked_forest_edge_tree_spacing_m_)));
-    for (int fork = 0; fork < forked_forest_config_.fork_count; ++fork) {
+    for (int fork = 0; fork < iap::sim::kForkedForestForkCount; ++fork) {
       const double x0 = forked_forest_config_.fork_x_min_m +
                         static_cast<double>(fork) *
                             forked_forest_config_.fork_length_m;
@@ -816,7 +816,7 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
     constexpr double kColumnRadiusM = 0.50;
     int hits = 0;
     int samples = 0;
-    for (int fork = 0; fork < forked_forest_config_.fork_count; ++fork) {
+    for (int fork = 0; fork < iap::sim::kForkedForestForkCount; ++fork) {
       const double x0 = forked_forest_config_.fork_x_min_m +
                         static_cast<double>(fork) *
                             forked_forest_config_.fork_length_m;
@@ -924,7 +924,8 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
       throw std::runtime_error(
           "forest_layout_mode must be random_forest or forked_s_forest_v1");
     }
-    if (forked_forest_enabled() && forked_forest_config_.fork_count != 4) {
+    if (forked_forest_enabled() &&
+        forked_forest_fork_count_ != iap::sim::kForkedForestForkCount) {
       throw std::runtime_error(
           "forked_s_forest_v1 requires exactly four forks");
     }
@@ -1133,6 +1134,7 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
   std::string forest_layout_mode_ = "random_forest";
   iap::sim::ForkedForestConfig forked_forest_config_;
   double forked_forest_flight_clearance_z_m_ = 2.8;
+  int forked_forest_fork_count_ = iap::sim::kForkedForestForkCount;
   double forked_forest_edge_tree_spacing_m_ = 1.0;
   double forked_forest_edge_tree_height_m_ = 3.2;
   double forked_forest_edge_canopy_radius_m_ = 1.5;

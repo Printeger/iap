@@ -1313,7 +1313,6 @@ SCENARIO_PRESETS = {
         "p0.skip_occupied_voxels": "true",
         "p0.predictor.use_current_integrity_prior": "true",
         "p0.predictor.conservative_max_with_gnss": "true",
-        "planner_executor_thread_count": "8",
         "fsm.thresh_replan_time": "0.2",
         "manager/max_vel": "1.0",
         "optimization/max_vel": "1.0",
@@ -3600,6 +3599,16 @@ def _launch_setup(context):
             "horizons_s": _csv_floats(
                 LaunchConfiguration("p0.horizons_s").perform(context)
             ),
+            "fit_grid_to_map_cloud": _param_bool(
+                context, "p0.fit_grid_to_map_cloud"),
+            "skip_occupied_voxels": _param_bool(
+                context, "p0.skip_occupied_voxels"),
+            "use_current_integrity_prior": _param_bool(
+                context, "p0.predictor.use_current_integrity_prior"),
+            "conservative_max_with_gnss": _param_bool(
+                context, "p0.predictor.conservative_max_with_gnss"),
+            "executor_thread_count": _param_int(
+                context, "planner_executor_thread_count"),
         },
         "decision_checkpoint": {
             "truth_x_m": -9.5, "truth_x_tolerance_m": 0.4,

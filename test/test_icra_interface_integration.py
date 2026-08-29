@@ -167,11 +167,77 @@ class TestStageContracts(unittest.TestCase):
         self.assertEqual(contract["low_risk_y_signs"], [-1, 1, -1, 1])
         self.assertEqual(contract["gnss"]["enabled_constellations"],
                          ["GPS", "GAL", "GLO"])
-        self.assertEqual(contract["planner_executor_thread_count"], 8)
+        self.assertEqual(contract["planner_executor_thread_count"], 6)
         self.assertTrue(contract["p0_conservative_max_with_gnss"])
         self.assertEqual([fork["x_min_m"] for fork in contract["forks"]],
                          [-16.0, -8.0, 0.0, 8.0])
         self.assertRegex(contract["fingerprint"], r"^sha256:[0-9a-f]{64}$")
+
+    def test_forest_manifest_binds_effective_launch_contract(self):
+        expected = MODULE.forest_scene_contract()
+        scene_map = {
+            "layout_mode": "forked_s_forest_v1",
+            "map_size_m": [42.0, 22.0, 8.0],
+            "forest_size_m": [40.0, 20.0],
+            "forest_seed": 41021,
+            "fork_risk_seed": 21,
+            "fork_count": 4,
+            "fork_x_min_m": -16.0,
+            "fork_length_m": 8.0,
+            "low_risk_amplitude_m": 4.0,
+            "high_risk_amplitude_m": 2.8,
+            "corridor_width_m": 2.4,
+            "junction_clearance_radius_m": 2.0,
+            "flight_clearance_z_m": 2.8,
+            "side_boundary_tree_spacing_m": 0.28,
+            "expanded_low_risk_sides": [
+                "right", "left", "right", "left"],
+        }
+        contract = {
+            "scene_map": scene_map,
+            "geometry": {
+                "start_m": expected["start_xyz_m"],
+                "goal_m": expected["goal_xyz_m"],
+            },
+            "gnss": {
+                "ephemeris_source": "rinex",
+                "enabled_constellations": "GPS,GAL,GLO",
+                "map_occlusion": True,
+                "skymask": False,
+                "nlos": True,
+                "multipath": True,
+            },
+            "p0_prediction": {
+                "fit_grid_to_map_cloud": True,
+                "skip_occupied_voxels": True,
+                "use_current_integrity_prior": True,
+                "conservative_max_with_gnss": True,
+                "executor_thread_count": 6,
+            },
+        }
+        with tempfile.TemporaryDirectory() as raw:
+            run_root = Path(raw)
+            manifest = run_root / "exports" / "run" / "test_planner_manifest.json"
+            manifest.parent.mkdir(parents=True)
+            manifest.write_text(json.dumps({
+                "scenario_contract": contract,
+                "scenario_fingerprint": "sha256:effective",
+            }))
+            evidence = MODULE.forest_manifest_evidence(run_root)
+            self.assertTrue(evidence["matches_expected"])
+            self.assertEqual(evidence["scenario_fingerprint"],
+                             "sha256:effective")
+            contract["scene_map"]["corridor_width_m"] = 3.0
+            manifest.write_text(json.dumps({
+                "scenario_contract": contract,
+                "scenario_fingerprint": "sha256:drifted",
+            }))
+            evidence = MODULE.forest_manifest_evidence(run_root)
+            self.assertFalse(evidence["matches_expected"])
+            self.assertEqual(evidence["failures"],
+                             ["forest_contract_mismatch"])
+            self.assertIn("scene_map.corridor_width_m",
+                          evidence["mismatches"])
 
     def test_forest_full_runs_for_ninety_seconds(self):
         self.assertEqual(MODULE.stage_duration_s(
@@ -320,6 +386,60 @@ class TestRunnerLifecycle(unittest.TestCase):
             session = json.loads(session_path.read_text())
             self.assertEqual(session["scenario"], MODULE.FOREST_SCENARIO)
             self.assertEqual(session["forest_scene"]["forest_seed"], 41021)
+            self.assertEqual(len(session["forest_pairs"]), 1)
+
+    def test_forest_pair_summary_records_branch_and_lineage_delta(self):
+        baseline = MODULE._result([], forest_path={
+            "selected_arms": {"0": "high", "1": "high"},
+            "selected_low_risk_forks": 1,
+            "selected_high_risk_forks": 3,
+        })
+        risk = MODULE._result(
+            [],
+            forest_path={
+                "selected_arms": {str(index): "low" for index in range(4)},
+                "selected_low_risk_forks": 4,
+                "selected_high_risk_forks": 0,
+            },
+            forest_risk={"passing_generation_id": 17},
+            selected_count=2,
+            lineage_group_count=1,
+        )
+
+        pair = MODULE.summarize_forest_pair(baseline, risk, 2)
+
+        self.assertTrue(pair["paired_pass"])
+        self.assertEqual(pair["repetition"], 2)
+        self.assertEqual(pair["delta_selected_low_risk_forks"], 3)
+        self.assertEqual(pair["risk_contrast_generation_id"], 17)
+        self.assertEqual(pair["risk_selected_lineage_count"], 2)
+
+    def test_forest_ab_finishes_risk_variant_after_baseline_failure(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            args = self.runner_args(root)
+            args.scenario = MODULE.FOREST_SCENARIO
+            args.forest_ab = True
+            failed_baseline = MODULE._result(
+                ["forest_baseline_branch_selection_failed"],
+                forest_path={"selected_low_risk_forks": 2})
+            passing_risk = MODULE._result(
+                [], forest_path={"selected_low_risk_forks": 4})
+            with mock.patch.object(
+                    MODULE, "_gpu_preflight",
+                    return_value={"gpu_ready": True}), mock.patch.object(
+                        MODULE, "_run_one",
+                        side_effect=[failed_baseline, passing_risk]) as run_one:
+                exit_code = MODULE._run_main(args)
+
+            self.assertEqual(exit_code, 1)
+            self.assertEqual(run_one.call_count, 2)
+            session_path = next((root / "results").glob(
+                "run-*/session_summary.json"))
+            session = json.loads(session_path.read_text())
+            self.assertEqual(session["result"], "FAIL")
+            self.assertEqual(len(session["forest_pairs"]), 1)
+            self.assertFalse(session["forest_pairs"][0]["paired_pass"])
 
     def test_preflight_interrupt_persists_interrupted_session(self):
         with tempfile.TemporaryDirectory() as temporary_directory:

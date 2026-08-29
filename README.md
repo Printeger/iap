@@ -1147,6 +1147,11 @@ python3 src/iap/scripts/dev_planner/run_icra_interface_integration.py \
 GPS+Galileo+GLONASS RINEX 子集（排除大规模 BDS 集）以兼顾实时地图遮挡与空间几何，风险差异来自地图遮挡/NLOS/multipath、
 冠层和 LiDAR 可观测性；P0 使用保守 GNSS max 融合，避免高 LiDAR 特征量掩盖
 GNSS 高 PL，不注入 fixture risk。
+
+2.4 m 是该开发场景的几何折中，不是固定的系统常量：以 0.14 m 树干、0.05 m
+根部保护间隙和最大 1.5 m 冠幅计算，边缘树中心距通道中心约 1.39 m，树干在净空区外、
+冠层仍能覆盖高风险分支中心；若使用 3.0 m，树中心距约 1.69 m，最大冠幅也无法稳定
+覆盖中心线。几何单测固定这一约束，实际 risk grid 尺寸仍由场景点云 bbox 自动适配。
 直接观察完整链路：
 
 ```bash
@@ -1158,7 +1163,8 @@ python3 src/iap/scripts/dev_planner/run_icra_interface_integration.py \
 配对验证会对每个 repetition 先运行 90 秒 P4/P5-off baseline，再运行 90 秒
 P4/P5-on 风险规划；默认连续 3 次。capture 只保存 B-spline/位置指令坐标、实际
 点云 bbox/hash，以及每个 P0 generation 的四分叉两侧 PL/c_pi/valid 汇总，不保存
-重复的完整风险点云：
+重复的完整风险点云；`session_summary.json` 的 `forest_pairs` 会记录两次分支选择、
+低风险分支数量差值、风险对比 generation 和 lineage 数量：
 
 ```bash
 python3 src/iap/scripts/dev_planner/run_icra_interface_integration.py \
