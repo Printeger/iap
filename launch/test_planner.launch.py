@@ -1035,10 +1035,10 @@ DENSE_FOUR_FORK_FOREST_ONLINE_PRESET = {
     "grid_map/origin_x": "-21.0",
     "grid_map/origin_y": "-11.0",
     "grid_map/origin_z": "0.0",
-    "grid_map/unknown_as_occupied": "true",
-    # The receding-horizon target must remain inside the 4.5 m LiDAR ray
-    # support.  A longer seed terminates in UNKNOWN and correctly fails closed
-    # before the vehicle can publish its first online trajectory.
+    # Restore the original EGO exploration contract for base rebound/A*: an
+    # unobserved voxel is traversable unless risk-aware P4 is enabled. P0 keeps
+    # reporting UNKNOWN, and P4 still requires frozen observed-free support.
+    "grid_map/unknown_as_occupied": "false",
     "manager/planning_horizon": "4.0",
     "planner_occupancy_cloud_topic": "/sim/drone_0/lidar",
     "p0.online_mapping_mode": "true",

@@ -6,6 +6,12 @@
 
 核心边界是：仿真障碍物/环境几何真值只能由传感器模拟器读取。`/map_generator/global_cloud` 可供 LiDAR renderer 和 GNSS 遮挡/NLOS/multipath 模拟使用，P0、EGO、P4 和 P5 不得直接或间接订阅 `/map_generator/*` 或 `/sim/world/*`。在线 profile 在 launch preflight 和 runner 的 ROS graph 审计中对此 fail closed。本轮按既定假设仍以 `/sim/drone_0/truth_odom` 提供规划 pose；它不提供障碍物地图或未来可见性，从 truth odometry 切换到估计 pose 是后续独立集成任务。
 
+2026-08-30 用户后续决策覆盖了本计划中基础 EGO 的 unknown
+fail-closed 要求：森林 v2 恢复原始 EGO 探索语义，设置
+`grid_map/unknown_as_occupied=false`。该放宽仅适用于 P4 关闭时的基础
+rebound/A*；P0 仍保留 UNKNOWN 风险状态，P4 开启后仍要求 frozen
+observed-free support，P5 权威与阈值不变。
+
 ## 在线地图契约
 
 森林 v2 使用已知任务 geofence，而不是已知障碍物地图：
@@ -17,7 +23,7 @@
 - Risk overlay resolution：`0.5 m`，每轴严格覆盖 `5` 个 EGO voxel
 - geometry identity：由 frame、origin、extent、voxel dimensions 和 resolution 生成
 
-EGO occupancy 是三态的不可变 generation 快照：`OCCUPIED`、`OBSERVED_FREE`、`UNKNOWN`。机载点云的命中位置标为 occupied；传感器原点到命中的 ray traversal 标为 observed；没有回波本身不能证明 free。未观测空间保留 unknown，并在 A*、P0 support 和 GNSS/LiDAR visibility 中 fail closed。
+EGO occupancy 是三态的不可变 generation 快照：`OCCUPIED`、`OBSERVED_FREE`、`UNKNOWN`。机载点云的命中位置标为 occupied；传感器原点到命中的 ray traversal 标为 observed；没有回波本身不能证明 free。未观测空间保留 unknown。基础 EGO 在 P4 关闭时按原始行为允许 A* 穿越 unknown；P0 support、GNSS/LiDAR visibility 以及启用 P4 后的风险 guide 仍对 unknown fail closed。
 
 P0 从 EGO 的 frozen occupancy epoch 获取共享 `PlanningLatticeGeometry`，不再根据全局点云 bbox 或 UAV 当前位置重算网格原点。这样 RiskMap 与 EGO 的坐标、边界及场景中心保持一致，且远处分叉在进入机载观测范围前显示为 unknown，而不是伪造的有效风险。
 
@@ -68,7 +74,7 @@ P4 保持局部 collision-segment guide 语义，不把 guide 伪装为从 UAV �
 - GNSS、LiDAR、prior source generations/stamps
 - alert-limit policy identity
 
-original/risk A* 共用同一 frozen occupancy query 和 risk snapshot。端点以及最终稠密 guide samples 必须为 `map` 坐标、observed-free、非 raw/inflated occupied，并在同一 RiskMap support 内。搜索结束但发布前若 live occupancy generation 已变化，整个 attempt 重新规划。
+启用 P4 时，original/risk A* 共用同一 frozen occupancy query 和 risk snapshot。端点以及最终稠密 guide samples 必须为 `map` 坐标、observed-free、非 raw/inflated occupied，并在同一 RiskMap support 内。搜索结束但发布前若 live occupancy generation 已变化，整个 attempt 重新规划。关闭 P4 时，original A* 使用原始 EGO 的二值 live-map 语义，不执行 frozen observed-free 完整性门。
 
 P4 debug CSV 保存 `source_identity_hash`、`geometry_id`、occupancy stamp 和 map-frame collision-segment 首尾坐标，end-to-end lineage 保存同一决策 identity。P0 health 从对应 completed generation 的不可变 snapshot 原子发布 config/source identity，canonical config hash 同时绑定实际 HAL/VAL；runner 只有在同一 generation 的风险 profile、P0 source identity、空间上属于该分叉的 P4 decision 和已发布 lineage 全部一致时，才接受该分叉证据。不同分叉可使用不同 generation，但必须维持同一 geometry/config identity 和相同实际 HAL/VAL。RViz 以端点球、UAV 到 collision segment 的虚线和 `P4 local collision guide` 标签表达局部 guide 的真实含义。
 

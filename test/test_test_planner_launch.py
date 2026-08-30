@@ -388,7 +388,7 @@ class TestPlannerLaunchTest(unittest.TestCase):
             "grid_map/origin_x": "-21.0",
             "grid_map/origin_y": "-11.0",
             "grid_map/origin_z": "0.0",
-            "grid_map/unknown_as_occupied": "true",
+            "grid_map/unknown_as_occupied": "false",
             "manager/planning_horizon": "4.0",
             "p0.online_mapping_mode": "true",
             "p0.fit_grid_to_map_cloud": "false",

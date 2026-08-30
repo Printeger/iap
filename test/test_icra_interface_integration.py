@@ -216,6 +216,8 @@ class TestStageContracts(unittest.TestCase):
                          ["GPS", "GAL", "GLO"])
         self.assertEqual(contract["planner_executor_thread_count"], 6)
         self.assertTrue(contract["p0_conservative_max_with_gnss"])
+        self.assertFalse(
+            contract["online_mapping"]["unknown_as_occupied"])
         self.assertEqual([fork["x_min_m"] for fork in contract["forks"]],
                          [-16.0, -8.0, 0.0, 8.0])
         self.assertRegex(contract["fingerprint"], r"^sha256:[0-9a-f]{64}$")
@@ -269,7 +271,7 @@ class TestStageContracts(unittest.TestCase):
                 "risk_resolution_m": 0.5,
                 "ego_resolution_m": 0.1,
                 "ego_origin_m": [-21.0, -11.0, 0.0],
-                "unknown_as_occupied": True,
+                "unknown_as_occupied": False,
                 "provider_cost_source": "pre_conservative_fim_ratio",
                 "require_safety_ratio_below_one_for_cost": True,
                 "alert_limit_policy_id": "fixed_hal10_val20_v1",

@@ -417,15 +417,17 @@ bool P4GuideRequest::valid(std::string * reason) const
     {
       return fail("invalid_frozen_occupancy_identity");
     }
-    const auto start_support = occupancy_snapshot_->diagnostic_query(start_);
-    const auto end_support = occupancy_snapshot_->diagnostic_query(end_);
-    const auto observed_free = [](const auto & support) {
-        return support.available && support.observed &&
-               support.state == GridMapObservationState::OBSERVED_FREE &&
-               !support.raw_occupied && !support.inflated_occupied;
-      };
-    if (!observed_free(start_support) || !observed_free(end_support)) {
-      return fail("endpoints_not_observed_free");
+    if (config_.enable_risk_aware_astar) {
+      const auto start_support = occupancy_snapshot_->diagnostic_query(start_);
+      const auto end_support = occupancy_snapshot_->diagnostic_query(end_);
+      const auto observed_free = [](const auto & support) {
+          return support.available && support.observed &&
+                 support.state == GridMapObservationState::OBSERVED_FREE &&
+                 !support.raw_occupied && !support.inflated_occupied;
+        };
+      if (!observed_free(start_support) || !observed_free(end_support)) {
+        return fail("endpoints_not_observed_free");
+      }
     }
     if (snapshot_ &&
       (snapshot_->params().frame_id != occupancy_snapshot_->frame_id ||
@@ -534,9 +536,13 @@ P4GuideSearchOutcome P4AStarGuideSearch::searchOriginal(
     return outcome;
   }
   a_star_->setP4Config(request.config());
-  if (request.occupancySnapshot()) {
+  if (request.config().enable_risk_aware_astar &&
+    request.occupancySnapshot())
+  {
     a_star_->setFrozenOccupancyQuery(
       request.occupancySnapshot()->diagnostic_query);
+  } else {
+    a_star_->clearFrozenOccupancyQuery();
   }
   outcome.success = a_star_->AstarSearchOriginal(
     0.1, request.start(), request.end());
@@ -646,7 +652,9 @@ P4GuideDecision P4CollisionGuidePlanner::planCollisionGuide(
       P4GuideDecisionReason::ORIGINAL_SEARCH_FAILED;
     return decision;
   }
-  if (!frozenGuideSupported(original.path, request.occupancySnapshot())) {
+  if (request.config().enable_risk_aware_astar &&
+    !frozenGuideSupported(original.path, request.occupancySnapshot()))
+  {
     decision.status = P4GuideDecisionStatus::PLANNER_FAILURE;
     decision.reason = P4GuideDecisionReason::PROVIDER_SUPPORT_INCOMPLETE;
     return decision;

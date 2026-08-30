@@ -3,6 +3,16 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(icra-forest-restore-ego-unknown-traversal): IAP-RQ-320 / IAP-RQ-400 /
+  IAP-RQ-410 — restore the original base EGO exploration behavior for forest
+  v2 by setting `grid_map/unknown_as_occupied=false`. When risk-aware P4 is
+  disabled, the original rebound A* no longer inherits the frozen
+  observed-free query or guide-support gate; when P4 is enabled, endpoints,
+  swept edges and returned guides still require frozen observed-free support.
+  P0 keeps tri-state occupancy, UNKNOWN risk output and diagnostics. Bind the
+  effective optimistic EGO setting into runner scene/manifest evidence and add
+  a regression that proves the P4-on safety boundary remains fail closed.
+
 - feat(icra-forest-online-risk-v2): IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 — add the
   `icra_dense_forest_four_fork_v2` development preset with a fixed geofence and simulator-only world truth.
   EGO now publishes immutable tri-state online occupancy geometry; P0 consumes the same geometry and treats

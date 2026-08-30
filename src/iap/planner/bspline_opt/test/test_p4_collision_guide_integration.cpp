@@ -139,6 +139,14 @@ struct GridMapTestAccess
     }
   }
 
+  static void restoreOriginalUnknownTraversal(GridMap * map)
+  {
+    map->mp_.unknown_as_occupied_ = false;
+    std::fill(
+      map->md_.observed_buffer_.begin(),
+      map->md_.observed_buffer_.end(), 0);
+  }
+
   static void advanceOccupancyEpoch(GridMap * map)
   {
     map->occupancy_update_sequence_.fetch_add(2, std::memory_order_acq_rel);
@@ -868,6 +876,41 @@ TEST(P4CollisionGuideIntegration,
   EXPECT_EQ(rebound.status, ego_planner::P4GuideDecisionStatus::RISK_SELECTED);
   EXPECT_TRUE(rebound.selection_applied);
   EXPECT_EQ(rebound.selected.canonical_hash, rebound.risk.canonical_hash);
+}
+
+TEST(P4CollisionGuideIntegration,
+  RiskDisabledRestoresOriginalEgoUnknownTraversalWithoutWeakeningP4)
+{
+  const auto snapshot = makeSnapshot();
+
+  auto original_map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureGuideFixture(original_map.get());
+  GridMapTestAccess::restoreOriginalUnknownTraversal(original_map.get());
+  auto original_optimizer = makeOptimizer(
+    original_map, snapshot, false, false);
+  Eigen::MatrixXd original_seed = guideSeedMatrix();
+  ASSERT_EQ(
+    original_optimizer->initControlPoints(original_seed, true).status,
+    ego_planner::CollisionScanStatus::CLOSED_SEGMENTS);
+  ASSERT_EQ(original_optimizer->getLastP4GuideViz().size(), 1U);
+  const auto & original = original_optimizer->getLastP4GuideViz().front();
+  EXPECT_EQ(
+    original.status, ego_planner::P4GuideDecisionStatus::ORIGINAL_SELECTED);
+  EXPECT_EQ(original.reason, ego_planner::P4GuideDecisionReason::RISK_DISABLED);
+  EXPECT_TRUE(original.selected.returned);
+
+  auto p4_map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureGuideFixture(p4_map.get());
+  GridMapTestAccess::restoreOriginalUnknownTraversal(p4_map.get());
+  auto p4_optimizer = makeOptimizer(p4_map, snapshot, true, false);
+  Eigen::MatrixXd p4_seed = guideSeedMatrix();
+  EXPECT_EQ(
+    p4_optimizer->initControlPoints(p4_seed, true).status,
+    ego_planner::CollisionScanStatus::INVALID_INPUT);
+  ASSERT_EQ(p4_optimizer->getLastP4GuideViz().size(), 1U);
+  EXPECT_NE(
+    p4_optimizer->getLastP4GuideViz().front().status,
+    ego_planner::P4GuideDecisionStatus::ORIGINAL_SELECTED);
 }
 
 TEST(P4CollisionGuideIntegration,

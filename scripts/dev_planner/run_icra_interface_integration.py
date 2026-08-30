@@ -167,7 +167,9 @@ def forest_scene_contract(scenario: str = FOREST_SCENARIO) -> dict:
             "ego_resolution_m": 0.1,
             "risk_resolution_m": 0.5,
             "risk_voxels_per_ego_axis": 5,
-            "unknown_as_occupied": online,
+            # Base EGO keeps its original optimistic exploration semantics.
+            # P0 still records UNKNOWN and risk-aware P4 remains fail-closed.
+            "unknown_as_occupied": False,
             "fit_grid_to_map_cloud": not online,
             "provider_cost_source": (
                 "pre_conservative_fim_ratio" if online
