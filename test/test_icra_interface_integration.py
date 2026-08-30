@@ -118,13 +118,27 @@ def lineage_for(decision, trajectory_id, start_ns):
 
 
 class TestStageContracts(unittest.TestCase):
-    def test_icra_rviz_uses_sensor_qos_for_predicted_pl_cloud(self):
+    def test_icra_rviz_keeps_environment_faint_and_risk_cloud_legible(self):
         rviz = (REPO / "config/sim_demo11/test_icra.rviz").read_text()
-        predicted_pl = rviz.split("Name: Predicted PL Cloud", 1)[1]
-        predicted_pl = predicted_pl.split("- Class:", 1)[0]
+
+        def display_block(name):
+            before, after = rviz.split(f"Name: {name}", 1)
+            return ("- Alpha:" + before.rsplit("- Alpha:", 1)[1] +
+                    f"Name: {name}" + after.split("- Alpha:", 1)[0])
+
+        environment = display_block("Global Obstacle Map")
+        self.assertIn("Color: 190; 195; 200", environment)
+        self.assertIn("Color Transformer: FlatColor", environment)
+        self.assertIn("Style: Flat Squares", environment)
+        self.assertTrue(environment.startswith("- Alpha: 0.55"))
+
+        predicted_pl = display_block("Predicted PL Cloud")
         self.assertIn("Reliability Policy: Best Effort", predicted_pl)
-        self.assertIn("Style: Points", predicted_pl)
-        self.assertIn("Size (Pixels): 3", predicted_pl)
+        self.assertIn("Color Transformer: RGB8", predicted_pl)
+        self.assertIn("Style: Spheres", predicted_pl)
+        self.assertIn("Size (Pixels): 6", predicted_pl)
+        self.assertIn("Size (m): 0.28", predicted_pl)
+        self.assertTrue(predicted_pl.startswith("- Alpha: 0.45"))
 
     def test_stage_switches_keep_forbidden_layers_off(self):
         for stage in MODULE.STAGE_ORDER:
