@@ -144,6 +144,29 @@ P4RiskAStarConfig providerBottleneckV2Config()
   return config;
 }
 
+std::shared_ptr<const GridMap::FrozenOccupancyEpoch>
+makeObservedFreeOccupancyEpoch(uint64_t generation)
+{
+  auto epoch = std::make_shared<GridMap::FrozenOccupancyEpoch>();
+  epoch->diagnostic_query = [generation](const Eigen::Vector3d &) {
+      GridMapOccupancyDiagnostic diagnostic;
+      diagnostic.available = true;
+      diagnostic.observed = true;
+      diagnostic.state = GridMapObservationState::OBSERVED_FREE;
+      diagnostic.frame_id = "map";
+      diagnostic.cloud_stamp_s = 10.0;
+      diagnostic.generation = generation;
+      diagnostic.source = "observed_free_fixture";
+      return diagnostic;
+    };
+  epoch->resolution_m = 0.1;
+  epoch->frame_id = "map";
+  epoch->geometry_id = "observed_free_fixture";
+  epoch->cloud_stamp_s = 10.0;
+  epoch->generation = generation;
+  return epoch;
+}
+
 class ScriptedSearch final : public ego_planner::P4GuideSearch
 {
 public:
@@ -191,13 +214,15 @@ ScriptedSearch successfulSearch()
 ego_planner::P4GuideRequest makeRequest(
   std::shared_ptr<const iap::RiskGridSnapshot> snapshot,
   uint64_t captured_epoch, const uint64_t * live_epoch,
-  P4RiskAStarConfig config = metricsOnlyConfig())
+  P4RiskAStarConfig config = metricsOnlyConfig(),
+  bool include_occupancy_snapshot = true)
 {
   return ego_planner::P4GuideRequest(
       41, 7, Eigen::Vector3d(-4.0, 0.0, 0.0),
       Eigen::Vector3d(4.0, 0.0, 0.0), true, std::move(snapshot), 10.0,
       captured_epoch, [live_epoch]() {return *live_epoch;},
-      std::move(config));
+      std::move(config), include_occupancy_snapshot ?
+      makeObservedFreeOccupancyEpoch(captured_epoch) : nullptr);
 }
 
 void expectOriginalFallback(
@@ -554,6 +579,24 @@ TEST(P4CollisionGuideDecision, OriginalTimeoutIsPlannerFailureWhenEpochIsStable)
     ego_planner::P4GuideDecisionReason::ORIGINAL_SEARCH_TIMEOUT);
   EXPECT_EQ(search.calls, (std::vector<std::string>{"original"}));
   EXPECT_FALSE(decision.selected.returned);
+}
+
+TEST(P4CollisionGuideDecision, RiskAwareRequestRequiresFrozenOccupancy)
+{
+  uint64_t epoch = 32;
+  auto search = successfulSearch();
+  ego_planner::P4CollisionGuidePlanner planner(search);
+
+  const auto decision = planner.planCollisionGuide(makeRequest(
+      makeSnapshot(ProviderMode::SPATIAL), epoch, &epoch,
+      metricsOnlyConfig(), false));
+
+  EXPECT_EQ(
+    decision.status,
+    ego_planner::P4GuideDecisionStatus::DECISION_INVALID_REPLAN_REQUIRED);
+  EXPECT_EQ(
+    decision.reason, ego_planner::P4GuideDecisionReason::REQUEST_INVALID);
+  EXPECT_TRUE(search.calls.empty());
 }
 
 TEST(P4CollisionGuideDecision, EpochChangeDuringTimedOutOriginalSearchIsAuthoritative)

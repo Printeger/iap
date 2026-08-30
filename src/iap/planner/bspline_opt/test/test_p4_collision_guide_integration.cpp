@@ -197,6 +197,10 @@ struct GridMapTestAccess
     map->md_.occupancy_buffer_.assign(count, -2.01);
     map->md_.occupancy_buffer_inflate_.assign(count, 0);
     map->md_.occupancy_buffer_raw_cloud_.assign(count, 0);
+    map->md_.observed_buffer_.assign(count, 1);
+    map->occupancy_cloud_stamp_s_.store(10.0, std::memory_order_release);
+    if (map->occupancy_update_sequence_.load(std::memory_order_acquire) == 0u)
+      map->occupancy_update_sequence_.store(2u, std::memory_order_release);
     for (int x_index = 0; x_index < 300; ++x_index) {
       const double x = -15.0 +
         (static_cast<double>(x_index) + 0.5) * resolution;
@@ -240,6 +244,10 @@ struct GridMapTestAccess
     map->md_.occupancy_buffer_.assign(count, -2.01);
     map->md_.occupancy_buffer_inflate_.assign(count, 0);
     map->md_.occupancy_buffer_raw_cloud_.assign(count, 0);
+    map->md_.observed_buffer_.assign(count, 1);
+    map->occupancy_cloud_stamp_s_.store(10.0, std::memory_order_release);
+    if (map->occupancy_update_sequence_.load(std::memory_order_acquire) == 0u)
+      map->occupancy_update_sequence_.store(2u, std::memory_order_release);
     for (int x_index = 0;
       x_index < icra074_targeted_optimization_fixture::kXCells; ++x_index)
     {
@@ -322,7 +330,7 @@ public:
       result.stale = false;
       const bool projected_risky_lane =
         query.position_w.x() >= -10.0 &&
-        query.position_w.x() <= -6.0 && query.position_w.y() < 0.0;
+        query.position_w.x() <= -6.0 && query.position_w.y() > 0.0;
       result.hpl_pred = projected_risky_lane ? 20.0 : 1.0;
       result.vpl_pred = result.hpl_pred;
       result.reason = "ok";
@@ -521,7 +529,8 @@ ego_planner::P4GuideDecision runIcra074TargetedFixture(
   auto request = std::make_unique<ego_planner::P4GuideRequest>(
     174, 1, icra074_targeted_optimization_fixture::start(),
     icra074_targeted_optimization_fixture::goal(), true, snapshot, 10.0,
-    *epoch, [epoch]() {return *epoch;}, p4V2Config());
+    *epoch, [epoch]() {return *epoch;}, p4V2Config(),
+    map->captureFrozenOccupancyEpoch());
   const auto decision = planner.planCollisionGuide(*request);
   if (retained_request) *retained_request = std::move(request);
   return decision;
@@ -618,6 +627,8 @@ TEST(P4CollisionGuideIntegration, PositiveFixtureUsesProductionAStar)
   auto map = std::make_shared<GridMap>();
   GridMapTestAccess::configureGuideFixture(map.get());
   uint64_t epoch = map->occupancyGeneration();
+  const auto occupancy = map->captureFrozenOccupancyEpoch();
+  ASSERT_NE(occupancy, nullptr);
 
   const auto run = [&]() {
       auto astar = std::make_shared<AStar>();
@@ -627,7 +638,7 @@ TEST(P4CollisionGuideIntegration, PositiveFixtureUsesProductionAStar)
       const ego_planner::P4GuideRequest request(
         91, 1, p4_collision_guide_fixture::start(),
         p4_collision_guide_fixture::end(), true, snapshot, 10.0, epoch,
-        [&epoch]() {return epoch;}, p4Config(true, true));
+        [&epoch]() {return epoch;}, p4Config(true, true), occupancy);
       return planner.planCollisionGuide(request);
     };
 
@@ -672,6 +683,8 @@ TEST(P4CollisionGuideIntegration,
   auto map = std::make_shared<GridMap>();
   GridMapTestAccess::configureGuideFixture(map.get());
   uint64_t epoch = map->occupancyGeneration();
+  const auto occupancy = map->captureFrozenOccupancyEpoch();
+  ASSERT_NE(occupancy, nullptr);
   auto astar = std::make_shared<AStar>();
   astar->initGridMap(map, Eigen::Vector3i(200, 100, 30));
   ego_planner::P4AStarGuideSearch search(astar);
@@ -679,7 +692,7 @@ TEST(P4CollisionGuideIntegration,
   const ego_planner::P4GuideRequest request(
     92, 1, p4_collision_guide_fixture::start(),
     p4_collision_guide_fixture::end(), true, snapshot, 10.0, epoch,
-    [&epoch]() {return epoch;}, p4V2Config());
+    [&epoch]() {return epoch;}, p4V2Config(), occupancy);
 
   const auto decision = planner.planCollisionGuide(request);
   EXPECT_EQ(decision.schema_version, "p4_collision_guide_decision_v2");
@@ -714,7 +727,13 @@ TEST(P4CollisionGuideIntegration,
 
   ASSERT_EQ(
     decision.status, ego_planner::P4GuideDecisionStatus::RISK_SELECTED)
-    << ego_planner::p4GuideDecisionReasonName(decision.reason);
+    << ego_planner::p4GuideDecisionReasonName(decision.reason)
+    << " original_max=" << decision.original.risk_profile.max
+    << " original_mean=" << decision.original.risk_profile.mean
+    << " original_length=" << decision.original.length_m
+    << " risk_max=" << decision.risk.risk_profile.max
+    << " risk_mean=" << decision.risk.risk_profile.mean
+    << " risk_length=" << decision.risk.length_m;
   EXPECT_EQ(
     decision.reason,
     ego_planner::P4GuideDecisionReason::PROVIDER_BOTTLENECK_SELECTED);
@@ -798,6 +817,8 @@ TEST(P4CollisionGuideIntegration,
   auto map = std::make_shared<GridMap>();
   GridMapTestAccess::configureIcra072SelectionTrigger(map.get());
   const uint64_t epoch = map->occupancyGeneration();
+  const auto occupancy = map->captureFrozenOccupancyEpoch();
+  ASSERT_NE(occupancy, nullptr);
   auto astar = std::make_shared<AStar>();
   astar->initGridMap(map, Eigen::Vector3i(200, 100, 30));
   ego_planner::P4AStarGuideSearch search(astar);
@@ -805,12 +826,18 @@ TEST(P4CollisionGuideIntegration,
   const ego_planner::P4GuideRequest request(
     172, 1, Eigen::Vector3d(-10.0, 0.0, 1.5),
     Eigen::Vector3d(-6.0, 0.0, 1.5), true, snapshot, 10.0, epoch,
-    [epoch]() {return epoch;}, p4V2Config());
+    [epoch]() {return epoch;}, p4V2Config(), occupancy);
 
   const auto decision = planner.planCollisionGuide(request);
   ASSERT_EQ(
     decision.status, ego_planner::P4GuideDecisionStatus::RISK_SELECTED)
-    << ego_planner::p4GuideDecisionReasonName(decision.reason);
+    << ego_planner::p4GuideDecisionReasonName(decision.reason)
+    << " original_max=" << decision.original.risk_profile.max
+    << " original_mean=" << decision.original.risk_profile.mean
+    << " original_length=" << decision.original.length_m
+    << " risk_max=" << decision.risk.risk_profile.max
+    << " risk_mean=" << decision.risk.risk_profile.mean
+    << " risk_length=" << decision.risk.length_m;
   EXPECT_EQ(
     decision.reason,
     ego_planner::P4GuideDecisionReason::PROVIDER_BOTTLENECK_SELECTED);
@@ -883,6 +910,30 @@ TEST(P4CollisionGuideIntegration,
 {
   const auto snapshot = makeSnapshot();
 
+  auto unknown_only_original_map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureGuideFixture(
+    unknown_only_original_map.get(), false);
+  GridMapTestAccess::restoreOriginalUnknownTraversal(
+    unknown_only_original_map.get());
+  auto unknown_only_original = makeOptimizer(
+    unknown_only_original_map, snapshot, false, false);
+  Eigen::MatrixXd unknown_only_original_seed = guideSeedMatrix();
+  EXPECT_EQ(
+    unknown_only_original->initControlPoints(
+      unknown_only_original_seed, true).status,
+    ego_planner::CollisionScanStatus::NO_COLLISION);
+
+  auto unknown_only_p4_map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureGuideFixture(unknown_only_p4_map.get(), false);
+  GridMapTestAccess::restoreOriginalUnknownTraversal(unknown_only_p4_map.get());
+  auto unknown_only_p4 = makeOptimizer(
+    unknown_only_p4_map, snapshot, true, false);
+  Eigen::MatrixXd unknown_only_p4_seed = guideSeedMatrix();
+  EXPECT_EQ(
+    unknown_only_p4->initControlPoints(
+      unknown_only_p4_seed, true).status,
+    ego_planner::CollisionScanStatus::OPEN_ENDED_COLLISION);
+
   auto original_map = std::make_shared<GridMap>();
   GridMapTestAccess::configureGuideFixture(original_map.get());
   GridMapTestAccess::restoreOriginalUnknownTraversal(original_map.get());
@@ -906,11 +957,8 @@ TEST(P4CollisionGuideIntegration,
   Eigen::MatrixXd p4_seed = guideSeedMatrix();
   EXPECT_EQ(
     p4_optimizer->initControlPoints(p4_seed, true).status,
-    ego_planner::CollisionScanStatus::INVALID_INPUT);
-  ASSERT_EQ(p4_optimizer->getLastP4GuideViz().size(), 1U);
-  EXPECT_NE(
-    p4_optimizer->getLastP4GuideViz().front().status,
-    ego_planner::P4GuideDecisionStatus::ORIGINAL_SELECTED);
+    ego_planner::CollisionScanStatus::OPEN_ENDED_COLLISION);
+  EXPECT_TRUE(p4_optimizer->getLastP4GuideViz().empty());
 }
 
 TEST(P4CollisionGuideIntegration,
@@ -934,7 +982,9 @@ TEST(P4CollisionGuideIntegration,
     selected.selected_status,
     ego_planner::P4GuideDecisionStatus::RISK_SELECTED);
 
-  GridMapTestAccess::configureGuideFixture(map.get(), false);
+  Eigen::MatrixXd free_seed = guideSeedMatrix();
+  free_seed.row(1).setConstant(2.0);
+  optimizer->setControlPoints(free_seed);
   bool stopped_for_error = false;
   EXPECT_FALSE(optimizer->checkCollisionAndReboundForTest(&stopped_for_error));
   EXPECT_FALSE(stopped_for_error);
@@ -1092,15 +1142,16 @@ TEST(P4CollisionGuideIntegration, InitialAndReboundUseSameDecisionSeam)
 
   auto rebound_map = std::make_shared<GridMap>();
   GridMapTestAccess::configure(
-    rebound_map.get(), p4_collision_fixture::kNoCollision);
+    rebound_map.get(), p4_collision_fixture::kOneClosed);
   auto rebound_optimizer = makeOptimizer(rebound_map, snapshot, true, true);
   Eigen::MatrixXd rebound_seed = seedMatrix(
     p4_collision_fixture::kOneClosed);
+  Eigen::MatrixXd free_rebound_seed = rebound_seed;
+  free_rebound_seed.row(1).setConstant(2.0);
   ASSERT_EQ(
-    rebound_optimizer->initControlPoints(rebound_seed, true).status,
+    rebound_optimizer->initControlPoints(free_rebound_seed, true).status,
     ego_planner::CollisionScanStatus::NO_COLLISION);
-  GridMapTestAccess::configure(
-    rebound_map.get(), p4_collision_fixture::kOneClosed);
+  rebound_optimizer->setControlPoints(rebound_seed);
   bool stopped_for_error = false;
   ASSERT_TRUE(rebound_optimizer->checkCollisionAndReboundForTest(
       &stopped_for_error));

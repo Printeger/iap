@@ -585,6 +585,7 @@ namespace ego_planner
         double window_duration_s = std::numeric_limits<double>::infinity()) const;
 
   private:
+    int collisionOccupancy(const Eigen::Vector3d &point) const;
     GridMap::Ptr grid_map_;
     fast_planner::ObjPredictor::Ptr moving_objs_;
     SwarmTrajData *swarm_trajs_{NULL}; // Can not use shared_ptr and no need to free

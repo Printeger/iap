@@ -9,6 +9,8 @@
   disabled, the original rebound A* no longer inherits the frozen
   observed-free query or guide-support gate; when P4 is enabled, endpoints,
   swept edges and returned guides still require frozen observed-free support.
+  P4-on collision scanning treats UNKNOWN or a missing frozen occupancy epoch
+  as unsupported.
   P0 keeps tri-state occupancy, UNKNOWN risk output and diagnostics. Bind the
   effective optimistic EGO setting into runner scene/manifest evidence and add
   a regression that proves the P4-on safety boundary remains fail closed.

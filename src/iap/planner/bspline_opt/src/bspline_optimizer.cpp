@@ -1338,6 +1338,31 @@ namespace ego_planner
            status == CollisionScanStatus::INVALID_INPUT;
   }
 
+  int BsplineOptimizer::collisionOccupancy(
+      const Eigen::Vector3d &point) const
+  {
+    if (!p4_config_.enable_risk_aware_astar)
+      return grid_map_ ? grid_map_->getInflateOccupancy(point) : -1;
+
+    if (!p4_occupancy_snapshot_ ||
+        !p4_occupancy_snapshot_->diagnostic_query)
+      return -1;
+
+    const auto support = p4_occupancy_snapshot_->diagnostic_query(point);
+    if (!support.available)
+      return -1;
+    if (support.raw_occupied || support.inflated_occupied ||
+        support.state == GridMapObservationState::OCCUPIED)
+      return 1;
+    if (support.observed &&
+        support.state == GridMapObservationState::OBSERVED_FREE)
+      return 0;
+
+    // Base EGO may traverse unseen space, but risk-aware P4 requires complete
+    // observed-free support for the collision segment and its guide.
+    return 1;
+  }
+
   CollisionScanResult BsplineOptimizer::scanCollisionSegments(
       const Eigen::MatrixXd &points) const
   {
@@ -1377,7 +1402,7 @@ namespace ego_planner
         const Eigen::Vector3d sample =
             alpha * points.col(index - 1) +
             (1.0 - alpha) * points.col(index);
-        const int occupancy = grid_map_->getInflateOccupancy(sample);
+        const int occupancy = collisionOccupancy(sample);
         if (occupancy < 0)
           return CollisionScanResult{};
         const bool occupied = occupancy != 0;
@@ -1410,9 +1435,9 @@ namespace ego_planner
         if (active_entry && possible_exit &&
             (stable_sample_count > kEnoughStableSamples || index == tail_end))
         {
-          const int start_occupancy = grid_map_->getInflateOccupancy(
+          const int start_occupancy = collisionOccupancy(
               points.col(free_start_index));
-          const int end_occupancy = grid_map_->getInflateOccupancy(
+          const int end_occupancy = collisionOccupancy(
               points.col(free_end_index));
           if (start_occupancy != 0 || end_occupancy != 0)
             return CollisionScanResult{};

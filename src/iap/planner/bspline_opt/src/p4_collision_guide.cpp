@@ -276,7 +276,7 @@ bool frozenGuideSupported(
   const std::shared_ptr<const GridMap::FrozenOccupancyEpoch> & occupancy)
 {
   if (!occupancy) {
-    return true;
+    return false;
   }
   if (!occupancy->diagnostic_query || path.size() < 2 ||
     !std::isfinite(occupancy->resolution_m) ||
@@ -294,8 +294,11 @@ bool frozenGuideSupported(
   for (std::size_t index = 1; index < path.size(); ++index) {
     const Eigen::Vector3d delta = path[index] - path[index - 1];
     const double length = delta.norm();
-    if (!std::isfinite(length) || length <= kGeometryEpsilon) {
+    if (!std::isfinite(length)) {
       return false;
+    }
+    if (length <= kGeometryEpsilon) {
+      continue;
     }
     const int samples = std::max(1, static_cast<int>(std::ceil(
       length / sample_step)));
@@ -407,6 +410,9 @@ bool P4GuideRequest::valid(std::string * reason) const
   }
   if (!std::isfinite(query_base_time_s_) || !live_occupancy_epoch_) {
     return fail("invalid_time_or_epoch_recheck");
+  }
+  if (config_.enable_risk_aware_astar && !occupancy_snapshot_) {
+    return fail("frozen_occupancy_unavailable");
   }
   if (occupancy_snapshot_) {
     if (!occupancy_snapshot_->diagnostic_query ||
