@@ -94,6 +94,10 @@ class P0RiskGridRuntime {
   };
 
   static Config declareAndReadConfig(const rclcpp::Node::SharedPtr& node);
+  static bool geometryMatchesRiskOverlay(
+      const iap::PlanningLatticeGeometry& geometry,
+      const iap::RiskGridMapParams& risk_grid,
+      int required_ego_voxels_per_axis = 5);
   static std::unique_ptr<P0RiskGridRuntime> createIfEnabled(
       const rclcpp::Node::SharedPtr& node);
 

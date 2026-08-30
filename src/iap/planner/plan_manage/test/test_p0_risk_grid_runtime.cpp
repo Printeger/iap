@@ -219,6 +219,35 @@ ego_planner::P0RiskGridRuntime::Config enabledConfig() {
   return config;
 }
 
+TEST(P0RiskGridRuntimeGeometryTest,
+     OnlineRiskOverlayRequiresExactlyFiveEgoVoxelsPerAxis) {
+  iap::PlanningLatticeGeometry geometry;
+  geometry.frame_id = "map";
+  geometry.origin_w = Eigen::Vector3d(-21.0, -11.0, 0.0);
+  geometry.extent_m = Eigen::Vector3d(42.0, 22.0, 8.0);
+  geometry.voxel_dimensions = Eigen::Vector3i(420, 220, 80);
+  geometry.resolution_m = 0.1;
+  geometry.geometry_id = "planning_lattice_v1:test";
+
+  iap::RiskGridMapParams risk_grid;
+  risk_grid.frame_id = "map";
+  risk_grid.use_fixed_origin = true;
+  risk_grid.fixed_origin_w = geometry.origin_w;
+  risk_grid.size_x_m = geometry.extent_m.x();
+  risk_grid.size_y_m = geometry.extent_m.y();
+  risk_grid.size_z_m = geometry.extent_m.z();
+  risk_grid.resolution_m = 0.5;
+  EXPECT_TRUE(ego_planner::P0RiskGridRuntime::geometryMatchesRiskOverlay(
+      geometry, risk_grid));
+
+  risk_grid.resolution_m = 0.4;
+  EXPECT_FALSE(ego_planner::P0RiskGridRuntime::geometryMatchesRiskOverlay(
+      geometry, risk_grid));
+  risk_grid.resolution_m = 0.6;
+  EXPECT_FALSE(ego_planner::P0RiskGridRuntime::geometryMatchesRiskOverlay(
+      geometry, risk_grid));
+}
+
 struct RuntimeOccupancyDiagnostic {
   bool available = false;
   bool observed = false;

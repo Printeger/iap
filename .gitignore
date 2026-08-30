@@ -75,3 +75,4 @@ CATKIN_IGNORE
 /tools/log/
 /tools/build/
 /tools/install/
+/symlink_install_manifest.txt

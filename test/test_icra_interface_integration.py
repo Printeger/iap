@@ -440,7 +440,11 @@ class TestRunnerLifecycle(unittest.TestCase):
                 "selected_low_risk_forks": 4,
                 "selected_high_risk_forks": 0,
             },
-            forest_risk={"passing_generation_id": 17},
+            forest_risk={
+                "contrast_generation_ids": {"0": 17},
+                "passing_generation_ids": {"0": 17},
+                "fork_evidence": {"0": {"geometry_id": "geometry"}},
+            },
             selected_count=2,
             lineage_group_count=1,
         )
@@ -450,7 +454,12 @@ class TestRunnerLifecycle(unittest.TestCase):
         self.assertTrue(pair["paired_pass"])
         self.assertEqual(pair["repetition"], 2)
         self.assertEqual(pair["delta_selected_low_risk_forks"], 3)
-        self.assertEqual(pair["risk_contrast_generation_id"], 17)
+        self.assertEqual(pair["risk_contrast_generation_ids"], {"0": 17})
+        self.assertEqual(
+            pair["risk_identity_bound_generation_ids"], {"0": 17})
+        self.assertEqual(
+            pair["risk_fork_evidence"],
+            {"0": {"geometry_id": "geometry"}})
         self.assertEqual(pair["risk_selected_lineage_count"], 2)
 
     def test_forest_ab_finishes_risk_variant_after_baseline_failure(self):
@@ -560,14 +569,70 @@ class TestStageAnalyzer(unittest.TestCase):
             },
         }
 
+    @staticmethod
+    def identity_evidence(generation_ids):
+        health_rows = []
+        decisions = []
+        lineage = []
+        for index, generation_id in enumerate(generation_ids):
+            occupancy_generation = 100 + generation_id
+            occupancy_stamp_s = 20.0 + generation_id
+            decision = selected_decision()
+            decision.update({
+                "planning_attempt_id": str(10 + index),
+                "collision_segment_id": str(20 + index),
+                "request_hash": f"request-{generation_id}",
+                "snapshot_generation_id": str(generation_id),
+                "snapshot_config_hash": "config-v2",
+                "source_identity_hash": f"sources-{generation_id}",
+                "occupancy_epoch": str(occupancy_generation),
+                "geometry_id": "planning-lattice-v2",
+                "occupancy_stamp_s": str(occupancy_stamp_s),
+            })
+            health_row = healthy(generation_id, 100.0 + index)
+            health_row["payload"].update({
+                "snapshot_config_hash": decision["snapshot_config_hash"],
+                "source_identity_hash": decision["source_identity_hash"],
+                "geometry_id": decision["geometry_id"],
+                "alert_limit_policy_id": "fixed_hal10_val20_v1",
+                "source_occupancy_generation": occupancy_generation,
+                "source_occupancy_stamp_s": occupancy_stamp_s,
+                "source_prior_generation": 200 + generation_id,
+                "source_prior_stamp_s": occupancy_stamp_s - 0.1,
+                "source_gnss_generation": 300 + generation_id,
+                "source_gnss_stamp_s": occupancy_stamp_s - 0.2,
+                "source_lidar_generation": 400 + generation_id,
+                "source_lidar_stamp_s": occupancy_stamp_s - 0.3,
+            })
+            health_rows.append(health_row)
+            decisions.append(decision)
+            lineage.extend(lineage_for(
+                decision, trajectory_id=500 + index,
+                start_ns=600 + index))
+        return health_rows, decisions, lineage
+
     def test_forest_risk_gate_requires_all_four_real_low_risk_arms(self):
+        health_rows, decisions, lineage = self.identity_evidence([7])
         passed = MODULE.analyze_forest_risk(
-            [self.forest_generation(low_multiplier=0.8)])
+            [self.forest_generation(low_multiplier=0.8)],
+            health_rows, decisions, lineage)
         self.assertEqual(passed["result"], "PASS")
         failed = MODULE.analyze_forest_risk(
-            [self.forest_generation(low_multiplier=0.95)])
+            [self.forest_generation(low_multiplier=0.95)],
+            health_rows, decisions, lineage)
         self.assertEqual(failed["result"], "FAIL")
         self.assertIn("forest_risk_contrast_missing", failed["failures"])
+
+    def test_forest_risk_gate_rejects_contrast_without_composite_lineage(self):
+        failed = MODULE.analyze_forest_risk(
+            [self.forest_generation(low_multiplier=0.8)])
+        self.assertEqual(failed["result"], "FAIL")
+        self.assertIn(
+            "forest_risk_identity_lineage_missing", failed["failures"])
+        self.assertEqual(failed["contrast_generation_ids"], {
+            "0": 7, "1": 7, "2": 7, "3": 7,
+        })
+        self.assertEqual(failed["fork_evidence"], {})
 
     def test_forest_risk_gate_accepts_progressive_same_generation_forks(self):
         records = []
@@ -582,13 +647,48 @@ class TestStageAnalyzer(unittest.TestCase):
                     arm["valid_count"] = 0
             records.append(record)
 
-        passed = MODULE.analyze_forest_risk(records)
+        health_rows, decisions, lineage = self.identity_evidence(
+            [20, 21, 22, 23])
+        passed = MODULE.analyze_forest_risk(
+            records, health_rows, decisions, lineage)
 
         self.assertEqual(passed["result"], "PASS")
         self.assertEqual(passed["passing_generation_ids"], {
             "0": 20, "1": 21, "2": 22, "3": 23,
         })
         self.assertEqual(passed["missing_forks"], [])
+        self.assertEqual(set(passed["fork_evidence"]), {"0", "1", "2", "3"})
+        self.assertTrue(all(
+            evidence["geometry_id"] == "planning-lattice-v2"
+            and "normal_publish_authorized" in evidence["lineage_stages"]
+            for evidence in passed["fork_evidence"].values()))
+
+    def test_forest_risk_gate_rejects_cross_fork_config_change(self):
+        records = []
+        for selected_index in range(4):
+            record = self.forest_generation(low_multiplier=0.8)
+            record["payload"]["generation_id"] = 20 + selected_index
+            for fork in record["payload"]["forks"]:
+                if fork["fork_index"] != selected_index:
+                    fork["low"]["sample_count"] = 0
+                    fork["low"]["valid_count"] = 0
+                    fork["high"]["sample_count"] = 0
+                    fork["high"]["valid_count"] = 0
+            records.append(record)
+        health_rows, decisions, lineage = self.identity_evidence(
+            [20, 21, 22, 23])
+        health_rows[-1]["payload"]["snapshot_config_hash"] = "changed"
+        decisions[-1]["snapshot_config_hash"] = "changed"
+        for row in lineage[-3:]:
+            row["snapshot_config_hash"] = "changed"
+
+        failed = MODULE.analyze_forest_risk(
+            records, health_rows, decisions, lineage)
+
+        self.assertEqual(failed["result"], "FAIL")
+        self.assertIn(
+            "forest_risk_cross_fork_identity_mismatch", failed["failures"])
+        self.assertFalse(failed["cross_fork_identity"]["consistent"])
 
     def test_forest_cloud_capture_reduces_points_by_generation_and_arm(self):
         points = []

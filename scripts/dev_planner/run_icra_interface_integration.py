@@ -373,8 +373,98 @@ def _finite_number(value) -> bool:
     return isinstance(value, (int, float)) and math.isfinite(float(value))
 
 
-def analyze_forest_risk(records: list[dict]) -> dict:
-    """Require a same-generation contrast for each progressively seen fork."""
+def analyze_forest_risk(
+        records: list[dict], health: list[dict] | None = None,
+        decisions: list[dict] | None = None,
+        lineage: list[dict] | None = None) -> dict:
+    """Bind each progressive fork contrast to one published P4 identity."""
+    health_by_generation = {}
+    for row in health or []:
+        payload = row.get("payload", row)
+        try:
+            generation_id = int(payload.get("generation_id", 0) or 0)
+            source_identity = {
+                "occupancy_generation": int(payload[
+                    "source_occupancy_generation"]),
+                "occupancy_stamp_s": float(payload[
+                    "source_occupancy_stamp_s"]),
+                "prior_generation": int(payload[
+                    "source_prior_generation"]),
+                "prior_stamp_s": float(payload["source_prior_stamp_s"]),
+                "gnss_generation": int(payload[
+                    "source_gnss_generation"]),
+                "gnss_stamp_s": float(payload["source_gnss_stamp_s"]),
+                "lidar_generation": int(payload[
+                    "source_lidar_generation"]),
+                "lidar_stamp_s": float(payload["source_lidar_stamp_s"]),
+            }
+        except (KeyError, TypeError, ValueError):
+            continue
+        required_strings = (
+            "snapshot_config_hash", "source_identity_hash", "geometry_id",
+            "alert_limit_policy_id")
+        if (generation_id <= 0
+                or not all(payload.get(field) for field in required_strings)
+                or not all(math.isfinite(value) for key, value
+                           in source_identity.items() if key.endswith("_s"))):
+            continue
+        health_by_generation[generation_id] = {
+            "snapshot_generation_id": generation_id,
+            "snapshot_config_hash": payload["snapshot_config_hash"],
+            "source_identity_hash": payload["source_identity_hash"],
+            "geometry_id": payload["geometry_id"],
+            "alert_limit_policy_id": payload["alert_limit_policy_id"],
+            "source_identity": source_identity,
+        }
+
+    selected = _selected_decisions(decisions or [])
+    published_lineage_keys = {
+        tuple(group["key"][:len(DECISION_ID_FIELDS) + 3]): group
+        for group in _lineage_groups(decisions or [], lineage or [])
+        if {"final_bspline_before_p5", "normal_publish_authorized"}
+        .issubset(group["stages"])
+    }
+
+    def bound_identity(generation_id: int) -> dict | None:
+        health_identity = health_by_generation.get(generation_id)
+        if health_identity is None:
+            return None
+        source = health_identity["source_identity"]
+        for decision in selected:
+            try:
+                identity_matches = (
+                    int(decision["snapshot_generation_id"]) == generation_id
+                    and decision["snapshot_config_hash"] ==
+                    health_identity["snapshot_config_hash"]
+                    and decision["source_identity_hash"] ==
+                    health_identity["source_identity_hash"]
+                    and decision["geometry_id"] ==
+                    health_identity["geometry_id"]
+                    and int(decision["occupancy_epoch"]) ==
+                    source["occupancy_generation"]
+                    and math.isclose(
+                        float(decision["occupancy_stamp_s"]),
+                        source["occupancy_stamp_s"],
+                        rel_tol=0.0, abs_tol=1.0e-6))
+            except (KeyError, TypeError, ValueError):
+                continue
+            decision_key = _decision_lineage_key(decision)
+            group = published_lineage_keys.get(decision_key)
+            if not identity_matches or group is None:
+                continue
+            return {
+                **health_identity,
+                "planning_attempt_id": decision["planning_attempt_id"],
+                "collision_segment_id": decision["collision_segment_id"],
+                "request_hash": decision["request_hash"],
+                "occupancy_epoch": int(decision["occupancy_epoch"]),
+                "occupancy_stamp_s": float(decision["occupancy_stamp_s"]),
+                "lineage_stages": sorted(group["stages"]),
+                "trajectory_id": group["trajectory_id"],
+                "trajectory_start_ns": group["start_ns"],
+            }
+        return None
+
     generation_results = []
     for row in records:
         if row.get("kind") != "forest_risk_generation":
@@ -423,27 +513,58 @@ def analyze_forest_risk(records: list[dict]) -> dict:
                 "low": low,
                 "high": high,
             })
+        generation_id = int(payload.get("generation_id", 0) or 0)
+        composite_identity = bound_identity(generation_id)
         generation_results.append({
-            "generation_id": payload.get("generation_id"),
+            "generation_id": generation_id,
+            "composite_identity": composite_identity,
+            "identity_lineage_pass": composite_identity is not None,
             "forks": fork_results,
             "pass": len(fork_results) == 4
             and {item["fork_index"] for item in fork_results}
             == {0, 1, 2, 3}
             and all(item["contrast_pass"] for item in fork_results),
         })
+    contrast_forks = {}
     passing_forks = {}
     for generation in generation_results:
         for fork in generation["forks"]:
             fork_index = fork.get("fork_index")
             if (fork_index in {0, 1, 2, 3}
                     and fork["contrast_pass"]
+                    and fork_index not in contrast_forks):
+                contrast_forks[fork_index] = {
+                    **fork,
+                    "generation_id": generation["generation_id"],
+                }
+            if (fork_index in {0, 1, 2, 3}
+                    and fork["contrast_pass"]
+                    and generation["identity_lineage_pass"]
                     and fork_index not in passing_forks):
                 passing_forks[fork_index] = {
                     **fork,
                     "generation_id": generation["generation_id"],
+                    "composite_identity": generation["composite_identity"],
                 }
-    passed = set(passing_forks) == {0, 1, 2, 3}
-    failures = [] if passed else ["forest_risk_contrast_missing"]
+    cross_fork_geometry_ids = {
+        item["composite_identity"]["geometry_id"]
+        for item in passing_forks.values()}
+    cross_fork_config_hashes = {
+        item["composite_identity"]["snapshot_config_hash"]
+        for item in passing_forks.values()}
+    cross_fork_identity_consistent = (
+        len(cross_fork_geometry_ids) == 1
+        and len(cross_fork_config_hashes) == 1)
+    passed = (set(passing_forks) == {0, 1, 2, 3}
+              and cross_fork_identity_consistent)
+    failures = []
+    if set(contrast_forks) != {0, 1, 2, 3}:
+        failures.append("forest_risk_contrast_missing")
+    if set(passing_forks) != {0, 1, 2, 3}:
+        failures.append("forest_risk_identity_lineage_missing")
+    if (set(passing_forks) == {0, 1, 2, 3}
+            and not cross_fork_identity_consistent):
+        failures.append("forest_risk_cross_fork_identity_mismatch")
     source_assessment = {}
     if passed:
         for source in ("gnss", "lidar", "fim", "safety"):
@@ -458,10 +579,25 @@ def analyze_forest_risk(records: list[dict]) -> dict:
     return _result(
         failures,
         generation_count=len(generation_results),
+        contrast_generation_ids={
+            str(index): contrast_forks[index]["generation_id"]
+            for index in sorted(contrast_forks)},
         passing_generation_ids={
             str(index): passing_forks[index]["generation_id"]
             for index in sorted(passing_forks)},
         missing_forks=sorted({0, 1, 2, 3} - set(passing_forks)),
+        missing_contrast_forks=sorted(
+            {0, 1, 2, 3} - set(contrast_forks)),
+        missing_identity_lineage_forks=sorted(
+            set(contrast_forks) - set(passing_forks)),
+        fork_evidence={
+            str(index): passing_forks[index]["composite_identity"]
+            for index in sorted(passing_forks)},
+        cross_fork_identity={
+            "consistent": cross_fork_identity_consistent,
+            "geometry_ids": sorted(cross_fork_geometry_ids),
+            "snapshot_config_hashes": sorted(cross_fork_config_hashes),
+        },
         source_assessment=source_assessment,
         generations=generation_results,
     )
@@ -1136,7 +1272,7 @@ def analyze_run(
             poscmd_times, stage_start)
         if not _is_forest_scenario(scenario):
             return base
-        risk = analyze_forest_risk(records)
+        risk = analyze_forest_risk(records, health, decisions, lineage)
         path = analyze_forest_path(records, forest_variant or "risk")
         failures = [*base["failures"], *risk["failures"], *path["failures"]]
         return _result(
@@ -1977,8 +2113,11 @@ def summarize_forest_pair(
         "risk_selected_high_risk_forks": risk_path.get(
             "selected_high_risk_forks"),
         "delta_selected_low_risk_forks": low_delta,
-        "risk_contrast_generation_id": risk_contrast.get(
-            "passing_generation_id"),
+        "risk_contrast_generation_ids": risk_contrast.get(
+            "contrast_generation_ids", {}),
+        "risk_identity_bound_generation_ids": risk_contrast.get(
+            "passing_generation_ids", {}),
+        "risk_fork_evidence": risk_contrast.get("fork_evidence", {}),
         "risk_selected_lineage_count": risk.get("selected_count"),
         "risk_lineage_group_count": risk.get("lineage_group_count"),
         "paired_pass": pair_pass,

@@ -14,7 +14,10 @@
   to online LiDAR support and disable original-guide fallback when risk support is incomplete; V1/ICRA072 behavior
   remains available. Live P0 is green, while P4/full remain fail-closed because forward GNSS rays are unknown and
   the observed raw FIM profile does not yet make the intended open branch lower-risk. This is development
-  integration only and creates no scientific or qualification claim.
+  integration only and creates no scientific or qualification claim. Review hardening clears stale observation
+  bits with raw cloud hits, enforces the exact 5× overlay contract, fails closed when the configured FIM cost is
+  unavailable, binds all online safety fields into one canonical hash, and requires each progressive fork summary
+  to match P0 source identity plus a published P4 lineage before the runner can pass it.
 
 - route(user-decision-010-repair-icra077a): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 /
   IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — user selects bounded repair, not bypass. Cross-bind current protected

@@ -63,68 +63,6 @@ bool sameSnapshotIdentity(
          lhs->params().frame_id == rhs->params().frame_id;
 }
 
-std::string riskGridConfigHash(const iap::RiskGridMapParams & params)
-{
-  std::ostringstream stream;
-  stream << "risk_grid_config_v2;" << params.frame_id << ';'
-         << params.alert_limit_policy_id << ';';
-  for (int axis = 0; axis < 3; ++axis)
-    appendCanonicalDouble(stream, params.lattice_anchor_w(axis));
-  appendCanonicalDouble(stream, params.resolution_m);
-  appendCanonicalDouble(stream, params.size_x_m);
-  appendCanonicalDouble(stream, params.size_y_m);
-  appendCanonicalDouble(stream, params.size_z_m);
-  stream << params.horizons_s.size() << ';';
-  for (const double horizon : params.horizons_s)
-    appendCanonicalDouble(stream, horizon);
-  appendCanonicalDouble(stream, params.refresh_period_s);
-  appendCanonicalDouble(stream, params.stale_timeout_s);
-  appendCanonicalDouble(stream, params.unknown_cost);
-  appendCanonicalDouble(stream, params.cost_max);
-  stream << params.skip_occupied_voxels << ';'
-         << params.use_predictor_batch_query << ';';
-  const auto append_box = [&stream](const auto & fixture) {
-      stream << fixture.enabled << ';' << fixture.name << ';';
-      appendCanonicalDouble(stream, fixture.x_min_m);
-      appendCanonicalDouble(stream, fixture.x_max_m);
-      appendCanonicalDouble(stream, fixture.y_min_m);
-      appendCanonicalDouble(stream, fixture.y_max_m);
-      appendCanonicalDouble(stream, fixture.z_min_m);
-      appendCanonicalDouble(stream, fixture.z_max_m);
-      appendCanonicalDouble(stream, fixture.tau_min_s);
-      appendCanonicalDouble(stream, fixture.tau_max_s);
-    };
-  append_box(params.p5_3_fixture);
-  appendCanonicalDouble(stream, params.p5_3_fixture.hpl_pred_m);
-  appendCanonicalDouble(stream, params.p5_3_fixture.vpl_pred_m);
-  append_box(params.p5_4_fixture);
-  appendCanonicalDouble(stream, params.p5_4_fixture.hpl_pred_m);
-  appendCanonicalDouble(stream, params.p5_4_fixture.vpl_pred_m);
-  append_box(params.p5_6_fixture);
-  append_box(params.p5_7_fixture);
-  stream << params.p5_7_fixture.effective_enabled << ';';
-  appendCanonicalDouble(stream, params.p5_7_fixture.hpl_pred_m);
-  appendCanonicalDouble(stream, params.p5_7_fixture.vpl_pred_m);
-  return hashHex(fnv1aAppend(kFnvOffset, stream.str()));
-}
-
-std::string riskGridSourceIdentityHash(
-  const iap::RiskGridSourceIdentity & identity)
-{
-  std::ostringstream stream;
-  stream << "risk_grid_sources_v1;"
-         << identity.occupancy_generation << ';';
-  appendCanonicalDouble(stream, identity.occupancy_stamp_s);
-  stream << identity.prior_generation << ';';
-  appendCanonicalDouble(stream, identity.prior_stamp_s);
-  stream << identity.gnss_generation << ';';
-  appendCanonicalDouble(stream, identity.gnss_stamp_s);
-  stream << identity.lidar_generation << ';';
-  appendCanonicalDouble(stream, identity.lidar_stamp_s);
-  stream << identity.alert_limit_policy_id << ';';
-  return hashHex(fnv1aAppend(kFnvOffset, stream.str()));
-}
-
 bool buildGuideRecord(
   const std::vector<Eigen::Vector3d> & path,
   const std::shared_ptr<const iap::RiskGridSnapshot> & snapshot,
@@ -578,12 +516,13 @@ std::string P4GuideRequest::canonicalIdentityHash() const
 
 std::string P4GuideRequest::snapshotConfigHash() const
 {
-  return snapshot_ ? riskGridConfigHash(snapshot_->params()) : "";
+  return snapshot_ ? iap::canonicalRiskGridConfigHash(snapshot_->params()) : "";
 }
 
 std::string P4GuideRequest::snapshotSourceIdentityHash() const
 {
-  return snapshot_ ? riskGridSourceIdentityHash(snapshot_->sourceIdentity()) : "";
+  return snapshot_ ?
+         iap::canonicalRiskGridSourceIdentityHash(snapshot_->sourceIdentity()) : "";
 }
 
 P4GuideSearchOutcome P4AStarGuideSearch::searchOriginal(

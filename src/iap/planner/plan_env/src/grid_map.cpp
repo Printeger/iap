@@ -348,6 +348,11 @@ void GridMap::resetBuffer(Eigen::Vector3d min_pos, Eigen::Vector3d max_pos)
       {
         md_.occupancy_buffer_inflate_[toAddress(x, y, z)] = 0;
         md_.occupancy_buffer_raw_cloud_[toAddress(x, y, z)] = 0;
+        // A return-only PointCloud2 frame carries no evidence about voxels
+        // that were not hit or explicitly ray-traversed in this frame.  Drop
+        // the old observation bit together with the old raw hit so a missing
+        // return becomes UNKNOWN, never OBSERVED_FREE by inheritance.
+        md_.observed_buffer_[toAddress(x, y, z)] = 0;
       }
 }
 
@@ -1057,13 +1062,13 @@ void GridMap::cloudCallback(const sensor_msgs::msg::PointCloud2::ConstPtr &img)
 
   occupancy_update_sequence_.fetch_add(1, std::memory_order_acq_rel);
 
+  this->resetBuffer(md_.camera_pos_ - mp_.local_update_range_,
+                    md_.camera_pos_ + mp_.local_update_range_);
+
   Eigen::Vector3i sensor_id;
   posToIndex(md_.camera_pos_, sensor_id);
   if (isInMap(sensor_id))
     md_.observed_buffer_[toAddress(sensor_id)] = 1;
-
-  this->resetBuffer(md_.camera_pos_ - mp_.local_update_range_,
-                    md_.camera_pos_ + mp_.local_update_range_);
 
   pcl::PointXYZ pt;
   Eigen::Vector3d p3d, p3d_inf;

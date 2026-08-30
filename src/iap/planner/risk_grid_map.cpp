@@ -3,6 +3,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iomanip>
+#include <sstream>
 #include <unordered_map>
 #include <utility>
 
@@ -18,6 +20,29 @@ constexpr const char* kP5_6FixtureName = "future_unknown_zone_v1";
 constexpr const char* kP5_6FixtureReason = "future_unknown";
 constexpr const char* kP5_7FixtureName = "rejected_trajectory_zone_v1";
 constexpr const char* kP5_7FixtureReason = "p5_7_rejected_trajectory";
+constexpr uint64_t kFnvOffset = 1469598103934665603ULL;
+constexpr uint64_t kFnvPrime = 1099511628211ULL;
+
+uint64_t fnv1a_append(uint64_t hash, const std::string& value) {
+  for (const unsigned char byte : value) {
+    hash ^= static_cast<uint64_t>(byte);
+    hash *= kFnvPrime;
+  }
+  return hash;
+}
+
+std::string hash_hex(const uint64_t hash) {
+  std::ostringstream stream;
+  stream << std::hex << std::setfill('0') << std::setw(16) << hash;
+  return stream.str();
+}
+
+void append_canonical_double(std::ostringstream& stream, double value) {
+  if (value == 0.0) {
+    value = 0.0;
+  }
+  stream << std::hexfloat << value << ';';
+}
 
 bool finite_positive(const double v) {
   return std::isfinite(v) && v > 0.0;
@@ -195,6 +220,76 @@ bool apply_any_p5_fixture(const RiskGridMapParams& params,
 }
 
 }  // namespace
+
+std::string canonicalRiskGridConfigHash(const RiskGridMapParams& params) {
+  std::ostringstream stream;
+  stream << "risk_grid_config_v3;" << params.frame_id << ';'
+         << params.alert_limit_policy_id << ';';
+  for (int axis = 0; axis < 3; ++axis) {
+    append_canonical_double(stream, params.lattice_anchor_w(axis));
+  }
+  stream << params.use_fixed_origin << ';';
+  for (int axis = 0; axis < 3; ++axis) {
+    append_canonical_double(stream, params.fixed_origin_w(axis));
+  }
+  stream << params.geometry_id << ';';
+  append_canonical_double(stream, params.resolution_m);
+  append_canonical_double(stream, params.size_x_m);
+  append_canonical_double(stream, params.size_y_m);
+  append_canonical_double(stream, params.size_z_m);
+  stream << params.horizons_s.size() << ';';
+  for (const double horizon : params.horizons_s) {
+    append_canonical_double(stream, horizon);
+  }
+  append_canonical_double(stream, params.refresh_period_s);
+  append_canonical_double(stream, params.stale_timeout_s);
+  append_canonical_double(stream, params.unknown_cost);
+  append_canonical_double(stream, params.cost_max);
+  stream << params.skip_occupied_voxels << ';'
+         << params.require_observed_support << ';'
+         << static_cast<int>(params.provider_cost_source) << ';'
+         << params.require_safety_ratio_below_one_for_cost << ';'
+         << params.use_predictor_batch_query << ';';
+  const auto append_box = [&stream](const auto& fixture) {
+    stream << fixture.enabled << ';' << fixture.name << ';';
+    append_canonical_double(stream, fixture.x_min_m);
+    append_canonical_double(stream, fixture.x_max_m);
+    append_canonical_double(stream, fixture.y_min_m);
+    append_canonical_double(stream, fixture.y_max_m);
+    append_canonical_double(stream, fixture.z_min_m);
+    append_canonical_double(stream, fixture.z_max_m);
+    append_canonical_double(stream, fixture.tau_min_s);
+    append_canonical_double(stream, fixture.tau_max_s);
+  };
+  append_box(params.p5_3_fixture);
+  append_canonical_double(stream, params.p5_3_fixture.hpl_pred_m);
+  append_canonical_double(stream, params.p5_3_fixture.vpl_pred_m);
+  append_box(params.p5_4_fixture);
+  append_canonical_double(stream, params.p5_4_fixture.hpl_pred_m);
+  append_canonical_double(stream, params.p5_4_fixture.vpl_pred_m);
+  append_box(params.p5_6_fixture);
+  append_box(params.p5_7_fixture);
+  stream << params.p5_7_fixture.effective_enabled << ';';
+  append_canonical_double(stream, params.p5_7_fixture.hpl_pred_m);
+  append_canonical_double(stream, params.p5_7_fixture.vpl_pred_m);
+  return hash_hex(fnv1a_append(kFnvOffset, stream.str()));
+}
+
+std::string canonicalRiskGridSourceIdentityHash(
+    const RiskGridSourceIdentity& identity) {
+  std::ostringstream stream;
+  stream << "risk_grid_sources_v1;"
+         << identity.occupancy_generation << ';';
+  append_canonical_double(stream, identity.occupancy_stamp_s);
+  stream << identity.prior_generation << ';';
+  append_canonical_double(stream, identity.prior_stamp_s);
+  stream << identity.gnss_generation << ';';
+  append_canonical_double(stream, identity.gnss_stamp_s);
+  stream << identity.lidar_generation << ';';
+  append_canonical_double(stream, identity.lidar_stamp_s);
+  stream << identity.alert_limit_policy_id << ';';
+  return hash_hex(fnv1a_append(kFnvOffset, stream.str()));
+}
 
 struct RiskGridSnapshot::Generation {
   RiskGridMapParams params;
@@ -1405,6 +1500,14 @@ bool RiskGridMap::refreshFromProvider(
     }
     voxel.valid = has_provider_result[i] &&
         result.available && result.valid && !result.stale && finite_pl(result);
+    std::string cost_source_failure;
+    if (voxel.valid &&
+        params_copy.provider_cost_source ==
+            RiskProviderCostSource::PRE_CONSERVATIVE_FIM_RATIO &&
+        !std::isfinite(result.fim_fused.risk_ratio)) {
+      voxel.valid = false;
+      cost_source_failure = "pre_conservative_fim_unavailable";
+    }
     voxel.stale = result.stale;
     voxel.unknown = !voxel.valid;
     if (voxel.valid) {
@@ -1416,16 +1519,16 @@ bool RiskGridMap::refreshFromProvider(
                      result.vpl_pred / result.val);
       const double provider_cost =
           params_copy.provider_cost_source ==
-                  RiskProviderCostSource::PRE_CONSERVATIVE_FIM_RATIO &&
-              std::isfinite(result.fim_fused.risk_ratio)
+                  RiskProviderCostSource::PRE_CONSERVATIVE_FIM_RATIO
           ? result.fim_fused.risk_ratio
           : std::max(result.hpl_pred, result.vpl_pred);
       voxel.c_pi = clamp_cost(provider_cost, params_copy.cost_max);
       voxel.reason = result.reason.empty() ? "ok" : result.reason;
       ++valid_count;
     } else {
-      voxel.reason =
-          has_provider_result[i] && !result.reason.empty()
+      voxel.reason = !cost_source_failure.empty()
+          ? cost_source_failure
+          : has_provider_result[i] && !result.reason.empty()
               ? result.reason
               : "provider_invalid";
       if (has_provider_result[i] && result.stale) {
@@ -1434,9 +1537,7 @@ bool RiskGridMap::refreshFromProvider(
                                                     : result.reason);
       } else {
         ++provider_invalid_count;
-        record_unknown_reason(has_provider_result[i] && !result.reason.empty()
-                                  ? result.reason
-                                  : "provider_invalid");
+        record_unknown_reason(voxel.reason);
       }
       voxel.c_pi = params_copy.unknown_cost;
       ++unknown_count;

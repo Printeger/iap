@@ -184,6 +184,13 @@ struct RiskGridSourceIdentity {
   std::string alert_limit_policy_id = "legacy_unspecified";
 };
 
+// Canonical identities shared by P0 health, P4 admission and runner evidence.
+// Keep hashing in the owning risk-grid module so every consumer binds exactly
+// the same safety and provenance fields.
+std::string canonicalRiskGridConfigHash(const RiskGridMapParams& params);
+std::string canonicalRiskGridSourceIdentityHash(
+    const RiskGridSourceIdentity& identity);
+
 struct RiskOccupancyDiagnostic;
 
 struct RiskSourcePrediction {

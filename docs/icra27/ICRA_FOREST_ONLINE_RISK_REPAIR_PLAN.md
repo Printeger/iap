@@ -4,7 +4,7 @@
 
 本文件记录 `icra_dense_forest_four_fork_v2` 的开发集成契约。它用于在线安全规划器的接口验证和可视化调试，不构成 P4 科学效果、正式资格或飞行安全声明。历史 `icra_dense_forest_four_fork_v1` 与 ICRA072 配置继续保留，用于复现和回归。
 
-核心边界是：仿真世界真值只能由传感器模拟器读取。`/map_generator/global_cloud` 可供 LiDAR renderer 和 GNSS 遮挡/NLOS/multipath 模拟使用，P0、EGO、P4 和 P5 不得直接或间接订阅 `/map_generator/*` 或 `/sim/world/*`。在线 profile 在 launch preflight 和 runner 的 ROS graph 审计中对此 fail closed。
+核心边界是：仿真障碍物/环境几何真值只能由传感器模拟器读取。`/map_generator/global_cloud` 可供 LiDAR renderer 和 GNSS 遮挡/NLOS/multipath 模拟使用，P0、EGO、P4 和 P5 不得直接或间接订阅 `/map_generator/*` 或 `/sim/world/*`。在线 profile 在 launch preflight 和 runner 的 ROS graph 审计中对此 fail closed。本轮按既定假设仍以 `/sim/drone_0/truth_odom` 提供规划 pose；它不提供障碍物地图或未来可见性，从 truth odometry 切换到估计 pose 是后续独立集成任务。
 
 ## 在线地图契约
 
@@ -70,7 +70,7 @@ P4 保持局部 collision-segment guide 语义，不把 guide 伪装为从 UAV �
 
 original/risk A* 共用同一 frozen occupancy query 和 risk snapshot。端点以及最终稠密 guide samples 必须为 `map` 坐标、observed-free、非 raw/inflated occupied，并在同一 RiskMap support 内。搜索结束但发布前若 live occupancy generation 已变化，整个 attempt 重新规划。
 
-P4 debug CSV 和 end-to-end lineage 均保存 `source_identity_hash`、`geometry_id` 与 occupancy stamp。不同分叉可使用不同 generation，但必须维持同一 geometry/config identity。RViz 以端点球、UAV 到 collision segment 的虚线和 `P4 local collision guide` 标签表达局部 guide 的真实含义。
+P4 debug CSV 和 end-to-end lineage 均保存 `source_identity_hash`、`geometry_id` 与 occupancy stamp。P0 health 使用同一 canonical hash 发布 snapshot config/source identity；runner 只有在同一 generation 的风险 profile、P0 source identity、P4 decision 和已发布 lineage 全部一致时，才接受该分叉证据。不同分叉可使用不同 generation，但必须维持同一 geometry/config identity。RViz 以端点球、UAV 到 collision segment 的虚线和 `P4 local collision guide` 标签表达局部 guide 的真实含义。
 
 ## 森林 v2 与 runner 证据
 

@@ -143,13 +143,34 @@ struct GridMapTestAccess {
 
   static sensor_msgs::msg::PointCloud2::SharedPtr pointCloud(
       const int32_t source_stamp_s, const uint32_t source_stamp_ns = 0U) {
+    return pointCloudAt(source_stamp_s, Eigen::Vector3d(0.0, 0.0, 1.0),
+                        source_stamp_ns);
+  }
+
+  static sensor_msgs::msg::PointCloud2::SharedPtr pointCloudAt(
+      const int32_t source_stamp_s, const Eigen::Vector3d& point,
+      const uint32_t source_stamp_ns = 0U) {
     pcl::PointCloud<pcl::PointXYZ> cloud;
-    cloud.push_back(pcl::PointXYZ(0.0F, 0.0F, 1.0F));
+    cloud.push_back(pcl::PointXYZ(
+        static_cast<float>(point.x()), static_cast<float>(point.y()),
+        static_cast<float>(point.z())));
     auto message = std::make_shared<sensor_msgs::msg::PointCloud2>();
     pcl::toROSMsg(cloud, *message);
     message->header.stamp.sec = source_stamp_s;
     message->header.stamp.nanosec = source_stamp_ns;
     return message;
+  }
+
+  static void acceptPointCloudAt(
+      GridMap* map, const int32_t source_stamp_s,
+      const Eigen::Vector3d& point,
+      const Eigen::Vector3d& sensor_position = Eigen::Vector3d::Zero()) {
+    {
+      std::lock_guard<std::mutex> lock(map->occupancy_epoch_mutex_);
+      map->md_.has_odom_ = true;
+      map->md_.camera_pos_ = sensor_position;
+    }
+    map->cloudCallback(pointCloudAt(source_stamp_s, point));
   }
 
   static void enqueueIndependentCloud(
@@ -440,6 +461,31 @@ TEST(GridMapOccupancyEpochTest,
   EXPECT_EQ(traversed.state, GridMapObservationState::OBSERVED_FREE);
   EXPECT_FALSE(unseen.observed);
   EXPECT_EQ(unseen.state, GridMapObservationState::UNKNOWN);
+}
+
+TEST(GridMapOccupancyEpochTest,
+     MissingReturnDoesNotTurnPreviousRawHitIntoObservedFree) {
+  GridMap map;
+  GridMapTestAccess::configureDepthFusion(&map);
+  const Eigen::Vector3d previous_hit(0.0, 0.0, 1.0);
+  GridMapTestAccess::acceptPointCloudAt(&map, 222, previous_hit);
+  const auto first = map.captureFrozenOccupancyEpoch();
+  ASSERT_NE(first, nullptr);
+  EXPECT_EQ(first->diagnostic_query(previous_hit).state,
+            GridMapObservationState::OCCUPIED);
+
+  // The second return points into another octant.  Its explicit ray does not
+  // traverse the previous hit voxel, so the old voxel has no current-frame
+  // free-space evidence and must return to UNKNOWN.
+  GridMapTestAccess::acceptPointCloudAt(
+      &map, 223, Eigen::Vector3d(-1.0, -1.0, -1.0));
+  const auto second = map.captureFrozenOccupancyEpoch();
+  ASSERT_NE(second, nullptr);
+  const auto previous_without_return =
+      second->diagnostic_query(previous_hit);
+  EXPECT_FALSE(previous_without_return.observed);
+  EXPECT_FALSE(previous_without_return.raw_occupied);
+  EXPECT_EQ(previous_without_return.state, GridMapObservationState::UNKNOWN);
 }
 
 TEST(GridMapOccupancyEpochTest,

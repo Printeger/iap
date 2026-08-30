@@ -64,6 +64,37 @@ class AffineProvider final : public iap::RiskPredictionProvider {
   }
 };
 
+class FimRatioProvider final : public iap::RiskPredictionProvider {
+ public:
+  double fim_ratio = std::numeric_limits<double>::quiet_NaN();
+  double safety_ratio = 0.5;
+
+  bool batchQuery(const std::vector<iap::RiskPredictionQuery>& queries,
+                  std::vector<iap::RiskPredictionResult>* results) override {
+    if (results == nullptr) {
+      return false;
+    }
+    results->assign(queries.size(), iap::RiskPredictionResult{});
+    for (auto& result : *results) {
+      result.available = true;
+      result.valid = true;
+      result.stale = false;
+      result.hpl_pred = 2.0;
+      result.vpl_pred = 4.0;
+      result.hal = 10.0;
+      result.val = 20.0;
+      result.safety_fused.available = true;
+      result.safety_fused.valid = true;
+      result.safety_fused.risk_ratio = safety_ratio;
+      result.fim_fused.available = std::isfinite(fim_ratio);
+      result.fim_fused.valid = std::isfinite(fim_ratio);
+      result.fim_fused.risk_ratio = fim_ratio;
+      result.reason = "ok";
+    }
+    return true;
+  }
+};
+
 TEST(RiskGridMapTest, FixedPlanningGeometryDoesNotRollWithVehiclePose) {
   auto params = base_params();
   params.use_fixed_origin = true;
@@ -364,6 +395,74 @@ TEST(RiskGridMapTest, ConfigureRejectsNonFiniteLatticeAnchor) {
   EXPECT_FALSE(grid.configure(invalid, &reason));
   EXPECT_EQ(reason, "invalid_lattice_anchor");
   EXPECT_EQ(grid.params().lattice_anchor_w, Eigen::Vector3d::Zero());
+}
+
+TEST(RiskGridMapTest, CanonicalConfigHashBindsOnlineSafetyCostPolicy) {
+  const auto baseline = base_params();
+  const std::string baseline_hash =
+      iap::canonicalRiskGridConfigHash(baseline);
+  ASSERT_FALSE(baseline_hash.empty());
+
+  auto observed = baseline;
+  observed.require_observed_support = true;
+  EXPECT_NE(iap::canonicalRiskGridConfigHash(observed), baseline_hash);
+
+  auto fim = baseline;
+  fim.provider_cost_source =
+      iap::RiskProviderCostSource::PRE_CONSERVATIVE_FIM_RATIO;
+  EXPECT_NE(iap::canonicalRiskGridConfigHash(fim), baseline_hash);
+
+  auto safety_gate = baseline;
+  safety_gate.require_safety_ratio_below_one_for_cost = true;
+  EXPECT_NE(iap::canonicalRiskGridConfigHash(safety_gate), baseline_hash);
+
+  auto fixed_geometry = baseline;
+  fixed_geometry.use_fixed_origin = true;
+  fixed_geometry.fixed_origin_w = Eigen::Vector3d(-21.0, -11.0, 0.0);
+  fixed_geometry.geometry_id = "planning_lattice_v1:forest";
+  EXPECT_NE(iap::canonicalRiskGridConfigHash(fixed_geometry), baseline_hash);
+}
+
+TEST(RiskGridMapTest, PreConservativeFimCostFailsClosedWhenRatioIsMissing) {
+  auto params = base_params();
+  params.horizons_s = {0.0};
+  params.provider_cost_source =
+      iap::RiskProviderCostSource::PRE_CONSERVATIVE_FIM_RATIO;
+  iap::RiskGridMap grid(params);
+  FimRatioProvider provider;
+  std::string reason;
+  ASSERT_TRUE(grid.refreshFromProvider(
+      Eigen::Vector3d::Zero(), 10.0, provider, &reason)) << reason;
+  const auto snapshot = grid.acquireSnapshot();
+  ASSERT_NE(snapshot, nullptr);
+  iap::RiskVoxel voxel;
+  ASSERT_TRUE(snapshot->voxelAt(0, Eigen::Vector3i(1, 1, 1), &voxel));
+  EXPECT_FALSE(voxel.valid);
+  EXPECT_TRUE(voxel.unknown);
+  EXPECT_EQ(voxel.reason, "pre_conservative_fim_unavailable");
+  iap::RiskCostSample cost;
+  EXPECT_FALSE(snapshot->queryCost(
+      Eigen::Vector3d::Zero(), 10.0, &cost));
+}
+
+TEST(RiskGridMapTest, PreConservativeFimCostStillHonorsSafetyRatioGate) {
+  auto params = base_params();
+  params.horizons_s = {0.0};
+  params.provider_cost_source =
+      iap::RiskProviderCostSource::PRE_CONSERVATIVE_FIM_RATIO;
+  params.require_safety_ratio_below_one_for_cost = true;
+  iap::RiskGridMap grid(params);
+  FimRatioProvider provider;
+  provider.fim_ratio = 0.2;
+  provider.safety_ratio = 1.0;
+  ASSERT_TRUE(grid.refreshFromProvider(
+      Eigen::Vector3d::Zero(), 10.0, provider));
+  const auto snapshot = grid.acquireSnapshot();
+  ASSERT_NE(snapshot, nullptr);
+  iap::RiskCostSample cost;
+  EXPECT_FALSE(snapshot->queryCost(
+      Eigen::Vector3d::Zero(), 10.0, &cost));
+  EXPECT_EQ(cost.reason, "safety_limit_exceeded");
 }
 
 TEST(RiskGridMapTest,

@@ -1057,6 +1057,25 @@ void P0RiskGridRuntime::healthTimerCallback() {
   }
 }
 
+bool P0RiskGridRuntime::geometryMatchesRiskOverlay(
+    const iap::PlanningLatticeGeometry& geometry,
+    const iap::RiskGridMapParams& risk_grid,
+    const int required_ego_voxels_per_axis) {
+  if (!geometry.valid() || required_ego_voxels_per_axis <= 0 ||
+      !risk_grid.use_fixed_origin) {
+    return false;
+  }
+  const Eigen::Vector3d configured_extent(
+      risk_grid.size_x_m, risk_grid.size_y_m, risk_grid.size_z_m);
+  const double ratio = risk_grid.resolution_m / geometry.resolution_m;
+  return std::isfinite(ratio) &&
+      std::abs(ratio - static_cast<double>(required_ego_voxels_per_axis)) <=
+          1.0e-9 &&
+      geometry.frame_id == risk_grid.frame_id &&
+      geometry.origin_w.isApprox(risk_grid.fixed_origin_w, 1.0e-9) &&
+      geometry.extent_m.isApprox(configured_extent, 1.0e-9);
+}
+
 void P0RiskGridRuntime::refreshTimerCallback() {
   if (!config_.enable_risk_grid) {
     return;
@@ -1076,17 +1095,8 @@ void P0RiskGridRuntime::refreshTimerCallback() {
   }
   if (config_.online_mapping_mode && occupancy_epoch.has_value()) {
     const auto& geometry = occupancy_epoch->geometry;
-    const Eigen::Vector3d configured_extent(
-        config_.grid.size_x_m, config_.grid.size_y_m,
-        config_.grid.size_z_m);
-    const double ratio = config_.grid.resolution_m / geometry.resolution_m;
-    const bool integer_overlay = std::isfinite(ratio) && ratio >= 1.0 &&
-        std::abs(ratio - std::round(ratio)) <= 1.0e-9;
-    const bool geometry_matches = geometry.valid() && integer_overlay &&
-        geometry.frame_id == config_.grid.frame_id &&
-        config_.grid.use_fixed_origin &&
-        geometry.origin_w.isApprox(config_.grid.fixed_origin_w, 1.0e-9) &&
-        geometry.extent_m.isApprox(configured_extent, 1.0e-9);
+    const bool geometry_matches = geometryMatchesRiskOverlay(
+        geometry, config_.grid, 5);
     if (!geometry_matches) {
       occupancy_capture_status =
           P0OccupancyEpochCaptureStatus::ADAPTER_INVALID;
@@ -1868,6 +1878,11 @@ void P0RiskGridRuntime::publishHealth(const iap::RiskGridHealth& health,
       << "\"valid_ratio\":" << jsonNumber(out_health.valid_ratio) << ","
       << "\"unknown_ratio\":" << jsonNumber(out_health.unknown_ratio) << ","
       << "\"generation_id\":" << out_health.generation_id << ","
+      << "\"snapshot_config_hash\":"
+      << jsonString(iap::canonicalRiskGridConfigHash(grid_params)) << ","
+      << "\"source_identity_hash\":"
+      << jsonString(iap::canonicalRiskGridSourceIdentityHash(
+             source_identity)) << ","
       << "\"geometry_id\":" << jsonString(grid_params.geometry_id) << ","
       << "\"frame_id\":" << jsonString(grid_params.frame_id) << ","
       << "\"grid_origin_m\":[" << jsonNumber(grid_origin.x()) << ","
