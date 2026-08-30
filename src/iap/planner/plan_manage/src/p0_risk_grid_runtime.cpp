@@ -1865,11 +1865,19 @@ void P0RiskGridRuntime::publishHealth(const iap::RiskGridHealth& health,
   }
   const iap::RiskGridHealth& out_health = evidence.health;
   const InputReadiness& readiness = evidence.readiness;
-  const auto& grid_params = risk_grid_.params();
-  const Eigen::Vector3d grid_origin = risk_grid_.origin();
-  const Eigen::Vector3i grid_dimensions = risk_grid_.voxelNum();
-  const iap::RiskGridSourceIdentity& source_identity =
-      evidence.source_identity;
+  const auto& health_snapshot = evidence.snapshot;
+  const iap::RiskGridMapParams* grid_params = health_snapshot
+      ? &health_snapshot->params() : nullptr;
+  const Eigen::Vector3d grid_origin = health_snapshot
+      ? health_snapshot->origin()
+      : Eigen::Vector3d::Constant(
+          std::numeric_limits<double>::quiet_NaN());
+  const Eigen::Vector3i grid_dimensions = health_snapshot
+      ? health_snapshot->voxelNum() : Eigen::Vector3i::Zero();
+  const iap::RiskGridSourceIdentity source_identity = health_snapshot
+      ? health_snapshot->sourceIdentity() : iap::RiskGridSourceIdentity{};
+  const std::string snapshot_config_hash = health_snapshot
+      ? iap::canonicalRiskGridConfigHash(health_snapshot->params()) : "";
   std::ostringstream oss;
   oss << "{"
       << "\"refresh_attempt_id\":" << evidence.refresh_attempt_id << ","
@@ -1886,26 +1894,44 @@ void P0RiskGridRuntime::publishHealth(const iap::RiskGridHealth& health,
       << "\"unknown_ratio\":" << jsonNumber(out_health.unknown_ratio) << ","
       << "\"generation_id\":" << out_health.generation_id << ","
       << "\"snapshot_config_hash\":"
-      << jsonString(evidence.snapshot_config_hash) << ","
+      << jsonString(snapshot_config_hash) << ","
       << "\"source_identity_hash\":"
       << jsonString(iap::canonicalRiskGridSourceIdentityHash(
              source_identity)) << ","
-      << "\"geometry_id\":" << jsonString(grid_params.geometry_id) << ","
-      << "\"frame_id\":" << jsonString(grid_params.frame_id) << ","
+      << "\"snapshot_identity_available\":"
+      << (health_snapshot ? "true" : "false") << ","
+      << "\"geometry_id\":"
+      << jsonString(grid_params ? grid_params->geometry_id : "") << ","
+      << "\"frame_id\":"
+      << jsonString(grid_params ? grid_params->frame_id : "") << ","
       << "\"grid_origin_m\":[" << jsonNumber(grid_origin.x()) << ","
       << jsonNumber(grid_origin.y()) << "," << jsonNumber(grid_origin.z())
       << "],"
-      << "\"grid_extent_m\":[" << jsonNumber(grid_params.size_x_m) << ","
-      << jsonNumber(grid_params.size_y_m) << ","
-      << jsonNumber(grid_params.size_z_m) << "],"
+      << "\"grid_extent_m\":["
+      << jsonNumber(grid_params ? grid_params->size_x_m
+                                : std::numeric_limits<double>::quiet_NaN())
+      << ","
+      << jsonNumber(grid_params ? grid_params->size_y_m
+                                : std::numeric_limits<double>::quiet_NaN())
+      << ","
+      << jsonNumber(grid_params ? grid_params->size_z_m
+                                : std::numeric_limits<double>::quiet_NaN())
+      << "],"
       << "\"grid_dimensions\":[" << grid_dimensions.x() << ","
       << grid_dimensions.y() << "," << grid_dimensions.z() << "],"
       << "\"grid_resolution_m\":"
-      << jsonNumber(grid_params.resolution_m) << ","
+      << jsonNumber(grid_params ? grid_params->resolution_m
+                                : std::numeric_limits<double>::quiet_NaN())
+      << ","
       << "\"alert_limit_policy_id\":"
-      << jsonString(grid_params.alert_limit_policy_id) << ","
-      << "\"alert_limit_h_m\":" << jsonNumber(grid_params.alert_limit_h_m)
-      << ",\"alert_limit_v_m\":" << jsonNumber(grid_params.alert_limit_v_m)
+      << jsonString(grid_params ? grid_params->alert_limit_policy_id : "")
+      << ","
+      << "\"alert_limit_h_m\":"
+      << jsonNumber(grid_params ? grid_params->alert_limit_h_m
+                                : std::numeric_limits<double>::quiet_NaN())
+      << ",\"alert_limit_v_m\":"
+      << jsonNumber(grid_params ? grid_params->alert_limit_v_m
+                                : std::numeric_limits<double>::quiet_NaN())
       << ","
       << "\"source_occupancy_generation\":"
       << source_identity.occupancy_generation << ","
@@ -2212,13 +2238,10 @@ void P0RiskGridRuntime::completeRefreshEvidence(
   refresh_evidence_.publication = healthPublicationStateSnapshot();
   refresh_evidence_.readiness = refresh_input_readiness_;
   refresh_evidence_.health = completed_health;
-  refresh_evidence_.source_identity = {};
-  refresh_evidence_.snapshot_config_hash.clear();
+  refresh_evidence_.snapshot.reset();
   if (completed_snapshot &&
       completed_snapshot->generation_id() == completed_health.generation_id) {
-    refresh_evidence_.source_identity = completed_snapshot->sourceIdentity();
-    refresh_evidence_.snapshot_config_hash =
-        iap::canonicalRiskGridConfigHash(completed_snapshot->params());
+    refresh_evidence_.snapshot = completed_snapshot;
   }
   refresh_evidence_.snapshot_failure_reason = last_snapshot_failure_reason_;
   if (succeeded) {

@@ -1229,13 +1229,16 @@ class P0RiskGridRuntimeStampTest : public ::testing::Test {
 
   static std::string refreshSnapshotConfigHash(
       const P0RiskGridRuntime& runtime) {
-    return runtime.refreshEvidenceRecordSnapshot().snapshot_config_hash;
+    const auto snapshot = runtime.refreshEvidenceRecordSnapshot().snapshot;
+    return snapshot ? iap::canonicalRiskGridConfigHash(snapshot->params()) : "";
   }
 
   static std::string refreshSourceIdentityHash(
       const P0RiskGridRuntime& runtime) {
-    return iap::canonicalRiskGridSourceIdentityHash(
-        runtime.refreshEvidenceRecordSnapshot().source_identity);
+    const auto snapshot = runtime.refreshEvidenceRecordSnapshot().snapshot;
+    return snapshot
+        ? iap::canonicalRiskGridSourceIdentityHash(snapshot->sourceIdentity())
+        : "";
   }
 
   struct PredictorDiagnosticCounts {
@@ -1962,6 +1965,12 @@ class P0RiskGridRuntimeStampTest : public ::testing::Test {
 
   static void publishHealthNow(P0RiskGridRuntime* runtime) {
     runtime->healthTimerCallback();
+  }
+
+  static bool reconfigureLiveRiskGrid(
+      P0RiskGridRuntime* runtime, iap::RiskGridMapParams params,
+      std::string* reason) {
+    return runtime->risk_grid_.configure(std::move(params), reason);
   }
 
   static void sendCloud(
@@ -2871,6 +2880,60 @@ TEST_F(P0RiskGridRuntimeStampTest,
                 "\"source_identity_hash\":\"" +
                 expected_source_hash + "\""),
             std::string::npos);
+}
+
+TEST_F(P0RiskGridRuntimeStampTest,
+       HealthJsonNeverMixesCompletedSnapshotWithLiveReconfiguration) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_health_frozen_geometry_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  P0RiskGridRuntime runtime(node, enabledConfig(),
+                            std::make_unique<FakeProvider>());
+  seedValidInputs(&runtime, 100.0, 100.0);
+  ASSERT_TRUE(refreshOnce(&runtime));
+  const std::string completed_hash = refreshSnapshotConfigHash(runtime);
+  ASSERT_FALSE(completed_hash.empty());
+
+  iap::RiskGridMapParams changed;
+  changed.frame_id = "changed_map";
+  changed.alert_limit_policy_id = "changed_policy";
+  changed.alert_limit_h_m = 3.0;
+  changed.alert_limit_v_m = 4.0;
+  changed.resolution_m = 0.25;
+  changed.size_x_m = 9.0;
+  changed.size_y_m = 8.0;
+  changed.size_z_m = 7.0;
+  changed.horizons_s = {0.0};
+  std::string reason;
+  ASSERT_TRUE(reconfigureLiveRiskGrid(&runtime, changed, &reason)) << reason;
+
+  std::string health_message;
+  auto health_sub = node->create_subscription<std_msgs::msg::String>(
+      "/planning/risk_grid_health", 10,
+      [&](const std_msgs::msg::String::ConstSharedPtr message) {
+        health_message = message->data;
+      });
+  (void)health_sub;
+  rclcpp::executors::SingleThreadedExecutor executor;
+  executor.add_node(node);
+  publishHealthNow(&runtime);
+  executor.spin_some();
+
+  ASSERT_FALSE(health_message.empty());
+  EXPECT_NE(health_message.find(
+                "\"snapshot_config_hash\":\"" + completed_hash + "\""),
+            std::string::npos);
+  EXPECT_NE(health_message.find("\"frame_id\":\"map\""),
+            std::string::npos);
+  EXPECT_NE(health_message.find("\"grid_extent_m\":[3,3,3]"),
+            std::string::npos);
+  EXPECT_NE(health_message.find("\"grid_resolution_m\":1"),
+            std::string::npos);
+  EXPECT_NE(health_message.find("\"alert_limit_h_m\":10"),
+            std::string::npos);
+  EXPECT_EQ(health_message.find("changed_map"), std::string::npos);
+  EXPECT_EQ(health_message.find("changed_policy"), std::string::npos);
 }
 
 TEST_F(P0RiskGridRuntimeStampTest,
