@@ -8,6 +8,7 @@
 #include <condition_variable>
 #include <cstdio>
 #include <cstdint>
+#include <cstring>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -55,6 +56,43 @@ class FakeProvider final : public iap::RiskPredictionProvider {
     return true;
   }
 };
+
+class RatioProvider final : public iap::RiskPredictionProvider {
+ public:
+  explicit RatioProvider(const double ratio, const bool stale = false)
+      : ratio_(ratio), stale_(stale) {}
+
+  bool batchQuery(const std::vector<iap::RiskPredictionQuery>& queries,
+                  std::vector<iap::RiskPredictionResult>* results) override {
+    if (results == nullptr) {
+      return false;
+    }
+    results->assign(queries.size(), iap::RiskPredictionResult{});
+    for (auto& result : *results) {
+      result.available = true;
+      result.valid = true;
+      result.stale = stale_;
+      result.hpl_pred = 10.0 * ratio_;
+      result.vpl_pred = 20.0 * ratio_;
+      result.hal = 10.0;
+      result.val = 20.0;
+      result.reason = stale_ ? "provider_stale" : "ok";
+    }
+    return true;
+  }
+
+ private:
+  double ratio_;
+  bool stale_;
+};
+
+uint32_t unpackRgb(const sensor_msgs::msg::PointCloud2& cloud) {
+  sensor_msgs::PointCloud2ConstIterator<float> rgb(cloud, "rgb");
+  uint32_t packed = 0;
+  const float value = *rgb;
+  std::memcpy(&packed, &value, sizeof(packed));
+  return packed;
+}
 
 class DelayedProvider final : public iap::RiskPredictionProvider {
  public:
@@ -183,6 +221,7 @@ ego_planner::P0RiskGridRuntime::Config enabledConfig() {
 
 struct RuntimeOccupancyDiagnostic {
   bool available = false;
+  bool observed = false;
   bool raw_occupied = false;
   bool inflated_occupied = false;
   Eigen::Vector3i voxel_index = Eigen::Vector3i::Constant(-1);
@@ -201,8 +240,11 @@ struct RuntimeFrozenOccupancyEpoch {
   std::shared_ptr<const std::vector<Eigen::Vector3d>>
       raw_occupied_voxel_centers;
   Eigen::Vector3d lattice_origin = Eigen::Vector3d::Zero();
+  Eigen::Vector3d extent_m = Eigen::Vector3d(30.0, 30.0, 6.0);
+  Eigen::Vector3i voxel_dimensions = Eigen::Vector3i(30, 30, 6);
   double resolution_m = 1.0;
   std::string frame_id;
+  std::string geometry_id = "planning_lattice_v1:runtime_test";
   double cloud_stamp_s = 0.0;
   uint64_t generation = 0;
 };
@@ -280,6 +322,7 @@ ego_planner::P0OccupancyEpochCapture makeOccupancyEpochCapture(
           const Eigen::Vector3d& position) {
         RuntimeOccupancyDiagnostic diagnostic;
         diagnostic.available = true;
+        diagnostic.observed = true;
         diagnostic.raw_occupied = owner->occupied_at(position);
         diagnostic.inflated_occupied = diagnostic.raw_occupied;
         diagnostic.voxel_center = position;
@@ -2406,6 +2449,126 @@ TEST(SafetyRvizPublisherTest, RiskGridHealthMarkerUsesProvidedStamp) {
   ASSERT_FALSE(markers.markers.empty());
   EXPECT_EQ(markers.markers.front().header.stamp.sec, 1657065614);
   EXPECT_EQ(markers.markers.front().header.stamp.nanosec, 123000000u);
+}
+
+TEST(SafetyRvizPublisherTest,
+     PredictedCloudCarriesRatioAndPerSourceDiagnosticsOnFixedGeometry) {
+  iap::RiskGridMapParams params;
+  params.use_fixed_origin = true;
+  params.fixed_origin_w = Eigen::Vector3d(-2.0, -1.0, 0.0);
+  params.geometry_id = "planning_lattice_v1:test";
+  params.resolution_m = 0.5;
+  params.size_x_m = 1.0;
+  params.size_y_m = 1.0;
+  params.size_z_m = 1.0;
+  params.horizons_s = {0.0};
+  iap::RiskGridMap grid(params);
+  FakeProvider provider;
+  std::string reason;
+  ASSERT_TRUE(grid.refreshFromProvider(
+      Eigen::Vector3d::Zero(), 10.0, provider,
+      [](const Eigen::Vector3d&) {
+        iap::RiskOccupancyDiagnostic diagnostic;
+        diagnostic.available = true;
+        diagnostic.observed = true;
+        diagnostic.state = iap::RiskOccupancyState::OBSERVED_FREE;
+        diagnostic.occupancy_generation = 3u;
+        diagnostic.source = "frozen_online_epoch";
+        return diagnostic;
+      }, &reason)) << reason;
+
+  ego_planner::SafetyRvizPublisher::Config config;
+  config.z_slice_mode = "all";
+  const auto snapshot = grid.acquireSnapshot();
+  const auto cloud = ego_planner::SafetyRvizPublisher::buildPredictedPLCloud(
+      snapshot, config, 0.5, rclcpp::Time(10, 0, RCL_ROS_TIME));
+  const auto has_field = [&cloud](const std::string& name) {
+      return std::any_of(cloud.fields.begin(), cloud.fields.end(),
+                         [&name](const auto& field) {
+                           return field.name == name;
+                         });
+    };
+  EXPECT_TRUE(has_field("risk_ratio"));
+  EXPECT_TRUE(has_field("hal"));
+  EXPECT_TRUE(has_field("val"));
+  EXPECT_TRUE(has_field("gnss_risk_ratio"));
+  EXPECT_TRUE(has_field("lidar_risk_ratio"));
+  EXPECT_TRUE(has_field("fim_risk_ratio"));
+  EXPECT_TRUE(has_field("floor_increment_v"));
+  EXPECT_TRUE(has_field("occupied"));
+  EXPECT_TRUE(has_field("observed"));
+  ASSERT_GT(cloud.width, 0u);
+  sensor_msgs::PointCloud2ConstIterator<float> ratio(cloud, "risk_ratio");
+  EXPECT_FLOAT_EQ(*ratio, 0.1f);
+
+  const auto geometry =
+      ego_planner::SafetyRvizPublisher::buildPlanningGeometryMarkers(
+          snapshot, config, 0.5, rclcpp::Time(10, 0, RCL_ROS_TIME));
+  ASSERT_EQ(geometry.markers.size(), 3u);
+  EXPECT_DOUBLE_EQ(geometry.markers[1].pose.position.x, -2.0);
+  EXPECT_NE(geometry.markers[2].text.find("planning_lattice_v1:test"),
+            std::string::npos);
+}
+
+TEST(SafetyRvizPublisherTest,
+     FixedRatioColorsAndFailClosedStatePriorityAreStable) {
+  const auto build_cloud = [](
+      const double ratio, const bool stale,
+      const iap::RiskOccupancyState occupancy_state) {
+    iap::RiskGridMapParams params;
+    params.use_fixed_origin = true;
+    params.fixed_origin_w = Eigen::Vector3d::Zero();
+    params.resolution_m = 0.5;
+    params.size_x_m = 0.5;
+    params.size_y_m = 0.5;
+    params.size_z_m = 0.5;
+    params.horizons_s = {0.0};
+    params.require_observed_support = true;
+    iap::RiskGridMap grid(params);
+    RatioProvider provider(ratio, stale);
+    std::string reason;
+    EXPECT_TRUE(grid.refreshFromProvider(
+        Eigen::Vector3d(0.25, 0.25, 0.25), 10.0, provider,
+        [occupancy_state](const Eigen::Vector3d&) {
+          iap::RiskOccupancyDiagnostic diagnostic;
+          diagnostic.available = true;
+          diagnostic.observed =
+              occupancy_state != iap::RiskOccupancyState::UNKNOWN;
+          diagnostic.state = occupancy_state;
+          diagnostic.raw_occupied =
+              occupancy_state == iap::RiskOccupancyState::OCCUPIED;
+          diagnostic.inflated_occupied = diagnostic.raw_occupied;
+          diagnostic.source = "frozen_online_epoch";
+          return diagnostic;
+        }, &reason)) << reason;
+    ego_planner::SafetyRvizPublisher::Config config;
+    config.z_slice_mode = "all";
+    return ego_planner::SafetyRvizPublisher::buildPredictedPLCloud(
+        grid.acquireSnapshot(), config, 0.25,
+        rclcpp::Time(10, 0, RCL_ROS_TIME));
+  };
+
+  EXPECT_EQ(unpackRgb(build_cloud(
+                0.4, false, iap::RiskOccupancyState::OBSERVED_FREE)),
+            0x16bf65u);
+  EXPECT_EQ(unpackRgb(build_cloud(
+                0.6, false, iap::RiskOccupancyState::OBSERVED_FREE)),
+            0xffcc0cu);
+  EXPECT_EQ(unpackRgb(build_cloud(
+                0.9, false, iap::RiskOccupancyState::OBSERVED_FREE)),
+            0xff6b05u);
+  EXPECT_EQ(unpackRgb(build_cloud(
+                1.1, false, iap::RiskOccupancyState::OBSERVED_FREE)),
+            0xff0505u);
+  EXPECT_EQ(unpackRgb(build_cloud(
+                0.4, false, iap::RiskOccupancyState::UNKNOWN)),
+            0x8c8c8cu);
+  EXPECT_EQ(unpackRgb(build_cloud(
+                0.4, true, iap::RiskOccupancyState::OBSERVED_FREE)),
+            0x000000u);
+  EXPECT_EQ(unpackRgb(build_cloud(
+                0.4, true, iap::RiskOccupancyState::OCCUPIED)),
+            0xa50cd8u);
 }
 
 TEST(SafetyRvizPublisherTest, AcceptedSnapshotCloudBypassesPeriodicThrottle) {

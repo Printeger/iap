@@ -35,6 +35,16 @@ bool sameOwner(const P0OccupancyEpoch::SourceOwner& lhs,
   return lhs && rhs && !lhs.owner_before(rhs) && !rhs.owner_before(lhs);
 }
 
+bool sameGeometry(const iap::PlanningLatticeGeometry& lhs,
+                  const iap::PlanningLatticeGeometry& rhs) {
+  return lhs.valid() && rhs.valid() && lhs.frame_id == rhs.frame_id &&
+         exactVector(lhs.origin_w, rhs.origin_w) &&
+         exactVector(lhs.extent_m, rhs.extent_m) &&
+         lhs.voxel_dimensions == rhs.voxel_dimensions &&
+         exactDouble(lhs.resolution_m, rhs.resolution_m) &&
+         lhs.geometry_id == rhs.geometry_id;
+}
+
 bool sameIdentity(const P0RawOccupancyIdentity& lhs,
                   const P0RawOccupancyIdentity& rhs) {
   return lhs.frameId() == rhs.frameId() &&
@@ -65,9 +75,12 @@ void extendBounds(const iap::VoxelKey& key,
 std::optional<P0OccupancyEpoch> P0OccupancyEpochAdapter::adaptFields(
     std::shared_ptr<const std::vector<Eigen::Vector3d>> occupied_centers,
     const Eigen::Vector3d& lattice_origin,
+    const Eigen::Vector3d& extent_m,
+    const Eigen::Vector3i& voxel_dimensions,
     const double resolution_m,
     std::string frame_id,
     const double cloud_stamp_s,
+    std::string geometry_id,
     const uint64_t generation,
     iap::RiskGridMap::OccupancyDiagnosticQuery diagnostic_query,
     P0OccupancyEpoch::SourceOwner source_owner,
@@ -77,7 +90,9 @@ std::optional<P0OccupancyEpoch> P0OccupancyEpochAdapter::adaptFields(
       !live_source_owner || !live_generation ||
       generation == 0u || !std::isfinite(cloud_stamp_s) ||
       frame_id.empty() || !std::isfinite(resolution_m) ||
-      resolution_m <= 0.0 || !lattice_origin.allFinite()) {
+      resolution_m <= 0.0 || !lattice_origin.allFinite() ||
+      !extent_m.allFinite() || (extent_m.array() <= 0.0).any() ||
+      (voxel_dimensions.array() <= 0).any() || geometry_id.empty()) {
     return std::nullopt;
   }
 
@@ -146,6 +161,12 @@ std::optional<P0OccupancyEpoch> P0OccupancyEpochAdapter::adaptFields(
   adapted.raw_identity = std::shared_ptr<const P0RawOccupancyIdentity>(
       new P0RawOccupancyIdentity(std::move(normalized_keys), lattice_origin,
                                  resolution_m, frame_id));
+  adapted.geometry.frame_id = frame_id;
+  adapted.geometry.origin_w = lattice_origin;
+  adapted.geometry.extent_m = extent_m;
+  adapted.geometry.voxel_dimensions = voxel_dimensions;
+  adapted.geometry.resolution_m = resolution_m;
+  adapted.geometry.geometry_id = std::move(geometry_id);
   adapted.source_owner = std::move(source_owner);
   adapted.live_source_owner = std::move(live_source_owner);
   adapted.live_generation = std::move(live_generation);
@@ -161,6 +182,7 @@ bool P0OccupancyEpochAdapter::sameVersion(
          std::isfinite(base.cloud_stamp_s) &&
          exactDouble(base.cloud_stamp_s, target.cloud_stamp_s) &&
          sameOwner(base.source_owner, target.source_owner) &&
+         sameGeometry(base.geometry, target.geometry) &&
          base.raw_identity && target.raw_identity &&
          sameIdentity(*base.raw_identity, *target.raw_identity);
 }
@@ -172,6 +194,7 @@ P0OccupancyEpochAdapter::completeDelta(
       !std::isfinite(base.cloud_stamp_s) ||
       !std::isfinite(target.cloud_stamp_s) ||
       !sameOwner(base.source_owner, target.source_owner) ||
+      !sameGeometry(base.geometry, target.geometry) ||
       !base.raw_identity || !target.raw_identity ||
       !coherentGeometry(*base.raw_identity, *target.raw_identity)) {
     return std::nullopt;

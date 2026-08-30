@@ -136,6 +136,7 @@ struct GnssAdvisoryResult {
   double effective_sigma_max = std::numeric_limits<double>::quiet_NaN();
 
   int n_visible = 0;
+  int n_unknown_support = 0;
   int n_used = 0;
   int n_hypotheses = 0;
   int n_excluded = 0;
@@ -198,6 +199,18 @@ struct FusionAdvisoryResult {
   double pl_scalar = std::numeric_limits<double>::quiet_NaN();
   double sigma_h = std::numeric_limits<double>::quiet_NaN();
   double sigma_v = std::numeric_limits<double>::quiet_NaN();
+  // Diagnostic channels retain the information before the conservative GNSS
+  // safety floor. They are not substitutes for hpl/vpl in P5.
+  double prior_only_hpl = std::numeric_limits<double>::quiet_NaN();
+  double prior_only_vpl = std::numeric_limits<double>::quiet_NaN();
+  double lidar_only_hpl = std::numeric_limits<double>::quiet_NaN();
+  double lidar_only_vpl = std::numeric_limits<double>::quiet_NaN();
+  double pre_conservative_hpl = std::numeric_limits<double>::quiet_NaN();
+  double pre_conservative_vpl = std::numeric_limits<double>::quiet_NaN();
+  double floor_increment_h = 0.0;
+  double floor_increment_v = 0.0;
+  std::string floor_source_h = "none";
+  std::string floor_source_v = "none";
 
   // All matrices below are R^{3x3} position-only map/ENU information or
   // covariance over the common Predictor fusion state.

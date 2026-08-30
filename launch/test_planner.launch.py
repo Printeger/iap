@@ -1025,6 +1025,47 @@ DENSE_FOUR_FORK_FOREST_PRESET = {
 }
 
 
+# v2 preserves the frozen forest geometry/seeds while changing the planner
+# contract: world truth remains simulator-only and the safety stack consumes
+# the EGO online occupancy epoch on a fixed task geofence.
+DENSE_FOUR_FORK_FOREST_ONLINE_PRESET = {
+    **DENSE_FOUR_FORK_FOREST_PRESET,
+    "forest_layout_mode": "forked_s_forest_v2",
+    "forked_forest.start_canopy_clearance_radius_m": "5.0",
+    "grid_map/origin_x": "-21.0",
+    "grid_map/origin_y": "-11.0",
+    "grid_map/origin_z": "0.0",
+    "grid_map/unknown_as_occupied": "true",
+    # The receding-horizon target must remain inside the 4.5 m LiDAR ray
+    # support.  A longer seed terminates in UNKNOWN and correctly fails closed
+    # before the vehicle can publish its first online trajectory.
+    "manager/planning_horizon": "4.0",
+    "planner_occupancy_cloud_topic": "/sim/drone_0/lidar",
+    "p0.online_mapping_mode": "true",
+    "p0.fit_grid_to_map_cloud": "false",
+    "p0.map_topic": "",
+    "p0.resolution_m": "0.5",
+    "p0.size_x_m": "42.0",
+    "p0.size_y_m": "22.0",
+    "p0.size_z_m": "8.0",
+    "p0.origin_x_m": "-21.0",
+    "p0.origin_y_m": "-11.0",
+    "p0.origin_z_m": "0.0",
+    "p0.provider_cost_source": "pre_conservative_fim_ratio",
+    "p0.require_safety_ratio_below_one_for_cost": "true",
+    "p0.alert_limit_policy_id": "fixed_hal10_val20_v1",
+    "p0.alert_limit_h_m": "10.0",
+    "p0.alert_limit_v_m": "20.0",
+    "p4.fallback_to_original_when_risk_not_ready": "false",
+    "integrity_dynamic_alert_limits": "false",
+    "integrity_hal_m": "10.0",
+    "integrity_val_m": "20.0",
+    "p5.pred_alert_limit_mode": "config_constant",
+    "p5.pred_alert_limit_constant_hal_m": "10.0",
+    "p5.pred_alert_limit_constant_val_m": "20.0",
+}
+
+
 CORRIDOR_DEGENERATE_MAP_PRESET = {
     "forest_size_x_m": "30.0",
     "forest_size_y_m": "6.0",
@@ -1170,6 +1211,16 @@ P0_6_OCCUPIED_OVERLAP_FIXTURE_PRESET = {
 
 
 COMBO_PRESETS = {
+    ("icra_p0_p4_v2_p5_dev", "icra_dense_forest_four_fork_v2"): {
+        key: value
+        for key, value in DENSE_FOUR_FORK_FOREST_ONLINE_PRESET.items()
+        if key.startswith("p0.") or key.startswith("grid_map/") or
+        key == "manager/planning_horizon" or
+        key == "p4.fallback_to_original_when_risk_not_ready" or
+        key.startswith("integrity_") or
+        key.startswith("p5.pred_alert_limit_") or
+        key == "forked_forest.start_canopy_clearance_radius_m"
+    },
     ("p0_open_sky", "manual"): P0_6_OCCUPIED_OVERLAP_FIXTURE_PRESET,
     ("p5_corridor", "manual"): {
         **DEFAULT_ROUTE_PRESET,
@@ -1305,6 +1356,34 @@ SCENARIO_PRESETS = {
         # make integrity epochs queue behind the odometry clock in this dense
         # cloud, so the development preset excludes the large BDS set while
         # retaining GPS+Galileo+GLONASS geometry for spatial contrast.
+        "gnss_enabled_constellations": "GPS,GAL,GLO",
+        "gnss_enable_skymask": "false",
+        "gnss_enable_nlos": "true",
+        "gnss_enable_multipath": "true",
+        "gnss_enable_fault_injection": "false",
+        "p0.skip_occupied_voxels": "true",
+        "p0.predictor.use_current_integrity_prior": "true",
+        "p0.predictor.conservative_max_with_gnss": "true",
+        "fsm.thresh_replan_time": "0.2",
+        "manager/max_vel": "1.0",
+        "optimization/max_vel": "1.0",
+        "bspline/limit_vel": "1.0",
+        "lidar_sensing_rate_hz": "10.0",
+    },
+    "icra_dense_forest_four_fork_v2": {
+        **DENSE_FOUR_FORK_FOREST_ONLINE_PRESET,
+        **GNSS_OPEN_SKY_PRESET,
+        "use_gnss": "true",
+        "use_araim": "true",
+        "gnss_time_source": "odom_stamp",
+        "enable_gnss_integrity": "true",
+        "enable_gnss_araim": "true",
+        "enable_lidar_integrity": "true",
+        "integrity_fusion_mode": "max_pl",
+        "validator_require_gnss_valid": "true",
+        "validator_require_lidar_valid": "true",
+        "validator_required_final_source": "",
+        "gnss_enable_map_occlusion": "true",
         "gnss_enabled_constellations": "GPS,GAL,GLO",
         "gnss_enable_skymask": "false",
         "gnss_enable_nlos": "true",
@@ -1769,6 +1848,7 @@ ARG_DEFAULTS = [
     ("forked_forest.high_risk_amplitude_m", "2.8"),
     ("forked_forest.corridor_width_m", "2.4"),
     ("forked_forest.junction_clearance_radius_m", "2.0"),
+    ("forked_forest.start_canopy_clearance_radius_m", "2.0"),
     ("forked_forest.start_x_m", "-18.0"),
     ("forked_forest.goal_x_m", "18.0"),
     ("forked_forest.risk_seed", "21"),
@@ -1824,7 +1904,12 @@ ARG_DEFAULTS = [
     ("p1_fixture_risky_tree_density_per_m2", "0.75"),
     ("p1_fixture_safe_canopy_probability", "0.05"),
     ("p1_fixture_risky_canopy_probability", "0.85"),
+    ("grid_map/resolution", "0.1"),
     ("grid_map/local_update_range_x", "5.5"),
+    ("grid_map/origin_x", "nan"),
+    ("grid_map/origin_y", "nan"),
+    ("grid_map/origin_z", "nan"),
+    ("grid_map/unknown_as_occupied", "false"),
     ("grid_map/independent_cloud_min_interval_s", "0.0"),
     ("grid_map/independent_cloud_clock_guard_s", "0.0"),
     ("planner_occupancy_cloud_topic", "/map_generator/global_cloud"),
@@ -1880,11 +1965,24 @@ ARG_DEFAULTS = [
     ("safety_viz.enable_p3_viz", "false"),
     ("safety_viz.enable_p4_viz", "false"),
     ("p0.enable_risk_grid", "false"),
+    ("p0.online_mapping_mode", "false"),
     ("p0.fit_grid_to_map_cloud", "false"),
+    ("p0.map_topic", "/map_generator/global_cloud"),
     ("p0.resolution_m", "0.75"),
     ("p0.size_x_m", "30.0"),
     ("p0.size_y_m", "30.0"),
     ("p0.size_z_m", "6.0"),
+    ("p0.origin_x_m", "nan"),
+    ("p0.origin_y_m", "nan"),
+    ("p0.origin_z_m", "nan"),
+    ("p0.provider_cost_source", "legacy_safety_pl"),
+    ("p0.require_safety_ratio_below_one_for_cost", "false"),
+    ("p0.alert_limit_policy_id", "legacy_unspecified"),
+    ("p0.alert_limit_h_m", "10.0"),
+    ("p0.alert_limit_v_m", "20.0"),
+    ("integrity_dynamic_alert_limits", "true"),
+    ("integrity_hal_m", "10.0"),
+    ("integrity_val_m", "20.0"),
     # The fixed P1 lattice must cover every sample of the initial
     # degraded-LiDAR B-spline (about 2.1 s) before P1 can be admitted.
     ("p0.horizons_s", "0.0,0.5,1.0,1.5,2.0,2.5"),
@@ -2274,6 +2372,29 @@ def _apply_presets(context, iap_share):
     return scenario, experiment, applied_keys
 
 
+def _validate_online_truth_isolation(context, scenario):
+    """Reject simulator-world subscriptions from an online planner profile."""
+    if not _param_bool(context, "p0.online_mapping_mode"):
+        return
+    forbidden_prefixes = ("/map_generator/", "/sim/world/")
+    planner_topics = {
+        "p0.map_topic": LaunchConfiguration("p0.map_topic").perform(context),
+        "planner_occupancy_cloud_topic": LaunchConfiguration(
+            "planner_occupancy_cloud_topic").perform(context),
+    }
+    for binding, raw_topic in planner_topics.items():
+        topic = str(raw_topic).strip()
+        if topic.startswith(forbidden_prefixes):
+            raise RuntimeError(
+                f"online scenario '{scenario}' binds planner truth topic "
+                f"{binding}={topic}"
+            )
+    if _param_bool(context, "p0.fit_grid_to_map_cloud"):
+        raise RuntimeError(
+            f"online scenario '{scenario}' cannot fit RiskMap to a map cloud"
+        )
+
+
 def _generated_gnss_scenario(name):
     header = """anchor:
   lat_deg: 31.2304
@@ -2567,6 +2688,10 @@ def _runtime_config(context, use_gnss, use_araim, allow_truth_alignment):
     integrity["integrity_require_valid_lidar"] = _as_bool(LaunchConfiguration("integrity_require_valid_lidar").perform(context))
     integrity["integrity_conservative_hpl_m"] = float(LaunchConfiguration("integrity_conservative_hpl_m").perform(context))
     integrity["integrity_conservative_vpl_m"] = float(LaunchConfiguration("integrity_conservative_vpl_m").perform(context))
+    integrity["enable_dynamic_al"] = _param_bool(
+        context, "integrity_dynamic_alert_limits")
+    integrity["HAL_trunk_default"] = _param_float(context, "integrity_hal_m")
+    integrity["VAL_default"] = _param_float(context, "integrity_val_m")
     integrity["p5_5.fixture.enabled"] = _as_bool(LaunchConfiguration("p5_5.fixture.enabled").perform(context))
     integrity["p5_5.fixture.name"] = LaunchConfiguration("p5_5.fixture.name").perform(context)
     integrity["p5_5.fixture.start_s"] = float(LaunchConfiguration("p5_5.fixture.start_s").perform(context))
@@ -2823,10 +2948,16 @@ def _ego_planner_node(context, drone_id, planner_odom_topic, cloud_topic, camera
                 for i, waypoint in enumerate(waypoint_values)
                 for axis, value in zip(("x", "y", "z"), waypoint)
             ],
-            {"grid_map/resolution": 0.1},
+            {"grid_map/resolution": _param_float(
+                context, "grid_map/resolution")},
             {"grid_map/map_size_x": map_size_x},
             {"grid_map/map_size_y": map_size_y},
             {"grid_map/map_size_z": map_size_z},
+            {"grid_map/origin_x": _param_float(context, "grid_map/origin_x")},
+            {"grid_map/origin_y": _param_float(context, "grid_map/origin_y")},
+            {"grid_map/origin_z": _param_float(context, "grid_map/origin_z")},
+            {"grid_map/unknown_as_occupied": _param_bool(
+                context, "grid_map/unknown_as_occupied")},
             {"grid_map/local_update_range_x": _param_float(context, "grid_map/local_update_range_x")},
             {"grid_map/independent_cloud_min_interval_s": _param_float(
                 context, "grid_map/independent_cloud_min_interval_s")},
@@ -2861,6 +2992,8 @@ def _ego_planner_node(context, drone_id, planner_odom_topic, cloud_topic, camera
             {"grid_map/pose_type": 1},
             {"grid_map/frame_id": "map"},
             {"p0.enable_risk_grid": p0_enabled},
+            {"p0.online_mapping_mode": _param_bool(
+                context, "p0.online_mapping_mode")},
             {"p0.fit_grid_to_map_cloud": _param_bool(
                 context, "p0.fit_grid_to_map_cloud")},
             {"p4.require_risk_grid_ready_before_planning": _param_bool(
@@ -2869,6 +3002,19 @@ def _ego_planner_node(context, drone_id, planner_odom_topic, cloud_topic, camera
             {"p0.size_x_m": _param_float(context, "p0.size_x_m")},
             {"p0.size_y_m": _param_float(context, "p0.size_y_m")},
             {"p0.size_z_m": _param_float(context, "p0.size_z_m")},
+            {"p0.origin_x_m": _param_float(context, "p0.origin_x_m")},
+            {"p0.origin_y_m": _param_float(context, "p0.origin_y_m")},
+            {"p0.origin_z_m": _param_float(context, "p0.origin_z_m")},
+            {"p0.provider_cost_source": LaunchConfiguration(
+                "p0.provider_cost_source").perform(context)},
+            {"p0.require_safety_ratio_below_one_for_cost": _param_bool(
+                context, "p0.require_safety_ratio_below_one_for_cost")},
+            {"p0.alert_limit_policy_id": LaunchConfiguration(
+                "p0.alert_limit_policy_id").perform(context)},
+            {"p0.alert_limit_h_m": _param_float(
+                context, "p0.alert_limit_h_m")},
+            {"p0.alert_limit_v_m": _param_float(
+                context, "p0.alert_limit_v_m")},
             {"p0.horizons_s": _csv_floats(LaunchConfiguration("p0.horizons_s").perform(context))},
             {"p0.refresh_period_s": _param_float(context, "p0.refresh_period_s")},
             {"p0.refresh_start_delay_s": _param_float(
@@ -2883,7 +3029,7 @@ def _ego_planner_node(context, drone_id, planner_odom_topic, cloud_topic, camera
             {"p0.glo_ephem_topic": "/ublox_driver/glo_ephem"},
             {"p0.receiver_lla_topic": "/ublox_driver/receiver_lla"},
             {"p0.iono_topic": "/ublox_driver/iono_params"},
-            {"p0.map_topic": "/map_generator/global_cloud"},
+            {"p0.map_topic": LaunchConfiguration("p0.map_topic").perform(context)},
             {"p0.health_topic": LaunchConfiguration("p0.health_topic").perform(context)},
             {"p0.gnss_epoch_max_age_s": _param_float(context, "p0.gnss_epoch_max_age_s")},
             {"p0.predictor.source_mode": LaunchConfiguration("p0.predictor.source_mode").perform(context)},
@@ -3112,6 +3258,7 @@ def _launch_setup(context):
     so3_control_share = get_package_share_directory("so3_control")
     local_sensing_share = get_package_share_directory("local_sensing")
     scenario, experiment, preset_keys = _apply_presets(context, iap_share)
+    _validate_online_truth_isolation(context, scenario)
     p4_g0c_binding = _prepare_p4_g0c_context(
         context, experiment, iap_share
     )
@@ -3460,10 +3607,12 @@ def _launch_setup(context):
                 context, "forked_forest.flight_clearance_z_m"),
             "side_boundary_tree_spacing_m": _param_float(
                 context, "forked_forest.side_boundary_tree_spacing_m"),
+            "start_canopy_clearance_radius_m": _param_float(
+                context, "forked_forest.start_canopy_clearance_radius_m"),
             "expanded_low_risk_sides": (
                 ["right", "left", "right", "left"]
                 if (LaunchConfiguration("forest_layout_mode").perform(context)
-                    == "forked_s_forest_v1"
+                    in ("forked_s_forest_v1", "forked_s_forest_v2")
                     and _param_int(context, "forked_forest.risk_seed") == 21)
                 else []
             ),
@@ -3601,6 +3750,37 @@ def _launch_setup(context):
             ),
             "fit_grid_to_map_cloud": _param_bool(
                 context, "p0.fit_grid_to_map_cloud"),
+            "online_mapping_mode": _param_bool(
+                context, "p0.online_mapping_mode"),
+            "map_topic": LaunchConfiguration("p0.map_topic").perform(context),
+            "frame_id": "map",
+            "origin_m": [
+                _param_float(context, "p0.origin_x_m"),
+                _param_float(context, "p0.origin_y_m"),
+                _param_float(context, "p0.origin_z_m"),
+            ],
+            "extent_m": [
+                _param_float(context, "p0.size_x_m"),
+                _param_float(context, "p0.size_y_m"),
+                _param_float(context, "p0.size_z_m"),
+            ],
+            "risk_resolution_m": _param_float(context, "p0.resolution_m"),
+            "ego_resolution_m": _param_float(context, "grid_map/resolution"),
+            "ego_origin_m": [
+                _param_float(context, "grid_map/origin_x"),
+                _param_float(context, "grid_map/origin_y"),
+                _param_float(context, "grid_map/origin_z"),
+            ],
+            "unknown_as_occupied": _param_bool(
+                context, "grid_map/unknown_as_occupied"),
+            "provider_cost_source": LaunchConfiguration(
+                "p0.provider_cost_source").perform(context),
+            "require_safety_ratio_below_one_for_cost": _param_bool(
+                context, "p0.require_safety_ratio_below_one_for_cost"),
+            "alert_limit_policy_id": LaunchConfiguration(
+                "p0.alert_limit_policy_id").perform(context),
+            "alert_limit_h_m": _param_float(context, "p0.alert_limit_h_m"),
+            "alert_limit_v_m": _param_float(context, "p0.alert_limit_v_m"),
             "skip_occupied_voxels": _param_bool(
                 context, "p0.skip_occupied_voxels"),
             "use_current_integrity_prior": _param_bool(
@@ -4145,6 +4325,8 @@ def _launch_setup(context):
                 {"forked_forest.high_risk_amplitude_m": _param_float(context, "forked_forest.high_risk_amplitude_m")},
                 {"forked_forest.corridor_width_m": _param_float(context, "forked_forest.corridor_width_m")},
                 {"forked_forest.junction_clearance_radius_m": _param_float(context, "forked_forest.junction_clearance_radius_m")},
+                {"forked_forest.start_canopy_clearance_radius_m": _param_float(
+                    context, "forked_forest.start_canopy_clearance_radius_m")},
                 {"forked_forest.start_x_m": _param_float(context, "forked_forest.start_x_m")},
                 {"forked_forest.goal_x_m": _param_float(context, "forked_forest.goal_x_m")},
                 {"forked_forest.risk_seed": _param_int(context, "forked_forest.risk_seed")},

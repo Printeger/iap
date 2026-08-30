@@ -237,8 +237,9 @@ namespace ego_planner
       {
         csv << "schema_version,stamp,planning_attempt_id,collision_segment_id,"
                "request_hash,snapshot_generation_id,snapshot_stamp_s,snapshot_frame,"
-               "snapshot_config_hash,"
-               "query_base_time_s,occupancy_epoch,status,reason,selection_applied,"
+               "snapshot_config_hash,source_identity_hash,"
+               "query_base_time_s,occupancy_epoch,geometry_id,occupancy_stamp_s,"
+               "status,reason,selection_applied,"
                "original_hash,risk_hash,selected_hash,original_sample_count,"
                "original_valid_count,original_unknown_count,original_stale_count,"
                "original_non_finite_count,original_mean,original_max,risk_sample_count,"
@@ -254,8 +255,10 @@ namespace ego_planner
           << decision.collision_segment_id << ',' << decision.request_hash << ','
           << decision.snapshot_generation << ',' << decision.snapshot_stamp_s << ','
           << decision.snapshot_frame << ',' << decision.snapshot_config_hash << ','
+          << decision.source_identity_hash << ','
           << decision.query_base_time_s << ','
           << decision.occupancy_epoch << ','
+          << decision.geometry_id << ',' << decision.occupancy_stamp_s << ','
           << p4GuideDecisionStatusName(decision.status) << ','
           << p4GuideDecisionReasonName(decision.reason) << ','
           << (decision.selection_applied ? 1 : 0) << ','
@@ -585,20 +588,30 @@ namespace ego_planner
     p4_config_.query_speed_mps = std::isfinite(max_vel_) && max_vel_ > 1.0e-3 ? max_vel_ : 1.0;
     p4_risk_snapshot_ = std::move(snapshot);
     p4_query_base_time_s_ = query_base_time_s;
-    p4_occupancy_epoch_ = grid_map_ ? grid_map_->occupancyGeneration() : 0;
+    p4_occupancy_snapshot_ = grid_map_ ?
+        grid_map_->captureFrozenOccupancyEpoch() : nullptr;
+    p4_occupancy_epoch_ = p4_occupancy_snapshot_ ?
+        p4_occupancy_snapshot_->generation : 0;
     active_p4_attempt_id_ = planning_attempt_id;
     if (!a_star_)
       return;
     a_star_->setP4Config(p4_config_);
     a_star_->setRiskSnapshot(p4_risk_snapshot_, query_base_time_s);
+    a_star_->setFrozenOccupancyQuery(
+        p4_occupancy_snapshot_ ? p4_occupancy_snapshot_->diagnostic_query :
+        GridMapOccupancyDiagnosticQuery{});
   }
 
   void BsplineOptimizer::releaseP4RiskSnapshot()
   {
     p4_risk_snapshot_.reset();
     p4_query_base_time_s_ = 0.0;
+    p4_occupancy_snapshot_.reset();
     if (a_star_)
+    {
       a_star_->clearRiskSnapshot();
+      a_star_->clearFrozenOccupancyQuery();
+    }
   }
 
   void BsplineOptimizer::invalidateP4AttemptLineage()
@@ -622,7 +635,10 @@ namespace ego_planner
     record.request_hash = decision.request_hash;
     record.snapshot_generation = decision.snapshot_generation;
     record.snapshot_config_hash = decision.snapshot_config_hash;
+    record.source_identity_hash = decision.source_identity_hash;
     record.occupancy_epoch = decision.occupancy_epoch;
+    record.geometry_id = decision.geometry_id;
+    record.occupancy_stamp_s = decision.occupancy_stamp_s;
     record.selected_status = decision.status;
     record.original_guide_hash = decision.original.canonical_hash;
     record.risk_guide_hash = decision.risk.canonical_hash;
@@ -645,7 +661,12 @@ namespace ego_planner
           current.request_hash == admitted.request_hash &&
           current.snapshot_generation == admitted.snapshot_generation &&
           current.snapshot_config_hash == admitted.snapshot_config_hash &&
+          current.source_identity_hash == admitted.source_identity_hash &&
           current.occupancy_epoch == admitted.occupancy_epoch &&
+          current.geometry_id == admitted.geometry_id &&
+          (current.occupancy_stamp_s == admitted.occupancy_stamp_s ||
+           (std::isnan(current.occupancy_stamp_s) &&
+            std::isnan(admitted.occupancy_stamp_s))) &&
           current.selected_status == admitted.selected_status &&
           current.original_guide_hash == admitted.original_guide_hash &&
           current.risk_guide_hash == admitted.risk_guide_hash &&
@@ -697,7 +718,7 @@ namespace ego_planner
         points.col(segment.first), points.col(segment.second), true,
         p4_risk_snapshot_, p4_query_base_time_s_, p4_occupancy_epoch_,
         [map = grid_map_]() { return map ? map->occupancyGeneration() : 0; },
-        p4_config_);
+        p4_config_, p4_occupancy_snapshot_);
   }
 
   P4GuideDecision BsplineOptimizer::planCollisionGuideForSegment(

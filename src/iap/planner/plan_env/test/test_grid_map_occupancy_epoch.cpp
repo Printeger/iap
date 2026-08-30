@@ -44,6 +44,7 @@ struct GridMapTestAccess {
     map->md_.occupancy_buffer_.assign(kCellCount, -2.01);
     map->md_.occupancy_buffer_inflate_.assign(kCellCount, 0);
     map->md_.occupancy_buffer_raw_cloud_.assign(kCellCount, 0);
+    map->md_.observed_buffer_.assign(kCellCount, 0);
     map->md_.count_hit_and_miss_.assign(kCellCount, 0);
     map->md_.count_hit_.assign(kCellCount, 0);
     map->md_.flag_rayend_.assign(kCellCount, -1);
@@ -124,10 +125,18 @@ struct GridMapTestAccess {
 
   static void acceptPointCloud(GridMap* map, const int32_t source_stamp_s,
                                const uint32_t source_stamp_ns = 0U) {
+    acceptPointCloudFrom(map, source_stamp_s, Eigen::Vector3d::Zero(),
+                         source_stamp_ns);
+  }
+
+  static void acceptPointCloudFrom(
+      GridMap* map, const int32_t source_stamp_s,
+      const Eigen::Vector3d& sensor_position,
+      const uint32_t source_stamp_ns = 0U) {
     {
       std::lock_guard<std::mutex> lock(map->occupancy_epoch_mutex_);
       map->md_.has_odom_ = true;
-      map->md_.camera_pos_ = Eigen::Vector3d::Zero();
+      map->md_.camera_pos_ = sensor_position;
     }
     map->cloudCallback(pointCloud(source_stamp_s, source_stamp_ns));
   }
@@ -188,7 +197,11 @@ struct GridMapTestAccess {
     map->md_.occupancy_buffer_.assign(4, 0.0);
     map->md_.occupancy_buffer_inflate_.assign(4, 0);
     map->md_.occupancy_buffer_raw_cloud_.assign(4, 0);
+    map->md_.observed_buffer_.assign(4, 0);
     map->md_.occupancy_buffer_raw_cloud_[0] = 1;
+    map->md_.observed_buffer_[0] = 1;
+    map->md_.observed_buffer_[2] = 1;
+    map->md_.observed_buffer_[3] = 1;
     map->md_.occupancy_buffer_[2] = 0.5;
     map->md_.occupancy_buffer_inflate_[3] = 1;
     map->occupancy_cloud_stamp_s_.store(cloud_stamp_s,
@@ -399,6 +412,34 @@ TEST(GridMapOccupancyEpochTest,
   ASSERT_NE(epoch, nullptr);
   EXPECT_EQ(epoch->generation, 1u);
   EXPECT_DOUBLE_EQ(epoch->cloud_stamp_s, 222.0);
+}
+
+TEST(GridMapOccupancyEpochTest,
+     FrozenEpochDistinguishesObservedFreeOccupiedAndUnknown) {
+  GridMap map;
+  GridMapTestAccess::configureDepthFusion(&map);
+  GridMapTestAccess::acceptPointCloudFrom(
+      &map, 222, Eigen::Vector3d(0.0, 0.0, -0.5));
+  const auto epoch = map.captureFrozenOccupancyEpoch();
+
+  ASSERT_NE(epoch, nullptr);
+  EXPECT_EQ(epoch->voxel_dimensions, Eigen::Vector3i(4, 4, 4));
+  EXPECT_TRUE(epoch->extent_m.isApprox(Eigen::Vector3d(4.0, 4.0, 4.0)));
+  EXPECT_FALSE(epoch->geometry_id.empty());
+
+  const auto hit = epoch->diagnostic_query(Eigen::Vector3d(0.5, 0.5, 1.5));
+  const auto traversed =
+      epoch->diagnostic_query(Eigen::Vector3d(0.5, 0.5, -0.5));
+  const auto unseen =
+      epoch->diagnostic_query(Eigen::Vector3d(-1.5, -1.5, -1.5));
+  EXPECT_TRUE(hit.observed);
+  EXPECT_TRUE(hit.raw_occupied);
+  EXPECT_EQ(hit.state, GridMapObservationState::OCCUPIED);
+  EXPECT_TRUE(traversed.observed);
+  EXPECT_FALSE(traversed.raw_occupied);
+  EXPECT_EQ(traversed.state, GridMapObservationState::OBSERVED_FREE);
+  EXPECT_FALSE(unseen.observed);
+  EXPECT_EQ(unseen.state, GridMapObservationState::UNKNOWN);
 }
 
 TEST(GridMapOccupancyEpochTest,

@@ -120,13 +120,15 @@ namespace ego_planner
     }
 
     std::vector<SafetyVizP4Guide> toSafetyVizP4Guides(
-        const std::vector<BsplineOptimizer::P4GuideViz> &guides)
+        const std::vector<BsplineOptimizer::P4GuideViz> &guides,
+        const Eigen::Vector3d &uav_position)
     {
       std::vector<SafetyVizP4Guide> out;
       out.reserve(guides.size());
       for (const auto &guide : guides)
       {
         SafetyVizP4Guide viz;
+        viz.uav_position = uav_position;
         viz.original_path = guide.original.complete_path;
         viz.risk_path = guide.risk.complete_path;
         viz.selected_path = guide.selected.complete_path;
@@ -787,7 +789,9 @@ namespace ego_planner
       return false;
     if (header)
       csv << "schema_version,stage,stamp_s,planning_attempt_id,collision_segment_id,"
-             "request_hash,snapshot_generation_id,snapshot_config_hash,occupancy_epoch,original_guide_hash,"
+             "request_hash,snapshot_generation_id,snapshot_config_hash,"
+             "source_identity_hash,occupancy_epoch,"
+             "geometry_id,occupancy_stamp_s,original_guide_hash,"
              "risk_guide_hash,selected_guide_hash,selection_applied,control_points_hash,"
              "closed_collision_observed,no_collision_refinement_observed,"
              "trajectory_id,trajectory_start_s,trajectory_start_ns,final_bspline_identity\n";
@@ -811,7 +815,9 @@ namespace ego_planner
       csv << "p4_v2_end_to_end_lineage_v2," << stage << ',' << stamp_s << ','
           << guide.planning_attempt_id << ',' << guide.collision_segment_id << ','
           << guide.request_hash << ',' << guide.snapshot_generation << ','
-          << guide.snapshot_config_hash << ',' << guide.occupancy_epoch << ','
+          << guide.snapshot_config_hash << ',' << guide.source_identity_hash
+          << ',' << guide.occupancy_epoch << ','
+          << guide.geometry_id << ',' << guide.occupancy_stamp_s << ','
           << guide.original_guide_hash << ','
           << guide.risk_guide_hash << ',' << guide.selected_guide_hash << ','
           << (guide.selection_applied ? 1 : 0) << ',' << control_hash << ','
@@ -1220,7 +1226,8 @@ namespace ego_planner
     if (safety_viz_)
     {
       safety_viz_->publishP4Guides(
-          toSafetyVizP4Guides(bspline_optimizer_->getLastP4GuideViz()),
+          toSafetyVizP4Guides(bspline_optimizer_->getLastP4GuideViz(),
+                             start_pt),
           plannerNow().seconds());
     }
     // 计算时间差并更新时间

@@ -114,7 +114,9 @@ public:
       std::shared_ptr < const iap::RiskGridSnapshot > snapshot,
       double query_base_time_s, uint64_t occupancy_epoch,
       LiveOccupancyEpoch live_occupancy_epoch,
-      P4RiskAStarConfig config);
+      P4RiskAStarConfig config,
+      std::shared_ptr<const GridMap::FrozenOccupancyEpoch>
+        occupancy_snapshot = nullptr);
 
     uint64_t planningAttemptId() const {return planning_attempt_id_;}
     uint64_t collisionSegmentId() const {return collision_segment_id_;}
@@ -135,9 +137,12 @@ public:
       return live_occupancy_epoch_;
     }
     const P4RiskAStarConfig & config() const {return config_;}
+    const std::shared_ptr<const GridMap::FrozenOccupancyEpoch> &
+    occupancySnapshot() const {return occupancy_snapshot_;}
 
     bool valid(std::string * reason = nullptr) const;
     std::string snapshotConfigHash() const;
+    std::string snapshotSourceIdentityHash() const;
     std::string canonicalIdentityHash() const;
 
 private:
@@ -151,6 +156,7 @@ private:
     uint64_t occupancy_epoch_;
     LiveOccupancyEpoch live_occupancy_epoch_;
     P4RiskAStarConfig config_;
+    std::shared_ptr<const GridMap::FrozenOccupancyEpoch> occupancy_snapshot_;
   };
 
   struct P4GuideSearchOutcome
@@ -203,8 +209,11 @@ private:
     double snapshot_stamp_s = std::numeric_limits < double > ::quiet_NaN();
     std::string snapshot_frame;
     std::string snapshot_config_hash;
+    std::string source_identity_hash;
     double query_base_time_s = std::numeric_limits < double > ::quiet_NaN();
     uint64_t occupancy_epoch = 0;
+    std::string geometry_id;
+    double occupancy_stamp_s = std::numeric_limits<double>::quiet_NaN();
     std::string request_hash;
     P4GuideRecord original;
     P4GuideRecord risk;

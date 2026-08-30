@@ -7,6 +7,7 @@
 #include <plan_env/grid_map.h>
 #include <cmath>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <queue>
 #include <string>
@@ -121,7 +122,9 @@ private:
 
 	//bool (*checkOccupancyPtr)( const Eigen::Vector3d &pos );
 
-	inline bool checkOccupancy(const Eigen::Vector3d &pos) { return (bool)grid_map_->getInflateOccupancy(pos); }
+	bool checkOccupancy(const Eigen::Vector3d &pos) const;
+	bool edgeTraversable(const Eigen::Vector3d &from,
+	                    const Eigen::Vector3d &to) const;
 
 	std::vector<GridNodePtr> retrievePath(GridNodePtr current);
 	bool astarSearchImpl(const double step_size, Eigen::Vector3d start_pt, Eigen::Vector3d end_pt, bool use_risk);
@@ -153,6 +156,7 @@ private:
 	double p4_valid_cost_sum_{0.0};
 	int p4_valid_cost_count_{0};
 	double p4_v2_reference_path_length_m_{0.0};
+	GridMapOccupancyDiagnosticQuery frozen_occupancy_query_;
 
 public:
 	typedef std::shared_ptr<AStar> Ptr;
@@ -171,6 +175,11 @@ public:
 	const P4RiskAStarConfig &getP4Config() const { return p4_config_; }
 	void setRiskSnapshot(std::shared_ptr<const iap::RiskGridSnapshot> snapshot, double query_base_time_s);
 	void clearRiskSnapshot();
+	void setFrozenOccupancyQuery(GridMapOccupancyDiagnosticQuery query)
+	{
+		frozen_occupancy_query_ = std::move(query);
+	}
+	void clearFrozenOccupancyQuery() { frozen_occupancy_query_ = {}; }
 	bool hasRiskSnapshot() const { return static_cast<bool>(risk_snapshot_); }
 	const P4AStarMetrics &getLastP4Metrics() const { return last_p4_metrics_; }
 	void recordP4GuideMetrics(const P4AStarMetrics &metrics) { last_p4_metrics_ = metrics; }

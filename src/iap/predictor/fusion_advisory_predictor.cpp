@@ -47,6 +47,43 @@ bool valid_position_information(const Eigen::Matrix3d& lambda,
   return true;
 }
 
+bool information_to_pl(const Eigen::Matrix3d& lambda,
+                       const FusionAdvisoryPredictorParams& params,
+                       double* hpl,
+                       double* vpl) {
+  Eigen::Matrix3d symmetric;
+  if (hpl == nullptr || vpl == nullptr ||
+      !valid_position_information(lambda, &symmetric)) {
+    return false;
+  }
+  const double eps =
+      std::isfinite(params.fim_epsilon) && params.fim_epsilon > 0.0
+          ? params.fim_epsilon : 1.0e-6;
+  Eigen::LDLT<Eigen::Matrix3d> ldlt(
+      symmetric + eps * Eigen::Matrix3d::Identity());
+  if (ldlt.info() != Eigen::Success || !ldlt.isPositive()) {
+    return false;
+  }
+  const Eigen::Matrix3d covariance =
+      ldlt.solve(Eigen::Matrix3d::Identity());
+  Eigen::SelfAdjointEigenSolver<Eigen::Matrix2d> horizontal(
+      covariance.block<2, 2>(0, 0), Eigen::EigenvaluesOnly);
+  if (!covariance.allFinite() || horizontal.info() != Eigen::Success ||
+      covariance(2, 2) < 0.0) {
+    return false;
+  }
+  const double k_h = std::isfinite(params.K_H_adv) && params.K_H_adv > 0.0
+      ? params.K_H_adv : 5.0;
+  const double k_v = std::isfinite(params.K_V_adv) && params.K_V_adv > 0.0
+      ? params.K_V_adv : 5.0;
+  *hpl = k_h * std::sqrt(std::max(
+      0.0, horizontal.eigenvalues().maxCoeff())) +
+      params.b_H_pred + params.s_H_pred;
+  *vpl = k_v * std::sqrt(std::max(0.0, covariance(2, 2))) +
+      params.b_V_pred + params.s_V_pred;
+  return std::isfinite(*hpl) && std::isfinite(*vpl);
+}
+
 }  // namespace
 
 FusionAdvisoryPredictor::FusionAdvisoryPredictor()
@@ -118,6 +155,14 @@ FusionAdvisoryResult FusionAdvisoryPredictor::query(
   out.lambda_prior_trace = out.lambda_prior.trace();
   out.lambda_gnss_trace = out.lambda_gnss.trace();
   out.lambda_lidar_trace = out.lambda_lidar.trace();
+  if (out.prior_valid) {
+    information_to_pl(out.lambda_prior, params_, &out.prior_only_hpl,
+                      &out.prior_only_vpl);
+  }
+  if (out.lidar_used) {
+    information_to_pl(out.lambda_lidar, params_, &out.lidar_only_hpl,
+                      &out.lidar_only_vpl);
+  }
 
   FimDiagnostic diag;
   diag.lambda = out.lambda_pred;
@@ -173,11 +218,17 @@ FusionAdvisoryResult FusionAdvisoryPredictor::query(
   out.sigma_v = std::sqrt(std::max(0.0, out.sigma_pos(2, 2)));
   out.hpl = k_h * out.sigma_h + params_.b_H_pred + params_.s_H_pred;
   out.vpl = k_v * out.sigma_v + params_.b_V_pred + params_.s_V_pred;
+  out.pre_conservative_hpl = out.hpl;
+  out.pre_conservative_vpl = out.vpl;
 
   if (params_.conservative_max_with_gnss && gnss.valid) {
     out.conservative_max_applied = true;
     out.hpl = std::max(out.hpl, gnss.hpl);
     out.vpl = std::max(out.vpl, gnss.vpl);
+    out.floor_increment_h = out.hpl - out.pre_conservative_hpl;
+    out.floor_increment_v = out.vpl - out.pre_conservative_vpl;
+    if (out.floor_increment_h > 0.0) out.floor_source_h = "gnss";
+    if (out.floor_increment_v > 0.0) out.floor_source_v = "gnss";
   }
   out.pl_scalar = std::max(out.hpl, out.vpl);
 

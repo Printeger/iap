@@ -236,10 +236,11 @@ class PredictorModuleRiskProvider final : public iap::RiskPredictionProvider {
       iap::RollingSpatialSourceProvenance source_provenance,
       iap::PredictorModule module,
       iap::IntegritySnapshot snapshot,
-      int worker_count)
+      int worker_count, double hal_m, double val_m)
       : occupancy_owner_(std::move(occupancy_owner)),
         rolling_window_(rolling_window), snapshot_(std::move(snapshot)),
-        worker_count_(std::max(1, worker_count)) {
+        worker_count_(std::max(1, worker_count)),
+        hal_m_(hal_m), val_m_(val_m) {
     iap::RollingSpatialRefreshInput input;
     input.geometry = std::move(geometry);
     input.module = std::move(module);
@@ -316,7 +317,8 @@ class PredictorModuleRiskProvider final : public iap::RiskPredictionProvider {
                   outcome.growth_valid = false;
                 }
                 (*results)[groups[group_index][local]] =
-                    iap::makeRiskPredictionResult(predictions[local]);
+                    iap::makeRiskPredictionResult(
+                        predictions[local], hal_m_, val_m_);
               }
               outcome.diagnostics.query_count += diagnostics.query_count;
               outcome.diagnostics.unique_positions += diagnostics.unique_positions;
@@ -389,6 +391,8 @@ class PredictorModuleRiskProvider final : public iap::RiskPredictionProvider {
   iap::RollingSpatialAdvisoryWindow* rolling_window_ = nullptr;
   iap::IntegritySnapshot snapshot_;
   int worker_count_ = 1;
+  double hal_m_ = 10.0;
+  double val_m_ = 20.0;
   bool ready_ = false;
   std::string begin_failure_reason_ = "provider_refresh_failed";
   iap::RollingSpatialRefreshDiagnostics begin_diagnostics_;
@@ -431,6 +435,17 @@ P0RiskGridRuntime::Config P0RiskGridRuntime::declareAndReadConfig(
       node->declare_parameter<double>("p0.size_y_m", 30.0);
   config.grid.size_z_m =
       node->declare_parameter<double>("p0.size_z_m", 6.0);
+  const Eigen::Vector3d fixed_origin(
+      node->declare_parameter<double>(
+          "p0.origin_x_m", std::numeric_limits<double>::quiet_NaN()),
+      node->declare_parameter<double>(
+          "p0.origin_y_m", std::numeric_limits<double>::quiet_NaN()),
+      node->declare_parameter<double>(
+          "p0.origin_z_m", std::numeric_limits<double>::quiet_NaN()));
+  if (fixed_origin.allFinite()) {
+    config.grid.use_fixed_origin = true;
+    config.grid.fixed_origin_w = fixed_origin;
+  }
   config.grid.horizons_s = node->declare_parameter<std::vector<double>>(
       "p0.horizons_s", std::vector<double>{0.0, 0.5, 1.0, 1.5, 2.0});
   config.grid.refresh_period_s =
@@ -442,8 +457,38 @@ P0RiskGridRuntime::Config P0RiskGridRuntime::declareAndReadConfig(
   config.grid.skip_occupied_voxels =
       node->declare_parameter<bool>("p0.skip_occupied_voxels",
                                     config.grid.skip_occupied_voxels);
+  const std::string provider_cost_source = node->declare_parameter<std::string>(
+      "p0.provider_cost_source", "legacy_safety_pl");
+  if (provider_cost_source == "legacy_safety_pl") {
+    config.grid.provider_cost_source =
+        iap::RiskProviderCostSource::LEGACY_SAFETY_PL;
+  } else if (provider_cost_source == "pre_conservative_fim_ratio") {
+    config.grid.provider_cost_source =
+        iap::RiskProviderCostSource::PRE_CONSERVATIVE_FIM_RATIO;
+  } else {
+    throw std::invalid_argument("unknown p0.provider_cost_source: " +
+                                provider_cost_source);
+  }
+  config.grid.require_safety_ratio_below_one_for_cost =
+      node->declare_parameter<bool>(
+          "p0.require_safety_ratio_below_one_for_cost", false);
+  config.grid.alert_limit_policy_id = node->declare_parameter<std::string>(
+      "p0.alert_limit_policy_id", "legacy_unspecified");
+  config.predictor_hal_m = node->declare_parameter<double>(
+      "p0.alert_limit_h_m", 10.0);
+  config.predictor_val_m = node->declare_parameter<double>(
+      "p0.alert_limit_v_m", 20.0);
+  if (!std::isfinite(config.predictor_hal_m) ||
+      !std::isfinite(config.predictor_val_m) ||
+      config.predictor_hal_m <= 0.0 || config.predictor_val_m <= 0.0 ||
+      config.grid.alert_limit_policy_id.empty()) {
+    throw std::invalid_argument("invalid P0 alert-limit policy");
+  }
   config.debug_metrics_enable =
       node->declare_parameter<bool>("p0.debug_metrics_enable", false);
+  config.online_mapping_mode = node->declare_parameter<bool>(
+      "p0.online_mapping_mode", false);
+  config.grid.require_observed_support = config.online_mapping_mode;
   config.fit_grid_to_map_cloud = node->declare_parameter<bool>(
       "p0.fit_grid_to_map_cloud", false);
   config.odom_topic = node->declare_parameter<std::string>(
@@ -468,6 +513,11 @@ P0RiskGridRuntime::Config P0RiskGridRuntime::declareAndReadConfig(
                                            "/ublox_driver/iono_params");
   config.map_topic = node->declare_parameter<std::string>(
       "p0.map_topic", "/map_generator/global_cloud");
+  if (config.online_mapping_mode &&
+      (config.fit_grid_to_map_cloud || !config.map_topic.empty())) {
+    throw std::invalid_argument(
+        "online P0 requires fit_grid_to_map_cloud=false and empty map_topic");
+  }
   // Raw health is an acceptance artifact and must not inherit a node
   // namespace.  Keep declaring the old parameter for launch compatibility,
   // but deliberately publish the authoritative absolute topic.
@@ -930,12 +980,14 @@ void P0RiskGridRuntime::createRosInterfaces() {
             ionoCallback(msg);
           },
           predictor_subscription_options);
-  cloud_sub_ = node_->create_subscription<sensor_msgs::msg::PointCloud2>(
-      config_.map_topic, rclcpp::QoS(2).transient_local().reliable(),
-      [this](const sensor_msgs::msg::PointCloud2::ConstSharedPtr msg) {
-        cloudCallback(msg);
-      },
-      map_subscription_options);
+  if (!config_.online_mapping_mode) {
+    cloud_sub_ = node_->create_subscription<sensor_msgs::msg::PointCloud2>(
+        config_.map_topic, rclcpp::QoS(2).transient_local().reliable(),
+        [this](const sensor_msgs::msg::PointCloud2::ConstSharedPtr msg) {
+          cloudCallback(msg);
+        },
+        map_subscription_options);
+  }
 
   // Do not couple the machine-readable health contract to RViz/debug flags.
   health_pub_ = node_->create_publisher<std_msgs::msg::String>(
@@ -1021,6 +1073,77 @@ void P0RiskGridRuntime::refreshTimerCallback() {
     P0OccupancyEpochCapture capture = occupancy_epoch_factory_();
     occupancy_capture_status = capture.status;
     occupancy_epoch = std::move(capture.epoch);
+  }
+  if (config_.online_mapping_mode && occupancy_epoch.has_value()) {
+    const auto& geometry = occupancy_epoch->geometry;
+    const Eigen::Vector3d configured_extent(
+        config_.grid.size_x_m, config_.grid.size_y_m,
+        config_.grid.size_z_m);
+    const double ratio = config_.grid.resolution_m / geometry.resolution_m;
+    const bool integer_overlay = std::isfinite(ratio) && ratio >= 1.0 &&
+        std::abs(ratio - std::round(ratio)) <= 1.0e-9;
+    const bool geometry_matches = geometry.valid() && integer_overlay &&
+        geometry.frame_id == config_.grid.frame_id &&
+        config_.grid.use_fixed_origin &&
+        geometry.origin_w.isApprox(config_.grid.fixed_origin_w, 1.0e-9) &&
+        geometry.extent_m.isApprox(configured_extent, 1.0e-9);
+    if (!geometry_matches) {
+      occupancy_capture_status =
+          P0OccupancyEpochCaptureStatus::ADAPTER_INVALID;
+      occupancy_epoch.reset();
+    } else {
+      if (!online_geometry_bound_) {
+        config_.grid.geometry_id = geometry.geometry_id;
+        std::string configure_reason;
+        if (!risk_grid_.configure(config_.grid, &configure_reason)) {
+          occupancy_capture_status =
+              P0OccupancyEpochCaptureStatus::ADAPTER_INVALID;
+          occupancy_epoch.reset();
+        } else {
+          online_geometry_bound_ = true;
+        }
+      }
+      if (occupancy_epoch.has_value()) {
+        // The adapter's immutable LOS grid does not expose its point vector;
+        // reconstruct it from the normalized occupied identity on the same
+        // frozen lattice, never from a simulator map topic.
+        auto points = std::make_shared<std::vector<Eigen::Vector3d>>();
+        if (occupancy_epoch->raw_identity) {
+          points->reserve(occupancy_epoch->raw_identity->keys().size());
+          for (const auto& key : occupancy_epoch->raw_identity->keys()) {
+            points->push_back(
+                occupancy_epoch->raw_identity->latticeOrigin() +
+                (Eigen::Vector3d(key.x, key.y, key.z) +
+                 Eigen::Vector3d::Constant(0.5)) *
+                    occupancy_epoch->raw_identity->resolutionM());
+          }
+        }
+        iap::LidarFimPrimitiveGenerationDiagnostics diagnostics;
+        auto primitives = iap::make_lidar_fim_primitives(
+            *points, nullptr, iap::LidarFimPrimitiveGenerationParams{},
+            &diagnostics);
+        {
+          std::lock_guard<std::mutex> lock(lidar_predictor_input_mutex_);
+          latest_lidar_map_points_ = points;
+          latest_lidar_fim_primitives_ = primitives;
+          latest_lidar_fim_diagnostics_ = diagnostics;
+          latest_lidar_map_point_count_ = points->size();
+          latest_lidar_fim_primitive_count_ =
+              primitives ? primitives->size() : 0u;
+          latest_lidar_fim_valid_normal_count_ =
+              static_cast<std::size_t>(
+                  std::max(0, diagnostics.lidar_pca_valid_normals));
+          latest_lidar_fim_fallback_reason_ = diagnostics.fallback_reason;
+          latest_lidar_generation_ = occupancy_epoch->generation;
+          latest_lidar_stamp_ = occupancy_epoch->cloud_stamp_s;
+        }
+        {
+          std::lock_guard<std::mutex> lock(health_state_mutex_);
+          map_seen_ = true;
+          latest_map_stamp_ = occupancy_epoch->cloud_stamp_s;
+        }
+      }
+    }
   }
   const std::string pre_build_failure = snapshotFailureReason(now_s);
   const InputReadiness refresh_input_readiness = inputReadiness(now_s);
@@ -1288,6 +1411,7 @@ void P0RiskGridRuntime::refreshTimerCallback() {
       const bool has_committed_base =
           rolling_occupancy_owner_ && rolling_raw_occupancy_identity_ &&
           rolling_occupancy_source_owner_ &&
+          rolling_occupancy_geometry_.valid() &&
           rolling_occupancy_generation_ != 0u &&
           std::isfinite(rolling_occupancy_stamp_) &&
           rolling_occupancy_content_identity_ != 0u;
@@ -1295,6 +1419,7 @@ void P0RiskGridRuntime::refreshTimerCallback() {
           static_cast<bool>(rolling_occupancy_owner_) ||
           static_cast<bool>(rolling_raw_occupancy_identity_) ||
           static_cast<bool>(rolling_occupancy_source_owner_) ||
+          rolling_occupancy_geometry_.valid() ||
           rolling_occupancy_generation_ != 0u ||
           std::isfinite(rolling_occupancy_stamp_) ||
           rolling_occupancy_content_identity_ != 0u;
@@ -1310,6 +1435,7 @@ void P0RiskGridRuntime::refreshTimerCallback() {
         committed_base.los_owner = rolling_occupancy_owner_;
         committed_base.raw_identity = rolling_raw_occupancy_identity_;
         committed_base.source_owner = rolling_occupancy_source_owner_;
+        committed_base.geometry = rolling_occupancy_geometry_;
         committed_base.generation = rolling_occupancy_generation_;
         committed_base.cloud_stamp_s = rolling_occupancy_stamp_;
         committed_base.frame_id = rolling_raw_occupancy_identity_->frameId();
@@ -1371,6 +1497,15 @@ void P0RiskGridRuntime::refreshTimerCallback() {
     captured_lidar_map_points = lidar_map_points;
     captured_lidar_fim_primitives = lidar_fim_primitives;
     iap::PredictorModule module(predictor_params);
+    if (config_.online_mapping_mode) {
+      const auto observed_support_query = occupancy_epoch->diagnostic_query;
+      module.set_observation_predicate(
+          [observed_support_query](const Eigen::Vector3d& position) {
+            const auto diagnostic = observed_support_query(position);
+            return diagnostic.available && diagnostic.observed &&
+                   diagnostic.state != iap::RiskOccupancyState::UNKNOWN;
+          });
+    }
     module.set_lidar_map_points(lidar_map_points);
     module.set_lidar_fim_primitives(lidar_fim_primitives);
     iap::RollingSpatialWindowGeometry rolling_geometry;
@@ -1407,7 +1542,8 @@ void P0RiskGridRuntime::refreshTimerCallback() {
         std::move(lidar_map_points), std::move(lidar_fim_primitives),
         retention_policy, source_provenance,
         std::move(module), snapshot,
-        config_.predictor_effective_worker_count);
+        config_.predictor_effective_worker_count,
+        config_.predictor_hal_m, config_.predictor_val_m);
     predictor_provider = owned_predictor_provider.get();
     local_provider = std::move(owned_predictor_provider);
     provider = local_provider.get();
@@ -1558,11 +1694,29 @@ void P0RiskGridRuntime::refreshTimerCallback() {
         };
   }
   TimedRiskProvider timed_provider(provider);
+  iap::RiskGridSourceIdentity source_identity;
+  source_identity.occupancy_generation = occupancy_epoch
+      ? occupancy_epoch->generation : 0u;
+  source_identity.occupancy_stamp_s = occupancy_epoch
+      ? occupancy_epoch->cloud_stamp_s
+      : std::numeric_limits<double>::quiet_NaN();
+  source_identity.prior_generation =
+      captured_predictor_sources.current_generation;
+  source_identity.prior_stamp_s = captured_predictor_sources.current_stamp;
+  source_identity.gnss_generation =
+      captured_predictor_sources.gnss_epoch_generation;
+  source_identity.gnss_stamp_s =
+      captured_predictor_sources.gnss_epoch_stamp;
+  source_identity.lidar_generation = captured_lidar_generation;
+  source_identity.lidar_stamp_s = captured_lidar_stamp;
+  source_identity.alert_limit_policy_id =
+      config_.grid.alert_limit_policy_id;
   bool refresh_succeeded = false;
   if (occupancy_diagnostic_query) {
     refresh_succeeded = risk_grid_.refreshFromProvider(
         snapshot.p_wb, now_s, timed_provider,
-        occupancy_diagnostic_query, source_validator, &reason);
+        occupancy_diagnostic_query, source_validator, source_identity,
+        &reason);
   } else {
     refresh_succeeded = risk_grid_.refreshFromProvider(
         snapshot.p_wb, now_s, timed_provider, occupancy_predicate, &reason);
@@ -1582,6 +1736,7 @@ void P0RiskGridRuntime::refreshTimerCallback() {
       rolling_occupancy_owner_ = occupancy_epoch->los_owner;
       rolling_raw_occupancy_identity_ = occupancy_epoch->raw_identity;
       rolling_occupancy_source_owner_ = occupancy_epoch->source_owner;
+      rolling_occupancy_geometry_ = occupancy_epoch->geometry;
       rolling_occupancy_generation_ = occupancy_epoch->generation;
       rolling_occupancy_stamp_ = occupancy_epoch->cloud_stamp_s;
       rolling_occupancy_content_identity_ =
@@ -1692,6 +1847,12 @@ void P0RiskGridRuntime::publishHealth(const iap::RiskGridHealth& health,
   }
   const iap::RiskGridHealth& out_health = evidence.health;
   const InputReadiness& readiness = evidence.readiness;
+  const auto health_snapshot = risk_grid_.acquireSnapshot();
+  const auto& grid_params = risk_grid_.params();
+  const Eigen::Vector3d grid_origin = risk_grid_.origin();
+  const Eigen::Vector3i grid_dimensions = risk_grid_.voxelNum();
+  const iap::RiskGridSourceIdentity source_identity = health_snapshot
+      ? health_snapshot->sourceIdentity() : iap::RiskGridSourceIdentity{};
   std::ostringstream oss;
   oss << "{"
       << "\"refresh_attempt_id\":" << evidence.refresh_attempt_id << ","
@@ -1707,6 +1868,39 @@ void P0RiskGridRuntime::publishHealth(const iap::RiskGridHealth& health,
       << "\"valid_ratio\":" << jsonNumber(out_health.valid_ratio) << ","
       << "\"unknown_ratio\":" << jsonNumber(out_health.unknown_ratio) << ","
       << "\"generation_id\":" << out_health.generation_id << ","
+      << "\"geometry_id\":" << jsonString(grid_params.geometry_id) << ","
+      << "\"frame_id\":" << jsonString(grid_params.frame_id) << ","
+      << "\"grid_origin_m\":[" << jsonNumber(grid_origin.x()) << ","
+      << jsonNumber(grid_origin.y()) << "," << jsonNumber(grid_origin.z())
+      << "],"
+      << "\"grid_extent_m\":[" << jsonNumber(grid_params.size_x_m) << ","
+      << jsonNumber(grid_params.size_y_m) << ","
+      << jsonNumber(grid_params.size_z_m) << "],"
+      << "\"grid_dimensions\":[" << grid_dimensions.x() << ","
+      << grid_dimensions.y() << "," << grid_dimensions.z() << "],"
+      << "\"grid_resolution_m\":"
+      << jsonNumber(grid_params.resolution_m) << ","
+      << "\"alert_limit_policy_id\":"
+      << jsonString(grid_params.alert_limit_policy_id) << ","
+      << "\"alert_limit_h_m\":" << jsonNumber(config_.predictor_hal_m)
+      << ",\"alert_limit_v_m\":" << jsonNumber(config_.predictor_val_m)
+      << ","
+      << "\"source_occupancy_generation\":"
+      << source_identity.occupancy_generation << ","
+      << "\"source_occupancy_stamp_s\":"
+      << jsonNumber(source_identity.occupancy_stamp_s) << ","
+      << "\"source_prior_generation\":"
+      << source_identity.prior_generation << ","
+      << "\"source_prior_stamp_s\":"
+      << jsonNumber(source_identity.prior_stamp_s) << ","
+      << "\"source_gnss_generation\":"
+      << source_identity.gnss_generation << ","
+      << "\"source_gnss_stamp_s\":"
+      << jsonNumber(source_identity.gnss_stamp_s) << ","
+      << "\"source_lidar_generation\":"
+      << source_identity.lidar_generation << ","
+      << "\"source_lidar_stamp_s\":"
+      << jsonNumber(source_identity.lidar_stamp_s) << ","
       << "\"provider_query_count\":" << out_health.provider_query_count << ","
       << "\"occupied_skip_count\":" << out_health.occupied_skip_count << ","
       << "\"provider_stale_count\":" << out_health.provider_stale_count << ","

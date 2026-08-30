@@ -54,6 +54,10 @@ struct GridMapTestAccess
     map->md_.occupancy_buffer_.assign(count, -2.01);
     map->md_.occupancy_buffer_inflate_.assign(count, 0);
     map->md_.occupancy_buffer_raw_cloud_.assign(count, 0);
+    map->md_.observed_buffer_.assign(count, 1);
+    map->occupancy_cloud_stamp_s_.store(10.0, std::memory_order_release);
+    if (map->occupancy_update_sequence_.load(std::memory_order_acquire) == 0u)
+      map->occupancy_update_sequence_.store(2u, std::memory_order_release);
     for (int x_index = 0; x_index < kXCells; ++x_index) {
       const double x = map->mp_.map_origin_.x() +
         (static_cast<double>(x_index) + 0.5) * kResolutionM;
@@ -103,6 +107,10 @@ struct GridMapTestAccess
     map->md_.occupancy_buffer_.assign(count, -2.01);
     map->md_.occupancy_buffer_inflate_.assign(count, 0);
     map->md_.occupancy_buffer_raw_cloud_.assign(count, 0);
+    map->md_.observed_buffer_.assign(count, 1);
+    map->occupancy_cloud_stamp_s_.store(10.0, std::memory_order_release);
+    if (map->occupancy_update_sequence_.load(std::memory_order_acquire) == 0u)
+      map->occupancy_update_sequence_.store(2u, std::memory_order_release);
     if (!include_obstacle) {
       return;
     }
@@ -134,6 +142,32 @@ struct GridMapTestAccess
   static void advanceOccupancyEpoch(GridMap * map)
   {
     map->occupancy_update_sequence_.fetch_add(2, std::memory_order_acq_rel);
+  }
+
+  static std::string frozenCaptureInputReason(const GridMap * map)
+  {
+    const uint64_t sequence = map->occupancy_update_sequence_.load(
+      std::memory_order_acquire);
+    if (sequence == 0u || (sequence & 1u) != 0u) return "sequence";
+    if (!std::isfinite(map->occupancy_cloud_stamp_s_.load(
+        std::memory_order_acquire))) return "stamp";
+    if (!map->mp_.map_origin_.allFinite()) return "origin";
+    if (!std::isfinite(map->mp_.resolution_) || map->mp_.resolution_ <= 0.0)
+      return "resolution";
+    if (!std::isfinite(map->mp_.resolution_inv_) ||
+      map->mp_.resolution_inv_ <= 0.0) return "resolution_inv";
+    if (map->mp_.frame_id_.empty()) return "frame";
+    if ((map->mp_.map_voxel_num_.array() <= 0).any()) return "dimensions";
+    const std::size_t count = static_cast<std::size_t>(
+      map->mp_.map_voxel_num_.x() * map->mp_.map_voxel_num_.y() *
+      map->mp_.map_voxel_num_.z());
+    if (map->md_.occupancy_buffer_.size() != count) return "fused_size";
+    if (map->md_.occupancy_buffer_inflate_.size() != count)
+      return "inflated_size";
+    if (map->md_.occupancy_buffer_raw_cloud_.size() != count)
+      return "raw_size";
+    if (map->md_.observed_buffer_.size() != count) return "observed_size";
+    return "ok";
   }
 
   static void configureIcra072SelectionTrigger(GridMap * map)
@@ -818,6 +852,12 @@ TEST(P4CollisionGuideIntegration,
     ego_planner::CollisionScanStatus::NO_COLLISION);
   GridMapTestAccess::configureGuideFixture(rebound_map.get());
   GridMapTestAccess::advanceOccupancyEpoch(rebound_map.get());
+  ASSERT_EQ(GridMapTestAccess::frozenCaptureInputReason(rebound_map.get()),
+            "ok");
+  const auto rebound_epoch = rebound_map->captureFrozenOccupancyEpoch();
+  ASSERT_NE(rebound_epoch, nullptr);
+  EXPECT_EQ(rebound_epoch->generation,
+            rebound_map->occupancyGeneration());
   rebound_optimizer->setP4RiskSnapshot(snapshot, 10.0, 73);
   bool stopped_for_error = false;
   ASSERT_TRUE(rebound_optimizer->checkCollisionAndReboundForTest(
@@ -941,6 +981,10 @@ TEST(P4CollisionGuideIntegration,
   EXPECT_FALSE(optimizer->validateP4AttemptLineage(73));
   EXPECT_TRUE(optimizer->getP4AttemptLineage().empty());
 
+  ASSERT_EQ(GridMapTestAccess::frozenCaptureInputReason(map.get()), "ok");
+  const auto replacement_epoch = map->captureFrozenOccupancyEpoch();
+  ASSERT_NE(replacement_epoch, nullptr);
+  EXPECT_EQ(replacement_epoch->generation, map->occupancyGeneration());
   optimizer->setP4RiskSnapshot(snapshot, 10.0, 74);
   Eigen::MatrixXd replacement_seed = guideSeedMatrix();
   ASSERT_EQ(

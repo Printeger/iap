@@ -80,6 +80,7 @@ struct P0OccupancyEpoch {
   iap::RiskGridMap::OccupancyDiagnosticQuery diagnostic_query;
   std::shared_ptr<const iap::LocalOccupancyGrid> los_owner;
   std::shared_ptr<const P0RawOccupancyIdentity> raw_identity;
+  iap::PlanningLatticeGeometry geometry;
   SourceOwner source_owner;
   LiveSourceOwner live_source_owner;
   LiveGeneration live_generation;
@@ -116,8 +117,14 @@ class P0OccupancyEpochAdapter {
             const auto source = neutral_query(position);
             iap::RiskOccupancyDiagnostic out;
             out.available = source.available;
+            out.observed = source.observed;
             out.raw_occupied = source.raw_occupied;
             out.inflated_occupied = source.inflated_occupied;
+            out.state = (source.raw_occupied || source.inflated_occupied)
+                ? iap::RiskOccupancyState::OCCUPIED
+                : source.observed
+                    ? iap::RiskOccupancyState::OBSERVED_FREE
+                    : iap::RiskOccupancyState::UNKNOWN;
             out.voxel_index = source.voxel_index;
             out.voxel_center = source.voxel_center;
             out.resolution_m = source.resolution_m;
@@ -130,9 +137,11 @@ class P0OccupancyEpochAdapter {
           };
     }
     return adaptFields(epoch.raw_occupied_voxel_centers,
-                       epoch.lattice_origin, epoch.resolution_m,
+                       epoch.lattice_origin, epoch.extent_m,
+                       epoch.voxel_dimensions, epoch.resolution_m,
                        epoch.frame_id, epoch.cloud_stamp_s,
-                       epoch.generation, std::move(diagnostic_query),
+                       epoch.geometry_id, epoch.generation,
+                       std::move(diagnostic_query),
                        std::move(source_owner),
                        std::move(live_source_owner),
                        std::move(live_generation));
@@ -147,9 +156,12 @@ class P0OccupancyEpochAdapter {
   static std::optional<P0OccupancyEpoch> adaptFields(
       std::shared_ptr<const std::vector<Eigen::Vector3d>> occupied_centers,
       const Eigen::Vector3d& lattice_origin,
+      const Eigen::Vector3d& extent_m,
+      const Eigen::Vector3i& voxel_dimensions,
       double resolution_m,
       std::string frame_id,
       double cloud_stamp_s,
+      std::string geometry_id,
       uint64_t generation,
       iap::RiskGridMap::OccupancyDiagnosticQuery diagnostic_query,
       P0OccupancyEpoch::SourceOwner source_owner,

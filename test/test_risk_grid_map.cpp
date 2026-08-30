@@ -64,6 +64,28 @@ class AffineProvider final : public iap::RiskPredictionProvider {
   }
 };
 
+TEST(RiskGridMapTest, FixedPlanningGeometryDoesNotRollWithVehiclePose) {
+  auto params = base_params();
+  params.use_fixed_origin = true;
+  params.fixed_origin_w = Eigen::Vector3d(-21.0, -11.0, 0.0);
+  params.geometry_id = "planning_lattice_v1:forest";
+  iap::RiskGridMap grid(params);
+  AffineProvider provider;
+
+  ASSERT_TRUE(grid.refreshFromProvider(
+      Eigen::Vector3d(-18.0, 0.0, 1.5), 10.0, provider));
+  const auto first = grid.acquireSnapshot();
+  ASSERT_NE(first, nullptr);
+  EXPECT_EQ(first->origin(), params.fixed_origin_w);
+
+  ASSERT_TRUE(grid.refreshFromProvider(
+      Eigen::Vector3d(12.0, 4.0, 1.5), 11.0, provider));
+  const auto second = grid.acquireSnapshot();
+  ASSERT_NE(second, nullptr);
+  EXPECT_EQ(second->origin(), params.fixed_origin_w);
+  EXPECT_EQ(first->origin(), second->origin());
+}
+
 class AlternatingStaleProvider final : public iap::RiskPredictionProvider {
  public:
   bool all_stale = false;
@@ -1817,6 +1839,47 @@ TEST(RiskGridMapTest,
   EXPECT_EQ(reason, "ok");
   ASSERT_NE(grid.acquireSnapshot(), nullptr);
   EXPECT_EQ(grid.acquireSnapshot()->generation_id(), 1u);
+}
+
+TEST(RiskGridMapTest, SnapshotRetainsImmutableCompositeSourceIdentity) {
+  auto params = base_params();
+  params.alert_limit_policy_id = "fixed_hal10_val20_v1";
+  iap::RiskGridMap grid(params);
+  AffineProvider provider;
+  iap::RiskGridSourceIdentity identity;
+  identity.occupancy_generation = 11u;
+  identity.occupancy_stamp_s = 10.1;
+  identity.prior_generation = 12u;
+  identity.prior_stamp_s = 10.2;
+  identity.gnss_generation = 13u;
+  identity.gnss_stamp_s = 10.3;
+  identity.lidar_generation = 14u;
+  identity.lidar_stamp_s = 10.4;
+  identity.alert_limit_policy_id = params.alert_limit_policy_id;
+  std::string reason;
+
+  ASSERT_TRUE(grid.refreshFromProvider(
+      Eigen::Vector3d::Zero(), 10.5, provider,
+      iap::RiskGridMap::OccupancyDiagnosticQuery{},
+      iap::RiskGridMap::SourceValidator{}, identity, &reason)) << reason;
+  const auto snapshot = grid.acquireSnapshot();
+  ASSERT_NE(snapshot, nullptr);
+  const auto& retained = snapshot->sourceIdentity();
+  EXPECT_EQ(retained.occupancy_generation, 11u);
+  EXPECT_DOUBLE_EQ(retained.occupancy_stamp_s, 10.1);
+  EXPECT_EQ(retained.prior_generation, 12u);
+  EXPECT_EQ(retained.gnss_generation, 13u);
+  EXPECT_EQ(retained.lidar_generation, 14u);
+  EXPECT_EQ(retained.alert_limit_policy_id, "fixed_hal10_val20_v1");
+}
+
+TEST(RiskGridMapTest, RejectsEmptyAlertLimitPolicyIdentity) {
+  auto params = base_params();
+  params.alert_limit_policy_id.clear();
+  iap::RiskGridMap grid;
+  std::string reason;
+  EXPECT_FALSE(grid.configure(params, &reason));
+  EXPECT_EQ(reason, "empty_alert_limit_policy_id");
 }
 
 TEST(RiskGridMapTest,

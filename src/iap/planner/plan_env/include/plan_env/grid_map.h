@@ -92,6 +92,7 @@ struct MappingParameters
   /* visualization and computation time display */
   double visualization_truncate_height_, virtual_ceil_height_, ground_height_, virtual_ceil_yp_, virtual_ceil_yn_;
   bool show_occ_time_;
+  bool unknown_as_occupied_ = false;
 
   /* active mapping */
   double unknown_flag_;
@@ -106,6 +107,10 @@ struct MappingData
   std::vector<double> occupancy_buffer_;
   std::vector<char> occupancy_buffer_inflate_;
   std::vector<char> occupancy_buffer_raw_cloud_;
+  // Monotonic observed-space mask for the static online map. A cell is set
+  // only by a sensor return or an explicit sensor ray traversal; absence of
+  // a point never proves free space.
+  std::vector<char> observed_buffer_;
 
   // camera position and pose data
 
@@ -156,11 +161,20 @@ struct MappingData
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 };
 
+enum class GridMapObservationState : uint8_t
+{
+  UNKNOWN = 0,
+  OBSERVED_FREE = 1,
+  OCCUPIED = 2,
+};
+
 struct GridMapOccupancyDiagnostic
 {
   bool available = false;
+  bool observed = false;
   bool raw_occupied = false;
   bool inflated_occupied = false;
+  GridMapObservationState state = GridMapObservationState::UNKNOWN;
   Eigen::Vector3i voxel_index = Eigen::Vector3i::Constant(-1);
   Eigen::Vector3d voxel_center = Eigen::Vector3d::Constant(
       std::numeric_limits<double>::quiet_NaN());
@@ -182,8 +196,12 @@ struct FrozenOccupancyEpoch
       raw_occupied_voxel_centers;
   Eigen::Vector3d lattice_origin = Eigen::Vector3d::Constant(
       std::numeric_limits<double>::quiet_NaN());
+  Eigen::Vector3d extent_m = Eigen::Vector3d::Constant(
+      std::numeric_limits<double>::quiet_NaN());
+  Eigen::Vector3i voxel_dimensions = Eigen::Vector3i::Zero();
   double resolution_m = std::numeric_limits<double>::quiet_NaN();
   std::string frame_id;
+  std::string geometry_id;
   double cloud_stamp_s = std::numeric_limits<double>::quiet_NaN();
   uint64_t generation = 0;
 };
@@ -364,7 +382,10 @@ inline bool GridMap::isUnknown(const Eigen::Vector3i &id)
 {
   Eigen::Vector3i id1 = id;
   boundIndex(id1);
-  return md_.occupancy_buffer_[toAddress(id1)] < mp_.clamp_min_log_ - 1e-3;
+  const int address = toAddress(id1);
+  return address < 0 ||
+      address >= static_cast<int>(md_.observed_buffer_.size()) ||
+      md_.observed_buffer_[static_cast<std::size_t>(address)] == 0;
 }
 
 inline bool GridMap::isUnknown(const Eigen::Vector3d &pos)
@@ -382,7 +403,9 @@ inline bool GridMap::isKnownFree(const Eigen::Vector3i &id)
 
   // return md_.occupancy_buffer_[adr] >= mp_.clamp_min_log_ &&
   //     md_.occupancy_buffer_[adr] < mp_.min_occupancy_log_;
-  return md_.occupancy_buffer_[adr] >= mp_.clamp_min_log_ && md_.occupancy_buffer_inflate_[adr] == 0;
+  return adr >= 0 && adr < static_cast<int>(md_.observed_buffer_.size()) &&
+      md_.observed_buffer_[static_cast<std::size_t>(adr)] != 0 &&
+      md_.occupancy_buffer_inflate_[adr] == 0;
 }
 
 inline bool GridMap::isKnownOccupied(const Eigen::Vector3i &id)
@@ -406,6 +429,9 @@ inline void GridMap::setOccupied(Eigen::Vector3d pos)
   occupancy_update_sequence_.fetch_add(1, std::memory_order_acq_rel);
   md_.occupancy_buffer_inflate_[id(0) * mp_.map_voxel_num_(1) * mp_.map_voxel_num_(2) +
                                 id(1) * mp_.map_voxel_num_(2) + id(2)] = 1;
+  const int address = toAddress(id);
+  if (address >= 0 && address < static_cast<int>(md_.observed_buffer_.size()))
+    md_.observed_buffer_[static_cast<std::size_t>(address)] = 1;
   occupancy_update_sequence_.fetch_add(1, std::memory_order_release);
 }
 
@@ -426,6 +452,9 @@ inline void GridMap::setOccupancy(Eigen::Vector3d pos, double occ)
   std::lock_guard<std::mutex> lock(occupancy_epoch_mutex_);
   occupancy_update_sequence_.fetch_add(1, std::memory_order_acq_rel);
   md_.occupancy_buffer_[toAddress(id)] = occ;
+  const int address = toAddress(id);
+  if (address >= 0 && address < static_cast<int>(md_.observed_buffer_.size()))
+    md_.observed_buffer_[static_cast<std::size_t>(address)] = 1;
   occupancy_update_sequence_.fetch_add(1, std::memory_order_release);
 }
 
@@ -448,7 +477,12 @@ inline int GridMap::getInflateOccupancy(Eigen::Vector3d pos)
   Eigen::Vector3i id;
   posToIndex(pos, id);
 
-  return int(md_.occupancy_buffer_inflate_[toAddress(id)]);
+  const int address = toAddress(id);
+  if (mp_.unknown_as_occupied_ &&
+      (address < 0 || address >= static_cast<int>(md_.observed_buffer_.size()) ||
+       md_.observed_buffer_[static_cast<std::size_t>(address)] == 0))
+    return 1;
+  return int(md_.occupancy_buffer_inflate_[address]);
 }
 
 inline int GridMap::getOccupancy(Eigen::Vector3i id)

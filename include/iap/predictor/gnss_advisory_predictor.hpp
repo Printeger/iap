@@ -3,6 +3,8 @@
 
 #include <Eigen/Core>
 
+#include <functional>
+
 #include <iap/map/local_occupancy.hpp>
 #include <iap/predictor/predictor_types.hpp>
 
@@ -15,6 +17,8 @@ class GnssAdvisoryPredictor {
 
   void set_params(const GnssAdvisoryPredictorParams& params);
   void set_local_occupancy(const LocalOccupancyGrid* occupancy);
+  void set_observation_predicate(
+      VisibilityPredictor::ObservationPredicate predicate);
 
   GnssAdvisoryResult query(const Eigen::Vector3d& query_position,
                            const IntegritySnapshot& snapshot) const;
@@ -32,6 +36,7 @@ class GnssAdvisoryPredictor {
   GnssAdvisoryPredictorParams params_;
   GnssGeometryPlPredictor geometry_predictor_;
   VisibilityPredictor visibility_predictor_;
+  VisibilityPredictor::ObservationPredicate observation_predicate_;
 };
 
 }  // namespace iap

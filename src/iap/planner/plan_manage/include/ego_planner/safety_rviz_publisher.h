@@ -111,6 +111,8 @@ struct SafetyVizP3ReferenceBias {
 };
 
 struct SafetyVizP4Guide {
+  Eigen::Vector3d uav_position = Eigen::Vector3d::Constant(
+      std::numeric_limits<double>::quiet_NaN());
   std::vector<Eigen::Vector3d> original_path;
   std::vector<Eigen::Vector3d> risk_path;
   std::vector<Eigen::Vector3d> selected_path;
@@ -127,6 +129,7 @@ class SafetyRvizPublisher {
     bool enabled = true;
     bool enable_im_bars = true;
     bool enable_validity_cloud = true;
+    bool enable_source_diagnostic_clouds = true;
     bool enable_p1_viz = false;
     bool enable_p2_viz = false;
     bool enable_p3_viz = false;
@@ -135,6 +138,12 @@ class SafetyRvizPublisher {
     std::string risk_grid_health_topic = "/iap/rviz/risk_grid_health";
     std::string predicted_pl_cloud_topic = "/iap/rviz/predicted_pl_cloud";
     std::string risk_validity_cloud_topic = "/iap/rviz/risk_validity_cloud";
+    std::string relative_risk_cloud_topic = "/iap/rviz/risk_relative_cloud";
+    std::string gnss_risk_cloud_topic = "/iap/rviz/risk_gnss_cloud";
+    std::string lidar_risk_cloud_topic = "/iap/rviz/risk_lidar_cloud";
+    std::string fim_risk_cloud_topic = "/iap/rviz/risk_fim_cloud";
+    std::string planning_geometry_topic =
+        "/iap/rviz/planning_lattice_geometry";
     std::string trajectory_samples_topic =
         "/iap/rviz/trajectory_integrity_samples";
     std::string current_traj_topic = "/iap/rviz/current_traj_integrity_colored";
@@ -198,6 +207,18 @@ class SafetyRvizPublisher {
       const Config& config,
       double current_altitude_m,
       const rclcpp::Time& stamp);
+  static sensor_msgs::msg::PointCloud2 buildDiagnosticRiskCloud(
+      const std::shared_ptr<const iap::RiskGridSnapshot>& snapshot,
+      const Config& config,
+      double current_altitude_m,
+      const rclcpp::Time& stamp,
+      const std::string& channel,
+      bool relative_scale = false);
+  static visualization_msgs::msg::MarkerArray buildPlanningGeometryMarkers(
+      const std::shared_ptr<const iap::RiskGridSnapshot>& snapshot,
+      const Config& config,
+      double current_altitude_m,
+      const rclcpp::Time& stamp);
   static visualization_msgs::msg::MarkerArray buildTrajectorySampleMarkers(
       const SafetyVizGateStatus& status,
       const Config& config,
@@ -250,6 +271,16 @@ class SafetyRvizPublisher {
       predicted_pl_cloud_pub_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr
       risk_validity_cloud_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr
+      relative_risk_cloud_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr
+      gnss_risk_cloud_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr
+      lidar_risk_cloud_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr
+      fim_risk_cloud_pub_;
+  rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr
+      planning_geometry_pub_;
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr
       trajectory_samples_pub_;
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr

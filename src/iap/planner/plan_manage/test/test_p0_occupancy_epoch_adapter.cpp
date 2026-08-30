@@ -12,6 +12,7 @@ namespace {
 
 struct FakeOccupancyDiagnostic {
   bool available = false;
+  bool observed = false;
   bool raw_occupied = false;
   bool inflated_occupied = false;
   Eigen::Vector3i voxel_index = Eigen::Vector3i::Constant(-1);
@@ -30,8 +31,11 @@ struct FakeFrozenOccupancyEpoch {
   std::shared_ptr<const std::vector<Eigen::Vector3d>>
       raw_occupied_voxel_centers;
   Eigen::Vector3d lattice_origin = Eigen::Vector3d::Zero();
+  Eigen::Vector3d extent_m = Eigen::Vector3d(4.0, 4.0, 4.0);
+  Eigen::Vector3i voxel_dimensions = Eigen::Vector3i(4, 4, 4);
   double resolution_m = 1.0;
   std::string frame_id;
+  std::string geometry_id = "planning_lattice_v1:test";
   double cloud_stamp_s = 0.0;
   uint64_t generation = 0;
 };
@@ -51,6 +55,7 @@ FakeFrozenOccupancyEpoch makeEpoch(
       const Eigen::Vector3d& position) {
     FakeOccupancyDiagnostic out;
     out.available = true;
+    out.observed = position.x() < 2.35;
     out.raw_occupied = position.x() < 1.35;
     out.inflated_occupied = out.raw_occupied;
     out.voxel_center = position;
@@ -63,6 +68,28 @@ FakeFrozenOccupancyEpoch makeEpoch(
     return out;
   };
   return epoch;
+}
+
+std::optional<ego_planner::P0OccupancyEpoch> adaptEpoch(
+    FakeFrozenOccupancyEpoch epoch,
+    const ego_planner::P0OccupancyEpoch::SourceOwner& source_owner);
+
+TEST(P0OccupancyEpochAdapterTest,
+     PreservesPlanningGeometryAndTriStateObservation) {
+  const auto source_owner = std::make_shared<const int>(1);
+  const auto adapted = adaptEpoch(makeEpoch({}), source_owner);
+  ASSERT_TRUE(adapted.has_value());
+  EXPECT_TRUE(adapted->geometry.valid());
+  EXPECT_EQ(adapted->geometry.geometry_id, "planning_lattice_v1:test");
+  EXPECT_TRUE(adapted->geometry.origin_w.isApprox(
+      Eigen::Vector3d(0.35, -0.2, 0.6)));
+
+  const auto observed = adapted->diagnostic_query(
+      Eigen::Vector3d(1.5, 0.0, 0.0));
+  const auto unknown = adapted->diagnostic_query(
+      Eigen::Vector3d(3.5, 0.0, 0.0));
+  EXPECT_EQ(observed.state, iap::RiskOccupancyState::OBSERVED_FREE);
+  EXPECT_EQ(unknown.state, iap::RiskOccupancyState::UNKNOWN);
 }
 
 std::tuple<int, int, int> keyTuple(const iap::VoxelKey& key) {

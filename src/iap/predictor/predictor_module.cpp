@@ -332,6 +332,11 @@ void PredictorModule::set_local_occupancy(const LocalOccupancyGrid* occupancy) {
   gnss_.set_local_occupancy(occupancy);
 }
 
+void PredictorModule::set_observation_predicate(
+    VisibilityPredictor::ObservationPredicate predicate) {
+  gnss_.set_observation_predicate(std::move(predicate));
+}
+
 void PredictorModule::set_lidar_fim_primitives(
     std::shared_ptr<const std::vector<LidarFimPrimitive>> primitives) {
   lidar_.set_lidar_fim_primitives(std::move(primitives));

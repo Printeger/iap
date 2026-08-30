@@ -272,6 +272,8 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
         declare_parameter<double>("forked_forest.corridor_width_m", 2.4);
     forked_forest_config_.junction_clearance_radius_m = declare_parameter<double>(
         "forked_forest.junction_clearance_radius_m", 2.0);
+    forked_forest_start_canopy_clearance_radius_m_ = declare_parameter<double>(
+        "forked_forest.start_canopy_clearance_radius_m", 2.0);
     forked_forest_config_.start_x_m =
         declare_parameter<double>("forked_forest.start_x_m", -18.0);
     forked_forest_config_.goal_x_m =
@@ -683,7 +685,8 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
   }
 
   bool forked_forest_enabled() const {
-    return forest_layout_mode_ == "forked_s_forest_v1";
+    return forest_layout_mode_ == "forked_s_forest_v1" ||
+           forest_layout_mode_ == "forked_s_forest_v2";
   }
 
   void add_forked_forest_edge_canopies() {
@@ -782,6 +785,11 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
     });
     erase_points(groups_.canopy, [&](const Point& point) {
       if (outside_scene(point)) {
+        return true;
+      }
+      if (forest_layout_mode_ == "forked_s_forest_v2" &&
+          std::hypot(point.x - forked_forest_config_.start_x_m, point.y) <=
+              forked_forest_start_canopy_clearance_radius_m_) {
         return true;
       }
       const auto corridor = iap::sim::classifyForkCorridorEnvelope(
@@ -920,9 +928,11 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
     region_canopy_counts_.fill(0);
 
     if (forest_layout_mode_ != "random_forest" &&
-        forest_layout_mode_ != "forked_s_forest_v1") {
+        forest_layout_mode_ != "forked_s_forest_v1" &&
+        forest_layout_mode_ != "forked_s_forest_v2") {
       throw std::runtime_error(
-          "forest_layout_mode must be random_forest or forked_s_forest_v1");
+          "forest_layout_mode must be random_forest, forked_s_forest_v1, "
+          "or forked_s_forest_v2");
     }
     if (forked_forest_enabled() &&
         forked_forest_fork_count_ != iap::sim::kForkedForestForkCount) {
@@ -940,6 +950,9 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
     forked_forest_config_.junction_clearance_radius_m =
         std::max(forked_forest_config_.corridor_half_width_m,
                  forked_forest_config_.junction_clearance_radius_m);
+    forked_forest_start_canopy_clearance_radius_m_ = std::max(
+        forked_forest_config_.junction_clearance_radius_m,
+        forked_forest_start_canopy_clearance_radius_m_);
     forked_forest_flight_clearance_z_m_ =
         std::max(0.1, forked_forest_flight_clearance_z_m_);
     forked_forest_edge_tree_spacing_m_ =
@@ -1138,6 +1151,7 @@ class Demo11CorridorMapPublisher : public rclcpp::Node {
   double forked_forest_edge_tree_spacing_m_ = 1.0;
   double forked_forest_edge_tree_height_m_ = 3.2;
   double forked_forest_edge_canopy_radius_m_ = 1.5;
+  double forked_forest_start_canopy_clearance_radius_m_ = 2.0;
   double forked_forest_side_boundary_spacing_m_ = 0.0;
   double canopy_density_lower_left_ = 0.5;
   double canopy_density_lower_right_ = 0.5;

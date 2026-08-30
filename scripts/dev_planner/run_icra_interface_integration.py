@@ -28,7 +28,9 @@ DEFAULT_RESULTS_ROOT = (
 DEFAULT_INSTALL_ROOT = (REPOSITORY.parents[1] / "install").resolve()
 STAGE_ORDER = ("estimator", "p0", "p4", "p5-final", "full", "shutdown")
 DEFAULT_SCENARIO = "icra072_p4_selection_trigger_v1"
-FOREST_SCENARIO = "icra_dense_forest_four_fork_v1"
+FOREST_V1_SCENARIO = "icra_dense_forest_four_fork_v1"
+FOREST_SCENARIO = "icra_dense_forest_four_fork_v2"
+FOREST_SCENARIOS = (FOREST_V1_SCENARIO, FOREST_SCENARIO)
 SEVEN_STAGE_ORDER = (
     "p0_snapshot", "closed_collision", "p4_selection_application",
     "ego_final_bspline", "p5_final_pass_before_publish",
@@ -117,11 +119,18 @@ STAGES = {
 }
 
 
-def forest_scene_contract() -> dict:
+def _is_forest_scenario(scenario: str) -> bool:
+    return scenario in FOREST_SCENARIOS
+
+
+def forest_scene_contract(scenario: str = FOREST_SCENARIO) -> dict:
     """Return the frozen, expanded geometry used by the forest preset."""
+    if not _is_forest_scenario(scenario):
+        raise ValueError(f"unsupported forest scenario: {scenario}")
+    online = scenario == FOREST_SCENARIO
     signs = [-1, 1, -1, 1]
     contract = {
-        "schema_version": FOREST_SCENARIO,
+        "schema_version": scenario,
         "forest_seed": 41021,
         "risk_seed": 21,
         "scene_bbox_m": {
@@ -133,6 +142,7 @@ def forest_scene_contract() -> dict:
         "low_risk_y_signs": signs,
         "corridor_width_m": 2.4,
         "junction_buffer_radius_m": 2.0,
+        "start_canopy_clearance_radius_m": 5.0 if online else 2.0,
         "forest_density_per_m2": 0.25,
         "stratified_cell_size_m": 2.0,
         "canopy_probability": 0.65,
@@ -145,6 +155,28 @@ def forest_scene_contract() -> dict:
         "p0_use_current_integrity_prior": True,
         "p0_conservative_max_with_gnss": True,
         "planner_executor_thread_count": 6,
+        "online_mapping": {
+            "enabled": online,
+            "truth_map_topic": "",
+            "planner_occupancy_topic": (
+                "/sim/drone_0/lidar" if online
+                else "/map_generator/global_cloud"),
+            "frame_id": "map",
+            "origin_m": [-21.0, -11.0, 0.0],
+            "extent_m": [42.0, 22.0, 8.0],
+            "ego_resolution_m": 0.1,
+            "risk_resolution_m": 0.5,
+            "risk_voxels_per_ego_axis": 5,
+            "unknown_as_occupied": online,
+            "fit_grid_to_map_cloud": not online,
+            "provider_cost_source": (
+                "pre_conservative_fim_ratio" if online
+                else "legacy_safety_pl"),
+            "require_safety_ratio_below_one_for_cost": online,
+            "alert_limit_policy": "fixed_hal10_val20_v1",
+            "hal_m": 10.0,
+            "val_m": 20.0,
+        },
         "gnss": {
             "ephemeris_source": "rinex",
             "enabled_constellations": ["GPS", "GAL", "GLO"],
@@ -170,7 +202,8 @@ def forest_scene_contract() -> dict:
     return contract
 
 
-def forest_manifest_evidence(run_root: Path) -> dict:
+def forest_manifest_evidence(
+        run_root: Path, scenario: str = FOREST_SCENARIO) -> dict:
     """Bind analyzer assumptions to the effective launch manifest."""
     manifests = sorted((run_root / "exports").glob(
         "**/test_planner_manifest.json"))
@@ -194,9 +227,12 @@ def forest_manifest_evidence(run_root: Path) -> dict:
     geometry = actual.get("geometry", {}) if isinstance(actual, dict) else {}
     gnss = actual.get("gnss", {}) if isinstance(actual, dict) else {}
     p0 = actual.get("p0_prediction", {}) if isinstance(actual, dict) else {}
-    expected = forest_scene_contract()
+    expected = forest_scene_contract(scenario)
+    online = expected["online_mapping"]
     expected_values = {
-        "layout_mode": "forked_s_forest_v1",
+        "layout_mode": (
+            "forked_s_forest_v2" if scenario == FOREST_SCENARIO
+            else "forked_s_forest_v1"),
         "map_size_m": [42.0, 22.0, 8.0],
         "forest_size_m": [40.0, 20.0],
         "forest_seed": expected["forest_seed"],
@@ -211,6 +247,8 @@ def forest_manifest_evidence(run_root: Path) -> dict:
         "corridor_width_m": expected["corridor_width_m"],
         "junction_clearance_radius_m": expected[
             "junction_buffer_radius_m"],
+        "start_canopy_clearance_radius_m": expected[
+            "start_canopy_clearance_radius_m"],
         "flight_clearance_z_m": expected["flight_clearance_z_m"],
         "side_boundary_tree_spacing_m": expected[
             "side_boundary_tree_spacing_m"],
@@ -233,8 +271,32 @@ def forest_manifest_evidence(run_root: Path) -> dict:
         "gnss.skymask": (gnss.get("skymask"), False),
         "gnss.nlos": (gnss.get("nlos"), True),
         "gnss.multipath": (gnss.get("multipath"), True),
+        "p0.online_mapping_mode": (
+            p0.get("online_mapping_mode"), online["enabled"]),
         "p0.fit_grid_to_map_cloud": (
-            p0.get("fit_grid_to_map_cloud"), True),
+            p0.get("fit_grid_to_map_cloud"),
+            online["fit_grid_to_map_cloud"]),
+        "p0.map_topic": (p0.get("map_topic"), online["truth_map_topic"]),
+        "p0.origin_m": (p0.get("origin_m"), online["origin_m"]),
+        "p0.extent_m": (p0.get("extent_m"), online["extent_m"]),
+        "p0.risk_resolution_m": (
+            p0.get("risk_resolution_m"), online["risk_resolution_m"]),
+        "p0.ego_resolution_m": (
+            p0.get("ego_resolution_m"), online["ego_resolution_m"]),
+        "p0.ego_origin_m": (p0.get("ego_origin_m"), online["origin_m"]),
+        "p0.unknown_as_occupied": (
+            p0.get("unknown_as_occupied"), online["unknown_as_occupied"]),
+        "p0.provider_cost_source": (
+            p0.get("provider_cost_source"), online["provider_cost_source"]),
+        "p0.require_safety_ratio_below_one_for_cost": (
+            p0.get("require_safety_ratio_below_one_for_cost"),
+            online["require_safety_ratio_below_one_for_cost"]),
+        "p0.alert_limit_policy_id": (
+            p0.get("alert_limit_policy_id"), online["alert_limit_policy"]),
+        "p0.alert_limit_h_m": (
+            p0.get("alert_limit_h_m"), online["hal_m"]),
+        "p0.alert_limit_v_m": (
+            p0.get("alert_limit_v_m"), online["val_m"]),
         "p0.skip_occupied_voxels": (
             p0.get("skip_occupied_voxels"), True),
         "p0.use_current_integrity_prior": (
@@ -266,11 +328,11 @@ def stage_launch_args(
         forest_variant: str | None = None) -> dict[str, str]:
     if stage not in STAGES:
         raise ValueError(f"unknown stage: {stage}")
-    if scenario not in (DEFAULT_SCENARIO, FOREST_SCENARIO):
+    if scenario not in (DEFAULT_SCENARIO, *FOREST_SCENARIOS):
         raise ValueError(f"unsupported scenario: {scenario}")
     if forest_variant not in (None, "risk", "baseline"):
         raise ValueError(f"unsupported forest variant: {forest_variant}")
-    if forest_variant is not None and scenario != FOREST_SCENARIO:
+    if forest_variant is not None and not _is_forest_scenario(scenario):
         raise ValueError("forest variants require the dense forest scenario")
     launch_args = dict(STAGES[stage].launch_args)
     launch_args["scenario"] = scenario
@@ -288,7 +350,7 @@ def stage_launch_args(
 def stage_duration_s(
         stage: str, scenario: str = DEFAULT_SCENARIO,
         forest_variant: str | None = None) -> float:
-    if (stage == "full" and scenario == FOREST_SCENARIO
+    if (stage == "full" and _is_forest_scenario(scenario)
             and forest_variant in ("risk", "baseline")):
         return 90.0
     return STAGES[stage].duration_s
@@ -312,7 +374,7 @@ def _finite_number(value) -> bool:
 
 
 def analyze_forest_risk(records: list[dict]) -> dict:
-    """Require one complete generation with lower risk on all four open arms."""
+    """Require a same-generation contrast for each progressively seen fork."""
     generation_results = []
     for row in records:
         if row.get("kind") != "forest_risk_generation":
@@ -329,15 +391,35 @@ def analyze_forest_risk(records: list[dict]) -> dict:
                 for arm in (low, high))
             finite = all(_finite_number(arm.get(field))
                          for arm in (low, high)
-                         for field in ("mean_c_pi", "max_c_pi", "mean_pl"))
+                         for field in (
+                             "mean_c_pi", "max_c_pi", "mean_pl",
+                             "mean_fim_ratio", "max_fim_ratio"))
             contrast = bool(complete and finite) and (
-                float(low["mean_c_pi"]) <= 0.9 * float(high["mean_c_pi"])
-                and float(low["max_c_pi"]) < float(high["max_c_pi"])
-                and float(low["mean_pl"]) < float(high["mean_pl"]))
+                float(low["mean_fim_ratio"])
+                <= 0.9 * float(high["mean_fim_ratio"])
+                and float(low["max_fim_ratio"])
+                < float(high["max_fim_ratio"]))
+            source_contrast = {}
+            for source, field in (
+                    ("gnss", "mean_gnss_ratio"),
+                    ("lidar", "mean_lidar_ratio"),
+                    ("fim", "mean_fim_ratio"),
+                    ("safety", "mean_risk_ratio")):
+                low_value = low.get(field)
+                high_value = high.get(field)
+                source_contrast[source] = {
+                    "low": low_value,
+                    "high": high_value,
+                    "lower_on_open_arm": bool(
+                        _finite_number(low_value)
+                        and _finite_number(high_value)
+                        and float(low_value) < float(high_value)),
+                }
             fork_results.append({
                 "fork_index": fork.get("fork_index"),
                 "complete": complete,
                 "contrast_pass": contrast,
+                "source_contrast": source_contrast,
                 "low": low,
                 "high": high,
             })
@@ -349,13 +431,38 @@ def analyze_forest_risk(records: list[dict]) -> dict:
             == {0, 1, 2, 3}
             and all(item["contrast_pass"] for item in fork_results),
         })
-    passing = next((item for item in generation_results if item["pass"]), None)
-    failures = [] if passing else ["forest_risk_contrast_missing"]
+    passing_forks = {}
+    for generation in generation_results:
+        for fork in generation["forks"]:
+            fork_index = fork.get("fork_index")
+            if (fork_index in {0, 1, 2, 3}
+                    and fork["contrast_pass"]
+                    and fork_index not in passing_forks):
+                passing_forks[fork_index] = {
+                    **fork,
+                    "generation_id": generation["generation_id"],
+                }
+    passed = set(passing_forks) == {0, 1, 2, 3}
+    failures = [] if passed else ["forest_risk_contrast_missing"]
+    source_assessment = {}
+    if passed:
+        for source in ("gnss", "lidar", "fim", "safety"):
+            lower_forks = [
+                item["fork_index"] for item in passing_forks.values()
+                if item["source_contrast"][source]["lower_on_open_arm"]]
+            source_assessment[source] = {
+                "lower_risk_fork_count": len(lower_forks),
+                "lower_risk_forks": lower_forks,
+                "all_four_lower": len(lower_forks) == 4,
+            }
     return _result(
         failures,
         generation_count=len(generation_results),
-        passing_generation_id=(
-            passing["generation_id"] if passing is not None else None),
+        passing_generation_ids={
+            str(index): passing_forks[index]["generation_id"]
+            for index in sorted(passing_forks)},
+        missing_forks=sorted({0, 1, 2, 3} - set(passing_forks)),
+        source_assessment=source_assessment,
         generations=generation_results,
     )
 
@@ -508,6 +615,7 @@ def analyze_p0(rows: list[dict], capture_start_s: float | None = None) -> dict:
         failures.append("p0_generation_not_monotonic")
     if not generations or max(generations) - min(generations) < 3:
         failures.append("p0_generation_did_not_advance")
+    latest = window[-1][1] if window else {}
     return _result(
         failures,
         health_count=len(observations),
@@ -516,12 +624,38 @@ def analyze_p0(rows: list[dict], capture_start_s: float | None = None) -> dict:
         first_healthy_delay_s=first_time - start_time,
         generation_min=min(generations) if generations else None,
         generation_max=max(generations) if generations else None,
+        geometry={
+            "geometry_id": latest.get("geometry_id"),
+            "frame_id": latest.get("frame_id"),
+            "origin_m": latest.get("grid_origin_m"),
+            "extent_m": latest.get("grid_extent_m"),
+            "dimensions": latest.get("grid_dimensions"),
+            "resolution_m": latest.get("grid_resolution_m"),
+        },
+        alert_limits={
+            "policy_id": latest.get("alert_limit_policy_id"),
+            "hal_m": latest.get("alert_limit_h_m"),
+            "val_m": latest.get("alert_limit_v_m"),
+        },
+        source_identity={
+            "occupancy_generation": latest.get(
+                "source_occupancy_generation"),
+            "occupancy_stamp_s": latest.get("source_occupancy_stamp_s"),
+            "prior_generation": latest.get("source_prior_generation"),
+            "prior_stamp_s": latest.get("source_prior_stamp_s"),
+            "gnss_generation": latest.get("source_gnss_generation"),
+            "gnss_stamp_s": latest.get("source_gnss_stamp_s"),
+            "lidar_generation": latest.get("source_lidar_generation"),
+            "lidar_stamp_s": latest.get("source_lidar_stamp_s"),
+        },
     )
 
 
 DECISION_ID_FIELDS = (
     "planning_attempt_id", "collision_segment_id", "request_hash",
-    "snapshot_generation_id", "snapshot_config_hash", "occupancy_epoch",
+    "snapshot_generation_id", "snapshot_config_hash",
+    "source_identity_hash", "occupancy_epoch", "geometry_id",
+    "occupancy_stamp_s",
 )
 
 
@@ -980,7 +1114,7 @@ def analyze_run(
     if stage == "p0":
         return analyze_p0(health, stage_start)
     if stage in ("p4", "p5-final", "full"):
-        if scenario == FOREST_SCENARIO and forest_variant == "baseline":
+        if _is_forest_scenario(scenario) and forest_variant == "baseline":
             p0 = analyze_p0(health, stage_start)
             stable, bspline_span = _stable_bspline(bsplines)
             poscmd_ok, poscmd_rate = _poscmd_sustained(poscmd_times)
@@ -1000,7 +1134,7 @@ def analyze_run(
         base = analyze_stage_records(
             stage, health, decisions, lineage, bsplines, p5_status,
             poscmd_times, stage_start)
-        if scenario != FOREST_SCENARIO:
+        if not _is_forest_scenario(scenario):
             return base
         risk = analyze_forest_risk(records)
         path = analyze_forest_path(records, forest_variant or "risk")
@@ -1055,10 +1189,18 @@ def summarize_forest_risk_cloud(points: list[dict]) -> dict | None:
             break
 
     def arm_summary(rows: list[dict]) -> dict:
-        valid = [row for row in rows
+        # The fixed geofence cloud includes UNKNOWN cells by design.  Arm
+        # completeness is therefore evaluated inside the currently observed,
+        # non-occupied ROI; requiring the whole four-fork geofence to be valid
+        # would reintroduce the forbidden global-knowledge assumption.
+        supported = [row for row in rows
+                     if int(row.get("observed", 0) or 0) == 1
+                     and int(row.get("occupied", 0) or 0) == 0]
+        valid = [row for row in supported
                  if int(row.get("valid", 0) or 0) == 1
                  and int(row.get("unknown", 0) or 0) == 0
-                 and int(row.get("stale", 0) or 0) == 0]
+                 and int(row.get("stale", 0) or 0) == 0
+                 and int(row.get("occupied", 0) or 0) == 0]
 
         def values(field: str) -> list[float]:
             output = []
@@ -1075,18 +1217,73 @@ def summarize_forest_risk_cloud(points: list[dict]) -> dict | None:
         pl = values("pl")
         hpl = values("hpl")
         vpl = values("vpl")
+        risk_ratio = values("risk_ratio")
+        gnss_ratio = values("gnss_risk_ratio")
+        lidar_ratio = values("lidar_risk_ratio")
+        fim_ratio = values("fim_risk_ratio")
+        floor_h = values("floor_increment_h")
+        floor_v = values("floor_increment_v")
+        floor_source_h = [int(row.get("floor_source_h", 0) or 0)
+                          for row in valid]
+        floor_source_v = [int(row.get("floor_source_v", 0) or 0)
+                          for row in valid]
         return {
-            "sample_count": len(rows),
+            "sample_count": len(supported),
             "valid_count": len(valid),
             "mean_c_pi": statistics.fmean(c_pi) if c_pi else None,
             "max_c_pi": max(c_pi) if c_pi else None,
             "mean_pl": statistics.fmean(pl) if pl else None,
             "mean_hpl": statistics.fmean(hpl) if hpl else None,
             "mean_vpl": statistics.fmean(vpl) if vpl else None,
+            "mean_risk_ratio": (
+                statistics.fmean(risk_ratio) if risk_ratio else None),
+            "mean_gnss_ratio": (
+                statistics.fmean(gnss_ratio) if gnss_ratio else None),
+            "mean_lidar_ratio": (
+                statistics.fmean(lidar_ratio) if lidar_ratio else None),
+            "mean_fim_ratio": (
+                statistics.fmean(fim_ratio) if fim_ratio else None),
+            "max_fim_ratio": max(fim_ratio) if fim_ratio else None,
+            "mean_floor_increment_h_m": (
+                statistics.fmean(floor_h) if floor_h else None),
+            "mean_floor_increment_v_m": (
+                statistics.fmean(floor_v) if floor_v else None),
+            "gnss_floor_h_count": floor_source_h.count(1),
+            "gnss_floor_v_count": floor_source_v.count(1),
         }
 
+    total_count = len(points)
+    observed_rows = [point for point in points
+                     if int(point.get("observed", 0) or 0) == 1]
+    occupied_count = sum(
+        int(point.get("occupied", 0) or 0) == 1 for point in points)
+    unknown_count = sum(
+        int(point.get("unknown", 0) or 0) == 1 for point in points)
+    observed_free_count = sum(
+        int(point.get("observed", 0) or 0) == 1
+        and int(point.get("occupied", 0) or 0) == 0 for point in points)
+    observed_bbox = None
+    if observed_rows:
+        observed_bbox = {
+            "min_xyz_m": [min(float(row[axis]) for row in observed_rows)
+                          for axis in ("x", "y", "z")],
+            "max_xyz_m": [max(float(row[axis]) for row in observed_rows)
+                          for axis in ("x", "y", "z")],
+        }
     return {
         "generation_id": next(iter(generation_ids)),
+        "coverage": {
+            "total_count": total_count,
+            "observed_count": len(observed_rows),
+            "observed_free_count": observed_free_count,
+            "occupied_count": occupied_count,
+            "unknown_count": unknown_count,
+            "observed_ratio": (
+                len(observed_rows) / total_count if total_count else 0.0),
+            "unknown_ratio": (
+                unknown_count / total_count if total_count else 1.0),
+        },
+        "observed_bbox": observed_bbox,
         "forks": [{
             "fork_index": index,
             "low": arm_summary(buckets[(index, "low")]),
@@ -1163,7 +1360,7 @@ def _capture_main(args: argparse.Namespace) -> int:
                 qos_profile_sensor_data)
             self.scene_bbox_recorded = False
             self.forest_risk_generations = set()
-            if args.capture_scenario == FOREST_SCENARIO:
+            if _is_forest_scenario(args.capture_scenario):
                 self.create_subscription(
                     PointCloud2, "/map_generator/global_cloud",
                     self.scene_cloud, qos_profile_sensor_data)
@@ -1240,7 +1437,11 @@ def _capture_main(args: argparse.Namespace) -> int:
         def forest_risk_cloud(self, message: PointCloud2) -> None:
             required = (
                 "x", "y", "z", "pl", "hpl", "vpl", "c_pi", "valid",
-                "unknown", "stale", "generation_id")
+                "risk_ratio", "gnss_risk_ratio", "lidar_risk_ratio",
+                "fim_risk_ratio", "floor_increment_h", "floor_increment_v",
+                "floor_source_h", "floor_source_v",
+                "unknown", "stale", "occupied", "observed",
+                "generation_id")
             if not set(required).issubset(
                     {field.name for field in message.fields}):
                 self.record("forest_risk_cloud_error", {
@@ -1304,6 +1505,66 @@ def _node_names(environment: dict[str, str]) -> set[str]:
         capture_output=True, text=True, check=False, timeout=5.0)
     return {line.strip() for line in completed.stdout.splitlines()
             if line.strip()}
+
+
+def _node_subscriptions(
+        node_name: str, environment: dict[str, str]) -> tuple[list[str], str]:
+    completed = subprocess.run(
+        ["ros2", "node", "info", node_name], cwd=REPOSITORY,
+        env=environment, capture_output=True, text=True, check=False,
+        timeout=5.0)
+    subscriptions = []
+    in_subscribers = False
+    for line in completed.stdout.splitlines():
+        stripped = line.strip()
+        if stripped == "Subscribers:":
+            in_subscribers = True
+            continue
+        if in_subscribers and stripped.endswith(":"):
+            break
+        if in_subscribers and stripped.startswith("/"):
+            subscriptions.append(stripped.split(":", 1)[0])
+    return subscriptions, completed.stderr.strip()
+
+
+def audit_planner_truth_isolation(
+        environment: dict[str, str], timeout_s: float = 18.0) -> dict:
+    """Audit the live planner graph; simulators may still consume truth."""
+    target = "/drone_0_ego_planner_node"
+    deadline = time.monotonic() + timeout_s
+    nodes: set[str] = set()
+    while time.monotonic() < deadline:
+        nodes = _node_names(environment)
+        if target in nodes or target.lstrip("/") in nodes:
+            break
+        time.sleep(0.25)
+    matched = target if target in nodes else target.lstrip("/")
+    if matched not in nodes:
+        return {
+            "schema_version": "planner_truth_isolation_audit_v1",
+            "pass": False,
+            "failures": ["planner_node_missing_for_truth_audit"],
+            "audited_nodes": [],
+            "forbidden_subscriptions": [],
+        }
+    subscriptions, error = _node_subscriptions(matched, environment)
+    forbidden = sorted(topic for topic in subscriptions if topic.startswith(
+        ("/map_generator/", "/sim/world/")))
+    failures = (["planner_truth_subscription_detected"] if forbidden else [])
+    if error:
+        failures.append("planner_graph_audit_error")
+    return {
+        "schema_version": "planner_truth_isolation_audit_v1",
+        "pass": not failures,
+        "failures": failures,
+        "audited_nodes": [{
+            "name": matched,
+            "subscriptions": subscriptions,
+        }],
+        "forbidden_prefixes": ["/map_generator/", "/sim/world/"],
+        "forbidden_subscriptions": forbidden,
+        "stderr": error,
+    }
 
 
 def _group_cleared(pid: int) -> bool:
@@ -1494,7 +1755,8 @@ def _run_one_impl(
         "scenario": scenario,
         "forest_variant": forest_variant,
         "forest_scene": (
-            forest_scene_contract() if scenario == FOREST_SCENARIO else None),
+            forest_scene_contract(scenario)
+            if _is_forest_scenario(scenario) else None),
         "shutdown_variant": shutdown_variant,
         "argv": ["bash", "-lc", shell_command],
         "launch_args": launch_args,
@@ -1512,6 +1774,13 @@ def _run_one_impl(
         "schema_version": "icra_interface_launch_started_v1",
         "started_steady_s": started,
     })
+    graph_audit = None
+    if (_is_forest_scenario(scenario)
+            and scenario == FOREST_SCENARIO
+            and launch_args.get("start_planner") == "true"):
+        graph_audit = audit_planner_truth_isolation(environment)
+        _json_write(run_root / "planner_truth_isolation_audit.json",
+                    graph_audit)
     timeout_s = (
         duration_s if stage == "shutdown" else duration_s + 20.0)
 
@@ -1556,13 +1825,15 @@ def _run_one_impl(
             extra.append("launch_exit_nonzero")
         if not launch_cleared or not capture_cleared:
             extra.append("owned_process_group_remaining")
+        if graph_audit and not graph_audit["pass"]:
+            extra.extend(graph_audit["failures"])
         summary = _result(
             [*summary["failures"], *extra],
             **{key: value for key, value in summary.items()
                if key not in ("result", "failures")})
     forest_manifest = None
-    if scenario == FOREST_SCENARIO and shutdown_variant is None:
-        forest_manifest = forest_manifest_evidence(run_root)
+    if _is_forest_scenario(scenario) and shutdown_variant is None:
+        forest_manifest = forest_manifest_evidence(run_root, scenario)
         if forest_manifest["failures"]:
             summary = _result(
                 [*summary["failures"], *forest_manifest["failures"]],
@@ -1573,8 +1844,10 @@ def _run_one_impl(
         "scenario": scenario,
         "forest_variant": forest_variant,
         "forest_scene": (
-            forest_scene_contract() if scenario == FOREST_SCENARIO else None),
+            forest_scene_contract(scenario)
+            if _is_forest_scenario(scenario) else None),
         "forest_effective_manifest": forest_manifest,
+        "planner_truth_isolation_audit": graph_audit,
         "scene_cloud_bbox": next((
             row.get("payload") for row in _read_jsonl(run_root / "capture.jsonl")
             if row.get("kind") == "scene_cloud_bbox"), None),
@@ -1745,7 +2018,8 @@ def _run_main(args: argparse.Namespace) -> int:
         "scenario": scenario,
         "forest_ab": forest_ab,
         "forest_scene": (
-            forest_scene_contract() if scenario == FOREST_SCENARIO else None),
+            forest_scene_contract(scenario)
+            if _is_forest_scenario(scenario) else None),
         "repetitions": args.repetitions,
         "runs": [],
         "forest_pairs": [],
@@ -1774,7 +2048,7 @@ def _run_main(args: argparse.Namespace) -> int:
                     run_variants = (("baseline", None), ("full", None))
                 else:
                     forest_variant = (
-                        "risk" if scenario == FOREST_SCENARIO
+                        "risk" if _is_forest_scenario(scenario)
                         and stage in ("p4", "p5-final", "full") else None)
                     run_variants = ((None, forest_variant),)
                 for shutdown_variant, forest_variant in run_variants:
@@ -1872,7 +2146,7 @@ def main() -> int:
                         default=DEFAULT_INSTALL_ROOT)
     parser.add_argument("--rviz", action="store_true")
     parser.add_argument(
-        "--scenario", choices=(DEFAULT_SCENARIO, FOREST_SCENARIO),
+        "--scenario", choices=(DEFAULT_SCENARIO, *FOREST_SCENARIOS),
         default=DEFAULT_SCENARIO)
     parser.add_argument(
         "--forest-ab", action="store_true",
@@ -1882,7 +2156,7 @@ def main() -> int:
     parser.add_argument("--capture-ready", type=Path)
     parser.add_argument("--capture-duration", type=float, default=120.0)
     parser.add_argument(
-        "--capture-scenario", choices=(DEFAULT_SCENARIO, FOREST_SCENARIO),
+        "--capture-scenario", choices=(DEFAULT_SCENARIO, *FOREST_SCENARIOS),
         default=DEFAULT_SCENARIO)
     args = parser.parse_args()
     if args.capture_output or args.capture_ready:
@@ -1894,7 +2168,7 @@ def main() -> int:
     if args.rviz and (args.stage != "full" or args.through):
         raise SystemExit("--rviz is valid only with --stage full")
     if args.forest_ab and (
-            args.scenario != FOREST_SCENARIO
+            not _is_forest_scenario(args.scenario)
             or args.stage != "full" or args.through):
         raise SystemExit(
             "--forest-ab requires --scenario "

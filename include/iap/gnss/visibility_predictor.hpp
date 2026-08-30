@@ -6,6 +6,7 @@
 #include <iap/gnss/gnss_types.hpp>
 #include <iap/gnss/canopy_noise_model.hpp>
 #include <Eigen/Core>
+#include <functional>
 #include <vector>
 #include <cmath>
 
@@ -17,6 +18,8 @@ struct VisibilityResult {
   std::vector<bool>    vis_flags;        ///< visibility flag per satellite
   std::vector<double>  kappas;           ///< κ per satellite (occupancy_ratio along LOS)
   std::vector<double>  sigma_effs;       ///< predicted σ_eff per satellite (IAP-RQ-314)
+  std::vector<bool>    unknown_flags;    ///< LOS support contains unobserved space
+  int                  n_unknown  = 0;   ///< satellites rejected for unknown LOS support
   double               mean_kappa = 0.0; ///< mean κ over visible satellites
 };
 
@@ -62,6 +65,13 @@ class VisibilityPredictor {
   ///        Pass nullptr to disable occlusion checks (open-sky assumption).
   void set_occupancy(const LocalOccupancyGrid* grid);
 
+  /// @brief Provide the immutable online-map support test used by this query.
+  /// A false result means UNKNOWN, not free. When configured, every sampled
+  /// LOS point must be observed before a satellite may be treated as visible.
+  using ObservationPredicate =
+      std::function<bool(const Eigen::Vector3d& position_world)>;
+  void set_observation_predicate(ObservationPredicate predicate);
+
   /**
    * @brief Predict visibility + κ for all satellites at a given position.
    *
@@ -80,6 +90,7 @@ class VisibilityPredictor {
 
   Params                      params_;
   const LocalOccupancyGrid*   grid_ = nullptr;
+  ObservationPredicate       observation_predicate_;
 };
 
 }  // namespace iap

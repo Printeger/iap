@@ -38,6 +38,13 @@ bool fixed_lattice_origin(const Eigen::Vector3d& position_w,
       !finite_positive(params.resolution_m)) {
     return false;
   }
+  if (params.use_fixed_origin) {
+    if (!params.fixed_origin_w.allFinite()) {
+      return false;
+    }
+    *origin_w = params.fixed_origin_w;
+    return true;
+  }
 
   constexpr double kMaxExactInteger = 9007199254740991.0;
   WorldVoxelKey center_key;
@@ -191,6 +198,7 @@ bool apply_any_p5_fixture(const RiskGridMapParams& params,
 
 struct RiskGridSnapshot::Generation {
   RiskGridMapParams params;
+  RiskGridSourceIdentity source_identity;
   RiskGridHealth health;
   Eigen::Vector3i voxel_num = Eigen::Vector3i::Zero();
   Eigen::Vector3d origin = Eigen::Vector3d::Zero();
@@ -232,6 +240,11 @@ int RiskGridSnapshot::layerVoxelCount() const {
 const RiskGridMapParams& RiskGridSnapshot::params() const {
   static const RiskGridMapParams kDefaultParams;
   return generation_ ? generation_->params : kDefaultParams;
+}
+
+const RiskGridSourceIdentity& RiskGridSnapshot::sourceIdentity() const {
+  static const RiskGridSourceIdentity kDefaultIdentity;
+  return generation_ ? generation_->source_identity : kDefaultIdentity;
 }
 
 const Eigen::Vector3d& RiskGridSnapshot::origin() const {
@@ -358,6 +371,7 @@ bool validate_corner(const RiskVoxel& voxel,
                      const double stale_timeout_s,
                      const bool require_pl,
                      const bool require_cost,
+                     const bool require_safety_ratio_below_one,
                      std::string* reason) {
   if (voxel.unknown) {
     if (reason) {
@@ -394,6 +408,14 @@ bool validate_corner(const RiskVoxel& voxel,
   if (require_cost && !std::isfinite(voxel.c_pi)) {
     if (reason) {
       *reason = "invalid_cost";
+    }
+    return false;
+  }
+  if (require_cost && require_safety_ratio_below_one &&
+      (!std::isfinite(voxel.risk_ratio) || voxel.risk_ratio >= 1.0)) {
+    if (reason) {
+      *reason = std::isfinite(voxel.risk_ratio)
+          ? "safety_limit_exceeded" : "invalid_safety_ratio";
     }
     return false;
   }
@@ -445,7 +467,9 @@ bool interpolate_cost_layer(const RiskGridSnapshot::Generation& generation,
         std::string corner_reason;
         const bool corner_valid = validate_corner(
             voxel, query_time_s, generation.params.stale_timeout_s,
-            false, true, &corner_reason);
+            false, true,
+            generation.params.require_safety_ratio_below_one_for_cost,
+            &corner_reason);
         const bool conservative_occupied_support =
             policy == RiskCostQueryPolicy::CONSERVATIVE_OCCUPIED_COST_SUPPORT &&
             combined_weight > 0.0 && voxel.unknown && !voxel.valid &&
@@ -564,7 +588,7 @@ bool interpolate_pl_layer(const RiskGridSnapshot::Generation& generation,
         const RiskVoxel& voxel = voxel_at(generation, horizon_id, id);
         if (!validate_corner(voxel, query_time_s,
                              generation.params.stale_timeout_s,
-                             true, false, reason)) {
+                             true, false, false, reason)) {
           return false;
         }
         h[dx][dy][dz] = voxel.hpl_pred;
@@ -1088,6 +1112,24 @@ bool RiskGridMap::refreshFromProvider(
     const OccupancyDiagnosticQuery& occupancy_query,
     const SourceValidator& source_validator,
     std::string* reason) {
+  RiskGridSourceIdentity source_identity;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    source_identity.alert_limit_policy_id = params_.alert_limit_policy_id;
+  }
+  return refreshFromProvider(uav_position_w, now_s, provider,
+                             occupancy_query, source_validator,
+                             source_identity, reason);
+}
+
+bool RiskGridMap::refreshFromProvider(
+    const Eigen::Vector3d& uav_position_w,
+    const double now_s,
+    RiskPredictionProvider& provider,
+    const OccupancyDiagnosticQuery& occupancy_query,
+    const SourceValidator& source_validator,
+    const RiskGridSourceIdentity& source_identity,
+    std::string* reason) {
   std::lock_guard<std::mutex> refresh_lock(refresh_mutex_);
   if (!uav_position_w.allFinite() || !std::isfinite(now_s)) {
     if (reason) {
@@ -1156,6 +1198,8 @@ bool RiskGridMap::refreshFromProvider(
       static_cast<std::size_t>(total_voxel_count));
   std::vector<bool> occupied_skip(static_cast<std::size_t>(total_voxel_count),
                                   false);
+  std::vector<bool> unobserved_skip(
+      static_cast<std::size_t>(total_voxel_count), false);
   std::vector<RiskOccupancyDiagnostic> occupancy_diagnostics(
       static_cast<std::size_t>(total_voxel_count));
   uint64_t occupied_skip_count = 0;
@@ -1215,6 +1259,13 @@ bool RiskGridMap::refreshFromProvider(
             ++occupied_skip_count;
             continue;
           }
+          if (params_copy.require_observed_support && occupancy_query &&
+              (!occupancy_diagnostics[voxel_index].observed ||
+               occupancy_diagnostics[voxel_index].state ==
+                   RiskOccupancyState::UNKNOWN)) {
+            unobserved_skip[voxel_index] = true;
+            continue;
+          }
           queries.push_back(query);
           query_voxel_indices.push_back(voxel_index);
         }
@@ -1257,6 +1308,7 @@ bool RiskGridMap::refreshFromProvider(
 
   auto next = std::make_shared<RiskGridSnapshot::Generation>();
   next->params = params_copy;
+  next->source_identity = source_identity;
   next->voxel_num = voxel_num_copy;
   next->origin = origin_copy;
   next->stamp_s = now_s;
@@ -1309,9 +1361,30 @@ bool RiskGridMap::refreshFromProvider(
       next->voxels[i] = voxel;
       continue;
     }
+    if (unobserved_skip[i]) {
+      voxel.valid = false;
+      voxel.stale = false;
+      voxel.unknown = true;
+      voxel.c_pi = params_copy.unknown_cost;
+      voxel.reason = "unknown_occupancy_support";
+      ++unknown_count;
+      record_unknown_reason(voxel.reason);
+      next->voxels[i] = voxel;
+      continue;
+    }
 
     const RiskPredictionResult& result = indexed_results[i];
     voxel.source_flags = result.source_flags;
+    voxel.hal = result.hal;
+    voxel.val = result.val;
+    voxel.gnss = result.gnss;
+    voxel.lidar = result.lidar;
+    voxel.prior = result.prior;
+    voxel.fim_fused = result.fim_fused;
+    voxel.floor_increment_h = result.floor_increment_h;
+    voxel.floor_increment_v = result.floor_increment_v;
+    voxel.floor_source_h = result.floor_source_h;
+    voxel.floor_source_v = result.floor_source_v;
     if ((voxel.source_flags & PREDICTOR_RESULT_GNSS_USED) != 0u) {
       ++predictor_gnss_used_count;
     }
@@ -1337,8 +1410,17 @@ bool RiskGridMap::refreshFromProvider(
     if (voxel.valid) {
       voxel.hpl_pred = result.hpl_pred;
       voxel.vpl_pred = result.vpl_pred;
-      voxel.c_pi = clamp_cost(std::max(result.hpl_pred, result.vpl_pred),
-                              params_copy.cost_max);
+      voxel.risk_ratio = std::isfinite(result.safety_fused.risk_ratio)
+          ? result.safety_fused.risk_ratio
+          : std::max(result.hpl_pred / result.hal,
+                     result.vpl_pred / result.val);
+      const double provider_cost =
+          params_copy.provider_cost_source ==
+                  RiskProviderCostSource::PRE_CONSERVATIVE_FIM_RATIO &&
+              std::isfinite(result.fim_fused.risk_ratio)
+          ? result.fim_fused.risk_ratio
+          : std::max(result.hpl_pred, result.vpl_pred);
+      voxel.c_pi = clamp_cost(provider_cost, params_copy.cost_max);
       voxel.reason = result.reason.empty() ? "ok" : result.reason;
       ++valid_count;
     } else {
@@ -1447,6 +1529,10 @@ bool RiskGridMap::validateParams(const RiskGridMapParams& params,
     if (reason) *reason = "empty_frame_id";
     return false;
   }
+  if (params.alert_limit_policy_id.empty()) {
+    if (reason) *reason = "empty_alert_limit_policy_id";
+    return false;
+  }
   if (!finite_positive(params.resolution_m) ||
       !finite_positive(params.size_x_m) ||
       !finite_positive(params.size_y_m) ||
@@ -1456,6 +1542,10 @@ bool RiskGridMap::validateParams(const RiskGridMapParams& params,
   }
   if (!params.lattice_anchor_w.allFinite()) {
     if (reason) *reason = "invalid_lattice_anchor";
+    return false;
+  }
+  if (params.use_fixed_origin && !params.fixed_origin_w.allFinite()) {
+    if (reason) *reason = "invalid_fixed_origin";
     return false;
   }
   if (params.horizons_s.empty()) {

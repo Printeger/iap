@@ -72,6 +72,45 @@ void AStar::clearRiskSnapshot()
     risk_query_base_time_s_ = 0.0;
 }
 
+bool AStar::checkOccupancy(const Eigen::Vector3d &pos) const
+{
+    if (frozen_occupancy_query_)
+    {
+        const auto diagnostic = frozen_occupancy_query_(pos);
+        // P4 is fail-closed: outside-map and UNKNOWN are not traversable.
+        return !diagnostic.available || !diagnostic.observed ||
+               diagnostic.state == GridMapObservationState::UNKNOWN ||
+               diagnostic.raw_occupied || diagnostic.inflated_occupied;
+    }
+    return !grid_map_ || static_cast<bool>(grid_map_->getInflateOccupancy(pos));
+}
+
+bool AStar::edgeTraversable(const Eigen::Vector3d &from,
+                            const Eigen::Vector3d &to) const
+{
+    // Preserve the historical live-map search contract.  Swept edge support
+    // is required for the online P4 path because only its frozen tri-state
+    // query can prove OBSERVED_FREE continuously.
+    if (!frozen_occupancy_query_)
+        return !checkOccupancy(to);
+    const Eigen::Vector3d delta = to - from;
+    const double length = delta.norm();
+    if (!from.allFinite() || !to.allFinite() || !std::isfinite(length) ||
+        length <= 1.0e-12)
+        return false;
+    const double sample_step = std::max(0.05, 0.5 * step_size_);
+    const int sample_count = std::max(
+        1, static_cast<int>(std::ceil(length / sample_step)));
+    for (int sample = 0; sample <= sample_count; ++sample)
+    {
+        const double alpha = static_cast<double>(sample) /
+            static_cast<double>(sample_count);
+        if (checkOccupancy(from + alpha * delta))
+            return false;
+    }
+    return true;
+}
+
 double AStar::getDiagHeu(GridNodePtr node1, GridNodePtr node2)
 {
     double dx = abs(node1->index(0) - node2->index(0));
@@ -308,7 +347,8 @@ bool AStar::astarSearchProviderBottleneckV2(
                         continue;
                     const Vector3d next_position = Index2Coord(next_index);
                     // Occupancy authority is evaluated before any P0 risk query.
-                    if (checkOccupancy(next_position))
+                    if (!edgeTraversable(
+                            Index2Coord(current->index), next_position))
                     {
                         ++last_p4_metrics_.occupied_reject_count;
                         continue;
@@ -536,7 +576,9 @@ bool AStar::astarSearchImpl(const double step_size, Vector3d start_pt, Vector3d 
 
                     neighborPtr->rounds = rounds_;
 
-                    if (checkOccupancy(Index2Coord(neighborPtr->index)))
+                    if (!edgeTraversable(
+                            Index2Coord(current->index),
+                            Index2Coord(neighborPtr->index)))
                     {
                         ++last_p4_metrics_.occupied_reject_count;
                         continue;

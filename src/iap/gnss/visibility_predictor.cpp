@@ -5,6 +5,7 @@
 #include <iap/gnss/visibility_predictor.hpp>
 #include <cmath>
 #include <algorithm>
+#include <utility>
 #include <spdlog/spdlog.h>
 
 namespace iap {
@@ -14,6 +15,11 @@ VisibilityPredictor::VisibilityPredictor(const Params& p) : params_(p) {}
 
 void VisibilityPredictor::set_occupancy(const LocalOccupancyGrid* grid) {
   grid_ = grid;
+}
+
+void VisibilityPredictor::set_observation_predicate(
+    ObservationPredicate predicate) {
+  observation_predicate_ = std::move(predicate);
 }
 
 // ---------------------------------------------------------------------------
@@ -33,6 +39,7 @@ VisibilityResult VisibilityPredictor::predict(const Eigen::Vector3d& pos_world,
   res.vis_flags.resize(N, false);
   res.kappas.resize(N, 0.0);
   res.sigma_effs.resize(N, params_.canopy.sigma_c);
+  res.unknown_flags.resize(N, false);
 
   double kappa_sum  = 0.0;
   int    n_above_el = 0;
@@ -49,6 +56,31 @@ VisibilityResult VisibilityPredictor::predict(const Eigen::Vector3d& pos_world,
     ++n_above_el;
 
     const Eigen::Vector3d dir = enu_dir(sat.elevation, sat.azimuth);
+
+    // The planning-side visibility model is allowed to use only observed
+    // online space. A point-cloud miss is not evidence of free space. Sample
+    // the same finite LOS horizon as the occupancy ray and fail closed if any
+    // part of that support remains UNKNOWN.
+    bool unknown_support = false;
+    if (observation_predicate_) {
+      const double start_offset = std::max(0.0, params_.ray_start_offset);
+      const double support_length = std::max(0.0, params_.occ_range);
+      constexpr double kSupportStepM = 0.5;
+      for (double distance = start_offset;
+           distance <= support_length + 1.0e-9;
+           distance += kSupportStepM) {
+        if (!observation_predicate_(pos_world + distance * dir)) {
+          unknown_support = true;
+          break;
+        }
+      }
+      res.unknown_flags[i] = unknown_support;
+      if (unknown_support) {
+        ++res.n_unknown;
+        res.vis_flags[i] = false;
+        continue;
+      }
+    }
 
     // κ and occlusion
     double kappa = 0.0;
@@ -76,9 +108,10 @@ VisibilityResult VisibilityPredictor::predict(const Eigen::Vector3d& pos_world,
   res.mean_kappa = (res.n_vis > 0) ? (kappa_sum / res.n_vis) : 0.0;
 
   spdlog::trace("[VisibilityPredictor] pos=({:.1f},{:.1f},{:.1f}) "
-                "n_sats={} n_above_el={} n_vis={} mean_kappa={:.3f}",
+                "n_sats={} n_above_el={} n_vis={} n_unknown={} "
+                "mean_kappa={:.3f}",
                 pos_world.x(), pos_world.y(), pos_world.z(),
-                N, n_above_el, res.n_vis, res.mean_kappa);
+                N, n_above_el, res.n_vis, res.n_unknown, res.mean_kappa);
 
   return res;
 }

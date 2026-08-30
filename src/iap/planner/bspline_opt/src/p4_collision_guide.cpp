@@ -66,7 +66,8 @@ bool sameSnapshotIdentity(
 std::string riskGridConfigHash(const iap::RiskGridMapParams & params)
 {
   std::ostringstream stream;
-  stream << "risk_grid_config_v1;" << params.frame_id << ';';
+  stream << "risk_grid_config_v2;" << params.frame_id << ';'
+         << params.alert_limit_policy_id << ';';
   for (int axis = 0; axis < 3; ++axis)
     appendCanonicalDouble(stream, params.lattice_anchor_w(axis));
   appendCanonicalDouble(stream, params.resolution_m);
@@ -104,6 +105,23 @@ std::string riskGridConfigHash(const iap::RiskGridMapParams & params)
   stream << params.p5_7_fixture.effective_enabled << ';';
   appendCanonicalDouble(stream, params.p5_7_fixture.hpl_pred_m);
   appendCanonicalDouble(stream, params.p5_7_fixture.vpl_pred_m);
+  return hashHex(fnv1aAppend(kFnvOffset, stream.str()));
+}
+
+std::string riskGridSourceIdentityHash(
+  const iap::RiskGridSourceIdentity & identity)
+{
+  std::ostringstream stream;
+  stream << "risk_grid_sources_v1;"
+         << identity.occupancy_generation << ';';
+  appendCanonicalDouble(stream, identity.occupancy_stamp_s);
+  stream << identity.prior_generation << ';';
+  appendCanonicalDouble(stream, identity.prior_stamp_s);
+  stream << identity.gnss_generation << ';';
+  appendCanonicalDouble(stream, identity.gnss_stamp_s);
+  stream << identity.lidar_generation << ';';
+  appendCanonicalDouble(stream, identity.lidar_stamp_s);
+  stream << identity.alert_limit_policy_id << ';';
   return hashHex(fnv1aAppend(kFnvOffset, stream.str()));
 }
 
@@ -288,6 +306,20 @@ void selectOriginal(
   decision->selection_applied = false;
 }
 
+void handleRiskNotReady(
+  const bool fallback_to_original, const P4GuideDecisionReason reason,
+  P4GuideDecision * decision)
+{
+  if (fallback_to_original) {
+    selectOriginal(reason, decision);
+    return;
+  }
+  decision->status = P4GuideDecisionStatus::PLANNER_FAILURE;
+  decision->reason = reason;
+  decision->selected = P4GuideRecord{};
+  decision->selection_applied = false;
+}
+
 bool epochCurrent(const P4GuideRequest & request)
 {
   return request.liveOccupancyEpoch() &&
@@ -299,6 +331,45 @@ bool requestIdentityCurrent(
 {
   return request.valid() &&
          request.canonicalIdentityHash() == expected_hash;
+}
+
+bool frozenGuideSupported(
+  const std::vector<Eigen::Vector3d> & path,
+  const std::shared_ptr<const GridMap::FrozenOccupancyEpoch> & occupancy)
+{
+  if (!occupancy) {
+    return true;
+  }
+  if (!occupancy->diagnostic_query || path.size() < 2 ||
+    !std::isfinite(occupancy->resolution_m) ||
+    occupancy->resolution_m <= 0.0)
+  {
+    return false;
+  }
+  const double sample_step = std::max(0.05, 0.5 * occupancy->resolution_m);
+  const auto observed_free = [&occupancy](const Eigen::Vector3d & point) {
+      const auto support = occupancy->diagnostic_query(point);
+      return support.available && support.observed &&
+             support.state == GridMapObservationState::OBSERVED_FREE &&
+             !support.raw_occupied && !support.inflated_occupied;
+    };
+  for (std::size_t index = 1; index < path.size(); ++index) {
+    const Eigen::Vector3d delta = path[index] - path[index - 1];
+    const double length = delta.norm();
+    if (!std::isfinite(length) || length <= kGeometryEpsilon) {
+      return false;
+    }
+    const int samples = std::max(1, static_cast<int>(std::ceil(
+      length / sample_step)));
+    for (int sample = 0; sample <= samples; ++sample) {
+      const double alpha = static_cast<double>(sample) /
+        static_cast<double>(samples);
+      if (!observed_free(path[index - 1] + alpha * delta)) {
+        return false;
+      }
+    }
+  }
+  return true;
 }
 
 }  // namespace
@@ -364,7 +435,8 @@ P4GuideRequest::P4GuideRequest(
   bool scanner_verified_free_endpoints,
   std::shared_ptr<const iap::RiskGridSnapshot> snapshot,
   double query_base_time_s, uint64_t occupancy_epoch,
-  LiveOccupancyEpoch live_occupancy_epoch, P4RiskAStarConfig config)
+  LiveOccupancyEpoch live_occupancy_epoch, P4RiskAStarConfig config,
+  std::shared_ptr<const GridMap::FrozenOccupancyEpoch> occupancy_snapshot)
 : planning_attempt_id_(planning_attempt_id),
   collision_segment_id_(collision_segment_id),
   start_(std::move(start)),
@@ -374,7 +446,8 @@ P4GuideRequest::P4GuideRequest(
   query_base_time_s_(query_base_time_s),
   occupancy_epoch_(occupancy_epoch),
   live_occupancy_epoch_(std::move(live_occupancy_epoch)),
-  config_(std::move(config))
+  config_(std::move(config)),
+  occupancy_snapshot_(std::move(occupancy_snapshot))
 {
 }
 
@@ -396,6 +469,33 @@ bool P4GuideRequest::valid(std::string * reason) const
   }
   if (!std::isfinite(query_base_time_s_) || !live_occupancy_epoch_) {
     return fail("invalid_time_or_epoch_recheck");
+  }
+  if (occupancy_snapshot_) {
+    if (!occupancy_snapshot_->diagnostic_query ||
+      occupancy_snapshot_->generation == 0u ||
+      occupancy_snapshot_->generation != occupancy_epoch_ ||
+      occupancy_snapshot_->frame_id != "map" ||
+      occupancy_snapshot_->geometry_id.empty())
+    {
+      return fail("invalid_frozen_occupancy_identity");
+    }
+    const auto start_support = occupancy_snapshot_->diagnostic_query(start_);
+    const auto end_support = occupancy_snapshot_->diagnostic_query(end_);
+    const auto observed_free = [](const auto & support) {
+        return support.available && support.observed &&
+               support.state == GridMapObservationState::OBSERVED_FREE &&
+               !support.raw_occupied && !support.inflated_occupied;
+      };
+    if (!observed_free(start_support) || !observed_free(end_support)) {
+      return fail("endpoints_not_observed_free");
+    }
+    if (snapshot_ &&
+      (snapshot_->params().frame_id != occupancy_snapshot_->frame_id ||
+       (!snapshot_->params().geometry_id.empty() &&
+        snapshot_->params().geometry_id != occupancy_snapshot_->geometry_id)))
+    {
+      return fail("risk_occupancy_geometry_mismatch");
+    }
   }
   if (!std::isfinite(config_.query_speed_mps) ||
     config_.query_speed_mps <= kGeometryEpsilon ||
@@ -455,9 +555,15 @@ std::string P4GuideRequest::canonicalIdentityHash() const
   appendCanonicalDouble(stream, query_base_time_s_);
   stream << occupancy_epoch_ << ';' << config_.enable_risk_aware_astar << ';' <<
     config_.metrics_only << ';';
+  stream << (occupancy_snapshot_ ? occupancy_snapshot_->geometry_id : "")
+         << ';';
+  appendCanonicalDouble(
+    stream, occupancy_snapshot_ ? occupancy_snapshot_->cloud_stamp_s :
+    std::numeric_limits<double>::quiet_NaN());
   if (config_.objective == P4RiskObjective::PROVIDER_BOTTLENECK_V2) {
     stream << static_cast<int>(config_.objective) << ';'
-           << snapshotConfigHash() << ';';
+           << snapshotConfigHash() << ';'
+           << snapshotSourceIdentityHash() << ';';
   }
   appendCanonicalDouble(stream, config_.lambda_p4_risk);
   appendCanonicalDouble(stream, config_.risk_cost_max);
@@ -475,6 +581,11 @@ std::string P4GuideRequest::snapshotConfigHash() const
   return snapshot_ ? riskGridConfigHash(snapshot_->params()) : "";
 }
 
+std::string P4GuideRequest::snapshotSourceIdentityHash() const
+{
+  return snapshot_ ? riskGridSourceIdentityHash(snapshot_->sourceIdentity()) : "";
+}
+
 P4GuideSearchOutcome P4AStarGuideSearch::searchOriginal(
   const P4GuideRequest & request)
 {
@@ -484,6 +595,10 @@ P4GuideSearchOutcome P4AStarGuideSearch::searchOriginal(
     return outcome;
   }
   a_star_->setP4Config(request.config());
+  if (request.occupancySnapshot()) {
+    a_star_->setFrozenOccupancyQuery(
+      request.occupancySnapshot()->diagnostic_query);
+  }
   outcome.success = a_star_->AstarSearchOriginal(
     0.1, request.start(), request.end());
   outcome.metrics = a_star_->getLastP4Metrics();
@@ -509,6 +624,10 @@ P4GuideSearchOutcome P4AStarGuideSearch::searchRiskAware(
     return outcome;
   }
   a_star_->setP4Config(request.config());
+  if (request.occupancySnapshot()) {
+    a_star_->setFrozenOccupancyQuery(
+      request.occupancySnapshot()->diagnostic_query);
+  }
   a_star_->setRiskSnapshot(request.snapshot(), request.queryBaseTimeS());
   a_star_->setP4V2ReferencePathLength(original_path_length_m_);
   const double search_step = request.config().objective ==
@@ -540,6 +659,11 @@ P4GuideDecision P4CollisionGuidePlanner::planCollisionGuide(
   decision.segment_end = request.end();
   decision.query_base_time_s = request.queryBaseTimeS();
   decision.occupancy_epoch = request.occupancyEpoch();
+  decision.geometry_id = request.occupancySnapshot() ?
+    request.occupancySnapshot()->geometry_id : "";
+  decision.occupancy_stamp_s = request.occupancySnapshot() ?
+    request.occupancySnapshot()->cloud_stamp_s :
+    std::numeric_limits<double>::quiet_NaN();
   decision.snapshot_owner = request.snapshot();
   decision.snapshot_generation = request.snapshot() ?
     request.snapshot()->generation_id() : 0;
@@ -548,6 +672,7 @@ P4GuideDecision P4CollisionGuidePlanner::planCollisionGuide(
   decision.snapshot_frame = request.snapshot() ?
     request.snapshot()->params().frame_id : "";
   decision.snapshot_config_hash = request.snapshotConfigHash();
+  decision.source_identity_hash = request.snapshotSourceIdentityHash();
   decision.request_hash = request.canonicalIdentityHash();
 
   std::string validation_reason;
@@ -582,6 +707,11 @@ P4GuideDecision P4CollisionGuidePlanner::planCollisionGuide(
       P4GuideDecisionReason::ORIGINAL_SEARCH_FAILED;
     return decision;
   }
+  if (!frozenGuideSupported(original.path, request.occupancySnapshot())) {
+    decision.status = P4GuideDecisionStatus::PLANNER_FAILURE;
+    decision.reason = P4GuideDecisionReason::PROVIDER_SUPPORT_INCOMPLETE;
+    return decision;
+  }
   if (!buildGuideRecord(
       original.path, request.snapshot(), request.queryBaseTimeS(),
       request.config().query_speed_mps,
@@ -608,7 +738,9 @@ P4GuideDecision P4CollisionGuidePlanner::planCollisionGuide(
     return decision;
   }
   if (!request.snapshot()) {
-    selectOriginal(P4GuideDecisionReason::SNAPSHOT_UNAVAILABLE, &decision);
+    handleRiskNotReady(
+      request.config().fallback_to_original_when_risk_not_ready,
+      P4GuideDecisionReason::SNAPSHOT_UNAVAILABLE, &decision);
     return decision;
   }
 
@@ -632,7 +764,15 @@ P4GuideDecision P4CollisionGuidePlanner::planCollisionGuide(
       (risk.reason == "provider_support_incomplete" ?
        P4GuideDecisionReason::PROVIDER_SUPPORT_INCOMPLETE :
        P4GuideDecisionReason::RISK_SEARCH_FAILED);
-    selectOriginal(reason, &decision);
+    handleRiskNotReady(
+      request.config().fallback_to_original_when_risk_not_ready,
+      reason, &decision);
+    return decision;
+  }
+  if (!frozenGuideSupported(risk.path, request.occupancySnapshot())) {
+    handleRiskNotReady(
+      request.config().fallback_to_original_when_risk_not_ready,
+      P4GuideDecisionReason::PROVIDER_SUPPORT_INCOMPLETE, &decision);
     return decision;
   }
   if (!buildGuideRecord(
@@ -652,7 +792,8 @@ P4GuideDecision P4CollisionGuidePlanner::planCollisionGuide(
   if (!decision.original.risk_profile.complete() ||
     !decision.risk.risk_profile.complete())
   {
-    selectOriginal(
+    handleRiskNotReady(
+      request.config().fallback_to_original_when_risk_not_ready,
       incompleteProfileReason(
         decision.original.risk_profile, decision.risk.risk_profile),
       &decision);
@@ -734,6 +875,8 @@ bool p4GuideDecisionReadyForInjection(
   if (!expected_request.valid() ||
     decision.request_hash != expected_request.canonicalIdentityHash() ||
     decision.snapshot_config_hash != expected_request.snapshotConfigHash() ||
+    decision.source_identity_hash !=
+      expected_request.snapshotSourceIdentityHash() ||
     decision.planning_attempt_id != expected_request.planningAttemptId() ||
     decision.collision_segment_id != expected_request.collisionSegmentId() ||
     !sameDouble(decision.query_base_time_s, expected_request.queryBaseTimeS()) ||

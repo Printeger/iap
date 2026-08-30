@@ -672,6 +672,32 @@ TEST(P4CollisionGuideDecision, ProviderSupportFailureHasTypedV2Fallback)
     ego_planner::P4GuideDecisionReason::PROVIDER_SUPPORT_INCOMPLETE);
 }
 
+TEST(P4CollisionGuideDecision,
+  ProviderSupportFailureFailsClosedWhenFallbackIsDisabled)
+{
+  uint64_t epoch = 8;
+  const auto snapshot = makeSnapshot(ProviderMode::SPATIAL);
+  auto search = successfulSearch();
+  search.risk.success = false;
+  search.risk.path.clear();
+  search.risk.reason = "provider_support_incomplete";
+  auto config = providerBottleneckV2Config();
+  config.fallback_to_original_when_risk_not_ready = false;
+  ego_planner::P4CollisionGuidePlanner planner(search);
+
+  const auto decision = planner.planCollisionGuide(
+    makeRequest(snapshot, epoch, &epoch, config));
+
+  EXPECT_EQ(
+    decision.status, ego_planner::P4GuideDecisionStatus::PLANNER_FAILURE);
+  EXPECT_EQ(
+    decision.reason,
+    ego_planner::P4GuideDecisionReason::PROVIDER_SUPPORT_INCOMPLETE);
+  EXPECT_TRUE(decision.original.returned);
+  EXPECT_FALSE(decision.selected.returned);
+  EXPECT_FALSE(decision.selection_applied);
+}
+
 TEST(P4CollisionGuideDecision, IncompleteSupportAndRatioHaveExactFallbacks)
 {
   uint64_t epoch = 10;

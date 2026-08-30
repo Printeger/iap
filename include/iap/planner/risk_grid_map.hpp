@@ -3,6 +3,7 @@
 #include <Eigen/Core>
 
 #include <cstdint>
+#include <cmath>
 #include <functional>
 #include <limits>
 #include <memory>
@@ -24,6 +25,36 @@ constexpr uint32_t RISK_GRID_SOURCE_OCCUPIED_SKIP = 1u << 31;
 enum class RiskCostQueryPolicy {
   LEGACY_STRICT = 0,
   CONSERVATIVE_OCCUPIED_COST_SUPPORT,
+};
+
+enum class RiskProviderCostSource {
+  LEGACY_SAFETY_PL = 0,
+  PRE_CONSERVATIVE_FIM_RATIO,
+};
+
+enum class RiskOccupancyState : uint8_t {
+  UNKNOWN = 0,
+  OBSERVED_FREE = 1,
+  OCCUPIED = 2,
+};
+
+struct PlanningLatticeGeometry {
+  std::string frame_id;
+  Eigen::Vector3d origin_w = Eigen::Vector3d::Constant(
+      std::numeric_limits<double>::quiet_NaN());
+  Eigen::Vector3d extent_m = Eigen::Vector3d::Constant(
+      std::numeric_limits<double>::quiet_NaN());
+  Eigen::Vector3i voxel_dimensions = Eigen::Vector3i::Zero();
+  double resolution_m = std::numeric_limits<double>::quiet_NaN();
+  std::string geometry_id;
+
+  bool valid() const {
+    return !frame_id.empty() && !geometry_id.empty() &&
+        origin_w.allFinite() && extent_m.allFinite() &&
+        (extent_m.array() > 0.0).all() &&
+        (voxel_dimensions.array() > 0).all() &&
+        std::isfinite(resolution_m) && resolution_m > 0.0;
+  }
 };
 
 struct P5_3HighRiskZoneFixtureConfig {
@@ -87,7 +118,11 @@ struct P5_7RejectedTrajectoryFixtureConfig {
 
 struct RiskGridMapParams {
   std::string frame_id = "map";
+  std::string alert_limit_policy_id = "legacy_unspecified";
   Eigen::Vector3d lattice_anchor_w = Eigen::Vector3d::Zero();
+  bool use_fixed_origin = false;
+  Eigen::Vector3d fixed_origin_w = Eigen::Vector3d::Zero();
+  std::string geometry_id;
   double resolution_m = 0.75;
   double size_x_m = 30.0;
   double size_y_m = 30.0;
@@ -98,6 +133,10 @@ struct RiskGridMapParams {
   double unknown_cost = 10.0;
   double cost_max = 100.0;
   bool skip_occupied_voxels = true;
+  bool require_observed_support = false;
+  RiskProviderCostSource provider_cost_source =
+      RiskProviderCostSource::LEGACY_SAFETY_PL;
+  bool require_safety_ratio_below_one_for_cost = false;
   bool use_predictor_batch_query = true;
   P5_3HighRiskZoneFixtureConfig p5_3_fixture;
   P5_4NearRiskZoneFixtureConfig p5_4_fixture;
@@ -131,12 +170,48 @@ struct RiskGridHealth {
   std::string reason = "not_ready";
 };
 
+// Immutable provenance captured with one risk generation.  These values are
+// evidence only: the generation itself remains the atomic planning contract.
+struct RiskGridSourceIdentity {
+  uint64_t occupancy_generation = 0;
+  double occupancy_stamp_s = std::numeric_limits<double>::quiet_NaN();
+  uint64_t prior_generation = 0;
+  double prior_stamp_s = std::numeric_limits<double>::quiet_NaN();
+  uint64_t gnss_generation = 0;
+  double gnss_stamp_s = std::numeric_limits<double>::quiet_NaN();
+  uint64_t lidar_generation = 0;
+  double lidar_stamp_s = std::numeric_limits<double>::quiet_NaN();
+  std::string alert_limit_policy_id = "legacy_unspecified";
+};
+
 struct RiskOccupancyDiagnostic;
+
+struct RiskSourcePrediction {
+  bool available = false;
+  bool valid = false;
+  bool stale = false;
+  double hpl = std::numeric_limits<double>::quiet_NaN();
+  double vpl = std::numeric_limits<double>::quiet_NaN();
+  double risk_ratio = std::numeric_limits<double>::quiet_NaN();
+  double information_trace = std::numeric_limits<double>::quiet_NaN();
+  std::string reason = "not_evaluated";
+};
 
 struct RiskVoxel {
   double c_pi = std::numeric_limits<double>::quiet_NaN();
   double hpl_pred = std::numeric_limits<double>::quiet_NaN();
   double vpl_pred = std::numeric_limits<double>::quiet_NaN();
+  double hal = 10.0;
+  double val = 20.0;
+  double risk_ratio = std::numeric_limits<double>::quiet_NaN();
+  RiskSourcePrediction gnss;
+  RiskSourcePrediction lidar;
+  RiskSourcePrediction prior;
+  RiskSourcePrediction fim_fused;
+  double floor_increment_h = 0.0;
+  double floor_increment_v = 0.0;
+  std::string floor_source_h = "none";
+  std::string floor_source_v = "none";
   double stamp_s = std::numeric_limits<double>::quiet_NaN();
   bool valid = false;
   bool stale = true;
@@ -173,8 +248,10 @@ struct RiskCostDecomposition {
 
 struct RiskOccupancyDiagnostic {
   bool available = false;
+  bool observed = false;
   bool raw_occupied = false;
   bool inflated_occupied = false;
+  RiskOccupancyState state = RiskOccupancyState::UNKNOWN;
   Eigen::Vector3i voxel_index = Eigen::Vector3i::Constant(-1);
   Eigen::Vector3d voxel_center = Eigen::Vector3d::Constant(
       std::numeric_limits<double>::quiet_NaN());
@@ -245,6 +322,17 @@ struct RiskPredictionResult {
   bool stale = true;
   double hpl_pred = std::numeric_limits<double>::quiet_NaN();
   double vpl_pred = std::numeric_limits<double>::quiet_NaN();
+  double hal = 10.0;
+  double val = 20.0;
+  RiskSourcePrediction gnss;
+  RiskSourcePrediction lidar;
+  RiskSourcePrediction prior;
+  RiskSourcePrediction fim_fused;
+  RiskSourcePrediction safety_fused;
+  double floor_increment_h = 0.0;
+  double floor_increment_v = 0.0;
+  std::string floor_source_h = "none";
+  std::string floor_source_v = "none";
   uint32_t source_flags = 0u;
   std::string reason = "not_evaluated";
 };
@@ -269,6 +357,7 @@ class RiskGridSnapshot {
   int layerVoxelCount() const;
 
   const RiskGridMapParams& params() const;
+  const RiskGridSourceIdentity& sourceIdentity() const;
   const Eigen::Vector3d& origin() const;
   const Eigen::Vector3i& voxelNum() const;
 
@@ -363,6 +452,13 @@ class RiskGridMap {
                            RiskPredictionProvider& provider,
                            const OccupancyDiagnosticQuery& occupancy_query,
                            const SourceValidator& source_validator,
+                           std::string* reason = nullptr);
+  bool refreshFromProvider(const Eigen::Vector3d& uav_position_w,
+                           double now_s,
+                           RiskPredictionProvider& provider,
+                           const OccupancyDiagnosticQuery& occupancy_query,
+                           const SourceValidator& source_validator,
+                           const RiskGridSourceIdentity& source_identity,
                            std::string* reason = nullptr);
 
   void markRefreshFailure(double now_s, const std::string& reason);

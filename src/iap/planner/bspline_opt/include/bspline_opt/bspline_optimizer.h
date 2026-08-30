@@ -402,7 +402,10 @@ namespace ego_planner
       std::string request_hash;
       uint64_t snapshot_generation = 0;
       std::string snapshot_config_hash;
+      std::string source_identity_hash;
       uint64_t occupancy_epoch = 0;
+      std::string geometry_id;
+      double occupancy_stamp_s = std::numeric_limits<double>::quiet_NaN();
       P4GuideDecisionStatus selected_status =
           P4GuideDecisionStatus::DECISION_INVALID_REPLAN_REQUIRED;
       std::string original_guide_hash;
@@ -653,6 +656,8 @@ namespace ego_planner
     std::shared_ptr<const iap::RiskGridSnapshot> p4_risk_snapshot_;
     double p4_query_base_time_s_{0.0};
     uint64_t p4_occupancy_epoch_{0};
+    std::shared_ptr<const GridMap::FrozenOccupancyEpoch>
+        p4_occupancy_snapshot_;
     uint64_t active_p4_attempt_id_{0};
     void invalidateP4AttemptLineage();
     void syncP4AdmittedLineage();

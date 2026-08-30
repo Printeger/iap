@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <utility>
 
 namespace iap {
 namespace {
@@ -120,11 +121,18 @@ void GnssAdvisoryPredictor::set_params(
   params_ = params;
   geometry_predictor_ = GnssGeometryPlPredictor(params_.geometry_params);
   visibility_predictor_ = VisibilityPredictor(params_.visibility_params);
+  visibility_predictor_.set_observation_predicate(observation_predicate_);
 }
 
 void GnssAdvisoryPredictor::set_local_occupancy(
     const LocalOccupancyGrid* occupancy) {
   visibility_predictor_.set_occupancy(occupancy);
+}
+
+void GnssAdvisoryPredictor::set_observation_predicate(
+    VisibilityPredictor::ObservationPredicate predicate) {
+  observation_predicate_ = std::move(predicate);
+  visibility_predictor_.set_observation_predicate(observation_predicate_);
 }
 
 GnssAdvisoryResult GnssAdvisoryPredictor::fallback(
@@ -219,8 +227,11 @@ GnssAdvisoryResult GnssAdvisoryPredictor::query(
   const auto visible_set = visible_geometry(snapshot.gnss_epoch, visibility);
   const auto& geom = visible_set.geom;
   if (static_cast<int>(geom.size()) < params_.geometry_params.min_sats) {
-    auto out = fallback("too_few_sats");
+    auto out = fallback(visibility.n_unknown > 0
+                            ? "too_few_observed_los_sats"
+                            : "too_few_sats");
     out.n_visible = visibility.n_vis;
+    out.n_unknown_support = visibility.n_unknown;
     copy_geometry_set_diagnostics(visible_set, out);
     return out;
   }
@@ -229,6 +240,7 @@ GnssAdvisoryResult GnssAdvisoryPredictor::query(
   if (!pl.valid) {
     auto out = fallback("singular_geometry");
     out.n_visible = visibility.n_vis;
+    out.n_unknown_support = visibility.n_unknown;
     copy_geometry_set_diagnostics(visible_set, out);
     out.n_hypotheses = pl.n_hypotheses;
     return out;
@@ -256,6 +268,7 @@ GnssAdvisoryResult GnssAdvisoryPredictor::query(
     out.vdop = std::sqrt(pl.S0(2, 2));
   }
   out.n_visible = visibility.n_vis;
+  out.n_unknown_support = visibility.n_unknown;
   copy_geometry_set_diagnostics(visible_set, out);
   out.n_hypotheses = pl.n_hypotheses;
   return compute_advisory_fim(query_position, snapshot.gnss_epoch, visibility,

@@ -290,6 +290,7 @@ void expect_gnss_scientific_eq(const iap::GnssAdvisoryResult& actual,
   expect_scalar_equivalent(actual.effective_sigma_max,
                            expected.effective_sigma_max);
   EXPECT_EQ(actual.n_visible, expected.n_visible);
+  EXPECT_EQ(actual.n_unknown_support, expected.n_unknown_support);
   EXPECT_EQ(actual.n_used, expected.n_used);
   EXPECT_EQ(actual.n_hypotheses, expected.n_hypotheses);
   EXPECT_EQ(actual.n_excluded, expected.n_excluded);
@@ -555,6 +556,40 @@ TEST(PredictorModuleTest, GnssTooFewSatsDoesNotReturnFiniteFallbackPl) {
   EXPECT_FALSE(std::isfinite(result.hpl));
   EXPECT_FALSE(std::isfinite(result.vpl));
   EXPECT_FALSE(std::isfinite(result.pl_scalar));
+}
+
+TEST(PredictorModuleTest, GnssUnknownOnlineLosIsNotAssumedVisible) {
+  auto params = make_params();
+  params.gnss.visibility_params.ray_start_offset = 0.0;
+  params.gnss.visibility_params.occ_range = 3.0;
+  iap::GnssAdvisoryPredictor predictor(params.gnss);
+  predictor.set_observation_predicate(
+      [](const Eigen::Vector3d& position) {
+        return position.norm() < 0.75;
+      });
+
+  const auto result =
+      predictor.query(Eigen::Vector3d::Zero(), make_snapshot(true, false));
+
+  EXPECT_FALSE(result.valid);
+  EXPECT_FALSE(result.available);
+  EXPECT_EQ(result.fallback_reason, "too_few_observed_los_sats");
+  EXPECT_EQ(result.n_visible, 0);
+  EXPECT_EQ(result.n_unknown_support, 8);
+}
+
+TEST(PredictorModuleTest, GnssFullyObservedOnlineLosRemainsAvailable) {
+  auto params = make_params();
+  iap::PredictorModule module(params);
+  module.set_observation_predicate(
+      [](const Eigen::Vector3d&) { return true; });
+
+  iap::PredictorQueryInput input(
+      Eigen::Vector3d::Zero(), make_snapshot(true, true), 100.0, 0.0);
+  const auto result = module.query(input);
+
+  EXPECT_TRUE(result.gnss.valid);
+  EXPECT_EQ(result.gnss.n_unknown_support, 0);
 }
 
 TEST(PredictorModuleTest, GnssExcludedSatellitesReduceUsedCountAndFallbackExplicitly) {
@@ -1622,6 +1657,14 @@ TEST(PredictorModuleTest, DegenerateLidarDoesNotReduceSelectedPl) {
     const auto raw = raw_fusion.query(snapshot, gnss, lidar);
     const auto selected = conservative_fusion.query(snapshot, gnss, lidar);
     ASSERT_TRUE(selected.valid) << case_id;
+    EXPECT_DOUBLE_EQ(selected.pre_conservative_hpl, raw.hpl) << case_id;
+    EXPECT_DOUBLE_EQ(selected.pre_conservative_vpl, raw.vpl) << case_id;
+    EXPECT_NEAR(selected.floor_increment_h,
+                selected.hpl - selected.pre_conservative_hpl, 1.0e-12)
+        << case_id;
+    EXPECT_NEAR(selected.floor_increment_v,
+                selected.vpl - selected.pre_conservative_vpl, 1.0e-12)
+        << case_id;
     EXPECT_GE(selected.hpl + 1.0e-12, gnss.hpl) << case_id;
     EXPECT_GE(selected.vpl + 1.0e-12, gnss.vpl) << case_id;
     if (case_id == "rich_lidar") {

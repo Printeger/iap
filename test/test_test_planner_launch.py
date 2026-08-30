@@ -378,6 +378,61 @@ class TestPlannerLaunchTest(unittest.TestCase):
         self.assertEqual(context.launch_configurations["forest_layout_mode"],
                          "forked_s_forest_v1")
 
+    def test_dense_forest_v2_is_online_and_truth_isolated(self):
+        name = "icra_dense_forest_four_fork_v2"
+        self.assertIn(name, MODULE.SCENARIO_PRESETS)
+        preset = MODULE.SCENARIO_PRESETS[name]
+        expected = {
+            "forest_layout_mode": "forked_s_forest_v2",
+            "forked_forest.start_canopy_clearance_radius_m": "5.0",
+            "grid_map/origin_x": "-21.0",
+            "grid_map/origin_y": "-11.0",
+            "grid_map/origin_z": "0.0",
+            "grid_map/unknown_as_occupied": "true",
+            "manager/planning_horizon": "4.0",
+            "p0.online_mapping_mode": "true",
+            "p0.fit_grid_to_map_cloud": "false",
+            "p0.map_topic": "",
+            "p0.resolution_m": "0.5",
+            "p0.size_x_m": "42.0",
+            "p0.size_y_m": "22.0",
+            "p0.size_z_m": "8.0",
+            "p0.origin_x_m": "-21.0",
+            "p0.origin_y_m": "-11.0",
+            "p0.origin_z_m": "0.0",
+            "p0.provider_cost_source": "pre_conservative_fim_ratio",
+            "p0.require_safety_ratio_below_one_for_cost": "true",
+            "p4.fallback_to_original_when_risk_not_ready": "false",
+            "integrity_dynamic_alert_limits": "false",
+            "integrity_hal_m": "10.0",
+            "integrity_val_m": "20.0",
+        }
+        for key, value in expected.items():
+            self.assertEqual(preset[key], value, key)
+
+        context = self._launch_context_with_defaults(
+            experiment="icra_p0_p4_v2_p5_dev", scenario=name)
+        with mock.patch.object(
+            sys, "argv",
+            ["test", "experiment:=icra_p0_p4_v2_p5_dev", f"scenario:={name}"],
+        ):
+            scenario, _, _ = MODULE._apply_presets(context, REPO)
+        self.assertEqual(scenario, name)
+        MODULE._validate_online_truth_isolation(context, scenario)
+
+    def test_online_truth_isolation_rejects_simulator_topics(self):
+        context = self._launch_context_with_defaults(
+            experiment="icra_p0_p4_v2_p5_dev",
+            scenario="icra_dense_forest_four_fork_v2",
+        )
+        context.launch_configurations["p0.online_mapping_mode"] = "true"
+        for topic in ("/map_generator/global_cloud", "/sim/world/forest"):
+            with self.subTest(topic=topic):
+                context.launch_configurations["p0.map_topic"] = topic
+                with self.assertRaisesRegex(RuntimeError, "truth topic"):
+                    MODULE._validate_online_truth_isolation(
+                        context, "icra_dense_forest_four_fork_v2")
+
     def test_fork_and_mirror_share_geometry_identity_except_mirror_flag(self):
         primary = MODULE.SCENARIO_PRESETS["p1_fork_fused_v1"]
         mirror = MODULE.SCENARIO_PRESETS["p1_fork_fused_mirror_v1"]

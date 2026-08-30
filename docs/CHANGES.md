@@ -3,6 +3,19 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(icra-forest-online-risk-v2): IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 — add the
+  `icra_dense_forest_four_fork_v2` development preset with a fixed geofence and simulator-only world truth.
+  EGO now publishes immutable tri-state online occupancy geometry; P0 consumes the same geometry and treats
+  unobserved support as unknown instead of free. Preserve per-voxel GNSS/LiDAR/prior/pre-conservative-FIM/safety
+  channels and conservative-floor attribution, bind fixed `HAL/VAL=10/20 m` policy identity, gate P4 with the
+  authoritative safety ratio and rank admitted forest candidates by pre-conservative FIM ratio. Add fixed-ratio
+  and diagnostic RViz clouds, frozen occupancy/source identity in P4 lineage, live planner truth-subscription
+  audit, source/coverage reporting and the v2 forest start canopy clearing. Bound the v2 local planning horizon
+  to online LiDAR support and disable original-guide fallback when risk support is incomplete; V1/ICRA072 behavior
+  remains available. Live P0 is green, while P4/full remain fail-closed because forward GNSS rays are unknown and
+  the observed raw FIM profile does not yet make the intended open branch lower-risk. This is development
+  integration only and creates no scientific or qualification claim.
+
 - route(user-decision-010-repair-icra077a): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 /
   IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — user selects bounded repair, not bypass. Cross-bind current protected
   route fields to the identity derived from the verified frozen roadmap Git blob, replace ambiguous formal

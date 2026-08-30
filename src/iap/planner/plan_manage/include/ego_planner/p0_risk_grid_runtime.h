@@ -53,6 +53,7 @@ class P0RiskGridRuntime {
   struct Config {
     bool enable_risk_grid = false;
     bool debug_metrics_enable = false;
+    bool online_mapping_mode = false;
     bool fit_grid_to_map_cloud = false;
     double refresh_start_delay_s = 0.0;
     iap::RiskGridMapParams grid;
@@ -74,6 +75,8 @@ class P0RiskGridRuntime {
         iap::PredictorGnssEpochPolicy::Auto;
     bool predictor_use_current_integrity_prior = true;
     bool predictor_conservative_max_with_gnss = false;
+    double predictor_hal_m = 10.0;
+    double predictor_val_m = 20.0;
     bool predictor_lidar_legacy_observability = true;
     double predictor_lidar_fim_radius_m =
         iap::LidarObservabilityFim::Params{}.fim_radius_m;
@@ -280,6 +283,7 @@ class P0RiskGridRuntime {
   std::shared_ptr<const P0RawOccupancyIdentity>
       rolling_raw_occupancy_identity_;
   P0OccupancyEpoch::SourceOwner rolling_occupancy_source_owner_;
+  iap::PlanningLatticeGeometry rolling_occupancy_geometry_;
   uint64_t rolling_occupancy_generation_ = 0;
   double rolling_occupancy_stamp_ =
       std::numeric_limits<double>::quiet_NaN();
@@ -323,6 +327,7 @@ class P0RiskGridRuntime {
   double latest_map_stamp_ = std::numeric_limits<double>::quiet_NaN();
   bool map_seen_ = false;
   bool scene_grid_dimensions_ready_ = false;
+  bool online_geometry_bound_ = false;
   iap::CurrentIntegrityState latest_current_;
   bool latest_current_valid_ = false;
   bool current_integrity_seen_ = false;

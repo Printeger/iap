@@ -110,6 +110,10 @@ struct GridMapTestAccess {
     map->md_.occupancy_buffer_.assign(count, -2.01);
     map->md_.occupancy_buffer_inflate_.assign(count, 0);
     map->md_.occupancy_buffer_raw_cloud_.assign(count, 0);
+    map->md_.observed_buffer_.assign(count, 1);
+    map->occupancy_cloud_stamp_s_.store(10.0, std::memory_order_release);
+    if (map->occupancy_update_sequence_.load(std::memory_order_acquire) == 0u)
+      map->occupancy_update_sequence_.store(2u, std::memory_order_release);
     for (int x = 0; x < 40; ++x) {
       const double px = -5.0 + (static_cast<double>(x) + 0.5) * resolution;
       if (px < -1.0 || px > 1.0) continue;

@@ -38,6 +38,8 @@ class PredictorModule {
 
   void set_params(const PredictorParams& params);
   void set_local_occupancy(const LocalOccupancyGrid* occupancy);
+  void set_observation_predicate(
+      VisibilityPredictor::ObservationPredicate predicate);
   void set_lidar_fim_primitives(
       std::shared_ptr<const std::vector<LidarFimPrimitive>> primitives);
   void set_lidar_map_points(

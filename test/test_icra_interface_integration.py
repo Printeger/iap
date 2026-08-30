@@ -39,7 +39,10 @@ def selected_decision():
         "request_hash": "request",
         "snapshot_generation_id": "5",
         "snapshot_config_hash": "config",
+        "source_identity_hash": "sources",
         "occupancy_epoch": "3",
+        "geometry_id": "geometry",
+        "occupancy_stamp_s": "12.5",
         "original_hash": "original",
         "risk_hash": "risk",
         "selected_hash": "risk",
@@ -64,7 +67,10 @@ def lineage_for(decision, trajectory_id, start_ns):
         "request_hash": decision["request_hash"],
         "snapshot_generation_id": decision["snapshot_generation_id"],
         "snapshot_config_hash": decision["snapshot_config_hash"],
+        "source_identity_hash": decision["source_identity_hash"],
         "occupancy_epoch": decision["occupancy_epoch"],
+        "geometry_id": decision["geometry_id"],
+        "occupancy_stamp_s": decision["occupancy_stamp_s"],
         "original_guide_hash": decision["original_hash"],
         "risk_guide_hash": decision["risk_hash"],
         "selected_guide_hash": decision["selected_hash"],
@@ -161,7 +167,7 @@ class TestStageContracts(unittest.TestCase):
     def test_forest_scene_contract_is_expanded_and_fingerprinted(self):
         contract = MODULE.forest_scene_contract()
         self.assertEqual(contract["schema_version"],
-                         "icra_dense_forest_four_fork_v1")
+                         "icra_dense_forest_four_fork_v2")
         self.assertEqual(contract["forest_seed"], 41021)
         self.assertEqual(contract["risk_seed"], 21)
         self.assertEqual(contract["low_risk_y_signs"], [-1, 1, -1, 1])
@@ -173,10 +179,15 @@ class TestStageContracts(unittest.TestCase):
                          [-16.0, -8.0, 0.0, 8.0])
         self.assertRegex(contract["fingerprint"], r"^sha256:[0-9a-f]{64}$")
 
+        legacy = MODULE.forest_scene_contract(MODULE.FOREST_V1_SCENARIO)
+        self.assertEqual(legacy["schema_version"],
+                         "icra_dense_forest_four_fork_v1")
+        self.assertFalse(legacy["online_mapping"]["enabled"])
+
     def test_forest_manifest_binds_effective_launch_contract(self):
         expected = MODULE.forest_scene_contract()
         scene_map = {
-            "layout_mode": "forked_s_forest_v1",
+            "layout_mode": "forked_s_forest_v2",
             "map_size_m": [42.0, 22.0, 8.0],
             "forest_size_m": [40.0, 20.0],
             "forest_seed": 41021,
@@ -188,6 +199,7 @@ class TestStageContracts(unittest.TestCase):
             "high_risk_amplitude_m": 2.8,
             "corridor_width_m": 2.4,
             "junction_clearance_radius_m": 2.0,
+            "start_canopy_clearance_radius_m": 5.0,
             "flight_clearance_z_m": 2.8,
             "side_boundary_tree_spacing_m": 0.28,
             "expanded_low_risk_sides": [
@@ -208,7 +220,20 @@ class TestStageContracts(unittest.TestCase):
                 "multipath": True,
             },
             "p0_prediction": {
-                "fit_grid_to_map_cloud": True,
+                "online_mapping_mode": True,
+                "fit_grid_to_map_cloud": False,
+                "map_topic": "",
+                "origin_m": [-21.0, -11.0, 0.0],
+                "extent_m": [42.0, 22.0, 8.0],
+                "risk_resolution_m": 0.5,
+                "ego_resolution_m": 0.1,
+                "ego_origin_m": [-21.0, -11.0, 0.0],
+                "unknown_as_occupied": True,
+                "provider_cost_source": "pre_conservative_fim_ratio",
+                "require_safety_ratio_below_one_for_cost": True,
+                "alert_limit_policy_id": "fixed_hal10_val20_v1",
+                "alert_limit_h_m": 10.0,
+                "alert_limit_v_m": 20.0,
                 "skip_occupied_voxels": True,
                 "use_current_integrity_prior": True,
                 "conservative_max_with_gnss": True,
@@ -246,6 +271,20 @@ class TestStageContracts(unittest.TestCase):
             "full", MODULE.FOREST_SCENARIO, "baseline"), 90.0)
         self.assertEqual(MODULE.stage_duration_s(
             "full", MODULE.DEFAULT_SCENARIO), 75.0)
+
+    def test_live_truth_audit_rejects_planner_world_subscription(self):
+        with mock.patch.object(
+                MODULE, "_node_names",
+                return_value={"/drone_0_ego_planner_node"}), mock.patch.object(
+                    MODULE, "_node_subscriptions",
+                    return_value=(["/sim/drone_0/lidar",
+                                   "/map_generator/global_cloud"], "")):
+            evidence = MODULE.audit_planner_truth_isolation({}, timeout_s=0.1)
+        self.assertFalse(evidence["pass"])
+        self.assertEqual(evidence["forbidden_subscriptions"],
+                         ["/map_generator/global_cloud"])
+        self.assertIn("planner_truth_subscription_detected",
+                      evidence["failures"])
 
 
 class TestRunnerLifecycle(unittest.TestCase):
@@ -501,11 +540,21 @@ class TestStageAnalyzer(unittest.TestCase):
                         "mean_c_pi": 10.0 * low_multiplier,
                         "max_c_pi": 12.0 * low_multiplier,
                         "mean_pl": 7.0 * low_multiplier,
+                        "mean_gnss_ratio": 0.8,
+                        "mean_lidar_ratio": 0.4 * low_multiplier,
+                        "mean_fim_ratio": 0.5 * low_multiplier,
+                        "max_fim_ratio": 0.6 * low_multiplier,
+                        "mean_risk_ratio": 0.8,
                     },
                     "high": {
                         "valid_count": 20, "sample_count": 20,
                         "mean_c_pi": 10.0, "max_c_pi": 12.0,
                         "mean_pl": 7.0,
+                        "mean_gnss_ratio": 0.8,
+                        "mean_lidar_ratio": 0.4,
+                        "mean_fim_ratio": 0.5,
+                        "max_fim_ratio": 0.6,
+                        "mean_risk_ratio": 0.8,
                     },
                 } for index in range(4)],
             },
@@ -520,6 +569,27 @@ class TestStageAnalyzer(unittest.TestCase):
         self.assertEqual(failed["result"], "FAIL")
         self.assertIn("forest_risk_contrast_missing", failed["failures"])
 
+    def test_forest_risk_gate_accepts_progressive_same_generation_forks(self):
+        records = []
+        for selected_index in range(4):
+            record = self.forest_generation(low_multiplier=0.8)
+            record["payload"]["generation_id"] = 20 + selected_index
+            for fork in record["payload"]["forks"]:
+                if fork["fork_index"] == selected_index:
+                    continue
+                for arm in (fork["low"], fork["high"]):
+                    arm["sample_count"] = 0
+                    arm["valid_count"] = 0
+            records.append(record)
+
+        passed = MODULE.analyze_forest_risk(records)
+
+        self.assertEqual(passed["result"], "PASS")
+        self.assertEqual(passed["passing_generation_ids"], {
+            "0": 20, "1": 21, "2": 22, "3": 23,
+        })
+        self.assertEqual(passed["missing_forks"], [])
+
     def test_forest_cloud_capture_reduces_points_by_generation_and_arm(self):
         points = []
         for fork in MODULE.forest_scene_contract()["forks"]:
@@ -532,7 +602,16 @@ class TestStageAnalyzer(unittest.TestCase):
                     "x": x, "y": y, "z": 1.5,
                     "pl": 10.0 * scale, "hpl": 8.0 * scale,
                     "vpl": 10.0 * scale, "c_pi": 10.0 * scale,
+                    "risk_ratio": scale,
+                    "gnss_risk_ratio": scale,
+                    "lidar_risk_ratio": scale,
+                    "fim_risk_ratio": scale,
+                    "floor_increment_h": 0.0,
+                    "floor_increment_v": 0.0,
+                    "floor_source_h": 0,
+                    "floor_source_v": 0,
                     "valid": 1, "unknown": 0, "stale": 0,
+                    "occupied": 0, "observed": 1,
                     "generation_id": 9,
                 })
         summary = MODULE.summarize_forest_risk_cloud(points)
