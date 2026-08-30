@@ -216,6 +216,8 @@ class P0RiskGridRuntime {
     HealthPublicationState publication;
     InputReadiness readiness;
     iap::RiskGridHealth health;
+    iap::RiskGridSourceIdentity source_identity;
+    std::string snapshot_config_hash;
     std::string snapshot_failure_reason = "none";
   };
   HealthPublicationState healthPublicationStateSnapshot() const;

@@ -119,6 +119,8 @@ struct P5_7RejectedTrajectoryFixtureConfig {
 struct RiskGridMapParams {
   std::string frame_id = "map";
   std::string alert_limit_policy_id = "legacy_unspecified";
+  double alert_limit_h_m = 10.0;
+  double alert_limit_v_m = 20.0;
   Eigen::Vector3d lattice_anchor_w = Eigen::Vector3d::Zero();
   bool use_fixed_origin = false;
   Eigen::Vector3d fixed_origin_w = Eigen::Vector3d::Zero();

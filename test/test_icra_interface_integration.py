@@ -26,6 +26,27 @@ def healthy(generation, received):
             "stale": False,
             "reason": "ok",
             "generation_id": generation,
+            "result_generation_id": generation,
+            "refresh_evidence_state": "COMPLETED_SUCCESS",
+            "snapshot_config_hash": "config-v2",
+            "source_identity_hash": f"sources-{generation}",
+            "geometry_id": "planning-lattice-v2",
+            "frame_id": "map",
+            "grid_origin_m": [-21.0, -11.0, 0.0],
+            "grid_extent_m": [42.0, 22.0, 8.0],
+            "grid_dimensions": [84, 44, 16],
+            "grid_resolution_m": 0.5,
+            "alert_limit_policy_id": "fixed_hal10_val20_v1",
+            "alert_limit_h_m": 10.0,
+            "alert_limit_v_m": 20.0,
+            "source_occupancy_generation": 100 + generation,
+            "source_occupancy_stamp_s": received - 0.1,
+            "source_prior_generation": 200 + generation,
+            "source_prior_stamp_s": received - 0.2,
+            "source_gnss_generation": 300 + generation,
+            "source_gnss_stamp_s": received - 0.3,
+            "source_lidar_generation": 400 + generation,
+            "source_lidar_stamp_s": received - 0.4,
         },
     }
 
@@ -43,6 +64,12 @@ def selected_decision():
         "occupancy_epoch": "3",
         "geometry_id": "geometry",
         "occupancy_stamp_s": "12.5",
+        "segment_start_x": "-15.5",
+        "segment_start_y": "0.0",
+        "segment_start_z": "1.5",
+        "segment_end_x": "-14.5",
+        "segment_end_y": "0.0",
+        "segment_end_z": "1.5",
         "original_hash": "original",
         "risk_hash": "risk",
         "selected_hash": "risk",
@@ -589,12 +616,25 @@ class TestStageAnalyzer(unittest.TestCase):
                 "geometry_id": "planning-lattice-v2",
                 "occupancy_stamp_s": str(occupancy_stamp_s),
             })
+            fork = MODULE.forest_scene_contract()["forks"][index % 4]
+            segment_midpoint_x = (
+                float(fork["x_min_m"]) + 0.5 * float(fork["length_m"]))
+            decision.update({
+                "segment_start_x": str(segment_midpoint_x - 0.5),
+                "segment_start_y": "0.0",
+                "segment_start_z": "1.5",
+                "segment_end_x": str(segment_midpoint_x + 0.5),
+                "segment_end_y": "0.0",
+                "segment_end_z": "1.5",
+            })
             health_row = healthy(generation_id, 100.0 + index)
             health_row["payload"].update({
                 "snapshot_config_hash": decision["snapshot_config_hash"],
                 "source_identity_hash": decision["source_identity_hash"],
                 "geometry_id": decision["geometry_id"],
                 "alert_limit_policy_id": "fixed_hal10_val20_v1",
+                "alert_limit_h_m": 10.0,
+                "alert_limit_v_m": 20.0,
                 "source_occupancy_generation": occupancy_generation,
                 "source_occupancy_stamp_s": occupancy_stamp_s,
                 "source_prior_generation": 200 + generation_id,
@@ -612,7 +652,7 @@ class TestStageAnalyzer(unittest.TestCase):
         return health_rows, decisions, lineage
 
     def test_forest_risk_gate_requires_all_four_real_low_risk_arms(self):
-        health_rows, decisions, lineage = self.identity_evidence([7])
+        health_rows, decisions, lineage = self.identity_evidence([7, 7, 7, 7])
         passed = MODULE.analyze_forest_risk(
             [self.forest_generation(low_multiplier=0.8)],
             health_rows, decisions, lineage)
@@ -622,6 +662,17 @@ class TestStageAnalyzer(unittest.TestCase):
             health_rows, decisions, lineage)
         self.assertEqual(failed["result"], "FAIL")
         self.assertIn("forest_risk_contrast_missing", failed["failures"])
+
+    def test_forest_risk_gate_does_not_reuse_one_decision_for_four_forks(self):
+        health_rows, decisions, lineage = self.identity_evidence([7])
+        failed = MODULE.analyze_forest_risk(
+            [self.forest_generation(low_multiplier=0.8)],
+            health_rows, decisions, lineage)
+
+        self.assertEqual(failed["result"], "FAIL")
+        self.assertEqual(failed["passing_generation_ids"], {"0": 7})
+        self.assertIn(
+            "forest_risk_identity_lineage_missing", failed["failures"])
 
     def test_forest_risk_gate_rejects_contrast_without_composite_lineage(self):
         failed = MODULE.analyze_forest_risk(
@@ -690,6 +741,29 @@ class TestStageAnalyzer(unittest.TestCase):
             "forest_risk_cross_fork_identity_mismatch", failed["failures"])
         self.assertFalse(failed["cross_fork_identity"]["consistent"])
 
+    def test_forest_risk_gate_rejects_cross_fork_alert_limit_change(self):
+        records = []
+        for selected_index in range(4):
+            record = self.forest_generation(low_multiplier=0.8)
+            record["payload"]["generation_id"] = 20 + selected_index
+            for fork in record["payload"]["forks"]:
+                if fork["fork_index"] != selected_index:
+                    fork["low"]["sample_count"] = 0
+                    fork["low"]["valid_count"] = 0
+                    fork["high"]["sample_count"] = 0
+                    fork["high"]["valid_count"] = 0
+            records.append(record)
+        health_rows, decisions, lineage = self.identity_evidence(
+            [20, 21, 22, 23])
+        health_rows[-1]["payload"]["alert_limit_v_m"] = 25.0
+
+        failed = MODULE.analyze_forest_risk(
+            records, health_rows, decisions, lineage)
+
+        self.assertEqual(failed["result"], "FAIL")
+        self.assertIn(
+            "forest_risk_cross_fork_identity_mismatch", failed["failures"])
+
     def test_forest_cloud_capture_reduces_points_by_generation_and_arm(self):
         points = []
         for fork in MODULE.forest_scene_contract()["forks"]:
@@ -755,6 +829,25 @@ class TestStageAnalyzer(unittest.TestCase):
         summary = MODULE.analyze_p0(rows, 85.2)
         self.assertEqual(summary["result"], "PASS")
         self.assertAlmostEqual(summary["first_healthy_delay_s"], 14.9)
+
+    def test_p0_summary_uses_completed_identity_not_in_progress_tail(self):
+        rows = [healthy(index + 1, index * 0.5) for index in range(30)]
+        in_progress = healthy(30, 15.0)
+        in_progress["payload"].update({
+            "refresh_evidence_state": "IN_PROGRESS",
+            "result_generation_id": 0,
+            "snapshot_config_hash": "",
+            "source_identity_hash": "transient-empty-source",
+            "source_occupancy_generation": 0,
+        })
+        rows.append(in_progress)
+
+        summary = MODULE.analyze_p0(rows)
+
+        self.assertEqual(summary["result"], "PASS")
+        self.assertEqual(summary["snapshot_identity"]["generation_id"], 30)
+        self.assertEqual(
+            summary["source_identity"]["occupancy_generation"], 130)
 
     def test_estimator_rejects_wrong_scale_and_large_state(self):
         summary = MODULE.analyze_estimator({

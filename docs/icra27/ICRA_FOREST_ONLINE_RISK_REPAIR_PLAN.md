@@ -70,7 +70,7 @@ P4 保持局部 collision-segment guide 语义，不把 guide 伪装为从 UAV �
 
 original/risk A* 共用同一 frozen occupancy query 和 risk snapshot。端点以及最终稠密 guide samples 必须为 `map` 坐标、observed-free、非 raw/inflated occupied，并在同一 RiskMap support 内。搜索结束但发布前若 live occupancy generation 已变化，整个 attempt 重新规划。
 
-P4 debug CSV 和 end-to-end lineage 均保存 `source_identity_hash`、`geometry_id` 与 occupancy stamp。P0 health 使用同一 canonical hash 发布 snapshot config/source identity；runner 只有在同一 generation 的风险 profile、P0 source identity、P4 decision 和已发布 lineage 全部一致时，才接受该分叉证据。不同分叉可使用不同 generation，但必须维持同一 geometry/config identity。RViz 以端点球、UAV 到 collision segment 的虚线和 `P4 local collision guide` 标签表达局部 guide 的真实含义。
+P4 debug CSV 保存 `source_identity_hash`、`geometry_id`、occupancy stamp 和 map-frame collision-segment 首尾坐标，end-to-end lineage 保存同一决策 identity。P0 health 从对应 completed generation 的不可变 snapshot 原子发布 config/source identity，canonical config hash 同时绑定实际 HAL/VAL；runner 只有在同一 generation 的风险 profile、P0 source identity、空间上属于该分叉的 P4 decision 和已发布 lineage 全部一致时，才接受该分叉证据。不同分叉可使用不同 generation，但必须维持同一 geometry/config identity 和相同实际 HAL/VAL。RViz 以端点球、UAV 到 collision segment 的虚线和 `P4 local collision guide` 标签表达局部 guide 的真实含义。
 
 ## 森林 v2 与 runner 证据
 

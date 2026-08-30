@@ -107,9 +107,9 @@ struct MappingData
   std::vector<double> occupancy_buffer_;
   std::vector<char> occupancy_buffer_inflate_;
   std::vector<char> occupancy_buffer_raw_cloud_;
-  // Monotonic observed-space mask for the static online map. A cell is set
-  // only by a sensor return or an explicit sensor ray traversal; absence of
-  // a point never proves free space.
+  // Current-frame observed-space mask. A cell is set only by a sensor return
+  // or an explicit sensor ray traversal; absence of a point never proves free
+  // space and prior-frame evidence is not silently retained.
   std::vector<char> observed_buffer_;
 
   // camera position and pose data

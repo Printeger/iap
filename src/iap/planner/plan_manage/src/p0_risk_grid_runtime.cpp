@@ -478,11 +478,19 @@ P0RiskGridRuntime::Config P0RiskGridRuntime::declareAndReadConfig(
       "p0.alert_limit_h_m", 10.0);
   config.predictor_val_m = node->declare_parameter<double>(
       "p0.alert_limit_v_m", 20.0);
+  config.grid.alert_limit_h_m = config.predictor_hal_m;
+  config.grid.alert_limit_v_m = config.predictor_val_m;
   if (!std::isfinite(config.predictor_hal_m) ||
       !std::isfinite(config.predictor_val_m) ||
       config.predictor_hal_m <= 0.0 || config.predictor_val_m <= 0.0 ||
       config.grid.alert_limit_policy_id.empty()) {
     throw std::invalid_argument("invalid P0 alert-limit policy");
+  }
+  if (config.grid.alert_limit_policy_id == "fixed_hal10_val20_v1" &&
+      (std::abs(config.predictor_hal_m - 10.0) > 1.0e-12 ||
+       std::abs(config.predictor_val_m - 20.0) > 1.0e-12)) {
+    throw std::invalid_argument(
+        "fixed_hal10_val20_v1 requires HAL=10 m and VAL=20 m");
   }
   config.debug_metrics_enable =
       node->declare_parameter<bool>("p0.debug_metrics_enable", false);
@@ -1857,12 +1865,11 @@ void P0RiskGridRuntime::publishHealth(const iap::RiskGridHealth& health,
   }
   const iap::RiskGridHealth& out_health = evidence.health;
   const InputReadiness& readiness = evidence.readiness;
-  const auto health_snapshot = risk_grid_.acquireSnapshot();
   const auto& grid_params = risk_grid_.params();
   const Eigen::Vector3d grid_origin = risk_grid_.origin();
   const Eigen::Vector3i grid_dimensions = risk_grid_.voxelNum();
-  const iap::RiskGridSourceIdentity source_identity = health_snapshot
-      ? health_snapshot->sourceIdentity() : iap::RiskGridSourceIdentity{};
+  const iap::RiskGridSourceIdentity& source_identity =
+      evidence.source_identity;
   std::ostringstream oss;
   oss << "{"
       << "\"refresh_attempt_id\":" << evidence.refresh_attempt_id << ","
@@ -1879,7 +1886,7 @@ void P0RiskGridRuntime::publishHealth(const iap::RiskGridHealth& health,
       << "\"unknown_ratio\":" << jsonNumber(out_health.unknown_ratio) << ","
       << "\"generation_id\":" << out_health.generation_id << ","
       << "\"snapshot_config_hash\":"
-      << jsonString(iap::canonicalRiskGridConfigHash(grid_params)) << ","
+      << jsonString(evidence.snapshot_config_hash) << ","
       << "\"source_identity_hash\":"
       << jsonString(iap::canonicalRiskGridSourceIdentityHash(
              source_identity)) << ","
@@ -1897,8 +1904,8 @@ void P0RiskGridRuntime::publishHealth(const iap::RiskGridHealth& health,
       << jsonNumber(grid_params.resolution_m) << ","
       << "\"alert_limit_policy_id\":"
       << jsonString(grid_params.alert_limit_policy_id) << ","
-      << "\"alert_limit_h_m\":" << jsonNumber(config_.predictor_hal_m)
-      << ",\"alert_limit_v_m\":" << jsonNumber(config_.predictor_val_m)
+      << "\"alert_limit_h_m\":" << jsonNumber(grid_params.alert_limit_h_m)
+      << ",\"alert_limit_v_m\":" << jsonNumber(grid_params.alert_limit_v_m)
       << ","
       << "\"source_occupancy_generation\":"
       << source_identity.occupancy_generation << ","
@@ -2191,6 +2198,7 @@ void P0RiskGridRuntime::completeRefreshEvidence(
     const iap::RiskGridHealth& health, const double now_s,
     const bool succeeded) {
   (void)now_s;
+  const auto completed_snapshot = risk_grid_.acquireSnapshot();
   std::scoped_lock lock(health_state_mutex_, lidar_predictor_input_mutex_);
   const iap::RiskGridHealth completed_health =
       addLidarPredictorInputHealthLocked(health);
@@ -2204,6 +2212,14 @@ void P0RiskGridRuntime::completeRefreshEvidence(
   refresh_evidence_.publication = healthPublicationStateSnapshot();
   refresh_evidence_.readiness = refresh_input_readiness_;
   refresh_evidence_.health = completed_health;
+  refresh_evidence_.source_identity = {};
+  refresh_evidence_.snapshot_config_hash.clear();
+  if (completed_snapshot &&
+      completed_snapshot->generation_id() == completed_health.generation_id) {
+    refresh_evidence_.source_identity = completed_snapshot->sourceIdentity();
+    refresh_evidence_.snapshot_config_hash =
+        iap::canonicalRiskGridConfigHash(completed_snapshot->params());
+  }
   refresh_evidence_.snapshot_failure_reason = last_snapshot_failure_reason_;
   if (succeeded) {
     last_successful_generation_id_ = completed_health.generation_id;

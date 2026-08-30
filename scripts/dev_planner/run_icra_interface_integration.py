@@ -403,8 +403,17 @@ def analyze_forest_risk(
         required_strings = (
             "snapshot_config_hash", "source_identity_hash", "geometry_id",
             "alert_limit_policy_id")
+        try:
+            alert_limits = (
+                float(payload["alert_limit_h_m"]),
+                float(payload["alert_limit_v_m"]),
+            )
+        except (KeyError, TypeError, ValueError):
+            continue
         if (generation_id <= 0
                 or not all(payload.get(field) for field in required_strings)
+                or not all(math.isfinite(value) and value > 0.0
+                           for value in alert_limits)
                 or not all(math.isfinite(value) for key, value
                            in source_identity.items() if key.endswith("_s"))):
             continue
@@ -414,6 +423,8 @@ def analyze_forest_risk(
             "source_identity_hash": payload["source_identity_hash"],
             "geometry_id": payload["geometry_id"],
             "alert_limit_policy_id": payload["alert_limit_policy_id"],
+            "alert_limit_h_m": alert_limits[0],
+            "alert_limit_v_m": alert_limits[1],
             "source_identity": source_identity,
         }
 
@@ -425,12 +436,14 @@ def analyze_forest_risk(
         .issubset(group["stages"])
     }
 
-    def bound_identity(generation_id: int) -> dict | None:
+    def bound_identity(generation_id: int, fork_index: int) -> dict | None:
         health_identity = health_by_generation.get(generation_id)
         if health_identity is None:
             return None
         source = health_identity["source_identity"]
         for decision in selected:
+            if _decision_fork_index(decision) != fork_index:
+                continue
             try:
                 identity_matches = (
                     int(decision["snapshot_generation_id"]) == generation_id
@@ -470,8 +483,10 @@ def analyze_forest_risk(
         if row.get("kind") != "forest_risk_generation":
             continue
         payload = row.get("payload", row)
+        generation_id = int(payload.get("generation_id", 0) or 0)
         fork_results = []
         for fork in payload.get("forks", []):
+            fork_index = fork.get("fork_index")
             low = fork.get("low", {})
             high = fork.get("high", {})
             complete = all(
@@ -505,20 +520,21 @@ def analyze_forest_risk(
                         and _finite_number(high_value)
                         and float(low_value) < float(high_value)),
                 }
+            composite_identity = (
+                bound_identity(generation_id, int(fork_index))
+                if fork_index in {0, 1, 2, 3} else None)
             fork_results.append({
-                "fork_index": fork.get("fork_index"),
+                "fork_index": fork_index,
                 "complete": complete,
                 "contrast_pass": contrast,
                 "source_contrast": source_contrast,
+                "composite_identity": composite_identity,
+                "identity_lineage_pass": composite_identity is not None,
                 "low": low,
                 "high": high,
             })
-        generation_id = int(payload.get("generation_id", 0) or 0)
-        composite_identity = bound_identity(generation_id)
         generation_results.append({
             "generation_id": generation_id,
-            "composite_identity": composite_identity,
-            "identity_lineage_pass": composite_identity is not None,
             "forks": fork_results,
             "pass": len(fork_results) == 4
             and {item["fork_index"] for item in fork_results}
@@ -539,12 +555,11 @@ def analyze_forest_risk(
                 }
             if (fork_index in {0, 1, 2, 3}
                     and fork["contrast_pass"]
-                    and generation["identity_lineage_pass"]
+                    and fork["identity_lineage_pass"]
                     and fork_index not in passing_forks):
                 passing_forks[fork_index] = {
                     **fork,
                     "generation_id": generation["generation_id"],
-                    "composite_identity": generation["composite_identity"],
                 }
     cross_fork_geometry_ids = {
         item["composite_identity"]["geometry_id"]
@@ -552,9 +567,14 @@ def analyze_forest_risk(
     cross_fork_config_hashes = {
         item["composite_identity"]["snapshot_config_hash"]
         for item in passing_forks.values()}
+    cross_fork_alert_limits = {
+        (item["composite_identity"]["alert_limit_h_m"],
+         item["composite_identity"]["alert_limit_v_m"])
+        for item in passing_forks.values()}
     cross_fork_identity_consistent = (
         len(cross_fork_geometry_ids) == 1
-        and len(cross_fork_config_hashes) == 1)
+        and len(cross_fork_config_hashes) == 1
+        and len(cross_fork_alert_limits) == 1)
     passed = (set(passing_forks) == {0, 1, 2, 3}
               and cross_fork_identity_consistent)
     failures = []
@@ -597,6 +617,8 @@ def analyze_forest_risk(
             "consistent": cross_fork_identity_consistent,
             "geometry_ids": sorted(cross_fork_geometry_ids),
             "snapshot_config_hashes": sorted(cross_fork_config_hashes),
+            "alert_limits_m": [list(value)
+                               for value in sorted(cross_fork_alert_limits)],
         },
         source_assessment=source_assessment,
         generations=generation_results,
@@ -752,6 +774,17 @@ def analyze_p0(rows: list[dict], capture_start_s: float | None = None) -> dict:
     if not generations or max(generations) - min(generations) < 3:
         failures.append("p0_generation_did_not_advance")
     latest = window[-1][1] if window else {}
+    identity_payload = next((
+        payload for _, payload in reversed(window)
+        if payload.get("refresh_evidence_state") == "COMPLETED_SUCCESS"
+        and payload.get("snapshot_config_hash")
+        and payload.get("source_identity_hash")
+        and int(payload.get("result_generation_id", 0) or 0)
+        == int(payload.get("generation_id", 0) or 0)
+    ), None)
+    if identity_payload is None:
+        failures.append("p0_completed_snapshot_identity_missing")
+        identity_payload = latest
     return _result(
         failures,
         health_count=len(observations),
@@ -761,28 +794,37 @@ def analyze_p0(rows: list[dict], capture_start_s: float | None = None) -> dict:
         generation_min=min(generations) if generations else None,
         generation_max=max(generations) if generations else None,
         geometry={
-            "geometry_id": latest.get("geometry_id"),
-            "frame_id": latest.get("frame_id"),
-            "origin_m": latest.get("grid_origin_m"),
-            "extent_m": latest.get("grid_extent_m"),
-            "dimensions": latest.get("grid_dimensions"),
-            "resolution_m": latest.get("grid_resolution_m"),
+            "geometry_id": identity_payload.get("geometry_id"),
+            "frame_id": identity_payload.get("frame_id"),
+            "origin_m": identity_payload.get("grid_origin_m"),
+            "extent_m": identity_payload.get("grid_extent_m"),
+            "dimensions": identity_payload.get("grid_dimensions"),
+            "resolution_m": identity_payload.get("grid_resolution_m"),
         },
         alert_limits={
-            "policy_id": latest.get("alert_limit_policy_id"),
-            "hal_m": latest.get("alert_limit_h_m"),
-            "val_m": latest.get("alert_limit_v_m"),
+            "policy_id": identity_payload.get("alert_limit_policy_id"),
+            "hal_m": identity_payload.get("alert_limit_h_m"),
+            "val_m": identity_payload.get("alert_limit_v_m"),
+        },
+        snapshot_identity={
+            "generation_id": identity_payload.get("generation_id"),
+            "config_hash": identity_payload.get("snapshot_config_hash"),
+            "source_hash": identity_payload.get("source_identity_hash"),
         },
         source_identity={
-            "occupancy_generation": latest.get(
+            "occupancy_generation": identity_payload.get(
                 "source_occupancy_generation"),
-            "occupancy_stamp_s": latest.get("source_occupancy_stamp_s"),
-            "prior_generation": latest.get("source_prior_generation"),
-            "prior_stamp_s": latest.get("source_prior_stamp_s"),
-            "gnss_generation": latest.get("source_gnss_generation"),
-            "gnss_stamp_s": latest.get("source_gnss_stamp_s"),
-            "lidar_generation": latest.get("source_lidar_generation"),
-            "lidar_stamp_s": latest.get("source_lidar_stamp_s"),
+            "occupancy_stamp_s": identity_payload.get(
+                "source_occupancy_stamp_s"),
+            "prior_generation": identity_payload.get(
+                "source_prior_generation"),
+            "prior_stamp_s": identity_payload.get("source_prior_stamp_s"),
+            "gnss_generation": identity_payload.get(
+                "source_gnss_generation"),
+            "gnss_stamp_s": identity_payload.get("source_gnss_stamp_s"),
+            "lidar_generation": identity_payload.get(
+                "source_lidar_generation"),
+            "lidar_stamp_s": identity_payload.get("source_lidar_stamp_s"),
         },
     )
 
@@ -793,6 +835,31 @@ DECISION_ID_FIELDS = (
     "source_identity_hash", "occupancy_epoch", "geometry_id",
     "occupancy_stamp_s",
 )
+
+DECISION_SEGMENT_FIELDS = (
+    "segment_start_x", "segment_start_y", "segment_start_z",
+    "segment_end_x", "segment_end_y", "segment_end_z",
+)
+
+
+def _decision_fork_index(row: dict) -> int | None:
+    """Map one local collision segment to exactly one frozen forest fork."""
+    try:
+        coordinates = [float(row[field]) for field in DECISION_SEGMENT_FIELDS]
+    except (KeyError, TypeError, ValueError):
+        return None
+    if not all(math.isfinite(value) for value in coordinates):
+        return None
+    midpoint_x = 0.5 * (coordinates[0] + coordinates[3])
+    forks = forest_scene_contract()["forks"]
+    matches = []
+    for index, fork in enumerate(forks):
+        x_min = float(fork["x_min_m"])
+        x_max = x_min + float(fork["length_m"])
+        if x_min <= midpoint_x < x_max or (
+                index == len(forks) - 1 and midpoint_x == x_max):
+            matches.append(int(fork["fork_index"]))
+    return matches[0] if len(matches) == 1 else None
 
 
 def _support_complete(row: dict, prefix: str) -> bool:
@@ -816,6 +883,7 @@ def _selected_decisions(decisions: list[dict]) -> list[dict]:
         if row.get("status") == "RISK_SELECTED"
         and str(row.get("selection_applied")) == "1"
         and all(row.get(field) for field in DECISION_ID_FIELDS)
+        and all(row.get(field) is not None for field in DECISION_SEGMENT_FIELDS)
         and all(row.get(field) for field in
                 ("original_hash", "risk_hash", "selected_hash"))
         and _support_complete(row, "original")

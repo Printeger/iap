@@ -68,6 +68,9 @@ class FimRatioProvider final : public iap::RiskPredictionProvider {
  public:
   double fim_ratio = std::numeric_limits<double>::quiet_NaN();
   double safety_ratio = 0.5;
+  bool fim_available = false;
+  bool fim_valid = false;
+  bool fim_stale = false;
 
   bool batchQuery(const std::vector<iap::RiskPredictionQuery>& queries,
                   std::vector<iap::RiskPredictionResult>* results) override {
@@ -86,8 +89,9 @@ class FimRatioProvider final : public iap::RiskPredictionProvider {
       result.safety_fused.available = true;
       result.safety_fused.valid = true;
       result.safety_fused.risk_ratio = safety_ratio;
-      result.fim_fused.available = std::isfinite(fim_ratio);
-      result.fim_fused.valid = std::isfinite(fim_ratio);
+      result.fim_fused.available = fim_available;
+      result.fim_fused.valid = fim_valid;
+      result.fim_fused.stale = fim_stale;
       result.fim_fused.risk_ratio = fim_ratio;
       result.reason = "ok";
     }
@@ -416,11 +420,37 @@ TEST(RiskGridMapTest, CanonicalConfigHashBindsOnlineSafetyCostPolicy) {
   safety_gate.require_safety_ratio_below_one_for_cost = true;
   EXPECT_NE(iap::canonicalRiskGridConfigHash(safety_gate), baseline_hash);
 
+  auto horizontal_limit = baseline;
+  horizontal_limit.alert_limit_h_m = 11.0;
+  EXPECT_NE(
+      iap::canonicalRiskGridConfigHash(horizontal_limit), baseline_hash);
+
+  auto vertical_limit = baseline;
+  vertical_limit.alert_limit_v_m = 21.0;
+  EXPECT_NE(iap::canonicalRiskGridConfigHash(vertical_limit), baseline_hash);
+
   auto fixed_geometry = baseline;
   fixed_geometry.use_fixed_origin = true;
   fixed_geometry.fixed_origin_w = Eigen::Vector3d(-21.0, -11.0, 0.0);
   fixed_geometry.geometry_id = "planning_lattice_v1:forest";
   EXPECT_NE(iap::canonicalRiskGridConfigHash(fixed_geometry), baseline_hash);
+}
+
+TEST(RiskGridMapTest, FixedAlertLimitPolicyRejectsNumericOverrides) {
+  iap::RiskGridMap grid;
+  auto params = base_params();
+  params.alert_limit_policy_id = "fixed_hal10_val20_v1";
+  std::string reason;
+  ASSERT_TRUE(grid.configure(params, &reason)) << reason;
+
+  params.alert_limit_h_m = 11.0;
+  EXPECT_FALSE(grid.configure(params, &reason));
+  EXPECT_EQ(reason, "fixed_alert_limit_policy_mismatch");
+
+  params.alert_limit_h_m = 10.0;
+  params.alert_limit_v_m = 19.0;
+  EXPECT_FALSE(grid.configure(params, &reason));
+  EXPECT_EQ(reason, "fixed_alert_limit_policy_mismatch");
 }
 
 TEST(RiskGridMapTest, PreConservativeFimCostFailsClosedWhenRatioIsMissing) {
@@ -454,6 +484,8 @@ TEST(RiskGridMapTest, PreConservativeFimCostStillHonorsSafetyRatioGate) {
   iap::RiskGridMap grid(params);
   FimRatioProvider provider;
   provider.fim_ratio = 0.2;
+  provider.fim_available = true;
+  provider.fim_valid = true;
   provider.safety_ratio = 1.0;
   ASSERT_TRUE(grid.refreshFromProvider(
       Eigen::Vector3d::Zero(), 10.0, provider));
@@ -463,6 +495,49 @@ TEST(RiskGridMapTest, PreConservativeFimCostStillHonorsSafetyRatioGate) {
   EXPECT_FALSE(snapshot->queryCost(
       Eigen::Vector3d::Zero(), 10.0, &cost));
   EXPECT_EQ(cost.reason, "safety_limit_exceeded");
+}
+
+TEST(RiskGridMapTest, PreConservativeFimCostRejectsStaleFiniteResidual) {
+  auto params = base_params();
+  params.horizons_s = {0.0};
+  params.provider_cost_source =
+      iap::RiskProviderCostSource::PRE_CONSERVATIVE_FIM_RATIO;
+  iap::RiskGridMap grid(params);
+  FimRatioProvider provider;
+  provider.fim_ratio = 0.2;
+  provider.fim_available = true;
+  provider.fim_valid = true;
+  provider.fim_stale = true;
+  ASSERT_TRUE(grid.refreshFromProvider(
+      Eigen::Vector3d::Zero(), 10.0, provider));
+  const auto snapshot = grid.acquireSnapshot();
+  ASSERT_NE(snapshot, nullptr);
+  iap::RiskVoxel voxel;
+  ASSERT_TRUE(snapshot->voxelAt(0, Eigen::Vector3i(1, 1, 1), &voxel));
+  EXPECT_FALSE(voxel.valid);
+  EXPECT_TRUE(voxel.unknown);
+  EXPECT_EQ(voxel.reason, "pre_conservative_fim_unavailable");
+}
+
+TEST(RiskGridMapTest, PreConservativeFimCostRejectsInvalidFiniteResidual) {
+  auto params = base_params();
+  params.horizons_s = {0.0};
+  params.provider_cost_source =
+      iap::RiskProviderCostSource::PRE_CONSERVATIVE_FIM_RATIO;
+  iap::RiskGridMap grid(params);
+  FimRatioProvider provider;
+  provider.fim_ratio = 0.2;
+  provider.fim_available = true;
+  provider.fim_valid = false;
+  ASSERT_TRUE(grid.refreshFromProvider(
+      Eigen::Vector3d::Zero(), 10.0, provider));
+  const auto snapshot = grid.acquireSnapshot();
+  ASSERT_NE(snapshot, nullptr);
+  iap::RiskVoxel voxel;
+  ASSERT_TRUE(snapshot->voxelAt(0, Eigen::Vector3i(1, 1, 1), &voxel));
+  EXPECT_FALSE(voxel.valid);
+  EXPECT_TRUE(voxel.unknown);
+  EXPECT_EQ(voxel.reason, "pre_conservative_fim_unavailable");
 }
 
 TEST(RiskGridMapTest,

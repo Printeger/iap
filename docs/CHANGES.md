@@ -17,7 +17,10 @@
   integration only and creates no scientific or qualification claim. Review hardening clears stale observation
   bits with raw cloud hits, enforces the exact 5× overlay contract, fails closed when the configured FIM cost is
   unavailable, binds all online safety fields into one canonical hash, and requires each progressive fork summary
-  to match P0 source identity plus a published P4 lineage before the runner can pass it.
+  to match P0 source identity plus a published P4 lineage before the runner can pass it. Final review hardening
+  binds the numeric HAL/VAL to that hash and enforces the named 10/20 m policy, publishes source provenance from
+  the exact completed P0 generation, rejects stale/invalid finite FIM residuals, and binds each P4 decision to a
+  concrete forest fork using its map-frame collision-segment coordinates.
 
 - route(user-decision-010-repair-icra077a): IAP-RQ-320 / IAP-RQ-321 / IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-421 /
   IAP-RQ-422 / IAP-RQ-423 / IAP-RQ-424 — user selects bounded repair, not bypass. Cross-bind current protected

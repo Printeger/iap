@@ -1227,6 +1227,17 @@ class P0RiskGridRuntimeStampTest : public ::testing::Test {
         evidence.readiness.current_integrity_stamp_s};
   }
 
+  static std::string refreshSnapshotConfigHash(
+      const P0RiskGridRuntime& runtime) {
+    return runtime.refreshEvidenceRecordSnapshot().snapshot_config_hash;
+  }
+
+  static std::string refreshSourceIdentityHash(
+      const P0RiskGridRuntime& runtime) {
+    return iap::canonicalRiskGridSourceIdentityHash(
+        runtime.refreshEvidenceRecordSnapshot().source_identity);
+  }
+
   struct PredictorDiagnosticCounts {
     std::size_t legacy_unique_positions = 0;
     std::size_t legacy_lidar_evaluations = 0;
@@ -2167,6 +2178,8 @@ TEST(P0RiskGridRuntimeTest, GnssEpochFreshnessDefaultIsTwoSeconds) {
   EXPECT_FALSE(config.predictor_conservative_max_with_gnss);
   EXPECT_TRUE(config.predictor_lidar_legacy_observability);
   EXPECT_FALSE(config.fit_grid_to_map_cloud);
+  EXPECT_DOUBLE_EQ(config.grid.alert_limit_h_m, 10.0);
+  EXPECT_DOUBLE_EQ(config.grid.alert_limit_v_m, 20.0);
   EXPECT_DOUBLE_EQ(config.predictor_lidar_fim_radius_m,
                    iap::LidarObservabilityFim::Params{}.fim_radius_m);
   EXPECT_TRUE(std::isnan(config.predictor_sigma_grow_m_sqrt_s));
@@ -2225,6 +2238,24 @@ TEST(P0RiskGridRuntimeTest, GnssEpochFreshnessCanBeOverridden) {
   const auto config = ego_planner::P0RiskGridRuntime::declareAndReadConfig(node);
 
   EXPECT_DOUBLE_EQ(config.gnss_epoch_max_age_s, 0.25);
+}
+
+TEST(P0RiskGridRuntimeTest, FixedAlertLimitPolicyRejectsNumericOverride) {
+  ensure_rclcpp();
+  rclcpp::NodeOptions options;
+  options.allow_undeclared_parameters(false);
+  options.parameter_overrides({
+      rclcpp::Parameter(
+          "p0.alert_limit_policy_id", "fixed_hal10_val20_v1"),
+      rclcpp::Parameter("p0.alert_limit_h_m", 11.0),
+      rclcpp::Parameter("p0.alert_limit_v_m", 20.0),
+  });
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_fixed_alert_limit_override_test", options);
+
+  EXPECT_THROW(
+      ego_planner::P0RiskGridRuntime::declareAndReadConfig(node),
+      std::invalid_argument);
 }
 
 TEST(P0RiskGridRuntimeTest, PredictorParamsCanBeOverridden) {
@@ -2811,6 +2842,10 @@ TEST_F(P0RiskGridRuntimeStampTest,
   constexpr double kSnapshotStamp = 1657065621.4871123;
   seedValidInputs(&runtime, kSnapshotStamp, kSnapshotStamp);
   ASSERT_TRUE(refreshOnce(&runtime));
+  const std::string snapshot_config_hash =
+      refreshSnapshotConfigHash(runtime);
+  ASSERT_FALSE(snapshot_config_hash.empty());
+  const std::string expected_source_hash = refreshSourceIdentityHash(runtime);
 
   std::string health_message;
   auto health_sub = node->create_subscription<std_msgs::msg::String>(
@@ -2827,6 +2862,14 @@ TEST_F(P0RiskGridRuntimeStampTest,
   ASSERT_FALSE(health_message.empty());
   EXPECT_NE(health_message.find(
                 "\"last_grid_stamp_s\":1657065621.4871123"),
+            std::string::npos);
+  EXPECT_NE(health_message.find(
+                "\"snapshot_config_hash\":\"" +
+                snapshot_config_hash + "\""),
+            std::string::npos);
+  EXPECT_NE(health_message.find(
+                "\"source_identity_hash\":\"" +
+                expected_source_hash + "\""),
             std::string::npos);
 }
 

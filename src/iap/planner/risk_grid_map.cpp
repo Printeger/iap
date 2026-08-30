@@ -223,8 +223,10 @@ bool apply_any_p5_fixture(const RiskGridMapParams& params,
 
 std::string canonicalRiskGridConfigHash(const RiskGridMapParams& params) {
   std::ostringstream stream;
-  stream << "risk_grid_config_v3;" << params.frame_id << ';'
+  stream << "risk_grid_config_v4;" << params.frame_id << ';'
          << params.alert_limit_policy_id << ';';
+  append_canonical_double(stream, params.alert_limit_h_m);
+  append_canonical_double(stream, params.alert_limit_v_m);
   for (int axis = 0; axis < 3; ++axis) {
     append_canonical_double(stream, params.lattice_anchor_w(axis));
   }
@@ -1504,7 +1506,9 @@ bool RiskGridMap::refreshFromProvider(
     if (voxel.valid &&
         params_copy.provider_cost_source ==
             RiskProviderCostSource::PRE_CONSERVATIVE_FIM_RATIO &&
-        !std::isfinite(result.fim_fused.risk_ratio)) {
+        (!result.fim_fused.available || !result.fim_fused.valid ||
+         result.fim_fused.stale ||
+         !std::isfinite(result.fim_fused.risk_ratio))) {
       voxel.valid = false;
       cost_source_failure = "pre_conservative_fim_unavailable";
     }
@@ -1632,6 +1636,17 @@ bool RiskGridMap::validateParams(const RiskGridMapParams& params,
   }
   if (params.alert_limit_policy_id.empty()) {
     if (reason) *reason = "empty_alert_limit_policy_id";
+    return false;
+  }
+  if (!finite_positive(params.alert_limit_h_m) ||
+      !finite_positive(params.alert_limit_v_m)) {
+    if (reason) *reason = "invalid_alert_limits";
+    return false;
+  }
+  if (params.alert_limit_policy_id == "fixed_hal10_val20_v1" &&
+      (std::abs(params.alert_limit_h_m - 10.0) > 1.0e-12 ||
+       std::abs(params.alert_limit_v_m - 20.0) > 1.0e-12)) {
+    if (reason) *reason = "fixed_alert_limit_policy_mismatch";
     return false;
   }
   if (!finite_positive(params.resolution_m) ||

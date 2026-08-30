@@ -239,6 +239,8 @@ namespace ego_planner
                "request_hash,snapshot_generation_id,snapshot_stamp_s,snapshot_frame,"
                "snapshot_config_hash,source_identity_hash,"
                "query_base_time_s,occupancy_epoch,geometry_id,occupancy_stamp_s,"
+               "segment_start_x,segment_start_y,segment_start_z,"
+               "segment_end_x,segment_end_y,segment_end_z,"
                "status,reason,selection_applied,"
                "original_hash,risk_hash,selected_hash,original_sample_count,"
                "original_valid_count,original_unknown_count,original_stale_count,"
@@ -259,6 +261,9 @@ namespace ego_planner
           << decision.query_base_time_s << ','
           << decision.occupancy_epoch << ','
           << decision.geometry_id << ',' << decision.occupancy_stamp_s << ','
+          << decision.segment_start.x() << ',' << decision.segment_start.y() << ','
+          << decision.segment_start.z() << ',' << decision.segment_end.x() << ','
+          << decision.segment_end.y() << ',' << decision.segment_end.z() << ','
           << p4GuideDecisionStatusName(decision.status) << ','
           << p4GuideDecisionReasonName(decision.reason) << ','
           << (decision.selection_applied ? 1 : 0) << ','
