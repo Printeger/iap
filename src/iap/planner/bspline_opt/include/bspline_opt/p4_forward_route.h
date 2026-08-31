@@ -189,6 +189,7 @@ namespace ego_planner
     std::function < P4ForwardRiskSample(const Eigen::Vector3d &, double) > risk;
     std::function < bool(
       const std::vector < P4ForwardRiskQuery > &,
+      double,
       std::vector < P4ForwardRiskSample > *) > risk_batch;
     // Production supplies the EGO-lattice native A* corridor refiner. It is
     // invoked by the worker so refinement and re-certification share the same
@@ -240,6 +241,9 @@ namespace ego_planner
     double movement_trigger_m = 0.5);
   bool p4ForwardDecisionMatchesLiveGeneration(
     const P4ForwardDecision & decision, uint64_t live_generation);
+  bool p4CertifyForwardCandidate(
+    const P4ForwardRequest & request, P4ForwardCandidate * candidate,
+    double compute_budget_ms);
 
   class P4ForwardRoutePlanner
   {

@@ -2,6 +2,7 @@
 // Public entry point for the independent advisory Predictor module.
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <vector>
 
@@ -48,7 +49,8 @@ class PredictorModule {
   PredictorQueryResult query(const PredictorQueryInput& input) const;
   std::vector<PredictorQueryResult> queryBatch(
       const std::vector<PredictorQueryInput>& inputs,
-      PredictorBatchDiagnostics* diagnostics = nullptr) const;
+      PredictorBatchDiagnostics* diagnostics = nullptr,
+      const std::function<bool()>& should_cancel = {}) const;
   ForwardRiskBatchResult queryForwardRiskBatch(
       const ForwardRiskBatchRequest& request,
       PredictorBatchDiagnostics* diagnostics = nullptr) const;

@@ -107,3 +107,8 @@ bool    any_inf_rejected
 bool    negative_variance_rejected
 bool    degenerate_geometry
 string  failure_reason
+
+# Exact GNSS measurement epoch used by the certified ARAIM source. A zero
+# identity means that no GNSS epoch contributed to this report.
+float64 gnss_epoch_stamp
+uint64  gnss_epoch_identity

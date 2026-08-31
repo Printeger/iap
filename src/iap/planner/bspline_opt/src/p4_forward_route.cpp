@@ -263,21 +263,22 @@ public:
            index.z < dimensions_.z();
   }
 
-  bool sweptFree(const Eigen::Vector3d & center) const
+  P4ForwardOccupancyState sweptState(const Eigen::Vector3d & center) const
   {
     if (timedOut()) {
-      return false;
+      return P4ForwardOccupancyState::UNKNOWN;
     }
     const double radius = request_.limits.vehicle_radius_m;
     if (radius <= kEpsilon) {
-      return request_.occupancy(center) ==
-             P4ForwardOccupancyState::OBSERVED_FREE;
+      return request_.occupancy(center);
     }
     const double resolution = request_.limits.occupancy_resolution_m;
     const Eigen::Vector3i minimum = ((center.array() - radius -
       request_.map_origin.array()) / resolution).floor().cast<int>();
     const Eigen::Vector3i maximum = ((center.array() + radius -
       request_.map_origin.array()) / resolution).floor().cast<int>();
+    P4ForwardOccupancyState swept_state =
+      P4ForwardOccupancyState::OBSERVED_FREE;
     for (int x = minimum.x(); x <= maximum.x(); ++x) {
       for (int y = minimum.y(); y <= maximum.y(); ++y) {
         for (int z = minimum.z(); z <= maximum.z(); ++z) {
@@ -295,22 +296,29 @@ public:
           const Eigen::Vector3d voxel_center =
             cell_min + Eigen::Vector3d::Constant(0.5 * resolution);
           if (timedOut()) {
-            return false;
+            return P4ForwardOccupancyState::UNKNOWN;
           }
           const GridIndex voxel{x, y, z};
-          auto cached = swept_cell_free_cache_.find(voxel);
-          if (cached == swept_cell_free_cache_.end()) {
-            cached = swept_cell_free_cache_.emplace(
-              voxel, request_.occupancy(voxel_center) ==
-              P4ForwardOccupancyState::OBSERVED_FREE).first;
+          auto cached = swept_cell_state_cache_.find(voxel);
+          if (cached == swept_cell_state_cache_.end()) {
+            cached = swept_cell_state_cache_.emplace(
+              voxel, request_.occupancy(voxel_center)).first;
           }
-          if (!cached->second) {
-            return false;
+          if (cached->second == P4ForwardOccupancyState::OCCUPIED) {
+            return P4ForwardOccupancyState::OCCUPIED;
+          }
+          if (cached->second == P4ForwardOccupancyState::UNKNOWN) {
+            swept_state = P4ForwardOccupancyState::UNKNOWN;
           }
         }
       }
     }
-    return true;
+    return swept_state;
+  }
+
+  bool sweptFree(const Eigen::Vector3d & center) const
+  {
+    return sweptState(center) == P4ForwardOccupancyState::OBSERVED_FREE;
   }
 
   bool edgeFree(const GridIndex & from, const GridIndex & to) const
@@ -614,8 +622,8 @@ private:
   const ComputeBudget * budget_ = nullptr;
   double resolution_ = 0.5;
   Eigen::Vector3i dimensions_ = Eigen::Vector3i::Zero();
-  mutable std::unordered_map<GridIndex, bool, GridIndexHash>
-  swept_cell_free_cache_;
+  mutable std::unordered_map<
+    GridIndex, P4ForwardOccupancyState, GridIndexHash> swept_cell_state_cache_;
 };
 
 std::vector<Eigen::Vector3d> toWorldPath(
@@ -702,13 +710,18 @@ P4ForwardRiskSample querySweptRisk(
         "risk_support_incomplete" : sample.reason;
       continue;
     }
-    aggregate.safety_state = sample.safety_state ==
-      P4ForwardSafetyState::UNKNOWN ?
-      (sample.safety_ratio < 1.0 ? P4ForwardSafetyState::SAFE :
-      P4ForwardSafetyState::UNSAFE) : sample.safety_state;
-    aggregate.ranking_state = sample.ranking_state ==
-      P4ForwardRankingState::INCOMPLETE ?
-      P4ForwardRankingState::COMPARABLE : sample.ranking_state;
+    if (sample.safety_state == P4ForwardSafetyState::UNKNOWN ||
+      sample.ranking_state == P4ForwardRankingState::INCOMPLETE)
+    {
+      aggregate.valid = false;
+      aggregate.safety_state = P4ForwardSafetyState::UNKNOWN;
+      aggregate.ranking_state = P4ForwardRankingState::INCOMPLETE;
+      aggregate.reason = sample.reason.empty() ?
+        "risk_support_incomplete" : sample.reason;
+      continue;
+    }
+    aggregate.safety_state = sample.safety_state;
+    aggregate.ranking_state = sample.ranking_state;
     aggregate.safety_ratio = std::max(
       aggregate.safety_ratio, sample.safety_ratio);
     aggregate.fim_ratio = std::max(
@@ -905,7 +918,7 @@ void evaluateCandidateRiskSet(
           request.limits.topology_resolution_m))
       {
         queries.push_back(P4ForwardRiskQuery{
-          center, query_time_s, candidate.candidate_id});
+              center, query_time_s, candidate.candidate_id});
       }
       group.end = queries.size();
       groups.push_back(group);
@@ -913,7 +926,10 @@ void evaluateCandidateRiskSet(
   }
   std::vector<P4ForwardRiskSample> samples;
   if ((budget && budget->expired()) ||
-    !request.risk_batch(queries, &samples) || samples.size() != queries.size())
+    !request.risk_batch(
+      queries, budget ? budget->remainingMs() :
+      request.limits.compute_budget_ms, &samples) ||
+    samples.size() != queries.size())
   {
     for (auto & candidate : *candidates) {
       candidate.risk_supported = false;
@@ -957,6 +973,55 @@ void evaluateCandidateRiskSet(
   }
 }
 
+std::vector<P4ForwardRiskSample> evaluateSweptPointSet(
+  const P4ForwardRequest & request, const ComputeBudget * budget,
+  const std::vector<std::pair<Eigen::Vector3d, double>> & points)
+{
+  std::vector<P4ForwardRiskSample> results(points.size());
+  if (points.empty() || !request.risk_batch) {
+    return results;
+  }
+  struct Range
+  {
+    std::size_t begin = 0;
+    std::size_t end = 0;
+  };
+  std::vector<Range> ranges;
+  std::vector<P4ForwardRiskQuery> queries;
+  ranges.reserve(points.size());
+  for (std::size_t index = 0; index < points.size(); ++index) {
+    Range range;
+    range.begin = queries.size();
+    for (const auto & center : sweptVoxelCenters(
+        request, points[index].first,
+        request.limits.topology_resolution_m))
+    {
+      queries.push_back(P4ForwardRiskQuery{
+            center, points[index].second, static_cast<uint64_t>(index + 1)});
+    }
+    range.end = queries.size();
+    ranges.push_back(range);
+  }
+  std::vector<P4ForwardRiskSample> samples;
+  if ((budget && budget->expired()) ||
+    !request.risk_batch(
+      queries, budget ? budget->remainingMs() :
+      request.limits.compute_budget_ms, &samples) ||
+    samples.size() != queries.size())
+  {
+    for (auto & result : results) {
+      result.reason = budget && budget->expired() ?
+        "compute_budget_exceeded" : "risk_batch_failed";
+    }
+    return results;
+  }
+  for (std::size_t index = 0; index < ranges.size(); ++index) {
+    results[index] = aggregateRiskSamples(
+      samples, ranges[index].begin, ranges[index].end);
+  }
+  return results;
+}
+
 std::vector<Eigen::Vector3d> certifiedNominalPrefix(
   const P4ForwardRequest & request, const ComputeBudget * budget,
   double * distance, P4ForwardRiskSample * first_failed,
@@ -986,7 +1051,9 @@ std::vector<Eigen::Vector3d> certifiedNominalPrefix(
         queries.push_back(P4ForwardRiskQuery{center, query_time_s, 0});
       }
       std::vector<P4ForwardRiskSample> samples;
-      if (!request.risk_batch(queries, &samples) ||
+      if (!request.risk_batch(
+          queries, budget ? budget->remainingMs() :
+          request.limits.compute_budget_ms, &samples) ||
         samples.size() != queries.size())
       {
         break;
@@ -995,7 +1062,9 @@ std::vector<Eigen::Vector3d> certifiedNominalPrefix(
     } else {
       sample = querySweptRisk(request, point, query_time_s, budget);
     }
-    const bool occupancy_free = graph.sweptFree(point);
+    const P4ForwardOccupancyState occupancy_state = graph.sweptState(point);
+    const bool occupancy_free =
+      occupancy_state == P4ForwardOccupancyState::OBSERVED_FREE;
     if (!occupancy_free ||
       !sample.valid || sample.stale ||
       sample.safety_state == P4ForwardSafetyState::UNKNOWN ||
@@ -1006,9 +1075,13 @@ std::vector<Eigen::Vector3d> certifiedNominalPrefix(
         *first_failed = sample;
         if (!occupancy_free) {
           first_failed->valid = false;
-          first_failed->safety_state = P4ForwardSafetyState::UNKNOWN;
+          first_failed->safety_state =
+            occupancy_state == P4ForwardOccupancyState::OCCUPIED ?
+            P4ForwardSafetyState::UNSAFE : P4ForwardSafetyState::UNKNOWN;
           first_failed->ranking_state = P4ForwardRankingState::INCOMPLETE;
-          first_failed->reason = "OCCUPANCY_UNKNOWN";
+          first_failed->reason =
+            occupancy_state == P4ForwardOccupancyState::OCCUPIED ?
+            "OCCUPIED" : "OCCUPANCY_UNKNOWN";
         }
       }
       if (first_failed_position) {
@@ -1153,7 +1226,7 @@ bool P4ForwardRequest::valid(std::string * reason) const
   {
     return fail("invalid_map_geometry");
   }
-  if (!occupancy || !risk || !std::isfinite(query_time_s)) {
+  if (!occupancy || !risk || !risk_batch || !std::isfinite(query_time_s)) {
     return fail("missing_snapshot_query");
   }
   const std::array<double, 14> finite_limits = {
@@ -1194,6 +1267,33 @@ double p4StoppingDistance(
   return speed * limits.reaction_time_s +
          speed * speed / (2.0 * limits.braking_accel_mps2) +
          limits.vehicle_radius_m + limits.safety_margin_m;
+}
+
+bool p4CertifyForwardCandidate(
+  const P4ForwardRequest & request, P4ForwardCandidate * candidate,
+  const double compute_budget_ms)
+{
+  if (!candidate || candidate->path.size() < 2 || !request.risk_batch ||
+    !std::isfinite(compute_budget_ms) || compute_budget_ms <= 0.0)
+  {
+    return false;
+  }
+  const ComputeBudget budget(compute_budget_ms);
+  const OnlineTopologyGraph graph(request, &budget);
+  candidate->length_m = pathLength(candidate->path);
+  candidate->path_hash = hashPath(candidate->path);
+  candidate->occupancy_supported = graph.worldPathFree(candidate->path);
+  if (!candidate->occupancy_supported) {
+    candidate->risk_supported = false;
+    candidate->safety_gate_passed = false;
+    candidate->reason = "occupancy_support_incomplete";
+    return false;
+  }
+  std::vector<P4ForwardCandidate> candidates{*candidate};
+  evaluateCandidateRiskSet(request, &budget, &candidates);
+  *candidate = std::move(candidates.front());
+  return !budget.expired() && candidate->occupancy_supported &&
+         candidate->risk_supported && candidate->safety_gate_passed;
 }
 
 bool p4ForwardDecisionMatchesRequest(
@@ -1277,21 +1377,30 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
   OnlineTopologyGraph graph(request, &budget);
   Eigen::Vector3d anchor = request.position;
   bool saw_unsupported_anchor = false;
-  for (auto iterator = nominal.rbegin(); iterator != nominal.rend(); ++iterator) {
-    if ((*iterator - request.position).norm() >
+  std::vector<std::pair<Eigen::Vector3d, double>> anchor_queries;
+  for (const auto & point : nominal) {
+    if ((point - request.position).norm() >
       decision.decision_horizon_m + kEpsilon)
     {
       continue;
     }
     const double query_time_s = request.query_time_s +
-      (*iterator - request.position).norm() /
+      (point - request.position).norm() /
       request.limits.nominal_query_speed_mps;
-    const auto sample = querySweptRisk(
-      request, *iterator, query_time_s, &budget);
-    if (graph.sweptFree(*iterator) && sample.valid &&
+    anchor_queries.emplace_back(point, query_time_s);
+  }
+  const auto anchor_risk = evaluateSweptPointSet(
+    request, &budget, anchor_queries);
+  for (std::size_t reverse_index = anchor_queries.size();
+    reverse_index > 0; --reverse_index)
+  {
+    const std::size_t index = reverse_index - 1;
+    const auto & point = anchor_queries[index].first;
+    const auto & sample = anchor_risk[index];
+    if (graph.sweptFree(point) && sample.valid &&
       !sample.stale && std::isfinite(sample.safety_ratio))
     {
-      anchor = *iterator;
+      anchor = point;
       break;
     }
     saw_unsupported_anchor = true;
@@ -1482,7 +1591,7 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
     decision.reason = "no_candidate_passed_safety_gate";
     return finalize(std::move(decision));
   }
-  std::sort(eligible.begin(), eligible.end(),
+  const auto risk_order =
     [](const P4ForwardCandidate * lhs, const P4ForwardCandidate * rhs) {
       if (std::abs(lhs->fim_max_ratio - rhs->fim_max_ratio) > kEpsilon) {
         return lhs->fim_max_ratio < rhs->fim_max_ratio;
@@ -1494,56 +1603,84 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
         return lhs->length_m < rhs->length_m;
       }
       return lhs->path_hash < rhs->path_hash;
-    });
-  P4ForwardCandidate * selected = nullptr;
-  for (auto * candidate : eligible) {
-    if (!request.refine) {
-      selected = candidate;
-      break;
+    };
+  std::sort(eligible.begin(), eligible.end(), risk_order);
+
+  if (request.refine) {
+    std::vector<P4ForwardCandidate> refined_candidates;
+    refined_candidates.reserve(eligible.size());
+    for (const auto * candidate : eligible) {
+      if (budget.expired()) {
+        decision.reason = "compute_budget_exceeded";
+        return finalize(std::move(decision));
+      }
+      P4ForwardCandidate refined_candidate = *candidate;
+      std::vector<Eigen::Vector3d> refined;
+      if (!request.refine(
+          candidate->path,
+          1.5 * request.limits.topology_resolution_m,
+          budget.remainingMs(), &refined))
+      {
+        continue;
+      }
+      refined_candidate.path = std::move(refined);
+      refined_candidate.length_m = pathLength(refined_candidate.path);
+      refined_candidate.path_hash = hashPath(refined_candidate.path);
+      refined_candidate.occupancy_supported =
+        graph.worldPathFree(refined_candidate.path);
+      if (refined_candidate.occupancy_supported) {
+        refined_candidates.push_back(std::move(refined_candidate));
+      }
     }
-    if (budget.expired()) {
-      decision.reason = "compute_budget_exceeded";
+    if (refined_candidates.empty()) {
+      decision.action = P4ForwardAction::REPLAN_REQUIRED;
+      decision.trigger_reason = P4ForwardTriggerReason::NO_TOPOLOGY_ROUTE;
+      decision.reason = budget.expired() ? "compute_budget_exceeded" :
+        "no_native_refined_candidate";
       return finalize(std::move(decision));
     }
-    std::vector<Eigen::Vector3d> refined;
-    if (!request.refine(
-        candidate->path,
-        1.5 * request.limits.topology_resolution_m,
-        budget.remainingMs(), &refined))
+    // Re-certify every refined route in one batch.  This is deliberately not
+    // a scalar fallback: all routes that can be selected share one immutable
+    // snapshot and one common-known satellite set.
+    evaluateCandidateRiskSet(request, &budget, &refined_candidates);
+    if (std::any_of(
+        refined_candidates.begin(), refined_candidates.end(),
+        [](const P4ForwardCandidate & candidate) {
+          return !candidate.occupancy_supported ||
+                 !candidate.risk_supported;
+        }))
     {
-      candidate->occupancy_supported = false;
-      candidate->risk_supported = false;
-      candidate->safety_gate_passed = false;
-      candidate->reason = budget.expired() ? "compute_budget_exceeded" :
-        "native_corridor_refinement_failed";
-      continue;
+      decision.candidates = std::move(refined_candidates);
+      decision.action = P4ForwardAction::OBSERVE_MORE;
+      decision.trigger_reason = P4ForwardTriggerReason::SUPPORT_INCOMPLETE;
+      decision.reason = "refined_candidate_risk_support_incomplete";
+      configureObserveMore(request, &budget, &decision);
+      return finalize(std::move(decision));
     }
-    candidate->path = std::move(refined);
-    candidate->length_m = pathLength(candidate->path);
-    candidate->path_hash = hashPath(candidate->path);
-    candidate->occupancy_supported = graph.worldPathFree(candidate->path);
-    if (!candidate->occupancy_supported) {
-      candidate->risk_supported = false;
-      candidate->safety_gate_passed = false;
-      candidate->reason = "native_refinement_occupancy_unsupported";
-      continue;
+    decision.candidates = std::move(refined_candidates);
+    const auto shortest_refined = std::min_element(
+      decision.candidates.begin(), decision.candidates.end(),
+      [](const P4ForwardCandidate & lhs, const P4ForwardCandidate & rhs) {
+        return lhs.length_m < rhs.length_m;
+      })->length_m;
+    eligible.clear();
+    for (auto & candidate : decision.candidates) {
+      if (candidate.safety_gate_passed &&
+        candidate.length_m <= shortest_refined *
+        request.limits.max_path_length_ratio + kEpsilon)
+      {
+        eligible.push_back(&candidate);
+      }
     }
-    evaluateRisk(request, &budget, candidate);
-    if (candidate->risk_supported && candidate->safety_gate_passed &&
-      candidate->length_m <= shortest *
-      request.limits.max_path_length_ratio + kEpsilon)
-    {
-      selected = candidate;
-      break;
-    }
+    std::sort(eligible.begin(), eligible.end(), risk_order);
   }
-  if (!selected) {
-    decision.action = P4ForwardAction::REPLAN_REQUIRED;
-    decision.trigger_reason = P4ForwardTriggerReason::NO_TOPOLOGY_ROUTE;
-    decision.reason = budget.expired() ? "compute_budget_exceeded" :
-      "no_native_refined_candidate";
+  if (eligible.empty()) {
+    decision.action = P4ForwardAction::NO_SAFE_ROUTE;
+    decision.trigger_reason = P4ForwardTriggerReason::NO_SAFE_ROUTE;
+    decision.reason = "no_refined_candidate_passed_safety_gate";
     return finalize(std::move(decision));
   }
+  P4ForwardCandidate * selected = eligible.front();
   decision.selected_candidate_id = selected->candidate_id;
   decision.selected_guide = selected->path;
   decision.action = decision.candidates.size() == 1 ?

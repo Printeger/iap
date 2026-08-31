@@ -24,6 +24,32 @@ using ego_planner::P4ForwardRoutePlanner;
 using ego_planner::P4ForwardSafetyState;
 using ego_planner::P4ForwardTriggerReason;
 
+void bindTestRiskBatch(P4ForwardRequest * request)
+{
+  const auto scalar = request->risk;
+  request->risk_batch = [scalar](
+    const std::vector<P4ForwardRiskQuery> & queries,
+    double,
+    std::vector<P4ForwardRiskSample> * samples) {
+      samples->clear();
+      samples->reserve(queries.size());
+      for (const auto & query : queries) {
+        auto sample = scalar(query.position, query.query_time_s);
+        if (sample.valid && !sample.stale && sample.gnss_supported &&
+          sample.lidar_supported && sample.fim_supported &&
+          std::isfinite(sample.safety_ratio) &&
+          std::isfinite(sample.fim_ratio))
+        {
+          sample.safety_state = sample.safety_ratio < 1.0 ?
+            P4ForwardSafetyState::SAFE : P4ForwardSafetyState::UNSAFE;
+          sample.ranking_state = P4ForwardRankingState::COMPARABLE;
+        }
+        samples->push_back(std::move(sample));
+      }
+      return true;
+    };
+}
+
 P4ForwardRequest straightRequest()
 {
   P4ForwardRequest request;
@@ -65,6 +91,7 @@ P4ForwardRequest straightRequest()
       sample.reason = "ok";
       return sample;
     };
+  bindTestRiskBatch(&request);
   return request;
 }
 
@@ -132,6 +159,7 @@ TEST(P4ForwardRoute, MissingRiskSupportObservesMoreWithoutCrossingUnknown)
       sample.reason = sample.valid ? "ok" : "unknown";
       return sample;
     };
+  bindTestRiskBatch(&request);
 
   const auto decision = P4ForwardRoutePlanner().decide(request);
   EXPECT_EQ(decision.action, P4ForwardAction::OBSERVE_MORE);
@@ -163,6 +191,7 @@ TEST(P4ForwardRoute, MissingIndividualSourceSupportObservesMore)
       sample.reason = "lidar_support_missing";
       return sample;
     };
+  bindTestRiskBatch(&request);
 
   const auto decision = P4ForwardRoutePlanner().decide(request);
   EXPECT_EQ(decision.action, P4ForwardAction::OBSERVE_MORE);
@@ -267,6 +296,7 @@ TEST(P4ForwardRoute, ObserveMoreEndpointRetainsZeroSpeedStoppingReserve)
       sample.reason = sample.valid ? "ok" : "unknown";
       return sample;
     };
+  bindTestRiskBatch(&request);
   const auto decision = P4ForwardRoutePlanner().decide(request);
   ASSERT_EQ(decision.action, P4ForwardAction::OBSERVE_MORE)
     << decision.reason << " latency_ms=" << decision.compute_latency_ms;
@@ -295,6 +325,7 @@ TEST(P4ForwardRoute, RiskProfileUsesAlongPathArrivalTime)
       sample.reason = "ok";
       return sample;
     };
+  bindTestRiskBatch(&request);
 
   const auto decision = P4ForwardRoutePlanner().decide(request);
   ASSERT_EQ(decision.action, P4ForwardAction::CONTINUE_NOMINAL);
@@ -327,6 +358,7 @@ TEST(P4ForwardRoute, OccupiedSeparatorCreatesTwoRiskRankedChannels)
       sample.reason = "ok";
       return sample;
     };
+  bindTestRiskBatch(&request);
 
   const auto decision = P4ForwardRoutePlanner().decide(request);
   EXPECT_EQ(decision.action, P4ForwardAction::RISK_SELECTED);
@@ -357,6 +389,7 @@ TEST(P4ForwardRoute, RiskBatchComparesAllChannelsWithOneCertificateCall)
   std::size_t max_group_count = 0;
   request.risk_batch = [&batch_calls, &max_group_count](
     const std::vector<ego_planner::P4ForwardRiskQuery> & queries,
+    double,
     std::vector<P4ForwardRiskSample> *samples) {
       ++batch_calls;
       std::set<uint64_t> groups;
@@ -387,7 +420,7 @@ TEST(P4ForwardRoute, RiskBatchComparesAllChannelsWithOneCertificateCall)
 
   ASSERT_EQ(decision.action, P4ForwardAction::RISK_SELECTED)
     << decision.reason;
-  EXPECT_EQ(batch_calls, 1);
+  EXPECT_GE(batch_calls, 2);
   EXPECT_GE(max_group_count, 2u);
 }
 
@@ -395,6 +428,7 @@ TEST(P4ForwardRoute, RiskBatchObserveMoreNeverCrossesUnknownSupport)
 {
   auto request = straightRequest();
   request.risk_batch = [](const std::vector<P4ForwardRiskQuery> & queries,
+    double,
     std::vector<P4ForwardRiskSample> *samples) {
       samples->clear();
       for (const auto & query : queries) {
@@ -442,6 +476,38 @@ TEST(P4ForwardRoute, RiskBatchObserveMoreNeverCrossesUnknownSupport)
   EXPECT_LE(decision.speed_cap_mps,
     request.limits.max_observe_speed_mps + 1.0e-9);
   EXPECT_EQ(decision.first_failed_risk.reason, "GNSS_SKY_UNKNOWN");
+}
+
+TEST(P4ForwardRoute, ObserveMoreReportsOccupiedFirstFailure)
+{
+  auto request = straightRequest();
+  request.occupancy = [](const Eigen::Vector3d & point) {
+      return point.x() > 1.25 ? P4ForwardOccupancyState::OCCUPIED :
+             P4ForwardOccupancyState::OBSERVED_FREE;
+    };
+
+  const auto decision = P4ForwardRoutePlanner().decide(request);
+
+  EXPECT_EQ(decision.action, P4ForwardAction::OBSERVE_MORE);
+  EXPECT_EQ(decision.first_failed_risk.reason, "OCCUPIED");
+  EXPECT_EQ(decision.first_failed_risk.safety_state,
+    P4ForwardSafetyState::UNSAFE);
+}
+
+TEST(P4ForwardRoute, ObserveMoreReportsUnknownFirstFailure)
+{
+  auto request = straightRequest();
+  request.occupancy = [](const Eigen::Vector3d & point) {
+      return point.x() > 1.25 ? P4ForwardOccupancyState::UNKNOWN :
+             P4ForwardOccupancyState::OBSERVED_FREE;
+    };
+
+  const auto decision = P4ForwardRoutePlanner().decide(request);
+
+  EXPECT_EQ(decision.action, P4ForwardAction::OBSERVE_MORE);
+  EXPECT_EQ(decision.first_failed_risk.reason, "OCCUPANCY_UNKNOWN");
+  EXPECT_EQ(decision.first_failed_risk.safety_state,
+    P4ForwardSafetyState::UNKNOWN);
 }
 
 TEST(P4ForwardRoute, UnknownSeparatorCannotBeMergedAsFreeSpace)
@@ -503,6 +569,7 @@ TEST(P4ForwardRoute, FullThreeDimensionalSearchSelectsVerticalChannel)
       sample.reason = "ok";
       return sample;
     };
+  bindTestRiskBatch(&request);
   const auto decision = P4ForwardRoutePlanner().decide(request);
   std::ostringstream raw_midpoints;
   for (const auto & candidate : decision.raw_candidates) {

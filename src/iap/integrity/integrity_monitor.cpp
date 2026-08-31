@@ -583,6 +583,10 @@ IntegrityReport IntegrityMonitor::compute(const glim::EstimationFrame& frame,
   const auto t0_integrity = std::chrono::high_resolution_clock::now();
   IntegrityReport report;
   report.stamp = frame.stamp;
+  if (epoch != nullptr) {
+    report.gnss_epoch_stamp = epoch->stamp;
+    report.gnss_epoch_identity = gnss_epoch_identity(*epoch);
+  }
   report.araim_n_det = 0;  // ensure deterministic state machine input
 
   // --- ICP health ---

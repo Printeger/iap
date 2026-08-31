@@ -1352,6 +1352,12 @@ class P0RiskGridRuntimeStampTest : public ::testing::Test {
 
   static void seedProfileGnss(P0RiskGridRuntime* runtime) {
     runtime->latest_epoch_ = profileGnssEpoch(100.0);
+    runtime->latest_current_.gnss_hpl = runtime->latest_current_.hpl;
+    runtime->latest_current_.gnss_vpl = runtime->latest_current_.vpl;
+    runtime->latest_current_.gnss_epoch_stamp =
+        runtime->latest_epoch_->stamp;
+    runtime->latest_current_.gnss_epoch_identity =
+        iap::gnss_epoch_identity(*runtime->latest_epoch_);
     runtime->latest_gnss_epoch_generation_ = 1u;
     runtime->gnss_epoch_seen_ = true;
     runtime->latest_gnss_epoch_stamp_ = 100.0;
@@ -1706,12 +1712,20 @@ class P0RiskGridRuntimeStampTest : public ::testing::Test {
   static void setLatestGnssEpoch(
       P0RiskGridRuntime* runtime, const iap::GnssEpoch& epoch) {
     runtime->latest_epoch_ = epoch;
+    runtime->latest_current_.gnss_epoch_stamp = epoch.stamp;
+    runtime->latest_current_.gnss_epoch_identity =
+        iap::gnss_epoch_identity(epoch);
   }
 
   static void seedGnssEpoch(P0RiskGridRuntime* runtime,
                             const double stamp_s,
                             const int satellite_count = 8) {
     runtime->latest_epoch_ = makeGnssEpoch(satellite_count, stamp_s);
+    runtime->latest_current_.gnss_hpl = runtime->latest_current_.hpl;
+    runtime->latest_current_.gnss_vpl = runtime->latest_current_.vpl;
+    runtime->latest_current_.gnss_epoch_stamp = stamp_s;
+    runtime->latest_current_.gnss_epoch_identity =
+        iap::gnss_epoch_identity(*runtime->latest_epoch_);
     ++runtime->latest_gnss_epoch_generation_;
     if (runtime->latest_gnss_epoch_generation_ == 0u) {
       ++runtime->latest_gnss_epoch_generation_;
@@ -1910,6 +1924,8 @@ class P0RiskGridRuntimeStampTest : public ::testing::Test {
     runtime->latest_current_.stamp = current_stamp;
     runtime->latest_current_.valid = true;
     runtime->latest_current_.gnss_valid = true;
+    runtime->latest_current_.gnss_hpl = 1.0;
+    runtime->latest_current_.gnss_vpl = 1.0;
     runtime->latest_current_.hpl = 1.0;
     runtime->latest_current_.vpl = 1.0;
     runtime->latest_current_.hal = 10.0;

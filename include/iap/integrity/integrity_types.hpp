@@ -4,6 +4,7 @@
 // §1.13: Three-state integrity state machine
 
 #include <Eigen/Core>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -191,6 +192,8 @@ struct IntegrityReport {
   double gnss_K_fa_used = 0.0;
   int    gnss_n_hyp     = 0;
   int    gnss_n_det     = 0;
+  double gnss_epoch_stamp = 0.0;
+  std::uint64_t gnss_epoch_identity = 0;
 
   // --- GNSS quality summary -----------------------------------------------
   int    n_sv_used         = 0;

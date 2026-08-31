@@ -5,6 +5,7 @@
 #include <Eigen/Geometry>
 
 #include <algorithm>
+#include <cstdint>
 #include <cmath>
 #include <limits>
 #include <string>
@@ -19,6 +20,10 @@ struct CurrentIntegrityState {
   double stamp = std::numeric_limits<double>::quiet_NaN();
   bool valid = false;
   bool gnss_valid = false;
+  double gnss_hpl = std::numeric_limits<double>::quiet_NaN();
+  double gnss_vpl = std::numeric_limits<double>::quiet_NaN();
+  double gnss_epoch_stamp = std::numeric_limits<double>::quiet_NaN();
+  std::uint64_t gnss_epoch_identity = 0;
 
   int integrity_state = -1;
 

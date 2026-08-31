@@ -2758,6 +2758,8 @@ TEST(IntegrityReportMappingTest, SourceFusionAndFailureFieldsMapToRosMessage) {
   report.gnss_PL_E = 3.0;
   report.gnss_PL_N = 2.0;
   report.gnss_PL_U = 10.0;
+  report.gnss_epoch_stamp = 123.5;
+  report.gnss_epoch_identity = 0x1234u;
 
   report.lidar_valid = 0;
   report.lidar_HPL = 8.0;
@@ -2802,6 +2804,8 @@ TEST(IntegrityReportMappingTest, SourceFusionAndFailureFieldsMapToRosMessage) {
   EXPECT_DOUBLE_EQ(msg.gnss_pl_e, report.gnss_PL_E);
   EXPECT_DOUBLE_EQ(msg.gnss_pl_n, report.gnss_PL_N);
   EXPECT_DOUBLE_EQ(msg.gnss_pl_u, report.gnss_PL_U);
+  EXPECT_DOUBLE_EQ(msg.gnss_epoch_stamp, report.gnss_epoch_stamp);
+  EXPECT_EQ(msg.gnss_epoch_identity, report.gnss_epoch_identity);
   EXPECT_DOUBLE_EQ(msg.lidar_pl_e, report.lidar_PL_E);
   EXPECT_DOUBLE_EQ(msg.lidar_pl_n, report.lidar_PL_N);
   EXPECT_DOUBLE_EQ(msg.lidar_pl_u, report.lidar_PL_U);

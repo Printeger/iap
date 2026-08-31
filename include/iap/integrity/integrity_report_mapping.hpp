@@ -73,6 +73,8 @@ inline void fill_integrity_report_msg(const IntegrityReport& report,
   msg.gnss_k_fa_used  = report.gnss_K_fa_used;
   msg.gnss_n_hyp      = static_cast<int32_t>(report.gnss_n_hyp);
   msg.gnss_n_det      = static_cast<int32_t>(report.gnss_n_det);
+  msg.gnss_epoch_stamp = report.gnss_epoch_stamp;
+  msg.gnss_epoch_identity = report.gnss_epoch_identity;
 
   // --- LiDAR source breakdown ---
   msg.lidar_valid      = (report.lidar_valid != 0);

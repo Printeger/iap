@@ -5,14 +5,18 @@
 ## Unreleased
 - fix(p0-anchored-gnss-zero-unknown-forward): IAP-RQ-320 / IAP-RQ-400 /
   IAP-RQ-410 — anchor P0 GNSS protection levels to the same-epoch certified
-  current Integrity/ARAIM HPL/VPL, adding only non-negative spatial advisory
-  degradation from a frozen common-satellite epoch. Reject anchor stamp
-  differences above 0.25 s. For soft canopy visibility, require online
+  current GNSS ARAIM `gnss_hpl/gnss_vpl`, adding only non-negative spatial
+  advisory degradation from a frozen common-satellite epoch. Carry an
+  explicit GNSS epoch stamp and identity from Integrity to P0; reject identity
+  mismatch or anchor stamp differences above 0.25 s. For soft canopy
+  visibility, require online
   observed support only over the model's actual 5 m influence interval after
   the near-field offset; retain the full configured ray for hard occlusion.
   Bind P4 to an immutable P0 risk+occupancy+GNSS batch certificate, compare all
-  topology candidates with one common known-satellite set, and reject stale or
-  generation-changed results. `OBSERVE_MORE` now moves at most 0.5 m and
+  topology candidates, refined guides and latched guides through the batch
+  interface with a common known-satellite set, and reject stale,
+  compute-budget-expired or generation-changed results. `OBSERVE_MORE` now
+  moves at most 0.5 m and
   0.5 m/s only over a fully observed-free, GNSS/LiDAR/FIM-supported prefix;
   any UNKNOWN support stops the prefix, with no empirical unknown-growth,
   receiver-support expansion, timeout bypass, or simulator truth access.

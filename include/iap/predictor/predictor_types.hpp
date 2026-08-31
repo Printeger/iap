@@ -316,6 +316,12 @@ enum class CovarianceGrowthStatus {
   NOT_EVALUATED,
 };
 
+enum class PredictorFreshnessStatus {
+  NOT_EVALUATED = 0,
+  FRESH,
+  STALE,
+};
+
 struct PredictorQueryResult {
   bool available = false;
   bool valid = false;
@@ -330,6 +336,8 @@ struct PredictorQueryResult {
   uint32_t source_flags = 0u;
   CovarianceGrowthStatus covariance_growth_status =
       CovarianceGrowthStatus::NOT_EVALUATED;
+  PredictorFreshnessStatus freshness_status =
+      PredictorFreshnessStatus::NOT_EVALUATED;
 
   GnssAdvisoryResult gnss;
   LidarAdvisoryResult lidar;
@@ -379,6 +387,7 @@ struct ForwardRiskBatchRequest {
   double val = 20.0;
   double freshness_reference_time_s =
       std::numeric_limits<double>::quiet_NaN();
+  double compute_budget_ms = std::numeric_limits<double>::infinity();
 };
 
 struct ForwardRiskPointResult {

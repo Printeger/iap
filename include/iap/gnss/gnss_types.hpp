@@ -2,6 +2,7 @@
 // IAP-RQ-020: GNSS types — per-satellite observation data
 
 #include <Eigen/Core>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -52,5 +53,29 @@ struct GnssEpoch {
   std::vector<SatObs>    sats;     ///< per-satellite channels
   std::vector<double>    iono_params;  ///< Klobuchar params {α0..α3, β0..β3}; empty → skip iono
 };
+
+/// Stable identity for the measurement epoch consumed by both Integrity and
+/// the planning Predictor. The hash intentionally excludes derived geometry
+/// and FDE state: those may be recomputed by each consumer, while the epoch
+/// stamp and ordered observable identities identify the source measurement.
+inline std::uint64_t gnss_epoch_identity(const GnssEpoch& epoch) {
+  std::uint64_t hash = 1469598103934665603ull;
+  const auto append = [&hash](const void* data, const std::size_t size) {
+    const auto* bytes = static_cast<const unsigned char*>(data);
+    for (std::size_t index = 0; index < size; ++index) {
+      hash ^= static_cast<std::uint64_t>(bytes[index]);
+      hash *= 1099511628211ull;
+    }
+  };
+  append(&epoch.stamp, sizeof(epoch.stamp));
+  append(&epoch.gps_sec, sizeof(epoch.gps_sec));
+  const std::uint64_t count = epoch.sats.size();
+  append(&count, sizeof(count));
+  for (const auto& sat : epoch.sats) {
+    append(&sat.sat_id, sizeof(sat.sat_id));
+    append(&sat.constellation, sizeof(sat.constellation));
+  }
+  return hash;
+}
 
 }  // namespace iap

@@ -47,10 +47,8 @@ uint32_t make_source_flags(const PredictorQueryResult& result) {
   if (result.fused.conservative_max_applied) {
     flags |= PREDICTOR_RESULT_CONSERVATIVE_MAX;
   }
-  if (result.fused.fallback_reason.find("stale_current_prior") !=
-          std::string::npos ||
-      result.fallback_reason.find("stale_current_prior") !=
-          std::string::npos) {
+  if (result.valid &&
+      result.freshness_status == PredictorFreshnessStatus::STALE) {
     flags |= PREDICTOR_RESULT_STALE_CURRENT_PRIOR;
   }
   return flags;
@@ -236,13 +234,20 @@ bool apply_certified_gnss_anchor(
   if (!candidate || !candidate->valid) {
     return false;
   }
+  const std::uint64_t epoch_identity =
+      gnss_epoch_identity(snapshot.gnss_epoch);
   const double epoch_delta =
-      std::abs(snapshot.current.stamp - snapshot.gnss_epoch.stamp);
+      std::abs(snapshot.current.gnss_epoch_stamp -
+               snapshot.gnss_epoch.stamp);
   const bool anchor_input_valid = snapshot.has_pose && snapshot.p_wb.allFinite() &&
       snapshot.current.valid && snapshot.current.gnss_valid &&
-      std::isfinite(snapshot.current.hpl) && snapshot.current.hpl >= 0.0 &&
-      std::isfinite(snapshot.current.vpl) && snapshot.current.vpl >= 0.0 &&
-      std::isfinite(snapshot.current.stamp) &&
+      std::isfinite(snapshot.current.gnss_hpl) &&
+      snapshot.current.gnss_hpl >= 0.0 &&
+      std::isfinite(snapshot.current.gnss_vpl) &&
+      snapshot.current.gnss_vpl >= 0.0 &&
+      std::isfinite(snapshot.current.gnss_epoch_stamp) &&
+      snapshot.current.gnss_epoch_identity != 0 &&
+      snapshot.current.gnss_epoch_identity == epoch_identity &&
       std::isfinite(snapshot.gnss_epoch.stamp) &&
       std::isfinite(params.measured_epoch_integrity_max_delta_s) &&
       params.measured_epoch_integrity_max_delta_s >= 0.0 &&
@@ -267,8 +272,8 @@ bool apply_certified_gnss_anchor(
   candidate->raw_vpl = candidate->vpl;
   candidate->receiver_raw_hpl = receiver.hpl;
   candidate->receiver_raw_vpl = receiver.vpl;
-  candidate->anchor_hpl = snapshot.current.hpl;
-  candidate->anchor_vpl = snapshot.current.vpl;
+  candidate->anchor_hpl = snapshot.current.gnss_hpl;
+  candidate->anchor_vpl = snapshot.current.gnss_vpl;
   candidate->spatial_delta_h =
       std::max(0.0, candidate->raw_hpl - receiver.hpl);
   candidate->spatial_delta_v =
@@ -496,6 +501,7 @@ PredictorQueryResult PredictorModule::queryWithSpatialAdvisory(
         input, params_.freshness, require_gnss_epoch);
   }
   if (!freshness_reason.empty()) {
+    out.freshness_status = PredictorFreshnessStatus::STALE;
     out.valid = false;
     out.available = false;
     out.fallback = true;
@@ -505,6 +511,9 @@ PredictorQueryResult PredictorModule::queryWithSpatialAdvisory(
   }
   const bool stale_current_prior =
       current_freshness_reason == "stale_integrity";
+  out.freshness_status = stale_current_prior
+      ? PredictorFreshnessStatus::STALE
+      : PredictorFreshnessStatus::FRESH;
   PredictorQueryInput working_input = input;
   const CovarianceGrowthOutcome growth = apply_covariance_growth(
       input, params_.covariance_growth, stale_current_prior,
@@ -632,7 +641,8 @@ PredictorQueryResult PredictorModule::queryWithSpatialAdvisory(
 
 std::vector<PredictorQueryResult> PredictorModule::queryBatch(
     const std::vector<PredictorQueryInput>& inputs,
-    PredictorBatchDiagnostics* diagnostics) const {
+    PredictorBatchDiagnostics* diagnostics,
+    const std::function<bool()>& should_cancel) const {
   struct Key {
     double x;
     double y;
@@ -688,6 +698,9 @@ std::vector<PredictorQueryResult> PredictorModule::queryBatch(
   std::vector<PredictorQueryResult> outputs;
   outputs.reserve(inputs.size());
   for (const auto& input : inputs) {
+    if (should_cancel && should_cancel()) {
+      break;
+    }
     const bool has_freshness_reference =
         std::isfinite(input.freshness_reference_time_s);
     const double freshness_reference =
@@ -745,6 +758,28 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
   ForwardRiskBatchResult out;
   out.combined_snapshot_identity = request.combined_snapshot_identity;
   out.points.resize(request.points.size());
+  const auto started_at = std::chrono::steady_clock::now();
+  const auto budget_expired = [&]() {
+    if (!std::isfinite(request.compute_budget_ms)) {
+      return false;
+    }
+    if (request.compute_budget_ms <= 0.0) {
+      return true;
+    }
+    const double elapsed_ms =
+        std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - started_at).count();
+    return elapsed_ms >= request.compute_budget_ms;
+  };
+  const auto fail_all = [&](const ForwardRiskFailureReason reason) {
+    out.complete = false;
+    out.failure_reason = reason;
+    for (auto& point : out.points) {
+      point.safety_state = ForwardRiskSafetyState::UNKNOWN;
+      point.ranking_state = ForwardRiskRankingState::INCOMPLETE;
+      point.failure_reason = reason;
+    }
+  };
   if (request.points.empty()) {
     out.complete = true;
     return out;
@@ -758,12 +793,24 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
     }
     return out;
   }
+  if (budget_expired()) {
+    fail_all(ForwardRiskFailureReason::COMPUTE_BUDGET_EXCEEDED);
+    return out;
+  }
 
   const std::size_t sat_count = request.snapshot.gnss_epoch.sats.size();
   std::vector<bool> common_known(sat_count, true);
   for (const auto& query : request.points) {
+    if (budget_expired()) {
+      fail_all(ForwardRiskFailureReason::COMPUTE_BUDGET_EXCEEDED);
+      return out;
+    }
     const VisibilityResult evidence =
         gnss_.visibility_evidence(query.position_map, request.snapshot);
+    if (budget_expired()) {
+      fail_all(ForwardRiskFailureReason::COMPUTE_BUDGET_EXCEEDED);
+      return out;
+    }
     if (evidence.known_flags.size() != sat_count) {
       std::fill(common_known.begin(), common_known.end(), false);
       break;
@@ -809,9 +856,15 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
                         point.query_time_s, point.horizon_s, "map",
                         request.freshness_reference_time_s);
   }
-  const auto predictions = queryBatch(inputs, diagnostics);
+  const auto predictions = queryBatch(inputs, diagnostics, budget_expired);
   if (predictions.size() != request.points.size()) {
-    out.failure_reason = ForwardRiskFailureReason::FIM_SUPPORT_MISSING;
+    fail_all(budget_expired()
+                 ? ForwardRiskFailureReason::COMPUTE_BUDGET_EXCEEDED
+                 : ForwardRiskFailureReason::FIM_SUPPORT_MISSING);
+    return out;
+  }
+  if (budget_expired()) {
+    fail_all(ForwardRiskFailureReason::COMPUTE_BUDGET_EXCEEDED);
     return out;
   }
 
@@ -834,12 +887,9 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
         std::isfinite(result.prediction.fused.pre_conservative_hpl) &&
         std::isfinite(result.prediction.fused.pre_conservative_vpl);
 
-    const bool stale_prediction = result.prediction.fallback_reason.find(
-        "stale") != std::string::npos ||
-        result.prediction.gnss.fallback_reason.find("stale") !=
-            std::string::npos ||
-        result.prediction.lidar.fallback_reason.find("stale") !=
-            std::string::npos;
+    const bool stale_prediction =
+        result.prediction.freshness_status ==
+        PredictorFreshnessStatus::STALE;
     if (stale_prediction) {
       result.failure_reason = ForwardRiskFailureReason::STALE;
     } else if (!result.gnss_supported) {

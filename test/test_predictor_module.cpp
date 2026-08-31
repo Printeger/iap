@@ -145,6 +145,8 @@ iap::CurrentIntegrityState make_current() {
   current.stamp = 100.0;
   current.valid = true;
   current.gnss_valid = true;
+  current.gnss_hpl = 4.0;
+  current.gnss_vpl = 5.0;
   current.hpl = 4.0;
   current.vpl = 5.0;
   current.pl = 5.0;
@@ -172,6 +174,9 @@ iap::IntegritySnapshot make_snapshot(const bool with_epoch,
   snapshot.has_epoch = with_epoch;
   if (with_epoch) {
     snapshot.gnss_epoch = make_epoch(8);
+    snapshot.current.gnss_epoch_stamp = snapshot.gnss_epoch.stamp;
+    snapshot.current.gnss_epoch_identity =
+        iap::gnss_epoch_identity(snapshot.gnss_epoch);
   }
   snapshot.has_lambda_base = with_prior;
   if (with_prior) {
@@ -184,6 +189,8 @@ iap::IntegritySnapshot make_snapshot_with_epoch(const iap::GnssEpoch& epoch,
                                                 const bool with_prior) {
   iap::IntegritySnapshot snapshot = make_snapshot(true, with_prior);
   snapshot.gnss_epoch = epoch;
+  snapshot.current.gnss_epoch_stamp = epoch.stamp;
+  snapshot.current.gnss_epoch_identity = iap::gnss_epoch_identity(epoch);
   return snapshot;
 }
 
@@ -742,16 +749,18 @@ TEST(PredictorModuleTest,
   predictor.set_observation_predicate(
       [](const Eigen::Vector3d&) { return true; });
   auto snapshot = make_snapshot(true, false);
-  snapshot.current.hpl = 13.25;
-  snapshot.current.vpl = 29.5;
+  snapshot.current.hpl = 36.0;
+  snapshot.current.vpl = 37.0;
+  snapshot.current.gnss_hpl = 13.25;
+  snapshot.current.gnss_vpl = 29.5;
 
   const auto result = predictor.query(iap::PredictorQueryInput(
       snapshot.p_wb, snapshot, snapshot.stamp, 0.0));
 
   ASSERT_TRUE(result.gnss.valid) << result.gnss.fallback_reason;
-  EXPECT_DOUBLE_EQ(result.gnss.hpl, snapshot.current.hpl);
-  EXPECT_DOUBLE_EQ(result.gnss.vpl, snapshot.current.vpl);
-  EXPECT_DOUBLE_EQ(result.gnss.pl_scalar, snapshot.current.vpl);
+  EXPECT_DOUBLE_EQ(result.gnss.hpl, snapshot.current.gnss_hpl);
+  EXPECT_DOUBLE_EQ(result.gnss.vpl, snapshot.current.gnss_vpl);
+  EXPECT_DOUBLE_EQ(result.gnss.pl_scalar, snapshot.current.gnss_vpl);
   EXPECT_TRUE(result.gnss.anchor_consistent);
 }
 
@@ -763,16 +772,16 @@ TEST(PredictorModuleTest,
   predictor.set_observation_predicate(
       [](const Eigen::Vector3d&) { return true; });
   auto snapshot = make_snapshot(true, true);
-  snapshot.current.hpl = 13.25;
-  snapshot.current.vpl = 29.5;
+  snapshot.current.gnss_hpl = 13.25;
+  snapshot.current.gnss_vpl = 29.5;
 
   const auto result = predictor.query(iap::PredictorQueryInput(
       Eigen::Vector3d(2.0, 0.5, 0.0), snapshot,
       snapshot.stamp + 1.0, 1.0, "map", snapshot.stamp));
 
   ASSERT_TRUE(result.gnss.valid) << result.gnss.fallback_reason;
-  EXPECT_GE(result.gnss.hpl, snapshot.current.hpl);
-  EXPECT_GE(result.gnss.vpl, snapshot.current.vpl);
+  EXPECT_GE(result.gnss.hpl, snapshot.current.gnss_hpl);
+  EXPECT_GE(result.gnss.vpl, snapshot.current.gnss_vpl);
   EXPECT_GE(result.gnss.spatial_delta_h, 0.0);
   EXPECT_GE(result.gnss.spatial_delta_v, 0.0);
   EXPECT_GE(result.gnss.temporal_growth_h, 0.0);
@@ -788,13 +797,29 @@ TEST(PredictorModuleTest,
   predictor.set_observation_predicate(
       [](const Eigen::Vector3d&) { return true; });
   auto snapshot = make_snapshot(true, false);
-  snapshot.current.stamp = snapshot.gnss_epoch.stamp + 0.251;
+  snapshot.current.gnss_epoch_stamp = snapshot.gnss_epoch.stamp + 0.251;
 
   const auto result = predictor.query(iap::PredictorQueryInput(
       snapshot.p_wb, snapshot, snapshot.stamp, 0.0));
 
   EXPECT_FALSE(result.gnss.valid);
   EXPECT_FALSE(result.gnss.available);
+  EXPECT_EQ(result.gnss.fallback_reason, "gnss_anchor_inconsistent");
+}
+
+TEST(PredictorModuleTest,
+     MismatchedCertifiedIntegrityAndGnssEpochIdentityFailsClosed) {
+  auto params = make_params();
+  iap::PredictorModule predictor(params);
+  predictor.set_observation_predicate(
+      [](const Eigen::Vector3d&) { return true; });
+  auto snapshot = make_snapshot(true, false);
+  snapshot.current.gnss_epoch_identity ^= 0x55u;
+
+  const auto result = predictor.query(iap::PredictorQueryInput(
+      snapshot.p_wb, snapshot, snapshot.stamp, 0.0));
+
+  EXPECT_FALSE(result.gnss.valid);
   EXPECT_EQ(result.gnss.fallback_reason, "gnss_anchor_inconsistent");
 }
 
@@ -838,10 +863,37 @@ TEST(PredictorModuleTest,
     EXPECT_DOUBLE_EQ(point.gnss_support_ray_length_m, 5.0);
     EXPECT_FALSE(point.gnss_hard_occlusion);
     EXPECT_DOUBLE_EQ(point.prediction.gnss.anchor_hpl,
-                     snapshot.current.hpl);
+                     snapshot.current.gnss_hpl);
     EXPECT_DOUBLE_EQ(point.prediction.gnss.anchor_vpl,
-                     snapshot.current.vpl);
+                     snapshot.current.gnss_vpl);
   }
+}
+
+TEST(PredictorModuleTest, ForwardRiskBatchFailsClosedWhenBudgetIsExpired) {
+  auto params = make_params();
+  iap::PredictorModule module(params);
+  module.set_observation_predicate(
+      [](const Eigen::Vector3d&) { return true; });
+  module.set_lidar_fim_primitives(make_lidar_primitives());
+  auto snapshot = make_snapshot(true, true);
+
+  iap::ForwardRiskBatchRequest request;
+  request.combined_snapshot_identity = "budget-expired";
+  request.snapshot = snapshot;
+  request.hal = 20.0;
+  request.val = 40.0;
+  request.freshness_reference_time_s = snapshot.stamp;
+  request.compute_budget_ms = 0.0;
+  request.points = {{snapshot.p_wb, snapshot.stamp, 0.0, 1}};
+
+  const auto result = module.queryForwardRiskBatch(request);
+
+  EXPECT_FALSE(result.complete);
+  EXPECT_EQ(result.failure_reason,
+            iap::ForwardRiskFailureReason::COMPUTE_BUDGET_EXCEEDED);
+  ASSERT_EQ(result.points.size(), 1u);
+  EXPECT_EQ(result.points.front().safety_state,
+            iap::ForwardRiskSafetyState::UNKNOWN);
 }
 
 TEST(PredictorModuleTest,
@@ -1090,8 +1142,8 @@ TEST(PredictorModuleTest, GnssSigmaInflationIncreasesPl) {
 TEST(PredictorModuleTest, CurrentIntegrityAnchorsPlannerGnssPrediction) {
   struct CurrentCase {
     std::string id;
-    double current_hpl;
-    double current_vpl;
+    double current_gnss_hpl;
+    double current_gnss_vpl;
     bool current_valid;
     int integrity_state;
   };
@@ -1104,15 +1156,17 @@ TEST(PredictorModuleTest, CurrentIntegrityAnchorsPlannerGnssPrediction) {
   const auto epoch = make_epoch(8);
   std::ofstream csv(predictor_artifact_dir() /
                     "current_advisory_separation.csv");
-  csv << "case_id,current_hpl,current_vpl,current_state,current_valid,"
+  csv << "case_id,current_gnss_hpl,current_gnss_vpl,current_state,current_valid,"
       << "gnss_hpl,gnss_vpl,selected_hpl,selected_vpl,copied_current_flag\n";
 
   std::vector<iap::PredictorQueryResult> results;
   for (const auto& test_case : cases) {
     auto snapshot = make_snapshot_with_epoch(epoch, false);
-    snapshot.current.hpl = test_case.current_hpl;
-    snapshot.current.vpl = test_case.current_vpl;
-    snapshot.current.pl = std::max(test_case.current_hpl, test_case.current_vpl);
+    snapshot.current.hpl = 42.0;
+    snapshot.current.vpl = 43.0;
+    snapshot.current.pl = 43.0;
+    snapshot.current.gnss_hpl = test_case.current_gnss_hpl;
+    snapshot.current.gnss_vpl = test_case.current_gnss_vpl;
     snapshot.current.valid = test_case.current_valid;
     snapshot.current.integrity_state = test_case.integrity_state;
     const iap::PredictorQueryInput input(Eigen::Vector3d::Zero(), snapshot,
@@ -1126,11 +1180,11 @@ TEST(PredictorModuleTest, CurrentIntegrityAnchorsPlannerGnssPrediction) {
     }
     ASSERT_TRUE(result.valid) << test_case.id << ':' << result.fallback_reason;
     const bool copied =
-        std::abs(result.gnss.hpl - test_case.current_hpl) < 1.0e-9 &&
-        std::abs(result.gnss.vpl - test_case.current_vpl) < 1.0e-9;
+        std::abs(result.gnss.hpl - test_case.current_gnss_hpl) < 1.0e-9 &&
+        std::abs(result.gnss.vpl - test_case.current_gnss_vpl) < 1.0e-9;
     csv << csv_escape(test_case.id) << ','
-        << test_case.current_hpl << ','
-        << test_case.current_vpl << ','
+        << test_case.current_gnss_hpl << ','
+        << test_case.current_gnss_vpl << ','
         << test_case.integrity_state << ','
         << (test_case.current_valid ? 1 : 0) << ','
         << result.gnss.hpl << ','

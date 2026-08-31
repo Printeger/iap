@@ -2889,6 +2889,10 @@ iap::CurrentIntegrityState P0RiskGridRuntime::currentFromMsg(
   iap::CurrentIntegrityState current;
   current.stamp = stampToSec(msg.header.stamp);
   current.gnss_valid = msg.gnss_valid;
+  current.gnss_hpl = msg.gnss_hpl;
+  current.gnss_vpl = msg.gnss_vpl;
+  current.gnss_epoch_stamp = msg.gnss_epoch_stamp;
+  current.gnss_epoch_identity = msg.gnss_epoch_identity;
   current.integrity_state = msg.integrity_state;
   current.hpl = msg.hpl;
   current.vpl = msg.vpl;
@@ -3007,9 +3011,12 @@ bool P0RiskGridRuntime::buildSnapshot(
   }
   const bool integrity_epoch_aligned = epoch && current.valid &&
       current.gnss_valid &&
-      std::isfinite(current.stamp) && std::isfinite(epoch->stamp) &&
-      std::abs(current.stamp - epoch->stamp) <=
-          config_.predictor_gnss_measured_epoch_integrity_max_delta_s;
+      std::isfinite(current.gnss_epoch_stamp) &&
+      std::isfinite(epoch->stamp) &&
+      std::abs(current.gnss_epoch_stamp - epoch->stamp) <=
+          config_.predictor_gnss_measured_epoch_integrity_max_delta_s &&
+      current.gnss_epoch_identity != 0 &&
+      current.gnss_epoch_identity == iap::gnss_epoch_identity(*epoch);
   if (integrity_epoch_aligned && !current.excluded_prns.empty()) {
     const std::unordered_set<int> excluded(
         current.excluded_prns.begin(), current.excluded_prns.end());

@@ -63,15 +63,6 @@ namespace ego_planner
       return length;
     }
 
-    std::string p4ForwardGuideHash(
-        const std::vector<Eigen::Vector3d> &path)
-    {
-      Eigen::MatrixXd points(3, static_cast<int>(path.size()));
-      for (std::size_t index = 0; index < path.size(); ++index)
-        points.col(static_cast<int>(index)) = path[index];
-      return p4ControlPointHash(points);
-    }
-
     double distanceToPolyline(
         const Eigen::Vector3d &point,
         const std::vector<Eigen::Vector3d> &path)
@@ -114,6 +105,74 @@ namespace ego_planner
       return out;
     }
 
+    P4ForwardRiskSample toP4ForwardRiskSample(
+        const iap::ForwardRiskPointResult &source,
+        const iap::ForwardRiskBatchResult &batch,
+        const double hal, const double val)
+    {
+      P4ForwardRiskSample target;
+      target.valid = source.safety_state !=
+          iap::ForwardRiskSafetyState::UNKNOWN &&
+          source.ranking_state ==
+          iap::ForwardRiskRankingState::COMPARABLE;
+      target.stale = source.failure_reason ==
+          iap::ForwardRiskFailureReason::STALE;
+      target.gnss_supported = source.gnss_supported;
+      target.lidar_supported = source.lidar_supported;
+      target.fim_supported = source.fim_supported;
+      target.safety_state = source.safety_state ==
+          iap::ForwardRiskSafetyState::SAFE ?
+          P4ForwardSafetyState::SAFE :
+          (source.safety_state == iap::ForwardRiskSafetyState::UNSAFE ?
+          P4ForwardSafetyState::UNSAFE : P4ForwardSafetyState::UNKNOWN);
+      target.ranking_state = source.ranking_state ==
+          iap::ForwardRiskRankingState::COMPARABLE ?
+          P4ForwardRankingState::COMPARABLE :
+          P4ForwardRankingState::INCOMPLETE;
+      target.safety_ratio = source.safety_ratio;
+      target.fim_ratio = source.fim_ratio;
+      target.hpl = source.prediction.fused.hpl;
+      target.vpl = source.prediction.fused.vpl;
+      target.hal = hal;
+      target.val = val;
+      target.gnss_anchor_hpl = source.prediction.gnss.anchor_hpl;
+      target.gnss_anchor_vpl = source.prediction.gnss.anchor_vpl;
+      target.gnss_raw_hpl = source.prediction.gnss.raw_hpl;
+      target.gnss_raw_vpl = source.prediction.gnss.raw_vpl;
+      target.gnss_receiver_raw_hpl =
+          source.prediction.gnss.receiver_raw_hpl;
+      target.gnss_receiver_raw_vpl =
+          source.prediction.gnss.receiver_raw_vpl;
+      target.gnss_spatial_delta_h =
+          source.prediction.gnss.spatial_delta_h;
+      target.gnss_spatial_delta_v =
+          source.prediction.gnss.spatial_delta_v;
+      target.gnss_temporal_growth_h =
+          source.prediction.gnss.temporal_growth_h;
+      target.gnss_temporal_growth_v =
+          source.prediction.gnss.temporal_growth_v;
+      target.gnss_anchor_epoch_delta_s =
+          source.prediction.gnss.anchor_epoch_delta_s;
+      target.gnss_support_ray_length_m =
+          source.gnss_support_ray_length_m;
+      target.gnss_hard_occlusion = source.gnss_hard_occlusion;
+      target.gnss_visible_satellite_count =
+          source.prediction.gnss.n_visible;
+      target.gnss_blocked_satellite_count =
+          source.prediction.gnss.n_blocked;
+      target.gnss_unknown_satellite_count =
+          source.prediction.gnss.n_unknown_support;
+      target.gnss_used_satellite_count = source.prediction.gnss.n_used;
+      target.common_known_satellite_count =
+          batch.common_known_satellite_count;
+      target.common_satellite_hash = batch.common_satellite_hash;
+      target.floor_source_h = source.prediction.fused.floor_source_h;
+      target.floor_source_v = source.prediction.fused.floor_source_v;
+      target.reason =
+          iap::forwardRiskFailureReasonName(source.failure_reason);
+      return target;
+    }
+
     std::vector<Eigen::Vector3d> resampleForwardGuide(
         const std::vector<Eigen::Vector3d> &path, double requested_spacing)
     {
@@ -145,103 +204,12 @@ namespace ego_planner
       return result;
     }
 
-
     bool certifyRefinedForwardGuide(
         const P4ForwardRequest &request,
         P4ForwardCandidate *candidate)
     {
-      if (!candidate || candidate->path.size() < 2)
-        return false;
-      const auto samples = resampleForwardGuide(
-          candidate->path, request.limits.occupancy_resolution_m);
-      if (samples.size() < 2)
-        return false;
-      candidate->occupancy_supported = true;
-      candidate->risk_supported = true;
-      candidate->safety_gate_passed = true;
-      candidate->fim_max_ratio = 0.0;
-      candidate->fim_integral = 0.0;
-      candidate->safety_max_ratio = 0.0;
-      double distance = 0.0;
-      for (std::size_t index = 0; index < samples.size(); ++index)
-      {
-        if (index > 0)
-          distance += (samples[index] - samples[index - 1]).norm();
-        const double radius = request.limits.vehicle_radius_m;
-        const double resolution = request.limits.occupancy_resolution_m;
-        std::vector<Eigen::Vector3d> swept_points{samples[index]};
-        if (radius > 1.0e-6)
-        {
-          const Eigen::Vector3i minimum =
-              ((samples[index].array() - radius -
-                request.map_origin.array()) / resolution)
-                  .floor().cast<int>();
-          const Eigen::Vector3i maximum =
-              ((samples[index].array() + radius -
-                request.map_origin.array()) / resolution)
-                  .floor().cast<int>();
-          for (int x = minimum.x(); x <= maximum.x(); ++x)
-            for (int y = minimum.y(); y <= maximum.y(); ++y)
-              for (int z = minimum.z(); z <= maximum.z(); ++z)
-              {
-                const Eigen::Vector3d cell_min = request.map_origin +
-                    resolution * Eigen::Vector3d(x, y, z);
-                const Eigen::Vector3d cell_max = cell_min +
-                    Eigen::Vector3d::Constant(resolution);
-                const Eigen::Vector3d closest = samples[index]
-                    .cwiseMax(cell_min).cwiseMin(cell_max);
-                if ((closest - samples[index]).squaredNorm() <=
-                    radius * radius + 1.0e-9)
-                  swept_points.push_back(
-                      cell_min + Eigen::Vector3d::Constant(0.5 * resolution));
-              }
-        }
-        double point_safety = 0.0;
-        double point_fim = 0.0;
-        for (const auto &swept_point : swept_points)
-        {
-          if (request.occupancy(swept_point) !=
-              P4ForwardOccupancyState::OBSERVED_FREE)
-          {
-            candidate->occupancy_supported = false;
-            candidate->risk_supported = false;
-            candidate->safety_gate_passed = false;
-            candidate->reason = "native_refinement_occupancy_unsupported";
-            return false;
-          }
-          const auto risk = request.risk(
-              swept_point,
-              request.query_time_s + distance /
-                  request.limits.nominal_query_speed_mps);
-          if (!risk.valid || risk.stale || !risk.gnss_supported ||
-              !risk.lidar_supported || !risk.fim_supported ||
-              !std::isfinite(risk.safety_ratio) ||
-              !std::isfinite(risk.fim_ratio))
-          {
-            candidate->risk_supported = false;
-            candidate->safety_gate_passed = false;
-            candidate->reason = "native_refinement_risk_unsupported";
-            return false;
-          }
-          point_safety = std::max(point_safety, risk.safety_ratio);
-          point_fim = std::max(point_fim, risk.fim_ratio);
-        }
-        candidate->safety_max_ratio = std::max(
-            candidate->safety_max_ratio, point_safety);
-        candidate->fim_max_ratio = std::max(
-            candidate->fim_max_ratio, point_fim);
-        if (index > 0)
-          candidate->fim_integral += point_fim *
-              (samples[index] - samples[index - 1]).norm();
-        if (point_safety >= 1.0)
-          candidate->safety_gate_passed = false;
-      }
-      candidate->length_m = polylineLength(candidate->path);
-      candidate->path_hash = p4ForwardGuideHash(candidate->path);
-      candidate->reason = candidate->safety_gate_passed ? "ok" :
-          "native_refinement_safety_ratio_not_below_one";
-      return candidate->occupancy_supported && candidate->risk_supported &&
-          candidate->safety_gate_passed;
+      return p4CertifyForwardCandidate(
+          request, candidate, request.limits.compute_budget_ms);
     }
 
     double meanPathDistance(
@@ -1229,6 +1197,7 @@ namespace ego_planner
           [forward_risk_batch, combined_identity, risk_stamp_s,
            forward_hal, forward_val](
               const std::vector<P4ForwardRiskQuery> &queries,
+              const double compute_budget_ms,
               std::vector<P4ForwardRiskSample> *samples)
           {
             if (!samples)
@@ -1238,6 +1207,7 @@ namespace ego_planner
             batch.freshness_reference_time_s = risk_stamp_s;
             batch.hal = forward_hal;
             batch.val = forward_val;
+            batch.compute_budget_ms = compute_budget_ms;
             batch.points.reserve(queries.size());
             for (const auto &query : queries)
             {
@@ -1253,71 +1223,8 @@ namespace ego_planner
             samples->assign(queries.size(), P4ForwardRiskSample{});
             for (std::size_t index = 0; index < result.points.size(); ++index)
             {
-              const auto &source = result.points[index];
-              auto &target = (*samples)[index];
-              target.valid = source.safety_state !=
-                  iap::ForwardRiskSafetyState::UNKNOWN &&
-                  source.ranking_state ==
-                  iap::ForwardRiskRankingState::COMPARABLE;
-              target.stale = source.failure_reason ==
-                  iap::ForwardRiskFailureReason::STALE;
-              target.gnss_supported = source.gnss_supported;
-              target.lidar_supported = source.lidar_supported;
-              target.fim_supported = source.fim_supported;
-              target.safety_state = source.safety_state ==
-                  iap::ForwardRiskSafetyState::SAFE ?
-                  P4ForwardSafetyState::SAFE :
-                  (source.safety_state == iap::ForwardRiskSafetyState::UNSAFE ?
-                  P4ForwardSafetyState::UNSAFE :
-                  P4ForwardSafetyState::UNKNOWN);
-              target.ranking_state = source.ranking_state ==
-                  iap::ForwardRiskRankingState::COMPARABLE ?
-                  P4ForwardRankingState::COMPARABLE :
-                  P4ForwardRankingState::INCOMPLETE;
-              target.safety_ratio = source.safety_ratio;
-              target.fim_ratio = source.fim_ratio;
-              target.hpl = source.prediction.fused.hpl;
-              target.vpl = source.prediction.fused.vpl;
-              target.hal = forward_hal;
-              target.val = forward_val;
-              target.gnss_anchor_hpl = source.prediction.gnss.anchor_hpl;
-              target.gnss_anchor_vpl = source.prediction.gnss.anchor_vpl;
-              target.gnss_raw_hpl = source.prediction.gnss.raw_hpl;
-              target.gnss_raw_vpl = source.prediction.gnss.raw_vpl;
-              target.gnss_receiver_raw_hpl =
-                  source.prediction.gnss.receiver_raw_hpl;
-              target.gnss_receiver_raw_vpl =
-                  source.prediction.gnss.receiver_raw_vpl;
-              target.gnss_spatial_delta_h =
-                  source.prediction.gnss.spatial_delta_h;
-              target.gnss_spatial_delta_v =
-                  source.prediction.gnss.spatial_delta_v;
-              target.gnss_temporal_growth_h =
-                  source.prediction.gnss.temporal_growth_h;
-              target.gnss_temporal_growth_v =
-                  source.prediction.gnss.temporal_growth_v;
-              target.gnss_anchor_epoch_delta_s =
-                  source.prediction.gnss.anchor_epoch_delta_s;
-              target.gnss_support_ray_length_m =
-                  source.gnss_support_ray_length_m;
-              target.gnss_hard_occlusion = source.gnss_hard_occlusion;
-              target.gnss_visible_satellite_count =
-                  source.prediction.gnss.n_visible;
-              target.gnss_blocked_satellite_count =
-                  source.prediction.gnss.n_blocked;
-              target.gnss_unknown_satellite_count =
-                  source.prediction.gnss.n_unknown_support;
-              target.gnss_used_satellite_count =
-                  source.prediction.gnss.n_used;
-              target.common_known_satellite_count =
-                  result.common_known_satellite_count;
-              target.common_satellite_hash = result.common_satellite_hash;
-              target.floor_source_h =
-                  source.prediction.fused.floor_source_h;
-              target.floor_source_v =
-                  source.prediction.fused.floor_source_v;
-              target.reason =
-                  iap::forwardRiskFailureReasonName(source.failure_reason);
+              (*samples)[index] = toP4ForwardRiskSample(
+                  result.points[index], result, forward_hal, forward_val);
             }
             return true;
           };
