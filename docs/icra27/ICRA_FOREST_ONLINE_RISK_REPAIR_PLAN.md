@@ -12,6 +12,11 @@ fail-closed 要求：森林 v2 恢复原始 EGO 探索语义，设置
 rebound/A*；P0 仍保留 UNKNOWN 风险状态，P4 开启后仍要求 frozen
 observed-free support，P5 权威与阈值不变。
 
+2026-08-31 用户进一步授权森林 v2 使用 `HAL/VAL=20/40 m` 进行开发选路
+诊断，因此上一段“P5 阈值不变”仅描述此前状态。P5 的 FUSED/max_pl 权威、
+融合方式与拒绝语义仍不变；正式资格阈值仍为原 `10/20 m`，本次 override
+不得作为资格验收输入。
+
 ## 在线地图契约
 
 森林 v2 使用已知任务 geofence，而不是已知障碍物地图：
@@ -38,17 +43,19 @@ P0 从 EGO 的 frozen occupancy epoch 获取共享 `PlanningLatticeGeometry`，�
 - safety fused：应用 conservative floor 后的权威结果
 - horizontal/vertical floor source 与增量
 
-森林 v2 的 alert-limit policy 固定为 `fixed_hal10_val20_v1`：
+森林 v2 当前按用户指定的开发选路实验固定为 `fixed_hal20_val40_v1`：
 
 ```text
-HAL = 10 m
-VAL = 20 m
+HAL = 20 m
+VAL = 40 m
 risk_ratio = max(HPL / HAL, VPL / VAL)
 ```
 
 本 profile 关闭尚未接通环境输入的 dynamic AL。HAL/VAL 是固定允许误差阈值，不是 PL 测量结果。
+这组放宽后的阈值仅用于确认 P4 能否越过起点安全比并进入在线拓扑选路，不构成安全资格结论；
+森林 v1 与其他场景仍保留原有阈值。
 
-不对 PL 做时间低通滤波。current/P5 继续以 conservative safety-fused `FUSED/max_pl` 为权威。P4 候选必须先通过完整、fresh、observed 且 `safety_fused.risk_ratio < 1` 的安全门；只有通过安全门后，森林 v2 才以 pre-conservative FIM ratio 做 bottleneck 排序。若无候选通过，P4/P5 必须拒绝，不能关闭 GNSS、放宽阈值或用 RViz 归一化色值参与规划。
+不对 PL 做时间低通滤波。current/P5 继续以 conservative safety-fused `FUSED/max_pl` 为权威。P4 候选必须先通过完整、fresh、observed 且 `safety_fused.risk_ratio < 1` 的安全门；只有通过安全门后，森林 v2 才以 pre-conservative FIM ratio 做 bottleneck 排序。若无候选通过，P4/P5 必须拒绝，不能关闭 GNSS、再次放宽当前开发阈值或用 RViz 归一化色值参与规划。
 
 ## RViz 契约
 
@@ -105,7 +112,7 @@ v2 保持四分叉、固定 seed `41021/21` 和真实几何风险，并增加约
 
 截至本轮实现，森林 v2 的单次 live P0 已通过：共享 geometry 为
 `origin=(-21,-11,0) m`、`extent=(42,22,8) m`、risk resolution `0.5 m`，固定
-`HAL/VAL=10/20 m`，ROS graph 审计未发现 P0/EGO/P4/P5 对
+当时使用 `HAL/VAL=10/20 m`，ROS graph 审计未发现 P0/EGO/P4/P5 对
 `/map_generator/*` 或 `/sim/world/*` 的订阅。起点时约 `98.8%` 的全域栅格保持
 unknown，符合局部在线观测语义，而不是用世界真值提前填满。
 

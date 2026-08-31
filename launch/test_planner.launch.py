@@ -1062,9 +1062,9 @@ DENSE_FOUR_FORK_FOREST_ONLINE_PRESET = {
     # LOS; all other cells remain fail-closed on online observed-space support.
     "p0.predictor.gnss_measured_epoch_support_radius_m": "0.45",
     "p0.predictor.gnss_measured_epoch_integrity_max_delta_s": "0.25",
-    "p0.alert_limit_policy_id": "fixed_hal10_val20_v1",
-    "p0.alert_limit_h_m": "10.0",
-    "p0.alert_limit_v_m": "20.0",
+    "p0.alert_limit_policy_id": "fixed_hal20_val40_v1",
+    "p0.alert_limit_h_m": "20.0",
+    "p0.alert_limit_v_m": "40.0",
     "p4.fallback_to_original_when_risk_not_ready": "false",
     "p4.forward.reaction_time_s": "1.2",
     "p4.forward.braking_accel_mps2": "1.5",
@@ -1076,11 +1076,11 @@ DENSE_FOUR_FORK_FOREST_ONLINE_PRESET = {
     "p4.forward.nominal_query_speed_mps": "1.5",
     "p4.forward.compute_budget_ms": "150.0",
     "integrity_dynamic_alert_limits": "false",
-    "integrity_hal_m": "10.0",
-    "integrity_val_m": "20.0",
+    "integrity_hal_m": "20.0",
+    "integrity_val_m": "40.0",
     "p5.pred_alert_limit_mode": "config_constant",
-    "p5.pred_alert_limit_constant_hal_m": "10.0",
-    "p5.pred_alert_limit_constant_val_m": "20.0",
+    "p5.pred_alert_limit_constant_hal_m": "20.0",
+    "p5.pred_alert_limit_constant_val_m": "40.0",
 }
 
 
@@ -3835,6 +3835,20 @@ def _launch_setup(context):
                 context, "p0.predictor.conservative_max_with_gnss"),
             "executor_thread_count": _param_int(
                 context, "planner_executor_thread_count"),
+        },
+        "integrity_alert_limits": {
+            "dynamic": _param_bool(
+                context, "integrity_dynamic_alert_limits"),
+            "hal_m": _param_float(context, "integrity_hal_m"),
+            "val_m": _param_float(context, "integrity_val_m"),
+        },
+        "p5_alert_limits": {
+            "mode": LaunchConfiguration(
+                "p5.pred_alert_limit_mode").perform(context),
+            "hal_m": _param_float(
+                context, "p5.pred_alert_limit_constant_hal_m"),
+            "val_m": _param_float(
+                context, "p5.pred_alert_limit_constant_val_m"),
         },
         "decision_checkpoint": {
             "truth_x_m": -9.5, "truth_x_tolerance_m": 0.4,

@@ -17,7 +17,7 @@ assert SPEC.loader is not None
 SPEC.loader.exec_module(MODULE)
 
 
-def healthy(generation, received):
+def forest_v2_healthy(generation, received):
     return {
         "kind": "p0_health",
         "receive_steady_s": received,
@@ -36,9 +36,9 @@ def healthy(generation, received):
             "grid_extent_m": [42.0, 22.0, 8.0],
             "grid_dimensions": [84, 44, 16],
             "grid_resolution_m": 0.5,
-            "alert_limit_policy_id": "fixed_hal10_val20_v1",
-            "alert_limit_h_m": 10.0,
-            "alert_limit_v_m": 20.0,
+            "alert_limit_policy_id": "fixed_hal20_val40_v1",
+            "alert_limit_h_m": 20.0,
+            "alert_limit_v_m": 40.0,
             "source_occupancy_generation": 100 + generation,
             "source_occupancy_stamp_s": received - 0.1,
             "source_prior_generation": 200 + generation,
@@ -278,13 +278,23 @@ class TestStageContracts(unittest.TestCase):
                 "unknown_as_occupied": False,
                 "provider_cost_source": "pre_conservative_fim_ratio",
                 "require_safety_ratio_below_one_for_cost": True,
-                "alert_limit_policy_id": "fixed_hal10_val20_v1",
-                "alert_limit_h_m": 10.0,
-                "alert_limit_v_m": 20.0,
+                "alert_limit_policy_id": "fixed_hal20_val40_v1",
+                "alert_limit_h_m": 20.0,
+                "alert_limit_v_m": 40.0,
                 "skip_occupied_voxels": True,
                 "use_current_integrity_prior": True,
                 "conservative_max_with_gnss": True,
                 "executor_thread_count": 6,
+            },
+            "integrity_alert_limits": {
+                "dynamic": False,
+                "hal_m": 20.0,
+                "val_m": 40.0,
+            },
+            "p5_alert_limits": {
+                "mode": "config_constant",
+                "hal_m": 20.0,
+                "val_m": 40.0,
             },
         }
         with tempfile.TemporaryDirectory() as raw:
@@ -299,6 +309,15 @@ class TestStageContracts(unittest.TestCase):
             self.assertTrue(evidence["matches_expected"])
             self.assertEqual(evidence["scenario_fingerprint"],
                              "sha256:effective")
+            contract["p5_alert_limits"]["val_m"] = 20.0
+            manifest.write_text(json.dumps({
+                "scenario_contract": contract,
+                "scenario_fingerprint": "sha256:p5-drifted",
+            }))
+            evidence = MODULE.forest_manifest_evidence(run_root)
+            self.assertFalse(evidence["matches_expected"])
+            self.assertIn("p5_alert_limits.val_m", evidence["mismatches"])
+            contract["p5_alert_limits"]["val_m"] = 40.0
             contract["scene_map"]["corridor_width_m"] = 3.0
             manifest.write_text(json.dumps({
                 "scenario_contract": contract,
@@ -647,14 +666,14 @@ class TestStageAnalyzer(unittest.TestCase):
                 "segment_end_y": "0.0",
                 "segment_end_z": "1.5",
             })
-            health_row = healthy(generation_id, 100.0 + index)
+            health_row = forest_v2_healthy(generation_id, 100.0 + index)
             health_row["payload"].update({
                 "snapshot_config_hash": decision["snapshot_config_hash"],
                 "source_identity_hash": decision["source_identity_hash"],
                 "geometry_id": decision["geometry_id"],
-                "alert_limit_policy_id": "fixed_hal10_val20_v1",
-                "alert_limit_h_m": 10.0,
-                "alert_limit_v_m": 20.0,
+                "alert_limit_policy_id": "fixed_hal20_val40_v1",
+                "alert_limit_h_m": 20.0,
+                "alert_limit_v_m": 40.0,
                 "source_occupancy_generation": occupancy_generation,
                 "source_occupancy_stamp_s": occupancy_stamp_s,
                 "source_prior_generation": 200 + generation_id,
@@ -764,7 +783,7 @@ class TestStageAnalyzer(unittest.TestCase):
                 "snapshot_config_hash": legacy["snapshot_config_hash"],
                 "source_identity_hash": legacy["source_identity_hash"],
                 "geometry_id": legacy["geometry_id"],
-                "alert_limit_policy_id": "fixed_hal10_val20_v1",
+                "alert_limit_policy_id": "fixed_hal20_val40_v1",
                 "occupancy_generation": legacy["occupancy_epoch"],
                 "occupancy_stamp_s": legacy["occupancy_stamp_s"],
                 "request_x": legacy["segment_start_x"],
@@ -838,7 +857,7 @@ class TestStageAnalyzer(unittest.TestCase):
             records.append(record)
         health_rows, decisions, lineage = self.identity_evidence(
             [20, 21, 22, 23])
-        health_rows[-1]["payload"]["alert_limit_v_m"] = 25.0
+        health_rows[-1]["payload"]["alert_limit_v_m"] = 45.0
 
         failed = MODULE.analyze_forest_risk(
             records, health_rows, decisions, lineage)
@@ -907,15 +926,16 @@ class TestStageAnalyzer(unittest.TestCase):
             }))
             self.assertEqual(MODULE._stage_start_steady_s(run_root), 85.2)
 
-        rows = [healthy(index + 1, 100.1 + index * 0.5)
+        rows = [forest_v2_healthy(index + 1, 100.1 + index * 0.5)
                 for index in range(31)]
         summary = MODULE.analyze_p0(rows, 85.2)
         self.assertEqual(summary["result"], "PASS")
         self.assertAlmostEqual(summary["first_healthy_delay_s"], 14.9)
 
     def test_p0_summary_uses_completed_identity_not_in_progress_tail(self):
-        rows = [healthy(index + 1, index * 0.5) for index in range(30)]
-        in_progress = healthy(30, 15.0)
+        rows = [forest_v2_healthy(index + 1, index * 0.5)
+                for index in range(30)]
+        in_progress = forest_v2_healthy(30, 15.0)
         in_progress["payload"].update({
             "refresh_evidence_state": "IN_PROGRESS",
             "result_generation_id": 0,
@@ -947,7 +967,8 @@ class TestStageAnalyzer(unittest.TestCase):
         self.assertIn("initial_rotation_exceeded", summary["failures"])
 
     def test_p0_requires_an_unbroken_fifteen_second_healthy_window(self):
-        rows = [healthy(index + 1, float(index)) for index in range(16)]
+        rows = [forest_v2_healthy(index + 1, float(index))
+                for index in range(16)]
         self.assertEqual(MODULE.analyze_p0(rows)["result"], "PASS")
         rows[8]["payload"]["stale"] = True
         rows[8]["payload"]["reason"] = "occupancy_stale"
@@ -956,33 +977,35 @@ class TestStageAnalyzer(unittest.TestCase):
         self.assertIn("p0_health_not_continuous", failed["failures"])
 
     def test_p0_window_includes_first_observation_past_boundary(self):
-        rows = [healthy(index + 1, index * 0.47) for index in range(34)]
+        rows = [forest_v2_healthy(index + 1, index * 0.47)
+                for index in range(34)]
         summary = MODULE.analyze_p0(rows)
         self.assertEqual(summary["result"], "PASS")
         self.assertGreaterEqual(summary["window_span_s"], 15.0)
 
     def test_p0_does_not_restart_after_first_healthy_generation(self):
-        rows = [healthy(1, 0.0)]
-        rows.append(healthy(1, 0.5))
+        rows = [forest_v2_healthy(1, 0.0)]
+        rows.append(forest_v2_healthy(1, 0.5))
         rows[-1]["payload"]["reason"] = "occupancy_stale"
-        rows.extend(healthy(index + 2, 1.0 + index * 0.5)
+        rows.extend(forest_v2_healthy(index + 2, 1.0 + index * 0.5)
                     for index in range(31))
         summary = MODULE.analyze_p0(rows)
         self.assertEqual(summary["result"], "FAIL")
         self.assertIn("p0_health_not_continuous", summary["failures"])
 
     def test_p0_ignores_unhealthy_startup_before_first_generation(self):
-        rows = [healthy(0, 0.0)]
+        rows = [forest_v2_healthy(0, 0.0)]
         rows[0]["payload"].update({
             "ready": False, "stale": True, "reason": "startup",
         })
-        rows.extend(healthy(index + 1, 1.0 + index * 0.5)
+        rows.extend(forest_v2_healthy(index + 1, 1.0 + index * 0.5)
                     for index in range(31))
         self.assertEqual(MODULE.analyze_p0(rows)["result"], "PASS")
 
     def test_p4_requires_selected_lineage_and_stable_publication(self):
         summary = MODULE.analyze_stage_records(
-            "p4", [healthy(index + 1, float(index)) for index in range(16)],
+            "p4", [forest_v2_healthy(index + 1, float(index))
+                   for index in range(16)],
             decisions=[], lineage=[], bsplines=[], p5_status=[], poscmd_times=[])
         self.assertEqual(summary["result"], "FAIL")
         self.assertIn("p4_risk_selected_missing", summary["failures"])
@@ -1013,7 +1036,8 @@ class TestStageAnalyzer(unittest.TestCase):
                                       "trajectory_start_time_ns": 34}]}}
         ]
         summary = MODULE.analyze_stage_records(
-            "full", [healthy(index + 1, float(index)) for index in range(16)],
+            "full", [forest_v2_healthy(index + 1, float(index))
+                     for index in range(16)],
             decisions=[decision], lineage=lineage, bsplines=bsplines,
             p5_status=statuses, poscmd_times=[25.0 + i * 0.01 for i in range(600)])
         self.assertEqual(summary["result"], "FAIL")
@@ -1066,7 +1090,8 @@ class TestStageAnalyzer(unittest.TestCase):
             },
         }]
         summary = MODULE.analyze_stage_records(
-            "full", [healthy(index + 1, float(index)) for index in range(16)],
+            "full", [forest_v2_healthy(index + 1, float(index))
+                     for index in range(16)],
             decisions=[decision], lineage=lineage, bsplines=bsplines,
             p5_status=statuses,
             poscmd_times=[20.0 + index * 0.01 for index in range(601)])
@@ -1122,7 +1147,8 @@ class TestStageAnalyzer(unittest.TestCase):
             },
         }]
         summary = MODULE.analyze_stage_records(
-            "full", [healthy(index + 1, float(index)) for index in range(16)],
+            "full", [forest_v2_healthy(index + 1, float(index))
+                     for index in range(16)],
             decisions=[decision], lineage=lineage, bsplines=bsplines,
             p5_status=statuses,
             poscmd_times=[20.0 + index * 0.01 for index in range(601)])
@@ -1166,7 +1192,8 @@ class TestStageAnalyzer(unittest.TestCase):
             },
         }]
         summary = MODULE.analyze_stage_records(
-            "full", [healthy(index + 1, float(index)) for index in range(16)],
+            "full", [forest_v2_healthy(index + 1, float(index))
+                     for index in range(16)],
             decisions=[decision], lineage=lineage, bsplines=bsplines,
             p5_status=statuses,
             poscmd_times=[20.0 + index * 0.01 for index in range(601)])

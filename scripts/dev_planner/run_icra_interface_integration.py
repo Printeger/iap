@@ -175,9 +175,11 @@ def forest_scene_contract(scenario: str = FOREST_SCENARIO) -> dict:
                 "pre_conservative_fim_ratio" if online
                 else "legacy_safety_pl"),
             "require_safety_ratio_below_one_for_cost": online,
-            "alert_limit_policy": "fixed_hal10_val20_v1",
-            "hal_m": 10.0,
-            "val_m": 20.0,
+            "alert_limit_policy": (
+                "fixed_hal20_val40_v1" if online
+                else "fixed_hal10_val20_v1"),
+            "hal_m": 20.0 if online else 10.0,
+            "val_m": 40.0 if online else 20.0,
         },
         "gnss": {
             "ephemeris_source": "rinex",
@@ -231,6 +233,12 @@ def forest_manifest_evidence(
     geometry = actual.get("geometry", {}) if isinstance(actual, dict) else {}
     gnss = actual.get("gnss", {}) if isinstance(actual, dict) else {}
     p0 = actual.get("p0_prediction", {}) if isinstance(actual, dict) else {}
+    integrity_limits = (
+        actual.get("integrity_alert_limits", {})
+        if isinstance(actual, dict) else {})
+    p5_limits = (
+        actual.get("p5_alert_limits", {})
+        if isinstance(actual, dict) else {})
     expected = forest_scene_contract(scenario)
     online = expected["online_mapping"]
     expected_values = {
@@ -312,6 +320,21 @@ def forest_manifest_evidence(
             p0.get("executor_thread_count"),
             expected["planner_executor_thread_count"]),
     }
+    if online["enabled"]:
+        comparisons.update({
+            "integrity_alert_limits.dynamic": (
+                integrity_limits.get("dynamic"), False),
+            "integrity_alert_limits.hal_m": (
+                integrity_limits.get("hal_m"), online["hal_m"]),
+            "integrity_alert_limits.val_m": (
+                integrity_limits.get("val_m"), online["val_m"]),
+            "p5_alert_limits.mode": (
+                p5_limits.get("mode"), "config_constant"),
+            "p5_alert_limits.hal_m": (
+                p5_limits.get("hal_m"), online["hal_m"]),
+            "p5_alert_limits.val_m": (
+                p5_limits.get("val_m"), online["val_m"]),
+        })
     mismatches = {
         key: {"actual": values[0], "expected": values[1]}
         for key, values in comparisons.items() if values[0] != values[1]

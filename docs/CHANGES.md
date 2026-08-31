@@ -3,6 +3,16 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- config(icra-forest-v2-alert-limits): IAP-RQ-320 / IAP-RQ-400 /
+  IAP-RQ-410 — for the user-directed forest-v2 development experiment, replace
+  the fixed `HAL/VAL=10/20 m` policy with `fixed_hal20_val40_v1` and propagate
+  `20/40 m` consistently through integrity output, P0 risk/snapshot identity,
+  P4 lineage, P5 constant prediction limits, and runner scenario evidence.
+  Forest v1, ICRA072, fusion authority, unknown fail-closed semantics and PL
+  calculations are unchanged. This relaxed development policy is intended to
+  test whether online P4 can proceed to topology selection; it is not a safety
+  qualification result.
+
 - fix(p0-p4-snapshot-pair-and-gnss-support): IAP-RQ-320 / IAP-RQ-400 /
   IAP-RQ-410 — publish P0's risk snapshot together with the exact immutable
   `P0OccupancyEpoch` used to build it, make PlannerManager pass that pair to

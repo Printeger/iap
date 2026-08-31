@@ -414,8 +414,13 @@ class TestPlannerLaunchTest(unittest.TestCase):
             "p4.forward.nominal_query_speed_mps": "1.5",
             "p4.forward.compute_budget_ms": "150.0",
             "integrity_dynamic_alert_limits": "false",
-            "integrity_hal_m": "10.0",
-            "integrity_val_m": "20.0",
+            "integrity_hal_m": "20.0",
+            "integrity_val_m": "40.0",
+            "p0.alert_limit_policy_id": "fixed_hal20_val40_v1",
+            "p0.alert_limit_h_m": "20.0",
+            "p0.alert_limit_v_m": "40.0",
+            "p5.pred_alert_limit_constant_hal_m": "20.0",
+            "p5.pred_alert_limit_constant_val_m": "40.0",
         }
         for key, value in expected.items():
             self.assertEqual(preset[key], value, key)
