@@ -526,6 +526,9 @@ namespace ego_planner
     bspline_optimizer_.reset(new BsplineOptimizer);
     // bspline_optimizer_->setParam(nh);
     bspline_optimizer_->setParam(node);
+    if (bspline_optimizer_->getP4RiskAStarConfig().enable_risk_aware_astar)
+      grid_map_->setCurrentVehicleClearanceRadius(
+          p4_forward_limits_.vehicle_radius_m);
     bspline_optimizer_->setEnvironment(grid_map_, obj_predictor_);
     bspline_optimizer_->a_star_.reset(new AStar);
     bspline_optimizer_->a_star_->initGridMap(grid_map_, Eigen::Vector3i(100, 100, 100));
@@ -1262,8 +1265,12 @@ namespace ego_planner
     }
     if (auto completed = p4_forward_worker_.poll(request.snapshot_identity))
     {
+      // Poll can overlap the 2 Hz occupancy callback. Validate against a fresh
+      // post-completion read, never the value sampled before poll().
+      const uint64_t live_generation_after_poll =
+          grid_map_ ? grid_map_->occupancyGeneration() : 0u;
       if (!p4ForwardDecisionMatchesLiveGeneration(
-              *completed, live_generation))
+              *completed, live_generation_after_poll))
       {
         p4_last_decision_position_.setConstant(
             std::numeric_limits<double>::quiet_NaN());
@@ -1373,6 +1380,26 @@ namespace ego_planner
     if (same_snapshot && same_target && moved_less_than_trigger &&
         !p4_forward_worker_.busy())
     {
+      const uint64_t live_generation_before_reuse =
+          grid_map_ ? grid_map_->occupancyGeneration() : 0u;
+      if (!p4ForwardDecisionMatchesLiveGeneration(
+              last_p4_forward_decision_, live_generation_before_reuse))
+      {
+        p4_last_decision_position_.setConstant(
+            std::numeric_limits<double>::quiet_NaN());
+        p4_last_decision_target_.setConstant(
+            std::numeric_limits<double>::quiet_NaN());
+        p4_latched_guide_.clear();
+        p4_latched_anchor_.setConstant(
+            std::numeric_limits<double>::quiet_NaN());
+        p4_latched_geometry_policy_.clear();
+        unavailable.snapshot_identity = request.snapshot_identity;
+        unavailable.request_position = request.position;
+        unavailable.local_target = request.local_target;
+        unavailable.reason =
+            "live_occupancy_generation_changed_before_decision_reuse";
+        return unavailable;
+      }
       P4ForwardDecision cached = last_p4_forward_decision_;
       cached.planning_attempt_id = request.planning_attempt_id;
       cached.reason = "cached_same_snapshot_target";

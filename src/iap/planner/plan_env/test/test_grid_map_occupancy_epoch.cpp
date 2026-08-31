@@ -21,7 +21,6 @@ struct GridMapTestAccess {
     map->mp_.resolution_ = 1.0;
     map->mp_.resolution_inv_ = 1.0;
     map->mp_.obstacles_inflation_ = 0.0;
-    map->mp_.current_vehicle_clearance_radius_m_ = 0.0;
     map->mp_.frame_id_ = "map";
     map->mp_.cx_ = 0.0;
     map->mp_.cy_ = 0.0;
@@ -203,7 +202,7 @@ struct GridMapTestAccess {
 
   static void setCurrentVehicleClearanceRadius(GridMap* map,
                                                 const double radius_m) {
-    map->mp_.current_vehicle_clearance_radius_m_ = radius_m;
+    map->setCurrentVehicleClearanceRadius(radius_m);
   }
 
   static uint64_t updateSequence(GridMap* map) {

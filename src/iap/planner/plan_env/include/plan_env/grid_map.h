@@ -62,10 +62,6 @@ struct MappingParameters
   Eigen::Vector3d local_update_range_;
   double resolution_, resolution_inv_;
   double obstacles_inflation_;
-  // Radius around the current vehicle-center pose that is physically known
-  // not to contain an external obstacle. This evidence only marks observation;
-  // it never clears raw or inflated occupancy.
-  double current_vehicle_clearance_radius_m_ = 0.0;
   string frame_id_;
   int pose_type_;
 
@@ -249,6 +245,9 @@ public:
   std::shared_ptr<const FrozenOccupancyEpoch>
   captureFrozenOccupancyEpoch() const;
   uint64_t occupancyGeneration() const;
+  // Bind current-body observation evidence to the planner's canonical vehicle
+  // radius. This is intentionally not a separate ROS parameter.
+  void setCurrentVehicleClearanceRadius(double radius_m);
 
   inline void boundIndex(Eigen::Vector3i &id);
   inline bool isUnknown(const Eigen::Vector3i &id);
@@ -359,6 +358,7 @@ private:
       pending_independent_clouds_;
   mutable std::mutex independent_cloud_input_mutex_;
   mutable std::mutex occupancy_epoch_mutex_;
+  double current_vehicle_clearance_radius_m_ = 0.0;
 };
 
 /* ============================== definition of inline function

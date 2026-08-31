@@ -1039,7 +1039,6 @@ DENSE_FOUR_FORK_FOREST_ONLINE_PRESET = {
     # unobserved voxel is traversable unless risk-aware P4 is enabled. P0 keeps
     # reporting UNKNOWN, and P4 still requires frozen observed-free support.
     "grid_map/unknown_as_occupied": "false",
-    "grid_map/current_vehicle_clearance_radius_m": "0.35",
     "manager/planning_horizon": "8.0",
     "fsm/planning_horizon": "8.0",
     "grid_map/local_update_range_x": "9.0",
@@ -1934,7 +1933,6 @@ ARG_DEFAULTS = [
     ("grid_map/origin_y", "nan"),
     ("grid_map/origin_z", "nan"),
     ("grid_map/unknown_as_occupied", "false"),
-    ("grid_map/current_vehicle_clearance_radius_m", "0.0"),
     ("grid_map/independent_cloud_min_interval_s", "0.0"),
     ("grid_map/independent_cloud_clock_guard_s", "0.0"),
     ("planner_occupancy_cloud_topic", "/map_generator/global_cloud"),
@@ -2999,8 +2997,6 @@ def _ego_planner_node(context, drone_id, planner_odom_topic, cloud_topic, camera
             {"grid_map/origin_z": _param_float(context, "grid_map/origin_z")},
             {"grid_map/unknown_as_occupied": _param_bool(
                 context, "grid_map/unknown_as_occupied")},
-            {"grid_map/current_vehicle_clearance_radius_m": _param_float(
-                context, "grid_map/current_vehicle_clearance_radius_m")},
             {"grid_map/local_update_range_x": _param_float(context, "grid_map/local_update_range_x")},
             {"grid_map/local_update_range_y": _param_float(context, "grid_map/local_update_range_y")},
             {"grid_map/local_update_range_z": _param_float(context, "grid_map/local_update_range_z")},
@@ -3835,7 +3831,7 @@ def _launch_setup(context):
             "unknown_as_occupied": _param_bool(
                 context, "grid_map/unknown_as_occupied"),
             "current_vehicle_clearance_radius_m": _param_float(
-                context, "grid_map/current_vehicle_clearance_radius_m"),
+                context, "p4.forward.vehicle_radius_m"),
             "provider_cost_source": LaunchConfiguration(
                 "p0.provider_cost_source").perform(context),
             "require_safety_ratio_below_one_for_cost": _param_bool(

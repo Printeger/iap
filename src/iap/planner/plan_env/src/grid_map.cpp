@@ -59,8 +59,6 @@ void GridMap::initMap(rclcpp::Node::SharedPtr node)
   node_->declare_parameter("grid_map/local_update_range_y", -1.0);
   node_->declare_parameter("grid_map/local_update_range_z", -1.0);
   node_->declare_parameter("grid_map/obstacles_inflation", -1.0);
-  node_->declare_parameter(
-      "grid_map/current_vehicle_clearance_radius_m", 0.0);
   node_->declare_parameter("grid_map/fx", -1.0);
   node_->declare_parameter("grid_map/fy", -1.0);
   node_->declare_parameter("grid_map/cx", -1.0);
@@ -107,9 +105,6 @@ void GridMap::initMap(rclcpp::Node::SharedPtr node)
   node_->get_parameter("grid_map/local_update_range_y", mp_.local_update_range_(1));
   node_->get_parameter("grid_map/local_update_range_z", mp_.local_update_range_(2));
   node_->get_parameter("grid_map/obstacles_inflation", mp_.obstacles_inflation_);
-  node_->get_parameter(
-      "grid_map/current_vehicle_clearance_radius_m",
-      mp_.current_vehicle_clearance_radius_m_);
   node_->get_parameter("grid_map/fx", mp_.fx_);
   node_->get_parameter("grid_map/fy", mp_.fy_);
   node_->get_parameter("grid_map/cx", mp_.cx_);
@@ -154,8 +149,6 @@ void GridMap::initMap(rclcpp::Node::SharedPtr node)
       std::max(0.0, mp_.independent_cloud_min_interval_s_);
   mp_.independent_cloud_clock_guard_s_ =
       std::max(0.0, mp_.independent_cloud_clock_guard_s_);
-  mp_.current_vehicle_clearance_radius_m_ =
-      std::max(0.0, mp_.current_vehicle_clearance_radius_m_);
   RCLCPP_INFO(node_->get_logger(),
               "[grid_map] independent cloud interval=%.3f s "
               "clock_guard=%.3f s",
@@ -1192,7 +1185,7 @@ void GridMap::cloudCallback(const sensor_msgs::msg::PointCloud2::ConstPtr &img)
 
 void GridMap::markCurrentVehicleFootprintObserved()
 {
-  const double radius = mp_.current_vehicle_clearance_radius_m_;
+  const double radius = current_vehicle_clearance_radius_m_;
   if (!md_.camera_pos_.allFinite() || !std::isfinite(mp_.resolution_) ||
       mp_.resolution_ <= 0.0)
     return;
@@ -1229,6 +1222,13 @@ void GridMap::markCurrentVehicleFootprintObserved()
         if ((closest - md_.camera_pos_).squaredNorm() <= radius * radius)
           md_.observed_buffer_[toAddress(index)] = 1;
       }
+}
+
+void GridMap::setCurrentVehicleClearanceRadius(const double radius_m)
+{
+  std::lock_guard<std::mutex> lock(occupancy_epoch_mutex_);
+  current_vehicle_clearance_radius_m_ =
+      std::isfinite(radius_m) && radius_m >= 0.0 ? radius_m : 0.0;
 }
 
 void GridMap::publishMap()
