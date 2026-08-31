@@ -14,6 +14,11 @@
 using namespace std;
 using namespace Eigen;
 
+namespace
+{
+constexpr int kPoolGuardCellsPerSide = 3;
+}
+
 bool p4V2CostLess(const P4V2LexicographicCost &lhs,
                   const P4V2LexicographicCost &rhs)
 {
@@ -40,8 +45,11 @@ AStar::~AStar()
 
 void AStar::initGridMap(GridMap::Ptr occ_map, const Eigen::Vector3i pool_size)
 {
-    POOL_SIZE_ = pool_size;
-    CENTER_IDX_ = pool_size / 2;
+    // Keep room for the caller-requested boundary, one outward endpoint
+    // adjustment, and the outer search sentinel without changing existing
+    // world-to-grid coordinates.
+    POOL_SIZE_ = pool_size.array() + 2 * kPoolGuardCellsPerSide;
+    CENTER_IDX_ = POOL_SIZE_ / 2;
 
     GridNodeMap_ = new GridNodePtr **[POOL_SIZE_(0)];
     for (int i = 0; i < POOL_SIZE_(0); i++)
