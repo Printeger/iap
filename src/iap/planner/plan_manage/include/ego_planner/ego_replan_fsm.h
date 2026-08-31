@@ -30,6 +30,15 @@ using std::vector;
 
 namespace ego_planner
 {
+  inline bool p4ObserveMoreReplanDue(
+      const double now_s, const double last_replan_s,
+      const bool worker_result_ready,
+      const double minimum_submission_period_s = 0.5)
+  {
+    return worker_result_ready ||
+        now_s - last_replan_s >= minimum_submission_period_s;
+  }
+
   class P4RiskGridPlanningAdmission
   {
   public:

@@ -1789,6 +1789,12 @@ std::optional<P4ForwardDecision> P4ForwardDecisionWorker::poll(
   return decision;
 }
 
+bool P4ForwardDecisionWorker::resultReady() const
+{
+  std::lock_guard<std::mutex> lock(impl_->mutex);
+  return impl_->result.has_value();
+}
+
 bool P4ForwardDecisionWorker::busy() const
 {
   std::lock_guard<std::mutex> lock(impl_->mutex);

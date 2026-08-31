@@ -775,7 +775,9 @@ namespace ego_planner
       // if no safe progress exists, publish a zero-velocity stop candidate
       // and remain in OBSERVE_MORE until a new online snapshot is usable.
       const double now_s = plannerNow().seconds();
-      if (now_s - p4_last_observe_replan_s_ < 0.5)
+      if (!p4ObserveMoreReplanDue(
+              now_s, p4_last_observe_replan_s_,
+              planner_manager_->p4ForwardDecisionReady()))
         break;
       p4_last_observe_replan_s_ = now_s;
       if (planFromCurrentTraj(1))

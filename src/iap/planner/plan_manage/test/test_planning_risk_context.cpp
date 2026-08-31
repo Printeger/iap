@@ -1020,3 +1020,11 @@ TEST(PlanningTimeProviderTest, EmergencyStopUsesProvidedSimStamp) {
 
   EXPECT_EQ(manager.local_data_.start_time_.nanoseconds(), sim_stamp.nanoseconds());
 }
+
+TEST(P4ObserveMoreScheduling,
+     CompletedWorkerResultBypassesSubmissionRateLimit)
+{
+  EXPECT_TRUE(ego_planner::p4ObserveMoreReplanDue(10.05, 10.0, true));
+  EXPECT_FALSE(ego_planner::p4ObserveMoreReplanDue(10.05, 10.0, false));
+  EXPECT_TRUE(ego_planner::p4ObserveMoreReplanDue(10.5, 10.0, false));
+}

@@ -261,7 +261,8 @@ public:
 
     bool submit(P4ForwardRequest request);
     std::optional < P4ForwardDecision > poll(
-    const P4ForwardSnapshotIdentity & expected_identity);
+      const P4ForwardSnapshotIdentity & expected_identity);
+    bool resultReady() const;
     bool busy() const;
 
 private:

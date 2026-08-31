@@ -138,6 +138,9 @@ namespace ego_planner
     const P4ForwardDecision &lastP4ForwardDecision() const {
       return last_p4_forward_decision_;
     }
+    bool p4ForwardDecisionReady() const {
+      return p4_forward_worker_.resultReady();
+    }
     void setP4ForwardDecisionForTest(P4ForwardDecision decision)
     {
       last_p4_forward_decision_ = std::move(decision);

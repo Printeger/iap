@@ -611,6 +611,19 @@ TEST(P4ForwardRoute, AsyncWorkerDropsResultFromDifferentSnapshotIdentity)
   EXPECT_EQ(current->snapshot_identity.canonical(), newer.canonical());
 }
 
+TEST(P4ForwardRoute, AsyncWorkerSignalsCompletedResultBeforePolling)
+{
+  ego_planner::P4ForwardDecisionWorker worker;
+  const auto request = straightRequest();
+  ASSERT_TRUE(worker.submit(request));
+  for (int attempt = 0; attempt < 100 && !worker.resultReady(); ++attempt) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  }
+  ASSERT_TRUE(worker.resultReady());
+  ASSERT_TRUE(worker.poll(request.snapshot_identity).has_value());
+  EXPECT_FALSE(worker.resultReady());
+}
+
 TEST(P4ForwardRoute, AsyncResultRetainsItsOwnLiveGenerationToken)
 {
   ego_planner::P4ForwardDecisionWorker worker;
