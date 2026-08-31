@@ -55,6 +55,40 @@ risk_ratio = max(HPL / HAL, VPL / VAL)
 这组放宽后的阈值仅用于确认 P4 能否越过起点安全比并进入在线拓扑选路，不构成安全资格结论；
 森林 v1 与其他场景仍保留原有阈值。
 
+### 认证 GNSS 锚与零 UNKNOWN 前进（2026-08-31）
+
+P0 的候选 GNSS 绝对 PL 不再直接采用另一套绝对 advisory。对 HPL/VPL
+分别使用：
+
+```text
+anchored(candidate, tau)
+  = current certified PL
+  + max(0, raw advisory(candidate, tau)
+           - raw advisory(receiver, tau))
+  + max(0, raw advisory(receiver, tau)
+           - raw advisory(receiver, 0))
+```
+
+当前实现的卫星 epoch、方向和排除状态在一个 P0/P4 快照内冻结，现有 GNSS
+几何模型在该冻结 epoch 内没有额外时间演化，因此最后一项严格为零；没有新增
+经验时间系数、`unknown_growth` 或离线场景不确定度。receiver、`tau=0` 的
+输出严格等于 current Integrity/ARAIM 的认证 PL。Integrity 与 GNSS epoch
+相差超过 `0.25 s`、非有限或身份不一致时，返回
+`GNSS_ANCHOR_INCONSISTENT`。
+
+软冠层模型只使用从 near-field offset 后开始的 `occ_L=5 m` 空间证据，故
+只要求这段射线为在线 observed；5–20 m 的 unknown 不再错误阻断软模型。
+硬遮挡仍检查其实际使用的完整 `occ_range`。这些 observed/blocked/unknown
+证据只来自机载 LiDAR/depth ray traversal 与冻结 occupancy，不读取
+`/map_generator/global_cloud`、森林 seed 或预设分叉。
+
+P4 使用 P0 发布时一并冻结的 risk+occupancy+GNSS epoch 批量证书。同一次
+决策的全部候选使用共同已知卫星集合；任一点共同/可用卫星不足、occupancy
+unknown、LiDAR/FIM support 缺失或 safety ratio 超限都不能进入正式排序。
+`OBSERVE_MORE` 也不例外：它最多以 `0.5 m/s` 前进 `0.5 m`，且至少需要
+`0.25 m` 的完整认证前缀，并在终点保留停止距离。找不到该前缀时必须悬停，
+完全禁止以经验性 UNKNOWN 惩罚、扩大 receiver support 或超时降级换取前进。
+
 不对 PL 做时间低通滤波。current/P5 继续以 conservative safety-fused `FUSED/max_pl` 为权威。P4 候选必须先通过完整、fresh、observed 且 `safety_fused.risk_ratio < 1` 的安全门；只有通过安全门后，森林 v2 才以 pre-conservative FIM ratio 做 bottleneck 排序。若无候选通过，P4/P5 必须拒绝，不能关闭 GNSS、再次放宽当前开发阈值或用 RViz 归一化色值参与规划。
 
 ## RViz 契约

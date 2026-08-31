@@ -144,8 +144,26 @@ struct GnssAdvisoryResult {
   double effective_sigma_mean = std::numeric_limits<double>::quiet_NaN();
   double effective_sigma_max = std::numeric_limits<double>::quiet_NaN();
 
+  // The planner GNSS channel is anchored to the current certified monitor.
+  // Raw advisory values remain available for spatial-delta diagnostics and
+  // pre-conservative ranking; they are never an absolute safety authority.
+  double raw_hpl = std::numeric_limits<double>::quiet_NaN();
+  double raw_vpl = std::numeric_limits<double>::quiet_NaN();
+  double receiver_raw_hpl = std::numeric_limits<double>::quiet_NaN();
+  double receiver_raw_vpl = std::numeric_limits<double>::quiet_NaN();
+  double anchor_hpl = std::numeric_limits<double>::quiet_NaN();
+  double anchor_vpl = std::numeric_limits<double>::quiet_NaN();
+  double spatial_delta_h = std::numeric_limits<double>::quiet_NaN();
+  double spatial_delta_v = std::numeric_limits<double>::quiet_NaN();
+  double temporal_growth_h = 0.0;
+  double temporal_growth_v = 0.0;
+  bool anchor_consistent = false;
+  double anchor_epoch_delta_s = std::numeric_limits<double>::quiet_NaN();
+
   int n_visible = 0;
   int n_unknown_support = 0;
+  int n_known_support = 0;
+  int n_blocked = 0;
   int n_used = 0;
   int n_hypotheses = 0;
   int n_excluded = 0;
@@ -316,6 +334,78 @@ struct PredictorQueryResult {
   GnssAdvisoryResult gnss;
   LidarAdvisoryResult lidar;
   FusionAdvisoryResult fused;
+};
+
+enum class ForwardRiskSafetyState {
+  SAFE = 0,
+  UNSAFE,
+  UNKNOWN,
+};
+
+enum class ForwardRiskRankingState {
+  COMPARABLE = 0,
+  INCOMPLETE,
+};
+
+enum class ForwardRiskFailureReason {
+  NONE = 0,
+  SAFETY_LIMIT_EXCEEDED,
+  GNSS_ANCHOR_INCONSISTENT,
+  GNSS_SKY_UNKNOWN,
+  GNSS_GEOMETRY_DEGENERATE,
+  OCCUPANCY_UNKNOWN,
+  OCCUPIED,
+  LIDAR_SUPPORT_MISSING,
+  FIM_SUPPORT_MISSING,
+  STALE,
+  GENERATION_CHANGED,
+  COMPUTE_BUDGET_EXCEEDED,
+};
+
+const char* forwardRiskFailureReasonName(ForwardRiskFailureReason reason);
+
+struct ForwardRiskQueryPoint {
+  Eigen::Vector3d position_map = Eigen::Vector3d::Zero();
+  double query_time_s = std::numeric_limits<double>::quiet_NaN();
+  double horizon_s = 0.0;
+  std::uint64_t candidate_group_id = 0;
+};
+
+struct ForwardRiskBatchRequest {
+  std::string combined_snapshot_identity;
+  IntegritySnapshot snapshot;
+  std::vector<ForwardRiskQueryPoint> points;
+  double hal = 10.0;
+  double val = 20.0;
+  double freshness_reference_time_s =
+      std::numeric_limits<double>::quiet_NaN();
+};
+
+struct ForwardRiskPointResult {
+  ForwardRiskSafetyState safety_state = ForwardRiskSafetyState::UNKNOWN;
+  ForwardRiskRankingState ranking_state =
+      ForwardRiskRankingState::INCOMPLETE;
+  ForwardRiskFailureReason failure_reason =
+      ForwardRiskFailureReason::GNSS_SKY_UNKNOWN;
+  PredictorQueryResult prediction;
+  double safety_ratio = std::numeric_limits<double>::quiet_NaN();
+  double fim_ratio = std::numeric_limits<double>::quiet_NaN();
+  bool gnss_supported = false;
+  bool lidar_supported = false;
+  bool fim_supported = false;
+  double gnss_support_ray_length_m =
+      std::numeric_limits<double>::quiet_NaN();
+  bool gnss_hard_occlusion = false;
+};
+
+struct ForwardRiskBatchResult {
+  bool complete = false;
+  std::string combined_snapshot_identity;
+  std::vector<int> common_known_sat_ids;
+  std::uint64_t common_satellite_hash = 0;
+  int common_known_satellite_count = 0;
+  ForwardRiskFailureReason failure_reason = ForwardRiskFailureReason::NONE;
+  std::vector<ForwardRiskPointResult> points;
 };
 
 }  // namespace iap

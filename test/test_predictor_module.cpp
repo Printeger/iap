@@ -580,6 +580,95 @@ TEST(PredictorModuleTest, GnssUnknownOnlineLosIsNotAssumedVisible) {
 }
 
 TEST(PredictorModuleTest,
+     SoftCanopyRequiresObservedSupportOnlyAcrossItsFiveMeterInfluenceRange) {
+  auto params = make_params();
+  params.gnss.visibility_params.hard_occlusion = false;
+  params.gnss.visibility_params.ray_start_offset = 0.0;
+  params.gnss.visibility_params.occ_L = 5.0;
+  params.gnss.visibility_params.occ_range = 20.0;
+  iap::GnssAdvisoryPredictor predictor(params.gnss);
+  predictor.set_observation_predicate(
+      [](const Eigen::Vector3d& position) {
+        return position.norm() <= 5.0 + 1.0e-9;
+      });
+
+  const auto result =
+      predictor.query(Eigen::Vector3d::Zero(), make_snapshot(true, false));
+
+  ASSERT_TRUE(result.valid) << result.fallback_reason;
+  EXPECT_EQ(result.n_unknown_support, 0);
+  EXPECT_EQ(result.n_used, 8);
+}
+
+TEST(PredictorModuleTest,
+     SoftCanopySupportIntervalBeginsAfterTheNearFieldOffset) {
+  auto params = make_params();
+  params.gnss.visibility_params.hard_occlusion = false;
+  params.gnss.visibility_params.ray_start_offset = 1.0;
+  params.gnss.visibility_params.occ_L = 5.0;
+  params.gnss.visibility_params.occ_range = 20.0;
+  iap::GnssAdvisoryPredictor predictor(params.gnss);
+  predictor.set_observation_predicate(
+      [](const Eigen::Vector3d& position) {
+        return position.norm() <= 6.0 + 1.0e-9;
+      });
+
+  const auto result =
+      predictor.query(Eigen::Vector3d::Zero(), make_snapshot(true, false));
+
+  ASSERT_TRUE(result.valid) << result.fallback_reason;
+  EXPECT_EQ(result.n_unknown_support, 0);
+  EXPECT_EQ(result.n_used, 8);
+}
+
+TEST(PredictorModuleTest,
+     HardOcclusionRequiresObservedSupportAcrossItsFullConfiguredRange) {
+  auto params = make_params();
+  params.gnss.visibility_params.hard_occlusion = true;
+  params.gnss.visibility_params.ray_start_offset = 0.0;
+  params.gnss.visibility_params.occ_L = 5.0;
+  params.gnss.visibility_params.occ_range = 20.0;
+  iap::GnssAdvisoryPredictor predictor(params.gnss);
+  predictor.set_observation_predicate(
+      [](const Eigen::Vector3d& position) {
+        return position.norm() <= 5.0 + 1.0e-9;
+      });
+
+  const auto result =
+      predictor.query(Eigen::Vector3d::Zero(), make_snapshot(true, false));
+
+  EXPECT_FALSE(result.valid);
+  EXPECT_EQ(result.fallback_reason, "too_few_observed_los_sats");
+  EXPECT_EQ(result.n_unknown_support, 8);
+}
+
+TEST(PredictorModuleTest,
+     OnlineSkyEvidenceCacheReusesVoxelAndInvalidatesOnGnssEpochChange) {
+  auto params = make_params();
+  params.gnss.measured_epoch_support_radius_m = 0.0;
+  iap::GnssAdvisoryPredictor predictor(params.gnss);
+  int support_queries = 0;
+  predictor.set_observation_predicate(
+      [&support_queries](const Eigen::Vector3d&) {
+        ++support_queries;
+        return true;
+      });
+  auto snapshot = make_snapshot(true, false);
+  const Eigen::Vector3d candidate(2.0, 0.0, 0.0);
+
+  ASSERT_TRUE(predictor.query(candidate, snapshot).valid);
+  const int first_query_count = support_queries;
+  ASSERT_GT(first_query_count, 0);
+  ASSERT_TRUE(predictor.query(candidate, snapshot).valid);
+  EXPECT_EQ(support_queries, first_query_count);
+
+  snapshot.gnss_epoch.stamp += 0.1;
+  snapshot.current.stamp += 0.1;
+  ASSERT_TRUE(predictor.query(candidate, snapshot).valid);
+  EXPECT_GT(support_queries, first_query_count);
+}
+
+TEST(PredictorModuleTest,
      MeasuredGnssEpochCertifiesOnlyTheConfiguredReceiverNeighborhood) {
   auto params = make_params();
   params.gnss.measured_epoch_support_radius_m = 1.0;
@@ -642,6 +731,151 @@ TEST(PredictorModuleTest, GnssFullyObservedOnlineLosRemainsAvailable) {
 
   EXPECT_TRUE(result.gnss.valid);
   EXPECT_EQ(result.gnss.n_unknown_support, 0);
+}
+
+TEST(PredictorModuleTest,
+     ReceiverTauZeroGnssProtectionLevelsUseCurrentCertifiedAnchor) {
+  auto params = make_params();
+  params.gnss.measured_epoch_support_radius_m = 0.45;
+  params.gnss.measured_epoch_integrity_max_delta_s = 0.25;
+  iap::PredictorModule predictor(params);
+  predictor.set_observation_predicate(
+      [](const Eigen::Vector3d&) { return true; });
+  auto snapshot = make_snapshot(true, false);
+  snapshot.current.hpl = 13.25;
+  snapshot.current.vpl = 29.5;
+
+  const auto result = predictor.query(iap::PredictorQueryInput(
+      snapshot.p_wb, snapshot, snapshot.stamp, 0.0));
+
+  ASSERT_TRUE(result.gnss.valid) << result.gnss.fallback_reason;
+  EXPECT_DOUBLE_EQ(result.gnss.hpl, snapshot.current.hpl);
+  EXPECT_DOUBLE_EQ(result.gnss.vpl, snapshot.current.vpl);
+  EXPECT_DOUBLE_EQ(result.gnss.pl_scalar, snapshot.current.vpl);
+  EXPECT_TRUE(result.gnss.anchor_consistent);
+}
+
+TEST(PredictorModuleTest,
+     SpatialGnssPredictionNeverImprovesOnTheCertifiedAnchor) {
+  auto params = make_params();
+  params.gnss.measured_epoch_support_radius_m = 0.45;
+  iap::PredictorModule predictor(params);
+  predictor.set_observation_predicate(
+      [](const Eigen::Vector3d&) { return true; });
+  auto snapshot = make_snapshot(true, true);
+  snapshot.current.hpl = 13.25;
+  snapshot.current.vpl = 29.5;
+
+  const auto result = predictor.query(iap::PredictorQueryInput(
+      Eigen::Vector3d(2.0, 0.5, 0.0), snapshot,
+      snapshot.stamp + 1.0, 1.0, "map", snapshot.stamp));
+
+  ASSERT_TRUE(result.gnss.valid) << result.gnss.fallback_reason;
+  EXPECT_GE(result.gnss.hpl, snapshot.current.hpl);
+  EXPECT_GE(result.gnss.vpl, snapshot.current.vpl);
+  EXPECT_GE(result.gnss.spatial_delta_h, 0.0);
+  EXPECT_GE(result.gnss.spatial_delta_v, 0.0);
+  EXPECT_GE(result.gnss.temporal_growth_h, 0.0);
+  EXPECT_GE(result.gnss.temporal_growth_v, 0.0);
+}
+
+TEST(PredictorModuleTest,
+     MisalignedCertifiedIntegrityAndGnssEpochFailAnchorClosed) {
+  auto params = make_params();
+  params.gnss.measured_epoch_support_radius_m = 0.45;
+  params.gnss.measured_epoch_integrity_max_delta_s = 0.25;
+  iap::PredictorModule predictor(params);
+  predictor.set_observation_predicate(
+      [](const Eigen::Vector3d&) { return true; });
+  auto snapshot = make_snapshot(true, false);
+  snapshot.current.stamp = snapshot.gnss_epoch.stamp + 0.251;
+
+  const auto result = predictor.query(iap::PredictorQueryInput(
+      snapshot.p_wb, snapshot, snapshot.stamp, 0.0));
+
+  EXPECT_FALSE(result.gnss.valid);
+  EXPECT_FALSE(result.gnss.available);
+  EXPECT_EQ(result.gnss.fallback_reason, "gnss_anchor_inconsistent");
+}
+
+TEST(PredictorModuleTest,
+     ForwardRiskBatchUsesOneFrozenCommonKnownSatelliteSet) {
+  auto params = make_params();
+  params.gnss.measured_epoch_support_radius_m = 0.45;
+  iap::PredictorModule module(params);
+  module.set_observation_predicate(
+      [](const Eigen::Vector3d&) { return true; });
+  module.set_lidar_fim_primitives(make_lidar_primitives());
+  auto snapshot = make_snapshot(true, true);
+
+  iap::ForwardRiskBatchRequest request;
+  request.combined_snapshot_identity = "geometry|occupancy3|risk5|epoch7";
+  request.snapshot = snapshot;
+  request.hal = 20.0;
+  request.val = 40.0;
+  request.freshness_reference_time_s = snapshot.stamp;
+  request.points = {
+      {snapshot.p_wb, snapshot.stamp, 0.0, 1},
+      {Eigen::Vector3d(0.5, 0.0, 0.0), snapshot.stamp + 0.5, 0.5, 2}};
+
+  const auto result = module.queryForwardRiskBatch(request);
+
+  ASSERT_TRUE(result.complete)
+      << iap::forwardRiskFailureReasonName(result.failure_reason);
+  EXPECT_EQ(result.combined_snapshot_identity,
+            request.combined_snapshot_identity);
+  EXPECT_EQ(result.common_known_satellite_count, 8);
+  EXPECT_NE(result.common_satellite_hash, 0u);
+  ASSERT_EQ(result.points.size(), request.points.size());
+  for (const auto& point : result.points) {
+    EXPECT_EQ(point.safety_state, iap::ForwardRiskSafetyState::SAFE);
+    EXPECT_EQ(point.ranking_state,
+              iap::ForwardRiskRankingState::COMPARABLE);
+    EXPECT_TRUE(point.gnss_supported);
+    EXPECT_TRUE(point.lidar_supported);
+    EXPECT_TRUE(point.fim_supported);
+    EXPECT_EQ(point.failure_reason, iap::ForwardRiskFailureReason::NONE);
+    EXPECT_DOUBLE_EQ(point.gnss_support_ray_length_m, 5.0);
+    EXPECT_FALSE(point.gnss_hard_occlusion);
+    EXPECT_DOUBLE_EQ(point.prediction.gnss.anchor_hpl,
+                     snapshot.current.hpl);
+    EXPECT_DOUBLE_EQ(point.prediction.gnss.anchor_vpl,
+                     snapshot.current.vpl);
+  }
+}
+
+TEST(PredictorModuleTest,
+     ForwardRiskBatchFailsClosedWhenCommonKnownSatelliteSetIsTooSmall) {
+  auto params = make_params();
+  params.gnss.measured_epoch_support_radius_m = 0.45;
+  iap::PredictorModule module(params);
+  module.set_observation_predicate(
+      [](const Eigen::Vector3d&) { return false; });
+  module.set_lidar_fim_primitives(make_lidar_primitives());
+  auto snapshot = make_snapshot(true, true);
+
+  iap::ForwardRiskBatchRequest request;
+  request.combined_snapshot_identity = "geometry|occupancy3|risk5|epoch7";
+  request.snapshot = snapshot;
+  request.hal = 20.0;
+  request.val = 40.0;
+  request.freshness_reference_time_s = snapshot.stamp;
+  request.points = {
+      {snapshot.p_wb, snapshot.stamp, 0.0, 1},
+      {Eigen::Vector3d(1.0, 0.0, 0.0), snapshot.stamp + 0.5, 0.5, 2}};
+
+  const auto result = module.queryForwardRiskBatch(request);
+
+  EXPECT_FALSE(result.complete);
+  EXPECT_LT(result.common_known_satellite_count,
+            params.gnss.geometry_params.min_sats);
+  EXPECT_EQ(result.failure_reason,
+            iap::ForwardRiskFailureReason::GNSS_SKY_UNKNOWN);
+  for (const auto& point : result.points) {
+    EXPECT_EQ(point.safety_state, iap::ForwardRiskSafetyState::UNKNOWN);
+    EXPECT_EQ(point.ranking_state,
+              iap::ForwardRiskRankingState::INCOMPLETE);
+  }
 }
 
 TEST(PredictorModuleTest, GnssExcludedSatellitesReduceUsedCountAndFallbackExplicitly) {
@@ -853,7 +1087,7 @@ TEST(PredictorModuleTest, GnssSigmaInflationIncreasesPl) {
   }
 }
 
-TEST(PredictorModuleTest, CurrentIntegrityDoesNotOverrideAdvisoryPrediction) {
+TEST(PredictorModuleTest, CurrentIntegrityAnchorsPlannerGnssPrediction) {
   struct CurrentCase {
     std::string id;
     double current_hpl;
@@ -884,10 +1118,16 @@ TEST(PredictorModuleTest, CurrentIntegrityDoesNotOverrideAdvisoryPrediction) {
     const iap::PredictorQueryInput input(Eigen::Vector3d::Zero(), snapshot,
                                          100.0, 0.0, "map");
     const auto result = module.query(input);
-    ASSERT_TRUE(result.valid) << test_case.id;
+    if (!test_case.current_valid) {
+      EXPECT_FALSE(result.gnss.valid);
+      EXPECT_EQ(result.gnss.fallback_reason, "gnss_anchor_inconsistent");
+      EXPECT_FALSE(result.valid);
+      continue;
+    }
+    ASSERT_TRUE(result.valid) << test_case.id << ':' << result.fallback_reason;
     const bool copied =
-        std::abs(result.fused.hpl - test_case.current_hpl) < 1.0e-9 &&
-        std::abs(result.fused.vpl - test_case.current_vpl) < 1.0e-9;
+        std::abs(result.gnss.hpl - test_case.current_hpl) < 1.0e-9 &&
+        std::abs(result.gnss.vpl - test_case.current_vpl) < 1.0e-9;
     csv << csv_escape(test_case.id) << ','
         << test_case.current_hpl << ','
         << test_case.current_vpl << ','
@@ -898,16 +1138,17 @@ TEST(PredictorModuleTest, CurrentIntegrityDoesNotOverrideAdvisoryPrediction) {
         << result.fused.hpl << ','
         << result.fused.vpl << ','
         << (copied ? 1 : 0) << '\n';
-    EXPECT_FALSE(copied) << test_case.id;
+    EXPECT_TRUE(copied) << test_case.id;
+    EXPECT_TRUE(result.gnss.anchor_consistent);
     results.push_back(result);
   }
 
-  ASSERT_EQ(results.size(), 3u);
+  ASSERT_EQ(results.size(), 2u);
   for (std::size_t i = 1; i < results.size(); ++i) {
-    EXPECT_NEAR(results[i].gnss.hpl, results[0].gnss.hpl, 1.0e-9);
-    EXPECT_NEAR(results[i].gnss.vpl, results[0].gnss.vpl, 1.0e-9);
-    EXPECT_NEAR(results[i].fused.hpl, results[0].fused.hpl, 1.0e-9);
-    EXPECT_NEAR(results[i].fused.vpl, results[0].fused.vpl, 1.0e-9);
+    EXPECT_NE(results[i].gnss.hpl, results[0].gnss.hpl);
+    EXPECT_NE(results[i].gnss.vpl, results[0].gnss.vpl);
+    EXPECT_NEAR(results[i].gnss.raw_hpl, results[0].gnss.raw_hpl, 1.0e-9);
+    EXPECT_NEAR(results[i].gnss.raw_vpl, results[0].gnss.raw_vpl, 1.0e-9);
   }
 }
 
@@ -1841,10 +2082,12 @@ TEST(PredictorModuleTest,
   EXPECT_TRUE(result.valid) << result.fallback_reason;
   EXPECT_TRUE(result.available);
   EXPECT_FALSE(result.fallback);
-  EXPECT_TRUE(result.fused.gnss_used);
+  EXPECT_FALSE(result.fused.gnss_used);
   EXPECT_TRUE(result.fused.lidar_used);
   EXPECT_FALSE(result.fused.prior_valid);
   EXPECT_NE(result.fallback_reason.find("stale_current_prior"),
+            std::string::npos);
+  EXPECT_NE(result.fallback_reason.find("gnss_anchor_inconsistent"),
             std::string::npos);
   EXPECT_TRUE(flag_set(result.source_flags,
                        iap::PREDICTOR_RESULT_STALE_CURRENT_PRIOR));

@@ -1508,6 +1508,33 @@ SafetyRvizPublisher::buildP4GuideMarkers(
       }
       arr.markers.push_back(std::move(connector));
     }
+    if (guide.forward_decision && guide.first_failed_position.allFinite()) {
+      auto failed = base_marker(config, stamp, "p4_astar_guides", id++,
+          visualization_msgs::msg::Marker::SPHERE);
+      failed.pose.position = point_msg(guide.first_failed_position);
+      failed.scale.x = failed.scale.y = failed.scale.z = 0.28;
+      failed.color = color(1.0f, 0.1f, 0.05f, 0.9f);
+      arr.markers.push_back(std::move(failed));
+
+      auto failed_label = base_marker(
+          config, stamp, "p4_astar_guides", id++,
+          visualization_msgs::msg::Marker::TEXT_VIEW_FACING);
+      failed_label.pose.position = point_msg(
+          guide.first_failed_position + Eigen::Vector3d(0.0, 0.0, 0.4));
+      failed_label.scale.z = 0.18;
+      failed_label.color = color(1.0f, 0.3f, 0.15f, 1.0f);
+      failed_label.text = "P4 first failure: " + guide.first_failed_reason +
+          "\nHPL " + fmt_num(guide.first_failed_hpl, 1) + "/" +
+          fmt_num(guide.first_failed_hal, 1) +
+          " VPL " + fmt_num(guide.first_failed_vpl, 1) + "/" +
+          fmt_num(guide.first_failed_val, 1) +
+          "\nfloor=" + guide.first_failed_floor_source_h + "/" +
+          guide.first_failed_floor_source_v +
+          " tau=" + fmt_num(
+              guide.first_failed_query_time_s - guide.risk_snapshot_stamp_s,
+              1);
+      arr.markers.push_back(std::move(failed_label));
+    }
     auto label = base_marker(config, stamp, "p4_astar_guides", id++,
                              visualization_msgs::msg::Marker::TEXT_VIEW_FACING);
     label.pose.position = point_msg((guide.segment_start + guide.segment_end) *

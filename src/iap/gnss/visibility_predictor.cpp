@@ -41,6 +41,8 @@ VisibilityResult VisibilityPredictor::predict(const Eigen::Vector3d& pos_world,
   res.kappas.resize(N, 0.0);
   res.sigma_effs.resize(N, params_.canopy.sigma_c);
   res.unknown_flags.resize(N, false);
+  res.known_flags.resize(N, false);
+  res.blocked_flags.resize(N, false);
 
   double kappa_sum  = 0.0;
   int    n_above_el = 0;
@@ -73,7 +75,10 @@ VisibilityResult VisibilityPredictor::predict(const Eigen::Vector3d& pos_world,
     bool unknown_support = false;
     if (observation_predicate_ && !measured_epoch_support) {
       const double start_offset = std::max(0.0, params_.ray_start_offset);
-      const double support_length = std::max(0.0, params_.occ_range);
+      const double support_length = std::max(
+          0.0, params_.hard_occlusion
+                   ? params_.occ_range
+                   : start_offset + params_.occ_L);
       constexpr double kSupportStepM = 0.5;
       for (double distance = start_offset;
            distance <= support_length + 1.0e-9;
@@ -90,6 +95,8 @@ VisibilityResult VisibilityPredictor::predict(const Eigen::Vector3d& pos_world,
         continue;
       }
     }
+    res.known_flags[i] = true;
+    ++res.n_known;
 
     // κ and occlusion
     double kappa = 0.0;
@@ -104,6 +111,10 @@ VisibilityResult VisibilityPredictor::predict(const Eigen::Vector3d& pos_world,
     }
 
     res.kappas[i]    = kappa;
+    res.blocked_flags[i] = blocked;
+    if (blocked) {
+      ++res.n_blocked;
+    }
     res.vis_flags[i] = !blocked;
     if (!blocked) {
       ++res.n_vis;

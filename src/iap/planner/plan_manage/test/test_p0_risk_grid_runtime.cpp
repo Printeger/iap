@@ -4151,6 +4151,11 @@ TEST_F(P0RiskGridRuntimeStampTest,
             2u);
   EXPECT_EQ(planning_snapshot->occupancy->generation, 2u);
   EXPECT_DOUBLE_EQ(planning_snapshot->occupancy->cloud_stamp_s, 100.0);
+  EXPECT_TRUE(static_cast<bool>(planning_snapshot->forward_risk_batch));
+  EXPECT_TRUE(planning_snapshot->integrity_anchor.current.valid);
+  EXPECT_DOUBLE_EQ(planning_snapshot->integrity_anchor.current.stamp, 100.0);
+  EXPECT_DOUBLE_EQ(planning_snapshot->gnss_support_ray_length_m, 5.0);
+  EXPECT_FALSE(planning_snapshot->gnss_hard_occlusion);
 
   live_generation->store(9u);
   const auto still_frozen = runtime.acquirePlanningSnapshot();
@@ -4593,6 +4598,9 @@ TEST_F(P0RiskGridRuntimeStampTest,
   EXPECT_EQ(rollingOccupancyContentIdentity(runtime), accepted_content);
 
   seedValidInputs(&runtime, 100.5, 100.5);
+  // Keep the anchor inputs on one epoch; the race exercised below is solely
+  // the live occupancy generation changing after the transaction is frozen.
+  seedGnssEpoch(&runtime, 100.5);
   advancePriorGeneration(&runtime);
   installStableOccupancyEpoch(
       &runtime, live_generation, source_owner, 4u, 100.5, base,

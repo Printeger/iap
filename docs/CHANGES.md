@@ -3,6 +3,24 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(p0-anchored-gnss-zero-unknown-forward): IAP-RQ-320 / IAP-RQ-400 /
+  IAP-RQ-410 — anchor P0 GNSS protection levels to the same-epoch certified
+  current Integrity/ARAIM HPL/VPL, adding only non-negative spatial advisory
+  degradation from a frozen common-satellite epoch. Reject anchor stamp
+  differences above 0.25 s. For soft canopy visibility, require online
+  observed support only over the model's actual 5 m influence interval after
+  the near-field offset; retain the full configured ray for hard occlusion.
+  Bind P4 to an immutable P0 risk+occupancy+GNSS batch certificate, compare all
+  topology candidates with one common known-satellite set, and reject stale or
+  generation-changed results. `OBSERVE_MORE` now moves at most 0.5 m and
+  0.5 m/s only over a fully observed-free, GNSS/LiDAR/FIM-supported prefix;
+  any UNKNOWN support stops the prefix, with no empirical unknown-growth,
+  receiver-support expansion, timeout bypass, or simulator truth access.
+  Health JSON, P4 lineage and RViz first-failure markers expose the certified
+  anchor, source support, satellite counts, floor source and soft/hard ray
+  length. Forest development alert limits remain fixed at 20/40 m; this is not
+  a qualification result.
+
 - config(icra-forest-v2-alert-limits): IAP-RQ-320 / IAP-RQ-400 /
   IAP-RQ-410 — for the user-directed forest-v2 development experiment, replace
   the fixed `HAL/VAL=10/20 m` policy with `fixed_hal20_val40_v1` and propagate

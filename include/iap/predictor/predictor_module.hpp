@@ -49,6 +49,9 @@ class PredictorModule {
   std::vector<PredictorQueryResult> queryBatch(
       const std::vector<PredictorQueryInput>& inputs,
       PredictorBatchDiagnostics* diagnostics = nullptr) const;
+  ForwardRiskBatchResult queryForwardRiskBatch(
+      const ForwardRiskBatchRequest& request,
+      PredictorBatchDiagnostics* diagnostics = nullptr) const;
 
   const PredictorParams& params() const { return params_; }
 

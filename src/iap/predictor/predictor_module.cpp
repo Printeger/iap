@@ -228,6 +228,68 @@ LidarAdvisoryResult disabled_lidar_result(const std::string& reason) {
   return result;
 }
 
+bool apply_certified_gnss_anchor(
+    const GnssAdvisoryPredictor& predictor,
+    const GnssAdvisoryPredictorParams& params,
+    const IntegritySnapshot& snapshot,
+    GnssAdvisoryResult* candidate) {
+  if (!candidate || !candidate->valid) {
+    return false;
+  }
+  const double epoch_delta =
+      std::abs(snapshot.current.stamp - snapshot.gnss_epoch.stamp);
+  const bool anchor_input_valid = snapshot.has_pose && snapshot.p_wb.allFinite() &&
+      snapshot.current.valid && snapshot.current.gnss_valid &&
+      std::isfinite(snapshot.current.hpl) && snapshot.current.hpl >= 0.0 &&
+      std::isfinite(snapshot.current.vpl) && snapshot.current.vpl >= 0.0 &&
+      std::isfinite(snapshot.current.stamp) &&
+      std::isfinite(snapshot.gnss_epoch.stamp) &&
+      std::isfinite(params.measured_epoch_integrity_max_delta_s) &&
+      params.measured_epoch_integrity_max_delta_s >= 0.0 &&
+      std::isfinite(epoch_delta) &&
+      epoch_delta <= params.measured_epoch_integrity_max_delta_s;
+  candidate->anchor_epoch_delta_s = epoch_delta;
+  if (!anchor_input_valid) {
+    *candidate = disabled_gnss_result("gnss_anchor_inconsistent");
+    candidate->anchor_epoch_delta_s = epoch_delta;
+    return false;
+  }
+  const GnssAdvisoryResult receiver =
+      predictor.query_receiver_measured(snapshot);
+  if (!receiver.valid || !std::isfinite(receiver.hpl) ||
+      !std::isfinite(receiver.vpl)) {
+    *candidate = disabled_gnss_result("gnss_anchor_inconsistent");
+    candidate->anchor_epoch_delta_s = epoch_delta;
+    return false;
+  }
+
+  candidate->raw_hpl = candidate->hpl;
+  candidate->raw_vpl = candidate->vpl;
+  candidate->receiver_raw_hpl = receiver.hpl;
+  candidate->receiver_raw_vpl = receiver.vpl;
+  candidate->anchor_hpl = snapshot.current.hpl;
+  candidate->anchor_vpl = snapshot.current.vpl;
+  candidate->spatial_delta_h =
+      std::max(0.0, candidate->raw_hpl - receiver.hpl);
+  candidate->spatial_delta_v =
+      std::max(0.0, candidate->raw_vpl - receiver.vpl);
+  candidate->temporal_growth_h = 0.0;
+  candidate->temporal_growth_v = 0.0;
+  candidate->hpl = candidate->anchor_hpl + candidate->spatial_delta_h;
+  candidate->vpl = candidate->anchor_vpl + candidate->spatial_delta_v;
+  candidate->pl_scalar = std::max(candidate->hpl, candidate->vpl);
+  candidate->anchor_consistent = std::isfinite(candidate->hpl) &&
+      std::isfinite(candidate->vpl) &&
+      candidate->hpl + 1.0e-12 >= candidate->anchor_hpl &&
+      candidate->vpl + 1.0e-12 >= candidate->anchor_vpl;
+  if (!candidate->anchor_consistent) {
+    *candidate = disabled_gnss_result("gnss_anchor_inconsistent");
+    candidate->anchor_epoch_delta_s = epoch_delta;
+    return false;
+  }
+  return true;
+}
+
 struct CovarianceGrowthOutcome {
   CovarianceGrowthStatus status = CovarianceGrowthStatus::NUMERICAL_FAILURE;
   std::string reason;
@@ -312,6 +374,34 @@ CovarianceGrowthOutcome apply_covariance_growth(
 }
 
 }  // namespace
+
+const char* forwardRiskFailureReasonName(
+    const ForwardRiskFailureReason reason) {
+  switch (reason) {
+    case ForwardRiskFailureReason::NONE: return "NONE";
+    case ForwardRiskFailureReason::SAFETY_LIMIT_EXCEEDED:
+      return "SAFETY_LIMIT_EXCEEDED";
+    case ForwardRiskFailureReason::GNSS_ANCHOR_INCONSISTENT:
+      return "GNSS_ANCHOR_INCONSISTENT";
+    case ForwardRiskFailureReason::GNSS_SKY_UNKNOWN:
+      return "GNSS_SKY_UNKNOWN";
+    case ForwardRiskFailureReason::GNSS_GEOMETRY_DEGENERATE:
+      return "GNSS_GEOMETRY_DEGENERATE";
+    case ForwardRiskFailureReason::OCCUPANCY_UNKNOWN:
+      return "OCCUPANCY_UNKNOWN";
+    case ForwardRiskFailureReason::OCCUPIED: return "OCCUPIED";
+    case ForwardRiskFailureReason::LIDAR_SUPPORT_MISSING:
+      return "LIDAR_SUPPORT_MISSING";
+    case ForwardRiskFailureReason::FIM_SUPPORT_MISSING:
+      return "FIM_SUPPORT_MISSING";
+    case ForwardRiskFailureReason::STALE: return "STALE";
+    case ForwardRiskFailureReason::GENERATION_CHANGED:
+      return "GENERATION_CHANGED";
+    case ForwardRiskFailureReason::COMPUTE_BUDGET_EXCEEDED:
+      return "COMPUTE_BUDGET_EXCEEDED";
+  }
+  return "UNKNOWN";
+}
 
 PredictorModule::PredictorModule() : PredictorModule(PredictorParams{}) {}
 
@@ -500,6 +590,10 @@ PredictorQueryResult PredictorModule::queryWithSpatialAdvisory(
       evaluated_spatial_advisory->lidar = out.lidar;
     }
   }
+  if (out.gnss.valid) {
+    apply_certified_gnss_anchor(gnss_, params_.gnss,
+                                working_input.snapshot, &out.gnss);
+  }
   const auto fusion_begin = diagnostics && diagnostics->collect_component_timing
                                 ? std::chrono::steady_clock::now()
                                 : std::chrono::steady_clock::time_point{};
@@ -643,6 +737,155 @@ std::vector<PredictorQueryResult> PredictorModule::queryBatch(
   }
   if (diagnostics) *diagnostics = local;
   return outputs;
+}
+
+ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
+    const ForwardRiskBatchRequest& request,
+    PredictorBatchDiagnostics* diagnostics) const {
+  ForwardRiskBatchResult out;
+  out.combined_snapshot_identity = request.combined_snapshot_identity;
+  out.points.resize(request.points.size());
+  if (request.points.empty()) {
+    out.complete = true;
+    return out;
+  }
+  if (!request.snapshot.has_epoch ||
+      !std::isfinite(request.hal) || request.hal <= 0.0 ||
+      !std::isfinite(request.val) || request.val <= 0.0) {
+    out.failure_reason = ForwardRiskFailureReason::GNSS_ANCHOR_INCONSISTENT;
+    for (auto& point : out.points) {
+      point.failure_reason = out.failure_reason;
+    }
+    return out;
+  }
+
+  const std::size_t sat_count = request.snapshot.gnss_epoch.sats.size();
+  std::vector<bool> common_known(sat_count, true);
+  for (const auto& query : request.points) {
+    const VisibilityResult evidence =
+        gnss_.visibility_evidence(query.position_map, request.snapshot);
+    if (evidence.known_flags.size() != sat_count) {
+      std::fill(common_known.begin(), common_known.end(), false);
+      break;
+    }
+    for (std::size_t index = 0; index < sat_count; ++index) {
+      const SatObs& sat = request.snapshot.gnss_epoch.sats[index];
+      common_known[index] = common_known[index] &&
+          !sat.excluded &&
+          sat.elevation >= params_.gnss.visibility_params.min_elevation &&
+          evidence.known_flags[index];
+    }
+  }
+
+  IntegritySnapshot restricted_snapshot = request.snapshot;
+  std::uint64_t common_hash = 1469598103934665603ull;
+  for (std::size_t index = 0; index < sat_count; ++index) {
+    if (!common_known[index]) {
+      restricted_snapshot.gnss_epoch.sats[index].excluded = true;
+      continue;
+    }
+    const int sat_id = restricted_snapshot.gnss_epoch.sats[index].sat_id;
+    out.common_known_sat_ids.push_back(sat_id);
+    common_hash ^= static_cast<std::uint64_t>(
+        static_cast<std::uint32_t>(sat_id));
+    common_hash *= 1099511628211ull;
+  }
+  out.common_satellite_hash = common_hash;
+  out.common_known_satellite_count =
+      static_cast<int>(out.common_known_sat_ids.size());
+  if (out.common_known_satellite_count <
+      params_.gnss.geometry_params.min_sats) {
+    out.failure_reason = ForwardRiskFailureReason::GNSS_SKY_UNKNOWN;
+    for (auto& point : out.points) {
+      point.failure_reason = out.failure_reason;
+    }
+    return out;
+  }
+
+  std::vector<PredictorQueryInput> inputs;
+  inputs.reserve(request.points.size());
+  for (const auto& point : request.points) {
+    inputs.emplace_back(point.position_map, restricted_snapshot,
+                        point.query_time_s, point.horizon_s, "map",
+                        request.freshness_reference_time_s);
+  }
+  const auto predictions = queryBatch(inputs, diagnostics);
+  if (predictions.size() != request.points.size()) {
+    out.failure_reason = ForwardRiskFailureReason::FIM_SUPPORT_MISSING;
+    return out;
+  }
+
+  out.complete = true;
+  out.failure_reason = ForwardRiskFailureReason::NONE;
+  for (std::size_t index = 0; index < predictions.size(); ++index) {
+    auto& result = out.points[index];
+    result.prediction = predictions[index];
+    result.gnss_support_ray_length_m =
+        params_.gnss.visibility_params.hard_occlusion
+            ? params_.gnss.visibility_params.occ_range
+            : params_.gnss.visibility_params.occ_L;
+    result.gnss_hard_occlusion =
+        params_.gnss.visibility_params.hard_occlusion;
+    result.gnss_supported = result.prediction.gnss.valid &&
+        result.prediction.gnss.n_unknown_support == 0 &&
+        result.prediction.gnss.n_used >= params_.gnss.geometry_params.min_sats;
+    result.lidar_supported = result.prediction.lidar.valid;
+    result.fim_supported = result.prediction.fused.valid &&
+        std::isfinite(result.prediction.fused.pre_conservative_hpl) &&
+        std::isfinite(result.prediction.fused.pre_conservative_vpl);
+
+    const bool stale_prediction = result.prediction.fallback_reason.find(
+        "stale") != std::string::npos ||
+        result.prediction.gnss.fallback_reason.find("stale") !=
+            std::string::npos ||
+        result.prediction.lidar.fallback_reason.find("stale") !=
+            std::string::npos;
+    if (stale_prediction) {
+      result.failure_reason = ForwardRiskFailureReason::STALE;
+    } else if (!result.gnss_supported) {
+      result.failure_reason =
+          result.prediction.gnss.fallback_reason ==
+                  "gnss_anchor_inconsistent"
+              ? ForwardRiskFailureReason::GNSS_ANCHOR_INCONSISTENT
+              : (result.prediction.gnss.n_unknown_support > 0
+                     ? ForwardRiskFailureReason::GNSS_SKY_UNKNOWN
+                     : ForwardRiskFailureReason::GNSS_GEOMETRY_DEGENERATE);
+    } else if (!result.lidar_supported) {
+      result.failure_reason =
+          ForwardRiskFailureReason::LIDAR_SUPPORT_MISSING;
+    } else if (!result.fim_supported) {
+      result.failure_reason = ForwardRiskFailureReason::FIM_SUPPORT_MISSING;
+    } else {
+      result.safety_ratio = std::max(
+          result.prediction.fused.hpl / request.hal,
+          result.prediction.fused.vpl / request.val);
+      result.fim_ratio = std::max(
+          result.prediction.fused.pre_conservative_hpl / request.hal,
+          result.prediction.fused.pre_conservative_vpl / request.val);
+      if (!std::isfinite(result.safety_ratio) ||
+          !std::isfinite(result.fim_ratio)) {
+        result.failure_reason = ForwardRiskFailureReason::FIM_SUPPORT_MISSING;
+      } else if (result.safety_ratio >= 1.0) {
+        result.safety_state = ForwardRiskSafetyState::UNSAFE;
+        result.ranking_state = ForwardRiskRankingState::COMPARABLE;
+        result.failure_reason =
+            ForwardRiskFailureReason::SAFETY_LIMIT_EXCEEDED;
+      } else {
+        result.safety_state = ForwardRiskSafetyState::SAFE;
+        result.ranking_state = ForwardRiskRankingState::COMPARABLE;
+        result.failure_reason = ForwardRiskFailureReason::NONE;
+      }
+    }
+    if (result.ranking_state != ForwardRiskRankingState::COMPARABLE) {
+      result.safety_state = ForwardRiskSafetyState::UNKNOWN;
+      out.complete = false;
+    }
+    if (out.failure_reason == ForwardRiskFailureReason::NONE &&
+        result.failure_reason != ForwardRiskFailureReason::NONE) {
+      out.failure_reason = result.failure_reason;
+    }
+  }
+  return out;
 }
 
 }  // namespace iap

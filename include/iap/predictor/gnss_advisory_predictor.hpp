@@ -4,6 +4,8 @@
 #include <Eigen/Core>
 
 #include <functional>
+#include <memory>
+#include <mutex>
 
 #include <iap/map/local_occupancy.hpp>
 #include <iap/predictor/predictor_types.hpp>
@@ -22,11 +24,31 @@ class GnssAdvisoryPredictor {
 
   GnssAdvisoryResult query(const Eigen::Vector3d& query_position,
                            const IntegritySnapshot& snapshot) const;
+  // Current receiver measurement support is an anchor-only operation.  It is
+  // intentionally separate from query() so standalone advisory diagnostics
+  // remain raw and planning code cannot extend measured support spatially.
+  GnssAdvisoryResult query_receiver_measured(
+      const IntegritySnapshot& snapshot) const;
+  VisibilityResult visibility_evidence(
+      const Eigen::Vector3d& query_position,
+      const IntegritySnapshot& snapshot) const;
 
   const GnssAdvisoryPredictorParams& params() const { return params_; }
 
  private:
+  struct ReceiverAnchorCache;
+  struct VisibilityEvidenceCache;
   GnssAdvisoryResult fallback(const std::string& reason) const;
+  GnssAdvisoryResult query_unanchored(
+      const Eigen::Vector3d& query_position,
+      const IntegritySnapshot& snapshot,
+      bool force_measured_epoch_support) const;
+  GnssAdvisoryResult receiver_anchor_advisory(
+      const IntegritySnapshot& snapshot) const;
+  VisibilityResult cached_visibility_evidence(
+      const Eigen::Vector3d& query_position,
+      const GnssEpoch& epoch,
+      bool measured_epoch_support) const;
   GnssAdvisoryResult compute_advisory_fim(
       const Eigen::Vector3d& query_position,
       const GnssEpoch& epoch,
@@ -37,6 +59,8 @@ class GnssAdvisoryPredictor {
   GnssGeometryPlPredictor geometry_predictor_;
   VisibilityPredictor visibility_predictor_;
   VisibilityPredictor::ObservationPredicate observation_predicate_;
+  std::shared_ptr<ReceiverAnchorCache> receiver_anchor_cache_;
+  std::shared_ptr<VisibilityEvidenceCache> visibility_evidence_cache_;
 };
 
 }  // namespace iap

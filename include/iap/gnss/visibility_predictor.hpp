@@ -19,7 +19,11 @@ struct VisibilityResult {
   std::vector<double>  kappas;           ///< κ per satellite (occupancy_ratio along LOS)
   std::vector<double>  sigma_effs;       ///< predicted σ_eff per satellite (IAP-RQ-314)
   std::vector<bool>    unknown_flags;    ///< LOS support contains unobserved space
+  std::vector<bool>    known_flags;      ///< LOS support required by the model is observed
+  std::vector<bool>    blocked_flags;    ///< hard-occlusion evidence per satellite
   int                  n_unknown  = 0;   ///< satellites rejected for unknown LOS support
+  int                  n_known    = 0;   ///< satellites with complete online LOS support
+  int                  n_blocked  = 0;   ///< satellites rejected by hard occlusion
   double               mean_kappa = 0.0; ///< mean κ over visible satellites
 };
 
@@ -32,7 +36,9 @@ struct VisibilityResult {
  *   d = [cos(el)*cos(az), cos(el)*sin(az), sin(el)]   (ENU)
  * @endcode
  * Then check whether the ray from the waypoint in direction d is occluded
- * within `occ_range` metres using the LocalOccupancyGrid.
+ * within `occ_range` metres when hard occlusion is enabled.  The soft canopy
+ * model requires online observation only across the `occ_L` interval that
+ * actually contributes to κ.
  *
  * ### Canopy density κ (IAP-RQ-313)
  * κ = occupancy_ratio(origin, d, occ_L) — fraction of `n_kappa_steps`

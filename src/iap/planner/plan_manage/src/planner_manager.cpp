@@ -362,6 +362,19 @@ namespace ego_planner
       viz.observe_more_path = decision.observe_more_trajectory;
       viz.decision_horizon_m = decision.decision_horizon_m;
       viz.stopping_distance_m = decision.stopping_distance_m;
+      viz.first_failed_position = decision.first_failed_position;
+      viz.first_failed_hpl = decision.first_failed_risk.hpl;
+      viz.first_failed_vpl = decision.first_failed_risk.vpl;
+      viz.first_failed_hal = decision.first_failed_risk.hal;
+      viz.first_failed_val = decision.first_failed_risk.val;
+      viz.first_failed_query_time_s =
+          decision.first_failed_query_time_s;
+      viz.risk_snapshot_stamp_s = decision.snapshot_identity.risk_stamp_s;
+      viz.first_failed_floor_source_h =
+          decision.first_failed_risk.floor_source_h;
+      viz.first_failed_floor_source_v =
+          decision.first_failed_risk.floor_source_v;
+      viz.first_failed_reason = decision.first_failed_risk.reason;
       viz.risk_selected =
           decision.action == P4ForwardAction::RISK_SELECTED;
       viz.reason = std::string(p4ForwardActionName(decision.action)) + "/" +
@@ -456,6 +469,9 @@ namespace ego_planner
     node->declare_parameter("p4.forward.topology_resolution_m", 0.5);
     node->declare_parameter("p4.forward.nominal_query_speed_mps", 1.5);
     node->declare_parameter("p4.forward.compute_budget_ms", 150.0);
+    node->declare_parameter("p4.forward.min_creep_progress_m", 0.25);
+    node->declare_parameter("p4.forward.max_creep_progress_m", 0.5);
+    node->declare_parameter("p4.forward.max_observe_speed_mps", 0.5);
     node->declare_parameter("p4.forward.max_raw_paths", 8);
     node->declare_parameter("p4.forward.max_channels", 4);
 
@@ -528,6 +544,12 @@ namespace ego_planner
                         p4_forward_limits_.nominal_query_speed_mps);
     node->get_parameter("p4.forward.compute_budget_ms",
                         p4_forward_limits_.compute_budget_ms);
+    node->get_parameter("p4.forward.min_creep_progress_m",
+                        p4_forward_limits_.min_creep_progress_m);
+    node->get_parameter("p4.forward.max_creep_progress_m",
+                        p4_forward_limits_.max_creep_progress_m);
+    node->get_parameter("p4.forward.max_observe_speed_mps",
+                        p4_forward_limits_.max_observe_speed_mps);
     node->get_parameter("p4.forward.max_raw_paths",
                         p4_forward_limits_.max_raw_paths);
     node->get_parameter("p4.forward.max_channels",
@@ -630,7 +652,11 @@ namespace ego_planner
           now_s, planning ? planning->risk : nullptr);
       if (planning && planning->risk && planning->occupancy &&
           planning_risk_context_.snapshot.get() == planning->risk.get())
+      {
         planning_risk_context_.occupancy_snapshot = planning->occupancy;
+        planning_risk_context_.forward_risk_batch =
+            planning->forward_risk_batch;
+      }
       return planning_risk_context_;
     }
     return beginPlanningRiskContextWithSnapshot(
@@ -658,7 +684,11 @@ namespace ego_planner
       const auto planning = p0_risk_grid_runtime_->acquirePlanningSnapshot();
       if (planning && planning->risk && planning->occupancy &&
           planning->risk.get() == planning_risk_context_.snapshot.get())
+      {
         planning_risk_context_.occupancy_snapshot = planning->occupancy;
+        planning_risk_context_.forward_risk_batch =
+            planning->forward_risk_batch;
+      }
     }
     if (planning_risk_context_.snapshot)
     {
@@ -1163,10 +1193,135 @@ namespace ego_planner
             std::numeric_limits<double>::quiet_NaN();
         result.fim_ratio = result.valid ? fim.provider_c_pi :
             std::numeric_limits<double>::quiet_NaN();
-        result.reason = result.valid ? "ok" :
-            (!safety_ok ? safety.reason : fim.reason);
+        result.hpl = safety.hpl_pred;
+        result.vpl = safety.vpl_pred;
+        result.hal = hal;
+        result.val = val;
+        if (result.valid)
+        {
+          result.safety_state = result.safety_ratio < 1.0 ?
+              P4ForwardSafetyState::SAFE : P4ForwardSafetyState::UNSAFE;
+          result.ranking_state = P4ForwardRankingState::COMPARABLE;
+          result.reason = result.safety_state == P4ForwardSafetyState::SAFE ?
+              "ok" : "SAFETY_LIMIT_EXCEEDED";
+        }
+        else
+        {
+          result.safety_state = P4ForwardSafetyState::UNKNOWN;
+          result.ranking_state = P4ForwardRankingState::INCOMPLETE;
+          result.reason = !safety_ok ? safety.reason :
+              (!result.gnss_supported ? "GNSS_SKY_UNKNOWN" :
+              (!result.lidar_supported ? "LIDAR_SUPPORT_MISSING" :
+              (!result.fim_supported ? "FIM_SUPPORT_MISSING" : fim.reason)));
+        }
         return result;
       };
+
+    const auto forward_risk_batch = planning_risk_context_.forward_risk_batch;
+    const double forward_hal = snapshot->params().alert_limit_h_m;
+    const double forward_val = snapshot->params().alert_limit_v_m;
+    if (forward_risk_batch)
+    {
+      const std::string combined_identity =
+          request.snapshot_identity.canonical();
+      const double risk_stamp_s = request.snapshot_identity.risk_stamp_s;
+      request.risk_batch =
+          [forward_risk_batch, combined_identity, risk_stamp_s,
+           forward_hal, forward_val](
+              const std::vector<P4ForwardRiskQuery> &queries,
+              std::vector<P4ForwardRiskSample> *samples)
+          {
+            if (!samples)
+              return false;
+            iap::ForwardRiskBatchRequest batch;
+            batch.combined_snapshot_identity = combined_identity;
+            batch.freshness_reference_time_s = risk_stamp_s;
+            batch.hal = forward_hal;
+            batch.val = forward_val;
+            batch.points.reserve(queries.size());
+            for (const auto &query : queries)
+            {
+              batch.points.push_back(iap::ForwardRiskQueryPoint{
+                  query.position, query.query_time_s,
+                  std::max(0.0, query.query_time_s - risk_stamp_s),
+                  query.candidate_group_id});
+            }
+            const auto result = forward_risk_batch(batch);
+            if (result.combined_snapshot_identity != combined_identity ||
+                result.points.size() != queries.size())
+              return false;
+            samples->assign(queries.size(), P4ForwardRiskSample{});
+            for (std::size_t index = 0; index < result.points.size(); ++index)
+            {
+              const auto &source = result.points[index];
+              auto &target = (*samples)[index];
+              target.valid = source.safety_state !=
+                  iap::ForwardRiskSafetyState::UNKNOWN &&
+                  source.ranking_state ==
+                  iap::ForwardRiskRankingState::COMPARABLE;
+              target.stale = source.failure_reason ==
+                  iap::ForwardRiskFailureReason::STALE;
+              target.gnss_supported = source.gnss_supported;
+              target.lidar_supported = source.lidar_supported;
+              target.fim_supported = source.fim_supported;
+              target.safety_state = source.safety_state ==
+                  iap::ForwardRiskSafetyState::SAFE ?
+                  P4ForwardSafetyState::SAFE :
+                  (source.safety_state == iap::ForwardRiskSafetyState::UNSAFE ?
+                  P4ForwardSafetyState::UNSAFE :
+                  P4ForwardSafetyState::UNKNOWN);
+              target.ranking_state = source.ranking_state ==
+                  iap::ForwardRiskRankingState::COMPARABLE ?
+                  P4ForwardRankingState::COMPARABLE :
+                  P4ForwardRankingState::INCOMPLETE;
+              target.safety_ratio = source.safety_ratio;
+              target.fim_ratio = source.fim_ratio;
+              target.hpl = source.prediction.fused.hpl;
+              target.vpl = source.prediction.fused.vpl;
+              target.hal = forward_hal;
+              target.val = forward_val;
+              target.gnss_anchor_hpl = source.prediction.gnss.anchor_hpl;
+              target.gnss_anchor_vpl = source.prediction.gnss.anchor_vpl;
+              target.gnss_raw_hpl = source.prediction.gnss.raw_hpl;
+              target.gnss_raw_vpl = source.prediction.gnss.raw_vpl;
+              target.gnss_receiver_raw_hpl =
+                  source.prediction.gnss.receiver_raw_hpl;
+              target.gnss_receiver_raw_vpl =
+                  source.prediction.gnss.receiver_raw_vpl;
+              target.gnss_spatial_delta_h =
+                  source.prediction.gnss.spatial_delta_h;
+              target.gnss_spatial_delta_v =
+                  source.prediction.gnss.spatial_delta_v;
+              target.gnss_temporal_growth_h =
+                  source.prediction.gnss.temporal_growth_h;
+              target.gnss_temporal_growth_v =
+                  source.prediction.gnss.temporal_growth_v;
+              target.gnss_anchor_epoch_delta_s =
+                  source.prediction.gnss.anchor_epoch_delta_s;
+              target.gnss_support_ray_length_m =
+                  source.gnss_support_ray_length_m;
+              target.gnss_hard_occlusion = source.gnss_hard_occlusion;
+              target.gnss_visible_satellite_count =
+                  source.prediction.gnss.n_visible;
+              target.gnss_blocked_satellite_count =
+                  source.prediction.gnss.n_blocked;
+              target.gnss_unknown_satellite_count =
+                  source.prediction.gnss.n_unknown_support;
+              target.gnss_used_satellite_count =
+                  source.prediction.gnss.n_used;
+              target.common_known_satellite_count =
+                  result.common_known_satellite_count;
+              target.common_satellite_hash = result.common_satellite_hash;
+              target.floor_source_h =
+                  source.prediction.fused.floor_source_h;
+              target.floor_source_v =
+                  source.prediction.fused.floor_source_v;
+              target.reason =
+                  iap::forwardRiskFailureReasonName(source.failure_reason);
+            }
+            return true;
+          };
+    }
 
     if (snapshot->sourceIdentity().occupancy_generation !=
         occupancy->generation ||
@@ -1430,7 +1585,26 @@ namespace ego_planner
              "request_x,request_y,request_z,anchor_x,anchor_y,anchor_z,"
              "selected_candidate_id,selected_guide_hash,candidate_count,"
              "stopping_distance_m,decision_horizon_m,certified_free_distance_m,"
-             "speed_cap_mps,compute_latency_ms,trajectory_id,trajectory_start_ns,"
+             "speed_cap_mps,first_failed_x,first_failed_y,first_failed_z,"
+             "first_failed_query_time_s,first_failed_hpl,first_failed_vpl,"
+             "first_failed_hal,first_failed_val,first_failed_safety_ratio,"
+             "first_failed_gnss_supported,first_failed_lidar_supported,"
+             "first_failed_fim_supported,first_failed_common_sat_count,"
+             "first_failed_common_sat_hash,first_failed_gnss_anchor_hpl,"
+             "first_failed_gnss_anchor_vpl,first_failed_gnss_raw_hpl,"
+             "first_failed_gnss_raw_vpl,first_failed_gnss_receiver_raw_hpl,"
+             "first_failed_gnss_receiver_raw_vpl,"
+             "first_failed_gnss_spatial_delta_h,"
+             "first_failed_gnss_spatial_delta_v,"
+             "first_failed_gnss_temporal_growth_h,"
+             "first_failed_gnss_temporal_growth_v,"
+             "first_failed_gnss_anchor_epoch_delta_s,"
+             "first_failed_gnss_visible_count,first_failed_gnss_blocked_count,"
+             "first_failed_gnss_unknown_count,first_failed_gnss_used_count,"
+             "first_failed_gnss_support_ray_length_m,"
+             "first_failed_gnss_hard_occlusion,first_failed_floor_source_h,"
+             "first_failed_floor_source_v,first_failed_reason,"
+             "compute_latency_ms,trajectory_id,trajectory_start_ns,"
              "control_points_hash,reason\n";
     std::string selected_hash;
     for (const auto &candidate : decision.candidates)
@@ -1464,6 +1638,40 @@ namespace ego_planner
         << decision.candidates.size() << ',' << decision.stopping_distance_m
         << ',' << decision.decision_horizon_m << ','
         << decision.certified_free_distance_m << ',' << decision.speed_cap_mps
+        << ',' << decision.first_failed_position.x()
+        << ',' << decision.first_failed_position.y()
+        << ',' << decision.first_failed_position.z()
+        << ',' << decision.first_failed_query_time_s
+        << ',' << decision.first_failed_risk.hpl
+        << ',' << decision.first_failed_risk.vpl
+        << ',' << decision.first_failed_risk.hal
+        << ',' << decision.first_failed_risk.val
+        << ',' << decision.first_failed_risk.safety_ratio
+        << ',' << (decision.first_failed_risk.gnss_supported ? 1 : 0)
+        << ',' << (decision.first_failed_risk.lidar_supported ? 1 : 0)
+        << ',' << (decision.first_failed_risk.fim_supported ? 1 : 0)
+        << ',' << decision.first_failed_risk.common_known_satellite_count
+        << ',' << decision.first_failed_risk.common_satellite_hash
+        << ',' << decision.first_failed_risk.gnss_anchor_hpl
+        << ',' << decision.first_failed_risk.gnss_anchor_vpl
+        << ',' << decision.first_failed_risk.gnss_raw_hpl
+        << ',' << decision.first_failed_risk.gnss_raw_vpl
+        << ',' << decision.first_failed_risk.gnss_receiver_raw_hpl
+        << ',' << decision.first_failed_risk.gnss_receiver_raw_vpl
+        << ',' << decision.first_failed_risk.gnss_spatial_delta_h
+        << ',' << decision.first_failed_risk.gnss_spatial_delta_v
+        << ',' << decision.first_failed_risk.gnss_temporal_growth_h
+        << ',' << decision.first_failed_risk.gnss_temporal_growth_v
+        << ',' << decision.first_failed_risk.gnss_anchor_epoch_delta_s
+        << ',' << decision.first_failed_risk.gnss_visible_satellite_count
+        << ',' << decision.first_failed_risk.gnss_blocked_satellite_count
+        << ',' << decision.first_failed_risk.gnss_unknown_satellite_count
+        << ',' << decision.first_failed_risk.gnss_used_satellite_count
+        << ',' << decision.first_failed_risk.gnss_support_ray_length_m
+        << ',' << (decision.first_failed_risk.gnss_hard_occlusion ? 1 : 0)
+        << ',' << decision.first_failed_risk.floor_source_h
+        << ',' << decision.first_failed_risk.floor_source_v
+        << ',' << decision.first_failed_risk.reason
         << ',' << decision.compute_latency_ms << ',' << local_data_.traj_id_
         << ',' << local_data_.start_time_.nanoseconds() << ',' << control_hash
         << ',' << decision.reason << '\n';

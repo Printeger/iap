@@ -19,6 +19,7 @@
 #include <traj_utils/plan_container.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <traj_utils/planning_visualization.h>
+#include <iap/predictor/predictor_types.hpp>
 
 namespace ego_planner
 {
@@ -48,6 +49,8 @@ namespace ego_planner
     {
       std::shared_ptr<const iap::RiskGridSnapshot> snapshot;
       std::shared_ptr<const P0OccupancyEpoch> occupancy_snapshot;
+      std::function<iap::ForwardRiskBatchResult(
+          const iap::ForwardRiskBatchRequest&)> forward_risk_batch;
       double query_base_time_s = 0.0;
       double planning_start_s = 0.0;
       double snapshot_acquired_s = 0.0;

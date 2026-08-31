@@ -7,6 +7,7 @@
 #include <chrono>
 #include <limits>
 #include <memory>
+#include <set>
 #include <sstream>
 #include <thread>
 
@@ -16,8 +17,11 @@ namespace
 using ego_planner::P4ForwardAction;
 using ego_planner::P4ForwardOccupancyState;
 using ego_planner::P4ForwardRequest;
+using ego_planner::P4ForwardRankingState;
+using ego_planner::P4ForwardRiskQuery;
 using ego_planner::P4ForwardRiskSample;
 using ego_planner::P4ForwardRoutePlanner;
+using ego_planner::P4ForwardSafetyState;
 using ego_planner::P4ForwardTriggerReason;
 
 P4ForwardRequest straightRequest()
@@ -136,6 +140,12 @@ TEST(P4ForwardRoute, MissingRiskSupportObservesMoreWithoutCrossingUnknown)
   for (const auto & point : decision.observe_more_trajectory) {
     EXPECT_LE(point.x(), 2.0 + 1.0e-9);
   }
+  if (!decision.observe_more_trajectory.empty()) {
+    EXPECT_LE((decision.observe_more_trajectory.back() - request.position).norm(),
+      request.limits.max_creep_progress_m + 1.0e-9);
+  }
+  EXPECT_LE(decision.speed_cap_mps,
+    request.limits.max_observe_speed_mps + 1.0e-9);
 }
 
 TEST(P4ForwardRoute, MissingIndividualSourceSupportObservesMore)
@@ -329,6 +339,106 @@ TEST(P4ForwardRoute, OccupiedSeparatorCreatesTwoRiskRankedChannels)
   EXPECT_LT(selected_mid.y(), 0.0);
 }
 
+TEST(P4ForwardRoute, RiskBatchComparesAllChannelsWithOneCertificateCall)
+{
+  auto request = straightRequest();
+  request.occupancy = [](const Eigen::Vector3d & point) {
+      if (point.x() >= 2.0 && point.x() <= 4.0 &&
+        std::abs(point.y()) <= 0.6)
+      {
+        return P4ForwardOccupancyState::OCCUPIED;
+      }
+      if (std::abs(point.y()) > 2.5 || point.z() < 0.5 || point.z() > 1.5) {
+        return P4ForwardOccupancyState::OCCUPIED;
+      }
+      return P4ForwardOccupancyState::OBSERVED_FREE;
+    };
+  int batch_calls = 0;
+  std::size_t max_group_count = 0;
+  request.risk_batch = [&batch_calls, &max_group_count](
+    const std::vector<ego_planner::P4ForwardRiskQuery> & queries,
+    std::vector<P4ForwardRiskSample> *samples) {
+      ++batch_calls;
+      std::set<uint64_t> groups;
+      samples->clear();
+      samples->reserve(queries.size());
+      for (const auto & query : queries) {
+        groups.insert(query.candidate_group_id);
+        P4ForwardRiskSample sample;
+        sample.valid = true;
+        sample.stale = false;
+        sample.gnss_supported = true;
+        sample.lidar_supported = true;
+        sample.fim_supported = true;
+        sample.safety_state = ego_planner::P4ForwardSafetyState::SAFE;
+        sample.ranking_state = ego_planner::P4ForwardRankingState::COMPARABLE;
+        sample.safety_ratio = 0.5;
+        sample.fim_ratio = query.position.y() < 0.0 ? 0.2 : 0.6;
+        sample.common_known_satellite_count = 6;
+        sample.common_satellite_hash = 12345;
+        sample.reason = "ok";
+        samples->push_back(sample);
+      }
+      max_group_count = std::max(max_group_count, groups.size());
+      return true;
+    };
+
+  const auto decision = P4ForwardRoutePlanner().decide(request);
+
+  ASSERT_EQ(decision.action, P4ForwardAction::RISK_SELECTED)
+    << decision.reason;
+  EXPECT_EQ(batch_calls, 1);
+  EXPECT_GE(max_group_count, 2u);
+}
+
+TEST(P4ForwardRoute, RiskBatchObserveMoreNeverCrossesUnknownSupport)
+{
+  auto request = straightRequest();
+  request.risk_batch = [](const std::vector<P4ForwardRiskQuery> & queries,
+    std::vector<P4ForwardRiskSample> *samples) {
+      samples->clear();
+      for (const auto & query : queries) {
+        P4ForwardRiskSample sample;
+        const bool supported = query.position.x() <= 2.0 + 1.0e-9;
+        sample.valid = supported;
+        sample.stale = false;
+        sample.gnss_supported = supported;
+        sample.lidar_supported = supported;
+        sample.fim_supported = supported;
+        sample.safety_state = supported ? P4ForwardSafetyState::SAFE :
+          P4ForwardSafetyState::UNKNOWN;
+        sample.ranking_state = supported ? P4ForwardRankingState::COMPARABLE :
+          P4ForwardRankingState::INCOMPLETE;
+        sample.safety_ratio = supported ? 0.4 : NAN;
+        sample.fim_ratio = supported ? 0.3 : NAN;
+        sample.hpl = supported ? 8.0 : NAN;
+        sample.vpl = supported ? 16.0 : NAN;
+        sample.hal = 20.0;
+        sample.val = 40.0;
+        sample.reason = supported ? "NONE" : "GNSS_SKY_UNKNOWN";
+        samples->push_back(sample);
+      }
+      return true;
+    };
+
+  const auto decision = P4ForwardRoutePlanner().decide(request);
+
+  ASSERT_EQ(decision.action, P4ForwardAction::OBSERVE_MORE)
+    << decision.reason;
+  for (const auto & point : decision.observe_more_trajectory) {
+    EXPECT_LE(point.x(), 2.0 + 1.0e-9);
+  }
+  if (!decision.observe_more_trajectory.empty()) {
+    EXPECT_GE((decision.observe_more_trajectory.back() - request.position).norm(),
+      request.limits.min_creep_progress_m - 1.0e-9);
+    EXPECT_LE((decision.observe_more_trajectory.back() - request.position).norm(),
+      request.limits.max_creep_progress_m + 1.0e-9);
+  }
+  EXPECT_LE(decision.speed_cap_mps,
+    request.limits.max_observe_speed_mps + 1.0e-9);
+  EXPECT_EQ(decision.first_failed_risk.reason, "GNSS_SKY_UNKNOWN");
+}
+
 TEST(P4ForwardRoute, UnknownSeparatorCannotBeMergedAsFreeSpace)
 {
   auto request = straightRequest();
@@ -438,7 +548,7 @@ TEST(P4ForwardRoute, AsyncResultRetainsItsOwnLiveGenerationToken)
   first.live_occupancy_generation_at_submit = 17u;
   const auto first_occupancy = first.occupancy;
   first.occupancy = [first_started, release_first, first_occupancy](
-      const Eigen::Vector3d &point) {
+    const Eigen::Vector3d & point) {
       first_started->store(true);
       while (!release_first->load()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -459,7 +569,7 @@ TEST(P4ForwardRoute, AsyncResultRetainsItsOwnLiveGenerationToken)
   const auto second_occupancy = first_occupancy;
   replacement.occupancy =
     [second_started, release_second, second_occupancy](
-      const Eigen::Vector3d &point) {
+    const Eigen::Vector3d & point) {
       second_started->store(true);
       while (!release_second->load()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));

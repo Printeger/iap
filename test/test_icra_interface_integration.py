@@ -126,11 +126,14 @@ class TestStageContracts(unittest.TestCase):
             return ("- Alpha:" + before.rsplit("- Alpha:", 1)[1] +
                     f"Name: {name}" + after.split("- Alpha:", 1)[0])
 
+        def display_alpha(block):
+            return float(block.splitlines()[0].split(":", 1)[1].strip())
+
         environment = display_block("Global Obstacle Map")
         self.assertIn("Color: 190; 195; 200", environment)
         self.assertIn("Color Transformer: FlatColor", environment)
         self.assertIn("Style: Flat Squares", environment)
-        self.assertTrue(environment.startswith("- Alpha: 0.55"))
+        self.assertAlmostEqual(display_alpha(environment), 0.55, places=6)
 
         predicted_pl = display_block("Predicted PL Cloud")
         self.assertIn("Reliability Policy: Best Effort", predicted_pl)
@@ -138,7 +141,7 @@ class TestStageContracts(unittest.TestCase):
         self.assertIn("Style: Spheres", predicted_pl)
         self.assertIn("Size (Pixels): 6", predicted_pl)
         self.assertIn("Size (m): 0.28", predicted_pl)
-        self.assertTrue(predicted_pl.startswith("- Alpha: 0.45"))
+        self.assertAlmostEqual(display_alpha(predicted_pl), 0.45, places=6)
 
     def test_stage_switches_keep_forbidden_layers_off(self):
         for stage in MODULE.STAGE_ORDER:

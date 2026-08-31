@@ -1420,6 +1420,12 @@ void P0RiskGridRuntime::refreshTimerCallback() {
       captured_lidar_map_points;
   std::shared_ptr<const std::vector<iap::LidarFimPrimitive>>
       captured_lidar_fim_primitives;
+  std::shared_ptr<iap::PredictorModule> forward_risk_module;
+  std::shared_ptr<const iap::LocalOccupancyGrid>
+      forward_risk_occupancy_owner;
+  double forward_gnss_support_ray_length_m =
+      std::numeric_limits<double>::quiet_NaN();
+  bool forward_gnss_hard_occlusion = false;
   uint64_t captured_lidar_generation = 0;
   double captured_lidar_stamp =
       std::numeric_limits<double>::quiet_NaN();
@@ -1435,6 +1441,11 @@ void P0RiskGridRuntime::refreshTimerCallback() {
     predictor_params.freshness.max_snapshot_age_s =
         config_.grid.stale_timeout_s;
     predictor_params.source_mode = config_.predictor_source_mode;
+    forward_gnss_hard_occlusion =
+        predictor_params.gnss.visibility_params.hard_occlusion;
+    forward_gnss_support_ray_length_m = forward_gnss_hard_occlusion
+        ? predictor_params.gnss.visibility_params.occ_range
+        : predictor_params.gnss.visibility_params.occ_L;
     predictor_params.gnss_epoch_policy =
         config_.predictor_gnss_epoch_policy;
     predictor_params.gnss.measured_epoch_support_radius_m =
@@ -1561,6 +1572,22 @@ void P0RiskGridRuntime::refreshTimerCallback() {
     }
     module.set_lidar_map_points(lidar_map_points);
     module.set_lidar_fim_primitives(lidar_fim_primitives);
+    forward_risk_module =
+        std::make_shared<iap::PredictorModule>(predictor_params);
+    forward_risk_occupancy_owner = occupancy_epoch->los_owner;
+    forward_risk_module->set_local_occupancy(
+        forward_risk_occupancy_owner.get());
+    if (config_.online_mapping_mode) {
+      const auto observed_support_query = occupancy_epoch->diagnostic_query;
+      forward_risk_module->set_observation_predicate(
+          [observed_support_query](const Eigen::Vector3d& position) {
+            const auto diagnostic = observed_support_query(position);
+            return diagnostic.available && diagnostic.observed &&
+                   diagnostic.state != iap::RiskOccupancyState::UNKNOWN;
+          });
+    }
+    forward_risk_module->set_lidar_map_points(lidar_map_points);
+    forward_risk_module->set_lidar_fim_primitives(lidar_fim_primitives);
     iap::RollingSpatialWindowGeometry rolling_geometry;
     rolling_geometry.frame_id = config_.grid.frame_id;
     rolling_geometry.lattice_anchor_w = config_.grid.lattice_anchor_w;
@@ -1783,9 +1810,27 @@ void P0RiskGridRuntime::refreshTimerCallback() {
     if (occupancy_identity_matches) {
       auto planning = std::make_shared<P0PlanningSnapshot>();
       planning->risk = viz_snapshot;
+      planning->integrity_anchor = snapshot;
+      planning->gnss_hard_occlusion = forward_gnss_hard_occlusion;
+      planning->gnss_support_ray_length_m =
+          forward_gnss_support_ray_length_m;
       if (occupancy_epoch) {
         planning->occupancy =
             std::make_shared<P0OccupancyEpoch>(*occupancy_epoch);
+      }
+      if (forward_risk_module && forward_risk_occupancy_owner) {
+        planning->forward_risk_batch =
+            [forward_risk_module, forward_risk_occupancy_owner, snapshot,
+             hal = config_.predictor_hal_m,
+             val = config_.predictor_val_m](
+                const iap::ForwardRiskBatchRequest& input) {
+              (void)forward_risk_occupancy_owner;
+              iap::ForwardRiskBatchRequest request = input;
+              request.snapshot = snapshot;
+              request.hal = hal;
+              request.val = val;
+              return forward_risk_module->queryForwardRiskBatch(request);
+            };
       }
       std::lock_guard<std::mutex> lock(planning_snapshot_mutex_);
       planning_snapshot_ = std::move(planning);
@@ -1933,6 +1978,12 @@ void P0RiskGridRuntime::publishHealth(const iap::RiskGridHealth& health,
       ? health_snapshot->sourceIdentity() : iap::RiskGridSourceIdentity{};
   const std::string snapshot_config_hash = health_snapshot
       ? iap::canonicalRiskGridConfigHash(health_snapshot->params()) : "";
+  const auto planning_snapshot = acquirePlanningSnapshot();
+  const bool anchor_matches_health = planning_snapshot && health_snapshot &&
+      planning_snapshot->risk.get() == health_snapshot.get();
+  const auto& integrity_anchor = anchor_matches_health
+      ? planning_snapshot->integrity_anchor.current
+      : iap::CurrentIntegrityState{};
   std::ostringstream oss;
   oss << "{"
       << "\"refresh_attempt_id\":" << evidence.refresh_attempt_id << ","
@@ -1988,6 +2039,31 @@ void P0RiskGridRuntime::publishHealth(const iap::RiskGridHealth& health,
       << jsonNumber(grid_params ? grid_params->alert_limit_v_m
                                 : std::numeric_limits<double>::quiet_NaN())
       << ","
+      << "\"gnss_anchor_available\":"
+      << (anchor_matches_health && integrity_anchor.valid &&
+                  integrity_anchor.gnss_valid
+              ? "true" : "false") << ","
+      << "\"gnss_anchor_hpl_m\":"
+      << jsonNumber(anchor_matches_health ? integrity_anchor.hpl
+                                          : std::numeric_limits<double>::quiet_NaN())
+      << ",\"gnss_anchor_vpl_m\":"
+      << jsonNumber(anchor_matches_health ? integrity_anchor.vpl
+                                          : std::numeric_limits<double>::quiet_NaN())
+      << ",\"gnss_anchor_stamp_s\":"
+      << jsonNumber(anchor_matches_health ? integrity_anchor.stamp
+                                          : std::numeric_limits<double>::quiet_NaN())
+      << ",\"gnss_anchor_epoch_delta_s\":"
+      << jsonNumber(anchor_matches_health
+            ? std::abs(integrity_anchor.stamp -
+                       planning_snapshot->integrity_anchor.gnss_epoch.stamp)
+            : std::numeric_limits<double>::quiet_NaN())
+      << ",\"gnss_support_ray_length_m\":"
+      << jsonNumber(anchor_matches_health
+            ? planning_snapshot->gnss_support_ray_length_m
+            : std::numeric_limits<double>::quiet_NaN())
+      << ",\"gnss_hard_occlusion\":"
+      << (anchor_matches_health && planning_snapshot->gnss_hard_occlusion
+              ? "true" : "false") << ","
       << "\"source_occupancy_generation\":"
       << source_identity.occupancy_generation << ","
       << "\"source_occupancy_stamp_s\":"

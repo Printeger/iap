@@ -702,10 +702,101 @@ P4ForwardRiskSample querySweptRisk(
         "risk_support_incomplete" : sample.reason;
       continue;
     }
+    aggregate.safety_state = sample.safety_state ==
+      P4ForwardSafetyState::UNKNOWN ?
+      (sample.safety_ratio < 1.0 ? P4ForwardSafetyState::SAFE :
+      P4ForwardSafetyState::UNSAFE) : sample.safety_state;
+    aggregate.ranking_state = sample.ranking_state ==
+      P4ForwardRankingState::INCOMPLETE ?
+      P4ForwardRankingState::COMPARABLE : sample.ranking_state;
     aggregate.safety_ratio = std::max(
       aggregate.safety_ratio, sample.safety_ratio);
     aggregate.fim_ratio = std::max(
       aggregate.fim_ratio, sample.fim_ratio);
+  }
+  return aggregate;
+}
+
+P4ForwardRiskSample aggregateRiskSamples(
+  const std::vector<P4ForwardRiskSample> & samples,
+  const std::size_t begin, const std::size_t end)
+{
+  P4ForwardRiskSample aggregate;
+  std::optional<P4ForwardRiskSample> first_incomplete;
+  std::optional<P4ForwardRiskSample> worst_safety_sample;
+  aggregate.valid = begin < end;
+  aggregate.stale = false;
+  aggregate.gnss_supported = begin < end;
+  aggregate.lidar_supported = begin < end;
+  aggregate.fim_supported = begin < end;
+  aggregate.safety_state = P4ForwardSafetyState::SAFE;
+  aggregate.ranking_state = P4ForwardRankingState::COMPARABLE;
+  aggregate.safety_ratio = 0.0;
+  aggregate.fim_ratio = 0.0;
+  aggregate.reason = begin < end ? "ok" : "risk_support_incomplete";
+  for (std::size_t index = begin; index < end; ++index) {
+    const auto & sample = samples[index];
+    aggregate.valid = aggregate.valid && sample.valid;
+    aggregate.stale = aggregate.stale || sample.stale;
+    aggregate.gnss_supported =
+      aggregate.gnss_supported && sample.gnss_supported;
+    aggregate.lidar_supported =
+      aggregate.lidar_supported && sample.lidar_supported;
+    aggregate.fim_supported =
+      aggregate.fim_supported && sample.fim_supported;
+    if (!sample.valid || sample.stale || !sample.gnss_supported ||
+      !sample.lidar_supported || !sample.fim_supported ||
+      sample.safety_state == P4ForwardSafetyState::UNKNOWN ||
+      sample.ranking_state == P4ForwardRankingState::INCOMPLETE ||
+      !std::isfinite(sample.safety_ratio) ||
+      !std::isfinite(sample.fim_ratio))
+    {
+      aggregate.valid = false;
+      aggregate.safety_state = P4ForwardSafetyState::UNKNOWN;
+      aggregate.ranking_state = P4ForwardRankingState::INCOMPLETE;
+      if (aggregate.reason == "ok") {
+        aggregate.reason = sample.reason.empty() ?
+          "risk_support_incomplete" : sample.reason;
+      }
+      if (!first_incomplete) {
+        first_incomplete = sample;
+        first_incomplete->valid = false;
+        first_incomplete->safety_state = P4ForwardSafetyState::UNKNOWN;
+        first_incomplete->ranking_state = P4ForwardRankingState::INCOMPLETE;
+      }
+      continue;
+    }
+    if (sample.safety_state == P4ForwardSafetyState::UNSAFE ||
+      sample.safety_ratio >= 1.0)
+    {
+      aggregate.safety_state = P4ForwardSafetyState::UNSAFE;
+    }
+    if (sample.safety_ratio >= aggregate.safety_ratio) {
+      aggregate.safety_ratio = sample.safety_ratio;
+      worst_safety_sample = sample;
+    }
+    aggregate.fim_ratio = std::max(
+      aggregate.fim_ratio, sample.fim_ratio);
+    aggregate.common_known_satellite_count =
+      sample.common_known_satellite_count;
+    aggregate.common_satellite_hash = sample.common_satellite_hash;
+  }
+  if (first_incomplete) {
+    return *first_incomplete;
+  }
+  if (worst_safety_sample) {
+    auto result = *worst_safety_sample;
+    result.valid = aggregate.valid;
+    result.stale = aggregate.stale;
+    result.gnss_supported = aggregate.gnss_supported;
+    result.lidar_supported = aggregate.lidar_supported;
+    result.fim_supported = aggregate.fim_supported;
+    result.safety_state = aggregate.safety_state;
+    result.ranking_state = aggregate.ranking_state;
+    result.safety_ratio = aggregate.safety_ratio;
+    result.fim_ratio = aggregate.fim_ratio;
+    result.reason = aggregate.reason;
+    return result;
   }
   return aggregate;
 }
@@ -763,9 +854,114 @@ void evaluateRisk(
   }
 }
 
+void evaluateCandidateRiskSet(
+  const P4ForwardRequest & request, const ComputeBudget * budget,
+  std::vector<P4ForwardCandidate> * candidates)
+{
+  if (!candidates || candidates->empty()) {
+    return;
+  }
+  if (!request.risk_batch) {
+    for (auto & candidate : *candidates) {
+      evaluateRisk(request, budget, &candidate);
+    }
+    return;
+  }
+  struct Group
+  {
+    std::size_t candidate = 0;
+    std::size_t begin = 0;
+    std::size_t end = 0;
+    double segment_m = 0.0;
+  };
+  std::vector<P4ForwardRiskQuery> queries;
+  std::vector<Group> groups;
+  for (std::size_t candidate_index = 0;
+    candidate_index < candidates->size(); ++candidate_index)
+  {
+    auto & candidate = (*candidates)[candidate_index];
+    candidate.risk_supported = true;
+    candidate.safety_gate_passed = true;
+    candidate.fim_max_ratio = 0.0;
+    candidate.fim_integral = 0.0;
+    candidate.safety_max_ratio = 0.0;
+    const auto path_samples = resample(
+      candidate.path, request.limits.occupancy_resolution_m);
+    double distance = 0.0;
+    for (std::size_t sample_index = 0;
+      sample_index < path_samples.size(); ++sample_index)
+    {
+      const double segment = sample_index == 0 ? 0.0 :
+        (path_samples[sample_index] - path_samples[sample_index - 1]).norm();
+      distance += segment;
+      Group group;
+      group.candidate = candidate_index;
+      group.begin = queries.size();
+      group.segment_m = segment;
+      const double query_time_s = request.query_time_s +
+        distance / request.limits.nominal_query_speed_mps;
+      for (const auto & center : sweptVoxelCenters(
+          request, path_samples[sample_index],
+          request.limits.topology_resolution_m))
+      {
+        queries.push_back(P4ForwardRiskQuery{
+          center, query_time_s, candidate.candidate_id});
+      }
+      group.end = queries.size();
+      groups.push_back(group);
+    }
+  }
+  std::vector<P4ForwardRiskSample> samples;
+  if ((budget && budget->expired()) ||
+    !request.risk_batch(queries, &samples) || samples.size() != queries.size())
+  {
+    for (auto & candidate : *candidates) {
+      candidate.risk_supported = false;
+      candidate.safety_gate_passed = false;
+      candidate.reason = budget && budget->expired() ?
+        "compute_budget_exceeded" : "risk_batch_failed";
+    }
+    return;
+  }
+  for (const auto & group : groups) {
+    auto & candidate = (*candidates)[group.candidate];
+    const auto risk = aggregateRiskSamples(samples, group.begin, group.end);
+    if (!risk.valid || risk.stale ||
+      risk.safety_state == P4ForwardSafetyState::UNKNOWN ||
+      risk.ranking_state == P4ForwardRankingState::INCOMPLETE)
+    {
+      candidate.risk_supported = false;
+      candidate.safety_gate_passed = false;
+      if (candidate.reason == "not_evaluated" || candidate.reason == "ok") {
+        candidate.reason = risk.reason.empty() ?
+          "risk_support_incomplete" : risk.reason;
+      }
+      continue;
+    }
+    candidate.safety_max_ratio = std::max(
+      candidate.safety_max_ratio, risk.safety_ratio);
+    candidate.fim_max_ratio = std::max(
+      candidate.fim_max_ratio, risk.fim_ratio);
+    candidate.fim_integral += risk.fim_ratio * group.segment_m;
+    if (risk.safety_state == P4ForwardSafetyState::UNSAFE ||
+      risk.safety_ratio >= 1.0)
+    {
+      candidate.safety_gate_passed = false;
+      candidate.reason = "safety_ratio_not_below_one";
+    }
+  }
+  for (auto & candidate : *candidates) {
+    if (candidate.risk_supported && candidate.safety_gate_passed) {
+      candidate.reason = "ok";
+    }
+  }
+}
+
 std::vector<Eigen::Vector3d> certifiedNominalPrefix(
   const P4ForwardRequest & request, const ComputeBudget * budget,
-  double * distance)
+  double * distance, P4ForwardRiskSample * first_failed,
+  Eigen::Vector3d * first_failed_position,
+  double * first_failed_query_time_s)
 {
   *distance = 0.0;
   const auto nominal = resample(
@@ -781,12 +977,46 @@ std::vector<Eigen::Vector3d> certifiedNominalPrefix(
       (prefix.empty() ? 0.0 : (point - prefix.back()).norm());
     const double query_time_s = request.query_time_s +
       point_distance / request.limits.nominal_query_speed_mps;
-    const auto sample = querySweptRisk(
-      request, point, query_time_s, budget);
-    if (!graph.sweptFree(point) ||
+    P4ForwardRiskSample sample;
+    if (request.risk_batch) {
+      std::vector<P4ForwardRiskQuery> queries;
+      for (const auto & center : sweptVoxelCenters(
+          request, point, request.limits.topology_resolution_m))
+      {
+        queries.push_back(P4ForwardRiskQuery{center, query_time_s, 0});
+      }
+      std::vector<P4ForwardRiskSample> samples;
+      if (!request.risk_batch(queries, &samples) ||
+        samples.size() != queries.size())
+      {
+        break;
+      }
+      sample = aggregateRiskSamples(samples, 0, samples.size());
+    } else {
+      sample = querySweptRisk(request, point, query_time_s, budget);
+    }
+    const bool occupancy_free = graph.sweptFree(point);
+    if (!occupancy_free ||
       !sample.valid || sample.stale ||
+      sample.safety_state == P4ForwardSafetyState::UNKNOWN ||
+      sample.ranking_state == P4ForwardRankingState::INCOMPLETE ||
       !std::isfinite(sample.safety_ratio) || sample.safety_ratio >= 1.0)
     {
+      if (first_failed) {
+        *first_failed = sample;
+        if (!occupancy_free) {
+          first_failed->valid = false;
+          first_failed->safety_state = P4ForwardSafetyState::UNKNOWN;
+          first_failed->ranking_state = P4ForwardRankingState::INCOMPLETE;
+          first_failed->reason = "OCCUPANCY_UNKNOWN";
+        }
+      }
+      if (first_failed_position) {
+        *first_failed_position = point;
+      }
+      if (first_failed_query_time_s) {
+        *first_failed_query_time_s = query_time_s;
+      }
       break;
     }
     *distance = point_distance;
@@ -824,13 +1054,16 @@ void configureObserveMore(
   P4ForwardDecision * decision)
 {
   const auto certified = certifiedNominalPrefix(
-    request, budget, &decision->certified_free_distance_m);
+    request, budget, &decision->certified_free_distance_m,
+    &decision->first_failed_risk, &decision->first_failed_position,
+    &decision->first_failed_query_time_s);
   decision->speed_cap_mps = speedCapForDistance(
     decision->certified_free_distance_m, request.limits);
   const double terminal_reserve = p4StoppingDistance(
     0.0, request.limits);
-  const double progress = std::max(
-    0.0, decision->certified_free_distance_m - terminal_reserve);
+  const double progress = std::min(
+    request.limits.max_creep_progress_m, std::max(
+      0.0, decision->certified_free_distance_m - terminal_reserve));
   if (progress < request.limits.min_creep_progress_m) {
     decision->observe_more_trajectory.clear();
     decision->speed_cap_mps = 0.0;
@@ -838,6 +1071,8 @@ void configureObserveMore(
   }
   decision->observe_more_trajectory = cropPrefixToDistance(
     certified, progress);
+  decision->speed_cap_mps = std::min(
+    decision->speed_cap_mps, request.limits.max_observe_speed_mps);
 }
 
 }  // namespace
@@ -920,13 +1155,14 @@ bool P4ForwardRequest::valid(std::string * reason) const
   if (!occupancy || !risk || !std::isfinite(query_time_s)) {
     return fail("missing_snapshot_query");
   }
-  const std::array<double, 12> finite_limits = {
+  const std::array<double, 14> finite_limits = {
     limits.reaction_time_s, limits.braking_accel_mps2,
     limits.vehicle_radius_m, limits.safety_margin_m,
     limits.max_lookahead_m, limits.sensing_range_m,
     limits.topology_resolution_m, limits.occupancy_resolution_m,
     limits.nominal_query_speed_mps, limits.max_path_length_ratio,
-    limits.min_creep_progress_m, limits.compute_budget_ms};
+    limits.min_creep_progress_m, limits.max_creep_progress_m,
+    limits.max_observe_speed_mps, limits.compute_budget_ms};
   if (std::any_of(
       finite_limits.begin(), finite_limits.end(),
       [](const double value) {return !std::isfinite(value);}) ||
@@ -937,6 +1173,8 @@ bool P4ForwardRequest::valid(std::string * reason) const
     limits.occupancy_resolution_m <= 0.0 ||
     limits.nominal_query_speed_mps <= 0.0 ||
     limits.max_path_length_ratio < 1.0 || limits.min_creep_progress_m < 0.0 ||
+    limits.max_creep_progress_m < limits.min_creep_progress_m ||
+    limits.max_observe_speed_mps <= 0.0 ||
     limits.max_raw_paths <= 0 ||
     limits.max_channels <= 0 || limits.compute_budget_ms <= 0.0)
   {
@@ -1104,9 +1342,7 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
     candidate.length_m = pathLength(candidate.path);
     candidate.path_hash = hashPath(candidate.path);
     candidate.occupancy_supported = graph.worldPathFree(candidate.path);
-    if (candidate.occupancy_supported) {
-      evaluateRisk(request, &budget, &candidate);
-    } else {
+    if (!candidate.occupancy_supported) {
       candidate.reason = "occupancy_support_incomplete";
     }
     decision.raw_candidates.push_back(std::move(candidate));
@@ -1177,9 +1413,7 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
       alternate.length_m = pathLength(alternate.path);
       alternate.path_hash = hashPath(alternate.path);
       alternate.occupancy_supported = graph.worldPathFree(alternate.path);
-      if (alternate.occupancy_supported) {
-        evaluateRisk(request, &budget, &alternate);
-      } else {
+      if (!alternate.occupancy_supported) {
         alternate.reason = "occupancy_support_incomplete";
         continue;
       }
@@ -1215,6 +1449,8 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
     decision.reason = "no_occupancy_supported_topology_route";
     return finalize(std::move(decision));
   }
+
+  evaluateCandidateRiskSet(request, &budget, &decision.candidates);
 
   const bool incomplete = std::any_of(
     decision.candidates.begin(), decision.candidates.end(),

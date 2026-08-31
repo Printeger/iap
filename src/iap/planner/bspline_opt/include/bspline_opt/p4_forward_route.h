@@ -47,6 +47,19 @@ namespace ego_planner
     COMPUTE_BUDGET_EXCEEDED,
   };
 
+  enum class P4ForwardSafetyState
+  {
+    SAFE = 0,
+    UNSAFE,
+    UNKNOWN,
+  };
+
+  enum class P4ForwardRankingState
+  {
+    COMPARABLE = 0,
+    INCOMPLETE,
+  };
+
   const char * p4ForwardActionName(P4ForwardAction action);
   const char * p4ForwardTriggerReasonName(P4ForwardTriggerReason reason);
 
@@ -78,7 +91,9 @@ namespace ego_planner
     double occupancy_resolution_m = 0.1;
     double nominal_query_speed_mps = 1.5;
     double max_path_length_ratio = 1.3;
-    double min_creep_progress_m = 0.5;
+    double min_creep_progress_m = 0.25;
+    double max_creep_progress_m = 0.5;
+    double max_observe_speed_mps = 0.5;
     int max_raw_paths = 8;
     int max_channels = 4;
     double compute_budget_ms = 150.0;
@@ -91,9 +106,52 @@ namespace ego_planner
     bool gnss_supported = false;
     bool lidar_supported = false;
     bool fim_supported = false;
+    P4ForwardSafetyState safety_state = P4ForwardSafetyState::UNKNOWN;
+    P4ForwardRankingState ranking_state =
+      P4ForwardRankingState::INCOMPLETE;
     double safety_ratio = std::numeric_limits < double > ::quiet_NaN();
     double fim_ratio = std::numeric_limits < double > ::quiet_NaN();
+    double hpl = std::numeric_limits < double > ::quiet_NaN();
+    double vpl = std::numeric_limits < double > ::quiet_NaN();
+    double hal = std::numeric_limits < double > ::quiet_NaN();
+    double val = std::numeric_limits < double > ::quiet_NaN();
+    double gnss_anchor_hpl = std::numeric_limits < double > ::quiet_NaN();
+    double gnss_anchor_vpl = std::numeric_limits < double > ::quiet_NaN();
+    double gnss_raw_hpl = std::numeric_limits < double > ::quiet_NaN();
+    double gnss_raw_vpl = std::numeric_limits < double > ::quiet_NaN();
+    double gnss_receiver_raw_hpl =
+      std::numeric_limits < double > ::quiet_NaN();
+    double gnss_receiver_raw_vpl =
+      std::numeric_limits < double > ::quiet_NaN();
+    double gnss_spatial_delta_h =
+      std::numeric_limits < double > ::quiet_NaN();
+    double gnss_spatial_delta_v =
+      std::numeric_limits < double > ::quiet_NaN();
+    double gnss_temporal_growth_h =
+      std::numeric_limits < double > ::quiet_NaN();
+    double gnss_temporal_growth_v =
+      std::numeric_limits < double > ::quiet_NaN();
+    double gnss_anchor_epoch_delta_s =
+      std::numeric_limits < double > ::quiet_NaN();
+    double gnss_support_ray_length_m =
+      std::numeric_limits < double > ::quiet_NaN();
+    bool gnss_hard_occlusion = false;
+    int gnss_visible_satellite_count = 0;
+    int gnss_blocked_satellite_count = 0;
+    int gnss_unknown_satellite_count = 0;
+    int gnss_used_satellite_count = 0;
+    int common_known_satellite_count = 0;
+    uint64_t common_satellite_hash = 0;
+    std::string floor_source_h = "none";
+    std::string floor_source_v = "none";
     std::string reason = "not_evaluated";
+  };
+
+  struct P4ForwardRiskQuery
+  {
+    Eigen::Vector3d position = Eigen::Vector3d::Zero();
+    double query_time_s = std::numeric_limits < double > ::quiet_NaN();
+    uint64_t candidate_group_id = 0;
   };
 
   struct P4ForwardCandidate
@@ -129,6 +187,9 @@ namespace ego_planner
     P4ForwardLimits limits;
     std::function < P4ForwardOccupancyState(const Eigen::Vector3d &) > occupancy;
     std::function < P4ForwardRiskSample(const Eigen::Vector3d &, double) > risk;
+    std::function < bool(
+      const std::vector < P4ForwardRiskQuery > &,
+      std::vector < P4ForwardRiskSample > *) > risk_batch;
     // Production supplies the EGO-lattice native A* corridor refiner. It is
     // invoked by the worker so refinement and re-certification share the same
     // end-to-end compute budget as topology search.
@@ -164,6 +225,11 @@ namespace ego_planner
     double decision_horizon_m = 0.0;
     double certified_free_distance_m = 0.0;
     double speed_cap_mps = 0.0;
+    P4ForwardRiskSample first_failed_risk;
+    Eigen::Vector3d first_failed_position = Eigen::Vector3d::Constant(
+      std::numeric_limits < double > ::quiet_NaN());
+    double first_failed_query_time_s =
+      std::numeric_limits < double > ::quiet_NaN();
     double compute_latency_ms = 0.0;
     std::string reason = "not_evaluated";
   };

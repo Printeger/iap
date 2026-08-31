@@ -36,6 +36,12 @@ namespace ego_planner {
 struct P0PlanningSnapshot {
   std::shared_ptr<const iap::RiskGridSnapshot> risk;
   std::shared_ptr<const P0OccupancyEpoch> occupancy;
+  iap::IntegritySnapshot integrity_anchor;
+  double gnss_support_ray_length_m =
+      std::numeric_limits<double>::quiet_NaN();
+  bool gnss_hard_occlusion = false;
+  std::function<iap::ForwardRiskBatchResult(
+      const iap::ForwardRiskBatchRequest&)> forward_risk_batch;
 };
 
 class P0RiskGridRuntime {

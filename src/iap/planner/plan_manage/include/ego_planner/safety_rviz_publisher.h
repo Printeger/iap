@@ -129,6 +129,19 @@ struct SafetyVizP4Guide {
   double path_length_ratio = 0.0;
   double decision_horizon_m = 0.0;
   double stopping_distance_m = 0.0;
+  Eigen::Vector3d first_failed_position = Eigen::Vector3d::Constant(
+      std::numeric_limits<double>::quiet_NaN());
+  double first_failed_hpl = std::numeric_limits<double>::quiet_NaN();
+  double first_failed_vpl = std::numeric_limits<double>::quiet_NaN();
+  double first_failed_hal = std::numeric_limits<double>::quiet_NaN();
+  double first_failed_val = std::numeric_limits<double>::quiet_NaN();
+  double first_failed_query_time_s =
+      std::numeric_limits<double>::quiet_NaN();
+  double risk_snapshot_stamp_s =
+      std::numeric_limits<double>::quiet_NaN();
+  std::string first_failed_floor_source_h = "none";
+  std::string first_failed_floor_source_v = "none";
+  std::string first_failed_reason;
   bool risk_selected = false;
   std::string reason = "not_evaluated";
 };
