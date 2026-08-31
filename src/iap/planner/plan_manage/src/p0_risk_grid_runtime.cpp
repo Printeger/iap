@@ -535,6 +535,16 @@ P0RiskGridRuntime::Config P0RiskGridRuntime::declareAndReadConfig(
   config.health_topic = "/planning/risk_grid_health";
   config.gnss_epoch_max_age_s =
       node->declare_parameter<double>("p0.gnss_epoch_max_age_s", 2.0);
+  config.gnss_pr_noise_base_m = node->declare_parameter<double>(
+      "p0.gnss_pr_noise_base_m", 5.0);
+  config.gnss_dop_noise_base_mps = node->declare_parameter<double>(
+      "p0.gnss_dop_noise_base_mps", 0.5);
+  if (!std::isfinite(config.gnss_pr_noise_base_m) ||
+      config.gnss_pr_noise_base_m <= 0.0 ||
+      !std::isfinite(config.gnss_dop_noise_base_mps) ||
+      config.gnss_dop_noise_base_mps <= 0.0) {
+    throw std::invalid_argument("invalid P0 GNSS source noise parameters");
+  }
   config.predictor_source_mode = parsePredictorSourceMode(
       node->declare_parameter<std::string>("p0.predictor.source_mode",
                                            "fusion"));
@@ -2590,6 +2600,25 @@ void P0RiskGridRuntime::rangeCallback(
 
       double azel[2] = {0.0, M_PI / 2.0};
       gnss_comm::sat_azel(origin_ecef, sat_ecef_pos, azel);
+      if (azel[1] < 10.0 * M_PI / 180.0) {
+        continue;
+      }
+
+      double dop_meas = 0.0;
+      double dop_sigma = config_.gnss_dop_noise_base_mps;
+      if (static_cast<int>(obs->dopp.size()) > l1_idx && freq > 0.0) {
+        const double doppler_hz = obs->dopp[l1_idx];
+        if (std::isfinite(doppler_hz)) {
+          dop_meas = -doppler_hz * (kLightSpeed / freq);
+        }
+      }
+      if (static_cast<int>(obs->dopp_std.size()) > l1_idx && freq > 0.0) {
+        const double converted_sigma =
+            obs->dopp_std[l1_idx] * (kLightSpeed / freq);
+        if (converted_sigma > 0.01) {
+          dop_sigma = converted_sigma;
+        }
+      }
 
       iap::SatObs sat;
       sat.sat_id = static_cast<int>(sat_id);
@@ -2598,13 +2627,13 @@ void P0RiskGridRuntime::rangeCallback(
                           : (sys == SYS_BDS) ? 'C'
                                              : 'G';
       sat.pr_meas = pr + svdt * kLightSpeed;
-      sat.dop_meas = 0.0 + svddt * kLightSpeed;
+      sat.dop_meas = dop_meas + svddt * kLightSpeed;
       sat.pr_sigma =
           static_cast<int>(obs->psr_std.size()) > l1_idx &&
                   obs->psr_std[l1_idx] > 0.05
               ? obs->psr_std[l1_idx]
-              : 5.0;
-      sat.dop_sigma = 0.5;
+              : config_.gnss_pr_noise_base_m;
+      sat.dop_sigma = dop_sigma;
       sat.sat_pos = sat_ecef_pos;
       sat.sat_vel = sat_ecef_vel;
       sat.elevation = azel[1];
@@ -3016,7 +3045,8 @@ bool P0RiskGridRuntime::buildSnapshot(
       std::abs(current.gnss_epoch_stamp - epoch->stamp) <=
           config_.predictor_gnss_measured_epoch_integrity_max_delta_s &&
       current.gnss_epoch_identity != 0 &&
-      current.gnss_epoch_identity == iap::gnss_epoch_identity(*epoch);
+      current.gnss_epoch_identity ==
+          iap::gnss_epoch_identity(*epoch, current.excluded_prns);
   if (integrity_epoch_aligned && !current.excluded_prns.empty()) {
     const std::unordered_set<int> excluded(
         current.excluded_prns.begin(), current.excluded_prns.end());

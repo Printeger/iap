@@ -176,7 +176,8 @@ iap::IntegritySnapshot make_snapshot(const bool with_epoch,
     snapshot.gnss_epoch = make_epoch(8);
     snapshot.current.gnss_epoch_stamp = snapshot.gnss_epoch.stamp;
     snapshot.current.gnss_epoch_identity =
-        iap::gnss_epoch_identity(snapshot.gnss_epoch);
+        iap::gnss_epoch_identity(snapshot.gnss_epoch,
+                                 snapshot.current.excluded_prns);
   }
   snapshot.has_lambda_base = with_prior;
   if (with_prior) {
@@ -190,7 +191,8 @@ iap::IntegritySnapshot make_snapshot_with_epoch(const iap::GnssEpoch& epoch,
   iap::IntegritySnapshot snapshot = make_snapshot(true, with_prior);
   snapshot.gnss_epoch = epoch;
   snapshot.current.gnss_epoch_stamp = epoch.stamp;
-  snapshot.current.gnss_epoch_identity = iap::gnss_epoch_identity(epoch);
+  snapshot.current.gnss_epoch_identity =
+      iap::gnss_epoch_identity(epoch, snapshot.current.excluded_prns);
   return snapshot;
 }
 
@@ -824,6 +826,43 @@ TEST(PredictorModuleTest,
 }
 
 TEST(PredictorModuleTest,
+     SameStampGnssPayloadMutationInvalidatesCertifiedEpochIdentity) {
+  auto params = make_params();
+  iap::PredictorModule predictor(params);
+  predictor.set_observation_predicate(
+      [](const Eigen::Vector3d&) { return true; });
+  auto snapshot = make_snapshot(true, false);
+  const auto certified_identity = snapshot.current.gnss_epoch_identity;
+  snapshot.gnss_epoch.sats.front().pr_meas += 0.25;
+  ASSERT_NE(iap::gnss_epoch_identity(snapshot.gnss_epoch,
+                                     snapshot.current.excluded_prns),
+            certified_identity);
+
+  const auto result = predictor.query(iap::PredictorQueryInput(
+      snapshot.p_wb, snapshot, snapshot.stamp, 0.0));
+
+  EXPECT_FALSE(result.gnss.valid);
+  EXPECT_EQ(result.gnss.fallback_reason, "gnss_anchor_inconsistent");
+}
+
+TEST(PredictorModuleTest,
+     CertifiedGnssExclusionMutationInvalidatesEpochIdentity) {
+  auto params = make_params();
+  iap::PredictorModule predictor(params);
+  predictor.set_observation_predicate(
+      [](const Eigen::Vector3d&) { return true; });
+  auto snapshot = make_snapshot(true, false);
+  snapshot.current.excluded_prns.push_back(
+      snapshot.gnss_epoch.sats.front().sat_id);
+
+  const auto result = predictor.query(iap::PredictorQueryInput(
+      snapshot.p_wb, snapshot, snapshot.stamp, 0.0));
+
+  EXPECT_FALSE(result.gnss.valid);
+  EXPECT_EQ(result.gnss.fallback_reason, "gnss_anchor_inconsistent");
+}
+
+TEST(PredictorModuleTest,
      ForwardRiskBatchUsesOneFrozenCommonKnownSatelliteSet) {
   auto params = make_params();
   params.gnss.measured_epoch_support_radius_m = 0.45;
@@ -894,6 +933,33 @@ TEST(PredictorModuleTest, ForwardRiskBatchFailsClosedWhenBudgetIsExpired) {
   ASSERT_EQ(result.points.size(), 1u);
   EXPECT_EQ(result.points.front().safety_state,
             iap::ForwardRiskSafetyState::UNKNOWN);
+}
+
+TEST(PredictorModuleTest, ForwardRiskBatchRejectsInvalidNonfiniteBudgets) {
+  auto params = make_params();
+  iap::PredictorModule module(params);
+  module.set_observation_predicate(
+      [](const Eigen::Vector3d&) { return true; });
+  module.set_lidar_fim_primitives(make_lidar_primitives());
+  const auto snapshot = make_snapshot(true, true);
+
+  for (const double invalid_budget : {
+           std::numeric_limits<double>::quiet_NaN(),
+           -std::numeric_limits<double>::infinity()}) {
+    iap::ForwardRiskBatchRequest request;
+    request.combined_snapshot_identity = "invalid-budget";
+    request.snapshot = snapshot;
+    request.hal = 20.0;
+    request.val = 40.0;
+    request.freshness_reference_time_s = snapshot.stamp;
+    request.compute_budget_ms = invalid_budget;
+    request.points = {{snapshot.p_wb, snapshot.stamp, 0.0, 1}};
+
+    const auto result = module.queryForwardRiskBatch(request);
+    EXPECT_FALSE(result.complete);
+    EXPECT_EQ(result.failure_reason,
+              iap::ForwardRiskFailureReason::COMPUTE_BUDGET_EXCEEDED);
+  }
 }
 
 TEST(PredictorModuleTest,

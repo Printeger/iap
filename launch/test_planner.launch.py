@@ -3071,6 +3071,8 @@ def _ego_planner_node(context, drone_id, planner_odom_topic, cloud_topic, camera
             {"p0.map_topic": LaunchConfiguration("p0.map_topic").perform(context)},
             {"p0.health_topic": LaunchConfiguration("p0.health_topic").perform(context)},
             {"p0.gnss_epoch_max_age_s": _param_float(context, "p0.gnss_epoch_max_age_s")},
+            {"p0.gnss_pr_noise_base_m": _param_float(context, "gnss_pr_noise_base")},
+            {"p0.gnss_dop_noise_base_mps": _param_float(context, "gnss_dop_noise_base")},
             {"p0.predictor.source_mode": LaunchConfiguration("p0.predictor.source_mode").perform(context)},
             {"p0.predictor.gnss_epoch_policy": LaunchConfiguration("p0.predictor.gnss_epoch_policy").perform(context)},
             {"p0.predictor.gnss_measured_epoch_support_radius_m": _param_float(context, "p0.predictor.gnss_measured_epoch_support_radius_m")},

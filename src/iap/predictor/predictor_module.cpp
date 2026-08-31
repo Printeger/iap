@@ -235,7 +235,8 @@ bool apply_certified_gnss_anchor(
     return false;
   }
   const std::uint64_t epoch_identity =
-      gnss_epoch_identity(snapshot.gnss_epoch);
+      gnss_epoch_identity(snapshot.gnss_epoch,
+                          snapshot.current.excluded_prns);
   const double epoch_delta =
       std::abs(snapshot.current.gnss_epoch_stamp -
                snapshot.gnss_epoch.stamp);
@@ -760,10 +761,12 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
   out.points.resize(request.points.size());
   const auto started_at = std::chrono::steady_clock::now();
   const auto budget_expired = [&]() {
-    if (!std::isfinite(request.compute_budget_ms)) {
+    if (request.compute_budget_ms ==
+        std::numeric_limits<double>::infinity()) {
       return false;
     }
-    if (request.compute_budget_ms <= 0.0) {
+    if (!std::isfinite(request.compute_budget_ms) ||
+        request.compute_budget_ms <= 0.0) {
       return true;
     }
     const double elapsed_ms =

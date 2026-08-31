@@ -80,6 +80,8 @@ class P0RiskGridRuntime {
     // namespaced planner cannot silently move it away from the bag contract.
     std::string health_topic = "/planning/risk_grid_health";
     double gnss_epoch_max_age_s = 2.0;
+    double gnss_pr_noise_base_m = 5.0;
+    double gnss_dop_noise_base_mps = 0.5;
     iap::PredictorSourceMode predictor_source_mode =
         iap::PredictorSourceMode::Fusion;
     iap::PredictorGnssEpochPolicy predictor_gnss_epoch_policy =

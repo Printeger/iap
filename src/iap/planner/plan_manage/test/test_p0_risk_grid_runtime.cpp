@@ -1824,6 +1824,12 @@ class P0RiskGridRuntimeStampTest : public ::testing::Test {
                                      std::vector<int> excluded_prns) {
     std::lock_guard<std::mutex> lock(runtime->health_state_mutex_);
     runtime->latest_current_.excluded_prns = std::move(excluded_prns);
+    if (runtime->latest_epoch_) {
+      runtime->latest_current_.gnss_epoch_identity =
+          iap::gnss_epoch_identity(
+              *runtime->latest_epoch_,
+              runtime->latest_current_.excluded_prns);
+    }
   }
 
   static bool buildIntegritySnapshot(P0RiskGridRuntime* runtime,
@@ -2308,6 +2314,8 @@ TEST(P0RiskGridRuntimeTest, PredictorParamsCanBeOverridden) {
       rclcpp::Parameter("p0.predictor.lidar_legacy_observability", false),
       rclcpp::Parameter("p0.predictor.lidar_fim_radius_m", 12.0),
       rclcpp::Parameter("p0.predictor.sigma_grow_m_sqrt_s", 0.08),
+      rclcpp::Parameter("p0.gnss_pr_noise_base_m", 1.25),
+      rclcpp::Parameter("p0.gnss_dop_noise_base_mps", 0.125),
   });
   auto node = std::make_shared<rclcpp::Node>(
       "p0_predictor_params_override_test", options);
@@ -2323,6 +2331,8 @@ TEST(P0RiskGridRuntimeTest, PredictorParamsCanBeOverridden) {
   EXPECT_FALSE(config.predictor_lidar_legacy_observability);
   EXPECT_DOUBLE_EQ(config.predictor_lidar_fim_radius_m, 12.0);
   EXPECT_DOUBLE_EQ(config.predictor_sigma_grow_m_sqrt_s, 0.08);
+  EXPECT_DOUBLE_EQ(config.gnss_pr_noise_base_m, 1.25);
+  EXPECT_DOUBLE_EQ(config.gnss_dop_noise_base_mps, 0.125);
 }
 
 TEST(P0RiskGridRuntimeTest, P0_6FixtureParamsCanBeOverridden) {

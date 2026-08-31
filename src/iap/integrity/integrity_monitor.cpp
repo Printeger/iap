@@ -585,7 +585,6 @@ IntegrityReport IntegrityMonitor::compute(const glim::EstimationFrame& frame,
   report.stamp = frame.stamp;
   if (epoch != nullptr) {
     report.gnss_epoch_stamp = epoch->stamp;
-    report.gnss_epoch_identity = gnss_epoch_identity(*epoch);
   }
   report.araim_n_det = 0;  // ensure deterministic state machine input
 
@@ -597,6 +596,10 @@ IntegrityReport IntegrityMonitor::compute(const glim::EstimationFrame& frame,
   const auto fallback_src = buildFallbackSource(frame, report);
   const auto gnss_src     = evaluateGnssSource(epoch, trunk, report);
   const auto lidar_src    = evaluateLidarSource(lidar_snapshot, fgo_info, report);
+  if (epoch != nullptr) {
+    report.gnss_epoch_identity =
+        gnss_epoch_identity(*epoch, report.excluded_sats);
+  }
 
   // --- TDOP ---
   if (trunk) {

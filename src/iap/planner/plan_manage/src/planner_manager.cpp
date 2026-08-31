@@ -204,14 +204,6 @@ namespace ego_planner
       return result;
     }
 
-    bool certifyRefinedForwardGuide(
-        const P4ForwardRequest &request,
-        P4ForwardCandidate *candidate)
-    {
-      return p4CertifyForwardCandidate(
-          request, candidate, request.limits.compute_budget_ms);
-    }
-
     double meanPathDistance(
         const std::vector<Eigen::Vector3d> &query,
         const std::vector<Eigen::Vector3d> &reference)
@@ -1243,62 +1235,6 @@ namespace ego_planner
     const std::string geometry_policy =
         request.snapshot_identity.geometry_id + "|" +
         request.snapshot_identity.alert_limit_policy_id;
-    const auto reuse_certified_latch =
-        [this, &request, &geometry_policy](const std::string &reason)
-        -> std::optional<P4ForwardDecision>
-      {
-        if (p4_latched_guide_.size() < 2 ||
-            p4_latched_geometry_policy_ != geometry_policy ||
-            !p4_latched_anchor_.allFinite() ||
-            (request.position - p4_latched_anchor_).norm() <=
-                request.limits.topology_resolution_m)
-          return std::nullopt;
-        std::size_t nearest_index = 0;
-        double nearest_distance = std::numeric_limits<double>::infinity();
-        for (std::size_t index = 0; index < p4_latched_guide_.size(); ++index)
-        {
-          const double distance =
-              (request.position - p4_latched_guide_[index]).norm();
-          if (distance < nearest_distance)
-          {
-            nearest_distance = distance;
-            nearest_index = index;
-          }
-        }
-        P4ForwardCandidate candidate;
-        candidate.candidate_id =
-            last_p4_forward_decision_.selected_candidate_id == 0 ? 1 :
-            last_p4_forward_decision_.selected_candidate_id;
-        candidate.path.push_back(request.position);
-        for (std::size_t index = nearest_index;
-             index < p4_latched_guide_.size(); ++index)
-          if ((p4_latched_guide_[index] - candidate.path.back()).norm() >
-              1.0e-6)
-            candidate.path.push_back(p4_latched_guide_[index]);
-        if (candidate.path.size() < 2 ||
-            !certifyRefinedForwardGuide(request, &candidate))
-        {
-          p4_latched_guide_.clear();
-          p4_latched_anchor_.setConstant(
-              std::numeric_limits<double>::quiet_NaN());
-          p4_latched_geometry_policy_.clear();
-          return std::nullopt;
-        }
-        P4ForwardDecision reused = last_p4_forward_decision_;
-        reused.planning_attempt_id = request.planning_attempt_id;
-        reused.request_position = request.position;
-        reused.local_target = request.local_target;
-        reused.snapshot_identity = request.snapshot_identity;
-        reused.common_anchor = p4_latched_anchor_;
-        reused.candidates = {candidate};
-        reused.selected_candidate_id = candidate.candidate_id;
-        reused.selected_guide = candidate.path;
-        reused.observe_more_trajectory.clear();
-        reused.action = P4ForwardAction::RISK_SELECTED;
-        reused.trigger_reason = P4ForwardTriggerReason::MULTIPLE_CHANNELS;
-        reused.reason = reason;
-        return reused;
-      };
     const bool same_snapshot =
         last_p4_forward_decision_.snapshot_identity.canonical() ==
         request.snapshot_identity.canonical();
@@ -1346,16 +1282,18 @@ namespace ego_planner
       }
       if (!p4ForwardDecisionMatchesRequest(*completed, request, 0.5))
       {
-        if (auto latched = reuse_certified_latch(
-            "latched_channel_while_result_mismatched"))
-          return *latched;
         unavailable.snapshot_identity = request.snapshot_identity;
         unavailable.request_position = request.position;
         unavailable.local_target = request.local_target;
         unavailable.action = P4ForwardAction::OBSERVE_MORE;
         unavailable.trigger_reason =
             P4ForwardTriggerReason::NOMINAL_CERTIFICATION_SHORT;
-        unavailable.reason = "forward_result_request_mismatch";
+        request.live_occupancy_generation_at_submit =
+            grid_map_ ? grid_map_->occupancyGeneration() : 0u;
+        p4_last_compute_stamp_s_ = plannerNow().seconds();
+        unavailable.reason = p4_forward_worker_.submit(std::move(request))
+            ? "forward_result_request_mismatch_recompute_pending"
+            : "forward_result_request_mismatch_submit_failed";
         return unavailable;
       }
       completed->planning_attempt_id = request.planning_attempt_id;
@@ -1419,6 +1357,9 @@ namespace ego_planner
       unavailable.snapshot_identity = request.snapshot_identity;
       unavailable.request_position = request.position;
       unavailable.local_target = request.local_target;
+      unavailable.action = P4ForwardAction::OBSERVE_MORE;
+      unavailable.trigger_reason =
+          P4ForwardTriggerReason::NOMINAL_CERTIFICATION_SHORT;
       unavailable.reason =
           "live_occupancy_generation_changed_before_decision_reuse";
       return unavailable;
@@ -1435,9 +1376,6 @@ namespace ego_planner
     if (std::isfinite(p4_last_compute_stamp_s_) &&
         now_s - p4_last_compute_stamp_s_ < 0.5)
     {
-      if (auto latched = reuse_certified_latch(
-          "latched_channel_while_rate_limited"))
-        return *latched;
       unavailable.snapshot_identity = request.snapshot_identity;
       unavailable.action = P4ForwardAction::OBSERVE_MORE;
       unavailable.trigger_reason =
@@ -1447,8 +1385,6 @@ namespace ego_planner
     }
     p4_last_compute_stamp_s_ = now_s;
     unavailable.snapshot_identity = request.snapshot_identity;
-    auto pending_latch = reuse_certified_latch(
-        "latched_channel_while_worker_pending");
     const uint64_t live_generation_at_submit =
         grid_map_ ? grid_map_->occupancyGeneration() : 0u;
     request.live_occupancy_generation_at_submit =
@@ -1458,8 +1394,6 @@ namespace ego_planner
       unavailable.reason = "forward_worker_submit_failed";
       return unavailable;
     }
-    if (pending_latch)
-      return *pending_latch;
     unavailable.action = P4ForwardAction::OBSERVE_MORE;
     unavailable.trigger_reason =
         P4ForwardTriggerReason::NOMINAL_CERTIFICATION_SHORT;

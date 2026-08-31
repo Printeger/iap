@@ -2,6 +2,7 @@
 // IAP-RQ-020: GNSS types — per-satellite observation data
 
 #include <Eigen/Core>
+#include <algorithm>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -54,10 +55,12 @@ struct GnssEpoch {
   std::vector<double>    iono_params;  ///< Klobuchar params {α0..α3, β0..β3}; empty → skip iono
 };
 
-/// Stable identity for the measurement epoch consumed by both Integrity and
-/// the planning Predictor. The hash intentionally excludes derived geometry
-/// and FDE state: those may be recomputed by each consumer, while the epoch
-/// stamp and ordered observable identities identify the source measurement.
+/// Stable identity for the common measurement epoch consumed by both
+/// Integrity and the planning Predictor. Consumer-derived fields (residuals,
+/// NIS, canopy kappa, and FDE exclusions) are deliberately excluded here:
+/// Integrity receives those after smoother optimization while P0 reconstructs
+/// the same source epoch directly from the range message. Certification-time
+/// exclusions are bound by the overload below.
 inline std::uint64_t gnss_epoch_identity(const GnssEpoch& epoch) {
   std::uint64_t hash = 1469598103934665603ull;
   const auto append = [&hash](const void* data, const std::size_t size) {
@@ -74,6 +77,50 @@ inline std::uint64_t gnss_epoch_identity(const GnssEpoch& epoch) {
   for (const auto& sat : epoch.sats) {
     append(&sat.sat_id, sizeof(sat.sat_id));
     append(&sat.constellation, sizeof(sat.constellation));
+    append(&sat.pr_meas, sizeof(sat.pr_meas));
+    append(&sat.dop_meas, sizeof(sat.dop_meas));
+    append(&sat.pr_sigma, sizeof(sat.pr_sigma));
+    append(&sat.dop_sigma, sizeof(sat.dop_sigma));
+    for (Eigen::Index axis = 0; axis < sat.sat_pos.size(); ++axis) {
+      append(&sat.sat_pos[axis], sizeof(sat.sat_pos[axis]));
+      append(&sat.sat_vel[axis], sizeof(sat.sat_vel[axis]));
+    }
+    append(&sat.tgd, sizeof(sat.tgd));
+    append(&sat.svddt, sizeof(sat.svddt));
+    append(&sat.elevation, sizeof(sat.elevation));
+    append(&sat.azimuth, sizeof(sat.azimuth));
+  }
+  const std::uint64_t iono_count = epoch.iono_params.size();
+  append(&iono_count, sizeof(iono_count));
+  for (const double parameter : epoch.iono_params) {
+    append(&parameter, sizeof(parameter));
+  }
+  return hash;
+}
+
+/// Identity of the exact certified epoch, including the FDE/ARAIM satellite
+/// exclusion set associated with the published protection levels.
+inline std::uint64_t gnss_epoch_identity(
+    const GnssEpoch& epoch, std::vector<int> excluded_sat_ids) {
+  std::sort(excluded_sat_ids.begin(), excluded_sat_ids.end());
+  excluded_sat_ids.erase(
+      std::unique(excluded_sat_ids.begin(), excluded_sat_ids.end()),
+      excluded_sat_ids.end());
+  std::uint64_t hash = gnss_epoch_identity(epoch);
+  if (excluded_sat_ids.empty()) {
+    return hash;
+  }
+  const auto append = [&hash](const void* data, const std::size_t size) {
+    const auto* bytes = static_cast<const unsigned char*>(data);
+    for (std::size_t index = 0; index < size; ++index) {
+      hash ^= static_cast<std::uint64_t>(bytes[index]);
+      hash *= 1099511628211ull;
+    }
+  };
+  const std::uint64_t count = excluded_sat_ids.size();
+  append(&count, sizeof(count));
+  for (const int sat_id : excluded_sat_ids) {
+    append(&sat_id, sizeof(sat_id));
   }
   return hash;
 }
