@@ -53,7 +53,51 @@ struct GnssEpoch {
   double gps_sec  = 0.0;           ///< GPS time [s since GPS epoch] — for iono/trop models
   std::vector<SatObs>    sats;     ///< per-satellite channels
   std::vector<double>    iono_params;  ///< Klobuchar params {α0..α3, β0..β3}; empty → skip iono
+  std::uint64_t source_identity = 0;  ///< frozen before consumer-derived mutation
 };
+
+/// Hash the immutable ROS measurement payload before either consumer consults
+/// its local ephemeris/origin caches. This is a template so the GNSS core types
+/// remain independent of ROS message headers.
+template <typename GnssMeasMsgT>
+inline std::uint64_t gnss_measurement_source_identity(
+    const GnssMeasMsgT& message) {
+  std::uint64_t hash = 1469598103934665603ull;
+  const auto append = [&hash](const void* data, const std::size_t size) {
+    const auto* bytes = static_cast<const unsigned char*>(data);
+    for (std::size_t index = 0; index < size; ++index) {
+      hash ^= static_cast<std::uint64_t>(bytes[index]);
+      hash *= 1099511628211ull;
+    }
+  };
+  const auto append_vector = [&append](const auto& values) {
+    const std::uint64_t count = values.size();
+    append(&count, sizeof(count));
+    for (const auto& value : values) {
+      append(&value, sizeof(value));
+    }
+  };
+
+  const std::uint64_t measurement_count = message.meas.size();
+  append(&measurement_count, sizeof(measurement_count));
+  for (const auto& observation : message.meas) {
+    append(&observation.time.week, sizeof(observation.time.week));
+    append(&observation.time.tow, sizeof(observation.time.tow));
+    append(&observation.sat, sizeof(observation.sat));
+    append_vector(observation.freqs);
+    append_vector(observation.cn0);
+    append_vector(observation.lli);
+    append_vector(observation.code);
+    append_vector(observation.psr);
+    append_vector(observation.psr_std);
+    append_vector(observation.cp);
+    append_vector(observation.cp_std);
+    append_vector(observation.dopp);
+    append_vector(observation.dopp_std);
+    append_vector(observation.status);
+  }
+  return hash == 0 ? 1 : hash;
+}
 
 /// Stable identity for the common measurement epoch consumed by both
 /// Integrity and the planning Predictor. Consumer-derived fields (residuals,
@@ -62,6 +106,9 @@ struct GnssEpoch {
 /// the same source epoch directly from the range message. Certification-time
 /// exclusions are bound by the overload below.
 inline std::uint64_t gnss_epoch_identity(const GnssEpoch& epoch) {
+  if (epoch.source_identity != 0) {
+    return epoch.source_identity;
+  }
   std::uint64_t hash = 1469598103934665603ull;
   const auto append = [&hash](const void* data, const std::size_t size) {
     const auto* bytes = static_cast<const unsigned char*>(data);

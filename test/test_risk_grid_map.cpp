@@ -1105,6 +1105,34 @@ TEST(RiskGridMapTest, QueryTraceAttributesOccupiedInterpolationCorner) {
   }
 }
 
+TEST(RiskGridMapTest, OccupancyEvidenceIsEvaluatedOncePerSpatialVoxel) {
+  iap::RiskGridMapParams params = base_params();
+  params.horizons_s = {0.0, 0.5, 1.0, 2.0};
+  iap::RiskGridMap grid(params);
+  AffineProvider provider;
+  std::string reason;
+  int occupancy_query_count = 0;
+  const auto observed_free = [&occupancy_query_count](const Eigen::Vector3d&) {
+    ++occupancy_query_count;
+    iap::RiskOccupancyDiagnostic diagnostic;
+    diagnostic.available = true;
+    diagnostic.observed = true;
+    diagnostic.state = iap::RiskOccupancyState::OBSERVED_FREE;
+    diagnostic.occupancy_generation = 7;
+    diagnostic.source = "test_map";
+    return diagnostic;
+  };
+
+  ASSERT_TRUE(grid.refreshFromProvider(
+      Eigen::Vector3d::Zero(), 10.0, provider, observed_free, &reason))
+      << reason;
+
+  constexpr int kSpatialVoxelCount = 3 * 3 * 3;
+  EXPECT_EQ(occupancy_query_count, kSpatialVoxelCount + 1);
+  EXPECT_EQ(provider.query_count,
+            kSpatialVoxelCount * static_cast<int>(params.horizons_s.size()));
+}
+
 TEST(RiskGridMapTest, RefreshRejectsChangingOccupancyGeneration) {
   iap::RiskGridMapParams params = base_params();
   iap::RiskGridMap grid(params);

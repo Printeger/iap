@@ -2,12 +2,14 @@
 #define _P0_RISK_GRID_RUNTIME_H_
 
 #include <cstddef>
+#include <deque>
 #include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include <Eigen/Core>
@@ -231,6 +233,7 @@ class P0RiskGridRuntime {
     InputReadiness readiness;
     iap::RiskGridHealth health;
     std::shared_ptr<const iap::RiskGridSnapshot> snapshot;
+    std::shared_ptr<const P0PlanningSnapshot> planning_snapshot;
     std::string snapshot_failure_reason = "none";
   };
   HealthPublicationState healthPublicationStateSnapshot() const;
@@ -406,6 +409,7 @@ class P0RiskGridRuntime {
   std::unordered_map<uint32_t, gnss_comm::GloEphemPtr> glo_ephem_cache_;
   std::vector<double> iono_params_;
   std::optional<iap::GnssEpoch> latest_epoch_;
+  std::deque<std::pair<uint64_t, iap::GnssEpoch>> gnss_epoch_history_;
   bool gnss_epoch_seen_ = false;
 
   mutable std::mutex lidar_predictor_input_mutex_;

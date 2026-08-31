@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -21,6 +22,31 @@
 namespace {
 
 constexpr double kPi = 3.14159265358979323846;
+
+struct FakeGnssTimeMessage {
+  std::uint32_t week = 0;
+  double tow = 0.0;
+};
+
+struct FakeGnssObservationMessage {
+  FakeGnssTimeMessage time;
+  std::uint32_t sat = 0;
+  std::vector<double> freqs;
+  std::vector<double> cn0;
+  std::vector<std::uint8_t> lli;
+  std::vector<std::uint8_t> code;
+  std::vector<double> psr;
+  std::vector<double> psr_std;
+  std::vector<double> cp;
+  std::vector<double> cp_std;
+  std::vector<double> dopp;
+  std::vector<double> dopp_std;
+  std::vector<std::uint8_t> status;
+};
+
+struct FakeGnssMeasurementMessage {
+  std::vector<FakeGnssObservationMessage> meas;
+};
 
 TEST(PredictorSourceUsageTest, ProjectsOnlyConfiguredSpatialSources) {
   iap::PredictorParams params;
@@ -843,6 +869,48 @@ TEST(PredictorModuleTest,
 
   EXPECT_FALSE(result.gnss.valid);
   EXPECT_EQ(result.gnss.fallback_reason, "gnss_anchor_inconsistent");
+}
+
+TEST(PredictorModuleTest,
+     FrozenSourceEpochIdentityIgnoresConsumerDerivedMutation) {
+  auto epoch = make_epoch(8);
+  epoch.source_identity = iap::gnss_epoch_identity(epoch);
+  const auto source_identity = iap::gnss_epoch_identity(epoch);
+
+  epoch.sats.front().pr_sigma *= 2.0;
+  epoch.sats.front().pr_residual = 12.0;
+  epoch.sats.front().nis_pr = 9.0;
+  epoch.sats.front().excluded = true;
+
+  EXPECT_EQ(iap::gnss_epoch_identity(epoch), source_identity);
+}
+
+TEST(PredictorModuleTest,
+     RawMeasurementSourceIdentityBindsExactImmutablePayload) {
+  FakeGnssMeasurementMessage message;
+  FakeGnssObservationMessage observation;
+  observation.time.week = 2300;
+  observation.time.tow = 12345.5;
+  observation.sat = 7;
+  observation.freqs = {1575.42e6};
+  observation.cn0 = {43.0};
+  observation.lli = {0};
+  observation.code = {1};
+  observation.psr = {2.1e7};
+  observation.psr_std = {1.2};
+  observation.cp = {10.0};
+  observation.cp_std = {0.02};
+  observation.dopp = {-1250.0};
+  observation.dopp_std = {0.4};
+  observation.status = {1};
+  message.meas.push_back(observation);
+
+  const auto identity = iap::gnss_measurement_source_identity(message);
+  auto identical_copy = message;
+  EXPECT_EQ(iap::gnss_measurement_source_identity(identical_copy), identity);
+
+  identical_copy.meas.front().psr.front() += 0.25;
+  EXPECT_NE(iap::gnss_measurement_source_identity(identical_copy), identity);
 }
 
 TEST(PredictorModuleTest,

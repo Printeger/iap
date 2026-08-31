@@ -1988,9 +1988,11 @@ void P0RiskGridRuntime::publishHealth(const iap::RiskGridHealth& health,
       ? health_snapshot->sourceIdentity() : iap::RiskGridSourceIdentity{};
   const std::string snapshot_config_hash = health_snapshot
       ? iap::canonicalRiskGridConfigHash(health_snapshot->params()) : "";
-  const auto planning_snapshot = acquirePlanningSnapshot();
+  const auto planning_snapshot = evidence.planning_snapshot;
   const bool anchor_matches_health = planning_snapshot && health_snapshot &&
-      planning_snapshot->risk.get() == health_snapshot.get();
+      planning_snapshot->risk &&
+      planning_snapshot->risk->generation_id() ==
+          health_snapshot->generation_id();
   const auto& integrity_anchor = anchor_matches_health
       ? planning_snapshot->integrity_anchor.current
       : iap::CurrentIntegrityState{};
@@ -2366,6 +2368,7 @@ void P0RiskGridRuntime::completeRefreshEvidence(
     const bool succeeded) {
   (void)now_s;
   const auto completed_snapshot = risk_grid_.acquireSnapshot();
+  const auto completed_planning_snapshot = acquirePlanningSnapshot();
   std::scoped_lock lock(health_state_mutex_, lidar_predictor_input_mutex_);
   const iap::RiskGridHealth completed_health =
       addLidarPredictorInputHealthLocked(health);
@@ -2380,9 +2383,15 @@ void P0RiskGridRuntime::completeRefreshEvidence(
   refresh_evidence_.readiness = refresh_input_readiness_;
   refresh_evidence_.health = completed_health;
   refresh_evidence_.snapshot.reset();
+  refresh_evidence_.planning_snapshot.reset();
   if (completed_snapshot &&
       completed_snapshot->generation_id() == completed_health.generation_id) {
     refresh_evidence_.snapshot = completed_snapshot;
+    if (completed_planning_snapshot && completed_planning_snapshot->risk &&
+        completed_planning_snapshot->risk->generation_id() ==
+            completed_snapshot->generation_id()) {
+      refresh_evidence_.planning_snapshot = completed_planning_snapshot;
+    }
   }
   refresh_evidence_.snapshot_failure_reason = last_snapshot_failure_reason_;
   if (succeeded) {
@@ -2528,6 +2537,8 @@ void P0RiskGridRuntime::rangeCallback(
     return;
   }
   recordInputCallback();
+  const std::uint64_t source_identity =
+      iap::gnss_measurement_source_identity(*msg);
 
   bool origin_valid = false;
   Eigen::Vector3d origin_ecef = Eigen::Vector3d::Zero();
@@ -2651,8 +2662,15 @@ void P0RiskGridRuntime::rangeCallback(
     latest_gnss_epoch_satellite_count_ =
         static_cast<uint64_t>(epoch.sats.size());
     if (!epoch.sats.empty()) {
+      epoch.source_identity = source_identity;
       latest_gnss_epoch_stamp_ = epoch.stamp;
-      latest_epoch_ = std::move(epoch);
+      gnss_epoch_history_.emplace_back(latest_gnss_epoch_generation_,
+                                       std::move(epoch));
+      constexpr std::size_t kGnssEpochHistoryCapacity = 16;
+      while (gnss_epoch_history_.size() > kGnssEpochHistoryCapacity) {
+        gnss_epoch_history_.pop_front();
+      }
+      latest_epoch_ = gnss_epoch_history_.back().second;
     } else {
       latest_gnss_epoch_stamp_ =
           std::numeric_limits<double>::quiet_NaN();
@@ -3026,6 +3044,22 @@ bool P0RiskGridRuntime::buildSnapshot(
     }
     epoch = latest_epoch_;
     captured_gnss_epoch_generation = latest_gnss_epoch_generation_;
+    if (current.gnss_epoch_identity != 0) {
+      for (auto it = gnss_epoch_history_.rbegin();
+           it != gnss_epoch_history_.rend(); ++it) {
+        const double epoch_delta_s =
+            std::abs(current.gnss_epoch_stamp - it->second.stamp);
+        if (std::isfinite(epoch_delta_s) &&
+            epoch_delta_s <=
+                config_.predictor_gnss_measured_epoch_integrity_max_delta_s &&
+            iap::gnss_epoch_identity(it->second, current.excluded_prns) ==
+                current.gnss_epoch_identity) {
+          captured_gnss_epoch_generation = it->first;
+          epoch = it->second;
+          break;
+        }
+      }
+    }
     if (readiness_capture) {
       *readiness_capture = inputReadinessLocked(now_s);
     }

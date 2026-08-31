@@ -355,6 +355,8 @@ template <typename GnssMeasMsgT>
 void GnssExtensionModule::on_range_meas_(
     const std::shared_ptr<const GnssMeasMsgT>& msg,
     double                                      ros_stamp) {
+  const std::uint64_t source_identity =
+      gnss_measurement_source_identity(*msg);
   // Convert ROS message to gnss_comm obs list
   const auto obs_list = gnss_comm::msg2meas(msg);
   if (obs_list.empty()) return;
@@ -531,6 +533,7 @@ void GnssExtensionModule::on_range_meas_(
   }
 
   if (!epoch.sats.empty()) {
+    epoch.source_identity = source_identity;
     gnss_handler_->insert_epoch(epoch);
     const uint64_t n = ++epoch_count_;
     // Log first epoch, then every 100 (≈ ~10 s at 10 Hz)

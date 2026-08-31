@@ -1736,6 +1736,25 @@ class P0RiskGridRuntimeStampTest : public ::testing::Test {
         static_cast<uint64_t>(satellite_count);
   }
 
+  static void setGnssEpochHistory(
+      P0RiskGridRuntime* runtime,
+      const std::vector<std::pair<uint64_t, iap::GnssEpoch>>& history,
+      const std::size_t certified_index) {
+    ASSERT_LT(certified_index, history.size());
+    std::lock_guard<std::mutex> lock(runtime->health_state_mutex_);
+    runtime->gnss_epoch_history_.assign(history.begin(), history.end());
+    runtime->latest_gnss_epoch_generation_ = history.back().first;
+    runtime->latest_epoch_ = history.back().second;
+    runtime->latest_gnss_epoch_stamp_ = history.back().second.stamp;
+    runtime->latest_gnss_epoch_satellite_count_ =
+        static_cast<uint64_t>(history.back().second.sats.size());
+    runtime->gnss_epoch_seen_ = true;
+    runtime->latest_current_.gnss_epoch_stamp =
+        history[certified_index].second.stamp;
+    runtime->latest_current_.gnss_epoch_identity =
+        iap::gnss_epoch_identity(history[certified_index].second);
+  }
+
   static std::shared_ptr<std::atomic<uint64_t>> installOccupancyEpoch(
       P0RiskGridRuntime* runtime,
       const double stamp_s,
@@ -3371,6 +3390,30 @@ TEST_F(P0RiskGridRuntimeStampTest, StaleOdomOrCurrentPreventsSnapshot) {
   setOdomSeen(&runtime, true);
   setCurrentSeen(&runtime, true);
   EXPECT_TRUE(buildSnapshot(&runtime, 100.0, &snapshot));
+}
+
+TEST_F(P0RiskGridRuntimeStampTest,
+       SnapshotSelectsExactCertifiedGnssEpochFromShortHistory) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_exact_certified_epoch_history_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  P0RiskGridRuntime runtime(node, enabledConfig(),
+                            std::make_unique<FakeProvider>());
+  seedValidInputs(&runtime, 100.0, 100.0);
+
+  auto certified = makeGnssEpoch(8, 99.9);
+  certified.source_identity = 0x1111u;
+  auto latest = makeGnssEpoch(8, 100.0);
+  latest.source_identity = 0x2222u;
+  setGnssEpochHistory(&runtime, {{10u, certified}, {11u, latest}}, 0u);
+
+  iap::IntegritySnapshot snapshot;
+  ASSERT_TRUE(buildSnapshot(&runtime, 100.0, &snapshot));
+  EXPECT_DOUBLE_EQ(snapshot.gnss_epoch.stamp, certified.stamp);
+  EXPECT_EQ(snapshot.gnss_epoch.source_identity,
+            certified.source_identity);
+  EXPECT_NE(snapshot.gnss_epoch.source_identity, latest.source_identity);
 }
 
 TEST_F(P0RiskGridRuntimeStampTest, GnssRangeCallbackCompletesWithoutRecursiveLock) {
