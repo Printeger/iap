@@ -279,6 +279,7 @@ class TestStageContracts(unittest.TestCase):
                 "ego_resolution_m": 0.1,
                 "ego_origin_m": [-21.0, -11.0, 0.0],
                 "unknown_as_occupied": False,
+                "current_vehicle_clearance_radius_m": 0.35,
                 "provider_cost_source": "pre_conservative_fim_ratio",
                 "require_safety_ratio_below_one_for_cost": True,
                 "alert_limit_policy_id": "fixed_hal20_val40_v1",

@@ -170,6 +170,7 @@ def forest_scene_contract(scenario: str = FOREST_SCENARIO) -> dict:
             # Base EGO keeps its original optimistic exploration semantics.
             # P0 still records UNKNOWN and risk-aware P4 remains fail-closed.
             "unknown_as_occupied": False,
+            "current_vehicle_clearance_radius_m": 0.35 if online else 0.0,
             "fit_grid_to_map_cloud": not online,
             "provider_cost_source": (
                 "pre_conservative_fim_ratio" if online
@@ -298,6 +299,9 @@ def forest_manifest_evidence(
         "p0.ego_origin_m": (p0.get("ego_origin_m"), online["origin_m"]),
         "p0.unknown_as_occupied": (
             p0.get("unknown_as_occupied"), online["unknown_as_occupied"]),
+        "p0.current_vehicle_clearance_radius_m": (
+            p0.get("current_vehicle_clearance_radius_m"),
+            online["current_vehicle_clearance_radius_m"]),
         "p0.provider_cost_source": (
             p0.get("provider_cost_source"), online["provider_cost_source"]),
         "p0.require_safety_ratio_below_one_for_cost": (

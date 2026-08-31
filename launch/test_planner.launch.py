@@ -3834,6 +3834,8 @@ def _launch_setup(context):
             ],
             "unknown_as_occupied": _param_bool(
                 context, "grid_map/unknown_as_occupied"),
+            "current_vehicle_clearance_radius_m": _param_float(
+                context, "grid_map/current_vehicle_clearance_radius_m"),
             "provider_cost_source": LaunchConfiguration(
                 "p0.provider_cost_source").perform(context),
             "require_safety_ratio_below_one_for_cost": _param_bool(
