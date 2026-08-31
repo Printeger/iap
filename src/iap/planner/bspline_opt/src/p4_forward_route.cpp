@@ -1057,8 +1057,6 @@ void configureObserveMore(
     request, budget, &decision->certified_free_distance_m,
     &decision->first_failed_risk, &decision->first_failed_position,
     &decision->first_failed_query_time_s);
-  decision->speed_cap_mps = speedCapForDistance(
-    decision->certified_free_distance_m, request.limits);
   const double terminal_reserve = p4StoppingDistance(
     0.0, request.limits);
   const double progress = std::min(
@@ -1071,8 +1069,11 @@ void configureObserveMore(
   }
   decision->observe_more_trajectory = cropPrefixToDistance(
     certified, progress);
+  const double certified_stop_reserve = std::max(
+    0.0, decision->certified_free_distance_m - progress);
   decision->speed_cap_mps = std::min(
-    decision->speed_cap_mps, request.limits.max_observe_speed_mps);
+    speedCapForDistance(certified_stop_reserve, request.limits),
+    request.limits.max_observe_speed_mps);
 }
 
 }  // namespace

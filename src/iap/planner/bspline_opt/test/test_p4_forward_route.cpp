@@ -429,10 +429,15 @@ TEST(P4ForwardRoute, RiskBatchObserveMoreNeverCrossesUnknownSupport)
     EXPECT_LE(point.x(), 2.0 + 1.0e-9);
   }
   if (!decision.observe_more_trajectory.empty()) {
-    EXPECT_GE((decision.observe_more_trajectory.back() - request.position).norm(),
+    const double progress =
+      (decision.observe_more_trajectory.back() - request.position).norm();
+    EXPECT_GE(progress,
       request.limits.min_creep_progress_m - 1.0e-9);
-    EXPECT_LE((decision.observe_more_trajectory.back() - request.position).norm(),
+    EXPECT_LE(progress,
       request.limits.max_creep_progress_m + 1.0e-9);
+    EXPECT_GE(decision.certified_free_distance_m - progress + 1.0e-9,
+      ego_planner::p4StoppingDistance(
+        decision.speed_cap_mps, request.limits));
   }
   EXPECT_LE(decision.speed_cap_mps,
     request.limits.max_observe_speed_mps + 1.0e-9);
