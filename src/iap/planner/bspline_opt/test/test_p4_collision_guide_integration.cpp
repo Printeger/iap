@@ -398,20 +398,6 @@ void ensureRclcpp()
   }
 }
 
-Eigen::MatrixXd seedMatrix(const CollisionCase & fixture)
-{
-  const int rows = fixture.seed_shape == SeedShape::kStructurallyInvalid ? 2 : 3;
-  Eigen::MatrixXd seed(rows, static_cast<int>(fixture.sample_count));
-  for (std::size_t index = 0; index < fixture.sample_count; ++index) {
-    seed(0, static_cast<int>(index)) = fixture.samples[index].x;
-    seed(1, static_cast<int>(index)) = fixture.samples[index].y;
-    if (rows == 3) {
-      seed(2, static_cast<int>(index)) = fixture.samples[index].z;
-    }
-  }
-  return seed;
-}
-
 Eigen::MatrixXd guideSeedMatrix()
 {
   Eigen::MatrixXd seed(3, 9);
@@ -569,30 +555,6 @@ std::unique_ptr<ego_planner::BsplineOptimizer> makeOptimizer(
   optimizer->setP4RiskAStarConfigForTest(config);
   optimizer->setP4RiskSnapshot(snapshot, 10.0, 73);
   return optimizer;
-}
-
-std::string constraintHash(const ego_planner::ControlPoints & points)
-{
-  std::ostringstream stream;
-  stream << std::setprecision(17) << points.size << ';';
-  for (int index = 0; index < points.size; ++index) {
-    stream << points.base_point[index].size() << ':';
-    for (const auto & value : points.base_point[index]) {
-      stream << value.x() << ',' << value.y() << ',' << value.z() << ';';
-    }
-    stream << points.direction[index].size() << ':';
-    for (const auto & value : points.direction[index]) {
-      stream << value.x() << ',' << value.y() << ',' << value.z() << ';';
-    }
-  }
-  uint64_t hash = 1469598103934665603ULL;
-  for (const unsigned char byte : stream.str()) {
-    hash ^= byte;
-    hash *= 1099511628211ULL;
-  }
-  std::ostringstream output;
-  output << std::hex << std::setfill('0') << std::setw(16) << hash;
-  return output.str();
 }
 
 void expectDenseSweptPathFree(
@@ -857,7 +819,7 @@ TEST(P4CollisionGuideIntegration,
 }
 
 TEST(P4CollisionGuideIntegration,
-  ProviderBottleneckV2InjectsSelectedGuideInInitialAndReboundSeams)
+  ClosedCollisionRepairUsesOnlyNativeAStarAndProducesNoP4Lineage)
 {
   const auto snapshot = makeSnapshot();
   auto initial_map = std::make_shared<GridMap>();
@@ -869,12 +831,8 @@ TEST(P4CollisionGuideIntegration,
   ASSERT_EQ(
     initial_optimizer->initControlPoints(initial_seed, true).status,
     ego_planner::CollisionScanStatus::CLOSED_SEGMENTS);
-  ASSERT_EQ(initial_optimizer->getLastP4GuideViz().size(), 1U);
-  const auto initial = initial_optimizer->getLastP4GuideViz().front();
-  EXPECT_EQ(initial.status, ego_planner::P4GuideDecisionStatus::RISK_SELECTED);
-  EXPECT_TRUE(initial.selection_applied);
-  EXPECT_EQ(initial.selected.canonical_hash, initial.risk.canonical_hash);
-  EXPECT_NE(initial.selected.canonical_hash, initial.original.canonical_hash);
+  EXPECT_TRUE(initial_optimizer->getLastP4GuideViz().empty());
+  EXPECT_TRUE(initial_optimizer->getP4AttemptLineage().empty());
 
   auto rebound_map = std::make_shared<GridMap>();
   GridMapTestAccess::configureGuideFixture(rebound_map.get(), false);
@@ -898,343 +856,88 @@ TEST(P4CollisionGuideIntegration,
   ASSERT_TRUE(rebound_optimizer->checkCollisionAndReboundForTest(
       &stopped_for_error));
   EXPECT_FALSE(stopped_for_error);
-  ASSERT_EQ(rebound_optimizer->getLastP4GuideViz().size(), 1U);
-  const auto rebound = rebound_optimizer->getLastP4GuideViz().front();
-  EXPECT_EQ(rebound.status, ego_planner::P4GuideDecisionStatus::RISK_SELECTED);
-  EXPECT_TRUE(rebound.selection_applied);
-  EXPECT_EQ(rebound.selected.canonical_hash, rebound.risk.canonical_hash);
+  EXPECT_TRUE(rebound_optimizer->getLastP4GuideViz().empty());
+  EXPECT_TRUE(rebound_optimizer->getP4AttemptLineage().empty());
 }
 
 TEST(P4CollisionGuideIntegration,
-  RiskDisabledRestoresOriginalEgoUnknownTraversalWithoutWeakeningP4)
-{
-  const auto snapshot = makeSnapshot();
-
-  auto unknown_only_original_map = std::make_shared<GridMap>();
-  GridMapTestAccess::configureGuideFixture(
-    unknown_only_original_map.get(), false);
-  GridMapTestAccess::restoreOriginalUnknownTraversal(
-    unknown_only_original_map.get());
-  auto unknown_only_original = makeOptimizer(
-    unknown_only_original_map, snapshot, false, false);
-  Eigen::MatrixXd unknown_only_original_seed = guideSeedMatrix();
-  EXPECT_EQ(
-    unknown_only_original->initControlPoints(
-      unknown_only_original_seed, true).status,
-    ego_planner::CollisionScanStatus::NO_COLLISION);
-
-  auto unknown_only_p4_map = std::make_shared<GridMap>();
-  GridMapTestAccess::configureGuideFixture(unknown_only_p4_map.get(), false);
-  GridMapTestAccess::restoreOriginalUnknownTraversal(unknown_only_p4_map.get());
-  auto unknown_only_p4 = makeOptimizer(
-    unknown_only_p4_map, snapshot, true, false);
-  Eigen::MatrixXd unknown_only_p4_seed = guideSeedMatrix();
-  EXPECT_EQ(
-    unknown_only_p4->initControlPoints(
-      unknown_only_p4_seed, true).status,
-    ego_planner::CollisionScanStatus::OPEN_ENDED_COLLISION);
-
-  auto original_map = std::make_shared<GridMap>();
-  GridMapTestAccess::configureGuideFixture(original_map.get());
-  GridMapTestAccess::restoreOriginalUnknownTraversal(original_map.get());
-  auto original_optimizer = makeOptimizer(
-    original_map, snapshot, false, false);
-  Eigen::MatrixXd original_seed = guideSeedMatrix();
-  ASSERT_EQ(
-    original_optimizer->initControlPoints(original_seed, true).status,
-    ego_planner::CollisionScanStatus::CLOSED_SEGMENTS);
-  ASSERT_EQ(original_optimizer->getLastP4GuideViz().size(), 1U);
-  const auto & original = original_optimizer->getLastP4GuideViz().front();
-  EXPECT_EQ(
-    original.status, ego_planner::P4GuideDecisionStatus::ORIGINAL_SELECTED);
-  EXPECT_EQ(original.reason, ego_planner::P4GuideDecisionReason::RISK_DISABLED);
-  EXPECT_TRUE(original.selected.returned);
-
-  auto p4_map = std::make_shared<GridMap>();
-  GridMapTestAccess::configureGuideFixture(p4_map.get());
-  GridMapTestAccess::restoreOriginalUnknownTraversal(p4_map.get());
-  auto p4_optimizer = makeOptimizer(p4_map, snapshot, true, false);
-  Eigen::MatrixXd p4_seed = guideSeedMatrix();
-  EXPECT_EQ(
-    p4_optimizer->initControlPoints(p4_seed, true).status,
-    ego_planner::CollisionScanStatus::OPEN_ENDED_COLLISION);
-  EXPECT_TRUE(p4_optimizer->getLastP4GuideViz().empty());
-}
-
-TEST(P4CollisionGuideIntegration,
-  ProviderBottleneckV2LineageSurvivesNoCollisionWithinAttemptAndClearsAtBoundaries)
+  ForwardGuidePointOneMeterNativeRefinementSucceedsAndIsolatesPlannerState)
 {
   const auto snapshot = makeSnapshot();
   auto map = std::make_shared<GridMap>();
-  GridMapTestAccess::configureGuideFixture(map.get());
-  auto optimizer = makeOptimizer(
-    map, snapshot, true, false,
-    P4RiskObjective::PROVIDER_BOTTLENECK_V2);
-  Eigen::MatrixXd seed = guideSeedMatrix();
-
-  ASSERT_EQ(
-    optimizer->initControlPoints(seed, true).status,
-    ego_planner::CollisionScanStatus::CLOSED_SEGMENTS);
-  ASSERT_EQ(optimizer->getP4AttemptLineage().size(), 1U);
-  const auto selected = optimizer->getP4AttemptLineage().front();
-  ASSERT_TRUE(selected.selection_applied);
-  ASSERT_EQ(
-    selected.selected_status,
-    ego_planner::P4GuideDecisionStatus::RISK_SELECTED);
-
-  Eigen::MatrixXd free_seed = guideSeedMatrix();
-  free_seed.row(1).setConstant(2.0);
-  optimizer->setControlPoints(free_seed);
-  bool stopped_for_error = false;
-  EXPECT_FALSE(optimizer->checkCollisionAndReboundForTest(&stopped_for_error));
-  EXPECT_FALSE(stopped_for_error);
-  EXPECT_TRUE(optimizer->getLastP4GuideViz().empty());
-  ASSERT_EQ(optimizer->getP4AttemptLineage().size(), 1U);
-  const auto persisted = optimizer->getP4AttemptLineage().front();
-  EXPECT_EQ(persisted.planning_attempt_id, selected.planning_attempt_id);
-  EXPECT_EQ(persisted.collision_segment_id, selected.collision_segment_id);
-  EXPECT_EQ(persisted.request_hash, selected.request_hash);
-  EXPECT_EQ(persisted.snapshot_generation, selected.snapshot_generation);
-  EXPECT_EQ(persisted.snapshot_config_hash, selected.snapshot_config_hash);
-  EXPECT_EQ(persisted.occupancy_epoch, selected.occupancy_epoch);
-  EXPECT_EQ(
-    persisted.selected_guide_hash, selected.selected_guide_hash);
-
-  optimizer->releaseP4RiskSnapshot();
-  EXPECT_FALSE(optimizer->hasP4RiskSnapshotForTest());
-  ASSERT_EQ(optimizer->getP4AttemptLineage().size(), 1U);
-  EXPECT_EQ(
-    optimizer->getP4AttemptLineage().front().request_hash,
-    selected.request_hash);
-
-  optimizer->setP4RiskSnapshot(snapshot, 10.0, 74);
-  EXPECT_TRUE(optimizer->getP4AttemptLineage().empty());
-
-  GridMapTestAccess::configureGuideFixture(map.get());
-  optimizer->setP4RiskSnapshot(snapshot, 10.0, 74);
-  Eigen::MatrixXd replacement_seed = guideSeedMatrix();
-  ASSERT_EQ(
-    optimizer->initControlPoints(replacement_seed, true).status,
-    ego_planner::CollisionScanStatus::CLOSED_SEGMENTS);
-  ASSERT_EQ(optimizer->getP4AttemptLineage().size(), 1U);
-  GridMapTestAccess::advanceOccupancyEpoch(map.get());
-  optimizer->setP4RiskSnapshot(snapshot, 10.0, 74);
-  EXPECT_TRUE(optimizer->getP4AttemptLineage().empty());
-
-  optimizer->clearP4RiskSnapshot();
-  EXPECT_TRUE(optimizer->getP4AttemptLineage().empty());
-}
-
-TEST(P4CollisionGuideIntegration,
-  ProviderBottleneckV2EpochChangeFailsClosedBeforeNoCollisionReturn)
-{
-  const auto snapshot = makeSnapshot();
-  auto map = std::make_shared<GridMap>();
-  GridMapTestAccess::configureGuideFixture(map.get());
-  auto optimizer = makeOptimizer(
-    map, snapshot, true, false,
-    P4RiskObjective::PROVIDER_BOTTLENECK_V2);
-  Eigen::MatrixXd seed = guideSeedMatrix();
-  ASSERT_EQ(
-    optimizer->initControlPoints(seed, true).status,
-    ego_planner::CollisionScanStatus::CLOSED_SEGMENTS);
-  ASSERT_EQ(optimizer->getP4AttemptLineage().size(), 1U);
-
   GridMapTestAccess::configureGuideFixture(map.get(), false);
-  GridMapTestAccess::advanceOccupancyEpoch(map.get());
-  bool stopped_for_error = false;
-  EXPECT_FALSE(optimizer->checkCollisionAndReboundForTest(&stopped_for_error));
-  EXPECT_TRUE(stopped_for_error);
-  EXPECT_EQ(
-    optimizer->lastCollisionScanResult().status,
-    ego_planner::CollisionScanStatus::INVALID_INPUT);
-  EXPECT_TRUE(optimizer->getP4AttemptLineage().empty());
+  const auto epoch = map->captureFrozenOccupancyEpoch();
+  ASSERT_NE(epoch, nullptr);
+  auto optimizer = makeOptimizer(
+    map, snapshot, true, false, P4RiskObjective::PROVIDER_BOTTLENECK_V2);
+  ASSERT_TRUE(optimizer->a_star_->hasRiskSnapshot());
+  const std::vector<Eigen::Vector3d> coarse = {
+    Eigen::Vector3d(-4.0, 0.0, 0.0),
+    Eigen::Vector3d(0.0, 0.0, 0.0),
+    Eigen::Vector3d(4.0, 0.0, 0.0)};
+  std::vector<Eigen::Vector3d> refined;
+
+  EXPECT_TRUE(optimizer->refineP4ForwardGuide(
+      coarse, epoch->diagnostic_query, 0.25, 100.0, &refined));
+  EXPECT_GE(refined.size(), 2u);
+  EXPECT_NEAR((refined.front() - coarse.front()).norm(), 0.0, 1.0e-6);
+  EXPECT_NEAR((refined.back() - coarse.back()).norm(), 0.0, 1.0e-6);
+  EXPECT_TRUE(optimizer->a_star_->hasRiskSnapshot());
 }
 
 TEST(P4CollisionGuideIntegration,
-  ReleasedSnapshotLineageRevalidatesAttemptAndLiveOccupancyBeforeTerminalUse)
+  ForwardGuideRefinementUsesFrozenOccupiedEpochAndRejectsCorridorEscape)
 {
   const auto snapshot = makeSnapshot();
   auto map = std::make_shared<GridMap>();
-  GridMapTestAccess::configureGuideFixture(map.get());
+  GridMapTestAccess::configureGuideFixture(map.get(), true);
+  const auto occupied_epoch = map->captureFrozenOccupancyEpoch();
+  ASSERT_NE(occupied_epoch, nullptr);
+  // Change the live map after capture. Refinement must still see the frozen
+  // obstacle and reject the native A* detour outside this narrow corridor.
+  GridMapTestAccess::configureGuideFixture(map.get(), false);
   auto optimizer = makeOptimizer(
-    map, snapshot, true, false,
-    P4RiskObjective::PROVIDER_BOTTLENECK_V2);
-  Eigen::MatrixXd seed = guideSeedMatrix();
-  ASSERT_EQ(
-    optimizer->initControlPoints(seed, true).status,
-    ego_planner::CollisionScanStatus::CLOSED_SEGMENTS);
-  ASSERT_EQ(optimizer->getP4AttemptLineage().size(), 1U);
+    map, snapshot, true, false, P4RiskObjective::PROVIDER_BOTTLENECK_V2);
+  const std::vector<Eigen::Vector3d> coarse = {
+    p4_collision_guide_fixture::start(),
+    p4_collision_guide_fixture::end()};
+  std::vector<Eigen::Vector3d> refined;
 
-  optimizer->releaseP4RiskSnapshot();
-  EXPECT_TRUE(optimizer->validateP4AttemptLineage(73));
-  ASSERT_EQ(optimizer->getP4AttemptLineage().size(), 1U);
-
-  GridMapTestAccess::advanceOccupancyEpoch(map.get());
-  EXPECT_FALSE(optimizer->validateP4AttemptLineage(73));
-  EXPECT_TRUE(optimizer->getP4AttemptLineage().empty());
-
-  ASSERT_EQ(GridMapTestAccess::frozenCaptureInputReason(map.get()), "ok");
-  const auto replacement_epoch = map->captureFrozenOccupancyEpoch();
-  ASSERT_NE(replacement_epoch, nullptr);
-  EXPECT_EQ(replacement_epoch->generation, map->occupancyGeneration());
-  optimizer->setP4RiskSnapshot(snapshot, 10.0, 74);
-  Eigen::MatrixXd replacement_seed = guideSeedMatrix();
-  ASSERT_EQ(
-    optimizer->initControlPoints(replacement_seed, true).status,
-    ego_planner::CollisionScanStatus::CLOSED_SEGMENTS);
-  optimizer->releaseP4RiskSnapshot();
-  EXPECT_FALSE(optimizer->validateP4AttemptLineage(73));
-  EXPECT_TRUE(optimizer->getP4AttemptLineage().empty());
+  EXPECT_FALSE(optimizer->refineP4ForwardGuide(
+      coarse, occupied_epoch->diagnostic_query, 0.2, 100.0, &refined));
+  EXPECT_TRUE(refined.empty());
+  EXPECT_TRUE(optimizer->a_star_->hasRiskSnapshot());
 }
 
-TEST(P4CollisionGuideIntegration, NonG0BContextPreservesFalseMetricsBoundary)
+TEST(P4CollisionGuideIntegration,
+  ForwardGuideRefinementRejectsFrozenUnknownAndClearsQueryOnFailure)
 {
   const auto snapshot = makeSnapshot();
   auto map = std::make_shared<GridMap>();
-  GridMapTestAccess::configureGuideFixture(map.get());
-  auto optimizer = makeOptimizer(map, snapshot, true, false);
-  EXPECT_TRUE(optimizer->getP4RiskAStarConfig().enable_risk_aware_astar);
-  EXPECT_FALSE(optimizer->getP4RiskAStarConfig().metrics_only);
-  Eigen::MatrixXd seed = guideSeedMatrix();
+  GridMapTestAccess::configureGuideFixture(map.get(), false);
+  GridMapTestAccess::restoreOriginalUnknownTraversal(map.get());
+  const auto unknown_epoch = map->captureFrozenOccupancyEpoch();
+  ASSERT_NE(unknown_epoch, nullptr);
+  auto optimizer = makeOptimizer(
+    map, snapshot, true, false, P4RiskObjective::PROVIDER_BOTTLENECK_V2);
+  const std::vector<Eigen::Vector3d> coarse = {
+    p4_collision_guide_fixture::start(),
+    p4_collision_guide_fixture::end()};
+  std::vector<Eigen::Vector3d> refined;
 
-  ASSERT_EQ(
-    optimizer->initControlPoints(seed, true).status,
-    ego_planner::CollisionScanStatus::CLOSED_SEGMENTS);
-  ASSERT_EQ(optimizer->getLastP4GuideViz().size(), 1U);
-  const auto decision = optimizer->getLastP4GuideViz().front();
-  ASSERT_TRUE(decision.original.returned);
-  ASSERT_TRUE(decision.risk.returned);
-  EXPECT_TRUE(decision.original.risk_profile.complete());
-  EXPECT_TRUE(decision.risk.risk_profile.complete());
-  EXPECT_LT(decision.risk.risk_profile.mean, decision.original.risk_profile.mean);
-  EXPECT_LE(decision.risk.risk_profile.max, decision.original.risk_profile.max);
-  EXPECT_EQ(
-    decision.status, ego_planner::P4GuideDecisionStatus::ORIGINAL_SELECTED);
-  EXPECT_EQ(
-    decision.reason,
-    ego_planner::P4GuideDecisionReason::SELECTION_NOT_AUTHORIZED);
-  EXPECT_EQ(
-    decision.selected.canonical_hash, decision.original.canonical_hash);
-  EXPECT_FALSE(decision.selection_applied);
+  EXPECT_FALSE(optimizer->refineP4ForwardGuide(
+      coarse, unknown_epoch->diagnostic_query, 0.25, 100.0, &refined));
+  EXPECT_TRUE(refined.empty());
+  EXPECT_TRUE(optimizer->a_star_->hasRiskSnapshot());
+  // A subsequent observed epoch must succeed, proving that the private
+  // fail-closed query from the first attempt cannot leak into later work.
+  GridMapTestAccess::configureGuideFixture(map.get(), false);
+  const auto observed_epoch = map->captureFrozenOccupancyEpoch();
+  ASSERT_NE(observed_epoch, nullptr);
+  EXPECT_TRUE(optimizer->refineP4ForwardGuide(
+      coarse, observed_epoch->diagnostic_query, 0.25, 100.0, &refined));
 }
 
-TEST(P4CollisionGuideIntegration, InitialAndReboundUseSameDecisionSeam)
-{
-  const auto snapshot = makeSnapshot();
-
-  auto initial_map = std::make_shared<GridMap>();
-  GridMapTestAccess::configure(
-    initial_map.get(), p4_collision_fixture::kOneClosed);
-  auto initial_optimizer = makeOptimizer(initial_map, snapshot, true, true);
-  EXPECT_TRUE(initial_optimizer->getP4RiskAStarConfig().metrics_only);
-  ASSERT_TRUE(initial_optimizer->hasP4RiskSnapshotForTest());
-  Eigen::MatrixXd initial_seed = seedMatrix(
-    p4_collision_fixture::kOneClosed);
-  ASSERT_EQ(
-    initial_optimizer->initControlPoints(initial_seed, true).status,
-    ego_planner::CollisionScanStatus::CLOSED_SEGMENTS);
-  ASSERT_EQ(initial_optimizer->getLastP4GuideViz().size(), 1U);
-  const auto initial_decision = initial_optimizer->getLastP4GuideViz().front();
-  EXPECT_EQ(initial_decision.planning_attempt_id, 73U);
-  EXPECT_TRUE(initial_optimizer->hasP4RiskSnapshotForTest());
-  EXPECT_EQ(initial_decision.snapshot_owner, snapshot);
-
-  auto rebound_map = std::make_shared<GridMap>();
-  GridMapTestAccess::configure(
-    rebound_map.get(), p4_collision_fixture::kOneClosed);
-  auto rebound_optimizer = makeOptimizer(rebound_map, snapshot, true, true);
-  Eigen::MatrixXd rebound_seed = seedMatrix(
-    p4_collision_fixture::kOneClosed);
-  Eigen::MatrixXd free_rebound_seed = rebound_seed;
-  free_rebound_seed.row(1).setConstant(2.0);
-  ASSERT_EQ(
-    rebound_optimizer->initControlPoints(free_rebound_seed, true).status,
-    ego_planner::CollisionScanStatus::NO_COLLISION);
-  rebound_optimizer->setControlPoints(rebound_seed);
-  bool stopped_for_error = false;
-  ASSERT_TRUE(rebound_optimizer->checkCollisionAndReboundForTest(
-      &stopped_for_error));
-  EXPECT_FALSE(stopped_for_error);
-  ASSERT_EQ(rebound_optimizer->getLastP4GuideViz().size(), 1U);
-  const auto rebound_decision = rebound_optimizer->getLastP4GuideViz().front();
-  EXPECT_TRUE(rebound_optimizer->hasP4RiskSnapshotForTest());
-  EXPECT_EQ(rebound_decision.snapshot_owner, snapshot);
-
-  EXPECT_EQ(initial_decision.schema_version, ego_planner::kP4GuideDecisionSchema);
-  EXPECT_EQ(rebound_decision.schema_version, initial_decision.schema_version);
-  EXPECT_EQ(rebound_decision.request_hash, initial_decision.request_hash);
-  EXPECT_EQ(
-    initial_decision.status,
-    ego_planner::P4GuideDecisionStatus::ORIGINAL_SELECTED);
-  EXPECT_EQ(rebound_decision.status, initial_decision.status);
-  EXPECT_EQ(
-    initial_decision.reason,
-    ego_planner::P4GuideDecisionReason::METRICS_ONLY);
-  EXPECT_EQ(rebound_decision.reason, initial_decision.reason);
-  EXPECT_FALSE(initial_decision.selection_applied);
-  EXPECT_FALSE(rebound_decision.selection_applied);
-  EXPECT_EQ(initial_decision.original.equal_arc_samples.size(), 200U);
-  EXPECT_EQ(initial_decision.risk.equal_arc_samples.size(), 200U);
-  EXPECT_EQ(rebound_decision.original.equal_arc_samples.size(), 200U);
-  EXPECT_EQ(rebound_decision.risk.equal_arc_samples.size(), 200U);
-}
-
-TEST(P4CollisionGuideIntegration, MetricsOnlyConstraintHashMatchesOriginalOnly)
-{
-  const auto snapshot = makeSnapshot();
-  auto metrics_map = std::make_shared<GridMap>();
-  auto original_map = std::make_shared<GridMap>();
-  GridMapTestAccess::configure(
-    metrics_map.get(), p4_collision_fixture::kOneClosed);
-  GridMapTestAccess::configure(
-    original_map.get(), p4_collision_fixture::kOneClosed);
-  auto metrics_optimizer = makeOptimizer(metrics_map, snapshot, true, true);
-  auto original_optimizer = makeOptimizer(original_map, snapshot, false, false);
-  Eigen::MatrixXd metrics_seed = seedMatrix(
-    p4_collision_fixture::kOneClosed);
-  Eigen::MatrixXd original_seed = metrics_seed;
-
-  ASSERT_EQ(
-    metrics_optimizer->initControlPoints(metrics_seed, true).status,
-    ego_planner::CollisionScanStatus::CLOSED_SEGMENTS);
-  ASSERT_EQ(
-    original_optimizer->initControlPoints(original_seed, true).status,
-    ego_planner::CollisionScanStatus::CLOSED_SEGMENTS);
-  ASSERT_EQ(metrics_optimizer->getLastP4GuideViz().size(), 1U);
-  EXPECT_EQ(
-    metrics_optimizer->getLastP4GuideViz().front().selected.canonical_hash,
-    metrics_optimizer->getLastP4GuideViz().front().original.canonical_hash);
-  EXPECT_FALSE(
-    metrics_optimizer->getLastP4GuideViz().front().selection_applied);
-  EXPECT_EQ(
-    constraintHash(metrics_optimizer->getControlPoints()),
-    constraintHash(original_optimizer->getControlPoints()));
-}
-
-TEST(P4CollisionGuideIntegration, InjectionEpochMismatchInvalidatesDecision)
-{
-  const auto snapshot = makeSnapshot();
-  auto map = std::make_shared<GridMap>();
-  GridMapTestAccess::configure(
-    map.get(), p4_collision_fixture::kOneClosed);
-  auto optimizer = makeOptimizer(map, snapshot, true, true);
-  Eigen::MatrixXd seed = seedMatrix(p4_collision_fixture::kOneClosed);
-  ASSERT_EQ(
-    optimizer->initControlPoints(seed, true).status,
-    ego_planner::CollisionScanStatus::CLOSED_SEGMENTS);
-  ASSERT_EQ(optimizer->getLastP4GuideViz().size(), 1U);
-  auto decision = optimizer->getLastP4GuideViz().front();
-
-  GridMapTestAccess::advanceOccupancyEpoch(map.get());
-  EXPECT_FALSE(optimizer->p4DecisionReadyForInjectionForTest(
-    &decision, seed, std::make_pair(3, 6)));
-  EXPECT_EQ(
-    decision.status,
-    ego_planner::P4GuideDecisionStatus::DECISION_INVALID_REPLAN_REQUIRED);
-  EXPECT_EQ(
-    decision.reason,
-    ego_planner::P4GuideDecisionReason::OCCUPANCY_EPOCH_CHANGED);
-  EXPECT_FALSE(decision.selected.returned);
-  EXPECT_FALSE(decision.selection_applied);
-}
+// The collision-triggered P4 seam was removed. Forward-route tests now own
+// P4 identity, safety, and selection coverage; the test above protects the
+// remaining native EGO collision-rebound contract.

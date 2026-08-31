@@ -481,7 +481,7 @@ namespace ego_planner
     else
       continously_called_times_ = 1;
 
-    static string state_str[8] = {"INIT", "WAIT_TARGET", "GEN_NEW_TRAJ", "REPLAN_TRAJ", "EXEC_TRAJ", "EMERGENCY_STOP", "SEQUENTIAL_START"};
+    static string state_str[8] = {"INIT", "WAIT_TARGET", "GEN_NEW_TRAJ", "REPLAN_TRAJ", "EXEC_TRAJ", "EMERGENCY_STOP", "SEQUENTIAL_START", "OBSERVE_MORE"};
     int pre_s = int(exec_state_);
     exec_state_ = new_state;
     cout << "[" + pos_call + "]: from " + state_str[pre_s] + " to " + state_str[int(new_state)] << endl;
@@ -494,7 +494,7 @@ namespace ego_planner
 
   void EGOReplanFSM::printFSMExecState()
   {
-    static string state_str[8] = {"INIT", "WAIT_TARGET", "GEN_NEW_TRAJ", "REPLAN_TRAJ", "EXEC_TRAJ", "EMERGENCY_STOP", "SEQUENTIAL_START"};
+    static string state_str[8] = {"INIT", "WAIT_TARGET", "GEN_NEW_TRAJ", "REPLAN_TRAJ", "EXEC_TRAJ", "EMERGENCY_STOP", "SEQUENTIAL_START", "OBSERVE_MORE"};
 
     cout << "[FSM]: state: " + state_str[int(exec_state_)] << endl;
   }
@@ -581,7 +581,10 @@ namespace ego_planner
               planFromGlobalTraj(globalTrajTrialLimitForP5FinalGate());
           if (success)
           {
-            changeFSMExecState(EXEC_TRAJ, "FSM");
+            changeFSMExecState(
+                planner_manager_->lastP4ForwardDecision().action ==
+                    P4ForwardAction::OBSERVE_MORE ? OBSERVE_MORE : EXEC_TRAJ,
+                "FSM");
 
             publishSwarmTrajs(true);
           }
@@ -592,7 +595,13 @@ namespace ego_planner
             {
               RCLCPP_ERROR(node_->get_logger(), "Failed to generate the first trajectory!!!");
             }
-            if (!p4_waiting_for_risk_grid_ready_)
+            if (planner_manager_->lastP4ForwardDecision().action ==
+                P4ForwardAction::OBSERVE_MORE)
+            {
+              callEmergencyStop(odom_pos_);
+              changeFSMExecState(OBSERVE_MORE, "P4_FORWARD");
+            }
+            else if (!p4_waiting_for_risk_grid_ready_)
               changeFSMExecState(SEQUENTIAL_START, "FSM");
           }
         }
@@ -611,7 +620,10 @@ namespace ego_planner
       bool success = planFromGlobalTraj(globalTrajTrialLimitForP5FinalGate());
       if (success)
       {
-        changeFSMExecState(EXEC_TRAJ, "FSM");
+        changeFSMExecState(
+            planner_manager_->lastP4ForwardDecision().action ==
+                P4ForwardAction::OBSERVE_MORE ? OBSERVE_MORE : EXEC_TRAJ,
+            "FSM");
         flag_escape_emergency_ = true;
         publishSwarmTrajs(false);
       }
@@ -620,6 +632,12 @@ namespace ego_planner
         if (p4_waiting_for_risk_grid_ready_)
         {
           break;
+        }
+        else if (planner_manager_->lastP4ForwardDecision().action ==
+                 P4ForwardAction::OBSERVE_MORE)
+        {
+          callEmergencyStop(odom_pos_);
+          changeFSMExecState(OBSERVE_MORE, "P4_FORWARD");
         }
         else if (p5_final_gate_emergency_candidate_)
         {
@@ -640,7 +658,10 @@ namespace ego_planner
 
       if (planFromCurrentTraj(1))
       {
-        changeFSMExecState(EXEC_TRAJ, "FSM");
+        changeFSMExecState(
+            planner_manager_->lastP4ForwardDecision().action ==
+                P4ForwardAction::OBSERVE_MORE ? OBSERVE_MORE : EXEC_TRAJ,
+            "FSM");
         publishSwarmTrajs(false);
       }
       else
@@ -648,6 +669,12 @@ namespace ego_planner
         if (p4_waiting_for_risk_grid_ready_)
         {
           break;
+        }
+        else if (planner_manager_->lastP4ForwardDecision().action ==
+                 P4ForwardAction::OBSERVE_MORE)
+        {
+          callEmergencyStop(odom_pos_);
+          changeFSMExecState(OBSERVE_MORE, "P4_FORWARD");
         }
         else if (p5_final_gate_emergency_candidate_)
         {
@@ -739,6 +766,29 @@ namespace ego_planner
       }
 
       flag_escape_emergency_ = false;
+      break;
+    }
+
+    case OBSERVE_MORE:
+    {
+      // Execute only the certified short trajectory.  Re-evaluate at 2 Hz;
+      // if no safe progress exists, publish a zero-velocity stop candidate
+      // and remain in OBSERVE_MORE until a new online snapshot is usable.
+      const double now_s = plannerNow().seconds();
+      if (now_s - p4_last_observe_replan_s_ < 0.5)
+        break;
+      p4_last_observe_replan_s_ = now_s;
+      if (planFromCurrentTraj(1))
+      {
+        publishSwarmTrajs(false);
+        if (planner_manager_->lastP4ForwardDecision().action !=
+            P4ForwardAction::OBSERVE_MORE)
+          changeFSMExecState(EXEC_TRAJ, "P4_FORWARD");
+      }
+      else
+      {
+        callEmergencyStop(odom_pos_);
+      }
       break;
     }
     }
@@ -1024,6 +1074,10 @@ namespace ego_planner
       const P5GateStatus p5_status =
           planner_manager_->p5_integrity_gate_->evaluateRuntime(
               *info, snapshot, now_s, emergency_time_);
+      if (p5_status.action == P5GateAction::OK)
+      {
+        planner_manager_->recordP4RuntimeLineage(now_s);
+      }
       if (p5_status.action == P5GateAction::REQUEST_EMERGENCY_STOP_CANDIDATE)
       {
         RCLCPP_WARN(node_->get_logger(),

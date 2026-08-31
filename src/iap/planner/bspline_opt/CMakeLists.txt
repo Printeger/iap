@@ -44,27 +44,28 @@ if(BUILD_TESTING)
   ament_lint_auto_find_test_dependencies()
 endif()
 
-include_directories( 
-    SYSTEM 
-    include 
-    ${Eigen3_INCLUDE_DIRS} 
+include_directories(
+    SYSTEM
+    include
+    ${Eigen3_INCLUDE_DIRS}
     ${PCL_INCLUDE_DIRS}
 )
 
 ament_export_include_directories(include)
 
-add_library( bspline_opt 
-    src/uniform_bspline.cpp 
-    src/bspline_optimizer.cpp 
+add_library(bspline_opt
+    src/uniform_bspline.cpp
+    src/bspline_optimizer.cpp
     src/p4_collision_guide.cpp
+    src/p4_forward_route.cpp
     src/gradient_descent_optimizer.cpp
-    )
+)
 
-ament_target_dependencies(bspline_opt 
-                          std_msgs visualization_msgs 
-                          nav_msgs cv_bridge 
-                          rclcpp Eigen3 
-                          PCL pcl_conversions 
+ament_target_dependencies(bspline_opt
+                          std_msgs visualization_msgs
+                          nav_msgs cv_bridge
+                          rclcpp Eigen3
+                          PCL pcl_conversions
                           plan_env traj_utils path_searching gnss_comm iap)
 
 target_link_libraries(bspline_opt
@@ -113,6 +114,16 @@ if(BUILD_TESTING)
   target_link_libraries(test_p4_collision_guide_integration
     bspline_opt
     iap::iap
+  )
+
+  ament_add_gtest(test_p4_forward_route
+    test/test_p4_forward_route.cpp
+  )
+  ament_target_dependencies(test_p4_forward_route
+    rclcpp Eigen3
+  )
+  target_link_libraries(test_p4_forward_route
+    bspline_opt
   )
 
   add_executable(icra076_repeatability_probe

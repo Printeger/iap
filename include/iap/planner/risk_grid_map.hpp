@@ -287,6 +287,9 @@ struct RiskCostQueryCornerTrace {
   bool valid = false;
   bool stale = true;
   bool unknown = true;
+  bool gnss_supported = false;
+  bool lidar_supported = false;
+  bool fim_supported = false;
   std::string invalid_reason = "not_evaluated";
   RiskOccupancyDiagnostic occupancy;
 };

@@ -3,6 +3,29 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(p4-online-forward-route): IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 —
+  move P4 from collision-segment repair to an asynchronous pre-B-spline 3-D
+  online topology decision. Bind occupancy+risk generations, timestamps,
+  geometry, AL policy and source/config hashes into one immutable identity;
+  fail closed on incomplete support; apply stopping-distance-bounded
+  `OBSERVE_MORE` creep/hover; seed the B-spline with the selected channel; and
+  restore native EGO A* as the only closed-collision rebound. Add forward
+  lineage/candidate evidence, runner binding, RViz horizon/anchor/candidate
+  markers, forest-v2 8 m horizon and 9/9/4.5 m local ranges, along-path risk
+  timing, 3-D topology/async/stopping tests, and retain legacy collision CSV
+  parsing only. Review hardening makes the 150 ms budget an in-search deadline,
+  binds async results to position and target, requires swept GNSS/LiDAR/FIM
+  support, refines the selected channel with an isolated native 0.1 m EGO A*
+  inside the same asynchronous end-to-end deadline, validates the final
+  B-spline remains in that channel, writes runtime lineage, and removes
+  obsolete disabled collision-P4 tests. Follow-up review hardening validates
+  every occupancy voxel intersecting the swept sphere, validates every
+  non-zero spatial/temporal GNSS/LiDAR/FIM interpolation corner, rejects
+  non-finite limits before constructing a deadline, enforces 2 Hz even after
+  request mismatch, and re-certifies a latched channel against each new
+  snapshot while replacement work is pending. Development integration only;
+  no qualification claim.
+
 - fix(icra-forest-restore-ego-unknown-traversal): IAP-RQ-320 / IAP-RQ-400 /
   IAP-RQ-410 — restore the original base EGO exploration behavior for forest
   v2 by setting `grid_map/unknown_as_occupied=false`. When risk-aware P4 is

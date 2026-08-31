@@ -89,6 +89,12 @@ class FimRatioProvider final : public iap::RiskPredictionProvider {
       result.safety_fused.available = true;
       result.safety_fused.valid = true;
       result.safety_fused.risk_ratio = safety_ratio;
+      result.gnss.available = true;
+      result.gnss.valid = true;
+      result.gnss.stale = false;
+      result.lidar.available = true;
+      result.lidar.valid = true;
+      result.lidar.stale = false;
       result.fim_fused.available = fim_available;
       result.fim_fused.valid = fim_valid;
       result.fim_fused.stale = fim_stale;
@@ -538,6 +544,38 @@ TEST(RiskGridMapTest, PreConservativeFimCostRejectsInvalidFiniteResidual) {
   EXPECT_FALSE(voxel.valid);
   EXPECT_TRUE(voxel.unknown);
   EXPECT_EQ(voxel.reason, "pre_conservative_fim_unavailable");
+}
+
+TEST(RiskGridMapTest,
+     CostTraceCarriesSourceSupportForEveryInterpolationCorner) {
+  auto params = base_params();
+  params.provider_cost_source =
+      iap::RiskProviderCostSource::PRE_CONSERVATIVE_FIM_RATIO;
+  iap::RiskGridMap grid(params);
+  FimRatioProvider provider;
+  provider.fim_available = true;
+  provider.fim_valid = true;
+  provider.fim_ratio = 0.3;
+  ASSERT_TRUE(grid.refreshFromProvider(
+      Eigen::Vector3d::Zero(), 10.0, provider));
+  const auto snapshot = grid.acquireSnapshot();
+  ASSERT_NE(snapshot, nullptr);
+
+  iap::RiskCostSample cost;
+  iap::RiskCostQueryTrace trace;
+  ASSERT_TRUE(snapshot->queryCost(
+      Eigen::Vector3d::Zero(), 10.5, &cost,
+      iap::RiskCostQueryPolicy::CONSERVATIVE_OCCUPIED_COST_SUPPORT,
+      &trace)) << cost.reason;
+  ASSERT_EQ(trace.corners.size(), 16u);
+  EXPECT_TRUE(std::all_of(
+      trace.corners.begin(), trace.corners.end(), [](const auto& corner) {
+        const double weight =
+            corner.temporal_weight * corner.spatial_weight;
+        return weight <= 0.0 ||
+               (corner.gnss_supported && corner.lidar_supported &&
+                corner.fim_supported);
+      }));
 }
 
 TEST(RiskGridMapTest,

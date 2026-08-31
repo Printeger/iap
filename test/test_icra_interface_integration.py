@@ -307,7 +307,7 @@ class TestStageContracts(unittest.TestCase):
             self.assertIn("scene_map.corridor_width_m",
                           evidence["mismatches"])
 
-    def test_forest_full_runs_for_ninety_seconds(self):
+    def test_forest_full_stage_configures_ninety_second_runtime(self):
         self.assertEqual(MODULE.stage_duration_s(
             "full", MODULE.FOREST_SCENARIO, "risk"), 90.0)
         self.assertEqual(MODULE.stage_duration_s(
@@ -729,6 +729,69 @@ class TestStageAnalyzer(unittest.TestCase):
             evidence["geometry_id"] == "planning-lattice-v2"
             and "normal_publish_authorized" in evidence["lineage_stages"]
             for evidence in passed["fork_evidence"].values()))
+
+    def test_forest_risk_gate_accepts_forward_decision_lineage(self):
+        records = []
+        for selected_index in range(4):
+            record = self.forest_generation(low_multiplier=0.8)
+            record["payload"]["generation_id"] = 30 + selected_index
+            for fork in record["payload"]["forks"]:
+                if fork["fork_index"] != selected_index:
+                    for arm in (fork["low"], fork["high"]):
+                        arm["sample_count"] = 0
+                        arm["valid_count"] = 0
+            records.append(record)
+
+        health_rows, legacy_decisions, _ = self.identity_evidence(
+            [30, 31, 32, 33])
+        decisions = []
+        lineage = []
+        for index, legacy in enumerate(legacy_decisions):
+            event_id = str(900 + index)
+            decision = {
+                "schema_version": "p4_forward_route_decision_v1",
+                "stage": "forward_decision",
+                "decision_event_id": event_id,
+                "planning_attempt_id": legacy["planning_attempt_id"],
+                "action": "RISK_SELECTED",
+                "selected_candidate_id": "2",
+                "candidate_count": "2",
+                "risk_generation": legacy["snapshot_generation_id"],
+                "snapshot_config_hash": legacy["snapshot_config_hash"],
+                "source_identity_hash": legacy["source_identity_hash"],
+                "geometry_id": legacy["geometry_id"],
+                "alert_limit_policy_id": "fixed_hal10_val20_v1",
+                "occupancy_generation": legacy["occupancy_epoch"],
+                "occupancy_stamp_s": legacy["occupancy_stamp_s"],
+                "request_x": legacy["segment_start_x"],
+                "request_y": legacy["segment_start_y"],
+                "request_z": legacy["segment_start_z"],
+                "anchor_x": legacy["segment_end_x"],
+                "anchor_y": legacy["segment_end_y"],
+                "anchor_z": legacy["segment_end_z"],
+            }
+            decisions.append(decision)
+            lineage.extend({
+                **decision,
+                "stage": stage,
+                "trajectory_id": str(700 + index),
+                "trajectory_start_ns": str(800 + index),
+                "control_points_hash": f"control-{index}",
+            } for stage in (
+                "final_bspline_before_p5",
+                "p5_final_pass_before_publish",
+                "normal_publish_authorized",
+                "p5_runtime_committed",
+            ))
+
+        result = MODULE.analyze_forest_risk(
+            records, health_rows, decisions, lineage)
+
+        self.assertEqual(result["result"], "PASS")
+        self.assertEqual(set(result["fork_evidence"]), {"0", "1", "2", "3"})
+        self.assertTrue(all(
+            evidence["decision_event_id"] is not None
+            for evidence in result["fork_evidence"].values()))
 
     def test_forest_risk_gate_rejects_cross_fork_config_change(self):
         records = []

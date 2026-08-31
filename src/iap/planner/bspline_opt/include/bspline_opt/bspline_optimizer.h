@@ -443,6 +443,19 @@ namespace ego_planner
     void releaseP4RiskSnapshot();
     void clearP4RiskSnapshot();
     bool validateP4AttemptLineage(uint64_t planning_attempt_id);
+    // Collision rebound is deliberately risk-agnostic. P4 now selects an
+    // initial forward route before B-spline construction; closed collision
+    // segments retain the native EGO A* repair path only.
+    bool collectNativeAStarGuides(
+        const Eigen::MatrixXd &points,
+        const std::vector<std::pair<int, int>> &segments,
+        std::vector<std::vector<Eigen::Vector3d>> *guide_paths);
+    bool refineP4ForwardGuide(
+        const std::vector<Eigen::Vector3d> &coarse_guide,
+        GridMapOccupancyDiagnosticQuery frozen_occupancy_query,
+        double corridor_radius_m,
+        double compute_budget_ms,
+        std::vector<Eigen::Vector3d> *refined_guide);
 
     // optional inputs
     void setGuidePath(const vector<Eigen::Vector3d> &guide_pt);
@@ -508,11 +521,6 @@ namespace ego_planner
         mutation(p4_attempt_lineage_.front());
     }
     bool hasP4RiskSnapshotForTest() const { return static_cast<bool>(p4_risk_snapshot_); }
-    bool p4DecisionReadyForInjectionForTest(
-        P4GuideDecision *decision, const Eigen::MatrixXd &points,
-        const std::pair<int, int> &segment) const {
-      return p4DecisionReadyForInjection(decision, points, segment);
-    }
     const OptimizerCostBreakdown &getLastOptimizerCostBreakdown() const { return last_optimizer_cost_breakdown_; }
     const P1OptimizationTrace &getLastP1OptimizationTrace() const { return last_p1_optimization_trace_; }
     const P1BasePrepassTrace &getLastP1BasePrepassTrace() const {
@@ -727,22 +735,6 @@ namespace ego_planner
     void captureP1PostOptimizationTrajectory(
         const Eigen::MatrixXd &control_points, double interval_s);
     void writeP1CandidateSidecars(const P1OptimizationTrace &trace) const;
-    uint64_t p4SegmentId(const std::pair<int, int> &segment) const;
-    P4GuideRequest makeP4GuideRequest(
-        const Eigen::MatrixXd &points,
-        const std::pair<int, int> &segment) const;
-    P4GuideDecision planCollisionGuideForSegment(
-        const Eigen::MatrixXd &points,
-        const std::pair<int, int> &segment);
-    bool collectP4GuidesForSegments(
-        const Eigen::MatrixXd &points,
-        const std::vector<std::pair<int, int>> &segments,
-        std::vector<std::vector<Eigen::Vector3d>> *guide_paths,
-        const char *logger_name);
-    bool p4DecisionReadyForInjection(
-        P4GuideDecision *decision,
-        const Eigen::MatrixXd &points,
-        const std::pair<int, int> &segment) const;
     bool check_collision_and_rebound(void);
 
     static int earlyExit(void *func_data, const double *x, const double *g, const double fx, const double xnorm, const double gnorm, const double step, int n, int k, int ls);

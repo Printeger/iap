@@ -115,7 +115,8 @@ namespace ego_planner
       REPLAN_TRAJ,
       EXEC_TRAJ,
       EMERGENCY_STOP,
-      SEQUENTIAL_START
+      SEQUENTIAL_START,
+      OBSERVE_MORE
     };
     enum TARGET_TYPE
     {
@@ -160,6 +161,8 @@ namespace ego_planner
     bool p5_waiting_for_p0_ready_ = false;
     bool p4_waiting_for_risk_grid_ready_ = false;
     bool p4_require_risk_grid_ready_before_planning_ = false;
+    double p4_last_observe_replan_s_ =
+        -std::numeric_limits<double>::infinity();
     std::shared_ptr<const iap::RiskGridSnapshot> p4_admitted_risk_grid_snapshot_;
     P4RiskGridPlanningAdmission p4_risk_grid_planning_admission_;
     P1ReplanAdmission p1_replan_admission_;

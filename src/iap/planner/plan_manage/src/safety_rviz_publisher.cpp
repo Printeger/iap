@@ -1419,6 +1419,39 @@ SafetyRvizPublisher::buildP4GuideMarkers(
     arr.markers.push_back(line);
   };
   for (const auto& guide : guides) {
+    if (guide.forward_decision) {
+      for (const auto& raw : guide.raw_topology_paths) {
+        add_path(raw, color(0.7f, 0.7f, 0.75f, 0.22f), 0.018);
+      }
+      for (std::size_t index = 0;
+           index < guide.topology_candidates.size(); ++index) {
+        const bool supported =
+            index < guide.topology_candidate_supported.size() &&
+            guide.topology_candidate_supported[index];
+        add_path(
+            guide.topology_candidates[index],
+            supported ? color(0.3f, 0.65f, 1.0f, 0.65f)
+                      : color(0.75f, 0.2f, 0.85f, 0.75f),
+            0.045);
+        if (!guide.topology_candidates[index].empty() &&
+            index < guide.topology_candidate_labels.size()) {
+          auto label = base_marker(
+              config, stamp, "p4_astar_guides", id++,
+              visualization_msgs::msg::Marker::TEXT_VIEW_FACING);
+          label.pose.position = point_msg(
+              guide.topology_candidates[index][
+                  guide.topology_candidates[index].size() / 2]);
+          label.pose.position.z += 0.22;
+          label.scale.z = 0.18;
+          label.color = supported ? color(0.8f, 0.9f, 1.0f, 0.9f)
+                                  : color(1.0f, 0.45f, 1.0f, 0.95f);
+          label.text = guide.topology_candidate_labels[index];
+          arr.markers.push_back(std::move(label));
+        }
+      }
+      add_path(guide.observe_more_path,
+               color(0.1f, 0.95f, 0.95f, 0.95f), 0.09);
+    }
     add_path(guide.original_path, color(0.2f, 0.45f, 1.0f, 0.45f), 0.04);
     add_path(guide.risk_path, color(1.0f, 0.52f, 0.04f, 0.65f), 0.06);
     add_path(guide.selected_path,
@@ -1432,6 +1465,32 @@ SafetyRvizPublisher::buildP4GuideMarkers(
     endpoints.points.push_back(point_msg(guide.segment_start));
     endpoints.points.push_back(point_msg(guide.segment_end));
     arr.markers.push_back(std::move(endpoints));
+    if (guide.forward_decision && guide.common_anchor.allFinite()) {
+      auto anchor = base_marker(config, stamp, "p4_astar_guides", id++,
+          visualization_msgs::msg::Marker::SPHERE);
+      anchor.pose.position = point_msg(guide.common_anchor);
+      anchor.scale.x = anchor.scale.y = anchor.scale.z = 0.34;
+      anchor.color = color(0.15f, 0.95f, 0.9f, 0.95f);
+      arr.markers.push_back(std::move(anchor));
+      const auto add_ring = [&](const double radius,
+                                const std_msgs::msg::ColorRGBA& ring_color) {
+          if (!guide.uav_position.allFinite() || radius <= 0.0) return;
+          auto ring = base_marker(config, stamp, "p4_astar_guides", id++,
+              visualization_msgs::msg::Marker::LINE_STRIP);
+          ring.scale.x = 0.025;
+          ring.color = ring_color;
+          constexpr int kRingSegments = 48;
+          for (int segment = 0; segment <= kRingSegments; ++segment) {
+            const double angle = 2.0 * M_PI * segment / kRingSegments;
+            ring.points.push_back(point_msg(
+                guide.uav_position + Eigen::Vector3d(
+                    radius * std::cos(angle), radius * std::sin(angle), 0.0)));
+          }
+          arr.markers.push_back(std::move(ring));
+        };
+      add_ring(guide.decision_horizon_m, color(0.2f, 0.7f, 1.0f, 0.65f));
+      add_ring(guide.stopping_distance_m, color(1.0f, 0.25f, 0.1f, 0.8f));
+    }
     if (guide.uav_position.allFinite()) {
       auto connector = base_marker(config, stamp, "p4_astar_guides", id++,
           visualization_msgs::msg::Marker::LINE_LIST);
@@ -1456,7 +1515,9 @@ SafetyRvizPublisher::buildP4GuideMarkers(
     label.scale.z = 0.22;
     label.color = guide.risk_selected ? color(0.1f, 0.85f, 0.25f, 1.0f)
                                       : color(1.0f, 0.75f, 0.05f, 1.0f);
-    label.text = std::string("P4 local collision guide\n") +
+    label.text = std::string(guide.forward_decision ?
+                 "P4 forward route decision\n" :
+                 "P4 local collision guide\n") +
                  (guide.risk_selected ? "risk guide" : "original guide") +
                  "\nratio: " + fmt_num(guide.path_length_ratio, 2) +
                  "\nreason: " + guide.reason;

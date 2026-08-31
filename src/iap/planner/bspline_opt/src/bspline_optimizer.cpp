@@ -219,144 +219,6 @@ namespace ego_planner
       return true;
     }
 
-    void writeP4Csv(const P4RiskAStarConfig &config,
-                    const P4GuideDecision &decision,
-                    double stamp)
-    {
-      if (!config.enable_risk_aware_astar || !config.debug_csv_enable || config.debug_csv_path.empty())
-        return;
-      std::ifstream existing(config.debug_csv_path);
-      const bool write_header =
-          !existing.good() || existing.peek() == std::ifstream::traits_type::eof();
-      existing.close();
-
-      std::ofstream csv(config.debug_csv_path, std::ios::app);
-      if (!csv.good())
-        return;
-      if (write_header)
-      {
-        csv << "schema_version,stamp,planning_attempt_id,collision_segment_id,"
-               "request_hash,snapshot_generation_id,snapshot_stamp_s,snapshot_frame,"
-               "snapshot_config_hash,source_identity_hash,"
-               "query_base_time_s,occupancy_epoch,geometry_id,occupancy_stamp_s,"
-               "segment_start_x,segment_start_y,segment_start_z,"
-               "segment_end_x,segment_end_y,segment_end_z,"
-               "status,reason,selection_applied,"
-               "original_hash,risk_hash,selected_hash,original_sample_count,"
-               "original_valid_count,original_unknown_count,original_stale_count,"
-               "original_non_finite_count,original_mean,original_max,risk_sample_count,"
-               "risk_valid_count,risk_unknown_count,risk_stale_count,risk_non_finite_count,"
-               "risk_mean,risk_max,original_path_length,risk_path_length,"
-               "original_controllable_length,risk_controllable_length,path_length_ratio,"
-               "original_search_latency_ms,risk_search_latency_ms,total_search_latency_ms\n";
-      }
-      const auto &original = decision.original.risk_profile;
-      const auto &risk = decision.risk.risk_profile;
-      csv << decision.schema_version << ',' << stamp << ','
-          << decision.planning_attempt_id << ','
-          << decision.collision_segment_id << ',' << decision.request_hash << ','
-          << decision.snapshot_generation << ',' << decision.snapshot_stamp_s << ','
-          << decision.snapshot_frame << ',' << decision.snapshot_config_hash << ','
-          << decision.source_identity_hash << ','
-          << decision.query_base_time_s << ','
-          << decision.occupancy_epoch << ','
-          << decision.geometry_id << ',' << decision.occupancy_stamp_s << ','
-          << decision.segment_start.x() << ',' << decision.segment_start.y() << ','
-          << decision.segment_start.z() << ',' << decision.segment_end.x() << ','
-          << decision.segment_end.y() << ',' << decision.segment_end.z() << ','
-          << p4GuideDecisionStatusName(decision.status) << ','
-          << p4GuideDecisionReasonName(decision.reason) << ','
-          << (decision.selection_applied ? 1 : 0) << ','
-          << decision.original.canonical_hash << ','
-          << decision.risk.canonical_hash << ','
-          << decision.selected.canonical_hash << ','
-          << original.sample_count << ',' << original.valid_count << ','
-          << original.unknown_count << ',' << original.stale_count << ','
-          << original.non_finite_count << ',' << original.mean << ','
-          << original.max << ',' << risk.sample_count << ',' << risk.valid_count << ','
-          << risk.unknown_count << ',' << risk.stale_count << ','
-          << risk.non_finite_count << ',' << risk.mean << ',' << risk.max << ','
-          << decision.original.length_m << ',' << decision.risk.length_m << ','
-          << decision.original.controllable_length_m << ','
-          << decision.risk.controllable_length_m << ','
-          << decision.risk_original_length_ratio << ','
-          << decision.original_search_latency_ms << ','
-          << decision.risk_search_latency_ms << ','
-          << decision.total_search_latency_ms << '\n';
-    }
-
-    const char *p4OccupancyClass(
-        const iap::RiskOccupancyDiagnostic &occupancy)
-    {
-      if (!occupancy.available)
-        return "UNAVAILABLE";
-      if (occupancy.raw_occupied)
-        return "RAW_OCCUPIED";
-      if (occupancy.inflated_occupied)
-        return "INFLATED_OCCUPIED";
-      return "FREE";
-    }
-
-    void writeP4ProfileTraceCsv(const P4RiskAStarConfig &config,
-                                const P4GuideDecision &decision)
-    {
-      if (!config.profile_trace_enable || config.profile_trace_path.empty())
-        return;
-      std::ifstream existing(config.profile_trace_path);
-      const bool write_header =
-          !existing.good() || existing.peek() == std::ifstream::traits_type::eof();
-      existing.close();
-      std::ofstream csv(config.profile_trace_path, std::ios::app);
-      if (!csv.good())
-        return;
-      if (write_header)
-        csv << "schema_version,planning_attempt_id,collision_segment_id,request_hash,"
-               "arm,sample_index,point_x,point_y,point_z,query_time_s,query_tau_s,"
-               "sample_valid,sample_stale,sample_cost,top_reason,risk_generation_id,"
-               "frame_id,corner_id,temporal_layer,horizon_id,horizon_s,temporal_weight,"
-               "voxel_x,voxel_y,voxel_z,voxel_position_x,voxel_position_y,voxel_position_z,"
-               "spatial_weight,source_flags,corner_cost,corner_valid,corner_stale,"
-               "corner_unknown,corner_reason,occupancy_class,occupancy_source\n";
-      const auto emit_arm = [&](const char *arm, const P4GuideRecord &record) {
-        for (const auto &sample_trace : record.sample_traces) {
-          const auto emit = [&](const iap::RiskCostQueryCornerTrace *corner) {
-            csv << "p4_equal_arc_profile_trace_v1," << decision.planning_attempt_id << ','
-                << decision.collision_segment_id << ',' << decision.request_hash << ','
-                << arm << ',' << sample_trace.sample_index << ','
-                << sample_trace.point.x() << ',' << sample_trace.point.y() << ','
-                << sample_trace.point.z() << ',' << sample_trace.query_time_s << ','
-                << sample_trace.query.query_tau_s << ','
-                << (sample_trace.sample.valid ? 1 : 0) << ','
-                << (sample_trace.sample.stale ? 1 : 0) << ','
-                << sample_trace.sample.cost << ',' << sample_trace.query.reason << ','
-                << sample_trace.query.risk_generation_id << ','
-                << sample_trace.query.frame_id << ',';
-            if (!corner) {
-              csv << "-1,-1,-1,nan,0,-1,-1,-1,nan,nan,nan,0,0,nan,0,1,1,not_evaluated,UNAVAILABLE,unavailable\n";
-              return;
-            }
-            csv << corner->corner_id << ',' << corner->temporal_layer << ','
-                << corner->horizon_id << ',' << corner->horizon_s << ','
-                << corner->temporal_weight << ',' << corner->voxel_index.x() << ','
-                << corner->voxel_index.y() << ',' << corner->voxel_index.z() << ','
-                << corner->voxel_position.x() << ',' << corner->voxel_position.y() << ','
-                << corner->voxel_position.z() << ',' << corner->spatial_weight << ','
-                << corner->source_flags << ',' << corner->c_pi << ','
-                << (corner->valid ? 1 : 0) << ',' << (corner->stale ? 1 : 0) << ','
-                << (corner->unknown ? 1 : 0) << ',' << corner->invalid_reason << ','
-                << p4OccupancyClass(corner->occupancy) << ','
-                << corner->occupancy.source << '\n';
-          };
-          if (sample_trace.query.corners.empty())
-            emit(nullptr);
-          else
-            for (const auto &corner : sample_trace.query.corners)
-              emit(&corner);
-        }
-      };
-      emit_arm("original", decision.original);
-      emit_arm("risk", decision.risk);
-    }
   } // namespace
 
 
@@ -708,118 +570,122 @@ namespace ego_planner
     active_p4_attempt_id_ = 0;
   }
 
-  uint64_t BsplineOptimizer::p4SegmentId(const std::pair<int, int> &segment) const
-  {
-    return (static_cast<uint64_t>(static_cast<uint32_t>(segment.first + 1)) << 32) |
-           static_cast<uint64_t>(static_cast<uint32_t>(segment.second + 1));
-  }
-
-  P4GuideRequest BsplineOptimizer::makeP4GuideRequest(
-      const Eigen::MatrixXd &points,
-      const std::pair<int, int> &segment) const
-  {
-    return P4GuideRequest(
-        active_p4_attempt_id_, p4SegmentId(segment),
-        points.col(segment.first), points.col(segment.second), true,
-        p4_risk_snapshot_, p4_query_base_time_s_, p4_occupancy_epoch_,
-        [map = grid_map_]() { return map ? map->occupancyGeneration() : 0; },
-        p4_config_, p4_occupancy_snapshot_);
-  }
-
-  P4GuideDecision BsplineOptimizer::planCollisionGuideForSegment(
-      const Eigen::MatrixXd &points,
-      const std::pair<int, int> &segment)
-  {
-    const P4GuideRequest request = makeP4GuideRequest(points, segment);
-    P4AStarGuideSearch search(a_star_);
-    P4CollisionGuidePlanner planner(search);
-    return planner.planCollisionGuide(request);
-  }
-
-  bool BsplineOptimizer::p4DecisionReadyForInjection(
-      P4GuideDecision *decision,
-      const Eigen::MatrixXd &points,
-      const std::pair<int, int> &segment) const
-  {
-    if (!decision)
-      return false;
-    P4GuideDecisionReason reason = P4GuideDecisionReason::NOT_EVALUATED;
-    const bool ready = ego_planner::p4GuideDecisionReadyForInjection(
-        *decision, makeP4GuideRequest(points, segment), &reason);
-    if (!ready)
-    {
-      decision->status = P4GuideDecisionStatus::DECISION_INVALID_REPLAN_REQUIRED;
-      decision->reason = reason;
-      decision->selected = P4GuideRecord{};
-      decision->selection_applied = false;
-    }
-    return ready;
-  }
-
-  bool BsplineOptimizer::collectP4GuidesForSegments(
+  bool BsplineOptimizer::collectNativeAStarGuides(
       const Eigen::MatrixXd &points,
       const std::vector<std::pair<int, int>> &segments,
-      std::vector<std::vector<Eigen::Vector3d>> *guide_paths,
-      const char *logger_name)
+      std::vector<std::vector<Eigen::Vector3d>> *guide_paths)
   {
-    if (!guide_paths)
-    {
-      invalidateP4AttemptLineage();
+    if (!guide_paths || !a_star_)
       return false;
-    }
     guide_paths->clear();
     guide_paths->reserve(segments.size());
+    a_star_->clearRiskSnapshot();
+    a_star_->clearFrozenOccupancyQuery();
     for (const auto &segment : segments)
     {
-      P4GuideDecision decision = planCollisionGuideForSegment(points, segment);
-      writeP4Csv(p4_config_, decision, rclcpp::Clock().now().seconds());
-      writeP4ProfileTraceCsv(p4_config_, decision);
-      last_p4_guides_.push_back(std::move(decision));
-      const auto &stored = last_p4_guides_.back();
-      if ((stored.status != P4GuideDecisionStatus::ORIGINAL_SELECTED &&
-           stored.status != P4GuideDecisionStatus::RISK_SELECTED) ||
-          !stored.selected.returned)
+      if (segment.first < 0 || segment.second >= points.cols() ||
+          segment.first >= segment.second ||
+          !a_star_->AstarSearchOriginal(
+              0.1, points.col(segment.first), points.col(segment.second)))
       {
-        invalidateP4AttemptLineage();
-        RCLCPP_ERROR(
-            rclcpp::get_logger(logger_name),
-            "P4 guide decision failed closed: status=%s reason=%s",
-            p4GuideDecisionStatusName(stored.status),
-            p4GuideDecisionReasonName(stored.reason));
-        return false;
-      }
-      guide_paths->push_back(stored.selected.complete_path);
-    }
-    for (size_t index = 0; index < segments.size(); ++index)
-    {
-      if (!p4DecisionReadyForInjection(
-          &last_p4_guides_[index], points, segments[index]))
-      {
-        invalidateP4AttemptLineage();
-        RCLCPP_ERROR(
-            rclcpp::get_logger(logger_name),
-            "P4 guide identity changed before constraint injection: reason=%s",
-            p4GuideDecisionReasonName(last_p4_guides_[index].reason));
         guide_paths->clear();
         return false;
       }
+      auto path = a_star_->getPath();
+      if (path.size() < 2)
+      {
+        guide_paths->clear();
+        return false;
+      }
+      guide_paths->push_back(std::move(path));
     }
-    for (const auto &decision : last_p4_guides_)
-    {
-      const auto existing = std::find_if(
-          p4_attempt_lineage_.begin(), p4_attempt_lineage_.end(),
-          [&decision](const P4AttemptLineageRecord &candidate) {
-            return candidate.planning_attempt_id == decision.planning_attempt_id &&
-                   candidate.collision_segment_id == decision.collision_segment_id &&
-                   candidate.request_hash == decision.request_hash;
-          });
-      if (existing == p4_attempt_lineage_.end())
-        p4_attempt_lineage_.push_back(makeP4AttemptLineageRecord(decision));
-      else
-        *existing = makeP4AttemptLineageRecord(decision);
-    }
-    syncP4AdmittedLineage();
     return true;
+  }
+
+  bool BsplineOptimizer::refineP4ForwardGuide(
+      const std::vector<Eigen::Vector3d> &coarse_guide,
+      GridMapOccupancyDiagnosticQuery frozen_occupancy_query,
+      const double corridor_radius_m,
+      const double compute_budget_ms,
+      std::vector<Eigen::Vector3d> *refined_guide)
+  {
+    if (!refined_guide || !grid_map_ || coarse_guide.size() < 2 ||
+        !frozen_occupancy_query || !std::isfinite(corridor_radius_m) ||
+        corridor_radius_m <= 0.0 || !std::isfinite(compute_budget_ms) ||
+        compute_budget_ms <= 0.0)
+      return false;
+    refined_guide->clear();
+    const auto deadline = std::chrono::steady_clock::now() +
+        std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+            std::chrono::duration<double, std::milli>(compute_budget_ms));
+    const auto deadline_query =
+        [query = std::move(frozen_occupancy_query), deadline](
+            const Eigen::Vector3d &point)
+        {
+          if (std::chrono::steady_clock::now() >= deadline)
+            return GridMapOccupancyDiagnostic{};
+          return query(point);
+        };
+    Eigen::Vector3d minimum = coarse_guide.front();
+    Eigen::Vector3d maximum = coarse_guide.front();
+    for (const auto &point : coarse_guide)
+    {
+      if (!point.allFinite())
+        return false;
+      minimum = minimum.cwiseMin(point);
+      maximum = maximum.cwiseMax(point);
+    }
+    constexpr double kFineResolutionM = 0.1;
+    const Eigen::Vector3d search_extent =
+        maximum - minimum +
+        Eigen::Vector3d::Constant(2.0 * corridor_radius_m);
+    const Eigen::Vector3i pool_size =
+        (search_extent / kFineResolutionM).array().ceil().cast<int>().matrix() +
+        Eigen::Vector3i::Constant(8);
+    auto fine_astar = std::make_shared<AStar>();
+    fine_astar->initGridMap(
+        grid_map_, pool_size.cwiseMax(Eigen::Vector3i::Constant(12)));
+    fine_astar->setFrozenOccupancyQuery(deadline_query);
+    const auto fail = [refined_guide]()
+    {
+      refined_guide->clear();
+      return false;
+    };
+    for (std::size_t segment = 1; segment < coarse_guide.size(); ++segment)
+    {
+      if (std::chrono::steady_clock::now() >= deadline)
+        return fail();
+      const Eigen::Vector3d from = coarse_guide[segment - 1];
+      const Eigen::Vector3d to = coarse_guide[segment];
+      if ((to - from).norm() <= 1.0e-6)
+        continue;
+      if (!fine_astar->AstarSearchOriginal(kFineResolutionM, from, to))
+        return fail();
+      if (std::chrono::steady_clock::now() >= deadline)
+        return fail();
+      const auto path = fine_astar->getPath();
+      if (path.size() < 2)
+        return fail();
+      const Eigen::Vector3d direction = to - from;
+      const double squared_length = direction.squaredNorm();
+      if (refined_guide->empty() ||
+          (from - refined_guide->back()).norm() > 1.0e-6)
+        refined_guide->push_back(from);
+      for (const auto &point : path)
+      {
+        const double alpha = std::clamp(
+            (point - from).dot(direction) / squared_length, 0.0, 1.0);
+        const Eigen::Vector3d closest = from + alpha * direction;
+        if ((point - closest).norm() > corridor_radius_m)
+          return fail();
+        if (refined_guide->empty() ||
+            (point - refined_guide->back()).norm() > 1.0e-6)
+          refined_guide->push_back(point);
+      }
+      if ((to - refined_guide->back()).norm() > 1.0e-6)
+        refined_guide->push_back(to);
+    }
+    return refined_guide->size() >= 2;
   }
 
   // 返回多个安全的控制点集
@@ -1504,10 +1370,10 @@ namespace ego_planner
         last_collision_scan_result_.closed_segments;
     bool occ = false;
 
-    /*** one immutable P4 decision per scanner-closed segment ***/
+    /*** native EGO A* repair for scanner-closed segments ***/
     vector<vector<Eigen::Vector3d>> a_star_pathes;
-    if (!collectP4GuidesForSegments(
-        init_points, segment_ids, &a_star_pathes, "initControlPoints"))
+    if (!collectNativeAStarGuides(
+        init_points, segment_ids, &a_star_pathes))
     {
       last_collision_scan_result_ = CollisionScanResult{};
       return last_collision_scan_result_;
@@ -2342,9 +2208,8 @@ namespace ego_planner
     if (!segment_ids.empty())
     {
       vector<vector<Eigen::Vector3d>> a_star_pathes;
-      if (!collectP4GuidesForSegments(
-          cps_.points, segment_ids, &a_star_pathes,
-          "check_collision_and_rebound"))
+      if (!collectNativeAStarGuides(
+          cps_.points, segment_ids, &a_star_pathes))
       {
         force_stop_type_ = STOP_FOR_ERROR;
         return false;

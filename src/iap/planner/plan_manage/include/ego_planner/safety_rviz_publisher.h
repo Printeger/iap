@@ -111,14 +111,24 @@ struct SafetyVizP3ReferenceBias {
 };
 
 struct SafetyVizP4Guide {
+  bool forward_decision = false;
   Eigen::Vector3d uav_position = Eigen::Vector3d::Constant(
       std::numeric_limits<double>::quiet_NaN());
+  std::vector<std::vector<Eigen::Vector3d>> raw_topology_paths;
+  std::vector<std::vector<Eigen::Vector3d>> topology_candidates;
+  std::vector<std::string> topology_candidate_labels;
+  std::vector<bool> topology_candidate_supported;
   std::vector<Eigen::Vector3d> original_path;
   std::vector<Eigen::Vector3d> risk_path;
   std::vector<Eigen::Vector3d> selected_path;
+  std::vector<Eigen::Vector3d> observe_more_path;
   Eigen::Vector3d segment_start = Eigen::Vector3d::Zero();
   Eigen::Vector3d segment_end = Eigen::Vector3d::Zero();
+  Eigen::Vector3d common_anchor = Eigen::Vector3d::Constant(
+      std::numeric_limits<double>::quiet_NaN());
   double path_length_ratio = 0.0;
+  double decision_horizon_m = 0.0;
+  double stopping_distance_m = 0.0;
   bool risk_selected = false;
   std::string reason = "not_evaluated";
 };

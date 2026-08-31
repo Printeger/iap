@@ -9,6 +9,7 @@
 #include <string>
 
 #include <bspline_opt/bspline_optimizer.h>
+#include <bspline_opt/p4_forward_route.h>
 #include <bspline_opt/uniform_bspline.h>
 #include <ego_planner/p2_candidate_ranking.h>
 #include <ego_planner/p3_reference_bias.h>
@@ -128,6 +129,14 @@ namespace ego_planner
     void recordGate0NormalBsplinePublish(double stamp_s);
     bool recordP4VerticalSliceLineage(const std::string &stage,
                                       double stamp_s);
+    bool recordP4RuntimeLineage(double stamp_s);
+    const P4ForwardDecision &lastP4ForwardDecision() const {
+      return last_p4_forward_decision_;
+    }
+    void setP4ForwardDecisionForTest(P4ForwardDecision decision)
+    {
+      last_p4_forward_decision_ = std::move(decision);
+    }
     void setP4VerticalSliceOptimizerForTest(
         BsplineOptimizer::Ptr optimizer, GridMap::Ptr grid_map)
     {
@@ -179,6 +188,32 @@ namespace ego_planner
     std::string trajectory_frame_id_{"map"};
     std::string last_p1_rejection_reason_;
     bool last_p1_rejection_requires_new_generation_{false};
+    P4ForwardLimits p4_forward_limits_;
+    P4ForwardDecisionWorker p4_forward_worker_;
+    P4ForwardDecision last_p4_forward_decision_;
+    P4ForwardDecision published_p4_forward_decision_;
+    int published_p4_trajectory_id_ = 0;
+    int64_t published_p4_trajectory_start_ns_ = 0;
+    std::string published_p4_control_points_hash_;
+    int64_t last_p4_runtime_lineage_start_ns_ = 0;
+    Eigen::Vector3d p4_last_decision_position_ = Eigen::Vector3d::Constant(
+        std::numeric_limits<double>::quiet_NaN());
+    Eigen::Vector3d p4_last_decision_target_ = Eigen::Vector3d::Constant(
+        std::numeric_limits<double>::quiet_NaN());
+    double p4_last_compute_stamp_s_ =
+        -std::numeric_limits<double>::infinity();
+    std::vector<Eigen::Vector3d> p4_latched_guide_;
+    Eigen::Vector3d p4_latched_anchor_ = Eigen::Vector3d::Constant(
+        std::numeric_limits<double>::quiet_NaN());
+    std::string p4_latched_geometry_policy_;
+
+    P4ForwardDecision evaluateP4ForwardRoute(
+        const Eigen::Vector3d &start_pt,
+        const Eigen::Vector3d &start_vel,
+        const Eigen::Vector3d &local_target_pt);
+    bool appendP4ForwardDecision(const P4ForwardDecision &decision,
+                                 const std::string &stage,
+                                 double stamp_s);
 
     void appendPlanningRiskContextTimeline(const std::string &stage,
                                            double stamp_s,

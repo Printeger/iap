@@ -600,6 +600,12 @@ bool interpolate_cost_layer(const RiskGridSnapshot::Generation& generation,
           corner.valid = voxel.valid;
           corner.stale = voxel.stale;
           corner.unknown = voxel.unknown;
+          corner.gnss_supported = voxel.gnss.available && voxel.gnss.valid &&
+              !voxel.gnss.stale;
+          corner.lidar_supported = voxel.lidar.available &&
+              voxel.lidar.valid && !voxel.lidar.stale;
+          corner.fim_supported = voxel.fim_fused.available &&
+              voxel.fim_fused.valid && !voxel.fim_fused.stale;
           corner.invalid_reason = corner_valid ? "none" : corner_reason;
           if (voxel.occupancy) {
             corner.occupancy = *voxel.occupancy;

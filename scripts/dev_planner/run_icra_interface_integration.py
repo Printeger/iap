@@ -447,32 +447,56 @@ def analyze_forest_risk(
             if _decision_fork_index(decision) != fork_index:
                 continue
             try:
-                identity_matches = (
-                    int(decision["snapshot_generation_id"]) == generation_id
-                    and decision["snapshot_config_hash"] ==
-                    health_identity["snapshot_config_hash"]
-                    and decision["source_identity_hash"] ==
-                    health_identity["source_identity_hash"]
-                    and decision["geometry_id"] ==
-                    health_identity["geometry_id"]
-                    and int(decision["occupancy_epoch"]) ==
-                    source["occupancy_generation"]
-                    and math.isclose(
-                        float(decision["occupancy_stamp_s"]),
-                        source["occupancy_stamp_s"],
-                        rel_tol=0.0, abs_tol=1.0e-6))
+                if decision.get("schema_version") == \
+                        "p4_forward_route_decision_v1":
+                    identity_matches = (
+                        int(decision["risk_generation"]) == generation_id
+                        and decision["snapshot_config_hash"] ==
+                        health_identity["snapshot_config_hash"]
+                        and decision["source_identity_hash"] ==
+                        health_identity["source_identity_hash"]
+                        and decision["geometry_id"] ==
+                        health_identity["geometry_id"]
+                        and decision["alert_limit_policy_id"] ==
+                        health_identity["alert_limit_policy_id"]
+                        and int(decision["occupancy_generation"]) ==
+                        source["occupancy_generation"]
+                        and math.isclose(
+                            float(decision["occupancy_stamp_s"]),
+                            source["occupancy_stamp_s"],
+                            rel_tol=0.0, abs_tol=1.0e-6))
+                    decision_key = (str(decision["decision_event_id"]),)
+                else:
+                    identity_matches = (
+                        int(decision["snapshot_generation_id"]) == generation_id
+                        and decision["snapshot_config_hash"] ==
+                        health_identity["snapshot_config_hash"]
+                        and decision["source_identity_hash"] ==
+                        health_identity["source_identity_hash"]
+                        and decision["geometry_id"] ==
+                        health_identity["geometry_id"]
+                        and int(decision["occupancy_epoch"]) ==
+                        source["occupancy_generation"]
+                        and math.isclose(
+                            float(decision["occupancy_stamp_s"]),
+                            source["occupancy_stamp_s"],
+                            rel_tol=0.0, abs_tol=1.0e-6))
+                    decision_key = _decision_lineage_key(decision)
             except (KeyError, TypeError, ValueError):
                 continue
-            decision_key = _decision_lineage_key(decision)
             group = published_lineage_keys.get(decision_key)
             if not identity_matches or group is None:
                 continue
             return {
                 **health_identity,
                 "planning_attempt_id": decision["planning_attempt_id"],
-                "collision_segment_id": decision["collision_segment_id"],
-                "request_hash": decision["request_hash"],
-                "occupancy_epoch": int(decision["occupancy_epoch"]),
+                "decision_event_id": decision.get("decision_event_id"),
+                "collision_segment_id": decision.get(
+                    "collision_segment_id"),
+                "request_hash": decision.get("request_hash"),
+                "occupancy_epoch": int(decision.get(
+                    "occupancy_generation", decision.get(
+                        "occupancy_epoch", 0))),
                 "occupancy_stamp_s": float(decision["occupancy_stamp_s"]),
                 "lineage_stages": sorted(group["stages"]),
                 "trajectory_id": group["trajectory_id"],
@@ -847,7 +871,15 @@ DECISION_SEGMENT_FIELDS = (
 def _decision_fork_index(row: dict) -> int | None:
     """Map one local collision segment to exactly one frozen forest fork."""
     try:
-        coordinates = [float(row[field]) for field in DECISION_SEGMENT_FIELDS]
+        if row.get("schema_version") == "p4_forward_route_decision_v1":
+            coordinates = [
+                float(row["request_x"]), float(row["request_y"]),
+                float(row["request_z"]), float(row["anchor_x"]),
+                float(row["anchor_y"]), float(row["anchor_z"]),
+            ]
+        else:
+            coordinates = [float(row[field])
+                           for field in DECISION_SEGMENT_FIELDS]
     except (KeyError, TypeError, ValueError):
         return None
     if not all(math.isfinite(value) for value in coordinates):
@@ -880,6 +912,20 @@ def _support_complete(row: dict, prefix: str) -> bool:
 
 
 def _selected_decisions(decisions: list[dict]) -> list[dict]:
+    if any(row.get("schema_version") == "p4_forward_route_decision_v1"
+           for row in decisions):
+        return [
+            row for row in decisions
+            if row.get("schema_version") == "p4_forward_route_decision_v1"
+            and row.get("stage") == "forward_decision"
+            and row.get("action") == "RISK_SELECTED"
+            and int(row.get("selected_candidate_id", 0) or 0) > 0
+            and int(row.get("candidate_count", 0) or 0) >= 2
+            and row.get("geometry_id")
+            and row.get("alert_limit_policy_id")
+            and int(row.get("occupancy_generation", 0) or 0) > 0
+            and int(row.get("risk_generation", 0) or 0) > 0
+        ]
     return [
         row for row in decisions
         if row.get("status") == "RISK_SELECTED"
@@ -905,6 +951,36 @@ def _decision_lineage_key(row: dict, lineage: bool = False) -> tuple[str, ...]:
 
 
 def _lineage_groups(decisions: list[dict], lineage: list[dict]) -> list[dict]:
+    if any(row.get("schema_version") == "p4_forward_route_decision_v1"
+           for row in lineage):
+        selected_ids = {
+            str(row.get("decision_event_id")): row
+            for row in _selected_decisions(decisions)
+        }
+        grouped: dict[str, list[dict]] = {}
+        for row in lineage:
+            event_id = str(row.get("decision_event_id", ""))
+            if event_id in selected_ids:
+                grouped.setdefault(event_id, []).append(row)
+        result = []
+        for event_id, rows in grouped.items():
+            bound = [row for row in rows
+                     if int(row.get("trajectory_id", 0) or 0) > 0
+                     and int(row.get("trajectory_start_ns", 0) or 0) > 0
+                     and row.get("control_points_hash")]
+            if not bound:
+                continue
+            identity_row = bound[-1]
+            result.append({
+                "key": (event_id,),
+                "rows": rows,
+                "ordered_stages": [row.get("stage") for row in rows],
+                "stages": {row.get("stage") for row in rows},
+                "closed_collision_observed": False,
+                "trajectory_id": int(identity_row["trajectory_id"]),
+                "start_ns": int(identity_row["trajectory_start_ns"]),
+            })
+        return result
     selected_keys = {_decision_lineage_key(row): row
                      for row in _selected_decisions(decisions)}
     groups: dict[tuple[str, ...], list[dict]] = {}
@@ -1120,6 +1196,16 @@ def analyze_stage_records(
             )
             if not runtime_ok:
                 failures.append("p5_runtime_identity_or_status_invalid")
+            if any(row.get("schema_version") ==
+                   "p4_forward_route_decision_v1" for row in decisions):
+                runtime_lineage_identities = {
+                    (group["trajectory_id"], group["start_ns"])
+                    for group in groups
+                    if "p5_runtime_committed" in group["stages"]
+                }
+                if not runtime_lineage_identities.intersection(
+                        published_identities):
+                    failures.append("p4_forward_runtime_lineage_missing")
 
             seven_stage = _VERTICAL_ANALYZER.analyze_seven_stage_evidence(
                 health, decisions, lineage,
@@ -1315,6 +1401,12 @@ def analyze_run(
     decisions = _read_csv(run_root / "exports/planner_p4_risk_astar_debug.csv")
     lineage = _read_csv(
         run_root / "exports/planner_p4_risk_astar_debug.csv.lineage.csv")
+    forward_lineage = _read_csv(
+        run_root /
+        "exports/planner_p4_risk_astar_debug.csv.forward_lineage.csv")
+    if forward_lineage:
+        decisions = forward_lineage
+        lineage = forward_lineage
     if stage == "estimator":
         return analyze_estimator(_estimator_metrics(run_root, records))
     if stage == "p0":
