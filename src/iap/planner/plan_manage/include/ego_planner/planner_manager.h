@@ -23,6 +23,7 @@
 namespace ego_planner
 {
   class P0RiskGridRuntime;
+  struct P0OccupancyEpoch;
   class P5RuntimeIntegrityGate;
   class SafetyRvizPublisher;
   class Gate0QualificationWriter;
@@ -46,6 +47,7 @@ namespace ego_planner
     struct PlanningRiskContext
     {
       std::shared_ptr<const iap::RiskGridSnapshot> snapshot;
+      std::shared_ptr<const P0OccupancyEpoch> occupancy_snapshot;
       double query_base_time_s = 0.0;
       double planning_start_s = 0.0;
       double snapshot_acquired_s = 0.0;
@@ -206,7 +208,6 @@ namespace ego_planner
     Eigen::Vector3d p4_latched_anchor_ = Eigen::Vector3d::Constant(
         std::numeric_limits<double>::quiet_NaN());
     std::string p4_latched_geometry_policy_;
-
     P4ForwardDecision evaluateP4ForwardRoute(
         const Eigen::Vector3d &start_pt,
         const Eigen::Vector3d &start_vel,

@@ -1057,6 +1057,11 @@ DENSE_FOUR_FORK_FOREST_ONLINE_PRESET = {
     "p0.origin_z_m": "0.0",
     "p0.provider_cost_source": "pre_conservative_fim_ratio",
     "p0.require_safety_ratio_below_one_for_cost": "true",
+    # A received, same-epoch integrity-filtered observation supports only the
+    # 0.5 m RiskMap voxel containing the receiver. It does not certify nearby
+    # LOS; all other cells remain fail-closed on online observed-space support.
+    "p0.predictor.gnss_measured_epoch_support_radius_m": "0.45",
+    "p0.predictor.gnss_measured_epoch_integrity_max_delta_s": "0.25",
     "p0.alert_limit_policy_id": "fixed_hal10_val20_v1",
     "p0.alert_limit_h_m": "10.0",
     "p0.alert_limit_v_m": "20.0",
@@ -2010,6 +2015,8 @@ ARG_DEFAULTS = [
     ("p0.gnss_epoch_max_age_s", "2.0"),
     ("p0.predictor.source_mode", "fusion"),
     ("p0.predictor.gnss_epoch_policy", "auto"),
+    ("p0.predictor.gnss_measured_epoch_support_radius_m", "0.0"),
+    ("p0.predictor.gnss_measured_epoch_integrity_max_delta_s", "0.25"),
     ("p0.predictor.use_current_integrity_prior", "true"),
     ("p0.predictor.conservative_max_with_gnss", "false"),
     ("p0.predictor.lidar_legacy_observability", "true"),
@@ -3060,6 +3067,8 @@ def _ego_planner_node(context, drone_id, planner_odom_topic, cloud_topic, camera
             {"p0.gnss_epoch_max_age_s": _param_float(context, "p0.gnss_epoch_max_age_s")},
             {"p0.predictor.source_mode": LaunchConfiguration("p0.predictor.source_mode").perform(context)},
             {"p0.predictor.gnss_epoch_policy": LaunchConfiguration("p0.predictor.gnss_epoch_policy").perform(context)},
+            {"p0.predictor.gnss_measured_epoch_support_radius_m": _param_float(context, "p0.predictor.gnss_measured_epoch_support_radius_m")},
+            {"p0.predictor.gnss_measured_epoch_integrity_max_delta_s": _param_float(context, "p0.predictor.gnss_measured_epoch_integrity_max_delta_s")},
             {"p0.predictor.use_current_integrity_prior": _param_bool(context, "p0.predictor.use_current_integrity_prior")},
             {"p0.predictor.conservative_max_with_gnss": _param_bool(context, "p0.predictor.conservative_max_with_gnss")},
             {"p0.predictor.lidar_legacy_observability": _param_bool(context, "p0.predictor.lidar_legacy_observability")},
@@ -3988,6 +3997,8 @@ def _launch_setup(context):
         "p0.skip_occupied_voxels": _param_bool(context, "p0.skip_occupied_voxels"),
         "p0.predictor.source_mode": LaunchConfiguration("p0.predictor.source_mode").perform(context),
         "p0.predictor.gnss_epoch_policy": LaunchConfiguration("p0.predictor.gnss_epoch_policy").perform(context),
+        "p0.predictor.gnss_measured_epoch_support_radius_m": _param_float(context, "p0.predictor.gnss_measured_epoch_support_radius_m"),
+        "p0.predictor.gnss_measured_epoch_integrity_max_delta_s": _param_float(context, "p0.predictor.gnss_measured_epoch_integrity_max_delta_s"),
         "p0.predictor.use_current_integrity_prior": _param_bool(context, "p0.predictor.use_current_integrity_prior"),
         "p0.predictor.conservative_max_with_gnss": _param_bool(context, "p0.predictor.conservative_max_with_gnss"),
         "p0.predictor.lidar_legacy_observability": _param_bool(context, "p0.predictor.lidar_legacy_observability"),

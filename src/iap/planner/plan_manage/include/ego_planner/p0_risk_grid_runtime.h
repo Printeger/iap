@@ -33,6 +33,11 @@
 
 namespace ego_planner {
 
+struct P0PlanningSnapshot {
+  std::shared_ptr<const iap::RiskGridSnapshot> risk;
+  std::shared_ptr<const P0OccupancyEpoch> occupancy;
+};
+
 class P0RiskGridRuntime {
  public:
   struct P0_6FixtureConfig {
@@ -73,6 +78,8 @@ class P0RiskGridRuntime {
         iap::PredictorSourceMode::Fusion;
     iap::PredictorGnssEpochPolicy predictor_gnss_epoch_policy =
         iap::PredictorGnssEpochPolicy::Auto;
+    double predictor_gnss_measured_epoch_support_radius_m = 0.0;
+    double predictor_gnss_measured_epoch_integrity_max_delta_s = 0.25;
     bool predictor_use_current_integrity_prior = true;
     bool predictor_conservative_max_with_gnss = false;
     double predictor_hal_m = 10.0;
@@ -109,9 +116,8 @@ class P0RiskGridRuntime {
   bool enabled() const { return config_.enable_risk_grid; }
   const iap::RiskGridMap& riskGrid() const { return risk_grid_; }
   iap::RiskGridMap& riskGrid() { return risk_grid_; }
-  std::shared_ptr<const iap::RiskGridSnapshot> acquireSnapshot() const {
-    return risk_grid_.acquireSnapshot();
-  }
+  std::shared_ptr<const iap::RiskGridSnapshot> acquireSnapshot() const;
+  std::shared_ptr<const P0PlanningSnapshot> acquirePlanningSnapshot() const;
   iap::RiskGridHealth health() const;
   bool refreshOnceForTest();
   void setOccupancyPredicate(iap::RiskGridMap::OccupancyPredicate predicate);
@@ -281,6 +287,8 @@ class P0RiskGridRuntime {
   std::function<iap::RiskGridMap::OccupancyDiagnosticQuery()>
       occupancy_diagnostic_query_factory_;
   std::function<P0OccupancyEpochCapture()> occupancy_epoch_factory_;
+  mutable std::mutex planning_snapshot_mutex_;
+  std::shared_ptr<const P0PlanningSnapshot> planning_snapshot_;
   iap::IntegritySnapshotBuilder snapshot_builder_;
   iap::RollingSpatialAdvisoryWindow rolling_spatial_window_;
   std::shared_ptr<const iap::LocalOccupancyGrid>

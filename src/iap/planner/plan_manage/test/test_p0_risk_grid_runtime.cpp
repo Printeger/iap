@@ -1806,6 +1806,18 @@ class P0RiskGridRuntimeStampTest : public ::testing::Test {
     return runtime.latest_epoch_.has_value();
   }
 
+  static void setCurrentExcludedPrns(P0RiskGridRuntime* runtime,
+                                     std::vector<int> excluded_prns) {
+    std::lock_guard<std::mutex> lock(runtime->health_state_mutex_);
+    runtime->latest_current_.excluded_prns = std::move(excluded_prns);
+  }
+
+  static bool buildIntegritySnapshot(P0RiskGridRuntime* runtime,
+                                     const double now_s,
+                                     iap::IntegritySnapshot* snapshot) {
+    return runtime->buildSnapshot(now_s, snapshot);
+  }
+
   static std::shared_ptr<const iap::LocalOccupancyGrid>
   rollingOccupancyOwner(const P0RiskGridRuntime& runtime) {
     return runtime.rolling_occupancy_owner_;
@@ -1897,6 +1909,7 @@ class P0RiskGridRuntimeStampTest : public ::testing::Test {
     runtime->odom_seen_ = true;
     runtime->latest_current_.stamp = current_stamp;
     runtime->latest_current_.valid = true;
+    runtime->latest_current_.gnss_valid = true;
     runtime->latest_current_.hpl = 1.0;
     runtime->latest_current_.vpl = 1.0;
     runtime->latest_current_.hal = 10.0;
@@ -4109,6 +4122,68 @@ TEST_F(P0RiskGridRuntimeStampTest,
   EXPECT_EQ(still_frozen.occupancy->occupancy_generation, 4u);
   EXPECT_EQ(still_frozen.occupancy->raw_occupied,
             blocked_voxel.occupancy->raw_occupied);
+}
+
+TEST_F(P0RiskGridRuntimeStampTest,
+       PlanningSnapshotRetainsTheExactFrozenOccupancyEpoch) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_planning_snapshot_occupancy_binding_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  auto config = enabledConfig();
+  config.predictor_source_mode = iap::PredictorSourceMode::GnssOnly;
+  config.predictor_gnss_epoch_policy =
+      iap::PredictorGnssEpochPolicy::Required;
+  config.grid.geometry_id = "planning_lattice_v1:runtime_test";
+  P0RiskGridRuntime runtime(node, config);
+
+  seedValidInputs(&runtime, 100.0, 100.0);
+  seedGnssEpoch(&runtime, 100.0);
+  const auto live_generation = installOccupancyEpoch(
+      &runtime, 100.0, {}, "map", 2u);
+  ASSERT_TRUE(refreshOnce(&runtime));
+
+  const auto planning_snapshot = runtime.acquirePlanningSnapshot();
+  ASSERT_NE(planning_snapshot, nullptr);
+  ASSERT_NE(planning_snapshot->risk, nullptr);
+  ASSERT_NE(planning_snapshot->occupancy, nullptr);
+  EXPECT_EQ(planning_snapshot->risk->sourceIdentity().occupancy_generation,
+            2u);
+  EXPECT_EQ(planning_snapshot->occupancy->generation, 2u);
+  EXPECT_DOUBLE_EQ(planning_snapshot->occupancy->cloud_stamp_s, 100.0);
+
+  live_generation->store(9u);
+  const auto still_frozen = runtime.acquirePlanningSnapshot();
+  ASSERT_NE(still_frozen, nullptr);
+  ASSERT_NE(still_frozen->occupancy, nullptr);
+  EXPECT_EQ(still_frozen->occupancy->generation, 2u);
+  const auto diagnostic =
+      still_frozen->occupancy->diagnostic_query(Eigen::Vector3d::Zero());
+  EXPECT_EQ(diagnostic.occupancy_generation, 2u);
+}
+
+TEST_F(P0RiskGridRuntimeStampTest,
+       CurrentIntegrityExclusionsAreAppliedToTheCapturedGnssEpoch) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_gnss_epoch_exclusion_binding_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  auto config = enabledConfig();
+  config.predictor_source_mode = iap::PredictorSourceMode::GnssOnly;
+  config.predictor_gnss_epoch_policy =
+      iap::PredictorGnssEpochPolicy::Required;
+  P0RiskGridRuntime runtime(node, config);
+  seedValidInputs(&runtime, 100.0, 100.0);
+  seedGnssEpoch(&runtime, 100.0, 8);
+  setCurrentExcludedPrns(&runtime, {300, 303});
+
+  iap::IntegritySnapshot snapshot;
+  ASSERT_TRUE(buildIntegritySnapshot(&runtime, 100.0, &snapshot));
+  ASSERT_EQ(snapshot.gnss_epoch.sats.size(), 8u);
+  EXPECT_TRUE(snapshot.gnss_epoch.sats[0].excluded);
+  EXPECT_FALSE(snapshot.gnss_epoch.sats[1].excluded);
+  EXPECT_FALSE(snapshot.gnss_epoch.sats[2].excluded);
+  EXPECT_TRUE(snapshot.gnss_epoch.sats[3].excluded);
 }
 
 TEST_F(P0RiskGridRuntimeStampTest,

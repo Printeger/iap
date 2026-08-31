@@ -18,6 +18,7 @@ namespace iap {
 struct CurrentIntegrityState {
   double stamp = std::numeric_limits<double>::quiet_NaN();
   bool valid = false;
+  bool gnss_valid = false;
 
   int integrity_state = -1;
 

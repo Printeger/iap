@@ -222,8 +222,21 @@ GnssAdvisoryResult GnssAdvisoryPredictor::query(
     return fallback("no_gnss_epoch");
   }
 
-  const VisibilityResult visibility =
-      visibility_predictor_.predict(query_position, snapshot.gnss_epoch);
+  const bool measured_epoch_support =
+      std::isfinite(params_.measured_epoch_support_radius_m) &&
+      params_.measured_epoch_support_radius_m > 0.0 && snapshot.has_pose &&
+      snapshot.p_wb.allFinite() && snapshot.current.valid &&
+      snapshot.current.gnss_valid &&
+      std::isfinite(snapshot.current.stamp) &&
+      std::isfinite(snapshot.gnss_epoch.stamp) &&
+      std::isfinite(params_.measured_epoch_integrity_max_delta_s) &&
+      params_.measured_epoch_integrity_max_delta_s >= 0.0 &&
+      std::abs(snapshot.current.stamp - snapshot.gnss_epoch.stamp) <=
+          params_.measured_epoch_integrity_max_delta_s &&
+      (query_position - snapshot.p_wb).norm() <=
+          params_.measured_epoch_support_radius_m;
+  const VisibilityResult visibility = visibility_predictor_.predict(
+      query_position, snapshot.gnss_epoch, measured_epoch_support);
   const auto visible_set = visible_geometry(snapshot.gnss_epoch, visibility);
   const auto& geom = visible_set.geom;
   if (static_cast<int>(geom.size()) < params_.geometry_params.min_sats) {
@@ -232,6 +245,7 @@ GnssAdvisoryResult GnssAdvisoryPredictor::query(
                             : "too_few_sats");
     out.n_visible = visibility.n_vis;
     out.n_unknown_support = visibility.n_unknown;
+    out.measured_epoch_support_used = measured_epoch_support;
     copy_geometry_set_diagnostics(visible_set, out);
     return out;
   }
@@ -241,6 +255,7 @@ GnssAdvisoryResult GnssAdvisoryPredictor::query(
     auto out = fallback("singular_geometry");
     out.n_visible = visibility.n_vis;
     out.n_unknown_support = visibility.n_unknown;
+    out.measured_epoch_support_used = measured_epoch_support;
     copy_geometry_set_diagnostics(visible_set, out);
     out.n_hypotheses = pl.n_hypotheses;
     return out;
@@ -269,6 +284,7 @@ GnssAdvisoryResult GnssAdvisoryPredictor::query(
   }
   out.n_visible = visibility.n_vis;
   out.n_unknown_support = visibility.n_unknown;
+  out.measured_epoch_support_used = measured_epoch_support;
   copy_geometry_set_diagnostics(visible_set, out);
   out.n_hypotheses = pl.n_hypotheses;
   return compute_advisory_fim(query_position, snapshot.gnss_epoch, visibility,

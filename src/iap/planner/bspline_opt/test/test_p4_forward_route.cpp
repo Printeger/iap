@@ -2,9 +2,11 @@
 
 #include <bspline_opt/p4_forward_route.h>
 
+#include <atomic>
 #include <cmath>
 #include <chrono>
 #include <limits>
+#include <memory>
 #include <sstream>
 #include <thread>
 
@@ -425,6 +427,84 @@ TEST(P4ForwardRoute, AsyncWorkerDropsResultFromDifferentSnapshotIdentity)
   const auto current = worker.poll(newer);
   ASSERT_TRUE(current.has_value());
   EXPECT_EQ(current->snapshot_identity.canonical(), newer.canonical());
+}
+
+TEST(P4ForwardRoute, AsyncResultRetainsItsOwnLiveGenerationToken)
+{
+  ego_planner::P4ForwardDecisionWorker worker;
+  auto first_started = std::make_shared<std::atomic<bool>>(false);
+  auto release_first = std::make_shared<std::atomic<bool>>(false);
+  auto first = straightRequest();
+  first.live_occupancy_generation_at_submit = 17u;
+  const auto first_occupancy = first.occupancy;
+  first.occupancy = [first_started, release_first, first_occupancy](
+      const Eigen::Vector3d &point) {
+      first_started->store(true);
+      while (!release_first->load()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      }
+      return first_occupancy(point);
+    };
+  ASSERT_TRUE(worker.submit(first));
+  for (int attempt = 0; attempt < 100 && !first_started->load(); ++attempt) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  ASSERT_TRUE(first_started->load());
+
+  auto replacement = first;
+  replacement.live_occupancy_generation_at_submit = 23u;
+  replacement.position.x() += 0.1;
+  auto second_started = std::make_shared<std::atomic<bool>>(false);
+  auto release_second = std::make_shared<std::atomic<bool>>(false);
+  const auto second_occupancy = first_occupancy;
+  replacement.occupancy =
+    [second_started, release_second, second_occupancy](
+      const Eigen::Vector3d &point) {
+      second_started->store(true);
+      while (!release_second->load()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      }
+      return second_occupancy(point);
+    };
+  ASSERT_TRUE(worker.submit(replacement));
+  release_first->store(true);
+
+  std::optional<ego_planner::P4ForwardDecision> first_result;
+  for (int attempt = 0; attempt < 200 && !first_result; ++attempt) {
+    first_result = worker.poll(first.snapshot_identity);
+    if (!first_result) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+  }
+  ASSERT_TRUE(first_result.has_value());
+  EXPECT_EQ(first_result->live_occupancy_generation_at_submit, 17u);
+
+  for (int attempt = 0; attempt < 100 && !second_started->load(); ++attempt) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  ASSERT_TRUE(second_started->load());
+  release_second->store(true);
+  std::optional<ego_planner::P4ForwardDecision> second_result;
+  for (int attempt = 0; attempt < 200 && !second_result; ++attempt) {
+    second_result = worker.poll(first.snapshot_identity);
+    if (!second_result) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+  }
+  ASSERT_TRUE(second_result.has_value());
+  EXPECT_EQ(second_result->live_occupancy_generation_at_submit, 23u);
+}
+
+TEST(P4ForwardRoute, LiveGenerationGateRejectsMissingOrChangedToken)
+{
+  ego_planner::P4ForwardDecision decision;
+  EXPECT_FALSE(ego_planner::p4ForwardDecisionMatchesLiveGeneration(
+      decision, 17u));
+  decision.live_occupancy_generation_at_submit = 17u;
+  EXPECT_TRUE(ego_planner::p4ForwardDecisionMatchesLiveGeneration(
+      decision, 17u));
+  EXPECT_FALSE(ego_planner::p4ForwardDecisionMatchesLiveGeneration(
+      decision, 18u));
 }
 
 }  // namespace

@@ -24,6 +24,15 @@ namespace iap {
 struct GnssAdvisoryPredictorParams {
   GnssGeometryPlPredictorParams geometry_params;
   VisibilityPredictor::Params visibility_params;
+  // A received GNSS epoch is direct evidence that its non-excluded signals
+  // were usable at the receiver. It is not evidence that they were LOS: the
+  // measured per-satellite sigma and integrity exclusions remain authoritative
+  // for LOS/NLOS quality. This radius must cover only the voxel containing the
+  // measured receiver pose; all other queries require online map support.
+  double measured_epoch_support_radius_m = 0.0;
+  // The current integrity report must belong to the same measurement epoch
+  // before receiver-local support or its FDE exclusions may be applied.
+  double measured_epoch_integrity_max_delta_s = 0.25;
   double fallback_pl = 5.0;
   double fim_clock_epsilon = 1.0e-6;
   double fim_psd_epsilon = 1.0e-9;
@@ -140,6 +149,7 @@ struct GnssAdvisoryResult {
   int n_used = 0;
   int n_hypotheses = 0;
   int n_excluded = 0;
+  bool measured_epoch_support_used = false;
   std::vector<int> visible_sat_ids;
   std::vector<int> used_sat_ids;
   std::vector<int> excluded_sat_ids;

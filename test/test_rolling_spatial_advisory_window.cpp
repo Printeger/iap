@@ -1334,6 +1334,20 @@ TEST(RollingSpatialAdvisoryWindowTest,
       RollingSpatialInvalidationReason::SourcePolicyChanged);
   expect_gnss_reason(
       [](RollingSpatialRefreshInput* input) {
+        auto params = input->module.params();
+        params.gnss.measured_epoch_support_radius_m = 0.45;
+        input->module.set_params(params);
+      },
+      RollingSpatialInvalidationReason::PredictorParametersChanged);
+  expect_gnss_reason(
+      [](RollingSpatialRefreshInput* input) {
+        auto params = input->module.params();
+        params.gnss.measured_epoch_integrity_max_delta_s = 0.1;
+        input->module.set_params(params);
+      },
+      RollingSpatialInvalidationReason::PredictorParametersChanged);
+  expect_gnss_reason(
+      [](RollingSpatialRefreshInput* input) {
         input->occupancy_owner = std::make_shared<LocalOccupancyGrid>();
       },
       RollingSpatialInvalidationReason::SourceProvenanceInvalid);
@@ -1343,6 +1357,57 @@ TEST(RollingSpatialAdvisoryWindowTest,
         ++input->provenance.occupancy_content_identity;
       },
       RollingSpatialInvalidationReason::OccupancySourceChanged);
+}
+
+TEST(RollingSpatialAdvisoryWindowTest,
+     ReceiverLocalGnssSupportIsNeverRetainedAcrossRefreshes) {
+  auto occupancy = std::make_shared<LocalOccupancyGrid>();
+  auto initial = makeGnssSnapshot(1);
+  initial.current.gnss_valid = true;
+  initial.current.stamp = initial.gnss_epoch.stamp;
+  initial.p_wb.setZero();
+  const Eigen::Vector3d query_position(0.25, 0.0, 0.0);
+
+  const auto make_local_input = [&](const IntegritySnapshot& snapshot) {
+    auto input = makeGnssRefreshInput(occupancy, snapshot);
+    auto params = input.module.params();
+    params.gnss.measured_epoch_support_radius_m = 0.45;
+    params.gnss.measured_epoch_integrity_max_delta_s = 0.25;
+    input.module.set_params(params);
+    return input;
+  };
+  const auto query_once = [&](RollingSpatialAdvisoryWindow* window,
+                              const IntegritySnapshot& snapshot) {
+    std::vector<PredictorQueryInput> queries;
+    queries.emplace_back(query_position, snapshot, 100.0, 0.0, "map", 100.0);
+    PredictorBatchDiagnostics diagnostics;
+    EXPECT_EQ(window->queryPositionHorizons(queries, &diagnostics).size(), 1u);
+    return diagnostics;
+  };
+  const auto expect_recomputed_after = [&](const IntegritySnapshot& changed) {
+    RollingSpatialAdvisoryWindow window;
+    ASSERT_TRUE(window.beginRefresh(make_local_input(initial)));
+    EXPECT_EQ(query_once(&window, initial).spatial_advisory_recompute_count,
+              1u);
+    window.commitRefresh();
+    ASSERT_TRUE(window.beginRefresh(make_local_input(changed)));
+    const auto diagnostics = query_once(&window, changed);
+    EXPECT_EQ(diagnostics.spatial_advisory_recompute_count, 1u);
+    EXPECT_EQ(window.diagnostics().retained_position_count, 0u);
+    EXPECT_EQ(window.diagnostics().gnss_ttl_expired_position_count, 1u);
+  };
+
+  auto invalid_source = initial;
+  invalid_source.current.gnss_valid = false;
+  expect_recomputed_after(invalid_source);
+
+  auto unaligned = initial;
+  unaligned.current.stamp += 1.0;
+  expect_recomputed_after(unaligned);
+
+  auto moved_receiver = initial;
+  moved_receiver.p_wb = Eigen::Vector3d(2.0, 0.0, 0.0);
+  expect_recomputed_after(moved_receiver);
 }
 
 TEST(RollingSpatialAdvisoryWindowTest,

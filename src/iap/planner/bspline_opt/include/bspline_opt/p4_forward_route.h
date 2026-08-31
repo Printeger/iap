@@ -114,6 +114,10 @@ namespace ego_planner
   struct P4ForwardRequest
   {
     uint64_t planning_attempt_id = 0;
+    // Live map generation observed immediately before this exact async job
+    // was submitted. This is validation metadata only; topology/risk queries
+    // continue to use the immutable occupancy+risk snapshot pair.
+    uint64_t live_occupancy_generation_at_submit = 0;
     Eigen::Vector3d position = Eigen::Vector3d::Zero();
     Eigen::Vector3d velocity = Eigen::Vector3d::Zero();
     Eigen::Vector3d local_target = Eigen::Vector3d::Zero();
@@ -143,6 +147,7 @@ namespace ego_planner
       P4ForwardTriggerReason::NOT_EVALUATED;
     uint64_t decision_event_id = 0;
     uint64_t planning_attempt_id = 0;
+    uint64_t live_occupancy_generation_at_submit = 0;
     P4ForwardSnapshotIdentity snapshot_identity;
     Eigen::Vector3d request_position = Eigen::Vector3d::Constant(
     std::numeric_limits < double > ::quiet_NaN());
@@ -167,6 +172,8 @@ namespace ego_planner
   bool p4ForwardDecisionMatchesRequest(
     const P4ForwardDecision & decision, const P4ForwardRequest & request,
     double movement_trigger_m = 0.5);
+  bool p4ForwardDecisionMatchesLiveGeneration(
+    const P4ForwardDecision & decision, uint64_t live_generation);
 
   class P4ForwardRoutePlanner
   {

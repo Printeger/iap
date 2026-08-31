@@ -144,6 +144,7 @@ iap::CurrentIntegrityState make_current() {
   iap::CurrentIntegrityState current;
   current.stamp = 100.0;
   current.valid = true;
+  current.gnss_valid = true;
   current.hpl = 4.0;
   current.vpl = 5.0;
   current.pl = 5.0;
@@ -576,6 +577,57 @@ TEST(PredictorModuleTest, GnssUnknownOnlineLosIsNotAssumedVisible) {
   EXPECT_EQ(result.fallback_reason, "too_few_observed_los_sats");
   EXPECT_EQ(result.n_visible, 0);
   EXPECT_EQ(result.n_unknown_support, 8);
+}
+
+TEST(PredictorModuleTest,
+     MeasuredGnssEpochCertifiesOnlyTheConfiguredReceiverNeighborhood) {
+  auto params = make_params();
+  params.gnss.measured_epoch_support_radius_m = 1.0;
+  params.gnss.measured_epoch_integrity_max_delta_s = 0.25;
+  params.gnss.visibility_params.ray_start_offset = 0.0;
+  params.gnss.visibility_params.occ_range = 20.0;
+  iap::GnssAdvisoryPredictor predictor(params.gnss);
+  predictor.set_observation_predicate(
+      [](const Eigen::Vector3d&) { return false; });
+  auto snapshot = make_snapshot(true, false);
+  snapshot.has_pose = true;
+  snapshot.p_wb = Eigen::Vector3d::Zero();
+
+  const auto local = predictor.query(
+      Eigen::Vector3d(0.5, 0.0, 0.0), snapshot);
+  ASSERT_TRUE(local.valid);
+  EXPECT_TRUE(local.measured_epoch_support_used);
+  EXPECT_EQ(local.n_unknown_support, 0);
+
+  const auto outside = predictor.query(
+      Eigen::Vector3d(1.5, 0.0, 0.0), snapshot);
+  EXPECT_FALSE(outside.valid);
+  EXPECT_FALSE(outside.measured_epoch_support_used);
+  EXPECT_EQ(outside.fallback_reason, "too_few_observed_los_sats");
+
+  snapshot.current.stamp += 1.0;
+  const auto unaligned = predictor.query(
+      Eigen::Vector3d(0.5, 0.0, 0.0), snapshot);
+  EXPECT_FALSE(unaligned.valid);
+  EXPECT_FALSE(unaligned.measured_epoch_support_used);
+  EXPECT_EQ(unaligned.fallback_reason, "too_few_observed_los_sats");
+
+  snapshot.current.stamp = snapshot.gnss_epoch.stamp;
+  snapshot.current.gnss_valid = false;
+  const auto source_invalid = predictor.query(
+      Eigen::Vector3d(0.5, 0.0, 0.0), snapshot);
+  EXPECT_FALSE(source_invalid.valid);
+  EXPECT_FALSE(source_invalid.measured_epoch_support_used);
+
+  snapshot.current.gnss_valid = true;
+  for (auto& sat : snapshot.gnss_epoch.sats) {
+    sat.pr_sigma = 50.0;
+  }
+  const auto degraded_measurements = predictor.query(
+      Eigen::Vector3d(0.5, 0.0, 0.0), snapshot);
+  ASSERT_TRUE(degraded_measurements.valid);
+  EXPECT_TRUE(degraded_measurements.measured_epoch_support_used);
+  EXPECT_GE(degraded_measurements.effective_sigma_mean, 50.0);
 }
 
 TEST(PredictorModuleTest, GnssFullyObservedOnlineLosRemainsAvailable) {

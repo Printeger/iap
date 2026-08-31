@@ -90,6 +90,30 @@ namespace ego_planner
       return best;
     }
 
+    GridMapOccupancyDiagnostic toGridMapDiagnostic(
+        const iap::RiskOccupancyDiagnostic &source)
+    {
+      GridMapOccupancyDiagnostic out;
+      out.available = source.available;
+      out.observed = source.observed;
+      out.raw_occupied = source.raw_occupied;
+      out.inflated_occupied = source.inflated_occupied;
+      out.state = source.state == iap::RiskOccupancyState::OCCUPIED
+          ? GridMapObservationState::OCCUPIED
+          : source.state == iap::RiskOccupancyState::OBSERVED_FREE
+              ? GridMapObservationState::OBSERVED_FREE
+              : GridMapObservationState::UNKNOWN;
+      out.voxel_index = source.voxel_index;
+      out.voxel_center = source.voxel_center;
+      out.resolution_m = source.resolution_m;
+      out.inflation_m = source.inflation_m;
+      out.frame_id = source.frame_id;
+      out.cloud_stamp_s = source.cloud_stamp_s;
+      out.generation = source.occupancy_generation;
+      out.source = source.source;
+      return out;
+    }
+
     std::vector<Eigen::Vector3d> resampleForwardGuide(
         const std::vector<Eigen::Vector3d> &path, double requested_spacing)
     {
@@ -599,7 +623,18 @@ namespace ego_planner
   const EGOPlannerManager::PlanningRiskContext &
   EGOPlannerManager::beginPlanningRiskContext(const double now_s)
   {
-    return beginPlanningRiskContextWithSnapshot(now_s, acquireRiskGridSnapshot());
+    if (p0_risk_grid_runtime_)
+    {
+      const auto planning = p0_risk_grid_runtime_->acquirePlanningSnapshot();
+      beginPlanningRiskContextWithSnapshot(
+          now_s, planning ? planning->risk : nullptr);
+      if (planning && planning->risk && planning->occupancy &&
+          planning_risk_context_.snapshot.get() == planning->risk.get())
+        planning_risk_context_.occupancy_snapshot = planning->occupancy;
+      return planning_risk_context_;
+    }
+    return beginPlanningRiskContextWithSnapshot(
+        now_s, latest_risk_snapshot_for_test_);
   }
 
   const EGOPlannerManager::PlanningRiskContext &
@@ -618,6 +653,13 @@ namespace ego_planner
         p1_planning_attempt_seq_, planning_risk_context_.planning_attempt_id);
     planning_risk_context_.query_base_time_s = now_s;
     planning_risk_context_.snapshot = std::move(snapshot);
+    if (p0_risk_grid_runtime_ && planning_risk_context_.snapshot)
+    {
+      const auto planning = p0_risk_grid_runtime_->acquirePlanningSnapshot();
+      if (planning && planning->risk && planning->occupancy &&
+          planning->risk.get() == planning_risk_context_.snapshot.get())
+        planning_risk_context_.occupancy_snapshot = planning->occupancy;
+    }
     if (planning_risk_context_.snapshot)
     {
       planning_risk_context_.generation_id =
@@ -1014,8 +1056,7 @@ namespace ego_planner
     unavailable.trigger_reason = P4ForwardTriggerReason::REQUEST_INVALID;
     unavailable.reason = "snapshot_unavailable";
     const auto snapshot = currentPlanningRiskSnapshot();
-    const auto occupancy = grid_map_ ?
-        grid_map_->captureFrozenOccupancyEpoch() : nullptr;
+    const auto occupancy = planning_risk_context_.occupancy_snapshot;
     if (!snapshot || !occupancy || !occupancy->diagnostic_query)
       return unavailable;
 
@@ -1025,14 +1066,14 @@ namespace ego_planner
     request.velocity = start_vel;
     request.local_target = local_target_pt;
     request.nominal_local_reference = {start_pt, local_target_pt};
-    request.map_origin = occupancy->lattice_origin;
-    request.map_extent = occupancy->extent_m;
+    request.map_origin = occupancy->geometry.origin_w;
+    request.map_extent = occupancy->geometry.extent_m;
     request.query_time_s = currentPlanningQueryBaseTime();
     request.limits = p4_forward_limits_;
     request.limits.max_path_length_ratio =
         bspline_optimizer_->getP4RiskAStarConfig().max_extra_path_ratio;
-    request.limits.occupancy_resolution_m = occupancy->resolution_m;
-    request.snapshot_identity.geometry_id = occupancy->geometry_id;
+    request.limits.occupancy_resolution_m = occupancy->geometry.resolution_m;
+    request.snapshot_identity.geometry_id = occupancy->geometry.geometry_id;
     request.snapshot_identity.frame_id = occupancy->frame_id;
     request.snapshot_identity.alert_limit_policy_id =
         snapshot->sourceIdentity().alert_limit_policy_id;
@@ -1044,13 +1085,16 @@ namespace ego_planner
     request.snapshot_identity.risk_generation = snapshot->generation_id();
     request.snapshot_identity.occupancy_stamp_s = occupancy->cloud_stamp_s;
     request.snapshot_identity.risk_stamp_s = snapshot->stamp_s();
+    unavailable.snapshot_identity = request.snapshot_identity;
+    unavailable.request_position = request.position;
+    unavailable.local_target = request.local_target;
     request.occupancy = [occupancy](const Eigen::Vector3d &point) {
         const auto support = occupancy->diagnostic_query(point);
         if (!support.available || !support.observed ||
-            support.state == GridMapObservationState::UNKNOWN)
+            support.state == iap::RiskOccupancyState::UNKNOWN)
           return P4ForwardOccupancyState::UNKNOWN;
         if (support.raw_occupied || support.inflated_occupied ||
-            support.state == GridMapObservationState::OCCUPIED)
+            support.state == iap::RiskOccupancyState::OCCUPIED)
           return P4ForwardOccupancyState::OCCUPIED;
         return P4ForwardOccupancyState::OBSERVED_FREE;
       };
@@ -1061,7 +1105,10 @@ namespace ego_planner
       {
         return bspline_optimizer_ &&
             bspline_optimizer_->refineP4ForwardGuide(
-                coarse, occupancy->diagnostic_query, corridor_radius_m,
+                coarse, [occupancy](const Eigen::Vector3d &point) {
+                  return toGridMapDiagnostic(
+                      occupancy->diagnostic_query(point));
+                }, corridor_radius_m,
                 remaining_budget_ms, refined);
       };
     request.risk = [snapshot](const Eigen::Vector3d &point,
@@ -1122,8 +1169,10 @@ namespace ego_planner
       };
 
     if (snapshot->sourceIdentity().occupancy_generation !=
-        occupancy->generation || snapshot->params().geometry_id !=
-        occupancy->geometry_id)
+        occupancy->generation ||
+        snapshot->sourceIdentity().occupancy_stamp_s !=
+            occupancy->cloud_stamp_s ||
+        snapshot->params().geometry_id != occupancy->geometry.geometry_id)
     {
       unavailable.snapshot_identity = request.snapshot_identity;
       unavailable.reason = "combined_snapshot_identity_mismatch";
@@ -1196,15 +1245,43 @@ namespace ego_planner
     const bool moved_less_than_trigger =
         p4_last_decision_position_.allFinite() &&
         (p4_last_decision_position_ - start_pt).norm() < 0.5;
-    if (same_snapshot && same_target && moved_less_than_trigger)
+    const uint64_t live_generation =
+        grid_map_ ? grid_map_->occupancyGeneration() : 0u;
+    bool invalidated_reusable_decision = false;
+    if (last_p4_forward_decision_.decision_event_id != 0u &&
+        !p4ForwardDecisionMatchesLiveGeneration(
+            last_p4_forward_decision_, live_generation))
     {
-      P4ForwardDecision cached = last_p4_forward_decision_;
-      cached.planning_attempt_id = request.planning_attempt_id;
-      cached.reason = "cached_same_snapshot_target";
-      return cached;
+      p4_last_decision_position_.setConstant(
+          std::numeric_limits<double>::quiet_NaN());
+      p4_last_decision_target_.setConstant(
+          std::numeric_limits<double>::quiet_NaN());
+      p4_latched_guide_.clear();
+      p4_latched_anchor_.setConstant(
+          std::numeric_limits<double>::quiet_NaN());
+      p4_latched_geometry_policy_.clear();
+      invalidated_reusable_decision = true;
     }
     if (auto completed = p4_forward_worker_.poll(request.snapshot_identity))
     {
+      if (!p4ForwardDecisionMatchesLiveGeneration(
+              *completed, live_generation))
+      {
+        p4_last_decision_position_.setConstant(
+            std::numeric_limits<double>::quiet_NaN());
+        p4_last_decision_target_.setConstant(
+            std::numeric_limits<double>::quiet_NaN());
+        p4_latched_guide_.clear();
+        p4_latched_anchor_.setConstant(
+            std::numeric_limits<double>::quiet_NaN());
+        p4_latched_geometry_policy_.clear();
+        unavailable.snapshot_identity = request.snapshot_identity;
+        unavailable.request_position = request.position;
+        unavailable.local_target = request.local_target;
+        unavailable.reason =
+            "live_occupancy_generation_changed_during_forward_decision";
+        return unavailable;
+      }
       if (!p4ForwardDecisionMatchesRequest(*completed, request, 0.5))
       {
         if (auto latched = reuse_certified_latch(
@@ -1275,6 +1352,23 @@ namespace ego_planner
       p4_last_decision_target_ = local_target_pt;
       return *completed;
     }
+    if (invalidated_reusable_decision)
+    {
+      unavailable.snapshot_identity = request.snapshot_identity;
+      unavailable.request_position = request.position;
+      unavailable.local_target = request.local_target;
+      unavailable.reason =
+          "live_occupancy_generation_changed_before_decision_reuse";
+      return unavailable;
+    }
+    if (same_snapshot && same_target && moved_less_than_trigger &&
+        !p4_forward_worker_.busy())
+    {
+      P4ForwardDecision cached = last_p4_forward_decision_;
+      cached.planning_attempt_id = request.planning_attempt_id;
+      cached.reason = "cached_same_snapshot_target";
+      return cached;
+    }
     const double now_s = plannerNow().seconds();
     if (std::isfinite(p4_last_compute_stamp_s_) &&
         now_s - p4_last_compute_stamp_s_ < 0.5)
@@ -1293,6 +1387,10 @@ namespace ego_planner
     unavailable.snapshot_identity = request.snapshot_identity;
     auto pending_latch = reuse_certified_latch(
         "latched_channel_while_worker_pending");
+    const uint64_t live_generation_at_submit =
+        grid_map_ ? grid_map_->occupancyGeneration() : 0u;
+    request.live_occupancy_generation_at_submit =
+        live_generation_at_submit;
     if (!p4_forward_worker_.submit(std::move(request)))
     {
       unavailable.reason = "forward_worker_submit_failed";
@@ -1460,15 +1558,21 @@ namespace ego_planner
       return false;
     if (last_p4_forward_decision_.snapshot_identity.occupancy_generation > 0)
     {
+      const auto bound_occupancy =
+          planning_risk_context_.occupancy_snapshot;
+      if (!bound_occupancy ||
+          bound_occupancy->generation != last_p4_forward_decision_.
+              snapshot_identity.occupancy_generation ||
+          bound_occupancy->geometry.geometry_id !=
+              last_p4_forward_decision_.snapshot_identity.geometry_id ||
+          bound_occupancy->cloud_stamp_s != last_p4_forward_decision_.
+              snapshot_identity.occupancy_stamp_s)
+        return false;
       const auto occupancy = grid_map_ ?
           grid_map_->captureFrozenOccupancyEpoch() : nullptr;
       if (!occupancy ||
-          occupancy->generation != last_p4_forward_decision_.
-              snapshot_identity.occupancy_generation ||
           occupancy->geometry_id != last_p4_forward_decision_.
-              snapshot_identity.geometry_id ||
-          occupancy->cloud_stamp_s != last_p4_forward_decision_.
-              snapshot_identity.occupancy_stamp_s)
+              snapshot_identity.geometry_id)
         return false;
       constexpr int kTrajectorySupportSamples = 80;
       for (int index = 0; index <= kTrajectorySupportSamples; ++index)
@@ -1488,6 +1592,9 @@ namespace ego_planner
                 2.0 * p4_forward_limits_.topology_resolution_m)
           return false;
       }
+      if (!grid_map_ ||
+          grid_map_->occupancyGeneration() != occupancy->generation)
+        return false;
     }
     const bool written = appendP4ForwardDecision(
         last_p4_forward_decision_, stage, stamp_s);

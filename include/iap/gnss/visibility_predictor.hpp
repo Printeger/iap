@@ -80,7 +80,8 @@ class VisibilityPredictor {
    * @return VisibilityResult with n_vis, vis_flags, kappas, sigma_effs, mean_kappa
    */
   VisibilityResult predict(const Eigen::Vector3d& pos_world,
-                           const GnssEpoch& epoch) const;
+                           const GnssEpoch& epoch,
+                           bool measured_epoch_support = false) const;
 
   const Params& params() const { return params_; }
 

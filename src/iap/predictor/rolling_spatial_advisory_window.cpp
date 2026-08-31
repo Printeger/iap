@@ -89,6 +89,10 @@ bool exactParams(const PredictorParams& lhs, const PredictorParams& rhs) {
   return exactGeometry(lhs.gnss.geometry_params, rhs.gnss.geometry_params) &&
          exactVisibility(lhs.gnss.visibility_params,
                          rhs.gnss.visibility_params) &&
+         exactDouble(lhs.gnss.measured_epoch_support_radius_m,
+                     rhs.gnss.measured_epoch_support_radius_m) &&
+         exactDouble(lhs.gnss.measured_epoch_integrity_max_delta_s,
+                     rhs.gnss.measured_epoch_integrity_max_delta_s) &&
          exactDouble(lhs.gnss.fallback_pl, rhs.gnss.fallback_pl) &&
          exactDouble(lhs.gnss.fim_clock_epsilon,
                      rhs.gnss.fim_clock_epsilon) &&
@@ -177,6 +181,26 @@ bool policyEnabled(const double value) {
   return std::isfinite(value) && value >= 0.0;
 }
 
+bool receiverLocalGnssSupportEligible(
+    const PredictorParams& params, const IntegritySnapshot& snapshot,
+    const Eigen::Vector3d& query_position) {
+  return params.gnss.measured_epoch_support_radius_m > 0.0 &&
+         std::isfinite(params.gnss.measured_epoch_support_radius_m) &&
+         std::isfinite(
+             params.gnss.measured_epoch_integrity_max_delta_s) &&
+         params.gnss.measured_epoch_integrity_max_delta_s >= 0.0 &&
+         snapshot.has_pose && snapshot.p_wb.allFinite() &&
+         snapshot.has_epoch && snapshot.current.valid &&
+         snapshot.current.gnss_valid &&
+         std::isfinite(snapshot.current.stamp) &&
+         std::isfinite(snapshot.gnss_epoch.stamp) &&
+         std::abs(snapshot.current.stamp - snapshot.gnss_epoch.stamp) <=
+             params.gnss.measured_epoch_integrity_max_delta_s &&
+         query_position.allFinite() &&
+         (query_position - snapshot.p_wb).norm() <=
+             params.gnss.measured_epoch_support_radius_m;
+}
+
 bool exactPolicy(const RollingSpatialRetentionPolicy& lhs,
                  const RollingSpatialRetentionPolicy& rhs) {
   return exactDouble(lhs.gnss_spatial_ttl_s, rhs.gnss_spatial_ttl_s) &&
@@ -218,6 +242,8 @@ struct RollingSpatialAdvisoryWindow::Impl {
   struct Slot {
     bool valid = false;
     WorldKey world_key = WorldKey::Zero();
+    Eigen::Vector3d query_position = Eigen::Vector3d::Constant(
+        std::numeric_limits<double>::quiet_NaN());
     std::uint64_t validity_generation = 0;
     PredictorModule::SpatialAdvisory advisory;
     IntegritySnapshot source_snapshot;
@@ -391,7 +417,8 @@ struct RollingSpatialAdvisoryWindow::Impl {
     bool invalid_provenance = false;
   };
 
-  SlotRetention evaluateSlotRetention(const Slot& slot) const {
+  SlotRetention evaluateSlotRetention(
+      const Slot& slot, const Eigen::Vector3d& query_position) const {
     SlotRetention out;
     if (!candidate || !slot.valid) return out;
     const Identity& incoming = candidate->identity;
@@ -399,6 +426,16 @@ struct RollingSpatialAdvisoryWindow::Impl {
         predictorSpatialSourceUsage(incoming.params);
     bool exact = true;
     if (usage.gnss && incoming.snapshot.has_epoch) {
+      // Receiver-local measurement support depends on current GNSS validity,
+      // epoch alignment, and receiver position. Never transport such an
+      // advisory across refreshes; recompute it from the new frozen snapshot.
+      if (receiverLocalGnssSupportEligible(
+              incoming.params, slot.source_snapshot, slot.query_position) ||
+          receiverLocalGnssSupportEligible(
+              incoming.params, incoming.snapshot, query_position)) {
+        out.gnss_expired = true;
+        return out;
+      }
       const bool gnss_exact =
           slot.provenance.gnss_epoch_generation ==
               incoming.provenance.gnss_epoch_generation &&
@@ -749,7 +786,8 @@ RollingSpatialAdvisoryWindow::queryPositionHorizons(
       slot.validity_generation ==
           impl_->candidate->identity.validity_generation;
   const Impl::SlotRetention retention =
-      slot_matches ? impl_->evaluateSlotRetention(slot)
+      slot_matches ? impl_->evaluateSlotRetention(
+                         slot, inputs.front().query_position_map)
                    : Impl::SlotRetention{};
   const bool hit = slot_matches && retention.reusable;
   if (!impl_->candidate->touched[address]) {
@@ -805,6 +843,7 @@ RollingSpatialAdvisoryWindow::queryPositionHorizons(
     if (!cached && local.spatial_advisory_recompute_count > recomputes_before) {
       slot.valid = true;
       slot.world_key = key;
+      slot.query_position = inputs.front().query_position_map;
       slot.validity_generation =
           impl_->candidate->identity.validity_generation;
       slot.advisory = std::move(evaluated);

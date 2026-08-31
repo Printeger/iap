@@ -214,6 +214,10 @@ class TestStageContracts(unittest.TestCase):
         self.assertEqual(contract["low_risk_y_signs"], [-1, 1, -1, 1])
         self.assertEqual(contract["gnss"]["enabled_constellations"],
                          ["GPS", "GAL", "GLO"])
+        self.assertEqual(
+            contract["gnss"]["measured_epoch_support_radius_m"], 0.45)
+        self.assertEqual(
+            contract["gnss"]["measured_epoch_integrity_max_delta_s"], 0.25)
         self.assertEqual(contract["planner_executor_thread_count"], 6)
         self.assertTrue(contract["p0_conservative_max_with_gnss"])
         self.assertFalse(

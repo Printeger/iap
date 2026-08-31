@@ -11,6 +11,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 #include <gnss_comm/gnss_constant.hpp>
@@ -540,6 +541,24 @@ P0RiskGridRuntime::Config P0RiskGridRuntime::declareAndReadConfig(
   config.predictor_gnss_epoch_policy = parsePredictorGnssEpochPolicy(
       node->declare_parameter<std::string>(
           "p0.predictor.gnss_epoch_policy", "auto"));
+  config.predictor_gnss_measured_epoch_support_radius_m =
+      node->declare_parameter<double>(
+          "p0.predictor.gnss_measured_epoch_support_radius_m", 0.0);
+  if (!std::isfinite(
+          config.predictor_gnss_measured_epoch_support_radius_m) ||
+      config.predictor_gnss_measured_epoch_support_radius_m < 0.0) {
+    throw std::invalid_argument(
+        "invalid P0 measured GNSS epoch support radius");
+  }
+  config.predictor_gnss_measured_epoch_integrity_max_delta_s =
+      node->declare_parameter<double>(
+          "p0.predictor.gnss_measured_epoch_integrity_max_delta_s", 0.25);
+  if (!std::isfinite(
+          config.predictor_gnss_measured_epoch_integrity_max_delta_s) ||
+      config.predictor_gnss_measured_epoch_integrity_max_delta_s < 0.0) {
+    throw std::invalid_argument(
+        "invalid P0 measured GNSS/integrity epoch alignment tolerance");
+  }
   config.predictor_use_current_integrity_prior =
       node->declare_parameter<bool>(
           "p0.predictor.use_current_integrity_prior", true);
@@ -828,6 +847,18 @@ iap::RiskGridHealth P0RiskGridRuntime::health() const {
   return addLidarPredictorInputHealth(
       std::isfinite(now_s) ? risk_grid_.health(now_s)
                            : risk_grid_.health());
+}
+
+std::shared_ptr<const P0PlanningSnapshot>
+P0RiskGridRuntime::acquirePlanningSnapshot() const {
+  std::lock_guard<std::mutex> lock(planning_snapshot_mutex_);
+  return planning_snapshot_;
+}
+
+std::shared_ptr<const iap::RiskGridSnapshot>
+P0RiskGridRuntime::acquireSnapshot() const {
+  const auto planning = acquirePlanningSnapshot();
+  return planning ? planning->risk : nullptr;
 }
 
 bool P0RiskGridRuntime::refreshOnceForTest() {
@@ -1406,6 +1437,10 @@ void P0RiskGridRuntime::refreshTimerCallback() {
     predictor_params.source_mode = config_.predictor_source_mode;
     predictor_params.gnss_epoch_policy =
         config_.predictor_gnss_epoch_policy;
+    predictor_params.gnss.measured_epoch_support_radius_m =
+        config_.predictor_gnss_measured_epoch_support_radius_m;
+    predictor_params.gnss.measured_epoch_integrity_max_delta_s =
+        config_.predictor_gnss_measured_epoch_integrity_max_delta_s;
     predictor_params.fusion.conservative_max_with_gnss =
         config_.predictor_conservative_max_with_gnss;
     predictor_params.lidar.enable_legacy_observability =
@@ -1739,8 +1774,28 @@ void P0RiskGridRuntime::refreshTimerCallback() {
     refresh_succeeded = risk_grid_.refreshFromProvider(
         snapshot.p_wb, now_s, timed_provider, occupancy_predicate, &reason);
   }
-  const iap::RiskGridHealth health = risk_grid_.health(now_s);
   const auto viz_snapshot = risk_grid_.acquireSnapshot();
+  if (refresh_succeeded && viz_snapshot) {
+    const auto& identity = viz_snapshot->sourceIdentity();
+    const bool occupancy_identity_matches = !occupancy_epoch ||
+        (identity.occupancy_generation == occupancy_epoch->generation &&
+         identity.occupancy_stamp_s == occupancy_epoch->cloud_stamp_s);
+    if (occupancy_identity_matches) {
+      auto planning = std::make_shared<P0PlanningSnapshot>();
+      planning->risk = viz_snapshot;
+      if (occupancy_epoch) {
+        planning->occupancy =
+            std::make_shared<P0OccupancyEpoch>(*occupancy_epoch);
+      }
+      std::lock_guard<std::mutex> lock(planning_snapshot_mutex_);
+      planning_snapshot_ = std::move(planning);
+    } else {
+      refresh_succeeded = false;
+      reason = "risk_occupancy_commit_identity_mismatch";
+      risk_grid_.markRefreshFailure(now_s, reason);
+    }
+  }
+  const iap::RiskGridHealth health = risk_grid_.health(now_s);
   const double refresh_end_stamp_s = liveNowSeconds();
   iap::RollingSpatialRefreshDiagnostics rolling_diagnostics;
   if (predictor_provider) {
@@ -2757,6 +2812,7 @@ iap::CurrentIntegrityState P0RiskGridRuntime::currentFromMsg(
     const iap::msg::IntegrityReport& msg) const {
   iap::CurrentIntegrityState current;
   current.stamp = stampToSec(msg.header.stamp);
+  current.gnss_valid = msg.gnss_valid;
   current.integrity_state = msg.integrity_state;
   current.hpl = msg.hpl;
   current.vpl = msg.vpl;
@@ -2872,6 +2928,18 @@ bool P0RiskGridRuntime::buildSnapshot(
         captured_gnss_epoch_generation;
     source_capture->gnss_epoch_stamp =
         epoch ? epoch->stamp : std::numeric_limits<double>::quiet_NaN();
+  }
+  const bool integrity_epoch_aligned = epoch && current.valid &&
+      current.gnss_valid &&
+      std::isfinite(current.stamp) && std::isfinite(epoch->stamp) &&
+      std::abs(current.stamp - epoch->stamp) <=
+          config_.predictor_gnss_measured_epoch_integrity_max_delta_s;
+  if (integrity_epoch_aligned && !current.excluded_prns.empty()) {
+    const std::unordered_set<int> excluded(
+        current.excluded_prns.begin(), current.excluded_prns.end());
+    for (auto& sat : epoch->sats) {
+      sat.excluded = sat.excluded || excluded.count(sat.sat_id) > 0;
+    }
   }
   if (!odom_valid || !current_valid) {
     return false;

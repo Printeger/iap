@@ -406,6 +406,8 @@ class TestPlannerLaunchTest(unittest.TestCase):
             "p0.origin_z_m": "0.0",
             "p0.provider_cost_source": "pre_conservative_fim_ratio",
             "p0.require_safety_ratio_below_one_for_cost": "true",
+            "p0.predictor.gnss_measured_epoch_support_radius_m": "0.45",
+            "p0.predictor.gnss_measured_epoch_integrity_max_delta_s": "0.25",
             "p4.fallback_to_original_when_risk_not_ready": "false",
             "p4.forward.max_lookahead_m": "8.0",
             "p4.forward.sensing_range_m": "10.0",

@@ -33,7 +33,8 @@ Eigen::Vector3d VisibilityPredictor::enu_dir(double elevation, double azimuth) {
 
 // ---------------------------------------------------------------------------
 VisibilityResult VisibilityPredictor::predict(const Eigen::Vector3d& pos_world,
-                                              const GnssEpoch& epoch) const {
+                                              const GnssEpoch& epoch,
+                                              const bool measured_epoch_support) const {
   VisibilityResult res;
   const std::size_t N = epoch.sats.size();
   res.vis_flags.resize(N, false);
@@ -57,12 +58,20 @@ VisibilityResult VisibilityPredictor::predict(const Eigen::Vector3d& pos_world,
 
     const Eigen::Vector3d dir = enu_dir(sat.elevation, sat.azimuth);
 
-    // The planning-side visibility model is allowed to use only observed
-    // online space. A point-cloud miss is not evidence of free space. Sample
-    // the same finite LOS horizon as the occupancy ray and fail closed if any
-    // part of that support remains UNKNOWN.
+    if (measured_epoch_support &&
+        (!std::isfinite(sat.pr_sigma) || sat.pr_sigma <= 0.0)) {
+      res.unknown_flags[i] = true;
+      ++res.n_unknown;
+      continue;
+    }
+
+    // Away from the measured receiver voxel, the planning-side visibility
+    // model is allowed to use only observed online space. A point-cloud miss
+    // is not evidence of free space. Receiver-local measured support only
+    // proves signal reception; NLOS quality remains represented by the
+    // measurement sigma and integrity exclusions in the epoch.
     bool unknown_support = false;
-    if (observation_predicate_) {
+    if (observation_predicate_ && !measured_epoch_support) {
       const double start_offset = std::max(0.0, params_.ray_start_offset);
       const double support_length = std::max(0.0, params_.occ_range);
       constexpr double kSupportStepM = 0.5;
@@ -102,7 +111,11 @@ VisibilityResult VisibilityPredictor::predict(const Eigen::Vector3d& pos_world,
     }
 
     // σ_eff (RQ-314)
-    res.sigma_effs[i] = sigma_eff_canopy(params_.canopy, kappa, sat.elevation);
+    const double canopy_sigma =
+        sigma_eff_canopy(params_.canopy, kappa, sat.elevation);
+    res.sigma_effs[i] = measured_epoch_support
+        ? std::max(sat.pr_sigma, canopy_sigma)
+        : canopy_sigma;
   }
 
   res.mean_kappa = (res.n_vis > 0) ? (kappa_sum / res.n_vis) : 0.0;

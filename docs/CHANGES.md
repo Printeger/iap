@@ -3,6 +3,23 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(p0-p4-snapshot-pair-and-gnss-support): IAP-RQ-320 / IAP-RQ-400 /
+  IAP-RQ-410 — publish P0's risk snapshot together with the exact immutable
+  `P0OccupancyEpoch` used to build it, make PlannerManager pass that pair to
+  asynchronous Forward P4, bind each async result to its own submit-time live
+  generation, and invalidate completed or reusable P4 state when that live
+  generation changes. Poll completed work before reusing a cached decision.
+  Forest v2 may use received GNSS measurements only in the 0.5 m RiskMap voxel
+  containing the receiver, only when the GNSS source is valid and its integrity
+  report is aligned within 0.25 s; NLOS-degraded measurement sigma and aligned
+  FDE exclusions remain authoritative. Receiver-local GNSS advice is always
+  recomputed across refreshes so validity, alignment, and receiver-voxel
+  changes cannot reuse stale cache state. Other voxels retain fail-closed
+  unknown LOS support. Live diagnostics remove the former
+  `combined_snapshot_identity_mismatch` storm and confirm GNSS input/ephemeris
+  delivery; P4 still correctly holds while current HPL/VPL exceed the fixed
+  10/20 m alert limits.
+
 - feat(p4-online-forward-route): IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 —
   move P4 from collision-segment repair to an asynchronous pre-B-spline 3-D
   online topology decision. Bind occupancy+risk generations, timestamps,

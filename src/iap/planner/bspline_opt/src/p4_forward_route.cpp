@@ -971,6 +971,13 @@ bool p4ForwardDecisionMatchesRequest(
          (decision.local_target - request.local_target).norm() <= 1.0e-6;
 }
 
+bool p4ForwardDecisionMatchesLiveGeneration(
+  const P4ForwardDecision & decision, const uint64_t live_generation)
+{
+  return decision.live_occupancy_generation_at_submit != 0u &&
+         live_generation == decision.live_occupancy_generation_at_submit;
+}
+
 P4ForwardDecision P4ForwardRoutePlanner::decide(
   const P4ForwardRequest & request) const
 {
@@ -980,6 +987,8 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
   decision.decision_event_id = next_event_id.fetch_add(
     1, std::memory_order_relaxed);
   decision.planning_attempt_id = request.planning_attempt_id;
+  decision.live_occupancy_generation_at_submit =
+    request.live_occupancy_generation_at_submit;
   decision.request_position = request.position;
   decision.local_target = request.local_target;
   decision.snapshot_identity = request.snapshot_identity;

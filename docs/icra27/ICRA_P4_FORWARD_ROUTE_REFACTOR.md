@@ -1,5 +1,25 @@
 # P4 Online Forward Route Selection
 
+## Snapshot-pair follow-up (2026-08-31)
+
+P0 now publishes a planning bundle containing the risk generation and the
+exact frozen occupancy epoch used during that generation. Forward P4 consumes
+that immutable pair; it no longer captures a newer live occupancy epoch and
+compares it to the older risk generation before search. The live occupancy
+generation is carried by each async request/result and checked before any
+completed result, cache, or latched guide can be reused. A change during
+computation discards the result and requests replanning.
+
+GNSS source support in forest v2 uses received measurements only in the 0.5 m
+RiskMap voxel containing the receiver (`0.45 m` support radius). The GNSS source
+must be valid and its integrity report must align to the measurement epoch
+within `0.25 s`; receiver-local prediction preserves the larger of measured
+NLOS-degraded sigma and canopy sigma, and only aligned FDE exclusions are
+copied. Outside that measured voxel, unknown online LOS support remains
+fail-closed. Receiver-local GNSS slots are never retained across rolling
+refreshes; GNSS validity, epoch alignment, and receiver position are therefore
+re-evaluated for every new frozen input set.
+
 Status: development integration only. This does not create a scientific or
 qualification claim.
 

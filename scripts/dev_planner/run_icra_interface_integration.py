@@ -187,6 +187,8 @@ def forest_scene_contract(scenario: str = FOREST_SCENARIO) -> dict:
             "multipath": True,
             "skymask": False,
             "fault_injection": False,
+            "measured_epoch_support_radius_m": 0.45 if online else 0.0,
+            "measured_epoch_integrity_max_delta_s": 0.25,
         },
         "forks": [{
             "fork_index": index,
