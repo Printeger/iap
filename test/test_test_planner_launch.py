@@ -389,6 +389,7 @@ class TestPlannerLaunchTest(unittest.TestCase):
             "grid_map/origin_y": "-11.0",
             "grid_map/origin_z": "0.0",
             "grid_map/unknown_as_occupied": "false",
+            "grid_map/current_vehicle_clearance_radius_m": "0.35",
             "manager/planning_horizon": "8.0",
             "fsm/planning_horizon": "8.0",
             "grid_map/local_update_range_x": "9.0",

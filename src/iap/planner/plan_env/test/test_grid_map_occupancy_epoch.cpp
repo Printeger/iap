@@ -21,6 +21,7 @@ struct GridMapTestAccess {
     map->mp_.resolution_ = 1.0;
     map->mp_.resolution_inv_ = 1.0;
     map->mp_.obstacles_inflation_ = 0.0;
+    map->mp_.current_vehicle_clearance_radius_m_ = 0.0;
     map->mp_.frame_id_ = "map";
     map->mp_.cx_ = 0.0;
     map->mp_.cy_ = 0.0;
@@ -198,6 +199,11 @@ struct GridMapTestAccess {
   static void setIndependentCloudMinInterval(GridMap* map,
                                               const double interval_s) {
     map->mp_.independent_cloud_min_interval_s_ = interval_s;
+  }
+
+  static void setCurrentVehicleClearanceRadius(GridMap* map,
+                                                const double radius_m) {
+    map->mp_.current_vehicle_clearance_radius_m_ = radius_m;
   }
 
   static uint64_t updateSequence(GridMap* map) {
@@ -461,6 +467,36 @@ TEST(GridMapOccupancyEpochTest,
   EXPECT_EQ(traversed.state, GridMapObservationState::OBSERVED_FREE);
   EXPECT_FALSE(unseen.observed);
   EXPECT_EQ(unseen.state, GridMapObservationState::UNKNOWN);
+}
+
+TEST(GridMapOccupancyEpochTest,
+     CurrentVehicleFootprintIsObservedWithoutClearingOccupiedCells) {
+  GridMap map;
+  GridMapTestAccess::configureDepthFusion(&map);
+  GridMapTestAccess::setCurrentVehicleClearanceRadius(&map, 1.1);
+
+  GridMapTestAccess::acceptPointCloudAt(
+      &map, 222, Eigen::Vector3d(0.0, 0.0, 1.0));
+  const auto epoch = map.captureFrozenOccupancyEpoch();
+
+  ASSERT_NE(epoch, nullptr);
+  // These cells intersect the known volume currently occupied by the vehicle,
+  // although the only LiDAR return points along +z.
+  const auto lateral =
+      epoch->diagnostic_query(Eigen::Vector3d(0.5, -0.5, 0.5));
+  EXPECT_TRUE(lateral.observed);
+  EXPECT_EQ(lateral.state, GridMapObservationState::OBSERVED_FREE);
+
+  // Body evidence only marks observation. It never erases an actual return
+  // or weakens occupied precedence.
+  const auto hit = epoch->diagnostic_query(Eigen::Vector3d(0.5, 0.5, 1.5));
+  EXPECT_TRUE(hit.raw_occupied);
+  EXPECT_EQ(hit.state, GridMapObservationState::OCCUPIED);
+
+  const auto outside =
+      epoch->diagnostic_query(Eigen::Vector3d(-1.5, -1.5, -1.5));
+  EXPECT_FALSE(outside.observed);
+  EXPECT_EQ(outside.state, GridMapObservationState::UNKNOWN);
 }
 
 TEST(GridMapOccupancyEpochTest,

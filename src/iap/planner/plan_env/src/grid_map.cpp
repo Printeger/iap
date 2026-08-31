@@ -59,6 +59,8 @@ void GridMap::initMap(rclcpp::Node::SharedPtr node)
   node_->declare_parameter("grid_map/local_update_range_y", -1.0);
   node_->declare_parameter("grid_map/local_update_range_z", -1.0);
   node_->declare_parameter("grid_map/obstacles_inflation", -1.0);
+  node_->declare_parameter(
+      "grid_map/current_vehicle_clearance_radius_m", 0.0);
   node_->declare_parameter("grid_map/fx", -1.0);
   node_->declare_parameter("grid_map/fy", -1.0);
   node_->declare_parameter("grid_map/cx", -1.0);
@@ -105,6 +107,9 @@ void GridMap::initMap(rclcpp::Node::SharedPtr node)
   node_->get_parameter("grid_map/local_update_range_y", mp_.local_update_range_(1));
   node_->get_parameter("grid_map/local_update_range_z", mp_.local_update_range_(2));
   node_->get_parameter("grid_map/obstacles_inflation", mp_.obstacles_inflation_);
+  node_->get_parameter(
+      "grid_map/current_vehicle_clearance_radius_m",
+      mp_.current_vehicle_clearance_radius_m_);
   node_->get_parameter("grid_map/fx", mp_.fx_);
   node_->get_parameter("grid_map/fy", mp_.fy_);
   node_->get_parameter("grid_map/cx", mp_.cx_);
@@ -149,6 +154,8 @@ void GridMap::initMap(rclcpp::Node::SharedPtr node)
       std::max(0.0, mp_.independent_cloud_min_interval_s_);
   mp_.independent_cloud_clock_guard_s_ =
       std::max(0.0, mp_.independent_cloud_clock_guard_s_);
+  mp_.current_vehicle_clearance_radius_m_ =
+      std::max(0.0, mp_.current_vehicle_clearance_radius_m_);
   RCLCPP_INFO(node_->get_logger(),
               "[grid_map] independent cloud interval=%.3f s "
               "clock_guard=%.3f s",
@@ -1065,10 +1072,7 @@ void GridMap::cloudCallback(const sensor_msgs::msg::PointCloud2::ConstPtr &img)
   this->resetBuffer(md_.camera_pos_ - mp_.local_update_range_,
                     md_.camera_pos_ + mp_.local_update_range_);
 
-  Eigen::Vector3i sensor_id;
-  posToIndex(md_.camera_pos_, sensor_id);
-  if (isInMap(sensor_id))
-    md_.observed_buffer_[toAddress(sensor_id)] = 1;
+  markCurrentVehicleFootprintObserved();
 
   pcl::PointXYZ pt;
   Eigen::Vector3d p3d, p3d_inf;
@@ -1184,6 +1188,47 @@ void GridMap::cloudCallback(const sensor_msgs::msg::PointCloud2::ConstPtr &img)
   if (valid_source_stamp)
     last_independent_cloud_stamp_s_ = source_stamp_s;
   occupancy_update_sequence_.fetch_add(1, std::memory_order_release);
+}
+
+void GridMap::markCurrentVehicleFootprintObserved()
+{
+  const double radius = mp_.current_vehicle_clearance_radius_m_;
+  if (!md_.camera_pos_.allFinite() || !std::isfinite(mp_.resolution_) ||
+      mp_.resolution_ <= 0.0)
+    return;
+
+  if (radius <= 0.0)
+  {
+    Eigen::Vector3i sensor_id;
+    posToIndex(md_.camera_pos_, sensor_id);
+    if (isInMap(sensor_id))
+      md_.observed_buffer_[toAddress(sensor_id)] = 1;
+    return;
+  }
+
+  // Match P4's swept-volume voxelization: every voxel whose AABB intersects
+  // the vehicle sphere is part of the volume currently occupied by the
+  // vehicle and is therefore directly known, not extrapolated UNKNOWN space.
+  const Eigen::Vector3i minimum = ((md_.camera_pos_.array() - radius -
+      mp_.map_origin_.array()) * mp_.resolution_inv_).floor().cast<int>();
+  const Eigen::Vector3i maximum = ((md_.camera_pos_.array() + radius -
+      mp_.map_origin_.array()) * mp_.resolution_inv_).floor().cast<int>();
+  for (int x = minimum.x(); x <= maximum.x(); ++x)
+    for (int y = minimum.y(); y <= maximum.y(); ++y)
+      for (int z = minimum.z(); z <= maximum.z(); ++z)
+      {
+        const Eigen::Vector3i index(x, y, z);
+        if (!isInMap(index))
+          continue;
+        const Eigen::Vector3d cell_min = mp_.map_origin_ + mp_.resolution_ *
+            index.cast<double>();
+        const Eigen::Vector3d cell_max =
+            cell_min + Eigen::Vector3d::Constant(mp_.resolution_);
+        const Eigen::Vector3d closest =
+            md_.camera_pos_.cwiseMax(cell_min).cwiseMin(cell_max);
+        if ((closest - md_.camera_pos_).squaredNorm() <= radius * radius)
+          md_.observed_buffer_[toAddress(index)] = 1;
+      }
 }
 
 void GridMap::publishMap()

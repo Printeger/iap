@@ -4,7 +4,9 @@
 #include <stdlib.h>
 
 #include <cstdint>
+#include <cmath>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <string>
 
@@ -37,6 +39,27 @@ namespace iap
 
 namespace ego_planner
 {
+
+  class P4ForwardSubmissionGate
+  {
+  public:
+    explicit P4ForwardSubmissionGate(
+        const double minimum_submission_period_s = 0.5)
+      : minimum_submission_period_s_(minimum_submission_period_s) {}
+
+    bool tryAcquire(const double now_s)
+    {
+      if (std::isfinite(last_submission_s_) &&
+          now_s - last_submission_s_ < minimum_submission_period_s_)
+        return false;
+      last_submission_s_ = now_s;
+      return true;
+    }
+
+  private:
+    double minimum_submission_period_s_ = 0.5;
+    double last_submission_s_ = -std::numeric_limits<double>::infinity();
+  };
 
   // Fast Planner Manager
   // Key algorithms of mapping and planning are called
@@ -208,8 +231,7 @@ namespace ego_planner
         std::numeric_limits<double>::quiet_NaN());
     Eigen::Vector3d p4_last_decision_target_ = Eigen::Vector3d::Constant(
         std::numeric_limits<double>::quiet_NaN());
-    double p4_last_compute_stamp_s_ =
-        -std::numeric_limits<double>::infinity();
+    P4ForwardSubmissionGate p4_forward_submission_gate_;
     std::vector<Eigen::Vector3d> p4_latched_guide_;
     Eigen::Vector3d p4_latched_anchor_ = Eigen::Vector3d::Constant(
         std::numeric_limits<double>::quiet_NaN());

@@ -1290,7 +1290,13 @@ namespace ego_planner
             P4ForwardTriggerReason::NOMINAL_CERTIFICATION_SHORT;
         request.live_occupancy_generation_at_submit =
             grid_map_ ? grid_map_->occupancyGeneration() : 0u;
-        p4_last_compute_stamp_s_ = plannerNow().seconds();
+        const double now_s = plannerNow().seconds();
+        if (!p4_forward_submission_gate_.tryAcquire(now_s))
+        {
+          unavailable.reason =
+              "forward_result_request_mismatch_recompute_rate_limited";
+          return unavailable;
+        }
         unavailable.reason = p4_forward_worker_.submit(std::move(request))
             ? "forward_result_request_mismatch_recompute_pending"
             : "forward_result_request_mismatch_submit_failed";
@@ -1373,8 +1379,7 @@ namespace ego_planner
       return cached;
     }
     const double now_s = plannerNow().seconds();
-    if (std::isfinite(p4_last_compute_stamp_s_) &&
-        now_s - p4_last_compute_stamp_s_ < 0.5)
+    if (!p4_forward_submission_gate_.tryAcquire(now_s))
     {
       unavailable.snapshot_identity = request.snapshot_identity;
       unavailable.action = P4ForwardAction::OBSERVE_MORE;
@@ -1383,7 +1388,6 @@ namespace ego_planner
       unavailable.reason = "forward_decision_rate_limited";
       return unavailable;
     }
-    p4_last_compute_stamp_s_ = now_s;
     unavailable.snapshot_identity = request.snapshot_identity;
     const uint64_t live_generation_at_submit =
         grid_map_ ? grid_map_->occupancyGeneration() : 0u;

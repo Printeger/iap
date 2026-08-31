@@ -30,14 +30,28 @@ using std::vector;
 
 namespace ego_planner
 {
-  inline bool p4ObserveMoreReplanDue(
-      const double now_s, const double last_replan_s,
-      const bool worker_result_ready,
-      const double minimum_submission_period_s = 0.5)
+  class P4ObserveMoreReplanScheduler
   {
-    return worker_result_ready ||
-        now_s - last_replan_s >= minimum_submission_period_s;
-  }
+  public:
+    explicit P4ObserveMoreReplanScheduler(
+        const double minimum_replan_period_s = 0.5)
+      : minimum_replan_period_s_(minimum_replan_period_s) {}
+
+    bool runIfDue(const double now_s, const bool worker_result_ready,
+                  const std::function<void()> &replan)
+    {
+      if (!worker_result_ready &&
+          now_s - last_replan_s_ < minimum_replan_period_s_)
+        return false;
+      last_replan_s_ = now_s;
+      replan();
+      return true;
+    }
+
+  private:
+    double minimum_replan_period_s_ = 0.5;
+    double last_replan_s_ = -std::numeric_limits<double>::infinity();
+  };
 
   class P4RiskGridPlanningAdmission
   {
@@ -170,8 +184,7 @@ namespace ego_planner
     bool p5_waiting_for_p0_ready_ = false;
     bool p4_waiting_for_risk_grid_ready_ = false;
     bool p4_require_risk_grid_ready_before_planning_ = false;
-    double p4_last_observe_replan_s_ =
-        -std::numeric_limits<double>::infinity();
+    P4ObserveMoreReplanScheduler p4_observe_more_scheduler_;
     std::shared_ptr<const iap::RiskGridSnapshot> p4_admitted_risk_grid_snapshot_;
     P4RiskGridPlanningAdmission p4_risk_grid_planning_admission_;
     P1ReplanAdmission p1_replan_admission_;

@@ -62,6 +62,10 @@ struct MappingParameters
   Eigen::Vector3d local_update_range_;
   double resolution_, resolution_inv_;
   double obstacles_inflation_;
+  // Radius around the current vehicle-center pose that is physically known
+  // not to contain an external obstacle. This evidence only marks observation;
+  // it never clears raw or inflated occupancy.
+  double current_vehicle_clearance_radius_m_ = 0.0;
   string frame_id_;
   int pose_type_;
 
@@ -302,6 +306,7 @@ private:
   void projectDepthImage();
   void raycastProcess();
   void clearAndInflateLocalMap();
+  void markCurrentVehicleFootprintObserved();
 
   inline void inflatePoint(const Eigen::Vector3i &pt, int step, vector<Eigen::Vector3i> &pts);
   int setCacheOccupancy(Eigen::Vector3d pos, int occ);

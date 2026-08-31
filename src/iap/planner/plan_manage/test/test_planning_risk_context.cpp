@@ -1021,10 +1021,27 @@ TEST(PlanningTimeProviderTest, EmergencyStopUsesProvidedSimStamp) {
   EXPECT_EQ(manager.local_data_.start_time_.nanoseconds(), sim_stamp.nanoseconds());
 }
 
-TEST(P4ObserveMoreScheduling,
-     CompletedWorkerResultBypassesSubmissionRateLimit)
+TEST(P4ObserveMoreScheduling, CompletedWorkerResultRunsPlannerImmediately)
 {
-  EXPECT_TRUE(ego_planner::p4ObserveMoreReplanDue(10.05, 10.0, true));
-  EXPECT_FALSE(ego_planner::p4ObserveMoreReplanDue(10.05, 10.0, false));
-  EXPECT_TRUE(ego_planner::p4ObserveMoreReplanDue(10.5, 10.0, false));
+  ego_planner::P4ObserveMoreReplanScheduler scheduler(0.5);
+  int replans = 0;
+  const auto replan = [&replans]() {++replans;};
+
+  EXPECT_TRUE(scheduler.runIfDue(10.0, false, replan));
+  EXPECT_FALSE(scheduler.runIfDue(10.05, false, replan));
+  EXPECT_TRUE(scheduler.runIfDue(10.05, true, replan));
+  EXPECT_EQ(replans, 2);
+  EXPECT_FALSE(scheduler.runIfDue(10.10, false, replan));
+  EXPECT_TRUE(scheduler.runIfDue(10.55, false, replan));
+  EXPECT_EQ(replans, 3);
+}
+
+TEST(P4ForwardSubmissionScheduling, EverySubmissionPathUsesTwoHertzGate)
+{
+  ego_planner::P4ForwardSubmissionGate gate(0.5);
+
+  EXPECT_TRUE(gate.tryAcquire(20.0));
+  EXPECT_FALSE(gate.tryAcquire(20.1));
+  EXPECT_FALSE(gate.tryAcquire(20.49));
+  EXPECT_TRUE(gate.tryAcquire(20.5));
 }

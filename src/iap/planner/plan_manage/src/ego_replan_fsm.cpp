@@ -775,12 +775,12 @@ namespace ego_planner
       // if no safe progress exists, publish a zero-velocity stop candidate
       // and remain in OBSERVE_MORE until a new online snapshot is usable.
       const double now_s = plannerNow().seconds();
-      if (!p4ObserveMoreReplanDue(
-              now_s, p4_last_observe_replan_s_,
-              planner_manager_->p4ForwardDecisionReady()))
+      bool planned = false;
+      if (!p4_observe_more_scheduler_.runIfDue(
+              now_s, planner_manager_->p4ForwardDecisionReady(),
+              [this, &planned]() {planned = planFromCurrentTraj(1);}))
         break;
-      p4_last_observe_replan_s_ = now_s;
-      if (planFromCurrentTraj(1))
+      if (planned)
       {
         publishSwarmTrajs(false);
         if (planner_manager_->lastP4ForwardDecision().action !=
