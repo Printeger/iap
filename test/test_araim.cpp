@@ -3013,6 +3013,43 @@ TEST_F(IntegrityMonitorBaselineTest, GnssSourceFieldsPopulated) {
   EXPECT_TRUE(std::isfinite(report.gnss_VPL));
 }
 
+TEST_F(IntegrityMonitorBaselineTest,
+       CertifiedEpochIdentityIncludesAraimFdeExclusions) {
+  IntegrityMonitor::Params p = default_monitor_params();
+  p.enable_gnss_integrity = true;
+  p.enable_gnss_araim = true;
+  IntegrityMonitor monitor(p);
+  auto frame = make_frame(0.01);
+
+  GnssEpoch epoch;
+  epoch.stamp = 100.0;
+  epoch.gps_sec = 2100000.0;
+  for (int i = 0; i < 8; ++i) {
+    SatObs sat;
+    sat.sat_id = i + 1;
+    sat.constellation = 'G';
+    sat.elevation = 0.35 + 0.08 * i;
+    sat.azimuth = 0.7 * i;
+    sat.pr_sigma = 1.0;
+    sat.pr_residual = i == 2 ? 100.0 : 0.0;
+    sat.nis_pr = 0.0;
+    epoch.sats.push_back(sat);
+  }
+  epoch.source_identity = gnss_epoch_identity(epoch);
+
+  const auto report = monitor.compute(frame, &epoch, nullptr, nullptr, nullptr);
+  const auto& araim = monitor.last_araim_result();
+  ASSERT_TRUE(araim.valid);
+  ASSERT_FALSE(araim.excluded_prns.empty());
+  for (const int prn : araim.excluded_prns) {
+    EXPECT_NE(std::find(report.excluded_sats.begin(),
+                        report.excluded_sats.end(), prn),
+              report.excluded_sats.end());
+  }
+  EXPECT_EQ(report.gnss_epoch_identity,
+            gnss_epoch_identity(epoch, report.excluded_sats));
+}
+
 // C2: Final source fields reflect fusion policy output
 TEST_F(IntegrityMonitorBaselineTest, FinalSourceFieldsReflectFusion) {
   IntegrityMonitor::Params p = default_monitor_params();

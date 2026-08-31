@@ -2666,16 +2666,32 @@ void P0RiskGridRuntime::rangeCallback(
       latest_gnss_epoch_stamp_ = epoch.stamp;
       gnss_epoch_history_.emplace_back(latest_gnss_epoch_generation_,
                                        std::move(epoch));
-      constexpr std::size_t kGnssEpochHistoryCapacity = 16;
-      while (gnss_epoch_history_.size() > kGnssEpochHistoryCapacity) {
-        gnss_epoch_history_.pop_front();
-      }
+      pruneGnssEpochHistoryLocked(latest_gnss_epoch_stamp_);
       latest_epoch_ = gnss_epoch_history_.back().second;
     } else {
       latest_gnss_epoch_stamp_ =
           std::numeric_limits<double>::quiet_NaN();
       latest_epoch_.reset();
     }
+  }
+}
+
+void P0RiskGridRuntime::pruneGnssEpochHistoryLocked(
+    const double newest_stamp_s) {
+  constexpr std::size_t kGnssEpochHistoryHardCapacity = 4096;
+  const double retention_window_s = std::max(
+      {0.25, config_.gnss_epoch_max_age_s,
+       config_.predictor_gnss_measured_epoch_integrity_max_delta_s}) + 0.25;
+  if (std::isfinite(newest_stamp_s) && std::isfinite(retention_window_s)) {
+    while (!gnss_epoch_history_.empty() &&
+           std::isfinite(gnss_epoch_history_.front().second.stamp) &&
+           newest_stamp_s - gnss_epoch_history_.front().second.stamp >
+               retention_window_s) {
+      gnss_epoch_history_.pop_front();
+    }
+  }
+  while (gnss_epoch_history_.size() > kGnssEpochHistoryHardCapacity) {
+    gnss_epoch_history_.pop_front();
   }
 }
 

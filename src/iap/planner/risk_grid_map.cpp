@@ -5,6 +5,7 @@
 #include <cmath>
 #include <iomanip>
 #include <sstream>
+#include <system_error>
 #include <thread>
 #include <unordered_map>
 #include <utility>
@@ -1500,18 +1501,30 @@ bool RiskGridMap::refreshFromProvider(
         }
       };
   const std::size_t initialization_worker_count = std::min<std::size_t>(
-      4u, std::max<std::size_t>(1u, next->voxels.size() / 50000u));
+      4u, std::max<std::size_t>(1u, next->voxels.size() / 1000u));
   std::vector<std::thread> initialization_workers;
   initialization_workers.reserve(initialization_worker_count);
-  for (std::size_t worker = 0; worker < initialization_worker_count; ++worker) {
-    const std::size_t begin = next->voxels.size() * worker /
-        initialization_worker_count;
-    const std::size_t end = next->voxels.size() * (worker + 1u) /
-        initialization_worker_count;
-    initialization_workers.emplace_back(initialize_skipped_voxels, begin, end);
+  bool all_workers_started = true;
+  try {
+    for (std::size_t worker = 0; worker < initialization_worker_count;
+         ++worker) {
+      const std::size_t begin = next->voxels.size() * worker /
+          initialization_worker_count;
+      const std::size_t end = next->voxels.size() * (worker + 1u) /
+          initialization_worker_count;
+      initialization_workers.emplace_back(
+          initialize_skipped_voxels, begin, end);
+    }
+  } catch (const std::system_error&) {
+    all_workers_started = false;
   }
   for (auto& worker : initialization_workers) {
-    worker.join();
+    if (worker.joinable()) {
+      worker.join();
+    }
+  }
+  if (!all_workers_started) {
+    initialize_skipped_voxels(0u, next->voxels.size());
   }
 
   for (std::size_t i = 0; i < results.size(); ++i) {

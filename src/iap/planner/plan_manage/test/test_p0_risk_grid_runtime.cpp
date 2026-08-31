@@ -1755,6 +1755,18 @@ class P0RiskGridRuntimeStampTest : public ::testing::Test {
         iap::gnss_epoch_identity(history[certified_index].second);
   }
 
+  static void pruneGnssEpochHistory(P0RiskGridRuntime* runtime,
+                                    const double newest_stamp_s) {
+    std::lock_guard<std::mutex> lock(runtime->health_state_mutex_);
+    runtime->pruneGnssEpochHistoryLocked(newest_stamp_s);
+  }
+
+  static std::size_t gnssEpochHistorySize(
+      const P0RiskGridRuntime& runtime) {
+    std::lock_guard<std::mutex> lock(runtime.health_state_mutex_);
+    return runtime.gnss_epoch_history_.size();
+  }
+
   static std::shared_ptr<std::atomic<uint64_t>> installOccupancyEpoch(
       P0RiskGridRuntime* runtime,
       const double stamp_s,
@@ -3414,6 +3426,34 @@ TEST_F(P0RiskGridRuntimeStampTest,
   EXPECT_EQ(snapshot.gnss_epoch.source_identity,
             certified.source_identity);
   EXPECT_NE(snapshot.gnss_epoch.source_identity, latest.source_identity);
+}
+
+TEST_F(P0RiskGridRuntimeStampTest,
+       GnssEpochHistoryRetainsFullFreshnessWindowAtHighRate) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_high_rate_certified_epoch_history_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  auto config = enabledConfig();
+  config.gnss_epoch_max_age_s = 2.0;
+  P0RiskGridRuntime runtime(node, config, std::make_unique<FakeProvider>());
+  seedValidInputs(&runtime, 100.0, 100.0);
+
+  std::vector<std::pair<uint64_t, iap::GnssEpoch>> history;
+  for (int i = 0; i <= 120; ++i) {
+    auto epoch = makeGnssEpoch(8, 97.6 + 0.02 * i);
+    epoch.source_identity = 0x1000u + static_cast<uint64_t>(i);
+    history.emplace_back(static_cast<uint64_t>(i + 1), std::move(epoch));
+  }
+  constexpr std::size_t kCertifiedIndex = 25;
+  setGnssEpochHistory(&runtime, history, kCertifiedIndex);
+  pruneGnssEpochHistory(&runtime, 100.0);
+
+  EXPECT_GT(gnssEpochHistorySize(runtime), 16u);
+  iap::IntegritySnapshot snapshot;
+  ASSERT_TRUE(buildSnapshot(&runtime, 100.0, &snapshot));
+  EXPECT_EQ(snapshot.gnss_epoch.source_identity,
+            history[kCertifiedIndex].second.source_identity);
 }
 
 TEST_F(P0RiskGridRuntimeStampTest, GnssRangeCallbackCompletesWithoutRecursiveLock) {

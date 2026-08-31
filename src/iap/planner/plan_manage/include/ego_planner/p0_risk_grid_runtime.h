@@ -248,6 +248,7 @@ class P0RiskGridRuntime {
   void odomCallback(const nav_msgs::msg::Odometry::ConstSharedPtr msg);
   void integrityCallback(const iap::msg::IntegrityReport::ConstSharedPtr msg);
   void rangeCallback(const gnss_comm::msg::GnssMeasMsg::ConstSharedPtr msg);
+  void pruneGnssEpochHistoryLocked(double newest_stamp_s);
   void ephemCallback(const gnss_comm::msg::GnssEphemMsg::ConstSharedPtr msg);
   void gloEphemCallback(
       const gnss_comm::msg::GnssGloEphemMsg::ConstSharedPtr msg);

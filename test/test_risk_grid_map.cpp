@@ -1107,17 +1107,24 @@ TEST(RiskGridMapTest, QueryTraceAttributesOccupiedInterpolationCorner) {
 
 TEST(RiskGridMapTest, OccupancyEvidenceIsEvaluatedOncePerSpatialVoxel) {
   iap::RiskGridMapParams params = base_params();
+  params.size_x_m = 10.0;
+  params.size_y_m = 10.0;
+  params.size_z_m = 10.0;
   params.horizons_s = {0.0, 0.5, 1.0, 2.0};
+  params.require_observed_support = true;
   iap::RiskGridMap grid(params);
   AffineProvider provider;
   std::string reason;
   int occupancy_query_count = 0;
-  const auto observed_free = [&occupancy_query_count](const Eigen::Vector3d&) {
+  const auto observed_free = [&occupancy_query_count](
+                                 const Eigen::Vector3d& position) {
     ++occupancy_query_count;
     iap::RiskOccupancyDiagnostic diagnostic;
     diagnostic.available = true;
-    diagnostic.observed = true;
-    diagnostic.state = iap::RiskOccupancyState::OBSERVED_FREE;
+    diagnostic.observed = position.x() >= 0.0;
+    diagnostic.state = diagnostic.observed
+        ? iap::RiskOccupancyState::OBSERVED_FREE
+        : iap::RiskOccupancyState::UNKNOWN;
     diagnostic.occupancy_generation = 7;
     diagnostic.source = "test_map";
     return diagnostic;
@@ -1127,10 +1134,16 @@ TEST(RiskGridMapTest, OccupancyEvidenceIsEvaluatedOncePerSpatialVoxel) {
       Eigen::Vector3d::Zero(), 10.0, provider, observed_free, &reason))
       << reason;
 
-  constexpr int kSpatialVoxelCount = 3 * 3 * 3;
+  constexpr int kSpatialVoxelCount = 10 * 10 * 10;
+  constexpr int kObservedSpatialVoxelCount = 5 * 10 * 10;
   EXPECT_EQ(occupancy_query_count, kSpatialVoxelCount + 1);
   EXPECT_EQ(provider.query_count,
-            kSpatialVoxelCount * static_cast<int>(params.horizons_s.size()));
+            kObservedSpatialVoxelCount *
+                static_cast<int>(params.horizons_s.size()));
+  const auto health = grid.health();
+  EXPECT_DOUBLE_EQ(health.valid_ratio, 0.5);
+  EXPECT_DOUBLE_EQ(health.unknown_ratio, 0.5);
+  EXPECT_EQ(health.dominant_unknown_reason, "unknown_occupancy_support");
 }
 
 TEST(RiskGridMapTest, RefreshRejectsChangingOccupancyGeneration) {

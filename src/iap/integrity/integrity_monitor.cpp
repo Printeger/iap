@@ -209,6 +209,9 @@ void IntegrityMonitor::run_gnss_gating(const GnssEpoch& epoch,
 // ---------------------------------------------------------------------------
 IntegritySourceResult IntegrityMonitor::run_araim(const GnssEpoch& epoch,
                                                    int n_trunk_obs) {
+  // Never let diagnostics or the certified epoch identity inherit exclusions
+  // from a preceding GNSS epoch when this ARAIM invocation exits early.
+  last_gnss_araim_result_ = {};
   if (!params_.enable_gnss_araim) {
     return IntegritySourceResult::make_disabled("GNSS");
   }
@@ -422,6 +425,16 @@ IntegritySourceResult IntegrityMonitor::evaluateGnssSource(
     gnss_src = run_araim(*epoch, n_trunk_obs);
 
     const auto& ar = last_gnss_araim_result_;
+    if (ar.valid) {
+      report.excluded_sats.insert(report.excluded_sats.end(),
+                                  ar.excluded_prns.begin(),
+                                  ar.excluded_prns.end());
+      std::sort(report.excluded_sats.begin(), report.excluded_sats.end());
+      report.excluded_sats.erase(
+          std::unique(report.excluded_sats.begin(),
+                      report.excluded_sats.end()),
+          report.excluded_sats.end());
+    }
     report.araim_valid  = ar.valid ? 1 : 0;
     report.araim_n_hyp  = ar.n_hypotheses;
     report.araim_n_det  = ar.n_detected;
