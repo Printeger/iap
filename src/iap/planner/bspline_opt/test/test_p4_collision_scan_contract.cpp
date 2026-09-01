@@ -531,6 +531,20 @@ TEST(P4CollisionScanFailClosedIntegration,
 }
 
 TEST(P4CollisionScanFailClosedIntegration,
+     NativeAStarMalformedSuccessfulResultHasDistinctStatus) {
+  EXPECT_EQ(
+    ego_planner::collisionScanStatusForNativeAStarFailure(
+      ego_planner::NativeAStarGuideStatus::INVALID_RESULT),
+    ego_planner::CollisionScanStatus::NATIVE_ASTAR_INVALID_RESULT);
+  EXPECT_TRUE(ego_planner::collisionScanFailsClosed(
+    ego_planner::CollisionScanStatus::NATIVE_ASTAR_INVALID_RESULT));
+  EXPECT_STREQ(
+    ego_planner::collisionScanStatusName(
+      ego_planner::CollisionScanStatus::NATIVE_ASTAR_INVALID_RESULT),
+    "NATIVE_ASTAR_INVALID_RESULT");
+}
+
+TEST(P4CollisionScanFailClosedIntegration,
      ReboundOpenEndedAndInvalidStopBeforeAStar) {
   auto open_map = std::make_shared<GridMap>();
   GridMapTestAccess::configure(

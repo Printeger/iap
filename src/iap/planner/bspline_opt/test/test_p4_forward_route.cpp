@@ -210,6 +210,23 @@ TEST(P4ForwardRoute, InconclusiveTopologyProbeHoldsBeforeAnyBranch)
   EXPECT_DOUBLE_EQ(decision.speed_cap_mps, 0.0);
 }
 
+TEST(P4ForwardRoute, ZeroLengthCandidatePrefixForcesStrictIntersectionHold)
+{
+  ego_planner::P4ForwardCandidate immediate_failure;
+  immediate_failure.path = {Eigen::Vector3d(0.0, 0.0, 1.0)};
+  ego_planner::P4ForwardCandidate later_failure;
+  later_failure.path = {
+    Eigen::Vector3d(0.0, 0.0, 1.0),
+    Eigen::Vector3d(0.5, 0.0, 1.0),
+    Eigen::Vector3d(1.0, 0.0, 1.0)};
+
+  const auto prefix = ego_planner::p4CommonGeometryPrefix(
+    {immediate_failure, later_failure}, 0.25);
+
+  ASSERT_EQ(prefix.size(), 1u);
+  EXPECT_TRUE(prefix.front().isApprox(immediate_failure.path.front()));
+}
+
 TEST(P4ForwardRoute, MissingRiskSupportDefersSelectionAtLimitedSpeed)
 {
   auto request = straightRequest();

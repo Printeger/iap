@@ -270,6 +270,8 @@ namespace ego_planner
   };
 
   double p4StoppingDistance(double speed_mps, const P4ForwardLimits & limits);
+  std::vector<Eigen::Vector3d> p4CommonGeometryPrefix(
+    const std::vector<P4ForwardCandidate> & candidates, double resolution);
   bool p4ForwardDecisionMatchesRequest(
     const P4ForwardDecision & decision, const P4ForwardRequest & request,
     double movement_trigger_m = 0.5);

@@ -1168,7 +1168,7 @@ void configureDeferredMotion(
     }
     return;
   }
-  const auto prefix = commonGeometryPrefix(
+  const auto prefix = p4CommonGeometryPrefix(
     decision->candidates, request.limits.topology_resolution_m * 0.5);
   decision->common_prefix_length_m = pathLength(prefix);
   const double terminal_reserve = p4StoppingDistance(0.0, request.limits);
@@ -1189,6 +1189,12 @@ void configureDeferredMotion(
 }
 
 }  // namespace
+
+std::vector<Eigen::Vector3d> p4CommonGeometryPrefix(
+  const std::vector<P4ForwardCandidate> & candidates, const double resolution)
+{
+  return commonGeometryPrefix(candidates, resolution);
+}
 
 const char * p4ForwardActionName(const P4ForwardAction action)
 {
@@ -1601,11 +1607,12 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
         }
         clear_prefix.path.push_back(point);
       }
-      if (clear_prefix.path.size() > 1) {
-        clear_prefixes.push_back(std::move(clear_prefix));
-      }
+      // A candidate that fails at its first swept sample contributes a
+      // zero-length prefix. Keeping that start point forces the strict
+      // intersection to zero length and therefore HOLDs every branch.
+      clear_prefixes.push_back(std::move(clear_prefix));
     }
-    auto prefix = commonGeometryPrefix(
+    auto prefix = p4CommonGeometryPrefix(
       clear_prefixes, request.limits.topology_resolution_m * 0.5);
     configureKnownGeometryPrefixMotion(request, prefix, &decision);
     if (decision.deferred_motion_mode ==

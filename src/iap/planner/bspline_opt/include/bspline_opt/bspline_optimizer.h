@@ -57,6 +57,8 @@ namespace ego_planner
 
   const char *collisionScanStatusName(CollisionScanStatus status);
   bool collisionScanFailsClosed(CollisionScanStatus status);
+  CollisionScanStatus collisionScanStatusForNativeAStarFailure(
+      NativeAStarGuideStatus status);
 
   class ControlPoints
   {

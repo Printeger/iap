@@ -1214,7 +1214,7 @@ namespace ego_planner
            status == CollisionScanStatus::INVALID_INPUT;
   }
 
-  static CollisionScanStatus collisionScanStatusForNativeAStarFailure(
+  CollisionScanStatus collisionScanStatusForNativeAStarFailure(
       const NativeAStarGuideStatus status)
   {
     switch (status)

@@ -114,7 +114,9 @@ unsafe, the FSM holds. Missing support can therefore delay formal risk
 selection without being converted into a geometry obstacle or allowing a
 premature branch choice. In particular, the shared prefix is computed only
 from all raw topology candidates; the nominal reference cannot replace that
-intersection merely because it is longer.
+intersection merely because it is longer. A candidate whose swept check fails
+at the first sample contributes a zero-length prefix, forcing `HOLD` rather
+than being discarded from the intersection.
 
 ## Triggering, caching, and latching
 
