@@ -15,7 +15,7 @@ namespace
 {
 
 using ego_planner::P4ForwardAction;
-using ego_planner::P4ForwardOccupancyState;
+using ego_planner::P4ForwardGeometryState;
 using ego_planner::P4ForwardRequest;
 using ego_planner::P4ForwardRankingState;
 using ego_planner::P4ForwardRiskQuery;
@@ -73,11 +73,11 @@ P4ForwardRequest straightRequest()
   request.snapshot_identity.risk_stamp_s = 10.0;
   request.limits.vehicle_radius_m = 0.0;
   request.limits.safety_margin_m = 0.0;
-  request.occupancy = [](const Eigen::Vector3d & point) {
+  request.geometry = [](const Eigen::Vector3d & point) {
       if (std::abs(point.y()) > 2.5 || point.z() < 0.5 || point.z() > 1.5) {
-        return P4ForwardOccupancyState::OCCUPIED;
+        return P4ForwardGeometryState::OCCUPIED;
       }
-      return P4ForwardOccupancyState::OBSERVED_FREE;
+      return P4ForwardGeometryState::CLEAR;
     };
   request.risk = [](const Eigen::Vector3d &, double) {
       P4ForwardRiskSample sample;
@@ -147,8 +147,8 @@ TEST(P4ForwardRoute, OpenObservedSpaceContinuesAsSingleChannel)
 TEST(P4ForwardRoute, UnobservedSpaceWithoutHitsRemainsGeometryClear)
 {
   auto request = straightRequest();
-  request.occupancy = [](const Eigen::Vector3d &) {
-      return P4ForwardOccupancyState::UNKNOWN;
+  request.geometry = [](const Eigen::Vector3d &) {
+      return P4ForwardGeometryState::CLEAR;
     };
 
   const auto decision = P4ForwardRoutePlanner().decide(request);
@@ -157,6 +157,59 @@ TEST(P4ForwardRoute, UnobservedSpaceWithoutHitsRemainsGeometryClear)
     << decision.reason;
   ASSERT_EQ(decision.candidates.size(), 1u);
   EXPECT_TRUE(decision.candidates.front().occupancy_supported);
+}
+
+TEST(P4ForwardRoute, ForestSizedClearSnapshotMeetsForwardDecisionBudget)
+{
+  auto request = straightRequest();
+  request.position = Eigen::Vector3d(-18.0, 0.0, 1.5);
+  request.velocity = Eigen::Vector3d::Zero();
+  request.local_target = Eigen::Vector3d(-10.0, 0.0, 1.5);
+  request.nominal_local_reference = {request.position, request.local_target};
+  request.map_origin = Eigen::Vector3d(-21.0, -11.0, 0.0);
+  request.map_extent = Eigen::Vector3d(42.0, 22.0, 8.0);
+  request.limits.vehicle_radius_m = 0.35;
+  request.limits.safety_margin_m = 0.5;
+  request.limits.compute_budget_ms = 150.0;
+  request.geometry = [&request](const Eigen::Vector3d & point) {
+      const Eigen::Vector3d relative = point - request.map_origin;
+      if ((relative.array() < 0.0).any() ||
+        (relative.array() >= request.map_extent.array()).any())
+      {
+        return P4ForwardGeometryState::OUT_OF_BOUNDS;
+      }
+      return P4ForwardGeometryState::CLEAR;
+    };
+
+  const auto decision = P4ForwardRoutePlanner().decide(request);
+
+  EXPECT_NE(decision.trigger_reason,
+            P4ForwardTriggerReason::COMPUTE_BUDGET_EXCEEDED)
+    << decision.reason << " latency_ms=" << decision.compute_latency_ms;
+  EXPECT_LT(decision.compute_latency_ms, 150.0);
+  EXPECT_FALSE(decision.candidates.empty());
+}
+
+TEST(P4ForwardRoute, InconclusiveTopologyProbeDefersToNativeEgo)
+{
+  auto request = straightRequest();
+  request.geometry = [](const Eigen::Vector3d & point) {
+      if (point.x() >= 2.15 && point.x() <= 2.35) {
+        return P4ForwardGeometryState::OCCUPIED;
+      }
+      return P4ForwardGeometryState::CLEAR;
+    };
+
+  const auto decision = P4ForwardRoutePlanner().decide(request);
+
+  EXPECT_EQ(decision.action, P4ForwardAction::DEFER_RISK_SELECTION);
+  EXPECT_EQ(decision.deferred_motion_mode,
+            ego_planner::P4ForwardDeferredMotionMode::NATIVE_EGO);
+  EXPECT_EQ(decision.reason, "topology_probe_inconclusive_native_ego");
+  EXPECT_TRUE(decision.selected_guide.empty());
+  EXPECT_GT(decision.speed_cap_mps, 0.0);
+  EXPECT_LE(decision.speed_cap_mps,
+            request.limits.max_observe_speed_mps);
 }
 
 TEST(P4ForwardRoute, MissingRiskSupportDefersSelectionAtLimitedSpeed)
@@ -186,6 +239,31 @@ TEST(P4ForwardRoute, MissingRiskSupportDefersSelectionAtLimitedSpeed)
   EXPECT_TRUE(decision.selected_guide.empty());
   EXPECT_LE(decision.speed_cap_mps,
     request.limits.max_observe_speed_mps + 1.0e-9);
+  ASSERT_EQ(decision.candidates.size(), 1u);
+  EXPECT_LE(
+    ego_planner::p4StoppingDistance(decision.speed_cap_mps, request.limits),
+    std::min(decision.decision_horizon_m,
+      decision.candidates.front().length_m) + 1.0e-9);
+}
+
+TEST(P4ForwardRoute, StaleCurrentAnchorForcesDeferredHold)
+{
+  auto request = straightRequest();
+  request.risk = [](const Eigen::Vector3d &, double) {
+      P4ForwardRiskSample sample;
+      sample.valid = false;
+      sample.stale = true;
+      sample.reason = "STALE";
+      return sample;
+    };
+  bindTestRiskBatch(&request);
+
+  const auto decision = P4ForwardRoutePlanner().decide(request);
+
+  ASSERT_EQ(decision.action, P4ForwardAction::DEFER_RISK_SELECTION);
+  EXPECT_EQ(decision.deferred_motion_mode,
+            ego_planner::P4ForwardDeferredMotionMode::HOLD);
+  EXPECT_DOUBLE_EQ(decision.speed_cap_mps, 0.0);
 }
 
 TEST(P4ForwardRoute, MissingIndividualSourceSupportDefersSelection)
@@ -270,9 +348,9 @@ TEST(P4ForwardRoute, WorkerShutdownIsBoundedByTheComputeDeadline)
 {
   auto request = straightRequest();
   request.limits.compute_budget_ms = 1.0;
-  request.occupancy = [](const Eigen::Vector3d &) {
+  request.geometry = [](const Eigen::Vector3d &) {
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
-      return P4ForwardOccupancyState::OBSERVED_FREE;
+      return P4ForwardGeometryState::CLEAR;
     };
   const auto started = std::chrono::steady_clock::now();
   {
@@ -289,11 +367,11 @@ TEST(P4ForwardRoute, DeferredNativeEgoMotionRetainsConfiguredSpeedCap)
 {
   auto request = straightRequest();
   request.limits.compute_budget_ms = 150.0;
-  request.occupancy = [](const Eigen::Vector3d & point) {
+  request.geometry = [](const Eigen::Vector3d & point) {
       if (std::abs(point.y()) > 2.5 || point.z() < 0.0 || point.z() > 2.0) {
-        return P4ForwardOccupancyState::OCCUPIED;
+        return P4ForwardGeometryState::OCCUPIED;
       }
-      return P4ForwardOccupancyState::OBSERVED_FREE;
+      return P4ForwardGeometryState::CLEAR;
     };
   request.risk = [](const Eigen::Vector3d & point, double) {
       P4ForwardRiskSample sample;
@@ -350,10 +428,10 @@ TEST(P4ForwardRoute, IncompleteSupportCannotMaskAllRoutesUnsafe)
   auto request = straightRequest();
   request.limits.vehicle_radius_m = 0.3;
   request.limits.compute_budget_ms = 500.0;
-  request.occupancy = [](const Eigen::Vector3d & point) {
+  request.geometry = [](const Eigen::Vector3d & point) {
       return std::abs(point.y()) <= 0.6 && point.z() >= 0.4 &&
-             point.z() <= 1.6 ? P4ForwardOccupancyState::UNKNOWN :
-             P4ForwardOccupancyState::OCCUPIED;
+             point.z() <= 1.6 ? P4ForwardGeometryState::CLEAR :
+             P4ForwardGeometryState::OCCUPIED;
     };
   request.risk = [](const Eigen::Vector3d & point, double) {
       P4ForwardRiskSample sample;
@@ -404,22 +482,27 @@ TEST(P4ForwardRoute, RiskProfileUsesAlongPathArrivalTime)
 
   const auto decision = P4ForwardRoutePlanner().decide(request);
   ASSERT_EQ(decision.action, P4ForwardAction::CONTINUE_NOMINAL);
-  EXPECT_GE(latest_query_time_s, request.query_time_s + 2.9);
+  ASSERT_FALSE(decision.selected_guide.empty());
+  EXPECT_GE(latest_query_time_s,
+    request.query_time_s +
+    (decision.candidates.front().length_m -
+    request.limits.occupancy_resolution_m) /
+    request.limits.nominal_query_speed_mps);
 }
 
 TEST(P4ForwardRoute, OccupiedSeparatorCreatesTwoRiskRankedChannels)
 {
   auto request = straightRequest();
-  request.occupancy = [](const Eigen::Vector3d & point) {
+  request.geometry = [](const Eigen::Vector3d & point) {
       if (point.x() >= 2.0 && point.x() <= 4.0 &&
         std::abs(point.y()) <= 0.6)
       {
-        return P4ForwardOccupancyState::OCCUPIED;
+        return P4ForwardGeometryState::OCCUPIED;
       }
       if (std::abs(point.y()) > 2.5 || point.z() < 0.5 || point.z() > 1.5) {
-        return P4ForwardOccupancyState::OCCUPIED;
+        return P4ForwardGeometryState::OCCUPIED;
       }
-      return P4ForwardOccupancyState::OBSERVED_FREE;
+      return P4ForwardGeometryState::CLEAR;
     };
   request.risk = [](const Eigen::Vector3d & point, double) {
       P4ForwardRiskSample sample;
@@ -449,16 +532,16 @@ TEST(P4ForwardRoute, OccupiedSeparatorCreatesTwoRiskRankedChannels)
 TEST(P4ForwardRoute, RiskBatchComparesAllChannelsWithOneCertificateCall)
 {
   auto request = straightRequest();
-  request.occupancy = [](const Eigen::Vector3d & point) {
+  request.geometry = [](const Eigen::Vector3d & point) {
       if (point.x() >= 2.0 && point.x() <= 4.0 &&
         std::abs(point.y()) <= 0.6)
       {
-        return P4ForwardOccupancyState::OCCUPIED;
+        return P4ForwardGeometryState::OCCUPIED;
       }
       if (std::abs(point.y()) > 2.5 || point.z() < 0.5 || point.z() > 1.5) {
-        return P4ForwardOccupancyState::OCCUPIED;
+        return P4ForwardGeometryState::OCCUPIED;
       }
-      return P4ForwardOccupancyState::OBSERVED_FREE;
+      return P4ForwardGeometryState::CLEAR;
     };
   int batch_calls = 0;
   std::size_t max_group_count = 0;
@@ -543,9 +626,9 @@ TEST(P4ForwardRoute, RiskBatchIncompleteDefersWithoutRiskSelection)
 TEST(P4ForwardRoute, KnownHitLimitsGeometryAnchor)
 {
   auto request = straightRequest();
-  request.occupancy = [](const Eigen::Vector3d & point) {
-      return point.x() > 1.25 ? P4ForwardOccupancyState::OCCUPIED :
-             P4ForwardOccupancyState::OBSERVED_FREE;
+  request.geometry = [](const Eigen::Vector3d & point) {
+      return point.x() > 1.25 ? P4ForwardGeometryState::OCCUPIED :
+             P4ForwardGeometryState::CLEAR;
     };
 
   const auto decision = P4ForwardRoutePlanner().decide(request);
@@ -561,9 +644,9 @@ TEST(P4ForwardRoute, KnownHitLimitsGeometryAnchor)
 TEST(P4ForwardRoute, UnobservedRegionDoesNotBecomeGeometryFailure)
 {
   auto request = straightRequest();
-  request.occupancy = [](const Eigen::Vector3d & point) {
-      return point.x() > 1.25 ? P4ForwardOccupancyState::UNKNOWN :
-             P4ForwardOccupancyState::OBSERVED_FREE;
+  request.geometry = [](const Eigen::Vector3d & point) {
+      return point.x() > 1.25 ? P4ForwardGeometryState::CLEAR :
+             P4ForwardGeometryState::CLEAR;
     };
 
   const auto decision = P4ForwardRoutePlanner().decide(request);
@@ -575,16 +658,16 @@ TEST(P4ForwardRoute, UnobservedRegionDoesNotBecomeGeometryFailure)
 TEST(P4ForwardRoute, UnobservedRegionCannotCreateArtificialChannels)
 {
   auto request = straightRequest();
-  request.occupancy = [](const Eigen::Vector3d & point) {
+  request.geometry = [](const Eigen::Vector3d & point) {
       if (point.x() >= 2.0 && point.x() <= 4.0 &&
         std::abs(point.y()) <= 0.6)
       {
-        return P4ForwardOccupancyState::UNKNOWN;
+        return P4ForwardGeometryState::CLEAR;
       }
       if (std::abs(point.y()) > 2.5 || point.z() < 0.5 || point.z() > 1.5) {
-        return P4ForwardOccupancyState::OCCUPIED;
+        return P4ForwardGeometryState::OCCUPIED;
       }
-      return P4ForwardOccupancyState::OBSERVED_FREE;
+      return P4ForwardGeometryState::CLEAR;
     };
 
   const auto decision = P4ForwardRoutePlanner().decide(request);
@@ -595,22 +678,27 @@ TEST(P4ForwardRoute, UnobservedRegionCannotCreateArtificialChannels)
 TEST(P4ForwardRoute, MultipleChannelsWithIncompleteRiskOnlyExposeCommonPrefix)
 {
   auto request = straightRequest();
-  request.occupancy = [](const Eigen::Vector3d & point) {
+  request.geometry = [](const Eigen::Vector3d & point) {
       if (point.x() >= 2.0 && point.x() <= 4.0 &&
         std::abs(point.y()) <= 0.6)
       {
-        return P4ForwardOccupancyState::OCCUPIED;
+        return P4ForwardGeometryState::OCCUPIED;
       }
       if (std::abs(point.y()) > 2.5 || point.z() < 0.5 || point.z() > 1.5) {
-        return P4ForwardOccupancyState::OCCUPIED;
+        return P4ForwardGeometryState::OCCUPIED;
       }
-      return P4ForwardOccupancyState::OBSERVED_FREE;
+      return P4ForwardGeometryState::CLEAR;
     };
-  request.risk = [](const Eigen::Vector3d &, double) {
+  request.risk = [](const Eigen::Vector3d & point, double) {
       P4ForwardRiskSample sample;
-      sample.valid = false;
+      sample.valid = point.x() <= 0.5;
       sample.stale = false;
-      sample.reason = "GNSS_SKY_UNKNOWN";
+      sample.gnss_supported = sample.valid;
+      sample.lidar_supported = sample.valid;
+      sample.fim_supported = sample.valid;
+      sample.safety_ratio = sample.valid ? 0.4 : NAN;
+      sample.fim_ratio = sample.valid ? 0.3 : NAN;
+      sample.reason = sample.valid ? "ok" : "GNSS_SKY_UNKNOWN";
       return sample;
     };
   bindTestRiskBatch(&request);
@@ -637,18 +725,18 @@ TEST(P4ForwardRoute, FullThreeDimensionalSearchSelectsVerticalChannel)
   request.nominal_local_reference = {request.position, request.local_target};
   request.map_origin = Eigen::Vector3d(-1.0, -1.0, 0.0);
   request.map_extent = Eigen::Vector3d(9.0, 2.0, 5.0);
-  request.occupancy = [](const Eigen::Vector3d & point) {
+  request.geometry = [](const Eigen::Vector3d & point) {
       if (std::abs(point.y()) > 0.75 || point.z() < 0.25 ||
         point.z() > 4.75)
       {
-        return P4ForwardOccupancyState::OCCUPIED;
+        return P4ForwardGeometryState::OCCUPIED;
       }
       if (point.x() >= 2.0 && point.x() <= 4.0 &&
         point.z() >= 2.0 && point.z() <= 3.0)
       {
-        return P4ForwardOccupancyState::OCCUPIED;
+        return P4ForwardGeometryState::OCCUPIED;
       }
-      return P4ForwardOccupancyState::OBSERVED_FREE;
+      return P4ForwardGeometryState::CLEAR;
     };
   request.risk = [](const Eigen::Vector3d & point, double) {
       P4ForwardRiskSample sample;
@@ -724,8 +812,8 @@ TEST(P4ForwardRoute, AsyncResultRetainsItsOwnLiveGenerationToken)
   auto release_first = std::make_shared<std::atomic<bool>>(false);
   auto first = straightRequest();
   first.live_occupancy_generation_at_submit = 17u;
-  const auto first_occupancy = first.occupancy;
-  first.occupancy = [first_started, release_first, first_occupancy](
+  const auto first_occupancy = first.geometry;
+  first.geometry = [first_started, release_first, first_occupancy](
     const Eigen::Vector3d & point) {
       first_started->store(true);
       while (!release_first->load()) {
@@ -745,7 +833,7 @@ TEST(P4ForwardRoute, AsyncResultRetainsItsOwnLiveGenerationToken)
   auto second_started = std::make_shared<std::atomic<bool>>(false);
   auto release_second = std::make_shared<std::atomic<bool>>(false);
   const auto second_occupancy = first_occupancy;
-  replacement.occupancy =
+  replacement.geometry =
     [second_started, release_second, second_occupancy](
     const Eigen::Vector3d & point) {
       second_started->store(true);

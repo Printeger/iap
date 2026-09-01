@@ -20,15 +20,9 @@ namespace ego_planner
   enum class P4ForwardGeometryState
   {
     CLEAR = 0,
-    // Source compatibility for archived fixtures. Both names deliberately
-    // carry CLEAR geometry semantics in v2.
-    OBSERVED_FREE = CLEAR,
-    UNKNOWN = CLEAR,
     OCCUPIED,
     OUT_OF_BOUNDS,
   };
-
-  using P4ForwardOccupancyState = P4ForwardGeometryState;
 
   enum class P4ForwardAction
   {
@@ -216,8 +210,6 @@ namespace ego_planner
     double query_time_s = 0.0;
     P4ForwardLimits limits;
     std::function < P4ForwardGeometryState(const Eigen::Vector3d &) > geometry;
-    // Read-only compatibility for v1 fixtures. Production v2 binds geometry.
-    std::function < P4ForwardGeometryState(const Eigen::Vector3d &) > occupancy;
     std::function < P4ForwardRiskSample(const Eigen::Vector3d &, double) > risk;
     std::function < bool(
       const std::vector < P4ForwardRiskQuery > &,
@@ -231,11 +223,6 @@ namespace ego_planner
       std::vector < Eigen::Vector3d > *) > refine;
 
     bool valid(std::string * reason = nullptr) const;
-    P4ForwardGeometryState queryGeometry(
-      const Eigen::Vector3d & point) const
-    {
-      return geometry ? geometry(point) : occupancy(point);
-    }
   };
 
   struct P4ForwardDecision

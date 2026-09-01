@@ -375,25 +375,58 @@ def effective_lidar_renderer_evidence(run_root: Path) -> dict | None:
 
 def lidar_runtime_stats(stdout: str) -> dict:
     rows = [
-        (int(rays), int(hits), float(latency))
-        for rays, hits, latency in re.findall(
-            r"first-hit lidar frame=\d+[^\n]*rays=(\d+) hits=(\d+)"
+        (int(frame), float(stamp), int(rays), int(hits), float(latency))
+        for frame, stamp, rays, hits, latency in re.findall(
+            r"first-hit lidar frame=(\d+) stamp=([0-9]+(?:\.[0-9]+)?)"
+            r"[^\n]*rays=(\d+) hits=(\d+)"
             r"[^\n]*latency_ms=([0-9]+(?:\.[0-9]+)?)",
             stdout,
         )
     ]
     if not rows:
         return {"sample_count": 0}
-    latencies = sorted(row[2] for row in rows)
-    p95_index = int(0.95 * (len(latencies) - 1))
+    latencies = sorted(row[4] for row in rows)
+    p95_index = max(0, math.ceil(0.95 * len(latencies)) - 1)
+    frame_span = rows[-1][0] - rows[0][0]
+    stamp_span_s = rows[-1][1] - rows[0][1]
     return {
         "sample_count": len(rows),
-        "ray_count": rows[-1][0],
-        "hit_count_min": min(row[1] for row in rows),
-        "hit_count_max": max(row[1] for row in rows),
+        "first_frame": rows[0][0],
+        "last_frame": rows[-1][0],
+        "ray_count": rows[-1][2],
+        "ray_count_min": min(row[2] for row in rows),
+        "ray_count_max": max(row[2] for row in rows),
+        "hit_count_min": min(row[3] for row in rows),
+        "hit_count_max": max(row[3] for row in rows),
+        "effective_rate_hz": (
+            frame_span / stamp_span_s
+            if frame_span > 0 and stamp_span_s > 0.0 else None
+        ),
         "render_latency_ms_p95": latencies[p95_index],
         "render_latency_ms_max": latencies[-1],
     }
+
+
+def lidar_runtime_failures(renderer: dict | None, stats: dict) -> list[str]:
+    """Fail ICRA first-hit runs when the declared real-time contract drifts."""
+    if not renderer or renderer.get("mode") != "spherical_first_hit_v1":
+        return []
+    failures = []
+    expected_rays = renderer.get("ray_count")
+    if stats.get("sample_count", 0) < 2:
+        failures.append("lidar_runtime_samples_insufficient")
+    if (not isinstance(expected_rays, int) or expected_rays <= 0 or
+            stats.get("ray_count_min") != expected_rays or
+            stats.get("ray_count_max") != expected_rays):
+        failures.append("lidar_ray_count_drift")
+    latency_p95 = stats.get("render_latency_ms_p95")
+    if not isinstance(latency_p95, (int, float)) or latency_p95 >= 80.0:
+        failures.append("lidar_render_p95_exceeded")
+    effective_rate_hz = stats.get("effective_rate_hz")
+    if (not isinstance(effective_rate_hz, (int, float)) or
+            effective_rate_hz < 9.5):
+        failures.append("lidar_effective_rate_below_9_5hz")
+    return failures
 
 
 def stage_launch_args(
@@ -2208,6 +2241,14 @@ def _run_one_impl(
                 [*summary["failures"], *forest_manifest["failures"]],
                 **{key: value for key, value in summary.items()
                    if key not in ("result", "failures")})
+    lidar_renderer = effective_lidar_renderer_evidence(run_root)
+    lidar_stats = lidar_runtime_stats(stdout)
+    lidar_failures = lidar_runtime_failures(lidar_renderer, lidar_stats)
+    if lidar_failures:
+        summary = _result(
+            [*summary["failures"], *lidar_failures],
+            **{key: value for key, value in summary.items()
+               if key not in ("result", "failures")})
     summary.update({
         "stage": stage,
         "scenario": scenario,
@@ -2216,8 +2257,8 @@ def _run_one_impl(
             forest_scene_contract(scenario)
             if _is_forest_scenario(scenario) else None),
         "forest_effective_manifest": forest_manifest,
-        "lidar_renderer": effective_lidar_renderer_evidence(run_root),
-        "lidar_runtime_stats": lidar_runtime_stats(stdout),
+        "lidar_renderer": lidar_renderer,
+        "lidar_runtime_stats": lidar_stats,
         "planner_truth_isolation_audit": graph_audit,
         "scene_cloud_bbox": next((
             row.get("payload") for row in _read_jsonl(run_root / "capture.jsonl")

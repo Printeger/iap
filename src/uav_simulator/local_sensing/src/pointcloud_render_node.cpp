@@ -174,17 +174,15 @@ void renderSensedPoints(/*const rclcpp::TimerBase event*/) {
     _local_map_pcd.header.frame_id = "map";
     pub_cloud->publish(_local_map_pcd);
     ++rendered_frame_count;
-    if (!logged_first_lidar_publish || rendered_frame_count % 10 == 0) {
-      RCLCPP_INFO(
-          rclcpp::get_logger("pcl_render_node"),
-          "first-hit lidar frame=%zu stamp=%.6f rays=%zu hits=%zu dda_visits=%zu latency_ms=%.3f",
-          rendered_frame_count,
-          rclcpp::Time(_local_map_pcd.header.stamp).seconds(),
-          scan.stats.ray_count,
-          scan.stats.hit_count,
-          scan.stats.dda_voxel_visits,
-          scan.stats.render_latency_ms);
-    }
+    RCLCPP_INFO(
+        rclcpp::get_logger("pcl_render_node"),
+        "first-hit lidar frame=%zu stamp=%.6f rays=%zu hits=%zu dda_visits=%zu latency_ms=%.3f",
+        rendered_frame_count,
+        rclcpp::Time(_local_map_pcd.header.stamp).seconds(),
+        scan.stats.ray_count,
+        scan.stats.hit_count,
+        scan.stats.dda_voxel_visits,
+        scan.stats.render_latency_ms);
     logged_first_lidar_publish = true;
     return;
   }

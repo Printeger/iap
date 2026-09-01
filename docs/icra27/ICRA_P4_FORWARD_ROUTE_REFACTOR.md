@@ -93,8 +93,10 @@ New runs emit `p4_forward_route_decision_v2` with independent
   complete. A single channel uses `NATIVE_EGO`; multiple channels may use only
   their `COMMON_PREFIX`; otherwise the decision is `HOLD`;
 - `REPLAN_REQUIRED`: invalid, stale asynchronous, or over-budget result;
-- `NO_SAFE_ROUTE`: no geometry-clear route or no candidate passes the safety
-  gate.
+- `NO_SAFE_ROUTE`: native EGO geometry has confirmed no route, or no complete
+  candidate passes the safety gate. A bounded P4 topology probe that finds no
+  representative is only inconclusive and defers to `NATIVE_EGO`; it is not a
+  no-route proof.
 
 `DEFER_RISK_SELECTION` never sets `selection_applied`, never emits selected
 candidate lineage, and never treats missing risk support as an occupied voxel.
@@ -116,11 +118,20 @@ combined generation changes, the target changes, the UAV advances by at least
 0.5 m, or the latched route loses support. Identical requests reuse the cached
 decision.
 
+The topology front end starts from the nominal route and deterministic 3-D
+lateral/vertical waypoint probes, clusters only occupancy-separated probes,
+and sends retained formal candidates through native frozen A* refinement.
+This avoids spending the 150 ms budget enumerating many lattice variants in
+one wide open channel. A forest-sized clear-snapshot regression enforces the
+deadline.
+
 A selected channel is latched until its common anchor is reached. While a new
 decision is pending or rate-limited, the remaining latch is trimmed from the
 current UAV position and re-certified against the new immutable occupancy and
 risk snapshot. It is reused only if that complete check passes; otherwise the
-latch is cleared and P4 decides again.
+latch is cleared and P4 decides again. Without such a certified latch,
+pending, rate-limited, identity-mismatched and generation-changed states are
+`HOLD`; they never provisionally enter a branch.
 
 ## Forest v2 defaults
 

@@ -345,6 +345,9 @@ namespace ego_planner
           " safety=" + p4ForwardSafetyStateName(decision.safety_state) +
           " deferred=" +
           p4ForwardDeferredMotionModeName(decision.deferred_motion_mode) +
+          " speed_cap=" + std::to_string(decision.speed_cap_mps) +
+          " common_prefix=" +
+          std::to_string(decision.common_prefix_length_m) +
           " / " + decision.reason;
       for (const auto &candidate : decision.raw_candidates)
         viz.raw_topology_paths.push_back(candidate.path);
@@ -1312,8 +1315,8 @@ namespace ego_planner
         unavailable.local_target = request.local_target;
         unavailable.action = P4ForwardAction::DEFER_RISK_SELECTION;
         unavailable.deferred_motion_mode =
-            P4ForwardDeferredMotionMode::NATIVE_EGO;
-        unavailable.speed_cap_mps = p4_forward_limits_.max_observe_speed_mps;
+            P4ForwardDeferredMotionMode::HOLD;
+        unavailable.speed_cap_mps = 0.0;
         unavailable.trigger_reason =
             P4ForwardTriggerReason::NOMINAL_CERTIFICATION_SHORT;
         request.live_occupancy_generation_at_submit =
@@ -1393,8 +1396,8 @@ namespace ego_planner
       unavailable.local_target = request.local_target;
       unavailable.action = P4ForwardAction::DEFER_RISK_SELECTION;
       unavailable.deferred_motion_mode =
-          P4ForwardDeferredMotionMode::NATIVE_EGO;
-      unavailable.speed_cap_mps = p4_forward_limits_.max_observe_speed_mps;
+          P4ForwardDeferredMotionMode::HOLD;
+      unavailable.speed_cap_mps = 0.0;
       unavailable.trigger_reason =
           P4ForwardTriggerReason::NOMINAL_CERTIFICATION_SHORT;
       unavailable.reason =
@@ -1435,8 +1438,8 @@ namespace ego_planner
       unavailable.snapshot_identity = request.snapshot_identity;
       unavailable.action = P4ForwardAction::DEFER_RISK_SELECTION;
       unavailable.deferred_motion_mode =
-          P4ForwardDeferredMotionMode::NATIVE_EGO;
-      unavailable.speed_cap_mps = p4_forward_limits_.max_observe_speed_mps;
+          P4ForwardDeferredMotionMode::HOLD;
+      unavailable.speed_cap_mps = 0.0;
       unavailable.trigger_reason =
           P4ForwardTriggerReason::NOMINAL_CERTIFICATION_SHORT;
       unavailable.reason = "forward_decision_rate_limited";
@@ -1454,8 +1457,8 @@ namespace ego_planner
     }
     unavailable.action = P4ForwardAction::DEFER_RISK_SELECTION;
     unavailable.deferred_motion_mode =
-        P4ForwardDeferredMotionMode::NATIVE_EGO;
-    unavailable.speed_cap_mps = p4_forward_limits_.max_observe_speed_mps;
+        P4ForwardDeferredMotionMode::HOLD;
+    unavailable.speed_cap_mps = 0.0;
     unavailable.trigger_reason =
         P4ForwardTriggerReason::NOMINAL_CERTIFICATION_SHORT;
     unavailable.reason = "forward_worker_pending";

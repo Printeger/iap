@@ -243,6 +243,15 @@ def _so3_feedback_imu_topic(sim_imu_topic, _iap_imu_topic):
     return sim_imu_topic
 
 
+def _lidar_output_semantics(renderer_mode):
+    """Describe the measurement contract actually emitted by the renderer."""
+    if renderer_mode == "spherical_first_hit_v1":
+        return "hit_only_first_return_pointcloud2"
+    if renderer_mode == "legacy_radius_crop_v1":
+        return "legacy_radius_crop_world_points"
+    return "unknown_renderer_semantics"
+
+
 def _sha256_file(path):
     path = Path(path).resolve()
     if not path.is_file():
@@ -3886,6 +3895,8 @@ def _launch_setup(context):
         context, experiment, iap_share, evidence
     )
 
+    lidar_renderer_mode = LaunchConfiguration(
+        "lidar_renderer_mode").perform(context)
     manifest = {
         "artifact_provenance": evidence,
         "experiment": experiment,
@@ -3907,7 +3918,7 @@ def _launch_setup(context):
         ),
         "lidar_start_delay_s": lidar_start_delay_s,
         "lidar_renderer": {
-            "mode": LaunchConfiguration("lidar_renderer_mode").perform(context),
+            "mode": lidar_renderer_mode,
             "horizontal_samples": _param_int(context, "lidar_horizontal_samples"),
             "vertical_samples": _param_int(context, "lidar_vertical_samples"),
             "ray_count": (
@@ -3922,7 +3933,7 @@ def _launch_setup(context):
             "max_range_m": _param_float(context, "lidar_max_range_m"),
             "world_voxel_resolution_m": _param_float(
                 context, "lidar_world_voxel_resolution_m"),
-            "output_semantics": "hit_only_first_return_pointcloud2",
+            "output_semantics": _lidar_output_semantics(lidar_renderer_mode),
         },
         "odometry_acc_scale": _param_float(context, "odometry_acc_scale"),
         "planner_executor_thread_count": int(LaunchConfiguration(

@@ -81,8 +81,14 @@ class TestPlannerLaunchTest(unittest.TestCase):
         source = MODULE_PATH.read_text()
         self.assertIn('"renderer_mode": LaunchConfiguration(', source)
         self.assertIn('"lidar.horizontal_samples": _param_int(', source)
-        self.assertIn('"output_semantics": "hit_only_first_return_pointcloud2"',
-                      source)
+        self.assertEqual(
+            MODULE._lidar_output_semantics("legacy_radius_crop_v1"),
+            "legacy_radius_crop_world_points",
+        )
+        self.assertEqual(
+            MODULE._lidar_output_semantics("spherical_first_hit_v1"),
+            "hit_only_first_return_pointcloud2",
+        )
         runtime, export = MODULE._resolve_run_roots(
             "sim_demo11", "p1_fork_formal", "p1_fork_fused_v1", 1234,
             runtime_root_dir="/work/runtime", export_root_dir="/work/exports",

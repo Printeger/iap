@@ -16,6 +16,15 @@
   360°, -7°..52°, 0.1..10 m, 0.1 m frozen-world DDA), publish only the first
   hit per ray, and treat no-return as a legal empty hit cloud rather than a
   fabricated PointCloud2 field. Empty frames refresh the EGO rolling map.
+  The runner now gates every first-hit frame on the declared ray count,
+  measured rate ≥9.5 Hz, and render-latency p95 <80 ms.
+  P4 provisional async states without a re-certified latch now HOLD. Its
+  topology front end avoids enumerating redundant Yen lattice variants in an
+  open 3-D grid: it clusters bounded nominal and lateral/vertical probes, then
+  retains native frozen A* as the formal-guide refinement. An inconclusive
+  bounded probe defers to native EGO geometry rather than claiming
+  `NO_SAFE_ROUTE`. A forest-scale regression and live smoke keep the forward
+  worker below its 150 ms deadline.
   Planner/P0/P4/P5 remain isolated from `/map_generator/global_cloud`; only
   sensor simulators may consume world truth. The legacy radius crop remains an
   explicit non-ICRA/debug mode. This aligns development behavior with
@@ -33,11 +42,13 @@
   Bind P4 to an immutable P0 risk+occupancy+GNSS batch certificate, compare all
   topology candidates, refined guides and latched guides through the batch
   interface with a common known-satellite set, and reject stale,
-  compute-budget-expired or generation-changed results. `OBSERVE_MORE` now
-  moves at most 0.5 m and
-  0.5 m/s only over a fully observed-free, GNSS/LiDAR/FIM-supported prefix;
-  any UNKNOWN support stops the prefix, with no empirical unknown-growth,
-  receiver-support expansion, timeout bypass, or simulator truth access.
+  compute-budget-expired or generation-changed results. The former
+  `OBSERVE_MORE` risk certificate remains the rule for applying a formal risk
+  selection: incomplete support cannot produce `RISK_SELECTED`, and no
+  empirical unknown-growth, receiver-support expansion, timeout bypass, or
+  simulator truth access is allowed. The later v2 geometry/risk split permits
+  native EGO motion without pretending that missing risk support is an
+  occupied voxel; that motion carries no selected-route lineage.
   Health JSON, P4 lineage and RViz first-failure markers expose the certified
   anchor, source support, satellite counts, floor source and soft/hard ray
   length. Forest development alert limits remain fixed at 20/40 m; this is not
@@ -97,10 +108,10 @@
   IAP-RQ-410 — restore the original base EGO exploration behavior for forest
   v2 by setting `grid_map/unknown_as_occupied=false`. When risk-aware P4 is
   disabled, the original rebound A* no longer inherits the frozen
-  observed-free query or guide-support gate; when P4 is enabled, endpoints,
-  swept edges and returned guides still require frozen observed-free support.
-  P4-on collision scanning treats UNKNOWN or a missing frozen occupancy epoch
-  as unsupported.
+  observed-free query or guide-support gate. This historical P4-on
+  observed-free geometry requirement is superseded by
+  `p4_forward_route_decision_v2`: only raw/inflated hits and bounds block
+  geometry, while observed coverage remains independent risk evidence.
   P0 keeps tri-state occupancy, UNKNOWN risk output and diagnostics. Bind the
   effective optimistic EGO setting into runner scene/manifest evidence and add
   a regression that proves the P4-on safety boundary remains fail closed.

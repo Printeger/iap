@@ -371,7 +371,7 @@ class TestRunnerLifecycle(unittest.TestCase):
         stdout = "\n".join((
             "first-hit lidar frame=1 stamp=1.0 rays=20480 hits=123 "
             "dda_visits=100 latency_ms=41.5",
-            "first-hit lidar frame=10 stamp=2.0 rays=20480 hits=456 "
+            "first-hit lidar frame=10 stamp=1.9 rays=20480 hits=456 "
             "dda_visits=200 latency_ms=52.0",
         ))
         stats = MODULE.lidar_runtime_stats(stdout)
@@ -380,6 +380,17 @@ class TestRunnerLifecycle(unittest.TestCase):
         self.assertEqual(stats["hit_count_min"], 123)
         self.assertEqual(stats["hit_count_max"], 456)
         self.assertEqual(stats["render_latency_ms_max"], 52.0)
+        self.assertAlmostEqual(stats["effective_rate_hz"], 10.0)
+        renderer = {"mode": "spherical_first_hit_v1", "ray_count": 20480}
+        self.assertEqual(MODULE.lidar_runtime_failures(renderer, stats), [])
+
+        slow = dict(stats, render_latency_ms_p95=80.0,
+                    effective_rate_hz=9.0, ray_count_min=1024)
+        self.assertEqual(
+            MODULE.lidar_runtime_failures(renderer, slow),
+            ["lidar_ray_count_drift", "lidar_render_p95_exceeded",
+             "lidar_effective_rate_below_9_5hz"],
+        )
 
     @staticmethod
     def runner_args(root, *, through=None, rviz=False):

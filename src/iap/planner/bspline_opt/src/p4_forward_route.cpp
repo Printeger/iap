@@ -268,14 +268,36 @@ public:
     if (timedOut()) {
       return P4ForwardGeometryState::OUT_OF_BOUNDS;
     }
-    const double radius = request_.limits.vehicle_radius_m;
+    // Edge checks revisit nearly identical centers from many neighbour
+    // directions.  Cache them in half-occupancy-voxel bins and evaluate a
+    // conservatively enlarged sphere at the bin centre.  This preserves the
+    // collision guarantee for every point represented by the key while
+    // avoiding tens of thousands of equivalent frozen-snapshot queries.
+    const double cache_bin_m = std::max(
+      1.0e-6, 0.5 * request_.limits.occupancy_resolution_m);
+    const double geometry_cache_scale = 1.0 / cache_bin_m;
+    const Eigen::Vector3d relative = center - request_.map_origin;
+    const GridIndex center_key{
+      static_cast<int>(std::llround(relative.x() * geometry_cache_scale)),
+      static_cast<int>(std::llround(relative.y() * geometry_cache_scale)),
+      static_cast<int>(std::llround(relative.z() * geometry_cache_scale))};
+    const auto cached_swept = swept_state_cache_.find(center_key);
+    if (cached_swept != swept_state_cache_.end()) {
+      return cached_swept->second;
+    }
+    const Eigen::Vector3d cached_center = request_.map_origin + cache_bin_m *
+      Eigen::Vector3d(center_key.x, center_key.y, center_key.z);
+    const double radius = request_.limits.vehicle_radius_m +
+      0.5 * std::sqrt(3.0) * cache_bin_m;
     if (radius <= kEpsilon) {
-      return request_.queryGeometry(center);
+      const auto state = request_.geometry(cached_center);
+      swept_state_cache_.emplace(center_key, state);
+      return state;
     }
     const double resolution = request_.limits.occupancy_resolution_m;
-    const Eigen::Vector3i minimum = ((center.array() - radius -
+    const Eigen::Vector3i minimum = ((cached_center.array() - radius -
       request_.map_origin.array()) / resolution).floor().cast<int>();
-    const Eigen::Vector3i maximum = ((center.array() + radius -
+    const Eigen::Vector3i maximum = ((cached_center.array() + radius -
       request_.map_origin.array()) / resolution).floor().cast<int>();
     P4ForwardGeometryState swept_state = P4ForwardGeometryState::CLEAR;
     for (int x = minimum.x(); x <= maximum.x(); ++x) {
@@ -285,9 +307,9 @@ public:
             Eigen::Vector3d(x, y, z);
           const Eigen::Vector3d cell_max =
             cell_min + Eigen::Vector3d::Constant(resolution);
-          const Eigen::Vector3d closest = center.cwiseMax(cell_min).cwiseMin(
+          const Eigen::Vector3d closest = cached_center.cwiseMax(cell_min).cwiseMin(
             cell_max);
-          if ((closest - center).squaredNorm() >
+          if ((closest - cached_center).squaredNorm() >
             radius * radius + kEpsilon)
           {
             continue;
@@ -301,9 +323,11 @@ public:
           auto cached = swept_cell_state_cache_.find(voxel);
           if (cached == swept_cell_state_cache_.end()) {
             cached = swept_cell_state_cache_.emplace(
-              voxel, request_.queryGeometry(voxel_center)).first;
+              voxel, request_.geometry(voxel_center)).first;
           }
           if (cached->second == P4ForwardGeometryState::OCCUPIED) {
+            swept_state_cache_.emplace(
+              center_key, P4ForwardGeometryState::OCCUPIED);
             return P4ForwardGeometryState::OCCUPIED;
           }
           if (cached->second == P4ForwardGeometryState::OUT_OF_BOUNDS) {
@@ -312,6 +336,7 @@ public:
         }
       }
     }
+    swept_state_cache_.emplace(center_key, swept_state);
     return swept_state;
   }
 
@@ -322,6 +347,11 @@ public:
 
   bool edgeFree(const GridIndex & from, const GridIndex & to) const
   {
+    const GridEdge edge{from, to};
+    const auto cached = edge_free_cache_.find(edge);
+    if (cached != edge_free_cache_.end()) {
+      return cached->second;
+    }
     const Eigen::Vector3d a = point(from);
     const Eigen::Vector3d b = point(to);
     const double edge_step = std::max(
@@ -335,9 +365,13 @@ public:
         return false;
       }
       if (!sweptFree(a + (b - a) * (static_cast<double>(i) / samples))) {
+        edge_free_cache_[edge] = false;
+        edge_free_cache_[GridEdge{to, from}] = false;
         return false;
       }
     }
+    edge_free_cache_[edge] = true;
+    edge_free_cache_[GridEdge{to, from}] = true;
     return true;
   }
 
@@ -400,6 +434,9 @@ public:
     std::unordered_map<GridIndex, GridIndex, GridIndexHash> parent;
     distance[start] = 0.0;
     open.push({(point(goal) - point(start)).norm(), 0.0, start});
+    const double max_route_length =
+      (point(goal) - point(start)).norm() *
+      request_.limits.max_path_length_ratio + resolution_;
     while (!open.empty()) {
       if (timedOut()) {
         return {};
@@ -435,6 +472,9 @@ public:
             }
             const double next_g = current.g +
               (point(next) - point(current.index)).norm();
+            if (next_g > max_route_length + kEpsilon) {
+              continue;
+            }
             const auto previous = distance.find(next);
             if (previous != distance.end() &&
               next_g >= previous->second - kEpsilon)
@@ -560,14 +600,13 @@ public:
         if (!inBounds(waypoint) || !sweptFree(point(waypoint))) {
           continue;
         }
-        auto first = shortestPath(start, waypoint);
-        auto second = shortestPath(waypoint, goal);
-        if (first.empty() || second.empty()) {
+        std::vector<GridIndex> candidate{start, waypoint, goal};
+        const std::vector<Eigen::Vector3d> candidate_world{
+          point(start), point(waypoint), point(goal)};
+        if (!worldPathFree(candidate_world)) {
           continue;
         }
-        first.pop_back();
-        first.insert(first.end(), second.begin(), second.end());
-        paths.push_back(std::move(first));
+        paths.push_back(std::move(candidate));
       }
     }
     return paths;
@@ -623,6 +662,9 @@ private:
   Eigen::Vector3i dimensions_ = Eigen::Vector3i::Zero();
   mutable std::unordered_map<
     GridIndex, P4ForwardGeometryState, GridIndexHash> swept_cell_state_cache_;
+  mutable std::unordered_map<
+    GridIndex, P4ForwardGeometryState, GridIndexHash> swept_state_cache_;
+  mutable std::unordered_map<GridEdge, bool, GridEdgeHash> edge_free_cache_;
 };
 
 std::vector<Eigen::Vector3d> toWorldPath(
@@ -1078,6 +1120,16 @@ std::vector<Eigen::Vector3d> commonGeometryPrefix(
   return prefix;
 }
 
+bool currentRiskAnchorSafe(const P4ForwardRequest & request)
+{
+  const auto current_anchor = request.risk(
+    request.position, request.query_time_s);
+  return current_anchor.valid && !current_anchor.stale &&
+    std::isfinite(current_anchor.safety_ratio) &&
+    current_anchor.safety_ratio < 1.0 &&
+    current_anchor.safety_state != P4ForwardSafetyState::UNSAFE;
+}
+
 void configureDeferredMotion(
   const P4ForwardRequest & request, P4ForwardDecision * decision)
 {
@@ -1087,6 +1139,9 @@ void configureDeferredMotion(
   decision->common_prefix_length_m = 0.0;
   decision->speed_cap_mps = 0.0;
   decision->deferred_motion_mode = P4ForwardDeferredMotionMode::HOLD;
+  if (!currentRiskAnchorSafe(request)) {
+    return;
+  }
   if (std::any_of(
       decision->candidates.begin(), decision->candidates.end(),
       [](const P4ForwardCandidate & candidate) {
@@ -1096,9 +1151,16 @@ void configureDeferredMotion(
     return;
   }
   if (decision->candidates.size() == 1) {
-    decision->deferred_motion_mode =
-      P4ForwardDeferredMotionMode::NATIVE_EGO;
-    decision->speed_cap_mps = request.limits.max_observe_speed_mps;
+    const double geometry_distance = std::min(
+      decision->decision_horizon_m,
+      decision->candidates.front().length_m);
+    decision->speed_cap_mps = std::min(
+      request.limits.max_observe_speed_mps,
+      speedCapForDistance(geometry_distance, request.limits));
+    if (decision->speed_cap_mps > 1.0e-3) {
+      decision->deferred_motion_mode =
+        P4ForwardDeferredMotionMode::NATIVE_EGO;
+    }
     return;
   }
   const auto prefix = commonGeometryPrefix(
@@ -1239,7 +1301,7 @@ bool P4ForwardRequest::valid(std::string * reason) const
   {
     return fail("invalid_map_geometry");
   }
-  if ((!geometry && !occupancy) || !risk || !risk_batch ||
+  if (!geometry || !risk || !risk_batch ||
     !std::isfinite(query_time_s))
   {
     return fail("missing_snapshot_query");
@@ -1433,30 +1495,62 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
     return finalize(std::move(decision));
   }
 
-  auto raw = graph.yenPaths(
-    graph.index(request.position), graph.index(anchor),
-    std::max(2, request.limits.max_raw_paths / 2));
+  // Start with the nominal path, then probe deterministic lateral/vertical
+  // waypoint paths and cluster them using the frozen occupancy sweep.
+  // Enumerating several lattice-neighbour variants with Yen before topology
+  // clustering is pathological in a large open 3-D grid: they all collapse to
+  // the same channel but can consume the complete 150 ms budget.  The direct
+  // probes ask the useful question -- whether occupancy-separated alternatives
+  // exist -- and any retained guide is still refined by native frozen A*.
+  std::vector<std::vector<Eigen::Vector3d>> raw;
+  std::vector<Eigen::Vector3d> nominal_path{request.position};
+  for (const auto & point : nominal) {
+    if ((point - request.position).norm() <=
+      (anchor - request.position).norm() + kEpsilon &&
+      (point - nominal_path.back()).norm() > kEpsilon)
+    {
+      nominal_path.push_back(point);
+    }
+  }
+  if ((nominal_path.back() - anchor).norm() > kEpsilon) {
+    nominal_path.push_back(anchor);
+  }
+  if (graph.worldPathFree(nominal_path)) {
+    raw.push_back(std::move(nominal_path));
+  }
   const auto offset_paths = graph.offsetWaypointPaths(
     graph.index(request.position), graph.index(anchor),
     std::max(0, request.limits.max_raw_paths - static_cast<int>(raw.size())));
-  raw.insert(raw.end(), offset_paths.begin(), offset_paths.end());
+  for (const auto & offset_path : offset_paths) {
+    raw.push_back(toWorldPath(
+      graph, offset_path, request.position, anchor));
+  }
   if (graph.timedOut()) {
     decision.reason = "compute_budget_exceeded";
     return finalize(std::move(decision));
   }
   if (raw.empty()) {
-    decision.action = P4ForwardAction::NO_SAFE_ROUTE;
-    decision.geometry_state = P4ForwardGeometryState::OCCUPIED;
-    decision.trigger_reason = P4ForwardTriggerReason::NO_TOPOLOGY_ROUTE;
-    decision.reason = "no_geometry_clear_topology_route";
+    // The bounded forward probes are not a proof that the EGO grid has no
+    // route.  Preserve native EGO A*/rebound as the geometry authority and do
+    // not manufacture a P4 guide or risk lineage.  A stale/unsafe current
+    // integrity anchor still forces HOLD.
+    decision.action = P4ForwardAction::DEFER_RISK_SELECTION;
+    decision.geometry_state = P4ForwardGeometryState::CLEAR;
+    decision.trigger_reason = P4ForwardTriggerReason::SUPPORT_INCOMPLETE;
+    decision.reason = "topology_probe_inconclusive_native_ego";
+    if (currentRiskAnchorSafe(request)) {
+      decision.deferred_motion_mode = P4ForwardDeferredMotionMode::NATIVE_EGO;
+      decision.speed_cap_mps = std::min(
+        request.limits.max_observe_speed_mps,
+        speedCapForDistance(decision.decision_horizon_m, request.limits));
+    }
     return finalize(std::move(decision));
   }
   uint64_t next_candidate_id = 1;
-  for (const auto & indices : raw) {
+  for (const auto & path : raw) {
     P4ForwardCandidate candidate;
     candidate.candidate_id = next_candidate_id++;
-    candidate.path = toWorldPath(
-      graph, indices, request.position, anchor);
+    candidate.path = path;
     candidate.length_m = pathLength(candidate.path);
     candidate.path_hash = hashPath(candidate.path);
     candidate.occupancy_supported = graph.worldPathFree(candidate.path);
@@ -1497,72 +1591,6 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
       }
     }
   }
-  // Yen's first few paths can all be lattice perturbations inside one broad
-  // channel.  Search outside each retained representative's middle corridor,
-  // then classify with the real occupancy sweep.  The artificial corridor is
-  // only a diversity hint; it never becomes occupancy or safety evidence.
-  bool found_new_channel = true;
-  int diversity_attempts = 0;
-  while (found_new_channel &&
-    static_cast<int>(decision.candidates.size()) < request.limits.max_channels &&
-    diversity_attempts < request.limits.max_raw_paths)
-  {
-    if (graph.timedOut()) {
-      decision.reason = "compute_budget_exceeded";
-      return finalize(std::move(decision));
-    }
-    found_new_channel = false;
-    const auto representatives = decision.candidates;
-    for (const auto & representative : representatives) {
-      if (diversity_attempts >= request.limits.max_raw_paths) {
-        break;
-      }
-      ++diversity_attempts;
-      const auto alternate_indices = graph.pathOutsideCorridor(
-        graph.index(request.position), graph.index(anchor),
-        representative.path,
-        request.limits.topology_resolution_m);
-      if (alternate_indices.empty()) {
-        continue;
-      }
-      P4ForwardCandidate alternate;
-      alternate.candidate_id = next_candidate_id++;
-      alternate.path = toWorldPath(
-        graph, alternate_indices, request.position, anchor);
-      alternate.length_m = pathLength(alternate.path);
-      alternate.path_hash = hashPath(alternate.path);
-      alternate.occupancy_supported = graph.worldPathFree(alternate.path);
-      if (!alternate.occupancy_supported) {
-        alternate.geometry_state = P4ForwardGeometryState::OCCUPIED;
-        alternate.reason = "occupancy_support_incomplete";
-        continue;
-      }
-      bool same = false;
-      for (const auto & existing : decision.candidates) {
-        if (sameChannel(request, graph, alternate.path, existing.path)) {
-          same = true;
-          break;
-        }
-      }
-      if (same) {
-        continue;
-      }
-      if (static_cast<int>(decision.raw_candidates.size()) >=
-        request.limits.max_raw_paths)
-      {
-        decision.raw_candidates.pop_back();
-      }
-      decision.raw_candidates.push_back(alternate);
-      decision.candidates.push_back(std::move(alternate));
-      found_new_channel = true;
-      if (static_cast<int>(decision.candidates.size()) >=
-        request.limits.max_channels)
-      {
-        break;
-      }
-    }
-  }
-
   if (decision.candidates.empty()) {
     decision.action = P4ForwardAction::NO_SAFE_ROUTE;
     decision.geometry_state = P4ForwardGeometryState::OCCUPIED;
