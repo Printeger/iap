@@ -135,6 +135,14 @@ class TestStageContracts(unittest.TestCase):
         self.assertIn("Style: Flat Squares", environment)
         self.assertAlmostEqual(display_alpha(environment), 0.55, places=6)
 
+        current_lidar = display_block("Current First-Hit LiDAR")
+        self.assertIn("Value: /sim/drone_0/lidar", current_lidar)
+        self.assertIn("Reliability Policy: Best Effort", current_lidar)
+        self.assertIn("Durability Policy: Volatile", current_lidar)
+        self.assertIn("Color Transformer: FlatColor", current_lidar)
+        self.assertIn("Style: Points", current_lidar)
+        self.assertAlmostEqual(display_alpha(current_lidar), 0.9, places=6)
+
         predicted_pl = display_block("Predicted PL Cloud")
         self.assertIn("Reliability Policy: Best Effort", predicted_pl)
         self.assertIn("Color Transformer: RGB8", predicted_pl)
