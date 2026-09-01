@@ -1163,43 +1163,39 @@ void P0RiskGridRuntime::refreshTimerCallback() {
         }
       }
       if (occupancy_epoch.has_value()) {
-        // The adapter's immutable LOS grid does not expose its point vector;
-        // reconstruct it from the normalized occupied identity on the same
-        // frozen lattice, never from a simulator map topic.
-        auto points = std::make_shared<std::vector<Eigen::Vector3d>>();
-        if (occupancy_epoch->raw_identity) {
-          points->reserve(occupancy_epoch->raw_identity->keys().size());
-          for (const auto& key : occupancy_epoch->raw_identity->keys()) {
-            points->push_back(
-                occupancy_epoch->raw_identity->latticeOrigin() +
-                (Eigen::Vector3d(key.x, key.y, key.z) +
-                 Eigen::Vector3d::Constant(0.5)) *
-                    occupancy_epoch->raw_identity->resolutionM());
+        // Reuse the exact immutable hit centers captured by the occupancy
+        // adapter. This work is performed once with the frozen epoch, never on
+        // the latency-sensitive planner callback and never from world truth.
+        const auto points = occupancy_epoch->raw_occupied_voxel_centers;
+        if (!points) {
+          occupancy_capture_status =
+              P0OccupancyEpochCaptureStatus::ADAPTER_INVALID;
+          occupancy_epoch.reset();
+        } else {
+          iap::LidarFimPrimitiveGenerationDiagnostics diagnostics;
+          auto primitives = iap::make_lidar_fim_primitives(
+              *points, nullptr, iap::LidarFimPrimitiveGenerationParams{},
+              &diagnostics);
+          {
+            std::lock_guard<std::mutex> lock(lidar_predictor_input_mutex_);
+            latest_lidar_map_points_ = points;
+            latest_lidar_fim_primitives_ = primitives;
+            latest_lidar_fim_diagnostics_ = diagnostics;
+            latest_lidar_map_point_count_ = points->size();
+            latest_lidar_fim_primitive_count_ =
+                primitives ? primitives->size() : 0u;
+            latest_lidar_fim_valid_normal_count_ =
+                static_cast<std::size_t>(
+                    std::max(0, diagnostics.lidar_pca_valid_normals));
+            latest_lidar_fim_fallback_reason_ = diagnostics.fallback_reason;
+            latest_lidar_generation_ = occupancy_epoch->generation;
+            latest_lidar_stamp_ = occupancy_epoch->cloud_stamp_s;
           }
-        }
-        iap::LidarFimPrimitiveGenerationDiagnostics diagnostics;
-        auto primitives = iap::make_lidar_fim_primitives(
-            *points, nullptr, iap::LidarFimPrimitiveGenerationParams{},
-            &diagnostics);
-        {
-          std::lock_guard<std::mutex> lock(lidar_predictor_input_mutex_);
-          latest_lidar_map_points_ = points;
-          latest_lidar_fim_primitives_ = primitives;
-          latest_lidar_fim_diagnostics_ = diagnostics;
-          latest_lidar_map_point_count_ = points->size();
-          latest_lidar_fim_primitive_count_ =
-              primitives ? primitives->size() : 0u;
-          latest_lidar_fim_valid_normal_count_ =
-              static_cast<std::size_t>(
-                  std::max(0, diagnostics.lidar_pca_valid_normals));
-          latest_lidar_fim_fallback_reason_ = diagnostics.fallback_reason;
-          latest_lidar_generation_ = occupancy_epoch->generation;
-          latest_lidar_stamp_ = occupancy_epoch->cloud_stamp_s;
-        }
-        {
-          std::lock_guard<std::mutex> lock(health_state_mutex_);
-          map_seen_ = true;
-          latest_map_stamp_ = occupancy_epoch->cloud_stamp_s;
+          {
+            std::lock_guard<std::mutex> lock(health_state_mutex_);
+            map_seen_ = true;
+            latest_map_stamp_ = occupancy_epoch->cloud_stamp_s;
+          }
         }
       }
     }

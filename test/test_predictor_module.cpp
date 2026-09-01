@@ -1057,11 +1057,22 @@ TEST(PredictorModuleTest,
             params.gnss.geometry_params.min_sats);
   EXPECT_EQ(result.failure_reason,
             iap::ForwardRiskFailureReason::GNSS_SKY_UNKNOWN);
+  bool retained_unknown_evidence = false;
+  bool retained_lidar_evidence = false;
   for (const auto& point : result.points) {
     EXPECT_EQ(point.safety_state, iap::ForwardRiskSafetyState::UNKNOWN);
     EXPECT_EQ(point.ranking_state,
               iap::ForwardRiskRankingState::INCOMPLETE);
+    retained_unknown_evidence = retained_unknown_evidence ||
+        (point.gnss_unknown_satellite_count > 0 &&
+         point.unknown_coverage > 0.0);
+    retained_lidar_evidence = retained_lidar_evidence ||
+        point.lidar_supported;
+    EXPECT_FALSE(point.known_hazard_evidence);
+    EXPECT_DOUBLE_EQ(point.known_gnss_degradation_ratio, 0.0);
   }
+  EXPECT_TRUE(retained_unknown_evidence);
+  EXPECT_TRUE(retained_lidar_evidence);
 }
 
 TEST(PredictorModuleTest, GnssExcludedSatellitesReduceUsedCountAndFallbackExplicitly) {

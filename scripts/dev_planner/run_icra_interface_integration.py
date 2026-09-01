@@ -33,6 +33,7 @@ FOREST_SCENARIO = "icra_dense_forest_four_fork_v2"
 P4_FORWARD_DECISION_SCHEMAS = {
     "p4_forward_route_decision_v1",
     "p4_forward_route_decision_v2",
+    "p4_forward_route_decision_v3",
 }
 FOREST_SCENARIOS = (FOREST_V1_SCENARIO, FOREST_SCENARIO)
 SEVEN_STAGE_ORDER = (
@@ -1042,6 +1043,9 @@ def _selected_decisions(decisions: list[dict]) -> list[dict]:
             if row.get("schema_version") in P4_FORWARD_DECISION_SCHEMAS
             and row.get("stage") == "forward_decision"
             and row.get("action") == "RISK_SELECTED"
+            and (row.get("schema_version") != "p4_forward_route_decision_v3"
+                 or (row.get("selection_authority") == "FORMAL"
+                     and str(row.get("formal_support")) == "1"))
             and int(row.get("selected_candidate_id", 0) or 0) > 0
             and int(row.get("candidate_count", 0) or 0) >= 2
             and row.get("geometry_id")
@@ -1208,6 +1212,36 @@ def analyze_stage_records(
         raise ValueError(f"unsupported record stage: {stage}")
     p0 = analyze_p0(health, capture_start_s)
     failures = list(p0["failures"])
+    v3_forward = [
+        row for row in decisions
+        if row.get("schema_version") == "p4_forward_route_decision_v3"
+        and row.get("stage") == "forward_decision"
+    ]
+    def csv_finite_values(field: str) -> list[float]:
+        values = []
+        for row in v3_forward:
+            try:
+                value = float(row.get(field, "nan"))
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(value):
+                values.append(value)
+        return values
+
+    forward_latencies = csv_finite_values("compute_latency_ms")
+    cspace_latencies = csv_finite_values(
+        "configuration_space_prepare_ms")
+    # Rate-limited/pending rows intentionally carry no worker timing. Gate the
+    # completed decisions only; absence of formal selection is reported by its
+    # own lineage gate below.
+    if v3_forward and not forward_latencies:
+        failures.append("p4_forward_timing_missing")
+    elif max(forward_latencies, default=-math.inf) >= 150.0:
+        failures.append("p4_forward_compute_budget_exceeded")
+    if v3_forward and not cspace_latencies:
+        failures.append("p4_configuration_space_timing_missing")
+    elif max(cspace_latencies, default=-math.inf) > 25.0:
+        failures.append("p4_configuration_space_prepare_budget_exceeded")
     selected = _selected_decisions(decisions)
     if not selected:
         failures.append("p4_risk_selected_missing")
@@ -1354,6 +1388,9 @@ def analyze_stage_records(
         failures,
         stage=stage,
         p0=p0,
+        p4_forward_max_latency_ms=max(forward_latencies, default=None),
+        p4_configuration_space_prepare_max_ms=max(
+            cspace_latencies, default=None),
         selected_count=len(selected),
         lineage_group_count=len(groups),
         published_group_count=len(published_groups),

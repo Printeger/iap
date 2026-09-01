@@ -454,6 +454,44 @@ TEST(P4ForwardTerminalLineageTest,
 }
 
 TEST(P4ForwardTerminalLineageTest,
+     AdvisorySelectionWritesExplicitNonCertifiedLineage) {
+  const auto snapshot = makeP4SelectionSnapshot();
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureNoCollision(map.get());
+  const auto debug_path = p4LineageTestPath("forward_advisory.csv");
+  const auto lineage_path = std::filesystem::path(
+      debug_path.string() + ".forward_lineage.csv");
+  std::filesystem::remove(lineage_path);
+  auto optimizer = makeP4Optimizer(map, snapshot, debug_path.string(), 1);
+
+  ego_planner::EGOPlannerManager manager;
+  manager.setP4VerticalSliceOptimizerForTest(std::move(optimizer), map);
+  manager.setPlanningRiskContextForTest(snapshot, 10.0);
+  auto decision = makeForwardDecision(
+      snapshot, manager.planningRiskContext().planning_attempt_id);
+  decision.action = ego_planner::P4ForwardAction::ADVISORY_SELECTED;
+  decision.selection_authority =
+      ego_planner::P4ForwardSelectionAuthority::ADVISORY_NON_CERTIFIED;
+  decision.formal_support = false;
+  decision.reason = "known_hazard_ranked_advisory_selected";
+  manager.setP4ForwardDecisionForTest(decision);
+  manager.local_data_.position_traj_ =
+      ego_planner::UniformBspline(p4RefinedControlPoints(), 3, 0.5);
+  manager.local_data_.traj_id_ = 34;
+  manager.local_data_.start_time_ = rclcpp::Time(10, 0, RCL_ROS_TIME);
+
+  ASSERT_TRUE(manager.recordP4VerticalSliceLineage(
+      "final_bspline_before_p5", 10.0));
+  const auto rows = readCsvRows(lineage_path);
+  ASSERT_EQ(rows.size(), 1u);
+  EXPECT_EQ(rows.front().at("action"), "ADVISORY_SELECTED");
+  EXPECT_EQ(rows.front().at("selection_authority"),
+            "ADVISORY_NON_CERTIFIED");
+  EXPECT_EQ(rows.front().at("formal_support"), "0");
+  EXPECT_EQ(rows.front().at("selection_applied"), "1");
+}
+
+TEST(P4ForwardTerminalLineageTest,
      NativeAStarNoPathWritesTerminalHoldWithoutSelectionLineage) {
   const auto snapshot = makeP4SelectionSnapshot();
   auto map = std::make_shared<GridMap>();

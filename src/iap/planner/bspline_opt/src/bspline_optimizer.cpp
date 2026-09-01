@@ -628,7 +628,19 @@ namespace ego_planner
         {
           if (std::chrono::steady_clock::now() >= deadline)
             return GridMapOccupancyDiagnostic{};
-          return query(point);
+          auto diagnostic = query(point);
+          // Forward-route refinement follows EGO's hit-only geometry
+          // contract. Observation coverage is risk evidence, not a
+          // collision. Only an unavailable/out-of-bounds query or a raw /
+          // inflated hit may block the native A* refinement.
+          if (diagnostic.available && !diagnostic.raw_occupied &&
+              !diagnostic.inflated_occupied &&
+              diagnostic.state != GridMapObservationState::OCCUPIED)
+          {
+            diagnostic.observed = true;
+            diagnostic.state = GridMapObservationState::OBSERVED_FREE;
+          }
+          return diagnostic;
         };
     Eigen::Vector3d minimum = coarse_guide.front();
     Eigen::Vector3d maximum = coarse_guide.front();

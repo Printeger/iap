@@ -1,5 +1,95 @@
 # P4 Online Forward Route Selection
 
+## Configuration-space and advisory v3 follow-up (2026-09-01)
+
+New runs emit `p4_forward_route_decision_v3`. P4 now constructs one immutable
+configuration-space view from the frozen raw hit set. Its collision clearance
+is the vehicle radius (0.35 m) plus the EGO map inflation (0.099 m); the 0.5 m
+stopping margin is not added to collision inflation. Topology nodes, 0.1 m
+edge samples, route shortcutting, channel sweeps and final guide validation all
+query this same view. UNKNOWN remains geometrically traversable under the
+hit-only EGO contract; hits and map bounds remain blocking.
+
+Channel generation no longer stops after a fixed pair of similar Yen paths.
+It repeatedly runs deterministic six-connected 3-D A* with finite soft
+repulsion around previously found route interiors. Duplicate lattice variants
+do not consume a channel slot. Channel identity uses monotone discrete
+Fréchet alignment plus a configuration-space sweep, with deterministic
+equal-arc alignment resolving equivalent timing ties. Up to four distinct
+channels are sought in 32 searches under the 60 ms enumeration target and the
+150 ms end-to-end deadline. The enumeration deadline is checked inside every
+A* expansion, so one difficult search cannot silently consume the remaining
+risk-query budget. An enumeration-budget exit discards every partial route and
+returns HOLD/REPLAN; it cannot authorize nominal or single-hypothesis motion.
+Repeated sweep-equivalent routes may terminate by deterministic duplicate
+saturation. While only one channel is known, eight consecutive duplicates are
+allowed so the second channel is not starved; after two channels exist, four
+consecutive duplicates stop optional third/fourth-channel discovery and leave
+budget for risk evaluation. A provably empty frozen raw-hit set is a single
+channel without search. The frozen raw-hit center list is cached by
+occupancy generation before the asynchronous worker request; the worker builds
+its private bucketed spatial hash from that immutable list. The first
+unpenalized A* is complete over the frozen local map, so a long wall or U-shaped
+obstacle cannot be clipped by a start-goal straight-line ellipse. Only later
+repulsion rounds use an envelope derived from the first actually reachable
+route, expanded by the six-connected 3-D bound and final length ratio. Each
+search keeps one internally consistent repulsed objective per cell; the final
+geometric length gate remains independent of the enumeration objective.
+
+A clear nominal line is treated as a candidate, never as proof that the graph
+has only one channel. The bounded enumerator still searches for separated
+off-nominal routes. A* tracks one coherent repulsed objective and parent per
+cell; route eligibility is checked independently after path construction.
+
+If the far anchor is not reachable through two distinct channels, P4 does not
+invent a merge point. It computes only the sequential configuration-space-clear
+prefix of the nominal reference and stops before the first unsupported or
+blocked point. The current-state permission for that deferred motion comes
+from the exact certified Integrity sample captured in the planning snapshot,
+not from interpolating a forward RiskMap voxel.
+
+Risk is sampled on the antenna/sensor reference path at no more than 0.25 m
+spacing; the vehicle sphere is used only for geometry. P0 retains per-point
+online visible/blocked/attenuated/unknown evidence even if fewer than four
+satellites remain in the formal common set. This evidence does not make an
+UNKNOWN point SAFE.
+
+v3 adds `ADVISORY_SELECTED` with
+`selection_authority=ADVISORY_NON_CERTIFIED`. It is permitted only when the
+current Integrity anchor is fresh and below AL, every candidate is
+geometrically clear, no candidate is known unsafe, online evidence contains a
+positive degradation, the compared routes have online evidence with no more
+than 10 percentage points of unknown-coverage mismatch, and the best route
+improves the next route by at least 10%. A route with no evidence cannot win as
+a zero-cost route. All compared degradation is restricted to the same frozen
+common-known satellite identity, even when that set is too small for formal
+GNSS support. UNKNOWN contributes no fabricated PL or numerical penalty. The advisory
+guide is applied to B-spline initialization at at most 0.5 m/s, but its
+lineage records `formal_support=0`; it cannot satisfy a formal
+`RISK_SELECTED` analyzer gate and P5 remains free to reject it.
+
+Status: development integration only. Advisory selection is not a safety or
+qualification claim.
+
+The final 2026-09-01 45 s forest-v2 smoke is
+`run-20260901T182813Z-3098612`. It enumerated exactly two clearance-aware
+channels in all 54 completed decisions. Every enumeration ended normally by
+duplicate-channel saturation after eight searches and six duplicate variants;
+none reached the enumeration deadline. Configuration-space preparation p95
+was 0.305 ms (maximum 0.588 ms), and end-to-end P4 latency p95 was 29.19 ms
+(maximum 30.66 ms). Formal risk support was still incomplete, so all completed
+multi-channel decisions remained `DEFER_RISK_SELECTION` with
+`selection_authority=NONE`. The corridor-sweep common-prefix calculation found
+4.10--4.62 m of shared geometry and authorized only bounded `COMMON_PREFIX`
+motion at at most 0.5 m/s; maximum commanded displacement from the first
+captured position was 0.476 m. All 108 candidate records still reported
+`GNSS_SKY_UNKNOWN`, `unknown_coverage=1`, and no positive known-hazard
+evidence. No `RISK_SELECTED` or `ADVISORY_SELECTED` was
+fabricated, so the existing formal P4 stage gate correctly remained FAIL.
+This proves the original geometry/timeout deadlock is unlocked; it is not the
+requested three-run 90 s forest acceptance and does not yet prove a risk-based
+branch selection.
+
 ## Snapshot-pair follow-up (2026-08-31)
 
 P0 now publishes a planning bundle containing the risk generation and the
@@ -69,26 +159,29 @@ support, and diagnostics. This preserves the hit-only engineering semantics of
 MID-360 EGO deployments: unobserved space is not silently converted into a
 geometric wall.
 
-Up to eight K-shortest and online offset-waypoint paths are generated,
-hit-separated paths are clustered into at most four channels, and the selected
-representative is refined by native EGO A* on the 0.1 m lattice inside a
-bounded corridor. Formal risk selection still requires complete support over
-the refined swept volume before it can seed the B-spline.
+Distinct paths are enumerated with clearance-aware 3-D A* and deterministic
+soft route repulsion. Repeated variants within one traversable corridor do not
+consume the four-channel limit. Formal risk selection still requires complete
+support along the refined antenna/reference trajectory before it can seed the
+B-spline.
 
-Each route and the complete vehicle swept sphere are sampled in arrival-time
-order using the configured nominal query speed. Every non-zero spatial and
+Each route reference trajectory is sampled in arrival-time order using the
+configured nominal query speed. Every non-zero spatial and
 temporal interpolation corner must carry fresh GNSS, LiDAR and
 pre-conservative FIM support. A route must also have safety-fused
 `risk_ratio < 1` everywhere. Admitted routes are sorted by pre-conservative FIM
 maximum, FIM integral, length, and stable path hash. The 1.3 path-length limit
 is unchanged.
 
-New runs emit `p4_forward_route_decision_v2` with independent
+New runs emit `p4_forward_route_decision_v3` with independent
 `GeometryState`, `RiskSupport`, `SafetyState`, `Action`, and
 `DeferredMotionMode`. The actions are:
 
 - `CONTINUE_NOMINAL`: one complete safe online channel;
 - `RISK_SELECTED`: at least two channels and the risk-ranked channel is used;
+- `ADVISORY_SELECTED`: formal support is incomplete, but two or more clear
+  channels contain a reproducible online known-hazard difference. The guide is
+  applied with non-certified authority and a 0.5 m/s cap;
 - `DEFER_RISK_SELECTION`: geometry is clear but formal risk comparison is not
   complete. A single channel uses `NATIVE_EGO`; multiple channels may use only
   their `COMMON_PREFIX`; otherwise the decision is `HOLD`;
@@ -129,14 +222,12 @@ combined generation changes, the target changes, the UAV advances by at least
 0.5 m, or the latched route loses support. Identical requests reuse the cached
 decision.
 
-The topology front end splits its bounded raw-candidate budget between Yen
-K-shortest routes and deterministic smooth 3-D lateral/vertical probes,
-clusters only occupancy-separated routes, and sends retained formal candidates
-through native frozen A* refinement. Coarse Yen expansion uses the binary EGO
-hit/inflated lattice; the full vehicle sweep is mandatory before a route can be
-retained. This avoids spending the 150 ms budget entirely on lattice variants
-inside one wide channel. A forest-sized clear-snapshot regression enforces the
-deadline.
+The topology front end uses one cached configuration-space predicate for
+search and validation. Six-connected expansion avoids diagonal corner cuts;
+the resulting Manhattan path is shortcut only where the same continuous
+configuration-space sweep is clear. Soft repulsion continues searching after
+same-channel duplicates. A frozen-raw-hit regression enforces configuration
+preparation below 25 ms and the 150 ms end-to-end deadline.
 
 A selected channel is latched until its common anchor is reached. While a new
 decision is pending or rate-limited, the remaining latch is trimmed from the
@@ -182,7 +273,7 @@ forest fork locations.
 New runs write:
 
 - `<p4-debug>.forward_lineage.csv` using
-  `p4_forward_route_decision_v2`;
+  `p4_forward_route_decision_v3`;
 - `<p4-debug>.forward_candidates.csv` with candidate paths and support/risk
   metrics.
 

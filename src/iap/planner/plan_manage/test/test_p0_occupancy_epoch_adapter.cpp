@@ -79,6 +79,8 @@ TEST(P0OccupancyEpochAdapterTest,
   const auto source_owner = std::make_shared<const int>(1);
   const auto adapted = adaptEpoch(makeEpoch({}), source_owner);
   ASSERT_TRUE(adapted.has_value());
+  ASSERT_NE(adapted->raw_occupied_voxel_centers, nullptr);
+  EXPECT_TRUE(adapted->raw_occupied_voxel_centers->empty());
   EXPECT_TRUE(adapted->geometry.valid());
   EXPECT_EQ(adapted->geometry.geometry_id, "planning_lattice_v1:test");
   EXPECT_TRUE(adapted->geometry.origin_w.isApprox(

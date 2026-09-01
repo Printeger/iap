@@ -158,6 +158,7 @@ std::optional<P0OccupancyEpoch> P0OccupancyEpochAdapter::adaptFields(
   P0OccupancyEpoch adapted;
   adapted.diagnostic_query = std::move(diagnostic_query);
   adapted.los_owner = std::move(los_owner);
+  adapted.raw_occupied_voxel_centers = occupied_centers;
   adapted.raw_identity = std::shared_ptr<const P0RawOccupancyIdentity>(
       new P0RawOccupancyIdentity(std::move(normalized_keys), lattice_origin,
                                  resolution_m, frame_id));

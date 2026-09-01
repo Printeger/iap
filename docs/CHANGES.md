@@ -3,6 +3,58 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(p4-forward-topology-advisory-v3): IAP-RQ-320 / IAP-RQ-400 /
+  IAP-RQ-410 — replace the centre-cell/Yen probe front end with one immutable
+  clearance-aware configuration space and a deterministic distinct-channel
+  enumerator. Vehicle radius plus EGO inflation is applied once across 0.5 m
+  nodes, <=0.1 m edges, monotone channel sweeps, guide shortcutting and final
+  validation; the stopping margin remains exclusive to braking distance.
+  Cache frozen raw hit centers by occupancy generation and use a worker-local
+  spatial hash, while keeping hit-only UNKNOWN geometrically traversable.
+  Risk sampling now follows only the antenna/reference trajectory at <=0.25 m
+  spacing. P0 preserves online visible/blocked/attenuated/unknown evidence even
+  when the formal common-satellite set is incomplete. Add
+  `p4_forward_route_decision_v3` and explicitly non-certified
+  `ADVISORY_SELECTED`: it requires a fresh safe current anchor, geometrically
+  valid routes, no known unsafe sample, positive online degradation evidence
+  and >=10% separation. UNKNOWN contributes no invented PL or penalty. The
+  advisory guide is applied at <=0.5 m/s and written with
+  `selection_authority=ADVISORY_NON_CERTIFIED,formal_support=0`; it cannot
+  satisfy formal `RISK_SELECTED` lineage and P5 gates are unchanged. Add
+  channel-search, known-hazard, unknown-coverage and first-failure diagnostics.
+  Enforce the 60 ms enumeration deadline inside A* expansion, derive deferred
+  motion only from the sequential configuration-space-clear common prefix when
+  no two-channel anchor is visible, and gate that motion with the exact current
+  Integrity anchor captured in the immutable planning snapshot rather than a
+  forward RiskMap interpolation. Always enumerate separated alternatives even
+  when the nominal line is clear, keep a consistent repulsed A* objective per
+  cell, run the first search complete over the frozen local map, and bound only
+  later repulsion rounds from that actually reachable route. This avoids
+  clipping the sole opening around a long wall/U obstacle. Prohibit
+  nominal-path replacement of a strict shared prefix,
+  and require comparable online evidence before advisory ranking. Reuse raw
+  hit centers directly from the frozen P0 occupancy epoch, use bucketed raw-hit
+  proximity queries, and deadline-check partial LiDAR evidence queries. The
+  Once two channels exist, deterministically saturate after four consecutive
+  sweep-equivalent variants, while retaining eight duplicate rounds when only
+  one channel is known so discovery of the second route is not starved. The
+  final 45 s forest-v2 smoke `run-20260901T182813Z-3098612` enumerated exactly
+  two channels in all 54 completed decisions; each completed after eight
+  searches and six duplicate variants, with no enumeration timeout.
+  Configuration-space preparation p95 was 0.305 ms (max 0.588 ms), P4 p95 was
+  29.19 ms (max 30.66 ms), the shared corridor was 4.10–4.62 m, and maximum
+  commanded displacement was 0.476 m via `COMMON_PREFIX` at <=0.5 m/s. All 108
+  recorded candidates remained `GNSS_SKY_UNKNOWN` with full unknown
+  coverage and no positive known-hazard evidence, so no formal or advisory
+  selection was claimed and the formal stage gate remained FAIL.
+  CSV/runner diagnostics now preserve attenuated-satellite counts, enforce the
+  25/150 ms preparation/decision budgets, and require
+  `FORMAL,formal_support=1` before a v3 row can satisfy the formal analyzer.
+  Enumeration sub-budget expiry discards partial routes and HOLDs; advisory
+  degradation is computed and compared only on one common-known satellite
+  identity, so equal unknown coverage with disjoint evidence cannot select.
+  Development integration only; no qualification claim.
+
 - feat(p4-mid360-ego-first-hit-v2): IAP-RQ-320 / IAP-RQ-400 /
   IAP-RQ-410 — split P4 geometry admission from risk evidence in
   `p4_forward_route_decision_v2`. Frozen EGO occupancy now blocks forward

@@ -15,7 +15,7 @@ namespace ego_planner
 {
 
   inline constexpr char kP4ForwardDecisionSchema[] =
-    "p4_forward_route_decision_v2";
+    "p4_forward_route_decision_v3";
 
   enum class P4ForwardGeometryState
   {
@@ -28,12 +28,20 @@ namespace ego_planner
   {
     CONTINUE_NOMINAL = 0,
     RISK_SELECTED,
+    ADVISORY_SELECTED,
     DEFER_RISK_SELECTION,
     // Retained so archived v1 captures remain readable. New v2 decisions use
     // DEFER_RISK_SELECTION with an explicit deferred motion mode.
     OBSERVE_MORE,
     REPLAN_REQUIRED,
     NO_SAFE_ROUTE,
+  };
+
+  enum class P4ForwardSelectionAuthority
+  {
+    NONE = 0,
+    FORMAL,
+    ADVISORY_NON_CERTIFIED,
   };
 
   enum class P4ForwardDeferredMotionMode
@@ -82,6 +90,8 @@ namespace ego_planner
   const char * p4ForwardGeometryStateName(P4ForwardGeometryState state);
   const char * p4ForwardRiskSupportName(P4ForwardRiskSupport support);
   const char * p4ForwardSafetyStateName(P4ForwardSafetyState state);
+  const char * p4ForwardSelectionAuthorityName(
+    P4ForwardSelectionAuthority authority);
   const char * p4ForwardDeferredMotionModeName(
     P4ForwardDeferredMotionMode mode);
 
@@ -118,6 +128,9 @@ namespace ego_planner
     double max_observe_speed_mps = 0.5;
     int max_raw_paths = 8;
     int max_channels = 4;
+    int max_channel_searches = 32;
+    double channel_enumeration_budget_ms = 60.0;
+    double advisory_min_relative_improvement = 0.10;
     double compute_budget_ms = 150.0;
   };
 
@@ -160,10 +173,18 @@ namespace ego_planner
     bool gnss_hard_occlusion = false;
     int gnss_visible_satellite_count = 0;
     int gnss_blocked_satellite_count = 0;
+    int gnss_attenuated_satellite_count = 0;
     int gnss_unknown_satellite_count = 0;
     int gnss_used_satellite_count = 0;
     int common_known_satellite_count = 0;
     uint64_t common_satellite_hash = 0;
+    // Non-certified evidence. These fields never turn UNKNOWN into SAFE and
+    // are used only to compare geometrically valid routes when formal source
+    // support is incomplete.
+    bool known_hazard_evidence = false;
+    double known_gnss_degradation_ratio = 0.0;
+    double known_fim_ratio = std::numeric_limits < double > ::quiet_NaN();
+    double unknown_coverage = 1.0;
     std::string floor_source_h = "none";
     std::string floor_source_v = "none";
     std::string reason = "not_evaluated";
@@ -180,6 +201,10 @@ namespace ego_planner
   {
     uint64_t candidate_id = 0;
     std::vector < Eigen::Vector3d > path;
+    // Clearance-checked lattice representative retained for strict common-
+    // prefix extraction. `path` may be shortcut for B-spline initialization;
+    // shortcutting must not erase a shared entry corridor.
+    std::vector < Eigen::Vector3d > topology_path;
     std::string path_hash;
     double length_m = 0.0;
     bool occupancy_supported = false;
@@ -191,6 +216,21 @@ namespace ego_planner
     double fim_max_ratio = std::numeric_limits < double > ::quiet_NaN();
     double fim_integral = std::numeric_limits < double > ::quiet_NaN();
     double safety_max_ratio = std::numeric_limits < double > ::quiet_NaN();
+    uint64_t channel_id = 0;
+    bool formal_support = false;
+    bool known_hazard_evidence = false;
+    double known_hazard_max = 0.0;
+    double known_hazard_integral = 0.0;
+    double known_fim_max_ratio = std::numeric_limits < double > ::quiet_NaN();
+    double unknown_coverage = 1.0;
+    int advisory_common_known_satellite_count = 0;
+    uint64_t advisory_common_satellite_hash = 0;
+    bool advisory_evidence_identity_consistent = true;
+    P4ForwardRiskSample first_failed_risk;
+    Eigen::Vector3d first_failed_position = Eigen::Vector3d::Constant(
+      std::numeric_limits<double>::quiet_NaN());
+    double first_failed_query_time_s =
+      std::numeric_limits<double>::quiet_NaN();
     std::string reason = "not_evaluated";
   };
 
@@ -208,7 +248,14 @@ namespace ego_planner
     P4ForwardSnapshotIdentity snapshot_identity;
     Eigen::Vector3d map_origin = Eigen::Vector3d::Zero();
     Eigen::Vector3d map_extent = Eigen::Vector3d::Zero();
+    std::shared_ptr<const std::vector<Eigen::Vector3d>>
+      raw_occupied_voxel_centers;
+    double map_inflation_m = 0.0;
     double query_time_s = 0.0;
+    // Current certified Integrity/ARAIM output captured in the same P0
+    // transaction. This is the absolute safety anchor for deferred/advisory
+    // motion; it is not a prediction for any forward UNKNOWN voxel.
+    P4ForwardRiskSample current_integrity_anchor;
     P4ForwardLimits limits;
     std::function < P4ForwardGeometryState(const Eigen::Vector3d &) > geometry;
     std::function < P4ForwardRiskSample(const Eigen::Vector3d &, double) > risk;
@@ -247,6 +294,9 @@ namespace ego_planner
     P4ForwardGeometryState geometry_state = P4ForwardGeometryState::CLEAR;
     P4ForwardRiskSupport risk_support = P4ForwardRiskSupport::INCOMPLETE;
     P4ForwardSafetyState safety_state = P4ForwardSafetyState::UNKNOWN;
+    P4ForwardSelectionAuthority selection_authority =
+      P4ForwardSelectionAuthority::NONE;
+    bool formal_support = false;
     uint64_t selected_candidate_id = 0;
     std::vector < Eigen::Vector3d > selected_guide;
     P4ForwardDeferredMotionMode deferred_motion_mode =
@@ -266,6 +316,10 @@ namespace ego_planner
     double first_failed_query_time_s =
       std::numeric_limits < double > ::quiet_NaN();
     double compute_latency_ms = 0.0;
+    double configuration_space_prepare_ms = 0.0;
+    int channel_search_attempts = 0;
+    int duplicate_channel_paths = 0;
+    std::string channel_search_termination = "not_started";
     std::string reason = "not_evaluated";
   };
 

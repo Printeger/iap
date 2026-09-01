@@ -106,43 +106,6 @@ double pathLength(const std::vector<Eigen::Vector3d> & path)
   return length;
 }
 
-std::vector<Eigen::Vector3d> sweptVoxelCenters(
-  const P4ForwardRequest & request, const Eigen::Vector3d & center,
-  const double resolution)
-{
-  const double radius = request.limits.vehicle_radius_m;
-  if (radius <= kEpsilon) {
-    return {center};
-  }
-  const Eigen::Vector3i minimum = ((center.array() - radius -
-    request.map_origin.array()) / resolution).floor().cast<int>();
-  const Eigen::Vector3i maximum = ((center.array() + radius -
-    request.map_origin.array()) / resolution).floor().cast<int>();
-  std::vector<Eigen::Vector3d> centers;
-  for (int x = minimum.x(); x <= maximum.x(); ++x) {
-    for (int y = minimum.y(); y <= maximum.y(); ++y) {
-      for (int z = minimum.z(); z <= maximum.z(); ++z) {
-        const Eigen::Vector3d cell_min = request.map_origin + resolution *
-          Eigen::Vector3d(x, y, z);
-        const Eigen::Vector3d cell_max =
-          cell_min + Eigen::Vector3d::Constant(resolution);
-        const Eigen::Vector3d closest = center.cwiseMax(cell_min).cwiseMin(
-          cell_max);
-        if ((closest - center).squaredNorm() <=
-          radius * radius + kEpsilon)
-        {
-          centers.push_back(
-            cell_min + Eigen::Vector3d::Constant(0.5 * resolution));
-        }
-      }
-    }
-  }
-  // The exact center is also queried because risk interpolation support is
-  // position-dependent even when all intersecting occupancy voxels are free.
-  centers.push_back(center);
-  return centers;
-}
-
 std::string hashPath(const std::vector<Eigen::Vector3d> & path)
 {
   uint64_t hash = 1469598103934665603ULL;
@@ -193,30 +156,6 @@ std::vector<Eigen::Vector3d> resample(
   return result;
 }
 
-Eigen::Vector3d pointAtPathFraction(
-  const std::vector<Eigen::Vector3d> & path, const double fraction)
-{
-  if (path.empty()) {
-    return Eigen::Vector3d::Constant(
-      std::numeric_limits<double>::quiet_NaN());
-  }
-  const double total = pathLength(path);
-  if (path.size() == 1 || total <= kEpsilon) {
-    return path.front();
-  }
-  const double target = std::clamp(fraction, 0.0, 1.0) * total;
-  double accumulated = 0.0;
-  for (std::size_t index = 1; index < path.size(); ++index) {
-    const double segment = (path[index] - path[index - 1]).norm();
-    if (accumulated + segment >= target && segment > kEpsilon) {
-      return path[index - 1] + (path[index] - path[index - 1]) *
-             ((target - accumulated) / segment);
-    }
-    accumulated += segment;
-  }
-  return path.back();
-}
-
 double speedCapForDistance(
   const double distance, const P4ForwardLimits & limits)
 {
@@ -231,6 +170,12 @@ double speedCapForDistance(
   return std::max(0.0, (-b + std::sqrt(discriminant)) / (2.0 * a));
 }
 
+class OnlineTopologyGraph;
+bool sameChannel(
+  const P4ForwardRequest & request, const OnlineTopologyGraph & graph,
+  const std::vector<Eigen::Vector3d> & lhs,
+  const std::vector<Eigen::Vector3d> & rhs);
+
 class OnlineTopologyGraph
 {
 public:
@@ -240,6 +185,31 @@ public:
     resolution_(request.limits.topology_resolution_m)
   {
     dimensions_ = (request.map_extent / resolution_).array().floor().cast<int>();
+    if (request.raw_occupied_voxel_centers) {
+      raw_occupied_cells_.reserve(
+        request.raw_occupied_voxel_centers->size() * 2 + 1);
+      const double occupancy_resolution =
+        request.limits.occupancy_resolution_m;
+      raw_bucket_size_cells_ = std::max(
+        1, static_cast<int>(std::llround(
+          resolution_ / occupancy_resolution)));
+      for (const auto & center : *request.raw_occupied_voxel_centers) {
+        const Eigen::Vector3d scaled =
+          (center - request.map_origin) / occupancy_resolution;
+        raw_occupied_cells_.insert({
+            static_cast<int>(std::floor(scaled.x())),
+            static_cast<int>(std::floor(scaled.y())),
+            static_cast<int>(std::floor(scaled.z()))});
+      }
+      raw_occupied_buckets_.reserve(raw_occupied_cells_.size() / 4 + 1);
+      for (const auto & cell : raw_occupied_cells_) {
+        raw_occupied_buckets_[{
+            cell.x / raw_bucket_size_cells_,
+            cell.y / raw_bucket_size_cells_,
+            cell.z / raw_bucket_size_cells_}].push_back(cell);
+      }
+      has_raw_configuration_space_ = true;
+    }
   }
 
   GridIndex index(const Eigen::Vector3d & point) const
@@ -267,6 +237,60 @@ public:
   {
     if (timedOut()) {
       return P4ForwardGeometryState::OUT_OF_BOUNDS;
+    }
+    if (has_raw_configuration_space_) {
+      const double radius = request_.limits.vehicle_radius_m +
+        std::max(0.0, request_.map_inflation_m);
+      const Eigen::Vector3d lower = center.array() - radius;
+      const Eigen::Vector3d upper = center.array() + radius;
+      if ((lower.array() < request_.map_origin.array()).any() ||
+        (upper.array() >=
+        (request_.map_origin + request_.map_extent).array()).any())
+      {
+        return P4ForwardGeometryState::OUT_OF_BOUNDS;
+      }
+      const double resolution = request_.limits.occupancy_resolution_m;
+      const Eigen::Vector3i minimum = ((lower - request_.map_origin) /
+        resolution).array().floor().cast<int>();
+      const Eigen::Vector3i maximum = ((upper - request_.map_origin) /
+        resolution).array().floor().cast<int>();
+      const Eigen::Vector3i minimum_bucket = minimum.array() /
+        raw_bucket_size_cells_;
+      const Eigen::Vector3i maximum_bucket = maximum.array() /
+        raw_bucket_size_cells_;
+      for (int bx = minimum_bucket.x(); bx <= maximum_bucket.x(); ++bx) {
+        for (int by = minimum_bucket.y(); by <= maximum_bucket.y(); ++by) {
+          for (int bz = minimum_bucket.z(); bz <= maximum_bucket.z(); ++bz) {
+            const auto bucket = raw_occupied_buckets_.find({bx, by, bz});
+            if (bucket == raw_occupied_buckets_.end()) {
+              continue;
+            }
+            for (const auto & occupied : bucket->second) {
+              const int x = occupied.x;
+              const int y = occupied.y;
+              const int z = occupied.z;
+              if (x < minimum.x() || x > maximum.x() ||
+                y < minimum.y() || y > maximum.y() ||
+                z < minimum.z() || z > maximum.z())
+              {
+                continue;
+              }
+              const Eigen::Vector3d cell_min =
+                request_.map_origin + resolution * Eigen::Vector3d(x, y, z);
+              const Eigen::Vector3d cell_max =
+                cell_min + Eigen::Vector3d::Constant(resolution);
+              const Eigen::Vector3d closest =
+                center.cwiseMax(cell_min).cwiseMin(cell_max);
+              if ((closest - center).squaredNorm() <=
+                radius * radius + kEpsilon)
+              {
+                return P4ForwardGeometryState::OCCUPIED;
+              }
+            }
+          }
+        }
+      }
+      return P4ForwardGeometryState::CLEAR;
     }
     // Edge checks revisit nearly identical centers from many neighbour
     // directions.  Cache them in half-occupancy-voxel bins and evaluate a
@@ -351,10 +375,43 @@ public:
     if (cached != topology_state_cache_.end()) {
       return cached->second;
     }
-    const bool clear = inBounds(cell) &&
-      request_.geometry(point(cell)) == P4ForwardGeometryState::CLEAR;
+    // Search and final validation share this exact configuration-space
+    // predicate. The callback already represents the frozen EGO raw/inflated
+    // hit map; the vehicle sphere is added exactly once here.
+    const bool clear = inBounds(cell) && sweptFree(point(cell));
     topology_state_cache_.emplace(cell, clear);
     return clear;
+  }
+
+  bool edgeFree(const GridIndex & from, const GridIndex & to) const
+  {
+    const auto less = [](const GridIndex & lhs, const GridIndex & rhs) {
+        if (lhs.x != rhs.x) return lhs.x < rhs.x;
+        if (lhs.y != rhs.y) return lhs.y < rhs.y;
+        return lhs.z < rhs.z;
+      };
+    const GridEdge key = less(to, from) ? GridEdge{to, from} :
+      GridEdge{from, to};
+    const auto cached = edge_state_cache_.find(key);
+    if (cached != edge_state_cache_.end()) {
+      return cached->second;
+    }
+    const Eigen::Vector3d start = point(from);
+    const Eigen::Vector3d delta = point(to) - start;
+    const double step = std::min(
+      0.1, request_.limits.occupancy_resolution_m);
+    const int samples = std::max(
+      1, static_cast<int>(std::ceil(delta.norm() / step)));
+    for (int sample = 1; sample <= samples; ++sample) {
+      if (!sweptFree(start + delta *
+        (static_cast<double>(sample) / samples)))
+      {
+        edge_state_cache_.emplace(key, false);
+        return false;
+      }
+    }
+    edge_state_cache_.emplace(key, true);
+    return true;
   }
 
   bool worldPathFree(const std::vector<Eigen::Vector3d> & path) const
@@ -391,19 +448,36 @@ public:
   std::vector<GridIndex> shortestPath(
     const GridIndex & start, const GridIndex & goal,
     const std::unordered_set<GridIndex, GridIndexHash> & blocked_nodes = {},
-    const std::unordered_set<GridEdge, GridEdgeHash> & blocked_edges = {}) const
+    const std::unordered_set<GridEdge, GridEdgeHash> & blocked_edges = {},
+    const std::unordered_map<GridIndex, double, GridIndexHash> & penalties = {},
+    const std::chrono::steady_clock::time_point local_deadline =
+      std::chrono::steady_clock::time_point::max(),
+    const double geometric_envelope_m =
+      std::numeric_limits<double>::infinity()) const
   {
     struct Entry
     {
       double f = 0.0;
-      double g = 0.0;
+      double objective = 0.0;
       GridIndex index;
     };
     struct Greater
     {
       bool operator()(const Entry & lhs, const Entry & rhs) const
       {
-        return lhs.f > rhs.f;
+        if (std::abs(lhs.f - rhs.f) > kEpsilon) {
+          return lhs.f > rhs.f;
+        }
+        if (std::abs(lhs.objective - rhs.objective) > kEpsilon) {
+          return lhs.objective > rhs.objective;
+        }
+        if (lhs.index.x != rhs.index.x) {
+          return lhs.index.x > rhs.index.x;
+        }
+        if (lhs.index.y != rhs.index.y) {
+          return lhs.index.y > rhs.index.y;
+        }
+        return lhs.index.z > rhs.index.z;
       }
     };
     if (!topologyFree(start) || !topologyFree(goal))
@@ -411,27 +485,35 @@ public:
       return {};
     }
     std::priority_queue<Entry, std::vector<Entry>, Greater> open;
-    std::unordered_map<GridIndex, double, GridIndexHash> distance;
+    std::unordered_map<GridIndex, double, GridIndexHash> best_objective;
     std::unordered_map<GridIndex, GridIndex, GridIndexHash> parent;
-    distance[start] = 0.0;
+    best_objective.emplace(start, 0.0);
     open.push({(point(goal) - point(start)).norm(), 0.0, start});
-    const double max_route_length =
-      (point(goal) - point(start)).norm() *
-      request_.limits.max_path_length_ratio + resolution_;
+    const Eigen::Vector3d start_point = point(start);
+    const Eigen::Vector3d goal_point = point(goal);
     while (!open.empty()) {
-      if (timedOut()) {
+      if (timedOut() || std::chrono::steady_clock::now() >= local_deadline) {
         return {};
       }
       const Entry current = open.top();
       open.pop();
-      const auto known = distance.find(current.index);
-      if (known == distance.end() || current.g > known->second + kEpsilon) {
+      const auto current_best = best_objective.find(current.index);
+      if (current_best == best_objective.end() ||
+        current.objective > current_best->second + kEpsilon)
+      {
         continue;
       }
       if (current.index == goal) {
-        std::vector<GridIndex> path{goal};
-        while (!(path.back() == start)) {
-          path.push_back(parent.at(path.back()));
+        std::vector<GridIndex> path;
+        GridIndex cursor = goal;
+        path.push_back(cursor);
+        while (!(cursor == start)) {
+          const auto predecessor = parent.find(cursor);
+          if (predecessor == parent.end()) {
+            return {};
+          }
+          cursor = predecessor->second;
+          path.push_back(cursor);
         }
         std::reverse(path.begin(), path.end());
         return path;
@@ -442,30 +524,44 @@ public:
             if (dx == 0 && dy == 0 && dz == 0) {
               continue;
             }
+            // Six-connected motion keeps full 3-D reachability. It also
+            // prevents diagonal corner cutting by construction and avoids
+            // spending the bounded channel budget on lattice-only variants.
+            if (std::abs(dx) + std::abs(dy) + std::abs(dz) > 1) {
+              continue;
+            }
             const GridIndex next{
               current.index.x + dx, current.index.y + dy,
               current.index.z + dz};
             if (!inBounds(next) || blocked_nodes.count(next) != 0 ||
               blocked_edges.count({current.index, next}) != 0 ||
-              !topologyFree(next))
+              !topologyFree(next) || !edgeFree(current.index, next))
             {
               continue;
             }
-            const double next_g = current.g +
-              (point(next) - point(current.index)).norm();
-            if (next_g > max_route_length + kEpsilon) {
-              continue;
-            }
-            const auto previous = distance.find(next);
-            if (previous != distance.end() &&
-              next_g >= previous->second - kEpsilon)
+            const Eigen::Vector3d next_point = point(next);
+            if (std::isfinite(geometric_envelope_m) &&
+              (next_point - start_point).norm() +
+              (goal_point - next_point).norm() >
+              geometric_envelope_m + kEpsilon)
             {
               continue;
             }
-            distance[next] = next_g;
+            const double edge_length =
+              (next_point - point(current.index)).norm();
+            const auto penalty = penalties.find(next);
+            const double next_objective = current.objective + edge_length +
+              (penalty == penalties.end() ? 0.0 : penalty->second);
+            const auto incumbent = best_objective.find(next);
+            if (incumbent != best_objective.end() &&
+              incumbent->second <= next_objective + kEpsilon)
+            {
+              continue;
+            }
+            best_objective[next] = next_objective;
             parent[next] = current.index;
-            open.push({next_g + (point(goal) - point(next)).norm(),
-                next_g, next});
+            open.push({next_objective + (point(goal) - point(next)).norm(),
+                next_objective, next});
           }
         }
       }
@@ -473,153 +569,169 @@ public:
     return {};
   }
 
-  std::vector<std::vector<GridIndex>> yenPaths(
-    const GridIndex & start, const GridIndex & goal, const int limit) const
+  std::vector<std::vector<GridIndex>> distinctChannelPaths(
+    const GridIndex & start, const GridIndex & goal, const int max_channels,
+    const int max_searches, const double enumeration_budget_ms,
+    int * search_attempts, int * duplicate_paths,
+    std::string * termination) const
   {
-    std::vector<std::vector<GridIndex>> accepted;
-    const auto first = shortestPath(start, goal);
-    if (first.empty()) {
-      return accepted;
-    }
-    accepted.push_back(first);
-    struct Candidate
-    {
-      double cost;
-      std::vector<GridIndex> path;
-    };
-    std::vector<Candidate> pool;
-    std::unordered_set<std::string> seen;
+    const auto enumeration_started = std::chrono::steady_clock::now();
+    const auto enumeration_deadline = enumeration_started +
+      std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+        std::chrono::duration<double, std::milli>(enumeration_budget_ms));
+    std::vector<std::vector<GridIndex>> representatives;
+    std::unordered_map<GridIndex, double, GridIndexHash> penalties;
+    std::unordered_set<std::string> seen_paths;
+    int consecutive_duplicate_channels = 0;
+    double geometric_envelope_m =
+      std::numeric_limits<double>::infinity();
     const auto key = [](const std::vector<GridIndex> & path) {
         std::ostringstream stream;
-        for (const auto & id : path) {
-          stream << id.x << ',' << id.y << ',' << id.z << ';';
+        for (const auto & cell : path) {
+          stream << cell.x << ',' << cell.y << ',' << cell.z << ';';
         }
         return stream.str();
       };
-    seen.insert(key(first));
-    for (int k = 1; k < limit; ++k) {
-      if (timedOut()) {
-        return accepted;
-      }
-      const auto & previous = accepted.back();
-      for (std::size_t spur_index = 0;
-        spur_index + 1 < previous.size(); ++spur_index)
-      {
-        if (timedOut()) {
-          return accepted;
+    const auto addRepulsion = [&penalties](
+      const std::vector<GridIndex> & path, const double strength) {
+        if (path.size() <= 2) {
+          return;
         }
-        std::vector<GridIndex> root(
-          previous.begin(), previous.begin() + spur_index + 1);
-        std::unordered_set<GridEdge, GridEdgeHash> blocked_edges;
-        for (const auto & path : accepted) {
-          if (path.size() > spur_index &&
-            std::equal(root.begin(), root.end(), path.begin()))
-          {
-            blocked_edges.insert({path[spur_index], path[spur_index + 1]});
+        for (std::size_t index = 1; index + 1 < path.size(); ++index) {
+          const auto & center = path[index];
+          for (int dx = -1; dx <= 1; ++dx) {
+            for (int dy = -1; dy <= 1; ++dy) {
+              for (int dz = -1; dz <= 1; ++dz) {
+                const double radius = std::sqrt(
+                  static_cast<double>(dx * dx + dy * dy + dz * dz));
+                if (radius > 1.0 + kEpsilon) {
+                  continue;
+                }
+                penalties[{center.x + dx, center.y + dy, center.z + dz}] +=
+                  strength / (1.0 + radius);
+              }
+            }
           }
         }
-        std::unordered_set<GridIndex, GridIndexHash> blocked_nodes;
-        for (std::size_t i = 0; i + 1 < root.size(); ++i) {
-          blocked_nodes.insert(root[i]);
+      };
+    if (search_attempts) {
+      *search_attempts = 0;
+    }
+    if (duplicate_paths) {
+      *duplicate_paths = 0;
+    }
+    if (termination) {
+      *termination = "search_limit";
+    }
+    for (int attempt = 0; attempt < max_searches; ++attempt) {
+      const double elapsed_ms = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - enumeration_started).count();
+      if (timedOut() || elapsed_ms >= enumeration_budget_ms) {
+        if (termination) {
+          *termination = "enumeration_budget_exceeded";
         }
-        auto spur = shortestPath(
-          root.back(), goal, blocked_nodes, blocked_edges);
-        if (spur.empty()) {
-          continue;
-        }
-        root.pop_back();
-        root.insert(root.end(), spur.begin(), spur.end());
-        const std::string identity = key(root);
-        if (!seen.insert(identity).second) {
-          continue;
-        }
-        double cost = 0.0;
-        for (std::size_t i = 1; i < root.size(); ++i) {
-          cost += (point(root[i]) - point(root[i - 1])).norm();
-        }
-        pool.push_back({cost, std::move(root)});
-      }
-      if (pool.empty()) {
         break;
       }
-      const auto best = std::min_element(
-        pool.begin(), pool.end(), [](const Candidate & lhs, const Candidate & rhs) {
-          return lhs.cost < rhs.cost;
-        });
-      accepted.push_back(best->path);
-      pool.erase(best);
-    }
-    return accepted;
-  }
-
-  std::vector<std::vector<GridIndex>> offsetWaypointPaths(
-    const GridIndex & start, const GridIndex & goal, const int limit) const
-  {
-    std::vector<std::vector<GridIndex>> paths;
-    if (limit <= 0) {
-      return paths;
-    }
-    const Eigen::Vector3d start_point = point(start);
-    const Eigen::Vector3d goal_point = point(goal);
-    const Eigen::Vector3d direction = (goal_point - start_point).normalized();
-    Eigen::Vector3d reference = std::abs(direction.z()) < 0.8 ?
-      Eigen::Vector3d::UnitZ() : Eigen::Vector3d::UnitY();
-    const Eigen::Vector3d lateral = direction.cross(reference).normalized();
-    const Eigen::Vector3d vertical = direction.cross(lateral).normalized();
-    const std::array<Eigen::Vector3d, 4> axes{
-      lateral, -lateral, vertical, -vertical};
-    const Eigen::Vector3d delta = goal_point - start_point;
-    for (const int multiplier : {4, 8})
-    {
-      if (static_cast<int>(paths.size()) >= limit) {
+      if (search_attempts) {
+        ++(*search_attempts);
+      }
+      auto path = shortestPath(
+        start, goal, {}, {}, penalties, enumeration_deadline,
+        geometric_envelope_m);
+      if (path.empty()) {
+        if (termination) {
+          *termination = std::chrono::steady_clock::now() >=
+            enumeration_deadline ? "enumeration_budget_exceeded" :
+            "search_exhausted";
+        }
         break;
       }
-      for (const auto & axis : axes) {
-        if (timedOut() || static_cast<int>(paths.size()) >= limit) {
-          return paths;
+      const std::string identity = key(path);
+      if (!std::isfinite(geometric_envelope_m)) {
+        // The first unpenalized search is complete over the frozen local map.
+        // A long wall or U-shaped obstacle can require a route far outside any
+        // ellipse derived from start-goal straight-line distance. Later
+        // repulsion rounds are bounded only after this reachable route exists.
+        // sqrt(3) covers its six-connected representation and the configured
+        // length ratio retains every potentially eligible 3-D channel.
+        const double first_route_lattice_length = path.size() > 1 ?
+          (path.size() - 1) * resolution_ : 0.0;
+        geometric_envelope_m = std::sqrt(3.0) *
+          request_.limits.max_path_length_ratio *
+          first_route_lattice_length + resolution_;
+      }
+      const bool new_lattice_path = seen_paths.insert(identity).second;
+      bool duplicate_channel = false;
+      std::vector<Eigen::Vector3d> world_path;
+      world_path.reserve(path.size());
+      for (const auto & cell : path) {
+        world_path.push_back(point(cell));
+      }
+      for (const auto & representative : representatives) {
+        std::vector<Eigen::Vector3d> representative_world;
+        representative_world.reserve(representative.size());
+        for (const auto & cell : representative) {
+          representative_world.push_back(point(cell));
         }
-        const double amplitude = multiplier * resolution_;
-        std::vector<GridIndex> candidate{start};
-        for (const auto & fraction_and_scale :
-          std::array<std::pair<double, double>, 3>{
-            std::pair<double, double>{0.25, 0.5},
-            std::pair<double, double>{0.50, 1.0},
-            std::pair<double, double>{0.75, 0.5}})
-        {
-          const auto waypoint = index(
-            start_point + fraction_and_scale.first * delta +
-            fraction_and_scale.second * amplitude * axis);
-          if (!inBounds(waypoint) || !sweptFree(point(waypoint))) {
-            candidate.clear();
-            break;
+        if (sameChannel(request_, *this, world_path, representative_world)) {
+          duplicate_channel = true;
+          break;
+        }
+      }
+      if (!duplicate_channel) {
+        representatives.push_back(path);
+        consecutive_duplicate_channels = 0;
+        if (static_cast<int>(representatives.size()) >= max_channels) {
+          if (termination) {
+            *termination = "channel_limit";
           }
-          if (!(candidate.back() == waypoint)) {
-            candidate.push_back(waypoint);
-          }
+          break;
         }
-        if (candidate.empty()) {
-          continue;
+      } else {
+        if (duplicate_paths) {
+          ++(*duplicate_paths);
         }
-        if (!(candidate.back() == goal)) {
-          candidate.push_back(goal);
+        ++consecutive_duplicate_channels;
+      }
+      // A duplicate lattice path receives a stronger deterministic penalty;
+      // near-neighbour variants do not consume a channel slot.
+      // One topology-cell repulsion is enough to expose a neighbouring
+      // lattice representative without creating a broad artificial wall that
+      // makes the next bounded A* exhaust the whole 3-D envelope. Repeated
+      // discoveries accumulate deterministically and still push later rounds
+      // toward genuinely separated corridors.
+      addRepulsion(path, new_lattice_path ? 0.25 : 0.5);
+      // Repeatedly discovering different lattice paths inside the same fully
+      // sweep-connected corridor is a deterministic saturation condition, not
+      // a timeout. This leaves budget for risk evaluation in open space while
+      // still allowing multiple repulsion rounds to expose a separated route.
+      // Finding a second channel is the important completeness threshold for
+      // a route choice.  Once it exists, spending eight more full 3-D A*
+      // searches on sweep-connected lattice variants only starves the risk
+      // batch and turns a useful decision into a hard timeout.  Keep the
+      // wider search allowance while only one channel is known, then use a
+      // tighter deterministic saturation rule for optional third/fourth
+      // channels.  This is an early "no new topology" termination, not use of
+      // a partial result after the compute deadline.
+      const int duplicate_saturation_limit = representatives.size() >= 2 ? 4 : 8;
+      if (consecutive_duplicate_channels >= duplicate_saturation_limit) {
+        if (termination) {
+          *termination = "duplicate_channel_saturation";
         }
-        std::vector<Eigen::Vector3d> candidate_world;
-        candidate_world.reserve(candidate.size());
-        for (const auto & cell : candidate) {
-          candidate_world.push_back(point(cell));
-        }
-        if (!worldPathFree(candidate_world)) {
-          continue;
-        }
-        paths.push_back(std::move(candidate));
+        break;
       }
     }
-    return paths;
+    return representatives;
   }
 
   bool timedOut() const
   {
     return budget_ && budget_->expired();
+  }
+
+  bool frozenRawConfigurationSpaceIsEmpty() const
+  {
+    return has_raw_configuration_space_ && raw_occupied_cells_.empty();
   }
 
 private:
@@ -633,6 +745,12 @@ private:
     GridIndex, P4ForwardGeometryState, GridIndexHash> swept_state_cache_;
   mutable std::unordered_map<GridIndex, bool, GridIndexHash>
     topology_state_cache_;
+  mutable std::unordered_map<GridEdge, bool, GridEdgeHash> edge_state_cache_;
+  std::unordered_set<GridIndex, GridIndexHash> raw_occupied_cells_;
+  std::unordered_map<GridIndex, std::vector<GridIndex>, GridIndexHash>
+    raw_occupied_buckets_;
+  int raw_bucket_size_cells_ = 1;
+  bool has_raw_configuration_space_ = false;
 };
 
 std::vector<Eigen::Vector3d> toWorldPath(
@@ -654,6 +772,28 @@ std::vector<Eigen::Vector3d> toWorldPath(
   return path;
 }
 
+std::vector<Eigen::Vector3d> shortcutPath(
+  const OnlineTopologyGraph & graph,
+  const std::vector<Eigen::Vector3d> & path)
+{
+  if (path.size() < 3) {
+    return path;
+  }
+  std::vector<Eigen::Vector3d> shortened{path.front()};
+  std::size_t current = 0;
+  while (current + 1 < path.size()) {
+    std::size_t next = path.size() - 1;
+    while (next > current + 1 &&
+      !graph.worldPathFree({path[current], path[next]}))
+    {
+      --next;
+    }
+    shortened.push_back(path[next]);
+    current = next;
+  }
+  return shortened;
+}
+
 bool sameChannel(
   const P4ForwardRequest & request, const OnlineTopologyGraph & graph,
   const std::vector<Eigen::Vector3d> & lhs,
@@ -661,16 +801,60 @@ bool sameChannel(
 {
   const auto a = resample(lhs, request.limits.topology_resolution_m);
   const auto b = resample(rhs, request.limits.topology_resolution_m);
-  const std::size_t count = std::max<std::size_t>(
-    16, std::max(a.size(), b.size()));
-  if (count == 0) {
+  if (a.empty() || b.empty()) {
     return true;
   }
-  for (std::size_t i = 0; i < count; ++i) {
-    const double fraction = count > 1 ?
-      static_cast<double>(i) / static_cast<double>(count - 1) : 0.0;
-    const Eigen::Vector3d a_point = pointAtPathFraction(a, fraction);
-    const Eigen::Vector3d b_point = pointAtPathFraction(b, fraction);
+  const std::size_t columns = b.size();
+  std::vector<double> frechet(a.size() * columns,
+    std::numeric_limits<double>::infinity());
+  const auto at = [columns, &frechet](const std::size_t row,
+      const std::size_t column) -> double & {
+      return frechet[row * columns + column];
+    };
+  for (std::size_t row = 0; row < a.size(); ++row) {
+    for (std::size_t column = 0; column < b.size(); ++column) {
+      const double distance = (a[row] - b[column]).norm();
+      if (row == 0 && column == 0) {
+        at(row, column) = distance;
+      } else {
+        double previous = std::numeric_limits<double>::infinity();
+        if (row > 0) previous = std::min(previous, at(row - 1, column));
+        if (column > 0) previous = std::min(previous, at(row, column - 1));
+        if (row > 0 && column > 0) {
+          previous = std::min(previous, at(row - 1, column - 1));
+        }
+        at(row, column) = std::max(distance, previous);
+      }
+    }
+  }
+  std::vector<std::pair<std::size_t, std::size_t>> alignment;
+  std::size_t row = a.size() - 1;
+  std::size_t column = b.size() - 1;
+  while (true) {
+    alignment.emplace_back(row, column);
+    if (row == 0 && column == 0) break;
+    struct Previous {double cost; int order; std::size_t row; std::size_t col;};
+    std::vector<Previous> previous;
+    if (row > 0 && column > 0) {
+      previous.push_back({at(row - 1, column - 1), 0, row - 1, column - 1});
+    }
+    if (row > 0) previous.push_back({at(row - 1, column), 1, row - 1, column});
+    if (column > 0) previous.push_back({at(row, column - 1), 2, row, column - 1});
+    const auto best = std::min_element(
+      previous.begin(), previous.end(), [](const auto & lhs, const auto & rhs) {
+        if (std::abs(lhs.cost - rhs.cost) > kEpsilon) {
+          return lhs.cost < rhs.cost;
+        }
+        return lhs.order < rhs.order;
+      });
+    row = best->row;
+    column = best->col;
+  }
+  std::reverse(alignment.begin(), alignment.end());
+  bool monotone_sweep_clear = true;
+  for (const auto & pair : alignment) {
+    const Eigen::Vector3d & a_point = a[pair.first];
+    const Eigen::Vector3d & b_point = b[pair.second];
     const double span = (b_point - a_point).norm();
     const int samples = std::max(1, static_cast<int>(std::ceil(
       span / (0.5 * request.limits.topology_resolution_m))));
@@ -678,6 +862,48 @@ bool sameChannel(
       const Eigen::Vector3d point = a_point + (b_point - a_point) *
         (static_cast<double>(j) / samples);
       if (!graph.sweptFree(point)) {
+        monotone_sweep_clear = false;
+        break;
+      }
+    }
+    if (!monotone_sweep_clear) break;
+  }
+  if (monotone_sweep_clear) {
+    return true;
+  }
+  // Discrete Fréchet can choose an equally optimal timing alignment that
+  // crosses a nearby obstacle even when another monotone reparameterisation
+  // stays inside one wide corridor. Check the deterministic equal-arc
+  // alignment before declaring a topological split.
+  const std::size_t count = std::max<std::size_t>(
+    16, std::max(a.size(), b.size()));
+  for (std::size_t index = 0; index < count; ++index) {
+    const double fraction = count > 1 ?
+      static_cast<double>(index) / static_cast<double>(count - 1) : 0.0;
+    const auto interpolate = [](const std::vector<Eigen::Vector3d> & path,
+        const double value) -> Eigen::Vector3d {
+        const double total = pathLength(path);
+        const double target = value * total;
+        double accumulated = 0.0;
+        for (std::size_t i = 1; i < path.size(); ++i) {
+          const double segment = (path[i] - path[i - 1]).norm();
+          if (accumulated + segment >= target && segment > kEpsilon) {
+            return (path[i - 1] + (path[i] - path[i - 1]) *
+              ((target - accumulated) / segment)).eval();
+          }
+          accumulated += segment;
+        }
+        return path.back();
+      };
+    const Eigen::Vector3d a_point = interpolate(a, fraction);
+    const Eigen::Vector3d b_point = interpolate(b, fraction);
+    const int samples = std::max(1, static_cast<int>(std::ceil(
+      (b_point - a_point).norm() /
+      (0.5 * request.limits.topology_resolution_m))));
+    for (int sample = 0; sample <= samples; ++sample) {
+      if (!graph.sweptFree(a_point + (b_point - a_point) *
+        (static_cast<double>(sample) / samples)))
+      {
         return false;
       }
     }
@@ -689,62 +915,15 @@ P4ForwardRiskSample querySweptRisk(
   const P4ForwardRequest & request, const Eigen::Vector3d & center,
   const double query_time_s, const ComputeBudget * budget)
 {
-  P4ForwardRiskSample aggregate;
-  bool known_unsafe = false;
-  aggregate.valid = true;
-  aggregate.stale = false;
-  aggregate.safety_ratio = 0.0;
-  aggregate.fim_ratio = 0.0;
-  aggregate.reason = "ok";
-  // RiskMap is a 0.5 m overlay. Query each overlay cell intersecting the
-  // vehicle sphere; each query in turn validates every non-zero trilinear and
-  // temporal source-support corner.
-  for (const auto & voxel_center : sweptVoxelCenters(
-      request, center, request.limits.topology_resolution_m))
-  {
-    if (budget && budget->expired()) {
-      aggregate.valid = false;
-      aggregate.stale = true;
-      aggregate.reason = "compute_budget_exceeded";
-      return aggregate;
-    }
-    const auto sample = request.risk(voxel_center, query_time_s);
-    if (!sample.valid || sample.stale || !sample.gnss_supported ||
-      !sample.lidar_supported || !sample.fim_supported ||
-      !std::isfinite(sample.safety_ratio) ||
-      !std::isfinite(sample.fim_ratio))
-    {
-      aggregate.valid = false;
-      aggregate.stale = aggregate.stale || sample.stale;
-      aggregate.reason = sample.reason.empty() ?
-        "risk_support_incomplete" : sample.reason;
-      continue;
-    }
-    if (sample.safety_state == P4ForwardSafetyState::UNKNOWN ||
-      sample.ranking_state == P4ForwardRankingState::INCOMPLETE)
-    {
-      aggregate.valid = false;
-      aggregate.safety_state = P4ForwardSafetyState::UNKNOWN;
-      aggregate.ranking_state = P4ForwardRankingState::INCOMPLETE;
-      aggregate.reason = sample.reason.empty() ?
-        "risk_support_incomplete" : sample.reason;
-      continue;
-    }
-    known_unsafe = known_unsafe ||
-      sample.safety_state == P4ForwardSafetyState::UNSAFE ||
-      sample.safety_ratio >= 1.0;
-    aggregate.safety_state = known_unsafe ?
-      P4ForwardSafetyState::UNSAFE : P4ForwardSafetyState::SAFE;
-    aggregate.ranking_state = sample.ranking_state;
-    aggregate.safety_ratio = std::max(
-      aggregate.safety_ratio, sample.safety_ratio);
-    aggregate.fim_ratio = std::max(
-      aggregate.fim_ratio, sample.fim_ratio);
+  if (budget && budget->expired()) {
+    P4ForwardRiskSample timeout;
+    timeout.reason = "compute_budget_exceeded";
+    return timeout;
   }
-  if (known_unsafe) {
-    aggregate.safety_state = P4ForwardSafetyState::UNSAFE;
-  }
-  return aggregate;
+  // Geometry certifies the complete vehicle body. Risk belongs to the
+  // antenna/sensor reference trajectory and must not demand GNSS support for
+  // every voxel inside the vehicle sphere.
+  return request.risk(center, query_time_s);
 }
 
 P4ForwardRiskSample aggregateRiskSamples(
@@ -764,6 +943,8 @@ P4ForwardRiskSample aggregateRiskSamples(
   aggregate.ranking_state = P4ForwardRankingState::COMPARABLE;
   aggregate.safety_ratio = 0.0;
   aggregate.fim_ratio = 0.0;
+  aggregate.known_gnss_degradation_ratio = 0.0;
+  aggregate.unknown_coverage = 0.0;
   aggregate.reason = begin < end ? "ok" : "risk_support_incomplete";
   for (std::size_t index = begin; index < end; ++index) {
     const auto & sample = samples[index];
@@ -775,6 +956,25 @@ P4ForwardRiskSample aggregateRiskSamples(
       aggregate.lidar_supported && sample.lidar_supported;
     aggregate.fim_supported =
       aggregate.fim_supported && sample.fim_supported;
+    aggregate.known_hazard_evidence =
+      aggregate.known_hazard_evidence || sample.known_hazard_evidence ||
+      (std::isfinite(sample.known_gnss_degradation_ratio) &&
+      sample.known_gnss_degradation_ratio > 0.0);
+    if (std::isfinite(sample.known_gnss_degradation_ratio)) {
+      aggregate.known_gnss_degradation_ratio = std::max(
+        aggregate.known_gnss_degradation_ratio,
+        std::max(0.0, sample.known_gnss_degradation_ratio));
+    }
+    if (std::isfinite(sample.known_fim_ratio)) {
+      aggregate.known_fim_ratio = std::isfinite(aggregate.known_fim_ratio) ?
+        std::max(aggregate.known_fim_ratio, sample.known_fim_ratio) :
+        sample.known_fim_ratio;
+    }
+    if (std::isfinite(sample.unknown_coverage)) {
+      aggregate.unknown_coverage = std::max(
+        aggregate.unknown_coverage,
+        std::clamp(sample.unknown_coverage, 0.0, 1.0));
+    }
     if (!sample.valid || sample.stale || !sample.gnss_supported ||
       !sample.lidar_supported || !sample.fim_supported ||
       sample.safety_state == P4ForwardSafetyState::UNKNOWN ||
@@ -818,6 +1018,11 @@ P4ForwardRiskSample aggregateRiskSamples(
   }
   if (first_incomplete) {
     auto result = *first_incomplete;
+    result.known_hazard_evidence = aggregate.known_hazard_evidence;
+    result.known_gnss_degradation_ratio =
+      aggregate.known_gnss_degradation_ratio;
+    result.known_fim_ratio = aggregate.known_fim_ratio;
+    result.unknown_coverage = aggregate.unknown_coverage;
     // Missing support must not erase a separately observed safety violation
     // in the same swept volume. Geometry remains clear, but deferred motion
     // must HOLD rather than traverse the known-unsafe portion.
@@ -856,8 +1061,8 @@ void evaluateRisk(
   const P4ForwardRequest & request, const ComputeBudget * budget,
   P4ForwardCandidate * candidate)
 {
-  const auto samples = resample(
-    candidate->path, request.limits.occupancy_resolution_m);
+  const auto samples = resample(candidate->path, std::min(
+      0.25, request.limits.topology_resolution_m));
   candidate->risk_supported = !samples.empty();
   candidate->safety_gate_passed = !samples.empty();
   candidate->fim_max_ratio = 0.0;
@@ -929,6 +1134,9 @@ void evaluateCandidateRiskSet(
     std::size_t begin = 0;
     std::size_t end = 0;
     double segment_m = 0.0;
+    Eigen::Vector3d position = Eigen::Vector3d::Constant(
+      std::numeric_limits<double>::quiet_NaN());
+    double query_time_s = std::numeric_limits<double>::quiet_NaN();
   };
   std::vector<P4ForwardRiskQuery> queries;
   std::vector<Group> groups;
@@ -941,8 +1149,17 @@ void evaluateCandidateRiskSet(
     candidate.fim_max_ratio = 0.0;
     candidate.fim_integral = 0.0;
     candidate.safety_max_ratio = 0.0;
-    const auto path_samples = resample(
-      candidate.path, request.limits.occupancy_resolution_m);
+    candidate.known_hazard_evidence = false;
+    candidate.known_hazard_max = 0.0;
+    candidate.known_hazard_integral = 0.0;
+    candidate.known_fim_max_ratio =
+      std::numeric_limits<double>::quiet_NaN();
+    candidate.unknown_coverage = 0.0;
+    candidate.advisory_common_known_satellite_count = 0;
+    candidate.advisory_common_satellite_hash = 0;
+    candidate.advisory_evidence_identity_consistent = true;
+    const auto path_samples = resample(candidate.path, std::min(
+        0.25, request.limits.topology_resolution_m));
     double distance = 0.0;
     for (std::size_t sample_index = 0;
       sample_index < path_samples.size(); ++sample_index)
@@ -956,13 +1173,11 @@ void evaluateCandidateRiskSet(
       group.segment_m = segment;
       const double query_time_s = request.query_time_s +
         distance / request.limits.nominal_query_speed_mps;
-      for (const auto & center : sweptVoxelCenters(
-          request, path_samples[sample_index],
-          request.limits.topology_resolution_m))
-      {
-        queries.push_back(P4ForwardRiskQuery{
-              center, query_time_s, candidate.candidate_id});
-      }
+      group.position = path_samples[sample_index];
+      group.query_time_s = query_time_s;
+      queries.push_back(P4ForwardRiskQuery{
+            path_samples[sample_index], query_time_s,
+            candidate.candidate_id});
       group.end = queries.size();
       groups.push_back(group);
     }
@@ -987,6 +1202,40 @@ void evaluateCandidateRiskSet(
   for (const auto & group : groups) {
     auto & candidate = (*candidates)[group.candidate];
     const auto risk = aggregateRiskSamples(samples, group.begin, group.end);
+    candidate.known_hazard_evidence = candidate.known_hazard_evidence ||
+      risk.known_hazard_evidence ||
+      (std::isfinite(risk.known_gnss_degradation_ratio) &&
+      risk.known_gnss_degradation_ratio > 0.0);
+    if (std::isfinite(risk.known_gnss_degradation_ratio)) {
+      const double known_hazard = std::max(
+        0.0, risk.known_gnss_degradation_ratio);
+      candidate.known_hazard_max = std::max(
+        candidate.known_hazard_max, known_hazard);
+      candidate.known_hazard_integral += known_hazard * group.segment_m;
+    }
+    if (std::isfinite(risk.known_fim_ratio)) {
+      candidate.known_fim_max_ratio =
+        std::isfinite(candidate.known_fim_max_ratio) ?
+        std::max(candidate.known_fim_max_ratio, risk.known_fim_ratio) :
+        risk.known_fim_ratio;
+    }
+    if (std::isfinite(risk.unknown_coverage)) {
+      candidate.unknown_coverage = std::max(
+        candidate.unknown_coverage,
+        std::clamp(risk.unknown_coverage, 0.0, 1.0));
+    }
+    if (candidate.advisory_common_satellite_hash == 0) {
+      candidate.advisory_common_satellite_hash =
+        risk.common_satellite_hash;
+      candidate.advisory_common_known_satellite_count =
+        risk.common_known_satellite_count;
+    } else if (candidate.advisory_common_satellite_hash !=
+      risk.common_satellite_hash ||
+      candidate.advisory_common_known_satellite_count !=
+      risk.common_known_satellite_count)
+    {
+      candidate.advisory_evidence_identity_consistent = false;
+    }
     if (risk.safety_state == P4ForwardSafetyState::UNSAFE ||
       (std::isfinite(risk.safety_ratio) && risk.safety_ratio >= 1.0))
     {
@@ -1002,6 +1251,11 @@ void evaluateCandidateRiskSet(
         candidate.reason = risk.reason.empty() ?
           "risk_support_incomplete" : risk.reason;
       }
+      if (!candidate.first_failed_position.allFinite()) {
+        candidate.first_failed_risk = risk;
+        candidate.first_failed_position = group.position;
+        candidate.first_failed_query_time_s = group.query_time_s;
+      }
       continue;
     }
     candidate.safety_max_ratio = std::max(
@@ -1014,6 +1268,11 @@ void evaluateCandidateRiskSet(
     {
       candidate.safety_gate_passed = false;
       candidate.reason = "safety_ratio_not_below_one";
+      if (!candidate.first_failed_position.allFinite()) {
+        candidate.first_failed_risk = risk;
+        candidate.first_failed_position = group.position;
+        candidate.first_failed_query_time_s = group.query_time_s;
+      }
     }
   }
   for (auto & candidate : *candidates) {
@@ -1022,6 +1281,8 @@ void evaluateCandidateRiskSet(
     }
     candidate.risk_support = candidate.risk_supported ?
       P4ForwardRiskSupport::COMPLETE : P4ForwardRiskSupport::INCOMPLETE;
+    candidate.formal_support = candidate.risk_supported &&
+      candidate.safety_gate_passed;
     if (candidate.safety_state != P4ForwardSafetyState::UNSAFE) {
       candidate.safety_state = candidate.risk_supported ?
         (candidate.safety_gate_passed ? P4ForwardSafetyState::SAFE :
@@ -1064,7 +1325,9 @@ std::vector<Eigen::Vector3d> commonGeometryPrefix(
   std::vector<std::vector<Eigen::Vector3d>> paths;
   paths.reserve(candidates.size());
   for (const auto & candidate : candidates) {
-    paths.push_back(resample(candidate.path, resolution));
+    paths.push_back(resample(
+        candidate.topology_path.empty() ? candidate.path :
+        candidate.topology_path, resolution));
   }
   std::size_t common_count = paths.front().size();
   for (const auto & path : paths) {
@@ -1088,14 +1351,51 @@ std::vector<Eigen::Vector3d> commonGeometryPrefix(
   return prefix;
 }
 
+std::vector<Eigen::Vector3d> commonGeometryCorridorPrefix(
+  const std::vector<P4ForwardCandidate> & candidates,
+  const double resolution, const OnlineTopologyGraph & graph)
+{
+  if (candidates.empty()) {
+    return {};
+  }
+  std::vector<std::vector<Eigen::Vector3d>> paths;
+  paths.reserve(candidates.size());
+  for (const auto & candidate : candidates) {
+    paths.push_back(resample(
+        candidate.topology_path.empty() ? candidate.path :
+        candidate.topology_path, resolution));
+  }
+  std::size_t common_count = paths.front().size();
+  for (const auto & path : paths) {
+    common_count = std::min(common_count, path.size());
+  }
+  std::vector<Eigen::Vector3d> prefix;
+  prefix.reserve(common_count);
+  for (std::size_t index = 0; index < common_count; ++index) {
+    const auto & reference = paths.front()[index];
+    const bool same_clear_corridor = std::all_of(
+      std::next(paths.begin()), paths.end(),
+      [&graph, &reference, index](const auto & path) {
+        return graph.worldPathFree({reference, path[index]});
+      });
+    if (!same_clear_corridor) {
+      break;
+    }
+    prefix.push_back(reference);
+  }
+  return prefix;
+}
+
 bool currentRiskAnchorSafe(const P4ForwardRequest & request)
 {
-  const auto current_anchor = request.risk(
-    request.position, request.query_time_s);
-  return current_anchor.valid && !current_anchor.stale &&
-    std::isfinite(current_anchor.safety_ratio) &&
-    current_anchor.safety_ratio < 1.0 &&
-    current_anchor.safety_state != P4ForwardSafetyState::UNSAFE;
+  const auto & certified = request.current_integrity_anchor;
+  // Deferred and advisory motion is authorized only by the certified current
+  // Integrity sample captured with this planning snapshot. A RiskMap lookup at
+  // the vehicle position may already be spatially predicted or incompletely
+  // interpolated and is therefore not an equivalent authority.
+  return certified.valid && !certified.stale &&
+    std::isfinite(certified.safety_ratio) && certified.safety_ratio < 1.0 &&
+    certified.safety_state == P4ForwardSafetyState::SAFE;
 }
 
 void configureKnownGeometryPrefixMotion(
@@ -1136,7 +1436,8 @@ void configureKnownGeometryPrefixMotion(
 }
 
 void configureDeferredMotion(
-  const P4ForwardRequest & request, P4ForwardDecision * decision)
+  const P4ForwardRequest & request, const OnlineTopologyGraph & graph,
+  P4ForwardDecision * decision)
 {
   decision->selected_candidate_id = 0;
   decision->selected_guide.clear();
@@ -1168,8 +1469,9 @@ void configureDeferredMotion(
     }
     return;
   }
-  const auto prefix = p4CommonGeometryPrefix(
-    decision->candidates, request.limits.topology_resolution_m * 0.5);
+  const auto prefix = commonGeometryCorridorPrefix(
+    decision->candidates, request.limits.topology_resolution_m * 0.5,
+    graph);
   decision->common_prefix_length_m = pathLength(prefix);
   const double terminal_reserve = p4StoppingDistance(0.0, request.limits);
   const double progress = std::min(
@@ -1188,6 +1490,122 @@ void configureDeferredMotion(
     speedCapForDistance(stop_reserve, request.limits));
 }
 
+bool configureAdvisorySelection(
+  const P4ForwardRequest & request, P4ForwardDecision * decision)
+{
+  if (!decision || decision->candidates.size() < 2 ||
+    !currentRiskAnchorSafe(request))
+  {
+    return false;
+  }
+  if (std::any_of(
+      decision->candidates.begin(), decision->candidates.end(),
+      [](const P4ForwardCandidate & candidate) {
+        return candidate.safety_state == P4ForwardSafetyState::UNSAFE;
+      }))
+  {
+    return false;
+  }
+  const double shortest = std::min_element(
+    decision->candidates.begin(), decision->candidates.end(),
+    [](const P4ForwardCandidate & lhs, const P4ForwardCandidate & rhs) {
+      return lhs.length_m < rhs.length_m;
+    })->length_m;
+  std::vector<P4ForwardCandidate *> eligible;
+  for (auto & candidate : decision->candidates) {
+    if (candidate.occupancy_supported &&
+      candidate.safety_state != P4ForwardSafetyState::UNSAFE &&
+      std::isfinite(candidate.unknown_coverage) &&
+      candidate.unknown_coverage < 1.0 - kEpsilon &&
+      candidate.advisory_evidence_identity_consistent &&
+      candidate.advisory_common_known_satellite_count > 0 &&
+      candidate.advisory_common_satellite_hash != 0 &&
+      candidate.length_m <= shortest *
+      request.limits.max_path_length_ratio + kEpsilon)
+    {
+      eligible.push_back(&candidate);
+    }
+  }
+  if (eligible.size() < 2 || !std::any_of(
+      eligible.begin(), eligible.end(), [](const auto * candidate) {
+        return candidate->known_hazard_evidence &&
+               (candidate->known_hazard_max > kEpsilon ||
+               candidate->known_hazard_integral > kEpsilon);
+      }))
+  {
+    return false;
+  }
+  const int common_count = eligible.front()->
+    advisory_common_known_satellite_count;
+  const uint64_t common_hash = eligible.front()->
+    advisory_common_satellite_hash;
+  if (std::any_of(
+      std::next(eligible.begin()), eligible.end(),
+      [common_count, common_hash](const auto * candidate) {
+        return candidate->advisory_common_known_satellite_count !=
+          common_count || candidate->advisory_common_satellite_hash !=
+          common_hash;
+      }))
+  {
+    return false;
+  }
+  const auto coverage = std::minmax_element(
+    eligible.begin(), eligible.end(), [](const auto * lhs, const auto * rhs) {
+      return lhs->unknown_coverage < rhs->unknown_coverage;
+    });
+  // A route with no online evidence must not win merely because its missing
+  // hazard score defaults to zero. Advisory ranking is allowed only on a
+  // comparable evidence domain; coverage remains diagnostic and UNKNOWN is
+  // never converted into a numerical penalty.
+  if ((*coverage.second)->unknown_coverage -
+    (*coverage.first)->unknown_coverage >
+    request.limits.advisory_min_relative_improvement + kEpsilon)
+  {
+    return false;
+  }
+  const auto order = [](const auto * lhs, const auto * rhs) {
+      if (std::abs(lhs->known_hazard_max - rhs->known_hazard_max) > kEpsilon) {
+        return lhs->known_hazard_max < rhs->known_hazard_max;
+      }
+      if (std::abs(lhs->known_hazard_integral -
+        rhs->known_hazard_integral) > kEpsilon)
+      {
+        return lhs->known_hazard_integral < rhs->known_hazard_integral;
+      }
+      const double lhs_fim = std::isfinite(lhs->known_fim_max_ratio) ?
+        lhs->known_fim_max_ratio : std::numeric_limits<double>::infinity();
+      const double rhs_fim = std::isfinite(rhs->known_fim_max_ratio) ?
+        rhs->known_fim_max_ratio : std::numeric_limits<double>::infinity();
+      if (std::abs(lhs_fim - rhs_fim) > kEpsilon) {
+        return lhs_fim < rhs_fim;
+      }
+      if (std::abs(lhs->length_m - rhs->length_m) > kEpsilon) {
+        return lhs->length_m < rhs->length_m;
+      }
+      return lhs->path_hash < rhs->path_hash;
+    };
+  std::sort(eligible.begin(), eligible.end(), order);
+  const double best_score = eligible[0]->known_hazard_max;
+  const double runner_up_score = eligible[1]->known_hazard_max;
+  if (runner_up_score <= kEpsilon ||
+    (runner_up_score - best_score) / runner_up_score + kEpsilon <
+    request.limits.advisory_min_relative_improvement)
+  {
+    return false;
+  }
+  decision->action = P4ForwardAction::ADVISORY_SELECTED;
+  decision->trigger_reason = P4ForwardTriggerReason::MULTIPLE_CHANNELS;
+  decision->selection_authority =
+    P4ForwardSelectionAuthority::ADVISORY_NON_CERTIFIED;
+  decision->formal_support = false;
+  decision->selected_candidate_id = eligible.front()->candidate_id;
+  decision->selected_guide = eligible.front()->path;
+  decision->speed_cap_mps = request.limits.max_observe_speed_mps;
+  decision->deferred_motion_mode = P4ForwardDeferredMotionMode::HOLD;
+  decision->reason = "known_hazard_ranked_advisory_selected";
+  return true;
+}
+
 }  // namespace
 
 std::vector<Eigen::Vector3d> p4CommonGeometryPrefix(
@@ -1201,10 +1619,23 @@ const char * p4ForwardActionName(const P4ForwardAction action)
   switch (action) {
     case P4ForwardAction::CONTINUE_NOMINAL: return "CONTINUE_NOMINAL";
     case P4ForwardAction::RISK_SELECTED: return "RISK_SELECTED";
+    case P4ForwardAction::ADVISORY_SELECTED: return "ADVISORY_SELECTED";
     case P4ForwardAction::DEFER_RISK_SELECTION: return "DEFER_RISK_SELECTION";
     case P4ForwardAction::OBSERVE_MORE: return "OBSERVE_MORE";
     case P4ForwardAction::REPLAN_REQUIRED: return "REPLAN_REQUIRED";
     case P4ForwardAction::NO_SAFE_ROUTE: return "NO_SAFE_ROUTE";
+  }
+  return "UNKNOWN";
+}
+
+const char * p4ForwardSelectionAuthorityName(
+  const P4ForwardSelectionAuthority authority)
+{
+  switch (authority) {
+    case P4ForwardSelectionAuthority::NONE: return "NONE";
+    case P4ForwardSelectionAuthority::FORMAL: return "FORMAL";
+    case P4ForwardSelectionAuthority::ADVISORY_NON_CERTIFIED:
+      return "ADVISORY_NON_CERTIFIED";
   }
   return "UNKNOWN";
 }
@@ -1310,7 +1741,8 @@ bool P4ForwardRequest::valid(std::string * reason) const
     return fail("invalid_snapshot_identity");
   }
   if (!map_origin.allFinite() || !map_extent.allFinite() ||
-    (map_extent.array() <= 0.0).any())
+    (map_extent.array() <= 0.0).any() ||
+    !std::isfinite(map_inflation_m) || map_inflation_m < 0.0)
   {
     return fail("invalid_map_geometry");
   }
@@ -1319,14 +1751,15 @@ bool P4ForwardRequest::valid(std::string * reason) const
   {
     return fail("missing_snapshot_query");
   }
-  const std::array<double, 14> finite_limits = {
+  const std::array<double, 16> finite_limits = {
     limits.reaction_time_s, limits.braking_accel_mps2,
     limits.vehicle_radius_m, limits.safety_margin_m,
     limits.max_lookahead_m, limits.sensing_range_m,
     limits.topology_resolution_m, limits.occupancy_resolution_m,
     limits.nominal_query_speed_mps, limits.max_path_length_ratio,
     limits.min_creep_progress_m, limits.max_creep_progress_m,
-    limits.max_observe_speed_mps, limits.compute_budget_ms};
+    limits.max_observe_speed_mps, limits.channel_enumeration_budget_ms,
+    limits.advisory_min_relative_improvement, limits.compute_budget_ms};
   if (std::any_of(
       finite_limits.begin(), finite_limits.end(),
       [](const double value) {return !std::isfinite(value);}) ||
@@ -1340,7 +1773,11 @@ bool P4ForwardRequest::valid(std::string * reason) const
     limits.max_creep_progress_m < limits.min_creep_progress_m ||
     limits.max_observe_speed_mps <= 0.0 ||
     limits.max_raw_paths <= 0 ||
-    limits.max_channels <= 0 || limits.compute_budget_ms <= 0.0)
+    limits.max_channels <= 0 || limits.max_channel_searches <= 0 ||
+    limits.channel_enumeration_budget_ms <= 0.0 ||
+    limits.advisory_min_relative_improvement < 0.0 ||
+    limits.advisory_min_relative_improvement >= 1.0 ||
+    limits.compute_budget_ms <= 0.0)
   {
     return fail("invalid_limits");
   }
@@ -1440,6 +1877,19 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
   decision.stopping_distance_m = p4StoppingDistance(
     request.velocity.norm(), request.limits);
   const auto finalize = [&request, &record_latency](P4ForwardDecision output) {
+      if (!output.first_failed_position.allFinite()) {
+        const auto failed = std::find_if(
+          output.candidates.begin(), output.candidates.end(),
+          [](const P4ForwardCandidate & candidate) {
+            return candidate.first_failed_position.allFinite();
+          });
+        if (failed != output.candidates.end()) {
+          output.first_failed_risk = failed->first_failed_risk;
+          output.first_failed_position = failed->first_failed_position;
+          output.first_failed_query_time_s =
+            failed->first_failed_query_time_s;
+        }
+      }
       if (!output.candidates.empty()) {
         output.geometry_state = P4ForwardGeometryState::CLEAR;
         const bool complete = std::all_of(
@@ -1468,6 +1918,8 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
         output.reason = "compute_budget_exceeded";
         output.selected_candidate_id = 0;
         output.selected_guide.clear();
+        output.selection_authority = P4ForwardSelectionAuthority::NONE;
+        output.formal_support = false;
         output.deferred_trajectory.clear();
         output.deferred_motion_mode = P4ForwardDeferredMotionMode::HOLD;
         output.observe_more_trajectory.clear();
@@ -1485,7 +1937,12 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
   auto nominal = resample(
     request.nominal_local_reference,
     request.limits.topology_resolution_m);
+  const auto configuration_space_started = std::chrono::steady_clock::now();
   OnlineTopologyGraph graph(request, &budget);
+  decision.configuration_space_prepare_ms =
+    std::chrono::duration<double, std::milli>(
+      std::chrono::steady_clock::now() -
+      configuration_space_started).count();
   Eigen::Vector3d anchor = request.position;
   for (const auto & point : nominal) {
     if ((point - request.position).norm() >
@@ -1508,43 +1965,95 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
     return finalize(std::move(decision));
   }
 
-  // Generate up to eight coarse 3-D routes with bounded Yen search, then add
-  // smooth lateral/vertical probes if Yen's lattice variants do not consume
-  // the raw-candidate budget. The coarse search uses hit/inflated occupancy at
-  // topology-cell centres for speed; every emitted candidate is subsequently
-  // checked with the full swept sphere and formally refined by frozen EGO A*.
-  std::vector<std::vector<GridIndex>> raw = graph.yenPaths(
-    graph.index(request.position), graph.index(anchor),
-    std::max(1, std::min(
-      request.limits.max_raw_paths, 8) / 4));
-  const auto offset_paths = graph.offsetWaypointPaths(
-    graph.index(request.position), graph.index(anchor),
-    std::max(0, request.limits.max_raw_paths - static_cast<int>(raw.size())));
-  raw.insert(raw.end(), offset_paths.begin(), offset_paths.end());
+  // Search until distinct topology channels are found. Near-neighbour lattice
+  // variants are repelled and retried rather than consuming the channel cap.
+  // Node, edge, clustering sweep and final validation all query the same
+  // frozen configuration-space predicate.
+  std::vector<std::vector<GridIndex>> raw;
+  std::vector<Eigen::Vector3d> nominal_to_anchor;
+  for (const auto & point : nominal) {
+    if ((point - request.position).norm() <=
+      (anchor - request.position).norm() + kEpsilon)
+    {
+      nominal_to_anchor.push_back(point);
+    }
+  }
+  const bool nominal_path_clear = nominal_to_anchor.size() >= 2 &&
+    graph.worldPathFree(nominal_to_anchor);
+  // A clear nominal line is one candidate, not proof that only one topology
+  // channel exists. Always run the bounded distinct-channel enumerator so an
+  // off-nominal route separated by an online hit can still be compared.
+  if (nominal_path_clear && graph.frozenRawConfigurationSpaceIsEmpty()) {
+    raw.emplace_back();
+    for (const auto & point : resample(
+        nominal_to_anchor, request.limits.topology_resolution_m))
+    {
+      const auto cell = graph.index(point);
+      if (raw.back().empty() || !(raw.back().back() == cell)) {
+        raw.back().push_back(cell);
+      }
+    }
+    decision.channel_search_attempts = 0;
+    decision.channel_search_termination =
+      "empty_configuration_space_single_channel";
+  } else {
+    raw = graph.distinctChannelPaths(
+      graph.index(request.position), graph.index(anchor),
+      request.limits.max_channels, request.limits.max_channel_searches,
+      request.limits.channel_enumeration_budget_ms,
+      &decision.channel_search_attempts, &decision.duplicate_channel_paths,
+      &decision.channel_search_termination);
+  }
   if (graph.timedOut()) {
     decision.reason = "compute_budget_exceeded";
     return finalize(std::move(decision));
   }
+  if (decision.channel_search_termination ==
+    "enumeration_budget_exceeded")
+  {
+    decision.action = P4ForwardAction::REPLAN_REQUIRED;
+    decision.geometry_state = P4ForwardGeometryState::CLEAR;
+    decision.trigger_reason =
+      P4ForwardTriggerReason::COMPUTE_BUDGET_EXCEEDED;
+    decision.reason = "channel_enumeration_budget_exceeded";
+    decision.deferred_motion_mode = P4ForwardDeferredMotionMode::HOLD;
+    return finalize(std::move(decision));
+  }
   if (raw.empty()) {
-    // The bounded forward probes are not a proof that the EGO grid has only
-    // one route or no route.  Without a certified common prefix, entering
-    // native EGO motion could commit to an un-compared branch, so hold and
-    // wait for a new immutable snapshot.  Native EGO A*/rebound remains the
-    // authority for an actual collision during ordinary geometry planning.
+    // The far anchor may be a hit-only UNKNOWN cell behind an as-yet
+    // unclosed fork. Failure to reach that point is not proof of no route.
+    // Expose only the sequential nominal prefix that is clear in the frozen
+    // C-space; this advances sensing without committing to either branch or
+    // inventing a remote merge point.
     decision.action = P4ForwardAction::DEFER_RISK_SELECTION;
     decision.geometry_state = P4ForwardGeometryState::CLEAR;
-    decision.trigger_reason = P4ForwardTriggerReason::SUPPORT_INCOMPLETE;
-    decision.reason = "topology_probe_inconclusive_hold";
-    decision.deferred_motion_mode = P4ForwardDeferredMotionMode::HOLD;
-    decision.speed_cap_mps = 0.0;
+    decision.trigger_reason =
+      P4ForwardTriggerReason::COMMON_ANCHOR_UNAVAILABLE;
+    std::vector<Eigen::Vector3d> prefix{request.position};
+    for (const auto & point : nominal_to_anchor) {
+      if ((point - prefix.back()).norm() <= kEpsilon) {
+        continue;
+      }
+      if (!graph.worldPathFree({prefix.back(), point})) {
+        break;
+      }
+      prefix.push_back(point);
+    }
+    decision.common_anchor = prefix.back();
+    configureKnownGeometryPrefixMotion(request, prefix, &decision);
+    decision.reason = decision.deferred_motion_mode ==
+      P4ForwardDeferredMotionMode::COMMON_PREFIX ?
+      "frontier_common_prefix_deferred_motion" :
+      "topology_probe_inconclusive_hold";
     return finalize(std::move(decision));
   }
   uint64_t next_candidate_id = 1;
   for (const auto & indices : raw) {
     P4ForwardCandidate candidate;
     candidate.candidate_id = next_candidate_id++;
-    candidate.path = toWorldPath(
+    candidate.topology_path = toWorldPath(
       graph, indices, request.position, anchor);
+    candidate.path = shortcutPath(graph, candidate.topology_path);
     candidate.length_m = pathLength(candidate.path);
     candidate.path_hash = hashPath(candidate.path);
     candidate.occupancy_supported = graph.worldPathFree(candidate.path);
@@ -1569,20 +2078,17 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
     if (!candidate.occupancy_supported) {
       continue;
     }
-    bool clustered = false;
-    for (const auto & representative : decision.candidates) {
-      if (sameChannel(request, graph, candidate.path, representative.path)) {
-        clustered = true;
-        break;
-      }
-    }
-    if (!clustered) {
-      decision.candidates.push_back(candidate);
-      if (static_cast<int>(decision.candidates.size()) >=
-        request.limits.max_channels)
-      {
-        break;
-      }
+    // DistinctChannelEnumerator already performed the expensive monotone
+    // channel-equivalence sweep. Repeating it here both wastes the bounded
+    // risk-query budget and can turn a valid result into a deadline failure.
+    auto representative = candidate;
+    representative.channel_id =
+      static_cast<uint64_t>(decision.candidates.size() + 1);
+    decision.candidates.push_back(std::move(representative));
+    if (static_cast<int>(decision.candidates.size()) >=
+      request.limits.max_channels)
+    {
+      break;
     }
   }
   if (decision.candidates.empty()) {
@@ -1623,6 +2129,30 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
     return finalize(std::move(decision));
   }
 
+  if (!nominal_path_clear && decision.candidates.size() < 2) {
+    // A clear point behind a nominal obstruction is not a common anchor by
+    // itself. Until two distinct routes reach the same frozen-geometry point,
+    // expose only the sequentially clear nominal prefix and do not commit to
+    // the sole topology hypothesis.
+    std::vector<Eigen::Vector3d> prefix{request.position};
+    for (const auto & point : nominal_to_anchor) {
+      if ((point - prefix.back()).norm() <= kEpsilon) {
+        continue;
+      }
+      if (!graph.worldPathFree({prefix.back(), point})) {
+        break;
+      }
+      prefix.push_back(point);
+    }
+    decision.common_anchor = prefix.back();
+    decision.action = P4ForwardAction::DEFER_RISK_SELECTION;
+    decision.trigger_reason =
+      P4ForwardTriggerReason::COMMON_ANCHOR_UNAVAILABLE;
+    decision.reason = "common_anchor_requires_two_distinct_channels";
+    configureKnownGeometryPrefixMotion(request, prefix, &decision);
+    return finalize(std::move(decision));
+  }
+
   evaluateCandidateRiskSet(request, &budget, &decision.candidates);
 
   const bool incomplete = std::any_of(
@@ -1631,10 +2161,13 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
       return !candidate.occupancy_supported || !candidate.risk_supported;
     });
   if (incomplete) {
+    if (configureAdvisorySelection(request, &decision)) {
+      return finalize(std::move(decision));
+    }
     decision.action = P4ForwardAction::DEFER_RISK_SELECTION;
     decision.trigger_reason = P4ForwardTriggerReason::SUPPORT_INCOMPLETE;
     decision.reason = "candidate_risk_support_incomplete";
-    configureDeferredMotion(request, &decision);
+    configureDeferredMotion(request, graph, &decision);
     return finalize(std::move(decision));
   }
 
@@ -1716,10 +2249,13 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
         }))
     {
       decision.candidates = std::move(refined_candidates);
+      if (configureAdvisorySelection(request, &decision)) {
+        return finalize(std::move(decision));
+      }
       decision.action = P4ForwardAction::DEFER_RISK_SELECTION;
       decision.trigger_reason = P4ForwardTriggerReason::SUPPORT_INCOMPLETE;
       decision.reason = "refined_candidate_risk_support_incomplete";
-      configureDeferredMotion(request, &decision);
+      configureDeferredMotion(request, graph, &decision);
       return finalize(std::move(decision));
     }
     decision.candidates = std::move(refined_candidates);
@@ -1750,6 +2286,10 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
   decision.selected_guide = selected->path;
   decision.action = decision.candidates.size() == 1 ?
     P4ForwardAction::CONTINUE_NOMINAL : P4ForwardAction::RISK_SELECTED;
+  decision.selection_authority = decision.candidates.size() == 1 ?
+    P4ForwardSelectionAuthority::NONE :
+    P4ForwardSelectionAuthority::FORMAL;
+  decision.formal_support = true;
   decision.trigger_reason = decision.candidates.size() == 1 ?
     P4ForwardTriggerReason::SINGLE_CHANNEL :
     P4ForwardTriggerReason::MULTIPLE_CHANNELS;

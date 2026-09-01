@@ -72,6 +72,7 @@ namespace ego_planner
     {
       std::shared_ptr<const iap::RiskGridSnapshot> snapshot;
       std::shared_ptr<const P0OccupancyEpoch> occupancy_snapshot;
+      iap::CurrentIntegrityState current_integrity_anchor;
       std::function<iap::ForwardRiskBatchResult(
           const iap::ForwardRiskBatchRequest&)> forward_risk_batch;
       double query_base_time_s = 0.0;
@@ -227,6 +228,10 @@ namespace ego_planner
     P4ForwardDecisionWorker p4_forward_worker_;
     P4ForwardDecision last_p4_forward_decision_;
     P4ForwardDecision published_p4_forward_decision_;
+    uint64_t p4_configuration_space_generation_ = 0;
+    std::string p4_configuration_space_geometry_id_;
+    std::shared_ptr<const std::vector<Eigen::Vector3d>>
+        p4_raw_occupied_centers_;
     int published_p4_trajectory_id_ = 0;
     int64_t published_p4_trajectory_start_ns_ = 0;
     std::string published_p4_control_points_hash_;

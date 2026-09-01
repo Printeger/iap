@@ -157,15 +157,22 @@ namespace ego_planner
           source.gnss_support_ray_length_m;
       target.gnss_hard_occlusion = source.gnss_hard_occlusion;
       target.gnss_visible_satellite_count =
-          source.prediction.gnss.n_visible;
+          source.gnss_visible_satellite_count;
       target.gnss_blocked_satellite_count =
-          source.prediction.gnss.n_blocked;
+          source.gnss_blocked_satellite_count;
+      target.gnss_attenuated_satellite_count =
+          source.gnss_attenuated_satellite_count;
       target.gnss_unknown_satellite_count =
-          source.prediction.gnss.n_unknown_support;
+          source.gnss_unknown_satellite_count;
       target.gnss_used_satellite_count = source.prediction.gnss.n_used;
       target.common_known_satellite_count =
           batch.common_known_satellite_count;
       target.common_satellite_hash = batch.common_satellite_hash;
+      target.known_hazard_evidence = source.known_hazard_evidence;
+      target.known_gnss_degradation_ratio =
+          source.known_gnss_degradation_ratio;
+      target.known_fim_ratio = source.known_fim_ratio;
+      target.unknown_coverage = source.unknown_coverage;
       target.floor_source_h = source.prediction.fused.floor_source_h;
       target.floor_source_v = source.prediction.fused.floor_source_v;
       target.reason =
@@ -343,6 +350,8 @@ namespace ego_planner
           " geometry=" + p4ForwardGeometryStateName(decision.geometry_state) +
           " risk_support=" + p4ForwardRiskSupportName(decision.risk_support) +
           " safety=" + p4ForwardSafetyStateName(decision.safety_state) +
+          " authority=" +
+          p4ForwardSelectionAuthorityName(decision.selection_authority) +
           " deferred=" +
           p4ForwardDeferredMotionModeName(decision.deferred_motion_mode) +
           " speed_cap=" + std::to_string(decision.speed_cap_mps) +
@@ -361,7 +370,10 @@ namespace ego_planner
             " safety=" + p4ForwardSafetyStateName(candidate.safety_state) +
             " fim_max=" +
             std::to_string(candidate.fim_max_ratio) + " safety_max=" +
-            std::to_string(candidate.safety_max_ratio) + " " +
+            std::to_string(candidate.safety_max_ratio) +
+            " known_hazard=" +
+            std::to_string(candidate.known_hazard_max) +
+            " unknown=" + std::to_string(candidate.unknown_coverage) + " " +
             candidate.reason);
         viz.topology_candidate_supported.push_back(
             candidate.occupancy_supported && candidate.risk_supported &&
@@ -448,6 +460,10 @@ namespace ego_planner
     node->declare_parameter("p4.forward.max_observe_speed_mps", 0.5);
     node->declare_parameter("p4.forward.max_raw_paths", 8);
     node->declare_parameter("p4.forward.max_channels", 4);
+    node->declare_parameter("p4.forward.max_channel_searches", 32);
+    node->declare_parameter("p4.forward.channel_enumeration_budget_ms", 60.0);
+    node->declare_parameter(
+        "p4.forward.advisory_min_relative_improvement", 0.10);
 
     node->get_parameter("manager/max_vel", pp_.max_vel_);
     node->get_parameter("manager/max_acc", pp_.max_acc_);
@@ -528,6 +544,12 @@ namespace ego_planner
                         p4_forward_limits_.max_raw_paths);
     node->get_parameter("p4.forward.max_channels",
                         p4_forward_limits_.max_channels);
+    node->get_parameter("p4.forward.max_channel_searches",
+                        p4_forward_limits_.max_channel_searches);
+    node->get_parameter("p4.forward.channel_enumeration_budget_ms",
+                        p4_forward_limits_.channel_enumeration_budget_ms);
+    node->get_parameter("p4.forward.advisory_min_relative_improvement",
+                        p4_forward_limits_.advisory_min_relative_improvement);
     safety_viz_ = std::make_shared<SafetyRvizPublisher>(
         node, SafetyRvizPublisher::declareAndReadConfig(node));
 
@@ -631,6 +653,8 @@ namespace ego_planner
           planning_risk_context_.snapshot.get() == planning->risk.get())
       {
         planning_risk_context_.occupancy_snapshot = planning->occupancy;
+        planning_risk_context_.current_integrity_anchor =
+            planning->integrity_anchor.current;
         planning_risk_context_.forward_risk_batch =
             planning->forward_risk_batch;
       }
@@ -663,6 +687,8 @@ namespace ego_planner
           planning->risk.get() == planning_risk_context_.snapshot.get())
       {
         planning_risk_context_.occupancy_snapshot = planning->occupancy;
+        planning_risk_context_.current_integrity_anchor =
+            planning->integrity_anchor.current;
         planning_risk_context_.forward_risk_batch =
             planning->forward_risk_batch;
       }
@@ -1076,10 +1102,49 @@ namespace ego_planner
     request.map_origin = occupancy->geometry.origin_w;
     request.map_extent = occupancy->geometry.extent_m;
     request.query_time_s = currentPlanningQueryBaseTime();
+    const auto &certified = planning_risk_context_.current_integrity_anchor;
+    request.current_integrity_anchor.valid = certified.valid &&
+        std::isfinite(certified.hpl) && std::isfinite(certified.vpl) &&
+        std::isfinite(certified.hal) && certified.hal > 0.0 &&
+        std::isfinite(certified.val) && certified.val > 0.0;
+    request.current_integrity_anchor.stale =
+        !request.current_integrity_anchor.valid;
+    request.current_integrity_anchor.hpl = certified.hpl;
+    request.current_integrity_anchor.vpl = certified.vpl;
+    request.current_integrity_anchor.hal = certified.hal;
+    request.current_integrity_anchor.val = certified.val;
+    if (request.current_integrity_anchor.valid)
+    {
+      request.current_integrity_anchor.safety_ratio = std::max(
+          certified.hpl / certified.hal, certified.vpl / certified.val);
+      request.current_integrity_anchor.safety_state =
+          request.current_integrity_anchor.safety_ratio < 1.0 ?
+          P4ForwardSafetyState::SAFE : P4ForwardSafetyState::UNSAFE;
+      request.current_integrity_anchor.reason = "current_integrity_anchor";
+    }
     request.limits = p4_forward_limits_;
     request.limits.max_path_length_ratio =
         bspline_optimizer_->getP4RiskAStarConfig().max_extra_path_ratio;
     request.limits.occupancy_resolution_m = occupancy->geometry.resolution_m;
+    if (occupancy->raw_occupied_voxel_centers)
+    {
+      if (!p4_raw_occupied_centers_ ||
+          p4_configuration_space_generation_ != occupancy->generation ||
+          p4_configuration_space_geometry_id_ !=
+              occupancy->geometry.geometry_id)
+      {
+        p4_raw_occupied_centers_ =
+            occupancy->raw_occupied_voxel_centers;
+        p4_configuration_space_generation_ = occupancy->generation;
+        p4_configuration_space_geometry_id_ =
+            occupancy->geometry.geometry_id;
+      }
+      request.raw_occupied_voxel_centers = p4_raw_occupied_centers_;
+    }
+    const auto start_occupancy = occupancy->diagnostic_query(start_pt);
+    if (std::isfinite(start_occupancy.inflation_m) &&
+        start_occupancy.inflation_m >= 0.0)
+      request.map_inflation_m = start_occupancy.inflation_m;
     request.snapshot_identity.geometry_id = occupancy->geometry.geometry_id;
     request.snapshot_identity.frame_id = occupancy->frame_id;
     request.snapshot_identity.alert_limit_policy_id =
@@ -1485,6 +1550,7 @@ namespace ego_planner
     if (header)
       csv << "schema_version,stage,stamp_s,decision_event_id,planning_attempt_id,"
              "action,trigger_reason,geometry_state,risk_support,safety_state,"
+             "selection_authority,formal_support,selection_applied,"
              "deferred_motion_mode,common_prefix_length_m,geometry_id,frame_id,alert_limit_policy_id,"
              "snapshot_config_hash,source_identity_hash,"
              "occupancy_generation,risk_generation,occupancy_stamp_s,risk_stamp_s,"
@@ -1506,10 +1572,14 @@ namespace ego_planner
              "first_failed_gnss_temporal_growth_v,"
              "first_failed_gnss_anchor_epoch_delta_s,"
              "first_failed_gnss_visible_count,first_failed_gnss_blocked_count,"
+             "first_failed_gnss_attenuated_count,"
              "first_failed_gnss_unknown_count,first_failed_gnss_used_count,"
              "first_failed_gnss_support_ray_length_m,"
              "first_failed_gnss_hard_occlusion,first_failed_floor_source_h,"
-             "first_failed_floor_source_v,first_failed_reason,"
+             "first_failed_floor_source_v,first_failed_known_hazard,"
+             "first_failed_unknown_coverage,first_failed_reason,"
+             "channel_search_attempts,duplicate_channel_paths,"
+             "channel_search_termination,configuration_space_prepare_ms,"
              "compute_latency_ms,trajectory_id,trajectory_start_ns,"
              "control_points_hash,reason\n";
     std::string selected_hash;
@@ -1528,6 +1598,9 @@ namespace ego_planner
         << p4ForwardGeometryStateName(decision.geometry_state) << ','
         << p4ForwardRiskSupportName(decision.risk_support) << ','
         << p4ForwardSafetyStateName(decision.safety_state) << ','
+        << p4ForwardSelectionAuthorityName(decision.selection_authority) << ','
+        << (decision.formal_support ? 1 : 0) << ','
+        << (!decision.selected_guide.empty() ? 1 : 0) << ','
         << p4ForwardDeferredMotionModeName(decision.deferred_motion_mode) << ','
         << decision.common_prefix_length_m << ','
         << decision.snapshot_identity.geometry_id << ','
@@ -1576,13 +1649,20 @@ namespace ego_planner
         << ',' << decision.first_failed_risk.gnss_anchor_epoch_delta_s
         << ',' << decision.first_failed_risk.gnss_visible_satellite_count
         << ',' << decision.first_failed_risk.gnss_blocked_satellite_count
+        << ',' << decision.first_failed_risk.gnss_attenuated_satellite_count
         << ',' << decision.first_failed_risk.gnss_unknown_satellite_count
         << ',' << decision.first_failed_risk.gnss_used_satellite_count
         << ',' << decision.first_failed_risk.gnss_support_ray_length_m
         << ',' << (decision.first_failed_risk.gnss_hard_occlusion ? 1 : 0)
         << ',' << decision.first_failed_risk.floor_source_h
         << ',' << decision.first_failed_risk.floor_source_v
+        << ',' << decision.first_failed_risk.known_gnss_degradation_ratio
+        << ',' << decision.first_failed_risk.unknown_coverage
         << ',' << decision.first_failed_risk.reason
+        << ',' << decision.channel_search_attempts
+        << ',' << decision.duplicate_channel_paths
+        << ',' << decision.channel_search_termination
+        << ',' << decision.configuration_space_prepare_ms
         << ',' << decision.compute_latency_ms << ',' << local_data_.traj_id_
         << ',' << local_data_.start_time_.nanoseconds() << ',' << control_hash
         << ',' << decision.reason << '\n';
@@ -1602,10 +1682,14 @@ namespace ego_planner
       return false;
     if (candidate_header)
       candidates_csv << "schema_version,decision_event_id,planning_attempt_id,"
-                        "candidate_id,selected,path_hash,length_m,geometry_state,"
+                        "candidate_id,channel_id,selected,path_hash,length_m,geometry_state,"
                         "risk_support,safety_state,risk_supported,"
                         "safety_gate_passed,fim_max_ratio,fim_integral,"
-                        "safety_max_ratio,point_count,path_xyz,reason\n";
+                        "safety_max_ratio,formal_support,known_hazard_evidence,"
+                        "known_hazard_max,known_hazard_integral,known_fim_max_ratio,"
+                        "unknown_coverage,advisory_common_sat_count,"
+                        "advisory_common_sat_hash,advisory_evidence_identity_consistent,"
+                        "point_count,path_xyz,reason\n";
     candidates_csv << std::setprecision(17);
     for (const auto &candidate : decision.candidates)
     {
@@ -1620,7 +1704,7 @@ namespace ego_planner
       }
       candidates_csv << decision.schema_version << ','
           << decision.decision_event_id << ',' << decision.planning_attempt_id
-          << ',' << candidate.candidate_id << ','
+          << ',' << candidate.candidate_id << ',' << candidate.channel_id << ','
           << (candidate.candidate_id == decision.selected_candidate_id ? 1 : 0)
           << ',' << candidate.path_hash << ',' << candidate.length_m << ','
           << p4ForwardGeometryStateName(candidate.geometry_state) << ','
@@ -1629,7 +1713,17 @@ namespace ego_planner
           << (candidate.risk_supported ? 1 : 0) << ','
           << (candidate.safety_gate_passed ? 1 : 0) << ','
           << candidate.fim_max_ratio << ',' << candidate.fim_integral << ','
-          << candidate.safety_max_ratio << ',' << candidate.path.size() << ','
+          << candidate.safety_max_ratio << ','
+          << (candidate.formal_support ? 1 : 0) << ','
+          << (candidate.known_hazard_evidence ? 1 : 0) << ','
+          << candidate.known_hazard_max << ','
+          << candidate.known_hazard_integral << ','
+          << candidate.known_fim_max_ratio << ','
+          << candidate.unknown_coverage << ','
+          << candidate.advisory_common_known_satellite_count << ','
+          << candidate.advisory_common_satellite_hash << ','
+          << (candidate.advisory_evidence_identity_consistent ? 1 : 0) << ','
+          << candidate.path.size() << ','
           << points.str() << ',' << candidate.reason << '\n';
     }
     candidates_csv.flush();
@@ -1665,7 +1759,7 @@ namespace ego_planner
     const auto &config = bspline_optimizer_->getP4RiskAStarConfig();
     if (!config.enable_risk_aware_astar)
       return true;
-    // v2 deferred motion deliberately has no selected candidate lineage.
+    // Deferred motion deliberately has no selected candidate lineage.
     // It may still publish a native-EGO/common-prefix trajectory (and P5 may
     // independently admit or reject it), so the absence of selected-route
     // lineage is "not applicable", not a publication failure.
@@ -1682,6 +1776,8 @@ namespace ego_planner
       return false;
     const bool selected_route =
         (last_p4_forward_decision_.action == P4ForwardAction::RISK_SELECTED ||
+         last_p4_forward_decision_.action ==
+             P4ForwardAction::ADVISORY_SELECTED ||
          last_p4_forward_decision_.action ==
              P4ForwardAction::CONTINUE_NOMINAL) &&
         last_p4_forward_decision_.selected_guide.size() >= 2;
@@ -1731,8 +1827,8 @@ namespace ego_planner
         const Eigen::Vector3d point =
             local_data_.position_traj_.evaluateDeBoorT(time);
         const auto support = occupancy->diagnostic_query(point);
-        if (!support.available || !support.observed ||
-            support.state != GridMapObservationState::OBSERVED_FREE ||
+        if (!support.available ||
+            support.state == GridMapObservationState::OCCUPIED ||
             support.raw_occupied || support.inflated_occupied ||
             distanceToPolyline(
                 point, selected_route ?
@@ -1982,9 +2078,18 @@ namespace ego_planner
       else if (last_p4_forward_decision_.action ==
                    P4ForwardAction::RISK_SELECTED ||
                last_p4_forward_decision_.action ==
+                   P4ForwardAction::ADVISORY_SELECTED ||
+               last_p4_forward_decision_.action ==
                    P4ForwardAction::CONTINUE_NOMINAL)
       {
         p4_forward_seed = last_p4_forward_decision_.selected_guide;
+        if (last_p4_forward_decision_.action ==
+            P4ForwardAction::ADVISORY_SELECTED)
+        {
+          planning_max_vel = std::min(
+              planning_max_vel,
+              last_p4_forward_decision_.speed_cap_mps);
+        }
       }
       else
       {

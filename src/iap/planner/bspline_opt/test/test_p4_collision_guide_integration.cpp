@@ -910,7 +910,7 @@ TEST(P4CollisionGuideIntegration,
 }
 
 TEST(P4CollisionGuideIntegration,
-  ForwardGuideRefinementRejectsFrozenUnknownAndClearsQueryOnFailure)
+  ForwardGuideRefinementTreatsFrozenUnknownWithoutHitsAsGeometryClear)
 {
   const auto snapshot = makeSnapshot();
   auto map = std::make_shared<GridMap>();
@@ -925,12 +925,12 @@ TEST(P4CollisionGuideIntegration,
     p4_collision_guide_fixture::end()};
   std::vector<Eigen::Vector3d> refined;
 
-  EXPECT_FALSE(optimizer->refineP4ForwardGuide(
+  EXPECT_TRUE(optimizer->refineP4ForwardGuide(
       coarse, unknown_epoch->diagnostic_query, 0.25, 100.0, &refined));
-  EXPECT_TRUE(refined.empty());
+  EXPECT_GE(refined.size(), 2u);
   EXPECT_TRUE(optimizer->a_star_->hasRiskSnapshot());
-  // A subsequent observed epoch must succeed, proving that the private
-  // fail-closed query from the first attempt cannot leak into later work.
+  // A subsequent observed epoch also succeeds; observation status does not
+  // alter the hit-only geometry result.
   GridMapTestAccess::configureGuideFixture(map.get(), false);
   const auto observed_epoch = map->captureFrozenOccupancyEpoch();
   ASSERT_NE(observed_epoch, nullptr);

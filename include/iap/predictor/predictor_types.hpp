@@ -405,6 +405,18 @@ struct ForwardRiskPointResult {
   double gnss_support_ray_length_m =
       std::numeric_limits<double>::quiet_NaN();
   bool gnss_hard_occlusion = false;
+  // Online evidence retained even when the common formal satellite set is
+  // insufficient. It is diagnostic/advisory only and never changes UNKNOWN
+  // into SAFE.
+  int gnss_visible_satellite_count = 0;
+  int gnss_blocked_satellite_count = 0;
+  int gnss_attenuated_satellite_count = 0;
+  int gnss_unknown_satellite_count = 0;
+  int gnss_known_satellite_count = 0;
+  bool known_hazard_evidence = false;
+  double known_gnss_degradation_ratio = 0.0;
+  double known_fim_ratio = std::numeric_limits<double>::quiet_NaN();
+  double unknown_coverage = 1.0;
 };
 
 struct ForwardRiskBatchResult {

@@ -651,6 +651,55 @@ class TestRunnerLifecycle(unittest.TestCase):
 
 
 class TestStageAnalyzer(unittest.TestCase):
+    def test_advisory_v3_is_not_counted_as_formal_risk_selection(self):
+        advisory = {
+            "schema_version": "p4_forward_route_decision_v3",
+            "stage": "forward_decision",
+            "decision_event_id": "901",
+            "action": "ADVISORY_SELECTED",
+            "selection_authority": "ADVISORY_NON_CERTIFIED",
+            "formal_support": "0",
+            "selection_applied": "1",
+            "selected_candidate_id": "2",
+            "candidate_count": "2",
+            "geometry_id": "planning-lattice-v2",
+            "alert_limit_policy_id": "fixed_hal20_val40_v1",
+            "occupancy_generation": "3",
+            "risk_generation": "5",
+        }
+
+        self.assertEqual(MODULE._selected_decisions([advisory]), [])
+
+    def test_v3_risk_selected_requires_formal_authority_and_support(self):
+        row = {
+            "schema_version": "p4_forward_route_decision_v3",
+            "stage": "forward_decision",
+            "action": "RISK_SELECTED",
+            "selection_authority": "ADVISORY_NON_CERTIFIED",
+            "formal_support": "0",
+            "selected_candidate_id": "2",
+            "candidate_count": "2",
+            "geometry_id": "planning-lattice-v2",
+            "alert_limit_policy_id": "fixed_hal20_val40_v1",
+            "occupancy_generation": "3",
+            "risk_generation": "5",
+        }
+        self.assertEqual(MODULE._selected_decisions([row]), [])
+        row["selection_authority"] = "FORMAL"
+        row["formal_support"] = "1"
+        self.assertEqual(MODULE._selected_decisions([row]), [row])
+
+    def test_v3_forward_timing_missing_fails_closed(self):
+        result = MODULE.analyze_stage_records(
+            "p4", [], [{
+                "schema_version": "p4_forward_route_decision_v3",
+                "stage": "forward_decision",
+                "action": "DEFER_RISK_SELECTION",
+            }], [], [], [], [])
+        self.assertIn("p4_forward_timing_missing", result["failures"])
+        self.assertIn(
+            "p4_configuration_space_timing_missing", result["failures"])
+
     @staticmethod
     def forest_generation(low_multiplier=0.8):
         return {

@@ -80,6 +80,10 @@ struct P0OccupancyEpoch {
   iap::RiskGridMap::OccupancyDiagnosticQuery diagnostic_query;
   std::shared_ptr<const iap::LocalOccupancyGrid> los_owner;
   std::shared_ptr<const P0RawOccupancyIdentity> raw_identity;
+  // Exact immutable raw-hit centers captured by the GridMap epoch. Consumers
+  // reuse this vector instead of rebuilding it on the planner callback path.
+  std::shared_ptr<const std::vector<Eigen::Vector3d>>
+      raw_occupied_voxel_centers;
   iap::PlanningLatticeGeometry geometry;
   SourceOwner source_owner;
   LiveSourceOwner live_source_owner;
