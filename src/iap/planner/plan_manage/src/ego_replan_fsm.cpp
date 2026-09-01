@@ -14,6 +14,14 @@ namespace ego_planner
   {
     constexpr int kP5FinalGateGlobalTrajTrialLimit = 1;
     constexpr int kDefaultGlobalTrajTrialLimit = 10;
+
+    bool p4UsesDeferredExecution(const P4ForwardDecision & decision)
+    {
+      return decision.action == P4ForwardAction::OBSERVE_MORE ||
+             (decision.action == P4ForwardAction::DEFER_RISK_SELECTION &&
+              decision.deferred_motion_mode !=
+                  P4ForwardDeferredMotionMode::NATIVE_EGO);
+    }
   }
 
   void EGOReplanFSM::init(rclcpp::Node::SharedPtr &node)
@@ -582,8 +590,9 @@ namespace ego_planner
           if (success)
           {
             changeFSMExecState(
-                planner_manager_->lastP4ForwardDecision().action ==
-                    P4ForwardAction::OBSERVE_MORE ? OBSERVE_MORE : EXEC_TRAJ,
+                p4UsesDeferredExecution(
+                    planner_manager_->lastP4ForwardDecision()) ?
+                    OBSERVE_MORE : EXEC_TRAJ,
                 "FSM");
 
             publishSwarmTrajs(true);
@@ -595,8 +604,8 @@ namespace ego_planner
             {
               RCLCPP_ERROR(node_->get_logger(), "Failed to generate the first trajectory!!!");
             }
-            if (planner_manager_->lastP4ForwardDecision().action ==
-                P4ForwardAction::OBSERVE_MORE)
+            if (p4UsesDeferredExecution(
+                planner_manager_->lastP4ForwardDecision()))
             {
               callEmergencyStop(odom_pos_);
               changeFSMExecState(OBSERVE_MORE, "P4_FORWARD");
@@ -621,8 +630,9 @@ namespace ego_planner
       if (success)
       {
         changeFSMExecState(
-            planner_manager_->lastP4ForwardDecision().action ==
-                P4ForwardAction::OBSERVE_MORE ? OBSERVE_MORE : EXEC_TRAJ,
+            p4UsesDeferredExecution(
+                planner_manager_->lastP4ForwardDecision()) ?
+                OBSERVE_MORE : EXEC_TRAJ,
             "FSM");
         flag_escape_emergency_ = true;
         publishSwarmTrajs(false);
@@ -633,8 +643,8 @@ namespace ego_planner
         {
           break;
         }
-        else if (planner_manager_->lastP4ForwardDecision().action ==
-                 P4ForwardAction::OBSERVE_MORE)
+        else if (p4UsesDeferredExecution(
+            planner_manager_->lastP4ForwardDecision()))
         {
           callEmergencyStop(odom_pos_);
           changeFSMExecState(OBSERVE_MORE, "P4_FORWARD");
@@ -659,8 +669,9 @@ namespace ego_planner
       if (planFromCurrentTraj(1))
       {
         changeFSMExecState(
-            planner_manager_->lastP4ForwardDecision().action ==
-                P4ForwardAction::OBSERVE_MORE ? OBSERVE_MORE : EXEC_TRAJ,
+            p4UsesDeferredExecution(
+                planner_manager_->lastP4ForwardDecision()) ?
+                OBSERVE_MORE : EXEC_TRAJ,
             "FSM");
         publishSwarmTrajs(false);
       }
@@ -670,8 +681,8 @@ namespace ego_planner
         {
           break;
         }
-        else if (planner_manager_->lastP4ForwardDecision().action ==
-                 P4ForwardAction::OBSERVE_MORE)
+        else if (p4UsesDeferredExecution(
+            planner_manager_->lastP4ForwardDecision()))
         {
           callEmergencyStop(odom_pos_);
           changeFSMExecState(OBSERVE_MORE, "P4_FORWARD");
@@ -783,8 +794,8 @@ namespace ego_planner
       if (planned)
       {
         publishSwarmTrajs(false);
-        if (planner_manager_->lastP4ForwardDecision().action !=
-            P4ForwardAction::OBSERVE_MORE)
+        if (!p4UsesDeferredExecution(
+            planner_manager_->lastP4ForwardDecision()))
           changeFSMExecState(EXEC_TRAJ, "P4_FORWARD");
       }
       else

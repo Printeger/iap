@@ -1036,8 +1036,9 @@ DENSE_FOUR_FORK_FOREST_ONLINE_PRESET = {
     "grid_map/origin_y": "-11.0",
     "grid_map/origin_z": "0.0",
     # Restore the original EGO exploration contract for base rebound/A*: an
-    # unobserved voxel is traversable unless risk-aware P4 is enabled. P0 keeps
-    # reporting UNKNOWN, and P4 still requires frozen observed-free support.
+    # unobserved voxel is geometrically traversable. P0 still reports missing
+    # risk evidence as UNKNOWN, and P4 defers formal risk selection until that
+    # independent support is complete.
     "grid_map/unknown_as_occupied": "false",
     "manager/planning_horizon": "8.0",
     "fsm/planning_horizon": "8.0",
@@ -1849,6 +1850,15 @@ ARG_DEFAULTS = [
     ("corridor_map_resolution_m", "0.1"),
     ("corridor_map_publish_rate_hz", "2.0"),
     ("lidar_sensing_rate_hz", "10.0"),
+    ("lidar_renderer_mode", "legacy_radius_crop_v1"),
+    ("lidar_horizontal_samples", "512"),
+    ("lidar_vertical_samples", "40"),
+    ("lidar_horizontal_fov_deg", "360.0"),
+    ("lidar_vertical_min_deg", "-7.0"),
+    ("lidar_vertical_max_deg", "52.0"),
+    ("lidar_min_range_m", "0.1"),
+    ("lidar_max_range_m", "10.0"),
+    ("lidar_world_voxel_resolution_m", "0.1"),
     ("forest_size_x_m", "20.0"),
     ("forest_size_y_m", "20.0"),
     ("tree_density_lower_left_per_m2", "0.5"),
@@ -3896,6 +3906,24 @@ def _launch_setup(context):
             0.0, float(LaunchConfiguration("planner_start_delay_s").perform(context))
         ),
         "lidar_start_delay_s": lidar_start_delay_s,
+        "lidar_renderer": {
+            "mode": LaunchConfiguration("lidar_renderer_mode").perform(context),
+            "horizontal_samples": _param_int(context, "lidar_horizontal_samples"),
+            "vertical_samples": _param_int(context, "lidar_vertical_samples"),
+            "ray_count": (
+                _param_int(context, "lidar_horizontal_samples")
+                * _param_int(context, "lidar_vertical_samples")
+            ),
+            "horizontal_fov_deg": _param_float(
+                context, "lidar_horizontal_fov_deg"),
+            "vertical_min_deg": _param_float(context, "lidar_vertical_min_deg"),
+            "vertical_max_deg": _param_float(context, "lidar_vertical_max_deg"),
+            "min_range_m": _param_float(context, "lidar_min_range_m"),
+            "max_range_m": _param_float(context, "lidar_max_range_m"),
+            "world_voxel_resolution_m": _param_float(
+                context, "lidar_world_voxel_resolution_m"),
+            "output_semantics": "hit_only_first_return_pointcloud2",
+        },
         "odometry_acc_scale": _param_float(context, "odometry_acc_scale"),
         "planner_executor_thread_count": int(LaunchConfiguration(
             "planner_executor_thread_count").perform(context)),
@@ -4341,6 +4369,24 @@ def _launch_setup(context):
             {"sensing_horizon": 10.0},
             {"sensing_rate": _param_float(context, "lidar_sensing_rate_hz")},
             {"estimation_rate": 15.0},
+            {"renderer_mode": LaunchConfiguration(
+                "lidar_renderer_mode").perform(context)},
+            {"lidar.horizontal_samples": _param_int(
+                context, "lidar_horizontal_samples")},
+            {"lidar.vertical_samples": _param_int(
+                context, "lidar_vertical_samples")},
+            {"lidar.horizontal_fov_deg": _param_float(
+                context, "lidar_horizontal_fov_deg")},
+            {"lidar.vertical_min_deg": _param_float(
+                context, "lidar_vertical_min_deg")},
+            {"lidar.vertical_max_deg": _param_float(
+                context, "lidar_vertical_max_deg")},
+            {"lidar.min_range_m": _param_float(
+                context, "lidar_min_range_m")},
+            {"lidar.max_range_m": _param_float(
+                context, "lidar_max_range_m")},
+            {"lidar.world_voxel_resolution_m": _param_float(
+                context, "lidar_world_voxel_resolution_m")},
             {"map/x_size": map_size[0]},
             {"map/y_size": map_size[1]},
             {"map/z_size": map_size[2]},

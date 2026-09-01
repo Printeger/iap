@@ -35,6 +35,7 @@ _set_default("odometry_acc_scale", "1.0")
 _set_default("planner_start_delay_s", "3.0")
 _set_default("rviz_config", "config/sim_demo11/test_icra.rviz")
 _set_default("planner_occupancy_cloud_topic", "/sim/drone_0/lidar")
+_set_default("lidar_renderer_mode", "spherical_first_hit_v1")
 
 _BASE.SCENARIO_PRESETS["icra072_p4_selection_trigger_v1"] = {
     **_BASE.SCENARIO_PRESETS["icra072_p4_selection_trigger_v1"],
@@ -46,7 +47,9 @@ _BASE.EXPERIMENT_PRESETS["icra_p0_p4_v2_p5_dev"] = {
     "grid_map/independent_cloud_min_interval_s": "0.5",
     "grid_map/independent_cloud_clock_guard_s": "0.5",
     "p0.refresh_start_delay_s": "0.05",
-    "p0.fit_grid_to_map_cloud": "true",
+    "p0.online_mapping_mode": "true",
+    "p0.fit_grid_to_map_cloud": "false",
+    "p0.map_topic": "",
     "planner_executor_thread_count": "6",
     "planner_occupancy_cloud_topic": "/sim/drone_0/lidar",
     "safety_viz.enable_p4_viz": "true",

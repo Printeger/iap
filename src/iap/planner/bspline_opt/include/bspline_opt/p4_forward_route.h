@@ -15,22 +15,38 @@ namespace ego_planner
 {
 
   inline constexpr char kP4ForwardDecisionSchema[] =
-    "p4_forward_route_decision_v1";
+    "p4_forward_route_decision_v2";
 
-  enum class P4ForwardOccupancyState
+  enum class P4ForwardGeometryState
   {
-    UNKNOWN = 0,
-    OBSERVED_FREE,
+    CLEAR = 0,
+    // Source compatibility for archived fixtures. Both names deliberately
+    // carry CLEAR geometry semantics in v2.
+    OBSERVED_FREE = CLEAR,
+    UNKNOWN = CLEAR,
     OCCUPIED,
+    OUT_OF_BOUNDS,
   };
+
+  using P4ForwardOccupancyState = P4ForwardGeometryState;
 
   enum class P4ForwardAction
   {
     CONTINUE_NOMINAL = 0,
     RISK_SELECTED,
+    DEFER_RISK_SELECTION,
+    // Retained so archived v1 captures remain readable. New v2 decisions use
+    // DEFER_RISK_SELECTION with an explicit deferred motion mode.
     OBSERVE_MORE,
     REPLAN_REQUIRED,
     NO_SAFE_ROUTE,
+  };
+
+  enum class P4ForwardDeferredMotionMode
+  {
+    NATIVE_EGO = 0,
+    COMMON_PREFIX,
+    HOLD,
   };
 
   enum class P4ForwardTriggerReason
@@ -54,6 +70,12 @@ namespace ego_planner
     UNKNOWN,
   };
 
+  enum class P4ForwardRiskSupport
+  {
+    COMPLETE = 0,
+    INCOMPLETE,
+  };
+
   enum class P4ForwardRankingState
   {
     COMPARABLE = 0,
@@ -62,6 +84,11 @@ namespace ego_planner
 
   const char * p4ForwardActionName(P4ForwardAction action);
   const char * p4ForwardTriggerReasonName(P4ForwardTriggerReason reason);
+  const char * p4ForwardGeometryStateName(P4ForwardGeometryState state);
+  const char * p4ForwardRiskSupportName(P4ForwardRiskSupport support);
+  const char * p4ForwardSafetyStateName(P4ForwardSafetyState state);
+  const char * p4ForwardDeferredMotionModeName(
+    P4ForwardDeferredMotionMode mode);
 
   struct P4ForwardSnapshotIdentity
   {
@@ -161,7 +188,10 @@ namespace ego_planner
     std::string path_hash;
     double length_m = 0.0;
     bool occupancy_supported = false;
+    P4ForwardGeometryState geometry_state = P4ForwardGeometryState::CLEAR;
     bool risk_supported = false;
+    P4ForwardRiskSupport risk_support = P4ForwardRiskSupport::INCOMPLETE;
+    P4ForwardSafetyState safety_state = P4ForwardSafetyState::UNKNOWN;
     bool safety_gate_passed = false;
     double fim_max_ratio = std::numeric_limits < double > ::quiet_NaN();
     double fim_integral = std::numeric_limits < double > ::quiet_NaN();
@@ -185,7 +215,9 @@ namespace ego_planner
     Eigen::Vector3d map_extent = Eigen::Vector3d::Zero();
     double query_time_s = 0.0;
     P4ForwardLimits limits;
-    std::function < P4ForwardOccupancyState(const Eigen::Vector3d &) > occupancy;
+    std::function < P4ForwardGeometryState(const Eigen::Vector3d &) > geometry;
+    // Read-only compatibility for v1 fixtures. Production v2 binds geometry.
+    std::function < P4ForwardGeometryState(const Eigen::Vector3d &) > occupancy;
     std::function < P4ForwardRiskSample(const Eigen::Vector3d &, double) > risk;
     std::function < bool(
       const std::vector < P4ForwardRiskQuery > &,
@@ -199,6 +231,11 @@ namespace ego_planner
       std::vector < Eigen::Vector3d > *) > refine;
 
     bool valid(std::string * reason = nullptr) const;
+    P4ForwardGeometryState queryGeometry(
+      const Eigen::Vector3d & point) const
+    {
+      return geometry ? geometry(point) : occupancy(point);
+    }
   };
 
   struct P4ForwardDecision
@@ -219,8 +256,17 @@ namespace ego_planner
     std::numeric_limits < double > ::quiet_NaN());
     std::vector < P4ForwardCandidate > raw_candidates;
     std::vector < P4ForwardCandidate > candidates;
+    P4ForwardGeometryState geometry_state = P4ForwardGeometryState::CLEAR;
+    P4ForwardRiskSupport risk_support = P4ForwardRiskSupport::INCOMPLETE;
+    P4ForwardSafetyState safety_state = P4ForwardSafetyState::UNKNOWN;
     uint64_t selected_candidate_id = 0;
     std::vector < Eigen::Vector3d > selected_guide;
+    P4ForwardDeferredMotionMode deferred_motion_mode =
+      P4ForwardDeferredMotionMode::HOLD;
+    std::vector < Eigen::Vector3d > deferred_trajectory;
+    double common_prefix_length_m = 0.0;
+    // Archived v1 readers use this field. New v2 production decisions leave
+    // it empty and publish deferred_trajectory instead.
     std::vector < Eigen::Vector3d > observe_more_trajectory;
     double stopping_distance_m = 0.0;
     double decision_horizon_m = 0.0;

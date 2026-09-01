@@ -3,6 +3,24 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(p4-mid360-ego-first-hit-v2): IAP-RQ-320 / IAP-RQ-400 /
+  IAP-RQ-410 — split P4 geometry admission from risk evidence in
+  `p4_forward_route_decision_v2`. Frozen EGO occupancy now blocks forward
+  topology, guide sweeps, refinement and native rebound only for actual
+  raw/inflated hits or map bounds; an unobserved voxel is geometrically clear,
+  while incomplete GNSS/LiDAR/FIM support independently prevents
+  `RISK_SELECTED`. Deferred decisions use native EGO for a single channel, a
+  geometry-common prefix before a multi-channel split, or HOLD when known
+  unsafe; they never claim selected-route lineage. Add a deterministic regular
+  spherical first-hit LiDAR renderer for every `test_icra` preset (512×40 rays,
+  360°, -7°..52°, 0.1..10 m, 0.1 m frozen-world DDA), publish only the first
+  hit per ray, and treat no-return as a legal empty hit cloud rather than a
+  fabricated PointCloud2 field. Empty frames refresh the EGO rolling map.
+  Planner/P0/P4/P5 remain isolated from `/map_generator/global_cloud`; only
+  sensor simulators may consume world truth. The legacy radius crop remains an
+  explicit non-ICRA/debug mode. This aligns development behavior with
+  hit-only MID-360/EGO engineering semantics and is not a safety proof.
+
 - fix(p0-anchored-gnss-zero-unknown-forward): IAP-RQ-320 / IAP-RQ-400 /
   IAP-RQ-410 — anchor P0 GNSS protection levels to the same-epoch certified
   current GNSS ARAIM `gnss_hpl/gnss_vpl`, adding only non-negative spatial

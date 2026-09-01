@@ -144,7 +144,22 @@ TEST(P4ForwardRoute, OpenObservedSpaceContinuesAsSingleChannel)
             straightRequest().snapshot_identity.canonical());
 }
 
-TEST(P4ForwardRoute, MissingRiskSupportObservesMoreWithoutCrossingUnknown)
+TEST(P4ForwardRoute, UnobservedSpaceWithoutHitsRemainsGeometryClear)
+{
+  auto request = straightRequest();
+  request.occupancy = [](const Eigen::Vector3d &) {
+      return P4ForwardOccupancyState::UNKNOWN;
+    };
+
+  const auto decision = P4ForwardRoutePlanner().decide(request);
+
+  EXPECT_EQ(decision.action, P4ForwardAction::CONTINUE_NOMINAL)
+    << decision.reason;
+  ASSERT_EQ(decision.candidates.size(), 1u);
+  EXPECT_TRUE(decision.candidates.front().occupancy_supported);
+}
+
+TEST(P4ForwardRoute, MissingRiskSupportDefersSelectionAtLimitedSpeed)
 {
   auto request = straightRequest();
   request.risk = [](const Eigen::Vector3d & point, double) {
@@ -162,21 +177,18 @@ TEST(P4ForwardRoute, MissingRiskSupportObservesMoreWithoutCrossingUnknown)
   bindTestRiskBatch(&request);
 
   const auto decision = P4ForwardRoutePlanner().decide(request);
-  EXPECT_EQ(decision.action, P4ForwardAction::OBSERVE_MORE);
+  EXPECT_EQ(decision.action, P4ForwardAction::DEFER_RISK_SELECTION);
   EXPECT_EQ(decision.trigger_reason,
             P4ForwardTriggerReason::SUPPORT_INCOMPLETE);
-  for (const auto & point : decision.observe_more_trajectory) {
-    EXPECT_LE(point.x(), 2.0 + 1.0e-9);
-  }
-  if (!decision.observe_more_trajectory.empty()) {
-    EXPECT_LE((decision.observe_more_trajectory.back() - request.position).norm(),
-      request.limits.max_creep_progress_m + 1.0e-9);
-  }
+  EXPECT_EQ(decision.deferred_motion_mode,
+            ego_planner::P4ForwardDeferredMotionMode::NATIVE_EGO);
+  EXPECT_EQ(decision.selected_candidate_id, 0u);
+  EXPECT_TRUE(decision.selected_guide.empty());
   EXPECT_LE(decision.speed_cap_mps,
     request.limits.max_observe_speed_mps + 1.0e-9);
 }
 
-TEST(P4ForwardRoute, MissingIndividualSourceSupportObservesMore)
+TEST(P4ForwardRoute, MissingIndividualSourceSupportDefersSelection)
 {
   auto request = straightRequest();
   request.risk = [](const Eigen::Vector3d &, double) {
@@ -194,7 +206,7 @@ TEST(P4ForwardRoute, MissingIndividualSourceSupportObservesMore)
   bindTestRiskBatch(&request);
 
   const auto decision = P4ForwardRoutePlanner().decide(request);
-  EXPECT_EQ(decision.action, P4ForwardAction::OBSERVE_MORE);
+  EXPECT_EQ(decision.action, P4ForwardAction::DEFER_RISK_SELECTION);
   EXPECT_EQ(decision.trigger_reason,
             P4ForwardTriggerReason::SUPPORT_INCOMPLETE);
 }
@@ -273,11 +285,10 @@ TEST(P4ForwardRoute, WorkerShutdownIsBoundedByTheComputeDeadline)
   EXPECT_LT(elapsed_ms, 100.0);
 }
 
-TEST(P4ForwardRoute, ObserveMoreEndpointRetainsZeroSpeedStoppingReserve)
+TEST(P4ForwardRoute, DeferredNativeEgoMotionRetainsConfiguredSpeedCap)
 {
   auto request = straightRequest();
-  request.limits.vehicle_radius_m = 0.35;
-  request.limits.safety_margin_m = 0.5;
+  request.limits.compute_budget_ms = 150.0;
   request.occupancy = [](const Eigen::Vector3d & point) {
       if (std::abs(point.y()) > 2.5 || point.z() < 0.0 || point.z() > 2.0) {
         return P4ForwardOccupancyState::OCCUPIED;
@@ -298,13 +309,77 @@ TEST(P4ForwardRoute, ObserveMoreEndpointRetainsZeroSpeedStoppingReserve)
     };
   bindTestRiskBatch(&request);
   const auto decision = P4ForwardRoutePlanner().decide(request);
-  ASSERT_EQ(decision.action, P4ForwardAction::OBSERVE_MORE)
+  ASSERT_EQ(decision.action, P4ForwardAction::DEFER_RISK_SELECTION)
     << decision.reason << " latency_ms=" << decision.compute_latency_ms;
-  ASSERT_FALSE(decision.observe_more_trajectory.empty());
-  EXPECT_LE(decision.observe_more_trajectory.back().x(), 2.15 + 1.0e-9);
-  EXPECT_GE(decision.certified_free_distance_m -
-            ego_planner::p4StoppingDistance(0.0, request.limits),
-    (decision.observe_more_trajectory.back() - request.position).norm());
+  EXPECT_EQ(decision.deferred_motion_mode,
+            ego_planner::P4ForwardDeferredMotionMode::NATIVE_EGO);
+  EXPECT_LE(decision.speed_cap_mps, request.limits.max_observe_speed_mps);
+}
+
+TEST(P4ForwardRoute, KnownUnsafeRiskPreventsDeferredNativeMotion)
+{
+  auto request = straightRequest();
+  request.risk = [](const Eigen::Vector3d & point, double) {
+      P4ForwardRiskSample sample;
+      sample.valid = point.x() <= 3.0;
+      sample.stale = false;
+      sample.gnss_supported = sample.valid;
+      sample.lidar_supported = sample.valid;
+      sample.fim_supported = sample.valid;
+      sample.safety_ratio = sample.valid ?
+        (point.x() >= 1.5 ? 1.1 : 0.4) : NAN;
+      sample.fim_ratio = sample.valid ? 0.3 : NAN;
+      sample.reason = sample.valid ? "ok" : "GNSS_SKY_UNKNOWN";
+      return sample;
+    };
+  bindTestRiskBatch(&request);
+
+  const auto decision = P4ForwardRoutePlanner().decide(request);
+
+  ASSERT_EQ(decision.action, P4ForwardAction::DEFER_RISK_SELECTION);
+  EXPECT_EQ(decision.risk_support,
+            ego_planner::P4ForwardRiskSupport::INCOMPLETE);
+  EXPECT_EQ(decision.safety_state, P4ForwardSafetyState::UNSAFE);
+  EXPECT_EQ(decision.deferred_motion_mode,
+            ego_planner::P4ForwardDeferredMotionMode::HOLD);
+  EXPECT_DOUBLE_EQ(decision.speed_cap_mps, 0.0);
+}
+
+TEST(P4ForwardRoute, IncompleteSupportCannotMaskAllRoutesUnsafe)
+{
+  auto request = straightRequest();
+  request.limits.vehicle_radius_m = 0.3;
+  request.limits.compute_budget_ms = 500.0;
+  request.occupancy = [](const Eigen::Vector3d & point) {
+      return std::abs(point.y()) <= 0.6 && point.z() >= 0.4 &&
+             point.z() <= 1.6 ? P4ForwardOccupancyState::UNKNOWN :
+             P4ForwardOccupancyState::OCCUPIED;
+    };
+  request.risk = [](const Eigen::Vector3d & point, double) {
+      P4ForwardRiskSample sample;
+      const bool incomplete = point.y() > 0.1;
+      sample.valid = !incomplete;
+      sample.stale = false;
+      sample.gnss_supported = !incomplete;
+      sample.lidar_supported = !incomplete;
+      sample.fim_supported = !incomplete;
+      sample.safety_ratio = incomplete ? NAN :
+        (point.y() < -0.1 ? 1.1 : 0.4);
+      sample.fim_ratio = incomplete ? NAN : 0.3;
+      sample.reason = incomplete ? "GNSS_SKY_UNKNOWN" : "ok";
+      return sample;
+    };
+  bindTestRiskBatch(&request);
+
+  const auto decision = P4ForwardRoutePlanner().decide(request);
+
+  ASSERT_EQ(decision.action, P4ForwardAction::DEFER_RISK_SELECTION)
+    << decision.reason << " candidates=" << decision.candidates.size();
+  EXPECT_EQ(decision.risk_support,
+            ego_planner::P4ForwardRiskSupport::INCOMPLETE);
+  EXPECT_EQ(decision.safety_state, P4ForwardSafetyState::UNSAFE);
+  EXPECT_EQ(decision.deferred_motion_mode,
+            ego_planner::P4ForwardDeferredMotionMode::HOLD);
 }
 
 TEST(P4ForwardRoute, RiskProfileUsesAlongPathArrivalTime)
@@ -420,11 +495,11 @@ TEST(P4ForwardRoute, RiskBatchComparesAllChannelsWithOneCertificateCall)
 
   ASSERT_EQ(decision.action, P4ForwardAction::RISK_SELECTED)
     << decision.reason;
-  EXPECT_GE(batch_calls, 2);
+  EXPECT_EQ(batch_calls, 1);
   EXPECT_GE(max_group_count, 2u);
 }
 
-TEST(P4ForwardRoute, RiskBatchObserveMoreNeverCrossesUnknownSupport)
+TEST(P4ForwardRoute, RiskBatchIncompleteDefersWithoutRiskSelection)
 {
   auto request = straightRequest();
   request.risk_batch = [](const std::vector<P4ForwardRiskQuery> & queries,
@@ -457,28 +532,15 @@ TEST(P4ForwardRoute, RiskBatchObserveMoreNeverCrossesUnknownSupport)
 
   const auto decision = P4ForwardRoutePlanner().decide(request);
 
-  ASSERT_EQ(decision.action, P4ForwardAction::OBSERVE_MORE)
+  ASSERT_EQ(decision.action, P4ForwardAction::DEFER_RISK_SELECTION)
     << decision.reason;
-  for (const auto & point : decision.observe_more_trajectory) {
-    EXPECT_LE(point.x(), 2.0 + 1.0e-9);
-  }
-  if (!decision.observe_more_trajectory.empty()) {
-    const double progress =
-      (decision.observe_more_trajectory.back() - request.position).norm();
-    EXPECT_GE(progress,
-      request.limits.min_creep_progress_m - 1.0e-9);
-    EXPECT_LE(progress,
-      request.limits.max_creep_progress_m + 1.0e-9);
-    EXPECT_GE(decision.certified_free_distance_m - progress + 1.0e-9,
-      ego_planner::p4StoppingDistance(
-        decision.speed_cap_mps, request.limits));
-  }
+  EXPECT_EQ(decision.selected_candidate_id, 0u);
+  EXPECT_TRUE(decision.selected_guide.empty());
   EXPECT_LE(decision.speed_cap_mps,
     request.limits.max_observe_speed_mps + 1.0e-9);
-  EXPECT_EQ(decision.first_failed_risk.reason, "GNSS_SKY_UNKNOWN");
 }
 
-TEST(P4ForwardRoute, ObserveMoreReportsOccupiedFirstFailure)
+TEST(P4ForwardRoute, KnownHitLimitsGeometryAnchor)
 {
   auto request = straightRequest();
   request.occupancy = [](const Eigen::Vector3d & point) {
@@ -488,13 +550,15 @@ TEST(P4ForwardRoute, ObserveMoreReportsOccupiedFirstFailure)
 
   const auto decision = P4ForwardRoutePlanner().decide(request);
 
-  EXPECT_EQ(decision.action, P4ForwardAction::OBSERVE_MORE);
-  EXPECT_EQ(decision.first_failed_risk.reason, "OCCUPIED");
-  EXPECT_EQ(decision.first_failed_risk.safety_state,
-    P4ForwardSafetyState::UNSAFE);
+  EXPECT_LE(decision.common_anchor.x(), 1.25 + 1.0e-9);
+  for (const auto & candidate : decision.candidates) {
+    for (const auto & point : candidate.path) {
+      EXPECT_LE(point.x(), 1.25 + 1.0e-9);
+    }
+  }
 }
 
-TEST(P4ForwardRoute, ObserveMoreReportsUnknownFirstFailure)
+TEST(P4ForwardRoute, UnobservedRegionDoesNotBecomeGeometryFailure)
 {
   auto request = straightRequest();
   request.occupancy = [](const Eigen::Vector3d & point) {
@@ -504,13 +568,11 @@ TEST(P4ForwardRoute, ObserveMoreReportsUnknownFirstFailure)
 
   const auto decision = P4ForwardRoutePlanner().decide(request);
 
-  EXPECT_EQ(decision.action, P4ForwardAction::OBSERVE_MORE);
-  EXPECT_EQ(decision.first_failed_risk.reason, "OCCUPANCY_UNKNOWN");
-  EXPECT_EQ(decision.first_failed_risk.safety_state,
-    P4ForwardSafetyState::UNKNOWN);
+  EXPECT_EQ(decision.action, P4ForwardAction::CONTINUE_NOMINAL);
+  EXPECT_GT(decision.common_anchor.x(), 1.25);
 }
 
-TEST(P4ForwardRoute, UnknownSeparatorCannotBeMergedAsFreeSpace)
+TEST(P4ForwardRoute, UnobservedRegionCannotCreateArtificialChannels)
 {
   auto request = straightRequest();
   request.occupancy = [](const Eigen::Vector3d & point) {
@@ -526,13 +588,44 @@ TEST(P4ForwardRoute, UnknownSeparatorCannotBeMergedAsFreeSpace)
     };
 
   const auto decision = P4ForwardRoutePlanner().decide(request);
-  EXPECT_EQ(decision.action, P4ForwardAction::RISK_SELECTED);
-  EXPECT_GE(decision.candidates.size(), 2u);
-  for (const auto & candidate : decision.candidates) {
-    for (const auto & point : candidate.path) {
-      EXPECT_FALSE(point.x() >= 2.0 && point.x() <= 4.0 &&
-                   std::abs(point.y()) <= 0.6);
-    }
+  EXPECT_EQ(decision.action, P4ForwardAction::CONTINUE_NOMINAL);
+  EXPECT_EQ(decision.candidates.size(), 1u);
+}
+
+TEST(P4ForwardRoute, MultipleChannelsWithIncompleteRiskOnlyExposeCommonPrefix)
+{
+  auto request = straightRequest();
+  request.occupancy = [](const Eigen::Vector3d & point) {
+      if (point.x() >= 2.0 && point.x() <= 4.0 &&
+        std::abs(point.y()) <= 0.6)
+      {
+        return P4ForwardOccupancyState::OCCUPIED;
+      }
+      if (std::abs(point.y()) > 2.5 || point.z() < 0.5 || point.z() > 1.5) {
+        return P4ForwardOccupancyState::OCCUPIED;
+      }
+      return P4ForwardOccupancyState::OBSERVED_FREE;
+    };
+  request.risk = [](const Eigen::Vector3d &, double) {
+      P4ForwardRiskSample sample;
+      sample.valid = false;
+      sample.stale = false;
+      sample.reason = "GNSS_SKY_UNKNOWN";
+      return sample;
+    };
+  bindTestRiskBatch(&request);
+
+  const auto decision = P4ForwardRoutePlanner().decide(request);
+
+  ASSERT_EQ(decision.action, P4ForwardAction::DEFER_RISK_SELECTION)
+    << decision.reason;
+  ASSERT_GE(decision.candidates.size(), 2u);
+  EXPECT_EQ(decision.deferred_motion_mode,
+            ego_planner::P4ForwardDeferredMotionMode::COMMON_PREFIX);
+  EXPECT_EQ(decision.selected_candidate_id, 0u);
+  EXPECT_TRUE(decision.selected_guide.empty());
+  for (const auto & point : decision.deferred_trajectory) {
+    EXPECT_LT(point.x(), 2.0);
   }
 }
 

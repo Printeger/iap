@@ -1220,13 +1220,10 @@ namespace ego_planner
     if (support.raw_occupied || support.inflated_occupied ||
         support.state == GridMapObservationState::OCCUPIED)
       return 1;
-    if (support.observed &&
-        support.state == GridMapObservationState::OBSERVED_FREE)
-      return 0;
-
-    // Base EGO may traverse unseen space, but risk-aware P4 requires complete
-    // observed-free support for the collision segment and its guide.
-    return 1;
+    // Geometry follows native EGO PointCloud2 semantics: only a hit (including
+    // its inflation) blocks motion. Observation completeness belongs to P0/P4
+    // risk support and must never be reinterpreted as an obstacle here.
+    return 0;
   }
 
   CollisionScanResult BsplineOptimizer::scanCollisionSegments(

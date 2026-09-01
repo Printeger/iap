@@ -73,6 +73,16 @@ class TestPlannerLaunchTest(unittest.TestCase):
         defaults = dict(MODULE.ARG_DEFAULTS)
         self.assertEqual(defaults["runtime_root_dir"], "")
         self.assertEqual(defaults["export_root_dir"], "")
+
+    def test_non_icra_launch_keeps_legacy_lidar_renderer_opt_in(self):
+        defaults = dict(MODULE.ARG_DEFAULTS)
+        self.assertEqual(defaults["lidar_renderer_mode"],
+                         "legacy_radius_crop_v1")
+        source = MODULE_PATH.read_text()
+        self.assertIn('"renderer_mode": LaunchConfiguration(', source)
+        self.assertIn('"lidar.horizontal_samples": _param_int(', source)
+        self.assertIn('"output_semantics": "hit_only_first_return_pointcloud2"',
+                      source)
         runtime, export = MODULE._resolve_run_roots(
             "sim_demo11", "p1_fork_formal", "p1_fork_fused_v1", 1234,
             runtime_root_dir="/work/runtime", export_root_dir="/work/exports",

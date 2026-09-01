@@ -161,6 +161,25 @@ struct GridMapTestAccess {
     return message;
   }
 
+  static sensor_msgs::msg::PointCloud2::SharedPtr emptyPointCloud(
+      const int32_t source_stamp_s) {
+    pcl::PointCloud<pcl::PointXYZ> cloud;
+    auto message = std::make_shared<sensor_msgs::msg::PointCloud2>();
+    pcl::toROSMsg(cloud, *message);
+    message->header.stamp.sec = source_stamp_s;
+    return message;
+  }
+
+  static void acceptEmptyPointCloud(GridMap* map,
+                                    const int32_t source_stamp_s) {
+    {
+      std::lock_guard<std::mutex> lock(map->occupancy_epoch_mutex_);
+      map->md_.has_odom_ = true;
+      map->md_.camera_pos_ = Eigen::Vector3d::Zero();
+    }
+    map->cloudCallback(emptyPointCloud(source_stamp_s));
+  }
+
   static void acceptPointCloudAt(
       GridMap* map, const int32_t source_stamp_s,
       const Eigen::Vector3d& point,
@@ -521,6 +540,28 @@ TEST(GridMapOccupancyEpochTest,
   EXPECT_FALSE(previous_without_return.observed);
   EXPECT_FALSE(previous_without_return.raw_occupied);
   EXPECT_EQ(previous_without_return.state, GridMapObservationState::UNKNOWN);
+}
+
+TEST(GridMapOccupancyEpochTest,
+     EmptyHitOnlyFrameClearsPreviousLocalObstacleAndAdvancesEpoch) {
+  GridMap map;
+  GridMapTestAccess::configureDepthFusion(&map);
+  const Eigen::Vector3d previous_hit(0.0, 0.0, 1.0);
+  GridMapTestAccess::acceptPointCloudAt(&map, 222, previous_hit);
+  const auto first = map.captureFrozenOccupancyEpoch();
+  ASSERT_NE(first, nullptr);
+  ASSERT_EQ(first->diagnostic_query(previous_hit).state,
+            GridMapObservationState::OCCUPIED);
+
+  GridMapTestAccess::acceptEmptyPointCloud(&map, 223);
+  const auto second = map.captureFrozenOccupancyEpoch();
+
+  ASSERT_NE(second, nullptr);
+  EXPECT_GT(second->generation, first->generation);
+  EXPECT_DOUBLE_EQ(second->cloud_stamp_s, 223.0);
+  EXPECT_FALSE(second->diagnostic_query(previous_hit).raw_occupied);
+  EXPECT_EQ(second->diagnostic_query(previous_hit).state,
+            GridMapObservationState::UNKNOWN);
 }
 
 TEST(GridMapOccupancyEpochTest,

@@ -36,7 +36,7 @@ The planning sequence is:
 local target
   -> immutable occupancy+risk snapshot
   -> P4 3-D forward topology decision
-  -> selected guide / certified short guide
+  -> selected guide / geometry-common prefix / native EGO
   -> initial B-spline
   -> native EGO optimization
   -> native EGO A* for closed collision rebound
@@ -59,15 +59,21 @@ occupancy/risk query functions. The identity binds:
 - complete risk configuration and source-identity hashes;
 - occupancy and risk generations and timestamps.
 
-The topology lattice is 0.5 m and fully three-dimensional. A cell and every
-edge sweep must be observed-free in every intersecting 0.1 m EGO voxel for the
-vehicle sphere. UNKNOWN is therefore
-not a P4 route, even though base EGO exploration can retain its original
-optimistic UNKNOWN behavior when P4 is disabled. Up to eight K-shortest and
-online offset-waypoint paths are generated, occupancy-separated paths are
-clustered into at most four channels, and the selected representative is
-refined by native EGO A* on the 0.1 m lattice inside a bounded corridor. The
-refined guide is re-certified before it can seed the B-spline.
+The topology lattice is 0.5 m and fully three-dimensional. Geometry and risk
+are separate contracts. A cell is geometrically `CLEAR` whenever the frozen
+EGO map contains no raw or inflated LiDAR hit; only `OCCUPIED` and
+`OUT_OF_BOUNDS` block topology search, edge sweeps, guide validation, channel
+clustering, and frozen native-A* refinement. The `observed` bit remains in the
+same immutable occupancy epoch, but is used only by P0 sky evidence, RiskMap
+support, and diagnostics. This preserves the hit-only engineering semantics of
+MID-360 EGO deployments: unobserved space is not silently converted into a
+geometric wall.
+
+Up to eight K-shortest and online offset-waypoint paths are generated,
+hit-separated paths are clustered into at most four channels, and the selected
+representative is refined by native EGO A* on the 0.1 m lattice inside a
+bounded corridor. Formal risk selection still requires complete support over
+the refined swept volume before it can seed the B-spline.
 
 Each route and the complete vehicle swept sphere are sampled in arrival-time
 order using the configured nominal query speed. Every non-zero spatial and
@@ -77,22 +83,27 @@ pre-conservative FIM support. A route must also have safety-fused
 maximum, FIM integral, length, and stable path hash. The 1.3 path-length limit
 is unchanged.
 
-The actions are:
+New runs emit `p4_forward_route_decision_v2` with independent
+`GeometryState`, `RiskSupport`, `SafetyState`, `Action`, and
+`DeferredMotionMode`. The actions are:
 
 - `CONTINUE_NOMINAL`: one complete safe online channel;
 - `RISK_SELECTED`: at least two channels and the risk-ranked channel is used;
-- `OBSERVE_MORE`: topology exists but common-anchor or risk support is not yet
-  complete; only a certified short guide is allowed;
+- `DEFER_RISK_SELECTION`: geometry is clear but formal risk comparison is not
+  complete. A single channel uses `NATIVE_EGO`; multiple channels may use only
+  their `COMMON_PREFIX`; otherwise the decision is `HOLD`;
 - `REPLAN_REQUIRED`: invalid, stale asynchronous, or over-budget result;
-- `NO_SAFE_ROUTE`: no observed-free route or no candidate passes the safety
+- `NO_SAFE_ROUTE`: no geometry-clear route or no candidate passes the safety
   gate.
 
-`OBSERVE_MORE` computes a speed cap from the certified distance and the same
-physical stopping model used for the forward horizon. Its endpoint retains the
-vehicle-radius and safety-margin reserve. The cap is applied to B-spline time
-allocation and feasibility checking. If no 0.5 m safe progress exists, the FSM
-publishes a stop trajectory and remains in `OBSERVE_MORE`; it never crosses
-UNKNOWN after a timeout.
+`DEFER_RISK_SELECTION` never sets `selection_applied`, never emits selected
+candidate lineage, and never treats missing risk support as an occupied voxel.
+Its speed is capped at 0.5 m/s and by the same physical stopping model used for
+the forward horizon. A common prefix ends before the first topology split; if
+it is shorter than the configured minimum progress, or any known point is
+unsafe, the FSM holds. Missing support can therefore delay formal risk
+selection without deadlocking ordinary EGO geometry planning or allowing a
+premature branch choice.
 
 ## Triggering, caching, and latching
 
@@ -147,7 +158,7 @@ forest fork locations.
 New runs write:
 
 - `<p4-debug>.forward_lineage.csv` using
-  `p4_forward_route_decision_v1`;
+  `p4_forward_route_decision_v2`;
 - `<p4-debug>.forward_candidates.csv` with candidate paths and support/risk
   metrics.
 
@@ -169,5 +180,24 @@ schema when present and binds progressive forest evidence by decision event and
 the exact P0 configuration/source/occupancy identity.
 
 RViz shows the decision horizon, stopping-distance ring, common anchor, raw
-topology candidates, selected route, and cyan `OBSERVE_MORE` short trajectory.
-These markers are diagnostics only and never enter the planning cost.
+topology candidates, selected route, deferred common prefix, and separate
+geometry/risk-support/safety/deferred-mode labels. These markers are
+diagnostics only and never enter the planning cost. The analyzer retains
+read-only support for v1 captures, but new runs never emit v1.
+
+## ICRA first-hit LiDAR boundary
+
+Every `test_icra.launch.py` preset now selects
+`spherical_first_hit_v1`. `local_sensing::FirstHitLidarRenderer` freezes the
+simulator world in 0.1 m voxels and renders 512×40 regular spherical rays at
+10 Hz over 360° azimuth and -7°..52° elevation. A 3-D DDA terminates at the
+first occupied voxel in the 0.1..10 m range. Successful hits are published in
+the map frame with the odometry timestamp; no-return rays publish no point, as
+in a normal hit-only PointCloud2 stream. A frame with no hit is still a valid
+empty cloud and refreshes the EGO local obstacle buffer.
+
+Only the sensor simulator may subscribe to `/map_generator/global_cloud` to
+render measurements. The ICRA online profile leaves the P0 map topic empty,
+disables fit-to-world-cloud behavior, and feeds EGO/P0/P4/P5 only the first-hit
+sensor cloud and online-derived snapshots. `legacy_radius_crop_v1` remains an
+explicit debug mode for non-ICRA launches.

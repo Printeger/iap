@@ -308,11 +308,20 @@ class TestStageContracts(unittest.TestCase):
             manifest.write_text(json.dumps({
                 "scenario_contract": contract,
                 "scenario_fingerprint": "sha256:effective",
+                "lidar_renderer": {
+                    "mode": "spherical_first_hit_v1",
+                    "ray_count": 20480,
+                    "output_semantics": "hit_only_first_return_pointcloud2",
+                },
             }))
             evidence = MODULE.forest_manifest_evidence(run_root)
             self.assertTrue(evidence["matches_expected"])
             self.assertEqual(evidence["scenario_fingerprint"],
                              "sha256:effective")
+            self.assertEqual(evidence["lidar_renderer"]["ray_count"], 20480)
+            self.assertEqual(
+                MODULE.effective_lidar_renderer_evidence(run_root)["mode"],
+                "spherical_first_hit_v1")
             contract["p5_alert_limits"]["val_m"] = 20.0
             manifest.write_text(json.dumps({
                 "scenario_contract": contract,
@@ -358,6 +367,20 @@ class TestStageContracts(unittest.TestCase):
 
 
 class TestRunnerLifecycle(unittest.TestCase):
+    def test_first_hit_runtime_logs_are_summarized(self):
+        stdout = "\n".join((
+            "first-hit lidar frame=1 stamp=1.0 rays=20480 hits=123 "
+            "dda_visits=100 latency_ms=41.5",
+            "first-hit lidar frame=10 stamp=2.0 rays=20480 hits=456 "
+            "dda_visits=200 latency_ms=52.0",
+        ))
+        stats = MODULE.lidar_runtime_stats(stdout)
+        self.assertEqual(stats["sample_count"], 2)
+        self.assertEqual(stats["ray_count"], 20480)
+        self.assertEqual(stats["hit_count_min"], 123)
+        self.assertEqual(stats["hit_count_max"], 456)
+        self.assertEqual(stats["render_latency_ms_max"], 52.0)
+
     @staticmethod
     def runner_args(root, *, through=None, rviz=False):
         install_root = root / "install"
@@ -757,7 +780,7 @@ class TestStageAnalyzer(unittest.TestCase):
             and "normal_publish_authorized" in evidence["lineage_stages"]
             for evidence in passed["fork_evidence"].values()))
 
-    def test_forest_risk_gate_accepts_forward_decision_lineage(self):
+    def test_forest_risk_gate_accepts_forward_v2_decision_lineage(self):
         records = []
         for selected_index in range(4):
             record = self.forest_generation(low_multiplier=0.8)
@@ -776,7 +799,7 @@ class TestStageAnalyzer(unittest.TestCase):
         for index, legacy in enumerate(legacy_decisions):
             event_id = str(900 + index)
             decision = {
-                "schema_version": "p4_forward_route_decision_v1",
+                "schema_version": "p4_forward_route_decision_v2",
                 "stage": "forward_decision",
                 "decision_event_id": event_id,
                 "planning_attempt_id": legacy["planning_attempt_id"],

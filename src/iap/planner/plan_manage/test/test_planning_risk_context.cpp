@@ -417,7 +417,7 @@ TEST(P4ForwardTerminalLineageTest,
 }
 
 TEST(P4ForwardTerminalLineageTest,
-     CertifiedObserveMoreTrajectoryCanReachTheSafetyGates) {
+     DeferredRiskSelectionDoesNotWriteOrBlockSelectedRouteLineage) {
   const auto snapshot = makeP4SelectionSnapshot();
   auto map = std::make_shared<GridMap>();
   GridMapTestAccess::configureNoCollision(map.get());
@@ -431,12 +431,14 @@ TEST(P4ForwardTerminalLineageTest,
   manager.setPlanningRiskContextForTest(snapshot, 10.0);
   auto decision = makeForwardDecision(
       snapshot, manager.planningRiskContext().planning_attempt_id);
-  decision.action = ego_planner::P4ForwardAction::OBSERVE_MORE;
+  decision.action = ego_planner::P4ForwardAction::DEFER_RISK_SELECTION;
   decision.trigger_reason =
       ego_planner::P4ForwardTriggerReason::SUPPORT_INCOMPLETE;
   decision.selected_candidate_id = 0;
   decision.selected_guide.clear();
-  decision.observe_more_trajectory = {
+  decision.deferred_motion_mode =
+      ego_planner::P4ForwardDeferredMotionMode::COMMON_PREFIX;
+  decision.deferred_trajectory = {
       Eigen::Vector3d(-4.0, 0.0, 0.0),
       Eigen::Vector3d(-3.5, 0.0, 0.0)};
   manager.setP4ForwardDecisionForTest(decision);
@@ -447,6 +449,8 @@ TEST(P4ForwardTerminalLineageTest,
 
   EXPECT_TRUE(manager.recordP4VerticalSliceLineage(
       "final_bspline_before_p5", 10.0));
+  EXPECT_FALSE(std::filesystem::exists(std::filesystem::path(
+      debug_path.string() + ".forward_lineage.csv")));
 }
 
 TEST(P4ForwardTerminalLineageTest,

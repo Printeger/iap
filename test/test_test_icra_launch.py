@@ -65,7 +65,9 @@ class TestIcraLaunchTest(unittest.TestCase):
         self.assertEqual(
             profile["grid_map/independent_cloud_clock_guard_s"], "0.5")
         self.assertEqual(profile["p0.refresh_start_delay_s"], "0.05")
-        self.assertEqual(profile["p0.fit_grid_to_map_cloud"], "true")
+        self.assertEqual(profile["p0.online_mapping_mode"], "true")
+        self.assertEqual(profile["p0.fit_grid_to_map_cloud"], "false")
+        self.assertEqual(profile["p0.map_topic"], "")
         self.assertEqual(profile["planner_executor_thread_count"], "6")
         scenario = MODULE.SCENARIO_PRESETS["icra072_p4_selection_trigger_v1"]
         self.assertEqual(scenario["lidar_sensing_rate_hz"], "10.0")
@@ -79,6 +81,20 @@ class TestIcraLaunchTest(unittest.TestCase):
         self.assertEqual(
             defaults["rviz_config"], "config/sim_demo11/test_icra.rviz"
         )
+
+    def test_all_icra_runs_default_to_regular_spherical_first_hit_lidar(self):
+        defaults = dict(MODULE.ARG_DEFAULTS)
+        self.assertEqual(
+            defaults["lidar_renderer_mode"], "spherical_first_hit_v1")
+        self.assertEqual(defaults["lidar_horizontal_samples"], "512")
+        self.assertEqual(defaults["lidar_vertical_samples"], "40")
+        self.assertEqual(defaults["lidar_horizontal_fov_deg"], "360.0")
+        self.assertEqual(defaults["lidar_vertical_min_deg"], "-7.0")
+        self.assertEqual(defaults["lidar_vertical_max_deg"], "52.0")
+        self.assertEqual(defaults["lidar_min_range_m"], "0.1")
+        self.assertEqual(defaults["lidar_max_range_m"], "10.0")
+        self.assertEqual(
+            defaults["lidar_world_voxel_resolution_m"], "0.1")
 
 
 if __name__ == "__main__":

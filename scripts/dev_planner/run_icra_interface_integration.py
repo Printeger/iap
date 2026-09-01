@@ -30,6 +30,10 @@ STAGE_ORDER = ("estimator", "p0", "p4", "p5-final", "full", "shutdown")
 DEFAULT_SCENARIO = "icra072_p4_selection_trigger_v1"
 FOREST_V1_SCENARIO = "icra_dense_forest_four_fork_v1"
 FOREST_SCENARIO = "icra_dense_forest_four_fork_v2"
+P4_FORWARD_DECISION_SCHEMAS = {
+    "p4_forward_route_decision_v1",
+    "p4_forward_route_decision_v2",
+}
 FOREST_SCENARIOS = (FOREST_V1_SCENARIO, FOREST_SCENARIO)
 SEVEN_STAGE_ORDER = (
     "p0_snapshot", "closed_collision", "p4_selection_application",
@@ -350,7 +354,45 @@ def forest_manifest_evidence(
         "manifest_path": str(manifest_path.relative_to(run_root)),
         "scenario_fingerprint": manifest.get("scenario_fingerprint"),
         "scenario_contract": actual,
+        "lidar_renderer": manifest.get("lidar_renderer"),
         "mismatches": mismatches,
+    }
+
+
+def effective_lidar_renderer_evidence(run_root: Path) -> dict | None:
+    """Return the immutable LiDAR renderer contract recorded by launch."""
+    manifests = sorted((run_root / "exports").glob(
+        "**/test_planner_manifest.json"))
+    if len(manifests) != 1:
+        return None
+    try:
+        manifest = json.loads(manifests[0].read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    renderer = manifest.get("lidar_renderer")
+    return renderer if isinstance(renderer, dict) else None
+
+
+def lidar_runtime_stats(stdout: str) -> dict:
+    rows = [
+        (int(rays), int(hits), float(latency))
+        for rays, hits, latency in re.findall(
+            r"first-hit lidar frame=\d+[^\n]*rays=(\d+) hits=(\d+)"
+            r"[^\n]*latency_ms=([0-9]+(?:\.[0-9]+)?)",
+            stdout,
+        )
+    ]
+    if not rows:
+        return {"sample_count": 0}
+    latencies = sorted(row[2] for row in rows)
+    p95_index = int(0.95 * (len(latencies) - 1))
+    return {
+        "sample_count": len(rows),
+        "ray_count": rows[-1][0],
+        "hit_count_min": min(row[1] for row in rows),
+        "hit_count_max": max(row[1] for row in rows),
+        "render_latency_ms_p95": latencies[p95_index],
+        "render_latency_ms_max": latencies[-1],
     }
 
 
@@ -476,8 +518,8 @@ def analyze_forest_risk(
             if _decision_fork_index(decision) != fork_index:
                 continue
             try:
-                if decision.get("schema_version") == \
-                        "p4_forward_route_decision_v1":
+                if decision.get("schema_version") in \
+                        P4_FORWARD_DECISION_SCHEMAS:
                     identity_matches = (
                         int(decision["risk_generation"]) == generation_id
                         and decision["snapshot_config_hash"] ==
@@ -900,7 +942,7 @@ DECISION_SEGMENT_FIELDS = (
 def _decision_fork_index(row: dict) -> int | None:
     """Map one local collision segment to exactly one frozen forest fork."""
     try:
-        if row.get("schema_version") == "p4_forward_route_decision_v1":
+        if row.get("schema_version") in P4_FORWARD_DECISION_SCHEMAS:
             coordinates = [
                 float(row["request_x"]), float(row["request_y"]),
                 float(row["request_z"]), float(row["anchor_x"]),
@@ -941,11 +983,11 @@ def _support_complete(row: dict, prefix: str) -> bool:
 
 
 def _selected_decisions(decisions: list[dict]) -> list[dict]:
-    if any(row.get("schema_version") == "p4_forward_route_decision_v1"
+    if any(row.get("schema_version") in P4_FORWARD_DECISION_SCHEMAS
            for row in decisions):
         return [
             row for row in decisions
-            if row.get("schema_version") == "p4_forward_route_decision_v1"
+            if row.get("schema_version") in P4_FORWARD_DECISION_SCHEMAS
             and row.get("stage") == "forward_decision"
             and row.get("action") == "RISK_SELECTED"
             and int(row.get("selected_candidate_id", 0) or 0) > 0
@@ -980,7 +1022,7 @@ def _decision_lineage_key(row: dict, lineage: bool = False) -> tuple[str, ...]:
 
 
 def _lineage_groups(decisions: list[dict], lineage: list[dict]) -> list[dict]:
-    if any(row.get("schema_version") == "p4_forward_route_decision_v1"
+    if any(row.get("schema_version") in P4_FORWARD_DECISION_SCHEMAS
            for row in lineage):
         selected_ids = {
             str(row.get("decision_event_id")): row
@@ -1225,8 +1267,8 @@ def analyze_stage_records(
             )
             if not runtime_ok:
                 failures.append("p5_runtime_identity_or_status_invalid")
-            if any(row.get("schema_version") ==
-                   "p4_forward_route_decision_v1" for row in decisions):
+            if any(row.get("schema_version") in P4_FORWARD_DECISION_SCHEMAS
+                   for row in decisions):
                 runtime_lineage_identities = {
                     (group["trajectory_id"], group["start_ns"])
                     for group in groups
@@ -2174,6 +2216,8 @@ def _run_one_impl(
             forest_scene_contract(scenario)
             if _is_forest_scenario(scenario) else None),
         "forest_effective_manifest": forest_manifest,
+        "lidar_renderer": effective_lidar_renderer_evidence(run_root),
+        "lidar_runtime_stats": lidar_runtime_stats(stdout),
         "planner_truth_isolation_audit": graph_audit,
         "scene_cloud_bbox": next((
             row.get("payload") for row in _read_jsonl(run_root / "capture.jsonl")

@@ -5,6 +5,23 @@ project(local_sensing)
 set(CMAKE_BUILD_TYPE Release)
 add_compile_options(-std=c++17)
 
+find_package(Eigen3 REQUIRED)
+find_package(VTK REQUIRED)
+find_package(flann CONFIG REQUIRED)
+find_package(PCL REQUIRED COMPONENTS common)
+find_package(Qhull REQUIRED)
+find_package(libusb REQUIRED)
+
+add_library(first_hit_lidar_renderer
+  src/first_hit_lidar_renderer.cpp)
+target_include_directories(first_hit_lidar_renderer PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+  ${PCL_INCLUDE_DIRS})
+target_link_libraries(first_hit_lidar_renderer PUBLIC
+  Eigen3::Eigen
+  ${PCL_LIBRARIES})
+
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
@@ -14,6 +31,7 @@ set(ENABLE_CUDA false)
 
 
 if(BUILD_TESTING)
+  find_package(ament_cmake_gtest REQUIRED)
   find_package(ament_lint_auto REQUIRED)
   # the following line skips the linter which checks for copyrights
   # comment the line when a copyright and license is added to all source files
@@ -23,6 +41,11 @@ if(BUILD_TESTING)
   # a copyright and license is added to all source files
   set(ament_cmake_cpplint_FOUND TRUE)
   ament_lint_auto_find_test_dependencies()
+
+  ament_add_gtest(test_first_hit_lidar_renderer
+    test/test_first_hit_lidar_renderer.cpp)
+  target_link_libraries(test_first_hit_lidar_renderer
+    first_hit_lidar_renderer)
 endif()
 
 if(ENABLE_CUDA)
@@ -135,12 +158,26 @@ else(ENABLE_CUDA)
     quadrotor_msgs
     Boost
   )
+  target_link_libraries(pcl_render_node first_hit_lidar_renderer)
 
 endif(ENABLE_CUDA)
 
 # Install setup
 install(TARGETS pcl_render_node
   DESTINATION lib/${PROJECT_NAME})
+
+install(TARGETS first_hit_lidar_renderer
+  EXPORT export_first_hit_lidar_renderer
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
+  RUNTIME DESTINATION bin
+  INCLUDES DESTINATION include)
+
+install(DIRECTORY include/
+  DESTINATION include)
+
+ament_export_targets(export_first_hit_lidar_renderer HAS_LIBRARY_TARGET)
+ament_export_include_directories(include)
 
 # 安装 params 文件
 install(

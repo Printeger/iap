@@ -1043,7 +1043,11 @@ void GridMap::cloudCallback(const sensor_msgs::msg::PointCloud2::ConstPtr &img)
   }
 
   pcl::PointCloud<pcl::PointXYZ> latest_cloud;
-  pcl::fromROSMsg(*img, latest_cloud);
+  // A hit-only LiDAR legitimately publishes an empty PointCloud2 when no
+  // beam returns. Avoid asking PCL to decode an empty data buffer, while still
+  // processing the frame below so the local rolling buffer is refreshed.
+  if (!img->data.empty())
+    pcl::fromROSMsg(*img, latest_cloud);
 
   std::lock_guard<std::mutex> occupancy_lock(occupancy_epoch_mutex_);
   md_.has_cloud_ = true;
@@ -1053,9 +1057,6 @@ void GridMap::cloudCallback(const sensor_msgs::msg::PointCloud2::ConstPtr &img)
     std::cout << "no odom!" << std::endl;
     return;
   }
-
-  if (latest_cloud.points.size() == 0)
-    return;
 
   if (isnan(md_.camera_pos_(0)) || isnan(md_.camera_pos_(1)) || isnan(md_.camera_pos_(2)))
     return;

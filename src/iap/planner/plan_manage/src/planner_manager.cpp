@@ -319,7 +319,9 @@ namespace ego_planner
       viz.segment_end = decision.common_anchor;
       viz.common_anchor = decision.common_anchor;
       viz.selected_path = decision.selected_guide;
-      viz.observe_more_path = decision.observe_more_trajectory;
+      viz.observe_more_path = decision.action ==
+          P4ForwardAction::DEFER_RISK_SELECTION ?
+          decision.deferred_trajectory : decision.observe_more_trajectory;
       viz.decision_horizon_m = decision.decision_horizon_m;
       viz.stopping_distance_m = decision.stopping_distance_m;
       viz.first_failed_position = decision.first_failed_position;
@@ -337,15 +339,24 @@ namespace ego_planner
       viz.first_failed_reason = decision.first_failed_risk.reason;
       viz.risk_selected =
           decision.action == P4ForwardAction::RISK_SELECTED;
-      viz.reason = std::string(p4ForwardActionName(decision.action)) + "/" +
-          decision.reason;
+      viz.reason = std::string(p4ForwardActionName(decision.action)) +
+          " geometry=" + p4ForwardGeometryStateName(decision.geometry_state) +
+          " risk_support=" + p4ForwardRiskSupportName(decision.risk_support) +
+          " safety=" + p4ForwardSafetyStateName(decision.safety_state) +
+          " deferred=" +
+          p4ForwardDeferredMotionModeName(decision.deferred_motion_mode) +
+          " / " + decision.reason;
       for (const auto &candidate : decision.raw_candidates)
         viz.raw_topology_paths.push_back(candidate.path);
       for (const auto &candidate : decision.candidates)
       {
         viz.topology_candidates.push_back(candidate.path);
         viz.topology_candidate_labels.push_back(
-            "C" + std::to_string(candidate.candidate_id) + " fim_max=" +
+            "C" + std::to_string(candidate.candidate_id) + " geometry=" +
+            p4ForwardGeometryStateName(candidate.geometry_state) +
+            " support=" + p4ForwardRiskSupportName(candidate.risk_support) +
+            " safety=" + p4ForwardSafetyStateName(candidate.safety_state) +
+            " fim_max=" +
             std::to_string(candidate.fim_max_ratio) + " safety_max=" +
             std::to_string(candidate.safety_max_ratio) + " " +
             candidate.reason);
@@ -1081,15 +1092,14 @@ namespace ego_planner
     unavailable.snapshot_identity = request.snapshot_identity;
     unavailable.request_position = request.position;
     unavailable.local_target = request.local_target;
-    request.occupancy = [occupancy](const Eigen::Vector3d &point) {
+    request.geometry = [occupancy](const Eigen::Vector3d &point) {
         const auto support = occupancy->diagnostic_query(point);
-        if (!support.available || !support.observed ||
-            support.state == iap::RiskOccupancyState::UNKNOWN)
-          return P4ForwardOccupancyState::UNKNOWN;
+        if (!support.available)
+          return P4ForwardGeometryState::OUT_OF_BOUNDS;
         if (support.raw_occupied || support.inflated_occupied ||
             support.state == iap::RiskOccupancyState::OCCUPIED)
-          return P4ForwardOccupancyState::OCCUPIED;
-        return P4ForwardOccupancyState::OBSERVED_FREE;
+          return P4ForwardGeometryState::OCCUPIED;
+        return P4ForwardGeometryState::CLEAR;
       };
     request.refine = [this, occupancy](
         const std::vector<Eigen::Vector3d> &coarse,
@@ -1099,8 +1109,16 @@ namespace ego_planner
         return bspline_optimizer_ &&
             bspline_optimizer_->refineP4ForwardGuide(
                 coarse, [occupancy](const Eigen::Vector3d &point) {
-                  return toGridMapDiagnostic(
+                  auto diagnostic = toGridMapDiagnostic(
                       occupancy->diagnostic_query(point));
+                  if (diagnostic.available && !diagnostic.raw_occupied &&
+                      !diagnostic.inflated_occupied &&
+                      diagnostic.state != GridMapObservationState::OCCUPIED)
+                  {
+                    diagnostic.observed = true;
+                    diagnostic.state = GridMapObservationState::OBSERVED_FREE;
+                  }
+                  return diagnostic;
                 }, corridor_radius_m,
                 remaining_budget_ms, refined);
       };
@@ -1292,7 +1310,10 @@ namespace ego_planner
         unavailable.snapshot_identity = request.snapshot_identity;
         unavailable.request_position = request.position;
         unavailable.local_target = request.local_target;
-        unavailable.action = P4ForwardAction::OBSERVE_MORE;
+        unavailable.action = P4ForwardAction::DEFER_RISK_SELECTION;
+        unavailable.deferred_motion_mode =
+            P4ForwardDeferredMotionMode::NATIVE_EGO;
+        unavailable.speed_cap_mps = p4_forward_limits_.max_observe_speed_mps;
         unavailable.trigger_reason =
             P4ForwardTriggerReason::NOMINAL_CERTIFICATION_SHORT;
         request.live_occupancy_generation_at_submit =
@@ -1370,7 +1391,10 @@ namespace ego_planner
       unavailable.snapshot_identity = request.snapshot_identity;
       unavailable.request_position = request.position;
       unavailable.local_target = request.local_target;
-      unavailable.action = P4ForwardAction::OBSERVE_MORE;
+      unavailable.action = P4ForwardAction::DEFER_RISK_SELECTION;
+      unavailable.deferred_motion_mode =
+          P4ForwardDeferredMotionMode::NATIVE_EGO;
+      unavailable.speed_cap_mps = p4_forward_limits_.max_observe_speed_mps;
       unavailable.trigger_reason =
           P4ForwardTriggerReason::NOMINAL_CERTIFICATION_SHORT;
       unavailable.reason =
@@ -1409,7 +1433,10 @@ namespace ego_planner
     if (!p4_forward_submission_gate_.tryAcquire(now_s))
     {
       unavailable.snapshot_identity = request.snapshot_identity;
-      unavailable.action = P4ForwardAction::OBSERVE_MORE;
+      unavailable.action = P4ForwardAction::DEFER_RISK_SELECTION;
+      unavailable.deferred_motion_mode =
+          P4ForwardDeferredMotionMode::NATIVE_EGO;
+      unavailable.speed_cap_mps = p4_forward_limits_.max_observe_speed_mps;
       unavailable.trigger_reason =
           P4ForwardTriggerReason::NOMINAL_CERTIFICATION_SHORT;
       unavailable.reason = "forward_decision_rate_limited";
@@ -1425,7 +1452,10 @@ namespace ego_planner
       unavailable.reason = "forward_worker_submit_failed";
       return unavailable;
     }
-    unavailable.action = P4ForwardAction::OBSERVE_MORE;
+    unavailable.action = P4ForwardAction::DEFER_RISK_SELECTION;
+    unavailable.deferred_motion_mode =
+        P4ForwardDeferredMotionMode::NATIVE_EGO;
+    unavailable.speed_cap_mps = p4_forward_limits_.max_observe_speed_mps;
     unavailable.trigger_reason =
         P4ForwardTriggerReason::NOMINAL_CERTIFICATION_SHORT;
     unavailable.reason = "forward_worker_pending";
@@ -1451,7 +1481,8 @@ namespace ego_planner
       return false;
     if (header)
       csv << "schema_version,stage,stamp_s,decision_event_id,planning_attempt_id,"
-             "action,trigger_reason,geometry_id,frame_id,alert_limit_policy_id,"
+             "action,trigger_reason,geometry_state,risk_support,safety_state,"
+             "deferred_motion_mode,common_prefix_length_m,geometry_id,frame_id,alert_limit_policy_id,"
              "snapshot_config_hash,source_identity_hash,"
              "occupancy_generation,risk_generation,occupancy_stamp_s,risk_stamp_s,"
              "request_x,request_y,request_z,anchor_x,anchor_y,anchor_z,"
@@ -1491,6 +1522,11 @@ namespace ego_planner
         << decision.decision_event_id << ',' << decision.planning_attempt_id
         << ',' << p4ForwardActionName(decision.action) << ','
         << p4ForwardTriggerReasonName(decision.trigger_reason) << ','
+        << p4ForwardGeometryStateName(decision.geometry_state) << ','
+        << p4ForwardRiskSupportName(decision.risk_support) << ','
+        << p4ForwardSafetyStateName(decision.safety_state) << ','
+        << p4ForwardDeferredMotionModeName(decision.deferred_motion_mode) << ','
+        << decision.common_prefix_length_m << ','
         << decision.snapshot_identity.geometry_id << ','
         << decision.snapshot_identity.frame_id << ','
         << decision.snapshot_identity.alert_limit_policy_id << ','
@@ -1563,7 +1599,8 @@ namespace ego_planner
       return false;
     if (candidate_header)
       candidates_csv << "schema_version,decision_event_id,planning_attempt_id,"
-                        "candidate_id,selected,path_hash,length_m,risk_supported,"
+                        "candidate_id,selected,path_hash,length_m,geometry_state,"
+                        "risk_support,safety_state,risk_supported,"
                         "safety_gate_passed,fim_max_ratio,fim_integral,"
                         "safety_max_ratio,point_count,path_xyz,reason\n";
     candidates_csv << std::setprecision(17);
@@ -1583,6 +1620,9 @@ namespace ego_planner
           << ',' << candidate.candidate_id << ','
           << (candidate.candidate_id == decision.selected_candidate_id ? 1 : 0)
           << ',' << candidate.path_hash << ',' << candidate.length_m << ','
+          << p4ForwardGeometryStateName(candidate.geometry_state) << ','
+          << p4ForwardRiskSupportName(candidate.risk_support) << ','
+          << p4ForwardSafetyStateName(candidate.safety_state) << ','
           << (candidate.risk_supported ? 1 : 0) << ','
           << (candidate.safety_gate_passed ? 1 : 0) << ','
           << candidate.fim_max_ratio << ',' << candidate.fim_integral << ','
@@ -1601,6 +1641,14 @@ namespace ego_planner
     const auto &config = bspline_optimizer_->getP4RiskAStarConfig();
     if (!config.enable_risk_aware_astar)
       return true;
+    // v2 deferred motion deliberately has no selected candidate lineage.
+    // It may still publish a native-EGO/common-prefix trajectory (and P5 may
+    // independently admit or reject it), so the absence of selected-route
+    // lineage is "not applicable", not a publication failure.
+    if (last_p4_forward_decision_.action ==
+          P4ForwardAction::DEFER_RISK_SELECTION ||
+        last_p4_forward_decision_.action == P4ForwardAction::OBSERVE_MORE)
+      return true;
     const Eigen::MatrixXd control_points =
         local_data_.position_traj_.getControlPoint();
     if (local_data_.traj_id_ <= 0 ||
@@ -1613,12 +1661,9 @@ namespace ego_planner
          last_p4_forward_decision_.action ==
              P4ForwardAction::CONTINUE_NOMINAL) &&
         last_p4_forward_decision_.selected_guide.size() >= 2;
-    const bool certified_observe_more =
-        last_p4_forward_decision_.action == P4ForwardAction::OBSERVE_MORE &&
-        last_p4_forward_decision_.observe_more_trajectory.size() >= 2;
     if (last_p4_forward_decision_.planning_attempt_id !=
             planning_risk_context_.planning_attempt_id ||
-        (!selected_route && !certified_observe_more))
+        !selected_route)
       return false;
     const auto snapshot = planning_risk_context_.snapshot;
     if (!snapshot ||
@@ -1864,7 +1909,33 @@ namespace ego_planner
           last_p4_forward_decision_.candidates.size(),
           last_p4_forward_decision_.decision_horizon_m,
           last_p4_forward_decision_.stopping_distance_m);
-      if (last_p4_forward_decision_.action == P4ForwardAction::OBSERVE_MORE)
+      if (last_p4_forward_decision_.action ==
+          P4ForwardAction::DEFER_RISK_SELECTION)
+      {
+        planning_max_vel = std::min(
+            planning_max_vel, last_p4_forward_decision_.speed_cap_mps);
+        if (!std::isfinite(planning_max_vel) || planning_max_vel <= 1.0e-3 ||
+            last_p4_forward_decision_.deferred_motion_mode ==
+                P4ForwardDeferredMotionMode::HOLD)
+        {
+          continous_failures_count_++;
+          return false;
+        }
+        if (last_p4_forward_decision_.deferred_motion_mode ==
+            P4ForwardDeferredMotionMode::COMMON_PREFIX)
+        {
+          p4_forward_seed =
+              last_p4_forward_decision_.deferred_trajectory;
+          if (p4_forward_seed.size() < 2)
+          {
+            continous_failures_count_++;
+            return false;
+          }
+          local_target_pt = p4_forward_seed.back();
+          local_target_vel.setZero();
+        }
+      }
+      else if (last_p4_forward_decision_.action == P4ForwardAction::OBSERVE_MORE)
       {
         p4_forward_seed =
             last_p4_forward_decision_.observe_more_trajectory;

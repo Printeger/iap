@@ -1,0 +1,64 @@
+#ifndef LOCAL_SENSING__FIRST_HIT_LIDAR_RENDERER_HPP_
+#define LOCAL_SENSING__FIRST_HIT_LIDAR_RENDERER_HPP_
+
+#include <Eigen/Geometry>
+#include <pcl/point_cloud.h>
+#include <pcl/point_types.h>
+
+#include <cstddef>
+#include <memory>
+#include <string>
+
+namespace local_sensing
+{
+
+struct FirstHitLidarConfig
+{
+  int horizontal_samples = 512;
+  int vertical_samples = 40;
+  double horizontal_fov_deg = 360.0;
+  double vertical_min_deg = -7.0;
+  double vertical_max_deg = 52.0;
+  double min_range_m = 0.1;
+  double max_range_m = 10.0;
+  double world_voxel_resolution_m = 0.1;
+};
+
+struct FirstHitLidarStats
+{
+  std::size_t ray_count = 0;
+  std::size_t hit_count = 0;
+  std::size_t dda_voxel_visits = 0;
+  double render_latency_ms = 0.0;
+};
+
+struct FirstHitLidarScan
+{
+  pcl::PointCloud<pcl::PointXYZ> hits;
+  FirstHitLidarStats stats;
+};
+
+class FirstHitLidarRenderer
+{
+public:
+  explicit FirstHitLidarRenderer(FirstHitLidarConfig config);
+  ~FirstHitLidarRenderer();
+  FirstHitLidarRenderer(FirstHitLidarRenderer &&) noexcept;
+  FirstHitLidarRenderer & operator=(FirstHitLidarRenderer &&) noexcept;
+  FirstHitLidarRenderer(const FirstHitLidarRenderer &) = delete;
+  FirstHitLidarRenderer & operator=(const FirstHitLidarRenderer &) = delete;
+
+  bool loadWorld(
+    const pcl::PointCloud<pcl::PointXYZ> & world,
+    std::string * reason = nullptr);
+  FirstHitLidarScan render(const Eigen::Isometry3d & sensor_pose_w) const;
+  const FirstHitLidarConfig & config() const;
+
+private:
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
+};
+
+}  // namespace local_sensing
+
+#endif  // LOCAL_SENSING__FIRST_HIT_LIDAR_RENDERER_HPP_

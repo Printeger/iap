@@ -8,11 +8,16 @@
 #include <pcl_conversions/pcl_conversions.h>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
+#include <local_sensing/first_hit_lidar_renderer.hpp>
 #include <Eigen/Dense>
+#include <Eigen/Geometry>
+#include <chrono>
 #include <csignal>
 #include <fstream>
 #include <iostream>
+#include <memory>
 #include <pcl/search/impl/kdtree.hpp>
+#include <string>
 #include <vector>
 
 using namespace std;
@@ -47,6 +52,10 @@ void requestStop(int)
 nav_msgs::msg::Odometry _odom;
 
 double sensing_horizon, sensing_rate, estimation_rate;
+std::string renderer_mode = "legacy_radius_crop_v1";
+local_sensing::FirstHitLidarConfig first_hit_config;
+std::unique_ptr<local_sensing::FirstHitLidarRenderer> first_hit_renderer;
+std::size_t rendered_frame_count = 0;
 double _x_size, _y_size, _z_size;
 double _gl_xl, _gl_yl, _gl_zl;
 double _resolution, _inv_resolution;
@@ -108,6 +117,23 @@ void rcvGlobalPointCloudCallBack(const sensor_msgs::msg::PointCloud2::SharedPtr 
   pcl::PointCloud<pcl::PointXYZ> cloud_input;
   pcl::fromROSMsg(*pointcloud_map, cloud_input);
 
+  if (renderer_mode == "spherical_first_hit_v1") {
+    std::string reason;
+    if (!first_hit_renderer ||
+        !first_hit_renderer->loadWorld(cloud_input, &reason)) {
+      RCLCPP_ERROR(
+          rclcpp::get_logger("pcl_render_node"),
+          "failed to freeze first-hit lidar world: %s", reason.c_str());
+      return;
+    }
+    RCLCPP_INFO(
+        rclcpp::get_logger("pcl_render_node"),
+        "first-hit world frozen input_points=%zu voxel_resolution=%.3f",
+        cloud_input.size(), first_hit_config.world_voxel_resolution_m);
+    has_global_map = true;
+    return;
+  }
+
   // 使用体素滤波对点云降采样
   _voxel_sampler.setLeafSize(0.1f, 0.1f, 0.1f);
   _voxel_sampler.setInputCloud(cloud_input.makeShared());
@@ -121,6 +147,47 @@ void rcvGlobalPointCloudCallBack(const sensor_msgs::msg::PointCloud2::SharedPtr 
 
 void renderSensedPoints(/*const rclcpp::TimerBase event*/) {
   if (!has_global_map || !has_odom) return;
+
+  if (renderer_mode == "spherical_first_hit_v1") {
+    Eigen::Quaterniond orientation(
+        _odom.pose.pose.orientation.w,
+        _odom.pose.pose.orientation.x,
+        _odom.pose.pose.orientation.y,
+        _odom.pose.pose.orientation.z);
+    if (!orientation.coeffs().allFinite() || orientation.norm() < 1.0e-9) {
+      RCLCPP_WARN(
+          rclcpp::get_logger("pcl_render_node"),
+          "skipping first-hit render: invalid odometry orientation");
+      return;
+    }
+    orientation.normalize();
+    Eigen::Isometry3d sensor_pose = Eigen::Isometry3d::Identity();
+    sensor_pose.linear() = orientation.toRotationMatrix();
+    sensor_pose.translation() = Eigen::Vector3d(
+        _odom.pose.pose.position.x,
+        _odom.pose.pose.position.y,
+        _odom.pose.pose.position.z);
+
+    auto scan = first_hit_renderer->render(sensor_pose);
+    pcl::toROSMsg(scan.hits, _local_map_pcd);
+    _local_map_pcd.header.stamp = _odom.header.stamp;
+    _local_map_pcd.header.frame_id = "map";
+    pub_cloud->publish(_local_map_pcd);
+    ++rendered_frame_count;
+    if (!logged_first_lidar_publish || rendered_frame_count % 10 == 0) {
+      RCLCPP_INFO(
+          rclcpp::get_logger("pcl_render_node"),
+          "first-hit lidar frame=%zu stamp=%.6f rays=%zu hits=%zu dda_visits=%zu latency_ms=%.3f",
+          rendered_frame_count,
+          rclcpp::Time(_local_map_pcd.header.stamp).seconds(),
+          scan.stats.ray_count,
+          scan.stats.hit_count,
+          scan.stats.dda_voxel_visits,
+          scan.stats.render_latency_ms);
+    }
+    logged_first_lidar_publish = true;
+    return;
+  }
 
   // 获取无人机姿态
   Eigen::Quaterniond q;
@@ -191,7 +258,7 @@ void renderSensedPoints(/*const rclcpp::TimerBase event*/) {
 }
 
 void rcvLocalPointCloudCallBack(
-    const sensor_msgs::msg::PointCloud2::SharedPtr pointcloud_map) {
+    const sensor_msgs::msg::PointCloud2::SharedPtr /*pointcloud_map*/) {
   // do nothing, fix later
 }
 
@@ -210,6 +277,15 @@ int main(int argc, char** argv) {
   node->declare_parameter("sensing_horizon", 0.0);
   node->declare_parameter("sensing_rate", 0.0);
   node->declare_parameter("estimation_rate", 0.0);
+  node->declare_parameter("renderer_mode", "legacy_radius_crop_v1");
+  node->declare_parameter("lidar.horizontal_samples", 512);
+  node->declare_parameter("lidar.vertical_samples", 40);
+  node->declare_parameter("lidar.horizontal_fov_deg", 360.0);
+  node->declare_parameter("lidar.vertical_min_deg", -7.0);
+  node->declare_parameter("lidar.vertical_max_deg", 52.0);
+  node->declare_parameter("lidar.min_range_m", 0.1);
+  node->declare_parameter("lidar.max_range_m", 10.0);
+  node->declare_parameter("lidar.world_voxel_resolution_m", 0.1);
 
   node->declare_parameter("map/x_size", 0.0);
   node->declare_parameter("map/y_size", 0.0);
@@ -219,10 +295,30 @@ int main(int argc, char** argv) {
   node->get_parameter("sensing_horizon", sensing_horizon);
   node->get_parameter("sensing_rate", sensing_rate);
   node->get_parameter("estimation_rate", estimation_rate);
+  node->get_parameter("renderer_mode", renderer_mode);
+  node->get_parameter("lidar.horizontal_samples", first_hit_config.horizontal_samples);
+  node->get_parameter("lidar.vertical_samples", first_hit_config.vertical_samples);
+  node->get_parameter("lidar.horizontal_fov_deg", first_hit_config.horizontal_fov_deg);
+  node->get_parameter("lidar.vertical_min_deg", first_hit_config.vertical_min_deg);
+  node->get_parameter("lidar.vertical_max_deg", first_hit_config.vertical_max_deg);
+  node->get_parameter("lidar.min_range_m", first_hit_config.min_range_m);
+  node->get_parameter("lidar.max_range_m", first_hit_config.max_range_m);
+  node->get_parameter(
+      "lidar.world_voxel_resolution_m", first_hit_config.world_voxel_resolution_m);
   node->get_parameter("map/x_size", _x_size);
   node->get_parameter("map/y_size", _y_size);
   node->get_parameter("map/z_size", _z_size);
   node->get_parameter("map/resolution", _resolution);
+
+  if (renderer_mode == "spherical_first_hit_v1") {
+    first_hit_renderer =
+        std::make_unique<local_sensing::FirstHitLidarRenderer>(first_hit_config);
+  } else if (renderer_mode != "legacy_radius_crop_v1") {
+    RCLCPP_ERROR(
+        node->get_logger(), "unsupported renderer_mode=%s", renderer_mode.c_str());
+    rclcpp::shutdown();
+    return 2;
+  }
 
   // 订阅点云数据
   global_map_sub = node->create_subscription<sensor_msgs::msg::PointCloud2>(
@@ -236,10 +332,12 @@ int main(int argc, char** argv) {
   pub_cloud = node->create_publisher<sensor_msgs::msg::PointCloud2>("pcl_render_node/cloud", 10);
   RCLCPP_INFO(
       node->get_logger(),
-      "pcl_render ready cloud_topic=pcl_render_node/cloud sensing_horizon=%.3f sensing_rate=%.3f map_resolution=%.3f",
+      "pcl_render ready cloud_topic=pcl_render_node/cloud renderer=%s sensing_horizon=%.3f sensing_rate=%.3f map_resolution=%.3f rays=%d",
+      renderer_mode.c_str(),
       sensing_horizon,
       sensing_rate,
-      _resolution);
+      _resolution,
+      first_hit_config.horizontal_samples * first_hit_config.vertical_samples);
 
   // 定时器：控制渲染频率
   double sensing_duration = 1.0 / sensing_rate;
