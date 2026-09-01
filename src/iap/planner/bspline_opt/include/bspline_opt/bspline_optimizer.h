@@ -36,8 +36,17 @@ namespace ego_planner
     NO_COLLISION,
     CLOSED_SEGMENTS,
     NATIVE_ASTAR_NO_PATH,
+    NATIVE_ASTAR_INVALID_RESULT,
     OPEN_ENDED_COLLISION,
     INVALID_INPUT
+  };
+
+  enum class NativeAStarGuideStatus
+  {
+    OK,
+    INVALID_INPUT,
+    SEARCH_NO_PATH,
+    INVALID_RESULT
   };
 
   struct CollisionScanResult
@@ -447,7 +456,7 @@ namespace ego_planner
     // Collision rebound is deliberately risk-agnostic. P4 now selects an
     // initial forward route before B-spline construction; closed collision
     // segments retain the native EGO A* repair path only.
-    bool collectNativeAStarGuides(
+    NativeAStarGuideStatus collectNativeAStarGuides(
         const Eigen::MatrixXd &points,
         const std::vector<std::pair<int, int>> &segments,
         std::vector<std::vector<Eigen::Vector3d>> *guide_paths);

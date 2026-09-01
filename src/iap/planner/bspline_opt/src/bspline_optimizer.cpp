@@ -570,13 +570,13 @@ namespace ego_planner
     active_p4_attempt_id_ = 0;
   }
 
-  bool BsplineOptimizer::collectNativeAStarGuides(
+  NativeAStarGuideStatus BsplineOptimizer::collectNativeAStarGuides(
       const Eigen::MatrixXd &points,
       const std::vector<std::pair<int, int>> &segments,
       std::vector<std::vector<Eigen::Vector3d>> *guide_paths)
   {
     if (!guide_paths || !a_star_)
-      return false;
+      return NativeAStarGuideStatus::INVALID_INPUT;
     guide_paths->clear();
     guide_paths->reserve(segments.size());
     a_star_->clearRiskSnapshot();
@@ -584,22 +584,26 @@ namespace ego_planner
     for (const auto &segment : segments)
     {
       if (segment.first < 0 || segment.second >= points.cols() ||
-          segment.first >= segment.second ||
-          !a_star_->AstarSearchOriginal(
+          segment.first >= segment.second)
+      {
+        guide_paths->clear();
+        return NativeAStarGuideStatus::INVALID_INPUT;
+      }
+      if (!a_star_->AstarSearchOriginal(
               0.1, points.col(segment.first), points.col(segment.second)))
       {
         guide_paths->clear();
-        return false;
+        return NativeAStarGuideStatus::SEARCH_NO_PATH;
       }
       auto path = a_star_->getPath();
       if (path.size() < 2)
       {
         guide_paths->clear();
-        return false;
+        return NativeAStarGuideStatus::INVALID_RESULT;
       }
       guide_paths->push_back(std::move(path));
     }
-    return true;
+    return NativeAStarGuideStatus::OK;
   }
 
   bool BsplineOptimizer::refineP4ForwardGuide(
@@ -1192,6 +1196,8 @@ namespace ego_planner
         return "CLOSED_SEGMENTS";
       case CollisionScanStatus::NATIVE_ASTAR_NO_PATH:
         return "NATIVE_ASTAR_NO_PATH";
+      case CollisionScanStatus::NATIVE_ASTAR_INVALID_RESULT:
+        return "NATIVE_ASTAR_INVALID_RESULT";
       case CollisionScanStatus::OPEN_ENDED_COLLISION:
         return "OPEN_ENDED_COLLISION";
       case CollisionScanStatus::INVALID_INPUT:
@@ -1203,8 +1209,25 @@ namespace ego_planner
   bool collisionScanFailsClosed(const CollisionScanStatus status)
   {
     return status == CollisionScanStatus::NATIVE_ASTAR_NO_PATH ||
+           status == CollisionScanStatus::NATIVE_ASTAR_INVALID_RESULT ||
            status == CollisionScanStatus::OPEN_ENDED_COLLISION ||
            status == CollisionScanStatus::INVALID_INPUT;
+  }
+
+  static CollisionScanStatus collisionScanStatusForNativeAStarFailure(
+      const NativeAStarGuideStatus status)
+  {
+    switch (status)
+    {
+      case NativeAStarGuideStatus::SEARCH_NO_PATH:
+        return CollisionScanStatus::NATIVE_ASTAR_NO_PATH;
+      case NativeAStarGuideStatus::INVALID_RESULT:
+        return CollisionScanStatus::NATIVE_ASTAR_INVALID_RESULT;
+      case NativeAStarGuideStatus::INVALID_INPUT:
+      case NativeAStarGuideStatus::OK:
+        return CollisionScanStatus::INVALID_INPUT;
+    }
+    return CollisionScanStatus::INVALID_INPUT;
   }
 
   int BsplineOptimizer::collisionOccupancy(
@@ -1372,11 +1395,12 @@ namespace ego_planner
 
     /*** native EGO A* repair for scanner-closed segments ***/
     vector<vector<Eigen::Vector3d>> a_star_pathes;
-    if (!collectNativeAStarGuides(
-        init_points, segment_ids, &a_star_pathes))
+    const auto native_astar_status = collectNativeAStarGuides(
+        init_points, segment_ids, &a_star_pathes);
+    if (native_astar_status != NativeAStarGuideStatus::OK)
     {
       last_collision_scan_result_.status =
-          CollisionScanStatus::NATIVE_ASTAR_NO_PATH;
+          collisionScanStatusForNativeAStarFailure(native_astar_status);
       last_collision_scan_result_.closed_segments.clear();
       return last_collision_scan_result_;
     }
@@ -2210,9 +2234,13 @@ namespace ego_planner
     if (!segment_ids.empty())
     {
       vector<vector<Eigen::Vector3d>> a_star_pathes;
-      if (!collectNativeAStarGuides(
-          cps_.points, segment_ids, &a_star_pathes))
+      const auto native_astar_status = collectNativeAStarGuides(
+          cps_.points, segment_ids, &a_star_pathes);
+      if (native_astar_status != NativeAStarGuideStatus::OK)
       {
+        last_collision_scan_result_.status =
+            collisionScanStatusForNativeAStarFailure(native_astar_status);
+        last_collision_scan_result_.closed_segments.clear();
         force_stop_type_ = STOP_FOR_ERROR;
         return false;
       }

@@ -1636,6 +1636,27 @@ namespace ego_planner
     return candidates_csv.good();
   }
 
+  bool EGOPlannerManager::recordP4NativeAStarNoPath(const double stamp_s)
+  {
+    // P4 did not perform this repair search. Preserve native EGO ownership
+    // while exposing its confirmed geometric failure through the v2 contract.
+    // No selected-route lineage is created.
+    last_p4_forward_decision_.action = P4ForwardAction::NO_SAFE_ROUTE;
+    last_p4_forward_decision_.trigger_reason =
+        P4ForwardTriggerReason::NATIVE_ASTAR_NO_PATH;
+    last_p4_forward_decision_.geometry_state =
+        P4ForwardGeometryState::OCCUPIED;
+    last_p4_forward_decision_.selected_candidate_id = 0;
+    last_p4_forward_decision_.selected_guide.clear();
+    last_p4_forward_decision_.deferred_motion_mode =
+        P4ForwardDeferredMotionMode::HOLD;
+    last_p4_forward_decision_.deferred_trajectory.clear();
+    last_p4_forward_decision_.speed_cap_mps = 0.0;
+    last_p4_forward_decision_.reason = "native_ego_astar_no_path";
+    return appendP4ForwardDecision(
+        last_p4_forward_decision_, "native_rebound_no_path", stamp_s);
+  }
+
   bool EGOPlannerManager::recordP4VerticalSliceLineage(
       const std::string &stage, const double stamp_s)
   {
@@ -2257,24 +2278,7 @@ namespace ego_planner
               CollisionScanStatus::NATIVE_ASTAR_NO_PATH &&
           p4_runtime_config.enable_risk_aware_astar)
       {
-        // P4 did not perform this repair search.  Preserve the native EGO
-        // ownership while exposing its confirmed geometric failure through
-        // the v2 decision contract.  No selected-route lineage is created.
-        last_p4_forward_decision_.action = P4ForwardAction::NO_SAFE_ROUTE;
-        last_p4_forward_decision_.trigger_reason =
-            P4ForwardTriggerReason::NO_TOPOLOGY_ROUTE;
-        last_p4_forward_decision_.geometry_state =
-            P4ForwardGeometryState::OCCUPIED;
-        last_p4_forward_decision_.selected_candidate_id = 0;
-        last_p4_forward_decision_.selected_guide.clear();
-        last_p4_forward_decision_.deferred_motion_mode =
-            P4ForwardDeferredMotionMode::HOLD;
-        last_p4_forward_decision_.deferred_trajectory.clear();
-        last_p4_forward_decision_.speed_cap_mps = 0.0;
-        last_p4_forward_decision_.reason = "native_ego_astar_no_path";
-        appendP4ForwardDecision(
-            last_p4_forward_decision_, "native_rebound_no_path",
-            plannerNow().seconds());
+        recordP4NativeAStarNoPath(plannerNow().seconds());
       }
       RCLCPP_WARN(
           rclcpp::get_logger("ego_planner"),

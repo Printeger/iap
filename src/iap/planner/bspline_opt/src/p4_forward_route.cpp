@@ -1213,6 +1213,8 @@ const char * p4ForwardTriggerReasonName(const P4ForwardTriggerReason reason)
     case P4ForwardTriggerReason::COMMON_ANCHOR_UNAVAILABLE: return "COMMON_ANCHOR_UNAVAILABLE";
     case P4ForwardTriggerReason::NOMINAL_CERTIFICATION_SHORT: return "NOMINAL_CERTIFICATION_SHORT";
     case P4ForwardTriggerReason::NO_TOPOLOGY_ROUTE: return "NO_TOPOLOGY_ROUTE";
+    case P4ForwardTriggerReason::NATIVE_ASTAR_NO_PATH:
+      return "NATIVE_ASTAR_NO_PATH";
     case P4ForwardTriggerReason::NO_SAFE_ROUTE: return "NO_SAFE_ROUTE";
     case P4ForwardTriggerReason::REQUEST_INVALID: return "REQUEST_INVALID";
     case P4ForwardTriggerReason::COMPUTE_BUDGET_EXCEEDED: return "COMPUTE_BUDGET_EXCEEDED";
@@ -1605,22 +1607,6 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
     }
     auto prefix = commonGeometryPrefix(
       clear_prefixes, request.limits.topology_resolution_m * 0.5);
-    std::vector<Eigen::Vector3d> nominal_prefix{request.position};
-    for (const auto & point : resample(
-        std::vector<Eigen::Vector3d>{request.position, anchor},
-        request.limits.occupancy_resolution_m))
-    {
-      if ((point - nominal_prefix.back()).norm() <= kEpsilon) {
-        continue;
-      }
-      if (!graph.sweptFree(point)) {
-        break;
-      }
-      nominal_prefix.push_back(point);
-    }
-    if (pathLength(nominal_prefix) > pathLength(prefix)) {
-      prefix = std::move(nominal_prefix);
-    }
     configureKnownGeometryPrefixMotion(request, prefix, &decision);
     if (decision.deferred_motion_mode ==
       P4ForwardDeferredMotionMode::COMMON_PREFIX)

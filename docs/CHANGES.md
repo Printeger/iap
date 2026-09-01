@@ -26,10 +26,12 @@
   refinement. An inconclusive topology probe HOLDs rather than entering an
   un-compared branch or falsely claiming `NO_SAFE_ROUTE`. A forest-scale
   regression and live smoke keep the forward worker below its 150 ms deadline.
-  Native EGO rebound remains the owner of closed-segment A*: a confirmed
-  native search failure is now distinguished from invalid input as
-  `NATIVE_ASTAR_NO_PATH` and exposed by P4 v2 as `NO_SAFE_ROUTE/HOLD` without
-  selected-route lineage.
+  Native EGO rebound remains the owner of closed-segment A*: invalid inputs,
+  malformed results, and a confirmed search failure are distinct. Only
+  `NATIVE_ASTAR_NO_PATH` is exposed by P4 v2 as `NO_SAFE_ROUTE/HOLD`, without
+  selected-route lineage. Deferred motion uses only the intersection prefix
+  shared by every raw topology candidate; a longer nominal branch cannot
+  replace it.
   Planner/P0/P4/P5 remain isolated from `/map_generator/global_cloud`; only
   sensor simulators may consume world truth. The legacy radius crop remains an
   explicit non-ICRA/debug mode. This aligns development behavior with

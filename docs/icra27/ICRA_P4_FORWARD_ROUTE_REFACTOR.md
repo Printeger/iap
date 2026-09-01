@@ -102,7 +102,8 @@ Closed collision segments remain exclusively owned by native EGO rebound A*.
 If that search confirms failure, the collision contract reports
 `NATIVE_ASTAR_NO_PATH`; the manager records a terminal `NO_SAFE_ROUTE/HOLD`
 v2 event without creating risk-selection lineage. Invalid seeds and unavailable
-occupancy remain separate `INVALID_INPUT` failures.
+occupancy remain separate `INVALID_INPUT` failures, and a malformed successful
+search result is `NATIVE_ASTAR_INVALID_RESULT`.
 
 `DEFER_RISK_SELECTION` never sets `selection_applied`, never emits selected
 candidate lineage, and never treats missing risk support as an occupied voxel.
@@ -111,7 +112,9 @@ the forward horizon. A common prefix ends before the first topology split; if
 it is shorter than the configured minimum progress, or any known point is
 unsafe, the FSM holds. Missing support can therefore delay formal risk
 selection without being converted into a geometry obstacle or allowing a
-premature branch choice.
+premature branch choice. In particular, the shared prefix is computed only
+from all raw topology candidates; the nominal reference cannot replace that
+intersection merely because it is longer.
 
 ## Triggering, caching, and latching
 

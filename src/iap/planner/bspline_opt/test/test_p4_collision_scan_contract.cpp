@@ -133,6 +133,29 @@ struct GridMapTestAccess
       }
     }
   }
+
+  static void closeEveryRouteAcrossOccupiedSamples(
+    GridMap * map, const CollisionCase & fixture)
+  {
+    for (int x_index = 0; x_index < map->mp_.map_voxel_num_.x(); ++x_index) {
+      const double x = map->mp_.map_origin_.x() +
+        (static_cast<double>(x_index) + 0.5) * map->mp_.resolution_;
+      const int nearest_sample = static_cast<int>(std::lround(x));
+      if (nearest_sample < 0 ||
+        nearest_sample >= static_cast<int>(fixture.sample_count) ||
+        !fixture.samples[static_cast<std::size_t>(nearest_sample)].occupied)
+      {
+        continue;
+      }
+      for (int y_index = 0; y_index < map->mp_.map_voxel_num_.y(); ++y_index) {
+        for (int z_index = 0; z_index < map->mp_.map_voxel_num_.z(); ++z_index) {
+          map->md_.occupancy_buffer_inflate_[static_cast<std::size_t>(
+            map->toAddress(Eigen::Vector3i(
+              x_index, y_index, z_index)))] = 1;
+        }
+      }
+    }
+  }
 };
 
 namespace
@@ -472,11 +495,29 @@ TEST(P4CollisionScanClosedIntegration,
 }
 
 TEST(P4CollisionScanFailClosedIntegration,
-     NativeAStarFailureHasDistinctNoPathStatus) {
+     MissingNativeAStarIsInvalidInputRatherThanNoPath) {
   auto map = std::make_shared<GridMap>();
   GridMapTestAccess::configure(map.get(), p4_collision_fixture::kOneClosed);
   auto optimizer = makeOptimizer(map);
   optimizer->a_star_.reset();
+  Eigen::MatrixXd seed = seedMatrix(p4_collision_fixture::kOneClosed);
+
+  const auto result = optimizer->initControlPoints(seed, true);
+
+  EXPECT_EQ(result.status, ego_planner::CollisionScanStatus::INVALID_INPUT);
+  EXPECT_TRUE(result.closed_segments.empty());
+  EXPECT_TRUE(ego_planner::collisionScanFailsClosed(result.status));
+  EXPECT_STREQ(ego_planner::collisionScanStatusName(result.status),
+               "INVALID_INPUT");
+}
+
+TEST(P4CollisionScanFailClosedIntegration,
+     NativeAStarConfirmedNoPathHasDistinctStatus) {
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configure(map.get(), p4_collision_fixture::kOneClosed);
+  GridMapTestAccess::closeEveryRouteAcrossOccupiedSamples(
+    map.get(), p4_collision_fixture::kOneClosed);
+  auto optimizer = makeOptimizer(map);
   Eigen::MatrixXd seed = seedMatrix(p4_collision_fixture::kOneClosed);
 
   const auto result = optimizer->initControlPoints(seed, true);

@@ -179,6 +179,10 @@ namespace ego_planner
     {
       latest_risk_snapshot_for_test_ = std::move(snapshot);
     }
+    bool recordP4NativeAStarNoPathForTest(double stamp_s)
+    {
+      return recordP4NativeAStarNoPath(stamp_s);
+    }
 
     PlanParameters pp_;
     LocalTrajData local_data_;
@@ -243,6 +247,7 @@ namespace ego_planner
     bool appendP4ForwardDecision(const P4ForwardDecision &decision,
                                  const std::string &stage,
                                  double stamp_s);
+    bool recordP4NativeAStarNoPath(double stamp_s);
 
     void appendPlanningRiskContextTimeline(const std::string &stage,
                                            double stamp_s,

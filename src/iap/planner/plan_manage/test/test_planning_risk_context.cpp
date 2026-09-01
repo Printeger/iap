@@ -454,6 +454,47 @@ TEST(P4ForwardTerminalLineageTest,
 }
 
 TEST(P4ForwardTerminalLineageTest,
+     NativeAStarNoPathWritesTerminalHoldWithoutSelectionLineage) {
+  const auto snapshot = makeP4SelectionSnapshot();
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureNoCollision(map.get());
+  const auto debug_path = p4LineageTestPath("forward_native_no_path.csv");
+  const auto lineage_path = std::filesystem::path(
+      debug_path.string() + ".forward_lineage.csv");
+  const auto candidates_path = std::filesystem::path(
+      debug_path.string() + ".forward_candidates.csv");
+  std::filesystem::remove(lineage_path);
+  std::filesystem::remove(candidates_path);
+  auto optimizer = makeP4Optimizer(map, snapshot, debug_path.string(), 1);
+
+  ego_planner::EGOPlannerManager manager;
+  manager.setP4VerticalSliceOptimizerForTest(std::move(optimizer), map);
+  manager.setPlanningRiskContextForTest(snapshot, 10.0);
+  manager.setP4ForwardDecisionForTest(makeForwardDecision(
+      snapshot, manager.planningRiskContext().planning_attempt_id));
+
+  ASSERT_TRUE(manager.recordP4NativeAStarNoPathForTest(10.25));
+  const auto& decision = manager.lastP4ForwardDecision();
+  EXPECT_EQ(decision.action, ego_planner::P4ForwardAction::NO_SAFE_ROUTE);
+  EXPECT_EQ(decision.trigger_reason,
+            ego_planner::P4ForwardTriggerReason::NATIVE_ASTAR_NO_PATH);
+  EXPECT_EQ(decision.deferred_motion_mode,
+            ego_planner::P4ForwardDeferredMotionMode::HOLD);
+  EXPECT_EQ(decision.selected_candidate_id, 0u);
+  EXPECT_TRUE(decision.selected_guide.empty());
+  EXPECT_TRUE(decision.deferred_trajectory.empty());
+  EXPECT_DOUBLE_EQ(decision.speed_cap_mps, 0.0);
+
+  const auto rows = readCsvRows(lineage_path);
+  ASSERT_EQ(rows.size(), 1u);
+  EXPECT_EQ(rows[0].at("stage"), "native_rebound_no_path");
+  EXPECT_EQ(rows[0].at("action"), "NO_SAFE_ROUTE");
+  EXPECT_EQ(rows[0].at("trigger_reason"), "NATIVE_ASTAR_NO_PATH");
+  EXPECT_EQ(rows[0].at("selected_candidate_id"), "0");
+  EXPECT_FALSE(std::filesystem::exists(candidates_path));
+}
+
+TEST(P4ForwardTerminalLineageTest,
      RejectsSnapshotTrajectoryAndWriterFailuresBeforePublication) {
   const auto snapshot = makeP4SelectionSnapshot();
   auto map = std::make_shared<GridMap>();
