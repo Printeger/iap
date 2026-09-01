@@ -190,7 +190,7 @@ TEST(P4ForwardRoute, ForestSizedClearSnapshotMeetsForwardDecisionBudget)
   EXPECT_FALSE(decision.candidates.empty());
 }
 
-TEST(P4ForwardRoute, InconclusiveTopologyProbeDefersToNativeEgo)
+TEST(P4ForwardRoute, InconclusiveTopologyProbeHoldsBeforeAnyBranch)
 {
   auto request = straightRequest();
   request.geometry = [](const Eigen::Vector3d & point) {
@@ -204,12 +204,10 @@ TEST(P4ForwardRoute, InconclusiveTopologyProbeDefersToNativeEgo)
 
   EXPECT_EQ(decision.action, P4ForwardAction::DEFER_RISK_SELECTION);
   EXPECT_EQ(decision.deferred_motion_mode,
-            ego_planner::P4ForwardDeferredMotionMode::NATIVE_EGO);
-  EXPECT_EQ(decision.reason, "topology_probe_inconclusive_native_ego");
+            ego_planner::P4ForwardDeferredMotionMode::HOLD);
+  EXPECT_EQ(decision.reason, "topology_probe_inconclusive_hold");
   EXPECT_TRUE(decision.selected_guide.empty());
-  EXPECT_GT(decision.speed_cap_mps, 0.0);
-  EXPECT_LE(decision.speed_cap_mps,
-            request.limits.max_observe_speed_mps);
+  EXPECT_DOUBLE_EQ(decision.speed_cap_mps, 0.0);
 }
 
 TEST(P4ForwardRoute, MissingRiskSupportDefersSelectionAtLimitedSpeed)

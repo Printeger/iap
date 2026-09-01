@@ -381,15 +381,18 @@ class TestRunnerLifecycle(unittest.TestCase):
         self.assertEqual(stats["hit_count_max"], 456)
         self.assertEqual(stats["render_latency_ms_max"], 52.0)
         self.assertAlmostEqual(stats["effective_rate_hz"], 10.0)
+        self.assertAlmostEqual(stats["frame_interval_s_max"], 0.1)
         renderer = {"mode": "spherical_first_hit_v1", "ray_count": 20480}
         self.assertEqual(MODULE.lidar_runtime_failures(renderer, stats), [])
 
         slow = dict(stats, render_latency_ms_p95=80.0,
-                    effective_rate_hz=9.0, ray_count_min=1024)
+                    effective_rate_hz=9.0, ray_count_min=1024,
+                    frame_interval_s_max=0.25)
         self.assertEqual(
             MODULE.lidar_runtime_failures(renderer, slow),
             ["lidar_ray_count_drift", "lidar_render_p95_exceeded",
-             "lidar_effective_rate_below_9_5hz"],
+             "lidar_effective_rate_below_9_5hz",
+             "lidar_frame_gap_exceeded_0_2s"],
         )
 
     @staticmethod

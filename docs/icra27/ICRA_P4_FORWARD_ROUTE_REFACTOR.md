@@ -94,9 +94,15 @@ New runs emit `p4_forward_route_decision_v2` with independent
   their `COMMON_PREFIX`; otherwise the decision is `HOLD`;
 - `REPLAN_REQUIRED`: invalid, stale asynchronous, or over-budget result;
 - `NO_SAFE_ROUTE`: native EGO geometry has confirmed no route, or no complete
-  candidate passes the safety gate. A bounded P4 topology probe that finds no
-  representative is only inconclusive and defers to `NATIVE_EGO`; it is not a
-  no-route proof.
+candidate passes the safety gate. A bounded P4 topology probe that finds no
+  representative is only inconclusive and `HOLD`s; it is not a no-route or
+  single-channel proof.
+
+Closed collision segments remain exclusively owned by native EGO rebound A*.
+If that search confirms failure, the collision contract reports
+`NATIVE_ASTAR_NO_PATH`; the manager records a terminal `NO_SAFE_ROUTE/HOLD`
+v2 event without creating risk-selection lineage. Invalid seeds and unavailable
+occupancy remain separate `INVALID_INPUT` failures.
 
 `DEFER_RISK_SELECTION` never sets `selection_applied`, never emits selected
 candidate lineage, and never treats missing risk support as an occupied voxel.
@@ -104,7 +110,7 @@ Its speed is capped at 0.5 m/s and by the same physical stopping model used for
 the forward horizon. A common prefix ends before the first topology split; if
 it is shorter than the configured minimum progress, or any known point is
 unsafe, the FSM holds. Missing support can therefore delay formal risk
-selection without deadlocking ordinary EGO geometry planning or allowing a
+selection without being converted into a geometry obstacle or allowing a
 premature branch choice.
 
 ## Triggering, caching, and latching
@@ -118,11 +124,13 @@ combined generation changes, the target changes, the UAV advances by at least
 0.5 m, or the latched route loses support. Identical requests reuse the cached
 decision.
 
-The topology front end starts from the nominal route and deterministic 3-D
-lateral/vertical waypoint probes, clusters only occupancy-separated probes,
-and sends retained formal candidates through native frozen A* refinement.
-This avoids spending the 150 ms budget enumerating many lattice variants in
-one wide open channel. A forest-sized clear-snapshot regression enforces the
+The topology front end splits its bounded raw-candidate budget between Yen
+K-shortest routes and deterministic smooth 3-D lateral/vertical probes,
+clusters only occupancy-separated routes, and sends retained formal candidates
+through native frozen A* refinement. Coarse Yen expansion uses the binary EGO
+hit/inflated lattice; the full vehicle sweep is mandatory before a route can be
+retained. This avoids spending the 150 ms budget entirely on lattice variants
+inside one wide channel. A forest-sized clear-snapshot regression enforces the
 deadline.
 
 A selected channel is latched until its common anchor is reached. While a new

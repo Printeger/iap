@@ -389,6 +389,14 @@ def lidar_runtime_stats(stdout: str) -> dict:
     p95_index = max(0, math.ceil(0.95 * len(latencies)) - 1)
     frame_span = rows[-1][0] - rows[0][0]
     stamp_span_s = rows[-1][1] - rows[0][1]
+    frame_intervals_s = [
+        (current[1] - previous[1]) / (current[0] - previous[0])
+        for previous, current in zip(rows, rows[1:])
+        if current[0] > previous[0] and current[1] > previous[1]
+    ]
+    sorted_intervals = sorted(frame_intervals_s)
+    interval_p95_index = max(
+        0, math.ceil(0.95 * len(sorted_intervals)) - 1)
     return {
         "sample_count": len(rows),
         "first_frame": rows[0][0],
@@ -401,6 +409,13 @@ def lidar_runtime_stats(stdout: str) -> dict:
         "effective_rate_hz": (
             frame_span / stamp_span_s
             if frame_span > 0 and stamp_span_s > 0.0 else None
+        ),
+        "frame_interval_s_p95": (
+            sorted_intervals[interval_p95_index]
+            if sorted_intervals else None
+        ),
+        "frame_interval_s_max": (
+            sorted_intervals[-1] if sorted_intervals else None
         ),
         "render_latency_ms_p95": latencies[p95_index],
         "render_latency_ms_max": latencies[-1],
@@ -426,6 +441,10 @@ def lidar_runtime_failures(renderer: dict | None, stats: dict) -> list[str]:
     if (not isinstance(effective_rate_hz, (int, float)) or
             effective_rate_hz < 9.5):
         failures.append("lidar_effective_rate_below_9_5hz")
+    max_frame_interval_s = stats.get("frame_interval_s_max")
+    if (not isinstance(max_frame_interval_s, (int, float)) or
+            max_frame_interval_s > 0.2):
+        failures.append("lidar_frame_gap_exceeded_0_2s")
     return failures
 
 

@@ -35,6 +35,7 @@ namespace ego_planner
   {
     NO_COLLISION,
     CLOSED_SEGMENTS,
+    NATIVE_ASTAR_NO_PATH,
     OPEN_ENDED_COLLISION,
     INVALID_INPUT
   };

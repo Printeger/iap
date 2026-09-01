@@ -472,6 +472,24 @@ TEST(P4CollisionScanClosedIntegration,
 }
 
 TEST(P4CollisionScanFailClosedIntegration,
+     NativeAStarFailureHasDistinctNoPathStatus) {
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configure(map.get(), p4_collision_fixture::kOneClosed);
+  auto optimizer = makeOptimizer(map);
+  optimizer->a_star_.reset();
+  Eigen::MatrixXd seed = seedMatrix(p4_collision_fixture::kOneClosed);
+
+  const auto result = optimizer->initControlPoints(seed, true);
+
+  EXPECT_EQ(result.status,
+            ego_planner::CollisionScanStatus::NATIVE_ASTAR_NO_PATH);
+  EXPECT_TRUE(result.closed_segments.empty());
+  EXPECT_TRUE(ego_planner::collisionScanFailsClosed(result.status));
+  EXPECT_STREQ(ego_planner::collisionScanStatusName(result.status),
+               "NATIVE_ASTAR_NO_PATH");
+}
+
+TEST(P4CollisionScanFailClosedIntegration,
      ReboundOpenEndedAndInvalidStopBeforeAStar) {
   auto open_map = std::make_shared<GridMap>();
   GridMapTestAccess::configure(

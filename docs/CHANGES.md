@@ -17,14 +17,19 @@
   hit per ray, and treat no-return as a legal empty hit cloud rather than a
   fabricated PointCloud2 field. Empty frames refresh the EGO rolling map.
   The runner now gates every first-hit frame on the declared ray count,
-  measured rate ≥9.5 Hz, and render-latency p95 <80 ms.
+  measured rate ≥9.5 Hz, maximum inter-frame gap ≤0.2 s, and render-latency
+  p95 <80 ms.
   P4 provisional async states without a re-certified latch now HOLD. Its
-  topology front end avoids enumerating redundant Yen lattice variants in an
-  open 3-D grid: it clusters bounded nominal and lateral/vertical probes, then
-  retains native frozen A* as the formal-guide refinement. An inconclusive
-  bounded probe defers to native EGO geometry rather than claiming
-  `NO_SAFE_ROUTE`. A forest-scale regression and live smoke keep the forward
-  worker below its 150 ms deadline.
+  topology front end bounds Yen expansion on the binary EGO lattice, reserves
+  raw-candidate capacity for smooth lateral/vertical 3-D probes, then applies
+  full swept-volume checks, topology clustering and native frozen A* formal
+  refinement. An inconclusive topology probe HOLDs rather than entering an
+  un-compared branch or falsely claiming `NO_SAFE_ROUTE`. A forest-scale
+  regression and live smoke keep the forward worker below its 150 ms deadline.
+  Native EGO rebound remains the owner of closed-segment A*: a confirmed
+  native search failure is now distinguished from invalid input as
+  `NATIVE_ASTAR_NO_PATH` and exposed by P4 v2 as `NO_SAFE_ROUTE/HOLD` without
+  selected-route lineage.
   Planner/P0/P4/P5 remain isolated from `/map_generator/global_cloud`; only
   sensor simulators may consume world truth. The legacy radius crop remains an
   explicit non-ICRA/debug mode. This aligns development behavior with

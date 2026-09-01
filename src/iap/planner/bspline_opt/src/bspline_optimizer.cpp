@@ -1190,6 +1190,8 @@ namespace ego_planner
         return "NO_COLLISION";
       case CollisionScanStatus::CLOSED_SEGMENTS:
         return "CLOSED_SEGMENTS";
+      case CollisionScanStatus::NATIVE_ASTAR_NO_PATH:
+        return "NATIVE_ASTAR_NO_PATH";
       case CollisionScanStatus::OPEN_ENDED_COLLISION:
         return "OPEN_ENDED_COLLISION";
       case CollisionScanStatus::INVALID_INPUT:
@@ -1200,7 +1202,8 @@ namespace ego_planner
 
   bool collisionScanFailsClosed(const CollisionScanStatus status)
   {
-    return status == CollisionScanStatus::OPEN_ENDED_COLLISION ||
+    return status == CollisionScanStatus::NATIVE_ASTAR_NO_PATH ||
+           status == CollisionScanStatus::OPEN_ENDED_COLLISION ||
            status == CollisionScanStatus::INVALID_INPUT;
   }
 
@@ -1372,7 +1375,9 @@ namespace ego_planner
     if (!collectNativeAStarGuides(
         init_points, segment_ids, &a_star_pathes))
     {
-      last_collision_scan_result_ = CollisionScanResult{};
+      last_collision_scan_result_.status =
+          CollisionScanStatus::NATIVE_ASTAR_NO_PATH;
+      last_collision_scan_result_.closed_segments.clear();
       return last_collision_scan_result_;
     }
 
