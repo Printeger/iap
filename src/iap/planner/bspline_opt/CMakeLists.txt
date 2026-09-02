@@ -57,6 +57,7 @@ add_library(bspline_opt
     src/uniform_bspline.cpp
     src/bspline_optimizer.cpp
     src/p4_collision_guide.cpp
+    src/p4_geometry_commit.cpp
     src/p4_forward_route.cpp
     src/gradient_descent_optimizer.cpp
 )

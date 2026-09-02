@@ -1,8 +1,10 @@
 #include <gtest/gtest.h>
 
 #include <bspline_opt/p4_forward_route.h>
+#include <bspline_opt/p4_geometry_commit.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cmath>
 #include <chrono>
@@ -15,6 +17,90 @@
 namespace
 {
 
+std::shared_ptr<FrozenOccupancyEpoch> makeClearCommitEpoch(
+  const uint64_t generation = 10u,
+  const double resolution = 1.0,
+  const Eigen::Vector3i dimensions = Eigen::Vector3i(10, 10, 3))
+{
+  auto epoch = std::make_shared<FrozenOccupancyEpoch>();
+  epoch->lattice_origin = Eigen::Vector3d::Zero();
+  epoch->voxel_dimensions = dimensions;
+  epoch->extent_m = resolution * dimensions.cast<double>();
+  epoch->resolution_m = resolution;
+  epoch->frame_id = "map";
+  epoch->geometry_id = "commit-geometry";
+  epoch->cloud_stamp_s = 100.0;
+  epoch->generation = generation;
+  epoch->raw_occupied_voxel_centers =
+    std::make_shared<const std::vector<Eigen::Vector3d>>();
+  epoch->diagnostic_query = [dimensions, generation, resolution](
+    const Eigen::Vector3d & point) {
+      GridMapOccupancyDiagnostic diagnostic;
+      diagnostic.resolution_m = resolution;
+      diagnostic.frame_id = "map";
+      diagnostic.generation = generation;
+      diagnostic.cloud_stamp_s = 100.0;
+      diagnostic.voxel_index =
+        (point / resolution).array().floor().cast<int>();
+      if ((diagnostic.voxel_index.array() < 0).any() ||
+        (diagnostic.voxel_index.array() >=
+        dimensions.array()).any())
+      {
+        diagnostic.source = "position_out_of_map";
+        return diagnostic;
+      }
+      diagnostic.available = true;
+      diagnostic.voxel_center =
+        resolution * (diagnostic.voxel_index.cast<double>() +
+        Eigen::Vector3d::Constant(0.5));
+      diagnostic.state = GridMapObservationState::UNKNOWN;
+      diagnostic.source = "unknown";
+      return diagnostic;
+    };
+  return epoch;
+}
+
+std::shared_ptr<FrozenOccupancyEpoch> makeInflatedOnlyCommitEpoch(
+  const Eigen::Vector3i & inflated_voxel)
+{
+  auto epoch = makeClearCommitEpoch();
+  const auto clear_query = epoch->diagnostic_query;
+  epoch->diagnostic_query =
+    [clear_query, inflated_voxel](const Eigen::Vector3d & point) {
+      auto diagnostic = clear_query(point);
+      if (diagnostic.available &&
+        diagnostic.voxel_index.isApprox(inflated_voxel, 0))
+      {
+        diagnostic.inflated_occupied = true;
+        diagnostic.state = GridMapObservationState::OCCUPIED;
+        diagnostic.source = "inflated_policy_obstacle";
+      }
+      return diagnostic;
+    };
+  return epoch;
+}
+
+OccupancyCollisionDeltaHistory makeCommitHistory(
+  const Eigen::Vector3i & changed_voxel,
+  const uint64_t from_generation = 10u,
+  const uint64_t to_generation = 11u)
+{
+  auto delta = std::make_shared<OccupancyCollisionDelta>();
+  delta->from_generation = from_generation;
+  delta->to_generation = to_generation;
+  delta->stamp_s = 100.1;
+  delta->geometry_id = "commit-geometry";
+  delta->complete = true;
+  delta->changes.push_back({changed_voxel, true});
+  OccupancyCollisionDeltaHistory history;
+  history.base_generation = from_generation;
+  history.latest_generation = to_generation;
+  history.complete = true;
+  history.geometry_id = delta->geometry_id;
+  history.deltas.push_back(std::move(delta));
+  return history;
+}
+
 using ego_planner::P4ForwardAction;
 using ego_planner::P4ForwardGeometryState;
 using ego_planner::P4ForwardRequest;
@@ -25,6 +111,269 @@ using ego_planner::P4ForwardRoutePlanner;
 using ego_planner::P4ForwardSafetyState;
 using ego_planner::P4ForwardSelectionAuthority;
 using ego_planner::P4ForwardTriggerReason;
+
+TEST(P4GeometryCommit, RemoteNewHitDoesNotInvalidateExecutableCorridor)
+{
+  ego_planner::P4GeometryCommitRequest request;
+  request.bound_occupancy = makeClearCommitEpoch();
+  request.history = makeCommitHistory(Eigen::Vector3i(4, 8, 1));
+  request.executable_path = {
+    Eigen::Vector3d(1.5, 5.5, 1.5), Eigen::Vector3d(8.5, 5.5, 1.5)};
+  request.vehicle_radius_m = 0.35;
+  request.map_inflation_m = 0.10;
+  request.expected_geometry_id = "commit-geometry";
+  request.compute_budget_ms = 10.0;
+
+  const auto result =
+    ego_planner::P4GeometryCommitValidator().validate(request);
+
+  EXPECT_EQ(result.verdict,
+    ego_planner::P4GeometryCommitVerdict::CLEAR_AFTER_UPDATE);
+  EXPECT_EQ(result.base_generation, 10u);
+  EXPECT_EQ(result.checked_generation, 11u);
+  EXPECT_EQ(result.semantic_changed_voxels, 1u);
+  EXPECT_EQ(result.route_relevant_new_hits, 0u);
+}
+
+TEST(P4GeometryCommit, NewHitInsideSweptCorridorRejectsWithConflictPosition)
+{
+  ego_planner::P4GeometryCommitRequest request;
+  request.bound_occupancy = makeClearCommitEpoch();
+  request.history = makeCommitHistory(Eigen::Vector3i(4, 5, 1));
+  request.executable_path = {
+    Eigen::Vector3d(1.5, 5.5, 1.5), Eigen::Vector3d(8.5, 5.5, 1.5)};
+  request.vehicle_radius_m = 0.35;
+  request.map_inflation_m = 0.10;
+  request.expected_geometry_id = "commit-geometry";
+  request.compute_budget_ms = 10.0;
+
+  const auto result =
+    ego_planner::P4GeometryCommitValidator().validate(request);
+
+  EXPECT_EQ(result.verdict,
+    ego_planner::P4GeometryCommitVerdict::NEW_ROUTE_COLLISION);
+  EXPECT_EQ(result.route_relevant_new_hits, 1u);
+  EXPECT_TRUE(result.first_conflict_position.isApprox(
+    Eigen::Vector3d(4.5, 5.5, 1.5), 0.0));
+}
+
+TEST(P4GeometryCommit, ReportsFirstConflictAlongRouteNotLowestVoxelAddress)
+{
+  auto delta = std::make_shared<OccupancyCollisionDelta>();
+  delta->from_generation = 10u;
+  delta->to_generation = 11u;
+  delta->stamp_s = 100.1;
+  delta->geometry_id = "commit-geometry";
+  delta->complete = true;
+  // The route travels from high x to low x. The first conflict therefore has
+  // the larger linear voxel address, which guards against address-ordering.
+  delta->changes.push_back({Eigen::Vector3i(3, 5, 1), true});
+  delta->changes.push_back({Eigen::Vector3i(7, 5, 1), true});
+  OccupancyCollisionDeltaHistory history;
+  history.base_generation = 10u;
+  history.latest_generation = 11u;
+  history.complete = true;
+  history.geometry_id = delta->geometry_id;
+  history.deltas.push_back(std::move(delta));
+
+  ego_planner::P4GeometryCommitRequest request;
+  request.bound_occupancy = makeClearCommitEpoch();
+  request.history = std::move(history);
+  request.executable_path = {
+    Eigen::Vector3d(8.5, 5.5, 1.5), Eigen::Vector3d(1.5, 5.5, 1.5)};
+  request.vehicle_radius_m = 0.35;
+  request.map_inflation_m = 0.10;
+  request.expected_geometry_id = "commit-geometry";
+  request.compute_budget_ms = 10.0;
+
+  const auto result =
+    ego_planner::P4GeometryCommitValidator().validate(request);
+
+  EXPECT_EQ(result.verdict,
+    ego_planner::P4GeometryCommitVerdict::NEW_ROUTE_COLLISION);
+  EXPECT_EQ(result.route_relevant_new_hits, 2u);
+  EXPECT_TRUE(result.first_conflict_position.isApprox(
+    Eigen::Vector3d(7.5, 5.5, 1.5), 0.0));
+  EXPECT_LT(result.first_conflict_path_distance_m, 1.0);
+}
+
+TEST(P4GeometryCommit, InflatedOnlyPolicyObstacleBlocksBaseline)
+{
+  ego_planner::P4GeometryCommitRequest request;
+  request.bound_occupancy = makeInflatedOnlyCommitEpoch(
+    Eigen::Vector3i(4, 5, 1));
+  request.history.base_generation = 10u;
+  request.history.latest_generation = 10u;
+  request.history.complete = true;
+  request.executable_path = {
+    Eigen::Vector3d(1.5, 5.5, 1.5), Eigen::Vector3d(8.5, 5.5, 1.5)};
+  request.vehicle_radius_m = 0.35;
+  request.map_inflation_m = 0.10;
+  request.expected_geometry_id = "commit-geometry";
+
+  const auto result =
+    ego_planner::P4GeometryCommitValidator().validate(request);
+
+  EXPECT_EQ(result.verdict,
+    ego_planner::P4GeometryCommitVerdict::BASE_COLLISION);
+  EXPECT_TRUE(result.first_conflict_position.isApprox(
+    Eigen::Vector3d(4.5, 5.5, 1.5), 0.0));
+}
+
+TEST(P4GeometryCommit, MissingDeltaGenerationFailsClosed)
+{
+  ego_planner::P4GeometryCommitRequest request;
+  request.bound_occupancy = makeClearCommitEpoch();
+  request.history = makeCommitHistory(Eigen::Vector3i(4, 8, 1));
+  request.history.complete = false;
+  request.executable_path = {
+    Eigen::Vector3d(1.5, 5.5, 1.5), Eigen::Vector3d(8.5, 5.5, 1.5)};
+  request.vehicle_radius_m = 0.35;
+  request.map_inflation_m = 0.10;
+  request.expected_geometry_id = "commit-geometry";
+
+  const auto result =
+    ego_planner::P4GeometryCommitValidator().validate(request);
+
+  EXPECT_EQ(result.verdict,
+    ego_planner::P4GeometryCommitVerdict::HISTORY_GAP);
+}
+
+TEST(P4GeometryCommit, CollisionPolicyChangeFailsClosed)
+{
+  ego_planner::P4GeometryCommitRequest request;
+  request.bound_occupancy = makeClearCommitEpoch();
+  request.history.base_generation = 10u;
+  request.history.latest_generation = 10u;
+  request.history.complete = true;
+  request.executable_path = {
+    Eigen::Vector3d(1.5, 5.5, 1.5), Eigen::Vector3d(8.5, 5.5, 1.5)};
+  request.vehicle_radius_m = 0.35;
+  request.map_inflation_m = 0.10;
+  request.expected_geometry_id = "commit-geometry";
+  request.expected_collision_policy_id =
+    ego_planner::p4CollisionPolicyIdentity(0.50, 0.10, 1.0);
+
+  const auto result =
+    ego_planner::P4GeometryCommitValidator().validate(request);
+
+  EXPECT_EQ(result.verdict,
+    ego_planner::P4GeometryCommitVerdict::POLICY_MISMATCH);
+}
+
+TEST(P4GeometryCommit, RuntimeValidationCanAdvanceFromLastAcceptedGeneration)
+{
+  ego_planner::P4GeometryCommitRequest request;
+  request.bound_occupancy = makeClearCommitEpoch();
+  request.history = makeCommitHistory(Eigen::Vector3i(4, 8, 1), 11u, 12u);
+  request.executable_path = {
+    Eigen::Vector3d(1.5, 5.5, 1.5), Eigen::Vector3d(8.5, 5.5, 1.5)};
+  request.vehicle_radius_m = 0.35;
+  request.map_inflation_m = 0.10;
+  request.expected_geometry_id = "commit-geometry";
+  request.baseline_already_validated = true;
+  request.delta_base_generation = 11u;
+
+  const auto result =
+    ego_planner::P4GeometryCommitValidator().validate(request);
+
+  EXPECT_EQ(result.verdict,
+    ego_planner::P4GeometryCommitVerdict::CLEAR_AFTER_UPDATE);
+  EXPECT_EQ(result.base_generation, 11u);
+  EXPECT_EQ(result.checked_generation, 12u);
+}
+
+TEST(P4GeometryCommit, TemporaryRouteHitReleasedByLatestDeltaDoesNotBlock)
+{
+  const Eigen::Vector3i route_voxel(4, 5, 1);
+  OccupancyCollisionDeltaHistory history;
+  history.base_generation = 10u;
+  history.latest_generation = 12u;
+  history.complete = true;
+  history.geometry_id = "commit-geometry";
+  for (uint64_t generation = 10u; generation < 12u; ++generation) {
+    auto delta = std::make_shared<OccupancyCollisionDelta>();
+    delta->from_generation = generation;
+    delta->to_generation = generation + 1u;
+    delta->geometry_id = history.geometry_id;
+    delta->complete = true;
+    delta->changes.push_back({route_voxel, generation == 10u});
+    history.deltas.push_back(std::move(delta));
+  }
+  ego_planner::P4GeometryCommitRequest request;
+  request.bound_occupancy = makeClearCommitEpoch();
+  request.history = std::move(history);
+  request.executable_path = {
+    Eigen::Vector3d(1.5, 5.5, 1.5), Eigen::Vector3d(8.5, 5.5, 1.5)};
+  request.vehicle_radius_m = 0.35;
+  request.map_inflation_m = 0.10;
+  request.expected_geometry_id = "commit-geometry";
+
+  const auto result =
+    ego_planner::P4GeometryCommitValidator().validate(request);
+
+  EXPECT_EQ(result.verdict,
+    ego_planner::P4GeometryCommitVerdict::CLEAR_AFTER_UPDATE);
+  EXPECT_EQ(result.route_relevant_new_hits, 0u);
+}
+
+TEST(P4GeometryCommit, OccupiedFreeOccupiedMergeUsesFinalOccupiedState)
+{
+  const Eigen::Vector3i route_voxel(4, 5, 1);
+  OccupancyCollisionDeltaHistory history;
+  history.base_generation = 10u;
+  history.latest_generation = 13u;
+  history.complete = true;
+  history.geometry_id = "commit-geometry";
+  const std::array<bool, 3> states = {true, false, true};
+  for (std::size_t index = 0; index < states.size(); ++index) {
+    auto delta = std::make_shared<OccupancyCollisionDelta>();
+    delta->from_generation = 10u + index;
+    delta->to_generation = 11u + index;
+    delta->geometry_id = history.geometry_id;
+    delta->complete = true;
+    delta->changes.push_back({route_voxel, states[index]});
+    history.deltas.push_back(std::move(delta));
+  }
+  ego_planner::P4GeometryCommitRequest request;
+  request.bound_occupancy = makeClearCommitEpoch();
+  request.history = std::move(history);
+  request.executable_path = {
+    Eigen::Vector3d(1.5, 5.5, 1.5), Eigen::Vector3d(8.5, 5.5, 1.5)};
+  request.vehicle_radius_m = 0.35;
+  request.map_inflation_m = 0.10;
+  request.expected_geometry_id = "commit-geometry";
+
+  const auto result =
+    ego_planner::P4GeometryCommitValidator().validate(request);
+
+  EXPECT_EQ(result.verdict,
+    ego_planner::P4GeometryCommitVerdict::NEW_ROUTE_COLLISION);
+  EXPECT_EQ(result.route_relevant_new_hits, 1u);
+}
+
+TEST(P4GeometryCommit, RepresentativeFineLatticeMeetsHardCommitBudget)
+{
+  ego_planner::P4GeometryCommitRequest request;
+  request.bound_occupancy = makeClearCommitEpoch(
+    10u, 0.1, Eigen::Vector3i(100, 100, 30));
+  request.history.base_generation = 10u;
+  request.history.latest_generation = 10u;
+  request.history.complete = true;
+  request.history.geometry_id = "commit-geometry";
+  request.executable_path = {
+    Eigen::Vector3d(1.0, 5.0, 1.5), Eigen::Vector3d(9.0, 5.0, 1.5)};
+  request.vehicle_radius_m = 0.35;
+  request.map_inflation_m = 0.10;
+  request.expected_geometry_id = "commit-geometry";
+  request.compute_budget_ms = 10.0;
+
+  const auto result =
+    ego_planner::P4GeometryCommitValidator().validate(request);
+
+  EXPECT_TRUE(result.accepted()) << result.reason;
+  EXPECT_LT(result.latency_ms, 10.0);
+}
 
 void bindTestRiskBatch(P4ForwardRequest * request)
 {
@@ -400,6 +749,10 @@ TEST(P4ForwardRoute, AsyncResultBindsSnapshotPositionAndTarget)
       decision, request));
   request.local_target.y() -= 0.01;
   ++request.snapshot_identity.risk_generation;
+  EXPECT_FALSE(ego_planner::p4ForwardDecisionMatchesRequest(
+      decision, request));
+  --request.snapshot_identity.risk_generation;
+  request.map_inflation_m += 0.01;
   EXPECT_FALSE(ego_planner::p4ForwardDecisionMatchesRequest(
       decision, request));
 }

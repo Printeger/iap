@@ -8,6 +8,7 @@
 #include <functional>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <string>
 
 #include <bspline_opt/bspline_optimizer.h>
@@ -165,6 +166,11 @@ namespace ego_planner
     bool p4ForwardDecisionReady() const {
       return p4_forward_worker_.resultReady();
     }
+    P4PlanningDisposition p4PlanningDisposition() const {
+      return p4_planning_disposition_;
+    }
+    std::optional<P4GeometryCommitResult>
+    validateCommittedP4TrajectoryGeometry(double now_s);
     void setP4ForwardDecisionForTest(P4ForwardDecision decision)
     {
       last_p4_forward_decision_ = std::move(decision);
@@ -228,6 +234,12 @@ namespace ego_planner
     P4ForwardDecisionWorker p4_forward_worker_;
     P4ForwardDecision last_p4_forward_decision_;
     P4ForwardDecision published_p4_forward_decision_;
+    std::shared_ptr<const FrozenOccupancyEpoch>
+        published_p4_bound_occupancy_;
+    uint64_t published_p4_checked_generation_ = 0;
+    P4PlanningDisposition p4_planning_disposition_ =
+        P4PlanningDisposition::HOLD_REQUIRED;
+    uint64_t p4_retained_trajectory_count_ = 0;
     uint64_t p4_configuration_space_generation_ = 0;
     std::string p4_configuration_space_geometry_id_;
     std::shared_ptr<const std::vector<Eigen::Vector3d>>

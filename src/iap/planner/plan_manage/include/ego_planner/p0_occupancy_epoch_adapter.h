@@ -13,6 +13,8 @@
 #include <iap/map/local_occupancy.hpp>
 #include <iap/planner/risk_grid_map.hpp>
 
+struct FrozenOccupancyEpoch;
+
 namespace ego_planner {
 
 struct P0RawOccupancyChangedBounds {
@@ -84,6 +86,10 @@ struct P0OccupancyEpoch {
   // reuse this vector instead of rebuilding it on the planner callback path.
   std::shared_ptr<const std::vector<Eigen::Vector3d>>
       raw_occupied_voxel_centers;
+  // The exact producer-owned epoch used to build this P0 snapshot. P4 uses
+  // it as the immutable base for route-local commit validation; it must never
+  // be replaced with a newly captured live map.
+  std::shared_ptr<const FrozenOccupancyEpoch> frozen_grid_map_epoch;
   iap::PlanningLatticeGeometry geometry;
   SourceOwner source_owner;
   LiveSourceOwner live_source_owner;

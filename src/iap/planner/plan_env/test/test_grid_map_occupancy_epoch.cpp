@@ -228,6 +228,15 @@ struct GridMapTestAccess {
     return map->occupancy_update_sequence_.load(std::memory_order_acquire);
   }
 
+  static void beginCollisionTransaction(GridMap* map) {
+    map->beginOccupancyWriteTransaction();
+  }
+
+  static void commitCollisionTransaction(GridMap* map,
+                                         const double stamp_s) {
+    map->commitOccupancyWriteTransaction(stamp_s);
+  }
+
   static void seed(GridMap* map,
                    const uint64_t sequence,
                    const double cloud_stamp_s) {
@@ -382,6 +391,26 @@ TEST(GridMapOccupancyEpochTest, InProgressOrPreCloudCaptureFailsClosed) {
   GridMapTestAccess::seed(
       &map, 2u, std::numeric_limits<double>::quiet_NaN());
   EXPECT_EQ(map.captureFrozenOccupancyEpoch(), nullptr);
+}
+
+TEST(GridMapOccupancyEpochTest,
+     CollisionDeltaReadFailsClosedWhileWriteTransactionIsActive) {
+  GridMap map;
+  GridMapTestAccess::configureDepthFusion(&map);
+  GridMapTestAccess::acceptPointCloud(&map, 10, 0U);
+  const uint64_t committed_generation = map.occupancyGeneration();
+
+  GridMapTestAccess::beginCollisionTransaction(&map);
+  const auto in_progress = map.collisionDeltasSince(committed_generation);
+  EXPECT_FALSE(in_progress.complete);
+  EXPECT_EQ(in_progress.latest_generation, committed_generation);
+
+  GridMapTestAccess::commitCollisionTransaction(&map, 10.1);
+  const auto committed = map.collisionDeltasSince(committed_generation);
+  EXPECT_TRUE(committed.complete);
+  EXPECT_EQ(committed.latest_generation, committed_generation + 1u);
+  ASSERT_EQ(committed.deltas.size(), 1u);
+  EXPECT_TRUE(committed.deltas.front()->changes.empty());
 }
 
 TEST(GridMapOccupancyEpochTest,
@@ -562,6 +591,72 @@ TEST(GridMapOccupancyEpochTest,
   EXPECT_FALSE(second->diagnostic_query(previous_hit).raw_occupied);
   EXPECT_EQ(second->diagnostic_query(previous_hit).state,
             GridMapObservationState::UNKNOWN);
+}
+
+TEST(GridMapOccupancyEpochTest,
+     RepeatedStaticCloudAdvancesEpochWithEmptySemanticCollisionDelta) {
+  GridMap map;
+  GridMapTestAccess::configureDepthFusion(&map);
+  const Eigen::Vector3d hit(0.0, 0.0, 1.0);
+  GridMapTestAccess::acceptPointCloudAt(&map, 222, hit);
+  const auto first = map.captureFrozenOccupancyEpoch();
+  ASSERT_NE(first, nullptr);
+
+  GridMapTestAccess::acceptPointCloudAt(&map, 223, hit);
+  const auto second = map.captureFrozenOccupancyEpoch();
+  ASSERT_NE(second, nullptr);
+  ASSERT_GT(second->generation, first->generation);
+
+  const auto history = map.collisionDeltasSince(first->generation);
+  ASSERT_TRUE(history.complete);
+  EXPECT_EQ(history.base_generation, first->generation);
+  EXPECT_EQ(history.latest_generation, second->generation);
+  ASSERT_EQ(history.deltas.size(), 1u);
+  EXPECT_TRUE(history.deltas.front()->changes.empty());
+}
+
+TEST(GridMapOccupancyEpochTest,
+     CollisionDeltaReportsNetRemovedAndAddedHits) {
+  GridMap map;
+  GridMapTestAccess::configureDepthFusion(&map);
+  const Eigen::Vector3d first_hit(0.0, 0.0, 1.0);
+  const Eigen::Vector3d second_hit(-1.0, -1.0, -1.0);
+  GridMapTestAccess::acceptPointCloudAt(&map, 222, first_hit);
+  const auto first = map.captureFrozenOccupancyEpoch();
+  ASSERT_NE(first, nullptr);
+
+  GridMapTestAccess::acceptPointCloudAt(&map, 223, second_hit);
+  const auto history = map.collisionDeltasSince(first->generation);
+
+  ASSERT_TRUE(history.complete);
+  ASSERT_EQ(history.deltas.size(), 1u);
+  ASSERT_TRUE(history.deltas.front()->complete);
+  ASSERT_EQ(history.deltas.front()->changes.size(), 2u);
+  int occupied_count = 0;
+  int released_count = 0;
+  for (const auto& change : history.deltas.front()->changes) {
+    occupied_count += change.occupied ? 1 : 0;
+    released_count += change.occupied ? 0 : 1;
+  }
+  EXPECT_EQ(occupied_count, 1);
+  EXPECT_EQ(released_count, 1);
+}
+
+TEST(GridMapOccupancyEpochTest,
+     CollisionDeltaJournalFailsClosedAfterHistoryCapacityGap) {
+  GridMap map;
+  GridMapTestAccess::configureDepthFusion(&map);
+  const Eigen::Vector3d hit(0.0, 0.0, 1.0);
+  GridMapTestAccess::acceptPointCloudAt(&map, 222, hit);
+  const auto first = map.captureFrozenOccupancyEpoch();
+  ASSERT_NE(first, nullptr);
+
+  for (int stamp = 223; stamp < 353; ++stamp)
+    GridMapTestAccess::acceptPointCloudAt(&map, stamp, hit);
+
+  const auto history = map.collisionDeltasSince(first->generation);
+  EXPECT_FALSE(history.complete);
+  EXPECT_TRUE(history.deltas.empty());
 }
 
 TEST(GridMapOccupancyEpochTest,

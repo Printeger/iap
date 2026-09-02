@@ -11,11 +11,20 @@
 #include <string>
 #include <vector>
 
+#include <bspline_opt/p4_geometry_commit.h>
+
 namespace ego_planner
 {
 
   inline constexpr char kP4ForwardDecisionSchema[] =
-    "p4_forward_route_decision_v3";
+    "p4_forward_route_decision_v4";
+
+  enum class P4PlanningDisposition
+  {
+    NEW_TRAJECTORY_READY = 0,
+    RETAIN_COMMITTED_TRAJECTORY,
+    HOLD_REQUIRED,
+  };
 
   enum class P4ForwardGeometryState
   {
@@ -94,6 +103,7 @@ namespace ego_planner
     P4ForwardSelectionAuthority authority);
   const char * p4ForwardDeferredMotionModeName(
     P4ForwardDeferredMotionMode mode);
+  const char * p4PlanningDispositionName(P4PlanningDisposition disposition);
 
   struct P4ForwardSnapshotIdentity
   {
@@ -251,6 +261,7 @@ namespace ego_planner
     std::shared_ptr<const std::vector<Eigen::Vector3d>>
       raw_occupied_voxel_centers;
     double map_inflation_m = 0.0;
+    double virtual_ceiling_height_m = -1.0;
     double query_time_s = 0.0;
     // Current certified Integrity/ARAIM output captured in the same P0
     // transaction. This is the absolute safety anchor for deferred/advisory
@@ -317,9 +328,16 @@ namespace ego_planner
       std::numeric_limits < double > ::quiet_NaN();
     double compute_latency_ms = 0.0;
     double configuration_space_prepare_ms = 0.0;
+    double vehicle_radius_m = std::numeric_limits<double>::quiet_NaN();
+    double map_inflation_m = std::numeric_limits<double>::quiet_NaN();
+    std::string collision_policy_id;
     int channel_search_attempts = 0;
     int duplicate_channel_paths = 0;
     std::string channel_search_termination = "not_started";
+    P4GeometryCommitResult geometry_commit;
+    P4PlanningDisposition planning_disposition =
+      P4PlanningDisposition::HOLD_REQUIRED;
+    uint64_t retained_trajectory_count = 0;
     std::string reason = "not_evaluated";
   };
 

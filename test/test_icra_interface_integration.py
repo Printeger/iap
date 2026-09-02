@@ -689,6 +689,25 @@ class TestStageAnalyzer(unittest.TestCase):
         row["formal_support"] = "1"
         self.assertEqual(MODULE._selected_decisions([row]), [row])
 
+    def test_v4_risk_selected_requires_accepted_geometry_commit(self):
+        row = {
+            "schema_version": "p4_forward_route_decision_v4",
+            "stage": "forward_decision",
+            "action": "RISK_SELECTED",
+            "selection_authority": "FORMAL",
+            "formal_support": "1",
+            "selected_candidate_id": "2",
+            "candidate_count": "2",
+            "geometry_id": "planning-lattice-v2",
+            "alert_limit_policy_id": "fixed_hal20_val40_v1",
+            "occupancy_generation": "3",
+            "risk_generation": "5",
+            "geometry_commit_verdict": "NEW_ROUTE_COLLISION",
+        }
+        self.assertEqual(MODULE._selected_decisions([row]), [])
+        row["geometry_commit_verdict"] = "CLEAR_AFTER_UPDATE"
+        self.assertEqual(MODULE._selected_decisions([row]), [row])
+
     def test_v3_forward_timing_missing_fails_closed(self):
         result = MODULE.analyze_stage_records(
             "p4", [], [{
@@ -699,6 +718,85 @@ class TestStageAnalyzer(unittest.TestCase):
         self.assertIn("p4_forward_timing_missing", result["failures"])
         self.assertIn(
             "p4_configuration_space_timing_missing", result["failures"])
+
+    def test_v4_geometry_commit_budget_and_generation_only_hold_are_gated(self):
+        row = {
+            "schema_version": "p4_forward_route_decision_v4",
+            "stage": "forward_decision",
+            "action": "DEFER_RISK_SELECTION",
+            "compute_latency_ms": "20.0",
+            "configuration_space_prepare_ms": "1.0",
+            "geometry_commit_verdict": "CLEAR_AFTER_UPDATE",
+            "geometry_commit_latency_ms": "10.5",
+            "reason": "live_occupancy_generation_changed_before_decision_reuse",
+        }
+
+        result = MODULE.analyze_stage_records(
+            "p4", [], [row], [], [], [], [])
+
+        self.assertIn("p4_geometry_commit_budget_exceeded", result["failures"])
+        self.assertIn("p4_generation_only_hold_detected", result["failures"])
+        self.assertEqual(result["generation_only_hold_count"], 1)
+
+    def test_v4_final_commit_budget_is_not_hidden_by_stage_filter(self):
+        forward = {
+            "schema_version": "p4_forward_route_decision_v4",
+            "stage": "forward_decision",
+            "action": "DEFER_RISK_SELECTION",
+            "compute_latency_ms": "20.0",
+            "configuration_space_prepare_ms": "1.0",
+            "geometry_commit_verdict": "CLEAR_UNCHANGED",
+            "geometry_commit_latency_ms": "2.0",
+            "reason": "route_clear_no_semantic_change",
+        }
+        final = dict(forward)
+        final["stage"] = "final_bspline_before_p5"
+        final["geometry_commit_verdict"] = "COMPUTE_BUDGET_EXCEEDED"
+        final["geometry_commit_latency_ms"] = "10.25"
+
+        result = MODULE.analyze_stage_records(
+            "p4", [], [forward, final], [], [], [], [])
+
+        self.assertIn("p4_geometry_commit_budget_exceeded", result["failures"])
+        self.assertEqual(result["p4_geometry_commit_max_latency_ms"], 10.25)
+
+    def test_v4_invalid_path_rejection_is_in_commit_timing_summary(self):
+        row = {
+            "schema_version": "p4_forward_route_decision_v4",
+            "stage": "final_bspline_before_p5_geometry_commit_rejected",
+            "action": "DEFER_RISK_SELECTION",
+            "geometry_commit_verdict": "INVALID_PATH",
+            "geometry_commit_latency_ms": "10.1",
+            "geometry_commit_reason":
+                "optimized_bspline_left_committed_guide_corridor",
+        }
+
+        result = MODULE.analyze_stage_records(
+            "p4", [], [row], [], [], [], [])
+
+        self.assertIn("p4_geometry_commit_budget_exceeded", result["failures"])
+        self.assertEqual(result["p4_geometry_commit_max_latency_ms"], 10.1)
+
+    def test_v4_clear_after_update_records_commit_latency(self):
+        row = {
+            "schema_version": "p4_forward_route_decision_v4",
+            "stage": "forward_decision",
+            "action": "DEFER_RISK_SELECTION",
+            "compute_latency_ms": "20.0",
+            "configuration_space_prepare_ms": "1.0",
+            "geometry_commit_verdict": "CLEAR_AFTER_UPDATE",
+            "geometry_commit_latency_ms": "2.5",
+            "reason": "route_clear_after_map_update",
+        }
+
+        result = MODULE.analyze_stage_records(
+            "p4", [], [row], [], [], [], [])
+
+        self.assertNotIn("p4_geometry_commit_budget_exceeded",
+                         result["failures"])
+        self.assertNotIn("p4_generation_only_hold_detected",
+                         result["failures"])
+        self.assertEqual(result["p4_geometry_commit_max_latency_ms"], 2.5)
 
     @staticmethod
     def forest_generation(low_multiplier=0.8):

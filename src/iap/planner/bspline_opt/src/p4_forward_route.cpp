@@ -1699,6 +1699,20 @@ const char * p4ForwardDeferredMotionModeName(
   return "UNKNOWN";
 }
 
+const char * p4PlanningDispositionName(
+  const P4PlanningDisposition disposition)
+{
+  switch (disposition) {
+    case P4PlanningDisposition::NEW_TRAJECTORY_READY:
+      return "NEW_TRAJECTORY_READY";
+    case P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY:
+      return "RETAIN_COMMITTED_TRAJECTORY";
+    case P4PlanningDisposition::HOLD_REQUIRED:
+      return "HOLD_REQUIRED";
+  }
+  return "HOLD_REQUIRED";
+}
+
 bool P4ForwardSnapshotIdentity::valid() const
 {
   return !geometry_id.empty() && !frame_id.empty() &&
@@ -1742,7 +1756,8 @@ bool P4ForwardRequest::valid(std::string * reason) const
   }
   if (!map_origin.allFinite() || !map_extent.allFinite() ||
     (map_extent.array() <= 0.0).any() ||
-    !std::isfinite(map_inflation_m) || map_inflation_m < 0.0)
+    !std::isfinite(map_inflation_m) || map_inflation_m < 0.0 ||
+    !std::isfinite(virtual_ceiling_height_m))
   {
     return fail("invalid_map_geometry");
   }
@@ -1831,6 +1846,10 @@ bool p4ForwardDecisionMatchesRequest(
   return std::isfinite(movement_trigger_m) && movement_trigger_m > 0.0 &&
          decision.snapshot_identity.canonical() ==
          request.snapshot_identity.canonical() &&
+         decision.collision_policy_id == p4CollisionPolicyIdentity(
+             request.limits.vehicle_radius_m, request.map_inflation_m,
+             request.limits.occupancy_resolution_m,
+             request.virtual_ceiling_height_m) &&
          decision.request_position.allFinite() &&
          decision.local_target.allFinite() &&
          (decision.request_position - request.position).norm() <
@@ -1859,6 +1878,12 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
   decision.request_position = request.position;
   decision.local_target = request.local_target;
   decision.snapshot_identity = request.snapshot_identity;
+  decision.vehicle_radius_m = request.limits.vehicle_radius_m;
+  decision.map_inflation_m = request.map_inflation_m;
+  decision.collision_policy_id = p4CollisionPolicyIdentity(
+    request.limits.vehicle_radius_m, request.map_inflation_m,
+    request.limits.occupancy_resolution_m,
+    request.virtual_ceiling_height_m);
   const auto record_latency = [&started](P4ForwardDecision output) {
       output.compute_latency_ms =
         std::chrono::duration<double, std::milli>(

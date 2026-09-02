@@ -3,6 +3,35 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(p4-route-local-geometry-commit-v4): IAP-RQ-320 / IAP-RQ-400 /
+  IAP-RQ-410 — replace generation-equality invalidation with a bounded,
+  fail-closed semantic collision-delta journal and route-local commit
+  validator. GridMap now records net raw/fused free/occupied changes for each
+  coherent write transaction in a 128-generation immutable ring. P4 validates
+  guides and optimized B-splines against their producer-bound frozen epoch,
+  then folds only later changes intersecting the vehicle-radius-plus-EGO-
+  inflation swept corridor. Remote or duplicate 10 Hz cloud updates therefore
+  no longer cancel a 2 Hz decision; new route hits, history gaps, policy
+  changes and the 10 ms validation budget remain blocking. Runtime checks
+  advance the accepted delta watermark, and pending/rate-limited workers retain
+  an unexpired committed short trajectory with a verified zero-speed endpoint
+  instead of replacing it with an emergency stop. Transaction/journal
+  publication shares one synchronization boundary, policy identity includes
+  the virtual ceiling, and concrete route collisions continue through EGO's
+  native time-to-collision emergency-stop decision. Final B-splines are bound
+  to the selected guide or certified common prefix, use derivative-bounded
+  adaptive sampling, and recheck formal PL support before lineage is written.
+  Multiple corridor conflicts are ordered by first contact along the executable
+  path rather than voxel address, preserving EGO's native time-to-collision
+  emergency decision. The 10 ms final/runtime budget includes curve sampling,
+  risk recheck, journal acquisition and delta validation. Identity, support,
+  policy and runtime route-hit failures now emit typed HOLD rejection rows and
+  refresh RViz instead of leaving a stale successful label.
+  New runs emit `p4_forward_route_decision_v4` with commit
+  generations, verdict, changed/hit counts, latency and planning disposition;
+  v1-v3 remain read-only compatible. Risk snapshot, GNSS epoch, AL and P5
+  identities are unchanged.
+
 - feat(p4-topology-channel-rviz-overlay): IAP-RQ-400 / IAP-RQ-410 — publish
   the accepted P4 topology representatives on the independent
   `/iap/rviz/p4_topology_channels` MarkerArray without replacing or changing

@@ -1,5 +1,45 @@
 # P4 Online Forward Route Selection
 
+## Route-local geometry commit v4 (2026-09-02)
+
+New runs emit `p4_forward_route_decision_v4`. The asynchronous search still
+uses the exact occupancy+risk snapshot captured by P0, but a newer live
+occupancy generation no longer invalidates the result by itself. GridMap
+publishes a contiguous 128-generation journal of net raw/fused collision
+changes. The write-active odd sequence, delta append, and committed even
+sequence share one synchronization boundary, so an in-progress 10 Hz cloud
+transaction cannot be mistaken for a complete unchanged generation. P4 first
+proves the executable guide clear in its bound frozen epoch,
+then merges later deltas only inside the continuous swept corridor defined by
+vehicle radius plus EGO inflation. A remote tree return, duplicate static scan,
+or a clear-then-reinserted identical hit is irrelevant; a new hit in the route,
+a journal gap, geometry/policy change, or validation timeout fails closed.
+The frozen inflated layer is checked with vehicle radius (rather than applying
+map inflation twice), preserving virtual-ceiling and other policy-only
+obstacles. Collision policy identity includes vehicle radius, map inflation,
+resolution, and virtual-ceiling height.
+
+The same validator runs on the optimized B-spline before P5/publication and on
+the unexecuted remainder from the 50 ms safety callback. Successful runtime
+checks advance a delta watermark, so a long trajectory does not depend on
+history older than the journal. While the 2 Hz worker is pending or
+rate-limited, an unexpired trajectory whose remainder still validates is
+retained only to its existing zero-speed endpoint. No new path is appended and
+no risk, GNSS, AL or P5 identity is mixed across snapshots. RViz and lineage
+report the base/checked generations, commit verdict, semantic-change count,
+route-relevant hit count, conflict position, latency, planning disposition and
+retention count.
+
+The continuous B-spline is converted to the commit polyline with a step chosen
+from derivative control-point bounds: chord length is at most 0.05 m and the
+declared curve/chord deviation bound is 0.002 m, which is added to the swept
+radius. Before formal lineage is written, the optimized curve must remain
+inside the selected guide corridor (or the stricter deferred common-prefix
+corridor), finish at that executable segment's endpoint, and remain below the
+same immutable PL limits. A concrete runtime collision still enters EGO's
+native time-to-collision scan so a near hit triggers `EMERGENCY_STOP`, while
+history, policy, or budget failures request a fail-closed replan.
+
 ## Dedicated topology overlay and execution diagnosis (2026-09-02)
 
 P4 publishes the distinct post-clustering channel representatives on the
@@ -237,14 +277,16 @@ than being discarded from the intersection.
 
 ## Triggering, caching, and latching
 
-The worker is asynchronous. Submission is limited to 2 Hz, the nominal budget
-is one checked 150 ms deadline covering topology search, native 0.1 m A*
-refinement and final support certification, and a completed result
-is accepted only when its snapshot identity, request position and target still
-match the current request. A decision is recomputed when the
-combined generation changes, the target changes, the UAV advances by at least
-0.5 m, or the latched route loses support. Identical requests reuse the cached
-decision.
+The worker is asynchronous. Submission is limited to 2 Hz, and the nominal
+budget is one checked 150 ms deadline covering topology search, native 0.1 m
+A* refinement and final support certification. Risk generation, source,
+GNSS/AL policy, request position and target remain exact immutable identities.
+Occupancy is different: the worker stays bound to its original frozen epoch,
+then folds the contiguous semantic collision deltas up to the live generation.
+The result is accepted when no final new occupied voxel intersects the
+executable swept corridor. A generation increment alone is not a rejection.
+A decision is recomputed when the target changes, the UAV advances by at least
+0.5 m, risk identity changes, or the latched route loses support.
 
 The topology front end uses one cached configuration-space predicate for
 search and validation. Six-connected expansion avoids diagonal corner cuts;
@@ -254,12 +296,22 @@ same-channel duplicates. A frozen-raw-hit regression enforces configuration
 preparation below 25 ms and the 150 ms end-to-end deadline.
 
 A selected channel is latched until its common anchor is reached. While a new
-decision is pending or rate-limited, the remaining latch is trimmed from the
-current UAV position and re-certified against the new immutable occupancy and
-risk snapshot. It is reused only if that complete check passes; otherwise the
-latch is cleared and P4 decides again. Without such a certified latch,
-pending, rate-limited, identity-mismatched and generation-changed states are
-`HOLD`; they never provisionally enter a branch.
+decision is pending or rate-limited, the UAV is projected onto the committed
+guide and only its remaining segment is checked. A valid unexpired short
+trajectory with a verified zero-speed endpoint stays in execution; changes
+behind the UAV or outside its swept corridor do not cancel it. A route-local
+new hit, history gap, policy mismatch, risk identity change, or expired
+trajectory clears the latch and requests replanning/HOLD. The 50 ms safety
+check uses the same delta validator and hands concrete collisions to EGO's
+native time-to-collision replan/emergency path.
+
+The semantic delta journal retains 128 contiguous generations. Every map write
+transaction records net `free↔occupied` changes after clear-and-reinsert has
+settled, including an empty delta when the frame changes no collision state.
+The commit validator has a 10 ms end-to-end budget and reports the earliest
+conflict in executable-path order. Final and runtime rejection rows include
+the base/checked generation, semantic change count, route-hit count, conflict
+position/path distance, typed reason, total latency and `HOLD_REQUIRED`.
 
 ## Forest v2 defaults
 
@@ -297,7 +349,7 @@ forest fork locations.
 New runs write:
 
 - `<p4-debug>.forward_lineage.csv` using
-  `p4_forward_route_decision_v3`;
+  `p4_forward_route_decision_v4` (v1-v3 remain read-only compatible);
 - `<p4-debug>.forward_candidates.csv` with candidate paths and support/risk
   metrics.
 
@@ -313,8 +365,8 @@ forward_decision
 
 Every terminal row retains the decision event, combined snapshot identity,
 trajectory ID/start time, and final control-point hash. Before the first
-terminal row, the final B-spline is checked against the live occupancy identity
-and selected-channel corridor. The runner prefers this
+terminal row, the final B-spline is route-locally committed against the bound
+frozen occupancy epoch plus its contiguous semantic delta history. The runner prefers this
 schema when present and binds progressive forest evidence by decision event and
 the exact P0 configuration/source/occupancy identity.
 

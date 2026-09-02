@@ -643,6 +643,11 @@ namespace ego_planner
         {
           break;
         }
+        else if (planner_manager_->p4PlanningDisposition() ==
+                 P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY)
+        {
+          changeFSMExecState(EXEC_TRAJ, "P4_COMMIT");
+        }
         else if (p4UsesDeferredExecution(
             planner_manager_->lastP4ForwardDecision()))
         {
@@ -680,6 +685,11 @@ namespace ego_planner
         if (p4_waiting_for_risk_grid_ready_)
         {
           break;
+        }
+        else if (planner_manager_->p4PlanningDisposition() ==
+                 P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY)
+        {
+          changeFSMExecState(EXEC_TRAJ, "P4_COMMIT");
         }
         else if (p4UsesDeferredExecution(
             planner_manager_->lastP4ForwardDecision()))
@@ -800,7 +810,9 @@ namespace ego_planner
       }
       else
       {
-        callEmergencyStop(odom_pos_);
+        if (planner_manager_->p4PlanningDisposition() !=
+            P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY)
+          callEmergencyStop(odom_pos_);
       }
       break;
     }
@@ -1020,6 +1032,36 @@ namespace ego_planner
     double t_cur = (plannerNow() - info->start_time_).seconds();
 
     Eigen::Vector3d p_cur = info->position_traj_.evaluateDeBoorT(t_cur);
+    bool p4_route_collision = false;
+    std::optional<P4GeometryCommitResult> p4_collision_commit;
+    if (const auto geometry_commit =
+            planner_manager_->validateCommittedP4TrajectoryGeometry(
+                plannerNow().seconds());
+        geometry_commit && !geometry_commit->accepted())
+    {
+      RCLCPP_WARN(
+          node_->get_logger(),
+          "P4 committed trajectory invalidated: verdict=%s base=%lu checked=%lu relevant_hits=%zu",
+          p4GeometryCommitVerdictName(geometry_commit->verdict),
+          static_cast<unsigned long>(geometry_commit->base_generation),
+          static_cast<unsigned long>(geometry_commit->checked_generation),
+          geometry_commit->route_relevant_new_hits);
+      p4_route_collision =
+          geometry_commit->verdict ==
+              P4GeometryCommitVerdict::BASE_COLLISION ||
+          geometry_commit->verdict ==
+              P4GeometryCommitVerdict::NEW_ROUTE_COLLISION;
+      if (p4_route_collision)
+        p4_collision_commit = *geometry_commit;
+      if (!p4_route_collision)
+      {
+        changeFSMExecState(REPLAN_TRAJ, "P4_GEOMETRY_COMMIT");
+        return;
+      }
+      // A concrete route collision must continue through the native scan
+      // below. That scan owns the time-to-collision decision between replan
+      // and EMERGENCY_STOP; returning here would weaken EGO's safety behavior.
+    }
     const double CLEARANCE = 1.0 * planner_manager_->getSwarmClearance();
     // double t_cur_global = ros::Time::now().toSec();
     double t_cur_global = plannerNow().seconds();
@@ -1032,6 +1074,25 @@ namespace ego_planner
 
       bool occ = false;
       occ |= map->getInflateOccupancy(info->position_traj_.evaluateDeBoorT(t));
+      if (p4_collision_commit &&
+          p4_collision_commit->first_conflict_position.allFinite() &&
+          std::isfinite(p4_collision_commit->effective_clearance_m) &&
+          std::isfinite(p4_collision_commit->voxel_resolution_m))
+      {
+        const Eigen::Vector3d trajectory_point =
+            info->position_traj_.evaluateDeBoorT(t);
+        const Eigen::Vector3d half_voxel = Eigen::Vector3d::Constant(
+            0.5 * p4_collision_commit->voxel_resolution_m);
+        const Eigen::Vector3d voxel_min =
+            p4_collision_commit->first_conflict_position - half_voxel;
+        const Eigen::Vector3d voxel_max =
+            p4_collision_commit->first_conflict_position + half_voxel;
+        const Eigen::Vector3d closest =
+            trajectory_point.cwiseMax(voxel_min).cwiseMin(voxel_max);
+        occ |= (closest - trajectory_point).squaredNorm() <=
+            p4_collision_commit->effective_clearance_m *
+            p4_collision_commit->effective_clearance_m;
+      }
 
       for (size_t id = 0; id < planner_manager_->swarm_trajs_buf_.size(); id++)
       {
@@ -1077,6 +1138,12 @@ namespace ego_planner
         }
         break;
       }
+    }
+
+    if (p4_route_collision)
+    {
+      changeFSMExecState(REPLAN_TRAJ, "P4_GEOMETRY_COMMIT");
+      return;
     }
 
     if (exec_state_ == EXEC_TRAJ && planner_manager_->p5_integrity_gate_ &&

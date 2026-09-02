@@ -1,5 +1,6 @@
 #include "plan_env/grid_map.h"
 
+#include <algorithm>
 #include <iomanip>
 #include <sstream>
 
@@ -346,13 +347,16 @@ void GridMap::resetBuffer(Eigen::Vector3d min_pos, Eigen::Vector3d max_pos)
     for (int y = min_id(1); y <= max_id(1); ++y)
       for (int z = min_id(2); z <= max_id(2); ++z)
       {
-        md_.occupancy_buffer_inflate_[toAddress(x, y, z)] = 0;
-        md_.occupancy_buffer_raw_cloud_[toAddress(x, y, z)] = 0;
+        const int address = toAddress(x, y, z);
+        if (md_.occupancy_buffer_raw_cloud_[address] != 0)
+          recordCollisionStateBeforeMutation(address);
+        md_.occupancy_buffer_inflate_[address] = 0;
+        md_.occupancy_buffer_raw_cloud_[address] = 0;
         // A return-only PointCloud2 frame carries no evidence about voxels
         // that were not hit or explicitly ray-traversed in this frame.  Drop
         // the old observation bit together with the old raw hit so a missing
         // return becomes UNKNOWN, never OBSERVED_FREE by inheritance.
-        md_.observed_buffer_[toAddress(x, y, z)] = 0;
+        md_.observed_buffer_[address] = 0;
       }
 }
 
@@ -651,6 +655,8 @@ void GridMap::raycastProcess()
 
     md_.count_hit_[idx_ctns] = md_.count_hit_and_miss_[idx_ctns] = 0;
 
+    recordCollisionStateBeforeMutation(idx_ctns);
+
     if (log_odds_update >= 0 && md_.occupancy_buffer_[idx_ctns] >= mp_.clamp_max_log_)
     {
       continue;
@@ -729,12 +735,16 @@ void GridMap::clearAndInflateLocalMap()
       for (int z = min_cut_m(2); z < min_cut(2); ++z)
       {
         int idx = toAddress(x, y, z);
+        if (collisionOccupiedAtAddress(idx))
+          recordCollisionStateBeforeMutation(idx);
         md_.occupancy_buffer_[idx] = mp_.clamp_min_log_ - mp_.unknown_flag_;
       }
 
       for (int z = max_cut(2) + 1; z <= max_cut_m(2); ++z)
       {
         int idx = toAddress(x, y, z);
+        if (collisionOccupiedAtAddress(idx))
+          recordCollisionStateBeforeMutation(idx);
         md_.occupancy_buffer_[idx] = mp_.clamp_min_log_ - mp_.unknown_flag_;
       }
     }
@@ -746,12 +756,16 @@ void GridMap::clearAndInflateLocalMap()
       for (int y = min_cut_m(1); y < min_cut(1); ++y)
       {
         int idx = toAddress(x, y, z);
+        if (collisionOccupiedAtAddress(idx))
+          recordCollisionStateBeforeMutation(idx);
         md_.occupancy_buffer_[idx] = mp_.clamp_min_log_ - mp_.unknown_flag_;
       }
 
       for (int y = max_cut(1) + 1; y <= max_cut_m(1); ++y)
       {
         int idx = toAddress(x, y, z);
+        if (collisionOccupiedAtAddress(idx))
+          recordCollisionStateBeforeMutation(idx);
         md_.occupancy_buffer_[idx] = mp_.clamp_min_log_ - mp_.unknown_flag_;
       }
     }
@@ -763,12 +777,16 @@ void GridMap::clearAndInflateLocalMap()
       for (int x = min_cut_m(0); x < min_cut(0); ++x)
       {
         int idx = toAddress(x, y, z);
+        if (collisionOccupiedAtAddress(idx))
+          recordCollisionStateBeforeMutation(idx);
         md_.occupancy_buffer_[idx] = mp_.clamp_min_log_ - mp_.unknown_flag_;
       }
 
       for (int x = max_cut(0) + 1; x <= max_cut_m(0); ++x)
       {
         int idx = toAddress(x, y, z);
+        if (collisionOccupiedAtAddress(idx))
+          recordCollisionStateBeforeMutation(idx);
         md_.occupancy_buffer_[idx] = mp_.clamp_min_log_ - mp_.unknown_flag_;
       }
     }
@@ -880,7 +898,7 @@ bool GridMap::updateOccupancyFromPendingDepth(
     return false;
   }
   md_.last_occ_update_time_ = receipt_time;
-  occupancy_update_sequence_.fetch_add(1, std::memory_order_acq_rel);
+  beginOccupancyWriteTransaction();
 
   /* update occupancy */
   // ros::Time t1, t2, t3, t4;
@@ -896,7 +914,7 @@ bool GridMap::updateOccupancyFromPendingDepth(
 
   occupancy_cloud_stamp_s_.store(
       source_stamp_s, std::memory_order_release);
-  occupancy_update_sequence_.fetch_add(1, std::memory_order_release);
+  commitOccupancyWriteTransaction(source_stamp_s);
 
   // t4 = ros::Time::now();
 
@@ -1061,7 +1079,7 @@ void GridMap::cloudCallback(const sensor_msgs::msg::PointCloud2::ConstPtr &img)
   if (isnan(md_.camera_pos_(0)) || isnan(md_.camera_pos_(1)) || isnan(md_.camera_pos_(2)))
     return;
 
-  occupancy_update_sequence_.fetch_add(1, std::memory_order_acq_rel);
+  beginOccupancyWriteTransaction();
 
   this->resetBuffer(md_.camera_pos_ - mp_.local_update_range_,
                     md_.camera_pos_ + mp_.local_update_range_);
@@ -1119,8 +1137,10 @@ void GridMap::cloudCallback(const sensor_msgs::msg::PointCloud2::ConstPtr &img)
       posToIndex(p3d, raw_id);
       if (isInMap(raw_id))
       {
-        md_.occupancy_buffer_raw_cloud_[toAddress(raw_id)] = 1;
-        md_.observed_buffer_[toAddress(raw_id)] = 1;
+        const int raw_address = toAddress(raw_id);
+        recordCollisionStateBeforeMutation(raw_address);
+        md_.occupancy_buffer_raw_cloud_[raw_address] = 1;
+        md_.observed_buffer_[raw_address] = 1;
       }
       for (int x = -inf_step; x <= inf_step; ++x)
         for (int y = -inf_step; y <= inf_step; ++y)
@@ -1181,7 +1201,8 @@ void GridMap::cloudCallback(const sensor_msgs::msg::PointCloud2::ConstPtr &img)
       rclcpp::Time(img->header.stamp).seconds(), std::memory_order_release);
   if (valid_source_stamp)
     last_independent_cloud_stamp_s_ = source_stamp_s;
-  occupancy_update_sequence_.fetch_add(1, std::memory_order_release);
+  commitOccupancyWriteTransaction(
+      rclcpp::Time(img->header.stamp).seconds());
 }
 
 void GridMap::markCurrentVehicleFootprintObserved()
@@ -1347,6 +1368,137 @@ uint64_t GridMap::occupancyGeneration() const
   return sequence / 2u;
 }
 
+bool GridMap::collisionOccupiedAtAddress(const int address) const
+{
+  if (address < 0 ||
+      address >= static_cast<int>(md_.occupancy_buffer_raw_cloud_.size()) ||
+      address >= static_cast<int>(md_.occupancy_buffer_.size()))
+    return false;
+  return md_.occupancy_buffer_raw_cloud_[static_cast<std::size_t>(address)] !=
+             0 ||
+         md_.occupancy_buffer_[static_cast<std::size_t>(address)] >
+             mp_.min_occupancy_log_;
+}
+
+void GridMap::beginOccupancyWriteTransaction()
+{
+  collision_state_before_transaction_.clear();
+  collision_transaction_active_ = true;
+  // Serialize the transition to an odd (writer-active) sequence with journal
+  // readers. A reader must never observe the previous committed generation as
+  // complete while a point-cloud callback is already mutating its successor.
+  std::lock_guard<std::mutex> lock(collision_delta_mutex_);
+  occupancy_update_sequence_.fetch_add(1, std::memory_order_acq_rel);
+}
+
+void GridMap::recordCollisionStateBeforeMutation(const int address)
+{
+  if (!collision_transaction_active_ || address < 0)
+    return;
+  collision_state_before_transaction_.try_emplace(
+      address, collisionOccupiedAtAddress(address));
+}
+
+void GridMap::commitOccupancyWriteTransaction(const double stamp_s)
+{
+  const uint64_t odd_sequence = occupancy_update_sequence_.load(
+      std::memory_order_acquire);
+  const uint64_t from_generation = odd_sequence / 2u;
+  auto delta = std::make_shared<OccupancyCollisionDelta>();
+  delta->from_generation = from_generation;
+  delta->to_generation = from_generation + 1u;
+  delta->stamp_s = stamp_s;
+  delta->geometry_id = geometryIdentity(
+      mp_.frame_id_, mp_.map_origin_, mp_.map_voxel_num_, mp_.resolution_);
+  delta->complete = collision_transaction_active_ &&
+      (odd_sequence & 1u) != 0u && !delta->geometry_id.empty();
+
+  std::vector<std::pair<int, bool>> semantic_changes;
+  semantic_changes.reserve(collision_state_before_transaction_.size());
+  for (const auto &[address, before_occupied] :
+       collision_state_before_transaction_)
+  {
+    const bool after_occupied = collisionOccupiedAtAddress(address);
+    if (after_occupied != before_occupied)
+      semantic_changes.emplace_back(address, after_occupied);
+  }
+  std::sort(semantic_changes.begin(), semantic_changes.end(),
+            [](const auto &lhs, const auto &rhs) {
+              return lhs.first < rhs.first;
+            });
+  const int yz = mp_.map_voxel_num_.y() * mp_.map_voxel_num_.z();
+  for (const auto &[address, occupied] : semantic_changes)
+  {
+    const int x = yz > 0 ? address / yz : -1;
+    const int remainder = yz > 0 ? address % yz : -1;
+    const int y = mp_.map_voxel_num_.z() > 0
+        ? remainder / mp_.map_voxel_num_.z()
+        : -1;
+    const int z = mp_.map_voxel_num_.z() > 0
+        ? remainder % mp_.map_voxel_num_.z()
+        : -1;
+    delta->changes.push_back({Eigen::Vector3i(x, y, z), occupied});
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(collision_delta_mutex_);
+    collision_delta_history_.push_back(std::move(delta));
+    while (collision_delta_history_.size() >
+           kCollisionDeltaHistoryCapacity)
+      collision_delta_history_.pop_front();
+    // Publish the journal entry and its even committed generation under one
+    // synchronization boundary.
+    occupancy_update_sequence_.fetch_add(1, std::memory_order_release);
+  }
+  collision_state_before_transaction_.clear();
+  collision_transaction_active_ = false;
+}
+
+OccupancyCollisionDeltaHistory GridMap::collisionDeltasSince(
+    const uint64_t base_generation) const
+{
+  OccupancyCollisionDeltaHistory out;
+  out.base_generation = base_generation;
+  std::lock_guard<std::mutex> lock(collision_delta_mutex_);
+  const uint64_t sequence = occupancy_update_sequence_.load(
+      std::memory_order_acquire);
+  out.latest_generation = sequence / 2u;
+  if ((sequence & 1u) != 0u)
+    return out;
+  if (base_generation == 0u || base_generation > out.latest_generation)
+    return out;
+  if (base_generation == out.latest_generation)
+  {
+    out.complete = true;
+    if (!collision_delta_history_.empty())
+      out.geometry_id = collision_delta_history_.back()->geometry_id;
+    return out;
+  }
+
+  uint64_t expected = base_generation;
+  for (const auto &delta : collision_delta_history_)
+  {
+    if (!delta || delta->to_generation <= base_generation ||
+        delta->from_generation >= out.latest_generation)
+      continue;
+    if (!delta->complete || delta->from_generation != expected ||
+        delta->to_generation != expected + 1u)
+      return out;
+    if (out.geometry_id.empty())
+      out.geometry_id = delta->geometry_id;
+    else if (out.geometry_id != delta->geometry_id)
+      return out;
+    out.deltas.push_back(delta);
+    expected = delta->to_generation;
+    if (expected == out.latest_generation)
+      break;
+  }
+  out.complete = expected == out.latest_generation;
+  if (!out.complete)
+    out.deltas.clear();
+  return out;
+}
+
 GridMap::OccupancyDiagnostic GridMap::queryOccupancyDiagnostic(
     const Eigen::Vector3d &pos) const
 {
@@ -1436,6 +1588,7 @@ GridMap::captureFrozenOccupancyEpoch() const
     double resolution = std::numeric_limits<double>::quiet_NaN();
     double resolution_inv = std::numeric_limits<double>::quiet_NaN();
     double inflation = std::numeric_limits<double>::quiet_NaN();
+    double virtual_ceiling_height = -1.0;
     double min_occupancy_log = std::numeric_limits<double>::quiet_NaN();
     std::string frame_id;
     double cloud_stamp_s = std::numeric_limits<double>::quiet_NaN();
@@ -1477,6 +1630,7 @@ GridMap::captureFrozenOccupancyEpoch() const
     buffers->resolution = mp_.resolution_;
     buffers->resolution_inv = mp_.resolution_inv_;
     buffers->inflation = mp_.obstacles_inflation_;
+    buffers->virtual_ceiling_height = mp_.virtual_ceil_height_;
     buffers->min_occupancy_log = mp_.min_occupancy_log_;
     buffers->frame_id = mp_.frame_id_;
     buffers->cloud_stamp_s = cloud_stamp_s;
@@ -1575,6 +1729,7 @@ GridMap::captureFrozenOccupancyEpoch() const
   epoch->extent_m = frozen_buffers->map_voxel_num.cast<double>() *
       frozen_buffers->resolution;
   epoch->resolution_m = frozen_buffers->resolution;
+  epoch->virtual_ceiling_height_m = buffers->virtual_ceiling_height;
   epoch->frame_id = frozen_buffers->frame_id;
   epoch->geometry_id = geometryIdentity(
       frozen_buffers->frame_id, frozen_buffers->map_origin,

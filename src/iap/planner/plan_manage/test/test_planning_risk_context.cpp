@@ -102,6 +102,7 @@ struct GridMapTestAccess {
     map->mp_.resolution_ = resolution;
     map->mp_.resolution_inv_ = 1.0 / resolution;
     map->mp_.obstacles_inflation_ = 0.0;
+    map->mp_.virtual_ceil_height_ = -1.0;
     map->mp_.min_occupancy_log_ = 0.5;
     map->mp_.clamp_min_log_ = -2.0;
     map->mp_.unknown_flag_ = 0.01;
@@ -412,12 +413,22 @@ TEST(P4ForwardTerminalLineageTest,
   manager.setP4ForwardDecisionForTest(std::move(decision));
   EXPECT_FALSE(manager.recordP4VerticalSliceLineage(
       "final_bspline_before_p5", 10.0));
-  EXPECT_FALSE(std::filesystem::exists(std::filesystem::path(
-      debug_path.string() + ".forward_lineage.csv")));
+  const auto rows = readCsvRows(std::filesystem::path(
+      debug_path.string() + ".forward_lineage.csv"));
+  ASSERT_EQ(rows.size(), 2u);
+  EXPECT_EQ(rows[0].at("stage"),
+            "final_bspline_before_p5_identity_rejected");
+  EXPECT_EQ(rows[0].at("geometry_commit_verdict"), "POLICY_MISMATCH");
+  EXPECT_EQ(rows[0].at("geometry_commit_reason"),
+            "planning_attempt_identity_changed_before_final_commit");
+  EXPECT_EQ(rows[1].at("geometry_commit_verdict"), "INVALID_PATH");
+  EXPECT_EQ(rows[1].at("geometry_commit_reason"),
+            "p4_decision_has_no_executable_route");
+  EXPECT_EQ(rows[1].at("planning_disposition"), "HOLD_REQUIRED");
 }
 
 TEST(P4ForwardTerminalLineageTest,
-     DeferredRiskSelectionDoesNotWriteOrBlockSelectedRouteLineage) {
+     DeferredRiskSelectionWritesNonSelectedExecutableLineage) {
   const auto snapshot = makeP4SelectionSnapshot();
   auto map = std::make_shared<GridMap>();
   GridMapTestAccess::configureNoCollision(map.get());
@@ -449,8 +460,12 @@ TEST(P4ForwardTerminalLineageTest,
 
   EXPECT_TRUE(manager.recordP4VerticalSliceLineage(
       "final_bspline_before_p5", 10.0));
-  EXPECT_FALSE(std::filesystem::exists(std::filesystem::path(
-      debug_path.string() + ".forward_lineage.csv")));
+  const auto rows = readCsvRows(std::filesystem::path(
+      debug_path.string() + ".forward_lineage.csv"));
+  ASSERT_EQ(rows.size(), 1u);
+  EXPECT_EQ(rows.front().at("action"), "DEFER_RISK_SELECTION");
+  EXPECT_EQ(rows.front().at("selection_applied"), "0");
+  EXPECT_EQ(rows.front().at("deferred_motion_mode"), "COMMON_PREFIX");
 }
 
 TEST(P4ForwardTerminalLineageTest,
@@ -578,8 +593,16 @@ TEST(P4ForwardTerminalLineageTest,
   manager.local_data_.traj_id_ = 31;
   EXPECT_FALSE(manager.recordP4VerticalSliceLineage(
       "final_bspline_before_p5", 10.2));
-  EXPECT_FALSE(std::filesystem::exists(std::filesystem::path(
-      debug_path.string() + ".forward_lineage.csv")));
+  const auto rejection_rows = readCsvRows(std::filesystem::path(
+      debug_path.string() + ".forward_lineage.csv"));
+  ASSERT_EQ(rejection_rows.size(), 2u);
+  EXPECT_EQ(rejection_rows[0].at("geometry_commit_verdict"),
+            "POLICY_MISMATCH");
+  EXPECT_EQ(rejection_rows[0].at("geometry_commit_reason"),
+            "risk_config_identity_changed_before_final_commit");
+  EXPECT_EQ(rejection_rows[1].at("geometry_commit_verdict"), "HISTORY_GAP");
+  EXPECT_EQ(rejection_rows[1].at("geometry_commit_reason"),
+            "bound_occupancy_snapshot_missing_before_final_commit");
 
   const auto missing_path = debug_path / "missing" / "writer.csv";
   auto missing_optimizer = makeP4Optimizer(

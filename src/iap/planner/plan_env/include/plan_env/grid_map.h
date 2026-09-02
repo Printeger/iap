@@ -17,6 +17,7 @@
 #include <queue>
 #include <rclcpp/rclcpp.hpp>
 #include <tuple>
+#include <unordered_map>
 #include <visualization_msgs/msg/marker.hpp>
 
 #include <pcl/point_cloud.h>
@@ -200,10 +201,36 @@ struct FrozenOccupancyEpoch
       std::numeric_limits<double>::quiet_NaN());
   Eigen::Vector3i voxel_dimensions = Eigen::Vector3i::Zero();
   double resolution_m = std::numeric_limits<double>::quiet_NaN();
+  double virtual_ceiling_height_m = -1.0;
   std::string frame_id;
   std::string geometry_id;
   double cloud_stamp_s = std::numeric_limits<double>::quiet_NaN();
   uint64_t generation = 0;
+};
+
+struct OccupancyCollisionVoxelChange
+{
+  Eigen::Vector3i voxel_index = Eigen::Vector3i::Constant(-1);
+  bool occupied = false;
+};
+
+struct OccupancyCollisionDelta
+{
+  uint64_t from_generation = 0;
+  uint64_t to_generation = 0;
+  double stamp_s = std::numeric_limits<double>::quiet_NaN();
+  std::string geometry_id;
+  bool complete = false;
+  std::vector<OccupancyCollisionVoxelChange> changes;
+};
+
+struct OccupancyCollisionDeltaHistory
+{
+  uint64_t base_generation = 0;
+  uint64_t latest_generation = 0;
+  bool complete = false;
+  std::string geometry_id;
+  std::vector<std::shared_ptr<const OccupancyCollisionDelta>> deltas;
 };
 
 class GridMap
@@ -244,6 +271,8 @@ public:
   OccupancyDiagnosticQuery captureOccupancyDiagnosticQuery() const;
   std::shared_ptr<const FrozenOccupancyEpoch>
   captureFrozenOccupancyEpoch() const;
+  OccupancyCollisionDeltaHistory collisionDeltasSince(
+      uint64_t base_generation) const;
   uint64_t occupancyGeneration() const;
   // Bind current-body observation evidence to the planner's canonical vehicle
   // radius. This is intentionally not a separate ROS parameter.
@@ -266,6 +295,8 @@ public:
   bool odomValid();
   void getRegion(Eigen::Vector3d &ori, Eigen::Vector3d &size);
   inline double getResolution();
+  inline double getObstacleInflation() const;
+  inline double getVirtualCeilingHeight() const;
   Eigen::Vector3d getOrigin();
   int getVoxelNum();
   bool getOdomDepthTimeout() { return md_.flag_depth_odom_timeout_; }
@@ -306,6 +337,10 @@ private:
   void raycastProcess();
   void clearAndInflateLocalMap();
   void markCurrentVehicleFootprintObserved();
+  void beginOccupancyWriteTransaction();
+  void recordCollisionStateBeforeMutation(int address);
+  void commitOccupancyWriteTransaction(double stamp_s);
+  bool collisionOccupiedAtAddress(int address) const;
 
   inline void inflatePoint(const Eigen::Vector3i &pt, int step, vector<Eigen::Vector3i> &pts);
   int setCacheOccupancy(Eigen::Vector3d pos, int occ);
@@ -358,6 +393,12 @@ private:
       pending_independent_clouds_;
   mutable std::mutex independent_cloud_input_mutex_;
   mutable std::mutex occupancy_epoch_mutex_;
+  mutable std::mutex collision_delta_mutex_;
+  std::unordered_map<int, bool> collision_state_before_transaction_;
+  bool collision_transaction_active_ = false;
+  std::deque<std::shared_ptr<const OccupancyCollisionDelta>>
+      collision_delta_history_;
+  static constexpr std::size_t kCollisionDeltaHistoryCapacity = 128;
   double current_vehicle_clearance_radius_m_ = 0.0;
 };
 
@@ -431,13 +472,14 @@ inline void GridMap::setOccupied(Eigen::Vector3d pos)
   posToIndex(pos, id);
 
   std::lock_guard<std::mutex> lock(occupancy_epoch_mutex_);
-  occupancy_update_sequence_.fetch_add(1, std::memory_order_acq_rel);
+  beginOccupancyWriteTransaction();
   md_.occupancy_buffer_inflate_[id(0) * mp_.map_voxel_num_(1) * mp_.map_voxel_num_(2) +
                                 id(1) * mp_.map_voxel_num_(2) + id(2)] = 1;
   const int address = toAddress(id);
   if (address >= 0 && address < static_cast<int>(md_.observed_buffer_.size()))
     md_.observed_buffer_[static_cast<std::size_t>(address)] = 1;
-  occupancy_update_sequence_.fetch_add(1, std::memory_order_release);
+  commitOccupancyWriteTransaction(
+      occupancy_cloud_stamp_s_.load(std::memory_order_acquire));
 }
 
 inline void GridMap::setOccupancy(Eigen::Vector3d pos, double occ)
@@ -455,12 +497,14 @@ inline void GridMap::setOccupancy(Eigen::Vector3d pos, double occ)
   posToIndex(pos, id);
 
   std::lock_guard<std::mutex> lock(occupancy_epoch_mutex_);
-  occupancy_update_sequence_.fetch_add(1, std::memory_order_acq_rel);
-  md_.occupancy_buffer_[toAddress(id)] = occ;
+  beginOccupancyWriteTransaction();
   const int address = toAddress(id);
+  recordCollisionStateBeforeMutation(address);
+  md_.occupancy_buffer_[address] = occ;
   if (address >= 0 && address < static_cast<int>(md_.observed_buffer_.size()))
     md_.observed_buffer_[static_cast<std::size_t>(address)] = 1;
-  occupancy_update_sequence_.fetch_add(1, std::memory_order_release);
+  commitOccupancyWriteTransaction(
+      occupancy_cloud_stamp_s_.load(std::memory_order_acquire));
 }
 
 inline int GridMap::getOccupancy(Eigen::Vector3d pos)
@@ -572,5 +616,15 @@ inline void GridMap::inflatePoint(const Eigen::Vector3i &pt, int step, vector<Ei
 }
 
 inline double GridMap::getResolution() { return mp_.resolution_; }
+
+inline double GridMap::getObstacleInflation() const
+{
+  return mp_.obstacles_inflation_;
+}
+
+inline double GridMap::getVirtualCeilingHeight() const
+{
+  return mp_.virtual_ceil_height_;
+}
 
 #endif

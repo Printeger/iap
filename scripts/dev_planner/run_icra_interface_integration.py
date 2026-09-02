@@ -34,6 +34,7 @@ P4_FORWARD_DECISION_SCHEMAS = {
     "p4_forward_route_decision_v1",
     "p4_forward_route_decision_v2",
     "p4_forward_route_decision_v3",
+    "p4_forward_route_decision_v4",
 }
 FOREST_SCENARIOS = (FOREST_V1_SCENARIO, FOREST_SCENARIO)
 SEVEN_STAGE_ORDER = (
@@ -1043,9 +1044,17 @@ def _selected_decisions(decisions: list[dict]) -> list[dict]:
             if row.get("schema_version") in P4_FORWARD_DECISION_SCHEMAS
             and row.get("stage") == "forward_decision"
             and row.get("action") == "RISK_SELECTED"
-            and (row.get("schema_version") != "p4_forward_route_decision_v3"
+            and (row.get("schema_version") not in {
+                     "p4_forward_route_decision_v3",
+                     "p4_forward_route_decision_v4",
+                 }
                  or (row.get("selection_authority") == "FORMAL"
                      and str(row.get("formal_support")) == "1"))
+            and (row.get("schema_version") !=
+                 "p4_forward_route_decision_v4"
+                 or row.get("geometry_commit_verdict") in {
+                     "CLEAR_UNCHANGED", "CLEAR_AFTER_UPDATE",
+                 })
             and int(row.get("selected_candidate_id", 0) or 0) > 0
             and int(row.get("candidate_count", 0) or 0) >= 2
             and row.get("geometry_id")
@@ -1212,14 +1221,17 @@ def analyze_stage_records(
         raise ValueError(f"unsupported record stage: {stage}")
     p0 = analyze_p0(health, capture_start_s)
     failures = list(p0["failures"])
-    v3_forward = [
+    current_forward = [
         row for row in decisions
-        if row.get("schema_version") == "p4_forward_route_decision_v3"
+        if row.get("schema_version") in {
+            "p4_forward_route_decision_v3",
+            "p4_forward_route_decision_v4",
+        }
         and row.get("stage") == "forward_decision"
     ]
     def csv_finite_values(field: str) -> list[float]:
         values = []
-        for row in v3_forward:
+        for row in current_forward:
             try:
                 value = float(row.get(field, "nan"))
             except (TypeError, ValueError):
@@ -1234,14 +1246,43 @@ def analyze_stage_records(
     # Rate-limited/pending rows intentionally carry no worker timing. Gate the
     # completed decisions only; absence of formal selection is reported by its
     # own lineage gate below.
-    if v3_forward and not forward_latencies:
+    if current_forward and not forward_latencies:
         failures.append("p4_forward_timing_missing")
     elif max(forward_latencies, default=-math.inf) >= 150.0:
         failures.append("p4_forward_compute_budget_exceeded")
-    if v3_forward and not cspace_latencies:
+    if current_forward and not cspace_latencies:
         failures.append("p4_configuration_space_timing_missing")
     elif max(cspace_latencies, default=-math.inf) > 25.0:
         failures.append("p4_configuration_space_prepare_budget_exceeded")
+    v4_records = [
+        row for row in decisions
+        if row.get("schema_version") == "p4_forward_route_decision_v4"
+    ]
+    commit_latencies = []
+    attempted_commit_verdicts = {
+        "CLEAR_UNCHANGED", "CLEAR_AFTER_UPDATE", "BASE_COLLISION",
+        "NEW_ROUTE_COLLISION", "OUT_OF_BOUNDS", "HISTORY_GAP",
+        "POLICY_MISMATCH", "INVALID_PATH", "COMPUTE_BUDGET_EXCEEDED",
+    }
+    for row in v4_records:
+        if row.get("geometry_commit_verdict") not in attempted_commit_verdicts:
+            continue
+        try:
+            latency = float(row["geometry_commit_latency_ms"])
+            if not math.isfinite(latency):
+                raise ValueError("non-finite commit latency")
+            commit_latencies.append(latency)
+        except (KeyError, TypeError, ValueError):
+            failures.append("p4_geometry_commit_timing_missing")
+            break
+    if max(commit_latencies, default=-math.inf) > 10.0:
+        failures.append("p4_geometry_commit_budget_exceeded")
+    generation_only_hold_count = sum(
+        1 for row in v4_records
+        if str(row.get("reason", "")).startswith(
+            "live_occupancy_generation_changed_"))
+    if generation_only_hold_count:
+        failures.append("p4_generation_only_hold_detected")
     selected = _selected_decisions(decisions)
     if not selected:
         failures.append("p4_risk_selected_missing")
@@ -1391,6 +1432,9 @@ def analyze_stage_records(
         p4_forward_max_latency_ms=max(forward_latencies, default=None),
         p4_configuration_space_prepare_max_ms=max(
             cspace_latencies, default=None),
+        p4_geometry_commit_max_latency_ms=max(
+            commit_latencies, default=None),
+        generation_only_hold_count=generation_only_hold_count,
         selected_count=len(selected),
         lineage_group_count=len(groups),
         published_group_count=len(published_groups),
