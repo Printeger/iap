@@ -233,7 +233,6 @@ namespace ego_planner
 
     P4ForwardRiskSample toP4ForwardRiskSample(
         const iap::ForwardRiskPointResult &source,
-        const iap::ForwardRiskBatchResult &batch,
         const double hal, const double val)
     {
       P4ForwardRiskSample target;
@@ -263,6 +262,8 @@ namespace ego_planner
       target.val = val;
       target.gnss_anchor_hpl = source.prediction.gnss.anchor_hpl;
       target.gnss_anchor_vpl = source.prediction.gnss.anchor_vpl;
+      target.gnss_anchored_hpl = source.prediction.gnss.hpl;
+      target.gnss_anchored_vpl = source.prediction.gnss.vpl;
       target.gnss_raw_hpl = source.prediction.gnss.raw_hpl;
       target.gnss_raw_vpl = source.prediction.gnss.raw_vpl;
       target.gnss_receiver_raw_hpl =
@@ -290,10 +291,12 @@ namespace ego_planner
           source.gnss_attenuated_satellite_count;
       target.gnss_unknown_satellite_count =
           source.gnss_unknown_satellite_count;
-      target.gnss_used_satellite_count = source.prediction.gnss.n_used;
-      target.common_known_satellite_count =
-          batch.common_known_satellite_count;
-      target.common_satellite_hash = batch.common_satellite_hash;
+      target.gnss_used_satellite_count =
+          source.gnss_used_satellite_count;
+      target.gnss_known_satellite_count =
+          source.gnss_known_satellite_count;
+      target.local_satellite_set_hash =
+          source.local_satellite_set_hash;
       target.known_hazard_evidence = source.known_hazard_evidence;
       target.known_gnss_degradation_ratio =
           source.known_gnss_degradation_ratio;
@@ -464,6 +467,18 @@ namespace ego_planner
       viz.first_failed_val = decision.first_failed_risk.val;
       viz.first_failed_query_time_s =
           decision.first_failed_query_time_s;
+      viz.first_failed_candidate_id = decision.first_failed_candidate_id;
+      viz.first_failed_arc_length_m = decision.first_failed_arc_length_m;
+      viz.first_failed_gnss_known_count =
+          decision.first_failed_risk.gnss_known_satellite_count;
+      viz.first_failed_gnss_visible_count =
+          decision.first_failed_risk.gnss_visible_satellite_count;
+      viz.first_failed_gnss_blocked_count =
+          decision.first_failed_risk.gnss_blocked_satellite_count;
+      viz.first_failed_gnss_unknown_count =
+          decision.first_failed_risk.gnss_unknown_satellite_count;
+      viz.first_failed_gnss_used_count =
+          decision.first_failed_risk.gnss_used_satellite_count;
       viz.risk_snapshot_stamp_s = decision.snapshot_identity.risk_stamp_s;
       viz.first_failed_floor_source_h =
           decision.first_failed_risk.floor_source_h;
@@ -1460,7 +1475,7 @@ namespace ego_planner
             for (std::size_t index = 0; index < result.points.size(); ++index)
             {
               (*samples)[index] = toP4ForwardRiskSample(
-                  result.points[index], result, forward_hal, forward_val);
+                  result.points[index], forward_hal, forward_val);
             }
             return true;
           };
@@ -1728,12 +1743,13 @@ namespace ego_planner
              "request_x,request_y,request_z,anchor_x,anchor_y,anchor_z,"
              "selected_candidate_id,selected_guide_hash,candidate_count,"
              "stopping_distance_m,decision_horizon_m,certified_free_distance_m,"
-             "speed_cap_mps,first_failed_x,first_failed_y,first_failed_z,"
+             "speed_cap_mps,first_failed_candidate_id,first_failed_arc_length_m,"
+             "first_failed_x,first_failed_y,first_failed_z,"
              "first_failed_query_time_s,first_failed_hpl,first_failed_vpl,"
              "first_failed_hal,first_failed_val,first_failed_safety_ratio,"
              "first_failed_gnss_supported,first_failed_lidar_supported,"
-             "first_failed_fim_supported,first_failed_common_sat_count,"
-             "first_failed_common_sat_hash,first_failed_gnss_anchor_hpl,"
+             "first_failed_fim_supported,first_failed_gnss_known_count,"
+             "first_failed_local_sat_hash,first_failed_gnss_anchor_hpl,"
              "first_failed_gnss_anchor_vpl,first_failed_gnss_raw_hpl,"
              "first_failed_gnss_raw_vpl,first_failed_gnss_receiver_raw_hpl,"
              "first_failed_gnss_receiver_raw_vpl,"
@@ -1801,6 +1817,8 @@ namespace ego_planner
         << decision.candidates.size() << ',' << decision.stopping_distance_m
         << ',' << decision.decision_horizon_m << ','
         << decision.certified_free_distance_m << ',' << decision.speed_cap_mps
+        << ',' << decision.first_failed_candidate_id
+        << ',' << decision.first_failed_arc_length_m
         << ',' << decision.first_failed_position.x()
         << ',' << decision.first_failed_position.y()
         << ',' << decision.first_failed_position.z()
@@ -1813,8 +1831,8 @@ namespace ego_planner
         << ',' << (decision.first_failed_risk.gnss_supported ? 1 : 0)
         << ',' << (decision.first_failed_risk.lidar_supported ? 1 : 0)
         << ',' << (decision.first_failed_risk.fim_supported ? 1 : 0)
-        << ',' << decision.first_failed_risk.common_known_satellite_count
-        << ',' << decision.first_failed_risk.common_satellite_hash
+        << ',' << decision.first_failed_risk.gnss_known_satellite_count
+        << ',' << decision.first_failed_risk.local_satellite_set_hash
         << ',' << decision.first_failed_risk.gnss_anchor_hpl
         << ',' << decision.first_failed_risk.gnss_anchor_vpl
         << ',' << decision.first_failed_risk.gnss_raw_hpl
@@ -1880,9 +1898,7 @@ namespace ego_planner
                         "safety_gate_passed,fim_max_ratio,fim_integral,"
                         "safety_max_ratio,formal_support,known_hazard_evidence,"
                         "known_hazard_max,known_hazard_integral,known_fim_max_ratio,"
-                        "unknown_coverage,advisory_common_sat_count,"
-                        "advisory_common_sat_hash,advisory_evidence_identity_consistent,"
-                        "point_count,path_xyz,reason\n";
+                        "unknown_coverage,point_count,path_xyz,reason\n";
     candidates_csv << std::setprecision(17);
     for (const auto &candidate : decision.candidates)
     {
@@ -1913,14 +1929,80 @@ namespace ego_planner
           << candidate.known_hazard_integral << ','
           << candidate.known_fim_max_ratio << ','
           << candidate.unknown_coverage << ','
-          << candidate.advisory_common_known_satellite_count << ','
-          << candidate.advisory_common_satellite_hash << ','
-          << (candidate.advisory_evidence_identity_consistent ? 1 : 0) << ','
           << candidate.path.size() << ','
           << points.str() << ',' << candidate.reason << '\n';
     }
     candidates_csv.flush();
-    return candidates_csv.good();
+    if (!candidates_csv.good())
+      return false;
+
+    const std::string samples_path =
+        config.debug_csv_path + ".forward_risk_samples.csv";
+    std::ifstream samples_existing(samples_path);
+    const bool samples_header = !samples_existing.good() ||
+        samples_existing.peek() == std::ifstream::traits_type::eof();
+    samples_existing.close();
+    std::ofstream samples_csv(samples_path, std::ios::app);
+    if (!samples_csv.good())
+      return false;
+    std::ostringstream samples_buffer;
+    if (samples_header)
+      samples_buffer << "schema_version,decision_event_id,planning_attempt_id,"
+                     "candidate_id,channel_id,sample_index,arc_length_m,x,y,z,"
+                     "query_time_s,gnss_known_count,gnss_visible_count,"
+                     "gnss_blocked_count,gnss_attenuated_count,gnss_unknown_count,"
+                     "gnss_used_count,local_satellite_set_hash,gnss_anchor_hpl,"
+                     "gnss_anchor_vpl,gnss_anchored_hpl,gnss_anchored_vpl,"
+                     "gnss_raw_hpl,gnss_raw_vpl,"
+                     "gnss_receiver_raw_hpl,gnss_receiver_raw_vpl,"
+                     "gnss_spatial_delta_h,gnss_spatial_delta_v,"
+                     "gnss_temporal_growth_h,gnss_temporal_growth_v,hpl,vpl,hal,val,"
+                     "safety_ratio,fim_ratio,gnss_supported,lidar_supported,"
+                     "fim_supported,safety_state,ranking_state,unknown_coverage,reason\n";
+    samples_buffer << std::setprecision(17);
+    for (const auto &candidate : decision.candidates)
+    {
+      for (const auto &record : candidate.risk_samples)
+      {
+        const auto &risk = record.risk;
+        samples_buffer << decision.schema_version << ','
+            << decision.decision_event_id << ',' << decision.planning_attempt_id
+            << ',' << candidate.candidate_id << ',' << candidate.channel_id
+            << ',' << record.sample_index << ',' << record.arc_length_m
+            << ',' << record.position.x() << ',' << record.position.y()
+            << ',' << record.position.z() << ',' << record.query_time_s
+            << ',' << risk.gnss_known_satellite_count
+            << ',' << risk.gnss_visible_satellite_count
+            << ',' << risk.gnss_blocked_satellite_count
+            << ',' << risk.gnss_attenuated_satellite_count
+            << ',' << risk.gnss_unknown_satellite_count
+            << ',' << risk.gnss_used_satellite_count
+            << ',' << risk.local_satellite_set_hash
+            << ',' << risk.gnss_anchor_hpl << ',' << risk.gnss_anchor_vpl
+            << ',' << risk.gnss_anchored_hpl
+            << ',' << risk.gnss_anchored_vpl
+            << ',' << risk.gnss_raw_hpl << ',' << risk.gnss_raw_vpl
+            << ',' << risk.gnss_receiver_raw_hpl
+            << ',' << risk.gnss_receiver_raw_vpl
+            << ',' << risk.gnss_spatial_delta_h
+            << ',' << risk.gnss_spatial_delta_v
+            << ',' << risk.gnss_temporal_growth_h
+            << ',' << risk.gnss_temporal_growth_v
+            << ',' << risk.hpl << ',' << risk.vpl << ',' << risk.hal
+            << ',' << risk.val << ',' << risk.safety_ratio
+            << ',' << risk.fim_ratio
+            << ',' << (risk.gnss_supported ? 1 : 0)
+            << ',' << (risk.lidar_supported ? 1 : 0)
+            << ',' << (risk.fim_supported ? 1 : 0)
+            << ',' << p4ForwardSafetyStateName(risk.safety_state)
+            << ',' << (risk.ranking_state == P4ForwardRankingState::COMPARABLE ?
+                "COMPARABLE" : "INCOMPLETE")
+            << ',' << risk.unknown_coverage << ',' << risk.reason << '\n';
+      }
+    }
+    samples_csv << samples_buffer.str();
+    samples_csv.flush();
+    return samples_csv.good();
   }
 
   bool EGOPlannerManager::recordP4NativeAStarNoPath(const double stamp_s)

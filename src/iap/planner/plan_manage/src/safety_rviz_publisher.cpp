@@ -1545,6 +1545,17 @@ SafetyRvizPublisher::buildP4GuideMarkers(
       failed_label.scale.z = 0.18;
       failed_label.color = color(1.0f, 0.3f, 0.15f, 1.0f);
       failed_label.text = "P4 first failure: " + guide.first_failed_reason +
+          "\ncandidate=" + std::to_string(
+              guide.first_failed_candidate_id) +
+          " arc=" + fmt_num(guide.first_failed_arc_length_m, 2) + " m" +
+          "\nknown=" + std::to_string(guide.first_failed_gnss_known_count) +
+          " visible=" + std::to_string(
+              guide.first_failed_gnss_visible_count) +
+          " blocked=" + std::to_string(
+              guide.first_failed_gnss_blocked_count) +
+          " unknown=" + std::to_string(
+              guide.first_failed_gnss_unknown_count) +
+          " used=" + std::to_string(guide.first_failed_gnss_used_count) +
           "\nHPL " + fmt_num(guide.first_failed_hpl, 1) + "/" +
           fmt_num(guide.first_failed_hal, 1) +
           " VPL " + fmt_num(guide.first_failed_vpl, 1) + "/" +

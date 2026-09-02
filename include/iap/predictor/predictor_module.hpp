@@ -73,7 +73,9 @@ class PredictorModule {
       const PredictorQueryInput& input,
       const SpatialAdvisory* cached_spatial_advisory,
       SpatialAdvisory* evaluated_spatial_advisory,
-      PredictorBatchDiagnostics* diagnostics) const;
+      PredictorBatchDiagnostics* diagnostics,
+      const std::vector<bool>* gnss_satellite_mask = nullptr,
+      const GnssAdvisoryResult* selected_receiver_advisory = nullptr) const;
 };
 
 }  // namespace iap

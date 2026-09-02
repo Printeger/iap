@@ -651,6 +651,115 @@ class TestRunnerLifecycle(unittest.TestCase):
 
 
 class TestStageAnalyzer(unittest.TestCase):
+    def test_v5_formal_selection_accepts_distinct_local_satellite_sets(self):
+        decision = {
+            "schema_version": "p4_forward_route_decision_v5",
+            "stage": "forward_decision",
+            "action": "RISK_SELECTED",
+            "selection_authority": "FORMAL",
+            "formal_support": "1",
+            "selected_candidate_id": "2",
+            "candidate_count": "2",
+            "geometry_id": "planning-lattice-v2",
+            "alert_limit_policy_id": "fixed_hal20_val40_v1",
+            "occupancy_generation": "3",
+            "risk_generation": "5",
+            "geometry_commit_verdict": "CLEAR_AFTER_UPDATE",
+            "decision_event_id": "77",
+        }
+        base = {
+            "schema_version": "p4_forward_route_decision_v5",
+            "decision_event_id": "77",
+            "sample_index": "0", "arc_length_m": "0",
+            "x": "1", "y": "0", "z": "1", "query_time_s": "100.1",
+            "gnss_known_count": "6", "gnss_visible_count": "5",
+            "gnss_blocked_count": "1", "gnss_attenuated_count": "2",
+            "gnss_unknown_count": "3", "gnss_used_count": "5",
+            "gnss_raw_hpl": "5", "gnss_raw_vpl": "6",
+            "gnss_receiver_raw_hpl": "4", "gnss_receiver_raw_vpl": "5",
+            "gnss_spatial_delta_h": "1", "gnss_spatial_delta_v": "1",
+            "gnss_anchor_hpl": "13", "gnss_anchor_vpl": "29",
+            "gnss_anchored_hpl": "14", "gnss_anchored_vpl": "30",
+            "gnss_temporal_growth_h": "0", "gnss_temporal_growth_v": "0",
+            "hpl": "14", "vpl": "30", "hal": "20", "val": "40",
+            "safety_ratio": "0.75", "fim_ratio": "0.4",
+            "gnss_supported": "1", "lidar_supported": "1",
+            "fim_supported": "1", "safety_state": "SAFE",
+            "ranking_state": "COMPARABLE", "reason": "NONE",
+        }
+        first = dict(base, candidate_id="1", local_satellite_set_hash="41")
+        second = dict(base, candidate_id="2", local_satellite_set_hash="42")
+
+        candidates = [
+            {"decision_event_id": "77", "candidate_id": "1",
+             "length_m": "0"},
+            {"decision_event_id": "77", "candidate_id": "2",
+             "length_m": "0"},
+        ]
+        result = MODULE.analyze_forward_risk_samples(
+            [decision], [first, second], candidates)
+
+        self.assertEqual(result["failures"], [])
+        self.assertEqual(result["local_satellite_set_count"], 2)
+
+        truncated = dict(second, sample_index="1", arc_length_m="0.5")
+        invalid = MODULE.analyze_forward_risk_samples(
+            [decision], [first, truncated], candidates)
+        self.assertIn(
+            "p4_forward_risk_route_sample_coverage_invalid",
+            invalid["failures"])
+
+        wrong_length = [dict(candidates[0]), dict(candidates[1])]
+        wrong_length[1]["length_m"] = "0.25"
+        invalid = MODULE.analyze_forward_risk_samples(
+            [decision], [first, second], wrong_length)
+        self.assertIn(
+            "p4_forward_risk_route_sample_coverage_invalid",
+            invalid["failures"])
+
+    def test_v5_formal_selection_allows_unselected_unsafe_candidate(self):
+        decision = {
+            "schema_version": "p4_forward_route_decision_v5",
+            "stage": "forward_decision",
+            "action": "RISK_SELECTED",
+            "selection_authority": "FORMAL",
+            "formal_support": "1",
+            "selected_candidate_id": "2",
+            "decision_event_id": "78",
+        }
+        base = {
+            "schema_version": "p4_forward_route_decision_v5",
+            "decision_event_id": "78", "sample_index": "0",
+            "arc_length_m": "0", "x": "1", "y": "0", "z": "1",
+            "query_time_s": "100.1", "gnss_known_count": "6",
+            "gnss_visible_count": "5", "gnss_blocked_count": "1",
+            "gnss_attenuated_count": "2", "gnss_unknown_count": "3",
+            "gnss_used_count": "5", "gnss_raw_hpl": "5",
+            "gnss_raw_vpl": "6", "gnss_receiver_raw_hpl": "4",
+            "gnss_receiver_raw_vpl": "5", "gnss_spatial_delta_h": "1",
+            "gnss_spatial_delta_v": "1", "hpl": "14", "vpl": "30",
+            "gnss_anchor_hpl": "13", "gnss_anchor_vpl": "29",
+            "gnss_anchored_hpl": "14", "gnss_anchored_vpl": "30",
+            "gnss_temporal_growth_h": "0", "gnss_temporal_growth_v": "0",
+            "hal": "20", "val": "40", "safety_ratio": "0.75",
+            "fim_ratio": "0.4", "gnss_supported": "1",
+            "lidar_supported": "1", "fim_supported": "1",
+            "safety_state": "SAFE", "ranking_state": "COMPARABLE",
+            "reason": "NONE",
+        }
+        safe_one = dict(
+            base, candidate_id="1", local_satellite_set_hash="41")
+        safe_two = dict(
+            base, candidate_id="2", local_satellite_set_hash="42")
+        unsafe = dict(
+            base, candidate_id="3", local_satellite_set_hash="43",
+            safety_state="UNSAFE", hpl="25", safety_ratio="1.25")
+
+        result = MODULE.analyze_forward_risk_samples(
+            [decision], [safe_one, safe_two, unsafe])
+
+        self.assertEqual(result["failures"], [])
+
     def test_advisory_v3_is_not_counted_as_formal_risk_selection(self):
         advisory = {
             "schema_version": "p4_forward_route_decision_v3",

@@ -24,11 +24,20 @@ class GnssAdvisoryPredictor {
 
   GnssAdvisoryResult query(const Eigen::Vector3d& query_position,
                            const IntegritySnapshot& snapshot) const;
+  // Evaluate advisory geometry using an explicit per-query satellite mask.
+  // The frozen epoch and its certified exclusion identity are not modified.
+  GnssAdvisoryResult query_with_satellite_mask(
+      const Eigen::Vector3d& query_position,
+      const IntegritySnapshot& snapshot,
+      const std::vector<bool>& satellite_mask) const;
   // Current receiver measurement support is an anchor-only operation.  It is
   // intentionally separate from query() so standalone advisory diagnostics
   // remain raw and planning code cannot extend measured support spatially.
   GnssAdvisoryResult query_receiver_measured(
       const IntegritySnapshot& snapshot) const;
+  GnssAdvisoryResult query_receiver_measured_with_satellite_mask(
+      const IntegritySnapshot& snapshot,
+      const std::vector<bool>& satellite_mask) const;
   VisibilityResult visibility_evidence(
       const Eigen::Vector3d& query_position,
       const IntegritySnapshot& snapshot) const;
@@ -42,7 +51,8 @@ class GnssAdvisoryPredictor {
   GnssAdvisoryResult query_unanchored(
       const Eigen::Vector3d& query_position,
       const IntegritySnapshot& snapshot,
-      bool force_measured_epoch_support) const;
+      bool force_measured_epoch_support,
+      const std::vector<bool>* satellite_mask = nullptr) const;
   GnssAdvisoryResult receiver_anchor_advisory(
       const IntegritySnapshot& snapshot) const;
   VisibilityResult cached_visibility_evidence(
@@ -53,7 +63,8 @@ class GnssAdvisoryPredictor {
       const Eigen::Vector3d& query_position,
       const GnssEpoch& epoch,
       const VisibilityResult& visibility,
-      const GnssAdvisoryResult& base) const;
+      const GnssAdvisoryResult& base,
+      const std::vector<bool>* satellite_mask = nullptr) const;
 
   GnssAdvisoryPredictorParams params_;
   GnssGeometryPlPredictor geometry_predictor_;

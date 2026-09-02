@@ -102,10 +102,12 @@ OccupancyCollisionDeltaHistory makeCommitHistory(
 }
 
 using ego_planner::P4ForwardAction;
+using ego_planner::P4ForwardCandidate;
 using ego_planner::P4ForwardGeometryState;
 using ego_planner::P4ForwardRequest;
 using ego_planner::P4ForwardRankingState;
 using ego_planner::P4ForwardRiskQuery;
+using ego_planner::P4ForwardRiskEvidenceRecord;
 using ego_planner::P4ForwardRiskSample;
 using ego_planner::P4ForwardRoutePlanner;
 using ego_planner::P4ForwardSafetyState;
@@ -1101,8 +1103,9 @@ TEST(P4ForwardRoute, IncompleteSupportWithKnownHazardDifferenceIsAdvisoryOnly)
         sample.known_hazard_evidence =
           sample.known_gnss_degradation_ratio > 0.0;
         sample.unknown_coverage = 0.40;
-        sample.common_known_satellite_count = 3;
-        sample.common_satellite_hash = 42;
+        sample.gnss_known_satellite_count = 3;
+        sample.gnss_used_satellite_count = 3;
+        sample.local_satellite_set_hash = 42;
         sample.reason = "GNSS_SKY_UNKNOWN";
         samples->push_back(sample);
       }
@@ -1150,8 +1153,9 @@ TEST(P4ForwardRoute, MissingEvidenceCannotWinAdvisoryAsZeroHazard)
           sample.known_gnss_degradation_ratio = 0.3;
           sample.known_hazard_evidence = true;
         }
-        sample.common_known_satellite_count = 3;
-        sample.common_satellite_hash = 42;
+        sample.gnss_known_satellite_count = 3;
+        sample.gnss_used_satellite_count = 3;
+        sample.local_satellite_set_hash = 42;
         sample.reason = "GNSS_SKY_UNKNOWN";
         samples->push_back(sample);
       }
@@ -1165,7 +1169,7 @@ TEST(P4ForwardRoute, MissingEvidenceCannotWinAdvisoryAsZeroHazard)
   EXPECT_TRUE(decision.selected_guide.empty());
 }
 
-TEST(P4ForwardRoute, DifferentKnownSatelliteDomainsCannotBeAdvisoryCompared)
+TEST(P4ForwardRoute, DifferentLocalSatelliteSetsCanBeAdvisoryCompared)
 {
   auto request = straightRequest();
   request.geometry = [](const Eigen::Vector3d & point) {
@@ -1186,11 +1190,15 @@ TEST(P4ForwardRoute, DifferentKnownSatelliteDomainsCannotBeAdvisoryCompared)
         sample.safety_state = P4ForwardSafetyState::UNKNOWN;
         sample.ranking_state = P4ForwardRankingState::INCOMPLETE;
         sample.unknown_coverage = 0.4;
-        sample.common_known_satellite_count = 3;
-        sample.common_satellite_hash = query.position.y() < 0.0 ? 41 : 42;
+        sample.gnss_known_satellite_count = 3;
+        sample.gnss_used_satellite_count = 3;
+        sample.local_satellite_set_hash =
+          query.position.y() < 0.0 ? 41 : 42;
         sample.known_gnss_degradation_ratio =
-          query.position.y() < 0.0 ? 0.05 : 0.30;
-        sample.known_hazard_evidence = true;
+          query.position.x() >= 2.0 && query.position.x() <= 4.0 ?
+          (query.position.y() < 0.0 ? 0.05 : 0.30) : 0.0;
+        sample.known_hazard_evidence =
+          sample.known_gnss_degradation_ratio > 0.0;
         sample.reason = "GNSS_SKY_UNKNOWN";
         samples->push_back(sample);
       }
@@ -1199,8 +1207,10 @@ TEST(P4ForwardRoute, DifferentKnownSatelliteDomainsCannotBeAdvisoryCompared)
 
   const auto decision = P4ForwardRoutePlanner().decide(request);
 
-  EXPECT_EQ(decision.action, P4ForwardAction::DEFER_RISK_SELECTION);
-  EXPECT_EQ(decision.selection_authority, P4ForwardSelectionAuthority::NONE);
+  EXPECT_EQ(decision.action, P4ForwardAction::ADVISORY_SELECTED)
+    << decision.reason;
+  EXPECT_EQ(decision.selection_authority,
+            P4ForwardSelectionAuthority::ADVISORY_NON_CERTIFIED);
 }
 
 TEST(P4ForwardRoute, EnumerationSubBudgetTimeoutNeverUsesPartialRoute)
@@ -1311,8 +1321,10 @@ TEST(P4ForwardRoute, RiskBatchComparesAllChannelsWithOneCertificateCall)
         sample.ranking_state = ego_planner::P4ForwardRankingState::COMPARABLE;
         sample.safety_ratio = 0.5;
         sample.fim_ratio = query.position.y() < 0.0 ? 0.2 : 0.6;
-        sample.common_known_satellite_count = 6;
-        sample.common_satellite_hash = 12345;
+        sample.gnss_known_satellite_count = 6;
+        sample.gnss_used_satellite_count = 6;
+        sample.local_satellite_set_hash =
+          query.position.y() < 0.0 ? 12345 : 67890;
         sample.reason = "ok";
         samples->push_back(sample);
       }
@@ -1326,6 +1338,72 @@ TEST(P4ForwardRoute, RiskBatchComparesAllChannelsWithOneCertificateCall)
     << decision.reason;
   EXPECT_EQ(batch_calls, 1);
   EXPECT_GE(max_group_count, 2u);
+  ASSERT_GE(decision.candidates.size(), 2u);
+  EXPECT_TRUE(std::all_of(
+      decision.candidates.begin(), decision.candidates.end(),
+      [](const P4ForwardCandidate & candidate) {
+        return !candidate.risk_samples.empty() &&
+               std::all_of(
+            candidate.risk_samples.begin(), candidate.risk_samples.end(),
+          [](const P4ForwardRiskEvidenceRecord & record) {
+            return record.position.allFinite() &&
+                   record.risk.local_satellite_set_hash != 0 &&
+                   record.risk.gnss_used_satellite_count >= 4;
+            });
+      }));
+}
+
+TEST(P4ForwardRoute, FormalRiskSelectionRequiresTwoSafeCompleteChannels)
+{
+  auto request = straightRequest();
+  request.geometry = [](const Eigen::Vector3d & point) {
+      if (point.x() >= 2.0 && point.x() <= 4.0 &&
+        std::abs(point.y()) <= 0.6)
+      {
+        return P4ForwardGeometryState::OCCUPIED;
+      }
+      if (std::abs(point.y()) > 2.5 || point.z() < 0.5 || point.z() > 1.5) {
+        return P4ForwardGeometryState::OCCUPIED;
+      }
+      return P4ForwardGeometryState::CLEAR;
+    };
+  request.risk_batch = [](
+    const std::vector<P4ForwardRiskQuery> & queries, double,
+    std::vector<P4ForwardRiskSample> * samples) {
+      samples->clear();
+      std::set<uint64_t> candidate_ids;
+      for (const auto & query : queries) {
+        candidate_ids.insert(query.candidate_group_id);
+      }
+      const uint64_t safe_candidate_id = *candidate_ids.begin();
+      for (const auto & query : queries) {
+        P4ForwardRiskSample sample;
+        sample.valid = true;
+        sample.stale = false;
+        sample.gnss_supported = true;
+        sample.lidar_supported = true;
+        sample.fim_supported = true;
+        sample.ranking_state = P4ForwardRankingState::COMPARABLE;
+        const bool safe = query.candidate_group_id == safe_candidate_id;
+        sample.safety_state = safe ? P4ForwardSafetyState::SAFE :
+          P4ForwardSafetyState::UNSAFE;
+        sample.safety_ratio = safe ? 0.5 : 1.1;
+        sample.fim_ratio = safe ? 0.2 : 0.8;
+        sample.gnss_known_satellite_count = 6;
+        sample.gnss_used_satellite_count = 6;
+        sample.local_satellite_set_hash = safe ? 12345 : 67890;
+        sample.reason = safe ? "ok" : "SAFETY_LIMIT_EXCEEDED";
+        samples->push_back(sample);
+      }
+      return true;
+    };
+
+  const auto decision = P4ForwardRoutePlanner().decide(request);
+
+  EXPECT_NE(decision.action, P4ForwardAction::RISK_SELECTED);
+  EXPECT_EQ(decision.action, P4ForwardAction::CONTINUE_NOMINAL)
+    << decision.reason;
+  EXPECT_EQ(decision.selection_authority, P4ForwardSelectionAuthority::NONE);
 }
 
 TEST(P4ForwardRoute, RiskBatchIncompleteDefersWithoutRiskSelection)

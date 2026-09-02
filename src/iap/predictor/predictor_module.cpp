@@ -230,7 +230,9 @@ bool apply_certified_gnss_anchor(
     const GnssAdvisoryPredictor& predictor,
     const GnssAdvisoryPredictorParams& params,
     const IntegritySnapshot& snapshot,
-    GnssAdvisoryResult* candidate) {
+    GnssAdvisoryResult* candidate,
+    const std::vector<bool>* satellite_mask = nullptr,
+    const GnssAdvisoryResult* selected_receiver_advisory = nullptr) {
   if (!candidate || !candidate->valid) {
     return false;
   }
@@ -260,11 +262,20 @@ bool apply_certified_gnss_anchor(
     candidate->anchor_epoch_delta_s = epoch_delta;
     return false;
   }
-  const GnssAdvisoryResult receiver =
-      predictor.query_receiver_measured(snapshot);
+  const GnssAdvisoryResult receiver = selected_receiver_advisory != nullptr
+      ? *selected_receiver_advisory
+      : (satellite_mask != nullptr
+          ? predictor.query_receiver_measured_with_satellite_mask(
+                snapshot, *satellite_mask)
+          : predictor.query_receiver_measured(snapshot));
   if (!receiver.valid || !std::isfinite(receiver.hpl) ||
       !std::isfinite(receiver.vpl)) {
-    *candidate = disabled_gnss_result("gnss_anchor_inconsistent");
+    const bool local_geometry_failure = satellite_mask != nullptr &&
+        (receiver.fallback_reason == "singular_geometry" ||
+         receiver.fallback_reason == "too_few_sats" ||
+         receiver.fallback_reason == "too_few_observed_los_sats");
+    *candidate = disabled_gnss_result(local_geometry_failure
+        ? "singular_geometry" : "gnss_anchor_inconsistent");
     candidate->anchor_epoch_delta_s = epoch_delta;
     return false;
   }
@@ -389,6 +400,8 @@ const char* forwardRiskFailureReasonName(
       return "SAFETY_LIMIT_EXCEEDED";
     case ForwardRiskFailureReason::GNSS_ANCHOR_INCONSISTENT:
       return "GNSS_ANCHOR_INCONSISTENT";
+    case ForwardRiskFailureReason::GNSS_LOCAL_USABLE_SATS_LT_MIN:
+      return "GNSS_LOCAL_USABLE_SATS_LT_MIN";
     case ForwardRiskFailureReason::GNSS_SKY_UNKNOWN:
       return "GNSS_SKY_UNKNOWN";
     case ForwardRiskFailureReason::GNSS_GEOMETRY_DEGENERATE:
@@ -452,7 +465,9 @@ PredictorQueryResult PredictorModule::queryWithSpatialAdvisory(
     const PredictorQueryInput& input,
     const SpatialAdvisory* cached_spatial_advisory,
     SpatialAdvisory* evaluated_spatial_advisory,
-    PredictorBatchDiagnostics* diagnostics) const {
+    PredictorBatchDiagnostics* diagnostics,
+    const std::vector<bool>* gnss_satellite_mask,
+    const GnssAdvisoryResult* selected_receiver_advisory) const {
   PredictorQueryResult out;
   out.query_position_map = input.query_position_map;
   out.query_time_s = input.query_time_s;
@@ -559,8 +574,12 @@ PredictorQueryResult PredictorModule::queryWithSpatialAdvisory(
         const auto begin = diagnostics && diagnostics->collect_component_timing
                                ? std::chrono::steady_clock::now()
                                : std::chrono::steady_clock::time_point{};
-        out.gnss = gnss_.query(working_input.query_position_map,
-                               working_input.snapshot);
+        out.gnss = gnss_satellite_mask != nullptr
+            ? gnss_.query_with_satellite_mask(
+                  working_input.query_position_map, working_input.snapshot,
+                  *gnss_satellite_mask)
+            : gnss_.query(working_input.query_position_map,
+                          working_input.snapshot);
         if (diagnostics) {
           ++diagnostics->gnss_advisory_invocations;
           if (diagnostics->collect_component_timing) {
@@ -602,7 +621,9 @@ PredictorQueryResult PredictorModule::queryWithSpatialAdvisory(
   }
   if (out.gnss.valid) {
     apply_certified_gnss_anchor(gnss_, params_.gnss,
-                                working_input.snapshot, &out.gnss);
+                                working_input.snapshot, &out.gnss,
+                                gnss_satellite_mask,
+                                selected_receiver_advisory);
   }
   const auto fusion_begin = diagnostics && diagnostics->collect_component_timing
                                 ? std::chrono::steady_clock::now()
@@ -759,6 +780,13 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
   ForwardRiskBatchResult out;
   out.combined_snapshot_identity = request.combined_snapshot_identity;
   out.points.resize(request.points.size());
+  if (diagnostics != nullptr) {
+    const bool collect_component_timing =
+        diagnostics->collect_component_timing;
+    *diagnostics = PredictorBatchDiagnostics{};
+    diagnostics->collect_component_timing = collect_component_timing;
+    diagnostics->query_count = request.points.size();
+  }
   const auto started_at = std::chrono::steady_clock::now();
   const auto budget_expired = [&]() {
     if (request.compute_budget_ms ==
@@ -774,13 +802,17 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
             std::chrono::steady_clock::now() - started_at).count();
     return elapsed_ms >= request.compute_budget_ms;
   };
-  const auto fail_all = [&](const ForwardRiskFailureReason reason) {
+  const auto fail_from = [&](const std::size_t first,
+                             const ForwardRiskFailureReason reason) {
     out.complete = false;
-    out.failure_reason = reason;
-    for (auto& point : out.points) {
-      point.safety_state = ForwardRiskSafetyState::UNKNOWN;
-      point.ranking_state = ForwardRiskRankingState::INCOMPLETE;
-      point.failure_reason = reason;
+    if (out.failure_reason == ForwardRiskFailureReason::NONE) {
+      out.failure_reason = reason;
+      out.first_failure_index = first;
+    }
+    for (std::size_t index = first; index < out.points.size(); ++index) {
+      out.points[index].safety_state = ForwardRiskSafetyState::UNKNOWN;
+      out.points[index].ranking_state = ForwardRiskRankingState::INCOMPLETE;
+      out.points[index].failure_reason = reason;
     }
   };
   if (request.points.empty()) {
@@ -797,49 +829,32 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
     return out;
   }
   if (budget_expired()) {
-    fail_all(ForwardRiskFailureReason::COMPUTE_BUDGET_EXCEEDED);
+    fail_from(0, ForwardRiskFailureReason::COMPUTE_BUDGET_EXCEEDED);
     return out;
   }
 
   const std::size_t sat_count = request.snapshot.gnss_epoch.sats.size();
-  std::vector<bool> common_known(sat_count, true);
-  std::vector<VisibilityResult> visibility_evidence;
-  visibility_evidence.reserve(request.points.size());
-  for (const auto& query : request.points) {
+  std::vector<std::vector<bool>> local_satellite_masks;
+  local_satellite_masks.reserve(request.points.size());
+  for (std::size_t point_index = 0;
+       point_index < request.points.size(); ++point_index) {
     if (budget_expired()) {
-      fail_all(ForwardRiskFailureReason::COMPUTE_BUDGET_EXCEEDED);
+      // No point has an advisory result yet during the evidence pass.
+      fail_from(0, ForwardRiskFailureReason::COMPUTE_BUDGET_EXCEEDED);
       return out;
     }
+    const auto& query = request.points[point_index];
     const VisibilityResult evidence =
         gnss_.visibility_evidence(query.position_map, request.snapshot);
-    visibility_evidence.push_back(evidence);
     if (budget_expired()) {
-      fail_all(ForwardRiskFailureReason::COMPUTE_BUDGET_EXCEEDED);
+      // Evidence retained above is diagnostic only; every advisory point is
+      // still unfinished until the second pass evaluates GNSS/LiDAR/FIM.
+      fail_from(0, ForwardRiskFailureReason::COMPUTE_BUDGET_EXCEEDED);
       return out;
     }
-    if (evidence.known_flags.size() != sat_count) {
-      std::fill(common_known.begin(), common_known.end(), false);
-      break;
-    }
-    for (std::size_t index = 0; index < sat_count; ++index) {
-      const SatObs& sat = request.snapshot.gnss_epoch.sats[index];
-      common_known[index] = common_known[index] &&
-          !sat.excluded &&
-          sat.elevation >= params_.gnss.visibility_params.min_elevation &&
-          evidence.known_flags[index];
-    }
-  }
-
-  for (std::size_t point_index = 0;
-       point_index < visibility_evidence.size(); ++point_index) {
-    const auto& evidence = visibility_evidence[point_index];
     auto& result = out.points[point_index];
-    result.gnss_visible_satellite_count = evidence.n_vis;
-    result.gnss_blocked_satellite_count = evidence.n_blocked;
-    result.gnss_unknown_satellite_count = evidence.n_unknown;
-    result.gnss_known_satellite_count = evidence.n_known;
+    std::vector<bool> local_mask(sat_count, false);
     int eligible_satellites = 0;
-    int attenuated_satellites = 0;
     double known_degradation = 0.0;
     for (std::size_t sat_index = 0; sat_index < sat_count; ++sat_index) {
       const auto& sat = request.snapshot.gnss_epoch.sats[sat_index];
@@ -849,27 +864,49 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
       }
       ++eligible_satellites;
       const bool known = sat_index < evidence.known_flags.size() &&
-          evidence.known_flags[sat_index] && common_known[sat_index];
+          evidence.known_flags[sat_index];
       if (!known) {
+        ++result.gnss_unknown_satellite_count;
         continue;
       }
+      ++result.gnss_known_satellite_count;
       const bool blocked = sat_index < evidence.blocked_flags.size() &&
           evidence.blocked_flags[sat_index];
+      const bool visible = sat_index < evidence.vis_flags.size() &&
+          evidence.vis_flags[sat_index] && !blocked;
       const double kappa = sat_index < evidence.kappas.size() &&
           std::isfinite(evidence.kappas[sat_index])
           ? std::clamp(evidence.kappas[sat_index], 0.0, 1.0)
           : 0.0;
-      if (!blocked && kappa > 0.0) {
-        ++attenuated_satellites;
+      if (blocked) {
+        ++result.gnss_blocked_satellite_count;
+      } else if (visible) {
+        ++result.gnss_visible_satellite_count;
+        local_mask[sat_index] = true;
+        ++result.gnss_used_satellite_count;
+        if (kappa > 0.0) {
+          ++result.gnss_attenuated_satellite_count;
+        }
       }
       known_degradation = std::max(
           known_degradation, blocked ? 1.0 : kappa);
     }
-    result.gnss_attenuated_satellite_count = attenuated_satellites;
+    std::uint64_t local_hash = 1469598103934665603ull;
+    for (std::size_t sat_index = 0; sat_index < sat_count; ++sat_index) {
+      if (!local_mask[sat_index]) {
+        continue;
+      }
+      local_hash ^= static_cast<std::uint64_t>(static_cast<std::uint32_t>(
+          request.snapshot.gnss_epoch.sats[sat_index].sat_id));
+      local_hash *= 1099511628211ull;
+    }
+    result.local_satellite_set_hash =
+        result.gnss_used_satellite_count > 0 ? local_hash : 0;
     result.known_gnss_degradation_ratio = known_degradation;
     result.known_hazard_evidence = known_degradation > 0.0;
     result.unknown_coverage = eligible_satellites > 0
-        ? std::clamp(static_cast<double>(evidence.n_unknown) /
+        ? std::clamp(static_cast<double>(
+              result.gnss_unknown_satellite_count) /
               static_cast<double>(eligible_satellites), 0.0, 1.0)
         : 1.0;
     result.gnss_support_ray_length_m =
@@ -878,80 +915,55 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
             : params_.gnss.visibility_params.occ_L;
     result.gnss_hard_occlusion =
         params_.gnss.visibility_params.hard_occlusion;
-  }
-
-  IntegritySnapshot restricted_snapshot = request.snapshot;
-  std::uint64_t common_hash = 1469598103934665603ull;
-  for (std::size_t index = 0; index < sat_count; ++index) {
-    if (!common_known[index]) {
-      restricted_snapshot.gnss_epoch.sats[index].excluded = true;
-      continue;
-    }
-    const int sat_id = restricted_snapshot.gnss_epoch.sats[index].sat_id;
-    out.common_known_sat_ids.push_back(sat_id);
-    common_hash ^= static_cast<std::uint64_t>(
-        static_cast<std::uint32_t>(sat_id));
-    common_hash *= 1099511628211ull;
-  }
-  out.common_satellite_hash = common_hash;
-  out.common_known_satellite_count =
-      static_cast<int>(out.common_known_sat_ids.size());
-  if (out.common_known_satellite_count <
-      params_.gnss.geometry_params.min_sats) {
-    out.complete = false;
-    out.failure_reason = ForwardRiskFailureReason::GNSS_SKY_UNKNOWN;
-    for (std::size_t index = 0; index < out.points.size(); ++index) {
-      if (budget_expired()) {
-        fail_all(ForwardRiskFailureReason::COMPUTE_BUDGET_EXCEEDED);
-        return out;
-      }
-      auto& point = out.points[index];
-      point.prediction.lidar = lidar_.query(
-          request.points[index].position_map, request.snapshot);
-      if (budget_expired()) {
-        fail_all(ForwardRiskFailureReason::COMPUTE_BUDGET_EXCEEDED);
-        return out;
-      }
-      point.lidar_supported = point.prediction.lidar.valid;
-      point.safety_state = ForwardRiskSafetyState::UNKNOWN;
-      point.ranking_state = ForwardRiskRankingState::INCOMPLETE;
-      point.failure_reason = out.failure_reason;
-    }
-    return out;
-  }
-
-  std::vector<PredictorQueryInput> inputs;
-  inputs.reserve(request.points.size());
-  for (const auto& point : request.points) {
-    inputs.emplace_back(point.position_map, restricted_snapshot,
-                        point.query_time_s, point.horizon_s, "map",
-                        request.freshness_reference_time_s);
-  }
-  const auto predictions = queryBatch(inputs, diagnostics, budget_expired);
-  if (predictions.size() != request.points.size()) {
-    fail_all(budget_expired()
-                 ? ForwardRiskFailureReason::COMPUTE_BUDGET_EXCEEDED
-                 : ForwardRiskFailureReason::FIM_SUPPORT_MISSING);
-    return out;
-  }
-  if (budget_expired()) {
-    fail_all(ForwardRiskFailureReason::COMPUTE_BUDGET_EXCEEDED);
-    return out;
+    local_satellite_masks.push_back(std::move(local_mask));
   }
 
   out.complete = true;
   out.failure_reason = ForwardRiskFailureReason::NONE;
-  for (std::size_t index = 0; index < predictions.size(); ++index) {
+  struct ReceiverAdvisoryCacheEntry {
+    std::vector<bool> satellite_mask;
+    GnssAdvisoryResult advisory;
+  };
+  std::unordered_map<std::uint64_t, ReceiverAdvisoryCacheEntry>
+      receiver_cache;
+  receiver_cache.reserve(request.points.size());
+  for (std::size_t index = 0; index < request.points.size(); ++index) {
+    if (budget_expired()) {
+      fail_from(index, ForwardRiskFailureReason::COMPUTE_BUDGET_EXCEEDED);
+      break;
+    }
     auto& result = out.points[index];
-    result.prediction = predictions[index];
-    result.gnss_support_ray_length_m =
-        params_.gnss.visibility_params.hard_occlusion
-            ? params_.gnss.visibility_params.occ_range
-            : params_.gnss.visibility_params.occ_L;
-    result.gnss_hard_occlusion =
-        params_.gnss.visibility_params.hard_occlusion;
+    const auto& local_mask = local_satellite_masks[index];
+    auto cached_receiver = receiver_cache.find(
+        result.local_satellite_set_hash);
+    GnssAdvisoryResult uncached_receiver;
+    const GnssAdvisoryResult* receiver_advisory = nullptr;
+    if (cached_receiver != receiver_cache.end() &&
+        cached_receiver->second.satellite_mask == local_mask) {
+      receiver_advisory = &cached_receiver->second.advisory;
+    } else {
+      uncached_receiver =
+          gnss_.query_receiver_measured_with_satellite_mask(
+              request.snapshot, local_mask);
+      if (cached_receiver == receiver_cache.end()) {
+        auto inserted = receiver_cache.emplace(
+            result.local_satellite_set_hash,
+            ReceiverAdvisoryCacheEntry{local_mask, uncached_receiver});
+        receiver_advisory = &inserted.first->second.advisory;
+      } else {
+        // A hash collision must never cause a receiver advisory from another
+        // satellite set to be reused.
+        receiver_advisory = &uncached_receiver;
+      }
+    }
+    const auto& query = request.points[index];
+    const PredictorQueryInput input(
+        query.position_map, request.snapshot, query.query_time_s,
+        query.horizon_s, "map", request.freshness_reference_time_s);
+    result.prediction = queryWithSpatialAdvisory(
+        input, nullptr, nullptr, diagnostics, &local_mask,
+        receiver_advisory);
     result.gnss_supported = result.prediction.gnss.valid &&
-        result.prediction.gnss.n_unknown_support == 0 &&
         result.prediction.gnss.n_used >= params_.gnss.geometry_params.min_sats;
     result.lidar_supported = result.prediction.lidar.valid;
     result.fim_supported = result.prediction.fused.valid &&
@@ -969,14 +981,16 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
         PredictorFreshnessStatus::STALE;
     if (stale_prediction) {
       result.failure_reason = ForwardRiskFailureReason::STALE;
+    } else if (result.gnss_used_satellite_count <
+               params_.gnss.geometry_params.min_sats) {
+      result.failure_reason =
+          ForwardRiskFailureReason::GNSS_LOCAL_USABLE_SATS_LT_MIN;
     } else if (!result.gnss_supported) {
       result.failure_reason =
           result.prediction.gnss.fallback_reason ==
                   "gnss_anchor_inconsistent"
               ? ForwardRiskFailureReason::GNSS_ANCHOR_INCONSISTENT
-              : (result.prediction.gnss.n_unknown_support > 0
-                     ? ForwardRiskFailureReason::GNSS_SKY_UNKNOWN
-                     : ForwardRiskFailureReason::GNSS_GEOMETRY_DEGENERATE);
+              : ForwardRiskFailureReason::GNSS_GEOMETRY_DEGENERATE;
     } else if (!result.lidar_supported) {
       result.failure_reason =
           ForwardRiskFailureReason::LIDAR_SUPPORT_MISSING;
@@ -1010,6 +1024,7 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
     if (out.failure_reason == ForwardRiskFailureReason::NONE &&
         result.failure_reason != ForwardRiskFailureReason::NONE) {
       out.failure_reason = result.failure_reason;
+      out.first_failure_index = index;
     }
   }
   return out;

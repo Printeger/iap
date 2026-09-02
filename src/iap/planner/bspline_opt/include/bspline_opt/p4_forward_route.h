@@ -17,7 +17,7 @@ namespace ego_planner
 {
 
   inline constexpr char kP4ForwardDecisionSchema[] =
-    "p4_forward_route_decision_v4";
+    "p4_forward_route_decision_v5";
 
   enum class P4PlanningDisposition
   {
@@ -162,6 +162,8 @@ namespace ego_planner
     double val = std::numeric_limits < double > ::quiet_NaN();
     double gnss_anchor_hpl = std::numeric_limits < double > ::quiet_NaN();
     double gnss_anchor_vpl = std::numeric_limits < double > ::quiet_NaN();
+    double gnss_anchored_hpl = std::numeric_limits < double > ::quiet_NaN();
+    double gnss_anchored_vpl = std::numeric_limits < double > ::quiet_NaN();
     double gnss_raw_hpl = std::numeric_limits < double > ::quiet_NaN();
     double gnss_raw_vpl = std::numeric_limits < double > ::quiet_NaN();
     double gnss_receiver_raw_hpl =
@@ -186,8 +188,8 @@ namespace ego_planner
     int gnss_attenuated_satellite_count = 0;
     int gnss_unknown_satellite_count = 0;
     int gnss_used_satellite_count = 0;
-    int common_known_satellite_count = 0;
-    uint64_t common_satellite_hash = 0;
+    int gnss_known_satellite_count = 0;
+    uint64_t local_satellite_set_hash = 0;
     // Non-certified evidence. These fields never turn UNKNOWN into SAFE and
     // are used only to compare geometrically valid routes when formal source
     // support is incomplete.
@@ -198,6 +200,16 @@ namespace ego_planner
     std::string floor_source_h = "none";
     std::string floor_source_v = "none";
     std::string reason = "not_evaluated";
+  };
+
+  struct P4ForwardRiskEvidenceRecord
+  {
+    std::size_t sample_index = 0;
+    double arc_length_m = 0.0;
+    Eigen::Vector3d position = Eigen::Vector3d::Constant(
+      std::numeric_limits < double > ::quiet_NaN());
+    double query_time_s = std::numeric_limits < double > ::quiet_NaN();
+    P4ForwardRiskSample risk;
   };
 
   struct P4ForwardRiskQuery
@@ -233,14 +245,14 @@ namespace ego_planner
     double known_hazard_integral = 0.0;
     double known_fim_max_ratio = std::numeric_limits < double > ::quiet_NaN();
     double unknown_coverage = 1.0;
-    int advisory_common_known_satellite_count = 0;
-    uint64_t advisory_common_satellite_hash = 0;
-    bool advisory_evidence_identity_consistent = true;
+    std::vector < P4ForwardRiskEvidenceRecord > risk_samples;
     P4ForwardRiskSample first_failed_risk;
     Eigen::Vector3d first_failed_position = Eigen::Vector3d::Constant(
       std::numeric_limits<double>::quiet_NaN());
     double first_failed_query_time_s =
       std::numeric_limits<double>::quiet_NaN();
+    double first_failed_arc_length_m =
+      std::numeric_limits < double > ::quiet_NaN();
     std::string reason = "not_evaluated";
   };
 
@@ -325,6 +337,9 @@ namespace ego_planner
     Eigen::Vector3d first_failed_position = Eigen::Vector3d::Constant(
       std::numeric_limits < double > ::quiet_NaN());
     double first_failed_query_time_s =
+      std::numeric_limits < double > ::quiet_NaN();
+    uint64_t first_failed_candidate_id = 0;
+    double first_failed_arc_length_m =
       std::numeric_limits < double > ::quiet_NaN();
     double compute_latency_ms = 0.0;
     double configuration_space_prepare_ms = 0.0;

@@ -35,6 +35,7 @@ P4_FORWARD_DECISION_SCHEMAS = {
     "p4_forward_route_decision_v2",
     "p4_forward_route_decision_v3",
     "p4_forward_route_decision_v4",
+    "p4_forward_route_decision_v5",
 }
 FOREST_SCENARIOS = (FOREST_V1_SCENARIO, FOREST_SCENARIO)
 SEVEN_STAGE_ORDER = (
@@ -1045,13 +1046,16 @@ def _selected_decisions(decisions: list[dict]) -> list[dict]:
             and row.get("stage") == "forward_decision"
             and row.get("action") == "RISK_SELECTED"
             and (row.get("schema_version") not in {
-                     "p4_forward_route_decision_v3",
-                     "p4_forward_route_decision_v4",
+                 "p4_forward_route_decision_v3",
+                 "p4_forward_route_decision_v4",
+                 "p4_forward_route_decision_v5",
                  }
                  or (row.get("selection_authority") == "FORMAL"
                      and str(row.get("formal_support")) == "1"))
-            and (row.get("schema_version") !=
-                 "p4_forward_route_decision_v4"
+            and (row.get("schema_version") not in {
+                     "p4_forward_route_decision_v4",
+                     "p4_forward_route_decision_v5",
+                 }
                  or row.get("geometry_commit_verdict") in {
                      "CLEAR_UNCHANGED", "CLEAR_AFTER_UPDATE",
                  })
@@ -1226,6 +1230,7 @@ def analyze_stage_records(
         if row.get("schema_version") in {
             "p4_forward_route_decision_v3",
             "p4_forward_route_decision_v4",
+            "p4_forward_route_decision_v5",
         }
         and row.get("stage") == "forward_decision"
     ]
@@ -1254,9 +1259,12 @@ def analyze_stage_records(
         failures.append("p4_configuration_space_timing_missing")
     elif max(cspace_latencies, default=-math.inf) > 25.0:
         failures.append("p4_configuration_space_prepare_budget_exceeded")
-    v4_records = [
+    commit_records = [
         row for row in decisions
-        if row.get("schema_version") == "p4_forward_route_decision_v4"
+        if row.get("schema_version") in {
+            "p4_forward_route_decision_v4",
+            "p4_forward_route_decision_v5",
+        }
     ]
     commit_latencies = []
     attempted_commit_verdicts = {
@@ -1264,7 +1272,7 @@ def analyze_stage_records(
         "NEW_ROUTE_COLLISION", "OUT_OF_BOUNDS", "HISTORY_GAP",
         "POLICY_MISMATCH", "INVALID_PATH", "COMPUTE_BUDGET_EXCEEDED",
     }
-    for row in v4_records:
+    for row in commit_records:
         if row.get("geometry_commit_verdict") not in attempted_commit_verdicts:
             continue
         try:
@@ -1278,7 +1286,7 @@ def analyze_stage_records(
     if max(commit_latencies, default=-math.inf) > 10.0:
         failures.append("p4_geometry_commit_budget_exceeded")
     generation_only_hold_count = sum(
-        1 for row in v4_records
+        1 for row in commit_records
         if str(row.get("reason", "")).startswith(
             "live_occupancy_generation_changed_"))
     if generation_only_hold_count:
@@ -1592,6 +1600,199 @@ def _stage_start_steady_s(run_root: Path) -> float | None:
     return None
 
 
+def analyze_forward_risk_samples(
+        decisions: list[dict], samples: list[dict],
+        candidates: list[dict] | None = None) -> dict:
+    """Validate v5 formal selections against their per-point evidence."""
+    failures: list[str] = []
+    v5_selected = [
+        row for row in _selected_decisions(decisions)
+        if row.get("schema_version") == "p4_forward_route_decision_v5"
+    ]
+    rows_by_event: dict[str, list[dict]] = {}
+    for row in samples:
+        if row.get("schema_version") != "p4_forward_route_decision_v5":
+            continue
+        rows_by_event.setdefault(str(row.get("decision_event_id", "")), []).append(row)
+    required = {
+        "candidate_id", "sample_index", "arc_length_m", "x", "y", "z",
+        "query_time_s", "gnss_known_count", "gnss_visible_count",
+        "gnss_blocked_count", "gnss_attenuated_count", "gnss_unknown_count",
+        "gnss_used_count", "local_satellite_set_hash", "gnss_anchor_hpl",
+        "gnss_anchor_vpl", "gnss_anchored_hpl", "gnss_anchored_vpl",
+        "gnss_raw_hpl", "gnss_raw_vpl", "gnss_receiver_raw_hpl",
+        "gnss_receiver_raw_vpl", "gnss_temporal_growth_h",
+        "gnss_temporal_growth_v",
+        "gnss_spatial_delta_h", "gnss_spatial_delta_v", "hpl", "vpl",
+        "hal", "val", "safety_ratio", "fim_ratio", "gnss_supported",
+        "lidar_supported", "fim_supported", "safety_state",
+        "ranking_state", "reason",
+    }
+    for decision in v5_selected:
+        event_id = str(decision.get("decision_event_id", ""))
+        event_rows = rows_by_event.get(event_id, [])
+        if not event_rows:
+            failures.append("p4_forward_risk_samples_missing")
+            continue
+        if any(not required.issubset(row) for row in event_rows):
+            failures.append("p4_forward_risk_sample_fields_missing")
+            continue
+        rows_by_candidate: dict[str, list[dict]] = {}
+        for row in event_rows:
+            rows_by_candidate.setdefault(
+                str(row.get("candidate_id", "")), []).append(row)
+        if len(rows_by_candidate) < 2:
+            failures.append("p4_forward_risk_candidate_coverage_incomplete")
+
+        eligible_candidates = {
+            candidate_id: candidate_rows
+            for candidate_id, candidate_rows in rows_by_candidate.items()
+            if candidate_rows and all(
+                all(str(row.get(field)) == "1" for field in (
+                    "gnss_supported", "lidar_supported", "fim_supported"))
+                and row.get("safety_state") == "SAFE"
+                and row.get("ranking_state") == "COMPARABLE"
+                for row in candidate_rows)
+        }
+        if len(eligible_candidates) < 2:
+            failures.append("p4_formal_selection_safe_candidate_count_lt_two")
+        selected_candidate_id = str(
+            decision.get("selected_candidate_id", ""))
+        if selected_candidate_id not in eligible_candidates:
+            failures.append("p4_formal_selected_candidate_not_safe_complete")
+        eligible_rows = [
+            row
+            for candidate_rows in eligible_candidates.values()
+            for row in candidate_rows
+        ]
+        try:
+            local_sets_valid = all(
+                int(row["gnss_used_count"]) >= 4
+                and int(row["local_satellite_set_hash"]) != 0
+                for row in eligible_rows)
+            limits = {
+                (float(row["hal"]), float(row["val"]))
+                for row in event_rows
+            }
+            deltas_reproducible = all(
+                math.isclose(
+                    float(row[axis_delta]),
+                    max(0.0, float(row[candidate_raw]) -
+                        float(row[receiver_raw])),
+                    rel_tol=1.0e-9, abs_tol=1.0e-9)
+                for row in eligible_rows
+                for axis_delta, candidate_raw, receiver_raw in (
+                    ("gnss_spatial_delta_h", "gnss_raw_hpl",
+                     "gnss_receiver_raw_hpl"),
+                    ("gnss_spatial_delta_v", "gnss_raw_vpl",
+                     "gnss_receiver_raw_vpl"),
+                ))
+            anchored_reproducible = all(
+                math.isclose(
+                    float(row[anchored]),
+                    float(row[anchor]) + float(row[delta]) +
+                    float(row[growth]),
+                    rel_tol=1.0e-9, abs_tol=1.0e-9)
+                for row in eligible_rows
+                for anchored, anchor, delta, growth in (
+                    ("gnss_anchored_hpl", "gnss_anchor_hpl",
+                     "gnss_spatial_delta_h", "gnss_temporal_growth_h"),
+                    ("gnss_anchored_vpl", "gnss_anchor_vpl",
+                     "gnss_spatial_delta_v", "gnss_temporal_growth_v"),
+                ))
+            ratios_reproducible = all(
+                math.isclose(
+                    float(row["safety_ratio"]),
+                    max(float(row["hpl"]) / float(row["hal"]),
+                        float(row["vpl"]) / float(row["val"])),
+                    rel_tol=1.0e-9, abs_tol=1.0e-9)
+                for row in eligible_rows)
+            counts_consistent = all(
+                int(row["gnss_known_count"]) ==
+                int(row["gnss_visible_count"]) +
+                int(row["gnss_blocked_count"])
+                and int(row["gnss_used_count"]) ==
+                int(row["gnss_visible_count"])
+                and 0 <= int(row["gnss_attenuated_count"]) <=
+                int(row["gnss_visible_count"])
+                for row in eligible_rows)
+        except (KeyError, TypeError, ValueError):
+            local_sets_valid = False
+            limits = set()
+            deltas_reproducible = False
+            anchored_reproducible = False
+            ratios_reproducible = False
+            counts_consistent = False
+        if not local_sets_valid:
+            failures.append("p4_formal_selection_local_satellite_set_invalid")
+        if len(limits) != 1:
+            failures.append("p4_formal_selection_alert_limits_mismatch")
+        if not deltas_reproducible:
+            failures.append("p4_forward_risk_spatial_delta_not_reproducible")
+        if not anchored_reproducible:
+            failures.append("p4_forward_risk_anchored_pl_not_reproducible")
+        if not ratios_reproducible:
+            failures.append("p4_forward_risk_safety_ratio_not_reproducible")
+        if not counts_consistent:
+            failures.append("p4_forward_risk_satellite_counts_inconsistent")
+
+        candidate_rows_by_id = {
+            str(row.get("candidate_id", "")): row
+            for row in (candidates or [])
+            if str(row.get("decision_event_id", "")) == event_id
+        }
+        for candidate_id, candidate_samples in eligible_candidates.items():
+            try:
+                ordered = sorted(
+                    candidate_samples, key=lambda row: int(row["sample_index"]))
+                indexes = [int(row["sample_index"]) for row in ordered]
+                arcs = [float(row["arc_length_m"]) for row in ordered]
+                numeric_values = [
+                    float(row[field])
+                    for row in ordered
+                    for field in (
+                        "arc_length_m", "x", "y", "z", "query_time_s",
+                        "gnss_anchor_hpl", "gnss_anchor_vpl",
+                        "gnss_anchored_hpl", "gnss_anchored_vpl",
+                        "gnss_raw_hpl", "gnss_raw_vpl",
+                        "gnss_receiver_raw_hpl", "gnss_receiver_raw_vpl",
+                        "gnss_spatial_delta_h", "gnss_spatial_delta_v",
+                        "gnss_temporal_growth_h", "gnss_temporal_growth_v",
+                        "hpl", "vpl", "hal", "val", "safety_ratio",
+                        "fim_ratio",
+                    )
+                ]
+                coverage_valid = (
+                    indexes == list(range(len(ordered)))
+                    and bool(arcs) and math.isclose(arcs[0], 0.0, abs_tol=1e-9)
+                    and all(math.isfinite(value) for value in numeric_values)
+                    and all(
+                        0.0 < right - left <= 0.250001
+                        for left, right in zip(arcs, arcs[1:]))
+                )
+                expected = candidate_rows_by_id.get(candidate_id)
+                if candidates is not None:
+                    coverage_valid = coverage_valid and expected is not None
+                    if expected is not None:
+                        coverage_valid = coverage_valid and math.isclose(
+                            arcs[-1], float(expected["length_m"]),
+                            rel_tol=1.0e-9, abs_tol=1.0e-6)
+            except (KeyError, TypeError, ValueError):
+                coverage_valid = False
+            if not coverage_valid:
+                failures.append("p4_forward_risk_route_sample_coverage_invalid")
+    hashes = {
+        str(row.get("local_satellite_set_hash")) for row in samples
+        if str(row.get("local_satellite_set_hash", "")) not in ("", "0")
+    }
+    return {
+        "sample_count": len(samples),
+        "local_satellite_set_count": len(hashes),
+        "formal_v5_selection_count": len(v5_selected),
+        "failures": list(dict.fromkeys(failures)),
+    }
+
+
 def analyze_run(
         stage: str, run_root: Path, scenario: str = DEFAULT_SCENARIO,
         forest_variant: str | None = None) -> dict:
@@ -1608,6 +1809,12 @@ def analyze_run(
     forward_lineage = _read_csv(
         run_root /
         "exports/planner_p4_risk_astar_debug.csv.forward_lineage.csv")
+    forward_risk_samples = _read_csv(
+        run_root /
+            "exports/planner_p4_risk_astar_debug.csv.forward_risk_samples.csv")
+    forward_candidates = _read_csv(
+        run_root /
+        "exports/planner_p4_risk_astar_debug.csv.forward_candidates.csv")
     if forward_lineage:
         decisions = forward_lineage
         lineage = forward_lineage
@@ -1636,6 +1843,13 @@ def analyze_run(
         base = analyze_stage_records(
             stage, health, decisions, lineage, bsplines, p5_status,
             poscmd_times, stage_start)
+        sample_analysis = analyze_forward_risk_samples(
+            decisions, forward_risk_samples, forward_candidates)
+        if sample_analysis["failures"]:
+            base["failures"] = list(dict.fromkeys([
+                *base["failures"], *sample_analysis["failures"]]))
+            base["result"] = "FAIL"
+        base["forward_risk_samples"] = sample_analysis
         if not _is_forest_scenario(scenario):
             return base
         risk = analyze_forest_risk(records, health, decisions, lineage)

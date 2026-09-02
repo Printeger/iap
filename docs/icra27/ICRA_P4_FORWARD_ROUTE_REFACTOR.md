@@ -1,5 +1,37 @@
 # P4 Online Forward Route Selection
 
+## Per-sample local satellite sets v5 (2026-09-02)
+
+New runs emit `p4_forward_route_decision_v5`. ForwardRisk no longer forms one
+satellite intersection across every point and every route. For sample `i`, it
+constructs `S_i` from the frozen epoch's non-excluded, elevation-qualified
+satellites whose local online sky evidence is known and visible (including
+known attenuation). Known blocked and unknown satellites are excluded.
+
+Candidate and receiver raw advisory PL are both solved with exactly `S_i`:
+
+```text
+spatial_delta_i = max(0, advisory(candidate_i, S_i)
+                         - advisory(receiver, S_i))
+anchored_PL_i = current_certified_PL + spatial_delta_i
+                + existing_temporal_growth_i
+```
+
+The original epoch exclusion flags and certified anchor identity are never
+rewritten. Different samples and different routes may use different local
+sets because their anchored PL is compared against the same HAL/VAL. A point
+is formally supported when its own set has at least four satellites, its
+geometry is solvable, and GNSS/LiDAR/FIM freshness and support pass. Failure at
+one point does not erase diagnostics or valid results at other points.
+
+`<p4-debug>.forward_risk_samples.csv` records each candidate sample's arc
+length, map position, prediction time, known/visible/blocked/attenuated/
+unknown/used counts, local-set hash, candidate and receiver raw PL, spatial
+delta, anchored/fused PL and ratios, source support, and failure reason. The
+runner verifies that every formal v5 selection has complete safe samples for
+at least two candidates. Unknown counts remain diagnostic only and never enter
+PL, route ranking, or RViz color normalization.
+
 ## Route-local geometry commit v4 (2026-09-02)
 
 New runs emit `p4_forward_route_decision_v4`. The asynchronous search still
@@ -131,6 +163,11 @@ GNSS support. UNKNOWN contributes no fabricated PL or numerical penalty. The adv
 guide is applied to B-spline initialization at at most 0.5 m/s, but its
 lineage records `formal_support=0`; it cannot satisfy a formal
 `RISK_SELECTED` analyzer gate and P5 remains free to reject it.
+
+The common-known identity and cross-route unknown-coverage comparison above
+describe archived v3 behavior only. v5 supersedes them: each sample uses its
+own local set, and unknown coverage is diagnostic rather than a ranking term.
+A route with no known positive evidence still cannot win advisory selection.
 
 Status: development integration only. Advisory selection is not a safety or
 qualification claim.
@@ -349,9 +386,11 @@ forest fork locations.
 New runs write:
 
 - `<p4-debug>.forward_lineage.csv` using
-  `p4_forward_route_decision_v4` (v1-v3 remain read-only compatible);
+  `p4_forward_route_decision_v5` (v1-v4 remain read-only compatible);
 - `<p4-debug>.forward_candidates.csv` with candidate paths and support/risk
-  metrics.
+  metrics;
+- `<p4-debug>.forward_risk_samples.csv` with independently reproducible local
+  satellite evidence and PL calculations for every sampled route point.
 
 The terminal lineage is:
 

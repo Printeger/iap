@@ -35,10 +35,15 @@ struct VisibleGeometrySet {
 
 VisibleGeometrySet visible_geometry(
     const GnssEpoch& epoch,
-    const VisibilityResult& visibility) {
+    const VisibilityResult& visibility,
+    const std::vector<bool>* satellite_mask = nullptr) {
   VisibleGeometrySet out;
   out.geom.reserve(static_cast<std::size_t>(visibility.n_vis));
   for (std::size_t i = 0; i < epoch.sats.size(); ++i) {
+    if (satellite_mask != nullptr &&
+        (i >= satellite_mask->size() || !(*satellite_mask)[i])) {
+      continue;
+    }
     const bool excluded = epoch.sats[i].excluded;
     if (i >= visibility.vis_flags.size() || !visibility.vis_flags[i]) {
       if (excluded) {
@@ -261,10 +266,11 @@ GnssAdvisoryResult GnssAdvisoryPredictor::compute_advisory_fim(
     const Eigen::Vector3d& query_position,
     const GnssEpoch& epoch,
     const VisibilityResult& visibility,
-    const GnssAdvisoryResult& base) const {
+    const GnssAdvisoryResult& base,
+    const std::vector<bool>* satellite_mask) const {
   (void)query_position;
   GnssAdvisoryResult out = base;
-  const auto visible_set = visible_geometry(epoch, visibility);
+  const auto visible_set = visible_geometry(epoch, visibility, satellite_mask);
   copy_geometry_set_diagnostics(visible_set, out);
   const auto& geom = visible_set.geom;
   if (out.n_used < params_.geometry_params.min_sats) {
@@ -325,7 +331,8 @@ GnssAdvisoryResult GnssAdvisoryPredictor::compute_advisory_fim(
 GnssAdvisoryResult GnssAdvisoryPredictor::query_unanchored(
     const Eigen::Vector3d& query_position,
     const IntegritySnapshot& snapshot,
-    const bool force_measured_epoch_support) const {
+    const bool force_measured_epoch_support,
+    const std::vector<bool>* satellite_mask) const {
   if (!query_position.allFinite()) {
     return fallback("invalid_position");
   }
@@ -348,16 +355,18 @@ GnssAdvisoryResult GnssAdvisoryPredictor::query_unanchored(
           params_.measured_epoch_support_radius_m);
   const VisibilityResult visibility = cached_visibility_evidence(
       query_position, snapshot.gnss_epoch, measured_epoch_support);
-  const auto visible_set = visible_geometry(snapshot.gnss_epoch, visibility);
+  const auto visible_set = visible_geometry(
+      snapshot.gnss_epoch, visibility, satellite_mask);
   const auto& geom = visible_set.geom;
   if (static_cast<int>(geom.size()) < params_.geometry_params.min_sats) {
     auto out = fallback(visibility.n_unknown > 0
                             ? "too_few_observed_los_sats"
                             : "too_few_sats");
     out.n_visible = visibility.n_vis;
-    out.n_unknown_support = visibility.n_unknown;
-    out.n_known_support = visibility.n_known;
-    out.n_blocked = visibility.n_blocked;
+    out.n_unknown_support = satellite_mask == nullptr ? visibility.n_unknown : 0;
+    out.n_known_support = satellite_mask == nullptr
+        ? visibility.n_known : static_cast<int>(visible_set.geom.size());
+    out.n_blocked = satellite_mask == nullptr ? visibility.n_blocked : 0;
     out.measured_epoch_support_used = measured_epoch_support;
     copy_geometry_set_diagnostics(visible_set, out);
     return out;
@@ -367,9 +376,10 @@ GnssAdvisoryResult GnssAdvisoryPredictor::query_unanchored(
   if (!pl.valid) {
     auto out = fallback("singular_geometry");
     out.n_visible = visibility.n_vis;
-    out.n_unknown_support = visibility.n_unknown;
-    out.n_known_support = visibility.n_known;
-    out.n_blocked = visibility.n_blocked;
+    out.n_unknown_support = satellite_mask == nullptr ? visibility.n_unknown : 0;
+    out.n_known_support = satellite_mask == nullptr
+        ? visibility.n_known : static_cast<int>(visible_set.geom.size());
+    out.n_blocked = satellite_mask == nullptr ? visibility.n_blocked : 0;
     out.measured_epoch_support_used = measured_epoch_support;
     copy_geometry_set_diagnostics(visible_set, out);
     out.n_hypotheses = pl.n_hypotheses;
@@ -398,14 +408,15 @@ GnssAdvisoryResult GnssAdvisoryPredictor::query_unanchored(
     out.vdop = std::sqrt(pl.S0(2, 2));
   }
   out.n_visible = visibility.n_vis;
-  out.n_unknown_support = visibility.n_unknown;
-  out.n_known_support = visibility.n_known;
-  out.n_blocked = visibility.n_blocked;
+  out.n_unknown_support = satellite_mask == nullptr ? visibility.n_unknown : 0;
+  out.n_known_support = satellite_mask == nullptr
+      ? visibility.n_known : static_cast<int>(visible_set.geom.size());
+  out.n_blocked = satellite_mask == nullptr ? visibility.n_blocked : 0;
   out.measured_epoch_support_used = measured_epoch_support;
   copy_geometry_set_diagnostics(visible_set, out);
   out.n_hypotheses = pl.n_hypotheses;
   return compute_advisory_fim(query_position, snapshot.gnss_epoch, visibility,
-                              out);
+                              out, satellite_mask);
 }
 
 GnssAdvisoryResult GnssAdvisoryPredictor::receiver_anchor_advisory(
@@ -439,6 +450,16 @@ GnssAdvisoryResult GnssAdvisoryPredictor::query(
   return query_unanchored(query_position, snapshot, false);
 }
 
+GnssAdvisoryResult GnssAdvisoryPredictor::query_with_satellite_mask(
+    const Eigen::Vector3d& query_position,
+    const IntegritySnapshot& snapshot,
+    const std::vector<bool>& satellite_mask) const {
+  if (satellite_mask.size() != snapshot.gnss_epoch.sats.size()) {
+    return fallback("invalid_satellite_mask");
+  }
+  return query_unanchored(query_position, snapshot, false, &satellite_mask);
+}
+
 GnssAdvisoryResult GnssAdvisoryPredictor::query_receiver_measured(
     const IntegritySnapshot& snapshot) const {
   const double epoch_delta =
@@ -455,6 +476,27 @@ GnssAdvisoryResult GnssAdvisoryPredictor::query_receiver_measured(
     return fallback("gnss_anchor_inconsistent");
   }
   return receiver_anchor_advisory(snapshot);
+}
+
+GnssAdvisoryResult
+GnssAdvisoryPredictor::query_receiver_measured_with_satellite_mask(
+    const IntegritySnapshot& snapshot,
+    const std::vector<bool>& satellite_mask) const {
+  const double epoch_delta =
+      std::abs(snapshot.current.stamp - snapshot.gnss_epoch.stamp);
+  if (!snapshot.has_epoch || !snapshot.has_pose ||
+      satellite_mask.size() != snapshot.gnss_epoch.sats.size() ||
+      !snapshot.p_wb.allFinite() || !snapshot.current.valid ||
+      !snapshot.current.gnss_valid ||
+      !std::isfinite(snapshot.current.stamp) ||
+      !std::isfinite(snapshot.gnss_epoch.stamp) ||
+      !std::isfinite(params_.measured_epoch_integrity_max_delta_s) ||
+      params_.measured_epoch_integrity_max_delta_s < 0.0 ||
+      !std::isfinite(epoch_delta) ||
+      epoch_delta > params_.measured_epoch_integrity_max_delta_s) {
+    return fallback("gnss_anchor_inconsistent");
+  }
+  return query_unanchored(snapshot.p_wb, snapshot, true, &satellite_mask);
 }
 
 VisibilityResult GnssAdvisoryPredictor::visibility_evidence(

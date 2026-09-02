@@ -3,6 +3,22 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(p4-local-satellite-sets-v5): IAP-RQ-312 / IAP-RQ-314 /
+  IAP-RQ-320 / IAP-RQ-400 — remove the batch-wide satellite intersection from
+  ForwardRisk. Every route sample now derives its own online-known usable set
+  and evaluates candidate and receiver raw advisory PL with the same local
+  mask, without mutating the frozen GNSS epoch or its certified exclusion
+  identity. Unknown and blocked satellites remain excluded and cannot improve
+  PL; only a sample with fewer than four local usable satellites, degenerate
+  geometry, stale identity, or missing LiDAR/FIM support makes its route
+  incomplete. Completed samples survive failures elsewhere in the batch.
+  P4 no longer requires satellite-set hashes to match across samples or
+  routes, emits `p4_forward_route_decision_v5`, and writes a batched
+  `.forward_risk_samples.csv` containing sample position/time, local evidence
+  counts and hash, raw/anchored PL, ratios, source support, and the actual
+  failure reason. HAL/VAL, P5 authority, route-local occupancy commits, and
+  simulation-truth isolation are unchanged; v1-v4 artifacts remain readable.
+
 - fix(p4-route-local-geometry-commit-v4): IAP-RQ-320 / IAP-RQ-400 /
   IAP-RQ-410 — replace generation-equality invalidation with a bounded,
   fail-closed semantic collision-delta journal and route-local commit

@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
@@ -15,6 +16,7 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <iap/predictor/predictor_module.hpp>
@@ -931,24 +933,28 @@ TEST(PredictorModuleTest,
 }
 
 TEST(PredictorModuleTest,
-     ForwardRiskBatchUsesOneFrozenCommonKnownSatelliteSet) {
+     ForwardRiskBatchUsesIndependentLocalSatelliteSetsPerPoint) {
   auto params = make_params();
   params.gnss.measured_epoch_support_radius_m = 0.45;
+  params.lidar.fim_params.fim_radius_m = 30.0;
   iap::PredictorModule module(params);
   module.set_observation_predicate(
-      [](const Eigen::Vector3d&) { return true; });
+      [](const Eigen::Vector3d& position) {
+        return position.x() < 0.0 ? position.x() >= -10.0 - 1.0e-9
+                                  : position.x() <= 10.0 + 1.0e-9;
+      });
   module.set_lidar_fim_primitives(make_lidar_primitives());
   auto snapshot = make_snapshot(true, true);
 
   iap::ForwardRiskBatchRequest request;
   request.combined_snapshot_identity = "geometry|occupancy3|risk5|epoch7";
   request.snapshot = snapshot;
-  request.hal = 20.0;
-  request.val = 40.0;
+  request.hal = 1000.0;
+  request.val = 1000.0;
   request.freshness_reference_time_s = snapshot.stamp;
   request.points = {
-      {snapshot.p_wb, snapshot.stamp, 0.0, 1},
-      {Eigen::Vector3d(0.5, 0.0, 0.0), snapshot.stamp + 0.5, 0.5, 2}};
+      {Eigen::Vector3d(-10.0, 0.0, 0.0), snapshot.stamp, 0.0, 1},
+      {Eigen::Vector3d(10.0, 0.0, 0.0), snapshot.stamp + 0.5, 0.5, 2}};
 
   const auto result = module.queryForwardRiskBatch(request);
 
@@ -956,9 +962,17 @@ TEST(PredictorModuleTest,
       << iap::forwardRiskFailureReasonName(result.failure_reason);
   EXPECT_EQ(result.combined_snapshot_identity,
             request.combined_snapshot_identity);
-  EXPECT_EQ(result.common_known_satellite_count, 8);
-  EXPECT_NE(result.common_satellite_hash, 0u);
   ASSERT_EQ(result.points.size(), request.points.size());
+  EXPECT_NE(result.points[0].local_satellite_set_hash,
+            result.points[1].local_satellite_set_hash);
+  const auto& first_ids = result.points[0].prediction.gnss.used_sat_ids;
+  const auto& second_ids = result.points[1].prediction.gnss.used_sat_ids;
+  const int intersection_count = static_cast<int>(std::count_if(
+      first_ids.begin(), first_ids.end(), [&second_ids](const int sat_id) {
+        return std::find(second_ids.begin(), second_ids.end(), sat_id) !=
+            second_ids.end();
+      }));
+  EXPECT_LT(intersection_count, params.gnss.geometry_params.min_sats);
   for (const auto& point : result.points) {
     EXPECT_EQ(point.safety_state, iap::ForwardRiskSafetyState::SAFE);
     EXPECT_EQ(point.ranking_state,
@@ -966,6 +980,9 @@ TEST(PredictorModuleTest,
     EXPECT_TRUE(point.gnss_supported);
     EXPECT_TRUE(point.lidar_supported);
     EXPECT_TRUE(point.fim_supported);
+    EXPECT_GE(point.gnss_used_satellite_count,
+              params.gnss.geometry_params.min_sats);
+    EXPECT_NE(point.local_satellite_set_hash, 0u);
     EXPECT_EQ(point.failure_reason, iap::ForwardRiskFailureReason::NONE);
     EXPECT_DOUBLE_EQ(point.gnss_support_ray_length_m, 5.0);
     EXPECT_FALSE(point.gnss_hard_occlusion);
@@ -974,6 +991,35 @@ TEST(PredictorModuleTest,
     EXPECT_DOUBLE_EQ(point.prediction.gnss.anchor_vpl,
                      snapshot.current.gnss_vpl);
   }
+}
+
+TEST(PredictorModuleTest,
+     LocalSatelliteMaskIgnoresUnselectedUnknownSatelliteParameters) {
+  iap::GnssAdvisoryPredictor predictor(make_params().gnss);
+  auto snapshot = make_snapshot(true, false);
+  std::vector<bool> local_mask(snapshot.gnss_epoch.sats.size(), false);
+  for (std::size_t index = 0; index < 4; ++index) {
+    local_mask[index] = true;
+  }
+  const auto original_identity = iap::gnss_epoch_identity(
+      snapshot.gnss_epoch, snapshot.current.excluded_prns);
+  const auto baseline = predictor.query_with_satellite_mask(
+      Eigen::Vector3d(1.0, 0.0, 0.0), snapshot, local_mask);
+  EXPECT_EQ(original_identity, iap::gnss_epoch_identity(
+      snapshot.gnss_epoch, snapshot.current.excluded_prns));
+
+  for (std::size_t index = 4; index < snapshot.gnss_epoch.sats.size();
+       ++index) {
+    snapshot.gnss_epoch.sats[index].pr_sigma *= 1000.0;
+  }
+  const auto changed_unselected = predictor.query_with_satellite_mask(
+      Eigen::Vector3d(1.0, 0.0, 0.0), snapshot, local_mask);
+
+  ASSERT_TRUE(baseline.valid);
+  ASSERT_TRUE(changed_unselected.valid);
+  EXPECT_EQ(baseline.used_sat_ids, changed_unselected.used_sat_ids);
+  EXPECT_DOUBLE_EQ(baseline.hpl, changed_unselected.hpl);
+  EXPECT_DOUBLE_EQ(baseline.vpl, changed_unselected.vpl);
 }
 
 TEST(PredictorModuleTest, ForwardRiskBatchFailsClosedWhenBudgetIsExpired) {
@@ -1001,6 +1047,45 @@ TEST(PredictorModuleTest, ForwardRiskBatchFailsClosedWhenBudgetIsExpired) {
   ASSERT_EQ(result.points.size(), 1u);
   EXPECT_EQ(result.points.front().safety_state,
             iap::ForwardRiskSafetyState::UNKNOWN);
+}
+
+TEST(PredictorModuleTest,
+     EvidencePhaseTimeoutMarksEveryAdvisoryPointUnfinished) {
+  auto params = make_params();
+  params.gnss.measured_epoch_support_radius_m = 0.45;
+  iap::PredictorModule module(params);
+  module.set_observation_predicate([](const Eigen::Vector3d&) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    return true;
+  });
+  module.set_lidar_fim_primitives(make_lidar_primitives());
+  auto snapshot = make_snapshot(true, true);
+  snapshot.current.stamp = snapshot.gnss_epoch.stamp;
+
+  iap::ForwardRiskBatchRequest request;
+  request.combined_snapshot_identity = "evidence-budget-expired";
+  request.snapshot = snapshot;
+  request.hal = 20.0;
+  request.val = 40.0;
+  request.freshness_reference_time_s = snapshot.stamp;
+  request.compute_budget_ms = 50.0;
+  request.points = {
+      {snapshot.p_wb, snapshot.stamp, 0.0, 1},
+      {snapshot.p_wb + Eigen::Vector3d(1.0, 0.0, 0.0),
+       snapshot.stamp + 0.25, 0.25, 2}};
+
+  const auto result = module.queryForwardRiskBatch(request);
+
+  ASSERT_FALSE(result.complete);
+  ASSERT_EQ(result.points.size(), 2u);
+  EXPECT_EQ(result.first_failure_index, 0u);
+  for (const auto& point : result.points) {
+    EXPECT_EQ(point.failure_reason,
+              iap::ForwardRiskFailureReason::COMPUTE_BUDGET_EXCEEDED);
+    EXPECT_EQ(point.safety_state, iap::ForwardRiskSafetyState::UNKNOWN);
+    EXPECT_EQ(point.ranking_state,
+              iap::ForwardRiskRankingState::INCOMPLETE);
+  }
 }
 
 TEST(PredictorModuleTest, ForwardRiskBatchRejectsInvalidNonfiniteBudgets) {
@@ -1031,12 +1116,30 @@ TEST(PredictorModuleTest, ForwardRiskBatchRejectsInvalidNonfiniteBudgets) {
 }
 
 TEST(PredictorModuleTest,
-     ForwardRiskBatchFailsClosedWhenCommonKnownSatelliteSetIsTooSmall) {
+     ForwardRiskBatchFailsOnlyThePointWithTooFewLocalUsableSatellites) {
   auto params = make_params();
   params.gnss.measured_epoch_support_radius_m = 0.45;
   iap::PredictorModule module(params);
-  module.set_observation_predicate(
-      [](const Eigen::Vector3d&) { return false; });
+  module.set_observation_predicate([](const Eigen::Vector3d& position) {
+    if (position.x() < 0.0) {
+      return position.x() >= -10.0 - 1.0e-9;
+    }
+    const Eigen::Vector2d horizontal =
+        (position - Eigen::Vector3d(10.0, 0.0, 0.0)).head<2>();
+    if (horizontal.norm() <= 1.0e-9) {
+      return true;
+    }
+    const double azimuth = std::atan2(horizontal.y(), horizontal.x());
+    for (const double known_azimuth : {0.0, 0.25 * kPi, 0.5 * kPi}) {
+      const double wrapped = std::atan2(
+          std::sin(azimuth - known_azimuth),
+          std::cos(azimuth - known_azimuth));
+      if (std::abs(wrapped) <= 1.0e-6) {
+        return true;
+      }
+    }
+    return false;
+  });
   module.set_lidar_fim_primitives(make_lidar_primitives());
   auto snapshot = make_snapshot(true, true);
 
@@ -1047,32 +1150,25 @@ TEST(PredictorModuleTest,
   request.val = 40.0;
   request.freshness_reference_time_s = snapshot.stamp;
   request.points = {
-      {snapshot.p_wb, snapshot.stamp, 0.0, 1},
-      {Eigen::Vector3d(1.0, 0.0, 0.0), snapshot.stamp + 0.5, 0.5, 2}};
+      {Eigen::Vector3d(-10.0, 0.0, 0.0), snapshot.stamp, 0.0, 1},
+      {Eigen::Vector3d(10.0, 0.0, 0.0), snapshot.stamp + 0.5, 0.5, 2}};
 
   const auto result = module.queryForwardRiskBatch(request);
 
   EXPECT_FALSE(result.complete);
-  EXPECT_LT(result.common_known_satellite_count,
-            params.gnss.geometry_params.min_sats);
   EXPECT_EQ(result.failure_reason,
-            iap::ForwardRiskFailureReason::GNSS_SKY_UNKNOWN);
-  bool retained_unknown_evidence = false;
-  bool retained_lidar_evidence = false;
-  for (const auto& point : result.points) {
-    EXPECT_EQ(point.safety_state, iap::ForwardRiskSafetyState::UNKNOWN);
-    EXPECT_EQ(point.ranking_state,
-              iap::ForwardRiskRankingState::INCOMPLETE);
-    retained_unknown_evidence = retained_unknown_evidence ||
-        (point.gnss_unknown_satellite_count > 0 &&
-         point.unknown_coverage > 0.0);
-    retained_lidar_evidence = retained_lidar_evidence ||
-        point.lidar_supported;
-    EXPECT_FALSE(point.known_hazard_evidence);
-    EXPECT_DOUBLE_EQ(point.known_gnss_degradation_ratio, 0.0);
-  }
-  EXPECT_TRUE(retained_unknown_evidence);
-  EXPECT_TRUE(retained_lidar_evidence);
+            iap::ForwardRiskFailureReason::GNSS_LOCAL_USABLE_SATS_LT_MIN);
+  EXPECT_EQ(result.first_failure_index, 1u);
+  ASSERT_EQ(result.points.size(), 2u);
+  EXPECT_TRUE(result.points[0].gnss_supported);
+  EXPECT_EQ(result.points[0].ranking_state,
+            iap::ForwardRiskRankingState::COMPARABLE);
+  EXPECT_FALSE(result.points[1].gnss_supported);
+  EXPECT_EQ(result.points[1].gnss_used_satellite_count, 3);
+  EXPECT_EQ(result.points[1].failure_reason,
+            iap::ForwardRiskFailureReason::GNSS_LOCAL_USABLE_SATS_LT_MIN);
+  EXPECT_GT(result.points[1].gnss_unknown_satellite_count, 0);
+  EXPECT_TRUE(result.points[1].lidar_supported);
 }
 
 TEST(PredictorModuleTest, GnssExcludedSatellitesReduceUsedCountAndFallbackExplicitly) {

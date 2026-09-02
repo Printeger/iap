@@ -1009,9 +1009,12 @@ P4ForwardRiskSample aggregateRiskSamples(
     }
     aggregate.fim_ratio = std::max(
       aggregate.fim_ratio, sample.fim_ratio);
-    aggregate.common_known_satellite_count =
-      sample.common_known_satellite_count;
-    aggregate.common_satellite_hash = sample.common_satellite_hash;
+    aggregate.gnss_known_satellite_count =
+      sample.gnss_known_satellite_count;
+    aggregate.gnss_used_satellite_count =
+      sample.gnss_used_satellite_count;
+    aggregate.local_satellite_set_hash =
+      sample.local_satellite_set_hash;
   }
   if (known_unsafe) {
     aggregate.safety_state = P4ForwardSafetyState::UNSAFE;
@@ -1134,6 +1137,8 @@ void evaluateCandidateRiskSet(
     std::size_t begin = 0;
     std::size_t end = 0;
     double segment_m = 0.0;
+    double arc_length_m = 0.0;
+    std::size_t sample_index = 0;
     Eigen::Vector3d position = Eigen::Vector3d::Constant(
       std::numeric_limits<double>::quiet_NaN());
     double query_time_s = std::numeric_limits<double>::quiet_NaN();
@@ -1155,9 +1160,7 @@ void evaluateCandidateRiskSet(
     candidate.known_fim_max_ratio =
       std::numeric_limits<double>::quiet_NaN();
     candidate.unknown_coverage = 0.0;
-    candidate.advisory_common_known_satellite_count = 0;
-    candidate.advisory_common_satellite_hash = 0;
-    candidate.advisory_evidence_identity_consistent = true;
+    candidate.risk_samples.clear();
     const auto path_samples = resample(candidate.path, std::min(
         0.25, request.limits.topology_resolution_m));
     double distance = 0.0;
@@ -1171,6 +1174,8 @@ void evaluateCandidateRiskSet(
       group.candidate = candidate_index;
       group.begin = queries.size();
       group.segment_m = segment;
+      group.arc_length_m = distance;
+      group.sample_index = sample_index;
       const double query_time_s = request.query_time_s +
         distance / request.limits.nominal_query_speed_mps;
       group.position = path_samples[sample_index];
@@ -1202,6 +1207,9 @@ void evaluateCandidateRiskSet(
   for (const auto & group : groups) {
     auto & candidate = (*candidates)[group.candidate];
     const auto risk = aggregateRiskSamples(samples, group.begin, group.end);
+    candidate.risk_samples.push_back(P4ForwardRiskEvidenceRecord{
+          group.sample_index, group.arc_length_m, group.position,
+          group.query_time_s, risk});
     candidate.known_hazard_evidence = candidate.known_hazard_evidence ||
       risk.known_hazard_evidence ||
       (std::isfinite(risk.known_gnss_degradation_ratio) &&
@@ -1224,18 +1232,6 @@ void evaluateCandidateRiskSet(
         candidate.unknown_coverage,
         std::clamp(risk.unknown_coverage, 0.0, 1.0));
     }
-    if (candidate.advisory_common_satellite_hash == 0) {
-      candidate.advisory_common_satellite_hash =
-        risk.common_satellite_hash;
-      candidate.advisory_common_known_satellite_count =
-        risk.common_known_satellite_count;
-    } else if (candidate.advisory_common_satellite_hash !=
-      risk.common_satellite_hash ||
-      candidate.advisory_common_known_satellite_count !=
-      risk.common_known_satellite_count)
-    {
-      candidate.advisory_evidence_identity_consistent = false;
-    }
     if (risk.safety_state == P4ForwardSafetyState::UNSAFE ||
       (std::isfinite(risk.safety_ratio) && risk.safety_ratio >= 1.0))
     {
@@ -1255,6 +1251,7 @@ void evaluateCandidateRiskSet(
         candidate.first_failed_risk = risk;
         candidate.first_failed_position = group.position;
         candidate.first_failed_query_time_s = group.query_time_s;
+        candidate.first_failed_arc_length_m = group.arc_length_m;
       }
       continue;
     }
@@ -1272,6 +1269,7 @@ void evaluateCandidateRiskSet(
         candidate.first_failed_risk = risk;
         candidate.first_failed_position = group.position;
         candidate.first_failed_query_time_s = group.query_time_s;
+        candidate.first_failed_arc_length_m = group.arc_length_m;
       }
     }
   }
@@ -1517,9 +1515,6 @@ bool configureAdvisorySelection(
       candidate.safety_state != P4ForwardSafetyState::UNSAFE &&
       std::isfinite(candidate.unknown_coverage) &&
       candidate.unknown_coverage < 1.0 - kEpsilon &&
-      candidate.advisory_evidence_identity_consistent &&
-      candidate.advisory_common_known_satellite_count > 0 &&
-      candidate.advisory_common_satellite_hash != 0 &&
       candidate.length_m <= shortest *
       request.limits.max_path_length_ratio + kEpsilon)
     {
@@ -1532,34 +1527,6 @@ bool configureAdvisorySelection(
                (candidate->known_hazard_max > kEpsilon ||
                candidate->known_hazard_integral > kEpsilon);
       }))
-  {
-    return false;
-  }
-  const int common_count = eligible.front()->
-    advisory_common_known_satellite_count;
-  const uint64_t common_hash = eligible.front()->
-    advisory_common_satellite_hash;
-  if (std::any_of(
-      std::next(eligible.begin()), eligible.end(),
-      [common_count, common_hash](const auto * candidate) {
-        return candidate->advisory_common_known_satellite_count !=
-          common_count || candidate->advisory_common_satellite_hash !=
-          common_hash;
-      }))
-  {
-    return false;
-  }
-  const auto coverage = std::minmax_element(
-    eligible.begin(), eligible.end(), [](const auto * lhs, const auto * rhs) {
-      return lhs->unknown_coverage < rhs->unknown_coverage;
-    });
-  // A route with no online evidence must not win merely because its missing
-  // hazard score defaults to zero. Advisory ranking is allowed only on a
-  // comparable evidence domain; coverage remains diagnostic and UNKNOWN is
-  // never converted into a numerical penalty.
-  if ((*coverage.second)->unknown_coverage -
-    (*coverage.first)->unknown_coverage >
-    request.limits.advisory_min_relative_improvement + kEpsilon)
   {
     return false;
   }
@@ -1913,6 +1880,9 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
           output.first_failed_position = failed->first_failed_position;
           output.first_failed_query_time_s =
             failed->first_failed_query_time_s;
+          output.first_failed_candidate_id = failed->candidate_id;
+          output.first_failed_arc_length_m =
+            failed->first_failed_arc_length_m;
         }
       }
       if (!output.candidates.empty()) {
@@ -2262,9 +2232,9 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
         "no_native_refined_candidate";
       return finalize(std::move(decision));
     }
-    // Re-certify every refined route in one batch.  This is deliberately not
-    // a scalar fallback: all routes that can be selected share one immutable
-    // snapshot and one common-known satellite set.
+    // Re-certify every refined route in one immutable batch. Each sample may
+    // use its own locally known satellite set; candidate and receiver raw PL
+    // for that sample still use the exact same set.
     evaluateCandidateRiskSet(request, &budget, &refined_candidates);
     if (std::any_of(
         refined_candidates.begin(), refined_candidates.end(),
@@ -2306,20 +2276,24 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
     decision.reason = "no_refined_candidate_passed_safety_gate";
     return finalize(std::move(decision));
   }
+  const bool multiple_safe_channels = eligible.size() >= 2;
   P4ForwardCandidate * selected = eligible.front();
   decision.selected_candidate_id = selected->candidate_id;
   decision.selected_guide = selected->path;
-  decision.action = decision.candidates.size() == 1 ?
-    P4ForwardAction::CONTINUE_NOMINAL : P4ForwardAction::RISK_SELECTED;
-  decision.selection_authority = decision.candidates.size() == 1 ?
-    P4ForwardSelectionAuthority::NONE :
-    P4ForwardSelectionAuthority::FORMAL;
+  decision.action = multiple_safe_channels ?
+    P4ForwardAction::RISK_SELECTED :
+    P4ForwardAction::CONTINUE_NOMINAL;
+  decision.selection_authority = multiple_safe_channels ?
+    P4ForwardSelectionAuthority::FORMAL :
+    P4ForwardSelectionAuthority::NONE;
   decision.formal_support = true;
-  decision.trigger_reason = decision.candidates.size() == 1 ?
-    P4ForwardTriggerReason::SINGLE_CHANNEL :
-    P4ForwardTriggerReason::MULTIPLE_CHANNELS;
-  decision.reason = decision.candidates.size() == 1 ? "single_channel" :
-    "risk_ranked_topology_selected";
+  decision.trigger_reason = multiple_safe_channels ?
+    P4ForwardTriggerReason::MULTIPLE_CHANNELS :
+    P4ForwardTriggerReason::SINGLE_CHANNEL;
+  decision.reason = multiple_safe_channels ?
+    "risk_ranked_topology_selected" :
+    (decision.candidates.size() == 1 ? "single_channel" :
+    "single_safe_channel");
   return finalize(std::move(decision));
 }
 

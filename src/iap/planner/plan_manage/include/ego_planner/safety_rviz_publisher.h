@@ -138,6 +138,14 @@ struct SafetyVizP4Guide {
   double first_failed_val = std::numeric_limits<double>::quiet_NaN();
   double first_failed_query_time_s =
       std::numeric_limits<double>::quiet_NaN();
+  uint64_t first_failed_candidate_id = 0;
+  double first_failed_arc_length_m =
+      std::numeric_limits<double>::quiet_NaN();
+  int first_failed_gnss_known_count = 0;
+  int first_failed_gnss_visible_count = 0;
+  int first_failed_gnss_blocked_count = 0;
+  int first_failed_gnss_unknown_count = 0;
+  int first_failed_gnss_used_count = 0;
   double risk_snapshot_stamp_s =
       std::numeric_limits<double>::quiet_NaN();
   std::string first_failed_floor_source_h = "none";

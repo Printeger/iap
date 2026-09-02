@@ -359,6 +359,7 @@ enum class ForwardRiskFailureReason {
   NONE = 0,
   SAFETY_LIMIT_EXCEEDED,
   GNSS_ANCHOR_INCONSISTENT,
+  GNSS_LOCAL_USABLE_SATS_LT_MIN,
   GNSS_SKY_UNKNOWN,
   GNSS_GEOMETRY_DEGENERATE,
   OCCUPANCY_UNKNOWN,
@@ -405,7 +406,7 @@ struct ForwardRiskPointResult {
   double gnss_support_ray_length_m =
       std::numeric_limits<double>::quiet_NaN();
   bool gnss_hard_occlusion = false;
-  // Online evidence retained even when the common formal satellite set is
+  // Online evidence retained even when this point's local satellite set is
   // insufficient. It is diagnostic/advisory only and never changes UNKNOWN
   // into SAFE.
   int gnss_visible_satellite_count = 0;
@@ -413,6 +414,8 @@ struct ForwardRiskPointResult {
   int gnss_attenuated_satellite_count = 0;
   int gnss_unknown_satellite_count = 0;
   int gnss_known_satellite_count = 0;
+  int gnss_used_satellite_count = 0;
+  std::uint64_t local_satellite_set_hash = 0;
   bool known_hazard_evidence = false;
   double known_gnss_degradation_ratio = 0.0;
   double known_fim_ratio = std::numeric_limits<double>::quiet_NaN();
@@ -422,9 +425,7 @@ struct ForwardRiskPointResult {
 struct ForwardRiskBatchResult {
   bool complete = false;
   std::string combined_snapshot_identity;
-  std::vector<int> common_known_sat_ids;
-  std::uint64_t common_satellite_hash = 0;
-  int common_known_satellite_count = 0;
+  std::size_t first_failure_index = std::numeric_limits<std::size_t>::max();
   ForwardRiskFailureReason failure_reason = ForwardRiskFailureReason::NONE;
   std::vector<ForwardRiskPointResult> points;
 };
