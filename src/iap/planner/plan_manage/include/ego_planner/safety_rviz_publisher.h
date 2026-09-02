@@ -116,6 +116,7 @@ struct SafetyVizP4Guide {
       std::numeric_limits<double>::quiet_NaN());
   std::vector<std::vector<Eigen::Vector3d>> raw_topology_paths;
   std::vector<std::vector<Eigen::Vector3d>> topology_candidates;
+  std::vector<uint64_t> topology_channel_ids;
   std::vector<std::string> topology_candidate_labels;
   std::vector<bool> topology_candidate_supported;
   std::vector<Eigen::Vector3d> original_path;
@@ -180,6 +181,8 @@ class SafetyRvizPublisher {
         "/iap/rviz/p2_candidate_trajectories";
     std::string p3_reference_bias_topic = "/iap/rviz/p3_reference_bias";
     std::string p4_astar_guides_topic = "/iap/rviz/p4_astar_guides";
+    std::string p4_topology_channels_topic =
+        "/iap/rviz/p4_topology_channels";
     double selected_horizon_s = 1.0;
     std::string z_slice_mode = "current_altitude";
     double z_slice_half_thickness_m = 0.75;
@@ -282,6 +285,10 @@ class SafetyRvizPublisher {
       const std::vector<SafetyVizP4Guide>& guides,
       const Config& config,
       const rclcpp::Time& stamp);
+  static visualization_msgs::msg::MarkerArray buildP4TopologyChannelMarkers(
+      const std::vector<SafetyVizP4Guide>& guides,
+      const Config& config,
+      const rclcpp::Time& stamp);
 
  private:
   bool shouldPublish(double now_s, double* last_publish_s) const;
@@ -324,6 +331,8 @@ class SafetyRvizPublisher {
       p3_reference_bias_pub_;
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr
       p4_astar_guides_pub_;
+  rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr
+      p4_topology_channels_pub_;
   double last_grid_publish_s_ = std::numeric_limits<double>::quiet_NaN();
   double last_validity_publish_s_ = std::numeric_limits<double>::quiet_NaN();
   double last_p5_publish_s_ = std::numeric_limits<double>::quiet_NaN();
@@ -331,6 +340,8 @@ class SafetyRvizPublisher {
   double last_p2_publish_s_ = std::numeric_limits<double>::quiet_NaN();
   double last_p3_publish_s_ = std::numeric_limits<double>::quiet_NaN();
   double last_p4_publish_s_ = std::numeric_limits<double>::quiet_NaN();
+  double last_p4_topology_publish_s_ =
+      std::numeric_limits<double>::quiet_NaN();
 };
 
 }  // namespace ego_planner

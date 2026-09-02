@@ -81,6 +81,11 @@ class TestIcraLaunchTest(unittest.TestCase):
         self.assertEqual(
             defaults["rviz_config"], "config/sim_demo11/test_icra.rviz"
         )
+        rviz = (REPO / defaults["rviz_config"]).read_text()
+        self.assertIn("Name: P4 AStar Guides", rviz)
+        self.assertIn("Value: /iap/rviz/p4_astar_guides", rviz)
+        self.assertIn("Name: P4 Topology Channels", rviz)
+        self.assertIn("Value: /iap/rviz/p4_topology_channels", rviz)
 
     def test_all_icra_runs_default_to_regular_spherical_first_hit_lidar(self):
         defaults = dict(MODULE.ARG_DEFAULTS)

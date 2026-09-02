@@ -4793,6 +4793,7 @@ def _launch_setup(context):
                     "/iap/rviz/p2_candidate_trajectories",
                     "/iap/rviz/p3_reference_bias",
                     "/iap/rviz/p4_astar_guides",
+                    "/iap/rviz/p4_topology_channels",
                 ],
                 output="screen",
         )

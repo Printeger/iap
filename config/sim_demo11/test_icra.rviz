@@ -212,6 +212,18 @@ Visualization Manager:
         Value: /iap/rviz/p4_astar_guides
     - Class: rviz_default_plugins/MarkerArray
       Enabled: true
+      Name: P4 Topology Channels
+      Namespaces:
+        p4_topology_channels: true
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /iap/rviz/p4_topology_channels
+      Value: true
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
       Name: P5 Gate Status
       Topic:
         Depth: 5

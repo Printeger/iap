@@ -3,6 +3,24 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(p4-topology-channel-rviz-overlay): IAP-RQ-400 / IAP-RQ-410 — publish
+  the accepted P4 topology representatives on the independent
+  `/iap/rviz/p4_topology_channels` MarkerArray without replacing or changing
+  `/iap/rviz/p4_astar_guides`. Stable per-channel colors and 0.12 m lines make
+  up to four channels distinguishable; the currently executable deferred
+  common-prefix segment is overlaid in white at 0.16 m. The ICRA RViz profile
+  enables this as a separately toggleable display, and bag capture includes
+  the topic. Empty provisional HOLD updates do not clear the independent
+  overlay or consume its publish throttle; finite marker lifetimes expire old
+  decisions. A replay of `run-20260901T182813Z-3098612` confirms that its 54
+  two-channel decisions had a 4.104 m minimum common corridor while published
+  B-spline endpoints remained within 0.943 m of the start. The dominant
+  execution interruption was immutable snapshot invalidation: 53 decisions
+  were rejected before reuse and five during computation as live occupancy
+  advanced, so the FSM alternated short common-prefix plans with HOLD/stop
+  trajectories. This change adds observability only; snapshot safety semantics
+  and P4/P5 admission are unchanged.
+
 - feat(p4-forward-topology-advisory-v3): IAP-RQ-320 / IAP-RQ-400 /
   IAP-RQ-410 — replace the centre-cell/Yen probe front end with one immutable
   clearance-aware configuration space and a deterministic distinct-channel

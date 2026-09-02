@@ -2591,6 +2591,134 @@ TEST(SafetyRvizPublisherTest, RiskGridHealthMarkerUsesProvidedStamp) {
 }
 
 TEST(SafetyRvizPublisherTest,
+     P4TopologyChannelsArePublishedAsAnIndependentOverlay) {
+  ego_planner::SafetyVizP4Guide guide;
+  guide.forward_decision = true;
+  guide.topology_candidates = {
+      {Eigen::Vector3d(0.0, 0.0, 1.5), Eigen::Vector3d(2.0, 1.0, 1.5),
+       Eigen::Vector3d(4.0, 0.0, 1.5)},
+      {Eigen::Vector3d(0.0, 0.0, 1.5), Eigen::Vector3d(2.0, -1.0, 1.5),
+       Eigen::Vector3d(4.0, 0.0, 1.5)}};
+  guide.topology_channel_ids = {2, 1};
+  guide.topology_candidate_labels = {"channel 1", "channel 2"};
+  guide.observe_more_path = {
+      Eigen::Vector3d(0.0, 0.0, 1.5), Eigen::Vector3d(0.5, 0.0, 1.5)};
+
+  ego_planner::SafetyRvizPublisher::Config config;
+  const auto markers =
+      ego_planner::SafetyRvizPublisher::buildP4TopologyChannelMarkers(
+          {guide}, config, rclcpp::Time(10, 0, RCL_ROS_TIME));
+
+  ASSERT_EQ(markers.markers.size(), 6u);
+  EXPECT_EQ(markers.markers.front().action,
+            visualization_msgs::msg::Marker::DELETEALL);
+  for (const auto& marker : markers.markers) {
+    EXPECT_EQ(marker.ns, "p4_topology_channels");
+  }
+  EXPECT_EQ(markers.markers[1].type,
+            visualization_msgs::msg::Marker::LINE_STRIP);
+  EXPECT_EQ(markers.markers[3].type,
+            visualization_msgs::msg::Marker::LINE_STRIP);
+  EXPECT_NE(markers.markers[1].color.r, markers.markers[3].color.r);
+  EXPECT_NE(markers.markers[1].color.b, markers.markers[3].color.b);
+  EXPECT_NE(markers.markers[2].text.find("P4 channel 2"), std::string::npos);
+  EXPECT_NE(markers.markers[4].text.find("P4 channel 1"), std::string::npos);
+  EXPECT_GT(markers.markers[1].lifetime.sec, 0);
+  EXPECT_EQ(markers.markers[1].lifetime, markers.markers[2].lifetime);
+  EXPECT_EQ(markers.markers[1].lifetime, markers.markers[5].lifetime);
+  EXPECT_DOUBLE_EQ(markers.markers[5].scale.x, 0.16);
+  EXPECT_EQ(markers.markers[5].points.size(), 2u);
+}
+
+TEST(SafetyRvizPublisherTest,
+     P4TopologyChannelPublisherDoesNotReplaceExistingGuidePublisher) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p4_topology_overlay_publisher_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  ego_planner::SafetyRvizPublisher::Config config;
+  config.enable_p4_viz = true;
+  ego_planner::SafetyRvizPublisher publisher(node, config);
+
+  EXPECT_EQ(node->count_publishers(config.p4_astar_guides_topic), 1u);
+  EXPECT_EQ(node->count_publishers(config.p4_topology_channels_topic), 1u);
+}
+
+TEST(SafetyRvizPublisherTest,
+     ProvisionalP4HoldDoesNotConsumeTopologyOverlayPublishBudget) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p4_topology_overlay_throttle_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  ego_planner::SafetyRvizPublisher::Config config;
+  config.enable_p4_viz = true;
+  config.publish_rate_hz = 1.0;
+  ego_planner::SafetyRvizPublisher publisher(node, config);
+
+  std::vector<visualization_msgs::msg::MarkerArray> topology_messages;
+  auto subscription =
+      node->create_subscription<visualization_msgs::msg::MarkerArray>(
+          config.p4_topology_channels_topic, 10,
+          [&topology_messages](
+              const visualization_msgs::msg::MarkerArray::ConstSharedPtr msg) {
+            topology_messages.push_back(*msg);
+          });
+  (void)subscription;
+  rclcpp::executors::SingleThreadedExecutor executor;
+  executor.add_node(node);
+
+  ego_planner::SafetyVizP4Guide provisional;
+  provisional.forward_decision = true;
+  publisher.publishP4Guides({provisional}, 100.0);
+  executor.spin_some();
+
+  auto completed = provisional;
+  completed.topology_candidates = {
+      {Eigen::Vector3d(0.0, 0.0, 1.5),
+       Eigen::Vector3d(2.0, 1.0, 1.5)}};
+  publisher.publishP4Guides({completed}, 100.01);
+  executor.spin_some();
+
+  ASSERT_EQ(topology_messages.size(), 1u);
+  EXPECT_GT(topology_messages.front().markers.size(), 1u);
+}
+
+TEST(SafetyRvizPublisherTest,
+     DeferredPrefixWithoutTopologyCandidatesRemainsVisible) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p4_deferred_prefix_overlay_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  ego_planner::SafetyRvizPublisher::Config config;
+  config.enable_p4_viz = true;
+  ego_planner::SafetyRvizPublisher publisher(node, config);
+
+  std::vector<visualization_msgs::msg::MarkerArray> topology_messages;
+  auto subscription =
+      node->create_subscription<visualization_msgs::msg::MarkerArray>(
+          config.p4_topology_channels_topic, 10,
+          [&topology_messages](
+              const visualization_msgs::msg::MarkerArray::ConstSharedPtr msg) {
+            topology_messages.push_back(*msg);
+          });
+  (void)subscription;
+  rclcpp::executors::SingleThreadedExecutor executor;
+  executor.add_node(node);
+
+  ego_planner::SafetyVizP4Guide deferred;
+  deferred.forward_decision = true;
+  deferred.observe_more_path = {
+      Eigen::Vector3d(0.0, 0.0, 1.5),
+      Eigen::Vector3d(0.5, 0.0, 1.5)};
+  publisher.publishP4Guides({deferred}, 100.0);
+  executor.spin_some();
+
+  ASSERT_EQ(topology_messages.size(), 1u);
+  ASSERT_EQ(topology_messages.front().markers.size(), 2u);
+  EXPECT_DOUBLE_EQ(topology_messages.front().markers[1].scale.x, 0.16);
+}
+
+TEST(SafetyRvizPublisherTest,
      PredictedCloudCarriesRatioAndPerSourceDiagnosticsOnFixedGeometry) {
   iap::RiskGridMapParams params;
   params.use_fixed_origin = true;

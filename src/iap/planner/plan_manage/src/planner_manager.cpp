@@ -363,6 +363,7 @@ namespace ego_planner
       for (const auto &candidate : decision.candidates)
       {
         viz.topology_candidates.push_back(candidate.path);
+        viz.topology_channel_ids.push_back(candidate.channel_id);
         viz.topology_candidate_labels.push_back(
             "C" + std::to_string(candidate.candidate_id) + " geometry=" +
             p4ForwardGeometryStateName(candidate.geometry_state) +

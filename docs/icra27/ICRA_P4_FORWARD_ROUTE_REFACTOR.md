@@ -1,5 +1,29 @@
 # P4 Online Forward Route Selection
 
+## Dedicated topology overlay and execution diagnosis (2026-09-02)
+
+P4 publishes the distinct post-clustering channel representatives on the
+independent `/iap/rviz/p4_topology_channels` MarkerArray. Channel colors are
+bound to the emitted P4 channel identity, and the currently executable
+deferred prefix is a thicker white line. Prefix-only deferred decisions remain
+visible, while an empty provisional HOLD does not clear the prior overlay or
+consume its independent publish throttle. Finite marker lifetimes remove stale
+decisions. The ICRA RViz profile exposes this as a separate display; toggling it
+does not change the existing P4 guide, risk-cloud, map, or trajectory displays.
+
+Replay of `run-20260901T182813Z-3098612` separates topology discovery from
+execution. All 54 completed decisions contained two channels and at least
+4.104 m of common corridor, but the farthest published B-spline endpoint was
+only 0.943 m from the start. The run also recorded 53
+`live_occupancy_generation_changed_before_decision_reuse` and five
+`live_occupancy_generation_changed_during_forward_decision` outcomes. Those
+outcomes correctly discard the old immutable result, but the OBSERVE_MORE FSM
+then publishes a stop candidate. Repetition alternates the 0.5 m capped common
+prefix with HOLD instead of accumulating forward progress. The overlay change
+does not relax that fail-closed behavior; coordinating the 10 Hz occupancy
+stream with the slower risk/P4 snapshot lifecycle remains a separate runtime
+repair.
+
 ## Configuration-space and advisory v3 follow-up (2026-09-01)
 
 New runs emit `p4_forward_route_decision_v3`. P4 now constructs one immutable

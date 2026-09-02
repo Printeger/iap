@@ -333,6 +333,9 @@ SafetyRvizPublisher::Config SafetyRvizPublisher::declareAndReadConfig(
   config.p4_astar_guides_topic = declare_or_get<std::string>(
       node, "safety_viz.p4_astar_guides_topic",
       config.p4_astar_guides_topic);
+  config.p4_topology_channels_topic = declare_or_get<std::string>(
+      node, "safety_viz.p4_topology_channels_topic",
+      config.p4_topology_channels_topic);
   config.selected_horizon_s = declare_or_get<double>(
       node, "safety_viz.selected_horizon_s", config.selected_horizon_s);
   config.z_slice_mode = declare_or_get<std::string>(
@@ -425,6 +428,9 @@ SafetyRvizPublisher::SafetyRvizPublisher(rclcpp::Node::SharedPtr node,
     p4_astar_guides_pub_ =
         node_->create_publisher<visualization_msgs::msg::MarkerArray>(
             config_.p4_astar_guides_topic, 10);
+    p4_topology_channels_pub_ =
+        node_->create_publisher<visualization_msgs::msg::MarkerArray>(
+            config_.p4_topology_channels_topic, 10);
   }
 }
 
@@ -580,11 +586,26 @@ void SafetyRvizPublisher::publishP3ReferenceBias(
 void SafetyRvizPublisher::publishP4Guides(
     const std::vector<SafetyVizP4Guide>& guides,
     double now_s) {
-  if (!p4_astar_guides_pub_ || !shouldPublish(now_s, &last_p4_publish_s_)) {
+  if ((!p4_astar_guides_pub_ && !p4_topology_channels_pub_) ||
+      !valid_stamp_s(now_s)) {
     return;
   }
   const rclcpp::Time stamp = stamp_from_seconds(node_, now_s);
-  p4_astar_guides_pub_->publish(buildP4GuideMarkers(guides, config_, stamp));
+  if (p4_astar_guides_pub_ &&
+      shouldPublish(now_s, &last_p4_publish_s_)) {
+    p4_astar_guides_pub_->publish(buildP4GuideMarkers(guides, config_, stamp));
+  }
+  const bool has_topology_payload = std::any_of(
+      guides.begin(), guides.end(), [](const SafetyVizP4Guide& guide) {
+        return guide.forward_decision &&
+               (!guide.topology_candidates.empty() ||
+                guide.observe_more_path.size() >= 2);
+      });
+  if (p4_topology_channels_pub_ && has_topology_payload &&
+      shouldPublish(now_s, &last_p4_topology_publish_s_)) {
+    p4_topology_channels_pub_->publish(
+        buildP4TopologyChannelMarkers(guides, config_, stamp));
+  }
 }
 
 visualization_msgs::msg::MarkerArray
@@ -1549,6 +1570,85 @@ SafetyRvizPublisher::buildP4GuideMarkers(
                  "\nratio: " + fmt_num(guide.path_length_ratio, 2) +
                  "\nreason: " + guide.reason;
     arr.markers.push_back(label);
+  }
+  return arr;
+}
+
+visualization_msgs::msg::MarkerArray
+SafetyRvizPublisher::buildP4TopologyChannelMarkers(
+    const std::vector<SafetyVizP4Guide>& guides,
+    const Config& config,
+    const rclcpp::Time& stamp) {
+  visualization_msgs::msg::MarkerArray arr;
+  constexpr char kNamespace[] = "p4_topology_channels";
+  auto clear = base_marker(config, stamp, kNamespace, 0,
+                           visualization_msgs::msg::Marker::LINE_STRIP);
+  clear.action = visualization_msgs::msg::Marker::DELETEALL;
+  arr.markers.push_back(std::move(clear));
+
+  const std::array<std_msgs::msg::ColorRGBA, 4> channel_colors = {
+      color(0.05f, 0.85f, 1.0f, 0.92f),
+      color(1.0f, 0.25f, 0.75f, 0.92f),
+      color(1.0f, 0.62f, 0.08f, 0.92f),
+      color(0.25f, 0.95f, 0.35f, 0.92f)};
+  const auto marker_lifetime = rclcpp::Duration::from_seconds(
+      std::max(1.5, 2.0 / config.publish_rate_hz));
+  int id = 1;
+  for (const auto& guide : guides) {
+    if (!guide.forward_decision) {
+      continue;
+    }
+    for (std::size_t index = 0;
+         index < guide.topology_candidates.size(); ++index) {
+      const auto& path = guide.topology_candidates[index];
+      if (path.size() < 2) {
+        continue;
+      }
+      const uint64_t channel_id =
+          index < guide.topology_channel_ids.size() &&
+          guide.topology_channel_ids[index] > 0
+          ? guide.topology_channel_ids[index]
+          : static_cast<uint64_t>(index + 1);
+      const auto& channel_color = channel_colors[
+          static_cast<std::size_t>((channel_id - 1) % channel_colors.size())];
+      auto line = base_marker(config, stamp, kNamespace, id++,
+                              visualization_msgs::msg::Marker::LINE_STRIP);
+      line.scale.x = 0.12;
+      line.color = channel_color;
+      line.lifetime = marker_lifetime;
+      for (const auto& point : path) {
+        line.points.push_back(point_msg(point));
+      }
+      arr.markers.push_back(std::move(line));
+
+      auto label = base_marker(
+          config, stamp, kNamespace, id++,
+          visualization_msgs::msg::Marker::TEXT_VIEW_FACING);
+      label.pose.position = point_msg(path[path.size() / 2]);
+      label.pose.position.z += 0.35;
+      label.scale.z = 0.22;
+      label.color = channel_color;
+      label.lifetime = marker_lifetime;
+      label.text = "P4 channel " + std::to_string(channel_id);
+      if (index < guide.topology_candidate_labels.size() &&
+          !guide.topology_candidate_labels[index].empty()) {
+        label.text += "\n" + guide.topology_candidate_labels[index];
+      }
+      arr.markers.push_back(std::move(label));
+    }
+
+    if (guide.observe_more_path.size() >= 2) {
+      auto prefix = base_marker(
+          config, stamp, kNamespace, id++,
+          visualization_msgs::msg::Marker::LINE_STRIP);
+      prefix.scale.x = 0.16;
+      prefix.color = color(1.0f, 1.0f, 1.0f, 1.0f);
+      prefix.lifetime = marker_lifetime;
+      for (const auto& point : guide.observe_more_path) {
+        prefix.points.push_back(point_msg(point));
+      }
+      arr.markers.push_back(std::move(prefix));
+    }
   }
   return arr;
 }
