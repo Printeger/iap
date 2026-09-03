@@ -1,0 +1,260 @@
+#include <gtest/gtest.h>
+
+#include <plan_env/registered_lidar_window.h>
+
+namespace {
+
+RegisteredLidarFrameData frame(
+    const std::int64_t id, const Eigen::Vector3d& origin,
+    std::initializer_list<Eigen::Vector3d> hits) {
+  RegisteredLidarFrameData value;
+  value.frame_id = id;
+  value.stamp_s = static_cast<double>(id);
+  value.scan_end_stamp_s = value.stamp_s + 0.1;
+  value.sensor_receipt_steady_ns = 1U;
+  value.T_map_lidar = Eigen::Isometry3d::Identity();
+  value.T_map_lidar.translation() = origin;
+  value.hits_lidar.assign(hits.begin(), hits.end());
+  value.frame_contract_id = "contract-a";
+  return value;
+}
+
+RegisteredLidarWindow makeWindow() {
+  RegisteredLidarWindow::Geometry geometry;
+  geometry.origin = Eigen::Vector3d::Zero();
+  geometry.dimensions = Eigen::Vector3i(8, 4, 4);
+  geometry.resolution_m = 1.0;
+  geometry.frame_contract_id = "contract-a";
+  return RegisteredLidarWindow(geometry);
+}
+
+TEST(RegisteredLidarWindow, CurrentOverlayReplacementPreservesActiveEvidence) {
+  auto window = makeWindow();
+
+  ActiveLidarWindowDeltaData base;
+  base.base_generation = 0;
+  base.generation = 1;
+  base.complete = true;
+  base.frame_contract_id = "contract-a";
+  base.added.push_back(frame(10, Eigen::Vector3d(0.5, 0.5, 0.5),
+                             {Eigen::Vector3d(3.0, 0.0, 0.0)}));
+  ASSERT_TRUE(window.applyActiveDelta(base).accepted);
+
+  ASSERT_TRUE(window.applyCurrentFrame(
+      frame(20, Eigen::Vector3d(0.5, 1.5, 0.5),
+            {Eigen::Vector3d(2.0, 0.0, 0.0)})).accepted);
+  EXPECT_EQ(window.stateAt(Eigen::Vector3i(3, 0, 0)),
+            RegisteredVoxelState::OCCUPIED);
+  EXPECT_EQ(window.stateAt(Eigen::Vector3i(2, 1, 0)),
+            RegisteredVoxelState::OCCUPIED);
+
+  ASSERT_TRUE(window.applyCurrentFrame(
+      frame(21, Eigen::Vector3d(0.5, 2.5, 0.5), {})).accepted);
+  EXPECT_EQ(window.stateAt(Eigen::Vector3i(3, 0, 0)),
+            RegisteredVoxelState::OCCUPIED);
+  EXPECT_EQ(window.stateAt(Eigen::Vector3i(2, 1, 0)),
+            RegisteredVoxelState::UNKNOWN);
+}
+
+TEST(RegisteredLidarWindow, SuccessfulHitRayMarksFreeAndHitWins) {
+  auto window = makeWindow();
+  ASSERT_TRUE(window.applyCurrentFrame(
+      frame(1, Eigen::Vector3d(0.5, 0.5, 0.5),
+            {Eigen::Vector3d(3.0, 0.0, 0.0)})).accepted);
+
+  EXPECT_EQ(window.stateAt(Eigen::Vector3i(0, 0, 0)),
+            RegisteredVoxelState::OBSERVED_FREE);
+  EXPECT_EQ(window.stateAt(Eigen::Vector3i(1, 0, 0)),
+            RegisteredVoxelState::OBSERVED_FREE);
+  EXPECT_EQ(window.stateAt(Eigen::Vector3i(2, 0, 0)),
+            RegisteredVoxelState::OBSERVED_FREE);
+  EXPECT_EQ(window.stateAt(Eigen::Vector3i(3, 0, 0)),
+            RegisteredVoxelState::OCCUPIED);
+
+  ActiveLidarWindowDeltaData delta;
+  delta.base_generation = 0;
+  delta.generation = 1;
+  delta.complete = true;
+  delta.frame_contract_id = "contract-a";
+  delta.added.push_back(frame(2, Eigen::Vector3d(3.5, 1.5, 0.5),
+                              {Eigen::Vector3d(0.0, -1.0, 0.0)}));
+  ASSERT_TRUE(window.applyActiveDelta(delta).accepted);
+  EXPECT_EQ(window.stateAt(Eigen::Vector3i(3, 0, 0)),
+            RegisteredVoxelState::OCCUPIED);
+}
+
+TEST(RegisteredLidarWindow, OutOfBoundsHitRetainsObservedFreeMapPrefix) {
+  auto window = makeWindow();
+  const auto update = window.applyCurrentFrame(frame(
+      1, Eigen::Vector3d(0.5, 0.5, 0.5),
+      {Eigen::Vector3d(10.0, 0.0, 0.0)}));
+  ASSERT_TRUE(update.accepted);
+  EXPECT_EQ(window.stateAt(Eigen::Vector3i(0, 0, 0)),
+            RegisteredVoxelState::OBSERVED_FREE);
+  EXPECT_EQ(window.stateAt(Eigen::Vector3i(7, 0, 0)),
+            RegisteredVoxelState::OBSERVED_FREE);
+}
+
+TEST(RegisteredLidarWindow, DeltaGapAndContractChangeRequireRecovery) {
+  auto window = makeWindow();
+  ActiveLidarWindowDeltaData delta;
+  delta.base_generation = 1;
+  delta.generation = 2;
+  delta.complete = true;
+  delta.frame_contract_id = "contract-a";
+  const auto gap = window.applyActiveDelta(delta);
+  EXPECT_FALSE(gap.accepted);
+  EXPECT_TRUE(gap.recovery_required);
+  EXPECT_EQ(gap.reason, "generation_gap");
+
+  delta.base_generation = 0;
+  delta.frame_contract_id = "contract-b";
+  const auto contract = window.applyActiveDelta(delta);
+  EXPECT_FALSE(contract.accepted);
+  EXPECT_TRUE(contract.recovery_required);
+  EXPECT_EQ(contract.reason, "frame_contract_mismatch");
+
+  delta.frame_contract_id = "contract-a";
+  delta.base_generation = 0;
+  delta.generation = 2;
+  const auto skipped_generation = window.applyActiveDelta(delta);
+  EXPECT_FALSE(skipped_generation.accepted);
+  EXPECT_TRUE(skipped_generation.recovery_required);
+  EXPECT_EQ(skipped_generation.reason, "generation_gap");
+}
+
+TEST(RegisteredLidarWindow, RecoveryCannotRollBackActiveGeneration) {
+  auto window = makeWindow();
+  ActiveLidarWindowDeltaData delta;
+  delta.base_generation = 0;
+  delta.generation = 1;
+  delta.complete = true;
+  delta.frame_contract_id = "contract-a";
+  ASSERT_TRUE(window.applyActiveDelta(delta).accepted);
+
+  const auto stale = window.replaceActiveWindow(0, "contract-a", {});
+  EXPECT_FALSE(stale.accepted);
+  EXPECT_TRUE(stale.recovery_required);
+  EXPECT_EQ(stale.reason, "recovery_generation_regression");
+  EXPECT_EQ(window.activeGeneration(), 1U);
+}
+
+TEST(RegisteredLidarWindow, PoseCorrectionRetractsOldContribution) {
+  auto window = makeWindow();
+  ActiveLidarWindowDeltaData add;
+  add.base_generation = 0;
+  add.generation = 1;
+  add.complete = true;
+  add.frame_contract_id = "contract-a";
+  add.added.push_back(frame(7, Eigen::Vector3d(0.5, 0.5, 0.5),
+                            {Eigen::Vector3d(2.0, 0.0, 0.0)}));
+  ASSERT_TRUE(window.applyActiveDelta(add).accepted);
+  EXPECT_EQ(window.stateAt(Eigen::Vector3i(2, 0, 0)),
+            RegisteredVoxelState::OCCUPIED);
+
+  ActiveLidarWindowDeltaData update;
+  update.base_generation = 1;
+  update.generation = 2;
+  update.complete = true;
+  update.frame_contract_id = "contract-a";
+  update.pose_updates.emplace_back(7, Eigen::Translation3d(0.0, 1.0, 0.0) *
+                                          Eigen::Isometry3d::Identity());
+  ASSERT_TRUE(window.applyActiveDelta(update).accepted);
+  EXPECT_EQ(window.stateAt(Eigen::Vector3i(2, 0, 0)),
+            RegisteredVoxelState::UNKNOWN);
+  EXPECT_EQ(window.stateAt(Eigen::Vector3i(2, 1, 0)),
+            RegisteredVoxelState::OCCUPIED);
+}
+
+TEST(RegisteredLidarWindow, CurrentFramePromotionDoesNotLoseItsEvidence) {
+  auto window = makeWindow();
+  const auto promoted = frame(
+      9, Eigen::Vector3d(0.5, 0.5, 0.5),
+      {Eigen::Vector3d(3.0, 0.0, 0.0)});
+  ASSERT_TRUE(window.applyCurrentFrame(promoted).accepted);
+
+  ActiveLidarWindowDeltaData add;
+  add.base_generation = 0;
+  add.generation = 1;
+  add.complete = true;
+  add.frame_contract_id = "contract-a";
+  add.added.push_back(promoted);
+  ASSERT_TRUE(window.applyActiveDelta(add).accepted);
+
+  ASSERT_TRUE(window.applyCurrentFrame(
+      frame(10, Eigen::Vector3d(0.5, 2.5, 0.5), {})).accepted);
+  EXPECT_EQ(window.stateAt(Eigen::Vector3i(3, 0, 0)),
+            RegisteredVoxelState::OCCUPIED);
+  EXPECT_EQ(window.stateAt(Eigen::Vector3i(1, 0, 0)),
+            RegisteredVoxelState::OBSERVED_FREE);
+}
+
+TEST(RegisteredLidarWindow, RemovingActiveFrameRetractsOnlyItsContribution) {
+  auto window = makeWindow();
+  ActiveLidarWindowDeltaData add;
+  add.base_generation = 0;
+  add.generation = 1;
+  add.complete = true;
+  add.frame_contract_id = "contract-a";
+  add.added.push_back(frame(1, Eigen::Vector3d(0.5, 0.5, 0.5),
+                            {Eigen::Vector3d(3.0, 0.0, 0.0)}));
+  add.added.push_back(frame(2, Eigen::Vector3d(0.5, 1.5, 0.5),
+                            {Eigen::Vector3d(3.0, 0.0, 0.0)}));
+  ASSERT_TRUE(window.applyActiveDelta(add).accepted);
+
+  ActiveLidarWindowDeltaData remove;
+  remove.base_generation = 1;
+  remove.generation = 2;
+  remove.complete = true;
+  remove.frame_contract_id = "contract-a";
+  remove.removed_frame_ids.push_back(1);
+  const auto result = window.applyActiveDelta(remove);
+  ASSERT_TRUE(result.accepted);
+  EXPECT_EQ(window.stateAt(Eigen::Vector3i(3, 0, 0)),
+            RegisteredVoxelState::UNKNOWN);
+  EXPECT_EQ(window.stateAt(Eigen::Vector3i(3, 1, 0)),
+            RegisteredVoxelState::OCCUPIED);
+}
+
+TEST(RegisteredLidarWindow, InvalidDeltaDoesNotPartiallyMutateWindow) {
+  auto window = makeWindow();
+  ActiveLidarWindowDeltaData add;
+  add.base_generation = 0;
+  add.generation = 1;
+  add.complete = true;
+  add.frame_contract_id = "contract-a";
+  add.added.push_back(frame(1, Eigen::Vector3d(0.5, 0.5, 0.5),
+                            {Eigen::Vector3d(3.0, 0.0, 0.0)}));
+  ASSERT_TRUE(window.applyActiveDelta(add).accepted);
+
+  ActiveLidarWindowDeltaData invalid;
+  invalid.base_generation = 1;
+  invalid.generation = 2;
+  invalid.complete = true;
+  invalid.frame_contract_id = "contract-a";
+  invalid.removed_frame_ids.push_back(1);
+  invalid.removed_frame_ids.push_back(999);
+  const auto result = window.applyActiveDelta(invalid);
+  EXPECT_FALSE(result.accepted);
+  EXPECT_TRUE(result.recovery_required);
+  EXPECT_EQ(window.activeGeneration(), 1U);
+  EXPECT_EQ(window.stateAt(Eigen::Vector3i(3, 0, 0)),
+            RegisteredVoxelState::OCCUPIED);
+}
+
+TEST(RegisteredLidarWindow, DiagonalRayDoesNotClaimCornerAdjacentVoxels) {
+  auto window = makeWindow();
+  ASSERT_TRUE(window.applyCurrentFrame(
+      frame(1, Eigen::Vector3d(0.5, 0.5, 0.5),
+            {Eigen::Vector3d(3.0, 3.0, 0.0)})).accepted);
+  EXPECT_EQ(window.stateAt(Eigen::Vector3i(1, 1, 0)),
+            RegisteredVoxelState::OBSERVED_FREE);
+  EXPECT_EQ(window.stateAt(Eigen::Vector3i(2, 2, 0)),
+            RegisteredVoxelState::OBSERVED_FREE);
+  EXPECT_EQ(window.stateAt(Eigen::Vector3i(1, 0, 0)),
+            RegisteredVoxelState::UNKNOWN);
+  EXPECT_EQ(window.stateAt(Eigen::Vector3i(3, 3, 0)),
+            RegisteredVoxelState::OCCUPIED);
+}
+
+}  // namespace

@@ -1,7 +1,9 @@
 #include "plan_env/grid_map.h"
 
 #include <algorithm>
+#include <exception>
 #include <iomanip>
+#include <sensor_msgs/point_cloud2_iterator.hpp>
 #include <sstream>
 
 // #define current_img_ md_.depth_image_[image_cnt_ & 1]
@@ -42,6 +44,92 @@ std::string geometryIdentity(const std::string &frame_id,
   out << "planning_lattice_v1:" << std::hex << std::setw(16)
       << std::setfill('0') << hash;
   return out.str();
+}
+
+Eigen::Isometry3d poseFromMessage(const geometry_msgs::msg::Pose &message)
+{
+  Eigen::Quaterniond quaternion(
+      message.orientation.w, message.orientation.x,
+      message.orientation.y, message.orientation.z);
+  if (!quaternion.coeffs().allFinite() || quaternion.norm() < 1.0e-9)
+    return Eigen::Isometry3d(Eigen::Matrix4d::Constant(
+        std::numeric_limits<double>::quiet_NaN()));
+  quaternion.normalize();
+  Eigen::Isometry3d pose = Eigen::Isometry3d::Identity();
+  pose.translation() = Eigen::Vector3d(
+      message.position.x, message.position.y, message.position.z);
+  pose.linear() = quaternion.toRotationMatrix();
+  return pose;
+}
+
+bool registeredFrameFromMessage(
+    const iap::msg::RegisteredLidarFrame &message,
+    const std::string &expected_planner_frame,
+    const std::string &expected_lidar_frame,
+    RegisteredLidarFrameData *frame)
+{
+  if (frame == nullptr)
+    return false;
+  double stamp_s = std::numeric_limits<double>::quiet_NaN();
+  double cloud_stamp_s = std::numeric_limits<double>::quiet_NaN();
+  if (message.header.frame_id != expected_planner_frame ||
+      message.deskewed_hits_lidar.header.frame_id != expected_lidar_frame ||
+      !sourceStampSeconds(message.header.stamp, &stamp_s) ||
+      !sourceStampSeconds(message.deskewed_hits_lidar.header.stamp,
+                          &cloud_stamp_s) ||
+      std::abs(stamp_s - cloud_stamp_s) > 1.0e-6 ||
+      !std::isfinite(message.scan_end_stamp_s) ||
+      message.scan_end_stamp_s + 1.0e-9 < stamp_s ||
+      message.sensor_receipt_steady_ns == 0U)
+    return false;
+  const auto has_xyz_field = [&message](const std::string &name)
+  {
+    return std::any_of(
+        message.deskewed_hits_lidar.fields.begin(),
+        message.deskewed_hits_lidar.fields.end(),
+        [&name](const sensor_msgs::msg::PointField &field)
+        {
+          return field.name == name && field.count == 1U &&
+              field.datatype == sensor_msgs::msg::PointField::FLOAT32;
+        });
+  };
+  if (!has_xyz_field("x") || !has_xyz_field("y") ||
+      !has_xyz_field("z"))
+    return false;
+  frame->frame_id = message.frame_id;
+  frame->stamp_s = stamp_s;
+  frame->scan_end_stamp_s = message.scan_end_stamp_s;
+  frame->sensor_receipt_steady_ns = message.sensor_receipt_steady_ns;
+  frame->T_map_lidar = poseFromMessage(message.t_map_lidar);
+  frame->frame_contract_id = message.frame_contract_id;
+  try
+  {
+    const std::size_t point_count =
+        static_cast<std::size_t>(message.deskewed_hits_lidar.width) *
+        static_cast<std::size_t>(message.deskewed_hits_lidar.height);
+    frame->hits_lidar.clear();
+    frame->hits_lidar.reserve(point_count);
+    sensor_msgs::PointCloud2ConstIterator<float> x(
+        message.deskewed_hits_lidar, "x");
+    sensor_msgs::PointCloud2ConstIterator<float> y(
+        message.deskewed_hits_lidar, "y");
+    sensor_msgs::PointCloud2ConstIterator<float> z(
+        message.deskewed_hits_lidar, "z");
+    for (std::size_t index = 0; index < point_count;
+         ++index, ++x, ++y, ++z)
+    {
+      const Eigen::Vector3d hit(*x, *y, *z);
+      if (!hit.allFinite())
+        return false;
+      frame->hits_lidar.push_back(hit);
+    }
+  }
+  catch (const std::exception &)
+  {
+    return false;
+  }
+  return frame->frame_id >= 0 &&
+      frame->T_map_lidar.matrix().allFinite();
 }
 
 }  // namespace
@@ -97,6 +185,21 @@ void GridMap::initMap(rclcpp::Node::SharedPtr node)
   node_->declare_parameter("grid_map/odom_depth_timeout", 1.0);
   node_->declare_parameter("grid_map/independent_cloud_min_interval_s", 0.0);
   node_->declare_parameter("grid_map/independent_cloud_clock_guard_s", 0.0);
+  node_->declare_parameter("grid_map/registered_lidar_window_enabled", false);
+  node_->declare_parameter(
+      "grid_map/registered_frame_contract_id", std::string(""));
+  node_->declare_parameter(
+      "grid_map/registered_current_topic",
+      std::string("/iap/local_map/current_frame"));
+  node_->declare_parameter(
+      "grid_map/registered_delta_topic",
+      std::string("/iap/local_map/window_delta"));
+  node_->declare_parameter(
+      "grid_map/registered_recovery_service",
+      std::string("/iap/local_map/get_active_window"));
+  node_->declare_parameter(
+      "grid_map/registered_lidar_reference_frame_id",
+      std::string("iap_lidar_reference"));
 
   node_->get_parameter("grid_map/resolution", mp_.resolution_);
   node_->get_parameter("grid_map/map_size_x", x_size);
@@ -146,6 +249,18 @@ void GridMap::initMap(rclcpp::Node::SharedPtr node)
                        mp_.independent_cloud_min_interval_s_);
   node_->get_parameter("grid_map/independent_cloud_clock_guard_s",
                        mp_.independent_cloud_clock_guard_s_);
+  node_->get_parameter("grid_map/registered_lidar_window_enabled",
+                       registered_lidar_window_enabled_);
+  node_->get_parameter("grid_map/registered_frame_contract_id",
+                       registered_frame_contract_id_);
+  node_->get_parameter("grid_map/registered_current_topic",
+                       registered_current_topic_);
+  node_->get_parameter("grid_map/registered_delta_topic",
+                       registered_delta_topic_);
+  node_->get_parameter("grid_map/registered_recovery_service",
+                       registered_recovery_service_);
+  node_->get_parameter("grid_map/registered_lidar_reference_frame_id",
+                       registered_lidar_reference_frame_id_);
   mp_.independent_cloud_min_interval_s_ =
       std::max(0.0, mp_.independent_cloud_min_interval_s_);
   mp_.independent_cloud_clock_guard_s_ =
@@ -205,6 +320,37 @@ void GridMap::initMap(rclcpp::Node::SharedPtr node)
 
   md_.raycast_num_ = 0;
 
+  if (registered_lidar_window_enabled_)
+  {
+    if (registered_frame_contract_id_.empty())
+      throw std::runtime_error(
+          "grid_map/registered_frame_contract_id must not be empty");
+    RegisteredLidarWindow::Geometry geometry;
+    geometry.origin = mp_.map_origin_;
+    geometry.dimensions = mp_.map_voxel_num_;
+    geometry.resolution_m = mp_.resolution_;
+    geometry.frame_contract_id = registered_frame_contract_id_;
+    registered_lidar_window_ =
+        std::make_unique<RegisteredLidarWindow>(std::move(geometry));
+    registered_inflation_dirty_bits_.assign(
+        (md_.occupancy_buffer_raw_cloud_.size() + 63U) / 64U, 0U);
+    registered_raw_inflation_count_.assign(
+        md_.occupancy_buffer_raw_cloud_.size(), 0U);
+    if (mp_.virtual_ceil_height_ > -0.5)
+    {
+      const int ceil_id = static_cast<int>(std::floor(
+          (mp_.virtual_ceil_height_ - mp_.map_origin_(2)) *
+          mp_.resolution_inv_)) - 1;
+      if (ceil_id >= 0 && ceil_id < mp_.map_voxel_num_(2))
+        for (int x = 0; x < mp_.map_voxel_num_(0); ++x)
+          for (int y = 0; y < mp_.map_voxel_num_(1); ++y)
+          {
+            int z = ceil_id;
+            md_.occupancy_buffer_inflate_[toAddress(x, y, z)] = 1;
+          }
+    }
+  }
+
   md_.proj_points_.resize(640 * 480 / mp_.skip_pixel_ / mp_.skip_pixel_);
   md_.proj_points_cnt = 0;
 
@@ -215,33 +361,38 @@ void GridMap::initMap(rclcpp::Node::SharedPtr node)
 
   /* init callback */
 
-  // 初始化 message_filters::Subscriber
-  depth_sub_ = std::make_shared<message_filters::Subscriber<sensor_msgs::msg::Image>>(
-      node_, "grid_map/depth", rclcpp::QoS(50).get_rmw_qos_profile());
-
-  extrinsic_sub_ = node_->create_subscription<nav_msgs::msg::Odometry>(
-      "/vins_estimator/extrinsic", 10,
-      std::bind(&GridMap::extrinsicCallback, this, std::placeholders::_1));
-
-  if (mp_.pose_type_ == POSE_STAMPED)
+  // The registered-window seam is the sole occupancy/evidence producer in
+  // GLIM mode.  Keeping the legacy depth synchronizer alive here would mix a
+  // second pose authority into the same FrozenOccupancyEpoch.
+  if (!registered_lidar_window_enabled_)
   {
-    pose_sub_ = std::make_shared<message_filters::Subscriber<geometry_msgs::msg::PoseStamped>>(
-        node_, "grid_map/pose", rclcpp::QoS(25).get_rmw_qos_profile());
+    depth_sub_ = std::make_shared<message_filters::Subscriber<sensor_msgs::msg::Image>>(
+        node_, "grid_map/depth", rclcpp::QoS(50).get_rmw_qos_profile());
 
-    sync_image_pose_ = std::make_shared<message_filters::Synchronizer<SyncPolicyImagePose>>(
-        SyncPolicyImagePose(100), *depth_sub_, *pose_sub_);
-    sync_image_pose_->registerCallback(
-        std::bind(&GridMap::depthPoseCallback, this, std::placeholders::_1, std::placeholders::_2));
-  }
-  else if (mp_.pose_type_ == ODOMETRY)
-  {
-    odom_sub_ = std::make_shared<message_filters::Subscriber<nav_msgs::msg::Odometry>>(
-        node_, "grid_map/odom", rclcpp::QoS(100).get_rmw_qos_profile());
+    extrinsic_sub_ = node_->create_subscription<nav_msgs::msg::Odometry>(
+        "/vins_estimator/extrinsic", 10,
+        std::bind(&GridMap::extrinsicCallback, this, std::placeholders::_1));
 
-    sync_image_odom_ = std::make_shared<message_filters::Synchronizer<SyncPolicyImageOdom>>(
-        SyncPolicyImageOdom(100), *depth_sub_, *odom_sub_);
-    sync_image_odom_->registerCallback(
-        std::bind(&GridMap::depthOdomCallback, this, std::placeholders::_1, std::placeholders::_2));
+    if (mp_.pose_type_ == POSE_STAMPED)
+    {
+      pose_sub_ = std::make_shared<message_filters::Subscriber<geometry_msgs::msg::PoseStamped>>(
+          node_, "grid_map/pose", rclcpp::QoS(25).get_rmw_qos_profile());
+
+      sync_image_pose_ = std::make_shared<message_filters::Synchronizer<SyncPolicyImagePose>>(
+          SyncPolicyImagePose(100), *depth_sub_, *pose_sub_);
+      sync_image_pose_->registerCallback(
+          std::bind(&GridMap::depthPoseCallback, this, std::placeholders::_1, std::placeholders::_2));
+    }
+    else if (mp_.pose_type_ == ODOMETRY)
+    {
+      odom_sub_ = std::make_shared<message_filters::Subscriber<nav_msgs::msg::Odometry>>(
+          node_, "grid_map/odom", rclcpp::QoS(100).get_rmw_qos_profile());
+
+      sync_image_odom_ = std::make_shared<message_filters::Synchronizer<SyncPolicyImageOdom>>(
+          SyncPolicyImageOdom(100), *depth_sub_, *odom_sub_);
+      sync_image_odom_->registerCallback(
+          std::bind(&GridMap::depthOdomCallback, this, std::placeholders::_1, std::placeholders::_2));
+    }
   }
 
   // Keep occupancy production independent from the planner FSM callback
@@ -260,18 +411,53 @@ void GridMap::initMap(rclcpp::Node::SharedPtr node)
   independent_odom_options.callback_group = independent_odom_callback_group_;
 
   // 使用独立的里程计和点云订阅
-  indep_cloud_sub_ = node_->create_subscription<sensor_msgs::msg::PointCloud2>(
-      "grid_map/cloud", rclcpp::SensorDataQoS().keep_last(1),
-      [this](const sensor_msgs::msg::PointCloud2::ConstPtr &message)
-      {
-        if (mp_.independent_cloud_min_interval_s_ > 0.0)
-          independentCloudInputCallback(message);
-        else
-          cloudCallback(message);
-      },
-      independent_cloud_options);
+  if (!registered_lidar_window_enabled_)
+  {
+    indep_cloud_sub_ = node_->create_subscription<sensor_msgs::msg::PointCloud2>(
+        "grid_map/cloud", rclcpp::SensorDataQoS().keep_last(1),
+        [this](const sensor_msgs::msg::PointCloud2::ConstPtr &message)
+        {
+          if (mp_.independent_cloud_min_interval_s_ > 0.0)
+            independentCloudInputCallback(message);
+          else
+            cloudCallback(message);
+        },
+        independent_cloud_options);
+  }
+  else
+  {
+    registered_current_sub_ =
+        node_->create_subscription<iap::msg::RegisteredLidarFrame>(
+            registered_current_topic_,
+            rclcpp::SensorDataQoS().keep_last(1),
+            std::bind(&GridMap::registeredCurrentFrameCallback, this,
+                      std::placeholders::_1),
+            independent_cloud_options);
+    registered_delta_sub_ =
+        node_->create_subscription<iap::msg::ActiveLidarWindowDelta>(
+            registered_delta_topic_, rclcpp::QoS(128).reliable(),
+            std::bind(&GridMap::registeredWindowDeltaCallback, this,
+                      std::placeholders::_1),
+            independent_cloud_options);
+    registered_recovery_client_ =
+        node_->create_client<iap::srv::GetActiveLidarWindow>(
+            registered_recovery_service_);
+    registered_recovery_pending_.store(true, std::memory_order_release);
+    registered_recovery_timer_ = node_->create_wall_timer(
+        std::chrono::milliseconds(250),
+        std::bind(&GridMap::maintainRegisteredWindowRecovery, this),
+        independent_cloud_callback_group_);
+    RCLCPP_INFO(
+        node_->get_logger(),
+        "[grid_map] registered LiDAR window enabled current=%s delta=%s "
+        "recovery=%s contract=%s",
+        registered_current_topic_.c_str(), registered_delta_topic_.c_str(),
+        registered_recovery_service_.c_str(),
+        registered_frame_contract_id_.c_str());
+  }
 
-  if (mp_.independent_cloud_min_interval_s_ > 0.0)
+  if (!registered_lidar_window_enabled_ &&
+      mp_.independent_cloud_min_interval_s_ > 0.0)
   {
     independent_cloud_timer_ = node_->create_wall_timer(
         std::chrono::duration<double>(
@@ -1046,6 +1232,511 @@ void GridMap::processLatestIndependentCloud()
     cloudCallback(cloud);
 }
 
+void GridMap::applyRegisteredLidarUpdate(
+    const RegisteredLidarWindowUpdate &update)
+{
+  if (!update.accepted || !registered_lidar_window_)
+    return;
+
+  beginOccupancyWriteTransaction();
+  const int inflation_xy =
+      static_cast<int>(std::ceil(mp_.obstacles_inflation_ / mp_.resolution_));
+  constexpr int inflation_z = 1;
+  std::vector<int> affected;
+  affected.reserve(update.changes.size());
+  std::vector<std::pair<Eigen::Vector3i, bool>> collision_changes;
+  collision_changes.reserve(update.changes.size());
+  const auto mark_affected = [this, &affected](const int address)
+  {
+    const auto unsigned_address = static_cast<std::size_t>(address);
+    auto &word = registered_inflation_dirty_bits_[unsigned_address >> 6U];
+    const uint64_t mask = uint64_t{1} << (unsigned_address & 63U);
+    if ((word & mask) == 0U)
+    {
+      word |= mask;
+      affected.push_back(address);
+    }
+  };
+  for (const auto &change : update.changes)
+  {
+    if (!isInMap(change.index))
+      continue;
+    const int changed_address = toAddress(change.index);
+    const bool was_occupied =
+        md_.occupancy_buffer_raw_cloud_[changed_address] != 0;
+    const bool becomes_occupied =
+        change.state == RegisteredVoxelState::OCCUPIED;
+    // Observed-free/unknown transitions are risk evidence only. They must not
+    // trigger the considerably more expensive collision-inflation update.
+    if (was_occupied == becomes_occupied)
+      continue;
+    collision_changes.emplace_back(change.index, becomes_occupied);
+    for (int x = -inflation_xy; x <= inflation_xy; ++x)
+      for (int y = -inflation_xy; y <= inflation_xy; ++y)
+        for (int z = -inflation_z; z <= inflation_z; ++z)
+        {
+          const Eigen::Vector3i index =
+              change.index + Eigen::Vector3i(x, y, z);
+          if (isInMap(index))
+            mark_affected(toAddress(index));
+        }
+  }
+  for (const int address : affected)
+    recordCollisionStateBeforeMutation(address);
+
+  Eigen::Vector3i minimum = Eigen::Vector3i::Zero();
+  Eigen::Vector3i maximum = Eigen::Vector3i::Zero();
+  bool have_changed_bounds = false;
+  for (const auto &change : update.changes)
+  {
+    if (!isInMap(change.index))
+      continue;
+    if (!have_changed_bounds)
+    {
+      minimum = change.index;
+      maximum = change.index;
+      have_changed_bounds = true;
+    }
+    else
+    {
+      minimum = minimum.cwiseMin(change.index);
+      maximum = maximum.cwiseMax(change.index);
+    }
+    const int address = toAddress(change.index);
+    md_.occupancy_buffer_raw_cloud_[address] =
+        change.state == RegisteredVoxelState::OCCUPIED ? 1 : 0;
+    md_.observed_buffer_[address] =
+        change.state == RegisteredVoxelState::UNKNOWN ? 0 : 1;
+  }
+
+  // Registered mode has a single hit-map producer, so maintain exact raw-hit
+  // inflation reference counts instead of rescanning every affected
+  // neighborhood. Fused depth occupancy is intentionally disabled in this
+  // mode by the input-seam contract.
+  for (const auto &[changed_index, becomes_occupied] : collision_changes)
+  {
+    for (int x = -inflation_xy; x <= inflation_xy; ++x)
+      for (int y = -inflation_xy; y <= inflation_xy; ++y)
+        for (int z = -inflation_z; z <= inflation_z; ++z)
+        {
+          const Eigen::Vector3i inflated_index =
+              changed_index + Eigen::Vector3i(x, y, z);
+          if (!isInMap(inflated_index))
+            continue;
+          auto &count = registered_raw_inflation_count_[
+              static_cast<std::size_t>(toAddress(inflated_index))];
+          if (becomes_occupied)
+          {
+            if (count < std::numeric_limits<uint16_t>::max())
+              ++count;
+          }
+          else if (count > 0U)
+            --count;
+        }
+  }
+  const int ceil_id = mp_.virtual_ceil_height_ > -0.5
+      ? static_cast<int>(std::floor(
+            (mp_.virtual_ceil_height_ - mp_.map_origin_(2)) *
+            mp_.resolution_inv_)) - 1
+      : -1;
+  const int yz = mp_.map_voxel_num_.y() * mp_.map_voxel_num_.z();
+  for (const int linear_address : affected)
+  {
+    const int z = yz > 0 ? linear_address % mp_.map_voxel_num_.z() : -1;
+    md_.occupancy_buffer_inflate_[linear_address] =
+        (z == ceil_id || registered_raw_inflation_count_[
+            static_cast<std::size_t>(linear_address)] > 0U) ? 1 : 0;
+  }
+  for (const int address : affected)
+  {
+    const auto unsigned_address = static_cast<std::size_t>(address);
+    registered_inflation_dirty_bits_[unsigned_address >> 6U] &=
+        ~(uint64_t{1} << (unsigned_address & 63U));
+  }
+
+  if (have_changed_bounds)
+  {
+    md_.local_bound_min_ =
+        (minimum - Eigen::Vector3i::Constant(inflation_xy)).cwiseMax(
+            Eigen::Vector3i::Zero());
+    md_.local_bound_max_ =
+        (maximum + Eigen::Vector3i::Constant(inflation_xy)).cwiseMin(
+            mp_.map_voxel_num_ - Eigen::Vector3i::Ones());
+  }
+  md_.has_cloud_ = true;
+  if (std::isfinite(update.stamp_s) && update.stamp_s > 0.0)
+    occupancy_cloud_stamp_s_.store(
+        update.stamp_s, std::memory_order_release);
+  commitOccupancyWriteTransaction(update.stamp_s);
+}
+
+void GridMap::registeredCurrentFrameCallback(
+    const iap::msg::RegisteredLidarFrame::ConstSharedPtr &message)
+{
+  const auto started = std::chrono::steady_clock::now();
+  if (!message || !registered_lidar_window_)
+    return;
+  RegisteredLidarFrameData frame;
+  if (!registeredFrameFromMessage(
+          *message, mp_.frame_id_, registered_lidar_reference_frame_id_,
+          &frame))
+  {
+    {
+      std::lock_guard<std::mutex> lock(occupancy_epoch_mutex_);
+      registered_current_frame_healthy_ = false;
+    }
+    RCLCPP_WARN(node_->get_logger(),
+                "[grid_map] rejected invalid registered current frame");
+    return;
+  }
+  const auto parsed = std::chrono::steady_clock::now();
+  std::lock_guard<std::mutex> lock(occupancy_epoch_mutex_);
+  md_.camera_pos_ = frame.T_map_lidar.translation();
+  md_.camera_r_m_ = frame.T_map_lidar.linear();
+  md_.has_odom_ = true;
+  const auto update = registered_lidar_window_->applyCurrentFrame(frame);
+  registered_current_frame_healthy_ = update.accepted;
+  const auto accumulated = std::chrono::steady_clock::now();
+  applyRegisteredLidarUpdate(update);
+  const auto applied = std::chrono::steady_clock::now();
+  const double elapsed_ms = std::chrono::duration<double, std::milli>(
+      applied - started).count();
+  registered_current_apply_latency_ms_.push_back(elapsed_ms);
+  const auto applied_steady_ns =
+      std::chrono::duration_cast<std::chrono::nanoseconds>(
+          applied.time_since_epoch()).count();
+  const double sensor_to_occupancy_ms =
+      static_cast<double>(
+          applied_steady_ns -
+          static_cast<int64_t>(frame.sensor_receipt_steady_ns)) * 1.0e-6;
+  if (std::isfinite(sensor_to_occupancy_ms) &&
+      sensor_to_occupancy_ms >= 0.0 && sensor_to_occupancy_ms < 10000.0)
+    registered_sensor_to_occupancy_latency_ms_.push_back(
+        sensor_to_occupancy_ms);
+  if (registered_current_apply_latency_ms_.size() >= 100U)
+  {
+    std::sort(registered_current_apply_latency_ms_.begin(),
+              registered_current_apply_latency_ms_.end());
+    const double p95 = registered_current_apply_latency_ms_[94];
+    const double maximum = registered_current_apply_latency_ms_.back();
+    RCLCPP_INFO(node_->get_logger(),
+                "[grid_map] registered current frame latency count=100 "
+                "p95_ms=%.3f max_ms=%.3f budget_ms=10.000",
+                p95, maximum);
+    registered_current_apply_latency_ms_.clear();
+  }
+  if (registered_sensor_to_occupancy_latency_ms_.size() >= 100U)
+  {
+    std::sort(registered_sensor_to_occupancy_latency_ms_.begin(),
+              registered_sensor_to_occupancy_latency_ms_.end());
+    RCLCPP_INFO(node_->get_logger(),
+                "[grid_map] sensor to occupancy latency count=100 "
+                "p95_ms=%.3f max_ms=%.3f budget_ms=80.000",
+                registered_sensor_to_occupancy_latency_ms_[94],
+                registered_sensor_to_occupancy_latency_ms_.back());
+    registered_sensor_to_occupancy_latency_ms_.clear();
+  }
+  if (elapsed_ms > 10.0)
+    RCLCPP_WARN_THROTTLE(
+        node_->get_logger(), *node_->get_clock(), 2000,
+        "[grid_map] registered current frame apply %.3f ms exceeds 10 ms budget "
+        "(decode=%.3f accumulate=%.3f grid=%.3f changes=%zu)",
+        elapsed_ms,
+        std::chrono::duration<double, std::milli>(parsed - started).count(),
+        std::chrono::duration<double, std::milli>(accumulated - parsed).count(),
+        std::chrono::duration<double, std::milli>(applied - accumulated).count(),
+        update.changes.size());
+}
+
+void GridMap::registeredWindowDeltaCallback(
+    const iap::msg::ActiveLidarWindowDelta::ConstSharedPtr &message)
+{
+  const auto started = std::chrono::steady_clock::now();
+  if (!message || !registered_lidar_window_)
+    return;
+  if (message->header.frame_id != mp_.frame_id_ ||
+      message->frame_contract_id != registered_frame_contract_id_ ||
+      message->generation != message->base_generation + 1U)
+  {
+    {
+      std::lock_guard<std::mutex> lock(occupancy_epoch_mutex_);
+      registered_active_window_healthy_ = false;
+    }
+    requestRegisteredWindowRecovery("invalid_delta_envelope");
+    return;
+  }
+  uint64_t highest = registered_highest_seen_generation_.load(
+      std::memory_order_acquire);
+  while (highest < message->generation &&
+         !registered_highest_seen_generation_.compare_exchange_weak(
+             highest, message->generation, std::memory_order_acq_rel,
+             std::memory_order_acquire))
+  {
+  }
+  if (!message->complete)
+  {
+    {
+      std::lock_guard<std::mutex> lock(occupancy_epoch_mutex_);
+      registered_active_window_healthy_ = false;
+    }
+    requestRegisteredWindowRecovery("producer_active_window_incomplete");
+    return;
+  }
+  ActiveLidarWindowDeltaData delta;
+  delta.frame_contract_id = message->frame_contract_id;
+  delta.base_generation = message->base_generation;
+  delta.generation = message->generation;
+  delta.complete = message->complete;
+  delta.removed_frame_ids = message->removed_frame_ids;
+  if (message->pose_updated_frame_ids.size() !=
+      message->updated_t_map_lidar.size())
+  {
+    requestRegisteredWindowRecovery("pose_update_size_mismatch");
+    return;
+  }
+  for (const auto &added : message->added)
+  {
+    RegisteredLidarFrameData frame;
+    if (!registeredFrameFromMessage(
+            added, mp_.frame_id_, registered_lidar_reference_frame_id_,
+            &frame))
+    {
+      requestRegisteredWindowRecovery("invalid_added_frame");
+      return;
+    }
+    delta.added.push_back(std::move(frame));
+  }
+  for (std::size_t i = 0; i < message->pose_updated_frame_ids.size(); ++i)
+    delta.pose_updates.emplace_back(
+        message->pose_updated_frame_ids[i],
+        poseFromMessage(message->updated_t_map_lidar[i]));
+
+  RegisteredLidarWindowUpdate update;
+  {
+    std::lock_guard<std::mutex> lock(occupancy_epoch_mutex_);
+    update = registered_lidar_window_->applyActiveDelta(delta);
+    if (update.accepted)
+    {
+      registered_active_window_healthy_ =
+          update.active_generation >=
+          registered_highest_seen_generation_.load(
+              std::memory_order_acquire);
+      registered_recovery_pending_.store(
+          !registered_active_window_healthy_, std::memory_order_release);
+      applyRegisteredLidarUpdate(update);
+    }
+    else if (update.recovery_required)
+    {
+      registered_active_window_healthy_ = false;
+      registered_recovery_pending_.store(true, std::memory_order_release);
+    }
+  }
+  if (!update.accepted && update.recovery_required)
+    requestRegisteredWindowRecovery(update.reason);
+  const double elapsed_ms = std::chrono::duration<double, std::milli>(
+      std::chrono::steady_clock::now() - started).count();
+  registered_delta_apply_latency_ms_.push_back(elapsed_ms);
+  if (registered_delta_apply_latency_ms_.size() >= 20U)
+  {
+    std::sort(registered_delta_apply_latency_ms_.begin(),
+              registered_delta_apply_latency_ms_.end());
+    const double p95 = registered_delta_apply_latency_ms_[18];
+    const double maximum = registered_delta_apply_latency_ms_.back();
+    RCLCPP_INFO(node_->get_logger(),
+                "[grid_map] registered keyframe delta latency count=20 "
+                "p95_ms=%.3f max_ms=%.3f budget_ms=40.000",
+                p95, maximum);
+    registered_delta_apply_latency_ms_.clear();
+  }
+  if (elapsed_ms > 40.0)
+    RCLCPP_WARN_THROTTLE(
+        node_->get_logger(), *node_->get_clock(), 2000,
+        "[grid_map] registered keyframe delta apply %.3f ms exceeds 40 ms budget",
+        elapsed_ms);
+}
+
+void GridMap::requestRegisteredWindowRecovery(const std::string &reason)
+{
+  {
+    std::lock_guard<std::mutex> lock(occupancy_epoch_mutex_);
+    registered_active_window_healthy_ = false;
+  }
+  registered_recovery_pending_.store(true, std::memory_order_release);
+  if (!registered_recovery_client_ ||
+      registered_recovery_in_flight_.exchange(true,
+                                               std::memory_order_acq_rel))
+    return;
+  if (!registered_recovery_client_->service_is_ready())
+  {
+    registered_recovery_in_flight_.store(false, std::memory_order_release);
+    RCLCPP_WARN(node_->get_logger(),
+                "[grid_map] active-window recovery unavailable after %s",
+                reason.c_str());
+    return;
+  }
+  uint64_t request_base_generation = 0;
+  {
+    std::lock_guard<std::mutex> lock(occupancy_epoch_mutex_);
+    request_base_generation = registered_lidar_window_
+        ? registered_lidar_window_->activeGeneration() : 0U;
+  }
+  const uint64_t request_serial =
+      registered_recovery_serial_.fetch_add(
+          1U, std::memory_order_acq_rel) + 1U;
+  const auto deadline = std::chrono::steady_clock::now() +
+      std::chrono::seconds(1);
+  registered_recovery_deadline_ns_.store(
+      std::chrono::duration_cast<std::chrono::nanoseconds>(
+          deadline.time_since_epoch()).count(),
+      std::memory_order_release);
+  auto request =
+      std::make_shared<iap::srv::GetActiveLidarWindow::Request>();
+  request->expected_frame_contract_id = registered_frame_contract_id_;
+  const std::weak_ptr<GridMap> weak_self = weak_from_this();
+  if (weak_self.expired())
+  {
+    registered_recovery_in_flight_.store(false, std::memory_order_release);
+    RCLCPP_ERROR(node_->get_logger(),
+                 "[grid_map] recovery requires shared GridMap ownership");
+    return;
+  }
+  try
+  {
+    registered_recovery_client_->async_send_request(
+      request,
+      [weak_self, reason, request_serial, request_base_generation](
+          rclcpp::Client<iap::srv::GetActiveLidarWindow>::SharedFuture future)
+      {
+        const auto self = weak_self.lock();
+        if (!self)
+          return;
+        if (request_serial != self->registered_recovery_serial_.load(
+                                  std::memory_order_acquire))
+          return;
+        iap::srv::GetActiveLidarWindow::Response::SharedPtr response;
+        try
+        {
+          response = future.get();
+        }
+        catch (const std::exception &error)
+        {
+          self->registered_recovery_in_flight_.store(
+              false, std::memory_order_release);
+          self->registered_recovery_pending_.store(
+              true, std::memory_order_release);
+          RCLCPP_WARN(self->node_->get_logger(),
+                      "[grid_map] active-window recovery aborted after %s: %s",
+                      reason.c_str(), error.what());
+          return;
+        }
+        RegisteredLidarWindowUpdate update;
+        bool committed_request_state = false;
+        if (response && response->complete &&
+            response->frame_contract_id ==
+                self->registered_frame_contract_id_)
+        {
+          std::vector<RegisteredLidarFrameData> frames;
+          bool valid = true;
+          frames.reserve(response->frames.size());
+          for (const auto &message : response->frames)
+          {
+            RegisteredLidarFrameData frame;
+            if (!registeredFrameFromMessage(
+                    message, self->mp_.frame_id_,
+                    self->registered_lidar_reference_frame_id_, &frame))
+            {
+              valid = false;
+              break;
+            }
+            frames.push_back(std::move(frame));
+          }
+          if (valid)
+          {
+            std::lock_guard<std::mutex> lock(self->occupancy_epoch_mutex_);
+            if (request_serial != self->registered_recovery_serial_.load(
+                                      std::memory_order_acquire))
+              return;
+            const uint64_t local_generation =
+                self->registered_lidar_window_->activeGeneration();
+            const uint64_t required_generation = std::max(
+                {request_base_generation, local_generation,
+                 self->registered_highest_seen_generation_.load(
+                     std::memory_order_acquire)});
+            if (response->generation >= required_generation)
+            {
+              update = self->registered_lidar_window_->replaceActiveWindow(
+                  response->generation, response->frame_contract_id, frames);
+              if (update.accepted)
+              {
+                self->registered_active_window_healthy_ = true;
+                self->applyRegisteredLidarUpdate(update);
+                // Commit health, pending and in-flight under the same state
+                // lock used by the delta callback. A fault arriving after
+                // this point will therefore set pending=true after us rather
+                // than being overwritten by a late success completion.
+                self->registered_recovery_pending_.store(
+                    false, std::memory_order_release);
+                self->registered_recovery_in_flight_.store(
+                    false, std::memory_order_release);
+                committed_request_state = true;
+              }
+            }
+            else
+              update.reason = "stale_recovery_generation";
+          }
+        }
+        if (!committed_request_state &&
+            request_serial == self->registered_recovery_serial_.load(
+                                  std::memory_order_acquire))
+        {
+          self->registered_recovery_in_flight_.store(
+              false, std::memory_order_release);
+          self->registered_recovery_pending_.store(
+              true, std::memory_order_release);
+        }
+        if (!update.accepted &&
+            request_serial == self->registered_recovery_serial_.load(
+                                  std::memory_order_acquire))
+          RCLCPP_ERROR(self->node_->get_logger(),
+                       "[grid_map] active-window recovery failed after %s",
+                       reason.c_str());
+      });
+  }
+  catch (const std::exception &error)
+  {
+    if (request_serial == registered_recovery_serial_.load(
+                              std::memory_order_acquire))
+      registered_recovery_in_flight_.store(false,
+                                            std::memory_order_release);
+    registered_recovery_pending_.store(true, std::memory_order_release);
+    RCLCPP_WARN(node_->get_logger(),
+                "[grid_map] active-window recovery request failed after %s: %s",
+                reason.c_str(), error.what());
+  }
+}
+
+void GridMap::maintainRegisteredWindowRecovery()
+{
+  if (!registered_lidar_window_enabled_)
+    return;
+  const auto now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+      std::chrono::steady_clock::now().time_since_epoch()).count();
+  if (registered_recovery_in_flight_.load(std::memory_order_acquire))
+  {
+    const auto deadline_ns = registered_recovery_deadline_ns_.load(
+        std::memory_order_acquire);
+    if (deadline_ns > 0 && now_ns < deadline_ns)
+      return;
+    registered_recovery_serial_.fetch_add(1U, std::memory_order_acq_rel);
+    registered_recovery_in_flight_.store(false, std::memory_order_release);
+    registered_recovery_pending_.store(true, std::memory_order_release);
+    RCLCPP_WARN(node_->get_logger(),
+                "[grid_map] active-window recovery timed out; retrying");
+  }
+  if (registered_recovery_pending_.load(std::memory_order_acquire))
+    requestRegisteredWindowRecovery("startup_or_retry");
+}
+
 void GridMap::cloudCallback(const sensor_msgs::msg::PointCloud2::ConstPtr &img)
 {
   double source_stamp_s = std::numeric_limits<double>::quiet_NaN();
@@ -1464,7 +2155,10 @@ OccupancyCollisionDeltaHistory GridMap::collisionDeltasSince(
       std::memory_order_acquire);
   out.latest_generation = sequence / 2u;
   if ((sequence & 1u) != 0u)
+  {
+    out.update_in_progress = true;
     return out;
+  }
   if (base_generation == 0u || base_generation > out.latest_generation)
     return out;
   if (base_generation == out.latest_generation)
@@ -1593,6 +2287,9 @@ GridMap::captureFrozenOccupancyEpoch() const
     std::string frame_id;
     double cloud_stamp_s = std::numeric_limits<double>::quiet_NaN();
     uint64_t generation = 0;
+    uint64_t active_window_generation = 0;
+    int64_t current_frame_id = -1;
+    std::string frame_contract_id;
     std::vector<double> fused;
     std::vector<char> inflated;
     std::vector<char> raw_cloud;
@@ -1607,6 +2304,9 @@ GridMap::captureFrozenOccupancyEpoch() const
     const double cloud_stamp_s = occupancy_cloud_stamp_s_.load(
         std::memory_order_acquire);
     if ((sequence & 1u) != 0u || sequence == 0u ||
+        (registered_lidar_window_enabled_ &&
+         (!registered_active_window_healthy_ ||
+          !registered_current_frame_healthy_)) ||
         !std::isfinite(cloud_stamp_s) || !mp_.map_origin_.allFinite() ||
         !std::isfinite(mp_.resolution_) || mp_.resolution_ <= 0.0 ||
         !std::isfinite(mp_.resolution_inv_) ||
@@ -1635,7 +2335,20 @@ GridMap::captureFrozenOccupancyEpoch() const
     buffers->frame_id = mp_.frame_id_;
     buffers->cloud_stamp_s = cloud_stamp_s;
     buffers->generation = sequence / 2u;
-    buffers->fused = md_.occupancy_buffer_;
+    if (registered_lidar_window_)
+    {
+      buffers->active_window_generation =
+          registered_lidar_window_->activeGeneration();
+      buffers->current_frame_id =
+          registered_lidar_window_->currentFrameId();
+      buffers->frame_contract_id = registered_frame_contract_id_;
+    }
+    // Registered-window mode has no depth/fused writer by contract. Avoid
+    // copying the 59 MiB log-odds layer while holding the occupancy mutex;
+    // that copy previously stalled the 10 Hz current-frame callback whenever
+    // P0 captured a snapshot.
+    if (!registered_lidar_window_enabled_)
+      buffers->fused = md_.occupancy_buffer_;
     buffers->inflated = md_.occupancy_buffer_inflate_;
     buffers->raw_cloud = md_.occupancy_buffer_raw_cloud_;
     buffers->observed = md_.observed_buffer_;
@@ -1655,7 +2368,7 @@ GridMap::captureFrozenOccupancyEpoch() const
                 static_cast<std::size_t>(buffers->map_voxel_num(2)) +
             static_cast<std::size_t>(z);
         const bool raw_cloud = buffers->raw_cloud[address] != 0;
-        const bool raw_fused =
+        const bool raw_fused = !buffers->fused.empty() &&
             buffers->fused[address] > buffers->min_occupancy_log;
         if (raw_cloud || raw_fused)
           centers->push_back(
@@ -1736,6 +2449,10 @@ GridMap::captureFrozenOccupancyEpoch() const
       frozen_buffers->map_voxel_num, frozen_buffers->resolution);
   epoch->cloud_stamp_s = frozen_buffers->cloud_stamp_s;
   epoch->generation = frozen_buffers->generation;
+  epoch->active_window_generation =
+      frozen_buffers->active_window_generation;
+  epoch->current_frame_id = frozen_buffers->current_frame_id;
+  epoch->frame_contract_id = frozen_buffers->frame_contract_id;
   return epoch;
 }
 

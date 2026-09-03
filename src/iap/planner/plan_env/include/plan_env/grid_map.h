@@ -20,6 +20,10 @@
 #include <unordered_map>
 #include <visualization_msgs/msg/marker.hpp>
 
+#include <iap/msg/active_lidar_window_delta.hpp>
+#include <iap/msg/registered_lidar_frame.hpp>
+#include <iap/srv/get_active_lidar_window.hpp>
+
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 #include <pcl_conversions/pcl_conversions.h>
@@ -30,6 +34,7 @@
 #include <message_filters/time_synchronizer.h>
 
 #include <plan_env/raycast.h>
+#include <plan_env/registered_lidar_window.h>
 
 #define logit(x) (log((x) / (1 - (x))))
 
@@ -108,9 +113,10 @@ struct MappingData
   std::vector<double> occupancy_buffer_;
   std::vector<char> occupancy_buffer_inflate_;
   std::vector<char> occupancy_buffer_raw_cloud_;
-  // Current-frame observed-space mask. A cell is set only by a sensor return
-  // or an explicit sensor ray traversal; absence of a point never proves free
-  // space and prior-frame evidence is not silently retained.
+  // Online observed-space mask. A cell is set only by a sensor return or an
+  // explicit successful-return ray traversal. In registered-window mode it
+  // combines the active-keyframe base with the replaceable current overlay;
+  // absence of a point never proves free space.
   std::vector<char> observed_buffer_;
 
   // camera position and pose data
@@ -206,6 +212,9 @@ struct FrozenOccupancyEpoch
   std::string geometry_id;
   double cloud_stamp_s = std::numeric_limits<double>::quiet_NaN();
   uint64_t generation = 0;
+  uint64_t active_window_generation = 0;
+  int64_t current_frame_id = -1;
+  std::string frame_contract_id;
 };
 
 struct OccupancyCollisionVoxelChange
@@ -229,11 +238,14 @@ struct OccupancyCollisionDeltaHistory
   uint64_t base_generation = 0;
   uint64_t latest_generation = 0;
   bool complete = false;
+  // A current sensor transaction is being committed. This is transient busy
+  // state, not a missing journal generation.
+  bool update_in_progress = false;
   std::string geometry_id;
   std::vector<std::shared_ptr<const OccupancyCollisionDelta>> deltas;
 };
 
-class GridMap
+class GridMap : public std::enable_shared_from_this<GridMap>
 {
 public:
   GridMap() {}
@@ -322,6 +334,14 @@ private:
   takeLatestIndependentCloudAtOrBefore(double clock_stamp_s);
   void processLatestIndependentCloud();
   void cloudCallback(const sensor_msgs::msg::PointCloud2::ConstPtr &img);
+  void registeredCurrentFrameCallback(
+      const iap::msg::RegisteredLidarFrame::ConstSharedPtr &message);
+  void registeredWindowDeltaCallback(
+      const iap::msg::ActiveLidarWindowDelta::ConstSharedPtr &message);
+  void requestRegisteredWindowRecovery(const std::string &reason);
+  void maintainRegisteredWindowRecovery();
+  void applyRegisteredLidarUpdate(
+      const RegisteredLidarWindowUpdate &update);
   void odomCallback(const nav_msgs::msg::Odometry::SharedPtr odom);
 
   // update occupancy by raycasting
@@ -367,6 +387,12 @@ private:
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr indep_cloud_sub_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr indep_odom_sub_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr extrinsic_sub_;
+  rclcpp::Subscription<iap::msg::RegisteredLidarFrame>::SharedPtr
+      registered_current_sub_;
+  rclcpp::Subscription<iap::msg::ActiveLidarWindowDelta>::SharedPtr
+      registered_delta_sub_;
+  rclcpp::Client<iap::srv::GetActiveLidarWindow>::SharedPtr
+      registered_recovery_client_;
   rclcpp::CallbackGroup::SharedPtr independent_cloud_callback_group_;
   rclcpp::CallbackGroup::SharedPtr independent_cloud_input_callback_group_;
   rclcpp::CallbackGroup::SharedPtr independent_odom_callback_group_;
@@ -377,6 +403,7 @@ private:
   rclcpp::TimerBase::SharedPtr occ_timer_;
   rclcpp::TimerBase::SharedPtr vis_timer_;
   rclcpp::TimerBase::SharedPtr independent_cloud_timer_;
+  rclcpp::TimerBase::SharedPtr registered_recovery_timer_;
 
   //
   uniform_real_distribution<double> rand_noise_;
@@ -400,6 +427,28 @@ private:
       collision_delta_history_;
   static constexpr std::size_t kCollisionDeltaHistoryCapacity = 128;
   double current_vehicle_clearance_radius_m_ = 0.0;
+  bool registered_lidar_window_enabled_ = false;
+  std::string registered_frame_contract_id_;
+  std::string registered_current_topic_;
+  std::string registered_delta_topic_;
+  std::string registered_recovery_service_;
+  std::unique_ptr<RegisteredLidarWindow> registered_lidar_window_;
+  std::atomic<bool> registered_recovery_in_flight_{false};
+  std::atomic<bool> registered_recovery_pending_{false};
+  std::atomic<uint64_t> registered_recovery_serial_{0};
+  std::atomic<uint64_t> registered_highest_seen_generation_{0};
+  std::atomic<int64_t> registered_recovery_deadline_ns_{0};
+  bool registered_active_window_healthy_ = false;
+  bool registered_current_frame_healthy_ = false;
+  std::string registered_lidar_reference_frame_id_ =
+      "iap_lidar_reference";
+  // Reused bitset for deduplicating inflation cells touched by registered
+  // hit transitions without allocating a large hash table at 10 Hz.
+  std::vector<uint64_t> registered_inflation_dirty_bits_;
+  std::vector<uint16_t> registered_raw_inflation_count_;
+  std::vector<double> registered_current_apply_latency_ms_;
+  std::vector<double> registered_sensor_to_occupancy_latency_ms_;
+  std::vector<double> registered_delta_apply_latency_ms_;
 };
 
 /* ============================== definition of inline function

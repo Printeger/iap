@@ -68,6 +68,18 @@ struct GridMapTestAccess {
     map->occupancy_update_sequence_.store(0, std::memory_order_release);
   }
 
+  static void configureRegisteredHealth(GridMap* map,
+                                        const bool active_healthy,
+                                        const bool current_healthy) {
+    configureDepthFusion(map);
+    std::lock_guard<std::mutex> lock(map->occupancy_epoch_mutex_);
+    map->registered_lidar_window_enabled_ = true;
+    map->registered_active_window_healthy_ = active_healthy;
+    map->registered_current_frame_healthy_ = current_healthy;
+    map->occupancy_cloud_stamp_s_.store(1.0, std::memory_order_release);
+    map->occupancy_update_sequence_.store(2U, std::memory_order_release);
+  }
+
   static sensor_msgs::msg::Image::SharedPtr depthImage(
       const int32_t stamp_s, const uint16_t depth_mm,
       const uint32_t stamp_ns = 0U) {
@@ -274,6 +286,17 @@ struct GridMapTestAccess {
   }
 };
 
+TEST(GridMapOccupancyEpochTest,
+     RegisteredWindowMustRecoverBeforePublishingFrozenEpoch) {
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureRegisteredHealth(map.get(), false, true);
+  EXPECT_EQ(map->captureFrozenOccupancyEpoch(), nullptr);
+  GridMapTestAccess::configureRegisteredHealth(map.get(), true, false);
+  EXPECT_EQ(map->captureFrozenOccupancyEpoch(), nullptr);
+  GridMapTestAccess::configureRegisteredHealth(map.get(), true, true);
+  EXPECT_NE(map->captureFrozenOccupancyEpoch(), nullptr);
+}
+
 namespace {
 
 bool containsCenter(const std::vector<Eigen::Vector3d>& centers,
@@ -403,11 +426,13 @@ TEST(GridMapOccupancyEpochTest,
   GridMapTestAccess::beginCollisionTransaction(&map);
   const auto in_progress = map.collisionDeltasSince(committed_generation);
   EXPECT_FALSE(in_progress.complete);
+  EXPECT_TRUE(in_progress.update_in_progress);
   EXPECT_EQ(in_progress.latest_generation, committed_generation);
 
   GridMapTestAccess::commitCollisionTransaction(&map, 10.1);
   const auto committed = map.collisionDeltasSince(committed_generation);
   EXPECT_TRUE(committed.complete);
+  EXPECT_FALSE(committed.update_in_progress);
   EXPECT_EQ(committed.latest_generation, committed_generation + 1u);
   ASSERT_EQ(committed.deltas.size(), 1u);
   EXPECT_TRUE(committed.deltas.front()->changes.empty());

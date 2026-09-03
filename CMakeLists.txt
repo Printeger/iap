@@ -374,13 +374,18 @@ if(DEFINED ENV{ROS_VERSION})
     ## Message generation (IAP-RQ-500: ROS2 msgs)
     find_package(rosidl_default_generators REQUIRED)
     find_package(std_msgs REQUIRED)
+    find_package(sensor_msgs REQUIRED)
+    find_package(geometry_msgs REQUIRED)
     rosidl_generate_interfaces(${PROJECT_NAME}_msgs
       "msg/IntegrityReport.msg"
       "msg/DynamicALResult.msg"
       "msg/TrunkLandmark.msg"
       "msg/MDPState.msg"
+      "msg/RegisteredLidarFrame.msg"
+      "msg/ActiveLidarWindowDelta.msg"
+      "srv/GetActiveLidarWindow.srv"
       LIBRARY_NAME ${PROJECT_NAME}
-      DEPENDENCIES std_msgs
+      DEPENDENCIES std_msgs sensor_msgs geometry_msgs
     )
 
     ## IAP-RQ-003: standalone dependencies (rviz_viewer + standard_viewer)
@@ -447,6 +452,20 @@ if(DEFINED ENV{ROS_VERSION})
     ament_target_dependencies(sim_extension rclcpp nav_msgs)
     list(APPEND iap_LIBRARIES sim_extension)
     install(TARGETS sim_extension DESTINATION lib)
+
+    ## GLIM active multi-scan adapter for EGO/P0 online evidence.
+    add_library(planner_local_map_extension SHARED
+      src/iap/local_map/planner_local_map_extension.cpp
+    )
+    target_include_directories(planner_local_map_extension PUBLIC
+      $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    )
+    target_link_libraries(
+      planner_local_map_extension iap "${iap_msgs_cpp_ts}")
+    ament_target_dependencies(
+      planner_local_map_extension rclcpp sensor_msgs geometry_msgs)
+    list(APPEND iap_LIBRARIES planner_local_map_extension)
+    install(TARGETS planner_local_map_extension DESTINATION lib)
 
     ## Demo8 truth ARAIM comparison extension
     add_library(demo8_truth_araim_extension SHARED

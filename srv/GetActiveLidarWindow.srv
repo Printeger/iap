@@ -1,0 +1,8 @@
+string expected_frame_contract_id
+---
+std_msgs/Header header
+string frame_contract_id
+uint64 generation
+bool complete
+RegisteredLidarFrame[] frames
+string reason

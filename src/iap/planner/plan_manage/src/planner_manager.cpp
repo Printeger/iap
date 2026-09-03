@@ -2440,6 +2440,11 @@ namespace ego_planner
         published_p4_checked_generation_ :
         published_p4_bound_occupancy_->generation;
     request.history = grid_map_->collisionDeltasSince(delta_base);
+    // The 10 Hz current-frame transaction may overlap this 50 ms watchdog.
+    // Keep executing the already-validated trajectory for this tick and retry
+    // after the transaction commits; a real journal gap still fails closed.
+    if (request.history.update_in_progress)
+      return std::nullopt;
     request.executable_path = std::move(remaining);
     request.vehicle_radius_m =
         published_p4_forward_decision_.vehicle_radius_m;

@@ -1200,6 +1200,16 @@ void P0RiskGridRuntime::refreshTimerCallback() {
       }
     }
   }
+  // The registered GLIM frame carries its optimized pose and can reach this
+  // executor just before the matching odometry/integrity DDS samples. Use the
+  // newest captured source stamp as the transaction clock; the normal
+  // per-source freshness gates below still reject an odometry or integrity
+  // anchor that is genuinely too old. This removes transport-order flicker
+  // without accepting a future-dated legacy occupancy source.
+  if (config_.online_mapping_mode && occupancy_epoch.has_value() &&
+      std::isfinite(occupancy_epoch->cloud_stamp_s)) {
+    now_s = std::max(now_s, occupancy_epoch->cloud_stamp_s);
+  }
   const std::string pre_build_failure = snapshotFailureReason(now_s);
   const InputReadiness refresh_input_readiness = inputReadiness(now_s);
   const iap::RiskGridHealth active_health_at_start =

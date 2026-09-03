@@ -1055,6 +1055,9 @@ DENSE_FOUR_FORK_FOREST_ONLINE_PRESET = {
     "grid_map/local_update_range_y": "9.0",
     "grid_map/local_update_range_z": "4.5",
     "planner_occupancy_cloud_topic": "/sim/drone_0/lidar",
+    "planner_frame_mode": "glim_world",
+    "planner_local_map_enable": "true",
+    "allow_truth_alignment": "false",
     "p0.online_mapping_mode": "true",
     "p0.fit_grid_to_map_cloud": "false",
     "p0.map_topic": "",
@@ -1800,6 +1803,13 @@ ARG_DEFAULTS = [
     ("run_duration_s", "90"),
     ("validation_duration_s", "85"),
     ("allow_truth_alignment", "true"),
+    ("planner_frame_mode", "legacy_truth_aligned"),
+    ("planner_local_map_enable", "false"),
+    ("planner_local_map_current_topic", "/iap/local_map/current_frame"),
+    ("planner_local_map_current_hits_map_topic", "/iap/local_map/current_hits_map"),
+    ("planner_local_map_delta_topic", "/iap/local_map/window_delta"),
+    ("planner_local_map_recovery_service", "/iap/local_map/get_active_window"),
+    ("planner_local_map_window_rate_hz", "2.0"),
     ("odometry_acc_scale", "1.0"),
     ("planner_executor_thread_count", "4"),
     ("planner_start_delay_s", "0.0"),
@@ -2445,6 +2455,12 @@ def _validate_online_truth_isolation(context, scenario):
         "p0.map_topic": LaunchConfiguration("p0.map_topic").perform(context),
         "planner_occupancy_cloud_topic": LaunchConfiguration(
             "planner_occupancy_cloud_topic").perform(context),
+        "planner_local_map_current_topic": LaunchConfiguration(
+            "planner_local_map_current_topic").perform(context),
+        "planner_local_map_current_hits_map_topic": LaunchConfiguration(
+            "planner_local_map_current_hits_map_topic").perform(context),
+        "planner_local_map_delta_topic": LaunchConfiguration(
+            "planner_local_map_delta_topic").perform(context),
     }
     for binding, raw_topic in planner_topics.items():
         topic = str(raw_topic).strip()
@@ -2457,6 +2473,50 @@ def _validate_online_truth_isolation(context, scenario):
         raise RuntimeError(
             f"online scenario '{scenario}' cannot fit RiskMap to a map cloud"
         )
+    if scenario == "icra_dense_forest_four_fork_v2":
+        if not _param_bool(context, "planner_local_map_enable"):
+            raise RuntimeError(
+                "forest v2 requires the GLIM planner local-map interface"
+            )
+        if LaunchConfiguration("planner_frame_mode").perform(context) != "glim_world":
+            raise RuntimeError(
+                "forest v2 requires planner_frame_mode=glim_world"
+            )
+        if _param_bool(context, "allow_truth_alignment"):
+            raise RuntimeError(
+                "forest v2 forbids runtime truth odometry alignment"
+            )
+
+
+def _planner_local_map_contract(context):
+    """Return the canonical immutable planner/GLIM frame contract."""
+    payload = {
+        "schema": "planner_local_map_frame_contract_v1",
+        "mode": LaunchConfiguration("planner_frame_mode").perform(context).strip(),
+        "planner_frame": "map",
+        "static_planner_from_glim_translation_m": [
+            _param_float(context, "init_x"),
+            _param_float(context, "init_y"),
+            _param_float(context, "init_z"),
+        ],
+        "ego_resolution_m": _param_float(context, "grid_map/resolution"),
+        "geofence_origin_m": [
+            _param_float(context, "grid_map/origin_x"),
+            _param_float(context, "grid_map/origin_y"),
+            _param_float(context, "grid_map/origin_z"),
+        ],
+        "geofence_extent_m": [
+            _param_float(context, "map_size_x"),
+            _param_float(context, "map_size_y"),
+            _param_float(context, "map_size_z"),
+        ],
+    }
+    contract_id = "sha256:" + hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode(
+            "utf-8"
+        )
+    ).hexdigest()
+    return payload, contract_id
 
 
 def _generated_gnss_scenario(name):
@@ -2708,12 +2768,47 @@ def _runtime_config(context, use_gnss, use_araim, allow_truth_alignment):
         modules.insert(0, "libgnss_extension.so")
     if use_araim:
         modules.insert(1 if use_gnss else 0, "libintegrity_extension.so")
+    planner_local_map_enable = _param_bool(
+        context, "planner_local_map_enable")
+    planner_frame_mode = LaunchConfiguration(
+        "planner_frame_mode").perform(context).strip()
+    if planner_local_map_enable:
+        modules.append("libplanner_local_map_extension.so")
+    frame_contract_payload, frame_contract_id = (
+        _planner_local_map_contract(context)
+    )
+    init_xyz = frame_contract_payload[
+        "static_planner_from_glim_translation_m"
+    ]
     config_ros["glim_ros"]["extension_modules"] = modules
     config_ros["glim_ros"]["imu_topic"] = "/sim/drone_0/imu_iap"
     config_ros["glim_ros"]["acc_scale"] = odometry_acc_scale
     config_ros["glim_ros"]["points_topic"] = "/sim/drone_0/lidar_body"
     config_ros["glim_ros"]["dump_path"] = str(runtime_root / "dump")
     config_ros["glim_ros"]["sim"]["align_planner_odom_to_truth"] = allow_truth_alignment
+    config_ros["glim_ros"]["sim"]["static_planner_alignment_enabled"] = bool(
+        planner_frame_mode == "glim_world")
+    config_ros["glim_ros"]["sim"]["static_planner_translation_m"] = init_xyz
+    if planner_local_map_enable:
+        config_ros["glim_ros"]["planner_local_map"] = {
+            "current_topic": LaunchConfiguration(
+                "planner_local_map_current_topic").perform(context),
+            "current_hits_map_topic": LaunchConfiguration(
+                "planner_local_map_current_hits_map_topic").perform(context),
+            "publish_current_hits_map": _param_bool(context, "start_rviz"),
+            "delta_topic": LaunchConfiguration(
+                "planner_local_map_delta_topic").perform(context),
+            "recovery_service": LaunchConfiguration(
+                "planner_local_map_recovery_service").perform(context),
+            "planner_frame_id": "map",
+            "lidar_reference_frame_id": "iap_lidar_reference",
+            "frame_contract_id": frame_contract_id,
+            "window_rate_hz": _param_float(
+                context, "planner_local_map_window_rate_hz"),
+            "max_active_keyframes": 15,
+            "static_planner_translation_m": init_xyz,
+        }
+        config_ros["glim_ros"]["sim"]["enable_metrics_csv"] = False
     config_ros["glim_ros"]["sim"]["metrics_csv_path"] = str(export_dir / "iap_sim_truth_vs_est.csv")
     with config_ros_path.open("w") as f:
         json.dump(config_ros, f, indent=2)
@@ -2939,6 +3034,9 @@ def _ego_planner_node(context, drone_id, planner_odom_topic, cloud_topic, camera
     p5_6_fixture_effective_enabled = _p5_6_fixture_effective_enabled(context)
     p5_7_fixture_requested = _param_bool(context, "p5_7.fixture.enabled")
     p5_7_fixture_effective_enabled = _p5_7_fixture_effective_enabled(context, p5_final)
+    planner_local_map_enable = _param_bool(
+        context, "planner_local_map_enable")
+    _, planner_local_map_contract_id = _planner_local_map_contract(context)
 
     p1_debug_path = LaunchConfiguration("p1.debug_csv_path").perform(context)
     if not p1_debug_path:
@@ -3055,6 +3153,18 @@ def _ego_planner_node(context, drone_id, planner_odom_topic, cloud_topic, camera
             {"grid_map/show_occ_time": False},
             {"grid_map/pose_type": 1},
             {"grid_map/frame_id": "map"},
+            {"grid_map/registered_lidar_window_enabled":
+                planner_local_map_enable},
+            {"grid_map/registered_frame_contract_id":
+                planner_local_map_contract_id},
+            {"grid_map/registered_current_topic": LaunchConfiguration(
+                "planner_local_map_current_topic").perform(context)},
+            {"grid_map/registered_delta_topic": LaunchConfiguration(
+                "planner_local_map_delta_topic").perform(context)},
+            {"grid_map/registered_recovery_service": LaunchConfiguration(
+                "planner_local_map_recovery_service").perform(context)},
+            {"grid_map/registered_lidar_reference_frame_id":
+                "iap_lidar_reference"},
             {"p0.enable_risk_grid": p0_enabled},
             {"p0.online_mapping_mode": _param_bool(
                 context, "p0.online_mapping_mode")},
@@ -3453,7 +3563,16 @@ def _launch_setup(context):
 
     truth_odom_topic = "/sim/drone_0/truth_odom"
     iap_odom_topic = "/drone_0_visual_slam/odom"
-    planner_odom_topic = truth_odom_topic
+    planner_frame_mode = LaunchConfiguration(
+        "planner_frame_mode").perform(context).strip()
+    planner_local_map_enable = _param_bool(context, "planner_local_map_enable")
+    simulator_world_frame = (
+        "sim_world" if planner_local_map_enable else "map"
+    )
+    planner_odom_topic = (
+        iap_odom_topic if planner_frame_mode == "glim_world"
+        else truth_odom_topic
+    )
     sim_imu_topic = "/sim/drone_0/imu"
     iap_imu_topic = "/sim/drone_0/imu_iap"
     so3_feedback_imu_topic = _so3_feedback_imu_topic(
@@ -3906,6 +4025,9 @@ def _launch_setup(context):
 
     lidar_renderer_mode = LaunchConfiguration(
         "lidar_renderer_mode").perform(context)
+    planner_local_map_contract, planner_local_map_contract_id = (
+        _planner_local_map_contract(context)
+    )
     manifest = {
         "artifact_provenance": evidence,
         "experiment": experiment,
@@ -3953,6 +4075,30 @@ def _launch_setup(context):
             context, "grid_map/independent_cloud_min_interval_s"),
         "planner_occupancy_clock_guard_s": _param_float(
             context, "grid_map/independent_cloud_clock_guard_s"),
+        "planner_local_map": {
+            "enabled": _param_bool(context, "planner_local_map_enable"),
+            "planner_frame_mode": planner_frame_mode,
+            "planner_odom_topic": planner_odom_topic,
+            "runtime_truth_alignment_enabled": allow_truth_alignment,
+            "simulator_world_frame": simulator_world_frame,
+            "current_topic": LaunchConfiguration(
+                "planner_local_map_current_topic").perform(context),
+            "current_hits_map_topic": LaunchConfiguration(
+                "planner_local_map_current_hits_map_topic").perform(context),
+            "current_hits_map_enabled": start_rviz,
+            "delta_topic": LaunchConfiguration(
+                "planner_local_map_delta_topic").perform(context),
+            "recovery_service": LaunchConfiguration(
+                "planner_local_map_recovery_service").perform(context),
+            "window_rate_hz": _param_float(
+                context, "planner_local_map_window_rate_hz"),
+            "frame_contract_id": planner_local_map_contract_id,
+            "frame_contract": planner_local_map_contract,
+            "current_queue_policy": "latest_wins",
+            "active_window_limit": 15,
+            "geometry_source": "glim_registered_first_hit_lidar",
+            "risk_evidence_source": "successful_return_rays",
+        },
         "manager/max_vel": _param_float(context, "manager/max_vel"),
         "manager/planning_horizon": _param_float(context, "manager/planning_horizon"),
         "manager/p1_collision_fanout_clearance_m": _param_float(
@@ -4431,6 +4577,21 @@ def _launch_setup(context):
         LogInfo(msg=f"[test_planner] GNSS scenario: {gnss_scenario_file}"),
         LogInfo(msg=f"[test_planner] rosbag output: {bag_output_dir}"),
     ]
+    if planner_local_map_enable:
+        # The truth cloud gets an explicit simulator-only frame. This identity
+        # transform is for sensor simulation and RViz; planner nodes consume
+        # registered GLIM data in `map`, never the truth topic.
+        actions.append(Node(
+            package="tf2_ros",
+            executable="static_transform_publisher",
+            name="test_planner_sim_world_tf",
+            arguments=[
+                "--x", "0", "--y", "0", "--z", "0",
+                "--roll", "0", "--pitch", "0", "--yaw", "0",
+                "--frame-id", "map", "--child-frame-id", "sim_world",
+            ],
+            output="screen",
+        ))
     if p0_conflict:
         actions.append(LogInfo(msg="[test_planner] WARNING: safety feature enabled but p0.enable_risk_grid:=false was explicit; fallback paths will be used"))
 
@@ -4443,7 +4604,7 @@ def _launch_setup(context):
             parameters=[
                 {"resolution_m": _param_float(context, "corridor_map_resolution_m")},
                 {"publish_rate_hz": _param_float(context, "corridor_map_publish_rate_hz")},
-                {"frame_id": "map"},
+                {"frame_id": simulator_world_frame},
                 {"stamp_authority_topic": LaunchConfiguration(
                     "corridor_map_stamp_authority_topic").perform(context)},
                 {"forest_size_x_m": _param_float(context, "forest_size_x_m")},

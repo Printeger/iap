@@ -28,6 +28,19 @@ find_package(Eigen3 REQUIRED)
 find_package(PCL REQUIRED)
 find_package(pcl_conversions REQUIRED)
 
+# The parent iap package has a custom non-ament config which does not import
+# its generated ROS interface targets. Resolve the installed interface seam
+# explicitly until that upstream packaging boundary is unified.
+find_library(IAP_MSGS_TYPESUPPORT_CPP
+  NAMES iap__rosidl_typesupport_cpp
+  REQUIRED
+)
+find_path(IAP_MSGS_INCLUDE_DIR
+  NAMES iap/msg/registered_lidar_frame.hpp
+  PATH_SUFFIXES include/iap
+  REQUIRED
+)
+
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   find_package(ament_cmake_gtest REQUIRED)
@@ -44,37 +57,51 @@ if(BUILD_TESTING)
     test/test_grid_map_occupancy_epoch.cpp
   )
   target_link_libraries(test_grid_map_occupancy_epoch plan_env)
+
+  ament_add_gtest(test_registered_lidar_window
+    test/test_registered_lidar_window.cpp
+  )
+  target_link_libraries(test_registered_lidar_window plan_env)
 endif()
 
-include_directories( 
-    SYSTEM 
-    include 
-    ${Eigen3_INCLUDE_DIRS} 
+include_directories(
+    SYSTEM
+    include
+    ${Eigen3_INCLUDE_DIRS}
     ${PCL_INCLUDE_DIRS}
     ${OpenCV_INCLUDE_DIRS}
+    ${IAP_MSGS_INCLUDE_DIR}
 )
 
 link_directories(${PCL_LIBRARY_DIRS})
 
 ament_export_include_directories(include)
 
-add_library( plan_env SHARED
-    src/grid_map.cpp 
-    src/raycast.cpp
-    src/obj_predictor.cpp 
-    )
+add_library(plan_env SHARED
+  src/grid_map.cpp
+  src/registered_lidar_window.cpp
+  src/raycast.cpp
+  src/obj_predictor.cpp
+)
 
-ament_target_dependencies(plan_env std_msgs visualization_msgs geometry_msgs nav_msgs rclcpp Eigen3 PCL cv_bridge message_filters pcl_conversions)
+ament_target_dependencies(plan_env
+  std_msgs visualization_msgs geometry_msgs nav_msgs rclcpp Eigen3 PCL
+  cv_bridge message_filters pcl_conversions
+)
 
-target_link_libraries( plan_env 
+target_link_libraries(plan_env
+  ${IAP_MSGS_TYPESUPPORT_CPP}
   ${PCL_LIBRARIES}
   ${OpenCV_LIBS}
-)  
+)
 
 add_executable(obj_generator
-    src/obj_generator.cpp 
+    src/obj_generator.cpp
 )
-ament_target_dependencies(obj_generator std_msgs visualization_msgs geometry_msgs nav_msgs rclcpp Eigen3 PCL cv_bridge message_filters pcl_conversions)
+ament_target_dependencies(obj_generator
+  std_msgs visualization_msgs geometry_msgs nav_msgs rclcpp Eigen3 PCL
+  cv_bridge message_filters pcl_conversions
+)
 
 install(TARGETS plan_env
         DESTINATION lib

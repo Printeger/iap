@@ -3,6 +3,32 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(glim-planner-local-map): IAP-RQ-312 / IAP-RQ-320 / IAP-RQ-400 — add a
+  thin `PlannerLocalMapExtension` over GLIM's registered current frame and
+  active keyframe callbacks. It preserves immutable raw first-hit returns,
+  deskews them off the odometry callback, publishes a best-effort latest frame
+  plus reliable 2 Hz add/remove/pose-update deltas, and exposes a complete
+  active-window recovery service. EGO now consumes these through the deep
+  `RegisteredLidarWindow` seam: active evidence is reference-counted, the
+  current overlay is replaceable, successful-return rays establish observed
+  free space, hits win over free, and delta gaps or contract changes fail
+  closed before mutation. One `FrozenOccupancyEpoch` binds the resulting map,
+  current frame, active-window generation, and frame contract for P0/P4. The
+  producer preserves ordered complete/incomplete transitions and only permits
+  recovery after a later successful full-window capture; marginalization can
+  no longer heal a failed capture from stale state. The
+  forest-v2 profile uses IAP/GLIM odometry and a public mission-start static
+  transform instead of runtime truth alignment; the simulator cloud is marked
+  `sim_world`, and launch/runner artifacts record the contract, rates,
+  bandwidth, displacement, owned-process CPU/RSS and truth-subscription audit.
+  The raw scan handoff cache is bounded while active frames retain their own
+  immutable scan reference. Current-frame evidence changes no longer trigger
+  collision inflation unless hit occupancy changed, and a collision watchdog
+  overlapping an in-progress sensor transaction retries on the next 50 ms tick
+  without misreporting a journal gap. Legacy scenarios retain their prior
+  cloud and truth-alignment behavior. See
+  `docs/icra27/ICRA_GLIM_PLANNER_LOCAL_MAP.md`.
+
 - fix(p4-local-satellite-sets-v5): IAP-RQ-312 / IAP-RQ-314 /
   IAP-RQ-320 / IAP-RQ-400 — remove the batch-wide satellite intersection from
   ForwardRisk. Every route sample now derives its own online-known usable set

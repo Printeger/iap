@@ -1,0 +1,9 @@
+std_msgs/Header header
+string frame_contract_id
+uint64 base_generation
+uint64 generation
+bool complete
+RegisteredLidarFrame[] added
+int64[] removed_frame_ids
+int64[] pose_updated_frame_ids
+geometry_msgs/Pose[] updated_t_map_lidar

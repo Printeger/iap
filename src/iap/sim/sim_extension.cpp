@@ -10,6 +10,7 @@
 
 #include <Eigen/Geometry>
 
+#include <algorithm>
 #include <cmath>
 #include <deque>
 #include <filesystem>
@@ -19,6 +20,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace iap {
 
@@ -118,6 +120,23 @@ public:
         {"glim_ros", "sim"}, "planner_body_frame_id", "imu");
     align_planner_odom_to_truth_ = config.param_nested<bool>(
         {"glim_ros", "sim"}, "align_planner_odom_to_truth", true);
+    static_planner_alignment_enabled_ = config.param_nested<bool>(
+        {"glim_ros", "sim"}, "static_planner_alignment_enabled", false);
+    const auto static_translation = config.param_nested<std::vector<double>>(
+        {"glim_ros", "sim"}, "static_planner_translation_m",
+        std::vector<double>{0.0, 0.0, 0.0});
+    if (static_translation.size() != 3 ||
+        !std::all_of(static_translation.begin(), static_translation.end(),
+                     [](const double value) { return std::isfinite(value); })) {
+      throw std::runtime_error(
+          "sim.static_planner_translation_m must contain three finite values");
+    }
+    if (align_planner_odom_to_truth_ && static_planner_alignment_enabled_) {
+      throw std::runtime_error(
+          "dynamic truth alignment and static planner alignment are mutually exclusive");
+    }
+    T_planner_glim_.translation() = Eigen::Vector3d(
+        static_translation[0], static_translation[1], static_translation[2]);
     alignment_max_time_diff_ = config.param_nested<double>(
         {"glim_ros", "sim"}, "alignment_max_time_diff", 0.05);
     truth_cache_duration_ = config.param_nested<double>(
@@ -137,9 +156,13 @@ public:
         });
 
     logger_->info(
-        "[sim_ext] truth_odom_topic={} planner_odom_topic={} align_to_truth={} alignment_max_dt={:.3f}s metrics_csv={}",
+        "[sim_ext] truth_odom_topic={} planner_odom_topic={} align_to_truth={} static_alignment={} static_translation=[{:.3f},{:.3f},{:.3f}] alignment_max_dt={:.3f}s metrics_csv={}",
         truth_odom_topic_, planner_odom_topic_,
         align_planner_odom_to_truth_ ? "true" : "false",
+        static_planner_alignment_enabled_ ? "true" : "false",
+        T_planner_glim_.translation().x(),
+        T_planner_glim_.translation().y(),
+        T_planner_glim_.translation().z(),
         alignment_max_time_diff_,
         enable_metrics_csv_ ? metrics_csv_path_ : std::string("disabled"));
   }
@@ -150,11 +173,13 @@ public:
         planner_odom_topic_, rclcpp::QoS(20));
 
     std::vector<glim::GenericTopicSubscription::Ptr> subs;
-    subs.push_back(std::make_shared<glim::TopicSubscription<nav_msgs::msg::Odometry>>(
-        truth_odom_topic_,
-        [this](const std::shared_ptr<const nav_msgs::msg::Odometry>& msg) {
-          on_truth_odom_(msg);
-        }));
+    if (align_planner_odom_to_truth_ || enable_metrics_csv_) {
+      subs.push_back(std::make_shared<glim::TopicSubscription<nav_msgs::msg::Odometry>>(
+          truth_odom_topic_,
+          [this](const std::shared_ptr<const nav_msgs::msg::Odometry>& msg) {
+            on_truth_odom_(msg);
+          }));
+    }
 
     logger_->info("[sim_ext] subscriptions created");
     return subs;
@@ -234,6 +259,10 @@ private:
           T_est = T_truth_est_ * T_est;
           v_est = T_truth_est_.linear() * v_est;
         }
+      }
+      else if (static_planner_alignment_enabled_) {
+        T_est = T_planner_glim_ * T_est;
+        v_est = T_planner_glim_.linear() * v_est;
       }
 
       if (!publish_odom) {
@@ -327,6 +356,7 @@ private:
   std::string planner_odom_frame_id_;
   std::string planner_body_frame_id_;
   bool align_planner_odom_to_truth_ = true;
+  bool static_planner_alignment_enabled_ = false;
   double alignment_max_time_diff_ = 0.05;
   double truth_cache_duration_ = 2.0;
   bool enable_metrics_csv_ = true;
@@ -338,6 +368,7 @@ private:
   bool alignment_initialized_ = false;
   std::size_t alignment_miss_count_ = 0;
   Eigen::Isometry3d T_truth_est_ = Eigen::Isometry3d::Identity();
+  Eigen::Isometry3d T_planner_glim_ = Eigen::Isometry3d::Identity();
   nav_msgs::msg::Odometry latest_truth_;
   nav_msgs::msg::Odometry latest_estimate_;
   std::deque<nav_msgs::msg::Odometry> truth_cache_;

@@ -118,6 +118,103 @@ def lineage_for(decision, trajectory_id, start_ns):
 
 
 class TestStageContracts(unittest.TestCase):
+    def test_process_group_resource_stats_reports_peak_and_cpu_cores(self):
+        stats = MODULE.process_group_resource_stats([
+            {"elapsed_s": 0.0, "process_count": 2,
+             "rss_bytes": 100 * 1024 * 1024, "cpu_seconds": 1.0},
+            {"elapsed_s": 5.0, "process_count": 4,
+             "rss_bytes": 160 * 1024 * 1024, "cpu_seconds": 6.0},
+            {"elapsed_s": 10.0, "process_count": 3,
+             "rss_bytes": 140 * 1024 * 1024, "cpu_seconds": 8.5},
+        ])
+        self.assertEqual(stats["sample_count"], 3)
+        self.assertEqual(stats["peak_process_count"], 4)
+        self.assertAlmostEqual(stats["peak_rss_mib"], 160.0)
+        self.assertAlmostEqual(stats["mean_cpu_cores"], 0.75)
+        self.assertAlmostEqual(stats["peak_cpu_cores"], 1.0)
+
+    def test_planner_local_map_runtime_stats_tracks_rate_bandwidth_and_delta_chain(self):
+        records = [
+            {"kind": "planner_local_map_current", "receive_steady_s": 1.0,
+             "payload": {"payload_bytes": 120,
+                         "position_m": [0.0, 0.0, 0.0]}},
+            {"kind": "planner_local_map_current", "receive_steady_s": 1.1,
+             "payload": {"payload_bytes": 120,
+                         "position_m": [3.0, 4.0, 0.0]}},
+            {"kind": "planner_local_map_delta", "receive_steady_s": 1.0,
+             "payload": {"base_generation": 0, "generation": 1,
+                         "complete": True, "active_frame_count": 1,
+                         "added_payload_bytes": 120,
+                         "frame_contract_id": "sha256:a"}},
+            {"kind": "planner_local_map_delta", "receive_steady_s": 1.5,
+             "payload": {"base_generation": 1, "generation": 2,
+                         "complete": True, "active_frame_count": 2,
+                         "added_payload_bytes": 240,
+                         "frame_contract_id": "sha256:a"}},
+        ]
+        stats = MODULE.planner_local_map_runtime_stats(records)
+        self.assertAlmostEqual(stats["current_rate_hz"], 10.0)
+        self.assertAlmostEqual(stats["window_delta_rate_hz"], 2.0)
+        self.assertGreater(stats["total_xyz_payload_mib_s"], 0.0)
+        self.assertEqual(stats["max_active_frame_count"], 2)
+        self.assertEqual(stats["frame_contract_ids"], ["sha256:a"])
+        self.assertTrue(stats["generation_contiguous"])
+        self.assertEqual(stats["first_position_m"], [0.0, 0.0, 0.0])
+        self.assertEqual(stats["last_position_m"], [3.0, 4.0, 0.0])
+        self.assertAlmostEqual(stats["displacement_m"], 5.0)
+
+    def test_planner_local_map_latency_stats_extracts_component_windows(self):
+        stats = MODULE.planner_local_map_latency_stats("\n".join([
+            "GLIM callback snapshot latency count=100 p95_ms=0.12 "
+            "max_ms=0.18 budget_ms=0.200",
+            "adapter deskew serialize latency count=100 p95_ms=1.2 "
+            "max_ms=1.8 budget_ms=2.000",
+            "registered current frame latency count=100 p95_ms=8.2 "
+            "max_ms=12.3 budget_ms=10.000",
+            "registered current frame latency count=100 p95_ms=9.1 "
+            "max_ms=15.0 budget_ms=10.000",
+            "registered keyframe delta latency count=20 p95_ms=31.0 "
+            "max_ms=39.0 budget_ms=40.000",
+            "sensor to occupancy latency count=100 p95_ms=62.0 "
+            "max_ms=75.0 budget_ms=80.000",
+        ]))
+        self.assertAlmostEqual(stats["callback_p95_ms_max"], 0.12)
+        self.assertAlmostEqual(stats["adapter_p95_ms_max"], 1.2)
+        self.assertEqual(stats["current_windows"], 2)
+        self.assertAlmostEqual(stats["current_p95_ms_max"], 9.1)
+        self.assertAlmostEqual(stats["current_max_ms"], 15.0)
+        self.assertEqual(stats["delta_windows"], 1)
+        self.assertAlmostEqual(stats["delta_p95_ms_max"], 31.0)
+        self.assertAlmostEqual(
+            stats["sensor_to_occupancy_p95_ms_max"], 62.0)
+
+    def test_planner_local_map_acceptance_gates_missing_and_slow_evidence(self):
+        runtime = {
+            "current_rate_hz": 10.0,
+            "window_delta_rate_hz": 2.0,
+            "max_active_frame_count": 15,
+            "generation_contiguous": True,
+            "frame_contract_ids": ["sha256:a"],
+            "total_xyz_payload_mib_s": 0.9,
+        }
+        latency = {
+            "callback_windows": 1, "callback_p95_ms_max": 0.1,
+            "adapter_windows": 1, "adapter_p95_ms_max": 1.0,
+            "current_windows": 1, "current_p95_ms_max": 9.0,
+            "delta_windows": 1, "delta_p95_ms_max": 39.0,
+            "sensor_to_occupancy_windows": 1,
+            "sensor_to_occupancy_p95_ms_max": 70.0,
+        }
+        self.assertEqual(
+            MODULE.planner_local_map_acceptance_failures(runtime, latency),
+            [])
+        latency["current_p95_ms_max"] = 10.0
+        latency["adapter_windows"] = 0
+        self.assertEqual(
+            MODULE.planner_local_map_acceptance_failures(runtime, latency),
+            ["planner_local_map_adapter_latency_missing",
+             "planner_local_map_current_latency_exceeded"])
+
     def test_icra_rviz_keeps_environment_faint_and_risk_cloud_legible(self):
         rviz = (REPO / "config/sim_demo11/test_icra.rviz").read_text()
 
@@ -142,6 +239,14 @@ class TestStageContracts(unittest.TestCase):
         self.assertIn("Color Transformer: FlatColor", current_lidar)
         self.assertIn("Style: Points", current_lidar)
         self.assertAlmostEqual(display_alpha(current_lidar), 0.9, places=6)
+
+        registered_lidar = display_block("GLIM Registered Current LiDAR")
+        self.assertIn("Value: /iap/local_map/current_hits_map", registered_lidar)
+        self.assertIn("Reliability Policy: Best Effort", registered_lidar)
+        self.assertIn("Durability Policy: Volatile", registered_lidar)
+        self.assertIn("Color Transformer: FlatColor", registered_lidar)
+        self.assertIn("Style: Points", registered_lidar)
+        self.assertAlmostEqual(display_alpha(registered_lidar), 0.8, places=6)
 
         predicted_pl = display_block("Predicted PL Cloud")
         self.assertIn("Reliability Policy: Best Effort", predicted_pl)
@@ -353,6 +458,8 @@ class TestStageContracts(unittest.TestCase):
 
     def test_forest_full_stage_configures_ninety_second_runtime(self):
         self.assertEqual(MODULE.stage_duration_s(
+            "p4", MODULE.FOREST_SCENARIO, "risk"), 90.0)
+        self.assertEqual(MODULE.stage_duration_s(
             "full", MODULE.FOREST_SCENARIO, "risk"), 90.0)
         self.assertEqual(MODULE.stage_duration_s(
             "full", MODULE.FOREST_SCENARIO, "baseline"), 90.0)
@@ -365,11 +472,13 @@ class TestStageContracts(unittest.TestCase):
                 return_value={"/drone_0_ego_planner_node"}), mock.patch.object(
                     MODULE, "_node_subscriptions",
                     return_value=(["/sim/drone_0/lidar",
-                                   "/map_generator/global_cloud"], "")):
+                                   "/map_generator/global_cloud",
+                                   "/sim/drone_0/truth_odom"], "")):
             evidence = MODULE.audit_planner_truth_isolation({}, timeout_s=0.1)
         self.assertFalse(evidence["pass"])
         self.assertEqual(evidence["forbidden_subscriptions"],
-                         ["/map_generator/global_cloud"])
+                         ["/map_generator/global_cloud",
+                          "/sim/drone_0/truth_odom"])
         self.assertIn("planner_truth_subscription_detected",
                       evidence["failures"])
 

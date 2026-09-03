@@ -1,0 +1,7 @@
+std_msgs/Header header
+int64 frame_id
+float64 scan_end_stamp_s
+uint64 sensor_receipt_steady_ns
+geometry_msgs/Pose t_map_lidar
+sensor_msgs/PointCloud2 deskewed_hits_lidar
+string frame_contract_id

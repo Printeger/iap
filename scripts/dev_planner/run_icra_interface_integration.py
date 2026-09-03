@@ -20,6 +20,11 @@ import time
 from pathlib import Path
 from typing import Callable, TextIO
 
+try:
+    import psutil
+except ImportError:  # pragma: no cover - launch package declares dependency
+    psutil = None
+
 
 REPOSITORY = Path(__file__).resolve().parents[2]
 DEFAULT_RESULTS_ROOT = (
@@ -478,6 +483,8 @@ def stage_launch_args(
 def stage_duration_s(
         stage: str, scenario: str = DEFAULT_SCENARIO,
         forest_variant: str | None = None) -> float:
+    if stage == "p4" and _is_forest_scenario(scenario):
+        return 90.0
     if (stage == "full" and _is_forest_scenario(scenario)
             and forest_variant in ("risk", "baseline")):
         return 90.0
@@ -1867,6 +1874,185 @@ def analyze_run(
     raise ValueError(f"unsupported functional stage: {stage}")
 
 
+def planner_local_map_runtime_stats(records: list[dict]) -> dict:
+    """Summarize the wire-level adapter evidence without decoding big clouds."""
+    current = [row for row in records
+               if row.get("kind") == "planner_local_map_current"]
+    deltas = [row for row in records
+              if row.get("kind") == "planner_local_map_delta"]
+
+    def rate_hz(rows: list[dict]) -> float:
+        stamps = [float(row.get("receive_steady_s", math.nan)) for row in rows]
+        stamps = [stamp for stamp in stamps if math.isfinite(stamp)]
+        if len(stamps) < 2 or max(stamps) <= min(stamps):
+            return 0.0
+        return (len(stamps) - 1) / (max(stamps) - min(stamps))
+
+    duration_s = 0.0
+    if len(current) >= 2:
+        duration_s = max(
+            0.0,
+            float(current[-1]["receive_steady_s"])
+            - float(current[0]["receive_steady_s"]),
+        )
+    delta_duration_s = 0.0
+    if len(deltas) >= 2:
+        delta_duration_s = max(
+            0.0,
+            float(deltas[-1]["receive_steady_s"])
+            - float(deltas[0]["receive_steady_s"]),
+        )
+    current_bytes = sum(int(row.get("payload", {}).get(
+        "payload_bytes", 0) or 0) for row in current)
+    delta_bytes = sum(int(row.get("payload", {}).get(
+        "added_payload_bytes", 0) or 0) for row in deltas)
+    contract_ids = sorted({
+        str(row.get("payload", {}).get("frame_contract_id", ""))
+        for row in [*current, *deltas]
+        if row.get("payload", {}).get("frame_contract_id")
+    })
+    generation_contiguous = True
+    previous_generation = None
+    for row in deltas:
+        payload = row.get("payload", {})
+        base = int(payload.get("base_generation", 0) or 0)
+        generation = int(payload.get("generation", 0) or 0)
+        if (not bool(payload.get("complete", False))
+                or generation != base + 1
+                or (previous_generation is not None
+                    and base != previous_generation)):
+            generation_contiguous = False
+            break
+        previous_generation = generation
+    positions = []
+    for row in current:
+        position = row.get("payload", {}).get("position_m")
+        if (isinstance(position, list) and len(position) == 3
+                and all(_finite_number(value) for value in position)):
+            positions.append([float(value) for value in position])
+    displacement_m = None
+    if len(positions) >= 2:
+        displacement_m = math.dist(positions[0], positions[-1])
+    current_mib_s = (
+        current_bytes / duration_s / (1024.0 * 1024.0)
+        if duration_s > 0.0 else 0.0
+    )
+    delta_mib_s = (
+        delta_bytes / delta_duration_s / (1024.0 * 1024.0)
+        if delta_duration_s > 0.0 else 0.0
+    )
+    return {
+        "current_frame_count": len(current),
+        "current_rate_hz": rate_hz(current),
+        "window_delta_count": len(deltas),
+        "window_delta_rate_hz": rate_hz(deltas),
+        "current_xyz_payload_mib_s": current_mib_s,
+        "keyframe_xyz_payload_mib_s": delta_mib_s,
+        "total_xyz_payload_mib_s": current_mib_s + delta_mib_s,
+        "keyframe_xyz_payload_mib": delta_bytes / (1024.0 * 1024.0),
+        "max_active_frame_count": max(
+            (int(row.get("payload", {}).get("active_frame_count", 0) or 0)
+             for row in deltas),
+            default=0,
+        ),
+        "frame_contract_ids": contract_ids,
+        "generation_contiguous": generation_contiguous,
+        "first_position_m": positions[0] if positions else None,
+        "last_position_m": positions[-1] if positions else None,
+        "displacement_m": displacement_m,
+    }
+
+
+def planner_local_map_latency_stats(stdout: str) -> dict:
+    """Extract component-side latency windows emitted by the map consumer."""
+    callback = [
+        (float(p95), float(maximum))
+        for p95, maximum in re.findall(
+            r"GLIM callback snapshot latency count=100 "
+            r"p95_ms=([0-9.]+) max_ms=([0-9.]+)", stdout)
+    ]
+    adapter = [
+        (float(p95), float(maximum))
+        for p95, maximum in re.findall(
+            r"adapter deskew serialize latency count=100 "
+            r"p95_ms=([0-9.]+) max_ms=([0-9.]+)", stdout)
+    ]
+    current = [
+        (float(p95), float(maximum))
+        for p95, maximum in re.findall(
+            r"registered current frame latency count=100 "
+            r"p95_ms=([0-9.]+) max_ms=([0-9.]+)", stdout)
+    ]
+    delta = [
+        (float(p95), float(maximum))
+        for p95, maximum in re.findall(
+            r"registered keyframe delta latency count=20 "
+            r"p95_ms=([0-9.]+) max_ms=([0-9.]+)", stdout)
+    ]
+    end_to_end = [
+        (float(p95), float(maximum))
+        for p95, maximum in re.findall(
+            r"sensor to occupancy latency count=100 "
+            r"p95_ms=([0-9.]+) max_ms=([0-9.]+)", stdout)
+    ]
+    return {
+        "callback_windows": len(callback),
+        "callback_p95_ms_max": max(
+            (row[0] for row in callback), default=None),
+        "callback_budget_ms": 0.2,
+        "adapter_windows": len(adapter),
+        "adapter_p95_ms_max": max(
+            (row[0] for row in adapter), default=None),
+        "adapter_budget_ms": 2.0,
+        "current_windows": len(current),
+        "current_p95_ms_max": max((row[0] for row in current), default=None),
+        "current_max_ms": max((row[1] for row in current), default=None),
+        "current_budget_ms": 10.0,
+        "delta_windows": len(delta),
+        "delta_p95_ms_max": max((row[0] for row in delta), default=None),
+        "delta_max_ms": max((row[1] for row in delta), default=None),
+        "delta_budget_ms": 40.0,
+        "sensor_to_occupancy_windows": len(end_to_end),
+        "sensor_to_occupancy_p95_ms_max": max(
+            (row[0] for row in end_to_end), default=None),
+        "sensor_to_occupancy_budget_ms": 80.0,
+    }
+
+
+def planner_local_map_acceptance_failures(
+        runtime: dict, latency: dict) -> list[str]:
+    """Apply the forest-v2 local-map wire and latency hard gates."""
+    failures = []
+    current_rate = runtime.get("current_rate_hz")
+    delta_rate = runtime.get("window_delta_rate_hz")
+    if not _finite_number(current_rate) or not 8.0 <= current_rate <= 12.0:
+        failures.append("planner_local_map_current_rate_out_of_bounds")
+    if not _finite_number(delta_rate) or not 0.1 <= delta_rate <= 2.2:
+        failures.append("planner_local_map_delta_rate_out_of_bounds")
+    if runtime.get("max_active_frame_count", 0) > 15:
+        failures.append("planner_local_map_active_window_exceeded")
+    if not runtime.get("generation_contiguous", False):
+        failures.append("planner_local_map_generation_gap")
+    if len(runtime.get("frame_contract_ids", [])) != 1:
+        failures.append("planner_local_map_contract_inconsistent")
+    if runtime.get("total_xyz_payload_mib_s", math.inf) >= 1.5:
+        failures.append("planner_local_map_bandwidth_exceeded")
+    latency_gates = (
+        ("callback", 0.2),
+        ("adapter", 2.0),
+        ("current", 10.0),
+        ("delta", 40.0),
+        ("sensor_to_occupancy", 80.0),
+    )
+    for name, budget in latency_gates:
+        value = latency.get(f"{name}_p95_ms_max")
+        if latency.get(f"{name}_windows", 0) < 1:
+            failures.append(f"planner_local_map_{name}_latency_missing")
+        elif not _finite_number(value) or value >= budget:
+            failures.append(f"planner_local_map_{name}_latency_exceeded")
+    return failures
+
+
 def summarize_forest_risk_cloud(points: list[dict]) -> dict | None:
     """Reduce a PL cloud to per-fork metrics without retaining cloud points."""
     if not points:
@@ -2010,7 +2196,9 @@ def summarize_forest_risk_cloud(points: list[dict]) -> dict | None:
 
 def _capture_main(args: argparse.Namespace) -> int:
     import rclpy
-    from iap.msg import IntegrityReport
+    from iap.msg import (
+        ActiveLidarWindowDelta, IntegrityReport, RegisteredLidarFrame,
+    )
     from nav_msgs.msg import Odometry
     from quadrotor_msgs.msg import PositionCommand
     from rclpy.node import Node
@@ -2053,6 +2241,11 @@ def _capture_main(args: argparse.Namespace) -> int:
                 lambda message: self.record("iap_odom", {
                     "stamp_s": float(message.header.stamp.sec)
                     + 1.0e-9 * float(message.header.stamp.nanosec),
+                    "position_m": [
+                        float(message.pose.pose.position.x),
+                        float(message.pose.pose.position.y),
+                        float(message.pose.pose.position.z),
+                    ],
                 }), qos_profile_sensor_data)
             self.create_subscription(
                 IntegrityReport, "/iap/integrity",
@@ -2070,6 +2263,30 @@ def _capture_main(args: argparse.Namespace) -> int:
                     + 1.0e-9 * float(message.header.stamp.nanosec),
                     "point_count": int(message.width) * int(message.height),
                 }), qos_profile_sensor_data)
+            self.create_subscription(
+                RegisteredLidarFrame, "/iap/local_map/current_frame",
+                lambda message: self.record("planner_local_map_current", {
+                    "stamp_s": float(message.header.stamp.sec)
+                    + 1.0e-9 * float(message.header.stamp.nanosec),
+                    "frame_id": message.header.frame_id,
+                    "source_frame_id": int(message.frame_id),
+                    "frame_contract_id": message.frame_contract_id,
+                    "position_m": [
+                        float(message.t_map_lidar.position.x),
+                        float(message.t_map_lidar.position.y),
+                        float(message.t_map_lidar.position.z),
+                    ],
+                    "point_count": (
+                        int(message.deskewed_hits_lidar.width)
+                        * int(message.deskewed_hits_lidar.height)
+                    ),
+                    "payload_bytes": len(
+                        message.deskewed_hits_lidar.data),
+                }), qos_profile_sensor_data)
+            self.active_local_map_frame_ids = set()
+            self.create_subscription(
+                ActiveLidarWindowDelta, "/iap/local_map/window_delta",
+                self.local_map_delta, reliable)
             self.imu_count = 0
             self.create_subscription(
                 Imu, "/sim/drone_0/imu_iap", self.imu,
@@ -2124,6 +2341,28 @@ def _capture_main(args: argparse.Namespace) -> int:
                     float(message.position.x), float(message.position.y),
                     float(message.position.z),
                 ],
+            })
+
+        def local_map_delta(self, message: ActiveLidarWindowDelta) -> None:
+            for frame_id in message.removed_frame_ids:
+                self.active_local_map_frame_ids.discard(int(frame_id))
+            for frame in message.added:
+                self.active_local_map_frame_ids.add(int(frame.frame_id))
+            self.record("planner_local_map_delta", {
+                "stamp_s": float(message.header.stamp.sec)
+                + 1.0e-9 * float(message.header.stamp.nanosec),
+                "frame_contract_id": message.frame_contract_id,
+                "base_generation": int(message.base_generation),
+                "generation": int(message.generation),
+                "complete": bool(message.complete),
+                "added_count": len(message.added),
+                "removed_count": len(message.removed_frame_ids),
+                "pose_updated_count": len(message.pose_updated_frame_ids),
+                "active_frame_count": len(self.active_local_map_frame_ids),
+                "added_payload_bytes": sum(
+                    len(frame.deskewed_hits_lidar.data)
+                    for frame in message.added
+                ),
             })
 
         def scene_cloud(self, message: PointCloud2) -> None:
@@ -2245,41 +2484,54 @@ def _node_subscriptions(
 
 def audit_planner_truth_isolation(
         environment: dict[str, str], timeout_s: float = 18.0) -> dict:
-    """Audit the live planner graph; simulators may still consume truth."""
-    target = "/drone_0_ego_planner_node"
+    """Audit planner and GLIM-adapter processes; simulators may use truth."""
+    targets = (
+        "/drone_0_ego_planner_node",
+        "/test_planner_iap_rosnode",
+    )
     deadline = time.monotonic() + timeout_s
     nodes: set[str] = set()
     while time.monotonic() < deadline:
         nodes = _node_names(environment)
-        if target in nodes or target.lstrip("/") in nodes:
+        if all(target in nodes or target.lstrip("/") in nodes
+               for target in targets):
             break
         time.sleep(0.25)
-    matched = target if target in nodes else target.lstrip("/")
-    if matched not in nodes:
-        return {
-            "schema_version": "planner_truth_isolation_audit_v1",
-            "pass": False,
-            "failures": ["planner_node_missing_for_truth_audit"],
-            "audited_nodes": [],
-            "forbidden_subscriptions": [],
-        }
-    subscriptions, error = _node_subscriptions(matched, environment)
-    forbidden = sorted(topic for topic in subscriptions if topic.startswith(
-        ("/map_generator/", "/sim/world/")))
-    failures = (["planner_truth_subscription_detected"] if forbidden else [])
-    if error:
-        failures.append("planner_graph_audit_error")
+    forbidden_prefixes = ("/map_generator/", "/sim/world/")
+    forbidden_exact = {"/sim/drone_0/truth_odom"}
+    failures = []
+    forbidden = set()
+    audited_nodes = []
+    for target in targets:
+        matched = target if target in nodes else target.lstrip("/")
+        if matched not in nodes:
+            failures.append("planner_node_missing_for_truth_audit")
+            continue
+        subscriptions, error = _node_subscriptions(matched, environment)
+        node_forbidden = sorted(
+            topic for topic in subscriptions
+            if topic in forbidden_exact or topic.startswith(forbidden_prefixes)
+        )
+        forbidden.update(node_forbidden)
+        audited_nodes.append({
+            "name": matched,
+            "subscriptions": subscriptions,
+            "forbidden_subscriptions": node_forbidden,
+            "stderr": error,
+        })
+        if error:
+            failures.append("planner_graph_audit_error")
+    if forbidden:
+        failures.append("planner_truth_subscription_detected")
+    failures = list(dict.fromkeys(failures))
     return {
         "schema_version": "planner_truth_isolation_audit_v1",
         "pass": not failures,
         "failures": failures,
-        "audited_nodes": [{
-            "name": matched,
-            "subscriptions": subscriptions,
-        }],
-        "forbidden_prefixes": ["/map_generator/", "/sim/world/"],
-        "forbidden_subscriptions": forbidden,
-        "stderr": error,
+        "audited_nodes": audited_nodes,
+        "forbidden_prefixes": list(forbidden_prefixes),
+        "forbidden_exact": sorted(forbidden_exact),
+        "forbidden_subscriptions": sorted(forbidden),
     }
 
 
@@ -2393,6 +2645,57 @@ def _progress_message(
         f"timeout={timeout_s:g}s log={stdout_path}")
 
 
+def _sample_process_group(pgid: int, elapsed_s: float) -> dict:
+    """Take a low-overhead aggregate resource sample for the owned launch."""
+    sample = {
+        "elapsed_s": elapsed_s,
+        "process_count": 0,
+        "rss_bytes": 0,
+        "cpu_seconds": 0.0,
+    }
+    if psutil is None:
+        sample["unavailable_reason"] = "python3-psutil_not_installed"
+        return sample
+    for process in psutil.process_iter(["pid", "memory_info", "cpu_times"]):
+        try:
+            if os.getpgid(process.pid) != pgid:
+                continue
+            memory = process.info["memory_info"]
+            cpu = process.info["cpu_times"]
+            sample["process_count"] += 1
+            sample["rss_bytes"] += int(memory.rss)
+            sample["cpu_seconds"] += float(cpu.user + cpu.system)
+        except (OSError, psutil.Error):
+            continue
+    return sample
+
+
+def process_group_resource_stats(samples: list[dict]) -> dict:
+    usable = [sample for sample in samples
+              if "unavailable_reason" not in sample]
+    cpu_core_samples = []
+    for previous, current in zip(usable, usable[1:]):
+        wall_delta = (float(current["elapsed_s"])
+                      - float(previous["elapsed_s"]))
+        cpu_delta = (float(current["cpu_seconds"])
+                     - float(previous["cpu_seconds"]))
+        if wall_delta > 0.0 and cpu_delta >= 0.0:
+            cpu_core_samples.append(cpu_delta / wall_delta)
+    return {
+        "sample_count": len(usable),
+        "peak_process_count": max(
+            (int(sample["process_count"]) for sample in usable), default=0),
+        "peak_rss_mib": max(
+            (int(sample["rss_bytes"]) for sample in usable), default=0)
+            / (1024.0 * 1024.0),
+        "mean_cpu_cores": (statistics.fmean(cpu_core_samples)
+                           if cpu_core_samples else None),
+        "peak_cpu_cores": (max(cpu_core_samples)
+                           if cpu_core_samples else None),
+        "samples": samples,
+    }
+
+
 def _launch_shell(install_root: Path, launch_args: dict[str, str]) -> str:
     argv = ["ros2", "launch", "iap", "test_icra.launch.py"]
     argv.extend(f"{key}:={value}" for key, value in launch_args.items())
@@ -2490,6 +2793,7 @@ def _run_one_impl(
         "schema_version": "icra_interface_launch_started_v1",
         "started_steady_s": started,
     })
+    resource_samples = [_sample_process_group(launch.pid, 0.0)]
     graph_audit = None
     if (_is_forest_scenario(scenario)
             and scenario == FOREST_SCENARIO
@@ -2501,6 +2805,8 @@ def _run_one_impl(
         duration_s if stage == "shutdown" else duration_s + 20.0)
 
     def report_progress(now_s: float) -> None:
+        resource_samples.append(_sample_process_group(
+            launch.pid, now_s - started))
         _emit(_progress_message(
             stage, now_s - started, duration_s, timeout_s, stdout_path))
 
@@ -2521,6 +2827,10 @@ def _run_one_impl(
             launch_cleared = _group_cleared(launch.pid)
             launch_escalated = False
             early_exit = time.monotonic() - started < duration_s - 1.0
+    resource_samples.append(_sample_process_group(
+        launch.pid, time.monotonic() - started))
+    process_resources = process_group_resource_stats(resource_samples)
+    _json_write(run_root / "process_resources.json", process_resources)
     capture_code, capture_cleared, capture_escalated = _stop_group(
         capture, 3.0, run_root / "capture_stacks.txt")
     launch_stream.close()
@@ -2563,6 +2873,17 @@ def _run_one_impl(
             [*summary["failures"], *lidar_failures],
             **{key: value for key, value in summary.items()
                if key not in ("result", "failures")})
+    capture_records = _read_jsonl(run_root / "capture.jsonl")
+    local_map_runtime = planner_local_map_runtime_stats(capture_records)
+    local_map_latency = planner_local_map_latency_stats(stdout)
+    if scenario == FOREST_SCENARIO and shutdown_variant is None:
+        local_map_failures = planner_local_map_acceptance_failures(
+            local_map_runtime, local_map_latency)
+        if local_map_failures:
+            summary = _result(
+                [*summary["failures"], *local_map_failures],
+                **{key: value for key, value in summary.items()
+                   if key not in ("result", "failures")})
     summary.update({
         "stage": stage,
         "scenario": scenario,
@@ -2574,8 +2895,11 @@ def _run_one_impl(
         "lidar_renderer": lidar_renderer,
         "lidar_runtime_stats": lidar_stats,
         "planner_truth_isolation_audit": graph_audit,
+        "planner_local_map_runtime": local_map_runtime,
+        "planner_local_map_latency": local_map_latency,
+        "process_group_resources": process_resources,
         "scene_cloud_bbox": next((
-            row.get("payload") for row in _read_jsonl(run_root / "capture.jsonl")
+            row.get("payload") for row in capture_records
             if row.get("kind") == "scene_cloud_bbox"), None),
         "shutdown_variant": shutdown_variant,
         "launch_exit_code": launch_code,

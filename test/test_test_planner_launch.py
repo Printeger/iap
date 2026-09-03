@@ -410,6 +410,9 @@ class TestPlannerLaunchTest(unittest.TestCase):
             "grid_map/local_update_range_x": "9.0",
             "grid_map/local_update_range_y": "9.0",
             "grid_map/local_update_range_z": "4.5",
+            "planner_frame_mode": "glim_world",
+            "planner_local_map_enable": "true",
+            "allow_truth_alignment": "false",
             "p0.online_mapping_mode": "true",
             "p0.fit_grid_to_map_cloud": "false",
             "p0.map_topic": "",
@@ -456,6 +459,15 @@ class TestPlannerLaunchTest(unittest.TestCase):
             scenario, _, _ = MODULE._apply_presets(context, REPO)
         self.assertEqual(scenario, name)
         MODULE._validate_online_truth_isolation(context, scenario)
+        contract, contract_id = MODULE._planner_local_map_contract(context)
+        self.assertEqual(
+            contract["static_planner_from_glim_translation_m"],
+            [-18.0, 0.0, 1.5],
+        )
+        self.assertEqual(contract["geofence_origin_m"], [-21.0, -11.0, 0.0])
+        self.assertRegex(contract_id, r"^sha256:[0-9a-f]{64}$")
+        self.assertEqual(
+            MODULE._planner_local_map_contract(context)[1], contract_id)
 
     def test_online_truth_isolation_rejects_simulator_topics(self):
         context = self._launch_context_with_defaults(
@@ -469,6 +481,31 @@ class TestPlannerLaunchTest(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "truth topic"):
                     MODULE._validate_online_truth_isolation(
                         context, "icra_dense_forest_four_fork_v2")
+
+    def test_forest_v2_rejects_truth_alignment_or_missing_local_map(self):
+        for key, value in (
+            ("allow_truth_alignment", "true"),
+            ("planner_local_map_enable", "false"),
+            ("planner_frame_mode", "legacy_truth_aligned"),
+        ):
+            with self.subTest(key=key):
+                context = self._launch_context_with_defaults(
+                    experiment="icra_p0_p4_v2_p5_dev",
+                    scenario="icra_dense_forest_four_fork_v2",
+                )
+                with mock.patch.object(
+                    sys,
+                    "argv",
+                    [
+                        "test",
+                        "experiment:=icra_p0_p4_v2_p5_dev",
+                        "scenario:=icra_dense_forest_four_fork_v2",
+                    ],
+                ):
+                    scenario, _, _ = MODULE._apply_presets(context, REPO)
+                context.launch_configurations[key] = value
+                with self.assertRaises(RuntimeError):
+                    MODULE._validate_online_truth_isolation(context, scenario)
 
     def test_fork_and_mirror_share_geometry_identity_except_mirror_flag(self):
         primary = MODULE.SCENARIO_PRESETS["p1_fork_fused_v1"]
