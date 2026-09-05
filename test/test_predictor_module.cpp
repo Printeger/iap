@@ -20,10 +20,37 @@
 #include <vector>
 
 #include <iap/predictor/predictor_module.hpp>
+#include <iap/map/trusted_local_map_support.hpp>
 
 namespace {
 
 constexpr double kPi = 3.14159265358979323846;
+
+TEST(TrustedLocalMapSupportTest, DistinguishesCompleteOutsideAndExpired)
+{
+  iap::TrustedLocalMapSupport support;
+  support.T_map_sensor.translation() = Eigen::Vector3d(1.0, 2.0, 3.0);
+  support.retained_min_map = Eigen::Vector3d(-20.0, -20.0, -20.0);
+  support.retained_max_map = Eigen::Vector3d(20.0, 20.0, 20.0);
+  support.min_range_m = 0.1;
+  support.max_range_m = 10.0;
+  support.horizontal_fov_rad = 2.0 * kPi;
+  support.vertical_min_rad = -7.0 * kPi / 180.0;
+  support.vertical_max_rad = 52.0 * kPi / 180.0;
+  support.stamp_s = 10.0;
+  support.valid_until_s = 11.0;
+  support.frame_id = "map";
+
+  const auto complete = support.query(Eigen::Vector3d(6.0, 2.0, 4.0), 10.5);
+  EXPECT_EQ(complete.authority,
+            iap::LocalMapSupportAuthority::TRUSTED_LOCAL_MAP);
+  EXPECT_EQ(complete.status, iap::LocalMapSupportStatus::MODEL_COMPLETE);
+  EXPECT_EQ(support.query(Eigen::Vector3d(1.0, 2.0, 12.0), 10.5).status,
+            iap::LocalMapSupportStatus::OUTSIDE_ENVELOPE);
+  EXPECT_EQ(support.query(Eigen::Vector3d(6.0, 2.0, 4.0), 11.1).status,
+            iap::LocalMapSupportStatus::EXPIRED);
+  EXPECT_FALSE(support.identity().empty());
+}
 
 struct FakeGnssTimeMessage {
   std::uint32_t week = 0;
@@ -614,6 +641,88 @@ TEST(PredictorModuleTest, GnssUnknownOnlineLosIsNotAssumedVisible) {
   EXPECT_EQ(result.fallback_reason, "too_few_observed_los_sats");
   EXPECT_EQ(result.n_visible, 0);
   EXPECT_EQ(result.n_unknown_support, 8);
+}
+
+TEST(PredictorModuleTest,
+     TrustedLocalMapCompletesNoHitSupportButDoesNotHideCanopyHits) {
+  auto params = make_params();
+  params.gnss.visibility_params.hard_occlusion = true;
+  params.gnss.visibility_params.ray_start_offset = 0.0;
+  params.gnss.visibility_params.occ_range = 6.0;
+  iap::IntegritySnapshot snapshot = make_snapshot(true, false);
+  snapshot.gnss_epoch = make_epoch(8);
+
+  const auto complete_support = [](const Eigen::Vector3d&, double) {
+      return iap::LocalMapSupportQuery{
+          iap::LocalMapSupportAuthority::TRUSTED_LOCAL_MAP,
+          iap::LocalMapSupportStatus::MODEL_COMPLETE};
+    };
+  iap::GnssAdvisoryPredictor clear_predictor(params.gnss);
+  clear_predictor.set_support_query(complete_support);
+  const auto clear = clear_predictor.query(Eigen::Vector3d::Zero(), snapshot);
+  ASSERT_TRUE(clear.valid) << clear.fallback_reason;
+  EXPECT_EQ(clear.support_authority,
+            iap::LocalMapSupportAuthority::TRUSTED_LOCAL_MAP);
+  EXPECT_EQ(clear.support_status,
+            iap::LocalMapSupportStatus::MODEL_COMPLETE);
+  EXPECT_EQ(clear.n_unknown_support, 0);
+
+  iap::LocalOccupancyGrid blocker_grid =
+      make_los_blocker_grid(snapshot.gnss_epoch, {0, 2});
+  iap::GnssAdvisoryPredictor occluded_predictor(params.gnss);
+  occluded_predictor.set_support_query(complete_support);
+  occluded_predictor.set_local_occupancy(&blocker_grid);
+  const auto occluded =
+      occluded_predictor.query(Eigen::Vector3d::Zero(), snapshot);
+  ASSERT_TRUE(occluded.valid) << occluded.fallback_reason;
+  EXPECT_LT(occluded.n_visible, clear.n_visible);
+  EXPECT_GT(occluded.hpl, clear.hpl);
+  EXPECT_GT(occluded.vpl, clear.vpl);
+
+  iap::GnssAdvisoryPredictor outside_predictor(params.gnss);
+  outside_predictor.set_support_query([](const Eigen::Vector3d&, double) {
+      return iap::LocalMapSupportQuery{
+          iap::LocalMapSupportAuthority::TRUSTED_LOCAL_MAP,
+          iap::LocalMapSupportStatus::OUTSIDE_ENVELOPE};
+    });
+  const auto outside =
+      outside_predictor.query(Eigen::Vector3d::Zero(), snapshot);
+  EXPECT_FALSE(outside.valid);
+  EXPECT_EQ(outside.n_unknown_support, 8);
+  EXPECT_EQ(outside.support_status,
+            iap::LocalMapSupportStatus::OUTSIDE_ENVELOPE);
+
+  iap::GnssAdvisoryPredictor expiring_predictor(params.gnss);
+  expiring_predictor.set_support_query(
+      [](const Eigen::Vector3d&, const double query_time_s) {
+        return iap::LocalMapSupportQuery{
+            iap::LocalMapSupportAuthority::TRUSTED_LOCAL_MAP,
+            query_time_s <= 100.5
+                ? iap::LocalMapSupportStatus::MODEL_COMPLETE
+                : iap::LocalMapSupportStatus::EXPIRED};
+      });
+  EXPECT_TRUE(expiring_predictor.query(
+      Eigen::Vector3d::Zero(), snapshot, 100.5).valid);
+  const auto expired = expiring_predictor.query(
+      Eigen::Vector3d::Zero(), snapshot, 100.6);
+  EXPECT_FALSE(expired.valid);
+  EXPECT_EQ(expired.support_status, iap::LocalMapSupportStatus::EXPIRED);
+
+  iap::GnssAdvisoryPredictor local_set_predictor(params.gnss);
+  local_set_predictor.set_support_query(
+      [](const Eigen::Vector3d& point, double) {
+        return iap::LocalMapSupportQuery{
+            iap::LocalMapSupportAuthority::TRUSTED_LOCAL_MAP,
+            point.x() >= -1.0e-9
+                ? iap::LocalMapSupportStatus::MODEL_COMPLETE
+                : iap::LocalMapSupportStatus::OUTSIDE_ENVELOPE};
+      });
+  const auto local_set = local_set_predictor.query(
+      Eigen::Vector3d::Zero(), snapshot, 100.0);
+  ASSERT_TRUE(local_set.valid) << local_set.fallback_reason;
+  EXPECT_GT(local_set.n_unknown_support, 0);
+  EXPECT_EQ(local_set.support_status,
+            iap::LocalMapSupportStatus::MODEL_COMPLETE);
 }
 
 TEST(PredictorModuleTest,

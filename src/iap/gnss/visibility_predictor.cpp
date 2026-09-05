@@ -22,6 +22,10 @@ void VisibilityPredictor::set_observation_predicate(
   observation_predicate_ = std::move(predicate);
 }
 
+void VisibilityPredictor::set_support_query(SupportQuery query) {
+  support_query_ = std::move(query);
+}
+
 // ---------------------------------------------------------------------------
 Eigen::Vector3d VisibilityPredictor::enu_dir(double elevation, double azimuth) {
   // ENU: East=X, North=Y, Up=Z
@@ -34,7 +38,8 @@ Eigen::Vector3d VisibilityPredictor::enu_dir(double elevation, double azimuth) {
 // ---------------------------------------------------------------------------
 VisibilityResult VisibilityPredictor::predict(const Eigen::Vector3d& pos_world,
                                               const GnssEpoch& epoch,
-                                              const bool measured_epoch_support) const {
+                                              const bool measured_epoch_support,
+                                              const double query_time_s) const {
   VisibilityResult res;
   const std::size_t N = epoch.sats.size();
   res.vis_flags.resize(N, false);
@@ -46,6 +51,12 @@ VisibilityResult VisibilityPredictor::predict(const Eigen::Vector3d& pos_world,
 
   double kappa_sum  = 0.0;
   int    n_above_el = 0;
+  if (support_query_) {
+    res.support_authority = LocalMapSupportAuthority::TRUSTED_LOCAL_MAP;
+    res.support_status = LocalMapSupportStatus::MODEL_COMPLETE;
+  } else if (observation_predicate_) {
+    res.support_status = LocalMapSupportStatus::MODEL_COMPLETE;
+  }
 
   for (std::size_t i = 0; i < N; ++i) {
     const SatObs& sat = epoch.sats[i];
@@ -73,7 +84,8 @@ VisibilityResult VisibilityPredictor::predict(const Eigen::Vector3d& pos_world,
     // proves signal reception; NLOS quality remains represented by the
     // measurement sigma and integrity exclusions in the epoch.
     bool unknown_support = false;
-    if (observation_predicate_ && !measured_epoch_support) {
+    if ((support_query_ || observation_predicate_) &&
+        !measured_epoch_support) {
       const double start_offset = std::max(0.0, params_.ray_start_offset);
       const double support_length = std::max(
           0.0, params_.hard_occlusion
@@ -83,7 +95,26 @@ VisibilityResult VisibilityPredictor::predict(const Eigen::Vector3d& pos_world,
       for (double distance = start_offset;
            distance <= support_length + 1.0e-9;
            distance += kSupportStepM) {
-        if (!observation_predicate_(pos_world + distance * dir)) {
+        const Eigen::Vector3d support_point = pos_world + distance * dir;
+        bool complete = false;
+        if (support_query_) {
+          const double effective_query_time_s = std::isfinite(query_time_s)
+              ? query_time_s : epoch.stamp;
+          const auto support = support_query_(support_point,
+                                              effective_query_time_s);
+          complete = support.complete();
+          if (!complete && res.support_status ==
+                               LocalMapSupportStatus::MODEL_COMPLETE) {
+            res.support_status = support.status;
+          }
+        } else {
+          complete = observation_predicate_(support_point);
+          if (!complete) {
+            res.support_status =
+                LocalMapSupportStatus::OBSERVATION_INCOMPLETE;
+          }
+        }
+        if (!complete) {
           unknown_support = true;
           break;
         }
@@ -130,6 +161,9 @@ VisibilityResult VisibilityPredictor::predict(const Eigen::Vector3d& pos_world,
   }
 
   res.mean_kappa = (res.n_vis > 0) ? (kappa_sum / res.n_vis) : 0.0;
+  if (support_query_ && res.n_unknown == 0) {
+    res.support_status = LocalMapSupportStatus::MODEL_COMPLETE;
+  }
 
   spdlog::trace("[VisibilityPredictor] pos=({:.1f},{:.1f},{:.1f}) "
                 "n_sats={} n_above_el={} n_vis={} n_unknown={} "

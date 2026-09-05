@@ -168,6 +168,10 @@ struct GnssAdvisoryResult {
   int n_hypotheses = 0;
   int n_excluded = 0;
   bool measured_epoch_support_used = false;
+  LocalMapSupportAuthority support_authority =
+      LocalMapSupportAuthority::STRICT_OBSERVATION;
+  LocalMapSupportStatus support_status =
+      LocalMapSupportStatus::FRAME_INVALID;
   std::vector<int> visible_sat_ids;
   std::vector<int> used_sat_ids;
   std::vector<int> excluded_sat_ids;

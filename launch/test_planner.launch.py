@@ -1094,6 +1094,7 @@ DENSE_FOUR_FORK_FOREST_ONLINE_PRESET = {
     "p4.forward.max_channel_searches": "32",
     "p4.forward.channel_enumeration_budget_ms": "60.0",
     "p4.forward.advisory_min_relative_improvement": "0.10",
+    "p4.execution.max_tracking_error_m": "0.75",
     "integrity_dynamic_alert_limits": "false",
     "integrity_hal_m": "20.0",
     "integrity_val_m": "40.0",
@@ -1881,6 +1882,7 @@ ARG_DEFAULTS = [
     ("lidar_min_range_m", "0.1"),
     ("lidar_max_range_m", "10.0"),
     ("lidar_world_voxel_resolution_m", "0.1"),
+    ("trusted_local_map_support_enabled", "true"),
     ("forest_size_x_m", "20.0"),
     ("forest_size_y_m", "20.0"),
     ("tree_density_lower_left_per_m2", "0.5"),
@@ -2196,6 +2198,7 @@ ARG_DEFAULTS = [
     ("p4.forward.max_channel_searches", "32"),
     ("p4.forward.channel_enumeration_budget_ms", "60.0"),
     ("p4.forward.advisory_min_relative_improvement", "0.10"),
+    ("p4.execution.max_tracking_error_m", "0.75"),
     ("p4.g0c.protocol_path", ""),
     ("p4.g0c.protocol_sha256", ""),
     ("p4.g0c.registry_path", ""),
@@ -3165,6 +3168,22 @@ def _ego_planner_node(context, drone_id, planner_odom_topic, cloud_topic, camera
                 "planner_local_map_recovery_service").perform(context)},
             {"grid_map/registered_lidar_reference_frame_id":
                 "iap_lidar_reference"},
+            {"grid_map/trusted_local_map_support_enabled": _param_bool(
+                context, "trusted_local_map_support_enabled")},
+            {"grid_map/trusted_support_min_range_m": _param_float(
+                context, "lidar_min_range_m")},
+            {"grid_map/trusted_support_max_range_m": _param_float(
+                context, "lidar_max_range_m")},
+            {"grid_map/trusted_support_horizontal_fov_deg": _param_float(
+                context, "lidar_horizontal_fov_deg")},
+            {"grid_map/trusted_support_vertical_min_deg": _param_float(
+                context, "lidar_vertical_min_deg")},
+            {"grid_map/trusted_support_vertical_max_deg": _param_float(
+                context, "lidar_vertical_max_deg")},
+            {"grid_map/trusted_support_validity_s": _param_float(
+                context, "p0.stale_timeout_s")},
+            {"grid_map/trusted_support_model_version":
+                "trusted_local_map_v1"},
             {"p0.enable_risk_grid": p0_enabled},
             {"p0.online_mapping_mode": _param_bool(
                 context, "p0.online_mapping_mode")},
@@ -3352,6 +3371,7 @@ def _ego_planner_node(context, drone_id, planner_odom_topic, cloud_topic, camera
             {"p4.forward.max_channel_searches": _param_int(context, "p4.forward.max_channel_searches")},
             {"p4.forward.channel_enumeration_budget_ms": _param_float(context, "p4.forward.channel_enumeration_budget_ms")},
             {"p4.forward.advisory_min_relative_improvement": _param_float(context, "p4.forward.advisory_min_relative_improvement")},
+            {"p4.execution.max_tracking_error_m": _param_float(context, "p4.execution.max_tracking_error_m")},
             {"p5.enable_runtime_gate": p5_runtime},
             {"p5.enable_final_gate": p5_final},
             {"p5.horizon_s": _param_float(context, "p5.horizon_s")},

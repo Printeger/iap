@@ -442,6 +442,27 @@ TEST(RiskGridMapTest, CanonicalConfigHashBindsOnlineSafetyCostPolicy) {
   EXPECT_NE(iap::canonicalRiskGridConfigHash(fixed_geometry), baseline_hash);
 }
 
+TEST(RiskGridMapTest, CanonicalSourceHashBindsTrustedMapSupportIdentity) {
+  iap::RiskGridSourceIdentity baseline;
+  baseline.occupancy_generation = 7;
+  baseline.occupancy_stamp_s = 10.0;
+  baseline.prior_generation = 8;
+  baseline.prior_stamp_s = 10.0;
+  baseline.gnss_generation = 9;
+  baseline.gnss_stamp_s = 10.0;
+  baseline.lidar_generation = 10;
+  baseline.lidar_stamp_s = 10.0;
+  baseline.local_map_support_identity = "support-at-pose-a";
+  baseline.alert_limit_policy_id = "fixed_hal10_val20_v1";
+  const std::string baseline_hash =
+      iap::canonicalRiskGridSourceIdentityHash(baseline);
+
+  auto moved_envelope = baseline;
+  moved_envelope.local_map_support_identity = "support-at-pose-b";
+  EXPECT_NE(iap::canonicalRiskGridSourceIdentityHash(moved_envelope),
+            baseline_hash);
+}
+
 TEST(RiskGridMapTest, FixedAlertLimitPolicyRejectsNumericOverrides) {
   iap::RiskGridMap grid;
   auto params = base_params();

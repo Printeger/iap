@@ -446,6 +446,12 @@ void PredictorModule::set_observation_predicate(
   gnss_.set_observation_predicate(std::move(predicate));
 }
 
+void PredictorModule::set_support_query(
+    VisibilityPredictor::SupportQuery query) {
+  support_query_time_sensitive_ = static_cast<bool>(query);
+  gnss_.set_support_query(std::move(query));
+}
+
 void PredictorModule::set_lidar_fim_primitives(
     std::shared_ptr<const std::vector<LidarFimPrimitive>> primitives) {
   lidar_.set_lidar_fim_primitives(std::move(primitives));
@@ -548,19 +554,24 @@ PredictorQueryResult PredictorModule::queryWithSpatialAdvisory(
     working_input.snapshot.lambda_base_pos.setZero();
   }
 
-  if (cached_spatial_advisory != nullptr) {
-    out.gnss = cached_spatial_advisory->gnss;
-    out.lidar = cached_spatial_advisory->lidar;
-    if (diagnostics) {
+  const bool gnss_allowed =
+      source_allows_gnss(params_.source_mode) &&
+      !gnss_policy_disables_gnss(params_.gnss_epoch_policy);
+  const bool reuse_gnss = cached_spatial_advisory != nullptr &&
+      (!support_query_time_sensitive_ || !gnss_allowed ||
+       cached_spatial_advisory->gnss_query_time_s ==
+           working_input.query_time_s);
+  const bool reuse_lidar = cached_spatial_advisory != nullptr;
+  if (diagnostics) {
+    if (reuse_gnss && reuse_lidar) {
       ++diagnostics->spatial_advisory_reuse_count;
-    }
-  } else {
-    if (diagnostics) {
+    } else {
       ++diagnostics->spatial_advisory_recompute_count;
     }
-    const bool gnss_allowed =
-        source_allows_gnss(params_.source_mode) &&
-        !gnss_policy_disables_gnss(params_.gnss_epoch_policy);
+  }
+  if (reuse_gnss) {
+    out.gnss = cached_spatial_advisory->gnss;
+  } else {
     if (gnss_allowed) {
       std::string gnss_unavailable_reason;
       if (params_.freshness.enabled) {
@@ -577,9 +588,10 @@ PredictorQueryResult PredictorModule::queryWithSpatialAdvisory(
         out.gnss = gnss_satellite_mask != nullptr
             ? gnss_.query_with_satellite_mask(
                   working_input.query_position_map, working_input.snapshot,
-                  *gnss_satellite_mask)
+                  *gnss_satellite_mask, working_input.query_time_s)
             : gnss_.query(working_input.query_position_map,
-                          working_input.snapshot);
+                          working_input.snapshot,
+                          working_input.query_time_s);
         if (diagnostics) {
           ++diagnostics->gnss_advisory_invocations;
           if (diagnostics->collect_component_timing) {
@@ -595,7 +607,11 @@ PredictorQueryResult PredictorModule::queryWithSpatialAdvisory(
     } else {
       out.gnss = disabled_gnss_result("gnss_disabled");
     }
+  }
 
+  if (reuse_lidar) {
+    out.lidar = cached_spatial_advisory->lidar;
+  } else {
     if (source_allows_lidar(params_.source_mode)) {
       const auto begin = diagnostics && diagnostics->collect_component_timing
                              ? std::chrono::steady_clock::now()
@@ -614,10 +630,12 @@ PredictorQueryResult PredictorModule::queryWithSpatialAdvisory(
     } else {
       out.lidar = disabled_lidar_result("lidar_disabled");
     }
-    if (evaluated_spatial_advisory != nullptr) {
-      evaluated_spatial_advisory->gnss = out.gnss;
-      evaluated_spatial_advisory->lidar = out.lidar;
-    }
+  }
+  if (evaluated_spatial_advisory != nullptr) {
+    evaluated_spatial_advisory->gnss = out.gnss;
+    evaluated_spatial_advisory->lidar = out.lidar;
+    evaluated_spatial_advisory->gnss_query_time_s =
+        working_input.query_time_s;
   }
   if (out.gnss.valid) {
     apply_certified_gnss_anchor(gnss_, params_.gnss,
@@ -845,7 +863,8 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
     }
     const auto& query = request.points[point_index];
     const VisibilityResult evidence =
-        gnss_.visibility_evidence(query.position_map, request.snapshot);
+        gnss_.visibility_evidence(
+            query.position_map, request.snapshot, query.query_time_s);
     if (budget_expired()) {
       // Evidence retained above is diagnostic only; every advisory point is
       // still unfinished until the second pass evaluates GNSS/LiDAR/FIM.

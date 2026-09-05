@@ -93,6 +93,64 @@ TEST(RegisteredLidarWindow, OutOfBoundsHitRetainsObservedFreeMapPrefix) {
             RegisteredVoxelState::OBSERVED_FREE);
   EXPECT_EQ(window.stateAt(Eigen::Vector3i(7, 0, 0)),
             RegisteredVoxelState::OBSERVED_FREE);
+  const auto environment = window.environmentOccupiedVoxelCenters();
+  ASSERT_NE(environment, nullptr);
+  ASSERT_EQ(environment->size(), 1U);
+  EXPECT_GT(environment->front().x(), 8.0);
+}
+
+TEST(RegisteredLidarWindow,
+     EnvironmentSnapshotIsImmutableAndCurrentMetadataIsLightweight) {
+  auto window = makeWindow();
+  ASSERT_TRUE(window.applyCurrentFrame(frame(
+      1, Eigen::Vector3d(0.5, 0.5, 0.5),
+      {Eigen::Vector3d(10.0, 0.0, 0.0)})).accepted);
+  const auto first = window.environmentOccupiedVoxelCenters();
+  ASSERT_NE(first, nullptr);
+  ASSERT_EQ(first->size(), 1U);
+  const Eigen::Vector3d first_center = first->front();
+
+  ASSERT_TRUE(window.applyCurrentFrame(frame(
+      2, Eigen::Vector3d(0.5, 0.5, 0.5),
+      {Eigen::Vector3d(12.0, 0.0, 0.0)})).accepted);
+  const auto second = window.environmentOccupiedVoxelCenters();
+  ASSERT_NE(second, nullptr);
+  ASSERT_EQ(second->size(), 1U);
+  EXPECT_NE(first.get(), second.get());
+  EXPECT_TRUE(first->front().isApprox(first_center));
+  EXPECT_FALSE(second->front().isApprox(first_center));
+
+  const auto metadata = window.currentFrameMetadata();
+  ASSERT_TRUE(metadata.has_value());
+  EXPECT_EQ(metadata->frame_id, 2);
+  EXPECT_DOUBLE_EQ(metadata->scan_end_stamp_s, 2.1);
+  EXPECT_TRUE(metadata->T_map_lidar.translation().isApprox(
+      Eigen::Vector3d(0.5, 0.5, 0.5)));
+}
+
+TEST(RegisteredLidarWindow,
+     EnvironmentReferenceCountsPreserveActiveHitAfterCurrentReplacement) {
+  auto window = makeWindow();
+  ActiveLidarWindowDeltaData active;
+  active.base_generation = 0;
+  active.generation = 1;
+  active.complete = true;
+  active.frame_contract_id = "contract-a";
+  active.added.push_back(frame(
+      10, Eigen::Vector3d(0.5, 0.5, 0.5),
+      {Eigen::Vector3d(10.0, 0.0, 0.0)}));
+  ASSERT_TRUE(window.applyActiveDelta(active).accepted);
+  ASSERT_TRUE(window.applyCurrentFrame(frame(
+      20, Eigen::Vector3d(0.5, 0.5, 0.5),
+      {Eigen::Vector3d(10.0, 0.0, 0.0)})).accepted);
+  ASSERT_EQ(window.environmentOccupiedVoxelCenters()->size(), 1U);
+
+  ASSERT_TRUE(window.applyCurrentFrame(frame(
+      21, Eigen::Vector3d(0.5, 0.5, 0.5),
+      {Eigen::Vector3d(12.0, 0.0, 0.0)})).accepted);
+  const auto environment = window.environmentOccupiedVoxelCenters();
+  ASSERT_EQ(environment->size(), 2U);
+  EXPECT_LT(environment->front().x(), environment->back().x());
 }
 
 TEST(RegisteredLidarWindow, DeltaGapAndContractChangeRequireRecovery) {

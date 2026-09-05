@@ -4,6 +4,7 @@
 #include <Eigen/Core>
 
 #include <functional>
+#include <limits>
 #include <memory>
 #include <mutex>
 
@@ -21,15 +22,20 @@ class GnssAdvisoryPredictor {
   void set_local_occupancy(const LocalOccupancyGrid* occupancy);
   void set_observation_predicate(
       VisibilityPredictor::ObservationPredicate predicate);
+  void set_support_query(VisibilityPredictor::SupportQuery query);
 
   GnssAdvisoryResult query(const Eigen::Vector3d& query_position,
-                           const IntegritySnapshot& snapshot) const;
+                           const IntegritySnapshot& snapshot,
+                           double query_time_s =
+                               std::numeric_limits<double>::quiet_NaN()) const;
   // Evaluate advisory geometry using an explicit per-query satellite mask.
   // The frozen epoch and its certified exclusion identity are not modified.
   GnssAdvisoryResult query_with_satellite_mask(
       const Eigen::Vector3d& query_position,
       const IntegritySnapshot& snapshot,
-      const std::vector<bool>& satellite_mask) const;
+      const std::vector<bool>& satellite_mask,
+      double query_time_s =
+          std::numeric_limits<double>::quiet_NaN()) const;
   // Current receiver measurement support is an anchor-only operation.  It is
   // intentionally separate from query() so standalone advisory diagnostics
   // remain raw and planning code cannot extend measured support spatially.
@@ -40,7 +46,9 @@ class GnssAdvisoryPredictor {
       const std::vector<bool>& satellite_mask) const;
   VisibilityResult visibility_evidence(
       const Eigen::Vector3d& query_position,
-      const IntegritySnapshot& snapshot) const;
+      const IntegritySnapshot& snapshot,
+      double query_time_s =
+          std::numeric_limits<double>::quiet_NaN()) const;
 
   const GnssAdvisoryPredictorParams& params() const { return params_; }
 
@@ -52,13 +60,16 @@ class GnssAdvisoryPredictor {
       const Eigen::Vector3d& query_position,
       const IntegritySnapshot& snapshot,
       bool force_measured_epoch_support,
-      const std::vector<bool>* satellite_mask = nullptr) const;
+      const std::vector<bool>* satellite_mask = nullptr,
+      double query_time_s =
+          std::numeric_limits<double>::quiet_NaN()) const;
   GnssAdvisoryResult receiver_anchor_advisory(
       const IntegritySnapshot& snapshot) const;
   VisibilityResult cached_visibility_evidence(
       const Eigen::Vector3d& query_position,
       const GnssEpoch& epoch,
-      bool measured_epoch_support) const;
+      bool measured_epoch_support,
+      double query_time_s) const;
   GnssAdvisoryResult compute_advisory_fim(
       const Eigen::Vector3d& query_position,
       const GnssEpoch& epoch,
@@ -70,6 +81,7 @@ class GnssAdvisoryPredictor {
   GnssGeometryPlPredictor geometry_predictor_;
   VisibilityPredictor visibility_predictor_;
   VisibilityPredictor::ObservationPredicate observation_predicate_;
+  VisibilityPredictor::SupportQuery support_query_;
   std::shared_ptr<ReceiverAnchorCache> receiver_anchor_cache_;
   std::shared_ptr<VisibilityEvidenceCache> visibility_evidence_cache_;
 };

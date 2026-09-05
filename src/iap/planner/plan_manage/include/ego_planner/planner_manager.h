@@ -26,6 +26,57 @@
 
 namespace ego_planner
 {
+  inline bool validP4TrackingErrorLimit(const double limit_m)
+  {
+    return std::isfinite(limit_m) && limit_m > 0.0 && limit_m <= 5.0;
+  }
+
+
+  enum class P4ExecutionAuthority
+  {
+    FORMAL_RISK_SELECTED = 0,
+    LIMITED_PREFIX,
+    ADVISORY,
+  };
+
+  struct P4ExecutionCertificate
+  {
+    bool valid = false;
+    int trajectory_id = 0;
+    int64_t start_time_ns = 0;
+    double duration_s = 0.0;
+    double execution_deadline_s = 0.0;
+    std::string control_points_hash;
+    std::string knot_vector_hash;
+    Eigen::Vector3d approved_endpoint = Eigen::Vector3d::Constant(
+        std::numeric_limits<double>::quiet_NaN());
+    double terminal_speed_mps = std::numeric_limits<double>::infinity();
+    double terminal_acceleration_mps2 = std::numeric_limits<double>::infinity();
+    double braking_distance_m = std::numeric_limits<double>::infinity();
+    P4ExecutionAuthority authority = P4ExecutionAuthority::LIMITED_PREFIX;
+    P4ForwardSnapshotIdentity snapshot_identity;
+  };
+
+  struct P4ExecutionCheckDiagnostics
+  {
+    bool applicable = false;
+    bool allowed = false;
+    bool endpoint_reached = false;
+    bool identity_match = false;
+    bool tracking_within_limit = false;
+    bool current_integrity_fresh = false;
+    bool current_integrity_safe = false;
+    bool remaining_risk_support_complete = false;
+    bool known_future_risk_unsafe = false;
+    double remaining_time_s = std::numeric_limits<double>::quiet_NaN();
+    double tracking_error_m = std::numeric_limits<double>::quiet_NaN();
+    double terminal_speed_mps = std::numeric_limits<double>::quiet_NaN();
+    double terminal_acceleration_mps2 =
+        std::numeric_limits<double>::quiet_NaN();
+    double time_to_risk_violation_s =
+        std::numeric_limits<double>::infinity();
+    std::string reason = "no_committed_trajectory";
+  };
   class P0RiskGridRuntime;
   struct P0OccupancyEpoch;
   class P5RuntimeIntegrityGate;
@@ -101,7 +152,11 @@ namespace ego_planner
 
     /* main planning interface */
     bool reboundReplan(Eigen::Vector3d start_pt, Eigen::Vector3d start_vel, Eigen::Vector3d start_acc,
-                       Eigen::Vector3d end_pt, Eigen::Vector3d end_vel, bool flag_polyInit, bool flag_randomPolyTraj);
+                       Eigen::Vector3d end_pt, Eigen::Vector3d end_vel, bool flag_polyInit,
+                       bool flag_randomPolyTraj,
+                       Eigen::Vector3d execution_actual_position =
+                           Eigen::Vector3d::Constant(
+                               std::numeric_limits<double>::quiet_NaN()));
     bool EmergencyStop(Eigen::Vector3d stop_pos);
     bool planGlobalTraj(const Eigen::Vector3d &start_pos, const Eigen::Vector3d &start_vel, const Eigen::Vector3d &start_acc,
                         const Eigen::Vector3d &end_pos, const Eigen::Vector3d &end_vel, const Eigen::Vector3d &end_acc);
@@ -171,6 +226,16 @@ namespace ego_planner
     }
     std::optional<P4GeometryCommitResult>
     validateCommittedP4TrajectoryGeometry(double now_s);
+    P4ExecutionCheckDiagnostics validateCommittedP4TrajectoryExecution(
+        double now_s, const Eigen::Vector3d &actual_position);
+    bool committedP4TrajectoryReachedEndpoint(double now_s) const;
+    bool p4ExecutionRevoked() const { return p4_execution_revoked_; }
+    const P4ExecutionCertificate &p4ExecutionCertificate() const {
+      return p4_execution_certificate_;
+    }
+    const P4ExecutionCheckDiagnostics &lastP4ExecutionDiagnostics() const {
+      return last_p4_execution_diagnostics_;
+    }
     void setP4ForwardDecisionForTest(P4ForwardDecision decision)
     {
       last_p4_forward_decision_ = std::move(decision);
@@ -247,6 +312,10 @@ namespace ego_planner
     int published_p4_trajectory_id_ = 0;
     int64_t published_p4_trajectory_start_ns_ = 0;
     std::string published_p4_control_points_hash_;
+    P4ExecutionCertificate p4_execution_certificate_;
+    P4ExecutionCheckDiagnostics last_p4_execution_diagnostics_;
+    bool p4_execution_revoked_ = false;
+    double p4_max_tracking_error_m_ = 0.75;
     int64_t last_p4_runtime_lineage_start_ns_ = 0;
     Eigen::Vector3d p4_last_decision_position_ = Eigen::Vector3d::Constant(
         std::numeric_limits<double>::quiet_NaN());

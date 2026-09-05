@@ -41,6 +41,7 @@ class PredictorModule {
   void set_local_occupancy(const LocalOccupancyGrid* occupancy);
   void set_observation_predicate(
       VisibilityPredictor::ObservationPredicate predicate);
+  void set_support_query(VisibilityPredictor::SupportQuery query);
   void set_lidar_fim_primitives(
       std::shared_ptr<const std::vector<LidarFimPrimitive>> primitives);
   void set_lidar_map_points(
@@ -63,9 +64,11 @@ class PredictorModule {
   struct SpatialAdvisory {
     GnssAdvisoryResult gnss;
     LidarAdvisoryResult lidar;
+    double gnss_query_time_s = std::numeric_limits<double>::quiet_NaN();
   };
 
   PredictorParams params_;
+  bool support_query_time_sensitive_ = false;
   GnssAdvisoryPredictor gnss_;
   LidarAdvisoryPredictor lidar_;
   FusionAdvisoryPredictor fusion_;

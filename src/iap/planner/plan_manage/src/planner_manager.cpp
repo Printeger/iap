@@ -13,6 +13,7 @@
 #include <iomanip>
 #include <limits>
 #include <sstream>
+#include <stdexcept>
 #include <thread>
 #include <utility>
 #include "visualization_msgs/msg/marker.hpp" // zx-todo
@@ -39,6 +40,92 @@ namespace ego_planner
       std::ostringstream output;
       output << std::hex << std::setfill('0') << std::setw(16) << hash;
       return output.str();
+    }
+
+    std::string p4KnotVectorHash(const Eigen::VectorXd &knots)
+    {
+      std::ostringstream canonical;
+      canonical << knots.size() << ';';
+      for (int index = 0; index < knots.size(); ++index)
+        canonical << std::hexfloat << knots(index) << ';';
+      uint64_t hash = 1469598103934665603ULL;
+      for (const unsigned char byte : canonical.str())
+      {
+        hash ^= static_cast<uint64_t>(byte);
+        hash *= 1099511628211ULL;
+      }
+      std::ostringstream output;
+      output << std::hex << std::setfill('0') << std::setw(16) << hash;
+      return output.str();
+    }
+
+    bool imposeP4TerminalStop(
+        UniformBspline *trajectory, const double max_velocity,
+        const double max_acceleration, const double feasibility_tolerance,
+        std::string *reason)
+    {
+      if (!trajectory)
+      {
+        if (reason) *reason = "trajectory_missing";
+        return false;
+      }
+      const Eigen::MatrixXd original_control_points =
+          trajectory->getControlPoint();
+      const double duration = trajectory->getTimeSum();
+      const double interval = trajectory->getInterval();
+      const int interpolation_count = original_control_points.cols() - 2;
+      if (original_control_points.rows() != 3 || interpolation_count < 4 ||
+          !original_control_points.allFinite() || !std::isfinite(duration) ||
+          duration <= 0.0 || !std::isfinite(interval) || interval <= 0.0)
+      {
+        if (reason) *reason = "terminal_parameterization_invalid";
+        return false;
+      }
+      UniformBspline velocity = trajectory->getDerivative();
+      UniformBspline acceleration = velocity.getDerivative();
+      std::vector<Eigen::Vector3d> samples;
+      samples.reserve(static_cast<std::size_t>(interpolation_count));
+      for (int index = 0; index < interpolation_count; ++index)
+      {
+        const double time = duration * static_cast<double>(index) /
+            static_cast<double>(interpolation_count - 1);
+        samples.push_back(trajectory->evaluateDeBoorT(time));
+      }
+      const std::vector<Eigen::Vector3d> derivatives = {
+          velocity.evaluateDeBoorT(0.0), Eigen::Vector3d::Zero(),
+          acceleration.evaluateDeBoorT(0.0), Eigen::Vector3d::Zero()};
+      Eigen::MatrixXd stopped_control_points;
+      UniformBspline::parameterizeToBspline(
+          interval, samples, derivatives, stopped_control_points);
+      if (stopped_control_points.rows() != 3 ||
+          stopped_control_points.cols() != original_control_points.cols() ||
+          !stopped_control_points.allFinite())
+      {
+        if (reason) *reason = "terminal_parameterization_failed";
+        return false;
+      }
+      UniformBspline stopped(stopped_control_points, 3, interval);
+      stopped.setPhysicalLimits(
+          max_velocity, max_acceleration, feasibility_tolerance);
+      double feasibility_ratio = 1.0;
+      if (!stopped.checkFeasibility(feasibility_ratio, false))
+      {
+        if (reason) *reason = "terminal_stop_not_dynamically_feasible";
+        return false;
+      }
+      UniformBspline stopped_velocity = stopped.getDerivative();
+      UniformBspline stopped_acceleration = stopped_velocity.getDerivative();
+      const double stopped_duration = stopped.getTimeSum();
+      if (stopped_velocity.evaluateDeBoorT(stopped_duration).norm() > 1.0e-3 ||
+          stopped_acceleration.evaluateDeBoorT(stopped_duration).norm() >
+              1.0e-2)
+      {
+        if (reason) *reason = "terminal_stop_constraint_not_met";
+        return false;
+      }
+      *trajectory = std::move(stopped);
+      if (reason) *reason = "ok";
+      return true;
     }
 
     std::vector<Eigen::Vector3d> matrixColumnsToPoints(const Eigen::MatrixXd &points)
@@ -295,6 +382,9 @@ namespace ego_planner
           source.gnss_used_satellite_count;
       target.gnss_known_satellite_count =
           source.gnss_known_satellite_count;
+      target.support_authority =
+          source.prediction.gnss.support_authority;
+      target.support_status = source.prediction.gnss.support_status;
       target.local_satellite_set_hash =
           source.local_satellite_set_hash;
       target.known_hazard_evidence = source.known_hazard_evidence;
@@ -631,6 +721,7 @@ namespace ego_planner
     node->declare_parameter("p4.forward.channel_enumeration_budget_ms", 60.0);
     node->declare_parameter(
         "p4.forward.advisory_min_relative_improvement", 0.10);
+    node->declare_parameter("p4.execution.max_tracking_error_m", 0.75);
 
     node->get_parameter("manager/max_vel", pp_.max_vel_);
     node->get_parameter("manager/max_acc", pp_.max_acc_);
@@ -717,6 +808,12 @@ namespace ego_planner
                         p4_forward_limits_.channel_enumeration_budget_ms);
     node->get_parameter("p4.forward.advisory_min_relative_improvement",
                         p4_forward_limits_.advisory_min_relative_improvement);
+    node->get_parameter("p4.execution.max_tracking_error_m",
+                        p4_max_tracking_error_m_);
+    if (!validP4TrackingErrorLimit(p4_max_tracking_error_m_))
+      throw std::invalid_argument(
+          "p4.execution.max_tracking_error_m must be finite, positive, and "
+          "no greater than 5 m");
     safety_viz_ = std::make_shared<SafetyRvizPublisher>(
         node, SafetyRvizPublisher::declareAndReadConfig(node));
 
@@ -1591,11 +1688,15 @@ namespace ego_planner
         const double now_s = plannerNow().seconds();
         if (!p4_forward_submission_gate_.tryAcquire(now_s))
         {
+          unavailable.result_status = P4ForwardResultStatus::RATE_LIMITED;
           unavailable.reason =
               "forward_result_request_mismatch_recompute_rate_limited";
           return unavailable;
         }
-        unavailable.reason = p4_forward_worker_.submit(std::move(request))
+        const bool submitted = p4_forward_worker_.submit(std::move(request));
+        unavailable.result_status = submitted ? P4ForwardResultStatus::PENDING
+                                              : P4ForwardResultStatus::FAILED;
+        unavailable.reason = submitted
             ? "forward_result_request_mismatch_recompute_pending"
             : "forward_result_request_mismatch_submit_failed";
         return unavailable;
@@ -1666,12 +1767,14 @@ namespace ego_planner
       }
       p4_last_decision_position_ = start_pt;
       p4_last_decision_target_ = local_target_pt;
+      completed->result_status = P4ForwardResultStatus::READY;
       return *completed;
     }
     if (same_snapshot && same_target && moved_less_than_trigger &&
         !p4_forward_worker_.busy())
     {
       P4ForwardDecision cached = last_p4_forward_decision_;
+      cached.result_status = P4ForwardResultStatus::READY;
       cached.planning_attempt_id = request.planning_attempt_id;
       cached.reason = "cached_same_snapshot_target";
       if (!validate_geometry_commit(&cached, true))
@@ -1686,6 +1789,7 @@ namespace ego_planner
     const double now_s = plannerNow().seconds();
     if (!p4_forward_submission_gate_.tryAcquire(now_s))
     {
+      unavailable.result_status = P4ForwardResultStatus::RATE_LIMITED;
       unavailable.snapshot_identity = request.snapshot_identity;
       unavailable.action = P4ForwardAction::DEFER_RISK_SELECTION;
       unavailable.deferred_motion_mode =
@@ -1703,6 +1807,7 @@ namespace ego_planner
         live_generation_at_submit;
     if (!p4_forward_worker_.submit(std::move(request)))
     {
+      unavailable.result_status = P4ForwardResultStatus::FAILED;
       unavailable.reason = "forward_worker_submit_failed";
       return unavailable;
     }
@@ -1712,6 +1817,7 @@ namespace ego_planner
     unavailable.speed_cap_mps = 0.0;
     unavailable.trigger_reason =
         P4ForwardTriggerReason::NOMINAL_CERTIFICATION_SHORT;
+    unavailable.result_status = P4ForwardResultStatus::PENDING;
     unavailable.reason = "forward_worker_pending";
     return unavailable;
   }
@@ -1762,7 +1868,8 @@ namespace ego_planner
              "first_failed_gnss_attenuated_count,"
              "first_failed_gnss_unknown_count,first_failed_gnss_used_count,"
              "first_failed_gnss_support_ray_length_m,"
-             "first_failed_gnss_hard_occlusion,first_failed_floor_source_h,"
+             "first_failed_gnss_hard_occlusion,first_failed_support_authority,"
+             "first_failed_support_status,first_failed_floor_source_h,"
              "first_failed_floor_source_v,first_failed_known_hazard,"
              "first_failed_unknown_coverage,first_failed_reason,"
              "channel_search_attempts,duplicate_channel_paths,"
@@ -1773,18 +1880,43 @@ namespace ego_planner
              "geometry_commit_conflict_y,geometry_commit_conflict_z,"
              "geometry_commit_conflict_path_distance_m,"
              "geometry_commit_latency_ms,geometry_commit_reason,"
-             "planning_disposition,"
+             "planning_disposition,result_status,"
              "retained_trajectory_count,"
              "compute_latency_ms,trajectory_id,trajectory_start_ns,"
-             "control_points_hash,reason\n";
+             "control_points_hash,knot_vector_hash,trajectory_duration_s,"
+             "approved_endpoint_x,approved_endpoint_y,approved_endpoint_z,"
+             "terminal_speed_mps,terminal_acceleration_mps2,reason\n";
     std::string selected_hash;
     for (const auto &candidate : decision.candidates)
       if (candidate.candidate_id == decision.selected_candidate_id)
         selected_hash = candidate.path_hash;
     std::string control_hash;
+    std::string knot_hash;
     if (local_data_.traj_id_ > 0)
+    {
       control_hash = p4ControlPointHash(
           local_data_.position_traj_.getControlPoint());
+      knot_hash = p4KnotVectorHash(local_data_.position_traj_.getKnot());
+    }
+    const double trajectory_duration = local_data_.traj_id_ > 0
+        ? local_data_.position_traj_.getTimeSum()
+        : std::numeric_limits<double>::quiet_NaN();
+    const Eigen::Vector3d approved_endpoint = local_data_.traj_id_ > 0 &&
+        std::isfinite(trajectory_duration) && trajectory_duration >= 0.0
+        ? local_data_.position_traj_.evaluateDeBoorT(trajectory_duration)
+        : Eigen::Vector3d::Constant(
+            std::numeric_limits<double>::quiet_NaN());
+    double terminal_speed = std::numeric_limits<double>::quiet_NaN();
+    double terminal_acceleration = std::numeric_limits<double>::quiet_NaN();
+    if (local_data_.traj_id_ > 0 && std::isfinite(trajectory_duration) &&
+        trajectory_duration >= 0.0)
+    {
+      UniformBspline velocity = local_data_.position_traj_.getDerivative();
+      UniformBspline acceleration = velocity.getDerivative();
+      terminal_speed = velocity.evaluateDeBoorT(trajectory_duration).norm();
+      terminal_acceleration =
+          acceleration.evaluateDeBoorT(trajectory_duration).norm();
+    }
     csv << std::setprecision(17)
         << decision.schema_version << ',' << stage << ',' << stamp_s << ','
         << decision.decision_event_id << ',' << decision.planning_attempt_id
@@ -1851,6 +1983,10 @@ namespace ego_planner
         << ',' << decision.first_failed_risk.gnss_used_satellite_count
         << ',' << decision.first_failed_risk.gnss_support_ray_length_m
         << ',' << (decision.first_failed_risk.gnss_hard_occlusion ? 1 : 0)
+        << ',' << iap::localMapSupportAuthorityName(
+            decision.first_failed_risk.support_authority)
+        << ',' << iap::localMapSupportStatusName(
+            decision.first_failed_risk.support_status)
         << ',' << decision.first_failed_risk.floor_source_h
         << ',' << decision.first_failed_risk.floor_source_v
         << ',' << decision.first_failed_risk.known_gnss_degradation_ratio
@@ -1873,10 +2009,14 @@ namespace ego_planner
         << ',' << decision.geometry_commit.latency_ms
         << ',' << decision.geometry_commit.reason
         << ',' << p4PlanningDispositionName(decision.planning_disposition)
+        << ',' << p4ForwardResultStatusName(decision.result_status)
         << ',' << decision.retained_trajectory_count
         << ',' << decision.compute_latency_ms << ',' << local_data_.traj_id_
         << ',' << local_data_.start_time_.nanoseconds() << ',' << control_hash
-        << ',' << decision.reason << '\n';
+        << ',' << knot_hash << ',' << trajectory_duration << ','
+        << approved_endpoint.x() << ',' << approved_endpoint.y() << ','
+        << approved_endpoint.z() << ',' << terminal_speed << ','
+        << terminal_acceleration << ',' << decision.reason << '\n';
     csv.flush();
     if (!csv.good())
       return false;
@@ -1958,7 +2098,8 @@ namespace ego_planner
                      "gnss_spatial_delta_h,gnss_spatial_delta_v,"
                      "gnss_temporal_growth_h,gnss_temporal_growth_v,hpl,vpl,hal,val,"
                      "safety_ratio,fim_ratio,gnss_supported,lidar_supported,"
-                     "fim_supported,safety_state,ranking_state,unknown_coverage,reason\n";
+                     "fim_supported,support_authority,support_status,"
+                     "safety_state,ranking_state,unknown_coverage,reason\n";
     samples_buffer << std::setprecision(17);
     for (const auto &candidate : decision.candidates)
     {
@@ -1994,6 +2135,9 @@ namespace ego_planner
             << ',' << (risk.gnss_supported ? 1 : 0)
             << ',' << (risk.lidar_supported ? 1 : 0)
             << ',' << (risk.fim_supported ? 1 : 0)
+            << ',' << iap::localMapSupportAuthorityName(
+                risk.support_authority)
+            << ',' << iap::localMapSupportStatusName(risk.support_status)
             << ',' << p4ForwardSafetyStateName(risk.safety_state)
             << ',' << (risk.ranking_state == P4ForwardRankingState::COMPARABLE ?
                 "COMPARABLE" : "INCOMPLETE")
@@ -2344,6 +2488,27 @@ namespace ego_planner
                 last_p4_forward_decision_, commit_position)},
             stamp_s);
     }
+    const double committed_duration = local_data_.position_traj_.getTimeSum();
+    UniformBspline committed_velocity =
+        local_data_.position_traj_.getDerivative();
+    UniformBspline committed_acceleration = committed_velocity.getDerivative();
+    const Eigen::Vector3d committed_endpoint =
+        local_data_.position_traj_.evaluateDeBoorT(committed_duration);
+    const double committed_terminal_speed =
+        committed_velocity.evaluateDeBoorT(committed_duration).norm();
+    const double committed_terminal_acceleration =
+        committed_acceleration.evaluateDeBoorT(committed_duration).norm();
+    if (stage == "normal_publish_authorized" &&
+        (!std::isfinite(committed_duration) || committed_duration <= 0.0 ||
+         !committed_endpoint.allFinite() ||
+         !std::isfinite(committed_terminal_speed) ||
+         committed_terminal_speed > 1.0e-3 ||
+         !std::isfinite(committed_terminal_acceleration) ||
+         committed_terminal_acceleration > 1.0e-2))
+      return reject_final_identity(
+          P4GeometryCommitVerdict::INVALID_PATH,
+          "final_bspline_terminal_stop_contract_failed");
+
     const bool written = appendP4ForwardDecision(
         last_p4_forward_decision_, stage, stamp_s);
     if (written && stage == "normal_publish_authorized")
@@ -2359,6 +2524,38 @@ namespace ego_planner
       published_p4_trajectory_start_ns_ =
           local_data_.start_time_.nanoseconds();
       published_p4_control_points_hash_ = p4ControlPointHash(control_points);
+      p4_execution_certificate_ = P4ExecutionCertificate{};
+      p4_execution_certificate_.valid = true;
+      p4_execution_certificate_.trajectory_id = local_data_.traj_id_;
+      p4_execution_certificate_.start_time_ns =
+          local_data_.start_time_.nanoseconds();
+      p4_execution_certificate_.duration_s = committed_duration;
+      p4_execution_certificate_.execution_deadline_s =
+          local_data_.start_time_.seconds() + committed_duration;
+      p4_execution_certificate_.control_points_hash =
+          published_p4_control_points_hash_;
+      p4_execution_certificate_.knot_vector_hash = p4KnotVectorHash(
+          local_data_.position_traj_.getKnot());
+      p4_execution_certificate_.approved_endpoint = committed_endpoint;
+      p4_execution_certificate_.terminal_speed_mps =
+          committed_terminal_speed;
+      p4_execution_certificate_.terminal_acceleration_mps2 =
+          committed_terminal_acceleration;
+      p4_execution_certificate_.braking_distance_m =
+          last_p4_forward_decision_.stopping_distance_m;
+      p4_execution_certificate_.snapshot_identity =
+          last_p4_forward_decision_.snapshot_identity;
+      p4_execution_certificate_.authority =
+          last_p4_forward_decision_.action == P4ForwardAction::RISK_SELECTED
+          ? P4ExecutionAuthority::FORMAL_RISK_SELECTED
+          : (last_p4_forward_decision_.action ==
+                 P4ForwardAction::DEFER_RISK_SELECTION ||
+             last_p4_forward_decision_.action ==
+                 P4ForwardAction::OBSERVE_MORE)
+              ? P4ExecutionAuthority::LIMITED_PREFIX
+              : P4ExecutionAuthority::ADVISORY;
+      last_p4_execution_diagnostics_ = P4ExecutionCheckDiagnostics{};
+      p4_execution_revoked_ = false;
       last_p4_runtime_lineage_start_ns_ = 0;
     }
     return written;
@@ -2488,6 +2685,155 @@ namespace ego_planner
     return result;
   }
 
+  bool EGOPlannerManager::committedP4TrajectoryReachedEndpoint(
+      const double now_s) const
+  {
+    return p4_execution_certificate_.valid && std::isfinite(now_s) &&
+        local_data_.traj_id_ == p4_execution_certificate_.trajectory_id &&
+        local_data_.start_time_.nanoseconds() ==
+            p4_execution_certificate_.start_time_ns &&
+        now_s >= p4_execution_certificate_.execution_deadline_s - 1.0e-6;
+  }
+
+  P4ExecutionCheckDiagnostics
+  EGOPlannerManager::validateCommittedP4TrajectoryExecution(
+      const double now_s, const Eigen::Vector3d &actual_position)
+  {
+    P4ExecutionCheckDiagnostics out;
+    out.applicable = p4_execution_certificate_.valid;
+    if (!out.applicable)
+    {
+      out.reason = "execution_certificate_missing";
+      last_p4_execution_diagnostics_ = out;
+      return out;
+    }
+    const auto revoke = [this, &out](const std::string &reason) {
+        out.allowed = false;
+        out.reason = reason;
+        p4_execution_revoked_ = true;
+        published_p4_forward_decision_.planning_disposition =
+            P4PlanningDisposition::HOLD_REQUIRED;
+        last_p4_execution_diagnostics_ = out;
+        return out;
+      };
+    if (!std::isfinite(now_s) || !actual_position.allFinite() ||
+        local_data_.traj_id_ != p4_execution_certificate_.trajectory_id ||
+        local_data_.start_time_.nanoseconds() !=
+            p4_execution_certificate_.start_time_ns ||
+        !std::isfinite(local_data_.duration_) ||
+        std::abs(local_data_.duration_ -
+                 p4_execution_certificate_.duration_s) > 1.0e-9 ||
+        p4ControlPointHash(local_data_.position_traj_.getControlPoint()) !=
+            p4_execution_certificate_.control_points_hash ||
+        p4KnotVectorHash(local_data_.position_traj_.getKnot()) !=
+            p4_execution_certificate_.knot_vector_hash)
+      return revoke("committed_trajectory_identity_mismatch");
+    out.identity_match = true;
+    out.terminal_speed_mps = p4_execution_certificate_.terminal_speed_mps;
+    out.terminal_acceleration_mps2 =
+        p4_execution_certificate_.terminal_acceleration_mps2;
+    if (!std::isfinite(out.terminal_speed_mps) ||
+        out.terminal_speed_mps > 1.0e-3 ||
+        !std::isfinite(out.terminal_acceleration_mps2) ||
+        out.terminal_acceleration_mps2 > 1.0e-2)
+      return revoke("committed_terminal_stop_contract_invalid");
+    const double current_t = std::clamp(
+        now_s - local_data_.start_time_.seconds(), 0.0,
+        p4_execution_certificate_.duration_s);
+    out.remaining_time_s = std::max(
+        0.0, p4_execution_certificate_.execution_deadline_s - now_s);
+    const Eigen::Vector3d commanded_position =
+        local_data_.position_traj_.evaluateDeBoorT(current_t);
+    out.tracking_error_m = (actual_position - commanded_position).norm();
+    out.tracking_within_limit = std::isfinite(out.tracking_error_m) &&
+        out.tracking_error_m <= p4_max_tracking_error_m_;
+    if (!out.tracking_within_limit)
+      return revoke("committed_trajectory_tracking_error_exceeded");
+    out.endpoint_reached = committedP4TrajectoryReachedEndpoint(now_s);
+    if (out.endpoint_reached)
+    {
+      out.allowed = true;
+      out.current_integrity_fresh = true;
+      out.current_integrity_safe = true;
+      out.remaining_risk_support_complete = true;
+      out.reason = "approved_endpoint_reached";
+      p4_execution_revoked_ = false;
+      last_p4_execution_diagnostics_ = out;
+      return out;
+    }
+
+    const auto snapshot = acquireRiskGridSnapshot();
+    if (!snapshot)
+      return revoke("runtime_integrity_snapshot_missing");
+    const iap::RiskGridHealth health = snapshot->health();
+    out.current_integrity_fresh = health.ready && !health.stale &&
+        std::isfinite(snapshot->stamp_s()) &&
+        now_s >= snapshot->stamp_s() &&
+        now_s - snapshot->stamp_s() <= snapshot->params().stale_timeout_s &&
+        snapshot->params().frame_id ==
+            p4_execution_certificate_.snapshot_identity.frame_id;
+    if (!out.current_integrity_fresh)
+      return revoke("runtime_integrity_stale_or_frame_invalid");
+    if (iap::canonicalRiskGridConfigHash(snapshot->params()) !=
+            p4_execution_certificate_.snapshot_identity.risk_config_hash ||
+        snapshot->sourceIdentity().alert_limit_policy_id !=
+            p4_execution_certificate_.snapshot_identity.
+                alert_limit_policy_id)
+      return revoke("runtime_risk_policy_identity_changed");
+
+    iap::PredictedPLSample current_integrity;
+    const bool current_ok = snapshot->queryPredictedPL(
+        actual_position, now_s, &current_integrity);
+    out.current_integrity_safe = current_ok &&
+        current_integrity.available && current_integrity.valid &&
+        !current_integrity.stale &&
+        current_integrity.hpl_pred < snapshot->params().alert_limit_h_m &&
+        current_integrity.vpl_pred < snapshot->params().alert_limit_v_m;
+    if (!out.current_integrity_safe)
+      return revoke("runtime_current_integrity_not_safe");
+
+    out.remaining_risk_support_complete = true;
+    constexpr double kRuntimeRiskStepS = 0.2;
+    const int sample_count = std::max(1, static_cast<int>(std::ceil(
+        out.remaining_time_s / kRuntimeRiskStepS)));
+    for (int index = 0; index <= sample_count; ++index)
+    {
+      const double alpha = static_cast<double>(index) / sample_count;
+      const double relative_t = current_t + alpha *
+          (p4_execution_certificate_.duration_s - current_t);
+      const double query_time = local_data_.start_time_.seconds() + relative_t;
+      iap::PredictedPLSample predicted;
+      const bool predicted_ok = snapshot->queryPredictedPL(
+          local_data_.position_traj_.evaluateDeBoorT(relative_t),
+          query_time, &predicted);
+      const bool complete = predicted_ok && predicted.available &&
+          predicted.valid && !predicted.stale;
+      out.remaining_risk_support_complete =
+          out.remaining_risk_support_complete && complete;
+      if (complete &&
+          (predicted.hpl_pred >= snapshot->params().alert_limit_h_m ||
+           predicted.vpl_pred >= snapshot->params().alert_limit_v_m))
+      {
+        out.known_future_risk_unsafe = true;
+        out.time_to_risk_violation_s = std::max(0.0, query_time - now_s);
+        return revoke("runtime_known_future_integrity_unsafe");
+      }
+    }
+    if (p4_execution_certificate_.authority ==
+            P4ExecutionAuthority::FORMAL_RISK_SELECTED &&
+        !out.remaining_risk_support_complete)
+      return revoke("runtime_formal_risk_support_incomplete");
+    out.allowed = true;
+    out.reason = out.remaining_risk_support_complete
+        ? "runtime_execution_contract_valid"
+        : "runtime_limited_authority_unknown_allowed";
+    p4_execution_revoked_ = false;
+    published_p4_forward_decision_.planning_disposition =
+        P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY;
+    last_p4_execution_diagnostics_ = out;
+    return out;
+  }
+
   bool EGOPlannerManager::recordP4RuntimeLineage(const double stamp_s)
   {
     if (published_p4_trajectory_id_ <= 0 ||
@@ -2586,7 +2932,9 @@ namespace ego_planner
 
   bool EGOPlannerManager::reboundReplan(Eigen::Vector3d start_pt, Eigen::Vector3d start_vel,
                                         Eigen::Vector3d start_acc, Eigen::Vector3d local_target_pt,
-                                        Eigen::Vector3d local_target_vel, bool flag_polyInit, bool flag_randomPolyTraj)
+                                        Eigen::Vector3d local_target_vel, bool flag_polyInit,
+                                        bool flag_randomPolyTraj,
+                                        Eigen::Vector3d execution_actual_position)
   {
     last_p1_rejection_reason_.clear();
     last_p1_rejection_requires_new_generation_ = false;
@@ -2648,30 +2996,29 @@ namespace ego_planner
       P4ForwardDecision evaluated = evaluateP4ForwardRoute(
           start_pt, start_vel, local_target_pt);
       const bool transient_wait =
-          evaluated.reason.find("pending") != std::string::npos ||
-          evaluated.reason.find("rate_limited") != std::string::npos;
-      const Eigen::Vector3d committed_endpoint_velocity =
-          has_existing_trajectory &&
-          std::isfinite(local_data_.duration_) &&
-          local_data_.duration_ > 0.0 ?
-          local_data_.velocity_traj_.evaluateDeBoorT(local_data_.duration_) :
-          Eigen::Vector3d::Constant(
-              std::numeric_limits<double>::quiet_NaN());
-      const bool committed_trajectory_stops =
-          committed_endpoint_velocity.allFinite() &&
-          committed_endpoint_velocity.norm() <= 1.0e-3;
+          evaluated.result_status == P4ForwardResultStatus::PENDING ||
+          evaluated.result_status == P4ForwardResultStatus::RATE_LIMITED;
       if (transient_wait && has_existing_trajectory &&
-          committed_trajectory_stops &&
           local_data_.traj_id_ == published_p4_trajectory_id_)
       {
-        const auto retained_commit =
-            validateCommittedP4TrajectoryGeometry(plannerNow().seconds());
-        if (retained_commit && retained_commit->accepted())
+        const double retain_now_s = plannerNow().seconds();
+        const auto execution_check = validateCommittedP4TrajectoryExecution(
+            retain_now_s, execution_actual_position.allFinite()
+                ? execution_actual_position : start_pt);
+        const auto retained_commit = execution_check.allowed &&
+            !execution_check.endpoint_reached
+            ? validateCommittedP4TrajectoryGeometry(retain_now_s)
+            : std::optional<P4GeometryCommitResult>{};
+        if (execution_check.allowed &&
+            (execution_check.endpoint_reached ||
+             (retained_commit && retained_commit->accepted())))
         {
           ++p4_retained_trajectory_count_;
-          last_p4_forward_decision_.geometry_commit = *retained_commit;
+          if (retained_commit)
+            last_p4_forward_decision_.geometry_commit = *retained_commit;
           last_p4_forward_decision_.planning_disposition =
               P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY;
+          last_p4_forward_decision_.result_status = evaluated.result_status;
           last_p4_forward_decision_.retained_trajectory_count =
               p4_retained_trajectory_count_;
           last_p4_forward_decision_.reason = evaluated.reason;
@@ -2687,6 +3034,28 @@ namespace ego_planner
                 plannerNow().seconds());
           return false;
         }
+        RCLCPP_WARN(
+            rclcpp::get_logger("ego_planner"),
+            "P4 retain rejected: execution_reason=%s geometry_checked=%d "
+            "geometry_verdict=%s geometry_reason=%s identity=%d remaining_s=%.3f "
+            "terminal_v=%.6f terminal_a=%.6f tracking_error=%.3f "
+            "integrity_fresh=%d integrity_safe=%d risk_complete=%d "
+            "known_future_unsafe=%d",
+            execution_check.reason.c_str(),
+            retained_commit.has_value() ? 1 : 0,
+            retained_commit
+                ? p4GeometryCommitVerdictName(retained_commit->verdict)
+                : "NOT_CHECKED",
+            retained_commit ? retained_commit->reason.c_str() : "not_checked",
+            execution_check.identity_match ? 1 : 0,
+            execution_check.remaining_time_s,
+            execution_check.terminal_speed_mps,
+            execution_check.terminal_acceleration_mps2,
+            execution_check.tracking_error_m,
+            execution_check.current_integrity_fresh ? 1 : 0,
+            execution_check.current_integrity_safe ? 1 : 0,
+            execution_check.remaining_risk_support_complete ? 1 : 0,
+            execution_check.known_future_risk_unsafe ? 1 : 0);
       }
       last_p4_forward_decision_ = std::move(evaluated);
       p4_planning_disposition_ =
@@ -4169,6 +4538,30 @@ namespace ego_planner
       refined_points.ts = ts;
       refined_points.control_points = pos.getControlPoint();
       gate0_writer_->appendControlPoints(refined_points);
+    }
+
+    // Every P4 executable segment is a finite authority grant. Reconstruct
+    // the final curve with fixed zero terminal velocity and acceleration so
+    // a delayed worker can never leave the controller with an open-ended
+    // prefix. This happens before all final P1/P4 checks, so those checks see
+    // the exact curve that may be published.
+    if (p4_runtime_config.enable_risk_aware_astar)
+    {
+      std::string terminal_reason;
+      if (!imposeP4TerminalStop(
+              &pos, planning_max_vel, pp_.max_acc_,
+              pp_.feasibility_tolerance_, &terminal_reason))
+      {
+        last_p4_forward_decision_.planning_disposition =
+            P4PlanningDisposition::HOLD_REQUIRED;
+        last_p4_forward_decision_.reason = terminal_reason;
+        p4_planning_disposition_ = P4PlanningDisposition::HOLD_REQUIRED;
+        RCLCPP_WARN(
+            rclcpp::get_logger("ego_planner"),
+            "P4 final trajectory rejected: %s", terminal_reason.c_str());
+        continous_failures_count_++;
+        return false;
+      }
     }
 
     // STEP3 is allowed to change both the control points and the interval.

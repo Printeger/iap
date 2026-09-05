@@ -183,6 +183,10 @@ struct RiskGridSourceIdentity {
   double gnss_stamp_s = std::numeric_limits<double>::quiet_NaN();
   uint64_t lidar_generation = 0;
   double lidar_stamp_s = std::numeric_limits<double>::quiet_NaN();
+  // Identity of the immutable local-map support envelope used by the
+  // predictor. It changes when pose, validity, extent or model version
+  // changes, even if the obstacle points themselves do not.
+  std::string local_map_support_identity;
   std::string alert_limit_policy_id = "legacy_unspecified";
 };
 

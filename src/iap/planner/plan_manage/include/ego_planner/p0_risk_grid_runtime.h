@@ -313,6 +313,7 @@ class P0RiskGridRuntime {
   double rolling_occupancy_stamp_ =
       std::numeric_limits<double>::quiet_NaN();
   uint64_t rolling_occupancy_content_identity_ = 0;
+  std::string rolling_support_identity_;
 
   // Inputs, heavy refresh, and health publication deliberately use distinct
   // execution paths.  Refresh may take longer than a sensor period, but must

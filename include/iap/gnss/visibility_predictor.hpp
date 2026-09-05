@@ -3,10 +3,12 @@
 // IAP-RQ-313: Estimate canopy density κ along LOS
 
 #include <iap/map/local_occupancy.hpp>
+#include <iap/map/trusted_local_map_support.hpp>
 #include <iap/gnss/gnss_types.hpp>
 #include <iap/gnss/canopy_noise_model.hpp>
 #include <Eigen/Core>
 #include <functional>
+#include <limits>
 #include <vector>
 #include <cmath>
 
@@ -25,6 +27,10 @@ struct VisibilityResult {
   int                  n_known    = 0;   ///< satellites with complete online LOS support
   int                  n_blocked  = 0;   ///< satellites rejected by hard occlusion
   double               mean_kappa = 0.0; ///< mean κ over visible satellites
+  LocalMapSupportAuthority support_authority =
+      LocalMapSupportAuthority::STRICT_OBSERVATION;
+  LocalMapSupportStatus support_status =
+      LocalMapSupportStatus::MODEL_COMPLETE;
 };
 
 /**
@@ -77,6 +83,10 @@ class VisibilityPredictor {
   using ObservationPredicate =
       std::function<bool(const Eigen::Vector3d& position_world)>;
   void set_observation_predicate(ObservationPredicate predicate);
+  using SupportQuery =
+      std::function<LocalMapSupportQuery(
+          const Eigen::Vector3d& position_world, double query_time_s)>;
+  void set_support_query(SupportQuery query);
 
   /**
    * @brief Predict visibility + κ for all satellites at a given position.
@@ -87,7 +97,9 @@ class VisibilityPredictor {
    */
   VisibilityResult predict(const Eigen::Vector3d& pos_world,
                            const GnssEpoch& epoch,
-                           bool measured_epoch_support = false) const;
+                           bool measured_epoch_support = false,
+                           double query_time_s =
+                               std::numeric_limits<double>::quiet_NaN()) const;
 
   const Params& params() const { return params_; }
 
@@ -98,6 +110,7 @@ class VisibilityPredictor {
   Params                      params_;
   const LocalOccupancyGrid*   grid_ = nullptr;
   ObservationPredicate       observation_predicate_;
+  SupportQuery               support_query_;
 };
 
 }  // namespace iap

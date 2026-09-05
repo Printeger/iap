@@ -23,6 +23,7 @@
 #include <iap/msg/active_lidar_window_delta.hpp>
 #include <iap/msg/registered_lidar_frame.hpp>
 #include <iap/srv/get_active_lidar_window.hpp>
+#include <iap/map/trusted_local_map_support.hpp>
 
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
@@ -201,6 +202,11 @@ struct FrozenOccupancyEpoch
   GridMapOccupancyDiagnosticQuery diagnostic_query;
   std::shared_ptr<const std::vector<Eigen::Vector3d>>
       raw_occupied_voxel_centers;
+  // Environment hits are independent of the flight lattice/geofence. They
+  // retain canopy points outside the permitted flight volume for GNSS LOS.
+  std::shared_ptr<const std::vector<Eigen::Vector3d>>
+      environment_occupied_voxel_centers;
+  std::shared_ptr<const iap::TrustedLocalMapSupport> trusted_local_map_support;
   Eigen::Vector3d lattice_origin = Eigen::Vector3d::Constant(
       std::numeric_limits<double>::quiet_NaN());
   Eigen::Vector3d extent_m = Eigen::Vector3d::Constant(
@@ -428,6 +434,14 @@ private:
   static constexpr std::size_t kCollisionDeltaHistoryCapacity = 128;
   double current_vehicle_clearance_radius_m_ = 0.0;
   bool registered_lidar_window_enabled_ = false;
+  bool trusted_local_map_support_enabled_ = true;
+  double trusted_support_min_range_m_ = 0.1;
+  double trusted_support_max_range_m_ = 10.0;
+  double trusted_support_horizontal_fov_deg_ = 360.0;
+  double trusted_support_vertical_min_deg_ = -7.0;
+  double trusted_support_vertical_max_deg_ = 52.0;
+  double trusted_support_validity_s_ = 1.0;
+  std::string trusted_support_model_version_ = "trusted_local_map_v1";
   std::string registered_frame_contract_id_;
   std::string registered_current_topic_;
   std::string registered_delta_topic_;

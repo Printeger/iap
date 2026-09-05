@@ -200,6 +200,16 @@ void GridMap::initMap(rclcpp::Node::SharedPtr node)
   node_->declare_parameter(
       "grid_map/registered_lidar_reference_frame_id",
       std::string("iap_lidar_reference"));
+  node_->declare_parameter("grid_map/trusted_local_map_support_enabled", true);
+  node_->declare_parameter("grid_map/trusted_support_min_range_m", 0.1);
+  node_->declare_parameter("grid_map/trusted_support_max_range_m", 10.0);
+  node_->declare_parameter("grid_map/trusted_support_horizontal_fov_deg", 360.0);
+  node_->declare_parameter("grid_map/trusted_support_vertical_min_deg", -7.0);
+  node_->declare_parameter("grid_map/trusted_support_vertical_max_deg", 52.0);
+  node_->declare_parameter("grid_map/trusted_support_validity_s", 1.0);
+  node_->declare_parameter(
+      "grid_map/trusted_support_model_version",
+      std::string("trusted_local_map_v1"));
 
   node_->get_parameter("grid_map/resolution", mp_.resolution_);
   node_->get_parameter("grid_map/map_size_x", x_size);
@@ -261,10 +271,41 @@ void GridMap::initMap(rclcpp::Node::SharedPtr node)
                        registered_recovery_service_);
   node_->get_parameter("grid_map/registered_lidar_reference_frame_id",
                        registered_lidar_reference_frame_id_);
+  node_->get_parameter("grid_map/trusted_local_map_support_enabled",
+                       trusted_local_map_support_enabled_);
+  node_->get_parameter("grid_map/trusted_support_min_range_m",
+                       trusted_support_min_range_m_);
+  node_->get_parameter("grid_map/trusted_support_max_range_m",
+                       trusted_support_max_range_m_);
+  node_->get_parameter("grid_map/trusted_support_horizontal_fov_deg",
+                       trusted_support_horizontal_fov_deg_);
+  node_->get_parameter("grid_map/trusted_support_vertical_min_deg",
+                       trusted_support_vertical_min_deg_);
+  node_->get_parameter("grid_map/trusted_support_vertical_max_deg",
+                       trusted_support_vertical_max_deg_);
+  node_->get_parameter("grid_map/trusted_support_validity_s",
+                       trusted_support_validity_s_);
+  node_->get_parameter("grid_map/trusted_support_model_version",
+                       trusted_support_model_version_);
   mp_.independent_cloud_min_interval_s_ =
       std::max(0.0, mp_.independent_cloud_min_interval_s_);
   mp_.independent_cloud_clock_guard_s_ =
       std::max(0.0, mp_.independent_cloud_clock_guard_s_);
+  if (registered_lidar_window_enabled_ && trusted_local_map_support_enabled_ &&
+      (!std::isfinite(trusted_support_min_range_m_) ||
+       !std::isfinite(trusted_support_max_range_m_) ||
+       trusted_support_min_range_m_ < 0.0 ||
+       trusted_support_max_range_m_ <= trusted_support_min_range_m_ ||
+       !std::isfinite(trusted_support_horizontal_fov_deg_) ||
+       trusted_support_horizontal_fov_deg_ <= 0.0 ||
+       trusted_support_horizontal_fov_deg_ > 360.0 ||
+       !std::isfinite(trusted_support_vertical_min_deg_) ||
+       !std::isfinite(trusted_support_vertical_max_deg_) ||
+       trusted_support_vertical_min_deg_ >= trusted_support_vertical_max_deg_ ||
+       !std::isfinite(trusted_support_validity_s_) ||
+       trusted_support_validity_s_ < 0.0 ||
+       trusted_support_model_version_.empty()))
+    throw std::runtime_error("invalid trusted local map support parameters");
   RCLCPP_INFO(node_->get_logger(),
               "[grid_map] independent cloud interval=%.3f s "
               "clock_guard=%.3f s",
@@ -2294,6 +2335,8 @@ GridMap::captureFrozenOccupancyEpoch() const
     std::vector<char> inflated;
     std::vector<char> raw_cloud;
     std::vector<char> observed;
+    std::shared_ptr<const std::vector<Eigen::Vector3d>> environment_hits;
+    std::optional<RegisteredLidarFrameMetadata> current_registered_frame;
   };
 
   auto buffers = std::make_shared<FrozenBuffers>();
@@ -2342,6 +2385,10 @@ GridMap::captureFrozenOccupancyEpoch() const
       buffers->current_frame_id =
           registered_lidar_window_->currentFrameId();
       buffers->frame_contract_id = registered_frame_contract_id_;
+      buffers->environment_hits =
+          registered_lidar_window_->environmentOccupiedVoxelCenters();
+      buffers->current_registered_frame =
+          registered_lidar_window_->currentFrameMetadata();
     }
     // Registered-window mode has no depth/fused writer by contract. Avoid
     // copying the 59 MiB log-odds layer while holding the occupancy mutex;
@@ -2437,6 +2484,8 @@ GridMap::captureFrozenOccupancyEpoch() const
   auto epoch = std::make_shared<FrozenOccupancyEpoch>();
   epoch->diagnostic_query = std::move(diagnostic_query);
   epoch->raw_occupied_voxel_centers = std::move(centers);
+  epoch->environment_occupied_voxel_centers = buffers->environment_hits
+      ? buffers->environment_hits : epoch->raw_occupied_voxel_centers;
   epoch->lattice_origin = frozen_buffers->map_origin;
   epoch->voxel_dimensions = frozen_buffers->map_voxel_num;
   epoch->extent_m = frozen_buffers->map_voxel_num.cast<double>() *
@@ -2453,6 +2502,33 @@ GridMap::captureFrozenOccupancyEpoch() const
       frozen_buffers->active_window_generation;
   epoch->current_frame_id = frozen_buffers->current_frame_id;
   epoch->frame_contract_id = frozen_buffers->frame_contract_id;
+  if (trusted_local_map_support_enabled_ &&
+      frozen_buffers->current_registered_frame)
+  {
+    constexpr double kPi = 3.14159265358979323846;
+    const auto &frame = *frozen_buffers->current_registered_frame;
+    auto support = std::make_shared<iap::TrustedLocalMapSupport>();
+    support->T_map_sensor = frame.T_map_lidar;
+    support->min_range_m = trusted_support_min_range_m_;
+    support->max_range_m = trusted_support_max_range_m_;
+    support->horizontal_fov_rad =
+        trusted_support_horizontal_fov_deg_ * kPi / 180.0;
+    support->vertical_min_rad =
+        trusted_support_vertical_min_deg_ * kPi / 180.0;
+    support->vertical_max_rad =
+        trusted_support_vertical_max_deg_ * kPi / 180.0;
+    support->stamp_s = frame.scan_end_stamp_s;
+    support->valid_until_s = frame.scan_end_stamp_s +
+        trusted_support_validity_s_;
+    support->frame_id = frozen_buffers->frame_id;
+    support->model_version = trusted_support_model_version_;
+    support->retained_min_map = frame.T_map_lidar.translation() -
+        Eigen::Vector3d::Constant(trusted_support_max_range_m_);
+    support->retained_max_map = frame.T_map_lidar.translation() +
+        Eigen::Vector3d::Constant(trusted_support_max_range_m_);
+    if (support->valid())
+      epoch->trusted_local_map_support = std::move(support);
+  }
   return epoch;
 }
 

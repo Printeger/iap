@@ -11,6 +11,7 @@
 #include <vector>
 
 #include <iap/map/local_occupancy.hpp>
+#include <iap/map/trusted_local_map_support.hpp>
 #include <iap/planner/risk_grid_map.hpp>
 
 struct FrozenOccupancyEpoch;
@@ -86,6 +87,9 @@ struct P0OccupancyEpoch {
   // reuse this vector instead of rebuilding it on the planner callback path.
   std::shared_ptr<const std::vector<Eigen::Vector3d>>
       raw_occupied_voxel_centers;
+  std::shared_ptr<const std::vector<Eigen::Vector3d>>
+      environment_occupied_voxel_centers;
+  std::shared_ptr<const iap::TrustedLocalMapSupport> trusted_local_map_support;
   // The exact producer-owned epoch used to build this P0 snapshot. P4 uses
   // it as the immutable base for route-local commit validation; it must never
   // be replaced with a newly captured live map.
@@ -147,6 +151,8 @@ class P0OccupancyEpochAdapter {
           };
     }
     return adaptFields(epoch.raw_occupied_voxel_centers,
+                       epoch.environment_occupied_voxel_centers,
+                       epoch.trusted_local_map_support,
                        epoch.lattice_origin, epoch.extent_m,
                        epoch.voxel_dimensions, epoch.resolution_m,
                        epoch.frame_id, epoch.cloud_stamp_s,
@@ -165,6 +171,8 @@ class P0OccupancyEpochAdapter {
  private:
   static std::optional<P0OccupancyEpoch> adaptFields(
       std::shared_ptr<const std::vector<Eigen::Vector3d>> occupied_centers,
+      std::shared_ptr<const std::vector<Eigen::Vector3d>> environment_centers,
+      std::shared_ptr<const iap::TrustedLocalMapSupport> trusted_support,
       const Eigen::Vector3d& lattice_origin,
       const Eigen::Vector3d& extent_m,
       const Eigen::Vector3i& voxel_dimensions,

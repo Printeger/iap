@@ -493,6 +493,8 @@ TEST(P4ForwardRoute, NonFiniteNominalReferenceFailsClosed)
 TEST(P4ForwardRoute, OpenObservedSpaceContinuesAsSingleChannel)
 {
   const auto decision = P4ForwardRoutePlanner().decide(straightRequest());
+  EXPECT_EQ(
+      decision.result_status, ego_planner::P4ForwardResultStatus::READY);
   EXPECT_EQ(decision.action, P4ForwardAction::CONTINUE_NOMINAL);
   EXPECT_EQ(decision.trigger_reason, P4ForwardTriggerReason::SINGLE_CHANNEL);
   ASSERT_EQ(decision.candidates.size(), 1u);

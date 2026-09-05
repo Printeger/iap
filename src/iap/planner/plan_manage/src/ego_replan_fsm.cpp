@@ -671,7 +671,8 @@ namespace ego_planner
     case REPLAN_TRAJ:
     {
 
-      if (planFromCurrentTraj(1))
+      const auto planning_result = planFromCurrentTraj(1);
+      if (planning_result == P4PlanningCycleResult::NEW_TRAJECTORY_READY)
       {
         changeFSMExecState(
             p4UsesDeferredExecution(
@@ -796,23 +797,33 @@ namespace ego_planner
       // if no safe progress exists, publish a zero-velocity stop candidate
       // and remain in OBSERVE_MORE until a new online snapshot is usable.
       const double now_s = plannerNow().seconds();
-      bool planned = false;
+      P4PlanningCycleResult planning_result =
+          P4PlanningCycleResult::RETRYABLE_FAILURE;
       if (!p4_observe_more_scheduler_.runIfDue(
               now_s, planner_manager_->p4ForwardDecisionReady(),
-              [this, &planned]() {planned = planFromCurrentTraj(1);}))
+              [this, &planning_result]() {
+                planning_result = planFromCurrentTraj(1);
+              }))
         break;
-      if (planned)
+      if (planning_result == P4PlanningCycleResult::NEW_TRAJECTORY_READY)
       {
         publishSwarmTrajs(false);
         if (!p4UsesDeferredExecution(
             planner_manager_->lastP4ForwardDecision()))
           changeFSMExecState(EXEC_TRAJ, "P4_FORWARD");
       }
-      else
+      else if (planning_result ==
+                   P4PlanningCycleResult::CONTINUE_COMMITTED ||
+               planning_result ==
+                   P4PlanningCycleResult::HOLD_APPROVED_ENDPOINT)
       {
-        if (planner_manager_->p4PlanningDisposition() !=
-            P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY)
-          callEmergencyStop(odom_pos_);
+        // Waiting for a worker result is an execution state.  The committed
+        // trajectory keeps its original start time, endpoint, and authority.
+        // The trajectory server holds its final position after expiry.
+      }
+      else if (!p4_waiting_for_risk_grid_ready_)
+      {
+        callEmergencyStop(odom_pos_);
       }
       break;
     }
@@ -958,10 +969,11 @@ namespace ego_planner
     return false;
   }
 
-  bool EGOReplanFSM::planFromCurrentTraj(const int trial_times /*=1*/)
+  P4PlanningCycleResult EGOReplanFSM::planFromCurrentTraj(
+      const int trial_times /*=1*/)
   {
     if (shouldDeferP4PlanningForRiskGridReady())
-      return false;
+      return P4PlanningCycleResult::RETRYABLE_FAILURE;
 
     LocalTrajData *info = &planner_manager_->local_data_;
     // ros::Time time_now = ros::Time::now();
@@ -974,38 +986,49 @@ namespace ego_planner
     start_acc_ = info->acceleration_traj_.evaluateDeBoorT(t_cur);
 
     bool success = callReboundReplan(false, false);
+    auto cycle_result = classifyP4PlanningCycle(
+        success, planner_manager_->p4PlanningDisposition(),
+        planner_manager_->committedP4TrajectoryReachedEndpoint(
+            time_now.seconds()),
+        planner_manager_->p4ExecutionRevoked());
 
-    if (!success)
+    if (p4PlanningCycleMayRetry(cycle_result))
     {
       if (p5_final_gate_emergency_candidate_)
       {
-        return false;
+        return P4PlanningCycleResult::EXECUTION_REVOKED;
       }
       success = callReboundReplan(true, false);
-      if (!success)
+      cycle_result = classifyP4PlanningCycle(
+          success, planner_manager_->p4PlanningDisposition(),
+          planner_manager_->committedP4TrajectoryReachedEndpoint(
+              plannerNow().seconds()),
+          planner_manager_->p4ExecutionRevoked());
+      if (p4PlanningCycleMayRetry(cycle_result))
       {
         if (p5_final_gate_emergency_candidate_)
         {
-          return false;
+          return P4PlanningCycleResult::EXECUTION_REVOKED;
         }
         for (int i = 0; i < trial_times; i++)
         {
           success = callReboundReplan(true, true);
-          if (success)
+          cycle_result = classifyP4PlanningCycle(
+              success, planner_manager_->p4PlanningDisposition(),
+              planner_manager_->committedP4TrajectoryReachedEndpoint(
+                  plannerNow().seconds()),
+              planner_manager_->p4ExecutionRevoked());
+          if (!p4PlanningCycleMayRetry(cycle_result))
             break;
           if (p5_final_gate_emergency_candidate_)
           {
-            return false;
+            return P4PlanningCycleResult::EXECUTION_REVOKED;
           }
-        }
-        if (!success)
-        {
-          return false;
         }
       }
     }
 
-    return true;
+    return cycle_result;
   }
 
   void EGOReplanFSM::checkCollisionCallback()
@@ -1032,6 +1055,35 @@ namespace ego_planner
     double t_cur = (plannerNow() - info->start_time_).seconds();
 
     Eigen::Vector3d p_cur = info->position_traj_.evaluateDeBoorT(t_cur);
+    const auto p4_execution_check =
+        planner_manager_->validateCommittedP4TrajectoryExecution(
+            plannerNow().seconds(), odom_pos_);
+    if (p4_execution_check.applicable && !p4_execution_check.allowed)
+    {
+      RCLCPP_WARN(
+          node_->get_logger(),
+          "P4 execution permission revoked: reason=%s identity=%d "
+          "remaining_s=%.3f tracking_error=%.3f integrity_fresh=%d "
+          "integrity_safe=%d risk_complete=%d known_future_unsafe=%d",
+          p4_execution_check.reason.c_str(),
+          p4_execution_check.identity_match ? 1 : 0,
+          p4_execution_check.remaining_time_s,
+          p4_execution_check.tracking_error_m,
+          p4_execution_check.current_integrity_fresh ? 1 : 0,
+          p4_execution_check.current_integrity_safe ? 1 : 0,
+          p4_execution_check.remaining_risk_support_complete ? 1 : 0,
+          p4_execution_check.known_future_risk_unsafe ? 1 : 0);
+      const double time_to_violation =
+          p4_execution_check.known_future_risk_unsafe
+          ? p4_execution_check.time_to_risk_violation_s
+          : p4_execution_check.remaining_time_s;
+      changeFSMExecState(
+          std::isfinite(time_to_violation) &&
+              time_to_violation <= emergency_time_
+              ? EMERGENCY_STOP : REPLAN_TRAJ,
+          "P4_EXECUTION_CONTRACT");
+      return;
+    }
     bool p4_route_collision = false;
     std::optional<P4GeometryCommitResult> p4_collision_commit;
     if (const auto geometry_commit =
@@ -1115,7 +1167,8 @@ namespace ego_planner
       if (occ)
       {
 
-        if (planFromCurrentTraj()) // Make a chance
+        if (planFromCurrentTraj() ==
+            P4PlanningCycleResult::NEW_TRAJECTORY_READY) // Make a chance
         {
           changeFSMExecState(EXEC_TRAJ, "SAFETY");
           publishSwarmTrajs(false);
@@ -1163,7 +1216,8 @@ namespace ego_planner
         RCLCPP_WARN(node_->get_logger(),
                     "P5 requested emergency candidate: reason=%s",
                     P5RuntimeIntegrityGate::reasonName(p5_status.reason));
-        if (planFromCurrentTraj())
+        if (planFromCurrentTraj() ==
+            P4PlanningCycleResult::NEW_TRAJECTORY_READY)
         {
           changeFSMExecState(EXEC_TRAJ, "P5_SAFETY");
           publishSwarmTrajs(false);
@@ -1272,7 +1326,7 @@ namespace ego_planner
         : planner_manager_->reboundReplan(
               start_pt_, start_vel_, start_acc_, local_target_pt_,
               local_target_vel_, (have_new_target_ || flag_use_poly_init),
-              flag_randomPolyTraj);
+              flag_randomPolyTraj, odom_pos_);
     have_new_target_ = false;
 
     cout << "refine_success=" << plan_and_refine_success << endl;

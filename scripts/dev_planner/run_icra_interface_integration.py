@@ -41,6 +41,11 @@ P4_FORWARD_DECISION_SCHEMAS = {
     "p4_forward_route_decision_v3",
     "p4_forward_route_decision_v4",
     "p4_forward_route_decision_v5",
+    "p4_forward_route_decision_v6",
+}
+P4_FORMAL_RISK_SAMPLE_SCHEMAS = {
+    "p4_forward_route_decision_v5",
+    "p4_forward_route_decision_v6",
 }
 FOREST_SCENARIOS = (FOREST_V1_SCENARIO, FOREST_SCENARIO)
 SEVEN_STAGE_ORDER = (
@@ -1056,12 +1061,14 @@ def _selected_decisions(decisions: list[dict]) -> list[dict]:
                  "p4_forward_route_decision_v3",
                  "p4_forward_route_decision_v4",
                  "p4_forward_route_decision_v5",
+                 "p4_forward_route_decision_v6",
                  }
                  or (row.get("selection_authority") == "FORMAL"
                      and str(row.get("formal_support")) == "1"))
             and (row.get("schema_version") not in {
                      "p4_forward_route_decision_v4",
                      "p4_forward_route_decision_v5",
+                     "p4_forward_route_decision_v6",
                  }
                  or row.get("geometry_commit_verdict") in {
                      "CLEAR_UNCHANGED", "CLEAR_AFTER_UPDATE",
@@ -1238,6 +1245,7 @@ def analyze_stage_records(
             "p4_forward_route_decision_v3",
             "p4_forward_route_decision_v4",
             "p4_forward_route_decision_v5",
+            "p4_forward_route_decision_v6",
         }
         and row.get("stage") == "forward_decision"
     ]
@@ -1271,6 +1279,7 @@ def analyze_stage_records(
         if row.get("schema_version") in {
             "p4_forward_route_decision_v4",
             "p4_forward_route_decision_v5",
+            "p4_forward_route_decision_v6",
         }
     ]
     commit_latencies = []
@@ -1610,15 +1619,15 @@ def _stage_start_steady_s(run_root: Path) -> float | None:
 def analyze_forward_risk_samples(
         decisions: list[dict], samples: list[dict],
         candidates: list[dict] | None = None) -> dict:
-    """Validate v5 formal selections against their per-point evidence."""
+    """Validate current formal selections against their per-point evidence."""
     failures: list[str] = []
-    v5_selected = [
+    selected = [
         row for row in _selected_decisions(decisions)
-        if row.get("schema_version") == "p4_forward_route_decision_v5"
+        if row.get("schema_version") in P4_FORMAL_RISK_SAMPLE_SCHEMAS
     ]
     rows_by_event: dict[str, list[dict]] = {}
     for row in samples:
-        if row.get("schema_version") != "p4_forward_route_decision_v5":
+        if row.get("schema_version") not in P4_FORMAL_RISK_SAMPLE_SCHEMAS:
             continue
         rows_by_event.setdefault(str(row.get("decision_event_id", "")), []).append(row)
     required = {
@@ -1635,7 +1644,7 @@ def analyze_forward_risk_samples(
         "lidar_supported", "fim_supported", "safety_state",
         "ranking_state", "reason",
     }
-    for decision in v5_selected:
+    for decision in selected:
         event_id = str(decision.get("decision_event_id", ""))
         event_rows = rows_by_event.get(event_id, [])
         if not event_rows:
@@ -1644,6 +1653,10 @@ def analyze_forward_risk_samples(
         if any(not required.issubset(row) for row in event_rows):
             failures.append("p4_forward_risk_sample_fields_missing")
             continue
+        if decision.get("schema_version") == "p4_forward_route_decision_v6":
+            if decision.get("result_status") != "READY":
+                failures.append("p4_forward_result_not_ready")
+                continue
         rows_by_candidate: dict[str, list[dict]] = {}
         for row in event_rows:
             rows_by_candidate.setdefault(
@@ -1667,6 +1680,18 @@ def analyze_forward_risk_samples(
             decision.get("selected_candidate_id", ""))
         if selected_candidate_id not in eligible_candidates:
             failures.append("p4_formal_selected_candidate_not_safe_complete")
+        elif decision.get("schema_version") == "p4_forward_route_decision_v6":
+            formal_rows = [
+                row
+                for candidate_rows in eligible_candidates.values()
+                for row in candidate_rows
+            ]
+            if any(
+                    row.get("support_status") != "MODEL_COMPLETE"
+                    or row.get("support_authority") not in {
+                        "TRUSTED_LOCAL_MAP", "STRICT_OBSERVATION"}
+                    for row in formal_rows):
+                failures.append("p4_forward_model_support_incomplete")
         eligible_rows = [
             row
             for candidate_rows in eligible_candidates.values()
@@ -1795,7 +1820,9 @@ def analyze_forward_risk_samples(
     return {
         "sample_count": len(samples),
         "local_satellite_set_count": len(hashes),
-        "formal_v5_selection_count": len(v5_selected),
+        # Preserve the public summary key used by existing reports while
+        # counting every schema that carries the formal per-sample contract.
+        "formal_v5_selection_count": len(selected),
         "failures": list(dict.fromkeys(failures)),
     }
 

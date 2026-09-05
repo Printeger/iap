@@ -1166,7 +1166,8 @@ void P0RiskGridRuntime::refreshTimerCallback() {
         // Reuse the exact immutable hit centers captured by the occupancy
         // adapter. This work is performed once with the frozen epoch, never on
         // the latency-sensitive planner callback and never from world truth.
-        const auto points = occupancy_epoch->raw_occupied_voxel_centers;
+        const auto points =
+            occupancy_epoch->environment_occupied_voxel_centers;
         if (!points) {
           occupancy_capture_status =
               P0OccupancyEpochCaptureStatus::ADAPTER_INVALID;
@@ -1509,6 +1510,10 @@ void P0RiskGridRuntime::refreshTimerCallback() {
         return;
       }
 
+      const std::string support_identity =
+          occupancy_epoch->trusted_local_map_support
+              ? occupancy_epoch->trusted_local_map_support->identity()
+              : std::string("strict_observation");
       bool retain_committed_content = false;
       if (has_committed_base) {
         P0OccupancyEpoch committed_base;
@@ -1528,7 +1533,8 @@ void P0RiskGridRuntime::refreshTimerCallback() {
                   P0SemanticFailure::OCCUPANCY_LOS_ADAPTER_INVALID);
               return;
             }
-            retain_committed_content = true;
+            retain_committed_content =
+                support_identity == rolling_support_identity_;
           } else if (occupancy_epoch->generation <
                      rolling_occupancy_generation_) {
             fail_semantic_refresh(
@@ -1537,7 +1543,9 @@ void P0RiskGridRuntime::refreshTimerCallback() {
           } else {
             const auto delta = P0OccupancyEpochAdapter::completeDelta(
                 committed_base, *occupancy_epoch);
-            retain_committed_content = delta && delta->empty();
+            retain_committed_content = delta && delta->empty() &&
+                support_identity == rolling_support_identity_ &&
+                !occupancy_epoch->trusted_local_map_support;
           }
         }
       }
@@ -1578,13 +1586,22 @@ void P0RiskGridRuntime::refreshTimerCallback() {
     captured_lidar_fim_primitives = lidar_fim_primitives;
     iap::PredictorModule module(predictor_params);
     if (config_.online_mapping_mode) {
+      const auto trusted_support = occupancy_epoch->trusted_local_map_support;
       const auto observed_support_query = occupancy_epoch->diagnostic_query;
-      module.set_observation_predicate(
+      if (trusted_support) {
+        module.set_support_query(
+            [trusted_support](const Eigen::Vector3d& position,
+                              const double query_time_s) {
+              return trusted_support->query(position, query_time_s);
+            });
+      } else {
+        module.set_observation_predicate(
           [observed_support_query](const Eigen::Vector3d& position) {
             const auto diagnostic = observed_support_query(position);
             return diagnostic.available && diagnostic.observed &&
                    diagnostic.state != iap::RiskOccupancyState::UNKNOWN;
           });
+      }
     }
     module.set_lidar_map_points(lidar_map_points);
     module.set_lidar_fim_primitives(lidar_fim_primitives);
@@ -1594,13 +1611,22 @@ void P0RiskGridRuntime::refreshTimerCallback() {
     forward_risk_module->set_local_occupancy(
         forward_risk_occupancy_owner.get());
     if (config_.online_mapping_mode) {
+      const auto trusted_support = occupancy_epoch->trusted_local_map_support;
       const auto observed_support_query = occupancy_epoch->diagnostic_query;
-      forward_risk_module->set_observation_predicate(
+      if (trusted_support) {
+        forward_risk_module->set_support_query(
+            [trusted_support](const Eigen::Vector3d& position,
+                              const double query_time_s) {
+              return trusted_support->query(position, query_time_s);
+            });
+      } else {
+        forward_risk_module->set_observation_predicate(
           [observed_support_query](const Eigen::Vector3d& position) {
             const auto diagnostic = observed_support_query(position);
             return diagnostic.available && diagnostic.observed &&
                    diagnostic.state != iap::RiskOccupancyState::UNKNOWN;
           });
+      }
     }
     forward_risk_module->set_lidar_map_points(lidar_map_points);
     forward_risk_module->set_lidar_fim_primitives(lidar_fim_primitives);
@@ -1805,6 +1831,9 @@ void P0RiskGridRuntime::refreshTimerCallback() {
       captured_predictor_sources.gnss_epoch_stamp;
   source_identity.lidar_generation = captured_lidar_generation;
   source_identity.lidar_stamp_s = captured_lidar_stamp;
+  source_identity.local_map_support_identity = occupancy_epoch &&
+      occupancy_epoch->trusted_local_map_support
+      ? occupancy_epoch->trusted_local_map_support->identity() : "strict";
   source_identity.alert_limit_policy_id =
       config_.grid.alert_limit_policy_id;
   bool refresh_succeeded = false;
@@ -1875,6 +1904,9 @@ void P0RiskGridRuntime::refreshTimerCallback() {
       rolling_occupancy_stamp_ = occupancy_epoch->cloud_stamp_s;
       rolling_occupancy_content_identity_ =
           candidate_occupancy_content_identity;
+      rolling_support_identity_ = occupancy_epoch->trusted_local_map_support
+          ? occupancy_epoch->trusted_local_map_support->identity()
+          : std::string("strict_observation");
     }
   }
   {
@@ -2098,6 +2130,8 @@ void P0RiskGridRuntime::publishHealth(const iap::RiskGridHealth& health,
       << source_identity.lidar_generation << ","
       << "\"source_lidar_stamp_s\":"
       << jsonNumber(source_identity.lidar_stamp_s) << ","
+      << "\"source_local_map_support_identity\":"
+      << jsonString(source_identity.local_map_support_identity) << ","
       << "\"provider_query_count\":" << out_health.provider_query_count << ","
       << "\"occupied_skip_count\":" << out_health.occupied_skip_count << ","
       << "\"provider_stale_count\":" << out_health.provider_stale_count << ","

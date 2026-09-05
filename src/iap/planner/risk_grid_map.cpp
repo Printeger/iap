@@ -282,7 +282,7 @@ std::string canonicalRiskGridConfigHash(const RiskGridMapParams& params) {
 std::string canonicalRiskGridSourceIdentityHash(
     const RiskGridSourceIdentity& identity) {
   std::ostringstream stream;
-  stream << "risk_grid_sources_v1;"
+  stream << "risk_grid_sources_v2;"
          << identity.occupancy_generation << ';';
   append_canonical_double(stream, identity.occupancy_stamp_s);
   stream << identity.prior_generation << ';';
@@ -291,6 +291,7 @@ std::string canonicalRiskGridSourceIdentityHash(
   append_canonical_double(stream, identity.gnss_stamp_s);
   stream << identity.lidar_generation << ';';
   append_canonical_double(stream, identity.lidar_stamp_s);
+  stream << identity.local_map_support_identity << ';';
   stream << identity.alert_limit_policy_id << ';';
   return hash_hex(fnv1a_append(kFnvOffset, stream.str()));
 }

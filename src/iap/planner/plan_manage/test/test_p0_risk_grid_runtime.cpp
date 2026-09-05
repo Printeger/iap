@@ -268,6 +268,9 @@ struct RuntimeFrozenOccupancyEpoch {
       diagnostic_query;
   std::shared_ptr<const std::vector<Eigen::Vector3d>>
       raw_occupied_voxel_centers;
+  std::shared_ptr<const std::vector<Eigen::Vector3d>>
+      environment_occupied_voxel_centers;
+  std::shared_ptr<const iap::TrustedLocalMapSupport> trusted_local_map_support;
   Eigen::Vector3d lattice_origin = Eigen::Vector3d::Zero();
   Eigen::Vector3d extent_m = Eigen::Vector3d(30.0, 30.0, 6.0);
   Eigen::Vector3i voxel_dimensions = Eigen::Vector3i(30, 30, 6);
@@ -341,6 +344,8 @@ ego_planner::P0OccupancyEpochCapture makeOccupancyEpochCapture(
   frozen.raw_occupied_voxel_centers =
       std::make_shared<const std::vector<Eigen::Vector3d>>(
           std::move(normalized_centers));
+  frozen.environment_occupied_voxel_centers =
+      frozen.raw_occupied_voxel_centers;
   frozen.lattice_origin = params.lattice_origin;
   frozen.resolution_m = params.voxel_size;
   frozen.generation = captured_generation;

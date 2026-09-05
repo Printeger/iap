@@ -12,12 +12,21 @@
 #include <vector>
 
 #include <bspline_opt/p4_geometry_commit.h>
+#include <iap/map/trusted_local_map_support.hpp>
 
 namespace ego_planner
 {
 
   inline constexpr char kP4ForwardDecisionSchema[] =
-    "p4_forward_route_decision_v5";
+    "p4_forward_route_decision_v6";
+
+  enum class P4ForwardResultStatus
+  {
+    READY = 0,
+    PENDING,
+    RATE_LIMITED,
+    FAILED,
+  };
 
   enum class P4PlanningDisposition
   {
@@ -104,6 +113,7 @@ namespace ego_planner
   const char * p4ForwardDeferredMotionModeName(
     P4ForwardDeferredMotionMode mode);
   const char * p4PlanningDispositionName(P4PlanningDisposition disposition);
+  const char * p4ForwardResultStatusName(P4ForwardResultStatus status);
 
   struct P4ForwardSnapshotIdentity
   {
@@ -189,6 +199,10 @@ namespace ego_planner
     int gnss_unknown_satellite_count = 0;
     int gnss_used_satellite_count = 0;
     int gnss_known_satellite_count = 0;
+    iap::LocalMapSupportAuthority support_authority =
+      iap::LocalMapSupportAuthority::STRICT_OBSERVATION;
+    iap::LocalMapSupportStatus support_status =
+      iap::LocalMapSupportStatus::FRAME_INVALID;
     uint64_t local_satellite_set_hash = 0;
     // Non-certified evidence. These fields never turn UNKNOWN into SAFE and
     // are used only to compare geometrically valid routes when formal source
@@ -299,6 +313,7 @@ namespace ego_planner
   struct P4ForwardDecision
   {
     std::string schema_version = kP4ForwardDecisionSchema;
+    P4ForwardResultStatus result_status = P4ForwardResultStatus::FAILED;
     P4ForwardAction action = P4ForwardAction::REPLAN_REQUIRED;
     P4ForwardTriggerReason trigger_reason =
       P4ForwardTriggerReason::NOT_EVALUATED;

@@ -30,6 +30,9 @@ struct FakeFrozenOccupancyEpoch {
       diagnostic_query;
   std::shared_ptr<const std::vector<Eigen::Vector3d>>
       raw_occupied_voxel_centers;
+  std::shared_ptr<const std::vector<Eigen::Vector3d>>
+      environment_occupied_voxel_centers;
+  std::shared_ptr<const iap::TrustedLocalMapSupport> trusted_local_map_support;
   Eigen::Vector3d lattice_origin = Eigen::Vector3d::Zero();
   Eigen::Vector3d extent_m = Eigen::Vector3d(4.0, 4.0, 4.0);
   Eigen::Vector3i voxel_dimensions = Eigen::Vector3i(4, 4, 4);
@@ -46,6 +49,8 @@ FakeFrozenOccupancyEpoch makeEpoch(
   epoch.raw_occupied_voxel_centers =
       std::make_shared<const std::vector<Eigen::Vector3d>>(
           std::move(centers));
+  epoch.environment_occupied_voxel_centers =
+      epoch.raw_occupied_voxel_centers;
   epoch.lattice_origin = Eigen::Vector3d(0.35, -0.2, 0.6);
   epoch.resolution_m = 1.0;
   epoch.frame_id = "map";

@@ -760,9 +760,10 @@ class TestRunnerLifecycle(unittest.TestCase):
 
 
 class TestStageAnalyzer(unittest.TestCase):
-    def test_v5_formal_selection_accepts_distinct_local_satellite_sets(self):
+    def test_v6_formal_selection_accepts_distinct_local_satellite_sets(self):
         decision = {
-            "schema_version": "p4_forward_route_decision_v5",
+            "schema_version": "p4_forward_route_decision_v6",
+            "result_status": "READY",
             "stage": "forward_decision",
             "action": "RISK_SELECTED",
             "selection_authority": "FORMAL",
@@ -777,7 +778,7 @@ class TestStageAnalyzer(unittest.TestCase):
             "decision_event_id": "77",
         }
         base = {
-            "schema_version": "p4_forward_route_decision_v5",
+            "schema_version": "p4_forward_route_decision_v6",
             "decision_event_id": "77",
             "sample_index": "0", "arc_length_m": "0",
             "x": "1", "y": "0", "z": "1", "query_time_s": "100.1",
@@ -794,10 +795,22 @@ class TestStageAnalyzer(unittest.TestCase):
             "safety_ratio": "0.75", "fim_ratio": "0.4",
             "gnss_supported": "1", "lidar_supported": "1",
             "fim_supported": "1", "safety_state": "SAFE",
+            "support_authority": "TRUSTED_LOCAL_MAP",
+            "support_status": "MODEL_COMPLETE",
             "ranking_state": "COMPARABLE", "reason": "NONE",
         }
         first = dict(base, candidate_id="1", local_satellite_set_hash="41")
         second = dict(base, candidate_id="2", local_satellite_set_hash="42")
+        rejected = dict(
+            base,
+            candidate_id="3",
+            local_satellite_set_hash="43",
+            support_status="OUTSIDE_ENVELOPE",
+            gnss_supported="0",
+            safety_state="UNKNOWN",
+            ranking_state="INCOMPLETE",
+            reason="GNSS_SKY_UNKNOWN",
+        )
 
         candidates = [
             {"decision_event_id": "77", "candidate_id": "1",
@@ -806,10 +819,10 @@ class TestStageAnalyzer(unittest.TestCase):
              "length_m": "0"},
         ]
         result = MODULE.analyze_forward_risk_samples(
-            [decision], [first, second], candidates)
+            [decision], [first, second, rejected], candidates)
 
         self.assertEqual(result["failures"], [])
-        self.assertEqual(result["local_satellite_set_count"], 2)
+        self.assertEqual(result["local_satellite_set_count"], 3)
 
         truncated = dict(second, sample_index="1", arc_length_m="0.5")
         invalid = MODULE.analyze_forward_risk_samples(

@@ -37,6 +37,12 @@ x(t) = { p, v, q, b_a, b_g, clk_bias δt, clk_drift δt_dot }
 ## E) Prediction for planning (baseline)
 For each candidate trajectory τ:
 - predict GNSS visibility set V^(τ) using point-cloud occlusion model
+- registered hit-only LiDAR may supply immutable trusted local-map support:
+  inside the configured sensor envelope no-hit is model-complete; outside,
+  expired, unhealthy or frame-invalid support is UNKNOWN. This inference is
+  never relabelled as measured free space. Envelope expiry is evaluated at
+  each trajectory sample's query time; successful geometry is complete only
+  over that sample's explicit local satellite set.
 - predict LiDAR observability proxy O^(τ) (ICP quality proxy, map-based, may include occlusion)
 - propagate Σ -> Σ_pred using empirical growth model (keep exact interface)
 - compute PL_pred from Σ_pred
@@ -44,6 +50,10 @@ For each candidate trajectory τ:
 ## F) Planning objective (optimization/selection)
 - J(τ) = Σ hinge(PL_pred - AL)^2 + λ_goal * dist(goal) + λ_u * effort
 - Receding horizon: plan H seconds, execute first Δt, replan
+- The executed Δt/prefix is accepted only with a bound endpoint/deadline and
+  zero terminal velocity/acceleration. While a new result is pending, an
+  unchanged valid prefix continues; runtime collision or Integrity revocation
+  triggers replan/braking/emergency handling.
 
 ## G) Upgrade items (optional, after baseline closes the loop)
 - trunk landmarks + TDOP

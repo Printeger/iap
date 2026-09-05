@@ -1680,6 +1680,17 @@ const char * p4PlanningDispositionName(
   return "HOLD_REQUIRED";
 }
 
+const char * p4ForwardResultStatusName(const P4ForwardResultStatus status)
+{
+  switch (status) {
+    case P4ForwardResultStatus::READY: return "READY";
+    case P4ForwardResultStatus::PENDING: return "PENDING";
+    case P4ForwardResultStatus::RATE_LIMITED: return "RATE_LIMITED";
+    case P4ForwardResultStatus::FAILED: return "FAILED";
+  }
+  return "FAILED";
+}
+
 bool P4ForwardSnapshotIdentity::valid() const
 {
   return !geometry_id.empty() && !frame_id.empty() &&
@@ -1869,6 +1880,7 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
   decision.stopping_distance_m = p4StoppingDistance(
     request.velocity.norm(), request.limits);
   const auto finalize = [&request, &record_latency](P4ForwardDecision output) {
+    output.result_status = P4ForwardResultStatus::READY;
       if (!output.first_failed_position.allFinite()) {
         const auto failed = std::find_if(
           output.candidates.begin(), output.candidates.end(),

@@ -74,6 +74,8 @@ void extendBounds(const iap::VoxelKey& key,
 
 std::optional<P0OccupancyEpoch> P0OccupancyEpochAdapter::adaptFields(
     std::shared_ptr<const std::vector<Eigen::Vector3d>> occupied_centers,
+    std::shared_ptr<const std::vector<Eigen::Vector3d>> environment_centers,
+    std::shared_ptr<const iap::TrustedLocalMapSupport> trusted_support,
     const Eigen::Vector3d& lattice_origin,
     const Eigen::Vector3d& extent_m,
     const Eigen::Vector3i& voxel_dimensions,
@@ -86,7 +88,8 @@ std::optional<P0OccupancyEpoch> P0OccupancyEpochAdapter::adaptFields(
     P0OccupancyEpoch::SourceOwner source_owner,
     P0OccupancyEpoch::LiveSourceOwner live_source_owner,
     P0OccupancyEpoch::LiveGeneration live_generation) {
-  if (!diagnostic_query || !occupied_centers || !source_owner ||
+  if (!diagnostic_query || !occupied_centers || !environment_centers ||
+      !source_owner ||
       !live_source_owner || !live_generation ||
       generation == 0u || !std::isfinite(cloud_stamp_s) ||
       frame_id.empty() || !std::isfinite(resolution_m) ||
@@ -141,17 +144,17 @@ std::optional<P0OccupancyEpoch> P0OccupancyEpochAdapter::adaptFields(
   iap::LocalOccupancyGrid::Params params;
   params.voxel_size = resolution_m;
   params.lattice_origin = lattice_origin;
-  params.max_voxels = captured_count == 0u
+  params.max_voxels = environment_centers->empty()
       ? 1
-      : static_cast<int>(captured_count);
+      : static_cast<int>(environment_centers->size());
   params.enable_eviction = false;
   auto los_owner = std::make_shared<iap::LocalOccupancyGrid>(params);
-  los_owner->insert_points(*occupied_centers);
+  los_owner->insert_points(*environment_centers);
   const auto diagnostics = los_owner->diagnostics();
   if (diagnostics.rejected_count != 0u ||
-      diagnostics.inserted_count != captured_count ||
-      diagnostics.voxel_count != captured_count ||
-      los_owner->size() != captured_count) {
+      diagnostics.inserted_count != environment_centers->size() ||
+      diagnostics.voxel_count != environment_centers->size() ||
+      los_owner->size() != environment_centers->size()) {
     return std::nullopt;
   }
 
@@ -159,6 +162,8 @@ std::optional<P0OccupancyEpoch> P0OccupancyEpochAdapter::adaptFields(
   adapted.diagnostic_query = std::move(diagnostic_query);
   adapted.los_owner = std::move(los_owner);
   adapted.raw_occupied_voxel_centers = occupied_centers;
+  adapted.environment_occupied_voxel_centers = environment_centers;
+  adapted.trusted_local_map_support = std::move(trusted_support);
   adapted.raw_identity = std::shared_ptr<const P0RawOccupancyIdentity>(
       new P0RawOccupancyIdentity(std::move(normalized_keys), lattice_origin,
                                  resolution_m, frame_id));

@@ -338,6 +338,38 @@ TEST(RollingSpatialAdvisoryWindowTest,
 }
 
 TEST(RollingSpatialAdvisoryWindowTest,
+     TimeSensitiveSupportIsReevaluatedAcrossExpiryAtSamePosition) {
+  auto occupancy = std::make_shared<LocalOccupancyGrid>();
+  const auto snapshot = makeGnssSnapshot(1);
+  auto refresh = makeGnssRefreshInput(occupancy, snapshot);
+  refresh.module.set_support_query(
+      [](const Eigen::Vector3d&, const double query_time_s) {
+        return LocalMapSupportQuery{
+            LocalMapSupportAuthority::TRUSTED_LOCAL_MAP,
+            query_time_s <= 100.5
+                ? LocalMapSupportStatus::MODEL_COMPLETE
+                : LocalMapSupportStatus::EXPIRED};
+      });
+  RollingSpatialAdvisoryWindow window;
+  ASSERT_TRUE(window.beginRefresh(std::move(refresh)));
+
+  const Eigen::Vector3d position(0.5, 0.5, 0.5);
+  std::vector<PredictorQueryInput> inputs;
+  inputs.emplace_back(position, snapshot, 100.0, 0.0, "map", 100.0);
+  inputs.emplace_back(position, snapshot, 101.0, 1.0, "map", 100.0);
+  PredictorBatchDiagnostics diagnostics;
+  const auto outputs = window.queryPositionHorizons(inputs, &diagnostics);
+
+  ASSERT_EQ(outputs.size(), 2U);
+  EXPECT_EQ(outputs[0].gnss.support_status,
+            LocalMapSupportStatus::MODEL_COMPLETE);
+  EXPECT_EQ(outputs[1].gnss.support_status,
+            LocalMapSupportStatus::EXPIRED);
+  EXPECT_EQ(diagnostics.gnss_advisory_invocations, 2U);
+  EXPECT_EQ(diagnostics.spatial_advisory_recompute_count, 2U);
+}
+
+TEST(RollingSpatialAdvisoryWindowTest,
      NegativeWrapMultiaxisShiftAndFullJumpUseWorldKeyIdentity) {
   auto occupancy = std::make_shared<LocalOccupancyGrid>();
   RollingSpatialAdvisoryWindow window;

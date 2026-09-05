@@ -4,8 +4,11 @@
 #include <Eigen/Geometry>
 
 #include <cstdint>
+#include <array>
 #include <initializer_list>
+#include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -24,6 +27,15 @@ struct RegisteredLidarFrameData {
   std::uint64_t sensor_receipt_steady_ns = 0;
   Eigen::Isometry3d T_map_lidar = Eigen::Isometry3d::Identity();
   std::vector<Eigen::Vector3d> hits_lidar;
+  std::string frame_contract_id;
+};
+
+struct RegisteredLidarFrameMetadata {
+  std::int64_t frame_id = -1;
+  double stamp_s = 0.0;
+  double scan_end_stamp_s = 0.0;
+  std::uint64_t sensor_receipt_steady_ns = 0;
+  Eigen::Isometry3d T_map_lidar = Eigen::Isometry3d::Identity();
   std::string frame_contract_id;
 };
 
@@ -84,12 +96,18 @@ class RegisteredLidarWindow {
   std::uint64_t activeGeneration() const { return active_generation_; }
   std::int64_t currentFrameId() const { return current_frame_id_; }
   const Geometry& geometry() const { return geometry_; }
+  std::optional<RegisteredLidarFrameMetadata> currentFrameMetadata() const;
+  std::shared_ptr<const std::vector<Eigen::Vector3d>>
+  environmentOccupiedVoxelCenters() const;
 
  private:
+  using EnvironmentVoxelKey = std::array<int, 3>;
+
   struct FrameContribution {
     RegisteredLidarFrameData source;
     std::vector<int> hits;
     std::vector<int> observed_free;
+    std::vector<EnvironmentVoxelKey> environment_hit_keys;
   };
 
   bool validGeometry() const;
@@ -105,6 +123,9 @@ class RegisteredLidarWindow {
   void collectChanges(
       const std::unordered_map<int, RegisteredVoxelState>& before,
       RegisteredLidarWindowUpdate* update) const;
+  bool addEnvironmentContribution(const FrameContribution& contribution);
+  bool removeEnvironmentContribution(const FrameContribution& contribution);
+  void publishEnvironmentOccupiedVoxelCenters();
 
   Geometry geometry_;
   std::uint64_t active_generation_ = 0;
@@ -120,4 +141,8 @@ class RegisteredLidarWindow {
   std::vector<std::uint32_t> active_free_count_;
   std::vector<std::uint8_t> current_hit_;
   std::vector<std::uint8_t> current_free_;
+  std::map<EnvironmentVoxelKey, std::uint32_t> environment_voxel_ref_count_;
+  std::shared_ptr<const std::vector<Eigen::Vector3d>>
+      environment_occupied_voxel_centers_ =
+          std::make_shared<const std::vector<Eigen::Vector3d>>();
 };

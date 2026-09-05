@@ -3975,3 +3975,34 @@ Requirements: `IAP-RQ-000`, `IAP-RQ-020`, `IAP-RQ-030`, `IAP-RQ-040`,
 - Review `f66fb73..ae79bc7` is REQUEST_CHANGES: replay uses `r=0.5` rather than frozen `r=0.75/b=1.5 m`, and
   freeze-005 omits the probe's tracked `thirdparty/json/include` build inputs. ICRA-076 remains NOT PASS;
   ICRA-077 awaits user repair-or-bypass direction. (`IAP-RQ-421`–`IAP-RQ-424`)
+# 2026-09-05 typed waiting, stoppable execution and trusted local-map support
+
+- Replace boolean P4 replanning outcomes with explicit new/continue/endpoint-
+  hold/retry/revoked results. `PENDING` and `RATE_LIMITED` are now typed worker
+  statuses (`p4_forward_route_decision_v6`), and retaining an approved
+  trajectory terminates the current initialization retry cycle.
+- Require final P4 B-splines to satisfy fixed zero terminal velocity and
+  acceleration. Publication now creates an immutable execution certificate
+  binding control points, knot vector, timing, approved endpoint/deadline,
+  braking data, risk authority and snapshot identity; retain rejection logs
+  each contract component instead of inferring the cause from a single speed
+  threshold.
+- Add runtime P4 checks independent of P5 for trajectory identity, tracking
+  error, current Integrity freshness/safety and remaining sky-risk support,
+  alongside the existing collision-delta sweep. Normal endpoint arrival keeps
+  the approved hover instead of publishing another emergency stop.
+- Add immutable `TrustedLocalMapSupport` for registered online LiDAR. P0, P4
+  ForwardRisk and final B-spline checks share its range/FOV/time/frame/model
+  semantics; model-complete no-hit support remains distinct from
+  `OBSERVED_FREE`, while out-of-envelope/expired support stays UNKNOWN.
+  Environmental hit storage is no longer clipped to the flight lattice, and
+  support identity participates in risk snapshot/cache identity.
+- New launch controls are `trusted_local_map_support_enabled` plus the
+  `grid_map/trusted_support_*` bindings and
+  `p4.execution.max_tracking_error_m` (default `0.75`, valid range `(0, 5]`
+  m).
+- Review hardening makes explicit revocation dominate retain, evaluates
+  current Integrity at actual odometry, evaluates trusted support at every
+  sample's query time, preserves immutable environment-hit snapshots without
+  copying the full current cloud during P0 capture, and limits v6
+  model-completeness acceptance to formal/eligible candidates.

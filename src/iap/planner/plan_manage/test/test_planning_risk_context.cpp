@@ -200,6 +200,15 @@ Eigen::MatrixXd p4RefinedControlPoints() {
   return points;
 }
 
+Eigen::MatrixXd p4StoppedControlPoints() {
+  Eigen::MatrixXd points = p4RefinedControlPoints();
+  const Eigen::Vector3d endpoint(4.0, 0.0, 0.0);
+  points.col(points.cols() - 3) = endpoint;
+  points.col(points.cols() - 2) = endpoint;
+  points.col(points.cols() - 1) = endpoint;
+  return points;
+}
+
 ego_planner::BsplineOptimizer::Ptr makeP4Optimizer(
     const GridMap::Ptr& map,
     const std::shared_ptr<const iap::RiskGridSnapshot>& snapshot,
@@ -354,8 +363,11 @@ TEST(P4ForwardTerminalLineageTest,
   manager.setPlanningRiskContextForTest(snapshot, 10.0);
   manager.setP4ForwardDecisionForTest(makeForwardDecision(
       snapshot, manager.planningRiskContext().planning_attempt_id));
+  ASSERT_EQ(
+      manager.lastP4ForwardDecision().snapshot_identity.alert_limit_policy_id,
+      snapshot->sourceIdentity().alert_limit_policy_id);
   manager.local_data_.position_traj_ =
-      ego_planner::UniformBspline(p4RefinedControlPoints(), 3, 0.5);
+      ego_planner::UniformBspline(p4StoppedControlPoints(), 3, 0.5);
   manager.local_data_.traj_id_ = 29;
   manager.local_data_.start_time_ = rclcpp::Time(10, 0, RCL_ROS_TIME);
 
@@ -365,6 +377,12 @@ TEST(P4ForwardTerminalLineageTest,
       "p5_final_pass_before_publish", 10.1));
   EXPECT_TRUE(manager.recordP4VerticalSliceLineage(
       "normal_publish_authorized", 10.2));
+  ASSERT_TRUE(manager.p4ExecutionCertificate().valid);
+  EXPECT_EQ(manager.p4ExecutionCertificate().trajectory_id, 29);
+  EXPECT_FALSE(manager.p4ExecutionCertificate().knot_vector_hash.empty());
+  EXPECT_LE(manager.p4ExecutionCertificate().terminal_speed_mps, 1.0e-3);
+  EXPECT_LE(
+      manager.p4ExecutionCertificate().terminal_acceleration_mps2, 1.0e-2);
   EXPECT_TRUE(manager.recordP4RuntimeLineage(10.3));
   EXPECT_FALSE(manager.recordP4RuntimeLineage(10.4));
 
@@ -384,6 +402,29 @@ TEST(P4ForwardTerminalLineageTest,
   EXPECT_EQ(rows[3].at("trajectory_id"), "29");
   EXPECT_EQ(rows[3].at("control_points_hash"),
             rows[0].at("control_points_hash"));
+
+  manager.local_data_.duration_ =
+      manager.p4ExecutionCertificate().duration_s;
+  const auto endpoint_check = manager.validateCommittedP4TrajectoryExecution(
+      manager.p4ExecutionCertificate().execution_deadline_s,
+      manager.p4ExecutionCertificate().approved_endpoint);
+  EXPECT_TRUE(endpoint_check.applicable);
+  EXPECT_TRUE(endpoint_check.allowed);
+  EXPECT_TRUE(endpoint_check.identity_match);
+  EXPECT_TRUE(endpoint_check.endpoint_reached);
+  EXPECT_EQ(endpoint_check.reason, "approved_endpoint_reached");
+  EXPECT_FALSE(manager.p4ExecutionRevoked());
+
+  const auto tracking_failure =
+      manager.validateCommittedP4TrajectoryExecution(
+          manager.p4ExecutionCertificate().execution_deadline_s,
+          manager.p4ExecutionCertificate().approved_endpoint +
+              Eigen::Vector3d(1.0, 0.0, 0.0));
+  EXPECT_FALSE(tracking_failure.allowed);
+  EXPECT_FALSE(tracking_failure.tracking_within_limit);
+  EXPECT_EQ(tracking_failure.reason,
+            "committed_trajectory_tracking_error_exceeded");
+  EXPECT_TRUE(manager.p4ExecutionRevoked());
 }
 
 TEST(P4ForwardTerminalLineageTest,
@@ -1150,4 +1191,60 @@ TEST(P4ForwardSubmissionScheduling, EverySubmissionPathUsesTwoHertzGate)
   EXPECT_FALSE(gate.tryAcquire(20.1));
   EXPECT_FALSE(gate.tryAcquire(20.49));
   EXPECT_TRUE(gate.tryAcquire(20.5));
+}
+
+TEST(P4PlanningCyclePolicy, RetainedTrajectoryEndsInitializationRetries)
+{
+  EXPECT_EQ(
+      ego_planner::classifyP4PlanningCycle(
+          false, ego_planner::P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY,
+          false),
+      ego_planner::P4PlanningCycleResult::CONTINUE_COMMITTED);
+  EXPECT_FALSE(ego_planner::p4PlanningCycleMayRetry(
+      ego_planner::P4PlanningCycleResult::CONTINUE_COMMITTED));
+}
+
+TEST(P4PlanningCyclePolicy, ApprovedEndpointIsNotAnEmergencyFailure)
+{
+  EXPECT_EQ(
+      ego_planner::classifyP4PlanningCycle(
+          false, ego_planner::P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY,
+          true),
+      ego_planner::P4PlanningCycleResult::HOLD_APPROVED_ENDPOINT);
+  EXPECT_FALSE(ego_planner::p4PlanningCycleMayRetry(
+      ego_planner::P4PlanningCycleResult::HOLD_APPROVED_ENDPOINT));
+}
+
+TEST(P4PlanningCyclePolicy, HoldIsRetryableUntilExecutionIsExplicitlyRevoked)
+{
+  EXPECT_EQ(
+      ego_planner::classifyP4PlanningCycle(
+          false, ego_planner::P4PlanningDisposition::HOLD_REQUIRED,
+          false, false),
+      ego_planner::P4PlanningCycleResult::RETRYABLE_FAILURE);
+  EXPECT_EQ(
+      ego_planner::classifyP4PlanningCycle(
+          false, ego_planner::P4PlanningDisposition::HOLD_REQUIRED,
+          false, true),
+      ego_planner::P4PlanningCycleResult::EXECUTION_REVOKED);
+}
+
+TEST(P4PlanningCyclePolicy, ExplicitRevocationOverridesRetainDisposition)
+{
+  EXPECT_EQ(
+      ego_planner::classifyP4PlanningCycle(
+          false, ego_planner::P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY,
+          false, true),
+      ego_planner::P4PlanningCycleResult::EXECUTION_REVOKED);
+}
+
+TEST(P4ExecutionParameterContract, TrackingErrorLimitMustBeFiniteAndBounded)
+{
+  EXPECT_TRUE(ego_planner::validP4TrackingErrorLimit(0.75));
+  EXPECT_FALSE(ego_planner::validP4TrackingErrorLimit(0.0));
+  EXPECT_FALSE(ego_planner::validP4TrackingErrorLimit(-0.1));
+  EXPECT_FALSE(ego_planner::validP4TrackingErrorLimit(
+      std::numeric_limits<double>::quiet_NaN()));
+  EXPECT_TRUE(ego_planner::validP4TrackingErrorLimit(5.0));
+  EXPECT_FALSE(ego_planner::validP4TrackingErrorLimit(5.1));
 }

@@ -30,6 +30,37 @@ using std::vector;
 
 namespace ego_planner
 {
+  enum class P4PlanningCycleResult
+  {
+    NEW_TRAJECTORY_READY = 0,
+    CONTINUE_COMMITTED,
+    HOLD_APPROVED_ENDPOINT,
+    RETRYABLE_FAILURE,
+    EXECUTION_REVOKED,
+  };
+
+  inline P4PlanningCycleResult classifyP4PlanningCycle(
+      const bool new_trajectory_ready,
+      const P4PlanningDisposition disposition,
+      const bool approved_endpoint_reached,
+      const bool execution_revoked = false)
+  {
+    if (new_trajectory_ready)
+      return P4PlanningCycleResult::NEW_TRAJECTORY_READY;
+    if (execution_revoked)
+      return P4PlanningCycleResult::EXECUTION_REVOKED;
+    if (disposition == P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY)
+      return approved_endpoint_reached
+          ? P4PlanningCycleResult::HOLD_APPROVED_ENDPOINT
+          : P4PlanningCycleResult::CONTINUE_COMMITTED;
+    return P4PlanningCycleResult::RETRYABLE_FAILURE;
+  }
+
+  inline bool p4PlanningCycleMayRetry(const P4PlanningCycleResult result)
+  {
+    return result == P4PlanningCycleResult::RETRYABLE_FAILURE;
+  }
+
   class P4ObserveMoreReplanScheduler
   {
   public:
@@ -211,7 +242,7 @@ namespace ego_planner
     bool callReboundReplan(bool flag_use_poly_init, bool flag_randomPolyTraj); // front-end and back-end method
     bool callEmergencyStop(Eigen::Vector3d stop_pos);                          // front-end and back-end method
     bool planFromGlobalTraj(const int trial_times = 1);
-    bool planFromCurrentTraj(const int trial_times = 1);
+    P4PlanningCycleResult planFromCurrentTraj(const int trial_times = 1);
     /* return value: std::pair< Times of the same state be continuously called, current continuously called state > */
     void changeFSMExecState(FSM_EXEC_STATE new_state, string pos_call);
     std::pair<int, EGOReplanFSM::FSM_EXEC_STATE> timesOfConsecutiveStateCalls();

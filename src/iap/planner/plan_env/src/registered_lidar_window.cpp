@@ -128,6 +128,9 @@ RegisteredLidarWindow::buildContribution(
       continue;
     }
     const Eigen::Vector3d hit = frame.T_map_lidar * hit_lidar;
+    const Eigen::Vector3i environment_index = indexOf(hit);
+    contribution.environment_hit_keys.push_back({
+        environment_index.x(), environment_index.y(), environment_index.z()});
     const Eigen::Vector3i finish = indexOf(hit);
     if (inBounds(finish)) {
       const int hit_address = address(finish);
@@ -218,7 +221,75 @@ RegisteredLidarWindow::buildContribution(
     append_addresses(hit_bits[word_index], &contribution.hits);
     append_addresses(free_bits[word_index], &contribution.observed_free);
   }
+  std::sort(contribution.environment_hit_keys.begin(),
+            contribution.environment_hit_keys.end());
+  contribution.environment_hit_keys.erase(
+      std::unique(contribution.environment_hit_keys.begin(),
+                  contribution.environment_hit_keys.end()),
+      contribution.environment_hit_keys.end());
   return contribution;
+}
+
+std::optional<RegisteredLidarFrameMetadata>
+RegisteredLidarWindow::currentFrameMetadata() const {
+  if (!has_current_frame_) {
+    return std::nullopt;
+  }
+  const auto& source = current_frame_.source;
+  return RegisteredLidarFrameMetadata{
+      source.frame_id, source.stamp_s, source.scan_end_stamp_s,
+      source.sensor_receipt_steady_ns, source.T_map_lidar,
+      source.frame_contract_id};
+}
+
+std::shared_ptr<const std::vector<Eigen::Vector3d>>
+RegisteredLidarWindow::environmentOccupiedVoxelCenters() const {
+  return environment_occupied_voxel_centers_;
+}
+
+bool RegisteredLidarWindow::addEnvironmentContribution(
+    const FrameContribution& contribution) {
+  bool union_changed = false;
+  for (const auto& key : contribution.environment_hit_keys) {
+    auto [found, inserted] = environment_voxel_ref_count_.try_emplace(key, 0U);
+    union_changed = union_changed || inserted;
+    if (found->second != std::numeric_limits<std::uint32_t>::max()) {
+      ++found->second;
+    }
+  }
+  return union_changed;
+}
+
+bool RegisteredLidarWindow::removeEnvironmentContribution(
+    const FrameContribution& contribution) {
+  bool union_changed = false;
+  for (const auto& key : contribution.environment_hit_keys) {
+    const auto found = environment_voxel_ref_count_.find(key);
+    if (found == environment_voxel_ref_count_.end()) {
+      continue;
+    }
+    if (found->second > 1U) {
+      --found->second;
+    } else {
+      environment_voxel_ref_count_.erase(found);
+      union_changed = true;
+    }
+  }
+  return union_changed;
+}
+
+void RegisteredLidarWindow::publishEnvironmentOccupiedVoxelCenters() {
+  auto centers = std::make_shared<std::vector<Eigen::Vector3d>>();
+  centers->reserve(environment_voxel_ref_count_.size());
+  for (const auto& [key, count] : environment_voxel_ref_count_) {
+    (void)count;
+    const Eigen::Vector3i index(key[0], key[1], key[2]);
+    centers->push_back(
+        geometry_.origin +
+        (index.cast<double>() + Eigen::Vector3d::Constant(0.5)) *
+            geometry_.resolution_m);
+  }
+  environment_occupied_voxel_centers_ = std::move(centers);
 }
 
 RegisteredVoxelState RegisteredLidarWindow::stateAtAddress(
@@ -245,6 +316,7 @@ RegisteredVoxelState RegisteredLidarWindow::stateAt(
 
 void RegisteredLidarWindow::removeActiveContribution(
     const FrameContribution& contribution) {
+  removeEnvironmentContribution(contribution);
   for (const int address : contribution.hits) {
     auto& count = active_hit_count_[static_cast<std::size_t>(address)];
     if (count > 0U) {
@@ -261,6 +333,7 @@ void RegisteredLidarWindow::removeActiveContribution(
 
 void RegisteredLidarWindow::addActiveContribution(
     const FrameContribution& contribution) {
+  addEnvironmentContribution(contribution);
   for (const int address : contribution.hits) {
     auto& count = active_hit_count_[static_cast<std::size_t>(address)];
     if (count != std::numeric_limits<std::uint32_t>::max()) {
@@ -358,7 +431,9 @@ RegisteredLidarWindowUpdate RegisteredLidarWindow::applyCurrentFrame(
     }
   }
 
+  bool environment_union_changed = false;
   if (has_current_frame_) {
+    environment_union_changed = removeEnvironmentContribution(current_frame_);
     for (const int address : current_frame_.hits) {
       current_hit_[static_cast<std::size_t>(address)] = 0U;
     }
@@ -366,6 +441,8 @@ RegisteredLidarWindowUpdate RegisteredLidarWindow::applyCurrentFrame(
       current_free_[static_cast<std::size_t>(address)] = 0U;
     }
   }
+  environment_union_changed =
+      addEnvironmentContribution(next) || environment_union_changed;
   for (const int address : next.hits) {
     current_hit_[static_cast<std::size_t>(address)] = 1U;
   }
@@ -376,6 +453,8 @@ RegisteredLidarWindowUpdate RegisteredLidarWindow::applyCurrentFrame(
   has_current_frame_ = true;
   current_frame_id_ = frame.frame_id;
   current_stamp_s_ = frame.stamp_s;
+  if (environment_union_changed)
+    publishEnvironmentOccupiedVoxelCenters();
   update.accepted = true;
   update.reason = "ok";
   update.current_frame_id = current_frame_id_;
@@ -473,6 +552,7 @@ RegisteredLidarWindowUpdate RegisteredLidarWindow::applyActiveDelta(
   }
 
   active_generation_ = delta.generation;
+  publishEnvironmentOccupiedVoxelCenters();
   update.accepted = true;
   update.reason = "ok";
   update.active_generation = active_generation_;
@@ -522,6 +602,10 @@ RegisteredLidarWindowUpdate RegisteredLidarWindow::replaceActiveWindow(
   }
   std::fill(active_hit_count_.begin(), active_hit_count_.end(), 0U);
   std::fill(active_free_count_.begin(), active_free_count_.end(), 0U);
+  for (const auto& [id, contribution] : active_frames_) {
+    (void)id;
+    removeEnvironmentContribution(contribution);
+  }
   active_frames_.clear();
   for (const auto& source : frames) {
     auto contribution = buildContribution(source);
@@ -535,6 +619,7 @@ RegisteredLidarWindowUpdate RegisteredLidarWindow::replaceActiveWindow(
     active_frames_.emplace(source.frame_id, std::move(contribution));
   }
   active_generation_ = generation;
+  publishEnvironmentOccupiedVoxelCenters();
   update.accepted = true;
   update.reason = "recovered";
   update.active_generation = active_generation_;
