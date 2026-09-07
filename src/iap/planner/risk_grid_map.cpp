@@ -282,13 +282,14 @@ std::string canonicalRiskGridConfigHash(const RiskGridMapParams& params) {
 std::string canonicalRiskGridSourceIdentityHash(
     const RiskGridSourceIdentity& identity) {
   std::ostringstream stream;
-  stream << "risk_grid_sources_v2;"
+  stream << "risk_grid_sources_v3;"
          << identity.occupancy_generation << ';';
   append_canonical_double(stream, identity.occupancy_stamp_s);
   stream << identity.prior_generation << ';';
   append_canonical_double(stream, identity.prior_stamp_s);
   stream << identity.gnss_generation << ';';
   append_canonical_double(stream, identity.gnss_stamp_s);
+  stream << identity.gnss_epoch_identity << ';';
   stream << identity.lidar_generation << ';';
   append_canonical_double(stream, identity.lidar_stamp_s);
   stream << identity.local_map_support_identity << ';';
@@ -1306,6 +1307,8 @@ bool RiskGridMap::refreshFromProvider(
       static_cast<std::size_t>(layer_size), false);
   std::vector<bool> spatial_unobserved_skip(
       static_cast<std::size_t>(layer_size), false);
+  std::vector<std::string> spatial_unobserved_reason(
+      static_cast<std::size_t>(layer_size), "unknown_occupancy_support");
   std::vector<RiskOccupancyDiagnostic> spatial_occupancy_diagnostics(
       static_cast<std::size_t>(layer_size));
   uint64_t occupied_skip_count = 0;
@@ -1359,11 +1362,41 @@ bool RiskGridMap::refreshFromProvider(
         spatial_occupied_skip[spatial_index] =
             params_copy.skip_occupied_voxels && occupancy_query &&
             spatial_occupancy_diagnostics[spatial_index].inflated_occupied;
+        const auto & occupancy =
+            spatial_occupancy_diagnostics[spatial_index];
+        const bool trusted_model_complete =
+            occupancy.model_support.authority ==
+                LocalMapSupportAuthority::TRUSTED_LOCAL_MAP &&
+            occupancy.model_support.complete();
         spatial_unobserved_skip[spatial_index] =
             params_copy.require_observed_support && occupancy_query &&
-            (!spatial_occupancy_diagnostics[spatial_index].observed ||
-             spatial_occupancy_diagnostics[spatial_index].state ==
-                 RiskOccupancyState::UNKNOWN);
+            (!occupancy.observed ||
+             occupancy.state == RiskOccupancyState::UNKNOWN) &&
+            !trusted_model_complete;
+        if (spatial_unobserved_skip[spatial_index] &&
+            occupancy.model_support.authority ==
+                LocalMapSupportAuthority::TRUSTED_LOCAL_MAP) {
+          switch (occupancy.model_support.status) {
+            case LocalMapSupportStatus::OUTSIDE_ENVELOPE:
+              spatial_unobserved_reason[spatial_index] =
+                  "outside_trusted_local_map_envelope";
+              break;
+            case LocalMapSupportStatus::EXPIRED:
+              spatial_unobserved_reason[spatial_index] =
+                  "trusted_local_map_expired";
+              break;
+            case LocalMapSupportStatus::FRAME_INVALID:
+              spatial_unobserved_reason[spatial_index] =
+                  "trusted_local_map_frame_invalid";
+              break;
+            case LocalMapSupportStatus::OBSERVATION_INCOMPLETE:
+              spatial_unobserved_reason[spatial_index] =
+                  "unknown_occupancy_support";
+              break;
+            case LocalMapSupportStatus::MODEL_COMPLETE:
+              break;
+          }
+        }
         if (spatial_occupied_skip[spatial_index]) {
           ++spatial_occupied_skip_count;
         } else if (spatial_unobserved_skip[spatial_index]) {
@@ -1471,8 +1504,13 @@ bool RiskGridMap::refreshFromProvider(
   std::unordered_map<std::string, uint64_t> unknown_reason_counts;
   unknown_reason_counts["occupied_skip"] =
       spatial_occupied_skip_count * static_cast<uint64_t>(horizon_count);
-  unknown_reason_counts["unknown_occupancy_support"] =
-      spatial_unobserved_skip_count * static_cast<uint64_t>(horizon_count);
+  for (std::size_t index = 0;
+       index < spatial_unobserved_skip.size(); ++index) {
+    if (spatial_unobserved_skip[index]) {
+      unknown_reason_counts[spatial_unobserved_reason[index]] +=
+          static_cast<uint64_t>(horizon_count);
+    }
+  }
   const auto record_unknown_reason = [&unknown_reason_counts](
                                          const std::string& reason) {
     ++unknown_reason_counts[reason.empty() ? "provider_invalid" : reason];
@@ -1497,7 +1535,7 @@ bool RiskGridMap::refreshFromProvider(
             voxel.stale = false;
             voxel.unknown = true;
             voxel.c_pi = params_copy.unknown_cost;
-            voxel.reason = "unknown_occupancy_support";
+            voxel.reason = spatial_unobserved_reason[spatial_index];
           }
         }
       };

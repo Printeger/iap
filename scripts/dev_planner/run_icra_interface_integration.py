@@ -42,10 +42,12 @@ P4_FORWARD_DECISION_SCHEMAS = {
     "p4_forward_route_decision_v4",
     "p4_forward_route_decision_v5",
     "p4_forward_route_decision_v6",
+    "p4_forward_route_decision_v7",
 }
 P4_FORMAL_RISK_SAMPLE_SCHEMAS = {
     "p4_forward_route_decision_v5",
     "p4_forward_route_decision_v6",
+    "p4_forward_route_decision_v7",
 }
 FOREST_SCENARIOS = (FOREST_V1_SCENARIO, FOREST_SCENARIO)
 SEVEN_STAGE_ORDER = (
@@ -511,6 +513,13 @@ def _result(failures: list[str], **details) -> dict:
 
 def _finite_number(value) -> bool:
     return isinstance(value, (int, float)) and math.isfinite(float(value))
+
+
+def _finite_csv_number(value) -> bool:
+    try:
+        return math.isfinite(float(value))
+    except (TypeError, ValueError):
+        return False
 
 
 def analyze_forest_risk(
@@ -1062,6 +1071,7 @@ def _selected_decisions(decisions: list[dict]) -> list[dict]:
                  "p4_forward_route_decision_v4",
                  "p4_forward_route_decision_v5",
                  "p4_forward_route_decision_v6",
+                 "p4_forward_route_decision_v7",
                  }
                  or (row.get("selection_authority") == "FORMAL"
                      and str(row.get("formal_support")) == "1"))
@@ -1069,6 +1079,7 @@ def _selected_decisions(decisions: list[dict]) -> list[dict]:
                      "p4_forward_route_decision_v4",
                      "p4_forward_route_decision_v5",
                      "p4_forward_route_decision_v6",
+                     "p4_forward_route_decision_v7",
                  }
                  or row.get("geometry_commit_verdict") in {
                      "CLEAR_UNCHANGED", "CLEAR_AFTER_UPDATE",
@@ -1079,6 +1090,12 @@ def _selected_decisions(decisions: list[dict]) -> list[dict]:
             and row.get("alert_limit_policy_id")
             and int(row.get("occupancy_generation", 0) or 0) > 0
             and int(row.get("risk_generation", 0) or 0) > 0
+            and (row.get("schema_version") !=
+                 "p4_forward_route_decision_v7"
+                 or (row.get("frame_contract_id")
+                     and row.get("local_map_support_identity")
+                     and int(row.get("gnss_epoch_identity", 0) or 0) > 0
+                     and _finite_csv_number(row.get("gnss_epoch_stamp_s"))))
         ]
     return [
         row for row in decisions
@@ -1246,6 +1263,7 @@ def analyze_stage_records(
             "p4_forward_route_decision_v4",
             "p4_forward_route_decision_v5",
             "p4_forward_route_decision_v6",
+            "p4_forward_route_decision_v7",
         }
         and row.get("stage") == "forward_decision"
     ]
@@ -1280,6 +1298,7 @@ def analyze_stage_records(
             "p4_forward_route_decision_v4",
             "p4_forward_route_decision_v5",
             "p4_forward_route_decision_v6",
+            "p4_forward_route_decision_v7",
         }
     ]
     commit_latencies = []
@@ -1653,7 +1672,9 @@ def analyze_forward_risk_samples(
         if any(not required.issubset(row) for row in event_rows):
             failures.append("p4_forward_risk_sample_fields_missing")
             continue
-        if decision.get("schema_version") == "p4_forward_route_decision_v6":
+        if decision.get("schema_version") in {
+                "p4_forward_route_decision_v6",
+                "p4_forward_route_decision_v7"}:
             if decision.get("result_status") != "READY":
                 failures.append("p4_forward_result_not_ready")
                 continue
@@ -1680,7 +1701,9 @@ def analyze_forward_risk_samples(
             decision.get("selected_candidate_id", ""))
         if selected_candidate_id not in eligible_candidates:
             failures.append("p4_formal_selected_candidate_not_safe_complete")
-        elif decision.get("schema_version") == "p4_forward_route_decision_v6":
+        elif decision.get("schema_version") in {
+                "p4_forward_route_decision_v6",
+                "p4_forward_route_decision_v7"}:
             formal_rows = [
                 row
                 for candidate_rows in eligible_candidates.values()
@@ -1849,6 +1872,9 @@ def analyze_run(
     forward_candidates = _read_csv(
         run_root /
         "exports/planner_p4_risk_astar_debug.csv.forward_candidates.csv")
+    gnss_risk_detail = _read_csv(
+        run_root /
+        "exports/planner_p4_risk_astar_debug.csv.gnss_risk_detail.csv")
     if forward_lineage:
         decisions = forward_lineage
         lineage = forward_lineage
@@ -1884,6 +1910,7 @@ def analyze_run(
                 *base["failures"], *sample_analysis["failures"]]))
             base["result"] = "FAIL"
         base["forward_risk_samples"] = sample_analysis
+        base["gnss_risk_detail_rows"] = len(gnss_risk_detail)
         if not _is_forest_scenario(scenario):
             return base
         risk = analyze_forest_risk(records, health, decisions, lineage)

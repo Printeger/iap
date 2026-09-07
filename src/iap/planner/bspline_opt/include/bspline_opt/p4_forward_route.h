@@ -13,12 +13,13 @@
 
 #include <bspline_opt/p4_geometry_commit.h>
 #include <iap/map/trusted_local_map_support.hpp>
+#include <iap/predictor/predictor_types.hpp>
 
 namespace ego_planner
 {
 
   inline constexpr char kP4ForwardDecisionSchema[] =
-    "p4_forward_route_decision_v6";
+    "p4_forward_route_decision_v7";
 
   enum class P4ForwardResultStatus
   {
@@ -119,11 +120,16 @@ namespace ego_planner
   {
     std::string geometry_id;
     std::string frame_id = "map";
+    std::string frame_contract_id = "legacy_unspecified";
+    std::string local_map_support_identity = "strict_observation";
     std::string alert_limit_policy_id;
     std::string risk_config_hash;
     std::string risk_source_identity_hash;
     uint64_t occupancy_generation = 0;
     uint64_t risk_generation = 0;
+    uint64_t gnss_epoch_identity = 0;
+    double gnss_epoch_stamp_s =
+      std::numeric_limits < double > ::quiet_NaN();
     double occupancy_stamp_s = std::numeric_limits < double > ::quiet_NaN();
     double risk_stamp_s = std::numeric_limits < double > ::quiet_NaN();
 
@@ -188,6 +194,14 @@ namespace ego_planner
       std::numeric_limits < double > ::quiet_NaN();
     double gnss_temporal_growth_v =
       std::numeric_limits < double > ::quiet_NaN();
+    double fused_pre_conservative_hpl =
+      std::numeric_limits < double > ::quiet_NaN();
+    double fused_pre_conservative_vpl =
+      std::numeric_limits < double > ::quiet_NaN();
+    double gnss_floor_increment_h =
+      std::numeric_limits < double > ::quiet_NaN();
+    double gnss_floor_increment_v =
+      std::numeric_limits < double > ::quiet_NaN();
     double gnss_anchor_epoch_delta_s =
       std::numeric_limits < double > ::quiet_NaN();
     double gnss_support_ray_length_m =
@@ -204,6 +218,7 @@ namespace ego_planner
     iap::LocalMapSupportStatus support_status =
       iap::LocalMapSupportStatus::FRAME_INVALID;
     uint64_t local_satellite_set_hash = 0;
+    std::vector<iap::GnssRiskSatelliteDiagnostic> gnss_satellites;
     // Non-certified evidence. These fields never turn UNKNOWN into SAFE and
     // are used only to compare geometrically valid routes when formal source
     // support is incomplete.

@@ -11,6 +11,8 @@
 #include <string>
 #include <vector>
 
+#include <iap/map/trusted_local_map_support.hpp>
+
 namespace iap {
 
 enum class RiskGridSourceValidation {
@@ -181,6 +183,7 @@ struct RiskGridSourceIdentity {
   double prior_stamp_s = std::numeric_limits<double>::quiet_NaN();
   uint64_t gnss_generation = 0;
   double gnss_stamp_s = std::numeric_limits<double>::quiet_NaN();
+  uint64_t gnss_epoch_identity = 0;
   uint64_t lidar_generation = 0;
   double lidar_stamp_s = std::numeric_limits<double>::quiet_NaN();
   // Identity of the immutable local-map support envelope used by the
@@ -274,6 +277,10 @@ struct RiskOccupancyDiagnostic {
   double cloud_stamp_s = std::numeric_limits<double>::quiet_NaN();
   uint64_t occupancy_generation = 0;
   std::string source = "unavailable";
+  // Independent from the ray-derived observed/state fields. A trusted
+  // hit-only local-map model may complete prediction support without
+  // fabricating OBSERVED_FREE occupancy evidence.
+  LocalMapSupportQuery model_support;
 };
 
 struct RiskCostQueryCornerTrace {

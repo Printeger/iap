@@ -422,6 +422,8 @@ P4ForwardRequest straightRequest()
   request.snapshot_identity.risk_source_identity_hash = "risk_sources";
   request.snapshot_identity.occupancy_generation = 3;
   request.snapshot_identity.risk_generation = 5;
+  request.snapshot_identity.gnss_epoch_identity = 7;
+  request.snapshot_identity.gnss_epoch_stamp_s = 10.0;
   request.snapshot_identity.occupancy_stamp_s = 10.0;
   request.snapshot_identity.risk_stamp_s = 10.0;
   request.limits.vehicle_radius_m = 0.0;
@@ -473,6 +475,18 @@ TEST(P4ForwardRoute, NonFiniteLimitsFailClosedBeforeBudgetConstruction)
   EXPECT_EQ(decision.action, P4ForwardAction::REPLAN_REQUIRED);
   EXPECT_EQ(decision.trigger_reason, P4ForwardTriggerReason::REQUEST_INVALID);
   EXPECT_EQ(decision.reason, "invalid_limits");
+}
+
+TEST(P4ForwardRoute, SnapshotIdentityRequiresCertifiedGnssEpoch)
+{
+  auto request = straightRequest();
+  request.snapshot_identity.gnss_epoch_identity = 0;
+  EXPECT_FALSE(request.snapshot_identity.valid());
+
+  request.snapshot_identity.gnss_epoch_identity = 7;
+  request.snapshot_identity.gnss_epoch_stamp_s =
+    std::numeric_limits<double>::quiet_NaN();
+  EXPECT_FALSE(request.snapshot_identity.valid());
 }
 
 TEST(P4ForwardRoute, NonFiniteNominalReferenceFailsClosed)
@@ -579,7 +593,7 @@ TEST(P4ForwardRoute, InconclusiveTopologyProbeAdvancesOnlyBeforeAnyBranch)
 }
 
 TEST(P4ForwardRoute,
-  CertifiedIntegrityAnchorDoesNotDependOnCurrentRiskVoxelInterpolation)
+  CertifiedIntegrityAnchorCannotSubstituteForPrefixRiskSupport)
 {
   auto request = straightRequest();
   request.geometry = [](const Eigen::Vector3d & point) {
@@ -603,8 +617,9 @@ TEST(P4ForwardRoute,
 
   EXPECT_EQ(decision.action, P4ForwardAction::DEFER_RISK_SELECTION);
   EXPECT_EQ(decision.deferred_motion_mode,
-            ego_planner::P4ForwardDeferredMotionMode::COMMON_PREFIX);
-  EXPECT_GT(decision.speed_cap_mps, 0.0);
+            ego_planner::P4ForwardDeferredMotionMode::HOLD);
+  EXPECT_DOUBLE_EQ(decision.speed_cap_mps, 0.0);
+  EXPECT_TRUE(decision.deferred_trajectory.empty());
 }
 
 TEST(P4ForwardRoute, ZeroLengthCandidatePrefixForcesStrictIntersectionHold)
@@ -624,7 +639,7 @@ TEST(P4ForwardRoute, ZeroLengthCandidatePrefixForcesStrictIntersectionHold)
   EXPECT_TRUE(prefix.front().isApprox(immediate_failure.path.front()));
 }
 
-TEST(P4ForwardRoute, MissingRiskSupportDefersSelectionAtLimitedSpeed)
+TEST(P4ForwardRoute, MissingRiskSupportDoesNotAuthorizeNativeMotion)
 {
   auto request = straightRequest();
   request.risk = [](const Eigen::Vector3d & point, double) {
@@ -646,16 +661,12 @@ TEST(P4ForwardRoute, MissingRiskSupportDefersSelectionAtLimitedSpeed)
   EXPECT_EQ(decision.trigger_reason,
             P4ForwardTriggerReason::SUPPORT_INCOMPLETE);
   EXPECT_EQ(decision.deferred_motion_mode,
-            ego_planner::P4ForwardDeferredMotionMode::NATIVE_EGO);
+            ego_planner::P4ForwardDeferredMotionMode::HOLD);
   EXPECT_EQ(decision.selected_candidate_id, 0u);
   EXPECT_TRUE(decision.selected_guide.empty());
-  EXPECT_LE(decision.speed_cap_mps,
-    request.limits.max_observe_speed_mps + 1.0e-9);
+  EXPECT_DOUBLE_EQ(decision.speed_cap_mps, 0.0);
   ASSERT_EQ(decision.candidates.size(), 1u);
-  EXPECT_LE(
-    ego_planner::p4StoppingDistance(decision.speed_cap_mps, request.limits),
-    std::min(decision.decision_horizon_m,
-      decision.candidates.front().length_m) + 1.0e-9);
+  EXPECT_TRUE(decision.deferred_trajectory.empty());
 }
 
 TEST(P4ForwardRoute, StaleCurrentAnchorForcesDeferredHold)
@@ -780,7 +791,7 @@ TEST(P4ForwardRoute, WorkerShutdownIsBoundedByTheComputeDeadline)
   EXPECT_LT(elapsed_ms, 100.0);
 }
 
-TEST(P4ForwardRoute, DeferredNativeEgoMotionRetainsConfiguredSpeedCap)
+TEST(P4ForwardRoute, DeferredNativeEgoMotionRequiresCompleteRiskSupport)
 {
   auto request = straightRequest();
   request.limits.compute_budget_ms = 150.0;
@@ -807,8 +818,8 @@ TEST(P4ForwardRoute, DeferredNativeEgoMotionRetainsConfiguredSpeedCap)
   ASSERT_EQ(decision.action, P4ForwardAction::DEFER_RISK_SELECTION)
     << decision.reason << " latency_ms=" << decision.compute_latency_ms;
   EXPECT_EQ(decision.deferred_motion_mode,
-            ego_planner::P4ForwardDeferredMotionMode::NATIVE_EGO);
-  EXPECT_LE(decision.speed_cap_mps, request.limits.max_observe_speed_mps);
+            ego_planner::P4ForwardDeferredMotionMode::HOLD);
+  EXPECT_DOUBLE_EQ(decision.speed_cap_mps, 0.0);
 }
 
 TEST(P4ForwardRoute, KnownUnsafeRiskPreventsDeferredNativeMotion)
@@ -1449,6 +1460,37 @@ TEST(P4ForwardRoute, RiskBatchIncompleteDefersWithoutRiskSelection)
     request.limits.max_observe_speed_mps + 1.0e-9);
 }
 
+TEST(P4ForwardRoute, MultipleIncompleteRoutesCannotUseGeometryOnlyPrefix)
+{
+  auto request = straightRequest();
+  request.geometry = [](const Eigen::Vector3d & point) {
+      if (point.x() >= 2.0 && point.x() <= 4.0 &&
+        std::abs(point.y()) <= 0.6)
+      {
+        return P4ForwardGeometryState::OCCUPIED;
+      }
+      return std::abs(point.y()) > 2.5 ?
+        P4ForwardGeometryState::OCCUPIED : P4ForwardGeometryState::CLEAR;
+    };
+  request.risk = [](const Eigen::Vector3d &, double) {
+      P4ForwardRiskSample sample;
+      sample.reason = "risk_voxel_interpolation_incomplete";
+      return sample;
+    };
+  bindTestRiskBatch(&request);
+
+  const auto decision = P4ForwardRoutePlanner().decide(request);
+
+  ASSERT_GE(decision.candidates.size(), 2u);
+  EXPECT_EQ(decision.action, P4ForwardAction::DEFER_RISK_SELECTION);
+  EXPECT_EQ(decision.trigger_reason,
+            P4ForwardTriggerReason::SUPPORT_INCOMPLETE);
+  EXPECT_EQ(decision.deferred_motion_mode,
+            ego_planner::P4ForwardDeferredMotionMode::HOLD);
+  EXPECT_TRUE(decision.deferred_trajectory.empty());
+  EXPECT_DOUBLE_EQ(decision.speed_cap_mps, 0.0);
+}
+
 TEST(P4ForwardRoute, KnownHitLimitsGeometryAnchor)
 {
   auto request = straightRequest();
@@ -1501,7 +1543,7 @@ TEST(P4ForwardRoute, UnobservedRegionCannotCreateArtificialChannels)
   EXPECT_EQ(decision.candidates.size(), 1u);
 }
 
-TEST(P4ForwardRoute, MultipleChannelsUseClearCorridorPrefixBeforeBranch)
+TEST(P4ForwardRoute, MultipleIncompleteChannelsHoldBeforeBranch)
 {
   auto request = straightRequest();
   request.geometry = [](const Eigen::Vector3d & point) {
@@ -1535,13 +1577,168 @@ TEST(P4ForwardRoute, MultipleChannelsUseClearCorridorPrefixBeforeBranch)
     << decision.reason;
   ASSERT_GE(decision.candidates.size(), 2u);
   EXPECT_EQ(decision.deferred_motion_mode,
-            ego_planner::P4ForwardDeferredMotionMode::COMMON_PREFIX);
-  EXPECT_GE(decision.common_prefix_length_m, 1.5);
-  EXPECT_LE(decision.speed_cap_mps, 0.5);
+            ego_planner::P4ForwardDeferredMotionMode::HOLD);
+  EXPECT_DOUBLE_EQ(decision.speed_cap_mps, 0.0);
   EXPECT_EQ(decision.selected_candidate_id, 0u);
   EXPECT_TRUE(decision.selected_guide.empty());
-  EXPECT_FALSE(decision.deferred_trajectory.empty());
+  EXPECT_TRUE(decision.deferred_trajectory.empty());
+}
+
+TEST(P4ForwardRoute, UnsafeFullRoutesAuthorizeOnlyContinuousSafeCommonPrefix)
+{
+  auto request = straightRequest();
+  request.velocity = Eigen::Vector3d(0.2, 0.0, 0.0);
+  request.geometry = [](const Eigen::Vector3d & point) {
+      if (point.x() >= 2.0 && point.x() <= 4.0 &&
+        std::abs(point.y()) <= 0.6)
+      {
+        return P4ForwardGeometryState::OCCUPIED;
+      }
+      return std::abs(point.y()) > 2.5 ?
+        P4ForwardGeometryState::OCCUPIED : P4ForwardGeometryState::CLEAR;
+    };
+  request.risk = [](const Eigen::Vector3d & point, double) {
+      P4ForwardRiskSample sample;
+      sample.valid = true;
+      sample.stale = false;
+      sample.gnss_supported = true;
+      sample.lidar_supported = true;
+      sample.fim_supported = true;
+      sample.safety_ratio = point.x() < 4.5 ? 0.6 : 1.2;
+      sample.fim_ratio = 0.3;
+      sample.reason = sample.safety_ratio < 1.0 ?
+        "ok" : "SAFETY_LIMIT_EXCEEDED";
+      return sample;
+    };
+  bindTestRiskBatch(&request);
+
+  const auto decision = P4ForwardRoutePlanner().decide(request);
+
+  EXPECT_EQ(decision.action, P4ForwardAction::DEFER_RISK_SELECTION)
+    << decision.reason;
+  EXPECT_EQ(decision.trigger_reason, P4ForwardTriggerReason::NO_SAFE_ROUTE);
+  EXPECT_EQ(decision.deferred_motion_mode,
+            ego_planner::P4ForwardDeferredMotionMode::COMMON_PREFIX);
+  EXPECT_EQ(decision.selection_authority, P4ForwardSelectionAuthority::NONE);
+  EXPECT_EQ(decision.reason, "safe_limited_common_prefix");
+  ASSERT_GE(decision.deferred_trajectory.size(), 2u);
+  EXPECT_GE(decision.deferred_trajectory.back().x(),
+            decision.stopping_distance_m - 1.0e-9);
   EXPECT_LT(decision.deferred_trajectory.back().x(), 2.0);
+}
+
+TEST(P4ForwardRoute,
+  SafeLimitedPrefixHasUsableSpeedWithNonzeroVehicleAndTrackingMargins)
+{
+  auto request = straightRequest();
+  request.velocity = Eigen::Vector3d::Zero();
+  request.limits.vehicle_radius_m = 0.35;
+  request.limits.safety_margin_m = 0.5;
+  request.limits.compute_budget_ms = 500.0;
+  request.limits.channel_enumeration_budget_ms = 250.0;
+  request.geometry = [](const Eigen::Vector3d & point) {
+      if (point.x() >= 2.0 && point.x() <= 4.0 &&
+        std::abs(point.y()) <= 0.6)
+      {
+        return P4ForwardGeometryState::OCCUPIED;
+      }
+      return std::abs(point.y()) > 2.5 ?
+        P4ForwardGeometryState::OCCUPIED : P4ForwardGeometryState::CLEAR;
+    };
+  request.risk = [](const Eigen::Vector3d & point, double) {
+      P4ForwardRiskSample sample;
+      sample.valid = true;
+      sample.stale = false;
+      sample.gnss_supported = true;
+      sample.lidar_supported = true;
+      sample.fim_supported = true;
+      sample.safety_ratio = point.x() < 4.5 ? 0.6 : 1.2;
+      sample.fim_ratio = 0.3;
+      sample.reason = sample.safety_ratio < 1.0 ?
+        "ok" : "SAFETY_LIMIT_EXCEEDED";
+      return sample;
+    };
+  bindTestRiskBatch(&request);
+
+  const auto decision = P4ForwardRoutePlanner().decide(request);
+
+  ASSERT_EQ(decision.reason, "safe_limited_common_prefix");
+  EXPECT_GT(decision.speed_cap_mps, 0.1);
+  EXPECT_LE(decision.speed_cap_mps,
+            request.limits.max_observe_speed_mps);
+  EXPECT_LE(ego_planner::p4StoppingDistance(
+      decision.speed_cap_mps, request.limits),
+      decision.certified_free_distance_m + 1.0e-9);
+  EXPECT_LE((decision.deferred_trajectory.back() -
+             decision.deferred_trajectory.front()).norm() +
+            request.limits.vehicle_radius_m +
+            request.limits.safety_margin_m,
+            decision.certified_free_distance_m + 1.0e-9);
+}
+
+TEST(P4ForwardRoute, SafeLimitedPrefixNeverExceedsConfiguredProgressCap)
+{
+  auto request = straightRequest();
+  request.velocity = Eigen::Vector3d(1.0, 0.0, 0.0);
+  request.limits.max_creep_progress_m = 0.5;
+  request.geometry = [](const Eigen::Vector3d & point) {
+      if (point.x() >= 2.0 && point.x() <= 4.0 &&
+        std::abs(point.y()) <= 0.6)
+      {
+        return P4ForwardGeometryState::OCCUPIED;
+      }
+      return std::abs(point.y()) > 2.5 ?
+        P4ForwardGeometryState::OCCUPIED : P4ForwardGeometryState::CLEAR;
+    };
+  request.risk = [](const Eigen::Vector3d & point, double) {
+      P4ForwardRiskSample sample;
+      sample.valid = true;
+      sample.stale = false;
+      sample.gnss_supported = true;
+      sample.lidar_supported = true;
+      sample.fim_supported = true;
+      sample.safety_ratio = point.x() < 4.5 ? 0.6 : 1.2;
+      sample.fim_ratio = 0.3;
+      sample.reason = sample.safety_ratio < 1.0 ?
+        "ok" : "SAFETY_LIMIT_EXCEEDED";
+      return sample;
+    };
+  bindTestRiskBatch(&request);
+
+  const auto decision = P4ForwardRoutePlanner().decide(request);
+
+  EXPECT_EQ(decision.action, P4ForwardAction::NO_SAFE_ROUTE);
+  EXPECT_EQ(decision.deferred_motion_mode,
+            ego_planner::P4ForwardDeferredMotionMode::HOLD);
+  EXPECT_EQ(decision.reason, "safe_common_prefix_progress_limit_too_short");
+}
+
+TEST(P4ForwardRoute, UnsafeNearStartOrInsufficientStoppingDistanceHolds)
+{
+  auto request = straightRequest();
+  request.velocity = Eigen::Vector3d(1.0, 0.0, 0.0);
+  request.risk = [](const Eigen::Vector3d & point, double) {
+      P4ForwardRiskSample sample;
+      sample.valid = true;
+      sample.stale = false;
+      sample.gnss_supported = true;
+      sample.lidar_supported = true;
+      sample.fim_supported = true;
+      sample.safety_ratio = point.x() < 0.5 ? 0.6 : 1.2;
+      sample.fim_ratio = 0.3;
+      sample.reason = sample.safety_ratio < 1.0 ?
+        "ok" : "SAFETY_LIMIT_EXCEEDED";
+      return sample;
+    };
+  bindTestRiskBatch(&request);
+
+  const auto decision = P4ForwardRoutePlanner().decide(request);
+
+  EXPECT_EQ(decision.action, P4ForwardAction::NO_SAFE_ROUTE);
+  EXPECT_EQ(decision.deferred_motion_mode,
+            ego_planner::P4ForwardDeferredMotionMode::HOLD);
+  EXPECT_TRUE(decision.deferred_trajectory.empty());
+  EXPECT_EQ(decision.reason, "safe_common_prefix_too_short_to_stop");
 }
 
 TEST(P4ForwardRoute, FullThreeDimensionalSearchSelectsVerticalChannel)

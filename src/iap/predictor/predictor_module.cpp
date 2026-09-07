@@ -880,38 +880,74 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
     double known_degradation = 0.0;
     for (std::size_t sat_index = 0; sat_index < sat_count; ++sat_index) {
       const auto& sat = request.snapshot.gnss_epoch.sats[sat_index];
-      if (sat.excluded ||
-          sat.elevation < params_.gnss.visibility_params.min_elevation) {
+      GnssRiskSatelliteDiagnostic diagnostic;
+      diagnostic.sat_id = sat.sat_id;
+      diagnostic.epoch_excluded = sat.excluded;
+      diagnostic.above_elevation_mask =
+          sat.elevation >= params_.gnss.visibility_params.min_elevation;
+      diagnostic.elevation_rad = sat.elevation;
+      diagnostic.azimuth_rad = sat.azimuth;
+      const double cos_elevation = std::cos(sat.elevation);
+      diagnostic.los_map = Eigen::Vector3d(
+          cos_elevation * std::sin(sat.azimuth),
+          cos_elevation * std::cos(sat.azimuth),
+          std::sin(sat.elevation));
+      diagnostic.support_known =
+          sat_index < evidence.known_flags.size() &&
+          evidence.known_flags[sat_index];
+      diagnostic.visible = sat_index < evidence.vis_flags.size() &&
+          evidence.vis_flags[sat_index];
+      diagnostic.blocked = sat_index < evidence.blocked_flags.size() &&
+          evidence.blocked_flags[sat_index];
+      diagnostic.kappa = sat_index < evidence.kappas.size()
+          ? evidence.kappas[sat_index]
+          : std::numeric_limits<double>::quiet_NaN();
+      diagnostic.sigma_eff_m = sat_index < evidence.sigma_effs.size()
+          ? evidence.sigma_effs[sat_index]
+          : std::numeric_limits<double>::quiet_NaN();
+      if (sat.excluded) {
+        diagnostic.exclusion_reason = "integrity_epoch_excluded";
+        result.gnss_satellites.push_back(std::move(diagnostic));
+        continue;
+      }
+      if (!diagnostic.above_elevation_mask) {
+        diagnostic.exclusion_reason = "below_elevation_mask";
+        result.gnss_satellites.push_back(std::move(diagnostic));
         continue;
       }
       ++eligible_satellites;
-      const bool known = sat_index < evidence.known_flags.size() &&
-          evidence.known_flags[sat_index];
+      const bool known = diagnostic.support_known;
       if (!known) {
         ++result.gnss_unknown_satellite_count;
+        diagnostic.exclusion_reason = "local_map_support_unknown";
+        result.gnss_satellites.push_back(std::move(diagnostic));
         continue;
       }
       ++result.gnss_known_satellite_count;
-      const bool blocked = sat_index < evidence.blocked_flags.size() &&
-          evidence.blocked_flags[sat_index];
-      const bool visible = sat_index < evidence.vis_flags.size() &&
-          evidence.vis_flags[sat_index] && !blocked;
+      const bool blocked = diagnostic.blocked;
+      const bool visible = diagnostic.visible && !blocked;
       const double kappa = sat_index < evidence.kappas.size() &&
           std::isfinite(evidence.kappas[sat_index])
           ? std::clamp(evidence.kappas[sat_index], 0.0, 1.0)
           : 0.0;
       if (blocked) {
         ++result.gnss_blocked_satellite_count;
+        diagnostic.exclusion_reason = "hard_occlusion";
       } else if (visible) {
         ++result.gnss_visible_satellite_count;
         local_mask[sat_index] = true;
         ++result.gnss_used_satellite_count;
+        diagnostic.used = true;
+        diagnostic.exclusion_reason = "used";
         if (kappa > 0.0) {
           ++result.gnss_attenuated_satellite_count;
         }
+      } else {
+        diagnostic.exclusion_reason = "visibility_rejected";
       }
       known_degradation = std::max(
           known_degradation, blocked ? 1.0 : kappa);
+      result.gnss_satellites.push_back(std::move(diagnostic));
     }
     std::uint64_t local_hash = 1469598103934665603ull;
     for (std::size_t sat_index = 0; sat_index < sat_count; ++sat_index) {

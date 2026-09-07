@@ -1714,8 +1714,20 @@ void P0RiskGridRuntime::refreshTimerCallback() {
       combinedOccupancyDiagnosticQuery(
       occupancy_epoch ? occupancy_epoch->diagnostic_query
                       : iap::RiskGridMap::OccupancyDiagnosticQuery{});
-  const iap::RiskGridMap::OccupancyDiagnosticQuery occupancy_diagnostic_query =
+  iap::RiskGridMap::OccupancyDiagnosticQuery occupancy_diagnostic_query =
       combined_occupancy_diagnostic_query;
+  if (occupancy_epoch && occupancy_epoch->trusted_local_map_support &&
+      combined_occupancy_diagnostic_query) {
+    const auto trusted_support =
+        occupancy_epoch->trusted_local_map_support;
+    occupancy_diagnostic_query =
+        [combined_occupancy_diagnostic_query, trusted_support, now_s](
+            const Eigen::Vector3d & position) {
+          auto diagnostic = combined_occupancy_diagnostic_query(position);
+          diagnostic.model_support = trusted_support->query(position, now_s);
+          return diagnostic;
+        };
+  }
   const auto occupancy_predicate = combinedOccupancyPredicate();
   iap::RiskGridMap::SourceValidator source_validator;
   if (occupancy_epoch) {
@@ -1837,6 +1849,8 @@ void P0RiskGridRuntime::refreshTimerCallback() {
       captured_predictor_sources.gnss_epoch_generation;
   source_identity.gnss_stamp_s =
       captured_predictor_sources.gnss_epoch_stamp;
+  source_identity.gnss_epoch_identity =
+      snapshot.current.gnss_epoch_identity;
   source_identity.lidar_generation = captured_lidar_generation;
   source_identity.lidar_stamp_s = captured_lidar_stamp;
   source_identity.local_map_support_identity = occupancy_epoch &&

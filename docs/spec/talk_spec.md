@@ -48,6 +48,10 @@ For each candidate trajectory τ:
   recheck freshness against their then-current ROS/simulation time. A newer
   generation does not itself revoke an in-flight immutable evaluation;
   collision deltas remain independently rechecked.
+  P0 uses the same rule: a no-hit voxel inside a `MODEL_COMPLETE` envelope is
+  eligible for prediction even when it is not ray-observed, without changing
+  its occupancy evidence to `OBSERVED_FREE`. All other incomplete support and
+  occupied/inflated geometry remains fail-closed.
 - predict LiDAR observability proxy O^(τ) (ICP quality proxy, map-based, may include occlusion)
 - propagate Σ -> Σ_pred using empirical growth model (keep exact interface)
 - compute PL_pred from Σ_pred
@@ -62,6 +66,16 @@ For each candidate trajectory τ:
   While a new result is pending, an
   unchanged valid prefix continues; runtime collision or Integrity revocation
   triggers replan/braking/emergency handling.
+- When no full topology route is risk-safe, the planner may crop the
+  continuous risk-safe geometry-common corridor before the first unsafe or
+  unsupported sample, reserve stopping/tracking distance, and publish it only
+  as a terminal-stopped `LIMITED_PREFIX`. Too little safe distance remains a
+  normal HOLD, including when current-speed braking exceeds the configured
+  maximum prefix progress; a limited prefix is not a full-route risk selection. A
+  geometry-only or risk-incomplete fallback cannot move. During execution the
+  latest coherent P0 transaction supplies a newly fresh certified-current
+  Integrity check; raw map advisory at the receiver remains predictive, while
+  the remaining curve is still checked at its future positions and times.
 
 ## G) Upgrade items (optional, after baseline closes the loop)
 - trunk landmarks + TDOP

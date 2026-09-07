@@ -3,6 +3,35 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(p4-safe-prefix-p0-envelope-gnss-audit): IAP-RQ-312 / IAP-RQ-320 /
+  IAP-RQ-400 / IAP-RQ-410 — when every complete forward route exceeds AL,
+  independently evaluate the continuous geometry-common corridor, stop at
+  its first unsafe or unsupported sample, reserve braking/tracking margin and
+  authorize a dynamically stoppable crop only as
+  `DEFER_RISK_SELECTION/COMMON_PREFIX` with `LIMITED_PREFIX` execution
+  authority. The final B-spline remains subject to hard terminal constraints,
+  actual-time collision/risk checks and the immutable execution certificate;
+  insufficient distance remains HOLD. Geometry-only and risk-incomplete
+  fallback prefixes can no longer move, and the configured prefix progress
+  maximum remains a hard cap even when current-speed braking needs more.
+  Runtime current authority now uses
+  the fresh certified monitor sample in the latest coherent P0 transaction,
+  rather than substituting the receiver-position raw map advisory; remaining
+  trajectory risk, map freshness and collision deltas are still rechecked.
+  Thread the frozen
+  `TrustedLocalMapSupport` query into P0 occupancy diagnostics so
+  model-complete no-hit cells can reach prediction without being relabelled
+  `OBSERVED_FREE`; outside/incomplete/expired/frame-invalid support and actual
+  occupancy still fail closed. Bind frame-contract, support and certified
+  GNSS-epoch identities through P4 final checks, and emit v7 first-failure /
+  worst-point per-satellite GNSS decomposition (LOS, exclusions, canopy
+  multiplier, effective sigma, raw/anchor/spatial/temporal/fusion/floor PL)
+  for coordinate and model audits. The forest-v2 map contract remains
+  translation-only map/ENU alignment with zero configured GNSS lever arm; no
+  risk weights, AL, P5 policy, or truth input changed. Receiver and candidate
+  GNSS model queries also share the epoch pseudorange-sigma floor across the
+  measured-support boundary, avoiding a support-radius PL discontinuity.
+
 - fix(p4-hard-stop-and-current-map-freshness): IAP-RQ-312 / IAP-RQ-320 /
   IAP-RQ-400 / IAP-RQ-410 — replace P4's overdetermined soft terminal fit with
   a boundary-eliminated cubic B-spline least-squares fit that exactly preserves

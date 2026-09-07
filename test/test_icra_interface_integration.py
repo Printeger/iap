@@ -760,6 +760,31 @@ class TestRunnerLifecycle(unittest.TestCase):
 
 
 class TestStageAnalyzer(unittest.TestCase):
+    def test_v7_formal_selection_requires_frame_support_and_gnss_identity(self):
+        decision = {
+            "schema_version": "p4_forward_route_decision_v7",
+            "stage": "forward_decision",
+            "action": "RISK_SELECTED",
+            "selection_authority": "FORMAL",
+            "formal_support": "1",
+            "selected_candidate_id": "2",
+            "candidate_count": "2",
+            "geometry_id": "planning-lattice-v2",
+            "alert_limit_policy_id": "fixed_hal20_val40_v1",
+            "occupancy_generation": "3",
+            "risk_generation": "5",
+            "geometry_commit_verdict": "CLEAR_AFTER_UPDATE",
+            "frame_contract_id": "planner-map-contract-a",
+            "local_map_support_identity": "support-envelope-a",
+            "gnss_epoch_identity": "71",
+            "gnss_epoch_stamp_s": "100.25",
+        }
+        self.assertEqual(MODULE._selected_decisions([decision]), [decision])
+        missing_support = dict(decision, local_map_support_identity="")
+        self.assertEqual(MODULE._selected_decisions([missing_support]), [])
+        missing_epoch = dict(decision, gnss_epoch_identity="0")
+        self.assertEqual(MODULE._selected_decisions([missing_epoch]), [])
+
     def test_v6_formal_selection_accepts_distinct_local_satellite_sets(self):
         decision = {
             "schema_version": "p4_forward_route_decision_v6",

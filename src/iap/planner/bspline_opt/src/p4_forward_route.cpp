@@ -1408,12 +1408,22 @@ void configureKnownGeometryPrefixMotion(
   if (!currentRiskAnchorSafe(request)) {
     return;
   }
-  for (const auto & point : resample(prefix, 0.25)) {
-    const auto sample = request.risk(point, request.query_time_s);
-    if (sample.valid && !sample.stale &&
-      (sample.safety_state == P4ForwardSafetyState::UNSAFE ||
-      (std::isfinite(sample.safety_ratio) && sample.safety_ratio >= 1.0)))
-    {
+  const auto samples = resample(prefix, 0.25);
+  const double timing_speed = std::max(
+    0.05, 0.5 * std::max(request.velocity.norm(),
+      request.limits.max_observe_speed_mps));
+  double arc_length_m = 0.0;
+  for (std::size_t index = 0; index < samples.size(); ++index) {
+    if (index > 0) {
+      arc_length_m += (samples[index] - samples[index - 1]).norm();
+    }
+    const auto sample = request.risk(
+      samples[index], request.query_time_s + arc_length_m / timing_speed);
+    const bool complete_safe = sample.valid && !sample.stale &&
+      sample.gnss_supported && sample.lidar_supported &&
+      sample.fim_supported && std::isfinite(sample.safety_ratio) &&
+      sample.safety_ratio < 1.0 && std::isfinite(sample.fim_ratio);
+    if (!complete_safe) {
       return;
     }
   }
@@ -1426,6 +1436,7 @@ void configureKnownGeometryPrefixMotion(
   }
   decision->deferred_motion_mode = P4ForwardDeferredMotionMode::COMMON_PREFIX;
   decision->deferred_trajectory = cropPrefixToDistance(prefix, progress);
+  decision->certified_free_distance_m = decision->common_prefix_length_m;
   const double stop_reserve = std::max(
     0.0, decision->common_prefix_length_m - progress);
   decision->speed_cap_mps = std::min(
@@ -1433,59 +1444,136 @@ void configureKnownGeometryPrefixMotion(
     speedCapForDistance(stop_reserve, request.limits));
 }
 
-void configureDeferredMotion(
+bool configureSafeLimitedCommonPrefix(
   const P4ForwardRequest & request, const OnlineTopologyGraph & graph,
-  P4ForwardDecision * decision)
+  const ComputeBudget * budget, P4ForwardDecision * decision)
 {
-  decision->selected_candidate_id = 0;
-  decision->selected_guide.clear();
-  decision->deferred_trajectory.clear();
-  decision->common_prefix_length_m = 0.0;
-  decision->speed_cap_mps = 0.0;
-  decision->deferred_motion_mode = P4ForwardDeferredMotionMode::HOLD;
-  if (!currentRiskAnchorSafe(request)) {
-    return;
-  }
-  if (std::any_of(
-      decision->candidates.begin(), decision->candidates.end(),
-      [](const P4ForwardCandidate & candidate) {
-        return candidate.safety_state == P4ForwardSafetyState::UNSAFE;
-      }))
+  if (!decision || !currentRiskAnchorSafe(request) ||
+    decision->candidates.empty())
   {
-    return;
+    return false;
   }
-  if (decision->candidates.size() == 1) {
-    const double geometry_distance = std::min(
-      decision->decision_horizon_m,
-      decision->candidates.front().length_m);
-    decision->speed_cap_mps = std::min(
-      request.limits.max_observe_speed_mps,
-      speedCapForDistance(geometry_distance, request.limits));
-    if (decision->speed_cap_mps > 1.0e-3) {
-      decision->deferred_motion_mode =
-        P4ForwardDeferredMotionMode::NATIVE_EGO;
-    }
-    return;
-  }
+  decision->deferred_motion_mode = P4ForwardDeferredMotionMode::HOLD;
+  decision->deferred_trajectory.clear();
+  decision->speed_cap_mps = 0.0;
+  decision->certified_free_distance_m = 0.0;
+
   const auto prefix = commonGeometryCorridorPrefix(
     decision->candidates, request.limits.topology_resolution_m * 0.5,
     graph);
   decision->common_prefix_length_m = pathLength(prefix);
-  const double terminal_reserve = p4StoppingDistance(0.0, request.limits);
-  const double progress = std::min(
-    request.limits.max_creep_progress_m,
-    std::max(0.0, decision->common_prefix_length_m - terminal_reserve));
-  if (progress < request.limits.min_creep_progress_m) {
-    return;
+  if (prefix.size() < 2 || decision->common_prefix_length_m <= kEpsilon) {
+    decision->reason = "safe_common_prefix_unavailable";
+    return false;
   }
-  decision->deferred_motion_mode =
-    P4ForwardDeferredMotionMode::COMMON_PREFIX;
-  decision->deferred_trajectory = cropPrefixToDistance(prefix, progress);
-  const double stop_reserve = std::max(
-    0.0, decision->common_prefix_length_m - progress);
-  decision->speed_cap_mps = std::min(
-    request.limits.max_observe_speed_mps,
-    speedCapForDistance(stop_reserve, request.limits));
+
+  const auto path_samples = resample(
+    prefix, std::min(0.25, request.limits.topology_resolution_m));
+  std::vector<P4ForwardRiskQuery> queries;
+  queries.reserve(path_samples.size());
+  const double timing_speed = std::max(
+    0.05, 0.5 * std::max(request.velocity.norm(),
+      request.limits.max_observe_speed_mps));
+  double arc_length_m = 0.0;
+  for (std::size_t index = 0; index < path_samples.size(); ++index) {
+    if (index > 0) {
+      arc_length_m += (path_samples[index] - path_samples[index - 1]).norm();
+    }
+    queries.push_back(P4ForwardRiskQuery{
+      path_samples[index], request.query_time_s + arc_length_m / timing_speed,
+      std::numeric_limits<uint64_t>::max()});
+  }
+
+  std::vector<P4ForwardRiskSample> samples;
+  bool queried = false;
+  if (request.risk_batch) {
+    queried = !(budget && budget->expired()) && request.risk_batch(
+      queries, budget ? budget->remainingMs() :
+      request.limits.compute_budget_ms, &samples) &&
+      samples.size() == queries.size();
+  } else if (request.risk) {
+    samples.reserve(queries.size());
+    for (const auto & query : queries) {
+      samples.push_back(request.risk(query.position, query.query_time_s));
+    }
+    queried = true;
+  }
+  if (!queried) {
+    decision->reason = budget && budget->expired() ?
+      "compute_budget_exceeded" : "safe_common_prefix_risk_query_failed";
+    return false;
+  }
+
+  double last_safe_arc_m = 0.0;
+  double sampled_arc_m = 0.0;
+  for (std::size_t index = 0; index < samples.size(); ++index) {
+    if (index > 0) {
+      sampled_arc_m +=
+        (path_samples[index] - path_samples[index - 1]).norm();
+    }
+    const auto & risk = samples[index];
+    const bool complete_safe = risk.valid && !risk.stale &&
+      risk.gnss_supported && risk.lidar_supported && risk.fim_supported &&
+      risk.safety_state == P4ForwardSafetyState::SAFE &&
+      risk.ranking_state == P4ForwardRankingState::COMPARABLE &&
+      std::isfinite(risk.safety_ratio) && risk.safety_ratio < 1.0 &&
+      std::isfinite(risk.fim_ratio);
+    if (!complete_safe) {
+      break;
+    }
+    last_safe_arc_m = sampled_arc_m;
+  }
+  decision->certified_free_distance_m = last_safe_arc_m;
+
+  const double fixed_reserve_m = request.limits.vehicle_radius_m +
+    request.limits.safety_margin_m;
+  const double approved_motion_m = std::max(
+    0.0, last_safe_arc_m - fixed_reserve_m);
+  const double required_braking_motion_m = std::max(
+    0.0, decision->stopping_distance_m - fixed_reserve_m);
+  if (approved_motion_m + kEpsilon < required_braking_motion_m ||
+    approved_motion_m + kEpsilon < request.limits.min_creep_progress_m)
+  {
+    decision->reason = "safe_common_prefix_too_short_to_stop";
+    return false;
+  }
+  if (required_braking_motion_m >
+    request.limits.max_creep_progress_m + kEpsilon)
+  {
+    decision->reason = "safe_common_prefix_progress_limit_too_short";
+    return false;
+  }
+  const double progress_m = std::min(
+    approved_motion_m, request.limits.max_creep_progress_m);
+  auto executable = cropPrefixToDistance(prefix, progress_m);
+  if (executable.size() < 2 ||
+    pathLength(executable) > approved_motion_m + kEpsilon)
+  {
+    decision->reason = "safe_common_prefix_crop_failed";
+    return false;
+  }
+
+  const double feasible_speed = speedCapForDistance(
+    progress_m + fixed_reserve_m, request.limits);
+  if (!std::isfinite(feasible_speed) ||
+    feasible_speed + kEpsilon < request.velocity.norm())
+  {
+    decision->reason = "safe_common_prefix_speed_not_stoppable";
+    return false;
+  }
+  decision->action = P4ForwardAction::DEFER_RISK_SELECTION;
+  decision->trigger_reason = P4ForwardTriggerReason::NO_SAFE_ROUTE;
+  decision->selection_authority = P4ForwardSelectionAuthority::NONE;
+  decision->formal_support = false;
+  decision->selected_candidate_id = 0;
+  decision->selected_guide.clear();
+  decision->deferred_motion_mode = P4ForwardDeferredMotionMode::COMMON_PREFIX;
+  decision->deferred_trajectory = std::move(executable);
+  decision->speed_cap_mps = std::max(
+    request.velocity.norm(), std::min(
+      request.limits.max_observe_speed_mps, feasible_speed));
+  decision->reason = "safe_limited_common_prefix";
+  return true;
 }
 
 bool configureAdvisorySelection(
@@ -1694,19 +1782,23 @@ const char * p4ForwardResultStatusName(const P4ForwardResultStatus status)
 bool P4ForwardSnapshotIdentity::valid() const
 {
   return !geometry_id.empty() && !frame_id.empty() &&
+         !frame_contract_id.empty() && !local_map_support_identity.empty() &&
          !alert_limit_policy_id.empty() && !risk_config_hash.empty() &&
          !risk_source_identity_hash.empty() && occupancy_generation > 0 &&
-         risk_generation > 0 && std::isfinite(occupancy_stamp_s) &&
-         std::isfinite(risk_stamp_s);
+         risk_generation > 0 && gnss_epoch_identity > 0 &&
+         std::isfinite(gnss_epoch_stamp_s) &&
+         std::isfinite(occupancy_stamp_s) && std::isfinite(risk_stamp_s);
 }
 
 std::string P4ForwardSnapshotIdentity::canonical() const
 {
   std::ostringstream stream;
-  stream << geometry_id << '|' << frame_id << '|' << alert_limit_policy_id <<
+  stream << geometry_id << '|' << frame_id << '|' << frame_contract_id <<
+    '|' << local_map_support_identity << '|' << alert_limit_policy_id <<
     '|' << risk_config_hash << '|' << risk_source_identity_hash <<
     '|' << occupancy_generation << '|' << risk_generation << '|' <<
-    std::setprecision(17) << occupancy_stamp_s << '|' << risk_stamp_s;
+    gnss_epoch_identity << '|' << std::setprecision(17) << gnss_epoch_stamp_s <<
+    '|' << occupancy_stamp_s << '|' << risk_stamp_s;
   return stream.str();
 }
 
@@ -2174,7 +2266,6 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
     decision.action = P4ForwardAction::DEFER_RISK_SELECTION;
     decision.trigger_reason = P4ForwardTriggerReason::SUPPORT_INCOMPLETE;
     decision.reason = "candidate_risk_support_incomplete";
-    configureDeferredMotion(request, graph, &decision);
     return finalize(std::move(decision));
   }
 
@@ -2189,9 +2280,16 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
     }
   }
   if (eligible.empty()) {
+    if (configureSafeLimitedCommonPrefix(
+        request, graph, &budget, &decision))
+    {
+      return finalize(std::move(decision));
+    }
     decision.action = P4ForwardAction::NO_SAFE_ROUTE;
     decision.trigger_reason = P4ForwardTriggerReason::NO_SAFE_ROUTE;
-    decision.reason = "no_candidate_passed_safety_gate";
+    if (decision.reason == "not_evaluated" || decision.reason == "ok") {
+      decision.reason = "no_candidate_passed_safety_gate";
+    }
     return finalize(std::move(decision));
   }
   const auto risk_order =
@@ -2262,7 +2360,6 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
       decision.action = P4ForwardAction::DEFER_RISK_SELECTION;
       decision.trigger_reason = P4ForwardTriggerReason::SUPPORT_INCOMPLETE;
       decision.reason = "refined_candidate_risk_support_incomplete";
-      configureDeferredMotion(request, graph, &decision);
       return finalize(std::move(decision));
     }
     decision.candidates = std::move(refined_candidates);
@@ -2283,9 +2380,16 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
     std::sort(eligible.begin(), eligible.end(), risk_order);
   }
   if (eligible.empty()) {
+    if (configureSafeLimitedCommonPrefix(
+        request, graph, &budget, &decision))
+    {
+      return finalize(std::move(decision));
+    }
     decision.action = P4ForwardAction::NO_SAFE_ROUTE;
     decision.trigger_reason = P4ForwardTriggerReason::NO_SAFE_ROUTE;
-    decision.reason = "no_refined_candidate_passed_safety_gate";
+    if (decision.reason == "not_evaluated" || decision.reason == "ok") {
+      decision.reason = "no_refined_candidate_passed_safety_gate";
+    }
     return finalize(std::move(decision));
   }
   const bool multiple_safe_channels = eligible.size() >= 2;

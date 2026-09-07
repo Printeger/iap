@@ -21,6 +21,20 @@
 
 namespace ego_planner
 {
+
+  bool p4CertifiedCurrentIntegritySafe(
+      const iap::CurrentIntegrityState &current, const double now_s,
+      const double stale_timeout_s)
+  {
+    return current.valid && std::isfinite(current.stamp) &&
+        std::isfinite(now_s) && std::isfinite(stale_timeout_s) &&
+        stale_timeout_s > 0.0 && now_s >= current.stamp &&
+        now_s - current.stamp <= stale_timeout_s &&
+        std::isfinite(current.hpl) && std::isfinite(current.vpl) &&
+        std::isfinite(current.hal) && current.hal > 0.0 &&
+        std::isfinite(current.val) && current.val > 0.0 &&
+        current.hpl < current.hal && current.vpl < current.val;
+  }
   namespace
   {
     std::string p4ControlPointHash(const Eigen::MatrixXd &points)
@@ -297,6 +311,14 @@ namespace ego_planner
           source.prediction.gnss.temporal_growth_h;
       target.gnss_temporal_growth_v =
           source.prediction.gnss.temporal_growth_v;
+      target.fused_pre_conservative_hpl =
+          source.prediction.fused.pre_conservative_hpl;
+      target.fused_pre_conservative_vpl =
+          source.prediction.fused.pre_conservative_vpl;
+      target.gnss_floor_increment_h =
+          source.prediction.fused.floor_increment_h;
+      target.gnss_floor_increment_v =
+          source.prediction.fused.floor_increment_v;
       target.gnss_anchor_epoch_delta_s =
           source.prediction.gnss.anchor_epoch_delta_s;
       target.gnss_support_ray_length_m =
@@ -319,6 +341,7 @@ namespace ego_planner
       target.support_status = source.prediction.gnss.support_status;
       target.local_satellite_set_hash =
           source.local_satellite_set_hash;
+      target.gnss_satellites = source.gnss_satellites;
       target.known_hazard_evidence = source.known_hazard_evidence;
       target.known_gnss_degradation_ratio =
           source.known_gnss_degradation_ratio;
@@ -1359,6 +1382,14 @@ namespace ego_planner
       request.map_inflation_m = start_occupancy.inflation_m;
     request.snapshot_identity.geometry_id = occupancy->geometry.geometry_id;
     request.snapshot_identity.frame_id = occupancy->frame_id;
+    request.snapshot_identity.frame_contract_id =
+        occupancy->frozen_grid_map_epoch
+        ? occupancy->frozen_grid_map_epoch->frame_contract_id
+        : "missing_frame_contract";
+    request.snapshot_identity.local_map_support_identity =
+        snapshot->sourceIdentity().local_map_support_identity.empty()
+        ? "strict_observation"
+        : snapshot->sourceIdentity().local_map_support_identity;
     request.snapshot_identity.alert_limit_policy_id =
         snapshot->sourceIdentity().alert_limit_policy_id;
     request.snapshot_identity.risk_config_hash =
@@ -1367,6 +1398,10 @@ namespace ego_planner
         iap::canonicalRiskGridSourceIdentityHash(snapshot->sourceIdentity());
     request.snapshot_identity.occupancy_generation = occupancy->generation;
     request.snapshot_identity.risk_generation = snapshot->generation_id();
+    request.snapshot_identity.gnss_epoch_identity =
+        snapshot->sourceIdentity().gnss_epoch_identity;
+    request.snapshot_identity.gnss_epoch_stamp_s =
+        snapshot->sourceIdentity().gnss_stamp_s;
     request.snapshot_identity.occupancy_stamp_s = occupancy->cloud_stamp_s;
     request.snapshot_identity.risk_stamp_s = snapshot->stamp_s();
     unavailable.snapshot_identity = request.snapshot_identity;
@@ -1790,8 +1825,9 @@ namespace ego_planner
       csv << "schema_version,stage,stamp_s,decision_event_id,planning_attempt_id,"
              "action,trigger_reason,geometry_state,risk_support,safety_state,"
              "selection_authority,formal_support,selection_applied,"
-             "deferred_motion_mode,common_prefix_length_m,geometry_id,frame_id,alert_limit_policy_id,"
-             "snapshot_config_hash,source_identity_hash,"
+             "deferred_motion_mode,common_prefix_length_m,geometry_id,frame_id,frame_contract_id,"
+             "local_map_support_identity,alert_limit_policy_id,"
+             "snapshot_config_hash,source_identity_hash,gnss_epoch_identity,gnss_epoch_stamp_s,"
              "occupancy_generation,risk_generation,occupancy_stamp_s,risk_stamp_s,"
              "request_x,request_y,request_z,anchor_x,anchor_y,anchor_z,"
              "selected_candidate_id,selected_guide_hash,candidate_count,"
@@ -1879,9 +1915,13 @@ namespace ego_planner
         << decision.common_prefix_length_m << ','
         << decision.snapshot_identity.geometry_id << ','
         << decision.snapshot_identity.frame_id << ','
+        << decision.snapshot_identity.frame_contract_id << ','
+        << decision.snapshot_identity.local_map_support_identity << ','
         << decision.snapshot_identity.alert_limit_policy_id << ','
         << decision.snapshot_identity.risk_config_hash << ','
         << decision.snapshot_identity.risk_source_identity_hash << ','
+        << decision.snapshot_identity.gnss_epoch_identity << ','
+        << decision.snapshot_identity.gnss_epoch_stamp_s << ','
         << decision.snapshot_identity.occupancy_generation << ','
         << decision.snapshot_identity.risk_generation << ','
         << decision.snapshot_identity.occupancy_stamp_s << ','
@@ -2093,7 +2133,121 @@ namespace ego_planner
     }
     samples_csv << samples_buffer.str();
     samples_csv.flush();
-    return samples_csv.good();
+    if (!samples_csv.good())
+      return false;
+
+    // Keep the high-rate sample file compact. Per-satellite decomposition is
+    // emitted only for the first failed and worst point of each candidate.
+    const std::string detail_path =
+        config.debug_csv_path + ".gnss_risk_detail.csv";
+    std::ifstream detail_existing(detail_path);
+    const bool detail_header = !detail_existing.good() ||
+        detail_existing.peek() == std::ifstream::traits_type::eof();
+    detail_existing.close();
+    std::ofstream detail_csv(detail_path, std::ios::app);
+    if (!detail_csv.good())
+      return false;
+    if (detail_header)
+      detail_csv << "schema_version,decision_event_id,planning_attempt_id,"
+                    "candidate_id,channel_id,sample_role,sample_index,arc_length_m,"
+                    "x,y,z,query_time_s,geometry_id,frame_id,frame_contract_id,"
+                    "local_map_support_identity,occupancy_generation,risk_generation,"
+                    "occupancy_stamp_s,risk_stamp_s,gnss_epoch_identity,"
+                    "gnss_epoch_stamp_s,satellite_set_hash,sat_id,exclusion_reason,"
+                    "epoch_excluded,above_elevation_mask,support_known,visible,blocked,used,"
+                    "los_map_x,los_map_y,los_map_z,elevation_rad,azimuth_rad,kappa,"
+                    "sigma_eff_m,candidate_raw_hpl,candidate_raw_vpl,"
+                    "receiver_raw_hpl,receiver_raw_vpl,anchor_hpl,anchor_vpl,"
+                    "spatial_delta_h,spatial_delta_v,temporal_growth_h,"
+                    "temporal_growth_v,pre_conservative_hpl,pre_conservative_vpl,"
+                    "gnss_floor_increment_h,gnss_floor_increment_v,final_hpl,final_vpl,"
+                    "hal,val,safety_ratio,floor_source_h,floor_source_v,failure_reason\n";
+    detail_csv << std::setprecision(17);
+    for (const auto &candidate : decision.candidates)
+    {
+      if (candidate.risk_samples.empty())
+        continue;
+      const auto first_failed = std::find_if(
+          candidate.risk_samples.begin(), candidate.risk_samples.end(),
+          [](const P4ForwardRiskEvidenceRecord & record) {
+            return !record.risk.valid || record.risk.stale ||
+                record.risk.safety_state != P4ForwardSafetyState::SAFE ||
+                record.risk.ranking_state !=
+                    P4ForwardRankingState::COMPARABLE ||
+                !std::isfinite(record.risk.safety_ratio) ||
+                record.risk.safety_ratio >= 1.0;
+          });
+      const auto worst = std::max_element(
+          candidate.risk_samples.begin(), candidate.risk_samples.end(),
+          [](const P4ForwardRiskEvidenceRecord & lhs,
+             const P4ForwardRiskEvidenceRecord & rhs) {
+            const double left = std::isfinite(lhs.risk.safety_ratio)
+                ? lhs.risk.safety_ratio
+                : -std::numeric_limits<double>::infinity();
+            const double right = std::isfinite(rhs.risk.safety_ratio)
+                ? rhs.risk.safety_ratio
+                : -std::numeric_limits<double>::infinity();
+            return left < right;
+          });
+      std::vector<std::pair<const char *,
+          const P4ForwardRiskEvidenceRecord *>> selected_records;
+      if (first_failed != candidate.risk_samples.end())
+        selected_records.emplace_back("FIRST_FAILED", &*first_failed);
+      if (worst != candidate.risk_samples.end())
+        selected_records.emplace_back("WORST", &*worst);
+      for (const auto &[role, record] : selected_records)
+      {
+        const auto &risk = record->risk;
+        for (const auto &satellite : risk.gnss_satellites)
+        {
+          detail_csv << decision.schema_version << ','
+              << decision.decision_event_id << ','
+              << decision.planning_attempt_id << ','
+              << candidate.candidate_id << ',' << candidate.channel_id << ','
+              << role << ',' << record->sample_index << ','
+              << record->arc_length_m << ',' << record->position.x() << ','
+              << record->position.y() << ',' << record->position.z() << ','
+              << record->query_time_s << ','
+              << decision.snapshot_identity.geometry_id << ','
+              << decision.snapshot_identity.frame_id << ','
+              << decision.snapshot_identity.frame_contract_id << ','
+              << decision.snapshot_identity.local_map_support_identity << ','
+              << decision.snapshot_identity.occupancy_generation << ','
+              << decision.snapshot_identity.risk_generation << ','
+              << decision.snapshot_identity.occupancy_stamp_s << ','
+              << decision.snapshot_identity.risk_stamp_s << ','
+              << decision.snapshot_identity.gnss_epoch_identity << ','
+              << decision.snapshot_identity.gnss_epoch_stamp_s << ','
+              << risk.local_satellite_set_hash << ',' << satellite.sat_id << ','
+              << satellite.exclusion_reason << ','
+              << (satellite.epoch_excluded ? 1 : 0) << ','
+              << (satellite.above_elevation_mask ? 1 : 0) << ','
+              << (satellite.support_known ? 1 : 0) << ','
+              << (satellite.visible ? 1 : 0) << ','
+              << (satellite.blocked ? 1 : 0) << ','
+              << (satellite.used ? 1 : 0) << ','
+              << satellite.los_map.x() << ',' << satellite.los_map.y() << ','
+              << satellite.los_map.z() << ',' << satellite.elevation_rad << ','
+              << satellite.azimuth_rad << ',' << satellite.kappa << ','
+              << satellite.sigma_eff_m << ',' << risk.gnss_raw_hpl << ','
+              << risk.gnss_raw_vpl << ',' << risk.gnss_receiver_raw_hpl << ','
+              << risk.gnss_receiver_raw_vpl << ',' << risk.gnss_anchor_hpl << ','
+              << risk.gnss_anchor_vpl << ',' << risk.gnss_spatial_delta_h << ','
+              << risk.gnss_spatial_delta_v << ','
+              << risk.gnss_temporal_growth_h << ','
+              << risk.gnss_temporal_growth_v << ','
+              << risk.fused_pre_conservative_hpl << ','
+              << risk.fused_pre_conservative_vpl << ','
+              << risk.gnss_floor_increment_h << ','
+              << risk.gnss_floor_increment_v << ',' << risk.hpl << ','
+              << risk.vpl << ',' << risk.hal << ',' << risk.val << ','
+              << risk.safety_ratio << ',' << risk.floor_source_h << ','
+              << risk.floor_source_v << ',' << risk.reason << '\n';
+        }
+      }
+    }
+    detail_csv.flush();
+    return detail_csv.good();
   }
 
   bool EGOPlannerManager::recordP4NativeAStarNoPath(const double stamp_s)
@@ -2205,6 +2359,36 @@ namespace ego_planner
       return reject_final_identity(
           P4GeometryCommitVerdict::POLICY_MISMATCH,
           "risk_geometry_identity_changed_before_final_commit");
+    if (last_p4_forward_decision_.snapshot_identity.frame_id !=
+        snapshot->params().frame_id)
+      return reject_final_identity(
+          P4GeometryCommitVerdict::POLICY_MISMATCH,
+          "risk_frame_identity_changed_before_final_commit");
+    const std::string expected_support_identity =
+        snapshot->sourceIdentity().local_map_support_identity.empty()
+        ? "strict_observation"
+        : snapshot->sourceIdentity().local_map_support_identity;
+    if (last_p4_forward_decision_.snapshot_identity.
+            local_map_support_identity != expected_support_identity)
+      return reject_final_identity(
+          P4GeometryCommitVerdict::POLICY_MISMATCH,
+          "local_map_support_identity_changed_before_final_commit");
+    if (last_p4_forward_decision_.snapshot_identity.gnss_epoch_identity !=
+        snapshot->sourceIdentity().gnss_epoch_identity)
+      return reject_final_identity(
+          P4GeometryCommitVerdict::POLICY_MISMATCH,
+          "gnss_epoch_identity_changed_before_final_commit");
+    const double expected_gnss_stamp_s =
+        snapshot->sourceIdentity().gnss_stamp_s;
+    const double decision_gnss_stamp_s =
+        last_p4_forward_decision_.snapshot_identity.gnss_epoch_stamp_s;
+    if (std::isfinite(expected_gnss_stamp_s) !=
+            std::isfinite(decision_gnss_stamp_s) ||
+        (std::isfinite(expected_gnss_stamp_s) &&
+         expected_gnss_stamp_s != decision_gnss_stamp_s))
+      return reject_final_identity(
+          P4GeometryCommitVerdict::POLICY_MISMATCH,
+          "gnss_epoch_stamp_changed_before_final_commit");
     if (last_p4_forward_decision_.snapshot_identity.alert_limit_policy_id !=
         snapshot->sourceIdentity().alert_limit_policy_id)
       return reject_final_identity(
@@ -2231,6 +2415,11 @@ namespace ego_planner
         return reject_final_identity(
             P4GeometryCommitVerdict::HISTORY_GAP,
             "bound_occupancy_epoch_missing_before_final_commit");
+      if (bound_occupancy->frozen_grid_map_epoch->frame_contract_id !=
+          last_p4_forward_decision_.snapshot_identity.frame_contract_id)
+        return reject_final_identity(
+            P4GeometryCommitVerdict::POLICY_MISMATCH,
+            "frame_contract_identity_changed_before_final_commit");
       constexpr double kCommitBudgetMs = 10.0;
       const auto commit_started = std::chrono::steady_clock::now();
       const auto commit_deadline = commit_started +
@@ -2736,14 +2925,30 @@ namespace ego_planner
                 alert_limit_policy_id)
       return revoke("runtime_risk_policy_identity_changed");
 
-    iap::PredictedPLSample current_integrity;
-    const bool current_ok = snapshot->queryPredictedPL(
-        actual_position, now_s, &current_integrity);
-    out.current_integrity_safe = current_ok &&
-        current_integrity.available && current_integrity.valid &&
-        !current_integrity.stale &&
-        current_integrity.hpl_pred < snapshot->params().alert_limit_h_m &&
-        current_integrity.vpl_pred < snapshot->params().alert_limit_v_m;
+    if (runtime_planning_snapshot)
+    {
+      // The current execution gate is owned by the certified monitor output,
+      // not by the raw map advisory evaluated at the receiver position.  The
+      // latter can legitimately differ because it is a predictive model.  A
+      // newly acquired P0 planning snapshot keeps this monitor sample, GNSS
+      // epoch, map and risk generation in one transaction.
+      out.current_integrity_safe = p4CertifiedCurrentIntegritySafe(
+          runtime_planning_snapshot->integrity_anchor.current, now_s,
+          snapshot->params().stale_timeout_s);
+    }
+    else
+    {
+      // Retain the deterministic unit-test/offline fallback when no live P0
+      // transaction is installed.
+      iap::PredictedPLSample current_integrity;
+      const bool current_ok = snapshot->queryPredictedPL(
+          actual_position, now_s, &current_integrity);
+      out.current_integrity_safe = current_ok &&
+          current_integrity.available && current_integrity.valid &&
+          !current_integrity.stale &&
+          current_integrity.hpl_pred < snapshot->params().alert_limit_h_m &&
+          current_integrity.vpl_pred < snapshot->params().alert_limit_v_m;
+    }
     if (!out.current_integrity_safe)
       return revoke("runtime_current_integrity_not_safe");
 

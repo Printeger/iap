@@ -487,6 +487,29 @@ ego_planner::P4ForwardDecision makeForwardDecision(
 
 }  // namespace
 
+TEST(P4ExecutionIntegrityTest,
+     CertifiedCurrentIntegrityOwnsTheLiveCurrentSafetyGate) {
+  iap::CurrentIntegrityState current;
+  current.valid = true;
+  current.stamp = 10.0;
+  current.hpl = 14.0;
+  current.vpl = 30.0;
+  current.hal = 20.0;
+  current.val = 40.0;
+
+  EXPECT_TRUE(ego_planner::p4CertifiedCurrentIntegritySafe(
+      current, 10.5, 1.0));
+  EXPECT_FALSE(ego_planner::p4CertifiedCurrentIntegritySafe(
+      current, 11.01, 1.0));
+  current.hpl = 20.0;
+  EXPECT_FALSE(ego_planner::p4CertifiedCurrentIntegritySafe(
+      current, 10.5, 1.0));
+  current.hpl = 14.0;
+  current.valid = false;
+  EXPECT_FALSE(ego_planner::p4CertifiedCurrentIntegritySafe(
+      current, 10.5, 1.0));
+}
+
 TEST(P4ForwardTerminalLineageTest,
      WritesSameDecisionAndTrajectoryIdentityAcrossTerminalStages) {
   const auto snapshot = makeP4SelectionSnapshot();
@@ -615,9 +638,16 @@ TEST(P4ForwardTerminalLineageTest,
   manager.setP4ForwardDecisionForTest(std::move(decision));
   EXPECT_FALSE(manager.recordP4VerticalSliceLineage(
       "final_bspline_before_p5", 10.0));
+  decision = makeForwardDecision(
+      snapshot, manager.planningRiskContext().planning_attempt_id);
+  decision.snapshot_identity.local_map_support_identity =
+      "different_support_envelope";
+  manager.setP4ForwardDecisionForTest(std::move(decision));
+  EXPECT_FALSE(manager.recordP4VerticalSliceLineage(
+      "final_bspline_before_p5", 10.0));
   const auto rows = readCsvRows(std::filesystem::path(
       debug_path.string() + ".forward_lineage.csv"));
-  ASSERT_EQ(rows.size(), 2u);
+  ASSERT_EQ(rows.size(), 3u);
   EXPECT_EQ(rows[0].at("stage"),
             "final_bspline_before_p5_identity_rejected");
   EXPECT_EQ(rows[0].at("geometry_commit_verdict"), "POLICY_MISMATCH");
@@ -627,6 +657,9 @@ TEST(P4ForwardTerminalLineageTest,
   EXPECT_EQ(rows[1].at("geometry_commit_reason"),
             "p4_decision_has_no_executable_route");
   EXPECT_EQ(rows[1].at("planning_disposition"), "HOLD_REQUIRED");
+  EXPECT_EQ(rows[2].at("geometry_commit_verdict"), "POLICY_MISMATCH");
+  EXPECT_EQ(rows[2].at("geometry_commit_reason"),
+            "local_map_support_identity_changed_before_final_commit");
 }
 
 TEST(P4ForwardTerminalLineageTest,
@@ -668,6 +701,127 @@ TEST(P4ForwardTerminalLineageTest,
   EXPECT_EQ(rows.front().at("action"), "DEFER_RISK_SELECTION");
   EXPECT_EQ(rows.front().at("selection_applied"), "0");
   EXPECT_EQ(rows.front().at("deferred_motion_mode"), "COMMON_PREFIX");
+}
+
+TEST(P4ForwardTerminalLineageTest,
+     SafeLimitedPrefixReceivesTerminalCheckedLimitedExecutionCertificate) {
+  const auto snapshot = makeP4SelectionSnapshot();
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureNoCollision(map.get());
+  const auto debug_path = p4LineageTestPath("forward_safe_prefix.csv");
+  std::filesystem::remove(std::filesystem::path(
+      debug_path.string() + ".forward_lineage.csv"));
+  std::filesystem::remove(std::filesystem::path(
+      debug_path.string() + ".gnss_risk_detail.csv"));
+  auto optimizer = makeP4Optimizer(map, snapshot, debug_path.string(), 1);
+
+  ego_planner::EGOPlannerManager manager;
+  manager.setP4VerticalSliceOptimizerForTest(std::move(optimizer), map);
+  manager.setPlanningRiskContextForTest(snapshot, 9.75);
+  manager.setLatestRiskSnapshotForTest(snapshot);
+  auto decision = makeForwardDecision(
+      snapshot, manager.planningRiskContext().planning_attempt_id);
+  const auto approved_prefix = decision.selected_guide;
+  decision.action = ego_planner::P4ForwardAction::DEFER_RISK_SELECTION;
+  decision.trigger_reason =
+      ego_planner::P4ForwardTriggerReason::NO_SAFE_ROUTE;
+  decision.selection_authority =
+      ego_planner::P4ForwardSelectionAuthority::NONE;
+  decision.formal_support = false;
+  decision.selected_candidate_id = 0;
+  decision.selected_guide.clear();
+  decision.deferred_motion_mode =
+      ego_planner::P4ForwardDeferredMotionMode::COMMON_PREFIX;
+  decision.deferred_trajectory = approved_prefix;
+  decision.reason = "safe_limited_common_prefix";
+  ego_planner::P4ForwardRiskEvidenceRecord failed_record;
+  failed_record.sample_index = 4;
+  failed_record.arc_length_m = 2.0;
+  failed_record.position = Eigen::Vector3d(-2.0, 0.8, 0.0);
+  failed_record.query_time_s = 12.0;
+  failed_record.risk.valid = true;
+  failed_record.risk.safety_state =
+      ego_planner::P4ForwardSafetyState::UNSAFE;
+  failed_record.risk.ranking_state =
+      ego_planner::P4ForwardRankingState::COMPARABLE;
+  failed_record.risk.safety_ratio = 1.2;
+  failed_record.risk.gnss_raw_hpl = 12.0;
+  failed_record.risk.gnss_receiver_raw_hpl = 4.0;
+  failed_record.risk.gnss_spatial_delta_h = 8.0;
+  failed_record.risk.fused_pre_conservative_hpl = 6.0;
+  failed_record.risk.gnss_floor_increment_h = 6.0;
+  failed_record.risk.hpl = 12.0;
+  failed_record.risk.hal = 10.0;
+  failed_record.risk.local_satellite_set_hash = 1701u;
+  iap::GnssRiskSatelliteDiagnostic satellite;
+  satellite.sat_id = 17;
+  satellite.above_elevation_mask = true;
+  satellite.support_known = true;
+  satellite.visible = true;
+  satellite.used = true;
+  satellite.los_map = Eigen::Vector3d(0.0, 1.0, 0.0);
+  satellite.elevation_rad = 0.4;
+  satellite.azimuth_rad = 0.0;
+  satellite.kappa = 2.0;
+  satellite.sigma_eff_m = 6.0;
+  satellite.exclusion_reason = "used";
+  failed_record.risk.gnss_satellites = {satellite};
+  decision.candidates.front().risk_samples = {failed_record};
+  manager.setP4ForwardDecisionForTest(std::move(decision));
+
+  auto stopped = ego_planner::UniformBspline(
+      p4StoppedControlPoints(), 3, 0.5);
+  const auto terminal = ego_planner::imposeP4TerminalStop(
+      &stopped, terminalStartState(stopped), 20.0, 100.0, 0.0);
+  ASSERT_TRUE(terminal.success) << terminal.reason;
+  manager.local_data_.position_traj_ = stopped;
+  manager.local_data_.traj_id_ = 35;
+  manager.local_data_.start_time_ = rclcpp::Time(10, 0, RCL_ROS_TIME);
+
+  ASSERT_TRUE(manager.recordP4VerticalSliceLineage(
+      "forward_decision", 10.0));
+  ASSERT_TRUE(manager.recordP4VerticalSliceLineage(
+      "final_bspline_before_p5", 10.0));
+  ASSERT_TRUE(manager.recordP4VerticalSliceLineage(
+      "normal_publish_authorized", 10.1));
+  const auto& certificate = manager.p4ExecutionCertificate();
+  ASSERT_TRUE(certificate.valid);
+  EXPECT_EQ(certificate.authority,
+            ego_planner::P4ExecutionAuthority::LIMITED_PREFIX);
+  EXPECT_EQ(certificate.trajectory_id, 35);
+  EXPECT_TRUE(certificate.approved_endpoint.isApprox(
+      approved_prefix.back(), 1.0e-9));
+  EXPECT_LE(certificate.terminal_speed_mps, 1.0e-3);
+  EXPECT_LE(certificate.terminal_acceleration_mps2, 1.0e-2);
+
+  manager.local_data_.duration_ = certificate.duration_s;
+  const auto committed_start = manager.local_data_.start_time_.nanoseconds();
+  const double during_execution_s = 10.5;
+  const auto commanded_position =
+      manager.local_data_.position_traj_.evaluateDeBoorT(
+          during_execution_s - manager.local_data_.start_time_.seconds());
+  const auto continuing = manager.validateCommittedP4TrajectoryExecution(
+      during_execution_s, commanded_position);
+  EXPECT_TRUE(continuing.allowed) << continuing.reason;
+  EXPECT_FALSE(continuing.endpoint_reached);
+  EXPECT_EQ(manager.local_data_.start_time_.nanoseconds(), committed_start);
+  const auto at_endpoint = manager.validateCommittedP4TrajectoryExecution(
+      certificate.execution_deadline_s, certificate.approved_endpoint);
+  EXPECT_TRUE(at_endpoint.allowed) << at_endpoint.reason;
+  EXPECT_TRUE(at_endpoint.endpoint_reached);
+  EXPECT_EQ(at_endpoint.reason, "approved_endpoint_reached");
+
+  const auto detail_rows = readCsvRows(std::filesystem::path(
+      debug_path.string() + ".gnss_risk_detail.csv"));
+  ASSERT_EQ(detail_rows.size(), 2u);
+  EXPECT_EQ(detail_rows[0].at("sample_role"), "FIRST_FAILED");
+  EXPECT_EQ(detail_rows[1].at("sample_role"), "WORST");
+  EXPECT_EQ(detail_rows[0].at("sat_id"), "17");
+  EXPECT_EQ(detail_rows[0].at("local_map_support_identity"),
+            "strict_observation");
+  EXPECT_EQ(detail_rows[0].at("exclusion_reason"), "used");
+  EXPECT_EQ(detail_rows[0].at("candidate_raw_hpl"), "12");
+  EXPECT_EQ(detail_rows[0].at("spatial_delta_h"), "8");
 }
 
 TEST(P4ForwardTerminalLineageTest,

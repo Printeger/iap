@@ -472,6 +472,10 @@ void expectSnapshotsScientificallyEquivalent(
                       rhs_voxel.occupancy->frame_id);
             EXPECT_EQ(lhs_voxel.occupancy->source,
                       rhs_voxel.occupancy->source);
+            EXPECT_EQ(lhs_voxel.occupancy->model_support.authority,
+                      rhs_voxel.occupancy->model_support.authority);
+            EXPECT_EQ(lhs_voxel.occupancy->model_support.status,
+                      rhs_voxel.occupancy->model_support.status);
             expectEquivalentDouble(lhs_voxel.occupancy->cloud_stamp_s,
                                    rhs_voxel.occupancy->cloud_stamp_s);
           }
@@ -3402,6 +3406,63 @@ TEST_F(P0RiskGridRuntimeStampTest,
                                 &second_cost, &second_trace));
   ASSERT_FALSE(second_trace.corners.empty());
   EXPECT_EQ(second_trace.corners.front().occupancy.occupancy_generation, 2u);
+}
+
+TEST_F(P0RiskGridRuntimeStampTest,
+       TrustedEnvelopeFeedsUnobservedCellsIntoProductionP0Refresh) {
+  ensure_rclcpp();
+  auto config = enabledConfig();
+  config.grid.require_observed_support = true;
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_trusted_envelope_runtime_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  P0RiskGridRuntime runtime(node, config, std::make_unique<FakeProvider>());
+
+  auto live_generation = std::make_shared<std::atomic<uint64_t>>(3u);
+  auto support = std::make_shared<iap::TrustedLocalMapSupport>();
+  support->retained_min_map = Eigen::Vector3d::Constant(-10.0);
+  support->retained_max_map = Eigen::Vector3d::Constant(10.0);
+  support->min_range_m = 0.0;
+  support->max_range_m = 20.0;
+  support->stamp_s = 99.0;
+  support->valid_until_s = 101.0;
+  support->frame_id = "map";
+  ASSERT_TRUE(support->valid());
+  runtime.setOccupancyEpochFactory([live_generation, support]() {
+    auto capture = makeOccupancyEpochCapture(
+        live_generation, 3u, 100.0, "map");
+    const auto base_query = capture.epoch->diagnostic_query;
+    capture.epoch->diagnostic_query =
+        [base_query](const Eigen::Vector3d& position) {
+          auto diagnostic = base_query(position);
+          diagnostic.observed = false;
+          diagnostic.state = iap::RiskOccupancyState::UNKNOWN;
+          return diagnostic;
+        };
+    capture.epoch->trusted_local_map_support = support;
+    return capture;
+  });
+  seedValidInputs(&runtime, 100.0, 100.0);
+
+  ASSERT_TRUE(runtime.refreshOnceForTest()) << runtime.health().reason;
+  const auto snapshot = runtime.acquireSnapshot();
+  ASSERT_NE(snapshot, nullptr);
+  iap::RiskCostSample cost;
+  iap::RiskCostQueryTrace trace;
+  ASSERT_TRUE(snapshot->queryCost(
+      Eigen::Vector3d::Zero(), 100.0, &cost, &trace));
+  ASSERT_FALSE(trace.corners.empty());
+  for (const auto& corner : trace.corners) {
+    EXPECT_TRUE(corner.valid);
+    EXPECT_FALSE(corner.occupancy.observed);
+    EXPECT_EQ(corner.occupancy.state, iap::RiskOccupancyState::UNKNOWN);
+    EXPECT_EQ(corner.occupancy.model_support.authority,
+              iap::LocalMapSupportAuthority::TRUSTED_LOCAL_MAP);
+    EXPECT_EQ(corner.occupancy.model_support.status,
+              iap::LocalMapSupportStatus::MODEL_COMPLETE);
+  }
+  EXPECT_EQ(snapshot->sourceIdentity().local_map_support_identity,
+            support->identity());
 }
 
 TEST_F(P0RiskGridRuntimeStampTest,

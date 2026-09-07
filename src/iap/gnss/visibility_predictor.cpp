@@ -160,7 +160,10 @@ VisibilityResult VisibilityPredictor::predict(const Eigen::Vector3d& pos_world,
     // σ_eff (RQ-314)
     const double canopy_sigma =
         sigma_eff_canopy(params_.canopy, kappa, sat.elevation);
-    res.sigma_effs[i] = measured_epoch_support
+    // The same epoch S_i and measurement-noise floor are used on both sides
+    // of the receiver measured-support radius. That radius changes support
+    // admission only; it must not create a discontinuous drop in sigma/PL.
+    res.sigma_effs[i] = std::isfinite(sat.pr_sigma) && sat.pr_sigma > 0.0
         ? std::max(sat.pr_sigma, canopy_sigma)
         : canopy_sigma;
   }

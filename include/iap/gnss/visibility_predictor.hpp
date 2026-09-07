@@ -39,8 +39,10 @@ struct VisibilityResult {
  * ### Visibility (IAP-RQ-312)
  * For each satellite, convert (elevation, azimuth) to a local ENU unit vector:
  * @code
- *   d = [cos(el)*cos(az), cos(el)*sin(az), sin(el)]   (ENU)
+ *   d = [cos(el)*sin(az), cos(el)*cos(az), sin(el)]   (ENU/map)
  * @endcode
+ * where azimuth is clockwise from north (`azimuth=0 -> +Y`). The current
+ * planner frame contract is translation-only relative to ENU.
  * Then check whether the ray from the waypoint in direction d is occluded
  * within `occ_range` metres when hard occlusion is enabled.  The soft canopy
  * model requires online observation only across the `occ_L` interval that

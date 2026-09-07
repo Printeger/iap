@@ -450,6 +450,7 @@ TEST(RiskGridMapTest, CanonicalSourceHashBindsTrustedMapSupportIdentity) {
   baseline.prior_stamp_s = 10.0;
   baseline.gnss_generation = 9;
   baseline.gnss_stamp_s = 10.0;
+  baseline.gnss_epoch_identity = 91;
   baseline.lidar_generation = 10;
   baseline.lidar_stamp_s = 10.0;
   baseline.local_map_support_identity = "support-at-pose-a";
@@ -460,6 +461,11 @@ TEST(RiskGridMapTest, CanonicalSourceHashBindsTrustedMapSupportIdentity) {
   auto moved_envelope = baseline;
   moved_envelope.local_map_support_identity = "support-at-pose-b";
   EXPECT_NE(iap::canonicalRiskGridSourceIdentityHash(moved_envelope),
+            baseline_hash);
+
+  auto next_gnss_epoch = baseline;
+  next_gnss_epoch.gnss_epoch_identity = 92;
+  EXPECT_NE(iap::canonicalRiskGridSourceIdentityHash(next_gnss_epoch),
             baseline_hash);
 }
 
@@ -1165,6 +1171,60 @@ TEST(RiskGridMapTest, OccupancyEvidenceIsEvaluatedOncePerSpatialVoxel) {
   EXPECT_DOUBLE_EQ(health.valid_ratio, 0.5);
   EXPECT_DOUBLE_EQ(health.unknown_ratio, 0.5);
   EXPECT_EQ(health.dominant_unknown_reason, "unknown_occupancy_support");
+}
+
+TEST(RiskGridMapTest,
+     TrustedModelEnvelopeAdmitsUnobservedCellsWithoutForgingFreeEvidence) {
+  iap::RiskGridMapParams params = base_params();
+  params.size_x_m = 2.0;
+  params.size_y_m = 1.0;
+  params.size_z_m = 1.0;
+  params.resolution_m = 1.0;
+  params.use_fixed_origin = true;
+  params.fixed_origin_w = Eigen::Vector3d(-1.0, -0.5, -0.5);
+  params.horizons_s = {0.0, 1.0};
+  params.require_observed_support = true;
+  iap::RiskGridMap grid(params);
+  AffineProvider provider;
+  const auto diagnostic = [](const Eigen::Vector3d & position) {
+      iap::RiskOccupancyDiagnostic out;
+      out.available = true;
+      out.observed = false;
+      out.state = iap::RiskOccupancyState::UNKNOWN;
+      out.occupancy_generation = 17;
+      out.source = "hit_only_unknown";
+      out.model_support.authority =
+          iap::LocalMapSupportAuthority::TRUSTED_LOCAL_MAP;
+      out.model_support.status = position.x() < 0.0
+          ? iap::LocalMapSupportStatus::MODEL_COMPLETE
+          : iap::LocalMapSupportStatus::OUTSIDE_ENVELOPE;
+      return out;
+    };
+
+  std::string reason;
+  ASSERT_TRUE(grid.refreshFromProvider(
+      Eigen::Vector3d(-0.5, 0.0, 0.0), 10.0, provider,
+      diagnostic, &reason)) << reason;
+
+  EXPECT_EQ(provider.query_count, 2);
+  const auto snapshot = grid.acquireSnapshot();
+  ASSERT_NE(snapshot, nullptr);
+  iap::RiskVoxel admitted;
+  ASSERT_TRUE(snapshot->voxelAt(0, Eigen::Vector3i(0, 0, 0), &admitted));
+  EXPECT_TRUE(admitted.valid);
+  ASSERT_NE(admitted.occupancy, nullptr);
+  EXPECT_FALSE(admitted.occupancy->observed);
+  EXPECT_EQ(admitted.occupancy->state, iap::RiskOccupancyState::UNKNOWN);
+  EXPECT_EQ(admitted.occupancy->model_support.status,
+            iap::LocalMapSupportStatus::MODEL_COMPLETE);
+
+  iap::RiskVoxel outside;
+  ASSERT_TRUE(snapshot->voxelAt(0, Eigen::Vector3i(1, 0, 0), &outside));
+  EXPECT_FALSE(outside.valid);
+  EXPECT_TRUE(outside.unknown);
+  EXPECT_EQ(outside.reason, "outside_trusted_local_map_envelope");
+  EXPECT_EQ(outside.occupancy->model_support.status,
+            iap::LocalMapSupportStatus::OUTSIDE_ENVELOPE);
 }
 
 TEST(RiskGridMapTest, RefreshRejectsChangingOccupancyGeneration) {
@@ -2127,6 +2187,7 @@ TEST(RiskGridMapTest, SnapshotRetainsImmutableCompositeSourceIdentity) {
   identity.prior_stamp_s = 10.2;
   identity.gnss_generation = 13u;
   identity.gnss_stamp_s = 10.3;
+  identity.gnss_epoch_identity = 1301u;
   identity.lidar_generation = 14u;
   identity.lidar_stamp_s = 10.4;
   identity.alert_limit_policy_id = params.alert_limit_policy_id;
@@ -2143,6 +2204,7 @@ TEST(RiskGridMapTest, SnapshotRetainsImmutableCompositeSourceIdentity) {
   EXPECT_DOUBLE_EQ(retained.occupancy_stamp_s, 10.1);
   EXPECT_EQ(retained.prior_generation, 12u);
   EXPECT_EQ(retained.gnss_generation, 13u);
+  EXPECT_EQ(retained.gnss_epoch_identity, 1301u);
   EXPECT_EQ(retained.lidar_generation, 14u);
   EXPECT_EQ(retained.alert_limit_policy_id, "fixed_hal10_val20_v1");
 }

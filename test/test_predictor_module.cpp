@@ -942,6 +942,88 @@ TEST(PredictorModuleTest,
 }
 
 TEST(PredictorModuleTest,
+     ReceiverPositionMapModelHasZeroSpatialDeltaAndAuditableLos) {
+  auto params = make_params();
+  params.gnss.measured_epoch_support_radius_m = 0.0;
+  params.lidar.fim_params.fim_radius_m = 30.0;
+  iap::PredictorModule module(params);
+  module.set_support_query([](const Eigen::Vector3d&, double, double) {
+      return iap::LocalMapSupportQuery{
+          iap::LocalMapSupportAuthority::TRUSTED_LOCAL_MAP,
+          iap::LocalMapSupportStatus::MODEL_COMPLETE};
+    });
+  module.set_lidar_fim_primitives(make_lidar_primitives());
+  auto snapshot = make_snapshot(true, true);
+
+  iap::ForwardRiskBatchRequest request;
+  request.combined_snapshot_identity = "same-frozen-map-epoch";
+  request.snapshot = snapshot;
+  request.hal = 1000.0;
+  request.val = 1000.0;
+  request.evaluation_time_s = snapshot.stamp;
+  request.points = {{snapshot.p_wb, snapshot.stamp, 0.0, 1}};
+
+  const auto result = module.queryForwardRiskBatch(request);
+
+  ASSERT_TRUE(result.complete)
+      << iap::forwardRiskFailureReasonName(result.failure_reason);
+  ASSERT_EQ(result.points.size(), 1u);
+  const auto& point = result.points.front();
+  EXPECT_NEAR(point.prediction.gnss.spatial_delta_h, 0.0, 1.0e-10);
+  EXPECT_NEAR(point.prediction.gnss.spatial_delta_v, 0.0, 1.0e-10);
+  EXPECT_NEAR(point.prediction.gnss.raw_hpl,
+              point.prediction.gnss.receiver_raw_hpl, 1.0e-10);
+  EXPECT_NEAR(point.prediction.gnss.raw_vpl,
+              point.prediction.gnss.receiver_raw_vpl, 1.0e-10);
+  ASSERT_EQ(point.gnss_satellites.size(), snapshot.gnss_epoch.sats.size());
+  for (const auto& satellite : point.gnss_satellites) {
+    EXPECT_NEAR(satellite.los_map.norm(), 1.0, 1.0e-12);
+    EXPECT_TRUE(std::isfinite(satellite.kappa));
+    EXPECT_TRUE(std::isfinite(satellite.sigma_eff_m));
+    EXPECT_FALSE(satellite.exclusion_reason.empty());
+  }
+  const auto& north_satellite = point.gnss_satellites.front();
+  EXPECT_NEAR(north_satellite.los_map.x(), 0.0, 1.0e-12);
+  EXPECT_GT(north_satellite.los_map.y(), 0.0);
+  EXPECT_GT(north_satellite.los_map.z(), 0.0);
+}
+
+TEST(PredictorModuleTest,
+     MeasuredSupportRadiusBoundaryDoesNotCreateAnArtificialPlJump) {
+  auto params = make_params();
+  params.gnss.measured_epoch_support_radius_m = 0.45;
+  iap::PredictorModule module(params);
+  module.set_support_query([](const Eigen::Vector3d&, double, double) {
+      return iap::LocalMapSupportQuery{
+          iap::LocalMapSupportAuthority::TRUSTED_LOCAL_MAP,
+          iap::LocalMapSupportStatus::MODEL_COMPLETE};
+  });
+  auto snapshot = make_snapshot(true, true);
+  for (auto& satellite : snapshot.gnss_epoch.sats) {
+    satellite.pr_sigma = 25.0;
+  }
+  snapshot.current.gnss_epoch_identity = iap::gnss_epoch_identity(
+      snapshot.gnss_epoch, snapshot.current.excluded_prns);
+
+  const auto inside = module.query(iap::PredictorQueryInput(
+      snapshot.p_wb + Eigen::Vector3d(0.449, 0.0, 0.0), snapshot,
+      snapshot.stamp, 0.0, "map", snapshot.stamp));
+  const auto outside = module.query(iap::PredictorQueryInput(
+      snapshot.p_wb + Eigen::Vector3d(0.451, 0.0, 0.0), snapshot,
+      snapshot.stamp, 0.0, "map", snapshot.stamp));
+
+  ASSERT_TRUE(inside.gnss.valid) << inside.gnss.fallback_reason;
+  ASSERT_TRUE(outside.gnss.valid) << outside.gnss.fallback_reason;
+  EXPECT_TRUE(inside.gnss.measured_epoch_support_used);
+  EXPECT_FALSE(outside.gnss.measured_epoch_support_used);
+  EXPECT_EQ(inside.gnss.used_sat_ids, outside.gnss.used_sat_ids);
+  EXPECT_GE(inside.gnss.effective_sigma_mean, 25.0);
+  EXPECT_GE(outside.gnss.effective_sigma_mean, 25.0);
+  EXPECT_NEAR(inside.gnss.raw_hpl, outside.gnss.raw_hpl, 1.0e-10);
+  EXPECT_NEAR(inside.gnss.raw_vpl, outside.gnss.raw_vpl, 1.0e-10);
+}
+
+TEST(PredictorModuleTest,
      MisalignedCertifiedIntegrityAndGnssEpochFailAnchorClosed) {
   auto params = make_params();
   params.gnss.measured_epoch_support_radius_m = 0.45;

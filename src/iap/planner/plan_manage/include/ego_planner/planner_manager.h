@@ -77,6 +77,11 @@ namespace ego_planner
         std::numeric_limits<double>::infinity();
     std::string reason = "no_committed_trajectory";
   };
+
+  bool p4CertifiedCurrentIntegritySafe(
+      const iap::CurrentIntegrityState &current, double now_s,
+      double stale_timeout_s);
+
   class P0RiskGridRuntime;
   struct P0OccupancyEpoch;
   class P5RuntimeIntegrityGate;

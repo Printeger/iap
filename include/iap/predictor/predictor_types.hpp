@@ -386,6 +386,23 @@ struct ForwardRiskQueryPoint {
   std::uint64_t candidate_group_id = 0;
 };
 
+struct GnssRiskSatelliteDiagnostic {
+  int sat_id = 0;
+  bool epoch_excluded = false;
+  bool above_elevation_mask = false;
+  bool support_known = false;
+  bool visible = false;
+  bool blocked = false;
+  bool used = false;
+  Eigen::Vector3d los_map = Eigen::Vector3d::Constant(
+      std::numeric_limits<double>::quiet_NaN());
+  double elevation_rad = std::numeric_limits<double>::quiet_NaN();
+  double azimuth_rad = std::numeric_limits<double>::quiet_NaN();
+  double kappa = std::numeric_limits<double>::quiet_NaN();
+  double sigma_eff_m = std::numeric_limits<double>::quiet_NaN();
+  std::string exclusion_reason = "not_evaluated";
+};
+
 struct ForwardRiskBatchRequest {
   std::string combined_snapshot_identity;
   IntegritySnapshot snapshot;
@@ -422,6 +439,7 @@ struct ForwardRiskPointResult {
   int gnss_known_satellite_count = 0;
   int gnss_used_satellite_count = 0;
   std::uint64_t local_satellite_set_hash = 0;
+  std::vector<GnssRiskSatelliteDiagnostic> gnss_satellites;
   bool known_hazard_evidence = false;
   double known_gnss_degradation_ratio = 0.0;
   double known_fim_ratio = std::numeric_limits<double>::quiet_NaN();
