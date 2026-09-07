@@ -190,8 +190,10 @@ namespace ego_planner
     std::shared_ptr<const iap::RiskGridSnapshot> currentPlanningRiskSnapshot() const { return planning_risk_context_.snapshot; }
     double currentPlanningQueryBaseTime() const { return planning_risk_context_.query_base_time_s; }
     uint64_t currentPlanningGenerationId() const { return planning_risk_context_.generation_id; }
-    void setPlanningRiskContextForTest(std::shared_ptr<const iap::RiskGridSnapshot> snapshot,
-                                       double query_base_time_s);
+    void setPlanningRiskContextForTest(
+        std::shared_ptr<const iap::RiskGridSnapshot> snapshot,
+        double query_base_time_s,
+        std::shared_ptr<const P0OccupancyEpoch> occupancy_snapshot = nullptr);
     // P1 candidates are fail-closed against the same immutable snapshot they
     // were optimized with. These methods are intentionally separate from P5.
     bool planningRiskContextFresh(double now_s, std::string *reason = nullptr) const;

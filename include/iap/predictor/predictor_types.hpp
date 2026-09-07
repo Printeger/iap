@@ -275,21 +275,23 @@ struct PredictorQueryInput {
                       const double query_time_s_in,
                       const double horizon_s_in = 0.0,
                       std::string frame_id_in = "map",
-                      const double freshness_reference_time_s_in =
+                      const double evaluation_time_s_in =
                           std::numeric_limits<double>::quiet_NaN())
       : query_position_map(std::move(query_position_map_in)),
         snapshot(std::move(snapshot_in)),
         query_time_s(query_time_s_in),
         horizon_s(horizon_s_in),
         frame_id(std::move(frame_id_in)),
-        freshness_reference_time_s(freshness_reference_time_s_in) {}
+        evaluation_time_s(evaluation_time_s_in) {}
 
   Eigen::Vector3d query_position_map;
   IntegritySnapshot snapshot;
   double query_time_s;
   double horizon_s;
   std::string frame_id = "map";
-  double freshness_reference_time_s =
+  // Wall/ROS simulation time at which this prediction round evaluates input
+  // freshness. This is distinct from the candidate arrival query_time_s.
+  double evaluation_time_s =
       std::numeric_limits<double>::quiet_NaN();
 };
 
@@ -390,7 +392,7 @@ struct ForwardRiskBatchRequest {
   std::vector<ForwardRiskQueryPoint> points;
   double hal = 10.0;
   double val = 20.0;
-  double freshness_reference_time_s =
+  double evaluation_time_s =
       std::numeric_limits<double>::quiet_NaN();
   double compute_budget_ms = std::numeric_limits<double>::infinity();
 };

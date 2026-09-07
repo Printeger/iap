@@ -237,9 +237,10 @@ class PredictorModuleRiskProvider final : public iap::RiskPredictionProvider {
       iap::RollingSpatialSourceProvenance source_provenance,
       iap::PredictorModule module,
       iap::IntegritySnapshot snapshot,
-      int worker_count, double hal_m, double val_m)
+      double evaluation_time_s, int worker_count, double hal_m, double val_m)
       : occupancy_owner_(std::move(occupancy_owner)),
         rolling_window_(rolling_window), snapshot_(std::move(snapshot)),
+        evaluation_time_s_(evaluation_time_s),
         worker_count_(std::max(1, worker_count)),
         hal_m_(hal_m), val_m_(val_m) {
     iap::RollingSpatialRefreshInput input;
@@ -302,7 +303,8 @@ class PredictorModuleRiskProvider final : public iap::RiskPredictionProvider {
               for (const std::size_t index : groups[group_index]) {
                 const auto& query = queries[index];
                 inputs.emplace_back(query.position_w, snapshot_,
-                    query.query_time_s, query.horizon_s, "map", snapshot_.stamp);
+                    query.query_time_s, query.horizon_s, "map",
+                    evaluation_time_s_);
               }
               iap::PredictorBatchDiagnostics diagnostics;
               const auto predictions =
@@ -391,6 +393,7 @@ class PredictorModuleRiskProvider final : public iap::RiskPredictionProvider {
   std::shared_ptr<const iap::LocalOccupancyGrid> occupancy_owner_;
   iap::RollingSpatialAdvisoryWindow* rolling_window_ = nullptr;
   iap::IntegritySnapshot snapshot_;
+  double evaluation_time_s_ = std::numeric_limits<double>::quiet_NaN();
   int worker_count_ = 1;
   double hal_m_ = 10.0;
   double val_m_ = 20.0;
@@ -1591,8 +1594,10 @@ void P0RiskGridRuntime::refreshTimerCallback() {
       if (trusted_support) {
         module.set_support_query(
             [trusted_support](const Eigen::Vector3d& position,
+                              const double evaluation_time_s,
                               const double query_time_s) {
-              return trusted_support->query(position, query_time_s);
+              return trusted_support->query(
+                  position, evaluation_time_s, query_time_s);
             });
       } else {
         module.set_observation_predicate(
@@ -1616,8 +1621,10 @@ void P0RiskGridRuntime::refreshTimerCallback() {
       if (trusted_support) {
         forward_risk_module->set_support_query(
             [trusted_support](const Eigen::Vector3d& position,
+                              const double evaluation_time_s,
                               const double query_time_s) {
-              return trusted_support->query(position, query_time_s);
+              return trusted_support->query(
+                  position, evaluation_time_s, query_time_s);
             });
       } else {
         forward_risk_module->set_observation_predicate(
@@ -1664,6 +1671,7 @@ void P0RiskGridRuntime::refreshTimerCallback() {
         std::move(lidar_map_points), std::move(lidar_fim_primitives),
         retention_policy, source_provenance,
         std::move(module), snapshot,
+        now_s,
         config_.predictor_effective_worker_count,
         config_.predictor_hal_m, config_.predictor_val_m);
     predictor_provider = owned_predictor_provider.get();

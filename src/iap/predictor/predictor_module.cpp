@@ -67,8 +67,8 @@ bool age_exceeds(const double query_time_s,
 }
 
 double freshness_time_s(const PredictorQueryInput& input) {
-  return std::isfinite(input.freshness_reference_time_s)
-             ? input.freshness_reference_time_s
+  return std::isfinite(input.evaluation_time_s)
+             ? input.evaluation_time_s
              : input.query_time_s;
 }
 
@@ -448,7 +448,7 @@ void PredictorModule::set_observation_predicate(
 
 void PredictorModule::set_support_query(
     VisibilityPredictor::SupportQuery query) {
-  support_query_time_sensitive_ = static_cast<bool>(query);
+  support_evaluation_time_sensitive_ = static_cast<bool>(query);
   gnss_.set_support_query(std::move(query));
 }
 
@@ -558,9 +558,9 @@ PredictorQueryResult PredictorModule::queryWithSpatialAdvisory(
       source_allows_gnss(params_.source_mode) &&
       !gnss_policy_disables_gnss(params_.gnss_epoch_policy);
   const bool reuse_gnss = cached_spatial_advisory != nullptr &&
-      (!support_query_time_sensitive_ || !gnss_allowed ||
-       cached_spatial_advisory->gnss_query_time_s ==
-           working_input.query_time_s);
+      (!support_evaluation_time_sensitive_ || !gnss_allowed ||
+       (cached_spatial_advisory->gnss_evaluation_time_s ==
+            freshness_time_s(working_input)));
   const bool reuse_lidar = cached_spatial_advisory != nullptr;
   if (diagnostics) {
     if (reuse_gnss && reuse_lidar) {
@@ -588,10 +588,12 @@ PredictorQueryResult PredictorModule::queryWithSpatialAdvisory(
         out.gnss = gnss_satellite_mask != nullptr
             ? gnss_.query_with_satellite_mask(
                   working_input.query_position_map, working_input.snapshot,
-                  *gnss_satellite_mask, working_input.query_time_s)
+                  *gnss_satellite_mask, working_input.query_time_s,
+                  freshness_time_s(working_input))
             : gnss_.query(working_input.query_position_map,
                           working_input.snapshot,
-                          working_input.query_time_s);
+                          working_input.query_time_s,
+                          freshness_time_s(working_input));
         if (diagnostics) {
           ++diagnostics->gnss_advisory_invocations;
           if (diagnostics->collect_component_timing) {
@@ -634,8 +636,8 @@ PredictorQueryResult PredictorModule::queryWithSpatialAdvisory(
   if (evaluated_spatial_advisory != nullptr) {
     evaluated_spatial_advisory->gnss = out.gnss;
     evaluated_spatial_advisory->lidar = out.lidar;
-    evaluated_spatial_advisory->gnss_query_time_s =
-        working_input.query_time_s;
+    evaluated_spatial_advisory->gnss_evaluation_time_s =
+        freshness_time_s(working_input);
   }
   if (out.gnss.valid) {
     apply_certified_gnss_anchor(gnss_, params_.gnss,
@@ -694,8 +696,8 @@ std::vector<PredictorQueryResult> PredictorModule::queryBatch(
     std::uint64_t prior_source_generation;
     bool has_gnss_epoch;
     double gnss_epoch_stamp;
-    bool has_freshness_reference;
-    double freshness_reference;
+    bool has_evaluation_time;
+    double evaluation_time;
     bool operator==(const Key& other) const {
       return x == other.x && y == other.y && z == other.z &&
              frame_id == other.frame_id &&
@@ -705,8 +707,8 @@ std::vector<PredictorQueryResult> PredictorModule::queryBatch(
              prior_source_generation == other.prior_source_generation &&
              has_gnss_epoch == other.has_gnss_epoch &&
              gnss_epoch_stamp == other.gnss_epoch_stamp &&
-             has_freshness_reference == other.has_freshness_reference &&
-             freshness_reference == other.freshness_reference;
+             has_evaluation_time == other.has_evaluation_time &&
+             evaluation_time == other.evaluation_time;
     }
   };
   struct Hash {
@@ -718,13 +720,13 @@ std::vector<PredictorQueryResult> PredictorModule::queryBatch(
       for (const double value :
            {key.y, key.z, key.snapshot_stamp, key.pose_stamp,
             key.current_stamp, key.gnss_epoch_stamp,
-            key.freshness_reference}) {
+            key.evaluation_time}) {
         combine(std::hash<double>{}(value));
       }
       combine(std::hash<std::string>{}(key.frame_id));
       combine(std::hash<std::uint64_t>{}(key.prior_source_generation));
       combine(std::hash<bool>{}(key.has_gnss_epoch));
-      combine(std::hash<bool>{}(key.has_freshness_reference));
+      combine(std::hash<bool>{}(key.has_evaluation_time));
       return seed;
     }
   };
@@ -741,11 +743,11 @@ std::vector<PredictorQueryResult> PredictorModule::queryBatch(
     if (should_cancel && should_cancel()) {
       break;
     }
-    const bool has_freshness_reference =
-        std::isfinite(input.freshness_reference_time_s);
-    const double freshness_reference =
-        has_freshness_reference
-            ? input.freshness_reference_time_s
+    const bool has_evaluation_time =
+        std::isfinite(input.evaluation_time_s);
+    const double evaluation_time =
+        has_evaluation_time
+            ? input.evaluation_time_s
             : (params_.freshness.enabled ? input.query_time_s : 0.0);
     const double gnss_epoch_stamp =
         input.snapshot.has_epoch ? input.snapshot.gnss_epoch.stamp : 0.0;
@@ -754,7 +756,7 @@ std::vector<PredictorQueryResult> PredictorModule::queryBatch(
         std::isfinite(input.snapshot.stamp) &&
         std::isfinite(input.snapshot.pose_stamp) &&
         std::isfinite(input.snapshot.current.stamp) &&
-        std::isfinite(freshness_reference) &&
+        std::isfinite(evaluation_time) &&
         (!input.snapshot.has_epoch || std::isfinite(gnss_epoch_stamp));
     const Key key{input.query_position_map.x(), input.query_position_map.y(),
                   input.query_position_map.z(), input.frame_id,
@@ -762,7 +764,7 @@ std::vector<PredictorQueryResult> PredictorModule::queryBatch(
                   input.snapshot.current.stamp,
                   input.snapshot.prior_source_generation,
                   input.snapshot.has_epoch, gnss_epoch_stamp,
-                  has_freshness_reference, freshness_reference};
+                  has_evaluation_time, evaluation_time};
     const auto cached = cacheable ? spatial_cache.find(key)
                                   : spatial_cache.end();
     const SpatialAdvisory* cached_spatial_advisory =
@@ -864,7 +866,8 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
     const auto& query = request.points[point_index];
     const VisibilityResult evidence =
         gnss_.visibility_evidence(
-            query.position_map, request.snapshot, query.query_time_s);
+            query.position_map, request.snapshot, query.query_time_s,
+            request.evaluation_time_s);
     if (budget_expired()) {
       // Evidence retained above is diagnostic only; every advisory point is
       // still unfinished until the second pass evaluates GNSS/LiDAR/FIM.
@@ -978,7 +981,7 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
     const auto& query = request.points[index];
     const PredictorQueryInput input(
         query.position_map, request.snapshot, query.query_time_s,
-        query.horizon_s, "map", request.freshness_reference_time_s);
+        query.horizon_s, "map", request.evaluation_time_s);
     result.prediction = queryWithSpatialAdvisory(
         input, nullptr, nullptr, diagnostics, &local_mask,
         receiver_advisory);

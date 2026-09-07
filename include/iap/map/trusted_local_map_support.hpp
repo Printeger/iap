@@ -69,15 +69,21 @@ struct TrustedLocalMapSupport {
         !model_version.empty();
   }
 
+  bool freshAt(const double evaluation_time_s) const {
+    return valid() && std::isfinite(evaluation_time_s) &&
+        evaluation_time_s >= stamp_s && evaluation_time_s <= valid_until_s;
+  }
+
   LocalMapSupportQuery query(const Eigen::Vector3d& point_map,
-                             const double now_s) const {
+                             const double evaluation_time_s) const {
     LocalMapSupportQuery out;
     out.authority = LocalMapSupportAuthority::TRUSTED_LOCAL_MAP;
-    if (!valid() || !point_map.allFinite() || !std::isfinite(now_s)) {
+    if (!valid() || !point_map.allFinite() ||
+        !std::isfinite(evaluation_time_s)) {
       out.status = LocalMapSupportStatus::FRAME_INVALID;
       return out;
     }
-    if (now_s < stamp_s || now_s > valid_until_s) {
+    if (!freshAt(evaluation_time_s)) {
       out.status = LocalMapSupportStatus::EXPIRED;
       return out;
     }
@@ -107,6 +113,21 @@ struct TrustedLocalMapSupport {
     }
     out.status = LocalMapSupportStatus::MODEL_COMPLETE;
     return out;
+  }
+
+  // Candidate arrival time is deliberately not part of local-map freshness.
+  // It remains explicit at the call boundary so a future prediction cannot
+  // accidentally be substituted for this round's evaluation clock again.
+  LocalMapSupportQuery query(const Eigen::Vector3d& point_map,
+                             const double evaluation_time_s,
+                             const double query_time_s) const {
+    if (!std::isfinite(query_time_s)) {
+      LocalMapSupportQuery out;
+      out.authority = LocalMapSupportAuthority::TRUSTED_LOCAL_MAP;
+      out.status = LocalMapSupportStatus::FRAME_INVALID;
+      return out;
+    }
+    return query(point_map, evaluation_time_s);
   }
 
   std::string identity() const {

@@ -1345,30 +1345,6 @@ namespace ego_planner
 
       auto info = &planner_manager_->local_data_;
 
-      traj_utils::msg::Bspline bspline;
-      bspline.order = 3;
-      bspline.start_time = info->start_time_;
-      bspline.traj_id = info->traj_id_;
-
-      Eigen::MatrixXd pos_pts = info->position_traj_.getControlPoint();
-      bspline.pos_pts.reserve(pos_pts.cols());
-      for (int i = 0; i < pos_pts.cols(); ++i)
-      {
-        geometry_msgs::msg::Point pt;
-        pt.x = pos_pts(0, i);
-        pt.y = pos_pts(1, i);
-        pt.z = pos_pts(2, i);
-        bspline.pos_pts.push_back(pt);
-      }
-
-      Eigen::VectorXd knots = info->position_traj_.getKnot();
-
-      bspline.knots.reserve(knots.rows());
-      for (int i = 0; i < knots.rows(); ++i)
-      {
-        bspline.knots.push_back(knots(i));
-      }
-
       if (!planner_manager_->recordP4VerticalSliceLineage(
               "final_bspline_before_p5", plannerNow().seconds()))
       {
@@ -1464,6 +1440,10 @@ namespace ego_planner
       }
 
       /* 1. publish traj to traj_server */
+      // Serialize only after every final gate and certificate check accepted
+      // the current LocalTrajData. This makes the published message a direct
+      // projection of the exact spline those checks inspected.
+      const traj_utils::msg::Bspline bspline = makeTrajectoryCommand(*info);
       bspline_pub_->publish(bspline);
       planner_manager_->recordGate0NormalBsplinePublish(plannerNow().seconds());
       if (!planner_manager_->finalizeP1AcceptedRiskProfile(

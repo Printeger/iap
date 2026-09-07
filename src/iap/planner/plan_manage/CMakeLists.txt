@@ -63,6 +63,7 @@ add_executable(ego_planner_node
   src/ego_replan_fsm.cpp
   src/gate0_qualification_writer.cpp
   src/planner_manager.cpp
+  src/p4_terminal_stop.cpp
   src/p0_risk_grid_runtime.cpp
   src/p0_occupancy_epoch_adapter.cpp
   src/p1_replan_admission.cpp
@@ -194,6 +195,7 @@ if(BUILD_TESTING)
     src/ego_replan_fsm.cpp
     src/gate0_qualification_writer.cpp
     src/planner_manager.cpp
+    src/p4_terminal_stop.cpp
     src/p0_risk_grid_runtime.cpp
     src/p0_occupancy_epoch_adapter.cpp
     src/p1_replan_admission.cpp

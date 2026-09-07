@@ -60,6 +60,15 @@ namespace ego_planner
                                       const vector<Eigen::Vector3d> &start_end_derivative,
                                       Eigen::MatrixXd &ctrl_pts);
 
+    // Least-squares path fit with exact cubic endpoint position, velocity and
+    // acceleration constraints. Unlike parameterizeToBspline(), boundary
+    // rows are eliminated before solving and therefore cannot be traded off
+    // against interior fit error.
+    static bool parameterizeToBsplineWithBoundaryConstraints(
+        const double &ts, const vector<Eigen::Vector3d> &point_set,
+        const vector<Eigen::Vector3d> &start_end_derivative,
+        Eigen::MatrixXd &ctrl_pts);
+
     /* check feasibility, adjust time */
 
     void setPhysicalLimits(const double &vel, const double &acc, const double &tolerance);

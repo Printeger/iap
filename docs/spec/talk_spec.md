@@ -40,9 +40,14 @@ For each candidate trajectory τ:
 - registered hit-only LiDAR may supply immutable trusted local-map support:
   inside the configured sensor envelope no-hit is model-complete; outside,
   expired, unhealthy or frame-invalid support is UNKNOWN. This inference is
-  never relabelled as measured free space. Envelope expiry is evaluated at
-  each trajectory sample's query time; successful geometry is complete only
-  over that sample's explicit local satellite set.
+  never relabelled as measured free space. Envelope freshness is evaluated at
+  the current `evaluation_time` of the immutable planning round, not at a
+  candidate's future arrival `query_time`. The future time still selects the
+  prediction layer and covariance growth. Successful geometry is complete
+  only over that sample's explicit local satellite set; publication/execution
+  recheck freshness against their then-current ROS/simulation time. A newer
+  generation does not itself revoke an in-flight immutable evaluation;
+  collision deltas remain independently rechecked.
 - predict LiDAR observability proxy O^(τ) (ICP quality proxy, map-based, may include occlusion)
 - propagate Σ -> Σ_pred using empirical growth model (keep exact interface)
 - compute PL_pred from Σ_pred
@@ -51,7 +56,10 @@ For each candidate trajectory τ:
 - J(τ) = Σ hinge(PL_pred - AL)^2 + λ_goal * dist(goal) + λ_u * effort
 - Receding horizon: plan H seconds, execute first Δt, replan
 - The executed Δt/prefix is accepted only with a bound endpoint/deadline and
-  zero terminal velocity/acceleration. While a new result is pending, an
+  zero terminal velocity/acceleration imposed as hard equalities together with
+  the execution-continuous start state and approved endpoint. Retiming is
+  allowed only before final dynamics, collision and time-aligned risk checks.
+  While a new result is pending, an
   unchanged valid prefix continues; runtime collision or Integrity revocation
   triggers replan/braking/emergency handling.
 

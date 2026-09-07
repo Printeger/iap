@@ -28,10 +28,19 @@
     model assumptions must remain separately identifiable.
   - Support identity includes pose, extent, timestamp/expiry and model
     version, and participates in P0/P4 snapshot and cache identity.
-  - Envelope validity is evaluated at each candidate's `query_time_s`, not at
-    snapshot refresh time. `MODEL_COMPLETE` describes a solved advisory over
-    its explicit local satellite set `S_i`; excluded UNKNOWN satellites remain
-    counted in diagnostics.
+  - Envelope validity is evaluated once per immutable planning/evaluation
+    snapshot using `evaluation_time_s` and the map acquisition stamp, on the
+    same ROS/simulation clock. A candidate's future arrival `query_time_s`
+    must not make a currently fresh map expire. `query_time_s` remains
+    authoritative for trajectory arrival, temporal-layer selection and
+    uncertainty growth. Publication and execution perform a new current-time
+    freshness check; an earlier pass is never cached as permanent authority.
+    A newer map generation does not invalidate computation already bound to a
+    fresh immutable snapshot; the existing collision-delta commit remains the
+    geometric change check.
+    `MODEL_COMPLETE` describes a solved advisory over its explicit local
+    satellite set `S_i`; excluded UNKNOWN satellites remain counted in
+    diagnostics.
   - Environmental LiDAR hits required by the sky-risk kernel may be retained
     outside the vehicle flight/geofence lattice. The geofence still limits
     executable trajectories.
@@ -52,7 +61,11 @@
   approved endpoint/deadline, terminal velocity/acceleration, braking model,
   map/risk snapshot identity and selection authority.
 - Every P4 curve, including common-prefix and observe-more curves, must satisfy
-  fixed zero terminal velocity and acceleration before final acceptance.
+  fixed zero terminal velocity and acceleration before final acceptance. The
+  production terminal fit treats start position/velocity/acceleration,
+  approved endpoint and terminal velocity/acceleration as hard equalities.
+  If it retimes a dynamically feasible curve, collision and risk are checked
+  again at the final curve's actual arrival times before publication.
 - `PENDING` and `RATE_LIMITED` are typed worker results. If the committed
   certificate still passes identity, tracking, collision and runtime Integrity
   checks, the FSM continues it without retrying initialization or changing its

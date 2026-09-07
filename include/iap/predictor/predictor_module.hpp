@@ -64,11 +64,12 @@ class PredictorModule {
   struct SpatialAdvisory {
     GnssAdvisoryResult gnss;
     LidarAdvisoryResult lidar;
-    double gnss_query_time_s = std::numeric_limits<double>::quiet_NaN();
+    double gnss_evaluation_time_s =
+        std::numeric_limits<double>::quiet_NaN();
   };
 
   PredictorParams params_;
-  bool support_query_time_sensitive_ = false;
+  bool support_evaluation_time_sensitive_ = false;
   GnssAdvisoryPredictor gnss_;
   LidarAdvisoryPredictor lidar_;
   FusionAdvisoryPredictor fusion_;

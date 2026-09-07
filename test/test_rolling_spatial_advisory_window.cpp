@@ -338,15 +338,15 @@ TEST(RollingSpatialAdvisoryWindowTest,
 }
 
 TEST(RollingSpatialAdvisoryWindowTest,
-     TimeSensitiveSupportIsReevaluatedAcrossExpiryAtSamePosition) {
+     EvaluationTimeControlsSupportWhileFutureQueryTimeStillVaries) {
   auto occupancy = std::make_shared<LocalOccupancyGrid>();
   const auto snapshot = makeGnssSnapshot(1);
   auto refresh = makeGnssRefreshInput(occupancy, snapshot);
   refresh.module.set_support_query(
-      [](const Eigen::Vector3d&, const double query_time_s) {
+      [](const Eigen::Vector3d&, const double evaluation_time_s, double) {
         return LocalMapSupportQuery{
             LocalMapSupportAuthority::TRUSTED_LOCAL_MAP,
-            query_time_s <= 100.5
+            evaluation_time_s <= 100.5
                 ? LocalMapSupportStatus::MODEL_COMPLETE
                 : LocalMapSupportStatus::EXPIRED};
       });
@@ -364,9 +364,15 @@ TEST(RollingSpatialAdvisoryWindowTest,
   EXPECT_EQ(outputs[0].gnss.support_status,
             LocalMapSupportStatus::MODEL_COMPLETE);
   EXPECT_EQ(outputs[1].gnss.support_status,
-            LocalMapSupportStatus::EXPIRED);
-  EXPECT_EQ(diagnostics.gnss_advisory_invocations, 2U);
-  EXPECT_EQ(diagnostics.spatial_advisory_recompute_count, 2U);
+            LocalMapSupportStatus::MODEL_COMPLETE);
+  EXPECT_EQ(diagnostics.gnss_advisory_invocations, 1U);
+  EXPECT_EQ(diagnostics.spatial_advisory_recompute_count, 1U);
+
+  std::vector<PredictorQueryInput> stale_inputs;
+  stale_inputs.emplace_back(position, snapshot, 101.1, 1.1, "map", 101.1);
+  const auto stale = window.queryPositionHorizons(stale_inputs);
+  ASSERT_EQ(stale.size(), 1U);
+  EXPECT_EQ(stale[0].gnss.support_status, LocalMapSupportStatus::EXPIRED);
 }
 
 TEST(RollingSpatialAdvisoryWindowTest,

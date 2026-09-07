@@ -1,5 +1,7 @@
 #include "bspline_opt/uniform_bspline.h"
 
+#include <cmath>
+
 namespace ego_planner
 {
 
@@ -278,6 +280,78 @@ namespace ego_planner
     ctrl_pts.row(2) = pz.transpose();
 
     // cout << "[B-spline]: parameterization ok." << endl;
+  }
+
+  bool UniformBspline::parameterizeToBsplineWithBoundaryConstraints(
+      const double &ts, const vector<Eigen::Vector3d> &point_set,
+      const vector<Eigen::Vector3d> &start_end_derivative,
+      Eigen::MatrixXd &ctrl_pts)
+  {
+    ctrl_pts.resize(0, 0);
+    if (!std::isfinite(ts) || ts <= 0.0 || point_set.size() < 4 ||
+        start_end_derivative.size() != 4)
+      return false;
+    for (const auto &point : point_set)
+      if (!point.allFinite()) return false;
+    for (const auto &derivative : start_end_derivative)
+      if (!derivative.allFinite()) return false;
+
+    const int sample_count = static_cast<int>(point_set.size());
+    const int control_count = sample_count + 2;
+    ctrl_pts = Eigen::MatrixXd::Zero(3, control_count);
+
+    const Eigen::Vector3d &start_position = point_set.front();
+    const Eigen::Vector3d &end_position = point_set.back();
+    const Eigen::Vector3d &start_velocity = start_end_derivative[0];
+    const Eigen::Vector3d &end_velocity = start_end_derivative[1];
+    const Eigen::Vector3d &start_acceleration = start_end_derivative[2];
+    const Eigen::Vector3d &end_acceleration = start_end_derivative[3];
+    const double ts_squared = ts * ts;
+
+    // Exact inverse of the uniform cubic endpoint position/velocity/
+    // acceleration basis. Eliminating these variables makes the six vector
+    // boundary conditions hard equalities rather than weighted LS rows.
+    ctrl_pts.col(0) = start_position - ts * start_velocity +
+        (ts_squared / 3.0) * start_acceleration;
+    ctrl_pts.col(1) = start_position -
+        (ts_squared / 6.0) * start_acceleration;
+    ctrl_pts.col(2) = start_position + ts * start_velocity +
+        (ts_squared / 3.0) * start_acceleration;
+    ctrl_pts.col(control_count - 3) = end_position - ts * end_velocity +
+        (ts_squared / 3.0) * end_acceleration;
+    ctrl_pts.col(control_count - 2) = end_position -
+        (ts_squared / 6.0) * end_acceleration;
+    ctrl_pts.col(control_count - 1) = end_position + ts * end_velocity +
+        (ts_squared / 3.0) * end_acceleration;
+
+    const int free_count = control_count - 6;
+    if (free_count > 0)
+    {
+      Eigen::MatrixXd A = Eigen::MatrixXd::Zero(sample_count, free_count);
+      Eigen::MatrixXd b(3, sample_count);
+      for (int sample = 0; sample < sample_count; ++sample)
+      {
+        b.col(sample) = point_set[static_cast<std::size_t>(sample)];
+        for (int offset = 0; offset < 3; ++offset)
+        {
+          const int control = sample + offset;
+          const double weight = offset == 1 ? 4.0 / 6.0 : 1.0 / 6.0;
+          if (control >= 3 && control < control_count - 3)
+            A(sample, control - 3) += weight;
+          else
+            b.col(sample) -= weight * ctrl_pts.col(control);
+        }
+      }
+      const Eigen::ColPivHouseholderQR<Eigen::MatrixXd> solver(A);
+      if (solver.rank() != free_count) return false;
+      for (int axis = 0; axis < 3; ++axis)
+      {
+        const Eigen::VectorXd solved = solver.solve(b.row(axis).transpose());
+        if (!solved.allFinite()) return false;
+        ctrl_pts.row(axis).segment(3, free_count) = solved.transpose();
+      }
+    }
+    return ctrl_pts.allFinite();
   }
 
   double UniformBspline::getTimeSum()

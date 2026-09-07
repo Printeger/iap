@@ -39,7 +39,8 @@ Eigen::Vector3d VisibilityPredictor::enu_dir(double elevation, double azimuth) {
 VisibilityResult VisibilityPredictor::predict(const Eigen::Vector3d& pos_world,
                                               const GnssEpoch& epoch,
                                               const bool measured_epoch_support,
-                                              const double query_time_s) const {
+                                              const double query_time_s,
+                                              const double evaluation_time_s) const {
   VisibilityResult res;
   const std::size_t N = epoch.sats.size();
   res.vis_flags.resize(N, false);
@@ -100,7 +101,11 @@ VisibilityResult VisibilityPredictor::predict(const Eigen::Vector3d& pos_world,
         if (support_query_) {
           const double effective_query_time_s = std::isfinite(query_time_s)
               ? query_time_s : epoch.stamp;
+          const double effective_evaluation_time_s =
+              std::isfinite(evaluation_time_s)
+                  ? evaluation_time_s : effective_query_time_s;
           const auto support = support_query_(support_point,
+                                              effective_evaluation_time_s,
                                               effective_query_time_s);
           complete = support.complete();
           if (!complete && res.support_status ==

@@ -45,10 +45,24 @@ TEST(TrustedLocalMapSupportTest, DistinguishesCompleteOutsideAndExpired)
   EXPECT_EQ(complete.authority,
             iap::LocalMapSupportAuthority::TRUSTED_LOCAL_MAP);
   EXPECT_EQ(complete.status, iap::LocalMapSupportStatus::MODEL_COMPLETE);
+  EXPECT_TRUE(support.freshAt(10.5));
+  EXPECT_FALSE(support.freshAt(11.1));
   EXPECT_EQ(support.query(Eigen::Vector3d(1.0, 2.0, 12.0), 10.5).status,
             iap::LocalMapSupportStatus::OUTSIDE_ENVELOPE);
-  EXPECT_EQ(support.query(Eigen::Vector3d(6.0, 2.0, 4.0), 11.1).status,
+  EXPECT_EQ(support.query(Eigen::Vector3d(6.0, 2.0, 4.0), 10.5, 30.0).status,
+            iap::LocalMapSupportStatus::MODEL_COMPLETE);
+  EXPECT_EQ(support.query(Eigen::Vector3d(6.0, 2.0, 4.0), 11.1, 30.0).status,
             iap::LocalMapSupportStatus::EXPIRED);
+  EXPECT_EQ(support.query(
+                Eigen::Vector3d(std::numeric_limits<double>::quiet_NaN(),
+                                2.0, 4.0),
+                10.5, 30.0).status,
+            iap::LocalMapSupportStatus::FRAME_INVALID);
+  auto incomplete_support = support;
+  incomplete_support.frame_id.clear();
+  EXPECT_EQ(incomplete_support.query(
+                Eigen::Vector3d(6.0, 2.0, 4.0), 10.5, 30.0).status,
+            iap::LocalMapSupportStatus::FRAME_INVALID);
   EXPECT_FALSE(support.identity().empty());
 }
 
@@ -652,7 +666,7 @@ TEST(PredictorModuleTest,
   iap::IntegritySnapshot snapshot = make_snapshot(true, false);
   snapshot.gnss_epoch = make_epoch(8);
 
-  const auto complete_support = [](const Eigen::Vector3d&, double) {
+  const auto complete_support = [](const Eigen::Vector3d&, double, double) {
       return iap::LocalMapSupportQuery{
           iap::LocalMapSupportAuthority::TRUSTED_LOCAL_MAP,
           iap::LocalMapSupportStatus::MODEL_COMPLETE};
@@ -680,7 +694,7 @@ TEST(PredictorModuleTest,
   EXPECT_GT(occluded.vpl, clear.vpl);
 
   iap::GnssAdvisoryPredictor outside_predictor(params.gnss);
-  outside_predictor.set_support_query([](const Eigen::Vector3d&, double) {
+  outside_predictor.set_support_query([](const Eigen::Vector3d&, double, double) {
       return iap::LocalMapSupportQuery{
           iap::LocalMapSupportAuthority::TRUSTED_LOCAL_MAP,
           iap::LocalMapSupportStatus::OUTSIDE_ENVELOPE};
@@ -694,23 +708,23 @@ TEST(PredictorModuleTest,
 
   iap::GnssAdvisoryPredictor expiring_predictor(params.gnss);
   expiring_predictor.set_support_query(
-      [](const Eigen::Vector3d&, const double query_time_s) {
+      [](const Eigen::Vector3d&, const double evaluation_time_s, double) {
         return iap::LocalMapSupportQuery{
             iap::LocalMapSupportAuthority::TRUSTED_LOCAL_MAP,
-            query_time_s <= 100.5
+            evaluation_time_s <= 100.5
                 ? iap::LocalMapSupportStatus::MODEL_COMPLETE
                 : iap::LocalMapSupportStatus::EXPIRED};
       });
   EXPECT_TRUE(expiring_predictor.query(
-      Eigen::Vector3d::Zero(), snapshot, 100.5).valid);
+      Eigen::Vector3d::Zero(), snapshot, 105.0, 100.5).valid);
   const auto expired = expiring_predictor.query(
-      Eigen::Vector3d::Zero(), snapshot, 100.6);
+      Eigen::Vector3d::Zero(), snapshot, 105.0, 100.6);
   EXPECT_FALSE(expired.valid);
   EXPECT_EQ(expired.support_status, iap::LocalMapSupportStatus::EXPIRED);
 
   iap::GnssAdvisoryPredictor local_set_predictor(params.gnss);
   local_set_predictor.set_support_query(
-      [](const Eigen::Vector3d& point, double) {
+      [](const Eigen::Vector3d& point, double, double) {
         return iap::LocalMapSupportQuery{
             iap::LocalMapSupportAuthority::TRUSTED_LOCAL_MAP,
             point.x() >= -1.0e-9
@@ -1060,7 +1074,7 @@ TEST(PredictorModuleTest,
   request.snapshot = snapshot;
   request.hal = 1000.0;
   request.val = 1000.0;
-  request.freshness_reference_time_s = snapshot.stamp;
+  request.evaluation_time_s = snapshot.stamp;
   request.points = {
       {Eigen::Vector3d(-10.0, 0.0, 0.0), snapshot.stamp, 0.0, 1},
       {Eigen::Vector3d(10.0, 0.0, 0.0), snapshot.stamp + 0.5, 0.5, 2}};
@@ -1144,7 +1158,7 @@ TEST(PredictorModuleTest, ForwardRiskBatchFailsClosedWhenBudgetIsExpired) {
   request.snapshot = snapshot;
   request.hal = 20.0;
   request.val = 40.0;
-  request.freshness_reference_time_s = snapshot.stamp;
+  request.evaluation_time_s = snapshot.stamp;
   request.compute_budget_ms = 0.0;
   request.points = {{snapshot.p_wb, snapshot.stamp, 0.0, 1}};
 
@@ -1176,7 +1190,7 @@ TEST(PredictorModuleTest,
   request.snapshot = snapshot;
   request.hal = 20.0;
   request.val = 40.0;
-  request.freshness_reference_time_s = snapshot.stamp;
+  request.evaluation_time_s = snapshot.stamp;
   request.compute_budget_ms = 50.0;
   request.points = {
       {snapshot.p_wb, snapshot.stamp, 0.0, 1},
@@ -1213,7 +1227,7 @@ TEST(PredictorModuleTest, ForwardRiskBatchRejectsInvalidNonfiniteBudgets) {
     request.snapshot = snapshot;
     request.hal = 20.0;
     request.val = 40.0;
-    request.freshness_reference_time_s = snapshot.stamp;
+    request.evaluation_time_s = snapshot.stamp;
     request.compute_budget_ms = invalid_budget;
     request.points = {{snapshot.p_wb, snapshot.stamp, 0.0, 1}};
 
@@ -1257,7 +1271,7 @@ TEST(PredictorModuleTest,
   request.snapshot = snapshot;
   request.hal = 20.0;
   request.val = 40.0;
-  request.freshness_reference_time_s = snapshot.stamp;
+  request.evaluation_time_s = snapshot.stamp;
   request.points = {
       {Eigen::Vector3d(-10.0, 0.0, 0.0), snapshot.stamp, 0.0, 1},
       {Eigen::Vector3d(10.0, 0.0, 0.0), snapshot.stamp + 0.5, 0.5, 2}};
@@ -2114,7 +2128,7 @@ TEST(PredictorModuleTest,
 }
 
 TEST(PredictorModuleTest,
-     FreshnessReferenceNotFutureQueryTimeControlsSixHorizonValidity) {
+     EvaluationTimeNotFutureQueryTimeControlsSixHorizonValidity) {
   auto params = make_params();
   params.freshness.enabled = true;
   params.freshness.max_odom_age_s = 0.5;
@@ -2135,6 +2149,51 @@ TEST(PredictorModuleTest,
   EXPECT_TRUE(runtime_result.valid) << runtime_result.fallback_reason;
   EXPECT_FALSE(query_time_result.valid);
   EXPECT_EQ(query_time_result.fallback_reason, "stale_odom");
+}
+
+TEST(PredictorModuleTest,
+     CurrentMapSupportAndFutureCovarianceGrowthUseSeparateTimes) {
+  auto params = make_params();
+  params.covariance_growth.sigma_grow_m_sqrt_s = 0.2;
+  iap::PredictorModule module(params);
+  module.set_lidar_fim_primitives(make_lidar_primitives());
+  std::vector<double> evaluation_times;
+  std::vector<double> query_times;
+  module.set_support_query(
+      [&evaluation_times, &query_times](const Eigen::Vector3d&,
+                                        const double evaluation_time_s,
+                                        const double query_time_s) {
+        evaluation_times.push_back(evaluation_time_s);
+        query_times.push_back(query_time_s);
+        return iap::LocalMapSupportQuery{
+            iap::LocalMapSupportAuthority::TRUSTED_LOCAL_MAP,
+            evaluation_time_s <= 100.5
+                ? iap::LocalMapSupportStatus::MODEL_COMPLETE
+                : iap::LocalMapSupportStatus::EXPIRED};
+      });
+  auto snapshot = make_snapshot(true, true);
+  snapshot.lambda_base_pos =
+      (Eigen::Vector3d(1.0, 0.5, 0.25)).asDiagonal();
+
+  const auto now = module.query(iap::PredictorQueryInput(
+      Eigen::Vector3d(0.5, -0.25, 1.0), snapshot,
+      100.0, 0.0, "map", 100.0));
+  const auto future = module.query(iap::PredictorQueryInput(
+      Eigen::Vector3d(0.5, -0.25, 1.0), snapshot,
+      102.5, 2.5, "map", 100.0));
+
+  ASSERT_TRUE(now.valid) << now.fallback_reason;
+  ASSERT_TRUE(future.valid) << future.fallback_reason;
+  EXPECT_EQ(future.gnss.support_status,
+            iap::LocalMapSupportStatus::MODEL_COMPLETE);
+  EXPECT_EQ(future.covariance_growth_status,
+            iap::CovarianceGrowthStatus::APPLIED);
+  EXPECT_GT(future.fused.hpl, now.fused.hpl);
+  ASSERT_FALSE(evaluation_times.empty());
+  EXPECT_TRUE(std::all_of(evaluation_times.begin(), evaluation_times.end(),
+                          [](double time_s) { return time_s == 100.0; }));
+  EXPECT_NE(std::find(query_times.begin(), query_times.end(), 102.5),
+            query_times.end());
 }
 
 TEST(PredictorModuleTest,

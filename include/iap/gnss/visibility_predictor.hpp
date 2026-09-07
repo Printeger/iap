@@ -85,7 +85,8 @@ class VisibilityPredictor {
   void set_observation_predicate(ObservationPredicate predicate);
   using SupportQuery =
       std::function<LocalMapSupportQuery(
-          const Eigen::Vector3d& position_world, double query_time_s)>;
+          const Eigen::Vector3d& position_world, double evaluation_time_s,
+          double query_time_s)>;
   void set_support_query(SupportQuery query);
 
   /**
@@ -99,6 +100,8 @@ class VisibilityPredictor {
                            const GnssEpoch& epoch,
                            bool measured_epoch_support = false,
                            double query_time_s =
+                               std::numeric_limits<double>::quiet_NaN(),
+                           double evaluation_time_s =
                                std::numeric_limits<double>::quiet_NaN()) const;
 
   const Params& params() const { return params_; }

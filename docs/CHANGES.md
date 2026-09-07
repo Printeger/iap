@@ -3,6 +3,28 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(p4-hard-stop-and-current-map-freshness): IAP-RQ-312 / IAP-RQ-320 /
+  IAP-RQ-400 / IAP-RQ-410 — replace P4's overdetermined soft terminal fit with
+  a boundary-eliminated cubic B-spline least-squares fit that exactly preserves
+  start position/velocity/acceleration and the approved endpoint while fixing
+  terminal velocity/acceleration to zero. Dynamically feasible candidates may
+  be refit on a longer uniform time base; the resulting control points, knots,
+  duration and arrival times remain subject to the existing final guide,
+  collision and risk checks, and the ROS command is serialized only after
+  those checks/certificate creation from the same final `LocalTrajData`.
+  In parallel, replace the superseded rule that expired trusted local-map
+  support at each future candidate arrival. Predictor, P0 refresh, P4
+  ForwardRisk and their caches now carry distinct `evaluation_time_s` and
+  `query_time_s`: the former alone checks the frozen local map's current
+  freshness, while the latter still drives temporal-layer selection,
+  trajectory arrival and covariance/PL growth. Later planning, publication
+  and runtime checks continue to use their current ROS/simulation time, so a
+  prior freshness pass is not permanent. Missing/incomplete maps, invalid
+  coordinates, envelope bounds, GNSS/Integrity freshness, collision deltas,
+  AL, risk weights and P5 policy are unchanged. This entry explicitly
+  supersedes the 2026-09-05 statement that envelope expiry is evaluated at
+  every sample's `query_time`.
+
 - feat(glim-planner-local-map): IAP-RQ-312 / IAP-RQ-320 / IAP-RQ-400 — add a
   thin `PlannerLocalMapExtension` over GLIM's registered current frame and
   active keyframe callbacks. It preserves immutable raw first-hit returns,

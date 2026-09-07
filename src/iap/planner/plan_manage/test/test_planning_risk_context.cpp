@@ -1,7 +1,9 @@
 #include <ego_planner/planner_manager.h>
 #include <ego_planner/ego_replan_fsm.h>
+#include <ego_planner/p0_occupancy_epoch_adapter.h>
 #include <ego_planner/p1_soft_fallback_policy.h>
 #include <ego_planner/p5_runtime_integrity_gate.h>
+#include <ego_planner/p4_terminal_stop.h>
 #include <ego_planner/trajectory_command_qos.h>
 
 #include <gtest/gtest.h>
@@ -90,6 +92,145 @@ void ensureRclcpp() {
 }
 
 }  // namespace
+
+namespace {
+
+ego_planner::UniformBspline makeMovingCurvedP4Trajectory(
+    const double interval_s)
+{
+  Eigen::MatrixXd points(3, 9);
+  points.col(0) = Eigen::Vector3d(0.0, 0.0, 1.0);
+  points.col(1) = Eigen::Vector3d(0.12, 0.01, 1.0);
+  points.col(2) = Eigen::Vector3d(0.28, 0.05, 1.02);
+  points.col(3) = Eigen::Vector3d(0.48, 0.14, 1.06);
+  points.col(4) = Eigen::Vector3d(0.70, 0.27, 1.10);
+  points.col(5) = Eigen::Vector3d(0.91, 0.43, 1.13);
+  points.col(6) = Eigen::Vector3d(1.10, 0.60, 1.15);
+  points.col(7) = Eigen::Vector3d(1.27, 0.76, 1.16);
+  points.col(8) = Eigen::Vector3d(1.42, 0.90, 1.16);
+  return ego_planner::UniformBspline(points, 3, interval_s);
+}
+
+void expectSameStartState(const ego_planner::UniformBspline &expected_input,
+                          ego_planner::UniformBspline *actual_input)
+{
+  auto expected = expected_input;
+  auto actual = *actual_input;
+  auto expected_velocity = expected.getDerivative();
+  auto actual_velocity = actual.getDerivative();
+  auto expected_acceleration = expected_velocity.getDerivative();
+  auto actual_acceleration = actual_velocity.getDerivative();
+  EXPECT_TRUE(actual.evaluateDeBoorT(0.0).isApprox(
+      expected.evaluateDeBoorT(0.0), 1.0e-9));
+  EXPECT_TRUE(actual_velocity.evaluateDeBoorT(0.0).isApprox(
+      expected_velocity.evaluateDeBoorT(0.0), 1.0e-9));
+  EXPECT_TRUE(actual_acceleration.evaluateDeBoorT(0.0).isApprox(
+      expected_acceleration.evaluateDeBoorT(0.0), 1.0e-8));
+}
+
+ego_planner::P4TerminalStartState terminalStartState(
+    const ego_planner::UniformBspline &trajectory_input)
+{
+  auto trajectory = trajectory_input;
+  auto velocity = trajectory.getDerivative();
+  auto acceleration = velocity.getDerivative();
+  return {trajectory.evaluateDeBoorT(0.0),
+          velocity.evaluateDeBoorT(0.0),
+          acceleration.evaluateDeBoorT(0.0)};
+}
+
+}  // namespace
+
+TEST(P4TerminalStopProductionTest,
+     MovingCurvedTrajectorySatisfiesBothBoundariesAtTwoIntervals)
+{
+  for (const double interval_s : {0.2, 0.45})
+  {
+    SCOPED_TRACE(interval_s);
+    auto original = makeMovingCurvedP4Trajectory(interval_s);
+    Eigen::MatrixXd perturbed_points = original.getControlPoint();
+    perturbed_points.col(0) += Eigen::Vector3d(0.08, -0.04, 0.02);
+    auto stopped = ego_planner::UniformBspline(
+        perturbed_points, 3, interval_s);
+    const double original_duration = original.getTimeSum();
+    const Eigen::Vector3d approved_endpoint =
+        original.evaluateDeBoorT(original_duration);
+
+    const auto result = ego_planner::imposeP4TerminalStop(
+        &stopped, terminalStartState(original), 20.0, 100.0, 0.0);
+
+    ASSERT_TRUE(result.success) << result.reason;
+    expectSameStartState(original, &stopped);
+    const double duration = stopped.getTimeSum();
+    EXPECT_TRUE(stopped.evaluateDeBoorT(duration).isApprox(
+        approved_endpoint, 1.0e-9));
+    EXPECT_LE(stopped.getDerivative().evaluateDeBoorT(duration).norm(),
+              1.0e-9);
+    EXPECT_LE(stopped.getDerivative().getDerivative()
+                  .evaluateDeBoorT(duration).norm(), 1.0e-8);
+  }
+}
+
+TEST(P4TerminalStopProductionTest,
+     RetimesForInteriorDynamicsButRejectsInfeasibleStartState)
+{
+  auto retimed = makeMovingCurvedP4Trajectory(0.2);
+  const auto retimed_result = ego_planner::imposeP4TerminalStop(
+      &retimed, terminalStartState(retimed), 1.0, 4.0, 0.0);
+  ASSERT_TRUE(retimed_result.success) << retimed_result.reason;
+  EXPECT_TRUE(retimed_result.duration_adjusted);
+  EXPECT_GT(retimed_result.final_duration_s,
+            retimed_result.original_duration_s);
+  double ratio = 1.0;
+  retimed.setPhysicalLimits(1.0, 4.0, 0.0);
+  EXPECT_TRUE(retimed.checkFeasibility(ratio, false));
+
+  auto impossible = makeMovingCurvedP4Trajectory(0.2);
+  const auto impossible_result = ego_planner::imposeP4TerminalStop(
+      &impossible, terminalStartState(impossible), 0.1, 4.0, 0.0);
+  EXPECT_FALSE(impossible_result.success);
+  EXPECT_EQ(impossible_result.reason,
+            "terminal_start_state_not_dynamically_feasible");
+}
+
+TEST(P4TerminalStopProductionTest,
+     FinalCertificateAndPublishedCommandUseExactStoppedSpline)
+{
+  auto stopped = makeMovingCurvedP4Trajectory(0.45);
+  const auto terminal = ego_planner::imposeP4TerminalStop(
+      &stopped, terminalStartState(stopped), 20.0, 100.0, 0.0);
+  ASSERT_TRUE(terminal.success) << terminal.reason;
+
+  ego_planner::LocalTrajData trajectory;
+  trajectory.position_traj_ = stopped;
+  trajectory.velocity_traj_ = stopped.getDerivative();
+  trajectory.acceleration_traj_ = trajectory.velocity_traj_.getDerivative();
+  trajectory.duration_ = stopped.getTimeSum();
+  trajectory.start_time_ = rclcpp::Time(20, 0, RCL_ROS_TIME);
+  trajectory.traj_id_ = 71;
+  const auto command = ego_planner::makeTrajectoryCommand(trajectory);
+
+  EXPECT_EQ(command.traj_id, trajectory.traj_id_);
+  EXPECT_EQ(rclcpp::Time(command.start_time).nanoseconds(),
+            trajectory.start_time_.nanoseconds());
+  const Eigen::MatrixXd control_points = stopped.getControlPoint();
+  const Eigen::VectorXd knots = stopped.getKnot();
+  ASSERT_EQ(command.pos_pts.size(),
+            static_cast<std::size_t>(control_points.cols()));
+  ASSERT_EQ(command.knots.size(), static_cast<std::size_t>(knots.rows()));
+  for (int index = 0; index < control_points.cols(); ++index)
+  {
+    EXPECT_DOUBLE_EQ(command.pos_pts[static_cast<std::size_t>(index)].x,
+                     control_points(0, index));
+    EXPECT_DOUBLE_EQ(command.pos_pts[static_cast<std::size_t>(index)].y,
+                     control_points(1, index));
+    EXPECT_DOUBLE_EQ(command.pos_pts[static_cast<std::size_t>(index)].z,
+                     control_points(2, index));
+  }
+  for (int index = 0; index < knots.rows(); ++index)
+    EXPECT_DOUBLE_EQ(command.knots[static_cast<std::size_t>(index)],
+                     knots(index));
+}
 
 struct GridMapTestAccess {
   static void configureP4SelectionTrigger(GridMap* map) {
@@ -360,14 +501,21 @@ TEST(P4ForwardTerminalLineageTest,
 
   ego_planner::EGOPlannerManager manager;
   manager.setP4VerticalSliceOptimizerForTest(std::move(optimizer), map);
-  manager.setPlanningRiskContextForTest(snapshot, 10.0);
+  // Deliberately make the planning base earlier than the eventual command
+  // start. Final risk checks must use the latter.
+  manager.setPlanningRiskContextForTest(snapshot, 9.75);
+  manager.setLatestRiskSnapshotForTest(snapshot);
   manager.setP4ForwardDecisionForTest(makeForwardDecision(
       snapshot, manager.planningRiskContext().planning_attempt_id));
   ASSERT_EQ(
       manager.lastP4ForwardDecision().snapshot_identity.alert_limit_policy_id,
       snapshot->sourceIdentity().alert_limit_policy_id);
-  manager.local_data_.position_traj_ =
-      ego_planner::UniformBspline(p4StoppedControlPoints(), 3, 0.5);
+  auto stopped = ego_planner::UniformBspline(
+      p4StoppedControlPoints(), 3, 0.5);
+  const auto terminal = ego_planner::imposeP4TerminalStop(
+      &stopped, terminalStartState(stopped), 20.0, 100.0, 0.0);
+  ASSERT_TRUE(terminal.success) << terminal.reason;
+  manager.local_data_.position_traj_ = stopped;
   manager.local_data_.traj_id_ = 29;
   manager.local_data_.start_time_ = rclcpp::Time(10, 0, RCL_ROS_TIME);
 
@@ -386,6 +534,21 @@ TEST(P4ForwardTerminalLineageTest,
   EXPECT_TRUE(manager.recordP4RuntimeLineage(10.3));
   EXPECT_FALSE(manager.recordP4RuntimeLineage(10.4));
 
+  manager.local_data_.duration_ =
+      manager.p4ExecutionCertificate().duration_s;
+  const int64_t committed_start_ns = manager.local_data_.start_time_.nanoseconds();
+  const double execution_time_s = 10.5;
+  const Eigen::Vector3d commanded_position =
+      manager.local_data_.position_traj_.evaluateDeBoorT(
+          execution_time_s - manager.local_data_.start_time_.seconds());
+  const auto continuing = manager.validateCommittedP4TrajectoryExecution(
+      execution_time_s, commanded_position);
+  EXPECT_TRUE(continuing.allowed) << continuing.reason;
+  EXPECT_FALSE(continuing.endpoint_reached);
+  EXPECT_EQ(manager.local_data_.start_time_.nanoseconds(), committed_start_ns);
+  EXPECT_DOUBLE_EQ(manager.p4ExecutionCertificate().execution_deadline_s,
+                   10.0 + manager.p4ExecutionCertificate().duration_s);
+
   const auto rows = readCsvRows(std::filesystem::path(
       debug_path.string() + ".forward_lineage.csv"));
   ASSERT_EQ(rows.size(), 4U);
@@ -403,8 +566,6 @@ TEST(P4ForwardTerminalLineageTest,
   EXPECT_EQ(rows[3].at("control_points_hash"),
             rows[0].at("control_points_hash"));
 
-  manager.local_data_.duration_ =
-      manager.p4ExecutionCertificate().duration_s;
   const auto endpoint_check = manager.validateCommittedP4TrajectoryExecution(
       manager.p4ExecutionCertificate().execution_deadline_s,
       manager.p4ExecutionCertificate().approved_endpoint);
@@ -752,6 +913,31 @@ TEST(PlanningRiskContextTest, StaleContextFailsClosedAgainstItsImmutableSnapshot
   EXPECT_EQ(reason, "ok");
   EXPECT_FALSE(manager.planningRiskContextFresh(20.1, &reason));
   EXPECT_EQ(reason, "stale_planning_risk_context");
+}
+
+TEST(PlanningRiskContextTest,
+     PrePublishRechecksFrozenLocalMapAtCurrentEvaluationTime) {
+  ego_planner::EGOPlannerManager manager;
+  auto snapshot = makeSnapshot(1.0, 10.0);
+  ASSERT_NE(snapshot, nullptr);
+  auto support = std::make_shared<iap::TrustedLocalMapSupport>();
+  support->retained_min_map = Eigen::Vector3d::Constant(-20.0);
+  support->retained_max_map = Eigen::Vector3d::Constant(20.0);
+  support->min_range_m = 0.1;
+  support->max_range_m = 30.0;
+  support->stamp_s = 10.0;
+  support->valid_until_s = 10.5;
+  support->frame_id = "map";
+  auto occupancy = std::make_shared<ego_planner::P0OccupancyEpoch>();
+  occupancy->trusted_local_map_support = std::move(support);
+  manager.setPlanningRiskContextForTest(snapshot, 10.0, occupancy);
+
+  std::string reason;
+  EXPECT_TRUE(manager.preparePlanningRiskPublish(10.4, &reason));
+  EXPECT_EQ(reason, "ok");
+  EXPECT_FALSE(manager.preparePlanningRiskPublish(10.6, &reason));
+  EXPECT_EQ(reason, "stale_planning_local_map_support");
+  EXPECT_FALSE(manager.preparePlanningRiskPublish(10.6));
 }
 
 TEST(P1AcceptedContextValidationTest,

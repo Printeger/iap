@@ -4,6 +4,7 @@
 #include <ego_planner/p1_candidate_selection.h>
 #include <ego_planner/p1_soft_fallback_policy.h>
 #include <ego_planner/p0_risk_grid_runtime.h>
+#include <ego_planner/p4_terminal_stop.h>
 #include <ego_planner/p5_runtime_integrity_gate.h>
 #include <ego_planner/safety_rviz_publisher.h>
 #include <iap/planner/risk_grid_map.hpp>
@@ -57,75 +58,6 @@ namespace ego_planner
       std::ostringstream output;
       output << std::hex << std::setfill('0') << std::setw(16) << hash;
       return output.str();
-    }
-
-    bool imposeP4TerminalStop(
-        UniformBspline *trajectory, const double max_velocity,
-        const double max_acceleration, const double feasibility_tolerance,
-        std::string *reason)
-    {
-      if (!trajectory)
-      {
-        if (reason) *reason = "trajectory_missing";
-        return false;
-      }
-      const Eigen::MatrixXd original_control_points =
-          trajectory->getControlPoint();
-      const double duration = trajectory->getTimeSum();
-      const double interval = trajectory->getInterval();
-      const int interpolation_count = original_control_points.cols() - 2;
-      if (original_control_points.rows() != 3 || interpolation_count < 4 ||
-          !original_control_points.allFinite() || !std::isfinite(duration) ||
-          duration <= 0.0 || !std::isfinite(interval) || interval <= 0.0)
-      {
-        if (reason) *reason = "terminal_parameterization_invalid";
-        return false;
-      }
-      UniformBspline velocity = trajectory->getDerivative();
-      UniformBspline acceleration = velocity.getDerivative();
-      std::vector<Eigen::Vector3d> samples;
-      samples.reserve(static_cast<std::size_t>(interpolation_count));
-      for (int index = 0; index < interpolation_count; ++index)
-      {
-        const double time = duration * static_cast<double>(index) /
-            static_cast<double>(interpolation_count - 1);
-        samples.push_back(trajectory->evaluateDeBoorT(time));
-      }
-      const std::vector<Eigen::Vector3d> derivatives = {
-          velocity.evaluateDeBoorT(0.0), Eigen::Vector3d::Zero(),
-          acceleration.evaluateDeBoorT(0.0), Eigen::Vector3d::Zero()};
-      Eigen::MatrixXd stopped_control_points;
-      UniformBspline::parameterizeToBspline(
-          interval, samples, derivatives, stopped_control_points);
-      if (stopped_control_points.rows() != 3 ||
-          stopped_control_points.cols() != original_control_points.cols() ||
-          !stopped_control_points.allFinite())
-      {
-        if (reason) *reason = "terminal_parameterization_failed";
-        return false;
-      }
-      UniformBspline stopped(stopped_control_points, 3, interval);
-      stopped.setPhysicalLimits(
-          max_velocity, max_acceleration, feasibility_tolerance);
-      double feasibility_ratio = 1.0;
-      if (!stopped.checkFeasibility(feasibility_ratio, false))
-      {
-        if (reason) *reason = "terminal_stop_not_dynamically_feasible";
-        return false;
-      }
-      UniformBspline stopped_velocity = stopped.getDerivative();
-      UniformBspline stopped_acceleration = stopped_velocity.getDerivative();
-      const double stopped_duration = stopped.getTimeSum();
-      if (stopped_velocity.evaluateDeBoorT(stopped_duration).norm() > 1.0e-3 ||
-          stopped_acceleration.evaluateDeBoorT(stopped_duration).norm() >
-              1.0e-2)
-      {
-        if (reason) *reason = "terminal_stop_constraint_not_met";
-        return false;
-      }
-      *trajectory = std::move(stopped);
-      if (reason) *reason = "ok";
-      return true;
     }
 
     std::vector<Eigen::Vector3d> matrixColumnsToPoints(const Eigen::MatrixXd &points)
@@ -1155,6 +1087,13 @@ namespace ego_planner
       if (reason) *reason = "stale_planning_risk_context";
       return false;
     }
+    if (ctx.occupancy_snapshot &&
+        ctx.occupancy_snapshot->trusted_local_map_support &&
+        !ctx.occupancy_snapshot->trusted_local_map_support->freshAt(now_s))
+    {
+      if (reason) *reason = "stale_planning_local_map_support";
+      return false;
+    }
     if (reason) *reason = "ok";
     return true;
   }
@@ -1163,14 +1102,20 @@ namespace ego_planner
       const double now_s, std::string *reason)
   {
     planning_risk_context_.pre_publish_s = now_s;
-    const bool fresh = planningRiskContextFresh(now_s, reason);
-    const bool blocks_publish = !fresh && planning_risk_context_.p1_objective_applied;
-    last_p1_rejection_requires_new_generation_ = blocks_publish && reason &&
-        (*reason == "stale_planning_risk_context" ||
-         *reason == "planning_risk_context_unavailable");
+    std::string local_reason;
+    std::string *effective_reason = reason ? reason : &local_reason;
+    const bool fresh = planningRiskContextFresh(now_s, effective_reason);
+    const bool local_map_invalid =
+        *effective_reason == "stale_planning_local_map_support";
+    const bool blocks_publish = !fresh &&
+        (planning_risk_context_.p1_objective_applied || local_map_invalid);
+    last_p1_rejection_requires_new_generation_ = blocks_publish &&
+        (*effective_reason == "stale_planning_risk_context" ||
+         *effective_reason == "planning_risk_context_unavailable" ||
+         *effective_reason == "stale_planning_local_map_support");
     appendPlanningRiskContextTimeline("pre_publish", now_s,
         fresh ? "fresh" : (blocks_publish ? "rejected" : "base_fallback"),
-        reason ? *reason : "",
+        *effective_reason,
         blocks_publish ? "existing_trajectory" : "p1_soft_fallback");
     return fresh || !blocks_publish;
   }
@@ -1541,8 +1486,10 @@ namespace ego_planner
       const std::string combined_identity =
           request.snapshot_identity.canonical();
       const double risk_stamp_s = request.snapshot_identity.risk_stamp_s;
+      const double evaluation_time_s = planning_risk_context_.planning_start_s;
       request.risk_batch =
           [forward_risk_batch, combined_identity, risk_stamp_s,
+           evaluation_time_s,
            forward_hal, forward_val](
               const std::vector<P4ForwardRiskQuery> &queries,
               const double compute_budget_ms,
@@ -1552,7 +1499,7 @@ namespace ego_planner
               return false;
             iap::ForwardRiskBatchRequest batch;
             batch.combined_snapshot_identity = combined_identity;
-            batch.freshness_reference_time_s = risk_stamp_s;
+            batch.evaluation_time_s = evaluation_time_s;
             batch.hal = forward_hal;
             batch.val = forward_val;
             batch.compute_budget_ms = compute_budget_ms;
@@ -2381,7 +2328,7 @@ namespace ego_planner
               P4GeometryCommitVerdict::COMPUTE_BUDGET_EXCEEDED,
               "commit_risk_recheck_budget_exceeded");
         iap::PredictedPLSample predicted;
-        const double query_time = planning_risk_context_.query_base_time_s +
+        const double query_time = local_data_.start_time_.seconds() +
             executable_times[index];
         const bool predicted_ok = snapshot->queryPredictedPL(
             executable_trajectory[index], query_time, &predicted);
@@ -2762,9 +2709,17 @@ namespace ego_planner
       return out;
     }
 
-    const auto snapshot = acquireRiskGridSnapshot();
+    const auto runtime_planning_snapshot = p0_risk_grid_runtime_
+        ? p0_risk_grid_runtime_->acquirePlanningSnapshot() : nullptr;
+    const auto snapshot = runtime_planning_snapshot
+        ? runtime_planning_snapshot->risk : acquireRiskGridSnapshot();
     if (!snapshot)
       return revoke("runtime_integrity_snapshot_missing");
+    if (runtime_planning_snapshot && runtime_planning_snapshot->occupancy &&
+        runtime_planning_snapshot->occupancy->trusted_local_map_support &&
+        !runtime_planning_snapshot->occupancy->trusted_local_map_support->
+            freshAt(now_s))
+      return revoke("runtime_local_map_support_stale_or_invalid");
     const iap::RiskGridHealth health = snapshot->health();
     out.current_integrity_fresh = health.ready && !health.stale &&
         std::isfinite(snapshot->stamp_s()) &&
@@ -2858,7 +2813,8 @@ namespace ego_planner
 
   void EGOPlannerManager::setPlanningRiskContextForTest(
       std::shared_ptr<const iap::RiskGridSnapshot> snapshot,
-      const double query_base_time_s)
+      const double query_base_time_s,
+      std::shared_ptr<const P0OccupancyEpoch> occupancy_snapshot)
   {
     planning_risk_context_ = PlanningRiskContext{};
     planning_risk_context_.active = true;
@@ -2867,6 +2823,8 @@ namespace ego_planner
     planning_risk_context_.planning_attempt_id = ++p1_planning_attempt_seq_;
     planning_risk_context_.query_base_time_s = query_base_time_s;
     planning_risk_context_.snapshot = std::move(snapshot);
+    planning_risk_context_.occupancy_snapshot =
+        std::move(occupancy_snapshot);
     if (planning_risk_context_.snapshot)
     {
       planning_risk_context_.generation_id =
@@ -4547,20 +4505,28 @@ namespace ego_planner
     // the exact curve that may be published.
     if (p4_runtime_config.enable_risk_aware_astar)
     {
-      std::string terminal_reason;
-      if (!imposeP4TerminalStop(
-              &pos, planning_max_vel, pp_.max_acc_,
-              pp_.feasibility_tolerance_, &terminal_reason))
+      const P4TerminalStopResult terminal = imposeP4TerminalStop(
+          &pos, P4TerminalStartState{start_pt, start_vel, start_acc},
+          planning_max_vel, pp_.max_acc_,
+          pp_.feasibility_tolerance_);
+      if (!terminal.success)
       {
         last_p4_forward_decision_.planning_disposition =
             P4PlanningDisposition::HOLD_REQUIRED;
-        last_p4_forward_decision_.reason = terminal_reason;
+        last_p4_forward_decision_.reason = terminal.reason;
         p4_planning_disposition_ = P4PlanningDisposition::HOLD_REQUIRED;
         RCLCPP_WARN(
             rclcpp::get_logger("ego_planner"),
-            "P4 final trajectory rejected: %s", terminal_reason.c_str());
+            "P4 final trajectory rejected: %s", terminal.reason.c_str());
         continous_failures_count_++;
         return false;
+      }
+      if (terminal.duration_adjusted)
+      {
+        RCLCPP_INFO(
+            rclcpp::get_logger("ego_planner"),
+            "P4 terminal stop retimed final spline from %.3f s to %.3f s",
+            terminal.original_duration_s, terminal.final_duration_s);
       }
     }
 
@@ -4793,7 +4759,7 @@ namespace ego_planner
       update_event.candidate_id = static_cast<int>(selected_p1_candidate_id);
       update_event.update_traj_info = 1;
       update_event.degree = 3;
-      update_event.ts = ts;
+      update_event.ts = pos.getInterval();
       update_event.rows = pos.getControlPoint().rows();
       update_event.cols = pos.getControlPoint().cols();
       update_event.reason = "accepted";
