@@ -2178,6 +2178,7 @@ ARG_DEFAULTS = [
     ("p4.debug_csv_enable", "false"),
     ("p4.require_risk_grid_ready_before_planning", "false"),
     ("p4.debug_csv_path", ""),
+    ("p4.debug_generation_probe_enable", "false"),
     ("p4.profile_trace_enable", "false"),
     ("p4.profile_trace_path", ""),
     ("p4.cost_query_policy", "LEGACY_STRICT"),
@@ -3351,6 +3352,8 @@ def _ego_planner_node(context, drone_id, planner_odom_topic, cloud_topic, camera
             {"p4.fallback_to_original_when_risk_not_ready": _param_bool(context, "p4.fallback_to_original_when_risk_not_ready")},
             {"p4.debug_csv_enable": _param_bool(context, "p4.debug_csv_enable")},
             {"p4.debug_csv_path": p4_debug_path},
+            {"p4.debug_generation_probe_enable": _param_bool(
+                context, "p4.debug_generation_probe_enable")},
             {"p4.profile_trace_enable": p4_profile_trace_enable},
             {"p4.profile_trace_path": p4_profile_trace_path},
             {"p4.cost_query_policy": p4_cost_query_policy},

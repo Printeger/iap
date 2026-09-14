@@ -143,6 +143,10 @@ struct GnssAdvisoryResult {
   double vdop = std::numeric_limits<double>::quiet_NaN();
   double effective_sigma_mean = std::numeric_limits<double>::quiet_NaN();
   double effective_sigma_max = std::numeric_limits<double>::quiet_NaN();
+  double weighted_geometry_condition =
+      std::numeric_limits<double>::quiet_NaN();
+  int worst_excluded_sat_h = -1;
+  int worst_excluded_sat_v = -1;
 
   // The planner GNSS channel is anchored to the current certified monitor.
   // Raw advisory values remain available for spatial-delta diagnostics and
@@ -399,7 +403,10 @@ struct GnssRiskSatelliteDiagnostic {
   double elevation_rad = std::numeric_limits<double>::quiet_NaN();
   double azimuth_rad = std::numeric_limits<double>::quiet_NaN();
   double kappa = std::numeric_limits<double>::quiet_NaN();
+  double epoch_pr_sigma_m = std::numeric_limits<double>::quiet_NaN();
+  double canopy_sigma_m = std::numeric_limits<double>::quiet_NaN();
   double sigma_eff_m = std::numeric_limits<double>::quiet_NaN();
+  std::string sigma_source = "not_evaluated";
   std::string exclusion_reason = "not_evaluated";
 };
 

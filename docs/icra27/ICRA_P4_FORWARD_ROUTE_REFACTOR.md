@@ -386,11 +386,13 @@ forest fork locations.
 New runs write:
 
 - `<p4-debug>.forward_lineage.csv` using
-  `p4_forward_route_decision_v5` (v1-v4 remain read-only compatible);
+  `p4_forward_route_decision_v8` (v1-v7 remain read-only compatible);
 - `<p4-debug>.forward_candidates.csv` with candidate paths and support/risk
   metrics;
 - `<p4-debug>.forward_risk_samples.csv` with independently reproducible local
   satellite evidence and PL calculations for every sampled route point.
+- `<p4-debug>.gnss_risk_detail.csv` with limited first-failure/worst-point
+  per-satellite sigma, geometry and exclusion decomposition.
 
 The terminal lineage is:
 
@@ -431,3 +433,24 @@ render measurements. The ICRA online profile leaves the P0 map topic empty,
 disables fit-to-world-cloud behavior, and feeds EGO/P0/P4/P5 only the first-hit
 sensor cloud and online-derived snapshots. `legacy_radius_crop_v1` remains an
 explicit debug mode for non-ICRA launches.
+
+## Limited-prefix smoke and generation diagnostics
+
+`run_icra_interface_integration.py --stage limited-prefix` is an independent
+development smoke; it is intentionally outside the normal `--through` ladder.
+It binds the P4 lineage certificate to the published B-spline, trajectory-ID
+PositionCommand stream and time-aligned odometry. A pass means either measured
+short-segment execution followed by stationary endpoint hold, or measured
+execution followed by a newer-generation, sample-backed risk revocation.
+Formal `RISK_SELECTED`, publication alone and launch exit zero are reported
+separately and do not pass this smoke.
+
+When explicitly enabled, P4 also writes rate-limited
+`*.execution_events.csv` and `*.generation_probe.csv`. The latter evaluates a
+fixed approved-trajectory lattice across the adjacent map/GNSS 2×2
+cross-product and compares direct ForwardRisk with RiskGrid interpolation.
+Both snapshots must still be fresh at the common evaluation time. This probe
+is diagnostic-only; its result is never consumed by planning or execution
+authority. `analyze_p4_gnss_sensitivity.py` reproduces production geometry PL
+before reporting satellite-set, effective-sigma/canopy, geometry-condition,
+receiver/candidate delta and RiskMap spatial-discrimination summaries.

@@ -19,7 +19,7 @@ namespace ego_planner
 {
 
   inline constexpr char kP4ForwardDecisionSchema[] =
-    "p4_forward_route_decision_v7";
+    "p4_forward_route_decision_v8";
 
   enum class P4ForwardResultStatus
   {
@@ -204,6 +204,10 @@ namespace ego_planner
       std::numeric_limits < double > ::quiet_NaN();
     double gnss_anchor_epoch_delta_s =
       std::numeric_limits < double > ::quiet_NaN();
+    double gnss_weighted_geometry_condition =
+      std::numeric_limits < double > ::quiet_NaN();
+    int gnss_worst_excluded_sat_h = -1;
+    int gnss_worst_excluded_sat_v = -1;
     double gnss_support_ray_length_m =
       std::numeric_limits < double > ::quiet_NaN();
     bool gnss_hard_occlusion = false;

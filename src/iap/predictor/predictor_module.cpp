@@ -902,9 +902,21 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
       diagnostic.kappa = sat_index < evidence.kappas.size()
           ? evidence.kappas[sat_index]
           : std::numeric_limits<double>::quiet_NaN();
+      diagnostic.epoch_pr_sigma_m = sat.pr_sigma;
+      diagnostic.canopy_sigma_m =
+          std::isfinite(diagnostic.kappa)
+          ? sigma_eff_canopy(params_.gnss.visibility_params.canopy,
+                             diagnostic.kappa, sat.elevation)
+          : std::numeric_limits<double>::quiet_NaN();
       diagnostic.sigma_eff_m = sat_index < evidence.sigma_effs.size()
           ? evidence.sigma_effs[sat_index]
           : std::numeric_limits<double>::quiet_NaN();
+      if (std::isfinite(diagnostic.sigma_eff_m)) {
+        diagnostic.sigma_source =
+            std::isfinite(diagnostic.epoch_pr_sigma_m) &&
+            diagnostic.epoch_pr_sigma_m >= diagnostic.canopy_sigma_m
+            ? "epoch" : "canopy";
+      }
       if (sat.excluded) {
         diagnostic.exclusion_reason = "integrity_epoch_excluded";
         result.gnss_satellites.push_back(std::move(diagnostic));

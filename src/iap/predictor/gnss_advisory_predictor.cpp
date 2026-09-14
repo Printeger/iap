@@ -442,6 +442,9 @@ GnssAdvisoryResult GnssAdvisoryPredictor::query_unanchored(
   out.sigma_h = std::sqrt(std::max(
       0.0, pl.sigma_ff_E * pl.sigma_ff_E + pl.sigma_ff_N * pl.sigma_ff_N));
   out.sigma_v = pl.sigma_ff_U;
+  out.weighted_geometry_condition = pl.weighted_normal_condition;
+  out.worst_excluded_sat_h = pl.worst_hyp_h;
+  out.worst_excluded_sat_v = pl.worst_hyp_v;
   if (pl.S0(0, 0) > 0.0 && pl.S0(1, 1) > 0.0 && pl.S0(2, 2) > 0.0) {
     out.pdop = std::sqrt(pl.S0(0, 0) + pl.S0(1, 1) + pl.S0(2, 2));
     out.hdop = std::sqrt(pl.S0(0, 0) + pl.S0(1, 1));

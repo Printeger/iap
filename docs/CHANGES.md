@@ -3,6 +3,25 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(p4-limited-prefix-smoke-gnss-root-cause): IAP-RQ-312 / IAP-RQ-320 /
+  IAP-RQ-400 / IAP-RQ-410 — add an independent `limited-prefix` development
+  smoke whose success requires identity-bound B-spline/PositionCommand,
+  measured odometry displacement and either sustained stationary endpoint
+  hold or a newer-generation PL/AL-backed revocation. Formal route selection,
+  publication alone and launch success are separate outcomes. P4 now emits
+  rate-limited execution events with certificate/current map-risk generations,
+  first violating position/time/PL/AL and endpoint/tracking state. Add a
+  default-off, diagnostic-only adjacent-generation map×GNSS four-cell probe;
+  it compares direct ForwardRisk with RiskGrid interpolation only while both
+  snapshots are current, and never affects authority. GNSS v8 detail evidence
+  adds epoch/canopy/effective sigma source, weighted geometry condition and
+  worst single-satellite exclusions. The new sensitivity analyzer first
+  reproduces production raw PL, then reports satellite-set, canopy/noise,
+  unit-sigma geometry, receiver/candidate delta, route span and generation
+  classifications. No PL/AL, risk weight, P5, conservative-floor or truth-map
+  behavior changed because the frozen evidence did not prove a model/unit or
+  coordinate defect.
+
 - fix(p4-safe-prefix-p0-envelope-gnss-audit): IAP-RQ-312 / IAP-RQ-320 /
   IAP-RQ-400 / IAP-RQ-410 — when every complete forward route exceeds AL,
   independently evaluate the continuous geometry-common corridor, stop at

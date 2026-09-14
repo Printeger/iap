@@ -44,6 +44,10 @@ struct P0PlanningSnapshot {
   bool gnss_hard_occlusion = false;
   std::function<iap::ForwardRiskBatchResult(
       const iap::ForwardRiskBatchRequest&)> forward_risk_batch;
+  // Diagnostic-only map/epoch cross-product query. Unlike the production
+  // callback above, this honors input.snapshot. It must never authorize motion.
+  std::function<iap::ForwardRiskBatchResult(
+      const iap::ForwardRiskBatchRequest&)> diagnostic_forward_risk_batch;
 };
 
 class P0RiskGridRuntime {

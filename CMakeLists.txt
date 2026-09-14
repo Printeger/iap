@@ -795,6 +795,10 @@ if(DEFINED ENV{ROS_VERSION})
         NAME test_icra_interface_integration
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_icra_interface_integration.py
       )
+      add_test(
+        NAME test_analyze_p4_gnss_sensitivity
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_analyze_p4_gnss_sensitivity.py
+      )
     endif()
     ament_export_include_directories(include ${EIGEN3_INCLUDE_DIR} ${OpenCV_INCLUDE_DIRS})
     ament_export_libraries(${iap_LIBRARIES} ${GTSAM_LIBRARIES} fmt spdlog::spdlog)

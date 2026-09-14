@@ -99,6 +99,7 @@ def generate_launch_description():
     p4_fallback_to_original_when_risk_not_ready = LaunchConfiguration('p4_fallback_to_original_when_risk_not_ready', default=True)
     p4_debug_csv_enable = LaunchConfiguration('p4_debug_csv_enable', default=False)
     p4_debug_csv_path = LaunchConfiguration('p4_debug_csv_path', default='')
+    p4_debug_generation_probe_enable = LaunchConfiguration('p4_debug_generation_probe_enable', default=False)
     integrity_field_stale_timeout_s = LaunchConfiguration('integrity_field_stale_timeout_s', default=0.5)
     integrity_nearest_radius_m = LaunchConfiguration('integrity_nearest_radius_m', default=1.0)
     integrity_cost_max = LaunchConfiguration('integrity_cost_max', default=1000.0)
@@ -274,6 +275,7 @@ def generate_launch_description():
     p4_fallback_to_original_when_risk_not_ready_arg = DeclareLaunchArgument('p4_fallback_to_original_when_risk_not_ready', default_value=p4_fallback_to_original_when_risk_not_ready, description='Fallback to original A* when P4 risk snapshot is unavailable')
     p4_debug_csv_enable_arg = DeclareLaunchArgument('p4_debug_csv_enable', default_value=p4_debug_csv_enable, description='Enable P4 debug CSV output')
     p4_debug_csv_path_arg = DeclareLaunchArgument('p4_debug_csv_path', default_value=p4_debug_csv_path, description='P4 debug CSV path')
+    p4_debug_generation_probe_enable_arg = DeclareLaunchArgument('p4_debug_generation_probe_enable', default_value=p4_debug_generation_probe_enable, description='Enable diagnostic-only P4 map/GNSS generation cross probe')
     integrity_field_stale_timeout_s_arg = DeclareLaunchArgument('integrity_field_stale_timeout_s', default_value=integrity_field_stale_timeout_s, description='Planner integrity field stale timeout in seconds')
     integrity_nearest_radius_m_arg = DeclareLaunchArgument('integrity_nearest_radius_m', default_value=integrity_nearest_radius_m, description='Planner integrity nearest sample search radius')
     integrity_cost_max_arg = DeclareLaunchArgument('integrity_cost_max', default_value=integrity_cost_max, description='Planner integrity sample cost clamp')
@@ -550,6 +552,7 @@ def generate_launch_description():
             {'p4.fallback_to_original_when_risk_not_ready': p4_fallback_to_original_when_risk_not_ready},
             {'p4.debug_csv_enable': p4_debug_csv_enable},
             {'p4.debug_csv_path': p4_debug_csv_path},
+            {'p4.debug_generation_probe_enable': p4_debug_generation_probe_enable},
             {'risk_overlay/enable': risk_overlay_enable},
             {'risk_overlay/use_for_astar': risk_overlay_use_for_astar},
             {'risk_overlay/use_for_bspline': risk_overlay_use_for_bspline},
@@ -718,6 +721,7 @@ def generate_launch_description():
     ld.add_action(p4_fallback_to_original_when_risk_not_ready_arg)
     ld.add_action(p4_debug_csv_enable_arg)
     ld.add_action(p4_debug_csv_path_arg)
+    ld.add_action(p4_debug_generation_probe_enable_arg)
     ld.add_action(integrity_field_stale_timeout_s_arg)
     ld.add_action(integrity_nearest_radius_m_arg)
     ld.add_action(integrity_cost_max_arg)

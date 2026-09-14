@@ -171,6 +171,21 @@ TEST(P4TerminalStopProductionTest,
   }
 }
 
+TEST(P4GenerationProbeTest, ClassifiesIndependentAndMixedChanges)
+{
+  using ego_planner::P4GenerationChangeClass;
+  EXPECT_EQ(ego_planner::classifyP4GenerationProbe(4, 4, 4, 4, 4, 4),
+            P4GenerationChangeClass::STABLE);
+  EXPECT_EQ(ego_planner::classifyP4GenerationProbe(4, 7, 4, 7, 4, 7),
+            P4GenerationChangeClass::MAP_CONTENT_OR_SUPPORT);
+  EXPECT_EQ(ego_planner::classifyP4GenerationProbe(4, 4, 2, 2, 4, 2),
+            P4GenerationChangeClass::GNSS_EPOCH_OR_SATELLITE_SET);
+  EXPECT_EQ(ego_planner::classifyP4GenerationProbe(4, 4, 4, 4, 3, 5),
+            P4GenerationChangeClass::RISK_GRID_INTERPOLATION);
+  EXPECT_EQ(ego_planner::classifyP4GenerationProbe(4, 7, 2, 6, 4, 6),
+            P4GenerationChangeClass::MIXED);
+}
+
 TEST(P4TerminalStopProductionTest,
      RetimesForInteriorDynamicsButRejectsInfeasibleStartState)
 {
@@ -306,6 +321,26 @@ class P4CorridorProvider final : public iap::RiskPredictionProvider {
   }
 };
 
+class RuntimeAheadUnsafeProvider final : public iap::RiskPredictionProvider {
+ public:
+  bool batchQuery(const std::vector<iap::RiskPredictionQuery>& queries,
+                  std::vector<iap::RiskPredictionResult>* results) override {
+    if (!results) return false;
+    results->clear();
+    for (const auto& query : queries) {
+      iap::RiskPredictionResult result;
+      result.available = true;
+      result.valid = true;
+      result.stale = false;
+      result.hpl_pred = query.position_w.x() > 0.5 ? 50.0 : 1.0;
+      result.vpl_pred = result.hpl_pred;
+      result.reason = "ok";
+      results->push_back(result);
+    }
+    return true;
+  }
+};
+
 std::shared_ptr<const iap::RiskGridSnapshot> makeP4SelectionSnapshot() {
   iap::RiskGridMapParams params;
   params.frame_id = "map";
@@ -321,6 +356,26 @@ std::shared_ptr<const iap::RiskGridSnapshot> makeP4SelectionSnapshot() {
   std::string reason;
   EXPECT_TRUE(grid.refreshFromProvider(
       Eigen::Vector3d::Zero(), 10.0, provider, &reason)) << reason;
+  return grid.acquireSnapshot();
+}
+
+std::shared_ptr<const iap::RiskGridSnapshot> makeRuntimeUnsafeSnapshot() {
+  iap::RiskGridMapParams map_params;
+  map_params.frame_id = "map";
+  map_params.resolution_m = 0.5;
+  map_params.size_x_m = 24.0;
+  map_params.size_y_m = 12.0;
+  map_params.size_z_m = 4.0;
+  map_params.horizons_s = {0.0, 5.0, 10.0};
+  map_params.stale_timeout_s = 100.0;
+  map_params.skip_occupied_voxels = false;
+  iap::RiskGridMap grid(map_params);
+  RuntimeAheadUnsafeProvider provider;
+  std::string reason;
+  EXPECT_TRUE(grid.refreshFromProvider(
+      Eigen::Vector3d::Zero(), 10.2, provider, &reason)) << reason;
+  EXPECT_TRUE(grid.refreshFromProvider(
+      Eigen::Vector3d::Zero(), 10.3, provider, &reason)) << reason;
   return grid.acquireSnapshot();
 }
 
@@ -520,6 +575,8 @@ TEST(P4ForwardTerminalLineageTest,
       debug_path.string() + ".forward_lineage.csv"));
   std::filesystem::remove(std::filesystem::path(
       debug_path.string() + ".forward_candidates.csv"));
+  std::filesystem::remove(std::filesystem::path(
+      debug_path.string() + ".execution_events.csv"));
   auto optimizer = makeP4Optimizer(map, snapshot, debug_path.string(), 1);
 
   ego_planner::EGOPlannerManager manager;
@@ -609,6 +666,27 @@ TEST(P4ForwardTerminalLineageTest,
   EXPECT_EQ(tracking_failure.reason,
             "committed_trajectory_tracking_error_exceeded");
   EXPECT_TRUE(manager.p4ExecutionRevoked());
+
+  const auto execution_rows = readCsvRows(std::filesystem::path(
+      debug_path.string() + ".execution_events.csv"));
+  ASSERT_GE(execution_rows.size(), 4U);
+  EXPECT_EQ(execution_rows.front().at("event"), "AUTHORIZED");
+  EXPECT_EQ(execution_rows.front().at("trajectory_id"), "29");
+  EXPECT_FALSE(execution_rows.front().at("control_points_hash").empty());
+  EXPECT_EQ(execution_rows.front().at("certificate_risk_generation"),
+            std::to_string(snapshot->generation_id()));
+  EXPECT_TRUE(std::any_of(
+      execution_rows.begin(), execution_rows.end(), [](const auto &row) {
+        return row.at("event") == "ENDPOINT_HOLD" &&
+            row.at("endpoint_reached") == "1" &&
+            row.at("reason") == "approved_endpoint_reached";
+      }));
+  EXPECT_TRUE(std::any_of(
+      execution_rows.begin(), execution_rows.end(), [](const auto &row) {
+        return row.at("event") == "EXECUTION_REVOKED" &&
+            row.at("reason") ==
+                "committed_trajectory_tracking_error_exceeded";
+      }));
 }
 
 TEST(P4ForwardTerminalLineageTest,
@@ -713,6 +791,8 @@ TEST(P4ForwardTerminalLineageTest,
       debug_path.string() + ".forward_lineage.csv"));
   std::filesystem::remove(std::filesystem::path(
       debug_path.string() + ".gnss_risk_detail.csv"));
+  std::filesystem::remove(std::filesystem::path(
+      debug_path.string() + ".execution_events.csv"));
   auto optimizer = makeP4Optimizer(map, snapshot, debug_path.string(), 1);
 
   ego_planner::EGOPlannerManager manager;
@@ -748,6 +828,9 @@ TEST(P4ForwardTerminalLineageTest,
   failed_record.risk.gnss_raw_hpl = 12.0;
   failed_record.risk.gnss_receiver_raw_hpl = 4.0;
   failed_record.risk.gnss_spatial_delta_h = 8.0;
+  failed_record.risk.gnss_weighted_geometry_condition = 123.0;
+  failed_record.risk.gnss_worst_excluded_sat_h = 17;
+  failed_record.risk.gnss_worst_excluded_sat_v = 19;
   failed_record.risk.fused_pre_conservative_hpl = 6.0;
   failed_record.risk.gnss_floor_increment_h = 6.0;
   failed_record.risk.hpl = 12.0;
@@ -763,7 +846,10 @@ TEST(P4ForwardTerminalLineageTest,
   satellite.elevation_rad = 0.4;
   satellite.azimuth_rad = 0.0;
   satellite.kappa = 2.0;
+  satellite.epoch_pr_sigma_m = 2.0;
+  satellite.canopy_sigma_m = 6.0;
   satellite.sigma_eff_m = 6.0;
+  satellite.sigma_source = "canopy";
   satellite.exclusion_reason = "used";
   failed_record.risk.gnss_satellites = {satellite};
   decision.candidates.front().risk_samples = {failed_record};
@@ -805,6 +891,22 @@ TEST(P4ForwardTerminalLineageTest,
   EXPECT_TRUE(continuing.allowed) << continuing.reason;
   EXPECT_FALSE(continuing.endpoint_reached);
   EXPECT_EQ(manager.local_data_.start_time_.nanoseconds(), committed_start);
+  const auto unsafe_snapshot = makeRuntimeUnsafeSnapshot();
+  ASSERT_GT(unsafe_snapshot->generation_id(), certificate.snapshot_identity.risk_generation);
+  manager.setLatestRiskSnapshotForTest(unsafe_snapshot);
+  const auto risk_revoke = manager.validateCommittedP4TrajectoryExecution(
+      during_execution_s, commanded_position);
+  EXPECT_FALSE(risk_revoke.allowed);
+  EXPECT_TRUE(risk_revoke.known_future_risk_unsafe);
+  EXPECT_EQ(risk_revoke.reason, "runtime_known_future_integrity_unsafe");
+  EXPECT_EQ(risk_revoke.current_risk_generation,
+            unsafe_snapshot->generation_id());
+  EXPECT_GT(risk_revoke.current_risk_generation,
+            risk_revoke.certificate_risk_generation);
+  EXPECT_TRUE(risk_revoke.violation_position.allFinite());
+  EXPECT_TRUE(std::isfinite(risk_revoke.violation_query_time_s));
+  EXPECT_GE(risk_revoke.violation_hpl_m, risk_revoke.alert_limit_h_m);
+  manager.setLatestRiskSnapshotForTest(snapshot);
   const auto at_endpoint = manager.validateCommittedP4TrajectoryExecution(
       certificate.execution_deadline_s, certificate.approved_endpoint);
   EXPECT_TRUE(at_endpoint.allowed) << at_endpoint.reason;
@@ -822,6 +924,20 @@ TEST(P4ForwardTerminalLineageTest,
   EXPECT_EQ(detail_rows[0].at("exclusion_reason"), "used");
   EXPECT_EQ(detail_rows[0].at("candidate_raw_hpl"), "12");
   EXPECT_EQ(detail_rows[0].at("spatial_delta_h"), "8");
+  EXPECT_EQ(detail_rows[0].at("epoch_pr_sigma_m"), "2");
+  EXPECT_EQ(detail_rows[0].at("canopy_sigma_m"), "6");
+  EXPECT_EQ(detail_rows[0].at("sigma_source"), "canopy");
+  EXPECT_EQ(detail_rows[0].at("weighted_geometry_condition"), "123");
+  EXPECT_EQ(detail_rows[0].at("worst_excluded_sat_h"), "17");
+  const auto execution_rows = readCsvRows(std::filesystem::path(
+      debug_path.string() + ".execution_events.csv"));
+  EXPECT_TRUE(std::any_of(
+      execution_rows.begin(), execution_rows.end(), [](const auto &row) {
+        return row.at("event") == "RISK_REVOKED" &&
+            row.at("current_risk_generation") == "2" &&
+            std::stod(row.at("violation_hpl_m")) >=
+                std::stod(row.at("alert_limit_h_m"));
+      }));
 }
 
 TEST(P4ForwardTerminalLineageTest,

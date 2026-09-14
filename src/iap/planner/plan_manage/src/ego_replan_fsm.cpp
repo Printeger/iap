@@ -1060,8 +1060,9 @@ namespace ego_planner
             plannerNow().seconds(), odom_pos_);
     if (p4_execution_check.applicable && !p4_execution_check.allowed)
     {
-      RCLCPP_WARN(
+      RCLCPP_WARN_THROTTLE(
           node_->get_logger(),
+          *node_->get_clock(), 1000,
           "P4 execution permission revoked: reason=%s identity=%d "
           "remaining_s=%.3f tracking_error=%.3f integrity_fresh=%d "
           "integrity_safe=%d risk_complete=%d known_future_unsafe=%d",

@@ -1898,6 +1898,17 @@ void P0RiskGridRuntime::refreshTimerCallback() {
               request.val = val;
               return forward_risk_module->queryForwardRiskBatch(request);
             };
+        planning->diagnostic_forward_risk_batch =
+            [forward_risk_module, forward_risk_occupancy_owner,
+             hal = config_.predictor_hal_m,
+             val = config_.predictor_val_m](
+                const iap::ForwardRiskBatchRequest& input) {
+              (void)forward_risk_occupancy_owner;
+              iap::ForwardRiskBatchRequest request = input;
+              request.hal = hal;
+              request.val = val;
+              return forward_risk_module->queryForwardRiskBatch(request);
+            };
       }
       std::lock_guard<std::mutex> lock(planning_snapshot_mutex_);
       planning_snapshot_ = std::move(planning);

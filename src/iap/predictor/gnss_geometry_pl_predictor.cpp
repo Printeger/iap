@@ -80,6 +80,14 @@ GnssGeometryPlResult GnssGeometryPlPredictor::predict(
 
   out.S0 = ldlt0.solve(Eigen::Matrix4d::Identity());
   out.valid = true;
+  Eigen::SelfAdjointEigenSolver<Eigen::Matrix4d> eigensolver(A0);
+  if (eigensolver.info() == Eigen::Success) {
+    const double smallest = eigensolver.eigenvalues().minCoeff();
+    const double largest = eigensolver.eigenvalues().maxCoeff();
+    if (smallest > 0.0 && std::isfinite(largest)) {
+      out.weighted_normal_condition = largest / smallest;
+    }
+  }
 
   // Position std from full covariance
   out.sigma_ff_E = std::sqrt(std::max(0.0, out.S0(0, 0)));
@@ -119,6 +127,9 @@ GnssGeometryPlResult GnssGeometryPlPredictor::predict(
   double best_PL_E = K_ff_eff * out.sigma_ff_E;
   double best_PL_N = K_ff_eff * out.sigma_ff_N;
   double best_PL_U = K_ff_eff * out.sigma_ff_U;
+  int worst_hyp_e = -1;
+  int worst_hyp_n = -1;
+  int worst_hyp_u = -1;
 
   for (int k = 0; k < N; ++k) {
     Eigen::Matrix4d Ak = A0 - row_outer[k];
@@ -127,6 +138,9 @@ GnssGeometryPlResult GnssGeometryPlPredictor::predict(
       best_PL_E = std::max(best_PL_E, 1e9);
       best_PL_N = std::max(best_PL_N, 1e9);
       best_PL_U = std::max(best_PL_U, 1e9);
+      worst_hyp_e = visible_sats[k].sat_id;
+      worst_hyp_n = visible_sats[k].sat_id;
+      worst_hyp_u = visible_sats[k].sat_id;
       continue;
     }
 
@@ -142,9 +156,18 @@ GnssGeometryPlResult GnssGeometryPlPredictor::predict(
     const double pl_n = K_fa_eff * sigma_ss_N + K_md_eff * sigma_k_N;
     const double pl_u = K_fa_eff * sigma_ss_U + K_md_eff * sigma_k_U;
 
-    best_PL_E = std::max(best_PL_E, pl_e);
-    best_PL_N = std::max(best_PL_N, pl_n);
-    best_PL_U = std::max(best_PL_U, pl_u);
+    if (pl_e > best_PL_E) {
+      best_PL_E = pl_e;
+      worst_hyp_e = visible_sats[k].sat_id;
+    }
+    if (pl_n > best_PL_N) {
+      best_PL_N = pl_n;
+      worst_hyp_n = visible_sats[k].sat_id;
+    }
+    if (pl_u > best_PL_U) {
+      best_PL_U = pl_u;
+      worst_hyp_u = visible_sats[k].sat_id;
+    }
   }
 
   out.PL_E = std::max(K_ff_eff * out.sigma_ff_E, best_PL_E);
@@ -153,7 +176,9 @@ GnssGeometryPlResult GnssGeometryPlPredictor::predict(
   out.HPL  = std::max(out.PL_E, out.PL_N);
   out.VPL  = out.PL_U;
   out.n_hypotheses = N;
-  out.worst_hyp   = -1;
+  out.worst_hyp_h = out.PL_E >= out.PL_N ? worst_hyp_e : worst_hyp_n;
+  out.worst_hyp_v = worst_hyp_u;
+  out.worst_hyp = out.worst_hyp_h;
 
   spdlog::trace("[GnssGeometryPlPredictor] N={} HPL={:.3f} VPL={:.3f}",
                 N, out.HPL, out.VPL);

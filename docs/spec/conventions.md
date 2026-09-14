@@ -107,6 +107,15 @@
 - Reaching the approved endpoint is a normal hold state, distinct from safety
   revocation. Runtime collision and GNSS sky-risk kernels are checked
   independently; this remains required when P5 is disabled.
+- Development smoke acceptance keeps limited authority distinct from formal
+  route selection. `LIMITED_PREFIX_EXECUTED_TO_ENDPOINT` requires the same
+  trajectory id/start/control-point certificate across publication and
+  commands, non-trivial odometry displacement, no approved-endpoint overrun,
+  and a sustained zero-velocity/zero-acceleration command plus stationary
+  odometry at that endpoint. `LIMITED_PREFIX_EXECUTED_THEN_RISK_REVOKED`
+  instead requires a newer risk generation, a concrete runtime PL/AL
+  violation and cessation of the old trajectory. `FORMAL_ROUTE_SELECTED`
+  never satisfies the limited-prefix smoke by itself.
 - Runtime current-Integrity authority comes from the fresh certified monitor
   sample in the latest coherent P0 transaction and its own HAL/VAL. The raw
   map advisory evaluated at the receiver is diagnostic/predictive and must not
@@ -114,3 +123,11 @@
   use their actual positions and arrival times for predicted risk. The
   configurable tracking-error limit must be finite, positive, and at most 5 m
   (production default: 0.75 m).
+- `p4.debug_generation_probe_enable` is diagnostic-only and defaults false.
+  For two adjacent snapshots that are both fresh at one evaluation time, it
+  holds approved-trajectory positions and arrival times fixed and evaluates
+  old-map/old-epoch, new-map/old-epoch, old-map/new-epoch and
+  new-map/new-epoch. Direct ForwardRisk is also compared with each generation's
+  RiskGrid interpolation. Probe results may classify map/support, GNSS epoch /
+  satellite-set, interpolation or mixed changes, but never grant or revoke
+  motion and never bypass map or GNSS freshness.

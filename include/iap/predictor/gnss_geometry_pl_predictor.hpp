@@ -3,6 +3,7 @@
 // This class does NOT include current ARAIM solver headers.
 
 #include <Eigen/Core>
+#include <limits>
 #include <vector>
 
 namespace iap {
@@ -44,6 +45,10 @@ struct GnssGeometryPlResult {
   double K_fa_used   = 0.0;
   int    n_hypotheses = 0;
   int    worst_hyp   = -1;
+  int    worst_hyp_h = -1;
+  int    worst_hyp_v = -1;
+  double weighted_normal_condition =
+      std::numeric_limits<double>::quiet_NaN();
   Eigen::Matrix4d S0 = Eigen::Matrix4d::Identity();
 };
 

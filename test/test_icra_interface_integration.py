@@ -118,6 +118,13 @@ def lineage_for(decision, trajectory_id, start_ns):
 
 
 class TestStageContracts(unittest.TestCase):
+    def test_limited_prefix_is_independent_not_part_of_through_ladder(self):
+        self.assertIn("limited-prefix", MODULE.STAGE_CHOICES)
+        self.assertNotIn("limited-prefix", MODULE.STAGE_ORDER)
+        args = MODULE.stage_launch_args(
+            "limited-prefix", MODULE.FOREST_SCENARIO)
+        self.assertEqual(args["p4.debug_generation_probe_enable"], "true")
+
     def test_process_group_resource_stats_reports_peak_and_cpu_cores(self):
         stats = MODULE.process_group_resource_stats([
             {"elapsed_s": 0.0, "process_count": 2,
@@ -1462,6 +1469,222 @@ class TestStageAnalyzer(unittest.TestCase):
         self.assertEqual(summary["result"], "FAIL")
         self.assertIn("p4_risk_selected_missing", summary["failures"])
         self.assertIn("stable_bspline_missing", summary["failures"])
+
+    @staticmethod
+    def limited_prefix_fixture():
+        start_ns = 12_000_000_000
+        spline_payload = {
+            "trajectory_id": 31, "start_time_ns": start_ns,
+            "control_points_xyz": [[0.0, 0.0, 1.0],
+                                   [0.5, 0.0, 1.0],
+                                   [1.0, 0.0, 1.0]],
+            "knots": [-1.0, 0.0, 1.0, 2.0, 3.0],
+        }
+        control_hash, knot_hash = MODULE._captured_bspline_hashes(
+            spline_payload)
+        lineage = [{
+            "schema_version": "p4_forward_route_decision_v8",
+            "stage": "normal_publish_authorized",
+            "action": "DEFER_RISK_SELECTION",
+            "deferred_motion_mode": "COMMON_PREFIX",
+            "reason": "safe_limited_common_prefix",
+            "trajectory_id": "31",
+            "trajectory_start_ns": str(start_ns),
+            "control_points_hash": control_hash,
+            "knot_vector_hash": knot_hash,
+            "approved_endpoint_x": "1.0",
+            "approved_endpoint_y": "0.0",
+            "approved_endpoint_z": "1.0",
+            "trajectory_duration_s": "2.0",
+            "risk_generation": "8",
+            "occupancy_generation": "18",
+        }]
+        bsplines = [{
+            "receive_steady_s": 12.0,
+            "payload": spline_payload,
+        }]
+        poscmd = []
+        odom = []
+        for index in range(31):
+            alpha = min(1.0, index / 20.0)
+            stamp = 12.0 + index * 0.1
+            poscmd.append({
+                "receive_steady_s": stamp,
+                "payload": {
+                    "trajectory_id": 31,
+                    "stamp_s": stamp,
+                    "position_xyz": [alpha, 0.0, 1.0],
+                    "velocity_xyz": ([0.5, 0.0, 0.0] if alpha < 1.0
+                                     else [0.0, 0.0, 0.0]),
+                    "acceleration_xyz": [0.0, 0.0, 0.0],
+                },
+            })
+            odom.append({
+                "receive_steady_s": stamp,
+                "payload": {
+                    "stamp_s": stamp,
+                    "position_m": [alpha, 0.0, 1.0],
+                    "velocity_mps": ([0.5, 0.0, 0.0] if alpha < 1.0
+                                     else [0.0, 0.0, 0.0]),
+                },
+            })
+        events = [{
+            "schema_version": "p4_execution_event_v1",
+            "event": "AUTHORIZED",
+            "authority": "LIMITED_PREFIX",
+            "trajectory_id": "31",
+            "trajectory_start_ns": str(start_ns),
+            "control_points_hash": control_hash,
+            "knot_vector_hash": knot_hash,
+            "certificate_risk_generation": "8",
+            "current_risk_generation": "8",
+            "allowed": "1",
+            "reason": "normal_publish_authorized",
+            "stamp_s": "12.0",
+        }, {
+            "schema_version": "p4_execution_event_v1",
+            "event": "ENDPOINT_HOLD",
+            "authority": "LIMITED_PREFIX",
+            "trajectory_id": "31",
+            "trajectory_start_ns": str(start_ns),
+            "control_points_hash": control_hash,
+            "knot_vector_hash": knot_hash,
+            "certificate_risk_generation": "8",
+            "current_risk_generation": "10",
+            "allowed": "1",
+            "endpoint_reached": "1",
+            "reason": "approved_endpoint_reached",
+            "stamp_s": "14.2",
+        }]
+        return lineage, bsplines, poscmd, odom, events
+
+    def test_limited_prefix_accepts_real_motion_and_endpoint_hold(self):
+        args = self.limited_prefix_fixture()
+        summary = MODULE.analyze_limited_prefix_records(*args)
+        self.assertEqual(summary["result"], "PASS")
+        self.assertEqual(
+            summary["limited_prefix_outcome"],
+            "LIMITED_PREFIX_EXECUTED_TO_ENDPOINT")
+
+    def test_limited_prefix_accepts_evidenced_new_generation_revoke(self):
+        lineage, bsplines, poscmd, odom, events = \
+            self.limited_prefix_fixture()
+        events[-1].update({
+            "event": "RISK_REVOKED", "allowed": "0",
+            "endpoint_reached": "0",
+            "reason": "runtime_known_future_integrity_unsafe",
+            "certificate_risk_generation": "8",
+            "current_risk_generation": "9",
+            "violation_hpl_m": "21.0", "violation_vpl_m": "35.0",
+            "alert_limit_h_m": "20.0", "alert_limit_v_m": "40.0",
+            "violation_query_time_s": "14.5",
+        })
+        # The old trajectory stops being commanded immediately after revoke.
+        poscmd[:] = [row for row in poscmd
+                     if row["receive_steady_s"] <= 14.2]
+        summary = MODULE.analyze_limited_prefix_records(
+            lineage, bsplines, poscmd, odom, events)
+        self.assertEqual(summary["result"], "PASS")
+        self.assertEqual(
+            summary["limited_prefix_outcome"],
+            "LIMITED_PREFIX_EXECUTED_THEN_RISK_REVOKED")
+
+    def test_limited_prefix_accepts_any_bound_execution_not_only_latest(self):
+        lineage, bsplines, poscmd, odom, events = \
+            self.limited_prefix_fixture()
+        events[-1].update({
+            "event": "RISK_REVOKED", "allowed": "0",
+            "endpoint_reached": "0",
+            "reason": "runtime_known_future_integrity_unsafe",
+            "certificate_risk_generation": "8",
+            "current_risk_generation": "9",
+            "violation_hpl_m": "21.0", "violation_vpl_m": "35.0",
+            "alert_limit_h_m": "20.0", "alert_limit_v_m": "40.0",
+            "violation_query_time_s": "14.5",
+        })
+        poscmd[:] = [row for row in poscmd
+                     if row["receive_steady_s"] <= 14.2]
+        later = dict(lineage[0])
+        later.update({
+            "trajectory_id": "32", "trajectory_start_ns": "15000000000",
+            "control_points_hash": "cp32",
+        })
+        lineage.append(later)
+        summary = MODULE.analyze_limited_prefix_records(
+            lineage, bsplines, poscmd, odom, events)
+        self.assertEqual(summary["result"], "PASS")
+        self.assertEqual(summary["limited_publish_count"], 2)
+        self.assertEqual(summary["trajectory_identity"], [31, 12000000000])
+        self.assertEqual(len(summary["limited_attempts"]), 2)
+
+    def test_limited_prefix_rejects_identity_mismatch_and_command_only(self):
+        lineage, bsplines, poscmd, _odom, events = \
+            self.limited_prefix_fixture()
+        bsplines[0]["payload"]["trajectory_id"] = 99
+        summary = MODULE.analyze_limited_prefix_records(
+            lineage, bsplines, poscmd, [], events)
+        self.assertEqual(summary["result"], "FAIL")
+        self.assertIn("limited_prefix_bspline_identity_missing",
+                      summary["failures"])
+        self.assertIn("limited_prefix_actual_motion_missing",
+                      summary["failures"])
+
+    def test_limited_prefix_does_not_accept_formal_route(self):
+        lineage, bsplines, poscmd, odom, events = \
+            self.limited_prefix_fixture()
+        lineage[0].update({
+            "action": "RISK_SELECTED", "deferred_motion_mode": "NONE",
+            "selection_applied": "1", "reason": "risk_selected",
+        })
+        events[0]["authority"] = "FORMAL_RISK_SELECTED"
+        summary = MODULE.analyze_limited_prefix_records(
+            lineage, bsplines, poscmd, odom, events)
+        self.assertEqual(summary["result"], "FAIL")
+        self.assertEqual(summary["limited_prefix_outcome"],
+                         "FORMAL_ROUTE_SELECTED")
+        self.assertIn("limited_prefix_not_exercised", summary["failures"])
+
+    def test_limited_prefix_rejects_unauthenticated_revoke(self):
+        lineage, bsplines, poscmd, odom, events = \
+            self.limited_prefix_fixture()
+        events[-1].update({
+            "event": "RISK_REVOKED", "allowed": "0",
+            "endpoint_reached": "0",
+            "reason": "runtime_known_future_integrity_unsafe",
+            "certificate_risk_generation": "8",
+            "current_risk_generation": "8",
+            "violation_hpl_m": "19", "violation_vpl_m": "39",
+            "alert_limit_h_m": "20", "alert_limit_v_m": "40",
+            "violation_query_time_s": "14.5",
+        })
+        poscmd[:] = [row for row in poscmd
+                     if row["receive_steady_s"] <= 14.2]
+        summary = MODULE.analyze_limited_prefix_records(
+            lineage, bsplines, poscmd, odom, events)
+        self.assertEqual(summary["result"], "FAIL")
+        self.assertFalse(summary["legal_risk_revoke_proven"])
+
+    def test_limited_prefix_rejects_short_endpoint_observation_window(self):
+        lineage, bsplines, poscmd, odom, events = \
+            self.limited_prefix_fixture()
+        poscmd[:] = [row for row in poscmd
+                     if row["receive_steady_s"] <= 14.4]
+        odom[:] = [row for row in odom
+                   if row["receive_steady_s"] <= 14.4]
+        summary = MODULE.analyze_limited_prefix_records(
+            lineage, bsplines, poscmd, odom, events)
+        self.assertEqual(summary["result"], "FAIL")
+        self.assertFalse(summary["endpoint_hold_proven"])
+
+    def test_limited_prefix_rejects_approved_endpoint_overrun(self):
+        lineage, bsplines, poscmd, odom, events = \
+            self.limited_prefix_fixture()
+        odom[-1]["payload"]["position_m"] = [1.25, 0.0, 1.0]
+        summary = MODULE.analyze_limited_prefix_records(
+            lineage, bsplines, poscmd, odom, events)
+        self.assertEqual(summary["result"], "FAIL")
+        self.assertIn("limited_prefix_approved_endpoint_overrun",
+                      summary["failures"])
 
     def test_full_rejects_mixed_p5_identity_and_unsafe_runtime(self):
         decision = selected_decision()

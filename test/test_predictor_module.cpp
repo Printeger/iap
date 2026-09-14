@@ -1520,6 +1520,9 @@ TEST(PredictorModuleTest, GnssGeometryDegradationSweepIncreasesPl) {
       EXPECT_TRUE(std::isfinite(result.hpl)) << test_case.id;
       EXPECT_TRUE(std::isfinite(result.vpl)) << test_case.id;
       EXPECT_TRUE(result.lambda_gnss.allFinite()) << test_case.id;
+      EXPECT_TRUE(std::isfinite(result.weighted_geometry_condition))
+          << test_case.id;
+      EXPECT_GE(result.weighted_geometry_condition, 1.0) << test_case.id;
     } else {
       EXPECT_FALSE(result.valid) << test_case.id;
       EXPECT_EQ(result.fallback_reason, "too_few_sats") << test_case.id;

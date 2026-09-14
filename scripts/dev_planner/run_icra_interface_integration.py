@@ -32,6 +32,7 @@ DEFAULT_RESULTS_ROOT = (
 ).resolve()
 DEFAULT_INSTALL_ROOT = (REPOSITORY.parents[1] / "install").resolve()
 STAGE_ORDER = ("estimator", "p0", "p4", "p5-final", "full", "shutdown")
+STAGE_CHOICES = (*STAGE_ORDER, "limited-prefix")
 DEFAULT_SCENARIO = "icra072_p4_selection_trigger_v1"
 FOREST_V1_SCENARIO = "icra_dense_forest_four_fork_v1"
 FOREST_SCENARIO = "icra_dense_forest_four_fork_v2"
@@ -43,11 +44,13 @@ P4_FORWARD_DECISION_SCHEMAS = {
     "p4_forward_route_decision_v5",
     "p4_forward_route_decision_v6",
     "p4_forward_route_decision_v7",
+    "p4_forward_route_decision_v8",
 }
 P4_FORMAL_RISK_SAMPLE_SCHEMAS = {
     "p4_forward_route_decision_v5",
     "p4_forward_route_decision_v6",
     "p4_forward_route_decision_v7",
+    "p4_forward_route_decision_v8",
 }
 FOREST_SCENARIOS = (FOREST_V1_SCENARIO, FOREST_SCENARIO)
 SEVEN_STAGE_ORDER = (
@@ -110,6 +113,17 @@ STAGES = {
         planner_enable_p5_final="false",
         planner_enable_p5_runtime="false",
         **{"safety_viz.enable_p4_viz": "true"},
+    ),
+    "limited-prefix": StageSpec(
+        90.0,
+        start_planner="true",
+        planner_enable_p4="true",
+        planner_enable_p5_final="false",
+        planner_enable_p5_runtime="false",
+        **{
+            "safety_viz.enable_p4_viz": "true",
+            "p4.debug_generation_probe_enable": "true",
+        },
     ),
     "p5-final": StageSpec(
         60.0,
@@ -1072,6 +1086,7 @@ def _selected_decisions(decisions: list[dict]) -> list[dict]:
                  "p4_forward_route_decision_v5",
                  "p4_forward_route_decision_v6",
                  "p4_forward_route_decision_v7",
+                 "p4_forward_route_decision_v8",
                  }
                  or (row.get("selection_authority") == "FORMAL"
                      and str(row.get("formal_support")) == "1"))
@@ -1080,6 +1095,7 @@ def _selected_decisions(decisions: list[dict]) -> list[dict]:
                      "p4_forward_route_decision_v5",
                      "p4_forward_route_decision_v6",
                      "p4_forward_route_decision_v7",
+                     "p4_forward_route_decision_v8",
                  }
                  or row.get("geometry_commit_verdict") in {
                      "CLEAR_UNCHANGED", "CLEAR_AFTER_UPDATE",
@@ -1090,8 +1106,9 @@ def _selected_decisions(decisions: list[dict]) -> list[dict]:
             and row.get("alert_limit_policy_id")
             and int(row.get("occupancy_generation", 0) or 0) > 0
             and int(row.get("risk_generation", 0) or 0) > 0
-            and (row.get("schema_version") !=
-                 "p4_forward_route_decision_v7"
+            and (row.get("schema_version") not in {
+                 "p4_forward_route_decision_v7",
+                 "p4_forward_route_decision_v8"}
                  or (row.get("frame_contract_id")
                      and row.get("local_map_support_identity")
                      and int(row.get("gnss_epoch_identity", 0) or 0) > 0
@@ -1248,6 +1265,284 @@ def _runtime_identity(payload: dict) -> tuple[int, int] | None:
     return identity if identity[0] > 0 and identity[1] > 0 else None
 
 
+def _xyz_vector(payload: dict, key: str) -> tuple[float, float, float] | None:
+    try:
+        values = tuple(float(value) for value in payload[key])
+    except (KeyError, TypeError, ValueError):
+        return None
+    return values if len(values) == 3 and all(map(math.isfinite, values)) \
+        else None
+
+
+def _distance(a: tuple[float, float, float],
+              b: tuple[float, float, float]) -> float:
+    return math.sqrt(sum((left - right) ** 2
+                         for left, right in zip(a, b)))
+
+
+def _cpp_hexfloat(value: float) -> str:
+    mantissa, exponent = float(value).hex().split("p")
+    return mantissa.rstrip("0").rstrip(".") + "p" + exponent
+
+
+def _fnv1a64(text: str) -> str:
+    value = 1469598103934665603
+    for byte in text.encode():
+        value = ((value ^ byte) * 1099511628211) & ((1 << 64) - 1)
+    return f"{value:016x}"
+
+
+def _captured_bspline_hashes(payload: dict) -> tuple[str, str] | None:
+    try:
+        points = [[float(value) for value in point]
+                  for point in payload["control_points_xyz"]]
+        knots = [float(value) for value in payload["knots"]]
+    except (KeyError, TypeError, ValueError):
+        return None
+    if (not points or any(len(point) != 3 for point in points) or
+            not knots or not all(math.isfinite(value)
+                                 for point in points for value in point) or
+            not all(map(math.isfinite, knots))):
+        return None
+    point_canonical = f"3;{len(points)};" + "".join(
+        _cpp_hexfloat(value) + ";" for point in points for value in point)
+    knot_canonical = f"{len(knots)};" + "".join(
+        _cpp_hexfloat(value) + ";" for value in knots)
+    return _fnv1a64(point_canonical), _fnv1a64(knot_canonical)
+
+
+def analyze_limited_prefix_records(
+        lineage: list[dict], bsplines: list[dict], poscmd: list[dict],
+        odometry: list[dict], execution_events: list[dict]) -> dict:
+    """Classify real LIMITED_PREFIX execution without weakening P4 gates."""
+    failures: list[str] = []
+    formal = [row for row in lineage
+              if row.get("stage") == "normal_publish_authorized"
+              and row.get("action") == "RISK_SELECTED"
+              and str(row.get("selection_applied", "0")) == "1"]
+    limited = [row for row in lineage
+               if row.get("stage") == "normal_publish_authorized"
+               and row.get("action") in {
+                   "DEFER_RISK_SELECTION", "OBSERVE_ONLY"}
+               and row.get("deferred_motion_mode") == "COMMON_PREFIX"
+               and row.get("reason") == "safe_limited_common_prefix"]
+    if not limited:
+        outcome = "FORMAL_ROUTE_SELECTED" if formal else "HOLD_NO_EXECUTION"
+        return _result(
+            ["limited_prefix_not_exercised"],
+            stage="limited-prefix", limited_prefix_outcome=outcome,
+            formal_route_selected_count=len(formal), limited_publish_count=0)
+
+    if len(limited) > 1:
+        attempts = [analyze_limited_prefix_records(
+            formal + [candidate], bsplines, poscmd, odometry,
+            execution_events) for candidate in limited]
+        successful = [attempt for attempt in attempts
+                      if attempt["result"] == "PASS"]
+        selected = successful[-1] if successful else attempts[-1]
+        selected = dict(selected)
+        selected["limited_publish_count"] = len(limited)
+        selected["limited_attempts"] = [{
+            "trajectory_identity": attempt.get("trajectory_identity"),
+            "outcome": attempt.get("limited_prefix_outcome"),
+            "result": attempt["result"],
+            "actual_displacement_m": attempt.get("actual_displacement_m"),
+            "failures": attempt["failures"],
+        } for attempt in attempts]
+        return selected
+
+    # Evaluate one certificate. A repeated latched publication with the same
+    # identity is one execution, not several successes.
+    row = limited[-1]
+    try:
+        identity = (int(row["trajectory_id"]),
+                    int(row["trajectory_start_ns"]))
+        approved_endpoint = tuple(float(row[f"approved_endpoint_{axis}"])
+                                  for axis in "xyz")
+        duration_s = float(row["trajectory_duration_s"])
+        expected_hash = str(row["control_points_hash"])
+        expected_knot_hash = str(row["knot_vector_hash"])
+    except (KeyError, TypeError, ValueError):
+        return _result(
+            ["limited_prefix_certificate_identity_invalid"],
+            stage="limited-prefix",
+            limited_prefix_outcome="HOLD_NO_EXECUTION",
+            formal_route_selected_count=len(formal),
+            limited_publish_count=len(limited))
+    if (identity[0] <= 0 or identity[1] <= 0 or
+            not all(map(math.isfinite, approved_endpoint)) or
+            not math.isfinite(duration_s) or duration_s <= 0.0 or
+            not expected_hash or not expected_knot_hash):
+        failures.append("limited_prefix_certificate_identity_invalid")
+
+    matching_events = []
+    for event in execution_events:
+        try:
+            event_identity = (int(event.get("trajectory_id", 0) or 0),
+                              int(event.get("trajectory_start_ns", 0) or 0))
+        except (TypeError, ValueError):
+            continue
+        if (event_identity == identity and
+                str(event.get("control_points_hash", "")) == expected_hash and
+                str(event.get("knot_vector_hash", "")) ==
+                expected_knot_hash and
+                event.get("authority") == "LIMITED_PREFIX"):
+            matching_events.append(event)
+    endpoint_events = [event for event in matching_events
+                       if event.get("event") == "ENDPOINT_HOLD"
+                       and str(event.get("allowed", "0")) == "1"
+                       and str(event.get("endpoint_reached", "0")) == "1"
+                       and event.get("reason") == "approved_endpoint_reached"]
+    revoke_events = [event for event in matching_events
+                     if event.get("event") == "RISK_REVOKED"
+                     and str(event.get("allowed", "1")) == "0"
+                     and event.get("reason") ==
+                     "runtime_known_future_integrity_unsafe"]
+
+    matching_splines = []
+    for candidate in bsplines:
+        payload = candidate.get("payload", candidate)
+        hashes = _captured_bspline_hashes(payload)
+        if (_message_identity(candidate) == identity and hashes ==
+                (expected_hash, expected_knot_hash)):
+            matching_splines.append(candidate)
+    if not matching_splines:
+        failures.append("limited_prefix_bspline_identity_missing")
+
+    start_s = identity[1] * 1.0e-9
+    end_s = start_s + duration_s
+    revoke_stamps = []
+    for event in revoke_events:
+        try:
+            revoke_stamp = float(event["stamp_s"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if math.isfinite(revoke_stamp):
+            revoke_stamps.append(revoke_stamp)
+    observation_end_s = min(
+        [end_s + 3.0] + [stamp + 0.5 for stamp in revoke_stamps])
+    commands = []
+    for command in poscmd:
+        payload = command.get("payload", command)
+        try:
+            trajectory_id = int(payload.get("trajectory_id", 0) or 0)
+            stamp_s = float(payload.get(
+                "stamp_s", command.get("receive_steady_s", math.nan)))
+        except (TypeError, ValueError):
+            continue
+        if trajectory_id == identity[0] and stamp_s >= start_s - 0.2:
+            commands.append((stamp_s, payload))
+    if not commands:
+        failures.append("limited_prefix_position_command_identity_missing")
+
+    odom_samples = []
+    for sample in odometry:
+        payload = sample.get("payload", sample)
+        try:
+            stamp_s = float(payload.get(
+                "stamp_s", sample.get("receive_steady_s", math.nan)))
+        except (TypeError, ValueError):
+            continue
+        position = _xyz_vector(payload, "position_m")
+        velocity = _xyz_vector(payload, "velocity_mps")
+        if (position is not None and velocity is not None and
+                start_s - 0.2 <= stamp_s <= observation_end_s):
+            odom_samples.append((stamp_s, position, velocity))
+    actual_displacement = max(
+        (_distance(odom_samples[0][1], sample[1])
+         for sample in odom_samples[1:]), default=0.0)
+    if actual_displacement < 0.05:
+        failures.append("limited_prefix_actual_motion_missing")
+
+    initial_position = odom_samples[0][1] if odom_samples else None
+    approved_distance = (_distance(initial_position, approved_endpoint)
+                         if initial_position is not None else math.nan)
+    endpoint_overrun_m = 0.0
+    if initial_position is not None and approved_distance > 1.0e-6:
+        direction = tuple((approved_endpoint[index] - initial_position[index])
+                          / approved_distance for index in range(3))
+        endpoint_overrun_m = max((
+            sum((position[index] - initial_position[index]) * direction[index]
+                for index in range(3)) - approved_distance
+            for _, position, _ in odom_samples), default=0.0)
+        if endpoint_overrun_m > 0.10:
+            failures.append("limited_prefix_approved_endpoint_overrun")
+
+    endpoint_hold_ok = False
+    if endpoint_events and commands and odom_samples:
+        endpoint_cmd = []
+        for stamp_s, payload in commands:
+            position = _xyz_vector(payload, "position_xyz")
+            velocity = _xyz_vector(payload, "velocity_xyz")
+            acceleration = _xyz_vector(payload, "acceleration_xyz")
+            if (stamp_s >= end_s and position is not None and
+                    velocity is not None and acceleration is not None and
+                    _distance(position, approved_endpoint) <= 0.02 and
+                    math.sqrt(sum(value * value for value in velocity)) <= .02
+                    and math.sqrt(sum(value * value for value in acceleration))
+                    <= .05):
+                endpoint_cmd.append(stamp_s)
+        endpoint_odom = [stamp_s for stamp_s, position, velocity in odom_samples
+                         if stamp_s >= end_s
+                         and _distance(position, approved_endpoint) <= .15
+                         and math.sqrt(sum(value * value for value in velocity))
+                         <= .10]
+        endpoint_hold_ok = (
+            endpoint_cmd and endpoint_odom and
+            max(endpoint_cmd) - min(endpoint_cmd) >= 0.8 and
+            max(endpoint_odom) - min(endpoint_odom) >= 0.8)
+
+    legal_revoke = False
+    legal_revoke_displacement = 0.0
+    for event in revoke_events:
+        try:
+            certificate_generation = int(
+                event["certificate_risk_generation"])
+            current_generation = int(event["current_risk_generation"])
+            hpl = float(event["violation_hpl_m"])
+            vpl = float(event["violation_vpl_m"])
+            hal = float(event["alert_limit_h_m"])
+            val = float(event["alert_limit_v_m"])
+            revoke_stamp = float(event["stamp_s"])
+            query_stamp = float(event["violation_query_time_s"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        old_commands_after_grace = [
+            stamp for stamp, _ in commands if stamp > revoke_stamp + 0.5]
+        before_revoke = [sample for sample in odom_samples
+                         if sample[0] <= revoke_stamp + 1.0e-6]
+        legal_revoke_displacement = max((
+            _distance(before_revoke[0][1], sample[1])
+            for sample in before_revoke[1:]), default=0.0)
+        legal_revoke = (
+            current_generation > certificate_generation and
+            all(map(math.isfinite, (hpl, vpl, hal, val, query_stamp))) and
+            query_stamp >= revoke_stamp and (hpl >= hal or vpl >= val) and
+            legal_revoke_displacement >= 0.05 and
+            not old_commands_after_grace)
+        if legal_revoke:
+            break
+
+    if endpoint_hold_ok:
+        outcome = "LIMITED_PREFIX_EXECUTED_TO_ENDPOINT"
+    elif legal_revoke:
+        outcome = "LIMITED_PREFIX_EXECUTED_THEN_RISK_REVOKED"
+    else:
+        outcome = "HOLD_NO_EXECUTION"
+        failures.append("limited_prefix_terminal_outcome_unproven")
+    return _result(
+        failures, stage="limited-prefix", limited_prefix_outcome=outcome,
+        formal_route_selected_count=len(formal),
+        limited_publish_count=len(limited), trajectory_identity=list(identity),
+        actual_displacement_m=actual_displacement,
+        approved_distance_m=approved_distance,
+        endpoint_overrun_m=max(0.0, endpoint_overrun_m),
+        endpoint_hold_proven=endpoint_hold_ok,
+        legal_risk_revoke_proven=legal_revoke,
+        displacement_before_revoke_m=legal_revoke_displacement,
+        execution_event_count=len(matching_events))
+
+
 def analyze_stage_records(
         stage: str, health: list[dict], decisions: list[dict],
         lineage: list[dict], bsplines: list[dict], p5_status: list[dict],
@@ -1264,6 +1559,7 @@ def analyze_stage_records(
             "p4_forward_route_decision_v5",
             "p4_forward_route_decision_v6",
             "p4_forward_route_decision_v7",
+            "p4_forward_route_decision_v8",
         }
         and row.get("stage") == "forward_decision"
     ]
@@ -1299,6 +1595,7 @@ def analyze_stage_records(
             "p4_forward_route_decision_v5",
             "p4_forward_route_decision_v6",
             "p4_forward_route_decision_v7",
+            "p4_forward_route_decision_v8",
         }
     ]
     commit_latencies = []
@@ -1674,7 +1971,8 @@ def analyze_forward_risk_samples(
             continue
         if decision.get("schema_version") in {
                 "p4_forward_route_decision_v6",
-                "p4_forward_route_decision_v7"}:
+                "p4_forward_route_decision_v7",
+                "p4_forward_route_decision_v8"}:
             if decision.get("result_status") != "READY":
                 failures.append("p4_forward_result_not_ready")
                 continue
@@ -1703,7 +2001,8 @@ def analyze_forward_risk_samples(
             failures.append("p4_formal_selected_candidate_not_safe_complete")
         elif decision.get("schema_version") in {
                 "p4_forward_route_decision_v6",
-                "p4_forward_route_decision_v7"}:
+                "p4_forward_route_decision_v7",
+                "p4_forward_route_decision_v8"}:
             formal_rows = [
                 row
                 for candidate_rows in eligible_candidates.values()
@@ -1875,6 +2174,9 @@ def analyze_run(
     gnss_risk_detail = _read_csv(
         run_root /
         "exports/planner_p4_risk_astar_debug.csv.gnss_risk_detail.csv")
+    execution_events = _read_csv(
+        run_root /
+        "exports/planner_p4_risk_astar_debug.csv.execution_events.csv")
     if forward_lineage:
         decisions = forward_lineage
         lineage = forward_lineage
@@ -1882,6 +2184,21 @@ def analyze_run(
         return analyze_estimator(_estimator_metrics(run_root, records))
     if stage == "p0":
         return analyze_p0(health, stage_start)
+    if stage == "limited-prefix":
+        p0 = analyze_p0(health, stage_start)
+        limited = analyze_limited_prefix_records(
+            lineage, bsplines,
+            [row for row in records if row.get("kind") == "poscmd"],
+            [row for row in records if row.get("kind") == "iap_odom"],
+            execution_events)
+        return _result(
+            [*p0["failures"], *limited["failures"]],
+            **{key: value for key, value in limited.items()
+               if key not in ("result", "failures")},
+            p0=p0,
+            generation_probe_rows=len(_read_csv(
+                run_root / "exports/planner_p4_risk_astar_debug.csv."
+                "generation_probe.csv")))
     if stage in ("p4", "p5-final", "full"):
         if _is_forest_scenario(scenario) and forest_variant == "baseline":
             p0 = analyze_p0(health, stage_start)
@@ -2300,6 +2617,11 @@ def _capture_main(args: argparse.Namespace) -> int:
                         float(message.pose.pose.position.y),
                         float(message.pose.pose.position.z),
                     ],
+                    "velocity_mps": [
+                        float(message.twist.twist.linear.x),
+                        float(message.twist.twist.linear.y),
+                        float(message.twist.twist.linear.z),
+                    ],
                 }), qos_profile_sensor_data)
             self.create_subscription(
                 IntegrityReport, "/iap/integrity",
@@ -2387,14 +2709,28 @@ def _capture_main(args: argparse.Namespace) -> int:
                     for point in message.pos_pts
                 ],
                 "knot_count": len(message.knots),
+                "knots": [float(knot) for knot in message.knots],
             })
 
         def poscmd(self, message: PositionCommand) -> None:
             self.record("poscmd", {
+                "trajectory_id": int(message.trajectory_id),
+                "stamp_s": float(message.header.stamp.sec)
+                + 1.0e-9 * float(message.header.stamp.nanosec),
                 "position_xyz": [
                     float(message.position.x), float(message.position.y),
                     float(message.position.z),
                 ],
+                "velocity_xyz": [
+                    float(message.velocity.x), float(message.velocity.y),
+                    float(message.velocity.z),
+                ],
+                "acceleration_xyz": [
+                    float(message.acceleration.x),
+                    float(message.acceleration.y),
+                    float(message.acceleration.z),
+                ],
+                "trajectory_flag": int(message.trajectory_flag),
             })
 
         def local_map_delta(self, message: ActiveLidarWindowDelta) -> None:
@@ -3244,7 +3580,7 @@ def _run_main(args: argparse.Namespace) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser()
     mode = parser.add_mutually_exclusive_group()
-    mode.add_argument("--stage", choices=STAGE_ORDER, default="full")
+    mode.add_argument("--stage", choices=STAGE_CHOICES, default="full")
     mode.add_argument("--through", choices=STAGE_ORDER)
     parser.add_argument("--repetitions", type=int, default=3)
     parser.add_argument("--results-root", type=Path,

@@ -26,6 +26,8 @@
 
 namespace ego_planner
 {
+  struct P0PlanningSnapshot;
+
   inline bool validP4TrackingErrorLimit(const double limit_m)
   {
     return std::isfinite(limit_m) && limit_m > 0.0 && limit_m <= 5.0;
@@ -38,6 +40,25 @@ namespace ego_planner
     LIMITED_PREFIX,
     ADVISORY,
   };
+
+  enum class P4GenerationChangeClass
+  {
+    STABLE = 0,
+    MAP_CONTENT_OR_SUPPORT,
+    GNSS_EPOCH_OR_SATELLITE_SET,
+    RISK_GRID_INTERPOLATION,
+    MIXED,
+  };
+
+  P4GenerationChangeClass classifyP4GenerationProbe(
+      int old_map_old_epoch_first_unsafe,
+      int new_map_old_epoch_first_unsafe,
+      int old_map_new_epoch_first_unsafe,
+      int new_map_new_epoch_first_unsafe,
+      int old_grid_first_unsafe,
+      int new_grid_first_unsafe);
+
+  const char *p4GenerationChangeClassName(P4GenerationChangeClass value);
 
   struct P4ExecutionCertificate
   {
@@ -75,6 +96,18 @@ namespace ego_planner
         std::numeric_limits<double>::quiet_NaN();
     double time_to_risk_violation_s =
         std::numeric_limits<double>::infinity();
+    uint64_t certificate_risk_generation = 0;
+    uint64_t certificate_occupancy_generation = 0;
+    uint64_t current_risk_generation = 0;
+    uint64_t current_occupancy_generation = 0;
+    Eigen::Vector3d violation_position = Eigen::Vector3d::Constant(
+        std::numeric_limits<double>::quiet_NaN());
+    double violation_query_time_s =
+        std::numeric_limits<double>::quiet_NaN();
+    double violation_hpl_m = std::numeric_limits<double>::quiet_NaN();
+    double violation_vpl_m = std::numeric_limits<double>::quiet_NaN();
+    double alert_limit_h_m = std::numeric_limits<double>::quiet_NaN();
+    double alert_limit_v_m = std::numeric_limits<double>::quiet_NaN();
     std::string reason = "no_committed_trajectory";
   };
 
@@ -324,6 +357,11 @@ namespace ego_planner
     bool p4_execution_revoked_ = false;
     double p4_max_tracking_error_m_ = 0.75;
     int64_t last_p4_runtime_lineage_start_ns_ = 0;
+    std::string last_p4_execution_event_key_;
+    bool p4_generation_probe_enable_ = false;
+    uint64_t last_p4_generation_probe_risk_generation_ = 0;
+    std::shared_ptr<const P0PlanningSnapshot>
+        p4_generation_probe_previous_snapshot_;
     Eigen::Vector3d p4_last_decision_position_ = Eigen::Vector3d::Constant(
         std::numeric_limits<double>::quiet_NaN());
     Eigen::Vector3d p4_last_decision_target_ = Eigen::Vector3d::Constant(
@@ -340,6 +378,12 @@ namespace ego_planner
     bool appendP4ForwardDecision(const P4ForwardDecision &decision,
                                  const std::string &stage,
                                  double stamp_s);
+    bool appendP4ExecutionEvent(
+        const std::string &event, double stamp_s,
+        const P4ExecutionCheckDiagnostics &diagnostics);
+    bool appendP4GenerationProbe(
+        double evaluation_time_s,
+        const std::shared_ptr<const P0PlanningSnapshot> &current);
     bool recordP4NativeAStarNoPath(double stamp_s);
 
     void appendPlanningRiskContextTimeline(const std::string &stage,

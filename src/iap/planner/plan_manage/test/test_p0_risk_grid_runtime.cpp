@@ -4455,10 +4455,30 @@ TEST_F(P0RiskGridRuntimeStampTest,
   EXPECT_EQ(planning_snapshot->occupancy->generation, 2u);
   EXPECT_DOUBLE_EQ(planning_snapshot->occupancy->cloud_stamp_s, 100.0);
   EXPECT_TRUE(static_cast<bool>(planning_snapshot->forward_risk_batch));
+  EXPECT_TRUE(static_cast<bool>(
+      planning_snapshot->diagnostic_forward_risk_batch));
   EXPECT_TRUE(planning_snapshot->integrity_anchor.current.valid);
   EXPECT_DOUBLE_EQ(planning_snapshot->integrity_anchor.current.stamp, 100.0);
   EXPECT_DOUBLE_EQ(planning_snapshot->gnss_support_ray_length_m, 5.0);
   EXPECT_FALSE(planning_snapshot->gnss_hard_occlusion);
+
+  iap::ForwardRiskBatchRequest cross_epoch_request;
+  cross_epoch_request.combined_snapshot_identity = "diagnostic_cross_epoch";
+  cross_epoch_request.evaluation_time_s = 100.0;
+  cross_epoch_request.compute_budget_ms = 1000.0;
+  cross_epoch_request.points.push_back(iap::ForwardRiskQueryPoint{
+      Eigen::Vector3d::Zero(), 100.0, 0.0, 1u});
+  // Production is bound to the captured epoch even if the caller supplies an
+  // empty one. The diagnostic callback must honor the caller-supplied epoch,
+  // which is what makes the map×epoch cross-product meaningful.
+  const auto production_result =
+      planning_snapshot->forward_risk_batch(cross_epoch_request);
+  const auto diagnostic_result =
+      planning_snapshot->diagnostic_forward_risk_batch(cross_epoch_request);
+  EXPECT_EQ(production_result.points.size(), 1u);
+  EXPECT_EQ(diagnostic_result.points.size(), 1u);
+  EXPECT_NE(production_result.points.front().failure_reason,
+            diagnostic_result.points.front().failure_reason);
 
   live_generation->store(9u);
   const auto still_frozen = runtime.acquirePlanningSnapshot();
