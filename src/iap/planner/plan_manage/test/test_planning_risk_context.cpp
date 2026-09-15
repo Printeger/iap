@@ -888,6 +888,73 @@ TEST(P4ForwardTerminalLineageTest,
 }
 
 TEST(P4ForwardTerminalLineageTest,
+     FailedReplanRestoresCommittedCurveAndExecutionCertificate) {
+  ensureRclcpp();
+  const auto snapshot = makeP4SelectionSnapshot();
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureNoCollision(map.get());
+  const auto debug_path = p4LineageTestPath(
+      "forward_failed_replan_restores_incumbent.csv");
+  auto optimizer = makeP4Optimizer(map, snapshot, debug_path.string(), 1);
+
+  auto manager = std::make_unique<ego_planner::EGOPlannerManager>();
+  manager->setP4VerticalSliceOptimizerForTest(std::move(optimizer), map);
+  manager->setPlanningRiskContextForTest(
+      snapshot, 10.0, nullptr, directRiskCallback(0.5));
+  manager->setLatestRiskSnapshotForTest(snapshot);
+  manager->setP4ForwardDecisionForTest(makeForwardDecision(
+      snapshot, manager->planningRiskContext().planning_attempt_id));
+  auto stopped = ego_planner::UniformBspline(
+      p4StoppedControlPoints(), 3, 0.5);
+  const auto terminal = ego_planner::imposeP4TerminalStop(
+      &stopped, terminalStartState(stopped), 20.0, 100.0, 0.0);
+  ASSERT_TRUE(terminal.success) << terminal.reason;
+  manager->local_data_.position_traj_ = stopped;
+  manager->local_data_.traj_id_ = 61;
+  manager->local_data_.start_time_ = rclcpp::Time(10, 0, RCL_ROS_TIME);
+  manager->local_data_.duration_ = stopped.getTimeSum();
+  ASSERT_TRUE(manager->recordP4VerticalSliceLineage(
+      "final_bspline_before_p5", 10.0));
+  ASSERT_TRUE(manager->recordP4VerticalSliceLineage(
+      "normal_publish_authorized", 10.0));
+  const auto incumbent_certificate = manager->p4ExecutionCertificate();
+  const auto incumbent_control_points =
+      manager->local_data_.position_traj_.getControlPoint();
+
+  auto node = std::make_shared<rclcpp::Node>(
+      "failed_replan_restores_incumbent_test");
+  auto publisher = node->create_publisher<traj_utils::msg::Bspline>(
+      "/test/failed_replan_restores_incumbent",
+      ego_planner::trajectoryCommandQos());
+  auto *manager_ptr = manager.get();
+  ego_planner::EGOReplanFSM fsm;
+  fsm.setP4TerminalFlowForTest(
+      std::move(manager), node, publisher, snapshot,
+      rclcpp::Time(10, 0, RCL_ROS_TIME), [manager_ptr]() {
+        manager_ptr->local_data_.position_traj_ = ego_planner::UniformBspline(
+            p4RefinedControlPoints(), 3, 0.5);
+        manager_ptr->local_data_.traj_id_ = 999;
+        manager_ptr->local_data_.start_time_ =
+            rclcpp::Time(11, 0, RCL_ROS_TIME);
+        return false;
+      });
+
+  EXPECT_FALSE(fsm.callReboundReplanForTest());
+  EXPECT_EQ(manager_ptr->local_data_.traj_id_,
+            incumbent_certificate.trajectory_id);
+  EXPECT_EQ(manager_ptr->local_data_.start_time_.nanoseconds(),
+            incumbent_certificate.start_time_ns);
+  EXPECT_TRUE(
+      manager_ptr->local_data_.position_traj_.getControlPoint().isApprox(
+          incumbent_control_points, 0.0));
+  EXPECT_TRUE(manager_ptr->p4ExecutionCertificate().valid);
+  EXPECT_EQ(manager_ptr->p4ExecutionCertificate().trajectory_id,
+            incumbent_certificate.trajectory_id);
+  EXPECT_EQ(manager_ptr->p4ExecutionCertificate().start_time_ns,
+            incumbent_certificate.start_time_ns);
+}
+
+TEST(P4ForwardTerminalLineageTest,
      RejectsMismatchedAttemptAndMissingSelectedGuide) {
   const auto snapshot = makeP4SelectionSnapshot();
   auto map = std::make_shared<GridMap>();

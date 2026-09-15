@@ -50,11 +50,23 @@
   merely because it is infinite. Candidate publication is transactional across
   final lineage/P5/publish gates, and an active braking certificate suppresses
   ordinary replanning until endpoint or explicit revocation, preventing curve /
-  certificate identity splits. The dense forest BDS profile uses six exact
-  worker-local predictors; the final development smoke measured RiskGrid p95
-  399.65 ms (max 413.34 ms), execution-snapshot p95 93.07 ms, one 0.461 m
-  LIMITED_PREFIX execution, certified braking to stop, zero identity mismatch
-  and zero interpolation-only revocation.
+  certificate identity splits. A failed optimizer/replan attempt also restores
+  both the incumbent curve and certificate instead of retaining a speculative
+  `LocalTrajData`; this was exposed by the third baseline A/B smoke after an
+  independently valid vertical-PL revocation. The dense forest BDS profile uses
+  six exact worker-local predictors. The final-code three-run A/B development smoke
+  measured baseline/BDS median raw HPL `93.83/33.65 m`, spatial HPL increment
+  `14.14/6.14 m` and usable-satellite count `8/19`. Baseline RiskGrid p95 was
+  `353.36--370.50 ms`; BDS was `384.39--406.65 ms`. Execution-snapshot p95 was
+  `59.71--66.43 ms` and `57.21--95.82 ms`, respectively; every reported direct
+  batch was below `10.01 ms`, and no over-500-ms grid was published. All six
+  runs executed a real `0.389--0.473 m` LIMITED_PREFIX and produced certified
+  braking-to-stop with zero identity mismatch or interpolation-only revocation.
+  Baseline passed 3/3 stage checks. BDS passed 2/3 overall: the remaining run
+  failed only `p0_health_not_continuous` after 18/61 observations classified
+  `SOURCE_DATA_GAP`, despite its valid execution/braking terminal result. This
+  source/support cadence gap remains an upstream availability issue and is not
+  hidden by increasing a stale timeout.
   PL/AL formulas, risk weights, P5 enablement and truth inputs are unchanged.
 
 - fix(risk-grid-topology-direct-authority): IAP-RQ-312 / IAP-RQ-320 /

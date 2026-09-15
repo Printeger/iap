@@ -1520,7 +1520,13 @@ namespace ego_planner
     }
     else
     {
-      planner_manager_->commitP4ExecutionCandidate();
+      // A failed planning attempt has no publish authority. Optimizer and P4
+      // fallback paths may already have touched LocalTrajData before returning
+      // false, so discarding only the certificate backup can split the still
+      // committed certificate from a speculative curve. Roll both halves of
+      // the execution transaction back to the incumbent.
+      planner_manager_->local_data_ = previous_local_data;
+      planner_manager_->restoreP4ExecutionCommitmentAfterCandidateRejection();
     }
 
     return plan_and_refine_success;
