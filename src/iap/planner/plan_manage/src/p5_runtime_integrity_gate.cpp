@@ -1,4 +1,5 @@
 #include <ego_planner/p5_runtime_integrity_gate.h>
+#include <ego_planner/p0_risk_grid_runtime.h>
 
 #include <algorithm>
 #include <cmath>
@@ -838,7 +839,14 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateFutureGate(
   status.pred_al_mode =
       PredAlertLimitProvider::modeName(config_.pred_alert_limit.mode);
 
-  if (!snapshot) {
+  const auto* direct_evidence = context.direct_risk;
+  const bool has_execution_evidence = direct_evidence &&
+      direct_evidence->execution_snapshot &&
+      direct_evidence->execution_snapshot->freshAt(context.now_s) &&
+      direct_evidence->execution_snapshot_id != 0u &&
+      direct_evidence->execution_snapshot_id ==
+          direct_evidence->execution_snapshot->execution_snapshot_id;
+  if (!snapshot && !has_execution_evidence) {
     status.reason = P5GateReason::SNAPSHOT_UNAVAILABLE;
     status.sample_count = 1;
     status.unknown_count = 1;
@@ -853,10 +861,17 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateFutureGate(
     return status;
   }
 
-  const iap::RiskGridHealth health = snapshot->health();
-  status.field_generation_id = health.generation_id;
-  status.field_age_s = finite(health.age_s) ? health.age_s
-                                            : context.now_s - snapshot->stamp_s();
+  if (snapshot) {
+    const iap::RiskGridHealth health = snapshot->health();
+    status.field_generation_id = health.generation_id;
+    status.field_age_s = finite(health.age_s)
+        ? health.age_s : context.now_s - snapshot->stamp_s();
+  } else {
+    status.field_generation_id = direct_evidence->risk_generation;
+    status.field_age_s = std::max(
+        0.0, context.now_s -
+            direct_evidence->execution_snapshot->evaluation_time_s);
+  }
 
   const double trajectory_start_time_s = local_data.start_time_.seconds();
   const int64_t trajectory_start_time_ns = local_data.start_time_.nanoseconds();
@@ -920,8 +935,8 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateFutureGate(
     const iap::ForwardRiskPointResult* direct = nullptr;
   };
   std::vector<FutureSample> future_samples;
-  const auto* direct_evidence = context.direct_risk;
-  const auto& source_identity = snapshot->sourceIdentity();
+  const iap::RiskGridSourceIdentity* source_identity = snapshot
+      ? &snapshot->sourceIdentity() : nullptr;
   const auto control_points_hash = p4ControlPointHash(
       local_data.position_traj_.getControlPoint());
   const auto knot_vector_hash = p4KnotVectorHash(
@@ -944,16 +959,31 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateFutureGate(
       }
     }
   }
-  const bool direct_evidence_valid = direct_evidence && snapshot &&
-      direct_evidence->complete &&
+  const bool execution_evidence_bound = direct_evidence &&
+      direct_evidence->execution_snapshot &&
+      direct_evidence->execution_snapshot->freshAt(context.now_s) &&
+      direct_evidence->execution_snapshot_id != 0u &&
+      direct_evidence->execution_snapshot_id ==
+          direct_evidence->execution_snapshot->execution_snapshot_id &&
+      direct_evidence->occupancy_generation ==
+          direct_evidence->execution_snapshot->source_identity.
+              occupancy_generation &&
+      direct_evidence->gnss_epoch_identity ==
+          direct_evidence->execution_snapshot->source_identity.
+              gnss_epoch_identity;
+  const bool legacy_grid_evidence_bound = direct_evidence && snapshot &&
+      !direct_evidence->execution_snapshot &&
       direct_evidence->risk_snapshot.get() == snapshot.get() &&
-      direct_evidence->trajectory_id == local_data.traj_id_ &&
-      direct_evidence->trajectory_start_ns == trajectory_start_time_ns &&
       direct_evidence->risk_generation == snapshot->generation_id() &&
       direct_evidence->occupancy_generation ==
-          source_identity.occupancy_generation &&
+          source_identity->occupancy_generation &&
       direct_evidence->gnss_epoch_identity ==
-          source_identity.gnss_epoch_identity &&
+          source_identity->gnss_epoch_identity;
+  const bool direct_evidence_valid = direct_evidence &&
+      direct_evidence->complete &&
+      (execution_evidence_bound || legacy_grid_evidence_bound) &&
+      direct_evidence->trajectory_id == local_data.traj_id_ &&
+      direct_evidence->trajectory_start_ns == trajectory_start_time_ns &&
       !direct_evidence->request_identity.empty() &&
       direct_evidence->control_points_hash == control_points_hash &&
       direct_evidence->knot_vector_hash == knot_vector_hash &&
@@ -1027,10 +1057,14 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateFutureGate(
       pl.stale = direct.failure_reason ==
           iap::ForwardRiskFailureReason::STALE;
       pl.query_time_s = actual_query_time_s;
-      pl.query_tau_s = std::max(0.0, pl.query_time_s - snapshot->stamp_s());
+      const double authority_stamp_s = snapshot
+          ? snapshot->stamp_s()
+          : direct_evidence->execution_snapshot->evaluation_time_s;
+      pl.query_tau_s = std::max(0.0, pl.query_time_s - authority_stamp_s);
       pl.hpl_pred = direct.prediction.fused.hpl;
       pl.vpl_pred = direct.prediction.fused.vpl;
-      pl.generation_id = snapshot->generation_id();
+      pl.generation_id = snapshot
+          ? snapshot->generation_id() : direct_evidence->risk_generation;
       pl.reason = iap::forwardRiskFailureReasonName(direct.failure_reason);
       pl_ok = evaluated;
     } else if (allow_grid_risk_for_tests_) {

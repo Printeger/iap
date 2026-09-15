@@ -1,4 +1,5 @@
 #include <ego_planner/p5_runtime_integrity_gate.h>
+#include <ego_planner/p0_risk_grid_runtime.h>
 #include <ego_planner/safety_rviz_publisher.h>
 
 #include <algorithm>
@@ -1072,6 +1073,90 @@ TEST(P5RuntimeIntegrityGateTest,
       [](const ego_planner::SafetyVizTrajectorySample& sample) {
         return sample.good && !sample.bad && !sample.unknown;
       }));
+}
+
+TEST(P5RuntimeIntegrityGateTest,
+     FreshExecutionEvidenceDoesNotRequireRiskGridPublication) {
+  auto config = baseConfig();
+  config.test_only_allow_grid_risk_authority = false;
+  config.current_stale_to_replan_s = 100.0;
+  config.current_stale_to_emergency_s = 100.0;
+  ego_planner::P5RuntimeIntegrityGate gate(nullptr, config, false);
+  gate.setCurrentIntegrityForTest(integrityMsg(
+      0.0, 1.0, 1.0, 10.0, 10.0));
+  auto trajectory = makeTrajectory();
+  const auto construction_grid = makeSnapshot(1.0, 1.0);
+  auto direct = directRiskEvidence(
+      trajectory, construction_grid, 1.0, 1.0);
+  auto execution = std::make_shared<ego_planner::P0ExecutionRiskSnapshot>();
+  execution->execution_snapshot_id = 41u;
+  execution->evaluation_time_s = 0.0;
+  execution->publish_time_s = 0.0;
+  auto occupancy = std::make_shared<ego_planner::P0OccupancyEpoch>();
+  occupancy->generation =
+      construction_grid->sourceIdentity().occupancy_generation;
+  occupancy->cloud_stamp_s = 0.0;
+  occupancy->frame_id = "map";
+  execution->occupancy = occupancy;
+  execution->integrity_anchor.current.valid = true;
+  execution->integrity_anchor.current.stamp = 0.0;
+  execution->risk_policy = construction_grid->params();
+  execution->risk_policy.frame_id = "map";
+  execution->geometry_id = "p5_execution_test_geometry";
+  execution->forward_risk_batch = [](const auto&) {
+    return iap::ForwardRiskBatchResult{};
+  };
+  execution->source_identity = construction_grid->sourceIdentity();
+  direct.execution_snapshot_id = execution->execution_snapshot_id;
+  direct.execution_snapshot = execution;
+  direct.risk_snapshot.reset();
+
+  const auto status = gate.evaluateRuntime(
+      trajectory, nullptr, 0.0, -1.0, &direct);
+
+  EXPECT_EQ(status.action, ego_planner::P5GateAction::OK);
+  EXPECT_EQ(status.reason, ego_planner::P5GateReason::OK);
+  EXPECT_GT(status.sample_count, 0u);
+  EXPECT_LE(status.sample_count, direct.points.size());
+  EXPECT_EQ(status.unknown_count, 0u);
+}
+
+TEST(P5RuntimeIntegrityGateTest,
+     StaleExecutionSnapshotCannotAuthorizeDirectEvidence) {
+  auto config = baseConfig();
+  config.test_only_allow_grid_risk_authority = false;
+  ego_planner::P5RuntimeIntegrityGate gate(nullptr, config, false);
+  gate.setCurrentIntegrityForTest(integrityMsg(
+      2.0, 1.0, 1.0, 10.0, 10.0));
+  auto trajectory = makeTrajectory();
+  const auto grid = makeSnapshot(1.0, 1.0);
+  auto direct = directRiskEvidence(trajectory, grid, 1.0, 1.0);
+  auto execution = std::make_shared<ego_planner::P0ExecutionRiskSnapshot>();
+  execution->execution_snapshot_id = 42u;
+  execution->evaluation_time_s = 0.0;
+  auto occupancy = std::make_shared<ego_planner::P0OccupancyEpoch>();
+  occupancy->generation =
+      grid->sourceIdentity().occupancy_generation;
+  occupancy->cloud_stamp_s = 0.0;
+  occupancy->frame_id = "map";
+  execution->occupancy = occupancy;
+  execution->integrity_anchor.current.valid = true;
+  execution->integrity_anchor.current.stamp = 0.0;
+  execution->risk_policy = grid->params();
+  execution->risk_policy.stale_timeout_s = 1.0;
+  execution->geometry_id = grid->params().geometry_id;
+  execution->forward_risk_batch = [](const auto&) {
+    return iap::ForwardRiskBatchResult{};
+  };
+  execution->source_identity = grid->sourceIdentity();
+  direct.execution_snapshot_id = execution->execution_snapshot_id;
+  direct.execution_snapshot = execution;
+  direct.risk_snapshot.reset();
+
+  const auto status = gate.evaluateRuntime(
+      trajectory, nullptr, 2.0, -1.0, &direct);
+  EXPECT_EQ(status.action, ego_planner::P5GateAction::REQUEST_REPLAN);
+  EXPECT_EQ(status.reason, ego_planner::P5GateReason::SNAPSHOT_UNAVAILABLE);
 }
 
 TEST(P5RuntimeIntegrityGateTest,

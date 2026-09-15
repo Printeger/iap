@@ -6,7 +6,12 @@
 #include <Eigen/Eigenvalues>
 #include <algorithm>
 #include <cmath>
+#include <cstring>
+#include <deque>
+#include <mutex>
 #include <spdlog/spdlog.h>
+#include <string>
+#include <unordered_map>
 
 namespace iap {
 
@@ -51,11 +56,91 @@ inline bool factorize(const Eigen::Matrix4d& A, double eps,
 
 }  // namespace
 
+struct GnssGeometryPlPredictor::CacheState {
+  mutable std::mutex mutex;
+  std::unordered_map<std::string, GnssGeometryPlResult> values;
+  std::deque<std::string> insertion_order;
+  std::uint64_t hits = 0;
+  std::uint64_t misses = 0;
+  std::uint64_t fallback_factorizations = 0;
+};
+
+namespace {
+
+template <typename T>
+void appendExact(std::string* key, const T& value) {
+  const auto* bytes = reinterpret_cast<const char*>(&value);
+  key->append(bytes, sizeof(T));
+}
+
+std::string exactGeometryKey(
+    const std::vector<GnssGeometrySat>& visible_sats) {
+  std::string key;
+  key.reserve(sizeof(std::size_t) + visible_sats.size() *
+      (3 * sizeof(double) + sizeof(int)));
+  appendExact(&key, visible_sats.size());
+  for (const auto& sat : visible_sats) {
+    appendExact(&key, sat.elevation);
+    appendExact(&key, sat.azimuth);
+    appendExact(&key, sat.pr_sigma);
+    appendExact(&key, sat.sat_id);
+  }
+  return key;
+}
+
+}  // namespace
+
 GnssGeometryPlPredictor::GnssGeometryPlPredictor(
     const GnssGeometryPlPredictorParams& params)
-    : params_(params) {}
+    : params_(params), cache_state_(std::make_shared<CacheState>()) {}
 
 GnssGeometryPlResult GnssGeometryPlPredictor::predict(
+    const std::vector<GnssGeometrySat>& visible_sats) const {
+  if (params_.exact_cache_capacity == 0u) {
+    return predictUncached(visible_sats);
+  }
+  const std::string key = exactGeometryKey(visible_sats);
+  {
+    std::lock_guard<std::mutex> lock(cache_state_->mutex);
+    const auto found = cache_state_->values.find(key);
+    if (found != cache_state_->values.end()) {
+      ++cache_state_->hits;
+      return found->second;
+    }
+    ++cache_state_->misses;
+  }
+  GnssGeometryPlResult result = predictUncached(visible_sats);
+  {
+    std::lock_guard<std::mutex> lock(cache_state_->mutex);
+    const auto inserted = cache_state_->values.emplace(key, result);
+    if (inserted.second) {
+      cache_state_->insertion_order.push_back(key);
+      while (cache_state_->values.size() > params_.exact_cache_capacity) {
+        cache_state_->values.erase(cache_state_->insertion_order.front());
+        cache_state_->insertion_order.pop_front();
+      }
+    }
+  }
+  return result;
+}
+
+GnssGeometryCacheStats GnssGeometryPlPredictor::cacheStats() const {
+  std::lock_guard<std::mutex> lock(cache_state_->mutex);
+  return {cache_state_->hits, cache_state_->misses,
+          cache_state_->fallback_factorizations,
+          cache_state_->values.size()};
+}
+
+void GnssGeometryPlPredictor::clearCache() const {
+  std::lock_guard<std::mutex> lock(cache_state_->mutex);
+  cache_state_->values.clear();
+  cache_state_->insertion_order.clear();
+  cache_state_->hits = 0;
+  cache_state_->misses = 0;
+  cache_state_->fallback_factorizations = 0;
+}
+
+GnssGeometryPlResult GnssGeometryPlPredictor::predictUncached(
     const std::vector<GnssGeometrySat>& visible_sats) const {
   GnssGeometryPlResult out;
   const int N = static_cast<int>(visible_sats.size());
@@ -160,16 +245,32 @@ GnssGeometryPlResult GnssGeometryPlPredictor::predict(
   int worst_hyp_u = -1;
 
   for (int k = 0; k < N; ++k) {
-    Eigen::Matrix4d Ak = A0 - row_outer[k];
-    Eigen::LDLT<Eigen::Matrix4d> ldltk;
-    if (!factorize(Ak, params_.eps_degen, &ldltk)) {
-      out.valid = false;
-      out.status = GnssGeometryStatus::SUBSET_DEGENERATE;
-      out.degenerate_satellite_ids.push_back(visible_sats[k].sat_id);
-      continue;
+    const Eigen::Vector4d gi = G.row(k).transpose();
+    const Eigen::Vector4d u = std::sqrt(W(k)) * gi;
+    const Eigen::Vector4d s0u = out.S0 * u;
+    const double denominator = 1.0 - u.dot(s0u);
+    Eigen::Matrix4d Sk;
+    const double downdate_guard = std::max(params_.eps_degen, 1.0e-12);
+    if (std::isfinite(denominator) && denominator > downdate_guard) {
+      Sk = out.S0 + (s0u * s0u.transpose()) / denominator;
+    } else {
+      // Near the Sherman-Morrison singularity, preserve the legacy LDLT
+      // verdict rather than allowing a fast-path rounding decision to alter
+      // the safety state.
+      {
+        std::lock_guard<std::mutex> lock(cache_state_->mutex);
+        ++cache_state_->fallback_factorizations;
+      }
+      const Eigen::Matrix4d Ak = A0 - row_outer[k];
+      Eigen::LDLT<Eigen::Matrix4d> ldltk;
+      if (!factorize(Ak, params_.eps_degen, &ldltk)) {
+        out.valid = false;
+        out.status = GnssGeometryStatus::SUBSET_DEGENERATE;
+        out.degenerate_satellite_ids.push_back(visible_sats[k].sat_id);
+        continue;
+      }
+      Sk = ldltk.solve(Eigen::Matrix4d::Identity());
     }
-
-    const Eigen::Matrix4d Sk = ldltk.solve(Eigen::Matrix4d::Identity());
     if (!Sk.allFinite()) {
       out.valid = false;
       out.status = GnssGeometryStatus::NUMERICAL_FAILURE;

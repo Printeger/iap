@@ -3,6 +3,60 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(bds-execution-snapshot-limited-prefix-stability): IAP-RQ-312 /
+  IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 — make `GPS+BDS+GAL+GLO` the default
+  formal/forest constellation set while retaining an explicit baseline arm.
+  Publish an immutable `P0ExecutionRiskSnapshot` from the complete frozen
+  occupancy/support, GNSS epoch, certified Integrity and LiDAR/FIM tuple
+  before building its RiskGrid. Final P4, runtime and P5 direct batches bind
+  this execution identity, so a missing, older or over-budget RiskGrid cannot
+  independently revoke motion. The production execution channel polls every
+  50 ms with a mutually exclusive latest-wins callback, reuses exact
+  same-occupancy FIM primitives, and cannot be overwritten by a later-finishing
+  dense-grid transaction. RiskGrid construction now has a cooperative
+  500 ms end-to-end deadline, never publishes a partial generation and keeps
+  its previous fresh generation for search only; direct curve batches retain
+  their 150 ms budget and recheck live source freshness. Its generation
+  materialisation batches only supported spatial cells across future layers,
+  moves provider results once, and parallelises deterministic voxel assembly;
+  the reported build duration ends at atomic grid commit. A discarded
+  background attempt remains visible in refresh evidence but does not make the
+  previously committed grid unhealthy until that grid is actually stale.
+  GNSS geometry keeps the production PL equation but factors the full
+  information matrix once, uses Sherman-Morrison leave-one-out downdates with
+  an LDLT boundary fallback, and reuses only exact satellite-ID/LOS/sigma bit
+  identities in a bounded 4096-entry cache. New advisory satellites require
+  three consecutive epochs before inclusion; disappearance, certified
+  exclusion and hard occlusion remain immediate. Execution batches use the
+  common usable-satellite intersection over the remaining B-spline and return
+  UNKNOWN if it is insufficient.
+  A committed `LIMITED_PREFIX` is retained through pending, rate limiting and
+  ordinary generation churn unless, after 1.0 s, a replacement advances the
+  common endpoint by at least 0.5 m without worse direct risk. Each accepted
+  prefix precomputes independently parameterized, dynamics/collision/direct-
+  risk-checked terminal-stop curves at <=0.2 s anchors. Source expiry schedules
+  the nearest future anchor, continues the old command for at most 0.2 s, then
+  publishes a new identity-bound `LIMITED_PREFIX_BRAKING` trajectory without
+  extending the original endpoint or deadline. Smoke analysis reports this as
+  `LIMITED_PREFIX_EXECUTED_THEN_FAILSAFE_BRAKED_TO_STOP`. Health evidence adds
+  execution-snapshot timestamps/identity/budgets, all observed latency
+  contributors and the priority primary cause. Repeated identical input tuples
+  retain one snapshot ID/cache; final/runtime current Integrity is reread live,
+  and P5 rejects stale execution evidence rather than treating it as a ticket.
+  Concurrent callbacks select the newest certified Integrity sample at or
+  before the evaluation timestamp (with one-microsecond numeric tolerance), so
+  a next-tick message cannot manufacture a future-stamp failure. The braking
+  path no longer rejects its deliberately unbounded second-stage age argument
+  merely because it is infinite. Candidate publication is transactional across
+  final lineage/P5/publish gates, and an active braking certificate suppresses
+  ordinary replanning until endpoint or explicit revocation, preventing curve /
+  certificate identity splits. The dense forest BDS profile uses six exact
+  worker-local predictors; the final development smoke measured RiskGrid p95
+  399.65 ms (max 413.34 ms), execution-snapshot p95 93.07 ms, one 0.461 m
+  LIMITED_PREFIX execution, certified braking to stop, zero identity mismatch
+  and zero interpolation-only revocation.
+  PL/AL formulas, risk weights, P5 enablement and truth inputs are unchanged.
+
 - fix(risk-grid-topology-direct-authority): IAP-RQ-312 / IAP-RQ-320 /
   IAP-RQ-400 / IAP-RQ-410 — make RiskGrid PL interpolation conditional on one
   common positive-weight satellite/support/source topology across both spatial

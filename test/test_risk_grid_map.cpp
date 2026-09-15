@@ -2438,7 +2438,8 @@ TEST(RiskGridMapTest,
   for (const auto failure : {
            iap::RiskGridSourceValidation::OCCUPANCY_GENERATION_CHANGED,
            iap::RiskGridSourceValidation::PRIOR_GENERATION_CHANGED,
-           iap::RiskGridSourceValidation::PREDICTOR_SPATIAL_SOURCE_CHANGED}) {
+           iap::RiskGridSourceValidation::PREDICTOR_SPATIAL_SOURCE_CHANGED,
+           iap::RiskGridSourceValidation::COMPUTE_BUDGET_EXCEEDED}) {
     validator_calls = 0;
     const auto validator = [&]() {
       return ++validator_calls == 1
@@ -2455,7 +2456,10 @@ TEST(RiskGridMapTest,
             ? "occupancy_generation_changed"
         : failure == iap::RiskGridSourceValidation::PRIOR_GENERATION_CHANGED
             ? "prior_generation_changed"
-            : "predictor_spatial_source_changed";
+        : failure ==
+              iap::RiskGridSourceValidation::PREDICTOR_SPATIAL_SOURCE_CHANGED
+            ? "predictor_spatial_source_changed"
+            : "risk_grid_build_budget_exceeded";
     EXPECT_EQ(reason, expected_reason);
 
     const auto still_active = grid.acquireSnapshot();

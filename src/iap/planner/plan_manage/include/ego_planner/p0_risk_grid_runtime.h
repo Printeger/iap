@@ -2,9 +2,12 @@
 #define _P0_RISK_GRID_RUNTIME_H_
 
 #include <cstddef>
+#include <atomic>
+#include <cmath>
 #include <deque>
 #include <functional>
 #include <memory>
+#include <limits>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -26,6 +29,7 @@
 #include <iap/planner/integrity_snapshot.hpp>
 #include <iap/planner/risk_grid_map.hpp>
 #include <iap/predictor/predictor_types.hpp>
+#include <iap/predictor/gnss_satellite_admission.hpp>
 #include <iap/predictor/rolling_spatial_advisory_window.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <rclcpp/rclcpp.hpp>
@@ -34,6 +38,60 @@
 #include <std_msgs/msg/string.hpp>
 
 namespace ego_planner {
+
+struct P0ExecutionRiskSnapshot {
+  std::uint64_t execution_snapshot_id = 0;
+  double evaluation_time_s = std::numeric_limits<double>::quiet_NaN();
+  double publish_time_s = std::numeric_limits<double>::quiet_NaN();
+  std::shared_ptr<const P0OccupancyEpoch> occupancy;
+  iap::IntegritySnapshot integrity_anchor;
+  iap::RiskGridSourceIdentity source_identity;
+  iap::RiskGridMapParams risk_policy;
+  double gnss_max_age_s = -1.0;
+  std::uint64_t lidar_generation = 0;
+  double lidar_stamp_s = std::numeric_limits<double>::quiet_NaN();
+  std::string frame_contract_id;
+  std::string geometry_id;
+  std::string predictor_algorithm_identity;
+  std::function<iap::ForwardRiskBatchResult(
+      const iap::ForwardRiskBatchRequest&)> forward_risk_batch;
+  std::function<iap::ForwardRiskBatchResult(
+      const iap::ForwardRiskBatchRequest&)> diagnostic_forward_risk_batch;
+
+  bool freshAt(double now_s, double gnss_max_age_s) const {
+    if (execution_snapshot_id == 0u || !std::isfinite(now_s) ||
+        !std::isfinite(evaluation_time_s) || now_s < evaluation_time_s ||
+        !occupancy || !forward_risk_batch || risk_policy.frame_id != "map" ||
+        geometry_id.empty() || !integrity_anchor.current.valid ||
+        !std::isfinite(integrity_anchor.current.stamp)) {
+      return false;
+    }
+    const double timeout = risk_policy.stale_timeout_s;
+    const auto fresh_stamp = [now_s, timeout](const double stamp) {
+      const double age = now_s - stamp;
+      return std::isfinite(stamp) && age >= -1.0e-6 &&
+          (timeout < 0.0 || age <= timeout);
+    };
+    if (!fresh_stamp(occupancy->cloud_stamp_s) ||
+        !fresh_stamp(integrity_anchor.current.stamp)) {
+      return false;
+    }
+    if (occupancy->trusted_local_map_support &&
+        !occupancy->trusted_local_map_support->freshAt(now_s)) {
+      return false;
+    }
+    if (integrity_anchor.has_epoch) {
+      const double gnss_age = now_s - integrity_anchor.gnss_epoch.stamp;
+      if (!std::isfinite(integrity_anchor.gnss_epoch.stamp) ||
+          gnss_age < -1.0e-6 ||
+          (gnss_max_age_s >= 0.0 && gnss_age > gnss_max_age_s)) {
+        return false;
+      }
+    }
+    return lidar_generation == 0u || fresh_stamp(lidar_stamp_s);
+  }
+  bool freshAt(double now_s) const { return freshAt(now_s, gnss_max_age_s); }
+};
 
 struct P0PlanningSnapshot {
   std::shared_ptr<const iap::RiskGridSnapshot> risk;
@@ -48,6 +106,9 @@ struct P0PlanningSnapshot {
   // callback above, this honors input.snapshot. It must never authorize motion.
   std::function<iap::ForwardRiskBatchResult(
       const iap::ForwardRiskBatchRequest&)> diagnostic_forward_risk_batch;
+  // Exact execution authority used to construct this search grid. A newer
+  // execution snapshot may be published while this grid remains active.
+  std::shared_ptr<const P0ExecutionRiskSnapshot> execution;
 };
 
 class P0RiskGridRuntime {
@@ -112,6 +173,10 @@ class P0RiskGridRuntime {
         std::numeric_limits<double>::quiet_NaN();
     int predictor_requested_worker_count = 1;
     int predictor_effective_worker_count = 1;
+    double execution_snapshot_period_s = 0.05;
+    double execution_batch_budget_ms = 150.0;
+    double risk_grid_build_budget_ms = 500.0;
+    int predictor_gnss_admission_epochs = 3;
     P0_6FixtureConfig p0_6_fixture;
   };
 
@@ -136,8 +201,22 @@ class P0RiskGridRuntime {
   iap::RiskGridMap& riskGrid() { return risk_grid_; }
   std::shared_ptr<const iap::RiskGridSnapshot> acquireSnapshot() const;
   std::shared_ptr<const P0PlanningSnapshot> acquirePlanningSnapshot() const;
+  std::shared_ptr<const P0ExecutionRiskSnapshot>
+  acquireExecutionRiskSnapshot() const;
   bool gnssEpochFreshAt(double epoch_stamp_s,
                         double evaluation_time_s) const;
+  bool executionSnapshotFreshAt(
+      const std::shared_ptr<const P0ExecutionRiskSnapshot>& snapshot,
+      double evaluation_time_s) const;
+  // Return the newest certified monitor sample at or before this evaluation
+  // instant, only when it is valid and fresh.  ROS callbacks carrying the
+  // next sensor timestamp can run before a planner callback for the preceding
+  // timestamp; selecting by timestamp prevents that benign ordering from
+  // looking like a missing input. Unsafe PL values are intentionally returned:
+  // callers must distinguish an unsafe current monitor from stale predictive
+  // inputs and revoke immediately.
+  bool currentIntegrityForExecution(
+      double evaluation_time_s, iap::CurrentIntegrityState* current) const;
   iap::RiskGridHealth health() const;
   bool refreshOnceForTest();
   void setOccupancyPredicate(iap::RiskGridMap::OccupancyPredicate predicate);
@@ -152,6 +231,7 @@ class P0RiskGridRuntime {
   friend class P0RiskGridRuntimeStampTest;
 
   void createRosInterfaces();
+  void executionSnapshotTimerCallback();
   void refreshTimerCallback();
   void healthTimerCallback();
   void publishHealth(const iap::RiskGridHealth& health, double now_s);
@@ -198,6 +278,13 @@ class P0RiskGridRuntime {
     double refresh_queue_delay_ms = std::numeric_limits<double>::quiet_NaN();
     double provider_batch_duration_ms = std::numeric_limits<double>::quiet_NaN();
     double generation_interval_ms = std::numeric_limits<double>::quiet_NaN();
+    uint64_t execution_snapshot_id = 0;
+    double execution_snapshot_evaluation_stamp_s =
+        std::numeric_limits<double>::quiet_NaN();
+    double execution_snapshot_publish_stamp_s =
+        std::numeric_limits<double>::quiet_NaN();
+    double execution_snapshot_publish_latency_ms =
+        std::numeric_limits<double>::quiet_NaN();
     double input_callback_age_s = std::numeric_limits<double>::quiet_NaN();
     double process_cpu_delta_ms = std::numeric_limits<double>::quiet_NaN();
     double health_callback_duration_ms = std::numeric_limits<double>::quiet_NaN();
@@ -311,6 +398,13 @@ class P0RiskGridRuntime {
   std::function<P0OccupancyEpochCapture()> occupancy_epoch_factory_;
   mutable std::mutex planning_snapshot_mutex_;
   std::shared_ptr<const P0PlanningSnapshot> planning_snapshot_;
+  std::shared_ptr<const P0ExecutionRiskSnapshot> execution_snapshot_;
+  std::atomic<std::uint64_t> next_execution_snapshot_id_{1};
+  // refreshOnceForTest() intentionally executes one frozen transaction.  It
+  // must not invoke the independent live timer (which would capture the
+  // occupancy factory twice), while still exposing that transaction's direct
+  // execution snapshot to deterministic tests.
+  std::atomic<bool> synchronous_test_refresh_{false};
   iap::IntegritySnapshotBuilder snapshot_builder_;
   iap::RollingSpatialAdvisoryWindow rolling_spatial_window_;
   std::shared_ptr<const iap::LocalOccupancyGrid>
@@ -319,6 +413,7 @@ class P0RiskGridRuntime {
       rolling_raw_occupancy_identity_;
   P0OccupancyEpoch::SourceOwner rolling_occupancy_source_owner_;
   iap::PlanningLatticeGeometry rolling_occupancy_geometry_;
+  std::string rolling_occupancy_frame_contract_id_;
   uint64_t rolling_occupancy_generation_ = 0;
   double rolling_occupancy_stamp_ =
       std::numeric_limits<double>::quiet_NaN();
@@ -334,9 +429,11 @@ class P0RiskGridRuntime {
   // Keep all three workloads independent so map refresh cannot stale GNSS.
   rclcpp::CallbackGroup::SharedPtr predictor_input_callback_group_;
   rclcpp::CallbackGroup::SharedPtr map_input_callback_group_;
+  rclcpp::CallbackGroup::SharedPtr execution_snapshot_callback_group_;
   rclcpp::CallbackGroup::SharedPtr refresh_callback_group_;
   rclcpp::CallbackGroup::SharedPtr health_callback_group_;
   rclcpp::TimerBase::SharedPtr refresh_start_timer_;
+  rclcpp::TimerBase::SharedPtr execution_snapshot_timer_;
   rclcpp::TimerBase::SharedPtr refresh_timer_;
   rclcpp::TimerBase::SharedPtr health_timer_;
   std::shared_ptr<SafetyRvizPublisher> safety_viz_;
@@ -368,6 +465,8 @@ class P0RiskGridRuntime {
   bool latest_current_valid_ = false;
   bool current_integrity_seen_ = false;
   uint64_t latest_current_generation_ = 0;
+  std::deque<std::pair<uint64_t, iap::CurrentIntegrityState>>
+      current_integrity_history_;
   double latest_gnss_epoch_stamp_ = std::numeric_limits<double>::quiet_NaN();
   uint64_t latest_gnss_epoch_satellite_count_ = 0;
   uint64_t latest_gnss_epoch_generation_ = 0;
@@ -377,6 +476,13 @@ class P0RiskGridRuntime {
   double last_refresh_queue_delay_ms_ = std::numeric_limits<double>::quiet_NaN();
   double last_provider_batch_duration_ms_ = std::numeric_limits<double>::quiet_NaN();
   double last_generation_interval_ms_ = std::numeric_limits<double>::quiet_NaN();
+  uint64_t last_execution_snapshot_id_ = 0;
+  double last_execution_snapshot_evaluation_stamp_s_ =
+      std::numeric_limits<double>::quiet_NaN();
+  double last_execution_snapshot_publish_stamp_s_ =
+      std::numeric_limits<double>::quiet_NaN();
+  double last_execution_snapshot_publish_latency_ms_ =
+      std::numeric_limits<double>::quiet_NaN();
   bool last_snapshot_available_ = false;
   bool last_refresh_succeeded_ = false;
   std::string last_snapshot_failure_reason_ = "none";
@@ -421,6 +527,7 @@ class P0RiskGridRuntime {
   std::unordered_map<uint32_t, gnss_comm::GloEphemPtr> glo_ephem_cache_;
   std::vector<double> iono_params_;
   std::optional<iap::GnssEpoch> latest_epoch_;
+  iap::GnssSatelliteAdmissionHysteresis gnss_satellite_admission_{3};
   std::deque<std::pair<uint64_t, iap::GnssEpoch>> gnss_epoch_history_;
   bool gnss_epoch_seen_ = false;
 

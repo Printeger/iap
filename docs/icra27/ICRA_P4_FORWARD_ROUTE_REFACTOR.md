@@ -470,7 +470,8 @@ unchanged; a newly observed anomaly is captured at its grid anomaly index, or
 at the direct-failure index when the grid itself returned a finite SAFE value.
 
 For constellation experiments, the runner accepts
-`--gnss-arm baseline|bds`. `baseline` (the default) uses GPS+Galileo+GLONASS;
-`bds` adds BeiDou while leaving AL, PL equations, P5 and risk weights
+`--gnss-arm baseline|bds`. `bds` is the default and uses
+GPS+BeiDou+Galileo+GLONASS; `baseline` explicitly selects the retained
+GPS+Galileo+GLONASS comparison arm. Both leave AL, PL equations, P5 and risk weights
 unchanged. This switch is an experiment label and launch contract, not a
 substitute for direct-risk authority or topology-safe interpolation.

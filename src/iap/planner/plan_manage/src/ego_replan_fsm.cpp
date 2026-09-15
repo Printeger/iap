@@ -972,6 +972,23 @@ namespace ego_planner
   P4PlanningCycleResult EGOReplanFSM::planFromCurrentTraj(
       const int trial_times /*=1*/)
   {
+    // A certified braking spline is already the bounded response to stale
+    // data. It owns the vehicle until its endpoint or an execution/collision
+    // gate revokes it; running the ordinary planner in parallel can mutate
+    // LocalTrajData before a candidate reaches its final gate and split the
+    // braking certificate from the curve being executed.
+    const auto &execution_certificate =
+        planner_manager_->p4ExecutionCertificate();
+    if (execution_certificate.valid &&
+        execution_certificate.authority ==
+            P4ExecutionAuthority::LIMITED_PREFIX_BRAKING &&
+        !planner_manager_->p4ExecutionRevoked())
+    {
+      return planner_manager_->committedP4TrajectoryReachedEndpoint(
+                 plannerNow().seconds())
+          ? P4PlanningCycleResult::HOLD_APPROVED_ENDPOINT
+          : P4PlanningCycleResult::CONTINUE_COMMITTED;
+    }
     if (shouldDeferP4PlanningForRiskGridReady())
       return P4PlanningCycleResult::RETRYABLE_FAILURE;
 
@@ -1200,8 +1217,22 @@ namespace ego_planner
       return;
     }
 
+    if (p4_execution_check.failsafe_braking_activated)
+    {
+      // The braking certificate owns a new, independently parameterized
+      // spline. Publish only after the live collision-delta check above has
+      // accepted that exact curve; do not reset it through the planner path.
+      bspline_pub_->publish(makeTrajectoryCommand(*info));
+      RCLCPP_WARN(node_->get_logger(),
+                  "Published certified LIMITED_PREFIX braking trajectory id=%d",
+                  info->traj_id_);
+      return;
+    }
+
     if (exec_state_ == EXEC_TRAJ && planner_manager_->p5_integrity_gate_ &&
-        planner_manager_->p5_integrity_gate_->runtimeEnabled())
+        planner_manager_->p5_integrity_gate_->runtimeEnabled() &&
+        planner_manager_->p4ExecutionCertificate().authority !=
+            P4ExecutionAuthority::LIMITED_PREFIX_BRAKING)
     {
       const double now_s = plannerNow().seconds();
       const auto &direct_evidence =
@@ -1328,6 +1359,7 @@ namespace ego_planner
     if (!rebound_planner_for_test_)
       getLocalTarget();
 
+    planner_manager_->preserveP4ExecutionCommitmentForCandidate();
     bool plan_and_refine_success = rebound_planner_for_test_
         ? rebound_planner_for_test_()
         : planner_manager_->reboundReplan(
@@ -1349,6 +1381,10 @@ namespace ego_planner
 
     if (plan_and_refine_success)
     {
+      const auto reject_candidate = [this, &previous_local_data]() {
+        planner_manager_->local_data_ = previous_local_data;
+        planner_manager_->restoreP4ExecutionCommitmentAfterCandidateRejection();
+      };
 
       auto info = &planner_manager_->local_data_;
 
@@ -1357,7 +1393,7 @@ namespace ego_planner
       {
         RCLCPP_ERROR(node_->get_logger(),
                      "P4-v2 final lineage write failed before P5");
-        planner_manager_->local_data_ = previous_local_data;
+        reject_candidate();
         return false;
       }
 
@@ -1399,7 +1435,7 @@ namespace ego_planner
                       static_cast<unsigned long>(final_gate_generation_id));
           planner_manager_->recordP4VerticalSliceLineage(
               "p5_final_rejected", plannerNow().seconds());
-          planner_manager_->local_data_ = previous_local_data;
+          reject_candidate();
           return false;
         }
         p5_final_status = p5_status;
@@ -1408,7 +1444,7 @@ namespace ego_planner
         {
           RCLCPP_ERROR(node_->get_logger(),
                        "P4-v2 P5-pass lineage write failed before publish");
-          planner_manager_->local_data_ = previous_local_data;
+          reject_candidate();
           return false;
         }
       }
@@ -1430,7 +1466,7 @@ namespace ego_planner
               freshness_reason, plannerNow().seconds());
           p1_replan_admission_.recordStaleRejection(p1_admission_generation);
         }
-        planner_manager_->local_data_ = previous_local_data;
+        reject_candidate();
         return false;
       }
 
@@ -1439,7 +1475,7 @@ namespace ego_planner
       {
         RCLCPP_ERROR(node_->get_logger(),
                      "P4-v2 publish-authorization lineage write failed");
-        planner_manager_->local_data_ = previous_local_data;
+        reject_candidate();
         return false;
       }
 
@@ -1455,6 +1491,7 @@ namespace ego_planner
       // projection of the exact spline those checks inspected.
       const traj_utils::msg::Bspline bspline = makeTrajectoryCommand(*info);
       bspline_pub_->publish(bspline);
+      planner_manager_->commitP4ExecutionCandidate();
       planner_manager_->recordGate0NormalBsplinePublish(plannerNow().seconds());
       if (!planner_manager_->finalizeP1AcceptedRiskProfile(
               plannerNow().seconds()))
@@ -1480,6 +1517,10 @@ namespace ego_planner
       if (visualization_)
         visualization_->displayOptimalList(
             info->position_traj_.get_control_points(), 0);
+    }
+    else
+    {
+      planner_manager_->commitP4ExecutionCandidate();
     }
 
     return plan_and_refine_success;

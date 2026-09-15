@@ -83,6 +83,7 @@ std::optional<P0OccupancyEpoch> P0OccupancyEpochAdapter::adaptFields(
     std::string frame_id,
     const double cloud_stamp_s,
     std::string geometry_id,
+    std::string frame_contract_id,
     const uint64_t generation,
     iap::RiskGridMap::OccupancyDiagnosticQuery diagnostic_query,
     P0OccupancyEpoch::SourceOwner source_owner,
@@ -96,7 +97,8 @@ std::optional<P0OccupancyEpoch> P0OccupancyEpochAdapter::adaptFields(
       frame_id.empty() || !std::isfinite(resolution_m) ||
       resolution_m <= 0.0 || !lattice_origin.allFinite() ||
       !extent_m.allFinite() || (extent_m.array() <= 0.0).any() ||
-      (voxel_dimensions.array() <= 0).any() || geometry_id.empty()) {
+      (voxel_dimensions.array() <= 0).any() || geometry_id.empty() ||
+      frame_contract_id.empty()) {
     return std::nullopt;
   }
 
@@ -184,6 +186,7 @@ std::optional<P0OccupancyEpoch> P0OccupancyEpochAdapter::adaptFields(
   adapted.geometry.voxel_dimensions = voxel_dimensions;
   adapted.geometry.resolution_m = resolution_m;
   adapted.geometry.geometry_id = std::move(geometry_id);
+  adapted.frame_contract_id = std::move(frame_contract_id);
   adapted.source_owner = std::move(source_owner);
   adapted.live_source_owner = std::move(live_source_owner);
   adapted.live_generation = std::move(live_generation);
@@ -199,6 +202,7 @@ bool P0OccupancyEpochAdapter::sameVersion(
          std::isfinite(base.cloud_stamp_s) &&
          exactDouble(base.cloud_stamp_s, target.cloud_stamp_s) &&
          sameOwner(base.source_owner, target.source_owner) &&
+         base.frame_contract_id == target.frame_contract_id &&
          sameGeometry(base.geometry, target.geometry) &&
          base.raw_identity && target.raw_identity &&
          sameIdentity(*base.raw_identity, *target.raw_identity);
@@ -211,6 +215,7 @@ P0OccupancyEpochAdapter::completeDelta(
       !std::isfinite(base.cloud_stamp_s) ||
       !std::isfinite(target.cloud_stamp_s) ||
       !sameOwner(base.source_owner, target.source_owner) ||
+      base.frame_contract_id != target.frame_contract_id ||
       !sameGeometry(base.geometry, target.geometry) ||
       !base.raw_identity || !target.raw_identity ||
       !coherentGeometry(*base.raw_identity, *target.raw_identity)) {

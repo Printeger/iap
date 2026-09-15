@@ -21,6 +21,7 @@
 
 #include <iap/predictor/predictor_module.hpp>
 #include <iap/predictor/gnss_geometry_pl_predictor.hpp>
+#include <iap/predictor/gnss_satellite_admission.hpp>
 #include <iap/map/trusted_local_map_support.hpp>
 
 namespace {
@@ -42,6 +43,115 @@ TEST(GnssGeometryPlPredictorTest, SubsetDegeneracyIsExplicitAndHasNoNumericPL) {
   EXPECT_FALSE(result.degenerate_satellite_ids.empty());
   EXPECT_FALSE(std::isfinite(result.HPL));
   EXPECT_FALSE(std::isfinite(result.VPL));
+}
+
+TEST(GnssGeometryPlPredictorTest, ExactInputUsesBoundedGeometryCache) {
+  iap::GnssGeometryPlPredictorParams params;
+  params.exact_cache_capacity = 2;
+  iap::GnssGeometryPlPredictor predictor(params);
+  const std::vector<iap::GnssGeometrySat> sats{
+      {0.55, 0.1, 3.0, 1}, {0.72, 1.3, 3.5, 2},
+      {0.86, 2.5, 4.0, 3}, {0.63, 3.7, 4.5, 4},
+      {1.02, 5.0, 2.8, 5}, {0.44, 5.8, 3.8, 6}};
+
+  const auto first = predictor.predict(sats);
+  const auto second = predictor.predict(sats);
+  ASSERT_TRUE(first.valid);
+  ASSERT_TRUE(second.valid);
+  EXPECT_DOUBLE_EQ(first.HPL, second.HPL);
+  EXPECT_DOUBLE_EQ(first.VPL, second.VPL);
+  const auto stats = predictor.cacheStats();
+  EXPECT_EQ(stats.misses, 1u);
+  EXPECT_EQ(stats.hits, 1u);
+  EXPECT_EQ(stats.entries, 1u);
+}
+
+TEST(GnssGeometryPlPredictorTest, RankOnePathMatchesDirectSubsetFactorization) {
+  iap::GnssGeometryPlPredictor predictor;
+  const std::vector<iap::GnssGeometrySat> sats{
+      {0.35, 0.0, 2.7, 10}, {0.60, 0.9, 3.1, 11},
+      {0.82, 1.8, 4.2, 12}, {1.05, 2.9, 2.4, 13},
+      {0.48, 4.0, 5.1, 14}, {0.74, 5.2, 3.6, 15},
+      {0.92, 5.8, 4.7, 16}};
+  const auto accelerated = predictor.predict(sats);
+  ASSERT_TRUE(accelerated.valid);
+
+  Eigen::Matrix4d a0 = Eigen::Matrix4d::Zero();
+  std::vector<Eigen::Vector4d> rows;
+  std::vector<double> weights;
+  for (const auto& sat : sats) {
+    Eigen::Vector4d row;
+    row << std::cos(sat.elevation) * std::sin(sat.azimuth),
+        std::cos(sat.elevation) * std::cos(sat.azimuth),
+        std::sin(sat.elevation), 1.0;
+    const double weight = 1.0 / (sat.pr_sigma * sat.pr_sigma);
+    rows.push_back(row);
+    weights.push_back(weight);
+    a0 += weight * row * row.transpose();
+  }
+  for (std::size_t index = 0; index < sats.size(); ++index) {
+    const Eigen::Matrix4d ak =
+        a0 - weights[index] * rows[index] * rows[index].transpose();
+    Eigen::LDLT<Eigen::Matrix4d> ldlt(ak);
+    ASSERT_EQ(ldlt.info(), Eigen::Success);
+    const Eigen::Matrix4d direct =
+        ldlt.solve(Eigen::Matrix4d::Identity());
+    const Eigen::Vector4d u = std::sqrt(weights[index]) * rows[index];
+    const Eigen::Vector4d s0u = accelerated.S0 * u;
+    const double denominator = 1.0 - u.dot(s0u);
+    ASSERT_GT(denominator, 1.0e-10);
+    const Eigen::Matrix4d rank_one = accelerated.S0 +
+        (s0u * s0u.transpose()) / denominator;
+    EXPECT_LT((direct - rank_one).cwiseAbs().maxCoeff(), 1.0e-10);
+  }
+}
+
+TEST(GnssGeometryPlPredictorTest,
+     FrozenBaselineAndBdsLoadReportsExactCacheBenefit) {
+  constexpr double kBenchmarkTwoPi = 6.28318530717958647692;
+  auto make_constellation = [kBenchmarkTwoPi](const int count) {
+    std::vector<iap::GnssGeometrySat> sats;
+    sats.reserve(static_cast<std::size_t>(count));
+    for (int index = 0; index < count; ++index) {
+      sats.push_back(iap::GnssGeometrySat{
+          0.28 + 0.055 * static_cast<double>(index % 12),
+          std::fmod(0.41 + 1.13 * static_cast<double>(index),
+                    kBenchmarkTwoPi),
+          2.5 + 0.17 * static_cast<double>(index % 7),
+          100 + index});
+    }
+    return sats;
+  };
+  const auto run = [](const std::vector<iap::GnssGeometrySat>& frozen,
+                      const int repetitions) {
+    iap::GnssGeometryPlPredictor predictor;
+    const auto start = std::chrono::steady_clock::now();
+    iap::GnssGeometryPlResult first;
+    for (int index = 0; index < repetitions; ++index) {
+      const auto result = predictor.predict(frozen);
+      EXPECT_TRUE(result.valid);
+      if (index == 0) first = result;
+      EXPECT_DOUBLE_EQ(result.HPL, first.HPL);
+      EXPECT_DOUBLE_EQ(result.VPL, first.VPL);
+      EXPECT_EQ(result.worst_hyp_h, first.worst_hyp_h);
+      EXPECT_EQ(result.worst_hyp_v, first.worst_hyp_v);
+    }
+    const double elapsed_us = std::chrono::duration<double, std::micro>(
+        std::chrono::steady_clock::now() - start).count();
+    return std::make_pair(elapsed_us, predictor.cacheStats());
+  };
+
+  constexpr int kRepetitions = 2000;
+  const auto baseline = run(make_constellation(8), kRepetitions);
+  const auto bds = run(make_constellation(16), kRepetitions);
+  EXPECT_EQ(baseline.second.misses, 1u);
+  EXPECT_EQ(baseline.second.hits, kRepetitions - 1u);
+  EXPECT_EQ(bds.second.misses, 1u);
+  EXPECT_EQ(bds.second.hits, kRepetitions - 1u);
+  RecordProperty("baseline_geometry_us", baseline.first);
+  RecordProperty("bds_geometry_us", bds.first);
+  RecordProperty("baseline_cache_hits", baseline.second.hits);
+  RecordProperty("bds_cache_hits", bds.second.hits);
 }
 
 constexpr double kPi = 3.14159265358979323846;
@@ -198,6 +308,65 @@ iap::GnssEpoch make_epoch(const int n_sats) {
     epoch.sats.push_back(sat);
   }
   return epoch;
+}
+
+TEST(GnssSatelliteAdmissionTest, RequiresThreeEpochsAndRemovesImmediately) {
+  iap::GnssSatelliteAdmissionHysteresis admission(3);
+  auto epoch = make_epoch(5);
+  epoch.source_identity = 1u;
+  auto pending = admission.apply(&epoch);
+  EXPECT_EQ(pending.size(), 5u);
+  EXPECT_TRUE(std::none_of(epoch.sats.begin(), epoch.sats.end(),
+                           [](const auto& sat) { return sat.excluded; }));
+  EXPECT_TRUE(std::all_of(
+      epoch.sats.begin(), epoch.sats.end(), [](const auto& sat) {
+        return sat.admission_hysteresis_pending;
+      }));
+
+  epoch = make_epoch(5);
+  epoch.stamp = 100.5;
+  epoch.source_identity = 2u;
+  admission.apply(&epoch);
+  epoch = make_epoch(5);
+  epoch.stamp = 101.0;
+  epoch.source_identity = 3u;
+  pending = admission.apply(&epoch);
+  EXPECT_TRUE(pending.empty());
+  EXPECT_TRUE(std::none_of(epoch.sats.begin(), epoch.sats.end(),
+                           [](const auto& sat) { return sat.excluded; }));
+
+  epoch.sats.erase(epoch.sats.begin());
+  epoch.stamp = 101.5;
+  epoch.source_identity = 4u;
+  admission.apply(&epoch);
+  epoch = make_epoch(5);
+  epoch.stamp = 102.0;
+  epoch.source_identity = 5u;
+  pending = admission.apply(&epoch);
+  EXPECT_EQ(pending, std::vector<int>{300});
+  EXPECT_TRUE(epoch.sats.front().admission_hysteresis_pending);
+}
+
+TEST(GnssSatelliteAdmissionTest,
+     DuplicateEpochDoesNotAdvanceAndLongGapRestartsAdmission) {
+  iap::GnssSatelliteAdmissionHysteresis admission(3, 1.0);
+  auto epoch = make_epoch(5);
+  epoch.stamp = 10.0;
+  epoch.source_identity = 77u;
+  EXPECT_EQ(admission.apply(&epoch).size(), 5u);
+  auto duplicate = epoch;
+  EXPECT_EQ(admission.apply(&duplicate).size(), 5u);
+
+  epoch.stamp = 10.5;
+  epoch.source_identity = 78u;
+  EXPECT_EQ(admission.apply(&epoch).size(), 5u);
+  epoch.stamp = 11.0;
+  epoch.source_identity = 79u;
+  EXPECT_TRUE(admission.apply(&epoch).empty());
+
+  epoch.stamp = 13.0;
+  epoch.source_identity = 80u;
+  EXPECT_EQ(admission.apply(&epoch).size(), 5u);
 }
 
 iap::GnssEpoch make_epoch_from_geometry(
@@ -1278,6 +1447,44 @@ TEST(PredictorModuleTest,
                      snapshot.current.gnss_hpl);
     EXPECT_DOUBLE_EQ(point.prediction.gnss.anchor_vpl,
                      snapshot.current.gnss_vpl);
+  }
+}
+
+TEST(PredictorModuleTest,
+     ExecutionCommonSatelliteCoreFailsClosedWhenIntersectionIsTooSmall) {
+  auto params = make_params();
+  params.gnss.measured_epoch_support_radius_m = 0.45;
+  params.lidar.fim_params.fim_radius_m = 30.0;
+  iap::PredictorModule module(params);
+  module.set_observation_predicate(
+      [](const Eigen::Vector3d& position) {
+        return position.x() < 0.0 ? position.x() >= -10.0 - 1.0e-9
+                                  : position.x() <= 10.0 + 1.0e-9;
+      });
+  module.set_lidar_fim_primitives(make_lidar_primitives());
+  auto snapshot = make_snapshot(true, true);
+
+  iap::ForwardRiskBatchRequest request;
+  request.combined_snapshot_identity = "execution-common-core";
+  request.snapshot = snapshot;
+  request.hal = 1000.0;
+  request.val = 1000.0;
+  request.evaluation_time_s = snapshot.stamp;
+  request.satellite_set_policy =
+      iap::ForwardRiskSatelliteSetPolicy::COMMON_CORE;
+  request.points = {
+      {Eigen::Vector3d(-10.0, 0.0, 0.0), snapshot.stamp, 0.0, 1},
+      {Eigen::Vector3d(10.0, 0.0, 0.0), snapshot.stamp + 0.5, 0.5, 2}};
+
+  const auto result = module.queryForwardRiskBatch(request);
+
+  EXPECT_FALSE(result.complete);
+  EXPECT_EQ(result.failure_reason,
+            iap::ForwardRiskFailureReason::GNSS_LOCAL_USABLE_SATS_LT_MIN);
+  for (const auto& point : result.points) {
+    EXPECT_EQ(point.safety_state, iap::ForwardRiskSafetyState::UNKNOWN);
+    EXPECT_EQ(point.ranking_state,
+              iap::ForwardRiskRankingState::INCOMPLETE);
   }
 }
 

@@ -1,6 +1,7 @@
 #include <ego_planner/planner_manager.h>
 #include <ego_planner/ego_replan_fsm.h>
 #include <ego_planner/p0_occupancy_epoch_adapter.h>
+#include <ego_planner/p0_risk_grid_runtime.h>
 #include <ego_planner/p1_soft_fallback_policy.h>
 #include <ego_planner/p5_runtime_integrity_gate.h>
 #include <ego_planner/p4_terminal_stop.h>
@@ -403,7 +404,8 @@ class RuntimeAheadUnsafeProvider final : public iap::RiskPredictionProvider {
   }
 };
 
-std::shared_ptr<const iap::RiskGridSnapshot> makeP4SelectionSnapshot() {
+std::shared_ptr<const iap::RiskGridSnapshot> makeP4SelectionSnapshot(
+    const double stale_timeout_s = 100.0) {
   iap::RiskGridMapParams params;
   params.frame_id = "map";
   params.resolution_m = 0.5;
@@ -411,7 +413,7 @@ std::shared_ptr<const iap::RiskGridSnapshot> makeP4SelectionSnapshot() {
   params.size_y_m = 12.0;
   params.size_z_m = 4.0;
   params.horizons_s = {0.0, 5.0, 10.0};
-  params.stale_timeout_s = 100.0;
+  params.stale_timeout_s = stale_timeout_s;
   params.skip_occupied_voxels = false;
   iap::RiskGridMap grid(params);
   P4CorridorProvider provider;
@@ -429,7 +431,7 @@ std::shared_ptr<const iap::RiskGridSnapshot> makeRuntimeUnsafeSnapshot() {
   map_params.size_y_m = 12.0;
   map_params.size_z_m = 4.0;
   map_params.horizons_s = {0.0, 5.0, 10.0};
-  map_params.stale_timeout_s = 100.0;
+  map_params.stale_timeout_s = 1.0;
   map_params.skip_occupied_voxels = false;
   iap::RiskGridMap grid(map_params);
   RuntimeAheadUnsafeProvider provider;
@@ -466,6 +468,47 @@ std::function<iap::ForwardRiskBatchResult(
       }
       return out;
     };
+}
+
+std::shared_ptr<const ego_planner::P0ExecutionRiskSnapshot>
+makeP4ExecutionSnapshot(
+    const std::shared_ptr<const iap::RiskGridSnapshot>& risk,
+    std::function<iap::ForwardRiskBatchResult(
+        const iap::ForwardRiskBatchRequest&)> direct,
+    const double stamp_s = 10.0) {
+  auto occupancy = std::make_shared<ego_planner::P0OccupancyEpoch>();
+  occupancy->generation = risk->sourceIdentity().occupancy_generation;
+  occupancy->cloud_stamp_s = stamp_s;
+  occupancy->frame_id = "map";
+  occupancy->frame_contract_id = "map:test";
+  occupancy->diagnostic_query = [](const Eigen::Vector3d& position) {
+    iap::RiskOccupancyDiagnostic diagnostic;
+    diagnostic.available = position.allFinite();
+    diagnostic.observed = true;
+    diagnostic.state = iap::RiskOccupancyState::OBSERVED_FREE;
+    diagnostic.voxel_center = position;
+    diagnostic.frame_id = "map";
+    return diagnostic;
+  };
+  auto execution =
+      std::make_shared<ego_planner::P0ExecutionRiskSnapshot>();
+  execution->execution_snapshot_id = 71u;
+  execution->evaluation_time_s = stamp_s;
+  execution->publish_time_s = stamp_s;
+  execution->occupancy = occupancy;
+  execution->integrity_anchor.current.valid = true;
+  execution->integrity_anchor.current.stamp = stamp_s;
+  execution->integrity_anchor.current.hpl = 1.0;
+  execution->integrity_anchor.current.vpl = 1.0;
+  execution->integrity_anchor.current.hal = 10.0;
+  execution->integrity_anchor.current.val = 20.0;
+  execution->source_identity = risk->sourceIdentity();
+  execution->risk_policy = risk->params();
+  execution->frame_contract_id = "map:test";
+  execution->geometry_id = "map:test";
+  execution->predictor_algorithm_identity = "test_direct_v1";
+  execution->forward_risk_batch = std::move(direct);
+  return execution;
 }
 
 Eigen::MatrixXd p4Seed() {
@@ -643,6 +686,15 @@ TEST(P4ExecutionIntegrityTest,
 
   EXPECT_TRUE(ego_planner::p4CertifiedCurrentIntegritySafe(
       current, 10.5, 1.0));
+  EXPECT_TRUE(ego_planner::p4CertifiedCurrentIntegritySafe(
+      current, 10.5, std::numeric_limits<double>::infinity()));
+  current.stamp = 10.5000005;
+  EXPECT_TRUE(ego_planner::p4CertifiedCurrentIntegritySafe(
+      current, 10.5, 1.0));
+  current.stamp = 10.500002;
+  EXPECT_FALSE(ego_planner::p4CertifiedCurrentIntegritySafe(
+      current, 10.5, 1.0));
+  current.stamp = 10.0;
   EXPECT_FALSE(ego_planner::p4CertifiedCurrentIntegritySafe(
       current, 11.01, 1.0));
   current.hpl = 20.0;
@@ -929,7 +981,7 @@ TEST(P4ForwardTerminalLineageTest,
 
 TEST(P4ForwardTerminalLineageTest,
      SafeLimitedPrefixReceivesTerminalCheckedLimitedExecutionCertificate) {
-  const auto snapshot = makeP4SelectionSnapshot();
+  const auto snapshot = makeP4SelectionSnapshot(1.0);
   auto map = std::make_shared<GridMap>();
   GridMapTestAccess::configureNoCollision(map.get());
   const auto debug_path = p4LineageTestPath("forward_safe_prefix.csv");
@@ -942,9 +994,13 @@ TEST(P4ForwardTerminalLineageTest,
   auto optimizer = makeP4Optimizer(map, snapshot, debug_path.string(), 1);
 
   ego_planner::EGOPlannerManager manager;
+  manager.pp_.max_vel_ = 20.0;
+  manager.pp_.max_acc_ = 100.0;
   manager.setP4VerticalSliceOptimizerForTest(std::move(optimizer), map);
+  const auto execution_snapshot = makeP4ExecutionSnapshot(
+      snapshot, directRiskCallback(0.5));
   manager.setPlanningRiskContextForTest(
-      snapshot, 9.75, nullptr, directRiskCallback(0.5));
+      snapshot, 9.75, nullptr, directRiskCallback(0.5), execution_snapshot);
   manager.setLatestRiskSnapshotForTest(snapshot);
   auto decision = makeForwardDecision(
       snapshot, manager.planningRiskContext().planning_attempt_id);
@@ -1017,7 +1073,7 @@ TEST(P4ForwardTerminalLineageTest,
       "final_bspline_before_p5", 10.0));
   ASSERT_TRUE(manager.recordP4VerticalSliceLineage(
       "normal_publish_authorized", 10.1));
-  const auto& certificate = manager.p4ExecutionCertificate();
+  const auto certificate = manager.p4ExecutionCertificate();
   ASSERT_TRUE(certificate.valid);
   EXPECT_EQ(certificate.authority,
             ego_planner::P4ExecutionAuthority::LIMITED_PREFIX);
@@ -1048,7 +1104,9 @@ TEST(P4ForwardTerminalLineageTest,
   EXPECT_FALSE(grid_spike_rechecked.known_future_risk_unsafe);
 
   manager.setPlanningRiskContextForTest(
-      unsafe_snapshot, 10.3, nullptr, directRiskCallback(1.25));
+      unsafe_snapshot, 10.3, nullptr, directRiskCallback(1.25),
+      makeP4ExecutionSnapshot(
+          unsafe_snapshot, directRiskCallback(1.25), 10.3));
   const auto risk_revoke = manager.validateCommittedP4TrajectoryExecution(
       during_execution_s, commanded_position);
   EXPECT_FALSE(risk_revoke.allowed);
@@ -1067,6 +1125,48 @@ TEST(P4ForwardTerminalLineageTest,
   EXPECT_TRUE(at_endpoint.allowed) << at_endpoint.reason;
   EXPECT_TRUE(at_endpoint.endpoint_reached);
   EXPECT_EQ(at_endpoint.reason, "approved_endpoint_reached");
+
+  manager.setPlanningRiskContextForTest(
+      snapshot, 10.0, nullptr, directRiskCallback(0.5), execution_snapshot);
+  const double stale_during_execution_s = 11.1;
+  ASSERT_LT(stale_during_execution_s, certificate.execution_deadline_s);
+  const auto stale_commanded_position =
+      manager.local_data_.position_traj_.evaluateDeBoorT(
+          stale_during_execution_s -
+          manager.local_data_.start_time_.seconds());
+  const auto braking = manager.validateCommittedP4TrajectoryExecution(
+      stale_during_execution_s, stale_commanded_position);
+  EXPECT_TRUE(braking.allowed) << braking.reason;
+  EXPECT_TRUE(braking.failsafe_braking_available);
+  EXPECT_FALSE(braking.failsafe_braking_active);
+  EXPECT_EQ(manager.p4ExecutionCertificate().authority,
+            ego_planner::P4ExecutionAuthority::LIMITED_PREFIX_BRAKING);
+  EXPECT_EQ(manager.local_data_.traj_id_, 35);
+  EXPECT_EQ(manager.local_data_.start_time_.nanoseconds(), committed_start);
+  EXPECT_TRUE(manager.p4ExecutionCertificate().approved_endpoint.isApprox(
+      approved_prefix.back(), 1.0e-9));
+  const double braking_switch_s =
+      committed_start * 1.0e-9 +
+      manager.p4ExecutionCertificate().braking_anchor_time_s;
+  const auto braking_switch_position =
+      manager.local_data_.position_traj_.evaluateDeBoorT(
+          manager.p4ExecutionCertificate().braking_anchor_time_s);
+  const auto braking_activated =
+      manager.validateCommittedP4TrajectoryExecution(
+          braking_switch_s, braking_switch_position);
+  EXPECT_TRUE(braking_activated.allowed) << braking_activated.reason;
+  EXPECT_TRUE(braking_activated.failsafe_braking_active);
+  EXPECT_TRUE(braking_activated.failsafe_braking_activated);
+  EXPECT_GT(manager.local_data_.traj_id_, 35);
+  EXPECT_EQ(manager.local_data_.start_time_.nanoseconds(),
+            static_cast<int64_t>(std::llround(braking_switch_s * 1.0e9)));
+  EXPECT_TRUE(manager.p4ExecutionCertificate().approved_endpoint.isApprox(
+      approved_prefix.back(), 1.0e-8));
+  const auto braking_stop = manager.validateCommittedP4TrajectoryExecution(
+      manager.p4ExecutionCertificate().execution_deadline_s,
+      manager.p4ExecutionCertificate().approved_endpoint);
+  EXPECT_TRUE(braking_stop.allowed) << braking_stop.reason;
+  EXPECT_TRUE(braking_stop.endpoint_reached);
 
   const auto detail_rows = readCsvRows(std::filesystem::path(
       debug_path.string() + ".gnss_risk_detail.csv"));
@@ -1858,4 +1958,61 @@ TEST(P4ExecutionParameterContract, TrackingErrorLimitMustBeFiniteAndBounded)
       std::numeric_limits<double>::quiet_NaN()));
   EXPECT_TRUE(ego_planner::validP4TrackingErrorLimit(5.0));
   EXPECT_FALSE(ego_planner::validP4TrackingErrorLimit(5.1));
+}
+
+TEST(P4LimitedPrefixCommitmentPolicy,
+     RequiresTimeProgressAndNonWorseDirectRisk)
+{
+  ego_planner::P4LimitedPrefixReplacementInput input;
+  input.committed_execution_s = 0.99;
+  input.endpoint_progress_m = 1.0;
+  input.candidate_worst_risk = 0.7;
+  input.incumbent_worst_remaining_risk = 0.8;
+  std::string reason;
+  EXPECT_FALSE(ego_planner::shouldReplaceCommittedLimitedPrefix(
+      input, &reason));
+  EXPECT_EQ(reason, "minimum_commitment_time_not_met");
+
+  input.committed_execution_s = 1.0;
+  input.endpoint_progress_m = 0.49;
+  EXPECT_FALSE(ego_planner::shouldReplaceCommittedLimitedPrefix(
+      input, &reason));
+  EXPECT_EQ(reason, "minimum_endpoint_progress_not_met");
+
+  input.endpoint_progress_m = 0.5;
+  input.candidate_worst_risk = 0.81;
+  EXPECT_FALSE(ego_planner::shouldReplaceCommittedLimitedPrefix(
+      input, &reason));
+  EXPECT_EQ(reason, "candidate_does_not_strictly_dominate");
+
+  input.candidate_worst_risk = 0.8;
+  EXPECT_TRUE(ego_planner::shouldReplaceCommittedLimitedPrefix(
+      input, &reason));
+  EXPECT_EQ(reason, "strictly_dominating_safe_extension");
+
+  input.incumbent_valid = false;
+  input.committed_execution_s = 0.0;
+  EXPECT_TRUE(ego_planner::shouldReplaceCommittedLimitedPrefix(
+      input, &reason));
+}
+
+TEST(P4LimitedPrefixCommitmentPolicy,
+     BrakingCommitmentCannotBeReplannedAway)
+{
+  ego_planner::P4LimitedPrefixReplacementInput input;
+  input.failsafe_braking_active = true;
+  input.incumbent_valid = false;
+  input.committed_execution_s = 2.0;
+  input.endpoint_progress_m = 2.0;
+  input.candidate_worst_risk = 0.1;
+  input.incumbent_worst_remaining_risk = 0.9;
+  std::string reason;
+  EXPECT_FALSE(ego_planner::shouldReplaceCommittedLimitedPrefix(
+      input, &reason));
+  EXPECT_EQ(reason, "failsafe_braking_commitment_active");
+
+  input.endpoint_reached = true;
+  EXPECT_TRUE(ego_planner::shouldReplaceCommittedLimitedPrefix(
+      input, &reason));
+  EXPECT_EQ(reason, "incumbent_invalid");
 }

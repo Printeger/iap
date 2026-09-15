@@ -1,6 +1,7 @@
 #include <ego_planner/p0_risk_grid_runtime.h>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <ctime>
@@ -23,6 +24,7 @@
 #include <sensor_msgs/point_cloud2_iterator.hpp>
 
 namespace ego_planner {
+
 namespace {
 
 constexpr double kLightSpeed = 2.99792458e8;
@@ -237,12 +239,13 @@ class PredictorModuleRiskProvider final : public iap::RiskPredictionProvider {
       iap::RollingSpatialSourceProvenance source_provenance,
       iap::PredictorModule module,
       iap::IntegritySnapshot snapshot,
-      double evaluation_time_s, int worker_count, double hal_m, double val_m)
+      double evaluation_time_s, int worker_count, double hal_m, double val_m,
+      std::chrono::steady_clock::time_point deadline)
       : occupancy_owner_(std::move(occupancy_owner)),
         rolling_window_(rolling_window), snapshot_(std::move(snapshot)),
         evaluation_time_s_(evaluation_time_s),
         worker_count_(std::max(1, worker_count)),
-        hal_m_(hal_m), val_m_(val_m) {
+        hal_m_(hal_m), val_m_(val_m), deadline_(deadline) {
     iap::RollingSpatialRefreshInput input;
     input.geometry = std::move(geometry);
     input.module = std::move(module);
@@ -298,6 +301,12 @@ class PredictorModuleRiskProvider final : public iap::RiskPredictionProvider {
             for (std::size_t group_index = static_cast<std::size_t>(worker_id);
                  group_index < groups.size();
                  group_index += static_cast<std::size_t>(worker_count)) {
+              if (cancelled_.load(std::memory_order_relaxed) ||
+                  std::chrono::steady_clock::now() >= deadline_) {
+                cancelled_.store(true, std::memory_order_relaxed);
+                outcome.growth_valid = false;
+                return outcome;
+              }
               std::vector<iap::PredictorQueryInput> inputs;
               inputs.reserve(groups[group_index].size());
               for (const std::size_t index : groups[group_index]) {
@@ -362,7 +371,7 @@ class PredictorModuleRiskProvider final : public iap::RiskPredictionProvider {
       last_diagnostics_.fusion_advisory_invocations +=
           diagnostics.fusion_advisory_invocations;
     }
-    return growth_valid;
+    return growth_valid && !cancelled_.load(std::memory_order_relaxed);
   }
 
   const iap::PredictorBatchDiagnostics& diagnostics() const {
@@ -401,12 +410,15 @@ class PredictorModuleRiskProvider final : public iap::RiskPredictionProvider {
   std::string begin_failure_reason_ = "provider_refresh_failed";
   iap::RollingSpatialRefreshDiagnostics begin_diagnostics_;
   iap::PredictorBatchDiagnostics last_diagnostics_;
+  std::chrono::steady_clock::time_point deadline_;
+  std::atomic<bool> cancelled_{false};
 };
 
 class TimedRiskProvider final : public iap::RiskPredictionProvider {
  public:
-  explicit TimedRiskProvider(iap::RiskPredictionProvider* provider)
-      : provider_(provider) {}
+  TimedRiskProvider(iap::RiskPredictionProvider* provider,
+                    std::chrono::steady_clock::time_point deadline)
+      : provider_(provider), deadline_(deadline) {}
 
   bool batchQuery(const std::vector<iap::RiskPredictionQuery>& queries,
                   std::vector<iap::RiskPredictionResult>* results) override {
@@ -414,7 +426,7 @@ class TimedRiskProvider final : public iap::RiskPredictionProvider {
     const bool success = provider_ && provider_->batchQuery(queries, results);
     duration_ms_ += std::chrono::duration<double, std::milli>(
         std::chrono::steady_clock::now() - start).count();
-    return success;
+    return success && std::chrono::steady_clock::now() < deadline_;
   }
 
   double durationMs() const { return duration_ms_; }
@@ -422,6 +434,7 @@ class TimedRiskProvider final : public iap::RiskPredictionProvider {
  private:
   iap::RiskPredictionProvider* provider_ = nullptr;
   double duration_ms_ = 0.0;
+  std::chrono::steady_clock::time_point deadline_;
 };
 
 }  // namespace
@@ -454,6 +467,20 @@ P0RiskGridRuntime::Config P0RiskGridRuntime::declareAndReadConfig(
       "p0.horizons_s", std::vector<double>{0.0, 0.5, 1.0, 1.5, 2.0});
   config.grid.refresh_period_s =
       node->declare_parameter<double>("p0.refresh_period_s", 0.5);
+  config.execution_snapshot_period_s = node->declare_parameter<double>(
+      "p0.execution_snapshot_period_s", 0.05);
+  config.execution_batch_budget_ms = node->declare_parameter<double>(
+      "p0.execution_batch_budget_ms", 150.0);
+  config.risk_grid_build_budget_ms = node->declare_parameter<double>(
+      "p0.risk_grid_build_budget_ms", 500.0);
+  if (!std::isfinite(config.execution_snapshot_period_s) ||
+      config.execution_snapshot_period_s <= 0.0 ||
+      !std::isfinite(config.execution_batch_budget_ms) ||
+      config.execution_batch_budget_ms <= 0.0 ||
+      !std::isfinite(config.risk_grid_build_budget_ms) ||
+      config.risk_grid_build_budget_ms <= 0.0) {
+    throw std::invalid_argument("invalid P0 execution/grid scheduling budget");
+  }
   config.refresh_start_delay_s =
       node->declare_parameter<double>("p0.refresh_start_delay_s", 0.0);
   config.grid.stale_timeout_s =
@@ -542,6 +569,9 @@ P0RiskGridRuntime::Config P0RiskGridRuntime::declareAndReadConfig(
       "p0.gnss_pr_noise_base_m", 5.0);
   config.gnss_dop_noise_base_mps = node->declare_parameter<double>(
       "p0.gnss_dop_noise_base_mps", 0.5);
+  config.predictor_gnss_admission_epochs = std::max<int>(1,
+      static_cast<int>(node->declare_parameter<int>(
+          "p0.predictor.gnss.admission_epochs", 3)));
   if (!std::isfinite(config.gnss_pr_noise_base_m) ||
       config.gnss_pr_noise_base_m <= 0.0 ||
       !std::isfinite(config.gnss_dop_noise_base_mps) ||
@@ -861,7 +891,8 @@ P0RiskGridRuntime::P0RiskGridRuntime(
     : node_(std::move(node)),
       config_(std::move(config)),
       risk_grid_(config_.grid),
-      provider_(std::move(provider)) {
+      provider_(std::move(provider)),
+      gnss_satellite_admission_(config_.predictor_gnss_admission_epochs) {
   createRosInterfaces();
 }
 
@@ -876,6 +907,12 @@ std::shared_ptr<const P0PlanningSnapshot>
 P0RiskGridRuntime::acquirePlanningSnapshot() const {
   std::lock_guard<std::mutex> lock(planning_snapshot_mutex_);
   return planning_snapshot_;
+}
+
+std::shared_ptr<const P0ExecutionRiskSnapshot>
+P0RiskGridRuntime::acquireExecutionRiskSnapshot() const {
+  std::lock_guard<std::mutex> lock(planning_snapshot_mutex_);
+  return execution_snapshot_;
 }
 
 std::shared_ptr<const iap::RiskGridSnapshot>
@@ -895,8 +932,64 @@ bool P0RiskGridRuntime::gnssEpochFreshAt(
        age_s <= config_.gnss_epoch_max_age_s);
 }
 
+bool P0RiskGridRuntime::executionSnapshotFreshAt(
+    const std::shared_ptr<const P0ExecutionRiskSnapshot>& snapshot,
+    const double evaluation_time_s) const {
+  return snapshot && snapshot->freshAt(
+      evaluation_time_s, config_.gnss_epoch_max_age_s);
+}
+
+bool P0RiskGridRuntime::currentIntegrityForExecution(
+    const double evaluation_time_s,
+    iap::CurrentIntegrityState* current) const {
+  if (!current || !std::isfinite(evaluation_time_s)) {
+    return false;
+  }
+  std::lock_guard<std::mutex> lock(health_state_mutex_);
+  if (!current_integrity_seen_) {
+    return false;
+  }
+
+  // Input and planner callbacks are intentionally concurrent.  A callback for
+  // t+dt may therefore be visible while the planner is still checking the
+  // trajectory at t.  Use the newest causal sample, rather than rejecting the
+  // whole monitor as "from the future".  Keep the latest-field fallback for
+  // deterministic fixtures that seed state without invoking ROS callbacks.
+  const iap::CurrentIntegrityState* selected = nullptr;
+  bool selected_valid = false;
+  double selected_stamp_s = -std::numeric_limits<double>::infinity();
+  for (const auto& [generation, sample] : current_integrity_history_) {
+    (void)generation;
+    if (std::isfinite(sample.stamp) &&
+        sample.stamp <= evaluation_time_s + 1.0e-6 &&
+        sample.stamp >= selected_stamp_s) {
+      selected = &sample;
+      selected_valid = sample.valid;
+      selected_stamp_s = sample.stamp;
+    }
+  }
+  if (!selected && std::isfinite(latest_current_.stamp) &&
+      latest_current_.stamp <= evaluation_time_s + 1.0e-6) {
+    selected = &latest_current_;
+    selected_valid = latest_current_valid_ && latest_current_.valid;
+  }
+  if (!selected || !selected_valid || !std::isfinite(selected->stamp)) {
+    return false;
+  }
+  const double age_s = evaluation_time_s - selected->stamp;
+  if (age_s < -1.0e-6 ||
+      (config_.grid.stale_timeout_s >= 0.0 &&
+       age_s > config_.grid.stale_timeout_s)) {
+    return false;
+  }
+  *current = *selected;
+  return true;
+}
+
 bool P0RiskGridRuntime::refreshOnceForTest() {
+  synchronous_test_refresh_.store(true, std::memory_order_release);
   refreshTimerCallback();
+  synchronous_test_refresh_.store(false, std::memory_order_release);
   std::lock_guard<std::mutex> lock(health_state_mutex_);
   return last_refresh_succeeded_;
 }
@@ -995,6 +1088,8 @@ void P0RiskGridRuntime::createRosInterfaces() {
   predictor_input_callback_group_ =
       node_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
   map_input_callback_group_ =
+      node_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+  execution_snapshot_callback_group_ =
       node_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
   refresh_callback_group_ =
       node_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
@@ -1095,6 +1190,10 @@ void P0RiskGridRuntime::createRosInterfaces() {
         std::chrono::duration<double>(period_s),
         [this]() { refreshTimerCallback(); }, refresh_callback_group_);
   }
+  execution_snapshot_timer_ = node_->create_wall_timer(
+      std::chrono::duration<double>(config_.execution_snapshot_period_s),
+      [this]() { executionSnapshotTimerCallback(); },
+      execution_snapshot_callback_group_);
   // Health must remain observable while a full grid refresh is evaluating a
   // large predictor batch.  It intentionally publishes the latest snapshot
   // state rather than waiting for that batch to finish.
@@ -1102,6 +1201,265 @@ void P0RiskGridRuntime::createRosInterfaces() {
       std::chrono::duration<double>(period_s),
       [this]() { healthTimerCallback(); },
       health_callback_group_);
+}
+
+void P0RiskGridRuntime::executionSnapshotTimerCallback() {
+  // Test providers deliberately own their deterministic snapshot lifecycle in
+  // refreshOnceForTest().  The live channel below is production-only and is
+  // independent of dense RiskGrid construction.
+  if (!config_.enable_risk_grid || provider_ || !occupancy_epoch_factory_) {
+    return;
+  }
+  const auto build_start = std::chrono::steady_clock::now();
+  double evaluation_time_s = liveNowSeconds();
+  P0OccupancyEpochCapture capture = occupancy_epoch_factory_();
+  if (capture.status != P0OccupancyEpochCaptureStatus::VALID ||
+      !capture.epoch) {
+    return;
+  }
+  auto occupancy = std::make_shared<P0OccupancyEpoch>(
+      std::move(*capture.epoch));
+  if (config_.online_mapping_mode &&
+      std::isfinite(occupancy->cloud_stamp_s)) {
+    evaluation_time_s = std::max(
+        evaluation_time_s, occupancy->cloud_stamp_s);
+  }
+  if (!occupancy->diagnostic_query || !occupancy->los_owner ||
+      !occupancy->source_owner || !occupancy->live_source_owner ||
+      !occupancy->live_generation || occupancy->generation == 0u ||
+      occupancy->frame_id != "map" ||
+      !geometryMatchesRiskOverlay(occupancy->geometry, config_.grid, 5)) {
+    return;
+  }
+  const double occupancy_age_s =
+      evaluation_time_s - occupancy->cloud_stamp_s;
+  if (!std::isfinite(occupancy_age_s) || occupancy_age_s < -1.0e-6 ||
+      (config_.grid.stale_timeout_s >= 0.0 &&
+       occupancy_age_s > config_.grid.stale_timeout_s)) {
+    return;
+  }
+
+  iap::IntegritySnapshot integrity;
+  PredictorSourceCapture sources;
+  InputReadiness readiness;
+  if (!buildSnapshot(evaluation_time_s, &integrity, &sources, &readiness) ||
+      !integrity.current.valid ||
+      !std::isfinite(integrity.current.stamp) ||
+      evaluation_time_s < integrity.current.stamp ||
+      evaluation_time_s - integrity.current.stamp >
+          config_.grid.stale_timeout_s ||
+      !std::isfinite(integrity.current.hpl) ||
+      !std::isfinite(integrity.current.vpl) ||
+      !std::isfinite(integrity.current.hal) ||
+      !std::isfinite(integrity.current.val) ||
+      integrity.current.hpl >= integrity.current.hal ||
+      integrity.current.vpl >= integrity.current.val) {
+    return;
+  }
+
+  iap::PredictorParams predictor_params;
+  predictor_params.freshness.enabled = true;
+  predictor_params.freshness.max_odom_age_s =
+      config_.grid.stale_timeout_s;
+  predictor_params.freshness.max_integrity_age_s =
+      config_.grid.stale_timeout_s;
+  predictor_params.freshness.max_gnss_age_s = config_.gnss_epoch_max_age_s;
+  predictor_params.freshness.max_snapshot_age_s =
+      config_.grid.stale_timeout_s;
+  predictor_params.source_mode = config_.predictor_source_mode;
+  predictor_params.gnss.visibility_params.clearance_transition_m =
+      config_.predictor_gnss_clearance_transition_m;
+  predictor_params.gnss_epoch_policy = config_.predictor_gnss_epoch_policy;
+  predictor_params.gnss.measured_epoch_support_radius_m =
+      config_.predictor_gnss_measured_epoch_support_radius_m;
+  predictor_params.gnss.measured_epoch_integrity_max_delta_s =
+      config_.predictor_gnss_measured_epoch_integrity_max_delta_s;
+  predictor_params.fusion.conservative_max_with_gnss =
+      config_.predictor_conservative_max_with_gnss;
+  predictor_params.lidar.enable_legacy_observability =
+      config_.predictor_lidar_legacy_observability;
+  predictor_params.covariance_growth.sigma_grow_m_sqrt_s =
+      config_.predictor_sigma_grow_m_sqrt_s;
+  if (std::isfinite(config_.predictor_lidar_fim_radius_m) &&
+      config_.predictor_lidar_fim_radius_m > 0.0) {
+    predictor_params.lidar.fim_params.fim_radius_m =
+        config_.predictor_lidar_fim_radius_m;
+    predictor_params.lidar.fim_params.search_radius_m =
+        config_.predictor_lidar_fim_radius_m;
+  }
+
+  const auto trusted_support = occupancy->trusted_local_map_support;
+  iap::RiskGridSourceIdentity source_identity;
+  source_identity.occupancy_generation = occupancy->generation;
+  source_identity.occupancy_stamp_s = occupancy->cloud_stamp_s;
+  source_identity.prior_generation = sources.current_generation;
+  source_identity.prior_stamp_s = sources.current_stamp;
+  source_identity.gnss_generation = sources.gnss_epoch_generation;
+  source_identity.gnss_stamp_s = sources.gnss_epoch_stamp;
+  source_identity.gnss_epoch_identity =
+      integrity.current.gnss_epoch_identity;
+  source_identity.lidar_generation = occupancy->generation;
+  source_identity.lidar_stamp_s = occupancy->cloud_stamp_s;
+  source_identity.local_map_support_identity = trusted_support
+      ? trusted_support->identity() : "strict_observation";
+  std::ostringstream algorithm_identity;
+  algorithm_identity << std::setprecision(17)
+      << "forward_risk_v3;clearance_transition_m="
+      << config_.predictor_gnss_clearance_transition_m
+      << ";admission_epochs=" << config_.predictor_gnss_admission_epochs
+      << ";geometry_solver=sherman_morrison_v1"
+      << ";execution_satellite_set=common_core_v1";
+  source_identity.predictor_algorithm_identity = algorithm_identity.str();
+  source_identity.alert_limit_policy_id =
+      config_.grid.alert_limit_policy_id;
+  const std::string source_hash =
+      iap::canonicalRiskGridSourceIdentityHash(source_identity);
+  {
+    std::lock_guard<std::mutex> lock(planning_snapshot_mutex_);
+    if (execution_snapshot_ &&
+        iap::canonicalRiskGridSourceIdentityHash(
+            execution_snapshot_->source_identity) == source_hash &&
+        execution_snapshot_->frame_contract_id ==
+            occupancy->frame_contract_id &&
+        execution_snapshot_->geometry_id == occupancy->geometry.geometry_id &&
+        iap::canonicalRiskGridConfigHash(execution_snapshot_->risk_policy) ==
+            iap::canonicalRiskGridConfigHash(config_.grid)) {
+      return;
+    }
+  }
+
+  const auto map_points = occupancy->environment_occupied_voxel_centers;
+  if (!map_points) {
+    return;
+  }
+  iap::LidarFimPrimitiveGenerationDiagnostics fim_diagnostics;
+  std::shared_ptr<const std::vector<iap::LidarFimPrimitive>> fim_primitives;
+  bool reused_fim_primitives = false;
+  {
+    std::lock_guard<std::mutex> lock(lidar_predictor_input_mutex_);
+    if (latest_lidar_generation_ == occupancy->generation &&
+        latest_lidar_stamp_ == occupancy->cloud_stamp_s &&
+        sameSharedOwner(latest_lidar_map_points_, map_points) &&
+        latest_lidar_fim_primitives_) {
+      fim_primitives = latest_lidar_fim_primitives_;
+      fim_diagnostics = latest_lidar_fim_diagnostics_;
+      reused_fim_primitives = true;
+    }
+  }
+  if (!reused_fim_primitives) {
+    fim_primitives = iap::make_lidar_fim_primitives(
+        *map_points, nullptr, iap::LidarFimPrimitiveGenerationParams{},
+        &fim_diagnostics);
+  }
+  {
+    std::lock_guard<std::mutex> lock(lidar_predictor_input_mutex_);
+    if (occupancy->generation >= latest_lidar_generation_) {
+      latest_lidar_map_points_ = map_points;
+      latest_lidar_fim_primitives_ = fim_primitives;
+      latest_lidar_fim_diagnostics_ = fim_diagnostics;
+      latest_lidar_map_point_count_ = map_points->size();
+      latest_lidar_fim_primitive_count_ =
+          fim_primitives ? fim_primitives->size() : 0u;
+      latest_lidar_fim_valid_normal_count_ = static_cast<std::size_t>(
+          std::max(0, fim_diagnostics.lidar_pca_valid_normals));
+      latest_lidar_fim_fallback_reason_ = fim_diagnostics.fallback_reason;
+      latest_lidar_generation_ = occupancy->generation;
+      latest_lidar_stamp_ = occupancy->cloud_stamp_s;
+    }
+  }
+  auto module = std::make_shared<iap::PredictorModule>(predictor_params);
+  module->set_local_occupancy(occupancy->los_owner.get());
+  const auto observed_support_query = occupancy->diagnostic_query;
+  if (trusted_support) {
+    module->set_support_query(
+        [trusted_support](const Eigen::Vector3d& position,
+                          const double evaluation_time,
+                          const double query_time) {
+          return trusted_support->query(
+              position, evaluation_time, query_time);
+        });
+  } else {
+    module->set_observation_predicate(
+        [observed_support_query](const Eigen::Vector3d& position) {
+          const auto diagnostic = observed_support_query(position);
+          return diagnostic.available && diagnostic.observed &&
+                 diagnostic.state != iap::RiskOccupancyState::UNKNOWN;
+        });
+  }
+  module->set_lidar_map_points(map_points);
+  module->set_lidar_fim_primitives(fim_primitives);
+
+  auto execution = std::make_shared<P0ExecutionRiskSnapshot>();
+  execution->execution_snapshot_id =
+      next_execution_snapshot_id_.fetch_add(1, std::memory_order_relaxed);
+  if (execution->execution_snapshot_id == 0u) {
+    execution->execution_snapshot_id =
+        next_execution_snapshot_id_.fetch_add(1, std::memory_order_relaxed);
+  }
+  execution->evaluation_time_s = evaluation_time_s;
+  execution->occupancy = occupancy;
+  execution->integrity_anchor = integrity;
+  execution->source_identity = source_identity;
+  execution->risk_policy = config_.grid;
+  execution->gnss_max_age_s = config_.gnss_epoch_max_age_s;
+  execution->risk_policy.geometry_id = occupancy->geometry.geometry_id;
+  execution->lidar_generation = occupancy->generation;
+  execution->lidar_stamp_s = occupancy->cloud_stamp_s;
+  execution->frame_contract_id = occupancy->frame_contract_id;
+  execution->geometry_id = occupancy->geometry.geometry_id;
+  execution->predictor_algorithm_identity =
+      source_identity.predictor_algorithm_identity;
+  const double hal = config_.predictor_hal_m;
+  const double val = config_.predictor_val_m;
+  const double batch_budget_ms = config_.execution_batch_budget_ms;
+  execution->forward_risk_batch =
+      [module, occupancy, integrity, hal, val, batch_budget_ms](
+          const iap::ForwardRiskBatchRequest& input) {
+        (void)occupancy;
+        iap::ForwardRiskBatchRequest request = input;
+        request.snapshot = integrity;
+        request.hal = hal;
+        request.val = val;
+        request.compute_budget_ms =
+            std::isfinite(request.compute_budget_ms) &&
+                request.compute_budget_ms > 0.0
+            ? std::min(request.compute_budget_ms, batch_budget_ms)
+            : batch_budget_ms;
+        return module->queryForwardRiskBatch(request);
+      };
+  execution->diagnostic_forward_risk_batch =
+      [module, occupancy, hal, val, batch_budget_ms](
+          const iap::ForwardRiskBatchRequest& input) {
+        (void)occupancy;
+        iap::ForwardRiskBatchRequest request = input;
+        request.hal = hal;
+        request.val = val;
+        request.compute_budget_ms =
+            std::isfinite(request.compute_budget_ms) &&
+                request.compute_budget_ms > 0.0
+            ? std::min(request.compute_budget_ms, batch_budget_ms)
+            : batch_budget_ms;
+        return module->queryForwardRiskBatch(request);
+      };
+  execution->publish_time_s = liveNowSeconds();
+  if (!execution->freshAt(
+          execution->publish_time_s, config_.gnss_epoch_max_age_s)) {
+    return;
+  }
+  {
+    std::lock_guard<std::mutex> lock(planning_snapshot_mutex_);
+    execution_snapshot_ = execution;
+  }
+  {
+    std::lock_guard<std::mutex> lock(health_state_mutex_);
+    last_execution_snapshot_id_ = execution->execution_snapshot_id;
+    last_execution_snapshot_evaluation_stamp_s_ =
+        execution->evaluation_time_s;
+    last_execution_snapshot_publish_stamp_s_ = execution->publish_time_s;
+    last_execution_snapshot_publish_latency_ms_ =
+        std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - build_start).count();
+  }
 }
 
 void P0RiskGridRuntime::healthTimerCallback() {
@@ -1154,6 +1512,20 @@ void P0RiskGridRuntime::refreshTimerCallback() {
     return;
   }
   const auto refresh_start = std::chrono::steady_clock::now();
+  // The public budget ends at the atomic RiskGrid commit.  Keep a small
+  // return-path allowance so the measured build duration cannot cross the
+  // limit immediately after a just-in-budget commit.  Planning-snapshot
+  // binding and health publication happen after this independently measured
+  // build and do not delay availability of the committed grid.
+  const double risk_grid_commit_reserve_ms = std::min(
+      10.0, std::max(0.0, 0.02 * config_.risk_grid_build_budget_ms));
+  const double risk_grid_compute_budget_ms = std::max(
+      0.0, config_.risk_grid_build_budget_ms -
+               risk_grid_commit_reserve_ms);
+  const auto risk_grid_deadline = refresh_start +
+      std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+          std::chrono::duration<double, std::milli>(
+              risk_grid_compute_budget_ms));
   const double refresh_start_steady_s = steadyNowSeconds();
   double now_s = liveNowSeconds();
   std::optional<P0OccupancyEpoch> occupancy_epoch;
@@ -1198,23 +1570,38 @@ void P0RiskGridRuntime::refreshTimerCallback() {
           occupancy_epoch.reset();
         } else {
           iap::LidarFimPrimitiveGenerationDiagnostics diagnostics;
-          auto primitives = iap::make_lidar_fim_primitives(
-              *points, nullptr, iap::LidarFimPrimitiveGenerationParams{},
-              &diagnostics);
+          std::shared_ptr<const std::vector<iap::LidarFimPrimitive>>
+              primitives;
           {
             std::lock_guard<std::mutex> lock(lidar_predictor_input_mutex_);
-            latest_lidar_map_points_ = points;
-            latest_lidar_fim_primitives_ = primitives;
-            latest_lidar_fim_diagnostics_ = diagnostics;
-            latest_lidar_map_point_count_ = points->size();
-            latest_lidar_fim_primitive_count_ =
-                primitives ? primitives->size() : 0u;
-            latest_lidar_fim_valid_normal_count_ =
-                static_cast<std::size_t>(
-                    std::max(0, diagnostics.lidar_pca_valid_normals));
-            latest_lidar_fim_fallback_reason_ = diagnostics.fallback_reason;
-            latest_lidar_generation_ = occupancy_epoch->generation;
-            latest_lidar_stamp_ = occupancy_epoch->cloud_stamp_s;
+            if (latest_lidar_generation_ == occupancy_epoch->generation &&
+                latest_lidar_stamp_ == occupancy_epoch->cloud_stamp_s &&
+                latest_lidar_fim_primitives_) {
+              primitives = latest_lidar_fim_primitives_;
+              diagnostics = latest_lidar_fim_diagnostics_;
+            }
+          }
+          if (!primitives) {
+            primitives = iap::make_lidar_fim_primitives(
+                *points, nullptr, iap::LidarFimPrimitiveGenerationParams{},
+                &diagnostics);
+          }
+          {
+            std::lock_guard<std::mutex> lock(lidar_predictor_input_mutex_);
+            if (occupancy_epoch->generation >= latest_lidar_generation_) {
+              latest_lidar_map_points_ = points;
+              latest_lidar_fim_primitives_ = primitives;
+              latest_lidar_fim_diagnostics_ = diagnostics;
+              latest_lidar_map_point_count_ = points->size();
+              latest_lidar_fim_primitive_count_ =
+                  primitives ? primitives->size() : 0u;
+              latest_lidar_fim_valid_normal_count_ =
+                  static_cast<std::size_t>(
+                      std::max(0, diagnostics.lidar_pca_valid_normals));
+              latest_lidar_fim_fallback_reason_ = diagnostics.fallback_reason;
+              latest_lidar_generation_ = occupancy_epoch->generation;
+              latest_lidar_stamp_ = occupancy_epoch->cloud_stamp_s;
+            }
           }
           {
             std::lock_guard<std::mutex> lock(health_state_mutex_);
@@ -1519,6 +1906,7 @@ void P0RiskGridRuntime::refreshTimerCallback() {
           rolling_occupancy_owner_ && rolling_raw_occupancy_identity_ &&
           rolling_occupancy_source_owner_ &&
           rolling_occupancy_geometry_.valid() &&
+          !rolling_occupancy_frame_contract_id_.empty() &&
           rolling_occupancy_generation_ != 0u &&
           std::isfinite(rolling_occupancy_stamp_) &&
           rolling_occupancy_content_identity_ != 0u;
@@ -1527,6 +1915,7 @@ void P0RiskGridRuntime::refreshTimerCallback() {
           static_cast<bool>(rolling_raw_occupancy_identity_) ||
           static_cast<bool>(rolling_occupancy_source_owner_) ||
           rolling_occupancy_geometry_.valid() ||
+          !rolling_occupancy_frame_contract_id_.empty() ||
           rolling_occupancy_generation_ != 0u ||
           std::isfinite(rolling_occupancy_stamp_) ||
           rolling_occupancy_content_identity_ != 0u;
@@ -1547,6 +1936,8 @@ void P0RiskGridRuntime::refreshTimerCallback() {
         committed_base.raw_identity = rolling_raw_occupancy_identity_;
         committed_base.source_owner = rolling_occupancy_source_owner_;
         committed_base.geometry = rolling_occupancy_geometry_;
+        committed_base.frame_contract_id =
+            rolling_occupancy_frame_contract_id_;
         committed_base.generation = rolling_occupancy_generation_;
         committed_base.cloud_stamp_s = rolling_occupancy_stamp_;
         committed_base.frame_id = rolling_raw_occupancy_identity_->frameId();
@@ -1696,7 +2087,8 @@ void P0RiskGridRuntime::refreshTimerCallback() {
         std::move(module), snapshot,
         now_s,
         config_.predictor_effective_worker_count,
-        config_.predictor_hal_m, config_.predictor_val_m);
+        config_.predictor_hal_m, config_.predictor_val_m,
+        risk_grid_deadline);
     predictor_provider = owned_predictor_provider.get();
     local_provider = std::move(owned_predictor_provider);
     provider = local_provider.get();
@@ -1771,7 +2163,10 @@ void P0RiskGridRuntime::refreshTimerCallback() {
          validate_lidar_spatial_source, validate_lidar_legacy_source,
          captured_predictor_sources, captured_lidar_generation,
          captured_lidar_stamp, captured_lidar_map_points,
-         captured_lidar_fim_primitives]() {
+         captured_lidar_fim_primitives, risk_grid_deadline]() {
+          if (std::chrono::steady_clock::now() >= risk_grid_deadline) {
+            return iap::RiskGridSourceValidation::COMPUTE_BUDGET_EXCEEDED;
+          }
           if (!captured_occupancy_source_owner ||
               !live_occupancy_source_owner || !live_occupancy_generation ||
               captured_occupancy_generation == 0u) {
@@ -1858,7 +2253,7 @@ void P0RiskGridRuntime::refreshTimerCallback() {
           return iap::RiskGridSourceValidation::VALID;
         };
   }
-  TimedRiskProvider timed_provider(provider);
+  TimedRiskProvider timed_provider(provider, risk_grid_deadline);
   iap::RiskGridSourceIdentity source_identity;
   source_identity.occupancy_generation = occupancy_epoch
       ? occupancy_epoch->generation : 0u;
@@ -1882,12 +2277,103 @@ void P0RiskGridRuntime::refreshTimerCallback() {
   {
     std::ostringstream predictor_identity;
     predictor_identity << std::setprecision(17)
-        << "forward_risk_v2;clearance_transition_m="
-        << config_.predictor_gnss_clearance_transition_m;
+        << "forward_risk_v3;clearance_transition_m="
+        << config_.predictor_gnss_clearance_transition_m
+        << ";admission_epochs=" << config_.predictor_gnss_admission_epochs
+        << ";geometry_solver=sherman_morrison_v1"
+        << ";execution_satellite_set=common_core_v1";
     source_identity.predictor_algorithm_identity = predictor_identity.str();
   }
   source_identity.alert_limit_policy_id =
       config_.grid.alert_limit_policy_id;
+  std::shared_ptr<const P0ExecutionRiskSnapshot> published_execution;
+  if (forward_risk_module && forward_risk_occupancy_owner &&
+      occupancy_epoch) {
+    auto execution = std::make_shared<P0ExecutionRiskSnapshot>();
+    execution->execution_snapshot_id = next_execution_snapshot_id_++;
+    if (execution->execution_snapshot_id == 0u) {
+      execution->execution_snapshot_id = next_execution_snapshot_id_++;
+    }
+    execution->evaluation_time_s = now_s;
+    execution->publish_time_s = liveNowSeconds();
+    execution->occupancy =
+        std::make_shared<P0OccupancyEpoch>(*occupancy_epoch);
+    execution->integrity_anchor = snapshot;
+    execution->source_identity = source_identity;
+    execution->risk_policy = config_.grid;
+    execution->gnss_max_age_s = config_.gnss_epoch_max_age_s;
+    execution->lidar_generation = captured_lidar_generation;
+    execution->lidar_stamp_s = captured_lidar_stamp;
+    execution->geometry_id = config_.grid.geometry_id;
+    execution->predictor_algorithm_identity =
+        source_identity.predictor_algorithm_identity;
+    // The collision validator retains the producer-owned frozen epoch and
+    // checks its frame contract at commit time. The direct risk snapshot
+    // binds the same planner-map geometry without dereferencing that opaque
+    // plan_env type here.
+    execution->frame_contract_id = occupancy_epoch->frame_contract_id;
+    execution->forward_risk_batch =
+        [forward_risk_module, forward_risk_occupancy_owner, snapshot,
+         hal = config_.predictor_hal_m,
+         val = config_.predictor_val_m,
+         budget_ms = config_.execution_batch_budget_ms](
+            const iap::ForwardRiskBatchRequest& input) {
+          (void)forward_risk_occupancy_owner;
+          iap::ForwardRiskBatchRequest request = input;
+          request.snapshot = snapshot;
+          request.hal = hal;
+          request.val = val;
+          request.compute_budget_ms =
+              std::isfinite(request.compute_budget_ms) &&
+                  request.compute_budget_ms > 0.0
+              ? std::min(request.compute_budget_ms, budget_ms)
+              : budget_ms;
+          return forward_risk_module->queryForwardRiskBatch(request);
+        };
+    execution->diagnostic_forward_risk_batch =
+        [forward_risk_module, forward_risk_occupancy_owner,
+         hal = config_.predictor_hal_m,
+         val = config_.predictor_val_m,
+         budget_ms = config_.execution_batch_budget_ms](
+            const iap::ForwardRiskBatchRequest& input) {
+          (void)forward_risk_occupancy_owner;
+          iap::ForwardRiskBatchRequest request = input;
+          request.hal = hal;
+          request.val = val;
+          request.compute_budget_ms =
+              std::isfinite(request.compute_budget_ms) &&
+                  request.compute_budget_ms > 0.0
+              ? std::min(request.compute_budget_ms, budget_ms)
+              : budget_ms;
+          return forward_risk_module->queryForwardRiskBatch(request);
+        };
+    published_execution = execution;
+    // A live production runtime has a separate 50 ms execution channel.  The
+    // grid-bound object remains attached to this planning generation for
+    // search reproducibility, but must never overwrite the newer execution
+    // authority merely because a dense grid happened to start.
+    if (!execution_snapshot_timer_ || provider_ ||
+        synchronous_test_refresh_.load(std::memory_order_acquire)) {
+      {
+        std::lock_guard<std::mutex> lock(planning_snapshot_mutex_);
+        if (!execution_snapshot_ ||
+            execution_snapshot_->execution_snapshot_id <
+                execution->execution_snapshot_id) {
+          execution_snapshot_ = execution;
+        }
+      }
+      {
+        std::lock_guard<std::mutex> lock(health_state_mutex_);
+        last_execution_snapshot_id_ = execution->execution_snapshot_id;
+        last_execution_snapshot_evaluation_stamp_s_ =
+            execution->evaluation_time_s;
+        last_execution_snapshot_publish_stamp_s_ = execution->publish_time_s;
+        last_execution_snapshot_publish_latency_ms_ =
+            std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - refresh_start).count();
+      }
+    }
+  }
   bool refresh_succeeded = false;
   if (occupancy_diagnostic_query) {
     refresh_succeeded = risk_grid_.refreshFromProvider(
@@ -1898,6 +2384,9 @@ void P0RiskGridRuntime::refreshTimerCallback() {
     refresh_succeeded = risk_grid_.refreshFromProvider(
         snapshot.p_wb, now_s, timed_provider, occupancy_predicate, &reason);
   }
+  const double risk_grid_build_elapsed_ms =
+      std::chrono::duration<double, std::milli>(
+          std::chrono::steady_clock::now() - refresh_start).count();
   const auto viz_snapshot = risk_grid_.acquireSnapshot();
   if (refresh_succeeded && viz_snapshot) {
     const auto& identity = viz_snapshot->sourceIdentity();
@@ -1907,6 +2396,7 @@ void P0RiskGridRuntime::refreshTimerCallback() {
     if (occupancy_identity_matches) {
       auto planning = std::make_shared<P0PlanningSnapshot>();
       planning->risk = viz_snapshot;
+      planning->execution = published_execution;
       planning->integrity_anchor = snapshot;
       planning->gnss_hard_occlusion = forward_gnss_hard_occlusion;
       planning->gnss_support_ray_length_m =
@@ -1915,7 +2405,12 @@ void P0RiskGridRuntime::refreshTimerCallback() {
         planning->occupancy =
             std::make_shared<P0OccupancyEpoch>(*occupancy_epoch);
       }
-      if (forward_risk_module && forward_risk_occupancy_owner) {
+      if (published_execution) {
+        planning->forward_risk_batch =
+            published_execution->forward_risk_batch;
+        planning->diagnostic_forward_risk_batch =
+            published_execution->diagnostic_forward_risk_batch;
+      } else if (forward_risk_module && forward_risk_occupancy_owner) {
         planning->forward_risk_batch =
             [forward_risk_module, forward_risk_occupancy_owner, snapshot,
              hal = config_.predictor_hal_m,
@@ -1963,6 +2458,8 @@ void P0RiskGridRuntime::refreshTimerCallback() {
       rolling_raw_occupancy_identity_ = occupancy_epoch->raw_identity;
       rolling_occupancy_source_owner_ = occupancy_epoch->source_owner;
       rolling_occupancy_geometry_ = occupancy_epoch->geometry;
+      rolling_occupancy_frame_contract_id_ =
+          occupancy_epoch->frame_contract_id;
       rolling_occupancy_generation_ = occupancy_epoch->generation;
       rolling_occupancy_stamp_ = occupancy_epoch->cloud_stamp_s;
       rolling_occupancy_content_identity_ =
@@ -1976,8 +2473,7 @@ void P0RiskGridRuntime::refreshTimerCallback() {
     std::lock_guard<std::mutex> health_lock(health_state_mutex_);
     last_grid_stamp_s_ = viz_snapshot ? viz_snapshot->stamp_s()
                                       : std::numeric_limits<double>::quiet_NaN();
-    last_refresh_elapsed_ms_ = std::chrono::duration<double, std::milli>(
-        std::chrono::steady_clock::now() - refresh_start).count();
+    last_refresh_elapsed_ms_ = risk_grid_build_elapsed_ms;
     last_provider_batch_duration_ms_ = timed_provider.durationMs();
     if (predictor_provider)
     {
@@ -2097,6 +2593,43 @@ void P0RiskGridRuntime::publishHealth(const iap::RiskGridHealth& health,
   const auto& integrity_anchor = anchor_matches_health
       ? planning_snapshot->integrity_anchor.current
       : iap::CurrentIntegrityState{};
+  const auto active_execution = acquireExecutionRiskSnapshot();
+  const bool source_data_gap =
+      !readiness.odom_fresh || !readiness.current_integrity_fresh ||
+      !readiness.gnss_epoch_fresh || !readiness.map_fresh;
+  const bool occupancy_build_lag =
+      snapshot_failure_reason.find("occupancy") != std::string::npos;
+  // A snapshot build duration is not a queue delay. We only claim queue lag
+  // when all source data is ready but no immutable execution snapshot has
+  // ever reached the atomic publication slot.
+  const bool snapshot_queue_lag =
+      !source_data_gap && !occupancy_build_lag && !active_execution;
+  const bool risk_grid_build_lag =
+      snapshot_failure_reason == "risk_grid_build_budget_exceeded" ||
+      (std::isfinite(state.refresh_elapsed_ms) &&
+       state.refresh_elapsed_ms > config_.risk_grid_build_budget_ms);
+  const char* latency_primary_cause = source_data_gap
+      ? "SOURCE_DATA_GAP"
+      : occupancy_build_lag
+          ? "OCCUPANCY_BUILD_LAG"
+          : snapshot_queue_lag
+              ? "SNAPSHOT_QUEUE_LAG"
+              : risk_grid_build_lag ? "RISK_GRID_BUILD_LAG" : "NONE";
+  std::vector<std::string> latency_contributors;
+  if (source_data_gap) latency_contributors.emplace_back("SOURCE_DATA_GAP");
+  if (occupancy_build_lag)
+    latency_contributors.emplace_back("OCCUPANCY_BUILD_LAG");
+  if (snapshot_queue_lag)
+    latency_contributors.emplace_back("SNAPSHOT_QUEUE_LAG");
+  if (risk_grid_build_lag)
+    latency_contributors.emplace_back("RISK_GRID_BUILD_LAG");
+  std::ostringstream latency_contributors_json;
+  latency_contributors_json << '[';
+  for (std::size_t index = 0; index < latency_contributors.size(); ++index) {
+    if (index > 0) latency_contributors_json << ',';
+    latency_contributors_json << jsonString(latency_contributors[index]);
+  }
+  latency_contributors_json << ']';
   std::ostringstream oss;
   oss << "{"
       << "\"refresh_attempt_id\":" << evidence.refresh_attempt_id << ","
@@ -2239,6 +2772,13 @@ void P0RiskGridRuntime::publishHealth(const iap::RiskGridHealth& health,
       << "\"refresh_queue_delay_ms\":" << jsonNumber(state.refresh_queue_delay_ms) << ","
       << "\"provider_batch_duration_ms\":" << jsonNumber(state.provider_batch_duration_ms) << ","
       << "\"generation_interval_ms\":" << jsonNumber(state.generation_interval_ms) << ","
+      << "\"execution_snapshot_id\":" << state.execution_snapshot_id << ","
+      << "\"execution_snapshot_evaluation_stamp_s\":"
+      << jsonNumber(state.execution_snapshot_evaluation_stamp_s) << ","
+      << "\"execution_snapshot_publish_stamp_s\":"
+      << jsonNumber(state.execution_snapshot_publish_stamp_s) << ","
+      << "\"execution_snapshot_publish_latency_ms\":"
+      << jsonNumber(state.execution_snapshot_publish_latency_ms) << ","
       << "\"input_callback_age_s\":" << jsonNumber(state.input_callback_age_s) << ","
       << "\"input_callback_count\":" << state.input_callback_count << ","
       << "\"health_callback_count\":" << state.health_callback_count << ","
@@ -2318,6 +2858,19 @@ void P0RiskGridRuntime::publishHealth(const iap::RiskGridHealth& health,
       << jsonString(state.predictor_spatial_invalidation_reason) << ","
       << "\"predictor_requested_worker_count\":" << config_.predictor_requested_worker_count << ","
       << "\"predictor_effective_worker_count\":" << config_.predictor_effective_worker_count << ","
+      << "\"risk_grid_build_budget_ms\":"
+      << jsonNumber(config_.risk_grid_build_budget_ms) << ","
+      << "\"execution_snapshot_period_s\":"
+      << jsonNumber(config_.execution_snapshot_period_s) << ","
+      << "\"execution_batch_budget_ms\":"
+      << jsonNumber(config_.execution_batch_budget_ms) << ","
+      << "\"execution_frame_contract_id\":"
+      << jsonString(active_execution
+                        ? active_execution->frame_contract_id : "") << ","
+      << "\"latency_contributors\":"
+      << latency_contributors_json.str() << ","
+      << "\"latency_primary_cause\":"
+      << jsonString(latency_primary_cause) << ","
       << "\"reason\":" << jsonString(out_health.reason)
       << "}";
   std_msgs::msg::String msg;
@@ -2394,6 +2947,13 @@ P0RiskGridRuntime::healthPublicationStateSnapshot() const {
   state.refresh_queue_delay_ms = last_refresh_queue_delay_ms_;
   state.provider_batch_duration_ms = last_provider_batch_duration_ms_;
   state.generation_interval_ms = last_generation_interval_ms_;
+  state.execution_snapshot_id = last_execution_snapshot_id_;
+  state.execution_snapshot_evaluation_stamp_s =
+      last_execution_snapshot_evaluation_stamp_s_;
+  state.execution_snapshot_publish_stamp_s =
+      last_execution_snapshot_publish_stamp_s_;
+  state.execution_snapshot_publish_latency_ms =
+      last_execution_snapshot_publish_latency_ms_;
   state.process_cpu_delta_ms = last_process_cpu_delta_ms_;
   state.health_callback_duration_ms = last_health_callback_duration_ms_;
   state.health_callback_queue_delay_ms = last_health_callback_queue_delay_ms_;
@@ -2632,6 +3192,13 @@ void P0RiskGridRuntime::integrityCallback(
   current_integrity_seen_ = true;
   latest_current_ = currentFromMsg(*msg);
   latest_current_valid_ = latest_current_.valid;
+  current_integrity_history_.emplace_back(
+      latest_current_generation_, latest_current_);
+  constexpr std::size_t kMaxCurrentIntegrityHistory = 512u;
+  while (current_integrity_history_.size() >
+         kMaxCurrentIntegrityHistory) {
+    current_integrity_history_.pop_front();
+  }
 }
 
 void P0RiskGridRuntime::rangeCallback(
@@ -2760,6 +3327,7 @@ void P0RiskGridRuntime::rangeCallback(
 
   {
     std::lock_guard<std::mutex> health_lock(health_state_mutex_);
+    gnss_satellite_admission_.apply(&epoch);
     advanceNonzeroGeneration(&latest_gnss_epoch_generation_);
     gnss_epoch_seen_ = true;
     latest_gnss_epoch_satellite_count_ =

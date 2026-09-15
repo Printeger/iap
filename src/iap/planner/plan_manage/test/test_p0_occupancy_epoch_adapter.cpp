@@ -39,6 +39,7 @@ struct FakeFrozenOccupancyEpoch {
   double resolution_m = 1.0;
   std::string frame_id;
   std::string geometry_id = "planning_lattice_v1:test";
+  std::string frame_contract_id = "planner_map_contract:test";
   double cloud_stamp_s = 0.0;
   uint64_t generation = 0;
 };
@@ -88,6 +89,7 @@ TEST(P0OccupancyEpochAdapterTest,
   EXPECT_TRUE(adapted->raw_occupied_voxel_centers->empty());
   EXPECT_TRUE(adapted->geometry.valid());
   EXPECT_EQ(adapted->geometry.geometry_id, "planning_lattice_v1:test");
+  EXPECT_EQ(adapted->frame_contract_id, "planner_map_contract:test");
   EXPECT_TRUE(adapted->geometry.origin_w.isApprox(
       Eigen::Vector3d(0.35, -0.2, 0.6)));
 

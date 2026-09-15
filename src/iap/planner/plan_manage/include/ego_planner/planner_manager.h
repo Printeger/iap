@@ -3,6 +3,7 @@
 
 #include <stdlib.h>
 
+#include <atomic>
 #include <cstdint>
 #include <cmath>
 #include <functional>
@@ -28,6 +29,7 @@
 namespace ego_planner
 {
   struct P0PlanningSnapshot;
+  struct P0ExecutionRiskSnapshot;
 
   inline bool validP4TrackingErrorLimit(const double limit_m)
   {
@@ -39,6 +41,7 @@ namespace ego_planner
   {
     FORMAL_RISK_SELECTED = 0,
     LIMITED_PREFIX,
+    LIMITED_PREFIX_BRAKING,
     ADVISORY,
   };
 
@@ -50,6 +53,22 @@ namespace ego_planner
     RISK_GRID_INTERPOLATION,
     MIXED,
   };
+
+  struct P4LimitedPrefixReplacementInput
+  {
+    double committed_execution_s = 0.0;
+    double endpoint_progress_m = 0.0;
+    double candidate_worst_risk = std::numeric_limits<double>::infinity();
+    double incumbent_worst_remaining_risk =
+        std::numeric_limits<double>::infinity();
+    bool incumbent_valid = true;
+    bool endpoint_reached = false;
+    bool failsafe_braking_active = false;
+  };
+
+  bool shouldReplaceCommittedLimitedPrefix(
+      const P4LimitedPrefixReplacementInput &input,
+      std::string *reason = nullptr);
 
   struct P4GenerationBoundarySignature
   {
@@ -100,7 +119,27 @@ namespace ego_planner
     double terminal_acceleration_mps2 = std::numeric_limits<double>::infinity();
     double braking_distance_m = std::numeric_limits<double>::infinity();
     P4ExecutionAuthority authority = P4ExecutionAuthority::LIMITED_PREFIX;
+    uint64_t execution_snapshot_id = 0;
     P4ForwardSnapshotIdentity snapshot_identity;
+    int parent_trajectory_id = 0;
+    int64_t parent_start_time_ns = 0;
+    uint64_t braking_certificate_id = 0;
+    double braking_anchor_time_s =
+        std::numeric_limits<double>::quiet_NaN();
+  };
+
+  struct P4BrakingAnchor
+  {
+    double trajectory_time_s = 0.0;
+    Eigen::Vector3d position = Eigen::Vector3d::Zero();
+    Eigen::Vector3d velocity = Eigen::Vector3d::Zero();
+    Eigen::Vector3d acceleration = Eigen::Vector3d::Zero();
+    UniformBspline trajectory;
+    double duration_s = 0.0;
+    std::string control_points_hash;
+    std::string knot_vector_hash;
+    std::string risk_query_lattice_hash;
+    uint64_t braking_certificate_id = 0;
   };
 
   struct P4ExecutionCheckDiagnostics
@@ -114,6 +153,9 @@ namespace ego_planner
     bool current_integrity_safe = false;
     bool remaining_risk_support_complete = false;
     bool known_future_risk_unsafe = false;
+    bool failsafe_braking_available = false;
+    bool failsafe_braking_active = false;
+    bool failsafe_braking_activated = false;
     double remaining_time_s = std::numeric_limits<double>::quiet_NaN();
     double tracking_error_m = std::numeric_limits<double>::quiet_NaN();
     double terminal_speed_mps = std::numeric_limits<double>::quiet_NaN();
@@ -133,6 +175,8 @@ namespace ego_planner
     double violation_vpl_m = std::numeric_limits<double>::quiet_NaN();
     double alert_limit_h_m = std::numeric_limits<double>::quiet_NaN();
     double alert_limit_v_m = std::numeric_limits<double>::quiet_NaN();
+    double direct_batch_duration_ms =
+        std::numeric_limits<double>::quiet_NaN();
     std::string reason = "no_committed_trajectory";
   };
 
@@ -187,6 +231,7 @@ namespace ego_planner
     {
       std::shared_ptr<const iap::RiskGridSnapshot> snapshot;
       std::shared_ptr<const P0OccupancyEpoch> occupancy_snapshot;
+      std::shared_ptr<const P0ExecutionRiskSnapshot> execution_snapshot;
       iap::CurrentIntegrityState current_integrity_anchor;
       std::function<iap::ForwardRiskBatchResult(
           const iap::ForwardRiskBatchRequest&)> forward_risk_batch;
@@ -263,7 +308,9 @@ namespace ego_planner
         double query_base_time_s,
         std::shared_ptr<const P0OccupancyEpoch> occupancy_snapshot = nullptr,
         std::function<iap::ForwardRiskBatchResult(
-            const iap::ForwardRiskBatchRequest&)> forward_risk_batch = {});
+            const iap::ForwardRiskBatchRequest&)> forward_risk_batch = {},
+        std::shared_ptr<const P0ExecutionRiskSnapshot>
+            execution_snapshot = nullptr);
     // P1 candidates are fail-closed against the same immutable snapshot they
     // were optimized with. These methods are intentionally separate from P5.
     bool planningRiskContextFresh(double now_s, std::string *reason = nullptr) const;
@@ -308,6 +355,12 @@ namespace ego_planner
     const P4ExecutionCheckDiagnostics &lastP4ExecutionDiagnostics() const {
       return last_p4_execution_diagnostics_;
     }
+    // A candidate mutates LocalTrajData before the final lineage/P5/publish
+    // gates run. Preserve the executing certificate as a small transaction so
+    // rejection cannot split the incumbent curve from its authority identity.
+    void preserveP4ExecutionCommitmentForCandidate();
+    void restoreP4ExecutionCommitmentAfterCandidateRejection();
+    void commitP4ExecutionCandidate();
     void setP4ForwardDecisionForTest(P4ForwardDecision decision)
     {
       last_p4_forward_decision_ = std::move(decision);
@@ -404,6 +457,7 @@ namespace ego_planner
       int trajectory_id = 0;
       int64_t start_time_ns = 0;
       uint64_t risk_generation = 0;
+      uint64_t execution_snapshot_id = 0;
       uint64_t occupancy_generation = 0;
       uint64_t gnss_epoch_identity = 0;
       std::string control_points_hash;
@@ -414,6 +468,28 @@ namespace ego_planner
     };
     P4RuntimeRiskCache p4_runtime_risk_cache_;
     P4DirectTrajectoryRiskEvidence p4_direct_risk_evidence_;
+    std::vector<P4BrakingAnchor> p4_braking_anchors_;
+    std::optional<std::size_t> p4_pending_braking_anchor_;
+    struct P4ExecutionCommitmentBackup
+    {
+      bool active = false;
+      P4ExecutionCertificate certificate;
+      P4ForwardDecision published_decision;
+      std::shared_ptr<const FrozenOccupancyEpoch> bound_occupancy;
+      uint64_t checked_generation = 0;
+      int published_trajectory_id = 0;
+      int64_t published_trajectory_start_ns = 0;
+      std::string published_control_points_hash;
+      P4ExecutionCheckDiagnostics diagnostics;
+      bool execution_revoked = false;
+      int64_t runtime_lineage_start_ns = 0;
+      P4RuntimeRiskCache runtime_risk_cache;
+      P4DirectTrajectoryRiskEvidence direct_risk_evidence;
+      std::vector<P4BrakingAnchor> braking_anchors;
+      std::optional<std::size_t> pending_braking_anchor;
+    };
+    P4ExecutionCommitmentBackup p4_execution_commitment_backup_;
+    std::atomic<std::uint64_t> next_p4_braking_certificate_id_{1};
     bool p4_generation_probe_enable_ = false;
     uint64_t last_p4_generation_probe_risk_generation_ = 0;
     std::shared_ptr<const P0PlanningSnapshot>

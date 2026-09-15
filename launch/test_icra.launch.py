@@ -50,6 +50,10 @@ _BASE.EXPERIMENT_PRESETS["icra_p0_p4_v2_p5_dev"] = {
     "p0.online_mapping_mode": "true",
     "p0.fit_grid_to_map_cloud": "false",
     "p0.map_topic": "",
+    # Forest-v2 BDS evaluates a larger but mathematically identical satellite
+    # geometry batch. Six worker-local predictors keep the dense search grid
+    # below its 500 ms publication budget without changing PL or support.
+    "p0.predictor.worker_count": "6",
     "planner_executor_thread_count": "6",
     "planner_occupancy_cloud_topic": "/sim/drone_0/lidar",
     "safety_viz.enable_p4_viz": "true",

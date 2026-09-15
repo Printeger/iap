@@ -3,7 +3,9 @@
 // This class does NOT include current ARAIM solver headers.
 
 #include <Eigen/Core>
+#include <cstdint>
 #include <limits>
+#include <memory>
 #include <vector>
 
 namespace iap {
@@ -38,6 +40,16 @@ struct GnssGeometryPlPredictorParams {
   int    min_sats      = 4;
   bool parallel_hypotheses = true;
   int  hypothesis_threads  = 0;
+  // Exact (bit-identical input) geometry results may be shared within one
+  // predictor snapshot. Zero disables caching.
+  std::size_t exact_cache_capacity = 4096;
+};
+
+struct GnssGeometryCacheStats {
+  std::uint64_t hits = 0;
+  std::uint64_t misses = 0;
+  std::uint64_t fallback_factorizations = 0;
+  std::size_t entries = 0;
 };
 
 struct GnssGeometryPlResult {
@@ -72,8 +84,14 @@ class GnssGeometryPlPredictor {
   GnssGeometryPlResult predict(
       const std::vector<GnssGeometrySat>& visible_sats) const;
   const GnssGeometryPlPredictorParams& params() const { return params_; }
+  GnssGeometryCacheStats cacheStats() const;
+  void clearCache() const;
  private:
+  struct CacheState;
+  GnssGeometryPlResult predictUncached(
+      const std::vector<GnssGeometrySat>& visible_sats) const;
   GnssGeometryPlPredictorParams params_;
+  std::shared_ptr<CacheState> cache_state_;
 };
 
 }  // namespace iap

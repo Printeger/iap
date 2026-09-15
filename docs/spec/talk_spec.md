@@ -57,10 +57,22 @@ For each candidate trajectory τ:
   prediction-source topology and report normal geometry. Topology changes
   request a direct ForwardRisk recheck; degenerate geometry is an explicit
   invalid state with non-finite PL, never a huge finite interpolation value.
-  Final, P5 and runtime authority comes from direct batched ForwardRisk samples of
-  the actual published B-spline and its actual arrival times. A cached batch is
-  reusable only for the same curve and source generations and never replaces
-  current-time freshness checks.
+  Final, P5 and runtime authority comes from direct batched ForwardRisk samples
+  of the actual published B-spline and its actual arrival times. They consume a
+  lightweight immutable execution-risk snapshot published from a complete
+  occupancy/support + GNSS epoch + certified-Integrity tuple before the dense
+  RiskGrid. RiskGrid is a bounded, discard-on-timeout background search
+  product; its delay or absence is not execution revocation evidence. A cached
+  direct batch is reusable only for the same curve and execution snapshot and
+  never replaces current-time freshness checks. The execution snapshot path is
+  single-slot/latest-wins and a dense-grid callback cannot overwrite it. A
+  failed background build is reported separately from the retained grid: the
+  old generation may guide search only while it is still fresh.
+  Formal planner defaults use GPS+BDS+GAL+GLO. New advisory satellites require
+  three consecutive epochs before admission, while disappearance, certified
+  exclusion and hard occlusion remove them immediately. Execution checks use
+  the conservative common usable-satellite core over the remaining short
+  curve; an insufficient core is UNKNOWN, never an interpolated PL.
   Optionally, canopy sigma may use a frozen occupancy-generation clearance
   field to turn distance from an occupied surface into a smooth bounded LOS
   proximity. This leaves hard intersections, support boundaries, elevation
@@ -79,6 +91,10 @@ For each candidate trajectory τ:
   While a new result is pending, an
   unchanged valid prefix continues; runtime collision or Integrity revocation
   triggers replan/braking/emergency handling.
+  Certified current-Integrity samples are selected causally at the planner's
+  evaluation timestamp; callback ordering may not turn a next-tick sample into
+  a false missing/unsafe result. Candidate final gates are transactional with
+  the incumbent execution certificate.
 - When no full topology route is risk-safe, the planner may crop the
   continuous risk-safe geometry-common corridor before the first unsafe or
   unsupported sample, reserve stopping/tracking distance, and publish it only
@@ -89,6 +105,17 @@ For each candidate trajectory τ:
   latest coherent P0 transaction supplies a newly fresh certified-current
   Integrity check; raw map advisory at the receiver remains predictive, while
   the remaining curve is still checked at its future positions and times.
+  A valid limited prefix is not replaced for ordinary worker/generation churn:
+  after a one-second minimum commitment, a replacement must extend the safe
+  common endpoint by at least 0.5 m without worsening its direct-risk maximum.
+  The committed terminal-stopped curve also carries independently generated,
+  checked stopping curves at <=0.2 s state anchors. When input data expires,
+  execution reaches the nearest future anchor within 0.2 s and publishes the
+  selected curve with a new braking certificate/trajectory identity; it never
+  extends the original deadline or passes the approved endpoint. Unsafe direct
+  risk, current Integrity failure, collision or tracking loss remains
+  fail-closed. Ordinary replanning is suspended while that braking certificate
+  is active, so worker/generation churn cannot relabel the stopping curve.
 
 ## G) Upgrade items (optional, after baseline closes the loop)
 - trunk landmarks + TDOP

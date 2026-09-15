@@ -917,6 +917,11 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
             diagnostic.epoch_pr_sigma_m >= diagnostic.canopy_sigma_m
             ? "epoch" : "canopy";
       }
+      if (sat.admission_hysteresis_pending) {
+        diagnostic.exclusion_reason = "admission_hysteresis_pending";
+        result.gnss_satellites.push_back(std::move(diagnostic));
+        continue;
+      }
       if (sat.excluded) {
         diagnostic.exclusion_reason = "integrity_epoch_excluded";
         result.gnss_satellites.push_back(std::move(diagnostic));
@@ -996,6 +1001,46 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
     result.gnss_hard_occlusion =
         params_.gnss.visibility_params.hard_occlusion;
     local_satellite_masks.push_back(std::move(local_mask));
+  }
+
+  if (request.satellite_set_policy ==
+      ForwardRiskSatelliteSetPolicy::COMMON_CORE) {
+    std::vector<bool> common_mask(sat_count, true);
+    for (const auto& local_mask : local_satellite_masks) {
+      for (std::size_t sat_index = 0; sat_index < sat_count; ++sat_index) {
+        common_mask[sat_index] = common_mask[sat_index] &&
+            local_mask[sat_index];
+      }
+    }
+    const int common_count = static_cast<int>(std::count(
+        common_mask.begin(), common_mask.end(), true));
+    if (common_count < params_.gnss.geometry_params.min_sats) {
+      fail_from(0, ForwardRiskFailureReason::GNSS_LOCAL_USABLE_SATS_LT_MIN);
+      return out;
+    }
+    std::uint64_t common_hash = 1469598103934665603ull;
+    for (std::size_t sat_index = 0; sat_index < sat_count; ++sat_index) {
+      if (!common_mask[sat_index]) continue;
+      common_hash ^= static_cast<std::uint64_t>(static_cast<std::uint32_t>(
+          request.snapshot.gnss_epoch.sats[sat_index].sat_id));
+      common_hash *= 1099511628211ull;
+    }
+    for (std::size_t point_index = 0;
+         point_index < local_satellite_masks.size(); ++point_index) {
+      local_satellite_masks[point_index] = common_mask;
+      auto& point = out.points[point_index];
+      point.gnss_used_satellite_count = common_count;
+      point.local_satellite_set_hash = common_hash;
+      for (std::size_t sat_index = 0;
+           sat_index < point.gnss_satellites.size() && sat_index < sat_count;
+           ++sat_index) {
+        auto& diagnostic = point.gnss_satellites[sat_index];
+        if (diagnostic.used && !common_mask[sat_index]) {
+          diagnostic.used = false;
+          diagnostic.exclusion_reason = "not_in_common_execution_core";
+        }
+      }
+    }
   }
 
   out.complete = true;

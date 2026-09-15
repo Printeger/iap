@@ -101,6 +101,7 @@ struct P0OccupancyEpoch {
   uint64_t generation = 0;
   double cloud_stamp_s = std::numeric_limits<double>::quiet_NaN();
   std::string frame_id;
+  std::string frame_contract_id;
 };
 
 enum class P0OccupancyEpochCaptureStatus {
@@ -157,7 +158,8 @@ class P0OccupancyEpochAdapter {
                        epoch.lattice_origin, epoch.extent_m,
                        epoch.voxel_dimensions, epoch.resolution_m,
                        epoch.frame_id, epoch.cloud_stamp_s,
-                       epoch.geometry_id, epoch.generation,
+                       epoch.geometry_id, epoch.frame_contract_id,
+                       epoch.generation,
                        std::move(diagnostic_query),
                        std::move(source_owner),
                        std::move(live_source_owner),
@@ -181,6 +183,7 @@ class P0OccupancyEpochAdapter {
       std::string frame_id,
       double cloud_stamp_s,
       std::string geometry_id,
+      std::string frame_contract_id,
       uint64_t generation,
       iap::RiskGridMap::OccupancyDiagnosticQuery diagnostic_query,
       P0OccupancyEpoch::SourceOwner source_owner,

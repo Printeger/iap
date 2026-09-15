@@ -15,6 +15,8 @@
 
 namespace ego_planner {
 
+struct P0ExecutionRiskSnapshot;
+
 inline std::string p4IdentityHash(const std::string& canonical) {
   std::uint64_t hash = 1469598103934665603ULL;
   for (const unsigned char byte : canonical) {
@@ -70,13 +72,16 @@ struct P4DirectTrajectoryRiskEvidence {
   std::string sample_lattice_hash;
   std::string request_identity;
   std::uint64_t risk_generation = 0;
+  std::uint64_t execution_snapshot_id = 0;
   std::uint64_t occupancy_generation = 0;
   std::uint64_t gnss_epoch_identity = 0;
   double evaluation_time_s = std::numeric_limits<double>::quiet_NaN();
+  double compute_duration_ms = std::numeric_limits<double>::quiet_NaN();
   // Keeps the exact immutable risk snapshot used by the direct batch alive.
   // P5 consumes this pointer so a newly published generation cannot create a
   // split-snapshot race between the P4 check and P5 admission.
   std::shared_ptr<const iap::RiskGridSnapshot> risk_snapshot;
+  std::shared_ptr<const P0ExecutionRiskSnapshot> execution_snapshot;
   std::vector<Eigen::Vector3d> positions;
   std::vector<double> relative_times;
   std::vector<iap::ForwardRiskPointResult> points;

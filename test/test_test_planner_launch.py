@@ -369,7 +369,7 @@ class TestPlannerLaunchTest(unittest.TestCase):
             "p0.predictor.conservative_max_with_gnss": "true",
             "integrity_fusion_mode": "max_pl",
             "gnss_enable_map_occlusion": "true",
-            "gnss_enabled_constellations": "GPS,GAL,GLO",
+            "gnss_enabled_constellations": "GPS,BDS,GAL,GLO",
             "gnss_enable_skymask": "false",
             "gnss_enable_nlos": "true",
             "gnss_enable_multipath": "true",
@@ -681,6 +681,9 @@ class TestPlannerLaunchTest(unittest.TestCase):
         self.assertEqual(
             context.launch_configurations["p0.predictor.sigma_growth_profile"],
             "legacy_iap_rq320_baseline_v1",
+        )
+        self.assertEqual(
+            context.launch_configurations["p0.predictor.worker_count"], "6"
         )
         self.assertEqual(context.launch_configurations["record_bag"], "false")
         self.assertEqual(context.launch_configurations["start_rviz"], "false")

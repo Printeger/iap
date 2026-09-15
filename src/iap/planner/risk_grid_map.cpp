@@ -2,6 +2,7 @@
 #include <iap/predictor/predictor_types.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <iomanip>
 #include <sstream>
@@ -1490,6 +1491,9 @@ bool RiskGridMap::refreshFromProvider(
       case RiskGridSourceValidation::PREDICTOR_SPATIAL_SOURCE_CHANGED:
         failure = "predictor_spatial_source_changed";
         break;
+      case RiskGridSourceValidation::COMPUTE_BUDGET_EXCEEDED:
+        failure = "risk_grid_build_budget_exceeded";
+        break;
     }
     if (reason) {
       *reason = failure;
@@ -1528,12 +1532,10 @@ bool RiskGridMap::refreshFromProvider(
   const int total_voxel_count = layer_size * horizon_count;
   std::vector<RiskPredictionQuery> queries;
   std::vector<std::size_t> query_voxel_indices;
-  std::vector<RiskPredictionQuery> voxel_queries(
-      static_cast<std::size_t>(total_voxel_count));
-  std::vector<bool> spatial_occupied_skip(
-      static_cast<std::size_t>(layer_size), false);
-  std::vector<bool> spatial_unobserved_skip(
-      static_cast<std::size_t>(layer_size), false);
+  std::vector<uint8_t> spatial_occupied_skip(
+      static_cast<std::size_t>(layer_size), 0u);
+  std::vector<uint8_t> spatial_unobserved_skip(
+      static_cast<std::size_t>(layer_size), 0u);
   std::vector<std::string> spatial_unobserved_reason(
       static_cast<std::size_t>(layer_size), "unknown_occupancy_support");
   std::vector<RiskOccupancyDiagnostic> spatial_occupancy_diagnostics(
@@ -1586,20 +1588,20 @@ bool RiskGridMap::refreshFromProvider(
           spatial_occupancy_diagnostics[spatial_index] =
               std::move(diagnostic);
         }
-        spatial_occupied_skip[spatial_index] =
+        spatial_occupied_skip[spatial_index] = static_cast<uint8_t>(
             params_copy.skip_occupied_voxels && occupancy_query &&
-            spatial_occupancy_diagnostics[spatial_index].inflated_occupied;
+            spatial_occupancy_diagnostics[spatial_index].inflated_occupied);
         const auto & occupancy =
             spatial_occupancy_diagnostics[spatial_index];
         const bool trusted_model_complete =
             occupancy.model_support.authority ==
                 LocalMapSupportAuthority::TRUSTED_LOCAL_MAP &&
             occupancy.model_support.complete();
-        spatial_unobserved_skip[spatial_index] =
+        spatial_unobserved_skip[spatial_index] = static_cast<uint8_t>(
             params_copy.require_observed_support && occupancy_query &&
             (!occupancy.observed ||
              occupancy.state == RiskOccupancyState::UNKNOWN) &&
-            !trusted_model_complete;
+            !trusted_model_complete);
         if (spatial_unobserved_skip[spatial_index] &&
             occupancy.model_support.authority ==
                 LocalMapSupportAuthority::TRUSTED_LOCAL_MAP) {
@@ -1632,38 +1634,47 @@ bool RiskGridMap::refreshFromProvider(
       }
     }
   }
-  for (int h = 0; h < horizon_count; ++h) {
-    for (int x = 0; x < voxel_num_copy.x(); ++x) {
-      for (int y = 0; y < voxel_num_copy.y(); ++y) {
-        for (int z = 0; z < voxel_num_copy.z(); ++z) {
-          const Eigen::Vector3i id(x, y, z);
-          const int address =
-              x * voxel_num_copy.y() * voxel_num_copy.z() +
-              y * voxel_num_copy.z() + z;
-          const std::size_t spatial_index = static_cast<std::size_t>(address);
-          const std::size_t voxel_index =
-              static_cast<std::size_t>(h * layer_size + address);
-          RiskPredictionQuery query;
-          query.position_w =
-              (id.cast<double>() + Eigen::Vector3d::Constant(0.5)) *
-                  params_copy.resolution_m +
-              origin_copy;
-          query.horizon_s = params_copy.horizons_s[static_cast<std::size_t>(h)];
-          query.query_time_s = now_s + query.horizon_s;
-          voxel_queries[voxel_index] = query;
-          if (spatial_occupied_skip[spatial_index]) {
-            ++occupied_skip_count;
-            continue;
-          }
-          if (spatial_unobserved_skip[spatial_index]) {
-            continue;
-          }
-          queries.push_back(query);
-          query_voxel_indices.push_back(voxel_index);
-        }
-      }
+  // Build only the supported spatial list once.  The previous horizon-major
+  // loop visited and materialised all ~600k space-time cells even though most
+  // forest cells are outside the trusted local envelope.  Skipped voxels are
+  // still explicitly initialised below, but they do not need a full query
+  // object for every horizon.
+  std::vector<int> query_spatial_addresses;
+  query_spatial_addresses.reserve(static_cast<std::size_t>(layer_size));
+  for (int address = 0; address < layer_size; ++address) {
+    const auto spatial_index = static_cast<std::size_t>(address);
+    if (!spatial_occupied_skip[spatial_index] &&
+        !spatial_unobserved_skip[spatial_index]) {
+      query_spatial_addresses.push_back(address);
     }
   }
+  const std::size_t queries_per_horizon = query_spatial_addresses.size();
+  queries.resize(queries_per_horizon * static_cast<std::size_t>(horizon_count));
+  query_voxel_indices.resize(queries.size());
+  const int yz_stride = voxel_num_copy.y() * voxel_num_copy.z();
+  for (int h = 0; h < horizon_count; ++h) {
+    const double horizon_s =
+        params_copy.horizons_s[static_cast<std::size_t>(h)];
+    for (std::size_t j = 0; j < queries_per_horizon; ++j) {
+      const int address = query_spatial_addresses[j];
+      const int x = address / yz_stride;
+      const int remainder = address % yz_stride;
+      const int y = remainder / voxel_num_copy.z();
+      const int z = remainder % voxel_num_copy.z();
+      const std::size_t query_index =
+          static_cast<std::size_t>(h) * queries_per_horizon + j;
+      RiskPredictionQuery& query = queries[query_index];
+      query.position_w =
+          (Eigen::Vector3d(x, y, z) + Eigen::Vector3d::Constant(0.5)) *
+              params_copy.resolution_m + origin_copy;
+      query.horizon_s = horizon_s;
+      query.query_time_s = now_s + horizon_s;
+      query_voxel_indices[query_index] =
+          static_cast<std::size_t>(h * layer_size + address);
+    }
+  }
+  occupied_skip_count = spatial_occupied_skip_count *
+      static_cast<uint64_t>(horizon_count);
 
   if (occupancy_binding_failed) {
     if (reason) {
@@ -1738,17 +1749,15 @@ bool RiskGridMap::refreshFromProvider(
           static_cast<uint64_t>(horizon_count);
     }
   }
-  const auto record_unknown_reason = [&unknown_reason_counts](
-                                         const std::string& reason) {
-    ++unknown_reason_counts[reason.empty() ? "provider_invalid" : reason];
-  };
   const auto initialize_skipped_voxels =
       [&](const std::size_t begin, const std::size_t end) {
         for (std::size_t i = begin; i < end; ++i) {
           const std::size_t spatial_index =
               i % static_cast<std::size_t>(layer_size);
           RiskVoxel& voxel = next->voxels[i];
-          voxel.stamp_s = voxel_queries[i].query_time_s;
+          const std::size_t horizon_index =
+              i / static_cast<std::size_t>(layer_size);
+          voxel.stamp_s = now_s + params_copy.horizons_s[horizon_index];
           voxel.occupancy = spatial_occupancy_owners[spatial_index];
           if (spatial_occupied_skip[spatial_index]) {
             voxel.source_flags = RISK_GRID_SOURCE_OCCUPIED_SKIP;
@@ -1767,7 +1776,7 @@ bool RiskGridMap::refreshFromProvider(
         }
       };
   const std::size_t initialization_worker_count = std::min<std::size_t>(
-      4u, std::max<std::size_t>(1u, next->voxels.size() / 1000u));
+      8u, std::max<std::size_t>(1u, next->voxels.size() / 1000u));
   std::vector<std::thread> initialization_workers;
   initialization_workers.reserve(initialization_worker_count);
   bool all_workers_started = true;
@@ -1793,101 +1802,182 @@ bool RiskGridMap::refreshFromProvider(
     initialize_skipped_voxels(0u, next->voxels.size());
   }
 
-  for (std::size_t i = 0; i < results.size(); ++i) {
-    const std::size_t voxel_index = query_voxel_indices[i];
-    const std::size_t spatial_index =
-        voxel_index % static_cast<std::size_t>(layer_size);
-    RiskPredictionResult result = results[i];
-    apply_any_p5_fixture(params_copy, queries[i], &result);
-    RiskVoxel voxel;
-    voxel.stamp_s = voxel_queries[voxel_index].query_time_s;
-    voxel.occupancy = spatial_occupancy_owners[spatial_index];
-    voxel.source_flags = result.source_flags;
-    voxel.hal = result.hal;
-    voxel.val = result.val;
-    voxel.gnss = result.gnss;
-    voxel.lidar = result.lidar;
-    voxel.prior = result.prior;
-    voxel.fim_fused = result.fim_fused;
-    voxel.floor_increment_h = result.floor_increment_h;
-    voxel.floor_increment_v = result.floor_increment_v;
-    voxel.floor_source_h = result.floor_source_h;
-    voxel.floor_source_v = result.floor_source_v;
-    voxel.gnss_geometry_status = result.gnss_geometry_status;
-    voxel.gnss_support_authority = result.gnss_support_authority;
-    voxel.gnss_support_status = result.gnss_support_status;
-    voxel.gnss_used_satellite_ids = result.gnss_used_satellite_ids;
-    voxel.gnss_local_satellite_set_hash =
-        result.gnss_local_satellite_set_hash;
-    voxel.gnss_weighted_geometry_condition =
-        result.gnss_weighted_geometry_condition;
-    voxel.gnss_worst_excluded_sat_h = result.gnss_worst_excluded_sat_h;
-    voxel.gnss_worst_excluded_sat_v = result.gnss_worst_excluded_sat_v;
-    if ((voxel.source_flags & PREDICTOR_RESULT_GNSS_USED) != 0u) {
-      ++predictor_gnss_used_count;
+  // Materialising the rich per-voxel diagnostics is independent for every
+  // query and used to dominate the end-to-end RiskGrid budget (especially
+  // with BDS).  Keep the prediction formula untouched and parallelise only
+  // this deterministic copy/reduction stage.
+  struct PredictionFillStats {
+    uint64_t valid = 0;
+    uint64_t unknown = 0;
+    uint64_t provider_stale = 0;
+    uint64_t provider_invalid = 0;
+    uint64_t gnss_used = 0;
+    uint64_t lidar_used = 0;
+    uint64_t prior_used = 0;
+    uint64_t stale_current_prior = 0;
+    uint64_t regularized = 0;
+    uint64_t conservative_max = 0;
+    std::unordered_map<std::string, uint64_t> unknown_reasons;
+  };
+  const auto fill_predictions =
+      [&](const std::size_t begin, const std::size_t end,
+          PredictionFillStats* stats) {
+        for (std::size_t i = begin; i < end; ++i) {
+          const std::size_t voxel_index = query_voxel_indices[i];
+          const std::size_t spatial_index =
+              voxel_index % static_cast<std::size_t>(layer_size);
+          // The provider result is consumed exactly once by this generation.
+          // Moving avoids an otherwise redundant deep copy of per-satellite
+          // identity and source diagnostics for every valid voxel.
+          RiskPredictionResult result = std::move(results[i]);
+          apply_any_p5_fixture(params_copy, queries[i], &result);
+          RiskVoxel voxel;
+          const std::size_t horizon_index =
+              voxel_index / static_cast<std::size_t>(layer_size);
+          voxel.stamp_s = now_s + params_copy.horizons_s[horizon_index];
+          voxel.occupancy = spatial_occupancy_owners[spatial_index];
+          voxel.source_flags = result.source_flags;
+          voxel.hal = result.hal;
+          voxel.val = result.val;
+          voxel.gnss = result.gnss;
+          voxel.lidar = result.lidar;
+          voxel.prior = result.prior;
+          voxel.fim_fused = result.fim_fused;
+          voxel.floor_increment_h = result.floor_increment_h;
+          voxel.floor_increment_v = result.floor_increment_v;
+          voxel.floor_source_h = result.floor_source_h;
+          voxel.floor_source_v = result.floor_source_v;
+          voxel.gnss_geometry_status = result.gnss_geometry_status;
+          voxel.gnss_support_authority = result.gnss_support_authority;
+          voxel.gnss_support_status = result.gnss_support_status;
+          voxel.gnss_used_satellite_ids = result.gnss_used_satellite_ids;
+          voxel.gnss_local_satellite_set_hash =
+              result.gnss_local_satellite_set_hash;
+          voxel.gnss_weighted_geometry_condition =
+              result.gnss_weighted_geometry_condition;
+          voxel.gnss_worst_excluded_sat_h =
+              result.gnss_worst_excluded_sat_h;
+          voxel.gnss_worst_excluded_sat_v =
+              result.gnss_worst_excluded_sat_v;
+          if ((voxel.source_flags & PREDICTOR_RESULT_GNSS_USED) != 0u) {
+            ++stats->gnss_used;
+          }
+          if ((voxel.source_flags & PREDICTOR_RESULT_LIDAR_USED) != 0u) {
+            ++stats->lidar_used;
+          }
+          if ((voxel.source_flags & PREDICTOR_RESULT_PRIOR_VALID) != 0u) {
+            ++stats->prior_used;
+          }
+          if ((voxel.source_flags &
+               PREDICTOR_RESULT_STALE_CURRENT_PRIOR) != 0u) {
+            ++stats->stale_current_prior;
+          }
+          if ((voxel.source_flags & PREDICTOR_RESULT_REGULARIZED) != 0u) {
+            ++stats->regularized;
+          }
+          if ((voxel.source_flags & PREDICTOR_RESULT_CONSERVATIVE_MAX) !=
+              0u) {
+            ++stats->conservative_max;
+          }
+          voxel.valid = result.available && result.valid && !result.stale &&
+              finite_pl(result);
+          std::string cost_source_failure;
+          if (voxel.valid &&
+              params_copy.provider_cost_source ==
+                  RiskProviderCostSource::PRE_CONSERVATIVE_FIM_RATIO &&
+              (!result.fim_fused.available || !result.fim_fused.valid ||
+               result.fim_fused.stale ||
+               !std::isfinite(result.fim_fused.risk_ratio))) {
+            voxel.valid = false;
+            cost_source_failure = "pre_conservative_fim_unavailable";
+          }
+          voxel.stale = result.stale;
+          voxel.unknown = !voxel.valid;
+          if (voxel.valid) {
+            voxel.hpl_pred = result.hpl_pred;
+            voxel.vpl_pred = result.vpl_pred;
+            voxel.risk_ratio = std::isfinite(result.safety_fused.risk_ratio)
+                ? result.safety_fused.risk_ratio
+                : std::max(result.hpl_pred / result.hal,
+                           result.vpl_pred / result.val);
+            const double provider_cost =
+                params_copy.provider_cost_source ==
+                        RiskProviderCostSource::PRE_CONSERVATIVE_FIM_RATIO
+                ? result.fim_fused.risk_ratio
+                : std::max(result.hpl_pred, result.vpl_pred);
+            voxel.c_pi = clamp_cost(provider_cost, params_copy.cost_max);
+            voxel.reason = result.reason.empty() ? "ok" : result.reason;
+            ++stats->valid;
+          } else {
+            voxel.reason = !cost_source_failure.empty()
+                ? cost_source_failure
+                : !result.reason.empty() ? result.reason
+                                         : "provider_invalid";
+            if (result.stale) {
+              ++stats->provider_stale;
+              ++stats->unknown_reasons[result.reason.empty()
+                    ? "provider_stale" : result.reason];
+            } else {
+              ++stats->provider_invalid;
+              ++stats->unknown_reasons[voxel.reason];
+            }
+            voxel.c_pi = params_copy.unknown_cost;
+            ++stats->unknown;
+          }
+          next->voxels[voxel_index] = std::move(voxel);
+        }
+      };
+  const std::size_t fill_worker_count = std::min<std::size_t>(
+      8u, std::max<std::size_t>(1u, results.size() / 1000u));
+  std::vector<PredictionFillStats> fill_stats(fill_worker_count);
+  std::vector<std::thread> fill_workers;
+  fill_workers.reserve(fill_worker_count);
+  bool fill_workers_started = true;
+  std::atomic<bool> fill_workers_release{false};
+  std::atomic<bool> fill_workers_abort{false};
+  try {
+    for (std::size_t worker = 0; worker < fill_worker_count; ++worker) {
+      const std::size_t begin = results.size() * worker / fill_worker_count;
+      const std::size_t end =
+          results.size() * (worker + 1u) / fill_worker_count;
+      fill_workers.emplace_back([&, begin, end, worker]() {
+        while (!fill_workers_release.load(std::memory_order_acquire)) {
+          std::this_thread::yield();
+        }
+        if (!fill_workers_abort.load(std::memory_order_acquire)) {
+          fill_predictions(begin, end, &fill_stats[worker]);
+        }
+      });
     }
-    if ((voxel.source_flags & PREDICTOR_RESULT_LIDAR_USED) != 0u) {
-      ++predictor_lidar_used_count;
+  } catch (const std::system_error&) {
+    fill_workers_started = false;
+  }
+  fill_workers_abort.store(!fill_workers_started,
+                           std::memory_order_release);
+  fill_workers_release.store(true, std::memory_order_release);
+  for (auto& worker : fill_workers) {
+    if (worker.joinable()) {
+      worker.join();
     }
-    if ((voxel.source_flags & PREDICTOR_RESULT_PRIOR_VALID) != 0u) {
-      ++predictor_prior_used_count;
+  }
+  if (!fill_workers_started) {
+    fill_stats.assign(1u, PredictionFillStats{});
+    fill_predictions(0u, results.size(), &fill_stats.front());
+  }
+  for (const auto& stats : fill_stats) {
+    valid_count += stats.valid;
+    unknown_count += stats.unknown;
+    provider_stale_count += stats.provider_stale;
+    provider_invalid_count += stats.provider_invalid;
+    predictor_gnss_used_count += stats.gnss_used;
+    predictor_lidar_used_count += stats.lidar_used;
+    predictor_prior_used_count += stats.prior_used;
+    predictor_stale_current_prior_count += stats.stale_current_prior;
+    predictor_regularized_count += stats.regularized;
+    predictor_conservative_max_count += stats.conservative_max;
+    for (const auto& entry : stats.unknown_reasons) {
+      unknown_reason_counts[entry.first] += entry.second;
     }
-    if ((voxel.source_flags & PREDICTOR_RESULT_STALE_CURRENT_PRIOR) != 0u) {
-      ++predictor_stale_current_prior_count;
-    }
-    if ((voxel.source_flags & PREDICTOR_RESULT_REGULARIZED) != 0u) {
-      ++predictor_regularized_count;
-    }
-    if ((voxel.source_flags & PREDICTOR_RESULT_CONSERVATIVE_MAX) != 0u) {
-      ++predictor_conservative_max_count;
-    }
-    voxel.valid =
-        result.available && result.valid && !result.stale && finite_pl(result);
-    std::string cost_source_failure;
-    if (voxel.valid &&
-        params_copy.provider_cost_source ==
-            RiskProviderCostSource::PRE_CONSERVATIVE_FIM_RATIO &&
-        (!result.fim_fused.available || !result.fim_fused.valid ||
-         result.fim_fused.stale ||
-         !std::isfinite(result.fim_fused.risk_ratio))) {
-      voxel.valid = false;
-      cost_source_failure = "pre_conservative_fim_unavailable";
-    }
-    voxel.stale = result.stale;
-    voxel.unknown = !voxel.valid;
-    if (voxel.valid) {
-      voxel.hpl_pred = result.hpl_pred;
-      voxel.vpl_pred = result.vpl_pred;
-      voxel.risk_ratio = std::isfinite(result.safety_fused.risk_ratio)
-          ? result.safety_fused.risk_ratio
-          : std::max(result.hpl_pred / result.hal,
-                     result.vpl_pred / result.val);
-      const double provider_cost =
-          params_copy.provider_cost_source ==
-                  RiskProviderCostSource::PRE_CONSERVATIVE_FIM_RATIO
-          ? result.fim_fused.risk_ratio
-          : std::max(result.hpl_pred, result.vpl_pred);
-      voxel.c_pi = clamp_cost(provider_cost, params_copy.cost_max);
-      voxel.reason = result.reason.empty() ? "ok" : result.reason;
-      ++valid_count;
-    } else {
-      voxel.reason = !cost_source_failure.empty()
-          ? cost_source_failure
-          : !result.reason.empty()
-              ? result.reason
-              : "provider_invalid";
-      if (result.stale) {
-        ++provider_stale_count;
-        record_unknown_reason(result.reason.empty() ? "provider_stale"
-                                                    : result.reason);
-      } else {
-        ++provider_invalid_count;
-        record_unknown_reason(voxel.reason);
-      }
-      voxel.c_pi = params_copy.unknown_cost;
-      ++unknown_count;
-    }
-    next->voxels[voxel_index] = std::move(voxel);
   }
 
   RiskGridHealth new_health;

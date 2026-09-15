@@ -45,6 +45,9 @@ struct SatObs {
   double nis_pr  = 0.0;  ///< normalised innovation squared — pseudorange
   double nis_dop = 0.0;  ///< normalised innovation squared — Doppler
   bool   excluded = false; ///< set true when FDE rejects the satellite
+  // Planner-advisory admission hysteresis. This never alters the immutable
+  // measurement epoch identity or the certified monitor exclusion set.
+  bool admission_hysteresis_pending = false;
 };
 
 /// @brief All per-satellite observations at one GNSS epoch.

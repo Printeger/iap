@@ -350,7 +350,7 @@ class TestStageContracts(unittest.TestCase):
         self.assertEqual(contract["risk_seed"], 21)
         self.assertEqual(contract["low_risk_y_signs"], [-1, 1, -1, 1])
         self.assertEqual(contract["gnss"]["enabled_constellations"],
-                         ["GPS", "GAL", "GLO"])
+                         ["GPS", "BDS", "GAL", "GLO"])
         self.assertEqual(
             contract["gnss"]["measured_epoch_support_radius_m"], 0.45)
         self.assertEqual(
@@ -398,7 +398,7 @@ class TestStageContracts(unittest.TestCase):
             },
             "gnss": {
                 "ephemeris_source": "rinex",
-                "enabled_constellations": "GPS,GAL,GLO",
+                "enabled_constellations": "GPS,BDS,GAL,GLO",
                 "map_occlusion": True,
                 "skymask": False,
                 "nlos": True,
@@ -1451,6 +1451,21 @@ class TestStageAnalyzer(unittest.TestCase):
         self.assertEqual(failed["result"], "FAIL")
         self.assertIn("p0_health_not_continuous", failed["failures"])
 
+    def test_p0_retains_a_fresh_grid_across_transient_background_failure(self):
+        rows = [forest_v2_healthy(index + 1, float(index))
+                for index in range(16)]
+        rows[8]["payload"].update({
+            "reason": "predictor_spatial_source_changed",
+            "refresh_evidence_state": "COMPLETED_FAILURE",
+        })
+        summary = MODULE.analyze_p0(rows)
+        self.assertEqual(summary["result"], "PASS")
+
+        rows[8]["payload"]["stale"] = True
+        failed = MODULE.analyze_p0(rows)
+        self.assertEqual(failed["result"], "FAIL")
+        self.assertIn("p0_health_not_continuous", failed["failures"])
+
     def test_p0_window_includes_first_observation_past_boundary(self):
         rows = [forest_v2_healthy(index + 1, index * 0.47)
                 for index in range(34)]
@@ -1556,6 +1571,7 @@ class TestStageAnalyzer(unittest.TestCase):
             "current_risk_generation": "8",
             "allowed": "1",
             "reason": "normal_publish_authorized",
+            "direct_batch_duration_ms": "12.0",
             "stamp_s": "12.0",
         }, {
             "schema_version": "p4_execution_event_v1",
@@ -1570,6 +1586,7 @@ class TestStageAnalyzer(unittest.TestCase):
             "allowed": "1",
             "endpoint_reached": "1",
             "reason": "approved_endpoint_reached",
+            "direct_batch_duration_ms": "18.0",
             "stamp_s": "14.2",
         }]
         return lineage, bsplines, poscmd, odom, events
@@ -1604,6 +1621,61 @@ class TestStageAnalyzer(unittest.TestCase):
         self.assertEqual(
             summary["limited_prefix_outcome"],
             "LIMITED_PREFIX_EXECUTED_THEN_RISK_REVOKED")
+
+    def test_limited_prefix_accepts_bound_failsafe_braking_stop(self):
+        lineage, bsplines, poscmd, odom, events = \
+            self.limited_prefix_fixture()
+        braking_payload = {
+            "trajectory_id": 32, "start_time_ns": 13_000_000_000,
+            "control_points_xyz": [[0.5, 0.0, 1.0],
+                                   [0.75, 0.0, 1.0],
+                                   [1.0, 0.0, 1.0]],
+            "knots": [-1.0, 0.0, 1.0, 2.0, 3.0],
+        }
+        braking_hash, braking_knot_hash = \
+            MODULE._captured_bspline_hashes(braking_payload)
+        bsplines.append({"receive_steady_s": 13.0,
+                         "payload": braking_payload})
+        poscmd.append({
+            "receive_steady_s": 13.1,
+            "payload": {"trajectory_id": 32, "stamp_s": 13.1,
+                        "position_xyz": [0.55, 0.0, 1.0],
+                        "velocity_xyz": [0.4, 0.0, 0.0],
+                        "acceleration_xyz": [0.0, 0.0, 0.0]},
+        })
+        events[-1].update({
+            "event": "FAILSAFE_BRAKED_TO_STOP",
+            "authority": "LIMITED_PREFIX_BRAKING",
+            "parent_trajectory_id": "31",
+            "parent_trajectory_start_ns": "12000000000",
+            "trajectory_id": "32",
+            "trajectory_start_ns": "13000000000",
+            "control_points_hash": braking_hash,
+            "knot_vector_hash": braking_knot_hash,
+            "allowed": "1", "endpoint_reached": "1",
+            "approved_endpoint_x": "1.0",
+            "approved_endpoint_y": "0.0",
+            "approved_endpoint_z": "1.0",
+            "stamp_s": "14.0",
+        })
+        summary = MODULE.analyze_limited_prefix_records(
+            lineage, bsplines, poscmd, odom, events)
+        self.assertEqual(summary["result"], "PASS")
+        self.assertEqual(
+            summary["limited_prefix_outcome"],
+            "LIMITED_PREFIX_EXECUTED_THEN_FAILSAFE_BRAKED_TO_STOP")
+
+    def test_limited_prefix_rejects_slow_direct_execution_check(self):
+        lineage, bsplines, poscmd, odom, events = \
+            self.limited_prefix_fixture()
+        events[-1]["direct_batch_duration_ms"] = "150.0"
+        summary = MODULE.analyze_limited_prefix_records(
+            lineage, bsplines, poscmd, odom, events)
+        self.assertEqual(summary["result"], "FAIL")
+        self.assertIn(
+            "limited_prefix_direct_batch_p95_exceeded",
+            summary["failures"])
+        self.assertEqual(summary["direct_batch_ms_p95"], 150.0)
 
     def test_limited_prefix_accepts_any_bound_execution_not_only_latest(self):
         lineage, bsplines, poscmd, odom, events = \

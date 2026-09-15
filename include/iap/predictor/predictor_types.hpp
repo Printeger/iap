@@ -393,6 +393,15 @@ struct ForwardRiskQueryPoint {
   std::uint64_t candidate_group_id = 0;
 };
 
+enum class ForwardRiskSatelliteSetPolicy {
+  // Coarse RiskGrid construction keeps the best locally supported set at
+  // each voxel.
+  PER_POINT = 0,
+  // Execution authorization uses one conservative set that is usable at
+  // every point of the remaining curve.
+  COMMON_CORE,
+};
+
 struct GnssRiskSatelliteDiagnostic {
   int sat_id = 0;
   bool epoch_excluded = false;
@@ -422,6 +431,8 @@ struct ForwardRiskBatchRequest {
   double evaluation_time_s =
       std::numeric_limits<double>::quiet_NaN();
   double compute_budget_ms = std::numeric_limits<double>::infinity();
+  ForwardRiskSatelliteSetPolicy satellite_set_policy =
+      ForwardRiskSatelliteSetPolicy::PER_POINT;
 };
 
 struct ForwardRiskPointResult {

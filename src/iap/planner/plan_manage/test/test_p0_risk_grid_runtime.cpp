@@ -276,6 +276,7 @@ struct RuntimeOccupancyDiagnostic {
   double resolution_m = 1.0;
   double inflation_m = 0.0;
   std::string frame_id;
+  std::string frame_contract_id = "planner_map_contract:runtime_test";
   double cloud_stamp_s = 0.0;
   uint64_t generation = 0;
   std::string source;
@@ -295,6 +296,7 @@ struct RuntimeFrozenOccupancyEpoch {
   double resolution_m = 1.0;
   std::string frame_id;
   std::string geometry_id = "planning_lattice_v1:runtime_test";
+  std::string frame_contract_id = "planner_map_contract:runtime_test";
   double cloud_stamp_s = 0.0;
   uint64_t generation = 0;
 };
@@ -381,6 +383,8 @@ ego_planner::P0OccupancyEpochCapture makeOccupancyEpochCapture(
         diagnostic.resolution_m = owner->params().voxel_size;
         diagnostic.inflation_m = 0.0;
         diagnostic.frame_id = frame_id;
+        diagnostic.frame_contract_id =
+            "planner_map_contract:runtime_test";
         diagnostic.cloud_stamp_s = stamp_s;
         diagnostic.generation = captured_generation;
         diagnostic.source = "frozen_test_epoch";
@@ -1437,6 +1441,15 @@ class P0RiskGridRuntimeStampTest : public ::testing::Test {
         });
   }
 
+  static void publishExecutionSnapshot(P0RiskGridRuntime* runtime) {
+    runtime->executionSnapshotTimerCallback();
+  }
+
+  static void useProductionExecutionSnapshotPath(
+      P0RiskGridRuntime* runtime) {
+    runtime->provider_.reset();
+  }
+
   static void validateProfileWorkContract(const ProfileScenario scenario,
                                           const ProfileSample& sample) {
     const bool cold = scenario == ProfileScenario::ColdFullRebuild;
@@ -2024,6 +2037,30 @@ class P0RiskGridRuntimeStampTest : public ::testing::Test {
     runtime->latest_current_.vpl = vpl;
   }
 
+  static void setLatestCurrentValid(P0RiskGridRuntime* runtime,
+                                    const bool valid) {
+    runtime->latest_current_valid_ = valid;
+  }
+
+  static void appendCurrentIntegrityHistory(
+      P0RiskGridRuntime* runtime, const double stamp_s,
+      const double hpl_m, const double vpl_m, const bool valid = true) {
+    iap::CurrentIntegrityState sample = runtime->latest_current_;
+    sample.stamp = stamp_s;
+    sample.hpl = hpl_m;
+    sample.vpl = vpl_m;
+    sample.valid = valid;
+    ++runtime->latest_current_generation_;
+    if (runtime->latest_current_generation_ == 0u) {
+      ++runtime->latest_current_generation_;
+    }
+    runtime->current_integrity_history_.emplace_back(
+        runtime->latest_current_generation_, sample);
+    runtime->latest_current_ = sample;
+    runtime->latest_current_valid_ = valid;
+    runtime->current_integrity_seen_ = true;
+  }
+
   static void setLegacyCurrentSpatial(P0RiskGridRuntime* runtime,
                                       const double tdop,
                                       const int n_trunks_observed) {
@@ -2289,6 +2326,10 @@ TEST(P0RiskGridRuntimeTest, GnssEpochFreshnessDefaultIsTwoSeconds) {
   EXPECT_TRUE(
       std::isnan(config.predictor_legacy_current_spatial_ttl_s));
   EXPECT_TRUE(std::isnan(config.predictor_full_refresh_watchdog_s));
+  EXPECT_DOUBLE_EQ(config.execution_snapshot_period_s, 0.05);
+  EXPECT_DOUBLE_EQ(config.execution_batch_budget_ms, 150.0);
+  EXPECT_DOUBLE_EQ(config.risk_grid_build_budget_ms, 500.0);
+  EXPECT_EQ(config.predictor_gnss_admission_epochs, 3);
   EXPECT_FALSE(node->has_parameter("p0.predictor.gnss_spatial_ttl_s"));
   EXPECT_FALSE(
       node->has_parameter("p0.predictor.legacy_current_spatial_ttl_s"));
@@ -2374,6 +2415,10 @@ TEST(P0RiskGridRuntimeTest, PredictorParamsCanBeOverridden) {
       rclcpp::Parameter("p0.predictor.sigma_grow_m_sqrt_s", 0.08),
       rclcpp::Parameter("p0.gnss_pr_noise_base_m", 1.25),
       rclcpp::Parameter("p0.gnss_dop_noise_base_mps", 0.125),
+      rclcpp::Parameter("p0.execution_snapshot_period_s", 0.025),
+      rclcpp::Parameter("p0.execution_batch_budget_ms", 125.0),
+      rclcpp::Parameter("p0.risk_grid_build_budget_ms", 450.0),
+      rclcpp::Parameter("p0.predictor.gnss.admission_epochs", 2),
   });
   auto node = std::make_shared<rclcpp::Node>(
       "p0_predictor_params_override_test", options);
@@ -2391,6 +2436,10 @@ TEST(P0RiskGridRuntimeTest, PredictorParamsCanBeOverridden) {
   EXPECT_DOUBLE_EQ(config.predictor_sigma_grow_m_sqrt_s, 0.08);
   EXPECT_DOUBLE_EQ(config.gnss_pr_noise_base_m, 1.25);
   EXPECT_DOUBLE_EQ(config.gnss_dop_noise_base_mps, 0.125);
+  EXPECT_DOUBLE_EQ(config.execution_snapshot_period_s, 0.025);
+  EXPECT_DOUBLE_EQ(config.execution_batch_budget_ms, 125.0);
+  EXPECT_DOUBLE_EQ(config.risk_grid_build_budget_ms, 450.0);
+  EXPECT_EQ(config.predictor_gnss_admission_epochs, 2);
 }
 
 TEST(P0RiskGridRuntimeTest, P0_6FixtureParamsCanBeOverridden) {
@@ -3595,6 +3644,70 @@ TEST_F(P0RiskGridRuntimeStampTest, InputReadinessReportsSeenValidAndFreshSources
   EXPECT_EQ(snapshotFailureReason(runtime, 100.0), "none");
 }
 
+TEST_F(P0RiskGridRuntimeStampTest,
+       ExecutionReadsLatestFreshIntegrityIncludingUnsafeValues) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_execution_current_integrity_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  auto config = enabledConfig();
+  config.grid.stale_timeout_s = 1.0;
+  P0RiskGridRuntime runtime(node, config, std::make_unique<FakeProvider>());
+
+  seedValidInputs(&runtime, 100.0, 100.0);
+  setCurrentProtectionLevels(&runtime, 12.0, 3.0);
+  iap::CurrentIntegrityState current;
+  ASSERT_TRUE(runtime.currentIntegrityForExecution(100.5, &current));
+  EXPECT_DOUBLE_EQ(current.hpl, 12.0);
+  EXPECT_GE(current.hpl, current.hal);
+  EXPECT_FALSE(runtime.currentIntegrityForExecution(101.1, &current));
+  setLatestCurrentValid(&runtime, false);
+  EXPECT_FALSE(runtime.currentIntegrityForExecution(100.5, &current));
+}
+
+TEST_F(P0RiskGridRuntimeStampTest,
+       ExecutionSelectsNewestCausalIntegrityAcrossCallbackOrdering) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_execution_causal_current_integrity_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  auto config = enabledConfig();
+  config.grid.stale_timeout_s = 1.0;
+  P0RiskGridRuntime runtime(node, config, std::make_unique<FakeProvider>());
+
+  seedValidInputs(&runtime, 100.0, 100.0);
+  appendCurrentIntegrityHistory(&runtime, 100.0, 1.0, 2.0);
+  appendCurrentIntegrityHistory(&runtime, 100.1, 12.0, 3.0);
+
+  iap::CurrentIntegrityState current;
+  ASSERT_TRUE(runtime.currentIntegrityForExecution(100.05, &current));
+  EXPECT_DOUBLE_EQ(current.stamp, 100.0);
+  EXPECT_DOUBLE_EQ(current.hpl, 1.0);
+
+  ASSERT_TRUE(runtime.currentIntegrityForExecution(100.1, &current));
+  EXPECT_DOUBLE_EQ(current.stamp, 100.1);
+  EXPECT_DOUBLE_EQ(current.hpl, 12.0);
+  EXPECT_GE(current.hpl, current.hal);
+}
+
+TEST_F(P0RiskGridRuntimeStampTest,
+       NewestCausalInvalidIntegrityIsNotHiddenByOlderValidSample) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_execution_invalid_current_integrity_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  auto config = enabledConfig();
+  config.grid.stale_timeout_s = 1.0;
+  P0RiskGridRuntime runtime(node, config, std::make_unique<FakeProvider>());
+
+  seedValidInputs(&runtime, 100.0, 100.0);
+  appendCurrentIntegrityHistory(&runtime, 100.0, 1.0, 2.0);
+  appendCurrentIntegrityHistory(&runtime, 100.1, 1.0, 2.0, false);
+
+  iap::CurrentIntegrityState current;
+  EXPECT_FALSE(runtime.currentIntegrityForExecution(100.1, &current));
+}
+
 TEST_F(P0RiskGridRuntimeStampTest, StaleOdomOrCurrentPreventsSnapshot) {
   ensure_rclcpp();
   auto node = std::make_shared<rclcpp::Node>(
@@ -4479,6 +4592,15 @@ TEST_F(P0RiskGridRuntimeStampTest,
   EXPECT_DOUBLE_EQ(planning_snapshot->integrity_anchor.current.stamp, 100.0);
   EXPECT_DOUBLE_EQ(planning_snapshot->gnss_support_ray_length_m, 5.0);
   EXPECT_FALSE(planning_snapshot->gnss_hard_occlusion);
+  const auto execution_snapshot = runtime.acquireExecutionRiskSnapshot();
+  ASSERT_NE(execution_snapshot, nullptr);
+  EXPECT_EQ(planning_snapshot->execution.get(), execution_snapshot.get());
+  EXPECT_GT(execution_snapshot->execution_snapshot_id, 0u);
+  EXPECT_EQ(execution_snapshot->occupancy->generation, 2u);
+  EXPECT_TRUE(execution_snapshot->freshAt(100.5,
+                                           config.gnss_epoch_max_age_s));
+  EXPECT_FALSE(execution_snapshot->freshAt(102.1,
+                                            config.gnss_epoch_max_age_s));
 
   iap::ForwardRiskBatchRequest cross_epoch_request;
   cross_epoch_request.combined_snapshot_identity = "diagnostic_cross_epoch";
@@ -4506,6 +4628,95 @@ TEST_F(P0RiskGridRuntimeStampTest,
   const auto diagnostic =
       still_frozen->occupancy->diagnostic_query(Eigen::Vector3d::Zero());
   EXPECT_EQ(diagnostic.occupancy_generation, 2u);
+}
+
+TEST_F(P0RiskGridRuntimeStampTest,
+       ExecutionSnapshotPublishesWhenRiskGridMissesItsBudget) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_execution_snapshot_grid_budget_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  auto config = enabledConfig();
+  config.predictor_source_mode = iap::PredictorSourceMode::GnssOnly;
+  config.predictor_gnss_epoch_policy =
+      iap::PredictorGnssEpochPolicy::Required;
+  config.risk_grid_build_budget_ms = 0.0;
+  config.grid.geometry_id = "planning_lattice_v1:budget_test";
+  P0RiskGridRuntime runtime(node, config);
+
+  seedValidInputs(&runtime, 100.0, 100.0);
+  seedGnssEpoch(&runtime, 100.0);
+  installOccupancyEpoch(&runtime, 100.0, {}, "map", 7u);
+
+  EXPECT_FALSE(refreshOnce(&runtime));
+  const auto execution = runtime.acquireExecutionRiskSnapshot();
+  ASSERT_NE(execution, nullptr);
+  EXPECT_EQ(execution->source_identity.occupancy_generation, 7u);
+  EXPECT_TRUE(execution->freshAt(100.1, config.gnss_epoch_max_age_s));
+  EXPECT_EQ(runtime.acquirePlanningSnapshot(), nullptr);
+  EXPECT_EQ(runtime.health().reason, "risk_grid_build_budget_exceeded");
+
+  iap::ForwardRiskBatchRequest request;
+  request.combined_snapshot_identity = "execution_without_grid";
+  request.evaluation_time_s = 100.1;
+  request.compute_budget_ms = 150.0;
+  request.satellite_set_policy =
+      iap::ForwardRiskSatelliteSetPolicy::COMMON_CORE;
+  request.points.push_back(iap::ForwardRiskQueryPoint{
+      Eigen::Vector3d::Zero(), 100.1, 0.0, 1u});
+  const auto direct = execution->forward_risk_batch(request);
+  ASSERT_EQ(direct.points.size(), 1u);
+  EXPECT_NE(direct.points.front().failure_reason,
+            iap::ForwardRiskFailureReason::COMPUTE_BUDGET_EXCEEDED);
+}
+
+TEST_F(P0RiskGridRuntimeStampTest,
+       IdenticalExecutionTupleDoesNotRepublishOrInvalidateCacheIdentity) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_execution_snapshot_tuple_dedup_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  auto config = enabledConfig();
+  config.online_mapping_mode = true;
+  config.predictor_source_mode = iap::PredictorSourceMode::GnssOnly;
+  config.predictor_gnss_epoch_policy =
+      iap::PredictorGnssEpochPolicy::Required;
+  config.grid.use_fixed_origin = true;
+  config.grid.fixed_origin_w = Eigen::Vector3d(-1.5, -1.5, -1.5);
+  config.grid.size_x_m = 30.0;
+  config.grid.size_y_m = 30.0;
+  config.grid.size_z_m = 6.0;
+  config.grid.geometry_id = "planning_lattice_v1:runtime_test";
+  P0RiskGridRuntime runtime(node, config);
+  // Exercise the production-only timer path, not the deterministic provider
+  // path used by most runtime unit tests.
+  useProductionExecutionSnapshotPath(&runtime);
+  const double stamp_s = node->now().seconds();
+  seedValidInputs(&runtime, stamp_s, stamp_s);
+  seedGnssEpoch(&runtime, stamp_s);
+  setOriginSeen(&runtime, true);
+  setOriginValid(&runtime, true);
+  setOriginStamp(&runtime, stamp_s);
+  const auto live_generation = std::make_shared<std::atomic<uint64_t>>(3u);
+  const auto source_owner = std::make_shared<const int>(3);
+  runtime.setOccupancyEpochFactory(
+      [live_generation, source_owner, stamp_s]() {
+        return makeOccupancyEpochCapture(
+            live_generation, 3u, stamp_s, "map", {}, source_owner,
+            [source_owner]() { return source_owner; }, 0.2,
+            Eigen::Vector3d(-1.5, -1.5, -1.5));
+      });
+
+  publishExecutionSnapshot(&runtime);
+  const auto first = runtime.acquireExecutionRiskSnapshot();
+  ASSERT_NE(first, nullptr);
+  EXPECT_EQ(first->frame_contract_id,
+            "planner_map_contract:runtime_test");
+  publishExecutionSnapshot(&runtime);
+  const auto second = runtime.acquireExecutionRiskSnapshot();
+  ASSERT_NE(second, nullptr);
+  EXPECT_EQ(second.get(), first.get());
+  EXPECT_EQ(second->execution_snapshot_id, first->execution_snapshot_id);
 }
 
 TEST_F(P0RiskGridRuntimeStampTest,

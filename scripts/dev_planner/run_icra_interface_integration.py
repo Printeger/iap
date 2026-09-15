@@ -158,7 +158,7 @@ def _is_forest_scenario(scenario: str) -> bool:
 
 def forest_scene_contract(
         scenario: str = FOREST_SCENARIO,
-        gnss_arm: str = "baseline") -> dict:
+        gnss_arm: str = "bds") -> dict:
     """Return the frozen, expanded geometry used by the forest preset."""
     if not _is_forest_scenario(scenario):
         raise ValueError(f"unsupported forest scenario: {scenario}")
@@ -249,7 +249,7 @@ def forest_scene_contract(
 
 def forest_manifest_evidence(
         run_root: Path, scenario: str = FOREST_SCENARIO,
-        gnss_arm: str = "baseline") -> dict:
+        gnss_arm: str = "bds") -> dict:
     """Bind analyzer assumptions to the effective launch manifest."""
     manifests = sorted((run_root / "exports").glob(
         "**/test_planner_manifest.json"))
@@ -489,7 +489,7 @@ def lidar_runtime_failures(renderer: dict | None, stats: dict) -> list[str]:
 def stage_launch_args(
         stage: str, scenario: str = DEFAULT_SCENARIO,
         forest_variant: str | None = None,
-        gnss_arm: str = "baseline") -> dict[str, str]:
+        gnss_arm: str = "bds") -> dict[str, str]:
     if stage not in STAGES:
         raise ValueError(f"unknown stage: {stage}")
     if scenario not in (DEFAULT_SCENARIO, *FOREST_SCENARIOS):
@@ -929,10 +929,21 @@ def _health_payload(row: dict) -> tuple[float, dict]:
 
 
 def _healthy(payload: dict) -> bool:
+    # A background build can lose its frozen input race or hit its budget
+    # while the previously committed grid is still fresh.  The attempt reason
+    # remains visible in refresh evidence, but it must not make that immutable
+    # active generation appear unavailable to search (and never affects the
+    # independent execution snapshot).
+    retained_fresh_grid_reasons = {
+        "occupancy_generation_changed",
+        "prior_generation_changed",
+        "predictor_spatial_source_changed",
+        "risk_grid_build_budget_exceeded",
+    }
     return (
         payload.get("ready") is True
         and payload.get("stale") is False
-        and payload.get("reason") == "ok"
+        and payload.get("reason") in ({"ok"} | retained_fresh_grid_reasons)
         and int(payload.get("generation_id", 0) or 0) > 0
     )
 
@@ -986,6 +997,43 @@ def analyze_p0(rows: list[dict], capture_start_s: float | None = None) -> dict:
     if identity_payload is None:
         failures.append("p0_completed_snapshot_identity_missing")
         identity_payload = latest
+
+    def numeric_values(field: str) -> list[float]:
+        values = []
+        for _, payload in window:
+            try:
+                value = float(payload.get(field, math.nan))
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(value):
+                values.append(value)
+        return values
+
+    def nearest_rank(values: list[float], quantile: float) -> float | None:
+        if not values:
+            return None
+        ordered = sorted(values)
+        return ordered[max(0, math.ceil(quantile * len(ordered)) - 1)]
+
+    grid_latencies = numeric_values("refresh_elapsed_ms")
+    execution_latencies = numeric_values(
+        "execution_snapshot_publish_latency_ms")
+    provider_latencies = numeric_values("provider_batch_duration_ms")
+    latency_causes: dict[str, int] = {}
+    for _, payload in window:
+        cause = str(payload.get("latency_primary_cause", "") or "")
+        if cause:
+            latency_causes[cause] = latency_causes.get(cause, 0) + 1
+    over_budget_grid_publications = sum(
+        1 for _, payload in window
+        if payload.get("refresh_evidence_state") == "COMPLETED_SUCCESS"
+        and _finite_number(payload.get("refresh_elapsed_ms"))
+        and float(payload["refresh_elapsed_ms"]) > 500.0)
+    if over_budget_grid_publications:
+        failures.append("p0_over_budget_grid_published")
+    if (execution_latencies and
+            nearest_rank(execution_latencies, .95) >= 150.0):
+        failures.append("p0_execution_snapshot_p95_exceeded")
     return _result(
         failures,
         health_count=len(observations),
@@ -1026,6 +1074,17 @@ def analyze_p0(rows: list[dict], capture_start_s: float | None = None) -> dict:
             "lidar_generation": identity_payload.get(
                 "source_lidar_generation"),
             "lidar_stamp_s": identity_payload.get("source_lidar_stamp_s"),
+        },
+        performance={
+            "risk_grid_ms_p95": nearest_rank(grid_latencies, .95),
+            "risk_grid_ms_max": max(grid_latencies, default=None),
+            "provider_batch_ms_p95": nearest_rank(provider_latencies, .95),
+            "execution_snapshot_ms_p95": nearest_rank(
+                execution_latencies, .95),
+            "execution_snapshot_ms_max": max(
+                execution_latencies, default=None),
+            "over_budget_grid_publications": over_budget_grid_publications,
+            "latency_primary_causes": latency_causes,
         },
     )
 
@@ -1412,6 +1471,20 @@ def analyze_limited_prefix_records(
                      and str(event.get("allowed", "1")) == "0"
                      and event.get("reason") ==
                      "runtime_known_future_integrity_unsafe"]
+    braking_events = []
+    for event in execution_events:
+        try:
+            parent_identity = (
+                int(event.get("parent_trajectory_id", 0) or 0),
+                int(event.get("parent_trajectory_start_ns", 0) or 0))
+        except (TypeError, ValueError):
+            continue
+        if (event.get("event") == "FAILSAFE_BRAKED_TO_STOP" and
+                event.get("authority") == "LIMITED_PREFIX_BRAKING" and
+                parent_identity == identity and
+                str(event.get("allowed", "0")) == "1" and
+                str(event.get("endpoint_reached", "0")) == "1"):
+            braking_events.append(event)
 
     matching_splines = []
     for candidate in bsplines:
@@ -1537,13 +1610,67 @@ def analyze_limited_prefix_records(
         if legal_revoke:
             break
 
+    failsafe_braked = False
+    braking_identity_proven = False
+    for event in braking_events:
+        try:
+            stop_stamp = float(event["stamp_s"])
+            stop_position = tuple(float(event[f"approved_endpoint_{axis}"])
+                                  for axis in "xyz")
+            braking_identity = (int(event["trajectory_id"]),
+                                int(event["trajectory_start_ns"]))
+            braking_hashes = (str(event["control_points_hash"]),
+                              str(event["knot_vector_hash"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+        braking_bspline = any(
+            _message_identity(candidate) == braking_identity and
+            _captured_bspline_hashes(candidate.get("payload", candidate)) ==
+            braking_hashes for candidate in bsplines)
+        braking_command = any(
+            int(command.get("payload", command).get(
+                "trajectory_id", 0) or 0) == braking_identity[0]
+            for command in poscmd)
+        braking_identity_proven = braking_bspline and braking_command
+        stopped_odom = [stamp for stamp, position, velocity in odom_samples
+                        if stamp >= stop_stamp
+                        and _distance(position, stop_position) <= .15
+                        and math.sqrt(sum(value * value
+                                         for value in velocity)) <= .10]
+        failsafe_braked = (braking_identity_proven and
+                           len(stopped_odom) >= 2 and
+                           max(stopped_odom) - min(stopped_odom) >= .8 and
+                           endpoint_overrun_m <= .10)
+        if failsafe_braked:
+            break
+
     if endpoint_hold_ok:
         outcome = "LIMITED_PREFIX_EXECUTED_TO_ENDPOINT"
+    elif failsafe_braked:
+        outcome = "LIMITED_PREFIX_EXECUTED_THEN_FAILSAFE_BRAKED_TO_STOP"
     elif legal_revoke:
         outcome = "LIMITED_PREFIX_EXECUTED_THEN_RISK_REVOKED"
     else:
         outcome = "HOLD_NO_EXECUTION"
         failures.append("limited_prefix_terminal_outcome_unproven")
+    if braking_events and not braking_identity_proven:
+        failures.append("limited_prefix_braking_command_identity_missing")
+
+    direct_batch_durations = []
+    for event in [*matching_events, *braking_events]:
+        try:
+            duration = float(event.get("direct_batch_duration_ms", "nan"))
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(duration) and duration >= 0.0:
+            direct_batch_durations.append(duration)
+    direct_batch_p95 = None
+    if direct_batch_durations:
+        ordered = sorted(direct_batch_durations)
+        direct_batch_p95 = ordered[
+            max(0, math.ceil(.95 * len(ordered)) - 1)]
+        if direct_batch_p95 >= 150.0:
+            failures.append("limited_prefix_direct_batch_p95_exceeded")
     return _result(
         failures, stage="limited-prefix", limited_prefix_outcome=outcome,
         formal_route_selected_count=len(formal),
@@ -1553,8 +1680,12 @@ def analyze_limited_prefix_records(
         endpoint_overrun_m=max(0.0, endpoint_overrun_m),
         endpoint_hold_proven=endpoint_hold_ok,
         legal_risk_revoke_proven=legal_revoke,
+        braking_command_identity_proven=braking_identity_proven,
+        failsafe_braked_to_stop_proven=failsafe_braked,
         displacement_before_revoke_m=legal_revoke_displacement,
-        execution_event_count=len(matching_events))
+        execution_event_count=len(matching_events),
+        direct_batch_ms_p95=direct_batch_p95,
+        direct_batch_ms_max=max(direct_batch_durations, default=None))
 
 
 def analyze_stage_records(
@@ -2165,7 +2296,7 @@ def analyze_forward_risk_samples(
 
 def analyze_run(
         stage: str, run_root: Path, scenario: str = DEFAULT_SCENARIO,
-        forest_variant: str | None = None) -> dict:
+        forest_variant: str | None = None, gnss_arm: str = "bds") -> dict:
     records = _read_jsonl(run_root / "capture.jsonl")
     health = [row for row in records if row.get("kind") == "p0_health"]
     bsplines = [row for row in records if row.get("kind") == "normal_bspline"]
@@ -2200,16 +2331,26 @@ def analyze_run(
         return analyze_p0(health, stage_start)
     if stage == "limited-prefix":
         p0 = analyze_p0(health, stage_start)
+        p0_p95 = p0.get("performance", {}).get("risk_grid_ms_p95")
+        p0_p95_limit_ms = 450.0 if gnss_arm == "bds" else 400.0
+        p0_performance_failures = []
+        if (_finite_number(p0_p95) and
+                float(p0_p95) >= p0_p95_limit_ms):
+            p0_performance_failures.append(
+                f"p0_{gnss_arm}_risk_grid_p95_exceeded")
         limited = analyze_limited_prefix_records(
             lineage, bsplines,
             [row for row in records if row.get("kind") == "poscmd"],
             [row for row in records if row.get("kind") == "iap_odom"],
             execution_events)
         return _result(
-            [*p0["failures"], *limited["failures"]],
+            [*p0["failures"], *p0_performance_failures,
+             *limited["failures"]],
             **{key: value for key, value in limited.items()
                if key not in ("result", "failures")},
             p0=p0,
+            gnss_arm=gnss_arm,
+            p0_risk_grid_p95_limit_ms=p0_p95_limit_ms,
             generation_probe_rows=len(_read_csv(
                 run_root / "exports/planner_p4_risk_astar_debug.csv."
                 "generation_probe.csv")))
@@ -3116,7 +3257,7 @@ def _run_one_impl(
         owned_streams: dict[str, TextIO],
         scenario: str = DEFAULT_SCENARIO,
         forest_variant: str | None = None,
-        gnss_arm: str = "baseline") -> dict:
+        gnss_arm: str = "bds") -> dict:
     spec = STAGES[stage]
     duration_s = stage_duration_s(stage, scenario, forest_variant)
     run_root.mkdir(parents=True, exist_ok=False)
@@ -3249,7 +3390,8 @@ def _run_one_impl(
             launch_code, stdout, launch_cleared, residual_nodes,
             runner_escalated=launch_escalated)
     else:
-        summary = analyze_run(stage, run_root, scenario, forest_variant)
+        summary = analyze_run(
+            stage, run_root, scenario, forest_variant, gnss_arm)
         extra = []
         if early_exit:
             extra.append("launch_exited_early")
@@ -3326,7 +3468,7 @@ def _run_one(
         start_rviz: bool = False, shutdown_variant: str | None = None,
         scenario: str = DEFAULT_SCENARIO,
         forest_variant: str | None = None,
-        gnss_arm: str = "baseline") -> dict:
+        gnss_arm: str = "bds") -> dict:
     owned_processes: dict[str, subprocess.Popen] = {}
     owned_streams: dict[str, TextIO] = {}
     started = time.monotonic()
@@ -3466,7 +3608,7 @@ def _run_main(args: argparse.Namespace) -> int:
         stages = (requested,)
     scenario = getattr(args, "scenario", DEFAULT_SCENARIO)
     forest_ab = bool(getattr(args, "forest_ab", False))
-    gnss_arm = getattr(args, "gnss_arm", "baseline")
+    gnss_arm = getattr(args, "gnss_arm", "bds")
     results_root = args.results_root.resolve()
     session = _session_root(results_root)
     session.mkdir(parents=True, exist_ok=False)
@@ -3606,8 +3748,8 @@ def main() -> int:
     mode.add_argument("--through", choices=STAGE_ORDER)
     parser.add_argument("--repetitions", type=int, default=3)
     parser.add_argument(
-        "--gnss-arm", choices=("baseline", "bds"), default="baseline",
-        help="development A/B constellation arm; does not change formal defaults")
+        "--gnss-arm", choices=("baseline", "bds"), default="bds",
+        help="GNSS constellation arm; BDS is the default, baseline is explicit A/B")
     parser.add_argument("--results-root", type=Path,
                         default=DEFAULT_RESULTS_ROOT)
     parser.add_argument("--install-root", type=Path,

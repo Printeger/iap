@@ -1391,11 +1391,10 @@ SCENARIO_PRESETS = {
         "validator_require_lidar_valid": "true",
         "validator_required_final_source": "",
         "gnss_enable_map_occlusion": "true",
-        # Map-occlusion ray tests run once per satellite. Four constellations
-        # make integrity epochs queue behind the odometry clock in this dense
-        # cloud, so the development preset excludes the large BDS set while
-        # retaining GPS+Galileo+GLONASS geometry for spatial contrast.
-        "gnss_enabled_constellations": "GPS,GAL,GLO",
+        # BDS is part of the production/default geometry. Execution-risk
+        # snapshots keep dense RiskGrid construction off the authorization
+        # path while retaining BDS in the direct curve check.
+        "gnss_enabled_constellations": "GPS,BDS,GAL,GLO",
         "gnss_enable_skymask": "false",
         "gnss_enable_nlos": "true",
         "gnss_enable_multipath": "true",
@@ -1423,7 +1422,7 @@ SCENARIO_PRESETS = {
         "validator_require_lidar_valid": "true",
         "validator_required_final_source": "",
         "gnss_enable_map_occlusion": "true",
-        "gnss_enabled_constellations": "GPS,GAL,GLO",
+        "gnss_enabled_constellations": "GPS,BDS,GAL,GLO",
         "gnss_enable_skymask": "false",
         "gnss_enable_nlos": "true",
         "gnss_enable_multipath": "true",
@@ -1714,7 +1713,10 @@ EXPERIMENT_PRESETS = {
         "planner_enable_p5_final": "true",
         "p0.enable_risk_grid": "true",
         "p0.debug_metrics_enable": "true",
-        "p0.predictor.worker_count": "4",
+        # BDS is the production default for this dense forest profile. Six
+        # worker-local predictors preserve the formula while reducing the
+        # larger exact geometry batch latency.
+        "p0.predictor.worker_count": "6",
         "p0.horizons_s": "0.0,0.5,1.0,1.5,2.0,2.5,3.0,4.0,5.0,6.0",
         "p0.predictor.sigma_grow_m_sqrt_s": "0.01",
         "p0.predictor.sigma_growth_profile": "legacy_iap_rq320_baseline_v1",

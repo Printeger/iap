@@ -72,19 +72,54 @@
   sentinel and never participate in ordinary interpolation.
 - Final publication and runtime execution checks sample the actual immutable
   B-spline (including its endpoint, at no more than 0.2 s spacing) and use one
-  direct ForwardRisk batch on the corresponding coherent P0 snapshot. The
-  result identity binds trajectory timing, control points/knots, sampling
-  lattice, occupancy/risk generations and GNSS epoch. `SAFE` with complete
+  direct ForwardRisk batch on a coherent immutable `P0ExecutionRiskSnapshot`.
+  This lightweight authority binds the frozen occupancy/support, GNSS epoch,
+  certified current Integrity, LiDAR/FIM inputs and all frame/geometry/policy
+  identities before the corresponding dense RiskGrid is built. The true map
+  frame contract is carried separately from the lattice geometry identity.
+  Repeated identical tuples retain the same execution snapshot ID. A dense grid
+  that misses its 500 ms end-to-end budget is discarded without partial
+  publication and cannot invalidate a still-fresh execution snapshot. The
+  execution channel is a single-slot latest-wins path evaluated every 50 ms;
+  a later-finishing RiskGrid transaction cannot overwrite its authority.
+  RiskGrid health distinguishes the active immutable generation from the last
+  build attempt: generation/source races and budget cancellation remain in
+  attempt evidence, while a retained active generation remains usable only
+  until its ordinary freshness deadline. The result identity binds trajectory
+  timing, control points/knots, sampling
+  lattice, execution-snapshot/occupancy identities, diagnostic RiskGrid
+  generation and GNSS epoch. `SAFE` with complete
   GNSS/LiDAR/FIM support is required; unsafe, incomplete, degenerate, expired
   or over-budget results fail closed. Same-generation result reuse never
   bypasses current map/GNSS/certified-Integrity freshness, and any generation
   change forces recomputation. RiskGrid remains available as a planning
   heuristic and for diagnostics.
-- P5 consumes that same direct batch and its exact immutable RiskGrid/P0
-  identity; acquiring a newer generation between P4 and P5 does not by itself
-  invalidate a completed coherent result. Ordinary RiskGrid PL is never a P5
-  authority. The existing P5-4/P5-7 fixture overlay remains an explicit test
-  policy, not a production interpolation fallback.
+- Certified current-Integrity lookup is causal: concurrent callbacks may retain
+  a bounded history, but an execution check selects the newest sample at or
+  before its evaluation time. One microsecond is the maximum timestamp
+  comparison tolerance for ROS floating-point conversion; it does not extend
+  the configured freshness window. Unsafe or invalid newer causal samples must
+  not be hidden by older valid samples.
+- P5 consumes that same execution-snapshot-bound direct batch. It does not
+  require a matching or newly published RiskGrid; acquiring a newer grid
+  generation between P4 and P5 does not by itself invalidate a completed
+  coherent result. Ordinary RiskGrid PL is never a P5 authority. The existing
+  P5-4/P5-7 fixture overlay remains an explicit test policy, not a production
+  interpolation fallback.
+- Planner-side GNSS geometry uses all four constellations
+  `GPS+BDS+GAL+GLO` in formal and forest launch defaults. This changes neither
+  the PL equation nor AL. The full information matrix is factored once;
+  leave-one-out protection levels use an algebraically equivalent rank-one
+  downdate, with the original LDLT solve at the numerical boundary. Exact
+  satellite-ID/LOS/sigma bit patterns may use a bounded 4096-entry cache;
+  approximated or quantized cache keys are forbidden.
+- A newly appearing advisory satellite must be present in three consecutive
+  raw epochs before use. Disappearance, certified exclusion and hard LOS
+  obstruction remove it immediately. This admission state is explicitly
+  diagnostic and is not added to the certified epoch identity. Final and
+  runtime checks use the intersection of usable satellites over the complete
+  remaining short-trajectory batch and recompute candidate and receiver raw
+  PL from that common core; an insufficient intersection is `UNKNOWN/HOLD`.
 - The optional GNSS LOS clearance transition is part of the predictor and
   snapshot identity. For width `w>0`, an occupancy generation owns a truncated
   distance field to occupied voxel surfaces; the LOS proximity is
@@ -144,6 +179,37 @@
   certificate still passes identity, tracking, collision and runtime Integrity
   checks, the FSM continues it without retrying initialization or changing its
   start time, endpoint or deadline.
+- A valid committed `LIMITED_PREFIX` is replaced only after at least 1.0 s of
+  execution when the new common-corridor endpoint advances by at least 0.5 m
+  and its direct-risk maximum is no worse than the old remaining curve. An
+  invalid certificate or an already reached endpoint may be replaced
+  immediately. Ordinary generations, pending/rate limiting and smaller
+  numerical endpoint changes retain the exact trajectory id, start, endpoint
+  and deadline.
+- A committed limited prefix stores independently parameterized stopping
+  curves at no more than 0.2 s anchor spacing. Every curve is start-state
+  continuous, terminal-zero, dynamics/collision checked, and all curve samples
+  are checked in one direct-risk batch. If source data expires, the executor
+  schedules the nearest future anchor, continues the old approved curve for no
+  more than 0.2 s, then publishes that curve with a new trajectory and braking
+  certificate identity under `LIMITED_PREFIX_BRAKING`, without extending the
+  original endpoint or deadline. Tracking loss, imminent collision, current certified Integrity
+  violation, an unsafe direct batch or an unavailable suffix remains an
+  emergency fail-closed condition. This terminal state is reported separately
+  from normal arrival at the originally approved endpoint.
+- Candidate mutation and final lineage/P5/publication form one execution-
+  commitment transaction. If a final gate rejects the candidate, both the
+  incumbent B-spline and its execution certificate/evidence are restored.
+  While `LIMITED_PREFIX_BRAKING` is active, ordinary replanning cannot replace
+  or relabel that curve; only endpoint completion or an explicit runtime /
+  collision revocation ends its authority.
+- Runtime timing evidence follows `LiDAR source -> ROS receive -> occupancy
+  freeze -> support ready -> execution snapshot publish -> RiskGrid
+  start/end -> execution query`. Freshness failures retain all observable contributors
+  and choose the primary cause in this order: `SOURCE_DATA_GAP`,
+  `OCCUPANCY_BUILD_LAG`, `SNAPSHOT_QUEUE_LAG`, then
+  `RISK_GRID_BUILD_LAG`. Grid lag affects search only and cannot revoke a
+  trajectory independently proven safe by a fresh execution snapshot.
 - Reaching the approved endpoint is a normal hold state, distinct from safety
   revocation. Runtime collision and GNSS sky-risk kernels are checked
   independently; this remains required when P5 is disabled.

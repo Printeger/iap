@@ -44,7 +44,8 @@ VisibleGeometrySet visible_geometry(
         (i >= satellite_mask->size() || !(*satellite_mask)[i])) {
       continue;
     }
-    const bool excluded = epoch.sats[i].excluded;
+    const bool excluded = epoch.sats[i].excluded ||
+        epoch.sats[i].admission_hysteresis_pending;
     if (i >= visibility.vis_flags.size() || !visibility.vis_flags[i]) {
       if (excluded) {
         out.excluded_sat_ids.push_back(epoch.sats[i].sat_id);
