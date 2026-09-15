@@ -572,6 +572,16 @@ P0RiskGridRuntime::Config P0RiskGridRuntime::declareAndReadConfig(
     throw std::invalid_argument(
         "invalid P0 measured GNSS/integrity epoch alignment tolerance");
   }
+  config.predictor_gnss_clearance_transition_m =
+      node->declare_parameter<double>(
+          "p0.predictor.gnss.clearance_transition_m", 0.0);
+  if (!std::isfinite(config.predictor_gnss_clearance_transition_m) ||
+      config.predictor_gnss_clearance_transition_m < 0.0 ||
+      config.predictor_gnss_clearance_transition_m >
+          iap::LocalOccupancyGrid::kMaxClearanceTransitionM) {
+    throw std::invalid_argument(
+        "invalid P0 GNSS clearance transition width");
+  }
   config.predictor_use_current_integrity_prior =
       node->declare_parameter<bool>(
           "p0.predictor.use_current_integrity_prior", true);
@@ -872,6 +882,17 @@ std::shared_ptr<const iap::RiskGridSnapshot>
 P0RiskGridRuntime::acquireSnapshot() const {
   const auto planning = acquirePlanningSnapshot();
   return planning ? planning->risk : nullptr;
+}
+
+bool P0RiskGridRuntime::gnssEpochFreshAt(
+    const double epoch_stamp_s, const double evaluation_time_s) const {
+  if (!std::isfinite(epoch_stamp_s) || !std::isfinite(evaluation_time_s)) {
+    return false;
+  }
+  const double age_s = evaluation_time_s - epoch_stamp_s;
+  return age_s >= -1.0e-6 &&
+      (config_.gnss_epoch_max_age_s < 0.0 ||
+       age_s <= config_.gnss_epoch_max_age_s);
 }
 
 bool P0RiskGridRuntime::refreshOnceForTest() {
@@ -1461,6 +1482,8 @@ void P0RiskGridRuntime::refreshTimerCallback() {
     predictor_params.freshness.max_snapshot_age_s =
         config_.grid.stale_timeout_s;
     predictor_params.source_mode = config_.predictor_source_mode;
+    predictor_params.gnss.visibility_params.clearance_transition_m =
+        config_.predictor_gnss_clearance_transition_m;
     forward_gnss_hard_occlusion =
         predictor_params.gnss.visibility_params.hard_occlusion;
     forward_gnss_support_ray_length_m = forward_gnss_hard_occlusion
@@ -1856,6 +1879,13 @@ void P0RiskGridRuntime::refreshTimerCallback() {
   source_identity.local_map_support_identity = occupancy_epoch &&
       occupancy_epoch->trusted_local_map_support
       ? occupancy_epoch->trusted_local_map_support->identity() : "strict";
+  {
+    std::ostringstream predictor_identity;
+    predictor_identity << std::setprecision(17)
+        << "forward_risk_v2;clearance_transition_m="
+        << config_.predictor_gnss_clearance_transition_m;
+    source_identity.predictor_algorithm_identity = predictor_identity.str();
+  }
   source_identity.alert_limit_policy_id =
       config_.grid.alert_limit_policy_id;
   bool refresh_succeeded = false;

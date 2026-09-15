@@ -122,7 +122,8 @@ class P0OccupancyEpochAdapter {
       const CapturedEpoch& epoch,
       P0OccupancyEpoch::SourceOwner source_owner,
       P0OccupancyEpoch::LiveSourceOwner live_source_owner,
-      P0OccupancyEpoch::LiveGeneration live_generation) {
+      P0OccupancyEpoch::LiveGeneration live_generation,
+      double clearance_transition_m = 0.0) {
     iap::RiskGridMap::OccupancyDiagnosticQuery diagnostic_query;
     if (epoch.diagnostic_query) {
       const auto neutral_query = epoch.diagnostic_query;
@@ -160,7 +161,7 @@ class P0OccupancyEpochAdapter {
                        std::move(diagnostic_query),
                        std::move(source_owner),
                        std::move(live_source_owner),
-                       std::move(live_generation));
+                       std::move(live_generation), clearance_transition_m);
   }
 
   static bool sameVersion(const P0OccupancyEpoch& base,
@@ -184,7 +185,8 @@ class P0OccupancyEpochAdapter {
       iap::RiskGridMap::OccupancyDiagnosticQuery diagnostic_query,
       P0OccupancyEpoch::SourceOwner source_owner,
       P0OccupancyEpoch::LiveSourceOwner live_source_owner,
-      P0OccupancyEpoch::LiveGeneration live_generation);
+      P0OccupancyEpoch::LiveGeneration live_generation,
+      double clearance_transition_m);
 };
 
 }  // namespace ego_planner

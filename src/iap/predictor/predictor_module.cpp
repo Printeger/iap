@@ -961,13 +961,23 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
           known_degradation, blocked ? 1.0 : kappa);
       result.gnss_satellites.push_back(std::move(diagnostic));
     }
-    std::uint64_t local_hash = 1469598103934665603ull;
+    std::vector<int> local_satellite_ids;
+    local_satellite_ids.reserve(result.gnss_used_satellite_count);
     for (std::size_t sat_index = 0; sat_index < sat_count; ++sat_index) {
       if (!local_mask[sat_index]) {
         continue;
       }
-      local_hash ^= static_cast<std::uint64_t>(static_cast<std::uint32_t>(
-          request.snapshot.gnss_epoch.sats[sat_index].sat_id));
+      local_satellite_ids.push_back(
+          request.snapshot.gnss_epoch.sats[sat_index].sat_id);
+    }
+    std::sort(local_satellite_ids.begin(), local_satellite_ids.end());
+    local_satellite_ids.erase(
+        std::unique(local_satellite_ids.begin(), local_satellite_ids.end()),
+        local_satellite_ids.end());
+    std::uint64_t local_hash = 1469598103934665603ull;
+    for (const int sat_id : local_satellite_ids) {
+      local_hash ^= static_cast<std::uint64_t>(
+          static_cast<std::uint32_t>(sat_id));
       local_hash *= 1099511628211ull;
     }
     result.local_satellite_set_hash =

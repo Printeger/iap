@@ -11,6 +11,20 @@
 #include <utility>
 
 namespace iap {
+
+const char* riskGridInterpolationStatusName(
+    const RiskGridInterpolationStatus status) {
+  switch (status) {
+    case RiskGridInterpolationStatus::NOT_EVALUATED: return "NOT_EVALUATED";
+    case RiskGridInterpolationStatus::INTERPOLATED: return "INTERPOLATED";
+    case RiskGridInterpolationStatus::DIRECT_RECHECK_REQUIRED:
+      return "DIRECT_RECHECK_REQUIRED";
+    case RiskGridInterpolationStatus::GEOMETRY_DEGENERATE:
+      return "GEOMETRY_DEGENERATE";
+    case RiskGridInterpolationStatus::INVALID_SUPPORT: return "INVALID_SUPPORT";
+  }
+  return "NOT_EVALUATED";
+}
 namespace {
 
 constexpr double kBoundaryEps = 1.0e-4;
@@ -282,7 +296,7 @@ std::string canonicalRiskGridConfigHash(const RiskGridMapParams& params) {
 std::string canonicalRiskGridSourceIdentityHash(
     const RiskGridSourceIdentity& identity) {
   std::ostringstream stream;
-  stream << "risk_grid_sources_v3;"
+  stream << "risk_grid_sources_v4;"
          << identity.occupancy_generation << ';';
   append_canonical_double(stream, identity.occupancy_stamp_s);
   stream << identity.prior_generation << ';';
@@ -293,6 +307,7 @@ std::string canonicalRiskGridSourceIdentityHash(
   stream << identity.lidar_generation << ';';
   append_canonical_double(stream, identity.lidar_stamp_s);
   stream << identity.local_map_support_identity << ';';
+  stream << identity.predictor_algorithm_identity << ';';
   stream << identity.alert_limit_policy_id << ';';
   return hash_hex(fnv1a_append(kFnvOffset, stream.str()));
 }
@@ -677,26 +692,147 @@ struct SpatialPLInterp {
   std::string reason = "not_evaluated";
 };
 
+bool same_pl_topology(const RiskVoxel& lhs, const RiskVoxel& rhs) {
+  constexpr uint32_t kTopologySourceMask =
+      PREDICTOR_RESULT_VALID |
+      PREDICTOR_RESULT_FALLBACK |
+      PREDICTOR_RESULT_GNSS_VALID |
+      PREDICTOR_RESULT_LIDAR_VALID |
+      PREDICTOR_RESULT_FUSION_VALID |
+      PREDICTOR_RESULT_PRIOR_VALID |
+      PREDICTOR_RESULT_GNSS_USED |
+      PREDICTOR_RESULT_LIDAR_USED |
+      PREDICTOR_RESULT_REGULARIZED |
+      PREDICTOR_RESULT_CONSERVATIVE_MAX |
+      PREDICTOR_RESULT_AVAILABLE |
+      PREDICTOR_RESULT_STALE_CURRENT_PRIOR;
+  const bool gnss_used =
+      ((lhs.source_flags | rhs.source_flags) & PREDICTOR_RESULT_GNSS_USED) != 0u;
+  return (!gnss_used ||
+          (lhs.gnss_local_satellite_set_hash != 0u &&
+           lhs.gnss_local_satellite_set_hash ==
+               rhs.gnss_local_satellite_set_hash &&
+           !lhs.gnss_used_satellite_ids.empty() &&
+           lhs.gnss_used_satellite_ids == rhs.gnss_used_satellite_ids)) &&
+      lhs.gnss_support_authority == rhs.gnss_support_authority &&
+      lhs.gnss_support_status == rhs.gnss_support_status &&
+      (lhs.source_flags & kTopologySourceMask) ==
+          (rhs.source_flags & kTopologySourceMask);
+}
+
 bool interpolate_pl_layer(const RiskGridSnapshot::Generation& generation,
                           const int horizon_id,
                           const Eigen::Vector3i& base_id,
                           const Eigen::Vector3d& frac,
                           const double query_time_s,
+                          const int temporal_layer,
+                          const double temporal_weight,
                           SpatialPLInterp* out,
-                          std::string* reason) {
+                          std::string* reason,
+                          PredictedPLQueryTrace* trace,
+                          RiskGridInterpolationStatus* status,
+                          RiskVoxel* topology) {
   double h[2][2][2]{};
   double v[2][2][2]{};
   std::string first_reason;
   bool all_reasons_match = true;
+  bool invalid_support = false;
+  bool geometry_degenerate = false;
+  bool topology_metadata_missing = false;
+  bool topology_mismatch = false;
+  std::string first_invalid_reason;
+  const double wx[2] = {1.0 - frac.x(), frac.x()};
+  const double wy[2] = {1.0 - frac.y(), frac.y()};
+  const double wz[2] = {1.0 - frac.z(), frac.z()};
+  const RiskVoxel* topology_reference = nullptr;
   for (int dx = 0; dx <= 1; ++dx) {
     for (int dy = 0; dy <= 1; ++dy) {
       for (int dz = 0; dz <= 1; ++dz) {
         const Eigen::Vector3i id = base_id + Eigen::Vector3i(dx, dy, dz);
         const RiskVoxel& voxel = voxel_at(generation, horizon_id, id);
-        if (!validate_corner(voxel, query_time_s,
+        const double spatial_weight = wx[dx] * wy[dy] * wz[dz];
+        const double combined_weight = spatial_weight * temporal_weight;
+        std::string corner_validation_reason;
+        const bool corner_valid = validate_corner(voxel, query_time_s,
                              generation.params.stale_timeout_s,
-                             true, false, false, reason)) {
-          return false;
+                             true, false, false,
+                             &corner_validation_reason);
+        if (trace) {
+          PredictedPLQueryCornerTrace corner;
+          corner.temporal_layer = temporal_layer;
+          corner.horizon_id = horizon_id;
+          corner.horizon_s = generation.params.horizons_s[
+              static_cast<std::size_t>(horizon_id)];
+          corner.temporal_weight = temporal_weight;
+          corner.corner_id = dx * 4 + dy * 2 + dz;
+          corner.voxel_index = id;
+          corner.voxel_position =
+              (id.cast<double>() + Eigen::Vector3d::Constant(0.5)) *
+                  generation.params.resolution_m + generation.origin;
+          corner.spatial_weight = spatial_weight;
+          corner.combined_weight = combined_weight;
+          corner.hpl_pred = voxel.hpl_pred;
+          corner.vpl_pred = voxel.vpl_pred;
+          corner.source_flags = voxel.source_flags;
+          corner.valid = voxel.valid;
+          corner.stale = voxel.stale;
+          corner.unknown = voxel.unknown;
+          corner.gnss_geometry_status = voxel.gnss_geometry_status;
+          corner.gnss_support_authority = voxel.gnss_support_authority;
+          corner.gnss_support_status = voxel.gnss_support_status;
+          corner.gnss_used_satellite_ids = voxel.gnss_used_satellite_ids;
+          corner.gnss_local_satellite_set_hash =
+              voxel.gnss_local_satellite_set_hash;
+          corner.gnss_weighted_geometry_condition =
+              voxel.gnss_weighted_geometry_condition;
+          corner.gnss_worst_excluded_sat_h =
+              voxel.gnss_worst_excluded_sat_h;
+          corner.gnss_worst_excluded_sat_v =
+              voxel.gnss_worst_excluded_sat_v;
+          corner.invalid_reason = corner_valid ? "none" :
+              corner_validation_reason;
+          trace->corners.push_back(std::move(corner));
+        }
+        if (combined_weight <= 0.0) {
+          h[dx][dy][dz] = 0.0;
+          v[dx][dy][dz] = 0.0;
+          continue;
+        }
+        const bool corner_geometry_degenerate =
+            voxel.gnss_geometry_status ==
+                GnssGeometryStatus::TOO_FEW_SATELLITES ||
+            voxel.gnss_geometry_status ==
+                GnssGeometryStatus::FULL_GEOMETRY_DEGENERATE ||
+            voxel.gnss_geometry_status ==
+                GnssGeometryStatus::SUBSET_DEGENERATE ||
+            voxel.gnss_geometry_status ==
+                GnssGeometryStatus::NUMERICAL_FAILURE;
+        const bool gnss_used =
+            (voxel.source_flags & PREDICTOR_RESULT_GNSS_USED) != 0u;
+        const bool corner_topology_metadata_missing = gnss_used &&
+            (voxel.gnss_geometry_status != GnssGeometryStatus::VALID ||
+             voxel.gnss_used_satellite_ids.empty() ||
+             voxel.gnss_local_satellite_set_hash == 0u);
+        if (corner_geometry_degenerate) {
+          geometry_degenerate = true;
+        }
+        if (corner_topology_metadata_missing &&
+            !corner_geometry_degenerate) {
+          topology_metadata_missing = true;
+        }
+        if (!corner_valid) {
+          invalid_support = true;
+          if (first_invalid_reason.empty()) {
+            first_invalid_reason = corner_validation_reason;
+          }
+        }
+        if (corner_valid && !corner_geometry_degenerate &&
+            topology_reference == nullptr) {
+          topology_reference = &voxel;
+        } else if (corner_valid && !corner_geometry_degenerate) {
+          if (!same_pl_topology(*topology_reference, voxel)) {
+            topology_mismatch = true;
+          }
         }
         h[dx][dy][dz] = voxel.hpl_pred;
         v[dx][dy][dz] = voxel.vpl_pred;
@@ -711,9 +847,34 @@ bool interpolate_pl_layer(const RiskGridSnapshot::Generation& generation,
     }
   }
 
-  const double wx[2] = {1.0 - frac.x(), frac.x()};
-  const double wy[2] = {1.0 - frac.y(), frac.y()};
-  const double wz[2] = {1.0 - frac.z(), frac.z()};
+  if (geometry_degenerate) {
+    if (reason) *reason = "risk_grid_geometry_degenerate";
+    if (status) *status = RiskGridInterpolationStatus::GEOMETRY_DEGENERATE;
+    return false;
+  }
+  if (invalid_support) {
+    if (reason) *reason = first_invalid_reason;
+    if (status) *status = RiskGridInterpolationStatus::INVALID_SUPPORT;
+    return false;
+  }
+  if (topology_metadata_missing) {
+    if (reason) *reason = "risk_grid_topology_metadata_missing";
+    if (status) {
+      *status = RiskGridInterpolationStatus::DIRECT_RECHECK_REQUIRED;
+    }
+    return false;
+  }
+  if (topology_mismatch) {
+    if (reason) *reason = "risk_grid_topology_mismatch";
+    if (status) {
+      *status = RiskGridInterpolationStatus::DIRECT_RECHECK_REQUIRED;
+    }
+    return false;
+  }
+  if (topology && topology_reference) {
+    *topology = *topology_reference;
+  }
+
   double hpl = 0.0;
   double vpl = 0.0;
   for (int dx = 0; dx <= 1; ++dx) {
@@ -942,19 +1103,37 @@ bool RiskGridSnapshot::queryPredictedPL(const Eigen::Vector3d& p_w,
                                         const double query_time_s,
                                         PredictedPLSample* out,
                                         const double p5_4_fixture_horizon_s,
-                                        const bool p5_7_final_candidate) const {
+                                        const bool p5_7_final_candidate,
+                                        PredictedPLQueryTrace* trace) const {
   if (out == nullptr) {
     return false;
   }
   *out = PredictedPLSample{};
   out->query_time_s = query_time_s;
   out->generation_id = generation_id();
+  if (trace) {
+    *trace = PredictedPLQueryTrace{};
+    trace->query_point = p_w;
+    trace->query_time_s = query_time_s;
+    trace->risk_generation_id = generation_id();
+  }
+  const auto finish_trace = [trace, out]() {
+      if (trace) {
+        trace->query_tau_s = out->query_tau_s;
+        trace->interpolation_status = out->interpolation_status;
+        trace->reason = out->reason;
+      }
+    };
   if (!generation_) {
     out->reason = "snapshot_not_ready";
+    out->interpolation_status = RiskGridInterpolationStatus::INVALID_SUPPORT;
+    finish_trace();
     return false;
   }
   if (!p_w.allFinite() || !std::isfinite(query_time_s)) {
     out->reason = "invalid_query";
+    out->interpolation_status = RiskGridInterpolationStatus::INVALID_SUPPORT;
+    finish_trace();
     return false;
   }
   const double tau = query_time_s - generation_->stamp_s;
@@ -977,6 +1156,10 @@ bool RiskGridSnapshot::queryPredictedPL(const Eigen::Vector3d& p_w,
     out->hpl_pred = fixture_result.hpl_pred;
     out->vpl_pred = fixture_result.vpl_pred;
     out->reason = fixture_result.reason;
+    out->interpolation_status = fixture_result.valid
+        ? RiskGridInterpolationStatus::INTERPOLATED
+        : RiskGridInterpolationStatus::INVALID_SUPPORT;
+    finish_trace();
     return fixture_result.valid && finite_pl(fixture_result);
   }
   HorizonBracket bracket;
@@ -984,28 +1167,70 @@ bool RiskGridSnapshot::queryPredictedPL(const Eigen::Vector3d& p_w,
   if (!find_horizon_bracket(generation_->params.horizons_s, tau,
                             &bracket, &reason)) {
     out->reason = reason;
+    out->interpolation_status = RiskGridInterpolationStatus::INVALID_SUPPORT;
+    finish_trace();
     return false;
   }
   Eigen::Vector3i base_id;
   Eigen::Vector3d frac;
   if (!trilinear_base(*this, p_w, &base_id, &frac, &reason)) {
     out->reason = reason;
+    out->interpolation_status = RiskGridInterpolationStatus::INVALID_SUPPORT;
+    finish_trace();
     return false;
   }
 
   SpatialPLInterp lower;
-  if (!interpolate_pl_layer(*generation_, bracket.lower, base_id, frac,
-                            query_time_s, &lower, &reason)) {
+  RiskVoxel lower_topology;
+  RiskGridInterpolationStatus interpolation_status =
+      RiskGridInterpolationStatus::INTERPOLATED;
+  const double lower_temporal_weight = bracket.upper == bracket.lower
+      ? 1.0 : 1.0 - bracket.weight_upper;
+  const bool lower_ok = interpolate_pl_layer(
+                            *generation_, bracket.lower, base_id, frac,
+                            query_time_s, 0, lower_temporal_weight,
+                            &lower, &reason, trace,
+                            &interpolation_status, &lower_topology);
+  SpatialPLInterp upper = lower;
+  RiskVoxel upper_topology = lower_topology;
+  bool upper_ok = true;
+  std::string upper_reason;
+  RiskGridInterpolationStatus upper_status =
+      RiskGridInterpolationStatus::INTERPOLATED;
+  if (bracket.upper != bracket.lower) {
+    upper_ok = interpolate_pl_layer(
+        *generation_, bracket.upper, base_id, frac, query_time_s, 1,
+        bracket.weight_upper, &upper, &upper_reason, trace, &upper_status,
+        &upper_topology);
+  }
+  if (!lower_ok || !upper_ok) {
+    if (interpolation_status !=
+            RiskGridInterpolationStatus::GEOMETRY_DEGENERATE &&
+        upper_status == RiskGridInterpolationStatus::GEOMETRY_DEGENERATE) {
+      interpolation_status = upper_status;
+      reason = upper_reason;
+    } else if (interpolation_status ==
+                   RiskGridInterpolationStatus::INTERPOLATED) {
+      interpolation_status = upper_status;
+      reason = upper_reason;
+    }
     out->reason = reason;
+    out->interpolation_status = interpolation_status;
+    finish_trace();
     return false;
   }
-  SpatialPLInterp upper = lower;
-  if (bracket.upper != bracket.lower) {
-    if (!interpolate_pl_layer(*generation_, bracket.upper, base_id, frac,
-                              query_time_s, &upper, &reason)) {
-      out->reason = reason;
-      return false;
-    }
+
+  // A time interpolation is only meaningful when every positively weighted
+  // spatial corner in both time layers describes the same discrete GNSS and
+  // support topology.  Per-layer checks above cannot detect a satellite-set
+  // switch that happens exactly between adjacent prediction horizons.
+  if (bracket.upper != bracket.lower &&
+      !same_pl_topology(lower_topology, upper_topology)) {
+    out->reason = "risk_grid_temporal_topology_mismatch";
+    out->interpolation_status =
+        RiskGridInterpolationStatus::DIRECT_RECHECK_REQUIRED;
+    finish_trace();
+    return false;
   }
 
   const double w = bracket.weight_upper;
@@ -1014,7 +1239,9 @@ bool RiskGridSnapshot::queryPredictedPL(const Eigen::Vector3d& p_w,
   out->available = true;
   out->valid = true;
   out->stale = false;
+  out->interpolation_status = RiskGridInterpolationStatus::INTERPOLATED;
   out->reason = lower.reason == upper.reason ? lower.reason : "mixed";
+  finish_trace();
   return true;
 }
 
@@ -1586,6 +1813,16 @@ bool RiskGridMap::refreshFromProvider(
     voxel.floor_increment_v = result.floor_increment_v;
     voxel.floor_source_h = result.floor_source_h;
     voxel.floor_source_v = result.floor_source_v;
+    voxel.gnss_geometry_status = result.gnss_geometry_status;
+    voxel.gnss_support_authority = result.gnss_support_authority;
+    voxel.gnss_support_status = result.gnss_support_status;
+    voxel.gnss_used_satellite_ids = result.gnss_used_satellite_ids;
+    voxel.gnss_local_satellite_set_hash =
+        result.gnss_local_satellite_set_hash;
+    voxel.gnss_weighted_geometry_condition =
+        result.gnss_weighted_geometry_condition;
+    voxel.gnss_worst_excluded_sat_h = result.gnss_worst_excluded_sat_h;
+    voxel.gnss_worst_excluded_sat_v = result.gnss_worst_excluded_sat_v;
     if ((voxel.source_flags & PREDICTOR_RESULT_GNSS_USED) != 0u) {
       ++predictor_gnss_used_count;
     }

@@ -125,6 +125,9 @@ struct GnssAdvisoryResult {
   bool valid = false;
   bool fallback = true;
   std::string fallback_reason = "not_evaluated";
+  GnssGeometryStatus geometry_status =
+      GnssGeometryStatus::NOT_EVALUATED;
+  std::vector<int> degenerate_satellite_ids;
   PredictorInformationState information_state =
       PredictorInformationState::Position3MapEnu;
 

@@ -3,6 +3,36 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(risk-grid-topology-direct-authority): IAP-RQ-312 / IAP-RQ-320 /
+  IAP-RQ-400 / IAP-RQ-410 — make RiskGrid PL interpolation conditional on one
+  common positive-weight satellite/support/source topology across both spatial
+  and temporal corners. Interpolation anomalies now request direct recheck;
+  insufficient/full/subset/numerical GNSS geometry is explicit and carries
+  non-finite PL instead of a large interpolable sentinel. Final publication
+  and runtime revocation use identity-bound direct ForwardRisk batches sampled
+  from the actual B-spline at <=0.2 s spacing, while current input freshness
+  and collision deltas remain independently fail-closed. The optional frozen
+  occupancy scalar-distance field supplies a trilinearly continuous
+  canopy-sigma transition
+  (`0` default, forest v2 `0.4 m`) without smoothing support or hard
+  occlusion. Generation diagnostics write rate-limited two-layer/eight-corner
+  topology evidence. The integration runner adds explicit `baseline` and
+  experimental `bds` GNSS arms; default production AL, PL formula, P5 and risk
+  weights are unchanged. P5's ordinary future-risk authority now consumes the
+  same identity-bound direct batch as P4 (with only the existing P5-4/P5-7
+  deterministic fixture overlay retained); its enable flags, AL policy and
+  fixture policy are unchanged. Generation probes classify the first
+  non-SAFE result (including UNKNOWN), preserve absolute query time in every
+  map×epoch arm, and dump both grids at each identical anomaly position. The
+  clearance field is capped at 64 MiB (and 2048 cells per axis for bounded
+  scratch memory) and built with a cell-linear separable
+  distance transform; pathological wider coordinate extents use constant-time
+  conservative maximum proximity. Widths above 5 m or 64 voxels are rejected
+  as invalid config. The diagnostic map×epoch batches have a strict per-cell
+  budget, compare typed boundary state as well as index, and refresh ROS time
+  plus all freshness gates after probing so diagnostics cannot extend motion
+  authority.
+
 - feat(p4-limited-prefix-smoke-gnss-root-cause): IAP-RQ-312 / IAP-RQ-320 /
   IAP-RQ-400 / IAP-RQ-410 — add an independent `limited-prefix` development
   smoke whose success requires identity-bound B-spline/PositionCommand,

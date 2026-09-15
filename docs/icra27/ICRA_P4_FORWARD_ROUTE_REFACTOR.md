@@ -446,11 +446,31 @@ Formal `RISK_SELECTED`, publication alone and launch exit zero are reported
 separately and do not pass this smoke.
 
 When explicitly enabled, P4 also writes rate-limited
-`*.execution_events.csv` and `*.generation_probe.csv`. The latter evaluates a
-fixed approved-trajectory lattice across the adjacent map/GNSS 2×2
-cross-product and compares direct ForwardRisk with RiskGrid interpolation.
+`*.execution_events.csv`, `*.generation_probe.csv` and
+`*.generation_probe_corners.csv`. The generation probe evaluates a fixed
+approved-trajectory lattice across the adjacent map/GNSS 2×2 cross-product
+while holding absolute query times fixed and recomputing each map arm's own
+prediction horizon. It compares direct ForwardRisk with RiskGrid interpolation.
+Its corner file
+records both temporal layers' eight spatial corners, weights, complete
+satellite sets, support/source topology and geometry status for each first
+non-SAFE/interpolation anomaly, always dumping OLD and NEW at the same curve
+position.
 Both snapshots must still be fresh at the common evaluation time. This probe
 is diagnostic-only; its result is never consumed by planning or execution
 authority. `analyze_p4_gnss_sensitivity.py` reproduces production geometry PL
 before reporting satellite-set, effective-sigma/canopy, geometry-condition,
 receiver/candidate delta and RiskMap spatial-discrimination summaries.
+
+The historical trajectory 99 (generation 29→30), 730 (95→96) and 1092
+(129→130) records predate this corner schema and retain only trajectory,
+generation and first-index summaries. Their exact corners cannot be recovered
+without the corresponding frozen grids and GNSS epochs. Those artifacts remain
+unchanged; a newly observed anomaly is captured at its grid anomaly index, or
+at the direct-failure index when the grid itself returned a finite SAFE value.
+
+For constellation experiments, the runner accepts
+`--gnss-arm baseline|bds`. `baseline` (the default) uses GPS+Galileo+GLONASS;
+`bds` adds BeiDou while leaving AL, PL equations, P5 and risk weights
+unchanged. This switch is an experiment label and launch contract, not a
+substitute for direct-risk authority or topology-safe interpolation.

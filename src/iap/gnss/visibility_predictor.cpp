@@ -141,7 +141,17 @@ VisibilityResult VisibilityPredictor::predict(const Eigen::Vector3d& pos_world,
       const double start_offset = std::max(0.0, params_.ray_start_offset);
       const Eigen::Vector3d ray_origin = pos_world + start_offset * dir;
       const double occ_range = std::max(0.0, params_.occ_range - start_offset);
-      kappa = grid_->occupancy_ratio(ray_origin, dir, params_.occ_L);
+      if (params_.clearance_transition_m > 0.0) {
+        // Evaluate the bounded union per LOS sample. The clearance proximity
+        // is exactly one for an occupied sample, so union(binary, proximity)
+        // reduces to proximity without retaining the binary boundary jump.
+        // Do this once: aggregating first and unioning the two aggregate
+        // ratios would both double-count canopy and remain discontinuous.
+        kappa = grid_->clearance_proximity_ratio(
+            ray_origin, dir, params_.occ_L);
+      } else {
+        kappa = grid_->occupancy_ratio(ray_origin, dir, params_.occ_L);
+      }
       blocked = params_.hard_occlusion &&
                 grid_->ray_occluded(ray_origin, dir, occ_range);
     }

@@ -52,6 +52,19 @@ For each candidate trajectory τ:
   eligible for prediction even when it is not ray-observed, without changing
   its occupancy evidence to `OBSERVED_FREE`. All other incomplete support and
   occupied/inflated geometry remains fail-closed.
+  RiskGrid may guide coarse search only. Its PL is interpolated as a scalar
+  only when all positive spatial/time corners share satellite-set, support and
+  prediction-source topology and report normal geometry. Topology changes
+  request a direct ForwardRisk recheck; degenerate geometry is an explicit
+  invalid state with non-finite PL, never a huge finite interpolation value.
+  Final, P5 and runtime authority comes from direct batched ForwardRisk samples of
+  the actual published B-spline and its actual arrival times. A cached batch is
+  reusable only for the same curve and source generations and never replaces
+  current-time freshness checks.
+  Optionally, canopy sigma may use a frozen occupancy-generation clearance
+  field to turn distance from an occupied surface into a smooth bounded LOS
+  proximity. This leaves hard intersections, support boundaries, elevation
+  masks and the epoch-sigma floor unchanged; `0 m` disables the transition.
 - predict LiDAR observability proxy O^(τ) (ICP quality proxy, map-based, may include occlusion)
 - propagate Σ -> Σ_pred using empirical growth model (keep exact interface)
 - compute PL_pred from Σ_pred

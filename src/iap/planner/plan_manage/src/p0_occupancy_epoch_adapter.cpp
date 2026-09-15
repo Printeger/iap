@@ -87,7 +87,8 @@ std::optional<P0OccupancyEpoch> P0OccupancyEpochAdapter::adaptFields(
     iap::RiskGridMap::OccupancyDiagnosticQuery diagnostic_query,
     P0OccupancyEpoch::SourceOwner source_owner,
     P0OccupancyEpoch::LiveSourceOwner live_source_owner,
-    P0OccupancyEpoch::LiveGeneration live_generation) {
+    P0OccupancyEpoch::LiveGeneration live_generation,
+    const double clearance_transition_m) {
   if (!diagnostic_query || !occupied_centers || !environment_centers ||
       !source_owner ||
       !live_source_owner || !live_generation ||
@@ -148,6 +149,16 @@ std::optional<P0OccupancyEpoch> P0OccupancyEpochAdapter::adaptFields(
       ? 1
       : static_cast<int>(environment_centers->size());
   params.enable_eviction = false;
+  if (!std::isfinite(clearance_transition_m) ||
+      clearance_transition_m < 0.0 ||
+      clearance_transition_m >
+          iap::LocalOccupancyGrid::kMaxClearanceTransitionM ||
+      clearance_transition_m / resolution_m >
+          iap::LocalOccupancyGrid::kMaxClearanceTransitionRadiusVoxels) {
+    return std::nullopt;
+  }
+  params.clearance_transition_m =
+      clearance_transition_m;
   auto los_owner = std::make_shared<iap::LocalOccupancyGrid>(params);
   los_owner->insert_points(*environment_centers);
   const auto diagnostics = los_owner->diagnostics();

@@ -1075,6 +1075,7 @@ DENSE_FOUR_FORK_FOREST_ONLINE_PRESET = {
     # LOS; all other cells remain fail-closed on online observed-space support.
     "p0.predictor.gnss_measured_epoch_support_radius_m": "0.45",
     "p0.predictor.gnss_measured_epoch_integrity_max_delta_s": "0.25",
+    "p0.predictor.gnss.clearance_transition_m": "0.4",
     "p0.alert_limit_policy_id": "fixed_hal20_val40_v1",
     "p0.alert_limit_h_m": "20.0",
     "p0.alert_limit_v_m": "40.0",
@@ -2054,6 +2055,7 @@ ARG_DEFAULTS = [
     ("p0.predictor.gnss_epoch_policy", "auto"),
     ("p0.predictor.gnss_measured_epoch_support_radius_m", "0.0"),
     ("p0.predictor.gnss_measured_epoch_integrity_max_delta_s", "0.25"),
+    ("p0.predictor.gnss.clearance_transition_m", "0.0"),
     ("p0.predictor.use_current_integrity_prior", "true"),
     ("p0.predictor.conservative_max_with_gnss", "false"),
     ("p0.predictor.lidar_legacy_observability", "true"),
@@ -3232,6 +3234,7 @@ def _ego_planner_node(context, drone_id, planner_odom_topic, cloud_topic, camera
             {"p0.predictor.gnss_epoch_policy": LaunchConfiguration("p0.predictor.gnss_epoch_policy").perform(context)},
             {"p0.predictor.gnss_measured_epoch_support_radius_m": _param_float(context, "p0.predictor.gnss_measured_epoch_support_radius_m")},
             {"p0.predictor.gnss_measured_epoch_integrity_max_delta_s": _param_float(context, "p0.predictor.gnss_measured_epoch_integrity_max_delta_s")},
+            {"p0.predictor.gnss.clearance_transition_m": _param_float(context, "p0.predictor.gnss.clearance_transition_m")},
             {"p0.predictor.use_current_integrity_prior": _param_bool(context, "p0.predictor.use_current_integrity_prior")},
             {"p0.predictor.conservative_max_with_gnss": _param_bool(context, "p0.predictor.conservative_max_with_gnss")},
             {"p0.predictor.lidar_legacy_observability": _param_bool(context, "p0.predictor.lidar_legacy_observability")},
@@ -4016,6 +4019,10 @@ def _launch_setup(context):
                 context, "p0.predictor.use_current_integrity_prior"),
             "conservative_max_with_gnss": _param_bool(
                 context, "p0.predictor.conservative_max_with_gnss"),
+            "gnss_clearance_transition_m": _param_float(
+                context, "p0.predictor.gnss.clearance_transition_m"),
+            "predictor_worker_count": _param_int(
+                context, "p0.predictor.worker_count"),
             "executor_thread_count": _param_int(
                 context, "planner_executor_thread_count"),
         },
@@ -4243,6 +4250,7 @@ def _launch_setup(context):
         "p0.predictor.gnss_epoch_policy": LaunchConfiguration("p0.predictor.gnss_epoch_policy").perform(context),
         "p0.predictor.gnss_measured_epoch_support_radius_m": _param_float(context, "p0.predictor.gnss_measured_epoch_support_radius_m"),
         "p0.predictor.gnss_measured_epoch_integrity_max_delta_s": _param_float(context, "p0.predictor.gnss_measured_epoch_integrity_max_delta_s"),
+        "p0.predictor.gnss.clearance_transition_m": _param_float(context, "p0.predictor.gnss.clearance_transition_m"),
         "p0.predictor.use_current_integrity_prior": _param_bool(context, "p0.predictor.use_current_integrity_prior"),
         "p0.predictor.conservative_max_with_gnss": _param_bool(context, "p0.predictor.conservative_max_with_gnss"),
         "p0.predictor.lidar_legacy_observability": _param_bool(context, "p0.predictor.lidar_legacy_observability"),

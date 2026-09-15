@@ -20,9 +20,29 @@
 #include <vector>
 
 #include <iap/predictor/predictor_module.hpp>
+#include <iap/predictor/gnss_geometry_pl_predictor.hpp>
 #include <iap/map/trusted_local_map_support.hpp>
 
 namespace {
+
+TEST(GnssGeometryPlPredictorTest, SubsetDegeneracyIsExplicitAndHasNoNumericPL) {
+  iap::GnssGeometryPlPredictor predictor;
+  std::vector<iap::GnssGeometrySat> sats;
+  for (int i = 0; i < 4; ++i) {
+    iap::GnssGeometrySat sat;
+    sat.sat_id = i + 1;
+    sat.elevation = 0.35 + 0.15 * i;
+    sat.azimuth = 1.3 * i;
+    sat.pr_sigma = 2.0;
+    sats.push_back(sat);
+  }
+  const auto result = predictor.predict(sats);
+  EXPECT_FALSE(result.valid);
+  EXPECT_EQ(result.status, iap::GnssGeometryStatus::SUBSET_DEGENERATE);
+  EXPECT_FALSE(result.degenerate_satellite_ids.empty());
+  EXPECT_FALSE(std::isfinite(result.HPL));
+  EXPECT_FALSE(std::isfinite(result.VPL));
+}
 
 constexpr double kPi = 3.14159265358979323846;
 
@@ -761,6 +781,69 @@ TEST(PredictorModuleTest,
 }
 
 TEST(PredictorModuleTest,
+     ClearanceTransitionKeepsCanopyKappaAndSigmaContinuousAcrossVoxelEdge) {
+  iap::GnssEpoch epoch;
+  epoch.stamp = 100.0;
+  iap::SatObs satellite;
+  satellite.sat_id = 7;
+  satellite.elevation = 0.35;
+  satellite.azimuth = 0.5 * kPi;
+  satellite.pr_sigma = 1.0;
+  epoch.sats.push_back(satellite);
+  const Eigen::Vector3d direction = enu_direction(satellite);
+
+  iap::LocalOccupancyGrid::Params grid_params;
+  grid_params.voxel_size = 0.1;
+  grid_params.n_kappa_steps = 40;
+  grid_params.clearance_transition_m = 0.4;
+  iap::LocalOccupancyGrid grid(grid_params);
+  grid.insert_points({2.0 * direction});
+
+  iap::VisibilityPredictor::Params visibility_params;
+  visibility_params.min_elevation = 0.1;
+  visibility_params.occ_L = 4.0;
+  visibility_params.occ_range = 4.0;
+  visibility_params.ray_start_offset = 0.0;
+  visibility_params.hard_occlusion = false;
+  visibility_params.clearance_transition_m = 0.4;
+  iap::VisibilityPredictor predictor(visibility_params);
+  predictor.set_occupancy(&grid);
+
+  const Eigen::Vector3d across = Eigen::Vector3d::UnitY();
+  // Continuity is a limiting property, not a requirement that a finite
+  // 2-mm interval be flat. Probe symmetrically at a small epsilon around the
+  // voxel boundary and require the jump to vanish.
+  const auto left = predictor.predict(-1.0e-6 * across, epoch);
+  const auto right = predictor.predict(1.0e-6 * across, epoch);
+  ASSERT_EQ(left.kappas.size(), 1u);
+  ASSERT_EQ(right.kappas.size(), 1u);
+  ASSERT_EQ(left.sigma_effs.size(), 1u);
+  ASSERT_EQ(right.sigma_effs.size(), 1u);
+  EXPECT_LT(std::abs(left.kappas[0] - right.kappas[0]), 1.0e-3);
+  EXPECT_LT(std::abs(left.sigma_effs[0] - right.sigma_effs[0]), 1.0e-2);
+
+  const double proximity = grid.clearance_proximity_ratio(
+      Eigen::Vector3d::Zero(), direction, visibility_params.occ_L);
+  const auto centered = predictor.predict(Eigen::Vector3d::Zero(), epoch);
+  ASSERT_EQ(centered.kappas.size(), 1u);
+  EXPECT_NEAR(centered.kappas[0], proximity, 1.0e-12);
+
+  const auto far = predictor.predict(2.0 * across, epoch);
+  EXPECT_NEAR(far.kappas[0], 0.0, 1.0e-12);
+  EXPECT_NEAR(far.sigma_effs[0],
+              iap::sigma_eff_canopy(
+                  visibility_params.canopy, 0.0, satellite.elevation),
+              1.0e-12);
+
+  visibility_params.hard_occlusion = true;
+  iap::VisibilityPredictor hard_predictor(visibility_params);
+  hard_predictor.set_occupancy(&grid);
+  const auto blocked = hard_predictor.predict(Eigen::Vector3d::Zero(), epoch);
+  EXPECT_TRUE(blocked.blocked_flags[0]);
+  EXPECT_FALSE(blocked.vis_flags[0]);
+}
+
+TEST(PredictorModuleTest,
      SoftCanopySupportIntervalBeginsAfterTheNearFieldOffset) {
   auto params = make_params();
   params.gnss.visibility_params.hard_occlusion = false;
@@ -1203,7 +1286,7 @@ TEST(PredictorModuleTest,
   iap::GnssAdvisoryPredictor predictor(make_params().gnss);
   auto snapshot = make_snapshot(true, false);
   std::vector<bool> local_mask(snapshot.gnss_epoch.sats.size(), false);
-  for (std::size_t index = 0; index < 4; ++index) {
+  for (std::size_t index = 0; index < 5; ++index) {
     local_mask[index] = true;
   }
   const auto original_identity = iap::gnss_epoch_identity(
@@ -1213,7 +1296,7 @@ TEST(PredictorModuleTest,
   EXPECT_EQ(original_identity, iap::gnss_epoch_identity(
       snapshot.gnss_epoch, snapshot.current.excluded_prns));
 
-  for (std::size_t index = 4; index < snapshot.gnss_epoch.sats.size();
+  for (std::size_t index = 5; index < snapshot.gnss_epoch.sats.size();
        ++index) {
     snapshot.gnss_epoch.sats[index].pr_sigma *= 1000.0;
   }
@@ -1515,7 +1598,7 @@ TEST(PredictorModuleTest, GnssGeometryDegradationSweepIncreasesPl) {
         << (result.valid ? 1 : 0) << ','
         << csv_escape(result.fallback_reason) << '\n';
 
-    if (result.n_used >= make_params().gnss.geometry_params.min_sats) {
+    if (result.n_used > make_params().gnss.geometry_params.min_sats) {
       EXPECT_TRUE(result.valid) << test_case.id;
       EXPECT_TRUE(std::isfinite(result.hpl)) << test_case.id;
       EXPECT_TRUE(std::isfinite(result.vpl)) << test_case.id;
@@ -1525,18 +1608,22 @@ TEST(PredictorModuleTest, GnssGeometryDegradationSweepIncreasesPl) {
       EXPECT_GE(result.weighted_geometry_condition, 1.0) << test_case.id;
     } else {
       EXPECT_FALSE(result.valid) << test_case.id;
-      EXPECT_EQ(result.fallback_reason, "too_few_sats") << test_case.id;
+      EXPECT_TRUE(result.fallback_reason == "too_few_sats" ||
+                  result.fallback_reason == "singular_geometry")
+          << test_case.id;
     }
   }
 
   ASSERT_TRUE(results[0].valid);
   ASSERT_TRUE(results[2].valid);
   ASSERT_TRUE(results[3].valid);
-  ASSERT_TRUE(results[6].valid);
+  ASSERT_FALSE(results[6].valid);
+  EXPECT_EQ(results[6].geometry_status,
+            iap::GnssGeometryStatus::SUBSET_DEGENERATE);
   EXPECT_GT(results[2].pdop, results[0].pdop);
   EXPECT_GT(results[2].hpl, results[0].hpl);
-  EXPECT_GT(results[6].hpl, results[0].hpl);
-  EXPECT_GT(results[6].vpl, results[0].vpl);
+  EXPECT_GT(results[5].hpl, results[0].hpl);
+  EXPECT_GT(results[5].vpl, results[0].vpl);
   EXPECT_FALSE(results.back().valid);
 }
 

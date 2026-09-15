@@ -3,12 +3,89 @@
 
 #include <iap/map/local_occupancy.hpp>
 #include <algorithm>
+#include <stdexcept>
 
 namespace iap {
 
+namespace {
+
+// Exact squared Euclidean distance transform for a one-dimensional line.
+// This is the lower-envelope algorithm from Felzenszwalb and Huttenlocher.
+// Calling it along x/y/z makes clearance-field construction O(number of
+// lattice cells), independent of transition radius and occupied-voxel count.
+void squared_distance_transform_1d(const std::vector<float>& input,
+                                   std::vector<float>* output) {
+  const int n = static_cast<int>(input.size());
+  output->assign(input.size(), std::numeric_limits<float>::infinity());
+  if (n == 0) return;
+
+  std::vector<int> finite_indices;
+  finite_indices.reserve(input.size());
+  for (int index = 0; index < n; ++index) {
+    if (std::isfinite(input[static_cast<std::size_t>(index)])) {
+      finite_indices.push_back(index);
+    }
+  }
+  if (finite_indices.empty()) return;
+
+  std::vector<int> sites(finite_indices.size());
+  std::vector<double> boundaries(finite_indices.size() + 1u);
+  int envelope_size = 0;
+  sites[0] = finite_indices[0];
+  boundaries[0] = -std::numeric_limits<double>::infinity();
+  boundaries[1] = std::numeric_limits<double>::infinity();
+  for (std::size_t candidate_index = 1;
+       candidate_index < finite_indices.size(); ++candidate_index) {
+    const int candidate = finite_indices[candidate_index];
+    double crossing = 0.0;
+    while (true) {
+      const int active = sites[static_cast<std::size_t>(envelope_size)];
+      crossing =
+          (static_cast<double>(input[static_cast<std::size_t>(candidate)]) +
+               static_cast<double>(candidate) * candidate -
+           static_cast<double>(input[static_cast<std::size_t>(active)]) -
+               static_cast<double>(active) * active) /
+          (2.0 * static_cast<double>(candidate - active));
+      if (crossing > boundaries[static_cast<std::size_t>(envelope_size)] ||
+          envelope_size == 0) {
+        break;
+      }
+      --envelope_size;
+    }
+    ++envelope_size;
+    sites[static_cast<std::size_t>(envelope_size)] = candidate;
+    boundaries[static_cast<std::size_t>(envelope_size)] = crossing;
+    boundaries[static_cast<std::size_t>(envelope_size + 1)] =
+        std::numeric_limits<double>::infinity();
+  }
+
+  int active_index = 0;
+  for (int query = 0; query < n; ++query) {
+    while (active_index < envelope_size &&
+           boundaries[static_cast<std::size_t>(active_index + 1)] < query) {
+      ++active_index;
+    }
+    const int active = sites[static_cast<std::size_t>(active_index)];
+    const double delta = static_cast<double>(query - active);
+    (*output)[static_cast<std::size_t>(query)] = static_cast<float>(
+        delta * delta + input[static_cast<std::size_t>(active)]);
+  }
+}
+
+}  // namespace
+
 // ---------------------------------------------------------------------------
 LocalOccupancyGrid::LocalOccupancyGrid() : params_(Params{}) {}
-LocalOccupancyGrid::LocalOccupancyGrid(const Params& p) : params_(p) {}
+LocalOccupancyGrid::LocalOccupancyGrid(const Params& p) : params_(p) {
+  if (!std::isfinite(params_.voxel_size) || params_.voxel_size <= 0.0 ||
+      !std::isfinite(params_.clearance_transition_m) ||
+      params_.clearance_transition_m < 0.0 ||
+      params_.clearance_transition_m > kMaxClearanceTransitionM ||
+      params_.clearance_transition_m / params_.voxel_size >
+          kMaxClearanceTransitionRadiusVoxels) {
+    throw std::invalid_argument("invalid local occupancy clearance geometry");
+  }
+}
 
 // ---------------------------------------------------------------------------
 VoxelKey LocalOccupancyGrid::to_key(const Eigen::Vector3d& p) const {
@@ -78,6 +155,7 @@ void LocalOccupancyGrid::insert(const gtsam_points::PointCloud& cloud,
       break;
     }
   }
+  rebuild_clearance_field();
 }
 
 void LocalOccupancyGrid::insert_points(
@@ -93,7 +171,7 @@ void LocalOccupancyGrid::insert_points(
     const Eigen::Vector3d& center_world,
     double stamp_s) {
   if (params_.enable_eviction) {
-    evict_around(center_world, stamp_s);
+    evict_around_impl(center_world, stamp_s);
   }
   for (const auto& pw : points_world) {
     if (!insert_voxel(pw, center_world, stamp_s) &&
@@ -101,6 +179,7 @@ void LocalOccupancyGrid::insert_points(
       break;
     }
   }
+  rebuild_clearance_field();
 }
 
 bool LocalOccupancyGrid::insert_voxel(const Eigen::Vector3d& p_world,
@@ -134,7 +213,7 @@ bool LocalOccupancyGrid::insert_voxel(const Eigen::Vector3d& p_world,
 
   if (params_.enable_eviction &&
       static_cast<int>(voxels_.size()) >= params_.max_voxels) {
-    evict_around(center_world, stamp_s);
+    evict_around_impl(center_world, stamp_s);
     if (static_cast<int>(voxels_.size()) >= params_.max_voxels) {
       diagnostics_.evicted_count +=
           evict_to_capacity(center_world,
@@ -157,6 +236,14 @@ bool LocalOccupancyGrid::insert_voxel(const Eigen::Vector3d& p_world,
 }
 
 std::size_t LocalOccupancyGrid::evict_around(
+    const Eigen::Vector3d& center_world,
+    double now_s) {
+  const std::size_t evicted = evict_around_impl(center_world, now_s);
+  if (evicted > 0u) rebuild_clearance_field();
+  return evicted;
+}
+
+std::size_t LocalOccupancyGrid::evict_around_impl(
     const Eigen::Vector3d& center_world,
     double now_s) {
   if (!params_.enable_eviction) {
@@ -249,6 +336,136 @@ std::size_t LocalOccupancyGrid::evict_to_capacity(
 // ---------------------------------------------------------------------------
 void LocalOccupancyGrid::reset() {
   voxels_.clear();
+  clearance_field_dense_.clear();
+  clearance_field_dims_.setZero();
+}
+
+void LocalOccupancyGrid::rebuild_clearance_field() {
+  clearance_field_dense_.clear();
+  clearance_field_dims_.setZero();
+  const double width = params_.clearance_transition_m;
+  const double vs = params_.voxel_size;
+  if (!(std::isfinite(width) && width > 0.0 && std::isfinite(vs) &&
+        vs > 0.0) || voxels_.empty()) {
+    return;
+  }
+  const int radius = std::max(1, static_cast<int>(std::ceil(width / vs)) + 1);
+  VoxelKey occupied_min = voxels_.begin()->first;
+  VoxelKey occupied_max = occupied_min;
+  for (const auto& occupied : voxels_) {
+    occupied_min.x = std::min(occupied_min.x, occupied.first.x);
+    occupied_min.y = std::min(occupied_min.y, occupied.first.y);
+    occupied_min.z = std::min(occupied_min.z, occupied.first.z);
+    occupied_max.x = std::max(occupied_max.x, occupied.first.x);
+    occupied_max.y = std::max(occupied_max.y, occupied.first.y);
+    occupied_max.z = std::max(occupied_max.z, occupied.first.z);
+  }
+  clearance_field_min_ = {occupied_min.x - radius,
+                          occupied_min.y - radius,
+                          occupied_min.z - radius};
+  const Eigen::Array3<int64_t> dimensions64(
+      static_cast<int64_t>(occupied_max.x) - occupied_min.x + 2 + 2 * radius,
+      static_cast<int64_t>(occupied_max.y) - occupied_min.y + 2 + 2 * radius,
+      static_cast<int64_t>(occupied_max.z) - occupied_min.z + 2 + 2 * radius);
+  constexpr std::size_t kMaxDenseClearanceCells = 16u * 1024u * 1024u;
+  std::size_t cell_count = 0u;
+  if (dimensions64.minCoeff() > 0 &&
+      dimensions64.maxCoeff() <= std::numeric_limits<int>::max()) {
+    const std::size_t xy = static_cast<std::size_t>(dimensions64.x()) *
+        static_cast<std::size_t>(dimensions64.y());
+    if (xy <= kMaxDenseClearanceCells &&
+        static_cast<std::size_t>(dimensions64.z()) <=
+            kMaxDenseClearanceCells / xy) {
+      cell_count = xy * static_cast<std::size_t>(dimensions64.z());
+    }
+  }
+  const bool use_dense = cell_count > 0u &&
+      cell_count <= kMaxDenseClearanceCells &&
+      dimensions64.maxCoeff() <= kMaxClearanceDenseAxisCells;
+  if (use_dense) {
+    const Eigen::Vector3i dimensions = dimensions64.cast<int>();
+    clearance_field_dims_ = dimensions;
+    clearance_field_dense_.assign(
+        cell_count, std::numeric_limits<float>::infinity());
+  } else {
+    // Avoid O(N*radius^3) construction and unbounded sparse memory. Queries
+    // fail closed in constant time in this rare representation.
+    return;
+  }
+  // Seed all eight lattice vertices of each occupied AABB. A lattice vertex's
+  // nearest point on an axis-aligned voxel is itself a lattice vertex, so the
+  // separable EDT below is exact at every stored sample.
+  for (const auto& occupied : voxels_) {
+    for (int dx = 0; dx <= 1; ++dx) {
+      for (int dy = 0; dy <= 1; ++dy) {
+        for (int dz = 0; dz <= 1; ++dz) {
+          const VoxelKey key{occupied.first.x + dx,
+                             occupied.first.y + dy,
+                             occupied.first.z + dz};
+          const int x = key.x - clearance_field_min_.x;
+          const int y = key.y - clearance_field_min_.y;
+          const int z = key.z - clearance_field_min_.z;
+          const std::size_t index =
+              (static_cast<std::size_t>(z) *
+                   static_cast<std::size_t>(clearance_field_dims_.y()) +
+               static_cast<std::size_t>(y)) *
+                  static_cast<std::size_t>(clearance_field_dims_.x()) +
+              static_cast<std::size_t>(x);
+          clearance_field_dense_[index] = 0.0f;
+        }
+      }
+    }
+  }
+
+  const int nx = clearance_field_dims_.x();
+  const int ny = clearance_field_dims_.y();
+  const int nz = clearance_field_dims_.z();
+  std::vector<float> line;
+  std::vector<float> transformed;
+  const auto index_of = [nx, ny](const int x, const int y, const int z) {
+      return (static_cast<std::size_t>(z) * static_cast<std::size_t>(ny) +
+              static_cast<std::size_t>(y)) * static_cast<std::size_t>(nx) +
+          static_cast<std::size_t>(x);
+    };
+  const auto transform_line = [&](const int length, const auto read,
+                                  const auto write) {
+      line.resize(static_cast<std::size_t>(length));
+      for (int i = 0; i < length; ++i) {
+        line[static_cast<std::size_t>(i)] = read(i);
+      }
+      squared_distance_transform_1d(line, &transformed);
+      for (int i = 0; i < length; ++i) {
+        write(i, transformed[static_cast<std::size_t>(i)]);
+      }
+    };
+  for (int z = 0; z < nz; ++z)
+    for (int y = 0; y < ny; ++y)
+      transform_line(nx,
+          [&](const int x) {
+            return clearance_field_dense_[index_of(x, y, z)];
+          },
+          [&](const int x, const float value) {
+            clearance_field_dense_[index_of(x, y, z)] = value;
+          });
+  for (int z = 0; z < nz; ++z)
+    for (int x = 0; x < nx; ++x)
+      transform_line(ny,
+          [&](const int y) {
+            return clearance_field_dense_[index_of(x, y, z)];
+          },
+          [&](const int y, const float value) {
+            clearance_field_dense_[index_of(x, y, z)] = value;
+          });
+  for (int y = 0; y < ny; ++y)
+    for (int x = 0; x < nx; ++x)
+      transform_line(nz,
+          [&](const int z) {
+            return clearance_field_dense_[index_of(x, y, z)];
+          },
+          [&](const int z, const float value) {
+            clearance_field_dense_[index_of(x, y, z)] = static_cast<float>(
+                std::min(width, vs * std::sqrt(static_cast<double>(value))));
+          });
 }
 
 // ---------------------------------------------------------------------------
@@ -323,6 +540,79 @@ double LocalOccupancyGrid::occupancy_ratio(const Eigen::Vector3d& origin,
     if (is_occupied(to_key(p))) ++occupied;
   }
   return static_cast<double>(occupied) / static_cast<double>(params_.n_kappa_steps);
+}
+
+double LocalOccupancyGrid::clearance_to_occupied(
+    const Eigen::Vector3d& p_world) const {
+  const double width = params_.clearance_transition_m;
+  const double vs = params_.voxel_size;
+  if (!p_world.allFinite() || !(std::isfinite(width) && width > 0.0) ||
+      !(std::isfinite(vs) && vs > 0.0) ||
+      voxels_.empty()) {
+    return std::isfinite(width) && width > 0.0 ? width :
+        std::numeric_limits<double>::infinity();
+  }
+  const Eigen::Vector3d cell =
+      (p_world - params_.lattice_origin) / vs;
+  const Eigen::Vector3i base = cell.array().floor().cast<int>();
+  if (clearance_field_dense_.empty()) {
+    // A pathological coordinate extent cannot safely allocate the bounded
+    // dense field. Fail closed in constant time instead of performing an
+    // unbounded radius^3 lookup in every LOS sample.
+    return 0.0;
+  }
+  const Eigen::Vector3d frac = cell - base.cast<double>();
+  double clearance = 0.0;
+  for (int dx = 0; dx <= 1; ++dx) {
+    for (int dy = 0; dy <= 1; ++dy) {
+      for (int dz = 0; dz <= 1; ++dz) {
+        const VoxelKey key{base.x() + dx, base.y() + dy, base.z() + dz};
+        double value = width;
+        const int x = key.x - clearance_field_min_.x;
+        const int y = key.y - clearance_field_min_.y;
+        const int z = key.z - clearance_field_min_.z;
+        if (x >= 0 && y >= 0 && z >= 0 &&
+            x < clearance_field_dims_.x() &&
+            y < clearance_field_dims_.y() &&
+            z < clearance_field_dims_.z()) {
+          const std::size_t index =
+              (static_cast<std::size_t>(z) *
+                   static_cast<std::size_t>(clearance_field_dims_.y()) +
+               static_cast<std::size_t>(y)) *
+                  static_cast<std::size_t>(clearance_field_dims_.x()) +
+              static_cast<std::size_t>(x);
+          value = clearance_field_dense_[index];
+        }
+        const double weight = (dx ? frac.x() : 1.0 - frac.x()) *
+                              (dy ? frac.y() : 1.0 - frac.y()) *
+                              (dz ? frac.z() : 1.0 - frac.z());
+        clearance += weight * value;
+      }
+    }
+  }
+  return std::clamp(clearance, 0.0, width);
+}
+
+double LocalOccupancyGrid::clearance_proximity_ratio(
+    const Eigen::Vector3d& origin, const Eigen::Vector3d& dir_unit,
+    const double L) const {
+  const double width = params_.clearance_transition_m;
+  if (!(std::isfinite(width) && width > 0.0) || voxels_.empty() ||
+      params_.n_kappa_steps <= 0 || !origin.allFinite() ||
+      !dir_unit.allFinite() || !(std::isfinite(L) && L > 0.0)) {
+    return 0.0;
+  }
+  const double dt = L / static_cast<double>(params_.n_kappa_steps);
+  double proximity_sum = 0.0;
+  for (int i = 0; i < params_.n_kappa_steps; ++i) {
+    const Eigen::Vector3d p =
+        origin + (static_cast<double>(i) + 0.5) * dt * dir_unit;
+    const double x = std::clamp(clearance_to_occupied(p) / width, 0.0, 1.0);
+    const double smoothstep = x * x * (3.0 - 2.0 * x);
+    proximity_sum += 1.0 - smoothstep;
+  }
+  return std::clamp(
+      proximity_sum / static_cast<double>(params_.n_kappa_steps), 0.0, 1.0);
 }
 
 // ---------------------------------------------------------------------------

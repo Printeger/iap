@@ -13,6 +13,7 @@
 #include <fstream>
 #include <iomanip>
 #include <limits>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <thread>
@@ -22,29 +23,36 @@
 namespace ego_planner
 {
 
-  P4GenerationChangeClass classifyP4GenerationProbe(
-      const int old_map_old_epoch_first_unsafe,
-      const int new_map_old_epoch_first_unsafe,
-      const int old_map_new_epoch_first_unsafe,
-      const int new_map_new_epoch_first_unsafe,
-      const int old_grid_first_unsafe,
-      const int new_grid_first_unsafe)
+  bool P4GenerationBoundarySignature::operator==(
+      const P4GenerationBoundarySignature &other) const
   {
-    const bool map_changed = old_map_old_epoch_first_unsafe !=
-        new_map_old_epoch_first_unsafe;
-    const bool gnss_changed = old_map_old_epoch_first_unsafe !=
-        old_map_new_epoch_first_unsafe;
+    return index == other.index && safety_state == other.safety_state &&
+        ranking_state == other.ranking_state &&
+        failure_reason == other.failure_reason &&
+        satellite_set_hash == other.satellite_set_hash &&
+        interpolation_status == other.interpolation_status &&
+        reason == other.reason;
+  }
+
+  P4GenerationChangeClass classifyP4GenerationProbe(
+      const P4GenerationBoundarySignature &old_map_old_epoch,
+      const P4GenerationBoundarySignature &new_map_old_epoch,
+      const P4GenerationBoundarySignature &old_map_new_epoch,
+      const P4GenerationBoundarySignature &new_map_new_epoch,
+      const P4GenerationBoundarySignature &old_grid,
+      const P4GenerationBoundarySignature &new_grid)
+  {
+    const bool map_changed = old_map_old_epoch != new_map_old_epoch;
+    const bool gnss_changed = old_map_old_epoch != old_map_new_epoch;
     const bool interpolation_changed =
-        old_grid_first_unsafe != old_map_old_epoch_first_unsafe ||
-        new_grid_first_unsafe != new_map_new_epoch_first_unsafe;
+        old_grid != old_map_old_epoch || new_grid != new_map_new_epoch;
     const int source_count = static_cast<int>(map_changed) +
         static_cast<int>(gnss_changed) +
         static_cast<int>(interpolation_changed);
     if (source_count > 1 ||
-        (source_count == 1 && new_map_new_epoch_first_unsafe !=
-         (map_changed ? new_map_old_epoch_first_unsafe :
-          gnss_changed ? old_map_new_epoch_first_unsafe :
-          new_map_new_epoch_first_unsafe)))
+        (source_count == 1 && new_map_new_epoch !=
+         (map_changed ? new_map_old_epoch :
+          gnss_changed ? old_map_new_epoch : new_map_new_epoch)))
       return P4GenerationChangeClass::MIXED;
     if (map_changed)
       return P4GenerationChangeClass::MAP_CONTENT_OR_SUPPORT;
@@ -70,6 +78,19 @@ namespace ego_planner
       case P4GenerationChangeClass::MIXED: return "MIXED";
     }
     return "MIXED";
+  }
+
+  int firstP4NonSafeIndex(const iap::ForwardRiskBatchResult &result)
+  {
+    for (std::size_t index = 0; index < result.points.size(); ++index)
+      if (result.points[index].safety_state !=
+              iap::ForwardRiskSafetyState::SAFE ||
+          result.points[index].ranking_state !=
+              iap::ForwardRiskRankingState::COMPARABLE ||
+          result.points[index].failure_reason !=
+              iap::ForwardRiskFailureReason::NONE)
+        return static_cast<int>(index);
+    return -1;
   }
 
   bool p4CertifiedCurrentIntegritySafe(
@@ -99,43 +120,6 @@ namespace ego_planner
           return "ADVISORY";
       }
       return "ADVISORY";
-    }
-
-    std::string p4ControlPointHash(const Eigen::MatrixXd &points)
-    {
-      std::ostringstream canonical;
-      canonical << points.rows() << ';' << points.cols() << ';';
-      for (int column = 0; column < points.cols(); ++column)
-      {
-        for (int row = 0; row < points.rows(); ++row)
-          canonical << std::hexfloat << points(row, column) << ';';
-      }
-      uint64_t hash = 1469598103934665603ULL;
-      for (const unsigned char byte : canonical.str())
-      {
-        hash ^= static_cast<uint64_t>(byte);
-        hash *= 1099511628211ULL;
-      }
-      std::ostringstream output;
-      output << std::hex << std::setfill('0') << std::setw(16) << hash;
-      return output.str();
-    }
-
-    std::string p4KnotVectorHash(const Eigen::VectorXd &knots)
-    {
-      std::ostringstream canonical;
-      canonical << knots.size() << ';';
-      for (int index = 0; index < knots.size(); ++index)
-        canonical << std::hexfloat << knots(index) << ';';
-      uint64_t hash = 1469598103934665603ULL;
-      for (const unsigned char byte : canonical.str())
-      {
-        hash ^= static_cast<uint64_t>(byte);
-        hash *= 1099511628211ULL;
-      }
-      std::ostringstream output;
-      output << std::hex << std::setfill('0') << std::setw(16) << hash;
-      return output.str();
     }
 
     std::vector<Eigen::Vector3d> matrixColumnsToPoints(const Eigen::MatrixXd &points)
@@ -199,9 +183,12 @@ namespace ego_planner
         const std::chrono::steady_clock::time_point deadline =
             std::chrono::steady_clock::time_point::max())
     {
+      const double duration = trajectory
+          ? trajectory->position_traj_.getTimeSum()
+          : std::numeric_limits<double>::quiet_NaN();
       if (!trajectory || !points || !std::isfinite(start_time) ||
-          !std::isfinite(trajectory->duration_) ||
-          start_time < 0.0 || start_time >= trajectory->duration_)
+          !std::isfinite(duration) ||
+          start_time < 0.0 || start_time >= duration)
         return false;
       constexpr double kMaximumChordLengthM = 0.05;
       constexpr double kCurveApproximationErrorM = 0.002;
@@ -219,7 +206,7 @@ namespace ego_planner
       if (!std::isfinite(step_s) || step_s <= 0.0)
         return false;
       const int sample_count = std::max(2, static_cast<int>(std::ceil(
-          (trajectory->duration_ - start_time) / step_s)));
+          (duration - start_time) / step_s)));
       if (sample_count > kMaximumSamples)
         return false;
       points->clear();
@@ -235,7 +222,7 @@ namespace ego_planner
           return false;
         const double alpha = static_cast<double>(index) / sample_count;
         const double time = start_time + alpha *
-            (trajectory->duration_ - start_time);
+            (duration - start_time);
         const Eigen::Vector3d point =
             trajectory->position_traj_.evaluateDeBoorT(time);
         if (!point.allFinite())
@@ -245,6 +232,105 @@ namespace ego_planner
           times->push_back(time);
       }
       return true;
+    }
+
+    std::string p4DirectRiskRequestIdentity(
+        const std::string &stage_identity,
+        LocalTrajData &trajectory,
+        const std::shared_ptr<const iap::RiskGridSnapshot> &snapshot,
+        const std::vector<Eigen::Vector3d> &points,
+        const std::vector<double> &relative_times)
+    {
+      std::ostringstream identity;
+      identity << stage_identity << ";trajectory_id=" << trajectory.traj_id_
+               << ";start_ns=" << trajectory.start_time_.nanoseconds()
+               << ";control_points="
+               << p4ControlPointHash(
+                      trajectory.position_traj_.getControlPoint())
+               << ";knots="
+               << p4KnotVectorHash(trajectory.position_traj_.getKnot())
+               << ";lattice="
+               << p4RiskQueryLatticeHash(points, relative_times);
+      if (snapshot)
+        identity << ";risk_generation=" << snapshot->generation_id()
+                 << ";occupancy_generation="
+                 << snapshot->sourceIdentity().occupancy_generation
+                 << ";gnss_epoch="
+                 << snapshot->sourceIdentity().gnss_epoch_identity
+                 << ";risk_sources="
+                 << iap::canonicalRiskGridSourceIdentityHash(
+                        snapshot->sourceIdentity());
+      return identity.str();
+    }
+
+    iap::ForwardRiskBatchRequest makeP4CurveRiskRequest(
+        const std::string &identity,
+        const std::shared_ptr<const iap::RiskGridSnapshot> &snapshot,
+        const double evaluation_time_s, const double start_time_s,
+        const std::vector<Eigen::Vector3d> &points,
+        const std::vector<double> &relative_times,
+        const double compute_budget_ms)
+    {
+      iap::ForwardRiskBatchRequest request;
+      request.combined_snapshot_identity = identity;
+      request.evaluation_time_s = evaluation_time_s;
+      request.compute_budget_ms = compute_budget_ms;
+      if (snapshot)
+      {
+        request.hal = snapshot->params().alert_limit_h_m;
+        request.val = snapshot->params().alert_limit_v_m;
+      }
+      request.points.reserve(points.size());
+      for (std::size_t index = 0; index < points.size(); ++index)
+      {
+        const double query_time_s = start_time_s + relative_times[index];
+        request.points.push_back(iap::ForwardRiskQueryPoint{
+            points[index], query_time_s,
+            snapshot ? std::max(0.0, query_time_s - snapshot->stamp_s())
+                     : relative_times[index],
+            static_cast<uint64_t>(index)});
+      }
+      return request;
+    }
+
+    P4DirectTrajectoryRiskEvidence makeP4DirectRiskEvidence(
+        LocalTrajData &trajectory,
+        const std::shared_ptr<const iap::RiskGridSnapshot> &snapshot,
+        const double evaluation_time_s,
+        const std::vector<Eigen::Vector3d> &points,
+        const std::vector<double> &relative_times,
+        const iap::ForwardRiskBatchRequest &request,
+        const iap::ForwardRiskBatchResult &result)
+    {
+      P4DirectTrajectoryRiskEvidence evidence;
+      evidence.complete = result.complete && snapshot &&
+          points.size() == relative_times.size() &&
+          result.points.size() == points.size() &&
+          result.combined_snapshot_identity ==
+              request.combined_snapshot_identity;
+      evidence.trajectory_id = trajectory.traj_id_;
+      evidence.trajectory_start_ns = trajectory.start_time_.nanoseconds();
+      evidence.control_points_hash = p4ControlPointHash(
+          trajectory.position_traj_.getControlPoint());
+      evidence.knot_vector_hash = p4KnotVectorHash(
+          trajectory.position_traj_.getKnot());
+      evidence.sample_lattice_hash = p4RiskQueryLatticeHash(
+          points, relative_times);
+      evidence.request_identity = request.combined_snapshot_identity;
+      evidence.evaluation_time_s = evaluation_time_s;
+      evidence.risk_snapshot = snapshot;
+      if (snapshot)
+      {
+        evidence.risk_generation = snapshot->generation_id();
+        evidence.occupancy_generation =
+            snapshot->sourceIdentity().occupancy_generation;
+        evidence.gnss_epoch_identity =
+            snapshot->sourceIdentity().gnss_epoch_identity;
+      }
+      evidence.positions = points;
+      evidence.relative_times = relative_times;
+      evidence.points = result.points;
+      return evidence;
     }
 
     std::vector<Eigen::Vector3d> p4ExecutablePath(
@@ -889,7 +975,9 @@ namespace ego_planner
                 },
                 [this]() {
                   return grid_map_ ? grid_map_->occupancyGeneration() : 0u;
-                });
+                },
+                p0_risk_grid_runtime_
+                    ? p0_risk_grid_runtime_->gnssClearanceTransitionM() : 0.0);
             if (!adapted)
               return {P0OccupancyEpochCaptureStatus::ADAPTER_INVALID,
                       std::nullopt};
@@ -932,6 +1020,13 @@ namespace ego_planner
       return latest_risk_snapshot_for_test_;
     }
     return p0_risk_grid_runtime_->acquireSnapshot();
+  }
+
+  std::shared_ptr<const P0PlanningSnapshot>
+  EGOPlannerManager::acquireCurrentP0PlanningSnapshot() const
+  {
+    return p0_risk_grid_runtime_
+        ? p0_risk_grid_runtime_->acquirePlanningSnapshot() : nullptr;
   }
 
   const EGOPlannerManager::PlanningRiskContext &
@@ -1188,6 +1283,13 @@ namespace ego_planner
         !ctx.occupancy_snapshot->trusted_local_map_support->freshAt(now_s))
     {
       if (reason) *reason = "stale_planning_local_map_support";
+      return false;
+    }
+    if (p0_risk_grid_runtime_ &&
+        !p0_risk_grid_runtime_->gnssEpochFreshAt(
+            ctx.snapshot->sourceIdentity().gnss_stamp_s, now_s))
+    {
+      if (reason) *reason = "stale_planning_gnss_epoch";
       return false;
     }
     if (reason) *reason = "ok";
@@ -2475,6 +2577,72 @@ namespace ego_planner
       return reject_final_identity(
           P4GeometryCommitVerdict::POLICY_MISMATCH,
           "alert_limit_policy_changed_before_final_commit");
+    std::string final_freshness_reason;
+    if (!planningRiskContextFresh(stamp_s, &final_freshness_reason))
+      return reject_final_identity(
+          P4GeometryCommitVerdict::POLICY_MISMATCH,
+          "final_direct_inputs_not_fresh:" + final_freshness_reason);
+    if (p0_risk_grid_runtime_ &&
+        !p4CertifiedCurrentIntegritySafe(
+            planning_risk_context_.current_integrity_anchor, stamp_s,
+            snapshot->params().stale_timeout_s))
+      return reject_final_identity(
+          P4GeometryCommitVerdict::INVALID_PATH,
+          "final_certified_integrity_stale_or_unsafe");
+
+    std::vector<Eigen::Vector3d> executable_trajectory;
+    std::vector<double> executable_times;
+    if (!sampleTrajectoryForGeometryCommit(
+            &local_data_, 0.0, &executable_trajectory, &executable_times))
+      return reject_final_identity(
+          P4GeometryCommitVerdict::COMPUTE_BUDGET_EXCEEDED,
+          "final_bspline_curve_sampling_failed");
+
+    // RiskGrid is a coarse search field. Every terminal stage is checked by
+    // one direct ForwardRisk batch over the actual B-spline, including tests
+    // and offline contexts that do not carry a live occupancy generation.
+    const auto direct_risk_batch = planning_risk_context_.forward_risk_batch;
+    if (!direct_risk_batch)
+      return reject_final_identity(
+          P4GeometryCommitVerdict::INVALID_PATH,
+          "final_bspline_direct_risk_unavailable");
+    const auto direct_request = makeP4CurveRiskRequest(
+        p4DirectRiskRequestIdentity(
+            "p4_final_direct_v1", local_data_, snapshot,
+            executable_trajectory, executable_times), snapshot,
+        stamp_s,
+        local_data_.start_time_.seconds(), executable_trajectory,
+        executable_times, p4_forward_limits_.compute_budget_ms);
+    const auto direct_result = direct_risk_batch(direct_request);
+    if (!direct_result.complete ||
+        direct_result.combined_snapshot_identity !=
+            direct_request.combined_snapshot_identity ||
+        direct_result.points.size() != executable_trajectory.size())
+      return reject_final_identity(
+          P4GeometryCommitVerdict::INVALID_PATH,
+          "final_bspline_direct_risk_incomplete");
+    p4_direct_risk_evidence_ = makeP4DirectRiskEvidence(
+        local_data_, snapshot, stamp_s, executable_trajectory,
+        executable_times, direct_request, direct_result);
+    for (std::size_t index = 0; index < executable_trajectory.size(); ++index)
+    {
+      const auto &direct = direct_result.points[index];
+      if (direct.safety_state == iap::ForwardRiskSafetyState::UNSAFE)
+        return reject_final_identity(
+            P4GeometryCommitVerdict::INVALID_PATH,
+            "optimized_bspline_direct_risk_unsafe");
+      if (direct.safety_state != iap::ForwardRiskSafetyState::SAFE ||
+          direct.ranking_state !=
+              iap::ForwardRiskRankingState::COMPARABLE ||
+          direct.failure_reason != iap::ForwardRiskFailureReason::NONE ||
+          !direct.gnss_supported || !direct.lidar_supported ||
+          !direct.fim_supported || !std::isfinite(direct.safety_ratio) ||
+          direct.safety_ratio >= 1.0)
+        return reject_final_identity(
+            P4GeometryCommitVerdict::INVALID_PATH,
+            "final_bspline_direct_risk_incomplete");
+    }
+
     if (last_p4_forward_decision_.snapshot_identity.occupancy_generation > 0)
     {
       const auto bound_occupancy =
@@ -2536,16 +2704,6 @@ namespace ego_planner
                 stage + "_geometry_commit_rejected", stamp_s);
             return false;
           };
-      std::vector<Eigen::Vector3d> executable_trajectory;
-      std::vector<double> executable_times;
-      if (!sampleTrajectoryForGeometryCommit(
-              &local_data_, 0.0, &executable_trajectory,
-              &executable_times, commit_deadline))
-      {
-        return reject_final_commit(
-            P4GeometryCommitVerdict::COMPUTE_BUDGET_EXCEEDED,
-            "commit_curve_sampling_budget_exceeded");
-      }
       const std::vector<Eigen::Vector3d> reference_path =
           p4ExecutablePath(last_p4_forward_decision_);
       if (!reference_path.empty())
@@ -2587,68 +2745,6 @@ namespace ego_planner
             P4GeometryCommitVerdict::POLICY_MISMATCH,
             "live_collision_policy_changed_before_final_commit");
 
-      // A formal selection may only claim final-B-spline lineage if the
-      // optimized curve itself remains fully supported and below the same
-      // immutable safety limits. Advisory/deferred routes retain their
-      // non-certified authority and only reject known unsafe samples.
-      for (std::size_t index = 0; index < executable_trajectory.size(); ++index)
-      {
-        if (!commit_budget_available())
-          return reject_final_commit(
-              P4GeometryCommitVerdict::COMPUTE_BUDGET_EXCEEDED,
-              "commit_risk_recheck_budget_exceeded");
-        iap::PredictedPLSample predicted;
-        const double query_time = local_data_.start_time_.seconds() +
-            executable_times[index];
-        const bool predicted_ok = snapshot->queryPredictedPL(
-            executable_trajectory[index], query_time, &predicted);
-        const bool known_unsafe = predicted_ok && predicted.available &&
-            predicted.valid && !predicted.stale &&
-            std::max(
-                predicted.hpl_pred / snapshot->params().alert_limit_h_m,
-                predicted.vpl_pred / snapshot->params().alert_limit_v_m) >=
-                1.0;
-        if (known_unsafe)
-          return reject_final_commit(
-              P4GeometryCommitVerdict::INVALID_PATH,
-              "optimized_bspline_known_risk_unsafe");
-        if (last_p4_forward_decision_.action ==
-                P4ForwardAction::RISK_SELECTED &&
-            (!predicted_ok || !predicted.available || !predicted.valid ||
-             predicted.stale))
-          return reject_final_commit(
-              P4GeometryCommitVerdict::INVALID_PATH,
-              "formal_optimized_bspline_risk_support_incomplete");
-        if (last_p4_forward_decision_.action ==
-            P4ForwardAction::RISK_SELECTED)
-        {
-          iap::RiskCostSample cost;
-          iap::RiskCostQueryTrace trace;
-          const bool trace_ok = snapshot->queryCost(
-              executable_trajectory[index], query_time, &cost,
-              iap::RiskCostQueryPolicy::CONSERVATIVE_OCCUPIED_COST_SUPPORT,
-              &trace);
-          bool complete_source_support =
-              trace_ok && trace.success && !trace.corners.empty();
-          bool weighted_corner_seen = false;
-          for (const auto &corner : trace.corners)
-          {
-            const double weight =
-                corner.temporal_weight * corner.spatial_weight;
-            if (!std::isfinite(weight) || weight <= 0.0)
-              continue;
-            weighted_corner_seen = true;
-            complete_source_support = complete_source_support &&
-                corner.valid && !corner.stale && !corner.unknown &&
-                corner.gnss_supported && corner.lidar_supported &&
-                corner.fim_supported;
-          }
-          if (!weighted_corner_seen || !complete_source_support)
-            return reject_final_commit(
-                P4GeometryCommitVerdict::INVALID_PATH,
-                "formal_optimized_bspline_source_support_incomplete");
-        }
-      }
       P4GeometryCommitRequest commit_request;
       const Eigen::Vector3d commit_position = executable_trajectory.front();
       commit_request.bound_occupancy =
@@ -2753,6 +2849,12 @@ namespace ego_planner
           published_p4_control_points_hash_;
       p4_execution_certificate_.knot_vector_hash = p4KnotVectorHash(
           local_data_.position_traj_.getKnot());
+      std::vector<Eigen::Vector3d> risk_points;
+      std::vector<double> risk_times;
+      if (sampleTrajectoryForGeometryCommit(
+              &local_data_, 0.0, &risk_points, &risk_times))
+        p4_execution_certificate_.risk_query_lattice_hash =
+            p4RiskQueryLatticeHash(risk_points, risk_times);
       p4_execution_certificate_.approved_endpoint = committed_endpoint;
       p4_execution_certificate_.terminal_speed_mps =
           committed_terminal_speed;
@@ -2775,6 +2877,10 @@ namespace ego_planner
       p4_execution_revoked_ = false;
       last_p4_runtime_lineage_start_ns_ = 0;
       last_p4_execution_event_key_.clear();
+      p4_runtime_risk_cache_ = P4RuntimeRiskCache{};
+      // The final direct evidence remains valid for P5's immediate
+      // pre-publication check. Runtime replaces it with the latest
+      // generation-bound remaining-curve batch on its first watchdog tick.
       p4_generation_probe_previous_snapshot_ = p0_risk_grid_runtime_
           ? p0_risk_grid_runtime_->acquirePlanningSnapshot() : nullptr;
       last_p4_generation_probe_risk_generation_ =
@@ -2945,11 +3051,12 @@ namespace ego_planner
         p4_execution_certificate_.snapshot_identity.risk_generation;
     out.certificate_occupancy_generation =
         p4_execution_certificate_.snapshot_identity.occupancy_generation;
-    const auto finish = [this, now_s](
+    double evaluation_now_s = now_s;
+    const auto finish = [this, &evaluation_now_s](
         P4ExecutionCheckDiagnostics &diagnostics,
         const std::string &event) {
         last_p4_execution_diagnostics_ = diagnostics;
-        appendP4ExecutionEvent(event, now_s, diagnostics);
+        appendP4ExecutionEvent(event, evaluation_now_s, diagnostics);
         return diagnostics;
       };
     if (!out.applicable)
@@ -2987,11 +3094,12 @@ namespace ego_planner
         !std::isfinite(out.terminal_acceleration_mps2) ||
         out.terminal_acceleration_mps2 > 1.0e-2)
       return revoke("committed_terminal_stop_contract_invalid");
-    const double current_t = std::clamp(
-        now_s - local_data_.start_time_.seconds(), 0.0,
+    double current_t = std::clamp(
+        evaluation_now_s - local_data_.start_time_.seconds(), 0.0,
         p4_execution_certificate_.duration_s);
     out.remaining_time_s = std::max(
-        0.0, p4_execution_certificate_.execution_deadline_s - now_s);
+        0.0, p4_execution_certificate_.execution_deadline_s -
+            evaluation_now_s);
     const Eigen::Vector3d commanded_position =
         local_data_.position_traj_.evaluateDeBoorT(current_t);
     out.tracking_error_m = (actual_position - commanded_position).norm();
@@ -2999,7 +3107,8 @@ namespace ego_planner
         out.tracking_error_m <= p4_max_tracking_error_m_;
     if (!out.tracking_within_limit)
       return revoke("committed_trajectory_tracking_error_exceeded");
-    out.endpoint_reached = committedP4TrajectoryReachedEndpoint(now_s);
+    out.endpoint_reached = committedP4TrajectoryReachedEndpoint(
+        evaluation_now_s);
     if (out.endpoint_reached)
     {
       out.allowed = true;
@@ -3017,12 +3126,10 @@ namespace ego_planner
         ? runtime_planning_snapshot->risk : acquireRiskGridSnapshot();
     if (!snapshot)
       return revoke("runtime_integrity_snapshot_missing");
-    if (runtime_planning_snapshot)
-      appendP4GenerationProbe(now_s, runtime_planning_snapshot);
     if (runtime_planning_snapshot && runtime_planning_snapshot->occupancy &&
         runtime_planning_snapshot->occupancy->trusted_local_map_support &&
         !runtime_planning_snapshot->occupancy->trusted_local_map_support->
-            freshAt(now_s))
+            freshAt(evaluation_now_s))
       return revoke("runtime_local_map_support_stale_or_invalid");
     const iap::RiskGridHealth health = snapshot->health();
     out.current_risk_generation = snapshot->generation_id();
@@ -3032,8 +3139,9 @@ namespace ego_planner
     out.alert_limit_v_m = snapshot->params().alert_limit_v_m;
     out.current_integrity_fresh = health.ready && !health.stale &&
         std::isfinite(snapshot->stamp_s()) &&
-        now_s >= snapshot->stamp_s() &&
-        now_s - snapshot->stamp_s() <= snapshot->params().stale_timeout_s &&
+        evaluation_now_s >= snapshot->stamp_s() &&
+        evaluation_now_s - snapshot->stamp_s() <=
+            snapshot->params().stale_timeout_s &&
         snapshot->params().frame_id ==
             p4_execution_certificate_.snapshot_identity.frame_id;
     if (!out.current_integrity_fresh)
@@ -3053,7 +3161,8 @@ namespace ego_planner
       // newly acquired P0 planning snapshot keeps this monitor sample, GNSS
       // epoch, map and risk generation in one transaction.
       out.current_integrity_safe = p4CertifiedCurrentIntegritySafe(
-          runtime_planning_snapshot->integrity_anchor.current, now_s,
+          runtime_planning_snapshot->integrity_anchor.current,
+          evaluation_now_s,
           snapshot->params().stale_timeout_s);
     }
     else
@@ -3062,7 +3171,7 @@ namespace ego_planner
       // transaction is installed.
       iap::PredictedPLSample current_integrity;
       const bool current_ok = snapshot->queryPredictedPL(
-          actual_position, now_s, &current_integrity);
+          actual_position, evaluation_now_s, &current_integrity);
       out.current_integrity_safe = current_ok &&
           current_integrity.available && current_integrity.valid &&
           !current_integrity.stale &&
@@ -3071,47 +3180,172 @@ namespace ego_planner
     }
     if (!out.current_integrity_safe)
       return revoke("runtime_current_integrity_not_safe");
+    if (p0_risk_grid_runtime_ &&
+        !p0_risk_grid_runtime_->gnssEpochFreshAt(
+            snapshot->sourceIdentity().gnss_stamp_s, evaluation_now_s))
+      return revoke("runtime_gnss_epoch_stale_or_invalid");
 
-    out.remaining_risk_support_complete = true;
-    constexpr double kRuntimeRiskStepS = 0.2;
-    const int sample_count = std::max(1, static_cast<int>(std::ceil(
-        out.remaining_time_s / kRuntimeRiskStepS)));
-    for (int index = 0; index <= sample_count; ++index)
+    // The four-cell generation diagnostic is deliberately outside the
+    // authority checks above. If it ran, refresh ROS time and revalidate all
+    // freshness-sensitive inputs before any cached or new result can govern
+    // execution. The probe itself has a small per-cell budget below.
+    if (runtime_planning_snapshot)
     {
-      const double alpha = static_cast<double>(index) / sample_count;
-      const double relative_t = current_t + alpha *
-          (p4_execution_certificate_.duration_s - current_t);
-      const double query_time = local_data_.start_time_.seconds() + relative_t;
-      iap::PredictedPLSample predicted;
-      const bool predicted_ok = snapshot->queryPredictedPL(
-          local_data_.position_traj_.evaluateDeBoorT(relative_t),
-          query_time, &predicted);
-      const bool complete = predicted_ok && predicted.available &&
-          predicted.valid && !predicted.stale;
+      appendP4GenerationProbe(evaluation_now_s, runtime_planning_snapshot);
+      const double refreshed_now_s = plannerNow().seconds();
+      if (std::isfinite(refreshed_now_s) &&
+          refreshed_now_s >= evaluation_now_s)
+        evaluation_now_s = refreshed_now_s;
+      current_t = std::clamp(
+          evaluation_now_s - local_data_.start_time_.seconds(), 0.0,
+          p4_execution_certificate_.duration_s);
+      out.remaining_time_s = std::max(
+          0.0, p4_execution_certificate_.execution_deadline_s -
+              evaluation_now_s);
+      if (!runtime_planning_snapshot->occupancy ||
+          !runtime_planning_snapshot->occupancy->trusted_local_map_support ||
+          !runtime_planning_snapshot->occupancy->trusted_local_map_support->
+              freshAt(evaluation_now_s))
+        return revoke("runtime_local_map_support_stale_or_invalid");
+      if (!std::isfinite(snapshot->stamp_s()) ||
+          evaluation_now_s < snapshot->stamp_s() ||
+          evaluation_now_s - snapshot->stamp_s() >
+              snapshot->params().stale_timeout_s)
+        return revoke("runtime_integrity_stale_or_frame_invalid");
+      if (!p4CertifiedCurrentIntegritySafe(
+              runtime_planning_snapshot->integrity_anchor.current,
+              evaluation_now_s, snapshot->params().stale_timeout_s))
+        return revoke("runtime_current_integrity_not_safe");
+      if (p0_risk_grid_runtime_ &&
+          !p0_risk_grid_runtime_->gnssEpochFreshAt(
+              snapshot->sourceIdentity().gnss_stamp_s, evaluation_now_s))
+        return revoke("runtime_gnss_epoch_stale_or_invalid");
+      if (committedP4TrajectoryReachedEndpoint(evaluation_now_s))
+      {
+        out.endpoint_reached = true;
+        out.allowed = true;
+        out.remaining_risk_support_complete = true;
+        out.reason = "approved_endpoint_reached";
+        p4_execution_revoked_ = false;
+        return finish(out, "ENDPOINT_HOLD");
+      }
+    }
+
+    const auto direct_risk_batch = runtime_planning_snapshot
+        ? runtime_planning_snapshot->forward_risk_batch
+        : planning_risk_context_.forward_risk_batch;
+    if (!direct_risk_batch)
+      return revoke("runtime_direct_risk_unavailable");
+    const bool cache_matches = p4_runtime_risk_cache_.valid &&
+        p4_runtime_risk_cache_.trajectory_id == local_data_.traj_id_ &&
+        p4_runtime_risk_cache_.start_time_ns ==
+            local_data_.start_time_.nanoseconds() &&
+        p4_runtime_risk_cache_.risk_generation == snapshot->generation_id() &&
+        p4_runtime_risk_cache_.occupancy_generation ==
+            snapshot->sourceIdentity().occupancy_generation &&
+        p4_runtime_risk_cache_.gnss_epoch_identity ==
+            snapshot->sourceIdentity().gnss_epoch_identity &&
+        p4_runtime_risk_cache_.control_points_hash ==
+            p4_execution_certificate_.control_points_hash &&
+        p4_runtime_risk_cache_.knot_vector_hash ==
+            p4_execution_certificate_.knot_vector_hash &&
+        p4_direct_risk_evidence_.complete &&
+        p4_direct_risk_evidence_.trajectory_id == local_data_.traj_id_ &&
+        p4_direct_risk_evidence_.trajectory_start_ns ==
+            local_data_.start_time_.nanoseconds() &&
+        p4_direct_risk_evidence_.risk_generation == snapshot->generation_id();
+    if (!cache_matches)
+    {
+      std::vector<Eigen::Vector3d> remaining_points;
+      std::vector<double> remaining_times;
+      if (!sampleTrajectoryForGeometryCommit(
+              &local_data_, current_t, &remaining_points, &remaining_times))
+        return revoke("runtime_direct_risk_curve_sampling_failed");
+      const auto request = makeP4CurveRiskRequest(
+          p4DirectRiskRequestIdentity(
+              "p4_runtime_direct_v1", local_data_, snapshot,
+              remaining_points, remaining_times), snapshot, evaluation_now_s,
+          local_data_.start_time_.seconds(), remaining_points,
+          remaining_times, p4_forward_limits_.compute_budget_ms);
+      const auto result = direct_risk_batch(request);
+      if (!result.complete ||
+          result.combined_snapshot_identity !=
+              request.combined_snapshot_identity ||
+          result.points.size() != remaining_points.size())
+        return revoke("runtime_direct_risk_incomplete");
+      p4_direct_risk_evidence_ = makeP4DirectRiskEvidence(
+          local_data_, snapshot, evaluation_now_s, remaining_points,
+          remaining_times, request, result);
+      p4_runtime_risk_cache_ = P4RuntimeRiskCache{};
+      p4_runtime_risk_cache_.valid = true;
+      p4_runtime_risk_cache_.trajectory_id = local_data_.traj_id_;
+      p4_runtime_risk_cache_.start_time_ns =
+          local_data_.start_time_.nanoseconds();
+      p4_runtime_risk_cache_.risk_generation = snapshot->generation_id();
+      p4_runtime_risk_cache_.occupancy_generation =
+          snapshot->sourceIdentity().occupancy_generation;
+      p4_runtime_risk_cache_.gnss_epoch_identity =
+          snapshot->sourceIdentity().gnss_epoch_identity;
+      p4_runtime_risk_cache_.control_points_hash =
+          p4_execution_certificate_.control_points_hash;
+      p4_runtime_risk_cache_.knot_vector_hash =
+          p4_execution_certificate_.knot_vector_hash;
+      p4_runtime_risk_cache_.relative_times = std::move(remaining_times);
+      p4_runtime_risk_cache_.query_lattice_hash = p4RiskQueryLatticeHash(
+          remaining_points, p4_runtime_risk_cache_.relative_times);
+      p4_runtime_risk_cache_.samples.reserve(result.points.size());
+      for (const auto &direct : result.points)
+      {
+        P4RuntimeRiskCache::Sample sample;
+        sample.unsafe =
+            direct.safety_state == iap::ForwardRiskSafetyState::UNSAFE;
+        sample.complete_safe =
+            direct.safety_state == iap::ForwardRiskSafetyState::SAFE &&
+            direct.ranking_state ==
+                iap::ForwardRiskRankingState::COMPARABLE &&
+            direct.failure_reason == iap::ForwardRiskFailureReason::NONE &&
+            direct.gnss_supported && direct.lidar_supported &&
+            direct.fim_supported && std::isfinite(direct.safety_ratio) &&
+            direct.safety_ratio < 1.0;
+        sample.safety_ratio = direct.safety_ratio;
+        sample.hpl_m = direct.prediction.fused.hpl;
+        sample.vpl_m = direct.prediction.fused.vpl;
+        p4_runtime_risk_cache_.samples.push_back(sample);
+      }
+    }
+    out.remaining_risk_support_complete = true;
+    for (std::size_t index = 0;
+         index < p4_runtime_risk_cache_.samples.size(); ++index)
+    {
+      if (index >= p4_runtime_risk_cache_.relative_times.size())
+        return revoke("runtime_direct_risk_cache_identity_mismatch");
+      const double relative_t =
+          p4_runtime_risk_cache_.relative_times[index];
+      if (relative_t + 1.0e-9 < current_t)
+        continue;
+      const auto &direct = p4_runtime_risk_cache_.samples[index];
+      const bool complete = direct.complete_safe;
       out.remaining_risk_support_complete =
           out.remaining_risk_support_complete && complete;
-      if (complete &&
-          (predicted.hpl_pred >= snapshot->params().alert_limit_h_m ||
-           predicted.vpl_pred >= snapshot->params().alert_limit_v_m))
+      if (direct.unsafe)
       {
         out.known_future_risk_unsafe = true;
-        out.time_to_risk_violation_s = std::max(0.0, query_time - now_s);
+        const double query_time =
+            local_data_.start_time_.seconds() + relative_t;
+        out.time_to_risk_violation_s = std::max(
+            0.0, query_time - evaluation_now_s);
         out.violation_position =
             local_data_.position_traj_.evaluateDeBoorT(relative_t);
         out.violation_query_time_s = query_time;
-        out.violation_hpl_m = predicted.hpl_pred;
-        out.violation_vpl_m = predicted.vpl_pred;
+        out.violation_hpl_m = direct.hpl_m;
+        out.violation_vpl_m = direct.vpl_m;
         return revoke("runtime_known_future_integrity_unsafe");
       }
+      if (!complete)
+        return revoke("runtime_direct_risk_incomplete");
     }
-    if (p4_execution_certificate_.authority ==
-            P4ExecutionAuthority::FORMAL_RISK_SELECTED &&
-        !out.remaining_risk_support_complete)
-      return revoke("runtime_formal_risk_support_incomplete");
     out.allowed = true;
-    out.reason = out.remaining_risk_support_complete
-        ? "runtime_execution_contract_valid"
-        : "runtime_limited_authority_unknown_allowed";
+    out.reason = "runtime_execution_contract_valid";
     p4_execution_revoked_ = false;
     published_p4_forward_decision_.planning_disposition =
         P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY;
@@ -3144,6 +3378,7 @@ namespace ego_planner
     if (write_header)
       csv << "schema_version,event,stamp_s,authority,trajectory_id,"
              "trajectory_start_ns,control_points_hash,knot_vector_hash,"
+             "risk_query_lattice_hash,"
              "certificate_risk_generation,certificate_occupancy_generation,"
              "current_risk_generation,current_occupancy_generation,allowed,"
              "endpoint_reached,reason,tracking_error_m,remaining_time_s,"
@@ -3158,6 +3393,7 @@ namespace ego_planner
         << p4_execution_certificate_.start_time_ns << ','
         << p4_execution_certificate_.control_points_hash << ','
         << p4_execution_certificate_.knot_vector_hash << ','
+        << p4_execution_certificate_.risk_query_lattice_hash << ','
         << diagnostics.certificate_risk_generation << ','
         << diagnostics.certificate_occupancy_generation << ','
         << diagnostics.current_risk_generation << ','
@@ -3236,7 +3472,9 @@ namespace ego_planner
     iap::ForwardRiskBatchRequest base;
     base.combined_snapshot_identity = "p4_generation_probe_v1";
     base.evaluation_time_s = evaluation_time_s;
-    base.compute_budget_ms = 1000.0;
+    // Diagnostic-only: cap each of the four counterfactual batches so this
+    // probe cannot occupy the execution watchdog for seconds.
+    base.compute_budget_ms = 10.0;
     base.hal = current->risk->params().alert_limit_h_m;
     base.val = current->risk->params().alert_limit_v_m;
     std::vector<double> arcs;
@@ -3263,6 +3501,11 @@ namespace ego_planner
         const iap::IntegritySnapshot &epoch, const bool diagnostic) {
         iap::ForwardRiskBatchRequest request = base;
         request.snapshot = epoch;
+        request.hal = map_snapshot->risk->params().alert_limit_h_m;
+        request.val = map_snapshot->risk->params().alert_limit_v_m;
+        for (auto &point : request.points)
+          point.horizon_s = std::max(
+              0.0, point.query_time_s - map_snapshot->risk->stamp_s());
         return diagnostic
             ? map_snapshot->diagnostic_forward_risk_batch(request)
             : map_snapshot->forward_risk_batch(request);
@@ -3272,36 +3515,120 @@ namespace ego_planner
     const auto old_new = run(previous, current->integrity_anchor, true);
     const auto new_new = run(current, current->integrity_anchor, false);
 
-    const auto first_unsafe = [](const iap::ForwardRiskBatchResult &result) {
-        for (std::size_t index = 0; index < result.points.size(); ++index)
-          if (result.points[index].safety_state ==
-              iap::ForwardRiskSafetyState::UNSAFE)
-            return static_cast<int>(index);
-        return -1;
-      };
-    const auto first_grid_unsafe = [&base](
+    struct GridProbeResult
+    {
+      int index = -1;
+      P4GenerationBoundarySignature boundary;
+      iap::PredictedPLQueryTrace trace;
+    };
+    const auto first_grid_anomaly = [&base](
         const std::shared_ptr<const iap::RiskGridSnapshot> &risk) {
+        GridProbeResult result;
         for (std::size_t index = 0; index < base.points.size(); ++index)
         {
           iap::PredictedPLSample sample;
-          if (risk->queryPredictedPL(
-                  base.points[index].position_map,
-                  base.points[index].query_time_s, &sample) &&
-              sample.available && sample.valid && !sample.stale &&
+          iap::PredictedPLQueryTrace trace;
+          const bool query_ok = risk->queryPredictedPL(
+              base.points[index].position_map,
+              base.points[index].query_time_s, &sample,
+              std::numeric_limits<double>::quiet_NaN(), false, &trace);
+          const bool topology_anomaly =
+              sample.interpolation_status ==
+                  iap::RiskGridInterpolationStatus::DIRECT_RECHECK_REQUIRED ||
+              sample.interpolation_status ==
+                  iap::RiskGridInterpolationStatus::GEOMETRY_DEGENERATE ||
+              sample.interpolation_status ==
+                  iap::RiskGridInterpolationStatus::INVALID_SUPPORT;
+          const bool unsafe = query_ok && sample.available && sample.valid &&
+              !sample.stale &&
               (sample.hpl_pred >= risk->params().alert_limit_h_m ||
-               sample.vpl_pred >= risk->params().alert_limit_v_m))
-            return static_cast<int>(index);
+               sample.vpl_pred >= risk->params().alert_limit_v_m);
+          const bool invalid = !query_ok || !sample.available || !sample.valid ||
+              sample.stale || !std::isfinite(sample.hpl_pred) ||
+              !std::isfinite(sample.vpl_pred);
+          if (topology_anomaly || unsafe || invalid)
+          {
+            result.index = static_cast<int>(index);
+            result.trace = std::move(trace);
+            result.boundary.index = result.index;
+            result.boundary.safety_state = unsafe
+                ? iap::ForwardRiskSafetyState::UNSAFE
+                : iap::ForwardRiskSafetyState::UNKNOWN;
+            result.boundary.ranking_state = unsafe
+                ? iap::ForwardRiskRankingState::COMPARABLE
+                : iap::ForwardRiskRankingState::INCOMPLETE;
+            result.boundary.failure_reason = unsafe
+                ? iap::ForwardRiskFailureReason::SAFETY_LIMIT_EXCEEDED
+                : sample.interpolation_status ==
+                      iap::RiskGridInterpolationStatus::GEOMETRY_DEGENERATE
+                    ? iap::ForwardRiskFailureReason::GNSS_GEOMETRY_DEGENERATE
+                    : iap::ForwardRiskFailureReason::OCCUPANCY_UNKNOWN;
+            result.boundary.interpolation_status = topology_anomaly || invalid
+                ? sample.interpolation_status
+                : iap::RiskGridInterpolationStatus::NOT_EVALUATED;
+            result.boundary.reason = topology_anomaly || invalid
+                ? sample.reason
+                : iap::forwardRiskFailureReasonName(
+                      result.boundary.failure_reason);
+            for (const auto &corner : result.trace.corners)
+              if (corner.combined_weight > 0.0)
+              {
+                result.boundary.satellite_set_hash =
+                    corner.gnss_local_satellite_set_hash;
+                break;
+              }
+            return result;
+          }
         }
-        return -1;
+        return result;
       };
-    const int oo = first_unsafe(old_old);
-    const int no = first_unsafe(new_old);
-    const int on = first_unsafe(old_new);
-    const int nn = first_unsafe(new_new);
-    const int old_grid = first_grid_unsafe(previous->risk);
-    const int new_grid = first_grid_unsafe(current->risk);
+    const auto grid_trace_at = [&base](
+        const std::shared_ptr<const iap::RiskGridSnapshot> &risk,
+        const int index) {
+        GridProbeResult result;
+        if (!risk || index < 0 ||
+            static_cast<std::size_t>(index) >= base.points.size())
+          return result;
+        iap::PredictedPLSample sample;
+        result.index = index;
+        risk->queryPredictedPL(
+            base.points[static_cast<std::size_t>(index)].position_map,
+            base.points[static_cast<std::size_t>(index)].query_time_s,
+            &sample, std::numeric_limits<double>::quiet_NaN(), false,
+            &result.trace);
+        return result;
+      };
+    const auto direct_boundary = [](const iap::ForwardRiskBatchResult &batch) {
+        P4GenerationBoundarySignature boundary;
+        boundary.index = firstP4NonSafeIndex(batch);
+        if (boundary.index < 0 ||
+            static_cast<std::size_t>(boundary.index) >= batch.points.size())
+          return boundary;
+        const auto &point = batch.points[
+            static_cast<std::size_t>(boundary.index)];
+        boundary.safety_state = point.safety_state;
+        boundary.ranking_state = point.ranking_state;
+        boundary.failure_reason = point.failure_reason;
+        boundary.satellite_set_hash = point.local_satellite_set_hash;
+        boundary.reason = iap::forwardRiskFailureReasonName(
+            point.failure_reason);
+        return boundary;
+      };
+    const auto oo_boundary = direct_boundary(old_old);
+    const auto no_boundary = direct_boundary(new_old);
+    const auto on_boundary = direct_boundary(old_new);
+    const auto nn_boundary = direct_boundary(new_new);
+    const int oo = oo_boundary.index;
+    const int no = no_boundary.index;
+    const int on = on_boundary.index;
+    const int nn = nn_boundary.index;
+    const auto old_grid_probe = first_grid_anomaly(previous->risk);
+    const auto new_grid_probe = first_grid_anomaly(current->risk);
+    const int old_grid = old_grid_probe.index;
+    const int new_grid = new_grid_probe.index;
     const auto classification = classifyP4GenerationProbe(
-        oo, no, on, nn, old_grid, new_grid);
+        oo_boundary, no_boundary, on_boundary, nn_boundary,
+        old_grid_probe.boundary, new_grid_probe.boundary);
     const std::string path = config.debug_csv_path + ".generation_probe.csv";
     std::ifstream existing(path);
     const bool write_header = !existing.good() || existing.peek() == EOF;
@@ -3320,7 +3647,11 @@ namespace ego_planner
              "new_map_old_epoch_first_arc_m,old_map_new_epoch_first_arc_m,"
              "new_map_new_epoch_first_arc_m,old_map_old_epoch_sat_hash,"
              "new_map_old_epoch_sat_hash,old_map_new_epoch_sat_hash,"
-             "new_map_new_epoch_sat_hash,classification\n";
+             "new_map_new_epoch_sat_hash,old_map_old_epoch_state,"
+             "new_map_old_epoch_state,old_map_new_epoch_state,"
+             "new_map_new_epoch_state,old_map_old_epoch_reason,"
+             "new_map_old_epoch_reason,old_map_new_epoch_reason,"
+             "new_map_new_epoch_reason,classification\n";
     const auto arc_at = [&arcs](const int index) {
         return index >= 0 && static_cast<std::size_t>(index) < arcs.size()
             ? arcs[static_cast<std::size_t>(index)]
@@ -3333,7 +3664,29 @@ namespace ego_planner
             ? result.points[static_cast<std::size_t>(index)].
                 local_satellite_set_hash : uint64_t{0};
       };
-    csv << std::setprecision(17) << "p4_generation_probe_v1,"
+    const auto state_at = [](const iap::ForwardRiskBatchResult &result,
+                             const int index) {
+        if (index < 0 || static_cast<std::size_t>(index) >= result.points.size())
+          return std::string("SAFE");
+        switch (result.points[static_cast<std::size_t>(index)].safety_state)
+        {
+          case iap::ForwardRiskSafetyState::SAFE: return std::string("SAFE");
+          case iap::ForwardRiskSafetyState::UNSAFE:
+            return std::string("UNSAFE");
+          case iap::ForwardRiskSafetyState::UNKNOWN:
+            return std::string("UNKNOWN");
+        }
+        return std::string("UNKNOWN");
+      };
+    const auto reason_at = [](const iap::ForwardRiskBatchResult &result,
+                              const int index) {
+        return index >= 0 &&
+            static_cast<std::size_t>(index) < result.points.size()
+            ? std::string(iap::forwardRiskFailureReasonName(
+                  result.points[static_cast<std::size_t>(index)].failure_reason))
+            : std::string("none");
+      };
+    csv << std::setprecision(17) << "p4_generation_probe_v2,"
         << evaluation_time_s << ',' << p4_execution_certificate_.trajectory_id
         << ',' << p4_execution_certificate_.start_time_ns << ','
         << previous->risk->generation_id() << ','
@@ -3347,7 +3700,87 @@ namespace ego_planner
         << arc_at(on) << ',' << arc_at(nn) << ','
         << sat_hash_at(old_old, oo) << ',' << sat_hash_at(new_old, no) << ','
         << sat_hash_at(old_new, on) << ',' << sat_hash_at(new_new, nn) << ','
+        << state_at(old_old, oo) << ',' << state_at(new_old, no) << ','
+        << state_at(old_new, on) << ',' << state_at(new_new, nn) << ','
+        << reason_at(old_old, oo) << ',' << reason_at(new_old, no) << ','
+        << reason_at(old_new, on) << ',' << reason_at(new_new, nn) << ','
         << p4GenerationChangeClassName(classification) << '\n';
+
+    const std::string corner_path =
+        config.debug_csv_path + ".generation_probe_corners.csv";
+    std::ifstream corner_existing(corner_path);
+    const bool corner_header = !corner_existing.good() ||
+        corner_existing.peek() == EOF;
+    corner_existing.close();
+    std::ofstream corner_csv(corner_path, std::ios::app);
+    if (!corner_csv)
+      return false;
+    if (corner_header)
+      corner_csv << "schema_version,evaluation_time_s,trajectory_id,grid_side,"
+                    "risk_generation,probe_index,query_x,query_y,query_z,"
+                    "query_time_s,interpolation_status,interpolation_reason,"
+                    "temporal_layer,horizon_id,horizon_s,temporal_weight,"
+                    "corner_id,voxel_x,voxel_y,voxel_z,corner_x,corner_y,corner_z,"
+                    "spatial_weight,combined_weight,hpl,vpl,source_flags,valid,"
+                    "stale,unknown,geometry_status,support_authority,support_status,"
+                    "satellite_set_hash,satellite_ids,geometry_condition,"
+                    "worst_excluded_h,worst_excluded_v,invalid_reason\n";
+    const auto write_corners = [&](const char *side,
+                                   const GridProbeResult &probe) {
+        for (const auto &corner : probe.trace.corners)
+        {
+          std::ostringstream satellites;
+          for (std::size_t i = 0;
+               i < corner.gnss_used_satellite_ids.size(); ++i)
+          {
+            if (i > 0) satellites << ';';
+            satellites << corner.gnss_used_satellite_ids[i];
+          }
+          corner_csv << std::setprecision(17)
+              << "p4_generation_probe_corner_v1," << evaluation_time_s << ','
+              << p4_execution_certificate_.trajectory_id << ',' << side << ','
+              << probe.trace.risk_generation_id << ',' << probe.index << ','
+              << probe.trace.query_point.x() << ','
+              << probe.trace.query_point.y() << ','
+              << probe.trace.query_point.z() << ','
+              << probe.trace.query_time_s << ','
+              << iap::riskGridInterpolationStatusName(
+                    probe.trace.interpolation_status) << ','
+              << probe.trace.reason << ',' << corner.temporal_layer << ','
+              << corner.horizon_id << ',' << corner.horizon_s << ','
+              << corner.temporal_weight << ',' << corner.corner_id << ','
+              << corner.voxel_index.x() << ',' << corner.voxel_index.y() << ','
+              << corner.voxel_index.z() << ',' << corner.voxel_position.x() << ','
+              << corner.voxel_position.y() << ',' << corner.voxel_position.z() << ','
+              << corner.spatial_weight << ',' << corner.combined_weight << ','
+              << corner.hpl_pred << ',' << corner.vpl_pred << ','
+              << corner.source_flags << ',' << (corner.valid ? 1 : 0) << ','
+              << (corner.stale ? 1 : 0) << ',' << (corner.unknown ? 1 : 0) << ','
+              << iap::gnssGeometryStatusName(corner.gnss_geometry_status) << ','
+              << iap::localMapSupportAuthorityName(
+                    corner.gnss_support_authority) << ','
+              << iap::localMapSupportStatusName(corner.gnss_support_status) << ','
+              << corner.gnss_local_satellite_set_hash << ','
+              << satellites.str() << ','
+              << corner.gnss_weighted_geometry_condition << ','
+              << corner.gnss_worst_excluded_sat_h << ','
+              << corner.gnss_worst_excluded_sat_v << ','
+              << corner.invalid_reason << '\n';
+        }
+      };
+    std::set<int> corner_indices;
+    for (const int index : {old_grid, new_grid, oo, no, on, nn})
+      if (index >= 0) corner_indices.insert(index);
+    for (const int index : corner_indices)
+    {
+      // Always dump both generations at the same trajectory position.  This
+      // turns each record into an actual paired corner comparison.
+      write_corners("OLD", grid_trace_at(previous->risk, index));
+      write_corners("NEW", grid_trace_at(current->risk, index));
+    }
+    corner_csv.flush();
+    if (!corner_csv.good())
+      return false;
     p4_generation_probe_previous_snapshot_ = current;
     last_p4_generation_probe_risk_generation_ =
         current->risk->generation_id();
@@ -3379,8 +3812,57 @@ namespace ego_planner
   void EGOPlannerManager::setPlanningRiskContextForTest(
       std::shared_ptr<const iap::RiskGridSnapshot> snapshot,
       const double query_base_time_s,
-      std::shared_ptr<const P0OccupancyEpoch> occupancy_snapshot)
+      std::shared_ptr<const P0OccupancyEpoch> occupancy_snapshot,
+      std::function<iap::ForwardRiskBatchResult(
+          const iap::ForwardRiskBatchRequest&)> forward_risk_batch)
   {
+    if (!forward_risk_batch && snapshot)
+    {
+      const auto test_snapshot = snapshot;
+      forward_risk_batch = [test_snapshot](
+          const iap::ForwardRiskBatchRequest &request) {
+          iap::ForwardRiskBatchResult result;
+          result.complete = true;
+          result.combined_snapshot_identity =
+              request.combined_snapshot_identity;
+          result.points.reserve(request.points.size());
+          for (const auto &point : request.points)
+          {
+            iap::PredictedPLSample grid;
+            iap::ForwardRiskPointResult direct;
+            if (test_snapshot->queryPredictedPL(
+                    point.position_map, point.query_time_s, &grid) &&
+                grid.available && grid.valid && !grid.stale)
+            {
+              direct.prediction.fused.hpl = grid.hpl_pred;
+              direct.prediction.fused.vpl = grid.vpl_pred;
+              direct.safety_ratio = std::max(
+                  grid.hpl_pred / request.hal,
+                  grid.vpl_pred / request.val);
+              direct.safety_state = direct.safety_ratio < 1.0
+                  ? iap::ForwardRiskSafetyState::SAFE
+                  : iap::ForwardRiskSafetyState::UNSAFE;
+              direct.ranking_state =
+                  iap::ForwardRiskRankingState::COMPARABLE;
+              direct.failure_reason = direct.safety_state ==
+                      iap::ForwardRiskSafetyState::SAFE
+                  ? iap::ForwardRiskFailureReason::NONE
+                  : iap::ForwardRiskFailureReason::SAFETY_LIMIT_EXCEEDED;
+              direct.gnss_supported = true;
+              direct.lidar_supported = true;
+              direct.fim_supported = true;
+            }
+            else
+            {
+              direct.failure_reason =
+                  iap::ForwardRiskFailureReason::GNSS_SKY_UNKNOWN;
+              result.complete = false;
+            }
+            result.points.push_back(std::move(direct));
+          }
+          return result;
+        };
+    }
     planning_risk_context_ = PlanningRiskContext{};
     planning_risk_context_.active = true;
     planning_risk_context_.planning_start_s = query_base_time_s;
@@ -3390,6 +3872,9 @@ namespace ego_planner
     planning_risk_context_.snapshot = std::move(snapshot);
     planning_risk_context_.occupancy_snapshot =
         std::move(occupancy_snapshot);
+    planning_risk_context_.forward_risk_batch =
+        std::move(forward_risk_batch);
+    p4_runtime_risk_cache_ = P4RuntimeRiskCache{};
     if (planning_risk_context_.snapshot)
     {
       planning_risk_context_.generation_id =

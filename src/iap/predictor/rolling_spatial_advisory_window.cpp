@@ -46,6 +46,8 @@ bool exactVisibility(const VisibilityPredictor::Params& lhs,
          exactDouble(lhs.occ_range, rhs.occ_range) &&
          exactDouble(lhs.occ_L, rhs.occ_L) &&
          exactDouble(lhs.ray_start_offset, rhs.ray_start_offset) &&
+         exactDouble(lhs.clearance_transition_m,
+                     rhs.clearance_transition_m) &&
          lhs.hard_occlusion == rhs.hard_occlusion &&
          exactCanopy(lhs.canopy, rhs.canopy);
 }

@@ -69,6 +69,8 @@ class VisibilityPredictor {
     double occ_L         = 5.0;    ///< survey length for κ computation [m]
     double ray_start_offset = 1.0; ///< ignore near-field voxels around query point [m]
     bool hard_occlusion = false;   ///< false keeps satellites usable and inflates σ via κ
+    double clearance_transition_m = 0.0;
+                                   ///< continuous LOS sigma transition width [m]
     CanopyNoiseParams canopy;      ///< σ_eff model params (σ_0, σ_mp, σ_c, α)
   };
 

@@ -328,6 +328,20 @@ class TestStageContracts(unittest.TestCase):
         self.assertEqual(baseline["planner_enable_p5_runtime"], "false")
         self.assertEqual(baseline["p0.enable_risk_grid"], "true")
 
+        bds = MODULE.stage_launch_args(
+            "limited-prefix", MODULE.FOREST_SCENARIO, gnss_arm="bds")
+        self.assertEqual(bds["gnss_enabled_constellations"],
+                         "GPS,BDS,GAL,GLO")
+        self.assertEqual(
+            MODULE.forest_scene_contract(
+                MODULE.FOREST_SCENARIO, "bds")["gnss"]
+            ["enabled_constellations"],
+            ["GPS", "BDS", "GAL", "GLO"])
+        with self.assertRaises(ValueError):
+            MODULE.stage_launch_args(
+                "limited-prefix", MODULE.FOREST_SCENARIO,
+                gnss_arm="unsupported")
+
     def test_forest_scene_contract_is_expanded_and_fingerprinted(self):
         contract = MODULE.forest_scene_contract()
         self.assertEqual(contract["schema_version"],
@@ -341,6 +355,7 @@ class TestStageContracts(unittest.TestCase):
             contract["gnss"]["measured_epoch_support_radius_m"], 0.45)
         self.assertEqual(
             contract["gnss"]["measured_epoch_integrity_max_delta_s"], 0.25)
+        self.assertEqual(contract["gnss"]["clearance_transition_m"], 0.4)
         self.assertEqual(contract["planner_executor_thread_count"], 6)
         self.assertTrue(contract["p0_conservative_max_with_gnss"])
         self.assertFalse(
@@ -408,6 +423,7 @@ class TestStageContracts(unittest.TestCase):
                 "skip_occupied_voxels": True,
                 "use_current_integrity_prior": True,
                 "conservative_max_with_gnss": True,
+                "gnss_clearance_transition_m": 0.4,
                 "executor_thread_count": 6,
             },
             "integrity_alert_limits": {

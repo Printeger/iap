@@ -62,6 +62,46 @@
   finite positive pseudorange sigma remains a common lower bound on the
   canopy-derived sigma on both sides of that radius; the radius changes only
   support admission.
+- `RiskGrid` PL is a coarse search/cost field, not final execution authority.
+  Trilinear/temporal PL interpolation is valid only when every positive-weight
+  corner has normal GNSS geometry and the same local satellite set, trusted
+  support authority/status and active prediction-source combination. A
+  topology change returns `DIRECT_RECHECK_REQUIRED`; insufficient, singular
+  leave-one-out or numerically failed geometry returns an explicit geometry
+  status with non-finite PL. Such values are never replaced by a large finite
+  sentinel and never participate in ordinary interpolation.
+- Final publication and runtime execution checks sample the actual immutable
+  B-spline (including its endpoint, at no more than 0.2 s spacing) and use one
+  direct ForwardRisk batch on the corresponding coherent P0 snapshot. The
+  result identity binds trajectory timing, control points/knots, sampling
+  lattice, occupancy/risk generations and GNSS epoch. `SAFE` with complete
+  GNSS/LiDAR/FIM support is required; unsafe, incomplete, degenerate, expired
+  or over-budget results fail closed. Same-generation result reuse never
+  bypasses current map/GNSS/certified-Integrity freshness, and any generation
+  change forces recomputation. RiskGrid remains available as a planning
+  heuristic and for diagnostics.
+- P5 consumes that same direct batch and its exact immutable RiskGrid/P0
+  identity; acquiring a newer generation between P4 and P5 does not by itself
+  invalidate a completed coherent result. Ordinary RiskGrid PL is never a P5
+  authority. The existing P5-4/P5-7 fixture overlay remains an explicit test
+  policy, not a production interpolation fallback.
+- The optional GNSS LOS clearance transition is part of the predictor and
+  snapshot identity. For width `w>0`, an occupancy generation owns a truncated
+  distance field to occupied voxel surfaces; the LOS proximity is
+  `1-smoothstep(0,w,clearance)` and combines with the original discrete canopy
+  coverage as `1-(1-kappa_discrete)(1-kappa_clearance)`, exactly once. The
+  union is evaluated per LOS sample: proximity is exactly one for an occupied
+  sample, so the result reduces to the continuous proximity kernel without
+  retaining or double-counting the binary boundary jump. `sigma_eff` remains
+  `max(epoch_sigma, canopy_sigma)`. Envelope/support/elevation gates are not
+  smoothed and true ray intersections still obey hard-occlusion exclusion.
+  Width `0` preserves legacy behavior; dense forest v2 uses `0.4 m`.
+  Implementations cap width at `5 m` and `64` voxels and cap dense storage at
+  `16M` float cells (64 MiB) and each axis at `2048` cells, bounding transform
+  scratch space as well. The exact separable EDT is linear in those cells
+  and independent of occupied-voxel count and transition radius. Pathological
+  wider coordinate extents fail closed with maximum proximity in constant
+  query time rather than using an unbounded sparse or radius-cubed fallback.
 - LiDAR observability set O^:
   - Baseline: use map-based proxy for “ICP observability/quality” (may include occlusion)
   - Trunk landmarks: optional upgrade (not required for baseline)
@@ -130,4 +170,12 @@
   new-map/new-epoch. Direct ForwardRisk is also compared with each generation's
   RiskGrid interpolation. Probe results may classify map/support, GNSS epoch /
   satellite-set, interpolation or mixed changes, but never grant or revoke
-  motion and never bypass map or GNSS freshness.
+  motion and never bypass map or GNSS freshness. Classification compares the
+  typed boundary (index, safety/ranking/failure, satellite-set hash and grid
+  interpolation state), not the index alone. Each counterfactual batch has a
+  strict diagnostic budget; execution refreshes ROS time and repeats current
+  map/GNSS/certified-Integrity freshness checks after the probe.
+  When an interpolation anomaly is found, the probe records both temporal
+  layers' eight spatial corners, their spatial/temporal/combined weights, PL,
+  support and source identities, full satellite IDs/hash, geometry condition,
+  worst exclusions and explicit failure state in a rate-limited corner CSV.

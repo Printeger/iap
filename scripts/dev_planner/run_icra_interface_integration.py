@@ -156,7 +156,9 @@ def _is_forest_scenario(scenario: str) -> bool:
     return scenario in FOREST_SCENARIOS
 
 
-def forest_scene_contract(scenario: str = FOREST_SCENARIO) -> dict:
+def forest_scene_contract(
+        scenario: str = FOREST_SCENARIO,
+        gnss_arm: str = "baseline") -> dict:
     """Return the frozen, expanded geometry used by the forest preset."""
     if not _is_forest_scenario(scenario):
         raise ValueError(f"unsupported forest scenario: {scenario}")
@@ -217,7 +219,9 @@ def forest_scene_contract(scenario: str = FOREST_SCENARIO) -> dict:
         },
         "gnss": {
             "ephemeris_source": "rinex",
-            "enabled_constellations": ["GPS", "GAL", "GLO"],
+            "enabled_constellations": (
+                ["GPS", "BDS", "GAL", "GLO"]
+                if gnss_arm == "bds" else ["GPS", "GAL", "GLO"]),
             "map_occlusion": True,
             "nlos": True,
             "multipath": True,
@@ -225,6 +229,7 @@ def forest_scene_contract(scenario: str = FOREST_SCENARIO) -> dict:
             "fault_injection": False,
             "measured_epoch_support_radius_m": 0.45 if online else 0.0,
             "measured_epoch_integrity_max_delta_s": 0.25,
+            "clearance_transition_m": 0.4 if online else 0.0,
         },
         "forks": [{
             "fork_index": index,
@@ -243,7 +248,8 @@ def forest_scene_contract(scenario: str = FOREST_SCENARIO) -> dict:
 
 
 def forest_manifest_evidence(
-        run_root: Path, scenario: str = FOREST_SCENARIO) -> dict:
+        run_root: Path, scenario: str = FOREST_SCENARIO,
+        gnss_arm: str = "baseline") -> dict:
     """Bind analyzer assumptions to the effective launch manifest."""
     manifests = sorted((run_root / "exports").glob(
         "**/test_planner_manifest.json"))
@@ -273,7 +279,7 @@ def forest_manifest_evidence(
     p5_limits = (
         actual.get("p5_alert_limits", {})
         if isinstance(actual, dict) else {})
-    expected = forest_scene_contract(scenario)
+    expected = forest_scene_contract(scenario, gnss_arm)
     online = expected["online_mapping"]
     expected_values = {
         "layout_mode": (
@@ -353,6 +359,9 @@ def forest_manifest_evidence(
         "p0.conservative_max_with_gnss": (
             p0.get("conservative_max_with_gnss"),
             expected["p0_conservative_max_with_gnss"]),
+        "p0.gnss_clearance_transition_m": (
+            p0.get("gnss_clearance_transition_m"),
+            expected["gnss"]["clearance_transition_m"]),
         "p0.executor_thread_count": (
             p0.get("executor_thread_count"),
             expected["planner_executor_thread_count"]),
@@ -479,7 +488,8 @@ def lidar_runtime_failures(renderer: dict | None, stats: dict) -> list[str]:
 
 def stage_launch_args(
         stage: str, scenario: str = DEFAULT_SCENARIO,
-        forest_variant: str | None = None) -> dict[str, str]:
+        forest_variant: str | None = None,
+        gnss_arm: str = "baseline") -> dict[str, str]:
     if stage not in STAGES:
         raise ValueError(f"unknown stage: {stage}")
     if scenario not in (DEFAULT_SCENARIO, *FOREST_SCENARIOS):
@@ -488,8 +498,12 @@ def stage_launch_args(
         raise ValueError(f"unsupported forest variant: {forest_variant}")
     if forest_variant is not None and not _is_forest_scenario(scenario):
         raise ValueError("forest variants require the dense forest scenario")
+    if gnss_arm not in ("baseline", "bds"):
+        raise ValueError(f"unsupported GNSS arm: {gnss_arm}")
     launch_args = dict(STAGES[stage].launch_args)
     launch_args["scenario"] = scenario
+    launch_args["gnss_enabled_constellations"] = (
+        "GPS,BDS,GAL,GLO" if gnss_arm == "bds" else "GPS,GAL,GLO")
     if forest_variant == "baseline":
         launch_args.update({
             "p0.enable_risk_grid": "true",
@@ -3101,7 +3115,8 @@ def _run_one_impl(
         owned_processes: dict[str, subprocess.Popen],
         owned_streams: dict[str, TextIO],
         scenario: str = DEFAULT_SCENARIO,
-        forest_variant: str | None = None) -> dict:
+        forest_variant: str | None = None,
+        gnss_arm: str = "baseline") -> dict:
     spec = STAGES[stage]
     duration_s = stage_duration_s(stage, scenario, forest_variant)
     run_root.mkdir(parents=True, exist_ok=False)
@@ -3134,7 +3149,7 @@ def _run_one_impl(
         _json_write(run_root / "summary.json", summary)
         return summary
 
-    launch_args = stage_launch_args(stage, scenario, forest_variant)
+    launch_args = stage_launch_args(stage, scenario, forest_variant, gnss_arm)
     if shutdown_variant == "baseline":
         launch_args.update({
             "experiment": "baseline_fused_nominal_off",
@@ -3163,8 +3178,9 @@ def _run_one_impl(
         "stage": stage,
         "scenario": scenario,
         "forest_variant": forest_variant,
+        "gnss_arm": gnss_arm,
         "forest_scene": (
-            forest_scene_contract(scenario)
+            forest_scene_contract(scenario, gnss_arm)
             if _is_forest_scenario(scenario) else None),
         "shutdown_variant": shutdown_variant,
         "argv": ["bash", "-lc", shell_command],
@@ -3249,7 +3265,7 @@ def _run_one_impl(
                if key not in ("result", "failures")})
     forest_manifest = None
     if _is_forest_scenario(scenario) and shutdown_variant is None:
-        forest_manifest = forest_manifest_evidence(run_root, scenario)
+        forest_manifest = forest_manifest_evidence(run_root, scenario, gnss_arm)
         if forest_manifest["failures"]:
             summary = _result(
                 [*summary["failures"], *forest_manifest["failures"]],
@@ -3279,7 +3295,7 @@ def _run_one_impl(
         "scenario": scenario,
         "forest_variant": forest_variant,
         "forest_scene": (
-            forest_scene_contract(scenario)
+            forest_scene_contract(scenario, gnss_arm)
             if _is_forest_scenario(scenario) else None),
         "forest_effective_manifest": forest_manifest,
         "lidar_renderer": lidar_renderer,
@@ -3309,14 +3325,15 @@ def _run_one(
         stage: str, run_root: Path, install_root: Path,
         start_rviz: bool = False, shutdown_variant: str | None = None,
         scenario: str = DEFAULT_SCENARIO,
-        forest_variant: str | None = None) -> dict:
+        forest_variant: str | None = None,
+        gnss_arm: str = "baseline") -> dict:
     owned_processes: dict[str, subprocess.Popen] = {}
     owned_streams: dict[str, TextIO] = {}
     started = time.monotonic()
     try:
         return _run_one_impl(
             stage, run_root, install_root, start_rviz, shutdown_variant,
-            owned_processes, owned_streams, scenario, forest_variant)
+            owned_processes, owned_streams, scenario, forest_variant, gnss_arm)
     except KeyboardInterrupt:
         _emit(f"INTERRUPT stage={stage} cleanup=starting")
         process_status = {
@@ -3348,6 +3365,7 @@ def _run_one(
             stage=stage,
             scenario=scenario,
             forest_variant=forest_variant,
+            gnss_arm=gnss_arm,
             shutdown_variant=shutdown_variant,
             launch_exit_code=process_status["launch"]["exit_code"],
             capture_exit_code=process_status["capture"]["exit_code"],
@@ -3448,6 +3466,7 @@ def _run_main(args: argparse.Namespace) -> int:
         stages = (requested,)
     scenario = getattr(args, "scenario", DEFAULT_SCENARIO)
     forest_ab = bool(getattr(args, "forest_ab", False))
+    gnss_arm = getattr(args, "gnss_arm", "baseline")
     results_root = args.results_root.resolve()
     session = _session_root(results_root)
     session.mkdir(parents=True, exist_ok=False)
@@ -3460,8 +3479,9 @@ def _run_main(args: argparse.Namespace) -> int:
         "stage_order": list(stages),
         "scenario": scenario,
         "forest_ab": forest_ab,
+        "gnss_arm": gnss_arm,
         "forest_scene": (
-            forest_scene_contract(scenario)
+            forest_scene_contract(scenario, gnss_arm)
             if _is_forest_scenario(scenario) else None),
         "repetitions": args.repetitions,
         "runs": [],
@@ -3518,12 +3538,14 @@ def _run_main(args: argparse.Namespace) -> int:
                         start_rviz=rviz_enabled,
                         shutdown_variant=shutdown_variant,
                         scenario=scenario,
-                        forest_variant=forest_variant)
+                        forest_variant=forest_variant,
+                        gnss_arm=gnss_arm)
                     session_summary["runs"].append({
                         "stage": stage,
                         "repetition": repetition,
                         "variant": variant,
                         "scenario": scenario,
+                        "gnss_arm": gnss_arm,
                         "path": str(run_root),
                         "result": summary["result"],
                         "failures": summary["failures"],
@@ -3583,6 +3605,9 @@ def main() -> int:
     mode.add_argument("--stage", choices=STAGE_CHOICES, default="full")
     mode.add_argument("--through", choices=STAGE_ORDER)
     parser.add_argument("--repetitions", type=int, default=3)
+    parser.add_argument(
+        "--gnss-arm", choices=("baseline", "bds"), default="baseline",
+        help="development A/B constellation arm; does not change formal defaults")
     parser.add_argument("--results-root", type=Path,
                         default=DEFAULT_RESULTS_ROOT)
     parser.add_argument("--install-root", type=Path,

@@ -29,7 +29,6 @@
 #include <vector>
 
 namespace {
-
 class ConstantProvider final : public iap::RiskPredictionProvider {
  public:
   explicit ConstantProvider(double value) : value_(value) {}
@@ -174,16 +173,79 @@ TEST(P4TerminalStopProductionTest,
 TEST(P4GenerationProbeTest, ClassifiesIndependentAndMixedChanges)
 {
   using ego_planner::P4GenerationChangeClass;
-  EXPECT_EQ(ego_planner::classifyP4GenerationProbe(4, 4, 4, 4, 4, 4),
+  const auto boundary = [](const int index) {
+      ego_planner::P4GenerationBoundarySignature out;
+      out.index = index;
+      return out;
+    };
+  EXPECT_EQ(ego_planner::classifyP4GenerationProbe(
+                boundary(4), boundary(4), boundary(4), boundary(4),
+                boundary(4), boundary(4)),
             P4GenerationChangeClass::STABLE);
-  EXPECT_EQ(ego_planner::classifyP4GenerationProbe(4, 7, 4, 7, 4, 7),
+  EXPECT_EQ(ego_planner::classifyP4GenerationProbe(
+                boundary(4), boundary(7), boundary(4), boundary(7),
+                boundary(4), boundary(7)),
             P4GenerationChangeClass::MAP_CONTENT_OR_SUPPORT);
-  EXPECT_EQ(ego_planner::classifyP4GenerationProbe(4, 4, 2, 2, 4, 2),
+  EXPECT_EQ(ego_planner::classifyP4GenerationProbe(
+                boundary(4), boundary(4), boundary(2), boundary(2),
+                boundary(4), boundary(2)),
             P4GenerationChangeClass::GNSS_EPOCH_OR_SATELLITE_SET);
-  EXPECT_EQ(ego_planner::classifyP4GenerationProbe(4, 4, 4, 4, 3, 5),
+  EXPECT_EQ(ego_planner::classifyP4GenerationProbe(
+                boundary(4), boundary(4), boundary(4), boundary(4),
+                boundary(3), boundary(5)),
             P4GenerationChangeClass::RISK_GRID_INTERPOLATION);
-  EXPECT_EQ(ego_planner::classifyP4GenerationProbe(4, 7, 2, 6, 4, 6),
+  EXPECT_EQ(ego_planner::classifyP4GenerationProbe(
+                boundary(4), boundary(7), boundary(2), boundary(6),
+                boundary(4), boundary(6)),
             P4GenerationChangeClass::MIXED);
+}
+
+TEST(P4GenerationProbeTest, DetectsStateAndSatelliteChangesAtSameIndex)
+{
+  using ego_planner::P4GenerationChangeClass;
+  ego_planner::P4GenerationBoundarySignature safe;
+  safe.index = 3;
+  ego_planner::P4GenerationBoundarySignature unknown = safe;
+  unknown.safety_state = iap::ForwardRiskSafetyState::UNKNOWN;
+  unknown.ranking_state = iap::ForwardRiskRankingState::INCOMPLETE;
+  unknown.failure_reason = iap::ForwardRiskFailureReason::OCCUPANCY_UNKNOWN;
+  unknown.reason = "occupancy_unknown";
+  EXPECT_EQ(ego_planner::classifyP4GenerationProbe(
+                safe, unknown, safe, unknown, safe, unknown),
+            P4GenerationChangeClass::MAP_CONTENT_OR_SUPPORT);
+
+  ego_planner::P4GenerationBoundarySignature new_satellites = safe;
+  new_satellites.satellite_set_hash = 42;
+  EXPECT_EQ(ego_planner::classifyP4GenerationProbe(
+                safe, safe, new_satellites, new_satellites,
+                safe, new_satellites),
+            P4GenerationChangeClass::GNSS_EPOCH_OR_SATELLITE_SET);
+
+  ego_planner::P4GenerationBoundarySignature invalid_grid = safe;
+  invalid_grid.interpolation_status =
+      iap::RiskGridInterpolationStatus::INVALID_SUPPORT;
+  invalid_grid.reason = "support_invalid";
+  EXPECT_EQ(ego_planner::classifyP4GenerationProbe(
+                safe, safe, safe, safe, invalid_grid, invalid_grid),
+            P4GenerationChangeClass::RISK_GRID_INTERPOLATION);
+}
+
+TEST(P4GenerationProbeTest, UnknownAndIncompleteAreFirstNonSafeBoundaries)
+{
+  iap::ForwardRiskBatchResult batch;
+  batch.points.resize(3);
+  batch.points[0].safety_state = iap::ForwardRiskSafetyState::SAFE;
+  batch.points[0].ranking_state = iap::ForwardRiskRankingState::COMPARABLE;
+  batch.points[0].failure_reason = iap::ForwardRiskFailureReason::NONE;
+  batch.points[1].safety_state = iap::ForwardRiskSafetyState::UNKNOWN;
+  batch.points[1].ranking_state = iap::ForwardRiskRankingState::INCOMPLETE;
+  batch.points[1].failure_reason =
+      iap::ForwardRiskFailureReason::OCCUPANCY_UNKNOWN;
+  EXPECT_EQ(ego_planner::firstP4NonSafeIndex(batch), 1);
+
+  batch.points[1] = batch.points[0];
+  batch.points[2] = batch.points[0];
+  EXPECT_EQ(ego_planner::firstP4NonSafeIndex(batch), -1);
 }
 
 TEST(P4TerminalStopProductionTest,
@@ -377,6 +439,33 @@ std::shared_ptr<const iap::RiskGridSnapshot> makeRuntimeUnsafeSnapshot() {
   EXPECT_TRUE(grid.refreshFromProvider(
       Eigen::Vector3d::Zero(), 10.3, provider, &reason)) << reason;
   return grid.acquireSnapshot();
+}
+
+std::function<iap::ForwardRiskBatchResult(
+    const iap::ForwardRiskBatchRequest&)> directRiskCallback(
+        const double safety_ratio) {
+  return [safety_ratio](const iap::ForwardRiskBatchRequest& request) {
+      iap::ForwardRiskBatchResult out;
+      out.complete = true;
+      out.combined_snapshot_identity = request.combined_snapshot_identity;
+      out.points.resize(request.points.size());
+      for (auto& point : out.points) {
+        point.safety_ratio = safety_ratio;
+        point.prediction.fused.hpl = request.hal * safety_ratio;
+        point.prediction.fused.vpl = request.val * safety_ratio;
+        point.safety_state = safety_ratio < 1.0
+            ? iap::ForwardRiskSafetyState::SAFE
+            : iap::ForwardRiskSafetyState::UNSAFE;
+        point.ranking_state = iap::ForwardRiskRankingState::COMPARABLE;
+        point.failure_reason = safety_ratio < 1.0
+            ? iap::ForwardRiskFailureReason::NONE
+            : iap::ForwardRiskFailureReason::SAFETY_LIMIT_EXCEEDED;
+        point.gnss_supported = true;
+        point.lidar_supported = true;
+        point.fim_supported = true;
+      }
+      return out;
+    };
 }
 
 Eigen::MatrixXd p4Seed() {
@@ -583,7 +672,8 @@ TEST(P4ForwardTerminalLineageTest,
   manager.setP4VerticalSliceOptimizerForTest(std::move(optimizer), map);
   // Deliberately make the planning base earlier than the eventual command
   // start. Final risk checks must use the latter.
-  manager.setPlanningRiskContextForTest(snapshot, 9.75);
+  manager.setPlanningRiskContextForTest(
+      snapshot, 9.75, nullptr, directRiskCallback(0.5));
   manager.setLatestRiskSnapshotForTest(snapshot);
   manager.setP4ForwardDecisionForTest(makeForwardDecision(
       snapshot, manager.planningRiskContext().planning_attempt_id));
@@ -687,6 +777,62 @@ TEST(P4ForwardTerminalLineageTest,
             row.at("reason") ==
                 "committed_trajectory_tracking_error_exceeded";
       }));
+}
+
+TEST(P4ForwardTerminalLineageTest,
+     FinalAuthorizationUsesIdentityBoundDirectSamplesOfActualBspline) {
+  const auto snapshot = makeP4SelectionSnapshot();
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureNoCollision(map.get());
+  const auto debug_path = p4LineageTestPath("forward_direct_reject.csv");
+  std::filesystem::remove(std::filesystem::path(
+      debug_path.string() + ".forward_lineage.csv"));
+  auto optimizer = makeP4Optimizer(map, snapshot, debug_path.string(), 1);
+
+  std::vector<iap::ForwardRiskBatchRequest> requests;
+  const auto unsafe_direct = [&requests](
+      const iap::ForwardRiskBatchRequest& request) {
+      requests.push_back(request);
+      return directRiskCallback(1.25)(request);
+    };
+  ego_planner::EGOPlannerManager manager;
+  manager.setP4VerticalSliceOptimizerForTest(std::move(optimizer), map);
+  manager.setPlanningRiskContextForTest(
+      snapshot, 9.75, nullptr, unsafe_direct);
+  manager.setP4ForwardDecisionForTest(makeForwardDecision(
+      snapshot, manager.planningRiskContext().planning_attempt_id));
+  auto stopped = ego_planner::UniformBspline(
+      p4StoppedControlPoints(), 3, 0.5);
+  const auto terminal = ego_planner::imposeP4TerminalStop(
+      &stopped, terminalStartState(stopped), 20.0, 100.0, 0.0);
+  ASSERT_TRUE(terminal.success) << terminal.reason;
+  manager.local_data_.position_traj_ = stopped;
+  manager.local_data_.traj_id_ = 41;
+  manager.local_data_.start_time_ = rclcpp::Time(10, 0, RCL_ROS_TIME);
+
+  EXPECT_FALSE(manager.recordP4VerticalSliceLineage(
+      "final_bspline_before_p5", 10.0));
+  ASSERT_EQ(requests.size(), 1u);
+  const auto& request = requests.front();
+  ASSERT_GE(request.points.size(), 2u);
+  EXPECT_NE(request.combined_snapshot_identity.find("trajectory_id=41"),
+            std::string::npos);
+  EXPECT_NE(request.combined_snapshot_identity.find("control_points="),
+            std::string::npos);
+  EXPECT_NE(request.combined_snapshot_identity.find("knots="),
+            std::string::npos);
+  EXPECT_NE(request.combined_snapshot_identity.find("lattice="),
+            std::string::npos);
+  EXPECT_TRUE(request.points.back().position_map.isApprox(
+      stopped.evaluateDeBoorT(stopped.getTimeSum()), 1.0e-12));
+  EXPECT_NEAR(request.points.back().query_time_s,
+              10.0 + stopped.getTimeSum(), 1.0e-12);
+  for (std::size_t index = 1; index < request.points.size(); ++index)
+    EXPECT_LE(request.points[index].query_time_s -
+                  request.points[index - 1].query_time_s,
+              0.2 + 1.0e-12);
+  EXPECT_EQ(manager.lastP4ForwardDecision().geometry_commit.reason,
+            "optimized_bspline_direct_risk_unsafe");
 }
 
 TEST(P4ForwardTerminalLineageTest,
@@ -797,7 +943,8 @@ TEST(P4ForwardTerminalLineageTest,
 
   ego_planner::EGOPlannerManager manager;
   manager.setP4VerticalSliceOptimizerForTest(std::move(optimizer), map);
-  manager.setPlanningRiskContextForTest(snapshot, 9.75);
+  manager.setPlanningRiskContextForTest(
+      snapshot, 9.75, nullptr, directRiskCallback(0.5));
   manager.setLatestRiskSnapshotForTest(snapshot);
   auto decision = makeForwardDecision(
       snapshot, manager.planningRiskContext().planning_attempt_id);
@@ -894,6 +1041,14 @@ TEST(P4ForwardTerminalLineageTest,
   const auto unsafe_snapshot = makeRuntimeUnsafeSnapshot();
   ASSERT_GT(unsafe_snapshot->generation_id(), certificate.snapshot_identity.risk_generation);
   manager.setLatestRiskSnapshotForTest(unsafe_snapshot);
+  const auto grid_spike_rechecked =
+      manager.validateCommittedP4TrajectoryExecution(
+      during_execution_s, commanded_position);
+  EXPECT_TRUE(grid_spike_rechecked.allowed) << grid_spike_rechecked.reason;
+  EXPECT_FALSE(grid_spike_rechecked.known_future_risk_unsafe);
+
+  manager.setPlanningRiskContextForTest(
+      unsafe_snapshot, 10.3, nullptr, directRiskCallback(1.25));
   const auto risk_revoke = manager.validateCommittedP4TrajectoryExecution(
       during_execution_s, commanded_position);
   EXPECT_FALSE(risk_revoke.allowed);

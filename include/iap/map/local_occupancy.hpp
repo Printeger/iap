@@ -58,6 +58,9 @@ namespace iap {
  */
 class LocalOccupancyGrid {
  public:
+  static constexpr double kMaxClearanceTransitionM = 5.0;
+  static constexpr int kMaxClearanceTransitionRadiusVoxels = 64;
+  static constexpr int kMaxClearanceDenseAxisCells = 2048;
   enum class EvictionPolicy {
     DISTANCE,
     AGE,
@@ -70,6 +73,8 @@ class LocalOccupancyGrid {
                                       ///< world origin of voxel key (0,0,0)
     int    max_voxels  = 200'000;    ///< maximum occupied voxels kept
     int    n_kappa_steps = 20;       ///< samples for occupancy_ratio()
+    double clearance_transition_m = 0.0;
+                                      ///< smooth occupied-surface transition [m]
     bool   enable_eviction = false;  ///< preserve legacy full-map behavior when false
     double local_radius_m = 25.0;    ///< rolling local radius around UAV/query center [m]
     double max_age_s = 5.0;          ///< maximum voxel age before stale eviction [s]
@@ -131,6 +136,16 @@ class LocalOccupancyGrid {
                          const Eigen::Vector3d& dir_unit,
                          double L) const;
 
+  /// Mean continuous proximity to occupied voxel surfaces along a ray.
+  /// Returns zero when the configured transition width is disabled.
+  double clearance_proximity_ratio(const Eigen::Vector3d& origin,
+                                   const Eigen::Vector3d& dir_unit,
+                                   double L) const;
+
+  /// Continuous, transition-width-truncated distance to the nearest occupied
+  /// AABB retained by the local clearance field [m].
+  double clearance_to_occupied(const Eigen::Vector3d& p_world) const;
+
   /// @brief Return whether a world-frame point falls in an occupied voxel.
   bool occupied_at(const Eigen::Vector3d& p_world) const;
 
@@ -162,9 +177,20 @@ class LocalOccupancyGrid {
                     double stamp_s);
   std::size_t evict_to_capacity(const Eigen::Vector3d& center_world,
                                 std::size_t target_size);
+  std::size_t evict_around_impl(const Eigen::Vector3d& center_world,
+                                double now_s);
+  void rebuild_clearance_field();
 
   Params params_;
   std::unordered_map<VoxelKey, VoxelRecord> voxels_;
+  // The live forest map is spatially bounded, so a dense field stores the
+  // truncated distance at lattice sample points. Trilinear lookup makes the
+  // transition continuous across voxel and nearest-obstacle boundaries. A
+  // Pathological, widely separated input uses bounded query-time local lookup
+  // instead of allocating an unbounded sparse distance field.
+  VoxelKey clearance_field_min_{0, 0, 0};
+  Eigen::Vector3i clearance_field_dims_ = Eigen::Vector3i::Zero();
+  std::vector<float> clearance_field_dense_;
   Diagnostics diagnostics_;
   std::uint64_t next_sequence_ = 0;
 };

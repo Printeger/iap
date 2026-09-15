@@ -398,6 +398,7 @@ GnssAdvisoryResult GnssAdvisoryPredictor::query_unanchored(
     auto out = fallback(visibility.n_unknown > 0
                             ? "too_few_observed_los_sats"
                             : "too_few_sats");
+    out.geometry_status = GnssGeometryStatus::TOO_FEW_SATELLITES;
     out.n_visible = visibility.n_vis;
     out.n_unknown_support = satellite_mask == nullptr ? visibility.n_unknown : 0;
     out.n_known_support = satellite_mask == nullptr
@@ -413,6 +414,8 @@ GnssAdvisoryResult GnssAdvisoryPredictor::query_unanchored(
   const GnssGeometryPlResult pl = geometry_predictor_.predict(geom);
   if (!pl.valid) {
     auto out = fallback("singular_geometry");
+    out.geometry_status = pl.status;
+    out.degenerate_satellite_ids = pl.degenerate_satellite_ids;
     out.n_visible = visibility.n_vis;
     out.n_unknown_support = satellite_mask == nullptr ? visibility.n_unknown : 0;
     out.n_known_support = satellite_mask == nullptr
@@ -429,6 +432,7 @@ GnssAdvisoryResult GnssAdvisoryPredictor::query_unanchored(
   GnssAdvisoryResult out;
   out.available = true;
   out.valid = true;
+  out.geometry_status = GnssGeometryStatus::VALID;
   out.fallback = false;
   out.fallback_reason.clear();
   out.hpl = pl.HPL;

@@ -8,6 +8,17 @@
 
 namespace iap {
 
+enum class GnssGeometryStatus {
+  NOT_EVALUATED = 0,
+  VALID,
+  TOO_FEW_SATELLITES,
+  FULL_GEOMETRY_DEGENERATE,
+  SUBSET_DEGENERATE,
+  NUMERICAL_FAILURE,
+};
+
+const char* gnssGeometryStatusName(GnssGeometryStatus status);
+
 struct GnssGeometrySat {
   double elevation = 0.0;
   double azimuth   = 0.0;
@@ -31,13 +42,14 @@ struct GnssGeometryPlPredictorParams {
 
 struct GnssGeometryPlResult {
   bool   valid       = false;
-  double HPL         = 1e9;
-  double VPL         = 1e9;
-  double PL_E        = 1e9;
-  double PL_N        = 1e9;
-  double PL_U        = 1e9;
-  double pl_ff       = 1e9;
-  double pl_ff_V     = 1e9;
+  GnssGeometryStatus status = GnssGeometryStatus::NOT_EVALUATED;
+  double HPL         = std::numeric_limits<double>::quiet_NaN();
+  double VPL         = std::numeric_limits<double>::quiet_NaN();
+  double PL_E        = std::numeric_limits<double>::quiet_NaN();
+  double PL_N        = std::numeric_limits<double>::quiet_NaN();
+  double PL_U        = std::numeric_limits<double>::quiet_NaN();
+  double pl_ff       = std::numeric_limits<double>::quiet_NaN();
+  double pl_ff_V     = std::numeric_limits<double>::quiet_NaN();
   double sigma_ff_E  = 0.0;
   double sigma_ff_N  = 0.0;
   double sigma_ff_U  = 0.0;
@@ -47,6 +59,7 @@ struct GnssGeometryPlResult {
   int    worst_hyp   = -1;
   int    worst_hyp_h = -1;
   int    worst_hyp_v = -1;
+  std::vector<int> degenerate_satellite_ids;
   double weighted_normal_condition =
       std::numeric_limits<double>::quiet_NaN();
   Eigen::Matrix4d S0 = Eigen::Matrix4d::Identity();

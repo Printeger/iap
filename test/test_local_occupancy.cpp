@@ -5,6 +5,7 @@
 #include <iap/map/local_occupancy.hpp>
 
 #include <vector>
+#include <stdexcept>
 
 namespace {
 
@@ -82,6 +83,20 @@ TEST(LocalOccupancyGridTest, QueryStillWorksAfterEviction) {
   EXPECT_GT(grid.occupancy_ratio(origin, dir, 2.0), 0.0);
 }
 
+TEST(LocalOccupancyGridTest, StandaloneEvictionRebuildsClearanceField) {
+  auto params = rolling_params();
+  params.max_voxels = 2;
+  params.local_radius_m = 1.0;
+  params.clearance_transition_m = 0.4;
+  iap::LocalOccupancyGrid grid(params);
+  grid.insert_points({p(0.5)}, p(0.5), 1.0);
+  EXPECT_DOUBLE_EQ(grid.clearance_to_occupied(p(0.5)), 0.0);
+
+  EXPECT_EQ(grid.evict_around(p(10.0), 2.0), 1u);
+  EXPECT_EQ(grid.size(), 0u);
+  EXPECT_DOUBLE_EQ(grid.clearance_to_occupied(p(0.5)), 0.4);
+}
+
 TEST(LocalOccupancyGridTest, DisabledEvictionPreservesLegacyCapacityGuard) {
   iap::LocalOccupancyGrid::Params params;
   params.voxel_size = 1.0;
@@ -145,4 +160,108 @@ TEST(LocalOccupancyGridTest,
   EXPECT_TRUE(grid.ray_occluded(ray_origin, Eigen::Vector3d::UnitX(), 2.0));
   EXPECT_GT(grid.occupancy_ratio(ray_origin, Eigen::Vector3d::UnitX(), 2.0),
             0.0);
+}
+
+TEST(LocalOccupancyGridTest, ClearanceTransitionIsContinuousAtVoxelSurface) {
+  iap::LocalOccupancyGrid::Params params;
+  params.voxel_size = 1.0;
+  params.max_voxels = 1;
+  params.n_kappa_steps = 1;
+  params.clearance_transition_m = 0.4;
+  iap::LocalOccupancyGrid grid(params);
+  grid.insert_points({Eigen::Vector3d(0.5, 0.5, 0.5)});
+
+  const double inside = grid.clearance_to_occupied(
+      Eigen::Vector3d(0.999, 0.5, 0.5));
+  const double surface = grid.clearance_to_occupied(
+      Eigen::Vector3d(1.0, 0.5, 0.5));
+  const double outside = grid.clearance_to_occupied(
+      Eigen::Vector3d(1.001, 0.5, 0.5));
+  const double farther = grid.clearance_to_occupied(
+      Eigen::Vector3d(1.2, 0.5, 0.5));
+  EXPECT_DOUBLE_EQ(inside, 0.0);
+  EXPECT_DOUBLE_EQ(surface, 0.0);
+  EXPECT_LT(std::abs(outside - inside), 0.01);
+  EXPECT_GT(farther, outside);
+  EXPECT_LT(farther, 0.4);
+  EXPECT_DOUBLE_EQ(grid.clearance_to_occupied(
+                       Eigen::Vector3d(2.0, 0.5, 0.5)), 0.4);
+}
+
+TEST(LocalOccupancyGridTest, ClearanceProximityIsContinuousAcrossOccupancy) {
+  iap::LocalOccupancyGrid::Params params;
+  params.voxel_size = 1.0;
+  params.max_voxels = 1;
+  params.n_kappa_steps = 1;
+  params.clearance_transition_m = 0.4;
+  iap::LocalOccupancyGrid grid(params);
+  grid.insert_points({Eigen::Vector3d(0.5, 0.5, 0.5)});
+
+  const double inside = grid.clearance_proximity_ratio(
+      Eigen::Vector3d(0.998, 0.5, 0.5), Eigen::Vector3d::UnitX(), 0.002);
+  const double outside = grid.clearance_proximity_ratio(
+      Eigen::Vector3d(1.0, 0.5, 0.5), Eigen::Vector3d::UnitX(), 0.002);
+  EXPECT_DOUBLE_EQ(inside, 1.0);
+  EXPECT_GT(outside, 0.999);
+  EXPECT_LT(std::abs(outside - inside), 1.0e-3);
+}
+
+TEST(LocalOccupancyGridTest, ClearanceProximityDefaultsOff) {
+  iap::LocalOccupancyGrid::Params params;
+  params.voxel_size = 1.0;
+  params.max_voxels = 1;
+  params.clearance_transition_m = 0.0;
+  iap::LocalOccupancyGrid grid(params);
+  grid.insert_points({Eigen::Vector3d(0.5, 0.5, 0.5)});
+  EXPECT_DOUBLE_EQ(grid.clearance_proximity_ratio(
+                       Eigen::Vector3d::Zero(), Eigen::Vector3d::UnitX(), 1.0),
+                   0.0);
+}
+
+TEST(LocalOccupancyGridTest, ClearanceStaysContinuousAcrossDenseVoxelCells) {
+  iap::LocalOccupancyGrid::Params params;
+  params.voxel_size = 0.1;
+  params.max_voxels = 8;
+  params.clearance_transition_m = 0.4;
+  iap::LocalOccupancyGrid grid(params);
+  grid.insert_points({Eigen::Vector3d(0.05, 0.05, 0.05),
+                      Eigen::Vector3d(0.95, 0.05, 0.05)});
+
+  double previous = grid.clearance_to_occupied(
+      Eigen::Vector3d(-0.5, 0.05, 0.05));
+  for (int index = 1; index <= 2000; ++index) {
+    const double x = -0.5 + 0.001 * static_cast<double>(index);
+    const double clearance = grid.clearance_to_occupied(
+        Eigen::Vector3d(x, 0.05, 0.05));
+    EXPECT_LE(std::abs(clearance - previous), 0.00101) << "x=" << x;
+    previous = clearance;
+  }
+}
+
+TEST(LocalOccupancyGridTest,
+     WidelySeparatedVoxelsUseConstantTimeConservativeClearanceFallback) {
+  iap::LocalOccupancyGrid::Params params;
+  params.voxel_size = 0.2;
+  params.max_voxels = 2;
+  params.clearance_transition_m = 0.4;
+  iap::LocalOccupancyGrid grid(params);
+  grid.insert_points({Eigen::Vector3d(0.1, 0.1, 0.1),
+                      Eigen::Vector3d(100000.1, 0.1, 0.1)});
+
+  EXPECT_DOUBLE_EQ(grid.clearance_to_occupied(
+                       Eigen::Vector3d(0.2, 0.1, 0.1)), 0.0);
+  EXPECT_DOUBLE_EQ(grid.clearance_to_occupied(
+                       Eigen::Vector3d(10.0, 0.1, 0.1)), 0.0);
+}
+
+TEST(LocalOccupancyGridTest, RejectsUnboundedClearanceGeometry) {
+  iap::LocalOccupancyGrid::Params params;
+  params.voxel_size = 0.01;
+  params.clearance_transition_m = 1.0;
+  EXPECT_THROW(iap::LocalOccupancyGrid grid(params), std::invalid_argument);
+
+  params.voxel_size = 1.0;
+  params.clearance_transition_m =
+      iap::LocalOccupancyGrid::kMaxClearanceTransitionM + 0.1;
+  EXPECT_THROW(iap::LocalOccupancyGrid grid(params), std::invalid_argument);
 }

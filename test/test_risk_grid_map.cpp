@@ -64,6 +64,66 @@ class AffineProvider final : public iap::RiskPredictionProvider {
   }
 };
 
+class TopologyProvider final : public iap::RiskPredictionProvider {
+ public:
+  bool degenerate_positive_x = false;
+  bool topology_changes_with_horizon = false;
+  bool satellite_changes_positive_x = true;
+  bool support_changes_positive_x = false;
+  bool source_changes_positive_x = false;
+  bool prior_source_changes_positive_x = false;
+  bool omit_topology_positive_x = false;
+
+  bool batchQuery(const std::vector<iap::RiskPredictionQuery>& queries,
+                  std::vector<iap::RiskPredictionResult>* results) override {
+    if (results == nullptr) return false;
+    results->clear();
+    for (const auto& query : queries) {
+      iap::RiskPredictionResult result;
+      result.available = true;
+      result.valid = true;
+      result.stale = false;
+      result.hpl_pred = query.position_w.x() > 0.0 ? 60000.0 : 2.0;
+      result.vpl_pred = result.hpl_pred;
+      result.source_flags = iap::PREDICTOR_RESULT_GNSS_VALID |
+                            iap::PREDICTOR_RESULT_GNSS_USED |
+          (source_changes_positive_x && query.position_w.x() > 0.0
+               ? iap::PREDICTOR_RESULT_LIDAR_USED : 0u) |
+          (prior_source_changes_positive_x && query.position_w.x() > 0.0
+               ? iap::PREDICTOR_RESULT_PRIOR_VALID : 0u);
+      result.gnss_geometry_status =
+          degenerate_positive_x && query.position_w.x() > 0.0
+              ? iap::GnssGeometryStatus::SUBSET_DEGENERATE
+              : iap::GnssGeometryStatus::VALID;
+      result.gnss_support_authority =
+          support_changes_positive_x && query.position_w.x() > 0.0
+              ? iap::LocalMapSupportAuthority::STRICT_OBSERVATION
+              : iap::LocalMapSupportAuthority::TRUSTED_LOCAL_MAP;
+      result.gnss_support_status =
+          support_changes_positive_x && query.position_w.x() > 0.0
+              ? iap::LocalMapSupportStatus::OBSERVATION_INCOMPLETE
+              : iap::LocalMapSupportStatus::MODEL_COMPLETE;
+      const bool alternate_topology =
+          (satellite_changes_positive_x && query.position_w.x() > 0.0) ||
+          (topology_changes_with_horizon && query.horizon_s > 0.5);
+      result.gnss_used_satellite_ids = alternate_topology
+          ? std::vector<int>{1, 2, 3, 5}
+          : std::vector<int>{1, 2, 3, 4};
+      result.gnss_local_satellite_set_hash =
+          alternate_topology ? 0x1235u : 0x1234u;
+      if (omit_topology_positive_x && query.position_w.x() > 0.0) {
+        result.gnss_geometry_status = iap::GnssGeometryStatus::NOT_EVALUATED;
+        result.gnss_used_satellite_ids.clear();
+        result.gnss_local_satellite_set_hash = 0u;
+      }
+      result.gnss_weighted_geometry_condition = 42.0;
+      result.reason = "ok";
+      results->push_back(std::move(result));
+    }
+    return true;
+  }
+};
+
 class FimRatioProvider final : public iap::RiskPredictionProvider {
  public:
   double fim_ratio = std::numeric_limits<double>::quiet_NaN();
@@ -467,6 +527,12 @@ TEST(RiskGridMapTest, CanonicalSourceHashBindsTrustedMapSupportIdentity) {
   next_gnss_epoch.gnss_epoch_identity = 92;
   EXPECT_NE(iap::canonicalRiskGridSourceIdentityHash(next_gnss_epoch),
             baseline_hash);
+
+  auto next_algorithm = baseline;
+  next_algorithm.predictor_algorithm_identity =
+      "forward_risk_v2;clearance_transition_m=0.4";
+  EXPECT_NE(iap::canonicalRiskGridSourceIdentityHash(next_algorithm),
+            baseline_hash);
 }
 
 TEST(RiskGridMapTest, FixedAlertLimitPolicyRejectsNumericOverrides) {
@@ -834,6 +900,145 @@ TEST(RiskGridMapTest, QueryCostAndPredictedPLAreSemanticallySeparate) {
   EXPECT_NEAR(pl.vpl_pred, 0.25 * expected_hpl, 1.0e-9);
   EXPECT_TRUE(pl.available);
   EXPECT_TRUE(pl.valid);
+}
+
+TEST(RiskGridMapTest, MixedSatelliteTopologyRequiresDirectRecheckAndTracesCorners) {
+  iap::RiskGridMap grid(base_params());
+  TopologyProvider provider;
+  ASSERT_TRUE(grid.refreshFromProvider(Eigen::Vector3d::Zero(), 10.0,
+                                       provider));
+  const auto snapshot = grid.acquireSnapshot();
+  ASSERT_NE(snapshot, nullptr);
+
+  iap::PredictedPLSample pl;
+  iap::PredictedPLQueryTrace trace;
+  EXPECT_FALSE(snapshot->queryPredictedPL(
+      Eigen::Vector3d::Zero(), 10.5, &pl,
+      std::numeric_limits<double>::quiet_NaN(), false, &trace));
+  EXPECT_EQ(pl.interpolation_status,
+            iap::RiskGridInterpolationStatus::DIRECT_RECHECK_REQUIRED);
+  EXPECT_EQ(pl.reason, "risk_grid_topology_mismatch");
+  ASSERT_EQ(trace.corners.size(), 16u);
+  double combined_weight = 0.0;
+  bool saw_left_set = false;
+  bool saw_right_set = false;
+  for (const auto& corner : trace.corners) {
+    combined_weight += corner.combined_weight;
+    EXPECT_TRUE(corner.spatial_weight >= 0.0);
+    EXPECT_TRUE(corner.temporal_weight > 0.0);
+    EXPECT_EQ(corner.gnss_used_satellite_ids.size(), 4u);
+    saw_left_set = saw_left_set ||
+        corner.gnss_local_satellite_set_hash == 0x1234u;
+    saw_right_set = saw_right_set ||
+        corner.gnss_local_satellite_set_hash == 0x1235u;
+  }
+  EXPECT_NEAR(combined_weight, 1.0, 1.0e-12);
+  EXPECT_TRUE(saw_left_set);
+  EXPECT_TRUE(saw_right_set);
+}
+
+TEST(RiskGridMapTest, DegenerateGeometryNeverContributesHugeInterpolatedPL) {
+  iap::RiskGridMap grid(base_params());
+  TopologyProvider provider;
+  provider.degenerate_positive_x = true;
+  ASSERT_TRUE(grid.refreshFromProvider(Eigen::Vector3d::Zero(), 10.0,
+                                       provider));
+  const auto snapshot = grid.acquireSnapshot();
+  ASSERT_NE(snapshot, nullptr);
+
+  iap::PredictedPLSample pl;
+  iap::PredictedPLQueryTrace trace;
+  EXPECT_FALSE(snapshot->queryPredictedPL(
+      Eigen::Vector3d::Zero(), 10.0, &pl,
+      std::numeric_limits<double>::quiet_NaN(), false, &trace));
+  EXPECT_EQ(pl.interpolation_status,
+            iap::RiskGridInterpolationStatus::GEOMETRY_DEGENERATE);
+  EXPECT_FALSE(std::isfinite(pl.hpl_pred));
+  EXPECT_FALSE(std::isfinite(pl.vpl_pred));
+}
+
+TEST(RiskGridMapTest, SupportOrPredictionSourceTopologyRequiresDirectRecheck) {
+  for (const bool support_change : {false, true}) {
+    iap::RiskGridMap grid(base_params());
+    TopologyProvider provider;
+    provider.satellite_changes_positive_x = false;
+    provider.support_changes_positive_x = support_change;
+    provider.source_changes_positive_x = !support_change;
+    ASSERT_TRUE(grid.refreshFromProvider(Eigen::Vector3d::Zero(), 10.0,
+                                         provider));
+    const auto snapshot = grid.acquireSnapshot();
+    ASSERT_NE(snapshot, nullptr);
+    iap::PredictedPLSample pl;
+    EXPECT_FALSE(snapshot->queryPredictedPL(
+        Eigen::Vector3d::Zero(), 10.5, &pl));
+    EXPECT_EQ(pl.interpolation_status,
+              iap::RiskGridInterpolationStatus::DIRECT_RECHECK_REQUIRED);
+  }
+}
+
+TEST(RiskGridMapTest, PriorSourceOrMissingGnssTopologyRequiresDirectRecheck) {
+  for (const bool missing_topology : {false, true}) {
+    iap::RiskGridMap grid(base_params());
+    TopologyProvider provider;
+    provider.satellite_changes_positive_x = false;
+    provider.prior_source_changes_positive_x = !missing_topology;
+    provider.omit_topology_positive_x = missing_topology;
+    ASSERT_TRUE(grid.refreshFromProvider(Eigen::Vector3d::Zero(), 10.0,
+                                         provider));
+    const auto snapshot = grid.acquireSnapshot();
+    ASSERT_NE(snapshot, nullptr);
+    iap::PredictedPLSample pl;
+    EXPECT_FALSE(snapshot->queryPredictedPL(
+        Eigen::Vector3d::Zero(), 10.5, &pl));
+    EXPECT_EQ(pl.interpolation_status,
+              iap::RiskGridInterpolationStatus::DIRECT_RECHECK_REQUIRED);
+  }
+}
+
+TEST(RiskGridMapTest, ZeroWeightTopologyDifferenceDoesNotForceDirectRecheck) {
+  iap::RiskGridMap grid(base_params());
+  TopologyProvider provider;
+  ASSERT_TRUE(grid.refreshFromProvider(Eigen::Vector3d::Zero(), 10.0,
+                                       provider));
+  const auto snapshot = grid.acquireSnapshot();
+  ASSERT_NE(snapshot, nullptr);
+  const Eigen::Vector3d exact_voxel_center =
+      snapshot->indexToPos(Eigen::Vector3i(1, 1, 1));
+  iap::PredictedPLSample pl;
+  iap::PredictedPLQueryTrace trace;
+  ASSERT_TRUE(snapshot->queryPredictedPL(
+      exact_voxel_center, 10.0, &pl,
+      std::numeric_limits<double>::quiet_NaN(), false, &trace)) << pl.reason;
+  EXPECT_EQ(pl.interpolation_status,
+            iap::RiskGridInterpolationStatus::INTERPOLATED);
+  EXPECT_TRUE(std::any_of(trace.corners.begin(), trace.corners.end(),
+                          [](const auto& corner) {
+                            return corner.combined_weight == 0.0 &&
+                                corner.gnss_local_satellite_set_hash ==
+                                    0x1235u;
+                          }));
+}
+
+TEST(RiskGridMapTest, TemporalTopologyChangeRequiresDirectRecheck) {
+  iap::RiskGridMap grid(base_params());
+  TopologyProvider provider;
+  provider.topology_changes_with_horizon = true;
+  ASSERT_TRUE(grid.refreshFromProvider(Eigen::Vector3d(-1.0, 0.0, 0.0),
+                                       10.0, provider));
+  const auto snapshot = grid.acquireSnapshot();
+  ASSERT_NE(snapshot, nullptr);
+
+  iap::PredictedPLSample pl;
+  iap::PredictedPLQueryTrace trace;
+  EXPECT_FALSE(snapshot->queryPredictedPL(
+      Eigen::Vector3d(-1.0, 0.0, 0.0), 10.5, &pl,
+      std::numeric_limits<double>::quiet_NaN(), false, &trace));
+  EXPECT_EQ(pl.interpolation_status,
+            iap::RiskGridInterpolationStatus::DIRECT_RECHECK_REQUIRED);
+  EXPECT_EQ(pl.reason, "risk_grid_temporal_topology_mismatch");
+  ASSERT_EQ(trace.corners.size(), 16u);
+  EXPECT_NEAR(trace.corners.front().temporal_weight, 0.5, 1.0e-12);
+  EXPECT_NEAR(trace.corners.back().temporal_weight, 0.5, 1.0e-12);
 }
 
 TEST(RiskGridMapTest, SnapshotVoxelAccessorExposesReadOnlyLayerData) {

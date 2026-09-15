@@ -527,7 +527,9 @@ P5RuntimeIntegrityGate::P5RuntimeIntegrityGate(rclcpp::Node::SharedPtr node,
                                                bool create_ros_interfaces)
     : node_(std::move(node)),
       config_(std::move(config)),
-      pred_alert_limit_provider_(config_.pred_alert_limit) {
+      pred_alert_limit_provider_(config_.pred_alert_limit),
+      allow_grid_risk_for_tests_(
+          config_.test_only_allow_grid_risk_authority) {
   config_.horizon_s = std::max(0.0, config_.horizon_s);
   config_.sample_dt_s = std::max(0.01, config_.sample_dt_s);
   config_.current_stale_to_replan_s =
@@ -636,14 +638,16 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateRuntime(
     LocalTrajData& local_data,
     const std::shared_ptr<const iap::RiskGridSnapshot>& snapshot,
     double now_s,
-    double emergency_time_s) {
+    double emergency_time_s,
+    const P4DirectTrajectoryRiskEvidence* direct_risk) {
   if (!config_.enable_runtime_gate) {
     P5GateStatus status;
     status.reason = P5GateReason::DISABLED;
     return status;
   }
-  P5GateStatus status = evaluate(local_data, snapshot,
-                                 EvalContext{false, now_s, emergency_time_s});
+  P5GateStatus status = evaluate(
+      local_data, snapshot,
+      EvalContext{false, now_s, emergency_time_s, direct_risk});
   status = applyDebounce(status, now_s);
   publishStatus(status, "runtime");
   return status;
@@ -653,15 +657,17 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateFinal(
     LocalTrajData& local_data,
     const std::shared_ptr<const iap::RiskGridSnapshot>& snapshot,
     double now_s,
-    double emergency_time_s) {
+    double emergency_time_s,
+    const P4DirectTrajectoryRiskEvidence* direct_risk) {
   if (!config_.enable_final_gate) {
     resetFinalGateFailureState();
     P5GateStatus status;
     status.reason = P5GateReason::DISABLED;
     return status;
   }
-  P5GateStatus status = evaluate(local_data, snapshot,
-                                 EvalContext{true, now_s, emergency_time_s});
+  P5GateStatus status = evaluate(
+      local_data, snapshot,
+      EvalContext{true, now_s, emergency_time_s, direct_risk});
   status = applyFinalGateBudget(status, now_s);
   status.final_evaluation_stamp_s = now_s;
   status.final_candidate_rejected =
@@ -864,6 +870,9 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateFutureGate(
   double t_cur = context.now_s - trajectory_start_time_s;
   t_cur = std::clamp(t_cur, 0.0, duration);
   const double t_end = std::min(duration, t_cur + config_.horizon_s);
+  // This value controls only the legacy fixture/query visualization lattice.
+  // Production direct evidence is sampled by P4 at <= 0.2 s and carries its
+  // own exact time lattice.
   const double dt = std::max(0.01, config_.sample_dt_s);
   const double time_remaining = std::max(0.0, duration - t_cur);
   const std::string sample_source =
@@ -904,22 +913,143 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateFutureGate(
     emitted_trajectory_timing_failure = true;
   }
 
-  for (double t = t_cur;
-       !emitted_trajectory_timing_failure && t <= t_end + 1.0e-9;
-       t += dt) {
-    const double tau = std::max(0.0, t - t_cur);
-    const Eigen::Vector3d p = local_data.position_traj_.evaluateDeBoorT(t);
+  struct FutureSample {
+    double trajectory_time_s = 0.0;
+    double tau_s = 0.0;
+    Eigen::Vector3d position = Eigen::Vector3d::Zero();
+    const iap::ForwardRiskPointResult* direct = nullptr;
+  };
+  std::vector<FutureSample> future_samples;
+  const auto* direct_evidence = context.direct_risk;
+  const auto& source_identity = snapshot->sourceIdentity();
+  const auto control_points_hash = p4ControlPointHash(
+      local_data.position_traj_.getControlPoint());
+  const auto knot_vector_hash = p4KnotVectorHash(
+      local_data.position_traj_.getKnot());
+  bool direct_curve_matches = direct_evidence &&
+      direct_evidence->positions.size() ==
+          direct_evidence->relative_times.size();
+  if (direct_curve_matches) {
+    for (std::size_t index = 0;
+         index < direct_evidence->positions.size(); ++index) {
+      const double sample_time = direct_evidence->relative_times[index];
+      if (!finite(sample_time) || sample_time < -1.0e-9 ||
+          sample_time > duration + 1.0e-9 ||
+          !direct_evidence->positions[index].allFinite() ||
+          !direct_evidence->positions[index].isApprox(
+              local_data.position_traj_.evaluateDeBoorT(
+                  std::clamp(sample_time, 0.0, duration)), 1.0e-8)) {
+        direct_curve_matches = false;
+        break;
+      }
+    }
+  }
+  const bool direct_evidence_valid = direct_evidence && snapshot &&
+      direct_evidence->complete &&
+      direct_evidence->risk_snapshot.get() == snapshot.get() &&
+      direct_evidence->trajectory_id == local_data.traj_id_ &&
+      direct_evidence->trajectory_start_ns == trajectory_start_time_ns &&
+      direct_evidence->risk_generation == snapshot->generation_id() &&
+      direct_evidence->occupancy_generation ==
+          source_identity.occupancy_generation &&
+      direct_evidence->gnss_epoch_identity ==
+          source_identity.gnss_epoch_identity &&
+      !direct_evidence->request_identity.empty() &&
+      direct_evidence->control_points_hash == control_points_hash &&
+      direct_evidence->knot_vector_hash == knot_vector_hash &&
+      direct_evidence->sample_lattice_hash == p4RiskQueryLatticeHash(
+          direct_evidence->positions, direct_evidence->relative_times) &&
+      direct_curve_matches &&
+      direct_evidence->positions.size() ==
+          direct_evidence->relative_times.size() &&
+      direct_evidence->positions.size() == direct_evidence->points.size();
+  if (direct_evidence_valid && !emitted_trajectory_timing_failure) {
+    for (std::size_t index = 0; index < direct_evidence->points.size(); ++index) {
+      const double t = direct_evidence->relative_times[index];
+      if (t + 1.0e-9 < t_cur || t > t_end + 1.0e-9) {
+        continue;
+      }
+      future_samples.push_back(FutureSample{
+          t, std::max(0.0, t - t_cur), direct_evidence->positions[index],
+          &direct_evidence->points[index]});
+    }
+  } else {
+    for (double t = t_cur;
+         !emitted_trajectory_timing_failure && t <= t_end + 1.0e-9;
+         t += dt) {
+      future_samples.push_back(FutureSample{
+          t, std::max(0.0, t - t_cur),
+          local_data.position_traj_.evaluateDeBoorT(t), nullptr});
+    }
+    if (!future_samples.empty() &&
+        future_samples.back().trajectory_time_s < t_end - 1.0e-9) {
+      future_samples.push_back(FutureSample{
+          t_end, std::max(0.0, t_end - t_cur),
+          local_data.position_traj_.evaluateDeBoorT(t_end), nullptr});
+    }
+  }
+
+  for (std::size_t sample_index = 0;
+       sample_index < future_samples.size(); ++sample_index) {
+    const auto& future = future_samples[sample_index];
+    const double tau = future.tau_s;
+    const double actual_query_time_s =
+        trajectory_start_time_s + future.trajectory_time_s;
+    const Eigen::Vector3d& p = future.position;
     SafetyVizTrajectorySample viz_sample;
     fill_timing(&viz_sample);
     viz_sample.position = p;
     viz_sample.tau_s = tau;
+    iap::PredictedPLSample grid_pl;
+    const bool grid_pl_ok = snapshot && snapshot->queryPredictedPL(
+        p, actual_query_time_s, &grid_pl, tau, context.final_gate);
     iap::PredictedPLSample pl;
-    const bool pl_ok =
-        snapshot->queryPredictedPL(p, context.now_s + tau, &pl, tau,
-                                   context.final_gate);
+    bool pl_ok = false;
+    if (grid_pl.fixture_match) {
+      // P5-4/P5-7 are explicit deterministic test overlays. Preserve their
+      // existing horizon/final-candidate semantics after switching ordinary
+      // production authority away from RiskGrid interpolation.
+      pl = grid_pl;
+      pl_ok = grid_pl_ok;
+    } else if (direct_evidence_valid && future.direct) {
+      const auto& direct = *future.direct;
+      const bool evaluated =
+          direct.ranking_state == iap::ForwardRiskRankingState::COMPARABLE &&
+          (direct.failure_reason == iap::ForwardRiskFailureReason::NONE ||
+           direct.failure_reason ==
+               iap::ForwardRiskFailureReason::SAFETY_LIMIT_EXCEEDED) &&
+          direct.safety_state != iap::ForwardRiskSafetyState::UNKNOWN &&
+          direct.gnss_supported && direct.lidar_supported &&
+          direct.fim_supported && finite(direct.prediction.fused.hpl) &&
+          finite(direct.prediction.fused.vpl);
+      pl.available = evaluated;
+      pl.valid = evaluated;
+      pl.stale = direct.failure_reason ==
+          iap::ForwardRiskFailureReason::STALE;
+      pl.query_time_s = actual_query_time_s;
+      pl.query_tau_s = std::max(0.0, pl.query_time_s - snapshot->stamp_s());
+      pl.hpl_pred = direct.prediction.fused.hpl;
+      pl.vpl_pred = direct.prediction.fused.vpl;
+      pl.generation_id = snapshot->generation_id();
+      pl.reason = iap::forwardRiskFailureReasonName(direct.failure_reason);
+      pl_ok = evaluated;
+    } else if (allow_grid_risk_for_tests_) {
+      // Unit tests predating the live direct provider retain deterministic
+      // fixture construction. Production instances never take this branch.
+      pl = grid_pl;
+      pl_ok = grid_pl_ok;
+    } else {
+      pl.query_time_s = actual_query_time_s;
+      pl.query_tau_s = snapshot
+          ? std::max(0.0, actual_query_time_s - snapshot->stamp_s()) : tau;
+      pl.generation_id = snapshot ? snapshot->generation_id() : 0u;
+      pl.reason = direct_evidence
+          ? "direct_risk_evidence_incomplete"
+          : "direct_risk_evidence_unavailable";
+    }
     const PredAlertLimitSample al = pred_alert_limit_provider_.evaluate(
-        p, context.now_s + tau, current.hal, current.val);
-    if (!pl_ok && isFutureCoverageLimit(pl)) {
+        p, actual_query_time_s, current.hal, current.val);
+    if (allow_grid_risk_for_tests_ && !pl_ok && isFutureCoverageLimit(pl)) {
       continue;
     }
     status.sample_count++;

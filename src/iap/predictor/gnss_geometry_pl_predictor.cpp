@@ -10,6 +10,19 @@
 
 namespace iap {
 
+const char* gnssGeometryStatusName(const GnssGeometryStatus status) {
+  switch (status) {
+    case GnssGeometryStatus::NOT_EVALUATED: return "NOT_EVALUATED";
+    case GnssGeometryStatus::VALID: return "VALID";
+    case GnssGeometryStatus::TOO_FEW_SATELLITES: return "TOO_FEW_SATELLITES";
+    case GnssGeometryStatus::FULL_GEOMETRY_DEGENERATE:
+      return "FULL_GEOMETRY_DEGENERATE";
+    case GnssGeometryStatus::SUBSET_DEGENERATE: return "SUBSET_DEGENERATE";
+    case GnssGeometryStatus::NUMERICAL_FAILURE: return "NUMERICAL_FAILURE";
+  }
+  return "NOT_EVALUATED";
+}
+
 namespace {
 
 inline double Q_inv(double p) {
@@ -28,7 +41,10 @@ inline bool factorize(const Eigen::Matrix4d& A, double eps,
   if (out->info() != Eigen::Success) return false;
   const auto& D = out->vectorD();
   for (int i = 0; i < 4; ++i) {
-    if (std::abs(D(i)) < eps) return false;
+    // G'WG is positive semidefinite. A non-positive pivot therefore means
+    // degenerate/numerically invalid geometry, not an invertible covariance
+    // that can safely be clamped after the solve.
+    if (!std::isfinite(D(i)) || D(i) <= eps) return false;
   }
   return true;
 }
@@ -46,6 +62,7 @@ GnssGeometryPlResult GnssGeometryPlPredictor::predict(
 
   if (N < params_.min_sats) {
     out.valid = false;
+    out.status = GnssGeometryStatus::TOO_FEW_SATELLITES;
     return out;
   }
 
@@ -57,6 +74,11 @@ GnssGeometryPlResult GnssGeometryPlPredictor::predict(
   for (int i = 0; i < N; ++i) {
     const double el = visible_sats[i].elevation;
     const double az = visible_sats[i].azimuth;
+    if (!std::isfinite(el) || !std::isfinite(az) ||
+        !std::isfinite(visible_sats[i].pr_sigma)) {
+      out.status = GnssGeometryStatus::NUMERICAL_FAILURE;
+      return out;
+    }
     G(i, 0) = std::cos(el) * std::sin(az);
     G(i, 1) = std::cos(el) * std::cos(az);
     G(i, 2) = std::sin(el);
@@ -75,11 +97,17 @@ GnssGeometryPlResult GnssGeometryPlPredictor::predict(
   Eigen::LDLT<Eigen::Matrix4d> ldlt0;
   if (!factorize(A0, params_.eps_degen, &ldlt0)) {
     out.valid = false;
+    out.status = GnssGeometryStatus::FULL_GEOMETRY_DEGENERATE;
     return out;
   }
 
   out.S0 = ldlt0.solve(Eigen::Matrix4d::Identity());
+  if (!out.S0.allFinite()) {
+    out.status = GnssGeometryStatus::NUMERICAL_FAILURE;
+    return out;
+  }
   out.valid = true;
+  out.status = GnssGeometryStatus::VALID;
   Eigen::SelfAdjointEigenSolver<Eigen::Matrix4d> eigensolver(A0);
   if (eigensolver.info() == Eigen::Success) {
     const double smallest = eigensolver.eigenvalues().minCoeff();
@@ -135,16 +163,18 @@ GnssGeometryPlResult GnssGeometryPlPredictor::predict(
     Eigen::Matrix4d Ak = A0 - row_outer[k];
     Eigen::LDLT<Eigen::Matrix4d> ldltk;
     if (!factorize(Ak, params_.eps_degen, &ldltk)) {
-      best_PL_E = std::max(best_PL_E, 1e9);
-      best_PL_N = std::max(best_PL_N, 1e9);
-      best_PL_U = std::max(best_PL_U, 1e9);
-      worst_hyp_e = visible_sats[k].sat_id;
-      worst_hyp_n = visible_sats[k].sat_id;
-      worst_hyp_u = visible_sats[k].sat_id;
+      out.valid = false;
+      out.status = GnssGeometryStatus::SUBSET_DEGENERATE;
+      out.degenerate_satellite_ids.push_back(visible_sats[k].sat_id);
       continue;
     }
 
     const Eigen::Matrix4d Sk = ldltk.solve(Eigen::Matrix4d::Identity());
+    if (!Sk.allFinite()) {
+      out.valid = false;
+      out.status = GnssGeometryStatus::NUMERICAL_FAILURE;
+      return out;
+    }
     const double sigma_ss_E = std::sqrt(std::max(0.0, out.S0(0, 0) - Sk(0, 0)));
     const double sigma_ss_N = std::sqrt(std::max(0.0, out.S0(1, 1) - Sk(1, 1)));
     const double sigma_ss_U = std::sqrt(std::max(0.0, out.S0(2, 2) - Sk(2, 2)));
@@ -170,6 +200,10 @@ GnssGeometryPlResult GnssGeometryPlPredictor::predict(
     }
   }
 
+  if (!out.valid) {
+    return out;
+  }
+
   out.PL_E = std::max(K_ff_eff * out.sigma_ff_E, best_PL_E);
   out.PL_N = std::max(K_ff_eff * out.sigma_ff_N, best_PL_N);
   out.PL_U = std::max(K_ff_eff * out.sigma_ff_U, best_PL_U);
@@ -179,6 +213,14 @@ GnssGeometryPlResult GnssGeometryPlPredictor::predict(
   out.worst_hyp_h = out.PL_E >= out.PL_N ? worst_hyp_e : worst_hyp_n;
   out.worst_hyp_v = worst_hyp_u;
   out.worst_hyp = out.worst_hyp_h;
+  if (!std::isfinite(out.HPL) || !std::isfinite(out.VPL) ||
+      !std::isfinite(out.PL_E) || !std::isfinite(out.PL_N) ||
+      !std::isfinite(out.PL_U)) {
+    out.valid = false;
+    out.status = GnssGeometryStatus::NUMERICAL_FAILURE;
+    out.HPL = out.VPL = out.PL_E = out.PL_N = out.PL_U =
+        std::numeric_limits<double>::quiet_NaN();
+  }
 
   spdlog::trace("[GnssGeometryPlPredictor] N={} HPL={:.3f} VPL={:.3f}",
                 N, out.HPL, out.VPL);

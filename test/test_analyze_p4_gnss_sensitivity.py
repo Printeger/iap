@@ -87,6 +87,25 @@ class GnssSensitivityTest(unittest.TestCase):
         report = MODULE.analyze_detail_rows(first + second)
         self.assertEqual(
             report["spatial_discrimination"]["satellite_set_change_count"], 1)
+        self.assertEqual(
+            report["spatial_discrimination"][
+                "satellite_set_transition_count"], 1)
+        self.assertEqual(
+            report["spatial_discrimination"]["satellite_set_change_rate"],
+            1.0)
+
+    def test_explicit_degenerate_nonfinite_sample_is_not_over_attributed(self):
+        rows = detail_rows(satellite_count=4)
+        for row in rows:
+            row["candidate_raw_hpl"] = "nan"
+            row["candidate_raw_vpl"] = "nan"
+            row["failure_reason"] = "GNSS_GEOMETRY_DEGENERATE"
+        report = MODULE.analyze_detail_rows(rows)
+        self.assertTrue(report["attribution_valid"])
+        self.assertEqual(report["sample_count"], 0)
+        self.assertEqual(report["unattributed_sample_count"], 1)
+        self.assertEqual(
+            report["unattributed_reasons"]["GNSS_GEOMETRY_DEGENERATE"], 1)
 
 
 if __name__ == "__main__":

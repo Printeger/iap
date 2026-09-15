@@ -102,8 +102,10 @@ def _percentiles(values: list[float]) -> dict:
             "p95": finite[p95_index], "max": finite[-1]}
 
 
-def analyze_detail_rows(rows: list[dict], replay_tolerance_m: float = 1e-8) -> dict:
+def analyze_detail_rows(rows: list[dict], replay_tolerance_m: float = 1e-8,
+                        replay_relative_tolerance: float = 1e-10) -> dict:
     failures = []
+    unattributed_reasons = {}
     deduplicated = {}
     for row in rows:
         key = (*_sample_key(row), row.get("sat_id", ""))
@@ -117,6 +119,16 @@ def analyze_detail_rows(rows: list[dict], replay_tolerance_m: float = 1e-8) -> d
                 "candidate_raw_vpl"}
     for key, group in groups.items():
         used = [row for row in group if str(row.get("used", "0")) == "1"]
+        try:
+            production_h = float(group[0].get("candidate_raw_hpl", "nan"))
+            production_v = float(group[0].get("candidate_raw_vpl", "nan"))
+        except (TypeError, ValueError):
+            failures.append("production_pl_fields_invalid")
+            continue
+        if not math.isfinite(production_h) or not math.isfinite(production_v):
+            reason = group[0].get("failure_reason", "nonfinite_production_pl")
+            unattributed_reasons[reason] = unattributed_reasons.get(reason, 0) + 1
+            continue
         if not used or any(not required.issubset(row) for row in used):
             failures.append("required_satellite_fields_missing")
             continue
@@ -124,14 +136,16 @@ def analyze_detail_rows(rows: list[dict], replay_tolerance_m: float = 1e-8) -> d
             used.sort(key=lambda row: int(row["sat_id"]))
             actual_sigmas = [_finite(row, "sigma_eff_m") for row in used]
             actual = _geometry_pl(used, actual_sigmas)
-            production_h = _finite(group[0], "candidate_raw_hpl")
-            production_v = _finite(group[0], "candidate_raw_vpl")
         except (KeyError, TypeError, ValueError, np.linalg.LinAlgError):
             failures.append("production_replay_input_invalid")
             continue
         replay_error = max(abs(actual["hpl"] - production_h),
                            abs(actual["vpl"] - production_v))
-        if replay_error > replay_tolerance_m:
+        replay_limit = max(
+            replay_tolerance_m,
+            replay_relative_tolerance * max(abs(production_h),
+                                            abs(production_v)))
+        if replay_error > replay_limit:
             failures.append("production_raw_pl_replay_mismatch")
         unit = _geometry_pl(used, [1.0] * len(used))
 
@@ -235,6 +249,8 @@ def analyze_detail_rows(rows: list[dict], replay_tolerance_m: float = 1e-8) -> d
         "schema_version": "p4_gnss_sensitivity_report_v1",
         "attribution_valid": not failures,
         "failures": list(dict.fromkeys(failures)),
+        "unattributed_sample_count": sum(unattributed_reasons.values()),
+        "unattributed_reasons": unattributed_reasons,
         "input_row_count": len(rows),
         "deduplicated_row_count": len(deduplicated),
         "sample_count": len(samples),
@@ -268,7 +284,10 @@ def analyze_detail_rows(rows: list[dict], replay_tolerance_m: float = 1e-8) -> d
         "spatial_discrimination": {
             "within_route_raw_hpl_jump_m": _percentiles(jumps),
             "within_route_raw_hpl_jump_max_m": max(jumps, default=0.0),
+            "satellite_set_transition_count": len(jumps),
             "satellite_set_change_count": int(set_changes),
+            "satellite_set_change_rate": (
+                float(set_changes) / len(jumps) if jumps else None),
             "same_satellite_set_hpl_jump_m": _percentiles(same_set_jumps),
             "changed_satellite_set_hpl_jump_m": _percentiles(
                 changed_set_jumps),

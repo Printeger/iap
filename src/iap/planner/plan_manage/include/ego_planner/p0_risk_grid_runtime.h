@@ -94,6 +94,7 @@ class P0RiskGridRuntime {
         iap::PredictorGnssEpochPolicy::Auto;
     double predictor_gnss_measured_epoch_support_radius_m = 0.0;
     double predictor_gnss_measured_epoch_integrity_max_delta_s = 0.25;
+    double predictor_gnss_clearance_transition_m = 0.0;
     bool predictor_use_current_integrity_prior = true;
     bool predictor_conservative_max_with_gnss = false;
     double predictor_hal_m = 10.0;
@@ -128,10 +129,15 @@ class P0RiskGridRuntime {
       std::unique_ptr<iap::RiskPredictionProvider> provider = nullptr);
 
   bool enabled() const { return config_.enable_risk_grid; }
+  double gnssClearanceTransitionM() const {
+    return config_.predictor_gnss_clearance_transition_m;
+  }
   const iap::RiskGridMap& riskGrid() const { return risk_grid_; }
   iap::RiskGridMap& riskGrid() { return risk_grid_; }
   std::shared_ptr<const iap::RiskGridSnapshot> acquireSnapshot() const;
   std::shared_ptr<const P0PlanningSnapshot> acquirePlanningSnapshot() const;
+  bool gnssEpochFreshAt(double epoch_stamp_s,
+                        double evaluation_time_s) const;
   iap::RiskGridHealth health() const;
   bool refreshOnceForTest();
   void setOccupancyPredicate(iap::RiskGridMap::OccupancyPredicate predicate);

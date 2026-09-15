@@ -10,6 +10,7 @@
 
 #include <iap/msg/integrity_report.hpp>
 #include <iap/planner/risk_grid_map.hpp>
+#include <ego_planner/direct_trajectory_risk_evidence.h>
 #include <rclcpp/rclcpp.hpp>
 #include <std_msgs/msg/string.hpp>
 #include <ego_planner/safety_rviz_publisher.h>
@@ -165,6 +166,9 @@ class P5RuntimeIntegrityGate {
     bool enable_runtime_gate = false;
     bool enable_final_gate = false;
     bool debug_metrics_enable = false;
+    // Test-fixture compatibility only. Production construction leaves this
+    // false so an interpolated RiskGrid value can never become P5 authority.
+    bool test_only_allow_grid_risk_authority = false;
     double horizon_s = 2.0;
     double sample_dt_s = 0.2;
     double current_stale_to_replan_s = 0.5;
@@ -201,13 +205,15 @@ class P5RuntimeIntegrityGate {
       LocalTrajData& local_data,
       const std::shared_ptr<const iap::RiskGridSnapshot>& snapshot,
       double now_s,
-      double emergency_time_s);
+      double emergency_time_s,
+      const P4DirectTrajectoryRiskEvidence* direct_risk = nullptr);
 
   P5GateStatus evaluateFinal(
       LocalTrajData& local_data,
       const std::shared_ptr<const iap::RiskGridSnapshot>& snapshot,
       double now_s,
-      double emergency_time_s);
+      double emergency_time_s,
+      const P4DirectTrajectoryRiskEvidence* direct_risk = nullptr);
 
   void publishFinalAdmission(P5GateStatus status,
                              double publish_authorization_stamp_s);
@@ -240,6 +246,7 @@ class P5RuntimeIntegrityGate {
     bool final_gate = false;
     double now_s = std::numeric_limits<double>::quiet_NaN();
     double emergency_time_s = 1.0;
+    const P4DirectTrajectoryRiskEvidence* direct_risk = nullptr;
   };
 
   void createRosInterfaces();
@@ -272,6 +279,7 @@ class P5RuntimeIntegrityGate {
   rclcpp::Subscription<iap::msg::IntegrityReport>::SharedPtr integrity_sub_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr status_pub_;
   std::shared_ptr<SafetyRvizPublisher> safety_viz_;
+  bool allow_grid_risk_for_tests_ = false;
 
   mutable std::mutex mutex_;
   CurrentIntegrity current_;

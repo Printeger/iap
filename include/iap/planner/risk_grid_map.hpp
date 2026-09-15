@@ -12,6 +12,7 @@
 #include <vector>
 
 #include <iap/map/trusted_local_map_support.hpp>
+#include <iap/predictor/gnss_geometry_pl_predictor.hpp>
 
 namespace iap {
 
@@ -190,6 +191,7 @@ struct RiskGridSourceIdentity {
   // predictor. It changes when pose, validity, extent or model version
   // changes, even if the obstacle points themselves do not.
   std::string local_map_support_identity;
+  std::string predictor_algorithm_identity = "legacy_predictor";
   std::string alert_limit_policy_id = "legacy_unspecified";
 };
 
@@ -234,6 +236,18 @@ struct RiskVoxel {
   bool unknown = true;
   uint32_t source_flags = 0u;
   std::string reason = "not_evaluated";
+  GnssGeometryStatus gnss_geometry_status =
+      GnssGeometryStatus::NOT_EVALUATED;
+  LocalMapSupportAuthority gnss_support_authority =
+      LocalMapSupportAuthority::STRICT_OBSERVATION;
+  LocalMapSupportStatus gnss_support_status =
+      LocalMapSupportStatus::FRAME_INVALID;
+  std::vector<int> gnss_used_satellite_ids;
+  uint64_t gnss_local_satellite_set_hash = 0;
+  double gnss_weighted_geometry_condition =
+      std::numeric_limits<double>::quiet_NaN();
+  int gnss_worst_excluded_sat_h = -1;
+  int gnss_worst_excluded_sat_v = -1;
   std::shared_ptr<const RiskOccupancyDiagnostic> occupancy;
 };
 
@@ -317,6 +331,61 @@ struct RiskCostQueryTrace {
   std::vector<RiskCostQueryCornerTrace> corners;
 };
 
+enum class RiskGridInterpolationStatus {
+  NOT_EVALUATED = 0,
+  INTERPOLATED,
+  DIRECT_RECHECK_REQUIRED,
+  GEOMETRY_DEGENERATE,
+  INVALID_SUPPORT,
+};
+
+const char* riskGridInterpolationStatusName(
+    RiskGridInterpolationStatus status);
+
+struct PredictedPLQueryCornerTrace {
+  int temporal_layer = -1;
+  int horizon_id = -1;
+  double horizon_s = std::numeric_limits<double>::quiet_NaN();
+  double temporal_weight = 0.0;
+  int corner_id = -1;
+  Eigen::Vector3i voxel_index = Eigen::Vector3i::Constant(-1);
+  Eigen::Vector3d voxel_position = Eigen::Vector3d::Constant(
+      std::numeric_limits<double>::quiet_NaN());
+  double spatial_weight = 0.0;
+  double combined_weight = 0.0;
+  double hpl_pred = std::numeric_limits<double>::quiet_NaN();
+  double vpl_pred = std::numeric_limits<double>::quiet_NaN();
+  uint32_t source_flags = 0u;
+  bool valid = false;
+  bool stale = true;
+  bool unknown = true;
+  GnssGeometryStatus gnss_geometry_status =
+      GnssGeometryStatus::NOT_EVALUATED;
+  LocalMapSupportAuthority gnss_support_authority =
+      LocalMapSupportAuthority::STRICT_OBSERVATION;
+  LocalMapSupportStatus gnss_support_status =
+      LocalMapSupportStatus::FRAME_INVALID;
+  std::vector<int> gnss_used_satellite_ids;
+  uint64_t gnss_local_satellite_set_hash = 0;
+  double gnss_weighted_geometry_condition =
+      std::numeric_limits<double>::quiet_NaN();
+  int gnss_worst_excluded_sat_h = -1;
+  int gnss_worst_excluded_sat_v = -1;
+  std::string invalid_reason = "not_evaluated";
+};
+
+struct PredictedPLQueryTrace {
+  Eigen::Vector3d query_point = Eigen::Vector3d::Constant(
+      std::numeric_limits<double>::quiet_NaN());
+  double query_time_s = std::numeric_limits<double>::quiet_NaN();
+  double query_tau_s = std::numeric_limits<double>::quiet_NaN();
+  uint64_t risk_generation_id = 0;
+  RiskGridInterpolationStatus interpolation_status =
+      RiskGridInterpolationStatus::NOT_EVALUATED;
+  std::string reason = "not_evaluated";
+  std::vector<PredictedPLQueryCornerTrace> corners;
+};
+
 struct PredictedPLSample {
   bool available = false;
   bool valid = false;
@@ -330,6 +399,8 @@ struct PredictedPLSample {
   double fixture_expected_vpl = std::numeric_limits<double>::quiet_NaN();
   std::string fixture_expected_reason;
   uint64_t generation_id = 0;
+  RiskGridInterpolationStatus interpolation_status =
+      RiskGridInterpolationStatus::NOT_EVALUATED;
   std::string reason = "not_evaluated";
 };
 
@@ -357,6 +428,18 @@ struct RiskPredictionResult {
   std::string floor_source_h = "none";
   std::string floor_source_v = "none";
   uint32_t source_flags = 0u;
+  GnssGeometryStatus gnss_geometry_status =
+      GnssGeometryStatus::NOT_EVALUATED;
+  LocalMapSupportAuthority gnss_support_authority =
+      LocalMapSupportAuthority::STRICT_OBSERVATION;
+  LocalMapSupportStatus gnss_support_status =
+      LocalMapSupportStatus::FRAME_INVALID;
+  std::vector<int> gnss_used_satellite_ids;
+  uint64_t gnss_local_satellite_set_hash = 0;
+  double gnss_weighted_geometry_condition =
+      std::numeric_limits<double>::quiet_NaN();
+  int gnss_worst_excluded_sat_h = -1;
+  int gnss_worst_excluded_sat_v = -1;
   std::string reason = "not_evaluated";
 };
 
@@ -416,7 +499,8 @@ class RiskGridSnapshot {
                         PredictedPLSample* out,
                         double p5_4_fixture_horizon_s =
                             std::numeric_limits<double>::quiet_NaN(),
-                        bool p5_7_final_candidate = false) const;
+                        bool p5_7_final_candidate = false,
+                        PredictedPLQueryTrace* trace = nullptr) const;
 
   bool voxelAt(int horizon_id,
                const Eigen::Vector3i& id,

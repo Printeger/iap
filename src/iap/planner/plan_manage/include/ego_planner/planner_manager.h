@@ -23,6 +23,7 @@
 #include <rclcpp/rclcpp.hpp>
 #include <traj_utils/planning_visualization.h>
 #include <iap/predictor/predictor_types.hpp>
+#include <ego_planner/direct_trajectory_risk_evidence.h>
 
 namespace ego_planner
 {
@@ -50,15 +51,38 @@ namespace ego_planner
     MIXED,
   };
 
+  struct P4GenerationBoundarySignature
+  {
+    int index = -1;
+    iap::ForwardRiskSafetyState safety_state =
+        iap::ForwardRiskSafetyState::SAFE;
+    iap::ForwardRiskRankingState ranking_state =
+        iap::ForwardRiskRankingState::COMPARABLE;
+    iap::ForwardRiskFailureReason failure_reason =
+        iap::ForwardRiskFailureReason::NONE;
+    uint64_t satellite_set_hash = 0;
+    iap::RiskGridInterpolationStatus interpolation_status =
+        iap::RiskGridInterpolationStatus::NOT_EVALUATED;
+    std::string reason = "none";
+
+    bool operator==(const P4GenerationBoundarySignature &other) const;
+    bool operator!=(const P4GenerationBoundarySignature &other) const
+    {
+      return !(*this == other);
+    }
+  };
+
   P4GenerationChangeClass classifyP4GenerationProbe(
-      int old_map_old_epoch_first_unsafe,
-      int new_map_old_epoch_first_unsafe,
-      int old_map_new_epoch_first_unsafe,
-      int new_map_new_epoch_first_unsafe,
-      int old_grid_first_unsafe,
-      int new_grid_first_unsafe);
+      const P4GenerationBoundarySignature &old_map_old_epoch,
+      const P4GenerationBoundarySignature &new_map_old_epoch,
+      const P4GenerationBoundarySignature &old_map_new_epoch,
+      const P4GenerationBoundarySignature &new_map_new_epoch,
+      const P4GenerationBoundarySignature &old_grid,
+      const P4GenerationBoundarySignature &new_grid);
 
   const char *p4GenerationChangeClassName(P4GenerationChangeClass value);
+
+  int firstP4NonSafeIndex(const iap::ForwardRiskBatchResult &result);
 
   struct P4ExecutionCertificate
   {
@@ -69,6 +93,7 @@ namespace ego_planner
     double execution_deadline_s = 0.0;
     std::string control_points_hash;
     std::string knot_vector_hash;
+    std::string risk_query_lattice_hash;
     Eigen::Vector3d approved_endpoint = Eigen::Vector3d::Constant(
         std::numeric_limits<double>::quiet_NaN());
     double terminal_speed_mps = std::numeric_limits<double>::infinity();
@@ -226,12 +251,19 @@ namespace ego_planner
     void clearPlanningRiskContext();
     const PlanningRiskContext &planningRiskContext() const { return planning_risk_context_; }
     std::shared_ptr<const iap::RiskGridSnapshot> currentPlanningRiskSnapshot() const { return planning_risk_context_.snapshot; }
+    std::shared_ptr<const P0PlanningSnapshot>
+    acquireCurrentP0PlanningSnapshot() const;
+    const P4DirectTrajectoryRiskEvidence& latestP4DirectRiskEvidence() const {
+      return p4_direct_risk_evidence_;
+    }
     double currentPlanningQueryBaseTime() const { return planning_risk_context_.query_base_time_s; }
     uint64_t currentPlanningGenerationId() const { return planning_risk_context_.generation_id; }
     void setPlanningRiskContextForTest(
         std::shared_ptr<const iap::RiskGridSnapshot> snapshot,
         double query_base_time_s,
-        std::shared_ptr<const P0OccupancyEpoch> occupancy_snapshot = nullptr);
+        std::shared_ptr<const P0OccupancyEpoch> occupancy_snapshot = nullptr,
+        std::function<iap::ForwardRiskBatchResult(
+            const iap::ForwardRiskBatchRequest&)> forward_risk_batch = {});
     // P1 candidates are fail-closed against the same immutable snapshot they
     // were optimized with. These methods are intentionally separate from P5.
     bool planningRiskContextFresh(double now_s, std::string *reason = nullptr) const;
@@ -358,6 +390,30 @@ namespace ego_planner
     double p4_max_tracking_error_m_ = 0.75;
     int64_t last_p4_runtime_lineage_start_ns_ = 0;
     std::string last_p4_execution_event_key_;
+    struct P4RuntimeRiskCache
+    {
+      struct Sample
+      {
+        bool complete_safe = false;
+        bool unsafe = false;
+        double safety_ratio = std::numeric_limits<double>::quiet_NaN();
+        double hpl_m = std::numeric_limits<double>::quiet_NaN();
+        double vpl_m = std::numeric_limits<double>::quiet_NaN();
+      };
+      bool valid = false;
+      int trajectory_id = 0;
+      int64_t start_time_ns = 0;
+      uint64_t risk_generation = 0;
+      uint64_t occupancy_generation = 0;
+      uint64_t gnss_epoch_identity = 0;
+      std::string control_points_hash;
+      std::string knot_vector_hash;
+      std::string query_lattice_hash;
+      std::vector<double> relative_times;
+      std::vector<Sample> samples;
+    };
+    P4RuntimeRiskCache p4_runtime_risk_cache_;
+    P4DirectTrajectoryRiskEvidence p4_direct_risk_evidence_;
     bool p4_generation_probe_enable_ = false;
     uint64_t last_p4_generation_probe_risk_generation_ = 0;
     std::shared_ptr<const P0PlanningSnapshot>

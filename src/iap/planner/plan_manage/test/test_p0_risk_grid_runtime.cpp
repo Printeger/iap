@@ -219,6 +219,24 @@ ego_planner::P0RiskGridRuntime::Config enabledConfig() {
   return config;
 }
 
+TEST(P0RiskGridRuntimeFreshnessTest,
+     GnssEpochFreshnessIsReevaluatedAtCurrentEvaluationTime) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_gnss_epoch_current_freshness_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  auto config = enabledConfig();
+  config.gnss_epoch_max_age_s = 0.25;
+  ego_planner::P0RiskGridRuntime runtime(
+      node, config, std::make_unique<FakeProvider>());
+
+  EXPECT_TRUE(runtime.gnssEpochFreshAt(10.0, 10.25));
+  EXPECT_FALSE(runtime.gnssEpochFreshAt(10.0, 10.250001));
+  EXPECT_FALSE(runtime.gnssEpochFreshAt(10.1, 10.0));
+  EXPECT_FALSE(runtime.gnssEpochFreshAt(
+      std::numeric_limits<double>::quiet_NaN(), 10.0));
+}
+
 TEST(P0RiskGridRuntimeGeometryTest,
      OnlineRiskOverlayRequiresExactlyFiveEgoVoxelsPerAxis) {
   iap::PlanningLatticeGeometry geometry;
