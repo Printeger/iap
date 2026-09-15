@@ -65,14 +65,34 @@ For each candidate trajectory τ:
   product; its delay or absence is not execution revocation evidence. A cached
   direct batch is reusable only for the same curve and execution snapshot and
   never replaces current-time freshness checks. The execution snapshot path is
-  single-slot/latest-wins and a dense-grid callback cannot overwrite it. A
+  occupancy-generation-driven, single-slot/latest-wins; its 50 ms timer is
+  only a missed-notification watchdog. Commit callbacks execute outside the
+  occupancy writer lock with lifetime-safe weak ownership; a newer request
+  supersedes any older in-flight build before it can publish. Factory failures
+  are classified and do not terminate the worker. Every attempt records classified
+  capture/build/publication timing, and dense-grid predictor workers yield
+  their current scheduler timeslice while execution work is pending. A
+  dense-grid callback cannot overwrite it. A
   failed background build is reported separately from the retained grid: the
   old generation may guide search only while it is still fresh.
+  Trusted support retains up to 64 original current-frame envelopes within the
+  unchanged one-second hard validity window. Each real B-spline point uses the
+  newest fresh envelope that spatially covers that point, so unrelated stale
+  map regions do not reject a fresh execution corridor and unrelated fresh
+  regions do not validate an expired corridor. This is model support only and
+  never changes ray-observation occupancy labels.
   Formal planner defaults use GPS+BDS+GAL+GLO. New advisory satellites require
   three consecutive epochs before admission, while disappearance, certified
   exclusion and hard occlusion remove them immediately. Execution checks use
   the conservative common usable-satellite core over the remaining short
   curve; an insufficient core is UNKNOWN, never an interpolated PL.
+  A bounded history of four completed execution snapshots is retained only to
+  choose the newest result causal to the current ROS evaluation stamp; the
+  work channel itself remains single-slot/latest-wins and every selected
+  result is freshness-checked again. The registered sparse snapshot also
+  carries the captured current vehicle pose/radius so its physically occupied
+  footprint remains measured free without copying or relabelling the whole
+  dense observation layer.
   Optionally, canopy sigma may use a frozen occupancy-generation clearance
   field to turn distance from an occupied surface into a smooth bounded LOS
   proximity. This leaves hard intersections, support boundaries, elevation
@@ -101,7 +121,11 @@ For each candidate trajectory τ:
   as a terminal-stopped `LIMITED_PREFIX`. Too little safe distance remains a
   normal HOLD, including when current-speed braking exceeds the configured
   maximum prefix progress; a limited prefix is not a full-route risk selection. A
-  geometry-only or risk-incomplete fallback cannot move. During execution the
+  geometry-only or risk-incomplete fallback cannot move. The sub-metre prefix
+  prefers the continuous nominal public approach while that
+  approach remains geometry-common/free, avoiding an unintended half-voxel
+  climb/descent or early branch caused by A* cell centres. The actual stopped
+  B-spline remains independently support/risk checked. During execution the
   latest coherent P0 transaction supplies a newly fresh certified-current
   Integrity check; raw map advisory at the receiver remains predictive, while
   the remaining curve is still checked at its future positions and times.
@@ -112,7 +136,12 @@ For each candidate trajectory τ:
   checked stopping curves at <=0.2 s state anchors. When input data expires,
   execution reaches the nearest future anchor within 0.2 s and publishes the
   selected curve with a new braking certificate/trajectory identity; it never
-  extends the original deadline or passes the approved endpoint. Unsafe direct
+  extends the original deadline or passes the approved endpoint. Before that
+  anchor the certificate remains the original `LIMITED_PREFIX`; a newer fresh
+  execution snapshot may cancel a staleness-triggered schedule only after the
+  original remaining curve passes direct risk, corridor support age,
+  Integrity/GNSS, collision and identity checks. Activated braking and any
+  unsafe, unknown or over-budget result cannot be canceled. Unsafe direct
   risk, current Integrity failure, collision or tracking loss remains
   fail-closed. Ordinary replanning is suspended while that braking certificate
   is active, so worker/generation churn cannot relabel the stopping curve.

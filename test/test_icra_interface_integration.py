@@ -489,6 +489,10 @@ class TestStageContracts(unittest.TestCase):
         self.assertEqual(MODULE.stage_duration_s(
             "full", MODULE.DEFAULT_SCENARIO), 75.0)
 
+    def test_limited_prefix_runtime_includes_terminal_hold_window(self):
+        self.assertEqual(MODULE.stage_duration_s(
+            "limited-prefix", MODULE.FOREST_SCENARIO), 100.0)
+
     def test_live_truth_audit_rejects_planner_world_subscription(self):
         with mock.patch.object(
                 MODULE, "_node_names",
@@ -1643,6 +1647,14 @@ class TestStageAnalyzer(unittest.TestCase):
                         "velocity_xyz": [0.4, 0.0, 0.0],
                         "acceleration_xyz": [0.0, 0.0, 0.0]},
         })
+        for stamp_s in (14.0, 14.4, 14.8):
+            poscmd.append({
+                "receive_steady_s": stamp_s,
+                "payload": {"trajectory_id": 32, "stamp_s": stamp_s,
+                            "position_xyz": [1.0, 0.0, 1.0],
+                            "velocity_xyz": [0.0, 0.0, 0.0],
+                            "acceleration_xyz": [0.0, 0.0, 0.0]},
+            })
         events[-1].update({
             "event": "FAILSAFE_BRAKED_TO_STOP",
             "authority": "LIMITED_PREFIX_BRAKING",
@@ -1664,6 +1676,47 @@ class TestStageAnalyzer(unittest.TestCase):
         self.assertEqual(
             summary["limited_prefix_outcome"],
             "LIMITED_PREFIX_EXECUTED_THEN_FAILSAFE_BRAKED_TO_STOP")
+
+    def test_limited_prefix_rejects_braking_without_sustained_terminal_cmd(self):
+        lineage, bsplines, poscmd, odom, events = \
+            self.limited_prefix_fixture()
+        braking_payload = {
+            "trajectory_id": 32, "start_time_ns": 13_000_000_000,
+            "control_points_xyz": [[0.5, 0.0, 1.0],
+                                   [0.75, 0.0, 1.0],
+                                   [1.0, 0.0, 1.0]],
+            "knots": [-1.0, 0.0, 1.0, 2.0, 3.0],
+        }
+        braking_hash, braking_knot_hash = \
+            MODULE._captured_bspline_hashes(braking_payload)
+        bsplines.append({"receive_steady_s": 13.0,
+                         "payload": braking_payload})
+        poscmd.append({
+            "receive_steady_s": 13.1,
+            "payload": {"trajectory_id": 32, "stamp_s": 13.1,
+                        "position_xyz": [0.55, 0.0, 1.0],
+                        "velocity_xyz": [0.4, 0.0, 0.0],
+                        "acceleration_xyz": [0.0, 0.0, 0.0]},
+        })
+        events[-1].update({
+            "event": "FAILSAFE_BRAKED_TO_STOP",
+            "authority": "LIMITED_PREFIX_BRAKING",
+            "parent_trajectory_id": "31",
+            "parent_trajectory_start_ns": "12000000000",
+            "trajectory_id": "32",
+            "trajectory_start_ns": "13000000000",
+            "control_points_hash": braking_hash,
+            "knot_vector_hash": braking_knot_hash,
+            "allowed": "1", "endpoint_reached": "1",
+            "approved_endpoint_x": "1.0",
+            "approved_endpoint_y": "0.0",
+            "approved_endpoint_z": "1.0",
+            "stamp_s": "14.0",
+        })
+        summary = MODULE.analyze_limited_prefix_records(
+            lineage, bsplines, poscmd, odom, events)
+        self.assertEqual(summary["result"], "FAIL")
+        self.assertFalse(summary["failsafe_braked_to_stop_proven"])
 
     def test_limited_prefix_rejects_slow_direct_execution_check(self):
         lineage, bsplines, poscmd, odom, events = \
@@ -1773,6 +1826,55 @@ class TestStageAnalyzer(unittest.TestCase):
         self.assertEqual(summary["result"], "FAIL")
         self.assertIn("limited_prefix_approved_endpoint_overrun",
                       summary["failures"])
+
+    def test_execution_snapshot_attempt_metrics_separate_recovery_and_gap(self):
+        records = [
+            {"kind": "execution_snapshot_attempt", "payload": {
+                "status": "PUBLISHED", "finish_ros_stamp_s": 10.0,
+                "queue_delay_ms": 4.0, "build_duration_ms": 25.0,
+                "publish_age_s": 0.08, "pending_overwrite_count": 1,
+                "published_execution_snapshot_id": 41,
+                "support_stamp_s": 10.0,
+                "risk_grid_yield_count": 2,
+                "risk_grid_yield_duration_ms": 12.0}},
+            {"kind": "execution_snapshot_attempt", "payload": {
+                "status": "PUBLISHED", "finish_ros_stamp_s": 10.2,
+                "queue_delay_ms": 5.0, "build_duration_ms": 30.0,
+                "publish_age_s": 0.09, "pending_overwrite_count": 1,
+                "risk_grid_yield_count": 3,
+                "risk_grid_yield_duration_ms": 18.0}},
+            {"kind": "occupancy_input", "payload": {"stamp_s": 10.0}},
+            {"kind": "occupancy_input", "payload": {"stamp_s": 10.1}},
+        ]
+        health = [{"payload": {"latency_primary_cause": "NONE"}}]
+        events = [
+            {"event": "FAILSAFE_BRAKING_SCHEDULED",
+             "stamp_s": 10.15,
+             "execution_snapshot_id": 41,
+             "reason": "failsafe_braking_scheduled:runtime_local_map_"
+                       "support_stale_or_invalid"},
+            {"event": "FAILSAFE_BRAKING_SCHEDULED",
+             "stamp_s": 10.15,
+             "reason": "failsafe_braking_scheduled:runtime_corridor_"
+                       "support_stale_or_invalid:EXPIRED"},
+            {"event": "FAILSAFE_BRAKING_SCHEDULED",
+             "stamp_s": 10.15,
+             "reason": "failsafe_braking_scheduled:runtime_corridor_"
+                       "support_stale_or_invalid:OUTSIDE_ENVELOPE"},
+            {"event": "FAILSAFE_BRAKING_CANCELED_RECOVERED"},
+        ]
+        summary = MODULE.analyze_execution_snapshot_attempts(
+            records, health, events)
+        self.assertEqual(summary["attempt_count"], 2)
+        self.assertAlmostEqual(summary["maximum_success_interval_s"], .2)
+        self.assertEqual(summary["false_support_stale_braking_count"], 1)
+        self.assertEqual(summary["local_map_support_stale_braking_count"], 1)
+        self.assertEqual(summary["corridor_support_stale_braking_count"], 1)
+        self.assertEqual(
+            summary["corridor_support_outside_envelope_braking_count"], 1)
+        self.assertEqual(summary["support_stale_braking_count"], 2)
+        self.assertEqual(summary["recovery_cancel_count"], 1)
+        self.assertEqual(summary["risk_grid_yield_count"], 3)
 
     def test_full_rejects_mixed_p5_identity_and_unsafe_runtime(self):
         decision = selected_decision()

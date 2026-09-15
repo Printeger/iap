@@ -3,6 +3,71 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(execution-snapshot-scheduling-and-corridor-support): IAP-RQ-312 /
+  IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 — keep the 1.0 s local-map hard
+  freshness limit while removing scheduler-induced expiry. Complete GridMap
+  occupancy commits now notify an independent C++17 single-slot latest-wins
+  execution-snapshot worker; the 50 ms timer is only a missed-notification
+  watchdog. Every attempt publishes a classified request/capture/build/publish
+  timeline on `/planning/execution_snapshot_attempt`, including source
+  identities/stamps, queue/build latency, publication age and overwrite/yield
+  counters. Dense RiskGrid prediction relinquishes scheduler timeslices at
+  batch boundaries while an execution request is pending, retains the same
+  500 ms discard budget, and
+  reuses the current execution snapshot's frozen occupancy rather than
+  recapturing that generation. Registered-map capture maintains sparse raw
+  occupied addresses, removing the full-lattice occupied-center scan.
+  Commit observers now run only after the occupancy writer lock is released;
+  the planner binds them through weak runtime ownership and unregisters before
+  shutdown. A generation arriving during an older build invalidates that build
+  at the atomic publication boundary, source-callable replacement is
+  synchronized, and worker exceptions become classified attempt failures
+  without terminating or poisoning the worker.
+  Trusted local-map support now retains at most 64 original, un-restamped
+  current-frame envelopes within the same hard window; each actual B-spline
+  sample uses the newest spatially covering envelope at evaluation time and
+  reports corridor observation age without changing `OBSERVED_FREE`.
+  Staleness-triggered LIMITED_PREFIX braking is first scheduled without
+  mutating the committed certificate. Before its <=0.2 s anchor, a newer fresh
+  execution snapshot can cancel the schedule only after the original remaining
+  curve passes direct ForwardRisk, corridor support, current Integrity/GNSS,
+  collision and identity checks; this emits
+  `FAILSAFE_BRAKING_CANCELED_RECOVERED`. Unsafe/unknown/over-budget evidence
+  and already activated braking remain fail-closed. The limited-prefix runner
+  now captures attempt events and reports publication cadence, overwrite,
+  RiskGrid yield, genuine source gaps, false support-stale braking and recovery
+  cancellations. PL/AL formulas, risk weights, P5 and freshness thresholds are
+  unchanged. Runner false-stale attribution now requires the exact execution
+  snapshot cited by the braking event to carry still-fresh support; raw
+  simulator LiDAR arrival alone is no longer treated as proof that the
+  registered-map and occupancy chain advanced. Failsafe-braking acceptance
+  also requires sustained terminal zero-velocity/zero-acceleration commands,
+  not merely one matching command followed by stationary odometry.
+  The completed execution side retains four results solely for causal
+  timestamp selection; this fixes benign next-frame callback overtaking
+  without changing the single pending slot or bypassing current freshness.
+  Registered sparse snapshots now carry the captured vehicle pose/radius so
+  the transaction's true current footprint remains `OBSERVED_FREE`; the dense
+  observed grid and model envelope are not copied or relabelled. LIMITED_PREFIX
+  construction prefers the continuous nominal public approach inside the
+  common free corridor, preventing A* half-voxel vertical offsets from sending
+  a short curve outside the LiDAR envelope. The dedicated smoke window is 100
+  s so the final endpoint has a sustained hold observation.
+  Three independent 100 s BDS live runs of the final concurrency-hardened code
+  published/executed real limited prefixes and proved
+  `LIMITED_PREFIX_EXECUTED_TO_ENDPOINT`, with `1.945--2.304 m` total odometry
+  displacement, zero support-stale/outside-envelope braking, execution
+  snapshot p95 `46.92--49.53 ms`, maximum success interval
+  `0.183--0.207 s`, raw LiDAR maximum interval `0.110--0.197 s`, and planner
+  current-frame maximum interval `0.110--0.193 s`. The atomic latest-wins gate
+  explicitly superseded `62/147/77` older in-flight builds without granting
+  them authority. The remaining performance miss is dense BDS RiskGrid p95
+  `464.44--485.07 ms` versus the `450 ms` target (provider p95
+  `298.93--305.20 ms`); one discarded/non-published refresh callback reached
+  `558.37 ms`, but no over-500-ms grid was published and this search lag did
+  not revoke execution. Timed per-boundary sleeps were rejected after
+  live evidence showed cumulative `55--250 ms` grid inflation; scheduler yield
+  preserves execution priority without that artificial delay.
 - feat(bds-execution-snapshot-limited-prefix-stability): IAP-RQ-312 /
   IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 — make `GPS+BDS+GAL+GLO` the default
   formal/forest constellation set while retaining an explicit baseline arm.

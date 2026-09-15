@@ -115,7 +115,7 @@ STAGES = {
         **{"safety_viz.enable_p4_viz": "true"},
     ),
     "limited-prefix": StageSpec(
-        90.0,
+        100.0,
         start_planner="true",
         planner_enable_p4="true",
         planner_enable_p5_final="false",
@@ -1627,17 +1627,42 @@ def analyze_limited_prefix_records(
             _message_identity(candidate) == braking_identity and
             _captured_bspline_hashes(candidate.get("payload", candidate)) ==
             braking_hashes for candidate in bsplines)
-        braking_command = any(
-            int(command.get("payload", command).get(
-                "trajectory_id", 0) or 0) == braking_identity[0]
-            for command in poscmd)
-        braking_identity_proven = braking_bspline and braking_command
+        braking_commands = []
+        for command in poscmd:
+            payload = command.get("payload", command)
+            try:
+                command_identity = int(payload.get("trajectory_id", 0) or 0)
+                command_stamp = float(payload.get(
+                    "stamp_s", command.get("receive_steady_s", math.nan)))
+            except (TypeError, ValueError):
+                continue
+            if command_identity == braking_identity[0]:
+                braking_commands.append((command_stamp, payload))
+        braking_identity_proven = braking_bspline and bool(braking_commands)
+        terminal_braking_commands = []
+        for command_stamp, payload in braking_commands:
+            position = _xyz_vector(payload, "position_xyz")
+            velocity = _xyz_vector(payload, "velocity_xyz")
+            acceleration = _xyz_vector(payload, "acceleration_xyz")
+            if (command_stamp >= stop_stamp and position is not None and
+                    velocity is not None and acceleration is not None and
+                    _distance(position, stop_position) <= .02 and
+                    math.sqrt(sum(value * value
+                                  for value in velocity)) <= .02 and
+                    math.sqrt(sum(value * value
+                                  for value in acceleration)) <= .05):
+                terminal_braking_commands.append(command_stamp)
+        sustained_terminal_command = (
+            terminal_braking_commands and
+            max(terminal_braking_commands) -
+            min(terminal_braking_commands) >= .8)
         stopped_odom = [stamp for stamp, position, velocity in odom_samples
                         if stamp >= stop_stamp
                         and _distance(position, stop_position) <= .15
                         and math.sqrt(sum(value * value
                                          for value in velocity)) <= .10]
         failsafe_braked = (braking_identity_proven and
+                           sustained_terminal_command and
                            len(stopped_odom) >= 2 and
                            max(stopped_odom) - min(stopped_odom) >= .8 and
                            endpoint_overrun_m <= .10)
@@ -1686,6 +1711,148 @@ def analyze_limited_prefix_records(
         execution_event_count=len(matching_events),
         direct_batch_ms_p95=direct_batch_p95,
         direct_batch_ms_max=max(direct_batch_durations, default=None))
+
+
+def analyze_execution_snapshot_attempts(
+        records: list[dict], health: list[dict],
+        execution_events: list[dict]) -> dict:
+    attempts = [row.get("payload", row) for row in records
+                if row.get("kind") == "execution_snapshot_attempt"]
+    statuses: dict[str, int] = {}
+    for attempt in attempts:
+        status = str(attempt.get("status", "MISSING"))
+        statuses[status] = statuses.get(status, 0) + 1
+    published = [attempt for attempt in attempts
+                 if attempt.get("status") == "PUBLISHED"]
+
+    def finite_values(key: str, rows: list[dict]) -> list[float]:
+        values = []
+        for row in rows:
+            try:
+                value = float(row.get(key, math.nan))
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(value):
+                values.append(value)
+        return values
+
+    def percentile95(values: list[float]) -> float | None:
+        if not values:
+            return None
+        ordered = sorted(values)
+        return ordered[max(0, math.ceil(.95 * len(ordered)) - 1)]
+
+    publish_times = sorted(finite_values("finish_ros_stamp_s", published))
+    successful_gaps = [right - left for left, right in
+                       zip(publish_times, publish_times[1:])]
+    health_payloads = [row.get("payload", row) for row in health]
+    source_gap_count = sum(
+        payload.get("latency_primary_cause") == "SOURCE_DATA_GAP"
+        for payload in health_payloads)
+    recovery_cancel_count = sum(
+        row.get("event") == "FAILSAFE_BRAKING_CANCELED_RECOVERED"
+        for row in execution_events)
+    support_invalid_events = [
+        row for row in execution_events
+        if "support_stale_or_invalid" in str(row.get("reason", ""))
+        and row.get("event") == "FAILSAFE_BRAKING_SCHEDULED"]
+    def braking_trigger(row: dict) -> str:
+        return str(row.get("reason", "")).removeprefix(
+            "failsafe_braking_scheduled:")
+    local_map_stale_events = [
+        row for row in support_invalid_events
+        if braking_trigger(row) ==
+        "runtime_local_map_support_stale_or_invalid"]
+    corridor_invalid_events = [
+        row for row in support_invalid_events
+        if braking_trigger(row).startswith(
+            "runtime_corridor_support_stale_or_invalid")]
+    corridor_stale_events = [
+        row for row in corridor_invalid_events
+        if braking_trigger(row).endswith(":EXPIRED") or
+        braking_trigger(row) ==
+        "runtime_corridor_support_stale_or_invalid"]
+    corridor_outside_events = [
+        row for row in corridor_invalid_events
+        if braking_trigger(row).endswith(":OUTSIDE_ENVELOPE")]
+    support_stale_braking_count = (
+        len(local_map_stale_events) + len(corridor_stale_events))
+    lidar_stamps = sorted(finite_values(
+        "stamp_s", [row.get("payload", row) for row in records
+                    if row.get("kind") == "occupancy_input"]))
+    lidar_gaps = [right - left for left, right in
+                  zip(lidar_stamps, lidar_stamps[1:])]
+    max_lidar_gap_s = max(lidar_gaps, default=None)
+    local_map_stamps = sorted(finite_values(
+        "stamp_s", [row.get("payload", row) for row in records
+                    if row.get("kind") == "planner_local_map_current"]))
+    local_map_gaps = [right - left for left, right in
+                      zip(local_map_stamps, local_map_stamps[1:])]
+    published_by_snapshot_id = {}
+    for attempt in published:
+        try:
+            snapshot_id = int(attempt.get(
+                "published_execution_snapshot_id", 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        if snapshot_id > 0:
+            published_by_snapshot_id[snapshot_id] = attempt
+    false_support_stale_braking_count = 0
+    for event in local_map_stale_events:
+        try:
+            event_stamp = float(event.get("stamp_s", math.nan))
+            snapshot_id = int(event.get("execution_snapshot_id", 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        attempt = published_by_snapshot_id.get(snapshot_id)
+        try:
+            support_stamp = float(attempt.get(
+                "support_stamp_s", math.nan)) if attempt else math.nan
+        except (TypeError, ValueError):
+            support_stamp = math.nan
+        # A raw simulator packet is not proof that GLIM/current-frame and the
+        # occupancy transaction advanced. Call it false-stale only when the
+        # exact execution snapshot cited by the braking event was published
+        # with support that is still within the one-second contract.
+        if (math.isfinite(event_stamp) and math.isfinite(support_stamp) and
+                -1.0e-6 <= event_stamp - support_stamp <= 1.0):
+            false_support_stale_braking_count += 1
+    return {
+        "attempt_count": len(attempts),
+        "status_counts": statuses,
+        "success_ratio": (len(published) / len(attempts)
+                          if attempts else None),
+        "queue_delay_ms_p95": percentile95(
+            finite_values("queue_delay_ms", attempts)),
+        "build_duration_ms_p95": percentile95(
+            finite_values("build_duration_ms", attempts)),
+        "publish_age_s_p95": percentile95(
+            finite_values("publish_age_s", published)),
+        "maximum_success_interval_s": max(successful_gaps, default=None),
+        "pending_overwrite_count": max(
+            [int(value) for value in finite_values(
+                "pending_overwrite_count", attempts)], default=0),
+        "risk_grid_yield_count": max(
+            [int(value) for value in finite_values(
+                "risk_grid_yield_count", attempts)], default=0),
+        "risk_grid_yield_duration_ms": max(
+            finite_values("risk_grid_yield_duration_ms", attempts),
+            default=0.0),
+        "source_data_gap_health_count": source_gap_count,
+        "support_stale_braking_count": support_stale_braking_count,
+        "local_map_support_stale_braking_count": len(
+            local_map_stale_events),
+        "corridor_support_stale_braking_count": len(
+            corridor_stale_events),
+        "corridor_support_outside_envelope_braking_count": len(
+            corridor_outside_events),
+        "false_support_stale_braking_count":
+            false_support_stale_braking_count,
+        "recovery_cancel_count": recovery_cancel_count,
+        "max_lidar_source_interval_s": max_lidar_gap_s,
+        "max_planner_local_map_interval_s": max(
+            local_map_gaps, default=None),
+    }
 
 
 def analyze_stage_records(
@@ -2343,12 +2510,32 @@ def analyze_run(
             [row for row in records if row.get("kind") == "poscmd"],
             [row for row in records if row.get("kind") == "iap_odom"],
             execution_events)
+        execution_snapshot = analyze_execution_snapshot_attempts(
+            records, health, execution_events)
+        snapshot_failures = []
+        if not execution_snapshot["attempt_count"]:
+            snapshot_failures.append("execution_snapshot_attempts_missing")
+        publish_age_p95 = execution_snapshot.get("publish_age_s_p95")
+        if (_finite_number(publish_age_p95) and
+                float(publish_age_p95) >= .150):
+            snapshot_failures.append(
+                "execution_snapshot_publish_age_p95_exceeded")
+        maximum_success_interval = execution_snapshot.get(
+            "maximum_success_interval_s")
+        if (_finite_number(maximum_success_interval) and
+                float(maximum_success_interval) >= .500):
+            snapshot_failures.append(
+                "execution_snapshot_success_interval_exceeded")
+        if execution_snapshot["false_support_stale_braking_count"]:
+            snapshot_failures.append(
+                "false_support_stale_braking_observed")
         return _result(
             [*p0["failures"], *p0_performance_failures,
-             *limited["failures"]],
+             *limited["failures"], *snapshot_failures],
             **{key: value for key, value in limited.items()
                if key not in ("result", "failures")},
             p0=p0,
+            execution_snapshot=execution_snapshot,
             gnss_arm=gnss_arm,
             p0_risk_grid_p95_limit_ms=p0_p95_limit_ms,
             generation_probe_rows=len(_read_csv(
@@ -2752,6 +2939,11 @@ def _capture_main(args: argparse.Namespace) -> int:
             self.create_subscription(
                 String, "/planning/risk_grid_health",
                 lambda message: self.json_record("p0_health", message.data),
+                reliable)
+            self.create_subscription(
+                String, "/planning/execution_snapshot_attempt",
+                lambda message: self.json_record(
+                    "execution_snapshot_attempt", message.data),
                 reliable)
             self.create_subscription(
                 String, "/planning/integrity_gate_status",

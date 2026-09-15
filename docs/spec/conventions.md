@@ -80,7 +80,20 @@
   Repeated identical tuples retain the same execution snapshot ID. A dense grid
   that misses its 500 ms end-to-end budget is discarded without partial
   publication and cannot invalidate a still-fresh execution snapshot. The
-  execution channel is a single-slot latest-wins path evaluated every 50 ms;
+  execution channel is an occupancy-commit-generation-driven single-slot
+  latest-wins worker; a 50 ms timer only detects missed notifications and
+  never performs a second eager map freeze. Map commit observers run after the
+  occupancy writer lock is released and use lifetime-safe weak ownership. If a
+  newer generation arrives while an older request is building, the older
+  result is explicitly superseded before the atomic publication boundary.
+  Replaceable source factories are synchronized and worker exceptions are
+  reported as classified failures without terminating the worker. Every
+  attempt emits a classified
+  request/capture/build/publish record on
+  `/planning/execution_snapshot_attempt`. Dense-grid workers cooperatively
+  relinquish their scheduler timeslice at predictor batch boundaries while an
+  execution request is pending, and reuse the
+  worker's frozen occupancy whenever it is the current generation;
   a later-finishing RiskGrid transaction cannot overwrite its authority.
   RiskGrid health distinguishes the active immutable generation from the last
   build attempt: generation/source races and budget cancellation remain in
@@ -94,6 +107,14 @@
   bypasses current map/GNSS/certified-Integrity freshness, and any generation
   change forces recomputation. RiskGrid remains available as a planning
   heuristic and for diagnostics.
+- Execution publication retains a bounded four-result history, separate from
+  the single pending work slot, solely to select the newest snapshot causal to
+  an execution evaluation timestamp. Each selected result still undergoes the
+  ordinary current-time freshness checks; history is not a persistent safety
+  ticket. Registered sparse execution snapshots preserve the transaction's
+  current-vehicle footprint as true `OBSERVED_FREE` using the captured pose
+  and vehicle radius, without copying the dense observation grid or treating
+  the surrounding model envelope as measured free space.
 - Certified current-Integrity lookup is causal: concurrent callbacks may retain
   a bounded history, but an execution check selects the newest sample at or
   before its evaluation time. One microsecond is the maximum timestamp
@@ -197,6 +218,15 @@
   violation, an unsafe direct batch or an unavailable suffix remains an
   emergency fail-closed condition. This terminal state is reported separately
   from normal arrival at the originally approved endpoint.
+- Scheduling a stopping curve does not mutate the committed trajectory or its
+  `LIMITED_PREFIX` certificate. Until the selected anchor (at most 0.2 s), a
+  newer fresh execution snapshot triggers a complete direct-risk, corridor
+  support-age, certified-Integrity/GNSS, collision and identity recheck of the
+  original remaining B-spline. A wholly safe result cancels the schedule as
+  `FAILSAFE_BRAKING_CANCELED_RECOVERED` without changing trajectory ID, start,
+  endpoint or deadline. Unsafe/unknown/over-budget evidence, collision,
+  Integrity failure, tracking loss, or an already activated braking curve
+  cannot be canceled.
 - Candidate mutation and final lineage/P5/publication form one execution-
   commitment transaction. If a final gate rejects the candidate, both the
   incumbent B-spline and its execution certificate/evidence are restored.
@@ -210,6 +240,17 @@
   `OCCUPANCY_BUILD_LAG`, `SNAPSHOT_QUEUE_LAG`, then
   `RISK_GRID_BUILD_LAG`. Grid lag affects search only and cannot revoke a
   trajectory independently proven safe by a fresh execution snapshot.
+- Trusted support keeps at most 64 original current-frame envelopes inside the
+  unchanged 1.0 s hard window. Each trajectory sample selects the newest
+  genuinely covering envelope and computes observation age from its original
+  scan stamp at the current evaluation time. Future arrival time continues to
+  drive prediction only. This corridor-local admission neither fabricates
+  `OBSERVED_FREE` nor lets an unrelated fresh region cover an expired path.
+- A sub-metre limited prefix prefers the continuous nominal public approach
+  while it remains inside the geometry-common free corridor. This prevents a
+  half-voxel A* centre offset from becoming an unintended initial climb,
+  descent or branch commitment. The chosen prefix and its final stopped
+  B-spline still require independent geometry, support and direct-risk checks.
 - Reaching the approved endpoint is a normal hold state, distinct from safety
   revocation. Runtime collision and GNSS sky-risk kernels are checked
   independently; this remains required when P5 is disabled.
