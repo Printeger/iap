@@ -1384,6 +1384,39 @@ std::vector<Eigen::Vector3d> commonGeometryCorridorPrefix(
   return prefix;
 }
 
+std::vector<Eigen::Vector3d> nominalPublicCorridorPrefix(
+  const P4ForwardRequest & request, const double maximum_length_m,
+  const OnlineTopologyGraph & graph)
+{
+  if (!(maximum_length_m > kEpsilon) ||
+    !request.position.allFinite())
+  {
+    return {};
+  }
+  std::vector<Eigen::Vector3d> nominal = request.nominal_local_reference;
+  if (nominal.size() < 2) {
+    nominal = {request.position, request.local_target};
+  } else if ((nominal.front() - request.position).norm() > kEpsilon) {
+    nominal.insert(nominal.begin(), request.position);
+  }
+  const double step_m = std::min(
+    0.25, std::max(0.05, request.limits.topology_resolution_m * 0.5));
+  const auto bounded = cropPrefixToDistance(
+    resample(nominal, step_m), maximum_length_m);
+  if (bounded.size() < 2) {
+    return {};
+  }
+  std::vector<Eigen::Vector3d> prefix{bounded.front()};
+  prefix.reserve(bounded.size());
+  for (std::size_t index = 1; index < bounded.size(); ++index) {
+    if (!graph.worldPathFree({prefix.back(), bounded[index]})) {
+      break;
+    }
+    prefix.push_back(bounded[index]);
+  }
+  return prefix;
+}
+
 bool currentRiskAnchorSafe(const P4ForwardRequest & request)
 {
   const auto & certified = request.current_integrity_anchor;
@@ -1458,9 +1491,20 @@ bool configureSafeLimitedCommonPrefix(
   decision->speed_cap_mps = 0.0;
   decision->certified_free_distance_m = 0.0;
 
-  const auto prefix = commonGeometryCorridorPrefix(
+  const auto geometry_prefix = commonGeometryCorridorPrefix(
     decision->candidates, request.limits.topology_resolution_m * 0.5,
     graph);
+  // Prefer the continuous nominal approach through the still-common free
+  // corridor. Lattice-centre paths may contain a half-voxel vertical or
+  // lateral offset immediately after the exact vehicle pose; using that
+  // quantisation artefact for a sub-metre LIMITED_PREFIX can leave the
+  // current LiDAR envelope even though the nominal public approach is clear.
+  // Geometry and risk are still checked point-by-point below, and the final
+  // published B-spline remains independently checked by direct ForwardRisk.
+  const auto nominal_prefix = nominalPublicCorridorPrefix(
+    request, pathLength(geometry_prefix), graph);
+  const auto & prefix = nominal_prefix.size() >= 2 ?
+    nominal_prefix : geometry_prefix;
   decision->common_prefix_length_m = pathLength(prefix);
   if (prefix.size() < 2 || decision->common_prefix_length_m <= kEpsilon) {
     decision->reason = "safe_common_prefix_unavailable";

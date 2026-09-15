@@ -1625,6 +1625,10 @@ TEST(P4ForwardRoute, UnsafeFullRoutesAuthorizeOnlyContinuousSafeCommonPrefix)
   EXPECT_GE(decision.deferred_trajectory.back().x(),
             decision.stopping_distance_m - 1.0e-9);
   EXPECT_LT(decision.deferred_trajectory.back().x(), 2.0);
+  for (const auto & point : decision.deferred_trajectory) {
+    EXPECT_NEAR(point.y(), request.position.y(), 1.0e-12);
+    EXPECT_NEAR(point.z(), request.position.z(), 1.0e-12);
+  }
 }
 
 TEST(P4ForwardRoute,

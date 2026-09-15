@@ -89,7 +89,8 @@ std::optional<P0OccupancyEpoch> P0OccupancyEpochAdapter::adaptFields(
     P0OccupancyEpoch::SourceOwner source_owner,
     P0OccupancyEpoch::LiveSourceOwner live_source_owner,
     P0OccupancyEpoch::LiveGeneration live_generation,
-    const double clearance_transition_m) {
+    const double clearance_transition_m,
+    std::optional<P0ReusableLosOccupancy> reusable_los) {
   if (!diagnostic_query || !occupied_centers || !environment_centers ||
       !source_owner ||
       !live_source_owner || !live_generation ||
@@ -161,14 +162,34 @@ std::optional<P0OccupancyEpoch> P0OccupancyEpochAdapter::adaptFields(
   }
   params.clearance_transition_m =
       clearance_transition_m;
-  auto los_owner = std::make_shared<iap::LocalOccupancyGrid>(params);
-  los_owner->insert_points(*environment_centers);
-  const auto diagnostics = los_owner->diagnostics();
-  if (diagnostics.rejected_count != 0u ||
-      diagnostics.inserted_count != environment_centers->size() ||
-      diagnostics.voxel_count != environment_centers->size() ||
-      los_owner->size() != environment_centers->size()) {
-    return std::nullopt;
+  std::shared_ptr<const iap::LocalOccupancyGrid> los_owner;
+  if (reusable_los && reusable_los->environment_centers &&
+      reusable_los->los_owner &&
+      sameOwner(P0OccupancyEpoch::SourceOwner(environment_centers),
+                P0OccupancyEpoch::SourceOwner(
+                    reusable_los->environment_centers))) {
+    const auto& cached = reusable_los->los_owner->params();
+    if (!exactDouble(cached.voxel_size, params.voxel_size) ||
+        !exactVector(cached.lattice_origin, params.lattice_origin) ||
+        !exactDouble(cached.clearance_transition_m,
+                     params.clearance_transition_m) ||
+        reusable_los->los_owner->size() != environment_centers->size()) {
+      reusable_los.reset();
+    } else {
+      los_owner = reusable_los->los_owner;
+    }
+  }
+  if (!los_owner) {
+    auto built = std::make_shared<iap::LocalOccupancyGrid>(params);
+    built->insert_points(*environment_centers);
+    const auto diagnostics = built->diagnostics();
+    if (diagnostics.rejected_count != 0u ||
+        diagnostics.inserted_count != environment_centers->size() ||
+        diagnostics.voxel_count != environment_centers->size() ||
+        built->size() != environment_centers->size()) {
+      return std::nullopt;
+    }
+    los_owner = std::move(built);
   }
 
   P0OccupancyEpoch adapted;

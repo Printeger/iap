@@ -196,6 +196,52 @@ TEST(TrustedLocalMapSupportTest, DistinguishesCompleteOutsideAndExpired)
   EXPECT_FALSE(support.identity().empty());
 }
 
+TEST(TrustedLocalMapSupportTest,
+     UsesNewestSpatiallyCoveringObservationAtEvaluationTime)
+{
+  iap::TrustedLocalMapSupport support;
+  support.T_map_sensor.translation() = Eigen::Vector3d::Zero();
+  support.retained_min_map = Eigen::Vector3d(-10.0, -10.0, -10.0);
+  support.retained_max_map = Eigen::Vector3d(10.0, 10.0, 10.0);
+  support.min_range_m = 0.1;
+  support.max_range_m = 3.0;
+  support.horizontal_fov_rad = 2.0 * kPi;
+  support.vertical_min_rad = -0.5 * kPi;
+  support.vertical_max_rad = 0.5 * kPi;
+  support.stamp_s = 10.8;
+  support.valid_until_s = 11.8;
+  support.frame_id = "map";
+
+  iap::TrustedLocalMapSupportObservation older;
+  older.T_map_sensor.translation() = Eigen::Vector3d(4.0, 0.0, 0.0);
+  older.retained_min_map = Eigen::Vector3d(1.0, -3.0, -3.0);
+  older.retained_max_map = Eigen::Vector3d(7.0, 3.0, 3.0);
+  older.stamp_s = 10.2;
+  older.valid_until_s = 11.2;
+  support.observations.push_back(older);
+
+  const auto near_newest = support.query(
+      Eigen::Vector3d(2.0, 0.0, 0.0), 11.0, 40.0);
+  ASSERT_EQ(near_newest.status,
+            iap::LocalMapSupportStatus::MODEL_COMPLETE);
+  EXPECT_DOUBLE_EQ(near_newest.observation_stamp_s, 10.8);
+  EXPECT_NEAR(near_newest.observation_age_s, 0.2, 1.0e-12);
+
+  const auto only_older = support.query(
+      Eigen::Vector3d(5.0, 0.0, 0.0), 11.0, 40.0);
+  ASSERT_EQ(only_older.status,
+            iap::LocalMapSupportStatus::MODEL_COMPLETE);
+  EXPECT_DOUBLE_EQ(only_older.observation_stamp_s, 10.2);
+  EXPECT_NEAR(only_older.observation_age_s, 0.8, 1.0e-12);
+
+  EXPECT_EQ(support.query(Eigen::Vector3d(5.0, 0.0, 0.0), 11.3, 40.0)
+                .status,
+            iap::LocalMapSupportStatus::EXPIRED);
+  EXPECT_EQ(support.query(Eigen::Vector3d(9.0, 0.0, 0.0), 11.0, 40.0)
+                .status,
+            iap::LocalMapSupportStatus::OUTSIDE_ENVELOPE);
+}
+
 struct FakeGnssTimeMessage {
   std::uint32_t week = 0;
   double tow = 0.0;

@@ -101,6 +101,52 @@ TEST(P0OccupancyEpochAdapterTest,
   EXPECT_EQ(unknown.state, iap::RiskOccupancyState::UNKNOWN);
 }
 
+TEST(P0OccupancyEpochAdapterTest,
+     TrueObservedFreeCompletesSupportWithoutChangingModelAuthority) {
+  ego_planner::P0OccupancyEpoch epoch;
+  epoch.cloud_stamp_s = 100.0;
+  auto trusted = std::make_shared<iap::TrustedLocalMapSupport>();
+  trusted->T_map_sensor = Eigen::Isometry3d::Identity();
+  trusted->retained_min_map = Eigen::Vector3d(-1.0, -1.0, -1.0);
+  trusted->retained_max_map = Eigen::Vector3d(1.0, 1.0, 1.0);
+  trusted->min_range_m = 0.0;
+  trusted->max_range_m = 1.0;
+  trusted->horizontal_fov_rad = 2.0 * M_PI;
+  trusted->vertical_min_rad = -0.5 * M_PI;
+  trusted->vertical_max_rad = 0.5 * M_PI;
+  trusted->stamp_s = 100.0;
+  trusted->valid_until_s = 101.0;
+  trusted->frame_id = "map";
+  epoch.trusted_local_map_support = trusted;
+  epoch.diagnostic_query = [](const Eigen::Vector3d& position) {
+    iap::RiskOccupancyDiagnostic out;
+    out.available = true;
+    out.observed = true;
+    out.state = position.y() == 0.0
+        ? iap::RiskOccupancyState::OBSERVED_FREE
+        : iap::RiskOccupancyState::OCCUPIED;
+    return out;
+  };
+
+  const Eigen::Vector3d outside_model(2.0, 0.0, 0.0);
+  const auto strict = ego_planner::queryP0LocalMapSupport(
+      epoch, outside_model, 100.5, 105.0);
+  EXPECT_TRUE(strict.complete());
+  EXPECT_EQ(strict.authority,
+            iap::LocalMapSupportAuthority::STRICT_OBSERVATION);
+  EXPECT_DOUBLE_EQ(strict.observation_stamp_s, 100.0);
+  EXPECT_DOUBLE_EQ(strict.observation_age_s, 0.5);
+
+  const auto expired = ego_planner::queryP0LocalMapSupport(
+      epoch, outside_model, 101.001, 105.0);
+  EXPECT_EQ(expired.status, iap::LocalMapSupportStatus::EXPIRED);
+  const auto occupied = ego_planner::queryP0LocalMapSupport(
+      epoch, Eigen::Vector3d(2.0, 0.1, 0.0), 100.5, 105.0);
+  EXPECT_FALSE(occupied.complete());
+  EXPECT_EQ(occupied.authority,
+            iap::LocalMapSupportAuthority::TRUSTED_LOCAL_MAP);
+}
+
 std::tuple<int, int, int> keyTuple(const iap::VoxelKey& key) {
   return {key.x, key.y, key.z};
 }
@@ -323,6 +369,38 @@ TEST(P0OccupancyEpochAdapterTest,
   EXPECT_TRUE(diagnostic.available);
   EXPECT_EQ(diagnostic.occupancy_generation, 7u);
   EXPECT_EQ(diagnostic.frame_id, "map");
+}
+
+TEST(P0OccupancyEpochAdapterTest,
+     ReusesLosOnlyForTheExactImmutableEnvironmentOwner) {
+  const Eigen::Vector3d origin(0.35, -0.2, 0.6);
+  auto epoch = makeEpoch({origin + Eigen::Vector3d(0.5, 0.5, 0.5)});
+  const auto source_owner = std::make_shared<const int>(1);
+  const auto first = ego_planner::P0OccupancyEpochAdapter::adapt(
+      epoch, source_owner, [source_owner]() { return source_owner; },
+      []() { return 7u; }, 0.4);
+  ASSERT_TRUE(first.has_value());
+
+  ego_planner::P0ReusableLosOccupancy reusable{
+      epoch.environment_occupied_voxel_centers, first->los_owner};
+  epoch.generation = 8u;
+  epoch.cloud_stamp_s = 100.1;
+  const auto same_environment =
+      ego_planner::P0OccupancyEpochAdapter::adapt(
+          epoch, source_owner, [source_owner]() { return source_owner; },
+          []() { return 8u; }, 0.4, reusable);
+  ASSERT_TRUE(same_environment.has_value());
+  EXPECT_EQ(same_environment->los_owner, first->los_owner);
+
+  auto replacement = makeEpoch(
+      {origin + Eigen::Vector3d(0.5, 0.5, 0.5)});
+  replacement.generation = 9u;
+  replacement.cloud_stamp_s = 100.2;
+  const auto changed_owner = ego_planner::P0OccupancyEpochAdapter::adapt(
+      replacement, source_owner, [source_owner]() { return source_owner; },
+      []() { return 9u; }, 0.4, reusable);
+  ASSERT_TRUE(changed_owner.has_value());
+  EXPECT_NE(changed_owner->los_owner, first->los_owner);
 }
 
 TEST(P0OccupancyEpochAdapterTest, CapacityOrCountMismatchFailsClosed) {

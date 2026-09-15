@@ -13,6 +13,7 @@
 #include <fstream>
 #include <iomanip>
 #include <limits>
+#include <mutex>
 #include <set>
 #include <sstream>
 #include <stdexcept>
@@ -820,7 +821,17 @@ namespace ego_planner
 
   EGOPlannerManager::EGOPlannerManager() {}
 
-  EGOPlannerManager::~EGOPlannerManager() {}
+  EGOPlannerManager::~EGOPlannerManager()
+  {
+    // Stop new map-generation notifications before releasing the runtime.
+    // An observer already copied by GridMap owns only a weak reference and
+    // therefore either completes with a live runtime or observes expiration.
+    if (grid_map_)
+      grid_map_->setOccupancyCommitObserver({});
+    if (p0_risk_grid_runtime_)
+      p0_risk_grid_runtime_->shutdown();
+    p0_risk_grid_runtime_.reset();
+  }
 
   void EGOPlannerManager::setTimeProvider(TimeProvider provider)
   {
@@ -1019,20 +1030,34 @@ namespace ego_planner
           {
             return grid_map_ && grid_map_->getInflateOccupancy(pos) > 0;
           });
-      p0_risk_grid_runtime_->setOccupancyEpochFactory(
-          [this]() -> P0OccupancyEpochCapture
+      struct P0LosReuseState
+      {
+        std::mutex mutex;
+        std::optional<P0ReusableLosOccupancy> value;
+      };
+      const auto p0_los_reuse = std::make_shared<P0LosReuseState>();
+      const auto capture_p0_occupancy =
+          [this, p0_los_reuse](
+              const bool execution_only) -> P0OccupancyEpochCapture
           {
             const std::shared_ptr<GridMap> captured_grid_map = grid_map_;
             if (!captured_grid_map)
               return {P0OccupancyEpochCaptureStatus::SNAPSHOT_UNAVAILABLE,
                       std::nullopt};
-            const auto frozen_epoch =
-                captured_grid_map->captureFrozenOccupancyEpoch();
+            const auto frozen_epoch = execution_only
+                ? captured_grid_map->captureFrozenExecutionOccupancyEpoch()
+                : captured_grid_map->captureFrozenOccupancyEpoch();
             if (!frozen_epoch)
               return {P0OccupancyEpochCaptureStatus::SNAPSHOT_UNAVAILABLE,
                       std::nullopt};
             const P0OccupancyEpoch::SourceOwner source_owner =
                 captured_grid_map;
+            // Building the clearance/LOS voxel grid is the dominant execution
+            // snapshot cost.  Registered current-frame commits do not replace
+            // the immutable environment cloud, so reuse that exact owner's
+            // grid.  Active-window changes publish a different shared owner
+            // and force a full rebuild inside the adapter.
+            std::lock_guard<std::mutex> los_lock(p0_los_reuse->mutex);
             auto adapted = P0OccupancyEpochAdapter::adapt(
                 *frozen_epoch, source_owner,
                 [this]() -> P0OccupancyEpoch::SourceOwner {
@@ -1042,14 +1067,42 @@ namespace ego_planner
                   return grid_map_ ? grid_map_->occupancyGeneration() : 0u;
                 },
                 p0_risk_grid_runtime_
-                    ? p0_risk_grid_runtime_->gnssClearanceTransitionM() : 0.0);
+                    ? p0_risk_grid_runtime_->gnssClearanceTransitionM() : 0.0,
+                p0_los_reuse->value);
             if (!adapted)
               return {P0OccupancyEpochCaptureStatus::ADAPTER_INVALID,
                       std::nullopt};
+            p0_los_reuse->value = P0ReusableLosOccupancy{
+                frozen_epoch->environment_occupied_voxel_centers,
+                adapted->los_owner};
             adapted->frozen_grid_map_epoch = frozen_epoch;
             return {P0OccupancyEpochCaptureStatus::VALID,
                     std::move(adapted)};
+          };
+      p0_risk_grid_runtime_->setOccupancyEpochFactory(
+          [capture_p0_occupancy]() {
+            return capture_p0_occupancy(false);
           });
+      p0_risk_grid_runtime_->setExecutionOccupancyEpochFactory(
+          [capture_p0_occupancy]() {
+            return capture_p0_occupancy(true);
+          });
+      p0_risk_grid_runtime_->setOccupancyGenerationProvider(
+          [this]() {
+            return grid_map_ ? grid_map_->occupancyGeneration() : 0u;
+          });
+      grid_map_->setOccupancyCommitObserver(
+          [runtime = std::weak_ptr<P0RiskGridRuntime>(
+               p0_risk_grid_runtime_)](
+              const uint64_t generation, const double source_stamp_s) {
+            if (const auto locked = runtime.lock())
+              locked->notifyOccupancyCommitted(generation, source_stamp_s);
+          });
+      const uint64_t existing_generation = grid_map_->occupancyGeneration();
+      if (existing_generation != 0u)
+        p0_risk_grid_runtime_->notifyOccupancyCommitted(
+            existing_generation,
+            std::numeric_limits<double>::quiet_NaN());
     }
     p5_integrity_gate_ = P5RuntimeIntegrityGate::createIfEnabled(node);
     if (p5_integrity_gate_)
@@ -2644,11 +2697,26 @@ namespace ego_planner
       return reject_final_identity(
           P4GeometryCommitVerdict::POLICY_MISMATCH,
           "alert_limit_policy_changed_before_final_commit");
-    std::string final_freshness_reason;
-    if (!planningRiskContextFresh(stamp_s, &final_freshness_reason))
+    // The RiskGrid above is immutable search/lineage evidence. It may age
+    // while optimization runs and must not gate the final curve. A current
+    // lightweight execution snapshot owns live authorization; offline
+    // contexts without one retain the legacy planning-context freshness gate.
+    const auto execution_snapshot = p0_risk_grid_runtime_
+        ? p0_risk_grid_runtime_->acquireExecutionRiskSnapshotForEvaluation(
+              stamp_s)
+        : planning_risk_context_.execution_snapshot;
+    if (!execution_snapshot && p0_risk_grid_runtime_)
       return reject_final_identity(
           P4GeometryCommitVerdict::POLICY_MISMATCH,
-          "final_direct_inputs_not_fresh:" + final_freshness_reason);
+          "final_execution_snapshot_stale_or_unavailable");
+    if (!execution_snapshot)
+    {
+      std::string final_freshness_reason;
+      if (!planningRiskContextFresh(stamp_s, &final_freshness_reason))
+        return reject_final_identity(
+            P4GeometryCommitVerdict::POLICY_MISMATCH,
+            "final_direct_inputs_not_fresh:" + final_freshness_reason);
+    }
     if (p0_risk_grid_runtime_)
     {
       iap::CurrentIntegrityState current;
@@ -2672,12 +2740,32 @@ namespace ego_planner
           P4GeometryCommitVerdict::COMPUTE_BUDGET_EXCEEDED,
           "final_bspline_curve_sampling_failed");
 
+    // Position support is a separate contract from GNSS LOS support. Check
+    // the exact curve here as well as in the execution watchdog so an
+    // unsupported spline is held before publication instead of immediately
+    // scheduling a certified brake on its first tick.
+    if (execution_snapshot && execution_snapshot->occupancy &&
+        execution_snapshot->occupancy->trusted_local_map_support)
+    {
+      for (std::size_t index = 0; index < executable_trajectory.size();
+           ++index)
+      {
+        const auto support = queryP0LocalMapSupport(
+            *execution_snapshot->occupancy, executable_trajectory[index],
+            stamp_s, local_data_.start_time_.seconds() +
+                         executable_times[index]);
+        if (!support.complete())
+          return reject_final_identity(
+              P4GeometryCommitVerdict::INVALID_PATH,
+              "final_bspline_corridor_support_stale_or_invalid:" +
+                  std::string(iap::localMapSupportStatusName(
+                      support.status)));
+      }
+    }
+
     // RiskGrid is a coarse search field. Every terminal stage is checked by
     // one direct ForwardRisk batch over the actual B-spline, including tests
     // and offline contexts that do not carry a live occupancy generation.
-    const auto execution_snapshot = p0_risk_grid_runtime_
-        ? p0_risk_grid_runtime_->acquireExecutionRiskSnapshot()
-        : planning_risk_context_.execution_snapshot;
     if (p0_risk_grid_runtime_ &&
         !p0_risk_grid_runtime_->executionSnapshotFreshAt(
             execution_snapshot, stamp_s))
@@ -2738,17 +2826,25 @@ namespace ego_planner
     if (last_p4_forward_decision_.snapshot_identity.occupancy_generation > 0)
     {
       const auto bound_occupancy =
-          planning_risk_context_.occupancy_snapshot;
+          execution_snapshot && execution_snapshot->occupancy &&
+                  execution_snapshot->occupancy->frozen_grid_map_epoch
+              ? execution_snapshot->occupancy
+              : planning_risk_context_.occupancy_snapshot;
       if (!bound_occupancy)
         return reject_final_identity(
             P4GeometryCommitVerdict::HISTORY_GAP,
             "bound_occupancy_snapshot_missing_before_final_commit");
-      if (bound_occupancy->generation != last_p4_forward_decision_.
-          snapshot_identity.occupancy_generation ||
+      const bool checking_current_execution_occupancy =
+          execution_snapshot &&
+          bound_occupancy == execution_snapshot->occupancy;
+      if ((!checking_current_execution_occupancy &&
+           bound_occupancy->generation != last_p4_forward_decision_.
+               snapshot_identity.occupancy_generation) ||
         bound_occupancy->geometry.geometry_id !=
           last_p4_forward_decision_.snapshot_identity.geometry_id ||
-        bound_occupancy->cloud_stamp_s != last_p4_forward_decision_.
-          snapshot_identity.occupancy_stamp_s)
+        (!checking_current_execution_occupancy &&
+         bound_occupancy->cloud_stamp_s != last_p4_forward_decision_.
+             snapshot_identity.occupancy_stamp_s))
         return reject_final_identity(
             P4GeometryCommitVerdict::HISTORY_GAP,
             "bound_occupancy_identity_changed_before_final_commit");
@@ -2841,8 +2937,25 @@ namespace ego_planner
       const Eigen::Vector3d commit_position = executable_trajectory.front();
       commit_request.bound_occupancy =
           bound_occupancy->frozen_grid_map_epoch;
-      commit_request.history = grid_map_->collisionDeltasSince(
-          bound_occupancy->generation);
+      if (checking_current_execution_occupancy)
+      {
+        // This is already the newest immutable obstacle view. Validate the
+        // complete actual curve against it, so an old search grid cannot
+        // manufacture a collision-history gap at the final authorization
+        // boundary.
+        commit_request.history.base_generation =
+            bound_occupancy->generation;
+        commit_request.history.latest_generation =
+            bound_occupancy->generation;
+        commit_request.history.complete = true;
+        commit_request.history.geometry_id =
+            bound_occupancy->geometry.geometry_id;
+      }
+      else
+      {
+        commit_request.history = grid_map_->collisionDeltasSince(
+            bound_occupancy->generation);
+      }
       const double preprocessing_ms = commit_elapsed_ms();
       const double remaining_budget_ms = kCommitBudgetMs - preprocessing_ms;
       if (!(remaining_budget_ms > 0.0))
@@ -3137,10 +3250,13 @@ namespace ego_planner
     if (written && stage == "normal_publish_authorized")
     {
       published_p4_forward_decision_ = last_p4_forward_decision_;
-      published_p4_bound_occupancy_ =
-          planning_risk_context_.occupancy_snapshot ?
-          planning_risk_context_.occupancy_snapshot->frozen_grid_map_epoch :
-          nullptr;
+      const auto published_occupancy =
+          execution_snapshot && execution_snapshot->occupancy &&
+                  execution_snapshot->occupancy->frozen_grid_map_epoch
+              ? execution_snapshot->occupancy
+              : planning_risk_context_.occupancy_snapshot;
+      published_p4_bound_occupancy_ = published_occupancy
+          ? published_occupancy->frozen_grid_map_epoch : nullptr;
       published_p4_checked_generation_ =
           last_p4_forward_decision_.geometry_commit.checked_generation;
       published_p4_trajectory_id_ = local_data_.traj_id_;
@@ -3451,19 +3567,29 @@ namespace ego_planner
         return finish(out, reason == "runtime_known_future_integrity_unsafe"
             ? "RISK_REVOKED" : "EXECUTION_REVOKED");
       };
+    uint64_t runtime_snapshot_id_for_check = 0u;
     const auto activate_failsafe_braking =
-        [this, &out, &finish, &revoke](const std::string &trigger,
+        [this, &out, &finish, &revoke, &evaluation_now_s,
+         &runtime_snapshot_id_for_check](const std::string &trigger,
                               const double current_t) {
           if (p4_execution_certificate_.authority !=
                   P4ExecutionAuthority::LIMITED_PREFIX ||
               p4_braking_anchors_.empty())
             return revoke(trigger);
-          const auto anchor = std::find_if(
+          // Select the latest certified anchor inside the 0.2 s transition
+          // window. Picking the first anchor at current_t made a transient
+          // failure on the first trajectory tick activate braking immediately
+          // and eliminated the promised recovery opportunity.
+          const auto after_window = std::upper_bound(
               p4_braking_anchors_.begin(), p4_braking_anchors_.end(),
-              [current_t](const P4BrakingAnchor &candidate) {
-                return candidate.trajectory_time_s + 1.0e-9 >= current_t;
+              current_t + 0.2 + 1.0e-9,
+              [](const double limit, const P4BrakingAnchor &candidate) {
+                return limit < candidate.trajectory_time_s;
               });
-          if (anchor == p4_braking_anchors_.end() ||
+          if (after_window == p4_braking_anchors_.begin())
+            return revoke(trigger);
+          const auto anchor = std::prev(after_window);
+          if (anchor->trajectory_time_s + 1.0e-9 < current_t ||
               anchor->trajectory_time_s - current_t > 0.2 + 1.0e-6 ||
               !anchor->position.allFinite() ||
               !anchor->velocity.allFinite() ||
@@ -3471,17 +3597,31 @@ namespace ego_planner
             return revoke(trigger);
           const std::size_t anchor_index = static_cast<std::size_t>(
               std::distance(p4_braking_anchors_.begin(), anchor));
-          p4_execution_certificate_.parent_trajectory_id =
-              p4_execution_certificate_.trajectory_id;
-          p4_execution_certificate_.parent_start_time_ns =
-              p4_execution_certificate_.start_time_ns;
-          p4_execution_certificate_.authority =
-              P4ExecutionAuthority::LIMITED_PREFIX_BRAKING;
-          p4_execution_certificate_.braking_certificate_id =
-              anchor->braking_certificate_id;
-          p4_execution_certificate_.braking_anchor_time_s =
-              anchor->trajectory_time_s;
-          p4_pending_braking_anchor_ = anchor_index;
+          const bool recoverable_staleness =
+              trigger == "runtime_execution_snapshot_missing" ||
+              trigger == "runtime_local_map_support_stale_or_invalid" ||
+              trigger == "runtime_integrity_stale_or_frame_invalid" ||
+              trigger == "runtime_execution_snapshot_stale_or_invalid" ||
+              trigger == "runtime_current_integrity_stale_or_unavailable" ||
+              trigger == "runtime_gnss_epoch_stale_or_invalid" ||
+              trigger.rfind(
+                  "runtime_corridor_support_stale_or_invalid", 0) == 0;
+          if (!p4_pending_braking_anchor_)
+          {
+            P4PendingBrakingTransition pending;
+            pending.anchor_index = anchor_index;
+            pending.trigger = trigger;
+            pending.trigger_execution_snapshot_id =
+                runtime_snapshot_id_for_check;
+            pending.scheduled_stamp_s = evaluation_now_s;
+            pending.recoverable_staleness = recoverable_staleness;
+            p4_pending_braking_anchor_ = std::move(pending);
+          }
+          else if (!recoverable_staleness)
+          {
+            p4_pending_braking_anchor_->trigger = trigger;
+            p4_pending_braking_anchor_->recoverable_staleness = false;
+          }
           out.allowed = true;
           out.failsafe_braking_available = true;
           out.failsafe_braking_active = false;
@@ -3540,49 +3680,34 @@ namespace ego_planner
               P4ExecutionAuthority::LIMITED_PREFIX_BRAKING
               ? "FAILSAFE_BRAKED_TO_STOP" : "ENDPOINT_HOLD");
     }
-    if (p4_execution_certificate_.authority ==
-        P4ExecutionAuthority::LIMITED_PREFIX_BRAKING)
+    if (p4_pending_braking_anchor_)
     {
-      if (p0_risk_grid_runtime_)
+      const auto &pending = *p4_pending_braking_anchor_;
+      if (pending.anchor_index >= p4_braking_anchors_.size())
+        return revoke("failsafe_braking_anchor_identity_invalid");
+      P4BrakingAnchor &anchor =
+          p4_braking_anchors_[pending.anchor_index];
+      if (anchor.control_points_hash.empty() ||
+          anchor.knot_vector_hash.empty() ||
+          anchor.risk_query_lattice_hash.empty())
+        return revoke("failsafe_braking_certificate_identity_invalid");
+      const double switch_time_s =
+          p4_execution_certificate_.start_time_ns * 1.0e-9 +
+          anchor.trajectory_time_s;
+      if (evaluation_now_s + 1.0e-9 >= switch_time_s)
       {
-        iap::CurrentIntegrityState current;
-        if (p0_risk_grid_runtime_->currentIntegrityForExecution(
-                evaluation_now_s, &current))
-        {
-          out.current_integrity_fresh = true;
-          out.current_integrity_safe = p4CertifiedCurrentIntegritySafe(
-              current, evaluation_now_s,
-              std::numeric_limits<double>::infinity());
-          if (!out.current_integrity_safe)
-            return revoke("runtime_current_integrity_not_safe");
-        }
-      }
-      if (p4_pending_braking_anchor_)
-      {
-        const std::size_t anchor_index = *p4_pending_braking_anchor_;
-        if (anchor_index >= p4_braking_anchors_.size())
-          return revoke("failsafe_braking_anchor_identity_invalid");
-        P4BrakingAnchor &anchor = p4_braking_anchors_[anchor_index];
-        if (anchor.braking_certificate_id !=
-                p4_execution_certificate_.braking_certificate_id ||
-            anchor.control_points_hash.empty() ||
-            anchor.knot_vector_hash.empty() ||
-            anchor.risk_query_lattice_hash.empty())
-          return revoke("failsafe_braking_certificate_identity_invalid");
-        const double switch_time_s =
-            p4_execution_certificate_.parent_start_time_ns * 1.0e-9 +
-            anchor.trajectory_time_s;
-        if (evaluation_now_s + 1.0e-9 < switch_time_s)
-        {
-          out.allowed = true;
-          out.failsafe_braking_available = true;
-          out.failsafe_braking_active = false;
-          out.reason = "failsafe_braking_waiting_for_anchor";
-          p4_execution_revoked_ = false;
-          return finish(out, "FAILSAFE_BRAKING_SCHEDULED");
-        }
         const double parent_deadline_s =
             p4_execution_certificate_.execution_deadline_s;
+        p4_execution_certificate_.parent_trajectory_id =
+            p4_execution_certificate_.trajectory_id;
+        p4_execution_certificate_.parent_start_time_ns =
+            p4_execution_certificate_.start_time_ns;
+        p4_execution_certificate_.authority =
+            P4ExecutionAuthority::LIMITED_PREFIX_BRAKING;
+        p4_execution_certificate_.braking_certificate_id =
+            anchor.braking_certificate_id;
+        p4_execution_certificate_.braking_anchor_time_s =
+            anchor.trajectory_time_s;
         updateTrajInfo(
             anchor.trajectory,
             rclcpp::Time(static_cast<int64_t>(
@@ -3618,7 +3743,66 @@ namespace ego_planner
         p4_runtime_risk_cache_ = P4RuntimeRiskCache{};
         p4_direct_risk_evidence_ = P4DirectTrajectoryRiskEvidence{};
         out.identity_match = true;
+        out.allowed = true;
+        out.failsafe_braking_available = true;
+        out.failsafe_braking_active = true;
         out.failsafe_braking_activated = true;
+        out.reason = "failsafe_braking_activated";
+        if (p0_risk_grid_runtime_)
+        {
+          const auto execution =
+              p0_risk_grid_runtime_->acquireExecutionRiskSnapshot();
+          if (execution)
+          {
+            out.execution_snapshot_id = execution->execution_snapshot_id;
+            out.gnss_epoch_identity =
+                execution->source_identity.gnss_epoch_identity;
+            if (execution->occupancy && execution->occupancy->
+                    trusted_local_map_support)
+            {
+              out.support_observation_stamp_s = execution->occupancy->
+                  trusted_local_map_support->stamp_s;
+              out.corridor_observation_age_max_s = evaluation_now_s -
+                  out.support_observation_stamp_s;
+            }
+          }
+        }
+        p4_execution_revoked_ = false;
+        return finish(out, "FAILSAFE_BRAKING_ACTIVATED");
+      }
+    }
+    if (p4_execution_certificate_.authority ==
+        P4ExecutionAuthority::LIMITED_PREFIX_BRAKING)
+    {
+      if (p0_risk_grid_runtime_)
+      {
+        const auto execution =
+            p0_risk_grid_runtime_->acquireExecutionRiskSnapshot();
+        if (execution)
+        {
+          out.execution_snapshot_id = execution->execution_snapshot_id;
+          out.gnss_epoch_identity =
+              execution->source_identity.gnss_epoch_identity;
+          if (execution->occupancy && execution->occupancy->
+                  trusted_local_map_support)
+          {
+            out.support_observation_stamp_s = execution->occupancy->
+                trusted_local_map_support->stamp_s;
+            out.corridor_observation_age_max_s = evaluation_now_s -
+                out.support_observation_stamp_s;
+          }
+        }
+        iap::CurrentIntegrityState current;
+        if (p0_risk_grid_runtime_->currentIntegrityForExecution(
+                evaluation_now_s, &current))
+        {
+          out.current_integrity_fresh = true;
+          out.current_integrity_safe = p4CertifiedCurrentIntegritySafe(
+              current, evaluation_now_s,
+              std::numeric_limits<double>::infinity());
+          if (!out.current_integrity_safe)
+            return revoke("runtime_current_integrity_not_safe");
+        }
       }
       out.allowed = true;
       out.failsafe_braking_available = true;
@@ -3635,8 +3819,15 @@ namespace ego_planner
     const auto runtime_planning_snapshot = p0_risk_grid_runtime_
         ? p0_risk_grid_runtime_->acquirePlanningSnapshot() : nullptr;
     const auto runtime_execution_snapshot = p0_risk_grid_runtime_
-        ? p0_risk_grid_runtime_->acquireExecutionRiskSnapshot()
+        ? p0_risk_grid_runtime_->acquireExecutionRiskSnapshotForEvaluation(
+              evaluation_now_s)
         : planning_risk_context_.execution_snapshot;
+    runtime_snapshot_id_for_check = runtime_execution_snapshot
+        ? runtime_execution_snapshot->execution_snapshot_id : 0u;
+    out.execution_snapshot_id = runtime_snapshot_id_for_check;
+    out.gnss_epoch_identity = runtime_execution_snapshot
+        ? runtime_execution_snapshot->source_identity.gnss_epoch_identity
+        : 0u;
     const auto snapshot = runtime_planning_snapshot
         ? runtime_planning_snapshot->risk : acquireRiskGridSnapshot();
     if (p0_risk_grid_runtime_ && !runtime_execution_snapshot)
@@ -3648,11 +3839,17 @@ namespace ego_planner
         ? runtime_execution_snapshot->occupancy
         : runtime_planning_snapshot ? runtime_planning_snapshot->occupancy
                                     : nullptr;
-    if (runtime_occupancy && runtime_occupancy->trusted_local_map_support &&
-        !runtime_occupancy->trusted_local_map_support->
-            freshAt(evaluation_now_s))
-      return activate_failsafe_braking(
-          "runtime_local_map_support_stale_or_invalid", current_t);
+    if (runtime_occupancy && runtime_occupancy->trusted_local_map_support)
+    {
+      out.support_observation_stamp_s =
+          runtime_occupancy->trusted_local_map_support->stamp_s;
+      out.corridor_observation_age_max_s = evaluation_now_s -
+          out.support_observation_stamp_s;
+      if (!runtime_occupancy->trusted_local_map_support->
+              freshAt(evaluation_now_s))
+        return activate_failsafe_braking(
+            "runtime_local_map_support_stale_or_invalid", current_t);
+    }
     out.current_risk_generation = snapshot ? snapshot->generation_id() : 0u;
     out.current_occupancy_generation = runtime_execution_snapshot
         ? runtime_execution_snapshot->source_identity.occupancy_generation
@@ -3787,6 +3984,42 @@ namespace ego_planner
         : planning_risk_context_.forward_risk_batch;
     if (!direct_risk_batch)
       return revoke("runtime_direct_risk_unavailable");
+    std::vector<Eigen::Vector3d> remaining_points;
+    std::vector<double> remaining_times;
+    if (!sampleTrajectoryForGeometryCommit(
+            &local_data_, current_t, &remaining_points, &remaining_times))
+      return revoke("runtime_direct_risk_curve_sampling_failed");
+    if (runtime_occupancy &&
+        runtime_occupancy->trusted_local_map_support)
+    {
+      double maximum_age_s = 0.0;
+      double oldest_stamp_s = std::numeric_limits<double>::infinity();
+      for (std::size_t index = 0; index < remaining_points.size(); ++index)
+      {
+        const double query_time_s = local_data_.start_time_.seconds() +
+            remaining_times[index];
+        const auto support = queryP0LocalMapSupport(
+            *runtime_occupancy, remaining_points[index], evaluation_now_s,
+            query_time_s);
+        if (!support.complete())
+        {
+          out.violation_position = remaining_points[index];
+          out.violation_query_time_s = query_time_s;
+          out.support_observation_stamp_s = support.observation_stamp_s;
+          out.corridor_observation_age_max_s = support.observation_age_s;
+          return activate_failsafe_braking(
+              "runtime_corridor_support_stale_or_invalid:" +
+                  std::string(iap::localMapSupportStatusName(
+                      support.status)),
+              current_t);
+        }
+        maximum_age_s = std::max(maximum_age_s, support.observation_age_s);
+        oldest_stamp_s = std::min(oldest_stamp_s,
+                                  support.observation_stamp_s);
+      }
+      out.corridor_observation_age_max_s = maximum_age_s;
+      out.support_observation_stamp_s = oldest_stamp_s;
+    }
     const bool cache_matches = p4_runtime_risk_cache_.valid &&
         p4_runtime_risk_cache_.trajectory_id == local_data_.traj_id_ &&
         p4_runtime_risk_cache_.start_time_ns ==
@@ -3817,11 +4050,6 @@ namespace ego_planner
                 ? runtime_execution_snapshot->execution_snapshot_id : 0u);
     if (!cache_matches)
     {
-      std::vector<Eigen::Vector3d> remaining_points;
-      std::vector<double> remaining_times;
-      if (!sampleTrajectoryForGeometryCommit(
-              &local_data_, current_t, &remaining_points, &remaining_times))
-        return revoke("runtime_direct_risk_curve_sampling_failed");
       const auto request = makeP4CurveRiskRequest(
           p4DirectRiskRequestIdentity(
               "p4_runtime_direct_v1", local_data_, snapshot,
@@ -3929,6 +4157,35 @@ namespace ego_planner
     p4_execution_revoked_ = false;
     published_p4_forward_decision_.planning_disposition =
         P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY;
+    if (p4_pending_braking_anchor_ &&
+        p4_pending_braking_anchor_->recoverable_staleness &&
+        runtime_snapshot_id_for_check != 0u &&
+        runtime_snapshot_id_for_check >
+            p4_pending_braking_anchor_->trigger_execution_snapshot_id)
+    {
+      // Recovery is an authorization decision, so the direct-risk result
+      // above is not enough on its own. Bind cancellation to the same
+      // incremental collision check that the FSM performs after this method.
+      // A concurrent occupancy writer (nullopt), journal gap, collision or
+      // compute timeout keeps braking scheduled and is retried on the next
+      // watchdog tick.
+      const auto recovery_geometry =
+          validateCommittedP4TrajectoryGeometry(evaluation_now_s);
+      if (!recovery_geometry || !recovery_geometry->accepted())
+      {
+        out.allowed = true;
+        out.failsafe_braking_available = true;
+        out.failsafe_braking_active = false;
+        out.reason = "failsafe_braking_recovery_collision_check_pending:" +
+            (recovery_geometry ? recovery_geometry->reason
+                               : std::string("update_in_progress"));
+        return finish(out, "FAILSAFE_BRAKING_SCHEDULED");
+      }
+      p4_pending_braking_anchor_.reset();
+      out.failsafe_braking_canceled_recovered = true;
+      out.reason = "fresh_execution_snapshot_recovered_before_braking";
+      return finish(out, "FAILSAFE_BRAKING_CANCELED_RECOVERED");
+    }
     return finish(out, "EXECUTION_ALLOWED");
   }
 
@@ -3945,7 +4202,9 @@ namespace ego_planner
     key << event << '|' << p4_execution_certificate_.trajectory_id << '|'
         << p4_execution_certificate_.start_time_ns << '|'
         << diagnostics.reason << '|' << diagnostics.current_risk_generation
-        << '|' << diagnostics.current_occupancy_generation;
+        << '|' << diagnostics.current_occupancy_generation << '|'
+        << diagnostics.execution_snapshot_id << '|'
+        << diagnostics.gnss_epoch_identity;
     if (key.str() == last_p4_execution_event_key_)
       return false;
     const std::string path = config.debug_csv_path + ".execution_events.csv";
@@ -3965,14 +4224,16 @@ namespace ego_planner
              "violation_x,violation_y,violation_z,violation_query_time_s,"
              "violation_hpl_m,violation_vpl_m,alert_limit_h_m,"
              "alert_limit_v_m,approved_endpoint_x,approved_endpoint_y,"
-             "approved_endpoint_z,execution_snapshot_id,"
+             "approved_endpoint_z,execution_snapshot_id,gnss_epoch_identity,"
              "parent_trajectory_id,parent_trajectory_start_ns,"
              "braking_certificate_id,braking_anchor_time_s,"
              "failsafe_braking_available,failsafe_braking_active,"
              "failsafe_braking_activated,"
-             "direct_batch_duration_ms\n";
+             "failsafe_braking_canceled_recovered,"
+             "direct_batch_duration_ms,support_observation_stamp_s,"
+             "corridor_observation_age_max_s\n";
     csv << std::setprecision(17)
-        << "p4_execution_event_v2," << event << ',' << stamp_s << ','
+        << "p4_execution_event_v3," << event << ',' << stamp_s << ','
         << p4ExecutionAuthorityName(p4_execution_certificate_.authority)
         << ',' << p4_execution_certificate_.trajectory_id << ','
         << p4_execution_certificate_.start_time_ns << ','
@@ -3997,7 +4258,8 @@ namespace ego_planner
         << p4_execution_certificate_.approved_endpoint.x() << ','
         << p4_execution_certificate_.approved_endpoint.y() << ','
         << p4_execution_certificate_.approved_endpoint.z() << ','
-        << p4_execution_certificate_.execution_snapshot_id << ','
+        << diagnostics.execution_snapshot_id << ','
+        << diagnostics.gnss_epoch_identity << ','
         << p4_execution_certificate_.parent_trajectory_id << ','
         << p4_execution_certificate_.parent_start_time_ns << ','
         << p4_execution_certificate_.braking_certificate_id << ','
@@ -4005,7 +4267,10 @@ namespace ego_planner
         << (diagnostics.failsafe_braking_available ? 1 : 0) << ','
         << (diagnostics.failsafe_braking_active ? 1 : 0) << ','
         << (diagnostics.failsafe_braking_activated ? 1 : 0) << ','
-        << diagnostics.direct_batch_duration_ms << '\n';
+        << (diagnostics.failsafe_braking_canceled_recovered ? 1 : 0) << ','
+        << diagnostics.direct_batch_duration_ms << ','
+        << diagnostics.support_observation_stamp_s << ','
+        << diagnostics.corridor_observation_age_max_s << '\n';
     if (!csv)
       return false;
     last_p4_execution_event_key_ = key.str();
@@ -6457,7 +6722,8 @@ namespace ego_planner
               &local_data_, incumbent_t, &incumbent_points,
               &incumbent_times);
       const auto execution = p0_risk_grid_runtime_
-          ? p0_risk_grid_runtime_->acquireExecutionRiskSnapshot()
+          ? p0_risk_grid_runtime_->acquireExecutionRiskSnapshotForEvaluation(
+                accepted_time.seconds())
           : planning_risk_context_.execution_snapshot;
       bool comparable = sampled && execution &&
           execution->forward_risk_batch &&

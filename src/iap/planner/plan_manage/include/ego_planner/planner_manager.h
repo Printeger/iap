@@ -156,6 +156,7 @@ namespace ego_planner
     bool failsafe_braking_available = false;
     bool failsafe_braking_active = false;
     bool failsafe_braking_activated = false;
+    bool failsafe_braking_canceled_recovered = false;
     double remaining_time_s = std::numeric_limits<double>::quiet_NaN();
     double tracking_error_m = std::numeric_limits<double>::quiet_NaN();
     double terminal_speed_mps = std::numeric_limits<double>::quiet_NaN();
@@ -176,6 +177,12 @@ namespace ego_planner
     double alert_limit_h_m = std::numeric_limits<double>::quiet_NaN();
     double alert_limit_v_m = std::numeric_limits<double>::quiet_NaN();
     double direct_batch_duration_ms =
+        std::numeric_limits<double>::quiet_NaN();
+    uint64_t execution_snapshot_id = 0;
+    uint64_t gnss_epoch_identity = 0;
+    double support_observation_stamp_s =
+        std::numeric_limits<double>::quiet_NaN();
+    double corridor_observation_age_max_s =
         std::numeric_limits<double>::quiet_NaN();
     std::string reason = "no_committed_trajectory";
   };
@@ -387,7 +394,10 @@ namespace ego_planner
     GridMap::Ptr grid_map_;
     fast_planner::ObjPredictor::Ptr obj_predictor_;    
     SwarmTrajData swarm_trajs_buf_;
-    std::unique_ptr<P0RiskGridRuntime> p0_risk_grid_runtime_;
+    // Shared ownership is intentional only for the GridMap commit observer:
+    // a callback already copied by GridMap may finish safely while manager
+    // shutdown unregisters the observer and releases its primary reference.
+    std::shared_ptr<P0RiskGridRuntime> p0_risk_grid_runtime_;
     std::unique_ptr<P5RuntimeIntegrityGate> p5_integrity_gate_;
     std::unique_ptr<Gate0QualificationWriter> gate0_writer_;
     std::shared_ptr<SafetyRvizPublisher> safety_viz_;
@@ -469,7 +479,16 @@ namespace ego_planner
     P4RuntimeRiskCache p4_runtime_risk_cache_;
     P4DirectTrajectoryRiskEvidence p4_direct_risk_evidence_;
     std::vector<P4BrakingAnchor> p4_braking_anchors_;
-    std::optional<std::size_t> p4_pending_braking_anchor_;
+    struct P4PendingBrakingTransition
+    {
+      std::size_t anchor_index = 0;
+      std::string trigger;
+      uint64_t trigger_execution_snapshot_id = 0;
+      double scheduled_stamp_s =
+          std::numeric_limits<double>::quiet_NaN();
+      bool recoverable_staleness = false;
+    };
+    std::optional<P4PendingBrakingTransition> p4_pending_braking_anchor_;
     struct P4ExecutionCommitmentBackup
     {
       bool active = false;
@@ -486,7 +505,7 @@ namespace ego_planner
       P4RuntimeRiskCache runtime_risk_cache;
       P4DirectTrajectoryRiskEvidence direct_risk_evidence;
       std::vector<P4BrakingAnchor> braking_anchors;
-      std::optional<std::size_t> pending_braking_anchor;
+      std::optional<P4PendingBrakingTransition> pending_braking_anchor;
     };
     P4ExecutionCommitmentBackup p4_execution_commitment_backup_;
     std::atomic<std::uint64_t> next_p4_braking_certificate_id_{1};

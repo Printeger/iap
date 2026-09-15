@@ -3,7 +3,9 @@
 
 #include <cstddef>
 #include <atomic>
+#include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <deque>
 #include <functional>
 #include <memory>
@@ -11,6 +13,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -38,6 +41,76 @@
 #include <std_msgs/msg/string.hpp>
 
 namespace ego_planner {
+
+enum class P0ExecutionSnapshotAttemptStatus : std::uint8_t {
+  PUBLISHED = 0,
+  DEDUPLICATED,
+  CAPTURE_UNAVAILABLE,
+  CAPTURE_ADAPTER_INVALID,
+  OCCUPANCY_INVALID,
+  OCCUPANCY_STALE,
+  INTEGRITY_UNAVAILABLE,
+  INTEGRITY_UNSAFE,
+  MAP_POINTS_MISSING,
+  FINAL_FRESHNESS_FAILED,
+  SUPERSEDED,
+  WORKER_EXCEPTION,
+  WORKER_STOPPED,
+};
+
+const char* p0ExecutionSnapshotAttemptStatusName(
+    P0ExecutionSnapshotAttemptStatus status);
+
+struct P0ExecutionSnapshotAttemptEvidence {
+  std::uint64_t attempt_id = 0;
+  P0ExecutionSnapshotAttemptStatus status =
+      P0ExecutionSnapshotAttemptStatus::CAPTURE_UNAVAILABLE;
+  std::string reason = "not_attempted";
+  std::uint64_t requested_occupancy_generation = 0;
+  double requested_occupancy_stamp_s =
+      std::numeric_limits<double>::quiet_NaN();
+  std::uint64_t captured_occupancy_generation = 0;
+  double captured_occupancy_stamp_s =
+      std::numeric_limits<double>::quiet_NaN();
+  double support_stamp_s = std::numeric_limits<double>::quiet_NaN();
+  std::uint64_t support_generation = 0;
+  double lidar_stamp_s = std::numeric_limits<double>::quiet_NaN();
+  std::uint64_t lidar_generation = 0;
+  double lidar_receive_steady_s =
+      std::numeric_limits<double>::quiet_NaN();
+  double gnss_epoch_stamp_s = std::numeric_limits<double>::quiet_NaN();
+  std::uint64_t gnss_epoch_generation = 0;
+  std::uint64_t gnss_epoch_identity = 0;
+  double integrity_stamp_s = std::numeric_limits<double>::quiet_NaN();
+  std::uint64_t integrity_generation = 0;
+  std::uint64_t published_execution_snapshot_id = 0;
+  double request_ros_stamp_s = std::numeric_limits<double>::quiet_NaN();
+  double start_ros_stamp_s = std::numeric_limits<double>::quiet_NaN();
+  double occupancy_capture_finish_ros_stamp_s =
+      std::numeric_limits<double>::quiet_NaN();
+  double predictor_ready_ros_stamp_s =
+      std::numeric_limits<double>::quiet_NaN();
+  double snapshot_publish_ros_stamp_s =
+      std::numeric_limits<double>::quiet_NaN();
+  double finish_ros_stamp_s = std::numeric_limits<double>::quiet_NaN();
+  double request_steady_s = std::numeric_limits<double>::quiet_NaN();
+  double start_steady_s = std::numeric_limits<double>::quiet_NaN();
+  double occupancy_capture_finish_steady_s =
+      std::numeric_limits<double>::quiet_NaN();
+  double predictor_ready_steady_s =
+      std::numeric_limits<double>::quiet_NaN();
+  double finish_steady_s = std::numeric_limits<double>::quiet_NaN();
+  double queue_delay_ms = std::numeric_limits<double>::quiet_NaN();
+  double build_duration_ms = std::numeric_limits<double>::quiet_NaN();
+  double publish_age_s = std::numeric_limits<double>::quiet_NaN();
+  std::uint64_t pending_overwrite_count_at_request = 0;
+  std::uint64_t pending_overwrite_count = 0;
+  std::uint64_t risk_grid_yield_count = 0;
+  double risk_grid_yield_duration_ms = 0.0;
+  std::string frame_contract_id;
+  std::string geometry_id;
+  std::string support_identity;
+};
 
 struct P0ExecutionRiskSnapshot {
   std::uint64_t execution_snapshot_id = 0;
@@ -192,6 +265,8 @@ class P0RiskGridRuntime {
       rclcpp::Node::SharedPtr node,
       Config config,
       std::unique_ptr<iap::RiskPredictionProvider> provider = nullptr);
+  ~P0RiskGridRuntime();
+  void shutdown();
 
   bool enabled() const { return config_.enable_risk_grid; }
   double gnssClearanceTransitionM() const {
@@ -203,6 +278,24 @@ class P0RiskGridRuntime {
   std::shared_ptr<const P0PlanningSnapshot> acquirePlanningSnapshot() const;
   std::shared_ptr<const P0ExecutionRiskSnapshot>
   acquireExecutionRiskSnapshot() const;
+  // Select a causal execution authority for the caller's ROS/simulation
+  // evaluation instant. The latest snapshot may already contain the next
+  // sensor timestamp when mutually-exclusive executor callbacks are observed
+  // out of timestamp order; in that case the execution snapshot bound to the
+  // latest completed RiskGrid is the bounded fallback.
+  std::shared_ptr<const P0ExecutionRiskSnapshot>
+  acquireExecutionRiskSnapshotForEvaluation(double evaluation_time_s) const;
+  static std::shared_ptr<const P0ExecutionRiskSnapshot>
+  selectExecutionRiskSnapshotForEvaluation(
+      const std::shared_ptr<const P0ExecutionRiskSnapshot>& latest,
+      const std::shared_ptr<const P0ExecutionRiskSnapshot>& grid_bound,
+      double evaluation_time_s);
+  static std::shared_ptr<const P0ExecutionRiskSnapshot>
+  selectExecutionRiskSnapshotHistoryForEvaluation(
+      const std::deque<std::shared_ptr<const P0ExecutionRiskSnapshot>>&
+          completed,
+      const std::shared_ptr<const P0ExecutionRiskSnapshot>& grid_bound,
+      double evaluation_time_s);
   bool gnssEpochFreshAt(double epoch_stamp_s,
                         double evaluation_time_s) const;
   bool executionSnapshotFreshAt(
@@ -226,12 +319,30 @@ class P0RiskGridRuntime {
       std::function<iap::RiskGridMap::OccupancyDiagnosticQuery()> factory);
   void setOccupancyEpochFactory(
       std::function<P0OccupancyEpochCapture()> factory);
+  void setExecutionOccupancyEpochFactory(
+      std::function<P0OccupancyEpochCapture()> factory);
+  void setOccupancyGenerationProvider(std::function<uint64_t()> provider);
+  void notifyOccupancyCommitted(uint64_t generation, double source_stamp_s);
+  P0ExecutionSnapshotAttemptEvidence lastExecutionSnapshotAttempt() const;
 
  private:
   friend class P0RiskGridRuntimeStampTest;
 
   void createRosInterfaces();
   void executionSnapshotTimerCallback();
+  struct ExecutionSnapshotRequest {
+    uint64_t generation = 0;
+    double source_stamp_s = std::numeric_limits<double>::quiet_NaN();
+    double request_ros_stamp_s = std::numeric_limits<double>::quiet_NaN();
+    double request_steady_s = std::numeric_limits<double>::quiet_NaN();
+    uint64_t overwritten_count = 0;
+  };
+  void executionSnapshotWorkerLoop();
+  void buildAndPublishExecutionSnapshot(const ExecutionSnapshotRequest& request);
+  void recordExecutionSnapshotAttempt(
+      P0ExecutionSnapshotAttemptEvidence evidence);
+  bool yieldRiskGridToExecutionSnapshot(
+      std::chrono::steady_clock::time_point deadline);
   void refreshTimerCallback();
   void healthTimerCallback();
   void publishHealth(const iap::RiskGridHealth& health, double now_s);
@@ -385,21 +496,55 @@ class P0RiskGridRuntime {
       iap::RiskGridMap::OccupancyDiagnosticQuery base_query = {}) const;
   double currentMessageStamp() const;
   double currentRefreshStamp() const;
+  double diagnosticRosNowSeconds() const;
   double liveNowSeconds() const;
 
   rclcpp::Node::SharedPtr node_;
   Config config_;
   iap::RiskGridMap risk_grid_;
   std::unique_ptr<iap::RiskPredictionProvider> provider_;
+  // Runtime callbacks start before production map adapters are attached.
+  // Keep each replaceable source callable behind one synchronization seam so
+  // the timer, dense-grid refresh and execution worker never race a setter.
+  mutable std::mutex source_factory_mutex_;
   iap::RiskGridMap::OccupancyPredicate occupancy_predicate_;
   iap::RiskGridMap::OccupancyDiagnosticQuery occupancy_diagnostic_query_;
   std::function<iap::RiskGridMap::OccupancyDiagnosticQuery()>
       occupancy_diagnostic_query_factory_;
   std::function<P0OccupancyEpochCapture()> occupancy_epoch_factory_;
+  std::function<P0OccupancyEpochCapture()>
+      execution_occupancy_epoch_factory_;
+  std::function<uint64_t()> occupancy_generation_provider_;
   mutable std::mutex planning_snapshot_mutex_;
   std::shared_ptr<const P0PlanningSnapshot> planning_snapshot_;
   std::shared_ptr<const P0ExecutionRiskSnapshot> execution_snapshot_;
+  // Published results are not pending work. Retain only enough completed
+  // snapshots to select the newest causal tuple when ROS callbacks for the
+  // next sensor stamp overtake an execution query for the preceding stamp.
+  std::deque<std::shared_ptr<const P0ExecutionRiskSnapshot>>
+      execution_snapshot_history_;
   std::atomic<std::uint64_t> next_execution_snapshot_id_{1};
+  std::atomic<std::uint64_t> next_execution_snapshot_attempt_id_{1};
+  mutable std::mutex execution_snapshot_worker_mutex_;
+  std::condition_variable execution_snapshot_worker_cv_;
+  std::optional<ExecutionSnapshotRequest> pending_execution_snapshot_request_;
+  std::thread execution_snapshot_worker_;
+  bool execution_snapshot_worker_stop_ = false;
+  bool execution_snapshot_worker_in_flight_ = false;
+  // Reserve two low-priority RiskGrid workers for uninterrupted forward
+  // progress while the remaining workers make bounded scheduling yields to
+  // the execution snapshot. Dynamic work stealing prevents yielded workers
+  // from retaining a slow fixed partition.
+  std::size_t risk_grid_yield_waiter_count_ = 0;
+  uint64_t last_requested_occupancy_generation_ = 0;
+  uint64_t execution_snapshot_pending_overwrite_count_ = 0;
+  P0ExecutionSnapshotAttemptEvidence last_execution_snapshot_attempt_;
+  P0ExecutionSnapshotAttemptEvidence last_execution_snapshot_failure_;
+  uint64_t execution_snapshot_attempt_count_ = 0;
+  uint64_t execution_snapshot_publish_count_ = 0;
+  uint64_t execution_snapshot_failure_count_ = 0;
+  uint64_t risk_grid_yield_count_ = 0;
+  double risk_grid_yield_duration_ms_ = 0.0;
   // refreshOnceForTest() intentionally executes one frozen transaction.  It
   // must not invoke the independent live timer (which would capture the
   // occupancy factory twice), while still exposing that transaction's direct
@@ -438,6 +583,8 @@ class P0RiskGridRuntime {
   rclcpp::TimerBase::SharedPtr health_timer_;
   std::shared_ptr<SafetyRvizPublisher> safety_viz_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr health_pub_;
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr
+      execution_snapshot_attempt_pub_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
   rclcpp::Subscription<iap::msg::IntegrityReport>::SharedPtr integrity_sub_;
   rclcpp::Subscription<gnss_comm::msg::GnssMeasMsg>::SharedPtr range_sub_;

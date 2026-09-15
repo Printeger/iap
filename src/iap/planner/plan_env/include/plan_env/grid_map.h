@@ -15,6 +15,7 @@
 #include <random>
 #include <nav_msgs/msg/odometry.hpp>
 #include <queue>
+#include <set>
 #include <rclcpp/rclcpp.hpp>
 #include <tuple>
 #include <unordered_map>
@@ -289,9 +290,18 @@ public:
   OccupancyDiagnosticQuery captureOccupancyDiagnosticQuery() const;
   std::shared_ptr<const FrozenOccupancyEpoch>
   captureFrozenOccupancyEpoch() const;
+  // Registered-map execution checks need immutable obstacle/support evidence,
+  // but not a copy of every dense lattice byte.  This sparse capture keeps the
+  // same generation and geometry identity while leaving the full dense freeze
+  // to the lower-priority RiskGrid builder.
+  std::shared_ptr<const FrozenOccupancyEpoch>
+  captureFrozenExecutionOccupancyEpoch() const;
   OccupancyCollisionDeltaHistory collisionDeltasSince(
       uint64_t base_generation) const;
   uint64_t occupancyGeneration() const;
+  using OccupancyCommitObserver =
+      std::function<void(uint64_t generation, double source_stamp_s)>;
+  void setOccupancyCommitObserver(OccupancyCommitObserver observer);
   // Bind current-body observation evidence to the planner's canonical vehicle
   // radius. This is intentionally not a separate ROS parameter.
   void setCurrentVehicleClearanceRadius(double radius_m);
@@ -346,7 +356,14 @@ private:
       const iap::msg::ActiveLidarWindowDelta::ConstSharedPtr &message);
   void requestRegisteredWindowRecovery(const std::string &reason);
   void maintainRegisteredWindowRecovery();
-  void applyRegisteredLidarUpdate(
+  struct OccupancyCommitNotification
+  {
+    uint64_t generation = 0;
+    double source_stamp_s = std::numeric_limits<double>::quiet_NaN();
+
+    explicit operator bool() const { return generation != 0U; }
+  };
+  OccupancyCommitNotification applyRegisteredLidarUpdate(
       const RegisteredLidarWindowUpdate &update);
   void odomCallback(const nav_msgs::msg::Odometry::SharedPtr odom);
 
@@ -365,7 +382,10 @@ private:
   void markCurrentVehicleFootprintObserved();
   void beginOccupancyWriteTransaction();
   void recordCollisionStateBeforeMutation(int address);
-  void commitOccupancyWriteTransaction(double stamp_s);
+  OccupancyCommitNotification commitOccupancyWriteTransaction(
+      double stamp_s);
+  void notifyOccupancyCommitted(
+      const OccupancyCommitNotification &notification);
   bool collisionOccupiedAtAddress(int address) const;
 
   inline void inflatePoint(const Eigen::Vector3i &pt, int step, vector<Eigen::Vector3i> &pts);
@@ -460,9 +480,15 @@ private:
   // hit transitions without allocating a large hash table at 10 Hz.
   std::vector<uint64_t> registered_inflation_dirty_bits_;
   std::vector<uint16_t> registered_raw_inflation_count_;
+  std::set<int> registered_raw_occupied_addresses_;
   std::vector<double> registered_current_apply_latency_ms_;
   std::vector<double> registered_sensor_to_occupancy_latency_ms_;
   std::vector<double> registered_delta_apply_latency_ms_;
+  // Original scan metadata for corridor-local freshness. Entries retain their
+  // acquisition stamps; they are never refreshed when a later frame arrives.
+  std::deque<RegisteredLidarFrameMetadata> registered_support_history_;
+  mutable std::mutex occupancy_commit_observer_mutex_;
+  OccupancyCommitObserver occupancy_commit_observer_;
 };
 
 /* ============================== definition of inline function
@@ -534,15 +560,17 @@ inline void GridMap::setOccupied(Eigen::Vector3d pos)
   Eigen::Vector3i id;
   posToIndex(pos, id);
 
-  std::lock_guard<std::mutex> lock(occupancy_epoch_mutex_);
+  std::unique_lock<std::mutex> lock(occupancy_epoch_mutex_);
   beginOccupancyWriteTransaction();
   md_.occupancy_buffer_inflate_[id(0) * mp_.map_voxel_num_(1) * mp_.map_voxel_num_(2) +
                                 id(1) * mp_.map_voxel_num_(2) + id(2)] = 1;
   const int address = toAddress(id);
   if (address >= 0 && address < static_cast<int>(md_.observed_buffer_.size()))
     md_.observed_buffer_[static_cast<std::size_t>(address)] = 1;
-  commitOccupancyWriteTransaction(
+  const auto notification = commitOccupancyWriteTransaction(
       occupancy_cloud_stamp_s_.load(std::memory_order_acquire));
+  lock.unlock();
+  notifyOccupancyCommitted(notification);
 }
 
 inline void GridMap::setOccupancy(Eigen::Vector3d pos, double occ)
@@ -559,15 +587,17 @@ inline void GridMap::setOccupancy(Eigen::Vector3d pos, double occ)
   Eigen::Vector3i id;
   posToIndex(pos, id);
 
-  std::lock_guard<std::mutex> lock(occupancy_epoch_mutex_);
+  std::unique_lock<std::mutex> lock(occupancy_epoch_mutex_);
   beginOccupancyWriteTransaction();
   const int address = toAddress(id);
   recordCollisionStateBeforeMutation(address);
   md_.occupancy_buffer_[address] = occ;
   if (address >= 0 && address < static_cast<int>(md_.observed_buffer_.size()))
     md_.observed_buffer_[static_cast<std::size_t>(address)] = 1;
-  commitOccupancyWriteTransaction(
+  const auto notification = commitOccupancyWriteTransaction(
       occupancy_cloud_stamp_s_.load(std::memory_order_acquire));
+  lock.unlock();
+  notifyOccupancyCommitted(notification);
 }
 
 inline int GridMap::getOccupancy(Eigen::Vector3d pos)

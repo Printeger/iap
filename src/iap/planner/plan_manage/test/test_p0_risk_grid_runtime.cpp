@@ -1264,6 +1264,32 @@ class P0RiskGridRuntimeStampTest : public ::testing::Test {
     return snapshot ? iap::canonicalRiskGridConfigHash(snapshot->params()) : "";
   }
 
+  static void setExecutionSnapshotGateForTest(
+      P0RiskGridRuntime* runtime, const bool in_flight) {
+    std::lock_guard<std::mutex> lock(
+        runtime->execution_snapshot_worker_mutex_);
+    runtime->execution_snapshot_worker_in_flight_ = in_flight;
+    runtime->execution_snapshot_worker_cv_.notify_all();
+  }
+
+  static bool yieldRiskGridForTest(
+      P0RiskGridRuntime* runtime,
+      const std::chrono::steady_clock::time_point deadline) {
+    return runtime->yieldRiskGridToExecutionSnapshot(deadline);
+  }
+
+  static std::size_t riskGridYieldWaiterCountForTest(
+      P0RiskGridRuntime* runtime) {
+    std::lock_guard<std::mutex> lock(
+        runtime->execution_snapshot_worker_mutex_);
+    return runtime->risk_grid_yield_waiter_count_;
+  }
+
+  static void setEffectiveWorkerCountForTest(
+      P0RiskGridRuntime* runtime, const int worker_count) {
+    runtime->config_.predictor_effective_worker_count = worker_count;
+  }
+
   static std::string refreshSourceIdentityHash(
       const P0RiskGridRuntime& runtime) {
     const auto snapshot = runtime.refreshEvidenceRecordSnapshot().snapshot;
@@ -1442,12 +1468,26 @@ class P0RiskGridRuntimeStampTest : public ::testing::Test {
   }
 
   static void publishExecutionSnapshot(P0RiskGridRuntime* runtime) {
-    runtime->executionSnapshotTimerCallback();
+    P0RiskGridRuntime::ExecutionSnapshotRequest request;
+    request.request_ros_stamp_s = runtime->liveNowSeconds();
+    runtime->buildAndPublishExecutionSnapshot(request);
   }
 
   static void useProductionExecutionSnapshotPath(
       P0RiskGridRuntime* runtime) {
     runtime->provider_.reset();
+  }
+
+  static bool yieldRiskGridForExecution(
+      P0RiskGridRuntime* runtime,
+      const std::chrono::steady_clock::time_point deadline) {
+    return runtime->yieldRiskGridToExecutionSnapshot(deadline);
+  }
+
+  static uint64_t riskGridYieldCount(P0RiskGridRuntime* runtime) {
+    std::lock_guard<std::mutex> lock(
+        runtime->execution_snapshot_worker_mutex_);
+    return runtime->risk_grid_yield_count_;
   }
 
   static void validateProfileWorkContract(const ProfileScenario scenario,
@@ -4671,6 +4711,144 @@ TEST_F(P0RiskGridRuntimeStampTest,
 }
 
 TEST_F(P0RiskGridRuntimeStampTest,
+       ExecutionSnapshotDirectRiskUsesObservedFreeOutsideModelEnvelope) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_execution_snapshot_support_union_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  auto config = enabledConfig();
+  config.online_mapping_mode = true;
+  config.predictor_source_mode = iap::PredictorSourceMode::GnssOnly;
+  config.predictor_gnss_epoch_policy =
+      iap::PredictorGnssEpochPolicy::Required;
+  config.grid.use_fixed_origin = true;
+  config.grid.fixed_origin_w = Eigen::Vector3d(-1.5, -1.5, -1.5);
+  config.grid.size_x_m = 30.0;
+  config.grid.size_y_m = 30.0;
+  config.grid.size_z_m = 6.0;
+  config.grid.geometry_id = "planning_lattice_v1:runtime_test";
+  P0RiskGridRuntime runtime(node, config);
+  useProductionExecutionSnapshotPath(&runtime);
+
+  const double stamp_s = node->now().seconds();
+  seedValidInputs(&runtime, stamp_s, stamp_s);
+  seedGnssEpoch(&runtime, stamp_s);
+  setOriginSeen(&runtime, true);
+  setOriginValid(&runtime, true);
+  setOriginStamp(&runtime, stamp_s);
+  const auto live_generation = std::make_shared<std::atomic<uint64_t>>(8u);
+  const auto source_owner = std::make_shared<const int>(8);
+  runtime.setOccupancyEpochFactory(
+      [live_generation, source_owner, stamp_s]() {
+        auto capture = makeOccupancyEpochCapture(
+            live_generation, 8u, stamp_s, "map", {}, source_owner,
+            [source_owner]() { return source_owner; }, 0.2,
+            Eigen::Vector3d(-1.5, -1.5, -1.5));
+        if (!capture.epoch) return capture;
+        auto support = std::make_shared<iap::TrustedLocalMapSupport>();
+        support->T_map_sensor = Eigen::Isometry3d::Identity();
+        support->retained_min_map = Eigen::Vector3d::Constant(-0.1);
+        support->retained_max_map = Eigen::Vector3d::Constant(0.1);
+        support->min_range_m = 0.0;
+        support->max_range_m = 0.1;
+        support->horizontal_fov_rad = 2.0 * M_PI;
+        support->vertical_min_rad = -0.5 * M_PI;
+        support->vertical_max_rad = 0.5 * M_PI;
+        support->stamp_s = stamp_s;
+        support->valid_until_s = stamp_s + 1.0;
+        support->frame_id = "map";
+        capture.epoch->trusted_local_map_support = std::move(support);
+        return capture;
+      });
+
+  publishExecutionSnapshot(&runtime);
+  const auto execution = runtime.acquireExecutionRiskSnapshot();
+  ASSERT_NE(execution, nullptr);
+  iap::ForwardRiskBatchRequest request;
+  request.combined_snapshot_identity = "execution_support_union";
+  request.evaluation_time_s = stamp_s;
+  request.compute_budget_ms = 150.0;
+  request.satellite_set_policy =
+      iap::ForwardRiskSatelliteSetPolicy::COMMON_CORE;
+  request.points.push_back(iap::ForwardRiskQueryPoint{
+      Eigen::Vector3d::Zero(), stamp_s, 0.0, 1u});
+  const auto direct = execution->forward_risk_batch(request);
+  ASSERT_EQ(direct.points.size(), 1u);
+  EXPECT_NE(direct.points.front().failure_reason,
+            iap::ForwardRiskFailureReason::GNSS_SKY_UNKNOWN);
+  EXPECT_EQ(direct.points.front().gnss_unknown_satellite_count, 0);
+}
+
+TEST_F(P0RiskGridRuntimeStampTest,
+       ExecutionPriorityUsesBoundedYieldWithoutStoppingRiskGrid) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_execution_priority_single_yield_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  P0RiskGridRuntime runtime(node, enabledConfig());
+  setEffectiveWorkerCountForTest(&runtime, 6);
+  setExecutionSnapshotGateForTest(&runtime, true);
+  const auto deadline = std::chrono::steady_clock::now() +
+      std::chrono::milliseconds(250);
+  const auto yield_started = std::chrono::steady_clock::now();
+  EXPECT_TRUE(yieldRiskGridForTest(&runtime, deadline));
+  const double yield_elapsed_ms =
+      std::chrono::duration<double, std::milli>(
+          std::chrono::steady_clock::now() - yield_started).count();
+  EXPECT_GE(yield_elapsed_ms, 0.0);
+  EXPECT_LT(yield_elapsed_ms, 10.0);
+  EXPECT_EQ(riskGridYieldWaiterCountForTest(&runtime), 0u);
+
+  setExecutionSnapshotGateForTest(&runtime, false);
+}
+
+TEST_F(P0RiskGridRuntimeStampTest,
+       ExecutionSnapshotUsesNewestFrozenTupleStampAsEvaluationTime) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_execution_snapshot_tuple_time_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  auto config = enabledConfig();
+  config.online_mapping_mode = true;
+  config.predictor_source_mode = iap::PredictorSourceMode::GnssOnly;
+  config.predictor_gnss_epoch_policy =
+      iap::PredictorGnssEpochPolicy::Required;
+  config.grid.use_fixed_origin = true;
+  config.grid.fixed_origin_w = Eigen::Vector3d(-1.5, -1.5, -1.5);
+  config.grid.size_x_m = 30.0;
+  config.grid.size_y_m = 30.0;
+  config.grid.size_z_m = 6.0;
+  config.grid.geometry_id = "planning_lattice_v1:runtime_test";
+  P0RiskGridRuntime runtime(node, config);
+  useProductionExecutionSnapshotPath(&runtime);
+
+  // The GNSS callback may arrive just ahead of the odometry/occupancy callback
+  // in the same simulator clock.  This is a causal tuple-alignment issue, not
+  // stale data: the frozen tuple must be evaluated at its newest source stamp.
+  seedValidInputs(&runtime, 100.0, 100.0);
+  seedGnssEpoch(&runtime, 100.1);
+  const auto live_generation =
+      std::make_shared<std::atomic<std::uint64_t>>(7u);
+  const auto source_owner = std::make_shared<const int>(7);
+  runtime.setOccupancyEpochFactory(
+      [live_generation, source_owner]() {
+        return makeOccupancyEpochCapture(
+            live_generation, 7u, 100.0, "map", {}, source_owner,
+            [source_owner]() { return source_owner; }, 0.2,
+            Eigen::Vector3d(-1.5, -1.5, -1.5));
+      });
+
+  publishExecutionSnapshot(&runtime);
+  const auto execution = runtime.acquireExecutionRiskSnapshot();
+  const auto attempt = runtime.lastExecutionSnapshotAttempt();
+  ASSERT_NE(execution, nullptr) << attempt.reason;
+  EXPECT_DOUBLE_EQ(execution->evaluation_time_s, 100.1);
+  EXPECT_TRUE(execution->freshAt(100.1, config.gnss_epoch_max_age_s));
+  EXPECT_EQ(attempt.status,
+            P0ExecutionSnapshotAttemptStatus::PUBLISHED);
+}
+
+TEST_F(P0RiskGridRuntimeStampTest,
        IdenticalExecutionTupleDoesNotRepublishOrInvalidateCacheIdentity) {
   ensure_rclcpp();
   auto node = std::make_shared<rclcpp::Node>(
@@ -4717,6 +4895,304 @@ TEST_F(P0RiskGridRuntimeStampTest,
   ASSERT_NE(second, nullptr);
   EXPECT_EQ(second.get(), first.get());
   EXPECT_EQ(second->execution_snapshot_id, first->execution_snapshot_id);
+}
+
+TEST_F(P0RiskGridRuntimeStampTest,
+       OccupancyGenerationNotificationPublishesLatestExecutionSnapshot) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_execution_snapshot_generation_worker_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  auto config = enabledConfig();
+  config.online_mapping_mode = true;
+  config.predictor_source_mode = iap::PredictorSourceMode::GnssOnly;
+  config.predictor_gnss_epoch_policy =
+      iap::PredictorGnssEpochPolicy::Required;
+  config.grid.use_fixed_origin = true;
+  config.grid.fixed_origin_w = Eigen::Vector3d(-1.5, -1.5, -1.5);
+  config.grid.size_x_m = 30.0;
+  config.grid.size_y_m = 30.0;
+  config.grid.size_z_m = 6.0;
+  config.grid.geometry_id = "planning_lattice_v1:runtime_test";
+  P0RiskGridRuntime runtime(node, config);
+  useProductionExecutionSnapshotPath(&runtime);
+  const double stamp_s = node->now().seconds();
+  seedValidInputs(&runtime, stamp_s, stamp_s);
+  seedGnssEpoch(&runtime, stamp_s);
+  setOriginSeen(&runtime, true);
+  setOriginValid(&runtime, true);
+  setOriginStamp(&runtime, stamp_s);
+  const auto live_generation = std::make_shared<std::atomic<uint64_t>>(3u);
+  const auto source_owner = std::make_shared<const int>(3);
+  runtime.setOccupancyEpochFactory(
+      [live_generation, source_owner, stamp_s]() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(15));
+        const auto generation = live_generation->load();
+        return makeOccupancyEpochCapture(
+            live_generation, generation, stamp_s, "map", {}, source_owner,
+            [source_owner]() { return source_owner; }, 0.2,
+            Eigen::Vector3d(-1.5, -1.5, -1.5));
+      });
+
+  runtime.notifyOccupancyCommitted(3u, stamp_s);
+  EXPECT_TRUE(yieldRiskGridForExecution(
+      &runtime, std::chrono::steady_clock::now() +
+                    std::chrono::seconds(2)));
+  EXPECT_GE(riskGridYieldCount(&runtime), 1u);
+  const auto first_deadline = std::chrono::steady_clock::now() +
+      std::chrono::seconds(2);
+  while (!runtime.acquireExecutionRiskSnapshot() &&
+         std::chrono::steady_clock::now() < first_deadline)
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  ASSERT_NE(runtime.acquireExecutionRiskSnapshot(), nullptr);
+
+  live_generation->store(5u);
+  runtime.notifyOccupancyCommitted(4u, stamp_s);
+  runtime.notifyOccupancyCommitted(5u, stamp_s);
+  const auto latest_deadline = std::chrono::steady_clock::now() +
+      std::chrono::seconds(2);
+  while (runtime.acquireExecutionRiskSnapshot()->source_identity
+                 .occupancy_generation != 5u &&
+         std::chrono::steady_clock::now() < latest_deadline)
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+
+  const auto latest = runtime.acquireExecutionRiskSnapshot();
+  ASSERT_NE(latest, nullptr);
+  EXPECT_EQ(latest->source_identity.occupancy_generation, 5u);
+  const auto attempt = runtime.lastExecutionSnapshotAttempt();
+  EXPECT_EQ(attempt.status,
+            P0ExecutionSnapshotAttemptStatus::PUBLISHED);
+  EXPECT_EQ(attempt.captured_occupancy_generation, 5u);
+  EXPECT_GT(attempt.attempt_id, 0u);
+  EXPECT_TRUE(std::isfinite(attempt.queue_delay_ms));
+  EXPECT_TRUE(std::isfinite(attempt.build_duration_ms));
+  EXPECT_TRUE(std::isfinite(attempt.occupancy_capture_finish_ros_stamp_s));
+  EXPECT_TRUE(std::isfinite(attempt.predictor_ready_ros_stamp_s));
+  EXPECT_TRUE(std::isfinite(attempt.snapshot_publish_ros_stamp_s));
+  EXPECT_GE(attempt.occupancy_capture_finish_steady_s,
+            attempt.start_steady_s);
+  EXPECT_GE(attempt.predictor_ready_steady_s,
+            attempt.occupancy_capture_finish_steady_s);
+}
+
+TEST_F(P0RiskGridRuntimeStampTest,
+       NewGenerationSupersedesAnOlderSnapshotAlreadyInFlight) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_execution_snapshot_inflight_latest_wins_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  auto config = enabledConfig();
+  config.online_mapping_mode = true;
+  config.predictor_source_mode = iap::PredictorSourceMode::GnssOnly;
+  config.predictor_gnss_epoch_policy =
+      iap::PredictorGnssEpochPolicy::Required;
+  config.grid.use_fixed_origin = true;
+  config.grid.fixed_origin_w = Eigen::Vector3d(-1.5, -1.5, -1.5);
+  config.grid.size_x_m = 30.0;
+  config.grid.size_y_m = 30.0;
+  config.grid.size_z_m = 6.0;
+  config.grid.geometry_id = "planning_lattice_v1:runtime_test";
+  P0RiskGridRuntime runtime(node, config);
+  useProductionExecutionSnapshotPath(&runtime);
+  const double stamp_s = node->now().seconds();
+  seedValidInputs(&runtime, stamp_s, stamp_s);
+  seedGnssEpoch(&runtime, stamp_s);
+  setOriginSeen(&runtime, true);
+  setOriginValid(&runtime, true);
+  setOriginStamp(&runtime, stamp_s);
+
+  const auto live_generation =
+      std::make_shared<std::atomic<std::uint64_t>>(4u);
+  const auto source_owner = std::make_shared<const int>(4);
+  std::mutex gate_mutex;
+  std::condition_variable gate_cv;
+  bool generation_four_started = false;
+  bool release_generation_four = false;
+  bool generation_five_started = false;
+  bool release_generation_five = false;
+  runtime.setOccupancyEpochFactory(
+      [&, live_generation, source_owner, stamp_s]() {
+        const auto generation = live_generation->load();
+        {
+          std::unique_lock<std::mutex> lock(gate_mutex);
+          if (generation == 4u) {
+            generation_four_started = true;
+            gate_cv.notify_all();
+            gate_cv.wait(lock, [&release_generation_four]() {
+              return release_generation_four;
+            });
+          } else if (generation == 5u) {
+            generation_five_started = true;
+            gate_cv.notify_all();
+            gate_cv.wait(lock, [&release_generation_five]() {
+              return release_generation_five;
+            });
+          }
+        }
+        return makeOccupancyEpochCapture(
+            live_generation, generation, stamp_s, "map", {}, source_owner,
+            [source_owner]() { return source_owner; }, 0.2,
+            Eigen::Vector3d(-1.5, -1.5, -1.5));
+      });
+
+  runtime.notifyOccupancyCommitted(4u, stamp_s);
+  {
+    std::unique_lock<std::mutex> lock(gate_mutex);
+    ASSERT_TRUE(gate_cv.wait_for(
+        lock, std::chrono::seconds(2),
+        [&generation_four_started]() { return generation_four_started; }));
+  }
+  live_generation->store(5u);
+  runtime.notifyOccupancyCommitted(5u, stamp_s);
+  {
+    std::lock_guard<std::mutex> lock(gate_mutex);
+    release_generation_four = true;
+  }
+  gate_cv.notify_all();
+  {
+    std::unique_lock<std::mutex> lock(gate_mutex);
+    ASSERT_TRUE(gate_cv.wait_for(
+        lock, std::chrono::seconds(2),
+        [&generation_five_started]() { return generation_five_started; }));
+  }
+
+  EXPECT_EQ(runtime.acquireExecutionRiskSnapshot(), nullptr);
+  EXPECT_EQ(runtime.lastExecutionSnapshotAttempt().status,
+            P0ExecutionSnapshotAttemptStatus::SUPERSEDED);
+  {
+    std::lock_guard<std::mutex> lock(gate_mutex);
+    release_generation_five = true;
+  }
+  gate_cv.notify_all();
+  const auto deadline = std::chrono::steady_clock::now() +
+      std::chrono::seconds(2);
+  while ((!runtime.acquireExecutionRiskSnapshot() ||
+          runtime.acquireExecutionRiskSnapshot()->source_identity
+                  .occupancy_generation != 5u) &&
+         std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  }
+  const auto latest = runtime.acquireExecutionRiskSnapshot();
+  ASSERT_NE(latest, nullptr);
+  EXPECT_EQ(latest->source_identity.occupancy_generation, 5u);
+}
+
+TEST_F(P0RiskGridRuntimeStampTest,
+       SnapshotWorkerClassifiesFactoryExceptionAndContinues) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_execution_snapshot_worker_exception_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  auto config = enabledConfig();
+  config.online_mapping_mode = true;
+  config.predictor_source_mode = iap::PredictorSourceMode::GnssOnly;
+  config.predictor_gnss_epoch_policy =
+      iap::PredictorGnssEpochPolicy::Required;
+  config.grid.use_fixed_origin = true;
+  config.grid.fixed_origin_w = Eigen::Vector3d(-1.5, -1.5, -1.5);
+  config.grid.size_x_m = 30.0;
+  config.grid.size_y_m = 30.0;
+  config.grid.size_z_m = 6.0;
+  config.grid.geometry_id = "planning_lattice_v1:runtime_test";
+  P0RiskGridRuntime runtime(node, config);
+  useProductionExecutionSnapshotPath(&runtime);
+  const double stamp_s = node->now().seconds();
+  seedValidInputs(&runtime, stamp_s, stamp_s);
+  seedGnssEpoch(&runtime, stamp_s);
+  setOriginSeen(&runtime, true);
+  setOriginValid(&runtime, true);
+  setOriginStamp(&runtime, stamp_s);
+  runtime.setOccupancyEpochFactory([]() -> P0OccupancyEpochCapture {
+    throw std::runtime_error("synthetic capture failure");
+  });
+
+  runtime.notifyOccupancyCommitted(11u, stamp_s);
+  const auto exception_deadline = std::chrono::steady_clock::now() +
+      std::chrono::seconds(2);
+  while (runtime.lastExecutionSnapshotAttempt().status !=
+             P0ExecutionSnapshotAttemptStatus::WORKER_EXCEPTION &&
+         std::chrono::steady_clock::now() < exception_deadline) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  }
+  const auto failed = runtime.lastExecutionSnapshotAttempt();
+  EXPECT_EQ(failed.status,
+            P0ExecutionSnapshotAttemptStatus::WORKER_EXCEPTION);
+  EXPECT_NE(failed.reason.find("synthetic capture failure"),
+            std::string::npos);
+
+  const auto live_generation =
+      std::make_shared<std::atomic<std::uint64_t>>(12u);
+  const auto source_owner = std::make_shared<const int>(12);
+  runtime.setOccupancyEpochFactory(
+      [live_generation, source_owner, stamp_s]() {
+        return makeOccupancyEpochCapture(
+            live_generation, 12u, stamp_s, "map", {}, source_owner,
+            [source_owner]() { return source_owner; }, 0.2,
+            Eigen::Vector3d(-1.5, -1.5, -1.5));
+      });
+  runtime.notifyOccupancyCommitted(12u, stamp_s);
+  const auto recovery_deadline = std::chrono::steady_clock::now() +
+      std::chrono::seconds(2);
+  while (!runtime.acquireExecutionRiskSnapshot() &&
+         std::chrono::steady_clock::now() < recovery_deadline) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  }
+  ASSERT_NE(runtime.acquireExecutionRiskSnapshot(), nullptr);
+  EXPECT_EQ(runtime.lastExecutionSnapshotAttempt().status,
+            P0ExecutionSnapshotAttemptStatus::PUBLISHED);
+}
+
+TEST_F(P0RiskGridRuntimeStampTest,
+       SnapshotWorkerShutdownIsIdempotentAndRejectsNewNotifications) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_execution_snapshot_worker_shutdown_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  auto config = enabledConfig();
+  P0RiskGridRuntime runtime(node, config);
+  std::atomic<std::size_t> capture_count{0u};
+  runtime.setOccupancyEpochFactory([&capture_count]() {
+    ++capture_count;
+    return P0OccupancyEpochCapture{
+        P0OccupancyEpochCaptureStatus::SNAPSHOT_UNAVAILABLE, std::nullopt};
+  });
+
+  runtime.shutdown();
+  runtime.shutdown();
+  runtime.notifyOccupancyCommitted(1u, 1.0);
+  std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  EXPECT_EQ(capture_count.load(), 0u);
+  EXPECT_EQ(runtime.lastExecutionSnapshotAttempt().attempt_id, 0u);
+}
+
+TEST_F(P0RiskGridRuntimeStampTest,
+       OccupancyGenerationAttemptClassifiesCaptureFailure) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_execution_snapshot_capture_failure_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  auto config = enabledConfig();
+  P0RiskGridRuntime runtime(node, config);
+  runtime.setOccupancyEpochFactory([]() {
+    return P0OccupancyEpochCapture{
+        P0OccupancyEpochCaptureStatus::SNAPSHOT_UNAVAILABLE, std::nullopt};
+  });
+  runtime.notifyOccupancyCommitted(9u, 8.5);
+  const auto deadline = std::chrono::steady_clock::now() +
+      std::chrono::seconds(2);
+  while (runtime.lastExecutionSnapshotAttempt().attempt_id == 0u &&
+         std::chrono::steady_clock::now() < deadline)
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  const auto attempt = runtime.lastExecutionSnapshotAttempt();
+  EXPECT_GT(attempt.attempt_id, 0u);
+  EXPECT_EQ(attempt.requested_occupancy_generation, 9u);
+  EXPECT_EQ(attempt.status,
+            P0ExecutionSnapshotAttemptStatus::CAPTURE_UNAVAILABLE);
+  EXPECT_EQ(attempt.reason, "occupancy_capture_unavailable");
+  EXPECT_TRUE(std::isfinite(attempt.queue_delay_ms));
+  EXPECT_TRUE(std::isfinite(attempt.build_duration_ms));
+  EXPECT_TRUE(std::isfinite(attempt.occupancy_capture_finish_ros_stamp_s));
+  EXPECT_FALSE(std::isfinite(attempt.predictor_ready_ros_stamp_s));
 }
 
 TEST_F(P0RiskGridRuntimeStampTest,

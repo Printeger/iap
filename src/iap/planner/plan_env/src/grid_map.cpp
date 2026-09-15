@@ -1097,7 +1097,7 @@ bool GridMap::updateOccupancyFromPendingDepth(
     const rclcpp::Time &receipt_time, bool *watchdog_timed_out,
     double *last_receipt_time_s)
 {
-  std::lock_guard<std::mutex> occupancy_lock(occupancy_epoch_mutex_);
+  std::unique_lock<std::mutex> occupancy_lock(occupancy_epoch_mutex_);
   if (watchdog_timed_out)
     *watchdog_timed_out = false;
   if (md_.last_occ_update_time_.seconds() < 1.0)
@@ -1141,7 +1141,7 @@ bool GridMap::updateOccupancyFromPendingDepth(
 
   occupancy_cloud_stamp_s_.store(
       source_stamp_s, std::memory_order_release);
-  commitOccupancyWriteTransaction(source_stamp_s);
+  const auto notification = commitOccupancyWriteTransaction(source_stamp_s);
 
   // t4 = ros::Time::now();
 
@@ -1159,6 +1159,8 @@ bool GridMap::updateOccupancyFromPendingDepth(
   md_.local_updated_ = false;
   md_.pending_depth_source_stamp_s_ =
       std::numeric_limits<double>::quiet_NaN();
+  occupancy_lock.unlock();
+  notifyOccupancyCommitted(notification);
   return true;
 }
 
@@ -1273,11 +1275,11 @@ void GridMap::processLatestIndependentCloud()
     cloudCallback(cloud);
 }
 
-void GridMap::applyRegisteredLidarUpdate(
+GridMap::OccupancyCommitNotification GridMap::applyRegisteredLidarUpdate(
     const RegisteredLidarWindowUpdate &update)
 {
   if (!update.accepted || !registered_lidar_window_)
-    return;
+    return {};
 
   beginOccupancyWriteTransaction();
   const int inflation_xy =
@@ -1312,6 +1314,14 @@ void GridMap::applyRegisteredLidarUpdate(
     if (was_occupied == becomes_occupied)
       continue;
     collision_changes.emplace_back(change.index, becomes_occupied);
+    // Keep the sparse execution snapshot tied to actual LiDAR returns.  The
+    // collision journal below intentionally observes the inflated footprint,
+    // which can be tens of times larger and must not be mistaken for raw LOS
+    // obstacles or copied on every execution-snapshot generation.
+    if (becomes_occupied)
+      registered_raw_occupied_addresses_.insert(changed_address);
+    else
+      registered_raw_occupied_addresses_.erase(changed_address);
     for (int x = -inflation_xy; x <= inflation_xy; ++x)
       for (int y = -inflation_xy; y <= inflation_xy; ++y)
         for (int z = -inflation_z; z <= inflation_z; ++z)
@@ -1405,10 +1415,16 @@ void GridMap::applyRegisteredLidarUpdate(
             mp_.map_voxel_num_ - Eigen::Vector3i::Ones());
   }
   md_.has_cloud_ = true;
+  // Registered-map mode owns the same physical current-vehicle clearance
+  // contract as the legacy point-cloud path. Record it before committing the
+  // occupancy transaction so execution snapshots never see a new LiDAR pose
+  // paired with an UNKNOWN voxel at the vehicle itself. Occupied/inflated
+  // state remains dominant in diagnostic queries.
+  markCurrentVehicleFootprintObserved();
   if (std::isfinite(update.stamp_s) && update.stamp_s > 0.0)
     occupancy_cloud_stamp_s_.store(
         update.stamp_s, std::memory_order_release);
-  commitOccupancyWriteTransaction(update.stamp_s);
+  return commitOccupancyWriteTransaction(update.stamp_s);
 }
 
 void GridMap::registeredCurrentFrameCallback(
@@ -1431,14 +1447,33 @@ void GridMap::registeredCurrentFrameCallback(
     return;
   }
   const auto parsed = std::chrono::steady_clock::now();
-  std::lock_guard<std::mutex> lock(occupancy_epoch_mutex_);
+  std::unique_lock<std::mutex> lock(occupancy_epoch_mutex_);
   md_.camera_pos_ = frame.T_map_lidar.translation();
   md_.camera_r_m_ = frame.T_map_lidar.linear();
   md_.has_odom_ = true;
   const auto update = registered_lidar_window_->applyCurrentFrame(frame);
   registered_current_frame_healthy_ = update.accepted;
+  if (update.accepted)
+  {
+    RegisteredLidarFrameMetadata metadata;
+    metadata.frame_id = frame.frame_id;
+    metadata.stamp_s = frame.stamp_s;
+    metadata.scan_end_stamp_s = frame.scan_end_stamp_s;
+    metadata.sensor_receipt_steady_ns = frame.sensor_receipt_steady_ns;
+    metadata.T_map_lidar = frame.T_map_lidar;
+    metadata.frame_contract_id = frame.frame_contract_id;
+    registered_support_history_.push_back(std::move(metadata));
+    const double oldest_allowed_stamp =
+        frame.scan_end_stamp_s - trusted_support_validity_s_;
+    while (!registered_support_history_.empty() &&
+           registered_support_history_.front().scan_end_stamp_s <
+               oldest_allowed_stamp)
+      registered_support_history_.pop_front();
+    while (registered_support_history_.size() > 64U)
+      registered_support_history_.pop_front();
+  }
   const auto accumulated = std::chrono::steady_clock::now();
-  applyRegisteredLidarUpdate(update);
+  const auto notification = applyRegisteredLidarUpdate(update);
   const auto applied = std::chrono::steady_clock::now();
   const double elapsed_ms = std::chrono::duration<double, std::milli>(
       applied - started).count();
@@ -1487,6 +1522,8 @@ void GridMap::registeredCurrentFrameCallback(
         std::chrono::duration<double, std::milli>(accumulated - parsed).count(),
         std::chrono::duration<double, std::milli>(applied - accumulated).count(),
         update.changes.size());
+  lock.unlock();
+  notifyOccupancyCommitted(notification);
 }
 
 void GridMap::registeredWindowDeltaCallback(
@@ -1799,7 +1836,7 @@ void GridMap::cloudCallback(const sensor_msgs::msg::PointCloud2::ConstPtr &img)
   if (!img->data.empty())
     pcl::fromROSMsg(*img, latest_cloud);
 
-  std::lock_guard<std::mutex> occupancy_lock(occupancy_epoch_mutex_);
+  std::unique_lock<std::mutex> occupancy_lock(occupancy_epoch_mutex_);
   md_.has_cloud_ = true;
 
   if (!md_.has_odom_)
@@ -1933,8 +1970,10 @@ void GridMap::cloudCallback(const sensor_msgs::msg::PointCloud2::ConstPtr &img)
       rclcpp::Time(img->header.stamp).seconds(), std::memory_order_release);
   if (valid_source_stamp)
     last_independent_cloud_stamp_s_ = source_stamp_s;
-  commitOccupancyWriteTransaction(
+  const auto notification = commitOccupancyWriteTransaction(
       rclcpp::Time(img->header.stamp).seconds());
+  occupancy_lock.unlock();
+  notifyOccupancyCommitted(notification);
 }
 
 void GridMap::markCurrentVehicleFootprintObserved()
@@ -2100,6 +2139,12 @@ uint64_t GridMap::occupancyGeneration() const
   return sequence / 2u;
 }
 
+void GridMap::setOccupancyCommitObserver(OccupancyCommitObserver observer)
+{
+  std::lock_guard<std::mutex> lock(occupancy_commit_observer_mutex_);
+  occupancy_commit_observer_ = std::move(observer);
+}
+
 bool GridMap::collisionOccupiedAtAddress(const int address) const
 {
   if (address < 0 ||
@@ -2131,7 +2176,8 @@ void GridMap::recordCollisionStateBeforeMutation(const int address)
       address, collisionOccupiedAtAddress(address));
 }
 
-void GridMap::commitOccupancyWriteTransaction(const double stamp_s)
+GridMap::OccupancyCommitNotification GridMap::commitOccupancyWriteTransaction(
+    const double stamp_s)
 {
   const uint64_t odd_sequence = occupancy_update_sequence_.load(
       std::memory_order_acquire);
@@ -2184,6 +2230,24 @@ void GridMap::commitOccupancyWriteTransaction(const double stamp_s)
   }
   collision_state_before_transaction_.clear();
   collision_transaction_active_ = false;
+  return {from_generation + 1u, stamp_s};
+}
+
+void GridMap::notifyOccupancyCommitted(
+    const OccupancyCommitNotification &notification)
+{
+  if (!notification)
+    return;
+  OccupancyCommitObserver observer;
+  {
+    std::lock_guard<std::mutex> lock(occupancy_commit_observer_mutex_);
+    observer = occupancy_commit_observer_;
+  }
+  // Invoke user code after the occupancy transaction lock is released. This
+  // permits a notification consumer to freeze the just-committed generation
+  // without blocking or re-entering the map writer.
+  if (observer)
+    observer(notification.generation, notification.source_stamp_s);
 }
 
 OccupancyCollisionDeltaHistory GridMap::collisionDeltasSince(
@@ -2314,6 +2378,269 @@ GridMap::captureOccupancyDiagnosticQuery() const
 }
 
 std::shared_ptr<const FrozenOccupancyEpoch>
+GridMap::captureFrozenExecutionOccupancyEpoch() const
+{
+  if (!registered_lidar_window_enabled_ ||
+      !trusted_local_map_support_enabled_)
+    return captureFrozenOccupancyEpoch();
+
+  struct SparseFrozenState
+  {
+    Eigen::Vector3d origin = Eigen::Vector3d::Zero();
+    Eigen::Vector3i dimensions = Eigen::Vector3i::Zero();
+    double resolution = std::numeric_limits<double>::quiet_NaN();
+    double resolution_inv = std::numeric_limits<double>::quiet_NaN();
+    double inflation = 0.0;
+    double virtual_ceiling = -1.0;
+    std::string frame_id;
+    std::string frame_contract_id;
+    double cloud_stamp_s = std::numeric_limits<double>::quiet_NaN();
+    uint64_t generation = 0;
+    uint64_t active_window_generation = 0;
+    int64_t current_frame_id = -1;
+    Eigen::Vector3d current_vehicle_position =
+        Eigen::Vector3d::Constant(
+            std::numeric_limits<double>::quiet_NaN());
+    double current_vehicle_clearance_radius_m = 0.0;
+    std::vector<int> raw_addresses;
+    std::shared_ptr<const std::vector<Eigen::Vector3d>> environment_hits;
+    std::optional<RegisteredLidarFrameMetadata> current_frame;
+    std::vector<RegisteredLidarFrameMetadata> support_history;
+  };
+
+  auto state = std::make_shared<SparseFrozenState>();
+  {
+    std::lock_guard<std::mutex> lock(occupancy_epoch_mutex_);
+    const uint64_t sequence = occupancy_update_sequence_.load(
+        std::memory_order_acquire);
+    const double cloud_stamp_s = occupancy_cloud_stamp_s_.load(
+        std::memory_order_acquire);
+    if ((sequence & 1u) != 0u || sequence == 0u ||
+        !registered_lidar_window_ || !registered_active_window_healthy_ ||
+        !registered_current_frame_healthy_ ||
+        !std::isfinite(cloud_stamp_s) || !mp_.map_origin_.allFinite() ||
+        (mp_.map_voxel_num_.array() <= 0).any() ||
+        !std::isfinite(mp_.resolution_) || mp_.resolution_ <= 0.0 ||
+        !std::isfinite(mp_.resolution_inv_) ||
+        mp_.resolution_inv_ <= 0.0 || mp_.frame_id_.empty())
+      return nullptr;
+    state->origin = mp_.map_origin_;
+    state->dimensions = mp_.map_voxel_num_;
+    state->resolution = mp_.resolution_;
+    state->resolution_inv = mp_.resolution_inv_;
+    state->inflation = mp_.obstacles_inflation_;
+    state->virtual_ceiling = mp_.virtual_ceil_height_;
+    state->frame_id = mp_.frame_id_;
+    state->frame_contract_id = registered_frame_contract_id_;
+    state->cloud_stamp_s = cloud_stamp_s;
+    state->generation = sequence / 2u;
+    state->active_window_generation =
+        registered_lidar_window_->activeGeneration();
+    state->current_frame_id = registered_lidar_window_->currentFrameId();
+    state->current_vehicle_position = md_.camera_pos_;
+    state->current_vehicle_clearance_radius_m =
+        current_vehicle_clearance_radius_m_;
+    state->environment_hits =
+        registered_lidar_window_->environmentOccupiedVoxelCenters();
+    state->current_frame =
+        registered_lidar_window_->currentFrameMetadata();
+    state->support_history.assign(
+        registered_support_history_.begin(),
+        registered_support_history_.end());
+    state->raw_addresses.assign(
+        registered_raw_occupied_addresses_.begin(),
+        registered_raw_occupied_addresses_.end());
+  }
+  if (!state->environment_hits || !state->current_frame ||
+      state->frame_contract_id.empty())
+    return nullptr;
+
+  auto raw_centers = std::make_shared<std::vector<Eigen::Vector3d>>();
+  raw_centers->reserve(state->raw_addresses.size());
+  const int yz = state->dimensions.y() * state->dimensions.z();
+  for (const int address : state->raw_addresses)
+  {
+    const int x = address / yz;
+    const int remainder = address % yz;
+    const int y = remainder / state->dimensions.z();
+    const int z = remainder % state->dimensions.z();
+    raw_centers->push_back(
+        (Eigen::Vector3i(x, y, z).cast<double>() +
+         Eigen::Vector3d::Constant(0.5)) * state->resolution +
+        state->origin);
+  }
+
+  const std::shared_ptr<const SparseFrozenState> frozen = state;
+  OccupancyDiagnosticQuery diagnostic_query =
+      [frozen](const Eigen::Vector3d &pos)
+      {
+        OccupancyDiagnostic out;
+        out.resolution_m = frozen->resolution;
+        out.inflation_m = frozen->inflation;
+        out.frame_id = frozen->frame_id;
+        out.cloud_stamp_s = frozen->cloud_stamp_s;
+        out.generation = frozen->generation;
+        if (!pos.allFinite())
+          return out;
+        for (int axis = 0; axis < 3; ++axis)
+          out.voxel_index(axis) = static_cast<int>(std::floor(
+              (pos(axis) - frozen->origin(axis)) *
+              frozen->resolution_inv));
+        for (int axis = 0; axis < 3; ++axis)
+          if (out.voxel_index(axis) < 0 ||
+              out.voxel_index(axis) >= frozen->dimensions(axis))
+          {
+            out.source = "position_out_of_map";
+            return out;
+          }
+        const int yz_count = frozen->dimensions.y() *
+            frozen->dimensions.z();
+        const auto address_of = [&frozen, yz_count](
+            const Eigen::Vector3i &index)
+        {
+          return index.x() * yz_count +
+              index.y() * frozen->dimensions.z() + index.z();
+        };
+        const int address = address_of(out.voxel_index);
+        const auto occupied = [&frozen](const int candidate)
+        {
+          return std::binary_search(
+              frozen->raw_addresses.begin(),
+              frozen->raw_addresses.end(), candidate);
+        };
+        out.raw_occupied = occupied(address);
+        out.inflated_occupied = out.raw_occupied;
+        const int ceiling_index = frozen->virtual_ceiling > -0.5
+            ? static_cast<int>(std::floor(
+                  (frozen->virtual_ceiling - frozen->origin.z()) *
+                  frozen->resolution_inv)) - 1
+            : -1;
+        if (out.voxel_index.z() == ceiling_index)
+          out.inflated_occupied = true;
+        if (!out.inflated_occupied)
+        {
+          const int inflation_xy = static_cast<int>(std::ceil(
+              frozen->inflation / frozen->resolution));
+          for (int dx = -inflation_xy;
+               dx <= inflation_xy && !out.inflated_occupied; ++dx)
+            for (int dy = -inflation_xy;
+                 dy <= inflation_xy && !out.inflated_occupied; ++dy)
+              for (int dz = -1; dz <= 1; ++dz)
+              {
+                const Eigen::Vector3i source = out.voxel_index +
+                    Eigen::Vector3i(dx, dy, dz);
+                if ((source.array() < 0).any() ||
+                    (source.array() >= frozen->dimensions.array()).any())
+                  continue;
+                if (occupied(address_of(source)))
+                {
+                  out.inflated_occupied = true;
+                  break;
+                }
+              }
+        }
+        out.voxel_center =
+            (out.voxel_index.cast<double>() +
+             Eigen::Vector3d::Constant(0.5)) * frozen->resolution +
+            frozen->origin;
+        // Do not turn model-envelope support into ray-observed free space.
+        // Preserve only the physically occupied vehicle footprint that the
+        // registered-map transaction marks as observed. This avoids copying
+        // the full dense observed buffer into every lightweight execution
+        // snapshot while retaining the exact current-position safety fact.
+        const Eigen::Vector3d cell_min = frozen->origin +
+            frozen->resolution * out.voxel_index.cast<double>();
+        const Eigen::Vector3d cell_max =
+            cell_min + Eigen::Vector3d::Constant(frozen->resolution);
+        const Eigen::Vector3d closest =
+            frozen->current_vehicle_position.cwiseMax(cell_min).cwiseMin(
+                cell_max);
+        const bool footprint_observed =
+            frozen->current_vehicle_position.allFinite() &&
+            std::isfinite(frozen->current_vehicle_clearance_radius_m) &&
+            frozen->current_vehicle_clearance_radius_m >= 0.0 &&
+            (closest - frozen->current_vehicle_position).squaredNorm() <=
+                frozen->current_vehicle_clearance_radius_m *
+                frozen->current_vehicle_clearance_radius_m;
+        out.observed = out.raw_occupied || out.inflated_occupied ||
+            footprint_observed;
+        out.state = out.inflated_occupied
+            ? GridMapObservationState::OCCUPIED
+            : footprint_observed ? GridMapObservationState::OBSERVED_FREE
+                                 : GridMapObservationState::UNKNOWN;
+        out.available = true;
+        out.source = out.raw_occupied ? "registered_sparse_raw" :
+            out.inflated_occupied ? "registered_sparse_inflated" :
+            footprint_observed ? "current_vehicle_footprint" :
+            "registered_sparse_unobserved";
+        return out;
+      };
+
+  auto epoch = std::make_shared<FrozenOccupancyEpoch>();
+  epoch->diagnostic_query = std::move(diagnostic_query);
+  epoch->raw_occupied_voxel_centers = std::move(raw_centers);
+  epoch->environment_occupied_voxel_centers = state->environment_hits;
+  epoch->lattice_origin = state->origin;
+  epoch->voxel_dimensions = state->dimensions;
+  epoch->extent_m = state->dimensions.cast<double>() * state->resolution;
+  epoch->resolution_m = state->resolution;
+  epoch->virtual_ceiling_height_m = state->virtual_ceiling;
+  epoch->frame_id = state->frame_id;
+  epoch->geometry_id = geometryIdentity(
+      state->frame_id, state->origin, state->dimensions, state->resolution);
+  epoch->cloud_stamp_s = state->cloud_stamp_s;
+  epoch->generation = state->generation;
+  epoch->active_window_generation = state->active_window_generation;
+  epoch->current_frame_id = state->current_frame_id;
+  epoch->frame_contract_id = state->frame_contract_id;
+
+  constexpr double kPi = 3.14159265358979323846;
+  const auto &frame = *state->current_frame;
+  auto support = std::make_shared<iap::TrustedLocalMapSupport>();
+  support->T_map_sensor = frame.T_map_lidar;
+  support->min_range_m = trusted_support_min_range_m_;
+  support->max_range_m = trusted_support_max_range_m_;
+  support->horizontal_fov_rad =
+      trusted_support_horizontal_fov_deg_ * kPi / 180.0;
+  support->vertical_min_rad =
+      trusted_support_vertical_min_deg_ * kPi / 180.0;
+  support->vertical_max_rad =
+      trusted_support_vertical_max_deg_ * kPi / 180.0;
+  support->stamp_s = frame.scan_end_stamp_s;
+  support->valid_until_s = frame.scan_end_stamp_s +
+      trusted_support_validity_s_;
+  support->sensor_receipt_steady_s =
+      static_cast<double>(frame.sensor_receipt_steady_ns) * 1.0e-9;
+  support->frame_id = state->frame_id;
+  support->model_version = trusted_support_model_version_ +
+      ";coverage_history_v1";
+  support->retained_min_map = frame.T_map_lidar.translation() -
+      Eigen::Vector3d::Constant(trusted_support_max_range_m_);
+  support->retained_max_map = frame.T_map_lidar.translation() +
+      Eigen::Vector3d::Constant(trusted_support_max_range_m_);
+  support->observations.reserve(state->support_history.size());
+  for (const auto &historical : state->support_history)
+  {
+    iap::TrustedLocalMapSupportObservation observation;
+    observation.T_map_sensor = historical.T_map_lidar;
+    observation.stamp_s = historical.scan_end_stamp_s;
+    observation.valid_until_s = historical.scan_end_stamp_s +
+        trusted_support_validity_s_;
+    observation.sensor_receipt_steady_s =
+        static_cast<double>(historical.sensor_receipt_steady_ns) * 1.0e-9;
+    observation.retained_min_map = historical.T_map_lidar.translation() -
+        Eigen::Vector3d::Constant(trusted_support_max_range_m_);
+    observation.retained_max_map = historical.T_map_lidar.translation() +
+        Eigen::Vector3d::Constant(trusted_support_max_range_m_);
+    support->observations.push_back(std::move(observation));
+  }
+  if (!support->valid())
+    return nullptr;
+  epoch->trusted_local_map_support = std::move(support);
+  return epoch;
+}
+
+std::shared_ptr<const FrozenOccupancyEpoch>
 GridMap::captureFrozenOccupancyEpoch() const
 {
   struct FrozenBuffers
@@ -2336,7 +2663,9 @@ GridMap::captureFrozenOccupancyEpoch() const
     std::vector<char> raw_cloud;
     std::vector<char> observed;
     std::shared_ptr<const std::vector<Eigen::Vector3d>> environment_hits;
+    std::shared_ptr<const std::vector<Eigen::Vector3d>> raw_centers;
     std::optional<RegisteredLidarFrameMetadata> current_registered_frame;
+    std::vector<RegisteredLidarFrameMetadata> support_history;
   };
 
   auto buffers = std::make_shared<FrozenBuffers>();
@@ -2389,6 +2718,24 @@ GridMap::captureFrozenOccupancyEpoch() const
           registered_lidar_window_->environmentOccupiedVoxelCenters();
       buffers->current_registered_frame =
           registered_lidar_window_->currentFrameMetadata();
+      buffers->support_history.assign(
+          registered_support_history_.begin(),
+          registered_support_history_.end());
+      auto centers = std::make_shared<std::vector<Eigen::Vector3d>>();
+      centers->reserve(registered_raw_occupied_addresses_.size());
+      const int yz = mp_.map_voxel_num_(1) * mp_.map_voxel_num_(2);
+      for (const int address : registered_raw_occupied_addresses_)
+      {
+        const int x = address / yz;
+        const int remainder = address % yz;
+        const int y = remainder / mp_.map_voxel_num_(2);
+        const int z = remainder % mp_.map_voxel_num_(2);
+        centers->push_back(
+            (Eigen::Vector3i(x, y, z).cast<double>() +
+             Eigen::Vector3d::Constant(0.5)) * mp_.resolution_ +
+            mp_.map_origin_);
+      }
+      buffers->raw_centers = std::move(centers);
     }
     // Registered-window mode has no depth/fused writer by contract. Avoid
     // copying the 59 MiB log-odds layer while holding the occupancy mutex;
@@ -2401,29 +2748,35 @@ GridMap::captureFrozenOccupancyEpoch() const
     buffers->observed = md_.observed_buffer_;
   }
 
-  auto centers = std::make_shared<std::vector<Eigen::Vector3d>>();
-  centers->reserve(buffers->raw_cloud.size());
-  for (int x = 0; x < buffers->map_voxel_num(0); ++x)
-    for (int y = 0; y < buffers->map_voxel_num(1); ++y)
-      for (int z = 0; z < buffers->map_voxel_num(2); ++z)
-      {
-        const std::size_t address =
-            static_cast<std::size_t>(x) *
-                static_cast<std::size_t>(buffers->map_voxel_num(1)) *
-                static_cast<std::size_t>(buffers->map_voxel_num(2)) +
-            static_cast<std::size_t>(y) *
-                static_cast<std::size_t>(buffers->map_voxel_num(2)) +
-            static_cast<std::size_t>(z);
-        const bool raw_cloud = buffers->raw_cloud[address] != 0;
-        const bool raw_fused = !buffers->fused.empty() &&
-            buffers->fused[address] > buffers->min_occupancy_log;
-        if (raw_cloud || raw_fused)
-          centers->push_back(
-              (Eigen::Vector3i(x, y, z).cast<double>() +
-               Eigen::Vector3d::Constant(0.5)) *
-                  buffers->resolution +
-              buffers->map_origin);
-      }
+  auto centers = buffers->raw_centers
+      ? std::make_shared<std::vector<Eigen::Vector3d>>(
+            *buffers->raw_centers)
+      : std::make_shared<std::vector<Eigen::Vector3d>>();
+  if (!buffers->raw_centers)
+  {
+    centers->reserve(buffers->raw_cloud.size());
+    for (int x = 0; x < buffers->map_voxel_num(0); ++x)
+      for (int y = 0; y < buffers->map_voxel_num(1); ++y)
+        for (int z = 0; z < buffers->map_voxel_num(2); ++z)
+        {
+          const std::size_t address =
+              static_cast<std::size_t>(x) *
+                  static_cast<std::size_t>(buffers->map_voxel_num(1)) *
+                  static_cast<std::size_t>(buffers->map_voxel_num(2)) +
+              static_cast<std::size_t>(y) *
+                  static_cast<std::size_t>(buffers->map_voxel_num(2)) +
+              static_cast<std::size_t>(z);
+          const bool raw_cloud = buffers->raw_cloud[address] != 0;
+          const bool raw_fused = !buffers->fused.empty() &&
+              buffers->fused[address] > buffers->min_occupancy_log;
+          if (raw_cloud || raw_fused)
+            centers->push_back(
+                (Eigen::Vector3i(x, y, z).cast<double>() +
+                 Eigen::Vector3d::Constant(0.5)) *
+                    buffers->resolution +
+                buffers->map_origin);
+        }
+  }
 
   const std::shared_ptr<const FrozenBuffers> frozen_buffers = buffers;
   OccupancyDiagnosticQuery diagnostic_query =
@@ -2520,12 +2873,33 @@ GridMap::captureFrozenOccupancyEpoch() const
     support->stamp_s = frame.scan_end_stamp_s;
     support->valid_until_s = frame.scan_end_stamp_s +
         trusted_support_validity_s_;
+    support->sensor_receipt_steady_s =
+        static_cast<double>(frame.sensor_receipt_steady_ns) * 1.0e-9;
     support->frame_id = frozen_buffers->frame_id;
     support->model_version = trusted_support_model_version_;
     support->retained_min_map = frame.T_map_lidar.translation() -
         Eigen::Vector3d::Constant(trusted_support_max_range_m_);
     support->retained_max_map = frame.T_map_lidar.translation() +
         Eigen::Vector3d::Constant(trusted_support_max_range_m_);
+    support->observations.reserve(frozen_buffers->support_history.size());
+    for (const auto &historical : frozen_buffers->support_history)
+    {
+      iap::TrustedLocalMapSupportObservation observation;
+      observation.T_map_sensor = historical.T_map_lidar;
+      observation.stamp_s = historical.scan_end_stamp_s;
+      observation.valid_until_s = historical.scan_end_stamp_s +
+          trusted_support_validity_s_;
+      observation.sensor_receipt_steady_s =
+          static_cast<double>(historical.sensor_receipt_steady_ns) * 1.0e-9;
+      observation.retained_min_map =
+          historical.T_map_lidar.translation() -
+          Eigen::Vector3d::Constant(trusted_support_max_range_m_);
+      observation.retained_max_map =
+          historical.T_map_lidar.translation() +
+          Eigen::Vector3d::Constant(trusted_support_max_range_m_);
+      support->observations.push_back(std::move(observation));
+    }
+    support->model_version += ";coverage_history_v1";
     if (support->valid())
       epoch->trusted_local_map_support = std::move(support);
   }

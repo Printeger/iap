@@ -9,6 +9,7 @@
 #include <limits>
 #include <sstream>
 #include <string>
+#include <vector>
 
 namespace iap {
 
@@ -29,9 +30,34 @@ struct LocalMapSupportQuery {
   LocalMapSupportAuthority authority =
       LocalMapSupportAuthority::STRICT_OBSERVATION;
   LocalMapSupportStatus status = LocalMapSupportStatus::FRAME_INVALID;
+  double observation_stamp_s = std::numeric_limits<double>::quiet_NaN();
+  double observation_age_s = std::numeric_limits<double>::quiet_NaN();
 
   bool complete() const {
     return status == LocalMapSupportStatus::MODEL_COMPLETE;
+  }
+};
+
+// One immutable sensor envelope contributing recent model-support coverage.
+// It records no ray-derived free-space claim; OBSERVED_FREE remains owned by
+// the occupancy layer.
+struct TrustedLocalMapSupportObservation {
+  Eigen::Isometry3d T_map_sensor = Eigen::Isometry3d::Identity();
+  Eigen::Vector3d retained_min_map = Eigen::Vector3d::Constant(
+      -std::numeric_limits<double>::infinity());
+  Eigen::Vector3d retained_max_map = Eigen::Vector3d::Constant(
+      std::numeric_limits<double>::infinity());
+  double stamp_s = std::numeric_limits<double>::quiet_NaN();
+  double valid_until_s = std::numeric_limits<double>::quiet_NaN();
+  double sensor_receipt_steady_s =
+      std::numeric_limits<double>::quiet_NaN();
+
+  bool valid() const {
+    return T_map_sensor.matrix().allFinite() && retained_min_map.allFinite() &&
+        retained_max_map.allFinite() &&
+        (retained_max_map.array() > retained_min_map.array()).all() &&
+        std::isfinite(stamp_s) && std::isfinite(valid_until_s) &&
+        valid_until_s >= stamp_s;
   }
 };
 
@@ -51,8 +77,14 @@ struct TrustedLocalMapSupport {
   double vertical_max_rad = 0.5 * 3.14159265358979323846;
   double stamp_s = std::numeric_limits<double>::quiet_NaN();
   double valid_until_s = std::numeric_limits<double>::quiet_NaN();
+  double sensor_receipt_steady_s =
+      std::numeric_limits<double>::quiet_NaN();
   std::string frame_id;
   std::string model_version = "trusted_local_map_v1";
+  // Older current-frame envelopes retained only inside the same hard
+  // freshness window. The fields above remain the newest observation and
+  // preserve the single-envelope wire/test contract.
+  std::vector<TrustedLocalMapSupportObservation> observations;
 
   bool valid() const {
     return T_map_sensor.matrix().allFinite() && retained_min_map.allFinite() &&
@@ -66,12 +98,22 @@ struct TrustedLocalMapSupport {
         vertical_min_rad < vertical_max_rad &&
         std::isfinite(stamp_s) && std::isfinite(valid_until_s) &&
         valid_until_s >= stamp_s && !frame_id.empty() &&
-        !model_version.empty();
+        !model_version.empty() &&
+        std::all_of(observations.begin(), observations.end(),
+                    [](const auto& observation) {
+                      return observation.valid();
+                    });
   }
 
   bool freshAt(const double evaluation_time_s) const {
-    return valid() && std::isfinite(evaluation_time_s) &&
-        evaluation_time_s >= stamp_s && evaluation_time_s <= valid_until_s;
+    if (!valid() || !std::isfinite(evaluation_time_s)) return false;
+    if (evaluation_time_s >= stamp_s && evaluation_time_s <= valid_until_s)
+      return true;
+    return std::any_of(observations.begin(), observations.end(),
+                       [evaluation_time_s](const auto& observation) {
+                         return evaluation_time_s >= observation.stamp_s &&
+                             evaluation_time_s <= observation.valid_until_s;
+                       });
   }
 
   LocalMapSupportQuery query(const Eigen::Vector3d& point_map,
@@ -83,35 +125,56 @@ struct TrustedLocalMapSupport {
       out.status = LocalMapSupportStatus::FRAME_INVALID;
       return out;
     }
-    if (!freshAt(evaluation_time_s)) {
-      out.status = LocalMapSupportStatus::EXPIRED;
-      return out;
+    const auto spatially_covers = [this, &point_map](
+        const Eigen::Isometry3d& pose, const Eigen::Vector3d& retained_min,
+        const Eigen::Vector3d& retained_max) {
+      if ((point_map.array() < retained_min.array()).any() ||
+          (point_map.array() > retained_max.array()).any())
+        return false;
+      // T_map_sensor is an isometry, so applying the transposed rotation
+      // avoids rebuilding an inverse for every support sample.
+      const Eigen::Vector3d point_sensor = pose.linear().transpose() *
+          (point_map - pose.translation());
+      const double range = point_sensor.norm();
+      if (!std::isfinite(range) || range < min_range_m || range > max_range_m)
+        return false;
+      const double horizontal =
+          std::atan2(point_sensor.y(), point_sensor.x());
+      const double elevation = std::atan2(
+          point_sensor.z(), std::hypot(point_sensor.x(), point_sensor.y()));
+      return std::abs(horizontal) <= 0.5 * horizontal_fov_rad + 1.0e-9 &&
+          elevation >= vertical_min_rad - 1.0e-9 &&
+          elevation <= vertical_max_rad + 1.0e-9;
+    };
+    bool covered_by_any_observation = false;
+    double newest_covering_stamp = -std::numeric_limits<double>::infinity();
+    const auto consider = [&](const Eigen::Isometry3d& pose,
+                              const Eigen::Vector3d& retained_min,
+                              const Eigen::Vector3d& retained_max,
+                              const double observation_stamp,
+                              const double valid_until) {
+      if (!spatially_covers(pose, retained_min, retained_max)) return;
+      covered_by_any_observation = true;
+      if (evaluation_time_s >= observation_stamp &&
+          evaluation_time_s <= valid_until &&
+          observation_stamp > newest_covering_stamp)
+        newest_covering_stamp = observation_stamp;
+    };
+    consider(T_map_sensor, retained_min_map, retained_max_map, stamp_s,
+             valid_until_s);
+    for (const auto& observation : observations)
+      consider(observation.T_map_sensor, observation.retained_min_map,
+               observation.retained_max_map, observation.stamp_s,
+               observation.valid_until_s);
+    if (std::isfinite(newest_covering_stamp)) {
+      out.status = LocalMapSupportStatus::MODEL_COMPLETE;
+      out.observation_stamp_s = newest_covering_stamp;
+      out.observation_age_s = evaluation_time_s - newest_covering_stamp;
+    } else {
+      out.status = covered_by_any_observation
+          ? LocalMapSupportStatus::EXPIRED
+          : LocalMapSupportStatus::OUTSIDE_ENVELOPE;
     }
-    if ((point_map.array() < retained_min_map.array()).any() ||
-        (point_map.array() > retained_max_map.array()).any()) {
-      out.status = LocalMapSupportStatus::OUTSIDE_ENVELOPE;
-      return out;
-    }
-    // T_map_sensor is an isometry, so applying the transposed rotation avoids
-    // rebuilding an inverse for every LOS support sample.
-    const Eigen::Vector3d point_sensor =
-        T_map_sensor.linear().transpose() *
-        (point_map - T_map_sensor.translation());
-    const double range = point_sensor.norm();
-    if (!std::isfinite(range) || range < min_range_m || range > max_range_m) {
-      out.status = LocalMapSupportStatus::OUTSIDE_ENVELOPE;
-      return out;
-    }
-    const double horizontal = std::atan2(point_sensor.y(), point_sensor.x());
-    const double elevation = std::atan2(
-        point_sensor.z(), std::hypot(point_sensor.x(), point_sensor.y()));
-    if (std::abs(horizontal) > 0.5 * horizontal_fov_rad + 1.0e-9 ||
-        elevation < vertical_min_rad - 1.0e-9 ||
-        elevation > vertical_max_rad + 1.0e-9) {
-      out.status = LocalMapSupportStatus::OUTSIDE_ENVELOPE;
-      return out;
-    }
-    out.status = LocalMapSupportStatus::MODEL_COMPLETE;
     return out;
   }
 
@@ -143,6 +206,18 @@ struct TrustedLocalMapSupport {
     for (int axis = 0; axis < 3; ++axis)
       stream << std::hexfloat << retained_min_map(axis) << '|'
              << retained_max_map(axis) << '|';
+    stream << "observations=" << observations.size() << '|';
+    for (const auto& observation : observations) {
+      stream << std::defaultfloat << std::setprecision(17)
+             << observation.stamp_s << '|' << observation.valid_until_s << '|';
+      for (int row = 0; row < 4; ++row)
+        for (int column = 0; column < 4; ++column)
+          stream << std::hexfloat
+                 << observation.T_map_sensor.matrix()(row, column) << '|';
+      for (int axis = 0; axis < 3; ++axis)
+        stream << std::hexfloat << observation.retained_min_map(axis) << '|'
+               << observation.retained_max_map(axis) << '|';
+    }
     return stream.str();
   }
 };

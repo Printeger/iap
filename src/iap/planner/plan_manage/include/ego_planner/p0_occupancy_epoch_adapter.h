@@ -104,6 +104,46 @@ struct P0OccupancyEpoch {
   std::string frame_contract_id;
 };
 
+// Resolve one point against the two independent local-map authorities. A
+// ray-derived OBSERVED_FREE voxel remains an observation (and keeps
+// STRICT_OBSERVATION authority); a trusted envelope remains model support.
+// Either may complete support, but neither is rewritten as the other.
+inline iap::LocalMapSupportQuery queryP0LocalMapSupport(
+    const P0OccupancyEpoch& epoch, const Eigen::Vector3d& position,
+    const double evaluation_time_s, const double query_time_s) {
+  iap::LocalMapSupportQuery model;
+  if (epoch.trusted_local_map_support) {
+    model = epoch.trusted_local_map_support->query(
+        position, evaluation_time_s, query_time_s);
+    if (model.complete()) {
+      return model;
+    }
+  }
+  if (!epoch.diagnostic_query || !position.allFinite() ||
+      !std::isfinite(evaluation_time_s) || !std::isfinite(query_time_s)) {
+    return model;
+  }
+  const auto observed = epoch.diagnostic_query(position);
+  if (!observed.available || !observed.observed ||
+      observed.state != iap::RiskOccupancyState::OBSERVED_FREE) {
+    return model;
+  }
+  const double hard_lifetime_s = epoch.trusted_local_map_support
+      ? epoch.trusted_local_map_support->valid_until_s -
+            epoch.trusted_local_map_support->stamp_s
+      : -1.0;
+  const double age_s = evaluation_time_s - epoch.cloud_stamp_s;
+  iap::LocalMapSupportQuery strict;
+  strict.authority = iap::LocalMapSupportAuthority::STRICT_OBSERVATION;
+  strict.observation_stamp_s = epoch.cloud_stamp_s;
+  strict.observation_age_s = age_s;
+  strict.status = std::isfinite(epoch.cloud_stamp_s) && age_s >= -1.0e-6 &&
+          (hard_lifetime_s < 0.0 || age_s <= hard_lifetime_s)
+      ? iap::LocalMapSupportStatus::MODEL_COMPLETE
+      : iap::LocalMapSupportStatus::EXPIRED;
+  return strict;
+}
+
 enum class P0OccupancyEpochCaptureStatus {
   VALID = 0,
   SNAPSHOT_UNAVAILABLE,
@@ -116,6 +156,14 @@ struct P0OccupancyEpochCapture {
   std::optional<P0OccupancyEpoch> epoch;
 };
 
+// A reusable LOS grid is valid only for the exact immutable environment-point
+// owner from which it was built.  Keeping both owners together prevents a
+// same-size but different obstacle cloud from being reused accidentally.
+struct P0ReusableLosOccupancy {
+  std::shared_ptr<const std::vector<Eigen::Vector3d>> environment_centers;
+  std::shared_ptr<const iap::LocalOccupancyGrid> los_owner;
+};
+
 class P0OccupancyEpochAdapter {
  public:
   template <typename CapturedEpoch>
@@ -124,7 +172,8 @@ class P0OccupancyEpochAdapter {
       P0OccupancyEpoch::SourceOwner source_owner,
       P0OccupancyEpoch::LiveSourceOwner live_source_owner,
       P0OccupancyEpoch::LiveGeneration live_generation,
-      double clearance_transition_m = 0.0) {
+      double clearance_transition_m = 0.0,
+      std::optional<P0ReusableLosOccupancy> reusable_los = std::nullopt) {
     iap::RiskGridMap::OccupancyDiagnosticQuery diagnostic_query;
     if (epoch.diagnostic_query) {
       const auto neutral_query = epoch.diagnostic_query;
@@ -163,7 +212,8 @@ class P0OccupancyEpochAdapter {
                        std::move(diagnostic_query),
                        std::move(source_owner),
                        std::move(live_source_owner),
-                       std::move(live_generation), clearance_transition_m);
+                       std::move(live_generation), clearance_transition_m,
+                       std::move(reusable_los));
   }
 
   static bool sameVersion(const P0OccupancyEpoch& base,
@@ -189,7 +239,8 @@ class P0OccupancyEpochAdapter {
       P0OccupancyEpoch::SourceOwner source_owner,
       P0OccupancyEpoch::LiveSourceOwner live_source_owner,
       P0OccupancyEpoch::LiveGeneration live_generation,
-      double clearance_transition_m);
+      double clearance_transition_m,
+      std::optional<P0ReusableLosOccupancy> reusable_los);
 };
 
 }  // namespace ego_planner

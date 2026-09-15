@@ -240,12 +240,15 @@ class PredictorModuleRiskProvider final : public iap::RiskPredictionProvider {
       iap::PredictorModule module,
       iap::IntegritySnapshot snapshot,
       double evaluation_time_s, int worker_count, double hal_m, double val_m,
-      std::chrono::steady_clock::time_point deadline)
+      std::chrono::steady_clock::time_point deadline,
+      std::function<bool(std::chrono::steady_clock::time_point)>
+          execution_priority_gate)
       : occupancy_owner_(std::move(occupancy_owner)),
         rolling_window_(rolling_window), snapshot_(std::move(snapshot)),
         evaluation_time_s_(evaluation_time_s),
         worker_count_(std::max(1, worker_count)),
-        hal_m_(hal_m), val_m_(val_m), deadline_(deadline) {
+        hal_m_(hal_m), val_m_(val_m), deadline_(deadline),
+        execution_priority_gate_(std::move(execution_priority_gate)) {
     iap::RollingSpatialRefreshInput input;
     input.geometry = std::move(geometry);
     input.module = std::move(module);
@@ -294,58 +297,82 @@ class PredictorModuleRiskProvider final : public iap::RiskPredictionProvider {
     };
     std::vector<std::future<WorkerOutcome>> workers;
     workers.reserve(static_cast<std::size_t>(worker_count));
+    std::atomic<std::size_t> next_group{0u};
     for (int worker_id = 0; worker_id < worker_count; ++worker_id) {
       workers.push_back(std::async(std::launch::async,
-          [this, &queries, &groups, results, worker_id, worker_count]() {
+          [this, &queries, &groups, results, &next_group]() {
             WorkerOutcome outcome;
-            for (std::size_t group_index = static_cast<std::size_t>(worker_id);
-                 group_index < groups.size();
-                 group_index += static_cast<std::size_t>(worker_count)) {
+            while (true) {
               if (cancelled_.load(std::memory_order_relaxed) ||
                   std::chrono::steady_clock::now() >= deadline_) {
                 cancelled_.store(true, std::memory_order_relaxed);
                 outcome.growth_valid = false;
                 return outcome;
               }
-              std::vector<iap::PredictorQueryInput> inputs;
-              inputs.reserve(groups[group_index].size());
-              for (const std::size_t index : groups[group_index]) {
-                const auto& query = queries[index];
-                inputs.emplace_back(query.position_w, snapshot_,
-                    query.query_time_s, query.horizon_s, "map",
-                    evaluation_time_s_);
-              }
-              iap::PredictorBatchDiagnostics diagnostics;
-              const auto predictions =
-                  rolling_window_->queryPositionHorizons(inputs, &diagnostics);
-              if (predictions.size() != inputs.size()) {
+              if (execution_priority_gate_ &&
+                  !execution_priority_gate_(deadline_)) {
+                cancelled_.store(true, std::memory_order_relaxed);
                 outcome.growth_valid = false;
                 return outcome;
               }
-              for (std::size_t local = 0; local < predictions.size(); ++local) {
-                if (inputs[local].horizon_s > 0.0 &&
-                    predictions[local].covariance_growth_status !=
-                        iap::CovarianceGrowthStatus::APPLIED) {
-                  outcome.growth_valid = false;
-                }
-                (*results)[groups[group_index][local]] =
-                    iap::makeRiskPredictionResult(
-                        predictions[local], hal_m_, val_m_);
+              // Dynamic dispatch is essential to cooperative priority. With
+              // fixed striding, a worker that yielded for each 10 Hz snapshot
+              // retained an entire sixth of the batch and became the tail.
+              // The active workers now consume its unclaimed positions while
+              // it waits, without changing any query or output identity.
+              constexpr std::size_t kDispatchChunk = 32u;
+              const std::size_t group_begin = next_group.fetch_add(
+                  kDispatchChunk, std::memory_order_relaxed);
+              if (group_begin >= groups.size()) {
+                break;
               }
-              outcome.diagnostics.query_count += diagnostics.query_count;
-              outcome.diagnostics.unique_positions += diagnostics.unique_positions;
-              outcome.diagnostics.lidar_evaluations += diagnostics.lidar_evaluations;
-              outcome.diagnostics.lidar_cache_hits += diagnostics.lidar_cache_hits;
-              outcome.diagnostics.spatial_advisory_recompute_count +=
-                  diagnostics.spatial_advisory_recompute_count;
-              outcome.diagnostics.spatial_advisory_reuse_count +=
-                  diagnostics.spatial_advisory_reuse_count;
-              outcome.diagnostics.gnss_advisory_invocations +=
-                  diagnostics.gnss_advisory_invocations;
-              outcome.diagnostics.lidar_advisory_invocations +=
-                  diagnostics.lidar_advisory_invocations;
-              outcome.diagnostics.fusion_advisory_invocations +=
-                  diagnostics.fusion_advisory_invocations;
+              const std::size_t group_end = std::min(
+                  groups.size(), group_begin + kDispatchChunk);
+              for (std::size_t group_index = group_begin;
+                   group_index < group_end; ++group_index) {
+                std::vector<iap::PredictorQueryInput> inputs;
+                inputs.reserve(groups[group_index].size());
+                for (const std::size_t index : groups[group_index]) {
+                  const auto& query = queries[index];
+                  inputs.emplace_back(query.position_w, snapshot_,
+                      query.query_time_s, query.horizon_s, "map",
+                      evaluation_time_s_);
+                }
+                iap::PredictorBatchDiagnostics diagnostics;
+                const auto predictions = rolling_window_->queryPositionHorizons(
+                    inputs, &diagnostics);
+                if (predictions.size() != inputs.size()) {
+                  outcome.growth_valid = false;
+                  return outcome;
+                }
+                for (std::size_t local = 0; local < predictions.size(); ++local) {
+                  if (inputs[local].horizon_s > 0.0 &&
+                      predictions[local].covariance_growth_status !=
+                          iap::CovarianceGrowthStatus::APPLIED) {
+                    outcome.growth_valid = false;
+                  }
+                  (*results)[groups[group_index][local]] =
+                      iap::makeRiskPredictionResult(
+                          predictions[local], hal_m_, val_m_);
+                }
+                outcome.diagnostics.query_count += diagnostics.query_count;
+                outcome.diagnostics.unique_positions +=
+                    diagnostics.unique_positions;
+                outcome.diagnostics.lidar_evaluations +=
+                    diagnostics.lidar_evaluations;
+                outcome.diagnostics.lidar_cache_hits +=
+                    diagnostics.lidar_cache_hits;
+                outcome.diagnostics.spatial_advisory_recompute_count +=
+                    diagnostics.spatial_advisory_recompute_count;
+                outcome.diagnostics.spatial_advisory_reuse_count +=
+                    diagnostics.spatial_advisory_reuse_count;
+                outcome.diagnostics.gnss_advisory_invocations +=
+                    diagnostics.gnss_advisory_invocations;
+                outcome.diagnostics.lidar_advisory_invocations +=
+                    diagnostics.lidar_advisory_invocations;
+                outcome.diagnostics.fusion_advisory_invocations +=
+                    diagnostics.fusion_advisory_invocations;
+              }
             }
             return outcome;
           }));
@@ -411,6 +438,8 @@ class PredictorModuleRiskProvider final : public iap::RiskPredictionProvider {
   iap::RollingSpatialRefreshDiagnostics begin_diagnostics_;
   iap::PredictorBatchDiagnostics last_diagnostics_;
   std::chrono::steady_clock::time_point deadline_;
+  std::function<bool(std::chrono::steady_clock::time_point)>
+      execution_priority_gate_;
   std::atomic<bool> cancelled_{false};
 };
 
@@ -894,6 +923,59 @@ P0RiskGridRuntime::P0RiskGridRuntime(
       provider_(std::move(provider)),
       gnss_satellite_admission_(config_.predictor_gnss_admission_epochs) {
   createRosInterfaces();
+  if (config_.enable_risk_grid && !provider_) {
+    execution_snapshot_worker_ =
+        std::thread([this]() { executionSnapshotWorkerLoop(); });
+  }
+}
+
+P0RiskGridRuntime::~P0RiskGridRuntime() {
+  shutdown();
+}
+
+void P0RiskGridRuntime::shutdown() {
+  {
+    std::lock_guard<std::mutex> lock(execution_snapshot_worker_mutex_);
+    execution_snapshot_worker_stop_ = true;
+    pending_execution_snapshot_request_.reset();
+  }
+  execution_snapshot_worker_cv_.notify_all();
+  if (execution_snapshot_worker_.joinable()) {
+    execution_snapshot_worker_.join();
+  }
+}
+
+const char* p0ExecutionSnapshotAttemptStatusName(
+    const P0ExecutionSnapshotAttemptStatus status) {
+  switch (status) {
+    case P0ExecutionSnapshotAttemptStatus::PUBLISHED:
+      return "PUBLISHED";
+    case P0ExecutionSnapshotAttemptStatus::DEDUPLICATED:
+      return "DEDUPLICATED";
+    case P0ExecutionSnapshotAttemptStatus::CAPTURE_UNAVAILABLE:
+      return "CAPTURE_UNAVAILABLE";
+    case P0ExecutionSnapshotAttemptStatus::CAPTURE_ADAPTER_INVALID:
+      return "CAPTURE_ADAPTER_INVALID";
+    case P0ExecutionSnapshotAttemptStatus::OCCUPANCY_INVALID:
+      return "OCCUPANCY_INVALID";
+    case P0ExecutionSnapshotAttemptStatus::OCCUPANCY_STALE:
+      return "OCCUPANCY_STALE";
+    case P0ExecutionSnapshotAttemptStatus::INTEGRITY_UNAVAILABLE:
+      return "INTEGRITY_UNAVAILABLE";
+    case P0ExecutionSnapshotAttemptStatus::INTEGRITY_UNSAFE:
+      return "INTEGRITY_UNSAFE";
+    case P0ExecutionSnapshotAttemptStatus::MAP_POINTS_MISSING:
+      return "MAP_POINTS_MISSING";
+    case P0ExecutionSnapshotAttemptStatus::FINAL_FRESHNESS_FAILED:
+      return "FINAL_FRESHNESS_FAILED";
+    case P0ExecutionSnapshotAttemptStatus::SUPERSEDED:
+      return "SUPERSEDED";
+    case P0ExecutionSnapshotAttemptStatus::WORKER_EXCEPTION:
+      return "WORKER_EXCEPTION";
+    case P0ExecutionSnapshotAttemptStatus::WORKER_STOPPED:
+      return "WORKER_STOPPED";
+  }
+  return "UNKNOWN";
 }
 
 iap::RiskGridHealth P0RiskGridRuntime::health() const {
@@ -913,6 +995,48 @@ std::shared_ptr<const P0ExecutionRiskSnapshot>
 P0RiskGridRuntime::acquireExecutionRiskSnapshot() const {
   std::lock_guard<std::mutex> lock(planning_snapshot_mutex_);
   return execution_snapshot_;
+}
+
+std::shared_ptr<const P0ExecutionRiskSnapshot>
+P0RiskGridRuntime::selectExecutionRiskSnapshotForEvaluation(
+    const std::shared_ptr<const P0ExecutionRiskSnapshot>& latest,
+    const std::shared_ptr<const P0ExecutionRiskSnapshot>& grid_bound,
+    const double evaluation_time_s) {
+  if (latest && latest->freshAt(evaluation_time_s)) {
+    return latest;
+  }
+  if (grid_bound && grid_bound != latest &&
+      grid_bound->freshAt(evaluation_time_s)) {
+    return grid_bound;
+  }
+  return nullptr;
+}
+
+std::shared_ptr<const P0ExecutionRiskSnapshot>
+P0RiskGridRuntime::selectExecutionRiskSnapshotHistoryForEvaluation(
+    const std::deque<std::shared_ptr<const P0ExecutionRiskSnapshot>>&
+        completed,
+    const std::shared_ptr<const P0ExecutionRiskSnapshot>& grid_bound,
+    const double evaluation_time_s) {
+  for (auto it = completed.rbegin(); it != completed.rend(); ++it) {
+    if (*it && (*it)->freshAt(evaluation_time_s)) {
+      return *it;
+    }
+  }
+  if (grid_bound && grid_bound->freshAt(evaluation_time_s)) {
+    return grid_bound;
+  }
+  return nullptr;
+}
+
+std::shared_ptr<const P0ExecutionRiskSnapshot>
+P0RiskGridRuntime::acquireExecutionRiskSnapshotForEvaluation(
+    const double evaluation_time_s) const {
+  std::lock_guard<std::mutex> lock(planning_snapshot_mutex_);
+  return selectExecutionRiskSnapshotHistoryForEvaluation(
+      execution_snapshot_history_,
+      planning_snapshot_ ? planning_snapshot_->execution : nullptr,
+      evaluation_time_s);
 }
 
 std::shared_ptr<const iap::RiskGridSnapshot>
@@ -996,22 +1120,118 @@ bool P0RiskGridRuntime::refreshOnceForTest() {
 
 void P0RiskGridRuntime::setOccupancyPredicate(
     iap::RiskGridMap::OccupancyPredicate predicate) {
+  std::lock_guard<std::mutex> lock(source_factory_mutex_);
   occupancy_predicate_ = std::move(predicate);
 }
 
 void P0RiskGridRuntime::setOccupancyDiagnosticQuery(
     iap::RiskGridMap::OccupancyDiagnosticQuery query) {
+  std::lock_guard<std::mutex> lock(source_factory_mutex_);
   occupancy_diagnostic_query_ = std::move(query);
 }
 
 void P0RiskGridRuntime::setOccupancyDiagnosticQueryFactory(
     std::function<iap::RiskGridMap::OccupancyDiagnosticQuery()> factory) {
+  std::lock_guard<std::mutex> lock(source_factory_mutex_);
   occupancy_diagnostic_query_factory_ = std::move(factory);
 }
 
 void P0RiskGridRuntime::setOccupancyEpochFactory(
     std::function<P0OccupancyEpochCapture()> factory) {
+  std::lock_guard<std::mutex> lock(source_factory_mutex_);
   occupancy_epoch_factory_ = std::move(factory);
+}
+
+void P0RiskGridRuntime::setExecutionOccupancyEpochFactory(
+    std::function<P0OccupancyEpochCapture()> factory) {
+  std::lock_guard<std::mutex> lock(source_factory_mutex_);
+  execution_occupancy_epoch_factory_ = std::move(factory);
+}
+
+void P0RiskGridRuntime::setOccupancyGenerationProvider(
+    std::function<uint64_t()> provider) {
+  std::lock_guard<std::mutex> lock(source_factory_mutex_);
+  occupancy_generation_provider_ = std::move(provider);
+}
+
+void P0RiskGridRuntime::notifyOccupancyCommitted(
+    const uint64_t generation, const double source_stamp_s) {
+  if (generation == 0u || provider_) {
+    return;
+  }
+  ExecutionSnapshotRequest request;
+  request.generation = generation;
+  request.source_stamp_s = source_stamp_s;
+  request.request_ros_stamp_s = diagnosticRosNowSeconds();
+  request.request_steady_s = steadyNowSeconds();
+  {
+    std::lock_guard<std::mutex> lock(execution_snapshot_worker_mutex_);
+    if (execution_snapshot_worker_stop_ ||
+        generation <= last_requested_occupancy_generation_) {
+      return;
+    }
+    last_requested_occupancy_generation_ = generation;
+    if (pending_execution_snapshot_request_) {
+      ++execution_snapshot_pending_overwrite_count_;
+    }
+    request.overwritten_count = execution_snapshot_pending_overwrite_count_;
+    pending_execution_snapshot_request_ = request;
+  }
+  execution_snapshot_worker_cv_.notify_all();
+}
+
+P0ExecutionSnapshotAttemptEvidence
+P0RiskGridRuntime::lastExecutionSnapshotAttempt() const {
+  std::lock_guard<std::mutex> lock(execution_snapshot_worker_mutex_);
+  return last_execution_snapshot_attempt_;
+}
+
+bool P0RiskGridRuntime::yieldRiskGridToExecutionSnapshot(
+    const std::chrono::steady_clock::time_point deadline) {
+  std::unique_lock<std::mutex> lock(execution_snapshot_worker_mutex_);
+  if (!pending_execution_snapshot_request_ &&
+      !execution_snapshot_worker_in_flight_) {
+    return std::chrono::steady_clock::now() < deadline;
+  }
+  // Keep two RiskGrid workers running when the configured pool has parallel
+  // capacity. One worker missed the live 500 ms budget by 6--12 ms; two still
+  // leave most of the pool to the execution builder while preventing every
+  // 10 Hz snapshot from becoming a full-pool stop. A single-worker grid yields
+  // completely, as execution authorization has priority.
+  const std::size_t worker_count = static_cast<std::size_t>(
+      std::max(1, config_.predictor_effective_worker_count));
+  const std::size_t retained_grid_workers = worker_count > 2u ? 2u : 1u;
+  const std::size_t waiter_limit = worker_count > retained_grid_workers
+      ? worker_count - retained_grid_workers : 1u;
+  if (risk_grid_yield_waiter_count_ >= waiter_limit) {
+    return std::chrono::steady_clock::now() < deadline;
+  }
+  const bool records_episode = risk_grid_yield_waiter_count_ == 0u;
+  ++risk_grid_yield_waiter_count_;
+  const auto start = std::chrono::steady_clock::now();
+  if (records_episode) {
+    ++risk_grid_yield_count_;
+  }
+  // A timed wait made the slowest worker absorb every 10 Hz snapshot build;
+  // even 25 us at each of tens of thousands of batch boundaries added about
+  // 55 ms to the live BDS p95. Relinquish the current scheduler timeslice
+  // instead. Four of six grid workers take this path while two retain forward
+  // progress, so the execution thread becomes runnable without manufacturing
+  // a fixed delay at every boundary.
+  lock.unlock();
+  std::this_thread::yield();
+  lock.lock();
+  if (records_episode) {
+    risk_grid_yield_duration_ms_ +=
+        std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - start).count();
+  }
+  if (risk_grid_yield_waiter_count_ > 0u) {
+    --risk_grid_yield_waiter_count_;
+  }
+  execution_snapshot_worker_cv_.notify_all();
+  return !execution_snapshot_worker_stop_ &&
+      std::chrono::steady_clock::now() < deadline;
 }
 
 bool P0RiskGridRuntime::p0_6_fixture_occupied(
@@ -1028,14 +1248,20 @@ bool P0RiskGridRuntime::p0_6_fixture_occupied(
 
 iap::RiskGridMap::OccupancyPredicate
 P0RiskGridRuntime::combinedOccupancyPredicate() const {
+  iap::RiskGridMap::OccupancyPredicate occupancy_predicate;
+  {
+    std::lock_guard<std::mutex> lock(source_factory_mutex_);
+    occupancy_predicate = occupancy_predicate_;
+  }
   const bool fixture_enabled =
       config_.p0_6_fixture.enabled &&
       config_.p0_6_fixture.name == "occupied_overlap_box_v1";
   if (!fixture_enabled) {
-    return occupancy_predicate_;
+    return occupancy_predicate;
   }
-  return [this](const Eigen::Vector3d& pos) {
-    if (occupancy_predicate_ && occupancy_predicate_(pos)) {
+  return [this, occupancy_predicate = std::move(occupancy_predicate)](
+             const Eigen::Vector3d& pos) {
+    if (occupancy_predicate && occupancy_predicate(pos)) {
       return true;
     }
     return p0_6_fixture_occupied(pos);
@@ -1046,12 +1272,20 @@ iap::RiskGridMap::OccupancyDiagnosticQuery
 P0RiskGridRuntime::combinedOccupancyDiagnosticQuery(
     iap::RiskGridMap::OccupancyDiagnosticQuery base_query) const {
   auto query = std::move(base_query);
+  bool factory_configured = false;
   if (!query) {
-    query = occupancy_diagnostic_query_factory_
-        ? occupancy_diagnostic_query_factory_()
-        : occupancy_diagnostic_query_;
+    std::function<iap::RiskGridMap::OccupancyDiagnosticQuery()> factory;
+    {
+      std::lock_guard<std::mutex> lock(source_factory_mutex_);
+      factory = occupancy_diagnostic_query_factory_;
+      query = occupancy_diagnostic_query_;
+    }
+    factory_configured = static_cast<bool>(factory);
+    if (factory) {
+      query = factory();
+    }
   }
-  if (!query && occupancy_diagnostic_query_factory_) {
+  if (!query && factory_configured) {
     query = [](const Eigen::Vector3d&) {
       iap::RiskOccupancyDiagnostic diagnostic;
       diagnostic.source = "occupancy_snapshot_unavailable";
@@ -1160,6 +1394,9 @@ void P0RiskGridRuntime::createRosInterfaces() {
   // Do not couple the machine-readable health contract to RViz/debug flags.
   health_pub_ = node_->create_publisher<std_msgs::msg::String>(
       "/planning/risk_grid_health", 10);
+  execution_snapshot_attempt_pub_ =
+      node_->create_publisher<std_msgs::msg::String>(
+          "/planning/execution_snapshot_attempt", 20);
   safety_viz_ = std::make_shared<SafetyRvizPublisher>(
       node_, SafetyRvizPublisher::declareAndReadConfig(node_));
   const double period_s =
@@ -1205,20 +1442,255 @@ void P0RiskGridRuntime::createRosInterfaces() {
 
 void P0RiskGridRuntime::executionSnapshotTimerCallback() {
   // Test providers deliberately own their deterministic snapshot lifecycle in
-  // refreshOnceForTest().  The live channel below is production-only and is
-  // independent of dense RiskGrid construction.
-  if (!config_.enable_risk_grid || provider_ || !occupancy_epoch_factory_) {
+  // refreshOnceForTest().  This timer is only a lost-notification watchdog;
+  // normal production publication is driven by occupancy commit generations.
+  std::function<P0OccupancyEpochCapture()> occupancy_factory;
+  std::function<uint64_t()> generation_provider;
+  {
+    std::lock_guard<std::mutex> lock(source_factory_mutex_);
+    occupancy_factory = occupancy_epoch_factory_;
+    generation_provider = occupancy_generation_provider_;
+  }
+  if (!config_.enable_risk_grid || provider_ || !occupancy_factory) {
     return;
   }
+  const uint64_t generation = generation_provider
+      ? generation_provider() : 0u;
+  if (generation != 0u) {
+    notifyOccupancyCommitted(
+        generation, std::numeric_limits<double>::quiet_NaN());
+  }
+}
+
+void P0RiskGridRuntime::executionSnapshotWorkerLoop() {
+  while (true) {
+    ExecutionSnapshotRequest request;
+    {
+      std::unique_lock<std::mutex> lock(execution_snapshot_worker_mutex_);
+      execution_snapshot_worker_cv_.wait(lock, [this]() {
+        return execution_snapshot_worker_stop_ ||
+            pending_execution_snapshot_request_.has_value();
+      });
+      if (execution_snapshot_worker_stop_) {
+        return;
+      }
+      request = *pending_execution_snapshot_request_;
+      pending_execution_snapshot_request_.reset();
+      execution_snapshot_worker_in_flight_ = true;
+    }
+    try {
+      buildAndPublishExecutionSnapshot(request);
+    } catch (const std::exception& error) {
+      P0ExecutionSnapshotAttemptEvidence evidence;
+      evidence.attempt_id = next_execution_snapshot_attempt_id_.fetch_add(
+          1, std::memory_order_relaxed);
+      evidence.requested_occupancy_generation = request.generation;
+      evidence.requested_occupancy_stamp_s = request.source_stamp_s;
+      evidence.request_ros_stamp_s = request.request_ros_stamp_s;
+      evidence.request_steady_s = request.request_steady_s;
+      evidence.start_ros_stamp_s = diagnosticRosNowSeconds();
+      evidence.start_steady_s = steadyNowSeconds();
+      evidence.status = P0ExecutionSnapshotAttemptStatus::WORKER_EXCEPTION;
+      evidence.reason = std::string("execution_snapshot_worker_exception:") +
+          error.what();
+      recordExecutionSnapshotAttempt(std::move(evidence));
+    } catch (...) {
+      P0ExecutionSnapshotAttemptEvidence evidence;
+      evidence.attempt_id = next_execution_snapshot_attempt_id_.fetch_add(
+          1, std::memory_order_relaxed);
+      evidence.requested_occupancy_generation = request.generation;
+      evidence.requested_occupancy_stamp_s = request.source_stamp_s;
+      evidence.request_ros_stamp_s = request.request_ros_stamp_s;
+      evidence.request_steady_s = request.request_steady_s;
+      evidence.start_ros_stamp_s = diagnosticRosNowSeconds();
+      evidence.start_steady_s = steadyNowSeconds();
+      evidence.status = P0ExecutionSnapshotAttemptStatus::WORKER_EXCEPTION;
+      evidence.reason = "execution_snapshot_worker_unknown_exception";
+      recordExecutionSnapshotAttempt(std::move(evidence));
+    }
+    {
+      std::lock_guard<std::mutex> lock(execution_snapshot_worker_mutex_);
+      execution_snapshot_worker_in_flight_ = false;
+    }
+    execution_snapshot_worker_cv_.notify_all();
+  }
+}
+
+void P0RiskGridRuntime::recordExecutionSnapshotAttempt(
+    P0ExecutionSnapshotAttemptEvidence evidence) {
+  evidence.finish_ros_stamp_s = diagnosticRosNowSeconds();
+  evidence.finish_steady_s = steadyNowSeconds();
+  evidence.queue_delay_ms =
+      1000.0 * (evidence.start_steady_s - evidence.request_steady_s);
+  evidence.build_duration_ms =
+      1000.0 * (evidence.finish_steady_s - evidence.start_steady_s);
+  {
+    std::lock_guard<std::mutex> lock(execution_snapshot_worker_mutex_);
+    evidence.pending_overwrite_count =
+        execution_snapshot_pending_overwrite_count_;
+    evidence.risk_grid_yield_count = risk_grid_yield_count_;
+    evidence.risk_grid_yield_duration_ms = risk_grid_yield_duration_ms_;
+    last_execution_snapshot_attempt_ = evidence;
+    ++execution_snapshot_attempt_count_;
+    if (evidence.status == P0ExecutionSnapshotAttemptStatus::PUBLISHED) {
+      ++execution_snapshot_publish_count_;
+    } else if (evidence.status !=
+                   P0ExecutionSnapshotAttemptStatus::DEDUPLICATED) {
+      ++execution_snapshot_failure_count_;
+      last_execution_snapshot_failure_ = evidence;
+    }
+  }
+  execution_snapshot_worker_cv_.notify_all();
+
+  if (execution_snapshot_attempt_pub_) {
+    std_msgs::msg::String msg;
+    std::ostringstream json;
+    json << std::setprecision(17)
+         << "{\"schema\":\"p0_execution_snapshot_attempt_v1\""
+         << ",\"attempt_id\":" << evidence.attempt_id
+         << ",\"status\":\""
+         << p0ExecutionSnapshotAttemptStatusName(evidence.status) << "\""
+         << ",\"reason\":" << jsonString(evidence.reason)
+         << ",\"requested_occupancy_generation\":"
+         << evidence.requested_occupancy_generation
+         << ",\"requested_occupancy_stamp_s\":"
+         << jsonNumber(evidence.requested_occupancy_stamp_s)
+         << ",\"captured_occupancy_generation\":"
+         << evidence.captured_occupancy_generation
+         << ",\"captured_occupancy_stamp_s\":"
+         << jsonNumber(evidence.captured_occupancy_stamp_s)
+         << ",\"support_stamp_s\":" << jsonNumber(evidence.support_stamp_s)
+         << ",\"support_generation\":" << evidence.support_generation
+         << ",\"lidar_stamp_s\":" << jsonNumber(evidence.lidar_stamp_s)
+         << ",\"lidar_generation\":" << evidence.lidar_generation
+         << ",\"lidar_receive_steady_s\":"
+         << jsonNumber(evidence.lidar_receive_steady_s)
+         << ",\"gnss_epoch_stamp_s\":"
+         << jsonNumber(evidence.gnss_epoch_stamp_s)
+         << ",\"gnss_epoch_generation\":"
+         << evidence.gnss_epoch_generation
+         << ",\"gnss_epoch_identity\":" << evidence.gnss_epoch_identity
+         << ",\"integrity_stamp_s\":"
+         << jsonNumber(evidence.integrity_stamp_s)
+         << ",\"integrity_generation\":"
+         << evidence.integrity_generation
+         << ",\"execution_snapshot_id\":"
+         << evidence.published_execution_snapshot_id
+         << ",\"request_ros_stamp_s\":"
+         << jsonNumber(evidence.request_ros_stamp_s)
+         << ",\"start_ros_stamp_s\":"
+         << jsonNumber(evidence.start_ros_stamp_s)
+         << ",\"occupancy_capture_finish_ros_stamp_s\":"
+         << jsonNumber(evidence.occupancy_capture_finish_ros_stamp_s)
+         << ",\"support_ready_ros_stamp_s\":"
+         << jsonNumber(evidence.occupancy_capture_finish_ros_stamp_s)
+         << ",\"predictor_ready_ros_stamp_s\":"
+         << jsonNumber(evidence.predictor_ready_ros_stamp_s)
+         << ",\"snapshot_publish_ros_stamp_s\":"
+         << jsonNumber(evidence.snapshot_publish_ros_stamp_s)
+         << ",\"finish_ros_stamp_s\":"
+         << jsonNumber(evidence.finish_ros_stamp_s)
+         << ",\"request_steady_s\":"
+         << jsonNumber(evidence.request_steady_s)
+         << ",\"start_steady_s\":"
+         << jsonNumber(evidence.start_steady_s)
+         << ",\"occupancy_capture_finish_steady_s\":"
+         << jsonNumber(evidence.occupancy_capture_finish_steady_s)
+         << ",\"support_ready_steady_s\":"
+         << jsonNumber(evidence.occupancy_capture_finish_steady_s)
+         << ",\"predictor_ready_steady_s\":"
+         << jsonNumber(evidence.predictor_ready_steady_s)
+         << ",\"finish_steady_s\":"
+         << jsonNumber(evidence.finish_steady_s)
+         << ",\"queue_delay_ms\":" << jsonNumber(evidence.queue_delay_ms)
+         << ",\"build_duration_ms\":"
+         << jsonNumber(evidence.build_duration_ms)
+         << ",\"publish_age_s\":" << jsonNumber(evidence.publish_age_s)
+         << ",\"pending_overwrite_count_at_request\":"
+         << evidence.pending_overwrite_count_at_request
+         << ",\"pending_overwrite_count\":"
+         << evidence.pending_overwrite_count
+         << ",\"risk_grid_yield_count\":"
+         << evidence.risk_grid_yield_count
+         << ",\"risk_grid_yield_duration_ms\":"
+         << evidence.risk_grid_yield_duration_ms
+         << ",\"frame_contract_id\":"
+         << jsonString(evidence.frame_contract_id)
+         << ",\"geometry_id\":" << jsonString(evidence.geometry_id)
+         << ",\"support_identity\":"
+         << jsonString(evidence.support_identity) << "}";
+    msg.data = json.str();
+    execution_snapshot_attempt_pub_->publish(msg);
+  }
+}
+
+void P0RiskGridRuntime::buildAndPublishExecutionSnapshot(
+    const ExecutionSnapshotRequest& request) {
+  P0ExecutionSnapshotAttemptEvidence evidence;
+  evidence.attempt_id = next_execution_snapshot_attempt_id_.fetch_add(
+      1, std::memory_order_relaxed);
+  evidence.requested_occupancy_generation = request.generation;
+  evidence.requested_occupancy_stamp_s = request.source_stamp_s;
+  evidence.pending_overwrite_count_at_request = request.overwritten_count;
+  evidence.start_ros_stamp_s = diagnosticRosNowSeconds();
+  evidence.start_steady_s = steadyNowSeconds();
+  evidence.request_ros_stamp_s = std::isfinite(request.request_ros_stamp_s)
+      ? request.request_ros_stamp_s : evidence.start_ros_stamp_s;
+  evidence.request_steady_s = std::isfinite(request.request_steady_s)
+      ? request.request_steady_s : evidence.start_steady_s;
+  const auto finish = [this, &evidence](
+                          const P0ExecutionSnapshotAttemptStatus status,
+                          const char* reason) {
+    evidence.status = status;
+    evidence.reason = reason;
+    recordExecutionSnapshotAttempt(evidence);
+  };
   const auto build_start = std::chrono::steady_clock::now();
   double evaluation_time_s = liveNowSeconds();
-  P0OccupancyEpochCapture capture = occupancy_epoch_factory_();
+  std::function<P0OccupancyEpochCapture()> execution_factory;
+  {
+    std::lock_guard<std::mutex> lock(source_factory_mutex_);
+    execution_factory = execution_occupancy_epoch_factory_
+        ? execution_occupancy_epoch_factory_ : occupancy_epoch_factory_;
+  }
+  if (!execution_factory) {
+    finish(P0ExecutionSnapshotAttemptStatus::CAPTURE_UNAVAILABLE,
+           "occupancy_capture_factory_missing");
+    return;
+  }
+  P0OccupancyEpochCapture capture = execution_factory();
+  evidence.occupancy_capture_finish_ros_stamp_s =
+      diagnosticRosNowSeconds();
+  evidence.occupancy_capture_finish_steady_s = steadyNowSeconds();
   if (capture.status != P0OccupancyEpochCaptureStatus::VALID ||
       !capture.epoch) {
+    finish(capture.status == P0OccupancyEpochCaptureStatus::ADAPTER_INVALID
+               ? P0ExecutionSnapshotAttemptStatus::CAPTURE_ADAPTER_INVALID
+               : P0ExecutionSnapshotAttemptStatus::CAPTURE_UNAVAILABLE,
+           capture.status == P0OccupancyEpochCaptureStatus::ADAPTER_INVALID
+               ? "occupancy_capture_adapter_invalid"
+               : "occupancy_capture_unavailable");
     return;
   }
   auto occupancy = std::make_shared<P0OccupancyEpoch>(
       std::move(*capture.epoch));
+  evidence.captured_occupancy_generation = occupancy->generation;
+  evidence.captured_occupancy_stamp_s = occupancy->cloud_stamp_s;
+  evidence.lidar_generation = occupancy->generation;
+  evidence.lidar_stamp_s = occupancy->cloud_stamp_s;
+  evidence.frame_contract_id = occupancy->frame_contract_id;
+  evidence.geometry_id = occupancy->geometry.geometry_id;
+  evidence.support_stamp_s = occupancy->cloud_stamp_s;
+  evidence.support_generation = occupancy->generation;
+  evidence.support_identity = "strict_observation";
+  if (occupancy->trusted_local_map_support) {
+    evidence.support_stamp_s = occupancy->trusted_local_map_support->stamp_s;
+    evidence.support_generation = occupancy->generation;
+    evidence.lidar_receive_steady_s = occupancy->trusted_local_map_support->
+        sensor_receipt_steady_s;
+    evidence.support_identity =
+        occupancy->trusted_local_map_support->identity();
+  }
   if (config_.online_mapping_mode &&
       std::isfinite(occupancy->cloud_stamp_s)) {
     evaluation_time_s = std::max(
@@ -1229,6 +1701,24 @@ void P0RiskGridRuntime::executionSnapshotTimerCallback() {
       !occupancy->live_generation || occupancy->generation == 0u ||
       occupancy->frame_id != "map" ||
       !geometryMatchesRiskOverlay(occupancy->geometry, config_.grid, 5)) {
+    finish(P0ExecutionSnapshotAttemptStatus::OCCUPANCY_INVALID,
+           "occupancy_epoch_incomplete_or_geometry_mismatch");
+    return;
+  }
+  if (request.generation != 0u && occupancy->generation < request.generation) {
+    finish(P0ExecutionSnapshotAttemptStatus::SUPERSEDED,
+           "captured_generation_precedes_requested_generation");
+    return;
+  }
+  bool superseded_after_capture = false;
+  {
+    std::lock_guard<std::mutex> lock(execution_snapshot_worker_mutex_);
+    superseded_after_capture =
+        occupancy->generation < last_requested_occupancy_generation_;
+  }
+  if (superseded_after_capture) {
+    finish(P0ExecutionSnapshotAttemptStatus::SUPERSEDED,
+           "captured_generation_superseded_while_in_flight");
     return;
   }
   const double occupancy_age_s =
@@ -1236,6 +1726,8 @@ void P0RiskGridRuntime::executionSnapshotTimerCallback() {
   if (!std::isfinite(occupancy_age_s) || occupancy_age_s < -1.0e-6 ||
       (config_.grid.stale_timeout_s >= 0.0 &&
        occupancy_age_s > config_.grid.stale_timeout_s)) {
+    finish(P0ExecutionSnapshotAttemptStatus::OCCUPANCY_STALE,
+           "occupancy_source_age_exceeded");
     return;
   }
 
@@ -1247,13 +1739,40 @@ void P0RiskGridRuntime::executionSnapshotTimerCallback() {
       !std::isfinite(integrity.current.stamp) ||
       evaluation_time_s < integrity.current.stamp ||
       evaluation_time_s - integrity.current.stamp >
-          config_.grid.stale_timeout_s ||
-      !std::isfinite(integrity.current.hpl) ||
+          config_.grid.stale_timeout_s) {
+    finish(P0ExecutionSnapshotAttemptStatus::INTEGRITY_UNAVAILABLE,
+           "integrity_snapshot_unavailable_or_stale");
+    return;
+  }
+  evidence.integrity_stamp_s = integrity.current.stamp;
+  evidence.integrity_generation = sources.current_generation;
+  evidence.gnss_epoch_stamp_s = sources.gnss_epoch_stamp;
+  evidence.gnss_epoch_generation = sources.gnss_epoch_generation;
+  evidence.gnss_epoch_identity = integrity.current.gnss_epoch_identity;
+  // All captured sources use the same ROS/simulator clock, but callbacks can
+  // be delivered out of order by a few tens of milliseconds.  Evaluate the
+  // immutable tuple at its newest source stamp so a GNSS epoch that arrived
+  // just ahead of odometry/occupancy is not mislabeled as "future" data.
+  // This does not extend any freshness timeout: older tuple members are still
+  // checked against the unchanged one-second age bound below and in freshAt.
+  const auto advance_evaluation_time = [&evaluation_time_s](
+      const double source_stamp_s) {
+    if (std::isfinite(source_stamp_s)) {
+      evaluation_time_s = std::max(evaluation_time_s, source_stamp_s);
+    }
+  };
+  advance_evaluation_time(occupancy->cloud_stamp_s);
+  advance_evaluation_time(integrity.current.stamp);
+  advance_evaluation_time(sources.current_stamp);
+  advance_evaluation_time(sources.gnss_epoch_stamp);
+  if (!std::isfinite(integrity.current.hpl) ||
       !std::isfinite(integrity.current.vpl) ||
       !std::isfinite(integrity.current.hal) ||
       !std::isfinite(integrity.current.val) ||
       integrity.current.hpl >= integrity.current.hal ||
       integrity.current.vpl >= integrity.current.val) {
+    finish(P0ExecutionSnapshotAttemptStatus::INTEGRITY_UNSAFE,
+           "certified_integrity_not_below_alert_limit");
     return;
   }
 
@@ -1314,6 +1833,7 @@ void P0RiskGridRuntime::executionSnapshotTimerCallback() {
       config_.grid.alert_limit_policy_id;
   const std::string source_hash =
       iap::canonicalRiskGridSourceIdentityHash(source_identity);
+  bool duplicate_tuple = false;
   {
     std::lock_guard<std::mutex> lock(planning_snapshot_mutex_);
     if (execution_snapshot_ &&
@@ -1324,12 +1844,22 @@ void P0RiskGridRuntime::executionSnapshotTimerCallback() {
         execution_snapshot_->geometry_id == occupancy->geometry.geometry_id &&
         iap::canonicalRiskGridConfigHash(execution_snapshot_->risk_policy) ==
             iap::canonicalRiskGridConfigHash(config_.grid)) {
-      return;
+      duplicate_tuple = true;
+      evidence.published_execution_snapshot_id =
+          execution_snapshot_->execution_snapshot_id;
     }
+  }
+  if (duplicate_tuple) {
+    evidence.publish_age_s = evaluation_time_s - occupancy->cloud_stamp_s;
+    finish(P0ExecutionSnapshotAttemptStatus::DEDUPLICATED,
+           "input_tuple_already_published");
+    return;
   }
 
   const auto map_points = occupancy->environment_occupied_voxel_centers;
   if (!map_points) {
+    finish(P0ExecutionSnapshotAttemptStatus::MAP_POINTS_MISSING,
+           "environment_obstacle_centers_missing");
     return;
   }
   iap::LidarFimPrimitiveGenerationDiagnostics fim_diagnostics;
@@ -1372,11 +1902,11 @@ void P0RiskGridRuntime::executionSnapshotTimerCallback() {
   const auto observed_support_query = occupancy->diagnostic_query;
   if (trusted_support) {
     module->set_support_query(
-        [trusted_support](const Eigen::Vector3d& position,
-                          const double evaluation_time,
-                          const double query_time) {
-          return trusted_support->query(
-              position, evaluation_time, query_time);
+        [occupancy](const Eigen::Vector3d& position,
+                    const double evaluation_time,
+                    const double query_time) {
+          return queryP0LocalMapSupport(
+              *occupancy, position, evaluation_time, query_time);
         });
   } else {
     module->set_observation_predicate(
@@ -1388,6 +1918,8 @@ void P0RiskGridRuntime::executionSnapshotTimerCallback() {
   }
   module->set_lidar_map_points(map_points);
   module->set_lidar_fim_primitives(fim_primitives);
+  evidence.predictor_ready_ros_stamp_s = diagnosticRosNowSeconds();
+  evidence.predictor_ready_steady_s = steadyNowSeconds();
 
   auto execution = std::make_shared<P0ExecutionRiskSnapshot>();
   execution->execution_snapshot_id =
@@ -1441,14 +1973,38 @@ void P0RiskGridRuntime::executionSnapshotTimerCallback() {
             : batch_budget_ms;
         return module->queryForwardRiskBatch(request);
       };
-  execution->publish_time_s = liveNowSeconds();
+  execution->publish_time_s = std::max(
+      liveNowSeconds(), execution->evaluation_time_s);
+  evidence.snapshot_publish_ros_stamp_s = execution->publish_time_s;
   if (!execution->freshAt(
           execution->publish_time_s, config_.gnss_epoch_max_age_s)) {
+    finish(P0ExecutionSnapshotAttemptStatus::FINAL_FRESHNESS_FAILED,
+           "snapshot_became_stale_before_publish");
     return;
   }
+  bool superseded_before_publish = false;
   {
-    std::lock_guard<std::mutex> lock(planning_snapshot_mutex_);
-    execution_snapshot_ = execution;
+    // notifyOccupancyCommitted() uses the same mutex. Comparing and publishing
+    // under this short critical section gives latest-wins a linearization
+    // point: an older in-flight build can never become authority after a newer
+    // generation has been requested.
+    std::lock_guard<std::mutex> worker_lock(
+        execution_snapshot_worker_mutex_);
+    superseded_before_publish =
+        occupancy->generation < last_requested_occupancy_generation_;
+    if (!superseded_before_publish) {
+      std::lock_guard<std::mutex> planning_lock(planning_snapshot_mutex_);
+      execution_snapshot_ = execution;
+      execution_snapshot_history_.push_back(execution);
+      while (execution_snapshot_history_.size() > 4U) {
+        execution_snapshot_history_.pop_front();
+      }
+    }
+  }
+  if (superseded_before_publish) {
+    finish(P0ExecutionSnapshotAttemptStatus::SUPERSEDED,
+           "snapshot_superseded_before_atomic_publish");
+    return;
   }
   {
     std::lock_guard<std::mutex> lock(health_state_mutex_);
@@ -1460,6 +2016,11 @@ void P0RiskGridRuntime::executionSnapshotTimerCallback() {
         std::chrono::duration<double, std::milli>(
             std::chrono::steady_clock::now() - build_start).count();
   }
+  evidence.published_execution_snapshot_id = execution->execution_snapshot_id;
+  evidence.publish_age_s =
+      execution->publish_time_s - occupancy->cloud_stamp_s;
+  finish(P0ExecutionSnapshotAttemptStatus::PUBLISHED,
+         "execution_snapshot_published");
 }
 
 void P0RiskGridRuntime::healthTimerCallback() {
@@ -1531,12 +2092,34 @@ void P0RiskGridRuntime::refreshTimerCallback() {
   std::optional<P0OccupancyEpoch> occupancy_epoch;
   P0OccupancyEpochCaptureStatus occupancy_capture_status =
       P0OccupancyEpochCaptureStatus::VALID;
+  std::function<P0OccupancyEpochCapture()> occupancy_factory;
+  {
+    std::lock_guard<std::mutex> lock(source_factory_mutex_);
+    occupancy_factory = occupancy_epoch_factory_;
+  }
   const bool occupancy_capture_attempted =
-      static_cast<bool>(occupancy_epoch_factory_);
+      static_cast<bool>(occupancy_factory);
   if (occupancy_capture_attempted) {
-    P0OccupancyEpochCapture capture = occupancy_epoch_factory_();
-    occupancy_capture_status = capture.status;
-    occupancy_epoch = std::move(capture.epoch);
+    // Execution authority owns the high-priority freeze. Dense RiskGrid work
+    // waits for that single-slot worker and reuses its immutable occupancy
+    // object whenever it represents the current committed generation.
+    if (!provider_) {
+      (void)yieldRiskGridToExecutionSnapshot(risk_grid_deadline);
+    }
+    const auto execution = !provider_ ? acquireExecutionRiskSnapshot()
+                                      : nullptr;
+    if (execution && execution->occupancy &&
+        executionSnapshotFreshAt(execution, liveNowSeconds())) {
+      // Build against this coherent, fresh immutable generation even if a
+      // newer occupancy transaction committed meanwhile. A new generation is
+      // a request for the next latest-wins snapshot, not grounds to discard
+      // the already frozen tuple and repeat the expensive dense-map capture.
+      occupancy_epoch = *execution->occupancy;
+    } else {
+      P0OccupancyEpochCapture capture = occupancy_factory();
+      occupancy_capture_status = capture.status;
+      occupancy_epoch = std::move(capture.epoch);
+    }
   }
   if (config_.online_mapping_mode && occupancy_epoch.has_value()) {
     const auto& geometry = occupancy_epoch->geometry;
@@ -2007,11 +2590,12 @@ void P0RiskGridRuntime::refreshTimerCallback() {
       const auto observed_support_query = occupancy_epoch->diagnostic_query;
       if (trusted_support) {
         module.set_support_query(
-            [trusted_support](const Eigen::Vector3d& position,
+            [occupancy_epoch](const Eigen::Vector3d& position,
                               const double evaluation_time_s,
                               const double query_time_s) {
-              return trusted_support->query(
-                  position, evaluation_time_s, query_time_s);
+              return queryP0LocalMapSupport(
+                  *occupancy_epoch, position, evaluation_time_s,
+                  query_time_s);
             });
       } else {
         module.set_observation_predicate(
@@ -2034,11 +2618,12 @@ void P0RiskGridRuntime::refreshTimerCallback() {
       const auto observed_support_query = occupancy_epoch->diagnostic_query;
       if (trusted_support) {
         forward_risk_module->set_support_query(
-            [trusted_support](const Eigen::Vector3d& position,
+            [occupancy_epoch](const Eigen::Vector3d& position,
                               const double evaluation_time_s,
                               const double query_time_s) {
-              return trusted_support->query(
-                  position, evaluation_time_s, query_time_s);
+              return queryP0LocalMapSupport(
+                  *occupancy_epoch, position, evaluation_time_s,
+                  query_time_s);
             });
       } else {
         forward_risk_module->set_observation_predicate(
@@ -2088,7 +2673,10 @@ void P0RiskGridRuntime::refreshTimerCallback() {
         now_s,
         config_.predictor_effective_worker_count,
         config_.predictor_hal_m, config_.predictor_val_m,
-        risk_grid_deadline);
+        risk_grid_deadline,
+        [this](const std::chrono::steady_clock::time_point deadline) {
+          return yieldRiskGridToExecutionSnapshot(deadline);
+        });
     predictor_provider = owned_predictor_provider.get();
     local_provider = std::move(owned_predictor_provider);
     provider = local_provider.get();
@@ -2360,6 +2948,10 @@ void P0RiskGridRuntime::refreshTimerCallback() {
             execution_snapshot_->execution_snapshot_id <
                 execution->execution_snapshot_id) {
           execution_snapshot_ = execution;
+          execution_snapshot_history_.push_back(execution);
+          while (execution_snapshot_history_.size() > 4U) {
+            execution_snapshot_history_.pop_front();
+          }
         }
       }
       {
@@ -2572,6 +3164,11 @@ void P0RiskGridRuntime::publishHealth(const iap::RiskGridHealth& health,
   }
   const iap::RiskGridHealth& out_health = evidence.health;
   const InputReadiness& readiness = evidence.readiness;
+  // Refresh evidence is intentionally frozen for reproducibility, but a
+  // long-running/failed RiskGrid build must not make current source health
+  // look stale. Latency attribution uses a fresh view of the input chain;
+  // the captured readiness remains serialized with the refresh transaction.
+  const InputReadiness live_readiness = inputReadiness(now_s);
   const auto& health_snapshot = evidence.snapshot;
   const iap::RiskGridMapParams* grid_params = health_snapshot
       ? &health_snapshot->params() : nullptr;
@@ -2594,16 +3191,59 @@ void P0RiskGridRuntime::publishHealth(const iap::RiskGridHealth& health,
       ? planning_snapshot->integrity_anchor.current
       : iap::CurrentIntegrityState{};
   const auto active_execution = acquireExecutionRiskSnapshot();
+  const auto execution_attempt = lastExecutionSnapshotAttempt();
+  P0ExecutionSnapshotAttemptEvidence execution_failure;
+  uint64_t execution_attempt_count = 0;
+  uint64_t execution_publish_count = 0;
+  uint64_t execution_failure_count = 0;
+  uint64_t execution_pending_overwrite_count = 0;
+  uint64_t risk_grid_yield_count = 0;
+  double risk_grid_yield_duration_ms = 0.0;
+  bool execution_snapshot_pending_or_in_flight = false;
+  uint64_t last_requested_occupancy_generation = 0;
+  {
+    std::lock_guard<std::mutex> lock(execution_snapshot_worker_mutex_);
+    execution_attempt_count = execution_snapshot_attempt_count_;
+    execution_publish_count = execution_snapshot_publish_count_;
+    execution_failure_count = execution_snapshot_failure_count_;
+    execution_failure = last_execution_snapshot_failure_;
+    execution_pending_overwrite_count =
+        execution_snapshot_pending_overwrite_count_;
+    risk_grid_yield_count = risk_grid_yield_count_;
+    risk_grid_yield_duration_ms = risk_grid_yield_duration_ms_;
+    execution_snapshot_pending_or_in_flight =
+        pending_execution_snapshot_request_.has_value() ||
+        execution_snapshot_worker_in_flight_;
+    last_requested_occupancy_generation =
+        last_requested_occupancy_generation_;
+  }
   const bool source_data_gap =
-      !readiness.odom_fresh || !readiness.current_integrity_fresh ||
-      !readiness.gnss_epoch_fresh || !readiness.map_fresh;
+      !live_readiness.odom_fresh ||
+      !live_readiness.current_integrity_fresh ||
+      !live_readiness.gnss_epoch_fresh || !live_readiness.map_fresh;
   const bool occupancy_build_lag =
-      snapshot_failure_reason.find("occupancy") != std::string::npos;
-  // A snapshot build duration is not a queue delay. We only claim queue lag
-  // when all source data is ready but no immutable execution snapshot has
-  // ever reached the atomic publication slot.
+      snapshot_failure_reason.find("occupancy") != std::string::npos ||
+      execution_attempt.status ==
+          P0ExecutionSnapshotAttemptStatus::CAPTURE_UNAVAILABLE ||
+      execution_attempt.status ==
+          P0ExecutionSnapshotAttemptStatus::CAPTURE_ADAPTER_INVALID ||
+      execution_attempt.status ==
+          P0ExecutionSnapshotAttemptStatus::OCCUPANCY_INVALID ||
+      execution_attempt.status ==
+          P0ExecutionSnapshotAttemptStatus::MAP_POINTS_MISSING;
+  // Queue lag is reserved for a healthy source tuple whose requested
+  // generation has not reached an atomic execution publication. Build
+  // failures remain separately attributable above.
   const bool snapshot_queue_lag =
-      !source_data_gap && !occupancy_build_lag && !active_execution;
+      !source_data_gap && !occupancy_build_lag &&
+      (execution_snapshot_pending_or_in_flight || !active_execution ||
+       (last_requested_occupancy_generation != 0u && active_execution &&
+        active_execution->source_identity.occupancy_generation <
+            last_requested_occupancy_generation) ||
+       execution_attempt.status ==
+           P0ExecutionSnapshotAttemptStatus::FINAL_FRESHNESS_FAILED ||
+       execution_attempt.status ==
+           P0ExecutionSnapshotAttemptStatus::WORKER_EXCEPTION);
   const bool risk_grid_build_lag =
       snapshot_failure_reason == "risk_grid_build_budget_exceeded" ||
       (std::isfinite(state.refresh_elapsed_ms) &&
@@ -2779,6 +3419,37 @@ void P0RiskGridRuntime::publishHealth(const iap::RiskGridHealth& health,
       << jsonNumber(state.execution_snapshot_publish_stamp_s) << ","
       << "\"execution_snapshot_publish_latency_ms\":"
       << jsonNumber(state.execution_snapshot_publish_latency_ms) << ","
+      << "\"execution_snapshot_attempt_count\":"
+      << execution_attempt_count << ","
+      << "\"execution_snapshot_publish_count\":"
+      << execution_publish_count << ","
+      << "\"execution_snapshot_failure_count\":"
+      << execution_failure_count << ","
+      << "\"execution_snapshot_pending_overwrite_count\":"
+      << execution_pending_overwrite_count << ","
+      << "\"execution_snapshot_last_attempt_status\":"
+      << jsonString(p0ExecutionSnapshotAttemptStatusName(
+             execution_attempt.status)) << ","
+      << "\"execution_snapshot_last_failure\":"
+      << jsonString(execution_failure_count > 0u
+             ? execution_failure.reason : "") << ","
+      << "\"execution_snapshot_last_failure_status\":"
+      << jsonString(execution_failure_count > 0u
+             ? p0ExecutionSnapshotAttemptStatusName(execution_failure.status)
+             : "") << ","
+      << "\"execution_snapshot_last_failure_attempt_id\":"
+      << (execution_failure_count > 0u ? execution_failure.attempt_id : 0u)
+      << ","
+      << "\"execution_snapshot_last_queue_delay_ms\":"
+      << jsonNumber(execution_attempt.queue_delay_ms) << ","
+      << "\"execution_snapshot_last_build_duration_ms\":"
+      << jsonNumber(execution_attempt.build_duration_ms) << ","
+      << "\"execution_snapshot_last_publish_age_s\":"
+      << jsonNumber(execution_attempt.publish_age_s) << ","
+      << "\"risk_grid_execution_priority_yield_count\":"
+      << risk_grid_yield_count << ","
+      << "\"risk_grid_execution_priority_yield_duration_ms\":"
+      << jsonNumber(risk_grid_yield_duration_ms) << ","
       << "\"input_callback_age_s\":" << jsonNumber(state.input_callback_age_s) << ","
       << "\"input_callback_count\":" << state.input_callback_count << ","
       << "\"health_callback_count\":" << state.health_callback_count << ","
@@ -3859,6 +4530,13 @@ double P0RiskGridRuntime::currentMessageStamp() const {
     return latest_current_.stamp;
   }
   return std::numeric_limits<double>::quiet_NaN();
+}
+
+double P0RiskGridRuntime::diagnosticRosNowSeconds() const {
+  if (!node_) {
+    return std::numeric_limits<double>::quiet_NaN();
+  }
+  return node_->now().seconds();
 }
 
 double P0RiskGridRuntime::liveNowSeconds() const {
