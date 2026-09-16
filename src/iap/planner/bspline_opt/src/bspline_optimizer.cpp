@@ -606,29 +606,50 @@ namespace ego_planner
     return NativeAStarGuideStatus::OK;
   }
 
-  bool BsplineOptimizer::refineP4ForwardGuide(
+  P4ForwardRefinementResult BsplineOptimizer::refineP4ForwardGuide(
       const std::vector<Eigen::Vector3d> &coarse_guide,
       GridMapOccupancyDiagnosticQuery frozen_occupancy_query,
       const double corridor_radius_m,
-      const double compute_budget_ms,
-      std::vector<Eigen::Vector3d> *refined_guide)
+      const double compute_budget_ms)
   {
-    if (!refined_guide || !grid_map_ || coarse_guide.size() < 2 ||
+    const auto started = std::chrono::steady_clock::now();
+    P4ForwardRefinementResult result;
+    const auto finish = [&result, started](
+        const P4ForwardRefinementStatus status,
+        const std::size_t segment = std::numeric_limits<std::size_t>::max(),
+        const Eigen::Vector3d &position = Eigen::Vector3d::Constant(
+          std::numeric_limits<double>::quiet_NaN())) {
+          result.status = status;
+          result.failed_segment_index = segment;
+          result.failure_position = position;
+          result.elapsed_ms = std::chrono::duration<double, std::milli>(
+              std::chrono::steady_clock::now() - started).count();
+          if (status != P4ForwardRefinementStatus::SUCCESS)
+            result.path.clear();
+          return std::move(result);
+        };
+    if (!grid_map_ || coarse_guide.size() < 2 ||
         !frozen_occupancy_query || !std::isfinite(corridor_radius_m) ||
         corridor_radius_m <= 0.0 || !std::isfinite(compute_budget_ms) ||
         compute_budget_ms <= 0.0)
-      return false;
-    refined_guide->clear();
+      return finish(P4ForwardRefinementStatus::INVALID_INPUT);
     const auto deadline = std::chrono::steady_clock::now() +
         std::chrono::duration_cast<std::chrono::steady_clock::duration>(
             std::chrono::duration<double, std::milli>(compute_budget_ms));
+    bool deadline_hit = false;
+    bool occupancy_unavailable = false;
     const auto deadline_query =
-        [query = std::move(frozen_occupancy_query), deadline](
+        [query = frozen_occupancy_query, deadline, &deadline_hit,
+         &occupancy_unavailable](
             const Eigen::Vector3d &point)
         {
-          if (std::chrono::steady_clock::now() >= deadline)
+          if (std::chrono::steady_clock::now() >= deadline) {
+            deadline_hit = true;
             return GridMapOccupancyDiagnostic{};
+          }
           auto diagnostic = query(point);
+          occupancy_unavailable = occupancy_unavailable ||
+              !diagnostic.available;
           // Forward-route refinement follows EGO's hit-only geometry
           // contract. Observation coverage is risk evidence, not a
           // collision. Only an unavailable/out-of-bounds query or a raw /
@@ -647,11 +668,55 @@ namespace ego_planner
     for (const auto &point : coarse_guide)
     {
       if (!point.allFinite())
-        return false;
+        return finish(P4ForwardRefinementStatus::INVALID_INPUT);
       minimum = minimum.cwiseMin(point);
       maximum = maximum.cwiseMax(point);
     }
     constexpr double kFineResolutionM = 0.1;
+    constexpr double kClearPathSampleM = 0.05;
+    std::vector<bool> segment_has_collision(coarse_guide.size() - 1u, false);
+    std::vector<Eigen::Vector3d> clear_path;
+    clear_path.push_back(coarse_guide.front());
+    bool any_collision = false;
+    for (std::size_t segment = 1; segment < coarse_guide.size(); ++segment)
+    {
+      const Eigen::Vector3d from = coarse_guide[segment - 1];
+      const Eigen::Vector3d to = coarse_guide[segment];
+      const double length = (to - from).norm();
+      const int sample_count = std::max(
+          1, static_cast<int>(std::ceil(length / kClearPathSampleM)));
+      for (int sample = 1; sample <= sample_count; ++sample)
+      {
+        if (std::chrono::steady_clock::now() >= deadline)
+          return finish(P4ForwardRefinementStatus::BUDGET_EXHAUSTED,
+                        segment - 1u, clear_path.back());
+        const Eigen::Vector3d point = from +
+            (to - from) * (static_cast<double>(sample) / sample_count);
+        auto diagnostic = frozen_occupancy_query(point);
+        if (!diagnostic.available)
+          return finish(P4ForwardRefinementStatus::OCCUPANCY_UNAVAILABLE,
+                        segment - 1u, point);
+        const bool occupied = diagnostic.raw_occupied ||
+            diagnostic.inflated_occupied ||
+            diagnostic.state == GridMapObservationState::OCCUPIED;
+        if (occupied)
+        {
+          segment_has_collision[segment - 1u] = true;
+          any_collision = true;
+          break;
+        }
+        if ((point - clear_path.back()).norm() > 1.0e-6)
+          clear_path.push_back(point);
+      }
+    }
+    if (!any_collision)
+    {
+      result.path = std::move(clear_path);
+      return result.path.size() >= 2u ?
+          finish(P4ForwardRefinementStatus::SUCCESS) :
+          finish(P4ForwardRefinementStatus::OUTPUT_TOO_SHORT);
+    }
+
     const Eigen::Vector3d search_extent =
         maximum - minimum +
         Eigen::Vector3d::Constant(2.0 * corridor_radius_m);
@@ -662,46 +727,64 @@ namespace ego_planner
     fine_astar->initGridMap(
         grid_map_, pool_size.cwiseMax(Eigen::Vector3i::Constant(12)));
     fine_astar->setFrozenOccupancyQuery(deadline_query);
-    const auto fail = [refined_guide]()
-    {
-      refined_guide->clear();
-      return false;
-    };
     for (std::size_t segment = 1; segment < coarse_guide.size(); ++segment)
     {
       if (std::chrono::steady_clock::now() >= deadline)
-        return fail();
+        return finish(P4ForwardRefinementStatus::BUDGET_EXHAUSTED,
+                      segment - 1u, coarse_guide[segment - 1]);
       const Eigen::Vector3d from = coarse_guide[segment - 1];
       const Eigen::Vector3d to = coarse_guide[segment];
       if ((to - from).norm() <= 1.0e-6)
         continue;
+      if (!segment_has_collision[segment - 1u])
+      {
+        if (result.path.empty() ||
+            (from - result.path.back()).norm() > 1.0e-6)
+          result.path.push_back(from);
+        result.path.push_back(to);
+        continue;
+      }
       if (!fine_astar->AstarSearchOriginal(kFineResolutionM, from, to))
-        return fail();
+      {
+        if (deadline_hit || std::chrono::steady_clock::now() >= deadline)
+          return finish(P4ForwardRefinementStatus::BUDGET_EXHAUSTED,
+                        segment - 1u, from);
+        if (occupancy_unavailable)
+          return finish(P4ForwardRefinementStatus::OCCUPANCY_UNAVAILABLE,
+                        segment - 1u, from);
+        return finish(P4ForwardRefinementStatus::ASTAR_NO_PATH,
+                      segment - 1u, from);
+      }
       if (std::chrono::steady_clock::now() >= deadline)
-        return fail();
+        return finish(P4ForwardRefinementStatus::BUDGET_EXHAUSTED,
+                      segment - 1u, to);
       const auto path = fine_astar->getPath();
       if (path.size() < 2)
-        return fail();
+        return finish(P4ForwardRefinementStatus::ASTAR_INVALID_RESULT,
+                      segment - 1u, to);
       const Eigen::Vector3d direction = to - from;
       const double squared_length = direction.squaredNorm();
-      if (refined_guide->empty() ||
-          (from - refined_guide->back()).norm() > 1.0e-6)
-        refined_guide->push_back(from);
+      if (result.path.empty() ||
+          (from - result.path.back()).norm() > 1.0e-6)
+        result.path.push_back(from);
       for (const auto &point : path)
       {
         const double alpha = std::clamp(
             (point - from).dot(direction) / squared_length, 0.0, 1.0);
         const Eigen::Vector3d closest = from + alpha * direction;
         if ((point - closest).norm() > corridor_radius_m)
-          return fail();
-        if (refined_guide->empty() ||
-            (point - refined_guide->back()).norm() > 1.0e-6)
-          refined_guide->push_back(point);
+          return finish(P4ForwardRefinementStatus::CORRIDOR_ESCAPE,
+                        segment - 1u, point);
+        if (result.path.empty() ||
+            (point - result.path.back()).norm() > 1.0e-6)
+          result.path.push_back(point);
       }
-      if ((to - refined_guide->back()).norm() > 1.0e-6)
-        refined_guide->push_back(to);
+      if ((to - result.path.back()).norm() > 1.0e-6)
+        result.path.push_back(to);
     }
-    return refined_guide->size() >= 2;
+    return result.path.size() >= 2u ?
+        finish(P4ForwardRefinementStatus::SUCCESS) :
+        finish(P4ForwardRefinementStatus::OUTPUT_TOO_SHORT);
   }
 
   // 返回多个安全的控制点集

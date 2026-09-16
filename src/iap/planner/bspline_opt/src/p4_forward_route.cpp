@@ -10,6 +10,7 @@
 #include <condition_variable>
 #include <iomanip>
 #include <limits>
+#include <map>
 #include <queue>
 #include <mutex>
 #include <sstream>
@@ -168,6 +169,12 @@ double speedCapForDistance(
   const double b = limits.reaction_time_s;
   const double discriminant = b * b + 4.0 * a * usable;
   return std::max(0.0, (-b + std::sqrt(discriminant)) / (2.0 * a));
+}
+
+double limitedPrefixProgressLimit(const P4ForwardLimits & limits)
+{
+  return limits.max_creep_progress_m >= 0.0 ?
+    limits.max_creep_progress_m : limits.max_limited_prefix_progress_m;
 }
 
 class OnlineTopologyGraph;
@@ -1460,9 +1467,14 @@ void configureKnownGeometryPrefixMotion(
       return;
     }
   }
-  const double terminal_reserve = p4StoppingDistance(0.0, request.limits);
+  // Reserve enough corridor to stop from the configured observation speed.
+  // Reserving only the zero-speed footprint and then subtracting that same
+  // footprint in speedCapForDistance deterministically produced a zero cap
+  // whenever the adaptive prefix consumed the rest of the clear corridor.
+  const double terminal_reserve = p4StoppingDistance(
+    request.limits.max_observe_speed_mps, request.limits);
   const double progress = std::min(
-    request.limits.max_creep_progress_m,
+    limitedPrefixProgressLimit(request.limits),
     std::max(0.0, decision->common_prefix_length_m - terminal_reserve));
   if (progress < request.limits.min_creep_progress_m) {
     return;
@@ -1571,24 +1583,26 @@ bool configureSafeLimitedCommonPrefix(
 
   const double fixed_reserve_m = request.limits.vehicle_radius_m +
     request.limits.safety_margin_m;
-  const double approved_motion_m = std::max(
-    0.0, last_safe_arc_m - fixed_reserve_m);
-  const double required_braking_motion_m = std::max(
+  const double dynamic_stopping_reserve_m = std::max(
     0.0, decision->stopping_distance_m - fixed_reserve_m);
-  if (approved_motion_m + kEpsilon < required_braking_motion_m ||
+  const double total_terminal_reserve_m =
+    fixed_reserve_m + dynamic_stopping_reserve_m;
+  const double approved_motion_m = std::max(
+    0.0, last_safe_arc_m - total_terminal_reserve_m);
+  if (approved_motion_m + kEpsilon < dynamic_stopping_reserve_m ||
     approved_motion_m + kEpsilon < request.limits.min_creep_progress_m)
   {
     decision->reason = "safe_common_prefix_too_short_to_stop";
     return false;
   }
-  if (required_braking_motion_m >
-    request.limits.max_creep_progress_m + kEpsilon)
+  const double progress_limit_m = limitedPrefixProgressLimit(request.limits);
+  if (dynamic_stopping_reserve_m > progress_limit_m + kEpsilon)
   {
     decision->reason = "safe_common_prefix_progress_limit_too_short";
     return false;
   }
   const double progress_m = std::min(
-    approved_motion_m, request.limits.max_creep_progress_m);
+    approved_motion_m, progress_limit_m);
   auto executable = cropPrefixToDistance(prefix, progress_m);
   if (executable.size() < 2 ||
     pathLength(executable) > approved_motion_m + kEpsilon)
@@ -1823,13 +1837,37 @@ const char * p4ForwardResultStatusName(const P4ForwardResultStatus status)
   return "FAILED";
 }
 
+const char *p4ForwardRefinementStatusName(
+  const P4ForwardRefinementStatus status)
+{
+  switch (status) {
+    case P4ForwardRefinementStatus::SUCCESS: return "success";
+    case P4ForwardRefinementStatus::INVALID_INPUT: return "invalid_input";
+    case P4ForwardRefinementStatus::BUDGET_EXHAUSTED:
+      return "budget_exhausted";
+    case P4ForwardRefinementStatus::OCCUPANCY_UNAVAILABLE:
+      return "occupancy_unavailable";
+    case P4ForwardRefinementStatus::COARSE_PATH_COLLISION:
+      return "coarse_path_collision";
+    case P4ForwardRefinementStatus::ASTAR_NO_PATH: return "astar_no_path";
+    case P4ForwardRefinementStatus::ASTAR_INVALID_RESULT:
+      return "astar_invalid_result";
+    case P4ForwardRefinementStatus::CORRIDOR_ESCAPE:
+      return "corridor_escape";
+    case P4ForwardRefinementStatus::OUTPUT_TOO_SHORT:
+      return "output_too_short";
+  }
+  return "invalid_input";
+}
+
 bool P4ForwardSnapshotIdentity::valid() const
 {
   return !geometry_id.empty() && !frame_id.empty() &&
          !frame_contract_id.empty() && !local_map_support_identity.empty() &&
          !alert_limit_policy_id.empty() && !risk_config_hash.empty() &&
          !risk_source_identity_hash.empty() && occupancy_generation > 0 &&
-         risk_generation > 0 && gnss_epoch_identity > 0 &&
+         (execution_snapshot_id > 0 || risk_generation > 0) &&
+         gnss_epoch_identity > 0 &&
          std::isfinite(gnss_epoch_stamp_s) &&
          std::isfinite(occupancy_stamp_s) && std::isfinite(risk_stamp_s);
 }
@@ -1840,7 +1878,8 @@ std::string P4ForwardSnapshotIdentity::canonical() const
   stream << geometry_id << '|' << frame_id << '|' << frame_contract_id <<
     '|' << local_map_support_identity << '|' << alert_limit_policy_id <<
     '|' << risk_config_hash << '|' << risk_source_identity_hash <<
-    '|' << occupancy_generation << '|' << risk_generation << '|' <<
+    '|' << occupancy_generation << '|' << execution_snapshot_id << '|' <<
+    risk_generation << '|' <<
     gnss_epoch_identity << '|' << std::setprecision(17) << gnss_epoch_stamp_s <<
     '|' << occupancy_stamp_s << '|' << risk_stamp_s;
   return stream.str();
@@ -1880,13 +1919,14 @@ bool P4ForwardRequest::valid(std::string * reason) const
   {
     return fail("missing_snapshot_query");
   }
-  const std::array<double, 16> finite_limits = {
+  const std::array<double, 17> finite_limits = {
     limits.reaction_time_s, limits.braking_accel_mps2,
     limits.vehicle_radius_m, limits.safety_margin_m,
     limits.max_lookahead_m, limits.sensing_range_m,
     limits.topology_resolution_m, limits.occupancy_resolution_m,
     limits.nominal_query_speed_mps, limits.max_path_length_ratio,
-    limits.min_creep_progress_m, limits.max_creep_progress_m,
+    limits.min_creep_progress_m, limits.max_limited_prefix_progress_m,
+    limits.max_creep_progress_m,
     limits.max_observe_speed_mps, limits.channel_enumeration_budget_ms,
     limits.advisory_min_relative_improvement, limits.compute_budget_ms};
   if (std::any_of(
@@ -1899,7 +1939,9 @@ bool P4ForwardRequest::valid(std::string * reason) const
     limits.occupancy_resolution_m <= 0.0 ||
     limits.nominal_query_speed_mps <= 0.0 ||
     limits.max_path_length_ratio < 1.0 || limits.min_creep_progress_m < 0.0 ||
-    limits.max_creep_progress_m < limits.min_creep_progress_m ||
+    limits.max_limited_prefix_progress_m < limits.min_creep_progress_m ||
+    (limits.max_creep_progress_m >= 0.0 &&
+     limits.max_creep_progress_m < limits.min_creep_progress_m) ||
     limits.max_observe_speed_mps <= 0.0 ||
     limits.max_raw_paths <= 0 ||
     limits.max_channels <= 0 || limits.max_channel_searches <= 0 ||
@@ -2354,21 +2396,23 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
   if (request.refine) {
     std::vector<P4ForwardCandidate> refined_candidates;
     refined_candidates.reserve(eligible.size());
+    std::map<P4ForwardRefinementStatus, std::size_t> refinement_failures;
     for (const auto * candidate : eligible) {
       if (budget.expired()) {
         decision.reason = "compute_budget_exceeded";
         return finalize(std::move(decision));
       }
       P4ForwardCandidate refined_candidate = *candidate;
-      std::vector<Eigen::Vector3d> refined;
-      if (!request.refine(
-          candidate->path,
-          1.5 * request.limits.topology_resolution_m,
-          budget.remainingMs(), &refined))
-      {
+      auto refinement = request.refine(
+        candidate->path,
+        1.5 * request.limits.topology_resolution_m,
+        budget.remainingMs());
+      decision.refinement_diagnostics.push_back(refinement);
+      if (!refinement.success()) {
+        ++refinement_failures[refinement.status];
         continue;
       }
-      refined_candidate.path = std::move(refined);
+      refined_candidate.path = std::move(refinement.path);
       refined_candidate.length_m = pathLength(refined_candidate.path);
       refined_candidate.path_hash = hashPath(refined_candidate.path);
       refined_candidate.occupancy_supported =
@@ -2382,8 +2426,17 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
     if (refined_candidates.empty()) {
       decision.action = P4ForwardAction::REPLAN_REQUIRED;
       decision.trigger_reason = P4ForwardTriggerReason::NO_TOPOLOGY_ROUTE;
-      decision.reason = budget.expired() ? "compute_budget_exceeded" :
-        "no_native_refined_candidate";
+      if (budget.expired()) {
+        decision.reason = "compute_budget_exceeded";
+      } else {
+        std::ostringstream reason;
+        reason << "no_native_refined_candidate";
+        for (const auto &entry : refinement_failures) {
+          reason << ':' << p4ForwardRefinementStatusName(entry.first)
+                 << '=' << entry.second;
+        }
+        decision.reason = reason.str();
+      }
       return finalize(std::move(decision));
     }
     // Re-certify every refined route in one immutable batch. Each sample may

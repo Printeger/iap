@@ -875,10 +875,10 @@ TEST(P4CollisionGuideIntegration,
     Eigen::Vector3d(-4.0, 0.0, 0.0),
     Eigen::Vector3d(0.0, 0.0, 0.0),
     Eigen::Vector3d(4.0, 0.0, 0.0)};
-  std::vector<Eigen::Vector3d> refined;
-
-  EXPECT_TRUE(optimizer->refineP4ForwardGuide(
-      coarse, epoch->diagnostic_query, 0.25, 100.0, &refined));
+  const auto refinement = optimizer->refineP4ForwardGuide(
+      coarse, epoch->diagnostic_query, 0.25, 100.0);
+  ASSERT_TRUE(refinement.success());
+  const auto &refined = refinement.path;
   EXPECT_GE(refined.size(), 2u);
   EXPECT_NEAR((refined.front() - coarse.front()).norm(), 0.0, 1.0e-6);
   EXPECT_NEAR((refined.back() - coarse.back()).norm(), 0.0, 1.0e-6);
@@ -901,11 +901,12 @@ TEST(P4CollisionGuideIntegration,
   const std::vector<Eigen::Vector3d> coarse = {
     p4_collision_guide_fixture::start(),
     p4_collision_guide_fixture::end()};
-  std::vector<Eigen::Vector3d> refined;
-
-  EXPECT_FALSE(optimizer->refineP4ForwardGuide(
-      coarse, occupied_epoch->diagnostic_query, 0.2, 100.0, &refined));
-  EXPECT_TRUE(refined.empty());
+  const auto refinement = optimizer->refineP4ForwardGuide(
+      coarse, occupied_epoch->diagnostic_query, 0.2, 100.0);
+  EXPECT_FALSE(refinement.success());
+  EXPECT_EQ(refinement.status,
+            ego_planner::P4ForwardRefinementStatus::ASTAR_NO_PATH);
+  EXPECT_TRUE(refinement.path.empty());
   EXPECT_TRUE(optimizer->a_star_->hasRiskSnapshot());
 }
 
@@ -923,11 +924,10 @@ TEST(P4CollisionGuideIntegration,
   const std::vector<Eigen::Vector3d> coarse = {
     p4_collision_guide_fixture::start(),
     p4_collision_guide_fixture::end()};
-  std::vector<Eigen::Vector3d> refined;
-
-  EXPECT_TRUE(optimizer->refineP4ForwardGuide(
-      coarse, unknown_epoch->diagnostic_query, 0.25, 100.0, &refined));
-  EXPECT_GE(refined.size(), 2u);
+  const auto unknown_refinement = optimizer->refineP4ForwardGuide(
+      coarse, unknown_epoch->diagnostic_query, 0.25, 100.0);
+  ASSERT_TRUE(unknown_refinement.success());
+  EXPECT_GE(unknown_refinement.path.size(), 2u);
   EXPECT_TRUE(optimizer->a_star_->hasRiskSnapshot());
   // A subsequent observed epoch also succeeds; observation status does not
   // alter the hit-only geometry result.
@@ -935,7 +935,7 @@ TEST(P4CollisionGuideIntegration,
   const auto observed_epoch = map->captureFrozenOccupancyEpoch();
   ASSERT_NE(observed_epoch, nullptr);
   EXPECT_TRUE(optimizer->refineP4ForwardGuide(
-      coarse, observed_epoch->diagnostic_query, 0.25, 100.0, &refined));
+      coarse, observed_epoch->diagnostic_query, 0.25, 100.0).success());
 }
 
 // The collision-triggered P4 seam was removed. Forward-route tests now own

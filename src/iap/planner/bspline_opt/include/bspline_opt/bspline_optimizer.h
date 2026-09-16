@@ -5,6 +5,7 @@
 #include <limits>
 #include <Eigen/Eigen>
 #include <bspline_opt/p4_collision_guide.h>
+#include <bspline_opt/p4_forward_route.h>
 #include <bspline_opt/uniform_bspline.h>
 #include <plan_env/grid_map.h>
 #include <plan_env/obj_predictor.h>
@@ -462,12 +463,11 @@ namespace ego_planner
         const Eigen::MatrixXd &points,
         const std::vector<std::pair<int, int>> &segments,
         std::vector<std::vector<Eigen::Vector3d>> *guide_paths);
-    bool refineP4ForwardGuide(
+    P4ForwardRefinementResult refineP4ForwardGuide(
         const std::vector<Eigen::Vector3d> &coarse_guide,
         GridMapOccupancyDiagnosticQuery frozen_occupancy_query,
         double corridor_radius_m,
-        double compute_budget_ms,
-        std::vector<Eigen::Vector3d> *refined_guide);
+        double compute_budget_ms);
 
     // optional inputs
     void setGuidePath(const vector<Eigen::Vector3d> &guide_pt);

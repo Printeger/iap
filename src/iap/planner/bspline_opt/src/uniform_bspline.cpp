@@ -124,6 +124,88 @@ namespace ego_planner
     return derivative;
   }
 
+  bool UniformBspline::sliceFrom(const double &t, UniformBspline &suffix)
+  {
+    const double duration = getTimeSum();
+    if (!std::isfinite(t) || !std::isfinite(duration) || t < 0.0 ||
+        t >= duration || p_ < 1 || control_points_.cols() <= p_)
+      return false;
+
+    const double split = u_(p_) + t;
+    Eigen::MatrixXd controls = control_points_;
+    Eigen::VectorXd knots = u_;
+    const double tolerance = 1.0e-10 *
+        std::max({1.0, std::abs(split), std::abs(duration)});
+    auto multiplicity = [&]() {
+        int count = 0;
+        for (int index = 0; index < knots.rows(); ++index)
+          if (std::abs(knots(index) - split) <= tolerance) ++count;
+        return count;
+      };
+
+    while (multiplicity() < p_)
+    {
+      const int n = controls.cols() - 1;
+      const int m = knots.rows() - 1;
+      int span = p_;
+      while (span < n && knots(span + 1) <= split + tolerance) ++span;
+      const int current_multiplicity = multiplicity();
+      Eigen::MatrixXd inserted_controls(
+          controls.rows(), controls.cols() + 1);
+      Eigen::VectorXd inserted_knots(knots.rows() + 1);
+      inserted_knots.head(span + 1) = knots.head(span + 1);
+      inserted_knots(span + 1) = split;
+      inserted_knots.tail(m - span) = knots.tail(m - span);
+      for (int index = 0; index <= span - p_; ++index)
+        inserted_controls.col(index) = controls.col(index);
+      for (int index = span - current_multiplicity; index <= n; ++index)
+        inserted_controls.col(index + 1) = controls.col(index);
+      for (int index = span - p_ + 1;
+           index <= span - current_multiplicity; ++index)
+      {
+        const double denominator = knots(index + p_) - knots(index);
+        if (!std::isfinite(denominator) ||
+            std::abs(denominator) <= tolerance)
+          return false;
+        const double alpha = (split - knots(index)) / denominator;
+        inserted_controls.col(index) =
+            alpha * controls.col(index) +
+            (1.0 - alpha) * controls.col(index - 1);
+      }
+      controls = std::move(inserted_controls);
+      knots = std::move(inserted_knots);
+    }
+
+    int first_split_knot = -1;
+    for (int index = 0; index < knots.rows(); ++index)
+    {
+      if (std::abs(knots(index) - split) <= tolerance)
+      {
+        first_split_knot = index;
+        break;
+      }
+    }
+    if (first_split_knot < 1 ||
+        first_split_knot - 1 >= controls.cols())
+      return false;
+    const int first_control = first_split_knot - 1;
+    const int suffix_control_count = controls.cols() - first_control;
+    const int suffix_knot_count = knots.rows() - first_split_knot + 1;
+    if (suffix_control_count <= p_ ||
+        suffix_knot_count != suffix_control_count + p_ + 1)
+      return false;
+    Eigen::MatrixXd suffix_controls =
+        controls.rightCols(suffix_control_count);
+    Eigen::VectorXd suffix_knots(suffix_knot_count);
+    suffix_knots(0) = split;
+    suffix_knots.tail(suffix_knot_count - 1) =
+        knots.tail(suffix_knot_count - 1);
+    suffix.setUniformBspline(suffix_controls, p_, interval_);
+    suffix.setKnot(suffix_knots);
+    return suffix.getTimeSum() > 0.0 &&
+        suffix.getControlPoint().allFinite() && suffix.getKnot().allFinite();
+  }
+
   double UniformBspline::getInterval() { return interval_; }
 
   void UniformBspline::setPhysicalLimits(const double &vel, const double &acc, const double &tolerance)

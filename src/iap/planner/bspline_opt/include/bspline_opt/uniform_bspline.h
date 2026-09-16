@@ -52,6 +52,11 @@ namespace ego_planner
     inline Eigen::VectorXd evaluateDeBoorT(const double &t) { return evaluateDeBoor(t + u_(p_)); } // use t \in [0, duration]
     UniformBspline getDerivative();
 
+    // Return the exact suffix on [t, duration] by knot insertion. The
+    // resulting spline starts at local time zero without refitting or
+    // changing the represented curve.
+    bool sliceFrom(const double &t, UniformBspline &suffix);
+
     // 3D B-spline interpolation of points in point_set, with boundary vel&acc
     // constraints
     // input : (K+2) points with boundary vel/acc; ts

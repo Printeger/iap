@@ -19,7 +19,7 @@ namespace ego_planner
 {
 
   inline constexpr char kP4ForwardDecisionSchema[] =
-    "p4_forward_route_decision_v8";
+    "p4_forward_route_decision_v9";
 
   enum class P4ForwardResultStatus
   {
@@ -85,6 +85,39 @@ namespace ego_planner
     COMPUTE_BUDGET_EXCEEDED,
   };
 
+  enum class P4ForwardRefinementStatus
+  {
+    SUCCESS = 0,
+    INVALID_INPUT,
+    BUDGET_EXHAUSTED,
+    OCCUPANCY_UNAVAILABLE,
+    COARSE_PATH_COLLISION,
+    ASTAR_NO_PATH,
+    ASTAR_INVALID_RESULT,
+    CORRIDOR_ESCAPE,
+    OUTPUT_TOO_SHORT,
+  };
+
+  struct P4ForwardRefinementResult
+  {
+    P4ForwardRefinementStatus status =
+      P4ForwardRefinementStatus::INVALID_INPUT;
+    std::vector<Eigen::Vector3d> path;
+    std::size_t failed_segment_index =
+      std::numeric_limits<std::size_t>::max();
+    Eigen::Vector3d failure_position = Eigen::Vector3d::Constant(
+      std::numeric_limits<double>::quiet_NaN());
+    double elapsed_ms = 0.0;
+
+    bool success() const
+    {
+      return status == P4ForwardRefinementStatus::SUCCESS && path.size() >= 2;
+    }
+  };
+
+  const char *p4ForwardRefinementStatusName(
+    P4ForwardRefinementStatus status);
+
   enum class P4ForwardSafetyState
   {
     SAFE = 0,
@@ -126,6 +159,9 @@ namespace ego_planner
     std::string risk_config_hash;
     std::string risk_source_identity_hash;
     uint64_t occupancy_generation = 0;
+    // Execution authorization identity. RiskGrid generation below is an
+    // optional search-hint/diagnostic identity when this value is non-zero.
+    uint64_t execution_snapshot_id = 0;
     uint64_t risk_generation = 0;
     uint64_t gnss_epoch_identity = 0;
     double gnss_epoch_stamp_s =
@@ -150,7 +186,13 @@ namespace ego_planner
     double nominal_query_speed_mps = 1.5;
     double max_path_length_ratio = 1.3;
     double min_creep_progress_m = 0.25;
-    double max_creep_progress_m = 0.5;
+    // Upper bound for an adaptively cropped LIMITED_PREFIX.  The actual
+    // endpoint is the last consecutively safe point minus the stopping and
+    // tracking reserve; this cap only limits the planning horizon.
+    double max_limited_prefix_progress_m = 8.0;
+    // Deprecated compatibility alias. A non-negative value overrides
+    // max_limited_prefix_progress_m for older launch files.
+    double max_creep_progress_m = -1.0;
     double max_observe_speed_mps = 0.5;
     int max_raw_paths = 8;
     int max_channels = 4;
@@ -322,9 +364,8 @@ namespace ego_planner
     // Production supplies the EGO-lattice native A* corridor refiner. It is
     // invoked by the worker so refinement and re-certification share the same
     // end-to-end compute budget as topology search.
-    std::function < bool(
-      const std::vector < Eigen::Vector3d > &, double, double,
-      std::vector < Eigen::Vector3d > *) > refine;
+    std::function < P4ForwardRefinementResult(
+      const std::vector < Eigen::Vector3d > &, double, double) > refine;
 
     bool valid(std::string * reason = nullptr) const;
   };
@@ -348,6 +389,7 @@ namespace ego_planner
     std::numeric_limits < double > ::quiet_NaN());
     std::vector < P4ForwardCandidate > raw_candidates;
     std::vector < P4ForwardCandidate > candidates;
+    std::vector<P4ForwardRefinementResult> refinement_diagnostics;
     P4ForwardGeometryState geometry_state = P4ForwardGeometryState::CLEAR;
     P4ForwardRiskSupport risk_support = P4ForwardRiskSupport::INCOMPLETE;
     P4ForwardSafetyState safety_state = P4ForwardSafetyState::UNKNOWN;

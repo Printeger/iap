@@ -2,6 +2,7 @@
 
 #include <bspline_opt/p4_forward_route.h>
 #include <bspline_opt/p4_geometry_commit.h>
+#include <bspline_opt/uniform_bspline.h>
 
 #include <algorithm>
 #include <array>
@@ -16,6 +17,39 @@
 
 namespace
 {
+
+TEST(UniformBsplineSlice, PreservesExactSuffixAndBoundaryState)
+{
+  Eigen::MatrixXd control_points(3, 10);
+  for (int index = 0; index < control_points.cols(); ++index)
+  {
+    const double x = 0.3 * static_cast<double>(index);
+    control_points.col(index) =
+      Eigen::Vector3d(x, std::sin(x), 0.2 * std::cos(0.5 * x));
+  }
+  ego_planner::UniformBspline original(control_points, 3, 0.25);
+  const double split_time = 0.63;
+  ego_planner::UniformBspline suffix;
+  ASSERT_TRUE(original.sliceFrom(split_time, suffix));
+  EXPECT_NEAR(
+    suffix.getTimeSum(), original.getTimeSum() - split_time, 1.0e-10);
+  auto original_velocity = original.getDerivative();
+  auto original_acceleration = original_velocity.getDerivative();
+  auto suffix_velocity = suffix.getDerivative();
+  auto suffix_acceleration = suffix_velocity.getDerivative();
+  for (int sample = 0; sample <= 20; ++sample)
+  {
+    const double local_time = suffix.getTimeSum() *
+      static_cast<double>(sample) / 20.0;
+    EXPECT_TRUE(suffix.evaluateDeBoorT(local_time).isApprox(
+      original.evaluateDeBoorT(split_time + local_time), 1.0e-10));
+    EXPECT_TRUE(suffix_velocity.evaluateDeBoorT(local_time).isApprox(
+      original_velocity.evaluateDeBoorT(split_time + local_time), 1.0e-9));
+    EXPECT_TRUE(suffix_acceleration.evaluateDeBoorT(local_time).isApprox(
+      original_acceleration.evaluateDeBoorT(split_time + local_time),
+      1.0e-8));
+  }
+}
 
 std::shared_ptr<FrozenOccupancyEpoch> makeClearCommitEpoch(
   const uint64_t generation = 10u,
@@ -733,12 +767,14 @@ TEST(P4ForwardRoute, NativeRefinementRunsInsideEndToEndWorkerBudget)
   request.limits.compute_budget_ms = 50.0;
   bool refinement_called = false;
   request.refine = [&refinement_called](
-    const std::vector<Eigen::Vector3d> &, double, double,
-    std::vector<Eigen::Vector3d> *)
+    const std::vector<Eigen::Vector3d> &, double, double)
     {
       refinement_called = true;
       std::this_thread::sleep_for(std::chrono::milliseconds(60));
-      return false;
+      ego_planner::P4ForwardRefinementResult result;
+      result.status =
+        ego_planner::P4ForwardRefinementStatus::BUDGET_EXHAUSTED;
+      return result;
     };
 
   const auto decision = P4ForwardRoutePlanner().decide(request);
@@ -747,6 +783,30 @@ TEST(P4ForwardRoute, NativeRefinementRunsInsideEndToEndWorkerBudget)
   EXPECT_EQ(decision.trigger_reason,
             P4ForwardTriggerReason::COMPUTE_BUDGET_EXCEEDED);
   EXPECT_GE(decision.compute_latency_ms, 50.0);
+}
+
+TEST(P4ForwardRoute, RefinementFailureKeepsStructuredCause)
+{
+  auto request = straightRequest();
+  request.refine = [](
+    const std::vector<Eigen::Vector3d> &, double, double)
+    {
+      ego_planner::P4ForwardRefinementResult result;
+      result.status = ego_planner::P4ForwardRefinementStatus::ASTAR_NO_PATH;
+      result.failed_segment_index = 3;
+      result.failure_position = Eigen::Vector3d(2.0, 0.0, 1.0);
+      return result;
+    };
+
+  const auto decision = P4ForwardRoutePlanner().decide(request);
+
+  EXPECT_EQ(decision.action, P4ForwardAction::REPLAN_REQUIRED);
+  EXPECT_EQ(decision.reason,
+            "no_native_refined_candidate:astar_no_path=1");
+  ASSERT_EQ(decision.refinement_diagnostics.size(), 1u);
+  EXPECT_EQ(decision.refinement_diagnostics.front().status,
+            ego_planner::P4ForwardRefinementStatus::ASTAR_NO_PATH);
+  EXPECT_EQ(decision.refinement_diagnostics.front().failed_segment_index, 3u);
 }
 
 TEST(P4ForwardRoute, AsyncResultBindsSnapshotPositionAndTarget)
@@ -1680,10 +1740,56 @@ TEST(P4ForwardRoute,
             decision.certified_free_distance_m + 1.0e-9);
 }
 
+TEST(P4ForwardRoute,
+  SafeLimitedPrefixUsesAvailableCorridorInsteadOfLegacyHalfMeterCap)
+{
+  auto request = straightRequest();
+  request.velocity = Eigen::Vector3d::Zero();
+  request.limits.vehicle_radius_m = 0.35;
+  request.limits.safety_margin_m = 0.5;
+  request.limits.compute_budget_ms = 500.0;
+  request.limits.channel_enumeration_budget_ms = 250.0;
+  request.geometry = [](const Eigen::Vector3d & point) {
+      if (point.x() >= 4.0 && point.x() <= 5.0 &&
+        std::abs(point.y()) <= 0.6)
+      {
+        return P4ForwardGeometryState::OCCUPIED;
+      }
+      return std::abs(point.y()) > 2.5 ?
+        P4ForwardGeometryState::OCCUPIED : P4ForwardGeometryState::CLEAR;
+    };
+  request.risk = [](const Eigen::Vector3d & point, double) {
+      P4ForwardRiskSample sample;
+      sample.valid = true;
+      sample.stale = false;
+      sample.gnss_supported = true;
+      sample.lidar_supported = true;
+      sample.fim_supported = true;
+      sample.safety_ratio = point.x() < 5.0 ? 0.6 : 1.2;
+      sample.fim_ratio = 0.3;
+      sample.reason = sample.safety_ratio < 1.0 ?
+        "ok" : "SAFETY_LIMIT_EXCEEDED";
+      return sample;
+    };
+  bindTestRiskBatch(&request);
+
+  const auto decision = P4ForwardRoutePlanner().decide(request);
+
+  ASSERT_EQ(decision.reason, "safe_limited_common_prefix");
+  ASSERT_GE(decision.deferred_trajectory.size(), 2u);
+  const double progress =
+      (decision.deferred_trajectory.back() - request.position).norm();
+  EXPECT_GT(progress, 1.0);
+  EXPECT_LE(progress + request.limits.vehicle_radius_m +
+                request.limits.safety_margin_m,
+            decision.certified_free_distance_m + 1.0e-9);
+  EXPECT_LE(progress, request.limits.max_lookahead_m + 1.0e-9);
+}
+
 TEST(P4ForwardRoute, SafeLimitedPrefixNeverExceedsConfiguredProgressCap)
 {
   auto request = straightRequest();
-  request.velocity = Eigen::Vector3d(1.0, 0.0, 0.0);
+  request.velocity = Eigen::Vector3d::Zero();
   request.limits.max_creep_progress_m = 0.5;
   request.geometry = [](const Eigen::Vector3d & point) {
       if (point.x() >= 2.0 && point.x() <= 4.0 &&
@@ -1711,10 +1817,12 @@ TEST(P4ForwardRoute, SafeLimitedPrefixNeverExceedsConfiguredProgressCap)
 
   const auto decision = P4ForwardRoutePlanner().decide(request);
 
-  EXPECT_EQ(decision.action, P4ForwardAction::NO_SAFE_ROUTE);
+  EXPECT_EQ(decision.action, P4ForwardAction::DEFER_RISK_SELECTION);
   EXPECT_EQ(decision.deferred_motion_mode,
-            ego_planner::P4ForwardDeferredMotionMode::HOLD);
-  EXPECT_EQ(decision.reason, "safe_common_prefix_progress_limit_too_short");
+            ego_planner::P4ForwardDeferredMotionMode::COMMON_PREFIX);
+  ASSERT_GE(decision.deferred_trajectory.size(), 2u);
+  EXPECT_LE((decision.deferred_trajectory.back() - request.position).norm(),
+            request.limits.max_creep_progress_m + 1.0e-9);
 }
 
 TEST(P4ForwardRoute, UnsafeNearStartOrInsufficientStoppingDistanceHolds)
