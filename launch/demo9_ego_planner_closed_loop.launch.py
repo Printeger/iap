@@ -516,6 +516,8 @@ def _launch_setup(context):
         output="screen",
         remappings=[
             ("planning/bspline", bspline_topic),
+            ("planning/pending_guard_bspline", bspline_topic.replace("/bspline", "/pending_guard_bspline")),
+            ("planning/pending_guard_status", bspline_topic.replace("/bspline", "/pending_guard_status")),
             ("position_cmd", pos_cmd_topic),
             ("/position_cmd", pos_cmd_topic),
         ],

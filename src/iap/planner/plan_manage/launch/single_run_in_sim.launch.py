@@ -173,7 +173,9 @@ def generate_launch_description():
         output='screen',
         remappings=[
             ('position_cmd', ['drone_', drone_id, '_planning/pos_cmd']),
-            ('planning/bspline', ['drone_', drone_id, '_planning/bspline'])
+            ('planning/bspline', ['drone_', drone_id, '_planning/bspline']),
+            ('planning/pending_guard_bspline', ['drone_', drone_id, '_planning/pending_guard_bspline']),
+            ('planning/pending_guard_status', ['drone_', drone_id, '_planning/pending_guard_status'])
         ],
         parameters=[
             {'traj_server/time_forward': 1.0}

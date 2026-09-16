@@ -634,6 +634,8 @@ def _ego_planner_node(
         remappings=[
             ("odom_world", planner_odom_topic),
             ("planning/bspline", bspline_topic),
+            ("planning/pending_guard_bspline", bspline_topic.replace("/bspline", "/pending_guard_bspline")),
+            ("planning/pending_guard_status", bspline_topic.replace("/bspline", "/pending_guard_status")),
             ("planning/data_display", f"/drone_{drone_id}_planning/data_display"),
             ("planning/broadcast_bspline_from_planner", "/broadcast_bspline"),
             ("planning/broadcast_bspline_to_planner", "/broadcast_bspline"),
@@ -975,6 +977,8 @@ def _launch_setup(context):
             output="screen",
             remappings=[
                 ("planning/bspline", bspline_topic),
+                ("planning/pending_guard_bspline", bspline_topic.replace("/bspline", "/pending_guard_bspline")),
+                ("planning/pending_guard_status", bspline_topic.replace("/bspline", "/pending_guard_status")),
                 ("position_cmd", pos_cmd_topic),
                 ("/position_cmd", pos_cmd_topic),
             ],

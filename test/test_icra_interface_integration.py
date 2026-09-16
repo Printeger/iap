@@ -1603,6 +1603,49 @@ class TestStageAnalyzer(unittest.TestCase):
             summary["limited_prefix_outcome"],
             "LIMITED_PREFIX_EXECUTED_TO_ENDPOINT")
 
+    def test_limited_prefix_reports_confirmation_and_reauthorization_stats(
+            self):
+        lineage, bsplines, poscmd, odom, events = \
+            self.limited_prefix_fixture()
+        lineage[0]["actual_curve_certification_status"] = "SAFE"
+        armed = dict(events[0])
+        armed.update({
+            "event": "MARGINAL_UNSAFE_ARMED",
+            "risk_confirmation_state": "MARGINAL_UNSAFE_ARMED",
+            "stamp_s": "12.4",
+        })
+        recovered = dict(events[0])
+        recovered.update({
+            "event": "MARGINAL_UNSAFE_RECOVERED",
+            "risk_confirmation_state": "SAFE",
+            "stamp_s": "12.5",
+        })
+        armed["guard_braking_preschedule_requested"] = "1"
+        cancel_requested = dict(events[0])
+        cancel_requested.update({
+            "event": "FAILSAFE_BRAKING_CANCEL_REQUESTED",
+            "guard_braking_cancel_requested": "1",
+            "stamp_s": "12.45",
+        })
+        recovered["event"] = "FAILSAFE_BRAKING_CANCELED_RECOVERED"
+        reauthorized = {
+            "event": "PREPARED_SUCCESSOR_REAUTHORIZED",
+            "risk_confirmation_state": "SAFE",
+        }
+        events.extend([armed, cancel_requested, recovered, reauthorized])
+        summary = MODULE.analyze_limited_prefix_records(
+            lineage, bsplines, poscmd, odom, events)
+        self.assertEqual(summary["result"], "PASS")
+        self.assertEqual(summary["marginal_unsafe_armed_count"], 1)
+        self.assertEqual(summary["marginal_unsafe_recovered_count"], 0)
+        self.assertEqual(summary["successor_reauthorization_count"], 1)
+        self.assertEqual(summary["guard_prequeue_count"], 1)
+        self.assertEqual(summary["guard_cancel_request_count"], 1)
+        self.assertEqual(summary["guard_cancel_ack_count"], 1)
+        self.assertEqual(
+            summary["actual_curve_certification_status_counts"],
+            {"SAFE": 1})
+
     def test_limited_prefix_accepts_evidenced_new_generation_revoke(self):
         lineage, bsplines, poscmd, odom, events = \
             self.limited_prefix_fixture()

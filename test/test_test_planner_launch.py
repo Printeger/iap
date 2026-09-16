@@ -28,6 +28,19 @@ SPEC.loader.exec_module(MODULE)
 
 
 class TestPlannerLaunchTest(unittest.TestCase):
+    def test_guard_command_and_ack_topics_are_isolated_with_bspline(self):
+        source = MODULE_PATH.read_text()
+        self.assertGreaterEqual(source.count("planning/pending_guard_bspline"), 2)
+        self.assertGreaterEqual(source.count("planning/pending_guard_status"), 2)
+        self.assertIn(
+            'bspline_topic.replace("/bspline", "/pending_guard_bspline")',
+            source,
+        )
+        self.assertIn(
+            'bspline_topic.replace("/bspline", "/pending_guard_status")',
+            source,
+        )
+
     @staticmethod
     def _runtime_logging_fixture(root: Path):
         runtime_base = root / "runtime"
@@ -437,6 +450,9 @@ class TestPlannerLaunchTest(unittest.TestCase):
             "p4.forward.advisory_min_relative_improvement": "0.10",
             "p4.forward.min_creep_progress_m": "0.25",
             "p4.forward.max_limited_prefix_progress_m": "8.0",
+            "p4.execution.marginal_unsafe_ratio_max": "1.005",
+            "p4.execution.marginal_confirm_distinct_evidence": "3",
+            "p4.execution.marginal_confirm_max_s": "0.35",
             "p4.forward.max_creep_progress_m": "-1.0",
             "p4.forward.max_observe_speed_mps": "0.5",
             "integrity_dynamic_alert_limits": "false",

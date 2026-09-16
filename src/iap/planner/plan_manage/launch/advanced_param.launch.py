@@ -369,6 +369,8 @@ def generate_launch_description():
         remappings=[
             ('odom_world', odometry_topic),
             ('planning/bspline', ['drone_', drone_id, '_planning/bspline']),
+            ('planning/pending_guard_bspline', ['drone_', drone_id, '_planning/pending_guard_bspline']),
+            ('planning/pending_guard_status', ['drone_', drone_id, '_planning/pending_guard_status']),
             ('planning/data_display', ['drone_', drone_id, '_planning/data_display']),
             ('planning/broadcast_bspline_from_planner', '/broadcast_bspline'),
             ('planning/broadcast_bspline_to_planner', '/broadcast_bspline'),

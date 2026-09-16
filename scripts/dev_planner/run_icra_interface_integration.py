@@ -1729,6 +1729,36 @@ def analyze_limited_prefix_records(
             max(0, math.ceil(.95 * len(ordered)) - 1)]
         if direct_batch_p95 >= 150.0:
             failures.append("limited_prefix_direct_batch_p95_exceeded")
+    confirmation_state_counts: dict[str, int] = {}
+    for event in matching_events:
+        state = str(event.get("risk_confirmation_state", "") or "")
+        if state:
+            confirmation_state_counts[state] = (
+                confirmation_state_counts.get(state, 0) + 1)
+    armed_count = sum(1 for event in matching_events
+                      if event.get("event") == "MARGINAL_UNSAFE_ARMED")
+    recovered_count = sum(1 for event in matching_events
+                          if event.get("event") ==
+                          "MARGINAL_UNSAFE_RECOVERED")
+    successor_reauthorization_count = sum(
+        1 for event in execution_events
+        if event.get("event") == "PREPARED_SUCCESSOR_REAUTHORIZED")
+    guard_prequeue_count = sum(
+        1 for event in matching_events
+        if str(event.get("guard_braking_preschedule_requested", "0")) == "1")
+    guard_cancel_request_count = sum(
+        1 for event in matching_events
+        if str(event.get("guard_braking_cancel_requested", "0")) == "1")
+    guard_cancel_ack_count = sum(
+        1 for event in matching_events
+        if event.get("event") == "FAILSAFE_BRAKING_CANCELED_RECOVERED")
+    actual_curve_status_counts: dict[str, int] = {}
+    for lineage_row in lineage:
+        status = str(lineage_row.get(
+            "actual_curve_certification_status", "") or "")
+        if status and status != "NOT_EVALUATED":
+            actual_curve_status_counts[status] = (
+                actual_curve_status_counts.get(status, 0) + 1)
     return _result(
         failures, stage="limited-prefix", limited_prefix_outcome=outcome,
         formal_route_selected_count=len(formal),
@@ -1743,6 +1773,18 @@ def analyze_limited_prefix_records(
         failsafe_braked_to_stop_proven=failsafe_braked,
         displacement_before_revoke_m=legal_revoke_displacement,
         execution_event_count=len(matching_events),
+        marginal_unsafe_armed_count=armed_count,
+        marginal_unsafe_recovered_count=recovered_count,
+        confirmed_unsafe_braking_count=confirmation_state_counts.get(
+            "CONFIRMED_UNSAFE_BRAKING", 0),
+        hard_unsafe_braking_count=confirmation_state_counts.get(
+            "HARD_UNSAFE_BRAKING", 0),
+        risk_confirmation_state_counts=confirmation_state_counts,
+        successor_reauthorization_count=successor_reauthorization_count,
+        guard_prequeue_count=guard_prequeue_count,
+        guard_cancel_request_count=guard_cancel_request_count,
+        guard_cancel_ack_count=guard_cancel_ack_count,
+        actual_curve_certification_status_counts=actual_curve_status_counts,
         direct_batch_ms_p95=direct_batch_p95,
         direct_batch_ms_max=max(direct_batch_durations, default=None))
 
@@ -2986,6 +3028,14 @@ def _capture_main(args: argparse.Namespace) -> int:
             self.create_subscription(
                 Bspline, "/drone_0_planning/bspline", self.bspline, retained)
             self.create_subscription(
+                Bspline, "/drone_0_planning/pending_guard_bspline",
+                self.pending_guard_bspline, retained)
+            self.create_subscription(
+                String, "/drone_0_planning/pending_guard_status",
+                lambda message: self.record(
+                    "pending_guard_status", {"status": message.data}),
+                retained)
+            self.create_subscription(
                 PositionCommand, "/drone_0_planning/pos_cmd",
                 self.poscmd, reliable)
             self.create_subscription(
@@ -3091,6 +3141,21 @@ def _capture_main(args: argparse.Namespace) -> int:
                 ],
                 "knot_count": len(message.knots),
                 "knots": [float(knot) for knot in message.knots],
+            })
+
+        def pending_guard_bspline(self, message: Bspline) -> None:
+            self.record("pending_guard_bspline", {
+                "trajectory_id": int(message.traj_id),
+                "start_time_ns": int(message.start_time.sec) * 1_000_000_000
+                + int(message.start_time.nanosec),
+                "control_point_count": len(message.pos_pts),
+                "control_points_xyz": [
+                    [float(point.x), float(point.y), float(point.z)]
+                    for point in message.pos_pts
+                ],
+                "knot_count": len(message.knots),
+                "knots": [float(knot) for knot in message.knots],
+                "cancellation": not message.pos_pts,
             })
 
         def poscmd(self, message: PositionCommand) -> None:
