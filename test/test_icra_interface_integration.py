@@ -332,6 +332,13 @@ class TestStageContracts(unittest.TestCase):
             "limited-prefix", MODULE.FOREST_SCENARIO, gnss_arm="bds")
         self.assertEqual(bds["gnss_enabled_constellations"],
                          "GPS,BDS,GAL,GLO")
+        self.assertEqual(bds["p4.forward.gnss_core_policy"],
+                         "braking_window_core")
+        legacy = MODULE.stage_launch_args(
+            "limited-prefix", MODULE.FOREST_SCENARIO,
+            gnss_arm="bds", gnss_core_policy="whole_curve_common_core")
+        self.assertEqual(legacy["p4.forward.gnss_core_policy"],
+                         "whole_curve_common_core")
         self.assertEqual(
             MODULE.forest_scene_contract(
                 MODULE.FOREST_SCENARIO, "bds")["gnss"]
@@ -341,6 +348,10 @@ class TestStageContracts(unittest.TestCase):
             MODULE.stage_launch_args(
                 "limited-prefix", MODULE.FOREST_SCENARIO,
                 gnss_arm="unsupported")
+        with self.assertRaises(ValueError):
+            MODULE.stage_launch_args(
+                "limited-prefix", MODULE.FOREST_SCENARIO,
+                gnss_core_policy="per_point_pick_best")
 
     def test_forest_scene_contract_is_expanded_and_fingerprinted(self):
         contract = MODULE.forest_scene_contract()
@@ -1645,6 +1656,42 @@ class TestStageAnalyzer(unittest.TestCase):
         self.assertEqual(
             summary["actual_curve_certification_status_counts"],
             {"SAFE": 1})
+
+    def test_limited_prefix_window_satellite_median_pools_window_sets(self):
+        lineage, bsplines, poscmd, odom, events = \
+            self.limited_prefix_fixture()
+        first = lineage[0]
+        first.update({
+            "actual_curve_core_policy": "braking_window_core",
+            "actual_curve_window_layout_hash": "layout-a",
+            "actual_curve_certification_status": "SAFE",
+            "actual_curve_first_failure_index": "0",
+            "actual_curve_total_ms": "10",
+            "actual_curve_window_count": "2",
+            "actual_curve_transition_count": "1",
+            "actual_curve_window_sat_min": "2",
+            "actual_curve_window_sat_median": "8",
+            "actual_curve_window_sat_max": "8",
+            "actual_curve_window_satellite_sets": "1:1|2/2:1|2|3|4|5|6|7|8",
+        })
+        second = dict(first)
+        second.update({
+            "execution_snapshot_id": "9",
+            "trajectory_id": "32",
+            "trajectory_start_ns": "13000000000",
+            "control_points_hash": "other-control-points",
+            "actual_curve_window_layout_hash": "layout-b",
+            "actual_curve_window_sat_min": "4",
+            "actual_curve_window_sat_median": "6",
+            "actual_curve_window_sat_max": "6",
+            "actual_curve_window_satellite_sets": "1:1|2|3|4/2:1|2|3|4|5|6",
+        })
+        lineage.append(second)
+
+        summary = MODULE.analyze_limited_prefix_records(
+            lineage, bsplines, poscmd, odom, events)
+
+        self.assertEqual(summary["braking_window_satellite_median"], 5.0)
 
     def test_limited_prefix_accepts_evidenced_new_generation_revoke(self):
         lineage, bsplines, poscmd, odom, events = \

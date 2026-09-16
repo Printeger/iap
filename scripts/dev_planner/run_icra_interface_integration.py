@@ -489,7 +489,8 @@ def lidar_runtime_failures(renderer: dict | None, stats: dict) -> list[str]:
 def stage_launch_args(
         stage: str, scenario: str = DEFAULT_SCENARIO,
         forest_variant: str | None = None,
-        gnss_arm: str = "bds") -> dict[str, str]:
+        gnss_arm: str = "bds",
+        gnss_core_policy: str = "braking_window_core") -> dict[str, str]:
     if stage not in STAGES:
         raise ValueError(f"unknown stage: {stage}")
     if scenario not in (DEFAULT_SCENARIO, *FOREST_SCENARIOS):
@@ -500,10 +501,15 @@ def stage_launch_args(
         raise ValueError("forest variants require the dense forest scenario")
     if gnss_arm not in ("baseline", "bds"):
         raise ValueError(f"unsupported GNSS arm: {gnss_arm}")
+    if gnss_core_policy not in (
+            "braking_window_core", "whole_curve_common_core"):
+        raise ValueError(
+            f"unsupported GNSS core policy: {gnss_core_policy}")
     launch_args = dict(STAGES[stage].launch_args)
     launch_args["scenario"] = scenario
     launch_args["gnss_enabled_constellations"] = (
         "GPS,BDS,GAL,GLO" if gnss_arm == "bds" else "GPS,GAL,GLO")
+    launch_args["p4.forward.gnss_core_policy"] = gnss_core_policy
     if forest_variant == "baseline":
         launch_args.update({
             "p0.enable_risk_grid": "true",
@@ -1759,6 +1765,91 @@ def analyze_limited_prefix_records(
         if status and status != "NOT_EVALUATED":
             actual_curve_status_counts[status] = (
                 actual_curve_status_counts.get(status, 0) + 1)
+    windowed_lineage_rows = [
+        row for row in lineage
+        if row.get("actual_curve_core_policy") == "braking_window_core"]
+    # One immutable direct certificate is written at several lineage stages.
+    # Count/timing the CSV rows would multiply a single computation by the
+    # number of audit records and bias p95. Deduplicate the exact certificate
+    # identity while retaining the raw row count for auditability.
+    windowed_rows = []
+    windowed_evidence_keys = set()
+    for row in windowed_lineage_rows:
+        evidence_key = tuple(row.get(key, "") for key in (
+            "execution_snapshot_id", "trajectory_id", "trajectory_start_ns",
+            "control_points_hash", "knot_vector_hash",
+            "actual_curve_window_layout_hash",
+            "actual_curve_certification_status",
+            "actual_curve_first_failure_index",
+            "actual_curve_total_ms"))
+        if evidence_key in windowed_evidence_keys:
+            continue
+        windowed_evidence_keys.add(evidence_key)
+        windowed_rows.append(row)
+
+    def _lineage_numbers(key: str) -> list[float]:
+        values = []
+        for row in windowed_rows:
+            try:
+                value = float(row.get(key, "nan"))
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(value):
+                values.append(value)
+        return values
+
+    window_counts = _lineage_numbers("actual_curve_window_count")
+    transition_counts = _lineage_numbers("actual_curve_transition_count")
+    window_sat_mins = _lineage_numbers("actual_curve_window_sat_min")
+    window_sat_medians = _lineage_numbers("actual_curve_window_sat_median")
+    window_sat_maxes = _lineage_numbers("actual_curve_window_sat_max")
+    pooled_window_satellite_counts = []
+    for row in windowed_rows:
+        encoded_sets = str(
+            row.get("actual_curve_window_satellite_sets", ""))
+        for encoded_window in encoded_sets.split("/"):
+            if ":" not in encoded_window:
+                continue
+            encoded_ids = encoded_window.split(":", 1)[1]
+            satellite_ids = [value for value in encoded_ids.split("|")
+                             if value]
+            if satellite_ids:
+                pooled_window_satellite_counts.append(len(satellite_ids))
+    window_saved_satellites = _lineage_numbers(
+        "actual_curve_satellites_saved_from_remote_count")
+    window_evidence_ms = _lineage_numbers("actual_curve_evidence_ms")
+    window_core_ms = _lineage_numbers("actual_curve_core_ms")
+    window_advisory_ms = _lineage_numbers("actual_curve_advisory_ms")
+    window_transition_ms = _lineage_numbers("actual_curve_transition_ms")
+    window_total_ms = _lineage_numbers("actual_curve_total_ms")
+    window_total_ms_p95 = None
+    if window_total_ms:
+        ordered = sorted(window_total_ms)
+        window_total_ms_p95 = ordered[
+            max(0, math.ceil(.95 * len(ordered)) - 1)]
+        if window_total_ms_p95 >= 75.0:
+            failures.append("braking_window_direct_batch_p95_exceeded")
+        if max(window_total_ms) >= 150.0:
+            failures.append("braking_window_direct_batch_budget_exceeded")
+    failed_window_counts: dict[str, int] = {}
+    failed_windows = []
+    for row in windowed_rows:
+        window_id = str(row.get("actual_curve_first_failure_window", "0"))
+        if window_id in ("", "0"):
+            continue
+        reason = str(row.get(
+            "actual_curve_first_failure_window_reason", "") or "UNKNOWN")
+        count_key = f"{window_id}:{reason}"
+        failed_window_counts[count_key] = (
+            failed_window_counts.get(count_key, 0) + 1)
+        if len(failed_windows) >= 32:
+            continue
+        failed_windows.append({
+            "window_id": row.get("actual_curve_first_failure_window"),
+            "reason": row.get("actual_curve_first_failure_window_reason"),
+            "trajectory_id": row.get("trajectory_id"),
+            "stage": row.get("stage"),
+        })
     return _result(
         failures, stage="limited-prefix", limited_prefix_outcome=outcome,
         formal_route_selected_count=len(formal),
@@ -1785,6 +1876,29 @@ def analyze_limited_prefix_records(
         guard_cancel_request_count=guard_cancel_request_count,
         guard_cancel_ack_count=guard_cancel_ack_count,
         actual_curve_certification_status_counts=actual_curve_status_counts,
+        braking_window_lineage_row_count=len(windowed_lineage_rows),
+        braking_window_evidence_row_count=len(windowed_rows),
+        braking_window_count_max=max(window_counts, default=None),
+        braking_window_transition_count_max=max(
+            transition_counts, default=None),
+        braking_window_satellite_min=min(window_sat_mins, default=None),
+        braking_window_satellite_median=(
+            statistics.median(pooled_window_satellite_counts)
+            if pooled_window_satellite_counts
+            else (statistics.median(window_sat_medians)
+                  if window_sat_medians else None)),
+        braking_window_satellite_max=max(window_sat_maxes, default=None),
+        braking_window_satellites_saved_from_remote_max=max(
+            window_saved_satellites, default=None),
+        braking_window_evidence_ms_max=max(window_evidence_ms, default=None),
+        braking_window_core_ms_max=max(window_core_ms, default=None),
+        braking_window_advisory_ms_max=max(window_advisory_ms, default=None),
+        braking_window_transition_ms_max=max(
+            window_transition_ms, default=None),
+        braking_window_direct_ms_p95=window_total_ms_p95,
+        braking_window_direct_ms_max=max(window_total_ms, default=None),
+        braking_window_first_failure_counts=failed_window_counts,
+        braking_window_first_failures=failed_windows,
         direct_batch_ms_p95=direct_batch_p95,
         direct_batch_ms_max=max(direct_batch_durations, default=None))
 
@@ -3548,7 +3662,8 @@ def _run_one_impl(
         owned_streams: dict[str, TextIO],
         scenario: str = DEFAULT_SCENARIO,
         forest_variant: str | None = None,
-        gnss_arm: str = "bds") -> dict:
+        gnss_arm: str = "bds",
+        gnss_core_policy: str = "braking_window_core") -> dict:
     spec = STAGES[stage]
     duration_s = stage_duration_s(stage, scenario, forest_variant)
     run_root.mkdir(parents=True, exist_ok=False)
@@ -3581,7 +3696,8 @@ def _run_one_impl(
         _json_write(run_root / "summary.json", summary)
         return summary
 
-    launch_args = stage_launch_args(stage, scenario, forest_variant, gnss_arm)
+    launch_args = stage_launch_args(
+        stage, scenario, forest_variant, gnss_arm, gnss_core_policy)
     if shutdown_variant == "baseline":
         launch_args.update({
             "experiment": "baseline_fused_nominal_off",
@@ -3611,6 +3727,7 @@ def _run_one_impl(
         "scenario": scenario,
         "forest_variant": forest_variant,
         "gnss_arm": gnss_arm,
+        "gnss_core_policy": gnss_core_policy,
         "forest_scene": (
             forest_scene_contract(scenario, gnss_arm)
             if _is_forest_scenario(scenario) else None),
@@ -3759,14 +3876,16 @@ def _run_one(
         start_rviz: bool = False, shutdown_variant: str | None = None,
         scenario: str = DEFAULT_SCENARIO,
         forest_variant: str | None = None,
-        gnss_arm: str = "bds") -> dict:
+        gnss_arm: str = "bds",
+        gnss_core_policy: str = "braking_window_core") -> dict:
     owned_processes: dict[str, subprocess.Popen] = {}
     owned_streams: dict[str, TextIO] = {}
     started = time.monotonic()
     try:
         return _run_one_impl(
             stage, run_root, install_root, start_rviz, shutdown_variant,
-            owned_processes, owned_streams, scenario, forest_variant, gnss_arm)
+            owned_processes, owned_streams, scenario, forest_variant, gnss_arm,
+            gnss_core_policy)
     except KeyboardInterrupt:
         _emit(f"INTERRUPT stage={stage} cleanup=starting")
         process_status = {
@@ -3900,6 +4019,8 @@ def _run_main(args: argparse.Namespace) -> int:
     scenario = getattr(args, "scenario", DEFAULT_SCENARIO)
     forest_ab = bool(getattr(args, "forest_ab", False))
     gnss_arm = getattr(args, "gnss_arm", "bds")
+    gnss_core_policy = getattr(
+        args, "gnss_core_policy", "braking_window_core")
     results_root = args.results_root.resolve()
     session = _session_root(results_root)
     session.mkdir(parents=True, exist_ok=False)
@@ -3913,6 +4034,7 @@ def _run_main(args: argparse.Namespace) -> int:
         "scenario": scenario,
         "forest_ab": forest_ab,
         "gnss_arm": gnss_arm,
+        "gnss_core_policy": gnss_core_policy,
         "forest_scene": (
             forest_scene_contract(scenario, gnss_arm)
             if _is_forest_scenario(scenario) else None),
@@ -3972,13 +4094,15 @@ def _run_main(args: argparse.Namespace) -> int:
                         shutdown_variant=shutdown_variant,
                         scenario=scenario,
                         forest_variant=forest_variant,
-                        gnss_arm=gnss_arm)
+                        gnss_arm=gnss_arm,
+                        gnss_core_policy=gnss_core_policy)
                     session_summary["runs"].append({
                         "stage": stage,
                         "repetition": repetition,
                         "variant": variant,
                         "scenario": scenario,
                         "gnss_arm": gnss_arm,
+                        "gnss_core_policy": gnss_core_policy,
                         "path": str(run_root),
                         "result": summary["result"],
                         "failures": summary["failures"],
@@ -4041,6 +4165,12 @@ def main() -> int:
     parser.add_argument(
         "--gnss-arm", choices=("baseline", "bds"), default="bds",
         help="GNSS constellation arm; BDS is the default, baseline is explicit A/B")
+    parser.add_argument(
+        "--gnss-core-policy",
+        choices=("braking_window_core", "whole_curve_common_core"),
+        default="braking_window_core",
+        help=("direct trajectory satellite-set policy; windowed is the "
+              "production default and whole-curve is the explicit legacy A/B arm"))
     parser.add_argument("--results-root", type=Path,
                         default=DEFAULT_RESULTS_ROOT)
     parser.add_argument("--install-root", type=Path,
