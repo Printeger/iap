@@ -5327,13 +5327,14 @@ namespace ego_planner
           }
           else if (!recoverable_before_activation)
           {
-            p4_pending_braking_anchor_->anchor_index = anchor_index;
-            p4_pending_braking_anchor_->trigger = trigger;
-            p4_pending_braking_anchor_->recoverable_before_activation =
-                false;
-            p4_pending_braking_anchor_->cancel_requested = false;
-            p4_pending_braking_anchor_->server_state =
-                P4GuardServerState::REQUESTED;
+            // A published guard is an execution commitment. Repeated stale or
+            // unsafe watchdog observations must not slide its anchor forward,
+            // reuse its trajectory ID for a different curve, or erase a
+            // QUEUED/ACTIVATED acknowledgement. A recoverable marginal guard
+            // may be hardened in place, but its exact command stays frozen.
+            if (p4_pending_braking_anchor_->cancel_requested)
+              return revoke("failsafe_braking_guard_cancel_in_flight");
+            p4_pending_braking_anchor_->recoverable_before_activation = false;
           }
           out.allowed = true;
           out.failsafe_braking_available = true;

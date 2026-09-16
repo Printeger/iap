@@ -1775,6 +1775,35 @@ TEST(P4ForwardTerminalLineageTest,
   EXPECT_TRUE(risk_revoke.violation_position.allFinite());
   EXPECT_TRUE(std::isfinite(risk_revoke.violation_query_time_s));
   EXPECT_GE(risk_revoke.violation_hpl_m, risk_revoke.alert_limit_h_m);
+  const auto first_hard_guard = manager.pendingP4GuardBrakingCommand();
+  ASSERT_TRUE(first_hard_guard.has_value());
+  manager.acknowledgeP4GuardStatus(
+      first_hard_guard->trajectory_id, "QUEUED");
+  const double repeated_hard_stamp = std::min(
+      first_hard_guard->start_time.seconds() - 1.0e-3,
+      during_execution_s + 0.05);
+  ASSERT_GT(repeated_hard_stamp, during_execution_s);
+  const auto repeated_hard = manager.validateCommittedP4TrajectoryExecution(
+      repeated_hard_stamp,
+      manager.local_data_.position_traj_.evaluateDeBoorT(
+          repeated_hard_stamp - manager.local_data_.start_time_.seconds()));
+  EXPECT_TRUE(repeated_hard.allowed) << repeated_hard.reason;
+  const auto frozen_hard_guard = manager.pendingP4GuardBrakingCommand();
+  ASSERT_TRUE(frozen_hard_guard.has_value());
+  EXPECT_EQ(frozen_hard_guard->trajectory_id,
+            first_hard_guard->trajectory_id);
+  EXPECT_EQ(frozen_hard_guard->start_time.nanoseconds(),
+            first_hard_guard->start_time.nanoseconds());
+  auto frozen_hard_trajectory = frozen_hard_guard->trajectory;
+  auto first_hard_trajectory = first_hard_guard->trajectory;
+  EXPECT_EQ(ego_planner::p4ControlPointHash(
+                frozen_hard_trajectory.getControlPoint()),
+            ego_planner::p4ControlPointHash(
+                first_hard_trajectory.getControlPoint()));
+  EXPECT_EQ(ego_planner::p4KnotVectorHash(
+                frozen_hard_trajectory.getKnot()),
+            ego_planner::p4KnotVectorHash(
+                first_hard_trajectory.getKnot()));
   manager.setPlanningRiskContextForTest(
       snapshot, 10.52, nullptr, directRiskCallback(0.5),
       makeP4ExecutionSnapshot(

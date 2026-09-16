@@ -185,7 +185,9 @@ For each candidate trajectory τ:
   churn cannot relabel the stopping curve. Planner-side time alone cannot
   declare that switch: only a matching traj_server `ACTIVATED` acknowledgement
   changes the trajectory ID and braking authority; a missing acknowledgement
-  or `ABSENT` response at the switch deadline fails closed.
+  or `ABSENT` response at the switch deadline fails closed. The first hard
+  guard freezes its anchor, deadline and curve identity; later watchdog ticks
+  cannot roll the stop forward or clear its server state.
 - Coarse/refined routes are only `CANDIDATE_READY`. Formal `RISK_SELECTED`
   authority is created after the actual terminal-stop B-spline passes direct
   braking-window checks at its real arrival times, including all braking

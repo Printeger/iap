@@ -45,7 +45,9 @@
   tracks `REQUESTED/QUEUED/ACTIVATED/ABSENT`; only a matching traj_server
   `ACTIVATED` acknowledgement can change trajectory identity or authority,
   while a missing acknowledgement or `ABSENT` at the switch deadline fails
-  closed. In the post-fix
+  closed. The first non-recoverable guard is an immutable commitment: repeated
+  watchdog failures cannot advance its anchor/deadline, replace its curve under
+  the same ID, or erase a `QUEUED/ACTIVATED` state. In the post-fix
   BDS forest run, the vehicle moved `2.877 m` and emitted
   `ENDPOINT_HOLD approved_endpoint_reached`. The deduplicated 16 s window
   certification p95/max was `70.75/72.15 ms` in the first performance run;

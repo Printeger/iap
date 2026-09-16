@@ -270,7 +270,10 @@
   execution: only a matching traj_server `ACTIVATED` acknowledgement permits
   the atomic trajectory-ID/certificate handover. Missing acknowledgement or
   `ABSENT` at the switch deadline fails closed without relabelling the parent
-  trajectory as a braking trajectory.
+  trajectory as a braking trajectory. Once a non-recoverable guard is issued,
+  its anchor, deadline, curve identity and server acknowledgement state are
+  immutable; repeated risk/staleness observations may not slide the stop
+  forward or reuse its trajectory ID for another curve.
 - Native refinement reports structured status. A densely sampled coarse path
   that is collision-free in frozen occupancy is accepted directly; A* runs
   only for colliding segments. Budget, occupancy, collision, no-path, invalid
