@@ -150,14 +150,41 @@ For each candidate trajectory τ:
   execution reaches the nearest future anchor within 0.2 s and publishes the
   selected curve with a new braking certificate/trajectory identity; it never
   extends the original deadline or passes the approved endpoint. Before that
-  anchor the certificate remains the original `LIMITED_PREFIX`; a newer fresh
-  execution snapshot may cancel a staleness-triggered schedule only after the
-  original remaining curve passes direct risk, corridor support age,
-  Integrity/GNSS, collision and identity checks. Activated braking and any
-  unsafe, unknown or over-budget result cannot be canceled. Unsafe direct
-  risk, current Integrity failure, collision or tracking loss remains
-  fail-closed. Ordinary replanning is suspended while that braking certificate
-  is active, so worker/generation churn cannot relabel the stopping curve.
+  anchor the certificate remains the original `LIMITED_PREFIX`. A slight
+  future exceedance up to 0.5% may enter a 0.35 s confirmation state only when
+  a directly certified guard brake can still stop before the unsafe boundary;
+  its reserved deadline must leave the full confirmation window. Confirmation
+  replaces the reservation with a certified brake no more than 0.2 s ahead;
+  otherwise the observation is immediately HARD.
+  the guard transition is prequeued at the trajectory server as soon as the
+  state becomes armed, after the exact guard curve passes the latest collision-
+  delta check, so its absolute switch deadline does not depend on the next
+  planner watchdog tick. Updated complete direct `SAFE` evidence requests a
+  same-ID cancellation, but the planner keeps the guard pending until the
+  trajectory server acknowledges `CANCELED`; an `ACTIVATED` acknowledgement
+  makes a racing cancellation irreversible. These command/status topics are
+  namespaced per drone;
+  three distinct semantic tuples confirm braking, while an updated SAFE tuple
+  disarms without changing the original trajectory. A larger/current
+  exceedance, stale/unknown/over-budget input, inadequate stopping margin,
+  current Integrity failure, collision or tracking loss is immediately HARD.
+  HARD-scheduled and activated braking cannot be canceled. Ordinary replanning
+  is suspended while that braking certificate is active, so worker/generation
+  churn cannot relabel the stopping curve.
+- Coarse/refined routes are only `CANDIDATE_READY`. Formal `RISK_SELECTED`
+  authority is created after the actual terminal-stop B-spline passes direct
+  common-core checks at its real arrival times. The first actual-curve failure
+  is fed back for at most two regenerations: another channel for spatial
+  failure, one bounded faster time parameterization for temporal growth, then
+  a directly certified stoppable prefix of the corridor shared by at least two
+  topology channels when a full route still fails. Every point of that nominal
+  executable prefix must be inside every channel tube; tube overlap alone is
+  insufficient. The selected branch itself
+  cannot be relabelled as that public prefix. Diagnostic fixed-point replay is
+  followed by a refreshed-time repetition of every execution safety gate.
+  Publication on
+  a newer execution snapshot performs at most one exact-curve reauthorization;
+  an ID-only change is not a safety failure.
 
 ## G) Upgrade items (optional, after baseline closes the loop)
 - trunk landmarks + TDOP

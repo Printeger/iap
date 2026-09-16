@@ -225,6 +225,26 @@
   authenticated child authorization stamp and reports
   `LIMITED_PREFIX_ROLLED_TO_SUCCESSOR`; child motion is never charged as a
   parent endpoint overrun.
+- A successor is computed against one immutable execution snapshot. At the
+  serialization boundary, a newer snapshot ID by itself is not a rejection:
+  the manager samples the exact child B-spline once, rechecks current
+  Integrity/GNSS, corridor support, incremental collision and direct
+  ForwardRisk, then atomically rebinds a SAFE result. A second snapshot arrival
+  is left to the runtime watchdog. Rejections name the changed semantic source
+  (`direct_risk`, `support`, `Integrity/GNSS`, collision, incomplete query or
+  curve identity), not a generic authority-ID mismatch.
+- P4 route search emits `CANDIDATE_READY`, never formal authority. The manager
+  builds the real terminal-stop B-spline and directly checks its <=0.2 s
+  samples at their actual arrival times with the remaining-curve common
+  satellite core. Only an entirely SAFE curve is promoted atomically to
+  `RISK_SELECTED`. The first failure retains curve position, arc length,
+  arrival time, PL/AL, satellite IDs, sigma/geometry and spatial/temporal
+  growth. At most two feedback regenerations may switch to an unused safe
+  channel, use one bounded `0.85` time-scale hint for a time-growth-dominated
+  failure, and then crop to the last continuous safe stoppable prefix. The
+  terminal solver may lengthen the hinted curve again when dynamics require
+  it, and every regenerated curve repeats dynamics, collision, support,
+  Integrity and direct risk checks. A cropped result remains `LIMITED_PREFIX`.
 - Native refinement reports structured status. A densely sampled coarse path
   that is collision-free in frozen occupancy is accepted directly; A* runs
   only for colliding segments. Budget, occupancy, collision, no-path, invalid
@@ -244,8 +264,8 @@
   curves at no more than 0.2 s anchor spacing. Every curve is start-state
   continuous, terminal-zero, dynamics/collision checked, selects the first
   feasible earlier stop on the approved corridor without extending the old
-  endpoint/deadline, and all curve samples
-  are checked in one direct-risk batch. If source data expires, the executor
+  endpoint/deadline, and all curve samples are checked in one direct-risk
+  batch. If source data expires, the executor
   schedules the nearest future anchor, continues the old approved curve for no
   more than 0.2 s, then publishes that curve with a new trajectory and braking
   certificate identity under `LIMITED_PREFIX_BRAKING`, without extending the
@@ -255,21 +275,51 @@
   collision, current certified Integrity violation or an unavailable braking
   curve remains an emergency fail-closed condition. This terminal state is
   reported separately from normal arrival at the originally approved endpoint.
-- Scheduling a stopping curve does not mutate the committed trajectory or its
-  `LIMITED_PREFIX` certificate. Until the selected anchor (at most 0.2 s), a
-  newer fresh execution snapshot triggers a complete direct-risk, corridor
-  support-age, certified-Integrity/GNSS, collision and identity recheck of the
-  original remaining B-spline. A wholly safe result cancels the schedule as
-  `FAILSAFE_BRAKING_CANCELED_RECOVERED` without changing trajectory ID, start,
-  endpoint or deadline. Unsafe/unknown/over-budget evidence, collision,
-  Integrity failure, tracking loss, or an already activated braking curve
-  cannot be canceled.
+- A complete LIMITED_PREFIX with a certified braking library distinguishes
+  `SAFE`, `MARGINAL_UNSAFE_ARMED`, `CONFIRMED_UNSAFE_BRAKING` and
+  `HARD_UNSAFE_BRAKING`. Only a future direct-risk ratio
+  `1 < max(HPL/HAL,VPL/VAL) <= 1.005` may arm, and only when a freshly direct-
+  certified guard brake stops before the first unsafe boundary. Three distinct
+  semantic evidence tuples or 0.35 s without recovery confirms braking;
+  the reserved marginal guard deadline must leave the full 0.35 s window.
+  Confirmation replaces that reservation with a certified anchor no more than
+  0.2 s ahead; without the full reserve the observation is HARD immediately.
+  entering `MARGINAL_UNSAFE_ARMED` immediately schedules the certified guard
+  anchor as a future-dated command in the trajectory server. Before each
+  prequeue the exact guard curve consumes the latest collision delta. Only
+  updated complete `SAFE` evidence may request cancellation of the same queued
+  trajectory ID before activation; planner state is cleared only after a
+  `CANCELED:<trajectory_id>` server acknowledgement. `ACTIVATED` wins a racing
+  cancellation and is irreversible. Guard command and acknowledgement topics
+  are isolated per drone. The trajectory server enforces the absolute deadline
+  even when the planner watchdog skips over the anchor;
+  repeated watchdog reads and snapshot-ID-only changes do not count. A newer
+  complete SAFE tuple disarms without changing trajectory identity. Armed
+  motion cannot pass the reserved guard anchor. Larger/current violations,
+  insufficient stopping margin, UNKNOWN/over-budget data, stale inputs,
+  collision, hard occlusion, tracking loss or current Integrity failure are
+  HARD and schedule braking immediately. Once a brake is scheduled for a HARD
+  condition or actually activated, it cannot be canceled.
 - Candidate mutation and final lineage/P5/publication form one execution-
   commitment transaction. If a final gate rejects the candidate, both the
   incumbent B-spline and its execution certificate/evidence are restored.
   While `LIMITED_PREFIX_BRAKING` is active, ordinary replanning cannot replace
   or relabel that curve; only endpoint completion or an explicit runtime /
   collision revocation ends its authority.
+- If actual-curve feedback degrades a failed complete route to
+  `LIMITED_PREFIX`, its geometry must come from a corridor shared by at least
+  two distinct topology channels. Collision-free cross-links or pairwise tube
+  overlap alone are not enough: every executable nominal sample must lie in
+  every candidate's vehicle/tracking/topology tube. It must retain the normal stopping/tracking
+  reserve. Cropping the already selected branch and renaming it a public
+  prefix is forbidden; the regenerated curve still requires full direct
+  certification.
+- Fixed-point and generation replay are diagnostic only. If enabled on an
+  execution check, once any diagnostic predictor query is attempted the
+  checker refreshes ROS time after the diagnostic work (regardless of result
+  completeness or CSV write success)
+  and repeats freshness, corridor support, current Integrity, GNSS, collision
+  and direct-risk gates exactly once before granting continued motion.
 - Runtime timing evidence follows `LiDAR source -> ROS receive -> occupancy
   freeze -> support ready -> execution snapshot publish -> RiskGrid
   start/end -> execution query`. Freshness failures retain all observable contributors
@@ -313,8 +363,11 @@
   old-map/old-epoch, new-map/old-epoch, old-map/new-epoch and
   new-map/new-epoch. Direct ForwardRisk is also compared with each generation's
   RiskGrid interpolation. Probe results may classify map/support, GNSS epoch /
-  satellite-set, interpolation or mixed changes, but never grant or revoke
-  motion and never bypass map or GNSS freshness. Classification compares the
+  satellite-set, sigma/canopy, geometry, time-growth, interpolation or mixed
+  changes and never authorize motion. Marginal/confirmed/hard events also
+  replay the fixed first-failure position across adjacent execution snapshots
+  using both the production absolute arrival time and a fixed relative tau.
+  The probe never bypasses map or GNSS freshness. Classification compares the
   typed boundary (index, safety/ranking/failure, satellite-set hash and grid
   interpolation state), not the index alone. Each counterfactual batch has a
   strict diagnostic budget; execution refreshes ROS time and repeats current

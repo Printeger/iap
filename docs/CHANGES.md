@@ -3,6 +3,58 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(gnss-boundary-confirmation-and-actual-curve-authority): IAP-RQ-312 /
+  IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 — add a LIMITED_PREFIX-only runtime
+  confirmation state machine for fully supported future GNSS exceedances no
+  more than 0.5% above AL. A freshly direct-certified guard brake bounds the
+  armed interval; three distinct semantic tuples or 0.35 s confirm braking,
+  and ARMED is permitted only when the reserved guard leaves that full window;
+  confirmation replaces it with a certified <=0.2 s transition anchor,
+  while the certified guard transition is already prequeued at the trajectory
+  server during `ARMED`
+  and only an updated complete `SAFE` evidence tuple can cancel it before
+  activation without changing trajectory identity.
+  Larger/current violations, missing margin and invalid/stale/unknown inputs
+  remain immediate hard braking, with PL/AL and the ForwardRisk formula
+  unchanged. ForwardRisk batches now expose exact common-core satellite IDs,
+  execution CSV v6 records confirmation/guard/prequeue/cancel/evidence state, and the debug
+  probe replays marginal points across adjacent snapshots at both absolute
+  arrival time and fixed relative tau. P4 workers now return
+  `CANDIDATE_READY`; only the actual terminal-stop B-spline can promote to
+  formal `RISK_SELECTED` after direct <=0.2 s common-core certification.
+  Structured evidence records its first failure and spatial/temporal cause,
+  and bounded feedback may try an unused topology channel, a `0.85` time-scale
+  hint for temporal-growth failures, then an independently checked prefix of
+  geometry shared by at least two channels. A failed selected branch is never
+  relabelled as a public prefix. The time hint never bypasses terminal dynamics
+  or final direct certification. Diagnostic replay time has no authority: ROS
+  time is refreshed afterward and all freshness, support, Integrity, GNSS,
+  collision and direct-risk gates run again exactly once even when a diagnostic query is
+  incomplete or its CSV cannot be written. The controller-side deadline gate
+  switches to the queued guard at its absolute anchor time even if the planner
+  watchdog polls late. The exact guard curve consumes the latest collision
+  delta before prequeue; a same-ID cancellation clears planner state only
+  after a trajectory-server `CANCELED` acknowledgement, while a racing
+  `ACTIVATED` status is irreversible. Guard command/status topics are isolated
+  per drone. Public-prefix feedback now executes the nominal centreline only
+  while each sample lies inside every candidate corridor tube; pairwise tube
+  overlap alone no longer authorizes the first candidate's centreline.
+  Prepared successors no longer fail on snapshot ID churn: one
+  latest-snapshot exact-curve reauthorization atomically rebinds SAFE evidence,
+  while semantic risk/support/Integrity/collision/query/curve changes retain
+  distinct fail-closed reasons. Launch defaults are ratio `1.005`, three
+  distinct tuples and `0.35 s`; BDS, AL/PL, P5, weights, 1 s freshness and the
+  150 ms direct budget are unchanged. Three post-fix forest BDS development
+  samples each executed about `2.876 m` and held the approved endpoint. One
+  to three marginal episodes per applicable run were prequeued, recovered and
+  server-ACK canceled without braking; the third run had no marginal episode.
+  Direct checks remained `27.3..32.2 ms` p95 and RiskGrid `412..433 ms` p95.
+  No run selected a formal route: actual terminal B-splines still failed with
+  spatial-dominant GNSS increments (representative VPL `43.1..44.6 m` versus
+  VAL `40 m` within `0.17..0.22 m` of the tested candidate). All three runner
+  verdicts separately remain FAIL because the unrelated current-frame adapter
+  p95 was `11.3..12.0 ms` against its `10 ms` performance gate; this is not
+  reported as a motion-authority or endpoint failure.
 - feat(adaptive-limited-prefix-and-grid-decoupling): IAP-RQ-312 /
   IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 — replace the forest's fixed 0.5 m
   creep cap with an adaptive continuous-safe-corridor prefix that subtracts
