@@ -850,8 +850,11 @@ namespace ego_planner
       p5_waiting_for_p0_ready_ = false;
       return false;
     }
-    const auto health = planner_manager_->p0_risk_grid_runtime_->health();
-    if (health.ready && !health.stale)
+    const double now_s = plannerNow().seconds();
+    const auto execution = planner_manager_->p0_risk_grid_runtime_->
+        acquireExecutionRiskSnapshotForEvaluation(now_s);
+    if (planner_manager_->p0_risk_grid_runtime_->executionSnapshotFreshAt(
+            execution, now_s))
     {
       p5_waiting_for_p0_ready_ = false;
       return false;
@@ -859,68 +862,50 @@ namespace ego_planner
     p5_waiting_for_p0_ready_ = true;
     RCLCPP_WARN_THROTTLE(
         node_->get_logger(), *node_->get_clock(), 1000,
-        "Deferring P5 final-gate planning until P0 risk grid is ready: ready=%d stale=%d reason=%s generation_id=%lu age_s=%.3f",
-        static_cast<int>(health.ready), static_cast<int>(health.stale),
-        health.reason.c_str(), static_cast<unsigned long>(health.generation_id),
-        health.age_s);
+        "Deferring P5 final-gate planning until execution risk authority is ready: execution_snapshot_id=%lu",
+        static_cast<unsigned long>(execution
+            ? execution->execution_snapshot_id : 0u));
     return true;
   }
 
   bool EGOReplanFSM::shouldDeferP4PlanningForRiskGridReady()
   {
-    if (!p4_require_risk_grid_ready_before_planning_)
+    if (!planner_manager_ || !planner_manager_->p0_risk_grid_runtime_)
     {
       p4_waiting_for_risk_grid_ready_ = false;
       p4_admitted_risk_grid_snapshot_.reset();
       return false;
     }
-
-    P4RiskGridPlanningAdmission::Inputs inputs;
-    inputs.enabled = true;
-    const auto snapshot = planner_manager_
-                              ? planner_manager_->acquireRiskGridSnapshot()
-                              : nullptr;
-    inputs.snapshot_owned = static_cast<bool>(snapshot);
-    if (snapshot)
-    {
-      const auto health = snapshot->health();
-      inputs.health_ready = health.ready;
-      inputs.health_stale = health.stale;
-      inputs.generation_id = snapshot->generation_id();
-      inputs.stamp_s = snapshot->stamp_s();
-      inputs.frame_id = snapshot->params().frame_id;
-    }
-
-    const auto decision = p4_risk_grid_planning_admission_.admit(inputs);
-    if (decision.allow_planning)
-      p4_admitted_risk_grid_snapshot_ = snapshot;
-    if (!decision.allow_planning)
+    const double now_s = plannerNow().seconds();
+    const auto execution = planner_manager_->p0_risk_grid_runtime_->
+        acquireExecutionRiskSnapshotForEvaluation(now_s);
+    if (!planner_manager_->p0_risk_grid_runtime_->executionSnapshotFreshAt(
+            execution, now_s))
     {
       p4_waiting_for_risk_grid_ready_ = true;
       p4_admitted_risk_grid_snapshot_.reset();
       RCLCPP_WARN_THROTTLE(
           node_->get_logger(), *node_->get_clock(), 1000,
-          "Deferring P4 planning until risk grid is ready: reason=%s snapshot_owned=%d ready=%d stale=%d generation_id=%lu stamp_s=%.9f frame=%s defer_count=%lu",
-          decision.reason.c_str(), static_cast<int>(inputs.snapshot_owned),
-          static_cast<int>(inputs.health_ready),
-          static_cast<int>(inputs.health_stale),
-          static_cast<unsigned long>(inputs.generation_id), inputs.stamp_s,
-          inputs.frame_id.c_str(),
-          static_cast<unsigned long>(p4_risk_grid_planning_admission_.deferCount()));
+          "Deferring P4 planning until execution risk authority is ready: execution_snapshot_id=%lu legacy_require_grid=%d",
+          static_cast<unsigned long>(execution
+              ? execution->execution_snapshot_id : 0u),
+          static_cast<int>(p4_require_risk_grid_ready_before_planning_));
       return true;
     }
     p4_waiting_for_risk_grid_ready_ = false;
-    if (decision.released_now)
+    const auto snapshot = planner_manager_->acquireRiskGridSnapshot();
+    if (snapshot)
     {
-      RCLCPP_INFO(
-          node_->get_logger(),
-          "P4 risk-grid planning admission released: release_stamp_s=%.9f release_generation_id=%lu defer_count=%lu",
-          p4_risk_grid_planning_admission_.releaseStampS(),
-          static_cast<unsigned long>(
-              p4_risk_grid_planning_admission_.releaseGenerationId()),
-          static_cast<unsigned long>(
-              p4_risk_grid_planning_admission_.deferCountAtRelease()));
+      const auto health = snapshot->health();
+      const double age_s = now_s - snapshot->stamp_s();
+      p4_admitted_risk_grid_snapshot_ = health.ready && !health.stale &&
+          std::isfinite(age_s) && age_s >= -1.0e-6 &&
+          (snapshot->params().stale_timeout_s < 0.0 ||
+           age_s <= snapshot->params().stale_timeout_s)
+          ? snapshot : nullptr;
     }
+    else
+      p4_admitted_risk_grid_snapshot_.reset();
     return false;
   }
 
@@ -1313,15 +1298,24 @@ namespace ego_planner
           ? admitted_snapshot->generation_id() : 0;
       const bool has_existing_trajectory =
           previous_local_data.traj_id_ > 0 && previous_local_data.duration_ > 0.0;
-      const auto admission = p1_replan_admission_.admit(
-          generation, health.ready, stale, has_existing_trajectory);
-      acquire_p1_context = admission.acquire_p1_context;
-      p1_planning_attempt_id = admission.planning_attempt_id;
-      if (!admission.allow_expensive_planning)
+      if (!stale && health.ready && generation > 0)
       {
+        const auto admission = p1_replan_admission_.admit(
+            generation, true, false, has_existing_trajectory);
+        acquire_p1_context = admission.acquire_p1_context;
+        p1_planning_attempt_id = admission.planning_attempt_id;
+      }
+      else
+      {
+        // The dense grid only enables P1's optional search preference. Keep
+        // planning from frozen occupancy and require direct execution-snapshot
+        // certification of the actual candidate before publication.
+        admitted_snapshot.reset();
+        acquire_p1_context = true;
+        p1_planning_attempt_id = 0;
         planner_manager_->recordP1RetryDeferred(
-            admission.reason, now_s, admitted_snapshot);
-        return false;
+            "risk_grid_hint_unavailable_direct_authority_fallback", now_s,
+            nullptr);
       }
     }
 

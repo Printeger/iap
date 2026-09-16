@@ -66,6 +66,32 @@ namespace ego_planner
     bool failsafe_braking_active = false;
   };
 
+  struct P4PreparedSuccessor
+  {
+    int parent_trajectory_id = 0;
+    int64_t parent_start_time_ns = 0;
+    std::string parent_control_points_hash;
+    double planned_switch_time_s =
+        std::numeric_limits<double>::quiet_NaN();
+    Eigen::Vector3d incumbent_position = Eigen::Vector3d::Zero();
+    Eigen::Vector3d incumbent_velocity = Eigen::Vector3d::Zero();
+    Eigen::Vector3d incumbent_acceleration = Eigen::Vector3d::Zero();
+    Eigen::Vector3d successor_position = Eigen::Vector3d::Zero();
+    Eigen::Vector3d successor_velocity = Eigen::Vector3d::Zero();
+    Eigen::Vector3d successor_acceleration = Eigen::Vector3d::Zero();
+    uint64_t execution_snapshot_id = 0;
+    bool direct_risk_safe = false;
+    bool support_and_integrity_fresh = false;
+  };
+
+  bool validateP4PreparedSuccessor(
+      const P4PreparedSuccessor &successor,
+      int expected_parent_trajectory_id,
+      int64_t expected_parent_start_time_ns,
+      const std::string &expected_parent_control_points_hash,
+      double now_s,
+      std::string *reason = nullptr);
+
   bool shouldReplaceCommittedLimitedPrefix(
       const P4LimitedPrefixReplacementInput &input,
       std::string *reason = nullptr);
@@ -234,8 +260,28 @@ namespace ego_planner
   {
     // SECTION stable
   public:
+    struct P4PlanningAuthority
+    {
+      std::shared_ptr<const P0ExecutionRiskSnapshot> execution_snapshot;
+      std::shared_ptr<const P0OccupancyEpoch> occupancy_snapshot;
+      iap::CurrentIntegrityState current_integrity_anchor;
+      std::function<iap::ForwardRiskBatchResult(
+          const iap::ForwardRiskBatchRequest&)> forward_risk_batch;
+
+      bool valid() const;
+    };
+
+    struct P4SearchHint
+    {
+      std::shared_ptr<const iap::RiskGridSnapshot> risk_grid;
+      bool usable = false;
+      std::string reason = "risk_grid_unavailable";
+    };
+
     struct PlanningRiskContext
     {
+      P4PlanningAuthority p4_authority;
+      P4SearchHint p4_search_hint;
       std::shared_ptr<const iap::RiskGridSnapshot> snapshot;
       std::shared_ptr<const P0OccupancyEpoch> occupancy_snapshot;
       std::shared_ptr<const P0ExecutionRiskSnapshot> execution_snapshot;
@@ -386,6 +432,13 @@ namespace ego_planner
     bool recordP4NativeAStarNoPathForTest(double stamp_s)
     {
       return recordP4NativeAStarNoPath(stamp_s);
+    }
+    P4ForwardDecision evaluateP4ForwardRouteForTest(
+        const Eigen::Vector3d &start_pt,
+        const Eigen::Vector3d &start_vel,
+        const Eigen::Vector3d &local_target_pt)
+    {
+      return evaluateP4ForwardRoute(start_pt, start_vel, local_target_pt);
     }
 
     PlanParameters pp_;

@@ -510,7 +510,8 @@ makeP4ExecutionSnapshot(
   execution->source_identity = risk->sourceIdentity();
   execution->risk_policy = risk->params();
   execution->frame_contract_id = "map:test";
-  execution->geometry_id = "map:test";
+  execution->geometry_id = risk->params().geometry_id.empty()
+      ? "map:test-geometry" : risk->params().geometry_id;
   execution->predictor_algorithm_identity = "test_direct_v1";
   execution->forward_risk_batch = std::move(direct);
   return execution;
@@ -1116,8 +1117,19 @@ TEST(P4ForwardTerminalLineageTest,
   manager.pp_.max_vel_ = 20.0;
   manager.pp_.max_acc_ = 100.0;
   manager.setP4VerticalSliceOptimizerForTest(std::move(optimizer), map);
+  std::size_t largest_direct_batch = 0u;
+  std::size_t braking_batch_points = 0u;
+  const auto safe_direct = [&largest_direct_batch, &braking_batch_points](
+      const iap::ForwardRiskBatchRequest &request) {
+      largest_direct_batch = std::max(
+          largest_direct_batch, request.points.size());
+      if (request.combined_snapshot_identity.rfind(
+              "p4_limited_prefix_braking_library_v1", 0) == 0)
+        braking_batch_points = request.points.size();
+      return directRiskCallback(0.5)(request);
+    };
   const auto execution_snapshot = makeP4ExecutionSnapshot(
-      snapshot, directRiskCallback(0.5));
+      snapshot, safe_direct);
   auto committed_occupancy =
       std::make_shared<ego_planner::P0OccupancyEpoch>(
           *execution_snapshot->occupancy);
@@ -1150,6 +1162,18 @@ TEST(P4ForwardTerminalLineageTest,
       ego_planner::P4ForwardDeferredMotionMode::COMMON_PREFIX;
   decision.deferred_trajectory = approved_prefix;
   decision.reason = "safe_limited_common_prefix";
+  // The worker prepared this candidate on an older execution tuple while a
+  // newer immutable execution snapshot became available before commit. The
+  // old source identity must not be compared to the optional RiskGrid hint;
+  // the actual curve is rechecked and rebound to the newer authority.
+  decision.snapshot_identity.execution_snapshot_id =
+      execution_snapshot->execution_snapshot_id - 1u;
+  decision.snapshot_identity.risk_source_identity_hash =
+      "older_execution_source";
+  decision.snapshot_identity.local_map_support_identity =
+      "older_support";
+  decision.snapshot_identity.gnss_epoch_identity = 1u;
+  decision.snapshot_identity.gnss_epoch_stamp_s = 9.5;
   ego_planner::P4ForwardRiskEvidenceRecord failed_record;
   failed_record.sample_index = 4;
   failed_record.arc_length_m = 2.0;
@@ -1211,6 +1235,12 @@ TEST(P4ForwardTerminalLineageTest,
   EXPECT_EQ(certificate.authority,
             ego_planner::P4ExecutionAuthority::LIMITED_PREFIX);
   EXPECT_EQ(certificate.trajectory_id, 35);
+  EXPECT_EQ(certificate.execution_snapshot_id,
+            execution_snapshot->execution_snapshot_id);
+  EXPECT_GT(largest_direct_batch, 0u);
+  EXPECT_LE(braking_batch_points,
+            static_cast<std::size_t>(
+                std::ceil(certificate.duration_s / 0.2)) + 1u);
   EXPECT_TRUE(certificate.approved_endpoint.isApprox(
       approved_prefix.back(), 1.0e-9));
   EXPECT_LE(certificate.terminal_speed_mps, 1.0e-3);
@@ -1389,6 +1419,15 @@ TEST(P4ForwardTerminalLineageTest,
   EXPECT_EQ(detail_rows[0].at("worst_excluded_sat_h"), "17");
   const auto execution_rows = readCsvRows(std::filesystem::path(
       debug_path.string() + ".execution_events.csv"));
+  EXPECT_TRUE(std::any_of(
+      execution_rows.begin(), execution_rows.end(),
+      [execution_snapshot](const auto &row) {
+        return row.at("event") == "AUTHORIZED" &&
+            row.at("execution_snapshot_id") == std::to_string(
+                execution_snapshot->execution_snapshot_id) &&
+            row.at("gnss_epoch_identity") == std::to_string(
+                execution_snapshot->source_identity.gnss_epoch_identity);
+      }));
   EXPECT_TRUE(std::any_of(
       execution_rows.begin(), execution_rows.end(), [](const auto &row) {
         return row.at("event") == "RISK_REVOKED" &&
@@ -1587,6 +1626,54 @@ TEST(PlanningRiskContextTest, BeginWithoutP0RuntimeCreatesDeterministicNullConte
 
   manager.clearPlanningRiskContext();
   EXPECT_FALSE(manager.planningRiskContext().active);
+}
+
+TEST(PlanningRiskContextTest,
+     P4CanStartFromExecutionAuthorityWithoutCompletedRiskGrid) {
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureNoCollision(map.get());
+  const auto frozen = map->captureFrozenOccupancyEpoch();
+  ASSERT_NE(frozen, nullptr);
+  const auto policy_seed = makeP4SelectionSnapshot(
+      100.0, frozen->geometry_id);
+  auto execution = std::make_shared<ego_planner::P0ExecutionRiskSnapshot>(
+      *makeP4ExecutionSnapshot(policy_seed, directRiskCallback(0.5)));
+  auto occupancy = std::make_shared<ego_planner::P0OccupancyEpoch>(
+      *execution->occupancy);
+  occupancy->generation = 7u;
+  occupancy->cloud_stamp_s = 10.0;
+  occupancy->frame_id = "map";
+  occupancy->geometry.origin_w = frozen->lattice_origin;
+  occupancy->geometry.extent_m = frozen->extent_m;
+  occupancy->geometry.resolution_m = frozen->resolution_m;
+  occupancy->geometry.geometry_id = frozen->geometry_id;
+  occupancy->frozen_grid_map_epoch = frozen;
+  execution->occupancy = occupancy;
+  execution->source_identity.occupancy_generation = occupancy->generation;
+  execution->source_identity.occupancy_stamp_s = occupancy->cloud_stamp_s;
+  execution->source_identity.gnss_generation = 3u;
+  execution->source_identity.gnss_epoch_identity = 11u;
+  execution->source_identity.gnss_stamp_s = 10.0;
+  execution->source_identity.alert_limit_policy_id = "test_limits";
+  execution->source_identity.local_map_support_identity = "test_support";
+  execution->risk_policy.geometry_id = frozen->geometry_id;
+
+  const auto debug_path = p4LineageTestPath("execution_only_p4.csv");
+  auto optimizer = makeP4Optimizer(
+      map, policy_seed, debug_path.string(), 1);
+  ego_planner::EGOPlannerManager manager;
+  manager.setP4VerticalSliceOptimizerForTest(std::move(optimizer), map);
+  manager.setPlanningRiskContextForTest(
+      nullptr, 10.0, occupancy, execution->forward_risk_batch, execution);
+
+  const auto decision = manager.evaluateP4ForwardRouteForTest(
+      Eigen::Vector3d(-4.0, 0.0, 1.0), Eigen::Vector3d::Zero(),
+      Eigen::Vector3d(4.0, 0.0, 1.0));
+
+  EXPECT_NE(decision.reason, "execution_authority_unavailable");
+  EXPECT_EQ(decision.snapshot_identity.execution_snapshot_id,
+            execution->execution_snapshot_id);
+  EXPECT_EQ(decision.snapshot_identity.risk_generation, 0u);
 }
 
 TEST(PlanningRiskContextTest, TrajectoryCommandSurvivesLateSubscriber) {
@@ -2218,4 +2305,39 @@ TEST(P4LimitedPrefixCommitmentPolicy,
   EXPECT_TRUE(ego_planner::shouldReplaceCommittedLimitedPrefix(
       input, &reason));
   EXPECT_EQ(reason, "incumbent_invalid");
+}
+
+TEST(P4PreparedSuccessorPolicy,
+     BindsParentSwitchWindowBoundaryStateAndDirectAuthority)
+{
+  ego_planner::P4PreparedSuccessor successor;
+  successor.parent_trajectory_id = 17;
+  successor.parent_start_time_ns = 1234;
+  successor.parent_control_points_hash = "parent_hash";
+  successor.planned_switch_time_s = 10.0;
+  successor.incumbent_position = Eigen::Vector3d(1.0, 2.0, 3.0);
+  successor.incumbent_velocity = Eigen::Vector3d(0.5, 0.0, 0.0);
+  successor.incumbent_acceleration = Eigen::Vector3d(0.1, 0.0, 0.0);
+  successor.successor_position = successor.incumbent_position;
+  successor.successor_velocity = successor.incumbent_velocity;
+  successor.successor_acceleration = successor.incumbent_acceleration;
+  successor.execution_snapshot_id = 9;
+  successor.direct_risk_safe = true;
+  successor.support_and_integrity_fresh = true;
+  std::string reason;
+  EXPECT_TRUE(ego_planner::validateP4PreparedSuccessor(
+      successor, 17, 1234, "parent_hash", 10.1, &reason));
+  EXPECT_EQ(reason, "prepared_successor_ready");
+
+  successor.successor_position.x() += 0.3;
+  EXPECT_FALSE(ego_planner::validateP4PreparedSuccessor(
+      successor, 17, 1234, "parent_hash", 10.1, &reason));
+  EXPECT_EQ(reason, "successor_boundary_state_discontinuous");
+  successor.successor_position = successor.incumbent_position;
+  EXPECT_FALSE(ego_planner::validateP4PreparedSuccessor(
+      successor, 18, 1234, "parent_hash", 10.1, &reason));
+  EXPECT_EQ(reason, "successor_parent_identity_mismatch");
+  EXPECT_FALSE(ego_planner::validateP4PreparedSuccessor(
+      successor, 17, 1234, "parent_hash", 10.25, &reason));
+  EXPECT_EQ(reason, "successor_switch_window_missed");
 }
