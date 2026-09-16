@@ -206,14 +206,20 @@ class P5RuntimeIntegrityGate {
       const std::shared_ptr<const iap::RiskGridSnapshot>& snapshot,
       double now_s,
       double emergency_time_s,
-      const P4DirectTrajectoryRiskEvidence* direct_risk = nullptr);
+      const P4DirectTrajectoryRiskEvidence* direct_risk = nullptr,
+      const std::string& required_gnss_core_policy = {},
+      const std::string& required_window_layout_hash = {},
+      const std::string& required_window_satellite_sets_hash = {});
 
   P5GateStatus evaluateFinal(
       LocalTrajData& local_data,
       const std::shared_ptr<const iap::RiskGridSnapshot>& snapshot,
       double now_s,
       double emergency_time_s,
-      const P4DirectTrajectoryRiskEvidence* direct_risk = nullptr);
+      const P4DirectTrajectoryRiskEvidence* direct_risk = nullptr,
+      const std::string& required_gnss_core_policy = {},
+      const std::string& required_window_layout_hash = {},
+      const std::string& required_window_satellite_sets_hash = {});
 
   void publishFinalAdmission(P5GateStatus status,
                              double publish_authorization_stamp_s);
@@ -247,6 +253,9 @@ class P5RuntimeIntegrityGate {
     double now_s = std::numeric_limits<double>::quiet_NaN();
     double emergency_time_s = 1.0;
     const P4DirectTrajectoryRiskEvidence* direct_risk = nullptr;
+    std::string required_gnss_core_policy;
+    std::string required_window_layout_hash;
+    std::string required_window_satellite_sets_hash;
   };
 
   void createRosInterfaces();

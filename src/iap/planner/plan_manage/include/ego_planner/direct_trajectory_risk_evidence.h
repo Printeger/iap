@@ -88,6 +88,23 @@ inline std::string p4RiskQueryLatticeHash(
   return p4IdentityHash(canonical.str());
 }
 
+inline std::string p4WindowSatelliteSetsHash(
+    const std::vector<iap::ForwardRiskWindowResult>& windows) {
+  if (windows.empty()) {
+    return {};
+  }
+  std::ostringstream canonical;
+  canonical << "p4_window_satellite_sets_v1;";
+  for (const auto& window : windows) {
+    canonical << window.satellite_window_id << ':';
+    for (const int satellite_id : window.satellite_ids) {
+      canonical << satellite_id << ',';
+    }
+    canonical << ';';
+  }
+  return p4IdentityHash(canonical.str());
+}
+
 struct P4DirectTrajectoryRiskEvidence {
   bool complete = false;
   bool certified_safe = false;
@@ -106,7 +123,15 @@ struct P4DirectTrajectoryRiskEvidence {
   std::uint64_t gnss_epoch_identity = 0;
   double evaluation_time_s = std::numeric_limits<double>::quiet_NaN();
   double compute_duration_ms = std::numeric_limits<double>::quiet_NaN();
+  std::string satellite_set_policy = "whole_curve_common_core";
+  std::string window_layout_hash;
+  std::string window_satellite_sets_hash;
+  std::uint64_t first_failure_window_id = 0;
+  iap::ForwardRiskFailureReason first_failure_window_reason =
+      iap::ForwardRiskFailureReason::NONE;
   std::vector<int> common_satellite_ids;
+  std::vector<iap::ForwardRiskWindowResult> windows;
+  iap::ForwardRiskBatchTiming timing;
   // Keeps the exact immutable risk snapshot used by the direct batch alive.
   // P5 consumes this pointer so a newly published generation cannot create a
   // split-snapshot race between the P4 check and P5 admission.
@@ -114,6 +139,9 @@ struct P4DirectTrajectoryRiskEvidence {
   std::shared_ptr<const P0ExecutionRiskSnapshot> execution_snapshot;
   std::vector<Eigen::Vector3d> positions;
   std::vector<double> relative_times;
+  std::vector<bool> nominal_sample_rows;
+  std::vector<std::uint64_t> evidence_point_ids;
+  std::vector<std::uint64_t> satellite_window_ids;
   std::vector<iap::ForwardRiskPointResult> points;
 };
 

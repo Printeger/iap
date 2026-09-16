@@ -1076,6 +1076,40 @@ TEST(P5RuntimeIntegrityGateTest,
 }
 
 TEST(P5RuntimeIntegrityGateTest,
+     WindowEvidenceAcceptsCertifiedBrakePointsOffTheNominalSpline) {
+  auto config = baseConfig();
+  config.test_only_allow_grid_risk_authority = false;
+  config.current_stale_to_replan_s = 100.0;
+  config.current_stale_to_emergency_s = 100.0;
+  ego_planner::P5RuntimeIntegrityGate gate(nullptr, config, false);
+  gate.setCurrentIntegrityForTest(integrityMsg(
+      0.0, 1.0, 1.0, 10.0, 10.0));
+  auto trajectory = makeTrajectory();
+  const auto snapshot = makeSnapshot(1.0, 1.0);
+  auto direct = directRiskEvidence(trajectory, snapshot, 1.0, 1.0);
+  direct.nominal_sample_rows.assign(direct.positions.size(), true);
+  direct.positions.push_back(
+      trajectory.position_traj_.evaluateDeBoorT(0.5) +
+      Eigen::Vector3d(0.0, 0.25, 0.0));
+  direct.relative_times.push_back(0.5);
+  direct.nominal_sample_rows.push_back(false);
+  direct.points.push_back(direct.points.front());
+  direct.sample_lattice_hash = ego_planner::p4RiskQueryLatticeHash(
+      direct.positions, direct.relative_times);
+
+  const auto status = gate.evaluateFinal(
+      trajectory, snapshot, 0.0, -1.0, &direct);
+
+  EXPECT_EQ(status.action, ego_planner::P5GateAction::OK);
+  EXPECT_EQ(status.reason, ego_planner::P5GateReason::OK);
+  EXPECT_TRUE(std::any_of(
+      status.viz_samples.begin(), status.viz_samples.end(),
+      [&direct](const auto &sample) {
+        return sample.position.isApprox(direct.positions.back(), 1.0e-12);
+      }));
+}
+
+TEST(P5RuntimeIntegrityGateTest,
      FreshExecutionEvidenceDoesNotRequireRiskGridPublication) {
   auto config = baseConfig();
   config.test_only_allow_grid_risk_authority = false;
@@ -1119,6 +1153,84 @@ TEST(P5RuntimeIntegrityGateTest,
   EXPECT_GT(status.sample_count, 0u);
   EXPECT_LE(status.sample_count, direct.points.size());
   EXPECT_EQ(status.unknown_count, 0u);
+}
+
+TEST(P5RuntimeIntegrityGateTest,
+     RequiredBrakingWindowContractRejectsLegacyOrMutatedEvidence) {
+  auto config = baseConfig();
+  config.test_only_allow_grid_risk_authority = false;
+  config.current_stale_to_replan_s = 100.0;
+  config.current_stale_to_emergency_s = 100.0;
+  config.max_unknown_ratio = 0.01;
+  ego_planner::P5RuntimeIntegrityGate gate(nullptr, config, false);
+  gate.setCurrentIntegrityForTest(integrityMsg(
+      0.0, 1.0, 1.0, 10.0, 10.0));
+  auto trajectory = makeTrajectory();
+  const auto snapshot = makeSnapshot(1.0, 1.0);
+  auto direct = directRiskEvidence(trajectory, snapshot, 1.0, 1.0);
+
+  const auto legacy = gate.evaluateFinal(
+      trajectory, snapshot, 0.0, -1.0, &direct,
+      "braking_window_core", "layout", "sets");
+  EXPECT_NE(legacy.raw_action, ego_planner::P5GateAction::OK);
+  EXPECT_EQ(legacy.raw_reason, ego_planner::P5GateReason::FUTURE_UNKNOWN);
+
+  direct.satellite_set_policy = "braking_window_core";
+  direct.certified_safe = true;
+  direct.certification_status =
+      ego_planner::P4ActualCurveCertificationStatus::SAFE;
+  direct.window_layout_hash = "layout";
+  direct.evidence_point_ids.resize(direct.positions.size());
+  direct.satellite_window_ids.assign(direct.positions.size(), 1u);
+  direct.nominal_sample_rows.assign(direct.positions.size(), true);
+  for (std::size_t index = 0; index < direct.evidence_point_ids.size(); ++index)
+    direct.evidence_point_ids[index] = index + 1u;
+  iap::ForwardRiskWindowResult window;
+  window.satellite_window_id = 1u;
+  window.satellite_ids = {1, 2, 3, 4, 5, 6};
+  window.point_count = direct.positions.size();
+  window.complete = true;
+  direct.windows = {window};
+  direct.window_satellite_sets_hash =
+      ego_planner::p4WindowSatelliteSetsHash(direct.windows);
+  ASSERT_EQ(direct.window_satellite_sets_hash,
+            ego_planner::p4WindowSatelliteSetsHash(direct.windows));
+  ASSERT_EQ(direct.evidence_point_ids.size(), direct.positions.size());
+  ASSERT_EQ(direct.satellite_window_ids.size(), direct.positions.size());
+  ASSERT_EQ(direct.nominal_sample_rows.size(), direct.positions.size());
+  ASSERT_EQ(direct.points.front().ranking_state,
+            iap::ForwardRiskRankingState::COMPARABLE);
+  ASSERT_EQ(direct.points.front().failure_reason,
+            iap::ForwardRiskFailureReason::NONE);
+  ASSERT_EQ(direct.points.front().safety_state,
+            iap::ForwardRiskSafetyState::SAFE);
+  ASSERT_TRUE(direct.points.front().gnss_supported);
+  ASSERT_TRUE(direct.points.front().lidar_supported);
+  ASSERT_TRUE(direct.points.front().fim_supported);
+  ASSERT_TRUE(std::isfinite(direct.points.front().prediction.fused.hpl));
+  ASSERT_TRUE(std::isfinite(direct.points.front().prediction.fused.vpl));
+
+  const auto valid = gate.evaluateFinal(
+      trajectory, snapshot, 0.1, -1.0, &direct,
+      "braking_window_core", direct.window_layout_hash,
+      direct.window_satellite_sets_hash);
+  std::string valid_reasons;
+  for (const auto& sample : valid.viz_samples) {
+    valid_reasons += sample.reason + ";";
+  }
+  EXPECT_EQ(valid.raw_action, ego_planner::P5GateAction::OK)
+      << valid.future_reason << ':' << valid_reasons
+      << " unknown=" << valid.unknown_count
+      << " bad=" << valid.bad_count << " samples=" << valid.sample_count;
+  EXPECT_EQ(valid.raw_reason, ego_planner::P5GateReason::OK)
+      << valid.future_reason << ':' << valid_reasons;
+
+  const auto mutated = gate.evaluateFinal(
+      trajectory, snapshot, 0.2, -1.0, &direct,
+      "braking_window_core", direct.window_layout_hash,
+      "mutated-satellite-sets");
+  EXPECT_NE(mutated.raw_action, ego_planner::P5GateAction::OK);
+  EXPECT_EQ(mutated.raw_reason, ego_planner::P5GateReason::FUTURE_UNKNOWN);
 }
 
 TEST(P5RuntimeIntegrityGateTest,

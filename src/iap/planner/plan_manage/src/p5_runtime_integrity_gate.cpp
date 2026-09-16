@@ -640,7 +640,10 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateRuntime(
     const std::shared_ptr<const iap::RiskGridSnapshot>& snapshot,
     double now_s,
     double emergency_time_s,
-    const P4DirectTrajectoryRiskEvidence* direct_risk) {
+    const P4DirectTrajectoryRiskEvidence* direct_risk,
+    const std::string& required_gnss_core_policy,
+    const std::string& required_window_layout_hash,
+    const std::string& required_window_satellite_sets_hash) {
   if (!config_.enable_runtime_gate) {
     P5GateStatus status;
     status.reason = P5GateReason::DISABLED;
@@ -648,7 +651,9 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateRuntime(
   }
   P5GateStatus status = evaluate(
       local_data, snapshot,
-      EvalContext{false, now_s, emergency_time_s, direct_risk});
+      EvalContext{false, now_s, emergency_time_s, direct_risk,
+                  required_gnss_core_policy, required_window_layout_hash,
+                  required_window_satellite_sets_hash});
   status = applyDebounce(status, now_s);
   publishStatus(status, "runtime");
   return status;
@@ -659,7 +664,10 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateFinal(
     const std::shared_ptr<const iap::RiskGridSnapshot>& snapshot,
     double now_s,
     double emergency_time_s,
-    const P4DirectTrajectoryRiskEvidence* direct_risk) {
+    const P4DirectTrajectoryRiskEvidence* direct_risk,
+    const std::string& required_gnss_core_policy,
+    const std::string& required_window_layout_hash,
+    const std::string& required_window_satellite_sets_hash) {
   if (!config_.enable_final_gate) {
     resetFinalGateFailureState();
     P5GateStatus status;
@@ -668,7 +676,9 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateFinal(
   }
   P5GateStatus status = evaluate(
       local_data, snapshot,
-      EvalContext{true, now_s, emergency_time_s, direct_risk});
+      EvalContext{true, now_s, emergency_time_s, direct_risk,
+                  required_gnss_core_policy, required_window_layout_hash,
+                  required_window_satellite_sets_hash});
   status = applyFinalGateBudget(status, now_s);
   status.final_evaluation_stamp_s = now_s;
   status.final_candidate_rejected =
@@ -943,10 +953,17 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateFutureGate(
       local_data.position_traj_.getKnot());
   bool direct_curve_matches = direct_evidence &&
       direct_evidence->positions.size() ==
-          direct_evidence->relative_times.size();
+          direct_evidence->relative_times.size() &&
+      (direct_evidence->nominal_sample_rows.empty() ||
+       direct_evidence->nominal_sample_rows.size() ==
+           direct_evidence->positions.size());
   if (direct_curve_matches) {
     for (std::size_t index = 0;
          index < direct_evidence->positions.size(); ++index) {
+      if (!direct_evidence->nominal_sample_rows.empty() &&
+          !direct_evidence->nominal_sample_rows[index]) {
+        continue;
+      }
       const double sample_time = direct_evidence->relative_times[index];
       if (!finite(sample_time) || sample_time < -1.0e-9 ||
           sample_time > duration + 1.0e-9 ||
@@ -979,8 +996,54 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateFutureGate(
           source_identity->occupancy_generation &&
       direct_evidence->gnss_epoch_identity ==
           source_identity->gnss_epoch_identity;
+  bool window_contract_valid = direct_evidence != nullptr;
+  if (window_contract_valid &&
+      !context.required_gnss_core_policy.empty()) {
+    window_contract_valid = direct_evidence->satellite_set_policy ==
+        context.required_gnss_core_policy;
+  }
+  if (window_contract_valid &&
+      !context.required_window_layout_hash.empty()) {
+    window_contract_valid = direct_evidence->window_layout_hash ==
+        context.required_window_layout_hash;
+  }
+  if (window_contract_valid &&
+      !context.required_window_satellite_sets_hash.empty()) {
+    window_contract_valid = direct_evidence->window_satellite_sets_hash ==
+        context.required_window_satellite_sets_hash;
+  }
+  if (window_contract_valid && direct_evidence->satellite_set_policy ==
+          "braking_window_core") {
+    window_contract_valid =
+        !direct_evidence->window_layout_hash.empty() &&
+        !direct_evidence->window_satellite_sets_hash.empty() &&
+        !direct_evidence->windows.empty() &&
+        direct_evidence->window_satellite_sets_hash ==
+            p4WindowSatelliteSetsHash(direct_evidence->windows) &&
+        direct_evidence->evidence_point_ids.size() ==
+            direct_evidence->positions.size() &&
+        direct_evidence->satellite_window_ids.size() ==
+            direct_evidence->positions.size() &&
+        direct_evidence->nominal_sample_rows.size() ==
+            direct_evidence->positions.size();
+    for (std::size_t index = 0;
+         window_contract_valid &&
+         index < direct_evidence->satellite_window_ids.size(); ++index) {
+      const std::uint64_t window_id =
+          direct_evidence->satellite_window_ids[index];
+      window_contract_valid = window_id != 0u &&
+          std::any_of(
+              direct_evidence->windows.begin(),
+              direct_evidence->windows.end(),
+              [window_id](const iap::ForwardRiskWindowResult& window) {
+                return window.satellite_window_id == window_id &&
+                    !window.satellite_ids.empty();
+              });
+    }
+  }
   const bool direct_evidence_valid = direct_evidence &&
       direct_evidence->complete &&
+      window_contract_valid &&
       (execution_evidence_bound || legacy_grid_evidence_bound) &&
       direct_evidence->trajectory_id == local_data.traj_id_ &&
       direct_evidence->trajectory_start_ns == trajectory_start_time_ns &&

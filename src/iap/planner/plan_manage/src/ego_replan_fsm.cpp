@@ -1282,10 +1282,13 @@ namespace ego_planner
       // evidence. Consume its exact immutable snapshot instead of acquiring a
       // second generation and manufacturing a split-snapshot revocation.
       auto snapshot = direct_evidence.risk_snapshot;
+      const auto &execution_certificate =
+          planner_manager_->p4ExecutionCertificate();
       const P5GateStatus p5_status =
           planner_manager_->p5_integrity_gate_->evaluateRuntime(
               *info, snapshot, now_s, emergency_time_,
-              &direct_evidence);
+              &direct_evidence,
+              execution_certificate.gnss_core_policy);
       if (p5_status.action == P5GateAction::OK)
       {
         planner_manager_->recordP4RuntimeLineage(now_s);
@@ -1473,6 +1476,8 @@ namespace ego_planner
         const double now_s = plannerNow().seconds();
         const auto &direct_evidence =
             planner_manager_->latestP4DirectRiskEvidence();
+        const auto &execution_certificate =
+            planner_manager_->p4ExecutionCertificate();
         auto snapshot = direct_evidence.risk_snapshot;
         const uint64_t planning_generation_id =
             planner_manager_->currentPlanningGenerationId();
@@ -1488,7 +1493,10 @@ namespace ego_planner
         const P5GateStatus p5_status =
             planner_manager_->p5_integrity_gate_->evaluateFinal(
                 *info, snapshot, now_s, emergency_time_,
-                &direct_evidence);
+                &direct_evidence,
+                execution_certificate.gnss_core_policy,
+                execution_certificate.window_layout_hash,
+                execution_certificate.window_satellite_sets_hash);
         if (p5_status.action != P5GateAction::OK)
         {
           if (p5_status.action ==

@@ -206,6 +206,9 @@ namespace ego_planner
     std::string control_points_hash;
     std::string knot_vector_hash;
     std::string risk_query_lattice_hash;
+    std::string gnss_core_policy;
+    std::string window_layout_hash;
+    std::string window_satellite_sets_hash;
     Eigen::Vector3d approved_endpoint = Eigen::Vector3d::Constant(
         std::numeric_limits<double>::quiet_NaN());
     double terminal_speed_mps = std::numeric_limits<double>::infinity();
@@ -234,6 +237,10 @@ namespace ego_planner
     std::string risk_query_lattice_hash;
     uint64_t braking_certificate_id = 0;
     uint64_t geometry_checked_generation = 0;
+    std::uint64_t satellite_window_id = 0;
+    std::vector<Eigen::Vector3d> risk_points;
+    // Times on the committed parent trajectory, including braking duration.
+    std::vector<double> risk_relative_times;
   };
 
   struct P4GuardBrakingCommand
@@ -295,6 +302,10 @@ namespace ego_planner
             std::numeric_limits<double>::quiet_NaN());
     std::string risk_confirmation_evidence_identity;
     std::string common_satellite_ids;
+    std::string gnss_core_policy;
+    std::string window_layout_hash;
+    std::size_t window_count = 0;
+    std::uint64_t first_failure_window_id = 0;
     uint64_t execution_snapshot_id = 0;
     uint64_t gnss_epoch_identity = 0;
     double support_observation_stamp_s =
@@ -595,6 +606,8 @@ namespace ego_planner
     std::string last_p1_rejection_reason_;
     bool last_p1_rejection_requires_new_generation_{false};
     P4ForwardLimits p4_forward_limits_;
+    std::string p4_gnss_core_policy_ = "braking_window_core";
+    double p4_window_transition_overlap_s_ = 0.4;
     P4ForwardDecisionWorker p4_forward_worker_;
     P4ForwardDecision last_p4_forward_decision_;
     P4ForwardDecision published_p4_forward_decision_;
@@ -644,6 +657,10 @@ namespace ego_planner
       std::string knot_vector_hash;
       std::string query_lattice_hash;
       std::vector<double> relative_times;
+      std::vector<Eigen::Vector3d> positions;
+      std::vector<std::uint64_t> satellite_window_ids;
+      double rebuild_after_trajectory_time_s =
+          -std::numeric_limits<double>::infinity();
       std::vector<Sample> samples;
     };
     P4RuntimeRiskCache p4_runtime_risk_cache_;
