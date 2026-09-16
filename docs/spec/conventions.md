@@ -265,6 +265,12 @@
   terminal solver may lengthen the hinted curve again when dynamics require
   it, and every regenerated curve repeats dynamics, collision, support,
   Integrity and direct risk checks. A cropped result remains `LIMITED_PREFIX`.
+- A queued braking guard has explicit `REQUESTED`, `QUEUED`, `ACTIVATED` and
+  `ABSENT` controller states. Time reaching the switch stamp is not proof of
+  execution: only a matching traj_server `ACTIVATED` acknowledgement permits
+  the atomic trajectory-ID/certificate handover. Missing acknowledgement or
+  `ABSENT` at the switch deadline fails closed without relabelling the parent
+  trajectory as a braking trajectory.
 - Native refinement reports structured status. A densely sampled coarse path
   that is collision-free in frozen occupancy is accepted directly; A* runs
   only for colliding segments. Budget, occupancy, collision, no-path, invalid

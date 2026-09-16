@@ -182,7 +182,10 @@ For each candidate trajectory τ:
   current Integrity failure, collision or tracking loss is immediately HARD.
   HARD-scheduled and activated braking cannot be canceled. Ordinary replanning
   is suspended while that braking certificate is active, so worker/generation
-  churn cannot relabel the stopping curve.
+  churn cannot relabel the stopping curve. Planner-side time alone cannot
+  declare that switch: only a matching traj_server `ACTIVATED` acknowledgement
+  changes the trajectory ID and braking authority; a missing acknowledgement
+  or `ABSENT` response at the switch deadline fails closed.
 - Coarse/refined routes are only `CANDIDATE_READY`. Formal `RISK_SELECTED`
   authority is created after the actual terminal-stop B-spline passes direct
   braking-window checks at its real arrival times, including all braking

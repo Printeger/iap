@@ -41,7 +41,11 @@
   suffix braking certificate after the last discrete guard anchor; this closes a terminal
   sampling gap without extending the endpoint or deadline. A production-state
   regression covers guard acknowledgement, atomic braking trajectory-ID
-  activation and completion under the braking authority. In the post-fix
+  activation and completion under the braking authority. Guard handover now
+  tracks `REQUESTED/QUEUED/ACTIVATED/ABSENT`; only a matching traj_server
+  `ACTIVATED` acknowledgement can change trajectory identity or authority,
+  while a missing acknowledgement or `ABSENT` at the switch deadline fails
+  closed. In the post-fix
   BDS forest run, the vehicle moved `2.877 m` and emitted
   `ENDPOINT_HOLD approved_endpoint_reached`. The deduplicated 16 s window
   certification p95/max was `70.75/72.15 ms` in the first performance run;

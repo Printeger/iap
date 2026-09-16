@@ -673,6 +673,13 @@ namespace ego_planner
     std::optional<P4PreparedSuccessor> p4_prepared_successor_;
     std::optional<P4ForwardDecision> p4_actual_curve_feedback_override_;
     std::vector<P4BrakingAnchor> p4_braking_anchors_;
+    enum class P4GuardServerState
+    {
+      REQUESTED = 0,
+      QUEUED,
+      ACTIVATED,
+      ABSENT,
+    };
     struct P4PendingBrakingTransition
     {
       std::size_t anchor_index = 0;
@@ -682,6 +689,7 @@ namespace ego_planner
           std::numeric_limits<double>::quiet_NaN();
       bool recoverable_before_activation = false;
       bool cancel_requested = false;
+      P4GuardServerState server_state = P4GuardServerState::REQUESTED;
     };
     std::optional<P4PendingBrakingTransition> p4_pending_braking_anchor_;
     int p4_guard_cancel_acknowledged_trajectory_id_ = 0;

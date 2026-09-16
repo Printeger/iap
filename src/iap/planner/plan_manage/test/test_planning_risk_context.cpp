@@ -1805,8 +1805,20 @@ TEST(P4ForwardTerminalLineageTest,
       manager.local_data_.position_traj_.evaluateDeBoorT(
           stale_during_execution_s -
           manager.local_data_.start_time_.seconds());
-  const auto braking = manager.validateCommittedP4TrajectoryExecution(
+  const auto braking_without_ack =
+      manager.validateCommittedP4TrajectoryExecution(
       stale_during_execution_s, stale_commanded_position);
+  EXPECT_FALSE(braking_without_ack.allowed);
+  EXPECT_EQ(braking_without_ack.reason,
+            "failsafe_braking_activation_unacknowledged");
+  const auto stale_guard = manager.pendingP4GuardBrakingCommand();
+  ASSERT_TRUE(stale_guard.has_value());
+  manager.acknowledgeP4GuardStatus(stale_guard->trajectory_id, "QUEUED");
+  manager.acknowledgeP4GuardStatus(stale_guard->trajectory_id, "ACTIVATED");
+  auto stale_guard_trajectory = stale_guard->trajectory;
+  const auto braking = manager.validateCommittedP4TrajectoryExecution(
+      std::max(stale_during_execution_s, stale_guard->start_time.seconds()),
+      stale_guard_trajectory.evaluateDeBoorT(0.0));
   EXPECT_TRUE(braking.allowed) << braking.reason;
   EXPECT_TRUE(braking.failsafe_braking_available);
   EXPECT_TRUE(braking.failsafe_braking_active);
@@ -1973,9 +1985,32 @@ TEST(P4ForwardTerminalLineageTest,
   // Model the trajectory server accepting the prequeued suffix and reaching
   // its scheduled switch stamp.  The manager must atomically move authority
   // to the new trajectory identity before endpoint completion is accepted.
+  const double terminal_switch_stamp = terminal_brake->start_time.seconds();
+  manager.acknowledgeP4GuardStatus(
+      terminal_brake->trajectory_id + 100, "ACTIVATED");
+  const auto terminal_unacknowledged =
+      manager.validateCommittedP4TrajectoryExecution(
+          terminal_switch_stamp,
+          terminal_braking_curve.evaluateDeBoorT(0.0));
+  EXPECT_FALSE(terminal_unacknowledged.allowed);
+  EXPECT_EQ(terminal_unacknowledged.reason,
+            "failsafe_braking_activation_unacknowledged");
+  EXPECT_EQ(manager.p4ExecutionCertificate().trajectory_id, 351);
+  EXPECT_EQ(manager.local_data_.traj_id_, 351);
+
+  manager.acknowledgeP4GuardStatus(
+      terminal_brake->trajectory_id, "ABSENT");
+  const auto terminal_absent =
+      manager.validateCommittedP4TrajectoryExecution(
+          terminal_switch_stamp,
+          terminal_braking_curve.evaluateDeBoorT(0.0));
+  EXPECT_FALSE(terminal_absent.allowed);
+  EXPECT_EQ(terminal_absent.reason, "failsafe_braking_guard_absent");
+  EXPECT_EQ(manager.p4ExecutionCertificate().trajectory_id, 351);
+  EXPECT_EQ(manager.local_data_.traj_id_, 351);
+
   manager.acknowledgeP4GuardStatus(
       terminal_brake->trajectory_id, "ACTIVATED");
-  const double terminal_switch_stamp = terminal_brake->start_time.seconds();
   const auto terminal_activation =
       manager.validateCommittedP4TrajectoryExecution(
           terminal_switch_stamp,

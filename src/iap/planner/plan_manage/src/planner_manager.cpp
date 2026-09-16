@@ -4564,8 +4564,26 @@ namespace ego_planner
       p4_guard_cancel_acknowledged_trajectory_id_ = trajectory_id;
       return;
     }
+    if (status == "QUEUED")
+    {
+      if (p4_pending_braking_anchor_->server_state !=
+          P4GuardServerState::ACTIVATED)
+        p4_pending_braking_anchor_->server_state =
+            P4GuardServerState::QUEUED;
+      return;
+    }
+    if (status == "ABSENT")
+    {
+      if (p4_pending_braking_anchor_->server_state !=
+          P4GuardServerState::ACTIVATED)
+        p4_pending_braking_anchor_->server_state =
+            P4GuardServerState::ABSENT;
+      return;
+    }
     if (status == "ACTIVATED")
     {
+      p4_pending_braking_anchor_->server_state =
+          P4GuardServerState::ACTIVATED;
       p4_pending_braking_anchor_->recoverable_before_activation = false;
       p4_pending_braking_anchor_->cancel_requested = false;
     }
@@ -5314,6 +5332,8 @@ namespace ego_planner
             p4_pending_braking_anchor_->recoverable_before_activation =
                 false;
             p4_pending_braking_anchor_->cancel_requested = false;
+            p4_pending_braking_anchor_->server_state =
+                P4GuardServerState::REQUESTED;
           }
           out.allowed = true;
           out.failsafe_braking_available = true;
@@ -5414,6 +5434,14 @@ namespace ego_planner
       if (evaluation_now_s + 1.0e-9 >= switch_time_s &&
           !pending.cancel_requested)
       {
+        // The planner cannot infer controller state from time alone. Only a
+        // matching traj_server ACTIVATED acknowledgement authorizes the
+        // atomic trajectory/certificate handover. At the certified switch
+        // deadline an absent or delayed acknowledgement is fail-closed.
+        if (pending.server_state != P4GuardServerState::ACTIVATED)
+          return revoke(pending.server_state == P4GuardServerState::ABSENT
+              ? "failsafe_braking_guard_absent"
+              : "failsafe_braking_activation_unacknowledged");
         if (p4_risk_confirmation_memory_.state ==
             P4RuntimeRiskConfirmationState::MARGINAL_UNSAFE_ARMED)
           p4_risk_confirmation_memory_.state =
