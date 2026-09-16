@@ -4,13 +4,16 @@
 #include "traj_utils/msg/bspline.hpp"
 #include "quadrotor_msgs/msg/position_command.hpp"
 #include "std_msgs/msg/empty.hpp"
+#include "std_msgs/msg/string.hpp"
 #include "visualization_msgs/msg/marker.hpp"
 #include <algorithm>
 #include <csignal>
+#include <optional>
 #include <rclcpp/rclcpp.hpp>
 
 rclcpp::Publisher<quadrotor_msgs::msg::PositionCommand>::SharedPtr pos_cmd_pub;
 rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub;
+rclcpp::Publisher<std_msgs::msg::String>::SharedPtr guard_status_pub;
 
 quadrotor_msgs::msg::PositionCommand cmd;
 double pos_gain[3] = {0, 0, 0};
@@ -23,6 +26,15 @@ vector<UniformBspline> traj_;
 double traj_duration_;
 rclcpp::Time start_time_;
 int traj_id_;
+struct PendingGuardTrajectory
+{
+  vector<UniformBspline> trajectory;
+  double duration_s = 0.0;
+  rclcpp::Time start_time{0, 0, RCL_ROS_TIME};
+  int trajectory_id = 0;
+};
+std::optional<PendingGuardTrajectory> pending_guard_trajectory_;
+ego_planner::PendingGuardDeadlineGate pending_guard_deadline_gate_;
 rclcpp::Time latest_odom_stamp_(0, 0, RCL_ROS_TIME);
 bool have_odom_stamp_ = false;
 volatile std::sig_atomic_t stop_requested = 0;
@@ -32,31 +44,75 @@ void requestStop(int)
   stop_requested = 1;
 }
 
+void publishGuardStatus(const char *status, const int trajectory_id)
+{
+  if (!guard_status_pub || trajectory_id <= 0)
+    return;
+  std_msgs::msg::String message;
+  message.data = std::string(status) + ":" + std::to_string(trajectory_id);
+  guard_status_pub->publish(message);
+}
+
 // yaw control
 double last_yaw_, last_yaw_dot_;
 double time_forward_;
 
-void bsplineCallback(traj_utils::msg::Bspline::ConstPtr msg)
+std::optional<PendingGuardTrajectory> parseTrajectoryCommand(
+    const traj_utils::msg::Bspline &msg)
 {
+  if (msg.pos_pts.empty() || msg.knots.empty())
+    return std::nullopt;
   // parse pos traj
 
-  Eigen::MatrixXd pos_pts(3, msg->pos_pts.size());
+  Eigen::MatrixXd pos_pts(3, msg.pos_pts.size());
 
-  Eigen::VectorXd knots(msg->knots.size());
-  for (size_t i = 0; i < msg->knots.size(); ++i)
+  Eigen::VectorXd knots(msg.knots.size());
+  for (size_t i = 0; i < msg.knots.size(); ++i)
   {
-    knots(i) = msg->knots[i];
+    knots(i) = msg.knots[i];
   }
 
-  for (size_t i = 0; i < msg->pos_pts.size(); ++i)
+  for (size_t i = 0; i < msg.pos_pts.size(); ++i)
   {
-    pos_pts(0, i) = msg->pos_pts[i].x;
-    pos_pts(1, i) = msg->pos_pts[i].y;
-    pos_pts(2, i) = msg->pos_pts[i].z;
+    pos_pts(0, i) = msg.pos_pts[i].x;
+    pos_pts(1, i) = msg.pos_pts[i].y;
+    pos_pts(2, i) = msg.pos_pts[i].z;
   }
 
-  UniformBspline pos_traj(pos_pts, msg->order, 0.1);
+  UniformBspline pos_traj(pos_pts, msg.order, 0.1);
   pos_traj.setKnot(knots);
+
+  PendingGuardTrajectory parsed;
+  parsed.start_time = msg.start_time;
+  parsed.trajectory_id = msg.traj_id;
+  parsed.trajectory.push_back(pos_traj);
+  parsed.trajectory.push_back(parsed.trajectory[0].getDerivative());
+  parsed.trajectory.push_back(parsed.trajectory[1].getDerivative());
+  parsed.duration_s = parsed.trajectory[0].getTimeSum();
+  return parsed;
+}
+
+void installTrajectory(PendingGuardTrajectory parsed)
+{
+  start_time_ = parsed.start_time;
+  traj_id_ = parsed.trajectory_id;
+  traj_ = std::move(parsed.trajectory);
+  traj_duration_ = parsed.duration_s;
+  receive_traj_ = true;
+}
+
+void bsplineCallback(traj_utils::msg::Bspline::ConstPtr msg)
+{
+  const auto parsed = parseTrajectoryCommand(*msg);
+  if (!parsed)
+    return;
+  if (pending_guard_trajectory_ &&
+      msg->traj_id >= pending_guard_trajectory_->trajectory_id)
+  {
+    pending_guard_trajectory_.reset();
+    pending_guard_deadline_gate_.clear();
+  }
+  installTrajectory(*parsed);
 
   // parse yaw traj
 
@@ -67,17 +123,36 @@ void bsplineCallback(traj_utils::msg::Bspline::ConstPtr msg)
 
   // UniformBspline yaw_traj(yaw_pts, msg->order, msg->yaw_dt);
 
-  start_time_ = msg->start_time;
-  traj_id_ = msg->traj_id;
+}
 
-  traj_.clear();
-  traj_.push_back(pos_traj);
-  traj_.push_back(traj_[0].getDerivative());
-  traj_.push_back(traj_[1].getDerivative());
-
-  traj_duration_ = traj_[0].getTimeSum();
-
-  receive_traj_ = true;
+void pendingGuardCallback(traj_utils::msg::Bspline::ConstPtr msg)
+{
+  if (msg->pos_pts.empty())
+  {
+    // Cancellation is effective only while the guard is still queued.  Once
+    // promoted, its trajectory id is current and cannot be undone.
+    if (pending_guard_trajectory_ &&
+        pending_guard_trajectory_->trajectory_id == msg->traj_id &&
+        pending_guard_deadline_gate_.cancel(msg->traj_id))
+    {
+      pending_guard_trajectory_.reset();
+      publishGuardStatus("CANCELED", msg->traj_id);
+    }
+    else if (receive_traj_ && traj_id_ == msg->traj_id)
+      publishGuardStatus("ACTIVATED", msg->traj_id);
+    else
+      publishGuardStatus("ABSENT", msg->traj_id);
+    return;
+  }
+  const auto parsed = parseTrajectoryCommand(*msg);
+  if (!parsed || parsed->trajectory_id <= 0)
+    return;
+  if (receive_traj_ && parsed->trajectory_id <= traj_id_)
+    return;
+  pending_guard_trajectory_ = *parsed;
+  pending_guard_deadline_gate_.schedule(
+      parsed->trajectory_id, parsed->start_time.seconds());
+  publishGuardStatus("QUEUED", parsed->trajectory_id);
 }
 
 void odometryCallback(nav_msgs::msg::Odometry::ConstSharedPtr msg)
@@ -190,11 +265,31 @@ std::pair<double, double> calculate_yaw(double t_cur, Eigen::Vector3d &pos, rclc
 
 void cmdCallback()
 {
+  rclcpp::Time time_now = trajServerNow();
+  if (pending_guard_trajectory_ && receive_traj_)
+  {
+    const auto deadline_action = pending_guard_deadline_gate_.poll(
+        traj_id_, time_now.seconds());
+    if (deadline_action ==
+        ego_planner::PendingGuardDeadlineAction::DISCARD)
+    {
+      pending_guard_trajectory_.reset();
+      pending_guard_deadline_gate_.clear();
+    }
+    else if (deadline_action ==
+             ego_planner::PendingGuardDeadlineAction::ACTIVATE)
+    {
+      const int activated_id = pending_guard_trajectory_->trajectory_id;
+      installTrajectory(std::move(*pending_guard_trajectory_));
+      pending_guard_trajectory_.reset();
+      pending_guard_deadline_gate_.clear();
+      publishGuardStatus("ACTIVATED", activated_id);
+    }
+  }
   /* no publishing before receive traj_ */
   if (!receive_traj_)
     return;
 
-  rclcpp::Time time_now = trajServerNow();
   double t_cur = (time_now - start_time_).seconds();
 
   Eigen::Vector3d pos(Eigen::Vector3d::Zero()), vel(Eigen::Vector3d::Zero()), acc(Eigen::Vector3d::Zero()), pos_f;
@@ -266,10 +361,21 @@ int main(int argc, char **argv)
   std::signal(SIGTERM, requestStop);
   auto node = rclcpp::Node::make_shared("traj_server");
 
+  // Create the acknowledgement publisher before either subscription.  A
+  // transient-local status closes the planner/server cancellation race even
+  // if one side starts slightly later.
+  guard_status_pub = node->create_publisher<std_msgs::msg::String>(
+      "planning/pending_guard_status",
+      ego_planner::trajectoryCommandQos(20u));
+
   auto bspline_sub = node->create_subscription<traj_utils::msg::Bspline>(
       "planning/bspline",
       ego_planner::trajectoryCommandQos(),
       bsplineCallback);
+  auto pending_guard_sub =
+      node->create_subscription<traj_utils::msg::Bspline>(
+          "planning/pending_guard_bspline",
+          ego_planner::trajectoryCommandQos(20u), pendingGuardCallback);
   odom_sub = node->create_subscription<nav_msgs::msg::Odometry>(
       "odometry",
       10,

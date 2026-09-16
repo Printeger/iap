@@ -1356,41 +1356,6 @@ std::vector<Eigen::Vector3d> commonGeometryPrefix(
   return prefix;
 }
 
-std::vector<Eigen::Vector3d> commonGeometryCorridorPrefix(
-  const std::vector<P4ForwardCandidate> & candidates,
-  const double resolution, const OnlineTopologyGraph & graph)
-{
-  if (candidates.empty()) {
-    return {};
-  }
-  std::vector<std::vector<Eigen::Vector3d>> paths;
-  paths.reserve(candidates.size());
-  for (const auto & candidate : candidates) {
-    paths.push_back(resample(
-        candidate.topology_path.empty() ? candidate.path :
-        candidate.topology_path, resolution));
-  }
-  std::size_t common_count = paths.front().size();
-  for (const auto & path : paths) {
-    common_count = std::min(common_count, path.size());
-  }
-  std::vector<Eigen::Vector3d> prefix;
-  prefix.reserve(common_count);
-  for (std::size_t index = 0; index < common_count; ++index) {
-    const auto & reference = paths.front()[index];
-    const bool same_clear_corridor = std::all_of(
-      std::next(paths.begin()), paths.end(),
-      [&graph, &reference, index](const auto & path) {
-        return graph.worldPathFree({reference, path[index]});
-      });
-    if (!same_clear_corridor) {
-      break;
-    }
-    prefix.push_back(reference);
-  }
-  return prefix;
-}
-
 std::vector<Eigen::Vector3d> nominalPublicCorridorPrefix(
   const P4ForwardRequest & request, const double maximum_length_m,
   const OnlineTopologyGraph & graph)
@@ -1422,6 +1387,75 @@ std::vector<Eigen::Vector3d> nominalPublicCorridorPrefix(
     prefix.push_back(bounded[index]);
   }
   return prefix;
+}
+
+double pointToPolylineDistance(
+  const Eigen::Vector3d & point,
+  const std::vector<Eigen::Vector3d> & polyline)
+{
+  if (polyline.empty()) {
+    return std::numeric_limits<double>::infinity();
+  }
+  double best = (point - polyline.front()).norm();
+  for (std::size_t index = 1; index < polyline.size(); ++index) {
+    const Eigen::Vector3d segment = polyline[index] - polyline[index - 1];
+    const double squared_length = segment.squaredNorm();
+    const double fraction = squared_length > kEpsilon * kEpsilon ?
+      std::clamp((point - polyline[index - 1]).dot(segment) /
+      squared_length, 0.0, 1.0) : 0.0;
+    best = std::min(best, (point -
+      (polyline[index - 1] + fraction * segment)).norm());
+  }
+  return best;
+}
+
+std::vector<Eigen::Vector3d> commonExecutableCorridorPrefix(
+  const P4ForwardRequest & request,
+  const std::vector<P4ForwardCandidate> & candidates,
+  const OnlineTopologyGraph & graph)
+{
+  if (candidates.empty()) {
+    return {};
+  }
+  double maximum_length_m = request.limits.max_lookahead_m;
+  for (const auto & candidate : candidates) {
+    const auto & path = candidate.topology_path.empty() ?
+      candidate.path : candidate.topology_path;
+    maximum_length_m = std::min(maximum_length_m, pathLength(path));
+  }
+  const auto nominal = nominalPublicCorridorPrefix(
+    request, maximum_length_m, graph);
+  if (nominal.size() < 2) {
+    return {};
+  }
+  // Match the topology corridor equivalence width: each branch centreline
+  // owns one clearance radius on either side, so the public overlap test uses
+  // the sum of both radii.  Unlike the former pairwise-centreline test, every
+  // executable nominal point is still explicitly required inside every tube.
+  const double tube_radius_m = 2.0 * (
+    request.limits.topology_resolution_m +
+    request.limits.vehicle_radius_m + request.limits.safety_margin_m);
+  std::vector<Eigen::Vector3d> intersection;
+  intersection.reserve(nominal.size());
+  for (const auto & point : nominal) {
+    const bool inside_every_tube = std::all_of(
+      candidates.begin(), candidates.end(),
+      [&point, tube_radius_m](const P4ForwardCandidate & candidate) {
+        const auto & path = candidate.topology_path.empty() ?
+          candidate.path : candidate.topology_path;
+        return pointToPolylineDistance(point, path) <=
+          tube_radius_m + kEpsilon;
+      });
+    if (!inside_every_tube ||
+      (!intersection.empty() &&
+      !graph.worldPathFree({intersection.back(), point})))
+    {
+      break;
+    }
+    intersection.push_back(point);
+  }
+  return intersection.size() >= 2 ? intersection :
+    std::vector<Eigen::Vector3d>{};
 }
 
 bool currentRiskAnchorSafe(const P4ForwardRequest & request)
@@ -1503,20 +1537,11 @@ bool configureSafeLimitedCommonPrefix(
   decision->speed_cap_mps = 0.0;
   decision->certified_free_distance_m = 0.0;
 
-  const auto geometry_prefix = commonGeometryCorridorPrefix(
-    decision->candidates, request.limits.topology_resolution_m * 0.5,
-    graph);
-  // Prefer the continuous nominal approach through the still-common free
-  // corridor. Lattice-centre paths may contain a half-voxel vertical or
-  // lateral offset immediately after the exact vehicle pose; using that
-  // quantisation artefact for a sub-metre LIMITED_PREFIX can leave the
-  // current LiDAR envelope even though the nominal public approach is clear.
-  // Geometry and risk are still checked point-by-point below, and the final
-  // published B-spline remains independently checked by direct ForwardRisk.
-  const auto nominal_prefix = nominalPublicCorridorPrefix(
-    request, pathLength(geometry_prefix), graph);
-  const auto & prefix = nominal_prefix.size() >= 2 ?
-    nominal_prefix : geometry_prefix;
+  // Execute only nominal samples that lie inside every candidate's swept
+  // tube. Merely proving that the tubes overlap does not prove that the first
+  // candidate's centreline is itself inside their intersection.
+  const auto prefix = commonExecutableCorridorPrefix(
+    request, decision->candidates, graph);
   decision->common_prefix_length_m = pathLength(prefix);
   if (prefix.size() < 2 || decision->common_prefix_length_m <= kEpsilon) {
     decision->reason = "safe_common_prefix_unavailable";
@@ -1731,6 +1756,7 @@ const char * p4ForwardActionName(const P4ForwardAction action)
 {
   switch (action) {
     case P4ForwardAction::CONTINUE_NOMINAL: return "CONTINUE_NOMINAL";
+    case P4ForwardAction::CANDIDATE_READY: return "CANDIDATE_READY";
     case P4ForwardAction::RISK_SELECTED: return "RISK_SELECTED";
     case P4ForwardAction::ADVISORY_SELECTED: return "ADVISORY_SELECTED";
     case P4ForwardAction::DEFER_RISK_SELECTION: return "DEFER_RISK_SELECTION";
@@ -2338,6 +2364,11 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
     return finalize(std::move(decision));
   }
 
+  if (decision.candidates.size() >= 2) {
+    decision.geometry_common_corridor = commonExecutableCorridorPrefix(
+      request, decision.candidates, graph);
+  }
+
   evaluateCandidateRiskSet(request, &budget, &decision.candidates);
 
   const bool incomplete = std::any_of(
@@ -2493,18 +2524,14 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
   P4ForwardCandidate * selected = eligible.front();
   decision.selected_candidate_id = selected->candidate_id;
   decision.selected_guide = selected->path;
-  decision.action = multiple_safe_channels ?
-    P4ForwardAction::RISK_SELECTED :
-    P4ForwardAction::CONTINUE_NOMINAL;
-  decision.selection_authority = multiple_safe_channels ?
-    P4ForwardSelectionAuthority::FORMAL :
-    P4ForwardSelectionAuthority::NONE;
-  decision.formal_support = true;
+  decision.action = P4ForwardAction::CANDIDATE_READY;
+  decision.selection_authority = P4ForwardSelectionAuthority::NONE;
+  decision.formal_support = false;
   decision.trigger_reason = multiple_safe_channels ?
     P4ForwardTriggerReason::MULTIPLE_CHANNELS :
     P4ForwardTriggerReason::SINGLE_CHANNEL;
   decision.reason = multiple_safe_channels ?
-    "risk_ranked_topology_selected" :
+    "risk_ranked_topology_candidate_ready" :
     (decision.candidates.size() == 1 ? "single_channel" :
     "single_safe_channel");
   return finalize(std::move(decision));

@@ -138,6 +138,29 @@ namespace ego_planner
     // not miss the only publication and leave the vehicle stationary.
     bspline_pub_ = node_->create_publisher<traj_utils::msg::Bspline>(
         "planning/bspline", trajectoryCommandQos(200u));
+    guard_bspline_pub_ = node_->create_publisher<traj_utils::msg::Bspline>(
+        "planning/pending_guard_bspline", trajectoryCommandQos(20u));
+    guard_status_sub_ = node_->create_subscription<std_msgs::msg::String>(
+        "planning/pending_guard_status", trajectoryCommandQos(20u),
+        [this](const std_msgs::msg::String::ConstSharedPtr message)
+        {
+          const auto separator = message->data.find(':');
+          if (separator == std::string::npos || separator == 0u)
+            return;
+          try
+          {
+            const int trajectory_id = std::stoi(
+                message->data.substr(separator + 1u));
+            planner_manager_->acknowledgeP4GuardStatus(
+                trajectory_id, message->data.substr(0u, separator));
+          }
+          catch (const std::exception &)
+          {
+            RCLCPP_WARN(node_->get_logger(),
+                        "Ignoring malformed pending guard status: %s",
+                        message->data.c_str());
+          }
+        });
     data_disp_pub_ = node_->create_publisher<traj_utils::msg::DataDisp>("planning/data_display", 100);
 
     if (target_type_ == TARGET_TYPE::MANUAL_TARGET)
@@ -1087,6 +1110,39 @@ namespace ego_planner
           "P4_EXECUTION_CONTRACT");
       return;
     }
+    // Deliver or cancel a certified guard before any parent-trajectory early
+    // return below.  The exact guard curve first consumes the latest collision
+    // delta, so a queued deadline can never outlive its geometry authority.
+    if (p4_execution_check.guard_braking_preschedule_requested)
+    {
+      const auto guard_geometry =
+          planner_manager_->validatePendingP4GuardGeometry(
+              plannerNow().seconds());
+      if (!guard_geometry || !guard_geometry->accepted())
+      {
+        RCLCPP_ERROR(
+            node_->get_logger(),
+            "Pending P4 guard failed live geometry validation: %s",
+            guard_geometry ? guard_geometry->reason.c_str()
+                           : "collision_update_in_progress");
+        changeFSMExecState(EMERGENCY_STOP, "P4_GUARD_GEOMETRY");
+        return;
+      }
+      const auto guard = planner_manager_->pendingP4GuardBrakingCommand();
+      if (!guard)
+      {
+        changeFSMExecState(EMERGENCY_STOP, "P4_GUARD_IDENTITY");
+        return;
+      }
+      guard_bspline_pub_->publish(makeTrajectoryCommand(
+          guard->trajectory, guard->start_time, guard->trajectory_id));
+    }
+    if (p4_execution_check.guard_braking_cancel_requested &&
+        p4_execution_check.guard_braking_trajectory_id > 0)
+    {
+      guard_bspline_pub_->publish(makeTrajectoryCancellation(
+          p4_execution_check.guard_braking_trajectory_id));
+    }
     bool p4_route_collision = false;
     std::optional<P4GeometryCommitResult> p4_collision_commit;
     if (const auto geometry_commit =
@@ -1387,7 +1443,26 @@ namespace ego_planner
       {
         RCLCPP_ERROR(node_->get_logger(),
                      "P4-v2 final lineage write failed before P5");
+        std::string feedback_reason;
+        const unsigned int retry_index =
+            p4_actual_curve_feedback_depth_ + 1u;
+        const bool retry_ready = retry_index <= 2u &&
+            planner_manager_->prepareP4ActualCurveFeedbackRetry(
+                retry_index, &feedback_reason);
         reject_candidate();
+        if (retry_ready)
+        {
+          RCLCPP_WARN(
+              node_->get_logger(),
+              "P4 actual B-spline certification requested bounded feedback "
+              "retry %u/2: %s",
+              retry_index, feedback_reason.c_str());
+          ++p4_actual_curve_feedback_depth_;
+          const bool retried = callReboundReplan(
+              flag_use_poly_init, flag_randomPolyTraj);
+          --p4_actual_curve_feedback_depth_;
+          return retried;
+        }
         return false;
       }
 

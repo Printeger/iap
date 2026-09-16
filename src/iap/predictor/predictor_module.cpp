@@ -1021,10 +1021,14 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
     std::uint64_t common_hash = 1469598103934665603ull;
     for (std::size_t sat_index = 0; sat_index < sat_count; ++sat_index) {
       if (!common_mask[sat_index]) continue;
+      out.common_satellite_ids.push_back(
+          request.snapshot.gnss_epoch.sats[sat_index].sat_id);
       common_hash ^= static_cast<std::uint64_t>(static_cast<std::uint32_t>(
           request.snapshot.gnss_epoch.sats[sat_index].sat_id));
       common_hash *= 1099511628211ull;
     }
+    std::sort(out.common_satellite_ids.begin(),
+              out.common_satellite_ids.end());
     for (std::size_t point_index = 0;
          point_index < local_satellite_masks.size(); ++point_index) {
       local_satellite_masks[point_index] = common_mask;

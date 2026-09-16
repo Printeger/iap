@@ -19,7 +19,7 @@ namespace ego_planner
 {
 
   inline constexpr char kP4ForwardDecisionSchema[] =
-    "p4_forward_route_decision_v9";
+    "p4_forward_route_decision_v10";
 
   enum class P4ForwardResultStatus
   {
@@ -46,6 +46,9 @@ namespace ego_planner
   enum class P4ForwardAction
   {
     CONTINUE_NOMINAL = 0,
+    // Route-level candidate only. The manager promotes this to
+    // RISK_SELECTED after certifying the exact terminal-stop B-spline.
+    CANDIDATE_READY,
     RISK_SELECTED,
     ADVISORY_SELECTED,
     DEFER_RISK_SELECTION,
@@ -398,6 +401,10 @@ namespace ego_planner
     bool formal_support = false;
     uint64_t selected_candidate_id = 0;
     std::vector < Eigen::Vector3d > selected_guide;
+    // Geometry shared by at least two distinct topology channels. It carries
+    // no risk authority; actual-curve feedback may use it only as the shape
+    // of a LIMITED_PREFIX that is independently regenerated and certified.
+    std::vector < Eigen::Vector3d > geometry_common_corridor;
     P4ForwardDeferredMotionMode deferred_motion_mode =
       P4ForwardDeferredMotionMode::HOLD;
     std::vector < Eigen::Vector3d > deferred_trajectory;
@@ -409,6 +416,11 @@ namespace ego_planner
     double decision_horizon_m = 0.0;
     double certified_free_distance_m = 0.0;
     double speed_cap_mps = 0.0;
+    // Bounded actual-curve feedback may request a faster parameterization
+    // after proving that the first direct failure is dominated by prediction
+    // time growth. This is only a generation hint: dynamics, collision,
+    // terminal stop and direct risk are all checked again on the new curve.
+    double actual_curve_duration_scale = 1.0;
     P4ForwardRiskSample first_failed_risk;
     Eigen::Vector3d first_failed_position = Eigen::Vector3d::Constant(
       std::numeric_limits < double > ::quiet_NaN());

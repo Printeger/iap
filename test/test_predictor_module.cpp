@@ -1535,6 +1535,46 @@ TEST(PredictorModuleTest,
 }
 
 TEST(PredictorModuleTest,
+     ExecutionCommonSatelliteCorePublishesExactSatelliteIds) {
+  auto params = make_params();
+  params.lidar.fim_params.fim_radius_m = 30.0;
+  iap::PredictorModule module(params);
+  module.set_observation_predicate(
+      [](const Eigen::Vector3d&) { return true; });
+  module.set_lidar_fim_primitives(make_lidar_primitives());
+  auto snapshot = make_snapshot(true, true);
+
+  iap::ForwardRiskBatchRequest request;
+  request.combined_snapshot_identity = "execution-common-core-ids";
+  request.snapshot = snapshot;
+  request.hal = 1000.0;
+  request.val = 1000.0;
+  request.evaluation_time_s = snapshot.stamp;
+  request.satellite_set_policy =
+      iap::ForwardRiskSatelliteSetPolicy::COMMON_CORE;
+  request.points = {
+      {Eigen::Vector3d(1.0, 0.0, 0.0), snapshot.stamp, 0.0, 1},
+      {Eigen::Vector3d(2.0, 0.0, 0.0), snapshot.stamp + 0.2, 0.2, 1}};
+
+  const auto result = module.queryForwardRiskBatch(request);
+
+  ASSERT_TRUE(result.complete)
+      << iap::forwardRiskFailureReasonName(result.failure_reason);
+  ASSERT_GE(result.common_satellite_ids.size(),
+            static_cast<std::size_t>(params.gnss.geometry_params.min_sats));
+  EXPECT_TRUE(std::is_sorted(result.common_satellite_ids.begin(),
+                             result.common_satellite_ids.end()));
+  for (const auto& point : result.points) {
+    std::vector<int> used;
+    for (const auto& satellite : point.gnss_satellites) {
+      if (satellite.used) used.push_back(satellite.sat_id);
+    }
+    std::sort(used.begin(), used.end());
+    EXPECT_EQ(used, result.common_satellite_ids);
+  }
+}
+
+TEST(PredictorModuleTest,
      LocalSatelliteMaskIgnoresUnselectedUnknownSatelliteParameters) {
   iap::GnssAdvisoryPredictor predictor(make_params().gnss);
   auto snapshot = make_snapshot(true, false);

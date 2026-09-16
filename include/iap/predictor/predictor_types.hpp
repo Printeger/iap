@@ -470,6 +470,9 @@ struct ForwardRiskPointResult {
 struct ForwardRiskBatchResult {
   bool complete = false;
   std::string combined_snapshot_identity;
+  // Populated for COMMON_CORE requests with the exact sorted IDs used by
+  // every point. Empty for PER_POINT requests or incomplete common cores.
+  std::vector<int> common_satellite_ids;
   std::size_t first_failure_index = std::numeric_limits<std::size_t>::max();
   ForwardRiskFailureReason failure_reason = ForwardRiskFailureReason::NONE;
   std::vector<ForwardRiskPointResult> points;

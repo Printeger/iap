@@ -543,7 +543,7 @@ TEST(P4ForwardRoute, OpenObservedSpaceContinuesAsSingleChannel)
   const auto decision = P4ForwardRoutePlanner().decide(straightRequest());
   EXPECT_EQ(
       decision.result_status, ego_planner::P4ForwardResultStatus::READY);
-  EXPECT_EQ(decision.action, P4ForwardAction::CONTINUE_NOMINAL);
+  EXPECT_EQ(decision.action, P4ForwardAction::CANDIDATE_READY);
   EXPECT_EQ(decision.trigger_reason, P4ForwardTriggerReason::SINGLE_CHANNEL);
   ASSERT_EQ(decision.candidates.size(), 1u);
   EXPECT_TRUE(decision.candidates.front().risk_supported);
@@ -561,7 +561,7 @@ TEST(P4ForwardRoute, UnobservedSpaceWithoutHitsRemainsGeometryClear)
 
   const auto decision = P4ForwardRoutePlanner().decide(request);
 
-  EXPECT_EQ(decision.action, P4ForwardAction::CONTINUE_NOMINAL)
+  EXPECT_EQ(decision.action, P4ForwardAction::CANDIDATE_READY)
     << decision.reason;
   ASSERT_EQ(decision.candidates.size(), 1u);
   EXPECT_TRUE(decision.candidates.front().occupancy_supported);
@@ -969,7 +969,7 @@ TEST(P4ForwardRoute, RiskProfileUsesAlongPathArrivalTime)
   bindTestRiskBatch(&request);
 
   const auto decision = P4ForwardRoutePlanner().decide(request);
-  ASSERT_EQ(decision.action, P4ForwardAction::CONTINUE_NOMINAL);
+  ASSERT_EQ(decision.action, P4ForwardAction::CANDIDATE_READY);
   ASSERT_FALSE(decision.selected_guide.empty());
   EXPECT_GE(latest_query_time_s,
     request.query_time_s +
@@ -1007,11 +1007,16 @@ TEST(P4ForwardRoute, OccupiedSeparatorCreatesTwoRiskRankedChannels)
   bindTestRiskBatch(&request);
 
   const auto decision = P4ForwardRoutePlanner().decide(request);
-  EXPECT_EQ(decision.action, P4ForwardAction::RISK_SELECTED);
+  EXPECT_EQ(decision.action, P4ForwardAction::CANDIDATE_READY);
   EXPECT_EQ(decision.trigger_reason,
             P4ForwardTriggerReason::MULTIPLE_CHANNELS);
   ASSERT_GE(decision.candidates.size(), 2u);
   ASSERT_FALSE(decision.selected_guide.empty());
+  ASSERT_FALSE(decision.geometry_common_corridor.empty());
+  // A collision-free lateral connector does not make already-diverged
+  // branches a public corridor.
+  EXPECT_LT(decision.geometry_common_corridor.back().x(), 2.0);
+  EXPECT_LT(std::abs(decision.geometry_common_corridor.back().y()), 0.4);
   const auto selected_mid = decision.selected_guide[
     decision.selected_guide.size() / 2];
   EXPECT_LT(selected_mid.y(), 0.0);
@@ -1053,7 +1058,7 @@ TEST(P4ForwardRoute, ClearanceAwareSearchSkipsNarrowShortcutAndFindsBothSides)
 
   const auto decision = P4ForwardRoutePlanner().decide(request);
 
-  ASSERT_EQ(decision.action, P4ForwardAction::RISK_SELECTED)
+  ASSERT_EQ(decision.action, P4ForwardAction::CANDIDATE_READY)
     << decision.reason << " searches=" << decision.channel_search_attempts;
   ASSERT_GE(decision.candidates.size(), 2u);
   EXPECT_GT(decision.channel_search_attempts,
@@ -1106,7 +1111,7 @@ TEST(P4ForwardRoute, FrozenRawHitConfigurationSpaceAvoidsRepeatedMapQueries)
 
   const auto decision = P4ForwardRoutePlanner().decide(request);
 
-  ASSERT_EQ(decision.action, P4ForwardAction::RISK_SELECTED)
+  ASSERT_EQ(decision.action, P4ForwardAction::CANDIDATE_READY)
     << decision.reason << " latency=" << decision.compute_latency_ms;
   EXPECT_EQ(diagnostic_queries, 0);
   EXPECT_LE(decision.configuration_space_prepare_ms, 25.0);
@@ -1321,7 +1326,7 @@ TEST(P4ForwardRoute, ClearNominalStillEnumeratesSeparatedAlternativeChannel)
 
   EXPECT_GT(decision.channel_search_attempts, 1);
   EXPECT_GE(decision.candidates.size(), 2u) << decision.reason;
-  EXPECT_EQ(decision.action, P4ForwardAction::RISK_SELECTED)
+  EXPECT_EQ(decision.action, P4ForwardAction::CANDIDATE_READY)
     << decision.reason;
 }
 
@@ -1407,7 +1412,7 @@ TEST(P4ForwardRoute, RiskBatchComparesAllChannelsWithOneCertificateCall)
 
   const auto decision = P4ForwardRoutePlanner().decide(request);
 
-  ASSERT_EQ(decision.action, P4ForwardAction::RISK_SELECTED)
+  ASSERT_EQ(decision.action, P4ForwardAction::CANDIDATE_READY)
     << decision.reason;
   EXPECT_EQ(batch_calls, 1);
   EXPECT_GE(max_group_count, 2u);
@@ -1474,7 +1479,7 @@ TEST(P4ForwardRoute, FormalRiskSelectionRequiresTwoSafeCompleteChannels)
   const auto decision = P4ForwardRoutePlanner().decide(request);
 
   EXPECT_NE(decision.action, P4ForwardAction::RISK_SELECTED);
-  EXPECT_EQ(decision.action, P4ForwardAction::CONTINUE_NOMINAL)
+  EXPECT_EQ(decision.action, P4ForwardAction::CANDIDATE_READY)
     << decision.reason;
   EXPECT_EQ(decision.selection_authority, P4ForwardSelectionAuthority::NONE);
 }
@@ -1579,7 +1584,7 @@ TEST(P4ForwardRoute, UnobservedRegionDoesNotBecomeGeometryFailure)
 
   const auto decision = P4ForwardRoutePlanner().decide(request);
 
-  EXPECT_EQ(decision.action, P4ForwardAction::CONTINUE_NOMINAL);
+  EXPECT_EQ(decision.action, P4ForwardAction::CANDIDATE_READY);
   EXPECT_GT(decision.common_anchor.x(), 1.25);
 }
 
@@ -1599,7 +1604,7 @@ TEST(P4ForwardRoute, UnobservedRegionCannotCreateArtificialChannels)
     };
 
   const auto decision = P4ForwardRoutePlanner().decide(request);
-  EXPECT_EQ(decision.action, P4ForwardAction::CONTINUE_NOMINAL);
+  EXPECT_EQ(decision.action, P4ForwardAction::CANDIDATE_READY);
   EXPECT_EQ(decision.candidates.size(), 1u);
 }
 
@@ -1894,7 +1899,7 @@ TEST(P4ForwardRoute, FullThreeDimensionalSearchSelectsVerticalChannel)
                   << ':' << candidate.occupancy_supported << ':'
                   << candidate.reason << ';';
   }
-  ASSERT_EQ(decision.action, P4ForwardAction::RISK_SELECTED)
+  ASSERT_EQ(decision.action, P4ForwardAction::CANDIDATE_READY)
     << decision.reason << " raw=" << decision.raw_candidates.size()
     << " channels=" << decision.candidates.size()
     << " searches=" << decision.channel_search_attempts

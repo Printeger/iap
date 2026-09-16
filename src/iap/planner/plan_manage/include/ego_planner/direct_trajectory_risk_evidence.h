@@ -17,6 +17,31 @@ namespace ego_planner {
 
 struct P0ExecutionRiskSnapshot;
 
+enum class P4ActualCurveCertificationStatus {
+  NOT_EVALUATED = 0,
+  SAFE,
+  UNSAFE_SPATIAL_DOMINANT,
+  UNSAFE_TEMPORAL_DOMINANT,
+  INCOMPLETE,
+};
+
+inline const char* p4ActualCurveCertificationStatusName(
+    const P4ActualCurveCertificationStatus status) {
+  switch (status) {
+    case P4ActualCurveCertificationStatus::NOT_EVALUATED:
+      return "NOT_EVALUATED";
+    case P4ActualCurveCertificationStatus::SAFE:
+      return "SAFE";
+    case P4ActualCurveCertificationStatus::UNSAFE_SPATIAL_DOMINANT:
+      return "UNSAFE_SPATIAL_DOMINANT";
+    case P4ActualCurveCertificationStatus::UNSAFE_TEMPORAL_DOMINANT:
+      return "UNSAFE_TEMPORAL_DOMINANT";
+    case P4ActualCurveCertificationStatus::INCOMPLETE:
+      return "INCOMPLETE";
+  }
+  return "UNKNOWN";
+}
+
 inline std::string p4IdentityHash(const std::string& canonical) {
   std::uint64_t hash = 1469598103934665603ULL;
   for (const unsigned char byte : canonical) {
@@ -65,6 +90,10 @@ inline std::string p4RiskQueryLatticeHash(
 
 struct P4DirectTrajectoryRiskEvidence {
   bool complete = false;
+  bool certified_safe = false;
+  P4ActualCurveCertificationStatus certification_status =
+      P4ActualCurveCertificationStatus::NOT_EVALUATED;
+  std::size_t first_failure_index = std::numeric_limits<std::size_t>::max();
   int trajectory_id = 0;
   std::int64_t trajectory_start_ns = 0;
   std::string control_points_hash;
@@ -77,6 +106,7 @@ struct P4DirectTrajectoryRiskEvidence {
   std::uint64_t gnss_epoch_identity = 0;
   double evaluation_time_s = std::numeric_limits<double>::quiet_NaN();
   double compute_duration_ms = std::numeric_limits<double>::quiet_NaN();
+  std::vector<int> common_satellite_ids;
   // Keeps the exact immutable risk snapshot used by the direct batch alive.
   // P5 consumes this pointer so a newly published generation cannot create a
   // split-snapshot race between the P4 check and P5 admission.
