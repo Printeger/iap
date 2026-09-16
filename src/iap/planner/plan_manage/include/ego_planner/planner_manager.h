@@ -456,6 +456,11 @@ namespace ego_planner
     const P4DirectTrajectoryRiskEvidence& latestP4DirectRiskEvidence() const {
       return p4_direct_risk_evidence_;
     }
+    void setP4DirectRiskEvidenceForTest(
+        P4DirectTrajectoryRiskEvidence evidence)
+    {
+      p4_direct_risk_evidence_ = std::move(evidence);
+    }
     double currentPlanningQueryBaseTime() const { return planning_risk_context_.query_base_time_s; }
     uint64_t currentPlanningGenerationId() const { return planning_risk_context_.generation_id; }
     void setPlanningRiskContextForTest(

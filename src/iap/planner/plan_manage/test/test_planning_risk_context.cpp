@@ -1271,6 +1271,57 @@ TEST(P4ForwardTerminalLineageTest,
 }
 
 TEST(P4ForwardTerminalLineageTest,
+     FeedbackPrefixUsesProjectedNominalFailureArcNotWindowRowDistance) {
+  ego_planner::EGOPlannerManager manager;
+  ego_planner::P4ForwardDecision decision;
+  decision.result_status = ego_planner::P4ForwardResultStatus::READY;
+  decision.action = ego_planner::P4ForwardAction::CANDIDATE_READY;
+  decision.first_failed_arc_length_m = 2.0;
+  decision.geometry_common_corridor = {
+      Eigen::Vector3d::Zero(), Eigen::Vector3d(10.0, 0.0, 0.0)};
+  for (std::uint64_t channel = 1; channel <= 2; ++channel)
+  {
+    ego_planner::P4ForwardCandidate candidate;
+    candidate.candidate_id = channel;
+    candidate.channel_id = channel;
+    candidate.path = decision.geometry_common_corridor;
+    candidate.safety_gate_passed = true;
+    candidate.risk_supported = true;
+    decision.candidates.push_back(std::move(candidate));
+  }
+  manager.setP4ForwardDecisionForTest(std::move(decision));
+
+  ego_planner::P4DirectTrajectoryRiskEvidence evidence;
+  evidence.complete = true;
+  evidence.certified_safe = false;
+  evidence.certification_status =
+      ego_planner::P4ActualCurveCertificationStatus::
+          UNSAFE_TEMPORAL_DOMINANT;
+  evidence.first_failure_index = 4u;
+  // Deliberately resembles concatenated nominal, brake and transition rows.
+  // The legacy calculation would infer hundreds of metres of safe progress.
+  evidence.positions = {
+      Eigen::Vector3d::Zero(), Eigen::Vector3d(100.0, 0.0, 0.0),
+      Eigen::Vector3d::Zero(), Eigen::Vector3d(100.0, 0.0, 0.0),
+      Eigen::Vector3d(2.0, 0.0, 0.0)};
+  manager.setP4DirectRiskEvidenceForTest(std::move(evidence));
+
+  std::string reason;
+  ASSERT_TRUE(manager.prepareP4ActualCurveFeedbackRetry(2u, &reason));
+  EXPECT_EQ(reason, "limited_prefix_feedback_ready");
+  ASSERT_TRUE(manager.pendingP4ActualCurveFeedbackForTest().has_value());
+  const auto &prefix =
+      manager.pendingP4ActualCurveFeedbackForTest()->deferred_trajectory;
+  double prefix_length_m = 0.0;
+  for (std::size_t index = 1; index < prefix.size(); ++index)
+    prefix_length_m += (prefix[index] - prefix[index - 1]).norm();
+  const ego_planner::P4ForwardLimits defaults;
+  const double expected_max_m = 2.0 - defaults.vehicle_radius_m -
+      defaults.safety_margin_m;
+  EXPECT_LE(prefix_length_m, expected_max_m + 1.0e-9);
+}
+
+TEST(P4ForwardTerminalLineageTest,
      FailedReplanRestoresCommittedCurveAndExecutionCertificate) {
   ensureRclcpp();
   const auto snapshot = makeP4SelectionSnapshot();
@@ -1919,12 +1970,38 @@ TEST(P4ForwardTerminalLineageTest,
       terminal_braking_velocity.evaluateDeBoorT(
           terminal_braking_curve.getTimeSum()).norm(),
       0.0, 1.0e-3);
+  // Model the trajectory server accepting the prequeued suffix and reaching
+  // its scheduled switch stamp.  The manager must atomically move authority
+  // to the new trajectory identity before endpoint completion is accepted.
+  manager.acknowledgeP4GuardStatus(
+      terminal_brake->trajectory_id, "ACTIVATED");
+  const double terminal_switch_stamp = terminal_brake->start_time.seconds();
+  const auto terminal_activation =
+      manager.validateCommittedP4TrajectoryExecution(
+          terminal_switch_stamp,
+          terminal_braking_curve.evaluateDeBoorT(0.0));
+  EXPECT_TRUE(terminal_activation.allowed) << terminal_activation.reason;
+  EXPECT_TRUE(terminal_activation.failsafe_braking_activated);
+  EXPECT_EQ(terminal_activation.reason, "failsafe_braking_activated");
+  EXPECT_EQ(manager.p4ExecutionCertificate().authority,
+            ego_planner::P4ExecutionAuthority::LIMITED_PREFIX_BRAKING);
+  EXPECT_EQ(manager.p4ExecutionCertificate().trajectory_id,
+            terminal_brake->trajectory_id);
+  EXPECT_EQ(manager.p4ExecutionCertificate().parent_trajectory_id, 351);
+  EXPECT_EQ(manager.local_data_.traj_id_, terminal_brake->trajectory_id);
+  EXPECT_EQ(manager.local_data_.start_time_.nanoseconds(),
+            terminal_brake->start_time.nanoseconds());
+  EXPECT_EQ(manager.p4ExecutionCertificate().control_points_hash,
+            ego_planner::p4ControlPointHash(
+                terminal_braking_curve.getControlPoint()));
   const auto endpoint_hold = manager.validateCommittedP4TrajectoryExecution(
       manager.p4ExecutionCertificate().execution_deadline_s + 1.0e-3,
       manager.p4ExecutionCertificate().approved_endpoint);
   EXPECT_TRUE(endpoint_hold.allowed) << endpoint_hold.reason;
   EXPECT_TRUE(endpoint_hold.endpoint_reached);
   EXPECT_EQ(endpoint_hold.reason, "approved_endpoint_reached");
+  EXPECT_EQ(manager.p4ExecutionCertificate().authority,
+            ego_planner::P4ExecutionAuthority::LIMITED_PREFIX_BRAKING);
 }
 
 TEST(P4ForwardTerminalLineageTest,

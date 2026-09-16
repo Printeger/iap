@@ -295,6 +295,13 @@ certificate; the later endpoint run below is the post-fix result. Neither A/B
 arm selected a formal route, so the experiment demonstrates local satellite
 retention and bounded compute, not formal-route availability.
 
+The exact terminal-suffix guard has deterministic integration coverage for
+prequeue acknowledgement, trajectory-ID handover, braking authority and stop
+completion. The post-fix live run below reached the original endpoint normally;
+it did not naturally trigger that suffix failsafe branch. Live activation of
+the terminal suffix therefore remains an unobserved validation case rather
+than a claimed result of this A/B.
+
 The first post-implementation forest run retained 12--37 satellites per
 window (pooled medians are now computed from the actual per-window ID sets)
 and recovered as many as 30 satellites

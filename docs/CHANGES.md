@@ -20,9 +20,10 @@
   a `BRAKING_WINDOW_CORE` admission. Prepared-successor reauthorization
   rebuilds the same nominal-plus-braking layout instead of silently falling
   back to the legacy policy, and marginal guard selection reuses the already
-  dual-checked current/next window evidence. Failure arc length is projected
-  onto the nominal B-spline (braking branches are no longer concatenated as
-  fake route distance), and runner satellite medians are pooled from the
+  dual-checked current/next window evidence. Failure arc length and feedback
+  prefix cropping are projected onto the nominal B-spline (braking branches
+  and duplicate transition memberships are never concatenated as fake route
+  distance), and runner satellite medians are pooled from the
   actual window sets rather than taking the largest per-certificate median.
   Runtime
   rechecks only the current/next commitment region and its available brakes;
@@ -38,7 +39,9 @@
   support histories stop at the newest covering observation. The final
   <=0.2 s hard-terminal spline remainder is registered as an activatable exact
   suffix braking certificate after the last discrete guard anchor; this closes a terminal
-  sampling gap without extending the endpoint or deadline. In the post-fix
+  sampling gap without extending the endpoint or deadline. A production-state
+  regression covers guard acknowledgement, atomic braking trajectory-ID
+  activation and completion under the braking authority. In the post-fix
   BDS forest run, the vehicle moved `2.877 m` and emitted
   `ENDPOINT_HOLD approved_endpoint_reached`. The deduplicated 16 s window
   certification p95/max was `70.75/72.15 ms` in the first performance run;

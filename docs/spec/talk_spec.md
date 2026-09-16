@@ -186,8 +186,10 @@ For each candidate trajectory τ:
 - Coarse/refined routes are only `CANDIDATE_READY`. Formal `RISK_SELECTED`
   authority is created after the actual terminal-stop B-spline passes direct
   braking-window checks at its real arrival times, including all braking
-  curves and both cores in every transition overlap. The first actual-curve failure
-  is fed back for at most two regenerations: another channel for spatial
+  curves and both cores in every transition overlap. A braking-branch failure
+  is first projected to its nominal anchor station; duplicated transition or
+  brake rows are never summed into executable progress. The first actual-curve
+  failure is fed back for at most two regenerations: another channel for spatial
   failure, one bounded faster time parameterization for temporal growth, then
   a directly certified stoppable prefix of the corridor shared by at least two
   topology channels when a full route still fails. Every point of that nominal

@@ -4781,20 +4781,21 @@ namespace ego_planner
     // it must never be relabelled as a public prefix after the branch point.
     // The regenerated terminal-stop spline still has to pass every final
     // gate, so the corridor itself carries no inherited risk authority.
-    const std::size_t failure =
-        p4_direct_risk_evidence_.first_failure_index;
-    if (failure < 2u || failure > p4_direct_risk_evidence_.positions.size())
+    const double safe_actual_arc_m =
+        last_p4_forward_decision_.first_failed_arc_length_m;
+    // The direct-evidence rows are a window-membership lattice, not an
+    // ordered polyline: transition samples occur twice and braking branches
+    // leave the nominal curve.  The final checker has already projected the
+    // failed physical sample (including a braking sample via its anchor) onto
+    // the nominal B-spline.  Reuse that station instead of concatenating the
+    // evidence rows and accidentally approving a prefix beyond the failure.
+    if (!std::isfinite(safe_actual_arc_m) || safe_actual_arc_m <= 0.0)
       return finish(false, "actual_curve_safe_prefix_too_short");
     std::set<uint64_t> channels;
     for (const auto &candidate : retry.candidates)
       if (candidate.channel_id != 0u) channels.insert(candidate.channel_id);
     if (channels.size() < 2u || retry.geometry_common_corridor.size() < 2u)
       return finish(false, "actual_curve_public_common_corridor_unavailable");
-    double safe_actual_arc_m = 0.0;
-    for (std::size_t index = 1; index < failure; ++index)
-      safe_actual_arc_m +=
-          (p4_direct_risk_evidence_.positions[index] -
-           p4_direct_risk_evidence_.positions[index - 1]).norm();
     const double fixed_reserve_m = p4_forward_limits_.vehicle_radius_m +
         p4_forward_limits_.safety_margin_m;
     const double terminal_reserve_m = std::max(

@@ -256,7 +256,10 @@
   arrival time. Only an entirely SAFE set of window certificates is promoted atomically to
   `RISK_SELECTED`. The first failure retains curve position, arc length,
   arrival time, PL/AL, satellite IDs, sigma/geometry and spatial/temporal
-  growth. At most two feedback regenerations may switch to an unused safe
+  growth. A braking-branch failure is projected to its anchor station on the
+  nominal B-spline; feedback cropping consumes that station and must not sum
+  braking rows or duplicated handover memberships as route progress. At most
+  two feedback regenerations may switch to an unused safe
   channel, use one bounded `0.85` time-scale hint for a time-growth-dominated
   failure, and then crop to the last continuous safe stoppable prefix. The
   terminal solver may lengthen the hinted curve again when dynamics require
