@@ -42,6 +42,8 @@
 
 namespace ego_planner {
 
+class P0RiskGridWorkerPool;
+
 enum class P0ExecutionSnapshotAttemptStatus : std::uint8_t {
   PUBLISHED = 0,
   DEDUPLICATED,
@@ -503,6 +505,7 @@ class P0RiskGridRuntime {
   Config config_;
   iap::RiskGridMap risk_grid_;
   std::unique_ptr<iap::RiskPredictionProvider> provider_;
+  std::unique_ptr<P0RiskGridWorkerPool> risk_grid_worker_pool_;
   // Runtime callbacks start before production map adapters are attached.
   // Keep each replaceable source callable behind one synchronization seam so
   // the timer, dense-grid refresh and execution worker never race a setter.

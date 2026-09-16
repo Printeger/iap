@@ -64,6 +64,47 @@ class AffineProvider final : public iap::RiskPredictionProvider {
   }
 };
 
+class CartesianBatchProvider final : public iap::RiskPredictionProvider {
+ public:
+  bool flat_called = false;
+  bool cartesian_called = false;
+  std::vector<Eigen::Vector3d> positions;
+  std::vector<double> horizons;
+  double evaluation_time_s = 0.0;
+
+  bool batchQuery(const std::vector<iap::RiskPredictionQuery>&,
+                  std::vector<iap::RiskPredictionResult>*) override {
+    flat_called = true;
+    return false;
+  }
+
+  bool batchQueryPositionHorizons(
+      const std::vector<Eigen::Vector3d>& positions_w,
+      const std::vector<double>& horizons_s,
+      const double evaluation_time,
+      std::vector<iap::RiskPredictionResult>* results) override {
+    cartesian_called = true;
+    positions = positions_w;
+    horizons = horizons_s;
+    evaluation_time_s = evaluation_time;
+    if (!results) return false;
+    results->clear();
+    for (const double horizon : horizons_s) {
+      for (const auto& position : positions_w) {
+        iap::RiskPredictionResult result;
+        result.available = true;
+        result.valid = true;
+        result.stale = false;
+        result.hpl_pred = AffineProvider::affine(position, horizon);
+        result.vpl_pred = 0.25 * result.hpl_pred;
+        result.reason = "ok";
+        results->push_back(std::move(result));
+      }
+    }
+    return true;
+  }
+};
+
 class TopologyProvider final : public iap::RiskPredictionProvider {
  public:
   bool degenerate_positive_x = false;
@@ -185,6 +226,24 @@ TEST(RiskGridMapTest, FixedPlanningGeometryDoesNotRollWithVehiclePose) {
   ASSERT_NE(second, nullptr);
   EXPECT_EQ(second->origin(), params.fixed_origin_w);
   EXPECT_EQ(first->origin(), second->origin());
+}
+
+TEST(RiskGridMapTest, UsesPositionMajorHorizonBatchWithoutFlatRegrouping) {
+  auto params = base_params();
+  CartesianBatchProvider provider;
+  iap::RiskGridMap grid(params);
+  ASSERT_TRUE(grid.refreshFromProvider(Eigen::Vector3d::Zero(), 10.0,
+                                       provider));
+  EXPECT_TRUE(provider.cartesian_called);
+  EXPECT_FALSE(provider.flat_called);
+  EXPECT_EQ(provider.horizons, params.horizons_s);
+  EXPECT_DOUBLE_EQ(provider.evaluation_time_s, 10.0);
+  EXPECT_EQ(provider.positions.size(), 27u);
+  const auto health = grid.health();
+  EXPECT_EQ(health.provider_query_count, 54u);
+  EXPECT_GE(health.occupancy_support_scan_ms, 0.0);
+  EXPECT_GE(health.provider_batch_ms, 0.0);
+  EXPECT_GE(health.build_total_ms, 0.0);
 }
 
 class AlternatingStaleProvider final : public iap::RiskPredictionProvider {

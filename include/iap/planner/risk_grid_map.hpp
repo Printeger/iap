@@ -170,6 +170,12 @@ struct RiskGridHealth {
   uint64_t predictor_lidar_map_point_count = 0;
   uint64_t predictor_lidar_fim_primitive_count = 0;
   uint64_t predictor_lidar_fim_valid_normal_count = 0;
+  double occupancy_support_scan_ms = 0.0;
+  double query_layout_ms = 0.0;
+  double provider_batch_ms = 0.0;
+  double voxel_materialization_ms = 0.0;
+  double commit_ms = 0.0;
+  double build_total_ms = 0.0;
   std::string predictor_lidar_fim_fallback_reason = "not_evaluated";
   std::string dominant_unknown_reason = "";
   uint64_t dominant_unknown_count = 0;
@@ -449,6 +455,26 @@ class RiskPredictionProvider {
   virtual ~RiskPredictionProvider() = default;
   virtual bool batchQuery(const std::vector<RiskPredictionQuery>& queries,
                           std::vector<RiskPredictionResult>* results) = 0;
+
+  // Structured Cartesian query used by RiskGrid. Results are horizon-major:
+  // result[h * positions.size() + p]. The default adapter preserves existing
+  // providers; production providers override this to avoid rebuilding and
+  // hashing the same spatial positions for every time layer.
+  virtual bool batchQueryPositionHorizons(
+      const std::vector<Eigen::Vector3d>& positions_w,
+      const std::vector<double>& horizons_s,
+      double evaluation_time_s,
+      std::vector<RiskPredictionResult>* results) {
+    std::vector<RiskPredictionQuery> queries;
+    queries.reserve(positions_w.size() * horizons_s.size());
+    for (const double horizon_s : horizons_s) {
+      for (const auto& position_w : positions_w) {
+        queries.push_back(RiskPredictionQuery{
+            position_w, evaluation_time_s + horizon_s, horizon_s});
+      }
+    }
+    return batchQuery(queries, results);
+  }
 };
 
 class RiskGridSnapshot {

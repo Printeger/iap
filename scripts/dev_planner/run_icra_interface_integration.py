@@ -1019,6 +1019,10 @@ def analyze_p0(rows: list[dict], capture_start_s: float | None = None) -> dict:
     execution_latencies = numeric_values(
         "execution_snapshot_publish_latency_ms")
     provider_latencies = numeric_values("provider_batch_duration_ms")
+    occupancy_scan_latencies = numeric_values("occupancy_support_scan_ms")
+    query_layout_latencies = numeric_values("query_layout_ms")
+    materialization_latencies = numeric_values("voxel_materialization_ms")
+    commit_latencies = numeric_values("risk_grid_commit_ms")
     latency_causes: dict[str, int] = {}
     for _, payload in window:
         cause = str(payload.get("latency_primary_cause", "") or "")
@@ -1079,6 +1083,14 @@ def analyze_p0(rows: list[dict], capture_start_s: float | None = None) -> dict:
             "risk_grid_ms_p95": nearest_rank(grid_latencies, .95),
             "risk_grid_ms_max": max(grid_latencies, default=None),
             "provider_batch_ms_p95": nearest_rank(provider_latencies, .95),
+            "occupancy_support_scan_ms_p95": nearest_rank(
+                occupancy_scan_latencies, .95),
+            "query_layout_ms_p95": nearest_rank(
+                query_layout_latencies, .95),
+            "voxel_materialization_ms_p95": nearest_rank(
+                materialization_latencies, .95),
+            "risk_grid_commit_ms_p95": nearest_rank(
+                commit_latencies, .95),
             "execution_snapshot_ms_p95": nearest_rank(
                 execution_latencies, .95),
             "execution_snapshot_ms_max": max(

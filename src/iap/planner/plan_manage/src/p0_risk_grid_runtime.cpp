@@ -25,6 +25,61 @@
 
 namespace ego_planner {
 
+class P0RiskGridWorkerPool {
+ public:
+  explicit P0RiskGridWorkerPool(const int worker_count) {
+    const int count = std::max(1, worker_count);
+    workers_.reserve(static_cast<std::size_t>(count));
+    for (int index = 0; index < count; ++index) {
+      workers_.emplace_back([this]() { workerLoop(); });
+    }
+  }
+
+  ~P0RiskGridWorkerPool() {
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      stopping_ = true;
+    }
+    cv_.notify_all();
+    for (auto& worker : workers_) {
+      if (worker.joinable()) worker.join();
+    }
+  }
+
+  std::future<void> submit(std::function<void()> task) {
+    std::packaged_task<void()> packaged(std::move(task));
+    auto future = packaged.get_future();
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      if (stopping_) throw std::runtime_error("risk_grid_worker_pool_stopped");
+      tasks_.push_back(std::move(packaged));
+    }
+    cv_.notify_one();
+    return future;
+  }
+
+ private:
+  void workerLoop() {
+    while (true) {
+      std::packaged_task<void()> task;
+      {
+        std::unique_lock<std::mutex> lock(mutex_);
+        cv_.wait(lock, [this]() { return stopping_ || !tasks_.empty(); });
+        if (stopping_ && tasks_.empty()) return;
+        task = std::move(tasks_.front());
+        tasks_.pop_front();
+      }
+      task();
+    }
+  }
+
+  std::mutex mutex_;
+  std::condition_variable cv_;
+  std::deque<std::packaged_task<void()>> tasks_;
+  std::vector<std::thread> workers_;
+  bool stopping_ = false;
+};
+
 namespace {
 
 constexpr double kLightSpeed = 2.99792458e8;
@@ -241,6 +296,7 @@ class PredictorModuleRiskProvider final : public iap::RiskPredictionProvider {
       iap::IntegritySnapshot snapshot,
       double evaluation_time_s, int worker_count, double hal_m, double val_m,
       std::chrono::steady_clock::time_point deadline,
+      P0RiskGridWorkerPool* worker_pool,
       std::function<bool(std::chrono::steady_clock::time_point)>
           execution_priority_gate)
       : occupancy_owner_(std::move(occupancy_owner)),
@@ -248,6 +304,7 @@ class PredictorModuleRiskProvider final : public iap::RiskPredictionProvider {
         evaluation_time_s_(evaluation_time_s),
         worker_count_(std::max(1, worker_count)),
         hal_m_(hal_m), val_m_(val_m), deadline_(deadline),
+        worker_pool_(worker_pool),
         execution_priority_gate_(std::move(execution_priority_gate)) {
     iap::RollingSpatialRefreshInput input;
     input.geometry = std::move(geometry);
@@ -290,30 +347,67 @@ class PredictorModuleRiskProvider final : public iap::RiskPredictionProvider {
       if (inserted.second) groups.emplace_back();
       groups[inserted.first->second].push_back(index);
     }
+    return batchQueryGrouped(queries, groups, results);
+  }
+
+  bool batchQueryPositionHorizons(
+      const std::vector<Eigen::Vector3d>& positions_w,
+      const std::vector<double>& horizons_s,
+      const double evaluation_time_s,
+      std::vector<iap::RiskPredictionResult>* results) override {
+    if (results == nullptr || !ready_) return false;
+    std::vector<iap::RiskPredictionQuery> queries;
+    queries.reserve(positions_w.size() * horizons_s.size());
+    for (const double horizon_s : horizons_s) {
+      for (const auto& position_w : positions_w) {
+        queries.push_back({position_w, evaluation_time_s + horizon_s,
+                           horizon_s});
+      }
+    }
+    results->assign(queries.size(), iap::RiskPredictionResult{});
+    if (queries.empty()) return true;
+    std::vector<std::vector<std::size_t>> groups(positions_w.size());
+    for (std::size_t position = 0; position < positions_w.size(); ++position) {
+      groups[position].reserve(horizons_s.size());
+      for (std::size_t horizon = 0; horizon < horizons_s.size(); ++horizon) {
+        groups[position].push_back(horizon * positions_w.size() + position);
+      }
+    }
+    return batchQueryGrouped(queries, groups, results);
+  }
+
+ private:
+  bool batchQueryGrouped(
+      const std::vector<iap::RiskPredictionQuery>& queries,
+      const std::vector<std::vector<std::size_t>>& groups,
+      std::vector<iap::RiskPredictionResult>* results) {
     const int worker_count = std::min<int>(worker_count_, groups.size());
     struct WorkerOutcome {
       iap::PredictorBatchDiagnostics diagnostics;
       bool growth_valid = true;
     };
-    std::vector<std::future<WorkerOutcome>> workers;
+    std::vector<WorkerOutcome> outcomes(static_cast<std::size_t>(worker_count));
+    std::vector<std::future<void>> workers;
     workers.reserve(static_cast<std::size_t>(worker_count));
     std::atomic<std::size_t> next_group{0u};
     for (int worker_id = 0; worker_id < worker_count; ++worker_id) {
-      workers.push_back(std::async(std::launch::async,
-          [this, &queries, &groups, results, &next_group]() {
+      auto work = [this, &queries, &groups, results, &next_group,
+                   &outcomes, worker_id]() {
             WorkerOutcome outcome;
             while (true) {
               if (cancelled_.load(std::memory_order_relaxed) ||
                   std::chrono::steady_clock::now() >= deadline_) {
                 cancelled_.store(true, std::memory_order_relaxed);
                 outcome.growth_valid = false;
-                return outcome;
+                outcomes[static_cast<std::size_t>(worker_id)] = outcome;
+                return;
               }
               if (execution_priority_gate_ &&
                   !execution_priority_gate_(deadline_)) {
                 cancelled_.store(true, std::memory_order_relaxed);
                 outcome.growth_valid = false;
-                return outcome;
+                outcomes[static_cast<std::size_t>(worker_id)] = outcome;
+                return;
               }
               // Dynamic dispatch is essential to cooperative priority. With
               // fixed striding, a worker that yielded for each 10 Hz snapshot
@@ -343,7 +437,8 @@ class PredictorModuleRiskProvider final : public iap::RiskPredictionProvider {
                     inputs, &diagnostics);
                 if (predictions.size() != inputs.size()) {
                   outcome.growth_valid = false;
-                  return outcome;
+                  outcomes[static_cast<std::size_t>(worker_id)] = outcome;
+                  return;
                 }
                 for (std::size_t local = 0; local < predictions.size(); ++local) {
                   if (inputs[local].horizon_s > 0.0 &&
@@ -374,13 +469,17 @@ class PredictorModuleRiskProvider final : public iap::RiskPredictionProvider {
                     diagnostics.fusion_advisory_invocations;
               }
             }
-            return outcome;
-          }));
+            outcomes[static_cast<std::size_t>(worker_id)] = outcome;
+          };
+      workers.push_back(worker_pool_
+          ? worker_pool_->submit(std::move(work))
+          : std::async(std::launch::async, std::move(work)));
     }
     last_diagnostics_ = {};
     bool growth_valid = true;
-    for (auto& worker : workers) {
-      const auto outcome = worker.get();
+    for (std::size_t index = 0; index < workers.size(); ++index) {
+      workers[index].get();
+      const auto& outcome = outcomes[index];
       const auto& diagnostics = outcome.diagnostics;
       growth_valid = growth_valid && outcome.growth_valid;
       last_diagnostics_.query_count += diagnostics.query_count;
@@ -400,6 +499,8 @@ class PredictorModuleRiskProvider final : public iap::RiskPredictionProvider {
     }
     return growth_valid && !cancelled_.load(std::memory_order_relaxed);
   }
+
+ public:
 
   const iap::PredictorBatchDiagnostics& diagnostics() const {
     return last_diagnostics_;
@@ -438,6 +539,7 @@ class PredictorModuleRiskProvider final : public iap::RiskPredictionProvider {
   iap::RollingSpatialRefreshDiagnostics begin_diagnostics_;
   iap::PredictorBatchDiagnostics last_diagnostics_;
   std::chrono::steady_clock::time_point deadline_;
+  P0RiskGridWorkerPool* worker_pool_ = nullptr;
   std::function<bool(std::chrono::steady_clock::time_point)>
       execution_priority_gate_;
   std::atomic<bool> cancelled_{false};
@@ -453,6 +555,19 @@ class TimedRiskProvider final : public iap::RiskPredictionProvider {
                   std::vector<iap::RiskPredictionResult>* results) override {
     const auto start = std::chrono::steady_clock::now();
     const bool success = provider_ && provider_->batchQuery(queries, results);
+    duration_ms_ += std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - start).count();
+    return success && std::chrono::steady_clock::now() < deadline_;
+  }
+
+  bool batchQueryPositionHorizons(
+      const std::vector<Eigen::Vector3d>& positions_w,
+      const std::vector<double>& horizons_s,
+      const double evaluation_time_s,
+      std::vector<iap::RiskPredictionResult>* results) override {
+    const auto start = std::chrono::steady_clock::now();
+    const bool success = provider_ && provider_->batchQueryPositionHorizons(
+        positions_w, horizons_s, evaluation_time_s, results);
     duration_ms_ += std::chrono::duration<double, std::milli>(
         std::chrono::steady_clock::now() - start).count();
     return success && std::chrono::steady_clock::now() < deadline_;
@@ -921,6 +1036,8 @@ P0RiskGridRuntime::P0RiskGridRuntime(
       config_(std::move(config)),
       risk_grid_(config_.grid),
       provider_(std::move(provider)),
+      risk_grid_worker_pool_(std::make_unique<P0RiskGridWorkerPool>(
+          config_.predictor_effective_worker_count)),
       gnss_satellite_admission_(config_.predictor_gnss_admission_epochs) {
   createRosInterfaces();
   if (config_.enable_risk_grid && !provider_) {
@@ -2674,6 +2791,7 @@ void P0RiskGridRuntime::refreshTimerCallback() {
         config_.predictor_effective_worker_count,
         config_.predictor_hal_m, config_.predictor_val_m,
         risk_grid_deadline,
+        risk_grid_worker_pool_.get(),
         [this](const std::chrono::steady_clock::time_point deadline) {
           return yieldRiskGridToExecutionSnapshot(deadline);
         });
@@ -3392,6 +3510,18 @@ void P0RiskGridRuntime::publishHealth(const iap::RiskGridHealth& health,
       << out_health.predictor_lidar_fim_valid_normal_count << ","
       << "\"predictor_lidar_fim_fallback_reason\":"
       << jsonString(out_health.predictor_lidar_fim_fallback_reason) << ","
+      << "\"occupancy_support_scan_ms\":"
+      << jsonNumber(out_health.occupancy_support_scan_ms) << ","
+      << "\"query_layout_ms\":"
+      << jsonNumber(out_health.query_layout_ms) << ","
+      << "\"provider_batch_ms\":"
+      << jsonNumber(out_health.provider_batch_ms) << ","
+      << "\"voxel_materialization_ms\":"
+      << jsonNumber(out_health.voxel_materialization_ms) << ","
+      << "\"risk_grid_commit_ms\":"
+      << jsonNumber(out_health.commit_ms) << ","
+      << "\"risk_grid_map_build_total_ms\":"
+      << jsonNumber(out_health.build_total_ms) << ","
       << "\"dominant_unknown_reason\":"
       << jsonString(out_health.dominant_unknown_reason) << ","
       << "\"dominant_unknown_count\":"
