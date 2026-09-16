@@ -1484,6 +1484,7 @@ def analyze_limited_prefix_records(
                      and event.get("reason") ==
                      "runtime_known_future_integrity_unsafe"]
     braking_events = []
+    successor_events = []
     for event in execution_events:
         try:
             parent_identity = (
@@ -1497,6 +1498,12 @@ def analyze_limited_prefix_records(
                 str(event.get("allowed", "0")) == "1" and
                 str(event.get("endpoint_reached", "0")) == "1"):
             braking_events.append(event)
+        if (event.get("event") == "AUTHORIZED" and
+                event.get("authority") == "LIMITED_PREFIX" and
+                parent_identity == identity and
+                str(event.get("allowed", "0")) == "1" and
+                event.get("reason") == "normal_publish_authorized"):
+            successor_events.append(event)
 
     matching_splines = []
     for candidate in bsplines:
@@ -1518,8 +1525,19 @@ def analyze_limited_prefix_records(
             continue
         if math.isfinite(revoke_stamp):
             revoke_stamps.append(revoke_stamp)
-    observation_end_s = min(
-        [end_s + 3.0] + [stamp + 0.5 for stamp in revoke_stamps])
+    successor_stamps = []
+    for event in successor_events:
+        try:
+            successor_stamp = float(event["stamp_s"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if math.isfinite(successor_stamp) and successor_stamp >= start_s:
+            successor_stamps.append(successor_stamp)
+    # A parent trajectory ends when its authenticated successor takes over.
+    # Samples from the child must not be attributed to the parent's approved
+    # endpoint.  Conversely, a transient revoke that is followed by continued
+    # authority must not truncate evidence for a later endpoint hold.
+    observation_end_s = min([end_s + 3.0] + successor_stamps)
     commands = []
     for command in poscmd:
         payload = command.get("payload", command)
@@ -1681,12 +1699,15 @@ def analyze_limited_prefix_records(
         if failsafe_braked:
             break
 
+    rolled_to_successor = bool(successor_stamps and commands and odom_samples)
     if endpoint_hold_ok:
         outcome = "LIMITED_PREFIX_EXECUTED_TO_ENDPOINT"
     elif failsafe_braked:
         outcome = "LIMITED_PREFIX_EXECUTED_THEN_FAILSAFE_BRAKED_TO_STOP"
     elif legal_revoke:
         outcome = "LIMITED_PREFIX_EXECUTED_THEN_RISK_REVOKED"
+    elif rolled_to_successor:
+        outcome = "LIMITED_PREFIX_ROLLED_TO_SUCCESSOR"
     else:
         outcome = "HOLD_NO_EXECUTION"
         failures.append("limited_prefix_terminal_outcome_unproven")
@@ -1716,6 +1737,7 @@ def analyze_limited_prefix_records(
         approved_distance_m=approved_distance,
         endpoint_overrun_m=max(0.0, endpoint_overrun_m),
         endpoint_hold_proven=endpoint_hold_ok,
+        rolled_to_successor_proven=rolled_to_successor,
         legal_risk_revoke_proven=legal_revoke,
         braking_command_identity_proven=braking_identity_proven,
         failsafe_braked_to_stop_proven=failsafe_braked,

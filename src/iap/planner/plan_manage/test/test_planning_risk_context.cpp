@@ -1343,11 +1343,15 @@ TEST(P4ForwardTerminalLineageTest,
       unsafe_snapshot, 10.3, nullptr, directRiskCallback(1.25),
       makeP4ExecutionSnapshot(
           unsafe_snapshot, directRiskCallback(1.25), 10.3));
+  manager.preserveP4ExecutionCommitmentForCandidate();
   const auto risk_revoke = manager.validateCommittedP4TrajectoryExecution(
       during_execution_s, commanded_position);
-  EXPECT_FALSE(risk_revoke.allowed);
+  EXPECT_TRUE(risk_revoke.allowed);
   EXPECT_TRUE(risk_revoke.known_future_risk_unsafe);
-  EXPECT_EQ(risk_revoke.reason, "runtime_known_future_integrity_unsafe");
+  EXPECT_TRUE(risk_revoke.failsafe_braking_available);
+  EXPECT_FALSE(risk_revoke.failsafe_braking_active);
+  EXPECT_EQ(risk_revoke.reason,
+            "failsafe_braking_scheduled:runtime_known_future_integrity_unsafe");
   EXPECT_EQ(risk_revoke.current_risk_generation,
             unsafe_snapshot->generation_id());
   EXPECT_GT(risk_revoke.current_risk_generation,
@@ -1355,6 +1359,20 @@ TEST(P4ForwardTerminalLineageTest,
   EXPECT_TRUE(risk_revoke.violation_position.allFinite());
   EXPECT_TRUE(std::isfinite(risk_revoke.violation_query_time_s));
   EXPECT_GE(risk_revoke.violation_hpl_m, risk_revoke.alert_limit_h_m);
+  manager.setPlanningRiskContextForTest(
+      snapshot, 10.52, nullptr, directRiskCallback(0.5),
+      makeP4ExecutionSnapshot(
+          snapshot, directRiskCallback(0.5), 10.52, 73u));
+  const double unsafe_recovery_check_s = 10.55;
+  const auto unsafe_recovery =
+      manager.validateCommittedP4TrajectoryExecution(
+          unsafe_recovery_check_s,
+          manager.local_data_.position_traj_.evaluateDeBoorT(
+              unsafe_recovery_check_s -
+              manager.local_data_.start_time_.seconds()));
+  EXPECT_TRUE(unsafe_recovery.allowed) << unsafe_recovery.reason;
+  EXPECT_FALSE(unsafe_recovery.failsafe_braking_canceled_recovered);
+  manager.restoreP4ExecutionCommitmentAfterCandidateRejection();
   manager.setLatestRiskSnapshotForTest(snapshot);
   const auto at_endpoint = manager.validateCommittedP4TrajectoryExecution(
       certificate.execution_deadline_s, certificate.approved_endpoint);
@@ -1468,7 +1486,7 @@ TEST(P4ForwardTerminalLineageTest,
       }));
   EXPECT_TRUE(std::any_of(
       execution_rows.begin(), execution_rows.end(), [](const auto &row) {
-        return row.at("event") == "RISK_REVOKED" &&
+        return row.at("event") == "FAILSAFE_BRAKING_SCHEDULED" &&
             row.at("current_risk_generation") == "2" &&
             std::stod(row.at("violation_hpl_m")) >=
                 std::stod(row.at("alert_limit_h_m"));

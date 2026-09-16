@@ -1827,6 +1827,45 @@ class TestStageAnalyzer(unittest.TestCase):
         self.assertIn("limited_prefix_approved_endpoint_overrun",
                       summary["failures"])
 
+    def test_limited_prefix_parent_handoff_stops_at_bound_successor(self):
+        lineage, bsplines, poscmd, odom, events = \
+            self.limited_prefix_fixture()
+        child = dict(lineage[0])
+        child.update({
+            "trajectory_id": "32",
+            "trajectory_start_ns": "13000000000",
+            "control_points_hash": "child-control-points",
+            "knot_vector_hash": "child-knots",
+            "approved_endpoint_x": "2.0",
+        })
+        lineage.append(child)
+        events.append({
+            "event": "AUTHORIZED",
+            "authority": "LIMITED_PREFIX",
+            "trajectory_id": "32",
+            "trajectory_start_ns": "13000000000",
+            "parent_trajectory_id": "31",
+            "parent_trajectory_start_ns": "12000000000",
+            "control_points_hash": "child-control-points",
+            "knot_vector_hash": "child-knots",
+            "allowed": "1",
+            "reason": "normal_publish_authorized",
+            "stamp_s": "13.0",
+        })
+        # This is child motion and may pass the old parent's endpoint.  It
+        # must not be reported as an overrun of the authenticated parent.
+        for row in odom:
+            if row["payload"]["stamp_s"] > 13.0:
+                row["payload"]["position_m"][0] += 1.0
+        summary = MODULE.analyze_limited_prefix_records(
+            lineage, bsplines, poscmd, odom, events)
+        parent = summary["limited_attempts"][0]
+        self.assertEqual(parent["result"], "PASS")
+        self.assertEqual(
+            parent["outcome"], "LIMITED_PREFIX_ROLLED_TO_SUCCESSOR")
+        self.assertNotIn("limited_prefix_approved_endpoint_overrun",
+                         parent["failures"])
+
     def test_execution_snapshot_attempt_metrics_separate_recovery_and_gap(self):
         records = [
             {"kind": "execution_snapshot_attempt", "payload": {

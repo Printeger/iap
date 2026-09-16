@@ -221,7 +221,10 @@
   freshness, direct risk and collision state. A late, discontinuous or
   identity-mismatched successor is discarded while the parent continues;
   accepted successors record their parent and switch without an intermediate
-  endpoint hold.
+  endpoint hold. Smoke accounting ends the parent's observation window at the
+  authenticated child authorization stamp and reports
+  `LIMITED_PREFIX_ROLLED_TO_SUCCESSOR`; child motion is never charged as a
+  parent endpoint overrun.
 - Native refinement reports structured status. A densely sampled coarse path
   that is collision-free in frozen occupancy is accepted directly; A* runs
   only for colliding segments. Budget, occupancy, collision, no-path, invalid
@@ -246,10 +249,12 @@
   schedules the nearest future anchor, continues the old approved curve for no
   more than 0.2 s, then publishes that curve with a new trajectory and braking
   certificate identity under `LIMITED_PREFIX_BRAKING`, without extending the
-  original endpoint or deadline. Tracking loss, imminent collision, current certified Integrity
-  violation, an unsafe direct batch or an unavailable suffix remains an
-  emergency fail-closed condition. This terminal state is reported separately
-  from normal arrival at the originally approved endpoint.
+  original endpoint or deadline. A directly proven future UNSAFE result also
+  schedules this transition as non-recoverable: a later SAFE generation may
+  not cancel it or silently resume the parent curve. Tracking loss, imminent
+  collision, current certified Integrity violation or an unavailable braking
+  curve remains an emergency fail-closed condition. This terminal state is
+  reported separately from normal arrival at the originally approved endpoint.
 - Scheduling a stopping curve does not mutate the committed trajectory or its
   `LIMITED_PREFIX` certificate. Until the selected anchor (at most 0.2 s), a
   newer fresh execution snapshot triggers a complete direct-risk, corridor

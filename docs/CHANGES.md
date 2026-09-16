@@ -47,6 +47,22 @@
   because the later direct VPL became unsafe. These runs prove adaptive-prefix
   execution and legal terminal outcomes, not live rolling-successor closure;
   the review-hardening changes above require a fresh live confirmation.
+  A fresh post-review BDS smoke at `71dc3fe` then exposed two follow-up defects.
+  First, the smoke analyzer attributed child odometry after an authenticated
+  rolling handoff to the parent and therefore reported a false endpoint
+  overrun; it now closes the parent window at the bound child's authorization
+  and records `LIMITED_PREFIX_ROLLED_TO_SUCCESSOR`. Second, a direct future
+  UNSAFE tick emitted `RISK_REVOKED` but could be followed by a SAFE tick while
+  the old trajectory server command remained active. Direct UNSAFE now uses
+  the already certified <=0.2 s braking transition as a non-recoverable
+  schedule, so later generations cannot cancel it. In the first fresh run the
+  vehicle moved `2.806 m` and ended with an approved-endpoint hold; RiskGrid
+  p95/max was `373.53/445.23 ms` and execution-snapshot p95 was `78.16 ms`.
+  The second moved `2.616 m` and demonstrated a live parent `6` -> child `7`
+  handoff before the diagnostic fixes; its RiskGrid p95/max was
+  `423.40/433.28 ms` and snapshot p95 was `50.31 ms`. Both runner summaries
+  remained red on independent LiDAR/local-map latency thresholds, and the
+  direct-UNSAFE braking change still requires a new live confirmation.
 - fix(execution-snapshot-scheduling-and-corridor-support): IAP-RQ-312 /
   IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 — keep the 1.0 s local-map hard
   freshness limit while removing scheduler-induced expiry. Complete GridMap

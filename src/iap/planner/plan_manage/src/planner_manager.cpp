@@ -4545,7 +4545,13 @@ namespace ego_planner
         out.violation_query_time_s = query_time;
         out.violation_hpl_m = direct.hpl_m;
         out.violation_vpl_m = direct.vpl_m;
-        return revoke("runtime_known_future_integrity_unsafe");
+        // A directly proven future integrity violation is not recoverable in
+        // the same way as a briefly stale input.  Keep the certified parent
+        // only until the next precomputed braking anchor (at most 0.2 s),
+        // then switch to its independently certified stop trajectory.  A
+        // later SAFE generation must not silently resume the old trajectory.
+        return activate_failsafe_braking(
+            "runtime_known_future_integrity_unsafe", current_t);
       }
       if (!complete)
         return activate_failsafe_braking(
