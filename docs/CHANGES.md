@@ -62,7 +62,21 @@
   handoff before the diagnostic fixes; its RiskGrid p95/max was
   `423.40/433.28 ms` and snapshot p95 was `50.31 ms`. Both runner summaries
   remained red on independent LiDAR/local-map latency thresholds, and the
-  direct-UNSAFE braking change still requires a new live confirmation.
+  direct-UNSAFE braking change still required a new live confirmation at that
+  checkpoint. Three subsequent BDS forest-v2 runs on `1e6c6b4` supplied that
+  confirmation. `run-20260916T053058Z-832171` moved `0.076 m`, scheduled
+  braking for direct `HPL 20.022 m > HAL 20 m`, switched to its independent
+  braking trajectory in `0.094 s`, stopped, and passed the complete runner.
+  `run-20260916T053258Z-851707` moved `2.878 m` and held the original approved
+  endpoint. `run-20260916T053458Z-871146` moved `2.340 m` and ended in certified
+  braking. Their direct-batch p95 was `25.61/31.56/32.54 ms`, execution-snapshot
+  p95 was `42.39/47.21/62.74 ms`, and RiskGrid p95/max was
+  `333.81/346.21`, `350.28/351.68`, and `413.21/422.24 ms`; no grid exceeded
+  500 ms. The latter two whole runner summaries remained red only on the
+  independent 10 ms current-map latency gate (and one 0.2 s LiDAR interval),
+  not on limited-prefix execution. These three runs did not produce a new
+  rolling successor; the earlier parent `6` -> child `7` run remains the live
+  handoff evidence, now correctly attributable by the fixed analyzer.
 - fix(execution-snapshot-scheduling-and-corridor-support): IAP-RQ-312 /
   IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 — keep the 1.0 s local-map hard
   freshness limit while removing scheduler-induced expiry. Complete GridMap
