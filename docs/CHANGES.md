@@ -20,11 +20,33 @@
   stores provider-backed rich voxels only for admitted spatial cells while
   sharing skipped-cell occupancy/support diagnostics across horizons, records
   scan/layout/provider/materialization/commit/total timing, and checks the
-  unchanged 500 ms whole-generation deadline at stage boundaries. Exact knot
-  insertion creates braking suffixes without least-squares drift, and final
-  authorization events carry the actual execution-snapshot and GNSS-epoch
-  identities. PL/AL, BDS defaults, P5 policy and the one-second map freshness
-  limit are unchanged.
+  unchanged 500 ms whole-generation deadline at stage boundaries and again
+  after acquiring the atomic-publication mutex. LIMITED_PREFIX braking anchors
+  now solve independent hard-boundary terminal-stop curves whose first
+  feasible endpoint is earlier on the approved corridor; exact suffix slicing
+  is no longer treated as braking. Each curve remains start-state continuous,
+  terminal-zero, inside the old deadline/boundary, and receives collision and
+  direct-risk checks. Successor advancement is measured by monotonic station
+  on the frozen common corridor instead of candidate arc length, so a curved
+  or lateral detour cannot fake 0.5 m progress. The prepared parent/child
+  identities, switch window, current boundary state, latest execution snapshot,
+  direct evidence and incremental collision state are revalidated at the real
+  serialization/publish transaction; a late child restores the incumbent.
+  Final authorization events carry the actual execution-snapshot and
+  GNSS-epoch identities. PL/AL, BDS defaults, P5 policy and the one-second map
+  freshness limit are unchanged.
+  Three BDS forest-v2 smokes before the final review hardening executed real
+  adaptive prefixes: one reached and held its approved endpoint after
+  `2.877 m`, while two were legally revoked by direct vertical PL evidence
+  (`VPL 40.075/40.025 m > VAL 40 m`) after `1.977/2.197 m`. Their RiskGrid
+  p95/max were `366.70/370.52`, `440.60/444.38`, and
+  `435.90/446.36 ms`; execution-snapshot p95 was `39.98--48.74 ms`, and no
+  interpolation-only or stale-support revocation occurred. All three runner
+  summaries still failed the separate `10 ms` planner-current-map latency gate
+  (observed p95 `11.26--12.22 ms`), and no live successor switch occurred
+  because the later direct VPL became unsafe. These runs prove adaptive-prefix
+  execution and legal terminal outcomes, not live rolling-successor closure;
+  the review-hardening changes above require a fresh live confirmation.
 - fix(execution-snapshot-scheduling-and-corridor-support): IAP-RQ-312 /
   IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 — keep the 1.0 s local-map hard
   freshness limit while removing scheduler-induced expiry. Complete GridMap

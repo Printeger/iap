@@ -215,7 +215,8 @@
   numerical endpoint changes retain the exact trajectory id, start, endpoint
   and deadline.
 - A replacement is a parent-bound prepared successor. Before atomic publish it
-  rechecks the parent trajectory ID/start/control-point hash, switch window,
+  rechecks the live parent trajectory ID/start/control-point hash, child
+  trajectory identity, switch window,
   bounded position/velocity/acceleration boundary mismatch, execution-snapshot
   freshness, direct risk and collision state. A late, discontinuous or
   identity-mismatched successor is discarded while the parent continues;
@@ -238,7 +239,9 @@
   semantics.
 - A committed limited prefix stores independently parameterized stopping
   curves at no more than 0.2 s anchor spacing. Every curve is start-state
-  continuous, terminal-zero, dynamics/collision checked, and all curve samples
+  continuous, terminal-zero, dynamics/collision checked, selects the first
+  feasible earlier stop on the approved corridor without extending the old
+  endpoint/deadline, and all curve samples
   are checked in one direct-risk batch. If source data expires, the executor
   schedules the nearest future anchor, continues the old approved curve for no
   more than 0.2 s, then publishes that curve with a new trajectory and braking

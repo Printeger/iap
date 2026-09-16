@@ -32,6 +32,15 @@ P4TerminalStopResult imposeP4TerminalStop(
     double max_velocity,
     double max_acceleration, double feasibility_tolerance);
 
+// Builds an independent terminal-stop curve from a point on an approved
+// reference trajectory. The first dynamically feasible stop along the
+// remaining reference corridor is selected; the result never passes the
+// reference endpoint or its original execution deadline.
+P4TerminalStopResult buildP4EmergencyBrakingTrajectory(
+    const UniformBspline &reference_trajectory, double anchor_time_s,
+    double max_velocity, double max_acceleration,
+    double feasibility_tolerance, UniformBspline *braking_trajectory);
+
 }  // namespace ego_planner
 
 #endif  // EGO_PLANNER_P4_TERMINAL_STOP_H_

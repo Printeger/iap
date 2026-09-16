@@ -59,6 +59,65 @@ namespace ego_planner
     return finish(true, "strictly_dominating_safe_extension");
   }
 
+  bool p4CommonCorridorEndpointProgress(
+      const std::vector<Eigen::Vector3d> &common_corridor,
+      const Eigen::Vector3d &incumbent_endpoint,
+      const Eigen::Vector3d &candidate_endpoint,
+      const double maximum_lateral_distance_m,
+      double *endpoint_progress_m, std::string *reason)
+  {
+    const auto finish = [reason](const bool valid, const char *why) {
+      if (reason) *reason = why;
+      return valid;
+    };
+    if (endpoint_progress_m)
+      *endpoint_progress_m = -std::numeric_limits<double>::infinity();
+    if (common_corridor.size() < 2 || !incumbent_endpoint.allFinite() ||
+        !candidate_endpoint.allFinite() ||
+        !std::isfinite(maximum_lateral_distance_m) ||
+        maximum_lateral_distance_m <= 0.0 || !endpoint_progress_m)
+      return finish(false, "common_corridor_progress_invalid_input");
+    struct Projection
+    {
+      double station_m = 0.0;
+      double distance_m = std::numeric_limits<double>::infinity();
+    };
+    const auto project = [&common_corridor](const Eigen::Vector3d &point) {
+      Projection best;
+      double station = 0.0;
+      for (std::size_t index = 1; index < common_corridor.size(); ++index)
+      {
+        const Eigen::Vector3d delta =
+            common_corridor[index] - common_corridor[index - 1];
+        const double length = delta.norm();
+        if (!std::isfinite(length) || length <= 1.0e-9) continue;
+        const double alpha = std::clamp(
+            (point - common_corridor[index - 1]).dot(delta) /
+                (length * length), 0.0, 1.0);
+        const Eigen::Vector3d projected =
+            common_corridor[index - 1] + alpha * delta;
+        const double distance = (point - projected).norm();
+        if (distance < best.distance_m)
+        {
+          best.distance_m = distance;
+          best.station_m = station + alpha * length;
+        }
+        station += length;
+      }
+      return best;
+    };
+    const Projection incumbent = project(incumbent_endpoint);
+    const Projection candidate = project(candidate_endpoint);
+    if (!std::isfinite(incumbent.distance_m) ||
+        incumbent.distance_m > maximum_lateral_distance_m)
+      return finish(false, "incumbent_endpoint_outside_common_corridor");
+    if (!std::isfinite(candidate.distance_m) ||
+        candidate.distance_m > maximum_lateral_distance_m)
+      return finish(false, "candidate_endpoint_outside_common_corridor");
+    *endpoint_progress_m = candidate.station_m - incumbent.station_m;
+    return finish(true, "ok");
+  }
+
   bool validateP4PreparedSuccessor(
       const P4PreparedSuccessor &successor,
       const int expected_parent_trajectory_id,
@@ -3237,13 +3296,13 @@ namespace ego_planner
             static_cast<double>(anchor_index) /
             static_cast<double>(anchor_count);
         const double remaining = committed_duration - anchor_t;
-        const std::vector<Eigen::Vector3d> derivatives = {
-            committed_velocity.evaluateDeBoorT(anchor_t),
-            Eigen::Vector3d::Zero(),
-            committed_acceleration.evaluateDeBoorT(anchor_t),
-            Eigen::Vector3d::Zero()};
         UniformBspline braking;
-        if (!local_data_.position_traj_.sliceFrom(anchor_t, braking))
+        const P4TerminalStopResult braking_build =
+            buildP4EmergencyBrakingTrajectory(
+                local_data_.position_traj_, anchor_t,
+                pp_.max_vel_, pp_.max_acc_, pp_.feasibility_tolerance_,
+                &braking);
+        if (!braking_build.success)
           continue;
         braking.setPhysicalLimits(
             pp_.max_vel_, pp_.max_acc_, 0.0);
@@ -3258,11 +3317,9 @@ namespace ego_planner
                 local_data_.position_traj_.evaluateDeBoorT(anchor_t),
                 1.0e-8) ||
             !braking_velocity.evaluateDeBoorT(0.0).isApprox(
-                derivatives[0], 1.0e-8) ||
+                committed_velocity.evaluateDeBoorT(anchor_t), 1.0e-8) ||
             !braking_acceleration.evaluateDeBoorT(0.0).isApprox(
-                derivatives[2], 1.0e-7) ||
-            !braking.evaluateDeBoorT(braking_duration).isApprox(
-                committed_endpoint, 1.0e-8) ||
+                committed_acceleration.evaluateDeBoorT(anchor_t), 1.0e-7) ||
             braking_velocity.evaluateDeBoorT(braking_duration).norm() >
                 1.0e-8 ||
             braking_acceleration.evaluateDeBoorT(braking_duration).norm() >
@@ -3272,8 +3329,9 @@ namespace ego_planner
         P4BrakingAnchor anchor;
         anchor.trajectory_time_s = anchor_t;
         anchor.position = braking.evaluateDeBoorT(0.0);
-        anchor.velocity = derivatives[0];
-        anchor.acceleration = derivatives[2];
+        anchor.velocity = committed_velocity.evaluateDeBoorT(anchor_t);
+        anchor.acceleration =
+            committed_acceleration.evaluateDeBoorT(anchor_t);
         anchor.trajectory = braking;
         anchor.duration_s = braking_duration;
         anchor.control_points_hash =
@@ -3287,9 +3345,8 @@ namespace ego_planner
               next_p4_braking_certificate_id_.fetch_add(
                   1, std::memory_order_relaxed);
 
-        // Reuse the common global anchor lattice. Every exact suffix then
-        // references the same remaining nodes instead of manufacturing
-        // nearly-equal floating-time samples that defeat de-duplication.
+        // All independent stopping curves share one direct-risk batch. Exact
+        // duplicates are folded without assuming they follow the old suffix.
         const int risk_count = anchor_count - anchor_index;
         std::vector<Eigen::Vector3d> anchor_risk_points;
         std::vector<double> anchor_risk_times;
@@ -3309,6 +3366,27 @@ namespace ego_planner
           const Eigen::Vector3d point = braking.evaluateDeBoorT(t);
           if (!point.allFinite() || !occupancy ||
               !occupancy->diagnostic_query)
+          {
+            collision_free = false;
+            break;
+          }
+          double reference_distance =
+              std::numeric_limits<double>::infinity();
+          const int reference_count = std::max(
+              1, static_cast<int>(std::ceil(remaining / 0.05)));
+          for (int reference_index = 0;
+               reference_index <= reference_count; ++reference_index)
+          {
+            const double reference_t = anchor_t + remaining *
+                static_cast<double>(reference_index) /
+                static_cast<double>(reference_count);
+            reference_distance = std::min(
+                reference_distance,
+                (point - local_data_.position_traj_.evaluateDeBoorT(
+                    reference_t)).norm());
+          }
+          if (!std::isfinite(reference_distance) ||
+              reference_distance > p4_max_tracking_error_m_)
           {
             collision_free = false;
             break;
@@ -3714,6 +3792,7 @@ namespace ego_planner
     backup.runtime_lineage_start_ns = last_p4_runtime_lineage_start_ns_;
     backup.runtime_risk_cache = p4_runtime_risk_cache_;
     backup.direct_risk_evidence = p4_direct_risk_evidence_;
+    backup.prepared_successor = p4_prepared_successor_;
     backup.braking_anchors = p4_braking_anchors_;
     backup.pending_braking_anchor = p4_pending_braking_anchor_;
   }
@@ -3738,6 +3817,7 @@ namespace ego_planner
     last_p4_runtime_lineage_start_ns_ = backup.runtime_lineage_start_ns;
     p4_runtime_risk_cache_ = std::move(backup.runtime_risk_cache);
     p4_direct_risk_evidence_ = std::move(backup.direct_risk_evidence);
+    p4_prepared_successor_ = std::move(backup.prepared_successor);
     p4_braking_anchors_ = std::move(backup.braking_anchors);
     p4_pending_braking_anchor_ = backup.pending_braking_anchor;
     p4_planning_disposition_ =
@@ -3751,6 +3831,107 @@ namespace ego_planner
   void EGOPlannerManager::commitP4ExecutionCandidate()
   {
     p4_execution_commitment_backup_ = P4ExecutionCommitmentBackup{};
+    p4_prepared_successor_.reset();
+  }
+
+  bool EGOPlannerManager::validatePreparedP4SuccessorBeforePublish(
+      const LocalTrajData &incumbent, const double now_s,
+      std::string *reason)
+  {
+    const auto finish = [this, now_s, reason](
+                            const bool valid, const std::string &why) {
+      if (reason) *reason = why;
+      if (!valid && p4_prepared_successor_)
+      {
+        P4ExecutionCheckDiagnostics rejected;
+        rejected.applicable = true;
+        rejected.allowed = false;
+        rejected.identity_match =
+            why.find("identity") == std::string::npos;
+        rejected.execution_snapshot_id =
+            p4_execution_certificate_.execution_snapshot_id;
+        rejected.reason = why;
+        appendP4ExecutionEvent(
+            "PREPARED_SUCCESSOR_PUBLISH_REJECTED", now_s, rejected);
+      }
+      return valid;
+    };
+    if (!p4_prepared_successor_)
+      return finish(true, "not_a_prepared_successor");
+    if (!std::isfinite(now_s) ||
+        local_data_.traj_id_ !=
+            p4_prepared_successor_->successor_trajectory_id ||
+        local_data_.start_time_.nanoseconds() !=
+            p4_prepared_successor_->successor_start_time_ns ||
+        p4ControlPointHash(local_data_.position_traj_.getControlPoint()) !=
+            p4_prepared_successor_->successor_control_points_hash)
+      return finish(false, "successor_candidate_identity_changed");
+
+    P4PreparedSuccessor current = *p4_prepared_successor_;
+    const double parent_t = std::clamp(
+        now_s - incumbent.start_time_.seconds(), 0.0,
+        std::max(0.0, incumbent.duration_));
+    const double successor_t = std::clamp(
+        now_s - local_data_.start_time_.seconds(), 0.0,
+        std::max(0.0, local_data_.duration_));
+    UniformBspline incumbent_position = incumbent.position_traj_;
+    UniformBspline incumbent_velocity = incumbent.velocity_traj_;
+    UniformBspline incumbent_acceleration = incumbent.acceleration_traj_;
+    current.incumbent_position =
+        incumbent_position.evaluateDeBoorT(parent_t);
+    current.incumbent_velocity =
+        incumbent_velocity.evaluateDeBoorT(parent_t);
+    current.incumbent_acceleration =
+        incumbent_acceleration.evaluateDeBoorT(parent_t);
+    current.successor_position =
+        local_data_.position_traj_.evaluateDeBoorT(successor_t);
+    current.successor_velocity =
+        local_data_.velocity_traj_.evaluateDeBoorT(successor_t);
+    current.successor_acceleration =
+        local_data_.acceleration_traj_.evaluateDeBoorT(successor_t);
+    std::string prepared_reason;
+    if (!validateP4PreparedSuccessor(
+            current, incumbent.traj_id_,
+            incumbent.start_time_.nanoseconds(),
+            p4ControlPointHash(incumbent_position.getControlPoint()),
+            now_s, &prepared_reason))
+      return finish(false, prepared_reason);
+
+    const auto execution = p0_risk_grid_runtime_
+        ? p0_risk_grid_runtime_->acquireExecutionRiskSnapshotForEvaluation(
+              now_s)
+        : planning_risk_context_.execution_snapshot;
+    if (!execution || !execution->freshAt(now_s) ||
+        !p4CertifiedCurrentIntegritySafe(
+            execution->integrity_anchor.current, now_s,
+            execution->risk_policy.stale_timeout_s))
+      return finish(false, "successor_latest_execution_authority_invalid");
+    if (!p4_execution_certificate_.valid ||
+        p4_execution_certificate_.trajectory_id != local_data_.traj_id_ ||
+        p4_execution_certificate_.start_time_ns !=
+            local_data_.start_time_.nanoseconds() ||
+        p4_execution_certificate_.execution_snapshot_id !=
+            execution->execution_snapshot_id ||
+        !p4_direct_risk_evidence_.complete ||
+        p4_direct_risk_evidence_.execution_snapshot_id !=
+            execution->execution_snapshot_id ||
+        p4_direct_risk_evidence_.trajectory_id != local_data_.traj_id_ ||
+        p4_direct_risk_evidence_.trajectory_start_ns !=
+            local_data_.start_time_.nanoseconds() ||
+        p4_direct_risk_evidence_.control_points_hash !=
+            current.successor_control_points_hash)
+      return finish(false, "successor_latest_direct_evidence_mismatch");
+    for (const auto &point : p4_direct_risk_evidence_.points)
+      if (point.safety_state != iap::ForwardRiskSafetyState::SAFE ||
+          point.ranking_state != iap::ForwardRiskRankingState::COMPARABLE ||
+          point.failure_reason != iap::ForwardRiskFailureReason::NONE ||
+          !std::isfinite(point.safety_ratio) || point.safety_ratio >= 1.0)
+        return finish(false, "successor_latest_direct_evidence_unsafe");
+    const auto geometry = validateCommittedP4TrajectoryGeometry(now_s);
+    if (geometry && !geometry->accepted())
+      return finish(false, "successor_publish_collision_recheck_failed:" +
+          geometry->reason);
+    return finish(true, "prepared_successor_publish_revalidated");
   }
 
   P4ExecutionCheckDiagnostics
@@ -6895,6 +7076,7 @@ namespace ego_planner
     // A committed limited prefix is a bounded promise, not a replaceable
     // planning hint. Compare the actual candidate and incumbent curves in one
     // direct batch before mutating LocalTrajData.
+    std::optional<P4PreparedSuccessor> accepted_prepared_successor;
     if (has_existing_trajectory && p4_execution_certificate_.valid &&
         (p4_execution_certificate_.authority ==
              P4ExecutionAuthority::LIMITED_PREFIX ||
@@ -7005,20 +7187,16 @@ namespace ego_planner
             incumbent_worst = std::max(incumbent_worst, point.safety_ratio);
         }
       }
-      const auto polyline_arc_length = [](const auto &points) {
-          double length = 0.0;
-          for (std::size_t index = 1; index < points.size(); ++index)
-            length += (points[index] - points[index - 1]).norm();
-          return length;
-        };
-      // Both paths start at the current execution state and are already
-      // constrained to the common channel. Compare executable arc progress,
-      // not radial distance from a start point; radial distance misorders
-      // curved prefixes and can replace an incumbent without extending it.
-      const double endpoint_progress = sampled
-          ? polyline_arc_length(candidate_points) -
-                polyline_arc_length(incumbent_points)
-          : -std::numeric_limits<double>::infinity();
+      double endpoint_progress = -std::numeric_limits<double>::infinity();
+      std::string corridor_progress_reason;
+      const std::vector<Eigen::Vector3d> frozen_common_corridor =
+          p4ExecutablePath(last_p4_forward_decision_);
+      const bool corridor_progress_valid = sampled &&
+          !candidate_points.empty() && !incumbent_points.empty() &&
+          p4CommonCorridorEndpointProgress(
+              frozen_common_corridor, incumbent_points.back(),
+              candidate_points.back(), p4_max_tracking_error_m_,
+              &endpoint_progress, &corridor_progress_reason);
       P4LimitedPrefixReplacementInput replacement;
       replacement.committed_execution_s = accepted_time.seconds() -
           p4_execution_certificate_.start_time_ns * 1.0e-9;
@@ -7027,7 +7205,8 @@ namespace ego_planner
           ? candidate_worst : std::numeric_limits<double>::infinity();
       replacement.incumbent_worst_remaining_risk = comparable
           ? incumbent_worst : -std::numeric_limits<double>::infinity();
-      std::string replacement_reason;
+      std::string replacement_reason = corridor_progress_valid
+          ? "not_evaluated" : corridor_progress_reason;
       UniformBspline candidate_velocity = pos.getDerivative();
       UniformBspline candidate_acceleration = candidate_velocity.getDerivative();
       P4PreparedSuccessor prepared;
@@ -7058,7 +7237,8 @@ namespace ego_planner
           local_data_.start_time_.nanoseconds(),
           prepared.parent_control_points_hash, accepted_time.seconds(),
           &replacement_reason);
-      if (!prepared_valid || !shouldReplaceCommittedLimitedPrefix(
+      if (!corridor_progress_valid || !prepared_valid ||
+          !shouldReplaceCommittedLimitedPrefix(
               replacement, &replacement_reason))
       {
         last_p4_forward_decision_.planning_disposition =
@@ -7073,8 +7253,20 @@ namespace ego_planner
         clearPlanningRiskContext();
         return false;
       }
+      accepted_prepared_successor = prepared;
     }
     updateTrajInfo(pos, accepted_time);
+    p4_prepared_successor_.reset();
+    if (accepted_prepared_successor)
+    {
+      accepted_prepared_successor->successor_trajectory_id =
+          local_data_.traj_id_;
+      accepted_prepared_successor->successor_start_time_ns =
+          local_data_.start_time_.nanoseconds();
+      accepted_prepared_successor->successor_control_points_hash =
+          p4ControlPointHash(local_data_.position_traj_.getControlPoint());
+      p4_prepared_successor_ = std::move(accepted_prepared_successor);
+    }
     if (gate0_writer_ && gate0_writer_->enabled())
     {
       Gate0QualificationEvent update_event;

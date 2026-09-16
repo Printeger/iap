@@ -2433,10 +2433,33 @@ TEST(RiskGridMapTest,
       Eigen::Vector3d::Zero(), 10.0, provider,
       iap::RiskGridMap::OccupancyDiagnosticQuery{}, validator, &reason))
       << reason;
-  EXPECT_EQ(validator_calls, 2);
+  EXPECT_EQ(validator_calls, 7);
   EXPECT_EQ(reason, "ok");
   ASSERT_NE(grid.acquireSnapshot(), nullptr);
   EXPECT_EQ(grid.acquireSnapshot()->generation_id(), 1u);
+}
+
+TEST(RiskGridMapTest, SourceDeadlineIsRecheckedInsidePublishCriticalSection) {
+  iap::RiskGridMap grid(base_params());
+  const auto first = make_snapshot(&grid, 9.0);
+  ASSERT_NE(first, nullptr);
+  AffineProvider provider;
+  int validator_calls = 0;
+  const auto validator = [&]() {
+    ++validator_calls;
+    return validator_calls < 7
+        ? iap::RiskGridSourceValidation::VALID
+        : iap::RiskGridSourceValidation::COMPUTE_BUDGET_EXCEEDED;
+  };
+  std::string reason;
+
+  EXPECT_FALSE(grid.refreshFromProvider(
+      Eigen::Vector3d::Zero(), 10.0, provider,
+      iap::RiskGridMap::OccupancyDiagnosticQuery{}, validator, &reason));
+  EXPECT_EQ(validator_calls, 7);
+  EXPECT_EQ(reason, "risk_grid_build_budget_exceeded");
+  ASSERT_NE(grid.acquireSnapshot(), nullptr);
+  EXPECT_EQ(grid.acquireSnapshot()->generation_id(), first->generation_id());
 }
 
 TEST(RiskGridMapTest, SnapshotRetainsImmutableCompositeSourceIdentity) {
@@ -2501,7 +2524,7 @@ TEST(RiskGridMapTest,
            iap::RiskGridSourceValidation::COMPUTE_BUDGET_EXCEEDED}) {
     validator_calls = 0;
     const auto validator = [&]() {
-      return ++validator_calls == 1
+      return ++validator_calls < 3
           ? iap::RiskGridSourceValidation::VALID
           : failure;
     };
@@ -2509,7 +2532,7 @@ TEST(RiskGridMapTest,
     EXPECT_FALSE(grid.refreshFromProvider(
         Eigen::Vector3d(8.0, -7.0, 6.0), 10.5, provider,
         iap::RiskGridMap::OccupancyDiagnosticQuery{}, validator, &reason));
-    EXPECT_EQ(validator_calls, 2);
+    EXPECT_EQ(validator_calls, 3);
     const char* expected_reason =
         failure == iap::RiskGridSourceValidation::OCCUPANCY_GENERATION_CHANGED
             ? "occupancy_generation_changed"

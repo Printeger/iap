@@ -71,6 +71,9 @@ namespace ego_planner
     int parent_trajectory_id = 0;
     int64_t parent_start_time_ns = 0;
     std::string parent_control_points_hash;
+    int successor_trajectory_id = 0;
+    int64_t successor_start_time_ns = 0;
+    std::string successor_control_points_hash;
     double planned_switch_time_s =
         std::numeric_limits<double>::quiet_NaN();
     Eigen::Vector3d incumbent_position = Eigen::Vector3d::Zero();
@@ -94,6 +97,14 @@ namespace ego_planner
 
   bool shouldReplaceCommittedLimitedPrefix(
       const P4LimitedPrefixReplacementInput &input,
+      std::string *reason = nullptr);
+
+  bool p4CommonCorridorEndpointProgress(
+      const std::vector<Eigen::Vector3d> &common_corridor,
+      const Eigen::Vector3d &incumbent_endpoint,
+      const Eigen::Vector3d &candidate_endpoint,
+      double maximum_lateral_distance_m,
+      double *endpoint_progress_m,
       std::string *reason = nullptr);
 
   struct P4GenerationBoundarySignature
@@ -414,6 +425,9 @@ namespace ego_planner
     void preserveP4ExecutionCommitmentForCandidate();
     void restoreP4ExecutionCommitmentAfterCandidateRejection();
     void commitP4ExecutionCandidate();
+    bool validatePreparedP4SuccessorBeforePublish(
+        const LocalTrajData &incumbent, double now_s,
+        std::string *reason = nullptr);
     void setP4ForwardDecisionForTest(P4ForwardDecision decision)
     {
       last_p4_forward_decision_ = std::move(decision);
@@ -531,6 +545,7 @@ namespace ego_planner
     };
     P4RuntimeRiskCache p4_runtime_risk_cache_;
     P4DirectTrajectoryRiskEvidence p4_direct_risk_evidence_;
+    std::optional<P4PreparedSuccessor> p4_prepared_successor_;
     std::vector<P4BrakingAnchor> p4_braking_anchors_;
     struct P4PendingBrakingTransition
     {
@@ -557,6 +572,7 @@ namespace ego_planner
       int64_t runtime_lineage_start_ns = 0;
       P4RuntimeRiskCache runtime_risk_cache;
       P4DirectTrajectoryRiskEvidence direct_risk_evidence;
+      std::optional<P4PreparedSuccessor> prepared_successor;
       std::vector<P4BrakingAnchor> braking_anchors;
       std::optional<P4PendingBrakingTransition> pending_braking_anchor;
     };

@@ -6003,13 +6003,13 @@ TEST_F(P0RiskGridRuntimeStampTest,
   const auto canonical_owner = rollingOccupancyOwner(runtime);
   ASSERT_NE(canonical_owner, nullptr);
   EXPECT_EQ(factory_calls->load(), 1u);
-  EXPECT_EQ(live_owner_calls->load(), 2u);
-  EXPECT_EQ(live_generation_calls->load(), 2u);
+  EXPECT_EQ(live_owner_calls->load(), 7u);
+  EXPECT_EQ(live_generation_calls->load(), 7u);
 
   ASSERT_TRUE(refreshOnce(&runtime));
   EXPECT_EQ(factory_calls->load(), 2u);
-  EXPECT_EQ(live_owner_calls->load(), 4u);
-  EXPECT_EQ(live_generation_calls->load(), 4u);
+  EXPECT_EQ(live_owner_calls->load(), 14u);
+  EXPECT_EQ(live_generation_calls->load(), 14u);
   EXPECT_EQ(rollingOccupancyOwner(runtime), canonical_owner);
 }
 
@@ -6365,7 +6365,9 @@ TEST_F(P0RiskGridRuntimeStampTest,
   expectSameActiveGeneration(accepted, runtime.acquireSnapshot());
   const auto aborted = predictorDiagnosticCounts(runtime);
   EXPECT_EQ(aborted.watchdog_forced_full_rebuilds, 0u);
-  EXPECT_EQ(aborted.spatial_recompute, 27u);
+  // Stage-boundary source validation now cancels immediately after the
+  // occupancy scan that observed the owner loss, before provider geometry.
+  EXPECT_EQ(aborted.spatial_recompute, 0u);
   EXPECT_EQ(aborted.retained_positions, 0u);
 
   *live_source_owner = source_owner;

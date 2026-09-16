@@ -1519,27 +1519,27 @@ bool RiskGridMap::refreshFromProvider(
     return false;
   }
 
+  const auto validation_reason = [](const RiskGridSourceValidation validation) {
+    switch (validation) {
+      case RiskGridSourceValidation::VALID:
+        return std::string("ok");
+      case RiskGridSourceValidation::OCCUPANCY_GENERATION_CHANGED:
+        return std::string("occupancy_generation_changed");
+      case RiskGridSourceValidation::PRIOR_GENERATION_CHANGED:
+        return std::string("prior_generation_changed");
+      case RiskGridSourceValidation::PREDICTOR_SPATIAL_SOURCE_CHANGED:
+        return std::string("predictor_spatial_source_changed");
+      case RiskGridSourceValidation::COMPUTE_BUDGET_EXCEEDED:
+        return std::string("risk_grid_build_budget_exceeded");
+    }
+    return std::string("source_validation_failed");
+  };
   const auto validate_sources = [&]() {
     const RiskGridSourceValidation validation = source_validator
         ? source_validator()
         : RiskGridSourceValidation::VALID;
-    std::string failure;
-    switch (validation) {
-      case RiskGridSourceValidation::VALID:
-        return true;
-      case RiskGridSourceValidation::OCCUPANCY_GENERATION_CHANGED:
-        failure = "occupancy_generation_changed";
-        break;
-      case RiskGridSourceValidation::PRIOR_GENERATION_CHANGED:
-        failure = "prior_generation_changed";
-        break;
-      case RiskGridSourceValidation::PREDICTOR_SPATIAL_SOURCE_CHANGED:
-        failure = "predictor_spatial_source_changed";
-        break;
-      case RiskGridSourceValidation::COMPUTE_BUDGET_EXCEEDED:
-        failure = "risk_grid_build_budget_exceeded";
-        break;
-    }
+    if (validation == RiskGridSourceValidation::VALID) return true;
+    const std::string failure = validation_reason(validation);
     if (reason) {
       *reason = failure;
     }
@@ -2060,11 +2060,26 @@ bool RiskGridMap::refreshFromProvider(
 
   const auto commit_started = std::chrono::steady_clock::now();
   {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::unique_lock<std::mutex> lock(mutex_);
     const auto commit_acquired = std::chrono::steady_clock::now();
     new_health.commit_ms = elapsed_ms(commit_started, commit_acquired);
     new_health.build_total_ms = elapsed_ms(build_started, commit_acquired);
     next->health = new_health;
+    // The mutex wait is part of the hard end-to-end deadline. Revalidate
+    // after acquiring the publication lock so a generation can never become
+    // active after its source tuple changed or its 500 ms budget expired.
+    const RiskGridSourceValidation commit_validation = source_validator
+        ? source_validator()
+        : RiskGridSourceValidation::VALID;
+    if (commit_validation != RiskGridSourceValidation::VALID) {
+      const std::string failure = validation_reason(commit_validation);
+      lock.unlock();
+      if (reason) {
+        *reason = failure;
+      }
+      markRefreshFailure(now_s, failure);
+      return false;
+    }
     if (configuration_epoch != configuration_epoch_) {
       if (reason) {
         *reason = "configuration_changed";

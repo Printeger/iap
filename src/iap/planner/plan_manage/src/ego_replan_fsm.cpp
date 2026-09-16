@@ -1473,6 +1473,22 @@ namespace ego_planner
         return false;
       }
 
+      // Successor preparation may be followed by a slow final-risk or P5
+      // gate. Revalidate against the still-executing parent and the newest
+      // execution authority at the actual publication boundary; a late or
+      // relabelled child is discarded without interrupting the parent.
+      std::string successor_publish_reason;
+      if (!planner_manager_->validatePreparedP4SuccessorBeforePublish(
+              previous_local_data, plannerNow().seconds(),
+              &successor_publish_reason))
+      {
+        RCLCPP_WARN(node_->get_logger(),
+                    "P4 prepared successor rejected before publish: %s",
+                    successor_publish_reason.c_str());
+        reject_candidate();
+        return false;
+      }
+
       if (p5_final_status && planner_manager_->p5_integrity_gate_)
       {
         planner_manager_->p5_integrity_gate_->publishFinalAdmission(

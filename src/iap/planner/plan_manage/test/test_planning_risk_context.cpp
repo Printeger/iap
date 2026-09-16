@@ -171,6 +171,41 @@ TEST(P4TerminalStopProductionTest,
   }
 }
 
+TEST(P4TerminalStopProductionTest,
+     EmergencyBrakingBuildsIndependentEarlierTerminalStop)
+{
+  auto reference = makeMovingCurvedP4Trajectory(0.2);
+  const double reference_duration = reference.getTimeSum();
+  const double anchor_time = 0.2;
+  auto reference_velocity = reference.getDerivative();
+  auto reference_acceleration = reference_velocity.getDerivative();
+  ego_planner::UniformBspline braking;
+
+  const auto result = ego_planner::buildP4EmergencyBrakingTrajectory(
+      reference, anchor_time, 3.0, 4.0, 0.0, &braking);
+
+  ASSERT_TRUE(result.success) << result.reason;
+  ASSERT_GT(braking.getTimeSum(), 0.0);
+  EXPECT_LE(braking.getTimeSum(), reference_duration - anchor_time + 1.0e-9);
+  EXPECT_TRUE(braking.evaluateDeBoorT(0.0).isApprox(
+      reference.evaluateDeBoorT(anchor_time), 1.0e-9));
+  EXPECT_TRUE(braking.getDerivative().evaluateDeBoorT(0.0).isApprox(
+      reference_velocity.evaluateDeBoorT(anchor_time), 1.0e-9));
+  EXPECT_TRUE(braking.getDerivative().getDerivative()
+                  .evaluateDeBoorT(0.0).isApprox(
+                      reference_acceleration.evaluateDeBoorT(anchor_time),
+                      1.0e-8));
+  const double braking_duration = braking.getTimeSum();
+  EXPECT_LE(braking.getDerivative()
+                .evaluateDeBoorT(braking_duration).norm(), 1.0e-9);
+  EXPECT_LE(braking.getDerivative().getDerivative()
+                .evaluateDeBoorT(braking_duration).norm(), 1.0e-8);
+  EXPECT_GT((braking.evaluateDeBoorT(braking_duration) -
+             reference.evaluateDeBoorT(anchor_time)).norm(), 0.05);
+  EXPECT_GT((reference.evaluateDeBoorT(reference_duration) -
+             braking.evaluateDeBoorT(braking_duration)).norm(), 0.05);
+}
+
 TEST(P4GenerationProbeTest, ClassifiesIndependentAndMixedChanges)
 {
   using ego_planner::P4GenerationChangeClass;
@@ -1238,9 +1273,10 @@ TEST(P4ForwardTerminalLineageTest,
   EXPECT_EQ(certificate.execution_snapshot_id,
             execution_snapshot->execution_snapshot_id);
   EXPECT_GT(largest_direct_batch, 0u);
-  EXPECT_LE(braking_batch_points,
+  EXPECT_GT(braking_batch_points,
             static_cast<std::size_t>(
                 std::ceil(certificate.duration_s / 0.2)) + 1u);
+  EXPECT_LT(braking_batch_points, 512u);
   EXPECT_TRUE(certificate.approved_endpoint.isApprox(
       approved_prefix.back(), 1.0e-9));
   EXPECT_LE(certificate.terminal_speed_mps, 1.0e-3);
@@ -1393,8 +1429,10 @@ TEST(P4ForwardTerminalLineageTest,
   EXPECT_GT(manager.local_data_.traj_id_, 35);
   EXPECT_GT(manager.local_data_.start_time_.seconds(), second_stale_check_s);
   EXPECT_LE(manager.local_data_.start_time_.seconds(), braking_switch_s);
-  EXPECT_TRUE(manager.p4ExecutionCertificate().approved_endpoint.isApprox(
+  EXPECT_FALSE(manager.p4ExecutionCertificate().approved_endpoint.isApprox(
       approved_prefix.back(), 1.0e-8));
+  EXPECT_GT((manager.p4ExecutionCertificate().approved_endpoint -
+             braking_switch_position).norm(), 1.0e-3);
   const auto braking_stop = manager.validateCommittedP4TrajectoryExecution(
       manager.p4ExecutionCertificate().execution_deadline_s,
       manager.p4ExecutionCertificate().approved_endpoint);
@@ -2340,4 +2378,32 @@ TEST(P4PreparedSuccessorPolicy,
   EXPECT_FALSE(ego_planner::validateP4PreparedSuccessor(
       successor, 17, 1234, "parent_hash", 10.25, &reason));
   EXPECT_EQ(reason, "successor_switch_window_missed");
+}
+
+TEST(P4PreparedSuccessorPolicy,
+     EndpointProgressUsesFrozenCorridorStationNotCurveArcLength)
+{
+  const std::vector<Eigen::Vector3d> corridor = {
+      {0.0, 0.0, 1.0}, {1.0, 0.0, 1.0}, {2.0, 0.0, 1.0},
+      {3.0, 0.0, 1.0}};
+  double progress = 0.0;
+  std::string reason;
+
+  EXPECT_TRUE(ego_planner::p4CommonCorridorEndpointProgress(
+      corridor, Eigen::Vector3d(1.0, 0.05, 1.0),
+      Eigen::Vector3d(1.7, -0.05, 1.0), 0.25, &progress, &reason));
+  EXPECT_NEAR(progress, 0.7, 1.0e-9);
+  EXPECT_EQ(reason, "ok");
+
+  // A long lateral/curved candidate ending at the same station is not an
+  // extension, even though its own arc length can be arbitrarily larger.
+  EXPECT_TRUE(ego_planner::p4CommonCorridorEndpointProgress(
+      corridor, Eigen::Vector3d(1.0, 0.0, 1.0),
+      Eigen::Vector3d(1.0, 0.2, 1.0), 0.25, &progress, &reason));
+  EXPECT_NEAR(progress, 0.0, 1.0e-9);
+
+  EXPECT_FALSE(ego_planner::p4CommonCorridorEndpointProgress(
+      corridor, Eigen::Vector3d(1.0, 0.0, 1.0),
+      Eigen::Vector3d(1.7, 0.5, 1.0), 0.25, &progress, &reason));
+  EXPECT_EQ(reason, "candidate_endpoint_outside_common_corridor");
 }
