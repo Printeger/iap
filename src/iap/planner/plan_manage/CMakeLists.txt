@@ -64,6 +64,7 @@ add_executable(ego_planner_node
   src/gate0_qualification_writer.cpp
   src/planner_manager.cpp
   src/p4_terminal_stop.cpp
+  src/p4_execution_risk_window.cpp
   src/p0_risk_grid_runtime.cpp
   src/p0_occupancy_epoch_adapter.cpp
   src/p1_replan_admission.cpp
@@ -139,6 +140,11 @@ if(BUILD_TESTING)
     pcl_conversions gnss_comm iap
   )
   target_link_libraries(test_p4_risk_grid_planning_admission iap::iap)
+  ament_add_gtest(test_p4_execution_risk_window
+    test/test_p4_execution_risk_window.cpp
+    src/p4_execution_risk_window.cpp
+  )
+  ament_target_dependencies(test_p4_execution_risk_window Eigen3)
   ament_add_gtest(test_p1_candidate_selection
     test/test_p1_candidate_selection.cpp
     src/p1_candidate_selection.cpp
@@ -196,6 +202,7 @@ if(BUILD_TESTING)
     src/gate0_qualification_writer.cpp
     src/planner_manager.cpp
     src/p4_terminal_stop.cpp
+    src/p4_execution_risk_window.cpp
     src/p0_risk_grid_runtime.cpp
     src/p0_occupancy_epoch_adapter.cpp
     src/p1_replan_admission.cpp

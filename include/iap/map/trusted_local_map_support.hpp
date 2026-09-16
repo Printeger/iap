@@ -153,19 +153,56 @@ struct TrustedLocalMapSupport {
                               const Eigen::Vector3d& retained_max,
                               const double observation_stamp,
                               const double valid_until) {
-      if (!spatially_covers(pose, retained_min, retained_max)) return;
+      if (!spatially_covers(pose, retained_min, retained_max)) return false;
       covered_by_any_observation = true;
       if (evaluation_time_s >= observation_stamp &&
           evaluation_time_s <= valid_until &&
-          observation_stamp > newest_covering_stamp)
+          observation_stamp > newest_covering_stamp) {
         newest_covering_stamp = observation_stamp;
+        return true;
+      }
+      return false;
     };
-    consider(T_map_sensor, retained_min_map, retained_max_map, stamp_s,
-             valid_until_s);
-    for (const auto& observation : observations)
-      consider(observation.T_map_sensor, observation.retained_min_map,
-               observation.retained_max_map, observation.stamp_s,
-               observation.valid_until_s);
+
+    // Production histories are appended in source-stamp order and the
+    // primary envelope is the newest frame. Preserve exact generic behavior
+    // for hand-built/legacy unordered inputs, but exploit that invariant in
+    // the hot LOS support path: the first covering entry in newest-to-oldest
+    // order is necessarily the answer.
+    const bool ordered_history =
+        std::is_sorted(observations.begin(), observations.end(),
+                       [](const auto& lhs, const auto& rhs) {
+                         return lhs.stamp_s < rhs.stamp_s;
+                       }) &&
+        (observations.empty() || observations.back().stamp_s <= stamp_s);
+    if (ordered_history) {
+      if (consider(T_map_sensor, retained_min_map, retained_max_map, stamp_s,
+                   valid_until_s)) {
+        out.status = LocalMapSupportStatus::MODEL_COMPLETE;
+        out.observation_stamp_s = newest_covering_stamp;
+        out.observation_age_s = evaluation_time_s - newest_covering_stamp;
+        return out;
+      }
+      for (auto observation = observations.rbegin();
+           observation != observations.rend(); ++observation) {
+        if (consider(observation->T_map_sensor,
+                     observation->retained_min_map,
+                     observation->retained_max_map, observation->stamp_s,
+                     observation->valid_until_s)) {
+          out.status = LocalMapSupportStatus::MODEL_COMPLETE;
+          out.observation_stamp_s = newest_covering_stamp;
+          out.observation_age_s = evaluation_time_s - newest_covering_stamp;
+          return out;
+        }
+      }
+    } else {
+      consider(T_map_sensor, retained_min_map, retained_max_map, stamp_s,
+               valid_until_s);
+      for (const auto& observation : observations)
+        consider(observation.T_map_sensor, observation.retained_min_map,
+                 observation.retained_max_map, observation.stamp_s,
+                 observation.valid_until_s);
+    }
     if (std::isfinite(newest_covering_stamp)) {
       out.status = LocalMapSupportStatus::MODEL_COMPLETE;
       out.observation_stamp_s = newest_covering_stamp;

@@ -147,13 +147,11 @@ struct GnssAdvisoryPredictor::VisibilityEvidenceCache {
     double x = 0.0;
     double y = 0.0;
     double z = 0.0;
-    double query_time_s = 0.0;
     double evaluation_time_s = 0.0;
     bool measured_support = false;
 
     bool operator==(const Key& other) const {
       return x == other.x && y == other.y && z == other.z &&
-          query_time_s == other.query_time_s &&
           evaluation_time_s == other.evaluation_time_s &&
           measured_support == other.measured_support;
     }
@@ -166,7 +164,6 @@ struct GnssAdvisoryPredictor::VisibilityEvidenceCache {
       };
       combine(std::hash<double>{}(key.y));
       combine(std::hash<double>{}(key.z));
-      combine(std::hash<double>{}(key.query_time_s));
       combine(std::hash<double>{}(key.evaluation_time_s));
       combine(std::hash<bool>{}(key.measured_support));
       return seed;
@@ -252,9 +249,13 @@ VisibilityResult GnssAdvisoryPredictor::cached_visibility_evidence(
         effective_query_time_s, evaluation_time_s);
   }
   const std::size_t epoch_identity = receiver_epoch_identity(epoch);
+  // With a frozen epoch/map, LOS, support and canopy evidence are spatial.
+  // Candidate arrival time still drives temporal PL growth downstream, but
+  // local-map freshness is deliberately evaluated at evaluation_time_s. Do
+  // not rerun identical ray casts merely because two certified curves reach
+  // the same point at different future times.
   const VisibilityEvidenceCache::Key key{
       query_position.x(), query_position.y(), query_position.z(),
-      effective_query_time_s,
       std::isfinite(evaluation_time_s) ? evaluation_time_s
                                       : effective_query_time_s,
       measured_epoch_support};

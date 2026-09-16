@@ -1575,6 +1575,280 @@ TEST(PredictorModuleTest,
 }
 
 TEST(PredictorModuleTest,
+     SingleBrakingWindowCoreMatchesLegacyWholeCurveCore) {
+  auto params = make_params();
+  params.lidar.fim_params.fim_radius_m = 30.0;
+  iap::PredictorModule module(params);
+  module.set_observation_predicate(
+      [](const Eigen::Vector3d&) { return true; });
+  module.set_lidar_fim_primitives(make_lidar_primitives());
+  const auto snapshot = make_snapshot(true, true);
+
+  iap::ForwardRiskBatchRequest legacy;
+  legacy.combined_snapshot_identity = "legacy-whole-core";
+  legacy.snapshot = snapshot;
+  legacy.hal = 1000.0;
+  legacy.val = 1000.0;
+  legacy.evaluation_time_s = snapshot.stamp;
+  legacy.satellite_set_policy =
+      iap::ForwardRiskSatelliteSetPolicy::COMMON_CORE;
+  legacy.points = {
+      {Eigen::Vector3d(1.0, 0.0, 0.0), snapshot.stamp, 0.0, 1, 11, 0},
+      {Eigen::Vector3d(2.0, 0.0, 0.0), snapshot.stamp + 0.2, 0.2, 1, 12, 0}};
+
+  auto windowed = legacy;
+  windowed.combined_snapshot_identity = "single-braking-window";
+  windowed.satellite_set_policy =
+      iap::ForwardRiskSatelliteSetPolicy::BRAKING_WINDOW_CORE;
+  for (auto& point : windowed.points) point.satellite_window_id = 7;
+
+  const auto legacy_result = module.queryForwardRiskBatch(legacy);
+  const auto windowed_result = module.queryForwardRiskBatch(windowed);
+
+  ASSERT_TRUE(legacy_result.complete);
+  ASSERT_TRUE(windowed_result.complete)
+      << iap::forwardRiskFailureReasonName(windowed_result.failure_reason);
+  ASSERT_EQ(windowed_result.windows.size(), 1u);
+  EXPECT_EQ(windowed_result.windows.front().satellite_window_id, 7u);
+  EXPECT_EQ(windowed_result.windows.front().satellite_ids,
+            legacy_result.common_satellite_ids);
+  ASSERT_EQ(windowed_result.points.size(), legacy_result.points.size());
+  for (std::size_t index = 0; index < legacy_result.points.size(); ++index) {
+    EXPECT_DOUBLE_EQ(windowed_result.points[index].prediction.fused.hpl,
+                     legacy_result.points[index].prediction.fused.hpl);
+    EXPECT_DOUBLE_EQ(windowed_result.points[index].prediction.fused.vpl,
+                     legacy_result.points[index].prediction.fused.vpl);
+    EXPECT_EQ(windowed_result.points[index].local_satellite_set_hash,
+              legacy_result.points[index].local_satellite_set_hash);
+  }
+}
+
+TEST(PredictorModuleTest,
+     BrakingWindowsPreventRemoteSupportLossFromPoisoningNearCore) {
+  auto params = make_params();
+  params.gnss.measured_epoch_support_radius_m = 0.45;
+  params.lidar.fim_params.fim_radius_m = 30.0;
+  iap::PredictorModule module(params);
+  module.set_observation_predicate(
+      [](const Eigen::Vector3d& position) {
+        return position.x() < 0.0 ? position.x() >= -10.0 - 1.0e-9
+                                  : position.x() <= 10.0 + 1.0e-9;
+      });
+  module.set_lidar_fim_primitives(make_lidar_primitives());
+  const auto snapshot = make_snapshot(true, true);
+
+  iap::ForwardRiskBatchRequest request;
+  request.combined_snapshot_identity = "two-braking-windows";
+  request.snapshot = snapshot;
+  request.hal = 1000.0;
+  request.val = 1000.0;
+  request.evaluation_time_s = snapshot.stamp;
+  request.satellite_set_policy =
+      iap::ForwardRiskSatelliteSetPolicy::BRAKING_WINDOW_CORE;
+  request.points = {
+      {Eigen::Vector3d(-10.0, 0.0, 0.0), snapshot.stamp, 0.0, 1, 101, 10},
+      {snapshot.p_wb, snapshot.stamp + 0.2, 0.2, 1, 102, 10},
+      {snapshot.p_wb, snapshot.stamp + 0.2, 0.2, 1, 102, 20},
+      {Eigen::Vector3d(10.0, 0.0, 0.0), snapshot.stamp + 0.4, 0.4, 1, 103, 20}};
+
+  const auto result = module.queryForwardRiskBatch(request);
+
+  ASSERT_TRUE(result.complete)
+      << iap::forwardRiskFailureReasonName(result.failure_reason);
+  EXPECT_EQ(result.timing.unique_evidence_point_count, 3u);
+  EXPECT_EQ(result.timing.evidence_reuse_count, 1u);
+  ASSERT_EQ(result.windows.size(), 2u);
+  EXPECT_EQ(result.windows[0].satellite_window_id, 10u);
+  EXPECT_EQ(result.windows[1].satellite_window_id, 20u);
+  EXPECT_NE(result.windows[0].satellite_ids,
+            result.windows[1].satellite_ids);
+  EXPECT_LT(result.common_satellite_ids.size(),
+            result.windows[0].satellite_ids.size());
+  EXPECT_GE(result.windows[0].satellite_ids.size(),
+            static_cast<std::size_t>(params.gnss.geometry_params.min_sats));
+  EXPECT_GE(result.windows[1].satellite_ids.size(),
+            static_cast<std::size_t>(params.gnss.geometry_params.min_sats));
+  EXPECT_EQ(result.points[0].prediction.gnss.used_sat_ids,
+            result.windows[0].satellite_ids);
+  EXPECT_EQ(result.points[3].prediction.gnss.used_sat_ids,
+            result.windows[1].satellite_ids);
+  EXPECT_EQ(result.points[1].prediction.gnss.used_sat_ids,
+            result.windows[0].satellite_ids);
+  EXPECT_EQ(result.points[2].prediction.gnss.used_sat_ids,
+            result.windows[1].satellite_ids);
+}
+
+TEST(PredictorModuleTest,
+     ReusedEvidencePointIdRejectsDifferentSpaceTimeDefinitions) {
+  auto params = make_params();
+  params.lidar.fim_params.fim_radius_m = 30.0;
+  iap::PredictorModule module(params);
+  module.set_observation_predicate(
+      [](const Eigen::Vector3d&) { return true; });
+  module.set_lidar_fim_primitives(make_lidar_primitives());
+  const auto snapshot = make_snapshot(true, true);
+
+  iap::ForwardRiskBatchRequest request;
+  request.combined_snapshot_identity = "invalid-evidence-definition";
+  request.snapshot = snapshot;
+  request.hal = 1000.0;
+  request.val = 1000.0;
+  request.evaluation_time_s = snapshot.stamp;
+  request.satellite_set_policy =
+      iap::ForwardRiskSatelliteSetPolicy::BRAKING_WINDOW_CORE;
+  request.points = {
+      {Eigen::Vector3d(1.0, 0.0, 0.0), snapshot.stamp, 0.0, 1, 42, 10},
+      {Eigen::Vector3d(1.1, 0.0, 0.0), snapshot.stamp, 0.0, 1, 42, 20}};
+
+  const auto result = module.queryForwardRiskBatch(request);
+
+  EXPECT_FALSE(result.complete);
+  EXPECT_EQ(result.failure_reason,
+            iap::ForwardRiskFailureReason::EVIDENCE_IDENTITY_MISMATCH);
+  EXPECT_EQ(result.first_failure_index, 1u);
+}
+
+TEST(PredictorModuleTest,
+     AdjacentBrakingWindowsWithIdenticalCoresMergeTheirCertificate) {
+  auto params = make_params();
+  params.lidar.fim_params.fim_radius_m = 30.0;
+  iap::PredictorModule module(params);
+  module.set_observation_predicate(
+      [](const Eigen::Vector3d&) { return true; });
+  module.set_lidar_fim_primitives(make_lidar_primitives());
+  const auto snapshot = make_snapshot(true, true);
+
+  iap::ForwardRiskBatchRequest request;
+  request.combined_snapshot_identity = "merge-identical-windows";
+  request.snapshot = snapshot;
+  request.hal = 1000.0;
+  request.val = 1000.0;
+  request.evaluation_time_s = snapshot.stamp;
+  request.satellite_set_policy =
+      iap::ForwardRiskSatelliteSetPolicy::BRAKING_WINDOW_CORE;
+  request.points = {
+      {Eigen::Vector3d(1.0, 0.0, 0.0), snapshot.stamp, 0.0, 1, 1, 10},
+      {Eigen::Vector3d(2.0, 0.0, 0.0), snapshot.stamp + 0.2, 0.2, 1, 2, 10},
+      {Eigen::Vector3d(2.0, 0.0, 0.0), snapshot.stamp + 0.2, 0.2, 1, 2, 20},
+      {Eigen::Vector3d(3.0, 0.0, 0.0), snapshot.stamp + 0.4, 0.4, 1, 3, 20}};
+
+  const auto result = module.queryForwardRiskBatch(request);
+
+  ASSERT_TRUE(result.complete);
+  ASSERT_EQ(result.windows.size(), 1u);
+  EXPECT_EQ(result.windows.front().satellite_window_id, 10u);
+  EXPECT_EQ(result.windows.front().point_count, request.points.size());
+  EXPECT_GE(result.timing.candidate_cache_hit_count, 1u);
+}
+
+TEST(PredictorModuleTest,
+     FrozenSixteenSecondBdsWindowPolicyStaysNumericallyEquivalentAndInBudget) {
+  auto params = make_params();
+  params.lidar.fim_params.fim_radius_m = 30.0;
+  iap::PredictorModule legacy_module(params);
+  iap::PredictorModule windowed_module(params);
+  legacy_module.set_observation_predicate(
+      [](const Eigen::Vector3d&) { return true; });
+  windowed_module.set_observation_predicate(
+      [](const Eigen::Vector3d&) { return true; });
+  legacy_module.set_lidar_fim_primitives(make_lidar_primitives());
+  windowed_module.set_lidar_fim_primitives(make_lidar_primitives());
+  const auto snapshot = make_snapshot_with_epoch(make_epoch(16), true);
+
+  iap::ForwardRiskBatchRequest legacy;
+  legacy.combined_snapshot_identity = "frozen-16s-bds-legacy";
+  legacy.snapshot = snapshot;
+  legacy.hal = 1000.0;
+  legacy.val = 1000.0;
+  legacy.evaluation_time_s = snapshot.stamp;
+  legacy.satellite_set_policy =
+      iap::ForwardRiskSatelliteSetPolicy::COMMON_CORE;
+  std::vector<std::size_t> anchor_indices;
+  for (std::uint64_t index = 0; index <= 80; ++index) {
+    const double t = 0.2 * static_cast<double>(index);
+    legacy.points.push_back({
+        Eigen::Vector3d(0.4 * t, 0.5 * std::sin(0.3 * t), 0.0),
+        snapshot.stamp + t, t, 1, index + 1u, 0u});
+    anchor_indices.push_back(static_cast<std::size_t>(index));
+  }
+  // Frozen stand-in for the real <=0.2 s braking library: five additional
+  // samples after each of the 81 nominal anchors. The anchor itself is the
+  // nominal evidence point and is not recomputed.
+  for (std::uint64_t anchor = 0; anchor <= 80; ++anchor) {
+    const double anchor_t = 0.2 * static_cast<double>(anchor);
+    const Eigen::Vector3d anchor_position(
+        0.4 * anchor_t, 0.5 * std::sin(0.3 * anchor_t), 0.0);
+    for (std::uint64_t brake_step = 1; brake_step <= 5; ++brake_step) {
+      const double brake_dt = 0.2 * static_cast<double>(brake_step);
+      const double t = anchor_t + brake_dt;
+      legacy.points.push_back({
+          anchor_position + Eigen::Vector3d(0.06 * brake_step, 0.0, 0.0),
+          snapshot.stamp + t, t, 1,
+          1000u + anchor * 5u + brake_step, 0u});
+      anchor_indices.push_back(static_cast<std::size_t>(anchor));
+    }
+  }
+
+  auto windowed = legacy;
+  windowed.combined_snapshot_identity = "frozen-16s-bds-windowed";
+  windowed.satellite_set_policy =
+      iap::ForwardRiskSatelliteSetPolicy::BRAKING_WINDOW_CORE;
+  windowed.points.clear();
+  constexpr std::size_t kSamplesPerWindow = 6u;
+  for (std::size_t index = 0; index < legacy.points.size(); ++index) {
+    auto point = legacy.points[index];
+    const std::size_t anchor_index = anchor_indices[index];
+    point.satellite_window_id =
+        1u + static_cast<std::uint64_t>(
+            anchor_index / kSamplesPerWindow);
+    windowed.points.push_back(point);
+    if (anchor_index > 0u && anchor_index % kSamplesPerWindow == 0u) {
+      auto old_window_point = point;
+      old_window_point.satellite_window_id -= 1u;
+      windowed.points.insert(windowed.points.end() - 1, old_window_point);
+    }
+  }
+
+  const auto legacy_result = legacy_module.queryForwardRiskBatch(legacy);
+  const auto windowed_result =
+      windowed_module.queryForwardRiskBatch(windowed);
+  ASSERT_TRUE(legacy_result.complete)
+      << iap::forwardRiskFailureReasonName(legacy_result.failure_reason);
+  ASSERT_TRUE(windowed_result.complete)
+      << iap::forwardRiskFailureReasonName(windowed_result.failure_reason);
+  ASSERT_EQ(windowed_result.timing.unique_evidence_point_count,
+            legacy.points.size());
+  EXPECT_GT(windowed_result.timing.evidence_reuse_count, 0u);
+  EXPECT_LT(windowed_result.timing.total_ms, 150.0);
+
+  std::size_t windowed_index = 0u;
+  for (std::size_t legacy_index = 0u;
+       legacy_index < legacy_result.points.size(); ++legacy_index) {
+    while (windowed_index < windowed_result.points.size() &&
+           windowed.points[windowed_index].evidence_point_id !=
+               legacy.points[legacy_index].evidence_point_id) {
+      ++windowed_index;
+    }
+    ASSERT_LT(windowed_index, windowed_result.points.size());
+    EXPECT_DOUBLE_EQ(
+        windowed_result.points[windowed_index].prediction.fused.hpl,
+        legacy_result.points[legacy_index].prediction.fused.hpl);
+    EXPECT_DOUBLE_EQ(
+        windowed_result.points[windowed_index].prediction.fused.vpl,
+        legacy_result.points[legacy_index].prediction.fused.vpl);
+  }
+  RecordProperty("legacy_total_ms", legacy_result.timing.total_ms);
+  RecordProperty("windowed_total_ms", windowed_result.timing.total_ms);
+  RecordProperty("window_count", windowed_result.windows.size());
+  RecordProperty("unique_evidence_points",
+                 windowed_result.timing.unique_evidence_point_count);
+  RecordProperty("reused_transition_points",
+                 windowed_result.timing.evidence_reuse_count);
+  RecordProperty("transition_advisory_ms",
+                 windowed_result.timing.transition_advisory_ms);
+}
+
+TEST(PredictorModuleTest,
      LocalSatelliteMaskIgnoresUnselectedUnknownSatelliteParameters) {
   iap::GnssAdvisoryPredictor predictor(make_params().gnss);
   auto snapshot = make_snapshot(true, false);
@@ -2643,6 +2917,7 @@ TEST(PredictorModuleTest,
   const auto now = module.query(iap::PredictorQueryInput(
       Eigen::Vector3d(0.5, -0.25, 1.0), snapshot,
       100.0, 0.0, "map", 100.0));
+  const std::size_t support_calls_after_now = query_times.size();
   const auto future = module.query(iap::PredictorQueryInput(
       Eigen::Vector3d(0.5, -0.25, 1.0), snapshot,
       102.5, 2.5, "map", 100.0));
@@ -2655,10 +2930,11 @@ TEST(PredictorModuleTest,
             iap::CovarianceGrowthStatus::APPLIED);
   EXPECT_GT(future.fused.hpl, now.fused.hpl);
   ASSERT_FALSE(evaluation_times.empty());
+  // The frozen map/epoch LOS evidence is spatial and is reused at this exact
+  // position. Future arrival time still changes covariance/PL downstream.
+  EXPECT_EQ(query_times.size(), support_calls_after_now);
   EXPECT_TRUE(std::all_of(evaluation_times.begin(), evaluation_times.end(),
                           [](double time_s) { return time_s == 100.0; }));
-  EXPECT_NE(std::find(query_times.begin(), query_times.end(), 102.5),
-            query_times.end());
 }
 
 TEST(PredictorModuleTest,

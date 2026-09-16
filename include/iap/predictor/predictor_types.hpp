@@ -381,6 +381,7 @@ enum class ForwardRiskFailureReason {
   FIM_SUPPORT_MISSING,
   STALE,
   GENERATION_CHANGED,
+  EVIDENCE_IDENTITY_MISMATCH,
   COMPUTE_BUDGET_EXCEEDED,
 };
 
@@ -391,6 +392,14 @@ struct ForwardRiskQueryPoint {
   double query_time_s = std::numeric_limits<double>::quiet_NaN();
   double horizon_s = 0.0;
   std::uint64_t candidate_group_id = 0;
+  // A physical space/time sample. Repeated IDs are evaluated once and may be
+  // assigned to two satellite windows to certify a handover with both cores.
+  // Zero preserves the legacy behavior of treating every request row as a
+  // distinct evidence point.
+  std::uint64_t evidence_point_id = 0;
+  // Deterministic execution-commitment window. Required by
+  // BRAKING_WINDOW_CORE and ignored by the legacy policies.
+  std::uint64_t satellite_window_id = 0;
 };
 
 enum class ForwardRiskSatelliteSetPolicy {
@@ -400,6 +409,10 @@ enum class ForwardRiskSatelliteSetPolicy {
   // Execution authorization uses one conservative set that is usable at
   // every point of the remaining curve.
   COMMON_CORE,
+  // Execution authorization intersects locally usable satellites only over
+  // one reaction-and-braking commitment window. Transition samples appear
+  // once per adjacent window and must pass with both exact cores.
+  BRAKING_WINDOW_CORE,
 };
 
 struct GnssRiskSatelliteDiagnostic {
@@ -467,12 +480,40 @@ struct ForwardRiskPointResult {
   double unknown_coverage = 1.0;
 };
 
+struct ForwardRiskWindowResult {
+  std::uint64_t satellite_window_id = 0;
+  std::vector<int> satellite_ids;
+  std::uint64_t satellite_set_hash = 0;
+  std::size_t point_count = 0;
+  bool complete = false;
+  std::size_t first_failure_index = std::numeric_limits<std::size_t>::max();
+  ForwardRiskFailureReason failure_reason = ForwardRiskFailureReason::NONE;
+};
+
+struct ForwardRiskBatchTiming {
+  std::size_t unique_evidence_point_count = 0;
+  std::size_t evidence_reuse_count = 0;
+  std::size_t receiver_cache_hit_count = 0;
+  std::size_t candidate_cache_hit_count = 0;
+  double evidence_ms = 0.0;
+  double core_construction_ms = 0.0;
+  double advisory_ms = 0.0;
+  double transition_advisory_ms = 0.0;
+  double total_ms = 0.0;
+};
+
 struct ForwardRiskBatchResult {
   bool complete = false;
   std::string combined_snapshot_identity;
-  // Populated for COMMON_CORE requests with the exact sorted IDs used by
-  // every point. Empty for PER_POINT requests or incomplete common cores.
+  // For COMMON_CORE, the exact sorted IDs used by every point. For
+  // BRAKING_WINDOW_CORE, the diagnostic whole-request intersection computed
+  // from the same evidence pass but not used for authorization. Empty for
+  // PER_POINT requests or incomplete evidence.
   std::vector<int> common_satellite_ids;
+  // Populated for BRAKING_WINDOW_CORE in first-appearance order. Each entry
+  // contains the exact sorted IDs used by every row assigned to that window.
+  std::vector<ForwardRiskWindowResult> windows;
+  ForwardRiskBatchTiming timing;
   std::size_t first_failure_index = std::numeric_limits<std::size_t>::max();
   ForwardRiskFailureReason failure_reason = ForwardRiskFailureReason::NONE;
   std::vector<ForwardRiskPointResult> points;

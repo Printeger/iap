@@ -416,6 +416,8 @@ const char* forwardRiskFailureReasonName(
     case ForwardRiskFailureReason::STALE: return "STALE";
     case ForwardRiskFailureReason::GENERATION_CHANGED:
       return "GENERATION_CHANGED";
+    case ForwardRiskFailureReason::EVIDENCE_IDENTITY_MISMATCH:
+      return "EVIDENCE_IDENTITY_MISMATCH";
     case ForwardRiskFailureReason::COMPUTE_BUDGET_EXCEEDED:
       return "COMPUTE_BUDGET_EXCEEDED";
   }
@@ -834,9 +836,23 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
       out.points[index].ranking_state = ForwardRiskRankingState::INCOMPLETE;
       out.points[index].failure_reason = reason;
     }
+    out.timing.total_ms = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - started_at).count();
+    if (out.timing.evidence_ms == 0.0) {
+      out.timing.evidence_ms = out.timing.total_ms;
+    } else if (out.timing.core_construction_ms == 0.0) {
+      out.timing.core_construction_ms = std::max(
+          0.0, out.timing.total_ms - out.timing.evidence_ms);
+    } else if (out.timing.advisory_ms == 0.0) {
+      out.timing.advisory_ms = std::max(
+          0.0, out.timing.total_ms - out.timing.evidence_ms -
+              out.timing.core_construction_ms);
+    }
   };
   if (request.points.empty()) {
     out.complete = true;
+    out.timing.total_ms = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - started_at).count();
     return out;
   }
   if (!request.snapshot.has_epoch ||
@@ -846,6 +862,8 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
     for (auto& point : out.points) {
       point.failure_reason = out.failure_reason;
     }
+    out.timing.total_ms = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - started_at).count();
     return out;
   }
   if (budget_expired()) {
@@ -856,6 +874,10 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
   const std::size_t sat_count = request.snapshot.gnss_epoch.sats.size();
   std::vector<std::vector<bool>> local_satellite_masks;
   local_satellite_masks.reserve(request.points.size());
+  std::unordered_map<std::uint64_t, std::size_t> evidence_rows;
+  evidence_rows.reserve(request.points.size());
+  std::unordered_map<std::uint64_t, std::size_t> evidence_counts;
+  evidence_counts.reserve(request.points.size());
   for (std::size_t point_index = 0;
        point_index < request.points.size(); ++point_index) {
     if (budget_expired()) {
@@ -864,6 +886,28 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
       return out;
     }
     const auto& query = request.points[point_index];
+    if (query.evidence_point_id != 0) {
+      ++evidence_counts[query.evidence_point_id];
+      const auto found = evidence_rows.find(query.evidence_point_id);
+      if (found != evidence_rows.end()) {
+        const auto& original = request.points[found->second];
+        const bool same_definition =
+            query.position_map == original.position_map &&
+            query.query_time_s == original.query_time_s &&
+            query.horizon_s == original.horizon_s;
+        if (!same_definition) {
+          fail_from(point_index,
+                    ForwardRiskFailureReason::EVIDENCE_IDENTITY_MISMATCH);
+          return out;
+        }
+        out.points[point_index] = out.points[found->second];
+        local_satellite_masks.push_back(
+            local_satellite_masks[found->second]);
+        ++out.timing.evidence_reuse_count;
+        continue;
+      }
+      evidence_rows.emplace(query.evidence_point_id, point_index);
+    }
     const VisibilityResult evidence =
         gnss_.visibility_evidence(
             query.position_map, request.snapshot, query.query_time_s,
@@ -1003,6 +1047,13 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
     local_satellite_masks.push_back(std::move(local_mask));
   }
 
+  out.timing.unique_evidence_point_count =
+      request.points.size() - out.timing.evidence_reuse_count;
+  const auto evidence_complete_at = std::chrono::steady_clock::now();
+  out.timing.evidence_ms = std::chrono::duration<double, std::milli>(
+      evidence_complete_at - started_at).count();
+
+  const auto core_started_at = std::chrono::steady_clock::now();
   if (request.satellite_set_policy ==
       ForwardRiskSatelliteSetPolicy::COMMON_CORE) {
     std::vector<bool> common_mask(sat_count, true);
@@ -1045,7 +1096,105 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
         }
       }
     }
+  } else if (request.satellite_set_policy ==
+             ForwardRiskSatelliteSetPolicy::BRAKING_WINDOW_CORE) {
+    std::vector<bool> diagnostic_whole_curve_mask(sat_count, true);
+    for (const auto& local_mask : local_satellite_masks) {
+      for (std::size_t sat_index = 0; sat_index < sat_count; ++sat_index) {
+        diagnostic_whole_curve_mask[sat_index] =
+            diagnostic_whole_curve_mask[sat_index] && local_mask[sat_index];
+      }
+    }
+    for (std::size_t sat_index = 0; sat_index < sat_count; ++sat_index) {
+      if (diagnostic_whole_curve_mask[sat_index]) {
+        out.common_satellite_ids.push_back(
+            request.snapshot.gnss_epoch.sats[sat_index].sat_id);
+      }
+    }
+    std::sort(out.common_satellite_ids.begin(),
+              out.common_satellite_ids.end());
+    std::unordered_map<std::uint64_t, std::size_t> window_lookup;
+    window_lookup.reserve(request.points.size());
+    std::vector<std::vector<std::size_t>> window_rows;
+    for (std::size_t point_index = 0;
+         point_index < request.points.size(); ++point_index) {
+      const std::uint64_t window_id =
+          request.points[point_index].satellite_window_id;
+      auto inserted = window_lookup.emplace(window_id, out.windows.size());
+      if (inserted.second) {
+        ForwardRiskWindowResult window;
+        window.satellite_window_id = window_id;
+        out.windows.push_back(std::move(window));
+        window_rows.emplace_back();
+      }
+      window_rows[inserted.first->second].push_back(point_index);
+    }
+
+    for (std::size_t window_index = 0;
+         window_index < out.windows.size(); ++window_index) {
+      auto& window = out.windows[window_index];
+      const auto& rows = window_rows[window_index];
+      window.point_count = rows.size();
+      std::vector<bool> window_mask(sat_count, true);
+      for (const std::size_t row : rows) {
+        for (std::size_t sat_index = 0; sat_index < sat_count; ++sat_index) {
+          window_mask[sat_index] = window_mask[sat_index] &&
+              local_satellite_masks[row][sat_index];
+        }
+      }
+      const int window_satellite_count = static_cast<int>(std::count(
+          window_mask.begin(), window_mask.end(), true));
+      std::uint64_t window_hash = 1469598103934665603ull;
+      for (std::size_t sat_index = 0; sat_index < sat_count; ++sat_index) {
+        if (!window_mask[sat_index]) continue;
+        const int sat_id = request.snapshot.gnss_epoch.sats[sat_index].sat_id;
+        window.satellite_ids.push_back(sat_id);
+        window_hash ^= static_cast<std::uint64_t>(
+            static_cast<std::uint32_t>(sat_id));
+        window_hash *= 1099511628211ull;
+      }
+      std::sort(window.satellite_ids.begin(), window.satellite_ids.end());
+      window.satellite_set_hash =
+          window_satellite_count > 0 ? window_hash : 0;
+      if (window_satellite_count < params_.gnss.geometry_params.min_sats) {
+        window.complete = false;
+        window.first_failure_index = rows.front();
+        window.failure_reason =
+            ForwardRiskFailureReason::GNSS_LOCAL_USABLE_SATS_LT_MIN;
+        if (out.failure_reason == ForwardRiskFailureReason::NONE) {
+          out.failure_reason = window.failure_reason;
+          out.first_failure_index = rows.front();
+        }
+      }
+      for (const std::size_t row : rows) {
+        local_satellite_masks[row] = window_mask;
+        auto& point = out.points[row];
+        point.gnss_used_satellite_count = window_satellite_count;
+        point.local_satellite_set_hash = window.satellite_set_hash;
+        for (std::size_t sat_index = 0;
+             sat_index < point.gnss_satellites.size() &&
+                 sat_index < sat_count;
+             ++sat_index) {
+          auto& diagnostic = point.gnss_satellites[sat_index];
+          if (diagnostic.used && !window_mask[sat_index]) {
+            diagnostic.used = false;
+            diagnostic.exclusion_reason =
+                "not_in_braking_window_execution_core";
+          }
+        }
+      }
+    }
+    if (out.failure_reason != ForwardRiskFailureReason::NONE) {
+      const auto reason = out.failure_reason;
+      const auto first = out.first_failure_index;
+      fail_from(first, reason);
+      return out;
+    }
   }
+  const auto core_complete_at = std::chrono::steady_clock::now();
+  out.timing.core_construction_ms =
+      std::chrono::duration<double, std::milli>(
+          core_complete_at - core_started_at).count();
 
   out.complete = true;
   out.failure_reason = ForwardRiskFailureReason::NONE;
@@ -1056,7 +1205,17 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
   std::unordered_map<std::uint64_t, ReceiverAdvisoryCacheEntry>
       receiver_cache;
   receiver_cache.reserve(request.points.size());
+  struct CandidateAdvisoryCacheEntry {
+    std::uint64_t evidence_point_id = 0;
+    std::vector<bool> satellite_mask;
+    PredictorQueryResult prediction;
+  };
+  std::unordered_multimap<std::uint64_t, CandidateAdvisoryCacheEntry>
+      candidate_cache;
+  candidate_cache.reserve(request.points.size());
+  const auto advisory_started_at = std::chrono::steady_clock::now();
   for (std::size_t index = 0; index < request.points.size(); ++index) {
+    const auto point_started_at = std::chrono::steady_clock::now();
     if (budget_expired()) {
       fail_from(index, ForwardRiskFailureReason::COMPUTE_BUDGET_EXCEEDED);
       break;
@@ -1070,6 +1229,7 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
     if (cached_receiver != receiver_cache.end() &&
         cached_receiver->second.satellite_mask == local_mask) {
       receiver_advisory = &cached_receiver->second.advisory;
+      ++out.timing.receiver_cache_hit_count;
     } else {
       uncached_receiver =
           gnss_.query_receiver_measured_with_satellite_mask(
@@ -1089,9 +1249,36 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
     const PredictorQueryInput input(
         query.position_map, request.snapshot, query.query_time_s,
         query.horizon_s, "map", request.evaluation_time_s);
-    result.prediction = queryWithSpatialAdvisory(
-        input, nullptr, nullptr, diagnostics, &local_mask,
-        receiver_advisory);
+    bool reused_candidate = false;
+    if (query.evidence_point_id != 0) {
+      const std::uint64_t cache_key = result.local_satellite_set_hash ^
+          (query.evidence_point_id + 0x9e3779b97f4a7c15ULL +
+           (result.local_satellite_set_hash << 6U) +
+           (result.local_satellite_set_hash >> 2U));
+      const auto range = candidate_cache.equal_range(cache_key);
+      for (auto candidate = range.first; candidate != range.second;
+           ++candidate) {
+        if (candidate->second.evidence_point_id == query.evidence_point_id &&
+            candidate->second.satellite_mask == local_mask) {
+          result.prediction = candidate->second.prediction;
+          reused_candidate = true;
+          ++out.timing.candidate_cache_hit_count;
+          break;
+        }
+      }
+      if (!reused_candidate) {
+        result.prediction = queryWithSpatialAdvisory(
+            input, nullptr, nullptr, diagnostics, &local_mask,
+            receiver_advisory);
+        candidate_cache.emplace(
+            cache_key, CandidateAdvisoryCacheEntry{
+                query.evidence_point_id, local_mask, result.prediction});
+      }
+    } else {
+      result.prediction = queryWithSpatialAdvisory(
+          input, nullptr, nullptr, diagnostics, &local_mask,
+          receiver_advisory);
+    }
     result.gnss_supported = result.prediction.gnss.valid &&
         result.prediction.gnss.n_used >= params_.gnss.geometry_params.min_sats;
     result.lidar_supported = result.prediction.lidar.valid;
@@ -1155,7 +1342,66 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
       out.failure_reason = result.failure_reason;
       out.first_failure_index = index;
     }
+    const auto evidence_count = evidence_counts.find(
+        request.points[index].evidence_point_id);
+    if (request.points[index].evidence_point_id != 0 &&
+        evidence_count != evidence_counts.end() &&
+        evidence_count->second > 1u) {
+      out.timing.transition_advisory_ms +=
+          std::chrono::duration<double, std::milli>(
+              std::chrono::steady_clock::now() - point_started_at).count();
+    }
   }
+  if (request.satellite_set_policy ==
+      ForwardRiskSatelliteSetPolicy::BRAKING_WINDOW_CORE) {
+    std::unordered_map<std::uint64_t, std::size_t> window_lookup;
+    window_lookup.reserve(out.windows.size());
+    for (std::size_t index = 0; index < out.windows.size(); ++index) {
+      auto& window = out.windows[index];
+      window.complete = true;
+      window.failure_reason = ForwardRiskFailureReason::NONE;
+      window_lookup.emplace(window.satellite_window_id, index);
+    }
+    for (std::size_t point_index = 0;
+         point_index < request.points.size(); ++point_index) {
+      auto& window = out.windows[window_lookup.at(
+          request.points[point_index].satellite_window_id)];
+      const auto& point = out.points[point_index];
+      if (point.ranking_state == ForwardRiskRankingState::COMPARABLE &&
+          point.failure_reason == ForwardRiskFailureReason::NONE) {
+        continue;
+      }
+      window.complete = window.complete &&
+          point.ranking_state == ForwardRiskRankingState::COMPARABLE;
+      if (window.failure_reason == ForwardRiskFailureReason::NONE &&
+          point.failure_reason != ForwardRiskFailureReason::NONE) {
+        window.first_failure_index = point_index;
+        window.failure_reason = point.failure_reason;
+      }
+    }
+    std::vector<ForwardRiskWindowResult> merged_windows;
+    merged_windows.reserve(out.windows.size());
+    for (auto& window : out.windows) {
+      if (!merged_windows.empty() &&
+          merged_windows.back().satellite_ids == window.satellite_ids) {
+        auto& merged = merged_windows.back();
+        merged.point_count += window.point_count;
+        merged.complete = merged.complete && window.complete;
+        if (merged.failure_reason == ForwardRiskFailureReason::NONE &&
+            window.failure_reason != ForwardRiskFailureReason::NONE) {
+          merged.first_failure_index = window.first_failure_index;
+          merged.failure_reason = window.failure_reason;
+        }
+      } else {
+        merged_windows.push_back(std::move(window));
+      }
+    }
+    out.windows = std::move(merged_windows);
+  }
+  out.timing.advisory_ms = std::chrono::duration<double, std::milli>(
+      std::chrono::steady_clock::now() - advisory_started_at).count();
+  out.timing.total_ms = std::chrono::duration<double, std::milli>(
+      std::chrono::steady_clock::now() - started_at).count();
   return out;
 }
 
