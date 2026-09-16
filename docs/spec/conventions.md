@@ -141,10 +141,25 @@
 - A newly appearing advisory satellite must be present in three consecutive
   raw epochs before use. Disappearance, certified exclusion and hard LOS
   obstruction remove it immediately. This admission state is explicitly
-  diagnostic and is not added to the certified epoch identity. Final and
-  runtime checks use the intersection of usable satellites over the complete
-  remaining short-trajectory batch and recompute candidate and receiver raw
-  PL from that common core; an insufficient intersection is `UNKNOWN/HOLD`.
+  diagnostic and is not added to the certified epoch identity. Production
+  final/runtime checks use `BRAKING_WINDOW_CORE`: each deterministic window
+  covers the nominal commands that may execute before the next handover, every
+  real certified braking curve reachable from those commands, and a 0.4 s
+  transition overlap. Usable satellites are intersected only inside that
+  execution commitment envelope; candidate and receiver raw PL use the same
+  exact IDs at every point. Transition evidence evaluates the same space-time
+  samples once and applies both old and new cores, accepting only when both are
+  complete and below AL. Equal adjacent cores merge. An insufficient core,
+  missing braking anchor, anchor gap over 0.2 s, degenerate geometry or budget
+  expiry is `UNKNOWN/HOLD`. The legacy whole-curve `COMMON_CORE` remains an
+  explicit diagnostic/A-B policy, not the formal forest default. During the
+  final 0.2 s after the last discrete guard anchor, the exact remaining
+  hard-terminal spline is registered as the reachable suffix braking curve
+  and can be activated without a state discontinuity; it may neither extend
+  the deadline nor move the approved endpoint. Every admission certificate
+  binds the window-layout hash and the exact per-window satellite-set hash.
+  Successor reauthorization and P5 must reject a policy/layout/set mismatch;
+  a legacy common-core result cannot be relabelled as a window certificate.
 - The optional GNSS LOS clearance transition is part of the predictor and
   snapshot identity. For width `w>0`, an occupancy generation owns a truncated
   distance field to occupied voxel surfaces; the LOS proximity is
@@ -177,7 +192,8 @@
 - A published P4 B-spline is an immutable, finite execution grant. Its
   certificate binds trajectory id, start time, duration/knots/control points,
   approved endpoint/deadline, terminal velocity/acceleration, braking model,
-  map/risk snapshot identity and selection authority.
+  map/risk snapshot identity, GNSS core policy, window/braking layout identity
+  and selection authority.
 - Every P4 curve, including common-prefix and observe-more curves, must satisfy
   fixed zero terminal velocity and acceleration before final acceptance. The
   production terminal fit treats start position/velocity/acceleration,
@@ -234,9 +250,10 @@
   (`direct_risk`, `support`, `Integrity/GNSS`, collision, incomplete query or
   curve identity), not a generic authority-ID mismatch.
 - P4 route search emits `CANDIDATE_READY`, never formal authority. The manager
-  builds the real terminal-stop B-spline and directly checks its <=0.2 s
-  samples at their actual arrival times with the remaining-curve common
-  satellite core. Only an entirely SAFE curve is promoted atomically to
+  builds the real terminal-stop B-spline and its <=0.2 s braking-anchor
+  library, constructs reaction/braking commitment windows, and directly
+  checks every nominal, braking and dual-transition sample at its actual
+  arrival time. Only an entirely SAFE set of window certificates is promoted atomically to
   `RISK_SELECTED`. The first failure retains curve position, arc length,
   arrival time, PL/AL, satellite IDs, sigma/geometry and spatial/temporal
   growth. At most two feedback regenerations may switch to an unused safe
@@ -275,6 +292,14 @@
   collision, current certified Integrity violation or an unavailable braking
   curve remains an emergency fail-closed condition. This terminal state is
   reported separately from normal arrival at the originally approved endpoint.
+- A formal route carries the same braking-window library. Runtime revalidation
+  checks only the current commitment window, its next handover overlap and the
+  braking curves that can still be selected, using the latest immutable
+  execution snapshot. A later-window failure cannot be skipped: authority may
+  extend only through the last continuously safe certified stop. A direct
+  formal-window failure therefore activates its existing certified brake
+  immediately; the LIMITED_PREFIX marginal confirmation state machine is not
+  widened to formal routes. RiskGrid never authorizes a window.
 - A complete LIMITED_PREFIX with a certified braking library distinguishes
   `SAFE`, `MARGINAL_UNSAFE_ARMED`, `CONFIRMED_UNSAFE_BRAKING` and
   `HARD_UNSAFE_BRAKING`. Only a future direct-risk ratio

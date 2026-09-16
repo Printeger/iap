@@ -92,8 +92,20 @@ For each candidate trajectory τ:
   Formal planner defaults use GPS+BDS+GAL+GLO. New advisory satellites require
   three consecutive epochs before admission, while disappearance, certified
   exclusion and hard occlusion remove them immediately. Execution checks use
-  the conservative common usable-satellite core over the remaining short
-  curve; an insufficient core is UNKNOWN, never an interpolated PL.
+  deterministic braking-window common cores rather than one intersection over
+  the whole future curve. A window contains the commands committed through
+  reaction/handover delay plus every reachable certified stopping curve;
+  adjacent windows overlap by 0.4 s and both satellite sets must independently
+  pass on identical transition samples. Far-future support loss therefore
+  cannot remove a satellite from the current stopping envelope. An
+  insufficient local core is UNKNOWN, never an interpolated PL, and RiskGrid
+  remains search-only. The explicit legacy A/B policy retains the old
+  whole-curve intersection. In the final 0.2 s after the last discrete guard
+  anchor, the exact hard-terminal spline remainder is registered as the only
+  reachable suffix braking curve and can be activated without extending its
+  approved endpoint or deadline. P4 and P5 bind both the deterministic window
+  layout and the exact satellite IDs used by every window; policy/layout/set
+  mismatches fail closed, including successor reauthorization.
   A bounded history of four completed execution snapshots is retained only to
   choose the newest result causal to the current ROS evaluation stamp; the
   work channel itself remains single-slot/latest-wins and every selected
@@ -173,7 +185,8 @@ For each candidate trajectory τ:
   churn cannot relabel the stopping curve.
 - Coarse/refined routes are only `CANDIDATE_READY`. Formal `RISK_SELECTED`
   authority is created after the actual terminal-stop B-spline passes direct
-  common-core checks at its real arrival times. The first actual-curve failure
+  braking-window checks at its real arrival times, including all braking
+  curves and both cores in every transition overlap. The first actual-curve failure
   is fed back for at most two regenerations: another channel for spatial
   failure, one bounded faster time parameterization for temporal growth, then
   a directly certified stoppable prefix of the corridor shared by at least two

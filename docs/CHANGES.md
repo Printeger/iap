@@ -3,6 +3,55 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(braking-window-gnss-core): IAP-RQ-312 / IAP-RQ-320 / IAP-RQ-400 /
+  IAP-RQ-410 — replace the production whole-trajectory GNSS satellite
+  intersection with deterministic `BRAKING_WINDOW_CORE` certificates. Each
+  window covers the executable nominal segment, all real <=0.2 s braking-anchor
+  curves in that commitment envelope, and a 0.4 s handover overlap. Identical
+  evidence points share one LOS/support pass; transition samples are evaluated
+  with both old and new exact satellite sets and both must pass. Candidate and
+  receiver retain the same IDs within a window, hard obstruction/certified
+  exclusion/removal remains immediate, three-epoch admission remains intact,
+  and equal adjacent cores merge. Formal routes, LIMITED_PREFIX, P5, runtime
+  checks and successor reauthorization now bind actual curve, sample lattice,
+  braking/window layout, execution snapshot, occupancy and GNSS epoch. Runtime
+  and P5 now also bind the exact per-window satellite-set hash; a legacy
+  `COMMON_CORE` result or a changed transition/set certificate cannot satisfy
+  a `BRAKING_WINDOW_CORE` admission. Prepared-successor reauthorization
+  rebuilds the same nominal-plus-braking layout instead of silently falling
+  back to the legacy policy, and marginal guard selection reuses the already
+  dual-checked current/next window evidence. Failure arc length is projected
+  onto the nominal B-spline (braking branches are no longer concatenated as
+  fake route distance), and runner satellite medians are pooled from the
+  actual window sets rather than taking the largest per-certificate median.
+  Runtime
+  rechecks only the current/next commitment region and its available brakes;
+  a formal-window failure immediately selects an existing certified brake,
+  while the marginal confirmation state remains LIMITED_PREFIX-only. The
+  formal forest/runner default is `braking_window_core`; explicit
+  `whole_curve_common_core` remains for legacy A/B. PL/AL, BDS, P5, 1 s
+  freshness and the 150 ms fail-closed budget are unchanged. This is rolling
+  instantaneous integrity plus a certified-stop invariant, not a claim of a
+  16 s accumulated integrity probability bound. Exact spatial LOS/support
+  evidence is now reused across future arrival times on the same frozen
+  map/epoch (future time still drives covariance and PL growth), and ordered
+  support histories stop at the newest covering observation. The final
+  <=0.2 s hard-terminal spline remainder is registered as an activatable exact
+  suffix braking certificate after the last discrete guard anchor; this closes a terminal
+  sampling gap without extending the endpoint or deadline. In the post-fix
+  BDS forest run, the vehicle moved `2.877 m` and emitted
+  `ENDPOINT_HOLD approved_endpoint_reached`. The deduplicated 16 s window
+  certification p95/max was `70.75/72.15 ms` in the first performance run;
+  the final endpoint-confirmation run observed `9.03/29.46 ms` because most
+  exact frozen evidence was cache-reusable. Window-core construction stayed
+  below `1 ms`; retained window satellite counts were `12..37` in the first
+  run and `15..36` in the final run, saving up to `30` and `11` satellites
+  respectively from remote-window deletion. No formal route was selected:
+  representative actual-curve window 2 used 16 satellites and failed on VPL
+  `42.762 m > VAL 40 m` while HPL was `6.754 m < HAL 20 m`; the vertical
+  spatial delta was `26.550 m`. The final runner remained red only on separate
+  LiDAR render/frame-gap and current-frame latency gates, not on execution,
+  endpoint, snapshot, support, or direct-query authority.
 - fix(gnss-boundary-confirmation-and-actual-curve-authority): IAP-RQ-312 /
   IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 — add a LIMITED_PREFIX-only runtime
   confirmation state machine for fully supported future GNSS exceedances no
