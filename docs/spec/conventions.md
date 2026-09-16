@@ -106,7 +106,11 @@
   or over-budget results fail closed. Same-generation result reuse never
   bypasses current map/GNSS/certified-Integrity freshness, and any generation
   change forces recomputation. RiskGrid remains available as a planning
-  heuristic and for diagnostics.
+  heuristic and for diagnostics. Its absence, expiry or build timeout disables
+  only grid-derived ordering and P1 cost preference: enumeration continues
+  from frozen occupancy and authorization still comes from the execution
+  snapshot direct batch. The legacy
+  `require_risk_grid_ready_before_planning` setting is diagnostic-only.
 - Execution publication retains a bounded four-result history, separate from
   the single pending work slot, solely to select the newest snapshot causal to
   an execution evaluation timestamp. Each selected result still undergoes the
@@ -186,9 +190,12 @@
   margin, requires valid current Integrity below AL and enough distance to
   stop, then emits `DEFER_RISK_SELECTION/COMMON_PREFIX` with
   `LIMITED_PREFIX` authority. It is never labelled `RISK_SELECTED`; absent
-  sufficient safe distance, the action remains HOLD. The configured maximum
-  prefix progress is a hard upper bound; if current-speed braking needs more,
-  the action remains HOLD. The cropped curve is
+  sufficient safe distance, the action remains HOLD. Executable progress is
+  the continuous safe common-corridor distance minus current-speed stopping
+  distance and vehicle/tracking reserve, capped by
+  `max_limited_prefix_progress_m` (default/formal forest: 8 m). The legacy
+  `max_creep_progress_m` is only a compatibility override. If the remaining
+  distance cannot stop the current state, the action remains HOLD. The cropped curve is
   independently checked at its actual arrival times and may not pass the
   approved endpoint.
 - A geometry-only prefix, a single route with incomplete risk support, or a
@@ -207,6 +214,28 @@
   immediately. Ordinary generations, pending/rate limiting and smaller
   numerical endpoint changes retain the exact trajectory id, start, endpoint
   and deadline.
+- A replacement is a parent-bound prepared successor. Before atomic publish it
+  rechecks the parent trajectory ID/start/control-point hash, switch window,
+  bounded position/velocity/acceleration boundary mismatch, execution-snapshot
+  freshness, direct risk and collision state. A late, discontinuous or
+  identity-mismatched successor is discarded while the parent continues;
+  accepted successors record their parent and switch without an intermediate
+  endpoint hold.
+- Native refinement reports structured status. A densely sampled coarse path
+  that is collision-free in frozen occupancy is accepted directly; A* runs
+  only for colliding segments. Budget, occupancy, collision, no-path, invalid
+  result, corridor escape and short-output failures remain distinct, and every
+  successful refinement is directly re-certified.
+- RiskGrid providers accept a position-major spatial batch plus a horizon
+  list. Generation health reports occupancy/support scan, query layout,
+  provider, voxel materialization, commit and total build timing. Source and
+  budget validity are checked at each stage boundary; an over-budget
+  generation is discarded whole and never partially published. Rich
+  provider/topology voxels are stored only for spatial cells admitted by
+  occupancy/support; skipped-cell occupancy and support are stored once per
+  spatial layer and reconstructed with the exact horizon stamp on query. This
+  storage optimization may not change public interpolation, trace or UNKNOWN
+  semantics.
 - A committed limited prefix stores independently parameterized stopping
   curves at no more than 0.2 s anchor spacing. Every curve is start-state
   continuous, terminal-zero, dynamics/collision checked, and all curve samples

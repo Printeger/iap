@@ -75,6 +75,14 @@ For each candidate trajectory τ:
   dense-grid callback cannot overwrite it. A
   failed background build is reported separately from the retained grid: the
   old generation may guide search only while it is still fresh.
+  Missing/stale RiskGrid also cannot block candidate enumeration: frozen
+  occupancy supplies geometry and the execution snapshot direct batch supplies
+  risk ranking and final authority. The position-major provider API evaluates
+  each spatial point across all horizons without reconstructing a flat-query
+  hash table. Admitted rich voxels remain horizon-specific, while skipped
+  occupancy/support diagnostics are stored once per spatial cell and exposed
+  with their exact queried horizon; stage timings and the 500 ms
+  whole-generation deadline remain observable.
   Trusted support retains up to 64 original current-frame envelopes within the
   unchanged one-second hard validity window. Each real B-spline point uses the
   newest fresh envelope that spatially covers that point, so unrelated stale
@@ -117,7 +125,8 @@ For each candidate trajectory τ:
   the incumbent execution certificate.
 - When no full topology route is risk-safe, the planner may crop the
   continuous risk-safe geometry-common corridor before the first unsafe or
-  unsupported sample, reserve stopping/tracking distance, and publish it only
+  unsupported sample, subtract current-speed stopping distance plus
+  vehicle/tracking reserve (up to an 8 m lookahead), and publish it only
   as a terminal-stopped `LIMITED_PREFIX`. Too little safe distance remains a
   normal HOLD, including when current-speed braking exceeds the configured
   maximum prefix progress; a limited prefix is not a full-route risk selection. A
@@ -132,6 +141,10 @@ For each candidate trajectory τ:
   A valid limited prefix is not replaced for ordinary worker/generation churn:
   after a one-second minimum commitment, a replacement must extend the safe
   common endpoint by at least 0.5 m without worsening its direct-risk maximum.
+  The successor is prepared while the current prefix executes and is published
+  only if parent identity, switch window, position/velocity/acceleration
+  boundary state and current direct authority still match; otherwise the old
+  prefix continues to its endpoint.
   The committed terminal-stopped curve also carries independently generated,
   checked stopping curves at <=0.2 s state anchors. When input data expires,
   execution reaches the nearest future anchor within 0.2 s and publishes the

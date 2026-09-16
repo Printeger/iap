@@ -3,6 +3,28 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(adaptive-limited-prefix-and-grid-decoupling): IAP-RQ-312 /
+  IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 — replace the forest's fixed 0.5 m
+  creep cap with an adaptive continuous-safe-corridor prefix that subtracts
+  current-speed stopping and tracking/vehicle reserve and is capped at 8 m.
+  The legacy cap remains an explicit compatibility override. Committed limited
+  prefixes accept only parent-bound, directly safe successors that advance at
+  least 0.5 m after the minimum commitment, do not worsen remaining risk, and
+  pass switch-time position/velocity/acceleration continuity checks; rejected
+  successors leave the incumbent identity and endpoint unchanged. P4/P5
+  admission now requires a fresh execution snapshot, while a missing, stale or
+  timed-out RiskGrid disables only search-cost preference and cannot block a
+  directly certified candidate. Native refinement returns typed failure
+  causes and skips per-segment A* for densely verified clear coarse paths.
+  RiskGrid construction uses a position-major × horizons provider interface,
+  stores provider-backed rich voxels only for admitted spatial cells while
+  sharing skipped-cell occupancy/support diagnostics across horizons, records
+  scan/layout/provider/materialization/commit/total timing, and checks the
+  unchanged 500 ms whole-generation deadline at stage boundaries. Exact knot
+  insertion creates braking suffixes without least-squares drift, and final
+  authorization events carry the actual execution-snapshot and GNSS-epoch
+  identities. PL/AL, BDS defaults, P5 policy and the one-second map freshness
+  limit are unchanged.
 - fix(execution-snapshot-scheduling-and-corridor-support): IAP-RQ-312 /
   IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 — keep the 1.0 s local-map hard
   freshness limit while removing scheduler-induced expiry. Complete GridMap
