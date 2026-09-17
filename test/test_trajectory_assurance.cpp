@@ -31,6 +31,24 @@ std::vector<iap::LocalMotionCurve> shortCurve() {
   return {nominal, brake};
 }
 
+std::vector<iap::LocalMotionCurve> longHealthyRegisteredCurve() {
+  iap::LocalMotionCurve nominal;
+  nominal.curve_id = "nominal-long";
+  for (int index = 0; index <= 43; ++index) {
+    nominal.samples.push_back({
+        0.2 * static_cast<double>(index),
+        Eigen::Vector3d(0.0, 0.0, 1.0), 0.05});
+  }
+  iap::LocalMotionCurve brake;
+  brake.curve_id = "brake-now";
+  brake.braking_curve = true;
+  brake.samples = {
+      {0.0, Eigen::Vector3d(0.0, 0.0, 1.0), 0.05},
+      {0.2, Eigen::Vector3d(0.0, 0.0, 1.0), 0.05},
+  };
+  return {nominal, brake};
+}
+
 std::vector<iap::GlobalNavigationExposureSample> slightVplExceedance() {
   return {
       {0.0, 10.0, 39.0, 20.0, 40.0, true},
@@ -197,6 +215,70 @@ TEST(LocalMotionAssuranceTest,
   EXPECT_EQ(result.status, iap::LocalMotionAssuranceStatus::SAFE);
   EXPECT_GT(result.minimum_margin_m, 3.0);
   EXPECT_LT(result.maximum_required_envelope_m, 1.0);
+}
+
+TEST(LocalMotionAssuranceTest,
+     HealthyRegisteredSlamDoesNotInventTimeLinearDrift) {
+  auto evidence = clearCurrentFrameEvidence();
+  iap::LocalObstacleEvidence obstacle;
+  // Surface clearance is 0.90 m. The measured/local envelope is 0.622 m;
+  // extending the same healthy registered geometry to 8.6 s must not add an
+  // uncalibrated 0.86 m error that the SLAM producer never reported.
+  obstacle.center_map = Eigen::Vector3d(0.0, 0.95, 1.0);
+  obstacle.half_extent_m = Eigen::Vector3d::Constant(0.05);
+  obstacle.provenance =
+      iap::LocalObstacleProvenance::ACTIVE_WINDOW_CERTIFIED;
+  obstacle.source_frame_id = 9;
+  obstacle.source_identity = "frame-9";
+  evidence.obstacles.push_back(obstacle);
+
+  const auto result = iap::LocalMotionAssurance().evaluate(
+      evidence, longHealthyRegisteredCurve());
+
+  EXPECT_EQ(result.status, iap::LocalMotionAssuranceStatus::SAFE)
+      << result.reason << " curve=" << result.first_failure.curve_id
+      << " sample=" << result.first_failure.sample_index
+      << " clearance=" << result.first_failure.obstacle_clearance_m
+      << " envelope=" << result.first_failure.required_envelope_m
+      << " drift=" << result.first_failure.drift_error_m;
+  EXPECT_NEAR(result.minimum_margin_m, 0.278, 1.0e-12);
+  EXPECT_NEAR(result.maximum_required_envelope_m, 0.622, 1.0e-12);
+}
+
+TEST(LocalMotionAssuranceTest, RegistrationAndSupportFailuresRemainFailClosed) {
+  auto registration_failure = clearCurrentFrameEvidence();
+  registration_failure.icp_degenerate = true;
+  const auto invalid_registration = iap::LocalMotionAssurance().evaluate(
+      registration_failure, shortCurve());
+  EXPECT_EQ(invalid_registration.status,
+            iap::LocalMotionAssuranceStatus::UNKNOWN);
+  EXPECT_EQ(invalid_registration.reason, "slam_registration_health_invalid");
+
+  auto stale_support = clearCurrentFrameEvidence();
+  stale_support.support_fresh = false;
+  const auto invalid_support = iap::LocalMotionAssurance().evaluate(
+      stale_support, shortCurve());
+  EXPECT_EQ(invalid_support.status, iap::LocalMotionAssuranceStatus::UNKNOWN);
+  EXPECT_EQ(invalid_support.reason, "local_motion_evidence_incomplete");
+}
+
+TEST(LocalMotionAssuranceTest, UnsafeCertifiedBrakeStillFailsClosed) {
+  auto evidence = clearCurrentFrameEvidence();
+  iap::LocalObstacleEvidence obstacle;
+  obstacle.center_map = Eigen::Vector3d(0.0, 0.0, 1.0);
+  obstacle.half_extent_m = Eigen::Vector3d::Constant(0.05);
+  obstacle.provenance = iap::LocalObstacleProvenance::CURRENT_FRAME;
+  evidence.obstacles.push_back(obstacle);
+
+  auto curves = shortCurve();
+  for (auto& sample : curves.front().samples) {
+    sample.position_map.y() = 2.0;
+  }
+  const auto result = iap::LocalMotionAssurance().evaluate(evidence, curves);
+
+  ASSERT_EQ(result.status, iap::LocalMotionAssuranceStatus::UNSAFE);
+  EXPECT_EQ(result.first_failure.curve_id, "brake-0");
+  EXPECT_EQ(result.reason, "hard_collision");
 }
 
 TEST(LocalMotionAssuranceTest, IcpResidualDoesNotReuseGnssAraimMultiplier) {

@@ -1529,7 +1529,7 @@ class TestStageAnalyzer(unittest.TestCase):
         control_hash, knot_hash = MODULE._captured_bspline_hashes(
             spline_payload)
         lineage = [{
-            "schema_version": "p4_forward_route_decision_v12",
+            "schema_version": "p4_forward_route_decision_v13",
             "stage": "normal_publish_authorized",
             "action": "DEFER_RISK_SELECTION",
             "deferred_motion_mode": "COMMON_PREFIX",

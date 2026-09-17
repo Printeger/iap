@@ -409,7 +409,7 @@
 - `LocalMotionAssurance` independently checks the exact nominal curve and all
   reachable braking curves at no more than `0.2 s` spacing. Its directional
   margin subtracts vehicle radius, measured tracking bound, scan/ICP bound,
-  short-horizon relative drift, curve approximation and fixed safety margin
+  curve approximation and fixed safety margin
   from obstacle-surface clearance. The registered local map is authoritative
   SLAM geometry: current and active-window obstacles use the same local
   execution envelope. Planner code must not synthesize a current-to-source
@@ -436,8 +436,12 @@
   occupancy voxel; an adjacent voxel has no surface identity authority. This does not create free-space
   evidence or remove occupancy. Invalid AABBs,
   missing/nonpositive frame identity, degenerate or incomplete source ICP
-  health fail closed. Relative-drift time starts at the current remaining-curve
-  or braking-curve sample, never at an already elapsed trajectory origin.
+  health fail closed. In healthy registered-map operation the planner must not
+  invent an elapsed-time-linear SLAM drift term: no producer supplies a
+  certified bound for such a term, and fresh registered updates already own
+  map-relative alignment. Loss of registration health, stale support or a
+  source-data gap remains fail-closed and activates the existing certified
+  braking path.
   `p4.execution.max_tracking_error_m` is a loss-of-control rejection threshold,
   not a future-error bound. Local envelopes use the separate certified
   `p4.assurance.local_tracking_error_bound_m` (default `0.15 m`) and

@@ -160,7 +160,6 @@ def generate_launch_description():
     p4_assurance_local_safety_margin_m = LaunchConfiguration('p4_assurance_local_safety_margin_m', default=0.20)
     p4_assurance_local_scan_error_min_m = LaunchConfiguration('p4_assurance_local_scan_error_min_m', default=0.02)
     p4_assurance_local_lidar_error_multiplier = LaunchConfiguration('p4_assurance_local_lidar_error_multiplier', default=1.0)
-    p4_assurance_local_drift_bound_mps = LaunchConfiguration('p4_assurance_local_drift_bound_mps', default=0.10)
     p5_enable_runtime_gate = LaunchConfiguration('p5_enable_runtime_gate', default=False)
     p5_enable_final_gate = LaunchConfiguration('p5_enable_final_gate', default=False)
     p5_horizon_s = LaunchConfiguration('p5_horizon_s', default=2.0)
@@ -348,7 +347,6 @@ def generate_launch_description():
     p4_assurance_local_safety_margin_m_arg = DeclareLaunchArgument('p4_assurance_local_safety_margin_m', default_value=p4_assurance_local_safety_margin_m)
     p4_assurance_local_scan_error_min_m_arg = DeclareLaunchArgument('p4_assurance_local_scan_error_min_m', default_value=p4_assurance_local_scan_error_min_m)
     p4_assurance_local_lidar_error_multiplier_arg = DeclareLaunchArgument('p4_assurance_local_lidar_error_multiplier', default_value=p4_assurance_local_lidar_error_multiplier)
-    p4_assurance_local_drift_bound_mps_arg = DeclareLaunchArgument('p4_assurance_local_drift_bound_mps', default_value=p4_assurance_local_drift_bound_mps)
     p5_enable_runtime_gate_arg = DeclareLaunchArgument('p5_enable_runtime_gate', default_value=p5_enable_runtime_gate)
     p5_enable_final_gate_arg = DeclareLaunchArgument('p5_enable_final_gate', default_value=p5_enable_final_gate)
     p5_horizon_s_arg = DeclareLaunchArgument('p5_horizon_s', default_value=p5_horizon_s)
@@ -511,7 +509,6 @@ def generate_launch_description():
             {'p4.assurance.local_safety_margin_m': p4_assurance_local_safety_margin_m},
             {'p4.assurance.local_scan_error_min_m': p4_assurance_local_scan_error_min_m},
             {'p4.assurance.local_lidar_error_multiplier': p4_assurance_local_lidar_error_multiplier},
-            {'p4.assurance.local_drift_bound_mps': p4_assurance_local_drift_bound_mps},
             {'p5.enable_runtime_gate': p5_enable_runtime_gate},
             {'p5.enable_final_gate': p5_enable_final_gate},
             {'p5.horizon_s': p5_horizon_s},
@@ -820,7 +817,6 @@ def generate_launch_description():
     ld.add_action(p4_assurance_local_safety_margin_m_arg)
     ld.add_action(p4_assurance_local_scan_error_min_m_arg)
     ld.add_action(p4_assurance_local_lidar_error_multiplier_arg)
-    ld.add_action(p4_assurance_local_drift_bound_mps_arg)
     ld.add_action(p5_enable_runtime_gate_arg)
     ld.add_action(p5_enable_final_gate_arg)
     ld.add_action(p5_horizon_s_arg)

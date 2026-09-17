@@ -3,6 +3,33 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(remove-uncalibrated-local-drift): IAP-RQ-312 / IAP-RQ-320 /
+  IAP-RQ-400 / IAP-RQ-410 — remove the planner-local `0.10 m/s`
+  elapsed-time-linear drift deduction from healthy registered-SLAM local
+  motion authorization. The value had no estimator output, covariance,
+  calibration evidence or runtime correction semantics, so it could grow by
+  about `0.86 m` across an otherwise unchanged 8.6 s curve and reject real
+  clearance. Local authorization still charges vehicle radius, the certified
+  tracking bound, current ICP/scan bound, curve approximation and fixed safety
+  margin, and still checks the exact nominal and every braking curve against
+  real obstacles. Missing/expired support, data gaps, degenerate ICP,
+  excessive tracking, collision or an unsafe brake remain fail-closed and use
+  the existing certified braking mechanism. Remove the public
+  `p4.assurance.local_drift_bound_mps` parameter and advance forward-lineage
+  to v13. The legacy `local_drift_error_m` CSV column remains for analyzer
+  shape compatibility but is deprecated and always zero.
+  Three default-BDS/windowed forest smokes each published one LIMITED_PREFIX
+  and produced `2.452/2.878/2.287 m` of real displacement. All recorded local
+  drift values were exactly zero. One run reached and held its approved
+  endpoint; two retained positive local margins (`0.511/0.528 m`) and used
+  their certified brakes when fresh direct GNSS evidence exhausted the global
+  exposure budget (`VPL 40.045/40.423 m`, `VAL 40 m`). Thus the fabricated
+  local-drift blocker is removed without weakening the remaining GNSS gate or
+  braking behavior. All three runner verdicts remained red only because the
+  planner-local-map current-frame p95 (`11.187..11.886 ms`) exceeded its
+  separate `10 ms` development performance gate. Direct window checks stayed
+  below the `150 ms` safety budget (worst observed p95 `51.277 ms`), and no
+  full formal route was selected.
 - fix(braking-window-certificate-identity): IAP-RQ-312 / IAP-RQ-320 /
   IAP-RQ-400 / IAP-RQ-410 — retain one `ForwardRiskWindowResult` for every
   original non-zero braking-window ID, even when adjacent windows use the same

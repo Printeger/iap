@@ -49,6 +49,7 @@ P4_FORWARD_DECISION_SCHEMAS = {
     "p4_forward_route_decision_v10",
     "p4_forward_route_decision_v11",
     "p4_forward_route_decision_v12",
+    "p4_forward_route_decision_v13",
 }
 P4_FORMAL_RISK_SAMPLE_SCHEMAS = {
     "p4_forward_route_decision_v5",
@@ -59,6 +60,7 @@ P4_FORMAL_RISK_SAMPLE_SCHEMAS = {
     "p4_forward_route_decision_v10",
     "p4_forward_route_decision_v11",
     "p4_forward_route_decision_v12",
+    "p4_forward_route_decision_v13",
 }
 FOREST_SCENARIOS = (FOREST_V1_SCENARIO, FOREST_SCENARIO)
 SEVEN_STAGE_ORDER = (

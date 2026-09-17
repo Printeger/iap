@@ -19,7 +19,7 @@ namespace ego_planner
 {
 
   inline constexpr char kP4ForwardDecisionSchema[] =
-    "p4_forward_route_decision_v12";
+    "p4_forward_route_decision_v13";
 
   enum class P4ForwardResultStatus
   {

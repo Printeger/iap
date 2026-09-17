@@ -221,11 +221,13 @@ For each candidate trajectory τ:
   includes the already-consumed episode budget before a replacement publishes.
 - Local execution is admitted by `LocalMotionAssurance`, not by RiskGrid or
   LiDAR FIM. It evaluates the actual nominal and braking splines against
-  obstacle surfaces using the vehicle/tracking/scan/ICP/drift/curve/safety
+  obstacle surfaces using the vehicle/tracking/scan/ICP/curve/safety
   envelope. The registered map is authoritative SLAM geometry, so current and
   older registered obstacles use the same local envelope. The planner neither
   adds current/source absolute LiDAR PL to invent a relative error nor charges
-  a source ICP residual twice. Missing provenance, exact source registration
+  an arbitrary elapsed-time-linear drift term. No certified producer bound
+  exists for that term; registered-map relative alignment belongs to SLAM.
+  Missing provenance, exact source registration
   health, fresh support, or any braking-curve proof is fail-closed. LiDAR
   observability remains a ranking/recovery cue and cannot shrink this
   certified envelope by itself.

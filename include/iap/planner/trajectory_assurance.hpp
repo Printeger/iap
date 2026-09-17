@@ -182,7 +182,6 @@ struct LocalMotionAssurancePolicy {
   // measurement.  Keep its calibration factor explicit; do not reuse the
   // ARAIM K_ff multiplier here.
   double lidar_error_multiplier = 1.0;
-  double relative_drift_bound_mps = 0.10;
   double maximum_sample_interval_s = 0.2;
 };
 
@@ -197,6 +196,8 @@ struct LocalMotionSampleResult {
   // by SLAM and is never reconstructed from absolute LiDAR PL in the planner.
   double relative_map_error_m = 0.0;
   double scan_error_m = 0.0;
+  // Deprecated compatibility diagnostic. Healthy registered SLAM does not
+  // supply a separately certified time-linear drift bound to the planner.
   double drift_error_m = 0.0;
   double required_envelope_m = std::numeric_limits<double>::quiet_NaN();
   double margin_m = std::numeric_limits<double>::quiet_NaN();

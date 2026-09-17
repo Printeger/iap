@@ -1535,7 +1535,6 @@ namespace ego_planner
     node->declare_parameter("p4.assurance.local_safety_margin_m", 0.20);
     node->declare_parameter("p4.assurance.local_scan_error_min_m", 0.02);
     node->declare_parameter("p4.assurance.local_lidar_error_multiplier", 1.0);
-    node->declare_parameter("p4.assurance.local_drift_bound_mps", 0.10);
 
     node->get_parameter("manager/max_vel", pp_.max_vel_);
     node->get_parameter("manager/max_acc", pp_.max_acc_);
@@ -1664,8 +1663,6 @@ namespace ego_planner
                         p4_local_motion_policy_.minimum_scan_error_m);
     node->get_parameter("p4.assurance.local_lidar_error_multiplier",
                         p4_local_motion_policy_.lidar_error_multiplier);
-    node->get_parameter("p4.assurance.local_drift_bound_mps",
-                        p4_local_motion_policy_.relative_drift_bound_mps);
     p4_local_motion_policy_.vehicle_radius_m =
         p4_forward_limits_.vehicle_radius_m;
     p4_local_motion_policy_.maximum_tracking_error_m =

@@ -480,7 +480,6 @@ LocalMotionAssurance::LocalMotionAssurance(LocalMotionAssurancePolicy policy)
       !(policy_.maximum_tracking_error_m >= 0.0) ||
       !(policy_.minimum_scan_error_m >= 0.0) ||
       !(policy_.lidar_error_multiplier >= 0.0) ||
-      !(policy_.relative_drift_bound_mps >= 0.0) ||
       !(policy_.maximum_sample_interval_s > 0.0)) {
     throw std::invalid_argument("invalid local motion assurance policy");
   }
@@ -553,13 +552,10 @@ LocalMotionAssuranceResult LocalMotionAssurance::evaluate(
           policy_.minimum_scan_error_m,
           policy_.lidar_error_multiplier * evidence.icp_gamma *
               evidence.icp_rmse_m);
-      sample_result.drift_error_m = policy_.relative_drift_bound_mps *
-          std::max(0.0, sample.relative_time_s -
-                            curve.samples.front().relative_time_s);
       const double common_required_envelope_m =
           policy_.vehicle_radius_m + policy_.safety_margin_m +
           policy_.curve_approximation_error_m + sample.tracking_error_m +
-          sample_result.scan_error_m + sample_result.drift_error_m;
+          sample_result.scan_error_m;
       sample_result.obstacle_clearance_m =
           evidence.certified_empty_clearance_m;
       sample_result.required_envelope_m = common_required_envelope_m;
