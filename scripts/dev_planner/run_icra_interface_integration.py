@@ -1989,6 +1989,108 @@ def analyze_execution_snapshot_attempts(
         if braking_trigger(row).endswith(":OUTSIDE_ENVELOPE")]
     support_stale_braking_count = (
         len(local_map_stale_events) + len(corridor_stale_events))
+
+    global_budget_events = []
+    global_budget_failure_cause_counts: dict[str, int] = {}
+    for row in execution_events:
+        reason = str(row.get("reason", ""))
+        if (row.get("event") not in {
+                "FAILSAFE_BRAKING_SCHEDULED", "EXECUTION_REVOKED",
+                "RISK_REVOKED"} or
+                ("global_navigation_budget_exceeded" not in reason and
+                 "global_navigation_episode_budget_exceeded" not in
+                 reason and
+                 "global_navigation_episode_budget_exhausted" not in
+                 reason)):
+            continue
+        causes = [cause for cause in str(row.get(
+            "global_budget_failure_causes", "NONE")).split("|")
+                  if cause and cause != "NONE"]
+        for cause in causes:
+            global_budget_failure_cause_counts[cause] = \
+                global_budget_failure_cause_counts.get(cause, 0) + 1
+
+        def finite_float(key: str) -> float | None:
+            try:
+                value = float(row.get(key, math.nan))
+            except (TypeError, ValueError):
+                return None
+            return value if math.isfinite(value) else None
+
+        peak = finite_float("runtime_global_peak_ratio")
+        peak_limit = finite_float("global_peak_ratio_limit")
+        duration = finite_float(
+            "runtime_global_maximum_continuous_exceedance_s")
+        duration_limit = finite_float(
+            "global_continuous_exceedance_limit_s")
+        integral = finite_float(
+            "runtime_global_exceedance_integral_ratio_s")
+        integral_limit = finite_float(
+            "global_exceedance_integral_limit_ratio_s")
+        utilizations = {
+            "HARD_GLOBAL_LIMIT": (peak / peak_limit
+                                  if peak is not None and peak_limit and
+                                  peak_limit > 0.0 else -math.inf),
+            "PEAK_RATIO": ((peak - 1.0) / (peak_limit - 1.0)
+                           if peak is not None and peak_limit is not None and
+                           peak_limit > 1.0 else -math.inf),
+            "CONTINUOUS_DURATION": (duration / duration_limit
+                                    if duration is not None and
+                                    duration_limit and duration_limit > 0.0
+                                    else -math.inf),
+            "EXCESS_INTEGRAL": (integral / integral_limit
+                                if integral is not None and integral_limit and
+                                integral_limit > 0.0 else -math.inf),
+            "PRIOR_EPISODE_EXHAUSTED": math.inf,
+        }
+        numeric_causes = [cause for cause in causes
+                          if cause != "PRIOR_EPISODE_EXHAUSTED"]
+        if numeric_causes:
+            dominant_cause = max(
+                numeric_causes, key=lambda cause: utilizations.get(
+                    cause, -math.inf))
+        elif causes:
+            dominant_cause = causes[0]
+        else:
+            dominant_cause = "UNATTRIBUTED_LEGACY_EVENT"
+        instantaneous = any(cause in {
+            "HARD_GLOBAL_LIMIT", "PEAK_RATIO"} for cause in causes)
+        accumulated = any(cause in {
+            "CONTINUOUS_DURATION", "EXCESS_INTEGRAL",
+            "PRIOR_EPISODE_EXHAUSTED"} for cause in causes)
+        trigger_scope = (
+            "INSTANTANEOUS_AND_ACCUMULATED" if instantaneous and accumulated
+            else "INSTANTANEOUS_PEAK" if instantaneous
+            else "ACCUMULATED_EXPOSURE" if accumulated
+            else "UNATTRIBUTED_LEGACY_EVENT")
+        global_budget_events.append({
+            "stamp_s": finite_float("stamp_s"),
+            "trajectory_id": row.get("trajectory_id"),
+            "reason": reason,
+            "causes": causes,
+            "dominant_cause": dominant_cause,
+            "trigger_scope": trigger_scope,
+            "first_unsafe_position_xyz": [
+                finite_float("violation_x"),
+                finite_float("violation_y"),
+                finite_float("violation_z")],
+            "first_unsafe_query_time_s": finite_float(
+                "violation_query_time_s"),
+            "first_unsafe_hpl_m": finite_float("violation_hpl_m"),
+            "first_unsafe_vpl_m": finite_float("violation_vpl_m"),
+            "alert_limit_h_m": finite_float("alert_limit_h_m"),
+            "alert_limit_v_m": finite_float("alert_limit_v_m"),
+            "peak_ratio": peak,
+            "peak_ratio_limit": peak_limit,
+            "maximum_continuous_exceedance_s": duration,
+            "continuous_exceedance_limit_s": duration_limit,
+            "exceedance_integral_ratio_s": integral,
+            "exceedance_integral_limit_ratio_s": integral_limit,
+            "prior_episode_active": str(row.get(
+                "global_prior_episode_active", "0")) == "1",
+            "prior_episode_budget_exhausted": str(row.get(
+                "global_prior_episode_budget_exhausted", "0")) == "1",
+        })
     lidar_stamps = sorted(finite_values(
         "stamp_s", [row.get("payload", row) for row in records
                     if row.get("kind") == "occupancy_input"]))
@@ -2061,6 +2163,10 @@ def analyze_execution_snapshot_attempts(
         "false_support_stale_braking_count":
             false_support_stale_braking_count,
         "recovery_cancel_count": recovery_cancel_count,
+        "global_budget_braking_count": len(global_budget_events),
+        "global_budget_failure_cause_counts":
+            global_budget_failure_cause_counts,
+        "global_budget_braking_events": global_budget_events,
         "max_lidar_source_interval_s": max_lidar_gap_s,
         "max_planner_local_map_interval_s": max(
             local_map_gaps, default=None),

@@ -57,9 +57,26 @@ struct GlobalNavigationExposureResult {
   double duration_budget_utilization = 0.0;
   double integral_budget_utilization = 0.0;
   double maximum_budget_utilization = 0.0;
+  // Structured rejection attribution. These flags are evaluated against the
+  // exact policy used for authorization after any persistent episode state is
+  // folded in; they are diagnostics and do not introduce another gate.
+  bool hard_global_exceedance = false;
+  bool peak_ratio_exceeded = false;
+  bool continuous_exceedance_exceeded = false;
+  bool exceedance_integral_exceeded = false;
+  bool prior_episode_budget_exhausted = false;
+  std::string budget_failure_causes = "NONE";
   std::size_t first_invalid_index = std::numeric_limits<std::size_t>::max();
   std::string reason = "not_evaluated";
 };
+
+// Applies the configured limits to already-computed exposure metrics. This is
+// the single attribution routine used by both predictive curve evaluation and
+// the runtime episode ledger; it does not change the metrics or authorization.
+void annotateGlobalNavigationBudgetFailures(
+    GlobalNavigationExposureResult* result,
+    const GlobalNavigationExposurePolicy& policy,
+    bool prior_episode_budget_exhausted = false);
 
 class GlobalNavigationExposureEvaluator {
  public:

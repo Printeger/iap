@@ -219,6 +219,12 @@ For each candidate trajectory τ:
   Predicted recovery uses that same sustained `0.95*AL` condition; merely
   crossing back below AL for one sample is not recovery. Candidate admission
   includes the already-consumed episode budget before a replacement publishes.
+  Runtime braking diagnostics expose all four distinct explanations: a hard or
+  peak limit, excessive continuous duration, excessive positive integral, or
+  a previously exhausted persistent episode. Values and thresholds come from
+  the same `TrajectoryAssurance` evaluation that made the decision. A logged
+  first point just above AL locates the exposure; it must not be presented as
+  proof that this one point alone triggered an aggregate-budget brake.
 - Local execution is admitted by `LocalMotionAssurance`, not by RiskGrid or
   LiDAR FIM. It evaluates the actual nominal and braking splines against
   obstacle surfaces using the vehicle/tracking/scan/ICP/curve/safety

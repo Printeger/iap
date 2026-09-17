@@ -2010,6 +2010,60 @@ class TestStageAnalyzer(unittest.TestCase):
         self.assertEqual(summary["recovery_cancel_count"], 1)
         self.assertEqual(summary["risk_grid_yield_count"], 3)
 
+    def test_execution_snapshot_summary_decomposes_global_budget_braking(self):
+        events = [
+            {"event": "FAILSAFE_BRAKING_SCHEDULED",
+             "reason": "failsafe_braking_scheduled:runtime_trajectory_"
+                       "assurance_rejected:global_navigation_budget_"
+                       "exceeded:safe",
+             "global_budget_failure_causes": "CONTINUOUS_DURATION|"
+                                               "EXCESS_INTEGRAL",
+             "runtime_global_peak_ratio": "1.0011",
+             "global_peak_ratio_limit": "1.05",
+             "global_maximum_continuous_exceedance_s": "1.31",
+             "global_continuous_exceedance_limit_s": "1.0",
+             "runtime_global_exceedance_integral_ratio_s": "0.041",
+             "global_exceedance_integral_limit_ratio_s": "0.025",
+             "global_prior_episode_active": "1",
+             "global_prior_episode_budget_exhausted": "0",
+             "violation_x": "-14.2", "violation_y": "0.3",
+             "violation_z": "1.5", "violation_query_time_s": "12.4",
+             "violation_hpl_m": "8.1", "violation_vpl_m": "40.044",
+             "alert_limit_h_m": "20.0", "alert_limit_v_m": "40.0"},
+            {"event": "FAILSAFE_BRAKING_SCHEDULED",
+             "reason": "failsafe_braking_scheduled:runtime_trajectory_"
+                       "assurance_rejected:global_navigation_episode_"
+                       "budget_exceeded:safe",
+             "global_budget_failure_causes":
+                 "PRIOR_EPISODE_EXHAUSTED",
+             "global_prior_episode_active": "1",
+             "global_prior_episode_budget_exhausted": "1"},
+        ]
+
+        summary = MODULE.analyze_execution_snapshot_attempts([], [], events)
+
+        self.assertEqual(summary["global_budget_braking_count"], 2)
+        self.assertEqual(
+            summary["global_budget_failure_cause_counts"],
+            {"CONTINUOUS_DURATION": 1, "EXCESS_INTEGRAL": 1,
+             "PRIOR_EPISODE_EXHAUSTED": 1})
+        self.assertEqual(
+            summary["global_budget_braking_events"][0]["dominant_cause"],
+            "EXCESS_INTEGRAL")
+        self.assertEqual(
+            summary["global_budget_braking_events"][0]["trigger_scope"],
+            "ACCUMULATED_EXPOSURE")
+        self.assertEqual(
+            summary["global_budget_braking_events"][0]
+                   ["first_unsafe_position_xyz"],
+            [-14.2, 0.3, 1.5])
+        self.assertAlmostEqual(
+            summary["global_budget_braking_events"][0]
+                   ["first_unsafe_vpl_m"], 40.044)
+        self.assertEqual(
+            summary["global_budget_braking_events"][1]["dominant_cause"],
+            "PRIOR_EPISODE_EXHAUSTED")
+
     def test_full_rejects_mixed_p5_identity_and_unsafe_runtime(self):
         decision = selected_decision()
         lineage = lineage_for(decision, trajectory_id=12, start_ns=34)

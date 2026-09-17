@@ -3,6 +3,23 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(global-exposure-stop-attribution): IAP-RQ-312 / IAP-RQ-320 /
+  IAP-RQ-400 / IAP-RQ-410 — add structured decision-time diagnostics for
+  global-navigation stops without changing PL, AL, exposure thresholds or
+  authorization behavior. `GlobalNavigationExposureResult` now distinguishes
+  hard-global, peak-ratio, continuous-duration, positive-integral and prior
+  exhausted-episode causes. P4 watchdog events advance to
+  `p4_execution_event_v9` and record each actual value beside its active
+  threshold plus the carried episode state. The interface runner reports
+  per-cause counts and the dominant normalized budget consumer, so a first
+  point barely above AL can no longer be mistaken for the sole reason for an
+  aggregate exposure stop. Focused production-chain tests exercise peak,
+  duration, integral and prior-episode attribution. Two default-BDS/windowed
+  forest smokes each moved about `2.88 m` and reached the approved endpoint;
+  both correctly reported zero global-budget braking events, so live coverage
+  did not fabricate a stop merely to exercise the new schema. Their runner
+  verdicts remained red only on the separate pre-existing `10 ms`
+  planner-local-map latency gate.
 - fix(remove-uncalibrated-local-drift): IAP-RQ-312 / IAP-RQ-320 /
   IAP-RQ-400 / IAP-RQ-410 — remove the planner-local `0.10 m/s`
   elapsed-time-linear drift deduction from healthy registered-SLAM local

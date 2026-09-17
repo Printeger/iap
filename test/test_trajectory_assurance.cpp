@@ -114,6 +114,11 @@ TEST(TrajectoryAssuranceTest, PeakAboveFivePercentRequiresRecovery) {
   EXPECT_EQ(result.mode,
             iap::TrajectoryExecutionMode::RECOVERY_OR_EXIT);
   EXPECT_EQ(result.reason, "global_navigation_budget_exceeded");
+  EXPECT_TRUE(result.global.peak_ratio_exceeded);
+  EXPECT_FALSE(result.global.continuous_exceedance_exceeded);
+  EXPECT_FALSE(result.global.exceedance_integral_exceeded);
+  EXPECT_FALSE(result.global.prior_episode_budget_exhausted);
+  EXPECT_EQ(result.global.budget_failure_causes, "PEAK_RATIO");
 }
 
 TEST(GlobalNavigationExposureTest, HardGlobalRejectsAnyTaskLimitExceedance) {
@@ -125,6 +130,9 @@ TEST(GlobalNavigationExposureTest, HardGlobalRejectsAnyTaskLimitExceedance) {
   EXPECT_TRUE(result.complete);
   EXPECT_FALSE(result.within_budget);
   EXPECT_EQ(result.reason, "global_navigation_budget_exceeded");
+  EXPECT_TRUE(result.hard_global_exceedance);
+  EXPECT_FALSE(result.peak_ratio_exceeded);
+  EXPECT_EQ(result.budget_failure_causes, "HARD_GLOBAL_LIMIT");
 }
 
 TEST(GlobalNavigationExposureTest, DurationAndIntegralBudgetsAreIndependent) {
@@ -138,6 +146,10 @@ TEST(GlobalNavigationExposureTest, DurationAndIntegralBudgetsAreIndependent) {
       iap::GlobalNavigationExposureEvaluator().evaluate(sustained);
   EXPECT_FALSE(duration.within_budget);
   EXPECT_GT(duration.maximum_continuous_exceedance_s, 1.0);
+  EXPECT_FALSE(duration.peak_ratio_exceeded);
+  EXPECT_TRUE(duration.continuous_exceedance_exceeded);
+  EXPECT_FALSE(duration.exceedance_integral_exceeded);
+  EXPECT_EQ(duration.budget_failure_causes, "CONTINUOUS_DURATION");
 
   const std::vector<iap::GlobalNavigationExposureSample> integral = {
       {0.0, 10.0, 42.0, 20.0, 40.0, true},
@@ -147,6 +159,57 @@ TEST(GlobalNavigationExposureTest, DurationAndIntegralBudgetsAreIndependent) {
       iap::GlobalNavigationExposureEvaluator().evaluate(integral);
   EXPECT_FALSE(integrated.within_budget);
   EXPECT_GT(integrated.exceedance_integral_ratio_s, 0.025);
+  EXPECT_FALSE(integrated.peak_ratio_exceeded);
+  EXPECT_FALSE(integrated.continuous_exceedance_exceeded);
+  EXPECT_TRUE(integrated.exceedance_integral_exceeded);
+  EXPECT_EQ(integrated.budget_failure_causes, "EXCESS_INTEGRAL");
+}
+
+TEST(TrajectoryAssuranceTest,
+     PriorEpisodeExhaustionIsReportedSeparatelyFromCurrentCurve) {
+  iap::TrajectoryAssuranceRequest request;
+  request.global_samples = {
+      {0.0, 10.0, 39.0, 20.0, 40.0, true},
+      {0.2, 10.0, 39.0, 20.0, 40.0, true},
+  };
+  request.has_prior_global_episode = true;
+  request.prior_global_episode.active = true;
+  request.prior_global_episode.budget_exhausted = true;
+  request.prior_global_episode.peak_ratio = 1.02;
+  request.prior_global_episode.continuous_exceedance_s = 0.4;
+  request.prior_global_episode.exceedance_integral_ratio_s = 0.01;
+  request.local_evidence = clearCurrentFrameEvidence();
+  request.local_curves = shortCurve();
+  request.certified_braking_available = true;
+
+  const auto result = iap::TrajectoryAssurance().evaluate(request);
+
+  EXPECT_FALSE(result.authorized());
+  EXPECT_TRUE(result.global.prior_episode_budget_exhausted);
+  EXPECT_FALSE(result.global.peak_ratio_exceeded);
+  EXPECT_FALSE(result.global.continuous_exceedance_exceeded);
+  EXPECT_FALSE(result.global.exceedance_integral_exceeded);
+  EXPECT_EQ(result.global.budget_failure_causes,
+            "PRIOR_EPISODE_EXHAUSTED");
+}
+
+TEST(GlobalNavigationExposureTest,
+     NewlyExhaustedEpisodeIsNotMislabeledAsPreviouslyExhausted) {
+  iap::GlobalNavigationExposureResult result;
+  result.peak_ratio = 1.01;
+  result.maximum_continuous_exceedance_s = 1.1;
+  result.exceedance_integral_ratio_s = 0.011;
+
+  iap::annotateGlobalNavigationBudgetFailures(&result, {}, false);
+
+  EXPECT_TRUE(result.continuous_exceedance_exceeded);
+  EXPECT_FALSE(result.prior_episode_budget_exhausted);
+  EXPECT_EQ(result.budget_failure_causes, "CONTINUOUS_DURATION");
+
+  iap::annotateGlobalNavigationBudgetFailures(&result, {}, true);
+  EXPECT_TRUE(result.prior_episode_budget_exhausted);
+  EXPECT_EQ(result.budget_failure_causes,
+            "CONTINUOUS_DURATION|PRIOR_EPISODE_EXHAUSTED");
 }
 
 TEST(GlobalNavigationExposureTest,

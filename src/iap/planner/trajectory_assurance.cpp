@@ -102,6 +102,47 @@ std::optional<AabbRelation> aabbRelation(
 
 }  // namespace
 
+void annotateGlobalNavigationBudgetFailures(
+    GlobalNavigationExposureResult* result,
+    const GlobalNavigationExposurePolicy& policy,
+    const bool prior_episode_budget_exhausted) {
+  if (!result) return;
+  result->hard_global_exceedance =
+      policy.hard_global && result->peak_ratio > 1.0 + kEpsilon;
+  result->peak_ratio_exceeded = !policy.hard_global &&
+      result->peak_ratio > policy.maximum_ratio + kEpsilon;
+  result->continuous_exceedance_exceeded =
+      result->maximum_continuous_exceedance_s >
+          policy.maximum_continuous_exceedance_s + kEpsilon;
+  result->exceedance_integral_exceeded =
+      result->exceedance_integral_ratio_s >
+          policy.maximum_exceedance_integral_ratio_s + kEpsilon;
+  result->prior_episode_budget_exhausted =
+      prior_episode_budget_exhausted;
+
+  std::vector<std::string> causes;
+  if (result->hard_global_exceedance)
+    causes.emplace_back("HARD_GLOBAL_LIMIT");
+  if (result->peak_ratio_exceeded)
+    causes.emplace_back("PEAK_RATIO");
+  if (result->continuous_exceedance_exceeded)
+    causes.emplace_back("CONTINUOUS_DURATION");
+  if (result->exceedance_integral_exceeded)
+    causes.emplace_back("EXCESS_INTEGRAL");
+  if (result->prior_episode_budget_exhausted)
+    causes.emplace_back("PRIOR_EPISODE_EXHAUSTED");
+  if (causes.empty()) {
+    result->budget_failure_causes = "NONE";
+    return;
+  }
+  std::ostringstream joined;
+  for (std::size_t index = 0; index < causes.size(); ++index) {
+    if (index > 0) joined << '|';
+    joined << causes[index];
+  }
+  result->budget_failure_causes = joined.str();
+}
+
 const char* trajectoryExecutionModeName(const TrajectoryExecutionMode mode) {
   switch (mode) {
     case TrajectoryExecutionMode::NORMAL_EXECUTION:
@@ -354,6 +395,7 @@ GlobalNavigationExposureResult GlobalNavigationExposureEvaluator::evaluate(
            policy_.maximum_continuous_exceedance_s + kEpsilon &&
        result.exceedance_integral_ratio_s <=
            policy_.maximum_exceedance_integral_ratio_s + kEpsilon);
+  annotateGlobalNavigationBudgetFailures(&result, policy_);
   result.reason = result.within_budget ?
       (result.normal ? "normal" : "controlled_degradation_within_budget") :
       "global_navigation_budget_exceeded";
@@ -700,6 +742,8 @@ TrajectoryAssuranceResult TrajectoryAssurance::evaluate(
             policy.maximum_continuous_exceedance_s + kEpsilon &&
         result.global.exceedance_integral_ratio_s <=
             policy.maximum_exceedance_integral_ratio_s + kEpsilon;
+    annotateGlobalNavigationBudgetFailures(
+        &result.global, policy, prior.budget_exhausted);
     result.global.reason = result.global.within_budget
         ? "controlled_degradation_within_remaining_episode_budget"
         : "global_navigation_episode_budget_exceeded";

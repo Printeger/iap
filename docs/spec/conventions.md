@@ -406,6 +406,14 @@
   or a currently certified braking curve remains available. `hard_global`
   tasks retain strict `GNSS PL < AL`. An exposure episode survives trajectory
   ID changes and ends only after `0.5 s` continuously below `0.95*AL`.
+- A runtime stop attributed to global-navigation exposure must report the
+  decision-time decomposition, not only the first point above AL. The
+  execution event records the evaluated peak ratio, maximum continuous
+  exceedance, positive exceedance integral, their exact policy limits, the
+  carried episode state, and independent flags for hard-global, peak,
+  duration, integral, and already-exhausted-episode causes. The first unsafe
+  point remains spatial evidence, but it is not by itself the explanation for
+  an aggregate-budget stop. Repeated watchdog reads do not consume budget.
 - `LocalMotionAssurance` independently checks the exact nominal curve and all
   reachable braking curves at no more than `0.2 s` spacing. Its directional
   margin subtracts vehicle radius, measured tracking bound, scan/ICP bound,

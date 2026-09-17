@@ -315,6 +315,29 @@ namespace ego_planner
     std::string window_layout_hash;
     std::size_t window_count = 0;
     std::uint64_t first_failure_window_id = 0;
+    // Decision-time global-navigation exposure. Certificate-level values
+    // describe what was admitted originally; these fields describe the exact
+    // watchdog evaluation that allowed or stopped the committed trajectory.
+    double global_peak_ratio = std::numeric_limits<double>::quiet_NaN();
+    double global_peak_ratio_limit = std::numeric_limits<double>::quiet_NaN();
+    double global_maximum_continuous_exceedance_s =
+        std::numeric_limits<double>::quiet_NaN();
+    double global_continuous_exceedance_limit_s =
+        std::numeric_limits<double>::quiet_NaN();
+    double global_exceedance_integral_ratio_s =
+        std::numeric_limits<double>::quiet_NaN();
+    double global_exceedance_integral_limit_ratio_s =
+        std::numeric_limits<double>::quiet_NaN();
+    bool global_hard_limit_exceeded = false;
+    bool global_peak_ratio_exceeded = false;
+    bool global_continuous_exceedance_exceeded = false;
+    bool global_exceedance_integral_exceeded = false;
+    bool global_prior_episode_active = false;
+    bool global_prior_episode_budget_exhausted = false;
+    double global_prior_peak_ratio = 0.0;
+    double global_prior_continuous_exceedance_s = 0.0;
+    double global_prior_exceedance_integral_ratio_s = 0.0;
+    std::string global_budget_failure_causes = "NONE";
     uint64_t execution_snapshot_id = 0;
     uint64_t gnss_epoch_identity = 0;
     double support_observation_stamp_s =

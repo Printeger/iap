@@ -1894,6 +1894,22 @@ TEST(P4ForwardTerminalLineageTest,
   EXPECT_TRUE(risk_revoke.violation_position.allFinite());
   EXPECT_TRUE(std::isfinite(risk_revoke.violation_query_time_s));
   EXPECT_GE(risk_revoke.violation_hpl_m, risk_revoke.alert_limit_h_m);
+  EXPECT_TRUE(risk_revoke.global_peak_ratio_exceeded);
+  EXPECT_TRUE(risk_revoke.global_continuous_exceedance_exceeded);
+  EXPECT_TRUE(risk_revoke.global_exceedance_integral_exceeded);
+  EXPECT_FALSE(risk_revoke.global_budget_failure_causes.empty());
+  EXPECT_NE(risk_revoke.global_budget_failure_causes.find("PEAK_RATIO"),
+            std::string::npos);
+  EXPECT_NE(risk_revoke.global_budget_failure_causes.find(
+                "CONTINUOUS_DURATION"), std::string::npos);
+  EXPECT_NE(risk_revoke.global_budget_failure_causes.find(
+                "EXCESS_INTEGRAL"), std::string::npos);
+  EXPECT_GT(risk_revoke.global_peak_ratio,
+            risk_revoke.global_peak_ratio_limit);
+  EXPECT_TRUE(std::isfinite(
+      risk_revoke.global_maximum_continuous_exceedance_s));
+  EXPECT_TRUE(std::isfinite(
+      risk_revoke.global_exceedance_integral_ratio_s));
   const auto first_hard_guard = manager.pendingP4GuardBrakingCommand();
   ASSERT_TRUE(first_hard_guard.has_value());
   manager.acknowledgeP4GuardStatus(
@@ -2065,10 +2081,23 @@ TEST(P4ForwardTerminalLineageTest,
       }));
   EXPECT_TRUE(std::any_of(
       execution_rows.begin(), execution_rows.end(), [](const auto &row) {
-        return row.at("event") == "FAILSAFE_BRAKING_SCHEDULED" &&
+        return row.at("schema_version") == "p4_execution_event_v9" &&
+            row.at("event") == "FAILSAFE_BRAKING_SCHEDULED" &&
             row.at("current_risk_generation") == "2" &&
             std::stod(row.at("violation_hpl_m")) >=
-                std::stod(row.at("alert_limit_h_m"));
+                std::stod(row.at("alert_limit_h_m")) &&
+            std::stod(row.at("runtime_global_peak_ratio")) >
+                std::stod(row.at("global_peak_ratio_limit")) &&
+            std::stod(row.at(
+                "runtime_global_maximum_continuous_exceedance_s")) >
+                std::stod(row.at(
+                    "global_continuous_exceedance_limit_s")) &&
+            std::stod(row.at(
+                "runtime_global_exceedance_integral_ratio_s")) >
+                std::stod(row.at(
+                    "global_exceedance_integral_limit_ratio_s")) &&
+            row.at("global_budget_failure_causes") ==
+                "PEAK_RATIO|CONTINUOUS_DURATION|EXCESS_INTEGRAL";
       }));
 }
 

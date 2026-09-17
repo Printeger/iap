@@ -5644,6 +5644,39 @@ namespace ego_planner
         appendP4ExecutionEvent(event, evaluation_now_s, diagnostics);
         return diagnostics;
       };
+    const auto populate_global_budget_diagnostics =
+        [this, &out](
+            const iap::GlobalNavigationExposureResult &global,
+            const iap::GlobalNavigationEpisodeState &prior) {
+          out.global_peak_ratio = global.peak_ratio;
+          out.global_peak_ratio_limit =
+              p4_global_exposure_policy_.hard_global
+                  ? 1.0 : p4_global_exposure_policy_.maximum_ratio;
+          out.global_maximum_continuous_exceedance_s =
+              global.maximum_continuous_exceedance_s;
+          out.global_continuous_exceedance_limit_s =
+              p4_global_exposure_policy_.maximum_continuous_exceedance_s;
+          out.global_exceedance_integral_ratio_s =
+              global.exceedance_integral_ratio_s;
+          out.global_exceedance_integral_limit_ratio_s =
+              p4_global_exposure_policy_.maximum_exceedance_integral_ratio_s;
+          out.global_hard_limit_exceeded = global.hard_global_exceedance;
+          out.global_peak_ratio_exceeded = global.peak_ratio_exceeded;
+          out.global_continuous_exceedance_exceeded =
+              global.continuous_exceedance_exceeded;
+          out.global_exceedance_integral_exceeded =
+              global.exceedance_integral_exceeded;
+          out.global_prior_episode_active = prior.active;
+          out.global_prior_episode_budget_exhausted =
+              prior.budget_exhausted;
+          out.global_prior_peak_ratio = prior.peak_ratio;
+          out.global_prior_continuous_exceedance_s =
+              prior.continuous_exceedance_s;
+          out.global_prior_exceedance_integral_ratio_s =
+              prior.exceedance_integral_ratio_s;
+          out.global_budget_failure_causes =
+              global.budget_failure_causes;
+        };
     if (!out.applicable)
     {
       out.reason = "execution_certificate_missing";
@@ -6602,6 +6635,9 @@ namespace ego_planner
           iap::TrajectoryAssurance(p4_global_exposure_policy_,
                                    p4_local_motion_policy_)
               .evaluate(runtime_assurance_request);
+      populate_global_budget_diagnostics(
+          p4_direct_risk_evidence_.trajectory_assurance.global,
+          runtime_assurance_request.prior_global_episode);
       p4_direct_risk_evidence_.trajectory_assurance_complete =
           p4_direct_risk_evidence_.trajectory_assurance.global.complete &&
           p4_direct_risk_evidence_.trajectory_assurance.local.status !=
@@ -6686,14 +6722,32 @@ namespace ego_planner
           p4RuntimeEvidenceIdentity(runtime_execution_snapshot.get()) +
           ";trajectory_time_ms=" + std::to_string(static_cast<long long>(
               std::llround(current_t * 1000.0)));
+      const auto episode_before_update = p4_global_exposure_ledger_.state();
       if (!p4_global_exposure_ledger_.update(
               evaluation_now_s, current_global_ratio, episode_identity) ||
           p4_global_exposure_ledger_.state().budget_exhausted)
       {
         if (p4_global_exposure_ledger_.state().budget_exhausted)
+        {
+          const auto &episode = p4_global_exposure_ledger_.state();
+          iap::GlobalNavigationExposureResult episode_result;
+          episode_result.complete = true;
+          episode_result.normal = false;
+          episode_result.within_budget = false;
+          episode_result.peak_ratio = episode.peak_ratio;
+          episode_result.maximum_continuous_exceedance_s =
+              episode.continuous_exceedance_s;
+          episode_result.exceedance_integral_ratio_s =
+              episode.exceedance_integral_ratio_s;
+          iap::annotateGlobalNavigationBudgetFailures(
+              &episode_result, p4_global_exposure_policy_,
+              episode_before_update.budget_exhausted);
+          populate_global_budget_diagnostics(
+              episode_result, episode_before_update);
           return activate_failsafe_braking(
               "runtime_global_navigation_episode_budget_exhausted",
               current_t);
+        }
       }
       p4_runtime_risk_cache_ = P4RuntimeRiskCache{};
       p4_runtime_risk_cache_.valid = true;
@@ -6778,6 +6832,10 @@ namespace ego_planner
         p4_runtime_risk_cache_.samples.push_back(sample);
       }
     }
+    if (p4_direct_risk_evidence_.trajectory_assurance_complete)
+      populate_global_budget_diagnostics(
+          p4_direct_risk_evidence_.trajectory_assurance.global,
+          p4_global_exposure_ledger_.state());
     // Cached GNSS geometry never caches map freshness. Re-evaluate corridor
     // observation age at every watchdog tick against the current evaluation
     // time, including every braking point in the active commitment windows.
@@ -7270,9 +7328,23 @@ namespace ego_planner
              "risk_confirmation_guard_endpoint_z,"
              "risk_confirmation_evidence_identity,common_satellite_ids,"
              "gnss_core_policy,window_layout_hash,window_count,"
-             "first_failure_window_id\n";
+             "first_failure_window_id,runtime_global_peak_ratio,"
+             "global_peak_ratio_limit,"
+             "runtime_global_maximum_continuous_exceedance_s,"
+             "global_continuous_exceedance_limit_s,"
+             "runtime_global_exceedance_integral_ratio_s,"
+             "global_exceedance_integral_limit_ratio_s,"
+             "global_hard_limit_exceeded,global_peak_ratio_exceeded,"
+             "global_continuous_exceedance_exceeded,"
+             "global_exceedance_integral_exceeded,"
+             "global_prior_episode_active,"
+             "global_prior_episode_budget_exhausted,"
+             "global_prior_peak_ratio,"
+             "global_prior_continuous_exceedance_s,"
+             "global_prior_exceedance_integral_ratio_s,"
+             "global_budget_failure_causes\n";
     csv << std::setprecision(17)
-        << "p4_execution_event_v8," << event << ',' << stamp_s << ','
+        << "p4_execution_event_v9," << event << ',' << stamp_s << ','
         << p4ExecutionAuthorityName(p4_execution_certificate_.authority)
         << ',' << p4_execution_certificate_.trajectory_id << ','
         << iap::trajectoryExecutionModeName(
@@ -7334,7 +7406,25 @@ namespace ego_planner
         << diagnostics.gnss_core_policy << ','
         << diagnostics.window_layout_hash << ','
         << diagnostics.window_count << ','
-        << diagnostics.first_failure_window_id << '\n';
+        << diagnostics.first_failure_window_id << ','
+        << diagnostics.global_peak_ratio << ','
+        << diagnostics.global_peak_ratio_limit << ','
+        << diagnostics.global_maximum_continuous_exceedance_s << ','
+        << diagnostics.global_continuous_exceedance_limit_s << ','
+        << diagnostics.global_exceedance_integral_ratio_s << ','
+        << diagnostics.global_exceedance_integral_limit_ratio_s << ','
+        << (diagnostics.global_hard_limit_exceeded ? 1 : 0) << ','
+        << (diagnostics.global_peak_ratio_exceeded ? 1 : 0) << ','
+        << (diagnostics.global_continuous_exceedance_exceeded ? 1 : 0)
+        << ','
+        << (diagnostics.global_exceedance_integral_exceeded ? 1 : 0)
+        << ','
+        << (diagnostics.global_prior_episode_active ? 1 : 0) << ','
+        << (diagnostics.global_prior_episode_budget_exhausted ? 1 : 0)
+        << ',' << diagnostics.global_prior_peak_ratio << ','
+        << diagnostics.global_prior_continuous_exceedance_s << ','
+        << diagnostics.global_prior_exceedance_integral_ratio_s << ','
+        << diagnostics.global_budget_failure_causes << '\n';
     if (!csv)
       return false;
     last_p4_execution_event_key_ = key.str();
