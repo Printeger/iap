@@ -149,9 +149,11 @@
   execution commitment envelope; candidate and receiver raw PL use the same
   exact IDs at every point. Transition evidence evaluates the same space-time
   samples once and applies both old and new cores, accepting only when both are
-  complete and below AL. Equal adjacent cores merge. An insufficient core,
-  missing braking anchor, anchor gap over 0.2 s, degenerate geometry or budget
-  expiry is `UNKNOWN/HOLD`. The legacy whole-curve `COMMON_CORE` remains an
+  complete and below AL. Equal adjacent cores may reuse exact receiver,
+  candidate and geometry calculations, but every original logical window ID
+  retains its own certificate and transition responsibility. An insufficient
+  core, missing braking anchor, anchor gap over 0.2 s, degenerate geometry or
+  budget expiry is `UNKNOWN/HOLD`. The legacy whole-curve `COMMON_CORE` remains an
   explicit diagnostic/A-B policy, not the formal forest default. During the
   final 0.2 s after the last discrete guard anchor, the exact remaining
   hard-terminal spline is registered as the reachable suffix braking curve

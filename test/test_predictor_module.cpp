@@ -1709,7 +1709,7 @@ TEST(PredictorModuleTest,
 }
 
 TEST(PredictorModuleTest,
-     AdjacentBrakingWindowsWithIdenticalCoresMergeTheirCertificate) {
+     AdjacentBrakingWindowsWithIdenticalCoresKeepDistinctCertificates) {
   auto params = make_params();
   params.lidar.fim_params.fim_radius_m = 30.0;
   iap::PredictorModule module(params);
@@ -1735,10 +1735,21 @@ TEST(PredictorModuleTest,
   const auto result = module.queryForwardRiskBatch(request);
 
   ASSERT_TRUE(result.complete);
-  ASSERT_EQ(result.windows.size(), 1u);
-  EXPECT_EQ(result.windows.front().satellite_window_id, 10u);
-  EXPECT_EQ(result.windows.front().point_count, request.points.size());
+  ASSERT_EQ(result.windows.size(), 2u);
+  EXPECT_EQ(result.windows[0].satellite_window_id, 10u);
+  EXPECT_EQ(result.windows[1].satellite_window_id, 20u);
+  EXPECT_EQ(result.windows[0].satellite_ids,
+            result.windows[1].satellite_ids);
+  EXPECT_EQ(result.windows[0].satellite_set_hash,
+            result.windows[1].satellite_set_hash);
+  EXPECT_EQ(result.windows[0].point_count, 2u);
+  EXPECT_EQ(result.windows[1].point_count, 2u);
+  EXPECT_GE(result.timing.receiver_cache_hit_count, 1u);
   EXPECT_GE(result.timing.candidate_cache_hit_count, 1u);
+  EXPECT_DOUBLE_EQ(result.points[1].prediction.fused.hpl,
+                   result.points[2].prediction.fused.hpl);
+  EXPECT_DOUBLE_EQ(result.points[1].prediction.fused.vpl,
+                   result.points[2].prediction.fused.vpl);
 }
 
 TEST(PredictorModuleTest,

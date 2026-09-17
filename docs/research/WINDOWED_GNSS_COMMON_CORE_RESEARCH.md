@@ -127,8 +127,10 @@ sample interval.  Over every positive-time overlap sample:
 The new set becomes authoritative only at the recorded transition.  A newly
 appearing satellite still passes the existing three-epoch admission rule;
 hard blockage, disappearance, or certified exclusion removes a satellite
-immediately and invalidates any certificate that depended on it.  Adjacent
-windows with identical cores should be merged.
+immediately and invalidates any certificate that depended on it. Adjacent
+windows with identical cores should share exact computations, but retain both
+logical window IDs and both certificates: computation identity and safety
+responsibility are different things.
 
 This dual check makes a set change conservative without imposing the new set
 on the whole past route or the old set on the whole future route.  If the
@@ -209,8 +211,9 @@ LOS or geometry cost.
 The likely outcome is therefore a modest increase in direct-batch time, not a
 RiskGrid-scale increase, if visibility evidence is shared.  The worst case is
 unbounded `W` (a different set at every sample), which destroys receiver-cache
-reuse and causes transition thrashing.  The design should bound transitions,
-merge equal adjacent cores, and fail closed on the existing 150 ms deadline.
+reuse and causes transition thrashing. The design should bound transitions,
+reuse exact calculations for equal adjacent cores without merging their
+certificates, and fail closed on the existing 150 ms deadline.
 
 ## Implementation shape to benchmark before activation
 
@@ -260,6 +263,14 @@ point ID and satellite-window ID. Repeated evidence IDs are accepted only for
 identical position, absolute query time and horizon, so a transition can reuse
 one LOS/support pass while evaluating both cores without silently aliasing two
 different samples.
+
+`ForwardRiskBatchResult.windows` preserves every original non-zero
+`satellite_window_id` in first-appearance order. Equal adjacent masks have the
+same canonical set hash and reuse receiver/candidate/geometry work, but they do
+not merge point counts, failure state, first-failure index or transition
+responsibility. P5 independently resolves every sample row to that window ID
+and verifies the same exact-set hash. In short: merge computation, not safety
+responsibility.
 
 The planner builds the window layout only after generating the final actual
 B-spline and its real <=0.2 s braking-anchor curves. The certificate binds the

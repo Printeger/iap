@@ -5,6 +5,7 @@
 #include <cmath>
 #include <iomanip>
 #include <sstream>
+#include <unordered_map>
 #include <utility>
 
 namespace ego_planner {
@@ -1026,19 +1027,65 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateFutureGate(
             direct_evidence->positions.size() &&
         direct_evidence->nominal_sample_rows.size() ==
             direct_evidence->positions.size();
+    std::unordered_map<std::uint64_t,
+                       const iap::ForwardRiskWindowResult*> windows_by_id;
+    windows_by_id.reserve(direct_evidence->windows.size());
+    for (const auto& window : direct_evidence->windows) {
+      const bool sorted_unique_satellites =
+          std::is_sorted(window.satellite_ids.begin(),
+                         window.satellite_ids.end()) &&
+          std::adjacent_find(window.satellite_ids.begin(),
+                             window.satellite_ids.end()) ==
+              window.satellite_ids.end();
+      const bool failure_is_complete_evidence =
+          window.failure_reason == iap::ForwardRiskFailureReason::NONE ||
+          window.failure_reason ==
+              iap::ForwardRiskFailureReason::SAFETY_LIMIT_EXCEEDED;
+      const bool inserted = window.satellite_window_id != 0u &&
+          windows_by_id.emplace(window.satellite_window_id, &window).second;
+      window_contract_valid = window_contract_valid && inserted &&
+          !window.satellite_ids.empty() && sorted_unique_satellites &&
+          window.satellite_set_hash ==
+              iap::forwardRiskSatelliteSetHash(window.satellite_ids) &&
+          window.complete && failure_is_complete_evidence;
+    }
+    std::unordered_map<std::uint64_t, std::size_t> window_row_counts;
+    window_row_counts.reserve(windows_by_id.size());
     for (std::size_t index = 0;
          window_contract_valid &&
          index < direct_evidence->satellite_window_ids.size(); ++index) {
       const std::uint64_t window_id =
           direct_evidence->satellite_window_ids[index];
-      window_contract_valid = window_id != 0u &&
-          std::any_of(
-              direct_evidence->windows.begin(),
-              direct_evidence->windows.end(),
-              [window_id](const iap::ForwardRiskWindowResult& window) {
-                return window.satellite_window_id == window_id &&
-                    !window.satellite_ids.empty();
-              });
+      const auto window = windows_by_id.find(window_id);
+      window_contract_valid = window != windows_by_id.end() &&
+          index < direct_evidence->points.size() &&
+          direct_evidence->points[index].local_satellite_set_hash ==
+              window->second->satellite_set_hash;
+      if (window_contract_valid) {
+        ++window_row_counts[window_id];
+      }
+    }
+    for (const auto& window : direct_evidence->windows) {
+      const auto row_count = window_row_counts.find(
+          window.satellite_window_id);
+      window_contract_valid = window_contract_valid &&
+          row_count != window_row_counts.end() &&
+          row_count->second == window.point_count;
+      if (!window_contract_valid) {
+        break;
+      }
+      if (window.failure_reason ==
+          iap::ForwardRiskFailureReason::SAFETY_LIMIT_EXCEEDED) {
+        window_contract_valid =
+            window.first_failure_index < direct_evidence->points.size() &&
+            window.first_failure_index <
+                direct_evidence->satellite_window_ids.size() &&
+            direct_evidence->satellite_window_ids[
+                window.first_failure_index] == window.satellite_window_id &&
+            direct_evidence->points[window.first_failure_index].
+                failure_reason ==
+                    iap::ForwardRiskFailureReason::SAFETY_LIMIT_EXCEEDED;
+      }
     }
   }
   const bool direct_evidence_valid = direct_evidence &&

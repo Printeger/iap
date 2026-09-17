@@ -3,6 +3,28 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(braking-window-certificate-identity): IAP-RQ-312 / IAP-RQ-320 /
+  IAP-RQ-400 / IAP-RQ-410 — retain one `ForwardRiskWindowResult` for every
+  original non-zero braking-window ID, even when adjacent windows use the same
+  exact satellite set. Identical sets now share only receiver/candidate/GNSS
+  geometry calculations and their canonical set hash; point counts, failure
+  state and first-failure index remain local to each logical certificate.
+  Transition samples keep both old/new memberships. P5 now validates a unique
+  window-ID index, canonical sorted-set hashes, every row's window and local
+  set hash, per-window row counts, and complete unsafe evidence. Missing,
+  duplicate or inconsistent certificates fail closed as `future_unknown`,
+  while complete `SAFETY_LIMIT_EXCEEDED` evidence remains a real risk rejection.
+  PL/AL, satellite selection, window layout and motion-authority rules are
+  unchanged. The post-fix BDS/windowed forest smoke retained up to nine logical
+  windows over four unique sets, recorded 550 receiver and 92 candidate cache
+  hits, and kept the full direct batch at `26.51 ms` maximum. It published one
+  LIMITED_PREFIX and moved `0.724 m`; no
+  `direct_risk_evidence_incomplete` event occurred. The certified trajectory
+  then braked on complete direct evidence (`HPL 16.325 < HAL 20 m`,
+  `VPL 40.740 > VAL 40 m`) and stopped normally. The runner remained FAIL only
+  because the unrelated local-map current-frame p95 was `10.65 ms` against its
+  `10 ms` development latency gate; launch/capture exited cleanly and this is
+  not claimed as an endpoint-hold or formal-route success.
 - feat(braking-window-gnss-core): IAP-RQ-312 / IAP-RQ-320 / IAP-RQ-400 /
   IAP-RQ-410 — replace the production whole-trajectory GNSS satellite
   intersection with deterministic `BRAKING_WINDOW_CORE` certificates. Each
@@ -12,7 +34,8 @@
   with both old and new exact satellite sets and both must pass. Candidate and
   receiver retain the same IDs within a window, hard obstruction/certified
   exclusion/removal remains immediate, three-epoch admission remains intact,
-  and equal adjacent cores merge. Formal routes, LIMITED_PREFIX, P5, runtime
+  and equal adjacent cores reuse calculation while retaining their independent
+  logical certificates. Formal routes, LIMITED_PREFIX, P5, runtime
   checks and successor reauthorization now bind actual curve, sample lattice,
   braking/window layout, execution snapshot, occupancy and GNSS epoch. Runtime
   and P5 now also bind the exact per-window satellite-set hash; a legacy

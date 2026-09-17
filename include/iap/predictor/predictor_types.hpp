@@ -21,6 +21,23 @@
 
 namespace iap {
 
+// Exact FNV-1a-style identity for a canonical sorted satellite-ID set. The
+// window identity is deliberately excluded: different execution commitments
+// may reuse one GNSS computation without sharing one safety certificate.
+inline std::uint64_t forwardRiskSatelliteSetHash(
+    const std::vector<int>& sorted_satellite_ids) {
+  if (sorted_satellite_ids.empty()) {
+    return 0u;
+  }
+  std::uint64_t hash = 1469598103934665603ULL;
+  for (const int satellite_id : sorted_satellite_ids) {
+    hash ^= static_cast<std::uint64_t>(
+        static_cast<std::uint32_t>(satellite_id));
+    hash *= 1099511628211ULL;
+  }
+  return hash;
+}
+
 struct GnssAdvisoryPredictorParams {
   GnssGeometryPlPredictorParams geometry_params;
   VisibilityPredictor::Params visibility_params;
@@ -511,7 +528,9 @@ struct ForwardRiskBatchResult {
   // PER_POINT requests or incomplete evidence.
   std::vector<int> common_satellite_ids;
   // Populated for BRAKING_WINDOW_CORE in first-appearance order. Each entry
-  // contains the exact sorted IDs used by every row assigned to that window.
+  // contains the exact sorted IDs used by every row assigned to that original
+  // logical window. Equal adjacent sets may share cached calculations, but
+  // their window certificates are never merged.
   std::vector<ForwardRiskWindowResult> windows;
   ForwardRiskBatchTiming timing;
   std::size_t first_failure_index = std::numeric_limits<std::size_t>::max();

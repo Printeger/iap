@@ -97,8 +97,11 @@ For each candidate trajectory τ:
   reaction/handover delay plus every reachable certified stopping curve;
   adjacent windows overlap by 0.4 s and both satellite sets must independently
   pass on identical transition samples. Far-future support loss therefore
-  cannot remove a satellite from the current stopping envelope. An
-  insufficient local core is UNKNOWN, never an interpolated PL, and RiskGrid
+  cannot remove a satellite from the current stopping envelope. An identical
+  set in adjacent windows reuses exact GNSS calculations but does
+  not merge their logical window IDs or safety certificates. Every P5 sample
+  must still resolve to its original window and matching canonical set hash.
+  An insufficient local core is UNKNOWN, never an interpolated PL, and RiskGrid
   remains search-only. The explicit legacy A/B policy retains the old
   whole-curve intersection. In the final 0.2 s after the last discrete guard
   anchor, the exact hard-terminal spline remainder is registered as the only

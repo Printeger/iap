@@ -1023,14 +1023,8 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
     local_satellite_ids.erase(
         std::unique(local_satellite_ids.begin(), local_satellite_ids.end()),
         local_satellite_ids.end());
-    std::uint64_t local_hash = 1469598103934665603ull;
-    for (const int sat_id : local_satellite_ids) {
-      local_hash ^= static_cast<std::uint64_t>(
-          static_cast<std::uint32_t>(sat_id));
-      local_hash *= 1099511628211ull;
-    }
     result.local_satellite_set_hash =
-        result.gnss_used_satellite_count > 0 ? local_hash : 0;
+        forwardRiskSatelliteSetHash(local_satellite_ids);
     result.known_gnss_degradation_ratio = known_degradation;
     result.known_hazard_evidence = known_degradation > 0.0;
     result.unknown_coverage = eligible_satellites > 0
@@ -1069,17 +1063,15 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
       fail_from(0, ForwardRiskFailureReason::GNSS_LOCAL_USABLE_SATS_LT_MIN);
       return out;
     }
-    std::uint64_t common_hash = 1469598103934665603ull;
     for (std::size_t sat_index = 0; sat_index < sat_count; ++sat_index) {
       if (!common_mask[sat_index]) continue;
       out.common_satellite_ids.push_back(
           request.snapshot.gnss_epoch.sats[sat_index].sat_id);
-      common_hash ^= static_cast<std::uint64_t>(static_cast<std::uint32_t>(
-          request.snapshot.gnss_epoch.sats[sat_index].sat_id));
-      common_hash *= 1099511628211ull;
     }
     std::sort(out.common_satellite_ids.begin(),
               out.common_satellite_ids.end());
+    const std::uint64_t common_hash =
+        forwardRiskSatelliteSetHash(out.common_satellite_ids);
     for (std::size_t point_index = 0;
          point_index < local_satellite_masks.size(); ++point_index) {
       local_satellite_masks[point_index] = common_mask;
@@ -1144,18 +1136,14 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
       }
       const int window_satellite_count = static_cast<int>(std::count(
           window_mask.begin(), window_mask.end(), true));
-      std::uint64_t window_hash = 1469598103934665603ull;
       for (std::size_t sat_index = 0; sat_index < sat_count; ++sat_index) {
         if (!window_mask[sat_index]) continue;
         const int sat_id = request.snapshot.gnss_epoch.sats[sat_index].sat_id;
         window.satellite_ids.push_back(sat_id);
-        window_hash ^= static_cast<std::uint64_t>(
-            static_cast<std::uint32_t>(sat_id));
-        window_hash *= 1099511628211ull;
       }
       std::sort(window.satellite_ids.begin(), window.satellite_ids.end());
       window.satellite_set_hash =
-          window_satellite_count > 0 ? window_hash : 0;
+          forwardRiskSatelliteSetHash(window.satellite_ids);
       if (window_satellite_count < params_.gnss.geometry_params.min_sats) {
         window.complete = false;
         window.first_failure_index = rows.front();
@@ -1379,24 +1367,6 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
         window.failure_reason = point.failure_reason;
       }
     }
-    std::vector<ForwardRiskWindowResult> merged_windows;
-    merged_windows.reserve(out.windows.size());
-    for (auto& window : out.windows) {
-      if (!merged_windows.empty() &&
-          merged_windows.back().satellite_ids == window.satellite_ids) {
-        auto& merged = merged_windows.back();
-        merged.point_count += window.point_count;
-        merged.complete = merged.complete && window.complete;
-        if (merged.failure_reason == ForwardRiskFailureReason::NONE &&
-            window.failure_reason != ForwardRiskFailureReason::NONE) {
-          merged.first_failure_index = window.first_failure_index;
-          merged.failure_reason = window.failure_reason;
-        }
-      } else {
-        merged_windows.push_back(std::move(window));
-      }
-    }
-    out.windows = std::move(merged_windows);
   }
   out.timing.advisory_ms = std::chrono::duration<double, std::milli>(
       std::chrono::steady_clock::now() - advisory_started_at).count();

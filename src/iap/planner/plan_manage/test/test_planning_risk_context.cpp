@@ -524,7 +524,8 @@ std::function<iap::ForwardRiskBatchResult(
           iap::ForwardRiskWindowResult window;
           window.satellite_window_id = window_id;
           window.satellite_ids = {1, 2, 3, 4, 5, 6, 7, 8};
-          window.satellite_set_hash = window_id;
+          window.satellite_set_hash =
+              iap::forwardRiskSatelliteSetHash(window.satellite_ids);
           window.point_count = static_cast<std::size_t>(std::count_if(
               request.points.begin(), request.points.end(),
               [window_id](const auto &point) {
@@ -534,10 +535,24 @@ std::function<iap::ForwardRiskBatchResult(
           window.failure_reason = safety_ratio < 1.0
               ? iap::ForwardRiskFailureReason::NONE
               : iap::ForwardRiskFailureReason::SAFETY_LIMIT_EXCEEDED;
+          if (safety_ratio >= 1.0) {
+            window.first_failure_index = static_cast<std::size_t>(
+                std::distance(request.points.begin(), std::find_if(
+                    request.points.begin(), request.points.end(),
+                    [window_id](const auto& point) {
+                      return point.satellite_window_id == window_id;
+                    })));
+          }
           out.windows.push_back(std::move(window));
         }
       }
-      for (auto& point : out.points) {
+      for (std::size_t index = 0; index < out.points.size(); ++index) {
+        auto& point = out.points[index];
+        if (request.satellite_set_policy ==
+            iap::ForwardRiskSatelliteSetPolicy::BRAKING_WINDOW_CORE) {
+          point.local_satellite_set_hash = iap::forwardRiskSatelliteSetHash(
+              std::vector<int>{1, 2, 3, 4, 5, 6, 7, 8});
+        }
         point.safety_ratio = safety_ratio;
         point.prediction.fused.hpl = request.hal * safety_ratio;
         point.prediction.fused.vpl = request.val * safety_ratio;
