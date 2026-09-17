@@ -9,7 +9,7 @@
 std_msgs/Header header
 
 # Exact estimator frame that produced this report.  Timestamp proximity alone
-# is not a valid provenance association for registered-map source bounds.
+# is not a valid provenance association for registered-map source health.
 int64 estimation_frame_id
 
 # Three-state: 0=SAFE, 1=SAFE_EXCLUDED, 2=UNSAFE

@@ -30,8 +30,7 @@ std::string contributionContentHash(
             << source.source_icp_degenerate << ';'
             << source.source_icp_rmse << ';'
             << source.source_icp_condition << ';'
-            << source.source_icp_gamma_lidar << ';'
-            << source.source_lidar_pl_enu_m.transpose() << ';';
+            << source.source_icp_gamma_lidar << ';';
   const Eigen::Matrix4d transform = source.T_map_lidar.matrix();
   for (int row = 0; row < transform.rows(); ++row) {
     for (int column = 0; column < transform.cols(); ++column) {

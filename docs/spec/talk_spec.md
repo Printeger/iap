@@ -222,17 +222,18 @@ For each candidate trajectory τ:
 - Local execution is admitted by `LocalMotionAssurance`, not by RiskGrid or
   LiDAR FIM. It evaluates the actual nominal and braking splines against
   obstacle surfaces using the vehicle/tracking/scan/ICP/drift/curve/safety
-  envelope. Current-frame common global transform error cancels; older
-  registered obstacles use the direction-projected sum of current and source
-  axis bounds because their correlation is unknown. Missing provenance,
-  source-frame LiDAR/ICP health, fresh support, or any braking-curve proof is
-  fail-closed. LiDAR observability remains a ranking/recovery cue and cannot
-  shrink this certified envelope by itself.
-  Source-frame PL and ICP health are frozen into the registered-frame message
-  before the frame becomes a long-lived active-window obstacle. Planner-local
-  history matching is compatibility-only and requires exact estimator-frame
-  identity plus exact acquisition stamp; a nearby report from another frame is
-  not interchangeable. Late exact health replaces the frame atomically. The
+  envelope. The registered map is authoritative SLAM geometry, so current and
+  older registered obstacles use the same local envelope. The planner neither
+  adds current/source absolute LiDAR PL to invent a relative error nor charges
+  a source ICP residual twice. Missing provenance, exact source registration
+  health, fresh support, or any braking-curve proof is fail-closed. LiDAR
+  observability remains a ranking/recovery cue and cannot shrink this
+  certified envelope by itself.
+  Exact ICP health is frozen into the registered-frame message before the
+  frame becomes a long-lived active-window obstacle. Existing source PL fields
+  are compatibility diagnostics only. Planner-local history cannot reconstruct
+  source health; exact estimator-frame identity plus exact acquisition stamp
+  is required. Late exact health replaces the frame atomically. The
   explicitly identified first estimator frame is the planner-map datum, so it
   has no self-ICP registration term; scan/deskew and all other local margins
   still apply. A

@@ -29,26 +29,37 @@ namespace ego_planner
 
   namespace
   {
+    bool p4SlamRegistrationHealthValid(
+        const iap::CurrentIntegrityState &integrity)
+    {
+      return !integrity.icp_degenerate &&
+          std::isfinite(integrity.icp_rmse) && integrity.icp_rmse >= 0.0 &&
+          std::isfinite(integrity.icp_condition) &&
+          integrity.icp_condition >= 0.0 &&
+          std::isfinite(integrity.icp_gamma_lidar) &&
+          integrity.icp_gamma_lidar >= 1.0;
+    }
+
     iap::LocalMotionEvidence buildP4LocalMotionEvidence(
         const std::shared_ptr<const P0OccupancyEpoch> &occupancy,
         const iap::CurrentIntegrityState &integrity,
         const std::vector<iap::LocalMotionCurve> &curves,
         const std::uint64_t execution_snapshot_id,
         const bool support_fresh,
-        const std::vector<P0ExecutionRiskSnapshot::LocalObstacleSourceBound>
-            *source_bounds)
+        const std::vector<
+            P0ExecutionRiskSnapshot::LocalObstacleSourceCertification>
+            *source_certifications)
     {
       iap::LocalMotionEvidence evidence;
       evidence.complete = occupancy &&
           occupancy->raw_occupied_voxel_centers &&
           occupancy->current_frame_occupied_voxel_centers;
       evidence.support_fresh = support_fresh;
-      evidence.icp_valid = integrity.lidar_valid;
+      evidence.registration_health_valid =
+          p4SlamRegistrationHealthValid(integrity);
       evidence.icp_degenerate = integrity.icp_degenerate;
       evidence.icp_rmse_m = integrity.icp_rmse;
       evidence.icp_gamma = integrity.icp_gamma_lidar;
-      evidence.current_lidar_pl_enu_m = Eigen::Vector3d(
-          integrity.lidar_pl_e, integrity.lidar_pl_n, integrity.lidar_pl_u);
       evidence.certified_empty_clearance_m = 12.0;
       evidence.identity = "execution_snapshot=" +
           std::to_string(execution_snapshot_id) + ";occupancy=" +
@@ -83,7 +94,7 @@ namespace ego_planner
           {
             // Only the exact occupied voxel is identity-preserving evidence.
             // A neighbouring hit may be another surface; proximity alone
-            // cannot erase an older source's conservative relative bound.
+            // cannot erase an older registered source's identity.
             return current_keys.count(voxel_key(center)) != 0u;
           };
       std::set<std::tuple<int, int, int>> provenance_keys = current_keys;
@@ -104,11 +115,6 @@ namespace ego_planner
           0.5 * occupancy->geometry.resolution_m);
       const auto append_obstacle = [&](const Eigen::Vector3d &center,
                                        const auto provenance,
-                                       const Eigen::Vector3d &source_pl,
-                                       const bool source_icp_degenerate,
-                                       const double source_icp_rmse,
-                                       const double source_icp_condition,
-                                       const double source_icp_gamma,
                                        const std::int64_t source_frame_id,
                                        const std::string &source_identity)
       {
@@ -121,11 +127,6 @@ namespace ego_planner
         obstacle.half_extent_m = half_extent;
         obstacle.source_frame_id = source_frame_id;
         obstacle.provenance = provenance;
-        obstacle.source_lidar_pl_enu_m = source_pl;
-        obstacle.source_icp_degenerate = source_icp_degenerate;
-        obstacle.source_icp_rmse_m = source_icp_rmse;
-        obstacle.source_icp_condition = source_icp_condition;
-        obstacle.source_icp_gamma = source_icp_gamma;
         obstacle.source_identity = source_identity;
         evidence.obstacles.push_back(std::move(obstacle));
       };
@@ -135,28 +136,24 @@ namespace ego_planner
            *occupancy->current_frame_occupied_voxel_centers)
         append_obstacle(
             center, iap::LocalObstacleProvenance::CURRENT_FRAME,
-            Eigen::Vector3d::Zero(), false, integrity.icp_rmse,
-            integrity.icp_condition, integrity.icp_gamma_lidar,
             current_frame_id, "current_frame");
 
-      if (source_bounds)
+      if (source_certifications)
       {
-        for (const auto &source : *source_bounds)
+        for (const auto &source : *source_certifications)
         {
           if (!source.occupied_centers) continue;
           const auto provenance = source.certified
-              ? iap::LocalObstacleProvenance::ACTIVE_WINDOW_BOUNDED
-              : iap::LocalObstacleProvenance::ACTIVE_WINDOW_UNBOUNDED;
+              ? iap::LocalObstacleProvenance::ACTIVE_WINDOW_CERTIFIED
+              : iap::LocalObstacleProvenance::ACTIVE_WINDOW_UNCERTIFIED;
           for (const auto &center : *source.occupied_centers)
           {
             if (center.allFinite()) provenance_keys.insert(voxel_key(center));
             // A current scan re-observation supersedes an older contribution
-            // at the same voxel for local-relative assurance.
+            // at the same voxel for local-motion assurance.
             if (currently_reobserved(center)) continue;
-            append_obstacle(center, provenance, source.lidar_pl_enu_m,
-                            source.icp_degenerate, source.icp_rmse_m,
-                            source.icp_condition, source.icp_gamma,
-                            source.frame_id, source.identity);
+            append_obstacle(center, provenance, source.frame_id,
+                            source.identity);
           }
         }
         // A registered snapshot is allowed to contain raw occupied voxels
@@ -169,29 +166,19 @@ namespace ego_planner
               provenance_keys.count(voxel_key(center)) == 0u)
             append_obstacle(
                 center,
-                iap::LocalObstacleProvenance::ACTIVE_WINDOW_UNBOUNDED,
-                Eigen::Vector3d::Constant(
-                    std::numeric_limits<double>::quiet_NaN()),
-                true, std::numeric_limits<double>::quiet_NaN(),
-                std::numeric_limits<double>::quiet_NaN(),
-                std::numeric_limits<double>::quiet_NaN(),
+                iap::LocalObstacleProvenance::ACTIVE_WINDOW_UNCERTIFIED,
                 -1, "registered_source_provenance_missing");
       }
       else
       {
         // Legacy/non-registered captures have no per-frame provenance.  Keep
-        // their collision role, but do not invent a local-relative bound.
+        // their collision role, but do not invent source certification.
         for (const auto &center : *occupancy->raw_occupied_voxel_centers)
           if (current_keys.count(voxel_key(center)) == 0u)
             append_obstacle(
                 center,
-                iap::LocalObstacleProvenance::ACTIVE_WINDOW_UNBOUNDED,
-                Eigen::Vector3d::Constant(
-                    std::numeric_limits<double>::quiet_NaN()),
-                true, std::numeric_limits<double>::quiet_NaN(),
-                std::numeric_limits<double>::quiet_NaN(),
-                std::numeric_limits<double>::quiet_NaN(),
-                -1, "active_window_bound_unavailable");
+                iap::LocalObstacleProvenance::ACTIVE_WINDOW_UNCERTIFIED,
+                -1, "active_window_source_uncertified");
       }
       return evidence;
     }
@@ -4034,7 +4021,7 @@ namespace ego_planner
               !p0_risk_grid_runtime_ ||
                   (execution_snapshot && execution_snapshot->freshAt(stamp_s)),
               execution_snapshot
-                  ? &execution_snapshot->local_obstacle_source_bounds
+                  ? &execution_snapshot->local_obstacle_source_certifications
                   : nullptr)
         : iap::LocalMotionEvidence{};
     p4_direct_risk_evidence_.trajectory_assurance =
@@ -5532,7 +5519,7 @@ namespace ego_planner
           execution->occupancy, execution->integrity_anchor.current,
           assurance_request.local_curves, execution->execution_snapshot_id,
           execution->freshAt(now_s),
-          &execution->local_obstacle_source_bounds);
+          &execution->local_obstacle_source_certifications);
       p4_direct_risk_evidence_.trajectory_assurance =
           iap::TrajectoryAssurance(p4_global_exposure_policy_,
                                    p4_local_motion_policy_)
@@ -6233,11 +6220,8 @@ namespace ego_planner
                      current.gnss_vpl / runtime_policy.alert_limit_v_m)
           : std::numeric_limits<double>::infinity();
       const bool current_controlled_candidate =
-          !p4_global_exposure_policy_.hard_global && current.lidar_valid &&
-          !current.icp_degenerate &&
-          std::isfinite(current.icp_rmse) && current.icp_rmse >= 0.0 &&
-          std::isfinite(current.icp_gamma_lidar) &&
-          current.icp_gamma_lidar > 0.0 &&
+          !p4_global_exposure_policy_.hard_global &&
+          p4SlamRegistrationHealthValid(current) &&
           current_gnss_ratio <=
               p4_global_exposure_policy_.maximum_ratio + 1.0e-9;
       if (!out.current_integrity_safe && !current_controlled_candidate)
@@ -6312,8 +6296,7 @@ namespace ego_planner
                       runtime_policy.alert_limit_v_m)
             : std::numeric_limits<double>::infinity();
         if (p4_global_exposure_policy_.hard_global ||
-            !refreshed_current.lidar_valid ||
-            refreshed_current.icp_degenerate ||
+            !p4SlamRegistrationHealthValid(refreshed_current) ||
             ratio > p4_global_exposure_policy_.maximum_ratio + 1.0e-9)
           return revoke("runtime_current_integrity_not_safe");
       }
@@ -6617,7 +6600,7 @@ namespace ego_planner
                 runtime_assurance_request.local_curves,
                 runtime_execution_snapshot->execution_snapshot_id,
                 runtime_execution_snapshot->freshAt(evaluation_now_s),
-                &runtime_execution_snapshot->local_obstacle_source_bounds);
+                &runtime_execution_snapshot->local_obstacle_source_certifications);
       p4_direct_risk_evidence_.trajectory_assurance =
           iap::TrajectoryAssurance(p4_global_exposure_policy_,
                                    p4_local_motion_policy_)

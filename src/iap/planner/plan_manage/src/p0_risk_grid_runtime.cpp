@@ -221,6 +221,48 @@ bool hasPointField(const sensor_msgs::msg::PointCloud2& msg,
                      });
 }
 
+P0ExecutionRiskSnapshot::LocalObstacleSourceCertification
+makeLocalObstacleSourceCertification(
+    const RegisteredLidarObstacleSource& source) {
+  P0ExecutionRiskSnapshot::LocalObstacleSourceCertification certification;
+  certification.frame_id = source.metadata.frame_id;
+  certification.source_stamp_s = source.metadata.stamp_s;
+  certification.occupied_centers = source.occupied_voxel_centers;
+  constexpr double kExactSourceStampToleranceS = 1.0e-6;
+  const bool embedded_health_valid =
+      source.metadata.source_health_valid &&
+      source.metadata.frame_id >= 0 &&
+      !source.metadata.content_hash.empty() &&
+      std::isfinite(source.metadata.source_health_stamp_s) &&
+      std::abs(source.metadata.source_health_stamp_s -
+               source.metadata.stamp_s) <= kExactSourceStampToleranceS &&
+      !source.metadata.source_icp_degenerate &&
+      std::isfinite(source.metadata.source_icp_rmse) &&
+      std::isfinite(source.metadata.source_icp_condition) &&
+      std::isfinite(source.metadata.source_icp_gamma_lidar) &&
+      source.metadata.source_icp_rmse >= 0.0 &&
+      source.metadata.source_icp_condition >= 0.0 &&
+      source.metadata.source_icp_gamma_lidar >= 1.0;
+  if (embedded_health_valid) {
+    certification.certified = true;
+    certification.icp_degenerate = source.metadata.source_icp_degenerate;
+    certification.icp_rmse_m = source.metadata.source_icp_rmse;
+    certification.icp_condition = source.metadata.source_icp_condition;
+    certification.icp_gamma = source.metadata.source_icp_gamma_lidar;
+  }
+  std::ostringstream identity;
+  identity << "frame=" << certification.frame_id << ";stamp="
+           << std::setprecision(17) << certification.source_stamp_s
+           << ";content=" << source.metadata.content_hash
+           << ";embedded_health=" << embedded_health_valid
+           << ";certified=" << certification.certified
+           << ";icp_rmse=" << certification.icp_rmse_m
+           << ";icp_condition=" << certification.icp_condition
+           << ";icp_gamma=" << certification.icp_gamma;
+  certification.identity = identity.str();
+  return certification;
+}
+
 struct PredictorPositionCacheKey {
   double x = 0.0;
   double y = 0.0;
@@ -2061,76 +2103,10 @@ void P0RiskGridRuntime::buildAndPublishExecutionSnapshot(
       source_identity.predictor_algorithm_identity;
   if (occupancy->frozen_grid_map_epoch &&
       occupancy->frozen_grid_map_epoch->active_window_obstacle_sources) {
-    std::lock_guard<std::mutex> health_lock(health_state_mutex_);
-    constexpr double kExactSourceStampToleranceS = 1.0e-6;
     for (const auto& source :
          *occupancy->frozen_grid_map_epoch->active_window_obstacle_sources) {
-      P0ExecutionRiskSnapshot::LocalObstacleSourceBound bound;
-      bound.frame_id = source.metadata.frame_id;
-      bound.source_stamp_s = source.metadata.stamp_s;
-      bound.occupied_centers = source.occupied_voxel_centers;
-      const bool embedded_health_valid =
-          source.metadata.source_health_valid &&
-          source.metadata.frame_id >= 0 &&
-          !source.metadata.content_hash.empty() &&
-          std::isfinite(source.metadata.source_health_stamp_s) &&
-          std::abs(source.metadata.source_health_stamp_s -
-                   source.metadata.stamp_s) <=
-              kExactSourceStampToleranceS &&
-          !source.metadata.source_icp_degenerate &&
-          std::isfinite(source.metadata.source_icp_rmse) &&
-          std::isfinite(source.metadata.source_icp_condition) &&
-          std::isfinite(source.metadata.source_icp_gamma_lidar) &&
-          source.metadata.source_icp_rmse >= 0.0 &&
-          source.metadata.source_icp_condition >= 0.0 &&
-          source.metadata.source_icp_gamma_lidar >= 1.0 &&
-          source.metadata.source_lidar_pl_enu_m.allFinite() &&
-          (source.metadata.source_lidar_pl_enu_m.array() >= 0.0).all();
-      if (embedded_health_valid) {
-        bound.certified = true;
-        bound.lidar_pl_enu_m = source.metadata.source_lidar_pl_enu_m;
-        bound.icp_degenerate = source.metadata.source_icp_degenerate;
-        bound.icp_rmse_m = source.metadata.source_icp_rmse;
-        bound.icp_condition = source.metadata.source_icp_condition;
-        bound.icp_gamma = source.metadata.source_icp_gamma_lidar;
-      }
-      const iap::CurrentIntegrityState* closest = nullptr;
-      double closest_delta_s = std::numeric_limits<double>::infinity();
-      for (const auto& entry : current_integrity_history_) {
-        const auto& candidate = entry.second;
-        const double delta_s = std::abs(candidate.stamp - bound.source_stamp_s);
-        if (candidate.valid && candidate.lidar_valid &&
-            candidate.estimation_frame_id == bound.frame_id &&
-            !candidate.icp_degenerate &&
-            std::isfinite(candidate.lidar_pl_e) &&
-            std::isfinite(candidate.lidar_pl_n) &&
-            std::isfinite(candidate.lidar_pl_u) && delta_s < closest_delta_s) {
-          closest = &candidate;
-          closest_delta_s = delta_s;
-        }
-      }
-      if (!bound.certified && closest &&
-          closest_delta_s <= kExactSourceStampToleranceS) {
-        bound.certified = true;
-        bound.lidar_pl_enu_m = Eigen::Vector3d(
-            closest->lidar_pl_e, closest->lidar_pl_n, closest->lidar_pl_u);
-        bound.icp_degenerate = closest->icp_degenerate;
-        bound.icp_rmse_m = closest->icp_rmse;
-        bound.icp_condition = closest->icp_condition;
-        bound.icp_gamma = closest->icp_gamma_lidar;
-      }
-      std::ostringstream bound_identity;
-      bound_identity << "frame=" << bound.frame_id << ";stamp="
-                     << std::setprecision(17) << bound.source_stamp_s
-                     << ";content=" << source.metadata.content_hash
-                     << ";embedded_health=" << embedded_health_valid
-                     << ";integrity_delta=" << closest_delta_s
-                     << ";certified=" << bound.certified
-                     << ";icp_rmse=" << bound.icp_rmse_m
-                     << ";icp_condition=" << bound.icp_condition
-                     << ";icp_gamma=" << bound.icp_gamma;
-      bound.identity = bound_identity.str();
-      execution->local_obstacle_source_bounds.push_back(std::move(bound));
+      execution->local_obstacle_source_certifications.push_back(
+          makeLocalObstacleSourceCertification(source));
     }
   }
   const double hal = config_.predictor_hal_m;
@@ -3095,77 +3071,11 @@ void P0RiskGridRuntime::refreshTimerCallback() {
     execution->frame_contract_id = occupancy_epoch->frame_contract_id;
     if (occupancy_epoch->frozen_grid_map_epoch &&
         occupancy_epoch->frozen_grid_map_epoch->active_window_obstacle_sources) {
-      std::lock_guard<std::mutex> health_lock(health_state_mutex_);
-      constexpr double kExactSourceStampToleranceS = 1.0e-6;
       for (const auto& source :
            *occupancy_epoch->frozen_grid_map_epoch->
                 active_window_obstacle_sources) {
-        P0ExecutionRiskSnapshot::LocalObstacleSourceBound bound;
-        bound.frame_id = source.metadata.frame_id;
-        bound.source_stamp_s = source.metadata.stamp_s;
-        bound.occupied_centers = source.occupied_voxel_centers;
-        const bool embedded_health_valid =
-            source.metadata.source_health_valid &&
-            source.metadata.frame_id >= 0 &&
-            !source.metadata.content_hash.empty() &&
-            std::isfinite(source.metadata.source_health_stamp_s) &&
-            std::abs(source.metadata.source_health_stamp_s -
-                     source.metadata.stamp_s) <=
-                kExactSourceStampToleranceS &&
-            !source.metadata.source_icp_degenerate &&
-            std::isfinite(source.metadata.source_icp_rmse) &&
-            std::isfinite(source.metadata.source_icp_condition) &&
-            std::isfinite(source.metadata.source_icp_gamma_lidar) &&
-            source.metadata.source_icp_rmse >= 0.0 &&
-            source.metadata.source_icp_condition >= 0.0 &&
-            source.metadata.source_icp_gamma_lidar >= 1.0 &&
-            source.metadata.source_lidar_pl_enu_m.allFinite() &&
-            (source.metadata.source_lidar_pl_enu_m.array() >= 0.0).all();
-        if (embedded_health_valid) {
-          bound.certified = true;
-          bound.lidar_pl_enu_m = source.metadata.source_lidar_pl_enu_m;
-          bound.icp_degenerate = false;
-          bound.icp_rmse_m = source.metadata.source_icp_rmse;
-          bound.icp_condition = source.metadata.source_icp_condition;
-          bound.icp_gamma = source.metadata.source_icp_gamma_lidar;
-        } else {
-          const iap::CurrentIntegrityState* closest = nullptr;
-          double closest_delta_s = std::numeric_limits<double>::infinity();
-          for (const auto& entry : current_integrity_history_) {
-            const auto& candidate = entry.second;
-            const double delta_s =
-                std::abs(candidate.stamp - bound.source_stamp_s);
-            if (candidate.valid && candidate.lidar_valid &&
-                candidate.estimation_frame_id == bound.frame_id &&
-                !candidate.icp_degenerate &&
-                std::isfinite(candidate.lidar_pl_e) &&
-                std::isfinite(candidate.lidar_pl_n) &&
-                std::isfinite(candidate.lidar_pl_u) &&
-                delta_s < closest_delta_s) {
-              closest = &candidate;
-              closest_delta_s = delta_s;
-            }
-          }
-          if (closest &&
-              closest_delta_s <= kExactSourceStampToleranceS) {
-            bound.certified = true;
-            bound.lidar_pl_enu_m = Eigen::Vector3d(
-                closest->lidar_pl_e, closest->lidar_pl_n,
-                closest->lidar_pl_u);
-            bound.icp_degenerate = closest->icp_degenerate;
-            bound.icp_rmse_m = closest->icp_rmse;
-            bound.icp_condition = closest->icp_condition;
-            bound.icp_gamma = closest->icp_gamma_lidar;
-          }
-        }
-        std::ostringstream identity;
-        identity << "frame=" << bound.frame_id << ";stamp="
-                 << std::setprecision(17) << bound.source_stamp_s
-                 << ";content=" << source.metadata.content_hash
-                 << ";embedded_health=" << embedded_health_valid
-                 << ";certified=" << bound.certified;
-        bound.identity = identity.str();
-        execution->local_obstacle_source_bounds.push_back(std::move(bound));
+        execution->local_obstacle_source_certifications.push_back(
+            makeLocalObstacleSourceCertification(source));
       }
     }
     execution->forward_risk_batch =

@@ -4445,6 +4445,23 @@ Requirements: `IAP-RQ-000`, `IAP-RQ-020`, `IAP-RQ-030`, `IAP-RQ-040`,
   copying the full current cloud during P0 capture, and limits v6
   model-completeness acceptance to formal/eligible candidates.
 
+## 2026-09-17 registered-map local-assurance correction
+
+- Treat the registered local map as authoritative SLAM geometry. Planner local
+  motion authorization no longer fabricates a current-to-source relative bound
+  by adding absolute current/source LiDAR PL, and no longer charges the source
+  frame's ICP residual a second time. The common envelope still includes body,
+  certified tracking, current scan/ICP, short drift, curve and fixed margins.
+- Active-window admission now depends on exact source identity and embedded,
+  non-degenerate ICP registration health. Absolute LiDAR PL remains in the ROS
+  frame as a compatibility diagnostic but is excluded from admission, content
+  identity and local clearance. The planner-side Integrity-history fallback
+  was removed; missing source health remains fail-closed.
+- Forward lineage advances to `p4_forward_route_decision_v12`; the historical
+  `local_relative_map_error_m` column remains for readers but is deprecated and
+  fixed to zero for v12 evidence. GNSS exposure, PL/AL formulas, RiskGrid, P5,
+  BDS and the one-second map freshness contract are unchanged.
+
 ## 2026-09-17 global-navigation exposure and local-motion assurance
 
 - Added `TrajectoryAssurance`, splitting direct GNSS task-global exposure from

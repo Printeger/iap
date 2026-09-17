@@ -177,6 +177,43 @@ TEST(RegisteredLidarWindow,
   EXPECT_DOUBLE_EQ(sources->front().metadata.source_icp_rmse, 0.02);
 }
 
+TEST(RegisteredLidarWindow,
+     AbsoluteLidarPlDiagnosticDoesNotChangeRegisteredContentIdentity) {
+  auto first_window = makeWindow();
+  auto second_window = makeWindow();
+  auto first = frame(12, Eigen::Vector3d(0.5, 0.5, 0.5),
+                     {Eigen::Vector3d(2.0, 0.0, 0.0)});
+  first.source_health_valid = true;
+  first.source_health_stamp_s = first.stamp_s;
+  first.source_icp_degenerate = false;
+  first.source_icp_rmse = 0.02;
+  first.source_icp_condition = 11.0;
+  first.source_icp_gamma_lidar = 1.2;
+  first.source_lidar_pl_enu_m = Eigen::Vector3d(1.0, 2.0, 3.0);
+  auto second = first;
+  second.source_lidar_pl_enu_m = Eigen::Vector3d(100.0, 200.0, 300.0);
+
+  ActiveLidarWindowDeltaData first_delta;
+  first_delta.base_generation = 0;
+  first_delta.generation = 1;
+  first_delta.complete = true;
+  first_delta.frame_contract_id = "contract-a";
+  first_delta.added.push_back(first);
+  ActiveLidarWindowDeltaData second_delta = first_delta;
+  second_delta.added.front() = second;
+  ASSERT_TRUE(first_window.applyActiveDelta(first_delta).accepted);
+  ASSERT_TRUE(second_window.applyActiveDelta(second_delta).accepted);
+
+  const auto first_sources = first_window.activeObstacleSources();
+  const auto second_sources = second_window.activeObstacleSources();
+  ASSERT_EQ(first_sources->size(), 1u);
+  ASSERT_EQ(second_sources->size(), 1u);
+  EXPECT_EQ(first_sources->front().metadata.content_hash,
+            second_sources->front().metadata.content_hash);
+  EXPECT_FALSE(first_sources->front().metadata.source_lidar_pl_enu_m.isApprox(
+      second_sources->front().metadata.source_lidar_pl_enu_m));
+}
+
 TEST(RegisteredLidarWindow, OutOfBoundsHitRetainsObservedFreeMapPrefix) {
   auto window = makeWindow();
   const auto update = window.applyCurrentFrame(frame(

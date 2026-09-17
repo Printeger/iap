@@ -4766,8 +4766,10 @@ TEST_F(P0RiskGridRuntimeStampTest,
     source.metadata.source_icp_rmse = 0.02;
     source.metadata.source_icp_condition = 12.0;
     source.metadata.source_icp_gamma_lidar = 1.25;
-    source.metadata.source_lidar_pl_enu_m =
-        Eigen::Vector3d(0.3, 0.4, 0.5);
+    // Absolute LiDAR PL is a compatibility diagnostic.  It may be unavailable
+    // without invalidating the exact SLAM registration-health evidence.
+    source.metadata.source_lidar_pl_enu_m = Eigen::Vector3d::Constant(
+        std::numeric_limits<double>::quiet_NaN());
     source.occupied_voxel_centers =
         std::make_shared<const std::vector<Eigen::Vector3d>>(
             std::vector<Eigen::Vector3d>{Eigen::Vector3d::Zero()});
@@ -4780,15 +4782,15 @@ TEST_F(P0RiskGridRuntimeStampTest,
   EXPECT_FALSE(refreshOnce(&runtime));
   const auto execution = runtime.acquireExecutionRiskSnapshot();
   ASSERT_NE(execution, nullptr);
-  ASSERT_EQ(execution->local_obstacle_source_bounds.size(), 1u);
-  const auto& bound = execution->local_obstacle_source_bounds.front();
-  EXPECT_TRUE(bound.certified);
-  EXPECT_EQ(bound.frame_id, 42);
-  EXPECT_TRUE(bound.lidar_pl_enu_m.isApprox(Eigen::Vector3d(0.3, 0.4, 0.5)));
-  EXPECT_FALSE(bound.icp_degenerate);
-  EXPECT_DOUBLE_EQ(bound.icp_rmse_m, 0.02);
-  EXPECT_DOUBLE_EQ(bound.icp_condition, 12.0);
-  EXPECT_DOUBLE_EQ(bound.icp_gamma, 1.25);
+  ASSERT_EQ(execution->local_obstacle_source_certifications.size(), 1u);
+  const auto& certification =
+      execution->local_obstacle_source_certifications.front();
+  EXPECT_TRUE(certification.certified);
+  EXPECT_EQ(certification.frame_id, 42);
+  EXPECT_FALSE(certification.icp_degenerate);
+  EXPECT_DOUBLE_EQ(certification.icp_rmse_m, 0.02);
+  EXPECT_DOUBLE_EQ(certification.icp_condition, 12.0);
+  EXPECT_DOUBLE_EQ(certification.icp_gamma, 1.25);
 }
 
 TEST_F(P0RiskGridRuntimeStampTest,
@@ -4833,10 +4835,11 @@ TEST_F(P0RiskGridRuntimeStampTest,
   EXPECT_FALSE(refreshOnce(&runtime));
   const auto execution = runtime.acquireExecutionRiskSnapshot();
   ASSERT_NE(execution, nullptr);
-  ASSERT_EQ(execution->local_obstacle_source_bounds.size(), 1u);
-  const auto& bound = execution->local_obstacle_source_bounds.front();
-  EXPECT_EQ(bound.frame_id, 42);
-  EXPECT_FALSE(bound.certified);
+  ASSERT_EQ(execution->local_obstacle_source_certifications.size(), 1u);
+  const auto& certification =
+      execution->local_obstacle_source_certifications.front();
+  EXPECT_EQ(certification.frame_id, 42);
+  EXPECT_FALSE(certification.certified);
 }
 
 TEST_F(P0RiskGridRuntimeStampTest,

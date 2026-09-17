@@ -410,18 +410,21 @@
   reachable braking curves at no more than `0.2 s` spacing. Its directional
   margin subtracts vehicle radius, measured tracking bound, scan/ICP bound,
   short-horizon relative drift, curve approximation and fixed safety margin
-  from obstacle-surface clearance. The current registered scan shares and
-  cancels the current global map transform; an active-window obstacle instead
-  uses the axis-projected worst correlated bound
-  `sum(abs(n_i)*(PL_current_i+PL_source_i))`. Missing source identity/bound,
-  stale support, degenerate ICP, collision, excessive tracking error, or any
+  from obstacle-surface clearance. The registered local map is authoritative
+  SLAM geometry: current and active-window obstacles use the same local
+  execution envelope. Planner code must not synthesize a current-to-source
+  relative uncertainty by adding their absolute LiDAR PL values, and it must
+  not charge a source frame's ICP residual a second time. Missing source
+  identity/registration health, stale support, degenerate ICP, collision,
+  excessive tracking error, or any
   unsafe braking curve is UNKNOWN/UNSAFE and cannot be overridden by GNSS
-  exposure policy or good LiDAR FIM. Registered source-frame pose/voxel content
-  and its time-associated LiDAR/ICP health are immutable certificate identity.
-  That source health travels with the registered frame when it enters the
-  active window; a downstream planner history is only a compatibility fallback
-  and must not be the sole authority for a long-lived keyframe. Compatibility
-  matching requires the exact estimator frame ID and the exact source stamp;
+  exposure policy or good LiDAR FIM. Registered source-frame pose/voxel
+  content and its exact, non-degenerate ICP registration health are immutable
+  certificate identity. Absolute LiDAR PL fields remain compatibility
+  diagnostics and do not affect local clearance or source admission. That
+  source health travels with the registered frame when it enters the active
+  window; planner-side Integrity history must not reconstruct or replace it.
+  Matching requires the exact estimator frame ID and exact source stamp;
   temporal proximity or a matching ROS `frame_id` string is insufficient. A
   late exact health report replaces that registered-frame contribution as one
   atomic remove/add transaction. The first estimator frame explicitly marks

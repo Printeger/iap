@@ -123,8 +123,8 @@ class GlobalNavigationExposureLedger {
 
 enum class LocalObstacleProvenance {
   CURRENT_FRAME = 0,
-  ACTIVE_WINDOW_BOUNDED,
-  ACTIVE_WINDOW_UNBOUNDED,
+  ACTIVE_WINDOW_CERTIFIED,
+  ACTIVE_WINDOW_UNCERTIFIED,
 };
 
 enum class LocalMotionAssuranceStatus {
@@ -141,13 +141,7 @@ struct LocalObstacleEvidence {
   Eigen::Vector3d half_extent_m = Eigen::Vector3d::Constant(
       std::numeric_limits<double>::quiet_NaN());
   LocalObstacleProvenance provenance =
-      LocalObstacleProvenance::ACTIVE_WINDOW_UNBOUNDED;
-  Eigen::Vector3d source_lidar_pl_enu_m = Eigen::Vector3d::Constant(
-      std::numeric_limits<double>::quiet_NaN());
-  bool source_icp_degenerate = true;
-  double source_icp_rmse_m = std::numeric_limits<double>::quiet_NaN();
-  double source_icp_condition = std::numeric_limits<double>::quiet_NaN();
-  double source_icp_gamma = std::numeric_limits<double>::quiet_NaN();
+      LocalObstacleProvenance::ACTIVE_WINDOW_UNCERTIFIED;
   std::int64_t source_frame_id = -1;
   std::string source_identity;
 };
@@ -155,12 +149,10 @@ struct LocalObstacleEvidence {
 struct LocalMotionEvidence {
   bool complete = false;
   bool support_fresh = false;
-  bool icp_valid = false;
+  bool registration_health_valid = false;
   bool icp_degenerate = true;
   double icp_rmse_m = std::numeric_limits<double>::quiet_NaN();
   double icp_gamma = std::numeric_limits<double>::quiet_NaN();
-  Eigen::Vector3d current_lidar_pl_enu_m = Eigen::Vector3d::Constant(
-      std::numeric_limits<double>::quiet_NaN());
   double certified_empty_clearance_m =
       std::numeric_limits<double>::quiet_NaN();
   std::vector<LocalObstacleEvidence> obstacles;
@@ -201,6 +193,8 @@ struct LocalMotionSampleResult {
       std::numeric_limits<double>::quiet_NaN());
   double relative_time_s = std::numeric_limits<double>::quiet_NaN();
   double obstacle_clearance_m = std::numeric_limits<double>::quiet_NaN();
+  // Deprecated compatibility diagnostic. Registered-map alignment is owned
+  // by SLAM and is never reconstructed from absolute LiDAR PL in the planner.
   double relative_map_error_m = 0.0;
   double scan_error_m = 0.0;
   double drift_error_m = 0.0;

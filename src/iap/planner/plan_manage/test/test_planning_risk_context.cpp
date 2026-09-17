@@ -766,7 +766,8 @@ makeP4ExecutionSnapshot(
     std::function<iap::ForwardRiskBatchResult(
         const iap::ForwardRiskBatchRequest&)> direct,
     const double stamp_s = 10.0,
-    const uint64_t execution_snapshot_id = 71u) {
+    const uint64_t execution_snapshot_id = 71u,
+    const bool absolute_lidar_integrity_valid = true) {
   auto occupancy = std::make_shared<ego_planner::P0OccupancyEpoch>();
   occupancy->generation = risk->sourceIdentity().occupancy_generation;
   occupancy->cloud_stamp_s = stamp_s;
@@ -799,10 +800,22 @@ makeP4ExecutionSnapshot(
   execution->integrity_anchor.current.vpl = 1.0;
   execution->integrity_anchor.current.hal = 10.0;
   execution->integrity_anchor.current.val = 20.0;
-  execution->integrity_anchor.current.lidar_valid = true;
-  execution->integrity_anchor.current.lidar_pl_e = 0.1;
-  execution->integrity_anchor.current.lidar_pl_n = 0.1;
-  execution->integrity_anchor.current.lidar_pl_u = 0.1;
+  execution->integrity_anchor.current.lidar_valid =
+      absolute_lidar_integrity_valid;
+  execution->integrity_anchor.current.gnss_valid = true;
+  execution->integrity_anchor.current.gnss_hpl =
+      absolute_lidar_integrity_valid ? 1.0 : 10.1;
+  execution->integrity_anchor.current.gnss_vpl = 1.0;
+  if (!absolute_lidar_integrity_valid) {
+    // Exercise controlled-degraded execution: fused/current global integrity
+    // is marginally above HAL while SLAM registration health remains valid.
+    execution->integrity_anchor.current.hpl = 10.1;
+  }
+  const double lidar_pl = absolute_lidar_integrity_valid
+      ? 0.1 : std::numeric_limits<double>::quiet_NaN();
+  execution->integrity_anchor.current.lidar_pl_e = lidar_pl;
+  execution->integrity_anchor.current.lidar_pl_n = lidar_pl;
+  execution->integrity_anchor.current.lidar_pl_u = lidar_pl;
   execution->integrity_anchor.current.lidar_hpl = 0.1;
   execution->integrity_anchor.current.lidar_vpl = 0.1;
   execution->integrity_anchor.current.icp_degenerate = false;
@@ -1626,7 +1639,8 @@ TEST(P4ForwardTerminalLineageTest,
       return directRiskCallback(0.5)(request);
     };
   const auto execution_snapshot = makeP4ExecutionSnapshot(
-      snapshot, safe_direct);
+      snapshot, safe_direct, 10.0, 71u, false);
+  ASSERT_FALSE(execution_snapshot->integrity_anchor.current.lidar_valid);
   auto committed_occupancy =
       std::make_shared<ego_planner::P0OccupancyEpoch>(
           *execution_snapshot->occupancy);
@@ -1766,6 +1780,8 @@ TEST(P4ForwardTerminalLineageTest,
   const auto continuing = manager.validateCommittedP4TrajectoryExecution(
       during_execution_s, commanded_position);
   EXPECT_TRUE(continuing.allowed) << continuing.reason;
+  EXPECT_FALSE(continuing.current_integrity_safe);
+  EXPECT_EQ(continuing.reason, "runtime_execution_contract_valid");
   EXPECT_FALSE(continuing.endpoint_reached);
   EXPECT_EQ(manager.local_data_.start_time_.nanoseconds(), committed_start);
 

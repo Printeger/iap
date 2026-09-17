@@ -103,9 +103,9 @@ bool hasCertifiedSourceHealth(
       std::isfinite(frame.source_icp_rmse) &&
       std::isfinite(frame.source_icp_condition) &&
       std::isfinite(frame.source_icp_gamma_lidar) &&
-      std::isfinite(frame.source_lidar_pl_e) &&
-      std::isfinite(frame.source_lidar_pl_n) &&
-      std::isfinite(frame.source_lidar_pl_u);
+      frame.source_icp_rmse >= 0.0 &&
+      frame.source_icp_condition >= 0.0 &&
+      frame.source_icp_gamma_lidar >= 1.0;
 }
 
 }  // namespace
@@ -549,15 +549,11 @@ class PlannerLocalMapExtension final : public glim::ExtensionModuleROS2 {
       message.source_lidar_pl_n = 0.0;
       message.source_lidar_pl_u = 0.0;
     } else if (const auto health = sourceHealthFor(frame.id, frame.stamp_s)) {
-      const bool finite = std::isfinite(health->lidar_pl_e) &&
-          std::isfinite(health->lidar_pl_n) &&
-          std::isfinite(health->lidar_pl_u) &&
-          std::isfinite(health->icp_rmse) &&
+      const bool finite = std::isfinite(health->icp_rmse) &&
           std::isfinite(health->icp_condition) &&
           std::isfinite(health->icp_gamma_lidar);
-      message.source_health_valid = health->lidar_valid && finite &&
-          !health->icp_degenerate && health->lidar_pl_e >= 0.0 &&
-          health->lidar_pl_n >= 0.0 && health->lidar_pl_u >= 0.0 &&
+      message.source_health_valid = finite &&
+          !health->icp_degenerate &&
           health->icp_rmse >= 0.0 && health->icp_condition >= 0.0 &&
           health->icp_gamma_lidar >= 1.0;
       message.source_health_stamp_s =

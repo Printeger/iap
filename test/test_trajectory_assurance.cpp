@@ -8,11 +8,10 @@ iap::LocalMotionEvidence clearCurrentFrameEvidence() {
   iap::LocalMotionEvidence evidence;
   evidence.complete = true;
   evidence.support_fresh = true;
-  evidence.icp_valid = true;
+  evidence.registration_health_valid = true;
   evidence.icp_degenerate = false;
   evidence.icp_rmse_m = 0.01;
   evidence.icp_gamma = 1.0;
-  evidence.current_lidar_pl_enu_m = Eigen::Vector3d(20.0, 20.0, 20.0);
   evidence.certified_empty_clearance_m = 5.0;
   evidence.identity = "local-evidence-1";
   return evidence;
@@ -168,7 +167,6 @@ TEST(LocalMotionAssuranceTest, CurrentFrameCommonTransformDoesNotAddGlobalPl) {
   obstacle.center_map = Eigen::Vector3d(0.0, 1.5, 1.0);
   obstacle.half_extent_m = Eigen::Vector3d::Constant(0.05);
   obstacle.provenance = iap::LocalObstacleProvenance::CURRENT_FRAME;
-  obstacle.source_lidar_pl_enu_m = Eigen::Vector3d(100.0, 100.0, 100.0);
   evidence.obstacles.push_back(obstacle);
 
   const auto result = iap::LocalMotionAssurance().evaluate(
@@ -176,6 +174,28 @@ TEST(LocalMotionAssuranceTest, CurrentFrameCommonTransformDoesNotAddGlobalPl) {
 
   EXPECT_EQ(result.status, iap::LocalMotionAssuranceStatus::SAFE);
   EXPECT_GT(result.minimum_margin_m, 0.0);
+  EXPECT_LT(result.maximum_required_envelope_m, 1.0);
+}
+
+TEST(LocalMotionAssuranceTest,
+     HealthyRegisteredObstacleDoesNotChargeAbsolutePlOrSourceIcpAgain) {
+  auto evidence = clearCurrentFrameEvidence();
+  iap::LocalObstacleEvidence obstacle;
+  // The closest surface is 3.957 m away, matching the live regression that
+  // was rejected by a fabricated 5.146 m current+source absolute-PL term.
+  obstacle.center_map = Eigen::Vector3d(0.0, 4.007, 1.0);
+  obstacle.half_extent_m = Eigen::Vector3d::Constant(0.05);
+  obstacle.provenance =
+      iap::LocalObstacleProvenance::ACTIVE_WINDOW_CERTIFIED;
+  obstacle.source_frame_id = 7;
+  obstacle.source_identity = "frame-7";
+  evidence.obstacles.push_back(obstacle);
+
+  const auto result = iap::LocalMotionAssurance().evaluate(
+      evidence, shortCurve());
+
+  EXPECT_EQ(result.status, iap::LocalMotionAssuranceStatus::SAFE);
+  EXPECT_GT(result.minimum_margin_m, 3.0);
   EXPECT_LT(result.maximum_required_envelope_m, 1.0);
 }
 
@@ -225,68 +245,55 @@ TEST(LocalMotionAssuranceTest,
             "local_clearance_margin_not_positive");
 }
 
-TEST(LocalMotionAssuranceTest, UnboundedOldMapObstacleFailsClosed) {
+TEST(LocalMotionAssuranceTest, UncertifiedOldMapObstacleFailsClosed) {
   auto evidence = clearCurrentFrameEvidence();
   iap::LocalObstacleEvidence obstacle;
   obstacle.center_map = Eigen::Vector3d(0.0, 1.5, 1.0);
   obstacle.half_extent_m = Eigen::Vector3d::Constant(0.05);
   obstacle.provenance =
-      iap::LocalObstacleProvenance::ACTIVE_WINDOW_UNBOUNDED;
+      iap::LocalObstacleProvenance::ACTIVE_WINDOW_UNCERTIFIED;
   evidence.obstacles.push_back(obstacle);
 
   const auto result = iap::LocalMotionAssurance().evaluate(
       evidence, shortCurve());
 
   EXPECT_EQ(result.status, iap::LocalMotionAssuranceStatus::UNKNOWN);
-  EXPECT_EQ(result.reason, "active_window_obstacle_bound_missing");
+  EXPECT_EQ(result.reason, "active_window_source_health_missing");
 }
 
-TEST(LocalMotionAssuranceTest, UnknownCorrelationUsesAxisWiseWorstCaseSum) {
+TEST(LocalMotionAssuranceTest, CertifiedOldMapObstacleUsesCommonEnvelope) {
   auto evidence = clearCurrentFrameEvidence();
-  evidence.current_lidar_pl_enu_m = Eigen::Vector3d(0.2, 0.3, 0.4);
   iap::LocalObstacleEvidence obstacle;
-  obstacle.center_map = Eigen::Vector3d(0.0, 1.2, 1.0);
+  obstacle.center_map = Eigen::Vector3d(0.0, 1.5, 1.0);
   obstacle.half_extent_m = Eigen::Vector3d::Constant(0.05);
   obstacle.provenance =
-      iap::LocalObstacleProvenance::ACTIVE_WINDOW_BOUNDED;
-  obstacle.source_lidar_pl_enu_m = Eigen::Vector3d(0.4, 0.5, 0.6);
+      iap::LocalObstacleProvenance::ACTIVE_WINDOW_CERTIFIED;
   obstacle.source_frame_id = 7;
   obstacle.source_identity = "frame-7";
-  obstacle.source_icp_degenerate = false;
-  obstacle.source_icp_rmse_m = 0.01;
-  obstacle.source_icp_condition = 10.0;
-  obstacle.source_icp_gamma = 1.0;
   evidence.obstacles.push_back(obstacle);
 
   const auto result = iap::LocalMotionAssurance().evaluate(
       evidence, shortCurve());
 
-  ASSERT_EQ(result.status, iap::LocalMotionAssuranceStatus::UNSAFE);
-  // The first sample's nearest-obstacle direction is +N, so the map-relative term is
-  // 0.3 + 0.5 = 0.8 m rather than an independence-based RSS value.
-  EXPECT_NEAR(result.first_failure.relative_map_error_m, 0.8, 1.0e-12);
+  EXPECT_EQ(result.status, iap::LocalMotionAssuranceStatus::SAFE);
+  EXPECT_DOUBLE_EQ(result.first_failure.relative_map_error_m, 0.0);
+  EXPECT_LT(result.maximum_required_envelope_m, 1.0);
 }
 
 TEST(LocalMotionAssuranceTest,
-     FartherOldObstacleWithLargeBoundCanBeTheLimitingObstacle) {
+     NearestGeometryControlsMarginAcrossCertifiedSources) {
   auto evidence = clearCurrentFrameEvidence();
-  evidence.current_lidar_pl_enu_m = Eigen::Vector3d(0.1, 0.1, 0.1);
   iap::LocalObstacleEvidence current;
-  current.center_map = Eigen::Vector3d(0.0, 1.2, 1.0);
+  current.center_map = Eigen::Vector3d(0.0, 0.65, 1.0);
   current.half_extent_m = Eigen::Vector3d::Constant(0.05);
   current.provenance = iap::LocalObstacleProvenance::CURRENT_FRAME;
   evidence.obstacles.push_back(current);
   iap::LocalObstacleEvidence old;
   old.center_map = Eigen::Vector3d(0.0, 2.0, 1.0);
   old.half_extent_m = Eigen::Vector3d::Constant(0.05);
-  old.provenance = iap::LocalObstacleProvenance::ACTIVE_WINDOW_BOUNDED;
-  old.source_lidar_pl_enu_m = Eigen::Vector3d(0.1, 1.5, 0.1);
+  old.provenance = iap::LocalObstacleProvenance::ACTIVE_WINDOW_CERTIFIED;
   old.source_frame_id = 8;
   old.source_identity = "frame-8";
-  old.source_icp_degenerate = false;
-  old.source_icp_rmse_m = 0.01;
-  old.source_icp_condition = 10.0;
-  old.source_icp_gamma = 1.0;
   evidence.obstacles.push_back(old);
 
   const auto result = iap::LocalMotionAssurance().evaluate(
@@ -294,8 +301,8 @@ TEST(LocalMotionAssuranceTest,
 
   ASSERT_EQ(result.status, iap::LocalMotionAssuranceStatus::UNSAFE);
   EXPECT_EQ(result.first_failure.provenance,
-            iap::LocalObstacleProvenance::ACTIVE_WINDOW_BOUNDED);
-  EXPECT_GT(result.first_failure.relative_map_error_m, 1.5);
+            iap::LocalObstacleProvenance::CURRENT_FRAME);
+  EXPECT_DOUBLE_EQ(result.first_failure.relative_map_error_m, 0.0);
 }
 
 TEST(LocalMotionAssuranceTest, InvalidObstacleGeometryFailsClosed) {
@@ -312,18 +319,17 @@ TEST(LocalMotionAssuranceTest, InvalidObstacleGeometryFailsClosed) {
   EXPECT_EQ(result.reason, "local_obstacle_geometry_invalid");
 }
 
-TEST(LocalMotionAssuranceTest, BoundedSourceRequiresIdentityAndIcpHealth) {
+TEST(LocalMotionAssuranceTest, CertifiedSourceRequiresIdentity) {
   auto evidence = clearCurrentFrameEvidence();
   iap::LocalObstacleEvidence obstacle;
   obstacle.center_map = Eigen::Vector3d(0.0, 1.5, 1.0);
   obstacle.half_extent_m = Eigen::Vector3d::Constant(0.05);
-  obstacle.provenance = iap::LocalObstacleProvenance::ACTIVE_WINDOW_BOUNDED;
-  obstacle.source_lidar_pl_enu_m = Eigen::Vector3d::Constant(0.1);
+  obstacle.provenance = iap::LocalObstacleProvenance::ACTIVE_WINDOW_CERTIFIED;
   evidence.obstacles.push_back(obstacle);
   const auto result = iap::LocalMotionAssurance().evaluate(
       evidence, shortCurve());
   EXPECT_EQ(result.status, iap::LocalMotionAssuranceStatus::UNKNOWN);
-  EXPECT_EQ(result.reason, "active_window_obstacle_bound_missing");
+  EXPECT_EQ(result.reason, "active_window_source_identity_missing");
 }
 
 TEST(GlobalNavigationExposureLedgerTest, ReplanningDoesNotResetEpisode) {

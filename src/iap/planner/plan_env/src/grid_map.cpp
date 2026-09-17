@@ -120,9 +120,7 @@ bool registeredFrameFromMessage(
        !std::isfinite(frame->source_icp_condition) ||
        !std::isfinite(frame->source_icp_gamma_lidar) ||
        frame->source_icp_rmse < 0.0 || frame->source_icp_condition < 0.0 ||
-       frame->source_icp_gamma_lidar < 1.0 ||
-       !frame->source_lidar_pl_enu_m.allFinite() ||
-       (frame->source_lidar_pl_enu_m.array() < 0.0).any()))
+       frame->source_icp_gamma_lidar < 1.0))
     return false;
   try
   {

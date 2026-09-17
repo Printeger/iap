@@ -499,12 +499,10 @@ LocalMotionAssuranceResult LocalMotionAssurance::evaluate(
     result.reason = "certified_empty_clearance_invalid";
     return result;
   }
-  if (!evidence.icp_valid || evidence.icp_degenerate ||
+  if (!evidence.registration_health_valid || evidence.icp_degenerate ||
       !std::isfinite(evidence.icp_rmse_m) || evidence.icp_rmse_m < 0.0 ||
-      !finitePositive(evidence.icp_gamma) ||
-      !evidence.current_lidar_pl_enu_m.allFinite() ||
-      (evidence.current_lidar_pl_enu_m.array() < 0.0).any()) {
-    result.reason = "lidar_relative_health_invalid";
+      !finitePositive(evidence.icp_gamma)) {
+    result.reason = "slam_registration_health_invalid";
     return result;
   }
   if (curves.empty()) {
@@ -576,49 +574,32 @@ LocalMotionAssuranceResult LocalMotionAssurance::evaluate(
           return result;
         }
         if (obstacle.provenance ==
-            LocalObstacleProvenance::ACTIVE_WINDOW_UNBOUNDED) {
-          result.reason = "active_window_obstacle_bound_missing";
+            LocalObstacleProvenance::ACTIVE_WINDOW_UNCERTIFIED) {
+          result.reason = "active_window_source_health_missing";
           result.first_failure = sample_result;
           result.first_failure.obstacle_clearance_m = relation->clearance_m;
           result.first_failure.provenance = obstacle.provenance;
           return result;
         }
-        double relative_map_error_m = 0.0;
-        double source_scan_error_m = 0.0;
         if (obstacle.provenance ==
-            LocalObstacleProvenance::ACTIVE_WINDOW_BOUNDED) {
-          if (obstacle.source_frame_id < 0 || obstacle.source_identity.empty() ||
-              obstacle.source_icp_degenerate ||
-              !std::isfinite(obstacle.source_icp_rmse_m) ||
-              !std::isfinite(obstacle.source_icp_condition) ||
-              !std::isfinite(obstacle.source_icp_gamma) ||
-              obstacle.source_icp_rmse_m < 0.0 ||
-              obstacle.source_icp_condition < 0.0 ||
-              obstacle.source_icp_gamma < 1.0 ||
-              !obstacle.source_lidar_pl_enu_m.allFinite() ||
-              (obstacle.source_lidar_pl_enu_m.array() < 0.0).any()) {
-            result.reason = "active_window_obstacle_bound_missing";
+            LocalObstacleProvenance::ACTIVE_WINDOW_CERTIFIED) {
+          if (obstacle.source_frame_id < 0 || obstacle.source_identity.empty()) {
+            result.reason = "active_window_source_identity_missing";
             result.first_failure = sample_result;
             result.first_failure.obstacle_clearance_m = relation->clearance_m;
             result.first_failure.provenance = obstacle.provenance;
             return result;
           }
-          const Eigen::Vector3d axis_bound =
-              evidence.current_lidar_pl_enu_m +
-              obstacle.source_lidar_pl_enu_m;
-          relative_map_error_m =
-              relation->direction.cwiseAbs().dot(axis_bound);
-          source_scan_error_m = std::max(
-              policy_.minimum_scan_error_m,
-              policy_.lidar_error_multiplier * obstacle.source_icp_gamma *
-                  obstacle.source_icp_rmse_m);
         }
-        const double required = common_required_envelope_m +
-                                relative_map_error_m + source_scan_error_m;
+        // The registered obstacle pose is authoritative SLAM output. Absolute
+        // LiDAR protection levels describe map/world localization and cannot
+        // be added to synthesize a current-to-source relative error. Source
+        // registration health is an admission gate; every admitted obstacle
+        // uses the same local execution envelope.
+        const double required = common_required_envelope_m;
         const double margin = relation->clearance_m - required;
         if (margin < sample_result.margin_m) {
           sample_result.obstacle_clearance_m = relation->clearance_m;
-          sample_result.relative_map_error_m = relative_map_error_m;
           sample_result.required_envelope_m = required;
           sample_result.margin_m = margin;
           sample_result.provenance = obstacle.provenance;
