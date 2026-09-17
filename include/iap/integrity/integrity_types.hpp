@@ -134,6 +134,7 @@ struct DynamicALResult {
 /// IAP-RQ-200: monitor PL, AL, monitor IM = AL - PL, state.
 struct IntegrityReport {
   double stamp = 0.0;  ///< frame timestamp [s]
+  std::int64_t estimation_frame_id = -1;  ///< exact GLIM frame identity
 
   // --- Current certified monitor scalars (IAP-RQ-200) --------------------
   double PL  = 1e9;  ///< monitor_fused_pl [m] (= monitor_fused_hpl)
@@ -161,6 +162,8 @@ struct IntegrityReport {
   std::vector<int> excluded_sats;
   double gamma_R = 1.0;
   bool   icp_degenerate = false;
+  double icp_rmse       = 1e9;
+  double icp_condition  = 1e9;
   double gamma_lidar    = 1.0;
   double tdop = 1e9;
 

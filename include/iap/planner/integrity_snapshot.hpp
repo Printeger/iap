@@ -18,12 +18,24 @@ namespace iap {
 
 struct CurrentIntegrityState {
   double stamp = std::numeric_limits<double>::quiet_NaN();
+  std::int64_t estimation_frame_id = -1;
   bool valid = false;
   bool gnss_valid = false;
   double gnss_hpl = std::numeric_limits<double>::quiet_NaN();
   double gnss_vpl = std::numeric_limits<double>::quiet_NaN();
   double gnss_epoch_stamp = std::numeric_limits<double>::quiet_NaN();
   std::uint64_t gnss_epoch_identity = 0;
+
+  bool lidar_valid = false;
+  double lidar_hpl = std::numeric_limits<double>::quiet_NaN();
+  double lidar_vpl = std::numeric_limits<double>::quiet_NaN();
+  double lidar_pl_e = std::numeric_limits<double>::quiet_NaN();
+  double lidar_pl_n = std::numeric_limits<double>::quiet_NaN();
+  double lidar_pl_u = std::numeric_limits<double>::quiet_NaN();
+  bool icp_degenerate = true;
+  double icp_rmse = std::numeric_limits<double>::quiet_NaN();
+  double icp_condition = std::numeric_limits<double>::quiet_NaN();
+  double icp_gamma_lidar = std::numeric_limits<double>::quiet_NaN();
 
   int integrity_state = -1;
 

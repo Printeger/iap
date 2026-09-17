@@ -115,6 +115,20 @@ struct P0ExecutionSnapshotAttemptEvidence {
 };
 
 struct P0ExecutionRiskSnapshot {
+  struct LocalObstacleSourceBound {
+    std::int64_t frame_id = -1;
+    double source_stamp_s = std::numeric_limits<double>::quiet_NaN();
+    bool certified = false;
+    Eigen::Vector3d lidar_pl_enu_m = Eigen::Vector3d::Constant(
+        std::numeric_limits<double>::quiet_NaN());
+    bool icp_degenerate = true;
+    double icp_rmse_m = std::numeric_limits<double>::quiet_NaN();
+    double icp_condition = std::numeric_limits<double>::quiet_NaN();
+    double icp_gamma = std::numeric_limits<double>::quiet_NaN();
+    std::shared_ptr<const std::vector<Eigen::Vector3d>> occupied_centers;
+    std::string identity;
+  };
+
   std::uint64_t execution_snapshot_id = 0;
   double evaluation_time_s = std::numeric_limits<double>::quiet_NaN();
   double publish_time_s = std::numeric_limits<double>::quiet_NaN();
@@ -128,6 +142,10 @@ struct P0ExecutionRiskSnapshot {
   std::string frame_contract_id;
   std::string geometry_id;
   std::string predictor_algorithm_identity;
+  // Per-source-frame local-relative bounds.  They are paired by source stamp
+  // with the immutable registered-map contribution; a missing pair remains
+  // uncertified and must fail closed in controlled-degraded execution.
+  std::vector<LocalObstacleSourceBound> local_obstacle_source_bounds;
   std::function<iap::ForwardRiskBatchResult(
       const iap::ForwardRiskBatchRequest&)> forward_risk_batch;
   std::function<iap::ForwardRiskBatchResult(

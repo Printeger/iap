@@ -552,6 +552,78 @@ TEST(P4ForwardRoute, OpenObservedSpaceContinuesAsSingleChannel)
             straightRequest().snapshot_identity.canonical());
 }
 
+TEST(P4ForwardRoute,
+  BriefGlobalDegradationRemainsCandidateWithoutReceivingAuthority)
+{
+  auto request = straightRequest();
+  request.risk = [](const Eigen::Vector3d &, const double query_time_s) {
+      P4ForwardRiskSample sample;
+      const bool brief_exceedance =
+        query_time_s >= 10.2 && query_time_s <= 10.6;
+      const double ratio = brief_exceedance ? 1.01 : 0.8;
+      sample.valid = true;
+      sample.stale = false;
+      sample.gnss_supported = true;
+      sample.lidar_supported = true;
+      sample.fim_supported = true;
+      sample.safety_ratio = ratio;
+      sample.fim_ratio = 0.3;
+      sample.hal = 10.0;
+      sample.val = 20.0;
+      sample.gnss_anchored_hpl = ratio * sample.hal;
+      sample.gnss_anchored_vpl = ratio * sample.val;
+      sample.reason = brief_exceedance ?
+        "SAFETY_LIMIT_EXCEEDED" : "ok";
+      return sample;
+    };
+  bindTestRiskBatch(&request);
+
+  const auto decision = P4ForwardRoutePlanner().decide(request);
+
+  ASSERT_EQ(decision.action, P4ForwardAction::CANDIDATE_READY)
+    << decision.reason;
+  ASSERT_EQ(decision.candidates.size(), 1u);
+  EXPECT_TRUE(decision.candidates.front().controlled_degraded_candidate);
+  EXPECT_LE(decision.candidates.front().global_budget_utilization, 1.0);
+  EXPECT_EQ(decision.selection_authority, P4ForwardSelectionAuthority::NONE);
+  EXPECT_EQ(decision.reason, "single_controlled_degraded_candidate");
+}
+
+TEST(P4ForwardRoute, HardGlobalTaskDoesNotRetainDegradedCandidate)
+{
+  auto request = straightRequest();
+  request.limits.hard_global = true;
+  request.risk = [](const Eigen::Vector3d &, const double query_time_s) {
+      P4ForwardRiskSample sample;
+      const bool exceedance = query_time_s >= 10.2;
+      const double ratio = exceedance ? 1.001 : 0.8;
+      sample.valid = true;
+      sample.stale = false;
+      sample.gnss_supported = true;
+      sample.lidar_supported = true;
+      sample.fim_supported = true;
+      sample.safety_ratio = ratio;
+      sample.fim_ratio = 0.3;
+      sample.hal = 10.0;
+      sample.val = 20.0;
+      sample.gnss_anchored_hpl = ratio * sample.hal;
+      sample.gnss_anchored_vpl = ratio * sample.val;
+      sample.reason = exceedance ? "SAFETY_LIMIT_EXCEEDED" : "ok";
+      return sample;
+    };
+  bindTestRiskBatch(&request);
+
+  const auto decision = P4ForwardRoutePlanner().decide(request);
+
+  EXPECT_NE(decision.action, P4ForwardAction::CANDIDATE_READY);
+  EXPECT_TRUE(std::none_of(
+      decision.candidates.begin(), decision.candidates.end(),
+      [](const P4ForwardCandidate & candidate) {
+        return candidate.controlled_degraded_candidate;
+      }));
+  EXPECT_EQ(decision.selection_authority, P4ForwardSelectionAuthority::NONE);
+}
+
 TEST(P4ForwardRoute, UnobservedSpaceWithoutHitsRemainsGeometryClear)
 {
   auto request = straightRequest();

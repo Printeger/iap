@@ -2729,6 +2729,7 @@ TEST(IntegrityMonitorHvSafetyTest, EqualityAtAlertLimitIsUnsafe) {
 
 TEST(IntegrityReportMappingTest, HvMarginsMapToRosMessage) {
   IntegrityReport report;
+  report.estimation_frame_id = 42;
   report.state = IntegrityState::UNSAFE;
   report.HPL = 12.0;
   report.VPL = 6.0;
@@ -2744,6 +2745,7 @@ TEST(IntegrityReportMappingTest, HvMarginsMapToRosMessage) {
   iap::msg::IntegrityReport msg;
   fill_integrity_report_msg(report, msg);
 
+  EXPECT_EQ(msg.estimation_frame_id, 42);
   EXPECT_DOUBLE_EQ(msg.im_h, report.im_h);
   EXPECT_DOUBLE_EQ(msg.im_v, report.im_v);
   EXPECT_DOUBLE_EQ(msg.im_min, report.IM);
@@ -2767,6 +2769,10 @@ TEST(IntegrityReportMappingTest, SourceFusionAndFailureFieldsMapToRosMessage) {
   report.lidar_PL_E = 8.0;
   report.lidar_PL_N = 4.0;
   report.lidar_PL_U = 4.0;
+  report.icp_degenerate = true;
+  report.icp_rmse = 0.12;
+  report.icp_condition = 345.0;
+  report.gamma_lidar = 1.7;
 
   report.fallback_HPL = 5.0;
   report.fallback_VPL = 5.0;
@@ -2809,6 +2815,10 @@ TEST(IntegrityReportMappingTest, SourceFusionAndFailureFieldsMapToRosMessage) {
   EXPECT_DOUBLE_EQ(msg.lidar_pl_e, report.lidar_PL_E);
   EXPECT_DOUBLE_EQ(msg.lidar_pl_n, report.lidar_PL_N);
   EXPECT_DOUBLE_EQ(msg.lidar_pl_u, report.lidar_PL_U);
+  EXPECT_EQ(msg.icp_degenerate, report.icp_degenerate);
+  EXPECT_DOUBLE_EQ(msg.icp_rmse, report.icp_rmse);
+  EXPECT_DOUBLE_EQ(msg.icp_condition, report.icp_condition);
+  EXPECT_DOUBLE_EQ(msg.icp_gamma_lidar, report.gamma_lidar);
   EXPECT_EQ(msg.fusion_mode, report.fusion_mode_str);
   EXPECT_EQ(msg.final_hpl_source, report.final_HPL_source);
   EXPECT_EQ(msg.final_vpl_source, report.final_VPL_source);

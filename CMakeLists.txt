@@ -168,6 +168,7 @@ add_library(iap SHARED
   src/iap/planner/predicted_araim.cpp
   src/iap/planner/risk_grid_map.cpp
   src/iap/planner/p1_accepted_context_validation.cpp
+  src/iap/planner/trajectory_assurance.cpp
   src/iap/predictor/gnss_geometry_pl_predictor.cpp
   # independent advisory predictor query module
   src/iap/predictor/gnss_advisory_predictor.cpp
@@ -702,6 +703,8 @@ if(DEFINED ENV{ROS_VERSION})
       target_link_libraries(test_initial_state_estimation iap)
       ament_add_gtest(test_alert_limit_model test/test_alert_limit_model.cpp)
       target_link_libraries(test_alert_limit_model iap)
+      ament_add_gtest(test_trajectory_assurance test/test_trajectory_assurance.cpp)
+      target_link_libraries(test_trajectory_assurance iap)
       ament_add_gtest(test_run_log_manager test/test_run_log_manager.cpp)
       ament_add_gtest(test_p1_fixture_geometry test/test_p1_fixture_geometry.cpp)
       ament_add_gtest(test_forked_forest_geometry

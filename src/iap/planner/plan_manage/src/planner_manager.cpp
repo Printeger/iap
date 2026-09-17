@@ -20,11 +20,182 @@
 #include <sstream>
 #include <stdexcept>
 #include <thread>
+#include <unordered_set>
 #include <utility>
 #include "visualization_msgs/msg/marker.hpp" // zx-todo
 
 namespace ego_planner
 {
+
+  namespace
+  {
+    iap::LocalMotionEvidence buildP4LocalMotionEvidence(
+        const std::shared_ptr<const P0OccupancyEpoch> &occupancy,
+        const iap::CurrentIntegrityState &integrity,
+        const std::vector<iap::LocalMotionCurve> &curves,
+        const std::uint64_t execution_snapshot_id,
+        const bool support_fresh,
+        const std::vector<P0ExecutionRiskSnapshot::LocalObstacleSourceBound>
+            *source_bounds)
+    {
+      iap::LocalMotionEvidence evidence;
+      evidence.complete = occupancy &&
+          occupancy->raw_occupied_voxel_centers &&
+          occupancy->current_frame_occupied_voxel_centers;
+      evidence.support_fresh = support_fresh;
+      evidence.icp_valid = integrity.lidar_valid;
+      evidence.icp_degenerate = integrity.icp_degenerate;
+      evidence.icp_rmse_m = integrity.icp_rmse;
+      evidence.icp_gamma = integrity.icp_gamma_lidar;
+      evidence.current_lidar_pl_enu_m = Eigen::Vector3d(
+          integrity.lidar_pl_e, integrity.lidar_pl_n, integrity.lidar_pl_u);
+      evidence.certified_empty_clearance_m = 12.0;
+      evidence.identity = "execution_snapshot=" +
+          std::to_string(execution_snapshot_id) + ";occupancy=" +
+          std::to_string(occupancy ? occupancy->generation : 0u) +
+          ";lidar_frame=" +
+          std::to_string(occupancy && occupancy->frozen_grid_map_epoch
+              ? occupancy->frozen_grid_map_epoch->current_frame_id : -1) +
+          ";lidar_content=" +
+          (occupancy && occupancy->frozen_grid_map_epoch
+              ? occupancy->frozen_grid_map_epoch->current_frame_content_hash
+              : std::string{});
+      if (!evidence.complete ||
+          !std::isfinite(occupancy->geometry.resolution_m) ||
+          occupancy->geometry.resolution_m <= 0.0 || curves.empty())
+        return evidence;
+
+      const auto voxel_key = [&occupancy](const Eigen::Vector3d &point) {
+        const Eigen::Vector3d scaled =
+            (point - occupancy->geometry.origin_w) /
+            occupancy->geometry.resolution_m;
+        return std::make_tuple(
+            static_cast<int>(std::floor(scaled.x())),
+            static_cast<int>(std::floor(scaled.y())),
+            static_cast<int>(std::floor(scaled.z())));
+      };
+      std::set<std::tuple<int, int, int>> current_keys;
+      for (const auto &center :
+           *occupancy->current_frame_occupied_voxel_centers)
+        if (center.allFinite()) current_keys.insert(voxel_key(center));
+      const auto currently_reobserved =
+          [&current_keys, &voxel_key](const Eigen::Vector3d &center)
+          {
+            // Only the exact occupied voxel is identity-preserving evidence.
+            // A neighbouring hit may be another surface; proximity alone
+            // cannot erase an older source's conservative relative bound.
+            return current_keys.count(voxel_key(center)) != 0u;
+          };
+      std::set<std::tuple<int, int, int>> provenance_keys = current_keys;
+      Eigen::Vector3d minimum = Eigen::Vector3d::Constant(
+          std::numeric_limits<double>::infinity());
+      Eigen::Vector3d maximum = Eigen::Vector3d::Constant(
+          -std::numeric_limits<double>::infinity());
+      for (const auto &curve : curves)
+        for (const auto &sample : curve.samples)
+        {
+          minimum = minimum.cwiseMin(sample.position_map);
+          maximum = maximum.cwiseMax(sample.position_map);
+        }
+      constexpr double kLocalEvidenceRadiusM = 12.0;
+      minimum.array() -= kLocalEvidenceRadiusM;
+      maximum.array() += kLocalEvidenceRadiusM;
+      const Eigen::Vector3d half_extent = Eigen::Vector3d::Constant(
+          0.5 * occupancy->geometry.resolution_m);
+      const auto append_obstacle = [&](const Eigen::Vector3d &center,
+                                       const auto provenance,
+                                       const Eigen::Vector3d &source_pl,
+                                       const bool source_icp_degenerate,
+                                       const double source_icp_rmse,
+                                       const double source_icp_condition,
+                                       const double source_icp_gamma,
+                                       const std::int64_t source_frame_id,
+                                       const std::string &source_identity)
+      {
+        if (!center.allFinite() ||
+            (center.array() < minimum.array()).any() ||
+            (center.array() > maximum.array()).any())
+          return;
+        iap::LocalObstacleEvidence obstacle;
+        obstacle.center_map = center;
+        obstacle.half_extent_m = half_extent;
+        obstacle.source_frame_id = source_frame_id;
+        obstacle.provenance = provenance;
+        obstacle.source_lidar_pl_enu_m = source_pl;
+        obstacle.source_icp_degenerate = source_icp_degenerate;
+        obstacle.source_icp_rmse_m = source_icp_rmse;
+        obstacle.source_icp_condition = source_icp_condition;
+        obstacle.source_icp_gamma = source_icp_gamma;
+        obstacle.source_identity = source_identity;
+        evidence.obstacles.push_back(std::move(obstacle));
+      };
+      const std::int64_t current_frame_id = occupancy->frozen_grid_map_epoch
+          ? occupancy->frozen_grid_map_epoch->current_frame_id : -1;
+      for (const auto &center :
+           *occupancy->current_frame_occupied_voxel_centers)
+        append_obstacle(
+            center, iap::LocalObstacleProvenance::CURRENT_FRAME,
+            Eigen::Vector3d::Zero(), false, integrity.icp_rmse,
+            integrity.icp_condition, integrity.icp_gamma_lidar,
+            current_frame_id, "current_frame");
+
+      if (source_bounds)
+      {
+        for (const auto &source : *source_bounds)
+        {
+          if (!source.occupied_centers) continue;
+          const auto provenance = source.certified
+              ? iap::LocalObstacleProvenance::ACTIVE_WINDOW_BOUNDED
+              : iap::LocalObstacleProvenance::ACTIVE_WINDOW_UNBOUNDED;
+          for (const auto &center : *source.occupied_centers)
+          {
+            if (center.allFinite()) provenance_keys.insert(voxel_key(center));
+            // A current scan re-observation supersedes an older contribution
+            // at the same voxel for local-relative assurance.
+            if (currently_reobserved(center)) continue;
+            append_obstacle(center, provenance, source.lidar_pl_enu_m,
+                            source.icp_degenerate, source.icp_rmse_m,
+                            source.icp_condition, source.icp_gamma,
+                            source.frame_id, source.identity);
+          }
+        }
+        // A registered snapshot is allowed to contain raw occupied voxels
+        // that were not present in the source list only as a conservative
+        // legacy/fusion residue. Keep their collision role and make the
+        // missing provenance explicit instead of silently omitting them from
+        // local-motion assurance.
+        for (const auto &center : *occupancy->raw_occupied_voxel_centers)
+          if (center.allFinite() &&
+              provenance_keys.count(voxel_key(center)) == 0u)
+            append_obstacle(
+                center,
+                iap::LocalObstacleProvenance::ACTIVE_WINDOW_UNBOUNDED,
+                Eigen::Vector3d::Constant(
+                    std::numeric_limits<double>::quiet_NaN()),
+                true, std::numeric_limits<double>::quiet_NaN(),
+                std::numeric_limits<double>::quiet_NaN(),
+                std::numeric_limits<double>::quiet_NaN(),
+                -1, "registered_source_provenance_missing");
+      }
+      else
+      {
+        // Legacy/non-registered captures have no per-frame provenance.  Keep
+        // their collision role, but do not invent a local-relative bound.
+        for (const auto &center : *occupancy->raw_occupied_voxel_centers)
+          if (current_keys.count(voxel_key(center)) == 0u)
+            append_obstacle(
+                center,
+                iap::LocalObstacleProvenance::ACTIVE_WINDOW_UNBOUNDED,
+                Eigen::Vector3d::Constant(
+                    std::numeric_limits<double>::quiet_NaN()),
+                true, std::numeric_limits<double>::quiet_NaN(),
+                std::numeric_limits<double>::quiet_NaN(),
+                std::numeric_limits<double>::quiet_NaN(),
+                -1, "active_window_bound_unavailable");
+      }
+      return evidence;
+    }
+  }  // namespace
 
   const char *p4RuntimeRiskConfirmationStateName(
       const P4RuntimeRiskConfirmationState state)
@@ -1363,6 +1534,21 @@ namespace ego_planner
     node->declare_parameter(
         "p4.execution.marginal_confirm_max_s", 0.35);
     node->declare_parameter("p4.debug_generation_probe_enable", false);
+    node->declare_parameter("p4.assurance.hard_global", false);
+    node->declare_parameter("p4.assurance.maximum_global_ratio", 1.05);
+    node->declare_parameter(
+        "p4.assurance.maximum_continuous_exceedance_s", 1.0);
+    node->declare_parameter(
+        "p4.assurance.maximum_exceedance_integral_ratio_s", 0.025);
+    node->declare_parameter("p4.assurance.recovery_horizon_s", 2.0);
+    node->declare_parameter("p4.assurance.recovered_ratio", 0.95);
+    node->declare_parameter("p4.assurance.recovered_hold_s", 0.5);
+    node->declare_parameter(
+        "p4.assurance.local_tracking_error_bound_m", 0.15);
+    node->declare_parameter("p4.assurance.local_safety_margin_m", 0.20);
+    node->declare_parameter("p4.assurance.local_scan_error_min_m", 0.02);
+    node->declare_parameter("p4.assurance.local_lidar_error_multiplier", 1.0);
+    node->declare_parameter("p4.assurance.local_drift_bound_mps", 0.10);
 
     node->get_parameter("manager/max_vel", pp_.max_vel_);
     node->get_parameter("manager/max_acc", pp_.max_acc_);
@@ -1466,10 +1652,62 @@ namespace ego_planner
                         p4_risk_confirmation_policy_.maximum_window_s);
     node->get_parameter("p4.debug_generation_probe_enable",
                         p4_generation_probe_enable_);
+    node->get_parameter("p4.assurance.hard_global",
+                        p4_global_exposure_policy_.hard_global);
+    node->get_parameter("p4.assurance.maximum_global_ratio",
+                        p4_global_exposure_policy_.maximum_ratio);
+    node->get_parameter(
+        "p4.assurance.maximum_continuous_exceedance_s",
+        p4_global_exposure_policy_.maximum_continuous_exceedance_s);
+    node->get_parameter(
+        "p4.assurance.maximum_exceedance_integral_ratio_s",
+        p4_global_exposure_policy_.maximum_exceedance_integral_ratio_s);
+    node->get_parameter("p4.assurance.recovery_horizon_s",
+                        p4_global_exposure_policy_.recovery_horizon_s);
+    node->get_parameter("p4.assurance.recovered_ratio",
+                        p4_global_exposure_policy_.recovered_ratio);
+    node->get_parameter("p4.assurance.recovered_hold_s",
+                        p4_global_exposure_policy_.recovered_hold_s);
+    node->get_parameter(
+        "p4.assurance.local_tracking_error_bound_m",
+        p4_local_tracking_error_bound_m_);
+    node->get_parameter("p4.assurance.local_safety_margin_m",
+                        p4_local_motion_policy_.safety_margin_m);
+    node->get_parameter("p4.assurance.local_scan_error_min_m",
+                        p4_local_motion_policy_.minimum_scan_error_m);
+    node->get_parameter("p4.assurance.local_lidar_error_multiplier",
+                        p4_local_motion_policy_.lidar_error_multiplier);
+    node->get_parameter("p4.assurance.local_drift_bound_mps",
+                        p4_local_motion_policy_.relative_drift_bound_mps);
+    p4_local_motion_policy_.vehicle_radius_m =
+        p4_forward_limits_.vehicle_radius_m;
+    p4_local_motion_policy_.maximum_tracking_error_m =
+        p4_max_tracking_error_m_;
+    p4_forward_limits_.hard_global =
+        p4_global_exposure_policy_.hard_global;
+    p4_forward_limits_.maximum_global_ratio =
+        p4_global_exposure_policy_.maximum_ratio;
+    p4_forward_limits_.maximum_global_continuous_exceedance_s =
+        p4_global_exposure_policy_.maximum_continuous_exceedance_s;
+    p4_forward_limits_.maximum_global_exceedance_integral_ratio_s =
+        p4_global_exposure_policy_.maximum_exceedance_integral_ratio_s;
+    // Validate the durable policy at startup instead of discovering an
+    // invalid mission contract only when the first candidate is committed.
+    (void)iap::GlobalNavigationExposureEvaluator(
+        p4_global_exposure_policy_);
+    (void)iap::LocalMotionAssurance(p4_local_motion_policy_);
+    p4_global_exposure_ledger_ =
+        iap::GlobalNavigationExposureLedger(p4_global_exposure_policy_);
     if (!validP4TrackingErrorLimit(p4_max_tracking_error_m_))
       throw std::invalid_argument(
           "p4.execution.max_tracking_error_m must be finite, positive, and "
           "no greater than 5 m");
+    if (!std::isfinite(p4_local_tracking_error_bound_m_) ||
+        p4_local_tracking_error_bound_m_ < 0.0 ||
+        p4_local_tracking_error_bound_m_ > p4_max_tracking_error_m_)
+      throw std::invalid_argument(
+          "p4.assurance.local_tracking_error_bound_m must be finite, "
+          "nonnegative, and no greater than the execution tracking limit");
     if (!std::isfinite(
             p4_risk_confirmation_policy_.marginal_ratio_max) ||
         p4_risk_confirmation_policy_.marginal_ratio_max <= 1.0 ||
@@ -2749,7 +2987,17 @@ namespace ego_planner
              "actual_curve_candidate_cache_hits,"
              "actual_curve_evidence_ms,actual_curve_core_ms,"
              "actual_curve_advisory_ms,actual_curve_transition_ms,"
-             "actual_curve_total_ms,reason\n";
+             "actual_curve_total_ms,assurance_execution_mode,"
+             "local_assurance_status,local_assurance_reason,"
+             "local_minimum_margin_m,local_first_failure_curve,"
+             "local_first_failure_sample,local_first_failure_time_s,"
+             "local_first_failure_x,local_first_failure_y,"
+             "local_first_failure_z,local_obstacle_clearance_m,"
+             "local_required_envelope_m,local_relative_map_error_m,"
+             "local_scan_error_m,local_drift_error_m,"
+             "local_failure_provenance,global_peak_ratio,"
+             "global_exceedance_duration_s,global_exceedance_integral_ratio_s,"
+             "reason\n";
     std::string selected_hash;
     for (const auto &candidate : decision.candidates)
       if (candidate.candidate_id == decision.selected_candidate_id)
@@ -2953,6 +3201,28 @@ namespace ego_planner
         << ',' << p4_direct_risk_evidence_.timing.advisory_ms
         << ',' << p4_direct_risk_evidence_.timing.transition_advisory_ms
         << ',' << p4_direct_risk_evidence_.timing.total_ms
+        << ',' << iap::trajectoryExecutionModeName(
+            p4_direct_risk_evidence_.trajectory_assurance.mode)
+        << ',' << iap::localMotionAssuranceStatusName(
+            p4_direct_risk_evidence_.trajectory_assurance.local.status)
+        << ',' << p4_direct_risk_evidence_.trajectory_assurance.local.reason
+        << ',' << p4_direct_risk_evidence_.trajectory_assurance.local.minimum_margin_m
+        << ',' << p4_direct_risk_evidence_.trajectory_assurance.local.first_failure.curve_id
+        << ',' << p4_direct_risk_evidence_.trajectory_assurance.local.first_failure.sample_index
+        << ',' << p4_direct_risk_evidence_.trajectory_assurance.local.first_failure.relative_time_s
+        << ',' << p4_direct_risk_evidence_.trajectory_assurance.local.first_failure.position_map.x()
+        << ',' << p4_direct_risk_evidence_.trajectory_assurance.local.first_failure.position_map.y()
+        << ',' << p4_direct_risk_evidence_.trajectory_assurance.local.first_failure.position_map.z()
+        << ',' << p4_direct_risk_evidence_.trajectory_assurance.local.first_failure.obstacle_clearance_m
+        << ',' << p4_direct_risk_evidence_.trajectory_assurance.local.first_failure.required_envelope_m
+        << ',' << p4_direct_risk_evidence_.trajectory_assurance.local.first_failure.relative_map_error_m
+        << ',' << p4_direct_risk_evidence_.trajectory_assurance.local.first_failure.scan_error_m
+        << ',' << p4_direct_risk_evidence_.trajectory_assurance.local.first_failure.drift_error_m
+        << ',' << static_cast<int>(
+            p4_direct_risk_evidence_.trajectory_assurance.local.first_failure.provenance)
+        << ',' << p4_direct_risk_evidence_.trajectory_assurance.global.peak_ratio
+        << ',' << p4_direct_risk_evidence_.trajectory_assurance.global.exceedance_duration_s
+        << ',' << p4_direct_risk_evidence_.trajectory_assurance.global.exceedance_integral_ratio_s
         << ',' << decision.reason << '\n';
     csv.flush();
     if (!csv.good())
@@ -3708,6 +3978,87 @@ namespace ego_planner
       for (const auto &row : direct_window_layout.rows)
         p4_direct_risk_evidence_.nominal_sample_rows.push_back(row.nominal);
     }
+
+    // Build one local-motion certificate over the exact nominal spline and
+    // every prepared braking curve. GNSS advisory exceedance is considered
+    // separately below; LiDAR FIM is deliberately not used to shrink this
+    // obstacle-relative envelope.
+    iap::TrajectoryAssuranceRequest assurance_request;
+    assurance_request.has_prior_global_episode =
+        p4_global_exposure_ledger_.state().active;
+    assurance_request.prior_global_episode =
+        p4_global_exposure_ledger_.state();
+    assurance_request.global_samples =
+        iap::globalNavigationSamplesFromForwardRisk(
+            direct_result.points, direct_times,
+            final_risk_policy.alert_limit_h_m,
+            final_risk_policy.alert_limit_v_m,
+            p4_direct_risk_evidence_.nominal_sample_rows);
+    assurance_request.certified_braking_available =
+        !prepared_braking_anchors.empty();
+    iap::LocalMotionCurve nominal_curve;
+    nominal_curve.curve_id = "nominal";
+    nominal_curve.samples.reserve(executable_trajectory.size());
+    for (std::size_t index = 0; index < executable_trajectory.size(); ++index)
+      nominal_curve.samples.push_back(iap::LocalMotionSample{
+          executable_times[index], executable_trajectory[index],
+          p4_local_tracking_error_bound_m_});
+    assurance_request.local_curves.push_back(std::move(nominal_curve));
+    for (const auto &anchor : prepared_braking_anchors)
+    {
+      iap::LocalMotionCurve braking_curve;
+      braking_curve.curve_id = "brake-" +
+          std::to_string(anchor.braking_certificate_id);
+      braking_curve.braking_curve = true;
+      braking_curve.samples.reserve(anchor.risk_points.size());
+      for (std::size_t index = 0; index < anchor.risk_points.size(); ++index)
+        braking_curve.samples.push_back(iap::LocalMotionSample{
+            index < anchor.risk_relative_times.size()
+                ? anchor.risk_relative_times[index]
+                : std::numeric_limits<double>::quiet_NaN(),
+            anchor.risk_points[index], p4_local_tracking_error_bound_m_});
+      assurance_request.local_curves.push_back(std::move(braking_curve));
+    }
+
+    const auto occupancy = execution_snapshot
+        ? execution_snapshot->occupancy
+        : planning_risk_context_.occupancy_snapshot;
+    const iap::CurrentIntegrityState *local_integrity = execution_snapshot
+        ? &execution_snapshot->integrity_anchor.current
+        : &planning_risk_context_.current_integrity_anchor;
+    assurance_request.local_evidence = local_integrity
+        ? buildP4LocalMotionEvidence(
+              occupancy, *local_integrity, assurance_request.local_curves,
+              execution_snapshot ? execution_snapshot->execution_snapshot_id
+                                 : 0u,
+              !p0_risk_grid_runtime_ ||
+                  (execution_snapshot && execution_snapshot->freshAt(stamp_s)),
+              execution_snapshot
+                  ? &execution_snapshot->local_obstacle_source_bounds
+                  : nullptr)
+        : iap::LocalMotionEvidence{};
+    p4_direct_risk_evidence_.trajectory_assurance =
+        iap::TrajectoryAssurance(p4_global_exposure_policy_,
+                                 p4_local_motion_policy_)
+            .evaluate(assurance_request);
+    p4_direct_risk_evidence_.trajectory_assurance_complete =
+        p4_direct_risk_evidence_.trajectory_assurance.global.complete &&
+        p4_direct_risk_evidence_.trajectory_assurance.local.status !=
+            iap::LocalMotionAssuranceStatus::UNKNOWN;
+    const bool trajectory_assurance_required =
+        execution_snapshot && use_braking_windows;
+    const bool controlled_degraded_authorized =
+        p4_direct_risk_evidence_.trajectory_assurance_complete &&
+        p4_direct_risk_evidence_.trajectory_assurance.mode ==
+            iap::TrajectoryExecutionMode::CONTROLLED_DEGRADED_EXECUTION;
+    if (trajectory_assurance_required &&
+        !p4_direct_risk_evidence_.trajectory_assurance.authorized())
+      return reject_final_identity(
+          P4GeometryCommitVerdict::INVALID_PATH,
+          "trajectory_assurance_rejected:" +
+              p4_direct_risk_evidence_.trajectory_assurance.reason + ":" +
+              p4_direct_risk_evidence_.trajectory_assurance.local.reason);
+
     const auto nominal_arc_at = [&executable_trajectory, &executable_times](
                                     const double relative_time_s) {
         if (executable_trajectory.empty() ||
@@ -3767,9 +4118,13 @@ namespace ego_planner
       if (direct.safety_state == iap::ForwardRiskSafetyState::UNSAFE)
       {
         record_actual_curve_failure();
-        return reject_final_identity(
-            P4GeometryCommitVerdict::INVALID_PATH,
-            "optimized_bspline_direct_risk_unsafe");
+        if (!(controlled_degraded_authorized &&
+              direct.failure_reason ==
+                  iap::ForwardRiskFailureReason::SAFETY_LIMIT_EXCEEDED))
+          return reject_final_identity(
+              P4GeometryCommitVerdict::INVALID_PATH,
+              "optimized_bspline_direct_risk_unsafe");
+        continue;
       }
       if (direct.safety_state != iap::ForwardRiskSafetyState::SAFE ||
           direct.ranking_state !=
@@ -3784,6 +4139,22 @@ namespace ego_planner
             P4GeometryCommitVerdict::INVALID_PATH,
           "final_bspline_direct_risk_incomplete");
       }
+    }
+
+    if (controlled_degraded_authorized &&
+        last_p4_forward_decision_.action ==
+            P4ForwardAction::CANDIDATE_READY)
+    {
+      // A long route may establish preference, but controlled degradation is
+      // execution-authorized only over a reaction-and-stopping envelope. Ask
+      // the existing bounded feedback loop to regenerate that short actual
+      // curve; never relabel this long B-spline as FORMAL_RISK_SELECTED.
+      last_p4_forward_decision_.reason =
+          "route_preference_requires_bounded_execution_envelope";
+      appendP4ForwardDecision(
+          last_p4_forward_decision_,
+          stage + "_controlled_envelope_retry", stamp_s);
+      return false;
     }
 
     if (last_p4_forward_decision_.action ==
@@ -4325,6 +4696,21 @@ namespace ego_planner
               : P4ExecutionAuthority::ADVISORY;
       p4_execution_certificate_.execution_snapshot_id =
           execution_snapshot ? execution_snapshot->execution_snapshot_id : 0u;
+      p4_execution_certificate_.execution_mode =
+          p4_direct_risk_evidence_.trajectory_assurance_complete
+              ? p4_direct_risk_evidence_.trajectory_assurance.mode
+              : iap::TrajectoryExecutionMode::NORMAL_EXECUTION;
+      p4_execution_certificate_.trajectory_assurance_hash =
+          p4_direct_risk_evidence_.trajectory_assurance.certificate_hash;
+      p4_execution_certificate_.local_motion_certificate_hash =
+          p4_direct_risk_evidence_.trajectory_assurance.local.certificate_hash;
+      p4_execution_certificate_.local_motion_minimum_margin_m =
+          p4_direct_risk_evidence_.trajectory_assurance.local.minimum_margin_m;
+      p4_execution_certificate_.global_peak_ratio =
+          p4_direct_risk_evidence_.trajectory_assurance.global.peak_ratio;
+      p4_execution_certificate_.global_exposure_integral_ratio_s =
+          p4_direct_risk_evidence_.trajectory_assurance.global.
+              exceedance_integral_ratio_s;
       if (p4_execution_commitment_backup_.active)
       {
         p4_execution_certificate_.parent_trajectory_id =
@@ -4732,17 +5118,54 @@ namespace ego_planner
         if (reason) *reason = why;
         return ready;
       };
+    const bool controlled_route_preference =
+        p4_direct_risk_evidence_.complete &&
+        p4_direct_risk_evidence_.trajectory_assurance_complete &&
+        p4_direct_risk_evidence_.trajectory_assurance.mode ==
+            iap::TrajectoryExecutionMode::CONTROLLED_DEGRADED_EXECUTION &&
+        p4_direct_risk_evidence_.trajectory_assurance.authorized() &&
+        last_p4_forward_decision_.action ==
+            P4ForwardAction::CANDIDATE_READY;
     if (retry_index == 0u || retry_index > 2u ||
         !p4_direct_risk_evidence_.complete ||
-        p4_direct_risk_evidence_.certified_safe ||
-        p4_direct_risk_evidence_.first_failure_index ==
-            std::numeric_limits<std::size_t>::max())
+        (!controlled_route_preference &&
+         (p4_direct_risk_evidence_.executionAuthorized() ||
+          p4_direct_risk_evidence_.first_failure_index ==
+              std::numeric_limits<std::size_t>::max())))
       return finish(false, "actual_curve_feedback_not_applicable");
 
     P4ForwardDecision retry = last_p4_forward_decision_;
     retry.result_status = P4ForwardResultStatus::READY;
     retry.planning_disposition = P4PlanningDisposition::NEW_TRAJECTORY_READY;
     retry.geometry_commit = P4GeometryCommitResult{};
+    if (controlled_route_preference && retry_index == 1u)
+    {
+      const double selected_length_m = p4PolylineLength(
+          retry.selected_guide);
+      const double execution_envelope_m = std::min({
+          selected_length_m,
+          p4_forward_limits_.max_lookahead_m,
+          std::max(p4_forward_limits_.min_creep_progress_m,
+                   retry.stopping_distance_m +
+                       p4_forward_limits_.min_creep_progress_m)});
+      auto observation = p4CropPolyline(
+          retry.selected_guide, execution_envelope_m);
+      if (observation.size() < 2u ||
+          p4PolylineLength(observation) + 1.0e-9 <
+              p4_forward_limits_.min_creep_progress_m)
+        return finish(false, "controlled_execution_envelope_too_short");
+      retry.action = P4ForwardAction::OBSERVE_MORE;
+      retry.selection_authority = P4ForwardSelectionAuthority::NONE;
+      retry.formal_support = false;
+      retry.observe_more_trajectory = std::move(observation);
+      retry.speed_cap_mps = std::min(
+          p4_forward_limits_.max_observe_speed_mps,
+          std::max(0.1, p4_forward_limits_.nominal_query_speed_mps));
+      retry.actual_curve_duration_scale = 1.0;
+      retry.reason = "controlled_degraded_execution_envelope";
+      p4_actual_curve_feedback_override_ = std::move(retry);
+      return finish(true, "controlled_execution_envelope_ready");
+    }
     if (p4_direct_risk_evidence_.certification_status ==
             P4ActualCurveCertificationStatus::UNSAFE_SPATIAL_DOMINANT &&
         retry_index == 1u)
@@ -4853,7 +5276,8 @@ namespace ego_planner
 
   bool EGOPlannerManager::validatePreparedP4SuccessorBeforePublish(
       const LocalTrajData &incumbent, const double now_s,
-      std::string *reason)
+      std::string *reason, const double emergency_time_s,
+      P5GateStatus *revalidated_p5_status)
   {
     const auto finish = [this, now_s, reason](
                             const bool valid, const std::string &why) {
@@ -4963,6 +5387,8 @@ namespace ego_planner
       if (!sampleTrajectoryForGeometryCommit(
               &local_data_, 0.0, &points, &times) || points.empty())
         return finish(false, "successor_actual_curve_sampling_failed");
+      const auto nominal_points = points;
+      const auto nominal_times = times;
       P4ExecutionRiskWindowLayout successor_layout;
       const bool successor_windowed =
           p4_execution_certificate_.gnss_core_policy ==
@@ -5045,14 +5471,13 @@ namespace ego_planner
         return finish(false, "successor_latest_query_incomplete");
       for (const auto &point : result.points)
       {
-        if (point.safety_state == iap::ForwardRiskSafetyState::UNSAFE ||
-            (std::isfinite(point.safety_ratio) &&
-             point.safety_ratio >= 1.0))
-          return finish(false, "successor_latest_direct_risk_changed");
-        if (point.safety_state != iap::ForwardRiskSafetyState::SAFE ||
+        if ((point.safety_state != iap::ForwardRiskSafetyState::SAFE &&
+             point.safety_state != iap::ForwardRiskSafetyState::UNSAFE) ||
             point.ranking_state !=
                 iap::ForwardRiskRankingState::COMPARABLE ||
-            point.failure_reason != iap::ForwardRiskFailureReason::NONE ||
+            (point.failure_reason != iap::ForwardRiskFailureReason::NONE &&
+             point.failure_reason !=
+                 iap::ForwardRiskFailureReason::SAFETY_LIMIT_EXCEEDED) ||
             !point.gnss_supported || !point.lidar_supported ||
             !point.fim_supported || !std::isfinite(point.safety_ratio))
           return finish(false, "successor_latest_query_incomplete");
@@ -5070,8 +5495,71 @@ namespace ego_planner
         for (const auto &row : successor_layout.rows)
           p4_direct_risk_evidence_.nominal_sample_rows.push_back(row.nominal);
       }
+      iap::TrajectoryAssuranceRequest assurance_request;
+      assurance_request.global_samples =
+          iap::globalNavigationSamplesFromForwardRisk(
+              result.points, times, execution->risk_policy.alert_limit_h_m,
+              execution->risk_policy.alert_limit_v_m,
+              p4_direct_risk_evidence_.nominal_sample_rows);
+      assurance_request.has_prior_global_episode =
+          p4_global_exposure_ledger_.state().active;
+      assurance_request.prior_global_episode =
+          p4_global_exposure_ledger_.state();
+      assurance_request.certified_braking_available =
+          !p4_braking_anchors_.empty();
+      iap::LocalMotionCurve nominal_curve;
+      nominal_curve.curve_id = "successor-nominal";
+      for (std::size_t index = 0; index < nominal_points.size(); ++index)
+        nominal_curve.samples.push_back(iap::LocalMotionSample{
+            nominal_times[index], nominal_points[index],
+            p4_local_tracking_error_bound_m_});
+      assurance_request.local_curves.push_back(std::move(nominal_curve));
+      for (const auto &anchor : p4_braking_anchors_)
+      {
+        iap::LocalMotionCurve brake;
+        brake.curve_id = "successor-brake-" +
+            std::to_string(anchor.braking_certificate_id);
+        brake.braking_curve = true;
+        for (std::size_t index = 0; index < anchor.risk_points.size() &&
+             index < anchor.risk_relative_times.size(); ++index)
+          brake.samples.push_back(iap::LocalMotionSample{
+              anchor.risk_relative_times[index], anchor.risk_points[index],
+              p4_local_tracking_error_bound_m_});
+        if (!brake.samples.empty())
+          assurance_request.local_curves.push_back(std::move(brake));
+      }
+      assurance_request.local_evidence = buildP4LocalMotionEvidence(
+          execution->occupancy, execution->integrity_anchor.current,
+          assurance_request.local_curves, execution->execution_snapshot_id,
+          execution->freshAt(now_s),
+          &execution->local_obstacle_source_bounds);
+      p4_direct_risk_evidence_.trajectory_assurance =
+          iap::TrajectoryAssurance(p4_global_exposure_policy_,
+                                   p4_local_motion_policy_)
+              .evaluate(assurance_request);
+      p4_direct_risk_evidence_.trajectory_assurance_complete =
+          p4_direct_risk_evidence_.trajectory_assurance.global.complete &&
+          p4_direct_risk_evidence_.trajectory_assurance.local.status !=
+              iap::LocalMotionAssuranceStatus::UNKNOWN;
+      if (!p4_direct_risk_evidence_.trajectory_assurance.authorized())
+        return finish(false, "successor_latest_trajectory_assurance_changed:" +
+            p4_direct_risk_evidence_.trajectory_assurance.reason + ":" +
+            p4_direct_risk_evidence_.trajectory_assurance.local.reason);
       p4_execution_certificate_.execution_snapshot_id =
           execution->execution_snapshot_id;
+      p4_execution_certificate_.execution_mode =
+          p4_direct_risk_evidence_.trajectory_assurance.mode;
+      p4_execution_certificate_.trajectory_assurance_hash =
+          p4_direct_risk_evidence_.trajectory_assurance.certificate_hash;
+      p4_execution_certificate_.local_motion_certificate_hash =
+          p4_direct_risk_evidence_.trajectory_assurance.local.certificate_hash;
+      p4_execution_certificate_.local_motion_minimum_margin_m =
+          p4_direct_risk_evidence_.trajectory_assurance.local.minimum_margin_m;
+      p4_execution_certificate_.global_peak_ratio =
+          p4_direct_risk_evidence_.trajectory_assurance.global.peak_ratio;
+      p4_execution_certificate_.global_exposure_integral_ratio_s =
+          p4_direct_risk_evidence_.trajectory_assurance.global.
+              exceedance_integral_ratio_s;
       p4_execution_certificate_.window_layout_hash =
           p4_direct_risk_evidence_.window_layout_hash;
       p4_execution_certificate_.window_satellite_sets_hash =
@@ -5113,16 +5601,30 @@ namespace ego_planner
       appendP4ExecutionEvent(
           "PREPARED_SUCCESSOR_REAUTHORIZED", now_s, rebound);
     }
-    for (const auto &point : p4_direct_risk_evidence_.points)
-      if (point.safety_state != iap::ForwardRiskSafetyState::SAFE ||
-          point.ranking_state != iap::ForwardRiskRankingState::COMPARABLE ||
-          point.failure_reason != iap::ForwardRiskFailureReason::NONE ||
-          !std::isfinite(point.safety_ratio) || point.safety_ratio >= 1.0)
-        return finish(false, "successor_latest_direct_evidence_unsafe");
+    if (!p4_direct_risk_evidence_.trajectory_assurance_complete ||
+        !p4_direct_risk_evidence_.trajectory_assurance.authorized())
+      return finish(false, "successor_latest_assurance_evidence_invalid");
     const auto geometry = validateCommittedP4TrajectoryGeometry(now_s);
     if (geometry && !geometry->accepted())
       return finish(false, "successor_publish_collision_recheck_failed:" +
           geometry->reason);
+    if (!latest_evidence_bound && p5_integrity_gate_ &&
+        p5_integrity_gate_->finalGateEnabled())
+    {
+      const auto p5 = p5_integrity_gate_->evaluateFinal(
+          local_data_, planning_risk_context_.snapshot, now_s,
+          emergency_time_s, &p4_direct_risk_evidence_,
+          p4_execution_certificate_.gnss_core_policy,
+          p4_execution_certificate_.window_layout_hash,
+          p4_execution_certificate_.window_satellite_sets_hash);
+      if (p5.action != P5GateAction::OK)
+        return finish(false, "successor_latest_p5_recheck_failed:" +
+            std::string(P5RuntimeIntegrityGate::reasonName(p5.reason)));
+      // The publication event must carry the admission produced for the
+      // rebound snapshot/certificate, never the earlier pre-rebind result.
+      if (revalidated_p5_status)
+        *revalidated_p5_status = p5;
+    }
     return finish(true, "prepared_successor_publish_revalidated");
   }
 
@@ -5211,7 +5713,7 @@ namespace ego_planner
           {
             const bool prior_window_certificate_valid =
                 p4_direct_risk_evidence_.complete &&
-                p4_direct_risk_evidence_.certified_safe &&
+                p4_direct_risk_evidence_.executionAuthorized() &&
                 p4_direct_risk_evidence_.satellite_set_policy ==
                     p4_execution_certificate_.gnss_core_policy &&
                 (p4_execution_certificate_.gnss_core_policy !=
@@ -5387,37 +5889,59 @@ namespace ego_planner
     const Eigen::Vector3d commanded_position =
         local_data_.position_traj_.evaluateDeBoorT(current_t);
     out.tracking_error_m = (actual_position - commanded_position).norm();
-    out.tracking_within_limit = std::isfinite(out.tracking_error_m) &&
-        out.tracking_error_m <= p4_max_tracking_error_m_;
     bool pending_guard_due = false;
+    bool activated_guard_matches_actual = false;
     if (p4_pending_braking_anchor_ &&
         p4_pending_braking_anchor_->anchor_index < p4_braking_anchors_.size())
     {
-      const auto &pending_anchor = p4_braking_anchors_[
+      auto &pending_anchor = p4_braking_anchors_[
           p4_pending_braking_anchor_->anchor_index];
       const double switch_time_s =
           p4_execution_certificate_.start_time_ns * 1.0e-9 +
           pending_anchor.trajectory_time_s;
       pending_guard_due = std::isfinite(switch_time_s) &&
           evaluation_now_s + 1.0e-9 >= switch_time_s;
+      // Once traj_server has acknowledged the certified guard as active, the
+      // guard -- not the parent nominal spline -- is the commanded trajectory.
+      // The watchdog can observe that acknowledgement after the exact switch
+      // instant, so compare against the guard at its actual elapsed time.
+      if (pending_guard_due &&
+          !p4_pending_braking_anchor_->cancel_requested &&
+          p4_pending_braking_anchor_->server_state ==
+              P4GuardServerState::ACTIVATED &&
+          !pending_anchor.control_points_hash.empty() &&
+          !pending_anchor.knot_vector_hash.empty() &&
+          !pending_anchor.risk_query_lattice_hash.empty())
+      {
+        const double guard_t = std::clamp(
+            evaluation_now_s - switch_time_s, 0.0,
+            pending_anchor.duration_s);
+        const Eigen::Vector3d guard_command =
+            pending_anchor.trajectory.evaluateDeBoorT(guard_t);
+        const double guard_tracking_error_m =
+            (actual_position - guard_command).norm();
+        out.tracking_error_m = guard_tracking_error_m;
+        activated_guard_matches_actual =
+            std::isfinite(guard_tracking_error_m) &&
+            guard_tracking_error_m <= p4_local_tracking_error_bound_m_;
+      }
     }
-    if (!out.tracking_within_limit && !pending_guard_due)
+    out.tracking_within_limit = std::isfinite(out.tracking_error_m) &&
+        out.tracking_error_m <= p4_max_tracking_error_m_;
+    const bool tracking_within_certified_bound =
+        std::isfinite(out.tracking_error_m) &&
+        out.tracking_error_m <= p4_local_tracking_error_bound_m_;
+    // Loss of control is an immediate revocation unless the controller has
+    // already activated the certified guard and the measured state matches
+    // that guard's current command. In that case the nominal-curve error is
+    // stale;
+    // the handover below atomically installs the correct active trajectory.
+    if (!out.tracking_within_limit && !activated_guard_matches_actual)
       return revoke("committed_trajectory_tracking_error_exceeded");
-    out.endpoint_reached = committedP4TrajectoryReachedEndpoint(
-        evaluation_now_s);
-    if (out.endpoint_reached)
-    {
-      out.allowed = true;
-      out.current_integrity_fresh = true;
-      out.current_integrity_safe = true;
-      out.remaining_risk_support_complete = true;
-      out.reason = "approved_endpoint_reached";
-      p4_execution_revoked_ = false;
-      return finish(out,
-          p4_execution_certificate_.authority ==
-              P4ExecutionAuthority::LIMITED_PREFIX_BRAKING
-              ? "FAILSAFE_BRAKED_TO_STOP" : "ENDPOINT_HOLD");
-    }
+    if (!tracking_within_certified_bound &&
+        !activated_guard_matches_actual && !pending_guard_due)
+      return activate_failsafe_braking(
+          "certified_tracking_bound_exceeded", current_t);
     if (p4_pending_braking_anchor_)
     {
       const auto &pending = *p4_pending_braking_anchor_;
@@ -5443,13 +5967,24 @@ namespace ego_planner
           return revoke(pending.server_state == P4GuardServerState::ABSENT
               ? "failsafe_braking_guard_absent"
               : "failsafe_braking_activation_unacknowledged");
+        const double guard_t = std::clamp(
+            evaluation_now_s - switch_time_s, 0.0, anchor.duration_s);
+        const double guard_tracking_error_m =
+            (actual_position -
+             anchor.trajectory.evaluateDeBoorT(guard_t)).norm();
+        if (!std::isfinite(guard_tracking_error_m) ||
+            guard_tracking_error_m > p4_local_tracking_error_bound_m_)
+          return revoke("failsafe_braking_guard_tracking_error");
+        const double parent_deadline_s =
+            p4_execution_certificate_.execution_deadline_s;
+        const double braking_deadline_s = switch_time_s + anchor.duration_s;
+        if (braking_deadline_s > parent_deadline_s + 1.0e-6)
+          return revoke("failsafe_braking_deadline_extended");
         if (p4_risk_confirmation_memory_.state ==
             P4RuntimeRiskConfirmationState::MARGINAL_UNSAFE_ARMED)
           p4_risk_confirmation_memory_.state =
               P4RuntimeRiskConfirmationState::CONFIRMED_UNSAFE_BRAKING;
         out.risk_confirmation_state = p4_risk_confirmation_memory_.state;
-        const double parent_deadline_s =
-            p4_execution_certificate_.execution_deadline_s;
         p4_execution_certificate_.parent_trajectory_id =
             p4_execution_certificate_.trajectory_id;
         p4_execution_certificate_.parent_start_time_ns =
@@ -5468,11 +6003,7 @@ namespace ego_planner
         p4_execution_certificate_.start_time_ns =
             local_data_.start_time_.nanoseconds();
         p4_execution_certificate_.duration_s = anchor.duration_s;
-        p4_execution_certificate_.execution_deadline_s =
-            switch_time_s + anchor.duration_s;
-        if (p4_execution_certificate_.execution_deadline_s >
-            parent_deadline_s + 1.0e-6)
-          return revoke("failsafe_braking_deadline_extended");
+        p4_execution_certificate_.execution_deadline_s = braking_deadline_s;
         p4_execution_certificate_.control_points_hash =
             anchor.control_points_hash;
         p4_execution_certificate_.knot_vector_hash =
@@ -5536,6 +6067,25 @@ namespace ego_planner
         if (const auto command = pendingP4GuardBrakingCommand())
           out.guard_braking_trajectory_id = command->trajectory_id;
       }
+    }
+    // A due guard owns the command stream and must complete the ACK, tracking,
+    // and certificate handover checks above before the parent trajectory may
+    // be considered complete. This prevents a parent deadline from bypassing
+    // a missing or mismatched braking activation.
+    out.endpoint_reached = committedP4TrajectoryReachedEndpoint(
+        evaluation_now_s);
+    if (out.endpoint_reached)
+    {
+      out.allowed = true;
+      out.current_integrity_fresh = true;
+      out.current_integrity_safe = true;
+      out.remaining_risk_support_complete = true;
+      out.reason = "approved_endpoint_reached";
+      p4_execution_revoked_ = false;
+      return finish(out,
+          p4_execution_certificate_.authority ==
+              P4ExecutionAuthority::LIMITED_PREFIX_BRAKING
+              ? "FAILSAFE_BRAKED_TO_STOP" : "ENDPOINT_HOLD");
     }
     if (p4_execution_certificate_.authority ==
         P4ExecutionAuthority::LIMITED_PREFIX_BRAKING)
@@ -5674,6 +6224,24 @@ namespace ego_planner
             "runtime_current_integrity_stale_or_unavailable", current_t);
       out.current_integrity_safe = p4CertifiedCurrentIntegritySafe(
           current, evaluation_now_s, runtime_policy.stale_timeout_s);
+      const double current_gnss_ratio = current.gnss_valid &&
+              std::isfinite(current.gnss_hpl) &&
+              std::isfinite(current.gnss_vpl) &&
+              runtime_policy.alert_limit_h_m > 0.0 &&
+              runtime_policy.alert_limit_v_m > 0.0
+          ? std::max(current.gnss_hpl / runtime_policy.alert_limit_h_m,
+                     current.gnss_vpl / runtime_policy.alert_limit_v_m)
+          : std::numeric_limits<double>::infinity();
+      const bool current_controlled_candidate =
+          !p4_global_exposure_policy_.hard_global && current.lidar_valid &&
+          !current.icp_degenerate &&
+          std::isfinite(current.icp_rmse) && current.icp_rmse >= 0.0 &&
+          std::isfinite(current.icp_gamma_lidar) &&
+          current.icp_gamma_lidar > 0.0 &&
+          current_gnss_ratio <=
+              p4_global_exposure_policy_.maximum_ratio + 1.0e-9;
+      if (!out.current_integrity_safe && !current_controlled_candidate)
+        return revoke("runtime_current_integrity_not_safe");
     }
     else
     {
@@ -5688,7 +6256,7 @@ namespace ego_planner
           current_integrity.hpl_pred < snapshot->params().alert_limit_h_m &&
           current_integrity.vpl_pred < snapshot->params().alert_limit_v_m;
     }
-    if (!out.current_integrity_safe)
+    if (!runtime_execution_snapshot && !out.current_integrity_safe)
       return revoke("runtime_current_integrity_not_safe");
     if (p0_risk_grid_runtime_ && runtime_execution_snapshot &&
         !p0_risk_grid_runtime_->gnssEpochFreshAt(
@@ -5731,7 +6299,24 @@ namespace ego_planner
       if (!p4CertifiedCurrentIntegritySafe(
               refreshed_current, evaluation_now_s,
               runtime_policy.stale_timeout_s))
-        return revoke("runtime_current_integrity_not_safe");
+      {
+        const double ratio = refreshed_current.gnss_valid &&
+                std::isfinite(refreshed_current.gnss_hpl) &&
+                std::isfinite(refreshed_current.gnss_vpl) &&
+                runtime_policy.alert_limit_h_m > 0.0 &&
+                runtime_policy.alert_limit_v_m > 0.0
+            ? std::max(
+                  refreshed_current.gnss_hpl /
+                      runtime_policy.alert_limit_h_m,
+                  refreshed_current.gnss_vpl /
+                      runtime_policy.alert_limit_v_m)
+            : std::numeric_limits<double>::infinity();
+        if (p4_global_exposure_policy_.hard_global ||
+            !refreshed_current.lidar_valid ||
+            refreshed_current.icp_degenerate ||
+            ratio > p4_global_exposure_policy_.maximum_ratio + 1.0e-9)
+          return revoke("runtime_current_integrity_not_safe");
+      }
       if (p0_risk_grid_runtime_ &&
           !p0_risk_grid_runtime_->gnssEpochFreshAt(
               runtime_execution_snapshot
@@ -5812,6 +6397,7 @@ namespace ego_planner
     if (!cache_matches)
     {
       P4ExecutionRiskWindowLayout runtime_layout;
+      std::vector<P4BrakingRiskCurveSamples> runtime_braking_curves;
       std::vector<Eigen::Vector3d> direct_points = remaining_points;
       std::vector<double> direct_times = remaining_times;
       if (runtime_windowed)
@@ -5833,7 +6419,6 @@ namespace ego_planner
           nominal_samples.push_back(P4ExecutionRiskSample{
               remaining_points[index], remaining_times[index]});
         }
-        std::vector<P4BrakingRiskCurveSamples> braking_curves;
         for (const auto &anchor : p4_braking_anchors_)
         {
           if (anchor.trajectory_time_s + 1.0e-9 < current_t ||
@@ -5847,7 +6432,7 @@ namespace ego_planner
             curve.samples.push_back(P4ExecutionRiskSample{
                 anchor.risk_points[index],
                 anchor.risk_relative_times[index]});
-          braking_curves.push_back(std::move(curve));
+          runtime_braking_curves.push_back(std::move(curve));
         }
         // Inside the final command-switch interval the last discrete guard
         // anchor can already be behind current_t. The committed hard-terminal
@@ -5856,7 +6441,7 @@ namespace ego_planner
         // approved zero-velocity/zero-acceleration endpoint. Certify that
         // exact remainder instead of creating a 0.2 s hole after the last
         // sampled guard anchor.
-        if (braking_curves.empty() &&
+        if (runtime_braking_curves.empty() &&
             p4_execution_certificate_.duration_s - current_t <=
                 0.2 + 1.0e-9)
         {
@@ -5864,14 +6449,14 @@ namespace ego_planner
           terminal_remainder.anchor_time_s =
               nominal_samples.front().relative_time_s;
           terminal_remainder.samples = nominal_samples;
-          braking_curves.push_back(std::move(terminal_remainder));
+          runtime_braking_curves.push_back(std::move(terminal_remainder));
         }
         P4ExecutionRiskWindowParams params;
         params.reaction_time_s = p4_forward_limits_.reaction_time_s;
         params.transition_overlap_s = p4_window_transition_overlap_s_;
         params.maximum_anchor_gap_s = 0.2;
         runtime_layout = buildP4ExecutionRiskWindowLayout(
-            nominal_samples, braking_curves, params);
+            nominal_samples, runtime_braking_curves, params);
         if (!runtime_layout.valid)
           return activate_failsafe_braking(
               "runtime_braking_window_layout_invalid:" +
@@ -5956,6 +6541,180 @@ namespace ego_planner
         for (const auto &row : runtime_layout.rows)
           p4_direct_risk_evidence_.nominal_sample_rows.push_back(row.nominal);
       }
+      iap::TrajectoryAssuranceRequest runtime_assurance_request;
+      runtime_assurance_request.has_prior_global_episode =
+          p4_global_exposure_ledger_.state().active;
+      runtime_assurance_request.prior_global_episode =
+          p4_global_exposure_ledger_.state();
+      runtime_assurance_request.global_samples =
+          iap::globalNavigationSamplesFromForwardRisk(
+              result.points, direct_times,
+              runtime_policy.alert_limit_h_m,
+              runtime_policy.alert_limit_v_m,
+              p4_direct_risk_evidence_.nominal_sample_rows);
+      iap::LocalMotionCurve runtime_nominal;
+      runtime_nominal.curve_id = "runtime-nominal";
+      if (runtime_windowed)
+      {
+        for (std::size_t index = 0; index < runtime_layout.rows.size(); ++index)
+        {
+          if (!runtime_layout.rows[index].nominal) continue;
+          const auto &sample = runtime_layout.rows[index].sample;
+          if (!runtime_nominal.samples.empty() &&
+              std::abs(runtime_nominal.samples.back().relative_time_s -
+                       sample.relative_time_s) <= 1.0e-9)
+            continue;
+          runtime_nominal.samples.push_back(iap::LocalMotionSample{
+              sample.relative_time_s, sample.position,
+              p4_local_tracking_error_bound_m_});
+        }
+        std::stable_sort(
+            runtime_nominal.samples.begin(), runtime_nominal.samples.end(),
+            [](const auto &lhs, const auto &rhs) {
+              return lhs.relative_time_s < rhs.relative_time_s;
+            });
+        runtime_nominal.samples.erase(
+            std::unique(
+                runtime_nominal.samples.begin(),
+                runtime_nominal.samples.end(),
+                [](const auto &lhs, const auto &rhs) {
+                  return std::abs(lhs.relative_time_s -
+                                  rhs.relative_time_s) <= 1.0e-9;
+                }),
+            runtime_nominal.samples.end());
+      }
+      else
+      {
+        for (std::size_t index = 0; index < remaining_points.size(); ++index)
+          runtime_nominal.samples.push_back(iap::LocalMotionSample{
+              remaining_times[index], remaining_points[index],
+              p4_local_tracking_error_bound_m_});
+      }
+      runtime_assurance_request.local_curves.push_back(
+          std::move(runtime_nominal));
+      for (std::size_t brake_index = 0;
+           brake_index < runtime_braking_curves.size(); ++brake_index)
+      {
+        const auto &brake = runtime_braking_curves[brake_index];
+        iap::LocalMotionCurve curve;
+        curve.curve_id = "runtime-brake-" +
+            std::to_string(brake_index);
+        curve.braking_curve = true;
+        for (const auto &sample : brake.samples)
+          curve.samples.push_back(iap::LocalMotionSample{
+              sample.relative_time_s, sample.position,
+              p4_local_tracking_error_bound_m_});
+        if (!curve.samples.empty())
+          runtime_assurance_request.local_curves.push_back(std::move(curve));
+      }
+      runtime_assurance_request.certified_braking_available =
+          runtime_assurance_request.local_curves.size() > 1u;
+      if (runtime_execution_snapshot && runtime_occupancy)
+        runtime_assurance_request.local_evidence =
+            buildP4LocalMotionEvidence(
+                runtime_occupancy,
+                runtime_execution_snapshot->integrity_anchor.current,
+                runtime_assurance_request.local_curves,
+                runtime_execution_snapshot->execution_snapshot_id,
+                runtime_execution_snapshot->freshAt(evaluation_now_s),
+                &runtime_execution_snapshot->local_obstacle_source_bounds);
+      p4_direct_risk_evidence_.trajectory_assurance =
+          iap::TrajectoryAssurance(p4_global_exposure_policy_,
+                                   p4_local_motion_policy_)
+              .evaluate(runtime_assurance_request);
+      p4_direct_risk_evidence_.trajectory_assurance_complete =
+          p4_direct_risk_evidence_.trajectory_assurance.global.complete &&
+          p4_direct_risk_evidence_.trajectory_assurance.local.status !=
+              iap::LocalMotionAssuranceStatus::UNKNOWN;
+      if (runtime_windowed &&
+          !p4_direct_risk_evidence_.trajectory_assurance.authorized())
+      {
+        // Preserve the first actual-curve GNSS violation in the execution
+        // event even though the unified assurance gate owns the rejection.
+        // Without this, a hard global-navigation rejection looked like an
+        // evidence failure (NaN PL and no location) to the operator.
+        for (std::size_t index = 0; index < result.points.size() &&
+             index < direct_points.size() && index < direct_times.size();
+             ++index)
+        {
+          if (!p4_direct_risk_evidence_.nominal_sample_rows.empty() &&
+              (index >= p4_direct_risk_evidence_.nominal_sample_rows.size() ||
+               !p4_direct_risk_evidence_.nominal_sample_rows[index]))
+            continue;
+          const auto &direct = result.points[index];
+          if (direct.safety_state != iap::ForwardRiskSafetyState::UNSAFE ||
+              direct.ranking_state !=
+                  iap::ForwardRiskRankingState::COMPARABLE ||
+              direct.failure_reason !=
+                  iap::ForwardRiskFailureReason::SAFETY_LIMIT_EXCEEDED)
+            continue;
+          out.known_future_risk_unsafe = true;
+          out.violation_position = direct_points[index];
+          out.violation_query_time_s =
+              local_data_.start_time_.seconds() + direct_times[index];
+          out.time_to_risk_violation_s = std::max(
+              0.0, out.violation_query_time_s - evaluation_now_s);
+          out.violation_hpl_m = direct.prediction.gnss.hpl;
+          out.violation_vpl_m = direct.prediction.gnss.vpl;
+          out.risk_confirmation_ratio = std::max(
+              direct.prediction.gnss.hpl / runtime_policy.alert_limit_h_m,
+              direct.prediction.gnss.vpl / runtime_policy.alert_limit_v_m);
+          break;
+        }
+        return activate_failsafe_braking(
+            "runtime_trajectory_assurance_rejected:" +
+                p4_direct_risk_evidence_.trajectory_assurance.reason + ":" +
+                p4_direct_risk_evidence_.trajectory_assurance.local.reason,
+            current_t);
+      }
+      if (p4_direct_risk_evidence_.trajectory_assurance_complete)
+      {
+        p4_execution_certificate_.execution_mode =
+            p4_direct_risk_evidence_.trajectory_assurance.mode;
+        p4_execution_certificate_.trajectory_assurance_hash =
+            p4_direct_risk_evidence_.trajectory_assurance.certificate_hash;
+        p4_execution_certificate_.local_motion_certificate_hash =
+            p4_direct_risk_evidence_.trajectory_assurance.local.
+                certificate_hash;
+        p4_execution_certificate_.local_motion_minimum_margin_m =
+            p4_direct_risk_evidence_.trajectory_assurance.local.
+                minimum_margin_m;
+        p4_execution_certificate_.global_peak_ratio =
+            p4_direct_risk_evidence_.trajectory_assurance.global.peak_ratio;
+        p4_execution_certificate_.global_exposure_integral_ratio_s =
+            p4_direct_risk_evidence_.trajectory_assurance.global.
+                exceedance_integral_ratio_s;
+      }
+      double current_global_ratio = 0.0;
+      if (!runtime_assurance_request.global_samples.empty())
+      {
+        const auto closest = std::min_element(
+            runtime_assurance_request.global_samples.begin(),
+            runtime_assurance_request.global_samples.end(),
+            [current_t](const auto &lhs, const auto &rhs) {
+              return std::abs(lhs.relative_time_s - current_t) <
+                  std::abs(rhs.relative_time_s - current_t);
+            });
+        if (closest->complete)
+          current_global_ratio = std::max(
+              closest->hpl_m / closest->hal_m,
+              closest->vpl_m / closest->val_m);
+      }
+      p4_global_exposure_ledger_.noteTrajectoryReplacement(
+          static_cast<std::uint64_t>(local_data_.traj_id_));
+      const std::string episode_identity =
+          p4RuntimeEvidenceIdentity(runtime_execution_snapshot.get()) +
+          ";trajectory_time_ms=" + std::to_string(static_cast<long long>(
+              std::llround(current_t * 1000.0)));
+      if (!p4_global_exposure_ledger_.update(
+              evaluation_now_s, current_global_ratio, episode_identity) ||
+          p4_global_exposure_ledger_.state().budget_exhausted)
+      {
+        if (p4_global_exposure_ledger_.state().budget_exhausted)
+          return activate_failsafe_braking(
+              "runtime_global_navigation_episode_budget_exhausted",
+              current_t);
+      }
       p4_runtime_risk_cache_ = P4RuntimeRiskCache{};
       p4_runtime_risk_cache_.valid = true;
       p4_runtime_risk_cache_.trajectory_id = local_data_.traj_id_;
@@ -6032,8 +6791,10 @@ namespace ego_planner
             direct.gnss_supported && direct.lidar_supported &&
             direct.fim_supported && std::isfinite(direct.safety_ratio);
         sample.safety_ratio = direct.safety_ratio;
-        sample.hpl_m = direct.prediction.fused.hpl;
-        sample.vpl_m = direct.prediction.fused.vpl;
+        sample.hpl_m = p4_direct_risk_evidence_.trajectory_assurance_complete
+            ? direct.prediction.gnss.hpl : direct.prediction.fused.hpl;
+        sample.vpl_m = p4_direct_risk_evidence_.trajectory_assurance_complete
+            ? direct.prediction.gnss.vpl : direct.prediction.fused.vpl;
         p4_runtime_risk_cache_.samples.push_back(sample);
       }
     }
@@ -6278,6 +7039,12 @@ namespace ego_planner
           p4_diagnostic_recheck_in_progress_ = false;
           return rechecked;
         }
+        if (p4_direct_risk_evidence_.executionAuthorized() &&
+            p4_direct_risk_evidence_.trajectory_assurance_complete &&
+            p4_direct_risk_evidence_.trajectory_assurance.mode ==
+                iap::TrajectoryExecutionMode::
+                    CONTROLLED_DEGRADED_EXECUTION)
+          continue;
         if (p4_execution_certificate_.authority ==
             P4ExecutionAuthority::FORMAL_RISK_SELECTED)
           return activate_failsafe_braking(
@@ -6418,7 +7185,10 @@ namespace ego_planner
           : "EXECUTION_ALLOWED");
     }
     out.allowed = true;
-    out.reason = "runtime_execution_contract_valid";
+    out.reason = p4_execution_certificate_.execution_mode ==
+            iap::TrajectoryExecutionMode::CONTROLLED_DEGRADED_EXECUTION
+        ? "runtime_controlled_degraded_execution"
+        : "runtime_execution_contract_valid";
     p4_execution_revoked_ = false;
     published_p4_forward_decision_.planning_disposition =
         P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY;
@@ -6490,6 +7260,9 @@ namespace ego_planner
       return false;
     if (write_header)
       csv << "schema_version,event,stamp_s,authority,trajectory_id,"
+             "execution_mode,trajectory_assurance_hash,"
+             "local_motion_certificate_hash,local_motion_minimum_margin_m,"
+             "global_peak_ratio,global_exposure_integral_ratio_s,"
              "trajectory_start_ns,control_points_hash,knot_vector_hash,"
              "risk_query_lattice_hash,"
              "certificate_risk_generation,certificate_occupancy_generation,"
@@ -6519,9 +7292,16 @@ namespace ego_planner
              "gnss_core_policy,window_layout_hash,window_count,"
              "first_failure_window_id\n";
     csv << std::setprecision(17)
-        << "p4_execution_event_v7," << event << ',' << stamp_s << ','
+        << "p4_execution_event_v8," << event << ',' << stamp_s << ','
         << p4ExecutionAuthorityName(p4_execution_certificate_.authority)
         << ',' << p4_execution_certificate_.trajectory_id << ','
+        << iap::trajectoryExecutionModeName(
+               p4_execution_certificate_.execution_mode) << ','
+        << p4_execution_certificate_.trajectory_assurance_hash << ','
+        << p4_execution_certificate_.local_motion_certificate_hash << ','
+        << p4_execution_certificate_.local_motion_minimum_margin_m << ','
+        << p4_execution_certificate_.global_peak_ratio << ','
+        << p4_execution_certificate_.global_exposure_integral_ratio_s << ','
         << p4_execution_certificate_.start_time_ns << ','
         << p4_execution_certificate_.control_points_hash << ','
         << p4_execution_certificate_.knot_vector_hash << ','

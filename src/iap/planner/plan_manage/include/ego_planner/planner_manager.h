@@ -31,6 +31,7 @@ namespace ego_planner
 {
   struct P0PlanningSnapshot;
   struct P0ExecutionRiskSnapshot;
+  struct P5GateStatus;
 
   inline bool validP4TrackingErrorLimit(const double limit_m)
   {
@@ -222,6 +223,14 @@ namespace ego_planner
     uint64_t braking_certificate_id = 0;
     double braking_anchor_time_s =
         std::numeric_limits<double>::quiet_NaN();
+    iap::TrajectoryExecutionMode execution_mode =
+        iap::TrajectoryExecutionMode::RECOVERY_OR_EXIT;
+    std::string trajectory_assurance_hash;
+    std::string local_motion_certificate_hash;
+    double local_motion_minimum_margin_m =
+        std::numeric_limits<double>::quiet_NaN();
+    double global_peak_ratio = std::numeric_limits<double>::quiet_NaN();
+    double global_exposure_integral_ratio_s = 0.0;
   };
 
   struct P4BrakingAnchor
@@ -521,6 +530,25 @@ namespace ego_planner
     pendingP4GuardBrakingCommand() const;
     void acknowledgeP4GuardStatus(
         int trajectory_id, const std::string &status);
+    bool setPendingP4GuardDurationForTest(double duration_s)
+    {
+      if (!p4_pending_braking_anchor_ ||
+          p4_pending_braking_anchor_->anchor_index >=
+              p4_braking_anchors_.size())
+        return false;
+      p4_braking_anchors_[
+          p4_pending_braking_anchor_->anchor_index].duration_s = duration_s;
+      return true;
+    }
+    void setP4RiskConfirmationStateForTest(
+        P4RuntimeRiskConfirmationState state)
+    {
+      p4_risk_confirmation_memory_.state = state;
+    }
+    P4RuntimeRiskConfirmationState p4RiskConfirmationStateForTest() const
+    {
+      return p4_risk_confirmation_memory_.state;
+    }
     // A candidate mutates LocalTrajData before the final lineage/P5/publish
     // gates run. Preserve the executing certificate as a small transaction so
     // rejection cannot split the incumbent curve from its authority identity.
@@ -528,8 +556,9 @@ namespace ego_planner
     void restoreP4ExecutionCommitmentAfterCandidateRejection();
     void commitP4ExecutionCandidate();
     bool validatePreparedP4SuccessorBeforePublish(
-        const LocalTrajData &incumbent, double now_s,
-        std::string *reason = nullptr);
+      const LocalTrajData &incumbent, double now_s,
+      std::string *reason = nullptr, double emergency_time_s = 1.0,
+      P5GateStatus *revalidated_p5_status = nullptr);
     bool prepareP4ActualCurveFeedbackRetry(
         unsigned int retry_index, std::string *reason = nullptr);
     const std::optional<P4ForwardDecision>&
@@ -613,6 +642,9 @@ namespace ego_planner
     P4ForwardLimits p4_forward_limits_;
     std::string p4_gnss_core_policy_ = "braking_window_core";
     double p4_window_transition_overlap_s_ = 0.4;
+    iap::GlobalNavigationExposurePolicy p4_global_exposure_policy_;
+    iap::GlobalNavigationExposureLedger p4_global_exposure_ledger_;
+    iap::LocalMotionAssurancePolicy p4_local_motion_policy_;
     P4ForwardDecisionWorker p4_forward_worker_;
     P4ForwardDecision last_p4_forward_decision_;
     P4ForwardDecision published_p4_forward_decision_;
@@ -633,6 +665,7 @@ namespace ego_planner
     P4ExecutionCheckDiagnostics last_p4_execution_diagnostics_;
     bool p4_execution_revoked_ = false;
     double p4_max_tracking_error_m_ = 0.75;
+    double p4_local_tracking_error_bound_m_ = 0.15;
     P4RuntimeRiskConfirmationPolicy p4_risk_confirmation_policy_;
     P4RuntimeRiskConfirmationMemory p4_risk_confirmation_memory_;
     std::optional<std::size_t>

@@ -8,6 +8,10 @@
 
 std_msgs/Header header
 
+# Exact estimator frame that produced this report.  Timestamp proximity alone
+# is not a valid provenance association for registered-map source bounds.
+int64 estimation_frame_id
+
 # Three-state: 0=SAFE, 1=SAFE_EXCLUDED, 2=UNSAFE
 uint8  integrity_state
 
@@ -82,6 +86,13 @@ float64 lidar_pl_u
 int32   lidar_n_hyp
 int32   lidar_n_det
 string  lidar_worst_mode
+
+# Current scan-to-map health used only to bound short-horizon relative motion
+# error. These fields do not turn LiDAR advisory/FIM into a motion authority.
+bool    icp_degenerate
+float64 icp_rmse
+float64 icp_condition
+float64 icp_gamma_lidar
 
 # --- Fallback source breakdown ---
 # TODO(Step 4): replace with explicit FallbackSourceResult struct

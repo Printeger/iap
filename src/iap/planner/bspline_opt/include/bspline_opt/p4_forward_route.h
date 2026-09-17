@@ -19,7 +19,7 @@ namespace ego_planner
 {
 
   inline constexpr char kP4ForwardDecisionSchema[] =
-    "p4_forward_route_decision_v10";
+    "p4_forward_route_decision_v11";
 
   enum class P4ForwardResultStatus
   {
@@ -203,6 +203,13 @@ namespace ego_planner
     double channel_enumeration_budget_ms = 60.0;
     double advisory_min_relative_improvement = 0.10;
     double compute_budget_ms = 150.0;
+    // Route preference may retain a globally degraded candidate only long
+    // enough to build its actual terminal B-spline. These values must match
+    // the final TrajectoryAssurance policy; they never grant motion authority.
+    bool hard_global = false;
+    double maximum_global_ratio = 1.05;
+    double maximum_global_continuous_exceedance_s = 1.0;
+    double maximum_global_exceedance_integral_ratio_s = 0.025;
   };
 
   struct P4ForwardRiskSample
@@ -316,6 +323,14 @@ namespace ego_planner
     double fim_max_ratio = std::numeric_limits < double > ::quiet_NaN();
     double fim_integral = std::numeric_limits < double > ::quiet_NaN();
     double safety_max_ratio = std::numeric_limits < double > ::quiet_NaN();
+    // Provisional task-global exposure summary.  This permits an actual
+    // terminal B-spline to be generated and checked by TrajectoryAssurance;
+    // it is never motion authority by itself.
+    bool controlled_degraded_candidate = false;
+    double global_peak_ratio = std::numeric_limits<double>::quiet_NaN();
+    double global_continuous_exceedance_s = 0.0;
+    double global_exceedance_integral_ratio_s = 0.0;
+    double global_budget_utilization = std::numeric_limits<double>::infinity();
     uint64_t channel_id = 0;
     bool formal_support = false;
     bool known_hazard_evidence = false;

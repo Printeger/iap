@@ -110,23 +110,35 @@ P4GeometryCommitResult P4GeometryCommitValidator::validate(
     };
 
   const auto epoch = request.bound_occupancy;
-  if (!epoch || request.executable_path.size() < 2 ||
-    !std::isfinite(request.compute_budget_ms) ||
-    request.compute_budget_ms <= 0.0 ||
-    !std::isfinite(request.vehicle_radius_m) ||
-    request.vehicle_radius_m < 0.0 ||
-    !std::isfinite(request.map_inflation_m) ||
-    request.map_inflation_m < 0.0 ||
-    !std::isfinite(request.curve_approximation_error_m) ||
-    request.curve_approximation_error_m < 0.0 ||
-    !std::isfinite(epoch->resolution_m) || epoch->resolution_m <= 0.0 ||
-    (epoch->voxel_dimensions.array() <= 0).any() ||
-    !epoch->lattice_origin.allFinite() || !epoch->extent_m.allFinite() ||
-    epoch->generation == 0u || !epoch->diagnostic_query)
-  {
-    result.reason = "invalid_commit_request";
-    return finish(std::move(result));
-  }
+  const auto invalid = [&finish, &result](const char* reason) {
+      result.reason = reason;
+      return finish(std::move(result));
+    };
+  if (!epoch) return invalid("commit_occupancy_missing");
+  if (request.executable_path.size() < 2)
+    return invalid("commit_executable_path_too_short");
+  if (!std::isfinite(request.compute_budget_ms) ||
+      request.compute_budget_ms <= 0.0)
+    return invalid("commit_compute_budget_invalid");
+  if (!std::isfinite(request.vehicle_radius_m) ||
+      request.vehicle_radius_m < 0.0)
+    return invalid("commit_vehicle_radius_invalid");
+  if (!std::isfinite(request.map_inflation_m) ||
+      request.map_inflation_m < 0.0)
+    return invalid("commit_map_inflation_invalid");
+  if (!std::isfinite(request.curve_approximation_error_m) ||
+      request.curve_approximation_error_m < 0.0)
+    return invalid("commit_curve_approximation_error_invalid");
+  if (!std::isfinite(epoch->resolution_m) || epoch->resolution_m <= 0.0)
+    return invalid("commit_occupancy_resolution_invalid");
+  if ((epoch->voxel_dimensions.array() <= 0).any())
+    return invalid("commit_occupancy_dimensions_invalid");
+  if (!epoch->lattice_origin.allFinite() || !epoch->extent_m.allFinite())
+    return invalid("commit_occupancy_geometry_nonfinite");
+  if (epoch->generation == 0u)
+    return invalid("commit_occupancy_generation_invalid");
+  if (!epoch->diagnostic_query)
+    return invalid("commit_occupancy_query_missing");
   for (const auto & point : request.executable_path) {
     if (!point.allFinite()) {
       result.reason = "nonfinite_executable_path";

@@ -151,7 +151,7 @@ if(BUILD_TESTING)
   )
   ament_target_dependencies(test_p0_risk_grid_runtime
     rclcpp nav_msgs geometry_msgs std_msgs sensor_msgs visualization_msgs
-    gnss_comm iap
+    gnss_comm iap plan_env cv_bridge pcl_conversions
   )
   target_link_libraries(test_p0_risk_grid_runtime
     iap::iap

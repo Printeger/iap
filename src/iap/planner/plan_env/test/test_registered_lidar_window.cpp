@@ -83,6 +83,100 @@ TEST(RegisteredLidarWindow, SuccessfulHitRayMarksFreeAndHitWins) {
             RegisteredVoxelState::OCCUPIED);
 }
 
+TEST(RegisteredLidarWindow,
+     ActiveObstacleSourcesPreserveFrameIdentityAndImmutableCenters) {
+  auto window = makeWindow();
+  ActiveLidarWindowDeltaData delta;
+  delta.base_generation = 0;
+  delta.generation = 1;
+  delta.complete = true;
+  delta.frame_contract_id = "contract-a";
+  auto source_frame = frame(
+      12, Eigen::Vector3d(0.5, 0.5, 0.5),
+      {Eigen::Vector3d(2.0, 0.0, 0.0)});
+  source_frame.source_is_map_reference = true;
+  source_frame.source_health_valid = true;
+  source_frame.source_health_stamp_s = source_frame.stamp_s;
+  source_frame.source_icp_degenerate = false;
+  source_frame.source_icp_rmse = 0.02;
+  source_frame.source_icp_condition = 11.0;
+  source_frame.source_icp_gamma_lidar = 1.2;
+  source_frame.source_lidar_pl_enu_m = Eigen::Vector3d(0.3, 0.4, 0.5);
+  delta.added.push_back(source_frame);
+  ASSERT_TRUE(window.applyActiveDelta(delta).accepted);
+
+  const auto sources = window.activeObstacleSources();
+  ASSERT_NE(sources, nullptr);
+  ASSERT_EQ(sources->size(), 1u);
+  EXPECT_EQ(sources->front().metadata.frame_id, 12);
+  EXPECT_DOUBLE_EQ(sources->front().metadata.stamp_s, 12.0);
+  EXPECT_TRUE(sources->front().metadata.source_is_map_reference);
+  EXPECT_TRUE(sources->front().metadata.source_health_valid);
+  EXPECT_FALSE(sources->front().metadata.source_icp_degenerate);
+  EXPECT_DOUBLE_EQ(sources->front().metadata.source_icp_rmse, 0.02);
+  EXPECT_TRUE(sources->front().metadata.source_lidar_pl_enu_m.isApprox(
+      Eigen::Vector3d(0.3, 0.4, 0.5)));
+  EXPECT_FALSE(sources->front().metadata.content_hash.empty());
+  EXPECT_EQ(window.activeObstacleSources()->front().metadata.content_hash,
+            sources->front().metadata.content_hash);
+  ASSERT_NE(sources->front().occupied_voxel_centers, nullptr);
+  ASSERT_EQ(sources->front().occupied_voxel_centers->size(), 1u);
+  EXPECT_TRUE(sources->front().occupied_voxel_centers->front().isApprox(
+      Eigen::Vector3d(2.5, 0.5, 0.5)));
+
+  ActiveLidarWindowDeltaData remove;
+  remove.base_generation = 1;
+  remove.generation = 2;
+  remove.complete = true;
+  remove.frame_contract_id = "contract-a";
+  remove.removed_frame_ids.push_back(12);
+  ASSERT_TRUE(window.applyActiveDelta(remove).accepted);
+  EXPECT_EQ(window.activeObstacleSources()->size(), 0u);
+  EXPECT_EQ(sources->size(), 1u);
+}
+
+TEST(RegisteredLidarWindow,
+     AtomicFrameReplacementUpgradesSourceHealthWithoutLosingOccupancy) {
+  auto window = makeWindow();
+  ActiveLidarWindowDeltaData add;
+  add.base_generation = 0;
+  add.generation = 1;
+  add.complete = true;
+  add.frame_contract_id = "contract-a";
+  const auto initial = frame(
+      12, Eigen::Vector3d(0.5, 0.5, 0.5),
+      {Eigen::Vector3d(2.0, 0.0, 0.0)});
+  add.added.push_back(initial);
+  ASSERT_TRUE(window.applyActiveDelta(add).accepted);
+  ASSERT_EQ(window.activeObstacleSources()->size(), 1u);
+  EXPECT_FALSE(window.activeObstacleSources()->front().metadata.
+                   source_health_valid);
+
+  auto certified = initial;
+  certified.source_health_valid = true;
+  certified.source_health_stamp_s = certified.stamp_s;
+  certified.source_icp_degenerate = false;
+  certified.source_icp_rmse = 0.02;
+  certified.source_icp_condition = 11.0;
+  certified.source_icp_gamma_lidar = 1.2;
+  certified.source_lidar_pl_enu_m = Eigen::Vector3d(0.3, 0.4, 0.5);
+  ActiveLidarWindowDeltaData replace;
+  replace.base_generation = 1;
+  replace.generation = 2;
+  replace.complete = true;
+  replace.frame_contract_id = "contract-a";
+  replace.removed_frame_ids.push_back(12);
+  replace.added.push_back(certified);
+  const auto update = window.applyActiveDelta(replace);
+  ASSERT_TRUE(update.accepted) << update.reason;
+  EXPECT_EQ(window.stateAt(Eigen::Vector3i(2, 0, 0)),
+            RegisteredVoxelState::OCCUPIED);
+  const auto sources = window.activeObstacleSources();
+  ASSERT_EQ(sources->size(), 1u);
+  EXPECT_TRUE(sources->front().metadata.source_health_valid);
+  EXPECT_DOUBLE_EQ(sources->front().metadata.source_icp_rmse, 0.02);
+}
+
 TEST(RegisteredLidarWindow, OutOfBoundsHitRetainsObservedFreeMapPrefix) {
   auto window = makeWindow();
   const auto update = window.applyCurrentFrame(frame(

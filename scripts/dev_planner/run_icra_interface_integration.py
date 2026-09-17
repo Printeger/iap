@@ -45,12 +45,18 @@ P4_FORWARD_DECISION_SCHEMAS = {
     "p4_forward_route_decision_v6",
     "p4_forward_route_decision_v7",
     "p4_forward_route_decision_v8",
+    "p4_forward_route_decision_v9",
+    "p4_forward_route_decision_v10",
+    "p4_forward_route_decision_v11",
 }
 P4_FORMAL_RISK_SAMPLE_SCHEMAS = {
     "p4_forward_route_decision_v5",
     "p4_forward_route_decision_v6",
     "p4_forward_route_decision_v7",
     "p4_forward_route_decision_v8",
+    "p4_forward_route_decision_v9",
+    "p4_forward_route_decision_v10",
+    "p4_forward_route_decision_v11",
 }
 FOREST_SCENARIOS = (FOREST_V1_SCENARIO, FOREST_SCENARIO)
 SEVEN_STAGE_ORDER = (
@@ -1736,11 +1742,18 @@ def analyze_limited_prefix_records(
         if direct_batch_p95 >= 150.0:
             failures.append("limited_prefix_direct_batch_p95_exceeded")
     confirmation_state_counts: dict[str, int] = {}
+    execution_mode_counts: dict[str, int] = {}
+    controlled_degraded_events = []
     for event in matching_events:
         state = str(event.get("risk_confirmation_state", "") or "")
         if state:
             confirmation_state_counts[state] = (
                 confirmation_state_counts.get(state, 0) + 1)
+        mode = str(event.get("execution_mode", "") or "")
+        if mode:
+            execution_mode_counts[mode] = execution_mode_counts.get(mode, 0) + 1
+        if mode == "CONTROLLED_DEGRADED_EXECUTION":
+            controlled_degraded_events.append(event)
     armed_count = sum(1 for event in matching_events
                       if event.get("event") == "MARGINAL_UNSAFE_ARMED")
     recovered_count = sum(1 for event in matching_events
@@ -1871,6 +1884,11 @@ def analyze_limited_prefix_records(
         hard_unsafe_braking_count=confirmation_state_counts.get(
             "HARD_UNSAFE_BRAKING", 0),
         risk_confirmation_state_counts=confirmation_state_counts,
+        execution_mode_counts=execution_mode_counts,
+        controlled_degraded_execution_event_count=len(
+            controlled_degraded_events),
+        controlled_degraded_motion_proven=(
+            bool(controlled_degraded_events) and actual_displacement >= 0.05),
         successor_reauthorization_count=successor_reauthorization_count,
         guard_prequeue_count=guard_prequeue_count,
         guard_cancel_request_count=guard_cancel_request_count,

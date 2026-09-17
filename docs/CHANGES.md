@@ -4444,3 +4444,74 @@ Requirements: `IAP-RQ-000`, `IAP-RQ-020`, `IAP-RQ-030`, `IAP-RQ-040`,
   sample's query time, preserves immutable environment-hit snapshots without
   copying the full current cloud during P0 capture, and limits v6
   model-completeness acceptance to formal/eligible candidates.
+
+## 2026-09-17 global-navigation exposure and local-motion assurance
+
+- Added `TrajectoryAssurance`, splitting direct GNSS task-global exposure from
+  an independent obstacle-relative `LocalMotionAssurance`. The latter checks
+  the exact nominal B-spline and every reachable braking spline using
+  directional clearance, tracking, ICP/scan, relative drift, curve and fixed
+  margins. Current-frame common transform error cancels; older active-window
+  obstacles use the conservative projected sum of current/source LiDAR axis
+  bounds, and missing provenance remains fail-closed.
+- Registered occupancy snapshots now retain immutable current/active source
+  grouping and deterministic frame content identities. Source-frame LiDAR PL
+  and ICP health are attached before keyframe promotion and remain available
+  for the lifetime of the active-window frame; short downstream Integrity
+  history is only a compatibility fallback. The execution certificate changes
+  when source content or health evidence changes.
+- Added bounded GNSS exposure metrics and persistent episodes. Default
+  controlled degradation permits peak ratio `1.05`, continuous exceedance
+  `1.0 s`, integral `0.025 ratio*s`, and recovery within `2.0 s` or an already
+  certified brake. Episodes survive replanning and clear only after `0.5 s`
+  below `0.95*AL`; `hard_global` preserves strict global limits.
+- Coarse routes may now remain non-authoritative preferences when their GNSS
+  exposure fits the configured budget. The actual terminal-stop B-spline,
+  braking-window evidence, local assurance and current execution snapshot still
+  decide publication. P4, P5 and runtime share the same execution mode and
+  certificate; RiskGrid and LiDAR FIM remain search/ranking inputs only.
+- Execution diagnostics and the limited-prefix runner report normal,
+  controlled-degraded and recovery/exit modes plus global peak/integral and
+  local minimum-margin identities. Hard or sustained direct GNSS failures
+  retain their real first-failure point and PL/AL when braking is scheduled.
+- Review hardening requires predicted recovery to remain below `0.95*AL` for
+  `0.5 s`, accounts for a descending threshold crossing in continuous exposure,
+  and charges replacement candidates against the persistent episode's already
+  consumed budget. Invalid obstacle geometry/source identity/ICP health is
+  fail-closed, remaining-curve drift starts at the current sample, and a
+  successor rebound to a newer snapshot rebuilds both assurance channels and
+  repeats P5 instead of retaining an old local-motion hash.
+- Final review repair makes estimator frame identity explicit in the Integrity
+  message and permits source-health fallback only for the exact frame/stamp.
+  Late exact health replaces an active registered frame atomically; a current
+  scan can supersede old provenance only for the same/adjacent occupied surface
+  voxel without changing occupancy/free evidence. Predicted route recovery can
+  no longer clear an already exhausted runtime episode, descending crossings
+  consume their positive duration/integral, and successor snapshot
+  reauthorization now carries the rerun P5 mode and assurance hash into final
+  admission.
+- Live review identified the startup map datum as the remaining unbounded
+  active-window source: estimator frame zero intentionally has no self-ICP
+  report. Registered frames now carry an explicit map-reference flag. Only
+  that datum receives a zero inter-frame registration term; scan/deskew and all
+  other local-motion margins remain active, while every later frame still
+  requires its exact frame/stamp Integrity evidence.
+- The next live replay exposed a separate parameter-semantics bug: the
+  `0.75 m` loss-of-control threshold and `0.5 m` stopping margin had both been
+  charged as local per-point uncertainty, making a `2.4 m` corridor impossible
+  by construction. Local assurance now has independent `0.15 m` certified
+  tracking and `0.20 m` fixed-clearance bounds; the original emergency tracking
+  threshold and stopping boundary remain unchanged.
+- Focused live diagnostics now record the exact local first-failure curve,
+  sample, clearance and scan/map/drift decomposition. They showed another
+  unit/meaning error: the GNSS ARAIM `K_ff=5.42` constant had been reused as an
+  ICP-residual multiplier. The local residual scale now defaults to `1.0` and
+  remains independently configurable; LiDAR PL/AL and Integrity formulas are
+  unchanged.
+- Final review hardening freezes the planner-map datum at synchronous capture
+  of the first valid estimator frame (never at asynchronous serialization),
+  permits current evidence to replace old provenance only for the exact same
+  occupied voxel, and schedules certified braking as soon as measured tracking
+  exceeds the `0.15 m` certificate bound. The `0.75 m` loss-of-control limit
+  remains an immediate revocation threshold. Forward lineage schema is bumped
+  to `p4_forward_route_decision_v11` for the assurance decomposition columns.

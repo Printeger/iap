@@ -4,6 +4,7 @@
 // protocol; it does not copy or alter GLIM's registration pipeline.
 #include <iap/common/cloud_deskewing.hpp>
 #include <iap/msg/active_lidar_window_delta.hpp>
+#include <iap/msg/integrity_report.hpp>
 #include <iap/msg/registered_lidar_frame.hpp>
 #include <iap/odometry/callbacks.hpp>
 #include <iap/odometry/estimation_frame.hpp>
@@ -27,6 +28,7 @@
 #include <condition_variable>
 #include <cstdint>
 #include <deque>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -93,6 +95,19 @@ bool samePose(const Eigen::Isometry3d& lhs, const Eigen::Isometry3d& rhs) {
   return translation_delta <= 1.0e-5 && rotation_delta <= 1.0e-6;
 }
 
+bool hasCertifiedSourceHealth(
+    const iap::msg::RegisteredLidarFrame& frame) {
+  return frame.source_health_valid &&
+      std::isfinite(frame.source_health_stamp_s) &&
+      !frame.source_icp_degenerate &&
+      std::isfinite(frame.source_icp_rmse) &&
+      std::isfinite(frame.source_icp_condition) &&
+      std::isfinite(frame.source_icp_gamma_lidar) &&
+      std::isfinite(frame.source_lidar_pl_e) &&
+      std::isfinite(frame.source_lidar_pl_n) &&
+      std::isfinite(frame.source_lidar_pl_u);
+}
+
 }  // namespace
 
 class PlannerLocalMapExtension final : public glim::ExtensionModuleROS2 {
@@ -110,6 +125,9 @@ class PlannerLocalMapExtension final : public glim::ExtensionModuleROS2 {
     recovery_service_ = config.param_nested<std::string>(
         {"glim_ros", "planner_local_map"}, "recovery_service",
         "/iap/local_map/get_active_window");
+    integrity_topic_ = config.param_nested<std::string>(
+        {"glim_ros", "planner_local_map"}, "integrity_topic",
+        "/iap/integrity");
     current_hits_map_topic_ = config.param_nested<std::string>(
         {"glim_ros", "planner_local_map"}, "current_hits_map_topic",
         "/iap/local_map/current_hits_map");
@@ -181,6 +199,12 @@ class PlannerLocalMapExtension final : public glim::ExtensionModuleROS2 {
       rclcpp::Node& node) override {
     current_publisher_ = node.create_publisher<iap::msg::RegisteredLidarFrame>(
         current_topic_, rclcpp::SensorDataQoS().keep_last(1));
+    integrity_subscription_ =
+        node.create_subscription<iap::msg::IntegrityReport>(
+            integrity_topic_, rclcpp::QoS(256).reliable().transient_local(),
+            [this](const iap::msg::IntegrityReport::ConstSharedPtr report) {
+              rememberIntegrity(report);
+            });
     delta_publisher_ =
         node.create_publisher<iap::msg::ActiveLidarWindowDelta>(
             delta_topic_, rclcpp::QoS(128).reliable());
@@ -197,14 +221,47 @@ class PlannerLocalMapExtension final : public glim::ExtensionModuleROS2 {
               current_hits_map_topic_, rclcpp::SensorDataQoS().keep_last(1));
     }
     logger_->info(
-        "[planner_local_map] current={} current_hits_map={} delta={} recovery={} rate={:.1f}Hz contract={}",
+        "[planner_local_map] current={} current_hits_map={} delta={} recovery={} integrity={} rate={:.1f}Hz contract={}",
         current_topic_, current_hits_map_topic_, delta_topic_,
-        recovery_service_, window_rate_hz_, frame_contract_id_);
+        recovery_service_, integrity_topic_, window_rate_hz_,
+        frame_contract_id_);
     condition_.notify_all();
     return {};
   }
 
  private:
+  static double messageStampSeconds(
+      const builtin_interfaces::msg::Time& stamp) {
+    return static_cast<double>(stamp.sec) +
+           static_cast<double>(stamp.nanosec) * 1.0e-9;
+  }
+
+  void rememberIntegrity(
+      const iap::msg::IntegrityReport::ConstSharedPtr& report) {
+    if (!report) return;
+    const double stamp_s = messageStampSeconds(report->header.stamp);
+    if (!std::isfinite(stamp_s)) return;
+    std::lock_guard<std::mutex> lock(integrity_history_mutex_);
+    integrity_history_.push_back(*report);
+    constexpr std::size_t kIntegrityHistoryCapacity = 2048U;
+    while (integrity_history_.size() > kIntegrityHistoryCapacity)
+      integrity_history_.pop_front();
+  }
+
+  std::optional<iap::msg::IntegrityReport> sourceHealthFor(
+      const std::int64_t frame_id, const double stamp_s) const {
+    std::lock_guard<std::mutex> lock(integrity_history_mutex_);
+    constexpr double kExactStampToleranceS = 1.0e-6;
+    for (const auto& candidate : integrity_history_) {
+      const double candidate_stamp_s =
+          messageStampSeconds(candidate.header.stamp);
+      if (candidate.estimation_frame_id == frame_id &&
+          std::abs(candidate_stamp_s - stamp_s) <= kExactStampToleranceS)
+        return candidate;
+    }
+    return std::nullopt;
+  }
+
   void unregisterCallbacks() {
     if (!callbacks_registered_.exchange(false, std::memory_order_acq_rel)) {
       return;
@@ -292,7 +349,13 @@ class PlannerLocalMapExtension final : public glim::ExtensionModuleROS2 {
     snapshot.imu_rate_trajectory = std::make_shared<
         const Eigen::Matrix<double, 8, Eigen::Dynamic>>(
         frame->imu_rate_trajectory);
-    if (captured_frame_count_.fetch_add(1, std::memory_order_relaxed) == 0) {
+    if (captured_frame_count_.fetch_add(1, std::memory_order_acq_rel) == 0) {
+      // The datum is chosen synchronously at the first valid estimator-frame
+      // capture.  The latest-wins current queue may later overwrite this
+      // frame, but serialization is never allowed to nominate another datum.
+      std::int64_t expected_reference = -1;
+      reference_frame_id_.compare_exchange_strong(
+          expected_reference, snapshot.id, std::memory_order_acq_rel);
       logger_->info(
           "[planner_local_map] captured first GLIM frame id={} raw_points={} imu_trajectory_cols={}",
           snapshot.id, snapshot.raw_points->points.size(),
@@ -468,6 +531,45 @@ class PlannerLocalMapExtension final : public glim::ExtensionModuleROS2 {
     message.sensor_receipt_steady_ns = frame.sensor_receipt_steady_ns;
     message.t_map_lidar = toMessagePose(frame.T_map_lidar);
     message.frame_contract_id = frame_contract_id_;
+    message.source_is_map_reference =
+        frame.id == reference_frame_id_.load(std::memory_order_acquire);
+    if (message.source_is_map_reference) {
+      // The first estimator frame defines the planner-map datum.  There is no
+      // older frame against which an ICP quality can be measured, so requiring
+      // an Integrity report would make the datum permanently uncertifiable.
+      // Its pose contribution is exactly zero by definition; scan/deskew error
+      // remains part of LocalMotionAssurance's fixed local envelope.
+      message.source_health_valid = true;
+      message.source_health_stamp_s = frame.stamp_s;
+      message.source_icp_degenerate = false;
+      message.source_icp_rmse = 0.0;
+      message.source_icp_condition = 1.0;
+      message.source_icp_gamma_lidar = 1.0;
+      message.source_lidar_pl_e = 0.0;
+      message.source_lidar_pl_n = 0.0;
+      message.source_lidar_pl_u = 0.0;
+    } else if (const auto health = sourceHealthFor(frame.id, frame.stamp_s)) {
+      const bool finite = std::isfinite(health->lidar_pl_e) &&
+          std::isfinite(health->lidar_pl_n) &&
+          std::isfinite(health->lidar_pl_u) &&
+          std::isfinite(health->icp_rmse) &&
+          std::isfinite(health->icp_condition) &&
+          std::isfinite(health->icp_gamma_lidar);
+      message.source_health_valid = health->lidar_valid && finite &&
+          !health->icp_degenerate && health->lidar_pl_e >= 0.0 &&
+          health->lidar_pl_n >= 0.0 && health->lidar_pl_u >= 0.0 &&
+          health->icp_rmse >= 0.0 && health->icp_condition >= 0.0 &&
+          health->icp_gamma_lidar >= 1.0;
+      message.source_health_stamp_s =
+          messageStampSeconds(health->header.stamp);
+      message.source_icp_degenerate = health->icp_degenerate;
+      message.source_icp_rmse = health->icp_rmse;
+      message.source_icp_condition = health->icp_condition;
+      message.source_icp_gamma_lidar = health->icp_gamma_lidar;
+      message.source_lidar_pl_e = health->lidar_pl_e;
+      message.source_lidar_pl_n = health->lidar_pl_n;
+      message.source_lidar_pl_u = health->lidar_pl_u;
+    }
 
     const auto points = deskew(frame);
     if (deskewed_points) {
@@ -580,6 +682,24 @@ class PlannerLocalMapExtension final : public glim::ExtensionModuleROS2 {
           auto message = makeMessage(frame);
           delta.added.push_back(message);
           active_messages_[frame.id] = std::move(message);
+        } else if (!hasCertifiedSourceHealth(active_messages_[frame.id])) {
+          // The active-window callback can precede the integrity callback for
+          // the same estimator frame.  Upgrade that frame atomically once its
+          // exact frame-id/stamp report arrives.  Remove+add is an explicit
+          // replacement transaction; no adjacent-frame health is borrowed.
+          auto refreshed = makeMessage(frame);
+          if (hasCertifiedSourceHealth(refreshed)) {
+            delta.removed_frame_ids.push_back(frame.id);
+            delta.added.push_back(refreshed);
+            active_messages_[frame.id] = std::move(refreshed);
+          } else if (!samePose(
+                         found->second.T_map_lidar, frame.T_map_lidar)) {
+            delta.pose_updated_frame_ids.push_back(frame.id);
+            delta.updated_t_map_lidar.push_back(
+                toMessagePose(frame.T_map_lidar));
+            active_messages_[frame.id].t_map_lidar =
+                delta.updated_t_map_lidar.back();
+          }
         } else if (!samePose(
                        found->second.T_map_lidar, frame.T_map_lidar)) {
           delta.pose_updated_frame_ids.push_back(frame.id);
@@ -740,6 +860,7 @@ class PlannerLocalMapExtension final : public glim::ExtensionModuleROS2 {
   std::string current_topic_;
   std::string delta_topic_;
   std::string recovery_service_;
+  std::string integrity_topic_;
   std::string current_hits_map_topic_;
   bool publish_current_hits_map_ = false;
   std::string planner_frame_id_;
@@ -770,6 +891,7 @@ class PlannerLocalMapExtension final : public glim::ExtensionModuleROS2 {
   std::uint64_t active_producer_serial_ = 0;
   bool active_window_complete_ = true;
   std::unordered_map<std::int64_t, FrameSnapshot> active_snapshots_;
+  mutable std::atomic<std::int64_t> reference_frame_id_{-1};
   std::unordered_map<std::int64_t, iap::msg::RegisteredLidarFrame>
       active_messages_;
 
@@ -785,6 +907,10 @@ class PlannerLocalMapExtension final : public glim::ExtensionModuleROS2 {
     std::uint64_t receipt_steady_ns = 0;
   };
   std::deque<RawPointsSnapshot> raw_points_history_;
+  mutable std::mutex integrity_history_mutex_;
+  std::deque<iap::msg::IntegrityReport> integrity_history_;
+  rclcpp::Subscription<iap::msg::IntegrityReport>::SharedPtr
+      integrity_subscription_;
   rclcpp::Publisher<iap::msg::RegisteredLidarFrame>::SharedPtr
       current_publisher_;
   rclcpp::Publisher<iap::msg::ActiveLidarWindowDelta>::SharedPtr

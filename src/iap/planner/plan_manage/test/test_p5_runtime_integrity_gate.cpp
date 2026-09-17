@@ -1423,6 +1423,71 @@ TEST(P5RuntimeIntegrityGateTest,
 }
 
 TEST(P5RuntimeIntegrityGateTest,
+     ControlledDegradationUsesBoundLocalCertificateInP4AndP5) {
+  auto config = baseConfig();
+  config.test_only_allow_grid_risk_authority = true;
+  config.current_stale_to_replan_s = 100.0;
+  config.current_stale_to_emergency_s = 100.0;
+  config.bad_tick_to_replan = 1;
+  ego_planner::P5RuntimeIntegrityGate gate(nullptr, config, false);
+  // The task-global vertical limit is slightly exceeded at the current
+  // epoch. P5 may override LOW_MARGIN only because the exact curve carries
+  // an independently safe local-motion certificate and bounded exposure.
+  gate.setCurrentIntegrityForTest(integrityMsg(
+      0.0, 8.0, 10.1, 10.0, 10.0));
+  auto trajectory = makeTrajectory();
+  const auto snapshot = makeSnapshot(1.0, 1.0);
+  auto direct = directRiskEvidence(trajectory, snapshot, 8.0, 8.0);
+  ASSERT_GT(direct.points.size(), 3u);
+  for (auto& point : direct.points) {
+    point.prediction.gnss.valid = true;
+    point.prediction.gnss.hpl = 8.0;
+    point.prediction.gnss.vpl = 8.0;
+  }
+  for (const std::size_t index : {1u, 2u}) {
+    direct.points[index].prediction.gnss.vpl = 10.1;
+    direct.points[index].prediction.fused.vpl = 10.1;
+    direct.points[index].safety_ratio = 1.01;
+    direct.points[index].safety_state =
+        iap::ForwardRiskSafetyState::UNSAFE;
+    direct.points[index].failure_reason =
+        iap::ForwardRiskFailureReason::SAFETY_LIMIT_EXCEEDED;
+  }
+  direct.certified_safe = false;
+  direct.certification_status =
+      ego_planner::P4ActualCurveCertificationStatus::
+          UNSAFE_TEMPORAL_DOMINANT;
+  direct.first_failure_index = 1u;
+  direct.trajectory_assurance_complete = true;
+  auto& assurance = direct.trajectory_assurance;
+  assurance.mode =
+      iap::TrajectoryExecutionMode::CONTROLLED_DEGRADED_EXECUTION;
+  assurance.reason = "controlled_degraded_execution";
+  assurance.certificate_hash = "bound-assurance-certificate";
+  assurance.global.complete = true;
+  assurance.global.within_budget = true;
+  assurance.global.normal = false;
+  assurance.global.peak_ratio = 1.01;
+  assurance.global.maximum_continuous_exceedance_s = 0.05;
+  assurance.global.exceedance_integral_ratio_s = 0.0005;
+  assurance.local.status = iap::LocalMotionAssuranceStatus::SAFE;
+  assurance.local.certificate_hash = "bound-local-motion-certificate";
+  assurance.local.minimum_margin_m = 0.4;
+
+  const auto status = gate.evaluateFinal(
+      trajectory, snapshot, 0.0, -1.0, &direct);
+
+  EXPECT_EQ(status.raw_action, ego_planner::P5GateAction::OK);
+  EXPECT_EQ(status.raw_reason, ego_planner::P5GateReason::OK);
+  EXPECT_EQ(status.execution_mode,
+            iap::TrajectoryExecutionMode::
+                CONTROLLED_DEGRADED_EXECUTION);
+  EXPECT_EQ(status.trajectory_assurance_hash,
+            assurance.certificate_hash);
+  EXPECT_EQ(status.bad_count, 0u);
+}
+
+TEST(P5RuntimeIntegrityGateTest,
      DirectTrajectoryIdentityMismatchFailsClosed) {
   auto config = baseConfig();
   config.test_only_allow_grid_risk_authority = false;

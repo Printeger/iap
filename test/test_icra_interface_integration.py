@@ -1529,7 +1529,7 @@ class TestStageAnalyzer(unittest.TestCase):
         control_hash, knot_hash = MODULE._captured_bspline_hashes(
             spline_payload)
         lineage = [{
-            "schema_version": "p4_forward_route_decision_v8",
+            "schema_version": "p4_forward_route_decision_v11",
             "stage": "normal_publish_authorized",
             "action": "DEFER_RISK_SELECTION",
             "deferred_motion_mode": "COMMON_PREFIX",
@@ -1619,6 +1619,7 @@ class TestStageAnalyzer(unittest.TestCase):
         lineage, bsplines, poscmd, odom, events = \
             self.limited_prefix_fixture()
         lineage[0]["actual_curve_certification_status"] = "SAFE"
+        events[0]["execution_mode"] = "CONTROLLED_DEGRADED_EXECUTION"
         armed = dict(events[0])
         armed.update({
             "event": "MARGINAL_UNSAFE_ARMED",
@@ -1650,6 +1651,10 @@ class TestStageAnalyzer(unittest.TestCase):
         self.assertEqual(summary["marginal_unsafe_armed_count"], 1)
         self.assertEqual(summary["marginal_unsafe_recovered_count"], 0)
         self.assertEqual(summary["successor_reauthorization_count"], 1)
+        self.assertGreaterEqual(
+            summary["execution_mode_counts"].get(
+                "CONTROLLED_DEGRADED_EXECUTION", 0), 1)
+        self.assertTrue(summary["controlled_degraded_motion_proven"])
         self.assertEqual(summary["guard_prequeue_count"], 1)
         self.assertEqual(summary["guard_cancel_request_count"], 1)
         self.assertEqual(summary["guard_cancel_ack_count"], 1)

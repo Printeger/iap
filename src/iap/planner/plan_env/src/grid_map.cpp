@@ -102,6 +102,28 @@ bool registeredFrameFromMessage(
   frame->sensor_receipt_steady_ns = message.sensor_receipt_steady_ns;
   frame->T_map_lidar = poseFromMessage(message.t_map_lidar);
   frame->frame_contract_id = message.frame_contract_id;
+  frame->source_is_map_reference = message.source_is_map_reference;
+  frame->source_health_valid = message.source_health_valid;
+  frame->source_health_stamp_s = message.source_health_stamp_s;
+  frame->source_icp_degenerate = message.source_icp_degenerate;
+  frame->source_icp_rmse = message.source_icp_rmse;
+  frame->source_icp_condition = message.source_icp_condition;
+  frame->source_icp_gamma_lidar = message.source_icp_gamma_lidar;
+  frame->source_lidar_pl_enu_m = Eigen::Vector3d(
+      message.source_lidar_pl_e, message.source_lidar_pl_n,
+      message.source_lidar_pl_u);
+  if (frame->source_health_valid &&
+      (!std::isfinite(frame->source_health_stamp_s) ||
+       std::abs(frame->source_health_stamp_s - stamp_s) > 0.20 ||
+       frame->source_icp_degenerate ||
+       !std::isfinite(frame->source_icp_rmse) ||
+       !std::isfinite(frame->source_icp_condition) ||
+       !std::isfinite(frame->source_icp_gamma_lidar) ||
+       frame->source_icp_rmse < 0.0 || frame->source_icp_condition < 0.0 ||
+       frame->source_icp_gamma_lidar < 1.0 ||
+       !frame->source_lidar_pl_enu_m.allFinite() ||
+       (frame->source_lidar_pl_enu_m.array() < 0.0).any()))
+    return false;
   try
   {
     const std::size_t point_count =
@@ -1462,6 +1484,7 @@ void GridMap::registeredCurrentFrameCallback(
     metadata.sensor_receipt_steady_ns = frame.sensor_receipt_steady_ns;
     metadata.T_map_lidar = frame.T_map_lidar;
     metadata.frame_contract_id = frame.frame_contract_id;
+    metadata.source_is_map_reference = frame.source_is_map_reference;
     registered_support_history_.push_back(std::move(metadata));
     const double oldest_allowed_stamp =
         frame.scan_end_stamp_s - trusted_support_validity_s_;
@@ -2404,6 +2427,9 @@ GridMap::captureFrozenExecutionOccupancyEpoch() const
     double current_vehicle_clearance_radius_m = 0.0;
     std::vector<int> raw_addresses;
     std::shared_ptr<const std::vector<Eigen::Vector3d>> environment_hits;
+    std::shared_ptr<const std::vector<Eigen::Vector3d>> current_hits;
+    std::shared_ptr<const std::vector<RegisteredLidarObstacleSource>>
+        active_obstacle_sources;
     std::optional<RegisteredLidarFrameMetadata> current_frame;
     std::vector<RegisteredLidarFrameMetadata> support_history;
   };
@@ -2442,6 +2468,10 @@ GridMap::captureFrozenExecutionOccupancyEpoch() const
         current_vehicle_clearance_radius_m_;
     state->environment_hits =
         registered_lidar_window_->environmentOccupiedVoxelCenters();
+    state->current_hits =
+        registered_lidar_window_->currentOccupiedVoxelCenters();
+    state->active_obstacle_sources =
+        registered_lidar_window_->activeObstacleSources();
     state->current_frame =
         registered_lidar_window_->currentFrameMetadata();
     state->support_history.assign(
@@ -2579,6 +2609,8 @@ GridMap::captureFrozenExecutionOccupancyEpoch() const
   auto epoch = std::make_shared<FrozenOccupancyEpoch>();
   epoch->diagnostic_query = std::move(diagnostic_query);
   epoch->raw_occupied_voxel_centers = std::move(raw_centers);
+  epoch->current_frame_occupied_voxel_centers = state->current_hits;
+  epoch->active_window_obstacle_sources = state->active_obstacle_sources;
   epoch->environment_occupied_voxel_centers = state->environment_hits;
   epoch->lattice_origin = state->origin;
   epoch->voxel_dimensions = state->dimensions;
@@ -2592,6 +2624,8 @@ GridMap::captureFrozenExecutionOccupancyEpoch() const
   epoch->generation = state->generation;
   epoch->active_window_generation = state->active_window_generation;
   epoch->current_frame_id = state->current_frame_id;
+  epoch->current_frame_content_hash = state->current_frame
+      ? state->current_frame->content_hash : std::string{};
   epoch->frame_contract_id = state->frame_contract_id;
 
   constexpr double kPi = 3.14159265358979323846;
@@ -2837,6 +2871,8 @@ GridMap::captureFrozenOccupancyEpoch() const
   auto epoch = std::make_shared<FrozenOccupancyEpoch>();
   epoch->diagnostic_query = std::move(diagnostic_query);
   epoch->raw_occupied_voxel_centers = std::move(centers);
+  epoch->current_frame_occupied_voxel_centers = nullptr;
+  epoch->active_window_obstacle_sources = nullptr;
   epoch->environment_occupied_voxel_centers = buffers->environment_hits
       ? buffers->environment_hits : epoch->raw_occupied_voxel_centers;
   epoch->lattice_origin = frozen_buffers->map_origin;

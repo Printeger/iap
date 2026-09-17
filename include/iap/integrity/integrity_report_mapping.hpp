@@ -12,6 +12,7 @@ namespace iap {
 /// The caller is responsible for setting msg.header (stamp, frame_id).
 inline void fill_integrity_report_msg(const IntegrityReport& report,
                                        iap::msg::IntegrityReport& msg) {
+  msg.estimation_frame_id = report.estimation_frame_id;
   // --- State ---
   msg.integrity_state = static_cast<uint8_t>(report.state);
 
@@ -86,6 +87,10 @@ inline void fill_integrity_report_msg(const IntegrityReport& report,
   msg.lidar_n_hyp      = static_cast<int32_t>(report.lidar_n_hyp);
   msg.lidar_n_det      = static_cast<int32_t>(report.lidar_n_det);
   msg.lidar_worst_mode = report.lidar_worst_mode;
+  msg.icp_degenerate   = report.icp_degenerate;
+  msg.icp_rmse         = report.icp_rmse;
+  msg.icp_condition    = report.icp_condition;
+  msg.icp_gamma_lidar  = report.gamma_lidar;
 
   // --- Fallback source breakdown (Step 4: explicit source) ---
   msg.fallback_valid = !report.numerical_failure.fallback_pl_invalid;

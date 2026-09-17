@@ -11,6 +11,7 @@
 
 #include <Eigen/Core>
 #include <iap/planner/risk_grid_map.hpp>
+#include <iap/planner/trajectory_assurance.hpp>
 #include <iap/predictor/predictor_types.hpp>
 
 namespace ego_planner {
@@ -143,6 +144,13 @@ struct P4DirectTrajectoryRiskEvidence {
   std::vector<std::uint64_t> evidence_point_ids;
   std::vector<std::uint64_t> satellite_window_ids;
   std::vector<iap::ForwardRiskPointResult> points;
+  bool trajectory_assurance_complete = false;
+  iap::TrajectoryAssuranceResult trajectory_assurance;
+
+  bool executionAuthorized() const {
+    return certified_safe ||
+        (trajectory_assurance_complete && trajectory_assurance.authorized());
+  }
 };
 
 }  // namespace ego_planner

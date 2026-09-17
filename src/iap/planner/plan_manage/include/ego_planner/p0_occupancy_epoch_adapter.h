@@ -7,6 +7,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -17,6 +18,20 @@
 struct FrozenOccupancyEpoch;
 
 namespace ego_planner {
+
+namespace p0_occupancy_detail {
+template <typename Epoch>
+auto currentFrameCenters(const Epoch& epoch, int)
+    -> decltype(epoch.current_frame_occupied_voxel_centers) {
+  return epoch.current_frame_occupied_voxel_centers;
+}
+
+template <typename Epoch>
+std::shared_ptr<const std::vector<Eigen::Vector3d>> currentFrameCenters(
+    const Epoch&, long) {
+  return nullptr;
+}
+}  // namespace p0_occupancy_detail
 
 struct P0RawOccupancyChangedBounds {
   iap::VoxelKey minimum;
@@ -87,6 +102,8 @@ struct P0OccupancyEpoch {
   // reuse this vector instead of rebuilding it on the planner callback path.
   std::shared_ptr<const std::vector<Eigen::Vector3d>>
       raw_occupied_voxel_centers;
+  std::shared_ptr<const std::vector<Eigen::Vector3d>>
+      current_frame_occupied_voxel_centers;
   std::shared_ptr<const std::vector<Eigen::Vector3d>>
       environment_occupied_voxel_centers;
   std::shared_ptr<const iap::TrustedLocalMapSupport> trusted_local_map_support;
@@ -213,7 +230,8 @@ class P0OccupancyEpochAdapter {
                        std::move(source_owner),
                        std::move(live_source_owner),
                        std::move(live_generation), clearance_transition_m,
-                       std::move(reusable_los));
+                       std::move(reusable_los),
+                       p0_occupancy_detail::currentFrameCenters(epoch, 0));
   }
 
   static bool sameVersion(const P0OccupancyEpoch& base,
@@ -240,7 +258,9 @@ class P0OccupancyEpochAdapter {
       P0OccupancyEpoch::LiveSourceOwner live_source_owner,
       P0OccupancyEpoch::LiveGeneration live_generation,
       double clearance_transition_m,
-      std::optional<P0ReusableLosOccupancy> reusable_los);
+      std::optional<P0ReusableLosOccupancy> reusable_los,
+      std::shared_ptr<const std::vector<Eigen::Vector3d>>
+          current_frame_centers);
 };
 
 }  // namespace ego_planner

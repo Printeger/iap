@@ -208,6 +208,54 @@ For each candidate trajectory τ:
   Publication on
   a newer execution snapshot performs at most one exact-curve reauthorization;
   an ID-only change is not a safety failure.
+- Global GNSS degradation and local collision avoidance are separate
+  contracts. GNSS advisory is evaluated on the actual curve as task-position
+  exposure (peak, continuous duration, positive integral, 0.5 s rolling worst
+  section, time-weighted CVaR90 and predicted recovery). The default controlled
+  budget is `r<=1.05`, `continuous<=1.0 s`, `integral<=0.025 ratio*s`, with
+  recovery within `2.0 s` or an immediately usable certified brake. A
+  `hard_global` mission never uses this exception. Replanning cannot reset an
+  active episode; `0.5 s` below `0.95*AL` is required to end it.
+  Predicted recovery uses that same sustained `0.95*AL` condition; merely
+  crossing back below AL for one sample is not recovery. Candidate admission
+  includes the already-consumed episode budget before a replacement publishes.
+- Local execution is admitted by `LocalMotionAssurance`, not by RiskGrid or
+  LiDAR FIM. It evaluates the actual nominal and braking splines against
+  obstacle surfaces using the vehicle/tracking/scan/ICP/drift/curve/safety
+  envelope. Current-frame common global transform error cancels; older
+  registered obstacles use the direction-projected sum of current and source
+  axis bounds because their correlation is unknown. Missing provenance,
+  source-frame LiDAR/ICP health, fresh support, or any braking-curve proof is
+  fail-closed. LiDAR observability remains a ranking/recovery cue and cannot
+  shrink this certified envelope by itself.
+  Source-frame PL and ICP health are frozen into the registered-frame message
+  before the frame becomes a long-lived active-window obstacle. Planner-local
+  history matching is compatibility-only and requires exact estimator-frame
+  identity plus exact acquisition stamp; a nearby report from another frame is
+  not interchangeable. Late exact health replaces the frame atomically. The
+  explicitly identified first estimator frame is the planner-map datum, so it
+  has no self-ICP registration term; scan/deskew and all other local margins
+  still apply. A
+  current scan can supersede old provenance only for the exact same occupied
+  surface voxel and never fabricates observed free space. A successor rebound
+  to a newer execution snapshot rebuilds local and global assurance, reruns P5,
+  and publishes the rebound P5 mode/hash rather than the stale admission.
+  The controller loss-of-control threshold (`0.75 m`) and stopping-distance
+  margin (`0.5 m`) are not silently reused as per-point uncertainty. The local
+  certificate has independent tracking (`0.15 m`) and fixed-clearance
+  (`0.20 m`) bounds, each exposed as a policy parameter. ICP residual RMSE has
+  its own calibrated scale (default `1.0`); it does not reuse GNSS ARAIM's
+  `K_ff=5.42`, because a surface residual is not a GNSS measurement sigma.
+  Exceeding the certified tracking bound activates a certified brake; the
+  larger controller threshold is reserved for immediate loss-of-control
+  revocation.
+- The public execution state is `NORMAL_EXECUTION`,
+  `CONTROLLED_DEGRADED_EXECUTION`, or `RECOVERY_OR_EXIT`. A route preference
+  has no motion authority. Only the reaction-and-stopping envelope certified
+  by one immutable execution snapshot is published; P4, P5 and runtime bind
+  the same actual-curve, braking, obstacle-source, exposure and assurance
+  identities. Budget exhaustion or loss of local proof activates the existing
+  certified brake before the approved boundary.
 
 ## G) Upgrade items (optional, after baseline closes the loop)
 - trunk landmarks + TDOP

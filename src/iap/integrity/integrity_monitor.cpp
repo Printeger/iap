@@ -596,6 +596,7 @@ IntegrityReport IntegrityMonitor::compute(const glim::EstimationFrame& frame,
   const auto t0_integrity = std::chrono::high_resolution_clock::now();
   IntegrityReport report;
   report.stamp = frame.stamp;
+  report.estimation_frame_id = frame.id;
   if (epoch != nullptr) {
     report.gnss_epoch_stamp = epoch->stamp;
   }
@@ -603,6 +604,8 @@ IntegrityReport IntegrityMonitor::compute(const glim::EstimationFrame& frame,
 
   // --- ICP health ---
   report.icp_degenerate = frame.icp_quality.degeneracy_flag;
+  report.icp_rmse       = frame.icp_quality.rmse;
+  report.icp_condition  = frame.icp_quality.cond_number;
   report.gamma_lidar    = frame.icp_quality.gamma_lidar;
 
   // --- Build source results ---

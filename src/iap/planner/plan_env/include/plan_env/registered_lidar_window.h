@@ -28,6 +28,14 @@ struct RegisteredLidarFrameData {
   Eigen::Isometry3d T_map_lidar = Eigen::Isometry3d::Identity();
   std::vector<Eigen::Vector3d> hits_lidar;
   std::string frame_contract_id;
+  bool source_is_map_reference = false;
+  bool source_health_valid = false;
+  double source_health_stamp_s = 0.0;
+  bool source_icp_degenerate = true;
+  double source_icp_rmse = 0.0;
+  double source_icp_condition = 0.0;
+  double source_icp_gamma_lidar = 0.0;
+  Eigen::Vector3d source_lidar_pl_enu_m = Eigen::Vector3d::Zero();
 };
 
 struct RegisteredLidarFrameMetadata {
@@ -37,6 +45,24 @@ struct RegisteredLidarFrameMetadata {
   std::uint64_t sensor_receipt_steady_ns = 0;
   Eigen::Isometry3d T_map_lidar = Eigen::Isometry3d::Identity();
   std::string frame_contract_id;
+  bool source_is_map_reference = false;
+  bool source_health_valid = false;
+  double source_health_stamp_s = 0.0;
+  bool source_icp_degenerate = true;
+  double source_icp_rmse = 0.0;
+  double source_icp_condition = 0.0;
+  double source_icp_gamma_lidar = 0.0;
+  Eigen::Vector3d source_lidar_pl_enu_m = Eigen::Vector3d::Zero();
+  // Deterministic identity of the immutable pose and occupied contribution.
+  std::string content_hash;
+};
+
+// Immutable obstacle provenance for one registered source frame.  Keeping the
+// source grouping (rather than only the union of occupied voxels) lets the
+// execution-assurance layer apply the error bound certified at that frame.
+struct RegisteredLidarObstacleSource {
+  RegisteredLidarFrameMetadata metadata;
+  std::shared_ptr<const std::vector<Eigen::Vector3d>> occupied_voxel_centers;
 };
 
 struct ActiveLidarWindowDeltaData {
@@ -99,6 +125,10 @@ class RegisteredLidarWindow {
   std::optional<RegisteredLidarFrameMetadata> currentFrameMetadata() const;
   std::shared_ptr<const std::vector<Eigen::Vector3d>>
   environmentOccupiedVoxelCenters() const;
+  std::shared_ptr<const std::vector<Eigen::Vector3d>>
+  currentOccupiedVoxelCenters() const;
+  std::shared_ptr<const std::vector<RegisteredLidarObstacleSource>>
+  activeObstacleSources() const;
 
  private:
   using EnvironmentVoxelKey = std::array<int, 3>;

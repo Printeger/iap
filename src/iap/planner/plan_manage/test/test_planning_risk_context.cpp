@@ -556,6 +556,9 @@ std::function<iap::ForwardRiskBatchResult(
         point.safety_ratio = safety_ratio;
         point.prediction.fused.hpl = request.hal * safety_ratio;
         point.prediction.fused.vpl = request.val * safety_ratio;
+        point.prediction.gnss.valid = true;
+        point.prediction.gnss.hpl = request.hal * safety_ratio;
+        point.prediction.gnss.vpl = request.val * safety_ratio;
         point.safety_state = safety_ratio < 1.0
             ? iap::ForwardRiskSafetyState::SAFE
             : iap::ForwardRiskSafetyState::UNSAFE;
@@ -706,6 +709,57 @@ TEST(P4RuntimeRiskConfirmationPolicy,
   EXPECT_TRUE(expired.activate_braking);
 }
 
+TEST(P4ControlledDegradationPolicy,
+     LongRoutePreferenceRegeneratesBoundedObservationEnvelope) {
+  ego_planner::EGOPlannerManager manager;
+  ego_planner::P4ForwardDecision decision;
+  decision.action = ego_planner::P4ForwardAction::CANDIDATE_READY;
+  decision.result_status = ego_planner::P4ForwardResultStatus::READY;
+  decision.planning_disposition =
+      ego_planner::P4PlanningDisposition::NEW_TRAJECTORY_READY;
+  decision.selected_candidate_id = 7u;
+  decision.stopping_distance_m = 1.5;
+  decision.selected_guide = {
+      Eigen::Vector3d(0.0, 0.0, 1.0),
+      Eigen::Vector3d(4.0, 0.0, 1.0),
+      Eigen::Vector3d(8.0, 0.0, 1.0)};
+  manager.setP4ForwardDecisionForTest(std::move(decision));
+
+  ego_planner::P4DirectTrajectoryRiskEvidence evidence;
+  evidence.complete = true;
+  evidence.trajectory_assurance_complete = true;
+  evidence.trajectory_assurance.mode =
+      iap::TrajectoryExecutionMode::CONTROLLED_DEGRADED_EXECUTION;
+  evidence.trajectory_assurance.global.complete = true;
+  evidence.trajectory_assurance.global.within_budget = true;
+  evidence.trajectory_assurance.local.status =
+      iap::LocalMotionAssuranceStatus::SAFE;
+  evidence.trajectory_assurance.certificate_hash = "controlled-route";
+  manager.setP4DirectRiskEvidenceForTest(std::move(evidence));
+
+  std::string reason;
+  ASSERT_TRUE(manager.prepareP4ActualCurveFeedbackRetry(1u, &reason))
+      << reason;
+  EXPECT_EQ(reason, "controlled_execution_envelope_ready");
+  const auto& retry = manager.pendingP4ActualCurveFeedbackForTest();
+  ASSERT_TRUE(retry.has_value());
+  EXPECT_EQ(retry->action, ego_planner::P4ForwardAction::OBSERVE_MORE);
+  EXPECT_EQ(retry->selection_authority,
+            ego_planner::P4ForwardSelectionAuthority::NONE);
+  ASSERT_GE(retry->observe_more_trajectory.size(), 2u);
+  const auto polyline_length = [](const std::vector<Eigen::Vector3d>& path) {
+    double length_m = 0.0;
+    for (std::size_t i = 1u; i < path.size(); ++i) {
+      length_m += (path[i] - path[i - 1u]).norm();
+    }
+    return length_m;
+  };
+  const double length = polyline_length(retry->observe_more_trajectory);
+  EXPECT_NEAR(length, 1.75, 1.0e-9);
+  EXPECT_LT(length,
+            polyline_length(manager.lastP4ForwardDecision().selected_guide));
+}
+
 std::shared_ptr<const ego_planner::P0ExecutionRiskSnapshot>
 makeP4ExecutionSnapshot(
     const std::shared_ptr<const iap::RiskGridSnapshot>& risk,
@@ -718,6 +772,12 @@ makeP4ExecutionSnapshot(
   occupancy->cloud_stamp_s = stamp_s;
   occupancy->frame_id = "map";
   occupancy->frame_contract_id = "map:test";
+  occupancy->geometry.origin_w = Eigen::Vector3d(-10.0, -10.0, -2.0);
+  occupancy->geometry.resolution_m = 0.5;
+  occupancy->raw_occupied_voxel_centers =
+      std::make_shared<const std::vector<Eigen::Vector3d>>();
+  occupancy->current_frame_occupied_voxel_centers =
+      std::make_shared<const std::vector<Eigen::Vector3d>>();
   occupancy->diagnostic_query = [](const Eigen::Vector3d& position) {
     iap::RiskOccupancyDiagnostic diagnostic;
     diagnostic.available = position.allFinite();
@@ -739,6 +799,16 @@ makeP4ExecutionSnapshot(
   execution->integrity_anchor.current.vpl = 1.0;
   execution->integrity_anchor.current.hal = 10.0;
   execution->integrity_anchor.current.val = 20.0;
+  execution->integrity_anchor.current.lidar_valid = true;
+  execution->integrity_anchor.current.lidar_pl_e = 0.1;
+  execution->integrity_anchor.current.lidar_pl_n = 0.1;
+  execution->integrity_anchor.current.lidar_pl_u = 0.1;
+  execution->integrity_anchor.current.lidar_hpl = 0.1;
+  execution->integrity_anchor.current.lidar_vpl = 0.1;
+  execution->integrity_anchor.current.icp_degenerate = false;
+  execution->integrity_anchor.current.icp_rmse = 0.01;
+  execution->integrity_anchor.current.icp_condition = 10.0;
+  execution->integrity_anchor.current.icp_gamma_lidar = 1.0;
   execution->source_identity = risk->sourceIdentity();
   execution->risk_policy = risk->params();
   execution->frame_contract_id = "map:test";
@@ -1121,6 +1191,21 @@ TEST(P4ForwardTerminalLineageTest,
             row.at("reason") ==
                 "committed_trajectory_tracking_error_exceeded";
       }));
+
+  // The local-motion certificate used 0.15 m, so a measured error between
+  // that bound and the 0.75 m loss-of-control threshold must not continue on
+  // the nominal spline. It uses the certified brake rather than pretending
+  // the original 0.15 m envelope is still valid.
+  const auto certified_bound_failure =
+      manager.validateCommittedP4TrajectoryExecution(
+          execution_time_s,
+          commanded_position + Eigen::Vector3d(0.30, 0.0, 0.0));
+  // This legacy/common-core fixture has no braking-window library, so it must
+  // fail closed instead of continuing outside the certified envelope. Live
+  // windowed trajectories take the certified-brake branch.
+  EXPECT_FALSE(certified_bound_failure.allowed);
+  EXPECT_EQ(certified_bound_failure.reason,
+            "certified_tracking_bound_exceeded");
 }
 
 TEST(P4ForwardTerminalLineageTest,
@@ -1501,6 +1586,12 @@ TEST(P4ForwardTerminalLineageTest,
   GridMapTestAccess::configureNoCollision(map.get());
   const auto frozen_occupancy = map->captureFrozenOccupancyEpoch();
   ASSERT_NE(frozen_occupancy, nullptr);
+  ASSERT_GT(frozen_occupancy->generation, 0u);
+  ASSERT_GT(frozen_occupancy->resolution_m, 0.0);
+  ASSERT_TRUE((frozen_occupancy->voxel_dimensions.array() > 0).all());
+  ASSERT_TRUE(frozen_occupancy->lattice_origin.allFinite());
+  ASSERT_TRUE(frozen_occupancy->extent_m.allFinite());
+  ASSERT_TRUE(static_cast<bool>(frozen_occupancy->diagnostic_query));
   const auto snapshot = makeP4SelectionSnapshot(
       1.0, frozen_occupancy->geometry_id);
   const auto debug_path = p4LineageTestPath("forward_safe_prefix.csv");
@@ -1681,8 +1772,10 @@ TEST(P4ForwardTerminalLineageTest,
   auto marginal_nominal = manager.local_data_.position_traj_;
   const double marginal_start_s = manager.local_data_.start_time_.seconds();
   const double marginal_threshold_t = 1.5;
+  const double marginal_recovery_t = 1.6;
   const auto marginal_direct = [marginal_nominal, marginal_start_s,
-      marginal_threshold_t](const iap::ForwardRiskBatchRequest &request)
+      marginal_threshold_t,
+      marginal_recovery_t](const iap::ForwardRiskBatchRequest &request)
       mutable {
       auto result = directRiskCallback(0.5)(request);
       const auto unsafe = directRiskCallback(1.001)(request);
@@ -1691,6 +1784,7 @@ TEST(P4ForwardTerminalLineageTest,
         const double trajectory_t =
             request.points[index].query_time_s - marginal_start_s;
         if (trajectory_t + 1.0e-9 < marginal_threshold_t ||
+            trajectory_t > marginal_recovery_t + 1.0e-9 ||
             trajectory_t > marginal_nominal.getTimeSum() + 1.0e-9)
           continue;
         const Eigen::Vector3d nominal_position =
@@ -1714,16 +1808,13 @@ TEST(P4ForwardTerminalLineageTest,
               manager.local_data_.start_time_.seconds()));
   EXPECT_TRUE(marginal_armed.allowed) << marginal_armed.reason;
   EXPECT_EQ(marginal_armed.risk_confirmation_state,
-            ego_planner::P4RuntimeRiskConfirmationState::
-                MARGINAL_UNSAFE_ARMED) << marginal_armed.reason;
-  EXPECT_EQ(marginal_armed.risk_confirmation_distinct_evidence, 1u);
-  EXPECT_TRUE(marginal_armed.failsafe_braking_available);
-  EXPECT_TRUE(marginal_armed.guard_braking_preschedule_requested);
-  const auto queued_guard = manager.pendingP4GuardBrakingCommand();
-  ASSERT_TRUE(queued_guard.has_value());
-  EXPECT_EQ(queued_guard->trajectory_id, 36);
-  EXPECT_EQ(marginal_armed.guard_braking_trajectory_id, 36);
-  EXPECT_GE(queued_guard->start_time.seconds(), marginal_check_s + 0.35);
+            ego_planner::P4RuntimeRiskConfirmationState::SAFE)
+      << marginal_armed.reason;
+  EXPECT_EQ(marginal_armed.risk_confirmation_distinct_evidence, 0u);
+  EXPECT_FALSE(marginal_armed.guard_braking_preschedule_requested);
+  EXPECT_FALSE(manager.pendingP4GuardBrakingCommand().has_value());
+  EXPECT_EQ(manager.p4ExecutionCertificate().execution_mode,
+            iap::TrajectoryExecutionMode::CONTROLLED_DEGRADED_EXECUTION);
   EXPECT_EQ(manager.local_data_.traj_id_, 35);
 
   const auto recovered_marginal_snapshot = makeP4ExecutionSnapshot(
@@ -1741,34 +1832,30 @@ TEST(P4ForwardTerminalLineageTest,
   EXPECT_TRUE(marginal_recovered.allowed) << marginal_recovered.reason;
   EXPECT_EQ(marginal_recovered.risk_confirmation_state,
             ego_planner::P4RuntimeRiskConfirmationState::SAFE);
-  EXPECT_EQ(marginal_recovered.reason, "marginal_unsafe_recovered");
-  EXPECT_TRUE(marginal_recovered.guard_braking_cancel_requested);
+  EXPECT_EQ(marginal_recovered.reason, "runtime_execution_contract_valid");
+  EXPECT_FALSE(marginal_recovered.guard_braking_cancel_requested);
   EXPECT_FALSE(marginal_recovered.guard_braking_preschedule_requested);
   EXPECT_FALSE(marginal_recovered.failsafe_braking_canceled_recovered);
-  EXPECT_EQ(marginal_recovered.guard_braking_trajectory_id, 36);
-  EXPECT_TRUE(manager.pendingP4GuardBrakingCommand().has_value());
-  manager.acknowledgeP4GuardStatus(36, "CANCELED");
-  const auto canceled_ack =
-      manager.validateCommittedP4TrajectoryExecution(
-          marginal_recovery_s + 0.01,
-          manager.local_data_.position_traj_.evaluateDeBoorT(
-              marginal_recovery_s + 0.01 -
-              manager.local_data_.start_time_.seconds()));
-  EXPECT_TRUE(canceled_ack.allowed) << canceled_ack.reason;
-  EXPECT_TRUE(canceled_ack.failsafe_braking_canceled_recovered);
-  EXPECT_EQ(canceled_ack.guard_braking_trajectory_id, 36);
+  EXPECT_EQ(manager.p4ExecutionCertificate().execution_mode,
+            iap::TrajectoryExecutionMode::NORMAL_EXECUTION);
   EXPECT_FALSE(manager.pendingP4GuardBrakingCommand().has_value());
   EXPECT_EQ(manager.local_data_.start_time_.nanoseconds(), committed_start);
 
   const auto unsafe_snapshot = makeRuntimeUnsafeSnapshot(
       frozen_occupancy->geometry_id);
   ASSERT_GT(unsafe_snapshot->generation_id(), certificate.snapshot_identity.risk_generation);
+  manager.preserveP4ExecutionCommitmentForCandidate();
   manager.setLatestRiskSnapshotForTest(unsafe_snapshot);
   const auto grid_spike_rechecked =
       manager.validateCommittedP4TrajectoryExecution(
       during_execution_s, commanded_position);
   EXPECT_TRUE(grid_spike_rechecked.allowed) << grid_spike_rechecked.reason;
   EXPECT_FALSE(grid_spike_rechecked.known_future_risk_unsafe);
+  // This diagnostic-only grid replacement intentionally has no matching
+  // execution snapshot and may schedule a stale-input guard. Restore the
+  // incumbent state before the independent direct-risk revocation case.
+  manager.restoreP4ExecutionCommitmentAfterCandidateRejection();
+  EXPECT_FALSE(manager.pendingP4GuardBrakingCommand().has_value());
 
   manager.setPlanningRiskContextForTest(
       unsafe_snapshot, 10.3, nullptr, directRiskCallback(1.25),
@@ -1782,7 +1869,8 @@ TEST(P4ForwardTerminalLineageTest,
   EXPECT_TRUE(risk_revoke.failsafe_braking_available);
   EXPECT_FALSE(risk_revoke.failsafe_braking_active);
   EXPECT_EQ(risk_revoke.reason,
-            "failsafe_braking_scheduled:runtime_known_future_integrity_unsafe");
+            "failsafe_braking_scheduled:runtime_trajectory_assurance_rejected:"
+            "global_navigation_budget_exceeded:safe");
   EXPECT_EQ(risk_revoke.current_risk_generation,
             unsafe_snapshot->generation_id());
   EXPECT_GT(risk_revoke.current_risk_generation,
@@ -1833,6 +1921,7 @@ TEST(P4ForwardTerminalLineageTest,
   EXPECT_TRUE(unsafe_recovery.allowed) << unsafe_recovery.reason;
   EXPECT_FALSE(unsafe_recovery.failsafe_braking_canceled_recovered);
   manager.restoreP4ExecutionCommitmentAfterCandidateRejection();
+  EXPECT_FALSE(manager.pendingP4GuardBrakingCommand().has_value());
   manager.setLatestRiskSnapshotForTest(snapshot);
   const auto at_endpoint = manager.validateCommittedP4TrajectoryExecution(
       certificate.execution_deadline_s, certificate.approved_endpoint);
@@ -1849,20 +1938,68 @@ TEST(P4ForwardTerminalLineageTest,
       manager.local_data_.position_traj_.evaluateDeBoorT(
           stale_during_execution_s -
           manager.local_data_.start_time_.seconds());
-  const auto braking_without_ack =
+  const auto braking_scheduled =
       manager.validateCommittedP4TrajectoryExecution(
       stale_during_execution_s, stale_commanded_position);
+  EXPECT_TRUE(braking_scheduled.allowed) << braking_scheduled.reason;
+  EXPECT_EQ(braking_scheduled.reason.rfind("failsafe_braking_scheduled", 0),
+            0u);
+  const auto stale_guard = manager.pendingP4GuardBrakingCommand();
+  ASSERT_TRUE(stale_guard.has_value());
+  auto stale_guard_trajectory = stale_guard->trajectory;
+  const double stale_switch_stamp = std::max(
+      stale_during_execution_s, stale_guard->start_time.seconds());
+  const auto braking_without_ack =
+      manager.validateCommittedP4TrajectoryExecution(
+          stale_switch_stamp,
+          stale_guard_trajectory.evaluateDeBoorT(
+              stale_switch_stamp - stale_guard->start_time.seconds()));
   EXPECT_FALSE(braking_without_ack.allowed);
   EXPECT_EQ(braking_without_ack.reason,
             "failsafe_braking_activation_unacknowledged");
-  const auto stale_guard = manager.pendingP4GuardBrakingCommand();
-  ASSERT_TRUE(stale_guard.has_value());
   manager.acknowledgeP4GuardStatus(stale_guard->trajectory_id, "QUEUED");
   manager.acknowledgeP4GuardStatus(stale_guard->trajectory_id, "ACTIVATED");
-  auto stale_guard_trajectory = stale_guard->trajectory;
+  const auto certificate_before_invalid_guard =
+      manager.p4ExecutionCertificate();
+  const int trajectory_id_before_invalid_guard = manager.local_data_.traj_id_;
+  const int64_t start_ns_before_invalid_guard =
+      manager.local_data_.start_time_.nanoseconds();
+  const std::string control_hash_before_invalid_guard =
+      ego_planner::p4ControlPointHash(
+          manager.local_data_.position_traj_.getControlPoint());
+  manager.setP4RiskConfirmationStateForTest(
+      ego_planner::P4RuntimeRiskConfirmationState::MARGINAL_UNSAFE_ARMED);
+  ASSERT_TRUE(manager.setPendingP4GuardDurationForTest(
+      certificate.duration_s + 10.0));
+  const auto invalid_guard_deadline =
+      manager.validateCommittedP4TrajectoryExecution(
+          stale_switch_stamp,
+          stale_guard_trajectory.evaluateDeBoorT(
+              stale_switch_stamp - stale_guard->start_time.seconds()));
+  EXPECT_FALSE(invalid_guard_deadline.allowed);
+  EXPECT_EQ(invalid_guard_deadline.reason,
+            "failsafe_braking_deadline_extended");
+  EXPECT_EQ(manager.p4RiskConfirmationStateForTest(),
+            ego_planner::P4RuntimeRiskConfirmationState::
+                MARGINAL_UNSAFE_ARMED);
+  EXPECT_EQ(manager.p4ExecutionCertificate().trajectory_id,
+            certificate_before_invalid_guard.trajectory_id);
+  EXPECT_EQ(manager.p4ExecutionCertificate().start_time_ns,
+            certificate_before_invalid_guard.start_time_ns);
+  EXPECT_EQ(manager.p4ExecutionCertificate().authority,
+            certificate_before_invalid_guard.authority);
+  EXPECT_EQ(manager.local_data_.traj_id_, trajectory_id_before_invalid_guard);
+  EXPECT_EQ(manager.local_data_.start_time_.nanoseconds(),
+            start_ns_before_invalid_guard);
+  EXPECT_EQ(ego_planner::p4ControlPointHash(
+                manager.local_data_.position_traj_.getControlPoint()),
+            control_hash_before_invalid_guard);
+  ASSERT_TRUE(manager.setPendingP4GuardDurationForTest(
+      stale_guard_trajectory.getTimeSum()));
   const auto braking = manager.validateCommittedP4TrajectoryExecution(
-      std::max(stale_during_execution_s, stale_guard->start_time.seconds()),
-      stale_guard_trajectory.evaluateDeBoorT(0.0));
+      stale_switch_stamp,
+      stale_guard_trajectory.evaluateDeBoorT(
+          stale_switch_stamp - stale_guard->start_time.seconds()));
   EXPECT_TRUE(braking.allowed) << braking.reason;
   EXPECT_TRUE(braking.failsafe_braking_available);
   EXPECT_TRUE(braking.failsafe_braking_active);
@@ -2055,10 +2192,11 @@ TEST(P4ForwardTerminalLineageTest,
 
   manager.acknowledgeP4GuardStatus(
       terminal_brake->trajectory_id, "ACTIVATED");
+  const double delayed_activation_stamp = terminal_switch_stamp + 0.05;
   const auto terminal_activation =
       manager.validateCommittedP4TrajectoryExecution(
-          terminal_switch_stamp,
-          terminal_braking_curve.evaluateDeBoorT(0.0));
+          delayed_activation_stamp,
+          terminal_braking_curve.evaluateDeBoorT(0.05));
   EXPECT_TRUE(terminal_activation.allowed) << terminal_activation.reason;
   EXPECT_TRUE(terminal_activation.failsafe_braking_activated);
   EXPECT_EQ(terminal_activation.reason, "failsafe_braking_activated");
@@ -3024,6 +3162,12 @@ TEST(P4PreparedSuccessorPolicy,
   GridMapTestAccess::configureNoCollision(map.get());
   const auto frozen_occupancy = map->captureFrozenOccupancyEpoch();
   ASSERT_NE(frozen_occupancy, nullptr);
+  ASSERT_GT(frozen_occupancy->generation, 0u);
+  ASSERT_GT(frozen_occupancy->resolution_m, 0.0);
+  ASSERT_TRUE((frozen_occupancy->voxel_dimensions.array() > 0).all());
+  ASSERT_TRUE(frozen_occupancy->lattice_origin.allFinite());
+  ASSERT_TRUE(frozen_occupancy->extent_m.allFinite());
+  ASSERT_TRUE(static_cast<bool>(frozen_occupancy->diagnostic_query));
   const auto snapshot = makeP4SelectionSnapshot(
       1.0, frozen_occupancy->geometry_id);
   const auto debug_path = p4LineageTestPath(
@@ -3122,5 +3266,7 @@ TEST(P4PreparedSuccessorPolicy,
       bound_execution_c);
   EXPECT_FALSE(manager.validatePreparedP4SuccessorBeforePublish(
       incumbent, 10.09, &reason));
-  EXPECT_EQ(reason, "successor_latest_direct_risk_changed");
+  EXPECT_EQ(reason,
+            "successor_latest_trajectory_assurance_changed:"
+            "global_navigation_budget_exceeded:safe");
 }

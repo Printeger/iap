@@ -396,6 +396,70 @@
   use their actual positions and arrival times for predicted risk. The
   configurable tracking-error limit must be finite, positive, and at most 5 m
   (production default: 0.75 m).
+- Execution authorization separates task-global navigation quality from local
+  obstacle-relative motion safety. Direct GNSS ForwardRisk samples of the
+  exact nominal B-spline define global exposure; fused PL and LiDAR FIM do not
+  replace this channel. The default policy permits
+  `CONTROLLED_DEGRADED_EXECUTION` only when peak ratio is at most `1.05`, one
+  continuous exceedance is at most `1.0 s`, the positive exceedance integral
+  is at most `0.025 ratio*s`, and either recovery is predicted within `2.0 s`
+  or a currently certified braking curve remains available. `hard_global`
+  tasks retain strict `GNSS PL < AL`. An exposure episode survives trajectory
+  ID changes and ends only after `0.5 s` continuously below `0.95*AL`.
+- `LocalMotionAssurance` independently checks the exact nominal curve and all
+  reachable braking curves at no more than `0.2 s` spacing. Its directional
+  margin subtracts vehicle radius, measured tracking bound, scan/ICP bound,
+  short-horizon relative drift, curve approximation and fixed safety margin
+  from obstacle-surface clearance. The current registered scan shares and
+  cancels the current global map transform; an active-window obstacle instead
+  uses the axis-projected worst correlated bound
+  `sum(abs(n_i)*(PL_current_i+PL_source_i))`. Missing source identity/bound,
+  stale support, degenerate ICP, collision, excessive tracking error, or any
+  unsafe braking curve is UNKNOWN/UNSAFE and cannot be overridden by GNSS
+  exposure policy or good LiDAR FIM. Registered source-frame pose/voxel content
+  and its time-associated LiDAR/ICP health are immutable certificate identity.
+  That source health travels with the registered frame when it enters the
+  active window; a downstream planner history is only a compatibility fallback
+  and must not be the sole authority for a long-lived keyframe. Compatibility
+  matching requires the exact estimator frame ID and the exact source stamp;
+  temporal proximity or a matching ROS `frame_id` string is insufficient. A
+  late exact health report replaces that registered-frame contribution as one
+  atomic remove/add transaction. The first estimator frame explicitly marks
+  the planner-map datum: it has zero inter-frame registration contribution by
+  definition and therefore does not require a self-ICP report, while its scan,
+  deskew, tracking, curve, and fixed margins are still charged normally.
+  Current-scan surface evidence may supersede
+  an older obstacle's provenance only when it reobserves the exact same
+  occupancy voxel; an adjacent voxel has no surface identity authority. This does not create free-space
+  evidence or remove occupancy. Invalid AABBs,
+  missing/nonpositive frame identity, degenerate or incomplete source ICP
+  health fail closed. Relative-drift time starts at the current remaining-curve
+  or braking-curve sample, never at an already elapsed trajectory origin.
+  `p4.execution.max_tracking_error_m` is a loss-of-control rejection threshold,
+  not a future-error bound. Local envelopes use the separate certified
+  `p4.assurance.local_tracking_error_bound_m` (default `0.15 m`) and
+  `p4.assurance.local_safety_margin_m` (default `0.20 m`); the P4 stopping
+  boundary continues to use its independent `p4.forward.safety_margin_m`.
+  `p4.assurance.local_lidar_error_multiplier` defaults to `1.0`: ICP RMSE is
+  a geometric residual and must not silently reuse the GNSS ARAIM `K_ff=5.42`
+  tail multiplier. A deployment may supply a larger calibrated residual
+  scale, but it is a separate local-motion model parameter.
+  Runtime tracking above the certified local bound schedules the existing
+  certified brake; the larger loss-of-control threshold remains the immediate
+  emergency-revocation boundary.
+- A complete long route is only `ROUTE_PREFERENCE_SELECTED` until its actual
+  terminal-stop curve passes this unified assurance. RiskGrid, LiDAR FIM,
+  GNSS exposure, recovery trend and mission progress may rank alternatives,
+  but only the current reaction/braking envelope receives execution authority.
+  P4 final admission, P5, successors and runtime reuse the same curve-bound
+  assurance hash and execution mode; P5 may reinterpret a GNSS-only low margin
+  only for a complete locally SAFE controlled-degradation certificate. A
+  newer-snapshot successor must rebuild that complete certificate and repeat
+  P5; the rebound P5 result, execution mode, assurance hash, and snapshot
+  identity are atomically carried into final admission. A GNSS-only recheck
+  cannot reuse the old local-motion hash. New route
+  authorization consumes the active episode's remaining duration/integral
+  budget before publication, not only on the next runtime watchdog tick.
 - `p4.debug_generation_probe_enable` is diagnostic-only and defaults false.
   For two adjacent snapshots that are both fresh at one evaluation time, it
   holds approved-trajectory positions and arrival times fixed and evaluates

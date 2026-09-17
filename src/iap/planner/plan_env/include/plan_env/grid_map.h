@@ -203,6 +203,10 @@ struct FrozenOccupancyEpoch
   GridMapOccupancyDiagnosticQuery diagnostic_query;
   std::shared_ptr<const std::vector<Eigen::Vector3d>>
       raw_occupied_voxel_centers;
+  std::shared_ptr<const std::vector<Eigen::Vector3d>>
+      current_frame_occupied_voxel_centers;
+  std::shared_ptr<const std::vector<RegisteredLidarObstacleSource>>
+      active_window_obstacle_sources;
   // Environment hits are independent of the flight lattice/geofence. They
   // retain canopy points outside the permitted flight volume for GNSS LOS.
   std::shared_ptr<const std::vector<Eigen::Vector3d>>
@@ -221,6 +225,7 @@ struct FrozenOccupancyEpoch
   uint64_t generation = 0;
   uint64_t active_window_generation = 0;
   int64_t current_frame_id = -1;
+  std::string current_frame_content_hash;
   std::string frame_contract_id;
 };
 

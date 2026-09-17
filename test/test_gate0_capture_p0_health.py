@@ -117,12 +117,13 @@ class Gate0CaptureTest(unittest.TestCase):
             integrity_publisher,
         )
         self.assertIn(
-            "node.create_publisher<MsgT>(pub_topic_, rclcpp::QoS(10))",
+            "pub_topic_, rclcpp::QoS(10).reliable().transient_local()",
             integrity_publisher,
         )
-        # Integer depth and rclcpp::QoS(depth) both use KEEP_LAST with the
-        # default reliable/volatile policies. The assertions above bind these
-        # subscriber checks to both production publisher declarations.
+        # The risk-grid publisher keeps the default reliable/volatile policy.
+        # Integrity is reliable/transient-local so a late registered-map
+        # subscriber can recover exact estimator-frame health; the volatile
+        # capture subscriber remains compatible and observes live evidence.
 
 
 if __name__ == "__main__":

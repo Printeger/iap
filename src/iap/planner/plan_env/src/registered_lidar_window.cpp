@@ -3,8 +3,10 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <iomanip>
 #include <limits>
 #include <optional>
+#include <sstream>
 #include <unordered_set>
 
 namespace {
@@ -13,6 +15,38 @@ void rememberBefore(
     const int address, const RegisteredVoxelState state,
     std::unordered_map<int, RegisteredVoxelState>* before) {
   before->emplace(address, state);
+}
+
+std::string contributionContentHash(
+    const RegisteredLidarFrameData& source,
+    const std::vector<int>& occupied_addresses) {
+  std::ostringstream canonical;
+  canonical << source.frame_id << ';' << std::hexfloat << source.stamp_s
+            << ';' << source.scan_end_stamp_s << ';'
+            << source.frame_contract_id << ';'
+            << source.source_is_map_reference << ';'
+            << source.source_health_valid << ';'
+            << source.source_health_stamp_s << ';'
+            << source.source_icp_degenerate << ';'
+            << source.source_icp_rmse << ';'
+            << source.source_icp_condition << ';'
+            << source.source_icp_gamma_lidar << ';'
+            << source.source_lidar_pl_enu_m.transpose() << ';';
+  const Eigen::Matrix4d transform = source.T_map_lidar.matrix();
+  for (int row = 0; row < transform.rows(); ++row) {
+    for (int column = 0; column < transform.cols(); ++column) {
+      canonical << transform(row, column) << ';';
+    }
+  }
+  for (const int address : occupied_addresses) canonical << address << ',';
+  std::uint64_t hash = 1469598103934665603ULL;
+  for (const unsigned char byte : canonical.str()) {
+    hash ^= static_cast<std::uint64_t>(byte);
+    hash *= 1099511628211ULL;
+  }
+  std::ostringstream output;
+  output << std::hex << std::setfill('0') << std::setw(16) << hash;
+  return output.str();
 }
 
 }  // namespace
@@ -236,15 +270,88 @@ RegisteredLidarWindow::currentFrameMetadata() const {
     return std::nullopt;
   }
   const auto& source = current_frame_.source;
-  return RegisteredLidarFrameMetadata{
-      source.frame_id, source.stamp_s, source.scan_end_stamp_s,
-      source.sensor_receipt_steady_ns, source.T_map_lidar,
-      source.frame_contract_id};
+  RegisteredLidarFrameMetadata metadata;
+  metadata.frame_id = source.frame_id;
+  metadata.stamp_s = source.stamp_s;
+  metadata.scan_end_stamp_s = source.scan_end_stamp_s;
+  metadata.sensor_receipt_steady_ns = source.sensor_receipt_steady_ns;
+  metadata.T_map_lidar = source.T_map_lidar;
+  metadata.frame_contract_id = source.frame_contract_id;
+  metadata.source_is_map_reference = source.source_is_map_reference;
+  metadata.source_health_valid = source.source_health_valid;
+  metadata.source_health_stamp_s = source.source_health_stamp_s;
+  metadata.source_icp_degenerate = source.source_icp_degenerate;
+  metadata.source_icp_rmse = source.source_icp_rmse;
+  metadata.source_icp_condition = source.source_icp_condition;
+  metadata.source_icp_gamma_lidar = source.source_icp_gamma_lidar;
+  metadata.source_lidar_pl_enu_m = source.source_lidar_pl_enu_m;
+  metadata.content_hash = contributionContentHash(source, current_frame_.hits);
+  return metadata;
 }
 
 std::shared_ptr<const std::vector<Eigen::Vector3d>>
 RegisteredLidarWindow::environmentOccupiedVoxelCenters() const {
   return environment_occupied_voxel_centers_;
+}
+
+std::shared_ptr<const std::vector<Eigen::Vector3d>>
+RegisteredLidarWindow::currentOccupiedVoxelCenters() const {
+  auto centers = std::make_shared<std::vector<Eigen::Vector3d>>();
+  if (!has_current_frame_) {
+    return centers;
+  }
+  centers->reserve(current_frame_.hits.size());
+  for (const int address : current_frame_.hits) {
+    const Eigen::Vector3i index = indexFromAddress(address);
+    centers->push_back(
+        geometry_.origin +
+        (index.cast<double>() + Eigen::Vector3d::Constant(0.5)) *
+            geometry_.resolution_m);
+  }
+  return centers;
+}
+
+std::shared_ptr<const std::vector<RegisteredLidarObstacleSource>>
+RegisteredLidarWindow::activeObstacleSources() const {
+  auto sources = std::make_shared<std::vector<RegisteredLidarObstacleSource>>();
+  sources->reserve(active_frames_.size());
+  for (const auto& [frame_id, contribution] : active_frames_) {
+    (void)frame_id;
+    auto centers = std::make_shared<std::vector<Eigen::Vector3d>>();
+    centers->reserve(contribution.environment_hit_keys.size());
+    for (const auto& key : contribution.environment_hit_keys) {
+      centers->push_back(
+          geometry_.origin +
+          (Eigen::Vector3d(key[0], key[1], key[2]) +
+           Eigen::Vector3d::Constant(0.5)) * geometry_.resolution_m);
+    }
+    RegisteredLidarObstacleSource source;
+    const auto& frame = contribution.source;
+    source.metadata.frame_id = frame.frame_id;
+    source.metadata.stamp_s = frame.stamp_s;
+    source.metadata.scan_end_stamp_s = frame.scan_end_stamp_s;
+    source.metadata.sensor_receipt_steady_ns = frame.sensor_receipt_steady_ns;
+    source.metadata.T_map_lidar = frame.T_map_lidar;
+    source.metadata.frame_contract_id = frame.frame_contract_id;
+    source.metadata.source_is_map_reference =
+        frame.source_is_map_reference;
+    source.metadata.source_health_valid = frame.source_health_valid;
+    source.metadata.source_health_stamp_s = frame.source_health_stamp_s;
+    source.metadata.source_icp_degenerate = frame.source_icp_degenerate;
+    source.metadata.source_icp_rmse = frame.source_icp_rmse;
+    source.metadata.source_icp_condition = frame.source_icp_condition;
+    source.metadata.source_icp_gamma_lidar = frame.source_icp_gamma_lidar;
+    source.metadata.source_lidar_pl_enu_m = frame.source_lidar_pl_enu_m;
+    source.metadata.content_hash = contributionContentHash(frame,
+                                                           contribution.hits);
+    source.occupied_voxel_centers = std::move(centers);
+    sources->push_back(std::move(source));
+  }
+  std::sort(sources->begin(), sources->end(),
+            [](const auto& lhs, const auto& rhs) {
+              return lhs.metadata.frame_id < rhs.metadata.frame_id;
+            });
+  return sources;
 }
 
 bool RegisteredLidarWindow::addEnvironmentContribution(
@@ -504,7 +611,9 @@ RegisteredLidarWindowUpdate RegisteredLidarWindow::applyActiveDelta(
   std::unordered_set<std::int64_t> added_ids;
   for (const auto& source : delta.added) {
     if (source.frame_contract_id != geometry_.frame_contract_id ||
-        source.frame_id < 0 || active_frames_.count(source.frame_id) != 0U ||
+        source.frame_id < 0 ||
+        (active_frames_.count(source.frame_id) != 0U &&
+         removed_ids.count(source.frame_id) == 0U) ||
         !added_ids.insert(source.frame_id).second ||
         !source.T_map_lidar.matrix().allFinite() ||
         !std::isfinite(source.stamp_s) ||

@@ -1,4 +1,5 @@
 #include <ego_planner/p0_risk_grid_runtime.h>
+#include <plan_env/grid_map.h>
 
 #include <algorithm>
 #include <array>
@@ -2099,6 +2100,28 @@ class P0RiskGridRuntimeStampTest : public ::testing::Test {
     runtime->latest_current_ = sample;
     runtime->latest_current_valid_ = valid;
     runtime->current_integrity_seen_ = true;
+  }
+
+  static void seedMismatchedSourceHealthHistory(P0RiskGridRuntime* runtime) {
+    auto valid_source_health = runtime->latest_current_;
+    valid_source_health.valid = true;
+    valid_source_health.lidar_valid = true;
+    valid_source_health.icp_degenerate = false;
+    valid_source_health.icp_rmse = 0.02;
+    valid_source_health.icp_condition = 12.0;
+    valid_source_health.icp_gamma_lidar = 1.25;
+    valid_source_health.lidar_pl_e = 0.3;
+    valid_source_health.lidar_pl_n = 0.4;
+    valid_source_health.lidar_pl_u = 0.5;
+
+    auto wrong_frame = valid_source_health;
+    wrong_frame.stamp = 100.0;
+    wrong_frame.estimation_frame_id = 41;
+    auto adjacent_stamp = valid_source_health;
+    adjacent_stamp.stamp = 100.0001;
+    adjacent_stamp.estimation_frame_id = 42;
+    runtime->current_integrity_history_.emplace_back(2u, wrong_frame);
+    runtime->current_integrity_history_.emplace_back(3u, adjacent_stamp);
   }
 
   static void setLegacyCurrentSpatial(P0RiskGridRuntime* runtime,
@@ -4708,6 +4731,112 @@ TEST_F(P0RiskGridRuntimeStampTest,
   ASSERT_EQ(direct.points.size(), 1u);
   EXPECT_NE(direct.points.front().failure_reason,
             iap::ForwardRiskFailureReason::COMPUTE_BUDGET_EXCEEDED);
+}
+
+TEST_F(P0RiskGridRuntimeStampTest,
+       ExecutionSnapshotUsesEmbeddedActiveFrameHealthWithoutHistory) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_execution_snapshot_embedded_source_health_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  auto config = enabledConfig();
+  config.predictor_source_mode = iap::PredictorSourceMode::GnssOnly;
+  config.predictor_gnss_epoch_policy =
+      iap::PredictorGnssEpochPolicy::Required;
+  config.risk_grid_build_budget_ms = 0.0;
+  P0RiskGridRuntime runtime(node, config);
+  seedValidInputs(&runtime, 100.0, 100.0);
+  seedGnssEpoch(&runtime, 100.0);
+  const auto live_generation = std::make_shared<std::atomic<uint64_t>>(7u);
+  runtime.setOccupancyEpochFactory([live_generation]() {
+    auto capture = makeOccupancyEpochCapture(
+        live_generation, 7u, 100.0, "map",
+        {Eigen::Vector3d(0.0, 0.0, 0.0)});
+    if (!capture.epoch) return capture;
+    auto frozen = std::make_shared<FrozenOccupancyEpoch>();
+    auto sources =
+        std::make_shared<std::vector<RegisteredLidarObstacleSource>>();
+    RegisteredLidarObstacleSource source;
+    source.metadata.frame_id = 42;
+    source.metadata.stamp_s = 99.95;
+    source.metadata.content_hash = "source-frame-42";
+    source.metadata.source_health_valid = true;
+    source.metadata.source_health_stamp_s = 99.95;
+    source.metadata.source_icp_degenerate = false;
+    source.metadata.source_icp_rmse = 0.02;
+    source.metadata.source_icp_condition = 12.0;
+    source.metadata.source_icp_gamma_lidar = 1.25;
+    source.metadata.source_lidar_pl_enu_m =
+        Eigen::Vector3d(0.3, 0.4, 0.5);
+    source.occupied_voxel_centers =
+        std::make_shared<const std::vector<Eigen::Vector3d>>(
+            std::vector<Eigen::Vector3d>{Eigen::Vector3d::Zero()});
+    sources->push_back(std::move(source));
+    frozen->active_window_obstacle_sources = std::move(sources);
+    capture.epoch->frozen_grid_map_epoch = std::move(frozen);
+    return capture;
+  });
+
+  EXPECT_FALSE(refreshOnce(&runtime));
+  const auto execution = runtime.acquireExecutionRiskSnapshot();
+  ASSERT_NE(execution, nullptr);
+  ASSERT_EQ(execution->local_obstacle_source_bounds.size(), 1u);
+  const auto& bound = execution->local_obstacle_source_bounds.front();
+  EXPECT_TRUE(bound.certified);
+  EXPECT_EQ(bound.frame_id, 42);
+  EXPECT_TRUE(bound.lidar_pl_enu_m.isApprox(Eigen::Vector3d(0.3, 0.4, 0.5)));
+  EXPECT_FALSE(bound.icp_degenerate);
+  EXPECT_DOUBLE_EQ(bound.icp_rmse_m, 0.02);
+  EXPECT_DOUBLE_EQ(bound.icp_condition, 12.0);
+  EXPECT_DOUBLE_EQ(bound.icp_gamma, 1.25);
+}
+
+TEST_F(P0RiskGridRuntimeStampTest,
+       ExecutionSnapshotDoesNotBorrowHealthFromAdjacentEstimatorFrame) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_execution_snapshot_exact_source_health_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  auto config = enabledConfig();
+  config.predictor_source_mode = iap::PredictorSourceMode::GnssOnly;
+  config.predictor_gnss_epoch_policy =
+      iap::PredictorGnssEpochPolicy::Required;
+  config.risk_grid_build_budget_ms = 0.0;
+  P0RiskGridRuntime runtime(node, config);
+  seedValidInputs(&runtime, 100.0, 100.0);
+  seedGnssEpoch(&runtime, 100.0);
+
+  seedMismatchedSourceHealthHistory(&runtime);
+
+  const auto live_generation = std::make_shared<std::atomic<uint64_t>>(7u);
+  runtime.setOccupancyEpochFactory([live_generation]() {
+    auto capture = makeOccupancyEpochCapture(
+        live_generation, 7u, 100.0, "map",
+        {Eigen::Vector3d(0.0, 0.0, 0.0)});
+    if (!capture.epoch) return capture;
+    auto frozen = std::make_shared<FrozenOccupancyEpoch>();
+    auto sources =
+        std::make_shared<std::vector<RegisteredLidarObstacleSource>>();
+    RegisteredLidarObstacleSource source;
+    source.metadata.frame_id = 42;
+    source.metadata.stamp_s = 100.0;
+    source.metadata.content_hash = "source-frame-42-without-health";
+    source.occupied_voxel_centers =
+        std::make_shared<const std::vector<Eigen::Vector3d>>(
+            std::vector<Eigen::Vector3d>{Eigen::Vector3d::Zero()});
+    sources->push_back(std::move(source));
+    frozen->active_window_obstacle_sources = std::move(sources);
+    capture.epoch->frozen_grid_map_epoch = std::move(frozen);
+    return capture;
+  });
+
+  EXPECT_FALSE(refreshOnce(&runtime));
+  const auto execution = runtime.acquireExecutionRiskSnapshot();
+  ASSERT_NE(execution, nullptr);
+  ASSERT_EQ(execution->local_obstacle_source_bounds.size(), 1u);
+  const auto& bound = execution->local_obstacle_source_bounds.front();
+  EXPECT_EQ(bound.frame_id, 42);
+  EXPECT_FALSE(bound.certified);
 }
 
 TEST_F(P0RiskGridRuntimeStampTest,

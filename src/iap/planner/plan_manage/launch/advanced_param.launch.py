@@ -149,6 +149,18 @@ def generate_launch_description():
     p0_skip_occupied_voxels = LaunchConfiguration('p0_skip_occupied_voxels', default=True)
     p0_debug_metrics_enable = LaunchConfiguration('p0_debug_metrics_enable', default=False)
     p0_health_topic = LaunchConfiguration('p0_health_topic', default='planning/risk_grid_health')
+    p4_assurance_hard_global = LaunchConfiguration('p4_assurance_hard_global', default=False)
+    p4_assurance_maximum_global_ratio = LaunchConfiguration('p4_assurance_maximum_global_ratio', default=1.05)
+    p4_assurance_maximum_continuous_exceedance_s = LaunchConfiguration('p4_assurance_maximum_continuous_exceedance_s', default=1.0)
+    p4_assurance_maximum_exceedance_integral_ratio_s = LaunchConfiguration('p4_assurance_maximum_exceedance_integral_ratio_s', default=0.025)
+    p4_assurance_recovery_horizon_s = LaunchConfiguration('p4_assurance_recovery_horizon_s', default=2.0)
+    p4_assurance_recovered_ratio = LaunchConfiguration('p4_assurance_recovered_ratio', default=0.95)
+    p4_assurance_recovered_hold_s = LaunchConfiguration('p4_assurance_recovered_hold_s', default=0.5)
+    p4_assurance_local_tracking_error_bound_m = LaunchConfiguration('p4_assurance_local_tracking_error_bound_m', default=0.15)
+    p4_assurance_local_safety_margin_m = LaunchConfiguration('p4_assurance_local_safety_margin_m', default=0.20)
+    p4_assurance_local_scan_error_min_m = LaunchConfiguration('p4_assurance_local_scan_error_min_m', default=0.02)
+    p4_assurance_local_lidar_error_multiplier = LaunchConfiguration('p4_assurance_local_lidar_error_multiplier', default=1.0)
+    p4_assurance_local_drift_bound_mps = LaunchConfiguration('p4_assurance_local_drift_bound_mps', default=0.10)
     p5_enable_runtime_gate = LaunchConfiguration('p5_enable_runtime_gate', default=False)
     p5_enable_final_gate = LaunchConfiguration('p5_enable_final_gate', default=False)
     p5_horizon_s = LaunchConfiguration('p5_horizon_s', default=2.0)
@@ -325,6 +337,18 @@ def generate_launch_description():
     p0_skip_occupied_voxels_arg = DeclareLaunchArgument('p0_skip_occupied_voxels', default_value=p0_skip_occupied_voxels)
     p0_debug_metrics_enable_arg = DeclareLaunchArgument('p0_debug_metrics_enable', default_value=p0_debug_metrics_enable)
     p0_health_topic_arg = DeclareLaunchArgument('p0_health_topic', default_value=p0_health_topic)
+    p4_assurance_hard_global_arg = DeclareLaunchArgument('p4_assurance_hard_global', default_value=p4_assurance_hard_global)
+    p4_assurance_maximum_global_ratio_arg = DeclareLaunchArgument('p4_assurance_maximum_global_ratio', default_value=p4_assurance_maximum_global_ratio)
+    p4_assurance_maximum_continuous_exceedance_s_arg = DeclareLaunchArgument('p4_assurance_maximum_continuous_exceedance_s', default_value=p4_assurance_maximum_continuous_exceedance_s)
+    p4_assurance_maximum_exceedance_integral_ratio_s_arg = DeclareLaunchArgument('p4_assurance_maximum_exceedance_integral_ratio_s', default_value=p4_assurance_maximum_exceedance_integral_ratio_s)
+    p4_assurance_recovery_horizon_s_arg = DeclareLaunchArgument('p4_assurance_recovery_horizon_s', default_value=p4_assurance_recovery_horizon_s)
+    p4_assurance_recovered_ratio_arg = DeclareLaunchArgument('p4_assurance_recovered_ratio', default_value=p4_assurance_recovered_ratio)
+    p4_assurance_recovered_hold_s_arg = DeclareLaunchArgument('p4_assurance_recovered_hold_s', default_value=p4_assurance_recovered_hold_s)
+    p4_assurance_local_tracking_error_bound_m_arg = DeclareLaunchArgument('p4_assurance_local_tracking_error_bound_m', default_value=p4_assurance_local_tracking_error_bound_m)
+    p4_assurance_local_safety_margin_m_arg = DeclareLaunchArgument('p4_assurance_local_safety_margin_m', default_value=p4_assurance_local_safety_margin_m)
+    p4_assurance_local_scan_error_min_m_arg = DeclareLaunchArgument('p4_assurance_local_scan_error_min_m', default_value=p4_assurance_local_scan_error_min_m)
+    p4_assurance_local_lidar_error_multiplier_arg = DeclareLaunchArgument('p4_assurance_local_lidar_error_multiplier', default_value=p4_assurance_local_lidar_error_multiplier)
+    p4_assurance_local_drift_bound_mps_arg = DeclareLaunchArgument('p4_assurance_local_drift_bound_mps', default_value=p4_assurance_local_drift_bound_mps)
     p5_enable_runtime_gate_arg = DeclareLaunchArgument('p5_enable_runtime_gate', default_value=p5_enable_runtime_gate)
     p5_enable_final_gate_arg = DeclareLaunchArgument('p5_enable_final_gate', default_value=p5_enable_final_gate)
     p5_horizon_s_arg = DeclareLaunchArgument('p5_horizon_s', default_value=p5_horizon_s)
@@ -476,6 +500,18 @@ def generate_launch_description():
             {'p0.iono_topic': '/ublox_driver/iono_params'},
             {'p0.map_topic': '/map_generator/global_cloud'},
             {'p0.health_topic': p0_health_topic},
+            {'p4.assurance.hard_global': p4_assurance_hard_global},
+            {'p4.assurance.maximum_global_ratio': p4_assurance_maximum_global_ratio},
+            {'p4.assurance.maximum_continuous_exceedance_s': p4_assurance_maximum_continuous_exceedance_s},
+            {'p4.assurance.maximum_exceedance_integral_ratio_s': p4_assurance_maximum_exceedance_integral_ratio_s},
+            {'p4.assurance.recovery_horizon_s': p4_assurance_recovery_horizon_s},
+            {'p4.assurance.recovered_ratio': p4_assurance_recovered_ratio},
+            {'p4.assurance.recovered_hold_s': p4_assurance_recovered_hold_s},
+            {'p4.assurance.local_tracking_error_bound_m': p4_assurance_local_tracking_error_bound_m},
+            {'p4.assurance.local_safety_margin_m': p4_assurance_local_safety_margin_m},
+            {'p4.assurance.local_scan_error_min_m': p4_assurance_local_scan_error_min_m},
+            {'p4.assurance.local_lidar_error_multiplier': p4_assurance_local_lidar_error_multiplier},
+            {'p4.assurance.local_drift_bound_mps': p4_assurance_local_drift_bound_mps},
             {'p5.enable_runtime_gate': p5_enable_runtime_gate},
             {'p5.enable_final_gate': p5_enable_final_gate},
             {'p5.horizon_s': p5_horizon_s},
@@ -773,6 +809,18 @@ def generate_launch_description():
     ld.add_action(p0_skip_occupied_voxels_arg)
     ld.add_action(p0_debug_metrics_enable_arg)
     ld.add_action(p0_health_topic_arg)
+    ld.add_action(p4_assurance_hard_global_arg)
+    ld.add_action(p4_assurance_maximum_global_ratio_arg)
+    ld.add_action(p4_assurance_maximum_continuous_exceedance_s_arg)
+    ld.add_action(p4_assurance_maximum_exceedance_integral_ratio_s_arg)
+    ld.add_action(p4_assurance_recovery_horizon_s_arg)
+    ld.add_action(p4_assurance_recovered_ratio_arg)
+    ld.add_action(p4_assurance_recovered_hold_s_arg)
+    ld.add_action(p4_assurance_local_tracking_error_bound_m_arg)
+    ld.add_action(p4_assurance_local_safety_margin_m_arg)
+    ld.add_action(p4_assurance_local_scan_error_min_m_arg)
+    ld.add_action(p4_assurance_local_lidar_error_multiplier_arg)
+    ld.add_action(p4_assurance_local_drift_bound_mps_arg)
     ld.add_action(p5_enable_runtime_gate_arg)
     ld.add_action(p5_enable_final_gate_arg)
     ld.add_action(p5_horizon_s_arg)

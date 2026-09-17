@@ -1293,6 +1293,75 @@ void evaluateCandidateRiskSet(
         (candidate.safety_gate_passed ? P4ForwardSafetyState::SAFE :
         P4ForwardSafetyState::UNSAFE) : P4ForwardSafetyState::UNKNOWN;
     }
+
+    candidate.controlled_degraded_candidate = false;
+    candidate.global_peak_ratio = 0.0;
+    candidate.global_continuous_exceedance_s = 0.0;
+    candidate.global_exceedance_integral_ratio_s = 0.0;
+    if (candidate.risk_supported && candidate.risk_samples.size() >= 2) {
+      bool complete_global = true;
+      double continuous = 0.0;
+      for (std::size_t index = 0; index < candidate.risk_samples.size();
+           ++index) {
+        const auto& record = candidate.risk_samples[index];
+        const auto& risk = record.risk;
+        const double ratio = std::max(
+            risk.gnss_anchored_hpl / risk.hal,
+            risk.gnss_anchored_vpl / risk.val);
+        if (!std::isfinite(ratio) || !(risk.hal > 0.0) ||
+            !(risk.val > 0.0) || !std::isfinite(record.query_time_s)) {
+          complete_global = false;
+          break;
+        }
+        candidate.global_peak_ratio = std::max(
+            candidate.global_peak_ratio, ratio);
+        if (index == 0) continue;
+        const auto& previous = candidate.risk_samples[index - 1];
+        const double previous_ratio = std::max(
+            previous.risk.gnss_anchored_hpl / previous.risk.hal,
+            previous.risk.gnss_anchored_vpl / previous.risk.val);
+        const double dt = record.query_time_s - previous.query_time_s;
+        if (!std::isfinite(previous_ratio) || !(dt > 0.0)) {
+          complete_global = false;
+          break;
+        }
+        const double a = std::max(0.0, previous_ratio - 1.0);
+        const double b = std::max(0.0, ratio - 1.0);
+        candidate.global_exceedance_integral_ratio_s +=
+            0.5 * (a + b) * dt;
+        if (previous_ratio > 1.0 && ratio > 1.0) {
+          continuous += dt;
+        } else if (ratio <= 1.0) {
+          continuous = 0.0;
+        } else {
+          continuous = dt * b / std::max(kEpsilon, a + b);
+        }
+        candidate.global_continuous_exceedance_s = std::max(
+            candidate.global_continuous_exceedance_s, continuous);
+      }
+      if (complete_global) {
+        const double peak_u = candidate.global_peak_ratio <= 1.0 ? 0.0 :
+            (candidate.global_peak_ratio - 1.0) /
+                std::max(kEpsilon,
+                    request.limits.maximum_global_ratio - 1.0);
+        const double duration_u =
+            candidate.global_continuous_exceedance_s /
+            std::max(kEpsilon,
+                request.limits.maximum_global_continuous_exceedance_s);
+        const double integral_u =
+            candidate.global_exceedance_integral_ratio_s /
+            std::max(kEpsilon,
+                request.limits.maximum_global_exceedance_integral_ratio_s);
+        candidate.global_budget_utilization = std::max(
+            {peak_u, duration_u, integral_u});
+        candidate.controlled_degraded_candidate =
+            !request.limits.hard_global &&
+            !candidate.safety_gate_passed &&
+            candidate.global_budget_utilization <= 1.0 + kEpsilon;
+        if (candidate.controlled_degraded_candidate)
+          candidate.reason = "controlled_degraded_candidate_ready";
+      }
+    }
   }
 }
 
@@ -1945,7 +2014,7 @@ bool P4ForwardRequest::valid(std::string * reason) const
   {
     return fail("missing_snapshot_query");
   }
-  const std::array<double, 17> finite_limits = {
+  const std::array<double, 20> finite_limits = {
     limits.reaction_time_s, limits.braking_accel_mps2,
     limits.vehicle_radius_m, limits.safety_margin_m,
     limits.max_lookahead_m, limits.sensing_range_m,
@@ -1954,7 +2023,10 @@ bool P4ForwardRequest::valid(std::string * reason) const
     limits.min_creep_progress_m, limits.max_limited_prefix_progress_m,
     limits.max_creep_progress_m,
     limits.max_observe_speed_mps, limits.channel_enumeration_budget_ms,
-    limits.advisory_min_relative_improvement, limits.compute_budget_ms};
+    limits.advisory_min_relative_improvement, limits.compute_budget_ms,
+    limits.maximum_global_ratio,
+    limits.maximum_global_continuous_exceedance_s,
+    limits.maximum_global_exceedance_integral_ratio_s};
   if (std::any_of(
       finite_limits.begin(), finite_limits.end(),
       [](const double value) {return !std::isfinite(value);}) ||
@@ -1974,7 +2046,10 @@ bool P4ForwardRequest::valid(std::string * reason) const
     limits.channel_enumeration_budget_ms <= 0.0 ||
     limits.advisory_min_relative_improvement < 0.0 ||
     limits.advisory_min_relative_improvement >= 1.0 ||
-    limits.compute_budget_ms <= 0.0)
+    limits.compute_budget_ms <= 0.0 ||
+    limits.maximum_global_ratio <= 1.0 ||
+    limits.maximum_global_continuous_exceedance_s <= 0.0 ||
+    limits.maximum_global_exceedance_integral_ratio_s <= 0.0)
   {
     return fail("invalid_limits");
   }
@@ -2389,7 +2464,8 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
   const double shortest = decision.candidates.front().length_m;
   std::vector<P4ForwardCandidate *> eligible;
   for (auto & candidate : decision.candidates) {
-    if (candidate.safety_gate_passed &&
+    if ((candidate.safety_gate_passed ||
+         candidate.controlled_degraded_candidate) &&
       candidate.length_m <= shortest *
       request.limits.max_path_length_ratio + kEpsilon)
     {
@@ -2411,6 +2487,13 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
   }
   const auto risk_order =
     [](const P4ForwardCandidate * lhs, const P4ForwardCandidate * rhs) {
+      if (std::abs(lhs->global_budget_utilization -
+                   rhs->global_budget_utilization) > kEpsilon &&
+          std::isfinite(lhs->global_budget_utilization) &&
+          std::isfinite(rhs->global_budget_utilization)) {
+        return lhs->global_budget_utilization <
+               rhs->global_budget_utilization;
+      }
       if (std::abs(lhs->fim_max_ratio - rhs->fim_max_ratio) > kEpsilon) {
         return lhs->fim_max_ratio < rhs->fim_max_ratio;
       }
@@ -2498,7 +2581,8 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
       })->length_m;
     eligible.clear();
     for (auto & candidate : decision.candidates) {
-      if (candidate.safety_gate_passed &&
+      if ((candidate.safety_gate_passed ||
+           candidate.controlled_degraded_candidate) &&
         candidate.length_m <= shortest_refined *
         request.limits.max_path_length_ratio + kEpsilon)
       {
@@ -2531,9 +2615,16 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
     P4ForwardTriggerReason::MULTIPLE_CHANNELS :
     P4ForwardTriggerReason::SINGLE_CHANNEL;
   decision.reason = multiple_safe_channels ?
-    "risk_ranked_topology_candidate_ready" :
-    (decision.candidates.size() == 1 ? "single_channel" :
-    "single_safe_channel");
+    (selected->controlled_degraded_candidate
+       ? "route_preference_controlled_degraded_candidate_ready"
+       : "risk_ranked_topology_candidate_ready") :
+    (decision.candidates.size() == 1 ?
+    (selected->controlled_degraded_candidate
+       ? "single_controlled_degraded_candidate"
+       : "single_channel") :
+    (selected->controlled_degraded_candidate
+       ? "single_controlled_degraded_candidate"
+       : "single_safe_channel"));
   return finalize(std::move(decision));
 }
 

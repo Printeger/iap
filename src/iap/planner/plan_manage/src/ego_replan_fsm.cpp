@@ -1563,7 +1563,8 @@ namespace ego_planner
       std::string successor_publish_reason;
       if (!planner_manager_->validatePreparedP4SuccessorBeforePublish(
               previous_local_data, plannerNow().seconds(),
-              &successor_publish_reason))
+              &successor_publish_reason, emergency_time_,
+              p5_final_status ? &*p5_final_status : nullptr))
       {
         RCLCPP_WARN(node_->get_logger(),
                     "P4 prepared successor rejected before publish: %s",

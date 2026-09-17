@@ -314,7 +314,8 @@ IntegrityExtensionModule::create_subscriptions(rclcpp::Node& node) {
   if (!enable_) return {};
 
   using MsgT = iap::msg::IntegrityReport;
-  auto pub   = node.create_publisher<MsgT>(pub_topic_, rclcpp::QoS(10));
+  auto pub = node.create_publisher<MsgT>(
+      pub_topic_, rclcpp::QoS(10).reliable().transient_local());
   pub_erased_ = pub;  // erase type to avoid heavy header in .hpp
 
   logger_->info("[IntegrityExt] publisher created → {}", pub_topic_);
@@ -497,6 +498,7 @@ void IntegrityExtensionModule::maybe_publish_integrity_() {
   // Header
   assign_header_stamp(msg.header, integrity_header_stamp_s_(report.stamp));
   msg.header.frame_id = "map";
+  msg.estimation_frame_id = report.estimation_frame_id;
 
   // Current certified monitor scalars. Keep legacy ROS field names for
   // compatibility; semantically these are monitor_fused_* and monitor_IM.

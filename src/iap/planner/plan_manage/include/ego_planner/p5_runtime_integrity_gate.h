@@ -158,6 +158,9 @@ struct P5GateStatus {
   int bad_count = 0;
   int unknown_count = 0;
   std::vector<SafetyVizTrajectorySample> viz_samples;
+  iap::TrajectoryExecutionMode execution_mode =
+      iap::TrajectoryExecutionMode::RECOVERY_OR_EXIT;
+  std::string trajectory_assurance_hash;
 };
 
 class P5RuntimeIntegrityGate {

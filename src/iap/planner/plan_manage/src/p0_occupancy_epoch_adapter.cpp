@@ -90,7 +90,9 @@ std::optional<P0OccupancyEpoch> P0OccupancyEpochAdapter::adaptFields(
     P0OccupancyEpoch::LiveSourceOwner live_source_owner,
     P0OccupancyEpoch::LiveGeneration live_generation,
     const double clearance_transition_m,
-    std::optional<P0ReusableLosOccupancy> reusable_los) {
+    std::optional<P0ReusableLosOccupancy> reusable_los,
+    std::shared_ptr<const std::vector<Eigen::Vector3d>>
+        current_frame_centers) {
   if (!diagnostic_query || !occupied_centers || !environment_centers ||
       !source_owner ||
       !live_source_owner || !live_generation ||
@@ -196,6 +198,8 @@ std::optional<P0OccupancyEpoch> P0OccupancyEpochAdapter::adaptFields(
   adapted.diagnostic_query = std::move(diagnostic_query);
   adapted.los_owner = std::move(los_owner);
   adapted.raw_occupied_voxel_centers = occupied_centers;
+  adapted.current_frame_occupied_voxel_centers =
+      std::move(current_frame_centers);
   adapted.environment_occupied_voxel_centers = environment_centers;
   adapted.trusted_local_map_support = std::move(trusted_support);
   adapted.raw_identity = std::shared_ptr<const P0RawOccupancyIdentity>(

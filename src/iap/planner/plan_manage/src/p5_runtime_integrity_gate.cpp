@@ -719,7 +719,11 @@ void P5RuntimeIntegrityGate::publishFinalAdmission(
       << ",\"final_evaluation_stamp_s\":"
       << jsonNumber(status.final_evaluation_stamp_s)
       << ",\"final_publish_authorization_stamp_s\":"
-      << jsonNumber(status.final_publish_authorization_stamp_s) << "}";
+      << jsonNumber(status.final_publish_authorization_stamp_s)
+      << ",\"execution_mode\":"
+      << jsonString(iap::trajectoryExecutionModeName(status.execution_mode))
+      << ",\"trajectory_assurance_hash\":"
+      << jsonString(status.trajectory_assurance_hash) << "}";
   std_msgs::msg::String msg;
   msg.data = oss.str();
   status_pub_->publish(msg);
@@ -738,7 +742,28 @@ P5GateStatus P5RuntimeIntegrityGate::evaluate(
   }
   P5GateStatus future_status =
       evaluateFutureGate(local_data, snapshot, current, context);
+  const bool controlled_degraded = context.direct_risk &&
+      context.direct_risk->trajectory_assurance_complete &&
+      context.direct_risk->trajectory_assurance.mode ==
+          iap::TrajectoryExecutionMode::CONTROLLED_DEGRADED_EXECUTION &&
+      context.direct_risk->trajectory_assurance.authorized();
+  // CURRENT_LOW_MARGIN is the legacy fused GNSS/LiDAR interpretation. A
+  // bound controlled-degraded certificate separates the GNSS task-quality
+  // exceedance from independently proven local motion safety. Invalid or
+  // stale current inputs are never overridden here.
+  if (controlled_degraded &&
+      current_status.reason == P5GateReason::CURRENT_LOW_MARGIN) {
+    current_status.action = P5GateAction::OK;
+    current_status.reason = P5GateReason::OK;
+  }
   P5GateStatus merged = merge(current_status, future_status);
+  if (context.direct_risk &&
+      context.direct_risk->trajectory_assurance_complete) {
+    merged.execution_mode =
+        context.direct_risk->trajectory_assurance.mode;
+    merged.trajectory_assurance_hash =
+        context.direct_risk->trajectory_assurance.certificate_hash;
+  }
   merged.raw_action = merged.action;
   merged.raw_reason = merged.reason;
   return merged;
@@ -1103,6 +1128,17 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateFutureGate(
       direct_evidence->positions.size() ==
           direct_evidence->relative_times.size() &&
       direct_evidence->positions.size() == direct_evidence->points.size();
+  const bool trajectory_assurance_valid = direct_evidence_valid &&
+      direct_evidence->trajectory_assurance_complete &&
+      direct_evidence->trajectory_assurance.authorized() &&
+      !direct_evidence->trajectory_assurance.certificate_hash.empty() &&
+      direct_evidence->trajectory_assurance.local.status ==
+          iap::LocalMotionAssuranceStatus::SAFE &&
+      direct_evidence->trajectory_assurance.global.complete &&
+      direct_evidence->trajectory_assurance.global.within_budget;
+  const bool controlled_degraded = trajectory_assurance_valid &&
+      direct_evidence->trajectory_assurance.mode ==
+          iap::TrajectoryExecutionMode::CONTROLLED_DEGRADED_EXECUTION;
   if (direct_evidence_valid && !emitted_trajectory_timing_failure) {
     for (std::size_t index = 0; index < direct_evidence->points.size(); ++index) {
       const double t = direct_evidence->relative_times[index];
@@ -1160,8 +1196,13 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateFutureGate(
                iap::ForwardRiskFailureReason::SAFETY_LIMIT_EXCEEDED) &&
           direct.safety_state != iap::ForwardRiskSafetyState::UNKNOWN &&
           direct.gnss_supported && direct.lidar_supported &&
-          direct.fim_supported && finite(direct.prediction.fused.hpl) &&
-          finite(direct.prediction.fused.vpl);
+          direct.fim_supported &&
+          finite(trajectory_assurance_valid
+                     ? direct.prediction.gnss.hpl
+                     : direct.prediction.fused.hpl) &&
+          finite(trajectory_assurance_valid
+                     ? direct.prediction.gnss.vpl
+                     : direct.prediction.fused.vpl);
       pl.available = evaluated;
       pl.valid = evaluated;
       pl.stale = direct.failure_reason ==
@@ -1171,8 +1212,10 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateFutureGate(
           ? snapshot->stamp_s()
           : direct_evidence->execution_snapshot->evaluation_time_s;
       pl.query_tau_s = std::max(0.0, pl.query_time_s - authority_stamp_s);
-      pl.hpl_pred = direct.prediction.fused.hpl;
-      pl.vpl_pred = direct.prediction.fused.vpl;
+      pl.hpl_pred = trajectory_assurance_valid
+          ? direct.prediction.gnss.hpl : direct.prediction.fused.hpl;
+      pl.vpl_pred = trajectory_assurance_valid
+          ? direct.prediction.gnss.vpl : direct.prediction.fused.vpl;
       pl.generation_id = snapshot
           ? snapshot->generation_id() : direct_evidence->risk_generation;
       pl.reason = iap::forwardRiskFailureReasonName(direct.failure_reason);
@@ -1229,7 +1272,11 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateFutureGate(
 
     const double im = std::min(al.hal - pl.hpl_pred, al.val - pl.vpl_pred);
     viz_sample.im_min = im;
-    viz_sample.bad = im < config_.future_replan_margin_m;
+    const bool budgeted_global_exceedance = controlled_degraded &&
+        future.direct && future.direct->failure_reason ==
+            iap::ForwardRiskFailureReason::SAFETY_LIMIT_EXCEEDED;
+    viz_sample.bad = im < config_.future_replan_margin_m &&
+        !budgeted_global_exceedance;
     viz_sample.good = !viz_sample.bad;
     const std::string pl_reason =
         pl.reason.empty() ? std::string("ok") : pl.reason;
@@ -1241,7 +1288,7 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateFutureGate(
     if (!finite(status.future_min_im) || im < status.future_min_im) {
       status.future_min_im = im;
     }
-    if (im < config_.future_replan_margin_m) {
+    if (viz_sample.bad) {
       status.bad_count++;
       if (!finite(status.first_bad_tau)) {
         status.first_bad_tau = tau;
@@ -1278,7 +1325,7 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateFutureGate(
       status.first_bad_tau <= context.emergency_time_s) {
     status.reason = P5GateReason::FUTURE_BAD;
     status.action = P5GateAction::REQUEST_EMERGENCY_STOP_CANDIDATE;
-  } else if (finite(status.future_min_im) &&
+  } else if (!controlled_degraded && finite(status.future_min_im) &&
              status.future_min_im < config_.future_emergency_margin_m) {
     status.reason = P5GateReason::FUTURE_BAD;
     status.action = P5GateAction::REQUEST_EMERGENCY_STOP_CANDIDATE;
