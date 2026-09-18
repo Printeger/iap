@@ -144,7 +144,8 @@ if(BUILD_TESTING)
     test/test_p4_execution_risk_window.cpp
     src/p4_execution_risk_window.cpp
   )
-  ament_target_dependencies(test_p4_execution_risk_window Eigen3)
+  ament_target_dependencies(test_p4_execution_risk_window Eigen3 iap)
+  target_link_libraries(test_p4_execution_risk_window iap::iap)
   ament_add_gtest(test_p1_candidate_selection
     test/test_p1_candidate_selection.cpp
     src/p1_candidate_selection.cpp

@@ -17,6 +17,7 @@
 namespace ego_planner {
 
 struct P0ExecutionRiskSnapshot;
+struct P4CommittedRiskWindowPlan;
 
 enum class P4ActualCurveCertificationStatus {
   NOT_EVALUATED = 0,
@@ -144,6 +145,10 @@ struct P4DirectTrajectoryRiskEvidence {
   std::vector<std::uint64_t> evidence_point_ids;
   std::vector<std::uint64_t> satellite_window_ids;
   std::vector<iap::ForwardRiskPointResult> points;
+  // Present for braking-window authorization. The plan owns the immutable
+  // submit-time point/window responsibility layout used by every watchdog
+  // re-evaluation of this trajectory.
+  std::shared_ptr<const P4CommittedRiskWindowPlan> committed_window_plan;
   bool trajectory_assurance_complete = false;
   iap::TrajectoryAssuranceResult trajectory_assurance;
 

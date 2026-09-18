@@ -192,9 +192,15 @@ P4ExecutionRiskWindowLayout buildP4ExecutionRiskWindowLayout(
       auto& row = layout->rows[existing->second];
       row.nominal = row.nominal || nominal;
       row.braking = row.braking || braking;
-      if (braking && row.braking_curve_index ==
-                          std::numeric_limits<std::size_t>::max()) {
-        row.braking_curve_index = braking_curve_index;
+      if (braking && std::find(
+              row.braking_curve_indices.begin(),
+              row.braking_curve_indices.end(), braking_curve_index) ==
+              row.braking_curve_indices.end()) {
+        row.braking_curve_indices.push_back(braking_curve_index);
+        if (row.braking_curve_index ==
+            std::numeric_limits<std::size_t>::max()) {
+          row.braking_curve_index = braking_curve_index;
+        }
       }
       return;
     }
@@ -205,6 +211,7 @@ P4ExecutionRiskWindowLayout buildP4ExecutionRiskWindowLayout(
     row.nominal = nominal;
     row.braking = braking;
     row.braking_curve_index = braking_curve_index;
+    if (braking) row.braking_curve_indices.push_back(braking_curve_index);
     const std::size_t row_index = layout->rows.size();
     layout->rows.push_back(std::move(row));
     row_lookup.emplace(membership, row_index);
@@ -261,10 +268,225 @@ P4ExecutionRiskWindowLayout buildP4ExecutionRiskWindowLayout(
     identity << row.evidence_point_id << ';' << row.satellite_window_id
              << ';' << sampleKey(row.sample) << ';' << row.nominal << ';'
              << row.braking << ';';
+    for (const std::size_t curve_index : row.braking_curve_indices)
+      identity << curve_index << ',';
+    identity << ';';
   }
   out.identity_hash = fnvHash(identity.str());
   out.valid = true;
   out.reason = "complete";
+  return out;
+}
+
+P4CommittedRiskWindowPlan buildP4CommittedRiskWindowPlan(
+    const int trajectory_id, const std::int64_t trajectory_start_ns,
+    const std::string& control_points_hash,
+    const std::string& knot_vector_hash,
+    const std::vector<P4ExecutionRiskSample>& nominal_samples,
+    const std::vector<P4BrakingRiskCurveSamples>& braking_curves,
+    const P4ExecutionRiskWindowParams& params) {
+  P4CommittedRiskWindowPlan plan;
+  plan.trajectory_id = trajectory_id;
+  plan.trajectory_start_ns = trajectory_start_ns;
+  plan.control_points_hash = control_points_hash;
+  plan.knot_vector_hash = knot_vector_hash;
+  if (trajectory_id <= 0 || trajectory_start_ns <= 0 ||
+      control_points_hash.empty() || knot_vector_hash.empty()) {
+    plan.reason = "invalid_trajectory_identity";
+    return plan;
+  }
+  plan.layout = buildP4ExecutionRiskWindowLayout(
+      nominal_samples, braking_curves, params);
+  if (!plan.layout.valid) {
+    plan.reason = plan.layout.reason;
+    return plan;
+  }
+  plan.braking_curves = braking_curves;
+  plan.valid = true;
+  plan.reason = "complete";
+  return plan;
+}
+
+P4CommittedRiskWindowSelection selectP4CommittedRiskWindowRows(
+    const P4CommittedRiskWindowPlan& plan, const double current_time_s) {
+  P4CommittedRiskWindowSelection out;
+  if (!plan.valid || !plan.layout.valid || plan.layout.windows.empty() ||
+      !std::isfinite(current_time_s)) {
+    out.reason = "invalid_committed_window_plan";
+    return out;
+  }
+  const auto& committed_windows = plan.layout.windows;
+  if (current_time_s <
+          committed_windows.front().nominal_start_time_s - kTimeToleranceS ||
+      current_time_s >
+          committed_windows.back().nominal_end_time_s + kTimeToleranceS) {
+    out.reason = "trajectory_time_outside_committed_layout";
+    return out;
+  }
+
+  std::size_t current_window_index = committed_windows.size() - 1u;
+  for (std::size_t index = 0; index < committed_windows.size(); ++index) {
+    const bool final_window = index + 1u == committed_windows.size();
+    if (current_time_s + kTimeToleranceS >=
+            committed_windows[index].nominal_start_time_s &&
+        (current_time_s < committed_windows[index].nominal_end_time_s -
+                              kTimeToleranceS ||
+         final_window)) {
+      current_window_index = index;
+      break;
+    }
+  }
+  const std::size_t last_window_index = std::min(
+      current_window_index + 1u, committed_windows.size() - 1u);
+  out.window_layout_hash = plan.layout.identity_hash;
+  out.current_window_id = committed_windows[current_window_index].window_id;
+  if (last_window_index != current_window_index) {
+    out.next_window_id = committed_windows[last_window_index].window_id;
+    out.next_window_boundary_time_s =
+        committed_windows[current_window_index].nominal_end_time_s;
+  }
+
+  std::map<std::uint64_t, std::size_t> selected_window_indices;
+  for (std::size_t index = current_window_index;
+       index <= last_window_index; ++index) {
+    P4ExecutionRiskWindow window = committed_windows[index];
+    window.request_row_indices.clear();
+    selected_window_indices.emplace(window.window_id, out.windows.size());
+    out.windows.push_back(std::move(window));
+  }
+
+  for (std::size_t source_index = 0;
+       source_index < plan.layout.rows.size(); ++source_index) {
+    const auto& row = plan.layout.rows[source_index];
+    const auto selected_window = selected_window_indices.find(
+        row.satellite_window_id);
+    if (selected_window == selected_window_indices.end()) continue;
+    if (row.sample.relative_time_s + kTimeToleranceS < current_time_s)
+      continue;
+    // One physical point can be both a nominal sample and the endpoint of an
+    // earlier braking curve. Expiring that brake must not erase the nominal
+    // responsibility at the same fixed evidence point.
+    if (row.braking) {
+      bool reachable_braking_membership = false;
+      if (row.braking_curve_indices.empty()) {
+        out.reason = "committed_braking_curve_membership_missing";
+        return out;
+      }
+      for (const std::size_t curve_index : row.braking_curve_indices) {
+        if (curve_index >= plan.braking_curves.size()) {
+          out.reason = "committed_braking_curve_index_invalid";
+          return out;
+        }
+        reachable_braking_membership = reachable_braking_membership ||
+            plan.braking_curves[curve_index].anchor_time_s +
+                kTimeToleranceS >= current_time_s;
+      }
+      if (!row.nominal && !reachable_braking_membership)
+        continue;
+    }
+    const std::size_t selected_row_index = out.rows.size();
+    out.rows.push_back(row);
+    out.source_row_indices.push_back(source_index);
+    out.windows[selected_window->second].request_row_indices.push_back(
+        selected_row_index);
+  }
+  if (out.rows.empty()) {
+    out.reason = "no_reachable_committed_window_rows";
+    return out;
+  }
+  for (const auto& window : out.windows) {
+    if (window.request_row_indices.empty()) {
+      out.reason = "selected_committed_window_has_no_reachable_rows";
+      return out;
+    }
+  }
+  out.valid = true;
+  out.reason = "complete";
+  return out;
+}
+
+std::vector<std::size_t> reachableP4CommittedBrakingCurveIndices(
+    const P4CommittedRiskWindowPlan& plan,
+    const P4CommittedRiskWindowSelection& selection,
+    const double current_time_s) {
+  std::set<std::size_t> indices;
+  if (!plan.valid || !selection.valid || !std::isfinite(current_time_s))
+    return {};
+  for (const auto& row : selection.rows) {
+    for (const std::size_t curve_index : row.braking_curve_indices) {
+      if (curve_index < plan.braking_curves.size() &&
+          plan.braking_curves[curve_index].anchor_time_s +
+              kTimeToleranceS >= current_time_s) {
+        indices.insert(curve_index);
+      }
+    }
+  }
+  return {indices.begin(), indices.end()};
+}
+
+P4RuntimeWindowEvidence buildP4RuntimeWindowEvidence(
+    const std::uint64_t sequence_id,
+    const P4CommittedRiskWindowPlan& plan,
+    const P4CommittedRiskWindowSelection& selection,
+    const std::uint64_t execution_snapshot_id,
+    const std::uint64_t occupancy_generation,
+    const std::uint64_t support_generation,
+    const std::uint64_t gnss_epoch_identity,
+    const std::uint64_t integrity_generation,
+    const double evaluation_time_s,
+    const iap::ForwardRiskBatchResult& result) {
+  P4RuntimeWindowEvidence out;
+  out.sequence_id = sequence_id;
+  out.complete = result.complete && selection.valid &&
+      result.points.size() == selection.rows.size();
+  out.reason = result.complete
+      ? (out.complete ? "complete" : "result_row_count_mismatch")
+      : iap::forwardRiskFailureReasonName(result.failure_reason);
+  out.trajectory_id = plan.trajectory_id;
+  out.trajectory_start_ns = plan.trajectory_start_ns;
+  out.control_points_hash = plan.control_points_hash;
+  out.knot_vector_hash = plan.knot_vector_hash;
+  out.window_layout_hash = plan.layout.identity_hash;
+  out.execution_snapshot_id = execution_snapshot_id;
+  out.occupancy_generation = occupancy_generation;
+  out.support_generation = support_generation;
+  out.gnss_epoch_identity = gnss_epoch_identity;
+  out.integrity_generation = integrity_generation;
+  out.evaluation_time_s = evaluation_time_s;
+  out.current_window_id = selection.current_window_id;
+  out.next_window_id = selection.next_window_id;
+  out.active_windows = selection.windows;
+  out.rows = selection.rows;
+  out.windows = result.windows;
+  out.points = result.points;
+  out.timing = result.timing;
+
+  const auto worse = [&out](const std::size_t lhs,
+                            const std::size_t rhs) {
+    if (lhs >= out.points.size()) return rhs;
+    if (rhs >= out.points.size()) return lhs;
+    const double lhs_ratio = out.points[lhs].safety_ratio;
+    const double rhs_ratio = out.points[rhs].safety_ratio;
+    if (!std::isfinite(lhs_ratio)) return lhs;
+    if (!std::isfinite(rhs_ratio)) return rhs;
+    return rhs_ratio > lhs_ratio ? rhs : lhs;
+  };
+  for (std::size_t index = 0;
+       index < out.points.size() && index < out.rows.size(); ++index) {
+    if (!out.rows[index].nominal) continue;
+    out.global_worst_nominal_index = worse(
+        out.global_worst_nominal_index, index);
+  }
+  out.per_window_worst.reserve(out.active_windows.size());
+  for (const auto& window : out.active_windows) {
+    P4RuntimeWindowWorstPoint worst;
+    worst.satellite_window_id = window.window_id;
+    for (const std::size_t row_index : window.request_row_indices)
+      worst.result_index = worse(worst.result_index, row_index);
+    if (worst.result_index < out.points.size())
+      worst.safety_ratio = out.points[worst.result_index].safety_ratio;
+    out.per_window_worst.push_back(std::move(worst));
+  }
   return out;
 }
 
