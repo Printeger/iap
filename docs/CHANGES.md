@@ -3,6 +3,43 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(stable-runtime-braking-window-evidence): IAP-RQ-312 / IAP-RQ-320 /
+  IAP-RQ-400 / IAP-RQ-410 — freeze the complete braking-window plan when the
+  actual B-spline is committed. Watchdog checks now select original current
+  and next windows from fixed absolute samples, transitions and braking
+  anchors without redrawing boundaries, renumbering windows or replacing the
+  commit-time P5 certificate. Each new occupancy/GNSS generation recomputes
+  the same physical lattice. Runtime decisions advance to execution-event v10
+  and reference immutable batch/window/satellite evidence written before
+  continue, UNKNOWN, revoke or brake, including PL decomposition, exact sets,
+  per-satellite LOS/support/kappa/sigma/exclusion state, geometry condition and
+  timing. A latest-wins background four-cell probe evaluates old/new map and
+  epoch on the fixed layout and separately identifies temporal growth; stale
+  prior snapshots remain explicitly non-comparable. PL/AL, BDS, P5, the one-
+  second map timeout and the 150 ms authority budget are unchanged.
+  Review hardening makes the probe execution-snapshot driven rather than
+  RiskGrid-generation driven, binds the previous production time to that same
+  successful snapshot, hashes the full fixed-row PL/support/sigma/geometry
+  evidence for classification, and writes every compared cell at the same
+  union of physical focus points. Early snapshot/support/Integrity failures
+  now retain submit-time physical decomposition as explicitly incomplete
+  current-attempt evidence before revoke or braking; it is diagnostic context,
+  never reused as motion authority. Runtime windowed checks no longer create a
+  moving suffix sample lattice.
+  A physical fixed sample now retains every braking-curve responsibility that
+  reaches it; an expired earlier brake can no longer erase a colocated nominal
+  endpoint or a later reachable brake. The post-fix default-BDS/windowed
+  forest smoke published one LIMITED_PREFIX, moved `2.877 m`, and held the
+  approved endpoint. Across 118 runtime evidence batches its layout changed
+  zero times, every execution event (including the terminal hold) resolved a
+  complete evidence sequence, and the runtime suffix checks measured
+  `10.969 ms` p95 / `15.235 ms` max. Full braking-window batches measured
+  `61.661 ms` p95 / `68.457 ms` max, below both their `75 ms` target and the
+  `150 ms` authority deadline. The runtime-window contract passed; the overall
+  development runner remained red only on three separate sensor/render
+  performance gates (`lidar_render_p95_exceeded`, a LiDAR frame interval above
+  `0.2 s`, and planner-local-map current-frame latency above `10 ms`). No
+  formal route was selected.
 - feat(global-exposure-stop-attribution): IAP-RQ-312 / IAP-RQ-320 /
   IAP-RQ-400 / IAP-RQ-410 — add structured decision-time diagnostics for
   global-navigation stops without changing PL, AL, exposure thresholds or

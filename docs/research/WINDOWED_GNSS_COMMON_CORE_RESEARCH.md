@@ -132,6 +132,13 @@ windows with identical cores should share exact computations, but retain both
 logical window IDs and both certificates: computation identity and safety
 responsibility are different things.
 
+The same rule applies inside one logical window layout when physical samples
+coincide. A nominal sample may also be the endpoint of several braking curves.
+The fixed plan therefore stores the complete set of braking-curve memberships
+for that physical point. Runtime reachability may retire an old membership,
+but it must retain the point when either its nominal responsibility or any
+later braking responsibility remains reachable.
+
 This dual check makes a set change conservative without imposing the new set
 on the whole past route or the old set on the whole future route.  If the
 overlap has too few satellites, degenerate geometry, stale evidence, or an
@@ -280,6 +287,17 @@ prepared successors and P5 all consume the same direct evidence format.
 Runtime evaluates only the current window, next overlap and brakes that can
 still be selected; RiskGrid remains a search hint.
 
+The committed layout is now also the cross-generation experimental control.
+It is built once at publication from absolute trajectory time and fixed brake
+anchors. Runtime selection retains its original evidence and window IDs and
+never creates a moving watchdog lattice. Every new map/GNSS tuple therefore
+recomputes the same physical questions. Runtime batch, window and limited
+satellite CSVs are written before the state machine acts. A background
+latest-wins four-cell replay holds the layout, evaluation time and horizon
+vector fixed while swapping old/new map and epoch; a separate old-tuple replay
+at the previous production time isolates temporal growth. Stale old evidence
+is explicitly non-comparable rather than silently revived.
+
 This implementation deliberately claims rolling instantaneous integrity with
 an always-certified stop, not a 16 s accumulated probability bound. The
 unchanged `anchor + non-negative advisory delta` model and operation-level
@@ -333,3 +351,15 @@ VPL were `84.286/110.836 m`, producing a `26.550 m` non-negative spatial
 increment. Thus the remaining formal-route blocker is a real direct vertical
 risk result under the unchanged advisory model, not whole-route satellite
 deletion, RiskGrid interpolation, or the direct-query budget.
+
+The final stable-layout run
+`run-20260918T124110Z-276344` again moved `2.877 m` and reached the approved
+endpoint. Its 118 runtime batches had zero layout changes, zero incomplete
+identities and zero missing event references; the terminal hold cited the
+same complete causal evidence as the final safe watchdog result. Runtime
+suffix checks were `10.969 ms` p95 / `15.235 ms` maximum, while complete
+braking-window certification was `61.661 ms` p95 / `68.457 ms` maximum. The
+runtime-window acceptance contract therefore passed. The overall development
+runner remained red on independent LiDAR render/frame-gap and registered
+current-frame latency gates, so this result is an executed endpoint smoke, not
+a claim that all live qualification gates or formal-route selection pass.

@@ -109,6 +109,19 @@ For each candidate trajectory τ:
   approved endpoint or deadline. P4 and P5 bind both the deterministic window
   layout and the exact satellite IDs used by every window; policy/layout/set
   mismatches fail closed, including successor reauthorization.
+  Window responsibility is frozen once, when that exact curve is committed:
+  absolute sample times, braking anchors, evidence IDs, original window IDs
+  and the layout hash do not move during execution. The watchdog merely
+  selects the current/next committed rows. New maps and GNSS epochs update the
+  physical evidence at those same points; they do not redraw the experiment.
+  Before any runtime continue/reject/brake transition, P4 persists the full
+  window evidence and makes the execution event reference it. A diagnostic
+  background four-cell replay then separates map/support change, GNSS
+  epoch/set change, normal time growth and mixed interaction without entering
+  the authority path. The replay is triggered by execution-snapshot identity,
+  not RiskGrid publication, and compares every cell at the same physical focus
+  rows. Its classification includes exact PL/support/sigma/geometry evidence,
+  so an unchanged unsafe index cannot hide a numerical jump as `STABLE`.
   A bounded history of four completed execution snapshots is retained only to
   choose the newest result causal to the current ROS evaluation stamp; the
   work channel itself remains single-slot/latest-wins and every selected

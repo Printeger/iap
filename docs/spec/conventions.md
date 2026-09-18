@@ -162,6 +162,15 @@
   binds the window-layout hash and the exact per-window satellite-set hash.
   Successor reauthorization and P5 must reject a policy/layout/set mismatch;
   a legacy common-core result cannot be relabelled as a window certificate.
+  The window layout is constructed exactly once when the actual B-spline is
+  committed. Its absolute trajectory times, evidence-point IDs, original
+  window IDs, transition duplicates, braking curves and layout hash are
+  immutable for that trajectory lifetime. Runtime selects existing current
+  and next windows and discards only rows that can no longer be reached; it
+  must not move a boundary, create a watchdog-time sample or renumber a
+  window. A new occupancy generation or GNSS epoch recomputes LOS, support,
+  sigma, geometry and PL on that same physical lattice. A layout-hash change
+  inside one trajectory is an internal certificate error, not GNSS evidence.
 - The optional GNSS LOS clearance transition is part of the predictor and
   snapshot identity. For width `w>0`, an occupancy generation owns a truncated
   distance field to occupied voxel surfaces; the LOS proximity is
@@ -314,6 +323,24 @@
   formal-window failure therefore activates its existing certified brake
   immediately; the LIMITED_PREFIX marginal confirmation state machine is not
   widened to formal routes. RiskGrid never authorizes a window.
+- Every braking-window runtime decision first materializes an immutable
+  evidence record and only then changes execution state. The record binds the
+  actual curve and fixed layout to execution-snapshot, occupancy/support,
+  GNSS-epoch, Integrity and policy identities, and retains active windows,
+  worst nominal/per-window samples, PL decomposition, exact satellite sets,
+  per-satellite LOS/support/kappa/sigma/exclusion state, geometry condition and
+  timing. SAFE, real UNSAFE, incomplete/UNKNOWN and support/provider failures
+  all follow this order; an execution event references the evidence sequence.
+  The commit-time P5 certificate is stored separately from later runtime
+  evidence and cannot be overwritten by a watchdog recheck.
+- The optional fixed-layout generation probe is diagnostic-only and runs on a
+  bounded latest-wins background channel. At one evaluation time it evaluates
+  old-map/old-epoch, new-map/old-epoch, old-map/new-epoch and
+  new-map/new-epoch on the exact committed rows, with a separate previous-time
+  replay for temporal growth. It reports `MAP_CONTENT_OR_SUPPORT`,
+  `GNSS_EPOCH_OR_SET`, `TIME_GROWTH`, `INTERACTION/MIXED`, `STABLE` or
+  `NOT_COMPARABLE_STALE_PREVIOUS`; it never authorizes motion or delays a
+  revoke/brake.
 - A complete LIMITED_PREFIX with a certified braking library distinguishes
   `SAFE`, `MARGINAL_UNSAFE_ARMED`, `CONFIRMED_UNSAFE_BRAKING` and
   `HARD_UNSAFE_BRAKING`. Only a future direct-risk ratio
@@ -366,6 +393,12 @@
   `OCCUPANCY_BUILD_LAG`, `SNAPSHOT_QUEUE_LAG`, then
   `RISK_GRID_BUILD_LAG`. Grid lag affects search only and cannot revoke a
   trajectory independently proven safe by a fresh execution snapshot.
+- Cross-generation fixed-layout replay is driven by execution-snapshot
+  identity, not RiskGrid publication. Its prior production time must belong to
+  the same saved successful execution snapshot. Classification compares the
+  complete fixed-row PL decomposition, support, satellite sigma/kappa and
+  geometry identity; a stable unsafe boundary alone is not `STABLE`. Detailed
+  cells are emitted at the same union of physical focus rows.
 - Trusted support keeps at most 64 original current-frame envelopes inside the
   unchanged 1.0 s hard window. Each trajectory sample selects the newest
   genuinely covering envelope and computes observation age from its original
