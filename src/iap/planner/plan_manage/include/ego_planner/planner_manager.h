@@ -4,14 +4,17 @@
 #include <stdlib.h>
 
 #include <atomic>
+#include <condition_variable>
 #include <cstdint>
 #include <cmath>
 #include <functional>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <set>
 #include <string>
+#include <thread>
 
 #include <bspline_opt/bspline_optimizer.h>
 #include <bspline_opt/p4_forward_route.h>
@@ -26,6 +29,7 @@
 #include <traj_utils/planning_visualization.h>
 #include <iap/predictor/predictor_types.hpp>
 #include <ego_planner/direct_trajectory_risk_evidence.h>
+#include <ego_planner/p4_execution_risk_window.h>
 
 namespace ego_planner
 {
@@ -109,6 +113,9 @@ namespace ego_planner
     GNSS_EPOCH_OR_SATELLITE_SET,
     RISK_GRID_INTERPOLATION,
     MIXED,
+    TIME_GROWTH,
+    INTERACTION_MIXED,
+    NOT_COMPARABLE_STALE_PREVIOUS,
   };
 
   struct P4LimitedPrefixReplacementInput
@@ -174,6 +181,10 @@ namespace ego_planner
     iap::ForwardRiskFailureReason failure_reason =
         iap::ForwardRiskFailureReason::NONE;
     uint64_t satellite_set_hash = 0;
+    // Exact fixed-row physical evidence (PL decomposition, support, geometry,
+    // and per-satellite state).  This makes a numerical jump observable even
+    // when the first unsafe row and satellite mask do not change.
+    std::string evidence_identity;
     iap::RiskGridInterpolationStatus interpolation_status =
         iap::RiskGridInterpolationStatus::NOT_EVALUATED;
     std::string reason = "none";
@@ -192,6 +203,15 @@ namespace ego_planner
       const P4GenerationBoundarySignature &new_map_new_epoch,
       const P4GenerationBoundarySignature &old_grid,
       const P4GenerationBoundarySignature &new_grid);
+
+  P4GenerationChangeClass classifyP4FixedLayoutGenerationProbe(
+      const P4GenerationBoundarySignature &old_map_old_epoch,
+      const P4GenerationBoundarySignature &new_map_old_epoch,
+      const P4GenerationBoundarySignature &old_map_new_epoch,
+      const P4GenerationBoundarySignature &new_map_new_epoch,
+      const P4GenerationBoundarySignature &previous_production,
+      bool previous_snapshot_comparable,
+      bool fixed_layout_comparable);
 
   const char *p4GenerationChangeClassName(P4GenerationChangeClass value);
 
@@ -315,6 +335,7 @@ namespace ego_planner
     std::string window_layout_hash;
     std::size_t window_count = 0;
     std::uint64_t first_failure_window_id = 0;
+    std::uint64_t runtime_window_evidence_sequence_id = 0;
     // Decision-time global-navigation exposure. Certificate-level values
     // describe what was admitted originally; these fields describe the exact
     // watchdog evaluation that allowed or stopped the committed trajectory.
@@ -486,12 +507,18 @@ namespace ego_planner
     std::shared_ptr<const P0PlanningSnapshot>
     acquireCurrentP0PlanningSnapshot() const;
     const P4DirectTrajectoryRiskEvidence& latestP4DirectRiskEvidence() const {
-      return p4_direct_risk_evidence_;
+      return p4_committed_direct_risk_evidence_.complete
+          ? p4_committed_direct_risk_evidence_
+          : p4_direct_risk_evidence_;
+    }
+    const P4RuntimeWindowEvidence& latestP4RuntimeWindowEvidence() const {
+      return p4_last_runtime_window_evidence_;
     }
     void setP4DirectRiskEvidenceForTest(
         P4DirectTrajectoryRiskEvidence evidence)
     {
       p4_direct_risk_evidence_ = std::move(evidence);
+      p4_committed_direct_risk_evidence_ = p4_direct_risk_evidence_;
     }
     double currentPlanningQueryBaseTime() const { return planning_risk_context_.query_base_time_s; }
     uint64_t currentPlanningGenerationId() const { return planning_risk_context_.generation_id; }
@@ -726,6 +753,13 @@ namespace ego_planner
     };
     P4RuntimeRiskCache p4_runtime_risk_cache_;
     P4DirectTrajectoryRiskEvidence p4_direct_risk_evidence_;
+    // The original full-curve evidence remains available to P5 and audit;
+    // runtime batches are generation-bound re-evaluations of its fixed plan.
+    P4DirectTrajectoryRiskEvidence p4_committed_direct_risk_evidence_;
+    std::shared_ptr<const P4CommittedRiskWindowPlan>
+        p4_committed_risk_window_plan_;
+    P4RuntimeWindowEvidence p4_last_runtime_window_evidence_;
+    std::atomic<std::uint64_t> next_p4_runtime_window_evidence_sequence_{1};
     std::optional<P4PreparedSuccessor> p4_prepared_successor_;
     std::optional<P4ForwardDecision> p4_actual_curve_feedback_override_;
     std::vector<P4BrakingAnchor> p4_braking_anchors_;
@@ -765,6 +799,10 @@ namespace ego_planner
       int64_t runtime_lineage_start_ns = 0;
       P4RuntimeRiskCache runtime_risk_cache;
       P4DirectTrajectoryRiskEvidence direct_risk_evidence;
+      P4DirectTrajectoryRiskEvidence committed_direct_risk_evidence;
+      std::shared_ptr<const P4CommittedRiskWindowPlan>
+          committed_risk_window_plan;
+      P4RuntimeWindowEvidence last_runtime_window_evidence;
       std::optional<P4PreparedSuccessor> prepared_successor;
       std::vector<P4BrakingAnchor> braking_anchors;
       std::optional<P4PendingBrakingTransition> pending_braking_anchor;
@@ -774,11 +812,32 @@ namespace ego_planner
     P4ExecutionCommitmentBackup p4_execution_commitment_backup_;
     std::atomic<std::uint64_t> next_p4_braking_certificate_id_{1};
     bool p4_generation_probe_enable_ = false;
-    uint64_t last_p4_generation_probe_risk_generation_ = 0;
-    std::shared_ptr<const P0PlanningSnapshot>
+    uint64_t last_p4_generation_probe_execution_snapshot_id_ = 0;
+    double p4_generation_probe_previous_evaluation_time_s_ =
+        std::numeric_limits<double>::quiet_NaN();
+    std::shared_ptr<const P0ExecutionRiskSnapshot>
         p4_generation_probe_previous_snapshot_;
     std::shared_ptr<const P0ExecutionRiskSnapshot>
         p4_confirmation_previous_execution_snapshot_;
+    struct P4FixedLayoutGenerationProbeTask
+    {
+      double evaluation_time_s = std::numeric_limits<double>::quiet_NaN();
+      double previous_production_evaluation_time_s =
+          std::numeric_limits<double>::quiet_NaN();
+      std::string csv_prefix;
+      int trajectory_id = 0;
+      std::int64_t trajectory_start_ns = 0;
+      std::shared_ptr<const P0ExecutionRiskSnapshot> previous;
+      std::shared_ptr<const P0ExecutionRiskSnapshot> current;
+      std::shared_ptr<const P4CommittedRiskWindowPlan> plan;
+      P4CommittedRiskWindowSelection selection;
+    };
+    std::mutex p4_generation_probe_worker_mutex_;
+    std::condition_variable p4_generation_probe_worker_cv_;
+    std::optional<P4FixedLayoutGenerationProbeTask>
+        p4_generation_probe_pending_task_;
+    std::thread p4_generation_probe_worker_thread_;
+    bool p4_generation_probe_worker_stopping_ = false;
     Eigen::Vector3d p4_last_decision_position_ = Eigen::Vector3d::Constant(
         std::numeric_limits<double>::quiet_NaN());
     Eigen::Vector3d p4_last_decision_target_ = Eigen::Vector3d::Constant(
@@ -798,9 +857,14 @@ namespace ego_planner
     bool appendP4ExecutionEvent(
         const std::string &event, double stamp_s,
         const P4ExecutionCheckDiagnostics &diagnostics);
+    bool appendP4RuntimeWindowEvidence(
+        const P4RuntimeWindowEvidence &evidence);
     bool appendP4GenerationProbe(
         double evaluation_time_s,
-        const std::shared_ptr<const P0PlanningSnapshot> &current);
+        const std::shared_ptr<const P0ExecutionRiskSnapshot> &current);
+    void p4GenerationProbeWorkerLoop();
+    bool writeP4FixedLayoutGenerationProbe(
+        const P4FixedLayoutGenerationProbeTask &task);
     bool appendP4MarginalRiskReplay(
         double evaluation_time_s, const Eigen::Vector3d &position,
         double absolute_query_time_s,

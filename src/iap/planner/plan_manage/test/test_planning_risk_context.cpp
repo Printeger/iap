@@ -284,6 +284,73 @@ TEST(P4GenerationProbeTest, UnknownAndIncompleteAreFirstNonSafeBoundaries)
   EXPECT_EQ(ego_planner::firstP4NonSafeIndex(batch), -1);
 }
 
+TEST(P4GenerationProbeTest, ClassifiesFixedLayoutTimeAndStaleSeparately)
+{
+  ego_planner::P4GenerationBoundarySignature safe;
+  safe.index = -1;
+  ego_planner::P4GenerationBoundarySignature time_changed = safe;
+  time_changed.index = 8;
+  time_changed.safety_state = iap::ForwardRiskSafetyState::UNSAFE;
+  time_changed.ranking_state = iap::ForwardRiskRankingState::COMPARABLE;
+  time_changed.failure_reason =
+      iap::ForwardRiskFailureReason::SAFETY_LIMIT_EXCEEDED;
+
+  EXPECT_EQ(ego_planner::classifyP4FixedLayoutGenerationProbe(
+                safe, safe, safe, safe, time_changed, true, true),
+            ego_planner::P4GenerationChangeClass::TIME_GROWTH);
+  EXPECT_EQ(ego_planner::classifyP4FixedLayoutGenerationProbe(
+                safe, safe, safe, safe, safe, false, true),
+            ego_planner::P4GenerationChangeClass::
+                NOT_COMPARABLE_STALE_PREVIOUS);
+
+  auto map_changed = safe;
+  map_changed.index = 3;
+  map_changed.failure_reason =
+      iap::ForwardRiskFailureReason::OCCUPANCY_UNKNOWN;
+  EXPECT_EQ(ego_planner::classifyP4FixedLayoutGenerationProbe(
+                safe, map_changed, safe, map_changed, safe, true, true),
+            ego_planner::P4GenerationChangeClass::MAP_CONTENT_OR_SUPPORT);
+
+  auto epoch_changed = safe;
+  epoch_changed.index = 5;
+  epoch_changed.satellite_set_hash = 77;
+  EXPECT_EQ(ego_planner::classifyP4FixedLayoutGenerationProbe(
+                safe, safe, epoch_changed, epoch_changed, safe, true, true),
+            ego_planner::P4GenerationChangeClass::
+                GNSS_EPOCH_OR_SATELLITE_SET);
+  EXPECT_EQ(ego_planner::classifyP4FixedLayoutGenerationProbe(
+                safe, map_changed, epoch_changed, time_changed,
+                safe, true, true),
+            ego_planner::P4GenerationChangeClass::INTERACTION_MIXED);
+}
+
+TEST(P4GenerationProbeTest,
+     FixedLayoutNumericalEvidenceChangesAreNotReportedStable)
+{
+  ego_planner::P4GenerationBoundarySignature baseline;
+  baseline.index = -1;
+  baseline.satellite_set_hash = 17;
+  baseline.evidence_identity = "pl-components-a";
+  auto map_changed = baseline;
+  map_changed.evidence_identity = "pl-components-map";
+  auto epoch_changed = baseline;
+  epoch_changed.evidence_identity = "pl-components-epoch";
+
+  EXPECT_EQ(ego_planner::classifyP4FixedLayoutGenerationProbe(
+                baseline, map_changed, baseline, map_changed,
+                baseline, true, true),
+            ego_planner::P4GenerationChangeClass::MAP_CONTENT_OR_SUPPORT);
+  EXPECT_EQ(ego_planner::classifyP4FixedLayoutGenerationProbe(
+                baseline, baseline, epoch_changed, epoch_changed,
+                baseline, true, true),
+            ego_planner::P4GenerationChangeClass::
+                GNSS_EPOCH_OR_SATELLITE_SET);
+  EXPECT_EQ(ego_planner::classifyP4FixedLayoutGenerationProbe(
+                baseline, baseline, baseline, baseline,
+                epoch_changed, true, true),
+            ego_planner::P4GenerationChangeClass::TIME_GROWTH);
+}
+
 TEST(P4TerminalStopProductionTest,
      RetimesForInteriorDynamicsButRejectsInfeasibleStartState)
 {
@@ -1783,7 +1850,20 @@ TEST(P4ForwardTerminalLineageTest,
   EXPECT_FALSE(continuing.current_integrity_safe);
   EXPECT_EQ(continuing.reason, "runtime_execution_contract_valid");
   EXPECT_FALSE(continuing.endpoint_reached);
+  EXPECT_NE(continuing.runtime_window_evidence_sequence_id, 0u);
+  EXPECT_TRUE(manager.latestP4RuntimeWindowEvidence().complete);
   EXPECT_EQ(manager.local_data_.start_time_.nanoseconds(), committed_start);
+  const auto cached_continuing =
+      manager.validateCommittedP4TrajectoryExecution(
+          during_execution_s + 0.01,
+          manager.local_data_.position_traj_.evaluateDeBoorT(
+              during_execution_s + 0.01 -
+              manager.local_data_.start_time_.seconds()));
+  EXPECT_TRUE(cached_continuing.allowed) << cached_continuing.reason;
+  EXPECT_EQ(cached_continuing.reason, "runtime_execution_contract_valid");
+  EXPECT_EQ(cached_continuing.runtime_window_evidence_sequence_id,
+            continuing.runtime_window_evidence_sequence_id);
+  EXPECT_TRUE(manager.latestP4RuntimeWindowEvidence().complete);
 
   auto marginal_nominal = manager.local_data_.position_traj_;
   const double marginal_start_s = manager.local_data_.start_time_.seconds();
@@ -1960,6 +2040,9 @@ TEST(P4ForwardTerminalLineageTest,
   EXPECT_TRUE(at_endpoint.allowed) << at_endpoint.reason;
   EXPECT_TRUE(at_endpoint.endpoint_reached);
   EXPECT_EQ(at_endpoint.reason, "approved_endpoint_reached");
+  EXPECT_NE(at_endpoint.runtime_window_evidence_sequence_id, 0u);
+  EXPECT_TRUE(manager.latestP4RuntimeWindowEvidence().complete);
+  EXPECT_EQ(manager.latestP4RuntimeWindowEvidence().reason, "complete");
 
   manager.setPlanningRiskContextForTest(
       snapshot, 10.0, committed_occupancy, directRiskCallback(0.5),
@@ -2081,7 +2164,7 @@ TEST(P4ForwardTerminalLineageTest,
       }));
   EXPECT_TRUE(std::any_of(
       execution_rows.begin(), execution_rows.end(), [](const auto &row) {
-        return row.at("schema_version") == "p4_execution_event_v9" &&
+        return row.at("schema_version") == "p4_execution_event_v10" &&
             row.at("event") == "FAILSAFE_BRAKING_SCHEDULED" &&
             row.at("current_risk_generation") == "2" &&
             std::stod(row.at("violation_hpl_m")) >=
@@ -2197,6 +2280,12 @@ TEST(P4ForwardTerminalLineageTest,
   EXPECT_TRUE(terminal_stale.failsafe_braking_available);
   EXPECT_EQ(terminal_stale.reason.rfind("failsafe_braking_scheduled", 0), 0u)
       << terminal_stale.reason;
+  EXPECT_NE(terminal_stale.runtime_window_evidence_sequence_id, 0u);
+  EXPECT_GT(terminal_stale.window_count, 0u);
+  EXPECT_NE(terminal_stale.common_satellite_ids, "none");
+  EXPECT_FALSE(manager.latestP4RuntimeWindowEvidence().points.empty());
+  EXPECT_EQ(manager.latestP4RuntimeWindowEvidence().reason,
+            "runtime_integrity_stale_or_frame_invalid");
   const auto terminal_brake = manager.pendingP4GuardBrakingCommand();
   ASSERT_TRUE(terminal_brake.has_value());
   auto terminal_braking_curve = terminal_brake->trajectory;

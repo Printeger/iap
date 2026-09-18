@@ -542,6 +542,7 @@ namespace ego_planner
         ranking_state == other.ranking_state &&
         failure_reason == other.failure_reason &&
         satellite_set_hash == other.satellite_set_hash &&
+        evidence_identity == other.evidence_identity &&
         interpolation_status == other.interpolation_status &&
         reason == other.reason;
   }
@@ -575,6 +576,40 @@ namespace ego_planner
     return P4GenerationChangeClass::STABLE;
   }
 
+  P4GenerationChangeClass classifyP4FixedLayoutGenerationProbe(
+      const P4GenerationBoundarySignature &old_map_old_epoch,
+      const P4GenerationBoundarySignature &new_map_old_epoch,
+      const P4GenerationBoundarySignature &old_map_new_epoch,
+      const P4GenerationBoundarySignature &new_map_new_epoch,
+      const P4GenerationBoundarySignature &previous_production,
+      const bool previous_snapshot_comparable,
+      const bool fixed_layout_comparable)
+  {
+    if (!previous_snapshot_comparable || !fixed_layout_comparable)
+      return P4GenerationChangeClass::NOT_COMPARABLE_STALE_PREVIOUS;
+    const bool map_changed = old_map_old_epoch != new_map_old_epoch;
+    const bool gnss_changed = old_map_old_epoch != old_map_new_epoch;
+    if (map_changed && gnss_changed)
+      return P4GenerationChangeClass::INTERACTION_MIXED;
+    if (map_changed)
+    {
+      if (new_map_new_epoch != new_map_old_epoch)
+        return P4GenerationChangeClass::INTERACTION_MIXED;
+      return P4GenerationChangeClass::MAP_CONTENT_OR_SUPPORT;
+    }
+    if (gnss_changed)
+    {
+      if (new_map_new_epoch != old_map_new_epoch)
+        return P4GenerationChangeClass::INTERACTION_MIXED;
+      return P4GenerationChangeClass::GNSS_EPOCH_OR_SATELLITE_SET;
+    }
+    if (new_map_new_epoch != old_map_old_epoch)
+      return P4GenerationChangeClass::INTERACTION_MIXED;
+    if (previous_production != new_map_new_epoch)
+      return P4GenerationChangeClass::TIME_GROWTH;
+    return P4GenerationChangeClass::STABLE;
+  }
+
   const char *p4GenerationChangeClassName(
       const P4GenerationChangeClass value)
   {
@@ -584,10 +619,15 @@ namespace ego_planner
       case P4GenerationChangeClass::MAP_CONTENT_OR_SUPPORT:
         return "MAP_CONTENT_OR_SUPPORT";
       case P4GenerationChangeClass::GNSS_EPOCH_OR_SATELLITE_SET:
-        return "GNSS_EPOCH_OR_SATELLITE_SET";
+        return "GNSS_EPOCH_OR_SET";
       case P4GenerationChangeClass::RISK_GRID_INTERPOLATION:
         return "RISK_GRID_INTERPOLATION";
       case P4GenerationChangeClass::MIXED: return "MIXED";
+      case P4GenerationChangeClass::TIME_GROWTH: return "TIME_GROWTH";
+      case P4GenerationChangeClass::INTERACTION_MIXED:
+        return "INTERACTION/MIXED";
+      case P4GenerationChangeClass::NOT_COMPARABLE_STALE_PREVIOUS:
+        return "NOT_COMPARABLE_STALE_PREVIOUS";
     }
     return "MIXED";
   }
@@ -1423,6 +1463,14 @@ namespace ego_planner
 
   EGOPlannerManager::~EGOPlannerManager()
   {
+    {
+      std::lock_guard<std::mutex> lock(p4_generation_probe_worker_mutex_);
+      p4_generation_probe_worker_stopping_ = true;
+      p4_generation_probe_pending_task_.reset();
+    }
+    p4_generation_probe_worker_cv_.notify_all();
+    if (p4_generation_probe_worker_thread_.joinable())
+      p4_generation_probe_worker_thread_.join();
     // Stop new map-generation notifications before releasing the runtime.
     // An observer already copied by GridMap owns only a weak reference and
     // therefore either completes with a live runtime or observes expiration.
@@ -1823,6 +1871,10 @@ namespace ego_planner
                              : std::numeric_limits<double>::quiet_NaN();
           });
     }
+
+    if (p4_generation_probe_enable_)
+      p4_generation_probe_worker_thread_ = std::thread(
+          &EGOPlannerManager::p4GenerationProbeWorkerLoop, this);
 
     visualization_ = vis;
   }
@@ -3734,6 +3786,8 @@ namespace ego_planner
     std::vector<P4BrakingAnchor> prepared_braking_anchors;
     std::vector<P4BrakingRiskCurveSamples> braking_window_curves;
     P4ExecutionRiskWindowLayout direct_window_layout;
+    std::shared_ptr<const P4CommittedRiskWindowPlan>
+        prepared_committed_window_plan;
     if (use_braking_windows)
     {
       const int anchor_count = std::max(
@@ -3867,12 +3921,20 @@ namespace ego_planner
       window_params.transition_overlap_s =
           p4_window_transition_overlap_s_;
       window_params.maximum_anchor_gap_s = 0.2;
-      direct_window_layout = buildP4ExecutionRiskWindowLayout(
+      auto committed_window_plan = buildP4CommittedRiskWindowPlan(
+          local_data_.traj_id_, local_data_.start_time_.nanoseconds(),
+          p4ControlPointHash(local_data_.position_traj_.getControlPoint()),
+          p4KnotVectorHash(local_data_.position_traj_.getKnot()),
           nominal_samples, braking_window_curves, window_params);
-      if (!direct_window_layout.valid)
+      if (!committed_window_plan.valid)
         return reject_final_identity(
             P4GeometryCommitVerdict::INVALID_PATH,
-            "braking_window_layout_invalid:" + direct_window_layout.reason);
+            "braking_window_layout_invalid:" +
+                committed_window_plan.reason);
+      prepared_committed_window_plan =
+          std::make_shared<const P4CommittedRiskWindowPlan>(
+              std::move(committed_window_plan));
+      direct_window_layout = prepared_committed_window_plan->layout;
       for (std::size_t anchor_index = 0;
            anchor_index < prepared_braking_anchors.size(); ++anchor_index)
       {
@@ -3954,6 +4016,8 @@ namespace ego_planner
         direct_duration_ms);
     p4_direct_risk_evidence_.window_layout_hash =
         direct_window_layout.identity_hash;
+    p4_direct_risk_evidence_.committed_window_plan =
+        prepared_committed_window_plan;
     if (use_braking_windows)
     {
       p4_direct_risk_evidence_.nominal_sample_rows.clear();
@@ -4076,10 +4140,11 @@ namespace ego_planner
           index < direct_window_layout.rows.size())
       {
         const auto &row = direct_window_layout.rows[index];
-        if (row.braking && row.braking_curve_index <
-                braking_window_curves.size())
-          failure_parent_time_s =
-              braking_window_curves[row.braking_curve_index].anchor_time_s;
+        for (const std::size_t curve_index : row.braking_curve_indices)
+          if (curve_index < braking_window_curves.size())
+            failure_parent_time_s = std::min(
+                failure_parent_time_s,
+                braking_window_curves[curve_index].anchor_time_s);
       }
       const double actual_curve_arc_m = nominal_arc_at(failure_parent_time_s);
       const auto &direct = direct_result.points[index];
@@ -4660,6 +4725,9 @@ namespace ego_planner
           p4_direct_risk_evidence_.window_layout_hash;
       p4_execution_certificate_.window_satellite_sets_hash =
           p4_direct_risk_evidence_.window_satellite_sets_hash;
+      p4_committed_direct_risk_evidence_ = p4_direct_risk_evidence_;
+      p4_committed_risk_window_plan_ =
+          p4_direct_risk_evidence_.committed_window_plan;
       p4_execution_certificate_.approved_endpoint = committed_endpoint;
       p4_execution_certificate_.terminal_speed_mps =
           committed_terminal_speed;
@@ -4723,17 +4791,21 @@ namespace ego_planner
       last_p4_runtime_lineage_start_ns_ = 0;
       last_p4_execution_event_key_.clear();
       p4_runtime_risk_cache_ = P4RuntimeRiskCache{};
+      p4_last_runtime_window_evidence_ = P4RuntimeWindowEvidence{};
       // The final direct evidence remains valid for P5's immediate
       // pre-publication check. Runtime replaces it with the latest
       // generation-bound remaining-curve batch on its first watchdog tick.
-      p4_generation_probe_previous_snapshot_ = p0_risk_grid_runtime_
-          ? p0_risk_grid_runtime_->acquirePlanningSnapshot() : nullptr;
+      // Bind the replay baseline to the exact execution snapshot used by the
+      // final direct certificate; reacquiring here could pair its production
+      // time with a newer tuple published during finalization.
+      p4_generation_probe_previous_snapshot_ = execution_snapshot;
       p4_confirmation_previous_execution_snapshot_ = execution_snapshot;
-      last_p4_generation_probe_risk_generation_ =
-          p4_generation_probe_previous_snapshot_ &&
-          p4_generation_probe_previous_snapshot_->risk
-          ? p4_generation_probe_previous_snapshot_->risk->generation_id()
+      last_p4_generation_probe_execution_snapshot_id_ =
+          p4_generation_probe_previous_snapshot_
+          ? p4_generation_probe_previous_snapshot_->execution_snapshot_id
           : 0;
+      p4_generation_probe_previous_evaluation_time_s_ =
+          p4_direct_risk_evidence_.evaluation_time_s;
       P4ExecutionCheckDiagnostics authorized;
       authorized.applicable = true;
       authorized.allowed = true;
@@ -5045,6 +5117,11 @@ namespace ego_planner
     backup.runtime_lineage_start_ns = last_p4_runtime_lineage_start_ns_;
     backup.runtime_risk_cache = p4_runtime_risk_cache_;
     backup.direct_risk_evidence = p4_direct_risk_evidence_;
+    backup.committed_direct_risk_evidence =
+        p4_committed_direct_risk_evidence_;
+    backup.committed_risk_window_plan = p4_committed_risk_window_plan_;
+    backup.last_runtime_window_evidence =
+        p4_last_runtime_window_evidence_;
     backup.prepared_successor = p4_prepared_successor_;
     backup.braking_anchors = p4_braking_anchors_;
     backup.pending_braking_anchor = p4_pending_braking_anchor_;
@@ -5073,6 +5150,12 @@ namespace ego_planner
     last_p4_runtime_lineage_start_ns_ = backup.runtime_lineage_start_ns;
     p4_runtime_risk_cache_ = std::move(backup.runtime_risk_cache);
     p4_direct_risk_evidence_ = std::move(backup.direct_risk_evidence);
+    p4_committed_direct_risk_evidence_ =
+        std::move(backup.committed_direct_risk_evidence);
+    p4_committed_risk_window_plan_ =
+        std::move(backup.committed_risk_window_plan);
+    p4_last_runtime_window_evidence_ =
+        std::move(backup.last_runtime_window_evidence);
     p4_prepared_successor_ = std::move(backup.prepared_successor);
     p4_braking_anchors_ = std::move(backup.braking_anchors);
     p4_pending_braking_anchor_ = backup.pending_braking_anchor;
@@ -5379,33 +5462,17 @@ namespace ego_planner
               "braking_window_core";
       if (successor_windowed)
       {
-        std::vector<P4ExecutionRiskSample> nominal_samples;
-        nominal_samples.reserve(points.size());
-        for (std::size_t index = 0; index < points.size(); ++index)
-          nominal_samples.push_back(P4ExecutionRiskSample{
-              points[index], times[index]});
-        std::vector<P4BrakingRiskCurveSamples> braking_curves;
-        braking_curves.reserve(p4_braking_anchors_.size());
-        for (const auto &anchor : p4_braking_anchors_)
-        {
-          P4BrakingRiskCurveSamples curve;
-          curve.anchor_time_s = anchor.trajectory_time_s;
-          for (std::size_t index = 0; index < anchor.risk_points.size() &&
-               index < anchor.risk_relative_times.size(); ++index)
-            curve.samples.push_back(P4ExecutionRiskSample{
-                anchor.risk_points[index],
-                anchor.risk_relative_times[index]});
-          braking_curves.push_back(std::move(curve));
-        }
-        P4ExecutionRiskWindowParams params;
-        params.reaction_time_s = p4_forward_limits_.reaction_time_s;
-        params.transition_overlap_s = p4_window_transition_overlap_s_;
-        params.maximum_anchor_gap_s = 0.2;
-        successor_layout = buildP4ExecutionRiskWindowLayout(
-            nominal_samples, braking_curves, params);
-        if (!successor_layout.valid)
-          return finish(false, "successor_braking_window_layout_invalid:" +
-              successor_layout.reason);
+        if (!p4_committed_risk_window_plan_ ||
+            !p4_committed_risk_window_plan_->valid ||
+            p4_committed_risk_window_plan_->trajectory_id !=
+                local_data_.traj_id_ ||
+            p4_committed_risk_window_plan_->trajectory_start_ns !=
+                local_data_.start_time_.nanoseconds() ||
+            p4_committed_risk_window_plan_->layout.identity_hash !=
+                p4_execution_certificate_.window_layout_hash)
+          return finish(false,
+              "successor_committed_window_plan_identity_invalid");
+        successor_layout = p4_committed_risk_window_plan_->layout;
         points.clear();
         times.clear();
         points.reserve(successor_layout.rows.size());
@@ -5473,6 +5540,8 @@ namespace ego_planner
       {
         p4_direct_risk_evidence_.window_layout_hash =
             successor_layout.identity_hash;
+        p4_direct_risk_evidence_.committed_window_plan =
+            p4_committed_risk_window_plan_;
         p4_direct_risk_evidence_.nominal_sample_rows.clear();
         p4_direct_risk_evidence_.nominal_sample_rows.reserve(
             successor_layout.rows.size());
@@ -5529,6 +5598,7 @@ namespace ego_planner
         return finish(false, "successor_latest_trajectory_assurance_changed:" +
             p4_direct_risk_evidence_.trajectory_assurance.reason + ":" +
             p4_direct_risk_evidence_.trajectory_assurance.local.reason);
+      p4_committed_direct_risk_evidence_ = p4_direct_risk_evidence_;
       p4_execution_certificate_.execution_snapshot_id =
           execution->execution_snapshot_id;
       p4_execution_certificate_.execution_mode =
@@ -5637,9 +5707,16 @@ namespace ego_planner
       p4_guard_cancel_acknowledged_trajectory_id_ = 0;
     }
     double evaluation_now_s = now_s;
-    const auto finish = [this, &evaluation_now_s](
+    std::shared_ptr<const P0ExecutionRiskSnapshot>
+        runtime_execution_snapshot_for_evidence;
+    std::function<void(const std::string &)> record_window_before_event =
+        [](const std::string &) {};
+    const auto finish = [this, &evaluation_now_s,
+                         &record_window_before_event](
         P4ExecutionCheckDiagnostics &diagnostics,
         const std::string &event) {
+        record_window_before_event(
+            diagnostics.reason.empty() ? event : diagnostics.reason);
         last_p4_execution_diagnostics_ = diagnostics;
         appendP4ExecutionEvent(event, evaluation_now_s, diagnostics);
         return diagnostics;
@@ -5682,7 +5759,317 @@ namespace ego_planner
       out.reason = "execution_certificate_missing";
       return finish(out, "NOT_APPLICABLE");
     }
-    const auto revoke = [this, &out, &finish](const std::string &reason) {
+    const auto persist_window_evidence =
+        [this, &out, &evaluation_now_s](
+            const P4CommittedRiskWindowSelection &selection,
+            const iap::ForwardRiskBatchResult &evidence_result,
+            const std::string &reason_override,
+            const std::uint64_t execution_snapshot_id,
+            const std::uint64_t occupancy_generation,
+            const std::uint64_t support_generation,
+            const std::uint64_t gnss_epoch_identity,
+            const std::uint64_t integrity_generation) {
+          if (!p4_committed_risk_window_plan_ ||
+              !p4_committed_risk_window_plan_->valid || !selection.valid ||
+              out.runtime_window_evidence_sequence_id != 0u)
+            return;
+          std::uint64_t sequence_id =
+              next_p4_runtime_window_evidence_sequence_.fetch_add(
+                  1u, std::memory_order_relaxed);
+          if (sequence_id == 0u)
+            sequence_id =
+                next_p4_runtime_window_evidence_sequence_.fetch_add(
+                    1u, std::memory_order_relaxed);
+          p4_last_runtime_window_evidence_ = buildP4RuntimeWindowEvidence(
+              sequence_id, *p4_committed_risk_window_plan_, selection,
+              execution_snapshot_id, occupancy_generation,
+              support_generation, gnss_epoch_identity, integrity_generation,
+              evaluation_now_s, evidence_result);
+          if (!reason_override.empty())
+          {
+            p4_last_runtime_window_evidence_.reason = reason_override;
+            p4_last_runtime_window_evidence_.complete = false;
+          }
+          out.runtime_window_evidence_sequence_id = sequence_id;
+          out.window_layout_hash =
+              p4_last_runtime_window_evidence_.window_layout_hash;
+          out.window_count =
+              p4_last_runtime_window_evidence_.active_windows.size();
+          std::ostringstream satellite_sets;
+          for (std::size_t index = 0;
+               index < evidence_result.windows.size(); ++index)
+          {
+            if (index > 0) satellite_sets << '|';
+            satellite_sets
+                << evidence_result.windows[index].satellite_window_id << ':'
+                << p4SatelliteIdsString(
+                       evidence_result.windows[index].satellite_ids);
+            if (out.first_failure_window_id == 0u &&
+                !evidence_result.windows[index].complete)
+              out.first_failure_window_id =
+                  evidence_result.windows[index].satellite_window_id;
+          }
+          out.common_satellite_ids = satellite_sets.str();
+          out.gnss_core_policy = "braking_window_core";
+          // The in-memory evidence is the authority/event reference. CSV is a
+          // diagnostic mirror and is deliberately not allowed to erase it.
+          appendP4RuntimeWindowEvidence(p4_last_runtime_window_evidence_);
+        };
+    record_window_before_event =
+        [this, &out, &evaluation_now_s, &persist_window_evidence,
+         &runtime_execution_snapshot_for_evidence](
+            const std::string &reason) {
+          if (out.runtime_window_evidence_sequence_id != 0u ||
+              p4_execution_certificate_.gnss_core_policy !=
+                  "braking_window_core")
+            return;
+          const auto bind_causal_evidence = [this, &out]() {
+              if (p4_last_runtime_window_evidence_.sequence_id == 0u)
+                return;
+              out.runtime_window_evidence_sequence_id =
+                  p4_last_runtime_window_evidence_.sequence_id;
+              out.window_layout_hash =
+                  p4_last_runtime_window_evidence_.window_layout_hash;
+              out.window_count =
+                  p4_last_runtime_window_evidence_.active_windows.size();
+              std::ostringstream satellite_sets;
+              for (std::size_t index = 0;
+                   index < p4_last_runtime_window_evidence_.windows.size();
+                   ++index)
+              {
+                if (index > 0) satellite_sets << '|';
+                const auto &window =
+                    p4_last_runtime_window_evidence_.windows[index];
+                satellite_sets << window.satellite_window_id << ':'
+                    << p4SatelliteIdsString(window.satellite_ids);
+              }
+              out.common_satellite_ids = satellite_sets.str();
+              out.gnss_core_policy = "braking_window_core";
+            };
+          if (!p4_committed_risk_window_plan_ ||
+              !p4_committed_risk_window_plan_->valid)
+          {
+            // An already activated braking trajectory has no new nominal
+            // window decision. Its ACTIVE/STOP event cites the immutable
+            // evidence that caused the certified handover.
+            bind_causal_evidence();
+            return;
+          }
+          const double current_t = std::clamp(
+              evaluation_now_s -
+                  p4_execution_certificate_.start_time_ns * 1.0e-9,
+              0.0, p4_execution_certificate_.duration_s);
+          const auto selection = selectP4CommittedRiskWindowRows(
+              *p4_committed_risk_window_plan_, current_t);
+          if (!selection.valid)
+          {
+            bind_causal_evidence();
+            return;
+          }
+
+          const bool continuation_requires_complete_evidence =
+              reason == "runtime_execution_contract_valid" ||
+              reason == "runtime_controlled_degraded_execution" ||
+              reason == "marginal_unsafe_armed" ||
+              reason == "marginal_unsafe_recovered" ||
+              reason == "direct_risk_safe" ||
+              reason == "fresh_execution_snapshot_safe_cancel_requested";
+          const auto &causal_snapshot =
+              runtime_execution_snapshot_for_evidence;
+          const bool latest_matches_causal_tuple =
+              causal_snapshot &&
+              p4_last_runtime_window_evidence_.sequence_id != 0u &&
+              p4_last_runtime_window_evidence_.complete &&
+              p4_last_runtime_window_evidence_.trajectory_id ==
+                  p4_committed_risk_window_plan_->trajectory_id &&
+              p4_last_runtime_window_evidence_.trajectory_start_ns ==
+                  p4_committed_risk_window_plan_->trajectory_start_ns &&
+              p4_last_runtime_window_evidence_.window_layout_hash ==
+                  p4_committed_risk_window_plan_->layout.identity_hash &&
+              p4_last_runtime_window_evidence_.execution_snapshot_id ==
+                  causal_snapshot->execution_snapshot_id &&
+              p4_last_runtime_window_evidence_.occupancy_generation ==
+                  causal_snapshot->source_identity.occupancy_generation &&
+              p4_last_runtime_window_evidence_.support_generation ==
+                  (causal_snapshot->occupancy
+                       ? causal_snapshot->occupancy->generation : 0u) &&
+              p4_last_runtime_window_evidence_.gnss_epoch_identity ==
+                  causal_snapshot->source_identity.gnss_epoch_identity &&
+              p4_last_runtime_window_evidence_.integrity_generation ==
+                  causal_snapshot->source_identity.prior_generation &&
+              p4_last_runtime_window_evidence_.current_window_id ==
+                  selection.current_window_id &&
+              p4_last_runtime_window_evidence_.next_window_id ==
+                  selection.next_window_id;
+          if (continuation_requires_complete_evidence &&
+              latest_matches_causal_tuple)
+          {
+            // The direct-risk cache may serve repeated watchdog ticks for the
+            // same immutable tuple.  Reuse the exact complete evidence that
+            // populated it; do not emit an artificial incomplete query.
+            bind_causal_evidence();
+            return;
+          }
+
+          // Reaching the approved endpoint is an allowed terminal state, not
+          // a failed provider query.  Prefer the latest complete runtime
+          // result for this exact committed trajectory.  If the endpoint is
+          // reached before another watchdog query, slice the immutable
+          // submit-time SAFE result onto the active fixed rows.  This keeps
+          // ENDPOINT_HOLD backed by complete evidence without pretending a
+          // new query was performed.
+          if (reason == "approved_endpoint_reached")
+          {
+            const bool latest_matches =
+                p4_last_runtime_window_evidence_.sequence_id != 0u &&
+                p4_last_runtime_window_evidence_.complete &&
+                p4_last_runtime_window_evidence_.trajectory_id ==
+                    p4_committed_risk_window_plan_->trajectory_id &&
+                p4_last_runtime_window_evidence_.trajectory_start_ns ==
+                    p4_committed_risk_window_plan_->trajectory_start_ns &&
+                p4_last_runtime_window_evidence_.window_layout_hash ==
+                    p4_committed_risk_window_plan_->layout.identity_hash;
+            if (latest_matches)
+            {
+              bind_causal_evidence();
+              return;
+            }
+
+            iap::ForwardRiskBatchResult committed_safe;
+            committed_safe.complete =
+                p4_committed_direct_risk_evidence_.complete &&
+                p4_committed_direct_risk_evidence_.certified_safe &&
+                p4_committed_direct_risk_evidence_.points.size() ==
+                    p4_committed_risk_window_plan_->layout.rows.size();
+            committed_safe.failure_reason = committed_safe.complete
+                ? iap::ForwardRiskFailureReason::NONE
+                : iap::ForwardRiskFailureReason::EVIDENCE_IDENTITY_MISMATCH;
+            committed_safe.timing = p4_committed_direct_risk_evidence_.timing;
+            if (committed_safe.complete)
+            {
+              for (const std::size_t source_index :
+                   selection.source_row_indices)
+              {
+                if (source_index >=
+                    p4_committed_direct_risk_evidence_.points.size())
+                {
+                  committed_safe.complete = false;
+                  committed_safe.failure_reason =
+                      iap::ForwardRiskFailureReason::
+                          EVIDENCE_IDENTITY_MISMATCH;
+                  committed_safe.points.clear();
+                  break;
+                }
+                committed_safe.points.push_back(
+                    p4_committed_direct_risk_evidence_.points[source_index]);
+              }
+            }
+            for (const auto &layout_window : selection.windows)
+            {
+              iap::ForwardRiskWindowResult summary;
+              summary.satellite_window_id = layout_window.window_id;
+              const auto committed = std::find_if(
+                  p4_committed_direct_risk_evidence_.windows.begin(),
+                  p4_committed_direct_risk_evidence_.windows.end(),
+                  [&layout_window](const auto &candidate) {
+                    return candidate.satellite_window_id ==
+                        layout_window.window_id;
+                  });
+              if (committed ==
+                  p4_committed_direct_risk_evidence_.windows.end())
+              {
+                committed_safe.complete = false;
+                committed_safe.failure_reason =
+                    iap::ForwardRiskFailureReason::
+                        EVIDENCE_IDENTITY_MISMATCH;
+              }
+              else
+              {
+                summary = *committed;
+              }
+              summary.point_count = layout_window.request_row_indices.size();
+              summary.complete = committed_safe.complete;
+              summary.failure_reason = committed_safe.failure_reason;
+              committed_safe.windows.push_back(std::move(summary));
+            }
+            if (committed_safe.complete)
+            {
+              const auto &committed_snapshot =
+                  p4_committed_direct_risk_evidence_.execution_snapshot;
+              persist_window_evidence(
+                  selection, committed_safe, "",
+                  p4_committed_direct_risk_evidence_.execution_snapshot_id,
+                  p4_committed_direct_risk_evidence_.occupancy_generation,
+                  committed_snapshot && committed_snapshot->occupancy
+                      ? committed_snapshot->occupancy->generation : 0u,
+                  p4_committed_direct_risk_evidence_.gnss_epoch_identity,
+                  committed_snapshot
+                      ? committed_snapshot->source_identity.prior_generation
+                      : 0u);
+              return;
+            }
+          }
+
+          // Preserve the submit-time physical decomposition on failures that
+          // occur before a new provider result exists.  It is explicitly
+          // marked incomplete with the current failure reason; it is never
+          // reused to authorize motion.
+          iap::ForwardRiskBatchResult fallback;
+          fallback.complete = false;
+          fallback.failure_reason =
+              iap::ForwardRiskFailureReason::EVIDENCE_IDENTITY_MISMATCH;
+          if (p4_committed_direct_risk_evidence_.points.size() ==
+                  p4_committed_risk_window_plan_->layout.rows.size())
+          {
+            for (const std::size_t source_index :
+                 selection.source_row_indices)
+              if (source_index <
+                  p4_committed_direct_risk_evidence_.points.size())
+                fallback.points.push_back(
+                    p4_committed_direct_risk_evidence_.points[source_index]);
+          }
+          for (const auto &layout_window : selection.windows)
+          {
+            iap::ForwardRiskWindowResult summary;
+            summary.satellite_window_id = layout_window.window_id;
+            const auto committed = std::find_if(
+                p4_committed_direct_risk_evidence_.windows.begin(),
+                p4_committed_direct_risk_evidence_.windows.end(),
+                [&layout_window](const auto &candidate) {
+                  return candidate.satellite_window_id ==
+                      layout_window.window_id;
+                });
+            if (committed !=
+                p4_committed_direct_risk_evidence_.windows.end())
+            {
+              summary.satellite_ids = committed->satellite_ids;
+              summary.satellite_set_hash = committed->satellite_set_hash;
+            }
+            summary.complete = false;
+            summary.point_count = layout_window.request_row_indices.size();
+            summary.failure_reason = fallback.failure_reason;
+            fallback.windows.push_back(std::move(summary));
+          }
+          const auto current = runtime_execution_snapshot_for_evidence
+              ? runtime_execution_snapshot_for_evidence
+              : p0_risk_grid_runtime_
+                  ? p0_risk_grid_runtime_->
+                        acquireExecutionRiskSnapshotForEvaluation(
+                            evaluation_now_s)
+                  : planning_risk_context_.execution_snapshot;
+          persist_window_evidence(
+              selection, fallback, reason,
+              current ? current->execution_snapshot_id : 0u,
+              current ? current->source_identity.occupancy_generation : 0u,
+              current && current->occupancy
+                  ? current->occupancy->generation : 0u,
+              current ? current->source_identity.gnss_epoch_identity : 0u,
+              current ? current->source_identity.prior_generation : 0u);
+        };
+    const auto revoke = [this, &out, &finish,
+                         &record_window_before_event](
+                            const std::string &reason) {
+        record_window_before_event(reason);
         out.allowed = false;
         out.reason = reason;
         p4_execution_revoked_ = true;
@@ -5694,10 +6081,12 @@ namespace ego_planner
     uint64_t runtime_snapshot_id_for_check = 0u;
     const auto activate_failsafe_braking =
         [this, &out, &finish, &revoke, &evaluation_now_s,
-         &runtime_snapshot_id_for_check](const std::string &trigger,
+         &runtime_snapshot_id_for_check,
+         &record_window_before_event](const std::string &trigger,
                               const double current_t,
                               const double maximum_anchor_time_s =
                                   std::numeric_limits<double>::infinity()) {
+          record_window_before_event(trigger);
           if ((p4_execution_certificate_.authority !=
                    P4ExecutionAuthority::LIMITED_PREFIX &&
                p4_execution_certificate_.authority !=
@@ -6002,6 +6391,7 @@ namespace ego_planner
           p4_risk_confirmation_memory_.state =
               P4RuntimeRiskConfirmationState::CONFIRMED_UNSAFE_BRAKING;
         out.risk_confirmation_state = p4_risk_confirmation_memory_.state;
+        record_window_before_event("failsafe_braking_activated");
         p4_execution_certificate_.parent_trajectory_id =
             p4_execution_certificate_.trajectory_id;
         p4_execution_certificate_.parent_start_time_ns =
@@ -6042,6 +6432,9 @@ namespace ego_planner
         p4_pending_braking_anchor_.reset();
         p4_runtime_risk_cache_ = P4RuntimeRiskCache{};
         p4_direct_risk_evidence_ = P4DirectTrajectoryRiskEvidence{};
+        p4_committed_direct_risk_evidence_ =
+            P4DirectTrajectoryRiskEvidence{};
+        p4_committed_risk_window_plan_.reset();
         out.identity_match = true;
         out.allowed = true;
         out.failsafe_braking_available = true;
@@ -6093,6 +6486,7 @@ namespace ego_planner
         evaluation_now_s);
     if (out.endpoint_reached)
     {
+      record_window_before_event("approved_endpoint_reached");
       out.allowed = true;
       out.current_integrity_fresh = true;
       out.current_integrity_safe = true;
@@ -6155,6 +6549,7 @@ namespace ego_planner
         ? p0_risk_grid_runtime_->acquireExecutionRiskSnapshotForEvaluation(
               evaluation_now_s)
         : planning_risk_context_.execution_snapshot;
+    runtime_execution_snapshot_for_evidence = runtime_execution_snapshot;
     const auto previous_confirmation_snapshot =
         p4_confirmation_previous_execution_snapshot_;
     if (runtime_execution_snapshot &&
@@ -6283,9 +6678,10 @@ namespace ego_planner
     // authority checks above. If it ran, refresh ROS time and revalidate all
     // freshness-sensitive inputs before any cached or new result can govern
     // execution. The probe itself has a small per-cell budget below.
-    if (runtime_planning_snapshot)
+    if (runtime_execution_snapshot &&
+        appendP4GenerationProbe(evaluation_now_s,
+                                runtime_execution_snapshot))
     {
-      appendP4GenerationProbe(evaluation_now_s, runtime_planning_snapshot);
       const double refreshed_now_s = plannerNow().seconds();
       if (std::isfinite(refreshed_now_s) &&
           refreshed_now_s >= evaluation_now_s)
@@ -6346,6 +6742,7 @@ namespace ego_planner
     // stale; do not attempt to construct a one-sample braking window there.
     if (committedP4TrajectoryReachedEndpoint(evaluation_now_s))
     {
+      record_window_before_event("approved_endpoint_reached");
       out.endpoint_reached = true;
       out.allowed = true;
       out.remaining_risk_support_complete = true;
@@ -6359,18 +6756,94 @@ namespace ego_planner
         : runtime_planning_snapshot
         ? runtime_planning_snapshot->forward_risk_batch
         : planning_risk_context_.forward_risk_batch;
-    if (!direct_risk_batch)
-      return revoke("runtime_direct_risk_unavailable");
-    std::vector<Eigen::Vector3d> remaining_points;
-    std::vector<double> remaining_times;
-    if (!sampleTrajectoryForGeometryCommit(
-            &local_data_, current_t, &remaining_points, &remaining_times))
-      return revoke("runtime_direct_risk_curve_sampling_failed");
     const bool runtime_windowed =
         p4_execution_certificate_.gnss_core_policy ==
             "braking_window_core" &&
         runtime_execution_snapshot && !p4_braking_anchors_.empty();
-    const bool cache_matches = p4_runtime_risk_cache_.valid &&
+    std::vector<Eigen::Vector3d> remaining_points;
+    std::vector<double> remaining_times;
+    // BRAKING_WINDOW_CORE owns an immutable submit-time lattice.  Only the
+    // legacy whole-curve path may sample a moving suffix at watchdog time.
+    if (!runtime_windowed && !sampleTrajectoryForGeometryCommit(
+            &local_data_, current_t, &remaining_points, &remaining_times))
+      return revoke("runtime_direct_risk_curve_sampling_failed");
+    P4CommittedRiskWindowSelection committed_window_selection;
+    if (runtime_windowed)
+    {
+      if (!p4_committed_risk_window_plan_ ||
+          !p4_committed_risk_window_plan_->valid ||
+          p4_committed_risk_window_plan_->trajectory_id !=
+              local_data_.traj_id_ ||
+          p4_committed_risk_window_plan_->trajectory_start_ns !=
+              local_data_.start_time_.nanoseconds() ||
+          p4_committed_risk_window_plan_->control_points_hash !=
+              p4_execution_certificate_.control_points_hash ||
+          p4_committed_risk_window_plan_->knot_vector_hash !=
+              p4_execution_certificate_.knot_vector_hash)
+        return activate_failsafe_braking(
+            "runtime_committed_window_plan_missing_or_identity_mismatch",
+            current_t);
+      committed_window_selection = selectP4CommittedRiskWindowRows(
+          *p4_committed_risk_window_plan_, current_t);
+      if (!committed_window_selection.valid)
+        return activate_failsafe_braking(
+            "runtime_committed_window_selection_invalid:" +
+                committed_window_selection.reason,
+            current_t);
+      if (committed_window_selection.window_layout_hash !=
+          p4_execution_certificate_.window_layout_hash)
+        return activate_failsafe_braking(
+            "runtime_committed_window_layout_identity_changed", current_t);
+    }
+    const auto record_runtime_window_evidence =
+        [&](const iap::ForwardRiskBatchResult &evidence_result) {
+          if (!runtime_windowed) return;
+          persist_window_evidence(
+              committed_window_selection, evidence_result, {},
+              runtime_execution_snapshot
+                  ? runtime_execution_snapshot->execution_snapshot_id : 0u,
+              runtime_execution_snapshot
+                  ? runtime_execution_snapshot->source_identity.
+                      occupancy_generation : 0u,
+              runtime_occupancy ? runtime_occupancy->generation : 0u,
+              runtime_execution_snapshot
+                  ? runtime_execution_snapshot->source_identity.
+                      gnss_epoch_identity : 0u,
+              runtime_execution_snapshot
+                  ? runtime_execution_snapshot->source_identity.
+                      prior_generation : 0u);
+        };
+    if (!direct_risk_batch)
+    {
+      return revoke("runtime_direct_risk_unavailable");
+    }
+    const bool runtime_window_evidence_cache_matches = !runtime_windowed ||
+        (p4_last_runtime_window_evidence_.sequence_id != 0u &&
+         p4_last_runtime_window_evidence_.complete &&
+         p4_last_runtime_window_evidence_.trajectory_id ==
+             local_data_.traj_id_ &&
+         p4_last_runtime_window_evidence_.trajectory_start_ns ==
+             local_data_.start_time_.nanoseconds() &&
+         p4_last_runtime_window_evidence_.window_layout_hash ==
+             committed_window_selection.window_layout_hash &&
+         p4_last_runtime_window_evidence_.execution_snapshot_id ==
+             runtime_execution_snapshot->execution_snapshot_id &&
+         p4_last_runtime_window_evidence_.occupancy_generation ==
+             runtime_execution_snapshot->source_identity.
+                 occupancy_generation &&
+         p4_last_runtime_window_evidence_.support_generation ==
+             (runtime_occupancy ? runtime_occupancy->generation : 0u) &&
+         p4_last_runtime_window_evidence_.gnss_epoch_identity ==
+             runtime_execution_snapshot->source_identity.
+                 gnss_epoch_identity &&
+         p4_last_runtime_window_evidence_.integrity_generation ==
+             runtime_execution_snapshot->source_identity.prior_generation &&
+         p4_last_runtime_window_evidence_.current_window_id ==
+             committed_window_selection.current_window_id &&
+         p4_last_runtime_window_evidence_.next_window_id ==
+             committed_window_selection.next_window_id);
+    const bool cache_matches = runtime_window_evidence_cache_matches &&
+        p4_runtime_risk_cache_.valid &&
         p4_runtime_risk_cache_.trajectory_id == local_data_.traj_id_ &&
         p4_runtime_risk_cache_.start_time_ns ==
             local_data_.start_time_.nanoseconds() &&
@@ -6415,66 +6888,47 @@ namespace ego_planner
       std::vector<double> direct_times = remaining_times;
       if (runtime_windowed)
       {
-        const double nominal_limit_s = std::min(
-            p4_execution_certificate_.duration_s,
-            current_t + 2.0 * p4_forward_limits_.reaction_time_s +
-                0.5 * p4_window_transition_overlap_s_);
-        std::vector<P4ExecutionRiskSample> nominal_samples;
-        for (std::size_t index = 0; index < remaining_points.size(); ++index)
+        runtime_layout.valid = true;
+        runtime_layout.reason = "selected_from_committed_plan";
+        runtime_layout.identity_hash =
+            committed_window_selection.window_layout_hash;
+        runtime_layout.windows = committed_window_selection.windows;
+        runtime_layout.rows = committed_window_selection.rows;
+        const auto reachable_braking_curves =
+            reachableP4CommittedBrakingCurveIndices(
+                *p4_committed_risk_window_plan_,
+                committed_window_selection, current_t);
+        for (const std::size_t curve_index : reachable_braking_curves)
         {
-          if (!nominal_samples.empty() &&
-              remaining_times[index] > nominal_limit_s + 1.0e-9)
-          {
-            nominal_samples.push_back(P4ExecutionRiskSample{
-                remaining_points[index], remaining_times[index]});
-            break;
-          }
-          nominal_samples.push_back(P4ExecutionRiskSample{
-              remaining_points[index], remaining_times[index]});
+          if (curve_index >=
+              p4_committed_risk_window_plan_->braking_curves.size())
+            return activate_failsafe_braking(
+                "runtime_committed_braking_curve_index_invalid", current_t);
+          runtime_braking_curves.push_back(
+              p4_committed_risk_window_plan_->braking_curves[curve_index]);
         }
-        for (const auto &anchor : p4_braking_anchors_)
-        {
-          if (anchor.trajectory_time_s + 1.0e-9 < current_t ||
-              anchor.trajectory_time_s >
-                  nominal_samples.back().relative_time_s + 1.0e-9)
-            continue;
-          P4BrakingRiskCurveSamples curve;
-          curve.anchor_time_s = anchor.trajectory_time_s;
-          for (std::size_t index = 0; index < anchor.risk_points.size() &&
-               index < anchor.risk_relative_times.size(); ++index)
-            curve.samples.push_back(P4ExecutionRiskSample{
-                anchor.risk_points[index],
-                anchor.risk_relative_times[index]});
-          runtime_braking_curves.push_back(std::move(curve));
-        }
-        // Inside the final command-switch interval the last discrete guard
-        // anchor can already be behind current_t. The committed hard-terminal
-        // spline is itself the only physically reachable braking curve there:
-        // it starts at the actual current curve state and reaches the already
-        // approved zero-velocity/zero-acceleration endpoint. Certify that
-        // exact remainder instead of creating a 0.2 s hole after the last
-        // sampled guard anchor.
+        // After the final discrete anchor has passed, the already committed
+        // hard-terminal spline suffix is itself the reachable stop. Reuse its
+        // fixed submit-time nominal rows; do not create a watchdog-time point
+        // or a new window identity.
         if (runtime_braking_curves.empty() &&
             p4_execution_certificate_.duration_s - current_t <=
                 0.2 + 1.0e-9)
         {
-          P4BrakingRiskCurveSamples terminal_remainder;
-          terminal_remainder.anchor_time_s =
-              nominal_samples.front().relative_time_s;
-          terminal_remainder.samples = nominal_samples;
-          runtime_braking_curves.push_back(std::move(terminal_remainder));
+          P4BrakingRiskCurveSamples terminal_suffix;
+          for (const auto &row : runtime_layout.rows)
+            if (row.nominal)
+            {
+              if (!std::isfinite(terminal_suffix.anchor_time_s))
+                terminal_suffix.anchor_time_s = row.sample.relative_time_s;
+              if (terminal_suffix.samples.empty() ||
+                  std::abs(terminal_suffix.samples.back().relative_time_s -
+                           row.sample.relative_time_s) > 1.0e-9)
+                terminal_suffix.samples.push_back(row.sample);
+            }
+          if (!terminal_suffix.samples.empty())
+            runtime_braking_curves.push_back(std::move(terminal_suffix));
         }
-        P4ExecutionRiskWindowParams params;
-        params.reaction_time_s = p4_forward_limits_.reaction_time_s;
-        params.transition_overlap_s = p4_window_transition_overlap_s_;
-        params.maximum_anchor_gap_s = 0.2;
-        runtime_layout = buildP4ExecutionRiskWindowLayout(
-            nominal_samples, runtime_braking_curves, params);
-        if (!runtime_layout.valid)
-          return activate_failsafe_braking(
-              "runtime_braking_window_layout_invalid:" +
-                  runtime_layout.reason,
-              current_t);
         direct_points.clear();
         direct_times.clear();
         for (const auto &row : runtime_layout.rows)
@@ -6534,6 +6988,7 @@ namespace ego_planner
       out.direct_batch_duration_ms =
           std::chrono::duration<double, std::milli>(
               std::chrono::steady_clock::now() - direct_start).count();
+      record_runtime_window_evidence(result);
       if (!result.complete ||
           result.combined_snapshot_identity !=
               request.combined_snapshot_identity ||
@@ -6796,7 +7251,7 @@ namespace ego_planner
             point.satellite_window_id);
       p4_runtime_risk_cache_.rebuild_after_trajectory_time_s =
           runtime_windowed
-              ? current_t + 0.5 * p4_forward_limits_.reaction_time_s
+              ? committed_window_selection.next_window_boundary_time_s
               : p4_execution_certificate_.duration_s;
       p4_runtime_risk_cache_.query_lattice_hash = p4RiskQueryLatticeHash(
           direct_points, p4_runtime_risk_cache_.relative_times);
@@ -6830,6 +7285,12 @@ namespace ego_planner
         sample.vpl_m = p4_direct_risk_evidence_.trajectory_assurance_complete
             ? direct.prediction.gnss.vpl : direct.prediction.fused.vpl;
         p4_runtime_risk_cache_.samples.push_back(sample);
+      }
+      if (runtime_execution_snapshot && result.complete &&
+          p4_direct_risk_evidence_.trajectory_assurance.authorized())
+      {
+        p4_generation_probe_previous_snapshot_ = runtime_execution_snapshot;
+        p4_generation_probe_previous_evaluation_time_s_ = evaluation_now_s;
       }
     }
     if (p4_direct_risk_evidence_.trajectory_assurance_complete)
@@ -6877,6 +7338,14 @@ namespace ego_planner
     out.window_count = p4_direct_risk_evidence_.windows.size();
     out.first_failure_window_id =
         p4_direct_risk_evidence_.first_failure_window_id;
+    if (p4_last_runtime_window_evidence_.trajectory_id ==
+            local_data_.traj_id_ &&
+        p4_last_runtime_window_evidence_.trajectory_start_ns ==
+            local_data_.start_time_.nanoseconds() &&
+        p4_last_runtime_window_evidence_.window_layout_hash ==
+            p4_execution_certificate_.window_layout_hash)
+      out.runtime_window_evidence_sequence_id =
+          p4_last_runtime_window_evidence_.sequence_id;
     const std::string runtime_evidence_identity =
         p4RuntimeEvidenceIdentity(runtime_execution_snapshot.get());
     const auto certify_confirmation_guard =
@@ -7256,6 +7725,8 @@ namespace ego_planner
       }
       if (const auto command = pendingP4GuardBrakingCommand())
         out.guard_braking_trajectory_id = command->trajectory_id;
+      record_window_before_event(
+          "fresh_execution_snapshot_safe_cancel_requested");
       p4_pending_braking_anchor_->cancel_requested = true;
       out.guard_braking_cancel_requested = true;
       out.guard_braking_preschedule_requested = false;
@@ -7328,7 +7799,8 @@ namespace ego_planner
              "risk_confirmation_guard_endpoint_z,"
              "risk_confirmation_evidence_identity,common_satellite_ids,"
              "gnss_core_policy,window_layout_hash,window_count,"
-             "first_failure_window_id,runtime_global_peak_ratio,"
+             "first_failure_window_id,runtime_window_evidence_sequence_id,"
+             "runtime_global_peak_ratio,"
              "global_peak_ratio_limit,"
              "runtime_global_maximum_continuous_exceedance_s,"
              "global_continuous_exceedance_limit_s,"
@@ -7344,7 +7816,7 @@ namespace ego_planner
              "global_prior_exceedance_integral_ratio_s,"
              "global_budget_failure_causes\n";
     csv << std::setprecision(17)
-        << "p4_execution_event_v9," << event << ',' << stamp_s << ','
+        << "p4_execution_event_v10," << event << ',' << stamp_s << ','
         << p4ExecutionAuthorityName(p4_execution_certificate_.authority)
         << ',' << p4_execution_certificate_.trajectory_id << ','
         << iap::trajectoryExecutionModeName(
@@ -7407,6 +7879,7 @@ namespace ego_planner
         << diagnostics.window_layout_hash << ','
         << diagnostics.window_count << ','
         << diagnostics.first_failure_window_id << ','
+        << diagnostics.runtime_window_evidence_sequence_id << ','
         << diagnostics.global_peak_ratio << ','
         << diagnostics.global_peak_ratio_limit << ','
         << diagnostics.global_maximum_continuous_exceedance_s << ','
@@ -7431,9 +7904,529 @@ namespace ego_planner
     return true;
   }
 
+  bool EGOPlannerManager::appendP4RuntimeWindowEvidence(
+      const P4RuntimeWindowEvidence &evidence)
+  {
+    if (!bspline_optimizer_)
+      return false;
+    const auto &config = bspline_optimizer_->getP4RiskAStarConfig();
+    if (!config.debug_csv_enable || config.debug_csv_path.empty())
+      return false;
+    const auto write_header_if_needed = [](const std::string &path,
+                                           const std::string &header) {
+        std::ifstream existing(path);
+        const bool write_header = !existing.good() ||
+            existing.peek() == std::ifstream::traits_type::eof();
+        existing.close();
+        std::ofstream csv(path, std::ios::app);
+        if (csv && write_header) csv << header << '\n';
+        return csv;
+      };
+    const auto point_valid = [&evidence](const std::size_t index) {
+        return index < evidence.points.size() && index < evidence.rows.size();
+      };
+    const auto write_point_summary = [&evidence, &point_valid](
+        std::ostream &stream, const std::size_t index) {
+        if (!point_valid(index))
+        {
+          stream << "nan,nan,nan,nan,nan,nan,nan,nan,nan,nan,nan,nan,nan,"
+                    "nan,nan,nan,nan,nan,nan,nan,nan";
+          return;
+        }
+        const auto &row = evidence.rows[index];
+        const auto &point = evidence.points[index];
+        const auto &gnss = point.prediction.gnss;
+        stream << row.sample.position.x() << ',' << row.sample.position.y()
+               << ',' << row.sample.position.z() << ','
+               << row.sample.relative_time_s << ',' << point.safety_ratio
+               << ',' << gnss.hpl << ',' << gnss.vpl << ',' << gnss.raw_hpl
+               << ',' << gnss.raw_vpl << ',' << gnss.receiver_raw_hpl << ','
+               << gnss.receiver_raw_vpl << ',' << gnss.anchor_hpl << ','
+               << gnss.anchor_vpl << ',' << gnss.spatial_delta_h << ','
+               << gnss.spatial_delta_v << ',' << gnss.temporal_growth_h << ','
+               << gnss.temporal_growth_v << ','
+               << gnss.weighted_geometry_condition << ','
+               << point.local_satellite_set_hash << ','
+               << iap::forwardRiskFailureReasonName(point.failure_reason)
+               << ',' << row.evidence_point_id;
+      };
+
+    const std::string batch_path =
+        config.debug_csv_path + ".runtime_window_batch.csv";
+    auto batch = write_header_if_needed(
+        batch_path,
+        "schema_version,evidence_sequence_id,complete,reason,evaluation_time_s,"
+        "trajectory_id,trajectory_start_ns,control_points_hash,knot_vector_hash,"
+        "window_layout_hash,current_window_id,next_window_id,execution_snapshot_id,"
+        "occupancy_generation,support_generation,gnss_epoch_identity,"
+        "integrity_generation,active_window_count,result_window_count,point_count,"
+        "global_worst_index,worst_x,worst_y,worst_z,worst_relative_time_s,"
+        "worst_ratio,worst_hpl,worst_vpl,worst_raw_hpl,worst_raw_vpl,"
+        "worst_receiver_raw_hpl,worst_receiver_raw_vpl,worst_anchor_hpl,"
+        "worst_anchor_vpl,worst_spatial_delta_h,worst_spatial_delta_v,"
+        "worst_temporal_growth_h,worst_temporal_growth_v,worst_geometry_condition,"
+        "worst_satellite_set_hash,worst_failure_reason,worst_evidence_point_id,"
+        "evidence_ms,core_ms,advisory_ms,transition_ms,total_ms");
+    if (!batch) return false;
+    batch << std::setprecision(17) << "p4_runtime_window_evidence_v1,"
+          << evidence.sequence_id << ',' << (evidence.complete ? 1 : 0)
+          << ',' << evidence.reason << ',' << evidence.evaluation_time_s << ','
+          << evidence.trajectory_id << ',' << evidence.trajectory_start_ns
+          << ',' << evidence.control_points_hash << ','
+          << evidence.knot_vector_hash << ',' << evidence.window_layout_hash
+          << ',' << evidence.current_window_id << ',' << evidence.next_window_id
+          << ',' << evidence.execution_snapshot_id << ','
+          << evidence.occupancy_generation << ',' << evidence.support_generation
+          << ',' << evidence.gnss_epoch_identity << ','
+          << evidence.integrity_generation << ','
+          << evidence.active_windows.size() << ',' << evidence.windows.size()
+          << ',' << evidence.points.size() << ','
+          << evidence.global_worst_nominal_index << ',';
+    write_point_summary(batch, evidence.global_worst_nominal_index);
+    batch << ',' << evidence.timing.evidence_ms << ','
+          << evidence.timing.core_construction_ms << ','
+          << evidence.timing.advisory_ms << ','
+          << evidence.timing.transition_advisory_ms << ','
+          << evidence.timing.total_ms << '\n';
+
+    const std::string window_path =
+        config.debug_csv_path + ".runtime_window.csv";
+    auto windows = write_header_if_needed(
+        window_path,
+        "schema_version,evidence_sequence_id,window_id,nominal_start_s,"
+        "nominal_end_s,certified_start_s,certified_end_s,satellite_ids,"
+        "satellite_set_hash,complete,point_count,first_failure_index,"
+        "failure_reason,worst_index,worst_x,worst_y,worst_z,worst_relative_time_s,"
+        "worst_ratio,worst_hpl,worst_vpl,worst_raw_hpl,worst_raw_vpl,"
+        "worst_receiver_raw_hpl,worst_receiver_raw_vpl,worst_anchor_hpl,"
+        "worst_anchor_vpl,worst_spatial_delta_h,worst_spatial_delta_v,"
+        "worst_temporal_growth_h,worst_temporal_growth_v,worst_geometry_condition,"
+        "worst_satellite_set_hash,worst_failure_reason,worst_evidence_point_id");
+    if (!windows) return false;
+    for (std::size_t index = 0; index < evidence.active_windows.size(); ++index)
+    {
+      const auto &layout_window = evidence.active_windows[index];
+      const auto result_window = std::find_if(
+          evidence.windows.begin(), evidence.windows.end(),
+          [&layout_window](const auto &candidate) {
+            return candidate.satellite_window_id == layout_window.window_id;
+          });
+      const std::size_t worst_index = index < evidence.per_window_worst.size()
+          ? evidence.per_window_worst[index].result_index
+          : std::numeric_limits<std::size_t>::max();
+      windows << std::setprecision(17) << "p4_runtime_window_v1,"
+              << evidence.sequence_id << ',' << layout_window.window_id << ','
+              << layout_window.nominal_start_time_s << ','
+              << layout_window.nominal_end_time_s << ','
+              << layout_window.certified_start_time_s << ','
+              << layout_window.certified_end_time_s << ',';
+      if (result_window == evidence.windows.end())
+        windows << "none,0,0," << layout_window.request_row_indices.size()
+                << ',' << std::numeric_limits<std::size_t>::max()
+                << ",missing_window_result,";
+      else
+        windows << p4SatelliteIdsString(result_window->satellite_ids) << ','
+                << result_window->satellite_set_hash << ','
+                << (result_window->complete ? 1 : 0) << ','
+                << result_window->point_count << ','
+                << result_window->first_failure_index << ','
+                << iap::forwardRiskFailureReasonName(
+                       result_window->failure_reason) << ',';
+      windows << worst_index << ',';
+      write_point_summary(windows, worst_index);
+      windows << '\n';
+    }
+
+    const std::string satellite_path =
+        config.debug_csv_path + ".runtime_window_satellite.csv";
+    auto satellites = write_header_if_needed(
+        satellite_path,
+        "schema_version,evidence_sequence_id,row_index,evidence_point_id,window_id,"
+        "relative_time_s,point_role,sat_id,used,visible,blocked,support_known,"
+        "epoch_excluded,los_x,los_y,los_z,kappa,epoch_sigma_m,canopy_sigma_m,"
+        "effective_sigma_m,sigma_source,exclusion_reason");
+    if (!satellites) return false;
+    std::set<std::size_t> detailed_rows;
+    if (point_valid(evidence.global_worst_nominal_index))
+      detailed_rows.insert(evidence.global_worst_nominal_index);
+    for (const auto &window : evidence.windows)
+      if (point_valid(window.first_failure_index))
+        detailed_rows.insert(window.first_failure_index);
+    for (std::size_t index = 0; index < evidence.rows.size(); ++index)
+      if (evidence.rows[index].transition_overlap && point_valid(index))
+        detailed_rows.insert(index);
+    for (const std::size_t row_index : detailed_rows)
+    {
+      const auto &row = evidence.rows[row_index];
+      const auto &point = evidence.points[row_index];
+      const char *role = row.transition_overlap ? "transition" :
+          row.nominal ? "nominal_worst" : "braking_failure";
+      for (const auto &satellite : point.gnss_satellites)
+        satellites << std::setprecision(17)
+                   << "p4_runtime_window_satellite_v1,"
+                   << evidence.sequence_id << ',' << row_index << ','
+                   << row.evidence_point_id << ',' << row.satellite_window_id
+                   << ',' << row.sample.relative_time_s << ',' << role << ','
+                   << satellite.sat_id << ',' << (satellite.used ? 1 : 0)
+                   << ',' << (satellite.visible ? 1 : 0) << ','
+                   << (satellite.blocked ? 1 : 0) << ','
+                   << (satellite.support_known ? 1 : 0) << ','
+                   << (satellite.epoch_excluded ? 1 : 0) << ','
+                   << satellite.los_map.x() << ',' << satellite.los_map.y()
+                   << ',' << satellite.los_map.z() << ',' << satellite.kappa
+                   << ',' << satellite.epoch_pr_sigma_m << ','
+                   << satellite.canopy_sigma_m << ',' << satellite.sigma_eff_m
+                   << ',' << satellite.sigma_source << ','
+                   << satellite.exclusion_reason << '\n';
+    }
+    return batch.good() && windows.good() && satellites.good();
+  }
+
+  void EGOPlannerManager::p4GenerationProbeWorkerLoop()
+  {
+    while (true)
+    {
+      P4FixedLayoutGenerationProbeTask task;
+      {
+        std::unique_lock<std::mutex> lock(p4_generation_probe_worker_mutex_);
+        p4_generation_probe_worker_cv_.wait(lock, [this] {
+          return p4_generation_probe_worker_stopping_ ||
+              p4_generation_probe_pending_task_.has_value();
+        });
+        if (p4_generation_probe_worker_stopping_)
+          return;
+        task = std::move(*p4_generation_probe_pending_task_);
+        p4_generation_probe_pending_task_.reset();
+      }
+      writeP4FixedLayoutGenerationProbe(task);
+    }
+  }
+
+  bool EGOPlannerManager::writeP4FixedLayoutGenerationProbe(
+      const P4FixedLayoutGenerationProbeTask &task)
+  {
+    if (!task.previous || !task.current || !task.plan ||
+        !task.plan->valid || !task.selection.valid ||
+        task.csv_prefix.empty())
+      return false;
+    const auto fresh = [&task](
+        const std::shared_ptr<const P0ExecutionRiskSnapshot> &snapshot) {
+        if (!snapshot || !snapshot->occupancy ||
+            !snapshot->diagnostic_forward_risk_batch ||
+            !snapshot->occupancy->trusted_local_map_support)
+          return false;
+        const double age_s =
+            task.evaluation_time_s - snapshot->evaluation_time_s;
+        return std::isfinite(age_s) && age_s >= -1.0e-6 &&
+            (snapshot->risk_policy.stale_timeout_s < 0.0 ||
+             age_s <= snapshot->risk_policy.stale_timeout_s) &&
+            snapshot->occupancy->trusted_local_map_support->freshAt(
+                task.evaluation_time_s);
+      };
+    const bool previous_comparable = fresh(task.previous);
+    const bool current_comparable = fresh(task.current);
+
+    iap::ForwardRiskBatchRequest base;
+    base.satellite_set_policy =
+        iap::ForwardRiskSatelliteSetPolicy::BRAKING_WINDOW_CORE;
+    base.compute_budget_ms = 50.0;
+    base.hal = task.current->risk_policy.alert_limit_h_m;
+    base.val = task.current->risk_policy.alert_limit_v_m;
+    base.points.reserve(task.selection.rows.size());
+    for (const auto &row : task.selection.rows)
+    {
+      const double query_time_s =
+          task.trajectory_start_ns * 1.0e-9 + row.sample.relative_time_s;
+      base.points.push_back(iap::ForwardRiskQueryPoint{
+          row.sample.position, query_time_s,
+          std::max(0.0, query_time_s - task.evaluation_time_s),
+          row.satellite_window_id, row.evidence_point_id,
+          row.satellite_window_id});
+    }
+    const auto run = [&base](
+        const std::shared_ptr<const P0ExecutionRiskSnapshot> &map_snapshot,
+        const iap::IntegritySnapshot &epoch, const double evaluation_time_s,
+        const std::string &cell) {
+        iap::ForwardRiskBatchRequest request = base;
+        request.combined_snapshot_identity =
+            "p4_fixed_layout_generation_probe_v1;cell=" + cell;
+        request.snapshot = epoch;
+        request.evaluation_time_s = evaluation_time_s;
+        for (auto &point : request.points)
+          point.horizon_s = std::max(
+              0.0, point.query_time_s - evaluation_time_s);
+        return map_snapshot->diagnostic_forward_risk_batch(request);
+      };
+
+    iap::ForwardRiskBatchResult old_old;
+    iap::ForwardRiskBatchResult new_old;
+    iap::ForwardRiskBatchResult old_new;
+    iap::ForwardRiskBatchResult new_new;
+    iap::ForwardRiskBatchResult previous_production;
+    if (previous_comparable && current_comparable)
+    {
+      old_old = run(task.previous, task.previous->integrity_anchor,
+                    task.evaluation_time_s, "old_map_old_epoch");
+      new_old = run(task.current, task.previous->integrity_anchor,
+                    task.evaluation_time_s, "new_map_old_epoch");
+      old_new = run(task.previous, task.current->integrity_anchor,
+                    task.evaluation_time_s, "old_map_new_epoch");
+      new_new = run(task.current, task.current->integrity_anchor,
+                    task.evaluation_time_s, "new_map_new_epoch");
+      previous_production = run(
+          task.previous, task.previous->integrity_anchor,
+          task.previous_production_evaluation_time_s,
+          "old_map_old_epoch_previous_production_time");
+    }
+    const auto aggregate_satellite_hash = [](const auto &batch) {
+        std::uint64_t hash = 1469598103934665603ULL;
+        for (const auto &point : batch.points)
+        {
+          hash ^= point.local_satellite_set_hash;
+          hash *= 1099511628211ULL;
+        }
+        return hash;
+      };
+    const auto signature = [&aggregate_satellite_hash](const auto &batch) {
+        P4GenerationBoundarySignature out;
+        out.index = firstP4NonSafeIndex(batch);
+        out.satellite_set_hash = aggregate_satellite_hash(batch);
+        std::ostringstream evidence;
+        evidence << std::hexfloat << batch.complete << ';'
+                 << static_cast<int>(batch.failure_reason) << ';';
+        for (const auto &point : batch.points)
+        {
+          const auto &gnss = point.prediction.gnss;
+          evidence << static_cast<int>(point.safety_state) << ';'
+                   << static_cast<int>(point.ranking_state) << ';'
+                   << static_cast<int>(point.failure_reason) << ';'
+                   << point.safety_ratio << ';' << gnss.hpl << ';'
+                   << gnss.vpl << ';' << gnss.raw_hpl << ';'
+                   << gnss.raw_vpl << ';' << gnss.receiver_raw_hpl << ';'
+                   << gnss.receiver_raw_vpl << ';' << gnss.spatial_delta_h
+                   << ';' << gnss.spatial_delta_v << ';'
+                   << gnss.temporal_growth_h << ';'
+                   << gnss.temporal_growth_v << ';'
+                   << gnss.weighted_geometry_condition << ';'
+                   << static_cast<int>(gnss.support_authority) << ';'
+                   << static_cast<int>(gnss.support_status) << ';'
+                   << point.local_satellite_set_hash << ';';
+          for (const auto &satellite : point.gnss_satellites)
+            evidence << satellite.sat_id << ':' << satellite.used << ':'
+                     << satellite.visible << ':' << satellite.blocked << ':'
+                     << satellite.support_known << ':' << satellite.kappa
+                     << ':' << satellite.epoch_pr_sigma_m << ':'
+                     << satellite.canopy_sigma_m << ':'
+                     << satellite.sigma_eff_m << ':'
+                     << satellite.exclusion_reason << ',';
+          evidence << '|';
+        }
+        out.evidence_identity = p4IdentityHash(evidence.str());
+        if (out.index >= 0 &&
+            static_cast<std::size_t>(out.index) < batch.points.size())
+        {
+          const auto &point = batch.points[static_cast<std::size_t>(out.index)];
+          out.safety_state = point.safety_state;
+          out.ranking_state = point.ranking_state;
+          out.failure_reason = point.failure_reason;
+          out.reason = iap::forwardRiskFailureReasonName(point.failure_reason);
+        }
+        else if (!batch.complete)
+        {
+          out.safety_state = iap::ForwardRiskSafetyState::UNKNOWN;
+          out.ranking_state = iap::ForwardRiskRankingState::INCOMPLETE;
+          out.failure_reason = batch.failure_reason;
+          out.reason = iap::forwardRiskFailureReasonName(batch.failure_reason);
+        }
+        return out;
+      };
+    const bool fixed_layout_comparable = previous_comparable &&
+        current_comparable && old_old.complete && new_old.complete &&
+        old_new.complete && new_new.complete && previous_production.complete &&
+        old_old.points.size() == task.selection.rows.size() &&
+        new_old.points.size() == task.selection.rows.size() &&
+        old_new.points.size() == task.selection.rows.size() &&
+        new_new.points.size() == task.selection.rows.size() &&
+        previous_production.points.size() == task.selection.rows.size();
+    const auto old_old_signature = signature(old_old);
+    const auto new_old_signature = signature(new_old);
+    const auto old_new_signature = signature(old_new);
+    const auto new_new_signature = signature(new_new);
+    const auto previous_production_signature = signature(previous_production);
+    const auto maximum_ratio = [](const auto &batch) {
+        double maximum = -std::numeric_limits<double>::infinity();
+        for (const auto &point : batch.points)
+          if (std::isfinite(point.safety_ratio))
+            maximum = std::max(maximum, point.safety_ratio);
+        return maximum;
+      };
+    const double old_ratio = maximum_ratio(old_old);
+    const double new_ratio = maximum_ratio(new_new);
+    const bool boundary_flip =
+        old_old_signature.index != new_new_signature.index ||
+        old_old_signature.failure_reason !=
+            new_new_signature.failure_reason;
+    const bool satellite_set_changed =
+        old_old_signature.satellite_set_hash !=
+            new_new_signature.satellite_set_hash;
+    const bool peak_jump = std::isfinite(old_ratio) &&
+        std::isfinite(new_ratio) && std::abs(new_ratio - old_ratio) >= 0.05;
+    const bool rejected = !new_new.complete ||
+        firstP4NonSafeIndex(new_new) >= 0;
+    if (!boundary_flip && !satellite_set_changed && !peak_jump && !rejected)
+      return true;
+    const auto classification = classifyP4FixedLayoutGenerationProbe(
+        old_old_signature, new_old_signature, old_new_signature,
+        new_new_signature, previous_production_signature,
+        previous_comparable, fixed_layout_comparable);
+    const auto worst_index = [](const auto &batch) {
+        std::size_t worst = std::numeric_limits<std::size_t>::max();
+        double ratio = -std::numeric_limits<double>::infinity();
+        for (std::size_t index = 0; index < batch.points.size(); ++index)
+          if (std::isfinite(batch.points[index].safety_ratio) &&
+              batch.points[index].safety_ratio > ratio)
+          {
+            ratio = batch.points[index].safety_ratio;
+            worst = index;
+          }
+        return worst;
+      };
+    const auto focus_index = [&worst_index](const auto &batch) {
+        const int first = firstP4NonSafeIndex(batch);
+        return first >= 0 ? static_cast<std::size_t>(first)
+                          : worst_index(batch);
+      };
+    // Compare every cell at the same physical rows.  The union keeps a
+    // failure/worst row discovered in any counterfactual cell without
+    // accidentally placing five unrelated points beside each other.
+    std::set<std::size_t> focus_indices;
+    for (const auto *batch : {&old_old, &new_old, &old_new, &new_new,
+                              &previous_production})
+    {
+      const std::size_t index = focus_index(*batch);
+      if (index < task.selection.rows.size()) focus_indices.insert(index);
+    }
+    const std::string path =
+        task.csv_prefix + ".generation_probe_fixed.csv";
+    std::ifstream existing(path);
+    const bool header = !existing.good() || existing.peek() == EOF;
+    existing.close();
+    std::ofstream csv(path, std::ios::app);
+    if (!csv) return false;
+    if (header)
+      csv << "schema_version,evaluation_time_s,previous_production_evaluation_time_s,"
+             "trajectory_id,trajectory_start_ns,window_layout_hash,current_window_id,"
+             "next_window_id,old_occupancy_generation,new_occupancy_generation,"
+             "old_gnss_epoch,new_gnss_epoch,previous_comparable,fixed_layout_comparable,"
+             "old_old_first_non_safe,new_old_first_non_safe,old_new_first_non_safe,"
+             "new_new_first_non_safe,previous_production_first_non_safe,"
+             "old_old_satellite_hash,new_old_satellite_hash,old_new_satellite_hash,"
+             "new_new_satellite_hash,previous_production_satellite_hash,"
+             "old_old_evidence_hash,new_old_evidence_hash,old_new_evidence_hash,"
+             "new_new_evidence_hash,previous_production_evidence_hash,"
+             "old_old_max_ratio,new_new_max_ratio,classification\n";
+    csv << std::setprecision(17) << "p4_fixed_layout_generation_probe_v1,"
+        << task.evaluation_time_s << ','
+        << task.previous_production_evaluation_time_s << ','
+        << task.trajectory_id << ',' << task.trajectory_start_ns << ','
+        << task.plan->layout.identity_hash << ','
+        << task.selection.current_window_id << ','
+        << task.selection.next_window_id << ','
+        << task.previous->occupancy->generation << ','
+        << task.current->occupancy->generation << ','
+        << task.previous->integrity_anchor.current.gnss_epoch_identity << ','
+        << task.current->integrity_anchor.current.gnss_epoch_identity << ','
+        << (previous_comparable ? 1 : 0) << ','
+        << (fixed_layout_comparable ? 1 : 0) << ','
+        << old_old_signature.index << ',' << new_old_signature.index << ','
+        << old_new_signature.index << ',' << new_new_signature.index << ','
+        << previous_production_signature.index << ','
+        << old_old_signature.satellite_set_hash << ','
+        << new_old_signature.satellite_set_hash << ','
+        << old_new_signature.satellite_set_hash << ','
+        << new_new_signature.satellite_set_hash << ','
+        << previous_production_signature.satellite_set_hash << ','
+        << old_old_signature.evidence_identity << ','
+        << new_old_signature.evidence_identity << ','
+        << old_new_signature.evidence_identity << ','
+        << new_new_signature.evidence_identity << ','
+        << previous_production_signature.evidence_identity << ','
+        << old_ratio << ',' << new_ratio << ','
+        << p4GenerationChangeClassName(classification) << '\n';
+
+    const std::string detail_path =
+        task.csv_prefix + ".generation_probe_fixed_detail.csv";
+    std::ifstream detail_existing(detail_path);
+    const bool detail_header = !detail_existing.good() ||
+        detail_existing.peek() == EOF;
+    detail_existing.close();
+    std::ofstream detail(detail_path, std::ios::app);
+    if (!detail) return false;
+    if (detail_header)
+      detail << "schema_version,evaluation_time_s,trajectory_id,cell,row_index,"
+                "evidence_point_id,window_id,x,y,z,query_time_s,safety_state,"
+                "failure_reason,safety_ratio,hpl,vpl,raw_hpl,raw_vpl,"
+                "receiver_raw_hpl,receiver_raw_vpl,spatial_delta_h,spatial_delta_v,"
+                "temporal_growth_h,temporal_growth_v,geometry_condition,"
+                "support_authority,support_status,satellite_set_hash,sat_id,"
+                "los_x,los_y,los_z,used,visible,blocked,support_known,kappa,"
+                "epoch_sigma_m,canopy_sigma_m,effective_sigma_m,exclusion_reason\n";
+    const auto write_detail = [&task, &detail](
+        const char *cell, const iap::ForwardRiskBatchResult &batch,
+        const std::size_t index) {
+        if (index >= batch.points.size() || index >= task.selection.rows.size())
+          return;
+        const auto &row = task.selection.rows[index];
+        const auto &point = batch.points[index];
+        const auto &gnss = point.prediction.gnss;
+        const char *state = point.safety_state == iap::ForwardRiskSafetyState::SAFE
+            ? "SAFE" : point.safety_state == iap::ForwardRiskSafetyState::UNSAFE
+            ? "UNSAFE" : "UNKNOWN";
+        for (const auto &satellite : point.gnss_satellites)
+          detail << std::setprecision(17)
+                 << "p4_fixed_layout_generation_probe_detail_v1,"
+                 << task.evaluation_time_s << ',' << task.trajectory_id << ','
+                 << cell << ',' << index << ',' << row.evidence_point_id << ','
+                 << row.satellite_window_id << ',' << row.sample.position.x()
+                 << ',' << row.sample.position.y() << ','
+                 << row.sample.position.z() << ','
+                 << task.trajectory_start_ns * 1.0e-9 +
+                        row.sample.relative_time_s << ',' << state << ','
+                 << iap::forwardRiskFailureReasonName(point.failure_reason)
+                 << ',' << point.safety_ratio << ',' << gnss.hpl << ','
+                 << gnss.vpl << ',' << gnss.raw_hpl << ',' << gnss.raw_vpl
+                 << ',' << gnss.receiver_raw_hpl << ','
+                 << gnss.receiver_raw_vpl << ',' << gnss.spatial_delta_h
+                 << ',' << gnss.spatial_delta_v << ','
+                 << gnss.temporal_growth_h << ',' << gnss.temporal_growth_v
+                 << ',' << gnss.weighted_geometry_condition << ','
+                 << static_cast<int>(gnss.support_authority) << ','
+                 << static_cast<int>(gnss.support_status) << ','
+                 << point.local_satellite_set_hash << ',' << satellite.sat_id
+                 << ',' << satellite.los_map.x() << ','
+                 << satellite.los_map.y() << ',' << satellite.los_map.z()
+                 << ',' << (satellite.used ? 1 : 0) << ','
+                 << (satellite.visible ? 1 : 0) << ','
+                 << (satellite.blocked ? 1 : 0) << ','
+                 << (satellite.support_known ? 1 : 0) << ','
+                 << satellite.kappa << ',' << satellite.epoch_pr_sigma_m << ','
+                 << satellite.canopy_sigma_m << ',' << satellite.sigma_eff_m
+                 << ',' << satellite.exclusion_reason << '\n';
+      };
+    for (const std::size_t index : focus_indices)
+    {
+      write_detail("OLD_MAP_OLD_EPOCH", old_old, index);
+      write_detail("NEW_MAP_OLD_EPOCH", new_old, index);
+      write_detail("OLD_MAP_NEW_EPOCH", old_new, index);
+      write_detail("NEW_MAP_NEW_EPOCH", new_new, index);
+      write_detail("PREVIOUS_PRODUCTION_TIME", previous_production, index);
+    }
+    return csv.good() && detail.good();
+  }
+
   bool EGOPlannerManager::appendP4GenerationProbe(
       const double evaluation_time_s,
-      const std::shared_ptr<const P0PlanningSnapshot> &current)
+      const std::shared_ptr<const P0ExecutionRiskSnapshot> &current)
   {
     if (!bspline_optimizer_)
       return false;
@@ -7441,363 +8434,56 @@ namespace ego_planner
     if (!p4_generation_probe_enable_ || !config.debug_csv_enable ||
         config.debug_csv_path.empty())
       return false;
-    if (!current || !current->risk ||
-        !current->occupancy || !current->forward_risk_batch ||
+    if (!current || !current->occupancy ||
+        !current->diagnostic_forward_risk_batch ||
         !p4_generation_probe_previous_snapshot_ ||
-        !p4_generation_probe_previous_snapshot_->risk ||
         !p4_generation_probe_previous_snapshot_->occupancy ||
-        !p4_generation_probe_previous_snapshot_->forward_risk_batch ||
         !p4_generation_probe_previous_snapshot_->
             diagnostic_forward_risk_batch ||
-        !p4_execution_certificate_.valid)
+        !p4_execution_certificate_.valid ||
+        !p4_committed_risk_window_plan_ ||
+        !p4_committed_risk_window_plan_->valid ||
+        !std::isfinite(evaluation_time_s))
       return false;
-    const auto previous = p4_generation_probe_previous_snapshot_;
-    if (current->risk->generation_id() == previous->risk->generation_id() ||
-        current->risk->generation_id() ==
-            last_p4_generation_probe_risk_generation_)
+    const auto queued_previous = p4_generation_probe_previous_snapshot_;
+    if (current->execution_snapshot_id ==
+            queued_previous->execution_snapshot_id ||
+        current->execution_snapshot_id ==
+            last_p4_generation_probe_execution_snapshot_id_)
       return false;
-
-    const auto risk_fresh = [evaluation_time_s](
-        const std::shared_ptr<const iap::RiskGridSnapshot> &risk) {
-        return risk && std::isfinite(evaluation_time_s) &&
-            std::isfinite(risk->stamp_s()) &&
-            evaluation_time_s >= risk->stamp_s() &&
-            evaluation_time_s - risk->stamp_s() <=
-                risk->params().stale_timeout_s;
-      };
-    const auto support_fresh = [evaluation_time_s](
-        const std::shared_ptr<const P0OccupancyEpoch> &occupancy) {
-        return occupancy && occupancy->trusted_local_map_support &&
-            occupancy->trusted_local_map_support->freshAt(evaluation_time_s);
-      };
-    if (!risk_fresh(previous->risk) || !risk_fresh(current->risk) ||
-        !support_fresh(previous->occupancy) ||
-        !support_fresh(current->occupancy))
+    const double current_t = std::clamp(
+        evaluation_time_s - p4_execution_certificate_.start_time_ns * 1.0e-9,
+        0.0, p4_execution_certificate_.duration_s);
+    auto selection = selectP4CommittedRiskWindowRows(
+        *p4_committed_risk_window_plan_, current_t);
+    if (!selection.valid || selection.window_layout_hash !=
+            p4_execution_certificate_.window_layout_hash)
+      return false;
+    P4FixedLayoutGenerationProbeTask task;
+    task.evaluation_time_s = evaluation_time_s;
+    task.previous_production_evaluation_time_s =
+        std::isfinite(p4_generation_probe_previous_evaluation_time_s_)
+        ? p4_generation_probe_previous_evaluation_time_s_
+        : evaluation_time_s;
+    task.csv_prefix = config.debug_csv_path;
+    task.trajectory_id = p4_execution_certificate_.trajectory_id;
+    task.trajectory_start_ns = p4_execution_certificate_.start_time_ns;
+    task.previous = queued_previous;
+    task.current = current;
+    task.plan = p4_committed_risk_window_plan_;
+    task.selection = std::move(selection);
     {
-      // Never retain a stale snapshot just to make the diagnostic comparable.
-      p4_generation_probe_previous_snapshot_ = current;
-      last_p4_generation_probe_risk_generation_ =
-          current->risk->generation_id();
-      return false;
+      std::lock_guard<std::mutex> lock(p4_generation_probe_worker_mutex_);
+      if (p4_generation_probe_worker_stopping_)
+        return false;
+      // Diagnostic-only latest-wins slot. Safety checks never wait for it.
+      p4_generation_probe_pending_task_ = std::move(task);
     }
+    p4_generation_probe_worker_cv_.notify_one();
+    last_p4_generation_probe_execution_snapshot_id_ =
+        current->execution_snapshot_id;
+    return true;
 
-    constexpr int kSampleCount = 21;
-    iap::ForwardRiskBatchRequest base;
-    base.combined_snapshot_identity = "p4_generation_probe_v1";
-    base.evaluation_time_s = evaluation_time_s;
-    // Diagnostic-only: cap each of the four counterfactual batches so this
-    // probe cannot occupy the execution watchdog for seconds.
-    base.compute_budget_ms = 10.0;
-    base.hal = current->risk->params().alert_limit_h_m;
-    base.val = current->risk->params().alert_limit_v_m;
-    std::vector<double> arcs;
-    arcs.reserve(kSampleCount);
-    Eigen::Vector3d prior = local_data_.position_traj_.evaluateDeBoorT(0.0);
-    double arc = 0.0;
-    for (int index = 0; index < kSampleCount; ++index)
-    {
-      const double relative_t = p4_execution_certificate_.duration_s *
-          static_cast<double>(index) / (kSampleCount - 1);
-      const Eigen::Vector3d position =
-          local_data_.position_traj_.evaluateDeBoorT(relative_t);
-      if (index > 0)
-        arc += (position - prior).norm();
-      prior = position;
-      arcs.push_back(arc);
-      base.points.push_back(iap::ForwardRiskQueryPoint{
-          position,
-          p4_execution_certificate_.start_time_ns * 1.0e-9 + relative_t,
-          relative_t, static_cast<uint64_t>(index)});
-    }
-    const auto run = [&base](
-        const std::shared_ptr<const P0PlanningSnapshot> &map_snapshot,
-        const iap::IntegritySnapshot &epoch, const bool diagnostic) {
-        iap::ForwardRiskBatchRequest request = base;
-        request.snapshot = epoch;
-        request.hal = map_snapshot->risk->params().alert_limit_h_m;
-        request.val = map_snapshot->risk->params().alert_limit_v_m;
-        for (auto &point : request.points)
-          point.horizon_s = std::max(
-              0.0, point.query_time_s - map_snapshot->risk->stamp_s());
-        return diagnostic
-            ? map_snapshot->diagnostic_forward_risk_batch(request)
-            : map_snapshot->forward_risk_batch(request);
-      };
-    const auto old_old = run(previous, previous->integrity_anchor, false);
-    const auto new_old = run(current, previous->integrity_anchor, true);
-    const auto old_new = run(previous, current->integrity_anchor, true);
-    const auto new_new = run(current, current->integrity_anchor, false);
-
-    struct GridProbeResult
-    {
-      int index = -1;
-      P4GenerationBoundarySignature boundary;
-      iap::PredictedPLQueryTrace trace;
-    };
-    const auto first_grid_anomaly = [&base](
-        const std::shared_ptr<const iap::RiskGridSnapshot> &risk) {
-        GridProbeResult result;
-        for (std::size_t index = 0; index < base.points.size(); ++index)
-        {
-          iap::PredictedPLSample sample;
-          iap::PredictedPLQueryTrace trace;
-          const bool query_ok = risk->queryPredictedPL(
-              base.points[index].position_map,
-              base.points[index].query_time_s, &sample,
-              std::numeric_limits<double>::quiet_NaN(), false, &trace);
-          const bool topology_anomaly =
-              sample.interpolation_status ==
-                  iap::RiskGridInterpolationStatus::DIRECT_RECHECK_REQUIRED ||
-              sample.interpolation_status ==
-                  iap::RiskGridInterpolationStatus::GEOMETRY_DEGENERATE ||
-              sample.interpolation_status ==
-                  iap::RiskGridInterpolationStatus::INVALID_SUPPORT;
-          const bool unsafe = query_ok && sample.available && sample.valid &&
-              !sample.stale &&
-              (sample.hpl_pred >= risk->params().alert_limit_h_m ||
-               sample.vpl_pred >= risk->params().alert_limit_v_m);
-          const bool invalid = !query_ok || !sample.available || !sample.valid ||
-              sample.stale || !std::isfinite(sample.hpl_pred) ||
-              !std::isfinite(sample.vpl_pred);
-          if (topology_anomaly || unsafe || invalid)
-          {
-            result.index = static_cast<int>(index);
-            result.trace = std::move(trace);
-            result.boundary.index = result.index;
-            result.boundary.safety_state = unsafe
-                ? iap::ForwardRiskSafetyState::UNSAFE
-                : iap::ForwardRiskSafetyState::UNKNOWN;
-            result.boundary.ranking_state = unsafe
-                ? iap::ForwardRiskRankingState::COMPARABLE
-                : iap::ForwardRiskRankingState::INCOMPLETE;
-            result.boundary.failure_reason = unsafe
-                ? iap::ForwardRiskFailureReason::SAFETY_LIMIT_EXCEEDED
-                : sample.interpolation_status ==
-                      iap::RiskGridInterpolationStatus::GEOMETRY_DEGENERATE
-                    ? iap::ForwardRiskFailureReason::GNSS_GEOMETRY_DEGENERATE
-                    : iap::ForwardRiskFailureReason::OCCUPANCY_UNKNOWN;
-            result.boundary.interpolation_status = topology_anomaly || invalid
-                ? sample.interpolation_status
-                : iap::RiskGridInterpolationStatus::NOT_EVALUATED;
-            result.boundary.reason = topology_anomaly || invalid
-                ? sample.reason
-                : iap::forwardRiskFailureReasonName(
-                      result.boundary.failure_reason);
-            for (const auto &corner : result.trace.corners)
-              if (corner.combined_weight > 0.0)
-              {
-                result.boundary.satellite_set_hash =
-                    corner.gnss_local_satellite_set_hash;
-                break;
-              }
-            return result;
-          }
-        }
-        return result;
-      };
-    const auto grid_trace_at = [&base](
-        const std::shared_ptr<const iap::RiskGridSnapshot> &risk,
-        const int index) {
-        GridProbeResult result;
-        if (!risk || index < 0 ||
-            static_cast<std::size_t>(index) >= base.points.size())
-          return result;
-        iap::PredictedPLSample sample;
-        result.index = index;
-        risk->queryPredictedPL(
-            base.points[static_cast<std::size_t>(index)].position_map,
-            base.points[static_cast<std::size_t>(index)].query_time_s,
-            &sample, std::numeric_limits<double>::quiet_NaN(), false,
-            &result.trace);
-        return result;
-      };
-    const auto direct_boundary = [](const iap::ForwardRiskBatchResult &batch) {
-        P4GenerationBoundarySignature boundary;
-        boundary.index = firstP4NonSafeIndex(batch);
-        if (boundary.index < 0 ||
-            static_cast<std::size_t>(boundary.index) >= batch.points.size())
-          return boundary;
-        const auto &point = batch.points[
-            static_cast<std::size_t>(boundary.index)];
-        boundary.safety_state = point.safety_state;
-        boundary.ranking_state = point.ranking_state;
-        boundary.failure_reason = point.failure_reason;
-        boundary.satellite_set_hash = point.local_satellite_set_hash;
-        boundary.reason = iap::forwardRiskFailureReasonName(
-            point.failure_reason);
-        return boundary;
-      };
-    const auto oo_boundary = direct_boundary(old_old);
-    const auto no_boundary = direct_boundary(new_old);
-    const auto on_boundary = direct_boundary(old_new);
-    const auto nn_boundary = direct_boundary(new_new);
-    const int oo = oo_boundary.index;
-    const int no = no_boundary.index;
-    const int on = on_boundary.index;
-    const int nn = nn_boundary.index;
-    const auto old_grid_probe = first_grid_anomaly(previous->risk);
-    const auto new_grid_probe = first_grid_anomaly(current->risk);
-    const int old_grid = old_grid_probe.index;
-    const int new_grid = new_grid_probe.index;
-    const auto classification = classifyP4GenerationProbe(
-        oo_boundary, no_boundary, on_boundary, nn_boundary,
-        old_grid_probe.boundary, new_grid_probe.boundary);
-    const std::string path = config.debug_csv_path + ".generation_probe.csv";
-    std::ifstream existing(path);
-    const bool write_header = !existing.good() || existing.peek() == EOF;
-    existing.close();
-    std::ofstream csv(path, std::ios::app);
-    if (!csv)
-      return false;
-    if (write_header)
-      csv << "schema_version,evaluation_time_s,trajectory_id,"
-             "trajectory_start_ns,old_risk_generation,new_risk_generation,"
-             "old_occupancy_generation,new_occupancy_generation,"
-             "old_gnss_epoch,new_gnss_epoch,old_map_old_epoch_first_index,"
-             "new_map_old_epoch_first_index,old_map_new_epoch_first_index,"
-             "new_map_new_epoch_first_index,old_grid_first_index,"
-             "new_grid_first_index,old_map_old_epoch_first_arc_m,"
-             "new_map_old_epoch_first_arc_m,old_map_new_epoch_first_arc_m,"
-             "new_map_new_epoch_first_arc_m,old_map_old_epoch_sat_hash,"
-             "new_map_old_epoch_sat_hash,old_map_new_epoch_sat_hash,"
-             "new_map_new_epoch_sat_hash,old_map_old_epoch_state,"
-             "new_map_old_epoch_state,old_map_new_epoch_state,"
-             "new_map_new_epoch_state,old_map_old_epoch_reason,"
-             "new_map_old_epoch_reason,old_map_new_epoch_reason,"
-             "new_map_new_epoch_reason,classification\n";
-    const auto arc_at = [&arcs](const int index) {
-        return index >= 0 && static_cast<std::size_t>(index) < arcs.size()
-            ? arcs[static_cast<std::size_t>(index)]
-            : std::numeric_limits<double>::quiet_NaN();
-      };
-    const auto sat_hash_at = [](const iap::ForwardRiskBatchResult &result,
-                                const int index) {
-        return index >= 0 &&
-            static_cast<std::size_t>(index) < result.points.size()
-            ? result.points[static_cast<std::size_t>(index)].
-                local_satellite_set_hash : uint64_t{0};
-      };
-    const auto state_at = [](const iap::ForwardRiskBatchResult &result,
-                             const int index) {
-        if (index < 0 || static_cast<std::size_t>(index) >= result.points.size())
-          return std::string("SAFE");
-        switch (result.points[static_cast<std::size_t>(index)].safety_state)
-        {
-          case iap::ForwardRiskSafetyState::SAFE: return std::string("SAFE");
-          case iap::ForwardRiskSafetyState::UNSAFE:
-            return std::string("UNSAFE");
-          case iap::ForwardRiskSafetyState::UNKNOWN:
-            return std::string("UNKNOWN");
-        }
-        return std::string("UNKNOWN");
-      };
-    const auto reason_at = [](const iap::ForwardRiskBatchResult &result,
-                              const int index) {
-        return index >= 0 &&
-            static_cast<std::size_t>(index) < result.points.size()
-            ? std::string(iap::forwardRiskFailureReasonName(
-                  result.points[static_cast<std::size_t>(index)].failure_reason))
-            : std::string("none");
-      };
-    csv << std::setprecision(17) << "p4_generation_probe_v2,"
-        << evaluation_time_s << ',' << p4_execution_certificate_.trajectory_id
-        << ',' << p4_execution_certificate_.start_time_ns << ','
-        << previous->risk->generation_id() << ','
-        << current->risk->generation_id() << ','
-        << previous->occupancy->generation << ','
-        << current->occupancy->generation << ','
-        << previous->integrity_anchor.current.gnss_epoch_identity << ','
-        << current->integrity_anchor.current.gnss_epoch_identity << ','
-        << oo << ',' << no << ',' << on << ',' << nn << ',' << old_grid
-        << ',' << new_grid << ',' << arc_at(oo) << ',' << arc_at(no) << ','
-        << arc_at(on) << ',' << arc_at(nn) << ','
-        << sat_hash_at(old_old, oo) << ',' << sat_hash_at(new_old, no) << ','
-        << sat_hash_at(old_new, on) << ',' << sat_hash_at(new_new, nn) << ','
-        << state_at(old_old, oo) << ',' << state_at(new_old, no) << ','
-        << state_at(old_new, on) << ',' << state_at(new_new, nn) << ','
-        << reason_at(old_old, oo) << ',' << reason_at(new_old, no) << ','
-        << reason_at(old_new, on) << ',' << reason_at(new_new, nn) << ','
-        << p4GenerationChangeClassName(classification) << '\n';
-
-    const std::string corner_path =
-        config.debug_csv_path + ".generation_probe_corners.csv";
-    std::ifstream corner_existing(corner_path);
-    const bool corner_header = !corner_existing.good() ||
-        corner_existing.peek() == EOF;
-    corner_existing.close();
-    std::ofstream corner_csv(corner_path, std::ios::app);
-    if (!corner_csv)
-      return false;
-    if (corner_header)
-      corner_csv << "schema_version,evaluation_time_s,trajectory_id,grid_side,"
-                    "risk_generation,probe_index,query_x,query_y,query_z,"
-                    "query_time_s,interpolation_status,interpolation_reason,"
-                    "temporal_layer,horizon_id,horizon_s,temporal_weight,"
-                    "corner_id,voxel_x,voxel_y,voxel_z,corner_x,corner_y,corner_z,"
-                    "spatial_weight,combined_weight,hpl,vpl,source_flags,valid,"
-                    "stale,unknown,geometry_status,support_authority,support_status,"
-                    "satellite_set_hash,satellite_ids,geometry_condition,"
-                    "worst_excluded_h,worst_excluded_v,invalid_reason\n";
-    const auto write_corners = [&](const char *side,
-                                   const GridProbeResult &probe) {
-        for (const auto &corner : probe.trace.corners)
-        {
-          std::ostringstream satellites;
-          for (std::size_t i = 0;
-               i < corner.gnss_used_satellite_ids.size(); ++i)
-          {
-            if (i > 0) satellites << ';';
-            satellites << corner.gnss_used_satellite_ids[i];
-          }
-          corner_csv << std::setprecision(17)
-              << "p4_generation_probe_corner_v1," << evaluation_time_s << ','
-              << p4_execution_certificate_.trajectory_id << ',' << side << ','
-              << probe.trace.risk_generation_id << ',' << probe.index << ','
-              << probe.trace.query_point.x() << ','
-              << probe.trace.query_point.y() << ','
-              << probe.trace.query_point.z() << ','
-              << probe.trace.query_time_s << ','
-              << iap::riskGridInterpolationStatusName(
-                    probe.trace.interpolation_status) << ','
-              << probe.trace.reason << ',' << corner.temporal_layer << ','
-              << corner.horizon_id << ',' << corner.horizon_s << ','
-              << corner.temporal_weight << ',' << corner.corner_id << ','
-              << corner.voxel_index.x() << ',' << corner.voxel_index.y() << ','
-              << corner.voxel_index.z() << ',' << corner.voxel_position.x() << ','
-              << corner.voxel_position.y() << ',' << corner.voxel_position.z() << ','
-              << corner.spatial_weight << ',' << corner.combined_weight << ','
-              << corner.hpl_pred << ',' << corner.vpl_pred << ','
-              << corner.source_flags << ',' << (corner.valid ? 1 : 0) << ','
-              << (corner.stale ? 1 : 0) << ',' << (corner.unknown ? 1 : 0) << ','
-              << iap::gnssGeometryStatusName(corner.gnss_geometry_status) << ','
-              << iap::localMapSupportAuthorityName(
-                    corner.gnss_support_authority) << ','
-              << iap::localMapSupportStatusName(corner.gnss_support_status) << ','
-              << corner.gnss_local_satellite_set_hash << ','
-              << satellites.str() << ','
-              << corner.gnss_weighted_geometry_condition << ','
-              << corner.gnss_worst_excluded_sat_h << ','
-              << corner.gnss_worst_excluded_sat_v << ','
-              << corner.invalid_reason << '\n';
-        }
-      };
-    std::set<int> corner_indices;
-    for (const int index : {old_grid, new_grid, oo, no, on, nn})
-      if (index >= 0) corner_indices.insert(index);
-    for (const int index : corner_indices)
-    {
-      // Always dump both generations at the same trajectory position.  This
-      // turns each record into an actual paired corner comparison.
-      write_corners("OLD", grid_trace_at(previous->risk, index));
-      write_corners("NEW", grid_trace_at(current->risk, index));
-    }
-    corner_csv.flush();
-    if (!corner_csv.good())
-      return false;
-    p4_generation_probe_previous_snapshot_ = current;
-    last_p4_generation_probe_risk_generation_ =
-        current->risk->generation_id();
-    return static_cast<bool>(csv);
   }
 
   bool EGOPlannerManager::appendP4MarginalRiskReplay(
