@@ -2266,6 +2266,62 @@ class TestStageAnalyzer(unittest.TestCase):
         self.assertIn("shutdown_escalated", summary["failures"])
         self.assertIn("child_process_nonzero", summary["failures"])
 
+    def test_runtime_window_evidence_requires_stable_layout_and_event_link(self):
+        batches = [{
+            "evidence_sequence_id": "1", "trajectory_id": "7",
+            "trajectory_start_ns": "9", "window_layout_hash": "fixed",
+            "active_window_count": "2", "result_window_count": "2",
+            "point_count": "5", "complete": "1", "total_ms": "12.5",
+        }, {
+            "evidence_sequence_id": "2", "trajectory_id": "7",
+            "trajectory_start_ns": "9", "window_layout_hash": "fixed",
+            "active_window_count": "2", "result_window_count": "2",
+            "point_count": "5", "complete": "1", "total_ms": "14.0",
+        }]
+        events = [{
+            "event": "FAILSAFE_BRAKING_SCHEDULED",
+            "gnss_core_policy": "braking_window_core",
+            "reason": "failsafe_braking_scheduled:"
+                      "runtime_trajectory_assurance_rejected:unsafe",
+            "runtime_window_evidence_sequence_id": "2",
+        }]
+        probes = [{"classification": "GNSS_EPOCH_OR_SET"}]
+        windows = [
+            {"evidence_sequence_id": sequence, "window_id": window,
+             "satellite_ids": "1;2;3;4", "satellite_set_hash": "17",
+             "complete": "1", "failure_reason": "NONE"}
+            for sequence in ("1", "2") for window in ("10", "11")]
+        summary = MODULE.analyze_runtime_window_evidence(
+            batches, windows, probes, events)
+        self.assertEqual(summary["result"], "PASS")
+        self.assertEqual(summary["runtime_window_layout_change_count"], 0)
+        self.assertEqual(summary[
+            "fixed_layout_generation_classification_counts"],
+            {"GNSS_EPOCH_OR_SET": 1})
+
+        for event_name in (
+                "MARGINAL_UNSAFE_ARMED", "MARGINAL_UNSAFE_RECOVERED",
+                "FAILSAFE_BRAKING_CANCEL_REQUESTED"):
+            incomplete_batches = [dict(row) for row in batches]
+            incomplete_batches[1]["complete"] = "0"
+            continuing_event = dict(events[0])
+            continuing_event["event"] = event_name
+            summary = MODULE.analyze_runtime_window_evidence(
+                incomplete_batches, windows, probes, [continuing_event])
+            self.assertEqual(summary["result"], "FAIL")
+            self.assertIn("runtime_risk_decision_missing_window_evidence",
+                          summary["failures"])
+
+        batches[1]["window_layout_hash"] = "rebuilt"
+        events[0]["runtime_window_evidence_sequence_id"] = "0"
+        summary = MODULE.analyze_runtime_window_evidence(
+            batches, [], [], events)
+        self.assertEqual(summary["result"], "FAIL")
+        self.assertIn("runtime_window_layout_changed_within_trajectory",
+                      summary["failures"])
+        self.assertIn("runtime_risk_decision_missing_window_evidence",
+                      summary["failures"])
+
     def test_shutdown_rejects_runner_kill_escalation(self):
         summary = MODULE.analyze_shutdown(
             launch_exit_code=0,

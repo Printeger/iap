@@ -2173,6 +2173,129 @@ def analyze_execution_snapshot_attempts(
     }
 
 
+def analyze_runtime_window_evidence(
+        batches: list[dict], windows: list[dict], probes: list[dict],
+        execution_events: list[dict]) -> dict:
+    """Check that risk decisions retain one immutable committed layout."""
+    failures: list[str] = []
+    batch_by_sequence = {
+        str(row.get("evidence_sequence_id", "")): row for row in batches
+        if str(row.get("evidence_sequence_id", ""))
+    }
+    duplicate_sequence_count = len(batches) - len(batch_by_sequence)
+    if duplicate_sequence_count:
+        failures.append("runtime_window_evidence_sequence_not_unique")
+    window_rows_by_sequence: dict[str, list[dict]] = {}
+    for row in windows:
+        sequence = str(row.get("evidence_sequence_id", "") or "")
+        if sequence:
+            window_rows_by_sequence.setdefault(sequence, []).append(row)
+    incomplete_identity_rows = []
+    for row in batches:
+        try:
+            active_windows = int(row.get("active_window_count", 0) or 0)
+        except (TypeError, ValueError):
+            active_windows = 0
+        sequence = str(row.get("evidence_sequence_id", "") or "")
+        try:
+            point_count = int(row.get("point_count", 0) or 0)
+            result_windows = int(row.get("result_window_count", 0) or 0)
+        except (TypeError, ValueError):
+            point_count = 0
+            result_windows = 0
+        window_rows = window_rows_by_sequence.get(sequence, [])
+        window_ids = [str(item.get("window_id", "") or "")
+                      for item in window_rows]
+        unique_windows = (len(window_ids) == len(set(window_ids)) and
+                          all(window_ids))
+        window_summaries_valid = all(
+            str(item.get("satellite_ids", "") or "") not in ("", "none")
+            and str(item.get("satellite_set_hash", "") or "") not in
+            ("", "0")
+            and str(item.get("failure_reason", "") or "") != ""
+            for item in window_rows)
+        batch_complete = str(row.get("complete", "0")) == "1"
+        complete_consistent = (not batch_complete or all(
+            str(item.get("complete", "0")) == "1"
+            for item in window_rows))
+        if (not row.get("window_layout_hash") or active_windows <= 0 or
+                point_count <= 0 or result_windows != active_windows or
+                len(window_rows) != active_windows or not unique_windows or
+                not window_summaries_valid or not complete_consistent):
+            incomplete_identity_rows.append(row)
+    if incomplete_identity_rows:
+        failures.append("runtime_window_evidence_identity_incomplete")
+
+    layouts_by_trajectory: dict[tuple[str, str], set[str]] = {}
+    for row in batches:
+        identity = (str(row.get("trajectory_id", "")),
+                    str(row.get("trajectory_start_ns", "")))
+        layout = str(row.get("window_layout_hash", ""))
+        if all(identity) and layout:
+            layouts_by_trajectory.setdefault(identity, set()).add(layout)
+    layout_change_count = sum(max(0, len(layouts) - 1)
+                              for layouts in layouts_by_trajectory.values())
+    if layout_change_count:
+        failures.append("runtime_window_layout_changed_within_trajectory")
+
+    missing_references = []
+    for event in execution_events:
+        if str(event.get("gnss_core_policy", "")) != "braking_window_core":
+            continue
+        # Initial publication has commit-time P5 evidence; every subsequent
+        # watchdog/hold/revoke/brake event must cite runtime evidence.
+        if str(event.get("event", "")) == "AUTHORIZED":
+            continue
+        sequence = str(event.get(
+            "runtime_window_evidence_sequence_id", "") or "")
+        if sequence in ("", "0") or sequence not in batch_by_sequence:
+            missing_references.append(event)
+            continue
+        if str(event.get("event", "")) in {
+                "EXECUTION_ALLOWED", "ENDPOINT_HOLD",
+                "MARGINAL_UNSAFE_ARMED", "MARGINAL_UNSAFE_RECOVERED",
+                "FAILSAFE_BRAKING_CANCEL_REQUESTED",
+                "FAILSAFE_BRAKING_CANCELED_RECOVERED"} and str(
+                    batch_by_sequence[sequence].get("complete", "0")) != "1":
+            missing_references.append(event)
+    if missing_references:
+        failures.append("runtime_risk_decision_missing_window_evidence")
+
+    durations = []
+    for row in batches:
+        try:
+            duration = float(row.get("total_ms", "nan"))
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(duration) and duration >= 0.0:
+            durations.append(duration)
+    direct_p95 = None
+    if durations:
+        ordered = sorted(durations)
+        direct_p95 = ordered[max(0, math.ceil(.95 * len(ordered)) - 1)]
+        if direct_p95 >= 75.0:
+            failures.append("runtime_window_direct_p95_exceeded")
+        if max(durations) >= 150.0:
+            failures.append("runtime_window_direct_budget_exceeded")
+
+    classifications: dict[str, int] = {}
+    for row in probes:
+        value = str(row.get("classification", "") or "UNKNOWN")
+        classifications[value] = classifications.get(value, 0) + 1
+    return _result(
+        failures, runtime_window_evidence_count=len(batches),
+        runtime_window_row_count=len(windows),
+        runtime_window_evidence_incomplete_identity_count=len(
+            incomplete_identity_rows),
+        runtime_window_duplicate_sequence_count=duplicate_sequence_count,
+        runtime_window_missing_event_reference_count=len(missing_references),
+        runtime_window_layout_change_count=layout_change_count,
+        runtime_window_direct_ms_p95=direct_p95,
+        runtime_window_direct_ms_max=max(durations, default=None),
+        fixed_layout_generation_probe_count=len(probes),
+        fixed_layout_generation_classification_counts=classifications)
+
+
 def analyze_stage_records(
         stage: str, health: list[dict], decisions: list[dict],
         lineage: list[dict], bsplines: list[dict], p5_status: list[dict],
@@ -2807,6 +2930,15 @@ def analyze_run(
     execution_events = _read_csv(
         run_root /
         "exports/planner_p4_risk_astar_debug.csv.execution_events.csv")
+    runtime_window_batches = _read_csv(
+        run_root /
+        "exports/planner_p4_risk_astar_debug.csv.runtime_window_batch.csv")
+    runtime_windows = _read_csv(
+        run_root /
+        "exports/planner_p4_risk_astar_debug.csv.runtime_window.csv")
+    fixed_layout_generation_probes = _read_csv(
+        run_root /
+        "exports/planner_p4_risk_astar_debug.csv.generation_probe_fixed.csv")
     if forward_lineage:
         decisions = forward_lineage
         lineage = forward_lineage
@@ -2830,6 +2962,9 @@ def analyze_run(
             execution_events)
         execution_snapshot = analyze_execution_snapshot_attempts(
             records, health, execution_events)
+        runtime_window = analyze_runtime_window_evidence(
+            runtime_window_batches, runtime_windows,
+            fixed_layout_generation_probes, execution_events)
         snapshot_failures = []
         if not execution_snapshot["attempt_count"]:
             snapshot_failures.append("execution_snapshot_attempts_missing")
@@ -2849,16 +2984,16 @@ def analyze_run(
                 "false_support_stale_braking_observed")
         return _result(
             [*p0["failures"], *p0_performance_failures,
-             *limited["failures"], *snapshot_failures],
+             *limited["failures"], *snapshot_failures,
+             *runtime_window["failures"]],
             **{key: value for key, value in limited.items()
                if key not in ("result", "failures")},
             p0=p0,
             execution_snapshot=execution_snapshot,
+            runtime_window=runtime_window,
             gnss_arm=gnss_arm,
             p0_risk_grid_p95_limit_ms=p0_p95_limit_ms,
-            generation_probe_rows=len(_read_csv(
-                run_root / "exports/planner_p4_risk_astar_debug.csv."
-                "generation_probe.csv")))
+            generation_probe_rows=len(fixed_layout_generation_probes))
     if stage in ("p4", "p5-final", "full"):
         if _is_forest_scenario(scenario) and forest_variant == "baseline":
             p0 = analyze_p0(health, stage_start)
