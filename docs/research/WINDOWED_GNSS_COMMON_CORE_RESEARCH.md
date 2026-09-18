@@ -352,14 +352,18 @@ increment. Thus the remaining formal-route blocker is a real direct vertical
 risk result under the unchanged advisory model, not whole-route satellite
 deletion, RiskGrid interpolation, or the direct-query budget.
 
-The final stable-layout run
-`run-20260918T124110Z-276344` again moved `2.877 m` and reached the approved
-endpoint. Its 118 runtime batches had zero layout changes, zero incomplete
-identities and zero missing event references; the terminal hold cited the
-same complete causal evidence as the final safe watchdog result. Runtime
-suffix checks were `10.969 ms` p95 / `15.235 ms` maximum, while complete
-braking-window certification was `61.661 ms` p95 / `68.457 ms` maximum. The
-runtime-window acceptance contract therefore passed. The overall development
-runner remained red on independent LiDAR render/frame-gap and registered
-current-frame latency gates, so this result is an executed endpoint smoke, not
-a claim that all live qualification gates or formal-route selection pass.
+The final stable-layout runs `run-20260918T124110Z-276344`,
+`run-20260918T124531Z-302330` and `run-20260918T124722Z-321691` moved
+`2.877/2.382/2.877 m`. The first and third reached their approved endpoint;
+the second stopped on its certified brake after the direct GNSS exposure
+budget exceeded both peak and integral limits (`VPL 40.145/40 m`, peak ratio
+`1.093/1.05`, integral `0.0434/0.025`). Their `118/78/113` runtime batches
+all had zero layout changes, zero incomplete identities and zero missing event
+references; endpoint and brake events retained complete causal evidence.
+Runtime suffix p95 was `10.969--15.479 ms` with a `21.700 ms` maximum, while
+complete braking-window p95 was `14.871--64.221 ms` with a `76.108 ms`
+maximum. The runtime-window acceptance contract therefore passed in all three
+runs. Every overall development runner remained red on independent LiDAR
+render/frame-gap and registered current-frame latency gates, so these are two
+executed endpoint smokes plus one attributed certified stop, not a claim that
+all live qualification gates or formal-route selection pass.

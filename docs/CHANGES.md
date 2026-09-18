@@ -29,14 +29,17 @@
   A physical fixed sample now retains every braking-curve responsibility that
   reaches it; an expired earlier brake can no longer erase a colocated nominal
   endpoint or a later reachable brake. The post-fix default-BDS/windowed
-  forest smoke published one LIMITED_PREFIX, moved `2.877 m`, and held the
-  approved endpoint. Across 118 runtime evidence batches its layout changed
-  zero times, every execution event (including the terminal hold) resolved a
-  complete evidence sequence, and the runtime suffix checks measured
-  `10.969 ms` p95 / `15.235 ms` max. Full braking-window batches measured
-  `61.661 ms` p95 / `68.457 ms` max, below both their `75 ms` target and the
-  `150 ms` authority deadline. The runtime-window contract passed; the overall
-  development runner remained red only on three separate sensor/render
+  forest smokes each published one LIMITED_PREFIX and moved
+  `2.877/2.382/2.877 m`; two held their approved endpoint and one used its
+  certified brake after a real GNSS exposure-budget rejection (`VPL
+  40.145/40 m`, peak ratio `1.093`, excess integral `0.0434/0.025`). Across
+  `118/78/113` runtime evidence batches every run had zero layout changes,
+  zero incomplete identities and zero missing event references. Runtime suffix
+  p95 was `10.969--15.479 ms` (maximum `21.700 ms`); full braking-window p95
+  was `14.871--64.221 ms` (maximum `76.108 ms`), below the `75 ms` p95 target
+  and `150 ms` authority deadline. The runtime-window contract passed in all
+  three runs; the overall development runner remained red only on three
+  separate sensor/render
   performance gates (`lidar_render_p95_exceeded`, a LiDAR frame interval above
   `0.2 s`, and planner-local-map current-frame latency above `10 ms`). No
   formal route was selected.
