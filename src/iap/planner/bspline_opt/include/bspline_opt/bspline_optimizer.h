@@ -467,7 +467,9 @@ namespace ego_planner
         const std::vector<Eigen::Vector3d> &coarse_guide,
         GridMapOccupancyDiagnosticQuery frozen_occupancy_query,
         double corridor_radius_m,
-        double compute_budget_ms);
+        double compute_budget_ms,
+        P4ForwardClearanceQuery clearance_query = {},
+        double planning_clearance_buffer_m = 0.0);
 
     // optional inputs
     void setGuidePath(const vector<Eigen::Vector3d> &guide_pt);

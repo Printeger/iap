@@ -344,7 +344,7 @@ TEST(LocalMotionAssuranceTest, UnsafeCertifiedBrakeStillFailsClosed) {
   EXPECT_EQ(result.reason, "hard_collision");
 }
 
-TEST(LocalMotionAssuranceTest, IcpResidualDoesNotReuseGnssAraimMultiplier) {
+TEST(LocalMotionAssuranceTest, IcpResidualIsHealthOnlyNotEnvelopeDistance) {
   auto evidence = clearCurrentFrameEvidence();
   evidence.icp_rmse_m = 0.25;
   evidence.icp_gamma = 1.0;
@@ -358,8 +358,119 @@ TEST(LocalMotionAssuranceTest, IcpResidualDoesNotReuseGnssAraimMultiplier) {
       evidence, shortCurve());
 
   EXPECT_EQ(result.status, iap::LocalMotionAssuranceStatus::SAFE);
-  EXPECT_NEAR(result.first_failure.scan_error_m, 0.0, 1.0e-12);
-  EXPECT_LT(result.maximum_required_envelope_m, 1.1);
+  EXPECT_NEAR(result.maximum_required_envelope_m, 0.622, 1.0e-12);
+  EXPECT_GT(result.minimum_margin_m, 1.0);
+}
+
+TEST(LocalClearanceEvaluatorTest,
+     HealthyIcpResidualDoesNotChangeCalibratedSurfaceEnvelope) {
+  auto low_residual = clearCurrentFrameEvidence();
+  low_residual.icp_rmse_m = 0.02;
+  auto high_residual = low_residual;
+  high_residual.icp_rmse_m = 0.30;
+
+  iap::LocalMotionAssurancePolicy policy;
+  policy.surface_error_bound_m = 0.04;
+  policy.surface_error_calibration_id = "forest-held-out-v1";
+  const auto low = iap::LocalMotionAssurance(policy).evaluate(
+      low_residual, shortCurve());
+  const auto high = iap::LocalMotionAssurance(policy).evaluate(
+      high_residual, shortCurve());
+
+  ASSERT_EQ(low.status, iap::LocalMotionAssuranceStatus::SAFE);
+  ASSERT_EQ(high.status, iap::LocalMotionAssuranceStatus::SAFE);
+  EXPECT_DOUBLE_EQ(low.maximum_required_envelope_m,
+                   high.maximum_required_envelope_m);
+  EXPECT_NEAR(low.maximum_required_envelope_m, 0.642, 1.0e-12);
+  EXPECT_DOUBLE_EQ(low.surface_error_bound_m, 0.04);
+  EXPECT_DOUBLE_EQ(high.surface_error_bound_m, 0.04);
+  EXPECT_EQ(high.surface_error_calibration_id, "forest-held-out-v1");
+  EXPECT_DOUBLE_EQ(high.raw_icp_rmse_m, 0.30);
+  EXPECT_NE(low.certificate_hash, high.certificate_hash)
+      << "raw ICP remains diagnostic certificate evidence even though it "
+         "does not inflate clearance";
+}
+
+TEST(LocalClearanceEvaluatorTest,
+     ReturnsSharedEnvelopeMarginAndEscapeDirection) {
+  auto evidence = clearCurrentFrameEvidence();
+  iap::LocalObstacleEvidence obstacle;
+  obstacle.center_map = Eigen::Vector3d(0.0, 1.0, 1.0);
+  obstacle.half_extent_m = Eigen::Vector3d::Constant(0.05);
+  obstacle.provenance = iap::LocalObstacleProvenance::CURRENT_FRAME;
+  obstacle.source_frame_id = 12;
+  obstacle.source_identity = "current-12";
+  evidence.obstacles.push_back(obstacle);
+
+  iap::LocalMotionAssurancePolicy policy;
+  policy.surface_error_bound_m = 0.04;
+  policy.surface_error_calibration_id = "forest-held-out-v1";
+  const iap::LocalClearanceEvaluator evaluator(evidence, policy);
+  const auto result = evaluator.query(
+      Eigen::Vector3d(0.0, 0.0, 1.0), 0.15, 0.05);
+
+  ASSERT_EQ(result.status, iap::LocalClearanceStatus::VALID);
+  EXPECT_NEAR(result.obstacle_clearance_m, 0.95, 1.0e-12);
+  EXPECT_NEAR(result.required_envelope_m, 0.742, 1.0e-12);
+  EXPECT_NEAR(result.planning_required_envelope_m, 0.792, 1.0e-12);
+  EXPECT_NEAR(result.signed_margin_m, 0.158, 1.0e-12);
+  EXPECT_TRUE(result.nearest_obstacle_position_map.isApprox(
+      Eigen::Vector3d(0.0, 1.0, 1.0)));
+  EXPECT_TRUE(result.escape_direction_map.isApprox(
+      Eigen::Vector3d(0.0, -1.0, 0.0)));
+  EXPECT_EQ(result.nearest_obstacle_identity, "current-12");
+  EXPECT_DOUBLE_EQ(result.raw_icp_rmse_m, 0.01);
+  EXPECT_DOUBLE_EQ(result.surface_error_bound_m, 0.04);
+}
+
+TEST(LocalClearanceEvaluatorTest,
+     FarObstacleReturnsExplicitCertifiedClearanceCap) {
+  auto evidence = clearCurrentFrameEvidence();
+  iap::LocalObstacleEvidence obstacle;
+  obstacle.center_map = Eigen::Vector3d(0.0, 3.0, 1.0);
+  obstacle.half_extent_m = Eigen::Vector3d::Constant(0.05);
+  obstacle.provenance = iap::LocalObstacleProvenance::CURRENT_FRAME;
+  obstacle.source_frame_id = 21;
+  obstacle.source_identity = "surface-at-three-metres";
+  evidence.obstacles.push_back(obstacle);
+
+  const iap::LocalClearanceEvaluator evaluator(evidence);
+  const auto result = evaluator.query(
+      Eigen::Vector3d(0.0, 0.0, 1.0), 0.05, 0.05);
+
+  ASSERT_EQ(result.status, iap::LocalClearanceStatus::VALID);
+  EXPECT_DOUBLE_EQ(result.obstacle_clearance_m, 5.0);
+  EXPECT_TRUE(result.obstacle_clearance_capped);
+  EXPECT_TRUE(result.nearest_obstacle_identity.empty());
+}
+
+TEST(LocalMotionAssuranceTest,
+     GenerationBufferRejectsSplineThatOnlyPassesHardBoundary) {
+  auto evidence = clearCurrentFrameEvidence();
+  iap::LocalObstacleEvidence obstacle;
+  obstacle.center_map = Eigen::Vector3d(0.0, 0.65, 1.0);
+  obstacle.half_extent_m = Eigen::Vector3d::Zero();
+  obstacle.provenance = iap::LocalObstacleProvenance::CURRENT_FRAME;
+  obstacle.source_frame_id = 12;
+  obstacle.source_identity = "current-12";
+  evidence.obstacles.push_back(obstacle);
+
+  iap::LocalMotionAssurancePolicy policy;
+  policy.surface_error_bound_m = 0.02;
+  policy.surface_error_calibration_id = "test-bound-v1";
+  const iap::LocalMotionAssurance assurance(policy);
+
+  const auto runtime = assurance.evaluate(
+      evidence, longHealthyRegisteredCurve(), 0.0);
+  const auto generation = assurance.evaluate(
+      evidence, longHealthyRegisteredCurve(), 0.05);
+
+  ASSERT_EQ(runtime.status, iap::LocalMotionAssuranceStatus::SAFE);
+  EXPECT_NEAR(runtime.minimum_margin_m, 0.028, 1.0e-12);
+  ASSERT_EQ(generation.status, iap::LocalMotionAssuranceStatus::UNSAFE);
+  EXPECT_EQ(generation.reason, "local_clearance_margin_not_positive");
+  EXPECT_NEAR(generation.first_failure.margin_m, -0.022, 1.0e-12);
+  EXPECT_DOUBLE_EQ(generation.planning_buffer_m, 0.05);
 }
 
 TEST(LocalMotionAssuranceTest,

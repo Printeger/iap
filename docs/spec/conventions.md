@@ -449,8 +449,8 @@
   an aggregate-budget stop. Repeated watchdog reads do not consume budget.
 - `LocalMotionAssurance` independently checks the exact nominal curve and all
   reachable braking curves at no more than `0.2 s` spacing. Its directional
-  margin subtracts vehicle radius, measured tracking bound, scan/ICP bound,
-  curve approximation and fixed safety margin
+  margin subtracts vehicle radius, measured tracking bound, a deployment-
+  calibrated registered-surface bound, curve approximation and fixed safety margin
   from obstacle-surface clearance. The registered local map is authoritative
   SLAM geometry: current and active-window obstacles use the same local
   execution envelope. Planner code must not synthesize a current-to-source
@@ -488,10 +488,31 @@
   `p4.assurance.local_tracking_error_bound_m` (default `0.15 m`) and
   `p4.assurance.local_safety_margin_m` (default `0.20 m`); the P4 stopping
   boundary continues to use its independent `p4.forward.safety_margin_m`.
-  `p4.assurance.local_lidar_error_multiplier` defaults to `1.0`: ICP RMSE is
-  a geometric residual and must not silently reuse the GNSS ARAIM `K_ff=5.42`
-  tail multiplier. A deployment may supply a larger calibrated residual
-  scale, but it is a separate local-motion model parameter.
+  ICP RMSE, condition, gamma and degeneracy are registration-health evidence,
+  not a position covariance or a surface-error bound; they therefore cannot
+  be added to every obstacle envelope. Online authorization uses the fixed
+  `p4.assurance.local_surface_error_bound_m` and binds its non-empty
+  `local_surface_error_calibration_id` into the certificate. The bound is
+  produced offline from three calibration runs plus one independent held-out
+  run as `max(0.02 m, q99.9(relative-pose error),
+  q99.9(one-sided repeated-surface offset)) + 0.01 m`; a held-out exceedance
+  invalidates the calibration. Simulation truth is evaluation-only and never
+  enters the planner. The repository's `0.02 m` / `uncalibrated_default_v1`
+  defaults are development/test wiring only and are not deployment authority;
+  a deployment profile must install a retained passing value and calibration
+  ID. Legacy `local_scan_error_min_m` and
+  `local_lidar_error_multiplier` are accepted only for configuration
+  compatibility and have no authorization effect.
+  Route refinement and final assurance share the same immutable
+  `LocalClearanceEvaluator` semantics and frozen evidence identity; a
+  latest-snapshot reauthorization deliberately rebuilds it from the newer
+  immutable evidence. Refinement samples guides at no more than `0.05 m`
+  spacing, and every newly generated nominal/braking spline must retain the
+  `0.05 m` planning reserve after smoothing. Runtime reauthorization keeps
+  the unchanged strict condition `signed_margin > 0`. A final clearance failure carries the nearest obstacle
+  and escape direction into at most two actual-curve retries: first push the
+  local guide away from that obstacle, then try an unused topology channel.
+  Soft guidance or planning buffer never grants execution authority.
   Runtime tracking above the certified local bound schedules the existing
   certified brake; the larger loss-of-control threshold remains the immediate
   emergency-revocation boundary.

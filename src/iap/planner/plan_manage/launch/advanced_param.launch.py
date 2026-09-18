@@ -158,6 +158,9 @@ def generate_launch_description():
     p4_assurance_recovered_hold_s = LaunchConfiguration('p4_assurance_recovered_hold_s', default=0.5)
     p4_assurance_local_tracking_error_bound_m = LaunchConfiguration('p4_assurance_local_tracking_error_bound_m', default=0.15)
     p4_assurance_local_safety_margin_m = LaunchConfiguration('p4_assurance_local_safety_margin_m', default=0.20)
+    p4_assurance_local_surface_error_bound_m = LaunchConfiguration('p4_assurance_local_surface_error_bound_m', default=0.02)
+    p4_assurance_local_surface_error_calibration_id = LaunchConfiguration('p4_assurance_local_surface_error_calibration_id', default='uncalibrated_default_v1')
+    p4_assurance_planning_clearance_buffer_m = LaunchConfiguration('p4_assurance_planning_clearance_buffer_m', default=0.05)
     p4_assurance_local_scan_error_min_m = LaunchConfiguration('p4_assurance_local_scan_error_min_m', default=0.02)
     p4_assurance_local_lidar_error_multiplier = LaunchConfiguration('p4_assurance_local_lidar_error_multiplier', default=1.0)
     p5_enable_runtime_gate = LaunchConfiguration('p5_enable_runtime_gate', default=False)
@@ -345,6 +348,9 @@ def generate_launch_description():
     p4_assurance_recovered_hold_s_arg = DeclareLaunchArgument('p4_assurance_recovered_hold_s', default_value=p4_assurance_recovered_hold_s)
     p4_assurance_local_tracking_error_bound_m_arg = DeclareLaunchArgument('p4_assurance_local_tracking_error_bound_m', default_value=p4_assurance_local_tracking_error_bound_m)
     p4_assurance_local_safety_margin_m_arg = DeclareLaunchArgument('p4_assurance_local_safety_margin_m', default_value=p4_assurance_local_safety_margin_m)
+    p4_assurance_local_surface_error_bound_m_arg = DeclareLaunchArgument('p4_assurance_local_surface_error_bound_m', default_value=p4_assurance_local_surface_error_bound_m)
+    p4_assurance_local_surface_error_calibration_id_arg = DeclareLaunchArgument('p4_assurance_local_surface_error_calibration_id', default_value=p4_assurance_local_surface_error_calibration_id)
+    p4_assurance_planning_clearance_buffer_m_arg = DeclareLaunchArgument('p4_assurance_planning_clearance_buffer_m', default_value=p4_assurance_planning_clearance_buffer_m)
     p4_assurance_local_scan_error_min_m_arg = DeclareLaunchArgument('p4_assurance_local_scan_error_min_m', default_value=p4_assurance_local_scan_error_min_m)
     p4_assurance_local_lidar_error_multiplier_arg = DeclareLaunchArgument('p4_assurance_local_lidar_error_multiplier', default_value=p4_assurance_local_lidar_error_multiplier)
     p5_enable_runtime_gate_arg = DeclareLaunchArgument('p5_enable_runtime_gate', default_value=p5_enable_runtime_gate)
@@ -507,6 +513,9 @@ def generate_launch_description():
             {'p4.assurance.recovered_hold_s': p4_assurance_recovered_hold_s},
             {'p4.assurance.local_tracking_error_bound_m': p4_assurance_local_tracking_error_bound_m},
             {'p4.assurance.local_safety_margin_m': p4_assurance_local_safety_margin_m},
+            {'p4.assurance.local_surface_error_bound_m': p4_assurance_local_surface_error_bound_m},
+            {'p4.assurance.local_surface_error_calibration_id': p4_assurance_local_surface_error_calibration_id},
+            {'p4.assurance.planning_clearance_buffer_m': p4_assurance_planning_clearance_buffer_m},
             {'p4.assurance.local_scan_error_min_m': p4_assurance_local_scan_error_min_m},
             {'p4.assurance.local_lidar_error_multiplier': p4_assurance_local_lidar_error_multiplier},
             {'p5.enable_runtime_gate': p5_enable_runtime_gate},
@@ -815,6 +824,9 @@ def generate_launch_description():
     ld.add_action(p4_assurance_recovered_hold_s_arg)
     ld.add_action(p4_assurance_local_tracking_error_bound_m_arg)
     ld.add_action(p4_assurance_local_safety_margin_m_arg)
+    ld.add_action(p4_assurance_local_surface_error_bound_m_arg)
+    ld.add_action(p4_assurance_local_surface_error_calibration_id_arg)
+    ld.add_action(p4_assurance_planning_clearance_buffer_m_arg)
     ld.add_action(p4_assurance_local_scan_error_min_m_arg)
     ld.add_action(p4_assurance_local_lidar_error_multiplier_arg)
     ld.add_action(p5_enable_runtime_gate_arg)

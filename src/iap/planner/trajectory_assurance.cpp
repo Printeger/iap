@@ -8,6 +8,8 @@
 #include <sstream>
 #include <stdexcept>
 #include <tuple>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 namespace iap {
@@ -76,6 +78,8 @@ double positiveLinearDuration(const double a, const double b,
 struct AabbRelation {
   double clearance_m = std::numeric_limits<double>::infinity();
   Eigen::Vector3d direction = Eigen::Vector3d::Zero();
+  Eigen::Vector3d closest_point = Eigen::Vector3d::Constant(
+      std::numeric_limits<double>::quiet_NaN());
 };
 
 std::optional<AabbRelation> aabbRelation(
@@ -91,6 +95,7 @@ std::optional<AabbRelation> aabbRelation(
   const Eigen::Vector3d closest = position.cwiseMax(lower).cwiseMin(upper);
   const Eigen::Vector3d delta = closest - position;
   AabbRelation relation;
+  relation.closest_point = closest;
   relation.clearance_m = delta.norm();
   if (relation.clearance_m > kEpsilon) {
     relation.direction = delta / relation.clearance_m;
@@ -101,6 +106,194 @@ std::optional<AabbRelation> aabbRelation(
 }
 
 }  // namespace
+
+struct LocalClearanceEvaluator::Impl {
+  struct BucketKey {
+    int x = 0;
+    int y = 0;
+    int z = 0;
+
+    bool operator==(const BucketKey& other) const {
+      return x == other.x && y == other.y && z == other.z;
+    }
+  };
+
+  struct BucketHash {
+    std::size_t operator()(const BucketKey& key) const {
+      std::size_t value = 1469598103934665603ULL;
+      for (const int component : {key.x, key.y, key.z}) {
+        value ^= std::hash<int>{}(component);
+        value *= 1099511628211ULL;
+      }
+      return value;
+    }
+  };
+
+  LocalMotionEvidence evidence;
+  LocalMotionAssurancePolicy policy;
+  double bucket_size_m = 1.0;
+  std::unordered_map<BucketKey, std::vector<std::size_t>, BucketHash> buckets;
+  std::string invalid_reason;
+  std::string identity;
+
+  BucketKey bucket(const Eigen::Vector3d& point) const {
+    return {static_cast<int>(std::floor(point.x() / bucket_size_m)),
+            static_cast<int>(std::floor(point.y() / bucket_size_m)),
+            static_cast<int>(std::floor(point.z() / bucket_size_m))};
+  }
+};
+
+LocalClearanceEvaluator::LocalClearanceEvaluator(
+    LocalMotionEvidence evidence, LocalMotionAssurancePolicy policy) {
+  auto writable = std::make_shared<Impl>();
+  writable->evidence = std::move(evidence);
+  writable->policy = std::move(policy);
+  const auto& local_policy = writable->policy;
+  const auto& local_evidence = writable->evidence;
+  if (!(local_policy.vehicle_radius_m >= 0.0) ||
+      !(local_policy.safety_margin_m >= 0.0) ||
+      !(local_policy.curve_approximation_error_m >= 0.0) ||
+      !(local_policy.maximum_tracking_error_m >= 0.0) ||
+      !(local_policy.surface_error_bound_m >= 0.0) ||
+      !(local_policy.planning_clearance_buffer_m >= 0.0) ||
+      local_policy.surface_error_calibration_id.empty()) {
+    throw std::invalid_argument("invalid local clearance policy");
+  }
+  if (!local_evidence.complete || !local_evidence.support_fresh ||
+      local_evidence.identity.empty()) {
+    writable->invalid_reason = "local_motion_evidence_incomplete";
+  } else if (!finitePositive(local_evidence.certified_empty_clearance_m)) {
+    writable->invalid_reason = "certified_empty_clearance_invalid";
+  } else if (!local_evidence.registration_health_valid ||
+             local_evidence.icp_degenerate ||
+             !std::isfinite(local_evidence.icp_rmse_m) ||
+             local_evidence.icp_rmse_m < 0.0 ||
+             !finitePositive(local_evidence.icp_gamma)) {
+    writable->invalid_reason = "slam_registration_health_invalid";
+  }
+
+  for (std::size_t index = 0; index < local_evidence.obstacles.size(); ++index) {
+    const auto& obstacle = local_evidence.obstacles[index];
+    if (!obstacle.center_map.allFinite() ||
+        !obstacle.half_extent_m.allFinite() ||
+        (obstacle.half_extent_m.array() < 0.0).any()) {
+      if (writable->invalid_reason.empty())
+        writable->invalid_reason = "local_obstacle_geometry_invalid";
+      continue;
+    }
+    if (obstacle.provenance ==
+        LocalObstacleProvenance::ACTIVE_WINDOW_UNCERTIFIED) {
+      if (writable->invalid_reason.empty())
+        writable->invalid_reason = "active_window_source_health_missing";
+      continue;
+    }
+    if (obstacle.provenance ==
+            LocalObstacleProvenance::ACTIVE_WINDOW_CERTIFIED &&
+        (obstacle.source_frame_id < 0 || obstacle.source_identity.empty())) {
+      if (writable->invalid_reason.empty())
+        writable->invalid_reason = "active_window_source_identity_missing";
+      continue;
+    }
+    const Impl::BucketKey lower = writable->bucket(
+        obstacle.center_map - obstacle.half_extent_m);
+    const Impl::BucketKey upper = writable->bucket(
+        obstacle.center_map + obstacle.half_extent_m);
+    for (int x = lower.x; x <= upper.x; ++x)
+      for (int y = lower.y; y <= upper.y; ++y)
+        for (int z = lower.z; z <= upper.z; ++z)
+          writable->buckets[{x, y, z}].push_back(index);
+  }
+
+  std::ostringstream canonical;
+  canonical << local_evidence.identity << ';'
+            << local_policy.surface_error_calibration_id << ';'
+            << std::hexfloat << local_policy.vehicle_radius_m << ';'
+            << local_policy.safety_margin_m << ';'
+            << local_policy.curve_approximation_error_m << ';'
+            << local_policy.surface_error_bound_m << ';'
+            << local_policy.planning_clearance_buffer_m << ';'
+            << local_evidence.icp_rmse_m << ';'
+            << local_evidence.icp_gamma << ';';
+  writable->identity = stableHash(canonical.str());
+  impl_ = std::move(writable);
+}
+
+LocalClearanceResult LocalClearanceEvaluator::query(
+    const Eigen::Vector3d& position_map, const double tracking_error_m,
+    const double planning_buffer_m) const {
+  LocalClearanceResult result;
+  result.position_map = position_map;
+  result.tracking_error_m = tracking_error_m;
+  result.planning_buffer_m = planning_buffer_m;
+  result.surface_error_bound_m = impl_->policy.surface_error_bound_m;
+  result.raw_icp_rmse_m = impl_->evidence.icp_rmse_m;
+  result.raw_icp_gamma = impl_->evidence.icp_gamma;
+  result.evidence_identity = impl_->identity;
+  if (!impl_->invalid_reason.empty()) {
+    result.reason = impl_->invalid_reason;
+    return result;
+  }
+  if (!position_map.allFinite() || !std::isfinite(tracking_error_m) ||
+      tracking_error_m < 0.0 ||
+      tracking_error_m > impl_->policy.maximum_tracking_error_m + kEpsilon ||
+      !std::isfinite(planning_buffer_m) || planning_buffer_m < 0.0) {
+    result.reason = "local_clearance_query_invalid";
+    return result;
+  }
+
+  result.required_envelope_m = impl_->policy.vehicle_radius_m +
+      impl_->policy.safety_margin_m +
+      impl_->policy.curve_approximation_error_m + tracking_error_m +
+      impl_->policy.surface_error_bound_m;
+  result.planning_required_envelope_m =
+      result.required_envelope_m + planning_buffer_m;
+  // Authorization and feedback only need obstacles capable of entering the
+  // requested envelope. Keep this bounded rather than scanning the complete
+  // local map at every 0.05 m refinement sample. When none is present the
+  // returned distance is explicitly a certified-empty cap, not a global
+  // nearest-obstacle claim.
+  const double search_radius_m = result.planning_required_envelope_m +
+      impl_->bucket_size_m;
+  const Impl::BucketKey lower = impl_->bucket(
+      position_map - Eigen::Vector3d::Constant(search_radius_m));
+  const Impl::BucketKey upper = impl_->bucket(
+      position_map + Eigen::Vector3d::Constant(search_radius_m));
+  std::unordered_set<std::size_t> candidates;
+  for (int x = lower.x; x <= upper.x; ++x)
+    for (int y = lower.y; y <= upper.y; ++y)
+      for (int z = lower.z; z <= upper.z; ++z) {
+        const auto found = impl_->buckets.find({x, y, z});
+        if (found == impl_->buckets.end()) continue;
+        candidates.insert(found->second.begin(), found->second.end());
+      }
+
+  result.obstacle_clearance_m = impl_->evidence.certified_empty_clearance_m;
+  for (const std::size_t index : candidates) {
+    const auto& obstacle = impl_->evidence.obstacles[index];
+    const auto relation = aabbRelation(position_map, obstacle);
+    if (!relation) {
+      result.reason = "local_obstacle_geometry_invalid";
+      return result;
+    }
+    if (relation->clearance_m >= result.obstacle_clearance_m) continue;
+    result.obstacle_clearance_m = relation->clearance_m;
+    result.obstacle_clearance_capped = false;
+    result.nearest_obstacle_position_map = obstacle.center_map;
+    result.nearest_point_map = relation->closest_point;
+    result.escape_direction_map = -relation->direction;
+    result.provenance = obstacle.provenance;
+    result.nearest_obstacle_identity = obstacle.source_identity;
+  }
+  result.signed_margin_m = result.obstacle_clearance_m -
+      result.planning_required_envelope_m;
+  result.status = LocalClearanceStatus::VALID;
+  result.reason = "valid";
+  return result;
+}
+
+const std::string& LocalClearanceEvaluator::identity() const {
+  return impl_->identity;
+}
 
 void annotateGlobalNavigationBudgetFailures(
     GlobalNavigationExposureResult* result,
@@ -520,8 +713,9 @@ LocalMotionAssurance::LocalMotionAssurance(LocalMotionAssurancePolicy policy)
       !(policy_.safety_margin_m >= 0.0) ||
       !(policy_.curve_approximation_error_m >= 0.0) ||
       !(policy_.maximum_tracking_error_m >= 0.0) ||
-      !(policy_.minimum_scan_error_m >= 0.0) ||
-      !(policy_.lidar_error_multiplier >= 0.0) ||
+      !(policy_.surface_error_bound_m >= 0.0) ||
+      !(policy_.planning_clearance_buffer_m >= 0.0) ||
+      policy_.surface_error_calibration_id.empty() ||
       !(policy_.maximum_sample_interval_s > 0.0)) {
     throw std::invalid_argument("invalid local motion assurance policy");
   }
@@ -529,9 +723,20 @@ LocalMotionAssurance::LocalMotionAssurance(LocalMotionAssurancePolicy policy)
 
 LocalMotionAssuranceResult LocalMotionAssurance::evaluate(
     const LocalMotionEvidence& evidence,
-    const std::vector<LocalMotionCurve>& curves) const {
+    const std::vector<LocalMotionCurve>& curves,
+    const double planning_buffer_m) const {
   LocalMotionAssuranceResult result;
   result.evidence_identity = evidence.identity;
+  result.raw_icp_rmse_m = evidence.icp_rmse_m;
+  result.raw_icp_gamma = evidence.icp_gamma;
+  result.surface_error_bound_m = policy_.surface_error_bound_m;
+  result.surface_error_calibration_id =
+      policy_.surface_error_calibration_id;
+  result.planning_buffer_m = planning_buffer_m;
+  if (!std::isfinite(planning_buffer_m) || planning_buffer_m < 0.0) {
+    result.reason = "local_planning_buffer_invalid";
+    return result;
+  }
   if (!evidence.complete || !evidence.support_fresh || evidence.identity.empty()) {
     result.reason = "local_motion_evidence_incomplete";
     return result;
@@ -550,6 +755,8 @@ LocalMotionAssuranceResult LocalMotionAssurance::evaluate(
     result.reason = "local_motion_curves_empty";
     return result;
   }
+
+  const LocalClearanceEvaluator clearance(evidence, policy_);
 
   result.minimum_margin_m = std::numeric_limits<double>::infinity();
   std::ostringstream identity;
@@ -590,59 +797,37 @@ LocalMotionAssuranceResult LocalMotionAssurance::evaluate(
       sample_result.sample_index = index;
       sample_result.position_map = sample.position_map;
       sample_result.relative_time_s = sample.relative_time_s;
-      sample_result.scan_error_m = std::max(
-          policy_.minimum_scan_error_m,
-          policy_.lidar_error_multiplier * evidence.icp_gamma *
-              evidence.icp_rmse_m);
-      const double common_required_envelope_m =
-          policy_.vehicle_radius_m + policy_.safety_margin_m +
-          policy_.curve_approximation_error_m + sample.tracking_error_m +
-          sample_result.scan_error_m;
-      sample_result.obstacle_clearance_m =
-          evidence.certified_empty_clearance_m;
-      sample_result.required_envelope_m = common_required_envelope_m;
-      sample_result.margin_m = sample_result.obstacle_clearance_m -
-                               common_required_envelope_m;
-      for (const auto& obstacle : evidence.obstacles) {
-        const auto relation = aabbRelation(sample.position_map, obstacle);
-        if (!relation) {
-          result.reason = "local_obstacle_geometry_invalid";
-          result.first_failure = sample_result;
-          result.first_failure.provenance = obstacle.provenance;
-          return result;
-        }
-        if (obstacle.provenance ==
-            LocalObstacleProvenance::ACTIVE_WINDOW_UNCERTIFIED) {
-          result.reason = "active_window_source_health_missing";
-          result.first_failure = sample_result;
-          result.first_failure.obstacle_clearance_m = relation->clearance_m;
-          result.first_failure.provenance = obstacle.provenance;
-          return result;
-        }
-        if (obstacle.provenance ==
-            LocalObstacleProvenance::ACTIVE_WINDOW_CERTIFIED) {
-          if (obstacle.source_frame_id < 0 || obstacle.source_identity.empty()) {
-            result.reason = "active_window_source_identity_missing";
-            result.first_failure = sample_result;
-            result.first_failure.obstacle_clearance_m = relation->clearance_m;
-            result.first_failure.provenance = obstacle.provenance;
-            return result;
-          }
-        }
-        // The registered obstacle pose is authoritative SLAM output. Absolute
-        // LiDAR protection levels describe map/world localization and cannot
-        // be added to synthesize a current-to-source relative error. Source
-        // registration health is an admission gate; every admitted obstacle
-        // uses the same local execution envelope.
-        const double required = common_required_envelope_m;
-        const double margin = relation->clearance_m - required;
-        if (margin < sample_result.margin_m) {
-          sample_result.obstacle_clearance_m = relation->clearance_m;
-          sample_result.required_envelope_m = required;
-          sample_result.margin_m = margin;
-          sample_result.provenance = obstacle.provenance;
-        }
+      const auto clearance_result = clearance.query(
+          sample.position_map, sample.tracking_error_m, planning_buffer_m);
+      if (clearance_result.status != LocalClearanceStatus::VALID) {
+        result.reason = clearance_result.reason;
+        result.first_failure = sample_result;
+        result.first_failure.raw_icp_rmse_m = evidence.icp_rmse_m;
+        result.first_failure.raw_icp_gamma = evidence.icp_gamma;
+        result.first_failure.surface_error_bound_m =
+            policy_.surface_error_bound_m;
+        result.first_failure.scan_error_m = policy_.surface_error_bound_m;
+        return result;
       }
+      sample_result.obstacle_clearance_m =
+          clearance_result.obstacle_clearance_m;
+      sample_result.required_envelope_m =
+          clearance_result.planning_required_envelope_m;
+      sample_result.margin_m = clearance_result.signed_margin_m;
+      sample_result.raw_icp_rmse_m = clearance_result.raw_icp_rmse_m;
+      sample_result.raw_icp_gamma = clearance_result.raw_icp_gamma;
+      sample_result.surface_error_bound_m =
+          clearance_result.surface_error_bound_m;
+      // Compatibility column: this is now the calibrated surface bound, not
+      // a conversion of frame-wide ICP residual RMS.
+      sample_result.scan_error_m = clearance_result.surface_error_bound_m;
+      sample_result.nearest_obstacle_position_map =
+          clearance_result.nearest_obstacle_position_map;
+      sample_result.escape_direction_map =
+          clearance_result.escape_direction_map;
+      sample_result.nearest_obstacle_identity =
+          clearance_result.nearest_obstacle_identity;
+      sample_result.provenance = clearance_result.provenance;
       sample_result.clearance_utilization =
           finitePositive(sample_result.obstacle_clearance_m)
               ? sample_result.required_envelope_m /
@@ -657,7 +842,8 @@ LocalMotionAssuranceResult LocalMotionAssurance::evaluate(
       result.maximum_clearance_utilization = std::max(
           result.maximum_clearance_utilization,
           sample_result.clearance_utilization);
-      identity << sample.relative_time_s << ':' << sample.position_map.x()
+      identity << clearance.identity() << ':' << sample.relative_time_s << ':'
+               << sample.position_map.x()
                << ':' << sample.position_map.y() << ':'
                << sample.position_map.z() << ':'
                << sample_result.margin_m << ';';
@@ -748,7 +934,9 @@ TrajectoryAssuranceResult TrajectoryAssurance::evaluate(
         ? "controlled_degradation_within_remaining_episode_budget"
         : "global_navigation_episode_budget_exceeded";
   }
-  result.local = local_.evaluate(request.local_evidence, request.local_curves);
+  result.local = local_.evaluate(
+      request.local_evidence, request.local_curves,
+      request.local_planning_buffer_m);
   result.mission_progress_m = request.mission_progress_m;
   result.lidar_observability_improvement =
       request.lidar_observability_improvement;

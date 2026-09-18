@@ -938,6 +938,41 @@ TEST(P4CollisionGuideIntegration,
       coarse, observed_epoch->diagnostic_query, 0.25, 100.0).success());
 }
 
+TEST(P4CollisionGuideIntegration,
+  ForwardGuideRefinementRoutesAroundClearanceEnvelope)
+{
+  const auto snapshot = makeSnapshot();
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureGuideFixture(map.get(), false);
+  const auto epoch = map->captureFrozenOccupancyEpoch();
+  ASSERT_NE(epoch, nullptr);
+  auto optimizer = makeOptimizer(
+    map, snapshot, true, false, P4RiskObjective::PROVIDER_BOTTLENECK_V2);
+  const std::vector<Eigen::Vector3d> coarse = {
+    Eigen::Vector3d(-4.0, 0.0, 0.0),
+    Eigen::Vector3d(4.0, 0.0, 0.0)};
+  const ego_planner::P4ForwardClearanceQuery clearance =
+    [](const Eigen::Vector3d & point) {
+      ego_planner::P4ForwardClearanceSample sample;
+      sample.available = true;
+      sample.signed_margin_m =
+        std::abs(point.x()) < 0.8 && std::abs(point.y()) < 0.30 ? -0.01 : 0.10;
+      sample.escape_direction = Eigen::Vector3d(0.0, 1.0, 0.0);
+      sample.nearest_obstacle_position = Eigen::Vector3d(point.x(), 0.30, 0.0);
+      sample.nearest_obstacle_identity = "clearance-wall";
+      return sample;
+    };
+
+  const auto refinement = optimizer->refineP4ForwardGuide(
+      coarse, epoch->diagnostic_query, 0.75, 100.0, clearance, 0.05);
+
+  ASSERT_TRUE(refinement.success()) << refinement.reason;
+  EXPECT_GE(refinement.minimum_signed_margin_m, 0.05 - 1.0e-9);
+  EXPECT_TRUE(std::any_of(
+      refinement.path.begin(), refinement.path.end(),
+      [](const Eigen::Vector3d & point) { return std::abs(point.y()) >= 0.30; }));
+}
+
 // The collision-triggered P4 seam was removed. Forward-route tests now own
 // P4 identity, safety, and selection coverage; the test above protects the
 // remaining native EGO collision-rebound contract.

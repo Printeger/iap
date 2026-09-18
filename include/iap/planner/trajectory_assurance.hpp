@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -194,12 +195,74 @@ struct LocalMotionAssurancePolicy {
   double safety_margin_m = 0.20;
   double curve_approximation_error_m = 0.002;
   double maximum_tracking_error_m = 0.75;
+  // Calibrated one-sided error bound for an admitted registered surface.
+  // ICP RMSE remains registration-health evidence and is deliberately not
+  // converted into a position bound by the planner.
+  double surface_error_bound_m = 0.02;
+  std::string surface_error_calibration_id = "uncalibrated_default_v1";
+  // Generation-only reserve. New nominal and braking splines are checked with
+  // this reserve after smoothing; runtime reauthorization uses zero and keeps
+  // the unchanged signed_margin > 0 hard boundary.
+  double planning_clearance_buffer_m = 0.05;
+  // Deprecated compatibility parameters. They remain readable so older
+  // launch files do not fail, but do not participate in authorization.
   double minimum_scan_error_m = 0.02;
-  // ICP residual RMS is a geometric residual, not a GNSS one-sigma
-  // measurement.  Keep its calibration factor explicit; do not reuse the
-  // ARAIM K_ff multiplier here.
   double lidar_error_multiplier = 1.0;
   double maximum_sample_interval_s = 0.2;
+};
+
+enum class LocalClearanceStatus {
+  VALID = 0,
+  UNKNOWN,
+};
+
+struct LocalClearanceResult {
+  LocalClearanceStatus status = LocalClearanceStatus::UNKNOWN;
+  Eigen::Vector3d position_map = Eigen::Vector3d::Constant(
+      std::numeric_limits<double>::quiet_NaN());
+  double obstacle_clearance_m = std::numeric_limits<double>::quiet_NaN();
+  // True means no obstacle capable of affecting this query was found and the
+  // value is the certified-empty clearance cap, not a claimed global nearest
+  // surface distance.
+  bool obstacle_clearance_capped = true;
+  double required_envelope_m = std::numeric_limits<double>::quiet_NaN();
+  double planning_required_envelope_m =
+      std::numeric_limits<double>::quiet_NaN();
+  double signed_margin_m = std::numeric_limits<double>::quiet_NaN();
+  double tracking_error_m = std::numeric_limits<double>::quiet_NaN();
+  double planning_buffer_m = 0.0;
+  double surface_error_bound_m = std::numeric_limits<double>::quiet_NaN();
+  double raw_icp_rmse_m = std::numeric_limits<double>::quiet_NaN();
+  double raw_icp_gamma = std::numeric_limits<double>::quiet_NaN();
+  Eigen::Vector3d nearest_obstacle_position_map = Eigen::Vector3d::Constant(
+      std::numeric_limits<double>::quiet_NaN());
+  Eigen::Vector3d nearest_point_map = Eigen::Vector3d::Constant(
+      std::numeric_limits<double>::quiet_NaN());
+  Eigen::Vector3d escape_direction_map = Eigen::Vector3d::Zero();
+  LocalObstacleProvenance provenance =
+      LocalObstacleProvenance::CURRENT_FRAME;
+  std::string nearest_obstacle_identity;
+  std::string evidence_identity;
+  std::string reason = "not_evaluated";
+};
+
+// Immutable clearance model shared by planning refinement and final
+// LocalMotionAssurance. It owns a compact spatial index over the exact frozen
+// obstacle evidence and never consults a newer live map during a query.
+class LocalClearanceEvaluator {
+ public:
+  LocalClearanceEvaluator(LocalMotionEvidence evidence,
+                          LocalMotionAssurancePolicy policy = {});
+
+  LocalClearanceResult query(const Eigen::Vector3d& position_map,
+                             double tracking_error_m,
+                             double planning_buffer_m = 0.0) const;
+
+  const std::string& identity() const;
+
+ private:
+  struct Impl;
+  std::shared_ptr<const Impl> impl_;
 };
 
 struct LocalMotionSampleResult {
@@ -212,6 +275,9 @@ struct LocalMotionSampleResult {
   // Deprecated compatibility diagnostic. Registered-map alignment is owned
   // by SLAM and is never reconstructed from absolute LiDAR PL in the planner.
   double relative_map_error_m = 0.0;
+  double raw_icp_rmse_m = std::numeric_limits<double>::quiet_NaN();
+  double raw_icp_gamma = std::numeric_limits<double>::quiet_NaN();
+  double surface_error_bound_m = 0.0;
   double scan_error_m = 0.0;
   // Deprecated compatibility diagnostic. Healthy registered SLAM does not
   // supply a separately certified time-linear drift bound to the planner.
@@ -219,6 +285,10 @@ struct LocalMotionSampleResult {
   double required_envelope_m = std::numeric_limits<double>::quiet_NaN();
   double margin_m = std::numeric_limits<double>::quiet_NaN();
   double clearance_utilization = std::numeric_limits<double>::quiet_NaN();
+  Eigen::Vector3d nearest_obstacle_position_map = Eigen::Vector3d::Constant(
+      std::numeric_limits<double>::quiet_NaN());
+  Eigen::Vector3d escape_direction_map = Eigen::Vector3d::Zero();
+  std::string nearest_obstacle_identity;
   LocalObstacleProvenance provenance =
       LocalObstacleProvenance::CURRENT_FRAME;
 };
@@ -230,6 +300,14 @@ struct LocalMotionAssuranceResult {
   double minimum_margin_m = std::numeric_limits<double>::quiet_NaN();
   double maximum_required_envelope_m = 0.0;
   double maximum_clearance_utilization = 0.0;
+  // Run-level diagnostics are populated for SAFE as well as rejected
+  // evaluations. Failure-only sample fields must not be used to describe a
+  // successful certificate.
+  double raw_icp_rmse_m = std::numeric_limits<double>::quiet_NaN();
+  double raw_icp_gamma = std::numeric_limits<double>::quiet_NaN();
+  double surface_error_bound_m = std::numeric_limits<double>::quiet_NaN();
+  std::string surface_error_calibration_id;
+  double planning_buffer_m = 0.0;
   std::size_t checked_sample_count = 0;
   LocalMotionSampleResult first_failure;
   std::string evidence_identity;
@@ -243,7 +321,8 @@ class LocalMotionAssurance {
 
   LocalMotionAssuranceResult evaluate(
       const LocalMotionEvidence& evidence,
-      const std::vector<LocalMotionCurve>& curves) const;
+      const std::vector<LocalMotionCurve>& curves,
+      double planning_buffer_m = 0.0) const;
 
   const LocalMotionAssurancePolicy& policy() const { return policy_; }
 
@@ -259,6 +338,9 @@ struct TrajectoryAssuranceRequest {
   GlobalNavigationEpisodeState prior_global_episode;
   LocalMotionEvidence local_evidence;
   std::vector<LocalMotionCurve> local_curves;
+  // Generation-time reserve. Runtime rechecks leave this at zero and retain
+  // the unchanged hard authorization boundary signed_margin > 0.
+  double local_planning_buffer_m = 0.0;
   bool certified_braking_available = false;
   double mission_progress_m = 0.0;
   double lidar_observability_improvement = 0.0;

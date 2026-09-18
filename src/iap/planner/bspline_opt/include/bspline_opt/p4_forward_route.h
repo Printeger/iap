@@ -19,7 +19,7 @@ namespace ego_planner
 {
 
   inline constexpr char kP4ForwardDecisionSchema[] =
-    "p4_forward_route_decision_v13";
+    "p4_forward_route_decision_v14";
 
   enum class P4ForwardResultStatus
   {
@@ -99,6 +99,8 @@ namespace ego_planner
     ASTAR_INVALID_RESULT,
     CORRIDOR_ESCAPE,
     OUTPUT_TOO_SHORT,
+    CLEARANCE_UNAVAILABLE,
+    CLEARANCE_MARGIN_INSUFFICIENT,
   };
 
   struct P4ForwardRefinementResult
@@ -110,13 +112,36 @@ namespace ego_planner
       std::numeric_limits<std::size_t>::max();
     Eigen::Vector3d failure_position = Eigen::Vector3d::Constant(
       std::numeric_limits<double>::quiet_NaN());
+    double minimum_signed_margin_m =
+      std::numeric_limits<double>::infinity();
+    Eigen::Vector3d nearest_obstacle_position = Eigen::Vector3d::Constant(
+      std::numeric_limits<double>::quiet_NaN());
+    Eigen::Vector3d escape_direction = Eigen::Vector3d::Zero();
+    std::string nearest_obstacle_identity;
+    std::string failed_curve_type = "guide";
     double elapsed_ms = 0.0;
+    std::string reason = "not_evaluated";
 
     bool success() const
     {
       return status == P4ForwardRefinementStatus::SUCCESS && path.size() >= 2;
     }
   };
+
+  struct P4ForwardClearanceSample
+  {
+    bool available = false;
+    double signed_margin_m =
+      std::numeric_limits<double>::quiet_NaN();
+    Eigen::Vector3d nearest_obstacle_position = Eigen::Vector3d::Constant(
+      std::numeric_limits<double>::quiet_NaN());
+    Eigen::Vector3d escape_direction = Eigen::Vector3d::Zero();
+    std::string nearest_obstacle_identity;
+    std::string reason = "not_evaluated";
+  };
+
+  using P4ForwardClearanceQuery =
+    std::function<P4ForwardClearanceSample(const Eigen::Vector3d &)>;
 
   const char *p4ForwardRefinementStatusName(
     P4ForwardRefinementStatus status);

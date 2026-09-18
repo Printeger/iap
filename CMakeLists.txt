@@ -615,6 +615,7 @@ if(DEFINED ENV{ROS_VERSION})
       scripts/dev_planner/archive_p1_2_retrospective.py
       scripts/dev_planner/analyze_safety_planner_run.py
       scripts/dev_planner/calibrate_p1_formal_tolerances.py
+      scripts/dev_planner/calibrate_local_surface_error.py
       scripts/dev_planner/p1_formal_metrics.py
       scripts/test_predictor_validator.py
       scripts/dev_predictor/analyze_predictor_system_e1.py
@@ -801,6 +802,10 @@ if(DEFINED ENV{ROS_VERSION})
       add_test(
         NAME test_analyze_p4_gnss_sensitivity
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_analyze_p4_gnss_sensitivity.py
+      )
+      add_test(
+        NAME test_local_surface_error_calibration
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_local_surface_error_calibration.py
       )
     endif()
     ament_export_include_directories(include ${EIGEN3_INCLUDE_DIR} ${OpenCV_INCLUDE_DIRS})

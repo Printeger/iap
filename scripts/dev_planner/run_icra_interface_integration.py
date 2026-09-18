@@ -1839,6 +1839,17 @@ def analyze_limited_prefix_records(
     window_advisory_ms = _lineage_numbers("actual_curve_advisory_ms")
     window_transition_ms = _lineage_numbers("actual_curve_transition_ms")
     window_total_ms = _lineage_numbers("actual_curve_total_ms")
+    local_final_margins = _lineage_numbers("local_minimum_margin_m")
+    local_raw_icp_rmse = _lineage_numbers("local_raw_icp_rmse_m")
+    local_surface_bounds = _lineage_numbers("local_surface_error_bound_m")
+    clearance_feedback_actions = sum(
+        1 for lineage_row in lineage
+        if lineage_row.get("reason") ==
+        "actual_curve_feedback_local_clearance_escape")
+    calibration_ids = sorted({
+        str(lineage_row.get("local_surface_calibration_id", ""))
+        for lineage_row in lineage
+        if str(lineage_row.get("local_surface_calibration_id", ""))})
     window_total_ms_p95 = None
     if window_total_ms:
         ordered = sorted(window_total_ms)
@@ -1921,6 +1932,12 @@ def analyze_limited_prefix_records(
         braking_window_direct_ms_max=max(window_total_ms, default=None),
         braking_window_first_failure_counts=failed_window_counts,
         braking_window_first_failures=failed_windows,
+        local_final_minimum_margin_m=min(local_final_margins, default=None),
+        local_raw_icp_rmse_m_max=max(local_raw_icp_rmse, default=None),
+        local_surface_error_bound_m_max=max(
+            local_surface_bounds, default=None),
+        local_surface_calibration_ids=calibration_ids,
+        local_clearance_feedback_action_count=clearance_feedback_actions,
         direct_batch_ms_p95=direct_batch_p95,
         direct_batch_ms_max=max(direct_batch_durations, default=None))
 

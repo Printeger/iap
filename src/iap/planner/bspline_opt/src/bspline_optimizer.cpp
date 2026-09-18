@@ -610,7 +610,9 @@ namespace ego_planner
       const std::vector<Eigen::Vector3d> &coarse_guide,
       GridMapOccupancyDiagnosticQuery frozen_occupancy_query,
       const double corridor_radius_m,
-      const double compute_budget_ms)
+      const double compute_budget_ms,
+      P4ForwardClearanceQuery clearance_query,
+      const double planning_clearance_buffer_m)
   {
     const auto started = std::chrono::steady_clock::now();
     P4ForwardRefinementResult result;
@@ -624,6 +626,7 @@ namespace ego_planner
           result.failure_position = position;
           result.elapsed_ms = std::chrono::duration<double, std::milli>(
               std::chrono::steady_clock::now() - started).count();
+          result.reason = p4ForwardRefinementStatusName(status);
           if (status != P4ForwardRefinementStatus::SUCCESS)
             result.path.clear();
           return std::move(result);
@@ -631,16 +634,32 @@ namespace ego_planner
     if (!grid_map_ || coarse_guide.size() < 2 ||
         !frozen_occupancy_query || !std::isfinite(corridor_radius_m) ||
         corridor_radius_m <= 0.0 || !std::isfinite(compute_budget_ms) ||
-        compute_budget_ms <= 0.0)
+        compute_budget_ms <= 0.0 ||
+        !std::isfinite(planning_clearance_buffer_m) ||
+        planning_clearance_buffer_m < 0.0)
       return finish(P4ForwardRefinementStatus::INVALID_INPUT);
     const auto deadline = std::chrono::steady_clock::now() +
         std::chrono::duration_cast<std::chrono::steady_clock::duration>(
             std::chrono::duration<double, std::milli>(compute_budget_ms));
     bool deadline_hit = false;
     bool occupancy_unavailable = false;
+    bool clearance_unavailable = false;
+    const auto clearance_at = [&clearance_query, &clearance_unavailable](
+        const Eigen::Vector3d & point) -> std::optional<P4ForwardClearanceSample>
+      {
+        if (!clearance_query) return std::nullopt;
+        auto sample = clearance_query(point);
+        if (!sample.available || !std::isfinite(sample.signed_margin_m))
+        {
+          clearance_unavailable = true;
+          return std::nullopt;
+        }
+        return sample;
+      };
     const auto deadline_query =
         [query = frozen_occupancy_query, deadline, &deadline_hit,
-         &occupancy_unavailable](
+         &occupancy_unavailable, &clearance_at,
+         &clearance_unavailable, planning_clearance_buffer_m](
             const Eigen::Vector3d &point)
         {
           if (std::chrono::steady_clock::now() >= deadline) {
@@ -658,6 +677,21 @@ namespace ego_planner
               !diagnostic.inflated_occupied &&
               diagnostic.state != GridMapObservationState::OCCUPIED)
           {
+            if (const auto clearance = clearance_at(point))
+            {
+              if (clearance->signed_margin_m + 1.0e-9 <
+                  planning_clearance_buffer_m)
+              {
+                diagnostic.inflated_occupied = true;
+                diagnostic.state = GridMapObservationState::OCCUPIED;
+                return diagnostic;
+              }
+            }
+            else if (clearance_unavailable)
+            {
+              diagnostic.available = false;
+              return diagnostic;
+            }
             diagnostic.observed = true;
             diagnostic.state = GridMapObservationState::OBSERVED_FREE;
           }
@@ -699,8 +733,25 @@ namespace ego_planner
         const bool occupied = diagnostic.raw_occupied ||
             diagnostic.inflated_occupied ||
             diagnostic.state == GridMapObservationState::OCCUPIED;
-        if (occupied)
+        const auto clearance = clearance_at(point);
+        if (clearance_query && !clearance)
+          return finish(P4ForwardRefinementStatus::CLEARANCE_UNAVAILABLE,
+                        segment - 1u, point);
+        const bool clearance_blocked = clearance &&
+            clearance->signed_margin_m + 1.0e-9 <
+                planning_clearance_buffer_m;
+        if (occupied || clearance_blocked)
         {
+          if (clearance_blocked)
+          {
+            result.minimum_signed_margin_m = clearance->signed_margin_m;
+            result.failure_position = point;
+            result.nearest_obstacle_position =
+                clearance->nearest_obstacle_position;
+            result.escape_direction = clearance->escape_direction;
+            result.nearest_obstacle_identity =
+                clearance->nearest_obstacle_identity;
+          }
           segment_has_collision[segment - 1u] = true;
           any_collision = true;
           break;
@@ -712,9 +763,23 @@ namespace ego_planner
     if (!any_collision)
     {
       result.path = std::move(clear_path);
-      return result.path.size() >= 2u ?
-          finish(P4ForwardRefinementStatus::SUCCESS) :
-          finish(P4ForwardRefinementStatus::OUTPUT_TOO_SHORT);
+      if (result.path.size() < 2u)
+        return finish(P4ForwardRefinementStatus::OUTPUT_TOO_SHORT);
+      if (clearance_query)
+      {
+        result.minimum_signed_margin_m =
+            std::numeric_limits<double>::infinity();
+        for (const auto & point : result.path)
+        {
+          const auto clearance = clearance_at(point);
+          if (!clearance)
+            return finish(P4ForwardRefinementStatus::CLEARANCE_UNAVAILABLE,
+                          std::numeric_limits<std::size_t>::max(), point);
+          result.minimum_signed_margin_m = std::min(
+              result.minimum_signed_margin_m, clearance->signed_margin_m);
+        }
+      }
+      return finish(P4ForwardRefinementStatus::SUCCESS);
     }
 
     const Eigen::Vector3d search_extent =
@@ -752,6 +817,9 @@ namespace ego_planner
         if (occupancy_unavailable)
           return finish(P4ForwardRefinementStatus::OCCUPANCY_UNAVAILABLE,
                         segment - 1u, from);
+        if (clearance_unavailable)
+          return finish(P4ForwardRefinementStatus::CLEARANCE_UNAVAILABLE,
+                        segment - 1u, from);
         return finish(P4ForwardRefinementStatus::ASTAR_NO_PATH,
                       segment - 1u, from);
       }
@@ -782,9 +850,64 @@ namespace ego_planner
       if ((to - result.path.back()).norm() > 1.0e-6)
         result.path.push_back(to);
     }
-    return result.path.size() >= 2u ?
-        finish(P4ForwardRefinementStatus::SUCCESS) :
-        finish(P4ForwardRefinementStatus::OUTPUT_TOO_SHORT);
+    if (result.path.size() < 2u)
+      return finish(P4ForwardRefinementStatus::OUTPUT_TOO_SHORT);
+    // A* nodes are spaced at 0.1 m, but the planning-clearance contract is
+    // defined on a lattice no coarser than 0.05 m.  Densify once here and
+    // return that exact checked guide to the B-spline generator.
+    std::vector<Eigen::Vector3d> checked_path;
+    result.minimum_signed_margin_m =
+        std::numeric_limits<double>::infinity();
+    checked_path.push_back(result.path.front());
+    for (std::size_t segment = 1; segment < result.path.size(); ++segment)
+    {
+      const Eigen::Vector3d from = result.path[segment - 1u];
+      const Eigen::Vector3d to = result.path[segment];
+      const int count = std::max(
+          1, static_cast<int>(std::ceil((to - from).norm() /
+                                       kClearPathSampleM)));
+      for (int sample = 1; sample <= count; ++sample)
+      {
+        if (std::chrono::steady_clock::now() >= deadline)
+          return finish(P4ForwardRefinementStatus::BUDGET_EXHAUSTED,
+                        segment - 1u, checked_path.back());
+        const Eigen::Vector3d point = from + (to - from) *
+            (static_cast<double>(sample) / count);
+        const auto occupancy = frozen_occupancy_query(point);
+        if (!occupancy.available)
+          return finish(P4ForwardRefinementStatus::OCCUPANCY_UNAVAILABLE,
+                        segment - 1u, point);
+        if (occupancy.raw_occupied || occupancy.inflated_occupied ||
+            occupancy.state == GridMapObservationState::OCCUPIED)
+          return finish(P4ForwardRefinementStatus::COARSE_PATH_COLLISION,
+                        segment - 1u, point);
+        if (clearance_query)
+        {
+          const auto clearance = clearance_at(point);
+          if (!clearance)
+            return finish(P4ForwardRefinementStatus::CLEARANCE_UNAVAILABLE,
+                          segment - 1u, point);
+          result.minimum_signed_margin_m = std::min(
+              result.minimum_signed_margin_m, clearance->signed_margin_m);
+          if (clearance->signed_margin_m + 1.0e-9 <
+              planning_clearance_buffer_m)
+          {
+            result.nearest_obstacle_position =
+                clearance->nearest_obstacle_position;
+            result.escape_direction = clearance->escape_direction;
+            result.nearest_obstacle_identity =
+                clearance->nearest_obstacle_identity;
+            return finish(
+                P4ForwardRefinementStatus::CLEARANCE_MARGIN_INSUFFICIENT,
+                segment - 1u, point);
+          }
+        }
+        if ((point - checked_path.back()).norm() > 1.0e-6)
+          checked_path.push_back(point);
+      }
+    }
+    result.path = std::move(checked_path);
+    return finish(P4ForwardRefinementStatus::SUCCESS);
   }
 
   // 返回多个安全的控制点集

@@ -1951,6 +1951,10 @@ const char *p4ForwardRefinementStatusName(
       return "corridor_escape";
     case P4ForwardRefinementStatus::OUTPUT_TOO_SHORT:
       return "output_too_short";
+    case P4ForwardRefinementStatus::CLEARANCE_UNAVAILABLE:
+      return "clearance_unavailable";
+    case P4ForwardRefinementStatus::CLEARANCE_MARGIN_INSUFFICIENT:
+      return "clearance_margin_insufficient";
   }
   return "invalid_input";
 }

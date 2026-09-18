@@ -240,7 +240,7 @@ For each candidate trajectory τ:
   proof that this one point alone triggered an aggregate-budget brake.
 - Local execution is admitted by `LocalMotionAssurance`, not by RiskGrid or
   LiDAR FIM. It evaluates the actual nominal and braking splines against
-  obstacle surfaces using the vehicle/tracking/scan/ICP/curve/safety
+  obstacle surfaces using the vehicle/tracking/calibrated-surface/curve/safety
   envelope. The registered map is authoritative SLAM geometry, so current and
   older registered obstacles use the same local envelope. The planner neither
   adds current/source absolute LiDAR PL to invent a relative error nor charges
@@ -250,6 +250,18 @@ For each candidate trajectory τ:
   health, fresh support, or any braking-curve proof is fail-closed. LiDAR
   observability remains a ranking/recovery cue and cannot shrink this
   certified envelope by itself.
+  ICP RMSE, condition and gamma are health signals only: RMSE is not treated
+  as centimetres of pose uncertainty. A fixed, offline-calibrated
+  `local_surface_error_bound_m` supplies the surface term and its calibration
+  ID is certificate identity. The P4 refiner and final gate use the same
+  `LocalClearanceEvaluator` implementation and require matching frozen
+  snapshot/evidence identity; deliberate latest-snapshot reauthorization
+  rebuilds it from the new immutable evidence. Generation keeps an additional
+  `0.05 m` buffer, while runtime authorization remains `margin > 0`. A failure
+  returns
+  the nearest obstacle and an escape direction so the bounded retry moves the
+  candidate toward corridor centre instead of regenerating the same edge-
+  hugging curve.
   Exact ICP health is frozen into the registered-frame message before the
   frame becomes a long-lived active-window obstacle. Existing source PL fields
   are compatibility diagnostics only. Planner-local history cannot reconstruct
@@ -265,9 +277,10 @@ For each candidate trajectory τ:
   The controller loss-of-control threshold (`0.75 m`) and stopping-distance
   margin (`0.5 m`) are not silently reused as per-point uncertainty. The local
   certificate has independent tracking (`0.15 m`) and fixed-clearance
-  (`0.20 m`) bounds, each exposed as a policy parameter. ICP residual RMSE has
-  its own calibrated scale (default `1.0`); it does not reuse GNSS ARAIM's
-  `K_ff=5.42`, because a surface residual is not a GNSS measurement sigma.
+  (`0.20 m`) bounds, each exposed as a policy parameter. Legacy ICP-RMSE scale
+  parameters are parse-only diagnostics and never enter the clearance
+  envelope; a surface residual is neither pose error nor GNSS measurement
+  sigma.
   Exceeding the certified tracking bound activates a certified brake; the
   larger controller threshold is reserved for immediate loss-of-control
   revocation.

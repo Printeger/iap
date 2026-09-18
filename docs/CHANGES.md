@@ -3,6 +3,28 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(calibrated-local-clearance-and-aware-refinement): IAP-RQ-312 /
+  IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 — stop converting frame-wide ICP RMSE
+  into per-obstacle position uncertainty. ICP degeneracy, condition, gamma,
+  finite RMSE and freshness remain hard registration-health inputs; local
+  authorization now uses a fixed configuration-bound
+  `local_surface_error_bound_m`, whose calibration ID is bound into the local
+  certificate. Legacy scan-minimum and LiDAR-multiplier parameters remain
+  parse-only diagnostics. Add an evaluation-only three-run plus held-out
+  calibration tool; truth data never enters online planning, all four run
+  directories must be distinct, and a held-out exceedance invalidates the
+  result. Introduce one immutable spatially indexed `LocalClearanceEvaluator`
+  contract shared by route refinement and final nominal/brake checks.
+  Refinement checks a <=0.05 m lattice, and newly generated actual nominal and
+  brake splines must retain the 0.05 m generation buffer after smoothing;
+  runtime authorization keeps the strict unchanged `margin > 0` rule.
+  Structured refinement/final evidence now carries raw ICP RMSE/gamma,
+  configured surface bound, minimum margin, nearest obstacle and escape
+  direction. The first bounded actual-curve retry moves guide points away
+  from that obstacle; the second may use an unused topology channel, and a
+  per-attempt failure signature prevents regenerating the same failed
+  candidate. GNSS PL/AL, RiskGrid, P5, map freshness and braking authority are
+  unchanged.
 - fix(stable-runtime-braking-window-evidence): IAP-RQ-312 / IAP-RQ-320 /
   IAP-RQ-400 / IAP-RQ-410 — freeze the complete braking-window plan when the
   actual B-spline is committed. Watchdog checks now select original current

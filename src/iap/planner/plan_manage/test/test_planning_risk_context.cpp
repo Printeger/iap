@@ -827,6 +827,101 @@ TEST(P4ControlledDegradationPolicy,
             polyline_length(manager.lastP4ForwardDecision().selected_guide));
 }
 
+TEST(P4LocalClearanceFeedback,
+     FailedActualCurvePushesGuideAlongCertifiedEscapeDirection) {
+  ego_planner::EGOPlannerManager manager;
+  ego_planner::P4ForwardDecision decision;
+  decision.action = ego_planner::P4ForwardAction::CANDIDATE_READY;
+  decision.result_status = ego_planner::P4ForwardResultStatus::READY;
+  decision.planning_disposition =
+      ego_planner::P4PlanningDisposition::NEW_TRAJECTORY_READY;
+  decision.selected_candidate_id = 11u;
+  decision.selected_guide = {
+      Eigen::Vector3d(0.0, 0.0, 1.0),
+      Eigen::Vector3d(1.0, 0.0, 1.0),
+      Eigen::Vector3d(2.0, 0.0, 1.0)};
+  manager.setP4ForwardDecisionForTest(std::move(decision));
+
+  ego_planner::P4DirectTrajectoryRiskEvidence evidence;
+  evidence.complete = true;
+  evidence.certified_safe = true;
+  evidence.trajectory_assurance_complete = true;
+  evidence.trajectory_assurance.mode =
+      iap::TrajectoryExecutionMode::RECOVERY_OR_EXIT;
+  evidence.trajectory_assurance.global.complete = true;
+  evidence.trajectory_assurance.global.within_budget = true;
+  evidence.trajectory_assurance.local.status =
+      iap::LocalMotionAssuranceStatus::UNSAFE;
+  evidence.trajectory_assurance.local.reason =
+      "local_clearance_margin_not_positive";
+  evidence.trajectory_assurance.local.minimum_margin_m = -0.003;
+  evidence.trajectory_assurance.local.first_failure.position_map =
+      Eigen::Vector3d(1.0, 0.0, 1.0);
+  evidence.trajectory_assurance.local.first_failure.escape_direction_map =
+      Eigen::Vector3d(0.0, 1.0, 0.0);
+  evidence.trajectory_assurance.local.first_failure.nearest_obstacle_identity =
+      "tree-42";
+  manager.setP4DirectRiskEvidenceForTest(std::move(evidence));
+
+  std::string reason;
+  ASSERT_TRUE(manager.prepareP4ActualCurveFeedbackRetry(1u, &reason))
+      << reason;
+  EXPECT_EQ(reason, "local_clearance_escape_feedback_ready");
+  ASSERT_TRUE(manager.pendingP4ActualCurveFeedbackForTest().has_value());
+  const auto& corrected =
+      manager.pendingP4ActualCurveFeedbackForTest()->selected_guide;
+  ASSERT_EQ(corrected.size(), 3u);
+  EXPECT_GT(corrected[1].y(), 0.05);
+  EXPECT_TRUE(corrected.front().isApprox(Eigen::Vector3d(0.0, 0.0, 1.0)));
+  EXPECT_TRUE(corrected.back().isApprox(Eigen::Vector3d(2.0, 0.0, 1.0)));
+}
+
+TEST(P4LocalClearanceFeedback,
+     FailedBrakingCurveShortensGuideAndReducesEntrySpeed) {
+  ego_planner::EGOPlannerManager manager;
+  ego_planner::P4ForwardDecision decision;
+  decision.action = ego_planner::P4ForwardAction::CANDIDATE_READY;
+  decision.result_status = ego_planner::P4ForwardResultStatus::READY;
+  decision.planning_disposition =
+      ego_planner::P4PlanningDisposition::NEW_TRAJECTORY_READY;
+  decision.selected_candidate_id = 12u;
+  decision.speed_cap_mps = 1.5;
+  decision.selected_guide = {
+      Eigen::Vector3d(0.0, 0.0, 1.0),
+      Eigen::Vector3d(2.0, 0.0, 1.0),
+      Eigen::Vector3d(4.0, 0.0, 1.0)};
+  manager.setP4ForwardDecisionForTest(std::move(decision));
+
+  ego_planner::P4DirectTrajectoryRiskEvidence evidence;
+  evidence.complete = true;
+  evidence.trajectory_assurance_complete = true;
+  evidence.trajectory_assurance.global.complete = true;
+  evidence.trajectory_assurance.global.within_budget = true;
+  evidence.trajectory_assurance.local.status =
+      iap::LocalMotionAssuranceStatus::UNSAFE;
+  evidence.trajectory_assurance.local.reason =
+      "local_clearance_margin_not_positive";
+  evidence.trajectory_assurance.local.minimum_margin_m = -0.01;
+  evidence.trajectory_assurance.local.first_failure.curve_id = "brake-4";
+  evidence.trajectory_assurance.local.first_failure.position_map =
+      Eigen::Vector3d(2.0, 0.0, 1.0);
+  evidence.trajectory_assurance.local.first_failure.escape_direction_map =
+      Eigen::Vector3d(0.0, 1.0, 0.0);
+  evidence.trajectory_assurance.local.first_failure.nearest_obstacle_identity =
+      "tree-brake";
+  manager.setP4DirectRiskEvidenceForTest(std::move(evidence));
+
+  std::string reason;
+  ASSERT_TRUE(manager.prepareP4ActualCurveFeedbackRetry(1u, &reason))
+      << reason;
+  EXPECT_EQ(reason, "local_clearance_braking_crop_feedback_ready");
+  const auto& retry = manager.pendingP4ActualCurveFeedbackForTest();
+  ASSERT_TRUE(retry.has_value());
+  EXPECT_LT(retry->speed_cap_mps, 1.5);
+  ASSERT_GE(retry->selected_guide.size(), 2u);
+  EXPECT_LT(retry->selected_guide.back().x(), 2.0);
+}
+
 std::shared_ptr<const ego_planner::P0ExecutionRiskSnapshot>
 makeP4ExecutionSnapshot(
     const std::shared_ptr<const iap::RiskGridSnapshot>& risk,

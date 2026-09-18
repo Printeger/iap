@@ -695,6 +695,7 @@ namespace ego_planner
     iap::GlobalNavigationExposurePolicy p4_global_exposure_policy_;
     iap::GlobalNavigationExposureLedger p4_global_exposure_ledger_;
     iap::LocalMotionAssurancePolicy p4_local_motion_policy_;
+    double p4_planning_clearance_buffer_m_ = 0.05;
     P4ForwardDecisionWorker p4_forward_worker_;
     P4ForwardDecision last_p4_forward_decision_;
     P4ForwardDecision published_p4_forward_decision_;
@@ -762,6 +763,7 @@ namespace ego_planner
     std::atomic<std::uint64_t> next_p4_runtime_window_evidence_sequence_{1};
     std::optional<P4PreparedSuccessor> p4_prepared_successor_;
     std::optional<P4ForwardDecision> p4_actual_curve_feedback_override_;
+    std::set<std::string> p4_actual_curve_failure_signatures_;
     std::vector<P4BrakingAnchor> p4_braking_anchors_;
     enum class P4GuardServerState
     {
