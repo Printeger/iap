@@ -67,6 +67,8 @@ struct RollingSpatialRefreshInput {
   RollingSpatialWindowGeometry geometry;
   PredictorModule module;
   IntegritySnapshot snapshot;
+  GlobalNavigationTaskMode task_mode =
+      GlobalNavigationTaskMode::STRICT_GLOBAL;
   RollingSpatialRetentionPolicy policy;
   RollingSpatialSourceProvenance provenance;
   std::shared_ptr<const LocalOccupancyGrid> occupancy_owner;

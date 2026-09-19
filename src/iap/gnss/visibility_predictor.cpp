@@ -39,6 +39,7 @@ Eigen::Vector3d VisibilityPredictor::enu_dir(double elevation, double azimuth) {
 VisibilityResult VisibilityPredictor::predict(const Eigen::Vector3d& pos_world,
                                               const GnssEpoch& epoch,
                                               const bool measured_epoch_support,
+                                              const bool retain_unknown_support,
                                               const double query_time_s,
                                               const double evaluation_time_s) const {
   VisibilityResult res;
@@ -49,6 +50,13 @@ VisibilityResult VisibilityPredictor::predict(const Eigen::Vector3d& pos_world,
   res.unknown_flags.resize(N, false);
   res.known_flags.resize(N, false);
   res.blocked_flags.resize(N, false);
+  res.support_sample_counts.resize(N, 0u);
+  res.support_covered_sample_counts.resize(N, 0u);
+  res.unknown_support_fractions.resize(N, 0.0);
+  res.first_missing_support_distances_m.resize(
+      N, std::numeric_limits<double>::quiet_NaN());
+  res.first_missing_support_statuses.resize(
+      N, LocalMapSupportStatus::MODEL_COMPLETE);
 
   double kappa_sum  = 0.0;
   int    n_above_el = 0;
@@ -96,8 +104,11 @@ VisibilityResult VisibilityPredictor::predict(const Eigen::Vector3d& pos_world,
       for (double distance = start_offset;
            distance <= support_length + 1.0e-9;
            distance += kSupportStepM) {
+        ++res.support_sample_counts[i];
         const Eigen::Vector3d support_point = pos_world + distance * dir;
         bool complete = false;
+        LocalMapSupportStatus sample_status =
+            LocalMapSupportStatus::MODEL_COMPLETE;
         if (support_query_) {
           const double effective_query_time_s = std::isfinite(query_time_s)
               ? query_time_s : epoch.stamp;
@@ -108,6 +119,7 @@ VisibilityResult VisibilityPredictor::predict(const Eigen::Vector3d& pos_world,
                                               effective_evaluation_time_s,
                                               effective_query_time_s);
           complete = support.complete();
+          sample_status = support.status;
           if (!complete && res.support_status ==
                                LocalMapSupportStatus::MODEL_COMPLETE) {
             res.support_status = support.status;
@@ -115,24 +127,39 @@ VisibilityResult VisibilityPredictor::predict(const Eigen::Vector3d& pos_world,
         } else {
           complete = observation_predicate_(support_point);
           if (!complete) {
+            sample_status = LocalMapSupportStatus::OBSERVATION_INCOMPLETE;
             res.support_status =
                 LocalMapSupportStatus::OBSERVATION_INCOMPLETE;
           }
         }
-        if (!complete) {
+        if (complete) {
+          ++res.support_covered_sample_counts[i];
+        } else {
           unknown_support = true;
-          break;
+          if (!std::isfinite(res.first_missing_support_distances_m[i])) {
+            res.first_missing_support_distances_m[i] = distance;
+            res.first_missing_support_statuses[i] = sample_status;
+          }
         }
+      }
+      if (res.support_sample_counts[i] > 0u) {
+        res.unknown_support_fractions[i] = 1.0 -
+            static_cast<double>(res.support_covered_sample_counts[i]) /
+            static_cast<double>(res.support_sample_counts[i]);
       }
       res.unknown_flags[i] = unknown_support;
       if (unknown_support) {
         ++res.n_unknown;
-        res.vis_flags[i] = false;
-        continue;
+        if (!retain_unknown_support) {
+          res.vis_flags[i] = false;
+          continue;
+        }
       }
     }
-    res.known_flags[i] = true;
-    ++res.n_known;
+    res.known_flags[i] = !unknown_support;
+    if (!unknown_support) {
+      ++res.n_known;
+    }
 
     // κ and occlusion
     double kappa = 0.0;
@@ -154,6 +181,13 @@ VisibilityResult VisibilityPredictor::predict(const Eigen::Vector3d& pos_world,
       }
       blocked = params_.hard_occlusion &&
                 grid_->ray_occluded(ray_origin, dir, occ_range);
+    }
+
+    if (retain_unknown_support && unknown_support) {
+      const double unknown_fraction = std::clamp(
+          res.unknown_support_fractions[i], 0.0, 1.0);
+      kappa = 1.0 - (1.0 - std::clamp(kappa, 0.0, 1.0)) *
+                        (1.0 - unknown_fraction);
     }
 
     res.kappas[i]    = kappa;

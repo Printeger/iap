@@ -21,6 +21,15 @@
 
 namespace iap {
 
+enum class GlobalNavigationTaskMode {
+  STRICT_GLOBAL = 0,
+  MISSION_BEST_EFFORT,
+};
+
+const char* globalNavigationTaskModeName(GlobalNavigationTaskMode mode);
+bool parseGlobalNavigationTaskMode(const std::string& value,
+                                   GlobalNavigationTaskMode* mode);
+
 // Exact FNV-1a-style identity for a canonical sorted satellite-ID set. The
 // window identity is deliberately excluded: different execution commitments
 // may reuse one GNSS computation without sharing one safety certificate.
@@ -41,11 +50,10 @@ inline std::uint64_t forwardRiskSatelliteSetHash(
 struct GnssAdvisoryPredictorParams {
   GnssGeometryPlPredictorParams geometry_params;
   VisibilityPredictor::Params visibility_params;
-  // A received GNSS epoch is direct evidence that its non-excluded signals
-  // were usable at the receiver. It is not evidence that they were LOS: the
-  // measured per-satellite sigma and integrity exclusions remain authoritative
-  // for LOS/NLOS quality. This radius must cover only the voxel containing the
-  // measured receiver pose; all other queries require online map support.
+  // Deprecated identity-only field. A received epoch proves signal use only
+  // at the exact receiver reference; no metric radius is applied to future
+  // candidate positions. Kept temporarily so archived configurations remain
+  // parseable and receive a different cache identity when replayed.
   double measured_epoch_support_radius_m = 0.0;
   // The current integrity report must belong to the same measurement epoch
   // before receiver-local support or its FDE exclusions may be applied.
@@ -402,6 +410,19 @@ enum class ForwardRiskFailureReason {
   COMPUTE_BUDGET_EXCEEDED,
 };
 
+// These are the only ForwardRisk failures that MISSION_BEST_EFFORT may
+// interpret as unavailable task-global navigation evidence.  Map/support,
+// LiDAR/FIM, freshness, computation and certificate-identity failures remain
+// hard failures because they can invalidate local motion authority itself.
+inline bool forwardRiskFailureIsGlobalNavigationDegradable(
+    const ForwardRiskFailureReason reason) {
+  return reason == ForwardRiskFailureReason::SAFETY_LIMIT_EXCEEDED ||
+         reason == ForwardRiskFailureReason::GNSS_ANCHOR_INCONSISTENT ||
+         reason == ForwardRiskFailureReason::GNSS_LOCAL_USABLE_SATS_LT_MIN ||
+         reason == ForwardRiskFailureReason::GNSS_SKY_UNKNOWN ||
+         reason == ForwardRiskFailureReason::GNSS_GEOMETRY_DEGENERATE;
+}
+
 const char* forwardRiskFailureReasonName(ForwardRiskFailureReason reason);
 
 struct ForwardRiskQueryPoint {
@@ -448,6 +469,13 @@ struct GnssRiskSatelliteDiagnostic {
   double epoch_pr_sigma_m = std::numeric_limits<double>::quiet_NaN();
   double canopy_sigma_m = std::numeric_limits<double>::quiet_NaN();
   double sigma_eff_m = std::numeric_limits<double>::quiet_NaN();
+  std::size_t support_sample_count = 0;
+  std::size_t support_covered_sample_count = 0;
+  double unknown_support_fraction = 0.0;
+  double first_missing_support_distance_m =
+      std::numeric_limits<double>::quiet_NaN();
+  LocalMapSupportStatus first_missing_support_status =
+      LocalMapSupportStatus::MODEL_COMPLETE;
   std::string sigma_source = "not_evaluated";
   std::string exclusion_reason = "not_evaluated";
 };
@@ -463,6 +491,8 @@ struct ForwardRiskBatchRequest {
   double compute_budget_ms = std::numeric_limits<double>::infinity();
   ForwardRiskSatelliteSetPolicy satellite_set_policy =
       ForwardRiskSatelliteSetPolicy::PER_POINT;
+  GlobalNavigationTaskMode task_mode =
+      GlobalNavigationTaskMode::STRICT_GLOBAL;
 };
 
 struct ForwardRiskPointResult {

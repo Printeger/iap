@@ -453,6 +453,27 @@ TEST(RollingSpatialAdvisoryWindowTest,
 }
 
 TEST(RollingSpatialAdvisoryWindowTest,
+     TaskModeChangeInvalidatesCachedSpatialSupportSemantics) {
+  auto occupancy = std::make_shared<LocalOccupancyGrid>();
+  const auto snapshot = makeGnssSnapshot(1);
+  RollingSpatialAdvisoryWindow window;
+  auto strict = makeGnssRefreshInput(occupancy, snapshot);
+  strict.task_mode = GlobalNavigationTaskMode::STRICT_GLOBAL;
+  ASSERT_TRUE(window.beginRefresh(std::move(strict)));
+  queryWindow(&window, snapshot, 0, false);
+  window.commitRefresh();
+
+  auto best_effort = makeGnssRefreshInput(occupancy, snapshot);
+  best_effort.task_mode = GlobalNavigationTaskMode::MISSION_BEST_EFFORT;
+  ASSERT_TRUE(window.beginRefresh(std::move(best_effort)));
+  queryWindow(&window, snapshot, 0, false);
+
+  EXPECT_EQ(window.diagnostics().full_invalidation_count, 1u);
+  EXPECT_EQ(window.diagnostics().invalidation_reason,
+            RollingSpatialInvalidationReason::SourcePolicyChanged);
+}
+
+TEST(RollingSpatialAdvisoryWindowTest,
      NewerOccupancyGenerationWithSameLosContentRetainsSpatialAdvisory) {
   auto occupancy = std::make_shared<LocalOccupancyGrid>();
   const auto snapshot = makeGnssSnapshot(1);
@@ -1398,13 +1419,13 @@ TEST(RollingSpatialAdvisoryWindowTest,
 }
 
 TEST(RollingSpatialAdvisoryWindowTest,
-     ReceiverLocalGnssSupportIsNeverRetainedAcrossRefreshes) {
+     ExactReceiverGnssSupportIsNeverRetainedAcrossRefreshes) {
   auto occupancy = std::make_shared<LocalOccupancyGrid>();
   auto initial = makeGnssSnapshot(1);
   initial.current.gnss_valid = true;
   initial.current.stamp = initial.gnss_epoch.stamp;
   initial.p_wb.setZero();
-  const Eigen::Vector3d query_position(0.25, 0.0, 0.0);
+  const Eigen::Vector3d query_position = Eigen::Vector3d::Zero();
 
   const auto make_local_input = [&](const IntegritySnapshot& snapshot) {
     auto input = makeGnssRefreshInput(occupancy, snapshot);

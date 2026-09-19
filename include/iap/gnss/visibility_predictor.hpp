@@ -23,6 +23,11 @@ struct VisibilityResult {
   std::vector<bool>    unknown_flags;    ///< LOS support contains unobserved space
   std::vector<bool>    known_flags;      ///< LOS support required by the model is observed
   std::vector<bool>    blocked_flags;    ///< hard-occlusion evidence per satellite
+  std::vector<std::size_t> support_sample_counts;
+  std::vector<std::size_t> support_covered_sample_counts;
+  std::vector<double> unknown_support_fractions;
+  std::vector<double> first_missing_support_distances_m;
+  std::vector<LocalMapSupportStatus> first_missing_support_statuses;
   int                  n_unknown  = 0;   ///< satellites rejected for unknown LOS support
   int                  n_known    = 0;   ///< satellites with complete online LOS support
   int                  n_blocked  = 0;   ///< satellites rejected by hard occlusion
@@ -103,6 +108,7 @@ class VisibilityPredictor {
   VisibilityResult predict(const Eigen::Vector3d& pos_world,
                            const GnssEpoch& epoch,
                            bool measured_epoch_support = false,
+                           bool retain_unknown_support = false,
                            double query_time_s =
                                std::numeric_limits<double>::quiet_NaN(),
                            double evaluation_time_s =

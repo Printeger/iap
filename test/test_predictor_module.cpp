@@ -1127,7 +1127,7 @@ TEST(PredictorModuleTest,
 }
 
 TEST(PredictorModuleTest,
-     MeasuredGnssEpochCertifiesOnlyTheConfiguredReceiverNeighborhood) {
+     MeasuredGnssEpochCertifiesOnlyTheReceiverReference) {
   auto params = make_params();
   params.gnss.measured_epoch_support_radius_m = 1.0;
   params.gnss.measured_epoch_integrity_max_delta_s = 0.25;
@@ -1142,9 +1142,13 @@ TEST(PredictorModuleTest,
 
   const auto local = predictor.query(
       Eigen::Vector3d(0.5, 0.0, 0.0), snapshot);
-  ASSERT_TRUE(local.valid);
-  EXPECT_TRUE(local.measured_epoch_support_used);
-  EXPECT_EQ(local.n_unknown_support, 0);
+  EXPECT_FALSE(local.valid);
+  EXPECT_FALSE(local.measured_epoch_support_used);
+
+  const auto receiver = predictor.query_receiver_measured(snapshot);
+  ASSERT_TRUE(receiver.valid);
+  EXPECT_TRUE(receiver.measured_epoch_support_used);
+  EXPECT_EQ(receiver.n_unknown_support, 0);
 
   const auto outside = predictor.query(
       Eigen::Vector3d(1.5, 0.0, 0.0), snapshot);
@@ -1170,11 +1174,125 @@ TEST(PredictorModuleTest,
   for (auto& sat : snapshot.gnss_epoch.sats) {
     sat.pr_sigma = 50.0;
   }
-  const auto degraded_measurements = predictor.query(
-      Eigen::Vector3d(0.5, 0.0, 0.0), snapshot);
+  const auto degraded_measurements =
+      predictor.query_receiver_measured(snapshot);
   ASSERT_TRUE(degraded_measurements.valid);
   EXPECT_TRUE(degraded_measurements.measured_epoch_support_used);
   EXPECT_GE(degraded_measurements.effective_sigma_mean, 50.0);
+}
+
+TEST(PredictorModuleTest,
+     BestEffortKeepsUnknownLosSatellitesWithContinuousSigmaAcrossReceiverRadius) {
+  auto params = make_params();
+  params.gnss.measured_epoch_support_radius_m = 0.45;
+  params.gnss.visibility_params.ray_start_offset = 0.0;
+  params.gnss.visibility_params.occ_L = 5.0;
+  iap::PredictorModule module(params);
+  module.set_support_query([](const Eigen::Vector3d&, double, double) {
+    return iap::LocalMapSupportQuery{
+        iap::LocalMapSupportAuthority::TRUSTED_LOCAL_MAP,
+        iap::LocalMapSupportStatus::OUTSIDE_ENVELOPE};
+  });
+  module.set_lidar_fim_primitives(make_lidar_primitives());
+  auto snapshot = make_snapshot(true, true);
+  snapshot.has_pose = true;
+  snapshot.p_wb = Eigen::Vector3d::Zero();
+
+  auto query = [&](double x, iap::GlobalNavigationTaskMode mode) {
+    iap::ForwardRiskBatchRequest request;
+    request.combined_snapshot_identity = "support-cliff";
+    request.snapshot = snapshot;
+    request.hal = 1000.0;
+    request.val = 1000.0;
+    request.evaluation_time_s = snapshot.stamp;
+    request.task_mode = mode;
+    request.points = {{Eigen::Vector3d(x, 0.0, 0.0), snapshot.stamp,
+                       0.0, 1, 1, 1}};
+    return module.queryForwardRiskBatch(request);
+  };
+
+  const auto strict = query(0.449, iap::GlobalNavigationTaskMode::STRICT_GLOBAL);
+  EXPECT_FALSE(strict.complete);
+  EXPECT_EQ(strict.failure_reason,
+            iap::ForwardRiskFailureReason::GNSS_LOCAL_USABLE_SATS_LT_MIN);
+
+  const auto inside = query(
+      0.449, iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT);
+  const auto outside = query(
+      0.451, iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT);
+  ASSERT_TRUE(inside.complete)
+      << iap::forwardRiskFailureReasonName(inside.failure_reason);
+  ASSERT_TRUE(outside.complete)
+      << iap::forwardRiskFailureReasonName(outside.failure_reason);
+  ASSERT_EQ(inside.points.size(), 1u);
+  ASSERT_EQ(outside.points.size(), 1u);
+  EXPECT_EQ(inside.points.front().gnss_used_satellite_count,
+            outside.points.front().gnss_used_satellite_count);
+  EXPECT_GT(outside.points.front().unknown_coverage, 0.0);
+  EXPECT_EQ(inside.points.front().local_satellite_set_hash,
+            outside.points.front().local_satellite_set_hash);
+  for (const auto& satellite : outside.points.front().gnss_satellites) {
+    if (!satellite.epoch_excluded && satellite.above_elevation_mask &&
+        !satellite.blocked) {
+      EXPECT_TRUE(satellite.used);
+      EXPECT_GT(satellite.support_sample_count, 0u);
+      EXPECT_GE(satellite.unknown_support_fraction, 0.0);
+      EXPECT_LE(satellite.unknown_support_fraction, 1.0);
+      EXPECT_EQ(satellite.exclusion_reason,
+                "used_with_unknown_support_penalty");
+    }
+  }
+}
+
+TEST(VisibilityPredictorTest,
+     BestEffortUnknownFractionFormsConservativeContinuousKappaUpperBound) {
+  iap::GnssEpoch epoch;
+  epoch.stamp = 100.0;
+  iap::SatObs satellite;
+  satellite.sat_id = 19;
+  satellite.elevation = 0.5 * kPi;
+  satellite.azimuth = 0.0;
+  satellite.pr_sigma = 1.0;
+  epoch.sats.push_back(satellite);
+
+  iap::VisibilityPredictor::Params params;
+  params.min_elevation = 0.1;
+  params.ray_start_offset = 0.0;
+  params.occ_L = 1.0;
+  params.occ_range = 1.0;
+  params.hard_occlusion = false;
+  iap::VisibilityPredictor predictor(params);
+  predictor.set_support_query(
+      [](const Eigen::Vector3d& point, double, double) {
+        return iap::LocalMapSupportQuery{
+            iap::LocalMapSupportAuthority::TRUSTED_LOCAL_MAP,
+            point.z() <= 0.5 + 1.0e-9
+                ? iap::LocalMapSupportStatus::MODEL_COMPLETE
+                : iap::LocalMapSupportStatus::OUTSIDE_ENVELOPE};
+      });
+
+  const auto strict = predictor.predict(
+      Eigen::Vector3d::Zero(), epoch, false, false, 100.0, 100.0);
+  ASSERT_EQ(strict.vis_flags.size(), 1u);
+  EXPECT_FALSE(strict.vis_flags.front());
+
+  const auto best_effort = predictor.predict(
+      Eigen::Vector3d::Zero(), epoch, false, true, 100.0, 100.0);
+  ASSERT_EQ(best_effort.vis_flags.size(), 1u);
+  ASSERT_EQ(best_effort.support_sample_counts.size(), 1u);
+  ASSERT_GT(best_effort.support_sample_counts.front(), 0u);
+  const double unknown_fraction =
+      best_effort.unknown_support_fractions.front();
+  EXPECT_TRUE(best_effort.vis_flags.front());
+  EXPECT_GT(unknown_fraction, 0.0);
+  EXPECT_LT(unknown_fraction, 1.0);
+  // The empty occupancy model has kappa_known=0, so the bounded-union rule
+  // reduces exactly to kappa_upper=unknown_fraction.
+  EXPECT_NEAR(best_effort.kappas.front(), unknown_fraction, 1.0e-12);
+  EXPECT_NEAR(best_effort.first_missing_support_distances_m.front(),
+              1.0, 1.0e-12);
+  EXPECT_EQ(best_effort.first_missing_support_statuses.front(),
+            iap::LocalMapSupportStatus::OUTSIDE_ENVELOPE);
 }
 
 TEST(PredictorModuleTest, GnssFullyObservedOnlineLosRemainsAvailable) {
@@ -1312,7 +1430,7 @@ TEST(PredictorModuleTest,
 
   ASSERT_TRUE(inside.gnss.valid) << inside.gnss.fallback_reason;
   ASSERT_TRUE(outside.gnss.valid) << outside.gnss.fallback_reason;
-  EXPECT_TRUE(inside.gnss.measured_epoch_support_used);
+  EXPECT_FALSE(inside.gnss.measured_epoch_support_used);
   EXPECT_FALSE(outside.gnss.measured_epoch_support_used);
   EXPECT_EQ(inside.gnss.used_sat_ids, outside.gnss.used_sat_ids);
   EXPECT_GE(inside.gnss.effective_sigma_mean, 25.0);

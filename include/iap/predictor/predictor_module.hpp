@@ -79,7 +79,9 @@ class PredictorModule {
       SpatialAdvisory* evaluated_spatial_advisory,
       PredictorBatchDiagnostics* diagnostics,
       const std::vector<bool>* gnss_satellite_mask = nullptr,
-      const GnssAdvisoryResult* selected_receiver_advisory = nullptr) const;
+      const GnssAdvisoryResult* selected_receiver_advisory = nullptr,
+      GlobalNavigationTaskMode task_mode =
+          GlobalNavigationTaskMode::STRICT_GLOBAL) const;
 };
 
 }  // namespace iap

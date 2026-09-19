@@ -186,9 +186,12 @@ bool policyEnabled(const double value) {
 bool receiverLocalGnssSupportEligible(
     const PredictorParams& params, const IntegritySnapshot& snapshot,
     const Eigen::Vector3d& query_position) {
-  return params.gnss.measured_epoch_support_radius_m > 0.0 &&
-         std::isfinite(params.gnss.measured_epoch_support_radius_m) &&
-         std::isfinite(
+  // A measured GNSS epoch proves support only at the receiver reference.
+  // Extending that evidence to a metric ball around the receiver created a
+  // discontinuous satellite-set cliff at the configured radius. Keep the
+  // legacy parameter in the identity for replay compatibility, but never use
+  // it to authorize a future candidate position.
+  return std::isfinite(
              params.gnss.measured_epoch_integrity_max_delta_s) &&
          params.gnss.measured_epoch_integrity_max_delta_s >= 0.0 &&
          snapshot.has_pose && snapshot.p_wb.allFinite() &&
@@ -199,8 +202,7 @@ bool receiverLocalGnssSupportEligible(
          std::abs(snapshot.current.stamp - snapshot.gnss_epoch.stamp) <=
              params.gnss.measured_epoch_integrity_max_delta_s &&
          query_position.allFinite() &&
-         (query_position - snapshot.p_wb).norm() <=
-             params.gnss.measured_epoch_support_radius_m;
+         (query_position - snapshot.p_wb).norm() <= 1.0e-9;
 }
 
 bool exactPolicy(const RollingSpatialRetentionPolicy& lhs,
@@ -232,6 +234,8 @@ struct RollingSpatialAdvisoryWindow::Impl {
   struct Identity {
     RollingSpatialWindowGeometry geometry;
     PredictorParams params;
+    GlobalNavigationTaskMode task_mode =
+        GlobalNavigationTaskMode::STRICT_GLOBAL;
     IntegritySnapshot snapshot;
     RollingSpatialRetentionPolicy policy;
     RollingSpatialSourceProvenance provenance;
@@ -287,7 +291,8 @@ struct RollingSpatialAdvisoryWindow::Impl {
       return RollingSpatialInvalidationReason::GeometryChanged;
     }
     if (active.params.source_mode != incoming.params.source_mode ||
-        active.params.gnss_epoch_policy != incoming.params.gnss_epoch_policy) {
+        active.params.gnss_epoch_policy != incoming.params.gnss_epoch_policy ||
+        active.task_mode != incoming.task_mode) {
       return RollingSpatialInvalidationReason::SourcePolicyChanged;
     }
     if (!exactParams(active.params, incoming.params)) {
@@ -684,6 +689,7 @@ bool RollingSpatialAdvisoryWindow::beginRefresh(
   auto candidate = std::make_unique<Impl::Candidate>();
   candidate->identity.geometry = std::move(input.geometry);
   candidate->identity.params = input.module.params();
+  candidate->identity.task_mode = input.task_mode;
   candidate->identity.snapshot = input.snapshot;
   candidate->identity.policy = input.policy;
   candidate->identity.provenance = input.provenance;
@@ -776,7 +782,8 @@ RollingSpatialAdvisoryWindow::queryPositionHorizons(
   if (!key_valid) {
     for (const auto& input : inputs) {
       outputs.push_back(impl_->candidate->module.queryWithSpatialAdvisory(
-          input, nullptr, nullptr, &local));
+          input, nullptr, nullptr, &local, nullptr, nullptr,
+          impl_->candidate->identity.task_mode));
     }
     if (diagnostics) *diagnostics = local;
     return outputs;
@@ -837,7 +844,8 @@ RollingSpatialAdvisoryWindow::queryPositionHorizons(
         local.spatial_advisory_recompute_count;
     const std::size_t reuses_before = local.spatial_advisory_reuse_count;
     outputs.push_back(impl_->candidate->module.queryWithSpatialAdvisory(
-        evaluated_input, cached, &evaluated, &local));
+        evaluated_input, cached, &evaluated, &local, nullptr, nullptr,
+        impl_->candidate->identity.task_mode));
     if (populated_lidar_this_call &&
         local.spatial_advisory_reuse_count > reuses_before) {
       ++local.lidar_cache_hits;

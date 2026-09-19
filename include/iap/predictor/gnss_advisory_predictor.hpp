@@ -29,7 +29,9 @@ class GnssAdvisoryPredictor {
                            double query_time_s =
                                std::numeric_limits<double>::quiet_NaN(),
                            double evaluation_time_s =
-                               std::numeric_limits<double>::quiet_NaN()) const;
+                               std::numeric_limits<double>::quiet_NaN(),
+                           GlobalNavigationTaskMode task_mode =
+                               GlobalNavigationTaskMode::STRICT_GLOBAL) const;
   // Evaluate advisory geometry using an explicit per-query satellite mask.
   // The frozen epoch and its certified exclusion identity are not modified.
   GnssAdvisoryResult query_with_satellite_mask(
@@ -39,7 +41,9 @@ class GnssAdvisoryPredictor {
       double query_time_s =
           std::numeric_limits<double>::quiet_NaN(),
       double evaluation_time_s =
-          std::numeric_limits<double>::quiet_NaN()) const;
+          std::numeric_limits<double>::quiet_NaN(),
+      GlobalNavigationTaskMode task_mode =
+          GlobalNavigationTaskMode::STRICT_GLOBAL) const;
   // Current receiver measurement support is an anchor-only operation.  It is
   // intentionally separate from query() so standalone advisory diagnostics
   // remain raw and planning code cannot extend measured support spatially.
@@ -54,7 +58,9 @@ class GnssAdvisoryPredictor {
       double query_time_s =
           std::numeric_limits<double>::quiet_NaN(),
       double evaluation_time_s =
-          std::numeric_limits<double>::quiet_NaN()) const;
+          std::numeric_limits<double>::quiet_NaN(),
+      GlobalNavigationTaskMode task_mode =
+          GlobalNavigationTaskMode::STRICT_GLOBAL) const;
 
   const GnssAdvisoryPredictorParams& params() const { return params_; }
 
@@ -67,6 +73,8 @@ class GnssAdvisoryPredictor {
       const IntegritySnapshot& snapshot,
       bool force_measured_epoch_support,
       const std::vector<bool>* satellite_mask = nullptr,
+      GlobalNavigationTaskMode task_mode =
+          GlobalNavigationTaskMode::STRICT_GLOBAL,
       double query_time_s =
           std::numeric_limits<double>::quiet_NaN(),
       double evaluation_time_s =
@@ -77,6 +85,7 @@ class GnssAdvisoryPredictor {
       const Eigen::Vector3d& query_position,
       const GnssEpoch& epoch,
       bool measured_epoch_support,
+      bool retain_unknown_support,
       double query_time_s,
       double evaluation_time_s) const;
   GnssAdvisoryResult compute_advisory_fim(

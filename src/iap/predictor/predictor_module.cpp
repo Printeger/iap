@@ -9,6 +9,32 @@
 #include <utility>
 
 namespace iap {
+
+const char* globalNavigationTaskModeName(
+    const GlobalNavigationTaskMode mode) {
+  switch (mode) {
+    case GlobalNavigationTaskMode::STRICT_GLOBAL:
+      return "strict_global";
+    case GlobalNavigationTaskMode::MISSION_BEST_EFFORT:
+      return "mission_best_effort";
+  }
+  return "unknown";
+}
+
+bool parseGlobalNavigationTaskMode(const std::string& value,
+                                   GlobalNavigationTaskMode* mode) {
+  if (mode == nullptr) return false;
+  if (value == "strict_global") {
+    *mode = GlobalNavigationTaskMode::STRICT_GLOBAL;
+    return true;
+  }
+  if (value == "mission_best_effort") {
+    *mode = GlobalNavigationTaskMode::MISSION_BEST_EFFORT;
+    return true;
+  }
+  return false;
+}
+
 namespace {
 
 uint32_t make_source_flags(const PredictorQueryResult& result) {
@@ -475,7 +501,8 @@ PredictorQueryResult PredictorModule::queryWithSpatialAdvisory(
     SpatialAdvisory* evaluated_spatial_advisory,
     PredictorBatchDiagnostics* diagnostics,
     const std::vector<bool>* gnss_satellite_mask,
-    const GnssAdvisoryResult* selected_receiver_advisory) const {
+    const GnssAdvisoryResult* selected_receiver_advisory,
+    const GlobalNavigationTaskMode task_mode) const {
   PredictorQueryResult out;
   out.query_position_map = input.query_position_map;
   out.query_time_s = input.query_time_s;
@@ -591,11 +618,11 @@ PredictorQueryResult PredictorModule::queryWithSpatialAdvisory(
             ? gnss_.query_with_satellite_mask(
                   working_input.query_position_map, working_input.snapshot,
                   *gnss_satellite_mask, working_input.query_time_s,
-                  freshness_time_s(working_input))
+                  freshness_time_s(working_input), task_mode)
             : gnss_.query(working_input.query_position_map,
                           working_input.snapshot,
                           working_input.query_time_s,
-                          freshness_time_s(working_input));
+                          freshness_time_s(working_input), task_mode);
         if (diagnostics) {
           ++diagnostics->gnss_advisory_invocations;
           if (diagnostics->collect_component_timing) {
@@ -911,7 +938,7 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
     const VisibilityResult evidence =
         gnss_.visibility_evidence(
             query.position_map, request.snapshot, query.query_time_s,
-            request.evaluation_time_s);
+            request.evaluation_time_s, request.task_mode);
     if (budget_expired()) {
       // Evidence retained above is diagnostic only; every advisory point is
       // still unfinished until the second pass evaluates GNSS/LiDAR/FIM.
@@ -921,6 +948,7 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
     auto& result = out.points[point_index];
     std::vector<bool> local_mask(sat_count, false);
     int eligible_satellites = 0;
+    double eligible_unknown_support_fraction_sum = 0.0;
     double known_degradation = 0.0;
     for (std::size_t sat_index = 0; sat_index < sat_count; ++sat_index) {
       const auto& sat = request.snapshot.gnss_epoch.sats[sat_index];
@@ -955,6 +983,23 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
       diagnostic.sigma_eff_m = sat_index < evidence.sigma_effs.size()
           ? evidence.sigma_effs[sat_index]
           : std::numeric_limits<double>::quiet_NaN();
+      diagnostic.support_sample_count =
+          sat_index < evidence.support_sample_counts.size()
+              ? evidence.support_sample_counts[sat_index] : 0u;
+      diagnostic.support_covered_sample_count =
+          sat_index < evidence.support_covered_sample_counts.size()
+              ? evidence.support_covered_sample_counts[sat_index] : 0u;
+      diagnostic.unknown_support_fraction =
+          sat_index < evidence.unknown_support_fractions.size()
+              ? evidence.unknown_support_fractions[sat_index] : 0.0;
+      diagnostic.first_missing_support_distance_m =
+          sat_index < evidence.first_missing_support_distances_m.size()
+              ? evidence.first_missing_support_distances_m[sat_index]
+              : std::numeric_limits<double>::quiet_NaN();
+      diagnostic.first_missing_support_status =
+          sat_index < evidence.first_missing_support_statuses.size()
+              ? evidence.first_missing_support_statuses[sat_index]
+              : LocalMapSupportStatus::MODEL_COMPLETE;
       if (std::isfinite(diagnostic.sigma_eff_m)) {
         diagnostic.sigma_source =
             std::isfinite(diagnostic.epoch_pr_sigma_m) &&
@@ -976,38 +1021,50 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
         result.gnss_satellites.push_back(std::move(diagnostic));
         continue;
       }
-      ++eligible_satellites;
       const bool known = diagnostic.support_known;
-      if (!known) {
-        ++result.gnss_unknown_satellite_count;
-        diagnostic.exclusion_reason = "local_map_support_unknown";
+      const bool retain_unknown =
+          request.task_mode == GlobalNavigationTaskMode::MISSION_BEST_EFFORT;
+      const bool blocked = diagnostic.blocked;
+      if (blocked) {
+        ++result.gnss_blocked_satellite_count;
+        known_degradation = 1.0;
+        diagnostic.exclusion_reason = "hard_occlusion";
         result.gnss_satellites.push_back(std::move(diagnostic));
         continue;
       }
-      ++result.gnss_known_satellite_count;
-      const bool blocked = diagnostic.blocked;
-      const bool visible = diagnostic.visible && !blocked;
+      ++eligible_satellites;
+      eligible_unknown_support_fraction_sum += std::clamp(
+          diagnostic.unknown_support_fraction, 0.0, 1.0);
+      if (!known) {
+        ++result.gnss_unknown_satellite_count;
+        if (!retain_unknown) {
+          diagnostic.exclusion_reason = "local_map_support_unknown";
+          result.gnss_satellites.push_back(std::move(diagnostic));
+          continue;
+        }
+      }
+      if (known) {
+        ++result.gnss_known_satellite_count;
+      }
+      const bool visible = diagnostic.visible;
       const double kappa = sat_index < evidence.kappas.size() &&
           std::isfinite(evidence.kappas[sat_index])
           ? std::clamp(evidence.kappas[sat_index], 0.0, 1.0)
           : 0.0;
-      if (blocked) {
-        ++result.gnss_blocked_satellite_count;
-        diagnostic.exclusion_reason = "hard_occlusion";
-      } else if (visible) {
+      if (visible) {
         ++result.gnss_visible_satellite_count;
         local_mask[sat_index] = true;
         ++result.gnss_used_satellite_count;
         diagnostic.used = true;
-        diagnostic.exclusion_reason = "used";
+        diagnostic.exclusion_reason = known
+            ? "used" : "used_with_unknown_support_penalty";
         if (kappa > 0.0) {
           ++result.gnss_attenuated_satellite_count;
         }
       } else {
         diagnostic.exclusion_reason = "visibility_rejected";
       }
-      known_degradation = std::max(
-          known_degradation, blocked ? 1.0 : kappa);
+      known_degradation = std::max(known_degradation, kappa);
       result.gnss_satellites.push_back(std::move(diagnostic));
     }
     std::vector<int> local_satellite_ids;
@@ -1028,8 +1085,7 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
     result.known_gnss_degradation_ratio = known_degradation;
     result.known_hazard_evidence = known_degradation > 0.0;
     result.unknown_coverage = eligible_satellites > 0
-        ? std::clamp(static_cast<double>(
-              result.gnss_unknown_satellite_count) /
+        ? std::clamp(eligible_unknown_support_fraction_sum /
               static_cast<double>(eligible_satellites), 0.0, 1.0)
         : 1.0;
     result.gnss_support_ray_length_m =
@@ -1257,7 +1313,7 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
       if (!reused_candidate) {
         result.prediction = queryWithSpatialAdvisory(
             input, nullptr, nullptr, diagnostics, &local_mask,
-            receiver_advisory);
+            receiver_advisory, request.task_mode);
         candidate_cache.emplace(
             cache_key, CandidateAdvisoryCacheEntry{
                 query.evidence_point_id, local_mask, result.prediction});
@@ -1265,7 +1321,7 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
     } else {
       result.prediction = queryWithSpatialAdvisory(
           input, nullptr, nullptr, diagnostics, &local_mask,
-          receiver_advisory);
+          receiver_advisory, request.task_mode);
     }
     result.gnss_supported = result.prediction.gnss.valid &&
         result.prediction.gnss.n_used >= params_.gnss.geometry_params.min_sats;
