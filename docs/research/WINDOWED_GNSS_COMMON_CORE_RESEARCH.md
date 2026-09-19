@@ -367,3 +367,25 @@ runs. Every overall development runner remained red on independent LiDAR
 render/frame-gap and registered current-frame latency gates, so these are two
 executed endpoint smokes plus one attributed certified stop, not a claim that
 all live qualification gates or formal-route selection pass.
+
+## 2026-09-19 support-continuity follow-up
+
+The measured receiver epoch is now evidence only at the exact receiver
+reference. The former radius shortcut created two incompatible models at a
+fixed distance: inside the radius every currently received satellite was
+accepted, while just outside it every point on a 5 m LOS had to fall inside a
+LiDAR support envelope. In snapshot 55 this removed 12 satellites without an
+occupied-ray intersection; nine were simply above the LiDAR's 52 degree
+vertical field of view. A braking-window intersection then reduced the usable
+set from 25 to 12 and caused an artificial VPL discontinuity.
+
+The unified visibility pass now records total and covered support samples,
+unknown fraction and first missing support for every satellite. Strict-global
+evaluation preserves fail-closed support. Mission-best-effort retains a
+satellite across unknown sky support and uses the deterministic bounded-union
+upper estimate
+`kappa_upper=1-(1-kappa_known)(1-unknown_fraction)` with the existing canopy
+sigma model. Hard occlusion and certified exclusions remain discrete. This is
+an engineering degraded-ranking model, not a claim of ARAIM completeness.
+Window intersection still stabilizes the locally executable braking envelope,
+but a remote LiDAR FOV boundary no longer deletes a near-window satellite.

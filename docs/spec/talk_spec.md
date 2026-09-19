@@ -252,7 +252,11 @@ For each candidate trajectory τ:
   section, time-weighted CVaR90 and predicted recovery). The default controlled
   budget is `r<=1.05`, `continuous<=1.0 s`, `integral<=0.025 ratio*s`, with
   recovery within `2.0 s` or an immediately usable certified brake. A
-  `hard_global` mission never uses this exception. Replanning cannot reset an
+  `STRICT_GLOBAL` mission never uses this exception. The default
+  `MISSION_BEST_EFFORT` mode uses the bounds to classify and order candidates;
+  beyond-budget or globally incomplete evidence becomes
+  `MISSION_DEGRADED_EXECUTION` when and only when local motion and certified
+  braking remain valid. It does not claim global integrity. Replanning cannot reset an
   active episode; `0.5 s` below `0.95*AL` is required to end it.
   Predicted recovery uses that same sustained `0.95*AL` condition; merely
   crossing back below AL for one sample is not recovery. Candidate admission
@@ -263,6 +267,41 @@ For each candidate trajectory τ:
   the same `TrajectoryAssurance` evaluation that made the decision. A logged
   first point just above AL locates the exposure; it must not be presented as
   proof that this one point alone triggered an aggregate-budget brake.
+- GNSS reception at the receiver is not extrapolated through a `0.45 m`
+  measured-support bubble. Candidate LOS support is sampled explicitly. In
+  strict mode, an unknown sample is fail-closed. In mission-best-effort mode,
+  unknown sky support retains the satellite with the deterministic conservative
+  canopy proxy `1-(1-kappa_known)(1-unknown_fraction)`; only true hard
+  occlusion, certified exclusion, disappearance and the elevation mask remove
+  it immediately. This prevents a LiDAR vertical-FOV boundary from deleting
+  an otherwise received satellite while keeping the degraded estimate clearly
+  separate from certified integrity.
+- A fresh registered map can publish local execution authority without a fresh
+  GNSS epoch. Global and local freshness are evaluated separately: local
+  freshness remains mandatory for every nominal/braking curve, while global
+  freshness determines `NORMAL`, `CONTROLLED_DEGRADED`, or
+  `MISSION_DEGRADED` state under the selected task contract.
+- The asynchronous topology/refinement worker has a separate `500 ms` route
+  deadline. The direct GNSS/local authorization batch remains limited to
+  `150 ms`; route computation cannot lend its remaining time to a safety
+  query. Best-effort evaluates all coarse channel guides in one shared batch
+  to schedule expensive refinement by mission risk, then directly evaluates
+  the refined candidate set again. Coarse results are hints only and cannot
+  authorize motion.
+- When every locally safe refined channel exceeds the global budget,
+  best-effort chooses the least-bad channel preference rather than HOLD, then
+  builds and certifies its actual stopping B-spline. Ordering is
+  peak ratio, worst time-weighted 0.5 s section, continuous exceedance,
+  exceedance integral, recovery time, local clearance, task progress and a
+  stable hash. Execution remains a rolling reaction-and-stop envelope and is
+  re-evaluated on every new immutable snapshot. This version does not compare
+  all channels after final spline optimization; the selected actual curve may
+  still be rejected or trigger bounded alternate-channel feedback.
+- Globally incomplete candidates are compared first by the mean unknown
+  LOS-sample fraction over eligible satellites, then usable satellite count,
+  geometry condition, predicted support recovery, LiDAR observability, local
+  clearance and progress. One missing ray sample is not treated like an
+  entirely unsupported satellite ray.
 - Local execution is admitted by `LocalMotionAssurance`, not by RiskGrid or
   LiDAR FIM. It evaluates the actual nominal and braking splines against
   obstacle surfaces using the vehicle/tracking/calibrated-surface/curve/safety

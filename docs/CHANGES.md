@@ -3,6 +3,77 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- feat(gnss-support-and-mission-best-effort): IAP-RQ-312 / IAP-RQ-320 /
+  IAP-RQ-400 / IAP-RQ-410 — remove the future-position measured-support
+  radius shortcut and record complete per-satellite LOS support coverage.
+  `STRICT_GLOBAL` remains fail-closed, while the default
+  `MISSION_BEST_EFFORT` retains non-occluded satellites across unknown LiDAR
+  sky support using a bounded-union kappa upper estimate and the unchanged
+  canopy sigma formula. Hard occlusion, certified exclusions, disappearance,
+  elevation masking and three-epoch admission retain their existing behavior.
+  Snapshot/cache/certificate identities now bind the support policy and task
+  mode. Execution snapshots separate local registered-map freshness from
+  global GNSS freshness; best-effort global budget exhaustion or incomplete
+  GNSS evidence produces explicit `MISSION_DEGRADED_EXECUTION` only after the
+  exact nominal and braking curves pass local motion assurance. P4 retains up
+  to four locally valid channels and, when no budget-compliant route exists,
+  selects the least-bad refined-channel preference by peak, 0.5 s tail,
+  continuous duration, integral, recovery, clearance, progress and stable
+  identity. RiskGrid remains advisory. Launch and development runner defaults
+  are BDS plus `mission_best_effort`; strict global behavior is an explicit
+  task choice. Runtime CSV schema advances to v11 with task mode and LOS
+  coverage decomposition. Best-effort refinement now evaluates all coarse
+  channel guides in one shared direct-risk batch to establish risk order,
+  then re-certifies the refined candidates; coarse evidence remains a
+  scheduling hint and never grants motion authority. The asynchronous route-search/refinement deadline
+  is independently configured by `p4.forward.route_compute_budget_ms`
+  (default `500 ms`); refinement reserves the unchanged direct-authorization
+  budget and stops launching additional channel refinements once an already
+  complete candidate would otherwise lose its authorization slot. Thus a
+  tight deadline preserves the best coarse-risk preference seen across all
+  enumerated channels instead of silently preferring enumeration/length
+  order, while final cross-channel optimized-spline comparison remains the
+  follow-up described below. Strict mode now ignores incomplete *alternative*
+  channels when another complete safe channel exists; only the selected
+  route must satisfy its fail-closed global contract. Every
+  direct authorization batch keeps the unchanged
+  `150 ms` `p4.forward.compute_budget_ms` limit. Braking anchors are verified
+  with the same configured dynamics tolerance as the terminal-stop builder,
+  preventing a zero-tolerance second pass from creating false holes in the
+  fixed `0.2 s` braking lattice.
+  Best-effort degradation is now an explicit whitelist: only GNSS AL/
+  anchor/usable-set/sky/geometry failures may be represented as degraded
+  global evidence. Occupancy/support, LiDAR/FIM, stale input, query timeout
+  and evidence-identity failures remain fail-closed in P4 runtime and P5.
+  Exact-epoch Integrity exclusions are retained even when the current global
+  GNSS solution is invalid. Unknown-route ranking additionally records minimum
+  usable satellites, worst GNSS geometry, support recovery and refined-guide
+  clearance. `unknown_coverage` is the mean unknown LOS-sample fraction over
+  eligible satellites, rather than the coarser fraction of satellites with
+  any missing sample. P5 validates every point failure against the degradation
+  whitelist and requires each failed window's first row to carry the same
+  reason, so timeout/identity failures cannot hide behind a GNSS-incomplete
+  summary. The selected channel alone is still converted into the final
+  optimized stopping B-spline and certified; cross-channel ranking of all
+  final optimized splines remains an explicit follow-up rather than being
+  claimed by this change. Three post-fix BDS/best-effort forest smokes selected
+  a formal route and produced real motion (`0.665/0.543/0.553 m`). Runtime
+  direct checks stayed below `33.66 ms`; none braked for global-navigation
+  budget or stale support. Their terminal blockers were independent local hard
+  conditions: certified tracking-bound exceedance in two runs and a collision
+  delta-history gap in one. A strict-global control moved `2.342 m`, then the
+  same global exposure policy triggered certified braking on
+  `global_navigation_budget_exceeded` and reached the braking endpoint. The
+  limited-prefix runner marks formal-route outcomes as stage failures by
+  design, and all four runs retained an unrelated current-map callback-latency
+  warning. No live run exercised `MISSION_DEGRADED_EXECUTION`: the best-effort
+  trajectories were globally normal at their earlier local-hard stops, so the
+  mission-degraded transition remains CPU-covered rather than live-proven. A
+  final post-review smoke with shared coarse-channel risk scheduling again
+  selected a formal route and moved `0.475 m`; runtime direct checks were
+  `30.03 ms` p95 / `30.53 ms` max, global-budget and support-stale braking
+  remained zero, and the certified stop was again caused by the independent
+  tracking bound (`0.153 m` schedule, `0.168 m` revoke), not GNSS support.
 - fix(astar-root-cause-and-precertified-successor): IAP-RQ-312 /
   IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 — repair the recorded successor A*
   failure where endpoint adjustment produced index `(36,14,14)` in a

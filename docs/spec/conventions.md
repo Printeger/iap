@@ -101,9 +101,14 @@
   until its ordinary freshness deadline. The result identity binds trajectory
   timing, control points/knots, sampling
   lattice, execution-snapshot/occupancy identities, diagnostic RiskGrid
-  generation and GNSS epoch. `SAFE` with complete
-  GNSS/LiDAR/FIM support is required; unsafe, incomplete, degenerate, expired
-  or over-budget results fail closed. Same-generation result reuse never
+  generation and GNSS epoch. In `STRICT_GLOBAL`, `SAFE` with complete
+  GNSS/LiDAR/FIM support is required. In `MISSION_BEST_EFFORT`, only explicitly
+  classified task-global GNSS failures (AL exceedance, missing/inconsistent
+  GNSS anchor, too few usable satellites, unknown sky or GNSS geometry
+  degeneracy) may become degraded navigation evidence after local motion and
+  braking are independently proven. Occupancy/support, LiDAR/FIM, freshness,
+  computation-budget and evidence-identity failures always fail closed.
+  Same-generation result reuse never
   bypasses current map/GNSS/certified-Integrity freshness, and any generation
   change forces recomputation. RiskGrid remains available as a planning
   heuristic and for diagnostics. Its absence, expiry or build timeout disables
@@ -326,6 +331,23 @@
   terminal solver may lengthen the hinted curve again when dynamics require
   it, and every regenerated curve repeats dynamics, collision, support,
   Integrity and direct risk checks. A cropped result remains `LIMITED_PREFIX`.
+- Best-effort route discovery first ranks refined, clearance-aware channel
+  guides and then converts the selected guide into the actual stopping
+  B-spline, braking library and final execution certificate. The final curve
+  still removes any candidate that fails local collision, clearance,
+  dynamics, tracking, support freshness or braking proof. Refined channel
+  preferences first favor globally budget-compliant evidence. If none exist,
+  comparable over-budget guides are ordered lexicographically by peak GNSS ratio,
+  worst time-weighted 0.5 s section, continuous exceedance, exceedance
+  integral, predicted recovery, local clearance, task progress and stable
+  path hash. Globally incomplete guides are considered only after all
+  comparable candidates and are ordered by mean unknown LOS-sample coverage,
+  usable satellite count, geometry, predicted support recovery, LiDAR FIM,
+  clearance and progress. RiskGrid is a search hint and cannot authorize or
+  veto the final curve. This contract does not claim that every channel has
+  already undergone final optimized-spline certification before channel
+  selection; cross-channel final-spline comparison requires a separate
+  bounded multi-curve implementation.
 - A queued braking guard has explicit `REQUESTED`, `QUEUED`, `ACTIVATED` and
   `ABSENT` controller states. Time reaching the switch stamp is not proof of
   execution: only a matching traj_server `ACTIVATED` acknowledgement permits
@@ -509,9 +531,46 @@
   `CONTROLLED_DEGRADED_EXECUTION` only when peak ratio is at most `1.05`, one
   continuous exceedance is at most `1.0 s`, the positive exceedance integral
   is at most `0.025 ratio*s`, and either recovery is predicted within `2.0 s`
-  or a currently certified braking curve remains available. `hard_global`
-  tasks retain strict `GNSS PL < AL`. An exposure episode survives trajectory
-  ID changes and ends only after `0.5 s` continuously below `0.95*AL`.
+  or a currently certified braking curve remains available. The public task
+  contract is `p4.assurance.task_mode`: `STRICT_GLOBAL` retains strict
+  `GNSS PL < AL`, while `MISSION_BEST_EFFORT` treats these bounds as
+  classification and route-ranking budgets. In best-effort mode, exceeding
+  them yields `MISSION_DEGRADED_EXECUTION` only when the exact nominal and
+  braking curves retain local-motion authority; it is never reported as
+  integrity satisfaction. An exposure episode survives trajectory ID changes
+  and ends only after `0.5 s` continuously below `0.95*AL`.
+- A received GNSS epoch certifies reception only at the exact receiver
+  reference; no measured-support radius grants future candidate positions
+  synthetic map support. Every candidate LOS records its sample count,
+  covered count, unknown fraction and first missing support. Strict-global
+  mode fails closed on any required unknown LOS support. Mission-best-effort
+  mode retains a satellite unless it is hard-occluded, integrity-excluded,
+  absent from the epoch or below the elevation mask, and applies
+  `kappa_upper = 1-(1-kappa_known)(1-unknown_fraction)` before the unchanged
+  canopy sigma model. This soft result is a degraded route-ranking estimate,
+  not a certified integrity bound. The support policy and task mode are part
+  of snapshot, cache and execution-certificate identity.
+- Execution snapshots have separate freshness meanings. `localFreshAt`
+  covers registered occupancy/support/SLAM authority and is the hard
+  prerequisite for movement and certified braking. `globalFreshAt` covers
+  GNSS epoch/current global evidence. Missing global evidence blocks
+  `STRICT_GLOBAL`, but in `MISSION_BEST_EFFORT` it changes navigation state
+  and ranking rather than suppressing a locally fresh execution snapshot.
+- Route discovery/refinement is asynchronous and has its own bounded wall-time
+  contract (`p4.forward.route_compute_budget_ms`, default `500 ms`). The
+  worker preserves a direct-authorization reserve and may return a smaller
+  set of fully refined candidates instead of a larger uncertified partial
+  set. Before refinement, one shared batch ranks all enumerated coarse guides
+  so a tight deadline does not silently select by enumeration order. This
+  coarse result is never execution authority. Direct
+  ForwardRisk authorization and reauthorization calls retain the independent
+  `p4.forward.compute_budget_ms` limit of `150 ms`; a larger route-search
+  budget must never be forwarded to the safety kernel. Mission-best-effort
+  uses one coarse scheduling batch, refines the highest-ranked geometric
+  channels that fit the route deadline, and re-certifies the resulting paths
+  once. In `STRICT_GLOBAL`, incomplete evidence on an unselected alternative
+  does not block another complete safe route; the selected route itself
+  remains fail-closed.
 - A runtime stop attributed to global-navigation exposure must report the
   decision-time decomposition, not only the first point above AL. The
   execution event records the evaluated peak ratio, maximum continuous
