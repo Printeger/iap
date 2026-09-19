@@ -2322,6 +2322,51 @@ class TestStageAnalyzer(unittest.TestCase):
         self.assertIn("runtime_risk_decision_missing_window_evidence",
                       summary["failures"])
 
+    def test_successor_preparation_reports_deadline_latency_and_typed_failure(self):
+        rows = [{
+            "successor_fast_path": "1",
+            "reason": "successor_worker_pending",
+            "successor_prepare_duration_ms": "nan",
+            "successor_queue_delay_ms": "nan",
+            "successor_failure": "NONE",
+        }, {
+            "successor_fast_path": "1",
+            "reason": "successor_fast_path_ready",
+            "successor_prepare_duration_ms": "420",
+            "successor_queue_delay_ms": "12",
+            "successor_required_progress_m": "0.17",
+            "successor_actual_progress_m": "0.31",
+            "successor_failure": "NONE",
+        }, {
+            "successor_fast_path": "1",
+            "reason": "successor_deadline_missed",
+            "successor_prepare_duration_ms": "810",
+            "successor_queue_delay_ms": "8",
+            "successor_failure": "DEADLINE_MISSED",
+        }]
+        summary = MODULE.analyze_successor_preparation(rows)
+        self.assertEqual(summary["failures"], [
+            "successor_deadline_missed",
+            "successor_fast_path_p95_exceeded",
+            "successor_prepare_wcet_exceeded",
+        ])
+        self.assertEqual(summary["request_count"], 3)
+        self.assertEqual(summary["deadline_miss_count"], 1)
+        self.assertEqual(summary["ordinary_rate_limited_count"], 0)
+        self.assertEqual(summary["prepare_duration_ms_p95"], 810.0)
+        self.assertEqual(summary["progress"], [{
+            "required_m": 0.17, "actual_m": 0.31}])
+
+    def test_successor_preparation_rejects_ordinary_rate_limit(self):
+        summary = MODULE.analyze_successor_preparation([{
+            "successor_fast_path": "0",
+            "successor_latest_prepare_start_s": "12.5",
+            "reason": "forward_decision_rate_limited",
+            "successor_failure": "NONE",
+        }])
+        self.assertEqual(
+            summary["failures"], ["successor_hit_ordinary_rate_limit"])
+
     def test_shutdown_rejects_runner_kill_escalation(self):
         summary = MODULE.analyze_shutdown(
             launch_exit_code=0,

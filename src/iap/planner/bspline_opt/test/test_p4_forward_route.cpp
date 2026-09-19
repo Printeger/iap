@@ -18,6 +18,242 @@
 namespace
 {
 
+TEST(P4SuccessorDeadlinePolicy,
+     StartsImmediatelyForShortSegmentsAndPreservesAbsoluteDeadline)
+{
+  ego_planner::P4SuccessorDeadlinePolicy policy;
+  const auto normal = ego_planner::computeP4SuccessorDeadline(
+    policy, 10.0, 14.0);
+  ASSERT_TRUE(normal.valid);
+  EXPECT_NEAR(normal.preparation_lead_s, 1.5, 1.0e-12);
+  EXPECT_NEAR(normal.latest_prepare_start_s, 12.5, 1.0e-12);
+  EXPECT_NEAR(normal.planned_switch_time_s, 13.8, 1.0e-12);
+  EXPECT_FALSE(normal.start_immediately);
+
+  const auto short_segment = ego_planner::computeP4SuccessorDeadline(
+    policy, 20.0, 21.0);
+  ASSERT_TRUE(short_segment.valid);
+  EXPECT_TRUE(short_segment.start_immediately);
+  EXPECT_NEAR(short_segment.latest_prepare_start_s, 20.0, 1.0e-12);
+  EXPECT_NEAR(short_segment.planned_switch_time_s, 20.8, 1.0e-12);
+}
+
+TEST(P4SuccessorProgressPolicy,
+     UsesActualCorridorStationAndAllowsMeaningfulLowSpeedProgress)
+{
+  ego_planner::P4SuccessorProgressInput input;
+  input.incumbent_endpoint_station_m = 5.0;
+  input.successor_station_after_coverage_m = 5.12;
+  auto low_speed = ego_planner::computeP4SuccessorProgressRequirement(input);
+  ASSERT_TRUE(low_speed.valid);
+  EXPECT_NEAR(low_speed.required_endpoint_progress_m, 0.17, 1.0e-12);
+  EXPECT_LT(low_speed.required_endpoint_progress_m, 0.5);
+
+  input.successor_station_after_coverage_m = 5.80;
+  auto high_speed = ego_planner::computeP4SuccessorProgressRequirement(input);
+  ASSERT_TRUE(high_speed.valid);
+  EXPECT_NEAR(high_speed.required_endpoint_progress_m, 0.85, 1.0e-12);
+
+  input.successor_station_after_coverage_m = 4.9;
+  auto jitter_floor = ego_planner::computeP4SuccessorProgressRequirement(input);
+  ASSERT_TRUE(jitter_floor.valid);
+  EXPECT_NEAR(jitter_floor.required_endpoint_progress_m, 0.10, 1.0e-12);
+}
+
+TEST(P4SuccessorPreparationWorker,
+     KeepsOneInflightAndLatestWaitingRequestPerParent)
+{
+  ego_planner::P4SuccessorPreparationWorker worker;
+  std::atomic<bool> release_first{false};
+  std::atomic<int> calls{0};
+  ego_planner::P4SuccessorPreparationRequest first;
+  first.parent_trajectory_id = 7;
+  first.request_sequence = 1;
+  first.absolute_deadline_s = 100.0;
+  first.compute = [&]() {
+    ++calls;
+    while (!release_first.load()) std::this_thread::yield();
+    ego_planner::P4SuccessorPreparationResult result;
+    result.ready = true;
+    result.reason = "first";
+    return result;
+  };
+  ASSERT_TRUE(worker.submit(std::move(first)));
+  for (int index = 0; index < 100 && calls.load() == 0; ++index)
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  ASSERT_EQ(calls.load(), 1);
+
+  for (std::uint64_t sequence : {2u, 3u})
+  {
+    ego_planner::P4SuccessorPreparationRequest next;
+    next.parent_trajectory_id = 7;
+    next.request_sequence = sequence;
+    next.absolute_deadline_s = 100.0;
+    next.compute = [sequence, &calls]() {
+      ++calls;
+      ego_planner::P4SuccessorPreparationResult result;
+      result.ready = true;
+      result.reason = std::to_string(sequence);
+      return result;
+    };
+    ASSERT_TRUE(worker.submit(std::move(next)));
+  }
+  release_first = true;
+
+  std::optional<ego_planner::P4SuccessorPreparationResult> result;
+  for (int index = 0; index < 500 && !result; ++index)
+  {
+    result = worker.poll(7);
+    if (!result) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  ASSERT_TRUE(result.has_value());
+  EXPECT_EQ(result->request_sequence, 3u);
+  EXPECT_EQ(result->reason, "3");
+  EXPECT_EQ(calls.load(), 2);
+  EXPECT_GE(worker.pendingOverwriteCount(), 1u);
+}
+
+TEST(P4SuccessorPreparationWorker,
+     ParentCancellationSignalsInflightCooperativeWork)
+{
+  ego_planner::P4SuccessorPreparationWorker worker;
+  const auto cancel = std::make_shared<std::atomic<bool>>(false);
+  std::atomic<bool> started{false};
+  std::atomic<bool> observed_cancel{false};
+  ego_planner::P4SuccessorPreparationRequest request;
+  request.parent_trajectory_id = 9;
+  request.request_sequence = 1;
+  request.absolute_deadline_s = 100.0;
+  request.cancel_token = cancel;
+  request.compute = [cancel, &started, &observed_cancel]() {
+    started = true;
+    while (!cancel->load(std::memory_order_relaxed))
+      std::this_thread::yield();
+    observed_cancel = true;
+    ego_planner::P4SuccessorPreparationResult result;
+    result.canceled = true;
+    result.failure = ego_planner::P4SuccessorFailure::CANCELED_SUPERSEDED;
+    return result;
+  };
+  ASSERT_TRUE(worker.submit(std::move(request)));
+  for (int index = 0; index < 100 && !started.load(); ++index)
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  ASSERT_TRUE(started.load());
+  worker.cancelParent(9);
+  for (int index = 0; index < 100 && !observed_cancel.load(); ++index)
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  EXPECT_TRUE(observed_cancel.load());
+  EXPECT_FALSE(worker.poll(9).has_value());
+}
+
+TEST(P4SuccessorPreparationWorker,
+     RejectsExpiredRequestBeforeStartingItsComputeCallback)
+{
+  ego_planner::P4SuccessorPreparationWorker worker;
+  std::atomic<int> calls{0};
+  ego_planner::P4SuccessorPreparationRequest request;
+  request.parent_trajectory_id = 12;
+  request.request_sequence = 1;
+  request.absolute_deadline_s = 1.0;
+  request.steady_deadline = std::chrono::steady_clock::now() -
+      std::chrono::milliseconds(1);
+  request.compute = [&calls]() {
+    ++calls;
+    ego_planner::P4SuccessorPreparationResult result;
+    result.ready = true;
+    return result;
+  };
+  ASSERT_TRUE(worker.submit(std::move(request)));
+
+  std::optional<ego_planner::P4SuccessorPreparationResult> result;
+  for (int index = 0; index < 500 && !result; ++index)
+  {
+    result = worker.poll(12);
+    if (!result) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  ASSERT_TRUE(result.has_value());
+  EXPECT_FALSE(result->ready);
+  EXPECT_TRUE(result->canceled);
+  EXPECT_EQ(result->failure,
+            ego_planner::P4SuccessorFailure::DEADLINE_MISSED);
+  EXPECT_EQ(result->reason, "successor_deadline_expired_before_start");
+  EXPECT_EQ(calls.load(), 0);
+}
+
+TEST(P4SuccessorAssuranceFailure,
+     PreservesSpecificFailureInsteadOfCollapsingUnsafeAndIncomplete)
+{
+  EXPECT_STREQ(ego_planner::p4SuccessorFailureName(
+      ego_planner::P4SuccessorFailure::GNSS_LIMIT_EXCEEDED),
+    "GNSS_LIMIT_EXCEEDED");
+  EXPECT_STREQ(ego_planner::p4SuccessorFailureName(
+      ego_planner::P4SuccessorFailure::SUPPORT_INCOMPLETE),
+    "SUPPORT_INCOMPLETE");
+  EXPECT_STREQ(ego_planner::p4SuccessorFailureName(
+      ego_planner::P4SuccessorFailure::SNAPSHOT_REAUTH_SEMANTIC_CHANGE),
+    "SNAPSHOT_REAUTH_SEMANTIC_CHANGE");
+}
+
+TEST(P4SuccessorFastPathFallback,
+     RequiresStructuredGeometryEvidenceAndRejectsUnknownReasonText)
+{
+  ego_planner::P4ForwardDecision decision;
+  decision.reason = "unrecognized_provider_failure";
+  EXPECT_FALSE(ego_planner::p4SuccessorGeometryFallbackAllowed(decision));
+
+  ego_planner::P4ForwardRefinementResult support;
+  support.status =
+      ego_planner::P4ForwardRefinementStatus::OCCUPANCY_UNAVAILABLE;
+  decision.refinement_diagnostics.push_back(support);
+  EXPECT_FALSE(ego_planner::p4SuccessorGeometryFallbackAllowed(decision));
+
+  ego_planner::P4ForwardRefinementResult blocked;
+  blocked.status = ego_planner::P4ForwardRefinementStatus::ASTAR_NO_PATH;
+  decision.refinement_diagnostics.push_back(blocked);
+  EXPECT_TRUE(ego_planner::p4SuccessorGeometryFallbackAllowed(decision));
+}
+
+TEST(P4SuccessorSnapshotRetry,
+     RequiresARealNewExecutionSnapshotForTransientEvidenceRetry)
+{
+  EXPECT_FALSE(ego_planner::p4SuccessorSnapshotRetryDue(false, 7u, 8u));
+  EXPECT_FALSE(ego_planner::p4SuccessorSnapshotRetryDue(true, 0u, 8u));
+  EXPECT_FALSE(ego_planner::p4SuccessorSnapshotRetryDue(true, 7u, 0u));
+  EXPECT_FALSE(ego_planner::p4SuccessorSnapshotRetryDue(true, 7u, 7u));
+  EXPECT_TRUE(ego_planner::p4SuccessorSnapshotRetryDue(true, 7u, 8u));
+}
+
+TEST(P4SuccessorAssuranceFailure, MapsEvidenceReasonsBySpecificCause)
+{
+  using Failure = ego_planner::P4SuccessorFailure;
+  const std::vector<std::pair<std::string, Failure>> cases{
+      {"actual_curve_local_clearance_margin_not_positive",
+       Failure::LOCAL_CLEARANCE_INSUFFICIENT},
+      {"certified_braking_curve_unsafe", Failure::BRAKING_CURVE_UNSAFE},
+      {"global_exposure_budget_exhausted",
+       Failure::GLOBAL_EXPOSURE_BUDGET_EXHAUSTED},
+      {"runtime_gnss_epoch_stale", Failure::GNSS_EPOCH_STALE},
+      {"runtime_integrity_unsafe_risk", Failure::INTEGRITY_UNSAFE},
+      {"execution_authority_integrity_stale", Failure::INTEGRITY_STALE},
+      {"corridor_support_incomplete", Failure::SUPPORT_INCOMPLETE},
+      {"runtime_local_map_stale", Failure::LOCAL_MAP_STALE},
+      {"direct_query_sampling_timeout", Failure::DIRECT_QUERY_TIMEOUT},
+      {"snapshot_reauth_semantic_change",
+       Failure::SNAPSHOT_REAUTH_SEMANTIC_CHANGE},
+      {"incremental_collision_geometry_changed", Failure::COLLISION_CHANGED},
+      {"successor_dynamics_invalid", Failure::DYNAMICS_INVALID},
+      {"minimum_endpoint_progress_not_met", Failure::PROGRESS_INSUFFICIENT},
+      {"successor_compute_budget_exceeded",
+       Failure::COMPUTE_BUDGET_EXCEEDED},
+      {"successor_switch_window_deadline_missed", Failure::DEADLINE_MISSED},
+      {"successor_parent_identity_changed", Failure::PARENT_IDENTITY_CHANGED},
+      {"actual_curve_gnss_risk_unsafe", Failure::GNSS_LIMIT_EXCEEDED},
+      {"no_reusable_corridor", Failure::CORRIDOR_INVALID}};
+  for (const auto & item : cases)
+    EXPECT_EQ(ego_planner::p4SuccessorFailureFromReason(item.first), item.second)
+        << item.first;
+}
+
 TEST(UniformBsplineSlice, PreservesExactSuffixAndBoundaryState)
 {
   Eigen::MatrixXd control_points(3, 10);
@@ -494,6 +730,44 @@ TEST(P4ForwardRoute, StoppingDistanceUsesApprovedPhysicalModel)
   ego_planner::P4ForwardLimits limits;
   EXPECT_NEAR(ego_planner::p4StoppingDistance(3.0, limits), 7.45, 1.0e-9);
   EXPECT_DOUBLE_EQ(ego_planner::p4StoppingDistance(-1.0, limits), 0.85);
+}
+
+TEST(P4ForwardRoute,
+     SuccessorFastPathReusesClearChannelWithoutTopologyEnumeration)
+{
+  auto request = straightRequest();
+  request.successor_fast_path = true;
+  request.incumbent_channel_id = 42u;
+  request.successor_reuse_guide = request.nominal_local_reference;
+  request.raw_occupied_voxel_centers =
+    std::make_shared<const std::vector<Eigen::Vector3d>>(
+      std::vector<Eigen::Vector3d>{Eigen::Vector3d(3.0, 2.0, 1.0)});
+
+  const auto decision = P4ForwardRoutePlanner().decide(request);
+
+  EXPECT_EQ(decision.channel_search_attempts, 0);
+  EXPECT_EQ(decision.channel_search_termination,
+    "successor_reuse_guide_clear");
+  ASSERT_FALSE(decision.candidates.empty()) << decision.reason;
+  EXPECT_EQ(decision.candidates.front().channel_id, 42u);
+}
+
+TEST(P4ForwardRoute,
+     SuccessorFastPathFallsBackToTopologyOnlyWhenCommittedGuideIsBlocked)
+{
+  auto request = straightRequest();
+  request.successor_fast_path = true;
+  request.incumbent_channel_id = 42u;
+  request.successor_reuse_guide = request.nominal_local_reference;
+  request.raw_occupied_voxel_centers =
+    std::make_shared<const std::vector<Eigen::Vector3d>>(
+      std::vector<Eigen::Vector3d>{Eigen::Vector3d(2.0, 0.0, 1.0)});
+
+  const auto decision = P4ForwardRoutePlanner().decide(request);
+
+  EXPECT_GT(decision.channel_search_attempts, 0);
+  EXPECT_NE(decision.channel_search_termination,
+    "successor_reuse_guide_clear");
 }
 
 TEST(P4ForwardRoute, NonFiniteLimitsFailClosedBeforeBudgetConstruction)

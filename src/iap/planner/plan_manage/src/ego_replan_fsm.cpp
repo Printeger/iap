@@ -756,6 +756,13 @@ namespace ego_planner
               planner_manager_->pp_.p1_collision_fanout_preserve_homotopies_,
               planner_manager_->p1FormalCheckpointRecorded(), pos.x(), -9.5,
               0.4, 1.5);
+      const auto &p4_certificate =
+          planner_manager_->p4ExecutionCertificate();
+      const bool committed_limited_prefix = p4_certificate.valid &&
+          p4_certificate.authority == P4ExecutionAuthority::LIMITED_PREFIX &&
+          !planner_manager_->p4ExecutionRevoked();
+      const bool successor_due = committed_limited_prefix &&
+          planner_manager_->p4SuccessorPreparationDue(time_now.seconds());
 
       /* && (end_pt_ - pos).norm() < 0.5 */
       if ((target_type_ == TARGET_TYPE::PRESET_TARGET) &&
@@ -781,14 +788,23 @@ namespace ego_planner
           changeFSMExecState(WAIT_TARGET, "FSM");
           goto force_return;
         }
-        else if ((end_pt_ - pos).norm() > no_replan_thresh_ &&
+        else if (successor_due)
+        {
+          changeFSMExecState(REPLAN_TRAJ, "P4_SUCCESSOR_DEADLINE");
+        }
+        else if (!committed_limited_prefix &&
+                 (end_pt_ - pos).norm() > no_replan_thresh_ &&
                  t_cur > replan_thresh_ &&
                  !defer_periodic_replan_for_p1_checkpoint)
         {
           changeFSMExecState(REPLAN_TRAJ, "FSM");
         }
       }
-      else if (t_cur > replan_thresh_ &&
+      else if (successor_due)
+      {
+        changeFSMExecState(REPLAN_TRAJ, "P4_SUCCESSOR_DEADLINE");
+      }
+      else if (!committed_limited_prefix && t_cur > replan_thresh_ &&
                !defer_periodic_replan_for_p1_checkpoint)
       {
         changeFSMExecState(REPLAN_TRAJ, "FSM");
@@ -816,18 +832,33 @@ namespace ego_planner
 
     case OBSERVE_MORE:
     {
-      // Execute only the certified short trajectory.  Re-evaluate at 2 Hz;
-      // if no safe progress exists, publish a zero-velocity stop candidate
-      // and remain in OBSERVE_MORE until a new online snapshot is usable.
+      // Execute only the certified short trajectory. Before its endpoint the
+      // deadline-driven successor lane is the sole planning producer: ordinary
+      // OBSERVE_MORE polling must not churn the parent's frozen guide or pass
+      // through the normal 0.5 s submission gate. At the approved stopped
+      // endpoint the ordinary 2 Hz observer may resume looking for a new move.
       const double now_s = plannerNow().seconds();
       P4PlanningCycleResult planning_result =
           P4PlanningCycleResult::RETRYABLE_FAILURE;
-      if (!p4_observe_more_scheduler_.runIfDue(
-              now_s, planner_manager_->p4ForwardDecisionReady(),
-              [this, &planning_result]() {
-                planning_result = planFromCurrentTraj(1);
-              }))
+      const auto &certificate = planner_manager_->p4ExecutionCertificate();
+      const bool executing_limited_prefix = certificate.valid &&
+          certificate.authority == P4ExecutionAuthority::LIMITED_PREFIX &&
+          !planner_manager_->p4ExecutionRevoked() &&
+          !planner_manager_->committedP4TrajectoryReachedEndpoint(now_s);
+      if (executing_limited_prefix)
+      {
+        if (!planner_manager_->p4SuccessorPreparationDue(now_s))
+          break;
+        planning_result = planFromCurrentTraj(1);
+      }
+      else if (!p4_observe_more_scheduler_.runIfDue(
+          now_s, planner_manager_->p4ForwardDecisionReady(),
+          [this, &planning_result]() {
+            planning_result = planFromCurrentTraj(1);
+          }))
+      {
         break;
+      }
       if (planning_result == P4PlanningCycleResult::NEW_TRAJECTORY_READY)
       {
         publishSwarmTrajs(false);

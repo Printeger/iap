@@ -3,6 +3,7 @@
 
 #include <Eigen/Core>
 
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <limits>
@@ -19,7 +20,7 @@ namespace ego_planner
 {
 
   inline constexpr char kP4ForwardDecisionSchema[] =
-    "p4_forward_route_decision_v14";
+    "p4_forward_route_decision_v15";
 
   enum class P4ForwardResultStatus
   {
@@ -28,6 +29,88 @@ namespace ego_planner
     RATE_LIMITED,
     FAILED,
   };
+
+  struct P4SuccessorDeadlinePolicy
+  {
+    double successor_prepare_wcet_s = 0.8;
+    double direct_authorization_budget_s = 0.15;
+    double latest_snapshot_reauthorization_budget_s = 0.15;
+    double control_switch_margin_s = 0.2;
+    double scheduler_guard_s = 0.2;
+  };
+
+  struct P4SuccessorDeadline
+  {
+    bool valid = false;
+    bool start_immediately = false;
+    double preparation_lead_s = std::numeric_limits<double>::quiet_NaN();
+    double latest_prepare_start_s = std::numeric_limits<double>::quiet_NaN();
+    double planned_switch_time_s = std::numeric_limits<double>::quiet_NaN();
+    double candidate_ready_deadline_s =
+      std::numeric_limits<double>::quiet_NaN();
+    std::string reason = "invalid_input";
+  };
+
+  P4SuccessorDeadline computeP4SuccessorDeadline(
+    const P4SuccessorDeadlinePolicy & policy,
+    double trajectory_start_s, double trajectory_end_s);
+
+  struct P4SuccessorProgressInput
+  {
+    double incumbent_endpoint_station_m =
+      std::numeric_limits<double>::quiet_NaN();
+    double successor_station_after_coverage_m =
+      std::numeric_limits<double>::quiet_NaN();
+    double jitter_floor_m = 0.10;
+    double stability_margin_m = 0.05;
+  };
+
+  struct P4SuccessorProgressRequirement
+  {
+    bool valid = false;
+    double required_endpoint_progress_m =
+      std::numeric_limits<double>::quiet_NaN();
+    double coverage_net_progress_m =
+      std::numeric_limits<double>::quiet_NaN();
+    std::string reason = "invalid_input";
+  };
+
+  P4SuccessorProgressRequirement computeP4SuccessorProgressRequirement(
+    const P4SuccessorProgressInput & input);
+
+  enum class P4SuccessorFailure
+  {
+    NONE = 0,
+    GNSS_LIMIT_EXCEEDED,
+    GLOBAL_EXPOSURE_BUDGET_EXHAUSTED,
+    SUPPORT_INCOMPLETE,
+    LOCAL_MAP_STALE,
+    INTEGRITY_STALE,
+    INTEGRITY_UNSAFE,
+    GNSS_EPOCH_STALE,
+    LOCAL_CLEARANCE_INSUFFICIENT,
+    BRAKING_CURVE_UNSAFE,
+    DIRECT_QUERY_TIMEOUT,
+    SNAPSHOT_REAUTH_SEMANTIC_CHANGE,
+    COLLISION_CHANGED,
+    DYNAMICS_INVALID,
+    PROGRESS_INSUFFICIENT,
+    COMPUTE_BUDGET_EXCEEDED,
+    DEADLINE_MISSED,
+    CORRIDOR_INVALID,
+    PARENT_IDENTITY_CHANGED,
+    CANCELED_SUPERSEDED,
+  };
+
+  struct P4ForwardDecision;
+  const char * p4SuccessorFailureName(P4SuccessorFailure failure);
+  P4SuccessorFailure p4SuccessorFailureFromReason(
+    const std::string & reason);
+  bool p4SuccessorGeometryFallbackAllowed(
+    const P4ForwardDecision & decision);
+  bool p4SuccessorSnapshotRetryDue(
+    bool awaiting_new_snapshot, std::uint64_t last_snapshot_id,
+    std::uint64_t current_snapshot_id);
 
   enum class P4PlanningDisposition
   {
@@ -385,6 +468,12 @@ namespace ego_planner
     Eigen::Vector3d velocity = Eigen::Vector3d::Zero();
     Eigen::Vector3d local_target = Eigen::Vector3d::Zero();
     std::vector < Eigen::Vector3d > nominal_local_reference;
+    // Deadline-driven successor preparation first reuses the committed
+    // topology. A clear guide bypasses channel enumeration; a blocked guide
+    // falls back to the ordinary bounded topology search.
+    bool successor_fast_path = false;
+    uint64_t incumbent_channel_id = 0;
+    std::vector<Eigen::Vector3d> successor_reuse_guide;
     P4ForwardSnapshotIdentity snapshot_identity;
     Eigen::Vector3d map_origin = Eigen::Vector3d::Zero();
     Eigen::Vector3d map_extent = Eigen::Vector3d::Zero();
@@ -409,6 +498,7 @@ namespace ego_planner
     // end-to-end compute budget as topology search.
     std::function < P4ForwardRefinementResult(
       const std::vector < Eigen::Vector3d > &, double, double) > refine;
+    std::function<bool()> cancel_requested;
 
     bool valid(std::string * reason = nullptr) const;
   };
@@ -471,6 +561,20 @@ namespace ego_planner
       std::numeric_limits < double > ::quiet_NaN();
     double compute_latency_ms = 0.0;
     double configuration_space_prepare_ms = 0.0;
+    bool successor_fast_path = false;
+    double successor_latest_prepare_start_s =
+      std::numeric_limits<double>::quiet_NaN();
+    double successor_candidate_ready_deadline_s =
+      std::numeric_limits<double>::quiet_NaN();
+    double successor_queue_delay_ms =
+      std::numeric_limits<double>::quiet_NaN();
+    double successor_prepare_duration_ms =
+      std::numeric_limits<double>::quiet_NaN();
+    double successor_required_progress_m =
+      std::numeric_limits<double>::quiet_NaN();
+    double successor_actual_progress_m =
+      std::numeric_limits<double>::quiet_NaN();
+    P4SuccessorFailure successor_failure = P4SuccessorFailure::NONE;
     double vehicle_radius_m = std::numeric_limits<double>::quiet_NaN();
     double map_inflation_m = std::numeric_limits<double>::quiet_NaN();
     std::string collision_policy_id;
@@ -500,6 +604,72 @@ namespace ego_planner
   {
 public:
     P4ForwardDecision decide(const P4ForwardRequest & request) const;
+  };
+
+  struct P4SuccessorAssuranceResult
+  {
+    bool complete = false;
+    bool safe = false;
+    P4SuccessorFailure failure = P4SuccessorFailure::NONE;
+    int first_failure_index = -1;
+    std::uint64_t first_failure_window_id = 0;
+    double first_failure_hpl_m = std::numeric_limits<double>::quiet_NaN();
+    double first_failure_vpl_m = std::numeric_limits<double>::quiet_NaN();
+    double first_failure_hal_m = std::numeric_limits<double>::quiet_NaN();
+    double first_failure_val_m = std::numeric_limits<double>::quiet_NaN();
+    double local_clearance_margin_m =
+      std::numeric_limits<double>::quiet_NaN();
+    double query_duration_ms = std::numeric_limits<double>::quiet_NaN();
+    std::uint64_t execution_snapshot_id = 0;
+    std::string detail;
+  };
+
+  struct P4SuccessorPreparationResult
+  {
+    bool ready = false;
+    bool canceled = false;
+    int parent_trajectory_id = 0;
+    std::uint64_t request_sequence = 0;
+    double queue_delay_ms = 0.0;
+    double compute_duration_ms = 0.0;
+    P4SuccessorFailure failure = P4SuccessorFailure::NONE;
+    P4ForwardDecision decision;
+    std::string reason = "not_evaluated";
+  };
+
+  struct P4SuccessorPreparationRequest
+  {
+    int parent_trajectory_id = 0;
+    std::uint64_t request_sequence = 0;
+    double absolute_deadline_s = std::numeric_limits<double>::quiet_NaN();
+    std::chrono::steady_clock::time_point steady_deadline =
+      std::chrono::steady_clock::time_point::max();
+    std::shared_ptr<std::atomic<bool>> cancel_token;
+    std::function<P4SuccessorPreparationResult()> compute;
+
+    bool valid() const;
+  };
+
+  class P4SuccessorPreparationWorker
+  {
+public:
+    P4SuccessorPreparationWorker();
+    ~P4SuccessorPreparationWorker();
+    P4SuccessorPreparationWorker(
+      const P4SuccessorPreparationWorker &) = delete;
+    P4SuccessorPreparationWorker & operator = (
+      const P4SuccessorPreparationWorker &) = delete;
+
+    bool submit(P4SuccessorPreparationRequest request);
+    std::optional<P4SuccessorPreparationResult> poll(
+      int expected_parent_trajectory_id);
+    bool busyFor(int parent_trajectory_id) const;
+    void cancelParent(int parent_trajectory_id);
+    std::uint64_t pendingOverwriteCount() const;
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
   };
 
   class P4ForwardDecisionWorker

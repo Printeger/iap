@@ -2313,6 +2313,80 @@ def analyze_runtime_window_evidence(
         fixed_layout_generation_classification_counts=classifications)
 
 
+def analyze_successor_preparation(lineage: list[dict]) -> dict:
+    """Summarize the deadline lane without treating it as motion success."""
+    def successor_lane_row(row: dict) -> bool:
+        try:
+            latest_start = float(row.get(
+                "successor_latest_prepare_start_s", "nan"))
+        except (TypeError, ValueError):
+            latest_start = math.nan
+        return (math.isfinite(latest_start)
+                or str(row.get("successor_fast_path", "0")) == "1"
+                or str(row.get("reason", "")).startswith("successor_"))
+
+    rows = [row for row in lineage if successor_lane_row(row)]
+    durations: list[float] = []
+    queue_delays: list[float] = []
+    failure_counts: dict[str, int] = {}
+    progress_pairs: list[dict] = []
+    for row in rows:
+        for field, target in (
+                ("successor_prepare_duration_ms", durations),
+                ("successor_queue_delay_ms", queue_delays)):
+            try:
+                value = float(row.get(field, "nan"))
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(value) and value >= 0.0:
+                target.append(value)
+        failure = str(row.get("successor_failure", "") or "NONE")
+        failure_counts[failure] = failure_counts.get(failure, 0) + 1
+        try:
+            required = float(row.get("successor_required_progress_m", "nan"))
+            actual = float(row.get("successor_actual_progress_m", "nan"))
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(required) and math.isfinite(actual):
+            progress_pairs.append({"required_m": required, "actual_m": actual})
+
+    def p95(values: list[float]) -> float | None:
+        if not values:
+            return None
+        ordered = sorted(values)
+        return ordered[max(0, math.ceil(.95 * len(ordered)) - 1)]
+
+    ordinary_rate_limited = sum(
+        str(row.get("reason", "")) == "forward_decision_rate_limited"
+        and successor_lane_row(row)
+        for row in lineage)
+    duration_p95 = p95(durations)
+    duration_max = max(durations, default=None)
+    failures: list[str] = []
+    if ordinary_rate_limited:
+        failures.append("successor_hit_ordinary_rate_limit")
+    if failure_counts.get("DEADLINE_MISSED", 0):
+        failures.append("successor_deadline_missed")
+    if _finite_number(duration_p95) and float(duration_p95) >= 500.0:
+        failures.append("successor_fast_path_p95_exceeded")
+    if _finite_number(duration_max) and float(duration_max) >= 800.0:
+        failures.append("successor_prepare_wcet_exceeded")
+    return {
+        "failures": failures,
+        "request_count": len(rows),
+        "fast_path_count": sum(
+            str(row.get("successor_fast_path", "0")) == "1"
+            for row in rows),
+        "queue_delay_ms_p95": p95(queue_delays),
+        "prepare_duration_ms_p95": duration_p95,
+        "prepare_duration_ms_max": duration_max,
+        "deadline_miss_count": failure_counts.get("DEADLINE_MISSED", 0),
+        "ordinary_rate_limited_count": ordinary_rate_limited,
+        "failure_counts": failure_counts,
+        "progress": progress_pairs,
+    }
+
+
 def analyze_stage_records(
         stage: str, health: list[dict], decisions: list[dict],
         lineage: list[dict], bsplines: list[dict], p5_status: list[dict],
@@ -2982,6 +3056,7 @@ def analyze_run(
         runtime_window = analyze_runtime_window_evidence(
             runtime_window_batches, runtime_windows,
             fixed_layout_generation_probes, execution_events)
+        successor = analyze_successor_preparation(forward_lineage)
         snapshot_failures = []
         if not execution_snapshot["attempt_count"]:
             snapshot_failures.append("execution_snapshot_attempts_missing")
@@ -3002,12 +3077,13 @@ def analyze_run(
         return _result(
             [*p0["failures"], *p0_performance_failures,
              *limited["failures"], *snapshot_failures,
-             *runtime_window["failures"]],
+             *runtime_window["failures"], *successor["failures"]],
             **{key: value for key, value in limited.items()
                if key not in ("result", "failures")},
             p0=p0,
             execution_snapshot=execution_snapshot,
             runtime_window=runtime_window,
+            successor_preparation=successor,
             gnss_arm=gnss_arm,
             p0_risk_grid_p95_limit_ms=p0_p95_limit_ms,
             generation_probe_rows=len(fixed_layout_generation_probes))

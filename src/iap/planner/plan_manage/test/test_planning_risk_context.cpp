@@ -3269,6 +3269,7 @@ TEST(P4LimitedPrefixCommitmentPolicy,
   ego_planner::P4LimitedPrefixReplacementInput input;
   input.committed_execution_s = 0.99;
   input.endpoint_progress_m = 1.0;
+  input.minimum_endpoint_progress_m = 0.17;
   input.candidate_worst_risk = 0.7;
   input.incumbent_worst_remaining_risk = 0.8;
   std::string reason;
@@ -3277,12 +3278,12 @@ TEST(P4LimitedPrefixCommitmentPolicy,
   EXPECT_EQ(reason, "minimum_commitment_time_not_met");
 
   input.committed_execution_s = 1.0;
-  input.endpoint_progress_m = 0.49;
+  input.endpoint_progress_m = 0.16;
   EXPECT_FALSE(ego_planner::shouldReplaceCommittedLimitedPrefix(
       input, &reason));
   EXPECT_EQ(reason, "minimum_endpoint_progress_not_met");
 
-  input.endpoint_progress_m = 0.5;
+  input.endpoint_progress_m = 0.17;
   input.candidate_worst_risk = 0.81;
   EXPECT_FALSE(ego_planner::shouldReplaceCommittedLimitedPrefix(
       input, &reason));
@@ -3320,6 +3321,37 @@ TEST(P4LimitedPrefixCommitmentPolicy,
   EXPECT_EQ(reason, "incumbent_invalid");
 }
 
+TEST(P4SuccessorDeadlineScheduling,
+     StartsPreparationAtCommitWhileKeepingAbsoluteDeadline)
+{
+  ego_planner::EGOPlannerManager manager;
+  manager.local_data_.traj_id_ = 7;
+  manager.local_data_.duration_ = 3.0;
+  ego_planner::P4ExecutionCertificate certificate;
+  certificate.valid = true;
+  certificate.trajectory_id = 7;
+  certificate.start_time_ns = 10000000000LL;
+  certificate.duration_s = 3.0;
+  certificate.execution_deadline_s = 13.0;
+  certificate.control_points_hash = "parent";
+  certificate.authority = ego_planner::P4ExecutionAuthority::LIMITED_PREFIX;
+  manager.setP4ExecutionCertificateForTest(certificate);
+
+  EXPECT_TRUE(manager.p4SuccessorPreparationDue(10.0));
+  EXPECT_TRUE(manager.p4SuccessorPreparationDue(11.499));
+  EXPECT_TRUE(manager.p4SuccessorPreparationDue(11.5));
+
+  manager.local_data_.traj_id_ = 8;
+  manager.local_data_.duration_ = 1.0;
+  certificate.trajectory_id = 8;
+  certificate.start_time_ns = 20000000000LL;
+  certificate.duration_s = 1.0;
+  certificate.execution_deadline_s = 21.0;
+  certificate.control_points_hash = "short_parent";
+  manager.setP4ExecutionCertificateForTest(certificate);
+  EXPECT_TRUE(manager.p4SuccessorPreparationDue(20.0));
+}
+
 TEST(P4PreparedSuccessorPolicy,
      BindsParentSwitchWindowBoundaryStateAndDirectAuthority)
 {
@@ -3335,8 +3367,9 @@ TEST(P4PreparedSuccessorPolicy,
   successor.successor_velocity = successor.incumbent_velocity;
   successor.successor_acceleration = successor.incumbent_acceleration;
   successor.execution_snapshot_id = 9;
-  successor.direct_risk_safe = true;
-  successor.support_and_integrity_fresh = true;
+  successor.assurance.complete = true;
+  successor.assurance.safe = true;
+  successor.assurance.failure = ego_planner::P4SuccessorFailure::NONE;
   std::string reason;
   EXPECT_TRUE(ego_planner::validateP4PreparedSuccessor(
       successor, 17, 1234, "parent_hash", 10.1, &reason));
@@ -3353,6 +3386,14 @@ TEST(P4PreparedSuccessorPolicy,
   EXPECT_FALSE(ego_planner::validateP4PreparedSuccessor(
       successor, 17, 1234, "parent_hash", 10.25, &reason));
   EXPECT_EQ(reason, "successor_switch_window_missed");
+
+  successor.planned_switch_time_s = 10.0;
+  successor.assurance.safe = false;
+  successor.assurance.failure =
+      ego_planner::P4SuccessorFailure::SUPPORT_INCOMPLETE;
+  EXPECT_FALSE(ego_planner::validateP4PreparedSuccessor(
+      successor, 17, 1234, "parent_hash", 10.1, &reason));
+  EXPECT_EQ(reason, "successor_support_incomplete");
 }
 
 TEST(P4PreparedSuccessorPolicy,
@@ -3458,8 +3499,9 @@ TEST(P4PreparedSuccessorPolicy,
       manager.local_data_.position_traj_.getControlPoint());
   prepared.planned_switch_time_s = 10.0;
   prepared.execution_snapshot_id = bound_execution_a->execution_snapshot_id;
-  prepared.direct_risk_safe = true;
-  prepared.support_and_integrity_fresh = true;
+  prepared.assurance.complete = true;
+  prepared.assurance.safe = true;
+  prepared.assurance.failure = ego_planner::P4SuccessorFailure::NONE;
   manager.setPreparedP4SuccessorForTest(prepared);
 
   const auto execution_b = makeP4ExecutionSnapshot(

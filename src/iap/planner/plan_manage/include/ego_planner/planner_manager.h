@@ -122,6 +122,7 @@ namespace ego_planner
   {
     double committed_execution_s = 0.0;
     double endpoint_progress_m = 0.0;
+    double minimum_endpoint_progress_m = 0.10;
     double candidate_worst_risk = std::numeric_limits<double>::infinity();
     double incumbent_worst_remaining_risk =
         std::numeric_limits<double>::infinity();
@@ -147,8 +148,7 @@ namespace ego_planner
     Eigen::Vector3d successor_velocity = Eigen::Vector3d::Zero();
     Eigen::Vector3d successor_acceleration = Eigen::Vector3d::Zero();
     uint64_t execution_snapshot_id = 0;
-    bool direct_risk_safe = false;
-    bool support_and_integrity_fresh = false;
+    P4SuccessorAssuranceResult assurance;
   };
 
   bool validateP4PreparedSuccessor(
@@ -251,6 +251,13 @@ namespace ego_planner
         std::numeric_limits<double>::quiet_NaN();
     double global_peak_ratio = std::numeric_limits<double>::quiet_NaN();
     double global_exposure_integral_ratio_s = 0.0;
+    // Immutable successor geometry captured with the execution certificate.
+    // Runtime planning must not reconstruct this from a later decision row.
+    uint64_t successor_channel_id = 0;
+    std::vector<Eigen::Vector3d> successor_topology_path;
+    std::vector<Eigen::Vector3d> successor_common_corridor;
+    std::string successor_guide_hash;
+    std::string successor_geometry_identity;
   };
 
   struct P4BrakingAnchor
@@ -559,6 +566,8 @@ namespace ego_planner
     bool p4ForwardDecisionReady() const {
       return p4_forward_worker_.resultReady();
     }
+    bool p4SuccessorPreparationDue(
+        double now_s, uint64_t current_execution_snapshot_id = 0);
     P4PlanningDisposition p4PlanningDisposition() const {
       return p4_planning_disposition_;
     }
@@ -619,6 +628,10 @@ namespace ego_planner
     void setPreparedP4SuccessorForTest(P4PreparedSuccessor successor)
     {
       p4_prepared_successor_ = std::move(successor);
+    }
+    void setP4ExecutionCertificateForTest(P4ExecutionCertificate certificate)
+    {
+      p4_execution_certificate_ = std::move(certificate);
     }
     void setP4ForwardDecisionForTest(P4ForwardDecision decision)
     {
@@ -692,11 +705,15 @@ namespace ego_planner
     P4ForwardLimits p4_forward_limits_;
     std::string p4_gnss_core_policy_ = "braking_window_core";
     double p4_window_transition_overlap_s_ = 0.4;
+    P4SuccessorDeadlinePolicy p4_successor_deadline_policy_;
+    double p4_successor_progress_jitter_floor_m_ = 0.10;
+    double p4_successor_progress_stability_margin_m_ = 0.05;
     iap::GlobalNavigationExposurePolicy p4_global_exposure_policy_;
     iap::GlobalNavigationExposureLedger p4_global_exposure_ledger_;
     iap::LocalMotionAssurancePolicy p4_local_motion_policy_;
     double p4_planning_clearance_buffer_m_ = 0.05;
     P4ForwardDecisionWorker p4_forward_worker_;
+    P4SuccessorPreparationWorker p4_successor_worker_;
     P4ForwardDecision last_p4_forward_decision_;
     P4ForwardDecision published_p4_forward_decision_;
     std::shared_ptr<const FrozenOccupancyEpoch>
@@ -845,6 +862,23 @@ namespace ego_planner
     Eigen::Vector3d p4_last_decision_target_ = Eigen::Vector3d::Constant(
         std::numeric_limits<double>::quiet_NaN());
     P4ForwardSubmissionGate p4_forward_submission_gate_;
+    struct P4SuccessorScheduleState
+    {
+      int parent_trajectory_id = 0;
+      int64_t parent_start_time_ns = 0;
+      std::string parent_control_points_hash;
+      P4SuccessorDeadline deadline;
+      uint64_t next_request_sequence = 1;
+      bool result_delivered = false;
+      P4SuccessorFailure last_failure = P4SuccessorFailure::NONE;
+      bool awaiting_new_snapshot = false;
+      uint64_t last_attempt_execution_snapshot_id = 0;
+      // Route preparation may finish before the one-second execution
+      // commitment permits an atomic switch. Keep that immutable result here
+      // instead of discarding it or rerunning geometry search.
+      std::optional<P4SuccessorPreparationResult> prepared_route;
+    };
+    P4SuccessorScheduleState p4_successor_schedule_;
     std::vector<Eigen::Vector3d> p4_latched_guide_;
     Eigen::Vector3d p4_latched_anchor_ = Eigen::Vector3d::Constant(
         std::numeric_limits<double>::quiet_NaN());

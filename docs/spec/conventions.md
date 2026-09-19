@@ -234,9 +234,30 @@
   certificate still passes identity, tracking, collision and runtime Integrity
   checks, the FSM continues it without retrying initialization or changing its
   start time, endpoint or deadline.
-- A valid committed `LIMITED_PREFIX` is replaced only after at least 1.0 s of
-  execution when the new common-corridor endpoint advances by at least 0.5 m
-  and its direct-risk maximum is no worse than the old remaining curve. An
+- A valid committed `LIMITED_PREFIX` arms an independent successor route-guide
+  task from an absolute deadline. Preparation is released immediately on commit; the
+  latest preparation start is the approved endpoint
+  time minus the configured generation WCET, direct authorization budget,
+  latest-snapshot reauthorization budget, command-switch margin and scheduler
+  guard (defaults total 1.5 s). It is a deadline, never a reason to wait.
+  A completed route guide is retained until the immutable
+  endpoint-minus-command-switch-margin anchor (and never before the 1.0 s
+  minimum commitment), so early work is neither discarded nor repeated and
+  cannot silently redefine its handoff state.
+  The lane is single-flight/latest-wins, bypasses ordinary P4 rate limiting,
+  and reuses the committed channel/guide before one bounded fallback to
+  topology/A* only when that frozen suffix has a geometry, clearance or
+  corridor failure. GNSS, support, freshness or budget failures do not trigger
+  an unrelated channel search.
+  While it runs, ordinary periodic planning cannot reset the parent. The
+  current implementation deliberately keeps B-spline optimization and final
+  braking/direct-risk/P5 certification on the planner thread at the handoff;
+  background preparation is not itself motion authority.
+  Replacement still requires at least 1.0 s of execution. Its minimum endpoint
+  advance is dynamic: the motion needed to cover the next switch + generation
+  + authorization cycle plus 0.05 m stability margin, with a 0.10 m jitter
+  floor. Risk dominance compares only the shared corridor; the new extension
+  must independently pass the full actual-curve and braking checks. An
   invalid certificate or an already reached endpoint may be replaced
   immediately. Ordinary generations, pending/rate limiting and smaller
   numerical endpoint changes retain the exact trajectory id, start, endpoint
@@ -260,6 +281,11 @@
   is left to the runtime watchdog. Rejections name the changed semantic source
   (`direct_risk`, `support`, `Integrity/GNSS`, collision, incomplete query or
   curve identity), not a generic authority-ID mismatch.
+- Successor failures are typed as GNSS limit/exposure, support or individual
+  input staleness, local clearance, braking, direct-query timeout,
+  latest-snapshot semantic change, collision, dynamics, insufficient progress,
+  compute budget, missed deadline or invalid corridor. A missed deadline never
+  extends the parent curve; it reaches its approved stopped endpoint.
 - P4 route search emits `CANDIDATE_READY`, never formal authority. The manager
   builds the real terminal-stop B-spline and its <=0.2 s braking-anchor
   library, constructs reaction/braking commitment windows, and directly

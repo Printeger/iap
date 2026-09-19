@@ -3,6 +3,42 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(deadline-driven-successor-fast-path): IAP-RQ-312 / IAP-RQ-320 /
+  IAP-RQ-400 / IAP-RQ-410 — move LIMITED_PREFIX successor preparation out of
+  the ordinary 0.5 s P4 submission gate. A single-flight/latest-wins worker is
+  armed immediately when the parent is committed; the computed default 1.5 s
+  lead is the latest permissible start, not a release time. A route result
+  that arrives early is retained until the fixed endpoint-minus-switch-margin
+  anchor (and never before the one-second commitment) rather than discarded.
+  The worker enforces the same deadline with a steady-clock cancellation token,
+  cooperatively cancels superseded parents,
+  warm-starts the committed channel without A* when it remains clear, and
+  falls back once to bounded topology search only on a real geometry,
+  clearance or corridor failure.
+  New execution snapshots retry the frozen-guide fast path without passing
+  through ordinary rate limiting; the final optimized B-spline is still
+  generated and certified by the existing main-thread publication pipeline.
+  Replace the fixed 0.5 m extension gate with a corridor-
+  station requirement derived from the next switch/planning/authorization
+  coverage interval, a 0.10 m jitter floor and 0.05 m stability margin; compare
+  direct risk only on the overlap while independently certifying the new
+  region. Forward lineage schema advances to `p4_forward_route_decision_v15`
+  and records deadlines, queue/compute latency,
+  required/actual progress and typed successor failures. Missing a deadline
+  retains the original ID, endpoint and stop rather than extending its scope.
+  Three forest live replays confirmed the dedicated lane has no ordinary
+  rate-limit or deadline miss: queue-delay p95 was `0.0065--0.0111 ms`,
+  fast-path-plus-fallback preparation was `9.14--11.46 ms`, and direct
+  execution checks were `11.07--11.76 ms` p95 (`15.30 ms` observed maximum).
+  All three runs moved (`2.063--2.877 m`); two stopped normally at their
+  approved endpoint and one used its certified brake after a direct future
+  sample reached VPL `40.452 m` against VAL `40 m`. In every run both the
+  reused corridor and bounded full search reported
+  `no_native_refined_candidate:astar_no_path=1`; no seamless successor was
+  therefore claimed. This change closes deadline/rate-limit starvation and
+  failure attribution, but does not yet move final B-spline optimization into
+  the background successor worker; that remaining seam prevents claiming the
+  full precomputed-successor contract.
 - fix(calibrated-local-clearance-and-aware-refinement): IAP-RQ-312 /
   IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 — stop converting frame-wide ICP RMSE
   into per-obstacle position uncertainty. ICP degeneracy, condition, gamma,

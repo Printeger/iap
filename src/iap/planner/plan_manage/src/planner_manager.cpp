@@ -419,8 +419,11 @@ namespace ego_planner
     if (!std::isfinite(input.committed_execution_s) ||
         input.committed_execution_s < 1.0)
       return finish(false, "minimum_commitment_time_not_met");
-    if (!std::isfinite(input.endpoint_progress_m) ||
-        input.endpoint_progress_m < 0.5)
+    if (!std::isfinite(input.minimum_endpoint_progress_m) ||
+        input.minimum_endpoint_progress_m < 0.0 ||
+        !std::isfinite(input.endpoint_progress_m) ||
+        input.endpoint_progress_m + 1.0e-12 <
+            input.minimum_endpoint_progress_m)
       return finish(false, "minimum_endpoint_progress_not_met");
     if (!std::isfinite(input.candidate_worst_risk) ||
         !std::isfinite(input.incumbent_worst_remaining_risk) ||
@@ -528,10 +531,53 @@ namespace ego_planner
       return finish(false, "successor_boundary_state_discontinuous");
     if (successor.execution_snapshot_id == 0)
       return finish(false, "successor_execution_snapshot_missing");
-    if (!successor.direct_risk_safe)
-      return finish(false, "successor_direct_risk_incomplete_or_unsafe");
-    if (!successor.support_and_integrity_fresh)
-      return finish(false, "successor_support_or_integrity_changed");
+    if (!successor.assurance.complete || !successor.assurance.safe ||
+        successor.assurance.failure != P4SuccessorFailure::NONE)
+    {
+      switch (successor.assurance.failure)
+      {
+        case P4SuccessorFailure::GNSS_LIMIT_EXCEEDED:
+          return finish(false, "successor_gnss_limit_exceeded");
+        case P4SuccessorFailure::GLOBAL_EXPOSURE_BUDGET_EXHAUSTED:
+          return finish(false, "successor_global_exposure_budget_exhausted");
+        case P4SuccessorFailure::SUPPORT_INCOMPLETE:
+          return finish(false, "successor_support_incomplete");
+        case P4SuccessorFailure::LOCAL_MAP_STALE:
+          return finish(false, "successor_local_map_stale");
+        case P4SuccessorFailure::INTEGRITY_STALE:
+          return finish(false, "successor_integrity_stale");
+        case P4SuccessorFailure::INTEGRITY_UNSAFE:
+          return finish(false, "successor_integrity_unsafe");
+        case P4SuccessorFailure::GNSS_EPOCH_STALE:
+          return finish(false, "successor_gnss_epoch_stale");
+        case P4SuccessorFailure::LOCAL_CLEARANCE_INSUFFICIENT:
+          return finish(false, "successor_local_clearance_insufficient");
+        case P4SuccessorFailure::BRAKING_CURVE_UNSAFE:
+          return finish(false, "successor_braking_curve_unsafe");
+        case P4SuccessorFailure::DIRECT_QUERY_TIMEOUT:
+          return finish(false, "successor_direct_query_timeout");
+        case P4SuccessorFailure::SNAPSHOT_REAUTH_SEMANTIC_CHANGE:
+          return finish(false, "successor_snapshot_reauth_semantic_change");
+        case P4SuccessorFailure::COLLISION_CHANGED:
+          return finish(false, "successor_collision_changed");
+        case P4SuccessorFailure::DYNAMICS_INVALID:
+          return finish(false, "successor_dynamics_invalid");
+        case P4SuccessorFailure::PROGRESS_INSUFFICIENT:
+          return finish(false, "successor_progress_insufficient");
+        case P4SuccessorFailure::COMPUTE_BUDGET_EXCEEDED:
+          return finish(false, "successor_compute_budget_exceeded");
+        case P4SuccessorFailure::DEADLINE_MISSED:
+          return finish(false, "successor_deadline_missed");
+        case P4SuccessorFailure::CORRIDOR_INVALID:
+          return finish(false, "successor_corridor_invalid");
+        case P4SuccessorFailure::PARENT_IDENTITY_CHANGED:
+          return finish(false, "successor_parent_identity_changed");
+        case P4SuccessorFailure::CANCELED_SUPERSEDED:
+          return finish(false, "successor_canceled_superseded");
+        case P4SuccessorFailure::NONE:
+          return finish(false, "successor_assurance_incomplete");
+      }
+    }
     return finish(true, "prepared_successor_ready");
   }
 
@@ -1495,6 +1541,84 @@ namespace ego_planner
     return rclcpp::Clock(RCL_ROS_TIME).now();
   }
 
+  bool EGOPlannerManager::p4SuccessorPreparationDue(
+      const double now_s, const uint64_t current_execution_snapshot_id)
+  {
+    uint64_t effective_execution_snapshot_id =
+        current_execution_snapshot_id;
+    if (effective_execution_snapshot_id == 0u && p0_risk_grid_runtime_ &&
+        std::isfinite(now_s))
+    {
+      const auto current =
+          p0_risk_grid_runtime_->acquireExecutionRiskSnapshotForEvaluation(
+              now_s);
+      if (current)
+        effective_execution_snapshot_id = current->execution_snapshot_id;
+    }
+    const bool committed_limited_prefix =
+        p4_execution_certificate_.valid && !p4_execution_revoked_ &&
+        p4_execution_certificate_.authority ==
+            P4ExecutionAuthority::LIMITED_PREFIX &&
+        local_data_.traj_id_ == p4_execution_certificate_.trajectory_id &&
+        local_data_.duration_ > 0.0;
+    if (!committed_limited_prefix || !std::isfinite(now_s))
+    {
+      if (p4_successor_schedule_.parent_trajectory_id > 0)
+        p4_successor_worker_.cancelParent(
+            p4_successor_schedule_.parent_trajectory_id);
+      p4_successor_schedule_ = P4SuccessorScheduleState{};
+      return false;
+    }
+
+    const int parent_id = p4_execution_certificate_.trajectory_id;
+    const int64_t parent_start_ns = p4_execution_certificate_.start_time_ns;
+    const std::string parent_hash =
+        p4_execution_certificate_.control_points_hash;
+    if (p4_successor_schedule_.parent_trajectory_id != parent_id ||
+        p4_successor_schedule_.parent_start_time_ns != parent_start_ns ||
+        p4_successor_schedule_.parent_control_points_hash != parent_hash)
+    {
+      if (p4_successor_schedule_.parent_trajectory_id > 0)
+        p4_successor_worker_.cancelParent(
+            p4_successor_schedule_.parent_trajectory_id);
+      p4_successor_schedule_ = P4SuccessorScheduleState{};
+      p4_successor_schedule_.parent_trajectory_id = parent_id;
+      p4_successor_schedule_.parent_start_time_ns = parent_start_ns;
+      p4_successor_schedule_.parent_control_points_hash = parent_hash;
+      p4_successor_schedule_.deadline = computeP4SuccessorDeadline(
+          p4_successor_deadline_policy_,
+          static_cast<double>(parent_start_ns) * 1.0e-9,
+          p4_execution_certificate_.execution_deadline_s);
+    }
+    const auto &deadline = p4_successor_schedule_.deadline;
+    if (p4_successor_schedule_.awaiting_new_snapshot)
+    {
+      if (!p4SuccessorSnapshotRetryDue(
+              true,
+              p4_successor_schedule_.last_attempt_execution_snapshot_id,
+              effective_execution_snapshot_id))
+        return false;
+      p4_successor_schedule_.awaiting_new_snapshot = false;
+      p4_successor_schedule_.result_delivered = false;
+    }
+    if (!deadline.valid || p4_successor_schedule_.result_delivered ||
+        now_s > p4_execution_certificate_.execution_deadline_s + 1.0e-9)
+      return false;
+    // latest_prepare_start_s is a deadline, not a release time. Start route
+    // preparation as soon as the trajectory is committed. If it finishes
+    // before the one-second commitment window, retain the immutable result
+    // and wake the publication path only when switching is permitted.
+    if (p4_successor_schedule_.prepared_route)
+    {
+      const double minimum_commitment_end_s =
+          static_cast<double>(parent_start_ns) * 1.0e-9 + 1.0;
+      const double release_s = std::max(
+          minimum_commitment_end_s, deadline.planned_switch_time_s);
+      return now_s + 1.0e-9 >= release_s;
+    }
+    return !p4_successor_worker_.busyFor(parent_id);
+  }
+
   void EGOPlannerManager::initPlanModules(rclcpp::Node::SharedPtr &node, PlanningVisualization::Ptr vis)
   {
     node->declare_parameter("manager/max_vel", -1.0);
@@ -1551,6 +1675,14 @@ namespace ego_planner
         "p4.forward.gnss_core_policy", "braking_window_core");
     node->declare_parameter(
         "p4.forward.window_transition_overlap_s", 0.4);
+    node->declare_parameter("p4.execution.successor_prepare_wcet_s", 0.8);
+    node->declare_parameter(
+        "p4.execution.successor_control_switch_margin_s", 0.2);
+    node->declare_parameter("p4.execution.successor_scheduler_guard_s", 0.2);
+    node->declare_parameter(
+        "p4.execution.successor_progress_jitter_floor_m", 0.10);
+    node->declare_parameter(
+        "p4.execution.successor_progress_stability_margin_m", 0.05);
     node->declare_parameter("p4.forward.min_creep_progress_m", 0.25);
     node->declare_parameter("p4.forward.max_limited_prefix_progress_m", 8.0);
     node->declare_parameter("p4.forward.max_creep_progress_m", -1.0);
@@ -1664,6 +1796,25 @@ namespace ego_planner
                         p4_gnss_core_policy_);
     node->get_parameter("p4.forward.window_transition_overlap_s",
                         p4_window_transition_overlap_s_);
+    node->get_parameter(
+        "p4.execution.successor_prepare_wcet_s",
+        p4_successor_deadline_policy_.successor_prepare_wcet_s);
+    node->get_parameter(
+        "p4.execution.successor_control_switch_margin_s",
+        p4_successor_deadline_policy_.control_switch_margin_s);
+    node->get_parameter(
+        "p4.execution.successor_scheduler_guard_s",
+        p4_successor_deadline_policy_.scheduler_guard_s);
+    node->get_parameter(
+        "p4.execution.successor_progress_jitter_floor_m",
+        p4_successor_progress_jitter_floor_m_);
+    node->get_parameter(
+        "p4.execution.successor_progress_stability_margin_m",
+        p4_successor_progress_stability_margin_m_);
+    p4_successor_deadline_policy_.direct_authorization_budget_s =
+        p4_forward_limits_.compute_budget_ms * 1.0e-3;
+    p4_successor_deadline_policy_.latest_snapshot_reauthorization_budget_s =
+        p4_forward_limits_.compute_budget_ms * 1.0e-3;
     node->get_parameter("p4.forward.min_creep_progress_m",
                         p4_forward_limits_.min_creep_progress_m);
     node->get_parameter("p4.forward.max_limited_prefix_progress_m",
@@ -1770,6 +1921,15 @@ namespace ego_planner
       throw std::invalid_argument(
           "p4.assurance.planning_clearance_buffer_m must be finite and in "
           "[0, 1] m");
+    const auto successor_deadline_probe = computeP4SuccessorDeadline(
+        p4_successor_deadline_policy_, 0.0, 10.0);
+    if (!successor_deadline_probe.valid ||
+        !std::isfinite(p4_successor_progress_jitter_floor_m_) ||
+        p4_successor_progress_jitter_floor_m_ <= 0.0 ||
+        !std::isfinite(p4_successor_progress_stability_margin_m_) ||
+        p4_successor_progress_stability_margin_m_ < 0.0)
+      throw std::invalid_argument(
+          "P4 successor deadline/progress parameters are invalid");
     if (!std::isfinite(
             p4_risk_confirmation_policy_.marginal_ratio_max) ||
         p4_risk_confirmation_policy_.marginal_ratio_max <= 1.0 ||
@@ -2837,6 +2997,316 @@ namespace ego_planner
                 decision->geometry_commit.reason;
           return decision->geometry_commit.accepted();
         };
+
+    // A committed LIMITED_PREFIX owns a separate, deadline-driven planning
+    // lane.  It deliberately bypasses the ordinary submission rate limiter:
+    // the current curve remains the authority while this immutable request is
+    // evaluated, and the generated curve still passes the ordinary actual-
+    // B-spline, braking, P5 and latest-snapshot checks before publication.
+    const double successor_now_s = plannerNow().seconds();
+    const bool successor_due = p4SuccessorPreparationDue(
+        successor_now_s, execution ? execution->execution_snapshot_id : 0u);
+    if (successor_due)
+    {
+      const double planned_switch_time_s =
+          p4_successor_schedule_.deadline.planned_switch_time_s;
+      const double planned_parent_t_s = std::clamp(
+          planned_switch_time_s - local_data_.start_time_.seconds(), 0.0,
+          std::max(0.0, local_data_.duration_));
+      // Freeze the physical handoff state from the committed parent. Route
+      // preparation may run much earlier, but its guide begins at the exact
+      // endpoint-minus-switch-margin anchor that the publication validator
+      // later checks.
+      request.position =
+          local_data_.position_traj_.evaluateDeBoorT(planned_parent_t_s);
+      request.velocity =
+          local_data_.velocity_traj_.evaluateDeBoorT(planned_parent_t_s);
+      request.query_time_s = planned_switch_time_s;
+      request.nominal_local_reference = {request.position, request.local_target};
+      std::vector<Eigen::Vector3d> reuse_guide =
+          p4_execution_certificate_.successor_topology_path;
+      uint64_t incumbent_channel_id =
+          p4_execution_certificate_.successor_channel_id;
+      if (reuse_guide.size() < 2u)
+        reuse_guide = last_p4_forward_decision_.selected_guide;
+      const auto selected = std::find_if(
+          last_p4_forward_decision_.candidates.begin(),
+          last_p4_forward_decision_.candidates.end(),
+          [this](const P4ForwardCandidate &candidate) {
+            return candidate.candidate_id ==
+                last_p4_forward_decision_.selected_candidate_id;
+          });
+      if (selected != last_p4_forward_decision_.candidates.end())
+      {
+        incumbent_channel_id = selected->channel_id;
+        if (reuse_guide.size() < 2u)
+          reuse_guide = selected->path;
+      }
+      if (reuse_guide.size() < 2u &&
+          !last_p4_forward_decision_.candidates.empty())
+      {
+        reuse_guide = last_p4_forward_decision_.candidates.front().path;
+        incumbent_channel_id =
+            last_p4_forward_decision_.candidates.front().channel_id;
+      }
+      if (reuse_guide.size() < 2u)
+        reuse_guide = last_p4_forward_decision_.geometry_common_corridor;
+      reuse_guide = p4RemainingPath(reuse_guide, request.position);
+      const bool guide_has_extension = reuse_guide.size() >= 2u &&
+          p4_execution_certificate_.approved_endpoint.allFinite() &&
+          (reuse_guide.back() -
+           p4_execution_certificate_.approved_endpoint).norm() >=
+              p4_successor_progress_jitter_floor_m_;
+      if (guide_has_extension)
+      {
+        request.successor_fast_path = true;
+        request.incumbent_channel_id = incumbent_channel_id;
+        request.successor_reuse_guide = reuse_guide;
+        request.nominal_local_reference = reuse_guide;
+        request.local_target = reuse_guide.back();
+      }
+
+      const int parent_id = p4_successor_schedule_.parent_trajectory_id;
+      std::optional<P4SuccessorPreparationResult> completed_result;
+      if (p4_successor_schedule_.prepared_route)
+      {
+        completed_result = std::move(p4_successor_schedule_.prepared_route);
+        p4_successor_schedule_.prepared_route.reset();
+      }
+      else
+      {
+        completed_result = p4_successor_worker_.poll(parent_id);
+      }
+      if (completed_result)
+      {
+        auto completed = std::move(*completed_result);
+        auto successor = std::move(completed.decision);
+        // The worker may have fallen back from the frozen-channel fast path
+        // to a full channel search. Preserve the path that actually produced
+        // this result instead of relabeling it from the submission request.
+        successor.successor_latest_prepare_start_s =
+            p4_successor_schedule_.deadline.latest_prepare_start_s;
+        successor.successor_candidate_ready_deadline_s =
+            p4_successor_schedule_.deadline.candidate_ready_deadline_s;
+        successor.successor_queue_delay_ms = completed.queue_delay_ms;
+        successor.successor_prepare_duration_ms =
+            completed.compute_duration_ms;
+        successor.successor_failure = completed.failure;
+        completed.decision = successor;
+        const double earliest_switch_s = std::max(
+            p4_execution_certificate_.start_time_ns * 1.0e-9 + 1.0,
+            p4_successor_schedule_.deadline.planned_switch_time_s);
+        if (completed.ready &&
+            completed.failure == P4SuccessorFailure::NONE &&
+            successor_now_s + 1.0e-9 < earliest_switch_s)
+        {
+          p4_successor_schedule_.prepared_route = std::move(completed);
+          unavailable.result_status = P4ForwardResultStatus::PENDING;
+          unavailable.snapshot_identity = request.snapshot_identity;
+          unavailable.action = P4ForwardAction::DEFER_RISK_SELECTION;
+          unavailable.deferred_motion_mode =
+              P4ForwardDeferredMotionMode::HOLD;
+          unavailable.planning_disposition =
+              P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY;
+          unavailable.successor_fast_path = request.successor_fast_path;
+          unavailable.successor_latest_prepare_start_s =
+              p4_successor_schedule_.deadline.latest_prepare_start_s;
+          unavailable.successor_candidate_ready_deadline_s =
+              p4_successor_schedule_.deadline.candidate_ready_deadline_s;
+          unavailable.successor_queue_delay_ms =
+              successor.successor_queue_delay_ms;
+          unavailable.successor_prepare_duration_ms =
+              successor.successor_prepare_duration_ms;
+          unavailable.reason =
+              "successor_prepared_waiting_fixed_switch_anchor";
+          return unavailable;
+        }
+        const auto retry_on_new_snapshot = [](const P4SuccessorFailure failure) {
+          switch (failure)
+          {
+            case P4SuccessorFailure::GNSS_LIMIT_EXCEEDED:
+            case P4SuccessorFailure::SUPPORT_INCOMPLETE:
+            case P4SuccessorFailure::LOCAL_MAP_STALE:
+            case P4SuccessorFailure::INTEGRITY_STALE:
+            case P4SuccessorFailure::GNSS_EPOCH_STALE:
+            case P4SuccessorFailure::DIRECT_QUERY_TIMEOUT:
+            case P4SuccessorFailure::SNAPSHOT_REAUTH_SEMANTIC_CHANGE:
+              return true;
+            case P4SuccessorFailure::NONE:
+            case P4SuccessorFailure::GLOBAL_EXPOSURE_BUDGET_EXHAUSTED:
+            case P4SuccessorFailure::INTEGRITY_UNSAFE:
+            case P4SuccessorFailure::LOCAL_CLEARANCE_INSUFFICIENT:
+            case P4SuccessorFailure::BRAKING_CURVE_UNSAFE:
+            case P4SuccessorFailure::COLLISION_CHANGED:
+            case P4SuccessorFailure::DYNAMICS_INVALID:
+            case P4SuccessorFailure::PROGRESS_INSUFFICIENT:
+            case P4SuccessorFailure::COMPUTE_BUDGET_EXCEEDED:
+            case P4SuccessorFailure::DEADLINE_MISSED:
+            case P4SuccessorFailure::CORRIDOR_INVALID:
+            case P4SuccessorFailure::PARENT_IDENTITY_CHANGED:
+            case P4SuccessorFailure::CANCELED_SUPERSEDED:
+              return false;
+          }
+          return false;
+        };
+        p4_successor_schedule_.result_delivered = completed.ready ||
+            !retry_on_new_snapshot(completed.failure);
+        p4_successor_schedule_.awaiting_new_snapshot = !completed.ready &&
+            retry_on_new_snapshot(completed.failure);
+        p4_successor_schedule_.last_failure = completed.failure;
+        // A cached result is intentionally consumed at the later fixed switch
+        // anchor. Its timeliness was decided when the worker finished against
+        // steady_deadline; comparing consumption time with the earlier
+        // candidate-ready deadline would reject every correctly cached result.
+        if (!completed.ready || completed.failure != P4SuccessorFailure::NONE)
+        {
+          successor.result_status = P4ForwardResultStatus::PENDING;
+          successor.planning_disposition =
+              P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY;
+          successor.reason = std::string("successor_") +
+              p4SuccessorFailureName(completed.failure) + ":" +
+              completed.reason;
+          return successor;
+        }
+        // A newer generation does not invalidate the prepared geometry by ID
+        // alone. Incremental collision validation happens here; the actual
+        // optimized curve is rebound to the newest execution snapshot by the
+        // existing final publication gate.
+        if (!validate_geometry_commit(&successor, true))
+        {
+          successor.result_status = P4ForwardResultStatus::PENDING;
+          successor.planning_disposition =
+              P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY;
+          successor.successor_failure = P4SuccessorFailure::COLLISION_CHANGED;
+          successor.reason = "successor_collision_changed";
+          return successor;
+        }
+        successor.planning_attempt_id = request.planning_attempt_id;
+        successor.request_position = request.position;
+        successor.local_target = request.local_target;
+        successor.result_status = P4ForwardResultStatus::READY;
+        successor.reason = request.successor_fast_path
+            ? "successor_fast_path_ready"
+            : "successor_full_search_fallback_ready";
+        return successor;
+      }
+
+      if (!p4_successor_worker_.busyFor(parent_id))
+      {
+        const uint64_t sequence =
+            p4_successor_schedule_.next_request_sequence++;
+        const double ready_deadline_s =
+            p4_successor_schedule_.deadline.candidate_ready_deadline_s;
+        P4SuccessorPreparationRequest successor_request;
+        const auto cancel_token =
+            std::make_shared<std::atomic<bool>>(false);
+        const auto steady_deadline = std::chrono::steady_clock::now() +
+            std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                std::chrono::duration<double>(
+                    std::max(0.0, ready_deadline_s - successor_now_s)));
+        request.cancel_requested = [cancel_token, steady_deadline]() {
+          return cancel_token->load(std::memory_order_relaxed) ||
+              std::chrono::steady_clock::now() > steady_deadline;
+        };
+        successor_request.parent_trajectory_id = parent_id;
+        successor_request.request_sequence = sequence;
+        successor_request.absolute_deadline_s = ready_deadline_s;
+        successor_request.steady_deadline = steady_deadline;
+        successor_request.cancel_token = cancel_token;
+        p4_successor_schedule_.last_attempt_execution_snapshot_id =
+            execution ? execution->execution_snapshot_id : 0u;
+        successor_request.compute = [request]() mutable {
+          P4SuccessorPreparationResult result;
+          const auto decision_ready = [](const P4ForwardDecision &decision) {
+            return decision.result_status ==
+                  P4ForwardResultStatus::READY &&
+              (decision.action == P4ForwardAction::CANDIDATE_READY ||
+               decision.action == P4ForwardAction::RISK_SELECTED ||
+               decision.action == P4ForwardAction::CONTINUE_NOMINAL ||
+               (decision.action ==
+                    P4ForwardAction::DEFER_RISK_SELECTION &&
+                decision.deferred_motion_mode ==
+                    P4ForwardDeferredMotionMode::COMMON_PREFIX));
+          };
+          result.decision = P4ForwardRoutePlanner().decide(request);
+          result.decision.successor_fast_path = request.successor_fast_path;
+          bool ready = decision_ready(result.decision);
+          const bool geometry_fallback_allowed =
+              p4SuccessorGeometryFallbackAllowed(result.decision);
+          if (!ready && request.successor_fast_path &&
+              geometry_fallback_allowed &&
+              !(request.cancel_requested && request.cancel_requested()))
+          {
+            // A blocked/too-short frozen suffix invalidates only the fast
+            // path. Retry once with ordinary channel enumeration, still in
+            // the dedicated successor worker and under its absolute deadline.
+            P4ForwardRequest fallback = request;
+            fallback.successor_fast_path = false;
+            fallback.incumbent_channel_id = 0u;
+            fallback.successor_reuse_guide.clear();
+            fallback.nominal_local_reference = {
+                fallback.position, fallback.local_target};
+            result.decision = P4ForwardRoutePlanner().decide(fallback);
+            result.decision.successor_fast_path = false;
+            ready = decision_ready(result.decision);
+          }
+          result.ready = ready;
+          if (ready)
+          {
+            result.failure = P4SuccessorFailure::NONE;
+            result.reason = "ready";
+          }
+          else if (result.decision.trigger_reason ==
+                   P4ForwardTriggerReason::COMPUTE_BUDGET_EXCEEDED ||
+                   result.decision.reason.find("compute_budget") !=
+                       std::string::npos)
+          {
+            result.failure = P4SuccessorFailure::COMPUTE_BUDGET_EXCEEDED;
+            result.reason = result.decision.reason;
+          }
+          else if (result.decision.safety_state ==
+                   P4ForwardSafetyState::UNSAFE)
+          {
+            result.failure = P4SuccessorFailure::GNSS_LIMIT_EXCEEDED;
+            result.reason = result.decision.reason;
+          }
+          else if (result.decision.risk_support ==
+                   P4ForwardRiskSupport::INCOMPLETE)
+          {
+            result.failure = P4SuccessorFailure::SUPPORT_INCOMPLETE;
+            result.reason = result.decision.reason;
+          }
+          else
+          {
+            result.failure = P4SuccessorFailure::CORRIDOR_INVALID;
+            result.reason = result.decision.reason;
+          }
+          return result;
+        };
+        if (!p4_successor_worker_.submit(std::move(successor_request)))
+        {
+          unavailable.result_status = P4ForwardResultStatus::FAILED;
+          unavailable.successor_fast_path = request.successor_fast_path;
+          unavailable.successor_failure =
+              P4SuccessorFailure::COMPUTE_BUDGET_EXCEEDED;
+          unavailable.reason = "successor_worker_submit_failed";
+          return unavailable;
+        }
+      }
+      unavailable.result_status = P4ForwardResultStatus::PENDING;
+      unavailable.snapshot_identity = request.snapshot_identity;
+      unavailable.action = P4ForwardAction::DEFER_RISK_SELECTION;
+      unavailable.deferred_motion_mode = P4ForwardDeferredMotionMode::HOLD;
+      unavailable.planning_disposition =
+          P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY;
+      unavailable.successor_fast_path = request.successor_fast_path;
+      unavailable.successor_latest_prepare_start_s =
+          p4_successor_schedule_.deadline.latest_prepare_start_s;
+      unavailable.successor_candidate_ready_deadline_s =
+          p4_successor_schedule_.deadline.candidate_ready_deadline_s;
+      unavailable.reason = "successor_worker_pending";
+      return unavailable;
+    }
     if (p4_actual_curve_feedback_override_)
     {
       P4ForwardDecision retry =
@@ -3117,6 +3587,10 @@ namespace ego_planner
              "local_planning_clearance_buffer_m,local_drift_error_m,"
              "local_failure_provenance,global_peak_ratio,"
              "global_exceedance_duration_s,global_exceedance_integral_ratio_s,"
+             "successor_fast_path,successor_latest_prepare_start_s,"
+             "successor_candidate_ready_deadline_s,successor_queue_delay_ms,"
+             "successor_prepare_duration_ms,successor_required_progress_m,"
+             "successor_actual_progress_m,successor_failure,"
              "reason\n";
     std::string selected_hash;
     for (const auto &candidate : decision.candidates)
@@ -3360,6 +3834,14 @@ namespace ego_planner
         << ',' << p4_direct_risk_evidence_.trajectory_assurance.global.peak_ratio
         << ',' << p4_direct_risk_evidence_.trajectory_assurance.global.exceedance_duration_s
         << ',' << p4_direct_risk_evidence_.trajectory_assurance.global.exceedance_integral_ratio_s
+        << ',' << (decision.successor_fast_path ? 1 : 0)
+        << ',' << decision.successor_latest_prepare_start_s
+        << ',' << decision.successor_candidate_ready_deadline_s
+        << ',' << decision.successor_queue_delay_ms
+        << ',' << decision.successor_prepare_duration_ms
+        << ',' << decision.successor_required_progress_m
+        << ',' << decision.successor_actual_progress_m
+        << ',' << p4SuccessorFailureName(decision.successor_failure)
         << ',' << decision.reason << '\n';
     csv.flush();
     if (!csv.good())
@@ -4853,6 +5335,51 @@ namespace ego_planner
                  P4ForwardAction::OBSERVE_MORE)
               ? P4ExecutionAuthority::LIMITED_PREFIX
               : P4ExecutionAuthority::ADVISORY;
+      const auto successor_candidate = std::find_if(
+          last_p4_forward_decision_.candidates.begin(),
+          last_p4_forward_decision_.candidates.end(),
+          [this](const P4ForwardCandidate &candidate) {
+            return candidate.candidate_id ==
+                last_p4_forward_decision_.selected_candidate_id;
+          });
+      if (successor_candidate != last_p4_forward_decision_.candidates.end())
+      {
+        p4_execution_certificate_.successor_channel_id =
+            successor_candidate->channel_id;
+        p4_execution_certificate_.successor_topology_path =
+            successor_candidate->topology_path.size() >= 2u
+            ? successor_candidate->topology_path : successor_candidate->path;
+        p4_execution_certificate_.successor_guide_hash =
+            successor_candidate->path_hash;
+      }
+      if (p4_execution_certificate_.successor_topology_path.size() < 2u)
+      {
+        p4_execution_certificate_.successor_topology_path =
+            last_p4_forward_decision_.selected_guide.size() >= 2u
+            ? last_p4_forward_decision_.selected_guide
+            : last_p4_forward_decision_.geometry_common_corridor;
+      }
+      if (p4_execution_certificate_.successor_guide_hash.empty() &&
+          !p4_execution_certificate_.successor_topology_path.empty())
+      {
+        Eigen::MatrixXd guide_points(
+            3, p4_execution_certificate_.successor_topology_path.size());
+        for (std::size_t guide_index = 0;
+             guide_index <
+                 p4_execution_certificate_.successor_topology_path.size();
+             ++guide_index)
+        {
+          guide_points.col(static_cast<Eigen::Index>(guide_index)) =
+              p4_execution_certificate_.successor_topology_path[guide_index];
+        }
+        p4_execution_certificate_.successor_guide_hash =
+            p4ControlPointHash(guide_points);
+      }
+      p4_execution_certificate_.successor_common_corridor =
+          last_p4_forward_decision_.geometry_common_corridor;
+      p4_execution_certificate_.successor_geometry_identity =
+          last_p4_forward_decision_.snapshot_identity.geometry_id + "|" +
+          last_p4_forward_decision_.collision_policy_id;
       p4_execution_certificate_.execution_snapshot_id =
           execution_snapshot ? execution_snapshot->execution_snapshot_id : 0u;
       p4_execution_certificate_.execution_mode =
@@ -4895,6 +5422,24 @@ namespace ego_planner
       }
       last_p4_execution_diagnostics_ = P4ExecutionCheckDiagnostics{};
       p4_execution_revoked_ = false;
+      if (p4_successor_schedule_.parent_trajectory_id > 0)
+        p4_successor_worker_.cancelParent(
+            p4_successor_schedule_.parent_trajectory_id);
+      p4_successor_schedule_ = P4SuccessorScheduleState{};
+      if (p4_execution_certificate_.authority ==
+          P4ExecutionAuthority::LIMITED_PREFIX)
+      {
+        p4_successor_schedule_.parent_trajectory_id =
+            p4_execution_certificate_.trajectory_id;
+        p4_successor_schedule_.parent_start_time_ns =
+            p4_execution_certificate_.start_time_ns;
+        p4_successor_schedule_.parent_control_points_hash =
+            p4_execution_certificate_.control_points_hash;
+        p4_successor_schedule_.deadline = computeP4SuccessorDeadline(
+            p4_successor_deadline_policy_,
+            p4_execution_certificate_.start_time_ns * 1.0e-9,
+            p4_execution_certificate_.execution_deadline_s);
+      }
       last_p4_runtime_lineage_start_ns_ = 0;
       last_p4_execution_event_key_.clear();
       p4_runtime_risk_cache_ = P4RuntimeRiskCache{};
@@ -5609,6 +6154,13 @@ namespace ego_planner
       if (reason) *reason = why;
       if (!valid && p4_prepared_successor_)
       {
+        const P4SuccessorFailure failure =
+            p4SuccessorFailureFromReason(why);
+        p4_prepared_successor_->assurance.complete = false;
+        p4_prepared_successor_->assurance.safe = false;
+        p4_prepared_successor_->assurance.failure = failure;
+        p4_prepared_successor_->assurance.detail = why;
+        last_p4_forward_decision_.successor_failure = failure;
         P4ExecutionCheckDiagnostics rejected;
         rejected.applicable = true;
         rejected.allowed = false;
@@ -5901,8 +6453,11 @@ namespace ego_planner
             execution->occupancy->cloud_stamp_s;
       }
       current.execution_snapshot_id = execution->execution_snapshot_id;
-      current.direct_risk_safe = true;
-      current.support_and_integrity_fresh = true;
+      current.assurance.complete = true;
+      current.assurance.safe = true;
+      current.assurance.failure = P4SuccessorFailure::NONE;
+      current.assurance.execution_snapshot_id =
+          execution->execution_snapshot_id;
       p4_prepared_successor_ = current;
 
       P4ExecutionCheckDiagnostics rebound;
@@ -9138,6 +9693,22 @@ namespace ego_planner
           last_p4_forward_decision_.planning_disposition =
               P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY;
           last_p4_forward_decision_.result_status = evaluated.result_status;
+          last_p4_forward_decision_.successor_fast_path =
+              evaluated.successor_fast_path;
+          last_p4_forward_decision_.successor_latest_prepare_start_s =
+              evaluated.successor_latest_prepare_start_s;
+          last_p4_forward_decision_.successor_candidate_ready_deadline_s =
+              evaluated.successor_candidate_ready_deadline_s;
+          last_p4_forward_decision_.successor_queue_delay_ms =
+              evaluated.successor_queue_delay_ms;
+          last_p4_forward_decision_.successor_prepare_duration_ms =
+              evaluated.successor_prepare_duration_ms;
+          last_p4_forward_decision_.successor_required_progress_m =
+              evaluated.successor_required_progress_m;
+          last_p4_forward_decision_.successor_actual_progress_m =
+              evaluated.successor_actual_progress_m;
+          last_p4_forward_decision_.successor_failure =
+              evaluated.successor_failure;
           last_p4_forward_decision_.retained_trajectory_count =
               p4_retained_trajectory_count_;
           last_p4_forward_decision_.reason = evaluated.reason;
@@ -10968,8 +11539,10 @@ namespace ego_planner
       };
       std::vector<Eigen::Vector3d> incumbent_points;
       std::vector<double> incumbent_times;
+      const double planned_switch_time_s =
+          p4_successor_schedule_.deadline.planned_switch_time_s;
       const double incumbent_t = std::clamp(
-          accepted_time.seconds() - local_data_.start_time_.seconds(), 0.0,
+          planned_switch_time_s - local_data_.start_time_.seconds(), 0.0,
           local_data_.duration_);
       const bool sampled = sample_spline(
           pos, &candidate_points, &candidate_times) &&
@@ -10987,6 +11560,20 @@ namespace ego_planner
                execution, accepted_time.seconds()));
       double candidate_worst = -std::numeric_limits<double>::infinity();
       double incumbent_worst = -std::numeric_limits<double>::infinity();
+      int successor_first_failure_index = -1;
+      uint64_t successor_first_failure_window_id = 0u;
+      double successor_first_failure_hpl_m =
+          std::numeric_limits<double>::quiet_NaN();
+      double successor_first_failure_vpl_m =
+          std::numeric_limits<double>::quiet_NaN();
+      double successor_query_duration_ms =
+          std::numeric_limits<double>::quiet_NaN();
+      const std::vector<Eigen::Vector3d> frozen_common_corridor =
+          last_p4_forward_decision_.geometry_common_corridor.size() >= 2u
+          ? last_p4_forward_decision_.geometry_common_corridor
+          : (!last_p4_forward_decision_.selected_guide.empty()
+             ? last_p4_forward_decision_.selected_guide
+             : p4ExecutablePath(last_p4_forward_decision_));
       if (comparable)
       {
         iap::ForwardRiskBatchRequest request;
@@ -11014,30 +11601,59 @@ namespace ego_planner
               std::max(0.0, incumbent_times[index] - incumbent_t), 2u,
               static_cast<std::uint64_t>(candidate_points.size() + index + 1u),
               2u});
+        const auto successor_query_start = std::chrono::steady_clock::now();
         const auto result = execution->forward_risk_batch(request);
+        successor_query_duration_ms =
+            std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - successor_query_start)
+                .count();
         comparable = result.complete &&
             result.points.size() == request.points.size();
         for (std::size_t index = 0; comparable &&
              index < result.points.size(); ++index)
         {
           const auto &point = result.points[index];
-          comparable = point.safety_state ==
+          const bool point_safe = point.safety_state ==
                   iap::ForwardRiskSafetyState::SAFE &&
               point.ranking_state ==
                   iap::ForwardRiskRankingState::COMPARABLE &&
               point.failure_reason == iap::ForwardRiskFailureReason::NONE &&
               std::isfinite(point.safety_ratio) &&
               point.safety_ratio < 1.0;
+          if (!point_safe && successor_first_failure_index < 0)
+          {
+            successor_first_failure_index = static_cast<int>(index);
+            successor_first_failure_window_id =
+                request.points[index].satellite_window_id;
+            successor_first_failure_hpl_m = point.prediction.gnss.hpl;
+            successor_first_failure_vpl_m = point.prediction.gnss.vpl;
+          }
+          comparable = point_safe;
           if (index < candidate_points.size())
-            candidate_worst = std::max(candidate_worst, point.safety_ratio);
+          {
+            double point_progress_m =
+                std::numeric_limits<double>::infinity();
+            std::string point_progress_reason;
+            const bool in_corridor = p4CommonCorridorEndpointProgress(
+                frozen_common_corridor, incumbent_points.back(),
+                candidate_points[index], p4_max_tracking_error_m_,
+                &point_progress_m, &point_progress_reason);
+            comparable = comparable && in_corridor;
+            // Compare risk only over the physical region shared by both
+            // curves. The extension is still independently required to pass
+            // the full direct-risk batch above.
+            if (in_corridor && point_progress_m <= 1.0e-6)
+              candidate_worst =
+                  std::max(candidate_worst, point.safety_ratio);
+          }
           else
             incumbent_worst = std::max(incumbent_worst, point.safety_ratio);
         }
+        comparable = comparable && std::isfinite(candidate_worst) &&
+            std::isfinite(incumbent_worst);
       }
       double endpoint_progress = -std::numeric_limits<double>::infinity();
       std::string corridor_progress_reason;
-      const std::vector<Eigen::Vector3d> frozen_common_corridor =
-          p4ExecutablePath(last_p4_forward_decision_);
       const bool corridor_progress_valid = sampled &&
           !candidate_points.empty() && !incumbent_points.empty() &&
           p4CommonCorridorEndpointProgress(
@@ -11048,6 +11664,40 @@ namespace ego_planner
       replacement.committed_execution_s = accepted_time.seconds() -
           p4_execution_certificate_.start_time_ns * 1.0e-9;
       replacement.endpoint_progress_m = endpoint_progress;
+      const double coverage_time_s =
+          p4_successor_deadline_policy_.control_switch_margin_s +
+          p4_successor_deadline_policy_.successor_prepare_wcet_s +
+          p4_successor_deadline_policy_.direct_authorization_budget_s +
+          p4_successor_deadline_policy_.
+              latest_snapshot_reauthorization_budget_s;
+      double coverage_progress_m =
+          -std::numeric_limits<double>::infinity();
+      std::string coverage_progress_reason;
+      if (corridor_progress_valid && !candidate_times.empty())
+      {
+        const auto coverage_it = std::lower_bound(
+            candidate_times.begin(), candidate_times.end(), coverage_time_s);
+        const std::size_t coverage_index = coverage_it == candidate_times.end()
+            ? candidate_times.size() - 1u
+            : static_cast<std::size_t>(
+                  std::distance(candidate_times.begin(), coverage_it));
+        (void)p4CommonCorridorEndpointProgress(
+            frozen_common_corridor, incumbent_points.back(),
+            candidate_points[coverage_index], p4_max_tracking_error_m_,
+            &coverage_progress_m, &coverage_progress_reason);
+      }
+      const auto progress_requirement =
+          computeP4SuccessorProgressRequirement({
+              0.0, coverage_progress_m,
+              p4_successor_progress_jitter_floor_m_,
+              p4_successor_progress_stability_margin_m_});
+      replacement.minimum_endpoint_progress_m = progress_requirement.valid
+          ? progress_requirement.required_endpoint_progress_m
+          : std::numeric_limits<double>::infinity();
+      last_p4_forward_decision_.successor_required_progress_m =
+          replacement.minimum_endpoint_progress_m;
+      last_p4_forward_decision_.successor_actual_progress_m =
+          endpoint_progress;
       replacement.candidate_worst_risk = comparable
           ? candidate_worst : std::numeric_limits<double>::infinity();
       replacement.incumbent_worst_remaining_risk = comparable
@@ -11061,7 +11711,7 @@ namespace ego_planner
       prepared.parent_start_time_ns = local_data_.start_time_.nanoseconds();
       prepared.parent_control_points_hash = p4ControlPointHash(
           local_data_.position_traj_.getControlPoint());
-      prepared.planned_switch_time_s = accepted_time.seconds();
+      prepared.planned_switch_time_s = planned_switch_time_s;
       prepared.incumbent_position =
           local_data_.position_traj_.evaluateDeBoorT(incumbent_t);
       prepared.incumbent_velocity =
@@ -11074,11 +11724,73 @@ namespace ego_planner
           candidate_acceleration.evaluateDeBoorT(0.0);
       prepared.execution_snapshot_id = execution
           ? execution->execution_snapshot_id : 0u;
-      prepared.direct_risk_safe = comparable;
-      prepared.support_and_integrity_fresh = execution &&
-          (!p0_risk_grid_runtime_ ||
-           p0_risk_grid_runtime_->executionSnapshotFreshAt(
-               execution, accepted_time.seconds()));
+      prepared.assurance.complete = comparable;
+      prepared.assurance.safe = comparable;
+      if (comparable)
+      {
+        prepared.assurance.failure = P4SuccessorFailure::NONE;
+        prepared.assurance.detail = "successor_actual_curve_safe";
+      }
+      else if (!execution || (p0_risk_grid_runtime_ &&
+               !p0_risk_grid_runtime_->executionSnapshotFreshAt(
+                   execution, accepted_time.seconds())))
+      {
+        prepared.assurance.failure = P4SuccessorFailure::LOCAL_MAP_STALE;
+        prepared.assurance.detail = "successor_execution_snapshot_stale";
+      }
+      else if (p4_direct_risk_evidence_.trajectory_assurance_complete)
+      {
+        const auto &assurance =
+            p4_direct_risk_evidence_.trajectory_assurance;
+        prepared.assurance.local_clearance_margin_m =
+            assurance.local.minimum_margin_m;
+        if (assurance.local.status ==
+            iap::LocalMotionAssuranceStatus::UNSAFE)
+        {
+          prepared.assurance.first_failure_index = static_cast<int>(
+              assurance.local.first_failure.sample_index);
+          const bool braking_curve =
+              assurance.local.first_failure.curve_id.find("brake-") == 0u;
+          prepared.assurance.failure = braking_curve
+              ? P4SuccessorFailure::BRAKING_CURVE_UNSAFE
+              : P4SuccessorFailure::LOCAL_CLEARANCE_INSUFFICIENT;
+          prepared.assurance.detail = assurance.local.reason;
+        }
+        else if (assurance.global.complete &&
+                 !assurance.global.within_budget)
+        {
+          prepared.assurance.failure =
+              P4SuccessorFailure::GLOBAL_EXPOSURE_BUDGET_EXHAUSTED;
+          prepared.assurance.detail = assurance.global.reason;
+        }
+        else
+        {
+          prepared.assurance.failure = P4SuccessorFailure::GNSS_LIMIT_EXCEEDED;
+          prepared.assurance.detail = assurance.reason;
+        }
+      }
+      else
+      {
+        prepared.assurance.failure = p4SuccessorFailureFromReason(
+            last_p4_forward_decision_.reason);
+        prepared.assurance.detail = last_p4_forward_decision_.reason;
+      }
+      prepared.assurance.execution_snapshot_id = prepared.execution_snapshot_id;
+      if (prepared.assurance.first_failure_index < 0)
+        prepared.assurance.first_failure_index =
+            successor_first_failure_index;
+      if (prepared.assurance.first_failure_window_id == 0u)
+        prepared.assurance.first_failure_window_id =
+            successor_first_failure_window_id;
+      prepared.assurance.first_failure_hpl_m = successor_first_failure_hpl_m;
+      prepared.assurance.first_failure_vpl_m = successor_first_failure_vpl_m;
+      prepared.assurance.first_failure_hal_m = execution
+          ? execution->risk_policy.alert_limit_h_m
+          : std::numeric_limits<double>::quiet_NaN();
+      prepared.assurance.first_failure_val_m = execution
+          ? execution->risk_policy.alert_limit_v_m
+          : std::numeric_limits<double>::quiet_NaN();
+      prepared.assurance.query_duration_ms = successor_query_duration_ms;
       const bool prepared_valid = validateP4PreparedSuccessor(
           prepared, local_data_.traj_id_,
           local_data_.start_time_.nanoseconds(),
@@ -11088,6 +11800,15 @@ namespace ego_planner
           !shouldReplaceCommittedLimitedPrefix(
               replacement, &replacement_reason))
       {
+        if (!corridor_progress_valid)
+          last_p4_forward_decision_.successor_failure =
+              P4SuccessorFailure::CORRIDOR_INVALID;
+        else if (!prepared_valid)
+          last_p4_forward_decision_.successor_failure =
+              prepared.assurance.failure;
+        else if (replacement_reason == "minimum_endpoint_progress_not_met")
+          last_p4_forward_decision_.successor_failure =
+              P4SuccessorFailure::PROGRESS_INSUFFICIENT;
         last_p4_forward_decision_.planning_disposition =
             P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY;
         last_p4_forward_decision_.reason = replacement_reason;

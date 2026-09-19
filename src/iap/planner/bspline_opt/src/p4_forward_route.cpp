@@ -1815,6 +1815,191 @@ bool configureAdvisorySelection(
 
 }  // namespace
 
+P4SuccessorDeadline computeP4SuccessorDeadline(
+  const P4SuccessorDeadlinePolicy & policy,
+  const double trajectory_start_s, const double trajectory_end_s)
+{
+  P4SuccessorDeadline result;
+  const std::array<double, 7> values = {
+    policy.successor_prepare_wcet_s,
+    policy.direct_authorization_budget_s,
+    policy.latest_snapshot_reauthorization_budget_s,
+    policy.control_switch_margin_s,
+    policy.scheduler_guard_s,
+    trajectory_start_s,
+    trajectory_end_s};
+  if (std::any_of(values.begin(), values.end(), [](const double value) {
+      return !std::isfinite(value);
+    }) || policy.successor_prepare_wcet_s < 0.0 ||
+    policy.direct_authorization_budget_s < 0.0 ||
+    policy.latest_snapshot_reauthorization_budget_s < 0.0 ||
+    policy.control_switch_margin_s < 0.0 ||
+    policy.scheduler_guard_s < 0.0 ||
+    trajectory_end_s <= trajectory_start_s)
+  {
+    return result;
+  }
+  result.preparation_lead_s = policy.successor_prepare_wcet_s +
+    policy.direct_authorization_budget_s +
+    policy.latest_snapshot_reauthorization_budget_s +
+    policy.control_switch_margin_s + policy.scheduler_guard_s;
+  const double unconstrained_start =
+    trajectory_end_s - result.preparation_lead_s;
+  result.start_immediately = unconstrained_start <= trajectory_start_s;
+  result.latest_prepare_start_s = std::max(
+    trajectory_start_s, unconstrained_start);
+  result.planned_switch_time_s = std::max(
+    trajectory_start_s,
+    trajectory_end_s - policy.control_switch_margin_s);
+  result.candidate_ready_deadline_s = std::max(
+    trajectory_start_s,
+    result.planned_switch_time_s -
+      policy.latest_snapshot_reauthorization_budget_s);
+  result.valid = result.latest_prepare_start_s <=
+    result.candidate_ready_deadline_s + kEpsilon;
+  result.reason = result.valid ? "ok" : "insufficient_preparation_window";
+  return result;
+}
+
+P4SuccessorProgressRequirement computeP4SuccessorProgressRequirement(
+  const P4SuccessorProgressInput & input)
+{
+  P4SuccessorProgressRequirement result;
+  if (!std::isfinite(input.incumbent_endpoint_station_m) ||
+    !std::isfinite(input.successor_station_after_coverage_m) ||
+    !std::isfinite(input.jitter_floor_m) || input.jitter_floor_m < 0.0 ||
+    !std::isfinite(input.stability_margin_m) ||
+    input.stability_margin_m < 0.0)
+  {
+    return result;
+  }
+  result.coverage_net_progress_m = std::max(
+    0.0, input.successor_station_after_coverage_m -
+      input.incumbent_endpoint_station_m);
+  result.required_endpoint_progress_m = std::max(
+    input.jitter_floor_m,
+    result.coverage_net_progress_m + input.stability_margin_m);
+  result.valid = true;
+  result.reason = "ok";
+  return result;
+}
+
+const char * p4SuccessorFailureName(const P4SuccessorFailure failure)
+{
+  switch (failure) {
+    case P4SuccessorFailure::NONE: return "NONE";
+    case P4SuccessorFailure::GNSS_LIMIT_EXCEEDED:
+      return "GNSS_LIMIT_EXCEEDED";
+    case P4SuccessorFailure::GLOBAL_EXPOSURE_BUDGET_EXHAUSTED:
+      return "GLOBAL_EXPOSURE_BUDGET_EXHAUSTED";
+    case P4SuccessorFailure::SUPPORT_INCOMPLETE: return "SUPPORT_INCOMPLETE";
+    case P4SuccessorFailure::LOCAL_MAP_STALE: return "LOCAL_MAP_STALE";
+    case P4SuccessorFailure::INTEGRITY_STALE: return "INTEGRITY_STALE";
+    case P4SuccessorFailure::INTEGRITY_UNSAFE: return "INTEGRITY_UNSAFE";
+    case P4SuccessorFailure::GNSS_EPOCH_STALE: return "GNSS_EPOCH_STALE";
+    case P4SuccessorFailure::LOCAL_CLEARANCE_INSUFFICIENT:
+      return "LOCAL_CLEARANCE_INSUFFICIENT";
+    case P4SuccessorFailure::BRAKING_CURVE_UNSAFE:
+      return "BRAKING_CURVE_UNSAFE";
+    case P4SuccessorFailure::DIRECT_QUERY_TIMEOUT:
+      return "DIRECT_QUERY_TIMEOUT";
+    case P4SuccessorFailure::SNAPSHOT_REAUTH_SEMANTIC_CHANGE:
+      return "SNAPSHOT_REAUTH_SEMANTIC_CHANGE";
+    case P4SuccessorFailure::COLLISION_CHANGED: return "COLLISION_CHANGED";
+    case P4SuccessorFailure::DYNAMICS_INVALID: return "DYNAMICS_INVALID";
+    case P4SuccessorFailure::PROGRESS_INSUFFICIENT:
+      return "PROGRESS_INSUFFICIENT";
+    case P4SuccessorFailure::COMPUTE_BUDGET_EXCEEDED:
+      return "COMPUTE_BUDGET_EXCEEDED";
+    case P4SuccessorFailure::DEADLINE_MISSED: return "DEADLINE_MISSED";
+    case P4SuccessorFailure::CORRIDOR_INVALID: return "CORRIDOR_INVALID";
+    case P4SuccessorFailure::PARENT_IDENTITY_CHANGED:
+      return "PARENT_IDENTITY_CHANGED";
+    case P4SuccessorFailure::CANCELED_SUPERSEDED:
+      return "CANCELED_SUPERSEDED";
+  }
+  return "UNKNOWN";
+}
+
+P4SuccessorFailure p4SuccessorFailureFromReason(
+  const std::string & reason)
+{
+  const auto contains = [&reason](const char * token) {
+    return reason.find(token) != std::string::npos;
+  };
+  // Specific evidence classes must precede the generic risk/assurance
+  // fallback. Integrity and support failures often contain those words too.
+  if (contains("local_clearance"))
+    return P4SuccessorFailure::LOCAL_CLEARANCE_INSUFFICIENT;
+  if (contains("braking"))
+    return P4SuccessorFailure::BRAKING_CURVE_UNSAFE;
+  if (contains("global_exposure"))
+    return P4SuccessorFailure::GLOBAL_EXPOSURE_BUDGET_EXHAUSTED;
+  if (contains("gnss_epoch"))
+    return P4SuccessorFailure::GNSS_EPOCH_STALE;
+  if (contains("integrity_unsafe"))
+    return P4SuccessorFailure::INTEGRITY_UNSAFE;
+  if (contains("integrity") || contains("execution_authority"))
+    return P4SuccessorFailure::INTEGRITY_STALE;
+  if (contains("support"))
+    return P4SuccessorFailure::SUPPORT_INCOMPLETE;
+  if (contains("local_map") || contains("stale"))
+    return P4SuccessorFailure::LOCAL_MAP_STALE;
+  if (contains("query") || contains("sampling"))
+    return P4SuccessorFailure::DIRECT_QUERY_TIMEOUT;
+  if (contains("snapshot") || contains("reauth"))
+    return P4SuccessorFailure::SNAPSHOT_REAUTH_SEMANTIC_CHANGE;
+  if (contains("collision") || contains("geometry"))
+    return P4SuccessorFailure::COLLISION_CHANGED;
+  if (contains("dynamic"))
+    return P4SuccessorFailure::DYNAMICS_INVALID;
+  if (contains("progress"))
+    return P4SuccessorFailure::PROGRESS_INSUFFICIENT;
+  if (contains("budget"))
+    return P4SuccessorFailure::COMPUTE_BUDGET_EXCEEDED;
+  if (contains("deadline") || contains("switch_window"))
+    return P4SuccessorFailure::DEADLINE_MISSED;
+  if (contains("identity") || contains("parent"))
+    return P4SuccessorFailure::PARENT_IDENTITY_CHANGED;
+  if (contains("gnss") || contains("risk") || contains("assurance"))
+    return P4SuccessorFailure::GNSS_LIMIT_EXCEEDED;
+  return P4SuccessorFailure::CORRIDOR_INVALID;
+}
+
+bool p4SuccessorGeometryFallbackAllowed(
+  const P4ForwardDecision & decision)
+{
+  return std::any_of(
+    decision.refinement_diagnostics.begin(),
+    decision.refinement_diagnostics.end(),
+    [](const P4ForwardRefinementResult & diagnostic) {
+      switch (diagnostic.status) {
+        case P4ForwardRefinementStatus::COARSE_PATH_COLLISION:
+        case P4ForwardRefinementStatus::ASTAR_NO_PATH:
+        case P4ForwardRefinementStatus::ASTAR_INVALID_RESULT:
+        case P4ForwardRefinementStatus::CORRIDOR_ESCAPE:
+        case P4ForwardRefinementStatus::OUTPUT_TOO_SHORT:
+        case P4ForwardRefinementStatus::CLEARANCE_MARGIN_INSUFFICIENT:
+          return true;
+        case P4ForwardRefinementStatus::SUCCESS:
+        case P4ForwardRefinementStatus::INVALID_INPUT:
+        case P4ForwardRefinementStatus::BUDGET_EXHAUSTED:
+        case P4ForwardRefinementStatus::OCCUPANCY_UNAVAILABLE:
+        case P4ForwardRefinementStatus::CLEARANCE_UNAVAILABLE:
+          return false;
+      }
+      return false;
+    });
+}
+
+bool p4SuccessorSnapshotRetryDue(
+  const bool awaiting_new_snapshot, const std::uint64_t last_snapshot_id,
+  const std::uint64_t current_snapshot_id)
+{
+  return awaiting_new_snapshot && last_snapshot_id != 0u &&
+    current_snapshot_id != 0u && current_snapshot_id != last_snapshot_id;
+}
+
 std::vector<Eigen::Vector3d> p4CommonGeometryPrefix(
   const std::vector<P4ForwardCandidate> & candidates, const double resolution)
 {
@@ -2003,6 +2188,13 @@ bool P4ForwardRequest::valid(std::string * reason) const
   {
     return fail("invalid_state_or_reference");
   }
+  if (successor_fast_path &&
+    (successor_reuse_guide.size() < 2 || std::any_of(
+      successor_reuse_guide.begin(), successor_reuse_guide.end(),
+      [](const Eigen::Vector3d & point) {return !point.allFinite();})))
+  {
+    return fail("invalid_successor_reuse_guide");
+  }
   if (!snapshot_identity.valid()) {
     return fail("invalid_snapshot_identity");
   }
@@ -2158,6 +2350,13 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
     decision.reason = invalid_reason;
     return record_latency(std::move(decision));
   }
+  const auto canceled = [&request]() {
+    return request.cancel_requested && request.cancel_requested();
+  };
+  if (canceled()) {
+    decision.reason = "successor_canceled_superseded";
+    return record_latency(std::move(decision));
+  }
 
   const ComputeBudget budget(request.limits.compute_budget_ms);
   decision.stopping_distance_m = p4StoppingDistance(
@@ -2224,8 +2423,10 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
       request.limits.sensing_range_m - decision.stopping_distance_m,
       map_radius}));
 
+  const auto & planning_reference = request.successor_fast_path ?
+    request.successor_reuse_guide : request.nominal_local_reference;
   auto nominal = resample(
-    request.nominal_local_reference,
+    planning_reference,
     request.limits.topology_resolution_m);
   const auto configuration_space_started = std::chrono::steady_clock::now();
   OnlineTopologyGraph graph(request, &budget);
@@ -2233,6 +2434,10 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
     std::chrono::duration<double, std::milli>(
       std::chrono::steady_clock::now() -
       configuration_space_started).count();
+  if (canceled()) {
+    decision.reason = "successor_canceled_superseded";
+    return finalize(std::move(decision));
+  }
   Eigen::Vector3d anchor = request.position;
   for (const auto & point : nominal) {
     if ((point - request.position).norm() >
@@ -2273,7 +2478,9 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
   // A clear nominal line is one candidate, not proof that only one topology
   // channel exists. Always run the bounded distinct-channel enumerator so an
   // off-nominal route separated by an online hit can still be compared.
-  if (nominal_path_clear && graph.frozenRawConfigurationSpaceIsEmpty()) {
+  if (nominal_path_clear &&
+    (request.successor_fast_path || graph.frozenRawConfigurationSpaceIsEmpty()))
+  {
     raw.emplace_back();
     for (const auto & point : resample(
         nominal_to_anchor, request.limits.topology_resolution_m))
@@ -2284,7 +2491,8 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
       }
     }
     decision.channel_search_attempts = 0;
-    decision.channel_search_termination =
+    decision.channel_search_termination = request.successor_fast_path ?
+      "successor_reuse_guide_clear" :
       "empty_configuration_space_single_channel";
   } else {
     raw = graph.distinctChannelPaths(
@@ -2296,6 +2504,10 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
   }
   if (graph.timedOut()) {
     decision.reason = "compute_budget_exceeded";
+    return finalize(std::move(decision));
+  }
+  if (canceled()) {
+    decision.reason = "successor_canceled_superseded";
     return finalize(std::move(decision));
   }
   if (decision.channel_search_termination ==
@@ -2372,7 +2584,8 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
     // channel-equivalence sweep. Repeating it here both wastes the bounded
     // risk-query budget and can turn a valid result into a deadline failure.
     auto representative = candidate;
-    representative.channel_id =
+    representative.channel_id = request.successor_fast_path &&
+      request.incumbent_channel_id != 0u ? request.incumbent_channel_id :
       static_cast<uint64_t>(decision.candidates.size() + 1);
     decision.candidates.push_back(std::move(representative));
     if (static_cast<int>(decision.candidates.size()) >=
@@ -2449,6 +2662,10 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
   }
 
   evaluateCandidateRiskSet(request, &budget, &decision.candidates);
+  if (canceled()) {
+    decision.reason = "successor_canceled_superseded";
+    return finalize(std::move(decision));
+  }
 
   const bool incomplete = std::any_of(
     decision.candidates.begin(), decision.candidates.end(),
@@ -2630,6 +2847,205 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
        ? "single_controlled_degraded_candidate"
        : "single_safe_channel"));
   return finalize(std::move(decision));
+}
+
+bool P4SuccessorPreparationRequest::valid() const
+{
+  return parent_trajectory_id > 0 && request_sequence > 0 &&
+    std::isfinite(absolute_deadline_s) && static_cast<bool>(compute);
+}
+
+struct P4SuccessorPreparationWorker::Impl
+{
+  struct Queued
+  {
+    P4SuccessorPreparationRequest request;
+    std::chrono::steady_clock::time_point submitted;
+  };
+
+  mutable std::mutex mutex;
+  std::condition_variable condition;
+  bool stopping = false;
+  int inflight_parent = 0;
+  std::uint64_t inflight_sequence = 0;
+  std::shared_ptr<std::atomic<bool>> inflight_cancel_token;
+  std::optional<Queued> pending;
+  std::optional<P4SuccessorPreparationResult> result;
+  std::unordered_set<int> canceled_parents;
+  std::uint64_t pending_overwrite_count = 0;
+  std::thread thread;
+
+  Impl()
+  : thread([this]() {run();})
+  {
+  }
+
+  void run()
+  {
+    while (true)
+    {
+      Queued queued;
+      {
+        std::unique_lock<std::mutex> lock(mutex);
+        condition.wait(lock, [this]() {
+          return stopping || pending.has_value();
+        });
+        if (stopping) return;
+        queued = std::move(*pending);
+        pending.reset();
+        inflight_parent = queued.request.parent_trajectory_id;
+        inflight_sequence = queued.request.request_sequence;
+        inflight_cancel_token = queued.request.cancel_token;
+        canceled_parents.erase(inflight_parent);
+      }
+
+      const auto started = std::chrono::steady_clock::now();
+      P4SuccessorPreparationResult computed;
+      if (started > queued.request.steady_deadline)
+      {
+        if (queued.request.cancel_token)
+          queued.request.cancel_token->store(true, std::memory_order_relaxed);
+        computed.canceled = true;
+        computed.failure = P4SuccessorFailure::DEADLINE_MISSED;
+        computed.reason = "successor_deadline_expired_before_start";
+      }
+      else
+      {
+        computed = queued.request.compute();
+        if (std::chrono::steady_clock::now() >
+            queued.request.steady_deadline)
+        {
+          if (queued.request.cancel_token)
+            queued.request.cancel_token->store(
+                true, std::memory_order_relaxed);
+          computed.ready = false;
+          computed.canceled = true;
+          computed.failure = P4SuccessorFailure::DEADLINE_MISSED;
+          computed.reason = "successor_deadline_expired_inflight";
+        }
+      }
+      const auto finished = std::chrono::steady_clock::now();
+      computed.parent_trajectory_id = queued.request.parent_trajectory_id;
+      computed.request_sequence = queued.request.request_sequence;
+      computed.queue_delay_ms = std::chrono::duration<double, std::milli>(
+        started - queued.submitted).count();
+      computed.compute_duration_ms = std::chrono::duration<double, std::milli>(
+        finished - started).count();
+
+      {
+        std::lock_guard<std::mutex> lock(mutex);
+        const bool canceled = canceled_parents.count(
+          queued.request.parent_trajectory_id) > 0;
+        const bool superseded = pending &&
+          pending->request.parent_trajectory_id ==
+            queued.request.parent_trajectory_id &&
+          pending->request.request_sequence > queued.request.request_sequence;
+        if (!canceled && !superseded)
+        {
+          result = std::move(computed);
+        }
+        inflight_parent = 0;
+        inflight_sequence = 0;
+        inflight_cancel_token.reset();
+      }
+    }
+  }
+};
+
+P4SuccessorPreparationWorker::P4SuccessorPreparationWorker()
+: impl_(std::make_unique<Impl>())
+{
+}
+
+P4SuccessorPreparationWorker::~P4SuccessorPreparationWorker()
+{
+  if (!impl_) return;
+  {
+    std::lock_guard<std::mutex> lock(impl_->mutex);
+    impl_->stopping = true;
+    if (impl_->inflight_cancel_token)
+      impl_->inflight_cancel_token->store(true, std::memory_order_relaxed);
+    if (impl_->pending && impl_->pending->request.cancel_token)
+      impl_->pending->request.cancel_token->store(
+          true, std::memory_order_relaxed);
+    impl_->pending.reset();
+  }
+  impl_->condition.notify_all();
+  if (impl_->thread.joinable()) impl_->thread.join();
+}
+
+bool P4SuccessorPreparationWorker::submit(
+  P4SuccessorPreparationRequest request)
+{
+  if (!request.valid()) return false;
+  if (!request.cancel_token)
+    request.cancel_token = std::make_shared<std::atomic<bool>>(false);
+  {
+    std::lock_guard<std::mutex> lock(impl_->mutex);
+    if (impl_->stopping) return false;
+    if (impl_->pending)
+    {
+      if (impl_->pending->request.cancel_token)
+        impl_->pending->request.cancel_token->store(
+            true, std::memory_order_relaxed);
+      ++impl_->pending_overwrite_count;
+    }
+    impl_->canceled_parents.erase(request.parent_trajectory_id);
+    impl_->pending = Impl::Queued{
+      std::move(request), std::chrono::steady_clock::now()};
+  }
+  impl_->condition.notify_one();
+  return true;
+}
+
+std::optional<P4SuccessorPreparationResult>
+P4SuccessorPreparationWorker::poll(const int expected_parent_trajectory_id)
+{
+  std::lock_guard<std::mutex> lock(impl_->mutex);
+  if (!impl_->result) return std::nullopt;
+  P4SuccessorPreparationResult result = std::move(*impl_->result);
+  impl_->result.reset();
+  if (result.parent_trajectory_id != expected_parent_trajectory_id)
+    return std::nullopt;
+  return result;
+}
+
+bool P4SuccessorPreparationWorker::busyFor(
+  const int parent_trajectory_id) const
+{
+  std::lock_guard<std::mutex> lock(impl_->mutex);
+  return impl_->inflight_parent == parent_trajectory_id ||
+    (impl_->pending &&
+      impl_->pending->request.parent_trajectory_id == parent_trajectory_id);
+}
+
+void P4SuccessorPreparationWorker::cancelParent(
+  const int parent_trajectory_id)
+{
+  std::lock_guard<std::mutex> lock(impl_->mutex);
+  impl_->canceled_parents.insert(parent_trajectory_id);
+  if (impl_->inflight_parent == parent_trajectory_id &&
+      impl_->inflight_cancel_token)
+    impl_->inflight_cancel_token->store(true, std::memory_order_relaxed);
+  if (impl_->pending &&
+    impl_->pending->request.parent_trajectory_id == parent_trajectory_id)
+  {
+    if (impl_->pending->request.cancel_token)
+      impl_->pending->request.cancel_token->store(
+          true, std::memory_order_relaxed);
+    impl_->pending.reset();
+  }
+  if (impl_->result &&
+    impl_->result->parent_trajectory_id == parent_trajectory_id)
+  {
+    impl_->result.reset();
+  }
+}
+
+std::uint64_t P4SuccessorPreparationWorker::pendingOverwriteCount() const
+{
+  std::lock_guard<std::mutex> lock(impl_->mutex);
+  return impl_->pending_overwrite_count;
 }
 
 struct P4ForwardDecisionWorker::Impl

@@ -168,8 +168,19 @@ For each candidate trajectory τ:
   the remaining curve is still checked at its future positions and times.
   A valid limited prefix is not replaced for ordinary worker/generation churn:
   after a one-second minimum commitment, a replacement must extend the safe
-  common endpoint by at least 0.5 m without worsening its direct-risk maximum.
-  The successor is prepared while the current prefix executes and is published
+  common endpoint far enough to cover the next command-switch, successor
+  generation and two direct-authorization intervals, plus a stability margin
+  (with a small jitter floor). The successor has an independent, single-slot
+  route-guide deadline lane: it starts preparing as soon as the parent is committed, while
+  the default 1.5 s value remains the latest allowed start. An early result is
+  held until the fixed endpoint-minus-switch-margin anchor (and never before
+  the one-second commitment). It first warm-starts from the committed channel
+  and guide; only a geometry, clearance or corridor failure permits one
+  bounded full-channel fallback. Ordinary P4 rate limiting does not apply.
+  The prepared guide is not authority: final B-spline optimization, braking
+  coverage, direct risk and P5 remain on the planner thread at handoff.
+  Shared-corridor risk must not worsen and the extension is independently
+  certified. The successor is published
   only if parent identity, switch window, position/velocity/acceleration
   boundary state and current direct authority still match; otherwise the old
   prefix continues to its endpoint.
