@@ -48,6 +48,18 @@ struct P4RiskAStarConfig
 		iap::RiskCostQueryPolicy::LEGACY_STRICT;
 };
 
+enum class P4AStarFailureKind
+{
+	NONE = 0,
+	INVALID_INPUT,
+	START_OUTSIDE_POOL,
+	END_OUTSIDE_POOL,
+	START_BLOCKED,
+	END_BLOCKED,
+	TIMEOUT,
+	NO_PATH,
+};
+
 struct P4AStarMetrics
 {
 	double original_path_length = 0.0;
@@ -67,6 +79,32 @@ struct P4AStarMetrics
 	double provider_integral = 0.0;
 	int provider_incomplete_reject_count = 0;
 	int time_state_count = 0;
+	// Endpoint/pool evidence is populated before graph expansion so callers can
+	// distinguish an invalid search contract from a genuinely disconnected
+	// free-space graph.
+	Eigen::Vector3d original_start = Eigen::Vector3d::Constant(
+		std::numeric_limits<double>::quiet_NaN());
+	Eigen::Vector3d original_end = Eigen::Vector3d::Constant(
+		std::numeric_limits<double>::quiet_NaN());
+	Eigen::Vector3d adjusted_start = Eigen::Vector3d::Constant(
+		std::numeric_limits<double>::quiet_NaN());
+	Eigen::Vector3d adjusted_end = Eigen::Vector3d::Constant(
+		std::numeric_limits<double>::quiet_NaN());
+	Eigen::Vector3i start_index = Eigen::Vector3i::Constant(-1);
+	Eigen::Vector3i end_index = Eigen::Vector3i::Constant(-1);
+	Eigen::Vector3i pool_size = Eigen::Vector3i::Zero();
+	Eigen::Vector3d searchable_world_min = Eigen::Vector3d::Constant(
+		std::numeric_limits<double>::quiet_NaN());
+	Eigen::Vector3d searchable_world_max = Eigen::Vector3d::Constant(
+		std::numeric_limits<double>::quiet_NaN());
+	Eigen::Vector3d nearest_reachable_frontier = Eigen::Vector3d::Constant(
+		std::numeric_limits<double>::quiet_NaN());
+	double nearest_reachable_frontier_distance_m =
+		std::numeric_limits<double>::infinity();
+	int start_adjustment_steps = 0;
+	int end_adjustment_steps = 0;
+	int boundary_reject_count = 0;
+	P4AStarFailureKind failure_kind = P4AStarFailureKind::NONE;
 };
 
 constexpr double inf = 1 >> 20;
@@ -223,9 +261,8 @@ inline bool AStar::Coord2Index(const Eigen::Vector3d &pt, Eigen::Vector3i &idx) 
 {
 	idx = ((pt - center_) * inv_step_size_ + Eigen::Vector3d(0.5, 0.5, 0.5)).cast<int>() + CENTER_IDX_;
 
-	// The outermost layer is a sentinel used by neighbor expansion.  Accepting an
-	// endpoint there would either make it unreachable or let a start node escape
-	// the searchable lattice, so endpoint conversion must require an interior cell.
+	// The outermost layer is a sentinel used by neighbor expansion. Accepting
+	// an endpoint there makes it unreachable even though conversion succeeded.
 	if (idx(0) <= 0 || idx(0) >= POOL_SIZE_(0) - 1 ||
 	    idx(1) <= 0 || idx(1) >= POOL_SIZE_(1) - 1 ||
 	    idx(2) <= 0 || idx(2) >= POOL_SIZE_(2) - 1)

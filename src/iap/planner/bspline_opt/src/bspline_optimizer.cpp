@@ -221,6 +221,89 @@ namespace ego_planner
 
   } // namespace
 
+  P4ForwardReplayQueries p4ForwardReplayQueriesFromCrop(
+      const P4ForwardRefinementResult &result,
+      const double planning_clearance_buffer_m)
+  {
+    P4ForwardReplayQueries replay;
+    const auto dimensions = result.replay_crop_dimensions;
+    const std::size_t expected_cells =
+        (dimensions.array() > 0).all()
+        ? static_cast<std::size_t>(dimensions.x()) *
+              static_cast<std::size_t>(dimensions.y()) *
+              static_cast<std::size_t>(dimensions.z())
+        : 0u;
+    if (!result.replay_crop_origin.allFinite() ||
+        !std::isfinite(result.replay_crop_resolution_m) ||
+        result.replay_crop_resolution_m <= 0.0 || expected_cells == 0u ||
+        result.replay_crop_cell_flags.size() != expected_cells ||
+        result.replay_crop_hash.empty() ||
+        !std::isfinite(planning_clearance_buffer_m) ||
+        planning_clearance_buffer_m < 0.0)
+    {
+      replay.reason = "invalid_replay_crop";
+      return replay;
+    }
+    const Eigen::Vector3d origin = result.replay_crop_origin;
+    const double resolution = result.replay_crop_resolution_m;
+    const auto flags = result.replay_crop_cell_flags;
+    const auto lookup = [origin, dimensions, resolution, flags](
+                            const Eigen::Vector3d &point)
+        -> std::optional<std::uint8_t> {
+      if (!point.allFinite()) return std::nullopt;
+      const Eigen::Array3d coordinates = (point - origin).array() / resolution;
+      const Eigen::Vector3i index = coordinates.round().cast<int>().matrix();
+      if ((index.array() < 0).any() ||
+          (index.array() >= dimensions.array()).any())
+        return std::nullopt;
+      const std::size_t linear =
+          (static_cast<std::size_t>(index.x()) * dimensions.y() +
+           static_cast<std::size_t>(index.y())) * dimensions.z() +
+          static_cast<std::size_t>(index.z());
+      return flags[linear];
+    };
+    replay.occupancy = [lookup](const Eigen::Vector3d &point) {
+      GridMapOccupancyDiagnostic diagnostic;
+      const auto flags_at_point = lookup(point);
+      if (!flags_at_point) return diagnostic;
+      diagnostic.available = (*flags_at_point & 0x01u) != 0u;
+      diagnostic.observed = diagnostic.available;
+      diagnostic.raw_occupied = (*flags_at_point & 0x02u) != 0u;
+      diagnostic.inflated_occupied = (*flags_at_point & 0x04u) != 0u;
+      diagnostic.state =
+          diagnostic.raw_occupied || diagnostic.inflated_occupied
+          ? GridMapObservationState::OCCUPIED
+          : (diagnostic.available
+              ? GridMapObservationState::OBSERVED_FREE
+              : GridMapObservationState::UNKNOWN);
+      return diagnostic;
+    };
+    replay.clearance = [lookup, planning_clearance_buffer_m](
+                           const Eigen::Vector3d &point) {
+      P4ForwardClearanceSample sample;
+      const auto flags_at_point = lookup(point);
+      if (!flags_at_point) {
+        sample.reason = "outside_replay_crop";
+        return sample;
+      }
+      sample.available = (*flags_at_point & 0x20u) != 0u;
+      if (!sample.available)
+      {
+        sample.reason = "clearance_unavailable_in_replay_crop";
+        return sample;
+      }
+      sample.signed_margin_m = (*flags_at_point & 0x08u) != 0u
+          ? std::max(0.0, planning_clearance_buffer_m - 1.0e-3)
+          : planning_clearance_buffer_m + 1.0e-3;
+      sample.nearest_obstacle_position = point;
+      sample.reason = sample.available ? "replay_crop" : "crop_unavailable";
+      return sample;
+    };
+    replay.valid = true;
+    replay.reason = "ok";
+    return replay;
+  }
+
 
   void BsplineOptimizer::setParam(rclcpp::Node::SharedPtr node)
   {
@@ -612,7 +695,8 @@ namespace ego_planner
       const double corridor_radius_m,
       const double compute_budget_ms,
       P4ForwardClearanceQuery clearance_query,
-      const double planning_clearance_buffer_m)
+      const double planning_clearance_buffer_m,
+      const double minimum_stopping_progress_m)
   {
     const auto started = std::chrono::steady_clock::now();
     P4ForwardRefinementResult result;
@@ -636,7 +720,9 @@ namespace ego_planner
         corridor_radius_m <= 0.0 || !std::isfinite(compute_budget_ms) ||
         compute_budget_ms <= 0.0 ||
         !std::isfinite(planning_clearance_buffer_m) ||
-        planning_clearance_buffer_m < 0.0)
+        planning_clearance_buffer_m < 0.0 ||
+        !std::isfinite(minimum_stopping_progress_m) ||
+        minimum_stopping_progress_m < 0.0)
       return finish(P4ForwardRefinementStatus::INVALID_INPUT);
     const auto deadline = std::chrono::steady_clock::now() +
         std::chrono::duration_cast<std::chrono::steady_clock::duration>(
@@ -644,6 +730,9 @@ namespace ego_planner
     bool deadline_hit = false;
     bool occupancy_unavailable = false;
     bool clearance_unavailable = false;
+    int raw_occupied_reject_count = 0;
+    int inflated_occupied_reject_count = 0;
+    int clearance_reject_count = 0;
     const auto clearance_at = [&clearance_query, &clearance_unavailable](
         const Eigen::Vector3d & point) -> std::optional<P4ForwardClearanceSample>
       {
@@ -659,7 +748,9 @@ namespace ego_planner
     const auto deadline_query =
         [query = frozen_occupancy_query, deadline, &deadline_hit,
          &occupancy_unavailable, &clearance_at,
-         &clearance_unavailable, planning_clearance_buffer_m](
+         &clearance_unavailable, &raw_occupied_reject_count,
+         &inflated_occupied_reject_count, &clearance_reject_count,
+         planning_clearance_buffer_m](
             const Eigen::Vector3d &point)
         {
           if (std::chrono::steady_clock::now() >= deadline) {
@@ -669,6 +760,10 @@ namespace ego_planner
           auto diagnostic = query(point);
           occupancy_unavailable = occupancy_unavailable ||
               !diagnostic.available;
+          if (diagnostic.raw_occupied)
+            ++raw_occupied_reject_count;
+          if (diagnostic.inflated_occupied && !diagnostic.raw_occupied)
+            ++inflated_occupied_reject_count;
           // Forward-route refinement follows EGO's hit-only geometry
           // contract. Observation coverage is risk evidence, not a
           // collision. Only an unavailable/out-of-bounds query or a raw /
@@ -682,6 +777,7 @@ namespace ego_planner
               if (clearance->signed_margin_m + 1.0e-9 <
                   planning_clearance_buffer_m)
               {
+                ++clearance_reject_count;
                 diagnostic.inflated_occupied = true;
                 diagnostic.state = GridMapObservationState::OCCUPIED;
                 return diagnostic;
@@ -697,25 +793,212 @@ namespace ego_planner
           }
           return diagnostic;
         };
-    Eigen::Vector3d minimum = coarse_guide.front();
-    Eigen::Vector3d maximum = coarse_guide.front();
-    for (const auto &point : coarse_guide)
+    constexpr double kFineResolutionM = 0.1;
+    constexpr double kClearPathSampleM = 0.05;
+    constexpr double kMinimumSuffixProgressM = 0.10;
+    std::vector<Eigen::Vector3d> working_guide = coarse_guide;
+    result.original_suffix_target = coarse_guide.back();
+    result.effective_suffix_target = coarse_guide.back();
+    const auto capture_replay_crop =
+        [&](const Eigen::Vector3d &from, const Eigen::Vector3d &to) {
+          const bool searchable_bounds_valid =
+              result.astar_searchable_world_min.allFinite() &&
+              result.astar_searchable_world_max.allFinite() &&
+              (result.astar_searchable_world_max.array() >=
+               result.astar_searchable_world_min.array()).all();
+          const Eigen::Vector3d crop_min = searchable_bounds_valid
+              ? result.astar_searchable_world_min
+              : from.cwiseMin(to) -
+                    Eigen::Vector3d::Constant(corridor_radius_m);
+          const Eigen::Vector3d crop_max = searchable_bounds_valid
+              ? result.astar_searchable_world_max
+              : from.cwiseMax(to) +
+                    Eigen::Vector3d::Constant(corridor_radius_m);
+          const Eigen::Vector3i dimensions =
+              ((crop_max - crop_min) / kFineResolutionM).array().ceil()
+                  .cast<int>().matrix() + Eigen::Vector3i::Ones();
+          if ((dimensions.array() <= 0).any()) return;
+          const std::size_t cell_count =
+              static_cast<std::size_t>(dimensions.x()) *
+              static_cast<std::size_t>(dimensions.y()) *
+              static_cast<std::size_t>(dimensions.z());
+          // A local failure crop is diagnostic evidence, not another global
+          // map. Bound it defensively so an invalid request cannot amplify a
+          // failure into unbounded memory use.
+          if (cell_count == 0u || cell_count > 100000u) return;
+          result.replay_crop_origin = crop_min;
+          result.replay_crop_dimensions = dimensions;
+          result.replay_crop_resolution_m = kFineResolutionM;
+          result.replay_crop_cell_flags.clear();
+          result.replay_crop_cell_flags.reserve(cell_count);
+          const Eigen::Vector3d segment = to - from;
+          const double squared_length = segment.squaredNorm();
+          std::uint64_t hash = 1469598103934665603ULL;
+          std::size_t visited_cells = 0u;
+          for (int x = 0; x < dimensions.x(); ++x)
+            for (int y = 0; y < dimensions.y(); ++y)
+              for (int z = 0; z < dimensions.z(); ++z)
+              {
+                if ((visited_cells++ & 0x3fu) == 0u &&
+                    std::chrono::steady_clock::now() >= deadline)
+                {
+                  result.replay_crop_cell_flags.clear();
+                  result.replay_crop_hash.clear();
+                  return;
+                }
+                const Eigen::Vector3d point = crop_min +
+                    kFineResolutionM * Eigen::Vector3d(x, y, z);
+                const auto occupancy = frozen_occupancy_query(point);
+                std::uint8_t flags = occupancy.available ? 0x01u : 0x00u;
+                if (occupancy.raw_occupied) flags |= 0x02u;
+                if (occupancy.inflated_occupied) flags |= 0x04u;
+                if (clearance_query)
+                {
+                  const auto clearance = clearance_query(point);
+                  if (clearance.available &&
+                      std::isfinite(clearance.signed_margin_m))
+                  {
+                    flags |= 0x20u;
+                    if (clearance.signed_margin_m + 1.0e-9 <
+                        planning_clearance_buffer_m)
+                      flags |= 0x08u;
+                  }
+                }
+                const double alpha = squared_length > 1.0e-12
+                    ? std::clamp((point - from).dot(segment) /
+                                     squared_length, 0.0, 1.0)
+                    : 0.0;
+                if ((point - (from + alpha * segment)).norm() >
+                    corridor_radius_m + 1.0e-9)
+                  flags |= 0x10u;
+                result.replay_crop_cell_flags.push_back(flags);
+                hash ^= flags;
+                hash *= 1099511628211ULL;
+              }
+          std::ostringstream identity;
+          identity << std::hex << hash << ':' << dimensions.x() << 'x'
+                   << dimensions.y() << 'x' << dimensions.z() << std::dec
+                   << ':' << std::setprecision(17) << crop_min.x() << '/'
+                   << crop_min.y() << '/' << crop_min.z() << ':'
+                   << kFineResolutionM;
+          result.replay_crop_hash = identity.str();
+        };
+
+    // A blocked suffix is not a request to push the goal farther away from
+    // the start. Select the farthest searchable point on the already
+    // approved suffix before allocating or invoking A*. This keeps endpoint
+    // adjustment inside the P4 corridor contract and gives a typed failure
+    // when the suffix offers no meaningful forward progress.
+    std::vector<double> cumulative_progress_m(working_guide.size(), 0.0);
+    for (std::size_t index = 1u; index < working_guide.size(); ++index)
+      cumulative_progress_m[index] = cumulative_progress_m[index - 1u] +
+          (working_guide[index] - working_guide[index - 1u]).norm();
+    const double original_guide_length_m = cumulative_progress_m.back();
+    const auto endpoint_usable = [&] (
+        const Eigen::Vector3d & point, const double progress_m) {
+        if (!std::isfinite(progress_m) ||
+            progress_m + 1.0e-9 < minimum_stopping_progress_m)
+          return false;
+        const auto occupancy = frozen_occupancy_query(point);
+        if (!occupancy.available)
+        {
+          occupancy_unavailable = true;
+          return false;
+        }
+        if (occupancy.raw_occupied)
+          ++raw_occupied_reject_count;
+        if (occupancy.inflated_occupied && !occupancy.raw_occupied)
+          ++inflated_occupied_reject_count;
+        if (occupancy.raw_occupied || occupancy.inflated_occupied ||
+            occupancy.state == GridMapObservationState::OCCUPIED)
+          return false;
+        if (clearance_query)
+        {
+          const auto clearance = clearance_at(point);
+          if (!clearance)
+            return false;
+          if (clearance->signed_margin_m + 1.0e-9 <
+              planning_clearance_buffer_m)
+          {
+            ++clearance_reject_count;
+            return false;
+          }
+        }
+        return true;
+      };
+    if (!endpoint_usable(working_guide.back(), original_guide_length_m))
+    {
+      const Eigen::Vector3d target = working_guide.back();
+      bool found = false;
+      // Walk the complete candidate suffix backwards, not only its final
+      // segment. A terminal segment can be fully blocked while an earlier
+      // point still provides meaningful, stoppable forward progress.
+      for (std::size_t reverse_segment = working_guide.size() - 1u;
+           reverse_segment > 0u && !found; --reverse_segment)
+      {
+        const std::size_t segment_start = reverse_segment - 1u;
+        const Eigen::Vector3d from = working_guide[segment_start];
+        const Eigen::Vector3d to = working_guide[reverse_segment];
+        const double segment_length = (to - from).norm();
+        const int sample_count = std::max(
+            1, static_cast<int>(std::ceil(segment_length /
+                                         kClearPathSampleM)));
+        for (int sample = sample_count - 1; sample >= 1; --sample)
+        {
+          if (std::chrono::steady_clock::now() >= deadline)
+            return finish(P4ForwardRefinementStatus::BUDGET_EXHAUSTED,
+                          segment_start, target);
+          const double alpha = static_cast<double>(sample) / sample_count;
+          const Eigen::Vector3d candidate = from + (to - from) * alpha;
+          const double progress_m = cumulative_progress_m[segment_start] +
+              alpha * segment_length;
+          if (progress_m + 1.0e-9 < kMinimumSuffixProgressM ||
+              !endpoint_usable(candidate, progress_m))
+            continue;
+          working_guide.resize(reverse_segment + 1u);
+          working_guide.back() = candidate;
+          result.effective_suffix_target = candidate;
+          result.target_suffix_backoff_m =
+              original_guide_length_m - progress_m;
+          found = true;
+          break;
+        }
+      }
+      if (!found)
+      {
+        result.raw_occupied_reject_count = raw_occupied_reject_count;
+        result.inflated_occupied_reject_count =
+            inflated_occupied_reject_count;
+        result.clearance_reject_count = clearance_reject_count;
+        capture_replay_crop(working_guide.front(), target);
+        if (occupancy_unavailable)
+          return finish(P4ForwardRefinementStatus::OCCUPANCY_UNAVAILABLE,
+                        working_guide.size() - 2u, target);
+        if (clearance_unavailable)
+          return finish(P4ForwardRefinementStatus::CLEARANCE_UNAVAILABLE,
+                        working_guide.size() - 2u, target);
+        return finish(P4ForwardRefinementStatus::TARGET_SUFFIX_BLOCKED,
+                      working_guide.size() - 2u, target);
+      }
+    }
+
+    Eigen::Vector3d minimum = working_guide.front();
+    Eigen::Vector3d maximum = working_guide.front();
+    for (const auto &point : working_guide)
     {
       if (!point.allFinite())
         return finish(P4ForwardRefinementStatus::INVALID_INPUT);
       minimum = minimum.cwiseMin(point);
       maximum = maximum.cwiseMax(point);
     }
-    constexpr double kFineResolutionM = 0.1;
-    constexpr double kClearPathSampleM = 0.05;
-    std::vector<bool> segment_has_collision(coarse_guide.size() - 1u, false);
+    std::vector<bool> segment_has_collision(working_guide.size() - 1u, false);
     std::vector<Eigen::Vector3d> clear_path;
-    clear_path.push_back(coarse_guide.front());
+    clear_path.push_back(working_guide.front());
     bool any_collision = false;
-    for (std::size_t segment = 1; segment < coarse_guide.size(); ++segment)
+    for (std::size_t segment = 1; segment < working_guide.size(); ++segment)
     {
-      const Eigen::Vector3d from = coarse_guide[segment - 1];
-      const Eigen::Vector3d to = coarse_guide[segment];
+      const Eigen::Vector3d from = working_guide[segment - 1];
+      const Eigen::Vector3d to = working_guide[segment];
       const double length = (to - from).norm();
       const int sample_count = std::max(
           1, static_cast<int>(std::ceil(length / kClearPathSampleM)));
@@ -785,6 +1068,10 @@ namespace ego_planner
     const Eigen::Vector3d search_extent =
         maximum - minimum +
         Eigen::Vector3d::Constant(2.0 * corridor_radius_m);
+    result.corridor_world_min =
+        minimum - Eigen::Vector3d::Constant(corridor_radius_m);
+    result.corridor_world_max =
+        maximum + Eigen::Vector3d::Constant(corridor_radius_m);
     const Eigen::Vector3i pool_size =
         (search_extent / kFineResolutionM).array().ceil().cast<int>().matrix() +
         Eigen::Vector3i::Constant(8);
@@ -792,13 +1079,13 @@ namespace ego_planner
     fine_astar->initGridMap(
         grid_map_, pool_size.cwiseMax(Eigen::Vector3i::Constant(12)));
     fine_astar->setFrozenOccupancyQuery(deadline_query);
-    for (std::size_t segment = 1; segment < coarse_guide.size(); ++segment)
+    for (std::size_t segment = 1; segment < working_guide.size(); ++segment)
     {
       if (std::chrono::steady_clock::now() >= deadline)
         return finish(P4ForwardRefinementStatus::BUDGET_EXHAUSTED,
-                      segment - 1u, coarse_guide[segment - 1]);
-      const Eigen::Vector3d from = coarse_guide[segment - 1];
-      const Eigen::Vector3d to = coarse_guide[segment];
+                      segment - 1u, working_guide[segment - 1]);
+      const Eigen::Vector3d from = working_guide[segment - 1];
+      const Eigen::Vector3d to = working_guide[segment];
       if ((to - from).norm() <= 1.0e-6)
         continue;
       if (!segment_has_collision[segment - 1u])
@@ -809,18 +1096,72 @@ namespace ego_planner
         result.path.push_back(to);
         continue;
       }
-      if (!fine_astar->AstarSearchOriginal(kFineResolutionM, from, to))
+      const bool astar_success = fine_astar->AstarSearchOriginal(
+          kFineResolutionM, from, to);
+      const auto &metrics = fine_astar->getLastP4Metrics();
+      result.astar_original_start = metrics.original_start;
+      result.astar_original_end = metrics.original_end;
+      result.astar_adjusted_start = metrics.adjusted_start;
+      result.astar_adjusted_end = metrics.adjusted_end;
+      result.astar_start_index = metrics.start_index;
+      result.astar_end_index = metrics.end_index;
+      result.astar_pool_size = metrics.pool_size;
+      result.astar_searchable_world_min = metrics.searchable_world_min;
+      result.astar_searchable_world_max = metrics.searchable_world_max;
+      result.astar_nearest_reachable_frontier =
+          metrics.nearest_reachable_frontier;
+      result.astar_nearest_frontier_distance_m =
+          metrics.nearest_reachable_frontier_distance_m;
+      result.astar_start_adjustment_steps = metrics.start_adjustment_steps;
+      result.astar_end_adjustment_steps = metrics.end_adjustment_steps;
+      result.astar_boundary_reject_count = metrics.boundary_reject_count;
+      if (!astar_success)
       {
+        result.raw_occupied_reject_count = raw_occupied_reject_count;
+        result.inflated_occupied_reject_count =
+            inflated_occupied_reject_count;
+        result.clearance_reject_count = clearance_reject_count;
         if (deadline_hit || std::chrono::steady_clock::now() >= deadline)
           return finish(P4ForwardRefinementStatus::BUDGET_EXHAUSTED,
                         segment - 1u, from);
+        capture_replay_crop(from, to);
         if (occupancy_unavailable)
           return finish(P4ForwardRefinementStatus::OCCUPANCY_UNAVAILABLE,
                         segment - 1u, from);
         if (clearance_unavailable)
           return finish(P4ForwardRefinementStatus::CLEARANCE_UNAVAILABLE,
                         segment - 1u, from);
-        return finish(P4ForwardRefinementStatus::ASTAR_NO_PATH,
+        if (metrics.failure_kind == P4AStarFailureKind::END_BLOCKED)
+          return finish(P4ForwardRefinementStatus::TARGET_SUFFIX_BLOCKED,
+                        segment - 1u, metrics.adjusted_end);
+        if (metrics.failure_kind == P4AStarFailureKind::START_OUTSIDE_POOL ||
+            metrics.failure_kind == P4AStarFailureKind::END_OUTSIDE_POOL ||
+            metrics.failure_kind == P4AStarFailureKind::INVALID_INPUT)
+          return finish(
+              P4ForwardRefinementStatus::SEARCH_POOL_BOUNDS_INVALID,
+              segment - 1u, metrics.adjusted_end);
+        if (metrics.failure_kind == P4AStarFailureKind::TIMEOUT)
+          return finish(P4ForwardRefinementStatus::BUDGET_EXHAUSTED,
+                        segment - 1u, metrics.nearest_reachable_frontier);
+        // These classifications are only asserted when the failed search had
+        // one physical blocking family.  Merely touching an obstacle while
+        // exploring does not prove that obstacle disconnected the graph.
+        if (raw_occupied_reject_count > 0)
+        {
+          if (inflated_occupied_reject_count > 0 ||
+              clearance_reject_count > 0)
+            return finish(P4ForwardRefinementStatus::NO_PATH_UNCLASSIFIED,
+                          segment - 1u,
+                          metrics.nearest_reachable_frontier);
+          return finish(P4ForwardRefinementStatus::RAW_OCCUPANCY_CLOSED,
+                        segment - 1u, from);
+        }
+        if (inflated_occupied_reject_count > 0 ||
+            clearance_reject_count > 0)
+          return finish(
+              P4ForwardRefinementStatus::CLEARANCE_ENVELOPE_CLOSED,
+              segment - 1u, from);
+        return finish(P4ForwardRefinementStatus::NO_PATH_UNCLASSIFIED,
                       segment - 1u, from);
       }
       if (std::chrono::steady_clock::now() >= deadline)
@@ -841,7 +1182,7 @@ namespace ego_planner
             (point - from).dot(direction) / squared_length, 0.0, 1.0);
         const Eigen::Vector3d closest = from + alpha * direction;
         if ((point - closest).norm() > corridor_radius_m)
-          return finish(P4ForwardRefinementStatus::CORRIDOR_ESCAPE,
+          return finish(P4ForwardRefinementStatus::CORRIDOR_BOUNDARY_CLOSED,
                         segment - 1u, point);
         if (result.path.empty() ||
             (point - result.path.back()).norm() > 1.0e-6)

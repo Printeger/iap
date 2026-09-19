@@ -35,7 +35,13 @@ TEST(P4SuccessorDeadlinePolicy,
   ASSERT_TRUE(short_segment.valid);
   EXPECT_TRUE(short_segment.start_immediately);
   EXPECT_NEAR(short_segment.latest_prepare_start_s, 20.0, 1.0e-12);
-  EXPECT_NEAR(short_segment.planned_switch_time_s, 20.8, 1.0e-12);
+  EXPECT_NEAR(short_segment.planned_switch_time_s, 21.0, 1.0e-12);
+
+  const auto subsecond = ego_planner::computeP4SuccessorDeadline(
+    policy, 30.0, 30.6);
+  ASSERT_TRUE(subsecond.valid);
+  EXPECT_TRUE(subsecond.start_immediately);
+  EXPECT_NEAR(subsecond.planned_switch_time_s, 30.6, 1.0e-12);
 }
 
 TEST(P4SuccessorProgressPolicy,
@@ -247,6 +253,12 @@ TEST(P4SuccessorAssuranceFailure, MapsEvidenceReasonsBySpecificCause)
        Failure::COMPUTE_BUDGET_EXCEEDED},
       {"successor_switch_window_deadline_missed", Failure::DEADLINE_MISSED},
       {"successor_parent_identity_changed", Failure::PARENT_IDENTITY_CHANGED},
+      {"p5_preview_rejected:future_unknown", Failure::SUPPORT_INCOMPLETE},
+      {"p5_preview_rejected:future_bad", Failure::GNSS_LIMIT_EXCEEDED},
+      {"p5_preview_rejected:current_stale", Failure::INTEGRITY_STALE},
+      {"p5_preview_rejected:current_low_margin", Failure::INTEGRITY_UNSAFE},
+      {"p5_preview_rejected:snapshot_unavailable",
+       Failure::SNAPSHOT_REAUTH_SEMANTIC_CHANGE},
       {"actual_curve_gnss_risk_unsafe", Failure::GNSS_LIMIT_EXCEEDED},
       {"no_reusable_corridor", Failure::CORRIDOR_INVALID}};
   for (const auto & item : cases)
@@ -733,6 +745,16 @@ TEST(P4ForwardRoute, StoppingDistanceUsesApprovedPhysicalModel)
 }
 
 TEST(P4ForwardRoute,
+     SuccessorKinematicStoppingProgressDoesNotDoubleCountClearanceEnvelope)
+{
+  ego_planner::P4ForwardLimits limits;
+  EXPECT_NEAR(
+      ego_planner::p4KinematicStoppingProgress(3.0, limits), 6.6, 1.0e-9);
+  EXPECT_DOUBLE_EQ(
+      ego_planner::p4KinematicStoppingProgress(-1.0, limits), 0.0);
+}
+
+TEST(P4ForwardRoute,
      SuccessorFastPathReusesClearChannelWithoutTopologyEnumeration)
 {
   auto request = straightRequest();
@@ -1138,7 +1160,8 @@ TEST(P4ForwardRoute, RefinementFailureKeepsStructuredCause)
     const std::vector<Eigen::Vector3d> &, double, double)
     {
       ego_planner::P4ForwardRefinementResult result;
-      result.status = ego_planner::P4ForwardRefinementStatus::ASTAR_NO_PATH;
+      result.status =
+        ego_planner::P4ForwardRefinementStatus::RAW_OCCUPANCY_CLOSED;
       result.failed_segment_index = 3;
       result.failure_position = Eigen::Vector3d(2.0, 0.0, 1.0);
       return result;
@@ -1148,10 +1171,10 @@ TEST(P4ForwardRoute, RefinementFailureKeepsStructuredCause)
 
   EXPECT_EQ(decision.action, P4ForwardAction::REPLAN_REQUIRED);
   EXPECT_EQ(decision.reason,
-            "no_native_refined_candidate:astar_no_path=1");
+            "no_native_refined_candidate:raw_occupancy_closed=1");
   ASSERT_EQ(decision.refinement_diagnostics.size(), 1u);
   EXPECT_EQ(decision.refinement_diagnostics.front().status,
-            ego_planner::P4ForwardRefinementStatus::ASTAR_NO_PATH);
+            ego_planner::P4ForwardRefinementStatus::RAW_OCCUPANCY_CLOSED);
   EXPECT_EQ(decision.refinement_diagnostics.front().failed_segment_index, 3u);
 }
 
@@ -1952,6 +1975,41 @@ TEST(P4ForwardRoute, UnobservedRegionCannotCreateArtificialChannels)
   const auto decision = P4ForwardRoutePlanner().decide(request);
   EXPECT_EQ(decision.action, P4ForwardAction::CANDIDATE_READY);
   EXPECT_EQ(decision.candidates.size(), 1u);
+}
+
+TEST(P4ForwardRoute, SelectedGuideOwnsActualCurveTerminal)
+{
+  ego_planner::P4ForwardDecision decision;
+  decision.action = ego_planner::P4ForwardAction::CANDIDATE_READY;
+  decision.local_target = Eigen::Vector3d(100.0, 0.0, 1.0);
+  decision.selected_guide = {
+    Eigen::Vector3d(1.0, 0.0, 1.0),
+    Eigen::Vector3d(2.0, 0.25, 1.0),
+    Eigen::Vector3d(3.0, 0.5, 1.0)};
+
+  const auto terminal = ego_planner::p4SelectedGuideTerminal(decision);
+
+  ASSERT_TRUE(terminal.has_value());
+  EXPECT_TRUE(terminal->isApprox(decision.selected_guide.back()));
+  EXPECT_FALSE(terminal->isApprox(decision.local_target));
+}
+
+TEST(P4ForwardRoute, NonMotionDecisionHasNoSelectedGuideTerminal)
+{
+  ego_planner::P4ForwardDecision decision;
+  decision.action = ego_planner::P4ForwardAction::REPLAN_REQUIRED;
+  decision.selected_guide = {
+    Eigen::Vector3d::Zero(), Eigen::Vector3d::UnitX()};
+
+  EXPECT_FALSE(ego_planner::p4SelectedGuideTerminal(decision).has_value());
+}
+
+TEST(P4SuccessorFailure, BoundaryDiscontinuityIsDynamicsNotGnss)
+{
+  EXPECT_EQ(
+    ego_planner::p4SuccessorFailureFromReason(
+      "successor_boundary_state_discontinuous"),
+    ego_planner::P4SuccessorFailure::DYNAMICS_INVALID);
 }
 
 TEST(P4ForwardRoute, MultipleIncompleteChannelsHoldBeforeBranch)

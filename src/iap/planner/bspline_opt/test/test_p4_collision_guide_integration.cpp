@@ -905,9 +905,202 @@ TEST(P4CollisionGuideIntegration,
       coarse, occupied_epoch->diagnostic_query, 0.2, 100.0);
   EXPECT_FALSE(refinement.success());
   EXPECT_EQ(refinement.status,
-            ego_planner::P4ForwardRefinementStatus::ASTAR_NO_PATH);
+            ego_planner::P4ForwardRefinementStatus::
+                CLEARANCE_ENVELOPE_CLOSED);
+  EXPECT_GT(refinement.raw_occupied_reject_count +
+            refinement.inflated_occupied_reject_count, 0);
+  EXPECT_GT(refinement.astar_pool_size.x(), 0);
   EXPECT_TRUE(refinement.path.empty());
   EXPECT_TRUE(optimizer->a_star_->hasRiskSnapshot());
+}
+
+TEST(P4CollisionGuideIntegration,
+  ForwardGuideRefinementClassifiesRawObstacleClosureSeparately)
+{
+  const auto snapshot = makeSnapshot();
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureGuideFixture(map.get(), false);
+  auto optimizer = makeOptimizer(
+    map, snapshot, true, false, P4RiskObjective::PROVIDER_BOTTLENECK_V2);
+  const std::vector<Eigen::Vector3d> coarse = {
+    Eigen::Vector3d(-1.0, 0.0, 0.0),
+    Eigen::Vector3d(1.0, 0.0, 0.0)};
+  int live_query_count = 0;
+  const GridMapOccupancyDiagnosticQuery raw_wall =
+    [&live_query_count](const Eigen::Vector3d & point) {
+      ++live_query_count;
+      GridMapOccupancyDiagnostic diagnostic;
+      diagnostic.available = true;
+      diagnostic.observed = true;
+      const bool occupied = std::abs(point.x()) < 0.08;
+      diagnostic.raw_occupied = occupied;
+      diagnostic.state = occupied
+        ? GridMapObservationState::OCCUPIED
+        : GridMapObservationState::OBSERVED_FREE;
+      return diagnostic;
+    };
+
+  const auto refinement = optimizer->refineP4ForwardGuide(
+      coarse, raw_wall, 0.2, 100.0);
+
+  EXPECT_FALSE(refinement.success());
+  EXPECT_EQ(refinement.status,
+            ego_planner::P4ForwardRefinementStatus::RAW_OCCUPANCY_CLOSED);
+  EXPECT_GT(refinement.raw_occupied_reject_count, 0);
+  EXPECT_EQ(refinement.inflated_occupied_reject_count, 0);
+  EXPECT_FALSE(refinement.replay_crop_hash.empty());
+  EXPECT_TRUE((refinement.replay_crop_dimensions.array() > 0).all());
+  EXPECT_EQ(refinement.replay_crop_cell_flags.size(),
+            static_cast<std::size_t>(
+                refinement.replay_crop_dimensions.prod()));
+  EXPECT_TRUE(refinement.astar_searchable_world_min.allFinite());
+  EXPECT_TRUE(refinement.astar_searchable_world_max.allFinite());
+  EXPECT_NEAR((refinement.replay_crop_origin -
+               refinement.astar_searchable_world_min).norm(), 0.0, 1.0e-9);
+  const Eigen::Vector3d replay_crop_last =
+      refinement.replay_crop_origin +
+      refinement.replay_crop_resolution_m *
+          (refinement.replay_crop_dimensions - Eigen::Vector3i::Ones())
+              .cast<double>();
+  EXPECT_NEAR((replay_crop_last -
+               refinement.astar_searchable_world_max).norm(), 0.0, 1.0e-9);
+
+  const auto replay_queries = ego_planner::p4ForwardReplayQueriesFromCrop(
+      refinement, 0.05);
+  ASSERT_TRUE(replay_queries.valid) << replay_queries.reason;
+  const int live_queries_before_replay = live_query_count;
+  const auto replayed = optimizer->refineP4ForwardGuide(
+      coarse, replay_queries.occupancy, 0.2, 100.0);
+  EXPECT_EQ(live_query_count, live_queries_before_replay);
+  EXPECT_EQ(replayed.status, refinement.status);
+  EXPECT_EQ(replayed.replay_crop_hash, refinement.replay_crop_hash);
+  EXPECT_EQ(replayed.replay_crop_cell_flags,
+            refinement.replay_crop_cell_flags);
+}
+
+TEST(P4CollisionGuideIntegration,
+  ForwardGuideRefinementClassifiesClearanceEnvelopeClosure)
+{
+  const auto snapshot = makeSnapshot();
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureGuideFixture(map.get(), false);
+  const auto epoch = map->captureFrozenOccupancyEpoch();
+  ASSERT_NE(epoch, nullptr);
+  auto optimizer = makeOptimizer(
+    map, snapshot, true, false, P4RiskObjective::PROVIDER_BOTTLENECK_V2);
+  const std::vector<Eigen::Vector3d> coarse = {
+    Eigen::Vector3d(-1.0, 0.0, 0.0),
+    Eigen::Vector3d(1.0, 0.0, 0.0)};
+  const ego_planner::P4ForwardClearanceQuery clearance =
+    [](const Eigen::Vector3d & point) {
+      ego_planner::P4ForwardClearanceSample sample;
+      sample.available = true;
+      sample.signed_margin_m = std::abs(point.x()) < 0.35 ? 0.0 : 0.10;
+      sample.escape_direction = Eigen::Vector3d(0.0, 1.0, 0.0);
+      sample.nearest_obstacle_position = point;
+      sample.nearest_obstacle_identity = "clearance-slab";
+      return sample;
+    };
+
+  const auto refinement = optimizer->refineP4ForwardGuide(
+      coarse, epoch->diagnostic_query, 0.2, 100.0, clearance, 0.05);
+
+  EXPECT_FALSE(refinement.success());
+  EXPECT_EQ(refinement.status,
+            ego_planner::P4ForwardRefinementStatus::
+                CLEARANCE_ENVELOPE_CLOSED);
+  EXPECT_GT(refinement.clearance_reject_count, 0);
+  EXPECT_EQ(refinement.raw_occupied_reject_count, 0);
+  ASSERT_FALSE(refinement.replay_crop_hash.empty());
+  const auto replay_queries = ego_planner::p4ForwardReplayQueriesFromCrop(
+      refinement, 0.05);
+  ASSERT_TRUE(replay_queries.valid) << replay_queries.reason;
+  const auto replayed = optimizer->refineP4ForwardGuide(
+      coarse, replay_queries.occupancy, 0.2, 100.0,
+      replay_queries.clearance, 0.05);
+  EXPECT_EQ(replayed.status,
+            ego_planner::P4ForwardRefinementStatus::
+                CLEARANCE_ENVELOPE_CLOSED);
+  EXPECT_EQ(replayed.replay_crop_hash, refinement.replay_crop_hash);
+}
+
+TEST(P4CollisionGuideIntegration,
+  ReplayCropHonorsRefinementDeadlineWithoutChangingFailureClassification)
+{
+  const auto snapshot = makeSnapshot();
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureGuideFixture(map.get(), false);
+  auto optimizer = makeOptimizer(
+    map, snapshot, true, false, P4RiskObjective::PROVIDER_BOTTLENECK_V2);
+  const std::vector<Eigen::Vector3d> coarse = {
+    Eigen::Vector3d(-1.0, 0.0, 0.0),
+    Eigen::Vector3d(1.0, 0.0, 0.0)};
+  int query_count = 0;
+  const GridMapOccupancyDiagnosticQuery raw_wall =
+    [&query_count](const Eigen::Vector3d & point) {
+      ++query_count;
+      GridMapOccupancyDiagnostic diagnostic;
+      diagnostic.available = true;
+      diagnostic.observed = true;
+      diagnostic.raw_occupied = std::abs(point.x()) < 0.08;
+      diagnostic.state = diagnostic.raw_occupied
+        ? GridMapObservationState::OCCUPIED
+        : GridMapObservationState::OBSERVED_FREE;
+      return diagnostic;
+    };
+
+  const auto baseline = optimizer->refineP4ForwardGuide(
+      coarse, raw_wall, 0.2, 100.0);
+  ASSERT_EQ(baseline.status,
+            ego_planner::P4ForwardRefinementStatus::RAW_OCCUPANCY_CLOSED);
+  ASSERT_FALSE(baseline.replay_crop_hash.empty());
+
+  // A deliberately exhausted budget must stop before or during diagnostic
+  // crop capture.  Diagnostic work may disappear, but it must never turn a
+  // blocked route into a successful route or publish a partial crop.
+  const auto exhausted = optimizer->refineP4ForwardGuide(
+      coarse, raw_wall, 0.2, 0.001);
+  EXPECT_EQ(exhausted.status,
+            ego_planner::P4ForwardRefinementStatus::BUDGET_EXHAUSTED);
+  EXPECT_TRUE(exhausted.path.empty());
+  EXPECT_TRUE(exhausted.replay_crop_cell_flags.empty());
+  EXPECT_TRUE(exhausted.replay_crop_hash.empty());
+}
+
+TEST(P4CollisionGuideIntegration,
+  ReplayCropPreservesClearanceUnavailableClassification)
+{
+  const auto snapshot = makeSnapshot();
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureGuideFixture(map.get(), false);
+  const auto epoch = map->captureFrozenOccupancyEpoch();
+  ASSERT_NE(epoch, nullptr);
+  auto optimizer = makeOptimizer(
+    map, snapshot, true, false, P4RiskObjective::PROVIDER_BOTTLENECK_V2);
+  const std::vector<Eigen::Vector3d> coarse = {
+    Eigen::Vector3d(-1.0, 0.0, 0.0),
+    Eigen::Vector3d(1.0, 0.0, 0.0)};
+  const ego_planner::P4ForwardClearanceQuery unavailable_clearance =
+    [](const Eigen::Vector3d &) {
+      ego_planner::P4ForwardClearanceSample sample;
+      sample.reason = "fixture_clearance_unavailable";
+      return sample;
+    };
+
+  const auto refinement = optimizer->refineP4ForwardGuide(
+      coarse, epoch->diagnostic_query, 0.2, 100.0,
+      unavailable_clearance, 0.05);
+  ASSERT_EQ(refinement.status,
+            ego_planner::P4ForwardRefinementStatus::CLEARANCE_UNAVAILABLE);
+  ASSERT_FALSE(refinement.replay_crop_hash.empty());
+  const auto replay_queries = ego_planner::p4ForwardReplayQueriesFromCrop(
+      refinement, 0.05);
+  ASSERT_TRUE(replay_queries.valid) << replay_queries.reason;
+  const auto replayed = optimizer->refineP4ForwardGuide(
+      coarse, replay_queries.occupancy, 0.2, 100.0,
+      replay_queries.clearance, 0.05);
+  EXPECT_EQ(replayed.status,
+            ego_planner::P4ForwardRefinementStatus::CLEARANCE_UNAVAILABLE);
 }
 
 TEST(P4CollisionGuideIntegration,
@@ -971,6 +1164,117 @@ TEST(P4CollisionGuideIntegration,
   EXPECT_TRUE(std::any_of(
       refinement.path.begin(), refinement.path.end(),
       [](const Eigen::Vector3d & point) { return std::abs(point.y()) >= 0.30; }));
+}
+
+TEST(P4CollisionGuideIntegration,
+  ForwardGuideRefinementBacksOffBlockedSuffixBeforeStartingAStar)
+{
+  const auto snapshot = makeSnapshot();
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureGuideFixture(map.get(), false);
+  auto optimizer = makeOptimizer(
+    map, snapshot, true, false, P4RiskObjective::PROVIDER_BOTTLENECK_V2);
+  const std::vector<Eigen::Vector3d> coarse = {
+    Eigen::Vector3d(0.0, 0.0, 0.0),
+    Eigen::Vector3d(1.0, 0.0, 0.0)};
+  const GridMapOccupancyDiagnosticQuery blocked_suffix =
+    [](const Eigen::Vector3d & point) {
+      GridMapOccupancyDiagnostic diagnostic;
+      diagnostic.available = true;
+      diagnostic.observed = true;
+      const bool occupied = point.x() >= 0.90;
+      diagnostic.raw_occupied = occupied;
+      diagnostic.state = occupied
+        ? GridMapObservationState::OCCUPIED
+        : GridMapObservationState::OBSERVED_FREE;
+      return diagnostic;
+    };
+
+  const auto refinement = optimizer->refineP4ForwardGuide(
+      coarse, blocked_suffix, 0.30, 100.0);
+
+  ASSERT_TRUE(refinement.success()) << refinement.reason;
+  EXPECT_NEAR(refinement.original_suffix_target.x(), 1.0, 1.0e-9);
+  EXPECT_LT(refinement.effective_suffix_target.x(), 0.90);
+  EXPECT_GT(refinement.effective_suffix_target.x(), 0.10);
+  EXPECT_GT(refinement.target_suffix_backoff_m, 0.10);
+  EXPECT_NEAR(refinement.path.back().x(),
+              refinement.effective_suffix_target.x(), 1.0e-6);
+  // The suffix is repaired before A* allocation/search, so this clear
+  // shortened guide needs no A* pool at all.
+  EXPECT_EQ(refinement.astar_pool_size, Eigen::Vector3i::Zero());
+}
+
+TEST(P4CollisionGuideIntegration,
+  ForwardGuideRefinementBacksOffAcrossEarlierSuffixSegments)
+{
+  const auto snapshot = makeSnapshot();
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureGuideFixture(map.get(), false);
+  auto optimizer = makeOptimizer(
+    map, snapshot, true, false, P4RiskObjective::PROVIDER_BOTTLENECK_V2);
+  const std::vector<Eigen::Vector3d> coarse = {
+    Eigen::Vector3d(0.0, 0.0, 0.0),
+    Eigen::Vector3d(1.0, 0.0, 0.0),
+    Eigen::Vector3d(2.0, 0.0, 0.0)};
+  const GridMapOccupancyDiagnosticQuery blocked_terminal_segment =
+    [](const Eigen::Vector3d & point) {
+      GridMapOccupancyDiagnostic diagnostic;
+      diagnostic.available = true;
+      diagnostic.observed = true;
+      const bool occupied = point.x() >= 0.90;
+      diagnostic.raw_occupied = occupied;
+      diagnostic.state = occupied
+        ? GridMapObservationState::OCCUPIED
+        : GridMapObservationState::OBSERVED_FREE;
+      return diagnostic;
+    };
+
+  const auto refinement = optimizer->refineP4ForwardGuide(
+      coarse, blocked_terminal_segment, 0.30, 100.0, {}, 0.0, 0.50);
+
+  ASSERT_TRUE(refinement.success()) << refinement.reason;
+  EXPECT_NEAR(refinement.original_suffix_target.x(), 2.0, 1.0e-9);
+  EXPECT_LT(refinement.effective_suffix_target.x(), 0.90);
+  EXPECT_GT(refinement.effective_suffix_target.x(), 0.50);
+  EXPECT_GT(refinement.target_suffix_backoff_m, 1.10);
+  EXPECT_NEAR(refinement.path.back().x(),
+              refinement.effective_suffix_target.x(), 1.0e-6);
+}
+
+TEST(P4CollisionGuideIntegration,
+  BlockedWholeSuffixReportsTypedEvidenceAndReplayCrop)
+{
+  const auto snapshot = makeSnapshot();
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureGuideFixture(map.get(), false);
+  auto optimizer = makeOptimizer(
+    map, snapshot, true, false, P4RiskObjective::PROVIDER_BOTTLENECK_V2);
+  const std::vector<Eigen::Vector3d> coarse = {
+    Eigen::Vector3d(0.0, 0.0, 0.0),
+    Eigen::Vector3d(1.0, 0.0, 0.0),
+    Eigen::Vector3d(2.0, 0.0, 0.0)};
+  const GridMapOccupancyDiagnosticQuery blocked_suffix =
+    [](const Eigen::Vector3d & point) {
+      GridMapOccupancyDiagnostic diagnostic;
+      diagnostic.available = true;
+      diagnostic.observed = true;
+      const bool occupied = point.x() >= 0.10;
+      diagnostic.raw_occupied = occupied;
+      diagnostic.state = occupied
+        ? GridMapObservationState::OCCUPIED
+        : GridMapObservationState::OBSERVED_FREE;
+      return diagnostic;
+    };
+
+  const auto refinement = optimizer->refineP4ForwardGuide(
+      coarse, blocked_suffix, 0.30, 100.0, {}, 0.0, 0.50);
+
+  EXPECT_EQ(refinement.status,
+            ego_planner::P4ForwardRefinementStatus::TARGET_SUFFIX_BLOCKED);
+  EXPECT_GT(refinement.raw_occupied_reject_count, 0);
+  EXPECT_FALSE(refinement.replay_crop_hash.empty());
+  EXPECT_GT(refinement.replay_crop_cell_flags.size(), 0u);
 }
 
 // The collision-triggered P4 seam was removed. Forward-route tests now own

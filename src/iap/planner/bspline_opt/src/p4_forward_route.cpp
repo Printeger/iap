@@ -1848,9 +1848,14 @@ P4SuccessorDeadline computeP4SuccessorDeadline(
   result.start_immediately = unconstrained_start <= trajectory_start_s;
   result.latest_prepare_start_s = std::max(
     trajectory_start_s, unconstrained_start);
-  result.planned_switch_time_s = std::max(
-    trajectory_start_s,
-    trajectory_end_s - policy.control_switch_margin_s);
+  // A successor may be prepared immediately, but replacing a valid
+  // commitment is not allowed before it has executed for one second.  Keep
+  // the switch anchor inside the parent duration; sub-second parents simply
+  // reach their endpoint instead of being replaced early.
+  result.planned_switch_time_s = std::min(
+    trajectory_end_s,
+    std::max(trajectory_start_s + 1.0,
+      trajectory_end_s - policy.control_switch_margin_s));
   result.candidate_ready_deadline_s = std::max(
     trajectory_start_s,
     result.planned_switch_time_s -
@@ -1929,6 +1934,16 @@ P4SuccessorFailure p4SuccessorFailureFromReason(
   };
   // Specific evidence classes must precede the generic risk/assurance
   // fallback. Integrity and support failures often contain those words too.
+  if (contains("future_unknown"))
+    return P4SuccessorFailure::SUPPORT_INCOMPLETE;
+  if (contains("future_bad"))
+    return P4SuccessorFailure::GNSS_LIMIT_EXCEEDED;
+  if (contains("current_invalid") || contains("current_stale"))
+    return P4SuccessorFailure::INTEGRITY_STALE;
+  if (contains("current_low_margin") || contains("al_invalid"))
+    return P4SuccessorFailure::INTEGRITY_UNSAFE;
+  if (contains("snapshot_unavailable"))
+    return P4SuccessorFailure::SNAPSHOT_REAUTH_SEMANTIC_CHANGE;
   if (contains("local_clearance"))
     return P4SuccessorFailure::LOCAL_CLEARANCE_INSUFFICIENT;
   if (contains("braking"))
@@ -1951,7 +1966,7 @@ P4SuccessorFailure p4SuccessorFailureFromReason(
     return P4SuccessorFailure::SNAPSHOT_REAUTH_SEMANTIC_CHANGE;
   if (contains("collision") || contains("geometry"))
     return P4SuccessorFailure::COLLISION_CHANGED;
-  if (contains("dynamic"))
+  if (contains("dynamic") || contains("boundary_state_discontinuous"))
     return P4SuccessorFailure::DYNAMICS_INVALID;
   if (contains("progress"))
     return P4SuccessorFailure::PROGRESS_INSUFFICIENT;
@@ -1966,6 +1981,25 @@ P4SuccessorFailure p4SuccessorFailureFromReason(
   return P4SuccessorFailure::CORRIDOR_INVALID;
 }
 
+std::optional<Eigen::Vector3d> p4SelectedGuideTerminal(
+  const P4ForwardDecision & decision)
+{
+  if (decision.selected_guide.size() < 2u ||
+      !decision.selected_guide.front().allFinite() ||
+      !decision.selected_guide.back().allFinite())
+    return std::nullopt;
+  switch (decision.action)
+  {
+    case P4ForwardAction::CANDIDATE_READY:
+    case P4ForwardAction::RISK_SELECTED:
+    case P4ForwardAction::ADVISORY_SELECTED:
+    case P4ForwardAction::CONTINUE_NOMINAL:
+      return decision.selected_guide.back();
+    default:
+      return std::nullopt;
+  }
+}
+
 bool p4SuccessorGeometryFallbackAllowed(
   const P4ForwardDecision & decision)
 {
@@ -1976,6 +2010,12 @@ bool p4SuccessorGeometryFallbackAllowed(
       switch (diagnostic.status) {
         case P4ForwardRefinementStatus::COARSE_PATH_COLLISION:
         case P4ForwardRefinementStatus::ASTAR_NO_PATH:
+        case P4ForwardRefinementStatus::TARGET_SUFFIX_BLOCKED:
+        case P4ForwardRefinementStatus::SEARCH_POOL_BOUNDS_INVALID:
+        case P4ForwardRefinementStatus::RAW_OCCUPANCY_CLOSED:
+        case P4ForwardRefinementStatus::CLEARANCE_ENVELOPE_CLOSED:
+        case P4ForwardRefinementStatus::CORRIDOR_BOUNDARY_CLOSED:
+        case P4ForwardRefinementStatus::NO_PATH_UNCLASSIFIED:
         case P4ForwardRefinementStatus::ASTAR_INVALID_RESULT:
         case P4ForwardRefinementStatus::CORRIDOR_ESCAPE:
         case P4ForwardRefinementStatus::OUTPUT_TOO_SHORT:
@@ -2130,6 +2170,18 @@ const char *p4ForwardRefinementStatusName(
     case P4ForwardRefinementStatus::COARSE_PATH_COLLISION:
       return "coarse_path_collision";
     case P4ForwardRefinementStatus::ASTAR_NO_PATH: return "astar_no_path";
+    case P4ForwardRefinementStatus::TARGET_SUFFIX_BLOCKED:
+      return "target_suffix_blocked";
+    case P4ForwardRefinementStatus::SEARCH_POOL_BOUNDS_INVALID:
+      return "search_pool_bounds_invalid";
+    case P4ForwardRefinementStatus::RAW_OCCUPANCY_CLOSED:
+      return "raw_occupancy_closed";
+    case P4ForwardRefinementStatus::CLEARANCE_ENVELOPE_CLOSED:
+      return "clearance_envelope_closed";
+    case P4ForwardRefinementStatus::CORRIDOR_BOUNDARY_CLOSED:
+      return "corridor_boundary_closed";
+    case P4ForwardRefinementStatus::NO_PATH_UNCLASSIFIED:
+      return "no_path_unclassified";
     case P4ForwardRefinementStatus::ASTAR_INVALID_RESULT:
       return "astar_invalid_result";
     case P4ForwardRefinementStatus::CORRIDOR_ESCAPE:
@@ -2259,9 +2311,16 @@ double p4StoppingDistance(
   const double speed_mps, const P4ForwardLimits & limits)
 {
   const double speed = std::max(0.0, speed_mps);
-  return speed * limits.reaction_time_s +
-         speed * speed / (2.0 * limits.braking_accel_mps2) +
+  return p4KinematicStoppingProgress(speed, limits) +
          limits.vehicle_radius_m + limits.safety_margin_m;
+}
+
+double p4KinematicStoppingProgress(
+  const double speed_mps, const P4ForwardLimits & limits)
+{
+  const double speed = std::max(0.0, speed_mps);
+  return speed * limits.reaction_time_s +
+         speed * speed / (2.0 * limits.braking_accel_mps2);
 }
 
 bool p4CertifyForwardCandidate(

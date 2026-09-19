@@ -210,11 +210,47 @@ TEST(P4RiskAStarTest, EvenPoolRejectsSentinelEndpointInEitherDirection) {
   const Eigen::Vector3d positive_sentinel_endpoint(5.2, 0.0, 0.0);
   EXPECT_FALSE(astar.AstarSearchOriginal(
       0.1, negative_endpoint, positive_sentinel_endpoint));
-  EXPECT_EQ(astar.getLastP4Metrics().fallback_reason, "invalid_start_or_end");
+  EXPECT_EQ(astar.getLastP4Metrics().fallback_reason,
+            "invalid_start_or_end");
+  EXPECT_TRUE(astar.getLastP4Metrics().searchable_world_min.allFinite());
+  EXPECT_TRUE(astar.getLastP4Metrics().searchable_world_max.allFinite());
+  EXPECT_GT(positive_sentinel_endpoint.x(),
+            astar.getLastP4Metrics().searchable_world_max.x());
 
   EXPECT_FALSE(astar.AstarSearchOriginal(
       0.1, positive_sentinel_endpoint, negative_endpoint));
-  EXPECT_EQ(astar.getLastP4Metrics().fallback_reason, "invalid_start_or_end");
+  EXPECT_EQ(astar.getLastP4Metrics().fallback_reason,
+            "invalid_start_or_end");
+}
+
+TEST(P4RiskAStarTest, RecordedThirtySixCellPoolRejectsBoundaryBeforeOutwardAdjustment) {
+  auto map = std::make_shared<GridMap>();
+  AStar astar;
+  // initGridMap adds the three-cell guard on both sides, producing the exact
+  // 36x28x28 allocated pool from a 30x22x22 requested searchable extent.
+  astar.initGridMap(map, Eigen::Vector3i(30, 22, 22));
+  astar.setFrozenOccupancyQuery([](const Eigen::Vector3d& point) {
+    GridMapOccupancyDiagnostic diagnostic;
+    diagnostic.available = true;
+    diagnostic.observed = true;
+    const bool occupied = std::abs(point.x() + 12.849674) < 1.0e-6;
+    diagnostic.raw_occupied = occupied;
+    diagnostic.state = occupied ? GridMapObservationState::OCCUPIED
+                                : GridMapObservationState::OBSERVED_FREE;
+    return diagnostic;
+  });
+
+  // With the historical two-cell guard this boundary endpoint was accepted,
+  // then pushed from index 35 to the invalid index 36. The searchable
+  // interior now rejects index 35 before any outward adjustment is attempted.
+  EXPECT_FALSE(astar.AstarSearchOriginal(
+      0.1, Eigen::Vector3d(-16.249674, 0.000123, 1.499789),
+      Eigen::Vector3d(-12.849674, 0.000123, 1.499789)));
+  const auto& metrics = astar.getLastP4Metrics();
+  EXPECT_EQ(metrics.pool_size, Eigen::Vector3i(36, 28, 28));
+  EXPECT_EQ(metrics.end_index, Eigen::Vector3i(35, 14, 14));
+  EXPECT_EQ(metrics.end_adjustment_steps, 0);
+  EXPECT_EQ(metrics.fallback_reason, "invalid_start_or_end");
 }
 
 TEST(P4RiskAStarTest, OccupiedBoundaryEndpointCanAdjustOutwardOneCell) {
@@ -241,6 +277,33 @@ TEST(P4RiskAStarTest, OccupiedBoundaryEndpointCanAdjustOutwardOneCell) {
 
   ASSERT_FALSE(path.empty());
   EXPECT_NEAR(path.back().x(), 5.1, 1.0e-9);
+  EXPECT_EQ(astar.getLastP4Metrics().end_adjustment_steps, 1);
+}
+
+TEST(P4RiskAStarTest, BlockedEndpointAdjustmentIsBoundedAndTyped) {
+  auto map = std::make_shared<GridMap>();
+  AStar astar;
+  astar.initGridMap(map, Eigen::Vector3i(32, 24, 24));
+  astar.setFrozenOccupancyQuery([](const Eigen::Vector3d& point) {
+    GridMapOccupancyDiagnostic diagnostic;
+    const bool occupied = point.x() >= 1.15;
+    diagnostic.available = true;
+    diagnostic.observed = true;
+    diagnostic.state = occupied ? GridMapObservationState::OCCUPIED
+                                : GridMapObservationState::OBSERVED_FREE;
+    diagnostic.inflated_occupied = occupied;
+    return diagnostic;
+  });
+
+  EXPECT_FALSE(astar.AstarSearchOriginal(
+      0.1, Eigen::Vector3d(-1.2, 0.0, 0.0),
+      Eigen::Vector3d(1.2, 0.0, 0.0)));
+  const auto& metrics = astar.getLastP4Metrics();
+  EXPECT_EQ(metrics.fallback_reason,
+            "end_point_blocked_after_bounded_adjustment");
+  EXPECT_EQ(metrics.end_adjustment_steps, 1);
+  EXPECT_TRUE(metrics.original_end.allFinite());
+  EXPECT_TRUE(metrics.adjusted_end.allFinite());
 }
 
 TEST(P4RiskAStarTest, V2CostUsesBottleneckThenIntegralThenLength) {

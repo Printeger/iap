@@ -32,6 +32,21 @@ namespace iap
 namespace ego_planner
 {
 
+  struct P4ForwardReplayQueries
+  {
+    bool valid = false;
+    GridMapOccupancyDiagnosticQuery occupancy;
+    P4ForwardClearanceQuery clearance;
+    std::string reason = "not_evaluated";
+  };
+
+  // Reconstruct read-only occupancy and clearance queries using only the
+  // serialized local crop attached to a failed refinement. This is the CPU
+  // replay seam; it never consults the live GridMap.
+  P4ForwardReplayQueries p4ForwardReplayQueriesFromCrop(
+      const P4ForwardRefinementResult &result,
+      double planning_clearance_buffer_m);
+
   enum class CollisionScanStatus
   {
     NO_COLLISION,
@@ -469,7 +484,8 @@ namespace ego_planner
         double corridor_radius_m,
         double compute_budget_ms,
         P4ForwardClearanceQuery clearance_query = {},
-        double planning_clearance_buffer_m = 0.0);
+        double planning_clearance_buffer_m = 0.0,
+        double minimum_stopping_progress_m = 0.0);
 
     // optional inputs
     void setGuidePath(const vector<Eigen::Vector3d> &guide_pt);

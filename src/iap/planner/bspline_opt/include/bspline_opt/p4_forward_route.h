@@ -179,6 +179,12 @@ namespace ego_planner
     OCCUPANCY_UNAVAILABLE,
     COARSE_PATH_COLLISION,
     ASTAR_NO_PATH,
+    TARGET_SUFFIX_BLOCKED,
+    SEARCH_POOL_BOUNDS_INVALID,
+    RAW_OCCUPANCY_CLOSED,
+    CLEARANCE_ENVELOPE_CLOSED,
+    CORRIDOR_BOUNDARY_CLOSED,
+    NO_PATH_UNCLASSIFIED,
     ASTAR_INVALID_RESULT,
     CORRIDOR_ESCAPE,
     OUTPUT_TOO_SHORT,
@@ -202,6 +208,52 @@ namespace ego_planner
     Eigen::Vector3d escape_direction = Eigen::Vector3d::Zero();
     std::string nearest_obstacle_identity;
     std::string failed_curve_type = "guide";
+    Eigen::Vector3d astar_original_start = Eigen::Vector3d::Constant(
+      std::numeric_limits<double>::quiet_NaN());
+    Eigen::Vector3d astar_original_end = Eigen::Vector3d::Constant(
+      std::numeric_limits<double>::quiet_NaN());
+    Eigen::Vector3d astar_adjusted_start = Eigen::Vector3d::Constant(
+      std::numeric_limits<double>::quiet_NaN());
+    Eigen::Vector3d astar_adjusted_end = Eigen::Vector3d::Constant(
+      std::numeric_limits<double>::quiet_NaN());
+    Eigen::Vector3i astar_start_index = Eigen::Vector3i::Constant(-1);
+    Eigen::Vector3i astar_end_index = Eigen::Vector3i::Constant(-1);
+    Eigen::Vector3i astar_pool_size = Eigen::Vector3i::Zero();
+    Eigen::Vector3d astar_searchable_world_min =
+      Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN());
+    Eigen::Vector3d astar_searchable_world_max =
+      Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN());
+    Eigen::Vector3d astar_nearest_reachable_frontier =
+      Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN());
+    double astar_nearest_frontier_distance_m =
+      std::numeric_limits<double>::infinity();
+    Eigen::Vector3d corridor_world_min = Eigen::Vector3d::Constant(
+      std::numeric_limits<double>::quiet_NaN());
+    Eigen::Vector3d corridor_world_max = Eigen::Vector3d::Constant(
+      std::numeric_limits<double>::quiet_NaN());
+    int astar_start_adjustment_steps = 0;
+    int astar_end_adjustment_steps = 0;
+    int astar_boundary_reject_count = 0;
+    int raw_occupied_reject_count = 0;
+    int inflated_occupied_reject_count = 0;
+    int clearance_reject_count = 0;
+    Eigen::Vector3d original_suffix_target = Eigen::Vector3d::Constant(
+      std::numeric_limits<double>::quiet_NaN());
+    Eigen::Vector3d effective_suffix_target = Eigen::Vector3d::Constant(
+      std::numeric_limits<double>::quiet_NaN());
+    double target_suffix_backoff_m = 0.0;
+    // Compact frozen local crop used to deterministically replay a failed
+    // refinement. One byte per cell: bit0 occupancy available, bit1 raw
+    // occupied, bit2 inflated occupied, bit3 clearance blocked, bit4 outside
+    // corridor, bit5 clearance available. Keeping availability separate from
+    // blockage preserves failure classification in offline replay.
+    Eigen::Vector3d replay_crop_origin = Eigen::Vector3d::Constant(
+      std::numeric_limits<double>::quiet_NaN());
+    Eigen::Vector3i replay_crop_dimensions = Eigen::Vector3i::Zero();
+    double replay_crop_resolution_m =
+      std::numeric_limits<double>::quiet_NaN();
+    std::vector<std::uint8_t> replay_crop_cell_flags;
+    std::string replay_crop_hash;
     double elapsed_ms = 0.0;
     std::string reason = "not_evaluated";
 
@@ -588,7 +640,16 @@ namespace ego_planner
     std::string reason = "not_evaluated";
   };
 
+  // The selected guide is the geometric contract consumed by the actual
+  // terminal B-spline.  Its terminal point must therefore replace any stale
+  // FSM-local target captured before an asynchronous successor result was
+  // delivered.
+  std::optional<Eigen::Vector3d> p4SelectedGuideTerminal(
+    const P4ForwardDecision & decision);
+
   double p4StoppingDistance(double speed_mps, const P4ForwardLimits & limits);
+  double p4KinematicStoppingProgress(
+    double speed_mps, const P4ForwardLimits & limits);
   std::vector<Eigen::Vector3d> p4CommonGeometryPrefix(
     const std::vector<P4ForwardCandidate> & candidates, double resolution);
   bool p4ForwardDecisionMatchesRequest(

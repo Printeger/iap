@@ -17,6 +17,7 @@ using namespace Eigen;
 namespace
 {
 constexpr int kPoolGuardCellsPerSide = 3;
+constexpr int kMaximumEndpointAdjustmentSteps = 1;
 }
 
 bool p4V2CostLess(const P4V2LexicographicCost &lhs,
@@ -176,31 +177,80 @@ vector<GridNodePtr> AStar::retrievePath(GridNodePtr current)
 
 bool AStar::ConvertToIndexAndAdjustStartEndPoints(Vector3d start_pt, Vector3d end_pt, Vector3i &start_idx, Vector3i &end_idx)
 {
-    if (!Coord2Index(start_pt, start_idx) || !Coord2Index(end_pt, end_idx))
+    last_p4_metrics_.original_start = start_pt;
+    last_p4_metrics_.original_end = end_pt;
+    last_p4_metrics_.adjusted_start = start_pt;
+    last_p4_metrics_.adjusted_end = end_pt;
+    last_p4_metrics_.pool_size = POOL_SIZE_;
+    const bool start_interior = Coord2Index(start_pt, start_idx);
+    const bool end_interior = Coord2Index(end_pt, end_idx);
+    last_p4_metrics_.start_index = start_idx;
+    last_p4_metrics_.end_index = end_idx;
+    if (!start_interior || !end_interior)
+    {
+        last_p4_metrics_.failure_kind = !start_interior
+            ? P4AStarFailureKind::START_OUTSIDE_POOL
+            : P4AStarFailureKind::END_OUTSIDE_POOL;
+        last_p4_metrics_.fallback_reason = "invalid_start_or_end";
         return false;
+    }
 
     if (checkOccupancy(Index2Coord(start_idx)))
     {
-        // RCLCPP_WARN(rclcpp::get_logger("ConvertToIndexAndAdjustStartEndPoints"), "Start point is insdide an obstacle.");
-        do
+        for (int step = 0; step < kMaximumEndpointAdjustmentSteps; ++step)
         {
             start_pt = (start_pt - end_pt).normalized() * step_size_ + start_pt;
             if (!Coord2Index(start_pt, start_idx))
+            {
+                last_p4_metrics_.adjusted_start = start_pt;
+                last_p4_metrics_.fallback_reason =
+                    "start_point_adjustment_outside_pool";
+                last_p4_metrics_.failure_kind =
+                    P4AStarFailureKind::START_OUTSIDE_POOL;
                 return false;
-        } while (checkOccupancy(Index2Coord(start_idx)));
+            }
+            ++last_p4_metrics_.start_adjustment_steps;
+        }
+        last_p4_metrics_.adjusted_start = start_pt;
+        if (checkOccupancy(Index2Coord(start_idx)))
+        {
+            last_p4_metrics_.fallback_reason =
+                "start_point_blocked_after_bounded_adjustment";
+            last_p4_metrics_.failure_kind = P4AStarFailureKind::START_BLOCKED;
+            return false;
+        }
     }
 
     if (checkOccupancy(Index2Coord(end_idx)))
     {
-        // RCLCPP_WARN(rclcpp::get_logger("ConvertToIndexAndAdjustStartEndPoints"), "End point is insdide an obstacle.");
-        do
+        for (int step = 0; step < kMaximumEndpointAdjustmentSteps; ++step)
         {
             end_pt = (end_pt - start_pt).normalized() * step_size_ + end_pt;
             if (!Coord2Index(end_pt, end_idx))
+            {
+                last_p4_metrics_.adjusted_end = end_pt;
+                last_p4_metrics_.fallback_reason =
+                    "end_point_adjustment_outside_pool";
+                last_p4_metrics_.failure_kind =
+                    P4AStarFailureKind::END_OUTSIDE_POOL;
                 return false;
-        } while (checkOccupancy(Index2Coord(end_idx)));
+            }
+            ++last_p4_metrics_.end_adjustment_steps;
+        }
+        last_p4_metrics_.adjusted_end = end_pt;
+        if (checkOccupancy(Index2Coord(end_idx)))
+        {
+            last_p4_metrics_.fallback_reason =
+                "end_point_blocked_after_bounded_adjustment";
+            last_p4_metrics_.failure_kind = P4AStarFailureKind::END_BLOCKED;
+            return false;
+        }
     }
 
+    last_p4_metrics_.adjusted_start = start_pt;
+    last_p4_metrics_.adjusted_end = end_pt;
+    last_p4_metrics_.start_index = start_idx;
+    last_p4_metrics_.end_index = end_idx;
     return true;
 }
 
@@ -318,6 +368,7 @@ bool AStar::astarSearchProviderBottleneckV2(
             last_p4_metrics_.elapsed_ms =
                 (rclcpp::Clock().now() - started).seconds() * 1000.0;
             last_p4_metrics_.fallback_reason = "timeout";
+            last_p4_metrics_.failure_kind = P4AStarFailureKind::TIMEOUT;
             return false;
         }
         const auto current = open.top();
@@ -407,6 +458,7 @@ bool AStar::astarSearchProviderBottleneckV2(
         last_p4_metrics_.provider_incomplete_reject_count > 0
             ? "provider_support_incomplete"
             : "no_path";
+    last_p4_metrics_.failure_kind = P4AStarFailureKind::NO_PATH;
     return false;
 }
 
@@ -495,12 +547,19 @@ bool AStar::astarSearchImpl(const double step_size, Vector3d start_pt, Vector3d 
     inv_step_size_ = 1 / step_size;
     center_ = (start_pt + end_pt) / 2;
     search_start_pt_ = start_pt;
+    last_p4_metrics_.pool_size = POOL_SIZE_;
+    if ((POOL_SIZE_.array() > 2).all())
+    {
+        last_p4_metrics_.searchable_world_min =
+            Index2Coord(Eigen::Vector3i::Ones());
+        last_p4_metrics_.searchable_world_max =
+            Index2Coord(POOL_SIZE_ - Eigen::Vector3i::Constant(2));
+    }
 
     Vector3i start_idx, end_idx;
     if (!ConvertToIndexAndAdjustStartEndPoints(start_pt, end_pt, start_idx, end_idx))
     {
         RCLCPP_ERROR(rclcpp::get_logger("AstarSearch"), "Unable to handle the initial or end point, force return!");
-        last_p4_metrics_.fallback_reason = "invalid_start_or_end";
         return false;
     }
 
@@ -536,6 +595,16 @@ bool AStar::astarSearchImpl(const double step_size, Vector3d start_pt, Vector3d 
         last_p4_metrics_.expanded_nodes = num_iter;
         current = openSet_.top();
         openSet_.pop();
+        const double frontier_distance =
+            (Index2Coord(current->index) - end_pt).norm();
+        if (frontier_distance <
+            last_p4_metrics_.nearest_reachable_frontier_distance_m)
+        {
+            last_p4_metrics_.nearest_reachable_frontier_distance_m =
+                frontier_distance;
+            last_p4_metrics_.nearest_reachable_frontier =
+                Index2Coord(current->index);
+        }
 
         // if ( num_iter < 10000 )
         //     cout << "current=" << current->index.transpose() << endl;
@@ -569,6 +638,7 @@ bool AStar::astarSearchImpl(const double step_size, Vector3d start_pt, Vector3d 
 
                     if (neighborIdx(0) < 1 || neighborIdx(0) >= POOL_SIZE_(0) - 1 || neighborIdx(1) < 1 || neighborIdx(1) >= POOL_SIZE_(1) - 1 || neighborIdx(2) < 1 || neighborIdx(2) >= POOL_SIZE_(2) - 1)
                     {
+                        ++last_p4_metrics_.boundary_reject_count;
                         continue;
                     }
 
@@ -625,6 +695,7 @@ bool AStar::astarSearchImpl(const double step_size, Vector3d start_pt, Vector3d 
             RCLCPP_WARN(rclcpp::get_logger("AstarSearch"), "Failed in A star path searching !!! 0.2 seconds time limit exceeded.");
             last_p4_metrics_.elapsed_ms = (time_2 - time_1).seconds() * 1000.0;
             last_p4_metrics_.fallback_reason = "timeout";
+            last_p4_metrics_.failure_kind = P4AStarFailureKind::TIMEOUT;
             return false;
         }
     }
@@ -637,6 +708,7 @@ bool AStar::astarSearchImpl(const double step_size, Vector3d start_pt, Vector3d 
 
     last_p4_metrics_.elapsed_ms = (time_2 - time_1).seconds() * 1000.0;
     last_p4_metrics_.fallback_reason = "no_path";
+    last_p4_metrics_.failure_kind = P4AStarFailureKind::NO_PATH;
     return false;
 }
 
