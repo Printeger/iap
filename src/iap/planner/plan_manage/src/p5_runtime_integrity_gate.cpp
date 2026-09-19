@@ -781,15 +781,26 @@ P5GateStatus P5RuntimeIntegrityGate::evaluate(
       evaluateFutureGate(local_data, snapshot, current, context);
   const bool controlled_degraded = context.direct_risk &&
       context.direct_risk->trajectory_assurance_complete &&
-      context.direct_risk->trajectory_assurance.mode ==
-          iap::TrajectoryExecutionMode::CONTROLLED_DEGRADED_EXECUTION &&
+      (context.direct_risk->trajectory_assurance.mode ==
+           iap::TrajectoryExecutionMode::CONTROLLED_DEGRADED_EXECUTION ||
+       context.direct_risk->trajectory_assurance.mode ==
+           iap::TrajectoryExecutionMode::MISSION_DEGRADED_EXECUTION) &&
       context.direct_risk->trajectory_assurance.authorized();
-  // CURRENT_LOW_MARGIN is the legacy fused GNSS/LiDAR interpretation. A
-  // bound controlled-degraded certificate separates the GNSS task-quality
-  // exceedance from independently proven local motion safety. Invalid or
-  // stale current inputs are never overridden here.
-  if (controlled_degraded &&
-      current_status.reason == P5GateReason::CURRENT_LOW_MARGIN) {
+  const bool best_effort_local_authority = controlled_degraded &&
+      context.direct_risk->task_mode ==
+          iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT &&
+      context.direct_risk->execution_snapshot &&
+      context.direct_risk->execution_snapshot->localFreshAt(context.now_s);
+  // The legacy current gate mixes global navigation quality with local SLAM
+  // health. In best-effort mode the bound execution snapshot independently
+  // proves fresh occupancy/support and healthy ICP, so missing, stale or
+  // over-AL global GNSS values remain mission-quality evidence instead of
+  // revoking locally safe motion. Any malformed/stale trajectory certificate
+  // is still rejected by evaluateFutureGate below.
+  if (best_effort_local_authority &&
+      (current_status.reason == P5GateReason::CURRENT_LOW_MARGIN ||
+       current_status.reason == P5GateReason::CURRENT_INVALID ||
+       current_status.reason == P5GateReason::CURRENT_STALE)) {
     current_status.action = P5GateAction::OK;
     current_status.reason = P5GateReason::OK;
   }
@@ -913,9 +924,14 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateFutureGate(
       PredAlertLimitProvider::modeName(config_.pred_alert_limit.mode);
 
   const auto* direct_evidence = context.direct_risk;
+  const bool best_effort_evidence = direct_evidence &&
+      direct_evidence->task_mode ==
+          iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT;
   const bool has_execution_evidence = direct_evidence &&
       direct_evidence->execution_snapshot &&
-      direct_evidence->execution_snapshot->freshAt(context.now_s) &&
+      (best_effort_evidence
+           ? direct_evidence->execution_snapshot->localFreshAt(context.now_s)
+           : direct_evidence->execution_snapshot->freshAt(context.now_s)) &&
       direct_evidence->execution_snapshot_id != 0u &&
       direct_evidence->execution_snapshot_id ==
           direct_evidence->execution_snapshot->execution_snapshot_id;
@@ -1039,9 +1055,16 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateFutureGate(
       }
     }
   }
+  const bool mission_degraded_evidence = direct_evidence &&
+      direct_evidence->trajectory_assurance_complete &&
+      direct_evidence->trajectory_assurance.mode ==
+          iap::TrajectoryExecutionMode::MISSION_DEGRADED_EXECUTION &&
+      direct_evidence->trajectory_assurance.authorized();
   const bool execution_evidence_bound = direct_evidence &&
       direct_evidence->execution_snapshot &&
-      direct_evidence->execution_snapshot->freshAt(context.now_s) &&
+      (best_effort_evidence
+           ? direct_evidence->execution_snapshot->localFreshAt(context.now_s)
+           : direct_evidence->execution_snapshot->freshAt(context.now_s)) &&
       direct_evidence->execution_snapshot_id != 0u &&
       direct_evidence->execution_snapshot_id ==
           direct_evidence->execution_snapshot->execution_snapshot_id &&
@@ -1099,32 +1122,55 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateFutureGate(
           std::adjacent_find(window.satellite_ids.begin(),
                              window.satellite_ids.end()) ==
               window.satellite_ids.end();
+      const bool global_only_degraded_window =
+          mission_degraded_evidence &&
+          iap::forwardRiskFailureIsGlobalNavigationDegradable(
+              window.failure_reason);
       const bool failure_is_complete_evidence =
           window.failure_reason == iap::ForwardRiskFailureReason::NONE ||
           window.failure_reason ==
-              iap::ForwardRiskFailureReason::SAFETY_LIMIT_EXCEEDED;
+              iap::ForwardRiskFailureReason::SAFETY_LIMIT_EXCEEDED ||
+          global_only_degraded_window;
       const bool inserted = window.satellite_window_id != 0u &&
           windows_by_id.emplace(window.satellite_window_id, &window).second;
       window_contract_valid = window_contract_valid && inserted &&
-          !window.satellite_ids.empty() && sorted_unique_satellites &&
+          (global_only_degraded_window || !window.satellite_ids.empty()) &&
+          sorted_unique_satellites &&
           window.satellite_set_hash ==
               iap::forwardRiskSatelliteSetHash(window.satellite_ids) &&
-          window.complete && failure_is_complete_evidence;
+          (window.complete || global_only_degraded_window) &&
+          failure_is_complete_evidence;
     }
     std::unordered_map<std::uint64_t, std::size_t> window_row_counts;
     window_row_counts.reserve(windows_by_id.size());
+    std::unordered_map<std::uint64_t, std::size_t> window_first_failures;
+    window_first_failures.reserve(windows_by_id.size());
     for (std::size_t index = 0;
          window_contract_valid &&
          index < direct_evidence->satellite_window_ids.size(); ++index) {
       const std::uint64_t window_id =
           direct_evidence->satellite_window_ids[index];
       const auto window = windows_by_id.find(window_id);
+      const bool point_failure_is_complete_evidence =
+          index < direct_evidence->points.size() &&
+          (direct_evidence->points[index].failure_reason ==
+               iap::ForwardRiskFailureReason::NONE ||
+           direct_evidence->points[index].failure_reason ==
+               iap::ForwardRiskFailureReason::SAFETY_LIMIT_EXCEEDED ||
+           (mission_degraded_evidence &&
+            iap::forwardRiskFailureIsGlobalNavigationDegradable(
+                direct_evidence->points[index].failure_reason)));
       window_contract_valid = window != windows_by_id.end() &&
           index < direct_evidence->points.size() &&
+          point_failure_is_complete_evidence &&
           direct_evidence->points[index].local_satellite_set_hash ==
               window->second->satellite_set_hash;
       if (window_contract_valid) {
         ++window_row_counts[window_id];
+        if (direct_evidence->points[index].failure_reason !=
+                iap::ForwardRiskFailureReason::NONE) {
+          window_first_failures.emplace(window_id, index);
+        }
       }
     }
     for (const auto& window : direct_evidence->windows) {
@@ -1136,22 +1182,25 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateFutureGate(
       if (!window_contract_valid) {
         break;
       }
-      if (window.failure_reason ==
-          iap::ForwardRiskFailureReason::SAFETY_LIMIT_EXCEEDED) {
+      const auto first_failure = window_first_failures.find(
+          window.satellite_window_id);
+      if (window.failure_reason == iap::ForwardRiskFailureReason::NONE) {
         window_contract_valid =
-            window.first_failure_index < direct_evidence->points.size() &&
-            window.first_failure_index <
-                direct_evidence->satellite_window_ids.size() &&
-            direct_evidence->satellite_window_ids[
-                window.first_failure_index] == window.satellite_window_id &&
-            direct_evidence->points[window.first_failure_index].
-                failure_reason ==
-                    iap::ForwardRiskFailureReason::SAFETY_LIMIT_EXCEEDED;
+            first_failure == window_first_failures.end();
+      } else {
+        window_contract_valid =
+            first_failure != window_first_failures.end() &&
+            window.first_failure_index == first_failure->second &&
+            direct_evidence->points[first_failure->second].failure_reason ==
+                window.failure_reason;
       }
     }
   }
   const bool direct_evidence_valid = direct_evidence &&
       direct_evidence->complete &&
+      (!mission_degraded_evidence ||
+       direct_evidence->task_mode ==
+           iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT) &&
       window_contract_valid &&
       (execution_evidence_bound || legacy_grid_evidence_bound) &&
       direct_evidence->trajectory_id == local_data.traj_id_ &&
@@ -1171,11 +1220,15 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateFutureGate(
       !direct_evidence->trajectory_assurance.certificate_hash.empty() &&
       direct_evidence->trajectory_assurance.local.status ==
           iap::LocalMotionAssuranceStatus::SAFE &&
-      direct_evidence->trajectory_assurance.global.complete &&
-      direct_evidence->trajectory_assurance.global.within_budget;
+      (direct_evidence->trajectory_assurance.mode ==
+           iap::TrajectoryExecutionMode::MISSION_DEGRADED_EXECUTION ||
+       (direct_evidence->trajectory_assurance.global.complete &&
+        direct_evidence->trajectory_assurance.global.within_budget));
   const bool controlled_degraded = trajectory_assurance_valid &&
-      direct_evidence->trajectory_assurance.mode ==
-          iap::TrajectoryExecutionMode::CONTROLLED_DEGRADED_EXECUTION;
+      (direct_evidence->trajectory_assurance.mode ==
+           iap::TrajectoryExecutionMode::CONTROLLED_DEGRADED_EXECUTION ||
+       direct_evidence->trajectory_assurance.mode ==
+           iap::TrajectoryExecutionMode::MISSION_DEGRADED_EXECUTION);
   if (direct_evidence_valid && !emitted_trajectory_timing_failure) {
     for (std::size_t index = 0; index < direct_evidence->points.size(); ++index) {
       const double t = direct_evidence->relative_times[index];
@@ -1296,6 +1349,14 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateFutureGate(
       if (!finite(status.pred_val_min) || al.val < status.pred_val_min) {
         status.pred_val_min = al.val;
       }
+    }
+    if (direct_evidence_valid && mission_degraded_evidence &&
+        (!pl_ok || !pl.available || !pl.valid || pl.stale ||
+         !finite(pl.hpl_pred) || !finite(pl.vpl_pred))) {
+      viz_sample.unknown = true;
+      viz_sample.reason = "mission_degraded_global_evidence_incomplete";
+      status.viz_samples.push_back(viz_sample);
+      continue;
     }
     if (!al.valid || !pl_ok || !pl.available || !pl.valid || pl.stale ||
         !finite(pl.hpl_pred) || !finite(pl.vpl_pred)) {

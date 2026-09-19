@@ -206,6 +206,28 @@ TEST(P4TerminalStopProductionTest,
              braking.evaluateDeBoorT(braking_duration)).norm(), 0.05);
 }
 
+TEST(P4TerminalStopProductionTest,
+     EmergencyBrakingCoversEveryTwoTenthsUntilStoppedEndpoint)
+{
+  auto reference = makeMovingCurvedP4Trajectory(0.2);
+  const auto terminal = ego_planner::imposeP4TerminalStop(
+      &reference, terminalStartState(reference), 3.0, 4.0, 0.0);
+  ASSERT_TRUE(terminal.success) << terminal.reason;
+  const double duration = reference.getTimeSum();
+  const int anchor_count =
+      std::max(1, static_cast<int>(std::ceil(duration / 0.2)));
+  for (int index = 0; index < anchor_count; ++index)
+  {
+    const double anchor_time = duration * static_cast<double>(index) /
+        static_cast<double>(anchor_count);
+    SCOPED_TRACE(anchor_time);
+    ego_planner::UniformBspline braking;
+    const auto result = ego_planner::buildP4EmergencyBrakingTrajectory(
+        reference, anchor_time, 3.0, 4.0, 0.0, &braking);
+    EXPECT_TRUE(result.success) << result.reason;
+  }
+}
+
 TEST(P4GenerationProbeTest, ClassifiesIndependentAndMixedChanges)
 {
   using ego_planner::P4GenerationChangeClass;
@@ -965,6 +987,8 @@ makeP4ExecutionSnapshot(
   execution->integrity_anchor.current.lidar_valid =
       absolute_lidar_integrity_valid;
   execution->integrity_anchor.current.gnss_valid = true;
+  execution->integrity_anchor.has_epoch = true;
+  execution->integrity_anchor.gnss_epoch.stamp = stamp_s;
   execution->integrity_anchor.current.gnss_hpl =
       absolute_lidar_integrity_valid ? 1.0 : 10.1;
   execution->integrity_anchor.current.gnss_vpl = 1.0;
@@ -2057,11 +2081,11 @@ TEST(P4ForwardTerminalLineageTest,
       during_execution_s, commanded_position);
   EXPECT_TRUE(risk_revoke.allowed);
   EXPECT_TRUE(risk_revoke.known_future_risk_unsafe);
-  EXPECT_TRUE(risk_revoke.failsafe_braking_available);
+  EXPECT_FALSE(risk_revoke.failsafe_braking_available);
   EXPECT_FALSE(risk_revoke.failsafe_braking_active);
-  EXPECT_EQ(risk_revoke.reason,
-            "failsafe_braking_scheduled:runtime_trajectory_assurance_rejected:"
-            "global_navigation_budget_exceeded:safe");
+  EXPECT_EQ(risk_revoke.reason, "runtime_mission_degraded_execution");
+  EXPECT_EQ(manager.p4ExecutionCertificate().execution_mode,
+            iap::TrajectoryExecutionMode::MISSION_DEGRADED_EXECUTION);
   EXPECT_EQ(risk_revoke.current_risk_generation,
             unsafe_snapshot->generation_id());
   EXPECT_GT(risk_revoke.current_risk_generation,
@@ -2085,35 +2109,7 @@ TEST(P4ForwardTerminalLineageTest,
       risk_revoke.global_maximum_continuous_exceedance_s));
   EXPECT_TRUE(std::isfinite(
       risk_revoke.global_exceedance_integral_ratio_s));
-  const auto first_hard_guard = manager.pendingP4GuardBrakingCommand();
-  ASSERT_TRUE(first_hard_guard.has_value());
-  manager.acknowledgeP4GuardStatus(
-      first_hard_guard->trajectory_id, "QUEUED");
-  const double repeated_hard_stamp = std::min(
-      first_hard_guard->start_time.seconds() - 1.0e-3,
-      during_execution_s + 0.05);
-  ASSERT_GT(repeated_hard_stamp, during_execution_s);
-  const auto repeated_hard = manager.validateCommittedP4TrajectoryExecution(
-      repeated_hard_stamp,
-      manager.local_data_.position_traj_.evaluateDeBoorT(
-          repeated_hard_stamp - manager.local_data_.start_time_.seconds()));
-  EXPECT_TRUE(repeated_hard.allowed) << repeated_hard.reason;
-  const auto frozen_hard_guard = manager.pendingP4GuardBrakingCommand();
-  ASSERT_TRUE(frozen_hard_guard.has_value());
-  EXPECT_EQ(frozen_hard_guard->trajectory_id,
-            first_hard_guard->trajectory_id);
-  EXPECT_EQ(frozen_hard_guard->start_time.nanoseconds(),
-            first_hard_guard->start_time.nanoseconds());
-  auto frozen_hard_trajectory = frozen_hard_guard->trajectory;
-  auto first_hard_trajectory = first_hard_guard->trajectory;
-  EXPECT_EQ(ego_planner::p4ControlPointHash(
-                frozen_hard_trajectory.getControlPoint()),
-            ego_planner::p4ControlPointHash(
-                first_hard_trajectory.getControlPoint()));
-  EXPECT_EQ(ego_planner::p4KnotVectorHash(
-                frozen_hard_trajectory.getKnot()),
-            ego_planner::p4KnotVectorHash(
-                first_hard_trajectory.getKnot()));
+  EXPECT_FALSE(manager.pendingP4GuardBrakingCommand().has_value());
   manager.setPlanningRiskContextForTest(
       snapshot, 10.52, nullptr, directRiskCallback(0.5),
       makeP4ExecutionSnapshot(
@@ -2259,8 +2255,10 @@ TEST(P4ForwardTerminalLineageTest,
       }));
   EXPECT_TRUE(std::any_of(
       execution_rows.begin(), execution_rows.end(), [](const auto &row) {
-        return row.at("schema_version") == "p4_execution_event_v10" &&
-            row.at("event") == "FAILSAFE_BRAKING_SCHEDULED" &&
+        return row.at("schema_version") == "p4_execution_event_v11" &&
+            row.at("event") == "EXECUTION_ALLOWED" &&
+            row.at("execution_mode") == "MISSION_DEGRADED_EXECUTION" &&
+            row.at("task_mode") == "mission_best_effort" &&
             row.at("current_risk_generation") == "2" &&
             std::stod(row.at("violation_hpl_m")) >=
                 std::stod(row.at("alert_limit_h_m")) &&
@@ -3479,6 +3477,8 @@ TEST(P4PreparedSuccessorPolicy,
   auto optimizer = makeP4Optimizer(map, snapshot, debug_path.string(), 1);
 
   ego_planner::EGOPlannerManager manager;
+  manager.setP4TaskModeForTest(
+      iap::GlobalNavigationTaskMode::STRICT_GLOBAL);
   manager.pp_.max_vel_ = 20.0;
   manager.pp_.max_acc_ = 100.0;
   manager.setP4VerticalSliceOptimizerForTest(std::move(optimizer), map);

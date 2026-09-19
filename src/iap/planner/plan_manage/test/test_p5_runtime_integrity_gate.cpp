@@ -208,6 +208,45 @@ ego_planner::P4DirectTrajectoryRiskEvidence directRiskEvidence(
   return evidence;
 }
 
+void bindFreshExecutionSnapshot(
+    ego_planner::P4DirectTrajectoryRiskEvidence* evidence,
+    const std::shared_ptr<const iap::RiskGridSnapshot>& construction_grid,
+    const iap::GlobalNavigationTaskMode task_mode =
+        iap::GlobalNavigationTaskMode::STRICT_GLOBAL) {
+  ASSERT_NE(evidence, nullptr);
+  ASSERT_NE(construction_grid, nullptr);
+  auto execution = std::make_shared<ego_planner::P0ExecutionRiskSnapshot>();
+  execution->execution_snapshot_id = 41u;
+  execution->evaluation_time_s = 0.0;
+  execution->publish_time_s = 0.0;
+  auto occupancy = std::make_shared<ego_planner::P0OccupancyEpoch>();
+  occupancy->generation =
+      construction_grid->sourceIdentity().occupancy_generation;
+  occupancy->cloud_stamp_s = 0.0;
+  occupancy->frame_id = "map";
+  execution->occupancy = occupancy;
+  execution->integrity_anchor.current.valid = true;
+  execution->integrity_anchor.current.gnss_valid = true;
+  execution->integrity_anchor.current.stamp = 0.0;
+  execution->integrity_anchor.current.icp_degenerate = false;
+  execution->integrity_anchor.current.icp_rmse = 0.05;
+  execution->integrity_anchor.current.icp_condition = 2.0;
+  execution->integrity_anchor.current.icp_gamma_lidar = 1.0;
+  execution->integrity_anchor.has_epoch = true;
+  execution->integrity_anchor.gnss_epoch.stamp = 0.0;
+  execution->risk_policy = construction_grid->params();
+  execution->risk_policy.frame_id = "map";
+  execution->geometry_id = "p5_execution_test_geometry";
+  execution->forward_risk_batch = [](const auto&) {
+    return iap::ForwardRiskBatchResult{};
+  };
+  execution->source_identity = construction_grid->sourceIdentity();
+  evidence->task_mode = task_mode;
+  evidence->execution_snapshot_id = execution->execution_snapshot_id;
+  evidence->execution_snapshot = execution;
+  evidence->risk_snapshot.reset();
+}
+
 iap::RiskGridMapParams p5_7FixtureParams(bool effective_enabled = true) {
   iap::RiskGridMapParams params;
   params.resolution_m = 0.5;
@@ -1181,28 +1220,7 @@ TEST(P5RuntimeIntegrityGateTest,
   const auto construction_grid = makeSnapshot(1.0, 1.0);
   auto direct = directRiskEvidence(
       trajectory, construction_grid, 1.0, 1.0);
-  auto execution = std::make_shared<ego_planner::P0ExecutionRiskSnapshot>();
-  execution->execution_snapshot_id = 41u;
-  execution->evaluation_time_s = 0.0;
-  execution->publish_time_s = 0.0;
-  auto occupancy = std::make_shared<ego_planner::P0OccupancyEpoch>();
-  occupancy->generation =
-      construction_grid->sourceIdentity().occupancy_generation;
-  occupancy->cloud_stamp_s = 0.0;
-  occupancy->frame_id = "map";
-  execution->occupancy = occupancy;
-  execution->integrity_anchor.current.valid = true;
-  execution->integrity_anchor.current.stamp = 0.0;
-  execution->risk_policy = construction_grid->params();
-  execution->risk_policy.frame_id = "map";
-  execution->geometry_id = "p5_execution_test_geometry";
-  execution->forward_risk_batch = [](const auto&) {
-    return iap::ForwardRiskBatchResult{};
-  };
-  execution->source_identity = construction_grid->sourceIdentity();
-  direct.execution_snapshot_id = execution->execution_snapshot_id;
-  direct.execution_snapshot = execution;
-  direct.risk_snapshot.reset();
+  bindFreshExecutionSnapshot(&direct, construction_grid);
 
   const auto status = gate.evaluateRuntime(
       trajectory, nullptr, 0.0, -1.0, &direct);
@@ -1418,6 +1436,253 @@ TEST(P5RuntimeIntegrityGateTest,
       point_hash_mismatch.window_satellite_sets_hash);
   EXPECT_EQ(point_hash_status.raw_reason,
             ego_planner::P5GateReason::FUTURE_UNKNOWN);
+
+  auto hidden_failure = direct;
+  hidden_failure.points.front().failure_reason =
+      iap::ForwardRiskFailureReason::GNSS_ANCHOR_INCONSISTENT;
+  const auto hidden_failure_status = gate.evaluateFinal(
+      trajectory, snapshot, 0.6, -1.0, &hidden_failure,
+      "braking_window_core", hidden_failure.window_layout_hash,
+      hidden_failure.window_satellite_sets_hash);
+  EXPECT_EQ(hidden_failure_status.raw_reason,
+            ego_planner::P5GateReason::FUTURE_UNKNOWN);
+
+  auto wrong_first_failure = direct;
+  wrong_first_failure.points.front().failure_reason =
+      iap::ForwardRiskFailureReason::GNSS_ANCHOR_INCONSISTENT;
+  wrong_first_failure.points[1].failure_reason =
+      iap::ForwardRiskFailureReason::GNSS_ANCHOR_INCONSISTENT;
+  wrong_first_failure.windows.front().complete = false;
+  wrong_first_failure.windows.front().failure_reason =
+      iap::ForwardRiskFailureReason::GNSS_ANCHOR_INCONSISTENT;
+  wrong_first_failure.windows.front().first_failure_index = 1u;
+  wrong_first_failure.window_satellite_sets_hash =
+      ego_planner::p4WindowSatelliteSetsHash(wrong_first_failure.windows);
+  const auto wrong_first_failure_status = gate.evaluateFinal(
+      trajectory, snapshot, 0.7, -1.0, &wrong_first_failure,
+      "braking_window_core", wrong_first_failure.window_layout_hash,
+      wrong_first_failure.window_satellite_sets_hash);
+  EXPECT_EQ(wrong_first_failure_status.raw_reason,
+            ego_planner::P5GateReason::FUTURE_UNKNOWN);
+}
+
+TEST(P5RuntimeIntegrityGateTest,
+     MissionBestEffortKeepsWindowResponsibilityWhenGnssIsIncomplete) {
+  auto config = baseConfig();
+  config.test_only_allow_grid_risk_authority = false;
+  config.current_stale_to_replan_s = 100.0;
+  config.current_stale_to_emergency_s = 100.0;
+  config.max_unknown_ratio = 0.01;
+  ego_planner::P5RuntimeIntegrityGate gate(nullptr, config, false);
+  gate.setCurrentIntegrityForTest(integrityMsg(
+      0.0, 1.0, 1.0, 10.0, 10.0));
+  auto trajectory = makeTrajectory();
+  const auto snapshot = makeSnapshot(1.0, 1.0);
+  auto direct = directRiskEvidence(trajectory, snapshot, 1.0, 1.0);
+  direct.task_mode =
+      iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT;
+  direct.satellite_set_policy = "braking_window_core";
+  direct.window_layout_hash = "mission-incomplete-layout";
+  direct.nominal_sample_rows.assign(direct.positions.size(), true);
+  direct.evidence_point_ids.resize(direct.positions.size());
+  direct.satellite_window_ids.assign(direct.positions.size(), 33u);
+  const auto empty_set_hash = iap::forwardRiskSatelliteSetHash({});
+  for (std::size_t index = 0; index < direct.positions.size(); ++index) {
+    direct.evidence_point_ids[index] = index + 1u;
+    direct.points[index] = iap::ForwardRiskPointResult{};
+    direct.points[index].local_satellite_set_hash = empty_set_hash;
+  }
+  direct.points.front().failure_reason =
+      iap::ForwardRiskFailureReason::GNSS_ANCHOR_INCONSISTENT;
+  iap::ForwardRiskWindowResult window;
+  window.satellite_window_id = 33u;
+  window.satellite_set_hash = empty_set_hash;
+  window.point_count = direct.positions.size();
+  window.complete = false;
+  window.failure_reason =
+      iap::ForwardRiskFailureReason::GNSS_ANCHOR_INCONSISTENT;
+  window.first_failure_index = 0u;
+  direct.windows = {window};
+  direct.window_satellite_sets_hash =
+      ego_planner::p4WindowSatelliteSetsHash(direct.windows);
+  direct.certified_safe = false;
+  direct.certification_status =
+      ego_planner::P4ActualCurveCertificationStatus::INCOMPLETE;
+  direct.trajectory_assurance_complete = true;
+  direct.trajectory_assurance.mode =
+      iap::TrajectoryExecutionMode::MISSION_DEGRADED_EXECUTION;
+  direct.trajectory_assurance.reason =
+      "mission_degraded_global_evidence_incomplete";
+  direct.trajectory_assurance.certificate_hash = "mission-cert";
+  direct.trajectory_assurance.local.status =
+      iap::LocalMotionAssuranceStatus::SAFE;
+  direct.trajectory_assurance.local.certificate_hash = "local-cert";
+  direct.trajectory_assurance.global.complete = false;
+
+  const auto status = gate.evaluateFinal(
+      trajectory, snapshot, 0.1, -1.0, &direct,
+      "braking_window_core", direct.window_layout_hash,
+      direct.window_satellite_sets_hash);
+
+  EXPECT_EQ(status.raw_action, ego_planner::P5GateAction::OK)
+      << status.future_reason;
+  EXPECT_EQ(status.raw_reason, ego_planner::P5GateReason::OK);
+  EXPECT_EQ(status.unknown_count, 0u);
+}
+
+TEST(P5RuntimeIntegrityGateTest,
+     MissionBestEffortDoesNotDegradeComputationOrIdentityFailures) {
+  auto config = baseConfig();
+  config.test_only_allow_grid_risk_authority = false;
+  config.current_stale_to_replan_s = 100.0;
+  config.current_stale_to_emergency_s = 100.0;
+  ego_planner::P5RuntimeIntegrityGate gate(nullptr, config, false);
+  gate.setCurrentIntegrityForTest(integrityMsg(
+      0.0, 1.0, 1.0, 10.0, 10.0));
+  auto trajectory = makeTrajectory();
+  const auto snapshot = makeSnapshot(1.0, 1.0);
+  auto direct = directRiskEvidence(trajectory, snapshot, 1.0, 1.0);
+  direct.task_mode =
+      iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT;
+  direct.satellite_set_policy = "braking_window_core";
+  direct.window_layout_hash = "mission-malformed-layout";
+  direct.nominal_sample_rows.assign(direct.positions.size(), true);
+  direct.evidence_point_ids.resize(direct.positions.size());
+  direct.satellite_window_ids.assign(direct.positions.size(), 55u);
+  const auto empty_set_hash = iap::forwardRiskSatelliteSetHash({});
+  for (std::size_t index = 0; index < direct.positions.size(); ++index) {
+    direct.evidence_point_ids[index] = index + 1u;
+    direct.points[index] = iap::ForwardRiskPointResult{};
+    direct.points[index].failure_reason =
+        iap::ForwardRiskFailureReason::COMPUTE_BUDGET_EXCEEDED;
+    direct.points[index].local_satellite_set_hash = empty_set_hash;
+  }
+  iap::ForwardRiskWindowResult window;
+  window.satellite_window_id = 55u;
+  window.satellite_set_hash = empty_set_hash;
+  window.point_count = direct.positions.size();
+  window.complete = false;
+  window.failure_reason =
+      iap::ForwardRiskFailureReason::GNSS_ANCHOR_INCONSISTENT;
+  window.first_failure_index = 0u;
+  direct.windows = {window};
+  direct.window_satellite_sets_hash =
+      ego_planner::p4WindowSatelliteSetsHash(direct.windows);
+  direct.trajectory_assurance_complete = true;
+  direct.trajectory_assurance.mode =
+      iap::TrajectoryExecutionMode::MISSION_DEGRADED_EXECUTION;
+  direct.trajectory_assurance.certificate_hash = "malformed-cert";
+  direct.trajectory_assurance.local.status =
+      iap::LocalMotionAssuranceStatus::SAFE;
+  direct.trajectory_assurance.local.certificate_hash = "local-cert";
+
+  const auto status = gate.evaluateFinal(
+      trajectory, snapshot, 0.1, -1.0, &direct,
+      "braking_window_core", direct.window_layout_hash,
+      direct.window_satellite_sets_hash);
+
+  EXPECT_NE(status.raw_action, ego_planner::P5GateAction::OK);
+  EXPECT_EQ(status.future_reason, "future_unknown");
+}
+
+TEST(P5RuntimeIntegrityGateTest,
+     MissionBestEffortCertificateUsesLocalFreshnessBeforeModeTransition) {
+  auto config = baseConfig();
+  config.test_only_allow_grid_risk_authority = false;
+  config.current_stale_to_replan_s = 100.0;
+  config.current_stale_to_emergency_s = 100.0;
+  ego_planner::P5RuntimeIntegrityGate gate(nullptr, config, false);
+  gate.setCurrentIntegrityForTest(integrityMsg(
+      0.5, 1.0, 1.0, 10.0, 10.0));
+  auto trajectory = makeTrajectory();
+  const auto grid = makeSnapshot(1.0, 1.0);
+  auto direct = directRiskEvidence(trajectory, grid, 1.0, 1.0);
+  direct.task_mode =
+      iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT;
+  direct.satellite_set_policy = "braking_window_core";
+  direct.window_layout_hash = "best-effort-local-fresh-layout";
+  direct.nominal_sample_rows.assign(direct.positions.size(), true);
+  direct.evidence_point_ids.resize(direct.positions.size());
+  direct.satellite_window_ids.assign(direct.positions.size(), 44u);
+  const std::vector<int> satellite_ids{1, 2, 3, 4, 5, 6};
+  const auto satellite_hash =
+      iap::forwardRiskSatelliteSetHash(satellite_ids);
+  for (std::size_t index = 0; index < direct.positions.size(); ++index) {
+    direct.evidence_point_ids[index] = index + 1u;
+    direct.points[index].local_satellite_set_hash = satellite_hash;
+    direct.points[index].prediction.gnss.valid = true;
+    direct.points[index].prediction.gnss.hpl = 1.0;
+    direct.points[index].prediction.gnss.vpl = 1.0;
+  }
+  iap::ForwardRiskWindowResult window;
+  window.satellite_window_id = 44u;
+  window.satellite_ids = satellite_ids;
+  window.satellite_set_hash = satellite_hash;
+  window.point_count = direct.positions.size();
+  window.complete = true;
+  direct.windows = {window};
+  direct.window_satellite_sets_hash =
+      ego_planner::p4WindowSatelliteSetsHash(direct.windows);
+  direct.trajectory_assurance_complete = true;
+  direct.trajectory_assurance.mode =
+      iap::TrajectoryExecutionMode::CONTROLLED_DEGRADED_EXECUTION;
+  direct.trajectory_assurance.certificate_hash = "controlled-cert";
+  direct.trajectory_assurance.local.status =
+      iap::LocalMotionAssuranceStatus::SAFE;
+  direct.trajectory_assurance.local.certificate_hash = "local-cert";
+  direct.trajectory_assurance.global.complete = true;
+  direct.trajectory_assurance.global.within_budget = true;
+
+  auto execution = std::make_shared<ego_planner::P0ExecutionRiskSnapshot>();
+  execution->execution_snapshot_id = 44u;
+  execution->evaluation_time_s = 0.0;
+  auto occupancy = std::make_shared<ego_planner::P0OccupancyEpoch>();
+  occupancy->generation = grid->sourceIdentity().occupancy_generation;
+  occupancy->cloud_stamp_s = 0.0;
+  occupancy->frame_id = "map";
+  execution->occupancy = occupancy;
+  execution->integrity_anchor.current.valid = true;
+  execution->integrity_anchor.current.gnss_valid = false;
+  execution->integrity_anchor.current.stamp = 0.0;
+  execution->integrity_anchor.current.icp_degenerate = false;
+  execution->integrity_anchor.current.icp_rmse = 0.03;
+  execution->integrity_anchor.current.icp_condition = 12.0;
+  execution->integrity_anchor.current.icp_gamma_lidar = 1.2;
+  execution->risk_policy = grid->params();
+  execution->risk_policy.stale_timeout_s = 1.0;
+  execution->geometry_id = grid->params().geometry_id.empty()
+      ? "test-geometry" : grid->params().geometry_id;
+  execution->forward_risk_batch = [](const auto&) {
+    return iap::ForwardRiskBatchResult{};
+  };
+  execution->source_identity = grid->sourceIdentity();
+  direct.execution_snapshot_id = execution->execution_snapshot_id;
+  direct.execution_snapshot = execution;
+  direct.risk_snapshot.reset();
+
+  ASSERT_TRUE(execution->localFreshAt(0.5));
+  ASSERT_FALSE(execution->globalFreshAt(0.5, 1.0));
+  const auto status = gate.evaluateFinal(
+      trajectory, nullptr, 0.5, -1.0, &direct,
+      "braking_window_core", direct.window_layout_hash,
+      direct.window_satellite_sets_hash);
+
+  EXPECT_EQ(status.raw_action, ego_planner::P5GateAction::OK)
+      << status.future_reason;
+  EXPECT_EQ(status.raw_reason, ego_planner::P5GateReason::OK);
+
+  // Missing global GNSS monitor values are a mission-quality state in
+  // MISSION_BEST_EFFORT, not proof that the independently certified local
+  // geometry became unsafe. The locally fresh execution snapshot above owns
+  // ICP freshness and must keep P5 from reintroducing the legacy global gate.
+  gate.setCurrentIntegrityForTest(integrityMsg(
+      0.5, std::numeric_limits<double>::quiet_NaN(), 1.0, 10.0, 10.0));
+  const auto global_invalid = gate.evaluateFinal(
+      trajectory, nullptr, 0.5, -1.0, &direct,
+      "braking_window_core", direct.window_layout_hash,
+      direct.window_satellite_sets_hash);
+  EXPECT_EQ(global_invalid.raw_action, ego_planner::P5GateAction::OK);
+  EXPECT_EQ(global_invalid.raw_reason, ego_planner::P5GateReason::OK);
 }
 
 TEST(P5RuntimeIntegrityGateTest,
@@ -1497,6 +1762,9 @@ TEST(P5RuntimeIntegrityGateTest,
   auto trajectory = makeTrajectory();
   const auto snapshot = makeSnapshot(1.0, 1.0);
   auto direct = directRiskEvidence(trajectory, snapshot, 8.0, 8.0);
+  bindFreshExecutionSnapshot(
+      &direct, snapshot,
+      iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT);
   ASSERT_GT(direct.points.size(), 3u);
   for (auto& point : direct.points) {
     point.prediction.gnss.valid = true;

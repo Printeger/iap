@@ -907,7 +907,8 @@ namespace ego_planner
     const double now_s = plannerNow().seconds();
     const auto execution = planner_manager_->p0_risk_grid_runtime_->
         acquireExecutionRiskSnapshotForEvaluation(now_s);
-    if (planner_manager_->p0_risk_grid_runtime_->executionSnapshotFreshAt(
+    if (planner_manager_->p0_risk_grid_runtime_->
+            executionSnapshotLocalFreshAt(
             execution, now_s))
     {
       p5_waiting_for_p0_ready_ = false;
@@ -933,7 +934,8 @@ namespace ego_planner
     const double now_s = plannerNow().seconds();
     const auto execution = planner_manager_->p0_risk_grid_runtime_->
         acquireExecutionRiskSnapshotForEvaluation(now_s);
-    if (!planner_manager_->p0_risk_grid_runtime_->executionSnapshotFreshAt(
+    if (!planner_manager_->p0_risk_grid_runtime_->
+             executionSnapshotLocalFreshAt(
             execution, now_s))
     {
       p4_waiting_for_risk_grid_ready_ = true;

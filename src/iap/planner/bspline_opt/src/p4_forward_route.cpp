@@ -25,6 +25,15 @@ namespace
 
 constexpr double kEpsilon = 1.0e-9;
 
+bool bestEffortGlobalFailureReason(const std::string & reason)
+{
+  return reason == "GNSS_ANCHOR_INCONSISTENT" ||
+         reason == "GNSS_LOCAL_USABLE_SATS_LT_MIN" ||
+         reason == "GNSS_SKY_UNKNOWN" ||
+         reason == "GNSS_GEOMETRY_DEGENERATE" ||
+         reason == "gnss_epoch_unavailable";
+}
+
 class ComputeBudget
 {
 public:
@@ -1045,7 +1054,6 @@ P4ForwardRiskSample aggregateRiskSamples(
       result.vpl = worst_safety_sample->vpl;
       result.hal = worst_safety_sample->hal;
       result.val = worst_safety_sample->val;
-      result.reason = "safety_limit_exceeded_with_incomplete_support";
     }
     result.ranking_state = P4ForwardRankingState::INCOMPLETE;
     return result;
@@ -1125,6 +1133,61 @@ void evaluateRisk(
     P4ForwardSafetyState::UNSAFE) : P4ForwardSafetyState::UNKNOWN;
 }
 
+double rollingWorstTimeWeightedRatio(
+  const std::vector<std::pair<double, double>> & samples,
+  const double window_s)
+{
+  if (samples.empty() || !(window_s > 0.0)) {
+    return std::numeric_limits<double>::quiet_NaN();
+  }
+  if (samples.size() == 1u) return samples.front().second;
+  const double first_t = samples.front().first;
+  const double last_t = samples.back().first;
+  const auto value_at = [&samples](const double t) {
+      if (t <= samples.front().first) return samples.front().second;
+      if (t >= samples.back().first) return samples.back().second;
+      const auto upper = std::upper_bound(
+        samples.begin(), samples.end(), t,
+        [](const double value, const auto & sample) {
+          return value < sample.first;
+        });
+      const auto lower = std::prev(upper);
+      const double alpha = (t - lower->first) /
+        std::max(kEpsilon, upper->first - lower->first);
+      return lower->second + alpha * (upper->second - lower->second);
+    };
+  const auto average = [&](const double start) {
+      const double end = std::min(last_t, start + window_s);
+      if (end <= start + kEpsilon) return value_at(start);
+      double area = 0.0;
+      double cursor = start;
+      double cursor_value = value_at(cursor);
+      for (const auto & sample : samples) {
+        if (sample.first <= cursor + kEpsilon) continue;
+        if (sample.first >= end - kEpsilon) break;
+        area += 0.5 * (cursor_value + sample.second) *
+          (sample.first - cursor);
+        cursor = sample.first;
+        cursor_value = sample.second;
+      }
+      const double end_value = value_at(end);
+      area += 0.5 * (cursor_value + end_value) * (end - cursor);
+      return area / (end - start);
+    };
+  std::vector<double> starts{first_t};
+  starts.reserve(2u * samples.size() + 1u);
+  for (const auto & sample : samples) {
+    if (sample.first >= first_t && sample.first < last_t)
+      starts.push_back(sample.first);
+    const double shifted = sample.first - window_s;
+    if (shifted >= first_t && shifted < last_t)
+      starts.push_back(shifted);
+  }
+  double worst = -std::numeric_limits<double>::infinity();
+  for (const double start : starts) worst = std::max(worst, average(start));
+  return worst;
+}
+
 void evaluateCandidateRiskSet(
   const P4ForwardRequest & request, const ComputeBudget * budget,
   std::vector<P4ForwardCandidate> * candidates)
@@ -1167,6 +1230,9 @@ void evaluateCandidateRiskSet(
     candidate.known_fim_max_ratio =
       std::numeric_limits<double>::quiet_NaN();
     candidate.unknown_coverage = 0.0;
+    candidate.minimum_gnss_used_satellite_count =
+      std::numeric_limits<int>::max();
+    candidate.maximum_gnss_geometry_condition = 0.0;
     candidate.risk_samples.clear();
     const auto path_samples = resample(candidate.path, std::min(
         0.25, request.limits.topology_resolution_m));
@@ -1197,7 +1263,8 @@ void evaluateCandidateRiskSet(
   std::vector<P4ForwardRiskSample> samples;
   if ((budget && budget->expired()) ||
     !request.risk_batch(
-      queries, budget ? budget->remainingMs() :
+      queries, budget ? std::min(
+        budget->remainingMs(), request.limits.compute_budget_ms) :
       request.limits.compute_budget_ms, &samples) ||
     samples.size() != queries.size())
   {
@@ -1234,10 +1301,13 @@ void evaluateCandidateRiskSet(
         std::max(candidate.known_fim_max_ratio, risk.known_fim_ratio) :
         risk.known_fim_ratio;
     }
-    if (std::isfinite(risk.unknown_coverage)) {
-      candidate.unknown_coverage = std::max(
-        candidate.unknown_coverage,
-        std::clamp(risk.unknown_coverage, 0.0, 1.0));
+    candidate.minimum_gnss_used_satellite_count = std::min(
+      candidate.minimum_gnss_used_satellite_count,
+      risk.gnss_used_satellite_count);
+    if (std::isfinite(risk.gnss_weighted_geometry_condition)) {
+      candidate.maximum_gnss_geometry_condition = std::max(
+        candidate.maximum_gnss_geometry_condition,
+        risk.gnss_weighted_geometry_condition);
     }
     if (risk.safety_state == P4ForwardSafetyState::UNSAFE ||
       (std::isfinite(risk.safety_ratio) && risk.safety_ratio >= 1.0))
@@ -1281,6 +1351,60 @@ void evaluateCandidateRiskSet(
     }
   }
   for (auto & candidate : *candidates) {
+    std::uint64_t unknown_los_samples = 0u;
+    std::uint64_t eligible_los_samples = 0u;
+    double fallback_unknown_sum = 0.0;
+    std::size_t fallback_unknown_count = 0u;
+    for (const auto & record : candidate.risk_samples) {
+      if (std::isfinite(record.risk.unknown_coverage)) {
+        fallback_unknown_sum += std::clamp(
+          record.risk.unknown_coverage, 0.0, 1.0);
+        ++fallback_unknown_count;
+      }
+      for (const auto & satellite : record.risk.gnss_satellites) {
+        if (satellite.epoch_excluded || !satellite.above_elevation_mask ||
+          satellite.blocked ||
+          satellite.exclusion_reason == "admission_hysteresis_pending")
+        {
+          continue;
+        }
+        eligible_los_samples += satellite.support_sample_count;
+        unknown_los_samples += satellite.support_sample_count >=
+          satellite.support_covered_sample_count ?
+          satellite.support_sample_count -
+          satellite.support_covered_sample_count : 0u;
+      }
+    }
+    candidate.unknown_coverage = eligible_los_samples > 0u ?
+      std::clamp(
+        static_cast<double>(unknown_los_samples) /
+        static_cast<double>(eligible_los_samples), 0.0, 1.0) :
+      fallback_unknown_count > 0u ?
+      fallback_unknown_sum / static_cast<double>(fallback_unknown_count) :
+      1.0;
+    if (candidate.minimum_gnss_used_satellite_count ==
+        std::numeric_limits<int>::max()) {
+      candidate.minimum_gnss_used_satellite_count = 0;
+    }
+    if (!(candidate.maximum_gnss_geometry_condition > 0.0)) {
+      candidate.maximum_gnss_geometry_condition =
+        std::numeric_limits<double>::infinity();
+    }
+    candidate.support_recovery_time_s =
+      std::numeric_limits<double>::infinity();
+    bool saw_unknown_support = false;
+    for (const auto &record : candidate.risk_samples) {
+      if (record.risk.unknown_coverage > kEpsilon) {
+        saw_unknown_support = true;
+      } else if (saw_unknown_support &&
+                 std::isfinite(record.query_time_s) &&
+                 !candidate.risk_samples.empty() &&
+                 std::isfinite(candidate.risk_samples.front().query_time_s)) {
+        candidate.support_recovery_time_s = record.query_time_s -
+          candidate.risk_samples.front().query_time_s;
+        break;
+      }
+    }
     if (candidate.risk_supported && candidate.safety_gate_passed) {
       candidate.reason = "ok";
     }
@@ -1295,12 +1419,18 @@ void evaluateCandidateRiskSet(
     }
 
     candidate.controlled_degraded_candidate = false;
+    candidate.mission_degraded_candidate = false;
     candidate.global_peak_ratio = 0.0;
     candidate.global_continuous_exceedance_s = 0.0;
     candidate.global_exceedance_integral_ratio_s = 0.0;
+    candidate.global_rolling_worst_ratio = 0.0;
+    candidate.global_recovery_time_s = std::numeric_limits<double>::infinity();
     if (candidate.risk_supported && candidate.risk_samples.size() >= 2) {
       bool complete_global = true;
+      bool saw_global_exceedance = false;
       double continuous = 0.0;
+      std::vector<std::pair<double, double>> global_ratios;
+      global_ratios.reserve(candidate.risk_samples.size());
       for (std::size_t index = 0; index < candidate.risk_samples.size();
            ++index) {
         const auto& record = candidate.risk_samples[index];
@@ -1315,6 +1445,14 @@ void evaluateCandidateRiskSet(
         }
         candidate.global_peak_ratio = std::max(
             candidate.global_peak_ratio, ratio);
+        global_ratios.emplace_back(record.query_time_s, ratio);
+        if (ratio > 1.0) {
+          saw_global_exceedance = true;
+        } else if (saw_global_exceedance &&
+                   !std::isfinite(candidate.global_recovery_time_s)) {
+          candidate.global_recovery_time_s =
+              record.query_time_s - candidate.risk_samples.front().query_time_s;
+        }
         if (index == 0) continue;
         const auto& previous = candidate.risk_samples[index - 1];
         const double previous_ratio = std::max(
@@ -1340,6 +1478,11 @@ void evaluateCandidateRiskSet(
             candidate.global_continuous_exceedance_s, continuous);
       }
       if (complete_global) {
+        if (!saw_global_exceedance) {
+          candidate.global_recovery_time_s = 0.0;
+        }
+        candidate.global_rolling_worst_ratio =
+            rollingWorstTimeWeightedRatio(global_ratios, 0.5);
         const double peak_u = candidate.global_peak_ratio <= 1.0 ? 0.0 :
             (candidate.global_peak_ratio - 1.0) /
                 std::max(kEpsilon,
@@ -1355,12 +1498,46 @@ void evaluateCandidateRiskSet(
         candidate.global_budget_utilization = std::max(
             {peak_u, duration_u, integral_u});
         candidate.controlled_degraded_candidate =
-            !request.limits.hard_global &&
+            request.limits.task_mode ==
+                iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT &&
             !candidate.safety_gate_passed &&
             candidate.global_budget_utilization <= 1.0 + kEpsilon;
+        candidate.mission_degraded_candidate =
+            request.limits.task_mode ==
+                iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT &&
+            !candidate.safety_gate_passed &&
+            !candidate.controlled_degraded_candidate;
         if (candidate.controlled_degraded_candidate)
           candidate.reason = "controlled_degraded_candidate_ready";
+        else if (candidate.mission_degraded_candidate)
+          candidate.reason = "mission_degraded_candidate_ready";
       }
+    }
+    const bool global_only_incomplete =
+        !candidate.risk_samples.empty() &&
+        std::all_of(
+            candidate.risk_samples.begin(), candidate.risk_samples.end(),
+            [](const P4ForwardRiskEvidenceRecord & record) {
+              const auto & risk = record.risk;
+              if (risk.stale || !risk.lidar_supported ||
+                !risk.fim_supported)
+              {
+                return false;
+              }
+              if (risk.valid &&
+                  risk.ranking_state == P4ForwardRankingState::COMPARABLE) {
+                return risk.reason == "ok" ||
+                       risk.reason == "NONE" ||
+                       risk.reason == "SAFETY_LIMIT_EXCEEDED";
+              }
+              return bestEffortGlobalFailureReason(risk.reason);
+            });
+    if (!candidate.risk_supported && global_only_incomplete &&
+        candidate.occupancy_supported &&
+        request.limits.task_mode ==
+            iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT) {
+      candidate.mission_degraded_candidate = true;
+      candidate.reason = "mission_degraded_gnss_incomplete_candidate_ready";
     }
   }
 }
@@ -1534,8 +1711,18 @@ bool currentRiskAnchorSafe(const P4ForwardRequest & request)
   // Integrity sample captured with this planning snapshot. A RiskMap lookup at
   // the vehicle position may already be spatially predicted or incompletely
   // interpolated and is therefore not an equivalent authority.
-  return certified.valid && !certified.stale &&
-    std::isfinite(certified.safety_ratio) && certified.safety_ratio < 1.0 &&
+  if (!certified.valid || certified.stale ||
+      !std::isfinite(certified.safety_ratio)) {
+    return false;
+  }
+  if (request.limits.task_mode ==
+      iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT) {
+    // The route layer may propose motion under degraded global navigation;
+    // final authorization still belongs to the actual B-spline's local
+    // motion and certified braking checks.
+    return true;
+  }
+  return certified.safety_ratio < 1.0 &&
     certified.safety_state == P4ForwardSafetyState::SAFE;
 }
 
@@ -1638,7 +1825,8 @@ bool configureSafeLimitedCommonPrefix(
   bool queried = false;
   if (request.risk_batch) {
     queried = !(budget && budget->expired()) && request.risk_batch(
-      queries, budget ? budget->remainingMs() :
+      queries, budget ? std::min(
+        budget->remainingMs(), request.limits.compute_budget_ms) :
       request.limits.compute_budget_ms, &samples) &&
       samples.size() == queries.size();
   } else if (request.risk) {
@@ -2196,16 +2384,20 @@ const char *p4ForwardRefinementStatusName(
   return "invalid_input";
 }
 
-bool P4ForwardSnapshotIdentity::valid() const
+bool P4ForwardSnapshotIdentity::locallyValid() const
 {
   return !geometry_id.empty() && !frame_id.empty() &&
          !frame_contract_id.empty() && !local_map_support_identity.empty() &&
          !alert_limit_policy_id.empty() && !risk_config_hash.empty() &&
          !risk_source_identity_hash.empty() && occupancy_generation > 0 &&
          (execution_snapshot_id > 0 || risk_generation > 0) &&
-         gnss_epoch_identity > 0 &&
-         std::isfinite(gnss_epoch_stamp_s) &&
          std::isfinite(occupancy_stamp_s) && std::isfinite(risk_stamp_s);
+}
+
+bool P4ForwardSnapshotIdentity::valid() const
+{
+  return locallyValid() && gnss_epoch_identity > 0 &&
+         std::isfinite(gnss_epoch_stamp_s);
 }
 
 std::string P4ForwardSnapshotIdentity::canonical() const
@@ -2247,7 +2439,12 @@ bool P4ForwardRequest::valid(std::string * reason) const
   {
     return fail("invalid_successor_reuse_guide");
   }
-  if (!snapshot_identity.valid()) {
+  const bool snapshot_identity_valid =
+      limits.task_mode ==
+              iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT
+          ? snapshot_identity.locallyValid()
+          : snapshot_identity.valid();
+  if (!snapshot_identity_valid) {
     return fail("invalid_snapshot_identity");
   }
   if (!map_origin.allFinite() || !map_extent.allFinite() ||
@@ -2262,7 +2459,7 @@ bool P4ForwardRequest::valid(std::string * reason) const
   {
     return fail("missing_snapshot_query");
   }
-  const std::array<double, 20> finite_limits = {
+  const std::array<double, 21> finite_limits = {
     limits.reaction_time_s, limits.braking_accel_mps2,
     limits.vehicle_radius_m, limits.safety_margin_m,
     limits.max_lookahead_m, limits.sensing_range_m,
@@ -2271,7 +2468,8 @@ bool P4ForwardRequest::valid(std::string * reason) const
     limits.min_creep_progress_m, limits.max_limited_prefix_progress_m,
     limits.max_creep_progress_m,
     limits.max_observe_speed_mps, limits.channel_enumeration_budget_ms,
-    limits.advisory_min_relative_improvement, limits.compute_budget_ms,
+    limits.advisory_min_relative_improvement,
+    limits.route_compute_budget_ms, limits.compute_budget_ms,
     limits.maximum_global_ratio,
     limits.maximum_global_continuous_exceedance_s,
     limits.maximum_global_exceedance_integral_ratio_s};
@@ -2294,6 +2492,7 @@ bool P4ForwardRequest::valid(std::string * reason) const
     limits.channel_enumeration_budget_ms <= 0.0 ||
     limits.advisory_min_relative_improvement < 0.0 ||
     limits.advisory_min_relative_improvement >= 1.0 ||
+    limits.route_compute_budget_ms <= 0.0 ||
     limits.compute_budget_ms <= 0.0 ||
     limits.maximum_global_ratio <= 1.0 ||
     limits.maximum_global_continuous_exceedance_s <= 0.0 ||
@@ -2369,6 +2568,30 @@ bool p4ForwardDecisionMatchesRequest(
          (decision.local_target - request.local_target).norm() <= 1.0e-6;
 }
 
+bool p4ForwardDecisionMatchesSearchRequest(
+  const P4ForwardDecision & decision, const P4ForwardRequest & request,
+  const double movement_trigger_m)
+{
+  return std::isfinite(movement_trigger_m) && movement_trigger_m > 0.0 &&
+         decision.collision_policy_id == p4CollisionPolicyIdentity(
+             request.limits.vehicle_radius_m, request.map_inflation_m,
+             request.limits.occupancy_resolution_m,
+             request.virtual_ceiling_height_m) &&
+         decision.request_position.allFinite() &&
+         decision.local_target.allFinite() &&
+         (decision.request_position - request.position).norm() <
+         movement_trigger_m &&
+         (decision.local_target - request.local_target).norm() <= 1.0e-6 &&
+         decision.snapshot_identity.frame_id ==
+             request.snapshot_identity.frame_id &&
+         decision.snapshot_identity.frame_contract_id ==
+             request.snapshot_identity.frame_contract_id &&
+         decision.snapshot_identity.geometry_id ==
+             request.snapshot_identity.geometry_id &&
+         decision.snapshot_identity.alert_limit_policy_id ==
+             request.snapshot_identity.alert_limit_policy_id;
+}
+
 bool p4ForwardDecisionMatchesLiveGeneration(
   const P4ForwardDecision & decision, const uint64_t live_generation)
 {
@@ -2417,7 +2640,7 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
     return record_latency(std::move(decision));
   }
 
-  const ComputeBudget budget(request.limits.compute_budget_ms);
+  const ComputeBudget budget(request.limits.route_compute_budget_ms);
   decision.stopping_distance_m = p4StoppingDistance(
     request.velocity.norm(), request.limits);
   const auto finalize = [&request, &record_latency](P4ForwardDecision output) {
@@ -2457,8 +2680,8 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
           P4ForwardSafetyState::UNKNOWN);
       }
       output = record_latency(std::move(output));
-      if (request.limits.compute_budget_ms > 0.0 &&
-        output.compute_latency_ms >= request.limits.compute_budget_ms)
+      if (request.limits.route_compute_budget_ms > 0.0 &&
+        output.compute_latency_ms >= request.limits.route_compute_budget_ms)
       {
         output.action = P4ForwardAction::REPLAN_REQUIRED;
         output.trigger_reason =
@@ -2720,6 +2943,17 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
       request, decision.candidates, graph);
   }
 
+  // A best-effort route with a native refiner has no authority until the
+  // refined geometry is available.  Nevertheless, evaluate every coarse
+  // channel in one batch before choosing which expensive refinement to run.
+  // Otherwise a tight route budget makes enumeration order (usually the
+  // shortest guide) masquerade as a mission-risk preference.  The coarse
+  // result is only a scheduling hint; every refined path is certified again
+  // below and only the actual curve may ultimately receive motion authority.
+  const bool certify_after_refinement =
+    request.limits.task_mode ==
+      iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT &&
+    static_cast<bool>(request.refine);
   evaluateCandidateRiskSet(request, &budget, &decision.candidates);
   if (canceled()) {
     decision.reason = "successor_canceled_superseded";
@@ -2731,28 +2965,30 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
     [](const P4ForwardCandidate & candidate) {
       return !candidate.occupancy_supported || !candidate.risk_supported;
     });
-  if (incomplete) {
-    if (configureAdvisorySelection(request, &decision)) {
-      return finalize(std::move(decision));
-    }
-    decision.action = P4ForwardAction::DEFER_RISK_SELECTION;
-    decision.trigger_reason = P4ForwardTriggerReason::SUPPORT_INCOMPLETE;
-    decision.reason = "candidate_risk_support_incomplete";
-    return finalize(std::move(decision));
-  }
-
-  const double shortest = decision.candidates.front().length_m;
   std::vector<P4ForwardCandidate *> eligible;
   for (auto & candidate : decision.candidates) {
-    if ((candidate.safety_gate_passed ||
-         candidate.controlled_degraded_candidate) &&
-      candidate.length_m <= shortest *
-      request.limits.max_path_length_ratio + kEpsilon)
+    if ((certify_after_refinement || candidate.safety_gate_passed ||
+         candidate.controlled_degraded_candidate ||
+         candidate.mission_degraded_candidate) &&
+        (request.limits.task_mode ==
+             iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT ||
+         candidate.length_m <= decision.candidates.front().length_m *
+             request.limits.max_path_length_ratio + kEpsilon))
     {
       eligible.push_back(&candidate);
     }
   }
   if (eligible.empty()) {
+    if (incomplete && request.limits.task_mode ==
+                          iap::GlobalNavigationTaskMode::STRICT_GLOBAL) {
+      if (configureAdvisorySelection(request, &decision)) {
+        return finalize(std::move(decision));
+      }
+      decision.action = P4ForwardAction::DEFER_RISK_SELECTION;
+      decision.trigger_reason = P4ForwardTriggerReason::SUPPORT_INCOMPLETE;
+      decision.reason = "candidate_risk_support_incomplete";
+      return finalize(std::move(decision));
+    }
     if (configureSafeLimitedCommonPrefix(
         request, graph, &budget, &decision))
     {
@@ -2766,22 +3002,118 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
     return finalize(std::move(decision));
   }
   const auto risk_order =
-    [](const P4ForwardCandidate * lhs, const P4ForwardCandidate * rhs) {
-      if (std::abs(lhs->global_budget_utilization -
-                   rhs->global_budget_utilization) > kEpsilon &&
-          std::isfinite(lhs->global_budget_utilization) &&
-          std::isfinite(rhs->global_budget_utilization)) {
-        return lhs->global_budget_utilization <
-               rhs->global_budget_utilization;
+    [task_mode = request.limits.task_mode](
+      const P4ForwardCandidate * lhs, const P4ForwardCandidate * rhs) {
+      const auto group = [](const P4ForwardCandidate* candidate) {
+        if (candidate->safety_gate_passed ||
+            candidate->controlled_degraded_candidate) return 0;
+        if (candidate->risk_supported) return 1;
+        return 2;
+      };
+      if (group(lhs) != group(rhs)) return group(lhs) < group(rhs);
+      if (group(lhs) == 2) {
+        if (std::abs(lhs->unknown_coverage - rhs->unknown_coverage) >
+            kEpsilon) {
+          return lhs->unknown_coverage < rhs->unknown_coverage;
+        }
+        if (lhs->minimum_gnss_used_satellite_count !=
+            rhs->minimum_gnss_used_satellite_count) {
+          return lhs->minimum_gnss_used_satellite_count >
+                 rhs->minimum_gnss_used_satellite_count;
+        }
+        if (std::isfinite(lhs->maximum_gnss_geometry_condition) !=
+            std::isfinite(rhs->maximum_gnss_geometry_condition)) {
+          return std::isfinite(lhs->maximum_gnss_geometry_condition);
+        }
+        if (std::isfinite(lhs->maximum_gnss_geometry_condition) &&
+            std::abs(lhs->maximum_gnss_geometry_condition -
+                     rhs->maximum_gnss_geometry_condition) > kEpsilon) {
+          return lhs->maximum_gnss_geometry_condition <
+                 rhs->maximum_gnss_geometry_condition;
+        }
+        if (std::isfinite(lhs->support_recovery_time_s) !=
+            std::isfinite(rhs->support_recovery_time_s)) {
+          return std::isfinite(lhs->support_recovery_time_s);
+        }
+        if (std::isfinite(lhs->support_recovery_time_s) &&
+            std::abs(lhs->support_recovery_time_s -
+                     rhs->support_recovery_time_s) > kEpsilon) {
+          return lhs->support_recovery_time_s <
+                 rhs->support_recovery_time_s;
+        }
+        if (std::abs(lhs->fim_max_ratio - rhs->fim_max_ratio) > kEpsilon) {
+          return lhs->fim_max_ratio < rhs->fim_max_ratio;
+        }
+        if (std::abs(lhs->fim_integral - rhs->fim_integral) > kEpsilon) {
+          return lhs->fim_integral < rhs->fim_integral;
+        }
+        if (std::isfinite(lhs->minimum_local_clearance_margin_m) &&
+            std::isfinite(rhs->minimum_local_clearance_margin_m) &&
+            std::abs(lhs->minimum_local_clearance_margin_m -
+                     rhs->minimum_local_clearance_margin_m) > kEpsilon) {
+          return lhs->minimum_local_clearance_margin_m >
+                 rhs->minimum_local_clearance_margin_m;
+        }
+        if (std::abs(lhs->length_m - rhs->length_m) > kEpsilon) {
+          return lhs->length_m > rhs->length_m;
+        }
+        return lhs->path_hash < rhs->path_hash;
       }
-      if (std::abs(lhs->fim_max_ratio - rhs->fim_max_ratio) > kEpsilon) {
+      if (std::isfinite(lhs->global_peak_ratio) &&
+          std::isfinite(rhs->global_peak_ratio) &&
+          std::abs(lhs->global_peak_ratio-rhs->global_peak_ratio)>kEpsilon) {
+        return lhs->global_peak_ratio < rhs->global_peak_ratio;
+      }
+      if (std::isfinite(lhs->global_rolling_worst_ratio) &&
+          std::isfinite(rhs->global_rolling_worst_ratio) &&
+          std::abs(lhs->global_rolling_worst_ratio-
+                   rhs->global_rolling_worst_ratio)>kEpsilon) {
+        return lhs->global_rolling_worst_ratio <
+               rhs->global_rolling_worst_ratio;
+      }
+      if (std::abs(lhs->global_continuous_exceedance_s-
+                   rhs->global_continuous_exceedance_s)>kEpsilon) {
+        return lhs->global_continuous_exceedance_s <
+               rhs->global_continuous_exceedance_s;
+      }
+      if (std::abs(lhs->global_exceedance_integral_ratio_s-
+                   rhs->global_exceedance_integral_ratio_s)>kEpsilon) {
+        return lhs->global_exceedance_integral_ratio_s <
+               rhs->global_exceedance_integral_ratio_s;
+      }
+      if (std::isfinite(lhs->global_recovery_time_s) !=
+          std::isfinite(rhs->global_recovery_time_s)) {
+        return std::isfinite(lhs->global_recovery_time_s);
+      }
+      if (std::isfinite(lhs->global_recovery_time_s) &&
+          std::abs(lhs->global_recovery_time_s-
+                   rhs->global_recovery_time_s)>kEpsilon) {
+        return lhs->global_recovery_time_s < rhs->global_recovery_time_s;
+      }
+      // Within-budget routes retain the established LiDAR-observability
+      // preference.  Once every route is over budget (group 1), the mission
+      // best-effort order above is exact and FIM must not jump ahead of
+      // clearance or task progress.
+      if (group(lhs) == 0 &&
+          std::abs(lhs->fim_max_ratio - rhs->fim_max_ratio) > kEpsilon) {
         return lhs->fim_max_ratio < rhs->fim_max_ratio;
       }
-      if (std::abs(lhs->fim_integral - rhs->fim_integral) > kEpsilon) {
+      if (group(lhs) == 0 &&
+          std::abs(lhs->fim_integral - rhs->fim_integral) > kEpsilon) {
         return lhs->fim_integral < rhs->fim_integral;
       }
+      if (std::isfinite(lhs->minimum_local_clearance_margin_m) &&
+          std::isfinite(rhs->minimum_local_clearance_margin_m) &&
+          std::abs(lhs->minimum_local_clearance_margin_m -
+                   rhs->minimum_local_clearance_margin_m) > kEpsilon) {
+        return lhs->minimum_local_clearance_margin_m >
+               rhs->minimum_local_clearance_margin_m;
+      }
       if (std::abs(lhs->length_m - rhs->length_m) > kEpsilon) {
-        return lhs->length_m < rhs->length_m;
+        return task_mode ==
+            iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT
+          ? lhs->length_m > rhs->length_m
+          : lhs->length_m < rhs->length_m;
       }
       return lhs->path_hash < rhs->path_hash;
     };
@@ -2791,22 +3123,48 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
     std::vector<P4ForwardCandidate> refined_candidates;
     refined_candidates.reserve(eligible.size());
     std::map<P4ForwardRefinementStatus, std::size_t> refinement_failures;
+    double successful_refinement_wcet_ms = 0.0;
+    const double direct_authorization_reserve_ms = std::min(
+      request.limits.compute_budget_ms,
+      0.5 * request.limits.route_compute_budget_ms);
     for (const auto * candidate : eligible) {
       if (budget.expired()) {
         decision.reason = "compute_budget_exceeded";
         return finalize(std::move(decision));
       }
+      // Refinement is only useful when the resulting physical curve can
+      // still be certified.  Keep the direct-kernel budget intact, and once
+      // one complete candidate exists do not start another refinement that
+      // cannot finish within the observed refinement WCET plus that reserve.
+      // This produces a smaller complete candidate set instead of repeatedly
+      // timing out with four uncertified guides.
+      const double remaining_ms = budget.remainingMs();
+      if (!refined_candidates.empty() &&
+        remaining_ms <= successful_refinement_wcet_ms +
+        direct_authorization_reserve_ms + kEpsilon)
+      {
+        break;
+      }
+      const double refinement_budget_ms =
+        remaining_ms - direct_authorization_reserve_ms;
+      if (!(refinement_budget_ms > 0.0)) {
+        break;
+      }
       P4ForwardCandidate refined_candidate = *candidate;
       auto refinement = request.refine(
         candidate->path,
         1.5 * request.limits.topology_resolution_m,
-        budget.remainingMs());
+        refinement_budget_ms);
       decision.refinement_diagnostics.push_back(refinement);
       if (!refinement.success()) {
         ++refinement_failures[refinement.status];
         continue;
       }
+      successful_refinement_wcet_ms = std::max(
+        successful_refinement_wcet_ms, refinement.elapsed_ms);
       refined_candidate.path = std::move(refinement.path);
+      refined_candidate.minimum_local_clearance_margin_m =
+        refinement.minimum_signed_margin_m;
       refined_candidate.length_m = pathLength(refined_candidate.path);
       refined_candidate.path_hash = hashPath(refined_candidate.path);
       refined_candidate.occupancy_supported =
@@ -2837,22 +3195,6 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
     // use its own locally known satellite set; candidate and receiver raw PL
     // for that sample still use the exact same set.
     evaluateCandidateRiskSet(request, &budget, &refined_candidates);
-    if (std::any_of(
-        refined_candidates.begin(), refined_candidates.end(),
-        [](const P4ForwardCandidate & candidate) {
-          return !candidate.occupancy_supported ||
-                 !candidate.risk_supported;
-        }))
-    {
-      decision.candidates = std::move(refined_candidates);
-      if (configureAdvisorySelection(request, &decision)) {
-        return finalize(std::move(decision));
-      }
-      decision.action = P4ForwardAction::DEFER_RISK_SELECTION;
-      decision.trigger_reason = P4ForwardTriggerReason::SUPPORT_INCOMPLETE;
-      decision.reason = "refined_candidate_risk_support_incomplete";
-      return finalize(std::move(decision));
-    }
     decision.candidates = std::move(refined_candidates);
     const auto shortest_refined = std::min_element(
       decision.candidates.begin(), decision.candidates.end(),
@@ -2862,9 +3204,12 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
     eligible.clear();
     for (auto & candidate : decision.candidates) {
       if ((candidate.safety_gate_passed ||
-           candidate.controlled_degraded_candidate) &&
-        candidate.length_m <= shortest_refined *
-        request.limits.max_path_length_ratio + kEpsilon)
+           candidate.controlled_degraded_candidate ||
+           candidate.mission_degraded_candidate) &&
+          (request.limits.task_mode ==
+               iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT ||
+           candidate.length_m <= shortest_refined *
+               request.limits.max_path_length_ratio + kEpsilon))
       {
         eligible.push_back(&candidate);
       }
@@ -2872,6 +3217,22 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
     std::sort(eligible.begin(), eligible.end(), risk_order);
   }
   if (eligible.empty()) {
+    const bool refined_incomplete = std::any_of(
+      decision.candidates.begin(), decision.candidates.end(),
+      [](const P4ForwardCandidate & candidate) {
+        return !candidate.occupancy_supported || !candidate.risk_supported;
+      });
+    if (refined_incomplete && request.limits.task_mode ==
+          iap::GlobalNavigationTaskMode::STRICT_GLOBAL)
+    {
+      if (configureAdvisorySelection(request, &decision)) {
+        return finalize(std::move(decision));
+      }
+      decision.action = P4ForwardAction::DEFER_RISK_SELECTION;
+      decision.trigger_reason = P4ForwardTriggerReason::SUPPORT_INCOMPLETE;
+      decision.reason = "refined_candidate_risk_support_incomplete";
+      return finalize(std::move(decision));
+    }
     if (configureSafeLimitedCommonPrefix(
         request, graph, &budget, &decision))
     {
@@ -2895,14 +3256,20 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
     P4ForwardTriggerReason::MULTIPLE_CHANNELS :
     P4ForwardTriggerReason::SINGLE_CHANNEL;
   decision.reason = multiple_safe_channels ?
-    (selected->controlled_degraded_candidate
+    (selected->mission_degraded_candidate
+       ? "route_preference_mission_degraded_candidate_ready"
+       : selected->controlled_degraded_candidate
        ? "route_preference_controlled_degraded_candidate_ready"
        : "risk_ranked_topology_candidate_ready") :
     (decision.candidates.size() == 1 ?
-    (selected->controlled_degraded_candidate
+    (selected->mission_degraded_candidate
+       ? "single_mission_degraded_candidate"
+       : selected->controlled_degraded_candidate
        ? "single_controlled_degraded_candidate"
        : "single_channel") :
-    (selected->controlled_degraded_candidate
+    (selected->mission_degraded_candidate
+       ? "single_mission_degraded_candidate"
+       : selected->controlled_degraded_candidate
        ? "single_controlled_degraded_candidate"
        : "single_safe_channel"));
   return finalize(std::move(decision));
@@ -3200,6 +3567,17 @@ std::optional<P4ForwardDecision> P4ForwardDecisionWorker::poll(
   {
     return std::nullopt;
   }
+  return decision;
+}
+
+std::optional<P4ForwardDecision> P4ForwardDecisionWorker::pollCompleted()
+{
+  std::lock_guard<std::mutex> lock(impl_->mutex);
+  if (!impl_->result) {
+    return std::nullopt;
+  }
+  P4ForwardDecision decision = std::move(*impl_->result);
+  impl_->result.reset();
   return decision;
 }
 

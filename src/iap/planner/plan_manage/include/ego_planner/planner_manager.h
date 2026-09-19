@@ -246,6 +246,8 @@ namespace ego_planner
         std::numeric_limits<double>::quiet_NaN();
     iap::TrajectoryExecutionMode execution_mode =
         iap::TrajectoryExecutionMode::RECOVERY_OR_EXIT;
+    iap::GlobalNavigationTaskMode task_mode =
+        iap::GlobalNavigationTaskMode::STRICT_GLOBAL;
     std::string trajectory_assurance_hash;
     std::string local_motion_certificate_hash;
     double local_motion_minimum_margin_m =
@@ -718,6 +720,13 @@ namespace ego_planner
     void setP4ForwardDecisionForTest(P4ForwardDecision decision)
     {
       last_p4_forward_decision_ = std::move(decision);
+    }
+    void setP4TaskModeForTest(iap::GlobalNavigationTaskMode task_mode)
+    {
+      p4_global_exposure_policy_.task_mode = task_mode;
+      p4_forward_limits_.task_mode = task_mode;
+      p4_global_exposure_ledger_ =
+          iap::GlobalNavigationExposureLedger(p4_global_exposure_policy_);
     }
     void setP4VerticalSliceOptimizerForTest(
         BsplineOptimizer::Ptr optimizer, GridMap::Ptr grid_map)

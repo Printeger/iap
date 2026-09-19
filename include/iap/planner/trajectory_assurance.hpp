@@ -15,6 +15,7 @@ namespace iap {
 enum class TrajectoryExecutionMode {
   NORMAL_EXECUTION = 0,
   CONTROLLED_DEGRADED_EXECUTION,
+  MISSION_DEGRADED_EXECUTION,
   RECOVERY_OR_EXIT,
 };
 
@@ -30,7 +31,8 @@ struct GlobalNavigationExposureSample {
 };
 
 struct GlobalNavigationExposurePolicy {
-  bool hard_global = false;
+  GlobalNavigationTaskMode task_mode =
+      GlobalNavigationTaskMode::MISSION_BEST_EFFORT;
   double maximum_ratio = 1.05;
   double maximum_continuous_exceedance_s = 1.0;
   double maximum_exceedance_integral_ratio_s = 0.025;

@@ -91,6 +91,14 @@ bool sameSharedOwner(const std::shared_ptr<const T>& lhs,
   return !lhs.owner_before(rhs) && !rhs.owner_before(lhs);
 }
 
+bool p0LocalSlamHealthValid(const iap::CurrentIntegrityState& current) {
+  return !current.icp_degenerate && std::isfinite(current.icp_rmse) &&
+      current.icp_rmse >= 0.0 && std::isfinite(current.icp_condition) &&
+      current.icp_condition >= 0.0 &&
+      std::isfinite(current.icp_gamma_lidar) &&
+      current.icp_gamma_lidar >= 1.0;
+}
+
 enum class P0SemanticFailure {
   NONE = 0,
   OCCUPANCY_SNAPSHOT_UNAVAILABLE,
@@ -337,6 +345,7 @@ class PredictorModuleRiskProvider final : public iap::RiskPredictionProvider {
       iap::RollingSpatialSourceProvenance source_provenance,
       iap::PredictorModule module,
       iap::IntegritySnapshot snapshot,
+      iap::GlobalNavigationTaskMode task_mode,
       double evaluation_time_s, int worker_count, double hal_m, double val_m,
       std::chrono::steady_clock::time_point deadline,
       P0RiskGridWorkerPool* worker_pool,
@@ -353,6 +362,7 @@ class PredictorModuleRiskProvider final : public iap::RiskPredictionProvider {
     input.geometry = std::move(geometry);
     input.module = std::move(module);
     input.snapshot = snapshot_;
+    input.task_mode = task_mode;
     input.policy = retention_policy;
     input.provenance = source_provenance;
     input.occupancy_owner = occupancy_owner_;
@@ -771,6 +781,18 @@ P0RiskGridRuntime::Config P0RiskGridRuntime::declareAndReadConfig(
   config.predictor_gnss_epoch_policy = parsePredictorGnssEpochPolicy(
       node->declare_parameter<std::string>(
           "p0.predictor.gnss_epoch_policy", "auto"));
+  std::string task_mode = "mission_best_effort";
+  if (node->has_parameter("p4.assurance.task_mode")) {
+    node->get_parameter("p4.assurance.task_mode", task_mode);
+  } else {
+    task_mode = node->declare_parameter<std::string>(
+        "p4.assurance.task_mode", task_mode);
+  }
+  if (!iap::parseGlobalNavigationTaskMode(task_mode, &config.task_mode)) {
+    throw std::invalid_argument(
+        "p4.assurance.task_mode must be strict_global or "
+        "mission_best_effort");
+  }
   config.predictor_gnss_measured_epoch_support_radius_m =
       node->declare_parameter<double>(
           "p0.predictor.gnss_measured_epoch_support_radius_m", 0.0);
@@ -1162,11 +1184,11 @@ P0RiskGridRuntime::selectExecutionRiskSnapshotForEvaluation(
     const std::shared_ptr<const P0ExecutionRiskSnapshot>& latest,
     const std::shared_ptr<const P0ExecutionRiskSnapshot>& grid_bound,
     const double evaluation_time_s) {
-  if (latest && latest->freshAt(evaluation_time_s)) {
+  if (latest && latest->localFreshAt(evaluation_time_s)) {
     return latest;
   }
   if (grid_bound && grid_bound != latest &&
-      grid_bound->freshAt(evaluation_time_s)) {
+      grid_bound->localFreshAt(evaluation_time_s)) {
     return grid_bound;
   }
   return nullptr;
@@ -1179,11 +1201,11 @@ P0RiskGridRuntime::selectExecutionRiskSnapshotHistoryForEvaluation(
     const std::shared_ptr<const P0ExecutionRiskSnapshot>& grid_bound,
     const double evaluation_time_s) {
   for (auto it = completed.rbegin(); it != completed.rend(); ++it) {
-    if (*it && (*it)->freshAt(evaluation_time_s)) {
+    if (*it && (*it)->localFreshAt(evaluation_time_s)) {
       return *it;
     }
   }
-  if (grid_bound && grid_bound->freshAt(evaluation_time_s)) {
+  if (grid_bound && grid_bound->localFreshAt(evaluation_time_s)) {
     return grid_bound;
   }
   return nullptr;
@@ -1223,6 +1245,19 @@ bool P0RiskGridRuntime::executionSnapshotFreshAt(
       evaluation_time_s, config_.gnss_epoch_max_age_s);
 }
 
+bool P0RiskGridRuntime::executionSnapshotLocalFreshAt(
+    const std::shared_ptr<const P0ExecutionRiskSnapshot>& snapshot,
+    const double evaluation_time_s) const {
+  return snapshot && snapshot->localFreshAt(evaluation_time_s);
+}
+
+bool P0RiskGridRuntime::executionSnapshotGlobalFreshAt(
+    const std::shared_ptr<const P0ExecutionRiskSnapshot>& snapshot,
+    const double evaluation_time_s) const {
+  return snapshot && snapshot->globalFreshAt(
+      evaluation_time_s, config_.gnss_epoch_max_age_s);
+}
+
 bool P0RiskGridRuntime::currentIntegrityForExecution(
     const double evaluation_time_s,
     iap::CurrentIntegrityState* current) const {
@@ -1258,6 +1293,46 @@ bool P0RiskGridRuntime::currentIntegrityForExecution(
     selected_valid = latest_current_valid_ && latest_current_.valid;
   }
   if (!selected || !selected_valid || !std::isfinite(selected->stamp)) {
+    return false;
+  }
+  const double age_s = evaluation_time_s - selected->stamp;
+  if (age_s < -1.0e-6 ||
+      (config_.grid.stale_timeout_s >= 0.0 &&
+       age_s > config_.grid.stale_timeout_s)) {
+    return false;
+  }
+  *current = *selected;
+  return true;
+}
+
+bool P0RiskGridRuntime::currentLocalHealthForExecution(
+    const double evaluation_time_s,
+    iap::CurrentIntegrityState* current) const {
+  if (!current || !std::isfinite(evaluation_time_s)) {
+    return false;
+  }
+  std::lock_guard<std::mutex> lock(health_state_mutex_);
+  if (!current_integrity_seen_) {
+    return false;
+  }
+
+  const iap::CurrentIntegrityState* selected = nullptr;
+  double selected_stamp_s = -std::numeric_limits<double>::infinity();
+  for (const auto& [generation, sample] : current_integrity_history_) {
+    (void)generation;
+    if (std::isfinite(sample.stamp) &&
+        sample.stamp <= evaluation_time_s + 1.0e-6 &&
+        sample.stamp >= selected_stamp_s) {
+      selected = &sample;
+      selected_stamp_s = sample.stamp;
+    }
+  }
+  if (!selected && std::isfinite(latest_current_.stamp) &&
+      latest_current_.stamp <= evaluation_time_s + 1.0e-6) {
+    selected = &latest_current_;
+  }
+  if (!selected || !std::isfinite(selected->stamp) ||
+      !p0LocalSlamHealthValid(*selected)) {
     return false;
   }
   const double age_s = evaluation_time_s - selected->stamp;
@@ -1894,8 +1969,13 @@ void P0RiskGridRuntime::buildAndPublishExecutionSnapshot(
   iap::IntegritySnapshot integrity;
   PredictorSourceCapture sources;
   InputReadiness readiness;
-  if (!buildSnapshot(evaluation_time_s, &integrity, &sources, &readiness) ||
-      !integrity.current.valid ||
+  const bool snapshot_built = buildSnapshot(
+      evaluation_time_s, &integrity, &sources, &readiness);
+  const bool current_authority_available =
+      config_.task_mode == iap::GlobalNavigationTaskMode::STRICT_GLOBAL
+          ? integrity.current.valid
+          : p0LocalSlamHealthValid(integrity.current);
+  if (!snapshot_built || !current_authority_available ||
       !std::isfinite(integrity.current.stamp) ||
       evaluation_time_s < integrity.current.stamp ||
       evaluation_time_s - integrity.current.stamp >
@@ -1925,16 +2005,10 @@ void P0RiskGridRuntime::buildAndPublishExecutionSnapshot(
   advance_evaluation_time(integrity.current.stamp);
   advance_evaluation_time(sources.current_stamp);
   advance_evaluation_time(sources.gnss_epoch_stamp);
-  if (!std::isfinite(integrity.current.hpl) ||
-      !std::isfinite(integrity.current.vpl) ||
-      !std::isfinite(integrity.current.hal) ||
-      !std::isfinite(integrity.current.val) ||
-      integrity.current.hpl >= integrity.current.hal ||
-      integrity.current.vpl >= integrity.current.val) {
-    finish(P0ExecutionSnapshotAttemptStatus::INTEGRITY_UNSAFE,
-           "certified_integrity_not_below_alert_limit");
-    return;
-  }
+  // Global GNSS alert-limit status is carried by the immutable snapshot but
+  // is not a prerequisite for publishing local occupancy/support authority.
+  // STRICT_GLOBAL enforces it at trajectory assurance; best-effort missions
+  // may still move when local motion and certified braking remain safe.
 
   iap::PredictorParams predictor_params;
   predictor_params.freshness.enabled = true;
@@ -1983,11 +2057,14 @@ void P0RiskGridRuntime::buildAndPublishExecutionSnapshot(
       ? trusted_support->identity() : "strict_observation";
   std::ostringstream algorithm_identity;
   algorithm_identity << std::setprecision(17)
-      << "forward_risk_v3;clearance_transition_m="
+      << "forward_risk_v4;gnss_support_model=continuous_unknown_fraction_v1;"
+         "clearance_transition_m="
       << config_.predictor_gnss_clearance_transition_m
       << ";admission_epochs=" << config_.predictor_gnss_admission_epochs
       << ";geometry_solver=sherman_morrison_v1"
-      << ";execution_satellite_set=common_core_v1";
+      << ";execution_satellite_set=braking_window_core_v2"
+      << ";task_mode="
+      << iap::globalNavigationTaskModeName(config_.task_mode);
   source_identity.predictor_algorithm_identity = algorithm_identity.str();
   source_identity.alert_limit_policy_id =
       config_.grid.alert_limit_policy_id;
@@ -2144,8 +2221,11 @@ void P0RiskGridRuntime::buildAndPublishExecutionSnapshot(
   execution->publish_time_s = std::max(
       liveNowSeconds(), execution->evaluation_time_s);
   evidence.snapshot_publish_ros_stamp_s = execution->publish_time_s;
-  if (!execution->freshAt(
-          execution->publish_time_s, config_.gnss_epoch_max_age_s)) {
+  // Publishing local execution authority is driven by the registered map.
+  // A missing/stale GNSS epoch is carried as global-navigation evidence and
+  // is interpreted by the task policy; it must not suppress a locally fresh
+  // snapshot needed to certify braking and best-effort motion.
+  if (!execution->localFreshAt(execution->publish_time_s)) {
     finish(P0ExecutionSnapshotAttemptStatus::FINAL_FRESHNESS_FAILED,
            "snapshot_became_stale_before_publish");
     return;
@@ -2838,6 +2918,7 @@ void P0RiskGridRuntime::refreshTimerCallback() {
         std::move(lidar_map_points), std::move(lidar_fim_primitives),
         retention_policy, source_provenance,
         std::move(module), snapshot,
+        config_.task_mode,
         now_s,
         config_.predictor_effective_worker_count,
         config_.predictor_hal_m, config_.predictor_val_m,
@@ -3034,11 +3115,14 @@ void P0RiskGridRuntime::refreshTimerCallback() {
   {
     std::ostringstream predictor_identity;
     predictor_identity << std::setprecision(17)
-        << "forward_risk_v3;clearance_transition_m="
+        << "forward_risk_v4;gnss_support_model=continuous_unknown_fraction_v1;"
+           "clearance_transition_m="
         << config_.predictor_gnss_clearance_transition_m
         << ";admission_epochs=" << config_.predictor_gnss_admission_epochs
         << ";geometry_solver=sherman_morrison_v1"
-        << ";execution_satellite_set=common_core_v1";
+        << ";execution_satellite_set=braking_window_core_v2"
+        << ";task_mode="
+        << iap::globalNavigationTaskModeName(config_.task_mode);
     source_identity.predictor_algorithm_identity = predictor_identity.str();
   }
   source_identity.alert_limit_policy_id =
@@ -4585,6 +4669,7 @@ bool P0RiskGridRuntime::buildSnapshot(
   bool odom_valid = false;
   iap::CurrentIntegrityState current;
   bool current_valid = false;
+  bool current_seen = false;
   uint64_t prior_source_generation = 0;
   Eigen::Matrix3d lambda_prior = Eigen::Matrix3d::Zero();
   std::optional<iap::GnssEpoch> epoch;
@@ -4597,6 +4682,7 @@ bool P0RiskGridRuntime::buildSnapshot(
     odom_valid = latest_odom_pose_valid_;
     current = latest_current_;
     current_valid = latest_current_valid_;
+    current_seen = current_integrity_seen_;
     prior_source_generation = latest_current_generation_;
     if (config_.predictor_use_current_integrity_prior) {
       lambda_prior = currentPriorInformation(current);
@@ -4631,8 +4717,11 @@ bool P0RiskGridRuntime::buildSnapshot(
     source_capture->gnss_epoch_stamp =
         epoch ? epoch->stamp : std::numeric_limits<double>::quiet_NaN();
   }
-  const bool integrity_epoch_aligned = epoch && current.valid &&
-      current.gnss_valid &&
+  // A globally invalid/over-AL current solution does not erase explicit
+  // per-satellite Integrity exclusions.  Apply them whenever the exact epoch
+  // identity is aligned; MISSION_BEST_EFFORT changes motion policy, not which
+  // measurements the integrity monitor has excluded.
+  const bool integrity_epoch_aligned = epoch &&
       std::isfinite(current.gnss_epoch_stamp) &&
       std::isfinite(epoch->stamp) &&
       std::abs(current.gnss_epoch_stamp - epoch->stamp) <=
@@ -4647,7 +4736,11 @@ bool P0RiskGridRuntime::buildSnapshot(
       sat.excluded = sat.excluded || excluded.count(sat.sat_id) > 0;
     }
   }
-  if (!odom_valid || !current_valid) {
+  const bool best_effort_local_health =
+      config_.task_mode ==
+          iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT &&
+      current_seen && p0LocalSlamHealthValid(current);
+  if (!odom_valid || (!current_valid && !best_effort_local_health)) {
     return false;
   }
   double transaction_now_s = now_s;
@@ -4700,7 +4793,8 @@ bool P0RiskGridRuntime::buildSnapshot(
   if (snapshot->has_lambda_base) {
     snapshot->prior_source_generation = prior_source_generation;
   }
-  return snapshot->valid;
+  return snapshot->valid ||
+      (best_effort_local_health && snapshot->has_pose);
 }
 
 iap::RiskGridHealth P0RiskGridRuntime::addLidarPredictorInputHealth(

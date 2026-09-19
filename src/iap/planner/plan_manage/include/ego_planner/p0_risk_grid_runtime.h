@@ -151,12 +151,11 @@ struct P0ExecutionRiskSnapshot {
   std::function<iap::ForwardRiskBatchResult(
       const iap::ForwardRiskBatchRequest&)> diagnostic_forward_risk_batch;
 
-  bool freshAt(double now_s, double gnss_max_age_s) const {
+  bool localFreshAt(double now_s) const {
     if (execution_snapshot_id == 0u || !std::isfinite(now_s) ||
         !std::isfinite(evaluation_time_s) || now_s < evaluation_time_s ||
         !occupancy || !forward_risk_batch || risk_policy.frame_id != "map" ||
-        geometry_id.empty() || !integrity_anchor.current.valid ||
-        !std::isfinite(integrity_anchor.current.stamp)) {
+        geometry_id.empty()) {
       return false;
     }
     const double timeout = risk_policy.stale_timeout_s;
@@ -165,12 +164,34 @@ struct P0ExecutionRiskSnapshot {
       return std::isfinite(stamp) && age >= -1.0e-6 &&
           (timeout < 0.0 || age <= timeout);
     };
-    if (!fresh_stamp(occupancy->cloud_stamp_s) ||
-        !fresh_stamp(integrity_anchor.current.stamp)) {
+    if (!fresh_stamp(occupancy->cloud_stamp_s)) {
+      return false;
+    }
+    const auto& current = integrity_anchor.current;
+    if (!fresh_stamp(current.stamp) || current.icp_degenerate ||
+        !std::isfinite(current.icp_rmse) || current.icp_rmse < 0.0 ||
+        !std::isfinite(current.icp_condition) ||
+        current.icp_condition < 0.0 ||
+        !std::isfinite(current.icp_gamma_lidar) ||
+        current.icp_gamma_lidar < 1.0) {
       return false;
     }
     if (occupancy->trusted_local_map_support &&
         !occupancy->trusted_local_map_support->freshAt(now_s)) {
+      return false;
+    }
+    return lidar_generation == 0u || fresh_stamp(lidar_stamp_s);
+  }
+  bool globalFreshAt(double now_s, double gnss_max_age_s) const {
+    if (!std::isfinite(now_s) || !integrity_anchor.current.valid ||
+        !integrity_anchor.current.gnss_valid ||
+        !std::isfinite(integrity_anchor.current.stamp)) {
+      return false;
+    }
+    const double timeout = risk_policy.stale_timeout_s;
+    const double current_age = now_s - integrity_anchor.current.stamp;
+    if (current_age < -1.0e-6 ||
+        (timeout >= 0.0 && current_age > timeout)) {
       return false;
     }
     if (integrity_anchor.has_epoch) {
@@ -181,7 +202,10 @@ struct P0ExecutionRiskSnapshot {
         return false;
       }
     }
-    return lidar_generation == 0u || fresh_stamp(lidar_stamp_s);
+    return integrity_anchor.has_epoch;
+  }
+  bool freshAt(double now_s, double gnss_max_age_s) const {
+    return localFreshAt(now_s) && globalFreshAt(now_s, gnss_max_age_s);
   }
   bool freshAt(double now_s) const { return freshAt(now_s, gnss_max_age_s); }
 };
@@ -246,6 +270,8 @@ class P0RiskGridRuntime {
         iap::PredictorSourceMode::Fusion;
     iap::PredictorGnssEpochPolicy predictor_gnss_epoch_policy =
         iap::PredictorGnssEpochPolicy::Auto;
+    iap::GlobalNavigationTaskMode task_mode =
+        iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT;
     double predictor_gnss_measured_epoch_support_radius_m = 0.0;
     double predictor_gnss_measured_epoch_integrity_max_delta_s = 0.25;
     double predictor_gnss_clearance_transition_m = 0.0;
@@ -321,6 +347,12 @@ class P0RiskGridRuntime {
   bool executionSnapshotFreshAt(
       const std::shared_ptr<const P0ExecutionRiskSnapshot>& snapshot,
       double evaluation_time_s) const;
+  bool executionSnapshotLocalFreshAt(
+      const std::shared_ptr<const P0ExecutionRiskSnapshot>& snapshot,
+      double evaluation_time_s) const;
+  bool executionSnapshotGlobalFreshAt(
+      const std::shared_ptr<const P0ExecutionRiskSnapshot>& snapshot,
+      double evaluation_time_s) const;
   // Return the newest certified monitor sample at or before this evaluation
   // instant, only when it is valid and fresh.  ROS callbacks carrying the
   // next sensor timestamp can run before a planner callback for the preceding
@@ -329,6 +361,12 @@ class P0RiskGridRuntime {
   // callers must distinguish an unsafe current monitor from stale predictive
   // inputs and revoke immediately.
   bool currentIntegrityForExecution(
+      double evaluation_time_s, iap::CurrentIntegrityState* current) const;
+  // Best-effort execution requires a fresh, healthy SLAM registration report,
+  // but not finite/under-AL global GNSS protection levels. The newest causal
+  // sample is still selected so a later unhealthy report cannot be hidden by
+  // an older healthy one.
+  bool currentLocalHealthForExecution(
       double evaluation_time_s, iap::CurrentIntegrityState* current) const;
   iap::RiskGridHealth health() const;
   bool refreshOnceForTest();

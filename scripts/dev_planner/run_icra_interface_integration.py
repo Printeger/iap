@@ -254,7 +254,9 @@ def forest_scene_contract(
             "multipath": True,
             "skymask": False,
             "fault_injection": False,
-            "measured_epoch_support_radius_m": 0.45 if online else 0.0,
+            # Measured GNSS support is receiver-reference evidence only.  It
+            # must never create a metric support bubble around future points.
+            "measured_epoch_support_radius_m": 0.0,
             "measured_epoch_integrity_max_delta_s": 0.25,
             "clearance_transition_m": 0.4 if online else 0.0,
         },
@@ -517,7 +519,8 @@ def stage_launch_args(
         stage: str, scenario: str = DEFAULT_SCENARIO,
         forest_variant: str | None = None,
         gnss_arm: str = "bds",
-        gnss_core_policy: str = "braking_window_core") -> dict[str, str]:
+        gnss_core_policy: str = "braking_window_core",
+        task_mode: str = "mission_best_effort") -> dict[str, str]:
     if stage not in STAGES:
         raise ValueError(f"unknown stage: {stage}")
     if scenario not in (DEFAULT_SCENARIO, *FOREST_SCENARIOS):
@@ -528,15 +531,15 @@ def stage_launch_args(
         raise ValueError("forest variants require the dense forest scenario")
     if gnss_arm not in ("baseline", "bds"):
         raise ValueError(f"unsupported GNSS arm: {gnss_arm}")
-    if gnss_core_policy not in (
-            "braking_window_core", "whole_curve_common_core"):
+    if gnss_core_policy != "braking_window_core":
         raise ValueError(
-            f"unsupported GNSS core policy: {gnss_core_policy}")
+            "production runner requires braking_window_core; legacy cores "
+            "are diagnostic-only C++ fixtures")
     launch_args = dict(STAGES[stage].launch_args)
     launch_args["scenario"] = scenario
     launch_args["gnss_enabled_constellations"] = (
         "GPS,BDS,GAL,GLO" if gnss_arm == "bds" else "GPS,GAL,GLO")
-    launch_args["p4.forward.gnss_core_policy"] = gnss_core_policy
+    launch_args["p4.assurance.task_mode"] = task_mode
     if forest_variant == "baseline":
         launch_args.update({
             "p0.enable_risk_grid": "true",
@@ -1749,7 +1752,9 @@ def analyze_limited_prefix_records(
             failures.append("limited_prefix_direct_batch_p95_exceeded")
     confirmation_state_counts: dict[str, int] = {}
     execution_mode_counts: dict[str, int] = {}
+    task_mode_counts: dict[str, int] = {}
     controlled_degraded_events = []
+    mission_degraded_events = []
     for event in matching_events:
         state = str(event.get("risk_confirmation_state", "") or "")
         if state:
@@ -1758,8 +1763,13 @@ def analyze_limited_prefix_records(
         mode = str(event.get("execution_mode", "") or "")
         if mode:
             execution_mode_counts[mode] = execution_mode_counts.get(mode, 0) + 1
+        task_mode = str(event.get("task_mode", "") or "")
+        if task_mode:
+            task_mode_counts[task_mode] = task_mode_counts.get(task_mode, 0) + 1
         if mode == "CONTROLLED_DEGRADED_EXECUTION":
             controlled_degraded_events.append(event)
+        elif mode == "MISSION_DEGRADED_EXECUTION":
+            mission_degraded_events.append(event)
     armed_count = sum(1 for event in matching_events
                       if event.get("event") == "MARGINAL_UNSAFE_ARMED")
     recovered_count = sum(1 for event in matching_events
@@ -1902,10 +1912,14 @@ def analyze_limited_prefix_records(
             "HARD_UNSAFE_BRAKING", 0),
         risk_confirmation_state_counts=confirmation_state_counts,
         execution_mode_counts=execution_mode_counts,
+        task_mode_counts=task_mode_counts,
         controlled_degraded_execution_event_count=len(
             controlled_degraded_events),
         controlled_degraded_motion_proven=(
             bool(controlled_degraded_events) and actual_displacement >= 0.05),
+        mission_degraded_execution_event_count=len(mission_degraded_events),
+        mission_degraded_motion_proven=(
+            bool(mission_degraded_events) and actual_displacement >= 0.05),
         successor_reauthorization_count=successor_reauthorization_count,
         guard_prequeue_count=guard_prequeue_count,
         guard_cancel_request_count=guard_cancel_request_count,
@@ -4015,7 +4029,8 @@ def _run_one_impl(
         scenario: str = DEFAULT_SCENARIO,
         forest_variant: str | None = None,
         gnss_arm: str = "bds",
-        gnss_core_policy: str = "braking_window_core") -> dict:
+        gnss_core_policy: str = "braking_window_core",
+        task_mode: str = "mission_best_effort") -> dict:
     spec = STAGES[stage]
     duration_s = stage_duration_s(stage, scenario, forest_variant)
     run_root.mkdir(parents=True, exist_ok=False)
@@ -4049,7 +4064,8 @@ def _run_one_impl(
         return summary
 
     launch_args = stage_launch_args(
-        stage, scenario, forest_variant, gnss_arm, gnss_core_policy)
+        stage, scenario, forest_variant, gnss_arm, gnss_core_policy,
+        task_mode)
     if shutdown_variant == "baseline":
         launch_args.update({
             "experiment": "baseline_fused_nominal_off",
@@ -4229,7 +4245,8 @@ def _run_one(
         scenario: str = DEFAULT_SCENARIO,
         forest_variant: str | None = None,
         gnss_arm: str = "bds",
-        gnss_core_policy: str = "braking_window_core") -> dict:
+        gnss_core_policy: str = "braking_window_core",
+        task_mode: str = "mission_best_effort") -> dict:
     owned_processes: dict[str, subprocess.Popen] = {}
     owned_streams: dict[str, TextIO] = {}
     started = time.monotonic()
@@ -4237,7 +4254,7 @@ def _run_one(
         return _run_one_impl(
             stage, run_root, install_root, start_rviz, shutdown_variant,
             owned_processes, owned_streams, scenario, forest_variant, gnss_arm,
-            gnss_core_policy)
+            gnss_core_policy, task_mode)
     except KeyboardInterrupt:
         _emit(f"INTERRUPT stage={stage} cleanup=starting")
         process_status = {
@@ -4373,6 +4390,7 @@ def _run_main(args: argparse.Namespace) -> int:
     gnss_arm = getattr(args, "gnss_arm", "bds")
     gnss_core_policy = getattr(
         args, "gnss_core_policy", "braking_window_core")
+    task_mode = getattr(args, "task_mode", "mission_best_effort")
     results_root = args.results_root.resolve()
     session = _session_root(results_root)
     session.mkdir(parents=True, exist_ok=False)
@@ -4387,6 +4405,7 @@ def _run_main(args: argparse.Namespace) -> int:
         "forest_ab": forest_ab,
         "gnss_arm": gnss_arm,
         "gnss_core_policy": gnss_core_policy,
+        "task_mode": task_mode,
         "forest_scene": (
             forest_scene_contract(scenario, gnss_arm)
             if _is_forest_scenario(scenario) else None),
@@ -4447,7 +4466,8 @@ def _run_main(args: argparse.Namespace) -> int:
                         scenario=scenario,
                         forest_variant=forest_variant,
                         gnss_arm=gnss_arm,
-                        gnss_core_policy=gnss_core_policy)
+                        gnss_core_policy=gnss_core_policy,
+                        task_mode=task_mode)
                     session_summary["runs"].append({
                         "stage": stage,
                         "repetition": repetition,
@@ -4455,6 +4475,7 @@ def _run_main(args: argparse.Namespace) -> int:
                         "scenario": scenario,
                         "gnss_arm": gnss_arm,
                         "gnss_core_policy": gnss_core_policy,
+                        "task_mode": task_mode,
                         "path": str(run_root),
                         "result": summary["result"],
                         "failures": summary["failures"],
@@ -4518,11 +4539,10 @@ def main() -> int:
         "--gnss-arm", choices=("baseline", "bds"), default="bds",
         help="GNSS constellation arm; BDS is the default, baseline is explicit A/B")
     parser.add_argument(
-        "--gnss-core-policy",
-        choices=("braking_window_core", "whole_curve_common_core"),
-        default="braking_window_core",
-        help=("direct trajectory satellite-set policy; windowed is the "
-              "production default and whole-curve is the explicit legacy A/B arm"))
+        "--task-mode",
+        choices=("mission_best_effort", "strict_global"),
+        default="mission_best_effort",
+        help="global-navigation task contract; best-effort is the default")
     parser.add_argument("--results-root", type=Path,
                         default=DEFAULT_RESULTS_ROOT)
     parser.add_argument("--install-root", type=Path,

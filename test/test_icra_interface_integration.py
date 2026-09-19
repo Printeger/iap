@@ -332,13 +332,11 @@ class TestStageContracts(unittest.TestCase):
             "limited-prefix", MODULE.FOREST_SCENARIO, gnss_arm="bds")
         self.assertEqual(bds["gnss_enabled_constellations"],
                          "GPS,BDS,GAL,GLO")
-        self.assertEqual(bds["p4.forward.gnss_core_policy"],
-                         "braking_window_core")
-        legacy = MODULE.stage_launch_args(
-            "limited-prefix", MODULE.FOREST_SCENARIO,
-            gnss_arm="bds", gnss_core_policy="whole_curve_common_core")
-        self.assertEqual(legacy["p4.forward.gnss_core_policy"],
-                         "whole_curve_common_core")
+        self.assertNotIn("p4.forward.gnss_core_policy", bds)
+        with self.assertRaises(ValueError):
+            MODULE.stage_launch_args(
+                "limited-prefix", MODULE.FOREST_SCENARIO,
+                gnss_arm="bds", gnss_core_policy="whole_curve_common_core")
         self.assertEqual(
             MODULE.forest_scene_contract(
                 MODULE.FOREST_SCENARIO, "bds")["gnss"]
@@ -363,7 +361,7 @@ class TestStageContracts(unittest.TestCase):
         self.assertEqual(contract["gnss"]["enabled_constellations"],
                          ["GPS", "BDS", "GAL", "GLO"])
         self.assertEqual(
-            contract["gnss"]["measured_epoch_support_radius_m"], 0.45)
+            contract["gnss"]["measured_epoch_support_radius_m"], 0.0)
         self.assertEqual(
             contract["gnss"]["measured_epoch_integrity_max_delta_s"], 0.25)
         self.assertEqual(contract["gnss"]["clearance_transition_m"], 0.4)

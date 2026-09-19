@@ -300,9 +300,11 @@ void annotateGlobalNavigationBudgetFailures(
     const GlobalNavigationExposurePolicy& policy,
     const bool prior_episode_budget_exhausted) {
   if (!result) return;
+  const bool strict_global =
+      policy.task_mode == GlobalNavigationTaskMode::STRICT_GLOBAL;
   result->hard_global_exceedance =
-      policy.hard_global && result->peak_ratio > 1.0 + kEpsilon;
-  result->peak_ratio_exceeded = !policy.hard_global &&
+      strict_global && result->peak_ratio > 1.0 + kEpsilon;
+  result->peak_ratio_exceeded = !strict_global &&
       result->peak_ratio > policy.maximum_ratio + kEpsilon;
   result->continuous_exceedance_exceeded =
       result->maximum_continuous_exceedance_s >
@@ -342,6 +344,8 @@ const char* trajectoryExecutionModeName(const TrajectoryExecutionMode mode) {
       return "NORMAL_EXECUTION";
     case TrajectoryExecutionMode::CONTROLLED_DEGRADED_EXECUTION:
       return "CONTROLLED_DEGRADED_EXECUTION";
+    case TrajectoryExecutionMode::MISSION_DEGRADED_EXECUTION:
+      return "MISSION_DEGRADED_EXECUTION";
     case TrajectoryExecutionMode::RECOVERY_OR_EXIT:
       return "RECOVERY_OR_EXIT";
   }
@@ -582,7 +586,7 @@ GlobalNavigationExposureResult GlobalNavigationExposureEvaluator::evaluate(
       result.integral_budget_utilization});
 
   result.within_budget = result.normal ||
-      (!policy_.hard_global &&
+      (policy_.task_mode == GlobalNavigationTaskMode::MISSION_BEST_EFFORT &&
        result.peak_ratio <= policy_.maximum_ratio + kEpsilon &&
        result.maximum_continuous_exceedance_s <=
            policy_.maximum_continuous_exceedance_s + kEpsilon &&
@@ -922,7 +926,7 @@ TrajectoryAssuranceResult TrajectoryAssurance::evaluate(
         result.global.duration_budget_utilization,
         result.global.integral_budget_utilization});
     result.global.within_budget = !prior.budget_exhausted &&
-        !policy.hard_global &&
+        policy.task_mode == GlobalNavigationTaskMode::MISSION_BEST_EFFORT &&
         result.global.peak_ratio <= policy.maximum_ratio + kEpsilon &&
         result.global.maximum_continuous_exceedance_s <=
             policy.maximum_continuous_exceedance_s + kEpsilon &&
@@ -948,21 +952,30 @@ TrajectoryAssuranceResult TrajectoryAssurance::evaluate(
     result.reason = result.local.status == LocalMotionAssuranceStatus::UNKNOWN
                         ? "local_motion_assurance_unknown"
                         : "local_motion_assurance_unsafe";
-  } else if (!result.global.complete || !result.global.within_budget) {
-    result.reason = result.global.reason;
   } else if (result.global.normal) {
     result.mode = TrajectoryExecutionMode::NORMAL_EXECUTION;
     result.reason = "normal_execution";
-  } else if (result.global.recovery_predicted ||
-             request.certified_braking_available) {
+  } else if (result.global.complete && result.global.within_budget &&
+             (result.global.recovery_predicted ||
+              request.certified_braking_available)) {
     result.mode = TrajectoryExecutionMode::CONTROLLED_DEGRADED_EXECUTION;
     result.reason = "controlled_degraded_execution";
+  } else if (global_.policy().task_mode ==
+                 GlobalNavigationTaskMode::MISSION_BEST_EFFORT &&
+             request.certified_braking_available) {
+    result.mode = TrajectoryExecutionMode::MISSION_DEGRADED_EXECUTION;
+    result.reason = result.global.complete
+        ? "mission_degraded_global_budget_exceeded"
+        : "mission_degraded_global_evidence_incomplete";
   } else {
-    result.reason = "degraded_recovery_or_braking_unavailable";
+    result.reason = result.global.complete
+        ? result.global.reason
+        : "global_navigation_evidence_incomplete";
   }
 
   std::ostringstream canonical;
   canonical << trajectoryExecutionModeName(result.mode) << ';'
+            << globalNavigationTaskModeName(global_.policy().task_mode) << ';'
             << result.local.certificate_hash << ';' << std::hexfloat
             << result.global.peak_ratio << ';'
             << result.global.maximum_continuous_exceedance_s << ';'

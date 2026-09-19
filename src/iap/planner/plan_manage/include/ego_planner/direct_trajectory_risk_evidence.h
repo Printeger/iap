@@ -125,6 +125,8 @@ struct P4DirectTrajectoryRiskEvidence {
   std::uint64_t gnss_epoch_identity = 0;
   double evaluation_time_s = std::numeric_limits<double>::quiet_NaN();
   double compute_duration_ms = std::numeric_limits<double>::quiet_NaN();
+  iap::GlobalNavigationTaskMode task_mode =
+      iap::GlobalNavigationTaskMode::STRICT_GLOBAL;
   std::string satellite_set_policy = "whole_curve_common_core";
   std::string window_layout_hash;
   std::string window_satellite_sets_hash;

@@ -30,6 +30,39 @@
 
 namespace {
 
+TEST(P0ExecutionRiskSnapshotTest,
+     LocalFreshnessRemainsUsableWhenGlobalGnssEvidenceIsUnavailable) {
+  auto occupancy = std::make_shared<ego_planner::P0OccupancyEpoch>();
+  occupancy->generation = 7u;
+  occupancy->cloud_stamp_s = 100.0;
+
+  ego_planner::P0ExecutionRiskSnapshot snapshot;
+  snapshot.execution_snapshot_id = 9u;
+  snapshot.evaluation_time_s = 100.0;
+  snapshot.occupancy = occupancy;
+  snapshot.risk_policy.frame_id = "map";
+  snapshot.risk_policy.stale_timeout_s = 1.0;
+  snapshot.geometry_id = "geometry-7";
+  snapshot.forward_risk_batch = [](const iap::ForwardRiskBatchRequest&) {
+    return iap::ForwardRiskBatchResult{};
+  };
+  snapshot.integrity_anchor.current.valid = false;
+  snapshot.integrity_anchor.current.stamp = 100.0;
+  snapshot.integrity_anchor.current.icp_degenerate = false;
+  snapshot.integrity_anchor.current.icp_rmse = 0.03;
+  snapshot.integrity_anchor.current.icp_condition = 12.0;
+  snapshot.integrity_anchor.current.icp_gamma_lidar = 1.2;
+  snapshot.integrity_anchor.has_epoch = false;
+
+  EXPECT_TRUE(snapshot.localFreshAt(100.5));
+  EXPECT_FALSE(snapshot.globalFreshAt(100.5, 1.0));
+  EXPECT_FALSE(snapshot.freshAt(100.5, 1.0));
+  EXPECT_FALSE(snapshot.localFreshAt(101.1));
+
+  snapshot.integrity_anchor.current.icp_degenerate = true;
+  EXPECT_FALSE(snapshot.localFreshAt(100.5));
+}
+
 void ensure_rclcpp() {
   if (!rclcpp::ok()) {
     int argc = 0;
@@ -2049,6 +2082,10 @@ class P0RiskGridRuntimeStampTest : public ::testing::Test {
     runtime->latest_current_.hal = 10.0;
     runtime->latest_current_.val = 10.0;
     runtime->latest_current_.im = 9.0;
+    runtime->latest_current_.icp_degenerate = false;
+    runtime->latest_current_.icp_rmse = 0.03;
+    runtime->latest_current_.icp_condition = 12.0;
+    runtime->latest_current_.icp_gamma_lidar = 1.2;
     runtime->latest_current_.n_trunks_observed = 0;
     runtime->latest_current_.tdop = 20.0;
     runtime->latest_current_valid_ = true;
@@ -2083,6 +2120,19 @@ class P0RiskGridRuntimeStampTest : public ::testing::Test {
     runtime->latest_current_valid_ = valid;
   }
 
+  static void invalidateGlobalCurrentPreservingLocalHealth(
+      P0RiskGridRuntime* runtime) {
+    runtime->latest_current_.valid = false;
+    runtime->latest_current_.gnss_valid = false;
+    runtime->latest_current_.hpl =
+        std::numeric_limits<double>::quiet_NaN();
+    runtime->latest_current_.vpl =
+        std::numeric_limits<double>::quiet_NaN();
+    runtime->latest_current_.im =
+        std::numeric_limits<double>::quiet_NaN();
+    runtime->latest_current_valid_ = false;
+  }
+
   static void appendCurrentIntegrityHistory(
       P0RiskGridRuntime* runtime, const double stamp_s,
       const double hpl_m, const double vpl_m, const bool valid = true) {
@@ -2099,6 +2149,24 @@ class P0RiskGridRuntimeStampTest : public ::testing::Test {
         runtime->latest_current_generation_, sample);
     runtime->latest_current_ = sample;
     runtime->latest_current_valid_ = valid;
+    runtime->current_integrity_seen_ = true;
+  }
+
+  static void appendLocalHealthHistory(
+      P0RiskGridRuntime* runtime, const double stamp_s,
+      const bool global_valid, const bool icp_degenerate) {
+    iap::CurrentIntegrityState sample = runtime->latest_current_;
+    sample.stamp = stamp_s;
+    sample.valid = global_valid;
+    sample.icp_degenerate = icp_degenerate;
+    ++runtime->latest_current_generation_;
+    if (runtime->latest_current_generation_ == 0u) {
+      ++runtime->latest_current_generation_;
+    }
+    runtime->current_integrity_history_.emplace_back(
+        runtime->latest_current_generation_, sample);
+    runtime->latest_current_ = sample;
+    runtime->latest_current_valid_ = global_valid;
     runtime->current_integrity_seen_ = true;
   }
 
@@ -3771,6 +3839,29 @@ TEST_F(P0RiskGridRuntimeStampTest,
   EXPECT_FALSE(runtime.currentIntegrityForExecution(100.1, &current));
 }
 
+TEST_F(P0RiskGridRuntimeStampTest,
+       BestEffortLocalHealthDoesNotRequireGlobalIntegrityValidity) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_execution_local_health_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  auto config = enabledConfig();
+  config.grid.stale_timeout_s = 1.0;
+  P0RiskGridRuntime runtime(node, config, std::make_unique<FakeProvider>());
+
+  seedValidInputs(&runtime, 100.0, 100.0);
+  appendLocalHealthHistory(&runtime, 100.0, false, false);
+
+  iap::CurrentIntegrityState current;
+  EXPECT_FALSE(runtime.currentIntegrityForExecution(100.5, &current));
+  ASSERT_TRUE(runtime.currentLocalHealthForExecution(100.5, &current));
+  EXPECT_FALSE(current.valid);
+
+  appendLocalHealthHistory(&runtime, 100.1, false, true);
+  EXPECT_FALSE(runtime.currentLocalHealthForExecution(100.1, &current));
+  EXPECT_FALSE(runtime.currentLocalHealthForExecution(101.2, &current));
+}
+
 TEST_F(P0RiskGridRuntimeStampTest, StaleOdomOrCurrentPreventsSnapshot) {
   ensure_rclcpp();
   auto node = std::make_shared<rclcpp::Node>(
@@ -5027,6 +5118,63 @@ TEST_F(P0RiskGridRuntimeStampTest,
   ASSERT_NE(second, nullptr);
   EXPECT_EQ(second.get(), first.get());
   EXPECT_EQ(second->execution_snapshot_id, first->execution_snapshot_id);
+}
+
+TEST_F(P0RiskGridRuntimeStampTest,
+       BestEffortPublishesLocalExecutionSnapshotWithoutGlobalGnssValidity) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_best_effort_local_snapshot_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  auto config = enabledConfig();
+  config.online_mapping_mode = true;
+  config.task_mode =
+      iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT;
+  config.predictor_source_mode = iap::PredictorSourceMode::Fusion;
+  config.predictor_gnss_epoch_policy =
+      iap::PredictorGnssEpochPolicy::Optional;
+  config.grid.use_fixed_origin = true;
+  config.grid.fixed_origin_w = Eigen::Vector3d(-1.5, -1.5, -1.5);
+  config.grid.size_x_m = 30.0;
+  config.grid.size_y_m = 30.0;
+  config.grid.size_z_m = 6.0;
+  config.grid.geometry_id = "planning_lattice_v1:runtime_test";
+  P0RiskGridRuntime runtime(node, config);
+  useProductionExecutionSnapshotPath(&runtime);
+
+  const double stamp_s = node->now().seconds();
+  seedValidInputs(&runtime, stamp_s, stamp_s);
+  seedGnssEpoch(&runtime, stamp_s);
+  setCurrentExcludedPrns(&runtime, {300});
+  invalidateGlobalCurrentPreservingLocalHealth(&runtime);
+  const auto live_generation = std::make_shared<std::atomic<uint64_t>>(6u);
+  const auto source_owner = std::make_shared<const int>(6);
+  runtime.setOccupancyEpochFactory(
+      [live_generation, source_owner, stamp_s]() {
+        return makeOccupancyEpochCapture(
+            live_generation, 6u, stamp_s, "map", {}, source_owner,
+            [source_owner]() { return source_owner; }, 0.2,
+            Eigen::Vector3d(-1.5, -1.5, -1.5));
+      });
+
+  publishExecutionSnapshot(&runtime);
+  const auto execution = runtime.acquireExecutionRiskSnapshot();
+  const auto attempt = runtime.lastExecutionSnapshotAttempt();
+  ASSERT_NE(execution, nullptr) << attempt.reason;
+  EXPECT_EQ(attempt.status, P0ExecutionSnapshotAttemptStatus::PUBLISHED);
+  EXPECT_TRUE(execution->localFreshAt(stamp_s));
+  EXPECT_FALSE(execution->globalFreshAt(stamp_s,
+                                        config.gnss_epoch_max_age_s));
+  EXPECT_FALSE(execution->integrity_anchor.current.valid);
+  ASSERT_TRUE(execution->integrity_anchor.has_epoch);
+  const auto excluded = std::find_if(
+      execution->integrity_anchor.gnss_epoch.sats.begin(),
+      execution->integrity_anchor.gnss_epoch.sats.end(),
+      [](const auto &satellite) {
+        return satellite.sat_id == 300;
+      });
+  ASSERT_NE(excluded, execution->integrity_anchor.gnss_epoch.sats.end());
+  EXPECT_TRUE(excluded->excluded);
 }
 
 TEST_F(P0RiskGridRuntimeStampTest,

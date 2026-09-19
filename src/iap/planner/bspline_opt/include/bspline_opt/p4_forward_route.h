@@ -332,6 +332,7 @@ namespace ego_planner
     double occupancy_stamp_s = std::numeric_limits < double > ::quiet_NaN();
     double risk_stamp_s = std::numeric_limits < double > ::quiet_NaN();
 
+    bool locallyValid() const;
     bool valid() const;
     std::string canonical() const;
   };
@@ -362,11 +363,15 @@ namespace ego_planner
     int max_channel_searches = 32;
     double channel_enumeration_budget_ms = 60.0;
     double advisory_min_relative_improvement = 0.10;
+    // End-to-end budget for asynchronous topology/refinement work. Direct
+    // ForwardRisk calls remain bounded by compute_budget_ms below.
+    double route_compute_budget_ms = 500.0;
     double compute_budget_ms = 150.0;
     // Route preference may retain a globally degraded candidate only long
     // enough to build its actual terminal B-spline. These values must match
     // the final TrajectoryAssurance policy; they never grant motion authority.
-    bool hard_global = false;
+    iap::GlobalNavigationTaskMode task_mode =
+      iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT;
     double maximum_global_ratio = 1.05;
     double maximum_global_continuous_exceedance_s = 1.0;
     double maximum_global_exceedance_integral_ratio_s = 0.025;
@@ -487,10 +492,20 @@ namespace ego_planner
     // terminal B-spline to be generated and checked by TrajectoryAssurance;
     // it is never motion authority by itself.
     bool controlled_degraded_candidate = false;
+    bool mission_degraded_candidate = false;
     double global_peak_ratio = std::numeric_limits<double>::quiet_NaN();
+    double global_rolling_worst_ratio =
+      std::numeric_limits<double>::quiet_NaN();
     double global_continuous_exceedance_s = 0.0;
     double global_exceedance_integral_ratio_s = 0.0;
+    double global_recovery_time_s = std::numeric_limits<double>::infinity();
     double global_budget_utilization = std::numeric_limits<double>::infinity();
+    double minimum_local_clearance_margin_m =
+      std::numeric_limits<double>::quiet_NaN();
+    int minimum_gnss_used_satellite_count = 0;
+    double maximum_gnss_geometry_condition =
+      std::numeric_limits<double>::infinity();
+    double support_recovery_time_s = std::numeric_limits<double>::infinity();
     uint64_t channel_id = 0;
     bool formal_support = false;
     bool known_hazard_evidence = false;
@@ -655,6 +670,13 @@ namespace ego_planner
   bool p4ForwardDecisionMatchesRequest(
     const P4ForwardDecision & decision, const P4ForwardRequest & request,
     double movement_trigger_m = 0.5);
+  // A completed asynchronous search remains a usable geometric proposal when
+  // only the execution-risk snapshot advanced. The exact published curve is
+  // re-certified against the latest snapshot by the manager before authority
+  // is granted.
+  bool p4ForwardDecisionMatchesSearchRequest(
+    const P4ForwardDecision & decision, const P4ForwardRequest & request,
+    double movement_trigger_m = 0.5);
   bool p4ForwardDecisionMatchesLiveGeneration(
     const P4ForwardDecision & decision, uint64_t live_generation);
   bool p4CertifyForwardCandidate(
@@ -744,6 +766,7 @@ public:
     bool submit(P4ForwardRequest request);
     std::optional < P4ForwardDecision > poll(
       const P4ForwardSnapshotIdentity & expected_identity);
+    std::optional < P4ForwardDecision > pollCompleted();
     bool resultReady() const;
     bool busy() const;
 

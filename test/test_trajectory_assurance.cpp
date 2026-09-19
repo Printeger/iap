@@ -99,7 +99,7 @@ TEST(GlobalNavigationExposureTest, UsesGnssChannelInsteadOfFusedOrLidar) {
   EXPECT_DOUBLE_EQ(samples.front().val_m, 40.0);
 }
 
-TEST(TrajectoryAssuranceTest, PeakAboveFivePercentRequiresRecovery) {
+TEST(TrajectoryAssuranceTest, PeakAboveFivePercentIsMissionDegradedByDefault) {
   auto global = slightVplExceedance();
   global[1].vpl_m = 42.01;
   iap::TrajectoryAssuranceRequest request;
@@ -110,10 +110,10 @@ TEST(TrajectoryAssuranceTest, PeakAboveFivePercentRequiresRecovery) {
 
   const auto result = iap::TrajectoryAssurance().evaluate(request);
 
-  EXPECT_FALSE(result.authorized());
+  EXPECT_TRUE(result.authorized());
   EXPECT_EQ(result.mode,
-            iap::TrajectoryExecutionMode::RECOVERY_OR_EXIT);
-  EXPECT_EQ(result.reason, "global_navigation_budget_exceeded");
+            iap::TrajectoryExecutionMode::MISSION_DEGRADED_EXECUTION);
+  EXPECT_EQ(result.reason, "mission_degraded_global_budget_exceeded");
   EXPECT_TRUE(result.global.peak_ratio_exceeded);
   EXPECT_FALSE(result.global.continuous_exceedance_exceeded);
   EXPECT_FALSE(result.global.exceedance_integral_exceeded);
@@ -121,9 +121,48 @@ TEST(TrajectoryAssuranceTest, PeakAboveFivePercentRequiresRecovery) {
   EXPECT_EQ(result.global.budget_failure_causes, "PEAK_RATIO");
 }
 
+TEST(TrajectoryAssuranceTest,
+     BestEffortAuthorizesLocallySafeOverBudgetCurveAsMissionDegraded) {
+  auto global = slightVplExceedance();
+  global[1].vpl_m = 48.0;
+  iap::GlobalNavigationExposurePolicy policy;
+  policy.task_mode = iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT;
+  iap::TrajectoryAssuranceRequest request;
+  request.global_samples = global;
+  request.local_evidence = clearCurrentFrameEvidence();
+  request.local_curves = shortCurve();
+  request.certified_braking_available = true;
+
+  const auto result = iap::TrajectoryAssurance(policy).evaluate(request);
+
+  EXPECT_TRUE(result.authorized());
+  EXPECT_FALSE(result.global.within_budget);
+  EXPECT_EQ(result.mode,
+            iap::TrajectoryExecutionMode::MISSION_DEGRADED_EXECUTION);
+  EXPECT_EQ(result.reason, "mission_degraded_global_budget_exceeded");
+}
+
+TEST(TrajectoryAssuranceTest,
+     StrictGlobalStillRejectsAnyGlobalLimitExceedance) {
+  auto global = slightVplExceedance();
+  iap::GlobalNavigationExposurePolicy policy;
+  policy.task_mode = iap::GlobalNavigationTaskMode::STRICT_GLOBAL;
+  iap::TrajectoryAssuranceRequest request;
+  request.global_samples = global;
+  request.local_evidence = clearCurrentFrameEvidence();
+  request.local_curves = shortCurve();
+  request.certified_braking_available = true;
+
+  const auto result = iap::TrajectoryAssurance(policy).evaluate(request);
+
+  EXPECT_FALSE(result.authorized());
+  EXPECT_EQ(result.mode, iap::TrajectoryExecutionMode::RECOVERY_OR_EXIT);
+  EXPECT_TRUE(result.global.hard_global_exceedance);
+}
+
 TEST(GlobalNavigationExposureTest, HardGlobalRejectsAnyTaskLimitExceedance) {
   iap::GlobalNavigationExposurePolicy policy;
-  policy.hard_global = true;
+  policy.task_mode = iap::GlobalNavigationTaskMode::STRICT_GLOBAL;
   const auto result =
       iap::GlobalNavigationExposureEvaluator(policy).evaluate(
           slightVplExceedance());
@@ -184,7 +223,9 @@ TEST(TrajectoryAssuranceTest,
 
   const auto result = iap::TrajectoryAssurance().evaluate(request);
 
-  EXPECT_FALSE(result.authorized());
+  EXPECT_TRUE(result.authorized());
+  EXPECT_EQ(result.mode,
+            iap::TrajectoryExecutionMode::MISSION_DEGRADED_EXECUTION);
   EXPECT_TRUE(result.global.prior_episode_budget_exhausted);
   EXPECT_FALSE(result.global.peak_ratio_exceeded);
   EXPECT_FALSE(result.global.continuous_exceedance_exceeded);
@@ -618,7 +659,9 @@ TEST(TrajectoryAssuranceTest, ReplanningConsumesRemainingEpisodeBudget) {
   request.prior_global_episode.exceedance_integral_ratio_s = 0.021;
 
   const auto result = iap::TrajectoryAssurance().evaluate(request);
-  EXPECT_FALSE(result.authorized());
+  EXPECT_TRUE(result.authorized());
+  EXPECT_EQ(result.mode,
+            iap::TrajectoryExecutionMode::MISSION_DEGRADED_EXECUTION);
   EXPECT_GT(result.global.exceedance_integral_ratio_s, 0.025);
   EXPECT_EQ(result.global.reason,
             "global_navigation_episode_budget_exceeded");
@@ -665,7 +708,9 @@ TEST(TrajectoryAssuranceTest,
   request.prior_global_episode.exceedance_integral_ratio_s = 0.03;
 
   const auto result = iap::TrajectoryAssurance().evaluate(request);
-  EXPECT_FALSE(result.authorized());
+  EXPECT_TRUE(result.authorized());
+  EXPECT_EQ(result.mode,
+            iap::TrajectoryExecutionMode::MISSION_DEGRADED_EXECUTION);
   EXPECT_FALSE(result.global.within_budget);
   EXPECT_EQ(result.global.reason,
             "global_navigation_episode_budget_exceeded");

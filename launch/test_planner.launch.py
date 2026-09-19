@@ -1070,10 +1070,10 @@ DENSE_FOUR_FORK_FOREST_ONLINE_PRESET = {
     "p0.origin_z_m": "0.0",
     "p0.provider_cost_source": "pre_conservative_fim_ratio",
     "p0.require_safety_ratio_below_one_for_cost": "true",
-    # A received, same-epoch integrity-filtered observation supports only the
-    # 0.5 m RiskMap voxel containing the receiver. It does not certify nearby
-    # LOS; all other cells remain fail-closed on online observed-space support.
-    "p0.predictor.gnss_measured_epoch_support_radius_m": "0.45",
+    # Receiver measurement evidence is anchor-only. Candidate LOS support is
+    # always evaluated at the candidate and task policy decides whether
+    # incomplete sky support is strict-unknown or best-effort soft attenuation.
+    "p0.predictor.gnss_measured_epoch_support_radius_m": "0.0",
     "p0.predictor.gnss_measured_epoch_integrity_max_delta_s": "0.25",
     "p0.predictor.gnss.clearance_transition_m": "0.4",
     "p0.alert_limit_policy_id": "fixed_hal20_val40_v1",
@@ -1081,6 +1081,7 @@ DENSE_FOUR_FORK_FOREST_ONLINE_PRESET = {
     "p0.alert_limit_v_m": "40.0",
     "p4.fallback_to_original_when_risk_not_ready": "false",
     "p4.forward.reaction_time_s": "1.2",
+    "p4.assurance.task_mode": "mission_best_effort",
     "p4.forward.braking_accel_mps2": "1.5",
     "p4.forward.vehicle_radius_m": "0.35",
     "p4.forward.safety_margin_m": "0.5",
@@ -1088,6 +1089,7 @@ DENSE_FOUR_FORK_FOREST_ONLINE_PRESET = {
     "p4.forward.sensing_range_m": "10.0",
     "p4.forward.topology_resolution_m": "0.5",
     "p4.forward.nominal_query_speed_mps": "1.5",
+    "p4.forward.route_compute_budget_ms": "500.0",
     "p4.forward.compute_budget_ms": "150.0",
     "p4.forward.gnss_core_policy": "braking_window_core",
     "p4.forward.window_transition_overlap_s": "0.4",
@@ -2198,6 +2200,7 @@ ARG_DEFAULTS = [
     ("p4.profile_trace_path", ""),
     ("p4.cost_query_policy", "LEGACY_STRICT"),
     ("p4.forward.reaction_time_s", "1.2"),
+    ("p4.assurance.task_mode", "mission_best_effort"),
     ("p4.forward.braking_accel_mps2", "1.5"),
     ("p4.forward.vehicle_radius_m", "0.35"),
     ("p4.forward.safety_margin_m", "0.5"),
@@ -2205,8 +2208,8 @@ ARG_DEFAULTS = [
     ("p4.forward.sensing_range_m", "10.0"),
     ("p4.forward.topology_resolution_m", "0.5"),
     ("p4.forward.nominal_query_speed_mps", "1.5"),
+    ("p4.forward.route_compute_budget_ms", "500.0"),
     ("p4.forward.compute_budget_ms", "150.0"),
-    ("p4.forward.gnss_core_policy", "braking_window_core"),
     ("p4.forward.window_transition_overlap_s", "0.4"),
     ("p4.execution.successor_prepare_wcet_s", "0.8"),
     ("p4.execution.successor_control_switch_margin_s", "0.2"),
@@ -3387,6 +3390,7 @@ def _ego_planner_node(context, drone_id, planner_odom_topic, cloud_topic, camera
             {"p4.profile_trace_path": p4_profile_trace_path},
             {"p4.cost_query_policy": p4_cost_query_policy},
             {"p4.forward.reaction_time_s": _param_float(context, "p4.forward.reaction_time_s")},
+            {"p4.assurance.task_mode": LaunchConfiguration("p4.assurance.task_mode")},
             {"p4.forward.braking_accel_mps2": _param_float(context, "p4.forward.braking_accel_mps2")},
             {"p4.forward.vehicle_radius_m": _param_float(context, "p4.forward.vehicle_radius_m")},
             {"p4.forward.safety_margin_m": _param_float(context, "p4.forward.safety_margin_m")},
@@ -3394,8 +3398,11 @@ def _ego_planner_node(context, drone_id, planner_odom_topic, cloud_topic, camera
             {"p4.forward.sensing_range_m": _param_float(context, "p4.forward.sensing_range_m")},
             {"p4.forward.topology_resolution_m": _param_float(context, "p4.forward.topology_resolution_m")},
             {"p4.forward.nominal_query_speed_mps": _param_float(context, "p4.forward.nominal_query_speed_mps")},
+            {"p4.forward.route_compute_budget_ms": _param_float(context, "p4.forward.route_compute_budget_ms")},
             {"p4.forward.compute_budget_ms": _param_float(context, "p4.forward.compute_budget_ms")},
-            {"p4.forward.gnss_core_policy": LaunchConfiguration("p4.forward.gnss_core_policy")},
+            # Production authorization has one implementation. Legacy
+            # whole-curve cores remain available only in focused C++ tests.
+            {"p4.forward.gnss_core_policy": "braking_window_core"},
             {"p4.forward.window_transition_overlap_s": _param_float(context, "p4.forward.window_transition_overlap_s")},
             {"p4.execution.successor_prepare_wcet_s": _param_float(context, "p4.execution.successor_prepare_wcet_s")},
             {"p4.execution.successor_control_switch_margin_s": _param_float(context, "p4.execution.successor_control_switch_margin_s")},

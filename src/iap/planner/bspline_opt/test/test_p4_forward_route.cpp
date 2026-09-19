@@ -710,6 +710,10 @@ P4ForwardRequest straightRequest()
   request.snapshot_identity.risk_stamp_s = 10.0;
   request.limits.vehicle_radius_m = 0.0;
   request.limits.safety_margin_m = 0.0;
+  // The generic fixture preserves the historical fail-closed contract.
+  // Best-effort behavior is always opted into explicitly by its tests.
+  request.limits.task_mode =
+      iap::GlobalNavigationTaskMode::STRICT_GLOBAL;
   request.current_integrity_anchor.valid = true;
   request.current_integrity_anchor.stale = false;
   request.current_integrity_anchor.safety_state =
@@ -795,7 +799,7 @@ TEST(P4ForwardRoute,
 TEST(P4ForwardRoute, NonFiniteLimitsFailClosedBeforeBudgetConstruction)
 {
   auto request = straightRequest();
-  request.limits.compute_budget_ms =
+  request.limits.route_compute_budget_ms =
     std::numeric_limits<double>::quiet_NaN();
   std::string reason;
   EXPECT_FALSE(request.valid(&reason));
@@ -817,6 +821,37 @@ TEST(P4ForwardRoute, SnapshotIdentityRequiresCertifiedGnssEpoch)
   request.snapshot_identity.gnss_epoch_stamp_s =
     std::numeric_limits<double>::quiet_NaN();
   EXPECT_FALSE(request.snapshot_identity.valid());
+}
+
+TEST(P4ForwardRoute, BestEffortAcceptsLocallyValidSnapshotWithoutGnssEpoch)
+{
+  auto request = straightRequest();
+  request.limits.task_mode =
+      iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT;
+  request.snapshot_identity.gnss_epoch_identity = 0;
+  request.snapshot_identity.gnss_epoch_stamp_s =
+      std::numeric_limits<double>::quiet_NaN();
+  request.risk_batch = [](
+      const std::vector<P4ForwardRiskQuery> &queries, double,
+      std::vector<P4ForwardRiskSample> *samples) {
+    samples->assign(queries.size(), P4ForwardRiskSample{});
+    for (auto &sample : *samples) {
+      sample.stale = false;
+      sample.lidar_supported = true;
+      sample.fim_supported = true;
+      sample.safety_state = P4ForwardSafetyState::UNKNOWN;
+      sample.ranking_state = P4ForwardRankingState::INCOMPLETE;
+      sample.unknown_coverage = 1.0;
+      sample.reason = "gnss_epoch_unavailable";
+    }
+    return true;
+  };
+
+  const auto decision = P4ForwardRoutePlanner().decide(request);
+
+  EXPECT_NE(decision.trigger_reason, P4ForwardTriggerReason::REQUEST_INVALID);
+  EXPECT_EQ(decision.action, P4ForwardAction::CANDIDATE_READY);
+  EXPECT_FALSE(decision.selected_guide.empty());
 }
 
 TEST(P4ForwardRoute, NonFiniteNominalReferenceFailsClosed)
@@ -852,6 +887,8 @@ TEST(P4ForwardRoute,
   BriefGlobalDegradationRemainsCandidateWithoutReceivingAuthority)
 {
   auto request = straightRequest();
+  request.limits.task_mode =
+      iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT;
   request.risk = [](const Eigen::Vector3d &, const double query_time_s) {
       P4ForwardRiskSample sample;
       const bool brief_exceedance =
@@ -888,7 +925,7 @@ TEST(P4ForwardRoute,
 TEST(P4ForwardRoute, HardGlobalTaskDoesNotRetainDegradedCandidate)
 {
   auto request = straightRequest();
-  request.limits.hard_global = true;
+  request.limits.task_mode = iap::GlobalNavigationTaskMode::STRICT_GLOBAL;
   request.risk = [](const Eigen::Vector3d &, const double query_time_s) {
       P4ForwardRiskSample sample;
       const bool exceedance = query_time_s >= 10.2;
@@ -1115,10 +1152,39 @@ TEST(P4ForwardRoute, MissingIndividualSourceSupportDefersSelection)
             P4ForwardTriggerReason::SUPPORT_INCOMPLETE);
 }
 
+TEST(P4ForwardRoute, BestEffortDoesNotRelabelLocalSupportFailureAsGnssDegraded)
+{
+  auto request = straightRequest();
+  request.limits.task_mode =
+    iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT;
+  request.risk = [](const Eigen::Vector3d &, double) {
+      P4ForwardRiskSample sample;
+      sample.valid = false;
+      sample.stale = false;
+      sample.gnss_supported = true;
+      sample.lidar_supported = false;
+      sample.fim_supported = false;
+      sample.safety_state = P4ForwardSafetyState::UNKNOWN;
+      sample.ranking_state = P4ForwardRankingState::INCOMPLETE;
+      sample.reason = "LIDAR_SUPPORT_MISSING";
+      return sample;
+    };
+  bindTestRiskBatch(&request);
+
+  const auto decision = P4ForwardRoutePlanner().decide(request);
+
+  EXPECT_NE(decision.action, P4ForwardAction::CANDIDATE_READY);
+  EXPECT_TRUE(std::none_of(
+      decision.candidates.begin(), decision.candidates.end(),
+      [](const P4ForwardCandidate & candidate) {
+        return candidate.mission_degraded_candidate;
+      }));
+}
+
 TEST(P4ForwardRoute, ComputeBudgetIsADeadlineForAllExitPaths)
 {
   auto request = straightRequest();
-  request.limits.compute_budget_ms = 0.001;
+  request.limits.route_compute_budget_ms = 0.001;
   const auto started = std::chrono::steady_clock::now();
   const auto decision = P4ForwardRoutePlanner().decide(request);
   const double elapsed_ms = std::chrono::duration<double, std::milli>(
@@ -1132,7 +1198,7 @@ TEST(P4ForwardRoute, ComputeBudgetIsADeadlineForAllExitPaths)
 TEST(P4ForwardRoute, NativeRefinementRunsInsideEndToEndWorkerBudget)
 {
   auto request = straightRequest();
-  request.limits.compute_budget_ms = 50.0;
+  request.limits.route_compute_budget_ms = 50.0;
   bool refinement_called = false;
   request.refine = [&refinement_called](
     const std::vector<Eigen::Vector3d> &, double, double)
@@ -1204,7 +1270,7 @@ TEST(P4ForwardRoute, AsyncResultBindsSnapshotPositionAndTarget)
 TEST(P4ForwardRoute, WorkerShutdownIsBoundedByTheComputeDeadline)
 {
   auto request = straightRequest();
-  request.limits.compute_budget_ms = 1.0;
+  request.limits.route_compute_budget_ms = 1.0;
   request.geometry = [](const Eigen::Vector3d &) {
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
       return P4ForwardGeometryState::CLEAR;
@@ -1389,6 +1455,239 @@ TEST(P4ForwardRoute, OccupiedSeparatorCreatesTwoRiskRankedChannels)
   const auto selected_mid = decision.selected_guide[
     decision.selected_guide.size() / 2];
   EXPECT_LT(selected_mid.y(), 0.0);
+}
+
+TEST(P4ForwardRoute, BestEffortChoosesLeastBadWhenEveryChannelExceedsBudget)
+{
+  auto request = straightRequest();
+  request.limits.task_mode =
+      iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT;
+  request.geometry = [](const Eigen::Vector3d & point) {
+      if (point.x() >= 2.0 && point.x() <= 4.0 &&
+          std::abs(point.y()) <= 0.6) {
+        return P4ForwardGeometryState::OCCUPIED;
+      }
+      return std::abs(point.y()) > 2.5 ?
+          P4ForwardGeometryState::OCCUPIED : P4ForwardGeometryState::CLEAR;
+    };
+  request.risk = [](const Eigen::Vector3d & point, double) {
+      P4ForwardRiskSample sample;
+      sample.valid = true;
+      sample.stale = false;
+      sample.gnss_supported = true;
+      sample.lidar_supported = true;
+      sample.fim_supported = true;
+      const bool branch_region = point.x() >= 2.0 && point.x() <= 4.5;
+      const double ratio = !branch_region ? 0.9 :
+          (point.y() < 0.0 ? 1.10 : 1.35);
+      sample.safety_ratio = ratio;
+      sample.fim_ratio = point.y() < 0.0 ? 0.25 : 0.35;
+      sample.hal = 10.0;
+      sample.val = 20.0;
+      sample.gnss_anchored_hpl = ratio * sample.hal;
+      sample.gnss_anchored_vpl = ratio * sample.val;
+      sample.reason = ratio > 1.0 ? "SAFETY_LIMIT_EXCEEDED" : "ok";
+      return sample;
+    };
+  bindTestRiskBatch(&request);
+
+  const auto decision = P4ForwardRoutePlanner().decide(request);
+
+  ASSERT_EQ(decision.action, P4ForwardAction::CANDIDATE_READY)
+      << decision.reason;
+  ASSERT_GE(decision.candidates.size(), 2u);
+  const auto selected = std::find_if(
+      decision.candidates.begin(), decision.candidates.end(),
+      [&decision](const P4ForwardCandidate & candidate) {
+        return candidate.candidate_id == decision.selected_candidate_id;
+      });
+  ASSERT_NE(selected, decision.candidates.end());
+  EXPECT_TRUE(selected->mission_degraded_candidate);
+  EXPECT_GT(selected->global_budget_utilization, 1.0);
+  EXPECT_NEAR(selected->global_peak_ratio, 1.10, 1.0e-9);
+  EXPECT_LT(decision.selected_guide[decision.selected_guide.size() / 2].y(),
+            0.0);
+}
+
+TEST(P4ForwardRoute,
+     BestEffortRefinementCertifiesOnlyTheRefinedCandidateSet)
+{
+  auto request = straightRequest();
+  request.limits.task_mode =
+      iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT;
+  request.limits.route_compute_budget_ms = 300.0;
+  request.limits.compute_budget_ms = 37.0;
+  bindTestRiskBatch(&request);
+  const auto production_batch = request.risk_batch;
+  int batch_calls = 0;
+  double observed_direct_budget_ms = 0.0;
+  request.risk_batch = [&batch_calls, &observed_direct_budget_ms,
+      production_batch](
+      const std::vector<P4ForwardRiskQuery> &queries,
+      const double budget_ms, std::vector<P4ForwardRiskSample> *samples) {
+    ++batch_calls;
+    observed_direct_budget_ms = budget_ms;
+    return production_batch(queries, budget_ms, samples);
+  };
+  request.refine = [](
+      const std::vector<Eigen::Vector3d> &path, double, double) {
+    ego_planner::P4ForwardRefinementResult result;
+    result.status = ego_planner::P4ForwardRefinementStatus::SUCCESS;
+    result.path = path;
+    return result;
+  };
+
+  const auto decision = P4ForwardRoutePlanner().decide(request);
+
+  ASSERT_EQ(decision.action, P4ForwardAction::CANDIDATE_READY)
+      << decision.reason;
+  EXPECT_EQ(batch_calls, 2);
+  EXPECT_GT(observed_direct_budget_ms, 0.0);
+  EXPECT_LE(observed_direct_budget_ms,
+            request.limits.compute_budget_ms);
+  ASSERT_FALSE(decision.candidates.empty());
+  EXPECT_TRUE(decision.candidates.front().risk_supported);
+}
+
+TEST(P4ForwardRoute,
+     BestEffortStopsRefiningToPreserveDirectAuthorizationBudget)
+{
+  auto request = straightRequest();
+  request.limits.task_mode =
+      iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT;
+  request.limits.route_compute_budget_ms = 150.0;
+  request.limits.compute_budget_ms = 20.0;
+  request.geometry = [](const Eigen::Vector3d &point) {
+    if (point.x() >= 2.0 && point.x() <= 4.0 &&
+        std::abs(point.y()) <= 0.6) {
+      return P4ForwardGeometryState::OCCUPIED;
+    }
+    return std::abs(point.y()) > 2.5 ?
+      P4ForwardGeometryState::OCCUPIED : P4ForwardGeometryState::CLEAR;
+  };
+  request.risk = [](const Eigen::Vector3d &point, double) {
+    P4ForwardRiskSample sample;
+    sample.valid = true;
+    sample.stale = false;
+    sample.gnss_supported = true;
+    sample.lidar_supported = true;
+    sample.fim_supported = true;
+    sample.safety_state = P4ForwardSafetyState::SAFE;
+    sample.ranking_state = P4ForwardRankingState::COMPARABLE;
+    sample.safety_ratio = point.y() > 0.2 ? 0.7 :
+      point.y() < -0.2 ? 0.9 : 0.8;
+    sample.hpl = 10.0 * sample.safety_ratio;
+    sample.vpl = 20.0 * sample.safety_ratio;
+    sample.hal = 10.0;
+    sample.val = 20.0;
+    sample.fim_ratio = 0.3;
+    sample.reason = "ok";
+    return sample;
+  };
+  bindTestRiskBatch(&request);
+  const auto production_batch = request.risk_batch;
+  int refinement_calls = 0;
+  int batch_calls = 0;
+  double observed_direct_budget_ms = 0.0;
+  request.refine = [&refinement_calls](
+      const std::vector<Eigen::Vector3d> &path, double,
+      const double budget_ms) {
+    ++refinement_calls;
+    ego_planner::P4ForwardRefinementResult result;
+    if (budget_ms < 30.0) {
+      result.status = ego_planner::P4ForwardRefinementStatus::BUDGET_EXHAUSTED;
+      result.elapsed_ms = budget_ms;
+      return result;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(30));
+    result.status = ego_planner::P4ForwardRefinementStatus::SUCCESS;
+    result.path = path;
+    result.elapsed_ms = 100.0;
+    return result;
+  };
+  request.risk_batch = [&batch_calls, &observed_direct_budget_ms,
+      production_batch](
+      const std::vector<P4ForwardRiskQuery> &queries,
+      const double budget_ms, std::vector<P4ForwardRiskSample> *samples) {
+    ++batch_calls;
+    observed_direct_budget_ms = budget_ms;
+    return production_batch(queries, budget_ms, samples);
+  };
+
+  const auto decision = P4ForwardRoutePlanner().decide(request);
+
+  ASSERT_EQ(decision.action, P4ForwardAction::CANDIDATE_READY)
+      << decision.reason;
+  EXPECT_EQ(refinement_calls, 1);
+  EXPECT_EQ(batch_calls, 2);
+  EXPECT_GT(observed_direct_budget_ms, 0.0);
+  EXPECT_LE(observed_direct_budget_ms,
+            request.limits.compute_budget_ms);
+  ASSERT_EQ(decision.candidates.size(), 1u);
+  EXPECT_TRUE(decision.candidates.front().risk_supported);
+  EXPECT_GT(std::max_element(
+      decision.candidates.front().path.begin(),
+      decision.candidates.front().path.end(),
+      [](const Eigen::Vector3d &lhs, const Eigen::Vector3d &rhs) {
+        return lhs.y() < rhs.y();
+      })->y(), 0.2);
+}
+
+TEST(P4ForwardRoute,
+     StrictGlobalIncompleteAlternativeDoesNotBlockCompleteSafeChannel)
+{
+  auto request = straightRequest();
+  request.limits.task_mode = iap::GlobalNavigationTaskMode::STRICT_GLOBAL;
+  request.limits.compute_budget_ms = 500.0;
+  request.limits.channel_enumeration_budget_ms = 300.0;
+  request.geometry = [](const Eigen::Vector3d &point) {
+    if (point.x() >= 2.0 && point.x() <= 4.0 &&
+        std::abs(point.y()) <= 0.6) {
+      return P4ForwardGeometryState::OCCUPIED;
+    }
+    return std::abs(point.y()) > 2.5 ?
+      P4ForwardGeometryState::OCCUPIED : P4ForwardGeometryState::CLEAR;
+  };
+  request.risk_batch = [](
+      const std::vector<P4ForwardRiskQuery> &queries, double,
+      std::vector<P4ForwardRiskSample> *samples) {
+    samples->clear();
+    samples->reserve(queries.size());
+    for (const auto &query : queries) {
+      P4ForwardRiskSample sample;
+      const bool incomplete = query.position.y() > 0.2;
+      sample.valid = !incomplete;
+      sample.stale = false;
+      sample.gnss_supported = !incomplete;
+      sample.lidar_supported = true;
+      sample.fim_supported = true;
+      sample.safety_state = incomplete ? P4ForwardSafetyState::UNKNOWN :
+        P4ForwardSafetyState::SAFE;
+      sample.ranking_state = incomplete ?
+        P4ForwardRankingState::INCOMPLETE :
+        P4ForwardRankingState::COMPARABLE;
+      sample.safety_ratio = incomplete ? NAN : 0.5;
+      sample.hpl = incomplete ? NAN : 5.0;
+      sample.vpl = incomplete ? NAN : 10.0;
+      sample.hal = 10.0;
+      sample.val = 20.0;
+      sample.fim_ratio = 0.3;
+      sample.reason = incomplete ? "GNSS_SKY_UNKNOWN" : "ok";
+      samples->push_back(std::move(sample));
+    }
+    return true;
+  };
+
+  const auto decision = P4ForwardRoutePlanner().decide(request);
+
+  ASSERT_EQ(decision.action, P4ForwardAction::CANDIDATE_READY)
+    << decision.reason;
+  ASSERT_FALSE(decision.selected_guide.empty());
+  EXPECT_LT(std::min_element(
+      decision.selected_guide.begin(), decision.selected_guide.end(),
+      [](const Eigen::Vector3d &lhs, const Eigen::Vector3d &rhs) {
+        return lhs.y() < rhs.y();
+      })->y(), -0.2);
 }
 
 TEST(P4ForwardRoute, ClearanceAwareSearchSkipsNarrowShortcutAndFindsBothSides)
@@ -2338,6 +2637,34 @@ TEST(P4ForwardRoute, AsyncWorkerDropsResultFromDifferentSnapshotIdentity)
   const auto current = worker.poll(newer);
   ASSERT_TRUE(current.has_value());
   EXPECT_EQ(current->snapshot_identity.canonical(), newer.canonical());
+}
+
+TEST(P4ForwardRoute,
+     AsyncWorkerCanReturnFrozenSearchResultForLatestSnapshotReauthorization)
+{
+  ego_planner::P4ForwardDecisionWorker worker;
+  const auto request = straightRequest();
+  ASSERT_TRUE(worker.submit(request));
+  for (int attempt = 0; attempt < 100 && worker.busy(); ++attempt) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  }
+  const auto frozen = worker.pollCompleted();
+  ASSERT_TRUE(frozen.has_value());
+  EXPECT_EQ(frozen->snapshot_identity.canonical(),
+            request.snapshot_identity.canonical());
+
+  auto latest = request;
+  ++latest.snapshot_identity.risk_generation;
+  ++latest.snapshot_identity.execution_snapshot_id;
+  ++latest.snapshot_identity.gnss_epoch_identity;
+  EXPECT_TRUE(ego_planner::p4ForwardDecisionMatchesSearchRequest(
+      *frozen, latest, 0.5));
+  EXPECT_FALSE(ego_planner::p4ForwardDecisionMatchesRequest(
+      *frozen, latest, 0.5));
+
+  latest.snapshot_identity.geometry_id = "different_geometry";
+  EXPECT_FALSE(ego_planner::p4ForwardDecisionMatchesSearchRequest(
+      *frozen, latest, 0.5));
 }
 
 TEST(P4ForwardRoute, AsyncWorkerSignalsCompletedResultBeforePolling)
