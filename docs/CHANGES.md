@@ -3,6 +3,63 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(astar-root-cause-and-precertified-successor): IAP-RQ-312 /
+  IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 — repair the recorded successor A*
+  failure where endpoint adjustment produced index `(36,14,14)` in a
+  `36x28x28` pool. The outer sentinel is again non-searchable, endpoint
+  adjustment is bounded, and P4 now backs a blocked suffix toward the start to
+  the farthest frozen-occupancy/clearance-safe point with meaningful progress
+  before A* is invoked. Refinement distinguishes target-suffix, pool-bounds,
+  raw-obstacle, clearance-envelope, corridor-boundary, budget and unclassified
+  failures and records pool/world/corridor bounds, endpoint indices, nearest
+  reachable frontier and rejection counts. The first new failure identity also
+  carries a bounded frozen cell crop for deterministic CPU replay, and a
+  backed-off suffix must cover the current reaction/braking progress. A
+  vehicle radius or fixed safety margin is not counted again in that progress
+  because the shared clearance evaluator already applies it. The selected
+  safe guide now owns the actual curve terminal, and the prepare-only pass
+  binds its start to the parent's exact future switch state only after the
+  asynchronous route result has entered `CURVE_PREPARING`; the earlier FSM
+  request site is intentionally not an authority for this future state. A
+  completed successor route now
+  immediately runs a prepare-only pass that builds the exact terminal-stop
+  B-spline, fixed braking-window plan and braking library and completes full
+  dynamics, collision, local-clearance, direct-GNSS and non-mutating P5 preview
+  checks. `PREPARED_CERTIFIED` is written only after that preview and the
+  complete bundle cache succeed. The parent remains untouched. At the fixed
+  switch anchor the exact cached curve is loaded and direct assurance plus
+  final P5 are always recomputed, even for the same snapshot ID, so current
+  exposure state cannot be bypassed; the
+  accepted collision generation is not rolled back to the preparation
+  snapshot. Review repairs prohibit activation before the fixed anchor,
+  compare `parent(anchor)` with `child(0)` for late callbacks, bypass the
+  obsolete P1/RiskGrid publish gate on cached handoff, retain the non-mutating
+  P5 preview result in the bundle, and mark every successor-route P5/cache
+  rejection `FAILED` instead of leaving `CURVE_PREPARING` stuck. Frozen A*
+  crops now cover the searchable interior and provide a live-map-independent
+  CPU replay adapter; deadline exhaustion skips or aborts crop work. Runner
+  analysis accepts current v14/v15 evidence and reports typed
+  refinement causes and `successor_prepared_certified` counts.
+  Three post-fix forest smokes each produced a certified cached successor
+  before its switch anchor (prepare maxima `4.06--4.51 ms`; representative
+  `actual_progress=0.702 m` against a dynamic requirement of `0.281 m`). All
+  three moved `2.142--2.875 m`, and none reproduced an A* pool-bound failure.
+  No seamless switch was observed: two parents entered their certified brake
+  before the later anchor while the runner reported current local-map latency;
+  the third reached handoff but latest-snapshot reauthorization found
+  `local_clearance_margin_not_positive` and retained the parent to its endpoint.
+  Thus the runs prove advance curve preparation and a real latest-snapshot
+  semantic rejection, not seamless rolling execution; current-map latency and
+  changed local clearance remain independent live blockers. A fourth smoke on
+  the final post-review build again prepared and certified one successor with
+  positive final local margin (`0.0574 m`) and no A* pool-bound failure, but
+  the parent moved only `0.571 m` before the runtime GNSS exposure check found
+  peak ratio `1.387` and excess integral `0.04979 ratio*s` (limits `1.05` and
+  `0.025`) and completed its certified brake. Direct checks remained fast
+  (p95 `9.85 ms`, max `14.63 ms`). This is a real global-navigation budget
+  rejection before the fixed switch anchor, not route-search or preparation
+  latency; the runner also retained the independent current-map latency
+  performance warning.
 - fix(deadline-driven-successor-fast-path): IAP-RQ-312 / IAP-RQ-320 /
   IAP-RQ-400 / IAP-RQ-410 — move LIMITED_PREFIX successor preparation out of
   the ordinary 0.5 s P4 submission gate. A single-flight/latest-wins worker is

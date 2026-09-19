@@ -240,19 +240,28 @@
   time minus the configured generation WCET, direct authorization budget,
   latest-snapshot reauthorization budget, command-switch margin and scheduler
   guard (defaults total 1.5 s). It is a deadline, never a reason to wait.
-  A completed route guide is retained until the immutable
-  endpoint-minus-command-switch-margin anchor (and never before the 1.0 s
-  minimum commitment), so early work is neither discarded nor repeated and
-  cannot silently redefine its handoff state.
+  A completed route guide immediately enters a prepare-only planner pass. That
+  pass freezes the immutable endpoint-minus-command-switch-margin anchor,
+  binds the optimized curve start to the parent's position, velocity and
+  acceleration at that absolute anchor after the asynchronous route result is
+  delivered, and takes the selected guide endpoint as the curve terminal,
+  builds the final terminal-stop B-spline, braking library and risk-window
+  layout, and completes dynamics, collision, local-clearance, direct-GNSS and
+  P5-preview certification while the parent keeps executing.
   The lane is single-flight/latest-wins, bypasses ordinary P4 rate limiting,
   and reuses the committed channel/guide before one bounded fallback to
   topology/A* only when that frozen suffix has a geometry, clearance or
   corridor failure. GNSS, support, freshness or budget failures do not trigger
   an unrelated channel search.
   While it runs, ordinary periodic planning cannot reset the parent. The
-  current implementation deliberately keeps B-spline optimization and final
-  braking/direct-risk/P5 certification on the planner thread at the handoff;
-  background preparation is not itself motion authority.
+  prepare-only pass has no publication authority and may not mutate P5
+  debounce/exposure or the parent's runtime certificate. Its complete child
+  bundle is cached by exact control-point, knot, braking, window, snapshot and
+  policy identities. `PREPARED_CERTIFIED` is emitted only after the P5 preview
+  and atomic bundle cache succeed; a refined curve alone is
+  `successor_curve_before_p5`, not a certificate. The cached bundle retains
+  the preview action and reason for audit; preview state is not motion
+  authority and final P5 still runs at handoff.
   Replacement still requires at least 1.0 s of execution. Its minimum endpoint
   advance is dynamic: the motion needed to cover the next switch + generation
   + authorization cycle plus 0.05 m stability margin, with a 0.10 m jitter
@@ -273,6 +282,21 @@
   authenticated child authorization stamp and reports
   `LIMITED_PREFIX_ROLLED_TO_SUCCESSOR`; child motion is never charged as a
   parent endpoint overrun.
+- At the fixed switch anchor, a cached successor never reruns topology search,
+  A*, B-spline optimization or braking-window construction. It loads the exact
+  prepared curve, obtains one latest execution snapshot and performs only
+  freshness, Integrity, incremental collision, local-clearance, direct-GNSS
+  and final-P5 reauthorization. A successful recheck atomically rebinds the
+  certificate; a failure leaves the parent endpoint and deadline unchanged.
+  It may not activate before the absolute anchor. A callback no more than
+  0.2 s late compares `parent(anchor)` with `child(0)`, never parent/child at
+  callback time. This handoff consumes execution-snapshot authority and
+  bypasses the P1/RiskGrid planning-context publish gate; RiskGrid remains a
+  search hint rather than a second execution veto.
+  This exact-curve reauthorization also runs when the snapshot ID is unchanged,
+  because evaluation time and the already-consumed global-exposure episode can
+  advance without changing the sensor tuple. The final P5 gate is never reused
+  from prepare time.
 - A successor is computed against one immutable execution snapshot. At the
   serialization boundary, a newer snapshot ID by itself is not a rejection:
   the manager samples the exact child B-spline once, rechecks current
@@ -311,11 +335,34 @@
   its anchor, deadline, curve identity and server acknowledgement state are
   immutable; repeated risk/staleness observations may not slide the stop
   forward or reuse its trajectory ID for another curve.
-- Native refinement reports structured status. A densely sampled coarse path
+- Native refinement reports structured status. A blocked requested suffix is
+  first scanned back toward the start and replaced by the farthest point that
+  satisfies frozen occupancy, the final clearance envelope, the current
+  speed's reaction/braking progress, and at least 0.10 m meaningful progress.
+  This suffix progress test contains only kinematic reaction and braking
+  distance; vehicle radius and fixed safety margin are already represented by
+  the shared clearance evaluator and must not be added a second time.
+  If none exists it reports `TARGET_SUFFIX_BLOCKED` and
+  never asks A* to push the endpoint out of the search pool. The A* pool keeps
+  an outer sentinel plus protection cells; adjusted endpoints must remain in
+  its searchable interior. Failures record original/adjusted endpoints,
+  voxel indices, searchable world bounds, corridor bounds, nearest reachable
+  frontier, boundary contact and separate raw/inflated/clearance reject counts.
+  The first new failure classification/content identity also embeds a bounded
+  frozen local replay crop (origin, dimensions, resolution and per-cell
+  raw/inflated/clearance/corridor flags). A rejection family is named
+  `*_CLOSED` only when it is the sole observed physical blocker; mixed evidence
+  remains `NO_PATH_UNCLASSIFIED` rather than claiming a false root cause.
+  The crop covers the A* searchable interior and has a CPU replay adapter that
+  reconstructs occupancy and clearance queries without consulting the live
+  map. Crop capture cooperates with the refinement deadline; a timeout returns
+  its safety decision instead of spending the remaining budget on diagnostics.
+  A densely sampled coarse path
   that is collision-free in frozen occupancy is accepted directly; A* runs
-  only for colliding segments. Budget, occupancy, collision, no-path, invalid
-  result, corridor escape and short-output failures remain distinct, and every
-  successful refinement is directly re-certified.
+  only for colliding segments. Target suffix, pool bounds, raw occupancy,
+  clearance envelope, corridor boundary, budget and unclassified no-path
+  failures remain distinct, and every successful refinement is directly
+  re-certified.
 - RiskGrid providers accept a position-major spatial batch plus a horizon
   list. Generation health reports occupancy/support scan, query layout,
   provider, voxel materialization, commit and total build timing. Source and

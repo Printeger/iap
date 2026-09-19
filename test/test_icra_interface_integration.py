@@ -2367,6 +2367,42 @@ class TestStageAnalyzer(unittest.TestCase):
         self.assertEqual(
             summary["failures"], ["successor_hit_ordinary_rate_limit"])
 
+    def test_successor_preparation_reports_refinement_root_cause_and_cache(self):
+        summary = MODULE.analyze_successor_preparation([{
+            "successor_fast_path": "1",
+            "stage": "forward_decision",
+            "reason": "no_native_refined_candidate:target_suffix_blocked=1",
+            "successor_failure": "CORRIDOR_INVALID",
+            "refinement_diagnostics":
+                "target_suffix_blocked:0:2.1:1:0:1:0.02:tree:1:0:0",
+        }, {
+            "successor_fast_path": "1",
+            "stage": "successor_prepared_certified",
+            "reason": "successor_fast_path_ready",
+            "successor_failure": "NONE",
+            "refinement_diagnostics":
+                "success:18446744073709551615:3.0:nan:nan:nan:0.08::0:0:0",
+        }])
+
+        self.assertEqual(summary["prepared_certified_count"], 1)
+        self.assertEqual(summary["refinement_failure_counts"], {
+            "target_suffix_blocked": 1})
+
+    def test_successor_preparation_reports_final_curve_failure(self):
+        summary = MODULE.analyze_successor_preparation([{
+            "successor_fast_path": "1",
+            "stage": "successor_curve_preparation_failed",
+            "reason": "successor_curve_preparation_failed:"
+                      "terminal_bspline_refinement_collision_or_dynamics",
+            "successor_failure": "COLLISION_CHANGED",
+        }])
+
+        self.assertIn(
+            "successor_final_curve_collision_or_dynamics",
+            summary["failures"])
+        self.assertEqual(
+            summary["failure_counts"].get("COLLISION_CHANGED"), 1)
+
     def test_shutdown_rejects_runner_kill_escalation(self):
         summary = MODULE.analyze_shutdown(
             launch_exit_code=0,

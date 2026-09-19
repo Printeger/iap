@@ -50,6 +50,8 @@ P4_FORWARD_DECISION_SCHEMAS = {
     "p4_forward_route_decision_v11",
     "p4_forward_route_decision_v12",
     "p4_forward_route_decision_v13",
+    "p4_forward_route_decision_v14",
+    "p4_forward_route_decision_v15",
 }
 P4_FORMAL_RISK_SAMPLE_SCHEMAS = {
     "p4_forward_route_decision_v5",
@@ -61,7 +63,22 @@ P4_FORMAL_RISK_SAMPLE_SCHEMAS = {
     "p4_forward_route_decision_v11",
     "p4_forward_route_decision_v12",
     "p4_forward_route_decision_v13",
+    "p4_forward_route_decision_v14",
+    "p4_forward_route_decision_v15",
 }
+
+
+def _p4_schema_revision(value: object) -> int:
+    prefix = "p4_forward_route_decision_v"
+    text = str(value or "")
+    if not text.startswith(prefix):
+        return 0
+    try:
+        return int(text[len(prefix):])
+    except ValueError:
+        return 0
+
+
 FOREST_SCENARIOS = (FOREST_V1_SCENARIO, FOREST_SCENARIO)
 SEVEN_STAGE_ORDER = (
     "p0_snapshot", "closed_collision", "p4_selection_application",
@@ -1181,23 +1198,10 @@ def _selected_decisions(decisions: list[dict]) -> list[dict]:
             if row.get("schema_version") in P4_FORWARD_DECISION_SCHEMAS
             and row.get("stage") == "forward_decision"
             and row.get("action") == "RISK_SELECTED"
-            and (row.get("schema_version") not in {
-                 "p4_forward_route_decision_v3",
-                 "p4_forward_route_decision_v4",
-                 "p4_forward_route_decision_v5",
-                 "p4_forward_route_decision_v6",
-                 "p4_forward_route_decision_v7",
-                 "p4_forward_route_decision_v8",
-                 }
+            and (_p4_schema_revision(row.get("schema_version")) < 3
                  or (row.get("selection_authority") == "FORMAL"
                      and str(row.get("formal_support")) == "1"))
-            and (row.get("schema_version") not in {
-                     "p4_forward_route_decision_v4",
-                     "p4_forward_route_decision_v5",
-                     "p4_forward_route_decision_v6",
-                     "p4_forward_route_decision_v7",
-                     "p4_forward_route_decision_v8",
-                 }
+            and (_p4_schema_revision(row.get("schema_version")) < 4
                  or row.get("geometry_commit_verdict") in {
                      "CLEAR_UNCHANGED", "CLEAR_AFTER_UPDATE",
                  })
@@ -1207,9 +1211,7 @@ def _selected_decisions(decisions: list[dict]) -> list[dict]:
             and row.get("alert_limit_policy_id")
             and int(row.get("occupancy_generation", 0) or 0) > 0
             and int(row.get("risk_generation", 0) or 0) > 0
-            and (row.get("schema_version") not in {
-                 "p4_forward_route_decision_v7",
-                 "p4_forward_route_decision_v8"}
+            and (_p4_schema_revision(row.get("schema_version")) < 7
                  or (row.get("frame_contract_id")
                      and row.get("local_map_support_identity")
                      and int(row.get("gnss_epoch_identity", 0) or 0) > 0
@@ -2329,6 +2331,7 @@ def analyze_successor_preparation(lineage: list[dict]) -> dict:
     durations: list[float] = []
     queue_delays: list[float] = []
     failure_counts: dict[str, int] = {}
+    refinement_failure_counts: dict[str, int] = {}
     progress_pairs: list[dict] = []
     for row in rows:
         for field, target in (
@@ -2342,6 +2345,12 @@ def analyze_successor_preparation(lineage: list[dict]) -> dict:
                 target.append(value)
         failure = str(row.get("successor_failure", "") or "NONE")
         failure_counts[failure] = failure_counts.get(failure, 0) + 1
+        diagnostics = str(row.get("refinement_diagnostics", "") or "")
+        for entry in diagnostics.split("|"):
+            status = entry.split(":", 1)[0].strip()
+            if status and status != "success":
+                refinement_failure_counts[status] = (
+                    refinement_failure_counts.get(status, 0) + 1)
         try:
             required = float(row.get("successor_required_progress_m", "nan"))
             actual = float(row.get("successor_actual_progress_m", "nan"))
@@ -2367,6 +2376,8 @@ def analyze_successor_preparation(lineage: list[dict]) -> dict:
         failures.append("successor_hit_ordinary_rate_limit")
     if failure_counts.get("DEADLINE_MISSED", 0):
         failures.append("successor_deadline_missed")
+    if failure_counts.get("COLLISION_CHANGED", 0):
+        failures.append("successor_final_curve_collision_or_dynamics")
     if _finite_number(duration_p95) and float(duration_p95) >= 500.0:
         failures.append("successor_fast_path_p95_exceeded")
     if _finite_number(duration_max) and float(duration_max) >= 800.0:
@@ -2382,7 +2393,11 @@ def analyze_successor_preparation(lineage: list[dict]) -> dict:
         "prepare_duration_ms_max": duration_max,
         "deadline_miss_count": failure_counts.get("DEADLINE_MISSED", 0),
         "ordinary_rate_limited_count": ordinary_rate_limited,
+        "prepared_certified_count": sum(
+            str(row.get("stage", "")) == "successor_prepared_certified"
+            for row in rows),
         "failure_counts": failure_counts,
+        "refinement_failure_counts": refinement_failure_counts,
         "progress": progress_pairs,
     }
 
@@ -2397,14 +2412,7 @@ def analyze_stage_records(
     failures = list(p0["failures"])
     current_forward = [
         row for row in decisions
-        if row.get("schema_version") in {
-            "p4_forward_route_decision_v3",
-            "p4_forward_route_decision_v4",
-            "p4_forward_route_decision_v5",
-            "p4_forward_route_decision_v6",
-            "p4_forward_route_decision_v7",
-            "p4_forward_route_decision_v8",
-        }
+        if row.get("schema_version") in P4_FORWARD_DECISION_SCHEMAS
         and row.get("stage") == "forward_decision"
     ]
     def csv_finite_values(field: str) -> list[float]:
@@ -2434,13 +2442,7 @@ def analyze_stage_records(
         failures.append("p4_configuration_space_prepare_budget_exceeded")
     commit_records = [
         row for row in decisions
-        if row.get("schema_version") in {
-            "p4_forward_route_decision_v4",
-            "p4_forward_route_decision_v5",
-            "p4_forward_route_decision_v6",
-            "p4_forward_route_decision_v7",
-            "p4_forward_route_decision_v8",
-        }
+        if _p4_schema_revision(row.get("schema_version")) >= 4
     ]
     commit_latencies = []
     attempted_commit_verdicts = {
@@ -2813,10 +2815,7 @@ def analyze_forward_risk_samples(
         if any(not required.issubset(row) for row in event_rows):
             failures.append("p4_forward_risk_sample_fields_missing")
             continue
-        if decision.get("schema_version") in {
-                "p4_forward_route_decision_v6",
-                "p4_forward_route_decision_v7",
-                "p4_forward_route_decision_v8"}:
+        if _p4_schema_revision(decision.get("schema_version")) >= 6:
             if decision.get("result_status") != "READY":
                 failures.append("p4_forward_result_not_ready")
                 continue
@@ -2843,10 +2842,7 @@ def analyze_forward_risk_samples(
             decision.get("selected_candidate_id", ""))
         if selected_candidate_id not in eligible_candidates:
             failures.append("p4_formal_selected_candidate_not_safe_complete")
-        elif decision.get("schema_version") in {
-                "p4_forward_route_decision_v6",
-                "p4_forward_route_decision_v7",
-                "p4_forward_route_decision_v8"}:
+        elif _p4_schema_revision(decision.get("schema_version")) >= 6:
             formal_rows = [
                 row
                 for candidate_rows in eligible_candidates.values()

@@ -171,19 +171,33 @@ For each candidate trajectory τ:
   common endpoint far enough to cover the next command-switch, successor
   generation and two direct-authorization intervals, plus a stability margin
   (with a small jitter floor). The successor has an independent, single-slot
-  route-guide deadline lane: it starts preparing as soon as the parent is committed, while
-  the default 1.5 s value remains the latest allowed start. An early result is
-  held until the fixed endpoint-minus-switch-margin anchor (and never before
-  the one-second commitment). It first warm-starts from the committed channel
+  deadline lane: it starts preparing as soon as the parent is committed, while
+  the default 1.5 s value remains the latest allowed start. An early route
+  result immediately produces and fully certifies the final child B-spline,
+  braking library and fixed risk windows against its immutable switch anchor.
+  Because route delivery is asynchronous, the prepare-only pass—not the FSM
+  request site—binds the child start to the parent's exact position, velocity
+  and acceleration at that anchor. The selected safe guide endpoint owns the
+  child terminal; a stale periodic local target cannot append an unchecked
+  tail.
+  It first warm-starts from the committed channel
   and guide; only a geometry, clearance or corridor failure permits one
   bounded full-channel fallback. Ordinary P4 rate limiting does not apply.
-  The prepared guide is not authority: final B-spline optimization, braking
-  coverage, direct risk and P5 remain on the planner thread at handoff.
+  Preparation is not motion authority and cannot alter the parent or P5
+  debounce state; its P5-preview summary remains in the cached bundle for
+  audit. At handoff the planner does not rerun route search, A* or
+  optimization; it only reauthorizes the exact cached curve and braking
+  evidence once against the latest execution snapshot. That reauthorization
+  is mandatory even when the snapshot ID is unchanged, so elapsed exposure
+  budget and the final P5 decision cannot be inherited from prepare time.
   Shared-corridor risk must not worsen and the extension is independently
   certified. The successor is published
   only if parent identity, switch window, position/velocity/acceleration
   boundary state and current direct authority still match; otherwise the old
-  prefix continues to its endpoint.
+  prefix continues to its endpoint. Activation never occurs before the fixed
+  anchor; a late callback compares the parent at the anchor with child time
+  zero. The cached handoff is not re-gated by a stale P1/RiskGrid planning
+  context because the current execution snapshot is its authority.
   The committed terminal-stopped curve also carries independently generated,
   checked stopping curves at <=0.2 s state anchors. When input data expires,
   execution reaches the nearest future anchor within 0.2 s and publishes the
