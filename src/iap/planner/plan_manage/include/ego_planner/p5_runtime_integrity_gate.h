@@ -224,6 +224,18 @@ class P5RuntimeIntegrityGate {
       const std::string& required_window_layout_hash = {},
       const std::string& required_window_satellite_sets_hash = {});
 
+  // Read-only final-gate evaluation for a future successor. It must not
+  // advance debounce/exposure state or publish a gate decision.
+  P5GateStatus evaluateFinalPreview(
+      LocalTrajData& local_data,
+      const std::shared_ptr<const iap::RiskGridSnapshot>& snapshot,
+      double now_s,
+      double emergency_time_s,
+      const P4DirectTrajectoryRiskEvidence* direct_risk = nullptr,
+      const std::string& required_gnss_core_policy = {},
+      const std::string& required_window_layout_hash = {},
+      const std::string& required_window_satellite_sets_hash = {});
+
   void publishFinalAdmission(P5GateStatus status,
                              double publish_authorization_stamp_s);
 

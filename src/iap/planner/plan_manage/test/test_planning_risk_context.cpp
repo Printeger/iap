@@ -3374,6 +3374,9 @@ TEST(P4PreparedSuccessorPolicy,
   EXPECT_TRUE(ego_planner::validateP4PreparedSuccessor(
       successor, 17, 1234, "parent_hash", 10.1, &reason));
   EXPECT_EQ(reason, "prepared_successor_ready");
+  EXPECT_FALSE(ego_planner::validateP4PreparedSuccessor(
+      successor, 17, 1234, "parent_hash", 9.9, &reason));
+  EXPECT_EQ(reason, "successor_switch_window_missed");
 
   successor.successor_position.x() += 0.3;
   EXPECT_FALSE(ego_planner::validateP4PreparedSuccessor(
@@ -3425,6 +3428,37 @@ TEST(P4PreparedSuccessorPolicy,
 }
 
 TEST(P4PreparedSuccessorPolicy,
+     AnySuccessorCurveRejectionLeavesPreparingState)
+{
+  ego_planner::EGOPlannerManager manager;
+  manager.setP4SuccessorPreparationBoundaryForTest(
+      17, 10000000000LL, 11.0);
+  ASSERT_TRUE(manager.preparingP4SuccessorCurve());
+
+  manager.recordPreparedP4SuccessorCurveFailure(
+      10.95, "p5_preview_rejected:future_bad");
+
+  EXPECT_FALSE(manager.preparingP4SuccessorCurve());
+  EXPECT_EQ(manager.lastP4ForwardDecision().planning_disposition,
+            ego_planner::P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY);
+  EXPECT_NE(manager.lastP4ForwardDecision().reason.find(
+                "successor_curve_preparation_failed"),
+            std::string::npos);
+
+  ego_planner::EGOPlannerManager overwritten_reason_manager;
+  overwritten_reason_manager.setP4SuccessorPreparationBoundaryForTest(
+      18, 11000000000LL, 12.0,
+      "successor_switch_boundary_unavailable");
+  ASSERT_TRUE(overwritten_reason_manager.preparingP4SuccessorCurve());
+  overwritten_reason_manager.recordPreparedP4SuccessorCurveFailure(
+      11.1, "terminal_bspline_refinement_collision_or_dynamics");
+  EXPECT_FALSE(overwritten_reason_manager.preparingP4SuccessorCurve());
+  EXPECT_EQ(
+      overwritten_reason_manager.lastP4ForwardDecision().planning_disposition,
+      ego_planner::P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY);
+}
+
+TEST(P4PreparedSuccessorPolicy,
      NewSnapshotIdentityReauthorizesExactCurveButRiskChangeRejects)
 {
   ensureRclcpp();
@@ -3456,6 +3490,14 @@ TEST(P4PreparedSuccessorPolicy,
   auto bound_execution_a = std::make_shared<ego_planner::P0ExecutionRiskSnapshot>(
       *execution_a);
   bound_execution_a->occupancy = occupancy_a;
+  int same_snapshot_direct_queries = 0;
+  const auto same_snapshot_callback = directRiskCallback(0.5);
+  bound_execution_a->forward_risk_batch =
+      [&same_snapshot_direct_queries, same_snapshot_callback](
+          const iap::ForwardRiskBatchRequest &request) {
+        ++same_snapshot_direct_queries;
+        return same_snapshot_callback(request);
+      };
   manager.setPlanningRiskContextForTest(
       snapshot, 10.0, occupancy_a, directRiskCallback(0.5),
       bound_execution_a);
@@ -3497,27 +3539,85 @@ TEST(P4PreparedSuccessorPolicy,
       manager.local_data_.start_time_.nanoseconds();
   prepared.successor_control_points_hash = ego_planner::p4ControlPointHash(
       manager.local_data_.position_traj_.getControlPoint());
-  prepared.planned_switch_time_s = 10.0;
+  prepared.planned_switch_time_s = 10.5;
   prepared.execution_snapshot_id = bound_execution_a->execution_snapshot_id;
   prepared.assurance.complete = true;
   prepared.assurance.safe = true;
   prepared.assurance.failure = ego_planner::P4SuccessorFailure::NONE;
   manager.setPreparedP4SuccessorForTest(prepared);
+  const std::string prepared_control_hash = ego_planner::p4ControlPointHash(
+      manager.local_data_.position_traj_.getControlPoint());
+  const std::string prepared_knot_hash = ego_planner::p4KnotVectorHash(
+      manager.local_data_.position_traj_.getKnot());
+  ego_planner::P5GateStatus disabled_preview;
+  std::string cache_reason;
+  ASSERT_TRUE(manager.cachePreparedP4SuccessorBundle(
+      9.9, disabled_preview, &cache_reason))
+      << cache_reason;
+  ASSERT_TRUE(manager.preparedP4SuccessorBundleForTest().has_value());
+  EXPECT_TRUE(manager.preparedP4SuccessorBundleForTest()->complete());
+  EXPECT_EQ(manager.preparedP4SuccessorBundleForTest()->p5_preview_reason,
+            static_cast<int>(ego_planner::P5GateReason::DISABLED));
+
+  // An enabled final gate overwrites the explicit disabled preview summary
+  // with its actual OK admission without changing the cached curve.
+  ego_planner::P5GateStatus preview;
+  preview.action = ego_planner::P5GateAction::OK;
+  preview.reason = ego_planner::P5GateReason::OK;
+  ASSERT_TRUE(manager.cachePreparedP4SuccessorBundle(
+      9.9, preview, &cache_reason))
+      << cache_reason;
+  ASSERT_TRUE(manager.preparedP4SuccessorBundleForTest().has_value());
+  EXPECT_TRUE(
+      manager.preparedP4SuccessorBundleForTest()->p5_preview_complete);
+  EXPECT_EQ(manager.preparedP4SuccessorBundleForTest()->p5_preview_action,
+            static_cast<int>(ego_planner::P5GateAction::OK));
+  EXPECT_EQ(manager.preparedP4SuccessorBundleForTest()->p5_preview_reason,
+            static_cast<int>(ego_planner::P5GateReason::OK));
+  EXPECT_FALSE(manager.preparedP4SuccessorBundleDue(10.5));
+
+  prepared.planned_switch_time_s = 11.0;
+  manager.setPreparedP4SuccessorForTest(prepared);
+  ASSERT_TRUE(manager.cachePreparedP4SuccessorBundle(
+      9.9, preview, &cache_reason))
+      << cache_reason;
+  EXPECT_FALSE(manager.preparedP4SuccessorBundleDue(10.85));
+  EXPECT_TRUE(manager.preparedP4SuccessorBundleDue(11.0));
+
+  // Isolate snapshot reauthorization from the scheduling assertions above:
+  // this child and parent share their exact t=0 boundary at the fixed anchor.
+  prepared.planned_switch_time_s = 10.0;
+  manager.setPreparedP4SuccessorForTest(prepared);
+
+  // Handoff-time authorization is recomputed even when the immutable input
+  // tuple has the same snapshot ID: evaluation time and the global exposure
+  // ledger can advance independently of that ID.
+  std::string reason;
+  const int queries_before_handoff = same_snapshot_direct_queries;
 
   const auto execution_b = makeP4ExecutionSnapshot(
-      snapshot, directRiskCallback(0.5), 10.04, 82u);
+      snapshot, directRiskCallback(0.5), 10.0, 82u);
   auto occupancy_b = std::make_shared<ego_planner::P0OccupancyEpoch>(
       *execution_b->occupancy);
   occupancy_b->frozen_grid_map_epoch = frozen_occupancy;
   auto bound_execution_b = std::make_shared<ego_planner::P0ExecutionRiskSnapshot>(
       *execution_b);
   bound_execution_b->occupancy = occupancy_b;
+  int latest_snapshot_direct_queries = 0;
+  const auto latest_snapshot_callback = directRiskCallback(0.5);
+  bound_execution_b->forward_risk_batch =
+      [&latest_snapshot_direct_queries, latest_snapshot_callback](
+          const iap::ForwardRiskBatchRequest &request) {
+        ++latest_snapshot_direct_queries;
+        return latest_snapshot_callback(request);
+      };
   manager.setPlanningRiskContextForTest(
       snapshot, 10.0, occupancy_b, directRiskCallback(0.5),
       bound_execution_b);
-  std::string reason;
   EXPECT_TRUE(manager.validatePreparedP4SuccessorBeforePublish(
-      incumbent, 10.05, &reason)) << reason;
+      incumbent, 10.0, &reason)) << reason;
+  EXPECT_EQ(same_snapshot_direct_queries, queries_before_handoff);
+  EXPECT_GT(latest_snapshot_direct_queries, 0);
   EXPECT_EQ(reason, "prepared_successor_publish_revalidated");
   EXPECT_EQ(manager.p4ExecutionCertificate().execution_snapshot_id,
             bound_execution_b->execution_snapshot_id);
@@ -3525,7 +3625,7 @@ TEST(P4PreparedSuccessorPolicy,
             bound_execution_b->execution_snapshot_id);
 
   const auto execution_c = makeP4ExecutionSnapshot(
-      snapshot, directRiskCallback(1.01), 10.08, 83u);
+      snapshot, directRiskCallback(1.01), 10.0, 83u);
   auto occupancy_c = std::make_shared<ego_planner::P0OccupancyEpoch>(
       *execution_c->occupancy);
   occupancy_c->frozen_grid_map_epoch = frozen_occupancy;
@@ -3536,8 +3636,72 @@ TEST(P4PreparedSuccessorPolicy,
       snapshot, 10.0, occupancy_c, directRiskCallback(1.01),
       bound_execution_c);
   EXPECT_FALSE(manager.validatePreparedP4SuccessorBeforePublish(
-      incumbent, 10.09, &reason));
+      incumbent, 10.0, &reason));
   EXPECT_EQ(reason,
             "successor_latest_trajectory_assurance_changed:"
             "global_navigation_budget_exceeded:safe");
+
+  // The rejected latest-snapshot probe did not mutate the cached curve. At
+  // the fixed handoff the manager installs the exact pre-certified spline;
+  // no route search or optimizer call is part of this operation.
+  auto parent_certificate = manager.p4ExecutionCertificate();
+  parent_certificate.valid = true;
+  parent_certificate.trajectory_id = incumbent.traj_id_;
+  parent_certificate.start_time_ns = incumbent.start_time_.nanoseconds();
+  parent_certificate.control_points_hash = ego_planner::p4ControlPointHash(
+      incumbent.position_traj_.getControlPoint());
+  manager.local_data_ = incumbent;
+  manager.setP4ExecutionCertificateForTest(parent_certificate);
+  ASSERT_TRUE(manager.activatePreparedP4SuccessorBundle(11.0, &reason))
+      << reason;
+  EXPECT_TRUE(manager.activatingPreparedP4SuccessorBundle());
+  EXPECT_EQ(ego_planner::p4ControlPointHash(
+                manager.local_data_.position_traj_.getControlPoint()),
+            prepared_control_hash);
+  EXPECT_EQ(ego_planner::p4KnotVectorHash(
+                manager.local_data_.position_traj_.getKnot()),
+            prepared_knot_hash);
+}
+
+TEST(P4PreparedSuccessorPolicy,
+     CurvePreparationUsesFrozenParentSwitchStateNotCurrentVehicleState)
+{
+  ensureRclcpp();
+  ego_planner::EGOPlannerManager manager;
+  Eigen::MatrixXd control_points(3, 8);
+  for (int index = 0; index < control_points.cols(); ++index)
+    control_points.col(index) = Eigen::Vector3d(
+        0.25 * static_cast<double>(index), 0.0, 1.0);
+  manager.local_data_.position_traj_ =
+      ego_planner::UniformBspline(control_points, 3, 0.5);
+  manager.local_data_.velocity_traj_ =
+      manager.local_data_.position_traj_.getDerivative();
+  manager.local_data_.acceleration_traj_ =
+      manager.local_data_.velocity_traj_.getDerivative();
+  manager.local_data_.traj_id_ = 17;
+  manager.local_data_.start_time_ = rclcpp::Time(10, 0, RCL_ROS_TIME);
+  manager.local_data_.duration_ =
+      manager.local_data_.position_traj_.getTimeSum();
+  const double switch_time_s = 11.0;
+  manager.setP4SuccessorPreparationBoundaryForTest(
+      manager.local_data_.traj_id_,
+      manager.local_data_.start_time_.nanoseconds(), switch_time_s);
+
+  Eigen::Vector3d position;
+  Eigen::Vector3d velocity;
+  Eigen::Vector3d acceleration;
+  ASSERT_TRUE(manager.p4SuccessorPreparationBoundaryState(
+      &position, &velocity, &acceleration));
+  const double parent_t_s = switch_time_s - 10.0;
+  EXPECT_TRUE(position.isApprox(
+      manager.local_data_.position_traj_.evaluateDeBoorT(parent_t_s),
+      1.0e-12));
+  EXPECT_TRUE(velocity.isApprox(
+      manager.local_data_.velocity_traj_.evaluateDeBoorT(parent_t_s),
+      1.0e-12));
+  EXPECT_TRUE(acceleration.isApprox(
+      manager.local_data_.acceleration_traj_.evaluateDeBoorT(parent_t_s),
+      1.0e-12));
+  EXPECT_FALSE(position.isApprox(
+      manager.local_data_.position_traj_.evaluateDeBoorT(0.0), 1.0e-6));
 }

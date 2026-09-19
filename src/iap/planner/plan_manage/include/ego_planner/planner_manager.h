@@ -157,7 +157,8 @@ namespace ego_planner
       int64_t expected_parent_start_time_ns,
       const std::string &expected_parent_control_points_hash,
       double now_s,
-      std::string *reason = nullptr);
+      std::string *reason = nullptr,
+      bool require_switch_window = true);
 
   bool shouldReplaceCommittedLimitedPrefix(
       const P4LimitedPrefixReplacementInput &input,
@@ -277,6 +278,46 @@ namespace ego_planner
     std::vector<Eigen::Vector3d> risk_points;
     // Times on the committed parent trajectory, including braking duration.
     std::vector<double> risk_relative_times;
+  };
+
+  enum class P4SuccessorPreparationState
+  {
+    ROUTE_PENDING = 0,
+    CURVE_PREPARING,
+    PREPARED_CERTIFIED,
+    REAUTHORIZING,
+    READY_TO_SWITCH,
+    FAILED,
+  };
+
+  struct P4PreparedSuccessorBundle
+  {
+    P4SuccessorPreparationState state =
+        P4SuccessorPreparationState::ROUTE_PENDING;
+    double prepared_stamp_s = std::numeric_limits<double>::quiet_NaN();
+    LocalTrajData trajectory;
+    P4ForwardDecision decision;
+    P4ExecutionCertificate certificate;
+    P4PreparedSuccessor boundary;
+    P4DirectTrajectoryRiskEvidence direct_risk_evidence;
+    std::shared_ptr<const P4CommittedRiskWindowPlan> risk_window_plan;
+    std::vector<P4BrakingAnchor> braking_anchors;
+    std::shared_ptr<const FrozenOccupancyEpoch> bound_occupancy;
+    uint64_t checked_generation = 0;
+    std::string curve_identity;
+    bool p5_preview_complete = false;
+    int p5_preview_action = -1;
+    int p5_preview_reason = -1;
+    std::string p5_preview_reason_name;
+
+    bool complete() const
+    {
+      return state == P4SuccessorPreparationState::PREPARED_CERTIFIED &&
+          trajectory.traj_id_ > 0 && certificate.valid &&
+          boundary.assurance.complete && boundary.assurance.safe &&
+          direct_risk_evidence.complete && !braking_anchors.empty() &&
+          p5_preview_complete && p5_preview_action == 0;
+    }
   };
 
   struct P4GuardBrakingCommand
@@ -614,6 +655,34 @@ namespace ego_planner
     void preserveP4ExecutionCommitmentForCandidate();
     void restoreP4ExecutionCommitmentAfterCandidateRejection();
     void commitP4ExecutionCandidate();
+    bool cachePreparedP4SuccessorBundle(
+        double now_s, const P5GateStatus &p5_preview,
+        std::string *reason = nullptr);
+    bool preparedP4SuccessorBundleDue(double now_s) const;
+    bool activatePreparedP4SuccessorBundle(
+        double now_s, std::string *reason = nullptr);
+    bool commitActivatedP4SuccessorBundle(
+        double now_s, std::string *reason = nullptr);
+    bool preparedP4SuccessorCandidateEarly(double now_s) const;
+    bool preparingP4SuccessorCurve() const
+    {
+      return p4_successor_preparation_state_ ==
+          P4SuccessorPreparationState::CURVE_PREPARING;
+    }
+    bool p4SuccessorPreparationBoundaryState(
+        Eigen::Vector3d *position, Eigen::Vector3d *velocity,
+        Eigen::Vector3d *acceleration);
+    void recordPreparedP4SuccessorCurveFailure(
+        double now_s, const std::string &detail);
+    bool activatingPreparedP4SuccessorBundle() const
+    {
+      return p4_cached_successor_activation_in_progress_;
+    }
+    const std::optional<P4PreparedSuccessorBundle> &
+    preparedP4SuccessorBundleForTest() const
+    {
+      return p4_cached_successor_bundle_;
+    }
     bool validatePreparedP4SuccessorBeforePublish(
       const LocalTrajData &incumbent, double now_s,
       std::string *reason = nullptr, double emergency_time_s = 1.0,
@@ -628,6 +697,19 @@ namespace ego_planner
     void setPreparedP4SuccessorForTest(P4PreparedSuccessor successor)
     {
       p4_prepared_successor_ = std::move(successor);
+    }
+    void setP4SuccessorPreparationBoundaryForTest(
+        int parent_trajectory_id, int64_t parent_start_time_ns,
+        double planned_switch_time_s,
+        std::string decision_reason = "successor_fast_path_ready")
+    {
+      p4_successor_preparation_state_ =
+          P4SuccessorPreparationState::CURVE_PREPARING;
+      p4_successor_schedule_.parent_trajectory_id = parent_trajectory_id;
+      p4_successor_schedule_.parent_start_time_ns = parent_start_time_ns;
+      p4_successor_schedule_.deadline.planned_switch_time_s =
+          planned_switch_time_s;
+      last_p4_forward_decision_.reason = std::move(decision_reason);
     }
     void setP4ExecutionCertificateForTest(P4ExecutionCertificate certificate)
     {
@@ -779,8 +861,14 @@ namespace ego_planner
     P4RuntimeWindowEvidence p4_last_runtime_window_evidence_;
     std::atomic<std::uint64_t> next_p4_runtime_window_evidence_sequence_{1};
     std::optional<P4PreparedSuccessor> p4_prepared_successor_;
+    std::optional<P4PreparedSuccessorBundle>
+        p4_cached_successor_bundle_;
+    bool p4_cached_successor_activation_in_progress_ = false;
+    P4SuccessorPreparationState p4_successor_preparation_state_ =
+        P4SuccessorPreparationState::ROUTE_PENDING;
     std::optional<P4ForwardDecision> p4_actual_curve_feedback_override_;
     std::set<std::string> p4_actual_curve_failure_signatures_;
+    std::string p4_last_astar_replay_signature_;
     std::vector<P4BrakingAnchor> p4_braking_anchors_;
     enum class P4GuardServerState
     {

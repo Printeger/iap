@@ -689,6 +689,43 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateFinal(
   return status;
 }
 
+P5GateStatus P5RuntimeIntegrityGate::evaluateFinalPreview(
+    LocalTrajData& local_data,
+    const std::shared_ptr<const iap::RiskGridSnapshot>& snapshot,
+    const double now_s,
+    const double emergency_time_s,
+    const P4DirectTrajectoryRiskEvidence* direct_risk,
+    const std::string& required_gnss_core_policy,
+    const std::string& required_window_layout_hash,
+    const std::string& required_window_satellite_sets_hash) {
+  if (!config_.enable_final_gate) {
+    P5GateStatus status;
+    status.reason = P5GateReason::DISABLED;
+    return status;
+  }
+  // A prepare-only successor preview is an observational query.  The
+  // evaluator historically reused the final-gate path, whose healthy
+  // branches clear the runtime debounce clocks even though final gates do
+  // not start them.  Preserve every runtime clock explicitly so preparing a
+  // child cannot heal (or otherwise alter) the executing parent's state.
+  const double saved_current_problem_started_s = current_problem_started_s_;
+  const double saved_current_low_margin_started_s =
+      current_low_margin_started_s_;
+  const double saved_future_unknown_started_s = future_unknown_started_s_;
+  P5GateStatus status = evaluate(
+      local_data, snapshot,
+      EvalContext{true, now_s, emergency_time_s, direct_risk,
+                  required_gnss_core_policy, required_window_layout_hash,
+                  required_window_satellite_sets_hash});
+  current_problem_started_s_ = saved_current_problem_started_s;
+  current_low_margin_started_s_ = saved_current_low_margin_started_s;
+  future_unknown_started_s_ = saved_future_unknown_started_s;
+  status.final_evaluation_stamp_s = now_s;
+  status.final_candidate_rejected =
+      status.action != P5GateAction::OK && status.final_candidate_traj_id >= 0;
+  return status;
+}
+
 void P5RuntimeIntegrityGate::publishFinalAdmission(
     P5GateStatus status, const double publish_authorization_stamp_s) {
   if (status.action != P5GateAction::OK ||

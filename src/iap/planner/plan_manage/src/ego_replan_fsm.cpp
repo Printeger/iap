@@ -1440,19 +1440,39 @@ namespace ego_planner
     const uint64_t p1_admission_generation =
         planner_manager_->currentPlanningGenerationId();
 
-    if (!rebound_planner_for_test_)
+    planner_manager_->preserveP4ExecutionCommitmentForCandidate();
+    bool using_cached_successor = false;
+    std::string cached_successor_reason;
+    if (!rebound_planner_for_test_ &&
+        planner_manager_->preparedP4SuccessorBundleDue(
+            plannerNow().seconds()))
+    {
+      using_cached_successor =
+          planner_manager_->activatePreparedP4SuccessorBundle(
+              plannerNow().seconds(), &cached_successor_reason);
+    }
+    if (!using_cached_successor && !rebound_planner_for_test_)
       getLocalTarget();
 
-    planner_manager_->preserveP4ExecutionCommitmentForCandidate();
-    bool plan_and_refine_success = rebound_planner_for_test_
+    bool plan_and_refine_success = using_cached_successor ||
+        (rebound_planner_for_test_
         ? rebound_planner_for_test_()
         : planner_manager_->reboundReplan(
-              start_pt_, start_vel_, start_acc_, local_target_pt_,
+              start_pt_, start_vel_, start_acc_,
+              local_target_pt_,
               local_target_vel_, (have_new_target_ || flag_use_poly_init),
-              flag_randomPolyTraj, odom_pos_);
+              flag_randomPolyTraj, odom_pos_));
     have_new_target_ = false;
 
     cout << "refine_success=" << plan_and_refine_success << endl;
+
+    if (!plan_and_refine_success && !using_cached_successor &&
+        !rebound_planner_for_test_)
+    {
+      planner_manager_->recordPreparedP4SuccessorCurveFailure(
+          plannerNow().seconds(),
+          "terminal_bspline_refinement_collision_or_dynamics");
+    }
 
     if (!plan_and_refine_success && planner_manager_->p1AdmissionEnabled() &&
         !p5_owns_admission &&
@@ -1471,9 +1491,15 @@ namespace ego_planner
       };
 
       auto info = &planner_manager_->local_data_;
+      const bool preparing_successor_curve = !using_cached_successor &&
+          planner_manager_->preparingP4SuccessorCurve();
 
-      if (!planner_manager_->recordP4VerticalSliceLineage(
-              "final_bspline_before_p5", plannerNow().seconds()))
+      if (!using_cached_successor &&
+          !planner_manager_->recordP4VerticalSliceLineage(
+              preparing_successor_curve
+                  ? "successor_curve_before_p5"
+                  : "final_bspline_before_p5",
+              plannerNow().seconds()))
       {
         RCLCPP_ERROR(node_->get_logger(),
                      "P4-v2 final lineage write failed before P5");
@@ -1495,14 +1521,46 @@ namespace ego_planner
           const bool retried = callReboundReplan(
               flag_use_poly_init, flag_randomPolyTraj);
           --p4_actual_curve_feedback_depth_;
+          if (!retried && preparing_successor_curve)
+            planner_manager_->recordPreparedP4SuccessorCurveFailure(
+                plannerNow().seconds(),
+                "successor_lineage_write_failed_after_feedback");
           return retried;
         }
+        if (preparing_successor_curve)
+          planner_manager_->recordPreparedP4SuccessorCurveFailure(
+              plannerNow().seconds(), "successor_lineage_write_failed");
         return false;
       }
 
-      std::optional<P5GateStatus> p5_final_status;
+      // Default construction is the explicit P5-disabled outcome
+      // (OK/DISABLED).  The companion flag distinguishes that valid outcome
+      // from an enabled gate that still needs evaluation.
+      P5GateStatus p5_final_status;
+      bool p5_final_status_evaluated = false;
+      if (using_cached_successor)
+      {
+        P5GateStatus rebound_p5;
+        std::string reauthorization_reason;
+        if (!planner_manager_->validatePreparedP4SuccessorBeforePublish(
+                previous_local_data, plannerNow().seconds(),
+                &reauthorization_reason, emergency_time_, &rebound_p5))
+        {
+          RCLCPP_WARN(node_->get_logger(),
+                      "Cached P4 successor reauthorization failed: %s",
+                      reauthorization_reason.c_str());
+          reject_candidate();
+          return false;
+        }
+        if (rebound_p5.action == P5GateAction::OK)
+        {
+          p5_final_status = rebound_p5;
+          p5_final_status_evaluated = true;
+        }
+      }
       if (planner_manager_->p5_integrity_gate_ &&
-          planner_manager_->p5_integrity_gate_->finalGateEnabled())
+          planner_manager_->p5_integrity_gate_->finalGateEnabled() &&
+          !p5_final_status_evaluated)
       {
         const double now_s = plannerNow().seconds();
         const auto &direct_evidence =
@@ -1521,8 +1579,14 @@ namespace ego_planner
                       static_cast<unsigned long>(planning_generation_id),
                       static_cast<unsigned long>(final_gate_generation_id));
         }
-        const P5GateStatus p5_status =
-            planner_manager_->p5_integrity_gate_->evaluateFinal(
+        const P5GateStatus p5_status = preparing_successor_curve
+            ? planner_manager_->p5_integrity_gate_->evaluateFinalPreview(
+                *info, snapshot, now_s, emergency_time_,
+                &direct_evidence,
+                execution_certificate.gnss_core_policy,
+                execution_certificate.window_layout_hash,
+                execution_certificate.window_satellite_sets_hash)
+            : planner_manager_->p5_integrity_gate_->evaluateFinal(
                 *info, snapshot, now_s, emergency_time_,
                 &direct_evidence,
                 execution_certificate.gnss_core_policy,
@@ -1543,11 +1607,18 @@ namespace ego_planner
                       static_cast<unsigned long>(final_gate_generation_id));
           planner_manager_->recordP4VerticalSliceLineage(
               "p5_final_rejected", plannerNow().seconds());
+          if (preparing_successor_curve)
+            planner_manager_->recordPreparedP4SuccessorCurveFailure(
+                plannerNow().seconds(),
+                std::string("p5_preview_rejected:") +
+                    P5RuntimeIntegrityGate::reasonName(p5_status.reason));
           reject_candidate();
           return false;
         }
         p5_final_status = p5_status;
-        if (!planner_manager_->recordP4VerticalSliceLineage(
+        p5_final_status_evaluated = true;
+        if (!preparing_successor_curve &&
+            !planner_manager_->recordP4VerticalSliceLineage(
                 "p5_final_pass_before_publish", plannerNow().seconds()))
         {
           RCLCPP_ERROR(node_->get_logger(),
@@ -1557,11 +1628,33 @@ namespace ego_planner
         }
       }
 
+      if (preparing_successor_curve)
+      {
+        std::string cache_reason;
+        if (!planner_manager_->cachePreparedP4SuccessorBundle(
+                plannerNow().seconds(), p5_final_status, &cache_reason))
+        {
+          RCLCPP_WARN(node_->get_logger(),
+                      "P4 successor full-curve cache rejected: %s",
+                      cache_reason.c_str());
+          planner_manager_->recordPreparedP4SuccessorCurveFailure(
+              plannerNow().seconds(), "bundle_cache_rejected:" +
+                  cache_reason);
+          reject_candidate();
+          return false;
+        }
+        RCLCPP_INFO(node_->get_logger(),
+                    "P4 successor final B-spline and assurance cached before switch");
+        reject_candidate();
+        return false;
+      }
+
       // P5 intentionally evaluates its own latest snapshot semantics above.
       // P1 publication is different: it must remain bound to the immutable
       // snapshot used to optimize this exact candidate.
       std::string freshness_reason;
-      if (!planner_manager_->preparePlanningRiskPublish(
+      if (!using_cached_successor &&
+          !planner_manager_->preparePlanningRiskPublish(
               plannerNow().seconds(), &freshness_reason))
       {
         RCLCPP_WARN(node_->get_logger(),
@@ -1578,11 +1671,17 @@ namespace ego_planner
         return false;
       }
 
-      if (!planner_manager_->recordP4VerticalSliceLineage(
-              "normal_publish_authorized", plannerNow().seconds()))
+      std::string successor_publish_reason;
+      const bool publication_committed = using_cached_successor
+          ? planner_manager_->commitActivatedP4SuccessorBundle(
+                plannerNow().seconds(), &successor_publish_reason)
+          : planner_manager_->recordP4VerticalSliceLineage(
+                "normal_publish_authorized", plannerNow().seconds());
+      if (!publication_committed)
       {
         RCLCPP_ERROR(node_->get_logger(),
-                     "P4-v2 publish-authorization lineage write failed");
+                     "P4-v2 publish authorization failed: %s",
+                     successor_publish_reason.c_str());
         reject_candidate();
         return false;
       }
@@ -1591,11 +1690,11 @@ namespace ego_planner
       // gate. Revalidate against the still-executing parent and the newest
       // execution authority at the actual publication boundary; a late or
       // relabelled child is discarded without interrupting the parent.
-      std::string successor_publish_reason;
-      if (!planner_manager_->validatePreparedP4SuccessorBeforePublish(
+      if (!using_cached_successor &&
+          !planner_manager_->validatePreparedP4SuccessorBeforePublish(
               previous_local_data, plannerNow().seconds(),
               &successor_publish_reason, emergency_time_,
-              p5_final_status ? &*p5_final_status : nullptr))
+              p5_final_status_evaluated ? &p5_final_status : nullptr))
       {
         RCLCPP_WARN(node_->get_logger(),
                     "P4 prepared successor rejected before publish: %s",
@@ -1604,10 +1703,11 @@ namespace ego_planner
         return false;
       }
 
-      if (p5_final_status && planner_manager_->p5_integrity_gate_)
+      if (p5_final_status_evaluated &&
+          planner_manager_->p5_integrity_gate_)
       {
         planner_manager_->p5_integrity_gate_->publishFinalAdmission(
-            *p5_final_status, plannerNow().seconds());
+            p5_final_status, plannerNow().seconds());
       }
 
       /* 1. publish traj to traj_server */

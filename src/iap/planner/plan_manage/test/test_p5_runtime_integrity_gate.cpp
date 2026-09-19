@@ -836,6 +836,65 @@ TEST(P5RuntimeIntegrityGateTest,
   EXPECT_STREQ(second.final_gate_last_reason.c_str(), "future_bad");
 }
 
+TEST(P5RuntimeIntegrityGateTest,
+     PrepareOnlyPreviewDoesNotConsumeFinalGateFailureBudget) {
+  auto config = baseConfig();
+  config.current_stale_to_replan_s = 100.0;
+  config.current_stale_to_emergency_s = 100.0;
+  config.final_gate_max_consecutive_failures = 2;
+  config.final_gate_max_failure_duration_s = 100.0;
+  ego_planner::P5RuntimeIntegrityGate gate(nullptr, config, false);
+  gate.setCurrentIntegrityForTest(integrityMsg(0.0, 1.0, 1.0, 10.0, 10.0));
+  auto traj = makeTrajectory();
+  auto snapshot = makeSnapshot(9.8, 9.8);
+
+  const auto preview_a = gate.evaluateFinalPreview(
+      traj, snapshot, 0.0, -1.0);
+  const auto preview_b = gate.evaluateFinalPreview(
+      traj, snapshot, 0.1, -1.0);
+  EXPECT_EQ(preview_a.action, ego_planner::P5GateAction::REQUEST_REPLAN);
+  EXPECT_EQ(preview_b.action, ego_planner::P5GateAction::REQUEST_REPLAN);
+  EXPECT_EQ(preview_a.final_gate_fail_count, 0);
+  EXPECT_EQ(preview_b.final_gate_fail_count, 0);
+
+  // The first real publication evaluation is still the first failure. A
+  // prepare-only successor cannot escalate the executing trajectory's gate.
+  const auto final = gate.evaluateFinal(traj, snapshot, 0.2, -1.0);
+  EXPECT_EQ(final.action, ego_planner::P5GateAction::REQUEST_REPLAN);
+  EXPECT_EQ(final.reason, ego_planner::P5GateReason::FUTURE_BAD);
+  EXPECT_EQ(final.final_gate_fail_count, 1);
+}
+
+TEST(P5RuntimeIntegrityGateTest,
+     PrepareOnlyPreviewDoesNotClearExecutingRuntimeDebounceClocks) {
+  auto config = baseConfig();
+  config.bad_tick_to_replan = 1;
+  config.current_stale_to_replan_s = 100.0;
+  config.current_stale_to_emergency_s = 100.0;
+  config.current_low_margin_to_emergency_s = 0.15;
+  ego_planner::P5RuntimeIntegrityGate gate(nullptr, config, false);
+  auto traj = makeTrajectory();
+  auto safe_snapshot = makeSnapshot(1.0, 1.0);
+
+  gate.setCurrentIntegrityForTest(integrityMsg(0.0, 10.3, 10.3, 10.0, 10.0));
+  const auto armed = gate.evaluateRuntime(traj, safe_snapshot, 0.0, 1.0);
+  EXPECT_EQ(armed.reason, ego_planner::P5GateReason::CURRENT_LOW_MARGIN);
+
+  // A healthy child preview must not clear the timer that belongs to the
+  // executing parent.
+  gate.setCurrentIntegrityForTest(integrityMsg(0.1, 1.0, 1.0, 10.0, 10.0));
+  EXPECT_EQ(gate.evaluateFinalPreview(
+                traj, safe_snapshot, 0.1, 1.0).action,
+            ego_planner::P5GateAction::OK);
+
+  gate.setCurrentIntegrityForTest(integrityMsg(0.2, 10.3, 10.3, 10.0, 10.0));
+  const auto still_armed = gate.evaluateRuntime(
+      traj, safe_snapshot, 0.2, 1.0);
+  EXPECT_EQ(still_armed.action,
+            ego_planner::P5GateAction::REQUEST_EMERGENCY_STOP_CANDIDATE);
+  EXPECT_GE(still_armed.current_low_margin_duration_s, 0.2 - 1.0e-9);
+}
+
 TEST(P5RuntimeIntegrityGateTest, FinalGatePassResetsFailureBudget) {
   auto config = baseConfig();
   config.current_stale_to_replan_s = 100.0;
