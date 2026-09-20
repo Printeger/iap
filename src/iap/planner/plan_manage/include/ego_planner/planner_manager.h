@@ -803,6 +803,9 @@ namespace ego_planner
     int continous_failures_count_{0};
     uint64_t execution_instance_id_ = 0;
     std::atomic<int> next_trajectory_id_{1};
+    std::atomic<uint64_t> next_p4_channel_id_{1};
+    std::atomic<std::size_t> p4_channel_round_robin_cursor_{0};
+    std::vector<P4ChannelSlot> p4_channel_slots_;
     double maximum_trajectory_pipeline_latency_s_ = 0.0;
     uint64_t last_published_execution_instance_id_ = 0;
     int last_published_trajectory_id_ = 0;

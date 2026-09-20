@@ -992,6 +992,10 @@ namespace ego_planner
       maximum = maximum.cwiseMax(point);
     }
     std::vector<bool> segment_has_collision(working_guide.size() - 1u, false);
+    std::vector<Eigen::Vector3d> segment_failure_positions(
+        working_guide.size() - 1u,
+        Eigen::Vector3d::Constant(
+            std::numeric_limits<double>::quiet_NaN()));
     std::vector<Eigen::Vector3d> clear_path;
     clear_path.push_back(working_guide.front());
     bool any_collision = false;
@@ -1036,6 +1040,7 @@ namespace ego_planner
                 clearance->nearest_obstacle_identity;
           }
           segment_has_collision[segment - 1u] = true;
+          segment_failure_positions[segment - 1u] = point;
           any_collision = true;
           break;
         }
@@ -1096,6 +1101,76 @@ namespace ego_planner
         result.path.push_back(to);
         continue;
       }
+      // First repair a bad waypoint with a deterministic, frame-neutral
+      // lateral corridor scan.  Both sides use the same clearance predicate;
+      // an observed escape direction only orders them and never hard-codes a
+      // world-y preference.  Local A* remains the bounded fallback when no
+      // two-link waypoint is available in the connected corridor.
+      Eigen::Vector3d tangent = to - from;
+      tangent.z() = 0.0;
+      Eigen::Vector3d lateral(-tangent.y(), tangent.x(), 0.0);
+      if (lateral.norm() <= 1.0e-9)
+        lateral = Eigen::Vector3d::UnitX();
+      else
+        lateral.normalize();
+      const Eigen::Vector3d bad_waypoint =
+          segment_failure_positions[segment - 1u].allFinite()
+          ? segment_failure_positions[segment - 1u]
+          : 0.5 * (from + to);
+      std::array<double, 2> signs{1.0, -1.0};
+      if (result.escape_direction.allFinite() &&
+          result.escape_direction.dot(lateral) < 0.0)
+        std::swap(signs[0], signs[1]);
+      const auto link_clear = [&](const Eigen::Vector3d &a,
+                                  const Eigen::Vector3d &b) {
+          const int count = std::max(
+              1, static_cast<int>(std::ceil((b - a).norm() /
+                                           kClearPathSampleM)));
+          for (int sample = 1; sample <= count; ++sample)
+          {
+            if (std::chrono::steady_clock::now() >= deadline)
+              return false;
+            const Eigen::Vector3d point = a + (b - a) *
+                (static_cast<double>(sample) / count);
+            const auto occupancy = frozen_occupancy_query(point);
+            if (!occupancy.available || occupancy.raw_occupied ||
+                occupancy.inflated_occupied ||
+                occupancy.state == GridMapObservationState::OCCUPIED)
+              return false;
+            if (clearance_query)
+            {
+              const auto clearance = clearance_at(point);
+              if (!clearance || clearance->signed_margin_m + 1.0e-9 <
+                    planning_clearance_buffer_m)
+                return false;
+            }
+          }
+          return true;
+        };
+      bool lateral_repair_found = false;
+      for (double offset = kClearPathSampleM;
+           offset <= corridor_radius_m + 1.0e-9 &&
+               !lateral_repair_found;
+           offset += kClearPathSampleM)
+        for (const double sign : signs)
+        {
+          const Eigen::Vector3d waypoint =
+              bad_waypoint + sign * offset * lateral;
+          if (link_clear(from, waypoint) && link_clear(waypoint, to))
+          {
+            if (result.path.empty() ||
+                (from - result.path.back()).norm() > 1.0e-6)
+              result.path.push_back(from);
+            if ((waypoint - result.path.back()).norm() > 1.0e-6)
+              result.path.push_back(waypoint);
+            if ((to - result.path.back()).norm() > 1.0e-6)
+              result.path.push_back(to);
+            lateral_repair_found = true;
+            break;
+          }
+        }
+      if (lateral_repair_found)
+        continue;
       const bool astar_success = fine_astar->AstarSearchOriginal(
           kFineResolutionM, from, to);
       const auto &metrics = fine_astar->getLastP4Metrics();

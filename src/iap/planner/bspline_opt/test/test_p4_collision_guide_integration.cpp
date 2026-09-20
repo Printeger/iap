@@ -1167,6 +1167,53 @@ TEST(P4CollisionGuideIntegration,
 }
 
 TEST(P4CollisionGuideIntegration,
+  ForwardGuideLateralRepairIsMirrorSymmetric)
+{
+  const auto snapshot = makeSnapshot();
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureGuideFixture(map.get(), false);
+  const auto epoch = map->captureFrozenOccupancyEpoch();
+  ASSERT_NE(epoch, nullptr);
+  auto optimizer = makeOptimizer(
+    map, snapshot, true, false, P4RiskObjective::PROVIDER_BOTTLENECK_V2);
+  const std::vector<Eigen::Vector3d> coarse = {
+    Eigen::Vector3d(-4.0, 0.0, 0.0),
+    Eigen::Vector3d(4.0, 0.0, 0.0)};
+  const auto make_clearance = [](const double escape_sign) {
+      return [escape_sign](const Eigen::Vector3d & point) {
+          ego_planner::P4ForwardClearanceSample sample;
+          sample.available = true;
+          sample.signed_margin_m =
+            std::abs(point.x()) < 0.8 && std::abs(point.y()) < 0.30
+            ? -0.01 : 0.10;
+          sample.escape_direction =
+            Eigen::Vector3d(0.0, escape_sign, 0.0);
+          sample.nearest_obstacle_position =
+            Eigen::Vector3d(point.x(), 0.30 * escape_sign, 0.0);
+          sample.nearest_obstacle_identity = "mirrored-clearance-wall";
+          return sample;
+        };
+    };
+
+  const auto positive = optimizer->refineP4ForwardGuide(
+      coarse, epoch->diagnostic_query, 0.75, 100.0,
+      make_clearance(1.0), 0.05);
+  const auto negative = optimizer->refineP4ForwardGuide(
+      coarse, epoch->diagnostic_query, 0.75, 100.0,
+      make_clearance(-1.0), 0.05);
+
+  ASSERT_TRUE(positive.success()) << positive.reason;
+  ASSERT_TRUE(negative.success()) << negative.reason;
+  ASSERT_EQ(positive.path.size(), negative.path.size());
+  for (std::size_t i = 0; i < positive.path.size(); ++i)
+  {
+    EXPECT_NEAR(positive.path[i].x(), negative.path[i].x(), 1.0e-9);
+    EXPECT_NEAR(positive.path[i].y(), -negative.path[i].y(), 1.0e-9);
+    EXPECT_NEAR(positive.path[i].z(), negative.path[i].z(), 1.0e-9);
+  }
+}
+
+TEST(P4CollisionGuideIntegration,
   ForwardGuideRefinementBacksOffBlockedSuffixBeforeStartingAStar)
 {
   const auto snapshot = makeSnapshot();

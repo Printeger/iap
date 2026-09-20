@@ -18,6 +18,32 @@
 namespace
 {
 
+TEST(P4ChannelSlotIdentity,
+     MatchesCorridorsAcrossReorderingAndAllocatesOnlyNewSlots)
+{
+  const std::vector<Eigen::Vector3d> left{
+      {0.0, 0.0, 1.0}, {1.0, 1.0, 1.0}, {2.0, 1.0, 1.0}};
+  const std::vector<Eigen::Vector3d> right{
+      {0.0, 0.0, 1.0}, {1.0, -1.0, 1.0}, {2.0, -1.0, 1.0}};
+  std::vector<ego_planner::P4ChannelSlot> previous(2);
+  previous[0].stable_channel_id = 17;
+  previous[0].topology_path = left;
+  previous[1].stable_channel_id = 29;
+  previous[1].topology_path = right;
+  auto shifted_left = left;
+  for (auto &point : shifted_left) point.y() += 0.05;
+  const std::vector<Eigen::Vector3d> upper{
+      {0.0, 0.0, 1.0}, {1.0, 0.0, 2.0}, {2.0, 0.0, 2.0}};
+
+  const auto slots = ego_planner::assignP4StableChannelSlots(
+      {right, shifted_left, upper}, previous, 100, 0.2);
+
+  ASSERT_EQ(slots.size(), 3u);
+  EXPECT_EQ(slots[0].stable_channel_id, 29u);
+  EXPECT_EQ(slots[1].stable_channel_id, 17u);
+  EXPECT_EQ(slots[2].stable_channel_id, 100u);
+}
+
 TEST(P4SuccessorDeadlinePolicy,
      StartsImmediatelyForShortSegmentsAndPreservesAbsoluteDeadline)
 {
@@ -1624,6 +1650,11 @@ TEST(P4ForwardRoute,
   EXPECT_LE(observed_direct_budget_ms,
             request.limits.compute_budget_ms);
   ASSERT_EQ(decision.candidates.size(), 1u);
+  EXPECT_EQ(decision.channel_comparison_state,
+            ego_planner::P4ChannelComparisonState::PARTIAL_COMPARISON);
+  EXPECT_GT(decision.unevaluated_channel_count, 0u);
+  EXPECT_EQ(decision.reason,
+            "partial_comparison_certified_candidate_ready");
   EXPECT_TRUE(decision.candidates.front().risk_supported);
   EXPECT_GT(std::max_element(
       decision.candidates.front().path.begin(),

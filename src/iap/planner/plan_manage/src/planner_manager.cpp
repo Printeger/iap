@@ -1370,23 +1370,6 @@ namespace ego_planner
       return result;
     }
 
-    double meanPathDistance(
-        const std::vector<Eigen::Vector3d> &query,
-        const std::vector<Eigen::Vector3d> &reference)
-    {
-      if (query.empty() || reference.empty())
-        return std::numeric_limits<double>::infinity();
-      double sum = 0.0;
-      for (const auto &point : query)
-      {
-        double nearest = std::numeric_limits<double>::infinity();
-        for (const auto &other : reference)
-          nearest = std::min(nearest, (point - other).norm());
-        sum += nearest;
-      }
-      return sum / static_cast<double>(query.size());
-    }
-
     SafetyVizP1Metrics toSafetyVizP1Metrics(
         const BsplineOptimizer::P1IntegrityMetrics &metrics)
     {
@@ -2802,6 +2785,15 @@ namespace ego_planner
 
     P4ForwardRequest request;
     request.planning_attempt_id = planning_risk_context_.planning_attempt_id;
+    request.prior_channel_slots = p4_channel_slots_;
+    request.first_reserved_channel_id = next_p4_channel_id_.fetch_add(
+        static_cast<uint64_t>(std::max(1, p4_forward_limits_.max_channels)),
+        std::memory_order_relaxed);
+    request.refinement_round_robin_start =
+        p4_channel_round_robin_cursor_.fetch_add(
+            1u, std::memory_order_relaxed);
+    request.incumbent_channel_id =
+        p4_execution_certificate_.successor_channel_id;
     request.position = start_pt;
     request.velocity = start_vel;
     request.local_target = local_target_pt;
@@ -2885,6 +2877,70 @@ namespace ego_planner
     request.snapshot_identity.occupancy_stamp_s = occupancy->cloud_stamp_s;
     request.snapshot_identity.risk_stamp_s = execution
         ? execution->evaluation_time_s : snapshot->stamp_s();
+    for (auto &slot : p4_channel_slots_)
+    {
+      if (slot.occupancy_generation != occupancy->generation)
+      {
+        const auto history = grid_map_
+            ? grid_map_->collisionDeltasSince(slot.occupancy_generation)
+            : OccupancyCollisionDeltaHistory{};
+        const bool invalidation_radius_valid =
+            std::isfinite(request.limits.vehicle_radius_m) &&
+            request.limits.vehicle_radius_m >= 0.0 &&
+            std::isfinite(request.map_inflation_m) &&
+            request.map_inflation_m >= 0.0;
+        bool corridor_intersects_delta =
+            !history.complete || !invalidation_radius_valid;
+        if (history.complete && occupancy->frozen_grid_map_epoch)
+        {
+          const auto &epoch = *occupancy->frozen_grid_map_epoch;
+          const double invalidation_radius =
+              request.limits.vehicle_radius_m + request.map_inflation_m +
+              epoch.resolution_m;
+          for (const auto &delta : history.deltas)
+          {
+            if (!delta || !delta->complete)
+            {
+              corridor_intersects_delta = true;
+              break;
+            }
+            for (const auto &change : delta->changes)
+            {
+              if (!change.occupied)
+                continue;
+              const Eigen::Vector3d center = epoch.lattice_origin +
+                  (change.voxel_index.cast<double>() +
+                   Eigen::Vector3d::Constant(0.5)) * epoch.resolution_m;
+              if (std::any_of(
+                      slot.topology_path.begin(), slot.topology_path.end(),
+                      [&center, invalidation_radius](
+                          const Eigen::Vector3d &point) {
+                        return (point - center).norm() <=
+                            invalidation_radius;
+                      }))
+              {
+                corridor_intersects_delta = true;
+                break;
+              }
+            }
+            if (corridor_intersects_delta)
+              break;
+          }
+        }
+        if (corridor_intersects_delta)
+          slot.state = P4ChannelEvaluationState::DISCOVERED;
+        slot.occupancy_generation = occupancy->generation;
+      }
+      if (slot.gnss_epoch_identity !=
+          request.snapshot_identity.gnss_epoch_identity)
+      {
+        if (slot.state == P4ChannelEvaluationState::CERTIFIED)
+          slot.state = P4ChannelEvaluationState::GEOMETRY_READY;
+        slot.gnss_epoch_identity =
+            request.snapshot_identity.gnss_epoch_identity;
+      }
+    }
+    request.prior_channel_slots = p4_channel_slots_;
     unavailable.snapshot_identity = request.snapshot_identity;
     unavailable.request_position = request.position;
     unavailable.local_target = request.local_target;
@@ -3560,6 +3616,8 @@ namespace ego_planner
         return *completed;
       }
       completed->planning_attempt_id = request.planning_attempt_id;
+      if (!completed->channel_slots.empty())
+        p4_channel_slots_ = completed->channel_slots;
       if (p4_latched_anchor_.allFinite() &&
           (start_pt - p4_latched_anchor_).norm() <=
               p4_forward_limits_.topology_resolution_m)
@@ -3568,43 +3626,6 @@ namespace ego_planner
         p4_latched_anchor_.setConstant(
             std::numeric_limits<double>::quiet_NaN());
         p4_latched_geometry_policy_.clear();
-      }
-      if (!p4_latched_guide_.empty() &&
-          p4_latched_geometry_policy_ == geometry_policy &&
-          (completed->action == P4ForwardAction::CANDIDATE_READY ||
-           completed->action == P4ForwardAction::RISK_SELECTED ||
-           completed->action == P4ForwardAction::CONTINUE_NOMINAL))
-      {
-        P4ForwardCandidate *latched_candidate = nullptr;
-        double best_distance = std::numeric_limits<double>::infinity();
-        for (auto &candidate : completed->candidates)
-        {
-          if (!candidate.risk_supported || !candidate.safety_gate_passed)
-            continue;
-          const double distance = meanPathDistance(
-              candidate.path, p4_latched_guide_);
-          if (distance < best_distance)
-          {
-            best_distance = distance;
-            latched_candidate = &candidate;
-          }
-        }
-        if (latched_candidate && best_distance <=
-            2.0 * p4_forward_limits_.topology_resolution_m)
-        {
-          completed->selected_candidate_id = latched_candidate->candidate_id;
-          completed->selected_guide = latched_candidate->path;
-          completed->action = P4ForwardAction::CANDIDATE_READY;
-          completed->selection_authority =
-              P4ForwardSelectionAuthority::NONE;
-          completed->formal_support = false;
-          completed->reason = "latched_channel_candidate_ready";
-        }
-        else
-        {
-          p4_latched_guide_.clear();
-          p4_latched_geometry_policy_.clear();
-        }
       }
       if (completed->action == P4ForwardAction::CANDIDATE_READY &&
           !completed->selected_guide.empty())
@@ -7801,10 +7822,18 @@ namespace ego_planner
             evaluation_now_s);
     const Eigen::Vector3d commanded_position =
         local_data_.position_traj_.evaluateDeBoorT(current_t);
+    // Derive the state from the identity-checked position spline itself.
+    // LocalTrajData derivative caches are an execution optimization and may
+    // legitimately be absent in replay/tests; they are not part of the
+    // certified curve identity and must never be dereferenced unchecked.
+    auto committed_velocity_traj =
+        local_data_.position_traj_.getDerivative();
+    auto committed_acceleration_traj =
+        committed_velocity_traj.getDerivative();
     const Eigen::Vector3d commanded_velocity =
-        local_data_.velocity_traj_.evaluateDeBoorT(current_t);
+        committed_velocity_traj.evaluateDeBoorT(current_t);
     const Eigen::Vector3d commanded_acceleration =
-        local_data_.acceleration_traj_.evaluateDeBoorT(current_t);
+        committed_acceleration_traj.evaluateDeBoorT(current_t);
     if (actual_velocity.allFinite() && actual_acceleration.allFinite() &&
         std::isfinite(p4_execution_certificate_.local_motion_minimum_margin_m))
     {

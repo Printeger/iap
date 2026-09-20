@@ -2003,6 +2003,79 @@ bool configureAdvisorySelection(
 
 }  // namespace
 
+std::vector<P4ChannelSlot> assignP4StableChannelSlots(
+    const std::vector<std::vector<Eigen::Vector3d>> &topology_paths,
+    const std::vector<P4ChannelSlot> &previous_slots,
+    const uint64_t first_new_channel_id,
+    const double matching_distance_m)
+{
+  std::vector<P4ChannelSlot> slots;
+  if (first_new_channel_id == 0u || !std::isfinite(matching_distance_m) ||
+      matching_distance_m < 0.0)
+    return slots;
+  const auto directed_distance = [](
+      const std::vector<Eigen::Vector3d> &left,
+      const std::vector<Eigen::Vector3d> &right) {
+        if (left.empty() || right.empty())
+          return std::numeric_limits<double>::infinity();
+        double sum = 0.0;
+        for (const auto &point : left)
+        {
+          double nearest = std::numeric_limits<double>::infinity();
+          for (const auto &other : right)
+            nearest = std::min(nearest, (point - other).norm());
+          sum += nearest;
+        }
+        return sum / static_cast<double>(left.size());
+      };
+  std::unordered_set<uint64_t> claimed;
+  uint64_t next_id = first_new_channel_id;
+  for (const auto &path : topology_paths)
+  {
+    if (path.size() < 2u)
+      continue;
+    const P4ChannelSlot *matched = nullptr;
+    double matched_distance = std::numeric_limits<double>::infinity();
+    for (const auto &prior : previous_slots)
+    {
+      if (prior.stable_channel_id == 0u ||
+          claimed.count(prior.stable_channel_id) != 0u ||
+          prior.topology_path.size() < 2u)
+        continue;
+      const double distance = std::max(
+          directed_distance(path, prior.topology_path),
+          directed_distance(prior.topology_path, path));
+      if (distance <= matching_distance_m + kEpsilon &&
+          (distance < matched_distance - kEpsilon ||
+           (std::abs(distance - matched_distance) <= kEpsilon &&
+            (!matched || prior.stable_channel_id <
+                 matched->stable_channel_id))))
+      {
+        matched = &prior;
+        matched_distance = distance;
+      }
+    }
+    P4ChannelSlot slot;
+    if (matched)
+    {
+      slot = *matched;
+      claimed.insert(slot.stable_channel_id);
+    }
+    else
+    {
+      while (claimed.count(next_id) != 0u)
+        ++next_id;
+      slot.stable_channel_id = next_id++;
+      claimed.insert(slot.stable_channel_id);
+    }
+    slot.topology_path = path;
+    slot.corridor_hash = hashPath(path);
+    slot.state = P4ChannelEvaluationState::DISCOVERED;
+    slots.push_back(std::move(slot));
+  }
+  return slots;
+}
+
 P4SuccessorDeadline computeP4SuccessorDeadline(
   const P4SuccessorDeadlinePolicy & policy,
   const double trajectory_start_s, const double trajectory_end_s)
@@ -2854,6 +2927,27 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
       }
       return lhs.path_hash < rhs.path_hash;
     });
+  std::vector<std::vector<Eigen::Vector3d>> clear_topology_paths;
+  for (const auto &candidate : decision.raw_candidates)
+    if (candidate.occupancy_supported)
+      clear_topology_paths.push_back(candidate.topology_path);
+  decision.channel_slots = assignP4StableChannelSlots(
+      clear_topology_paths, request.prior_channel_slots,
+      request.first_reserved_channel_id,
+      request.limits.topology_resolution_m);
+  if (request.successor_fast_path && request.incumbent_channel_id != 0u &&
+      decision.channel_slots.size() == 1u)
+    decision.channel_slots.front().stable_channel_id =
+        request.incumbent_channel_id;
+  for (auto &slot : decision.channel_slots)
+  {
+    slot.occupancy_generation =
+        request.snapshot_identity.occupancy_generation;
+    slot.gnss_epoch_identity =
+        request.snapshot_identity.gnss_epoch_identity;
+    slot.state = P4ChannelEvaluationState::GEOMETRY_READY;
+  }
+  std::size_t clear_slot_index = 0;
   for (const auto & candidate : decision.raw_candidates) {
     if (graph.timedOut()) {
       decision.reason = "compute_budget_exceeded";
@@ -2866,9 +2960,9 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
     // channel-equivalence sweep. Repeating it here both wastes the bounded
     // risk-query budget and can turn a valid result into a deadline failure.
     auto representative = candidate;
-    representative.channel_id = request.successor_fast_path &&
-      request.incumbent_channel_id != 0u ? request.incumbent_channel_id :
-      static_cast<uint64_t>(decision.candidates.size() + 1);
+    representative.channel_id = clear_slot_index < decision.channel_slots.size()
+      ? decision.channel_slots[clear_slot_index].stable_channel_id : 0u;
+    ++clear_slot_index;
     decision.candidates.push_back(std::move(representative));
     if (static_cast<int>(decision.candidates.size()) >=
       request.limits.max_channels)
@@ -3002,7 +3096,8 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
     return finalize(std::move(decision));
   }
   const auto risk_order =
-    [task_mode = request.limits.task_mode](
+    [task_mode = request.limits.task_mode,
+     incumbent_channel_id = request.incumbent_channel_id](
       const P4ForwardCandidate * lhs, const P4ForwardCandidate * rhs) {
       const auto group = [](const P4ForwardCandidate* candidate) {
         if (candidate->safety_gate_passed ||
@@ -3057,6 +3152,9 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
         if (std::abs(lhs->length_m - rhs->length_m) > kEpsilon) {
           return lhs->length_m > rhs->length_m;
         }
+        if ((lhs->channel_id == incumbent_channel_id) !=
+            (rhs->channel_id == incumbent_channel_id))
+          return lhs->channel_id == incumbent_channel_id;
         return lhs->path_hash < rhs->path_hash;
       }
       if (std::isfinite(lhs->global_peak_ratio) &&
@@ -3115,15 +3213,26 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
           ? lhs->length_m > rhs->length_m
           : lhs->length_m < rhs->length_m;
       }
+      if ((lhs->channel_id == incumbent_channel_id) !=
+          (rhs->channel_id == incumbent_channel_id))
+        return lhs->channel_id == incumbent_channel_id;
       return lhs->path_hash < rhs->path_hash;
     };
   std::sort(eligible.begin(), eligible.end(), risk_order);
 
   if (request.refine) {
+    if (!eligible.empty())
+    {
+      const std::size_t offset =
+          request.refinement_round_robin_start % eligible.size();
+      std::rotate(eligible.begin(), eligible.begin() + offset,
+                  eligible.end());
+    }
     std::vector<P4ForwardCandidate> refined_candidates;
     refined_candidates.reserve(eligible.size());
     std::map<P4ForwardRefinementStatus, std::size_t> refinement_failures;
     double successful_refinement_wcet_ms = 0.0;
+    std::unordered_set<uint64_t> attempted_channel_ids;
     const double direct_authorization_reserve_ms = std::min(
       request.limits.compute_budget_ms,
       0.5 * request.limits.route_compute_budget_ms);
@@ -3151,6 +3260,7 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
         break;
       }
       P4ForwardCandidate refined_candidate = *candidate;
+      attempted_channel_ids.insert(candidate->channel_id);
       auto refinement = request.refine(
         candidate->path,
         1.5 * request.limits.topology_resolution_m,
@@ -3174,6 +3284,27 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
       if (refined_candidate.occupancy_supported) {
         refined_candidates.push_back(std::move(refined_candidate));
       }
+    }
+    if (attempted_channel_ids.size() < eligible.size())
+    {
+      decision.channel_comparison_state =
+          P4ChannelComparisonState::PARTIAL_COMPARISON;
+      decision.unevaluated_channel_count =
+          eligible.size() - attempted_channel_ids.size();
+    }
+    for (auto &slot : decision.channel_slots)
+    {
+      const auto certified = std::find_if(
+          refined_candidates.begin(), refined_candidates.end(),
+          [&slot](const P4ForwardCandidate &candidate) {
+            return candidate.channel_id == slot.stable_channel_id;
+          });
+      if (certified != refined_candidates.end())
+        slot.state = P4ChannelEvaluationState::CERTIFIED;
+      else if (attempted_channel_ids.count(slot.stable_channel_id) != 0u)
+        slot.state = P4ChannelEvaluationState::HARD_FAILED;
+      else
+        slot.state = P4ChannelEvaluationState::PARTIAL_COMPARISON;
     }
     if (refined_candidates.empty()) {
       decision.action = P4ForwardAction::REPLAN_REQUIRED;
@@ -3272,6 +3403,9 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
        : selected->controlled_degraded_candidate
        ? "single_controlled_degraded_candidate"
        : "single_safe_channel"));
+  if (decision.channel_comparison_state ==
+      P4ChannelComparisonState::PARTIAL_COMPARISON)
+    decision.reason = "partial_comparison_certified_candidate_ready";
   return finalize(std::move(decision));
 }
 

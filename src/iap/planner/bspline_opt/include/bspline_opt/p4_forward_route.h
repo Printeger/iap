@@ -300,6 +300,36 @@ namespace ego_planner
     INCOMPLETE,
   };
 
+  enum class P4ChannelEvaluationState
+  {
+    DISCOVERED = 0,
+    GEOMETRY_READY,
+    CERTIFIED,
+    HARD_FAILED,
+    PARTIAL_COMPARISON,
+  };
+
+  enum class P4ChannelComparisonState
+  {
+    COMPLETE = 0,
+    PARTIAL_COMPARISON,
+  };
+
+  struct P4ChannelSlot
+  {
+    uint64_t stable_channel_id = 0;
+    std::vector<Eigen::Vector3d> topology_path;
+    std::string corridor_hash;
+    uint64_t occupancy_generation = 0;
+    uint64_t gnss_epoch_identity = 0;
+    P4ChannelEvaluationState state = P4ChannelEvaluationState::DISCOVERED;
+  };
+
+  std::vector<P4ChannelSlot> assignP4StableChannelSlots(
+      const std::vector<std::vector<Eigen::Vector3d>> &topology_paths,
+      const std::vector<P4ChannelSlot> &previous_slots,
+      uint64_t first_new_channel_id, double matching_distance_m);
+
   const char * p4ForwardActionName(P4ForwardAction action);
   const char * p4ForwardTriggerReasonName(P4ForwardTriggerReason reason);
   const char * p4ForwardGeometryStateName(P4ForwardGeometryState state);
@@ -540,6 +570,9 @@ namespace ego_planner
     // falls back to the ordinary bounded topology search.
     bool successor_fast_path = false;
     uint64_t incumbent_channel_id = 0;
+    std::vector<P4ChannelSlot> prior_channel_slots;
+    uint64_t first_reserved_channel_id = 1;
+    std::size_t refinement_round_robin_start = 0;
     std::vector<Eigen::Vector3d> successor_reuse_guide;
     P4ForwardSnapshotIdentity snapshot_identity;
     Eigen::Vector3d map_origin = Eigen::Vector3d::Zero();
@@ -589,6 +622,10 @@ namespace ego_planner
     std::numeric_limits < double > ::quiet_NaN());
     std::vector < P4ForwardCandidate > raw_candidates;
     std::vector < P4ForwardCandidate > candidates;
+    std::vector<P4ChannelSlot> channel_slots;
+    P4ChannelComparisonState channel_comparison_state =
+      P4ChannelComparisonState::COMPLETE;
+    std::size_t unevaluated_channel_count = 0;
     std::vector<P4ForwardRefinementResult> refinement_diagnostics;
     P4ForwardGeometryState geometry_state = P4ForwardGeometryState::CLEAR;
     P4ForwardRiskSupport risk_support = P4ForwardRiskSupport::INCOMPLETE;
