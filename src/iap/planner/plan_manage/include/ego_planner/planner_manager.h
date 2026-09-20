@@ -327,6 +327,12 @@ namespace ego_planner
     UniformBspline trajectory;
     rclcpp::Time start_time{0, 0, RCL_ROS_TIME};
     int trajectory_id = 0;
+    uint64_t execution_instance_id = 0;
+    std::string curve_hash;
+    uint64_t parent_execution_instance_id = 0;
+    int parent_trajectory_id = 0;
+    rclcpp::Time parent_start_time{0, 0, RCL_ROS_TIME};
+    std::string parent_curve_hash;
     uint64_t braking_certificate_id = 0;
   };
 
@@ -537,6 +543,15 @@ namespace ego_planner
     using TimeProvider = std::function<rclcpp::Time()>;
     void setTimeProvider(TimeProvider provider);
     rclcpp::Time plannerNow() const;
+    int allocateTrajectoryId();
+    uint64_t executionInstanceId() const { return execution_instance_id_; }
+    double requiredTrajectoryLeadTimeSeconds() const;
+    void recordTrajectoryCommandPublished(
+        uint64_t execution_instance_id, int trajectory_id,
+        const std::string &curve_hash);
+    void recordTrajectoryActivated(
+        uint64_t execution_instance_id, int trajectory_id,
+        const std::string &curve_hash);
 
     void deliverTrajToOptimizer(void) { bspline_optimizer_->setSwarmTrajs(&swarm_trajs_buf_); };
 
@@ -629,7 +644,7 @@ namespace ego_planner
       return last_p4_execution_diagnostics_;
     }
     std::optional<P4GuardBrakingCommand>
-    pendingP4GuardBrakingCommand() const;
+    pendingP4GuardBrakingCommand();
     void acknowledgeP4GuardStatus(
         int trajectory_id, const std::string &status);
     bool setPendingP4GuardDurationForTest(double duration_s)
@@ -776,6 +791,13 @@ namespace ego_planner
     BsplineOptimizer::Ptr bspline_optimizer_;
 
     int continous_failures_count_{0};
+    uint64_t execution_instance_id_ = 0;
+    std::atomic<int> next_trajectory_id_{1};
+    double maximum_trajectory_pipeline_latency_s_ = 0.0;
+    uint64_t last_published_execution_instance_id_ = 0;
+    int last_published_trajectory_id_ = 0;
+    std::string last_published_curve_hash_;
+    std::chrono::steady_clock::time_point last_trajectory_publish_steady_;
     uint64_t p1_accepted_profile_seq_{0};
     uint64_t p1_formal_observed_trajectory_id_{0};
     bool p1_formal_checkpoint_recorded_{false};
@@ -895,6 +917,8 @@ namespace ego_planner
           std::numeric_limits<double>::quiet_NaN();
       bool recoverable_before_activation = false;
       bool cancel_requested = false;
+      int trajectory_id = 0;
+      std::string curve_hash;
       P4GuardServerState server_state = P4GuardServerState::REQUESTED;
     };
     std::optional<P4PendingBrakingTransition> p4_pending_braking_anchor_;
@@ -1022,7 +1046,10 @@ namespace ego_planner
         const std::string &p1_admission_verdict,
         const std::string &p1_admission_reason) const;
 
-    void updateTrajInfo(const UniformBspline &position_traj, const rclcpp::Time time_now);
+    void updateTrajInfo(
+        const UniformBspline &position_traj, const rclcpp::Time time_now,
+        int reserved_trajectory_id = 0,
+        const std::string &reserved_curve_hash = {});
 
     void reparamBspline(UniformBspline &bspline, vector<Eigen::Vector3d> &start_end_derivative, double ratio, Eigen::MatrixXd &ctrl_pts, double &dt,
                         double &time_inc);

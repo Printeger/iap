@@ -70,6 +70,7 @@ void SO3Control::calculateControl(const Eigen::Vector3d &des_pos,
 
   // 计算力
   force_ = mass_ * g_ * Eigen::Vector3d(0, 0, 1);
+  saturated_ = false;
   if (flag_use_pos)
     force_.noalias() += kx.asDiagonal() * (des_pos - pos_);
   if (flag_use_vel)
@@ -85,6 +86,7 @@ void SO3Control::calculateControl(const Eigen::Vector3d &des_pos,
   f.noalias() = force_ - mass_ * g_ * Eigen::Vector3d(0, 0, 1);
   if (Eigen::Vector3d(0, 0, 1).dot(force_ / force_.norm()) < c)
   {
+    saturated_ = true;
     double nf = f.norm();
     double A = c * c * nf * nf - f(2) * f(2);
     double B = 2 * (c * c - 1) * f(2) * mass_ * g_;

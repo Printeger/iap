@@ -4935,6 +4935,8 @@ def _launch_setup(context):
                         ("motors", "/test_planner/motors"),
                         ("corrections", "/test_planner/corrections"),
                         ("so3_cmd", so3_cmd_topic),
+                        ("controller_trace",
+                         f"/drone_{drone_id}_controller_trace"),
                         ("imu", so3_feedback_imu_topic),
                     ],
                 )

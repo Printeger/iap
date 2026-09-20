@@ -109,6 +109,13 @@ if(BUILD_TESTING)
     test/test_gate0_qualification_writer.cpp
     src/gate0_qualification_writer.cpp
   )
+  find_package(Python3 REQUIRED COMPONENTS Interpreter)
+  add_test(
+    NAME test_traj_server_handshake
+    COMMAND ${Python3_EXECUTABLE}
+      ${CMAKE_CURRENT_SOURCE_DIR}/../../../../test/test_traj_server_handshake.py
+      --server $<TARGET_FILE:traj_server>
+  )
   ament_target_dependencies(test_gate0_qualification_writer Eigen3)
 
   ament_add_gtest(test_p0_risk_grid_runtime

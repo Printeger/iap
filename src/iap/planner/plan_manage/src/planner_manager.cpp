@@ -8,6 +8,7 @@
 #include <ego_planner/p4_terminal_stop.h>
 #include <ego_planner/p5_runtime_integrity_gate.h>
 #include <ego_planner/safety_rviz_publisher.h>
+#include <ego_planner/trajectory_command_qos.h>
 #include <iap/planner/risk_grid_map.hpp>
 #include <algorithm>
 #include <chrono>
@@ -1581,7 +1582,55 @@ namespace ego_planner
     }
   } // namespace
 
-  EGOPlannerManager::EGOPlannerManager() {}
+  EGOPlannerManager::EGOPlannerManager()
+  {
+    execution_instance_id_ = std::max<std::uint64_t>(
+        1u, static_cast<std::uint64_t>(
+            std::chrono::steady_clock::now().time_since_epoch().count()));
+  }
+
+  int EGOPlannerManager::allocateTrajectoryId()
+  {
+    int next = next_trajectory_id_.load(std::memory_order_relaxed);
+    const int minimum = std::max(1, local_data_.traj_id_ + 1);
+    while (next < minimum &&
+           !next_trajectory_id_.compare_exchange_weak(
+               next, minimum, std::memory_order_relaxed))
+    {
+    }
+    return next_trajectory_id_.fetch_add(1, std::memory_order_relaxed);
+  }
+
+  double EGOPlannerManager::requiredTrajectoryLeadTimeSeconds() const
+  {
+    return std::max(0.2, maximum_trajectory_pipeline_latency_s_ + 0.05);
+  }
+
+  void EGOPlannerManager::recordTrajectoryCommandPublished(
+      const uint64_t execution_instance_id, const int trajectory_id,
+      const std::string &curve_hash)
+  {
+    last_published_execution_instance_id_ = execution_instance_id;
+    last_published_trajectory_id_ = trajectory_id;
+    last_published_curve_hash_ = curve_hash;
+    last_trajectory_publish_steady_ = std::chrono::steady_clock::now();
+  }
+
+  void EGOPlannerManager::recordTrajectoryActivated(
+      const uint64_t execution_instance_id, const int trajectory_id,
+      const std::string &curve_hash)
+  {
+    if (execution_instance_id != last_published_execution_instance_id_ ||
+        trajectory_id != last_published_trajectory_id_ ||
+        curve_hash != last_published_curve_hash_)
+      return;
+    const double latency_s = std::chrono::duration<double>(
+        std::chrono::steady_clock::now() -
+        last_trajectory_publish_steady_).count();
+    if (std::isfinite(latency_s) && latency_s >= 0.0)
+      maximum_trajectory_pipeline_latency_s_ = std::max(
+          maximum_trajectory_pipeline_latency_s_, latency_s);
+  }
 
   EGOPlannerManager::~EGOPlannerManager()
   {
@@ -5887,7 +5936,7 @@ namespace ego_planner
   }
 
   std::optional<P4GuardBrakingCommand>
-  EGOPlannerManager::pendingP4GuardBrakingCommand() const
+  EGOPlannerManager::pendingP4GuardBrakingCommand()
   {
     if (!p4_pending_braking_anchor_ ||
         p4_pending_braking_anchor_->anchor_index >=
@@ -5906,7 +5955,18 @@ namespace ego_planner
             static_cast<int64_t>(std::llround(
                 anchor.trajectory_time_s * 1.0e9)),
         RCL_ROS_TIME);
-    command.trajectory_id = local_data_.traj_id_ + 1;
+    if (p4_pending_braking_anchor_->trajectory_id <= 0)
+      p4_pending_braking_anchor_->trajectory_id = allocateTrajectoryId();
+    command.trajectory_id = p4_pending_braking_anchor_->trajectory_id;
+    command.execution_instance_id = execution_instance_id_;
+    if (p4_pending_braking_anchor_->curve_hash.empty())
+      p4_pending_braking_anchor_->curve_hash =
+          trajectoryCurveHash(command.trajectory, command.start_time);
+    command.curve_hash = p4_pending_braking_anchor_->curve_hash;
+    command.parent_execution_instance_id = execution_instance_id_;
+    command.parent_trajectory_id = local_data_.traj_id_;
+    command.parent_start_time = local_data_.start_time_;
+    command.parent_curve_hash = local_data_.curve_hash_;
     command.braking_certificate_id = anchor.braking_certificate_id;
     return command;
   }
@@ -7794,7 +7854,8 @@ namespace ego_planner
         updateTrajInfo(
             anchor.trajectory,
             rclcpp::Time(static_cast<int64_t>(
-                std::llround(switch_time_s * 1.0e9)), RCL_ROS_TIME));
+                std::llround(switch_time_s * 1.0e9)), RCL_ROS_TIME),
+            pending.trajectory_id, pending.curve_hash);
         p4_execution_certificate_.trajectory_id = local_data_.traj_id_;
         p4_execution_certificate_.start_time_ns =
             local_data_.start_time_.nanoseconds();
@@ -12136,7 +12197,7 @@ namespace ego_planner
              "successor_full_search_fallback_ready");
     const double candidate_start_time_s = successor_curve_preparation
         ? p4_successor_schedule_.deadline.planned_switch_time_s
-        : accepted_time.seconds();
+        : accepted_time.seconds() + requiredTrajectoryLeadTimeSeconds();
     const rclcpp::Time candidate_start_time(
         static_cast<int64_t>(std::llround(candidate_start_time_s * 1.0e9)),
         RCL_ROS_TIME);
@@ -12632,7 +12693,13 @@ namespace ego_planner
       control_points.col(i) = stop_pos;
     }
 
-    updateTrajInfo(UniformBspline(control_points, 3, 1.0), plannerNow());
+    const auto now = plannerNow();
+    updateTrajInfo(
+        UniformBspline(control_points, 3, 1.0),
+        rclcpp::Time(
+            now.nanoseconds() + static_cast<int64_t>(std::llround(
+                requiredTrajectoryLeadTimeSeconds() * 1.0e9)),
+            RCL_ROS_TIME));
     has_p1_preference_incumbent_ = false;
 
     return true;
@@ -12885,15 +12952,31 @@ namespace ego_planner
     return success;
   }
 
-  void EGOPlannerManager::updateTrajInfo(const UniformBspline &position_traj, const rclcpp::Time time_now)
+  void EGOPlannerManager::updateTrajInfo(
+      const UniformBspline &position_traj, const rclcpp::Time time_now,
+      const int reserved_trajectory_id,
+      const std::string &reserved_curve_hash)
   {
+    const uint64_t parent_instance = local_data_.execution_instance_id_;
+    const int parent_id = local_data_.traj_id_;
+    const rclcpp::Time parent_start = local_data_.start_time_;
+    const std::string parent_hash = local_data_.curve_hash_;
     local_data_.start_time_ = time_now;
     local_data_.position_traj_ = position_traj;
     local_data_.velocity_traj_ = local_data_.position_traj_.getDerivative();
     local_data_.acceleration_traj_ = local_data_.velocity_traj_.getDerivative();
     local_data_.start_pos_ = local_data_.position_traj_.evaluateDeBoorT(0.0);
     local_data_.duration_ = local_data_.position_traj_.getTimeSum();
-    local_data_.traj_id_ += 1;
+    local_data_.execution_instance_id_ = execution_instance_id_;
+    local_data_.traj_id_ = reserved_trajectory_id > 0
+        ? reserved_trajectory_id : allocateTrajectoryId();
+    local_data_.curve_hash_ = reserved_curve_hash.empty()
+        ? trajectoryCurveHash(position_traj, time_now)
+        : reserved_curve_hash;
+    local_data_.parent_execution_instance_id_ = parent_instance;
+    local_data_.parent_traj_id_ = parent_id;
+    local_data_.parent_start_time_ = parent_start;
+    local_data_.parent_curve_hash_ = parent_hash;
   }
 
   void EGOPlannerManager::reparamBspline(UniformBspline &bspline, vector<Eigen::Vector3d> &start_end_derivative, double ratio,

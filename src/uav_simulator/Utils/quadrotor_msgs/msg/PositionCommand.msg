@@ -8,6 +8,13 @@ float64[3] kx
 float64[3] kv 
 
 uint32 trajectory_id
+uint64 execution_instance_id
+string curve_hash
+builtin_interfaces/Time trajectory_start_time
+uint64 parent_execution_instance_id
+int64 parent_trajectory_id
+builtin_interfaces/Time parent_start_time
+string parent_curve_hash
 
 uint8 TRAJECTORY_STATUS_EMPTY = 0
 uint8 TRAJECTORY_STATUS_READY = 1

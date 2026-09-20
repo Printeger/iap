@@ -2,6 +2,7 @@
 #include <nav_msgs/msg/odometry.hpp>
 #include <rclcpp_components/register_node_macro.hpp>
 #include <quadrotor_msgs/msg/corrections.hpp>
+#include <quadrotor_msgs/msg/controller_command_trace.hpp>
 #include <quadrotor_msgs/msg/position_command.hpp>
 #include <quadrotor_msgs/msg/so3_command.hpp>
 #include <rclcpp/rclcpp.hpp>
@@ -10,6 +11,7 @@
 #include <std_msgs/msg/bool.hpp>
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
+#include <chrono>
 
 class SO3ControlComponent : public rclcpp::Node
 {
@@ -35,6 +37,8 @@ private:
 
     SO3Control controller_;
     rclcpp::Publisher<quadrotor_msgs::msg::SO3Command>::SharedPtr so3_command_pub_;
+    rclcpp::Publisher<quadrotor_msgs::msg::ControllerCommandTrace>::SharedPtr
+        controller_trace_pub_;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
     rclcpp::Subscription<quadrotor_msgs::msg::PositionCommand>::SharedPtr position_cmd_sub_;
     rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr enable_motors_sub_;
@@ -51,6 +55,12 @@ private:
     bool use_external_yaw_;
     double kR_[3], kOm_[3], corrections_[3];
     double init_x_, init_y_, init_z_;
+    quadrotor_msgs::msg::PositionCommand latest_position_command_;
+    uint64_t position_command_receive_steady_ns_ = 0;
+    Eigen::Vector3d feedback_position_ = Eigen::Vector3d::Zero();
+    Eigen::Vector3d feedback_velocity_ = Eigen::Vector3d::Zero();
+    Eigen::Vector3d feedback_acceleration_ = Eigen::Vector3d::Zero();
+    builtin_interfaces::msg::Time feedback_odometry_stamp_;
 };
 
 void SO3ControlComponent::publishSO3Command(void)
@@ -92,10 +102,49 @@ void SO3ControlComponent::publishSO3Command(void)
 
     // 发布消息
     so3_command_pub_->publish(*so3_command);
+
+    if (position_cmd_init_ && controller_trace_pub_)
+    {
+        quadrotor_msgs::msg::ControllerCommandTrace trace;
+        trace.header.stamp = so3_command->header.stamp;
+        trace.header.frame_id = frame_id_;
+        trace.receive_steady_time_ns = position_command_receive_steady_ns_;
+        trace.output_steady_time_ns = static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count());
+        trace.execution_instance_id =
+            latest_position_command_.execution_instance_id;
+        trace.trajectory_id = latest_position_command_.trajectory_id;
+        trace.trajectory_start_time =
+            latest_position_command_.trajectory_start_time;
+        trace.curve_hash = latest_position_command_.curve_hash;
+        trace.commanded_position = latest_position_command_.position;
+        trace.commanded_velocity = latest_position_command_.velocity;
+        trace.commanded_acceleration = latest_position_command_.acceleration;
+        trace.feedback_position.x = feedback_position_.x();
+        trace.feedback_position.y = feedback_position_.y();
+        trace.feedback_position.z = feedback_position_.z();
+        trace.feedback_velocity.x = feedback_velocity_.x();
+        trace.feedback_velocity.y = feedback_velocity_.y();
+        trace.feedback_velocity.z = feedback_velocity_.z();
+        trace.feedback_acceleration.x = feedback_acceleration_.x();
+        trace.feedback_acceleration.y = feedback_acceleration_.y();
+        trace.feedback_acceleration.z = feedback_acceleration_.z();
+        trace.odometry_stamp = feedback_odometry_stamp_;
+        trace.control_output.x = force.x();
+        trace.control_output.y = force.y();
+        trace.control_output.z = force.z();
+        trace.saturated = controller_.wasSaturated();
+        controller_trace_pub_->publish(trace);
+    }
 }
 
 void SO3ControlComponent::position_cmd_callback(const quadrotor_msgs::msg::PositionCommand::ConstPtr &cmd)
 {
+    latest_position_command_ = *cmd;
+    position_command_receive_steady_ns_ = static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count());
     // std::cout<< "SO3ControlComponent::cmd callback!!!!!!!!!!!!!!!!!!!!!!!" << std::endl;
     des_pos_ = Eigen::Vector3d(cmd->position.x, cmd->position.y, cmd->position.z);
     des_vel_ = Eigen::Vector3d(cmd->velocity.x, cmd->velocity.y, cmd->velocity.z);
@@ -129,6 +178,9 @@ void SO3ControlComponent::odom_callback(const nav_msgs::msg::Odometry::ConstPtr 
     const Eigen::Vector3d velocity(odom->twist.twist.linear.x,
                                    odom->twist.twist.linear.y,
                                    odom->twist.twist.linear.z);
+    feedback_position_ = position;
+    feedback_velocity_ = velocity;
+    feedback_odometry_stamp_ = odom->header.stamp;
 
     // ROS2中不能直接这样获取
     // current_yaw_ = tf2::getYaw(odom->pose.pose.orientation);
@@ -192,6 +244,7 @@ void SO3ControlComponent::imu_callback(const sensor_msgs::msg::Imu &imu)
     const Eigen::Vector3d acc(imu.linear_acceleration.x,
                               imu.linear_acceleration.y,
                               imu.linear_acceleration.z);
+    feedback_acceleration_ = acc;
     controller_.setAcc(acc);
 }
 
@@ -258,6 +311,9 @@ void SO3ControlComponent::onInit(void)
     get_parameter("so3_control/init_state_z", init_z_);
 
     so3_command_pub_ = create_publisher<quadrotor_msgs::msg::SO3Command>("so3_cmd", 10);
+    controller_trace_pub_ =
+        create_publisher<quadrotor_msgs::msg::ControllerCommandTrace>(
+            "controller_trace", 50);
 
     odom_sub_ = create_subscription<nav_msgs::msg::Odometry>(
         "odom", 10, std::bind(&SO3ControlComponent::odom_callback, this, std::placeholders::_1));

@@ -22,6 +22,7 @@ public:
 
   const Eigen::Vector3d&    getComputedForce(void);
   const Eigen::Quaterniond& getComputedOrientation(void);
+  bool wasSaturated(void) const { return saturated_; }
 
 
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
@@ -37,6 +38,7 @@ private:
   // Outputs of the controller
   Eigen::Vector3d    force_;
   Eigen::Quaterniond orientation_;
+  bool saturated_ = false;
 };
 
 #endif

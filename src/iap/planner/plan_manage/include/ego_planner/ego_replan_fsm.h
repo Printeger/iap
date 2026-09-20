@@ -21,6 +21,7 @@
 #include "plan_env/grid_map.h"
 #include "traj_utils/msg/bspline.hpp"
 #include "traj_utils/msg/multi_bsplines.hpp"
+#include "traj_utils/msg/trajectory_command_status.hpp"
 #include "geometry_msgs/msg/pose_stamped.hpp"
 #include "traj_utils/msg/data_disp.hpp"
 #include "ego_planner/planner_manager.h"
@@ -232,7 +233,8 @@ namespace ego_planner
     rclcpp::Subscription<traj_utils::msg::MultiBsplines>::SharedPtr swarm_trajs_sub_;
     rclcpp::Subscription<traj_utils::msg::Bspline>::SharedPtr broadcast_bspline_sub_;
     rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr trigger_sub_;
-    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr guard_status_sub_;
+    rclcpp::Subscription<traj_utils::msg::TrajectoryCommandStatus>::SharedPtr
+        guard_status_sub_;
 
     // rclcpp::Publisher<std_msgs::msg::Empty>::SharedPtr replan_pub_;
     // rclcpp::Publisher<std_msgs::msg::Empty>::SharedPtr new_pub_;

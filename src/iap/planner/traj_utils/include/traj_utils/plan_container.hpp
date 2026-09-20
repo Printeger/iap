@@ -2,6 +2,8 @@
 #define _PLAN_CONTAINER_H_
 
 #include <Eigen/Eigen>
+#include <cstdint>
+#include <string>
 #include <vector>
 #include <rclcpp/rclcpp.hpp>
 
@@ -211,8 +213,14 @@ namespace ego_planner
   {
     /* info of generated traj */
 
-    int traj_id_;
-    double duration_;
+    int traj_id_ = 0;
+    std::uint64_t execution_instance_id_ = 0;
+    std::string curve_hash_;
+    std::uint64_t parent_execution_instance_id_ = 0;
+    int parent_traj_id_ = 0;
+    rclcpp::Time parent_start_time_{0, 0, RCL_ROS_TIME};
+    std::string parent_curve_hash_;
+    double duration_ = 0.0;
     rclcpp::Time start_time_;
     Eigen::Vector3d start_pos_;
     UniformBspline position_traj_, velocity_traj_, acceleration_traj_;

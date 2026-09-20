@@ -2,9 +2,9 @@
 #include "ego_planner/trajectory_command_qos.h"
 #include "nav_msgs/msg/odometry.hpp"
 #include "traj_utils/msg/bspline.hpp"
+#include "traj_utils/msg/trajectory_command_status.hpp"
 #include "quadrotor_msgs/msg/position_command.hpp"
 #include "std_msgs/msg/empty.hpp"
-#include "std_msgs/msg/string.hpp"
 #include "visualization_msgs/msg/marker.hpp"
 #include <algorithm>
 #include <csignal>
@@ -13,7 +13,8 @@
 
 rclcpp::Publisher<quadrotor_msgs::msg::PositionCommand>::SharedPtr pos_cmd_pub;
 rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub;
-rclcpp::Publisher<std_msgs::msg::String>::SharedPtr guard_status_pub;
+rclcpp::Publisher<traj_utils::msg::TrajectoryCommandStatus>::SharedPtr
+    guard_status_pub;
 
 quadrotor_msgs::msg::PositionCommand cmd;
 double pos_gain[3] = {0, 0, 0};
@@ -25,18 +26,25 @@ bool receive_traj_ = false;
 vector<UniformBspline> traj_;
 double traj_duration_;
 rclcpp::Time start_time_;
-int traj_id_;
+int traj_id_ = 0;
 struct PendingGuardTrajectory
 {
   vector<UniformBspline> trajectory;
   double duration_s = 0.0;
   rclcpp::Time start_time{0, 0, RCL_ROS_TIME};
   int trajectory_id = 0;
+  ego_planner::TrajectoryIdentity identity;
+  ego_planner::TrajectoryIdentity parent_identity;
 };
 std::optional<PendingGuardTrajectory> pending_guard_trajectory_;
 ego_planner::PendingGuardDeadlineGate pending_guard_deadline_gate_;
+ego_planner::TrajectoryCommandLedger command_ledger_;
+std::optional<ego_planner::TrajectoryIdentity> active_identity_;
+ego_planner::TrajectoryIdentity active_parent_identity_;
 rclcpp::Time latest_odom_stamp_(0, 0, RCL_ROS_TIME);
 bool have_odom_stamp_ = false;
+Eigen::Vector3d latest_odom_position_ = Eigen::Vector3d::Zero();
+bool have_odom_position_ = false;
 volatile std::sig_atomic_t stop_requested = 0;
 
 void requestStop(int)
@@ -44,12 +52,30 @@ void requestStop(int)
   stop_requested = 1;
 }
 
-void publishGuardStatus(const char *status, const int trajectory_id)
+void publishGuardStatus(
+    const uint8_t state, const PendingGuardTrajectory &trajectory,
+    const rclcpp::Time &actual_event_time,
+    const std::string &rejection_reason = {})
 {
-  if (!guard_status_pub || trajectory_id <= 0)
+  if (!guard_status_pub || !trajectory.identity.valid())
     return;
-  std_msgs::msg::String message;
-  message.data = std::string(status) + ":" + std::to_string(trajectory_id);
+  traj_utils::msg::TrajectoryCommandStatus message;
+  message.header.stamp = actual_event_time;
+  message.header.frame_id = "map";
+  message.state = state;
+  message.execution_instance_id = trajectory.identity.execution_instance_id;
+  message.trajectory_id = trajectory.identity.trajectory_id;
+  message.start_time = trajectory.start_time;
+  message.curve_hash = trajectory.identity.curve_hash;
+  message.parent_execution_instance_id =
+      trajectory.parent_identity.execution_instance_id;
+  message.parent_trajectory_id = trajectory.parent_identity.trajectory_id;
+  message.parent_start_time = rclcpp::Time(
+      trajectory.parent_identity.start_time_ns, RCL_ROS_TIME);
+  message.parent_curve_hash = trajectory.parent_identity.curve_hash;
+  message.planned_event_time = trajectory.start_time;
+  message.actual_event_time = actual_event_time;
+  message.rejection_reason = rejection_reason;
   guard_status_pub->publish(message);
 }
 
@@ -60,7 +86,11 @@ double time_forward_;
 std::optional<PendingGuardTrajectory> parseTrajectoryCommand(
     const traj_utils::msg::Bspline &msg)
 {
-  if (msg.pos_pts.empty() || msg.knots.empty())
+  if (msg.pos_pts.empty() || msg.knots.empty() ||
+      msg.traj_id < std::numeric_limits<int>::min() ||
+      msg.traj_id > std::numeric_limits<int>::max() ||
+      msg.parent_traj_id < std::numeric_limits<int>::min() ||
+      msg.parent_traj_id > std::numeric_limits<int>::max())
     return std::nullopt;
   // parse pos traj
 
@@ -84,11 +114,23 @@ std::optional<PendingGuardTrajectory> parseTrajectoryCommand(
 
   PendingGuardTrajectory parsed;
   parsed.start_time = msg.start_time;
-  parsed.trajectory_id = msg.traj_id;
+  parsed.trajectory_id = static_cast<int>(msg.traj_id);
+  parsed.identity = {
+      msg.execution_instance_id, static_cast<int>(msg.traj_id),
+      rclcpp::Time(msg.start_time).nanoseconds(), msg.curve_hash};
+  parsed.parent_identity = {
+      msg.parent_execution_instance_id, static_cast<int>(msg.parent_traj_id),
+      rclcpp::Time(msg.parent_start_time).nanoseconds(),
+      msg.parent_curve_hash};
   parsed.trajectory.push_back(pos_traj);
   parsed.trajectory.push_back(parsed.trajectory[0].getDerivative());
   parsed.trajectory.push_back(parsed.trajectory[1].getDerivative());
   parsed.duration_s = parsed.trajectory[0].getTimeSum();
+  if (!parsed.identity.valid() ||
+      ego_planner::trajectoryCurveHash(
+          parsed.trajectory[0], parsed.start_time) !=
+          parsed.identity.curve_hash)
+    return std::nullopt;
   return parsed;
 }
 
@@ -99,20 +141,91 @@ void installTrajectory(PendingGuardTrajectory parsed)
   traj_ = std::move(parsed.trajectory);
   traj_duration_ = parsed.duration_s;
   receive_traj_ = true;
+  active_identity_ = parsed.identity;
+  active_parent_identity_ = parsed.parent_identity;
 }
 
-void bsplineCallback(traj_utils::msg::Bspline::ConstPtr msg)
+void receiveTrajectoryCommand(const traj_utils::msg::Bspline &msg)
 {
-  const auto parsed = parseTrajectoryCommand(*msg);
+  const rclcpp::Time now = have_odom_stamp_
+      ? latest_odom_stamp_
+      : rclcpp::Clock(RCL_ROS_TIME).now();
+  const auto parsed = parseTrajectoryCommand(msg);
   if (!parsed)
+  {
+    PendingGuardTrajectory rejected;
+    rejected.start_time = msg.start_time;
+    rejected.trajectory_id = static_cast<int>(msg.traj_id);
+    rejected.identity = {msg.execution_instance_id,
+                         static_cast<int>(msg.traj_id),
+                         rclcpp::Time(msg.start_time).nanoseconds(),
+                         msg.curve_hash};
+    rejected.parent_identity = {
+        msg.parent_execution_instance_id,
+        static_cast<int>(msg.parent_traj_id),
+        rclcpp::Time(msg.parent_start_time).nanoseconds(),
+        msg.parent_curve_hash};
+    publishGuardStatus(
+        traj_utils::msg::TrajectoryCommandStatus::REJECTED,
+        rejected, now, "invalid_curve_identity_or_payload");
     return;
-  if (pending_guard_trajectory_ &&
-      msg->traj_id >= pending_guard_trajectory_->trajectory_id)
+  }
+  const auto observation = command_ledger_.observe(parsed->identity);
+  if (observation ==
+          ego_planner::TrajectoryCommandObservation::REJECT_ID_CONFLICT ||
+      observation ==
+          ego_planner::TrajectoryCommandObservation::REJECT_OLD_INSTANCE ||
+      observation ==
+          ego_planner::TrajectoryCommandObservation::REJECT_OUT_OF_ORDER_ID ||
+      observation ==
+          ego_planner::TrajectoryCommandObservation::REJECT_CANCELED_ID ||
+      observation ==
+          ego_planner::TrajectoryCommandObservation::REJECT_INVALID)
+  {
+    publishGuardStatus(
+        traj_utils::msg::TrajectoryCommandStatus::REJECTED,
+        *parsed, now,
+        observation == ego_planner::TrajectoryCommandObservation::REJECT_ID_CONFLICT
+            ? "trajectory_id_curve_conflict"
+            : "stale_or_canceled_identity");
+    return;
+  }
+  if (observation ==
+      ego_planner::TrajectoryCommandObservation::ACCEPT_DUPLICATE)
+  {
+    if (active_identity_ && *active_identity_ == parsed->identity)
+      publishGuardStatus(
+          traj_utils::msg::TrajectoryCommandStatus::ACTIVATED,
+          *parsed, now);
+    else
+      publishGuardStatus(
+          traj_utils::msg::TrajectoryCommandStatus::QUEUED,
+          *parsed, now);
+    return;
+  }
+  if (observation ==
+      ego_planner::TrajectoryCommandObservation::ACCEPT_NEW_INSTANCE)
   {
     pending_guard_trajectory_.reset();
     pending_guard_deadline_gate_.clear();
   }
-  installTrajectory(*parsed);
+  if (parsed->start_time.seconds() + 1.0e-9 < now.seconds())
+  {
+    command_ledger_.cancel(parsed->identity);
+    publishGuardStatus(
+        traj_utils::msg::TrajectoryCommandStatus::REJECTED,
+        *parsed, now, "queue_deadline_missed_rebuild_required");
+    return;
+  }
+  pending_guard_trajectory_ = *parsed;
+  pending_guard_deadline_gate_.schedule(parsed->identity);
+  publishGuardStatus(
+      traj_utils::msg::TrajectoryCommandStatus::QUEUED, *parsed, now);
+}
+
+void bsplineCallback(traj_utils::msg::Bspline::ConstPtr msg)
+{
+  receiveTrajectoryCommand(*msg);
 
   // parse yaw traj
 
@@ -131,34 +244,44 @@ void pendingGuardCallback(traj_utils::msg::Bspline::ConstPtr msg)
   {
     // Cancellation is effective only while the guard is still queued.  Once
     // promoted, its trajectory id is current and cannot be undone.
+    const ego_planner::TrajectoryIdentity identity{
+        msg->execution_instance_id, static_cast<int>(msg->traj_id),
+        rclcpp::Time(msg->start_time).nanoseconds(), msg->curve_hash};
     if (pending_guard_trajectory_ &&
-        pending_guard_trajectory_->trajectory_id == msg->traj_id &&
-        pending_guard_deadline_gate_.cancel(msg->traj_id))
+        pending_guard_trajectory_->identity == identity &&
+        pending_guard_deadline_gate_.cancel(msg->traj_id) &&
+        command_ledger_.cancel(identity))
     {
+      const auto canceled = *pending_guard_trajectory_;
       pending_guard_trajectory_.reset();
-      publishGuardStatus("CANCELED", msg->traj_id);
+      publishGuardStatus(
+          traj_utils::msg::TrajectoryCommandStatus::CANCELED,
+          canceled, have_odom_stamp_ ? latest_odom_stamp_
+                                     : rclcpp::Clock(RCL_ROS_TIME).now());
     }
-    else if (receive_traj_ && traj_id_ == msg->traj_id)
-      publishGuardStatus("ACTIVATED", msg->traj_id);
-    else
-      publishGuardStatus("ABSENT", msg->traj_id);
+    else if (active_identity_ && *active_identity_ == identity)
+    {
+      PendingGuardTrajectory active;
+      active.identity = identity;
+      active.start_time = msg->start_time;
+      publishGuardStatus(
+          traj_utils::msg::TrajectoryCommandStatus::ACTIVATED,
+          active, have_odom_stamp_ ? latest_odom_stamp_
+                                   : rclcpp::Clock(RCL_ROS_TIME).now());
+    }
     return;
   }
-  const auto parsed = parseTrajectoryCommand(*msg);
-  if (!parsed || parsed->trajectory_id <= 0)
-    return;
-  if (receive_traj_ && parsed->trajectory_id <= traj_id_)
-    return;
-  pending_guard_trajectory_ = *parsed;
-  pending_guard_deadline_gate_.schedule(
-      parsed->trajectory_id, parsed->start_time.seconds());
-  publishGuardStatus("QUEUED", parsed->trajectory_id);
+  receiveTrajectoryCommand(*msg);
 }
 
 void odometryCallback(nav_msgs::msg::Odometry::ConstSharedPtr msg)
 {
   latest_odom_stamp_ = rclcpp::Time(msg->header.stamp, RCL_ROS_TIME);
   have_odom_stamp_ = latest_odom_stamp_.nanoseconds() > 0;
+  latest_odom_position_ = Eigen::Vector3d(
+      msg->pose.pose.position.x, msg->pose.pose.position.y,
+      msg->pose.pose.position.z);
+  have_odom_position_ = latest_odom_position_.allFinite();
 }
 
 rclcpp::Time trajServerNow()
@@ -266,10 +389,13 @@ std::pair<double, double> calculate_yaw(double t_cur, Eigen::Vector3d &pos, rclc
 void cmdCallback()
 {
   rclcpp::Time time_now = trajServerNow();
-  if (pending_guard_trajectory_ && receive_traj_)
+  if (pending_guard_trajectory_)
   {
-    const auto deadline_action = pending_guard_deadline_gate_.poll(
-        traj_id_, time_now.seconds());
+    const auto deadline_action = active_identity_
+        ? pending_guard_deadline_gate_.poll(*active_identity_, time_now.seconds())
+        : (time_now.seconds() >= pending_guard_trajectory_->start_time.seconds()
+               ? ego_planner::PendingGuardDeadlineAction::ACTIVATE
+               : ego_planner::PendingGuardDeadlineAction::WAIT);
     if (deadline_action ==
         ego_planner::PendingGuardDeadlineAction::DISCARD)
     {
@@ -280,23 +406,34 @@ void cmdCallback()
              ego_planner::PendingGuardDeadlineAction::ACTIVATE)
     {
       const int activated_id = pending_guard_trajectory_->trajectory_id;
+      const auto activated = *pending_guard_trajectory_;
       installTrajectory(std::move(*pending_guard_trajectory_));
       pending_guard_trajectory_.reset();
       pending_guard_deadline_gate_.clear();
-      publishGuardStatus("ACTIVATED", activated_id);
+      (void)activated_id;
+      publishGuardStatus(
+          traj_utils::msg::TrajectoryCommandStatus::ACTIVATED,
+          activated, time_now);
     }
   }
   /* no publishing before receive traj_ */
-  if (!receive_traj_)
+  if (!receive_traj_ && !have_odom_position_)
     return;
 
-  double t_cur = (time_now - start_time_).seconds();
+  double t_cur = receive_traj_ ? (time_now - start_time_).seconds() : 0.0;
 
   Eigen::Vector3d pos(Eigen::Vector3d::Zero()), vel(Eigen::Vector3d::Zero()), acc(Eigen::Vector3d::Zero()), pos_f;
   std::pair<double, double> yaw_yawdot(0, 0);
 
   static rclcpp::Time time_last = time_now;
-  if (t_cur < traj_duration_ && t_cur >= 0.0)
+  if (!receive_traj_)
+  {
+    pos = latest_odom_position_;
+    vel.setZero();
+    acc.setZero();
+    pos_f = pos;
+  }
+  else if (t_cur < traj_duration_ && t_cur >= 0.0)
   {
     pos = traj_[0].evaluateDeBoorT(t_cur);
     vel = traj_[1].evaluateDeBoorT(t_cur);
@@ -331,6 +468,21 @@ void cmdCallback()
   cmd.header.frame_id = "map";
   cmd.trajectory_flag = quadrotor_msgs::msg::PositionCommand::TRAJECTORY_STATUS_READY;
   cmd.trajectory_id = traj_id_;
+  cmd.execution_instance_id = active_identity_
+      ? active_identity_->execution_instance_id : 0u;
+  cmd.curve_hash = active_identity_ ? active_identity_->curve_hash : "";
+  cmd.trajectory_start_time = receive_traj_ ? start_time_ : rclcpp::Time(0, 0, RCL_ROS_TIME);
+  if (active_identity_)
+  {
+    cmd.parent_execution_instance_id =
+        active_parent_identity_.execution_instance_id;
+    cmd.parent_trajectory_id =
+        active_parent_identity_.trajectory_id;
+    cmd.parent_start_time = rclcpp::Time(
+        active_parent_identity_.start_time_ns,
+        RCL_ROS_TIME);
+    cmd.parent_curve_hash = active_parent_identity_.curve_hash;
+  }
 
   cmd.position.x = pos(0);
   cmd.position.y = pos(1);
@@ -364,7 +516,8 @@ int main(int argc, char **argv)
   // Create the acknowledgement publisher before either subscription.  A
   // transient-local status closes the planner/server cancellation race even
   // if one side starts slightly later.
-  guard_status_pub = node->create_publisher<std_msgs::msg::String>(
+  guard_status_pub = node->create_publisher<
+      traj_utils::msg::TrajectoryCommandStatus>(
       "planning/pending_guard_status",
       ego_planner::trajectoryCommandQos(20u));
 

@@ -3469,7 +3469,7 @@ def _capture_main(args: argparse.Namespace) -> int:
         ActiveLidarWindowDelta, IntegrityReport, RegisteredLidarFrame,
     )
     from nav_msgs.msg import Odometry
-    from quadrotor_msgs.msg import PositionCommand
+    from quadrotor_msgs.msg import ControllerCommandTrace, PositionCommand
     from rclpy.node import Node
     from rclpy.qos import (
         DurabilityPolicy, QoSProfile, ReliabilityPolicy,
@@ -3478,7 +3478,7 @@ def _capture_main(args: argparse.Namespace) -> int:
     from sensor_msgs.msg import Imu, PointCloud2
     from sensor_msgs_py import point_cloud2
     from std_msgs.msg import String
-    from traj_utils.msg import Bspline
+    from traj_utils.msg import Bspline, TrajectoryCommandStatus
 
     output = args.capture_output.resolve()
     ready = args.capture_ready.resolve()
@@ -3511,13 +3511,16 @@ def _capture_main(args: argparse.Namespace) -> int:
                 Bspline, "/drone_0_planning/pending_guard_bspline",
                 self.pending_guard_bspline, retained)
             self.create_subscription(
-                String, "/drone_0_planning/pending_guard_status",
-                lambda message: self.record(
-                    "pending_guard_status", {"status": message.data}),
+                TrajectoryCommandStatus,
+                "/drone_0_planning/pending_guard_status",
+                self.trajectory_status,
                 retained)
             self.create_subscription(
                 PositionCommand, "/drone_0_planning/pos_cmd",
                 self.poscmd, reliable)
+            self.create_subscription(
+                ControllerCommandTrace, "/drone_0_controller_trace",
+                self.controller_trace, reliable)
             self.create_subscription(
                 Odometry, "/drone_0_visual_slam/odom",
                 lambda message: self.record("iap_odom", {
@@ -3611,6 +3614,7 @@ def _capture_main(args: argparse.Namespace) -> int:
 
         def bspline(self, message: Bspline) -> None:
             self.record("normal_bspline", {
+                "execution_instance_id": int(message.execution_instance_id),
                 "trajectory_id": int(message.traj_id),
                 "start_time_ns": int(message.start_time.sec) * 1_000_000_000
                 + int(message.start_time.nanosec),
@@ -3621,10 +3625,19 @@ def _capture_main(args: argparse.Namespace) -> int:
                 ],
                 "knot_count": len(message.knots),
                 "knots": [float(knot) for knot in message.knots],
+                "curve_hash": message.curve_hash,
+                "parent_execution_instance_id": int(
+                    message.parent_execution_instance_id),
+                "parent_trajectory_id": int(message.parent_traj_id),
+                "parent_start_time_ns":
+                    int(message.parent_start_time.sec) * 1_000_000_000
+                    + int(message.parent_start_time.nanosec),
+                "parent_curve_hash": message.parent_curve_hash,
             })
 
         def pending_guard_bspline(self, message: Bspline) -> None:
             self.record("pending_guard_bspline", {
+                "execution_instance_id": int(message.execution_instance_id),
                 "trajectory_id": int(message.traj_id),
                 "start_time_ns": int(message.start_time.sec) * 1_000_000_000
                 + int(message.start_time.nanosec),
@@ -3636,10 +3649,30 @@ def _capture_main(args: argparse.Namespace) -> int:
                 "knot_count": len(message.knots),
                 "knots": [float(knot) for knot in message.knots],
                 "cancellation": not message.pos_pts,
+                "curve_hash": message.curve_hash,
+            })
+
+        def trajectory_status(self, message: TrajectoryCommandStatus) -> None:
+            states = {
+                message.QUEUED: "QUEUED", message.ACTIVATED: "ACTIVATED",
+                message.CANCELED: "CANCELED", message.REJECTED: "REJECTED",
+            }
+            self.record("trajectory_status", {
+                "state": states.get(int(message.state), "UNKNOWN"),
+                "execution_instance_id": int(message.execution_instance_id),
+                "trajectory_id": int(message.trajectory_id),
+                "start_time_ns": int(message.start_time.sec) * 1_000_000_000
+                + int(message.start_time.nanosec),
+                "curve_hash": message.curve_hash,
+                "event_time_ns":
+                    int(message.actual_event_time.sec) * 1_000_000_000
+                    + int(message.actual_event_time.nanosec),
+                "rejection_reason": message.rejection_reason,
             })
 
         def poscmd(self, message: PositionCommand) -> None:
             self.record("poscmd", {
+                "execution_instance_id": int(message.execution_instance_id),
                 "trajectory_id": int(message.trajectory_id),
                 "stamp_s": float(message.header.stamp.sec)
                 + 1.0e-9 * float(message.header.stamp.nanosec),
@@ -3657,6 +3690,31 @@ def _capture_main(args: argparse.Namespace) -> int:
                     float(message.acceleration.z),
                 ],
                 "trajectory_flag": int(message.trajectory_flag),
+                "start_time_ns":
+                    int(message.trajectory_start_time.sec) * 1_000_000_000
+                    + int(message.trajectory_start_time.nanosec),
+                "curve_hash": message.curve_hash,
+            })
+
+        def controller_trace(self, message: ControllerCommandTrace) -> None:
+            self.record("controller_trace", {
+                "execution_instance_id": int(message.execution_instance_id),
+                "trajectory_id": int(message.trajectory_id),
+                "start_time_ns":
+                    int(message.trajectory_start_time.sec) * 1_000_000_000
+                    + int(message.trajectory_start_time.nanosec),
+                "curve_hash": message.curve_hash,
+                "receive_steady_ns": int(message.receive_steady_time_ns),
+                "output_steady_ns": int(message.output_steady_time_ns),
+                "position_xyz": [
+                    float(message.commanded_position.x),
+                    float(message.commanded_position.y),
+                    float(message.commanded_position.z)],
+                "feedback_position_xyz": [
+                    float(message.feedback_position.x),
+                    float(message.feedback_position.y),
+                    float(message.feedback_position.z)],
+                "saturated": bool(message.saturated),
             })
 
         def local_map_delta(self, message: ActiveLidarWindowDelta) -> None:

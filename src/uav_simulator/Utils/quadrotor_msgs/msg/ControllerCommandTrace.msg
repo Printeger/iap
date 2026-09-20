@@ -1,0 +1,19 @@
+std_msgs/Header header
+uint64 receive_steady_time_ns
+uint64 output_steady_time_ns
+
+uint64 execution_instance_id
+uint32 trajectory_id
+builtin_interfaces/Time trajectory_start_time
+string curve_hash
+
+geometry_msgs/Point commanded_position
+geometry_msgs/Vector3 commanded_velocity
+geometry_msgs/Vector3 commanded_acceleration
+geometry_msgs/Point feedback_position
+geometry_msgs/Vector3 feedback_velocity
+geometry_msgs/Vector3 feedback_acceleration
+builtin_interfaces/Time odometry_stamp
+
+geometry_msgs/Vector3 control_output
+bool saturated

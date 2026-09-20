@@ -459,6 +459,55 @@ TEST(P4RuntimeGuardTest,
   gate.clear();
 }
 
+TEST(TrajectoryCommandIdentityTest,
+     RejectsConflictsAndActivatesNonContiguousFutureIdentity)
+{
+  const ego_planner::TrajectoryIdentity parent{
+      1001u, 25, 10'000'000'000LL, "parent-hash"};
+  const ego_planner::TrajectoryIdentity child{
+      1001u, 41, 10'200'000'000LL, "child-hash"};
+  ego_planner::TrajectoryCommandLedger ledger;
+  EXPECT_EQ(ledger.observe(child),
+            ego_planner::TrajectoryCommandObservation::ACCEPT_NEW);
+  EXPECT_EQ(ledger.observe(child),
+            ego_planner::TrajectoryCommandObservation::ACCEPT_DUPLICATE);
+  auto conflict = child;
+  conflict.curve_hash = "different-curve";
+  EXPECT_EQ(ledger.observe(conflict),
+            ego_planner::TrajectoryCommandObservation::REJECT_ID_CONFLICT);
+  auto out_of_order = child;
+  out_of_order.trajectory_id = 40;
+  out_of_order.curve_hash = "old-unseen-id";
+  EXPECT_EQ(ledger.observe(out_of_order),
+            ego_planner::TrajectoryCommandObservation::REJECT_OUT_OF_ORDER_ID);
+
+  ego_planner::PendingGuardDeadlineGate gate;
+  gate.schedule(child);
+  EXPECT_EQ(gate.poll(parent, 10.19),
+            ego_planner::PendingGuardDeadlineAction::WAIT);
+  EXPECT_EQ(gate.poll(parent, 10.20),
+            ego_planner::PendingGuardDeadlineAction::ACTIVATE);
+
+  auto new_instance = child;
+  new_instance.execution_instance_id = 1002u;
+  new_instance.trajectory_id = 1;
+  new_instance.curve_hash = "new-instance";
+  EXPECT_EQ(ledger.observe(new_instance),
+            ego_planner::TrajectoryCommandObservation::ACCEPT_NEW_INSTANCE);
+  EXPECT_EQ(ledger.observe(child),
+            ego_planner::TrajectoryCommandObservation::REJECT_OLD_INSTANCE);
+}
+
+TEST(TrajectoryCommandIdentityTest, ComputesMeasuredLeadWithMarginAndFloor)
+{
+  ego_planner::TrajectoryLeadTimeEstimator estimator;
+  EXPECT_DOUBLE_EQ(estimator.requiredLeadTimeSeconds(), 0.2);
+  estimator.observePipelineLatencySeconds(0.05);
+  EXPECT_DOUBLE_EQ(estimator.requiredLeadTimeSeconds(), 0.2);
+  estimator.observePipelineLatencySeconds(0.27);
+  EXPECT_NEAR(estimator.requiredLeadTimeSeconds(), 0.32, 1.0e-12);
+}
+
 struct GridMapTestAccess {
   static void configureP4SelectionTrigger(GridMap* map) {
     constexpr double resolution = 0.25;

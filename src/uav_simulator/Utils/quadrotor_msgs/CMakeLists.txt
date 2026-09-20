@@ -11,6 +11,7 @@ find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(builtin_interfaces REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 
 # 设置EIGEN3的头文件路径
@@ -20,6 +21,7 @@ include_directories(${EIGEN3_INCLUDE_DIR})
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/AuxCommand.msg"
   "msg/Corrections.msg"
+  "msg/ControllerCommandTrace.msg"
   "msg/Gains.msg"
   "msg/LQRTrajectory.msg"
   "msg/OutputData.msg"
@@ -31,11 +33,11 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/TRPYCommand.msg"
   "msg/Odometry.msg"
   "msg/PolynomialTrajectory.msg"
-  DEPENDENCIES geometry_msgs nav_msgs std_msgs rclcpp
+  DEPENDENCIES geometry_msgs nav_msgs std_msgs rclcpp builtin_interfaces
 )
 
 # 将该包对应的依赖导出，其他包在调用是会自动依赖
-ament_export_dependencies(rosidl_default_runtime geometry_msgs nav_msgs std_msgs rclcpp) 
+ament_export_dependencies(rosidl_default_runtime geometry_msgs nav_msgs std_msgs rclcpp builtin_interfaces)
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)

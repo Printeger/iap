@@ -140,26 +140,47 @@ namespace ego_planner
         "planning/bspline", trajectoryCommandQos(200u));
     guard_bspline_pub_ = node_->create_publisher<traj_utils::msg::Bspline>(
         "planning/pending_guard_bspline", trajectoryCommandQos(20u));
-    guard_status_sub_ = node_->create_subscription<std_msgs::msg::String>(
+    guard_status_sub_ = node_->create_subscription<
+        traj_utils::msg::TrajectoryCommandStatus>(
         "planning/pending_guard_status", trajectoryCommandQos(20u),
-        [this](const std_msgs::msg::String::ConstSharedPtr message)
+        [this](const traj_utils::msg::TrajectoryCommandStatus::ConstSharedPtr
+                   message)
         {
-          const auto separator = message->data.find(':');
-          if (separator == std::string::npos || separator == 0u)
+          if (message->state ==
+              traj_utils::msg::TrajectoryCommandStatus::ACTIVATED)
+            planner_manager_->recordTrajectoryActivated(
+                message->execution_instance_id,
+                message->trajectory_id, message->curve_hash);
+          const auto pending =
+              planner_manager_->pendingP4GuardBrakingCommand();
+          if (!pending ||
+              message->execution_instance_id !=
+                  pending->execution_instance_id ||
+              message->trajectory_id != pending->trajectory_id ||
+              rclcpp::Time(message->start_time).nanoseconds() !=
+                  pending->start_time.nanoseconds() ||
+              message->curve_hash != pending->curve_hash)
             return;
-          try
+          std::string state;
+          switch (message->state)
           {
-            const int trajectory_id = std::stoi(
-                message->data.substr(separator + 1u));
-            planner_manager_->acknowledgeP4GuardStatus(
-                trajectory_id, message->data.substr(0u, separator));
+            case traj_utils::msg::TrajectoryCommandStatus::QUEUED:
+              state = "QUEUED";
+              break;
+            case traj_utils::msg::TrajectoryCommandStatus::ACTIVATED:
+              state = "ACTIVATED";
+              break;
+            case traj_utils::msg::TrajectoryCommandStatus::CANCELED:
+              state = "CANCELED";
+              break;
+            case traj_utils::msg::TrajectoryCommandStatus::REJECTED:
+              state = "REJECTED";
+              break;
+            default:
+              return;
           }
-          catch (const std::exception &)
-          {
-            RCLCPP_WARN(node_->get_logger(),
-                        "Ignoring malformed pending guard status: %s",
-                        message->data.c_str());
-          }
+          planner_manager_->acknowledgeP4GuardStatus(
+              message->trajectory_id, state);
         });
     data_disp_pub_ = node_->create_publisher<traj_utils::msg::DataDisp>("planning/data_display", 100);
 
@@ -1167,14 +1188,26 @@ namespace ego_planner
         changeFSMExecState(EMERGENCY_STOP, "P4_GUARD_IDENTITY");
         return;
       }
-      guard_bspline_pub_->publish(makeTrajectoryCommand(
-          guard->trajectory, guard->start_time, guard->trajectory_id));
+      const auto guard_command = makeTrajectoryCommand(
+          guard->trajectory, guard->start_time, guard->trajectory_id,
+          guard->execution_instance_id,
+          {guard->parent_execution_instance_id,
+           guard->parent_trajectory_id,
+           guard->parent_start_time.nanoseconds(),
+           guard->parent_curve_hash});
+      planner_manager_->recordTrajectoryCommandPublished(
+          guard_command.execution_instance_id, guard_command.traj_id,
+          guard_command.curve_hash);
+      guard_bspline_pub_->publish(guard_command);
     }
     if (p4_execution_check.guard_braking_cancel_requested &&
         p4_execution_check.guard_braking_trajectory_id > 0)
     {
-      guard_bspline_pub_->publish(makeTrajectoryCancellation(
-          p4_execution_check.guard_braking_trajectory_id));
+      if (const auto guard =
+              planner_manager_->pendingP4GuardBrakingCommand())
+        guard_bspline_pub_->publish(makeTrajectoryCancellation(
+            {guard->execution_instance_id, guard->trajectory_id,
+             guard->start_time.nanoseconds(), guard->curve_hash}));
     }
     bool p4_route_collision = false;
     std::optional<P4GeometryCommitResult> p4_collision_commit;
@@ -1296,7 +1329,11 @@ namespace ego_planner
       // The braking certificate owns a new, independently parameterized
       // spline. Publish only after the live collision-delta check above has
       // accepted that exact curve; do not reset it through the planner path.
-      bspline_pub_->publish(makeTrajectoryCommand(*info));
+      const auto command = makeTrajectoryCommand(*info);
+      planner_manager_->recordTrajectoryCommandPublished(
+          command.execution_instance_id, command.traj_id,
+          command.curve_hash);
+      bspline_pub_->publish(command);
       RCLCPP_WARN(node_->get_logger(),
                   "Published certified LIMITED_PREFIX braking trajectory id=%d",
                   info->traj_id_);
@@ -1717,6 +1754,9 @@ namespace ego_planner
       // the current LocalTrajData. This makes the published message a direct
       // projection of the exact spline those checks inspected.
       const traj_utils::msg::Bspline bspline = makeTrajectoryCommand(*info);
+      planner_manager_->recordTrajectoryCommandPublished(
+          bspline.execution_instance_id, bspline.traj_id,
+          bspline.curve_hash);
       bspline_pub_->publish(bspline);
       planner_manager_->commitP4ExecutionCandidate();
       planner_manager_->recordGate0NormalBsplinePublish(plannerNow().seconds());
@@ -1818,30 +1858,10 @@ namespace ego_planner
 
     auto info = &planner_manager_->local_data_;
 
-    /* publish traj */
-    traj_utils::msg::Bspline bspline;
-    bspline.order = 3;
-    bspline.start_time = info->start_time_;
-    bspline.traj_id = info->traj_id_;
-
-    Eigen::MatrixXd pos_pts = info->position_traj_.getControlPoint();
-    bspline.pos_pts.reserve(pos_pts.cols());
-    for (int i = 0; i < pos_pts.cols(); ++i)
-    {
-      geometry_msgs::msg::Point pt;
-      pt.x = pos_pts(0, i);
-      pt.y = pos_pts(1, i);
-      pt.z = pos_pts(2, i);
-      bspline.pos_pts.push_back(pt);
-    }
-
-    Eigen::VectorXd knots = info->position_traj_.getKnot();
-    bspline.knots.reserve(knots.rows());
-    for (int i = 0; i < knots.rows(); ++i)
-    {
-      bspline.knots.push_back(knots(i));
-    }
-
+    const auto bspline = makeTrajectoryCommand(*info);
+    planner_manager_->recordTrajectoryCommandPublished(
+        bspline.execution_instance_id, bspline.traj_id,
+        bspline.curve_hash);
     bspline_pub_->publish(bspline);
 
     return true;

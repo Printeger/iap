@@ -163,7 +163,9 @@ def generate_launch_description():
                         ('position_cmd', ['drone_', drone_id, '_planning/pos_cmd']),
                         ('motors', ['drone_', drone_id, '_motors']),
                         ('corrections', ['drone_', drone_id, '_corrections']),
-                        ('so3_cmd', ['drone_', drone_id, '_so3_cmd'])],
+                        ('so3_cmd', ['drone_', drone_id, '_so3_cmd']),
+                        ('controller_trace',
+                         ['drone_', drone_id, '_controller_trace'])],
             condition = IfCondition(use_dynamic)
             )
     
