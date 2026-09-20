@@ -634,6 +634,17 @@ namespace ego_planner
       P4ForwardSelectionAuthority::NONE;
     bool formal_support = false;
     uint64_t selected_candidate_id = 0;
+    uint64_t selected_channel_id = 0;
+    uint64_t runner_up_candidate_id = 0;
+    uint64_t runner_up_channel_id = 0;
+    Eigen::Vector3d selected_actual_endpoint = Eigen::Vector3d::Constant(
+      std::numeric_limits<double>::quiet_NaN());
+    Eigen::Vector3d runner_up_actual_endpoint = Eigen::Vector3d::Constant(
+      std::numeric_limits<double>::quiet_NaN());
+    double selected_unevaluated_suffix_m =
+      std::numeric_limits<double>::quiet_NaN();
+    double runner_up_unevaluated_suffix_m =
+      std::numeric_limits<double>::quiet_NaN();
     std::vector < Eigen::Vector3d > selected_guide;
     // Geometry shared by at least two distinct topology channels. It carries
     // no risk authority; actual-curve feedback may use it only as the shape

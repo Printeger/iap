@@ -3438,6 +3438,66 @@ TEST(P4SuccessorDeadlineScheduling,
   EXPECT_TRUE(manager.p4SuccessorPreparationDue(20.0));
 }
 
+TEST(P4PreparedChannelComparison,
+     RejectsHardFailuresAndUsesIncumbentOnlyAfterCompleteRiskTie)
+{
+  ego_planner::P4ForwardSnapshotIdentity snapshot;
+  snapshot.geometry_id = "frozen-map";
+  snapshot.frame_id = "map";
+  snapshot.frame_contract_id = "map-v1";
+  snapshot.local_map_support_identity = "strict-observation";
+  snapshot.alert_limit_policy_id = "hal-val-v1";
+  snapshot.risk_config_hash = "risk-v1";
+  snapshot.risk_source_identity_hash = "source-v1";
+  snapshot.occupancy_generation = 7u;
+  snapshot.execution_snapshot_id = 9u;
+  snapshot.risk_generation = 11u;
+  snapshot.gnss_epoch_identity = 13u;
+  snapshot.gnss_epoch_stamp_s = 10.0;
+  snapshot.occupancy_stamp_s = 10.0;
+  snapshot.risk_stamp_s = 10.0;
+  const auto record = [&snapshot](const uint64_t channel_id) {
+      ego_planner::P4PreparedChannelRecord value;
+      value.channel_id = channel_id;
+      value.snapshot_identity = snapshot;
+      value.curve_identity = "curve-" + std::to_string(channel_id);
+      value.actual_endpoint = Eigen::Vector3d(
+          static_cast<double>(channel_id), 0.0, 1.0);
+      value.duration_s = 2.0;
+      value.global_peak_ratio = 0.7;
+      value.global_rolling_worst_ratio = 0.7;
+      value.global_continuous_exceedance_s = 0.0;
+      value.global_exposure_integral_ratio_s = 0.0;
+      value.global_recovery_time_s = 0.0;
+      value.fim_max_ratio = 0.4;
+      value.fim_integral = 1.0;
+      value.minimum_local_clearance_margin_m = 0.2;
+      value.failure = ego_planner::P4PreparedCurveFailure::NONE;
+      return value;
+    };
+  auto incumbent = record(41u);
+  auto safer = record(42u);
+  safer.global_peak_ratio = 0.6;
+  auto failed = record(43u);
+  failed.global_peak_ratio = 0.1;
+  failed.failure = ego_planner::P4PreparedCurveFailure::BRAKING;
+
+  auto comparison = ego_planner::compareP4PreparedChannels(
+      {incumbent, safer, failed}, snapshot, 3u, incumbent.channel_id);
+  EXPECT_EQ(comparison.state,
+            ego_planner::P4ChannelComparisonState::COMPLETE);
+  EXPECT_EQ(comparison.winner_channel_id, safer.channel_id);
+  EXPECT_EQ(comparison.runner_up_channel_id, incumbent.channel_id);
+  EXPECT_EQ(comparison.hard_failure_count, 1u);
+
+  safer.global_peak_ratio = incumbent.global_peak_ratio;
+  comparison = ego_planner::compareP4PreparedChannels(
+      {incumbent, safer}, snapshot, 3u, incumbent.channel_id);
+  EXPECT_EQ(comparison.state,
+            ego_planner::P4ChannelComparisonState::PARTIAL_COMPARISON);
+  EXPECT_EQ(comparison.winner_channel_id, incumbent.channel_id);
+}
+
 TEST(P4PreparedSuccessorPolicy,
      BindsParentSwitchWindowBoundaryStateAndDirectAuthority)
 {

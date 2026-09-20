@@ -3379,7 +3379,13 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
   const bool multiple_safe_channels = eligible.size() >= 2;
   P4ForwardCandidate * selected = eligible.front();
   decision.selected_candidate_id = selected->candidate_id;
+  decision.selected_channel_id = selected->channel_id;
   decision.selected_guide = selected->path;
+  if (eligible.size() > 1u)
+  {
+    decision.runner_up_candidate_id = eligible[1]->candidate_id;
+    decision.runner_up_channel_id = eligible[1]->channel_id;
+  }
   decision.action = P4ForwardAction::CANDIDATE_READY;
   decision.selection_authority = P4ForwardSelectionAuthority::NONE;
   decision.formal_support = false;

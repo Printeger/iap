@@ -585,6 +585,106 @@ namespace ego_planner
     return finish(true, "prepared_successor_ready");
   }
 
+  P4PreparedChannelComparison compareP4PreparedChannels(
+      const std::vector<P4PreparedChannelRecord> &records,
+      const P4ForwardSnapshotIdentity &latest_snapshot,
+      const std::size_t expected_channel_count,
+      const uint64_t incumbent_channel_id)
+  {
+    P4PreparedChannelComparison result;
+    std::vector<const P4PreparedChannelRecord *> feasible;
+    const std::string latest_identity = latest_snapshot.canonical();
+    std::set<uint64_t> evaluated_channels;
+    for (const auto &record : records)
+    {
+      if (record.channel_id == 0u ||
+          !evaluated_channels.insert(record.channel_id).second)
+        continue;
+      if (!latest_snapshot.valid() || !record.snapshot_identity.valid() ||
+          record.snapshot_identity.canonical() != latest_identity)
+      {
+        ++result.snapshot_mismatch_count;
+        continue;
+      }
+      if (!record.feasible())
+      {
+        ++result.hard_failure_count;
+        continue;
+      }
+      feasible.push_back(&record);
+    }
+    const auto finite_or_infinity = [](const double value) {
+        return std::isfinite(value) ? value
+                                    : std::numeric_limits<double>::infinity();
+      };
+    const auto finite_or_negative_infinity = [](const double value) {
+        return std::isfinite(value)
+          ? value : -std::numeric_limits<double>::infinity();
+      };
+    std::sort(
+        feasible.begin(), feasible.end(),
+        [&](const P4PreparedChannelRecord *left,
+            const P4PreparedChannelRecord *right) {
+          const auto differs = [](const double lhs, const double rhs) {
+              if (std::isfinite(lhs) != std::isfinite(rhs)) return true;
+              return std::isfinite(lhs) && std::abs(lhs - rhs) > 1.0e-9;
+            };
+          const auto less_metric = [&](const double lhs, const double rhs) {
+              return finite_or_infinity(lhs) < finite_or_infinity(rhs);
+            };
+          if (differs(left->global_peak_ratio, right->global_peak_ratio))
+            return less_metric(left->global_peak_ratio,
+                               right->global_peak_ratio);
+          if (differs(left->global_rolling_worst_ratio,
+                      right->global_rolling_worst_ratio))
+            return less_metric(left->global_rolling_worst_ratio,
+                               right->global_rolling_worst_ratio);
+          if (differs(left->global_continuous_exceedance_s,
+                      right->global_continuous_exceedance_s))
+            return less_metric(left->global_continuous_exceedance_s,
+                               right->global_continuous_exceedance_s);
+          if (differs(left->global_exposure_integral_ratio_s,
+                      right->global_exposure_integral_ratio_s))
+            return less_metric(left->global_exposure_integral_ratio_s,
+                               right->global_exposure_integral_ratio_s);
+          if (differs(left->global_recovery_time_s,
+                      right->global_recovery_time_s))
+            return less_metric(left->global_recovery_time_s,
+                               right->global_recovery_time_s);
+          if (differs(left->fim_max_ratio, right->fim_max_ratio))
+            return less_metric(left->fim_max_ratio, right->fim_max_ratio);
+          if (differs(left->fim_integral, right->fim_integral))
+            return less_metric(left->fim_integral, right->fim_integral);
+          if (differs(left->minimum_local_clearance_margin_m,
+                      right->minimum_local_clearance_margin_m))
+            return finite_or_negative_infinity(
+                       left->minimum_local_clearance_margin_m) >
+                   finite_or_negative_infinity(
+                       right->minimum_local_clearance_margin_m);
+          if (differs(left->unevaluated_suffix_m,
+                      right->unevaluated_suffix_m))
+            return less_metric(left->unevaluated_suffix_m,
+                               right->unevaluated_suffix_m);
+          if (differs(left->duration_s, right->duration_s))
+            return less_metric(left->duration_s, right->duration_s);
+          if ((left->channel_id == incumbent_channel_id) !=
+              (right->channel_id == incumbent_channel_id))
+            return left->channel_id == incumbent_channel_id;
+          return left->channel_id < right->channel_id;
+        });
+    result.feasible_count = feasible.size();
+    if (!feasible.empty())
+      result.winner_channel_id = feasible.front()->channel_id;
+    if (feasible.size() > 1u)
+      result.runner_up_channel_id = feasible[1]->channel_id;
+    result.state = expected_channel_count > 0u &&
+        evaluated_channels.size() >= expected_channel_count &&
+        result.snapshot_mismatch_count == 0u
+      ? P4ChannelComparisonState::COMPLETE
+      : P4ChannelComparisonState::PARTIAL_COMPARISON;
+    return result;
+  }
+
   bool P4GenerationBoundarySignature::operator==(
       const P4GenerationBoundarySignature &other) const
   {
@@ -3717,7 +3817,12 @@ namespace ego_planner
              "snapshot_config_hash,source_identity_hash,gnss_epoch_identity,gnss_epoch_stamp_s,"
              "execution_snapshot_id,occupancy_generation,risk_generation,occupancy_stamp_s,risk_stamp_s,"
              "request_x,request_y,request_z,anchor_x,anchor_y,anchor_z,"
-             "selected_candidate_id,selected_guide_hash,candidate_count,"
+             "selected_candidate_id,selected_channel_id,runner_up_candidate_id,"
+             "runner_up_channel_id,selected_guide_hash,candidate_count,"
+             "selected_actual_endpoint_x,selected_actual_endpoint_y,"
+             "selected_actual_endpoint_z,runner_up_actual_endpoint_x,"
+             "runner_up_actual_endpoint_y,runner_up_actual_endpoint_z,"
+             "selected_unevaluated_suffix_m,runner_up_unevaluated_suffix_m,"
              "stopping_distance_m,decision_horizon_m,certified_free_distance_m,"
              "speed_cap_mps,actual_curve_duration_scale,"
              "first_failed_candidate_id,first_failed_arc_length_m,"
@@ -3972,8 +4077,20 @@ namespace ego_planner
         << decision.common_anchor.x() << ','
         << decision.common_anchor.y() << ','
         << decision.common_anchor.z() << ','
-        << decision.selected_candidate_id << ',' << selected_hash << ','
-        << decision.candidates.size() << ',' << decision.stopping_distance_m
+        << decision.selected_candidate_id << ','
+        << decision.selected_channel_id << ','
+        << decision.runner_up_candidate_id << ','
+        << decision.runner_up_channel_id << ',' << selected_hash << ','
+        << decision.candidates.size() << ','
+        << decision.selected_actual_endpoint.x() << ','
+        << decision.selected_actual_endpoint.y() << ','
+        << decision.selected_actual_endpoint.z() << ','
+        << decision.runner_up_actual_endpoint.x() << ','
+        << decision.runner_up_actual_endpoint.y() << ','
+        << decision.runner_up_actual_endpoint.z() << ','
+        << decision.selected_unevaluated_suffix_m << ','
+        << decision.runner_up_unevaluated_suffix_m << ','
+        << decision.stopping_distance_m
         << ',' << decision.decision_horizon_m << ','
         << decision.certified_free_distance_m << ',' << decision.speed_cap_mps
         << ',' << decision.actual_curve_duration_scale
@@ -5709,6 +5826,15 @@ namespace ego_planner
       p4_committed_risk_window_plan_ =
           p4_direct_risk_evidence_.committed_window_plan;
       p4_execution_certificate_.approved_endpoint = committed_endpoint;
+      last_p4_forward_decision_.selected_actual_endpoint =
+          committed_endpoint;
+      const auto unevaluated_suffix = p4RemainingPath(
+          last_p4_forward_decision_.selected_guide, committed_endpoint);
+      last_p4_forward_decision_.selected_unevaluated_suffix_m = 0.0;
+      for (std::size_t index = 1u; index < unevaluated_suffix.size(); ++index)
+        last_p4_forward_decision_.selected_unevaluated_suffix_m +=
+            (unevaluated_suffix[index] -
+             unevaluated_suffix[index - 1u]).norm();
       p4_execution_certificate_.terminal_speed_mps =
           committed_terminal_speed;
       p4_execution_certificate_.terminal_acceleration_mps2 =
@@ -6357,12 +6483,101 @@ namespace ego_planner
     bundle.p5_preview_reason = static_cast<int>(p5_preview.reason);
     bundle.p5_preview_reason_name =
         P5RuntimeIntegrityGate::reasonName(p5_preview.reason);
+    const P4ForwardCandidate *selected_candidate = nullptr;
+    for (const auto &candidate : bundle.decision.candidates)
+      if (candidate.candidate_id == bundle.decision.selected_candidate_id)
+      {
+        selected_candidate = &candidate;
+        break;
+      }
+    bundle.channel_record.channel_id = bundle.decision.selected_channel_id;
+    if (bundle.channel_record.channel_id == 0u && selected_candidate)
+      bundle.channel_record.channel_id = selected_candidate->channel_id;
+    bundle.channel_record.snapshot_identity =
+        bundle.decision.snapshot_identity;
+    bundle.channel_record.curve_identity = bundle.curve_identity;
+    bundle.channel_record.actual_endpoint =
+        bundle.certificate.approved_endpoint;
+    bundle.channel_record.duration_s = bundle.certificate.duration_s;
+    bundle.channel_record.global_peak_ratio =
+        bundle.certificate.global_peak_ratio;
+    bundle.channel_record.global_exposure_integral_ratio_s =
+        bundle.certificate.global_exposure_integral_ratio_s;
+    bundle.channel_record.failure = P4PreparedCurveFailure::NONE;
+    if (selected_candidate)
+    {
+      bundle.channel_record.global_rolling_worst_ratio =
+          selected_candidate->global_rolling_worst_ratio;
+      bundle.channel_record.global_continuous_exceedance_s =
+          selected_candidate->global_continuous_exceedance_s;
+      bundle.channel_record.global_recovery_time_s =
+          selected_candidate->global_recovery_time_s;
+      bundle.channel_record.fim_max_ratio = selected_candidate->fim_max_ratio;
+      bundle.channel_record.fim_integral = selected_candidate->fim_integral;
+      bundle.channel_record.minimum_local_clearance_margin_m =
+          selected_candidate->minimum_local_clearance_margin_m;
+      const auto remainder = p4RemainingPath(
+          selected_candidate->path, bundle.channel_record.actual_endpoint);
+      double suffix_m = 0.0;
+      for (std::size_t index = 1u; index < remainder.size(); ++index)
+        suffix_m += (remainder[index] - remainder[index - 1u]).norm();
+      bundle.channel_record.unevaluated_suffix_m = suffix_m;
+    }
     if (!bundle.complete())
       return finish(false, "successor_prepared_bundle_incomplete");
     // Certification is a statement about the atomically cached complete
     // bundle, not merely about a refined curve. Install first, then emit the
     // state transition; a lineage failure rolls the unpublished cache back.
-    p4_cached_successor_bundle_ = std::move(bundle);
+    for (auto entry = p4_prepared_channel_bundles_.begin();
+         entry != p4_prepared_channel_bundles_.end();)
+    {
+      if (entry->second.channel_record.snapshot_identity.canonical() !=
+          bundle.channel_record.snapshot_identity.canonical())
+        entry = p4_prepared_channel_bundles_.erase(entry);
+      else
+        ++entry;
+    }
+    if (bundle.channel_record.feasible())
+      p4_prepared_channel_bundles_[bundle.channel_record.channel_id] = bundle;
+    while (p4_prepared_channel_bundles_.size() > 4u)
+      p4_prepared_channel_bundles_.erase(
+          p4_prepared_channel_bundles_.begin());
+    std::vector<P4PreparedChannelRecord> prepared_records;
+    for (const auto &entry : p4_prepared_channel_bundles_)
+      prepared_records.push_back(entry.second.channel_record);
+    const auto comparison = compareP4PreparedChannels(
+        prepared_records, bundle.decision.snapshot_identity,
+        bundle.decision.channel_comparison_state ==
+            P4ChannelComparisonState::COMPLETE
+          ? bundle.decision.channel_slots.size() : prepared_records.size(),
+        p4_execution_certificate_.successor_channel_id);
+    P4PreparedSuccessorBundle selected_bundle = bundle;
+    const auto winner = p4_prepared_channel_bundles_.find(
+        comparison.winner_channel_id);
+    if (winner != p4_prepared_channel_bundles_.end())
+      selected_bundle = winner->second;
+    selected_bundle.decision.channel_comparison_state = comparison.state;
+    selected_bundle.decision.selected_channel_id =
+        comparison.winner_channel_id;
+    selected_bundle.decision.runner_up_channel_id =
+        comparison.runner_up_channel_id;
+    selected_bundle.decision.selected_actual_endpoint =
+        selected_bundle.channel_record.actual_endpoint;
+    selected_bundle.decision.selected_unevaluated_suffix_m =
+        selected_bundle.channel_record.unevaluated_suffix_m;
+    if (comparison.runner_up_channel_id != 0u)
+    {
+      const auto runner = p4_prepared_channel_bundles_.find(
+          comparison.runner_up_channel_id);
+      if (runner != p4_prepared_channel_bundles_.end())
+      {
+        selected_bundle.decision.runner_up_actual_endpoint =
+            runner->second.channel_record.actual_endpoint;
+        selected_bundle.decision.runner_up_unevaluated_suffix_m =
+            runner->second.channel_record.unevaluated_suffix_m;
+      }
+    }
+    p4_cached_successor_bundle_ = std::move(selected_bundle);
     p4_cached_successor_activation_in_progress_ = false;
     if (!appendP4ForwardDecision(
             last_p4_forward_decision_, "successor_prepared_certified", now_s))

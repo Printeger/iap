@@ -1472,6 +1472,9 @@ TEST(P4ForwardRoute, OccupiedSeparatorCreatesTwoRiskRankedChannels)
   EXPECT_EQ(decision.trigger_reason,
             P4ForwardTriggerReason::MULTIPLE_CHANNELS);
   ASSERT_GE(decision.candidates.size(), 2u);
+  EXPECT_NE(decision.selected_channel_id, 0u);
+  EXPECT_NE(decision.runner_up_channel_id, 0u);
+  EXPECT_NE(decision.selected_channel_id, decision.runner_up_channel_id);
   ASSERT_FALSE(decision.selected_guide.empty());
   ASSERT_FALSE(decision.geometry_common_corridor.empty());
   // A collision-free lateral connector does not make already-diverged

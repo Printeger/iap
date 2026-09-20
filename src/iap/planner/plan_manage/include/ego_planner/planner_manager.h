@@ -10,11 +10,13 @@
 #include <functional>
 #include <limits>
 #include <memory>
+#include <map>
 #include <mutex>
 #include <optional>
 #include <set>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include <bspline_opt/bspline_optimizer.h>
 #include <bspline_opt/p4_forward_route.h>
@@ -292,6 +294,67 @@ namespace ego_planner
     FAILED,
   };
 
+  enum class P4PreparedCurveFailure
+  {
+    NONE = 0,
+    LOCAL_GEOMETRY,
+    DYNAMICS,
+    TRACKING_CAPABILITY,
+    BRAKING,
+    FRESHNESS,
+    GNSS_RISK,
+    P5_PREVIEW,
+    INCOMPLETE,
+  };
+
+  struct P4PreparedChannelRecord
+  {
+    uint64_t channel_id = 0;
+    P4ForwardSnapshotIdentity snapshot_identity;
+    std::string curve_identity;
+    Eigen::Vector3d actual_endpoint = Eigen::Vector3d::Constant(
+        std::numeric_limits<double>::quiet_NaN());
+    double unevaluated_suffix_m = 0.0;
+    double duration_s = std::numeric_limits<double>::infinity();
+    double global_peak_ratio = std::numeric_limits<double>::infinity();
+    double global_rolling_worst_ratio =
+        std::numeric_limits<double>::infinity();
+    double global_continuous_exceedance_s =
+        std::numeric_limits<double>::infinity();
+    double global_exposure_integral_ratio_s =
+        std::numeric_limits<double>::infinity();
+    double global_recovery_time_s = std::numeric_limits<double>::infinity();
+    double fim_max_ratio = std::numeric_limits<double>::infinity();
+    double fim_integral = std::numeric_limits<double>::infinity();
+    double minimum_local_clearance_margin_m =
+        -std::numeric_limits<double>::infinity();
+    P4PreparedCurveFailure failure = P4PreparedCurveFailure::INCOMPLETE;
+
+    bool feasible() const
+    {
+      return channel_id != 0u && snapshot_identity.valid() &&
+          !curve_identity.empty() && actual_endpoint.allFinite() &&
+          std::isfinite(duration_s) && duration_s > 0.0 &&
+          failure == P4PreparedCurveFailure::NONE;
+    }
+  };
+
+  struct P4PreparedChannelComparison
+  {
+    P4ChannelComparisonState state =
+        P4ChannelComparisonState::PARTIAL_COMPARISON;
+    uint64_t winner_channel_id = 0;
+    uint64_t runner_up_channel_id = 0;
+    std::size_t feasible_count = 0;
+    std::size_t hard_failure_count = 0;
+    std::size_t snapshot_mismatch_count = 0;
+  };
+
+  P4PreparedChannelComparison compareP4PreparedChannels(
+      const std::vector<P4PreparedChannelRecord> &records,
+      const P4ForwardSnapshotIdentity &latest_snapshot,
+      std::size_t expected_channel_count, uint64_t incumbent_channel_id = 0u);
+
   struct P4PreparedSuccessorBundle
   {
     P4SuccessorPreparationState state =
@@ -311,6 +374,7 @@ namespace ego_planner
     int p5_preview_action = -1;
     int p5_preview_reason = -1;
     std::string p5_preview_reason_name;
+    P4PreparedChannelRecord channel_record;
 
     bool complete() const
     {
@@ -908,6 +972,8 @@ namespace ego_planner
     std::optional<P4PreparedSuccessor> p4_prepared_successor_;
     std::optional<P4PreparedSuccessorBundle>
         p4_cached_successor_bundle_;
+    std::map<uint64_t, P4PreparedSuccessorBundle>
+        p4_prepared_channel_bundles_;
     bool p4_cached_successor_activation_in_progress_ = false;
     P4SuccessorPreparationState p4_successor_preparation_state_ =
         P4SuccessorPreparationState::ROUTE_PENDING;
