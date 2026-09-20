@@ -549,6 +549,60 @@ TEST(P4GeometryCommit, MissingDeltaGenerationFailsClosed)
     ego_planner::P4GeometryCommitVerdict::HISTORY_GAP);
 }
 
+TEST(P4GeometryCommit, RepeatedCurveReusesCertifiedCorridorBaseline)
+{
+  ego_planner::P4GeometryCommitRequest request;
+  request.bound_occupancy = makeClearCommitEpoch();
+  request.history.base_generation = 10u;
+  request.history.latest_generation = 10u;
+  request.history.complete = true;
+  request.history.geometry_id = "commit-geometry";
+  request.executable_path = {
+    Eigen::Vector3d(1.5, 5.5, 1.5), Eigen::Vector3d(8.5, 5.5, 1.5)};
+  request.curve_hash = "curve-identity-17";
+  request.vehicle_radius_m = 0.35;
+  request.map_inflation_m = 0.10;
+  request.expected_geometry_id = "commit-geometry";
+
+  ego_planner::P4GeometryCommitValidator validator;
+  const auto first = validator.validate(request);
+  const auto repeated = validator.validate(request);
+
+  ASSERT_TRUE(first.accepted()) << first.reason;
+  ASSERT_TRUE(repeated.accepted()) << repeated.reason;
+  EXPECT_FALSE(first.baseline_cache_hit);
+  EXPECT_TRUE(repeated.baseline_cache_hit);
+  EXPECT_EQ(repeated.corridor_build_ms, 0.0);
+  EXPECT_EQ(repeated.occupancy_scan_ms, 0.0);
+  EXPECT_GT(repeated.repeated_certification_ms, 0.0);
+}
+
+TEST(P4GeometryCommit, HistoryGapForcesFullLatestOccupancyRecheck)
+{
+  ego_planner::P4GeometryCommitRequest request;
+  request.bound_occupancy = makeClearCommitEpoch();
+  request.history.base_generation = 10u;
+  request.history.latest_generation = 12u;
+  request.history.complete = false;
+  auto latest = makeInflatedOnlyCommitEpoch(Eigen::Vector3i(4, 5, 1));
+  latest->generation = 20u;
+  request.latest_occupancy = latest;
+  request.executable_path = {
+    Eigen::Vector3d(1.5, 5.5, 1.5), Eigen::Vector3d(8.5, 5.5, 1.5)};
+  request.vehicle_radius_m = 0.35;
+  request.map_inflation_m = 0.10;
+  request.expected_geometry_id = "commit-geometry";
+
+  const auto result =
+    ego_planner::P4GeometryCommitValidator().validate(request);
+
+  EXPECT_EQ(result.verdict,
+    ego_planner::P4GeometryCommitVerdict::BASE_COLLISION);
+  EXPECT_TRUE(result.full_latest_recheck);
+  EXPECT_EQ(result.base_generation, 20u);
+  EXPECT_EQ(result.checked_generation, 20u);
+}
+
 TEST(P4GeometryCommit, CollisionPolicyChangeFailsClosed)
 {
   ego_planner::P4GeometryCommitRequest request;

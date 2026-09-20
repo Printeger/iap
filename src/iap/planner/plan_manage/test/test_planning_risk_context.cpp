@@ -3436,6 +3436,19 @@ TEST(P4SuccessorDeadlineScheduling,
   certificate.control_points_hash = "short_parent";
   manager.setP4ExecutionCertificateForTest(certificate);
   EXPECT_TRUE(manager.p4SuccessorPreparationDue(20.0));
+
+  for (const auto authority : {
+           ego_planner::P4ExecutionAuthority::FORMAL_RISK_SELECTED,
+           ego_planner::P4ExecutionAuthority::ADVISORY})
+  {
+    certificate.authority = authority;
+    manager.setP4ExecutionCertificateForTest(certificate);
+    EXPECT_TRUE(manager.p4SuccessorPreparationDue(20.0));
+  }
+  certificate.authority =
+      ego_planner::P4ExecutionAuthority::LIMITED_PREFIX_BRAKING;
+  manager.setP4ExecutionCertificateForTest(certificate);
+  EXPECT_FALSE(manager.p4SuccessorPreparationDue(20.0));
 }
 
 TEST(P4PreparedChannelComparison,

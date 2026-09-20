@@ -1763,13 +1763,28 @@ namespace ego_planner
       if (current)
         effective_execution_snapshot_id = current->execution_snapshot_id;
     }
-    const bool committed_limited_prefix =
+    bool final_goal_segment = false;
+    if (!global_data_.local_traj_.empty() &&
+        std::isfinite(global_data_.global_duration_) &&
+        global_data_.global_duration_ > 0.0 &&
+        std::isfinite(global_data_.local_end_time_) &&
+        global_data_.localTrajReachTarget() &&
+        p4_execution_certificate_.approved_endpoint.allFinite())
+    {
+      const Eigen::Vector3d mission_endpoint =
+          global_data_.getPosition(global_data_.global_duration_);
+      final_goal_segment = mission_endpoint.allFinite() &&
+          (mission_endpoint -
+           p4_execution_certificate_.approved_endpoint).norm() <= 0.20;
+    }
+    const bool committed_successor_parent =
         p4_execution_certificate_.valid && !p4_execution_revoked_ &&
-        p4_execution_certificate_.authority ==
-            P4ExecutionAuthority::LIMITED_PREFIX &&
+        p4_execution_certificate_.authority !=
+            P4ExecutionAuthority::LIMITED_PREFIX_BRAKING &&
+        !final_goal_segment &&
         local_data_.traj_id_ == p4_execution_certificate_.trajectory_id &&
         local_data_.duration_ > 0.0;
-    if (!committed_limited_prefix || !std::isfinite(now_s))
+    if (!committed_successor_parent || !std::isfinite(now_s))
     {
       if (p4_successor_schedule_.parent_trajectory_id > 0)
         p4_successor_worker_.cancelParent(
@@ -3338,6 +3353,9 @@ namespace ego_planner
               occupancy->frozen_grid_map_epoch;
           commit_request.history = grid_map_->collisionDeltasSince(
               occupancy->generation);
+          if (!commit_request.history.complete)
+            commit_request.latest_occupancy =
+                grid_map_->captureFrozenExecutionOccupancyEpoch();
           commit_request.executable_path = std::move(path);
           commit_request.vehicle_radius_m = decision->vehicle_radius_m;
           commit_request.map_inflation_m = decision->map_inflation_m;
@@ -3347,7 +3365,7 @@ namespace ego_planner
               decision->collision_policy_id;
           commit_request.compute_budget_ms = 10.0;
           decision->geometry_commit =
-              P4GeometryCommitValidator().validate(commit_request);
+              p4_geometry_commit_validator_.validate(commit_request);
           decision->planning_disposition =
               decision->geometry_commit.accepted() ?
               P4PlanningDisposition::NEW_TRAJECTORY_READY :
@@ -3855,7 +3873,12 @@ namespace ego_planner
              "route_relevant_new_hits,geometry_commit_conflict_x,"
              "geometry_commit_conflict_y,geometry_commit_conflict_z,"
              "geometry_commit_conflict_path_distance_m,"
-             "geometry_commit_latency_ms,geometry_commit_reason,"
+             "geometry_commit_latency_ms,geometry_commit_occupancy_scan_ms,"
+             "geometry_commit_corridor_build_ms,geometry_commit_hash_ms,"
+             "geometry_commit_delta_merge_ms,geometry_commit_collision_query_ms,"
+             "geometry_commit_repeated_certification_ms,"
+             "geometry_commit_baseline_cache_hit,"
+             "geometry_commit_full_latest_recheck,geometry_commit_reason,"
              "planning_disposition,result_status,"
              "retained_trajectory_count,"
              "compute_latency_ms,trajectory_id,trajectory_start_ns,"
@@ -4152,6 +4175,14 @@ namespace ego_planner
         << ',' << decision.geometry_commit.first_conflict_position.z()
         << ',' << decision.geometry_commit.first_conflict_path_distance_m
         << ',' << decision.geometry_commit.latency_ms
+        << ',' << decision.geometry_commit.occupancy_scan_ms
+        << ',' << decision.geometry_commit.corridor_build_ms
+        << ',' << decision.geometry_commit.hash_ms
+        << ',' << decision.geometry_commit.delta_merge_ms
+        << ',' << decision.geometry_commit.collision_query_ms
+        << ',' << decision.geometry_commit.repeated_certification_ms
+        << ',' << (decision.geometry_commit.baseline_cache_hit ? 1 : 0)
+        << ',' << (decision.geometry_commit.full_latest_recheck ? 1 : 0)
         << ',' << decision.geometry_commit.reason
         << ',' << p4PlanningDispositionName(decision.planning_disposition)
         << ',' << p4ForwardResultStatusName(decision.result_status)
@@ -5474,6 +5505,9 @@ namespace ego_planner
       {
         commit_request.history = grid_map_->collisionDeltasSince(
             bound_occupancy->generation);
+        if (!commit_request.history.complete)
+          commit_request.latest_occupancy =
+              grid_map_->captureFrozenExecutionOccupancyEpoch();
       }
       const double preprocessing_ms = commit_elapsed_ms();
       const double remaining_budget_ms = kCommitBudgetMs - preprocessing_ms;
@@ -5491,9 +5525,11 @@ namespace ego_planner
       commit_request.expected_collision_policy_id =
           last_p4_forward_decision_.collision_policy_id;
       commit_request.curve_approximation_error_m = 0.002;
+      commit_request.curve_hash = p4ControlPointHash(
+          local_data_.position_traj_.getControlPoint());
       commit_request.compute_budget_ms = remaining_budget_ms;
       last_p4_forward_decision_.geometry_commit =
-          P4GeometryCommitValidator().validate(commit_request);
+          p4_geometry_commit_validator_.validate(commit_request);
       last_p4_forward_decision_.geometry_commit.latency_ms +=
           preprocessing_ms;
       if (last_p4_forward_decision_.geometry_commit.latency_ms >
@@ -6098,13 +6134,17 @@ namespace ego_planner
         published_p4_checked_generation_ > 0u;
     request.delta_base_generation = delta_base;
     request.curve_approximation_error_m = 0.002;
+    request.curve_hash = published_p4_control_points_hash_;
     const double preprocessing_ms = commit_elapsed_ms();
     request.compute_budget_ms = kCommitBudgetMs - preprocessing_ms;
     if (!(request.compute_budget_ms > 0.0))
       return finish_runtime_failure(
           P4GeometryCommitVerdict::COMPUTE_BUDGET_EXCEEDED,
           "runtime_commit_preprocessing_budget_exceeded");
-    auto result = P4GeometryCommitValidator().validate(request);
+    if (!request.history.complete && grid_map_)
+      request.latest_occupancy =
+          grid_map_->captureFrozenExecutionOccupancyEpoch();
+    auto result = p4_geometry_commit_validator_.validate(request);
     result.latency_ms += preprocessing_ms;
     if (result.latency_ms > kCommitBudgetMs)
     {
@@ -6274,8 +6314,12 @@ namespace ego_planner
     request.baseline_already_validated = true;
     request.delta_base_generation = anchor.geometry_checked_generation;
     request.curve_approximation_error_m = 0.002;
+    request.curve_hash = anchor.control_points_hash;
     request.compute_budget_ms = 10.0;
-    auto result = P4GeometryCommitValidator().validate(request);
+    if (!request.history.complete && grid_map_)
+      request.latest_occupancy =
+          grid_map_->captureFrozenExecutionOccupancyEpoch();
+    auto result = p4_geometry_commit_validator_.validate(request);
     if (result.accepted())
       anchor.geometry_checked_generation = result.checked_generation;
     return result;

@@ -6,7 +6,9 @@
 #include <cstddef>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <plan_env/grid_map.h>
@@ -36,8 +38,17 @@ std::string p4CollisionPolicyIdentity(
 struct P4GeometryCommitRequest
 {
   std::shared_ptr<const FrozenOccupancyEpoch> bound_occupancy;
+  // Used only when the collision journal no longer reaches the bound epoch.
+  // The validator then performs a complete fail-closed corridor query against
+  // this newest immutable epoch instead of treating the missing journal as an
+  // unchanged map.
+  std::shared_ptr<const FrozenOccupancyEpoch> latest_occupancy;
   OccupancyCollisionDeltaHistory history;
   std::vector<Eigen::Vector3d> executable_path;
+  // Stable identity of the continuous curve. The sampled-path hash remains
+  // part of the cache key, so a trimmed suffix can never reuse a full-curve
+  // corridor accidentally.
+  std::string curve_hash;
   double vehicle_radius_m = std::numeric_limits<double>::quiet_NaN();
   double map_inflation_m = std::numeric_limits<double>::quiet_NaN();
   std::string expected_geometry_id;
@@ -74,6 +85,14 @@ struct P4GeometryCommitResult
   double voxel_resolution_m =
     std::numeric_limits<double>::quiet_NaN();
   double latency_ms = 0.0;
+  double occupancy_scan_ms = 0.0;
+  double corridor_build_ms = 0.0;
+  double hash_ms = 0.0;
+  double delta_merge_ms = 0.0;
+  double collision_query_ms = 0.0;
+  double repeated_certification_ms = 0.0;
+  bool baseline_cache_hit = false;
+  bool full_latest_recheck = false;
   std::string collision_policy_id;
   std::string reason = "not_evaluated";
 
@@ -89,6 +108,22 @@ class P4GeometryCommitValidator
 public:
   P4GeometryCommitResult validate(
     const P4GeometryCommitRequest & request) const;
+
+private:
+  struct CachedCorridor
+  {
+    struct Voxel
+    {
+      std::size_t address = 0;
+      double first_path_distance_m = 0.0;
+      bool in_inflated_corridor = false;
+    };
+    std::vector<Voxel> voxels;
+    bool baseline_clear = false;
+  };
+  mutable std::mutex cache_mutex_;
+  mutable std::unordered_map<std::string, std::shared_ptr<const CachedCorridor>>
+      baseline_cache_;
 };
 
 }  // namespace ego_planner

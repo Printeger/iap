@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
+#include <cstring>
 #include <iomanip>
 #include <map>
 #include <sstream>
@@ -46,6 +48,33 @@ bool inBounds(
 {
   return (index.array() >= 0).all() &&
          (index.array() < dimensions.array()).all();
+}
+
+void hashBytes(std::uint64_t * hash, const void * data, const std::size_t size)
+{
+  const auto * bytes = static_cast<const unsigned char *>(data);
+  for (std::size_t index = 0; index < size; ++index) {
+    *hash ^= static_cast<std::uint64_t>(bytes[index]);
+    *hash *= 1099511628211ULL;
+  }
+}
+
+std::string sampledPathHash(const std::vector<Eigen::Vector3d> & path)
+{
+  std::uint64_t hash = 1469598103934665603ULL;
+  const std::size_t count = path.size();
+  hashBytes(&hash, &count, sizeof(count));
+  for (const auto & point : path) {
+    for (int axis = 0; axis < 3; ++axis) {
+      std::uint64_t bits = 0;
+      const double value = point[axis];
+      std::memcpy(&bits, &value, sizeof(bits));
+      hashBytes(&hash, &bits, sizeof(bits));
+    }
+  }
+  std::ostringstream output;
+  output << std::hex << std::setfill('0') << std::setw(16) << hash;
+  return output.str();
 }
 
 }  // namespace
@@ -109,7 +138,9 @@ P4GeometryCommitResult P4GeometryCommitValidator::validate(
         Clock::now() - started).count() > request.compute_budget_ms;
     };
 
-  const auto epoch = request.bound_occupancy;
+  auto epoch = request.bound_occupancy;
+  auto history = request.history;
+  bool baseline_already_validated = request.baseline_already_validated;
   const auto invalid = [&finish, &result](const char* reason) {
       result.reason = reason;
       return finish(std::move(result));
@@ -145,11 +176,62 @@ P4GeometryCommitResult P4GeometryCommitValidator::validate(
       return finish(std::move(result));
     }
   }
-  const uint64_t delta_base_generation =
-    request.baseline_already_validated ? request.delta_base_generation :
-    epoch->generation;
+  const auto hash_started = Clock::now();
+  const std::string path_hash = sampledPathHash(request.executable_path);
+  const std::string curve_hash = request.curve_hash.empty() ?
+      path_hash : request.curve_hash;
+  result.hash_ms = std::chrono::duration<double, std::milli>(
+      Clock::now() - hash_started).count();
+
+  auto delta_base_generation = baseline_already_validated ?
+      request.delta_base_generation : epoch->generation;
+  const auto complete_history_chain = [](const OccupancyCollisionDeltaHistory & value,
+                                         const uint64_t base,
+                                         const std::string & geometry_id) {
+      if (!value.complete || base == 0u || value.base_generation != base ||
+          value.latest_generation < base)
+        return false;
+      uint64_t expected = base;
+      for (const auto & delta : value.deltas) {
+        if (!delta || !delta->complete || delta->geometry_id != geometry_id ||
+            delta->from_generation != expected ||
+            delta->to_generation != expected + 1u)
+          return false;
+        expected = delta->to_generation;
+      }
+      return expected == value.latest_generation;
+    };
+  if (!complete_history_chain(
+      history, delta_base_generation, request.expected_geometry_id))
+  {
+    const auto latest = request.latest_occupancy;
+    if (!latest || latest->generation == 0u ||
+        latest->geometry_id != request.expected_geometry_id ||
+        !latest->diagnostic_query)
+    {
+      result.base_generation = delta_base_generation;
+      result.checked_generation = history.latest_generation;
+      result.verdict = P4GeometryCommitVerdict::HISTORY_GAP;
+      result.reason = "collision_delta_history_gap";
+      return finish(std::move(result));
+    }
+    epoch = latest;
+    baseline_already_validated = false;
+    delta_base_generation = latest->generation;
+    history = OccupancyCollisionDeltaHistory{};
+    history.base_generation = latest->generation;
+    history.latest_generation = latest->generation;
+    history.complete = true;
+    history.geometry_id = latest->geometry_id;
+    result.full_latest_recheck = true;
+  }
+  if (!std::isfinite(epoch->resolution_m) || epoch->resolution_m <= 0.0 ||
+      (epoch->voxel_dimensions.array() <= 0).any() ||
+      !epoch->lattice_origin.allFinite() || !epoch->extent_m.allFinite() ||
+      epoch->generation == 0u || !epoch->diagnostic_query)
+    return invalid("commit_latest_occupancy_invalid");
   result.base_generation = delta_base_generation;
-  result.checked_generation = request.history.latest_generation;
+  result.checked_generation = history.latest_generation;
   result.collision_policy_id = p4CollisionPolicyIdentity(
     request.vehicle_radius_m, request.map_inflation_m,
     epoch->resolution_m, epoch->virtual_ceiling_height_m);
@@ -158,8 +240,8 @@ P4GeometryCommitResult P4GeometryCommitValidator::validate(
   result.voxel_resolution_m = epoch->resolution_m;
   if (request.expected_geometry_id.empty() ||
     request.expected_geometry_id != epoch->geometry_id ||
-    (!request.history.geometry_id.empty() &&
-    request.history.geometry_id != request.expected_geometry_id) ||
+    (!history.geometry_id.empty() &&
+    history.geometry_id != request.expected_geometry_id) ||
     (!request.expected_collision_policy_id.empty() &&
     request.expected_collision_policy_id != result.collision_policy_id))
   {
@@ -167,15 +249,10 @@ P4GeometryCommitResult P4GeometryCommitValidator::validate(
     result.reason = "geometry_or_collision_policy_mismatch";
     return finish(std::move(result));
   }
-  if (!request.history.complete ||
-    delta_base_generation == 0u ||
-    request.history.base_generation != delta_base_generation ||
-    request.history.latest_generation < delta_base_generation)
-  {
-    result.verdict = P4GeometryCommitVerdict::HISTORY_GAP;
-    result.reason = "collision_delta_history_gap";
-    return finish(std::move(result));
-  }
+  const std::string cache_key = curve_hash + '|' + path_hash + '|' +
+      result.collision_policy_id + '|' + epoch->geometry_id + '|' +
+      std::to_string(epoch->generation) + '|' +
+      std::to_string(request.curve_approximation_error_m);
 
   const double sample_spacing = std::min(0.05, 0.5 * epoch->resolution_m);
   const double radius = request.vehicle_radius_m + request.map_inflation_m +
@@ -188,76 +265,108 @@ P4GeometryCommitResult P4GeometryCommitValidator::validate(
     request.curve_approximation_error_m + 0.5 * sample_spacing;
   std::unordered_map<std::size_t, double> corridor_first_distance;
   std::unordered_set<std::size_t> inflated_corridor;
-  double segment_start_distance = 0.0;
-  for (std::size_t segment = 1;
-    segment < request.executable_path.size(); ++segment)
+  std::shared_ptr<const CachedCorridor> cached_corridor;
+  const auto repeated_started = Clock::now();
   {
-    const Eigen::Vector3d start = request.executable_path[segment - 1];
-    const Eigen::Vector3d delta = request.executable_path[segment] - start;
-    const int sample_count = std::max(
-      1, static_cast<int>(std::ceil(delta.norm() / sample_spacing)));
-    for (int sample = segment == 1 ? 0 : 1;
-      sample <= sample_count; ++sample)
+    std::lock_guard<std::mutex> lock(cache_mutex_);
+    const auto found = baseline_cache_.find(cache_key);
+    if (found != baseline_cache_.end())
+      cached_corridor = found->second;
+  }
+  if (cached_corridor)
+  {
+    result.baseline_cache_hit = true;
+    corridor_first_distance.reserve(cached_corridor->voxels.size());
+    inflated_corridor.reserve(cached_corridor->voxels.size());
+    for (const auto & voxel : cached_corridor->voxels) {
+      corridor_first_distance.emplace(
+          voxel.address, voxel.first_path_distance_m);
+      if (voxel.in_inflated_corridor)
+        inflated_corridor.insert(voxel.address);
+    }
+    result.repeated_certification_ms =
+        std::chrono::duration<double, std::milli>(
+            Clock::now() - repeated_started).count();
+  }
+  else
+  {
+    const auto corridor_started = Clock::now();
+    double segment_start_distance = 0.0;
+    for (std::size_t segment = 1;
+      segment < request.executable_path.size(); ++segment)
     {
-      if (timed_out()) {
-        result.verdict = P4GeometryCommitVerdict::COMPUTE_BUDGET_EXCEEDED;
-        result.reason = "commit_corridor_budget_exceeded";
-        return finish(std::move(result));
-      }
-      const Eigen::Vector3d center = start + delta *
-        (static_cast<double>(sample) / sample_count);
-      const double path_distance = segment_start_distance + delta.norm() *
-        (static_cast<double>(sample) / sample_count);
-      const Eigen::Vector3d lower = center.array() - radius;
-      const Eigen::Vector3d upper = center.array() + radius;
-      if ((lower.array() < epoch->lattice_origin.array()).any() ||
-        (upper.array() >=
-        (epoch->lattice_origin + epoch->extent_m).array()).any())
+      const Eigen::Vector3d start = request.executable_path[segment - 1];
+      const Eigen::Vector3d delta = request.executable_path[segment] - start;
+      const int sample_count = std::max(
+        1, static_cast<int>(std::ceil(delta.norm() / sample_spacing)));
+      for (int sample = segment == 1 ? 0 : 1;
+        sample <= sample_count; ++sample)
       {
-        result.verdict = P4GeometryCommitVerdict::OUT_OF_BOUNDS;
-        result.reason = "swept_corridor_out_of_bounds";
-        return finish(std::move(result));
-      }
-      const Eigen::Vector3i minimum = ((lower - epoch->lattice_origin) /
-        epoch->resolution_m).array().floor().cast<int>();
-      const Eigen::Vector3i maximum = ((upper - epoch->lattice_origin) /
-        epoch->resolution_m).array().floor().cast<int>();
-      for (int x = minimum.x(); x <= maximum.x(); ++x) {
-        for (int y = minimum.y(); y <= maximum.y(); ++y) {
-          for (int z = minimum.z(); z <= maximum.z(); ++z) {
-            const Eigen::Vector3i voxel(x, y, z);
-            if (!inBounds(voxel, epoch->voxel_dimensions)) {
-              result.verdict = P4GeometryCommitVerdict::OUT_OF_BOUNDS;
-              result.reason = "corridor_voxel_out_of_bounds";
-              return finish(std::move(result));
+        if (timed_out()) {
+          result.verdict = P4GeometryCommitVerdict::COMPUTE_BUDGET_EXCEEDED;
+          result.reason = "commit_corridor_budget_exceeded";
+          return finish(std::move(result));
+        }
+        const Eigen::Vector3d center = start + delta *
+          (static_cast<double>(sample) / sample_count);
+        const double path_distance = segment_start_distance + delta.norm() *
+          (static_cast<double>(sample) / sample_count);
+        const Eigen::Vector3d lower = center.array() - radius;
+        const Eigen::Vector3d upper = center.array() + radius;
+        if ((lower.array() < epoch->lattice_origin.array()).any() ||
+          (upper.array() >=
+          (epoch->lattice_origin + epoch->extent_m).array()).any())
+        {
+          result.verdict = P4GeometryCommitVerdict::OUT_OF_BOUNDS;
+          result.reason = "swept_corridor_out_of_bounds";
+          return finish(std::move(result));
+        }
+        const Eigen::Vector3i minimum = ((lower - epoch->lattice_origin) /
+          epoch->resolution_m).array().floor().cast<int>();
+        const Eigen::Vector3i maximum = ((upper - epoch->lattice_origin) /
+          epoch->resolution_m).array().floor().cast<int>();
+        for (int x = minimum.x(); x <= maximum.x(); ++x) {
+          for (int y = minimum.y(); y <= maximum.y(); ++y) {
+            for (int z = minimum.z(); z <= maximum.z(); ++z) {
+              const Eigen::Vector3i voxel(x, y, z);
+              if (!inBounds(voxel, epoch->voxel_dimensions)) {
+                result.verdict = P4GeometryCommitVerdict::OUT_OF_BOUNDS;
+                result.reason = "corridor_voxel_out_of_bounds";
+                return finish(std::move(result));
+              }
+              const Eigen::Vector3d cell_min = epoch->lattice_origin +
+                epoch->resolution_m * voxel.cast<double>();
+              const Eigen::Vector3d cell_max = cell_min +
+                Eigen::Vector3d::Constant(epoch->resolution_m);
+              const Eigen::Vector3d closest =
+                center.cwiseMax(cell_min).cwiseMin(cell_max);
+              const double squared_distance =
+                (closest - center).squaredNorm();
+              if (squared_distance <= radius * radius) {
+                const std::size_t address = addressOf(
+                  voxel, epoch->voxel_dimensions);
+                const auto [iterator, inserted] =
+                  corridor_first_distance.emplace(address, path_distance);
+                if (!inserted)
+                  iterator->second = std::min(iterator->second, path_distance);
+              }
+              if (squared_distance <= inflated_radius * inflated_radius)
+                inflated_corridor.insert(
+                  addressOf(voxel, epoch->voxel_dimensions));
             }
-            const Eigen::Vector3d cell_min = epoch->lattice_origin +
-              epoch->resolution_m * voxel.cast<double>();
-            const Eigen::Vector3d cell_max = cell_min +
-              Eigen::Vector3d::Constant(epoch->resolution_m);
-            const Eigen::Vector3d closest =
-              center.cwiseMax(cell_min).cwiseMin(cell_max);
-            const double squared_distance =
-              (closest - center).squaredNorm();
-            if (squared_distance <= radius * radius) {
-              const std::size_t address = addressOf(
-                voxel, epoch->voxel_dimensions);
-              const auto [iterator, inserted] =
-                corridor_first_distance.emplace(address, path_distance);
-              if (!inserted)
-                iterator->second = std::min(iterator->second, path_distance);
-            }
-            if (squared_distance <= inflated_radius * inflated_radius)
-              inflated_corridor.insert(
-                addressOf(voxel, epoch->voxel_dimensions));
           }
         }
       }
+      segment_start_distance += delta.norm();
     }
-    segment_start_distance += delta.norm();
+    result.corridor_build_ms = std::chrono::duration<double, std::milli>(
+        Clock::now() - corridor_started).count();
   }
 
-  if (!request.baseline_already_validated) {
+  bool completed_baseline_scan = false;
+  if (!baseline_already_validated &&
+      (!cached_corridor || !cached_corridor->baseline_clear)) {
+    const auto scan_started = Clock::now();
     double earliest_conflict_distance =
       std::numeric_limits<double>::infinity();
     std::size_t earliest_conflict_address = 0u;
@@ -305,11 +414,37 @@ P4GeometryCommitResult P4GeometryCommitValidator::validate(
       result.reason = "baseline_route_collision";
       return finish(std::move(result));
     }
+    result.occupancy_scan_ms = std::chrono::duration<double, std::milli>(
+        Clock::now() - scan_started).count();
+    result.collision_query_ms = result.occupancy_scan_ms;
+    completed_baseline_scan = true;
+  }
+
+  if (!cached_corridor)
+  {
+    auto baseline = std::make_shared<CachedCorridor>();
+    baseline->voxels.reserve(corridor_first_distance.size());
+    for (const auto & [address, path_distance] : corridor_first_distance)
+      baseline->voxels.push_back(CachedCorridor::Voxel{
+          address, path_distance, inflated_corridor.count(address) != 0u});
+    baseline->baseline_clear = !baseline_already_validated;
+    std::lock_guard<std::mutex> lock(cache_mutex_);
+    if (baseline_cache_.size() >= 16u)
+      baseline_cache_.clear();
+    baseline_cache_[cache_key] = std::move(baseline);
+  }
+  else if (completed_baseline_scan && !cached_corridor->baseline_clear)
+  {
+    auto baseline = std::make_shared<CachedCorridor>(*cached_corridor);
+    baseline->baseline_clear = true;
+    std::lock_guard<std::mutex> lock(cache_mutex_);
+    baseline_cache_[cache_key] = std::move(baseline);
   }
 
   std::map<std::size_t, bool> relevant_final_state;
   uint64_t expected_generation = delta_base_generation;
-  for (const auto & delta : request.history.deltas) {
+  const auto delta_started = Clock::now();
+  for (const auto & delta : history.deltas) {
     if (!delta || !delta->complete ||
       delta->geometry_id != request.expected_geometry_id ||
       delta->from_generation != expected_generation ||
@@ -338,11 +473,13 @@ P4GeometryCommitResult P4GeometryCommitValidator::validate(
         relevant_final_state[address] = change.occupied;
     }
   }
-  if (expected_generation != request.history.latest_generation) {
+  if (expected_generation != history.latest_generation) {
     result.verdict = P4GeometryCommitVerdict::HISTORY_GAP;
     result.reason = "collision_delta_generation_chain_incomplete";
     return finish(std::move(result));
   }
+  result.delta_merge_ms = std::chrono::duration<double, std::milli>(
+      Clock::now() - delta_started).count();
   double earliest_conflict_distance =
     std::numeric_limits<double>::infinity();
   std::size_t earliest_conflict_address = 0u;
