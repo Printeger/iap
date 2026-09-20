@@ -205,6 +205,8 @@ namespace ego_planner
     Eigen::Vector3d odom_pos_, odom_vel_, odom_acc_; // odometry state
     Eigen::Quaterniond odom_orient_;
     rclcpp::Time latest_odom_stamp_{0, 0, RCL_ROS_TIME};
+    rclcpp::Time latest_imu_stamp_{0, 0, RCL_ROS_TIME};
+    bool have_imu_acceleration_ = false;
 
     Eigen::Vector3d init_pt_, start_pt_, start_vel_, start_acc_, start_yaw_; // start state
     Eigen::Vector3d end_pt_, end_vel_;                                       // goal state
@@ -230,6 +232,7 @@ namespace ego_planner
 
     rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr waypoint_sub_;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
+    rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_sub_;
     rclcpp::Subscription<traj_utils::msg::MultiBsplines>::SharedPtr swarm_trajs_sub_;
     rclcpp::Subscription<traj_utils::msg::Bspline>::SharedPtr broadcast_bspline_sub_;
     rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr trigger_sub_;
@@ -269,6 +272,7 @@ namespace ego_planner
     void waypointCallback(const std::shared_ptr<const geometry_msgs::msg::PoseStamped> &msg);
     void triggerCallback(const std::shared_ptr<const geometry_msgs::msg::PoseStamped> &msg);
     void odometryCallback(const std::shared_ptr<const nav_msgs::msg::Odometry> &msg);
+    void imuCallback(const std::shared_ptr<const sensor_msgs::msg::Imu> &msg);
     void swarmTrajsCallback(const std::shared_ptr<const traj_utils::msg::MultiBsplines> &msg);
     void BroadcastBsplineCallback(const std::shared_ptr<const traj_utils::msg::Bspline> &msg);
 

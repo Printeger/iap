@@ -12,28 +12,93 @@ namespace
 
 bool boundaryWithinLimits(const Eigen::Vector3d &velocity,
                           const Eigen::Vector3d &acceleration,
-                          const double max_velocity,
-                          const double max_acceleration,
+                          const P4ControlCapabilityProfile &profile,
                           const double tolerance)
 {
   if (!velocity.allFinite() || !acceleration.allFinite() ||
-      !std::isfinite(max_velocity) || max_velocity <= 0.0 ||
-      !std::isfinite(max_acceleration) || max_acceleration <= 0.0 ||
+      !profile.valid() ||
       !std::isfinite(tolerance) || tolerance < 0.0)
     return false;
-  const double velocity_limit = max_velocity * (1.0 + tolerance) + 1.0e-4;
-  const double acceleration_limit =
-      max_acceleration * (1.0 + tolerance) + 1.0e-4;
-  return velocity.cwiseAbs().maxCoeff() <= velocity_limit &&
-      acceleration.cwiseAbs().maxCoeff() <= acceleration_limit;
+  return (velocity.cwiseAbs().array() <=
+              profile.maximum_velocity_mps.array() * (1.0 + tolerance) +
+                  1.0e-4).all() &&
+      (acceleration.cwiseAbs().array() <=
+              profile.maximum_acceleration_mps2.array() *
+                  (1.0 + tolerance) + 1.0e-4).all();
+}
+
+P4ControlCapabilityProfile legacyProfile(
+    const double max_velocity, const double max_acceleration)
+{
+  P4ControlCapabilityProfile profile;
+  profile.maximum_velocity_mps = Eigen::Vector3d::Constant(max_velocity);
+  profile.maximum_acceleration_mps2 =
+      Eigen::Vector3d::Constant(max_acceleration);
+  profile.maximum_jerk_mps3 = Eigen::Vector3d::Constant(1.0e9);
+  profile.position_tracking_bound_m = Eigen::Vector3d::Constant(0.125);
+  profile.velocity_tracking_bound_mps = Eigen::Vector3d::Constant(1.0e9);
+  profile.controller_identity = "legacy_scalar_contract";
+  profile.simulator_identity = "legacy_scalar_contract";
+  profile.code_version = "legacy_scalar_contract";
+  return profile;
 }
 
 }  // namespace
 
+P4BrakingControllabilityResult evaluateP4BrakingControllability(
+    const P4TerminalStartState &certified,
+    const P4TerminalStartState &actual,
+    const P4ControlCapabilityProfile &profile,
+    const double available_clearance_margin_m)
+{
+  P4BrakingControllabilityResult result;
+  if (!profile.valid() || !certified.position.allFinite() ||
+      !certified.velocity.allFinite() ||
+      !certified.acceleration.allFinite() || !actual.position.allFinite() ||
+      !actual.velocity.allFinite() || !actual.acceleration.allFinite() ||
+      !std::isfinite(available_clearance_margin_m) ||
+      available_clearance_margin_m < 0.0)
+  {
+    result.reason = "controllability_input_invalid";
+    return result;
+  }
+  const Eigen::Vector3d position_error =
+      (actual.position - certified.position).cwiseAbs();
+  const Eigen::Vector3d velocity_error =
+      (actual.velocity - certified.velocity).cwiseAbs();
+  const Eigen::Vector3d acceleration_error =
+      (actual.acceleration - certified.acceleration).cwiseAbs();
+  const double latency = profile.measured_latency_bound_s;
+  const Eigen::Vector3d reachable = position_error +
+      latency * velocity_error +
+      0.5 * latency * latency * acceleration_error;
+  result.latency_reachable_excursion_m = reachable.norm();
+  result.controllable_margin_m = available_clearance_margin_m -
+      result.latency_reachable_excursion_m;
+  result.within_certified_domain =
+      (position_error.array() <=
+           profile.position_tracking_bound_m.array() + 1.0e-12).all() &&
+      (velocity_error.array() <=
+           profile.velocity_tracking_bound_mps.array() + 1.0e-12).all() &&
+      (actual.acceleration.cwiseAbs().array() <=
+           profile.maximum_acceleration_mps2.array() + 1.0e-12).all();
+  result.controllable = result.controllable_margin_m >= -1.0e-12 &&
+      (actual.velocity.cwiseAbs().array() <=
+           profile.maximum_velocity_mps.array() + 1.0e-12).all() &&
+      (actual.acceleration.cwiseAbs().array() <=
+           profile.maximum_acceleration_mps2.array() + 1.0e-12).all();
+  result.valid = true;
+  result.reason = result.within_certified_domain
+      ? "within_certified_braking_domain"
+      : result.controllable ? "recovery_braking_required"
+                            : "outside_controllable_braking_domain";
+  return result;
+}
+
 P4TerminalStopResult imposeP4TerminalStop(
     UniformBspline *trajectory, const P4TerminalStartState &start_state,
-    const double max_velocity,
-    const double max_acceleration, const double feasibility_tolerance)
+    const P4ControlCapabilityProfile &profile,
+    const double feasibility_tolerance)
 {
   P4TerminalStopResult result;
   if (!trajectory)
@@ -60,7 +125,7 @@ P4TerminalStopResult imposeP4TerminalStop(
       trajectory->evaluateDeBoorT(original_duration);
   if (!start_state.position.allFinite() || !approved_endpoint.allFinite() ||
       !boundaryWithinLimits(start_state.velocity, start_state.acceleration,
-                            max_velocity, max_acceleration,
+                            profile,
                             feasibility_tolerance))
   {
     result.reason = "terminal_start_state_not_dynamically_feasible";
@@ -94,10 +159,13 @@ P4TerminalStopResult imposeP4TerminalStop(
       return result;
     }
     UniformBspline stopped(stopped_control_points, 3, interval);
-    stopped.setPhysicalLimits(max_velocity, max_acceleration,
+    stopped.setPhysicalLimits(profile.maximum_velocity_mps.minCoeff(),
+                              profile.maximum_acceleration_mps2.minCoeff(),
                               feasibility_tolerance);
-    double feasibility_ratio = 1.0;
-    if (stopped.checkFeasibility(feasibility_ratio, false))
+    const auto limits = stopped.checkDerivativeLimits(
+        profile, feasibility_tolerance);
+    if (limits.valid && limits.velocity_ok && limits.acceleration_ok &&
+        limits.jerk_ok)
     {
       UniformBspline stopped_velocity = stopped.getDerivative();
       UniformBspline stopped_acceleration = stopped_velocity.getDerivative();
@@ -127,14 +195,16 @@ P4TerminalStopResult imposeP4TerminalStop(
       result.reason = "ok";
       return result;
     }
-    if (!std::isfinite(feasibility_ratio) || feasibility_ratio <= 0.0)
+    if (!std::isfinite(limits.required_time_scale) ||
+        limits.required_time_scale <= 0.0)
     {
       result.reason = "terminal_stop_not_dynamically_feasible";
       return result;
     }
     // Refit on a longer uniform time base. Reparameterization, rather than
     // merely stretching knots, preserves the exact start derivatives.
-    interval *= std::clamp(1.05 * feasibility_ratio, 1.10, 2.0);
+    interval *= std::clamp(
+        1.05 * limits.required_time_scale, 1.10, 2.0);
   }
   result.reason = "terminal_stop_not_dynamically_feasible";
   return result;
@@ -142,8 +212,8 @@ P4TerminalStopResult imposeP4TerminalStop(
 
 P4TerminalStopResult buildP4EmergencyBrakingTrajectory(
     const UniformBspline &reference_trajectory_input,
-    const double anchor_time_s, const double max_velocity,
-    const double max_acceleration, const double feasibility_tolerance,
+    const double anchor_time_s, const P4ControlCapabilityProfile &profile,
+    const double feasibility_tolerance,
     UniformBspline *braking_trajectory)
 {
   P4TerminalStopResult result;
@@ -158,8 +228,7 @@ P4TerminalStopResult buildP4EmergencyBrakingTrajectory(
   if (!std::isfinite(reference_duration) || reference_duration <= 0.0 ||
       !std::isfinite(anchor_time_s) || anchor_time_s < 0.0 ||
       anchor_time_s >= reference_duration ||
-      !std::isfinite(max_velocity) || max_velocity <= 0.0 ||
-      !std::isfinite(max_acceleration) || max_acceleration <= 0.0)
+      !profile.valid())
   {
     result.reason = "braking_input_invalid";
     return result;
@@ -172,7 +241,7 @@ P4TerminalStopResult buildP4EmergencyBrakingTrajectory(
       reference_acceleration.evaluateDeBoorT(anchor_time_s)};
   if (!start_state.position.allFinite() ||
       !boundaryWithinLimits(start_state.velocity, start_state.acceleration,
-                            max_velocity, max_acceleration,
+                            profile,
                             feasibility_tolerance))
   {
     result.reason = "braking_start_state_not_dynamically_feasible";
@@ -181,7 +250,8 @@ P4TerminalStopResult buildP4EmergencyBrakingTrajectory(
 
   const double remaining_duration = reference_duration - anchor_time_s;
   const double minimum_stop_distance =
-      start_state.velocity.squaredNorm() / (2.0 * max_acceleration) + 0.05;
+      start_state.velocity.squaredNorm() /
+          (2.0 * profile.maximum_acceleration_mps2.minCoeff()) + 0.05;
   double accumulated_distance = 0.0;
   double first_stop_time = reference_duration;
   Eigen::Vector3d previous = start_state.position;
@@ -248,10 +318,13 @@ P4TerminalStopResult buildP4EmergencyBrakingTrajectory(
               interval, samples, derivatives, control_points))
         break;
       UniformBspline candidate(control_points, 3, interval);
-      candidate.setPhysicalLimits(max_velocity, max_acceleration,
+      candidate.setPhysicalLimits(profile.maximum_velocity_mps.minCoeff(),
+                                  profile.maximum_acceleration_mps2.minCoeff(),
                                   feasibility_tolerance);
-      double feasibility_ratio = 1.0;
-      if (candidate.checkFeasibility(feasibility_ratio, false))
+      const auto limits = candidate.checkDerivativeLimits(
+          profile, feasibility_tolerance);
+      if (limits.valid && limits.velocity_ok && limits.acceleration_ok &&
+          limits.jerk_ok)
       {
         UniformBspline velocity = candidate.getDerivative();
         UniformBspline acceleration = velocity.getDerivative();
@@ -275,14 +348,38 @@ P4TerminalStopResult buildP4EmergencyBrakingTrajectory(
           return result;
         }
       }
-      if (!std::isfinite(feasibility_ratio) || feasibility_ratio <= 0.0)
+      if (!std::isfinite(limits.required_time_scale) ||
+          limits.required_time_scale <= 0.0)
         break;
-      interval *= std::clamp(1.05 * feasibility_ratio, 1.10, 2.0);
+      interval *= std::clamp(
+          1.05 * limits.required_time_scale, 1.10, 2.0);
     }
     if (bounded_stop_time >= reference_duration) break;
   }
   result.reason = "braking_stop_not_dynamically_feasible_before_deadline";
   return result;
+}
+
+P4TerminalStopResult imposeP4TerminalStop(
+    UniformBspline *trajectory, const P4TerminalStartState &start_state,
+    const double max_velocity, const double max_acceleration,
+    const double feasibility_tolerance)
+{
+  return imposeP4TerminalStop(
+      trajectory, start_state, legacyProfile(max_velocity, max_acceleration),
+      feasibility_tolerance);
+}
+
+P4TerminalStopResult buildP4EmergencyBrakingTrajectory(
+    const UniformBspline &reference_trajectory, const double anchor_time_s,
+    const double max_velocity, const double max_acceleration,
+    const double feasibility_tolerance,
+    UniformBspline *braking_trajectory)
+{
+  return buildP4EmergencyBrakingTrajectory(
+      reference_trajectory, anchor_time_s,
+      legacyProfile(max_velocity, max_acceleration),
+      feasibility_tolerance, braking_trajectory);
 }
 
 }  // namespace ego_planner

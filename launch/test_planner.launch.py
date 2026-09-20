@@ -1105,7 +1105,7 @@ DENSE_FOUR_FORK_FOREST_ONLINE_PRESET = {
     "p4.forward.max_channel_searches": "32",
     "p4.forward.channel_enumeration_budget_ms": "60.0",
     "p4.forward.advisory_min_relative_improvement": "0.10",
-    "p4.execution.max_tracking_error_m": "0.75",
+    "p4.execution.max_tracking_error_m": "0.15",
     "p4.execution.marginal_unsafe_ratio_max": "1.005",
     "p4.execution.marginal_confirm_distinct_evidence": "3",
     "p4.execution.marginal_confirm_max_s": "0.35",
@@ -2225,7 +2225,7 @@ ARG_DEFAULTS = [
     ("p4.forward.max_channel_searches", "32"),
     ("p4.forward.channel_enumeration_budget_ms", "60.0"),
     ("p4.forward.advisory_min_relative_improvement", "0.10"),
-    ("p4.execution.max_tracking_error_m", "0.75"),
+    ("p4.execution.max_tracking_error_m", "0.15"),
     ("p4.execution.marginal_unsafe_ratio_max", "1.005"),
     ("p4.execution.marginal_confirm_distinct_evidence", "3"),
     ("p4.execution.marginal_confirm_max_s", "0.35"),
@@ -3040,7 +3040,7 @@ def _odom_visualization_node(name, odom_topic, cmd_topic, topic_prefix, color, d
     )
 
 
-def _ego_planner_node(context, drone_id, planner_odom_topic, cloud_topic, camera_pose_topic, depth_topic, bspline_topic, map_size, goal, point_num, safety_profile, safety_enabled, p0_enabled, p0_covariance_growth, export_dir, evidence):
+def _ego_planner_node(context, drone_id, planner_odom_topic, imu_topic, cloud_topic, camera_pose_topic, depth_topic, bspline_topic, map_size, goal, point_num, safety_profile, safety_enabled, p0_enabled, p0_covariance_growth, export_dir, evidence):
     p1_enabled = safety_enabled["p1"]
     p2_enabled = safety_enabled["p2"]
     p3_local_enabled = safety_enabled["p3_local"]
@@ -3111,6 +3111,7 @@ def _ego_planner_node(context, drone_id, planner_odom_topic, cloud_topic, camera
         output="screen",
         remappings=[
             ("odom_world", planner_odom_topic),
+            ("imu", imu_topic),
             ("planning/bspline", bspline_topic),
             ("planning/pending_guard_bspline", bspline_topic.replace("/bspline", "/pending_guard_bspline")),
             ("planning/pending_guard_status", bspline_topic.replace("/bspline", "/pending_guard_status")),
@@ -3676,6 +3677,7 @@ def _launch_setup(context):
             context,
             drone_id,
             planner_odom_topic,
+            iap_imu_topic,
             LaunchConfiguration("planner_occupancy_cloud_topic").perform(
                 context
             ),

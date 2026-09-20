@@ -356,6 +356,11 @@ namespace ego_planner
     int guard_braking_trajectory_id = 0;
     double remaining_time_s = std::numeric_limits<double>::quiet_NaN();
     double tracking_error_m = std::numeric_limits<double>::quiet_NaN();
+    bool braking_state_observed = false;
+    bool within_certified_braking_domain = false;
+    bool recovery_braking_required = false;
+    double controllable_braking_margin_m =
+        -std::numeric_limits<double>::infinity();
     double terminal_speed_mps = std::numeric_limits<double>::quiet_NaN();
     double terminal_acceleration_mps2 =
         std::numeric_limits<double>::quiet_NaN();
@@ -634,7 +639,12 @@ namespace ego_planner
     std::optional<P4GeometryCommitResult>
     validatePendingP4GuardGeometry(double now_s);
     P4ExecutionCheckDiagnostics validateCommittedP4TrajectoryExecution(
-        double now_s, const Eigen::Vector3d &actual_position);
+        double now_s, const Eigen::Vector3d &actual_position,
+        const Eigen::Vector3d &actual_velocity = Eigen::Vector3d::Constant(
+            std::numeric_limits<double>::quiet_NaN()),
+        const Eigen::Vector3d &actual_acceleration =
+            Eigen::Vector3d::Constant(
+                std::numeric_limits<double>::quiet_NaN()));
     bool committedP4TrajectoryReachedEndpoint(double now_s) const;
     bool p4ExecutionRevoked() const { return p4_execution_revoked_; }
     const P4ExecutionCertificate &p4ExecutionCertificate() const {
@@ -845,7 +855,8 @@ namespace ego_planner
     P4ExecutionCertificate p4_execution_certificate_;
     P4ExecutionCheckDiagnostics last_p4_execution_diagnostics_;
     bool p4_execution_revoked_ = false;
-    double p4_max_tracking_error_m_ = 0.75;
+    P4ControlCapabilityProfile p4_control_profile_;
+    double p4_max_tracking_error_m_ = 0.15;
     double p4_local_tracking_error_bound_m_ = 0.15;
     P4RuntimeRiskConfirmationPolicy p4_risk_confirmation_policy_;
     P4RuntimeRiskConfirmationMemory p4_risk_confirmation_memory_;

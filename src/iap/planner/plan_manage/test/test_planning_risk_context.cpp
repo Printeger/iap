@@ -207,6 +207,45 @@ TEST(P4TerminalStopProductionTest,
 }
 
 TEST(P4TerminalStopProductionTest,
+     BrakingDomainUsesActualPositionVelocityAccelerationAndLatency)
+{
+  ego_planner::P4ControlCapabilityProfile profile;
+  profile.maximum_velocity_mps = Eigen::Vector3d::Constant(2.0);
+  profile.maximum_acceleration_mps2 = Eigen::Vector3d::Constant(3.0);
+  profile.maximum_jerk_mps3 = Eigen::Vector3d::Constant(4.0);
+  profile.measured_latency_bound_s = 0.2;
+  profile.position_tracking_bound_m = Eigen::Vector3d::Constant(0.1);
+  profile.velocity_tracking_bound_mps = Eigen::Vector3d::Constant(0.2);
+  profile.controller_identity = "unit-controller";
+  profile.simulator_identity = "unit-simulator";
+  profile.code_version = "unit-code";
+  const ego_planner::P4TerminalStartState certified{
+      Eigen::Vector3d::Zero(), Eigen::Vector3d(1.0, 0.0, 0.0),
+      Eigen::Vector3d::Zero()};
+  auto actual = certified;
+  actual.position.x() = 0.08;
+  actual.velocity.x() = 1.15;
+  actual.acceleration.x() = 0.5;
+  const auto inside = ego_planner::evaluateP4BrakingControllability(
+      certified, actual, profile, 0.5);
+  ASSERT_TRUE(inside.valid);
+  EXPECT_TRUE(inside.within_certified_domain);
+  EXPECT_TRUE(inside.controllable);
+
+  actual.position.x() = 0.14;
+  const auto recovery = ego_planner::evaluateP4BrakingControllability(
+      certified, actual, profile, 0.5);
+  EXPECT_FALSE(recovery.within_certified_domain);
+  EXPECT_TRUE(recovery.controllable);
+  EXPECT_EQ(recovery.reason, "recovery_braking_required");
+
+  const auto lost = ego_planner::evaluateP4BrakingControllability(
+      certified, actual, profile, 0.01);
+  EXPECT_FALSE(lost.controllable);
+  EXPECT_EQ(lost.reason, "outside_controllable_braking_domain");
+}
+
+TEST(P4TerminalStopProductionTest,
      EmergencyBrakingCoversEveryTwoTenthsUntilStoppedEndpoint)
 {
   auto reference = makeMovingCurvedP4Trajectory(0.2);

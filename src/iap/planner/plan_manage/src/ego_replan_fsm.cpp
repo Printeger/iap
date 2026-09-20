@@ -96,6 +96,12 @@ namespace ego_planner
         {
           this->odometryCallback(msg);
         });
+    imu_sub_ = node_->create_subscription<sensor_msgs::msg::Imu>(
+        "imu", 10,
+        [this](const std::shared_ptr<const sensor_msgs::msg::Imu> &msg)
+        {
+          this->imuCallback(msg);
+        });
     // std::bind(&EGOReplanFSM::odometryCallback, this, std::placeholders::_1));
 
     if (planner_manager_->pp_.drone_id >= 1)
@@ -333,14 +339,25 @@ namespace ego_planner
     odom_vel_(1) = msg->twist.twist.linear.y;
     odom_vel_(2) = msg->twist.twist.linear.z;
 
-    // odom_acc_ = estimateAcc( msg );
-
     odom_orient_.w() = msg->pose.pose.orientation.w;
     odom_orient_.x() = msg->pose.pose.orientation.x;
     odom_orient_.y() = msg->pose.pose.orientation.y;
     odom_orient_.z() = msg->pose.pose.orientation.z;
 
     have_odom_ = true;
+  }
+
+  void EGOReplanFSM::imuCallback(
+      const std::shared_ptr<const sensor_msgs::msg::Imu> &msg)
+  {
+    const Eigen::Vector3d measured(
+        msg->linear_acceleration.x, msg->linear_acceleration.y,
+        msg->linear_acceleration.z);
+    if (!measured.allFinite())
+      return;
+    odom_acc_ = measured;
+    latest_imu_stamp_ = rclcpp::Time(msg->header.stamp, RCL_ROS_TIME);
+    have_imu_acceleration_ = true;
   }
 
   rclcpp::Time EGOReplanFSM::plannerNow() const
@@ -1134,9 +1151,13 @@ namespace ego_planner
     double t_cur = (plannerNow() - info->start_time_).seconds();
 
     Eigen::Vector3d p_cur = info->position_traj_.evaluateDeBoorT(t_cur);
+    const bool imu_fresh = have_imu_acceleration_ &&
+        std::abs((plannerNow() - latest_imu_stamp_).seconds()) <= 0.1;
     const auto p4_execution_check =
         planner_manager_->validateCommittedP4TrajectoryExecution(
-            plannerNow().seconds(), odom_pos_);
+            plannerNow().seconds(), odom_pos_, odom_vel_,
+            imu_fresh ? odom_acc_ : Eigen::Vector3d::Constant(
+                std::numeric_limits<double>::quiet_NaN()));
     if (p4_execution_check.applicable && !p4_execution_check.allowed)
     {
       RCLCPP_WARN_THROTTLE(

@@ -1,0 +1,23 @@
+{
+  "schema_version": "p4_control_capability_scan_v1",
+  "velocity_mps": [0.5, 1.0, 1.5, 2.0],
+  "acceleration_mps2": [0.75, 1.5, 2.25, 3.0],
+  "jerk_mps3": [1.0, 2.0, 3.0, 4.0],
+  "maneuvers": [
+    "stationary_start",
+    "nonzero_start",
+    "left_turn",
+    "right_turn",
+    "s_turn",
+    "successor_switch",
+    "stop"
+  ],
+  "partitions": ["training", "held_out"],
+  "acceptance": {
+    "tracking_error_multiplier": 1.2,
+    "maximum_tracking_envelope_m": 0.15,
+    "allow_saturation": false,
+    "require_switch_continuity": true
+  },
+  "profile_output": "p4_control_capability_v1.json"
+}

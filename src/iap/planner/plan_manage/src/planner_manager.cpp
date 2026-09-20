@@ -1815,7 +1815,21 @@ namespace ego_planner
     node->declare_parameter("p4.forward.channel_enumeration_budget_ms", 60.0);
     node->declare_parameter(
         "p4.forward.advisory_min_relative_improvement", 0.10);
-    node->declare_parameter("p4.execution.max_tracking_error_m", 0.75);
+    node->declare_parameter("p4.execution.max_tracking_error_m", 0.15);
+    node->declare_parameter(
+        "p4.control_profile.schema_version", "p4_control_capability_v1");
+    node->declare_parameter(
+        "p4.control_profile.measured_latency_bound_s", 0.15);
+    node->declare_parameter(
+        "p4.control_profile.position_tracking_bound_m", 0.125);
+    node->declare_parameter(
+        "p4.control_profile.velocity_tracking_bound_mps", 0.25);
+    node->declare_parameter(
+        "p4.control_profile.controller_identity", "so3_control_v1");
+    node->declare_parameter(
+        "p4.control_profile.simulator_identity", "quadrotor_simulator_v1");
+    node->declare_parameter(
+        "p4.control_profile.code_version", "continuous_flight_s2");
     node->declare_parameter(
         "p4.execution.marginal_unsafe_ratio_max", 1.005);
     node->declare_parameter(
@@ -1960,6 +1974,39 @@ namespace ego_planner
                         p4_forward_limits_.advisory_min_relative_improvement);
     node->get_parameter("p4.execution.max_tracking_error_m",
                         p4_max_tracking_error_m_);
+    node->get_parameter(
+        "p4.control_profile.schema_version",
+        p4_control_profile_.schema_version);
+    node->get_parameter(
+        "p4.control_profile.measured_latency_bound_s",
+        p4_control_profile_.measured_latency_bound_s);
+    double profile_position_tracking_bound_m = 0.125;
+    double profile_velocity_tracking_bound_mps = 0.25;
+    node->get_parameter(
+        "p4.control_profile.position_tracking_bound_m",
+        profile_position_tracking_bound_m);
+    node->get_parameter(
+        "p4.control_profile.velocity_tracking_bound_mps",
+        profile_velocity_tracking_bound_mps);
+    node->get_parameter(
+        "p4.control_profile.controller_identity",
+        p4_control_profile_.controller_identity);
+    node->get_parameter(
+        "p4.control_profile.simulator_identity",
+        p4_control_profile_.simulator_identity);
+    node->get_parameter(
+        "p4.control_profile.code_version",
+        p4_control_profile_.code_version);
+    p4_control_profile_.maximum_velocity_mps =
+        Eigen::Vector3d::Constant(pp_.max_vel_);
+    p4_control_profile_.maximum_acceleration_mps2 =
+        Eigen::Vector3d::Constant(pp_.max_acc_);
+    p4_control_profile_.maximum_jerk_mps3 =
+        Eigen::Vector3d::Constant(pp_.max_jerk_);
+    p4_control_profile_.position_tracking_bound_m =
+        Eigen::Vector3d::Constant(profile_position_tracking_bound_m);
+    p4_control_profile_.velocity_tracking_bound_mps =
+        Eigen::Vector3d::Constant(profile_velocity_tracking_bound_mps);
     node->get_parameter("p4.execution.marginal_unsafe_ratio_max",
                         p4_risk_confirmation_policy_.marginal_ratio_max);
     node->get_parameter(
@@ -2038,6 +2085,11 @@ namespace ego_planner
       throw std::invalid_argument(
           "p4.execution.max_tracking_error_m must be finite, positive, and "
           "no greater than 5 m");
+    if (p4_max_tracking_error_m_ > 0.15 + 1.0e-12 ||
+        !p4_control_profile_.valid())
+      throw std::invalid_argument(
+          "P4 control capability profile is invalid or exceeds the 0.15 m "
+          "tracking envelope");
     if (!std::isfinite(p4_local_tracking_error_bound_m_) ||
         p4_local_tracking_error_bound_m_ < 0.0 ||
         p4_local_tracking_error_bound_m_ > p4_max_tracking_error_m_)
@@ -4623,7 +4675,7 @@ namespace ego_planner
         const P4TerminalStopResult braking_build =
             buildP4EmergencyBrakingTrajectory(
                 local_data_.position_traj_, anchor_t,
-                pp_.max_vel_, pp_.max_acc_, pp_.feasibility_tolerance_,
+                p4_control_profile_, pp_.feasibility_tolerance_,
                 &braking);
         if (!braking_build.success)
         {
@@ -4638,11 +4690,13 @@ namespace ego_planner
         // lattice.
         braking.setPhysicalLimits(
             pp_.max_vel_, pp_.max_acc_, pp_.feasibility_tolerance_);
-        double feasibility_ratio = 1.0;
+        const auto braking_limits = braking.checkDerivativeLimits(
+            p4_control_profile_, pp_.feasibility_tolerance_);
         const double braking_duration = braking.getTimeSum();
         UniformBspline braking_velocity = braking.getDerivative();
         UniformBspline braking_acceleration = braking_velocity.getDerivative();
-        if (!braking.checkFeasibility(feasibility_ratio, false) ||
+        if (!braking_limits.valid || !braking_limits.velocity_ok ||
+            !braking_limits.acceleration_ok || !braking_limits.jerk_ok ||
             !std::isfinite(braking_duration) || braking_duration <= 0.0 ||
             braking_duration > remaining + 1.0e-6 ||
             !braking.evaluateDeBoorT(0.0).isApprox(
@@ -5353,17 +5407,19 @@ namespace ego_planner
         const P4TerminalStopResult braking_build =
             buildP4EmergencyBrakingTrajectory(
                 local_data_.position_traj_, anchor_t,
-                pp_.max_vel_, pp_.max_acc_, pp_.feasibility_tolerance_,
+                p4_control_profile_, pp_.feasibility_tolerance_,
                 &braking);
         if (!braking_build.success)
           continue;
         braking.setPhysicalLimits(
             pp_.max_vel_, pp_.max_acc_, pp_.feasibility_tolerance_);
-        double feasibility_ratio = 1.0;
+        const auto braking_limits = braking.checkDerivativeLimits(
+            p4_control_profile_, pp_.feasibility_tolerance_);
         const double braking_duration = braking.getTimeSum();
         UniformBspline braking_velocity = braking.getDerivative();
         UniformBspline braking_acceleration = braking_velocity.getDerivative();
-        if (!braking.checkFeasibility(feasibility_ratio, false) ||
+        if (!braking_limits.valid || !braking_limits.velocity_ok ||
+            !braking_limits.acceleration_ok || !braking_limits.jerk_ok ||
             !std::isfinite(braking_duration) || braking_duration <= 0.0 ||
             braking_duration > remaining + 1.0e-6 ||
             !braking.evaluateDeBoorT(0.0).isApprox(
@@ -7132,7 +7188,9 @@ namespace ego_planner
 
   P4ExecutionCheckDiagnostics
   EGOPlannerManager::validateCommittedP4TrajectoryExecution(
-      const double now_s, const Eigen::Vector3d &actual_position)
+      const double now_s, const Eigen::Vector3d &actual_position,
+      const Eigen::Vector3d &actual_velocity,
+      const Eigen::Vector3d &actual_acceleration)
   {
     P4ExecutionCheckDiagnostics out;
     out.applicable = p4_execution_certificate_.valid;
@@ -7743,6 +7801,32 @@ namespace ego_planner
             evaluation_now_s);
     const Eigen::Vector3d commanded_position =
         local_data_.position_traj_.evaluateDeBoorT(current_t);
+    const Eigen::Vector3d commanded_velocity =
+        local_data_.velocity_traj_.evaluateDeBoorT(current_t);
+    const Eigen::Vector3d commanded_acceleration =
+        local_data_.acceleration_traj_.evaluateDeBoorT(current_t);
+    if (actual_velocity.allFinite() && actual_acceleration.allFinite() &&
+        std::isfinite(p4_execution_certificate_.local_motion_minimum_margin_m))
+    {
+      const auto controllability = evaluateP4BrakingControllability(
+          {commanded_position, commanded_velocity, commanded_acceleration},
+          {actual_position, actual_velocity, actual_acceleration},
+          p4_control_profile_,
+          std::max(0.0,
+              p4_execution_certificate_.local_motion_minimum_margin_m));
+      out.braking_state_observed = controllability.valid;
+      out.within_certified_braking_domain =
+          controllability.within_certified_domain;
+      out.recovery_braking_required = controllability.valid &&
+          !controllability.within_certified_domain &&
+          controllability.controllable;
+      out.controllable_braking_margin_m =
+          controllability.controllable_margin_m;
+      if (controllability.valid && !controllability.controllable)
+        return revoke("outside_controllable_braking_domain");
+      if (out.recovery_braking_required)
+        return revoke("recovery_braking_required_not_certified");
+    }
     out.tracking_error_m = (actual_position - commanded_position).norm();
     bool pending_guard_due = false;
     bool activated_guard_matches_actual = false;
@@ -12011,7 +12095,7 @@ namespace ego_planner
     {
       const P4TerminalStopResult terminal = imposeP4TerminalStop(
           &pos, P4TerminalStartState{start_pt, start_vel, start_acc},
-          planning_max_vel, pp_.max_acc_,
+          p4_control_profile_,
           pp_.feasibility_tolerance_);
       if (!terminal.success)
       {
@@ -12031,6 +12115,19 @@ namespace ego_planner
             rclcpp::get_logger("ego_planner"),
             "P4 terminal stop retimed final spline from %.3f s to %.3f s",
             terminal.original_duration_s, terminal.final_duration_s);
+      }
+      const auto final_limits = pos.checkDerivativeLimits(
+          p4_control_profile_, pp_.feasibility_tolerance_);
+      if (!final_limits.valid || !final_limits.velocity_ok ||
+          !final_limits.acceleration_ok || !final_limits.jerk_ok)
+      {
+        last_p4_forward_decision_.planning_disposition =
+            P4PlanningDisposition::HOLD_REQUIRED;
+        last_p4_forward_decision_.reason =
+            "control_capability_profile_derivative_limit_exceeded";
+        p4_planning_disposition_ = P4PlanningDisposition::HOLD_REQUIRED;
+        continous_failures_count_++;
+        return false;
       }
     }
 

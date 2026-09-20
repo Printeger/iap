@@ -3714,6 +3714,29 @@ def _capture_main(args: argparse.Namespace) -> int:
                     float(message.feedback_position.x),
                     float(message.feedback_position.y),
                     float(message.feedback_position.z)],
+                "velocity_xyz": [
+                    float(message.commanded_velocity.x),
+                    float(message.commanded_velocity.y),
+                    float(message.commanded_velocity.z)],
+                "feedback_velocity_xyz": [
+                    float(message.feedback_velocity.x),
+                    float(message.feedback_velocity.y),
+                    float(message.feedback_velocity.z)],
+                "acceleration_xyz": [
+                    float(message.commanded_acceleration.x),
+                    float(message.commanded_acceleration.y),
+                    float(message.commanded_acceleration.z)],
+                "feedback_acceleration_xyz": [
+                    float(message.feedback_acceleration.x),
+                    float(message.feedback_acceleration.y),
+                    float(message.feedback_acceleration.z)],
+                "odom_stamp_ns":
+                    int(message.odom_stamp.sec) * 1_000_000_000
+                    + int(message.odom_stamp.nanosec),
+                "control_output_xyz": [
+                    float(message.control_output.x),
+                    float(message.control_output.y),
+                    float(message.control_output.z)],
                 "saturated": bool(message.saturated),
             })
 

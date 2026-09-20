@@ -4,6 +4,26 @@
 
 namespace ego_planner
 {
+  bool P4ControlCapabilityProfile::valid() const
+  {
+    return schema_version == "p4_control_capability_v1" &&
+        (maximum_velocity_mps.array() > 0.0).all() &&
+        (maximum_acceleration_mps2.array() > 0.0).all() &&
+        (maximum_jerk_mps3.array() > 0.0).all() &&
+        maximum_velocity_mps.allFinite() &&
+        maximum_acceleration_mps2.allFinite() &&
+        maximum_jerk_mps3.allFinite() &&
+        std::isfinite(measured_latency_bound_s) &&
+        measured_latency_bound_s >= 0.0 &&
+        position_tracking_bound_m.allFinite() &&
+        velocity_tracking_bound_mps.allFinite() &&
+        (position_tracking_bound_m.array() >= 0.0).all() &&
+        (velocity_tracking_bound_mps.array() >= 0.0).all() &&
+        position_tracking_bound_m.maxCoeff() * 1.2 <= 0.15 + 1.0e-12 &&
+        !controller_identity.empty() && !simulator_identity.empty() &&
+        !code_version.empty();
+  }
+
 
   UniformBspline::UniformBspline(const Eigen::MatrixXd &points, const int &order,
                                  const double &interval)
@@ -362,6 +382,92 @@ namespace ego_planner
     ctrl_pts.row(2) = pz.transpose();
 
     // cout << "[B-spline]: parameterization ok." << endl;
+  }
+
+  BsplineDerivativeLimitResult UniformBspline::checkDerivativeLimits(
+      const P4ControlCapabilityProfile &profile, const double tolerance)
+  {
+    BsplineDerivativeLimitResult result;
+    if (!profile.valid() ||
+        !std::isfinite(tolerance) || tolerance < 0.0)
+    {
+      result.reason = "invalid_control_capability_profile";
+      return result;
+    }
+    UniformBspline velocity = getDerivative();
+    UniformBspline acceleration = velocity.getDerivative();
+    UniformBspline jerk = acceleration.getDerivative();
+    const auto component_maximum = [](const Eigen::MatrixXd &points) {
+      Eigen::Vector3d maximum = Eigen::Vector3d::Zero();
+      for (Eigen::Index column = 0; column < points.cols(); ++column)
+        for (Eigen::Index axis = 0;
+             axis < std::min<Eigen::Index>(3, points.rows()); ++axis)
+          maximum(axis) = std::max(maximum(axis),
+                                   std::abs(points(axis, column)));
+      return maximum;
+    };
+    result.maximum_velocity = component_maximum(velocity.getControlPoint());
+    result.maximum_acceleration =
+        component_maximum(acceleration.getControlPoint());
+    result.maximum_jerk = component_maximum(jerk.getControlPoint());
+    result.velocity_ok = (result.maximum_velocity.array() <=
+        profile.maximum_velocity_mps.array() * (1.0 + tolerance) + 1.0e-9).all();
+    result.acceleration_ok = (result.maximum_acceleration.array() <=
+        profile.maximum_acceleration_mps2.array() * (1.0 + tolerance) + 1.0e-9).all();
+    result.jerk_ok = (result.maximum_jerk.array() <=
+        profile.maximum_jerk_mps3.array() * (1.0 + tolerance) + 1.0e-9).all();
+    result.required_time_scale = 1.0;
+    for (Eigen::Index axis = 0; axis < 3; ++axis)
+    {
+      result.required_time_scale = std::max(
+          result.required_time_scale,
+          result.maximum_velocity(axis) /
+              profile.maximum_velocity_mps(axis));
+      result.required_time_scale = std::max(
+          result.required_time_scale,
+          std::sqrt(result.maximum_acceleration(axis) /
+                    profile.maximum_acceleration_mps2(axis)));
+      result.required_time_scale = std::max(
+          result.required_time_scale,
+          std::cbrt(result.maximum_jerk(axis) /
+                    profile.maximum_jerk_mps3(axis)));
+    }
+
+    double start = 0.0;
+    double finish = 0.0;
+    if (jerk.getTimeSpan(start, finish) && finish >= start)
+    {
+      const double duration = finish - start;
+      const Eigen::VectorXd jerk_knots = jerk.getKnot();
+      for (Eigen::Index index = 0; index < jerk_knots.rows(); ++index)
+      {
+        const double local = jerk_knots(index) - start;
+        if (local < -1.0e-9 || local > duration + 1.0e-9)
+          continue;
+        const double epsilon = 1.0e-9;
+        for (const double side : {
+                 std::max(0.0, local - epsilon),
+                 std::min(duration, local + epsilon)})
+        {
+          const Eigen::VectorXd value = jerk.evaluateDeBoorT(side);
+          if (!value.allFinite())
+          {
+            result.reason = "nonfinite_jerk_at_node_side";
+            return result;
+          }
+          ++result.jerk_node_side_samples;
+          for (Eigen::Index axis = 0;
+               axis < std::min<Eigen::Index>(3, value.rows()); ++axis)
+            if (std::abs(value(axis)) >
+                profile.maximum_jerk_mps3(axis) * (1.0 + tolerance) + 1.0e-9)
+              result.jerk_ok = false;
+        }
+      }
+    }
+    result.valid = true;
+    result.reason = result.velocity_ok && result.acceleration_ok && result.jerk_ok
+        ? "accepted" : "derivative_limit_exceeded";
+    return result;
   }
 
   bool UniformBspline::parameterizeToBsplineWithBoundaryConstraints(

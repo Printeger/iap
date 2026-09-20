@@ -127,6 +127,12 @@ if(BUILD_TESTING)
     bspline_opt
   )
 
+  ament_add_gtest(test_uniform_bspline_dynamics
+    test/test_uniform_bspline_dynamics.cpp
+  )
+  ament_target_dependencies(test_uniform_bspline_dynamics Eigen3)
+  target_link_libraries(test_uniform_bspline_dynamics bspline_opt)
+
   add_executable(icra076_repeatability_probe
     test/icra076_repeatability_probe.cpp
   )
