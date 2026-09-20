@@ -800,6 +800,10 @@ if(DEFINED ENV{ROS_VERSION})
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_icra_interface_integration.py
       )
       add_test(
+        NAME test_analyze_continuous_flight
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_analyze_continuous_flight.py
+      )
+      add_test(
         NAME test_analyze_p4_gnss_sensitivity
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_analyze_p4_gnss_sensitivity.py
       )
