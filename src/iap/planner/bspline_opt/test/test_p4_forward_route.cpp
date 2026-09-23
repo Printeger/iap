@@ -2846,4 +2846,87 @@ TEST(P4ForwardRoute, LiveGenerationGateRejectsMissingOrChangedToken)
       decision, 18u));
 }
 
+TEST(P4ForwardRoute,
+     V91RefinedCandidateDoesNotRetainCoarseUnsafeState)
+{
+  auto request = straightRequest();
+  request.limits.task_mode =
+      iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT;
+  request.limits.route_compute_budget_ms = 500.0;
+  request.limits.compute_budget_ms = 150.0;
+  request.geometry = [](const Eigen::Vector3d &point) {
+    if (point.x() >= 2.0 && point.x() <= 4.0 &&
+        std::abs(point.y()) <= 0.6) {
+      return P4ForwardGeometryState::OCCUPIED;
+    }
+    return std::abs(point.y()) > 2.5 ?
+      P4ForwardGeometryState::OCCUPIED : P4ForwardGeometryState::CLEAR;
+  };
+  request.refine = [](
+      const std::vector<Eigen::Vector3d> &path, double, double) {
+    ego_planner::P4ForwardRefinementResult result;
+    result.status = ego_planner::P4ForwardRefinementStatus::SUCCESS;
+    result.path = path;
+    return result;
+  };
+
+  int risk_batch_round = 0;
+  request.risk_batch = [&risk_batch_round](
+      const std::vector<P4ForwardRiskQuery> &queries, double,
+      std::vector<P4ForwardRiskSample> *samples) {
+    ++risk_batch_round;
+    const bool coarse = risk_batch_round == 1;
+    const double ratio = coarse ? 40.141206501632432 / 40.0 :
+      0.96778317842640205;
+    samples->clear();
+    samples->reserve(queries.size());
+    for (std::size_t index = 0; index < queries.size(); ++index) {
+      P4ForwardRiskSample sample;
+      sample.valid = true;
+      sample.stale = false;
+      sample.gnss_supported = true;
+      sample.lidar_supported = true;
+      sample.fim_supported = true;
+      sample.safety_state = coarse ? P4ForwardSafetyState::UNSAFE :
+        P4ForwardSafetyState::SAFE;
+      sample.ranking_state = P4ForwardRankingState::COMPARABLE;
+      sample.safety_ratio = ratio;
+      sample.fim_ratio = 0.013149569755803159;
+      sample.hpl = 14.123;
+      sample.vpl = 40.0 * ratio;
+      sample.hal = 20.0;
+      sample.val = 40.0;
+      sample.gnss_anchor_hpl = sample.hpl;
+      sample.gnss_anchor_vpl = sample.vpl;
+      sample.gnss_anchored_hpl = sample.hpl;
+      sample.gnss_anchored_vpl = sample.vpl;
+      sample.gnss_raw_hpl = sample.hpl;
+      sample.gnss_raw_vpl = sample.vpl;
+      sample.gnss_receiver_raw_hpl = sample.hpl;
+      sample.gnss_receiver_raw_vpl = sample.vpl;
+      sample.gnss_spatial_delta_h = 0.0;
+      sample.gnss_spatial_delta_v = coarse ? 24.928062415153363 : 0.0;
+      sample.gnss_temporal_growth_h = 0.0;
+      sample.gnss_temporal_growth_v = 0.0;
+      sample.gnss_used_satellite_count = 28;
+      sample.gnss_weighted_geometry_condition = 1.0;
+      sample.unknown_coverage = 0.16502525252525252;
+      sample.reason = "ok";
+      samples->push_back(std::move(sample));
+    }
+    return true;
+  };
+
+  const auto decision = P4ForwardRoutePlanner().decide(request);
+
+  ASSERT_GE(risk_batch_round, 2);
+  ASSERT_FALSE(decision.candidates.empty()) << decision.reason;
+  for (const auto &candidate : decision.candidates) {
+    EXPECT_TRUE(candidate.risk_supported);
+    EXPECT_TRUE(candidate.safety_gate_passed);
+    EXPECT_LT(candidate.safety_max_ratio, 1.0);
+    EXPECT_EQ(candidate.safety_state, P4ForwardSafetyState::SAFE);
+  }
+}
+
 }  // namespace
