@@ -228,6 +228,11 @@ class P5RuntimeIntegrityGate {
       const std::string& required_window_layout_hash = {},
       const std::string& required_window_satellite_sets_hash = {});
 
+  static bool observationCertificateIdentityValid(
+      LocalTrajData& local_data,
+      const P4DirectTrajectoryRiskEvidence* direct_risk,
+      const std::string& required_observation_validation_hash);
+
   // Typed admission for an exact, terminal-stopping common observation
   // curve. It intentionally applies the same current, collision-bound direct
   // risk, alert-limit, freshness, dynamics and braking certificate checks as

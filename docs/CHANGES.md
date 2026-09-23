@@ -24,6 +24,12 @@
   before both enabled and disabled P5 outcomes. The approved test seam freezes
   only route-level input; normal `reboundReplan` still owns optimization,
   terminal stopping, trajectory identity and publication.
+  Final review repair makes that canonical identity check independent of the
+  optional P5 object, so the default null-gate configuration cannot bypass it,
+  and binds every final audit field to the exact newest execution snapshot
+  selected for reauthorization. Negative production regressions independently
+  cover occupied collision, free-occupancy/insufficient-clearance, nominal and
+  brake dynamics/jerk, brake hashes, p/v/a continuity and terminal stop.
   Existing collision, clearance, dynamics, braking, freshness, PL/AL, and
   STRICT/MISSION policy thresholds are unchanged.
 - fix(frozen-local-evidence-and-interval-selection): IAP-RQ-312 /

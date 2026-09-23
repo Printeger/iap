@@ -1070,7 +1070,9 @@ namespace ego_planner
         std::string *reason = nullptr);
     P4ObservationValidationResult validateObservationExecutionEnvelope(
         double evidence_time_s,
-        const std::vector<P4BrakingAnchor> *braking_library = nullptr) const;
+        const std::vector<P4BrakingAnchor> *braking_library = nullptr,
+        std::shared_ptr<const P0ExecutionRiskSnapshot> execution_snapshot =
+            nullptr) const;
     const P4ObservationValidationResult &observationValidationResult() const
     {
       return p4_observation_validation_;

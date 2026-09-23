@@ -30,6 +30,14 @@ preflight、增量审查和干净提交之后执行，因此此处不宣称 live
 输入，实际曲线、终端停止和 ID/start/hash 仍由正常 `reboundReplan` 路径产生。
 本闭环未新增运行参数，也未修改 PL/AL、1 秒 freshness、碰撞/净空、0.05 m planning
 buffer、制动认证、0.15 m tracking envelope 或 STRICT/MISSION 门限。
+最终双轴复审还确认并修复两项发布边界：canonical observation identity 现在在
+可选 P5 对象判断之前验证，故默认 `p5_integrity_gate_ == nullptr` 也不能绕过；最终
+审核器显式消费本轮重授权选中的同一 execution snapshot，而非旧 planning-context
+副本。负向回归分别命中 occupied collision、occupancy-free 但 local-clearance margin
+不足、nominal/brake dynamics/jerk、brake hash、p/v/a 连续性与 terminal-stop 拒绝。
+最终聚焦结果为 P4 `122/122`、P5 `55/55`、planning context `161/161`、完整真实
+进程握手 `2/2`，核心激活测试再次独立运行 `20/20`；这些仍是 CPU/进程证据，唯一
+75 秒 live 的结果另行记录。
 
 调查基线：`605e96e7e4c17ef6591b51a0ad1abc19579289a6`。实施时重新记录 HEAD，先核对后续改动。
 

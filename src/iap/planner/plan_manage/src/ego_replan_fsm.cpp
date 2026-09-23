@@ -2036,8 +2036,33 @@ namespace ego_planner
           p5_final_status_evaluated = true;
         }
       }
+      if (p5_pre_evaluation_hook_for_test_)
+        p5_pre_evaluation_hook_for_test_();
+      if (preparing_common_observation)
+      {
+        const auto &direct_evidence =
+            planner_manager_->latestP4DirectRiskEvidence();
+        const auto &execution_certificate =
+            planner_manager_->p4ExecutionCertificate();
+        if (!P5RuntimeIntegrityGate::observationCertificateIdentityValid(
+                *info, &direct_evidence,
+                execution_certificate.observation_validation_hash))
+        {
+          RCLCPP_WARN(
+              node_->get_logger(),
+              "Observation certificate identity changed before publish");
+          planner_manager_->demoteP4ObservationToHold(
+              "observation_certificate_identity_mismatch");
+          planner_manager_->recordP4VerticalSliceLineage(
+              "observation_certificate_identity_rejected",
+              plannerNow().seconds());
+          reject_candidate();
+          return false;
+        }
+      }
       if (planner_manager_->p5_integrity_gate_ &&
-          planner_manager_->p5_integrity_gate_->finalGateEnabled() &&
+          (planner_manager_->p5_integrity_gate_->finalGateEnabled() ||
+           preparing_common_observation) &&
           !p5_final_status_evaluated)
       {
         const double now_s = plannerNow().seconds();

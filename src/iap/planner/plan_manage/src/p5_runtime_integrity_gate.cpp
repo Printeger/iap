@@ -694,36 +694,10 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateFinal(
   return status;
 }
 
-P5GateStatus P5RuntimeIntegrityGate::evaluateObservationFinal(
+bool P5RuntimeIntegrityGate::observationCertificateIdentityValid(
     LocalTrajData& local_data,
-    const std::shared_ptr<const iap::RiskGridSnapshot>& snapshot,
-    const double now_s,
-    const double emergency_time_s,
     const P4DirectTrajectoryRiskEvidence* direct_risk,
-    const std::string& required_gnss_core_policy,
-    const std::string& required_window_layout_hash,
-    const std::string& required_window_satellite_sets_hash,
     const std::string& required_observation_validation_hash) {
-  const auto reject_identity = [&]() {
-      P5GateStatus rejected;
-      rejected.action = P5GateAction::REQUEST_REPLAN;
-      rejected.raw_action = rejected.action;
-      rejected.reason = P5GateReason::FINAL_GATE_FAILED;
-      rejected.raw_reason = rejected.reason;
-      rejected.future_reason =
-          "observation_certificate_identity_mismatch";
-      rejected.active_reasons.push_back(rejected.future_reason);
-      rejected.final_candidate_traj_id = local_data.traj_id_;
-      rejected.final_candidate_start_time_s =
-          local_data.start_time_.seconds();
-      rejected.final_candidate_start_time_ns =
-          local_data.start_time_.nanoseconds();
-      rejected.final_candidate_duration_s = local_data.duration_;
-      rejected.final_candidate_rejected = true;
-      rejected.final_evaluation_stamp_s = now_s;
-      publishStatus(rejected, "observation_final");
-      return rejected;
-    };
   const auto* validation = direct_risk
       ? &direct_risk->observation_validation : nullptr;
   const std::string curve_hash = trajectoryCurveHash(
@@ -751,7 +725,41 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateObservationFinal(
       validation->minimum_stopping_margin_m < -1.0e-6 ||
       validation->brake_library_identity.empty() ||
       validation->task_mode != direct_risk->task_mode)
-    return reject_identity();
+    return false;
+  return true;
+}
+
+P5GateStatus P5RuntimeIntegrityGate::evaluateObservationFinal(
+    LocalTrajData& local_data,
+    const std::shared_ptr<const iap::RiskGridSnapshot>& snapshot,
+    const double now_s,
+    const double emergency_time_s,
+    const P4DirectTrajectoryRiskEvidence* direct_risk,
+    const std::string& required_gnss_core_policy,
+    const std::string& required_window_layout_hash,
+    const std::string& required_window_satellite_sets_hash,
+    const std::string& required_observation_validation_hash) {
+  if (!observationCertificateIdentityValid(
+          local_data, direct_risk,
+          required_observation_validation_hash)) {
+    P5GateStatus rejected;
+    rejected.action = P5GateAction::REQUEST_REPLAN;
+    rejected.raw_action = rejected.action;
+    rejected.reason = P5GateReason::FINAL_GATE_FAILED;
+    rejected.raw_reason = rejected.reason;
+    rejected.future_reason = "observation_certificate_identity_mismatch";
+    rejected.active_reasons.push_back(rejected.future_reason);
+    rejected.final_candidate_traj_id = local_data.traj_id_;
+    rejected.final_candidate_start_time_s =
+        local_data.start_time_.seconds();
+    rejected.final_candidate_start_time_ns =
+        local_data.start_time_.nanoseconds();
+    rejected.final_candidate_duration_s = local_data.duration_;
+    rejected.final_candidate_rejected = true;
+    rejected.final_evaluation_stamp_s = now_s;
+    publishStatus(rejected, "observation_final");
+    return rejected;
+  }
   if (!config_.enable_final_gate) {
     resetFinalGateFailureState();
     P5GateStatus status;

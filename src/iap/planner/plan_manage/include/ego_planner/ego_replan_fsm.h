@@ -347,11 +347,16 @@ namespace ego_planner
     {
       return callReboundReplan(false, false);
     }
+    void setP5PreEvaluationHookForTest(std::function<void()> hook)
+    {
+      p5_pre_evaluation_hook_for_test_ = std::move(hook);
+    }
 
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
   private:
     std::function<bool()> rebound_planner_for_test_;
+    std::function<void()> p5_pre_evaluation_hook_for_test_;
   };
 
 } // namespace ego_planner

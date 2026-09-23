@@ -7723,7 +7723,7 @@ namespace ego_planner
     {
       p4_observation_validation_ =
           validateObservationExecutionEnvelope(
-              stamp_s, &prepared_braking_anchors);
+              stamp_s, &prepared_braking_anchors, execution_snapshot);
       if (!p4_observation_validation_.valid)
         return reject_final_identity(
             P4GeometryCommitVerdict::INVALID_PATH,
@@ -9565,7 +9565,8 @@ namespace ego_planner
   P4ObservationValidationResult
   EGOPlannerManager::validateObservationExecutionEnvelope(
       const double evidence_time_s,
-      const std::vector<P4BrakingAnchor> *braking_library) const
+      const std::vector<P4BrakingAnchor> *braking_library,
+      std::shared_ptr<const P0ExecutionRiskSnapshot> execution_snapshot) const
   {
     P4ObservationValidationResult result;
     result.applicable = last_p4_forward_decision_.executable_intent ==
@@ -9580,8 +9581,12 @@ namespace ego_planner
         ? local_data_.execution_instance_id_ : execution_instance_id_;
     result.trajectory_id = local_data_.traj_id_;
     result.start_time_ns = local_data_.start_time_.nanoseconds();
-    result.execution_snapshot_id = planning_risk_context_.execution_snapshot
-        ? planning_risk_context_.execution_snapshot->execution_snapshot_id
+    if (!execution_snapshot)
+      execution_snapshot = p4_direct_risk_evidence_.execution_snapshot
+          ? p4_direct_risk_evidence_.execution_snapshot
+          : planning_risk_context_.execution_snapshot;
+    result.execution_snapshot_id = execution_snapshot
+        ? execution_snapshot->execution_snapshot_id
         : last_p4_forward_decision_.snapshot_identity.execution_snapshot_id;
     result.snapshot_identity =
         last_p4_forward_decision_.snapshot_identity.canonical();
@@ -9824,12 +9829,12 @@ namespace ego_planner
       return reject("OBSERVATION_STOPPING_RESERVE_INSUFFICIENT");
     result.brake_library_identity = p4IdentityHash(brake_identity.str());
 
-    const auto occupancy = planning_risk_context_.execution_snapshot
-        ? planning_risk_context_.execution_snapshot->occupancy
+    const auto occupancy = execution_snapshot
+        ? execution_snapshot->occupancy
         : planning_risk_context_.occupancy_snapshot;
     if (braking_library)
     {
-      const auto &execution = planning_risk_context_.execution_snapshot;
+      const auto &execution = execution_snapshot;
       if (!execution || !occupancy || !occupancy->diagnostic_query)
         return reject("OBSERVATION_FROZEN_OCCUPANCY_UNAVAILABLE");
       const auto local_evidence = buildP4LocalMotionEvidence(
@@ -9935,8 +9940,12 @@ namespace ego_planner
           "OBSERVATION_NO_POSITIVE_INFORMATION_GAIN");
     if (common_observation)
     {
+      const auto execution_snapshot = p4_direct_risk_evidence_.execution_snapshot
+          ? p4_direct_risk_evidence_.execution_snapshot
+          : planning_risk_context_.execution_snapshot;
       p4_observation_validation_ =
-          validateObservationExecutionEnvelope(now_s);
+          validateObservationExecutionEnvelope(
+              now_s, nullptr, execution_snapshot);
       if (!p4_observation_validation_.valid)
         return reject_observation(
             p4_observation_validation_.reason);
