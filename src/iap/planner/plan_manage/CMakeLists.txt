@@ -115,6 +115,7 @@ if(BUILD_TESTING)
     COMMAND ${Python3_EXECUTABLE}
       ${CMAKE_CURRENT_SOURCE_DIR}/../../../../test/test_traj_server_handshake.py
       --server $<TARGET_FILE:traj_server>
+      --planner-test $<TARGET_FILE:test_planning_risk_context>
   )
   add_test(
     NAME P4ObservationPublication.PlannerMessageActivatesUnchangedInTrajServer

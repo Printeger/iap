@@ -87,6 +87,7 @@ Implementation must follow docs/spec/conventions.md and docs/spec/talk_spec.md a
 - Build：`colcon build --symlink-install`
 - Test：按改动范围运行 focused test；重大集成点可运行 `colcon test && colcon test-result --all`
 - Run demo：见 `README.md` / `apps/` / `launch/`
+- 每次启动 live 验证前，必须先将本次参与构建和运行的 IAP 源码、配置与测试变更创建为可识别的 Git commit，并确认 `src/iap` 工作区干净。运行清单必须记录该 commit 且满足 `git_worktree_clean=true`；任一条件不满足时停止 live，不得以 dirty worktree 启动。这样每次 live 结果都能精确对应并恢复到唯一源码版本。
 - 顶层 launch exit 0 不能单独证明 live 系统成功；明确验证 live 系统时还要检查 required process 是否提前退出。
 - 运行结束只清理本任务启动的 ROS 进程，不得终止无法证明由本任务启动的用户进程。
 - 不得在仓库外创建 backup、归档或证据，也不得进行磁盘清理、移动或压缩用户数据。

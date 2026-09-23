@@ -1718,16 +1718,14 @@ TEST(P4ForwardRoute, InconclusiveTopologyProbeAdvancesOnlyBeforeAnyBranch)
 
   EXPECT_EQ(decision.action, P4ForwardAction::DEFER_RISK_SELECTION);
   EXPECT_EQ(decision.deferred_motion_mode,
-            ego_planner::P4ForwardDeferredMotionMode::COMMON_PREFIX);
-  EXPECT_EQ(decision.reason, "frontier_common_prefix_deferred_motion");
+            ego_planner::P4ForwardDeferredMotionMode::HOLD);
+  EXPECT_EQ(decision.executable_intent,
+            ego_planner::P4ExecutableIntent::HOLD);
+  EXPECT_EQ(decision.reason, "topology_probe_inconclusive_hold");
   EXPECT_TRUE(decision.selected_guide.empty());
   EXPECT_GT(decision.common_prefix_length_m, 0.25);
-  ASSERT_GE(decision.deferred_trajectory.size(), 2u);
-  EXPECT_GE((decision.deferred_trajectory.back() -
-             decision.deferred_trajectory.front()).norm(), 0.25);
-  EXPECT_GT(decision.speed_cap_mps, 0.0);
-  EXPECT_LE(decision.speed_cap_mps,
-            request.limits.max_observe_speed_mps);
+  EXPECT_TRUE(decision.deferred_trajectory.empty());
+  EXPECT_DOUBLE_EQ(decision.speed_cap_mps, 0.0);
 }
 
 TEST(P4ForwardRoute,
@@ -3344,26 +3342,17 @@ TEST(P4ForwardRoute, UnsafeFullRoutesAuthorizeOnlyContinuousSafeCommonPrefix)
 
   const auto decision = P4ForwardRoutePlanner().decide(request);
 
-  EXPECT_EQ(decision.action, P4ForwardAction::DEFER_RISK_SELECTION)
+  EXPECT_EQ(decision.action, P4ForwardAction::NO_SAFE_ROUTE)
     << decision.reason;
   EXPECT_EQ(decision.trigger_reason, P4ForwardTriggerReason::NO_SAFE_ROUTE);
   EXPECT_EQ(decision.deferred_motion_mode,
-            ego_planner::P4ForwardDeferredMotionMode::COMMON_PREFIX);
+            ego_planner::P4ForwardDeferredMotionMode::HOLD);
   EXPECT_EQ(decision.selection_authority, P4ForwardSelectionAuthority::NONE);
-  EXPECT_EQ(decision.reason, "safe_limited_common_prefix");
-  ASSERT_GE(decision.deferred_trajectory.size(), 2u);
-  EXPECT_TRUE(decision.observation_endpoint.isApprox(
-    decision.deferred_trajectory.back(), 1.0e-12));
-  EXPECT_TRUE(decision.observation_divergence_boundary.allFinite());
-  EXPECT_GT(decision.observation_stopping_reserve_m, 0.0);
-  EXPECT_DOUBLE_EQ(decision.observation_predicted_information_gain, 0.0);
-  EXPECT_GE(decision.deferred_trajectory.back().x(),
-            decision.stopping_distance_m - 1.0e-9);
-  EXPECT_LT(decision.deferred_trajectory.back().x(), 2.0);
-  for (const auto & point : decision.deferred_trajectory) {
-    EXPECT_NEAR(point.y(), request.position.y(), 1.0e-12);
-    EXPECT_NEAR(point.z(), request.position.z(), 1.0e-12);
-  }
+  EXPECT_EQ(decision.executable_intent,
+            ego_planner::P4ExecutableIntent::HOLD);
+  EXPECT_EQ(decision.reason, "OBSERVATION_NO_POSITIVE_INFORMATION_GAIN");
+  EXPECT_TRUE(decision.deferred_trajectory.empty());
+  EXPECT_DOUBLE_EQ(decision.speed_cap_mps, 0.0);
 }
 
 TEST(P4ForwardRoute,
@@ -3401,18 +3390,11 @@ TEST(P4ForwardRoute,
 
   const auto decision = P4ForwardRoutePlanner().decide(request);
 
-  ASSERT_EQ(decision.reason, "safe_limited_common_prefix");
-  EXPECT_GT(decision.speed_cap_mps, 0.1);
-  EXPECT_LE(decision.speed_cap_mps,
-            request.limits.max_observe_speed_mps);
-  EXPECT_LE(ego_planner::p4StoppingDistance(
-      decision.speed_cap_mps, request.limits),
-      decision.certified_free_distance_m + 1.0e-9);
-  EXPECT_LE((decision.deferred_trajectory.back() -
-             decision.deferred_trajectory.front()).norm() +
-            request.limits.vehicle_radius_m +
-            request.limits.safety_margin_m,
-            decision.certified_free_distance_m + 1.0e-9);
+  EXPECT_EQ(decision.reason, "OBSERVATION_NO_POSITIVE_INFORMATION_GAIN");
+  EXPECT_EQ(decision.executable_intent,
+            ego_planner::P4ExecutableIntent::HOLD);
+  EXPECT_TRUE(decision.deferred_trajectory.empty());
+  EXPECT_DOUBLE_EQ(decision.speed_cap_mps, 0.0);
 }
 
 TEST(P4ForwardRoute,
@@ -3450,15 +3432,10 @@ TEST(P4ForwardRoute,
 
   const auto decision = P4ForwardRoutePlanner().decide(request);
 
-  ASSERT_EQ(decision.reason, "safe_limited_common_prefix");
-  ASSERT_GE(decision.deferred_trajectory.size(), 2u);
-  const double progress =
-      (decision.deferred_trajectory.back() - request.position).norm();
-  EXPECT_GT(progress, 1.0);
-  EXPECT_LE(progress + request.limits.vehicle_radius_m +
-                request.limits.safety_margin_m,
-            decision.certified_free_distance_m + 1.0e-9);
-  EXPECT_LE(progress, request.limits.max_lookahead_m + 1.0e-9);
+  EXPECT_EQ(decision.reason, "OBSERVATION_NO_POSITIVE_INFORMATION_GAIN");
+  EXPECT_EQ(decision.executable_intent,
+            ego_planner::P4ExecutableIntent::HOLD);
+  EXPECT_TRUE(decision.deferred_trajectory.empty());
 }
 
 TEST(P4ForwardRoute, SafeLimitedPrefixNeverExceedsConfiguredProgressCap)
@@ -3492,14 +3469,13 @@ TEST(P4ForwardRoute, SafeLimitedPrefixNeverExceedsConfiguredProgressCap)
 
   const auto decision = P4ForwardRoutePlanner().decide(request);
 
-  EXPECT_EQ(decision.action, P4ForwardAction::DEFER_RISK_SELECTION);
+  EXPECT_EQ(decision.action, P4ForwardAction::NO_SAFE_ROUTE);
   EXPECT_EQ(decision.executable_intent,
-    ego_planner::P4ExecutableIntent::COMMON_OBSERVATION_SEGMENT);
+    ego_planner::P4ExecutableIntent::HOLD);
   EXPECT_EQ(decision.deferred_motion_mode,
-            ego_planner::P4ForwardDeferredMotionMode::COMMON_PREFIX);
-  ASSERT_GE(decision.deferred_trajectory.size(), 2u);
-  EXPECT_LE((decision.deferred_trajectory.back() - request.position).norm(),
-            request.limits.max_creep_progress_m + 1.0e-9);
+            ego_planner::P4ForwardDeferredMotionMode::HOLD);
+  EXPECT_TRUE(decision.deferred_trajectory.empty());
+  EXPECT_EQ(decision.reason, "OBSERVATION_NO_POSITIVE_INFORMATION_GAIN");
 }
 
 TEST(P4ForwardRoute, UnsafeNearStartOrInsufficientStoppingDistanceHolds)
@@ -3527,7 +3503,7 @@ TEST(P4ForwardRoute, UnsafeNearStartOrInsufficientStoppingDistanceHolds)
   EXPECT_EQ(decision.deferred_motion_mode,
             ego_planner::P4ForwardDeferredMotionMode::HOLD);
   EXPECT_TRUE(decision.deferred_trajectory.empty());
-  EXPECT_EQ(decision.reason, "safe_common_prefix_too_short_to_stop");
+  EXPECT_EQ(decision.reason, "OBSERVATION_NO_POSITIVE_INFORMATION_GAIN");
 }
 
 TEST(P4ForwardRoute, FullThreeDimensionalSearchSelectsVerticalChannel)

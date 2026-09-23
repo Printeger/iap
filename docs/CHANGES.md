@@ -9,9 +9,15 @@
   intent. A certified common observation keeps candidate/channel IDs at zero,
   bypasses final-channel bundle comparison, and follows dedicated exact-curve,
   P5, lineage, publication, queue, activation, motion, and terminal-stop
-  stages. Its endpoint must remain on the common corridor with the declared
-  stopping reserve before divergence; failures hold instead of selecting an
-  alternate channel. Final channels still require their selected bundle.
+  stages. A final read-only auditor now recomputes positive LOS evidence gain,
+  the first true channel divergence, actual B-spline swept-corridor coverage,
+  derivatives, stopping margin, collision/clearance, and brake-library
+  identity from frozen inputs. P5 matches that exact observation certificate
+  to the execution instance and command identity; failures hold instead of
+  selecting an alternate channel. Final channels still require their selected
+  bundle. The planner-process seam passes its actual serialized B-spline to
+  `traj_server` and verifies unchanged QUEUED, ACTIVATED and PositionCommand
+  identity through a stopped endpoint.
   Existing collision, clearance, dynamics, braking, freshness, PL/AL, and
   STRICT/MISSION policy thresholds are unchanged.
 - fix(frozen-local-evidence-and-interval-selection): IAP-RQ-312 /

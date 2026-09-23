@@ -1953,7 +1953,7 @@ TEST(P4LocalClearanceFeedback,
   EXPECT_LT(retry->selected_guide.back().x(), 2.0);
 }
 
-std::shared_ptr<const ego_planner::P0ExecutionRiskSnapshot>
+std::shared_ptr<ego_planner::P0ExecutionRiskSnapshot>
 makeP4ExecutionSnapshot(
     const std::shared_ptr<const iap::RiskGridSnapshot>& risk,
     std::function<iap::ForwardRiskBatchResult(
@@ -2235,6 +2235,29 @@ ego_planner::P4ForwardDecision makeForwardDecision(
   decision.selected_guide = candidate.path;
   decision.reason = "risk_ranked_topology_selected";
   return decision;
+}
+
+void bindObservationSensorEvidence(
+    ego_planner::P4ForwardDecision* decision,
+    ego_planner::UniformBspline curve) {
+  ASSERT_NE(decision, nullptr);
+  const double duration = curve.getTimeSum();
+  const Eigen::Vector3d endpoint = curve.evaluateDeBoorT(duration);
+  Eigen::Vector3d approach = endpoint - curve.evaluateDeBoorT(
+      std::max(0.0, duration - 0.25));
+  if (approach.norm() <= 1.0e-6)
+    approach = Eigen::Vector3d::UnitX();
+  const Eigen::Vector3d target = endpoint + approach.normalized();
+  decision->observation_sensor_model.identity = "unit-observation-sensor";
+  decision->observation_sensor_model.horizontal_fov_rad = 6.283185307179586;
+  decision->observation_sensor_model.vertical_min_rad = -1.5707963267948966;
+  decision->observation_sensor_model.vertical_max_rad = 1.5707963267948966;
+  decision->observation_sensor_model.min_range_m = 0.0;
+  decision->observation_sensor_model.max_range_m = 1.5;
+  decision->observation_sensor_model.occluder_radius_m = 0.05;
+  decision->observation_raw_occluders =
+      std::make_shared<const std::vector<Eigen::Vector3d>>();
+  decision->observation_missing_los_by_channel = {{target}, {target}};
 }
 
 }  // namespace
@@ -2567,19 +2590,13 @@ TEST(P4ForwardTerminalLineageTest,
       temporal_manager.pendingP4ActualCurveFeedbackForTest()
           ->actual_curve_duration_scale,
       0.85);
-  EXPECT_TRUE(temporal_manager.prepareP4ActualCurveFeedbackRetry(
+  EXPECT_FALSE(temporal_manager.prepareP4ActualCurveFeedbackRetry(
       2u, &feedback_reason));
-  EXPECT_EQ(feedback_reason, "limited_prefix_feedback_ready");
-  ASSERT_TRUE(
+  EXPECT_EQ(feedback_reason, "OBSERVATION_NO_POSITIVE_INFORMATION_GAIN");
+  EXPECT_FALSE(
       temporal_manager.pendingP4ActualCurveFeedbackForTest().has_value());
-  EXPECT_EQ(
-      temporal_manager.pendingP4ActualCurveFeedbackForTest()
-          ->deferred_motion_mode,
-      ego_planner::P4ForwardDeferredMotionMode::COMMON_PREFIX);
-  EXPECT_LE(
-      temporal_manager.pendingP4ActualCurveFeedbackForTest()
-          ->deferred_trajectory.back().x(),
-      -2.0 + 1.0e-9);
+  EXPECT_EQ(temporal_manager.lastP4ForwardDecision().executable_intent,
+            ego_planner::P4ExecutableIntent::HOLD);
 }
 
 TEST(P4ForwardTerminalLineageTest,
@@ -2619,18 +2636,11 @@ TEST(P4ForwardTerminalLineageTest,
   manager.setP4DirectRiskEvidenceForTest(std::move(evidence));
 
   std::string reason;
-  ASSERT_TRUE(manager.prepareP4ActualCurveFeedbackRetry(2u, &reason));
-  EXPECT_EQ(reason, "limited_prefix_feedback_ready");
-  ASSERT_TRUE(manager.pendingP4ActualCurveFeedbackForTest().has_value());
-  const auto &prefix =
-      manager.pendingP4ActualCurveFeedbackForTest()->deferred_trajectory;
-  double prefix_length_m = 0.0;
-  for (std::size_t index = 1; index < prefix.size(); ++index)
-    prefix_length_m += (prefix[index] - prefix[index - 1]).norm();
-  const ego_planner::P4ForwardLimits defaults;
-  const double expected_max_m = 2.0 - defaults.vehicle_radius_m -
-      defaults.safety_margin_m;
-  EXPECT_LE(prefix_length_m, expected_max_m + 1.0e-9);
+  EXPECT_FALSE(manager.prepareP4ActualCurveFeedbackRetry(2u, &reason));
+  EXPECT_EQ(reason, "OBSERVATION_NO_POSITIVE_INFORMATION_GAIN");
+  EXPECT_FALSE(manager.pendingP4ActualCurveFeedbackForTest().has_value());
+  EXPECT_EQ(manager.lastP4ForwardDecision().executable_intent,
+            ego_planner::P4ExecutableIntent::HOLD);
 }
 
 TEST(P4ForwardTerminalLineageTest,
@@ -2677,16 +2687,11 @@ TEST(P4ForwardTerminalLineageTest,
   EXPECT_EQ(alternate->runner_up_candidate_id, 1u);
   EXPECT_EQ(alternate->runner_up_channel_id, 1u);
 
-  ASSERT_TRUE(manager.prepareP4ActualCurveFeedbackRetry(2u, &reason));
-  EXPECT_EQ(reason, "limited_prefix_feedback_ready");
-  const auto &retry = manager.pendingP4ActualCurveFeedbackForTest();
-  ASSERT_TRUE(retry.has_value());
-  EXPECT_EQ(retry->action,
-            ego_planner::P4ForwardAction::DEFER_RISK_SELECTION);
-  EXPECT_EQ(retry->deferred_motion_mode,
-            ego_planner::P4ForwardDeferredMotionMode::COMMON_PREFIX);
-  ASSERT_GE(retry->deferred_trajectory.size(), 2u);
-  EXPECT_LT(retry->deferred_trajectory.back().x(), 3.0);
+  EXPECT_FALSE(manager.prepareP4ActualCurveFeedbackRetry(2u, &reason));
+  EXPECT_EQ(reason, "OBSERVATION_NO_POSITIVE_INFORMATION_GAIN");
+  EXPECT_FALSE(manager.pendingP4ActualCurveFeedbackForTest().has_value());
+  EXPECT_EQ(manager.lastP4ForwardDecision().executable_intent,
+            ego_planner::P4ExecutableIntent::HOLD);
 }
 
 TEST(P4ForwardTerminalLineageTest,
@@ -2983,14 +2988,16 @@ TEST(P4ForwardTerminalLineageTest,
   manager.local_data_.traj_id_ = 33;
   manager.local_data_.start_time_ = rclcpp::Time(10, 0, RCL_ROS_TIME);
 
-  EXPECT_TRUE(manager.recordP4VerticalSliceLineage(
+  EXPECT_FALSE(manager.recordP4VerticalSliceLineage(
       "final_bspline_before_p5", 10.0));
+  EXPECT_EQ(manager.lastP4ForwardDecision().executable_intent,
+            ego_planner::P4ExecutableIntent::HOLD);
   const auto rows = readCsvRows(std::filesystem::path(
       debug_path.string() + ".forward_lineage.csv"));
   ASSERT_EQ(rows.size(), 1u);
   EXPECT_EQ(rows.front().at("action"), "DEFER_RISK_SELECTION");
   EXPECT_EQ(rows.front().at("selection_applied"), "0");
-  EXPECT_EQ(rows.front().at("deferred_motion_mode"), "COMMON_PREFIX");
+  EXPECT_EQ(rows.front().at("deferred_motion_mode"), "HOLD");
 }
 
 TEST(P4ObservationPublication,
@@ -3141,6 +3148,7 @@ TEST(P4ObservationPublication,
         lower.path.back().y() = -1.5;
         lower.path_hash = "observation-lower-channel";
         decision.candidates = {upper, lower};
+        bindObservationSensorEvidence(&decision, observation);
         manager_ptr->setP4ForwardDecisionForTest(std::move(decision));
         manager_ptr->local_data_.position_traj_ = observation;
         manager_ptr->local_data_.velocity_traj_ = observation.getDerivative();
@@ -3203,6 +3211,8 @@ TEST(P4ObservationPublication,
      TypedContractRejectsDivergenceStoppingAndFinalWinnerViolations) {
   const auto snapshot = makeP4SelectionSnapshot();
   ego_planner::EGOPlannerManager manager;
+  manager.setP4ControlCapabilityProfileForTest(
+      permissiveTestControlProfile());
   auto curve = ego_planner::UniformBspline(p4StoppedControlPoints(), 3, 0.5);
   manager.local_data_.position_traj_ = curve;
   manager.local_data_.velocity_traj_ = curve.getDerivative();
@@ -3243,10 +3253,12 @@ TEST(P4ObservationPublication,
   observation.selected_guide.clear();
   observation.deferred_motion_mode =
       ego_planner::P4ForwardDeferredMotionMode::COMMON_PREFIX;
-  observation.geometry_common_corridor = {
-      Eigen::Vector3d(0.0, 0.0, 0.0),
-      Eigen::Vector3d(4.0, 0.0, 0.0),
-      Eigen::Vector3d(5.0, 0.0, 0.0)};
+  observation.geometry_common_corridor.clear();
+  for (int index = 0; index <= 8; ++index)
+    observation.geometry_common_corridor.push_back(curve.evaluateDeBoorT(
+        curve.getTimeSum() * static_cast<double>(index) / 8.0));
+  observation.geometry_common_corridor.push_back(
+      Eigen::Vector3d(5.0, 0.0, 0.0));
   observation.deferred_trajectory = {
       observation.geometry_common_corridor[0],
       observation.geometry_common_corridor[1]};
@@ -3256,10 +3268,21 @@ TEST(P4ObservationPublication,
       observation.geometry_common_corridor.back();
   observation.observation_stopping_reserve_m = 0.85;
   observation.observation_predicted_information_gain = 0.4;
-  auto second = observation.candidates.front();
-  second.candidate_id += 1u;
-  second.channel_id += 1u;
-  observation.candidates.push_back(second);
+  auto upper = observation.candidates.front();
+  upper.candidate_id = 101u;
+  upper.channel_id = 11u;
+  upper.path = observation.geometry_common_corridor;
+  upper.path.push_back(Eigen::Vector3d(6.0, 1.0, 0.0));
+  upper.topology_path = upper.path;
+  upper.path_hash = "typed-observation-upper";
+  auto lower = upper;
+  lower.candidate_id = 102u;
+  lower.channel_id = 12u;
+  lower.path.back().y() = -1.0;
+  lower.topology_path = lower.path;
+  lower.path_hash = "typed-observation-lower";
+  observation.candidates = {upper, lower};
+  bindObservationSensorEvidence(&observation, curve);
 
   ego_planner::P5GateStatus p5_ok;
   std::string reason;
@@ -3281,7 +3304,7 @@ TEST(P4ObservationPublication,
   EXPECT_EQ(reason, "observation_intent_contract_invalid");
 
   auto insufficient_stop = observation;
-  insufficient_stop.observation_stopping_reserve_m = 1.01;
+  insufficient_stop.observation_stopping_reserve_m = 100.0;
   manager.setP4ForwardDecisionForTest(std::move(insufficient_stop));
   EXPECT_EQ(manager.prepareP4NormalChannelComparison(10.0, p5_ok, &reason),
             ego_planner::P4NormalChannelPreparationDisposition::REJECTED);
@@ -3341,6 +3364,7 @@ TEST(P4ObservationExecution, ZeroInformationGainCannotPublish) {
   second.candidate_id += 1u;
   second.channel_id += 1u;
   observation.candidates.push_back(second);
+  const auto observation_template = observation;
   manager.setP4ForwardDecisionForTest(std::move(observation));
 
   ego_planner::P5GateStatus p5_ok;
@@ -3355,6 +3379,22 @@ TEST(P4ObservationExecution, ZeroInformationGainCannotPublish) {
   EXPECT_EQ(manager.lastP4ForwardDecision().selected_channel_id, 0u);
   EXPECT_FALSE(manager.pendingP4ActualCurveFeedbackForTest().has_value());
   EXPECT_EQ(manager.local_data_.traj_id_, 0);
+
+  ego_planner::EGOPlannerManager nonfinite_manager;
+  auto nonfinite = observation_template;
+  nonfinite.observation_predicted_information_gain =
+      std::numeric_limits<double>::quiet_NaN();
+  nonfinite_manager.setP4ForwardDecisionForTest(std::move(nonfinite));
+  reason.clear();
+  EXPECT_EQ(nonfinite_manager.prepareP4NormalChannelComparison(
+                10.0, p5_ok, &reason),
+            ego_planner::P4NormalChannelPreparationDisposition::REJECTED);
+  EXPECT_EQ(reason, "OBSERVATION_NO_POSITIVE_INFORMATION_GAIN");
+  EXPECT_EQ(nonfinite_manager.lastP4ForwardDecision().executable_intent,
+            ego_planner::P4ExecutableIntent::HOLD);
+  EXPECT_FALSE(
+      nonfinite_manager.pendingP4ActualCurveFeedbackForTest().has_value());
+  EXPECT_EQ(nonfinite_manager.local_data_.traj_id_, 0);
 }
 
 TEST(P4ObservationExecution, RecomputesDivergenceAndStoppingReserve) {
@@ -3430,10 +3470,20 @@ TEST(P4ObservationExecution, RecomputesDivergenceAndStoppingReserve) {
           observation.geometry_common_corridor.back();
       observation.observation_stopping_reserve_m = declared_reserve_m;
       observation.observation_predicted_information_gain = 0.4;
-      auto second = observation.candidates.front();
-      second.candidate_id += 1u;
-      second.channel_id += 1u;
-      observation.candidates.push_back(second);
+      auto upper = observation.candidates.front();
+      upper.candidate_id = 101u;
+      upper.channel_id = 11u;
+      upper.path = observation.geometry_common_corridor;
+      upper.path.push_back(Eigen::Vector3d(6.0, 1.0, 0.0));
+      upper.topology_path = upper.path;
+      upper.path_hash = "observation-upper";
+      auto lower = upper;
+      lower.candidate_id = 102u;
+      lower.channel_id = 12u;
+      lower.path.back().y() = -1.0;
+      lower.topology_path = lower.path;
+      lower.path_hash = "observation-lower";
+      observation.candidates = {upper, lower};
       manager->setP4ForwardDecisionForTest(std::move(observation));
       return manager;
     };
@@ -3506,8 +3556,12 @@ TEST(P4ForwardTerminalLineageTest,
   auto committed_occupancy =
       std::make_shared<ego_planner::P0OccupancyEpoch>(
           *execution_snapshot->occupancy);
+  committed_occupancy->generation = frozen_occupancy->generation;
   committed_occupancy->frozen_grid_map_epoch =
       frozen_occupancy;
+  execution_snapshot->occupancy = committed_occupancy;
+  execution_snapshot->source_identity.occupancy_generation =
+      committed_occupancy->generation;
   ASSERT_NE(committed_occupancy->frozen_grid_map_epoch, nullptr);
   manager.setPlanningRiskContextForTest(
       // Deliberately stale search-context capture: the fresh execution
@@ -3595,13 +3649,40 @@ TEST(P4ForwardTerminalLineageTest,
   diagnostic_detail->satellites = {satellite};
   failed_record.risk.diagnostic_detail = std::move(diagnostic_detail);
   decision.candidates.front().risk_samples = {failed_record};
-  manager.setP4ForwardDecisionForTest(std::move(decision));
 
   auto stopped = ego_planner::UniformBspline(
       p4StoppedControlPoints(), 3, 0.5);
   const auto terminal = ego_planner::imposeP4TerminalStop(
       &stopped, terminalStartState(stopped), 20.0, 100.0, 0.0);
   ASSERT_TRUE(terminal.success) << terminal.reason;
+  std::vector<Eigen::Vector3d> observation_guide;
+  for (int index = 0; index <= 8; ++index)
+    observation_guide.push_back(stopped.evaluateDeBoorT(
+        stopped.getTimeSum() * static_cast<double>(index) / 8.0));
+  decision.deferred_trajectory = observation_guide;
+  decision.geometry_common_corridor = observation_guide;
+  decision.geometry_common_corridor.push_back(
+      Eigen::Vector3d(5.0, 0.0, 0.0));
+  decision.observation_endpoint = observation_guide.back();
+  decision.observation_divergence_boundary =
+      decision.geometry_common_corridor.back();
+  decision.observation_stopping_reserve_m = 0.85;
+  decision.observation_predicted_information_gain = 0.4;
+  auto upper = decision.candidates.front();
+  upper.candidate_id = 101u;
+  upper.channel_id = 11u;
+  upper.path = decision.geometry_common_corridor;
+  upper.path.push_back(Eigen::Vector3d(6.0, 1.5, 0.0));
+  upper.topology_path = upper.path;
+  auto lower = upper;
+  lower.candidate_id = 102u;
+  lower.channel_id = 12u;
+  lower.path.back().y() = -1.5;
+  lower.topology_path = lower.path;
+  lower.risk_samples.clear();
+  decision.candidates = {upper, lower};
+  bindObservationSensorEvidence(&decision, stopped);
+  manager.setP4ForwardDecisionForTest(std::move(decision));
   manager.local_data_.position_traj_ = stopped;
   manager.local_data_.traj_id_ = 35;
   manager.local_data_.start_time_ = rclcpp::Time(10, 0, RCL_ROS_TIME);
@@ -8016,25 +8097,16 @@ TEST(P4PreparedChannelPreparation,
       manager.prepareP4NormalChannelComparison(
           10.0, disabled_preview, &reason),
       ego_planner::P4NormalChannelPreparationDisposition::
-          COMMON_PREFIX_PENDING)
+          REJECTED)
       << reason;
-  ASSERT_TRUE(manager.pendingP4ActualCurveFeedbackForTest().has_value());
-  const auto &observe = *manager.pendingP4ActualCurveFeedbackForTest();
-  ASSERT_EQ(observe.deferred_motion_mode,
-            ego_planner::P4ForwardDeferredMotionMode::COMMON_PREFIX);
-  ASSERT_GE(observe.deferred_trajectory.size(), 2u);
-  EXPECT_LE(observe.deferred_trajectory.back().x(), -2.0 + 1.0e-9);
-  EXPECT_NEAR(observe.deferred_trajectory.back().y(), 0.0, 1.0e-9);
-  EXPECT_EQ(observe.selection_authority,
-            ego_planner::P4ForwardSelectionAuthority::NONE);
-  EXPECT_EQ(observe.executable_intent,
-            ego_planner::P4ExecutableIntent::COMMON_OBSERVATION_SEGMENT);
-  EXPECT_EQ(observe.selected_channel_id, 0u);
-  EXPECT_TRUE(observe.observation_endpoint.isApprox(
-      observe.deferred_trajectory.back(), 1.0e-9));
-  EXPECT_TRUE(observe.observation_divergence_boundary.isApprox(
-      observe.geometry_common_corridor.back(), 1.0e-9));
-  EXPECT_GT(observe.observation_stopping_reserve_m, 0.0);
+  EXPECT_EQ(reason, "normal_channel_comparison_incomparable_hold");
+  EXPECT_FALSE(manager.pendingP4ActualCurveFeedbackForTest().has_value());
+  EXPECT_EQ(manager.lastP4ForwardDecision().deferred_motion_mode,
+            ego_planner::P4ForwardDeferredMotionMode::HOLD);
+  EXPECT_EQ(manager.lastP4ForwardDecision().executable_intent,
+            ego_planner::P4ExecutableIntent::HOLD);
+  EXPECT_EQ(manager.lastP4ForwardDecision().reason,
+            "OBSERVATION_NO_POSITIVE_INFORMATION_GAIN");
 }
 
 // State-machine/lineage regression only. The synthetic lateral-sign callback

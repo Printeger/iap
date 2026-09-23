@@ -16,6 +16,17 @@ CPU/进程全量门禁、单岔路 primary/mirror 和 180 秒森林验收尚未�
 专用 lineage 后发布；失败进入 typed HOLD，不转换为 alternate channel。该切片的
 CPU 与真实 traj_server 进程测试独立记录，不代表下文完整 S0–S6 或森林 live 已完成。
 
+同日 observation execution closure 进一步移除了上游自证：最终审核器从冻结的
+通道 guide、occupancy/execution snapshot、传感器 LOS 输入、实际 B-spline、控制能力
+和制动库独立重算信息增益、首次真实分歧点、全曲线公共走廊、导数与停车余量；P5
+核对同一 validation hash、execution instance、trajectory ID/start/curve hash、snapshot、
+endpoint、divergence、brake identity 和 task mode。零/非有限增益或没有新增可观测
+LOS voxel 均为 typed HOLD，且不进入 alternate channel。聚焦 CPU 测试与真实
+planner→traj_server seam 已通过，核心激活测试连续 20/20；75 秒 live 仍须在 GPU
+preflight、增量审查和干净提交之后执行，因此此处不宣称 live 或完整 S0–S6 完成。
+本闭环未新增运行参数，也未修改 PL/AL、1 秒 freshness、碰撞/净空、0.05 m planning
+buffer、制动认证、0.15 m tracking envelope 或 STRICT/MISSION 门限。
+
 调查基线：`605e96e7e4c17ef6591b51a0ad1abc19579289a6`。实施时重新记录 HEAD，先核对后续改动。
 
 目标场景：`icra_dense_forest_four_fork_v2`，默认 BDS、`MISSION_BEST_EFFORT`。
