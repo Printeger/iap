@@ -520,6 +520,51 @@ class TestStageContracts(unittest.TestCase):
 
 
 class TestRunnerLifecycle(unittest.TestCase):
+    def test_raw_evidence_retention_is_summary_first_and_run_scoped(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            run_root = root / "continuous-flight-r01"
+            exports = run_root / "exports"
+            exports.mkdir(parents=True)
+            prefix = exports / "planner_p4_risk_astar_debug.csv"
+            raw_suffixes = (
+                ".forward_risk_samples.csv",
+                ".gnss_risk_detail.csv",
+                ".runtime_window.csv",
+                ".runtime_window_satellite.csv",
+            )
+            for suffix in raw_suffixes:
+                Path(f"{prefix}{suffix}").write_text("raw\n")
+            compact_paths = (
+                Path(f"{prefix}.forward_candidates.csv"),
+                Path(f"{prefix}.forward_channel_decisions.csv"),
+            )
+            for compact in compact_paths:
+                compact.write_text("compact\n")
+            outside = root / "planner_p4_risk_astar_debug.csv.gnss_risk_detail.csv"
+            outside.write_text("outside\n")
+
+            with self.assertRaises(RuntimeError):
+                MODULE.apply_raw_evidence_retention(
+                    run_root, retain_raw=False)
+
+            (run_root / "summary.json").write_text("{}\n")
+            retention = MODULE.apply_raw_evidence_retention(
+                run_root, retain_raw=False)
+            self.assertEqual(retention["policy"], "compact_default")
+            self.assertEqual(len(retention["removed"]), len(raw_suffixes))
+            self.assertTrue(all(path.is_file() for path in compact_paths))
+            self.assertTrue(outside.is_file())
+
+            for suffix in raw_suffixes:
+                Path(f"{prefix}{suffix}").write_text("raw\n")
+            retained = MODULE.apply_raw_evidence_retention(
+                run_root, retain_raw=True)
+            self.assertEqual(retained["policy"], "retain_full_detail")
+            self.assertEqual(retained["removed"], [])
+            for suffix in raw_suffixes:
+                self.assertTrue(Path(f"{prefix}{suffix}").is_file())
+
     def test_first_hit_runtime_logs_are_summarized(self):
         stdout = "\n".join((
             "first-hit lidar frame=1 stamp=1.0 rays=20480 hits=123 "
@@ -583,6 +628,25 @@ class TestRunnerLifecycle(unittest.TestCase):
             )
             self.assertIn("[icra] LOG ", stdout)
             self.assertIn("/full-r01/stdout.log", stdout)
+
+    def test_cli_forwards_explicit_raw_evidence_retention(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            args = self.runner_args(root)
+            args.retain_raw_risk_detail = True
+            with mock.patch.object(
+                    MODULE, "_gpu_preflight",
+                    return_value={"gpu_ready": True}), mock.patch.object(
+                        MODULE, "_run_one",
+                        return_value=MODULE._result([])) as run_one:
+                self.assertEqual(MODULE._run_main(args), 0)
+
+            self.assertTrue(
+                run_one.call_args.kwargs["retain_raw_risk_detail"])
+            session_path = next((root / "results").glob(
+                "run-*/session_summary.json"))
+            session = json.loads(session_path.read_text())
+            self.assertTrue(session["retain_raw_risk_detail"])
 
     def test_process_wait_reports_progress_periodically(self):
         now = [0.0]

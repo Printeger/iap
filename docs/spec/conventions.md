@@ -331,10 +331,13 @@
   terminal solver may lengthen the hinted curve again when dynamics require
   it, and every regenerated curve repeats dynamics, collision, support,
   Integrity and direct risk checks. A cropped result remains `LIMITED_PREFIX`.
-- Best-effort route discovery first ranks refined, clearance-aware channel
-  guides and then converts the selected guide into the actual stopping
-  B-spline, braking library and final execution certificate. The final curve
-  still removes any candidate that fails local collision, clearance,
+- Best-effort route discovery first schedules refined, clearance-aware channel
+  guides, then converts every locally feasible stable channel into an actual
+  stopping B-spline and side-effect-free prepared bundle. Each bundle includes
+  its real braking library, fixed execution window, local/dynamic/tracking
+  checks, direct GNSS evidence and P5 preview. Before ranking, cached curves
+  are re-certified against the same latest immutable snapshot. The comparison
+  removes any candidate that fails local collision, clearance,
   dynamics, tracking, support freshness or braking proof. Refined channel
   preferences first favor globally budget-compliant evidence. If none exist,
   comparable over-budget guides are ordered lexicographically by peak GNSS ratio,
@@ -343,11 +346,12 @@
   path hash. Globally incomplete guides are considered only after all
   comparable candidates and are ordered by mean unknown LOS-sample coverage,
   usable satellite count, geometry, predicted support recovery, LiDAR FIM,
-  clearance and progress. RiskGrid is a search hint and cannot authorize or
-  veto the final curve. This contract does not claim that every channel has
-  already undergone final optimized-spline certification before channel
-  selection; cross-channel final-spline comparison requires a separate
-  bounded multi-curve implementation.
+  clearance and progress. The old stable channel is only a tie-break after the
+  complete ordering key is equal. Winner/runner-up, actual endpoints,
+  unevaluated suffixes and the full decomposition remain recorded. If the
+  bounded preparation deadline expires, the state is `PARTIAL_COMPARISON` and
+  only already certified finite progress is eligible. RiskGrid is a search
+  hint and cannot authorize or veto any final curve.
 - A queued braking guard has explicit `REQUESTED`, `QUEUED`, `ACTIVATED` and
   `ABSENT` controller states. Time reaching the switch stamp is not proof of
   execution: only a matching traj_server `ACTIVATED` acknowledgement permits

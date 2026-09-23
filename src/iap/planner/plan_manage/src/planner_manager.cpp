@@ -4299,6 +4299,134 @@ namespace ego_planner
     csv.flush();
     if (!csv.good())
       return false;
+    const bool final_channel_decision =
+        stage == "successor_prepared_certified" ||
+        stage == "successor_channel_comparison_incomparable";
+    if (final_channel_decision)
+    {
+      const std::string channel_path =
+          config.debug_csv_path + ".forward_channel_decisions.csv";
+      std::ifstream channel_existing(channel_path);
+      const bool channel_header = !channel_existing.good() ||
+          channel_existing.peek() == std::ifstream::traits_type::eof();
+      channel_existing.close();
+      std::ofstream channel_csv(channel_path, std::ios::app);
+      if (!channel_csv.good())
+        return false;
+      if (channel_header)
+        channel_csv
+            << "schema_version,stage,decision_event_id,planning_attempt_id,"
+               "channel_id,candidate_id,selected,guide_hash,refined_path_hash,"
+               "final_curve_hash,actual_endpoint_x,actual_endpoint_y,"
+               "actual_endpoint_z,known_occupancy_kappa,"
+               "unknown_support_fraction,unknown_kappa_upper_bound,"
+               "combined_conservative_kappa,worst_hpl,worst_vpl,"
+               "worst_gnss_anchor_hpl,worst_gnss_anchor_vpl,"
+               "worst_gnss_raw_hpl,worst_gnss_raw_vpl,"
+               "worst_receiver_raw_hpl,worst_receiver_raw_vpl,"
+               "worst_spatial_delta_h,worst_spatial_delta_v,"
+               "worst_temporal_growth_h,worst_temporal_growth_v,"
+               "worst_x,worst_y,worst_z,worst_query_time_s,"
+               "worst_used_satellite_count,worst_known_satellite_count,"
+               "minimum_clearance_m,final_curve_status,ranking_key,"
+               "rejection_reason\n";
+      channel_csv << std::setprecision(17);
+      const double nan = std::numeric_limits<double>::quiet_NaN();
+      for (const auto &candidate : decision.candidates)
+      {
+        const auto prepared = p4_prepared_channel_bundles_.find(
+            candidate.channel_id);
+        const P4PreparedSuccessorBundle *bundle = prepared ==
+            p4_prepared_channel_bundles_.end() ? nullptr : &prepared->second;
+        const P4PreparedChannelRecord *record = bundle
+            ? &bundle->channel_record : nullptr;
+        const iap::ForwardRiskPointResult *worst = nullptr;
+        std::size_t worst_index = 0u;
+        if (bundle)
+        {
+          for (std::size_t index = 0u;
+               index < bundle->direct_risk_evidence.points.size(); ++index)
+          {
+            const auto &point = bundle->direct_risk_evidence.points[index];
+            if (!worst ||
+                (std::isfinite(point.safety_ratio) &&
+                 (!std::isfinite(worst->safety_ratio) ||
+                  point.safety_ratio > worst->safety_ratio)))
+            {
+              worst = &point;
+              worst_index = index;
+            }
+          }
+        }
+        const Eigen::Vector3d endpoint = record
+            ? record->actual_endpoint
+            : Eigen::Vector3d::Constant(nan);
+        const Eigen::Vector3d worst_position = bundle &&
+                worst_index < bundle->direct_risk_evidence.positions.size()
+            ? bundle->direct_risk_evidence.positions[worst_index]
+            : Eigen::Vector3d::Constant(nan);
+        const double worst_time = bundle &&
+                worst_index < bundle->direct_risk_evidence.relative_times.size()
+            ? bundle->direct_risk_evidence.relative_times[worst_index] : nan;
+        std::ostringstream ranking_key;
+        if (record)
+          ranking_key << record->global_peak_ratio << '|'
+                      << record->global_rolling_worst_ratio << '|'
+                      << record->global_continuous_exceedance_s << '|'
+                      << record->global_exposure_integral_ratio_s << '|'
+                      << record->fim_max_ratio << '|'
+                      << record->fim_integral << '|'
+                      << record->duration_s << '|'
+                      << record->unevaluated_suffix_m << '|'
+                      << record->channel_id;
+        std::string rejection_reason;
+        if (!record)
+          rejection_reason = candidate.reason.empty()
+              ? "final_curve_missing" : candidate.reason;
+        else if (decision.channel_comparison_state ==
+                 P4ChannelComparisonState::PARTIAL_COMPARISON)
+          rejection_reason = decision.reason;
+        else if (candidate.channel_id != decision.selected_channel_id)
+          rejection_reason = "not_selected_by_final_ranking";
+        channel_csv << decision.schema_version << ',' << stage << ','
+            << decision.decision_event_id << ',' << decision.planning_attempt_id
+            << ',' << candidate.channel_id << ',' << candidate.candidate_id
+            << ',' << (candidate.channel_id == decision.selected_channel_id
+                           ? 1 : 0)
+            << ',' << candidate.path_hash << ','
+            << (record ? record->refined_path_identity : std::string{}) << ','
+            << (record ? record->curve_identity : std::string{}) << ','
+            << endpoint.x() << ',' << endpoint.y() << ',' << endpoint.z() << ','
+            << (record ? record->known_occupancy_kappa : nan) << ','
+            << (record ? record->unknown_support_fraction : nan) << ','
+            << (record ? record->unknown_kappa_upper_bound : nan) << ','
+            << (record ? record->combined_conservative_kappa : nan) << ','
+            << (worst ? worst->prediction.fused.hpl : nan) << ','
+            << (worst ? worst->prediction.fused.vpl : nan) << ','
+            << (worst ? worst->prediction.gnss.anchor_hpl : nan) << ','
+            << (worst ? worst->prediction.gnss.anchor_vpl : nan) << ','
+            << (worst ? worst->prediction.gnss.raw_hpl : nan) << ','
+            << (worst ? worst->prediction.gnss.raw_vpl : nan) << ','
+            << (worst ? worst->prediction.gnss.receiver_raw_hpl : nan) << ','
+            << (worst ? worst->prediction.gnss.receiver_raw_vpl : nan) << ','
+            << (worst ? worst->prediction.gnss.spatial_delta_h : nan) << ','
+            << (worst ? worst->prediction.gnss.spatial_delta_v : nan) << ','
+            << (worst ? worst->prediction.gnss.temporal_growth_h : nan) << ','
+            << (worst ? worst->prediction.gnss.temporal_growth_v : nan) << ','
+            << worst_position.x() << ',' << worst_position.y() << ','
+            << worst_position.z() << ',' << worst_time << ','
+            << (worst ? worst->gnss_used_satellite_count : 0) << ','
+            << (worst ? worst->gnss_known_satellite_count : 0) << ','
+            << (record ? record->minimum_local_clearance_margin_m : nan) << ','
+            << (bundle ? p4ActualCurveCertificationStatusName(
+                             bundle->direct_risk_evidence.certification_status)
+                       : "NOT_EVALUATED")
+            << ',' << ranking_key.str() << ',' << rejection_reason << '\n';
+      }
+      channel_csv.flush();
+      if (!channel_csv.good())
+        return false;
+    }
     if (stage != "forward_decision")
       return true;
     const std::string candidates_path =
@@ -6782,7 +6910,6 @@ namespace ego_planner
       observe.deferred_motion_mode = P4ForwardDeferredMotionMode::HOLD;
       observe.deferred_trajectory.clear();
       observe.speed_cap_mps = 0.0;
-      p4_prepared_channel_bundles_.clear();
       if (observe.geometry_common_corridor.size() >= 2u)
       {
         observe.deferred_motion_mode =
@@ -6798,6 +6925,7 @@ namespace ego_planner
         appendP4ForwardDecision(
             last_p4_forward_decision_,
             "successor_channel_comparison_incomparable", now_s);
+        p4_prepared_channel_bundles_.clear();
         return finish(true, "successor_common_prefix_observation_pending");
       }
       observe.reason = "final_channel_intervals_overlap_hold";
@@ -6806,6 +6934,7 @@ namespace ego_planner
       appendP4ForwardDecision(
           last_p4_forward_decision_,
           "successor_channel_comparison_incomparable", now_s);
+      p4_prepared_channel_bundles_.clear();
       return finish(false, "successor_channel_comparison_incomparable_hold");
     }
     P4PreparedSuccessorBundle selected_bundle = bundle;
@@ -6837,7 +6966,8 @@ namespace ego_planner
     p4_cached_successor_bundle_ = std::move(selected_bundle);
     p4_cached_successor_activation_in_progress_ = false;
     if (!appendP4ForwardDecision(
-            last_p4_forward_decision_, "successor_prepared_certified", now_s))
+            p4_cached_successor_bundle_->decision,
+            "successor_prepared_certified", now_s))
     {
       p4_cached_successor_bundle_.reset();
       return finish(false, "successor_prepared_lineage_failed");

@@ -80,6 +80,12 @@ def _p4_schema_revision(value: object) -> int:
 
 
 FOREST_SCENARIOS = (FOREST_V1_SCENARIO, FOREST_SCENARIO)
+RAW_RISK_EVIDENCE_SUFFIXES = (
+    ".forward_risk_samples.csv",
+    ".gnss_risk_detail.csv",
+    ".runtime_window.csv",
+    ".runtime_window_satellite.csv",
+)
 SEVEN_STAGE_ORDER = (
     "p0_snapshot", "closed_collision", "p4_selection_application",
     "ego_final_bspline", "p5_final_pass_before_publish",
@@ -110,6 +116,31 @@ COMMON_ARGS = {
     "run_validator": "true",
     **FORBIDDEN_LAYER_ARGS,
 }
+
+
+def apply_raw_evidence_retention(
+        run_root: Path, retain_raw: bool) -> dict:
+    """Apply the run-scoped evidence policy after its summary is durable."""
+    summary_path = run_root / "summary.json"
+    if not summary_path.is_file():
+        raise RuntimeError(
+            "raw evidence retention requires a persisted run summary")
+    prefix = run_root / "exports/planner_p4_risk_astar_debug.csv"
+    raw_paths = [Path(f"{prefix}{suffix}")
+                 for suffix in RAW_RISK_EVIDENCE_SUFFIXES]
+    existing = [path for path in raw_paths if path.is_file()]
+    removed = []
+    if not retain_raw:
+        for path in existing:
+            path.unlink()
+            removed.append(str(path.relative_to(run_root)))
+    retained = [str(path.relative_to(run_root)) for path in existing
+                if path.is_file()]
+    return {
+        "policy": "retain_full_detail" if retain_raw else "compact_default",
+        "removed": removed,
+        "retained": retained,
+    }
 
 
 class StageSpec:
@@ -4111,7 +4142,8 @@ def _run_one_impl(
         forest_variant: str | None = None,
         gnss_arm: str = "bds",
         gnss_core_policy: str = "braking_window_core",
-        task_mode: str = "mission_best_effort") -> dict:
+        task_mode: str = "mission_best_effort",
+        retain_raw_risk_detail: bool = False) -> dict:
     spec = STAGES[stage]
     duration_s = stage_duration_s(stage, scenario, forest_variant)
     run_root.mkdir(parents=True, exist_ok=False)
@@ -4317,6 +4349,9 @@ def _run_one_impl(
         "elapsed_s": time.monotonic() - started,
     })
     _json_write(run_root / "summary.json", summary)
+    summary["raw_evidence_retention"] = apply_raw_evidence_retention(
+        run_root, retain_raw_risk_detail)
+    _json_write(run_root / "summary.json", summary)
     return summary
 
 
@@ -4327,7 +4362,8 @@ def _run_one(
         forest_variant: str | None = None,
         gnss_arm: str = "bds",
         gnss_core_policy: str = "braking_window_core",
-        task_mode: str = "mission_best_effort") -> dict:
+        task_mode: str = "mission_best_effort",
+        retain_raw_risk_detail: bool = False) -> dict:
     owned_processes: dict[str, subprocess.Popen] = {}
     owned_streams: dict[str, TextIO] = {}
     started = time.monotonic()
@@ -4335,7 +4371,7 @@ def _run_one(
         return _run_one_impl(
             stage, run_root, install_root, start_rviz, shutdown_variant,
             owned_processes, owned_streams, scenario, forest_variant, gnss_arm,
-            gnss_core_policy, task_mode)
+            gnss_core_policy, task_mode, retain_raw_risk_detail)
     except KeyboardInterrupt:
         _emit(f"INTERRUPT stage={stage} cleanup=starting")
         process_status = {
@@ -4472,6 +4508,8 @@ def _run_main(args: argparse.Namespace) -> int:
     gnss_core_policy = getattr(
         args, "gnss_core_policy", "braking_window_core")
     task_mode = getattr(args, "task_mode", "mission_best_effort")
+    retain_raw_risk_detail = bool(getattr(
+        args, "retain_raw_risk_detail", False))
     results_root = args.results_root.resolve()
     session = _session_root(results_root)
     session.mkdir(parents=True, exist_ok=False)
@@ -4487,6 +4525,7 @@ def _run_main(args: argparse.Namespace) -> int:
         "gnss_arm": gnss_arm,
         "gnss_core_policy": gnss_core_policy,
         "task_mode": task_mode,
+        "retain_raw_risk_detail": retain_raw_risk_detail,
         "forest_scene": (
             forest_scene_contract(scenario, gnss_arm)
             if _is_forest_scenario(scenario) else None),
@@ -4548,7 +4587,8 @@ def _run_main(args: argparse.Namespace) -> int:
                         forest_variant=forest_variant,
                         gnss_arm=gnss_arm,
                         gnss_core_policy=gnss_core_policy,
-                        task_mode=task_mode)
+                        task_mode=task_mode,
+                        retain_raw_risk_detail=retain_raw_risk_detail)
                     session_summary["runs"].append({
                         "stage": stage,
                         "repetition": repetition,
@@ -4624,6 +4664,10 @@ def main() -> int:
         choices=("mission_best_effort", "strict_global"),
         default="mission_best_effort",
         help="global-navigation task contract; best-effort is the default")
+    parser.add_argument(
+        "--retain-raw-risk-detail", action="store_true",
+        help=("retain per-sample risk and runtime-window CSVs; the default "
+              "keeps compact channel evidence only"))
     parser.add_argument("--results-root", type=Path,
                         default=DEFAULT_RESULTS_ROOT)
     parser.add_argument("--install-root", type=Path,

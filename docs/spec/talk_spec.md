@@ -288,15 +288,22 @@ For each candidate trajectory τ:
   to schedule expensive refinement by mission risk, then directly evaluates
   the refined candidate set again. Coarse results are hints only and cannot
   authorize motion.
-- When every locally safe refined channel exceeds the global budget,
-  best-effort chooses the least-bad channel preference rather than HOLD, then
-  builds and certifies its actual stopping B-spline. Ordering is
+- Every locally feasible channel is converted into its actual terminal-stop
+  B-spline and a side-effect-free prepared bundle (dynamics, tracking,
+  braking, fixed-window, local-motion, direct GNSS and P5 preview evidence).
+  Prepared curves are rebound to one latest immutable snapshot before the
+  winner is installed. Hard failures are eliminated first; incomplete work is
+  reported as `PARTIAL_COMPARISON` and can authorize only the already
+  certified finite prefix. When every complete locally safe curve exceeds the
+  global budget, best-effort chooses the least-bad actual curve rather than
+  HOLD. Ordering is
   peak ratio, worst time-weighted 0.5 s section, continuous exceedance,
   exceedance integral, recovery time, local clearance, task progress and a
-  stable hash. Execution remains a rolling reaction-and-stop envelope and is
-  re-evaluated on every new immutable snapshot. This version does not compare
-  all channels after final spline optimization; the selected actual curve may
-  still be rejected or trigger bounded alternate-channel feedback.
+  stable hash, with the old stable channel used only as a true-key tie-break.
+  Winner, runner-up, actual endpoints, unevaluated suffixes and the full
+  geometry/time/risk decomposition are retained. Execution remains a rolling
+  reaction-and-stop envelope and is re-evaluated on every new immutable
+  snapshot.
 - Globally incomplete candidates are compared first by the mean unknown
   LOS-sample fraction over eligible satellites, then usable satellite count,
   geometry condition, predicted support recovery, LiDAR observability, local

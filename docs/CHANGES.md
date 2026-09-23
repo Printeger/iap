@@ -3,6 +3,47 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(rolling-successor-horizon-and-station-cache): IAP-RQ-312 /
+  IAP-RQ-320 / IAP-RQ-410 — every non-braking certified execution now enters
+  the successor lane, and long parents use a configurable 2.5-second fixed
+  handoff horizon rather than waiting until the terminal-stop margin. Runtime
+  geometry validation samples each curve once, caches full-curve corridor
+  voxels with first/last path stations, and advances a minimum station so map
+  deltas behind the vehicle are ignored while future hits remain fail-closed.
+  This removes per-watchdog suffix hash churn without relaxing collision
+  policy, the 0.05 m planning buffer, or the 10 ms commit budget.
+- feat(continuous-flight-and-final-channel-selection): IAP-RQ-312 /
+  IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 / IAP-RQ-422 — implement the S0–S6
+  continuous-flight evidence and execution paths; CPU/process and live
+  acceptance remain separate gates and are not claimed by this entry.
+  Trajectories now carry a
+  process execution instance plus immutable ID/start/hash/parent identity
+  through queue, activation, PositionCommand, controller trace, P5 and the
+  execution certificate; future activation is atomic and conflicting reuse is
+  rejected. A versioned control profile constrains exact B-spline derivative
+  control points and node-sided jerk, while certified recovery braking starts
+  from the measured nonzero switch state. Stable channel slots, deterministic
+  mirror-neutral refinement and fair resumable scheduling feed bounded
+  prepare-only final-curve bundles; all feasible actual curves are compared on
+  one latest snapshot and incomplete work is explicitly
+  `PARTIAL_COMPARISON`. Formal, limited-prefix and mission-degraded curves all
+  start parent-bound successor preparation. Geometry commit reuses
+  curve/policy/generation baselines, merges deltas and performs a full latest
+  occupancy check on history gaps, with phase timings. RViz uses stable
+  per-channel markers, and the new 180 s `continuous-flight` runner stage
+  judges PositionCommand/controller/odom identity, tracking, saturation,
+  pauses, successor switches and terminal hover rather than marker or
+  `RISK_SELECTED` presence. The one-command evidence analyzer emits
+  `continuous_flight_timeline.csv`, `channel_comparison.csv` and a JSON
+  summary without inventing controller latency when controller evidence is
+  absent. First-fork correction additionally resets all refined-candidate
+  evidence, separates known occupancy from unknown-support kappa, requires
+  complete same-snapshot final bundles, and falls back to a certified common
+  prefix or hold when channel intervals are incomparable. A compact final
+  row is retained per channel; unbounded per-sample risk CSVs are removed
+  only after the run summary is durable unless
+  `--retain-raw-risk-detail` is explicitly requested. Live acceptance is
+  still pending until the documented primary/mirror and forest gates pass.
 - feat(gnss-support-and-mission-best-effort): IAP-RQ-312 / IAP-RQ-320 /
   IAP-RQ-400 / IAP-RQ-410 — remove the future-position measured-support
   radius shortcut and record complete per-satellite LOS support coverage.

@@ -1,5 +1,39 @@
 # Important parameters
 
+## IAP continuous-flight safety contract
+
+- `p4.control_profile.*` identifies the versioned controller/simulator
+  capability profile shared by nominal, successor and braking trajectories.
+  The launch configuration supplies per-axis velocity, acceleration and jerk
+  limits, measured command latency, position/velocity tracking bounds and the
+  controller, simulator and code identities. A missing or invalid profile is
+  fail-closed; the 0.15 m tracking envelope is not relaxed.
+- The trajectory submission lead time is derived from measured certification,
+  transport, queue and scheduling maxima plus 50 ms, with a 200 ms minimum.
+  It is not a fixed observation-specific delay. Missing a queue deadline
+  cancels that curve identity and requires a new ID/start/hash.
+- `p4.execution.successor_max_parent_execution_s` (default 2.5 s) bounds the
+  fixed rolling handoff anchor for every non-braking certified trajectory.
+  Preparation starts immediately after parent activation; short parents keep
+  their endpoint-minus-switch-margin anchor, while long parents hand off at
+  this bounded horizon instead of waiting near their terminal stop.
+- P4 keeps at most four stable channel slots. Route work uses a 500 ms bounded
+  round-robin budget and each direct authorization batch keeps its 150 ms
+  limit. `PARTIAL_COMPARISON` means computation is unfinished, never that an
+  unvisited channel is closed.
+- `scripts/dev_planner/run_icra_interface_integration.py --stage
+  continuous-flight` has a 180 s default budget and accepts `--rviz`. Passing
+  is determined from full trajectory identities, PositionCommand,
+  controller trace and odometry evidence: at least two successor switches,
+  no in-flight pause longer than 0.5 s below 0.05 m/s, tracking error at most
+  0.15 m, no saturation, and arrival/hover at `(18, 0, 1.5)`.
+- The runner keeps compact per-channel final evidence in
+  `planner_p4_risk_astar_debug.csv.forward_channel_decisions.csv`. By default
+  it removes only the current run's four raw per-sample/window CSVs after
+  `summary.json` is written. Use `--retain-raw-risk-detail` for an unresolved
+  failure or an explicit milestone run; this changes retention only, never
+  planning or authorization.
+
 !!! info
     See the [sensor setup buide](https://github.com/koide3/iap/wiki/Sensor-setup-guide) for configurations of popular sensors (including Livox MID360 and Azure Kinect).
 
