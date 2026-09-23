@@ -383,6 +383,7 @@ if(DEFINED ENV{ROS_VERSION})
       "msg/TrunkLandmark.msg"
       "msg/MDPState.msg"
       "msg/RegisteredLidarFrame.msg"
+      "msg/LidarBeamEvidence.msg"
       "msg/ActiveLidarWindowDelta.msg"
       "srv/GetActiveLidarWindow.srv"
       LIBRARY_NAME ${PROJECT_NAME}
@@ -674,6 +675,24 @@ if(DEFINED ENV{ROS_VERSION})
       target_link_libraries(test_pl_grid iap)
       ament_add_gtest(test_local_occupancy test/test_local_occupancy.cpp)
       target_link_libraries(test_local_occupancy iap)
+      ament_add_gtest(test_registered_hit_wire_filter
+        test/test_registered_hit_wire_filter.cpp
+      )
+      target_include_directories(test_registered_hit_wire_filter PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+      )
+      target_link_libraries(test_registered_hit_wire_filter
+        Eigen3::Eigen
+      )
+      ament_add_gtest(test_beam_evidence_binding
+        test/test_beam_evidence_binding.cpp
+      )
+      target_include_directories(test_beam_evidence_binding PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+      )
+      target_link_libraries(test_beam_evidence_binding
+        "${iap_msgs_cpp_ts}"
+      )
       ament_add_gtest(test_future_pl_field_predictor test/test_future_pl_field_predictor.cpp)
       target_link_libraries(test_future_pl_field_predictor iap iap_prediction_integrity)
       ament_add_gtest(test_predictor_module test/test_predictor_module.cpp)

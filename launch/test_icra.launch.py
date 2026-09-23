@@ -41,6 +41,11 @@ _BASE.SCENARIO_PRESETS["icra072_p4_selection_trigger_v1"] = {
     **_BASE.SCENARIO_PRESETS["icra072_p4_selection_trigger_v1"],
     "lidar_sensing_rate_hz": "10.0",
 }
+_BASE.SCENARIO_PRESETS["icra072_p4_selection_trigger_mirror_v1"] = {
+    **_BASE.SCENARIO_PRESETS["icra072_p4_selection_trigger_v1"],
+    "p1_map_fixture": "icra072_p4_selection_trigger_mirror_v1",
+    "p1_fixture_mirror_y": "true",
+}
 _BASE.EXPERIMENT_PRESETS["icra_p0_p4_v2_p5_dev"] = {
     **_BASE.EXPERIMENT_PRESETS["icra_p0_p4_v2_p5_dev"],
     **ICRA_DEV_FIXED_VALUES,
@@ -51,9 +56,9 @@ _BASE.EXPERIMENT_PRESETS["icra_p0_p4_v2_p5_dev"] = {
     "p0.fit_grid_to_map_cloud": "false",
     "p0.map_topic": "",
     # Forest-v2 BDS evaluates a larger but mathematically identical satellite
-    # geometry batch. Six worker-local predictors keep the dense search grid
+    # geometry batch. Eight worker-local predictors keep the dense search grid
     # below its 500 ms publication budget without changing PL or support.
-    "p0.predictor.worker_count": "6",
+    "p0.predictor.worker_count": "8",
     "planner_executor_thread_count": "6",
     "planner_occupancy_cloud_topic": "/sim/drone_0/lidar",
     "safety_viz.enable_p4_viz": "true",

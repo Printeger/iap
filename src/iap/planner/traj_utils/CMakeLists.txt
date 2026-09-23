@@ -60,6 +60,16 @@ add_library( traj_utils_lib SHARED
     src/polynomial_traj.cpp 
     )
 
+# Eigen implements its aligned allocator as inline template code.  Several IAP
+# shared objects use different Eigen alignment contracts, so exporting those
+# weak inline symbols lets the dynamic loader interpose (for example) the
+# gnss_comm allocator inside PolynomialTraj while traj_utils supplies the
+# matching deallocator.  Keep inline implementations local and bind internal
+# function references to this DSO so an allocation is always released by the
+# same Eigen contract.
+target_compile_options(traj_utils_lib PRIVATE -fvisibility-inlines-hidden)
+target_link_options(traj_utils_lib PRIVATE "LINKER:-Bsymbolic-functions")
+
 ament_target_dependencies(traj_utils_lib std_msgs geometry_msgs visualization_msgs rclcpp Eigen3 PCL)
 
 install(TARGETS traj_utils_lib

@@ -756,15 +756,33 @@ std::vector<PredictorQueryResult>
 RollingSpatialAdvisoryWindow::queryPositionHorizons(
     const std::vector<PredictorQueryInput>& inputs,
     PredictorBatchDiagnostics* diagnostics) {
+  std::vector<PredictorQueryResult> outputs;
+  outputs.reserve(inputs.size());
+  queryPositionHorizons(inputs, &outputs, diagnostics);
+  return outputs;
+}
+
+bool RollingSpatialAdvisoryWindow::queryPositionHorizons(
+    const std::vector<PredictorQueryInput>& inputs,
+    std::vector<PredictorQueryResult>* outputs,
+    PredictorBatchDiagnostics* diagnostics) {
   PredictorBatchDiagnostics local;
   local.collect_component_timing =
       diagnostics && diagnostics->collect_component_timing;
   local.query_count = inputs.size();
-  std::vector<PredictorQueryResult> outputs;
-  outputs.reserve(inputs.size());
-  if (!impl_->candidate || inputs.empty()) {
+  if (outputs == nullptr) {
     if (diagnostics) *diagnostics = local;
-    return outputs;
+    return false;
+  }
+  outputs->clear();
+  if (outputs->capacity() < inputs.size()) outputs->reserve(inputs.size());
+  if (!impl_->candidate) {
+    if (diagnostics) *diagnostics = local;
+    return false;
+  }
+  if (inputs.empty()) {
+    if (diagnostics) *diagnostics = local;
+    return true;
   }
 
   const Eigen::Vector3d& expected_position = inputs.front().query_position_map;
@@ -773,7 +791,7 @@ RollingSpatialAdvisoryWindow::queryPositionHorizons(
       impl_->candidate->source_identity_valid.store(
           false, std::memory_order_relaxed);
       if (diagnostics) *diagnostics = local;
-      return outputs;
+      return false;
     }
   }
 
@@ -781,12 +799,12 @@ RollingSpatialAdvisoryWindow::queryPositionHorizons(
   const bool key_valid = impl_->worldKey(inputs.front().query_position_map, &key);
   if (!key_valid) {
     for (const auto& input : inputs) {
-      outputs.push_back(impl_->candidate->module.queryWithSpatialAdvisory(
+      outputs->push_back(impl_->candidate->module.queryWithSpatialAdvisory(
           input, nullptr, nullptr, &local, nullptr, nullptr,
           impl_->candidate->identity.task_mode));
     }
     if (diagnostics) *diagnostics = local;
-    return outputs;
+    return true;
   }
   const std::size_t address = impl_->address(key);
   Impl::Slot& slot = impl_->candidate->slots[address];
@@ -843,7 +861,7 @@ RollingSpatialAdvisoryWindow::queryPositionHorizons(
     const std::size_t recomputes_before =
         local.spatial_advisory_recompute_count;
     const std::size_t reuses_before = local.spatial_advisory_reuse_count;
-    outputs.push_back(impl_->candidate->module.queryWithSpatialAdvisory(
+    outputs->push_back(impl_->candidate->module.queryWithSpatialAdvisory(
         evaluated_input, cached, &evaluated, &local, nullptr, nullptr,
         impl_->candidate->identity.task_mode));
     if (populated_lidar_this_call &&
@@ -868,7 +886,7 @@ RollingSpatialAdvisoryWindow::queryPositionHorizons(
     }
   }
   if (diagnostics) *diagnostics = local;
-  return outputs;
+  return true;
 }
 
 void RollingSpatialAdvisoryWindow::commitRefresh() {

@@ -32,8 +32,9 @@ DEFAULT_RESULTS_ROOT = (
 ).resolve()
 DEFAULT_INSTALL_ROOT = (REPOSITORY.parents[1] / "install").resolve()
 STAGE_ORDER = ("estimator", "p0", "p4", "p5-final", "full", "shutdown")
-STAGE_CHOICES = (*STAGE_ORDER, "limited-prefix")
+STAGE_CHOICES = (*STAGE_ORDER, "limited-prefix", "continuous-flight")
 DEFAULT_SCENARIO = "icra072_p4_selection_trigger_v1"
+MIRROR_SCENARIO = "icra072_p4_selection_trigger_mirror_v1"
 FOREST_V1_SCENARIO = "icra_dense_forest_four_fork_v1"
 FOREST_SCENARIO = "icra_dense_forest_four_fork_v2"
 P4_FORWARD_DECISION_SCHEMAS = {
@@ -80,6 +81,7 @@ def _p4_schema_revision(value: object) -> int:
 
 
 FOREST_SCENARIOS = (FOREST_V1_SCENARIO, FOREST_SCENARIO)
+SINGLE_FORK_SCENARIOS = (DEFAULT_SCENARIO, MIRROR_SCENARIO)
 RAW_RISK_EVIDENCE_SUFFIXES = (
     ".forward_risk_samples.csv",
     ".gnss_risk_detail.csv",
@@ -182,6 +184,14 @@ STAGES = {
             "safety_viz.enable_p4_viz": "true",
             "p4.debug_generation_probe_enable": "true",
         },
+    ),
+    "continuous-flight": StageSpec(
+        180.0,
+        start_planner="true",
+        planner_enable_p4="true",
+        planner_enable_p5_final="true",
+        planner_enable_p5_runtime="true",
+        **{"safety_viz.enable_p4_viz": "true"},
     ),
     "p5-final": StageSpec(
         60.0,
@@ -554,7 +564,7 @@ def stage_launch_args(
         task_mode: str = "mission_best_effort") -> dict[str, str]:
     if stage not in STAGES:
         raise ValueError(f"unknown stage: {stage}")
-    if scenario not in (DEFAULT_SCENARIO, *FOREST_SCENARIOS):
+    if scenario not in (*SINGLE_FORK_SCENARIOS, *FOREST_SCENARIOS):
         raise ValueError(f"unsupported scenario: {scenario}")
     if forest_variant not in (None, "risk", "baseline"):
         raise ValueError(f"unsupported forest variant: {forest_variant}")
@@ -955,6 +965,176 @@ def analyze_forest_path(records: list[dict], variant: str) -> dict:
         selected_high_risk_forks=high_count,
         sample_votes={str(key): value for key, value in votes.items()},
     )
+
+
+def analyze_continuous_flight(records: list[dict]) -> dict:
+    """Accept continuous flight from command/controller/odometry evidence."""
+    failures: list[str] = []
+    commands = [row for row in records if row.get("kind") == "poscmd"]
+    traces = [row for row in records if row.get("kind") == "controller_trace"]
+    odometry = [row for row in records if row.get("kind") == "iap_odom"]
+    statuses = [row for row in records if row.get("kind") == "trajectory_status"]
+    splines = [row for row in records if row.get("kind") in (
+        "normal_bspline", "pending_guard_bspline")]
+
+    def payload(row: dict) -> dict:
+        value = row.get("payload", row)
+        return value if isinstance(value, dict) else {}
+
+    def identity(value: dict) -> tuple[int, int, int, str]:
+        return (int(value.get("execution_instance_id", 0) or 0),
+                int(value.get("trajectory_id", 0) or 0),
+                int(value.get("start_time_ns", 0) or 0),
+                str(value.get("curve_hash", "")))
+
+    published = {identity(payload(row)) for row in splines}
+    activated = [payload(row) for row in statuses
+                 if payload(row).get("state") == "ACTIVATED"]
+    rejected = [payload(row) for row in statuses
+                if payload(row).get("state") == "REJECTED"]
+    activation_identities = [identity(row) for row in activated]
+    if rejected:
+        failures.append("trajectory_command_rejected")
+    if any(not all((item[0] > 0, item[1] > 0, item[2] > 0, item[3]))
+           for item in activation_identities):
+        failures.append("activation_identity_incomplete")
+    if any(item not in published for item in activation_identities):
+        failures.append("activation_without_matching_curve")
+    distinct_activations = []
+    for item in activation_identities:
+        if not distinct_activations or distinct_activations[-1] != item:
+            distinct_activations.append(item)
+    successor_switches = max(0, len(distinct_activations) - 1)
+    if successor_switches < 2:
+        failures.append("fewer_than_two_successor_switches")
+
+    first_bound_command_receive_s = min((
+        float(row.get("receive_steady_s", math.inf))
+        for row in commands if all(identity(payload(row)))
+    ), default=math.inf)
+    startup_hover_commands = [
+        row for row in commands
+        if float(row.get("receive_steady_s", math.inf)) <
+        first_bound_command_receive_s
+        and not any(identity(payload(row)))
+    ]
+    bound_commands = [row for row in commands
+                      if row not in startup_hover_commands]
+    command_identities = [identity(payload(row)) for row in bound_commands]
+    if not commands:
+        failures.append("position_command_missing")
+    elif any(not all((item[0] > 0, item[1] > 0, item[2] > 0, item[3]))
+             for item in command_identities):
+        failures.append("position_command_identity_incomplete")
+
+    maximum_tracking_error_m = 0.0
+    saturated_count = 0
+    trace_identities = set()
+    startup_hover_trace_count = 0
+    for row in traces:
+        item = payload(row)
+        item_identity = identity(item)
+        # Controller output may lag the PositionCommand subscription by one
+        # control cycle during the first activation.  An explicitly all-zero
+        # identity is the traj_server's odom-hover command, regardless of
+        # whether its output trace is received just before or just after the
+        # first bound command.  It must not be compared with an active curve.
+        startup_hover = not any(item_identity)
+        if startup_hover:
+            startup_hover_trace_count += 1
+        else:
+            trace_identities.add(item_identity)
+        commanded = item.get("position_xyz")
+        feedback = item.get("feedback_position_xyz")
+        if (isinstance(commanded, list) and isinstance(feedback, list)
+                and len(commanded) == 3 and len(feedback) == 3):
+            try:
+                error = math.sqrt(sum(
+                    (float(commanded[index]) - float(feedback[index])) ** 2
+                    for index in range(3)))
+            except (TypeError, ValueError):
+                error = math.inf
+            maximum_tracking_error_m = max(maximum_tracking_error_m, error)
+        else:
+            maximum_tracking_error_m = math.inf
+        saturated_count += bool(item.get("saturated"))
+    if not traces:
+        failures.append("controller_trace_missing")
+    if trace_identities - set(command_identities):
+        failures.append("controller_trace_identity_unmatched")
+    if not math.isfinite(maximum_tracking_error_m) or \
+            maximum_tracking_error_m > 0.15:
+        failures.append("tracking_envelope_exceeded")
+    if saturated_count:
+        failures.append("controller_saturation_observed")
+
+    samples = []
+    for row in odometry:
+        item = payload(row)
+        try:
+            stamp = float(item["stamp_s"])
+            position = [float(value) for value in item["position_m"]]
+            velocity = [float(value) for value in item["velocity_mps"]]
+        except (KeyError, TypeError, ValueError):
+            continue
+        if len(position) == 3 and len(velocity) == 3:
+            samples.append((stamp, position, math.sqrt(sum(
+                value * value for value in velocity))))
+    samples.sort(key=lambda item: item[0])
+    longest_nonterminal_pause_s = 0.0
+    pause_start = None
+    for stamp, position, speed in samples:
+        in_flight = position[0] > -17.5 and position[0] < 17.5
+        if in_flight and speed < 0.05:
+            pause_start = stamp if pause_start is None else pause_start
+            longest_nonterminal_pause_s = max(
+                longest_nonterminal_pause_s, stamp - pause_start)
+        else:
+            pause_start = None
+    if longest_nonterminal_pause_s > 0.5:
+        failures.append("nonterminal_flight_pause_exceeded")
+    if not samples:
+        failures.append("odometry_missing")
+    else:
+        _, final_position, final_speed = samples[-1]
+        if math.dist(final_position, [18.0, 0.0, 1.5]) > 0.5:
+            failures.append("terminal_goal_not_reached")
+        if final_speed >= 0.05:
+            failures.append("terminal_hover_not_established")
+    return _result(
+        failures,
+        position_command_count=len(commands),
+        controller_trace_count=len(traces),
+        odometry_count=len(samples),
+        activation_count=len(activated),
+        successor_switch_count=successor_switches,
+        maximum_tracking_error_m=maximum_tracking_error_m,
+        saturated_count=saturated_count,
+        longest_nonterminal_pause_s=longest_nonterminal_pause_s,
+        rejected_command_count=len(rejected),
+        startup_hover_command_count=len(startup_hover_commands),
+        startup_hover_trace_count=startup_hover_trace_count,
+    )
+
+
+def run_process_failures(
+        stage: str, *, early_exit: bool, launch_exit_code: int | None,
+        launch_group_cleared: bool, capture_group_cleared: bool,
+        graph_failures: list[str]) -> list[str]:
+    """Return process failures that are part of the selected stage contract."""
+    failures: list[str] = []
+    # continuous-flight is accepted only from captured closed-loop evidence.
+    # A timed launch is stopped by the runner, so its signal-derived exit code
+    # and early-exit heuristic are diagnostics rather than flight evidence.
+    if stage != "continuous-flight":
+        if early_exit:
+            failures.append("launch_exited_early")
+        if launch_exit_code != 0:
+            failures.append("launch_exit_nonzero")
+    if not launch_group_cleared or not capture_group_cleared:
+        failures.append("owned_process_group_remaining")
+    failures.extend(graph_failures)
+    return failures
 
 
 def analyze_estimator(metrics: dict) -> dict:
@@ -3128,7 +3308,7 @@ def analyze_run(
             gnss_arm=gnss_arm,
             p0_risk_grid_p95_limit_ms=p0_p95_limit_ms,
             generation_probe_rows=len(fixed_layout_generation_probes))
-    if stage in ("p4", "p5-final", "full"):
+    if stage in ("p4", "p5-final", "full", "continuous-flight"):
         if _is_forest_scenario(scenario) and forest_variant == "baseline":
             p0 = analyze_p0(health, stage_start)
             stable, bspline_span = _stable_bspline(bsplines)
@@ -3146,8 +3326,9 @@ def analyze_run(
                 bspline_count=len(bsplines), bspline_span_s=bspline_span,
                 poscmd_count=len(poscmd_times), poscmd_rate_hz=poscmd_rate,
             )
+        record_stage = "full" if stage == "continuous-flight" else stage
         base = analyze_stage_records(
-            stage, health, decisions, lineage, bsplines, p5_status,
+            record_stage, health, decisions, lineage, bsplines, p5_status,
             poscmd_times, stage_start)
         sample_analysis = analyze_forward_risk_samples(
             decisions, forward_risk_samples, forward_candidates)
@@ -3157,6 +3338,39 @@ def analyze_run(
             base["result"] = "FAIL"
         base["forward_risk_samples"] = sample_analysis
         base["gnss_risk_detail_rows"] = len(gnss_risk_detail)
+        if stage == "continuous-flight":
+            continuous = analyze_continuous_flight(records)
+            # This stage is deliberately accepted from closed-loop evidence,
+            # not from visualization, RISK_SELECTED events, or launch exit.
+            # Keep the traditional full-stage analysis as diagnostics only.
+            policy_failures = []
+            forbidden_reasons = (
+                "late_catch", "identity_conflict",
+                "generation_only", "window_layout_changed",
+                "geometry_commit_commit_baseline_budget_exceeded",
+            )
+            for row in [*decisions, *lineage]:
+                text = " ".join(str(value) for value in row.values()).lower()
+                for forbidden in forbidden_reasons:
+                    if forbidden in text:
+                        policy_failures.append(forbidden)
+            failures = [*continuous["failures"], *policy_failures]
+            result = _result(
+                failures,
+                **{key: value for key, value in base.items()
+                   if key not in ("result", "failures")},
+                full_stage_diagnostics=base,
+                healthy_policy_violation_count=len(policy_failures),
+                continuous_flight=continuous,
+                scenario=scenario,
+            )
+            if _is_forest_scenario(scenario):
+                path = analyze_forest_path(records, "risk")
+                result["forest_path"] = path
+                result["failures"] = list(dict.fromkeys([
+                    *result["failures"], *path["failures"]]))
+                result["result"] = "FAIL" if result["failures"] else "PASS"
+            return result
         if not _is_forest_scenario(scenario):
             return base
         risk = analyze_forest_risk(records, health, decisions, lineage)
@@ -3664,6 +3878,8 @@ def _capture_main(args: argparse.Namespace) -> int:
                     int(message.parent_start_time.sec) * 1_000_000_000
                     + int(message.parent_start_time.nanosec),
                 "parent_curve_hash": message.parent_curve_hash,
+                "parent_switch_elapsed_s":
+                    float(message.parent_switch_elapsed_s),
             })
 
         def pending_guard_bspline(self, message: Bspline) -> None:
@@ -3681,6 +3897,15 @@ def _capture_main(args: argparse.Namespace) -> int:
                 "knots": [float(knot) for knot in message.knots],
                 "cancellation": not message.pos_pts,
                 "curve_hash": message.curve_hash,
+                "parent_execution_instance_id": int(
+                    message.parent_execution_instance_id),
+                "parent_trajectory_id": int(message.parent_traj_id),
+                "parent_start_time_ns":
+                    int(message.parent_start_time.sec) * 1_000_000_000
+                    + int(message.parent_start_time.nanosec),
+                "parent_curve_hash": message.parent_curve_hash,
+                "parent_switch_elapsed_s":
+                    float(message.parent_switch_elapsed_s),
             })
 
         def trajectory_status(self, message: TrajectoryCommandStatus) -> None:
@@ -3724,16 +3949,22 @@ def _capture_main(args: argparse.Namespace) -> int:
                 "start_time_ns":
                     int(message.trajectory_start_time.sec) * 1_000_000_000
                     + int(message.trajectory_start_time.nanosec),
+                "trajectory_elapsed_s":
+                    float(message.trajectory_elapsed_s),
                 "curve_hash": message.curve_hash,
             })
 
         def controller_trace(self, message: ControllerCommandTrace) -> None:
             self.record("controller_trace", {
+                "stamp_s": float(message.header.stamp.sec)
+                    + 1.0e-9 * float(message.header.stamp.nanosec),
                 "execution_instance_id": int(message.execution_instance_id),
                 "trajectory_id": int(message.trajectory_id),
                 "start_time_ns":
                     int(message.trajectory_start_time.sec) * 1_000_000_000
                     + int(message.trajectory_start_time.nanosec),
+                "trajectory_elapsed_s":
+                    float(message.trajectory_elapsed_s),
                 "curve_hash": message.curve_hash,
                 "receive_steady_ns": int(message.receive_steady_time_ns),
                 "output_steady_ns": int(message.output_steady_time_ns),
@@ -3762,8 +3993,8 @@ def _capture_main(args: argparse.Namespace) -> int:
                     float(message.feedback_acceleration.y),
                     float(message.feedback_acceleration.z)],
                 "odom_stamp_ns":
-                    int(message.odom_stamp.sec) * 1_000_000_000
-                    + int(message.odom_stamp.nanosec),
+                    int(message.odometry_stamp.sec) * 1_000_000_000
+                    + int(message.odometry_stamp.nanosec),
                 "control_output_xyz": [
                     float(message.control_output.x),
                     float(message.control_output.y),
@@ -4281,15 +4512,13 @@ def _run_one_impl(
     else:
         summary = analyze_run(
             stage, run_root, scenario, forest_variant, gnss_arm)
-        extra = []
-        if early_exit:
-            extra.append("launch_exited_early")
-        if launch_code != 0:
-            extra.append("launch_exit_nonzero")
-        if not launch_cleared or not capture_cleared:
-            extra.append("owned_process_group_remaining")
-        if graph_audit and not graph_audit["pass"]:
-            extra.extend(graph_audit["failures"])
+        extra = run_process_failures(
+            stage, early_exit=early_exit, launch_exit_code=launch_code,
+            launch_group_cleared=launch_cleared,
+            capture_group_cleared=capture_cleared,
+            graph_failures=(graph_audit["failures"]
+                            if graph_audit and not graph_audit["pass"]
+                            else []))
         summary = _result(
             [*summary["failures"], *extra],
             **{key: value for key, value in summary.items()
@@ -4558,14 +4787,16 @@ def _run_main(args: argparse.Namespace) -> int:
                 else:
                     forest_variant = (
                         "risk" if _is_forest_scenario(scenario)
-                        and stage in ("p4", "p5-final", "full") else None)
+                        and stage in (
+                            "p4", "p5-final", "full", "continuous-flight")
+                        else None)
                     run_variants = ((None, forest_variant),)
                 for shutdown_variant, forest_variant in run_variants:
                     variant = forest_variant or shutdown_variant
                     suffix = f"-{variant}" if variant else ""
                     run_root = session / f"{stage}-r{repetition:02d}{suffix}"
                     rviz_enabled = (
-                        args.rviz and stage == "full"
+                        args.rviz and stage in ("full", "continuous-flight")
                         and forest_variant != "baseline")
                     duration_s = stage_duration_s(
                         stage, scenario, forest_variant)
@@ -4674,7 +4905,7 @@ def main() -> int:
                         default=DEFAULT_INSTALL_ROOT)
     parser.add_argument("--rviz", action="store_true")
     parser.add_argument(
-        "--scenario", choices=(DEFAULT_SCENARIO, *FOREST_SCENARIOS),
+        "--scenario", choices=(*SINGLE_FORK_SCENARIOS, *FOREST_SCENARIOS),
         default=DEFAULT_SCENARIO)
     parser.add_argument(
         "--forest-ab", action="store_true",
@@ -4684,7 +4915,8 @@ def main() -> int:
     parser.add_argument("--capture-ready", type=Path)
     parser.add_argument("--capture-duration", type=float, default=120.0)
     parser.add_argument(
-        "--capture-scenario", choices=(DEFAULT_SCENARIO, *FOREST_SCENARIOS),
+        "--capture-scenario",
+        choices=(*SINGLE_FORK_SCENARIOS, *FOREST_SCENARIOS),
         default=DEFAULT_SCENARIO)
     args = parser.parse_args()
     if args.capture_output or args.capture_ready:
@@ -4693,8 +4925,10 @@ def main() -> int:
         return _capture_main(args)
     if args.repetitions < 1:
         raise SystemExit("repetitions must be positive")
-    if args.rviz and (args.stage != "full" or args.through):
-        raise SystemExit("--rviz is valid only with --stage full")
+    if args.rviz and (
+            args.stage not in ("full", "continuous-flight") or args.through):
+        raise SystemExit(
+            "--rviz is valid only with --stage full or continuous-flight")
     if args.forest_ab and (
             not _is_forest_scenario(args.scenario)
             or args.stage != "full" or args.through):

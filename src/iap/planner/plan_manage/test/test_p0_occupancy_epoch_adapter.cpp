@@ -30,6 +30,8 @@ struct FakeFrozenOccupancyEpoch {
       diagnostic_query;
   std::shared_ptr<const std::vector<Eigen::Vector3d>>
       raw_occupied_voxel_centers;
+  std::shared_ptr<const std::vector<iap::VoxelKey>>
+      raw_occupied_voxel_keys;
   std::shared_ptr<const std::vector<Eigen::Vector3d>>
       environment_occupied_voxel_centers;
   std::shared_ptr<const iap::TrustedLocalMapSupport> trusted_local_map_support;
@@ -204,6 +206,38 @@ TEST(P0OccupancyEpochAdapterTest,
   EXPECT_TRUE(delta->addedKeys().empty());
   EXPECT_TRUE(delta->removedKeys().empty());
   EXPECT_FALSE(delta->changedBounds().has_value());
+}
+
+TEST(P0OccupancyEpochAdapterTest,
+     AcceptsOnlySortedUniqueProducerNativeVoxelIdentity) {
+  const Eigen::Vector3d origin(0.35, -0.2, 0.6);
+  const auto center = [&origin](const int x, const int y,
+                                const int z) -> Eigen::Vector3d {
+    return (origin + Eigen::Vector3d(x + 0.5, y + 0.5, z + 0.5)).eval();
+  };
+  const auto source_owner = std::make_shared<const int>(1);
+  auto valid = makeEpoch({center(-1, 0, 0), center(2, 1, 0)});
+  valid.raw_occupied_voxel_keys =
+      std::make_shared<const std::vector<iap::VoxelKey>>(
+          std::vector<iap::VoxelKey>{{-1, 0, 0}, {2, 1, 0}});
+  const auto adapted = adaptEpoch(valid, source_owner);
+  ASSERT_TRUE(adapted.has_value());
+  ASSERT_NE(adapted->raw_identity, nullptr);
+  EXPECT_EQ(keyTuples(adapted->raw_identity->keys()),
+            (std::vector<std::tuple<int, int, int>>{
+                {-1, 0, 0}, {2, 1, 0}}));
+
+  auto unsorted = valid;
+  unsorted.raw_occupied_voxel_keys =
+      std::make_shared<const std::vector<iap::VoxelKey>>(
+          std::vector<iap::VoxelKey>{{2, 1, 0}, {-1, 0, 0}});
+  EXPECT_FALSE(adaptEpoch(std::move(unsorted), source_owner).has_value());
+
+  auto duplicate = valid;
+  duplicate.raw_occupied_voxel_keys =
+      std::make_shared<const std::vector<iap::VoxelKey>>(
+          std::vector<iap::VoxelKey>{{-1, 0, 0}, {-1, 0, 0}});
+  EXPECT_FALSE(adaptEpoch(std::move(duplicate), source_owner).has_value());
 }
 
 TEST(P0OccupancyEpochAdapterTest,

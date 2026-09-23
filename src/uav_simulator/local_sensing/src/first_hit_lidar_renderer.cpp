@@ -234,6 +234,7 @@ FirstHitLidarScan FirstHitLidarRenderer::render(
   FirstHitLidarScan scan;
   scan.stats.ray_count = impl_->directions_sensor.size();
   scan.hits.reserve(scan.stats.ray_count);
+  scan.beams.reserve(scan.stats.ray_count);
   if (impl_->world_loaded && sensor_pose_w.matrix().allFinite()) {
     const Eigen::Vector3d origin = sensor_pose_w.translation();
     for (const auto & direction_sensor : impl_->directions_sensor) {
@@ -246,7 +247,19 @@ FirstHitLidarScan FirstHitLidarRenderer::render(
         scan.hits.push_back(pcl::PointXYZ(
           static_cast<float>(hit.x()), static_cast<float>(hit.y()),
           static_cast<float>(hit.z())));
+        scan.beams.push_back(FirstHitLidarBeam{
+          direction_sensor, FirstHitLidarBeamOutcome::HIT,
+          (hit - origin).norm()});
+      } else {
+        scan.beams.push_back(FirstHitLidarBeam{
+          direction_sensor, FirstHitLidarBeamOutcome::NO_RETURN,
+          impl_->config.max_range_m});
       }
+    }
+  } else {
+    for (const auto & direction_sensor : impl_->directions_sensor) {
+      scan.beams.push_back(FirstHitLidarBeam{
+        direction_sensor, FirstHitLidarBeamOutcome::INVALID, 0.0});
     }
   }
   scan.hits.width = static_cast<std::uint32_t>(scan.hits.size());

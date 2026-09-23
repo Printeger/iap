@@ -150,12 +150,14 @@ struct GnssAdvisoryPredictor::VisibilityEvidenceCache {
     double evaluation_time_s = 0.0;
     bool measured_support = false;
     bool retain_unknown_support = false;
+    bool unknown_as_open_bound = false;
 
     bool operator==(const Key& other) const {
       return x == other.x && y == other.y && z == other.z &&
           evaluation_time_s == other.evaluation_time_s &&
           measured_support == other.measured_support &&
-          retain_unknown_support == other.retain_unknown_support;
+          retain_unknown_support == other.retain_unknown_support &&
+          unknown_as_open_bound == other.unknown_as_open_bound;
     }
   };
   struct Hash {
@@ -169,6 +171,7 @@ struct GnssAdvisoryPredictor::VisibilityEvidenceCache {
       combine(std::hash<double>{}(key.evaluation_time_s));
       combine(std::hash<bool>{}(key.measured_support));
       combine(std::hash<bool>{}(key.retain_unknown_support));
+      combine(std::hash<bool>{}(key.unknown_as_open_bound));
       return seed;
     }
   };
@@ -244,14 +247,16 @@ VisibilityResult GnssAdvisoryPredictor::cached_visibility_evidence(
     const bool measured_epoch_support,
     const bool retain_unknown_support,
     const double query_time_s,
-    const double evaluation_time_s) const {
+    const double evaluation_time_s,
+    const bool unknown_as_open_bound) const {
   const double effective_query_time_s = std::isfinite(query_time_s)
       ? query_time_s : epoch.stamp;
   if (!visibility_evidence_cache_) {
     return visibility_predictor_.predict(
         query_position, epoch, measured_epoch_support,
         retain_unknown_support,
-        effective_query_time_s, evaluation_time_s);
+        effective_query_time_s, evaluation_time_s,
+        unknown_as_open_bound);
   }
   const std::size_t epoch_identity = receiver_epoch_identity(epoch);
   // With a frozen epoch/map, LOS, support and canopy evidence are spatial.
@@ -263,7 +268,8 @@ VisibilityResult GnssAdvisoryPredictor::cached_visibility_evidence(
       query_position.x(), query_position.y(), query_position.z(),
       std::isfinite(evaluation_time_s) ? evaluation_time_s
                                       : effective_query_time_s,
-      measured_epoch_support, retain_unknown_support};
+      measured_epoch_support, retain_unknown_support,
+      unknown_as_open_bound};
   {
     std::lock_guard<std::mutex> lock(visibility_evidence_cache_->mutex);
     if (!visibility_evidence_cache_->has_epoch_identity ||
@@ -280,7 +286,8 @@ VisibilityResult GnssAdvisoryPredictor::cached_visibility_evidence(
   auto result = visibility_predictor_.predict(
       query_position, epoch, measured_epoch_support,
       retain_unknown_support,
-      effective_query_time_s, evaluation_time_s);
+      effective_query_time_s, evaluation_time_s,
+      unknown_as_open_bound);
   {
     std::lock_guard<std::mutex> lock(visibility_evidence_cache_->mutex);
     if (!visibility_evidence_cache_->has_epoch_identity ||
@@ -376,7 +383,8 @@ GnssAdvisoryResult GnssAdvisoryPredictor::query_unanchored(
     const std::vector<bool>* satellite_mask,
     const GlobalNavigationTaskMode task_mode,
     const double query_time_s,
-    const double evaluation_time_s) const {
+    const double evaluation_time_s,
+    const bool unknown_as_open_bound) const {
   if (!query_position.allFinite()) {
     return fallback("invalid_position");
   }
@@ -389,11 +397,12 @@ GnssAdvisoryResult GnssAdvisoryPredictor::query_unanchored(
   // proof over a radius created an artificial support discontinuity.
   const bool measured_epoch_support = force_measured_epoch_support;
   const bool retain_unknown_support =
-      task_mode == GlobalNavigationTaskMode::MISSION_BEST_EFFORT;
+      task_mode == GlobalNavigationTaskMode::MISSION_BEST_EFFORT ||
+      unknown_as_open_bound;
   const VisibilityResult visibility = cached_visibility_evidence(
       query_position, snapshot.gnss_epoch, measured_epoch_support,
       retain_unknown_support,
-      query_time_s, evaluation_time_s);
+      query_time_s, evaluation_time_s, unknown_as_open_bound);
   const auto visible_set = visible_geometry(
       snapshot.gnss_epoch, visibility, satellite_mask);
   const auto& geom = visible_set.geom;
@@ -523,6 +532,22 @@ GnssAdvisoryResult GnssAdvisoryPredictor::query_with_satellite_mask(
       evaluation_time_s);
 }
 
+GnssAdvisoryResult
+GnssAdvisoryPredictor::query_lower_bound_with_satellite_mask(
+    const Eigen::Vector3d& query_position,
+    const IntegritySnapshot& snapshot,
+    const std::vector<bool>& satellite_mask,
+    const double query_time_s,
+    const double evaluation_time_s) const {
+  if (satellite_mask.size() != snapshot.gnss_epoch.sats.size()) {
+    return fallback("invalid_satellite_mask");
+  }
+  return query_unanchored(
+      query_position, snapshot, false, &satellite_mask,
+      GlobalNavigationTaskMode::MISSION_BEST_EFFORT,
+      query_time_s, evaluation_time_s, true);
+}
+
 GnssAdvisoryResult GnssAdvisoryPredictor::query_receiver_measured(
     const IntegritySnapshot& snapshot) const {
   const double epoch_delta =
@@ -574,7 +599,7 @@ VisibilityResult GnssAdvisoryPredictor::visibility_evidence(
   return cached_visibility_evidence(
       query_position, snapshot.gnss_epoch, false,
       task_mode == GlobalNavigationTaskMode::MISSION_BEST_EFFORT,
-      query_time_s, evaluation_time_s);
+      query_time_s, evaluation_time_s, false);
 }
 
 }  // namespace iap

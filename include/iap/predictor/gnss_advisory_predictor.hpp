@@ -44,6 +44,14 @@ class GnssAdvisoryPredictor {
           std::numeric_limits<double>::quiet_NaN(),
       GlobalNavigationTaskMode task_mode =
           GlobalNavigationTaskMode::STRICT_GLOBAL) const;
+  // Diagnostic lower bound: unknown LOS is treated as unobstructed while
+  // known attenuation and the existing geometry/PL solver are preserved.
+  GnssAdvisoryResult query_lower_bound_with_satellite_mask(
+      const Eigen::Vector3d& query_position,
+      const IntegritySnapshot& snapshot,
+      const std::vector<bool>& satellite_mask,
+      double query_time_s,
+      double evaluation_time_s) const;
   // Current receiver measurement support is an anchor-only operation.  It is
   // intentionally separate from query() so standalone advisory diagnostics
   // remain raw and planning code cannot extend measured support spatially.
@@ -78,7 +86,8 @@ class GnssAdvisoryPredictor {
       double query_time_s =
           std::numeric_limits<double>::quiet_NaN(),
       double evaluation_time_s =
-          std::numeric_limits<double>::quiet_NaN()) const;
+          std::numeric_limits<double>::quiet_NaN(),
+      bool unknown_as_open_bound = false) const;
   GnssAdvisoryResult receiver_anchor_advisory(
       const IntegritySnapshot& snapshot) const;
   VisibilityResult cached_visibility_evidence(
@@ -87,7 +96,8 @@ class GnssAdvisoryPredictor {
       bool measured_epoch_support,
       bool retain_unknown_support,
       double query_time_s,
-      double evaluation_time_s) const;
+      double evaluation_time_s,
+      bool unknown_as_open_bound = false) const;
   GnssAdvisoryResult compute_advisory_fim(
       const Eigen::Vector3d& query_position,
       const GnssEpoch& epoch,

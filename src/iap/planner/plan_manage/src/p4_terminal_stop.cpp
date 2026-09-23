@@ -171,14 +171,14 @@ P4TerminalStopResult imposeP4TerminalStop(
       UniformBspline stopped_acceleration = stopped_velocity.getDerivative();
       const double stopped_duration = stopped.getTimeSum();
       const bool boundary_exact =
-          stopped.evaluateDeBoorT(0.0).isApprox(
-              start_state.position, 1.0e-9) &&
-          stopped_velocity.evaluateDeBoorT(0.0).isApprox(
-              start_state.velocity, 1.0e-9) &&
-          stopped_acceleration.evaluateDeBoorT(0.0).isApprox(
-              start_state.acceleration, 1.0e-8) &&
-          stopped.evaluateDeBoorT(stopped_duration).isApprox(
-              approved_endpoint, 1.0e-9) &&
+          (stopped.evaluateDeBoorT(0.0) -
+              start_state.position).norm() <= 1.0e-9 &&
+          (stopped_velocity.evaluateDeBoorT(0.0) -
+              start_state.velocity).norm() <= 1.0e-9 &&
+          (stopped_acceleration.evaluateDeBoorT(0.0) -
+              start_state.acceleration).norm() <= 1.0e-8 &&
+          (stopped.evaluateDeBoorT(stopped_duration) -
+              approved_endpoint).norm() <= 1.0e-9 &&
           stopped_velocity.evaluateDeBoorT(stopped_duration).norm() <=
               1.0e-9 &&
           stopped_acceleration.evaluateDeBoorT(stopped_duration).norm() <=
@@ -207,6 +207,79 @@ P4TerminalStopResult imposeP4TerminalStop(
         1.05 * limits.required_time_scale, 1.10, 2.0);
   }
   result.reason = "terminal_stop_not_dynamically_feasible";
+  return result;
+}
+
+P4TerminalStopResult buildP4CertifiedTerminalSuffix(
+    const UniformBspline &reference_trajectory_input,
+    const double anchor_time_s,
+    const P4ControlCapabilityProfile &profile,
+    const double feasibility_tolerance,
+    UniformBspline *braking_trajectory)
+{
+  P4TerminalStopResult result;
+  if (!braking_trajectory || !profile.valid() ||
+      !std::isfinite(feasibility_tolerance) || feasibility_tolerance < 0.0)
+  {
+    result.reason = "certified_suffix_input_invalid";
+    return result;
+  }
+  UniformBspline reference = reference_trajectory_input;
+  const double reference_duration = reference.getTimeSum();
+  result.original_duration_s = reference_duration;
+  if (!std::isfinite(reference_duration) || reference_duration <= 0.0 ||
+      !std::isfinite(anchor_time_s) || anchor_time_s < 0.0 ||
+      anchor_time_s >= reference_duration)
+  {
+    result.reason = "certified_suffix_anchor_invalid";
+    return result;
+  }
+  UniformBspline suffix;
+  if (!reference.sliceFrom(anchor_time_s, suffix))
+  {
+    result.reason = "certified_suffix_slice_failed";
+    return result;
+  }
+  const double suffix_duration = suffix.getTimeSum();
+  if (!std::isfinite(suffix_duration) || suffix_duration <= 0.0 ||
+      std::abs(suffix_duration - (reference_duration - anchor_time_s)) >
+          1.0e-8)
+  {
+    result.reason = "certified_suffix_deadline_changed";
+    return result;
+  }
+  auto reference_velocity = reference.getDerivative();
+  auto reference_acceleration = reference_velocity.getDerivative();
+  auto suffix_velocity = suffix.getDerivative();
+  auto suffix_acceleration = suffix_velocity.getDerivative();
+  const bool boundary_exact =
+      suffix.evaluateDeBoorT(0.0).isApprox(
+          reference.evaluateDeBoorT(anchor_time_s), 1.0e-9) &&
+      suffix_velocity.evaluateDeBoorT(0.0).isApprox(
+          reference_velocity.evaluateDeBoorT(anchor_time_s), 1.0e-9) &&
+      suffix_acceleration.evaluateDeBoorT(0.0).isApprox(
+          reference_acceleration.evaluateDeBoorT(anchor_time_s), 1.0e-8) &&
+      suffix.evaluateDeBoorT(suffix_duration).isApprox(
+          reference.evaluateDeBoorT(reference_duration), 1.0e-9) &&
+      suffix_velocity.evaluateDeBoorT(suffix_duration).norm() <= 1.0e-9 &&
+      suffix_acceleration.evaluateDeBoorT(suffix_duration).norm() <= 1.0e-8;
+  if (!boundary_exact)
+  {
+    result.reason = "certified_suffix_boundary_invalid";
+    return result;
+  }
+  const auto limits = suffix.checkDerivativeLimits(
+      profile, feasibility_tolerance);
+  if (!limits.valid || !limits.velocity_ok || !limits.acceleration_ok ||
+      !limits.jerk_ok)
+  {
+    result.reason = "certified_suffix_derivative_limit_exceeded";
+    return result;
+  }
+  *braking_trajectory = std::move(suffix);
+  result.success = true;
+  result.final_duration_s = suffix_duration;
+  result.reason = "exact_certified_terminal_suffix";
   return result;
 }
 
@@ -329,14 +402,14 @@ P4TerminalStopResult buildP4EmergencyBrakingTrajectory(
         UniformBspline velocity = candidate.getDerivative();
         UniformBspline acceleration = velocity.getDerivative();
         const double duration = candidate.getTimeSum();
-        if (candidate.evaluateDeBoorT(0.0).isApprox(
-                start_state.position, 1.0e-9) &&
-            velocity.evaluateDeBoorT(0.0).isApprox(
-                start_state.velocity, 1.0e-9) &&
-            acceleration.evaluateDeBoorT(0.0).isApprox(
-                start_state.acceleration, 1.0e-8) &&
-            candidate.evaluateDeBoorT(duration).isApprox(
-                stop_position, 1.0e-9) &&
+        if ((candidate.evaluateDeBoorT(0.0) -
+                start_state.position).norm() <= 1.0e-9 &&
+            (velocity.evaluateDeBoorT(0.0) -
+                start_state.velocity).norm() <= 1.0e-9 &&
+            (acceleration.evaluateDeBoorT(0.0) -
+                start_state.acceleration).norm() <= 1.0e-8 &&
+            (candidate.evaluateDeBoorT(duration) -
+                stop_position).norm() <= 1.0e-9 &&
             velocity.evaluateDeBoorT(duration).norm() <= 1.0e-9 &&
             acceleration.evaluateDeBoorT(duration).norm() <= 1.0e-8)
         {
@@ -356,7 +429,142 @@ P4TerminalStopResult buildP4EmergencyBrakingTrajectory(
     }
     if (bounded_stop_time >= reference_duration) break;
   }
-  result.reason = "braking_stop_not_dynamically_feasible_before_deadline";
+
+  auto suffix = buildP4CertifiedTerminalSuffix(
+      reference_trajectory_input, anchor_time_s, profile,
+      feasibility_tolerance, braking_trajectory);
+  if (suffix.success)
+    return suffix;
+  result.reason = "braking_stop_not_dynamically_feasible_before_deadline:" +
+      suffix.reason;
+  return result;
+}
+
+P4TerminalStopResult buildP4RecoveryBrakingTrajectory(
+    const UniformBspline &reference_trajectory, const double anchor_time_s,
+    const P4TerminalStartState &actual_switch_state,
+    const P4ControlCapabilityProfile &profile,
+    const double feasibility_tolerance,
+    UniformBspline *braking_trajectory)
+{
+  P4TerminalStopResult result;
+  if (!braking_trajectory || !profile.valid() ||
+      !actual_switch_state.position.allFinite() ||
+      !boundaryWithinLimits(actual_switch_state.velocity,
+                            actual_switch_state.acceleration,
+                            profile, feasibility_tolerance))
+  {
+    result.reason = "recovery_braking_input_invalid";
+    return result;
+  }
+  // UniformBspline's legacy query/slice API is not const-qualified. Work on
+  // a private copy so recovery construction remains side-effect free.
+  UniformBspline reference = reference_trajectory;
+  const double reference_duration = reference.getTimeSum();
+  result.original_duration_s = reference_duration;
+  if (!std::isfinite(reference_duration) || reference_duration <= 0.0 ||
+      !std::isfinite(anchor_time_s) || anchor_time_s < 0.0 ||
+      anchor_time_s >= reference_duration)
+  {
+    result.reason = "recovery_braking_anchor_invalid";
+    return result;
+  }
+  const double remaining_s = reference_duration - anchor_time_s;
+  const double minimum_stop_distance =
+      actual_switch_state.velocity.squaredNorm() /
+          (2.0 * profile.maximum_acceleration_mps2.minCoeff()) + 0.05;
+  double accumulated_distance = 0.0;
+  double first_stop_time = reference_duration;
+  Eigen::Vector3d previous = actual_switch_state.position;
+  for (double time = std::min(reference_duration, anchor_time_s + 0.05);
+       time <= reference_duration + 1.0e-9; time += 0.05)
+  {
+    const double bounded_time = std::min(time, reference_duration);
+    const Eigen::Vector3d point = reference.evaluateDeBoorT(bounded_time);
+    if (!point.allFinite())
+    {
+      result.reason = "recovery_braking_reference_nonfinite";
+      return result;
+    }
+    accumulated_distance += (point - previous).norm();
+    previous = point;
+    if (accumulated_distance >= minimum_stop_distance)
+    {
+      first_stop_time = bounded_time;
+      break;
+    }
+    if (bounded_time >= reference_duration) break;
+  }
+
+  for (double stop_time = first_stop_time;
+       stop_time <= reference_duration + 1.0e-9; stop_time += 0.1)
+  {
+    const double bounded_stop_time = std::min(stop_time, reference_duration);
+    const double horizon = bounded_stop_time - anchor_time_s;
+    if (horizon <= 0.0) continue;
+    const int sample_count = std::max(
+        4, static_cast<int>(std::ceil(horizon / 0.2)) + 1);
+    std::vector<Eigen::Vector3d> samples;
+    samples.reserve(static_cast<std::size_t>(sample_count));
+    for (int sample = 0; sample < sample_count; ++sample)
+    {
+      const double alpha = static_cast<double>(sample) /
+          static_cast<double>(sample_count - 1);
+      samples.push_back(reference.evaluateDeBoorT(
+          anchor_time_s + alpha * horizon));
+    }
+    samples.front() = actual_switch_state.position;
+    const Eigen::Vector3d stop_position = samples.back();
+    const std::vector<Eigen::Vector3d> derivatives = {
+        actual_switch_state.velocity, Eigen::Vector3d::Zero(),
+        actual_switch_state.acceleration, Eigen::Vector3d::Zero()};
+    double interval = horizon / static_cast<double>(sample_count - 1);
+    for (int attempt = 0; attempt < 10; ++attempt)
+    {
+      const double candidate_duration =
+          interval * static_cast<double>(sample_count - 1);
+      if (candidate_duration > remaining_s + 1.0e-9) break;
+      Eigen::MatrixXd control_points;
+      if (!UniformBspline::parameterizeToBsplineWithBoundaryConstraints(
+              interval, samples, derivatives, control_points))
+        break;
+      UniformBspline candidate(control_points, 3, interval);
+      const auto limits = candidate.checkDerivativeLimits(
+          profile, feasibility_tolerance);
+      if (limits.valid && limits.velocity_ok && limits.acceleration_ok &&
+          limits.jerk_ok)
+      {
+        auto velocity = candidate.getDerivative();
+        auto acceleration = velocity.getDerivative();
+        const double duration = candidate.getTimeSum();
+        if ((candidate.evaluateDeBoorT(0.0) -
+                actual_switch_state.position).norm() <= 1.0e-9 &&
+            (velocity.evaluateDeBoorT(0.0) -
+                actual_switch_state.velocity).norm() <= 1.0e-9 &&
+            (acceleration.evaluateDeBoorT(0.0) -
+                actual_switch_state.acceleration).norm() <= 1.0e-8 &&
+            (candidate.evaluateDeBoorT(duration) -
+                stop_position).norm() <= 1.0e-9 &&
+            velocity.evaluateDeBoorT(duration).norm() <= 1.0e-9 &&
+            acceleration.evaluateDeBoorT(duration).norm() <= 1.0e-8)
+        {
+          *braking_trajectory = std::move(candidate);
+          result.success = true;
+          result.duration_adjusted = attempt > 0;
+          result.final_duration_s = duration;
+          result.reason = "ok";
+          return result;
+        }
+      }
+      if (!std::isfinite(limits.required_time_scale) ||
+          limits.required_time_scale <= 0.0)
+        break;
+      interval *= std::clamp(
+          1.05 * limits.required_time_scale, 1.10, 2.0);
+    }
+    if (bounded_stop_time >= reference_duration) break;
+  }
+  result.reason = "recovery_braking_misses_parent_deadline";
   return result;
 }
 

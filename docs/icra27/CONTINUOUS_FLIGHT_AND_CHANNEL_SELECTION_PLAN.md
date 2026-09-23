@@ -9,6 +9,13 @@
 CPU/进程全量门禁、单岔路 primary/mirror 和 180 秒森林验收尚未在本状态行宣称通过；
 下方交付清单只有在对应证据命令完成后才勾选。
 
+2026-09-23 的 observation publication 回退已在独立有界切片中修复：
+`COMMON_OBSERVATION_SEGMENT` 现在是强类型执行意图，不再借用 reason string
+或 final-channel winner 合同。合法观察段保持 candidate/channel 为 0，在分叉前
+保留完整停车余量，经 exact B-spline、local/dynamics/brake、现有任务策略、P5 和
+专用 lineage 后发布；失败进入 typed HOLD，不转换为 alternate channel。该切片的
+CPU 与真实 traj_server 进程测试独立记录，不代表下文完整 S0–S6 或森林 live 已完成。
+
 调查基线：`605e96e7e4c17ef6591b51a0ad1abc19579289a6`。实施时重新记录 HEAD，先核对后续改动。
 
 目标场景：`icra_dense_forest_four_fork_v2`，默认 BDS、`MISSION_BEST_EFFORT`。

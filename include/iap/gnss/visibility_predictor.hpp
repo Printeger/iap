@@ -118,7 +118,8 @@ class VisibilityPredictor {
                            double query_time_s =
                                std::numeric_limits<double>::quiet_NaN(),
                            double evaluation_time_s =
-                               std::numeric_limits<double>::quiet_NaN()) const;
+                               std::numeric_limits<double>::quiet_NaN(),
+                           bool unknown_as_open_bound = false) const;
 
   const Params& params() const { return params_; }
 

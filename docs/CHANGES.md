@@ -3,6 +3,30 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(typed-common-observation-publication): IAP-RQ-312 / IAP-RQ-320 /
+  IAP-RQ-410 — distinguish `FINAL_CHANNEL`,
+  `COMMON_OBSERVATION_SEGMENT`, and `HOLD` with a versioned typed execution
+  intent. A certified common observation keeps candidate/channel IDs at zero,
+  bypasses final-channel bundle comparison, and follows dedicated exact-curve,
+  P5, lineage, publication, queue, activation, motion, and terminal-stop
+  stages. Its endpoint must remain on the common corridor with the declared
+  stopping reserve before divergence; failures hold instead of selecting an
+  alternate channel. Final channels still require their selected bundle.
+  Existing collision, clearance, dynamics, braking, freshness, PL/AL, and
+  STRICT/MISSION policy thresholds are unchanged.
+- fix(frozen-local-evidence-and-interval-selection): IAP-RQ-312 /
+  IAP-RQ-320 / IAP-RQ-400 / IAP-RQ-410 — add explicit HIT/NO_RETURN/INVALID
+  beam evidence, exact cloud association, accumulated immutable tri-state
+  snapshots, and frozen-epoch propagation. GNSS LOS now records per-satellite
+  known/unknown support and computes real-solver PL lower/formal-upper bounds;
+  final channel bundles compare route-scoped risk intervals after unchanged
+  collision, clearance, dynamics, tracking, brake, freshness, and PL/AL hard
+  gates. Whole-grid unknown coverage is diagnostic only. Incomparable
+  incomplete channels may produce a fair, positive-gain, pre-divergence
+  observation guide with no route-winner authority; the existing terminal
+  B-spline, assurance, brake, and P5 pipeline remains authoritative, and
+  physically unavailable observation returns typed HOLD. Pre-beam captures
+  are explicitly `non_exact_replay_for_local_evidence`.
 - fix(rolling-successor-horizon-and-station-cache): IAP-RQ-312 /
   IAP-RQ-320 / IAP-RQ-410 — every non-braking certified execution now enters
   the successor lane, and long parents use a configurable 2.5-second fixed

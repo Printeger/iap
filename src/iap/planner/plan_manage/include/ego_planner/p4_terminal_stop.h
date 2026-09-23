@@ -68,6 +68,22 @@ P4TerminalStopResult buildP4EmergencyBrakingTrajectory(
     const P4ControlCapabilityProfile &profile,
     double feasibility_tolerance, UniformBspline *braking_trajectory);
 
+// Returns the exact remainder of an already certified terminal-stop curve.
+// This is the deadline-preserving fallback when an independently earlier
+// stop cannot be fitted at a late braking anchor.
+P4TerminalStopResult buildP4CertifiedTerminalSuffix(
+    const UniformBspline &reference_trajectory, double anchor_time_s,
+    const P4ControlCapabilityProfile &profile,
+    double feasibility_tolerance, UniformBspline *braking_trajectory);
+
+// Builds a deadline-bounded stop from the measured state instead of claiming
+// that an out-of-domain state is still covered by the nominal brake library.
+P4TerminalStopResult buildP4RecoveryBrakingTrajectory(
+    const UniformBspline &reference_trajectory, double anchor_time_s,
+    const P4TerminalStartState &actual_switch_state,
+    const P4ControlCapabilityProfile &profile,
+    double feasibility_tolerance, UniformBspline *braking_trajectory);
+
 }  // namespace ego_planner
 
 #endif  // EGO_PLANNER_P4_TERMINAL_STOP_H_

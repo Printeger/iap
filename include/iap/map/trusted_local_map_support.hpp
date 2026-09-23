@@ -230,6 +230,98 @@ struct TrustedLocalMapSupport {
     return query(point_map, evaluation_time_s);
   }
 
+  // Return the smallest deterministic correction into one of the sensor
+  // envelopes that is valid at evaluation_time_s.  This is a geometry hint,
+  // not new authority: callers must regenerate their curve and run query()
+  // (plus collision/dynamics/risk gates) over the complete result.  In
+  // particular, expired observations are never projected or refreshed.
+  bool projectIntoFreshEnvelope(const Eigen::Vector3d& point_map,
+                                const double evaluation_time_s,
+                                const double interior_margin_m,
+                                Eigen::Vector3d* projected_map) const {
+    if (!projected_map || !valid() || !point_map.allFinite() ||
+        !std::isfinite(evaluation_time_s) ||
+        !std::isfinite(interior_margin_m) || interior_margin_m < 0.0) {
+      return false;
+    }
+    if (query(point_map, evaluation_time_s).complete()) {
+      *projected_map = point_map;
+      return true;
+    }
+
+    Eigen::Vector3d best = Eigen::Vector3d::Constant(
+        std::numeric_limits<double>::quiet_NaN());
+    double best_distance = std::numeric_limits<double>::infinity();
+    const auto consider = [&](const Eigen::Isometry3d& pose,
+                              const Eigen::Vector3d& retained_min,
+                              const Eigen::Vector3d& retained_max,
+                              const double observation_stamp,
+                              const double valid_until) {
+      if (evaluation_time_s < observation_stamp ||
+          evaluation_time_s > valid_until) {
+        return;
+      }
+      Eigen::Vector3d candidate = point_map.cwiseMax(
+          retained_min + Eigen::Vector3d::Constant(interior_margin_m));
+      candidate = candidate.cwiseMin(
+          retained_max - Eigen::Vector3d::Constant(interior_margin_m));
+      Eigen::Vector3d sensor = pose.linear().transpose() *
+          (candidate - pose.translation());
+      double planar = std::hypot(sensor.x(), sensor.y());
+      double azimuth = std::atan2(sensor.y(), sensor.x());
+
+      constexpr double kPi = 3.14159265358979323846;
+      if (horizontal_fov_rad < 2.0 * kPi - 1.0e-9) {
+        const double angular_margin = std::atan2(
+            interior_margin_m, std::max(planar, 1.0e-9));
+        const double half_width = 0.5 * horizontal_fov_rad;
+        if (angular_margin >= half_width) return;
+        azimuth = std::clamp(
+            azimuth, -half_width + angular_margin,
+            half_width - angular_margin);
+        sensor.x() = planar * std::cos(azimuth);
+        sensor.y() = planar * std::sin(azimuth);
+      }
+
+      planar = std::hypot(sensor.x(), sensor.y());
+      const double lower = planar * std::tan(vertical_min_rad) +
+          interior_margin_m;
+      const double upper = planar * std::tan(vertical_max_rad) -
+          interior_margin_m;
+      if (!std::isfinite(lower) || !std::isfinite(upper) || lower > upper)
+        return;
+      sensor.z() = std::clamp(sensor.z(), lower, upper);
+
+      double range = sensor.norm();
+      const double minimum = min_range_m + interior_margin_m;
+      const double maximum = max_range_m - interior_margin_m;
+      if (!std::isfinite(range) || maximum <= minimum) return;
+      if (range <= 1.0e-12) {
+        sensor = Eigen::Vector3d(minimum, 0.0, 0.0);
+      } else if (range < minimum || range > maximum) {
+        sensor *= std::clamp(range, minimum, maximum) / range;
+      }
+      candidate = pose * sensor;
+      if (!query(candidate, evaluation_time_s).complete()) return;
+      const double distance = (candidate - point_map).squaredNorm();
+      if (distance < best_distance) {
+        best_distance = distance;
+        best = candidate;
+      }
+    };
+
+    consider(T_map_sensor, retained_min_map, retained_max_map, stamp_s,
+             valid_until_s);
+    for (const auto& observation : observations) {
+      consider(observation.T_map_sensor, observation.retained_min_map,
+               observation.retained_max_map, observation.stamp_s,
+               observation.valid_until_s);
+    }
+    if (!best.allFinite()) return false;
+    *projected_map = best;
+    return true;
+  }
+
   std::string identity() const {
     if (!valid()) return {};
     std::ostringstream stream;

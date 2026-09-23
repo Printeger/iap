@@ -87,6 +87,8 @@ struct GridMapTestAccess {
     map->registered_active_window_healthy_ = true;
     map->registered_current_frame_healthy_ = true;
     map->trusted_local_map_support_enabled_ = true;
+    map->trusted_support_min_range_m_ = 0.0;
+    map->trusted_support_max_range_m_ = 2.0;
     map->trusted_support_horizontal_fov_deg_ = 90.0;
     map->trusted_support_vertical_min_deg_ = -45.0;
     map->trusted_support_vertical_max_deg_ = 45.0;
@@ -121,6 +123,78 @@ struct GridMapTestAccess {
     ASSERT_EQ(map->registered_support_history_.size(), 2u);
     map->occupancy_cloud_stamp_s_.store(10.4, std::memory_order_release);
     map->occupancy_update_sequence_.store(2U, std::memory_order_release);
+  }
+
+  static void configureRegisteredActiveSources(GridMap* map) {
+    std::lock_guard<std::mutex> lock(map->occupancy_epoch_mutex_);
+    ASSERT_NE(map->registered_lidar_window_, nullptr);
+    std::vector<RegisteredLidarFrameData> frames;
+    for (int64_t frame_id = 1; frame_id <= 2; ++frame_id) {
+      RegisteredLidarFrameData frame;
+      frame.frame_id = frame_id;
+      frame.stamp_s = 9.0 + static_cast<double>(frame_id);
+      frame.scan_end_stamp_s = frame.stamp_s;
+      frame.sensor_receipt_steady_ns = static_cast<uint64_t>(frame_id);
+      frame.T_map_lidar.translation() =
+          Eigen::Vector3d(static_cast<double>(frame_id - 1), 0.0, 0.0);
+      frame.hits_lidar = {Eigen::Vector3d(1.0, 0.0, 0.0)};
+      frame.frame_contract_id = map->registered_frame_contract_id_;
+      frames.push_back(std::move(frame));
+    }
+    EXPECT_TRUE(map->registered_lidar_window_->replaceActiveWindow(
+        1U, map->registered_frame_contract_id_, frames).accepted);
+  }
+
+  static void configureExplicitBeamEvidence(GridMap* map) {
+    configureDepthFusion(map);
+    std::lock_guard<std::mutex> lock(map->occupancy_epoch_mutex_);
+    map->registered_lidar_window_enabled_ = true;
+    map->registered_active_window_healthy_ = true;
+    map->registered_current_frame_healthy_ = true;
+    map->trusted_local_map_support_enabled_ = true;
+    map->trusted_support_min_range_m_ = 0.0;
+    map->trusted_support_max_range_m_ = 2.0;
+    map->trusted_support_horizontal_fov_deg_ = 90.0;
+    map->trusted_support_vertical_min_deg_ = -45.0;
+    map->trusted_support_vertical_max_deg_ = 45.0;
+    map->trusted_support_validity_s_ = 1.0;
+    map->registered_frame_contract_id_ = "map:test";
+    RegisteredLidarWindow::Geometry geometry;
+    geometry.origin = map->mp_.map_origin_;
+    geometry.dimensions = map->mp_.map_voxel_num_;
+    geometry.resolution_m = map->mp_.resolution_;
+    geometry.frame_contract_id = map->registered_frame_contract_id_;
+    map->registered_lidar_window_ =
+        std::make_unique<RegisteredLidarWindow>(geometry);
+
+    RegisteredLidarFrameData frame;
+    frame.frame_id = 41;
+    frame.stamp_s = 10.0;
+    frame.scan_end_stamp_s = 10.0;
+    frame.sensor_receipt_steady_ns = 1U;
+    frame.T_map_lidar.translation() = Eigen::Vector3d::Zero();
+    frame.frame_contract_id = map->registered_frame_contract_id_;
+    frame.sensor_model_id = "test-lidar-v1";
+    frame.horizontal_samples = 2U;
+    frame.vertical_samples = 1U;
+    frame.horizontal_fov_rad = 1.0;
+    frame.vertical_min_rad = 0.0;
+    frame.vertical_max_rad = 0.0;
+    frame.min_range_m = 0.1;
+    frame.max_range_m = 1.5;
+    frame.beam_evidence_complete = true;
+    frame.beam_content_hash = "explicit-beams";
+    frame.beams = {
+        {Eigen::Vector3d::UnitX(), RegisteredLidarBeamOutcome::NO_RETURN,
+         std::numeric_limits<double>::quiet_NaN()},
+        {Eigen::Vector3d::UnitY(), RegisteredLidarBeamOutcome::HIT, 1.0}};
+    frame.hits_lidar = {Eigen::Vector3d(0.0, 1.0, 0.0)};
+    ASSERT_TRUE(map->registered_lidar_window_->applyCurrentFrame(frame).accepted);
+    const auto metadata = map->registered_lidar_window_->currentFrameMetadata();
+    ASSERT_TRUE(metadata.has_value());
+    map->registered_support_history_.push_back(*metadata);
+    map->occupancy_cloud_stamp_s_.store(10.0, std::memory_order_release);
+    map->occupancy_update_sequence_.store(14U, std::memory_order_release);
   }
 
   static Eigen::Vector3d addRegisteredRawHit(
@@ -463,9 +537,11 @@ TEST(GridMapOccupancyEpochTest,
 
   ASSERT_NE(epoch, nullptr);
   ASSERT_NE(epoch->raw_occupied_voxel_centers, nullptr);
+  ASSERT_NE(epoch->current_frame_occupied_voxel_centers, nullptr);
   EXPECT_EQ(epoch->generation, 1u);
   EXPECT_DOUBLE_EQ(epoch->cloud_stamp_s, 100.0);
   EXPECT_EQ(epoch->frame_id, "map");
+  EXPECT_EQ(epoch->frame_contract_id, "grid_map_native_v1:map");
   EXPECT_DOUBLE_EQ(epoch->resolution_m, 1.0);
   EXPECT_TRUE(epoch->lattice_origin.isApprox(
       Eigen::Vector3d(0.35, -0.2, 0.6), 0.0));
@@ -474,6 +550,13 @@ TEST(GridMapOccupancyEpochTest,
                              Eigen::Vector3d(0.85, 0.3, 1.1)));
   EXPECT_TRUE(containsCenter(*epoch->raw_occupied_voxel_centers,
                              Eigen::Vector3d(1.85, 0.3, 1.1)));
+  ASSERT_EQ(epoch->current_frame_occupied_voxel_centers->size(), 1u);
+  EXPECT_TRUE(containsCenter(*epoch->current_frame_occupied_voxel_centers,
+                             Eigen::Vector3d(0.85, 0.3, 1.1)));
+  EXPECT_FALSE(containsCenter(*epoch->current_frame_occupied_voxel_centers,
+                              Eigen::Vector3d(1.85, 0.3, 1.1)));
+  EXPECT_EQ(epoch->current_frame_id, 1);
+  EXPECT_FALSE(epoch->current_frame_content_hash.empty());
 
   const auto raw = epoch->diagnostic_query(Eigen::Vector3d(0.85, 0.3, 1.1));
   const auto fused =
@@ -657,6 +740,35 @@ TEST(GridMapOccupancyEpochTest,
   EXPECT_EQ(traversed.state, GridMapObservationState::OBSERVED_FREE);
   EXPECT_FALSE(unseen.observed);
   EXPECT_EQ(unseen.state, GridMapObservationState::UNKNOWN);
+}
+
+TEST(GridMapOccupancyEpochTest,
+     ExplicitBeamEvidenceIsPreservedByExecutionFreeze) {
+  GridMap map;
+  GridMapTestAccess::configureExplicitBeamEvidence(&map);
+
+  const auto epoch = map.captureFrozenExecutionOccupancyEpoch();
+
+  ASSERT_NE(epoch, nullptr);
+  ASSERT_NE(epoch->local_evidence_snapshot, nullptr);
+  EXPECT_TRUE(epoch->local_evidence_snapshot->matches(
+      epoch->generation, epoch->active_window_generation,
+      epoch->frame_contract_id, "test-lidar-v1"));
+  const auto no_return_free = epoch->local_evidence_snapshot->queryVoxel(
+      Eigen::Vector3d(1.5, 0.5, 0.5), 10.5);
+  const auto hit = epoch->local_evidence_snapshot->queryVoxel(
+      Eigen::Vector3d(0.5, 1.5, 0.5), 10.5);
+  const auto unseen = epoch->local_evidence_snapshot->queryVoxel(
+      Eigen::Vector3d(-1.5, -1.5, -1.5), 10.5);
+  EXPECT_EQ(no_return_free.state, EvidenceVoxelState::OBSERVED_FREE);
+  EXPECT_EQ(hit.state, EvidenceVoxelState::RAW_OCCUPIED);
+  EXPECT_EQ(unseen.state, EvidenceVoxelState::UNKNOWN);
+  const auto coverage = epoch->local_evidence_snapshot->coverage(10.5);
+  ASSERT_TRUE(coverage.valid);
+  EXPECT_GT(coverage.observed_free_count, 0u);
+  EXPECT_GT(coverage.raw_occupied_count, 0u);
+  EXPECT_GT(coverage.unknown_fraction, 0.0);
+  EXPECT_LT(coverage.unknown_fraction, 1.0);
 }
 
 TEST(GridMapOccupancyEpochTest,
@@ -890,6 +1002,29 @@ TEST(GridMapOccupancyEpochTest,
       Eigen::Vector3d(1.0, 0.0, 0.0), 10.8, 99.0);
   EXPECT_TRUE(support.complete());
   EXPECT_DOUBLE_EQ(support.observation_stamp_s, 10.0);
+}
+
+TEST(GridMapOccupancyEpochTest,
+     DenseRegisteredFreezePreservesCurrentFrameAndSourceProvenance) {
+  GridMap map;
+  GridMapTestAccess::configureRegisteredSupportHistory(&map);
+  GridMapTestAccess::configureRegisteredActiveSources(&map);
+
+  const auto epoch = map.captureFrozenOccupancyEpoch();
+
+  ASSERT_NE(epoch, nullptr);
+  ASSERT_NE(epoch->current_frame_occupied_voxel_centers, nullptr);
+  ASSERT_NE(epoch->active_window_obstacle_sources, nullptr);
+  EXPECT_EQ(epoch->current_frame_id, 2);
+  EXPECT_FALSE(epoch->current_frame_content_hash.empty());
+  ASSERT_EQ(epoch->active_window_obstacle_sources->size(), 2u);
+  EXPECT_EQ(epoch->active_window_obstacle_sources->at(0).metadata.frame_id, 1);
+  EXPECT_EQ(epoch->active_window_obstacle_sources->at(1).metadata.frame_id, 2);
+  for (const auto& source : *epoch->active_window_obstacle_sources) {
+    EXPECT_FALSE(source.metadata.content_hash.empty());
+    EXPECT_EQ(source.metadata.frame_contract_id, "map:test");
+    ASSERT_NE(source.occupied_voxel_centers, nullptr);
+  }
 }
 
 TEST(GridMapOccupancyEpochTest,

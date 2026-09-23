@@ -1025,6 +1025,80 @@ TEST(P5RuntimeIntegrityGateTest, FutureSamplesCarryTrajectoryTiming) {
 }
 
 TEST(P5RuntimeIntegrityGateTest,
+     RuntimeUsesServerCurveProgressInsteadOfRosCatchupTime) {
+  auto config = baseConfig();
+  config.horizon_s = 1.0;
+  config.sample_dt_s = 0.25;
+  config.current_stale_to_replan_s = 100.0;
+  config.current_stale_to_emergency_s = 100.0;
+  ego_planner::P5RuntimeIntegrityGate gate(nullptr, config, false);
+  gate.setCurrentIntegrityForTest(
+      integrityMsg(0.5, 1.0, 1.0, 10.0, 10.0));
+
+  auto trajectory = makeTrajectory(3.0);
+  trajectory.start_time_ = rclcpp::Time(
+      -1000000000LL, RCL_ROS_TIME);
+  const auto status = gate.evaluateRuntime(
+      trajectory, makeSnapshot(1.0, 1.0), 0.5, 1.0,
+      nullptr, {}, {}, {}, std::numeric_limits<double>::infinity(), 0.25);
+
+  ASSERT_FALSE(status.viz_samples.empty());
+  EXPECT_NEAR(status.viz_samples.front().trajectory_t_cur_s, 0.25, 1.0e-9);
+  EXPECT_NEAR(status.viz_samples.front().trajectory_t_end_s, 1.25, 1.0e-9);
+  EXPECT_NEAR(
+      status.viz_samples.front().trajectory_time_remaining_s, 2.75, 1.0e-9);
+}
+
+TEST(P5RuntimeIntegrityGateTest,
+     QueuedCertifiedSuccessorBoundsParentRuntimeHorizonAtHandoff) {
+  auto config = baseConfig();
+  config.test_only_allow_grid_risk_authority = false;
+  config.horizon_s = 2.0;
+  config.current_stale_to_replan_s = 100.0;
+  config.current_stale_to_emergency_s = 100.0;
+  config.bad_tick_to_replan = 1;
+  config.max_bad_ratio = 0.01;
+  auto trajectory = makeTrajectory(3.0);
+  const auto snapshot = makeSnapshot(1.0, 1.0);
+  auto direct = directRiskEvidence(trajectory, snapshot, 1.0, 1.0);
+  for (std::size_t index = 0; index < direct.points.size(); ++index) {
+    if (direct.relative_times[index] <= 0.6) {
+      continue;
+    }
+    auto& point = direct.points[index];
+    point.prediction.fused.hpl = 20.0;
+    point.prediction.fused.vpl = 20.0;
+    point.safety_ratio = 2.0;
+    point.safety_state = iap::ForwardRiskSafetyState::UNSAFE;
+    point.failure_reason =
+        iap::ForwardRiskFailureReason::SAFETY_LIMIT_EXCEEDED;
+  }
+
+  ego_planner::P5RuntimeIntegrityGate full_gate(nullptr, config, false);
+  full_gate.setCurrentIntegrityForTest(
+      integrityMsg(0.0, 1.0, 1.0, 10.0, 10.0));
+  const auto unbounded = full_gate.evaluateRuntime(
+      trajectory, snapshot, 0.0, 1.0, &direct);
+  EXPECT_EQ(unbounded.raw_reason, ego_planner::P5GateReason::FUTURE_BAD);
+
+  ego_planner::P5RuntimeIntegrityGate handoff_gate(nullptr, config, false);
+  handoff_gate.setCurrentIntegrityForTest(
+      integrityMsg(0.0, 1.0, 1.0, 10.0, 10.0));
+  const auto bounded = handoff_gate.evaluateRuntime(
+      trajectory, snapshot, 0.0, 1.0, &direct, {}, {}, {}, 0.5);
+  EXPECT_EQ(bounded.raw_action, ego_planner::P5GateAction::OK)
+      << bounded.future_reason << " bad=" << bounded.bad_count
+      << " samples=" << bounded.sample_count;
+  EXPECT_EQ(bounded.raw_reason, ego_planner::P5GateReason::OK)
+      << bounded.future_reason;
+  ASSERT_FALSE(bounded.viz_samples.empty());
+  EXPECT_LE(bounded.viz_samples.back().trajectory_t_end_s, 0.5 + 1.0e-9);
+  EXPECT_TRUE(std::all_of(
+      bounded.viz_samples.begin(), bounded.viz_samples.end(),
+      [](const auto& sample) { return sample.tau_s <= 0.5 + 1.0e-9; }));
+}
+
+TEST(P5RuntimeIntegrityGateTest,
      RuntimeAndFinalCarryExactTrajectoryIdAndNanosecondStart) {
   auto config = baseConfig();
   config.current_stale_to_replan_s = 1.0e12;
@@ -1174,6 +1248,37 @@ TEST(P5RuntimeIntegrityGateTest,
 }
 
 TEST(P5RuntimeIntegrityGateTest,
+     ObservationFinalUsesExactEvidenceAndDoesNotBypassUnknownRisk) {
+  auto config = baseConfig();
+  config.test_only_allow_grid_risk_authority = false;
+  config.current_stale_to_replan_s = 100.0;
+  config.current_stale_to_emergency_s = 100.0;
+  ego_planner::P5RuntimeIntegrityGate safe_gate(nullptr, config, false);
+  safe_gate.setCurrentIntegrityForTest(integrityMsg(
+      0.0, 1.0, 1.0, 10.0, 10.0));
+  auto trajectory = makeTrajectory();
+  const auto snapshot = makeSnapshot(500.0, 500.0);
+  auto direct = directRiskEvidence(trajectory, snapshot, 1.0, 1.0);
+
+  const auto safe = safe_gate.evaluateObservationFinal(
+      trajectory, snapshot, 0.0, -1.0, &direct);
+  EXPECT_EQ(safe.action, ego_planner::P5GateAction::OK);
+  EXPECT_EQ(safe.reason, ego_planner::P5GateReason::OK);
+  EXPECT_EQ(safe.final_candidate_traj_id, trajectory.traj_id_);
+
+  direct.complete = false;
+  direct.certified_safe = false;
+  direct.trajectory_assurance_complete = false;
+  ego_planner::P5RuntimeIntegrityGate unknown_gate(nullptr, config, false);
+  unknown_gate.setCurrentIntegrityForTest(integrityMsg(
+      0.0, 1.0, 1.0, 10.0, 10.0));
+  const auto unknown = unknown_gate.evaluateObservationFinal(
+      trajectory, snapshot, 0.0, -1.0, &direct);
+  EXPECT_NE(unknown.action, ego_planner::P5GateAction::OK);
+  EXPECT_EQ(unknown.reason, ego_planner::P5GateReason::FUTURE_UNKNOWN);
+}
+
+TEST(P5RuntimeIntegrityGateTest,
      WindowEvidenceAcceptsCertifiedBrakePointsOffTheNominalSpline) {
   auto config = baseConfig();
   config.test_only_allow_grid_risk_authority = false;
@@ -1313,6 +1418,10 @@ TEST(P5RuntimeIntegrityGateTest,
       "mutated-satellite-sets");
   EXPECT_NE(mutated.raw_action, ego_planner::P5GateAction::OK);
   EXPECT_EQ(mutated.raw_reason, ego_planner::P5GateReason::FUTURE_UNKNOWN);
+  ASSERT_FALSE(mutated.viz_samples.empty());
+  EXPECT_EQ(mutated.viz_samples.front().reason,
+            "direct_risk_evidence_incomplete:"
+            "required_window_satellite_sets_hash_mismatch");
 }
 
 TEST(P5RuntimeIntegrityGateTest,
@@ -1505,6 +1614,11 @@ TEST(P5RuntimeIntegrityGateTest,
   direct.windows = {window};
   direct.window_satellite_sets_hash =
       ego_planner::p4WindowSatelliteSetsHash(direct.windows);
+  // The provider truthfully reports an incomplete global batch because GNSS
+  // is unavailable.  The typed failures above are nevertheless completely
+  // accounted for by the mission-degraded certificate; P5 must not require
+  // the top-level global `complete` bit to become true.
+  direct.complete = false;
   direct.certified_safe = false;
   direct.certification_status =
       ego_planner::P4ActualCurveCertificationStatus::INCOMPLETE;
@@ -1683,6 +1797,59 @@ TEST(P5RuntimeIntegrityGateTest,
       direct.window_satellite_sets_hash);
   EXPECT_EQ(global_invalid.raw_action, ego_planner::P5GateAction::OK);
   EXPECT_EQ(global_invalid.raw_reason, ego_planner::P5GateReason::OK);
+}
+
+TEST(P5RuntimeIntegrityGateTest,
+     NormalAuthorizedBestEffortTreatsSubAlertLowMarginAsMissionQuality) {
+  auto config = baseConfig();
+  config.test_only_allow_grid_risk_authority = false;
+  config.current_stale_to_replan_s = 100.0;
+  config.current_stale_to_emergency_s = 100.0;
+  config.future_emergency_margin_m = 0.2;
+  ego_planner::P5RuntimeIntegrityGate gate(nullptr, config, false);
+  gate.setCurrentIntegrityForTest(integrityMsg(
+      0.0, 9.91, 9.91, 10.0, 10.0));
+  auto trajectory = makeTrajectory();
+  const auto grid = makeSnapshot(1.0, 1.0);
+
+  const auto make_evidence = [&](const iap::GlobalNavigationTaskMode mode) {
+    auto direct = directRiskEvidence(trajectory, grid, 9.91, 9.91);
+    bindFreshExecutionSnapshot(&direct, grid, mode);
+    for (auto& point : direct.points) {
+      point.prediction.gnss.valid = true;
+      point.prediction.gnss.hpl = 9.91;
+      point.prediction.gnss.vpl = 9.91;
+    }
+    direct.trajectory_assurance_complete = true;
+    direct.trajectory_assurance.mode =
+        iap::TrajectoryExecutionMode::NORMAL_EXECUTION;
+    direct.trajectory_assurance.certificate_hash = "normal-cert";
+    direct.trajectory_assurance.local.status =
+        iap::LocalMotionAssuranceStatus::SAFE;
+    direct.trajectory_assurance.local.certificate_hash = "local-cert";
+    direct.trajectory_assurance.global.complete = true;
+    direct.trajectory_assurance.global.within_budget = true;
+    return direct;
+  };
+
+  auto best_effort = make_evidence(
+      iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT);
+  const auto best_effort_status = gate.evaluateRuntime(
+      trajectory, nullptr, 0.0, 0.5, &best_effort);
+  EXPECT_EQ(best_effort_status.raw_action, ego_planner::P5GateAction::OK)
+      << best_effort_status.future_reason;
+  EXPECT_EQ(best_effort_status.raw_reason, ego_planner::P5GateReason::OK);
+  EXPECT_EQ(best_effort_status.bad_count, 0u);
+  EXPECT_LT(best_effort_status.future_min_im,
+            config.future_replan_margin_m);
+
+  auto strict = make_evidence(iap::GlobalNavigationTaskMode::STRICT_GLOBAL);
+  const auto strict_status = gate.evaluateRuntime(
+      trajectory, nullptr, 0.0, 0.5, &strict);
+  EXPECT_EQ(strict_status.raw_action,
+            ego_planner::P5GateAction::REQUEST_EMERGENCY_STOP_CANDIDATE);
+  EXPECT_EQ(strict_status.raw_reason, ego_planner::P5GateReason::FUTURE_BAD);
+  EXPECT_GT(strict_status.bad_count, 0u);
 }
 
 TEST(P5RuntimeIntegrityGateTest,

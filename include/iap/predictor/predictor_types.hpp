@@ -114,6 +114,10 @@ struct PredictorParams {
   PredictorSourceMode source_mode = PredictorSourceMode::Fusion;
   PredictorGnssEpochPolicy gnss_epoch_policy =
       PredictorGnssEpochPolicy::Auto;
+  // Long direct execution batches are independent across unique physical
+  // samples. The execution snapshot sets this explicitly while reserving
+  // cores for controller and watchdog callbacks.
+  int execution_batch_worker_count = 1;
 };
 
 // Authoritative description of which spatial evidence the configured
@@ -475,6 +479,10 @@ struct GnssRiskSatelliteDiagnostic {
   std::size_t support_sample_count = 0;
   std::size_t support_covered_sample_count = 0;
   double unknown_support_fraction = 0.0;
+  double known_occupied_fraction = 0.0;
+  double kappa_lower = 0.0;
+  double kappa_upper = 0.0;
+  bool support_complete = false;
   double first_missing_support_distance_m =
       std::numeric_limits<double>::quiet_NaN();
   LocalMapSupportStatus first_missing_support_status =
@@ -505,6 +513,14 @@ struct ForwardRiskPointResult {
   ForwardRiskFailureReason failure_reason =
       ForwardRiskFailureReason::GNSS_SKY_UNKNOWN;
   PredictorQueryResult prediction;
+  double hpl_lower_m = std::numeric_limits<double>::infinity();
+  double vpl_lower_m = std::numeric_limits<double>::infinity();
+  double hpl_upper_m = std::numeric_limits<double>::infinity();
+  double vpl_upper_m = std::numeric_limits<double>::infinity();
+  double safety_ratio_lower = std::numeric_limits<double>::infinity();
+  double safety_ratio_upper = std::numeric_limits<double>::infinity();
+  bool pl_lower_available = false;
+  bool pl_upper_available = false;
   double safety_ratio = std::numeric_limits<double>::quiet_NaN();
   double fim_ratio = std::numeric_limits<double>::quiet_NaN();
   bool gnss_supported = false;

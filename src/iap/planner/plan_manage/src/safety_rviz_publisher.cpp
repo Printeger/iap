@@ -213,6 +213,12 @@ uint8_t floor_source_code(const std::string& source) {
   return 0u;
 }
 
+int p4_channel_marker_base(const uint64_t channel_id) {
+  // Two adjacent IDs belong to one stable channel (curve + label). Keep the
+  // prefix marker range separate and fold only at a large prime boundary.
+  return 100 + static_cast<int>((channel_id % 1000000007ULL) * 2ULL);
+}
+
 visualization_msgs::msg::Marker base_marker(
     const SafetyRvizPublisher::Config& config,
     const rclcpp::Time& stamp,
@@ -595,16 +601,36 @@ void SafetyRvizPublisher::publishP4Guides(
       shouldPublish(now_s, &last_p4_publish_s_)) {
     p4_astar_guides_pub_->publish(buildP4GuideMarkers(guides, config_, stamp));
   }
+  std::set<uint64_t> current_channel_ids;
+  for (const auto& guide : guides)
+    for (std::size_t index = 0;
+         index < guide.topology_candidates.size(); ++index)
+      current_channel_ids.insert(
+          index < guide.topology_channel_ids.size() &&
+                  guide.topology_channel_ids[index] > 0
+              ? guide.topology_channel_ids[index]
+              : static_cast<uint64_t>(index + 1));
   const bool has_topology_payload = std::any_of(
       guides.begin(), guides.end(), [](const SafetyVizP4Guide& guide) {
         return guide.forward_decision &&
                (!guide.topology_candidates.empty() ||
                 guide.observe_more_path.size() >= 2);
-      });
+      }) || !last_p4_topology_channel_ids_.empty();
   if (p4_topology_channels_pub_ && has_topology_payload &&
       shouldPublish(now_s, &last_p4_topology_publish_s_)) {
-    p4_topology_channels_pub_->publish(
-        buildP4TopologyChannelMarkers(guides, config_, stamp));
+    auto markers = buildP4TopologyChannelMarkers(guides, config_, stamp);
+    for (const uint64_t channel_id : last_p4_topology_channel_ids_)
+      if (current_channel_ids.count(channel_id) == 0u)
+        for (int offset = 0; offset < 2; ++offset) {
+          auto removed = base_marker(
+              config_, stamp, "p4_topology_channels",
+              p4_channel_marker_base(channel_id) + offset,
+              visualization_msgs::msg::Marker::LINE_STRIP);
+          removed.action = visualization_msgs::msg::Marker::DELETE;
+          markers.markers.push_back(std::move(removed));
+        }
+    p4_topology_channels_pub_->publish(markers);
+    last_p4_topology_channel_ids_ = std::move(current_channel_ids);
   }
 }
 
@@ -1579,6 +1605,9 @@ SafetyRvizPublisher::buildP4GuideMarkers(
                  "P4 local collision guide\n") +
                  (guide.risk_selected ? "risk guide" : "original guide") +
                  "\nratio: " + fmt_num(guide.path_length_ratio, 2) +
+                 "\nevidence age: " + fmt_num(
+                     stamp.seconds() - guide.risk_snapshot_stamp_s, 2) +
+                 " s" +
                  "\nreason: " + guide.reason;
     arr.markers.push_back(label);
   }
@@ -1592,10 +1621,6 @@ SafetyRvizPublisher::buildP4TopologyChannelMarkers(
     const rclcpp::Time& stamp) {
   visualization_msgs::msg::MarkerArray arr;
   constexpr char kNamespace[] = "p4_topology_channels";
-  auto clear = base_marker(config, stamp, kNamespace, 0,
-                           visualization_msgs::msg::Marker::LINE_STRIP);
-  clear.action = visualization_msgs::msg::Marker::DELETEALL;
-  arr.markers.push_back(std::move(clear));
 
   const std::array<std_msgs::msg::ColorRGBA, 4> channel_colors = {
       color(0.05f, 0.85f, 1.0f, 0.92f),
@@ -1604,7 +1629,6 @@ SafetyRvizPublisher::buildP4TopologyChannelMarkers(
       color(0.25f, 0.95f, 0.35f, 0.92f)};
   const auto marker_lifetime = rclcpp::Duration::from_seconds(
       std::max(1.5, 2.0 / config.publish_rate_hz));
-  int id = 1;
   for (const auto& guide : guides) {
     if (!guide.forward_decision) {
       continue;
@@ -1622,7 +1646,8 @@ SafetyRvizPublisher::buildP4TopologyChannelMarkers(
           : static_cast<uint64_t>(index + 1);
       const auto& channel_color = channel_colors[
           static_cast<std::size_t>((channel_id - 1) % channel_colors.size())];
-      auto line = base_marker(config, stamp, kNamespace, id++,
+      const int marker_base = p4_channel_marker_base(channel_id);
+      auto line = base_marker(config, stamp, kNamespace, marker_base,
                               visualization_msgs::msg::Marker::LINE_STRIP);
       line.scale.x = 0.12;
       line.color = channel_color;
@@ -1633,7 +1658,7 @@ SafetyRvizPublisher::buildP4TopologyChannelMarkers(
       arr.markers.push_back(std::move(line));
 
       auto label = base_marker(
-          config, stamp, kNamespace, id++,
+          config, stamp, kNamespace, marker_base + 1,
           visualization_msgs::msg::Marker::TEXT_VIEW_FACING);
       label.pose.position = point_msg(path[path.size() / 2]);
       label.pose.position.z += 0.35;
@@ -1650,7 +1675,7 @@ SafetyRvizPublisher::buildP4TopologyChannelMarkers(
 
     if (guide.observe_more_path.size() >= 2) {
       auto prefix = base_marker(
-          config, stamp, kNamespace, id++,
+          config, stamp, kNamespace, 1,
           visualization_msgs::msg::Marker::LINE_STRIP);
       prefix.scale.x = 0.16;
       prefix.color = color(1.0f, 1.0f, 1.0f, 1.0f);

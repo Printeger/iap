@@ -2816,25 +2816,26 @@ TEST(SafetyRvizPublisherTest,
       ego_planner::SafetyRvizPublisher::buildP4TopologyChannelMarkers(
           {guide}, config, rclcpp::Time(10, 0, RCL_ROS_TIME));
 
-  ASSERT_EQ(markers.markers.size(), 6u);
+  ASSERT_EQ(markers.markers.size(), 5u);
   EXPECT_EQ(markers.markers.front().action,
-            visualization_msgs::msg::Marker::DELETEALL);
+            visualization_msgs::msg::Marker::ADD);
   for (const auto& marker : markers.markers) {
     EXPECT_EQ(marker.ns, "p4_topology_channels");
   }
-  EXPECT_EQ(markers.markers[1].type,
+  EXPECT_EQ(markers.markers[0].type,
             visualization_msgs::msg::Marker::LINE_STRIP);
-  EXPECT_EQ(markers.markers[3].type,
+  EXPECT_EQ(markers.markers[2].type,
             visualization_msgs::msg::Marker::LINE_STRIP);
-  EXPECT_NE(markers.markers[1].color.r, markers.markers[3].color.r);
-  EXPECT_NE(markers.markers[1].color.b, markers.markers[3].color.b);
-  EXPECT_NE(markers.markers[2].text.find("P4 channel 2"), std::string::npos);
-  EXPECT_NE(markers.markers[4].text.find("P4 channel 1"), std::string::npos);
-  EXPECT_GT(markers.markers[1].lifetime.sec, 0);
-  EXPECT_EQ(markers.markers[1].lifetime, markers.markers[2].lifetime);
-  EXPECT_EQ(markers.markers[1].lifetime, markers.markers[5].lifetime);
-  EXPECT_DOUBLE_EQ(markers.markers[5].scale.x, 0.16);
-  EXPECT_EQ(markers.markers[5].points.size(), 2u);
+  EXPECT_NE(markers.markers[0].color.r, markers.markers[2].color.r);
+  EXPECT_NE(markers.markers[0].color.b, markers.markers[2].color.b);
+  EXPECT_NE(markers.markers[1].text.find("P4 channel 2"), std::string::npos);
+  EXPECT_NE(markers.markers[3].text.find("P4 channel 1"), std::string::npos);
+  EXPECT_NE(markers.markers[0].id, markers.markers[2].id);
+  EXPECT_GT(markers.markers[0].lifetime.sec, 0);
+  EXPECT_EQ(markers.markers[0].lifetime, markers.markers[1].lifetime);
+  EXPECT_EQ(markers.markers[0].lifetime, markers.markers[4].lifetime);
+  EXPECT_DOUBLE_EQ(markers.markers[4].scale.x, 0.16);
+  EXPECT_EQ(markers.markers[4].points.size(), 2u);
 }
 
 TEST(SafetyRvizPublisherTest,
@@ -2887,7 +2888,7 @@ TEST(SafetyRvizPublisherTest,
   executor.spin_some();
 
   ASSERT_EQ(topology_messages.size(), 1u);
-  EXPECT_GT(topology_messages.front().markers.size(), 1u);
+  EXPECT_FALSE(topology_messages.front().markers.empty());
 }
 
 TEST(SafetyRvizPublisherTest,
@@ -2921,8 +2922,8 @@ TEST(SafetyRvizPublisherTest,
   executor.spin_some();
 
   ASSERT_EQ(topology_messages.size(), 1u);
-  ASSERT_EQ(topology_messages.front().markers.size(), 2u);
-  EXPECT_DOUBLE_EQ(topology_messages.front().markers[1].scale.x, 0.16);
+  ASSERT_EQ(topology_messages.front().markers.size(), 1u);
+  EXPECT_DOUBLE_EQ(topology_messages.front().markers[0].scale.x, 0.16);
 }
 
 TEST(SafetyRvizPublisherTest,
@@ -3819,6 +3820,47 @@ TEST_F(P0RiskGridRuntimeStampTest,
   EXPECT_DOUBLE_EQ(current.stamp, 100.1);
   EXPECT_DOUBLE_EQ(current.hpl, 12.0);
   EXPECT_GE(current.hpl, current.hal);
+}
+
+TEST_F(P0RiskGridRuntimeStampTest,
+       ExecutionHistoryRetainsCausalAuthorityAcrossFutureStampBurst) {
+  const auto make_execution = [](const uint64_t id, const double stamp_s) {
+    auto execution = std::make_shared<P0ExecutionRiskSnapshot>();
+    execution->execution_snapshot_id = id;
+    execution->evaluation_time_s = stamp_s;
+    execution->risk_policy.frame_id = "map";
+    execution->risk_policy.stale_timeout_s = 1.0;
+    execution->geometry_id = "causal-history-test";
+    auto occupancy = std::make_shared<P0OccupancyEpoch>();
+    occupancy->cloud_stamp_s = stamp_s;
+    execution->occupancy = std::move(occupancy);
+    execution->integrity_anchor.current.stamp = stamp_s;
+    execution->integrity_anchor.current.icp_degenerate = false;
+    execution->integrity_anchor.current.icp_rmse = 0.01;
+    execution->integrity_anchor.current.icp_condition = 1.0;
+    execution->integrity_anchor.current.icp_gamma_lidar = 1.0;
+    execution->forward_risk_batch = [](const auto&) {
+      return iap::ForwardRiskBatchResult{};
+    };
+    return execution;
+  };
+
+  std::deque<std::shared_ptr<const P0ExecutionRiskSnapshot>> history;
+  const auto causal = make_execution(1u, 100.0);
+  P0RiskGridRuntime::appendExecutionRiskSnapshotHistory(&history, causal);
+  // Model the live executor burst: more than the former four-entry capacity
+  // can be published with stamps just ahead of a planner callback.
+  for (uint64_t id = 2u; id <= 22u; ++id) {
+    P0RiskGridRuntime::appendExecutionRiskSnapshotHistory(
+        &history, make_execution(id, 100.0 + 0.01 * id));
+  }
+
+  const auto selected =
+      P0RiskGridRuntime::selectExecutionRiskSnapshotHistoryForEvaluation(
+          history, nullptr, 100.0);
+  ASSERT_NE(selected, nullptr);
+  EXPECT_EQ(selected->execution_snapshot_id, causal->execution_snapshot_id);
+  EXPECT_TRUE(selected->localFreshAt(100.0));
 }
 
 TEST_F(P0RiskGridRuntimeStampTest,
@@ -5256,7 +5298,7 @@ TEST_F(P0RiskGridRuntimeStampTest,
 }
 
 TEST_F(P0RiskGridRuntimeStampTest,
-       NewGenerationSupersedesAnOlderSnapshotAlreadyInFlight) {
+       CompletedFreshSnapshotBridgesAQueuedNewerGenerationWithoutRegression) {
   ensure_rclcpp();
   auto node = std::make_shared<rclcpp::Node>(
       "p0_execution_snapshot_inflight_latest_wins_test",
@@ -5336,9 +5378,16 @@ TEST_F(P0RiskGridRuntimeStampTest,
         [&generation_five_started]() { return generation_five_started; }));
   }
 
-  EXPECT_EQ(runtime.acquireExecutionRiskSnapshot(), nullptr);
+  // A request arriving while the current generation is already building must
+  // not starve execution authority.  The completed, still-fresh generation is
+  // published as a bridge; the queued newer generation replaces it once it is
+  // complete.  Latest-wins applies to published authority, so an actually
+  // published newer generation may never be overwritten by an older result.
+  const auto bridge = runtime.acquireExecutionRiskSnapshot();
+  ASSERT_NE(bridge, nullptr);
+  EXPECT_EQ(bridge->source_identity.occupancy_generation, 4u);
   EXPECT_EQ(runtime.lastExecutionSnapshotAttempt().status,
-            P0ExecutionSnapshotAttemptStatus::SUPERSEDED);
+            P0ExecutionSnapshotAttemptStatus::PUBLISHED);
   {
     std::lock_guard<std::mutex> lock(gate_mutex);
     release_generation_five = true;
@@ -5355,6 +5404,63 @@ TEST_F(P0RiskGridRuntimeStampTest,
   const auto latest = runtime.acquireExecutionRiskSnapshot();
   ASSERT_NE(latest, nullptr);
   EXPECT_EQ(latest->source_identity.occupancy_generation, 5u);
+}
+
+TEST_F(P0RiskGridRuntimeStampTest,
+       ExecutionWorkerBindsNewestCausalIntegrityWhenLatestIsFuture) {
+  ensure_rclcpp();
+  auto node = std::make_shared<rclcpp::Node>(
+      "p0_execution_snapshot_causal_integrity_worker_test",
+      rclcpp::NodeOptions().allow_undeclared_parameters(false));
+  auto config = enabledConfig();
+  config.online_mapping_mode = true;
+  config.task_mode = iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT;
+  config.predictor_source_mode = iap::PredictorSourceMode::GnssOnly;
+  config.predictor_gnss_epoch_policy =
+      iap::PredictorGnssEpochPolicy::Required;
+  config.grid.use_fixed_origin = true;
+  config.grid.fixed_origin_w = Eigen::Vector3d(-1.5, -1.5, -1.5);
+  config.grid.size_x_m = 30.0;
+  config.grid.size_y_m = 30.0;
+  config.grid.size_z_m = 6.0;
+  config.grid.geometry_id = "planning_lattice_v1:runtime_test";
+  P0RiskGridRuntime runtime(node, config);
+  useProductionExecutionSnapshotPath(&runtime);
+
+  const double stamp_s = node->now().seconds();
+  seedValidInputs(&runtime, stamp_s, stamp_s);
+  seedGnssEpoch(&runtime, stamp_s);
+  appendCurrentIntegrityHistory(&runtime, stamp_s, 1.0, 1.0);
+  appendCurrentIntegrityHistory(&runtime, stamp_s + 0.1, 2.0, 2.0);
+  setOriginSeen(&runtime, true);
+  setOriginValid(&runtime, true);
+  setOriginStamp(&runtime, stamp_s);
+  const auto live_generation =
+      std::make_shared<std::atomic<std::uint64_t>>(9u);
+  const auto source_owner = std::make_shared<const int>(9);
+  runtime.setOccupancyEpochFactory(
+      [live_generation, source_owner, stamp_s]() {
+        return makeOccupancyEpochCapture(
+            live_generation, 9u, stamp_s, "map", {}, source_owner,
+            [source_owner]() { return source_owner; }, 0.2,
+            Eigen::Vector3d(-1.5, -1.5, -1.5));
+      });
+
+  runtime.notifyOccupancyCommitted(9u, stamp_s);
+  const auto deadline = std::chrono::steady_clock::now() +
+      std::chrono::seconds(2);
+  while (runtime.lastExecutionSnapshotAttempt().attempt_id == 0u &&
+         std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  }
+
+  const auto attempt = runtime.lastExecutionSnapshotAttempt();
+  EXPECT_EQ(attempt.status, P0ExecutionSnapshotAttemptStatus::PUBLISHED)
+      << attempt.reason;
+  const auto execution = runtime.acquireExecutionRiskSnapshot();
+  ASSERT_NE(execution, nullptr);
+  EXPECT_DOUBLE_EQ(execution->integrity_anchor.current.stamp, stamp_s);
+  EXPECT_DOUBLE_EQ(execution->integrity_anchor.current.hpl, 1.0);
 }
 
 TEST_F(P0RiskGridRuntimeStampTest,

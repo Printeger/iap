@@ -1167,6 +1167,44 @@ TEST(P4CollisionGuideIntegration,
 }
 
 TEST(P4CollisionGuideIntegration,
+  ForwardGuideWarmStartIsRecheckedInsideOriginalCorridor)
+{
+  const auto snapshot = makeSnapshot();
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureGuideFixture(map.get(), false);
+  const auto epoch = map->captureFrozenOccupancyEpoch();
+  ASSERT_NE(epoch, nullptr);
+  auto optimizer = makeOptimizer(
+    map, snapshot, true, false, P4RiskObjective::PROVIDER_BOTTLENECK_V2);
+  const std::vector<Eigen::Vector3d> coarse = {
+    Eigen::Vector3d(-4.0, 0.0, 0.0),
+    Eigen::Vector3d(4.0, 0.0, 0.0)};
+  const std::vector<Eigen::Vector3d> warm_start = {
+    coarse.front(), Eigen::Vector3d(-1.0, 0.4, 0.0),
+    Eigen::Vector3d(1.0, 0.4, 0.0), coarse.back()};
+  const ego_planner::P4ForwardClearanceQuery clearance =
+    [](const Eigen::Vector3d &point) {
+      ego_planner::P4ForwardClearanceSample sample;
+      sample.available = true;
+      sample.signed_margin_m =
+        std::abs(point.x()) < 0.8 && std::abs(point.y()) < 0.30
+        ? -0.01 : 0.10;
+      sample.escape_direction = Eigen::Vector3d(0.0, 1.0, 0.0);
+      return sample;
+    };
+
+  const auto refinement = optimizer->refineP4ForwardGuide(
+      coarse, epoch->diagnostic_query, 0.75, 100.0, clearance, 0.05,
+      0.0, &warm_start);
+
+  ASSERT_TRUE(refinement.success()) << refinement.reason;
+  EXPECT_TRUE(std::any_of(
+      refinement.path.begin(), refinement.path.end(),
+      [](const Eigen::Vector3d &point) { return point.y() >= 0.39; }));
+  EXPECT_GE(refinement.minimum_signed_margin_m, 0.05 - 1.0e-9);
+}
+
+TEST(P4CollisionGuideIntegration,
   ForwardGuideLateralRepairIsMirrorSymmetric)
 {
   const auto snapshot = makeSnapshot();
@@ -1211,6 +1249,133 @@ TEST(P4CollisionGuideIntegration,
     EXPECT_NEAR(positive.path[i].y(), -negative.path[i].y(), 1.0e-9);
     EXPECT_NEAR(positive.path[i].z(), negative.path[i].z(), 1.0e-9);
   }
+}
+
+TEST(P4CollisionGuideIntegration,
+  ForwardGuideReplacesBlockedInteriorWaypointSymmetrically)
+{
+  const auto snapshot = makeSnapshot();
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureGuideFixture(map.get(), false);
+  const auto epoch = map->captureFrozenOccupancyEpoch();
+  ASSERT_NE(epoch, nullptr);
+  auto optimizer = makeOptimizer(
+    map, snapshot, true, false, P4RiskObjective::PROVIDER_BOTTLENECK_V2);
+  const std::vector<Eigen::Vector3d> coarse = {
+    Eigen::Vector3d(-2.0, 0.0, 0.0),
+    Eigen::Vector3d(0.0, 0.0, 0.0),
+    Eigen::Vector3d(2.0, 0.0, 0.0)};
+  const auto make_clearance = [](const double escape_sign) {
+      return [escape_sign](const Eigen::Vector3d &point) {
+          ego_planner::P4ForwardClearanceSample sample;
+          sample.available = true;
+          sample.signed_margin_m =
+              std::hypot(point.x(), point.y()) - 0.25;
+          sample.escape_direction =
+              Eigen::Vector3d(0.0, escape_sign, 0.0);
+          sample.nearest_obstacle_position = Eigen::Vector3d::Zero();
+          sample.nearest_obstacle_identity = "blocked-interior-waypoint";
+          return sample;
+        };
+    };
+
+  const auto positive = optimizer->refineP4ForwardGuide(
+      coarse, epoch->diagnostic_query, 0.75, 100.0,
+      make_clearance(1.0), 0.05);
+  const auto negative = optimizer->refineP4ForwardGuide(
+      coarse, epoch->diagnostic_query, 0.75, 100.0,
+      make_clearance(-1.0), 0.05);
+
+  ASSERT_TRUE(positive.success()) << positive.reason;
+  ASSERT_TRUE(negative.success()) << negative.reason;
+  ASSERT_EQ(positive.path.size(), negative.path.size());
+  EXPECT_TRUE(std::any_of(
+      positive.path.begin(), positive.path.end(),
+      [](const Eigen::Vector3d &point) { return point.y() >= 0.30; }));
+  for (std::size_t index = 0; index < positive.path.size(); ++index)
+  {
+    EXPECT_NEAR(positive.path[index].x(), negative.path[index].x(), 1.0e-9);
+    EXPECT_NEAR(positive.path[index].y(), -negative.path[index].y(), 1.0e-9);
+    EXPECT_NEAR(positive.path[index].z(), negative.path[index].z(), 1.0e-9);
+  }
+}
+
+TEST(P4CollisionGuideIntegration,
+  ForwardGuideDropsUnsafeInteriorWaypointBeforeLocalAStar)
+{
+  const auto snapshot = makeSnapshot();
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureGuideFixture(map.get(), false);
+  const auto epoch = map->captureFrozenOccupancyEpoch();
+  ASSERT_NE(epoch, nullptr);
+  auto optimizer = makeOptimizer(
+    map, snapshot, true, false, P4RiskObjective::PROVIDER_BOTTLENECK_V2);
+  const std::vector<Eigen::Vector3d> coarse = {
+    Eigen::Vector3d(-4.0, 0.0, 0.0),
+    Eigen::Vector3d(0.0, 0.0, 0.0),
+    Eigen::Vector3d(4.0, 0.0, 0.0)};
+  const ego_planner::P4ForwardClearanceQuery clearance =
+    [](const Eigen::Vector3d &point) {
+      ego_planner::P4ForwardClearanceSample sample;
+      sample.available = true;
+      sample.signed_margin_m =
+        std::abs(point.x()) < 0.8 && std::abs(point.y()) < 0.30
+        ? -0.01 : 0.10;
+      sample.escape_direction = Eigen::Vector3d(0.0, 1.0, 0.0);
+      sample.nearest_obstacle_position = Eigen::Vector3d(point.x(), 0.0, 0.0);
+      sample.nearest_obstacle_identity = "blocked-interior-link-wall";
+      return sample;
+    };
+
+  const auto refinement = optimizer->refineP4ForwardGuide(
+      coarse, epoch->diagnostic_query, 0.75, 150.0, clearance, 0.05);
+
+  ASSERT_TRUE(refinement.success()) << refinement.reason;
+  EXPECT_TRUE(std::any_of(
+      refinement.path.begin(), refinement.path.end(),
+      [](const Eigen::Vector3d &point) { return std::abs(point.y()) >= 0.30; }));
+  EXPECT_FALSE(std::any_of(
+      refinement.path.begin(), refinement.path.end(),
+      [](const Eigen::Vector3d &point) {
+        return std::abs(point.x()) < 0.8 && std::abs(point.y()) < 0.30;
+      }));
+}
+
+TEST(P4CollisionGuideIntegration,
+  ForwardGuideRetainsForkHomotopyWhenUnsafeWaypointNeedsLocalAStar)
+{
+  const auto snapshot = makeSnapshot();
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureGuideFixture(map.get(), false);
+  const auto epoch = map->captureFrozenOccupancyEpoch();
+  ASSERT_NE(epoch, nullptr);
+  auto optimizer = makeOptimizer(
+    map, snapshot, true, false, P4RiskObjective::PROVIDER_BOTTLENECK_V2);
+  const std::vector<Eigen::Vector3d> coarse = {
+    Eigen::Vector3d(-3.0, 0.0, 0.0),
+    Eigen::Vector3d(0.0, 2.0, 0.0),
+    Eigen::Vector3d(3.0, 0.0, 0.0)};
+  const ego_planner::P4ForwardClearanceQuery clearance =
+    [](const Eigen::Vector3d &point) {
+      ego_planner::P4ForwardClearanceSample sample;
+      sample.available = true;
+      const double obstacle_distance =
+        (point.head<2>() - Eigen::Vector2d(0.0, 2.0)).norm();
+      sample.signed_margin_m = obstacle_distance - 0.25;
+      sample.escape_direction = Eigen::Vector3d(0.0, 1.0, 0.0);
+      sample.nearest_obstacle_position = Eigen::Vector3d(0.0, 2.0, 0.0);
+      sample.nearest_obstacle_identity = "fork-waypoint-obstacle";
+      return sample;
+    };
+
+  const auto refinement = optimizer->refineP4ForwardGuide(
+      coarse, epoch->diagnostic_query, 0.75, 300.0, clearance, 0.05);
+
+  ASSERT_TRUE(refinement.success()) << refinement.reason;
+  EXPECT_TRUE(std::any_of(
+      refinement.path.begin(), refinement.path.end(),
+      [](const Eigen::Vector3d &point) { return point.y() > 1.0; }));
+  EXPECT_GT(refinement.corridor_world_max.y(), 2.5);
 }
 
 TEST(P4CollisionGuideIntegration,
@@ -1322,6 +1487,51 @@ TEST(P4CollisionGuideIntegration,
   EXPECT_GT(refinement.raw_occupied_reject_count, 0);
   EXPECT_FALSE(refinement.replay_crop_hash.empty());
   EXPECT_GT(refinement.replay_crop_cell_flags.size(), 0u);
+}
+
+TEST(P4CollisionGuideIntegration,
+  BlockedCenterSuffixSelectsLateralEndpointAndRepairsConnectedPath)
+{
+  const auto snapshot = makeSnapshot();
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureGuideFixture(map.get(), false);
+  auto optimizer = makeOptimizer(
+    map, snapshot, true, false, P4RiskObjective::PROVIDER_BOTTLENECK_V2);
+  const std::vector<Eigen::Vector3d> coarse = {
+    Eigen::Vector3d(0.0, 0.0, 0.0),
+    Eigen::Vector3d(1.0, 0.0, 0.0),
+    Eigen::Vector3d(2.0, 0.0, 0.0)};
+  const GridMapOccupancyDiagnosticQuery blocked_center_suffix =
+    [](const Eigen::Vector3d & point) {
+      GridMapOccupancyDiagnostic diagnostic;
+      diagnostic.available = true;
+      diagnostic.observed = true;
+      const bool occupied = point.x() >= 0.10 &&
+        std::abs(point.y()) <= 0.30;
+      diagnostic.raw_occupied = occupied;
+      diagnostic.state = occupied
+        ? GridMapObservationState::OCCUPIED
+        : GridMapObservationState::OBSERVED_FREE;
+      return diagnostic;
+    };
+
+  const auto refinement = optimizer->refineP4ForwardGuide(
+      coarse, blocked_center_suffix, 0.75, 300.0, {}, 0.0, 0.50);
+
+  ASSERT_TRUE(refinement.success()) << refinement.reason;
+  EXPECT_GT(std::abs(refinement.effective_suffix_target.y()), 0.30);
+  EXPECT_TRUE(std::any_of(
+      refinement.path.begin(), refinement.path.end(),
+      [](const Eigen::Vector3d &point) {
+        return std::abs(point.y()) > 0.30;
+      }));
+  EXPECT_TRUE(std::all_of(
+      refinement.path.begin(), refinement.path.end(),
+      [&blocked_center_suffix](const Eigen::Vector3d &point) {
+        const auto occupancy = blocked_center_suffix(point);
+        return occupancy.available && !occupancy.raw_occupied &&
+          !occupancy.inflated_occupied;
+      }));
 }
 
 // The collision-triggered P4 seam was removed. Forward-route tests now own

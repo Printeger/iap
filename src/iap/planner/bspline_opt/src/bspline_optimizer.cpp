@@ -696,7 +696,8 @@ namespace ego_planner
       const double compute_budget_ms,
       P4ForwardClearanceQuery clearance_query,
       const double planning_clearance_buffer_m,
-      const double minimum_stopping_progress_m)
+      const double minimum_stopping_progress_m,
+      const std::vector<Eigen::Vector3d> *warm_start_guide)
   {
     const auto started = std::chrono::steady_clock::now();
     P4ForwardRefinementResult result;
@@ -733,16 +734,35 @@ namespace ego_planner
     int raw_occupied_reject_count = 0;
     int inflated_occupied_reject_count = 0;
     int clearance_reject_count = 0;
-    const auto clearance_at = [&clearance_query, &clearance_unavailable](
+    constexpr double kReplayResolutionM = 0.1;
+    // Keep the search lattice aligned with the persisted replay crop.  The
+    // 0.1 m cells are part of the refinement evidence contract: coarser cells
+    // can step over thin occupied/clearance fixtures and change the typed
+    // failure classification.
+    constexpr double kAStarResolutionM = 0.1;
+    constexpr double kClearPathSampleM = 0.05;
+    constexpr double kLateralOffsetStepM = 0.1;
+    constexpr double kMinimumSuffixProgressM = 0.10;
+    std::map<std::array<double, 3>,
+             std::optional<P4ForwardClearanceSample>> clearance_cache;
+    const auto clearance_at = [&clearance_query, &clearance_unavailable,
+        &clearance_cache](
         const Eigen::Vector3d & point) -> std::optional<P4ForwardClearanceSample>
       {
         if (!clearance_query) return std::nullopt;
+        const std::array<double, 3> key{
+            point.x(), point.y(), point.z()};
+        const auto cached = clearance_cache.find(key);
+        if (cached != clearance_cache.end())
+          return cached->second;
         auto sample = clearance_query(point);
         if (!sample.available || !std::isfinite(sample.signed_margin_m))
         {
           clearance_unavailable = true;
+          clearance_cache.emplace(key, std::nullopt);
           return std::nullopt;
         }
+        clearance_cache.emplace(key, sample);
         return sample;
       };
     const auto deadline_query =
@@ -793,10 +813,39 @@ namespace ego_planner
           }
           return diagnostic;
         };
-    constexpr double kFineResolutionM = 0.1;
-    constexpr double kClearPathSampleM = 0.05;
-    constexpr double kMinimumSuffixProgressM = 0.10;
+    const auto distance_to_original_corridor = [&coarse_guide](
+        const Eigen::Vector3d &point) {
+      double minimum_distance = std::numeric_limits<double>::infinity();
+      for (std::size_t index = 1u; index < coarse_guide.size(); ++index)
+      {
+        const Eigen::Vector3d from = coarse_guide[index - 1u];
+        const Eigen::Vector3d segment = coarse_guide[index] - from;
+        const double squared_length = segment.squaredNorm();
+        const double alpha = squared_length > 1.0e-12
+            ? std::clamp((point - from).dot(segment) / squared_length,
+                         0.0, 1.0)
+            : 0.0;
+        minimum_distance = std::min(
+            minimum_distance, (point - (from + alpha * segment)).norm());
+      }
+      return minimum_distance;
+    };
     std::vector<Eigen::Vector3d> working_guide = coarse_guide;
+    if (warm_start_guide && warm_start_guide->size() >= 2u &&
+        (warm_start_guide->front() - coarse_guide.front()).norm() <=
+          1.0e-6 &&
+        (warm_start_guide->back() - coarse_guide.back()).norm() <= 1.0e-6 &&
+        std::all_of(
+          warm_start_guide->begin(), warm_start_guide->end(),
+          [&distance_to_original_corridor, corridor_radius_m](
+              const Eigen::Vector3d &point) {
+            return point.allFinite() &&
+              distance_to_original_corridor(point) <=
+                corridor_radius_m + 1.0e-9;
+          }))
+    {
+      working_guide = *warm_start_guide;
+    }
     result.original_suffix_target = coarse_guide.back();
     result.effective_suffix_target = coarse_guide.back();
     const auto capture_replay_crop =
@@ -815,7 +864,7 @@ namespace ego_planner
               : from.cwiseMax(to) +
                     Eigen::Vector3d::Constant(corridor_radius_m);
           const Eigen::Vector3i dimensions =
-              ((crop_max - crop_min) / kFineResolutionM).array().ceil()
+              ((crop_max - crop_min) / kReplayResolutionM).array().ceil()
                   .cast<int>().matrix() + Eigen::Vector3i::Ones();
           if ((dimensions.array() <= 0).any()) return;
           const std::size_t cell_count =
@@ -828,7 +877,7 @@ namespace ego_planner
           if (cell_count == 0u || cell_count > 100000u) return;
           result.replay_crop_origin = crop_min;
           result.replay_crop_dimensions = dimensions;
-          result.replay_crop_resolution_m = kFineResolutionM;
+          result.replay_crop_resolution_m = kReplayResolutionM;
           result.replay_crop_cell_flags.clear();
           result.replay_crop_cell_flags.reserve(cell_count);
           const Eigen::Vector3d segment = to - from;
@@ -847,7 +896,7 @@ namespace ego_planner
                   return;
                 }
                 const Eigen::Vector3d point = crop_min +
-                    kFineResolutionM * Eigen::Vector3d(x, y, z);
+                    kReplayResolutionM * Eigen::Vector3d(x, y, z);
                 const auto occupancy = frozen_occupancy_query(point);
                 std::uint8_t flags = occupancy.available ? 0x01u : 0x00u;
                 if (occupancy.raw_occupied) flags |= 0x02u;
@@ -880,7 +929,7 @@ namespace ego_planner
                    << dimensions.y() << 'x' << dimensions.z() << std::dec
                    << ':' << std::setprecision(17) << crop_min.x() << '/'
                    << crop_min.y() << '/' << crop_min.z() << ':'
-                   << kFineResolutionM;
+                   << kReplayResolutionM;
           result.replay_crop_hash = identity.str();
         };
 
@@ -964,6 +1013,71 @@ namespace ego_planner
           break;
         }
       }
+      // The selected topology can remain connected even when every sampled
+      // point on its centre-line suffix is occupied.  Search the same
+      // bounded corridor laterally for a replacement stopping endpoint,
+      // then let the common segment repair below prove connectivity with its
+      // deterministic scan / local A*.  The lateral basis is derived from
+      // the guide tangent, so mirrored scenes exercise identical logic.
+      for (std::size_t reverse_segment = working_guide.size() - 1u;
+           reverse_segment > 0u && !found; --reverse_segment)
+      {
+        const std::size_t segment_start = reverse_segment - 1u;
+        const Eigen::Vector3d from = working_guide[segment_start];
+        const Eigen::Vector3d to = working_guide[reverse_segment];
+        const Eigen::Vector3d segment = to - from;
+        const double segment_length = segment.norm();
+        if (segment_length <= 1.0e-9)
+          continue;
+        Eigen::Vector3d tangent = segment;
+        tangent.z() = 0.0;
+        Eigen::Vector3d lateral(-tangent.y(), tangent.x(), 0.0);
+        if (lateral.norm() <= 1.0e-9)
+          lateral = Eigen::Vector3d::UnitX();
+        else
+          lateral.normalize();
+        const int sample_count = std::max(
+            1, static_cast<int>(std::ceil(segment_length /
+                                         kClearPathSampleM)));
+        for (int sample = sample_count - 1; sample >= 1 && !found; --sample)
+        {
+          if (std::chrono::steady_clock::now() >= deadline)
+            return finish(P4ForwardRefinementStatus::BUDGET_EXHAUSTED,
+                          segment_start, target);
+          const double alpha = static_cast<double>(sample) / sample_count;
+          const Eigen::Vector3d base = from + segment * alpha;
+          const double progress_m = cumulative_progress_m[segment_start] +
+              alpha * segment_length;
+          if (progress_m + 1.0e-9 < kMinimumSuffixProgressM ||
+              progress_m + 1.0e-9 < minimum_stopping_progress_m)
+            continue;
+          std::array<double, 2> signs{1.0, -1.0};
+          if (clearance_query)
+          {
+            const auto clearance = clearance_at(base);
+            if (clearance && clearance->escape_direction.allFinite() &&
+                clearance->escape_direction.dot(lateral) < 0.0)
+              std::swap(signs[0], signs[1]);
+          }
+          for (double offset = kLateralOffsetStepM;
+               offset <= corridor_radius_m + 1.0e-9 && !found;
+               offset += kLateralOffsetStepM)
+            for (const double sign : signs)
+            {
+              const Eigen::Vector3d candidate =
+                  base + sign * offset * lateral;
+              if (!endpoint_usable(candidate, progress_m))
+                continue;
+              working_guide.resize(reverse_segment + 1u);
+              working_guide.back() = candidate;
+              result.effective_suffix_target = candidate;
+              result.target_suffix_backoff_m =
+                  original_guide_length_m - progress_m;
+              found = true;
+              break;
+            }
+        }
+      }
       if (!found)
       {
         result.raw_occupied_reject_count = raw_occupied_reject_count;
@@ -982,12 +1096,111 @@ namespace ego_planner
       }
     }
 
+    const auto link_clear = [&](const Eigen::Vector3d &a,
+                                const Eigen::Vector3d &b) {
+        const int count = std::max(
+            1, static_cast<int>(std::ceil((b - a).norm() /
+                                         kClearPathSampleM)));
+        for (int sample = 1; sample <= count; ++sample)
+        {
+          if (std::chrono::steady_clock::now() >= deadline)
+            return false;
+          const Eigen::Vector3d point = a + (b - a) *
+              (static_cast<double>(sample) / count);
+          const auto occupancy = frozen_occupancy_query(point);
+          if (!occupancy.available || occupancy.raw_occupied ||
+              occupancy.inflated_occupied ||
+              occupancy.state == GridMapObservationState::OCCUPIED)
+            return false;
+          if (clearance_query)
+          {
+            const auto clearance = clearance_at(point);
+            if (!clearance || clearance->signed_margin_m + 1.0e-9 <
+                  planning_clearance_buffer_m)
+              return false;
+          }
+        }
+        return true;
+      };
+
+    // A topology waypoint is a guide, not a mandatory task point.  Replace
+    // an obstructed interior waypoint inside its corridor when both adjacent
+    // links remain connected and satisfy the exact same occupancy/clearance
+    // predicate.  Escape evidence only determines deterministic search
+    // order, so the operation is invariant under scene mirroring.
+    for (std::size_t index = 1u; index + 1u < working_guide.size();)
+    {
+      const Eigen::Vector3d bad_waypoint = working_guide[index];
+      if (link_clear(bad_waypoint, bad_waypoint))
+      {
+        ++index;
+        continue;
+      }
+      Eigen::Vector3d tangent =
+          working_guide[index + 1u] - working_guide[index - 1u];
+      tangent.z() = 0.0;
+      Eigen::Vector3d lateral(-tangent.y(), tangent.x(), 0.0);
+      if (lateral.norm() <= 1.0e-9)
+        lateral = Eigen::Vector3d::UnitX();
+      else
+        lateral.normalize();
+      std::array<double, 2> signs{1.0, -1.0};
+      if (clearance_query)
+      {
+        const auto clearance = clearance_at(bad_waypoint);
+        if (clearance && clearance->escape_direction.allFinite() &&
+            clearance->escape_direction.dot(lateral) < 0.0)
+          std::swap(signs[0], signs[1]);
+      }
+      bool replacement_found = false;
+      for (double offset = kLateralOffsetStepM;
+           offset <= corridor_radius_m + 1.0e-9 && !replacement_found;
+           offset += kLateralOffsetStepM)
+        for (const double sign : signs)
+        {
+          const Eigen::Vector3d candidate =
+              bad_waypoint + sign * offset * lateral;
+          // Preserve the selected homotopy as soon as the replacement point
+          // itself satisfies the common envelope. Adjacent links are repaired
+          // by the bounded local A* below; requiring both straight links here
+          // discards valid curved fork corridors and collapses them onto the
+          // centre line.
+          if (link_clear(candidate, candidate))
+          {
+            working_guide[index] = candidate;
+            replacement_found = true;
+            break;
+          }
+        }
+      if (replacement_found)
+      {
+        ++index;
+        continue;
+      }
+      // The waypoint is not a task constraint.  Keeping an unsafe point here
+      // makes the segment fallback start or end A* inside the forbidden
+      // envelope, where bounded endpoint adjustment cannot recover.  Remove
+      // it and let the later local A* reconnect its two safe neighbours in
+      // the same bounded corridor.
+      working_guide.erase(
+          working_guide.begin() + static_cast<std::ptrdiff_t>(index));
+    }
+
     Eigen::Vector3d minimum = working_guide.front();
     Eigen::Vector3d maximum = working_guide.front();
     for (const auto &point : working_guide)
     {
       if (!point.allFinite())
         return finish(P4ForwardRefinementStatus::INVALID_INPUT);
+      minimum = minimum.cwiseMin(point);
+      maximum = maximum.cwiseMax(point);
+    }
+    // Removed unsafe waypoints are not mandatory endpoints, but they still
+    // define the selected topology corridor.  Retain the original guide in
+    // the search-pool bounds so reconnecting adjacent safe neighbours does
+    // not silently collapse an upper/lower fork back onto the straight line.
+    for (const auto &point : coarse_guide)
+    {
       minimum = minimum.cwiseMin(point);
       maximum = maximum.cwiseMax(point);
     }
@@ -1070,20 +1283,52 @@ namespace ego_planner
       return finish(P4ForwardRefinementStatus::SUCCESS);
     }
 
+    // Topology repair is a lateral operation.  Keep enough vertical room for
+    // small optimizer deviations while avoiding a cubic 3-D search volume
+    // through canopy space that the guide never requested.
+    const double vertical_corridor_radius_m = std::min(
+        corridor_radius_m, 0.5);
+    const Eigen::Vector3d corridor_radii(
+        corridor_radius_m, corridor_radius_m,
+        vertical_corridor_radius_m);
     const Eigen::Vector3d search_extent =
-        maximum - minimum +
-        Eigen::Vector3d::Constant(2.0 * corridor_radius_m);
-    result.corridor_world_min =
-        minimum - Eigen::Vector3d::Constant(corridor_radius_m);
-    result.corridor_world_max =
-        maximum + Eigen::Vector3d::Constant(corridor_radius_m);
+        maximum - minimum + 2.0 * corridor_radii;
+    result.corridor_world_min = minimum - corridor_radii;
+    result.corridor_world_max = maximum + corridor_radii;
     const Eigen::Vector3i pool_size =
-        (search_extent / kFineResolutionM).array().ceil().cast<int>().matrix() +
+        (search_extent / kAStarResolutionM).array().ceil().cast<int>().matrix() +
         Eigen::Vector3i::Constant(8);
     auto fine_astar = std::make_shared<AStar>();
     fine_astar->initGridMap(
         grid_map_, pool_size.cwiseMax(Eigen::Vector3i::Constant(12)));
+    fine_astar->setAxisAlignedVerticalMotion(true);
     fine_astar->setFrozenOccupancyQuery(deadline_query);
+    const auto checkpoint_refinement = [&result, &working_guide,
+        &distance_to_original_corridor, corridor_radius_m](
+        const std::size_t segment_start,
+        const std::vector<Eigen::Vector3d> &frontier_path) {
+      std::vector<Eigen::Vector3d> checkpoint = result.path;
+      const auto append = [&checkpoint](const Eigen::Vector3d &point) {
+        if (checkpoint.empty() ||
+            (point - checkpoint.back()).norm() > 1.0e-6)
+          checkpoint.push_back(point);
+      };
+      for (const auto &point : frontier_path)
+      {
+        if (!point.allFinite() ||
+            distance_to_original_corridor(point) >
+              corridor_radius_m + 1.0e-9)
+          break;
+        append(point);
+      }
+      for (std::size_t index = segment_start + 1u;
+           index < working_guide.size(); ++index)
+        append(working_guide[index]);
+      if (checkpoint.size() >= 2u &&
+          (checkpoint.front() - working_guide.front()).norm() <= 1.0e-6 &&
+          (checkpoint.back() - working_guide.back()).norm() <= 1.0e-6)
+        result.resume_guide = std::move(checkpoint);
+    };
     for (std::size_t segment = 1; segment < working_guide.size(); ++segment)
     {
       if (std::chrono::steady_clock::now() >= deadline)
@@ -1121,37 +1366,11 @@ namespace ego_planner
       if (result.escape_direction.allFinite() &&
           result.escape_direction.dot(lateral) < 0.0)
         std::swap(signs[0], signs[1]);
-      const auto link_clear = [&](const Eigen::Vector3d &a,
-                                  const Eigen::Vector3d &b) {
-          const int count = std::max(
-              1, static_cast<int>(std::ceil((b - a).norm() /
-                                           kClearPathSampleM)));
-          for (int sample = 1; sample <= count; ++sample)
-          {
-            if (std::chrono::steady_clock::now() >= deadline)
-              return false;
-            const Eigen::Vector3d point = a + (b - a) *
-                (static_cast<double>(sample) / count);
-            const auto occupancy = frozen_occupancy_query(point);
-            if (!occupancy.available || occupancy.raw_occupied ||
-                occupancy.inflated_occupied ||
-                occupancy.state == GridMapObservationState::OCCUPIED)
-              return false;
-            if (clearance_query)
-            {
-              const auto clearance = clearance_at(point);
-              if (!clearance || clearance->signed_margin_m + 1.0e-9 <
-                    planning_clearance_buffer_m)
-                return false;
-            }
-          }
-          return true;
-        };
       bool lateral_repair_found = false;
-      for (double offset = kClearPathSampleM;
+      for (double offset = kLateralOffsetStepM;
            offset <= corridor_radius_m + 1.0e-9 &&
                !lateral_repair_found;
-           offset += kClearPathSampleM)
+           offset += kLateralOffsetStepM)
         for (const double sign : signs)
         {
           const Eigen::Vector3d waypoint =
@@ -1171,8 +1390,14 @@ namespace ego_planner
         }
       if (lateral_repair_found)
         continue;
+      const double remaining_search_s = std::chrono::duration<double>(
+          deadline - std::chrono::steady_clock::now()).count();
+      if (remaining_search_s <= 0.0)
+        return finish(P4ForwardRefinementStatus::BUDGET_EXHAUSTED,
+                      segment - 1u, from);
+      fine_astar->setSearchTimeLimit(remaining_search_s);
       const bool astar_success = fine_astar->AstarSearchOriginal(
-          kFineResolutionM, from, to);
+          kAStarResolutionM, from, to);
       const auto &metrics = fine_astar->getLastP4Metrics();
       result.astar_original_start = metrics.original_start;
       result.astar_original_end = metrics.original_end;
@@ -1197,8 +1422,13 @@ namespace ego_planner
             inflated_occupied_reject_count;
         result.clearance_reject_count = clearance_reject_count;
         if (deadline_hit || std::chrono::steady_clock::now() >= deadline)
+        {
+          checkpoint_refinement(
+              segment - 1u,
+              fine_astar->getLastReachableFrontierPath());
           return finish(P4ForwardRefinementStatus::BUDGET_EXHAUSTED,
                         segment - 1u, from);
+        }
         capture_replay_crop(from, to);
         if (occupancy_unavailable)
           return finish(P4ForwardRefinementStatus::OCCUPANCY_UNAVAILABLE,
@@ -1216,8 +1446,13 @@ namespace ego_planner
               P4ForwardRefinementStatus::SEARCH_POOL_BOUNDS_INVALID,
               segment - 1u, metrics.adjusted_end);
         if (metrics.failure_kind == P4AStarFailureKind::TIMEOUT)
+        {
+          checkpoint_refinement(
+              segment - 1u,
+              fine_astar->getLastReachableFrontierPath());
           return finish(P4ForwardRefinementStatus::BUDGET_EXHAUSTED,
                         segment - 1u, metrics.nearest_reachable_frontier);
+        }
         // These classifications are only asserted when the failed search had
         // one physical blocking family.  Merely touching an obstacle while
         // exploring does not prove that obstacle disconnected the graph.
@@ -1240,23 +1475,21 @@ namespace ego_planner
                       segment - 1u, from);
       }
       if (std::chrono::steady_clock::now() >= deadline)
+      {
+        checkpoint_refinement(segment - 1u, fine_astar->getPath());
         return finish(P4ForwardRefinementStatus::BUDGET_EXHAUSTED,
                       segment - 1u, to);
+      }
       const auto path = fine_astar->getPath();
       if (path.size() < 2)
         return finish(P4ForwardRefinementStatus::ASTAR_INVALID_RESULT,
                       segment - 1u, to);
-      const Eigen::Vector3d direction = to - from;
-      const double squared_length = direction.squaredNorm();
       if (result.path.empty() ||
           (from - result.path.back()).norm() > 1.0e-6)
         result.path.push_back(from);
       for (const auto &point : path)
       {
-        const double alpha = std::clamp(
-            (point - from).dot(direction) / squared_length, 0.0, 1.0);
-        const Eigen::Vector3d closest = from + alpha * direction;
-        if ((point - closest).norm() > corridor_radius_m)
+        if (distance_to_original_corridor(point) > corridor_radius_m)
           return finish(P4ForwardRefinementStatus::CORRIDOR_BOUNDARY_CLOSED,
                         segment - 1u, point);
         if (result.path.empty() ||
@@ -1285,8 +1518,11 @@ namespace ego_planner
       for (int sample = 1; sample <= count; ++sample)
       {
         if (std::chrono::steady_clock::now() >= deadline)
+        {
+          result.resume_guide = result.path;
           return finish(P4ForwardRefinementStatus::BUDGET_EXHAUSTED,
                         segment - 1u, checked_path.back());
+        }
         const Eigen::Vector3d point = from + (to - from) *
             (static_cast<double>(sample) / count);
         const auto occupancy = frozen_occupancy_query(point);

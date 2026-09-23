@@ -363,6 +363,42 @@ For each candidate trajectory τ:
   identities. Budget exhaustion or loss of local proof activates the existing
   certified brake before the approved boundary.
 
+## Frozen beam evidence and interval channel decisions
+
+- The first-hit renderer publishes `/iap/simulator/lidar_beam_evidence` with
+  `HIT`, `NO_RETURN`, and `INVALID` outcomes plus the complete sampling,
+  range, frame, timestamp, model-version, and content-hash contract. The local
+  map associates it with the hit cloud only when both timestamps match.
+- `RegisteredLidarWindow` accumulates explicit rays into immutable two-bit
+  `UNKNOWN` / `OBSERVED_FREE` / `RAW_OCCUPIED` snapshots. Hit prefixes and
+  no-return beams establish free space; hit endpoints remain raw occupied;
+  missing, invalid, mismatched, out-of-range, or free evidence older than one
+  second is fail-closed. Collision inflation is never GNSS raw obstruction.
+- Each frozen occupancy epoch owns the accumulated snapshot. GNSS evaluates
+  each satellite on one LOS sample set and reruns the real PL solver twice:
+  unknown LOS is open only for the diagnostic lower bound, while satellites
+  with incomplete support are excluded from the formal upper solve. Too few
+  remaining satellites makes the upper PL unavailable, never a finite
+  penalty. PL/AL authorization always uses the upper bound.
+- Final curves store lower/upper peak, rolling, duration, integral, and
+  recovery metrics. After unchanged hard gates and authorization groups, a
+  channel is ordered only when one complete interval is strictly below the
+  other; overlap is `PARTIAL_COMPARISON`. Whole-grid unknown fraction is
+  diagnostic only. Final-curve, clearance-tube, every braking tube, and GNSS
+  LOS support are route-scoped formal evidence.
+- When two incomplete channels cannot yet be ordered, the independent
+  observation planner scores positions in their common pre-divergence
+  corridor by the minimum normalized information gain across channels. It
+  uses only frozen raw occluders and the registered sensor model, reserves the
+  complete stopping distance, and has no route-winner authority. The returned
+  guide still goes through the existing stopped-B-spline collision,
+  clearance, dynamics, brake, assurance, and P5 gates. No positive feasible
+  gain yields `OBSERVATION_UNAVAILABLE_SENSOR_GEOMETRY` and HOLD.
+
+Historical captures made before the beam-evidence topic contain only
+decision-level data and are labeled `non_exact_replay_for_local_evidence`;
+they must not be presented as exact frozen-evidence replay.
+
 ## G) Upgrade items (optional, after baseline closes the loop)
 - trunk landmarks + TDOP
 - full ARAIM hypothesis set beyond per-sat gating

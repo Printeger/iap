@@ -14,9 +14,24 @@
 #include <set>
 #include <sstream>
 #include <thread>
+#include <type_traits>
 
 namespace
 {
+
+template<typename T, typename = void>
+struct HasGnssSatelliteVector : std::false_type {};
+
+template<typename T>
+struct HasGnssSatelliteVector<T, std::void_t<decltype(
+    std::declval<T>().gnss_satellites)>> : std::true_type {};
+
+TEST(P4ForwardRiskSampleInterface,
+     DoesNotCarryNestedSatelliteDiagnosticsAcrossTheWorkerBoundary)
+{
+  EXPECT_FALSE(HasGnssSatelliteVector<
+      ego_planner::P4ForwardRiskSample>::value);
+}
 
 TEST(P4ChannelSlotIdentity,
      MatchesCorridorsAcrossReorderingAndAllocatesOnlyNewSlots)
@@ -44,6 +59,111 @@ TEST(P4ChannelSlotIdentity,
   EXPECT_EQ(slots[2].stable_channel_id, 100u);
 }
 
+TEST(P4ChannelSlotIdentity,
+     MatchesTheSameMirroredCorridorsAcrossDifferentPathSampling)
+{
+  const std::vector<Eigen::Vector3d> sparse_left{
+      {0.0, 0.0, 1.0}, {2.0, 1.0, 1.0}, {4.0, 0.0, 1.0}};
+  const std::vector<Eigen::Vector3d> sparse_right{
+      {0.0, 0.0, 1.0}, {2.0, -1.0, 1.0}, {4.0, 0.0, 1.0}};
+  std::vector<ego_planner::P4ChannelSlot> previous(2);
+  previous[0].stable_channel_id = 41;
+  previous[0].topology_path = sparse_left;
+  previous[1].stable_channel_id = 42;
+  previous[1].topology_path = sparse_right;
+
+  const std::vector<Eigen::Vector3d> dense_left{
+      {0.0, 0.0, 1.0}, {0.5, 0.25, 1.0}, {1.0, 0.5, 1.0},
+      {1.5, 0.75, 1.0}, {2.0, 1.0, 1.0}, {2.5, 0.75, 1.0},
+      {3.0, 0.5, 1.0}, {3.5, 0.25, 1.0}, {4.0, 0.0, 1.0}};
+  auto dense_right = dense_left;
+  for (auto &point : dense_right) point.y() = -point.y();
+
+  const auto slots = ego_planner::assignP4StableChannelSlots(
+      {dense_right, dense_left}, previous, 100, 0.05);
+  ASSERT_EQ(slots.size(), 2u);
+  EXPECT_EQ(slots[0].stable_channel_id, 42u);
+  EXPECT_EQ(slots[1].stable_channel_id, 41u);
+}
+
+TEST(P4ChannelSlotIdentity,
+     GlobalAssignmentDoesNotLetAmbiguousCorridorStealUniqueWarmStart)
+{
+  const auto corridor = [](const double y) {
+      return std::vector<Eigen::Vector3d>{
+          {0.0, y, 1.0}, {1.0, y, 1.0}, {2.0, y, 1.0}};
+    };
+  std::vector<ego_planner::P4ChannelSlot> previous(2);
+  previous[0].stable_channel_id = 17u;
+  previous[0].topology_path = corridor(0.0);
+  previous[0].state =
+      ego_planner::P4ChannelEvaluationState::PARTIAL_COMPARISON;
+  previous[0].refinement_warm_start = corridor(-0.2);
+  previous[1].stable_channel_id = 29u;
+  previous[1].topology_path = corridor(0.4);
+  previous[1].state =
+      ego_planner::P4ChannelEvaluationState::PARTIAL_COMPARISON;
+  previous[1].refinement_warm_start = corridor(0.1);
+
+  // The first path can match either prior slot and is closer to 17.  The
+  // second can only match 17.  Per-path greedy matching therefore allocates
+  // a new ID and discards one resumable refinement; a global assignment
+  // preserves both stable identities and their warm starts.
+  const auto slots = ego_planner::assignP4StableChannelSlots(
+      {corridor(0.1), corridor(-0.2)}, previous, 100u, 0.5);
+
+  ASSERT_EQ(slots.size(), 2u);
+  EXPECT_EQ(slots[0].stable_channel_id, 29u);
+  EXPECT_EQ(slots[1].stable_channel_id, 17u);
+  EXPECT_FALSE(slots[0].refinement_warm_start.empty());
+  EXPECT_FALSE(slots[1].refinement_warm_start.empty());
+}
+
+TEST(P4ChannelSlotIdentity,
+     KeepsIdentityWhenTheRollingWindowAdvancesAlongTheSameCorridor)
+{
+  const std::vector<Eigen::Vector3d> prior_low{
+      {0.0, -2.0, 1.0}, {2.0, -2.0, 1.0}, {4.0, -2.0, 1.0},
+      {6.0, -2.0, 1.0}, {8.0, -2.0, 1.0}, {10.0, -2.0, 1.0}};
+  const std::vector<Eigen::Vector3d> prior_high{
+      {0.0, 2.0, 1.0}, {2.0, 2.0, 1.0}, {4.0, 2.0, 1.0},
+      {6.0, 2.0, 1.0}, {8.0, 2.0, 1.0}, {10.0, 2.0, 1.0}};
+  std::vector<ego_planner::P4ChannelSlot> previous(2);
+  previous[0].stable_channel_id = 501u;
+  previous[0].topology_path = prior_low;
+  previous[1].stable_channel_id = 502u;
+  previous[1].topology_path = prior_high;
+
+  const std::vector<Eigen::Vector3d> advanced_high{
+      {4.0, 2.02, 1.0}, {6.0, 2.02, 1.0}, {8.0, 2.02, 1.0},
+      {10.0, 2.02, 1.0}, {12.0, 2.02, 1.0}};
+  const std::vector<Eigen::Vector3d> advanced_low{
+      {4.0, -2.02, 1.0}, {6.0, -2.02, 1.0}, {8.0, -2.02, 1.0},
+      {10.0, -2.02, 1.0}, {12.0, -2.02, 1.0}};
+
+  const auto slots = ego_planner::assignP4StableChannelSlots(
+      {advanced_high, advanced_low}, previous, 900u, 0.1);
+
+  ASSERT_EQ(slots.size(), 2u);
+  EXPECT_EQ(slots[0].stable_channel_id, 502u);
+  EXPECT_EQ(slots[1].stable_channel_id, 501u);
+}
+
+TEST(P4ChannelSlotInvalidation,
+     OccupancyDeltaBetweenSparseWaypointsIntersectsSweptCorridor)
+{
+  const std::vector<Eigen::Vector3d> sparse_corridor = {
+      Eigen::Vector3d(0.0, 0.0, 1.0),
+      Eigen::Vector3d(2.0, 0.0, 1.0)};
+
+  EXPECT_TRUE(ego_planner::p4ChannelCorridorIntersectsPoint(
+      sparse_corridor, Eigen::Vector3d(1.0, 0.1, 1.0), 0.2));
+  EXPECT_FALSE(ego_planner::p4ChannelCorridorIntersectsPoint(
+      sparse_corridor, Eigen::Vector3d(1.0, 0.3, 1.0), 0.2));
+  EXPECT_FALSE(ego_planner::p4ChannelCorridorIntersectsPoint(
+      {}, Eigen::Vector3d::Zero(), 0.2));
+}
+
 TEST(P4SuccessorDeadlinePolicy,
      StartsImmediatelyForShortSegmentsAndPreservesAbsoluteDeadline)
 {
@@ -52,9 +172,16 @@ TEST(P4SuccessorDeadlinePolicy,
     policy, 10.0, 14.0);
   ASSERT_TRUE(normal.valid);
   EXPECT_NEAR(normal.preparation_lead_s, 1.5, 1.0e-12);
-  EXPECT_NEAR(normal.latest_prepare_start_s, 12.5, 1.0e-12);
-  EXPECT_NEAR(normal.planned_switch_time_s, 13.8, 1.0e-12);
+  EXPECT_NEAR(normal.latest_prepare_start_s, 11.2, 1.0e-12);
+  EXPECT_NEAR(normal.planned_switch_time_s, 12.5, 1.0e-12);
   EXPECT_FALSE(normal.start_immediately);
+
+  const auto long_segment = ego_planner::computeP4SuccessorDeadline(
+    policy, 40.0, 72.0);
+  ASSERT_TRUE(long_segment.valid);
+  EXPECT_NEAR(long_segment.planned_switch_time_s, 42.5, 1.0e-12);
+  EXPECT_NEAR(long_segment.candidate_ready_deadline_s, 42.35, 1.0e-12);
+  EXPECT_LT(long_segment.planned_switch_time_s, 72.0 - 0.2);
 
   const auto short_segment = ego_planner::computeP4SuccessorDeadline(
     policy, 20.0, 21.0);
@@ -90,6 +217,135 @@ TEST(P4SuccessorProgressPolicy,
   auto jitter_floor = ego_planner::computeP4SuccessorProgressRequirement(input);
   ASSERT_TRUE(jitter_floor.valid);
   EXPECT_NEAR(jitter_floor.required_endpoint_progress_m, 0.10, 1.0e-12);
+}
+
+TEST(P4RollingSuccessorGuide,
+     BoundsChildAfterParentEndpointWithBrakingAndProgressReserve)
+{
+  const std::vector<Eigen::Vector3d> guide{
+    {0.0, 0.0, 1.0}, {1.0, 0.0, 1.0},
+    {2.0, 0.0, 1.0}, {4.0, 0.0, 1.0}};
+
+  const auto bounded = ego_planner::p4BoundRollingSuccessorGuide(
+    guide, Eigen::Vector3d(1.2, 0.05, 1.0), 0.40, 0.25, 0.20);
+
+  ASSERT_TRUE(bounded.valid) << bounded.reason;
+  EXPECT_NEAR(bounded.approved_endpoint_station_m, 1.2, 1.0e-12);
+  EXPECT_NEAR(bounded.projection_distance_m, 0.05, 1.0e-12);
+  EXPECT_NEAR(bounded.target_station_m, 1.85, 1.0e-12);
+  ASSERT_GE(bounded.guide.size(), 2u);
+  EXPECT_TRUE(bounded.guide.front().isApprox(guide.front(), 1.0e-12));
+  EXPECT_TRUE(bounded.guide.back().isApprox(
+    Eigen::Vector3d(1.85, 0.0, 1.0), 1.0e-12));
+}
+
+TEST(P4RollingSuccessorGuide, RejectsParentEndpointOutsideFrozenGuide)
+{
+  const std::vector<Eigen::Vector3d> guide{
+    {0.0, 0.0, 1.0}, {2.0, 0.0, 1.0}, {4.0, 0.0, 1.0}};
+
+  const auto bounded = ego_planner::p4BoundRollingSuccessorGuide(
+    guide, Eigen::Vector3d(1.0, 0.4, 1.0), 0.40, 0.25, 0.20);
+
+  EXPECT_FALSE(bounded.valid);
+  EXPECT_EQ(bounded.reason, "approved_endpoint_outside_frozen_guide");
+  EXPECT_TRUE(bounded.guide.empty());
+}
+
+TEST(P4RollingSuccessorGuide,
+     FullTopologyFallbackKeepsTheFrozenBoundedChildTarget)
+{
+  ego_planner::P4ForwardRequest request;
+  request.local_target = Eigen::Vector3d(8.0, 3.0, 1.0);
+  request.nominal_local_reference = {
+    Eigen::Vector3d::Zero(), request.local_target};
+  ego_planner::P4RollingSuccessorGuide bounded;
+  bounded.valid = true;
+  bounded.guide = {
+    Eigen::Vector3d(0.0, 0.0, 1.0),
+    Eigen::Vector3d(1.4, -0.2, 1.0)};
+
+  ASSERT_TRUE(ego_planner::applyP4RollingSuccessorGuide(
+    bounded, true, 17u, &request));
+  EXPECT_FALSE(request.successor_fast_path);
+  EXPECT_TRUE(request.successor_reuse_guide.empty());
+  EXPECT_EQ(request.incumbent_channel_id, 0u);
+  ASSERT_EQ(request.nominal_local_reference.size(), 2u);
+  EXPECT_TRUE(request.nominal_local_reference.back().isApprox(
+    bounded.guide.back(), 1.0e-12));
+  EXPECT_TRUE(request.local_target.isApprox(
+    bounded.guide.back(), 1.0e-12));
+}
+
+TEST(P4RollingSuccessorGuide,
+     FullTopologyFallbackRetainsTheFirstFixedGuideAfterFailureEvidence)
+{
+  ego_planner::P4RollingSuccessorGuide fixed;
+  fixed.valid = true;
+  fixed.reason = "ok";
+  fixed.guide = {
+    Eigen::Vector3d(0.0, 0.0, 1.0),
+    Eigen::Vector3d(1.4, -0.2, 1.0)};
+  fixed.target_station_m = 1.42;
+  ego_planner::P4RollingSuccessorGuide rebuilt_after_failure;
+  rebuilt_after_failure.reason =
+    "frozen_guide_has_insufficient_successor_reserve";
+
+  const auto selected = ego_planner::selectP4RollingSuccessorGuide(
+    rebuilt_after_failure, fixed, true);
+
+  ASSERT_TRUE(selected.valid);
+  ASSERT_EQ(selected.guide.size(), fixed.guide.size());
+  EXPECT_TRUE(selected.guide.back().isApprox(
+    fixed.guide.back(), 1.0e-12));
+  EXPECT_DOUBLE_EQ(selected.target_station_m, fixed.target_station_m);
+}
+
+TEST(P4RollingSuccessorGuide,
+     CertifiedParentCurveBridgesItsActualEndpointToTheRouteSuffix)
+{
+  const std::vector<Eigen::Vector3d> certified_parent_curve{
+    {0.0, 0.0, 1.0}, {0.8, -0.2, 1.0}, {1.2, -0.35, 1.0}};
+  const std::vector<Eigen::Vector3d> route{
+    {0.0, 0.0, 1.0}, {1.0, 0.0, 1.0},
+    {2.0, 0.0, 1.0}, {4.0, 0.0, 1.0}};
+
+  const auto composed = ego_planner::composeP4RollingSuccessorPath(
+    certified_parent_curve, route, certified_parent_curve.back());
+
+  ASSERT_TRUE(composed.valid) << composed.reason;
+  ASSERT_GT(composed.guide.size(), certified_parent_curve.size());
+  EXPECT_TRUE(composed.guide[2].isApprox(
+    certified_parent_curve.back(), 1.0e-12));
+  EXPECT_TRUE(composed.guide[3].isApprox(
+    Eigen::Vector3d(1.2, 0.0, 1.0), 1.0e-12));
+  EXPECT_TRUE(composed.guide.back().isApprox(route.back(), 1.0e-12));
+
+  const auto bounded = ego_planner::p4BoundRollingSuccessorGuide(
+    composed.guide, certified_parent_curve.back(), 0.4, 0.2, 0.20);
+  EXPECT_TRUE(bounded.valid) << bounded.reason;
+}
+
+TEST(P4RollingSuccessorGuide,
+     ChildCertificateInheritsTheUnconsumedParentContinuation)
+{
+  const std::vector<Eigen::Vector3d> bounded_child_route{
+    {1.0, 0.0, 1.0}, {2.0, 0.0, 1.0}};
+  const std::vector<Eigen::Vector3d> full_parent_continuation{
+    {0.0, 0.0, 1.0}, {2.0, 0.0, 1.0},
+    {4.0, 0.0, 1.0}, {8.0, 0.0, 1.0}};
+
+  const auto inherited = ego_planner::selectP4RollingContinuationRoute(
+    bounded_child_route, full_parent_continuation, true);
+  ASSERT_EQ(inherited.size(), full_parent_continuation.size());
+  EXPECT_TRUE(inherited.back().isApprox(
+    full_parent_continuation.back(), 1.0e-12));
+
+  const auto ordinary = ego_planner::selectP4RollingContinuationRoute(
+    bounded_child_route, full_parent_continuation, false);
+  ASSERT_EQ(ordinary.size(), bounded_child_route.size());
+  EXPECT_TRUE(ordinary.back().isApprox(
+    bounded_child_route.back(), 1.0e-12));
 }
 
 TEST(P4SuccessorPreparationWorker,
@@ -242,6 +498,19 @@ TEST(P4SuccessorFastPathFallback,
   ego_planner::P4ForwardRefinementResult blocked;
   blocked.status = ego_planner::P4ForwardRefinementStatus::ASTAR_NO_PATH;
   decision.refinement_diagnostics.push_back(blocked);
+  EXPECT_TRUE(ego_planner::p4SuccessorGeometryFallbackAllowed(decision));
+}
+
+TEST(P4SuccessorFastPathFallback,
+     CommonAnchorFailureRetriesWithFullTopologySearch)
+{
+  ego_planner::P4ForwardDecision decision;
+  decision.action = ego_planner::P4ForwardAction::NO_SAFE_ROUTE;
+  decision.trigger_reason =
+      ego_planner::P4ForwardTriggerReason::COMMON_ANCHOR_UNAVAILABLE;
+  decision.geometry_state = ego_planner::P4ForwardGeometryState::OCCUPIED;
+  decision.reason = "common_geometry_anchor_unavailable";
+
   EXPECT_TRUE(ego_planner::p4SuccessorGeometryFallbackAllowed(decision));
 }
 
@@ -577,6 +846,132 @@ TEST(P4GeometryCommit, RepeatedCurveReusesCertifiedCorridorBaseline)
   EXPECT_GT(repeated.repeated_certification_ms, 0.0);
 }
 
+TEST(P4GeometryCommit, NewOccupancyGenerationReusesOnlyCorridorGeometry)
+{
+  ego_planner::P4GeometryCommitRequest request;
+  request.bound_occupancy = makeClearCommitEpoch();
+  request.history.base_generation = 10u;
+  request.history.latest_generation = 10u;
+  request.history.complete = true;
+  request.history.geometry_id = "commit-geometry";
+  request.executable_path = {
+    Eigen::Vector3d(1.5, 5.5, 1.5), Eigen::Vector3d(8.5, 5.5, 1.5)};
+  request.curve_hash = "curve-identity-generation-reuse";
+  request.vehicle_radius_m = 0.35;
+  request.map_inflation_m = 0.10;
+  request.expected_geometry_id = "commit-geometry";
+
+  ego_planner::P4GeometryCommitValidator validator;
+  ASSERT_TRUE(validator.validate(request).accepted());
+
+  auto next = makeClearCommitEpoch(11u);
+  const auto query_count = std::make_shared<int>(0);
+  const auto clear_query = next->diagnostic_query;
+  next->diagnostic_query = [query_count, clear_query](
+      const Eigen::Vector3d & point) {
+      ++*query_count;
+      return clear_query(point);
+    };
+  request.bound_occupancy = next;
+  request.history.base_generation = 11u;
+  request.history.latest_generation = 11u;
+
+  const auto result = validator.validate(request);
+
+  ASSERT_TRUE(result.accepted()) << result.reason;
+  EXPECT_TRUE(result.baseline_cache_hit);
+  EXPECT_EQ(result.corridor_build_ms, 0.0);
+  EXPECT_GT(*query_count, 0);
+  EXPECT_EQ(result.checked_generation, 11u);
+}
+
+TEST(P4GeometryCommit,
+     FullCurveStationCacheIgnoresPassedVoxelsAndDetectsFutureHits)
+{
+  ego_planner::P4GeometryCommitRequest request;
+  request.bound_occupancy = makeClearCommitEpoch();
+  request.history.base_generation = 10u;
+  request.history.latest_generation = 10u;
+  request.history.complete = true;
+  request.history.geometry_id = "commit-geometry";
+  request.executable_path = {
+    Eigen::Vector3d(1.5, 5.5, 1.5), Eigen::Vector3d(8.5, 5.5, 1.5)};
+  request.curve_hash = "curve-station-cache";
+  request.vehicle_radius_m = 0.35;
+  request.map_inflation_m = 0.10;
+  request.expected_geometry_id = "commit-geometry";
+
+  ego_planner::P4GeometryCommitValidator validator;
+  ASSERT_TRUE(validator.validate(request).accepted());
+
+  request.baseline_already_validated = true;
+  request.delta_base_generation = 10u;
+  request.minimum_path_station_m = 4.0;
+  request.history.base_generation = 10u;
+  request.history.latest_generation = 11u;
+  auto passed = std::make_shared<OccupancyCollisionDelta>();
+  passed->from_generation = 10u;
+  passed->to_generation = 11u;
+  passed->geometry_id = "commit-geometry";
+  passed->complete = true;
+  passed->changes.push_back({Eigen::Vector3i(2, 5, 1), true});
+  request.history.deltas = {passed};
+  const auto behind = validator.validate(request);
+  ASSERT_TRUE(behind.accepted()) << behind.reason;
+  EXPECT_TRUE(behind.baseline_cache_hit);
+  EXPECT_EQ(behind.route_relevant_new_hits, 0u);
+
+  request.delta_base_generation = 11u;
+  request.history.base_generation = 11u;
+  request.history.latest_generation = 12u;
+  auto future = std::make_shared<OccupancyCollisionDelta>();
+  future->from_generation = 11u;
+  future->to_generation = 12u;
+  future->geometry_id = "commit-geometry";
+  future->complete = true;
+  future->changes.push_back({Eigen::Vector3i(7, 5, 1), true});
+  request.history.deltas = {future};
+  const auto ahead = validator.validate(request);
+  EXPECT_EQ(ahead.verdict,
+      ego_planner::P4GeometryCommitVerdict::NEW_ROUTE_COLLISION);
+  EXPECT_TRUE(ahead.baseline_cache_hit);
+  EXPECT_EQ(ahead.route_relevant_new_hits, 1u);
+}
+
+TEST(P4GeometryCommit, SparseRawSnapshotBuildsBaselineWithoutPerVoxelQueries)
+{
+  ego_planner::P4GeometryCommitRequest request;
+  auto epoch = makeClearCommitEpoch();
+  epoch->sparse_occupancy_derived_from_raw_centers = true;
+  epoch->map_inflation_m = 0.10;
+  epoch->raw_occupied_voxel_centers =
+    std::make_shared<const std::vector<Eigen::Vector3d>>(
+      std::vector<Eigen::Vector3d>{Eigen::Vector3d(4.5, 5.5, 1.5)});
+  const auto query_count = std::make_shared<int>(0);
+  const auto clear_query = epoch->diagnostic_query;
+  epoch->diagnostic_query = [query_count, clear_query](
+      const Eigen::Vector3d & point) {
+      ++*query_count;
+      return clear_query(point);
+    };
+  request.bound_occupancy = epoch;
+  request.history.base_generation = 10u;
+  request.history.latest_generation = 10u;
+  request.history.complete = true;
+  request.history.geometry_id = "commit-geometry";
+  request.executable_path = {
+    Eigen::Vector3d(1.5, 5.5, 1.5), Eigen::Vector3d(8.5, 5.5, 1.5)};
+  request.vehicle_radius_m = 0.35;
+  request.map_inflation_m = 0.10;
+  request.expected_geometry_id = "commit-geometry";
+
+  const auto result =
+    ego_planner::P4GeometryCommitValidator().validate(request);
+
+  EXPECT_EQ(result.verdict, ego_planner::P4GeometryCommitVerdict::BASE_COLLISION);
+  EXPECT_EQ(*query_count, 0);
+}
+
 TEST(P4GeometryCommit, HistoryGapForcesFullLatestOccupancyRecheck)
 {
   ego_planner::P4GeometryCommitRequest request;
@@ -739,6 +1134,39 @@ TEST(P4GeometryCommit, RepresentativeFineLatticeMeetsHardCommitBudget)
   EXPECT_LT(result.latency_ms, 10.0);
 }
 
+TEST(P4GeometryCommit, DenselySampledShortCurveMeetsHardCommitBudget)
+{
+  ego_planner::P4GeometryCommitRequest request;
+  request.bound_occupancy = makeClearCommitEpoch(
+    10u, 0.1, Eigen::Vector3i(100, 100, 30));
+  request.history.base_generation = 10u;
+  request.history.latest_generation = 10u;
+  request.history.complete = true;
+  request.history.geometry_id = "commit-geometry";
+  // A low-speed terminal prefix is sampled at the controller period before
+  // commit. Thousands of adjacent samples may occupy the same swept voxels;
+  // commit time must scale with corridor geometry, not message sample count.
+  constexpr std::size_t kSampleCount = 6201u;
+  request.executable_path.reserve(kSampleCount);
+  for (std::size_t index = 0; index < kSampleCount; ++index) {
+    const double alpha = static_cast<double>(index) /
+      static_cast<double>(kSampleCount - 1u);
+    request.executable_path.emplace_back(
+      1.0 + 1.5 * alpha, 5.0 + 0.1 * std::sin(alpha * M_PI), 1.5);
+  }
+  request.curve_hash = "dense-short-terminal-prefix";
+  request.vehicle_radius_m = 0.35;
+  request.map_inflation_m = 0.10;
+  request.expected_geometry_id = "commit-geometry";
+  request.compute_budget_ms = 10.0;
+
+  const auto result =
+    ego_planner::P4GeometryCommitValidator().validate(request);
+
+  EXPECT_TRUE(result.accepted()) << result.reason;
+  EXPECT_LT(result.latency_ms, 10.0);
+}
+
 void bindTestRiskBatch(P4ForwardRequest * request)
 {
   const auto scalar = request->risk;
@@ -819,6 +1247,114 @@ P4ForwardRequest straightRequest()
     };
   bindTestRiskBatch(&request);
   return request;
+}
+
+P4ForwardRequest incompleteObservationRequest(const double sensor_max_range_m)
+{
+  auto request = straightRequest();
+  request.velocity = Eigen::Vector3d(0.2, 0.0, 0.0);
+  request.acceleration.setZero();
+  request.limits.task_mode =
+    iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT;
+  request.limits.vehicle_radius_m = 0.0;
+  request.limits.safety_margin_m = 0.0;
+  request.limits.route_compute_budget_ms = 500.0;
+  request.limits.compute_budget_ms = 250.0;
+  request.geometry = [](const Eigen::Vector3d &point) {
+      if (point.x() >= 2.0 && point.x() <= 4.0 &&
+        std::abs(point.y()) <= 0.6)
+        return P4ForwardGeometryState::OCCUPIED;
+      return std::abs(point.y()) > 2.5 ?
+        P4ForwardGeometryState::OCCUPIED : P4ForwardGeometryState::CLEAR;
+    };
+  request.observation_sensor_model.identity = "test-beam-model-v1";
+  request.observation_sensor_model.horizontal_fov_rad = 1.2;
+  request.observation_sensor_model.vertical_min_rad = -0.5;
+  request.observation_sensor_model.vertical_max_rad = 0.5;
+  request.observation_sensor_model.min_range_m = 0.1;
+  request.observation_sensor_model.max_range_m = sensor_max_range_m;
+  request.observation_sensor_model.occluder_radius_m = 0.15;
+  request.raw_occupied_voxel_centers.reset();
+  const auto incomplete = [](const Eigen::Vector3d &, double) {
+      P4ForwardRiskSample sample;
+      sample.valid = false;
+      sample.stale = false;
+      sample.gnss_supported = false;
+      sample.lidar_supported = true;
+      sample.fim_supported = true;
+      sample.safety_state = P4ForwardSafetyState::UNKNOWN;
+      sample.ranking_state = P4ForwardRankingState::INCOMPLETE;
+      sample.safety_ratio = std::numeric_limits<double>::infinity();
+      sample.gnss_anchored_hpl = 4.0;
+      sample.gnss_anchored_vpl = 8.0;
+      sample.hal = 10.0;
+      sample.val = 20.0;
+      sample.fim_ratio = 0.3;
+      sample.known_fim_ratio = 0.3;
+      sample.gnss_eligible_los_sample_count = 10u;
+      sample.gnss_unknown_los_sample_count = 1u;
+      sample.missing_los_voxel_centers = {
+        Eigen::Vector3d(4.0, 1.5, 1.0)};
+      sample.reason = "GNSS_SKY_UNKNOWN";
+      return sample;
+    };
+  request.risk = incomplete;
+  request.risk_batch = [incomplete](
+      const std::vector<P4ForwardRiskQuery> &queries, double,
+      std::vector<P4ForwardRiskSample> *samples) {
+        if (!samples)
+          return false;
+        samples->clear();
+        samples->reserve(queries.size());
+        for (const auto &query : queries)
+          samples->push_back(incomplete(query.position, query.query_time_s));
+        return true;
+      };
+  return request;
+}
+
+TEST(P4ChannelSlotIdentity,
+     ReusesCompletedRefinementWhenOnlyRiskEvidenceExpired)
+{
+  auto request = straightRequest();
+  request.limits.task_mode =
+      iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT;
+  ego_planner::P4ChannelSlot cached;
+  cached.stable_channel_id = 73u;
+  cached.topology_path = request.nominal_local_reference;
+  cached.refined_path = request.nominal_local_reference;
+  cached.refined_minimum_signed_margin_m = 0.4;
+  cached.state = ego_planner::P4ChannelEvaluationState::GEOMETRY_READY;
+  cached.occupancy_generation =
+      request.snapshot_identity.occupancy_generation;
+  cached.gnss_epoch_identity =
+      request.snapshot_identity.gnss_epoch_identity - 1u;
+  request.prior_channel_slots = {cached};
+  int refinement_calls = 0;
+  request.refine = [&refinement_calls](
+      const std::vector<Eigen::Vector3d> &path, double, double) {
+    ++refinement_calls;
+    ego_planner::P4ForwardRefinementResult result;
+    result.status = ego_planner::P4ForwardRefinementStatus::SUCCESS;
+    result.path = path;
+    return result;
+  };
+
+  const auto decision = P4ForwardRoutePlanner().decide(request);
+
+  ASSERT_EQ(decision.action, P4ForwardAction::CANDIDATE_READY)
+      << decision.reason;
+  EXPECT_EQ(refinement_calls, 0);
+  ASSERT_EQ(decision.candidates.size(), 1u);
+  EXPECT_EQ(decision.candidates.front().channel_id, 73u);
+  ASSERT_EQ(decision.channel_slots.size(), 1u);
+  EXPECT_EQ(decision.channel_slots.front().state,
+            ego_planner::P4ChannelEvaluationState::CERTIFIED);
+  EXPECT_EQ(decision.channel_slots.front().refined_path,
+            decision.candidates.front().path);
+  ASSERT_EQ(decision.channel_slots.front().refined_path.size(), 3u);
+  EXPECT_EQ(decision.channel_slots.front().refined_path[1],
+            request.nominal_local_reference[1]);
 }
 
 TEST(P4ForwardRoute, StoppingDistanceUsesApprovedPhysicalModel)
@@ -934,6 +1470,37 @@ TEST(P4ForwardRoute, BestEffortAcceptsLocallyValidSnapshotWithoutGnssEpoch)
   EXPECT_FALSE(decision.selected_guide.empty());
 }
 
+TEST(P4ForwardRoute,
+     UsesProjectedSatelliteCoverageTotalsInsteadOfFallbackCoverage)
+{
+  auto request = straightRequest();
+  request.risk_batch = [](
+      const std::vector<P4ForwardRiskQuery> &queries, double,
+      std::vector<P4ForwardRiskSample> *samples) {
+    samples->assign(queries.size(), P4ForwardRiskSample{});
+    for (auto &sample : *samples) {
+      sample.valid = false;
+      sample.stale = false;
+      sample.lidar_supported = true;
+      sample.fim_supported = true;
+      sample.safety_state = P4ForwardSafetyState::UNKNOWN;
+      sample.ranking_state = P4ForwardRankingState::INCOMPLETE;
+      sample.gnss_eligible_los_sample_count = 4u;
+      sample.gnss_unknown_los_sample_count = 2u;
+      sample.unknown_coverage = 1.0;
+      sample.reason = "GNSS_ANCHOR_INCONSISTENT";
+    }
+    return true;
+  };
+
+  const auto decision = P4ForwardRoutePlanner().decide(request);
+
+  ASSERT_FALSE(decision.candidates.empty());
+  for (const auto &candidate : decision.candidates) {
+    EXPECT_DOUBLE_EQ(candidate.unknown_coverage, 0.5);
+  }
+}
+
 TEST(P4ForwardRoute, NonFiniteNominalReferenceFailsClosed)
 {
   auto request = straightRequest();
@@ -961,6 +1528,36 @@ TEST(P4ForwardRoute, OpenObservedSpaceContinuesAsSingleChannel)
   EXPECT_FALSE(decision.selected_guide.empty());
   EXPECT_EQ(decision.snapshot_identity.canonical(),
             straightRequest().snapshot_identity.canonical());
+}
+
+TEST(P4ForwardRoute,
+     StableIncumbentCorridorMayContinueWhenOnlyOneRouteRemains)
+{
+  auto request = straightRequest();
+  request.geometry = [](const Eigen::Vector3d &point) {
+      const bool center_block = point.x() >= 2.0 && point.x() <= 4.0 &&
+          std::abs(point.y()) <= 0.6;
+      const bool lower_closed = point.y() < -0.7;
+      const bool outside = point.y() > 2.5 || point.z() < 0.5 ||
+          point.z() > 1.5;
+      return center_block || lower_closed || outside
+          ? P4ForwardGeometryState::OCCUPIED
+          : P4ForwardGeometryState::CLEAR;
+    };
+  ego_planner::P4ChannelSlot incumbent;
+  incumbent.stable_channel_id = 42u;
+  incumbent.topology_path = {
+      request.position, Eigen::Vector3d(3.0, 1.2, 1.0),
+      request.local_target};
+  request.prior_channel_slots = {incumbent};
+
+  const auto decision = P4ForwardRoutePlanner().decide(request);
+
+  ASSERT_EQ(decision.candidates.size(), 1u) << decision.reason;
+  EXPECT_EQ(decision.candidates.front().channel_id, 42u);
+  EXPECT_EQ(decision.action, P4ForwardAction::CANDIDATE_READY)
+      << decision.reason;
+  EXPECT_EQ(decision.trigger_reason, P4ForwardTriggerReason::SINGLE_CHANNEL);
 }
 
 TEST(P4ForwardRoute,
@@ -1049,6 +1646,28 @@ TEST(P4ForwardRoute, UnobservedSpaceWithoutHitsRemainsGeometryClear)
   EXPECT_EQ(decision.action, P4ForwardAction::CANDIDATE_READY)
     << decision.reason;
   ASSERT_EQ(decision.candidates.size(), 1u);
+  EXPECT_TRUE(decision.candidates.front().occupancy_supported);
+}
+
+TEST(P4ForwardRoute,
+  ClearContinuousStartConnectsAroundOccupiedContainingTopologyCellCenter)
+{
+  auto request = straightRequest();
+  const Eigen::Vector3d containing_cell_center(0.25, 0.25, 1.25);
+  request.geometry = [containing_cell_center](const Eigen::Vector3d & point) {
+      return (point - containing_cell_center).norm() <= 0.11 ?
+        P4ForwardGeometryState::OCCUPIED : P4ForwardGeometryState::CLEAR;
+    };
+
+  const auto decision = P4ForwardRoutePlanner().decide(request);
+
+  EXPECT_EQ(decision.action, P4ForwardAction::CANDIDATE_READY)
+    << decision.reason << " termination="
+    << decision.channel_search_termination;
+  ASSERT_FALSE(decision.candidates.empty());
+  ASSERT_GE(decision.candidates.front().path.size(), 2u);
+  EXPECT_TRUE(decision.candidates.front().path.front().isApprox(
+    request.position, 1.0e-12));
   EXPECT_TRUE(decision.candidates.front().occupancy_supported);
 }
 
@@ -1275,6 +1894,42 @@ TEST(P4ForwardRoute, ComputeBudgetIsADeadlineForAllExitPaths)
   EXPECT_LT(elapsed_ms, 50.0);
 }
 
+TEST(P4ForwardRoute,
+     DiagonalSweptClearCorridorIsNotDisconnectedByTopologyLattice)
+{
+  auto request = straightRequest();
+  request.position = Eigen::Vector3d(0.25, 0.25, 1.25);
+  request.local_target = Eigen::Vector3d(4.25, 4.25, 1.25);
+  request.nominal_local_reference = {
+    request.position, request.local_target};
+  request.map_origin = Eigen::Vector3d(0.0, 0.0, 0.0);
+  request.map_extent = Eigen::Vector3d(5.0, 5.0, 2.0);
+  request.limits.vehicle_radius_m = 0.0;
+  request.limits.safety_margin_m = 0.0;
+  request.limits.topology_resolution_m = 0.5;
+  request.limits.occupancy_resolution_m = 0.05;
+  request.limits.max_lookahead_m = 8.0;
+  request.limits.sensing_range_m = 10.0;
+  request.limits.channel_enumeration_budget_ms = 100.0;
+  request.limits.route_compute_budget_ms = 300.0;
+  request.geometry = [](const Eigen::Vector3d & point) {
+      const bool inside_diagonal_corridor =
+        std::abs(point.y() - point.x()) <= 0.20 &&
+        point.z() >= 1.0 && point.z() <= 1.5;
+      return inside_diagonal_corridor ? P4ForwardGeometryState::CLEAR :
+        P4ForwardGeometryState::OCCUPIED;
+    };
+
+  const auto decision = P4ForwardRoutePlanner().decide(request);
+
+  ASSERT_FALSE(decision.candidates.empty()) << decision.reason;
+  EXPECT_NE(decision.reason, "topology_probe_inconclusive_hold");
+  ASSERT_FALSE(decision.candidates.front().path.empty());
+  for (const auto & point : decision.candidates.front().path) {
+    EXPECT_LE(std::abs(point.y() - point.x()), 0.20 + 1.0e-9);
+  }
+}
+
 TEST(P4ForwardRoute, NativeRefinementRunsInsideEndToEndWorkerBudget)
 {
   auto request = straightRequest();
@@ -1297,6 +1952,28 @@ TEST(P4ForwardRoute, NativeRefinementRunsInsideEndToEndWorkerBudget)
   EXPECT_EQ(decision.trigger_reason,
             P4ForwardTriggerReason::COMPUTE_BUDGET_EXCEEDED);
   EXPECT_GE(decision.compute_latency_ms, 50.0);
+}
+
+TEST(P4ForwardRoute, RefinementCorridorIncludesStoppingAndPhysicalReserve)
+{
+  ego_planner::P4ForwardLimits limits;
+  limits.topology_resolution_m = 0.5;
+  limits.occupancy_resolution_m = 0.1;
+  limits.vehicle_radius_m = 0.35;
+  limits.safety_margin_m = 0.5;
+  EXPECT_NEAR(
+      ego_planner::p4RefinementCorridorRadius(limits),
+      ego_planner::p4StoppingDistance(
+        limits.max_observe_speed_mps, limits) +
+          0.5 * limits.occupancy_resolution_m, 1.0e-12);
+
+  limits.vehicle_radius_m = 0.1;
+  limits.safety_margin_m = 0.1;
+  EXPECT_NEAR(
+      ego_planner::p4RefinementCorridorRadius(limits),
+      ego_planner::p4StoppingDistance(
+        limits.max_observe_speed_mps, limits) +
+          0.5 * limits.occupancy_resolution_m, 1.0e-12);
 }
 
 TEST(P4ForwardRoute, RefinementFailureKeepsStructuredCause)
@@ -1729,12 +2406,152 @@ TEST(P4ForwardRoute,
     EXPECT_TRUE(decision.deferred_trajectory.empty());
   }
   EXPECT_TRUE(decision.candidates.front().risk_supported);
-  EXPECT_GT(std::max_element(
-      decision.candidates.front().path.begin(),
-      decision.candidates.front().path.end(),
-      [](const Eigen::Vector3d &lhs, const Eigen::Vector3d &rhs) {
-        return lhs.y() < rhs.y();
-      })->y(), 0.2);
+}
+
+TEST(P4ForwardRoute,
+     V91RefinedCandidateDoesNotRetainCoarseUnsafeState)
+{
+  auto request = straightRequest();
+  request.limits.task_mode =
+      iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT;
+  request.limits.route_compute_budget_ms = 500.0;
+  request.limits.compute_budget_ms = 150.0;
+  request.geometry = [](const Eigen::Vector3d &point) {
+    if (point.x() >= 2.0 && point.x() <= 4.0 &&
+        std::abs(point.y()) <= 0.6) {
+      return P4ForwardGeometryState::OCCUPIED;
+    }
+    return std::abs(point.y()) > 2.5 ?
+      P4ForwardGeometryState::OCCUPIED : P4ForwardGeometryState::CLEAR;
+  };
+  request.refine = [](
+      const std::vector<Eigen::Vector3d> &path, double, double) {
+    ego_planner::P4ForwardRefinementResult result;
+    result.status = ego_planner::P4ForwardRefinementStatus::SUCCESS;
+    result.path = path;
+    return result;
+  };
+
+  int risk_batch_round = 0;
+  request.risk_batch = [&risk_batch_round](
+      const std::vector<P4ForwardRiskQuery> &queries, double,
+      std::vector<P4ForwardRiskSample> *samples) {
+    ++risk_batch_round;
+    const bool coarse = risk_batch_round == 1;
+    const double ratio = coarse ? 40.141206501632432 / 40.0 :
+      0.96778317842640205;
+    samples->clear();
+    samples->reserve(queries.size());
+    for (std::size_t index = 0; index < queries.size(); ++index) {
+      P4ForwardRiskSample sample;
+      sample.valid = true;
+      sample.stale = false;
+      sample.gnss_supported = true;
+      sample.lidar_supported = true;
+      sample.fim_supported = true;
+      sample.safety_state = coarse ? P4ForwardSafetyState::UNSAFE :
+        P4ForwardSafetyState::SAFE;
+      sample.ranking_state = P4ForwardRankingState::COMPARABLE;
+      sample.safety_ratio = ratio;
+      sample.fim_ratio = 0.013149569755803159;
+      sample.hpl = 14.123;
+      sample.vpl = 40.0 * ratio;
+      sample.hal = 20.0;
+      sample.val = 40.0;
+      sample.gnss_anchor_hpl = sample.hpl;
+      sample.gnss_anchor_vpl = sample.vpl;
+      sample.gnss_anchored_hpl = sample.hpl;
+      sample.gnss_anchored_vpl = sample.vpl;
+      sample.gnss_raw_hpl = sample.hpl;
+      sample.gnss_raw_vpl = sample.vpl;
+      sample.gnss_receiver_raw_hpl = sample.hpl;
+      sample.gnss_receiver_raw_vpl = sample.vpl;
+      sample.gnss_spatial_delta_h = 0.0;
+      sample.gnss_spatial_delta_v = coarse ? 24.928062415153363 : 0.0;
+      sample.gnss_temporal_growth_h = 0.0;
+      sample.gnss_temporal_growth_v = 0.0;
+      sample.gnss_used_satellite_count = 28;
+      sample.gnss_weighted_geometry_condition = 1.0;
+      sample.unknown_coverage = 0.16502525252525252;
+      sample.reason = "ok";
+      samples->push_back(std::move(sample));
+    }
+    return true;
+  };
+
+  const auto decision = P4ForwardRoutePlanner().decide(request);
+
+  ASSERT_GE(risk_batch_round, 2);
+  ASSERT_FALSE(decision.candidates.empty()) << decision.reason;
+  for (const auto &candidate : decision.candidates) {
+    EXPECT_TRUE(candidate.risk_supported);
+    EXPECT_TRUE(candidate.safety_gate_passed);
+    EXPECT_LT(candidate.safety_max_ratio, 1.0);
+    EXPECT_EQ(candidate.safety_state, P4ForwardSafetyState::SAFE);
+  }
+}
+
+TEST(P4ForwardRoute,
+     BudgetExhaustionKeepsNonAuthoritativeWarmStartForStableChannel)
+{
+  auto request = straightRequest();
+  request.limits.task_mode =
+      iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT;
+  request.limits.route_compute_budget_ms = 150.0;
+  request.limits.compute_budget_ms = 20.0;
+  std::vector<Eigen::Vector3d> warm_start;
+  request.refine_with_warm_start = [&warm_start](
+      const std::vector<Eigen::Vector3d> &path,
+      const std::vector<Eigen::Vector3d> &provided_warm_start,
+      double, double) {
+    EXPECT_TRUE(provided_warm_start.empty());
+    warm_start = {
+        path.front(),
+        Eigen::Vector3d(1.0, 0.5, path.front().z()),
+        path.back()};
+    ego_planner::P4ForwardRefinementResult result;
+    result.status =
+        ego_planner::P4ForwardRefinementStatus::BUDGET_EXHAUSTED;
+    result.resume_guide = warm_start;
+    return result;
+  };
+
+  const auto incomplete = P4ForwardRoutePlanner().decide(request);
+
+  ASSERT_FALSE(incomplete.channel_slots.empty());
+  const auto channel_id = incomplete.channel_slots.front().stable_channel_id;
+  EXPECT_EQ(incomplete.channel_slots.front().state,
+            ego_planner::P4ChannelEvaluationState::PARTIAL_COMPARISON);
+  EXPECT_EQ(incomplete.channel_slots.front().refinement_warm_start,
+            warm_start);
+  EXPECT_NE(incomplete.channel_slots.front().state,
+            ego_planner::P4ChannelEvaluationState::HARD_FAILED);
+
+  auto resumed_request = straightRequest();
+  resumed_request.limits = request.limits;
+  resumed_request.prior_channel_slots = incomplete.channel_slots;
+  resumed_request.first_reserved_channel_id = channel_id + 10u;
+  bool reused = false;
+  resumed_request.refine_with_warm_start = [&reused, &warm_start](
+      const std::vector<Eigen::Vector3d> &path,
+      const std::vector<Eigen::Vector3d> &provided_warm_start,
+      double, double) {
+    reused = true;
+    EXPECT_EQ(provided_warm_start, warm_start);
+    ego_planner::P4ForwardRefinementResult result;
+    result.status = ego_planner::P4ForwardRefinementStatus::SUCCESS;
+    result.path = path;
+    return result;
+  };
+
+  const auto completed = P4ForwardRoutePlanner().decide(resumed_request);
+
+  EXPECT_TRUE(reused);
+  ASSERT_FALSE(completed.channel_slots.empty());
+  EXPECT_EQ(completed.channel_slots.front().stable_channel_id, channel_id);
+  EXPECT_EQ(completed.channel_slots.front().state,
+            ego_planner::P4ChannelEvaluationState::CERTIFIED);
+  EXPECT_TRUE(completed.channel_slots.front().refinement_warm_start.empty());
 }
 
 TEST(P4ForwardRoute,
@@ -2291,6 +3108,8 @@ TEST(P4ForwardRoute, RiskBatchIncompleteDefersWithoutRiskSelection)
 
   ASSERT_EQ(decision.action, P4ForwardAction::DEFER_RISK_SELECTION)
     << decision.reason;
+  EXPECT_EQ(decision.executable_intent,
+    ego_planner::P4ExecutableIntent::HOLD);
   EXPECT_EQ(decision.selected_candidate_id, 0u);
   EXPECT_TRUE(decision.selected_guide.empty());
   EXPECT_LE(decision.speed_cap_mps,
@@ -2344,6 +3163,45 @@ TEST(P4ForwardRoute, KnownHitLimitsGeometryAnchor)
       EXPECT_LE(point.x(), 1.25 + 1.0e-9);
     }
   }
+}
+
+TEST(P4ForwardRoute,
+  BlockedNominalSuffixFindsMirrorSymmetricLateralCommonAnchor)
+{
+  const auto make_request = [](const double blocked_side_sign) {
+      auto request = straightRequest();
+      request.geometry = [blocked_side_sign](const Eigen::Vector3d &point) {
+          if (std::abs(point.y()) > 2.5 || point.z() < 0.5 ||
+            point.z() > 1.5)
+          {
+            return P4ForwardGeometryState::OCCUPIED;
+          }
+          if (point.x() < 0.10) {
+            return P4ForwardGeometryState::CLEAR;
+          }
+          const bool center_blocked = std::abs(point.y()) <= 0.31;
+          const bool chosen_side_blocked =
+            blocked_side_sign * point.y() > 0.31;
+          return center_blocked || chosen_side_blocked ?
+            P4ForwardGeometryState::OCCUPIED :
+            P4ForwardGeometryState::CLEAR;
+        };
+      return request;
+    };
+
+  const auto lower = P4ForwardRoutePlanner().decide(make_request(1.0));
+  const auto upper = P4ForwardRoutePlanner().decide(make_request(-1.0));
+
+  ASSERT_NE(lower.action, P4ForwardAction::NO_SAFE_ROUTE) << lower.reason;
+  ASSERT_NE(upper.action, P4ForwardAction::NO_SAFE_ROUTE) << upper.reason;
+  ASSERT_FALSE(lower.candidates.empty());
+  ASSERT_FALSE(upper.candidates.empty());
+  const auto &lower_anchor = lower.candidates.front().path.back();
+  const auto &upper_anchor = upper.candidates.front().path.back();
+  EXPECT_LT(lower_anchor.y(), -0.31);
+  EXPECT_GT(upper_anchor.y(), 0.31);
+  EXPECT_NEAR(lower_anchor.x(), upper_anchor.x(), 1.0e-9);
+  EXPECT_NEAR(lower_anchor.y(), -upper_anchor.y(), 1.0e-9);
 }
 
 TEST(P4ForwardRoute, UnobservedRegionDoesNotBecomeGeometryFailure)
@@ -2494,6 +3352,11 @@ TEST(P4ForwardRoute, UnsafeFullRoutesAuthorizeOnlyContinuousSafeCommonPrefix)
   EXPECT_EQ(decision.selection_authority, P4ForwardSelectionAuthority::NONE);
   EXPECT_EQ(decision.reason, "safe_limited_common_prefix");
   ASSERT_GE(decision.deferred_trajectory.size(), 2u);
+  EXPECT_TRUE(decision.observation_endpoint.isApprox(
+    decision.deferred_trajectory.back(), 1.0e-12));
+  EXPECT_TRUE(decision.observation_divergence_boundary.allFinite());
+  EXPECT_GT(decision.observation_stopping_reserve_m, 0.0);
+  EXPECT_DOUBLE_EQ(decision.observation_predicted_information_gain, 0.0);
   EXPECT_GE(decision.deferred_trajectory.back().x(),
             decision.stopping_distance_m - 1.0e-9);
   EXPECT_LT(decision.deferred_trajectory.back().x(), 2.0);
@@ -2630,6 +3493,8 @@ TEST(P4ForwardRoute, SafeLimitedPrefixNeverExceedsConfiguredProgressCap)
   const auto decision = P4ForwardRoutePlanner().decide(request);
 
   EXPECT_EQ(decision.action, P4ForwardAction::DEFER_RISK_SELECTION);
+  EXPECT_EQ(decision.executable_intent,
+    ego_planner::P4ExecutableIntent::COMMON_OBSERVATION_SEGMENT);
   EXPECT_EQ(decision.deferred_motion_mode,
             ego_planner::P4ForwardDeferredMotionMode::COMMON_PREFIX);
   ASSERT_GE(decision.deferred_trajectory.size(), 2u);
@@ -2717,6 +3582,33 @@ TEST(P4ForwardRoute, FullThreeDimensionalSearchSelectsVerticalChannel)
   ASSERT_FALSE(decision.selected_guide.empty());
   EXPECT_GT(decision.selected_guide[decision.selected_guide.size() / 2].z(),
             3.0);
+}
+
+TEST(P4ForwardRoute,
+     FrozenRawConfigurationSpaceHonorsVirtualCeilingCollisionPolicy)
+{
+  auto request = straightRequest();
+  request.position = Eigen::Vector3d(0.5, 0.0, 1.5);
+  request.local_target = Eigen::Vector3d(5.5, 0.0, 1.5);
+  request.nominal_local_reference = {request.position, request.local_target};
+  request.map_origin = Eigen::Vector3d(0.0, -1.0, 0.0);
+  request.map_extent = Eigen::Vector3d(6.0, 2.0, 6.0);
+  request.virtual_ceiling_height_m = 2.9;
+  request.limits.channel_enumeration_budget_ms = 300.0;
+  request.limits.route_compute_budget_ms = 500.0;
+  auto raw_hits = std::make_shared<std::vector<Eigen::Vector3d>>();
+  for (double y = -0.95; y <= 0.95 + 1.0e-9; y += 0.1)
+    for (double z = 0.05; z <= 2.85 + 1.0e-9; z += 0.1)
+      raw_hits->emplace_back(3.0, y, z);
+  request.raw_occupied_voxel_centers = raw_hits;
+
+  const auto decision = P4ForwardRoutePlanner().decide(request);
+
+  for (const auto &candidate : decision.raw_candidates)
+    for (const auto &point : candidate.path)
+      EXPECT_LT(point.z() + request.limits.vehicle_radius_m,
+                request.virtual_ceiling_height_m + 1.0e-9);
+  EXPECT_TRUE(decision.candidates.empty()) << decision.reason;
 }
 
 TEST(P4ForwardRoute, AsyncWorkerDropsResultFromDifferentSnapshotIdentity)
@@ -2863,86 +3755,294 @@ TEST(P4ForwardRoute, LiveGenerationGateRejectsMissingOrChangedToken)
 }
 
 TEST(P4ForwardRoute,
-     V91RefinedCandidateDoesNotRetainCoarseUnsafeState)
+     StoppedHardSafeClearanceFailureCreatesFiniteCertifiedRecoveryInput)
 {
-  auto request = straightRequest();
-  request.limits.task_mode =
-      iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT;
-  request.limits.route_compute_budget_ms = 500.0;
-  request.limits.compute_budget_ms = 150.0;
-  request.geometry = [](const Eigen::Vector3d &point) {
-    if (point.x() >= 2.0 && point.x() <= 4.0 &&
-        std::abs(point.y()) <= 0.6) {
-      return P4ForwardGeometryState::OCCUPIED;
-    }
-    return std::abs(point.y()) > 2.5 ?
-      P4ForwardGeometryState::OCCUPIED : P4ForwardGeometryState::CLEAR;
-  };
-  request.refine = [](
-      const std::vector<Eigen::Vector3d> &path, double, double) {
-    ego_planner::P4ForwardRefinementResult result;
-    result.status = ego_planner::P4ForwardRefinementStatus::SUCCESS;
-    result.path = path;
-    return result;
-  };
+  ego_planner::P4ForwardDecision decision;
+  decision.result_status = ego_planner::P4ForwardResultStatus::READY;
+  decision.action = ego_planner::P4ForwardAction::REPLAN_REQUIRED;
+  decision.trigger_reason =
+      ego_planner::P4ForwardTriggerReason::NO_TOPOLOGY_ROUTE;
+  decision.planning_disposition =
+      ego_planner::P4PlanningDisposition::HOLD_REQUIRED;
+  decision.reason =
+      "no_native_refined_candidate:clearance_margin_insufficient=1";
+  ego_planner::P4ForwardRefinementResult failure;
+  failure.status =
+      ego_planner::P4ForwardRefinementStatus::CLEARANCE_MARGIN_INSUFFICIENT;
+  failure.failure_position = Eigen::Vector3d(-12.08, 2.36, 1.29);
+  failure.minimum_signed_margin_m = 0.0425;
+  failure.escape_direction = Eigen::Vector3d(0.0, 1.0, 0.0);
+  failure.nearest_obstacle_identity = "current-frame-tree";
+  decision.refinement_diagnostics.push_back(failure);
 
-  int risk_batch_round = 0;
-  request.risk_batch = [&risk_batch_round](
-      const std::vector<P4ForwardRiskQuery> &queries, double,
-      std::vector<P4ForwardRiskSample> *samples) {
-    ++risk_batch_round;
-    const bool coarse = risk_batch_round == 1;
-    const double ratio = coarse ? 40.141206501632432 / 40.0 :
-      0.96778317842640205;
-    samples->clear();
-    samples->reserve(queries.size());
-    for (std::size_t index = 0; index < queries.size(); ++index) {
-      P4ForwardRiskSample sample;
-      sample.valid = true;
-      sample.stale = false;
-      sample.gnss_supported = true;
-      sample.lidar_supported = true;
-      sample.fim_supported = true;
-      sample.safety_state = coarse ? P4ForwardSafetyState::UNSAFE :
-        P4ForwardSafetyState::SAFE;
-      sample.ranking_state = P4ForwardRankingState::COMPARABLE;
-      sample.safety_ratio = ratio;
-      sample.fim_ratio = 0.013149569755803159;
-      sample.hpl = 14.123;
-      sample.vpl = 40.0 * ratio;
-      sample.hal = 20.0;
-      sample.val = 40.0;
-      sample.gnss_anchor_hpl = sample.hpl;
-      sample.gnss_anchor_vpl = sample.vpl;
-      sample.gnss_anchored_hpl = sample.hpl;
-      sample.gnss_anchored_vpl = sample.vpl;
-      sample.gnss_raw_hpl = sample.hpl;
-      sample.gnss_raw_vpl = sample.vpl;
-      sample.gnss_receiver_raw_hpl = sample.hpl;
-      sample.gnss_receiver_raw_vpl = sample.vpl;
-      sample.gnss_spatial_delta_h = 0.0;
-      sample.gnss_spatial_delta_v = coarse ? 24.928062415153363 : 0.0;
-      sample.gnss_temporal_growth_h = 0.0;
-      sample.gnss_temporal_growth_v = 0.0;
-      sample.gnss_used_satellite_count = 28;
-      sample.gnss_weighted_geometry_condition = 1.0;
-      sample.unknown_coverage = 0.16502525252525252;
-      sample.reason = "ok";
-      samples->push_back(std::move(sample));
-    }
-    return true;
+  const Eigen::Vector3d start(-12.105, 2.357, 1.263);
+  ASSERT_TRUE(ego_planner::configureP4RefinementClearanceRecovery(
+      start, Eigen::Vector3d::Zero(), 0.05, &decision));
+  EXPECT_EQ(decision.action, ego_planner::P4ForwardAction::OBSERVE_MORE);
+  EXPECT_EQ(decision.trigger_reason,
+            ego_planner::P4ForwardTriggerReason::NO_SAFE_ROUTE);
+  EXPECT_EQ(decision.planning_disposition,
+            ego_planner::P4PlanningDisposition::NEW_TRAJECTORY_READY);
+  EXPECT_TRUE(decision.local_clearance_recovery);
+  EXPECT_EQ(decision.selection_authority,
+            ego_planner::P4ForwardSelectionAuthority::NONE);
+  EXPECT_FALSE(decision.formal_support);
+  ASSERT_EQ(decision.observe_more_trajectory.size(), 3u);
+  EXPECT_TRUE(decision.observe_more_trajectory.front().isApprox(start));
+  EXPECT_NEAR((decision.observe_more_trajectory.back() - start).norm(),
+              0.10, 1.0e-12);
+  EXPECT_GT((decision.observe_more_trajectory.back() - start)
+                .dot(failure.escape_direction),
+            0.09);
+  EXPECT_LE(decision.speed_cap_mps, 0.25);
+  EXPECT_EQ(decision.reason, "refinement_clearance_recovery_exit");
+}
+
+TEST(P4ForwardRoute,
+     ClearanceRecoveryRejectsMotionHardCollisionAndMissingEvidence)
+{
+  const auto make_failure = []() {
+    ego_planner::P4ForwardDecision decision;
+    decision.result_status = ego_planner::P4ForwardResultStatus::READY;
+    decision.action = ego_planner::P4ForwardAction::REPLAN_REQUIRED;
+    decision.planning_disposition =
+        ego_planner::P4PlanningDisposition::HOLD_REQUIRED;
+    decision.reason =
+        "no_native_refined_candidate:clearance_margin_insufficient=1";
+    ego_planner::P4ForwardRefinementResult failure;
+    failure.status = ego_planner::P4ForwardRefinementStatus::
+        CLEARANCE_MARGIN_INSUFFICIENT;
+    failure.failure_position = Eigen::Vector3d(0.02, 0.0, 1.0);
+    failure.minimum_signed_margin_m = 0.04;
+    failure.escape_direction = Eigen::Vector3d::UnitY();
+    failure.nearest_obstacle_identity = "tree";
+    decision.refinement_diagnostics.push_back(failure);
+    return decision;
   };
+  const Eigen::Vector3d start(0.0, 0.0, 1.0);
 
-  const auto decision = P4ForwardRoutePlanner().decide(request);
+  auto moving = make_failure();
+  EXPECT_FALSE(ego_planner::configureP4RefinementClearanceRecovery(
+      start, Eigen::Vector3d(0.06, 0.0, 0.0), 0.05, &moving));
+  EXPECT_EQ(moving.action, ego_planner::P4ForwardAction::REPLAN_REQUIRED);
 
-  ASSERT_GE(risk_batch_round, 2);
-  ASSERT_FALSE(decision.candidates.empty()) << decision.reason;
-  for (const auto &candidate : decision.candidates) {
-    EXPECT_TRUE(candidate.risk_supported);
-    EXPECT_TRUE(candidate.safety_gate_passed);
-    EXPECT_LT(candidate.safety_max_ratio, 1.0);
-    EXPECT_EQ(candidate.safety_state, P4ForwardSafetyState::SAFE);
-  }
+  auto hard_collision = make_failure();
+  hard_collision.refinement_diagnostics.front().minimum_signed_margin_m =
+      -0.05;
+  EXPECT_FALSE(ego_planner::configureP4RefinementClearanceRecovery(
+      start, Eigen::Vector3d::Zero(), 0.05, &hard_collision));
+
+  auto missing_escape = make_failure();
+  missing_escape.refinement_diagnostics.front().escape_direction.setZero();
+  EXPECT_FALSE(ego_planner::configureP4RefinementClearanceRecovery(
+      start, Eigen::Vector3d::Zero(), 0.05, &missing_escape));
+}
+
+TEST(P4ForwardRoute,
+     StoppedClearanceEnvelopeClosureWithPositiveHardMarginEscapes)
+{
+  ego_planner::P4ForwardDecision decision;
+  decision.result_status = ego_planner::P4ForwardResultStatus::READY;
+  decision.action = ego_planner::P4ForwardAction::REPLAN_REQUIRED;
+  decision.trigger_reason =
+      ego_planner::P4ForwardTriggerReason::NO_TOPOLOGY_ROUTE;
+  decision.planning_disposition =
+      ego_planner::P4PlanningDisposition::HOLD_REQUIRED;
+  decision.reason =
+      "no_native_refined_candidate:clearance_envelope_closed=1";
+  ego_planner::P4ForwardRefinementResult failure;
+  failure.status = ego_planner::P4ForwardRefinementStatus::
+      CLEARANCE_ENVELOPE_CLOSED;
+  const Eigen::Vector3d start(-11.5805, 2.21067, 1.38339);
+  failure.failure_position = start;
+  // This is the signed planning margin. Removing the unchanged 0.05 m
+  // planning reserve leaves 0.0294 m of strictly positive hard clearance.
+  failure.minimum_signed_margin_m = -0.0205906;
+  failure.escape_direction = Eigen::Vector3d(0.524177, 0.851609, 0.0);
+  failure.nearest_obstacle_identity = "current_frame";
+  decision.refinement_diagnostics.push_back(failure);
+
+  ASSERT_TRUE(ego_planner::configureP4RefinementClearanceRecovery(
+      start, Eigen::Vector3d::Zero(), 0.05, &decision));
+  EXPECT_EQ(decision.action, ego_planner::P4ForwardAction::OBSERVE_MORE);
+  EXPECT_TRUE(decision.local_clearance_recovery);
+  ASSERT_EQ(decision.observe_more_trajectory.size(), 3u);
+  EXPECT_TRUE(decision.observe_more_trajectory.front().isApprox(start));
+  EXPECT_GT((decision.observe_more_trajectory.back() - start)
+                .dot(failure.escape_direction.normalized()),
+            0.10);
+  EXPECT_EQ(decision.reason, "refinement_clearance_recovery_exit");
+}
+
+TEST(P4ForwardRoute,
+     StoppedDistantClearanceFailureCreatesBoundedRevalidatedPrefix)
+{
+  const Eigen::Vector3d start = Eigen::Vector3d::Zero();
+  ego_planner::P4ForwardDecision decision;
+  decision.result_status = ego_planner::P4ForwardResultStatus::READY;
+  decision.action = ego_planner::P4ForwardAction::REPLAN_REQUIRED;
+  decision.planning_disposition =
+      ego_planner::P4PlanningDisposition::HOLD_REQUIRED;
+  decision.reason =
+      "no_native_refined_candidate:clearance_margin_insufficient=2";
+  ego_planner::P4ForwardRefinementResult failure;
+  failure.status = ego_planner::P4ForwardRefinementStatus::
+      CLEARANCE_MARGIN_INSUFFICIENT;
+  failure.path = {
+      start,
+      Eigen::Vector3d(0.5, 0.0, 0.0),
+      Eigen::Vector3d(1.0, 0.0, 0.0),
+      Eigen::Vector3d(1.5, 0.0, 0.0),
+      Eigen::Vector3d(2.0, 0.0, 0.0)};
+  failure.failure_position = failure.path.back();
+  failure.minimum_signed_margin_m = 0.02;
+  failure.escape_direction = Eigen::Vector3d::UnitY();
+  failure.nearest_obstacle_identity = "distant-tree";
+  decision.refinement_diagnostics.push_back(failure);
+
+  ASSERT_TRUE(ego_planner::configureP4RefinementClearanceRecovery(
+      start, Eigen::Vector3d::Zero(), 0.05, &decision));
+  EXPECT_EQ(decision.action, ego_planner::P4ForwardAction::OBSERVE_MORE);
+  EXPECT_EQ(decision.planning_disposition,
+            ego_planner::P4PlanningDisposition::NEW_TRAJECTORY_READY);
+  EXPECT_FALSE(decision.local_clearance_recovery);
+  ASSERT_GE(decision.observe_more_trajectory.size(), 2u);
+  EXPECT_TRUE(decision.observe_more_trajectory.front().isApprox(start));
+  double progress = 0.0;
+  for (std::size_t index = 1u;
+       index < decision.observe_more_trajectory.size(); ++index)
+    progress += (decision.observe_more_trajectory[index] -
+                 decision.observe_more_trajectory[index - 1u]).norm();
+  EXPECT_GE(progress, 0.25);
+  EXPECT_LE(progress, 0.5);
+  EXPECT_LT((decision.observe_more_trajectory.back() -
+             failure.failure_position).norm(),
+            (start - failure.failure_position).norm());
+  EXPECT_EQ(decision.reason,
+            "refinement_clearance_limited_prefix");
 }
 
 }  // namespace
+TEST(P4ObservationSegmentPlannerTest,
+     SelectsFairPositiveGainBeforeDivergenceAndMirrorsWithoutSideLabels) {
+  ego_planner::P4ObservationSegmentInput input;
+  input.current_position = Eigen::Vector3d::Zero();
+  input.common_corridor = {
+      Eigen::Vector3d(0.0, 0.0, 0.0),
+      Eigen::Vector3d(1.0, 0.0, 0.0),
+      Eigen::Vector3d(2.0, 0.0, 0.0),
+      Eigen::Vector3d(3.0, 0.0, 0.0),
+      Eigen::Vector3d(4.0, 0.0, 0.0)};
+  input.divergence_point = input.common_corridor.back();
+  input.missing_los_by_channel = {
+      {Eigen::Vector3d(3.0, 0.5, 0.0)},
+      {Eigen::Vector3d(3.0, -0.5, 0.0)}};
+  input.raw_occluders =
+      std::make_shared<const std::vector<Eigen::Vector3d>>();
+  input.sensor.identity = "test-lidar-v1";
+  input.sensor.horizontal_fov_rad = 2.0;
+  input.sensor.vertical_min_rad = -0.5;
+  input.sensor.vertical_max_rad = 0.5;
+  input.sensor.min_range_m = 0.1;
+  input.sensor.max_range_m = 2.2;
+  input.candidate_spacing_m = 0.25;
+  input.stopping_reserve_m = 0.5;
+  input.maximum_progress_m = 3.5;
+
+  ego_planner::P4ObservationSegmentPlanner planner;
+  const auto original = planner.plan(input);
+  ASSERT_TRUE(original.available) << original.reason;
+  ASSERT_EQ(original.per_channel_normalized_gain.size(), 2u);
+  EXPECT_GT(original.per_channel_normalized_gain[0], 0.0);
+  EXPECT_GT(original.per_channel_normalized_gain[1], 0.0);
+  EXPECT_GT(original.fair_information_gain, 0.0);
+  EXPECT_LE(original.endpoint_station_m + input.stopping_reserve_m,
+            4.0 + 1.0e-12);
+  EXPECT_FALSE(original.route_winner_authority);
+  EXPECT_TRUE(original.terminal_stop_required);
+
+  std::swap(input.missing_los_by_channel[0],
+            input.missing_los_by_channel[1]);
+  const auto mirrored = planner.plan(input);
+  ASSERT_TRUE(mirrored.available) << mirrored.reason;
+  EXPECT_DOUBLE_EQ(mirrored.endpoint_station_m,
+                   original.endpoint_station_m);
+  EXPECT_DOUBLE_EQ(mirrored.fair_information_gain,
+                   original.fair_information_gain);
+}
+
+TEST(P4ObservationSegmentPlannerTest,
+     ReturnsTypedHoldWhenSensorGeometryCannotRevealBothChannels) {
+  ego_planner::P4ObservationSegmentInput input;
+  input.current_position = Eigen::Vector3d::Zero();
+  input.common_corridor = {
+      Eigen::Vector3d(0.0, 0.0, 0.0),
+      Eigen::Vector3d(1.0, 0.0, 0.0),
+      Eigen::Vector3d(2.0, 0.0, 0.0)};
+  input.divergence_point = input.common_corridor.back();
+  input.missing_los_by_channel = {
+      {Eigen::Vector3d(-2.0, 1.0, 0.0)},
+      {Eigen::Vector3d(-2.0, -1.0, 0.0)}};
+  input.sensor.identity = "test-lidar-v1";
+  input.sensor.horizontal_fov_rad = 1.0;
+  input.sensor.vertical_min_rad = -0.5;
+  input.sensor.vertical_max_rad = 0.5;
+  input.sensor.min_range_m = 0.1;
+  input.sensor.max_range_m = 10.0;
+  input.candidate_spacing_m = 0.25;
+  input.stopping_reserve_m = 0.5;
+  input.maximum_progress_m = 1.5;
+
+  const auto result = ego_planner::P4ObservationSegmentPlanner{}.plan(input);
+
+  EXPECT_FALSE(result.available);
+  EXPECT_TRUE(result.guide.empty());
+  EXPECT_EQ(result.reason,
+            "OBSERVATION_UNAVAILABLE_SENSOR_GEOMETRY");
+}
+
+TEST(P4ForwardRoute,
+     IncompleteProductionRiskUsesCertifiedObservationSegmentWithoutWinner) {
+  auto request = incompleteObservationRequest(3.6);
+
+  const auto decision = P4ForwardRoutePlanner().decide(request);
+
+  ASSERT_EQ(decision.action, P4ForwardAction::DEFER_RISK_SELECTION)
+    << decision.reason;
+  EXPECT_EQ(decision.executable_intent,
+    ego_planner::P4ExecutableIntent::COMMON_OBSERVATION_SEGMENT);
+  EXPECT_EQ(decision.reason, "certified_observation_segment");
+  EXPECT_EQ(decision.deferred_motion_mode,
+    ego_planner::P4ForwardDeferredMotionMode::COMMON_PREFIX);
+  EXPECT_EQ(decision.selection_authority,
+    P4ForwardSelectionAuthority::NONE);
+  EXPECT_EQ(decision.selected_candidate_id, 0u);
+  EXPECT_EQ(decision.selected_channel_id, 0u);
+  EXPECT_TRUE(decision.selected_guide.empty());
+  ASSERT_GE(decision.deferred_trajectory.size(), 2u);
+  EXPECT_TRUE(decision.observation_endpoint.isApprox(
+    decision.deferred_trajectory.back(), 1.0e-12));
+  EXPECT_TRUE(decision.observation_divergence_boundary.allFinite());
+  EXPECT_GT(decision.observation_stopping_reserve_m, 0.0);
+  EXPECT_GT(decision.observation_predicted_information_gain, 0.0);
+  EXPECT_GT(decision.speed_cap_mps, 0.0);
+  EXPECT_LT(decision.deferred_trajectory.back().x(), 3.0);
+}
+
+TEST(P4ForwardRoute,
+     PhysicallyUnobservableProductionRiskProducesTypedHold) {
+  auto request = incompleteObservationRequest(0.5);
+
+  const auto decision = P4ForwardRoutePlanner().decide(request);
+
+  EXPECT_EQ(decision.action, P4ForwardAction::DEFER_RISK_SELECTION);
+  EXPECT_EQ(decision.executable_intent,
+    ego_planner::P4ExecutableIntent::HOLD);
+  EXPECT_EQ(decision.reason, "OBSERVATION_UNAVAILABLE_SENSOR_GEOMETRY");
+  EXPECT_EQ(decision.deferred_motion_mode,
+    ego_planner::P4ForwardDeferredMotionMode::HOLD);
+  EXPECT_EQ(decision.selection_authority,
+    P4ForwardSelectionAuthority::NONE);
+  EXPECT_TRUE(decision.deferred_trajectory.empty());
+  EXPECT_DOUBLE_EQ(decision.speed_cap_mps, 0.0);
+}

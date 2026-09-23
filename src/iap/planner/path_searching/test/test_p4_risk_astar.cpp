@@ -4,8 +4,10 @@
 #include <iap/planner/risk_grid_map.hpp>
 
 #include <cmath>
+#include <chrono>
 #include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 
 struct GridMapTestAccess {
@@ -253,13 +255,13 @@ TEST(P4RiskAStarTest, RecordedThirtySixCellPoolRejectsBoundaryBeforeOutwardAdjus
   EXPECT_EQ(metrics.fallback_reason, "invalid_start_or_end");
 }
 
-TEST(P4RiskAStarTest, OccupiedBoundaryEndpointCanAdjustOutwardOneCell) {
+TEST(P4RiskAStarTest, ExactlyOccupiedBoundaryEndpointCanAdjustOutwardOneCell) {
   auto map = std::make_shared<GridMap>();
   AStar astar;
   astar.initGridMap(map, Eigen::Vector3i(100, 8, 8));
   astar.setFrozenOccupancyQuery([](const Eigen::Vector3d& point) {
     GridMapOccupancyDiagnostic diagnostic;
-    const bool occupied = std::abs(point.x() - 5.0) < 1.0e-9 &&
+    const bool occupied = point.x() >= 4.94 && point.x() <= 5.01 &&
                           std::abs(point.y()) < 1.0e-9 &&
                           std::abs(point.z()) < 1.0e-9;
     diagnostic.available = true;
@@ -277,6 +279,37 @@ TEST(P4RiskAStarTest, OccupiedBoundaryEndpointCanAdjustOutwardOneCell) {
 
   ASSERT_FALSE(path.empty());
   EXPECT_NEAR(path.back().x(), 5.1, 1.0e-9);
+  EXPECT_EQ(astar.getLastP4Metrics().end_adjustment_steps, 1);
+}
+
+TEST(P4RiskAStarTest,
+     FreeExactEndpointUsesInteriorCellWhenItsQuantizedCenterIsBlocked) {
+  auto map = std::make_shared<GridMap>();
+  AStar astar;
+  astar.initGridMap(map, Eigen::Vector3i(100, 8, 8));
+  astar.setFrozenOccupancyQuery([](const Eigen::Vector3d& point) {
+    GridMapOccupancyDiagnostic diagnostic;
+    // 4.95 is an exactly checked, free guide endpoint. Its containing lattice
+    // cell is centred at 5.0, while both that centre and every point farther
+    // along the task direction are blocked. A safe search must shorten to the
+    // interior cell at 4.9 instead of overshooting the approved guide.
+    const bool occupied = point.x() >= 4.999;
+    diagnostic.available = true;
+    diagnostic.observed = true;
+    diagnostic.state = occupied ? GridMapObservationState::OCCUPIED
+                                : GridMapObservationState::OBSERVED_FREE;
+    diagnostic.inflated_occupied = occupied;
+    return diagnostic;
+  });
+
+  ASSERT_TRUE(astar.AstarSearchOriginal(
+      0.1, Eigen::Vector3d(-4.95, 0.0, 0.0),
+      Eigen::Vector3d(4.95, 0.0, 0.0)));
+  const auto path = astar.getPath();
+
+  ASSERT_FALSE(path.empty());
+  EXPECT_NEAR(path.back().x(), 4.9, 1.0e-9);
+  EXPECT_LT(astar.getLastP4Metrics().adjusted_end.x(), 4.95);
   EXPECT_EQ(astar.getLastP4Metrics().end_adjustment_steps, 1);
 }
 
@@ -304,6 +337,71 @@ TEST(P4RiskAStarTest, BlockedEndpointAdjustmentIsBoundedAndTyped) {
   EXPECT_EQ(metrics.end_adjustment_steps, 1);
   EXPECT_TRUE(metrics.original_end.allFinite());
   EXPECT_TRUE(metrics.adjusted_end.allFinite());
+}
+
+TEST(P4RiskAStarTest, SearchTimeLimitIsExplicitAndRejectsInvalidUpdates) {
+  AStar astar;
+  EXPECT_DOUBLE_EQ(astar.searchTimeLimit(), 0.2);
+  astar.setSearchTimeLimit(0.75);
+  EXPECT_DOUBLE_EQ(astar.searchTimeLimit(), 0.75);
+  astar.setSearchTimeLimit(0.0);
+  EXPECT_DOUBLE_EQ(astar.searchTimeLimit(), 0.75);
+}
+
+TEST(P4RiskAStarTest, TimeoutExposesCheckedPathToNearestFrontier) {
+  auto map = std::make_shared<GridMap>();
+  AStar astar;
+  astar.initGridMap(map, Eigen::Vector3i(120, 40, 12));
+  astar.setSearchTimeLimit(0.015);
+  astar.setFrozenOccupancyQuery([](const Eigen::Vector3d&) {
+    std::this_thread::sleep_for(std::chrono::microseconds(20));
+    GridMapOccupancyDiagnostic diagnostic;
+    diagnostic.available = true;
+    diagnostic.observed = true;
+    diagnostic.state = GridMapObservationState::OBSERVED_FREE;
+    return diagnostic;
+  });
+
+  EXPECT_FALSE(astar.AstarSearchOriginal(
+      0.1, Eigen::Vector3d(-4.0, 0.0, 0.0),
+      Eigen::Vector3d(4.0, 0.0, 0.0)));
+  EXPECT_EQ(astar.getLastP4Metrics().failure_kind,
+            P4AStarFailureKind::TIMEOUT);
+  const auto frontier_path = astar.getLastReachableFrontierPath();
+  ASSERT_GE(frontier_path.size(), 2u);
+  EXPECT_LT((frontier_path.front() - Eigen::Vector3d(-4.0, 0.0, 0.0)).norm(),
+            0.11);
+  EXPECT_LT((frontier_path.back() - Eigen::Vector3d(4.0, 0.0, 0.0)).norm(),
+            8.0);
+}
+
+TEST(P4RiskAStarTest,
+     LateralRefinementKeepsVerticalMotionCompleteWithoutDiagonalFanout) {
+  auto map = std::make_shared<GridMap>();
+  AStar astar;
+  astar.initGridMap(map, Eigen::Vector3i(48, 32, 12));
+  astar.setAxisAlignedVerticalMotion(true);
+  astar.setFrozenOccupancyQuery([](const Eigen::Vector3d& point) {
+    GridMapOccupancyDiagnostic diagnostic;
+    diagnostic.available = point.allFinite();
+    diagnostic.observed = diagnostic.available;
+    diagnostic.state = diagnostic.available
+                           ? GridMapObservationState::OBSERVED_FREE
+                           : GridMapObservationState::UNKNOWN;
+    return diagnostic;
+  });
+
+  ASSERT_TRUE(astar.AstarSearchOriginal(
+      0.1, Eigen::Vector3d(-1.5, 0.0, -0.1),
+      Eigen::Vector3d(1.5, 0.4, 0.1)));
+  const auto path = astar.getPath();
+  ASSERT_GE(path.size(), 2u);
+  for (std::size_t index = 1; index < path.size(); ++index) {
+    const Eigen::Vector3d delta = path[index] - path[index - 1u];
+    if (std::abs(delta.z()) <= 1.0e-9) continue;
+    EXPECT_NEAR(delta.x(), 0.0, 1.0e-9);
+    EXPECT_NEAR(delta.y(), 0.0, 1.0e-9);
+  }
 }
 
 TEST(P4RiskAStarTest, V2CostUsesBottleneckThenIntegralThenLength) {

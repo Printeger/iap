@@ -6,6 +6,24 @@ geometry_msgs/Pose t_map_lidar
 sensor_msgs/PointCloud2 deskewed_hits_lidar
 string frame_contract_id
 
+# Explicit beam outcomes associated with this registered scan. The arrays are
+# empty and complete=false when no synchronized simulator evidence exists.
+string sensor_model_id
+uint32 horizontal_samples
+uint32 vertical_samples
+float64 horizontal_fov_rad
+float64 vertical_min_rad
+float64 vertical_max_rad
+float64 min_range_m
+float64 max_range_m
+bool beam_evidence_complete
+uint8[] beam_outcomes
+float32[] beam_direction_x
+float32[] beam_direction_y
+float32[] beam_direction_z
+float32[] beam_ranges_m
+string beam_content_hash
+
 # True only for the first estimator frame that defines the planner-map datum.
 # Its pose is not the result of an ICP alignment against an older frame; scan
 # error is still charged by LocalMotionAssurance.

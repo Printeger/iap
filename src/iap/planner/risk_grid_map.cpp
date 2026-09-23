@@ -1864,18 +1864,19 @@ bool RiskGridMap::refreshFromProvider(
           voxel.source_flags = result.source_flags;
           voxel.hal = result.hal;
           voxel.val = result.val;
-          voxel.gnss = result.gnss;
-          voxel.lidar = result.lidar;
-          voxel.prior = result.prior;
-          voxel.fim_fused = result.fim_fused;
+          voxel.gnss = std::move(result.gnss);
+          voxel.lidar = std::move(result.lidar);
+          voxel.prior = std::move(result.prior);
+          voxel.fim_fused = std::move(result.fim_fused);
           voxel.floor_increment_h = result.floor_increment_h;
           voxel.floor_increment_v = result.floor_increment_v;
-          voxel.floor_source_h = result.floor_source_h;
-          voxel.floor_source_v = result.floor_source_v;
+          voxel.floor_source_h = std::move(result.floor_source_h);
+          voxel.floor_source_v = std::move(result.floor_source_v);
           voxel.gnss_geometry_status = result.gnss_geometry_status;
           voxel.gnss_support_authority = result.gnss_support_authority;
           voxel.gnss_support_status = result.gnss_support_status;
-          voxel.gnss_used_satellite_ids = result.gnss_used_satellite_ids;
+          voxel.gnss_used_satellite_ids =
+              std::move(result.gnss_used_satellite_ids);
           voxel.gnss_local_satellite_set_hash =
               result.gnss_local_satellite_set_hash;
           voxel.gnss_weighted_geometry_condition =
@@ -1931,17 +1932,18 @@ bool RiskGridMap::refreshFromProvider(
                 ? result.fim_fused.risk_ratio
                 : std::max(result.hpl_pred, result.vpl_pred);
             voxel.c_pi = clamp_cost(provider_cost, params_copy.cost_max);
-            voxel.reason = result.reason.empty() ? "ok" : result.reason;
+            voxel.reason = result.reason.empty()
+                ? "ok" : std::move(result.reason);
             ++stats->valid;
           } else {
             voxel.reason = !cost_source_failure.empty()
-                ? cost_source_failure
-                : !result.reason.empty() ? result.reason
+                ? std::move(cost_source_failure)
+                : !result.reason.empty() ? std::move(result.reason)
                                          : "provider_invalid";
             if (result.stale) {
               ++stats->provider_stale;
-              ++stats->unknown_reasons[result.reason.empty()
-                    ? "provider_stale" : result.reason];
+              ++stats->unknown_reasons[voxel.reason.empty()
+                    ? "provider_stale" : voxel.reason];
             } else {
               ++stats->provider_invalid;
               ++stats->unknown_reasons[voxel.reason];

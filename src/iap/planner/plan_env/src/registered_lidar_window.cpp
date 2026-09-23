@@ -48,6 +48,56 @@ std::string contributionContentHash(
   return output.str();
 }
 
+bool validExplicitBeamEvidence(const RegisteredLidarFrameData& frame) {
+  if (!frame.beam_evidence_complete) {
+    return true;
+  }
+  const std::size_t expected =
+      static_cast<std::size_t>(frame.horizontal_samples) *
+      static_cast<std::size_t>(frame.vertical_samples);
+  if (frame.sensor_model_id.empty() || frame.beam_content_hash.empty() ||
+      frame.horizontal_samples == 0U || frame.vertical_samples == 0U ||
+      expected != frame.beams.size() ||
+      !std::isfinite(frame.horizontal_fov_rad) ||
+      !std::isfinite(frame.vertical_min_rad) ||
+      !std::isfinite(frame.vertical_max_rad) ||
+      frame.vertical_min_rad > frame.vertical_max_rad ||
+      !std::isfinite(frame.min_range_m) || frame.min_range_m < 0.0 ||
+      !std::isfinite(frame.max_range_m) ||
+      frame.max_range_m <= frame.min_range_m) {
+    return false;
+  }
+  for (const auto& beam : frame.beams) {
+    if (!beam.direction_lidar.allFinite() ||
+        beam.direction_lidar.norm() <= 1.0e-12) {
+      return false;
+    }
+    if (beam.outcome == RegisteredLidarBeamOutcome::HIT &&
+        (!std::isfinite(beam.range_m) ||
+         beam.range_m < frame.min_range_m ||
+         beam.range_m > frame.max_range_m + 1.0e-6)) {
+      return false;
+    }
+    if (beam.outcome != RegisteredLidarBeamOutcome::INVALID &&
+        beam.outcome != RegisteredLidarBeamOutcome::HIT &&
+        beam.outcome != RegisteredLidarBeamOutcome::NO_RETURN) {
+      return false;
+    }
+  }
+  return true;
+}
+
+std::string fnvIdentity(const std::string& canonical) {
+  std::uint64_t hash = 1469598103934665603ULL;
+  for (const unsigned char byte : canonical) {
+    hash ^= static_cast<std::uint64_t>(byte);
+    hash *= 1099511628211ULL;
+  }
+  std::ostringstream output;
+  output << std::hex << std::setfill('0') << std::setw(16) << hash;
+  return output.str();
+}
+
 }  // namespace
 
 RegisteredLidarWindow::RegisteredLidarWindow(Geometry geometry)
@@ -126,7 +176,9 @@ RegisteredLidarWindow::buildContribution(
     bool occupied_endpoint = false;
   };
   std::vector<RayEnd> representative_rays;
-  representative_rays.reserve(frame.hits_lidar.size());
+  representative_rays.reserve(frame.beam_evidence_complete
+                                  ? frame.beams.size()
+                                  : frame.hits_lidar.size());
   const Eigen::Vector3d map_max =
       geometry_.origin +
       geometry_.dimensions.cast<double>() * geometry_.resolution_m;
@@ -156,7 +208,35 @@ RegisteredLidarWindow::buildContribution(
     return sensor + inside_fraction * direction;
   };
 
-  for (const auto& hit_lidar : frame.hits_lidar) {
+  std::vector<Eigen::Vector3d> explicit_hits;
+  if (frame.beam_evidence_complete) {
+    for (const auto& beam : frame.beams) {
+      if (beam.outcome == RegisteredLidarBeamOutcome::INVALID) {
+        continue;
+      }
+      const Eigen::Vector3d direction = beam.direction_lidar.normalized();
+      const double range = beam.outcome == RegisteredLidarBeamOutcome::HIT
+                               ? beam.range_m : frame.max_range_m;
+      const Eigen::Vector3d endpoint_lidar = direction * range;
+      if (beam.outcome == RegisteredLidarBeamOutcome::HIT) {
+        explicit_hits.push_back(endpoint_lidar);
+      } else {
+        const Eigen::Vector3d endpoint = frame.T_map_lidar * endpoint_lidar;
+        const auto clipped = inBounds(indexOf(endpoint))
+            ? std::optional<Eigen::Vector3d>(endpoint)
+            : clip_to_map(endpoint);
+        if (clipped) {
+          const Eigen::Vector3i finish = indexOf(*clipped);
+          if (inBounds(finish) && mark(&ray_end_bits, address(finish))) {
+            representative_rays.push_back({*clipped, false});
+          }
+        }
+      }
+    }
+  }
+  const auto& hits = frame.beam_evidence_complete
+      ? explicit_hits : frame.hits_lidar;
+  for (const auto& hit_lidar : hits) {
     if (!hit_lidar.allFinite()) {
       continue;
     }
@@ -239,7 +319,7 @@ RegisteredLidarWindow::buildContribution(
     }
   }
 
-  contribution.hits.reserve(frame.hits_lidar.size());
+  contribution.hits.reserve(hits.size());
   for (std::size_t word_index = 0; word_index < word_count; ++word_index) {
     free_bits[word_index] &= ~hit_bits[word_index];
     auto append_addresses = [word_index](
@@ -353,6 +433,146 @@ RegisteredLidarWindow::activeObstacleSources() const {
   return sources;
 }
 
+std::shared_ptr<const LocalEvidenceSnapshot>
+RegisteredLidarWindow::captureLocalEvidenceSnapshot(
+    const std::uint64_t occupancy_generation) const {
+  if (!validGeometry()) {
+    return nullptr;
+  }
+  std::vector<const FrameContribution*> contributions;
+  contributions.reserve(active_frames_.size() + (has_current_frame_ ? 1U : 0U));
+  for (const auto& entry : active_frames_) {
+    if (entry.second.source.beam_evidence_complete &&
+        validExplicitBeamEvidence(entry.second.source)) {
+      contributions.push_back(&entry.second);
+    }
+  }
+  if (has_current_frame_ && current_frame_.source.beam_evidence_complete &&
+      validExplicitBeamEvidence(current_frame_.source)) {
+    contributions.push_back(&current_frame_);
+  }
+  std::sort(contributions.begin(), contributions.end(),
+            [](const auto* lhs, const auto* rhs) {
+              if (lhs->source.scan_end_stamp_s != rhs->source.scan_end_stamp_s) {
+                return lhs->source.scan_end_stamp_s <
+                    rhs->source.scan_end_stamp_s;
+              }
+              return lhs->source.frame_id < rhs->source.frame_id;
+            });
+  if (contributions.empty()) {
+    return nullptr;
+  }
+  const std::string sensor_model =
+      contributions.front()->source.sensor_model_id;
+  const auto &sensor_contract = contributions.front()->source;
+  const auto same_sensor_contract = [&sensor_contract](
+      const FrameContribution *contribution) {
+        const auto &frame = contribution->source;
+        constexpr double kContractTolerance = 1.0e-12;
+        return frame.sensor_model_id == sensor_contract.sensor_model_id &&
+            frame.horizontal_samples == sensor_contract.horizontal_samples &&
+            frame.vertical_samples == sensor_contract.vertical_samples &&
+            std::abs(frame.horizontal_fov_rad -
+                sensor_contract.horizontal_fov_rad) <= kContractTolerance &&
+            std::abs(frame.vertical_min_rad -
+                sensor_contract.vertical_min_rad) <= kContractTolerance &&
+            std::abs(frame.vertical_max_rad -
+                sensor_contract.vertical_max_rad) <= kContractTolerance &&
+            std::abs(frame.min_range_m - sensor_contract.min_range_m) <=
+                kContractTolerance &&
+            std::abs(frame.max_range_m - sensor_contract.max_range_m) <=
+                kContractTolerance;
+      };
+  if (sensor_model.empty() ||
+      std::any_of(contributions.begin(), contributions.end(),
+                  [&same_sensor_contract](const auto* contribution) {
+                    return !same_sensor_contract(contribution);
+                  }) ||
+      contributions.size() >=
+          static_cast<std::size_t>(std::numeric_limits<std::uint16_t>::max())) {
+    return nullptr;
+  }
+
+  auto storage = std::make_shared<LocalEvidenceSnapshot::Storage>();
+  storage->identity.occupancy_generation = occupancy_generation;
+  storage->identity.active_window_generation = active_generation_;
+  storage->identity.coordinate_contract = geometry_.frame_contract_id;
+  storage->identity.sensor_model_identity = sensor_model;
+  storage->identity.horizontal_samples = sensor_contract.horizontal_samples;
+  storage->identity.vertical_samples = sensor_contract.vertical_samples;
+  storage->identity.horizontal_fov_rad = sensor_contract.horizontal_fov_rad;
+  storage->identity.vertical_min_rad = sensor_contract.vertical_min_rad;
+  storage->identity.vertical_max_rad = sensor_contract.vertical_max_rad;
+  storage->identity.min_range_m = sensor_contract.min_range_m;
+  storage->identity.max_range_m = sensor_contract.max_range_m;
+  storage->geometry.origin = geometry_.origin;
+  storage->geometry.dimensions = geometry_.dimensions;
+  storage->geometry.resolution_m = geometry_.resolution_m;
+  const std::size_t cell_count = active_hit_count_.size();
+  storage->packed_states.assign((cell_count + 3U) / 4U, 0U);
+  storage->source_indices.assign(cell_count, 0U);
+  storage->sources.reserve(contributions.size());
+  std::vector<EvidenceVoxelState> states(
+      cell_count, EvidenceVoxelState::UNKNOWN);
+  std::vector<double> source_stamps(
+      cell_count, -std::numeric_limits<double>::infinity());
+  std::ostringstream source_identity;
+  for (std::size_t source = 0; source < contributions.size(); ++source) {
+    const auto& contribution = *contributions[source];
+    const auto& frame = contribution.source;
+    storage->sources.push_back(LocalEvidenceSource{
+        frame.frame_id, frame.scan_end_stamp_s, frame.sensor_model_id,
+        frame.beam_content_hash});
+    source_identity << frame.frame_id << ':' << std::hexfloat
+                    << frame.scan_end_stamp_s << ':'
+                    << frame.beam_content_hash << ';';
+    const std::uint16_t source_index =
+        static_cast<std::uint16_t>(source + 1U);
+    for (const int address : contribution.observed_free) {
+      const auto index = static_cast<std::size_t>(address);
+      if (states[index] != EvidenceVoxelState::RAW_OCCUPIED &&
+          frame.scan_end_stamp_s >= source_stamps[index]) {
+        states[index] = EvidenceVoxelState::OBSERVED_FREE;
+        storage->source_indices[index] = source_index;
+        source_stamps[index] = frame.scan_end_stamp_s;
+      }
+    }
+    for (const int address : contribution.hits) {
+      const auto index = static_cast<std::size_t>(address);
+      if (states[index] != EvidenceVoxelState::RAW_OCCUPIED ||
+          frame.scan_end_stamp_s >= source_stamps[index]) {
+        states[index] = EvidenceVoxelState::RAW_OCCUPIED;
+        storage->source_indices[index] = source_index;
+        source_stamps[index] = frame.scan_end_stamp_s;
+      }
+    }
+  }
+  std::ostringstream content_identity;
+  content_identity << occupancy_generation << ':' << active_generation_ << ':'
+                   << geometry_.frame_contract_id << ':' << sensor_model << ':'
+                   << sensor_contract.horizontal_samples << ':'
+                   << sensor_contract.vertical_samples << ':' << std::hexfloat
+                   << sensor_contract.horizontal_fov_rad << ':'
+                   << sensor_contract.vertical_min_rad << ':'
+                   << sensor_contract.vertical_max_rad << ':'
+                   << sensor_contract.min_range_m << ':'
+                   << sensor_contract.max_range_m << ':';
+  for (std::size_t address = 0; address < states.size(); ++address) {
+    const auto raw = static_cast<std::uint8_t>(states[address]);
+    storage->packed_states[address / 4U] |=
+        static_cast<std::uint8_t>(raw << ((address % 4U) * 2U));
+    if (raw != 0U) {
+      content_identity << address << '=' << static_cast<unsigned>(raw) << '@'
+                       << storage->source_indices[address] << ';';
+    }
+  }
+  storage->identity.source_set_hash = fnvIdentity(source_identity.str());
+  content_identity << storage->identity.source_set_hash;
+  storage->identity.content_hash = fnvIdentity(content_identity.str());
+  return std::shared_ptr<const LocalEvidenceSnapshot>(
+      new LocalEvidenceSnapshot(std::move(storage)));
+}
+
 bool RegisteredLidarWindow::addEnvironmentContribution(
     const FrameContribution& contribution) {
   bool union_changed = false;
@@ -395,6 +615,12 @@ void RegisteredLidarWindow::publishEnvironmentOccupiedVoxelCenters() {
         (index.cast<double>() + Eigen::Vector3d::Constant(0.5)) *
             geometry_.resolution_m);
   }
+  std::sort(centers->begin(), centers->end(),
+            [](const Eigen::Vector3d& lhs, const Eigen::Vector3d& rhs) {
+              if (lhs.x() != rhs.x()) return lhs.x() < rhs.x();
+              if (lhs.y() != rhs.y()) return lhs.y() < rhs.y();
+              return lhs.z() < rhs.z();
+            });
   environment_occupied_voxel_centers_ = std::move(centers);
 }
 
@@ -480,14 +706,15 @@ RegisteredLidarWindowUpdate RegisteredLidarWindow::applyCurrentFrame(
       !std::isfinite(frame.stamp_s) ||
       !std::isfinite(frame.scan_end_stamp_s) ||
       frame.scan_end_stamp_s + 1.0e-9 < frame.stamp_s ||
-      frame.sensor_receipt_steady_ns == 0U) {
+      frame.sensor_receipt_steady_ns == 0U ||
+      !validExplicitBeamEvidence(frame)) {
     update.reason = frame.frame_contract_id != geometry_.frame_contract_id
                         ? "frame_contract_mismatch"
                         : "invalid_current_frame";
     return update;
   }
 
-  const FrameContribution next = buildContribution(frame);
+  FrameContribution next = buildContribution(frame);
 
   // Contributions are sorted. Compare the old and new overlays with one
   // four-way merge instead of materializing a large unordered map. A MID-360
@@ -555,7 +782,7 @@ RegisteredLidarWindowUpdate RegisteredLidarWindow::applyCurrentFrame(
   for (const int address : next.observed_free) {
     current_free_[static_cast<std::size_t>(address)] = 1U;
   }
-  current_frame_ = next;
+  current_frame_ = std::move(next);
   has_current_frame_ = true;
   current_frame_id_ = frame.frame_id;
   current_stamp_s_ = frame.stamp_s;
@@ -618,7 +845,8 @@ RegisteredLidarWindowUpdate RegisteredLidarWindow::applyActiveDelta(
         !std::isfinite(source.stamp_s) ||
         !std::isfinite(source.scan_end_stamp_s) ||
         source.scan_end_stamp_s + 1.0e-9 < source.stamp_s ||
-        source.sensor_receipt_steady_ns == 0U) {
+        source.sensor_receipt_steady_ns == 0U ||
+        !validExplicitBeamEvidence(source)) {
       update.recovery_required = true;
       update.reason = "invalid_added_frame";
       return update;
@@ -694,7 +922,8 @@ RegisteredLidarWindowUpdate RegisteredLidarWindow::replaceActiveWindow(
         !std::isfinite(source.stamp_s) ||
         !std::isfinite(source.scan_end_stamp_s) ||
         source.scan_end_stamp_s + 1.0e-9 < source.stamp_s ||
-        source.sensor_receipt_steady_ns == 0U) {
+        source.sensor_receipt_steady_ns == 0U ||
+        !validExplicitBeamEvidence(source)) {
       update.recovery_required = true;
       update.reason = "invalid_recovery_window";
       return update;

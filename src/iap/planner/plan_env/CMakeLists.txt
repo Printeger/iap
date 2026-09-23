@@ -80,6 +80,7 @@ ament_export_include_directories(include)
 
 add_library(plan_env SHARED
   src/grid_map.cpp
+  src/local_evidence_snapshot.cpp
   src/registered_lidar_window.cpp
   src/raycast.cpp
   src/obj_predictor.cpp

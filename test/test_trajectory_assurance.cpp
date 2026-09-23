@@ -515,6 +515,123 @@ TEST(LocalMotionAssuranceTest,
 }
 
 TEST(LocalMotionAssuranceTest,
+     InitialClearanceRecoveryRegainsPlanningBufferWithinBound) {
+  auto evidence = clearCurrentFrameEvidence();
+  iap::LocalObstacleEvidence obstacle;
+  obstacle.center_map = Eigen::Vector3d(0.0, 0.65, 1.0);
+  obstacle.half_extent_m = Eigen::Vector3d::Zero();
+  obstacle.provenance = iap::LocalObstacleProvenance::CURRENT_FRAME;
+  obstacle.source_frame_id = 12;
+  obstacle.source_identity = "recovery-tree";
+  evidence.obstacles.push_back(obstacle);
+
+  iap::LocalMotionCurve nominal;
+  nominal.curve_id = "recovery-nominal";
+  nominal.samples = {
+      {0.0, Eigen::Vector3d(0.0, 0.0, 1.0), 0.05},
+      {0.2, Eigen::Vector3d(0.0, -0.03, 1.0), 0.05},
+      {0.4, Eigen::Vector3d(0.0, -0.06, 1.0), 0.05},
+  };
+  iap::LocalMotionCurve early_brake;
+  early_brake.curve_id = "brake-early";
+  early_brake.braking_curve = true;
+  early_brake.samples = {
+      {0.0, Eigen::Vector3d(0.0, 0.0, 1.0), 0.05},
+      {0.2, Eigen::Vector3d(0.0, -0.01, 1.0), 0.05},
+  };
+  iap::LocalMotionCurve late_brake;
+  late_brake.curve_id = "brake-late";
+  late_brake.braking_curve = true;
+  late_brake.samples = {
+      {0.4, Eigen::Vector3d(0.0, -0.06, 1.0), 0.05},
+      {0.6, Eigen::Vector3d(0.0, -0.06, 1.0), 0.05},
+  };
+  iap::LocalMotionInitialClearanceRecovery recovery;
+  recovery.enabled = true;
+  recovery.maximum_transition_duration_s = 0.4;
+
+  const auto result = iap::LocalMotionAssurance().evaluate(
+      evidence, {nominal, early_brake, late_brake}, 0.05, recovery);
+
+  EXPECT_EQ(result.status, iap::LocalMotionAssuranceStatus::SAFE)
+      << result.reason;
+  EXPECT_TRUE(result.initial_clearance_recovery_complete);
+  EXPECT_NEAR(result.initial_clearance_recovery_time_s, 0.2, 1.0e-12);
+  EXPECT_LT(result.minimum_margin_m, 0.0);
+  EXPECT_GT(result.minimum_hard_margin_m, 0.0);
+  EXPECT_LT(result.minimum_hard_margin_m, result.minimum_margin_m + 0.051);
+}
+
+TEST(LocalMotionAssuranceTest,
+     InitialClearanceRecoveryRejectsHardCollisionAndNonImprovingExit) {
+  auto evidence = clearCurrentFrameEvidence();
+  iap::LocalObstacleEvidence obstacle;
+  obstacle.center_map = Eigen::Vector3d(0.0, 0.65, 1.0);
+  obstacle.half_extent_m = Eigen::Vector3d::Zero();
+  obstacle.provenance = iap::LocalObstacleProvenance::CURRENT_FRAME;
+  evidence.obstacles.push_back(obstacle);
+  auto curves = shortCurve();
+  for (auto& curve : curves) {
+    curve.samples = {
+        {0.0, Eigen::Vector3d(0.0, 0.0, 1.0), 0.05},
+        {0.2, Eigen::Vector3d(0.0, 0.02, 1.0), 0.05},
+        {0.4, Eigen::Vector3d(0.0, 0.03, 1.0), 0.05},
+    };
+  }
+  iap::LocalMotionInitialClearanceRecovery recovery;
+  recovery.enabled = true;
+  recovery.maximum_transition_duration_s = 0.4;
+
+  const auto non_improving = iap::LocalMotionAssurance().evaluate(
+      evidence, curves, 0.05, recovery);
+  EXPECT_EQ(non_improving.status, iap::LocalMotionAssuranceStatus::UNSAFE);
+  EXPECT_EQ(non_improving.reason,
+            "initial_clearance_recovery_not_improving");
+
+  obstacle.center_map.y() = 0.60;
+  evidence.obstacles = {obstacle};
+  const auto hard_collision = iap::LocalMotionAssurance().evaluate(
+      evidence, curves, 0.05, recovery);
+  EXPECT_EQ(hard_collision.status, iap::LocalMotionAssuranceStatus::UNSAFE);
+  EXPECT_EQ(hard_collision.reason, "initial_clearance_recovery_hard_unsafe");
+}
+
+TEST(LocalMotionAssuranceTest,
+     InitialClearanceRecoveryRejectsLateOrIncompleteTransition) {
+  auto evidence = clearCurrentFrameEvidence();
+  iap::LocalObstacleEvidence obstacle;
+  obstacle.center_map = Eigen::Vector3d(0.0, 0.65, 1.0);
+  obstacle.half_extent_m = Eigen::Vector3d::Zero();
+  obstacle.provenance = iap::LocalObstacleProvenance::CURRENT_FRAME;
+  evidence.obstacles.push_back(obstacle);
+  auto curves = shortCurve();
+  for (auto& curve : curves) {
+    curve.samples = {
+        {0.0, Eigen::Vector3d(0.0, 0.0, 1.0), 0.05},
+        {0.2, Eigen::Vector3d(0.0, -0.01, 1.0), 0.05},
+        {0.4, Eigen::Vector3d(0.0, -0.03, 1.0), 0.05},
+    };
+  }
+  iap::LocalMotionInitialClearanceRecovery recovery;
+  recovery.enabled = true;
+  recovery.maximum_transition_duration_s = 0.1;
+
+  const auto late = iap::LocalMotionAssurance().evaluate(
+      evidence, curves, 0.05, recovery);
+  EXPECT_EQ(late.status, iap::LocalMotionAssuranceStatus::UNSAFE);
+  EXPECT_EQ(late.reason, "initial_clearance_recovery_deadline_exceeded");
+
+  recovery.maximum_transition_duration_s = 0.5;
+  for (auto& curve : curves) {
+    curve.samples.back().position_map.y() = -0.015;
+  }
+  const auto incomplete = iap::LocalMotionAssurance().evaluate(
+      evidence, curves, 0.05, recovery);
+  EXPECT_EQ(incomplete.status, iap::LocalMotionAssuranceStatus::UNSAFE);
+  EXPECT_EQ(incomplete.reason, "initial_clearance_recovery_incomplete");
+}
+
+TEST(LocalMotionAssuranceTest,
      CertifiedTrackingBoundIsDistinctFromLossOfControlThreshold) {
   auto evidence = clearCurrentFrameEvidence();
   iap::LocalObstacleEvidence obstacle;

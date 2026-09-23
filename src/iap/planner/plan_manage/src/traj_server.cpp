@@ -31,6 +31,7 @@ struct PendingGuardTrajectory
 {
   vector<UniformBspline> trajectory;
   double duration_s = 0.0;
+  double parent_switch_elapsed_s = 0.0;
   rclcpp::Time start_time{0, 0, RCL_ROS_TIME};
   int trajectory_id = 0;
   ego_planner::TrajectoryIdentity identity;
@@ -39,12 +40,20 @@ struct PendingGuardTrajectory
 std::optional<PendingGuardTrajectory> pending_guard_trajectory_;
 ego_planner::PendingGuardDeadlineGate pending_guard_deadline_gate_;
 ego_planner::TrajectoryCommandLedger command_ledger_;
+ego_planner::TrajectoryExecutionClock trajectory_execution_clock_;
 std::optional<ego_planner::TrajectoryIdentity> active_identity_;
 ego_planner::TrajectoryIdentity active_parent_identity_;
 rclcpp::Time latest_odom_stamp_(0, 0, RCL_ROS_TIME);
 bool have_odom_stamp_ = false;
+std::chrono::steady_clock::time_point latest_odom_receive_steady_;
 Eigen::Vector3d latest_odom_position_ = Eigen::Vector3d::Zero();
 bool have_odom_position_ = false;
+// A retained command is commonly delivered as soon as this process creates
+// its subscription, before the first odometry sample establishes the ROS
+// execution clock.  Keep only the newest command until that clock exists;
+// comparing its simulated start stamp with the system clock would create a
+// false deadline rejection and can poison the planner's adaptive lead time.
+std::optional<traj_utils::msg::Bspline> deferred_trajectory_command_;
 volatile std::sig_atomic_t stop_requested = 0;
 
 void requestStop(int)
@@ -126,7 +135,10 @@ std::optional<PendingGuardTrajectory> parseTrajectoryCommand(
   parsed.trajectory.push_back(parsed.trajectory[0].getDerivative());
   parsed.trajectory.push_back(parsed.trajectory[1].getDerivative());
   parsed.duration_s = parsed.trajectory[0].getTimeSum();
+  parsed.parent_switch_elapsed_s = msg.parent_switch_elapsed_s;
   if (!parsed.identity.valid() ||
+      !std::isfinite(parsed.parent_switch_elapsed_s) ||
+      parsed.parent_switch_elapsed_s < 0.0 ||
       ego_planner::trajectoryCurveHash(
           parsed.trajectory[0], parsed.start_time) !=
           parsed.identity.curve_hash)
@@ -134,7 +146,9 @@ std::optional<PendingGuardTrajectory> parseTrajectoryCommand(
   return parsed;
 }
 
-void installTrajectory(PendingGuardTrajectory parsed)
+void installTrajectory(
+    PendingGuardTrajectory parsed, const double activation_ros_s,
+    const double activation_steady_s)
 {
   start_time_ = parsed.start_time;
   traj_id_ = parsed.trajectory_id;
@@ -143,13 +157,20 @@ void installTrajectory(PendingGuardTrajectory parsed)
   receive_traj_ = true;
   active_identity_ = parsed.identity;
   active_parent_identity_ = parsed.parent_identity;
+  trajectory_execution_clock_.activate(
+      activation_ros_s, activation_steady_s);
 }
+
+rclcpp::Time trajServerNow();
 
 void receiveTrajectoryCommand(const traj_utils::msg::Bspline &msg)
 {
-  const rclcpp::Time now = have_odom_stamp_
-      ? latest_odom_stamp_
-      : rclcpp::Clock(RCL_ROS_TIME).now();
+  if (!have_odom_stamp_)
+  {
+    deferred_trajectory_command_ = msg;
+    return;
+  }
+  const rclcpp::Time now = trajServerNow();
   const auto parsed = parseTrajectoryCommand(msg);
   if (!parsed)
   {
@@ -202,6 +223,22 @@ void receiveTrajectoryCommand(const traj_utils::msg::Bspline &msg)
           traj_utils::msg::TrajectoryCommandStatus::QUEUED,
           *parsed, now);
     return;
+  }
+  if (pending_guard_trajectory_ &&
+      !(pending_guard_trajectory_->identity == parsed->identity))
+  {
+    const auto superseded = *pending_guard_trajectory_;
+    // A successfully admitted latest-wins command atomically supersedes the
+    // older queued curve.  Record the cancellation before replacing the
+    // single slot so a late retransmission can never resurrect its ID.
+    if (superseded.identity.execution_instance_id ==
+        parsed->identity.execution_instance_id)
+      command_ledger_.cancel(superseded.identity);
+    pending_guard_trajectory_.reset();
+    pending_guard_deadline_gate_.clear();
+    publishGuardStatus(
+        traj_utils::msg::TrajectoryCommandStatus::CANCELED,
+        superseded, now);
   }
   if (observation ==
       ego_planner::TrajectoryCommandObservation::ACCEPT_NEW_INSTANCE)
@@ -256,8 +293,7 @@ void pendingGuardCallback(traj_utils::msg::Bspline::ConstPtr msg)
       pending_guard_trajectory_.reset();
       publishGuardStatus(
           traj_utils::msg::TrajectoryCommandStatus::CANCELED,
-          canceled, have_odom_stamp_ ? latest_odom_stamp_
-                                     : rclcpp::Clock(RCL_ROS_TIME).now());
+          canceled, trajServerNow());
     }
     else if (active_identity_ && *active_identity_ == identity)
     {
@@ -266,8 +302,7 @@ void pendingGuardCallback(traj_utils::msg::Bspline::ConstPtr msg)
       active.start_time = msg->start_time;
       publishGuardStatus(
           traj_utils::msg::TrajectoryCommandStatus::ACTIVATED,
-          active, have_odom_stamp_ ? latest_odom_stamp_
-                                   : rclcpp::Clock(RCL_ROS_TIME).now());
+          active, trajServerNow());
     }
     return;
   }
@@ -276,19 +311,33 @@ void pendingGuardCallback(traj_utils::msg::Bspline::ConstPtr msg)
 
 void odometryCallback(nav_msgs::msg::Odometry::ConstSharedPtr msg)
 {
+  const bool clock_was_unavailable = !have_odom_stamp_;
   latest_odom_stamp_ = rclcpp::Time(msg->header.stamp, RCL_ROS_TIME);
   have_odom_stamp_ = latest_odom_stamp_.nanoseconds() > 0;
+  latest_odom_receive_steady_ = std::chrono::steady_clock::now();
   latest_odom_position_ = Eigen::Vector3d(
       msg->pose.pose.position.x, msg->pose.pose.position.y,
       msg->pose.pose.position.z);
   have_odom_position_ = latest_odom_position_.allFinite();
+  if (clock_was_unavailable && have_odom_stamp_ &&
+      deferred_trajectory_command_)
+  {
+    auto command = std::move(*deferred_trajectory_command_);
+    deferred_trajectory_command_.reset();
+    receiveTrajectoryCommand(command);
+  }
 }
 
 rclcpp::Time trajServerNow()
 {
   if (have_odom_stamp_)
   {
-    return latest_odom_stamp_;
+    const auto elapsed = std::chrono::steady_clock::now() -
+        latest_odom_receive_steady_;
+    const auto elapsed_ns = std::chrono::duration_cast<
+        std::chrono::nanoseconds>(elapsed).count();
+    return rclcpp::Time(
+        latest_odom_stamp_.nanoseconds() + elapsed_ns, RCL_ROS_TIME);
   }
   return rclcpp::Clock(RCL_ROS_TIME).now();
 }
@@ -389,38 +438,108 @@ std::pair<double, double> calculate_yaw(double t_cur, Eigen::Vector3d &pos, rclc
 void cmdCallback()
 {
   rclcpp::Time time_now = trajServerNow();
+  const double steady_now_s = std::chrono::duration<double>(
+      std::chrono::steady_clock::now().time_since_epoch()).count();
+  double active_execution_time_s = receive_traj_
+      ? trajectory_execution_clock_.advance(
+          time_now.seconds(), steady_now_s)
+      : 0.0;
   if (pending_guard_trajectory_)
   {
-    const auto deadline_action = active_identity_
+    auto deadline_action = active_identity_
         ? pending_guard_deadline_gate_.poll(*active_identity_, time_now.seconds())
         : (time_now.seconds() >= pending_guard_trajectory_->start_time.seconds()
                ? ego_planner::PendingGuardDeadlineAction::ACTIVATE
                : ego_planner::PendingGuardDeadlineAction::WAIT);
     if (deadline_action ==
+          ego_planner::PendingGuardDeadlineAction::ACTIVATE &&
+        active_identity_ &&
+        pending_guard_trajectory_->parent_identity.valid())
+    {
+      if (!(*active_identity_ ==
+            pending_guard_trajectory_->parent_identity))
+      {
+        deadline_action = ego_planner::PendingGuardDeadlineAction::DISCARD;
+      }
+      else if (!ego_planner::trajectoryParentExecutionAnchorReached(
+          *active_identity_, pending_guard_trajectory_->parent_identity,
+          pending_guard_trajectory_->parent_switch_elapsed_s,
+          active_execution_time_s))
+      {
+        deadline_action = ego_planner::PendingGuardDeadlineAction::WAIT;
+      }
+    }
+    if (deadline_action ==
         ego_planner::PendingGuardDeadlineAction::DISCARD)
     {
+      const auto discarded = *pending_guard_trajectory_;
+      command_ledger_.cancel(discarded.identity);
       pending_guard_trajectory_.reset();
       pending_guard_deadline_gate_.clear();
+      publishGuardStatus(
+          traj_utils::msg::TrajectoryCommandStatus::CANCELED,
+          discarded, time_now);
     }
     else if (deadline_action ==
              ego_planner::PendingGuardDeadlineAction::ACTIVATE)
     {
-      const int activated_id = pending_guard_trajectory_->trajectory_id;
-      const auto activated = *pending_guard_trajectory_;
-      installTrajectory(std::move(*pending_guard_trajectory_));
-      pending_guard_trajectory_.reset();
-      pending_guard_deadline_gate_.clear();
-      (void)activated_id;
-      publishGuardStatus(
-          traj_utils::msg::TrajectoryCommandStatus::ACTIVATED,
-          activated, time_now);
+      auto activated = *pending_guard_trajectory_;
+      bool boundary_continuous = true;
+      if (receive_traj_ && active_identity_ &&
+          activated.parent_identity.valid())
+      {
+        const double parent_t = std::clamp(
+            active_execution_time_s, 0.0, traj_duration_);
+        const Eigen::Vector3d parent_position =
+            traj_[0].evaluateDeBoorT(parent_t);
+        const Eigen::Vector3d parent_velocity =
+            traj_[1].evaluateDeBoorT(parent_t);
+        const Eigen::Vector3d parent_acceleration =
+            traj_[2].evaluateDeBoorT(parent_t);
+        const Eigen::Vector3d child_position =
+            activated.trajectory[0].evaluateDeBoorT(0.0);
+        const Eigen::Vector3d child_velocity =
+            activated.trajectory[1].evaluateDeBoorT(0.0);
+        const Eigen::Vector3d child_acceleration =
+            activated.trajectory[2].evaluateDeBoorT(0.0);
+        boundary_continuous =
+            ego_planner::trajectorySwitchBoundaryContinuous(
+                parent_position, parent_velocity, parent_acceleration,
+                child_position, child_velocity, child_acceleration);
+      }
+      if (!boundary_continuous)
+      {
+        command_ledger_.cancel(activated.identity);
+        pending_guard_trajectory_.reset();
+        pending_guard_deadline_gate_.clear();
+        publishGuardStatus(
+            traj_utils::msg::TrajectoryCommandStatus::REJECTED,
+            activated, time_now,
+            "parent_boundary_discontinuous_rebuild_required");
+      }
+      else
+      {
+        installTrajectory(
+            std::move(*pending_guard_trajectory_), time_now.seconds(),
+            steady_now_s);
+        active_execution_time_s = 0.0;
+        pending_guard_trajectory_.reset();
+        pending_guard_deadline_gate_.clear();
+        publishGuardStatus(
+            traj_utils::msg::TrajectoryCommandStatus::ACTIVATED,
+            activated, time_now);
+      }
     }
   }
   /* no publishing before receive traj_ */
   if (!receive_traj_ && !have_odom_position_)
     return;
 
-  double t_cur = receive_traj_ ? (time_now - start_time_).seconds() : 0.0;
+  // Scheduling remains on the ROS start stamp, but execution begins at the
+  // curve origin on actual activation and advances only by time supported by
+  // both ROS and same-host steady clocks. This preserves simulator pauses and
+  // prevents a ROS catch-up jump from skipping a section of the curve.
+  const double t_cur = receive_traj_ ? active_execution_time_s : 0.0;
 
   Eigen::Vector3d pos(Eigen::Vector3d::Zero()), vel(Eigen::Vector3d::Zero()), acc(Eigen::Vector3d::Zero()), pos_f;
   std::pair<double, double> yaw_yawdot(0, 0);
@@ -433,7 +552,7 @@ void cmdCallback()
     acc.setZero();
     pos_f = pos;
   }
-  else if (t_cur < traj_duration_ && t_cur >= 0.0)
+  else if (t_cur < traj_duration_)
   {
     pos = traj_[0].evaluateDeBoorT(t_cur);
     vel = traj_[1].evaluateDeBoorT(t_cur);
@@ -472,6 +591,7 @@ void cmdCallback()
       ? active_identity_->execution_instance_id : 0u;
   cmd.curve_hash = active_identity_ ? active_identity_->curve_hash : "";
   cmd.trajectory_start_time = receive_traj_ ? start_time_ : rclcpp::Time(0, 0, RCL_ROS_TIME);
+  cmd.trajectory_elapsed_s = t_cur;
   if (active_identity_)
   {
     cmd.parent_execution_instance_id =
@@ -571,8 +691,10 @@ int main(int argc, char **argv)
   executor.remove_node(node);
   cmd_timer.reset();
   bspline_sub.reset();
+  pending_guard_sub.reset();
   odom_sub.reset();
   pos_cmd_pub.reset();
+  guard_status_pub.reset();
   node.reset();
   rclcpp::shutdown();
 

@@ -11,6 +11,13 @@ find_package(flann CONFIG REQUIRED)
 find_package(PCL REQUIRED COMPONENTS common)
 find_package(Qhull REQUIRED)
 find_package(libusb REQUIRED)
+find_library(IAP_MSGS_TYPESUPPORT_CPP
+  NAMES iap__rosidl_typesupport_cpp
+  REQUIRED)
+find_path(IAP_MSGS_INCLUDE_DIR
+  NAMES iap/msg/lidar_beam_evidence.hpp
+  PATH_SUFFIXES include/iap
+  REQUIRED)
 
 add_library(first_hit_lidar_renderer
   src/first_hit_lidar_renderer.cpp)
@@ -80,7 +87,6 @@ if(ENABLE_CUDA)
   find_package(geometry_msgs REQUIRED)
   find_package(nav_msgs REQUIRED)
   find_package(quadrotor_msgs REQUIRED)
-
   # 生成动态重配置（如果需要）
   # generate_dynamic_reconfigure_options(cfg/local_sensing_node.cfg)
 
@@ -145,6 +151,7 @@ else(ENABLE_CUDA)
     ${geometry_msgs_INCLUDE_DIRS}
     ${nav_msgs_INCLUDE_DIRS}
     ${quadrotor_msgs_INCLUDE_DIRS}
+    ${IAP_MSGS_INCLUDE_DIR}
   )
 
   add_executable(pcl_render_node src/pointcloud_render_node.cpp)
@@ -158,7 +165,9 @@ else(ENABLE_CUDA)
     quadrotor_msgs
     Boost
   )
-  target_link_libraries(pcl_render_node first_hit_lidar_renderer)
+  target_link_libraries(pcl_render_node
+    first_hit_lidar_renderer
+    ${IAP_MSGS_TYPESUPPORT_CPP})
 
 endif(ENABLE_CUDA)
 

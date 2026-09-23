@@ -5,6 +5,7 @@ uint64 output_steady_time_ns
 uint64 execution_instance_id
 uint32 trajectory_id
 builtin_interfaces/Time trajectory_start_time
+float64 trajectory_elapsed_s
 string curve_hash
 
 geometry_msgs/Point commanded_position

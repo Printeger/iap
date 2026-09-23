@@ -19,6 +19,24 @@ RegisteredLidarFrameData frame(
   return value;
 }
 
+RegisteredLidarFrameData beamFrame(
+    const std::int64_t id, const Eigen::Vector3d& origin,
+    std::initializer_list<RegisteredLidarBeamData> beams) {
+  auto value = frame(id, origin, {});
+  value.sensor_model_id = "first_hit_spherical_v1";
+  value.horizontal_samples = static_cast<std::uint32_t>(beams.size());
+  value.vertical_samples = 1U;
+  value.horizontal_fov_rad = 0.0;
+  value.vertical_min_rad = 0.0;
+  value.vertical_max_rad = 0.0;
+  value.min_range_m = 0.1;
+  value.max_range_m = 6.0;
+  value.beam_evidence_complete = true;
+  value.beam_content_hash = "fixture-beams-v1";
+  value.beams.assign(beams.begin(), beams.end());
+  return value;
+}
+
 RegisteredLidarWindow makeWindow() {
   RegisteredLidarWindow::Geometry geometry;
   geometry.origin = Eigen::Vector3d::Zero();
@@ -81,6 +99,104 @@ TEST(RegisteredLidarWindow, SuccessfulHitRayMarksFreeAndHitWins) {
   ASSERT_TRUE(window.applyActiveDelta(delta).accepted);
   EXPECT_EQ(window.stateAt(Eigen::Vector3i(3, 0, 0)),
             RegisteredVoxelState::OCCUPIED);
+}
+
+TEST(RegisteredLidarWindow,
+     ExplicitBeamOutcomesFreezeImmutableFreshTriStateEvidence) {
+  auto window = makeWindow();
+  RegisteredLidarBeamData hit;
+  hit.direction_lidar = Eigen::Vector3d::UnitX();
+  hit.outcome = RegisteredLidarBeamOutcome::HIT;
+  hit.range_m = 3.0;
+  RegisteredLidarBeamData no_return;
+  no_return.direction_lidar = Eigen::Vector3d::UnitY();
+  no_return.outcome = RegisteredLidarBeamOutcome::NO_RETURN;
+  no_return.range_m = 6.0;
+  RegisteredLidarBeamData invalid;
+  invalid.direction_lidar = Eigen::Vector3d::UnitZ();
+  invalid.outcome = RegisteredLidarBeamOutcome::INVALID;
+
+  ASSERT_TRUE(window.applyCurrentFrame(beamFrame(
+      10, Eigen::Vector3d(0.5, 0.5, 0.5),
+      {hit, no_return, invalid})).accepted);
+  const auto snapshot = window.captureLocalEvidenceSnapshot(41U);
+  ASSERT_NE(snapshot, nullptr);
+  EXPECT_EQ(snapshot->identity().occupancy_generation, 41U);
+  EXPECT_EQ(snapshot->identity().active_window_generation, 0U);
+  EXPECT_EQ(snapshot->identity().coordinate_contract, "contract-a");
+  EXPECT_EQ(snapshot->identity().sensor_model_identity,
+            "first_hit_spherical_v1");
+
+  EXPECT_EQ(snapshot->queryVoxel(Eigen::Vector3d(1.5, 0.5, 0.5), 10.5).state,
+            EvidenceVoxelState::OBSERVED_FREE);
+  EXPECT_EQ(snapshot->queryVoxel(Eigen::Vector3d(3.5, 0.5, 0.5), 10.5).state,
+            EvidenceVoxelState::RAW_OCCUPIED);
+  EXPECT_EQ(snapshot->queryVoxel(Eigen::Vector3d(4.5, 0.5, 0.5), 10.5).state,
+            EvidenceVoxelState::UNKNOWN);
+  EXPECT_EQ(snapshot->queryVoxel(Eigen::Vector3d(0.5, 3.5, 0.5), 10.5).state,
+            EvidenceVoxelState::OBSERVED_FREE);
+  EXPECT_EQ(snapshot->queryVoxel(Eigen::Vector3d(0.5, 0.5, 1.5), 10.5).state,
+            EvidenceVoxelState::UNKNOWN);
+
+  const auto stale_free =
+      snapshot->queryVoxel(Eigen::Vector3d(1.5, 0.5, 0.5), 11.100001);
+  EXPECT_EQ(stale_free.state, EvidenceVoxelState::UNKNOWN);
+  EXPECT_EQ(stale_free.reason, LocalEvidenceReason::STALE_OBSERVATION);
+  EXPECT_EQ(snapshot->queryVoxel(Eigen::Vector3d(3.5, 0.5, 0.5), 11.100001)
+                .state,
+            EvidenceVoxelState::RAW_OCCUPIED);
+
+  EXPECT_EQ(snapshot->queryVoxel(Eigen::Vector3d(8.5, 0.5, 0.5), 10.5)
+                .reason,
+            LocalEvidenceReason::OUT_OF_RANGE);
+  EXPECT_FALSE(snapshot->matches(41U, 0U, "other-contract",
+                                 "first_hit_spherical_v1"));
+
+  ASSERT_TRUE(window.applyCurrentFrame(
+      beamFrame(11, Eigen::Vector3d(0.5, 0.5, 0.5), {invalid})).accepted);
+  EXPECT_EQ(snapshot->queryVoxel(Eigen::Vector3d(3.5, 0.5, 0.5), 10.5).state,
+            EvidenceVoxelState::RAW_OCCUPIED)
+      << "the frozen snapshot must not follow later window mutations";
+}
+
+TEST(RegisteredLidarWindow,
+     FreshHistoricalFrameSuppliesEvidenceOutsideCurrentScan) {
+  auto window = makeWindow();
+  RegisteredLidarBeamData historical;
+  historical.direction_lidar = Eigen::Vector3d::UnitX();
+  historical.outcome = RegisteredLidarBeamOutcome::NO_RETURN;
+  historical.range_m = 6.0;
+  auto old_frame = beamFrame(
+      20, Eigen::Vector3d(0.5, 0.5, 0.5), {historical});
+  old_frame.stamp_s = 100.0;
+  old_frame.scan_end_stamp_s = 100.1;
+  ActiveLidarWindowDeltaData active;
+  active.base_generation = 0;
+  active.generation = 1;
+  active.complete = true;
+  active.frame_contract_id = "contract-a";
+  active.added.push_back(old_frame);
+  ASSERT_TRUE(window.applyActiveDelta(active).accepted);
+
+  RegisteredLidarBeamData current;
+  current.direction_lidar = Eigen::Vector3d::UnitY();
+  current.outcome = RegisteredLidarBeamOutcome::NO_RETURN;
+  current.range_m = 6.0;
+  auto current_frame = beamFrame(
+      21, Eigen::Vector3d(0.5, 0.5, 0.5), {current});
+  current_frame.stamp_s = 100.2;
+  current_frame.scan_end_stamp_s = 100.3;
+  ASSERT_TRUE(window.applyCurrentFrame(current_frame).accepted);
+
+  const auto snapshot = window.captureLocalEvidenceSnapshot(52U);
+  ASSERT_NE(snapshot, nullptr);
+  const auto historical_query =
+      snapshot->queryVoxel(Eigen::Vector3d(4.5, 0.5, 0.5), 100.9);
+  EXPECT_EQ(historical_query.state, EvidenceVoxelState::OBSERVED_FREE);
+  EXPECT_EQ(historical_query.source_frame_id, 20);
+  EXPECT_EQ(snapshot->queryVoxel(Eigen::Vector3d(4.5, 0.5, 0.5), 101.100001)
+                .state,
+            EvidenceVoxelState::UNKNOWN);
 }
 
 TEST(RegisteredLidarWindow,

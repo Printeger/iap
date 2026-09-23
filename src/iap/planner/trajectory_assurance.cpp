@@ -728,7 +728,8 @@ LocalMotionAssurance::LocalMotionAssurance(LocalMotionAssurancePolicy policy)
 LocalMotionAssuranceResult LocalMotionAssurance::evaluate(
     const LocalMotionEvidence& evidence,
     const std::vector<LocalMotionCurve>& curves,
-    const double planning_buffer_m) const {
+    const double planning_buffer_m,
+    const LocalMotionInitialClearanceRecovery initial_recovery) const {
   LocalMotionAssuranceResult result;
   result.evidence_identity = evidence.identity;
   result.raw_icp_rmse_m = evidence.icp_rmse_m;
@@ -737,8 +738,16 @@ LocalMotionAssuranceResult LocalMotionAssurance::evaluate(
   result.surface_error_calibration_id =
       policy_.surface_error_calibration_id;
   result.planning_buffer_m = planning_buffer_m;
+  result.initial_clearance_recovery = initial_recovery.enabled;
   if (!std::isfinite(planning_buffer_m) || planning_buffer_m < 0.0) {
     result.reason = "local_planning_buffer_invalid";
+    return result;
+  }
+  if (initial_recovery.enabled &&
+      (!(planning_buffer_m > 0.0) ||
+       !std::isfinite(initial_recovery.maximum_transition_duration_s) ||
+       !(initial_recovery.maximum_transition_duration_s > 0.0))) {
+    result.reason = "initial_clearance_recovery_policy_invalid";
     return result;
   }
   if (!evidence.complete || !evidence.support_fresh || evidence.identity.empty()) {
@@ -763,10 +772,18 @@ LocalMotionAssuranceResult LocalMotionAssurance::evaluate(
   const LocalClearanceEvaluator clearance(evidence, policy_);
 
   result.minimum_margin_m = std::numeric_limits<double>::infinity();
+  result.minimum_hard_margin_m = std::numeric_limits<double>::infinity();
   std::ostringstream identity;
-  identity << evidence.identity << ';' << std::hexfloat;
+  identity << evidence.identity << ';' << std::hexfloat
+           << "initial_recovery=" << initial_recovery.enabled << ':'
+           << initial_recovery.maximum_transition_duration_s << ';';
   bool have_nominal = false;
   bool have_brake = false;
+  bool recovery_complete = false;
+  double recovery_start_time_s = std::numeric_limits<double>::quiet_NaN();
+  double recovery_time_s = std::numeric_limits<double>::quiet_NaN();
+  double previous_recovery_margin_m =
+      -std::numeric_limits<double>::infinity();
   for (const auto& curve : curves) {
     if (curve.curve_id.empty() || curve.samples.empty()) {
       result.reason = "local_motion_curve_invalid";
@@ -801,10 +818,17 @@ LocalMotionAssuranceResult LocalMotionAssurance::evaluate(
       sample_result.sample_index = index;
       sample_result.position_map = sample.position_map;
       sample_result.relative_time_s = sample.relative_time_s;
-      const auto clearance_result = clearance.query(
+      const auto planning_clearance = clearance.query(
           sample.position_map, sample.tracking_error_m, planning_buffer_m);
-      if (clearance_result.status != LocalClearanceStatus::VALID) {
-        result.reason = clearance_result.reason;
+      const auto hard_clearance = initial_recovery.enabled
+          ? clearance.query(sample.position_map, sample.tracking_error_m, 0.0)
+          : planning_clearance;
+      if (planning_clearance.status != LocalClearanceStatus::VALID ||
+          hard_clearance.status != LocalClearanceStatus::VALID) {
+        result.reason = planning_clearance.status !=
+                LocalClearanceStatus::VALID
+            ? planning_clearance.reason
+            : hard_clearance.reason;
         result.first_failure = sample_result;
         result.first_failure.raw_icp_rmse_m = evidence.icp_rmse_m;
         result.first_failure.raw_icp_gamma = evidence.icp_gamma;
@@ -813,25 +837,33 @@ LocalMotionAssuranceResult LocalMotionAssurance::evaluate(
         result.first_failure.scan_error_m = policy_.surface_error_bound_m;
         return result;
       }
+      const bool early_recovery_brake = initial_recovery.enabled &&
+          curve.braking_curve &&
+          (!recovery_complete || curve.samples.front().relative_time_s <
+               recovery_time_s - kEpsilon);
+      const auto& authorization_clearance = early_recovery_brake
+          ? hard_clearance
+          : planning_clearance;
       sample_result.obstacle_clearance_m =
-          clearance_result.obstacle_clearance_m;
+          authorization_clearance.obstacle_clearance_m;
       sample_result.required_envelope_m =
-          clearance_result.planning_required_envelope_m;
-      sample_result.margin_m = clearance_result.signed_margin_m;
-      sample_result.raw_icp_rmse_m = clearance_result.raw_icp_rmse_m;
-      sample_result.raw_icp_gamma = clearance_result.raw_icp_gamma;
+          authorization_clearance.planning_required_envelope_m;
+      sample_result.margin_m = authorization_clearance.signed_margin_m;
+      sample_result.raw_icp_rmse_m = authorization_clearance.raw_icp_rmse_m;
+      sample_result.raw_icp_gamma = authorization_clearance.raw_icp_gamma;
       sample_result.surface_error_bound_m =
-          clearance_result.surface_error_bound_m;
+          authorization_clearance.surface_error_bound_m;
       // Compatibility column: this is now the calibrated surface bound, not
       // a conversion of frame-wide ICP residual RMS.
-      sample_result.scan_error_m = clearance_result.surface_error_bound_m;
+      sample_result.scan_error_m =
+          authorization_clearance.surface_error_bound_m;
       sample_result.nearest_obstacle_position_map =
-          clearance_result.nearest_obstacle_position_map;
+          authorization_clearance.nearest_obstacle_position_map;
       sample_result.escape_direction_map =
-          clearance_result.escape_direction_map;
+          authorization_clearance.escape_direction_map;
       sample_result.nearest_obstacle_identity =
-          clearance_result.nearest_obstacle_identity;
-      sample_result.provenance = clearance_result.provenance;
+          authorization_clearance.nearest_obstacle_identity;
+      sample_result.provenance = authorization_clearance.provenance;
       sample_result.clearance_utilization =
           finitePositive(sample_result.obstacle_clearance_m)
               ? sample_result.required_envelope_m /
@@ -839,10 +871,12 @@ LocalMotionAssuranceResult LocalMotionAssurance::evaluate(
               : std::numeric_limits<double>::infinity();
       ++result.checked_sample_count;
       result.minimum_margin_m = std::min(
-          result.minimum_margin_m, sample_result.margin_m);
+          result.minimum_margin_m, planning_clearance.signed_margin_m);
+      result.minimum_hard_margin_m = std::min(
+          result.minimum_hard_margin_m, hard_clearance.signed_margin_m);
       result.maximum_required_envelope_m = std::max(
           result.maximum_required_envelope_m,
-          sample_result.required_envelope_m);
+          planning_clearance.planning_required_envelope_m);
       result.maximum_clearance_utilization = std::max(
           result.maximum_clearance_utilization,
           sample_result.clearance_utilization);
@@ -850,7 +884,64 @@ LocalMotionAssuranceResult LocalMotionAssurance::evaluate(
                << sample.position_map.x()
                << ':' << sample.position_map.y() << ':'
                << sample.position_map.z() << ':'
-               << sample_result.margin_m << ';';
+               << planning_clearance.signed_margin_m << ':'
+               << hard_clearance.signed_margin_m << ';';
+
+      if (initial_recovery.enabled &&
+          !(hard_clearance.signed_margin_m > 0.0)) {
+        result.status = LocalMotionAssuranceStatus::UNSAFE;
+        result.first_failure = sample_result;
+        result.first_failure.margin_m = hard_clearance.signed_margin_m;
+        result.first_failure.required_envelope_m =
+            hard_clearance.planning_required_envelope_m;
+        result.reason = "initial_clearance_recovery_hard_unsafe";
+        result.nominal_curve_checked = have_nominal;
+        result.braking_curves_checked = have_brake;
+        result.certificate_hash = stableHash(identity.str());
+        return result;
+      }
+
+      if (initial_recovery.enabled && !curve.braking_curve &&
+          !recovery_complete) {
+        if (!std::isfinite(recovery_start_time_s)) {
+          recovery_start_time_s = sample.relative_time_s;
+          previous_recovery_margin_m = planning_clearance.signed_margin_m;
+        } else if (planning_clearance.signed_margin_m + kEpsilon <
+                   previous_recovery_margin_m) {
+          result.status = LocalMotionAssuranceStatus::UNSAFE;
+          result.first_failure = sample_result;
+          result.first_failure.margin_m = planning_clearance.signed_margin_m;
+          result.reason = "initial_clearance_recovery_not_improving";
+          result.certificate_hash = stableHash(identity.str());
+          return result;
+        } else {
+          previous_recovery_margin_m = planning_clearance.signed_margin_m;
+        }
+        if (planning_clearance.signed_margin_m > 0.0) {
+          recovery_time_s = sample.relative_time_s;
+          if (recovery_time_s - recovery_start_time_s >
+              initial_recovery.maximum_transition_duration_s + kEpsilon) {
+            result.status = LocalMotionAssuranceStatus::UNSAFE;
+            result.first_failure = sample_result;
+            result.reason = "initial_clearance_recovery_deadline_exceeded";
+            result.certificate_hash = stableHash(identity.str());
+            return result;
+          }
+          recovery_complete = true;
+          result.initial_clearance_recovery_complete = true;
+          result.initial_clearance_recovery_time_s = recovery_time_s;
+        } else if (sample.relative_time_s - recovery_start_time_s >
+                   initial_recovery.maximum_transition_duration_s +
+                       kEpsilon) {
+          result.status = LocalMotionAssuranceStatus::UNSAFE;
+          result.first_failure = sample_result;
+          result.reason = "initial_clearance_recovery_deadline_exceeded";
+          result.certificate_hash = stableHash(identity.str());
+          return result;
+        }
+        continue;
+      }
+
       if (!(sample_result.margin_m > 0.0)) {
         result.status = LocalMotionAssuranceStatus::UNSAFE;
         result.first_failure = sample_result;
@@ -862,6 +953,14 @@ LocalMotionAssuranceResult LocalMotionAssurance::evaluate(
         result.certificate_hash = stableHash(identity.str());
         return result;
       }
+    }
+    if (initial_recovery.enabled && !curve.braking_curve &&
+        !recovery_complete) {
+      result.status = LocalMotionAssuranceStatus::UNSAFE;
+      result.reason = "initial_clearance_recovery_incomplete";
+      result.nominal_curve_checked = true;
+      result.certificate_hash = stableHash(identity.str());
+      return result;
     }
   }
 
@@ -940,7 +1039,8 @@ TrajectoryAssuranceResult TrajectoryAssurance::evaluate(
   }
   result.local = local_.evaluate(
       request.local_evidence, request.local_curves,
-      request.local_planning_buffer_m);
+      request.local_planning_buffer_m,
+      request.local_initial_clearance_recovery);
   result.mission_progress_m = request.mission_progress_m;
   result.lidar_observability_improvement =
       request.lidar_observability_improvement;

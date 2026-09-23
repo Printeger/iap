@@ -342,6 +342,9 @@ class P0RiskGridRuntime {
           completed,
       const std::shared_ptr<const P0ExecutionRiskSnapshot>& grid_bound,
       double evaluation_time_s);
+  static void appendExecutionRiskSnapshotHistory(
+      std::deque<std::shared_ptr<const P0ExecutionRiskSnapshot>>* completed,
+      std::shared_ptr<const P0ExecutionRiskSnapshot> snapshot);
   bool gnssEpochFreshAt(double epoch_stamp_s,
                         double evaluation_time_s) const;
   bool executionSnapshotFreshAt(

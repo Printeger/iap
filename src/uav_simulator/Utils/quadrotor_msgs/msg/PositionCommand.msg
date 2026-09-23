@@ -11,6 +11,9 @@ uint32 trajectory_id
 uint64 execution_instance_id
 string curve_hash
 builtin_interfaces/Time trajectory_start_time
+# Monotonic curve progress selected by traj_server. This remains zero-based
+# at actual activation even when ROS time pauses or catches up.
+float64 trajectory_elapsed_s
 uint64 parent_execution_instance_id
 int64 parent_trajectory_id
 builtin_interfaces/Time parent_start_time

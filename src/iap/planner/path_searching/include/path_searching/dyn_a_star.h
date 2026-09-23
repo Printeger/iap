@@ -6,6 +6,7 @@
 #include <Eigen/Eigen>
 #include <plan_env/grid_map.h>
 #include <cmath>
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -182,6 +183,10 @@ private:
 
 	std::vector<GridNodePtr> gridPath_;
 	std::vector<Eigen::Vector3d> v2_path_;
+	// On timeout, retain only the already-expanded parent chain to the
+	// closest reachable frontier. This is progress evidence for a later
+	// bounded search slice, never a successful path to the requested goal.
+	std::vector<Eigen::Vector3d> last_reachable_frontier_path_;
 
 	GridNodePtr ***GridNodeMap_{nullptr};
 	std::priority_queue<GridNodePtr, std::vector<GridNodePtr>, NodeComparator> openSet_;
@@ -194,6 +199,11 @@ private:
 	double p4_valid_cost_sum_{0.0};
 	int p4_valid_cost_count_{0};
 	double p4_v2_reference_path_length_m_{0.0};
+	double search_time_limit_s_{0.2};
+	// Local forward-route repair is principally lateral.  Keeping vertical
+	// transitions axis-aligned preserves 3-D grid connectivity while avoiding
+	// the 16 redundant diagonal-up/down successors at every expanded node.
+	bool axis_aligned_vertical_motion_{false};
 	GridMapOccupancyDiagnosticQuery frozen_occupancy_query_;
 
 public:
@@ -203,12 +213,26 @@ public:
 	~AStar();
 
 	void initGridMap(GridMap::Ptr occ_map, const Eigen::Vector3i pool_size);
+	void setSearchTimeLimit(double seconds)
+	{
+		if (std::isfinite(seconds) && seconds > 0.0)
+			search_time_limit_s_ = seconds;
+	}
+	double searchTimeLimit() const { return search_time_limit_s_; }
+	void setAxisAlignedVerticalMotion(bool enabled)
+	{
+		axis_aligned_vertical_motion_ = enabled;
+	}
 
 	bool AstarSearch(const double step_size, Eigen::Vector3d start_pt, Eigen::Vector3d end_pt);
 	bool AstarSearchOriginal(const double step_size, Eigen::Vector3d start_pt, Eigen::Vector3d end_pt);
 	bool AstarSearchRiskAware(const double step_size, Eigen::Vector3d start_pt, Eigen::Vector3d end_pt);
 
 	std::vector<Eigen::Vector3d> getPath();
+	const std::vector<Eigen::Vector3d> &getLastReachableFrontierPath() const
+	{
+		return last_reachable_frontier_path_;
+	}
 	void setP4Config(const P4RiskAStarConfig &config) { p4_config_ = config; }
 	const P4RiskAStarConfig &getP4Config() const { return p4_config_; }
 	void setRiskSnapshot(std::shared_ptr<const iap::RiskGridSnapshot> snapshot, double query_base_time_s);

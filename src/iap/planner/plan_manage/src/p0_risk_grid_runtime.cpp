@@ -447,6 +447,12 @@ class PredictorModuleRiskProvider final : public iap::RiskPredictionProvider {
       auto work = [this, &queries, &groups, results, &next_group,
                    &outcomes, worker_id]() {
             WorkerOutcome outcome;
+            std::vector<iap::PredictorQueryInput> inputs;
+            std::vector<iap::PredictorQueryResult> predictions;
+            if (!groups.empty()) {
+              inputs.reserve(groups.front().size());
+              predictions.reserve(groups.front().size());
+            }
             while (true) {
               if (cancelled_.load(std::memory_order_relaxed) ||
                   std::chrono::steady_clock::now() >= deadline_) {
@@ -477,8 +483,7 @@ class PredictorModuleRiskProvider final : public iap::RiskPredictionProvider {
                   groups.size(), group_begin + kDispatchChunk);
               for (std::size_t group_index = group_begin;
                    group_index < group_end; ++group_index) {
-                std::vector<iap::PredictorQueryInput> inputs;
-                inputs.reserve(groups[group_index].size());
+                inputs.clear();
                 for (const std::size_t index : groups[group_index]) {
                   const auto& query = queries[index];
                   inputs.emplace_back(query.position_w, snapshot_,
@@ -486,22 +491,43 @@ class PredictorModuleRiskProvider final : public iap::RiskPredictionProvider {
                       evaluation_time_s_);
                 }
                 iap::PredictorBatchDiagnostics diagnostics;
-                const auto predictions = rolling_window_->queryPositionHorizons(
-                    inputs, &diagnostics);
-                if (predictions.size() != inputs.size()) {
+                if (!rolling_window_->queryPositionHorizons(
+                        inputs, &predictions, &diagnostics) ||
+                    predictions.size() != inputs.size()) {
                   outcome.growth_valid = false;
                   outcomes[static_cast<std::size_t>(worker_id)] = outcome;
                   return;
                 }
+                std::vector<int> raw_satellite_ids;
+                std::vector<int> canonical_satellite_ids;
+                std::uint64_t canonical_satellite_hash = 0u;
                 for (std::size_t local = 0; local < predictions.size(); ++local) {
                   if (inputs[local].horizon_s > 0.0 &&
                       predictions[local].covariance_growth_status !=
                           iap::CovarianceGrowthStatus::APPLIED) {
                     outcome.growth_valid = false;
                   }
+                  if (local == 0u) {
+                    raw_satellite_ids =
+                        predictions[local].gnss.used_sat_ids;
+                  }
+                  const bool same_spatial_satellite_set = local > 0u &&
+                      predictions[local].gnss.used_sat_ids ==
+                          raw_satellite_ids;
+                  auto converted = iap::makeRiskPredictionResult(
+                      std::move(predictions[local]), hal_m_, val_m_,
+                      same_spatial_satellite_set ? &canonical_satellite_ids
+                                                 : nullptr,
+                      same_spatial_satellite_set
+                          ? canonical_satellite_hash : 0u);
+                  if (local == 0u) {
+                    canonical_satellite_ids =
+                        converted.gnss_used_satellite_ids;
+                    canonical_satellite_hash =
+                        converted.gnss_local_satellite_set_hash;
+                  }
                   (*results)[groups[group_index][local]] =
-                      iap::makeRiskPredictionResult(
-                          predictions[local], hal_m_, val_m_);
+                      std::move(converted);
                 }
                 outcome.diagnostics.query_count += diagnostics.query_count;
                 outcome.diagnostics.unique_positions +=
@@ -1209,6 +1235,24 @@ P0RiskGridRuntime::selectExecutionRiskSnapshotHistoryForEvaluation(
     return grid_bound;
   }
   return nullptr;
+}
+
+void P0RiskGridRuntime::appendExecutionRiskSnapshotHistory(
+    std::deque<std::shared_ptr<const P0ExecutionRiskSnapshot>>* completed,
+    std::shared_ptr<const P0ExecutionRiskSnapshot> snapshot) {
+  if (!completed || !snapshot) {
+    return;
+  }
+  completed->push_back(std::move(snapshot));
+  // The execution builder can publish more than once per 100 ms simulator
+  // tick when callbacks carrying the next source stamp arrive early. Keep a
+  // full one-second causal horizon (20 nominal 50 ms publications plus
+  // scheduler burst reserve), so those future-stamped tuples cannot evict the
+  // newest snapshot at-or-before the planner's evaluation instant.
+  constexpr std::size_t kCausalHistoryCapacity = 32U;
+  while (completed->size() > kCausalHistoryCapacity) {
+    completed->pop_front();
+  }
 }
 
 std::shared_ptr<const P0ExecutionRiskSnapshot>
@@ -1945,17 +1989,10 @@ void P0RiskGridRuntime::buildAndPublishExecutionSnapshot(
            "captured_generation_precedes_requested_generation");
     return;
   }
-  bool superseded_after_capture = false;
-  {
-    std::lock_guard<std::mutex> lock(execution_snapshot_worker_mutex_);
-    superseded_after_capture =
-        occupancy->generation < last_requested_occupancy_generation_;
-  }
-  if (superseded_after_capture) {
-    finish(P0ExecutionSnapshotAttemptStatus::SUPERSEDED,
-           "captured_generation_superseded_while_in_flight");
-    return;
-  }
+  // Do not discard this immutable capture just because another commit was
+  // queued while the capture factory ran.  It can safely bridge the interval
+  // until that request completes; the atomic publish below still prevents a
+  // genuinely older result from replacing an already-published generation.
   const double occupancy_age_s =
       evaluation_time_s - occupancy->cloud_stamp_s;
   if (!std::isfinite(occupancy_age_s) || occupancy_age_s < -1.0e-6 ||
@@ -2033,6 +2070,13 @@ void P0RiskGridRuntime::buildAndPublishExecutionSnapshot(
       config_.predictor_lidar_legacy_observability;
   predictor_params.covariance_growth.sigma_grow_m_sqrt_s =
       config_.predictor_sigma_grow_m_sqrt_s;
+  // Execution-time direct batches are independent over physical evidence
+  // points.  Bind them to the same versioned worker-count configuration as
+  // the frozen P0 provider; leaving this at PredictorParams' serial default
+  // made complete braking-window certification consume the full 150 ms
+  // admission budget even on an otherwise idle multi-core host.
+  predictor_params.execution_batch_worker_count =
+      config_.predictor_effective_worker_count;
   if (std::isfinite(config_.predictor_lidar_fim_radius_m) &&
       config_.predictor_lidar_fim_radius_m > 0.0) {
     predictor_params.lidar.fim_params.fim_radius_m =
@@ -2232,21 +2276,24 @@ void P0RiskGridRuntime::buildAndPublishExecutionSnapshot(
   }
   bool superseded_before_publish = false;
   {
-    // notifyOccupancyCommitted() uses the same mutex. Comparing and publishing
-    // under this short critical section gives latest-wins a linearization
-    // point: an older in-flight build can never become authority after a newer
-    // generation has been requested.
+    // A queued request is not execution evidence yet.  Rejecting every
+    // completed build merely because a newer generation has been requested
+    // can starve this stream when map commits arrive near the build period.
+    // Linearize against the generation that has actually been published:
+    // publish a fresh completed build as a bridge while the newer request is
+    // pending, but never let an older completion replace newer authority.
     std::lock_guard<std::mutex> worker_lock(
         execution_snapshot_worker_mutex_);
+    std::lock_guard<std::mutex> planning_lock(planning_snapshot_mutex_);
+    const uint64_t published_generation =
+        execution_snapshot_ && execution_snapshot_->occupancy
+        ? execution_snapshot_->occupancy->generation : 0u;
     superseded_before_publish =
-        occupancy->generation < last_requested_occupancy_generation_;
+        occupancy->generation < published_generation;
     if (!superseded_before_publish) {
-      std::lock_guard<std::mutex> planning_lock(planning_snapshot_mutex_);
       execution_snapshot_ = execution;
-      execution_snapshot_history_.push_back(execution);
-      while (execution_snapshot_history_.size() > 4U) {
-        execution_snapshot_history_.pop_front();
-      }
+      appendExecutionRiskSnapshotHistory(
+          &execution_snapshot_history_, execution);
     }
   }
   if (superseded_before_publish) {
@@ -2719,6 +2766,8 @@ void P0RiskGridRuntime::refreshTimerCallback() {
         config_.predictor_lidar_legacy_observability;
     predictor_params.covariance_growth.sigma_grow_m_sqrt_s =
         config_.predictor_sigma_grow_m_sqrt_s;
+    predictor_params.execution_batch_worker_count =
+        config_.predictor_effective_worker_count;
     const iap::PredictorSpatialSourceUsage source_projection =
         iap::predictorSpatialSourceUsage(predictor_params);
     validate_gnss_spatial_source =
@@ -3210,10 +3259,8 @@ void P0RiskGridRuntime::refreshTimerCallback() {
             execution_snapshot_->execution_snapshot_id <
                 execution->execution_snapshot_id) {
           execution_snapshot_ = execution;
-          execution_snapshot_history_.push_back(execution);
-          while (execution_snapshot_history_.size() > 4U) {
-            execution_snapshot_history_.pop_front();
-          }
+          appendExecutionRiskSnapshotHistory(
+              &execution_snapshot_history_, execution);
         }
       }
       {
@@ -4680,10 +4727,35 @@ bool P0RiskGridRuntime::buildSnapshot(
     odom_position = latest_odom_p_;
     odom_orientation = latest_odom_q_;
     odom_valid = latest_odom_pose_valid_;
-    current = latest_current_;
-    current_valid = latest_current_valid_;
     current_seen = current_integrity_seen_;
-    prior_source_generation = latest_current_generation_;
+    // A current-integrity callback for t+dt can win the callback race while
+    // this worker is still building the transaction frozen at t.  Bind the
+    // newest causal sample (and its generation) to the transaction instead of
+    // copying the globally latest sample and subsequently rejecting it as
+    // being from the future.  Selecting the newest sample regardless of its
+    // validity is intentional: an older valid sample must not hide a newer
+    // causal integrity failure.
+    double selected_current_stamp_s =
+        -std::numeric_limits<double>::infinity();
+    for (const auto& [generation, sample] : current_integrity_history_) {
+      if (std::isfinite(sample.stamp) &&
+          sample.stamp <= now_s + 1.0e-6 &&
+          sample.stamp >= selected_current_stamp_s) {
+        current = sample;
+        current_valid = sample.valid;
+        prior_source_generation = generation;
+        selected_current_stamp_s = sample.stamp;
+      }
+    }
+    // Preserve deterministic test and embedding seams which seed the latest
+    // fields directly rather than entering through the ROS callback history.
+    if (prior_source_generation == 0u &&
+        std::isfinite(latest_current_.stamp) &&
+        latest_current_.stamp <= now_s + 1.0e-6) {
+      current = latest_current_;
+      current_valid = latest_current_valid_ && latest_current_.valid;
+      prior_source_generation = latest_current_generation_;
+    }
     if (config_.predictor_use_current_integrity_prior) {
       lambda_prior = currentPriorInformation(current);
     }

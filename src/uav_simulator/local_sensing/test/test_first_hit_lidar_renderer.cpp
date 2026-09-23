@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <vector>
 
 namespace
@@ -40,6 +41,10 @@ TEST(FirstHitLidarRenderer, OccluderSuppressesEveryPointBehindIt)
   EXPECT_LT(scan.hits.front().x, 3.0);
   EXPECT_EQ(scan.stats.ray_count, 1u);
   EXPECT_EQ(scan.stats.hit_count, 1u);
+  ASSERT_EQ(scan.beams.size(), 1u);
+  EXPECT_EQ(scan.beams.front().outcome,
+            local_sensing::FirstHitLidarBeamOutcome::HIT);
+  EXPECT_NEAR(scan.beams.front().range_m, 2.0, 0.11);
 }
 
 TEST(FirstHitLidarRenderer, NoReturnProducesNoSyntheticPoint)
@@ -54,6 +59,25 @@ TEST(FirstHitLidarRenderer, NoReturnProducesNoSyntheticPoint)
   EXPECT_TRUE(scan.hits.empty());
   EXPECT_EQ(scan.stats.ray_count, 1u);
   EXPECT_EQ(scan.stats.hit_count, 0u);
+  ASSERT_EQ(scan.beams.size(), 1u);
+  EXPECT_EQ(scan.beams.front().outcome,
+            local_sensing::FirstHitLidarBeamOutcome::NO_RETURN);
+  EXPECT_DOUBLE_EQ(scan.beams.front().range_m,
+                   oneForwardRay().max_range_m);
+}
+
+TEST(FirstHitLidarRenderer, InvalidPoseProducesExplicitInvalidBeams)
+{
+  local_sensing::FirstHitLidarRenderer renderer(oneForwardRay());
+  ASSERT_TRUE(renderer.loadWorld({}));
+  Eigen::Isometry3d invalid = Eigen::Isometry3d::Identity();
+  invalid.translation().x() = std::numeric_limits<double>::quiet_NaN();
+
+  const auto scan = renderer.render(invalid);
+
+  ASSERT_EQ(scan.beams.size(), 1u);
+  EXPECT_EQ(scan.beams.front().outcome,
+            local_sensing::FirstHitLidarBeamOutcome::INVALID);
 }
 
 TEST(FirstHitLidarRenderer, SensorPoseRotatesTheRegularSphericalScan)

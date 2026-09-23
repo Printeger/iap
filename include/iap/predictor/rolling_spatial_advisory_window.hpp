@@ -110,6 +110,10 @@ class RollingSpatialAdvisoryWindow {
   std::vector<PredictorQueryResult> queryPositionHorizons(
       const std::vector<PredictorQueryInput>& inputs,
       PredictorBatchDiagnostics* diagnostics = nullptr);
+  bool queryPositionHorizons(
+      const std::vector<PredictorQueryInput>& inputs,
+      std::vector<PredictorQueryResult>* outputs,
+      PredictorBatchDiagnostics* diagnostics = nullptr);
   void commitRefresh();
   void abortRefresh();
 

@@ -13,6 +13,7 @@
 #include <map>
 #include <queue>
 #include <mutex>
+#include <numeric>
 #include <sstream>
 #include <unordered_map>
 #include <unordered_set>
@@ -254,9 +255,23 @@ public:
     if (timedOut()) {
       return P4ForwardGeometryState::OUT_OF_BOUNDS;
     }
+    const double configuration_space_radius =
+      request_.limits.vehicle_radius_m +
+      std::max(0.0, request_.map_inflation_m);
+    // The sparse raw-hit acceleration path must preserve every component of
+    // the collision policy represented by the ordinary frozen-map query.
+    // Virtual ceilings are procedural occupancy and therefore do not appear
+    // in raw_occupied_voxel_centers; omitting this check allowed topology
+    // search to invent channels above the ceiling that exact refinement
+    // could never certify.
+    if (request_.virtual_ceiling_height_m > -0.5 &&
+        center.z() + configuration_space_radius >=
+          request_.virtual_ceiling_height_m - kEpsilon)
+    {
+      return P4ForwardGeometryState::OCCUPIED;
+    }
     if (has_raw_configuration_space_) {
-      const double radius = request_.limits.vehicle_radius_m +
-        std::max(0.0, request_.map_inflation_m);
+      const double radius = configuration_space_radius;
       const Eigen::Vector3d lower = center.array() - radius;
       const Eigen::Vector3d upper = center.array() + radius;
       if ((lower.array() < request_.map_origin.array()).any() ||
@@ -461,6 +476,66 @@ public:
     return true;
   }
 
+  bool nearestReachableTopologyCell(
+    const Eigen::Vector3d & endpoint, GridIndex * connected) const
+  {
+    if (!connected || !sweptFree(endpoint)) {
+      return false;
+    }
+    const GridIndex containing = index(endpoint);
+    // Preserve the historical lattice identity whenever the containing cell
+    // is actually connectable.  Endpoint coordinates often lie exactly on a
+    // cell boundary, where sorting all equidistant neighbours would otherwise
+    // flip the selected channel even though no obstacle changed.
+    if (inBounds(containing) && topologyFree(containing) &&
+      worldPathFree({endpoint, point(containing)}))
+    {
+      *connected = containing;
+      return true;
+    }
+    std::vector<std::pair<double, GridIndex>> candidates;
+    candidates.reserve(26);
+    for (int dx = -1; dx <= 1; ++dx) {
+      for (int dy = -1; dy <= 1; ++dy) {
+        for (int dz = -1; dz <= 1; ++dz) {
+          if (dx == 0 && dy == 0 && dz == 0) {
+            continue;
+          }
+          const GridIndex candidate{
+            containing.x + dx, containing.y + dy, containing.z + dz};
+          if (!inBounds(candidate)) {
+            continue;
+          }
+          candidates.emplace_back(
+            (point(candidate) - endpoint).squaredNorm(), candidate);
+        }
+      }
+    }
+    std::sort(
+      candidates.begin(), candidates.end(),
+      [](const auto & lhs, const auto & rhs) {
+        if (std::abs(lhs.first - rhs.first) > kEpsilon) {
+          return lhs.first < rhs.first;
+        }
+        if (lhs.second.x != rhs.second.x) {
+          return lhs.second.x < rhs.second.x;
+        }
+        if (lhs.second.y != rhs.second.y) {
+          return lhs.second.y < rhs.second.y;
+        }
+        return lhs.second.z < rhs.second.z;
+      });
+    for (const auto & candidate : candidates) {
+      if (topologyFree(candidate.second) &&
+        worldPathFree({endpoint, point(candidate.second)}))
+      {
+        *connected = candidate.second;
+        return true;
+      }
+    }
+    return false;
+  }
+
   std::vector<GridIndex> shortestPath(
     const GridIndex & start, const GridIndex & goal,
     const std::unordered_set<GridIndex, GridIndexHash> & blocked_nodes = {},
@@ -469,7 +544,8 @@ public:
     const std::chrono::steady_clock::time_point local_deadline =
       std::chrono::steady_clock::time_point::max(),
     const double geometric_envelope_m =
-      std::numeric_limits<double>::infinity()) const
+      std::numeric_limits<double>::infinity(),
+    const bool allow_horizontal_diagonal = false) const
   {
     struct Entry
     {
@@ -540,10 +616,16 @@ public:
             if (dx == 0 && dy == 0 && dz == 0) {
               continue;
             }
-            // Six-connected motion keeps full 3-D reachability. It also
-            // prevents diagonal corner cutting by construction and avoids
-            // spending the bounded channel budget on lattice-only variants.
-            if (std::abs(dx) + std::abs(dy) + std::abs(dz) > 1) {
+            const int changed_axes =
+              std::abs(dx) + std::abs(dy) + std::abs(dz);
+            // Use the fast six-connected search first. If it proves that the
+            // frozen lattice is disconnected, distinctChannelPaths retries
+            // with horizontal diagonals whose complete continuous segment is
+            // still checked by edgeFree(). This recovers oblique corridors
+            // without imposing 10-way branching on every normal search.
+            const bool horizontal_diagonal =
+              allow_horizontal_diagonal && dz == 0 && changed_axes == 2;
+            if (changed_axes > 1 && !horizontal_diagonal) {
               continue;
             }
             const GridIndex next{
@@ -599,6 +681,7 @@ public:
     std::unordered_map<GridIndex, double, GridIndexHash> penalties;
     std::unordered_set<std::string> seen_paths;
     int consecutive_duplicate_channels = 0;
+    bool horizontal_diagonal_required = false;
     double geometric_envelope_m =
       std::numeric_limits<double>::infinity();
     const auto key = [](const std::vector<GridIndex> & path) {
@@ -653,7 +736,15 @@ public:
       }
       auto path = shortestPath(
         start, goal, {}, {}, penalties, enumeration_deadline,
-        geometric_envelope_m);
+        geometric_envelope_m, horizontal_diagonal_required);
+      if (path.empty() && !horizontal_diagonal_required && !timedOut() &&
+        std::chrono::steady_clock::now() < enumeration_deadline)
+      {
+        path = shortestPath(
+          start, goal, {}, {}, penalties, enumeration_deadline,
+          geometric_envelope_m, true);
+        horizontal_diagonal_required = !path.empty();
+      }
       if (path.empty()) {
         if (termination) {
           *termination = std::chrono::steady_clock::now() >=
@@ -965,9 +1056,22 @@ P4ForwardRiskSample aggregateRiskSamples(
   aggregate.unknown_kappa_upper_bound = 0.0;
   aggregate.combined_conservative_kappa = 0.0;
   aggregate.unknown_coverage = 0.0;
+  aggregate.gnss_eligible_los_sample_count = 0u;
+  aggregate.gnss_unknown_los_sample_count = 0u;
   aggregate.reason = begin < end ? "ok" : "risk_support_incomplete";
   for (std::size_t index = begin; index < end; ++index) {
     const auto & sample = samples[index];
+    const auto saturating_add = [](const std::uint64_t lhs,
+      const std::uint64_t rhs) {
+        return std::numeric_limits<std::uint64_t>::max() - lhs < rhs ?
+          std::numeric_limits<std::uint64_t>::max() : lhs + rhs;
+      };
+    aggregate.gnss_eligible_los_sample_count = saturating_add(
+      aggregate.gnss_eligible_los_sample_count,
+      sample.gnss_eligible_los_sample_count);
+    aggregate.gnss_unknown_los_sample_count = saturating_add(
+      aggregate.gnss_unknown_los_sample_count,
+      sample.gnss_unknown_los_sample_count);
     aggregate.valid = aggregate.valid && sample.valid;
     aggregate.stale = aggregate.stale || sample.stale;
     aggregate.gnss_supported =
@@ -1063,6 +1167,10 @@ P4ForwardRiskSample aggregateRiskSamples(
     result.unknown_kappa_upper_bound = aggregate.unknown_kappa_upper_bound;
     result.combined_conservative_kappa =
         aggregate.combined_conservative_kappa;
+    result.gnss_eligible_los_sample_count =
+      aggregate.gnss_eligible_los_sample_count;
+    result.gnss_unknown_los_sample_count =
+      aggregate.gnss_unknown_los_sample_count;
     // Missing support must not erase a separately observed safety violation
     // in the same swept volume. Geometry remains clear, but deferred motion
     // must HOLD rather than traverse the known-unsafe portion.
@@ -1090,6 +1198,10 @@ P4ForwardRiskSample aggregateRiskSamples(
     result.ranking_state = aggregate.ranking_state;
     result.safety_ratio = aggregate.safety_ratio;
     result.fim_ratio = aggregate.fim_ratio;
+    result.gnss_eligible_los_sample_count =
+      aggregate.gnss_eligible_los_sample_count;
+    result.gnss_unknown_los_sample_count =
+      aggregate.gnss_unknown_los_sample_count;
     result.reason = aggregate.reason;
     return result;
   }
@@ -1122,11 +1234,11 @@ void resetCandidateRiskEvidence(P4ForwardCandidate * candidate)
   candidate->support_recovery_time_s = std::numeric_limits<double>::infinity();
   candidate->formal_support = false;
   candidate->known_hazard_evidence = false;
-  candidate->known_hazard_max = 0.0;
   candidate->known_occupancy_kappa = 0.0;
   candidate->unknown_support_fraction = 0.0;
   candidate->unknown_kappa_upper_bound = 0.0;
   candidate->combined_conservative_kappa = 0.0;
+  candidate->known_hazard_max = 0.0;
   candidate->known_hazard_integral = 0.0;
   candidate->known_fim_max_ratio =
     std::numeric_limits<double>::quiet_NaN();
@@ -1429,19 +1541,17 @@ void evaluateCandidateRiskSet(
           record.risk.unknown_coverage, 0.0, 1.0);
         ++fallback_unknown_count;
       }
-      for (const auto & satellite : record.risk.gnss_satellites) {
-        if (satellite.epoch_excluded || !satellite.above_elevation_mask ||
-          satellite.blocked ||
-          satellite.exclusion_reason == "admission_hysteresis_pending")
-        {
-          continue;
-        }
-        eligible_los_samples += satellite.support_sample_count;
-        unknown_los_samples += satellite.support_sample_count >=
-          satellite.support_covered_sample_count ?
-          satellite.support_sample_count -
-          satellite.support_covered_sample_count : 0u;
-      }
+      const auto saturating_add = [](const std::uint64_t lhs,
+        const std::uint64_t rhs) {
+          return std::numeric_limits<std::uint64_t>::max() - lhs < rhs ?
+            std::numeric_limits<std::uint64_t>::max() : lhs + rhs;
+        };
+      eligible_los_samples = saturating_add(
+        eligible_los_samples,
+        record.risk.gnss_eligible_los_sample_count);
+      unknown_los_samples = saturating_add(
+        unknown_los_samples,
+        record.risk.gnss_unknown_los_sample_count);
     }
     candidate.unknown_coverage = eligible_los_samples > 0u ?
       std::clamp(
@@ -1794,13 +1904,38 @@ bool currentRiskAnchorSafe(const P4ForwardRequest & request)
     certified.safety_state == P4ForwardSafetyState::SAFE;
 }
 
+bool candidatesRequireObservationBeforeSelection(
+  const std::vector<P4ForwardCandidate> &candidates)
+{
+  if (candidates.size() < 2u)
+    return false;
+  if (std::any_of(
+      candidates.begin(), candidates.end(),
+      [](const P4ForwardCandidate &candidate) {
+        return candidate.safety_gate_passed ||
+          candidate.controlled_degraded_candidate;
+      }))
+    return false;
+  return std::any_of(
+    candidates.begin(), candidates.end(),
+    [](const P4ForwardCandidate &candidate) {
+      return std::any_of(
+        candidate.risk_samples.begin(), candidate.risk_samples.end(),
+        [](const P4ForwardRiskEvidenceRecord &record) {
+          return !record.risk.missing_los_voxel_centers.empty();
+        });
+    });
+}
+
 void configureKnownGeometryPrefixMotion(
   const P4ForwardRequest & request,
   const std::vector<Eigen::Vector3d> & prefix,
   P4ForwardDecision * decision)
 {
   decision->deferred_motion_mode = P4ForwardDeferredMotionMode::HOLD;
+  decision->executable_intent = P4ExecutableIntent::HOLD;
   decision->deferred_trajectory.clear();
+  decision->geometry_common_corridor = prefix;
   decision->common_prefix_length_m = pathLength(prefix);
   decision->speed_cap_mps = 0.0;
   if (!currentRiskAnchorSafe(request)) {
@@ -1839,6 +1974,14 @@ void configureKnownGeometryPrefixMotion(
   }
   decision->deferred_motion_mode = P4ForwardDeferredMotionMode::COMMON_PREFIX;
   decision->deferred_trajectory = cropPrefixToDistance(prefix, progress);
+  decision->executable_intent =
+    P4ExecutableIntent::COMMON_OBSERVATION_SEGMENT;
+  decision->channel_comparison_state =
+    P4ChannelComparisonState::PARTIAL_COMPARISON;
+  decision->observation_endpoint = decision->deferred_trajectory.back();
+  decision->observation_divergence_boundary = prefix.back();
+  decision->observation_stopping_reserve_m = terminal_reserve;
+  decision->observation_predicted_information_gain = 0.0;
   decision->certified_free_distance_m = decision->common_prefix_length_m;
   const double stop_reserve = std::max(
     0.0, decision->common_prefix_length_m - progress);
@@ -1857,6 +2000,7 @@ bool configureSafeLimitedCommonPrefix(
     return false;
   }
   decision->deferred_motion_mode = P4ForwardDeferredMotionMode::HOLD;
+  decision->executable_intent = P4ExecutableIntent::HOLD;
   decision->deferred_trajectory.clear();
   decision->speed_cap_mps = 0.0;
   decision->certified_free_distance_m = 0.0;
@@ -1881,6 +2025,66 @@ bool configureSafeLimitedCommonPrefix(
   if (prefix.size() < 2 || decision->common_prefix_length_m <= kEpsilon) {
     decision->reason = "safe_common_prefix_unavailable";
     return false;
+  }
+
+  bool observation_segment_selected = false;
+  double observation_endpoint_station_m =
+    std::numeric_limits<double>::infinity();
+  double observation_information_gain = 0.0;
+  std::vector<std::vector<Eigen::Vector3d>> missing_los_by_channel;
+  missing_los_by_channel.reserve(decision->candidates.size());
+  bool has_missing_los_target = false;
+  for (const auto &candidate : decision->candidates)
+  {
+    std::vector<Eigen::Vector3d> targets;
+    for (const auto &record : candidate.risk_samples)
+    {
+      for (const auto &target : record.risk.missing_los_voxel_centers)
+      {
+        if (!target.allFinite())
+          continue;
+        const bool duplicate = std::any_of(
+          targets.begin(), targets.end(), [&target](const auto &existing) {
+            return (existing - target).norm() <= 1.0e-6;
+          });
+        if (!duplicate)
+          targets.push_back(target);
+      }
+    }
+    has_missing_los_target = has_missing_los_target || !targets.empty();
+    missing_los_by_channel.push_back(std::move(targets));
+  }
+  if (has_missing_los_target && missing_los_by_channel.size() >= 2u)
+  {
+    const double fixed_reserve_m = request.limits.vehicle_radius_m +
+      request.limits.safety_margin_m;
+    const double dynamic_stopping_reserve_m = std::max(
+      0.0, decision->stopping_distance_m - fixed_reserve_m);
+    P4ObservationSegmentInput observation;
+    observation.current_position = request.position;
+    observation.current_velocity = request.velocity;
+    observation.current_acceleration = request.acceleration;
+    observation.common_corridor = prefix;
+    observation.divergence_point = prefix.back();
+    observation.missing_los_by_channel = std::move(missing_los_by_channel);
+    observation.raw_occluders = request.raw_occupied_voxel_centers;
+    observation.sensor = request.observation_sensor_model;
+    observation.candidate_spacing_m = std::min(
+      0.25, request.limits.topology_resolution_m);
+    observation.stopping_reserve_m =
+      fixed_reserve_m + dynamic_stopping_reserve_m;
+    observation.maximum_progress_m = limitedPrefixProgressLimit(
+      request.limits);
+    const auto planned = P4ObservationSegmentPlanner{}.plan(observation);
+    if (!planned.available || planned.route_winner_authority ||
+      !planned.terminal_stop_required || planned.guide.size() < 2u)
+    {
+      decision->reason = "OBSERVATION_UNAVAILABLE_SENSOR_GEOMETRY";
+      return false;
+    }
+    observation_segment_selected = true;
+    observation_endpoint_station_m = planned.endpoint_station_m;
+    observation_information_gain = planned.fair_information_gain;
   }
 
   const auto path_samples = resample(
@@ -1923,6 +2127,11 @@ bool configureSafeLimitedCommonPrefix(
 
   double last_safe_arc_m = 0.0;
   double sampled_arc_m = 0.0;
+  double observation_continuous_exceedance_s = 0.0;
+  double observation_exposure_integral_ratio_s = 0.0;
+  double previous_observation_ratio =
+    request.current_integrity_anchor.safety_ratio;
+  double previous_observation_time_s = request.query_time_s;
   for (std::size_t index = 0; index < samples.size(); ++index) {
     if (index > 0) {
       sampled_arc_m +=
@@ -1935,8 +2144,57 @@ bool configureSafeLimitedCommonPrefix(
       risk.ranking_state == P4ForwardRankingState::COMPARABLE &&
       std::isfinite(risk.safety_ratio) && risk.safety_ratio < 1.0 &&
       std::isfinite(risk.fim_ratio);
-    if (!complete_safe) {
+    bool bounded_observation_safe = false;
+    if (!complete_safe && observation_segment_selected &&
+      request.limits.task_mode ==
+        iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT &&
+      !risk.stale && risk.lidar_supported && risk.fim_supported &&
+      risk.safety_state != P4ForwardSafetyState::UNSAFE &&
+      bestEffortGlobalFailureReason(risk.reason) &&
+      std::isfinite(risk.gnss_anchored_hpl) &&
+      std::isfinite(risk.gnss_anchored_vpl) &&
+      std::isfinite(risk.hal) && risk.hal > 0.0 &&
+      std::isfinite(risk.val) && risk.val > 0.0)
+    {
+      const double ratio = std::max(
+        risk.gnss_anchored_hpl / risk.hal,
+        risk.gnss_anchored_vpl / risk.val);
+      const double dt = queries[index].query_time_s -
+        previous_observation_time_s;
+      if (std::isfinite(ratio) && std::isfinite(previous_observation_ratio) &&
+        dt >= 0.0)
+      {
+        const double previous_excess = std::max(
+          0.0, previous_observation_ratio - 1.0);
+        const double excess = std::max(0.0, ratio - 1.0);
+        observation_exposure_integral_ratio_s +=
+          0.5 * (previous_excess + excess) * dt;
+        if (previous_observation_ratio > 1.0 && ratio > 1.0)
+          observation_continuous_exceedance_s += dt;
+        else if (ratio <= 1.0)
+          observation_continuous_exceedance_s = 0.0;
+        else
+          observation_continuous_exceedance_s =
+            dt * excess / std::max(kEpsilon, previous_excess + excess);
+        bounded_observation_safe =
+          ratio <= request.limits.maximum_global_ratio + kEpsilon &&
+          observation_continuous_exceedance_s <=
+            request.limits.maximum_global_continuous_exceedance_s +
+              kEpsilon &&
+          observation_exposure_integral_ratio_s <=
+            request.limits.maximum_global_exceedance_integral_ratio_s +
+              kEpsilon;
+        previous_observation_ratio = ratio;
+        previous_observation_time_s = queries[index].query_time_s;
+      }
+    }
+    if (!complete_safe && !bounded_observation_safe) {
       break;
+    }
+    if (complete_safe)
+    {
+      previous_observation_ratio = risk.safety_ratio;
+      previous_observation_time_s = queries[index].query_time_s;
     }
     last_safe_arc_m = sampled_arc_m;
   }
@@ -1956,7 +2214,9 @@ bool configureSafeLimitedCommonPrefix(
     decision->reason = "safe_common_prefix_too_short_to_stop";
     return false;
   }
-  const double progress_limit_m = limitedPrefixProgressLimit(request.limits);
+  const double progress_limit_m = std::min(
+    limitedPrefixProgressLimit(request.limits),
+    observation_endpoint_station_m);
   if (dynamic_stopping_reserve_m > progress_limit_m + kEpsilon)
   {
     decision->reason = "safe_common_prefix_progress_limit_too_short";
@@ -1991,10 +2251,20 @@ bool configureSafeLimitedCommonPrefix(
   decision->selected_guide.clear();
   decision->deferred_motion_mode = P4ForwardDeferredMotionMode::COMMON_PREFIX;
   decision->deferred_trajectory = std::move(executable);
+  decision->executable_intent =
+    P4ExecutableIntent::COMMON_OBSERVATION_SEGMENT;
+  decision->channel_comparison_state =
+    P4ChannelComparisonState::PARTIAL_COMPARISON;
+  decision->observation_endpoint = decision->deferred_trajectory.back();
+  decision->observation_divergence_boundary = prefix.back();
+  decision->observation_stopping_reserve_m = total_terminal_reserve_m;
+  decision->observation_predicted_information_gain =
+    observation_information_gain;
   decision->speed_cap_mps = std::max(
     request.velocity.norm(), std::min(
       request.limits.max_observe_speed_mps, feasible_speed));
-  decision->reason = "safe_limited_common_prefix";
+  decision->reason = observation_segment_selected ?
+    "certified_observation_segment" : "safe_limited_common_prefix";
   return true;
 }
 
@@ -2071,11 +2341,13 @@ bool configureAdvisorySelection(
     return false;
   }
   decision->action = P4ForwardAction::ADVISORY_SELECTED;
+  decision->executable_intent = P4ExecutableIntent::FINAL_CHANNEL;
   decision->trigger_reason = P4ForwardTriggerReason::MULTIPLE_CHANNELS;
   decision->selection_authority =
     P4ForwardSelectionAuthority::ADVISORY_NON_CERTIFIED;
   decision->formal_support = false;
   decision->selected_candidate_id = eligible.front()->candidate_id;
+  decision->selected_channel_id = eligible.front()->channel_id;
   decision->selected_guide = eligible.front()->path;
   decision->speed_cap_mps = request.limits.max_observe_speed_mps;
   decision->deferred_motion_mode = P4ForwardDeferredMotionMode::HOLD;
@@ -2098,45 +2370,152 @@ std::vector<P4ChannelSlot> assignP4StableChannelSlots(
   const auto directed_distance = [](
       const std::vector<Eigen::Vector3d> &left,
       const std::vector<Eigen::Vector3d> &right) {
-        if (left.empty() || right.empty())
+        if (left.empty() || right.size() < 2u)
           return std::numeric_limits<double>::infinity();
-        double sum = 0.0;
+        std::vector<double> distances;
+        distances.reserve(left.size());
         for (const auto &point : left)
         {
           double nearest = std::numeric_limits<double>::infinity();
-          for (const auto &other : right)
-            nearest = std::min(nearest, (point - other).norm());
-          sum += nearest;
+          for (std::size_t index = 1u; index < right.size(); ++index)
+          {
+            const Eigen::Vector3d segment = right[index] - right[index - 1u];
+            const double denominator = segment.squaredNorm();
+            const double station = denominator > kEpsilon
+                ? std::clamp(
+                    (point - right[index - 1u]).dot(segment) / denominator,
+                    0.0, 1.0)
+                : 0.0;
+            nearest = std::min(
+                nearest,
+                (point - (right[index - 1u] + station * segment)).norm());
+          }
+          distances.push_back(nearest);
         }
-        return sum / static_cast<double>(left.size());
+        // Rolling planning windows remove an already-flown prefix and append
+        // a new suffix.  Averaging the non-overlapping tails made the same
+        // physical corridor look unrelated on every replan.  Compare the
+        // best-overlapping half instead: it preserves identity through
+        // bounded window motion, while a crossing at only one or two samples
+        // still cannot claim a complete corridor slot.
+        const std::size_t overlap_count =
+            std::max<std::size_t>(2u, (distances.size() + 1u) / 2u);
+        if (overlap_count > distances.size())
+          return std::numeric_limits<double>::infinity();
+        std::nth_element(
+            distances.begin(), distances.begin() + overlap_count - 1u,
+            distances.end());
+        return std::accumulate(
+            distances.begin(), distances.begin() + overlap_count, 0.0) /
+            static_cast<double>(overlap_count);
       };
+  const std::size_t path_count = topology_paths.size();
+  const std::size_t prior_count = previous_slots.size();
+  std::vector<std::vector<double>> distances(
+      path_count, std::vector<double>(
+          prior_count, std::numeric_limits<double>::infinity()));
+  for (std::size_t path_index = 0u; path_index < path_count; ++path_index)
+  {
+    if (topology_paths[path_index].size() < 2u)
+      continue;
+    for (std::size_t prior_index = 0u;
+         prior_index < prior_count; ++prior_index)
+    {
+      const auto &prior = previous_slots[prior_index];
+      if (prior.stable_channel_id == 0u || prior.topology_path.size() < 2u)
+        continue;
+      distances[path_index][prior_index] = std::max(
+          directed_distance(topology_paths[path_index], prior.topology_path),
+          directed_distance(prior.topology_path,
+                            topology_paths[path_index]));
+    }
+  }
+
+  // At most four live channels are admitted, so solve the complete
+  // assignment instead of greedily claiming the nearest old slot. Greedy
+  // matching can let an ambiguous first corridor steal the only compatible
+  // slot of a later corridor, allocating a new ID and discarding its cached
+  // refinement. Prefer the assignment with the most reused slots, then the
+  // smallest total corridor distance, then stable IDs lexicographically.
+  std::vector<int> assignment(path_count, -1);
+  std::vector<int> best_assignment(path_count, -1);
+  std::vector<bool> prior_used(prior_count, false);
+  std::size_t best_match_count = 0u;
+  double best_total_distance = std::numeric_limits<double>::infinity();
+  bool best_assignment_set = false;
+  const auto lexicographically_stabler = [&](const std::vector<int> &left,
+                                             const std::vector<int> &right) {
+      for (std::size_t index = 0u; index < left.size(); ++index)
+      {
+        const uint64_t left_id = left[index] >= 0
+            ? previous_slots[static_cast<std::size_t>(left[index])]
+                  .stable_channel_id
+            : std::numeric_limits<uint64_t>::max();
+        const uint64_t right_id = right[index] >= 0
+            ? previous_slots[static_cast<std::size_t>(right[index])]
+                  .stable_channel_id
+            : std::numeric_limits<uint64_t>::max();
+        if (left_id != right_id)
+          return left_id < right_id;
+      }
+      return false;
+    };
+  const auto search_assignment = [&](const auto &self,
+                                     const std::size_t path_index,
+                                     const std::size_t match_count,
+                                     const double total_distance) -> void {
+      if (path_index == path_count)
+      {
+        const bool better = !best_assignment_set ||
+            match_count > best_match_count ||
+            (match_count == best_match_count &&
+             (total_distance < best_total_distance - kEpsilon ||
+              (std::abs(total_distance - best_total_distance) <= kEpsilon &&
+               lexicographically_stabler(assignment, best_assignment))));
+        if (better)
+        {
+          best_assignment_set = true;
+          best_match_count = match_count;
+          best_total_distance = total_distance;
+          best_assignment = assignment;
+        }
+        return;
+      }
+      if (match_count + path_count - path_index < best_match_count)
+        return;
+      if (topology_paths[path_index].size() >= 2u)
+      {
+        for (std::size_t prior_index = 0u;
+             prior_index < prior_count; ++prior_index)
+        {
+          if (prior_used[prior_index] ||
+              distances[path_index][prior_index] >
+                  matching_distance_m + kEpsilon)
+            continue;
+          assignment[path_index] = static_cast<int>(prior_index);
+          prior_used[prior_index] = true;
+          self(self, path_index + 1u, match_count + 1u,
+               total_distance + distances[path_index][prior_index]);
+          prior_used[prior_index] = false;
+          assignment[path_index] = -1;
+        }
+      }
+      self(self, path_index + 1u, match_count, total_distance);
+    };
+  search_assignment(search_assignment, 0u, 0u, 0.0);
+
   std::unordered_set<uint64_t> claimed;
   uint64_t next_id = first_new_channel_id;
-  for (const auto &path : topology_paths)
+  for (std::size_t path_index = 0u;
+       path_index < topology_paths.size(); ++path_index)
   {
+    const auto &path = topology_paths[path_index];
     if (path.size() < 2u)
       continue;
-    const P4ChannelSlot *matched = nullptr;
-    double matched_distance = std::numeric_limits<double>::infinity();
-    for (const auto &prior : previous_slots)
-    {
-      if (prior.stable_channel_id == 0u ||
-          claimed.count(prior.stable_channel_id) != 0u ||
-          prior.topology_path.size() < 2u)
-        continue;
-      const double distance = std::max(
-          directed_distance(path, prior.topology_path),
-          directed_distance(prior.topology_path, path));
-      if (distance <= matching_distance_m + kEpsilon &&
-          (distance < matched_distance - kEpsilon ||
-           (std::abs(distance - matched_distance) <= kEpsilon &&
-            (!matched || prior.stable_channel_id <
-                 matched->stable_channel_id))))
-      {
-        matched = &prior;
-        matched_distance = distance;
-      }
-    }
+    const int matched_index = best_assignment_set
+        ? best_assignment[path_index] : -1;
+    const P4ChannelSlot *matched = matched_index >= 0
+        ? &previous_slots[static_cast<std::size_t>(matched_index)] : nullptr;
     P4ChannelSlot slot;
     if (matched)
     {
@@ -2152,10 +2531,36 @@ std::vector<P4ChannelSlot> assignP4StableChannelSlots(
     }
     slot.topology_path = path;
     slot.corridor_hash = hashPath(path);
-    slot.state = P4ChannelEvaluationState::DISCOVERED;
+    if (!matched)
+      slot.state = P4ChannelEvaluationState::DISCOVERED;
     slots.push_back(std::move(slot));
   }
   return slots;
+}
+
+bool p4ChannelCorridorIntersectsPoint(
+    const std::vector<Eigen::Vector3d> &corridor,
+    const Eigen::Vector3d &point, const double radius_m)
+{
+  if (corridor.size() < 2u || !point.allFinite() ||
+      !std::isfinite(radius_m) || radius_m < 0.0)
+    return false;
+  const double radius_squared = radius_m * radius_m;
+  for (std::size_t index = 1u; index < corridor.size(); ++index)
+  {
+    const Eigen::Vector3d from = corridor[index - 1u];
+    const Eigen::Vector3d segment = corridor[index] - from;
+    if (!from.allFinite() || !corridor[index].allFinite())
+      return true;
+    const double squared_length = segment.squaredNorm();
+    const double alpha = squared_length > kEpsilon
+        ? std::clamp((point - from).dot(segment) / squared_length, 0.0, 1.0)
+        : 0.0;
+    if ((point - (from + alpha * segment)).squaredNorm() <=
+        radius_squared + kEpsilon)
+      return true;
+  }
+  return false;
 }
 
 P4SuccessorDeadline computeP4SuccessorDeadline(
@@ -2163,12 +2568,13 @@ P4SuccessorDeadline computeP4SuccessorDeadline(
   const double trajectory_start_s, const double trajectory_end_s)
 {
   P4SuccessorDeadline result;
-  const std::array<double, 7> values = {
+  const std::array<double, 8> values = {
     policy.successor_prepare_wcet_s,
     policy.direct_authorization_budget_s,
     policy.latest_snapshot_reauthorization_budget_s,
     policy.control_switch_margin_s,
     policy.scheduler_guard_s,
+    policy.maximum_parent_execution_before_switch_s,
     trajectory_start_s,
     trajectory_end_s};
   if (std::any_of(values.begin(), values.end(), [](const double value) {
@@ -2178,6 +2584,7 @@ P4SuccessorDeadline computeP4SuccessorDeadline(
     policy.latest_snapshot_reauthorization_budget_s < 0.0 ||
     policy.control_switch_margin_s < 0.0 ||
     policy.scheduler_guard_s < 0.0 ||
+    policy.maximum_parent_execution_before_switch_s < 1.0 ||
     trajectory_end_s <= trajectory_start_s)
   {
     return result;
@@ -2186,8 +2593,16 @@ P4SuccessorDeadline computeP4SuccessorDeadline(
     policy.direct_authorization_budget_s +
     policy.latest_snapshot_reauthorization_budget_s +
     policy.control_switch_margin_s + policy.scheduler_guard_s;
+  result.planned_switch_time_s = std::min({
+    trajectory_end_s,
+    trajectory_start_s + policy.maximum_parent_execution_before_switch_s,
+    std::max(trajectory_start_s + 1.0,
+      trajectory_end_s - policy.control_switch_margin_s)});
+  // The control margin has already moved the switch anchor earlier.  Do not
+  // subtract it a second time from the candidate preparation deadline.
   const double unconstrained_start =
-    trajectory_end_s - result.preparation_lead_s;
+    result.planned_switch_time_s -
+    (result.preparation_lead_s - policy.control_switch_margin_s);
   result.start_immediately = unconstrained_start <= trajectory_start_s;
   result.latest_prepare_start_s = std::max(
     trajectory_start_s, unconstrained_start);
@@ -2195,10 +2610,6 @@ P4SuccessorDeadline computeP4SuccessorDeadline(
   // commitment is not allowed before it has executed for one second.  Keep
   // the switch anchor inside the parent duration; sub-second parents simply
   // reach their endpoint instead of being replaced early.
-  result.planned_switch_time_s = std::min(
-    trajectory_end_s,
-    std::max(trajectory_start_s + 1.0,
-      trajectory_end_s - policy.control_switch_margin_s));
   result.candidate_ready_deadline_s = std::max(
     trajectory_start_s,
     result.planned_switch_time_s -
@@ -2230,6 +2641,452 @@ P4SuccessorProgressRequirement computeP4SuccessorProgressRequirement(
   result.valid = true;
   result.reason = "ok";
   return result;
+}
+
+P4RollingSuccessorGuide p4BoundRollingSuccessorGuide(
+  const std::vector<Eigen::Vector3d> & frozen_guide,
+  const Eigen::Vector3d & parent_approved_endpoint,
+  const double stopping_distance_m, const double minimum_progress_m,
+  const double maximum_projection_distance_m)
+{
+  P4RollingSuccessorGuide result;
+  if (frozen_guide.size() < 2u || !parent_approved_endpoint.allFinite() ||
+    !std::isfinite(stopping_distance_m) || stopping_distance_m < 0.0 ||
+    !std::isfinite(minimum_progress_m) || minimum_progress_m <= 0.0 ||
+    !std::isfinite(maximum_projection_distance_m) ||
+    maximum_projection_distance_m < 0.0 ||
+    std::any_of(
+      frozen_guide.begin(), frozen_guide.end(),
+      [](const Eigen::Vector3d & point) {return !point.allFinite();}))
+  {
+    return result;
+  }
+
+  double traversed_m = 0.0;
+  double total_length_m = 0.0;
+  double best_distance_m = std::numeric_limits<double>::infinity();
+  double best_station_m = std::numeric_limits<double>::quiet_NaN();
+  for (std::size_t index = 1u; index < frozen_guide.size(); ++index) {
+    const Eigen::Vector3d segment =
+      frozen_guide[index] - frozen_guide[index - 1u];
+    const double segment_length_m = segment.norm();
+    if (!std::isfinite(segment_length_m) || segment_length_m <= kEpsilon) {
+      continue;
+    }
+    const double alpha = std::clamp(
+      (parent_approved_endpoint - frozen_guide[index - 1u]).dot(segment) /
+      (segment_length_m * segment_length_m), 0.0, 1.0);
+    const Eigen::Vector3d projection =
+      frozen_guide[index - 1u] + alpha * segment;
+    const double distance_m =
+      (parent_approved_endpoint - projection).norm();
+    if (distance_m < best_distance_m) {
+      best_distance_m = distance_m;
+      best_station_m = traversed_m + alpha * segment_length_m;
+    }
+    traversed_m += segment_length_m;
+  }
+  total_length_m = traversed_m;
+  result.approved_endpoint_station_m = best_station_m;
+  result.projection_distance_m = best_distance_m;
+  if (!std::isfinite(best_station_m) ||
+    best_distance_m > maximum_projection_distance_m + kEpsilon)
+  {
+    result.reason = "approved_endpoint_outside_frozen_guide";
+    return result;
+  }
+
+  result.target_station_m = best_station_m + stopping_distance_m +
+    minimum_progress_m;
+  if (result.target_station_m > total_length_m + kEpsilon) {
+    result.reason = "frozen_guide_has_insufficient_successor_reserve";
+    return result;
+  }
+
+  result.guide.reserve(frozen_guide.size());
+  result.guide.push_back(frozen_guide.front());
+  traversed_m = 0.0;
+  for (std::size_t index = 1u; index < frozen_guide.size(); ++index) {
+    const Eigen::Vector3d segment =
+      frozen_guide[index] - frozen_guide[index - 1u];
+    const double segment_length_m = segment.norm();
+    if (!std::isfinite(segment_length_m) || segment_length_m <= kEpsilon) {
+      continue;
+    }
+    if (traversed_m + segment_length_m <=
+      result.target_station_m + kEpsilon)
+    {
+      result.guide.push_back(frozen_guide[index]);
+      traversed_m += segment_length_m;
+      continue;
+    }
+    const double remaining_m = result.target_station_m - traversed_m;
+    if (remaining_m > kEpsilon) {
+      result.guide.push_back(
+        frozen_guide[index - 1u] +
+        segment * (remaining_m / segment_length_m));
+    }
+    break;
+  }
+  if (result.guide.size() < 2u) {
+    result.guide.clear();
+    result.reason = "bounded_successor_guide_too_short";
+    return result;
+  }
+  result.valid = true;
+  result.reason = "ok";
+  return result;
+}
+
+P4RollingSuccessorGuide composeP4RollingSuccessorPath(
+  const std::vector<Eigen::Vector3d> & certified_parent_curve,
+  const std::vector<Eigen::Vector3d> & selected_route,
+  const Eigen::Vector3d & parent_approved_endpoint)
+{
+  P4RollingSuccessorGuide result;
+  if (certified_parent_curve.size() < 2u || selected_route.size() < 2u ||
+    !parent_approved_endpoint.allFinite() ||
+    std::any_of(
+      certified_parent_curve.begin(), certified_parent_curve.end(),
+      [](const Eigen::Vector3d & point) {return !point.allFinite();}) ||
+    std::any_of(
+      selected_route.begin(), selected_route.end(),
+      [](const Eigen::Vector3d & point) {return !point.allFinite();}))
+  {
+    result.reason = "invalid_parent_curve_or_selected_route";
+    return result;
+  }
+
+  std::size_t best_segment = 0u;
+  double best_squared_distance = std::numeric_limits<double>::infinity();
+  Eigen::Vector3d best_projection = selected_route.front();
+  for (std::size_t index = 1u; index < selected_route.size(); ++index) {
+    const Eigen::Vector3d segment =
+      selected_route[index] - selected_route[index - 1u];
+    const double squared_length = segment.squaredNorm();
+    if (squared_length <= kEpsilon * kEpsilon) {
+      continue;
+    }
+    const double alpha = std::clamp(
+      (parent_approved_endpoint - selected_route[index - 1u]).dot(segment) /
+      squared_length, 0.0, 1.0);
+    const Eigen::Vector3d projection =
+      selected_route[index - 1u] + alpha * segment;
+    const double squared_distance =
+      (parent_approved_endpoint - projection).squaredNorm();
+    if (squared_distance < best_squared_distance) {
+      best_squared_distance = squared_distance;
+      best_segment = index - 1u;
+      best_projection = projection;
+    }
+  }
+  if (!std::isfinite(best_squared_distance)) {
+    result.reason = "selected_route_has_no_nonzero_segment";
+    return result;
+  }
+
+  result.guide = certified_parent_curve;
+  if ((result.guide.back() - parent_approved_endpoint).norm() > kEpsilon) {
+    result.guide.push_back(parent_approved_endpoint);
+  }
+  if ((result.guide.back() - best_projection).norm() > kEpsilon) {
+    result.guide.push_back(best_projection);
+  }
+  for (std::size_t index = best_segment + 1u;
+    index < selected_route.size(); ++index)
+  {
+    if ((result.guide.back() - selected_route[index]).norm() > kEpsilon) {
+      result.guide.push_back(selected_route[index]);
+    }
+  }
+  if (result.guide.size() < 2u) {
+    result.guide.clear();
+    result.reason = "composed_successor_path_too_short";
+    return result;
+  }
+  result.valid = true;
+  result.projection_distance_m = std::sqrt(best_squared_distance);
+  result.reason = "ok";
+  return result;
+}
+
+std::vector<Eigen::Vector3d> selectP4RollingContinuationRoute(
+  const std::vector<Eigen::Vector3d> & candidate_route,
+  const std::vector<Eigen::Vector3d> & parent_continuation_route,
+  const bool preparing_rolling_child)
+{
+  if (preparing_rolling_child && parent_continuation_route.size() >= 2u) {
+    return parent_continuation_route;
+  }
+  return candidate_route;
+}
+
+P4ObservationSegmentResult P4ObservationSegmentPlanner::plan(
+  const P4ObservationSegmentInput & input) const
+{
+  constexpr double kObservationPi = 3.14159265358979323846;
+  P4ObservationSegmentResult result;
+  const auto &sensor = input.sensor;
+  if (!input.current_position.allFinite() ||
+    !input.current_velocity.allFinite() ||
+    !input.current_acceleration.allFinite() ||
+    input.common_corridor.size() < 2u ||
+    !input.divergence_point.allFinite() || sensor.identity.empty() ||
+    !std::isfinite(sensor.horizontal_fov_rad) ||
+    sensor.horizontal_fov_rad <= 0.0 ||
+    sensor.horizontal_fov_rad > 2.0 * kObservationPi ||
+    !std::isfinite(sensor.vertical_min_rad) ||
+    !std::isfinite(sensor.vertical_max_rad) ||
+    sensor.vertical_min_rad > sensor.vertical_max_rad ||
+    !std::isfinite(sensor.min_range_m) || sensor.min_range_m < 0.0 ||
+    !std::isfinite(sensor.max_range_m) ||
+    sensor.max_range_m <= sensor.min_range_m ||
+    !std::isfinite(sensor.occluder_radius_m) ||
+    sensor.occluder_radius_m < 0.0 ||
+    !std::isfinite(input.candidate_spacing_m) ||
+    input.candidate_spacing_m <= 0.0 ||
+    !std::isfinite(input.stopping_reserve_m) ||
+    input.stopping_reserve_m < 0.0 ||
+    !std::isfinite(input.maximum_progress_m) ||
+    input.maximum_progress_m <= 0.0 ||
+    input.missing_los_by_channel.size() < 2u ||
+    std::any_of(
+      input.common_corridor.begin(), input.common_corridor.end(),
+      [](const Eigen::Vector3d &point) {return !point.allFinite();}))
+  {
+    return result;
+  }
+
+  const double corridor_length = pathLength(input.common_corridor);
+  double divergence_station = 0.0;
+  double traversed = 0.0;
+  double best_divergence_distance = std::numeric_limits<double>::infinity();
+  for (std::size_t index = 1u; index < input.common_corridor.size(); ++index)
+  {
+    const Eigen::Vector3d segment =
+      input.common_corridor[index] - input.common_corridor[index - 1u];
+    const double length = segment.norm();
+    if (length <= kEpsilon)
+      continue;
+    const double alpha = std::clamp(
+      (input.divergence_point - input.common_corridor[index - 1u]).dot(
+        segment) / (length * length), 0.0, 1.0);
+    const double distance = (input.divergence_point -
+      (input.common_corridor[index - 1u] + alpha * segment)).norm();
+    if (distance < best_divergence_distance)
+    {
+      best_divergence_distance = distance;
+      divergence_station = traversed + alpha * length;
+    }
+    traversed += length;
+  }
+  if (!std::isfinite(divergence_station) ||
+    best_divergence_distance > input.candidate_spacing_m + kEpsilon)
+  {
+    return result;
+  }
+  const double latest_endpoint_station = std::min({
+      input.maximum_progress_m,
+      corridor_length,
+      divergence_station - input.stopping_reserve_m});
+  if (latest_endpoint_station <= kEpsilon)
+    return result;
+
+  const auto point_at = [&](const double station) -> Eigen::Vector3d {
+      double cursor = 0.0;
+      for (std::size_t index = 1u; index < input.common_corridor.size();
+           ++index)
+      {
+        const Eigen::Vector3d segment =
+          input.common_corridor[index] - input.common_corridor[index - 1u];
+        const double length = segment.norm();
+        if (length <= kEpsilon)
+          continue;
+        if (cursor + length >= station - kEpsilon)
+          return (input.common_corridor[index - 1u] + segment *
+            (std::clamp(station - cursor, 0.0, length) / length)).eval();
+        cursor += length;
+      }
+      return input.common_corridor.back();
+    };
+  const auto tangent_at = [&](const double station) -> Eigen::Vector3d {
+      const double half = 0.5 * input.candidate_spacing_m;
+      const Eigen::Vector3d delta =
+        point_at(std::min(corridor_length, station + half)) -
+        point_at(std::max(0.0, station - half));
+      if (delta.norm() <= kEpsilon)
+        return Eigen::Vector3d::Zero();
+      return delta.normalized();
+    };
+  const auto occluded = [&](const Eigen::Vector3d &origin,
+                            const Eigen::Vector3d &target) {
+      if (!input.raw_occluders)
+        return false;
+      const Eigen::Vector3d ray = target - origin;
+      const double squared_length = ray.squaredNorm();
+      if (squared_length <= kEpsilon)
+        return false;
+      for (const auto &obstacle : *input.raw_occluders)
+      {
+        const double alpha = (obstacle - origin).dot(ray) / squared_length;
+        if (alpha <= 1.0e-3 || alpha >= 1.0 - 1.0e-3)
+          continue;
+        const Eigen::Vector3d closest = origin + alpha * ray;
+        if ((obstacle - closest).norm() <=
+            sensor.occluder_radius_m + kEpsilon)
+          return true;
+      }
+      return false;
+    };
+  const auto visible_count = [&](const Eigen::Vector3d &position,
+                                 const Eigen::Vector3d &forward,
+                                 const std::vector<Eigen::Vector3d> &targets) {
+      Eigen::Vector3d up = Eigen::Vector3d::UnitZ();
+      Eigen::Vector3d left = up.cross(forward);
+      if (left.norm() <= kEpsilon)
+        left = Eigen::Vector3d::UnitY();
+      left.normalize();
+      up = forward.cross(left).normalized();
+      std::size_t count = 0u;
+      for (const auto &target : targets)
+      {
+        if (!target.allFinite())
+          continue;
+        const Eigen::Vector3d relative = target - position;
+        const double range = relative.norm();
+        if (range < sensor.min_range_m - kEpsilon ||
+            range > sensor.max_range_m + kEpsilon || occluded(position, target))
+          continue;
+        const double longitudinal = relative.dot(forward);
+        const double lateral = relative.dot(left);
+        const double vertical = relative.dot(up);
+        const double horizontal_angle = std::atan2(lateral, longitudinal);
+        const double vertical_angle = std::atan2(
+          vertical, std::hypot(longitudinal, lateral));
+        if (std::abs(horizontal_angle) <=
+              0.5 * sensor.horizontal_fov_rad + kEpsilon &&
+            vertical_angle >= sensor.vertical_min_rad - kEpsilon &&
+            vertical_angle <= sensor.vertical_max_rad + kEpsilon)
+          ++count;
+      }
+      return count;
+    };
+
+  const Eigen::Vector3d initial_forward = tangent_at(0.0);
+  if (!initial_forward.allFinite())
+    return result;
+  std::vector<std::size_t> baseline(input.missing_los_by_channel.size(), 0u);
+  for (std::size_t channel = 0u;
+       channel < input.missing_los_by_channel.size(); ++channel)
+    baseline[channel] = visible_count(
+      input.current_position, initial_forward,
+      input.missing_los_by_channel[channel]);
+
+  double best_fair_gain = 0.0;
+  double best_sum_gain = 0.0;
+  double best_station = 0.0;
+  std::vector<double> best_per_channel;
+  for (double station = input.candidate_spacing_m;
+       station <= latest_endpoint_station + kEpsilon;
+       station += input.candidate_spacing_m)
+  {
+    const double candidate_station = std::min(station, latest_endpoint_station);
+    const Eigen::Vector3d position = point_at(candidate_station);
+    const Eigen::Vector3d forward = tangent_at(candidate_station);
+    if (!position.allFinite() || !forward.allFinite())
+      continue;
+    std::vector<double> gains;
+    gains.reserve(input.missing_los_by_channel.size());
+    double fair_gain = 1.0;
+    double sum_gain = 0.0;
+    bool has_missing = false;
+    for (std::size_t channel = 0u;
+         channel < input.missing_los_by_channel.size(); ++channel)
+    {
+      const auto &targets = input.missing_los_by_channel[channel];
+      if (targets.empty())
+      {
+        gains.push_back(1.0);
+        continue;
+      }
+      has_missing = true;
+      const std::size_t visible = visible_count(position, forward, targets);
+      const double gain = static_cast<double>(
+          visible > baseline[channel] ? visible - baseline[channel] : 0u) /
+        static_cast<double>(targets.size());
+      gains.push_back(gain);
+      fair_gain = std::min(fair_gain, gain);
+      sum_gain += gain;
+    }
+    if (!has_missing || fair_gain <= 0.0)
+      continue;
+    if (fair_gain > best_fair_gain + kEpsilon ||
+      (std::abs(fair_gain - best_fair_gain) <= kEpsilon &&
+       sum_gain > best_sum_gain + kEpsilon))
+    {
+      best_fair_gain = fair_gain;
+      best_sum_gain = sum_gain;
+      best_station = candidate_station;
+      best_per_channel = std::move(gains);
+    }
+    if (candidate_station >= latest_endpoint_station - kEpsilon)
+      break;
+  }
+  if (best_fair_gain <= 0.0)
+    return result;
+
+  result.guide = cropPrefixToDistance(input.common_corridor, best_station);
+  if (result.guide.size() < 2u ||
+    pathLength(result.guide) + input.stopping_reserve_m >
+      divergence_station + kEpsilon)
+  {
+    result.guide.clear();
+    return result;
+  }
+  result.available = true;
+  result.reason = "observation_segment_candidate_ready";
+  result.per_channel_normalized_gain = std::move(best_per_channel);
+  result.fair_information_gain = best_fair_gain;
+  result.endpoint_station_m = best_station;
+  return result;
+}
+
+bool applyP4RollingSuccessorGuide(
+  const P4RollingSuccessorGuide & bounded, const bool force_full_search,
+  const uint64_t incumbent_channel_id, P4ForwardRequest * request)
+{
+  if (!request || !bounded.valid || bounded.guide.size() < 2u ||
+    std::any_of(
+      bounded.guide.begin(), bounded.guide.end(),
+      [](const Eigen::Vector3d & point) {return !point.allFinite();}))
+  {
+    return false;
+  }
+
+  request->local_target = bounded.guide.back();
+  request->nominal_local_reference = bounded.guide;
+  request->successor_fast_path = !force_full_search;
+  if (!force_full_search) {
+    request->incumbent_channel_id = incumbent_channel_id;
+    request->successor_reuse_guide = bounded.guide;
+  } else {
+    request->incumbent_channel_id = 0u;
+    request->successor_reuse_guide.clear();
+  }
+  return true;
+}
+
+P4RollingSuccessorGuide selectP4RollingSuccessorGuide(
+  const P4RollingSuccessorGuide & newly_bounded,
+  const P4RollingSuccessorGuide & fixed_for_parent,
+  const bool force_full_search)
+{
+  if (force_full_search && fixed_for_parent.valid &&
+    fixed_for_parent.guide.size() >= 2u)
+  {
+    return fixed_for_parent;
+  }
+  return newly_bounded;
 }
 
 const char * p4SuccessorFailureName(const P4SuccessorFailure failure)
@@ -2343,9 +3200,239 @@ std::optional<Eigen::Vector3d> p4SelectedGuideTerminal(
   }
 }
 
+bool configureP4RefinementClearanceRecovery(
+  const Eigen::Vector3d & current_position,
+  const Eigen::Vector3d & current_velocity,
+  const double planning_clearance_buffer_m,
+  P4ForwardDecision * decision)
+{
+  constexpr double kStoppedVelocityMps = 0.05;
+  constexpr double kRecoveryReserveM = 0.04;
+  constexpr double kMinimumRecoveryDistanceM = 0.10;
+  constexpr double kMaximumRecoveryDistanceM = 0.30;
+  constexpr double kMaximumFailureDistanceM = 0.30;
+  constexpr double kMinimumLimitedPrefixProgressM = 0.25;
+  constexpr double kMaximumLimitedPrefixProgressM = 0.50;
+  if (!decision || !current_position.allFinite() ||
+      !current_velocity.allFinite() ||
+      current_velocity.norm() > kStoppedVelocityMps + 1.0e-9 ||
+      !std::isfinite(planning_clearance_buffer_m) ||
+      planning_clearance_buffer_m <= 0.0 ||
+      decision->result_status != P4ForwardResultStatus::READY ||
+      decision->action != P4ForwardAction::REPLAN_REQUIRED ||
+      (decision->reason.rfind(
+         "no_native_refined_candidate:clearance_margin_insufficient=", 0u) !=
+           0u &&
+       decision->reason.rfind(
+         "no_native_refined_candidate:clearance_envelope_closed=", 0u) !=
+           0u))
+  {
+    return false;
+  }
+
+  const auto usable_failure = [planning_clearance_buffer_m](
+      const P4ForwardRefinementResult & failure) {
+      const bool supported_status = failure.status ==
+          P4ForwardRefinementStatus::CLEARANCE_MARGIN_INSUFFICIENT ||
+        failure.status ==
+          P4ForwardRefinementStatus::CLEARANCE_ENVELOPE_CLOSED;
+      // minimum_signed_margin_m includes the independent planning buffer.
+      // A negative planning margin is recoverable only while removing that
+      // buffer still leaves strictly positive hard clearance.  This preserves
+      // the collision envelope while allowing a stopped vehicle to move
+      // monotonically along measured escape evidence instead of deadlocking.
+      const bool positive_hard_margin =
+        failure.minimum_signed_margin_m + planning_clearance_buffer_m >
+          kEpsilon;
+      return supported_status &&
+        failure.failure_position.allFinite() &&
+        std::isfinite(failure.minimum_signed_margin_m) &&
+        positive_hard_margin &&
+        failure.minimum_signed_margin_m + 1.0e-9 <
+          planning_clearance_buffer_m &&
+        failure.escape_direction.allFinite() &&
+        failure.escape_direction.norm() > 1.0e-9;
+    };
+  const auto nearby_failure = std::min_element(
+    decision->refinement_diagnostics.begin(),
+    decision->refinement_diagnostics.end(),
+    [&current_position, &usable_failure](
+      const P4ForwardRefinementResult & lhs,
+      const P4ForwardRefinementResult & rhs) {
+      const bool lhs_near = usable_failure(lhs) &&
+        (lhs.failure_position - current_position).norm() <=
+          kMaximumFailureDistanceM;
+      const bool rhs_near = usable_failure(rhs) &&
+        (rhs.failure_position - current_position).norm() <=
+          kMaximumFailureDistanceM;
+      if (lhs_near != rhs_near) return lhs_near;
+      return lhs.minimum_signed_margin_m < rhs.minimum_signed_margin_m;
+    });
+  const bool has_nearby_failure =
+    nearby_failure != decision->refinement_diagnostics.end() &&
+    usable_failure(*nearby_failure) &&
+    (nearby_failure->failure_position - current_position).norm() <=
+      kMaximumFailureDistanceM;
+
+  if (!has_nearby_failure)
+  {
+    // A stopped vehicle can also be separated from the failed clearance
+    // station by a fully checked prefix.  Holding forever throws away that
+    // positive evidence and repeatedly solves the same two failed routes.
+    // Retain at most 0.5 m of the already checked refinement path, ending a
+    // full 0.5 m before the first failed station.  This is only a candidate:
+    // the manager still builds a new terminal B-spline and repeats collision,
+    // clearance, dynamics, braking, GNSS and P5 certification.
+    const P4ForwardRefinementResult * prefix_source = nullptr;
+    double prefix_progress_m = std::numeric_limits<double>::infinity();
+    for (const auto & diagnostic : decision->refinement_diagnostics)
+    {
+      if (!usable_failure(diagnostic) || diagnostic.path.size() < 2u ||
+          !diagnostic.path.front().allFinite() ||
+          (diagnostic.path.front() - current_position).norm() >
+            kMaximumFailureDistanceM)
+        continue;
+      double traversed_m = 0.0;
+      double failure_station_m = 0.0;
+      double best_distance_m = std::numeric_limits<double>::infinity();
+      for (std::size_t index = 1u; index < diagnostic.path.size(); ++index)
+      {
+        const Eigen::Vector3d segment =
+          diagnostic.path[index] - diagnostic.path[index - 1u];
+        const double length_m = segment.norm();
+        if (!std::isfinite(length_m) || length_m <= kEpsilon) continue;
+        const double alpha = std::clamp(
+          (diagnostic.failure_position - diagnostic.path[index - 1u]).dot(
+            segment) / (length_m * length_m), 0.0, 1.0);
+        const double distance_m =
+          (diagnostic.failure_position -
+           (diagnostic.path[index - 1u] + alpha * segment)).norm();
+        if (distance_m < best_distance_m)
+        {
+          best_distance_m = distance_m;
+          failure_station_m = traversed_m + alpha * length_m;
+        }
+        traversed_m += length_m;
+      }
+      const double candidate_progress_m = std::min(
+        kMaximumLimitedPrefixProgressM,
+        failure_station_m - kMaximumLimitedPrefixProgressM);
+      if (std::isfinite(best_distance_m) &&
+          best_distance_m <= kMaximumFailureDistanceM &&
+          candidate_progress_m + kEpsilon >=
+            kMinimumLimitedPrefixProgressM &&
+          candidate_progress_m < prefix_progress_m)
+      {
+        prefix_source = &diagnostic;
+        prefix_progress_m = candidate_progress_m;
+      }
+    }
+    if (!prefix_source) return false;
+
+    std::vector<Eigen::Vector3d> prefix{current_position};
+    double traversed_m = 0.0;
+    for (std::size_t index = 1u; index < prefix_source->path.size(); ++index)
+    {
+      const Eigen::Vector3d from = index == 1u
+        ? current_position : prefix_source->path[index - 1u];
+      const Eigen::Vector3d segment = prefix_source->path[index] - from;
+      const double length_m = segment.norm();
+      if (!std::isfinite(length_m) || length_m <= kEpsilon) continue;
+      if (traversed_m + length_m <= prefix_progress_m + kEpsilon)
+      {
+        prefix.push_back(prefix_source->path[index]);
+        traversed_m += length_m;
+        continue;
+      }
+      const double remaining_m = prefix_progress_m - traversed_m;
+      if (remaining_m > kEpsilon)
+        prefix.push_back(from + (remaining_m / length_m) * segment);
+      break;
+    }
+    if (prefix.size() < 2u || pathLength(prefix) + kEpsilon <
+        kMinimumLimitedPrefixProgressM)
+      return false;
+
+    decision->action = P4ForwardAction::OBSERVE_MORE;
+    decision->trigger_reason = P4ForwardTriggerReason::NO_SAFE_ROUTE;
+    decision->geometry_state = P4ForwardGeometryState::CLEAR;
+    decision->risk_support = P4ForwardRiskSupport::INCOMPLETE;
+    decision->safety_state = P4ForwardSafetyState::UNKNOWN;
+    decision->selection_authority = P4ForwardSelectionAuthority::NONE;
+    decision->formal_support = false;
+    decision->selected_candidate_id = 0u;
+    decision->selected_channel_id = 0u;
+    decision->runner_up_candidate_id = 0u;
+    decision->runner_up_channel_id = 0u;
+    decision->selected_guide.clear();
+    decision->deferred_motion_mode = P4ForwardDeferredMotionMode::HOLD;
+    decision->deferred_trajectory.clear();
+    decision->observe_more_trajectory = std::move(prefix);
+    decision->request_position = current_position;
+    decision->selected_actual_endpoint =
+      decision->observe_more_trajectory.back();
+    decision->local_clearance_recovery = false;
+    decision->speed_cap_mps = 0.1;
+    decision->actual_curve_duration_scale = 1.0;
+    decision->geometry_commit = P4GeometryCommitResult{};
+    decision->planning_disposition =
+      P4PlanningDisposition::NEW_TRAJECTORY_READY;
+    decision->reason = "refinement_clearance_limited_prefix";
+    return true;
+  }
+
+  const auto failure = nearby_failure;
+  const Eigen::Vector3d direction = failure->escape_direction.normalized();
+  const double deficit_m =
+    planning_clearance_buffer_m - failure->minimum_signed_margin_m;
+  const double distance_m = std::clamp(
+    deficit_m + kRecoveryReserveM,
+    kMinimumRecoveryDistanceM, kMaximumRecoveryDistanceM);
+  decision->action = P4ForwardAction::OBSERVE_MORE;
+  decision->trigger_reason = P4ForwardTriggerReason::NO_SAFE_ROUTE;
+  decision->geometry_state = P4ForwardGeometryState::CLEAR;
+  decision->risk_support = P4ForwardRiskSupport::INCOMPLETE;
+  decision->safety_state = P4ForwardSafetyState::UNKNOWN;
+  decision->selection_authority = P4ForwardSelectionAuthority::NONE;
+  decision->formal_support = false;
+  decision->selected_candidate_id = 0u;
+  decision->selected_channel_id = 0u;
+  decision->runner_up_candidate_id = 0u;
+  decision->runner_up_channel_id = 0u;
+  decision->selected_guide.clear();
+  decision->deferred_motion_mode = P4ForwardDeferredMotionMode::HOLD;
+  decision->deferred_trajectory.clear();
+  decision->observe_more_trajectory = {
+    current_position,
+    current_position + 0.5 * distance_m * direction,
+    current_position + distance_m * direction};
+  decision->request_position = current_position;
+  decision->selected_actual_endpoint =
+    decision->observe_more_trajectory.back();
+  decision->local_clearance_recovery = true;
+  decision->local_clearance_recovery_max_duration_s = 1.0;
+  decision->speed_cap_mps = 0.1;
+  decision->actual_curve_duration_scale = 1.0;
+  decision->geometry_commit = P4GeometryCommitResult{};
+  decision->planning_disposition =
+    P4PlanningDisposition::NEW_TRAJECTORY_READY;
+  decision->reason = "refinement_clearance_recovery_exit";
+  return true;
+}
+
 bool p4SuccessorGeometryFallbackAllowed(
   const P4ForwardDecision & decision)
 {
+  // The frozen continuation is only an optimization.  If its first usable
+  // anchor has become occupied, ordinary channel enumeration must still get
+  // one chance under the same deadline; this verdict does not establish that
+  // every topology is closed.  Keep this keyed to the typed trigger instead
+  // of parsing diagnostic prose.
+  if (decision.trigger_reason ==
+    P4ForwardTriggerReason::COMMON_ANCHOR_UNAVAILABLE)
+  {
+    return true;
+  }
   return std::any_of(
     decision.refinement_diagnostics.begin(),
     decision.refinement_diagnostics.end(),
@@ -2412,6 +3499,17 @@ const char * p4ForwardSelectionAuthorityName(
     case P4ForwardSelectionAuthority::FORMAL: return "FORMAL";
     case P4ForwardSelectionAuthority::ADVISORY_NON_CERTIFIED:
       return "ADVISORY_NON_CERTIFIED";
+  }
+  return "UNKNOWN";
+}
+
+const char * p4ExecutableIntentName(const P4ExecutableIntent intent)
+{
+  switch (intent) {
+    case P4ExecutableIntent::FINAL_CHANNEL: return "FINAL_CHANNEL";
+    case P4ExecutableIntent::COMMON_OBSERVATION_SEGMENT:
+      return "COMMON_OBSERVATION_SEGMENT";
+    case P4ExecutableIntent::HOLD: return "HOLD";
   }
   return "UNKNOWN";
 }
@@ -2677,6 +3775,14 @@ double p4KinematicStoppingProgress(
          speed * speed / (2.0 * limits.braking_accel_mps2);
 }
 
+double p4RefinementCorridorRadius(const P4ForwardLimits &limits)
+{
+  return std::max(
+    1.5 * limits.topology_resolution_m,
+    p4StoppingDistance(limits.max_observe_speed_mps, limits) +
+    0.5 * limits.occupancy_resolution_m);
+}
+
 bool p4CertifyForwardCandidate(
   const P4ForwardRequest & request, P4ForwardCandidate * candidate,
   const double compute_budget_ms)
@@ -2839,6 +3945,7 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
         output.compute_latency_ms >= request.limits.route_compute_budget_ms)
       {
         output.action = P4ForwardAction::REPLAN_REQUIRED;
+        output.executable_intent = P4ExecutableIntent::HOLD;
         output.trigger_reason =
           P4ForwardTriggerReason::COMPUTE_BUDGET_EXCEEDED;
         output.reason = "compute_budget_exceeded";
@@ -2884,6 +3991,69 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
     }
     if (graph.sweptFree(point)) {
       anchor = point;
+    }
+  }
+  if ((anchor - request.position).norm() <
+    request.limits.topology_resolution_m)
+  {
+    // A fully blocked nominal centre line does not prove that the selected
+    // local free-space component has ended.  Search laterally around the
+    // farthest nominal stations before classifying the common anchor as
+    // unavailable.  This is only an endpoint proposal: the topology search
+    // below must still prove a connected swept-free path to it.
+    const double lateral_limit_m = p4RefinementCorridorRadius(request.limits);
+    const double lateral_step_m = std::max(
+      request.limits.occupancy_resolution_m, 0.1);
+    for (std::size_t reverse_index = nominal.size();
+      reverse_index > 0u &&
+      (anchor - request.position).norm() <
+        request.limits.topology_resolution_m;
+      --reverse_index)
+    {
+      const std::size_t index = reverse_index - 1u;
+      const Eigen::Vector3d base = nominal[index];
+      if ((base - request.position).norm() >
+        decision.decision_horizon_m + kEpsilon)
+      {
+        continue;
+      }
+      Eigen::Vector3d tangent;
+      if (index + 1u < nominal.size()) {
+        tangent = nominal[index + 1u] - base;
+      } else if (index > 0u) {
+        tangent = base - nominal[index - 1u];
+      } else {
+        continue;
+      }
+      tangent.z() = 0.0;
+      Eigen::Vector3d lateral(-tangent.y(), tangent.x(), 0.0);
+      if (lateral.norm() <= kEpsilon) {
+        lateral = Eigen::Vector3d::UnitX();
+      } else {
+        lateral.normalize();
+      }
+      for (double offset = lateral_step_m;
+        offset <= lateral_limit_m + kEpsilon;
+        offset += lateral_step_m)
+      {
+        for (const double sign : {1.0, -1.0}) {
+          const Eigen::Vector3d candidate = base + sign * offset * lateral;
+          if ((candidate - request.position).norm() >
+            decision.decision_horizon_m + kEpsilon)
+          {
+            continue;
+          }
+          if (graph.sweptFree(candidate)) {
+            anchor = candidate;
+            break;
+          }
+        }
+        if ((anchor - request.position).norm() >=
+          request.limits.topology_resolution_m)
+        {
+          break;
+        }
+      }
     }
   }
   decision.common_anchor = anchor;
@@ -2932,12 +4102,22 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
       "successor_reuse_guide_clear" :
       "empty_configuration_space_single_channel";
   } else {
-    raw = graph.distinctChannelPaths(
-      graph.index(request.position), graph.index(anchor),
-      request.limits.max_channels, request.limits.max_channel_searches,
-      request.limits.channel_enumeration_budget_ms,
-      &decision.channel_search_attempts, &decision.duplicate_channel_paths,
-      &decision.channel_search_termination);
+    GridIndex topology_start;
+    GridIndex topology_goal;
+    const bool endpoints_connected =
+      graph.nearestReachableTopologyCell(request.position, &topology_start) &&
+      graph.nearestReachableTopologyCell(anchor, &topology_goal);
+    if (endpoints_connected) {
+      raw = graph.distinctChannelPaths(
+        topology_start, topology_goal,
+        request.limits.max_channels, request.limits.max_channel_searches,
+        request.limits.channel_enumeration_budget_ms,
+        &decision.channel_search_attempts, &decision.duplicate_channel_paths,
+        &decision.channel_search_termination);
+    } else {
+      decision.channel_search_termination =
+        "endpoint_topology_connection_unavailable";
+    }
   }
   if (graph.timedOut()) {
     decision.reason = "compute_budget_exceeded";
@@ -3027,7 +4207,8 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
         request.snapshot_identity.occupancy_generation;
     slot.gnss_epoch_identity =
         request.snapshot_identity.gnss_epoch_identity;
-    slot.state = P4ChannelEvaluationState::GEOMETRY_READY;
+    if (!request.refine && slot.state == P4ChannelEvaluationState::DISCOVERED)
+      slot.state = P4ChannelEvaluationState::GEOMETRY_READY;
   }
   std::size_t clear_slot_index = 0;
   for (const auto & candidate : decision.raw_candidates) {
@@ -3090,7 +4271,16 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
     return finalize(std::move(decision));
   }
 
-  if (!nominal_path_clear && decision.candidates.size() < 2) {
+  const bool sole_candidate_has_stable_identity =
+    decision.candidates.size() == 1u &&
+    std::any_of(
+      request.prior_channel_slots.begin(), request.prior_channel_slots.end(),
+      [&decision](const P4ChannelSlot &slot) {
+        return slot.stable_channel_id != 0u &&
+               slot.stable_channel_id == decision.candidates.front().channel_id;
+      });
+  if (!nominal_path_clear && decision.candidates.size() < 2 &&
+      !sole_candidate_has_stable_identity) {
     // A clear point behind a nominal obstruction is not a common anchor by
     // itself. Until two distinct routes reach the same frozen-geometry point,
     // expose only the sequentially clear nominal prefix and do not commit to
@@ -3153,6 +4343,28 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
     {
       eligible.push_back(&candidate);
     }
+  }
+  if (!certify_after_refinement &&
+    request.limits.task_mode ==
+      iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT &&
+    candidatesRequireObservationBeforeSelection(decision.candidates))
+  {
+    if (configureSafeLimitedCommonPrefix(
+        request, graph, &budget, &decision))
+      return finalize(std::move(decision));
+    decision.action = P4ForwardAction::DEFER_RISK_SELECTION;
+    decision.trigger_reason = P4ForwardTriggerReason::SUPPORT_INCOMPLETE;
+    decision.selection_authority = P4ForwardSelectionAuthority::NONE;
+    decision.formal_support = false;
+    decision.selected_candidate_id = 0u;
+    decision.selected_channel_id = 0u;
+    decision.runner_up_candidate_id = 0u;
+    decision.runner_up_channel_id = 0u;
+    decision.selected_guide.clear();
+    decision.deferred_motion_mode = P4ForwardDeferredMotionMode::HOLD;
+    decision.deferred_trajectory.clear();
+    decision.speed_cap_mps = 0.0;
+    return finalize(std::move(decision));
   }
   if (eligible.empty()) {
     if (incomplete && request.limits.task_mode ==
@@ -3302,7 +4514,7 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
     };
   std::sort(eligible.begin(), eligible.end(), risk_order);
 
-  if (request.refine) {
+  if (request.refine || request.refine_with_warm_start) {
     if (!eligible.empty())
     {
       const std::size_t offset =
@@ -3313,6 +4525,8 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
     std::vector<P4ForwardCandidate> refined_candidates;
     refined_candidates.reserve(eligible.size());
     std::map<P4ForwardRefinementStatus, std::size_t> refinement_failures;
+    std::unordered_map<uint64_t, std::vector<Eigen::Vector3d>>
+      refinement_warm_starts;
     double successful_refinement_wcet_ms = 0.0;
     std::unordered_set<uint64_t> attempted_channel_ids;
     const double direct_authorization_reserve_ms = std::min(
@@ -3323,12 +4537,59 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
         decision.reason = "compute_budget_exceeded";
         return finalize(std::move(decision));
       }
+      P4ForwardCandidate refined_candidate = *candidate;
+      const auto cached_slot = std::find_if(
+        decision.channel_slots.begin(), decision.channel_slots.end(),
+        [candidate](const P4ChannelSlot &slot) {
+          return slot.stable_channel_id == candidate->channel_id;
+        });
+      if (cached_slot != decision.channel_slots.end() &&
+        cached_slot->state != P4ChannelEvaluationState::DISCOVERED &&
+        cached_slot->refined_path.size() >= 2u)
+      {
+        auto cached_path = cached_slot->refined_path;
+        const double endpoint_tolerance_m =
+          2.0 * request.limits.topology_resolution_m;
+        if ((cached_path.front() - candidate->path.front()).norm() <=
+              endpoint_tolerance_m + kEpsilon &&
+          (cached_path.back() - candidate->path.back()).norm() <=
+              endpoint_tolerance_m + kEpsilon)
+        {
+          // A stable slot may be observed from a slightly advanced start.
+          // Re-anchor only its boundary samples; the interior refined
+          // geometry remains immutable and receives the same swept check
+          // below before being reused.
+          cached_path.front() = candidate->path.front();
+          cached_path.back() = candidate->path.back();
+          if (graph.worldPathFree(cached_path))
+          {
+            P4ForwardRefinementResult reused;
+            reused.status = P4ForwardRefinementStatus::SUCCESS;
+            reused.path = cached_path;
+            reused.minimum_signed_margin_m =
+              cached_slot->refined_minimum_signed_margin_m;
+            reused.elapsed_ms = 0.0;
+            decision.refinement_diagnostics.push_back(reused);
+            refined_candidate.path = std::move(cached_path);
+            refined_candidate.minimum_local_clearance_margin_m =
+              cached_slot->refined_minimum_signed_margin_m;
+            refined_candidate.length_m = pathLength(refined_candidate.path);
+            refined_candidate.path_hash = hashPath(refined_candidate.path);
+            refined_candidate.occupancy_supported = true;
+            refined_candidate.geometry_state =
+              P4ForwardGeometryState::CLEAR;
+            refined_candidates.push_back(std::move(refined_candidate));
+            attempted_channel_ids.insert(candidate->channel_id);
+            continue;
+          }
+        }
+      }
       // Refinement is only useful when the resulting physical curve can
       // still be certified.  Keep the direct-kernel budget intact, and once
       // one complete candidate exists do not start another refinement that
       // cannot finish within the observed refinement WCET plus that reserve.
-      // This produces a smaller complete candidate set instead of repeatedly
-      // timing out with four uncertified guides.
+      // Cached geometry above is intentionally considered first: it needs no
+      // local A* budget and leaves the complete reserve to authorization.
       const double remaining_ms = budget.remainingMs();
       if (!refined_candidates.empty() &&
         remaining_ms <= successful_refinement_wcet_ms +
@@ -3341,15 +4602,58 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
       if (!(refinement_budget_ms > 0.0)) {
         break;
       }
-      P4ForwardCandidate refined_candidate = *candidate;
       attempted_channel_ids.insert(candidate->channel_id);
-      auto refinement = request.refine(
-        candidate->path,
-        1.5 * request.limits.topology_resolution_m,
-        refinement_budget_ms);
+      // The topology lattice spacing is not the physical corridor width.
+      // In dense scenes a valid detour may need to move by the complete
+      // vehicle-and-stop reserve before the exact clearance predicate can
+      // certify it.  Keep that search inside the same homotopy slot, while
+      // allowing the frozen-map refinement to discover the usable part of
+      // the corridor.  Every returned point still passes the unchanged
+      // occupancy and local-clearance gates.
+      const double refinement_corridor_radius_m =
+        p4RefinementCorridorRadius(request.limits);
+      std::vector<Eigen::Vector3d> warm_start;
+      if (cached_slot != decision.channel_slots.end() &&
+          cached_slot->state ==
+            P4ChannelEvaluationState::PARTIAL_COMPARISON &&
+          cached_slot->refinement_warm_start.size() >= 2u)
+      {
+        warm_start = cached_slot->refinement_warm_start;
+        const double endpoint_tolerance_m =
+          2.0 * request.limits.topology_resolution_m;
+        if ((warm_start.front() - candidate->path.front()).norm() <=
+              endpoint_tolerance_m + kEpsilon &&
+            (warm_start.back() - candidate->path.back()).norm() <=
+              endpoint_tolerance_m + kEpsilon)
+        {
+          // Rolling windows may advance the endpoints while preserving the
+          // stable corridor. The refiner rechecks these replacement links
+          // against the current frozen snapshot before using the checkpoint.
+          warm_start.front() = candidate->path.front();
+          warm_start.back() = candidate->path.back();
+        }
+        else
+        {
+          warm_start.clear();
+        }
+      }
+      auto refinement = request.refine_with_warm_start
+        ? request.refine_with_warm_start(
+            candidate->path, warm_start, refinement_corridor_radius_m,
+            refinement_budget_ms)
+        : request.refine(
+            candidate->path, refinement_corridor_radius_m,
+            refinement_budget_ms);
       decision.refinement_diagnostics.push_back(refinement);
       if (!refinement.success()) {
         ++refinement_failures[refinement.status];
+        if (refinement.status ==
+              P4ForwardRefinementStatus::BUDGET_EXHAUSTED &&
+            refinement.resume_guide.size() >= 2u)
+        {
+          refinement_warm_starts[candidate->channel_id] =
+            std::move(refinement.resume_guide);
+        }
         continue;
       }
       successful_refinement_wcet_ms = std::max(
@@ -3374,6 +4678,12 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
       decision.unevaluated_channel_count =
           eligible.size() - attempted_channel_ids.size();
     }
+    if (!refinement_warm_starts.empty())
+    {
+      decision.channel_comparison_state =
+          P4ChannelComparisonState::PARTIAL_COMPARISON;
+      decision.unevaluated_channel_count += refinement_warm_starts.size();
+    }
     for (auto &slot : decision.channel_slots)
     {
       const auto certified = std::find_if(
@@ -3382,9 +4692,31 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
             return candidate.channel_id == slot.stable_channel_id;
           });
       if (certified != refined_candidates.end())
+      {
         slot.state = P4ChannelEvaluationState::CERTIFIED;
+        slot.refined_path = certified->path;
+        slot.refinement_warm_start.clear();
+        slot.refined_minimum_signed_margin_m =
+          certified->minimum_local_clearance_margin_m;
+      }
       else if (attempted_channel_ids.count(slot.stable_channel_id) != 0u)
-        slot.state = P4ChannelEvaluationState::HARD_FAILED;
+      {
+        const auto warm = refinement_warm_starts.find(
+            slot.stable_channel_id);
+        if (warm != refinement_warm_starts.end())
+        {
+          slot.state = P4ChannelEvaluationState::PARTIAL_COMPARISON;
+          slot.refinement_warm_start = warm->second;
+        }
+        else
+        {
+          slot.state = P4ChannelEvaluationState::HARD_FAILED;
+          slot.refined_path.clear();
+          slot.refinement_warm_start.clear();
+          slot.refined_minimum_signed_margin_m =
+            -std::numeric_limits<double>::infinity();
+        }
+      }
       else
         slot.state = P4ChannelEvaluationState::PARTIAL_COMPARISON;
     }
@@ -3426,6 +4758,27 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
       {
         eligible.push_back(&candidate);
       }
+    }
+    if (request.limits.task_mode ==
+          iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT &&
+      candidatesRequireObservationBeforeSelection(decision.candidates))
+    {
+      if (configureSafeLimitedCommonPrefix(
+          request, graph, &budget, &decision))
+        return finalize(std::move(decision));
+      decision.action = P4ForwardAction::DEFER_RISK_SELECTION;
+      decision.trigger_reason = P4ForwardTriggerReason::SUPPORT_INCOMPLETE;
+      decision.selection_authority = P4ForwardSelectionAuthority::NONE;
+      decision.formal_support = false;
+      decision.selected_candidate_id = 0u;
+      decision.selected_channel_id = 0u;
+      decision.runner_up_candidate_id = 0u;
+      decision.runner_up_channel_id = 0u;
+      decision.selected_guide.clear();
+      decision.deferred_motion_mode = P4ForwardDeferredMotionMode::HOLD;
+      decision.deferred_trajectory.clear();
+      decision.speed_cap_mps = 0.0;
+      return finalize(std::move(decision));
     }
     std::sort(eligible.begin(), eligible.end(), risk_order);
   }
@@ -3499,6 +4852,7 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
     decision.runner_up_channel_id = eligible[1]->channel_id;
   }
   decision.action = P4ForwardAction::CANDIDATE_READY;
+  decision.executable_intent = P4ExecutableIntent::FINAL_CHANNEL;
   decision.selection_authority = P4ForwardSelectionAuthority::NONE;
   decision.formal_support = false;
   decision.trigger_reason = multiple_safe_channels ?

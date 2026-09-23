@@ -8,6 +8,7 @@
 #include <pcl_conversions/pcl_conversions.h>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
+#include <iap/msg/lidar_beam_evidence.hpp>
 #include <local_sensing/first_hit_lidar_renderer.hpp>
 #include <Eigen/Dense>
 #include <Eigen/Geometry>
@@ -15,9 +16,11 @@
 #include <csignal>
 #include <fstream>
 #include <iostream>
+#include <iomanip>
 #include <memory>
 #include <pcl/search/impl/kdtree.hpp>
 #include <string>
+#include <sstream>
 #include <vector>
 
 using namespace std;
@@ -25,6 +28,7 @@ using namespace Eigen;
 
 // ROS2 初始化节点
 rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_cloud;
+rclcpp::Publisher<iap::msg::LidarBeamEvidence>::SharedPtr pub_beams;
 
 sensor_msgs::msg::PointCloud2 local_map_pcl;
 sensor_msgs::msg::PointCloud2 local_depth_pcl;
@@ -62,6 +66,33 @@ double _resolution, _inv_resolution;
 int _GLX_SIZE, _GLY_SIZE, _GLZ_SIZE;
 
 rclcpp::Time last_odom_stamp = rclcpp::Time(0, 0, RCL_ROS_TIME);
+
+std::string beamContentHash(const local_sensing::FirstHitLidarScan & scan)
+{
+  std::uint64_t hash = 1469598103934665603ULL;
+  const auto mix = [&hash](const void * data, const std::size_t size) {
+      const auto * bytes = static_cast<const unsigned char *>(data);
+      for (std::size_t i = 0; i < size; ++i) {
+        hash ^= static_cast<std::uint64_t>(bytes[i]);
+        hash *= 1099511628211ULL;
+      }
+    };
+  for (const auto & beam : scan.beams) {
+    const auto outcome = static_cast<std::uint8_t>(beam.outcome);
+    const float x = static_cast<float>(beam.direction_sensor.x());
+    const float y = static_cast<float>(beam.direction_sensor.y());
+    const float z = static_cast<float>(beam.direction_sensor.z());
+    const float range = static_cast<float>(beam.range_m);
+    mix(&outcome, sizeof(outcome));
+    mix(&x, sizeof(x));
+    mix(&y, sizeof(y));
+    mix(&z, sizeof(z));
+    mix(&range, sizeof(range));
+  }
+  std::ostringstream out;
+  out << std::hex << std::setfill('0') << std::setw(16) << hash;
+  return out.str();
+}
 
 inline Eigen::Vector3d gridIndex2coord(const Eigen::Vector3i& index) {
   Eigen::Vector3d pt;
@@ -173,6 +204,36 @@ void renderSensedPoints(/*const rclcpp::TimerBase event*/) {
     _local_map_pcd.header.stamp = _odom.header.stamp;
     _local_map_pcd.header.frame_id = "map";
     pub_cloud->publish(_local_map_pcd);
+    iap::msg::LidarBeamEvidence evidence;
+    evidence.header.stamp = _odom.header.stamp;
+    evidence.header.frame_id = "iap_lidar_reference";
+    evidence.scan_end_stamp_s = rclcpp::Time(_odom.header.stamp).seconds();
+    evidence.sensor_model_id = "spherical_first_hit_v1";
+    evidence.horizontal_samples = static_cast<std::uint32_t>(
+      first_hit_config.horizontal_samples);
+    evidence.vertical_samples = static_cast<std::uint32_t>(
+      first_hit_config.vertical_samples);
+    evidence.horizontal_fov_rad =
+      first_hit_config.horizontal_fov_deg * M_PI / 180.0;
+    evidence.vertical_min_rad = first_hit_config.vertical_min_deg * M_PI / 180.0;
+    evidence.vertical_max_rad = first_hit_config.vertical_max_deg * M_PI / 180.0;
+    evidence.min_range_m = first_hit_config.min_range_m;
+    evidence.max_range_m = first_hit_config.max_range_m;
+    evidence.complete = scan.beams.size() == scan.stats.ray_count;
+    evidence.outcomes.reserve(scan.beams.size());
+    evidence.direction_x.reserve(scan.beams.size());
+    evidence.direction_y.reserve(scan.beams.size());
+    evidence.direction_z.reserve(scan.beams.size());
+    evidence.ranges_m.reserve(scan.beams.size());
+    for (const auto & beam : scan.beams) {
+      evidence.outcomes.push_back(static_cast<std::uint8_t>(beam.outcome));
+      evidence.direction_x.push_back(static_cast<float>(beam.direction_sensor.x()));
+      evidence.direction_y.push_back(static_cast<float>(beam.direction_sensor.y()));
+      evidence.direction_z.push_back(static_cast<float>(beam.direction_sensor.z()));
+      evidence.ranges_m.push_back(static_cast<float>(beam.range_m));
+    }
+    evidence.content_hash = beamContentHash(scan);
+    pub_beams->publish(evidence);
     ++rendered_frame_count;
     RCLCPP_INFO(
         rclcpp::get_logger("pcl_render_node"),
@@ -328,6 +389,8 @@ int main(int argc, char** argv) {
 
   // 发布者：点云数据
   pub_cloud = node->create_publisher<sensor_msgs::msg::PointCloud2>("pcl_render_node/cloud", 10);
+  pub_beams = node->create_publisher<iap::msg::LidarBeamEvidence>(
+    "/iap/simulator/lidar_beam_evidence", rclcpp::SensorDataQoS().keep_last(4));
   RCLCPP_INFO(
       node->get_logger(),
       "pcl_render ready cloud_topic=pcl_render_node/cloud renderer=%s sensing_horizon=%.3f sensing_rate=%.3f map_resolution=%.3f rays=%d",
@@ -367,6 +430,7 @@ int main(int argc, char** argv) {
   local_map_sub.reset();
   global_map_sub.reset();
   pub_cloud.reset();
+  pub_beams.reset();
   node.reset();
   rclcpp::shutdown();
   return 0;

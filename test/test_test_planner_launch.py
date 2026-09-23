@@ -326,9 +326,9 @@ class TestPlannerLaunchTest(unittest.TestCase):
                          "true")
         self.assertNotIn("p5.current_pl_source", fixture)
         self.assertEqual(fixture["fsm.thresh_replan_time"], "0.2")
-        self.assertEqual(fixture["manager/max_vel"], "1.0")
-        self.assertEqual(fixture["optimization/max_vel"], "1.0")
-        self.assertEqual(fixture["bspline/limit_vel"], "1.0")
+        self.assertEqual(fixture["manager/max_vel"], "0.5")
+        self.assertEqual(fixture["optimization/max_vel"], "0.5")
+        self.assertEqual(fixture["bspline/limit_vel"], "0.5")
         self.assertNotIn("inverse_corridor", fixture_name)
         profile = MODULE.EXPERIMENT_PRESETS["icra_p0_p4_v2_p5_dev"]
         defaults = dict(MODULE.ARG_DEFAULTS)
@@ -407,6 +407,38 @@ class TestPlannerLaunchTest(unittest.TestCase):
         self.assertEqual(context.launch_configurations["forest_layout_mode"],
                          "forked_s_forest_v1")
 
+    def test_icra_online_profile_uses_the_execution_map_geometry(self):
+        """Online P0 overlays the same fixed lattice captured by GridMap."""
+        profile = MODULE.EXPERIMENT_PRESETS["icra_p0_p4_v2_p5_dev"]
+        self.assertEqual(profile["grid_map/origin_x"], "-15.0")
+        self.assertEqual(profile["grid_map/origin_y"], "-15.0")
+        self.assertEqual(profile["grid_map/origin_z"], "0.0")
+        self.assertEqual(profile["p0.resolution_m"], "0.5")
+        self.assertEqual(profile["p0.size_x_m"], "30.0")
+        self.assertEqual(profile["p0.size_y_m"], "30.0")
+        self.assertEqual(profile["p0.size_z_m"], "3.5")
+        self.assertEqual(profile["p0.origin_x_m"], "-15.0")
+        self.assertEqual(profile["p0.origin_y_m"], "-15.0")
+        self.assertEqual(profile["p0.origin_z_m"], "0.0")
+
+        context = self._launch_context_with_defaults(
+            experiment="icra_p0_p4_v2_p5_dev",
+            scenario="icra072_p4_selection_trigger_v1",
+        )
+        with mock.patch.object(
+            sys,
+            "argv",
+            [
+                "test",
+                "experiment:=icra_p0_p4_v2_p5_dev",
+                "scenario:=icra072_p4_selection_trigger_v1",
+            ],
+        ):
+            MODULE._apply_presets(context, REPO)
+        self.assertEqual(context.launch_configurations["p0.resolution_m"], "0.5")
+        self.assertEqual(context.launch_configurations["p0.size_z_m"], "3.5")
+        self.assertEqual(context.launch_configurations["p0.origin_x_m"], "-15.0")
+
     def test_dense_forest_v2_is_online_and_truth_isolated(self):
         name = "icra_dense_forest_four_fork_v2"
         self.assertIn(name, MODULE.SCENARIO_PRESETS)
@@ -445,10 +477,12 @@ class TestPlannerLaunchTest(unittest.TestCase):
             "p4.forward.max_lookahead_m": "8.0",
             "p4.forward.sensing_range_m": "10.0",
             "p4.forward.nominal_query_speed_mps": "1.5",
-            "p4.forward.route_compute_budget_ms": "500.0",
+            "p4.forward.route_compute_budget_ms": "1200.0",
             "p4.forward.compute_budget_ms": "150.0",
+            "p4.execution.successor_prepare_wcet_s": "1.2",
+            "p4.execution.successor_max_parent_execution_s": "2.5",
             "p4.forward.max_channel_searches": "32",
-            "p4.forward.channel_enumeration_budget_ms": "60.0",
+            "p4.forward.channel_enumeration_budget_ms": "250.0",
             "p4.forward.advisory_min_relative_improvement": "0.10",
             "p4.forward.min_creep_progress_m": "0.25",
             "p4.forward.max_limited_prefix_progress_m": "8.0",
@@ -702,7 +736,7 @@ class TestPlannerLaunchTest(unittest.TestCase):
             "legacy_iap_rq320_baseline_v1",
         )
         self.assertEqual(
-            context.launch_configurations["p0.predictor.worker_count"], "6"
+            context.launch_configurations["p0.predictor.worker_count"], "8"
         )
         self.assertEqual(context.launch_configurations["record_bag"], "false")
         self.assertEqual(context.launch_configurations["start_rviz"], "false")

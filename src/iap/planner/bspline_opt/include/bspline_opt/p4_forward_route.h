@@ -20,7 +20,7 @@ namespace ego_planner
 {
 
   inline constexpr char kP4ForwardDecisionSchema[] =
-    "p4_forward_route_decision_v15";
+    "p4_forward_route_decision_v16";
 
   enum class P4ForwardResultStatus
   {
@@ -37,6 +37,9 @@ namespace ego_planner
     double latest_snapshot_reauthorization_budget_s = 0.15;
     double control_switch_margin_s = 0.2;
     double scheduler_guard_s = 0.2;
+    // Long certified parents are rolling execution envelopes, not a reason
+    // to defer the next atomic handoff until their terminal stop.
+    double maximum_parent_execution_before_switch_s = 2.5;
   };
 
   struct P4SuccessorDeadline
@@ -77,6 +80,91 @@ namespace ego_planner
 
   P4SuccessorProgressRequirement computeP4SuccessorProgressRequirement(
     const P4SuccessorProgressInput & input);
+
+  struct P4RollingSuccessorGuide
+  {
+    bool valid = false;
+    std::vector<Eigen::Vector3d> guide;
+    double approved_endpoint_station_m =
+      std::numeric_limits<double>::quiet_NaN();
+    double projection_distance_m =
+      std::numeric_limits<double>::quiet_NaN();
+    double target_station_m = std::numeric_limits<double>::quiet_NaN();
+    std::string reason = "invalid_input";
+  };
+
+  // Produce the immutable, bounded guide used to prepare a rolling child.
+  // The child must cover the parent's approved endpoint and then retain both
+  // its stopping distance and a non-zero progress reserve.  A parent endpoint
+  // that cannot be associated with the frozen guide is rejected rather than
+  // silently preparing a child on another corridor.
+  P4RollingSuccessorGuide p4BoundRollingSuccessorGuide(
+    const std::vector<Eigen::Vector3d> & frozen_guide,
+    const Eigen::Vector3d & parent_approved_endpoint,
+    double stopping_distance_m, double minimum_progress_m,
+    double maximum_projection_distance_m);
+
+  // Preserve the certified physical path up to the parent's real endpoint,
+  // then bridge to the remaining selected route.  This prevents a refined
+  // B-spline endpoint from becoming unmatchable merely because it is not on
+  // the discrete topology centerline.
+  P4RollingSuccessorGuide composeP4RollingSuccessorPath(
+    const std::vector<Eigen::Vector3d> & certified_parent_curve,
+    const std::vector<Eigen::Vector3d> & selected_route,
+    const Eigen::Vector3d & parent_approved_endpoint);
+
+  std::vector<Eigen::Vector3d> selectP4RollingContinuationRoute(
+    const std::vector<Eigen::Vector3d> & candidate_route,
+    const std::vector<Eigen::Vector3d> & parent_continuation_route,
+    bool preparing_rolling_child);
+
+  struct P4ObservationSensorModel
+  {
+    std::string identity;
+    double horizontal_fov_rad = 0.0;
+    double vertical_min_rad = 0.0;
+    double vertical_max_rad = 0.0;
+    double min_range_m = 0.0;
+    double max_range_m = 0.0;
+    double occluder_radius_m = 0.15;
+  };
+
+  struct P4ObservationSegmentInput
+  {
+    Eigen::Vector3d current_position = Eigen::Vector3d::Zero();
+    Eigen::Vector3d current_velocity = Eigen::Vector3d::Zero();
+    Eigen::Vector3d current_acceleration = Eigen::Vector3d::Zero();
+    std::vector<Eigen::Vector3d> common_corridor;
+    Eigen::Vector3d divergence_point = Eigen::Vector3d::Constant(
+        std::numeric_limits<double>::quiet_NaN());
+    std::vector<std::vector<Eigen::Vector3d>> missing_los_by_channel;
+    std::shared_ptr<const std::vector<Eigen::Vector3d>> raw_occluders;
+    P4ObservationSensorModel sensor;
+    double candidate_spacing_m = 0.25;
+    double stopping_reserve_m = 0.0;
+    double maximum_progress_m = 0.0;
+  };
+
+  struct P4ObservationSegmentResult
+  {
+    bool available = false;
+    std::string reason = "OBSERVATION_UNAVAILABLE_SENSOR_GEOMETRY";
+    std::vector<Eigen::Vector3d> guide;
+    std::vector<double> per_channel_normalized_gain;
+    double fair_information_gain = 0.0;
+    double endpoint_station_m = 0.0;
+    // The observation planner never selects a route. The returned guide must
+    // still be converted to and certified as an exact terminal-stop B-spline.
+    bool route_winner_authority = false;
+    bool terminal_stop_required = true;
+  };
+
+  class P4ObservationSegmentPlanner
+  {
+  public:
+    P4ObservationSegmentResult plan(
+      const P4ObservationSegmentInput & input) const;
+  };
 
   enum class P4SuccessorFailure
   {
@@ -149,6 +237,13 @@ namespace ego_planner
     ADVISORY_NON_CERTIFIED,
   };
 
+  enum class P4ExecutableIntent
+  {
+    FINAL_CHANNEL = 0,
+    COMMON_OBSERVATION_SEGMENT,
+    HOLD,
+  };
+
   enum class P4ForwardDeferredMotionMode
   {
     NATIVE_EGO = 0,
@@ -197,6 +292,11 @@ namespace ego_planner
     P4ForwardRefinementStatus status =
       P4ForwardRefinementStatus::INVALID_INPUT;
     std::vector<Eigen::Vector3d> path;
+    // Progress checkpoint for a refinement that exhausted its compute
+    // slice. It is deliberately not a certified output path: callers may
+    // only feed it back to the refiner under the original topology corridor
+    // and a fresh frozen-snapshot check.
+    std::vector<Eigen::Vector3d> resume_guide;
     std::size_t failed_segment_index =
       std::numeric_limits<std::size_t>::max();
     Eigen::Vector3d failure_position = Eigen::Vector3d::Constant(
@@ -319,6 +419,15 @@ namespace ego_planner
   {
     uint64_t stable_channel_id = 0;
     std::vector<Eigen::Vector3d> topology_path;
+    // Geometry evidence is independent of the GNSS epoch.  Keep the last
+    // completely refined path in the stable slot so risk-only invalidation
+    // can re-rank it without rerunning local A*.
+    std::vector<Eigen::Vector3d> refined_path;
+    // Non-authoritative refinement progress. BUDGET_EXHAUSTED preserves
+    // this checkpoint as PARTIAL_COMPARISON; hard failures clear it.
+    std::vector<Eigen::Vector3d> refinement_warm_start;
+    double refined_minimum_signed_margin_m =
+      -std::numeric_limits<double>::infinity();
     std::string corridor_hash;
     uint64_t occupancy_generation = 0;
     uint64_t gnss_epoch_identity = 0;
@@ -330,6 +439,10 @@ namespace ego_planner
       const std::vector<P4ChannelSlot> &previous_slots,
       uint64_t first_new_channel_id, double matching_distance_m);
 
+  bool p4ChannelCorridorIntersectsPoint(
+      const std::vector<Eigen::Vector3d> &corridor,
+      const Eigen::Vector3d &point, double radius_m);
+
   const char * p4ForwardActionName(P4ForwardAction action);
   const char * p4ForwardTriggerReasonName(P4ForwardTriggerReason reason);
   const char * p4ForwardGeometryStateName(P4ForwardGeometryState state);
@@ -337,6 +450,7 @@ namespace ego_planner
   const char * p4ForwardSafetyStateName(P4ForwardSafetyState state);
   const char * p4ForwardSelectionAuthorityName(
     P4ForwardSelectionAuthority authority);
+  const char * p4ExecutableIntentName(P4ExecutableIntent intent);
   const char * p4ForwardDeferredMotionModeName(
     P4ForwardDeferredMotionMode mode);
   const char * p4PlanningDispositionName(P4PlanningDisposition disposition);
@@ -407,6 +521,14 @@ namespace ego_planner
     double maximum_global_exceedance_integral_ratio_s = 0.025;
   };
 
+  // Opaque, immutable diagnostics may follow a risk sample for manager-side
+  // milestone logging. The route worker never interprets the concrete
+  // payload; comparison uses only the scalar fields below.
+  struct P4ForwardRiskDiagnosticDetail
+  {
+    virtual ~P4ForwardRiskDiagnosticDetail() = default;
+  };
+
   struct P4ForwardRiskSample
   {
     bool valid = false;
@@ -418,6 +540,14 @@ namespace ego_planner
     P4ForwardRankingState ranking_state =
       P4ForwardRankingState::INCOMPLETE;
     double safety_ratio = std::numeric_limits < double > ::quiet_NaN();
+    double safety_ratio_lower = std::numeric_limits<double>::infinity();
+    double safety_ratio_upper = std::numeric_limits<double>::infinity();
+    double hpl_lower = std::numeric_limits<double>::infinity();
+    double vpl_lower = std::numeric_limits<double>::infinity();
+    double hpl_upper = std::numeric_limits<double>::infinity();
+    double vpl_upper = std::numeric_limits<double>::infinity();
+    bool pl_lower_available = false;
+    bool pl_upper_available = false;
     double fim_ratio = std::numeric_limits < double > ::quiet_NaN();
     double hpl = std::numeric_limits < double > ::quiet_NaN();
     double vpl = std::numeric_limits < double > ::quiet_NaN();
@@ -469,7 +599,16 @@ namespace ego_planner
     iap::LocalMapSupportStatus support_status =
       iap::LocalMapSupportStatus::FRAME_INVALID;
     uint64_t local_satellite_set_hash = 0;
-    std::vector<iap::GnssRiskSatelliteDiagnostic> gnss_satellites;
+    // Only the coverage totals needed by route comparison cross the async
+    // planner boundary. Per-satellite diagnostics remain owned by the
+    // predictor/manager evidence path and its raw-detail logs.
+    uint64_t gnss_eligible_los_sample_count = 0;
+    uint64_t gnss_unknown_los_sample_count = 0;
+    // Compact observation-planning seam: first missing LOS voxel per
+    // incomplete satellite. Full per-satellite diagnostics remain outside
+    // the route worker.
+    std::vector<Eigen::Vector3d> missing_los_voxel_centers;
+    std::shared_ptr<const P4ForwardRiskDiagnosticDetail> diagnostic_detail;
     // Non-certified evidence. These fields never turn UNKNOWN into SAFE and
     // are used only to compare geometrically valid routes when formal source
     // support is incomplete.
@@ -571,6 +710,7 @@ namespace ego_planner
     uint64_t live_occupancy_generation_at_submit = 0;
     Eigen::Vector3d position = Eigen::Vector3d::Zero();
     Eigen::Vector3d velocity = Eigen::Vector3d::Zero();
+    Eigen::Vector3d acceleration = Eigen::Vector3d::Zero();
     Eigen::Vector3d local_target = Eigen::Vector3d::Zero();
     std::vector < Eigen::Vector3d > nominal_local_reference;
     // Deadline-driven successor preparation first reuses the committed
@@ -587,6 +727,7 @@ namespace ego_planner
     Eigen::Vector3d map_extent = Eigen::Vector3d::Zero();
     std::shared_ptr<const std::vector<Eigen::Vector3d>>
       raw_occupied_voxel_centers;
+    P4ObservationSensorModel observation_sensor_model;
     double map_inflation_m = 0.0;
     double virtual_ceiling_height_m = -1.0;
     double query_time_s = 0.0;
@@ -606,10 +747,30 @@ namespace ego_planner
     // end-to-end compute budget as topology search.
     std::function < P4ForwardRefinementResult(
       const std::vector < Eigen::Vector3d > &, double, double) > refine;
+    std::function < P4ForwardRefinementResult(
+      const std::vector < Eigen::Vector3d > &,
+      const std::vector < Eigen::Vector3d > &, double, double) >
+      refine_with_warm_start;
     std::function<bool()> cancel_requested;
 
     bool valid(std::string * reason = nullptr) const;
   };
+
+  // Apply the immutable rolling-child extent to either preparation path.
+  // A full topology fallback may choose another corridor, but it must search
+  // toward the same fixed child endpoint instead of silently expanding back
+  // to the ordinary long-horizon local target.
+  bool applyP4RollingSuccessorGuide(
+    const P4RollingSuccessorGuide & bounded, bool force_full_search,
+    uint64_t incumbent_channel_id, P4ForwardRequest * request);
+
+  // Once a parent has a fixed rolling-child extent, failure diagnostics must
+  // not make a full topology retry reconstruct a different (usually longer)
+  // extent from mutable decision state.
+  P4RollingSuccessorGuide selectP4RollingSuccessorGuide(
+    const P4RollingSuccessorGuide & newly_bounded,
+    const P4RollingSuccessorGuide & fixed_for_parent,
+    bool force_full_search);
 
   struct P4ForwardDecision
   {
@@ -640,6 +801,9 @@ namespace ego_planner
     P4ForwardSafetyState safety_state = P4ForwardSafetyState::UNKNOWN;
     P4ForwardSelectionAuthority selection_authority =
       P4ForwardSelectionAuthority::NONE;
+    // Executable semantics are authoritative. `reason` remains diagnostic
+    // text and must never decide final-channel versus observation behavior.
+    P4ExecutableIntent executable_intent = P4ExecutableIntent::HOLD;
     bool formal_support = false;
     uint64_t selected_candidate_id = 0;
     uint64_t selected_channel_id = 0;
@@ -662,9 +826,21 @@ namespace ego_planner
       P4ForwardDeferredMotionMode::HOLD;
     std::vector < Eigen::Vector3d > deferred_trajectory;
     double common_prefix_length_m = 0.0;
+    Eigen::Vector3d observation_endpoint = Eigen::Vector3d::Constant(
+      std::numeric_limits<double>::quiet_NaN());
+    Eigen::Vector3d observation_divergence_boundary =
+      Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN());
+    double observation_stopping_reserve_m =
+      std::numeric_limits<double>::quiet_NaN();
+    double observation_predicted_information_gain =
+      std::numeric_limits<double>::quiet_NaN();
     // Archived v1 readers use this field. New v2 production decisions leave
     // it empty and publish deferred_trajectory instead.
     std::vector < Eigen::Vector3d > observe_more_trajectory;
+    // Typed authority for a short, independently certified exit from a state
+    // that is hard-safe but has lost the generation planning reserve.
+    bool local_clearance_recovery = false;
+    double local_clearance_recovery_max_duration_s = 1.0;
     double stopping_distance_m = 0.0;
     double decision_horizon_m = 0.0;
     double certified_free_distance_m = 0.0;
@@ -718,9 +894,20 @@ namespace ego_planner
   std::optional<Eigen::Vector3d> p4SelectedGuideTerminal(
     const P4ForwardDecision & decision);
 
+  // Convert a frozen refinement that lost only the extra planning-clearance
+  // reserve into a finite escape guide. This grants no motion authority: the
+  // resulting OBSERVE_MORE curve still passes the ordinary exact-curve,
+  // braking, collision, GNSS and P5 certification chain.
+  bool configureP4RefinementClearanceRecovery(
+    const Eigen::Vector3d & current_position,
+    const Eigen::Vector3d & current_velocity,
+    double planning_clearance_buffer_m,
+    P4ForwardDecision * decision);
+
   double p4StoppingDistance(double speed_mps, const P4ForwardLimits & limits);
   double p4KinematicStoppingProgress(
     double speed_mps, const P4ForwardLimits & limits);
+  double p4RefinementCorridorRadius(const P4ForwardLimits & limits);
   std::vector<Eigen::Vector3d> p4CommonGeometryPrefix(
     const std::vector<P4ForwardCandidate> & candidates, double resolution);
   bool p4ForwardDecisionMatchesRequest(

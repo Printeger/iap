@@ -6,8 +6,10 @@
 #include <pcl/point_types.h>
 
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace local_sensing
 {
@@ -32,9 +34,24 @@ struct FirstHitLidarStats
   double render_latency_ms = 0.0;
 };
 
+enum class FirstHitLidarBeamOutcome : std::uint8_t
+{
+  INVALID = 0,
+  HIT = 1,
+  NO_RETURN = 2,
+};
+
+struct FirstHitLidarBeam
+{
+  Eigen::Vector3d direction_sensor = Eigen::Vector3d::Zero();
+  FirstHitLidarBeamOutcome outcome = FirstHitLidarBeamOutcome::INVALID;
+  double range_m = 0.0;
+};
+
 struct FirstHitLidarScan
 {
   pcl::PointCloud<pcl::PointXYZ> hits;
+  std::vector<FirstHitLidarBeam> beams;
   FirstHitLidarStats stats;
 };
 

@@ -1,6 +1,7 @@
 #include "path_searching/dyn_a_star.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <limits>
 #include <memory>
@@ -197,19 +198,47 @@ bool AStar::ConvertToIndexAndAdjustStartEndPoints(Vector3d start_pt, Vector3d en
 
     if (checkOccupancy(Index2Coord(start_idx)))
     {
-        for (int step = 0; step < kMaximumEndpointAdjustmentSteps; ++step)
+        const Vector3d original_start_pt = start_pt;
+        const Vector3i original_start_idx = start_idx;
+        const Vector3d toward_end = end_pt - start_pt;
+        // A free exact endpoint can quantize onto a blocked cell centre. In
+        // that case shorten into the already requested segment first. The
+        // historical outward adjustment remains the bounded fallback when
+        // the exact endpoint itself is occupied.
+        if (!checkOccupancy(start_pt) && toward_end.norm() > 1.0e-12)
         {
-            start_pt = (start_pt - end_pt).normalized() * step_size_ + start_pt;
-            if (!Coord2Index(start_pt, start_idx))
+            const Vector3d interior_start =
+                start_pt + toward_end.normalized() * step_size_;
+            Vector3i interior_start_idx;
+            if (Coord2Index(interior_start, interior_start_idx) &&
+                !checkOccupancy(Index2Coord(interior_start_idx)))
             {
-                last_p4_metrics_.adjusted_start = start_pt;
+                start_pt = interior_start;
+                start_idx = interior_start_idx;
+                ++last_p4_metrics_.start_adjustment_steps;
                 last_p4_metrics_.fallback_reason =
-                    "start_point_adjustment_outside_pool";
-                last_p4_metrics_.failure_kind =
-                    P4AStarFailureKind::START_OUTSIDE_POOL;
-                return false;
+                    "start_quantization_shortened_inward";
             }
-            ++last_p4_metrics_.start_adjustment_steps;
+        }
+        if (checkOccupancy(Index2Coord(start_idx)))
+        {
+            start_pt = original_start_pt;
+            start_idx = original_start_idx;
+            for (int step = 0; step < kMaximumEndpointAdjustmentSteps; ++step)
+            {
+                start_pt =
+                    (start_pt - end_pt).normalized() * step_size_ + start_pt;
+                if (!Coord2Index(start_pt, start_idx))
+                {
+                    last_p4_metrics_.adjusted_start = start_pt;
+                    last_p4_metrics_.fallback_reason =
+                        "start_point_adjustment_outside_pool";
+                    last_p4_metrics_.failure_kind =
+                        P4AStarFailureKind::START_OUTSIDE_POOL;
+                    return false;
+                }
+                ++last_p4_metrics_.start_adjustment_steps;
+            }
         }
         last_p4_metrics_.adjusted_start = start_pt;
         if (checkOccupancy(Index2Coord(start_idx)))
@@ -223,19 +252,43 @@ bool AStar::ConvertToIndexAndAdjustStartEndPoints(Vector3d start_pt, Vector3d en
 
     if (checkOccupancy(Index2Coord(end_idx)))
     {
-        for (int step = 0; step < kMaximumEndpointAdjustmentSteps; ++step)
+        const Vector3d original_end_pt = end_pt;
+        const Vector3i original_end_idx = end_idx;
+        const Vector3d toward_start = start_pt - end_pt;
+        if (!checkOccupancy(end_pt) && toward_start.norm() > 1.0e-12)
         {
-            end_pt = (end_pt - start_pt).normalized() * step_size_ + end_pt;
-            if (!Coord2Index(end_pt, end_idx))
+            const Vector3d interior_end =
+                end_pt + toward_start.normalized() * step_size_;
+            Vector3i interior_end_idx;
+            if (Coord2Index(interior_end, interior_end_idx) &&
+                !checkOccupancy(Index2Coord(interior_end_idx)))
             {
-                last_p4_metrics_.adjusted_end = end_pt;
+                end_pt = interior_end;
+                end_idx = interior_end_idx;
+                ++last_p4_metrics_.end_adjustment_steps;
                 last_p4_metrics_.fallback_reason =
-                    "end_point_adjustment_outside_pool";
-                last_p4_metrics_.failure_kind =
-                    P4AStarFailureKind::END_OUTSIDE_POOL;
-                return false;
+                    "end_quantization_shortened_inward";
             }
-            ++last_p4_metrics_.end_adjustment_steps;
+        }
+        if (checkOccupancy(Index2Coord(end_idx)))
+        {
+            end_pt = original_end_pt;
+            end_idx = original_end_idx;
+            for (int step = 0; step < kMaximumEndpointAdjustmentSteps; ++step)
+            {
+                end_pt =
+                    (end_pt - start_pt).normalized() * step_size_ + end_pt;
+                if (!Coord2Index(end_pt, end_idx))
+                {
+                    last_p4_metrics_.adjusted_end = end_pt;
+                    last_p4_metrics_.fallback_reason =
+                        "end_point_adjustment_outside_pool";
+                    last_p4_metrics_.failure_kind =
+                        P4AStarFailureKind::END_OUTSIDE_POOL;
+                    return false;
+                }
+                ++last_p4_metrics_.end_adjustment_steps;
+            }
         }
         last_p4_metrics_.adjusted_end = end_pt;
         if (checkOccupancy(Index2Coord(end_idx)))
@@ -320,13 +373,18 @@ bool AStar::astarSearchProviderBottleneckV2(
         }
     };
 
-    const rclcpp::Time started = rclcpp::Clock().now();
+    const auto started = std::chrono::steady_clock::now();
+    const auto elapsed_seconds = [&]() {
+        return std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - started).count();
+    };
     last_p4_metrics_ = P4AStarMetrics{};
     last_p4_metrics_.risk_enabled = true;
     last_p4_metrics_.snapshot_generation_id = risk_snapshot_->generation_id();
     last_p4_metrics_.fallback_reason = "provider_bottleneck_v2_search";
     v2_path_.clear();
     gridPath_.clear();
+    last_reachable_frontier_path_.clear();
     step_size_ = step_size;
     inv_step_size_ = 1.0 / step_size;
     center_ = (start_pt + end_pt) / 2.0;
@@ -363,10 +421,9 @@ bool AStar::astarSearchProviderBottleneckV2(
 
     while (!open.empty())
     {
-        if ((rclcpp::Clock().now() - started).seconds() > 0.2)
+        if (elapsed_seconds() > search_time_limit_s_)
         {
-            last_p4_metrics_.elapsed_ms =
-                (rclcpp::Clock().now() - started).seconds() * 1000.0;
+            last_p4_metrics_.elapsed_ms = elapsed_seconds() * 1000.0;
             last_p4_metrics_.fallback_reason = "timeout";
             last_p4_metrics_.failure_kind = P4AStarFailureKind::TIMEOUT;
             return false;
@@ -387,8 +444,7 @@ bool AStar::astarSearchProviderBottleneckV2(
             last_p4_metrics_.provider_integral = current->cost.integral;
             last_p4_metrics_.risk_path_length = current->cost.path_length;
             last_p4_metrics_.time_state_count = static_cast<int>(best.size());
-            last_p4_metrics_.elapsed_ms =
-                (rclcpp::Clock().now() - started).seconds() * 1000.0;
+            last_p4_metrics_.elapsed_ms = elapsed_seconds() * 1000.0;
             last_p4_metrics_.fallback_reason = "provider_bottleneck_v2";
             return true;
         }
@@ -398,6 +454,9 @@ bool AStar::astarSearchProviderBottleneckV2(
                 for (int dz = -1; dz <= 1; ++dz)
                 {
                     if (dx == 0 && dy == 0 && dz == 0) continue;
+                    if (axis_aligned_vertical_motion_ && dz != 0 &&
+                        (dx != 0 || dy != 0))
+                        continue;
                     const Vector3i next_index =
                         current->index + Vector3i(dx, dy, dz);
                     if (next_index.x() < 1 || next_index.x() >= POOL_SIZE_.x() - 1 ||
@@ -451,8 +510,7 @@ bool AStar::astarSearchProviderBottleneckV2(
                     open.push(next);
                 }
     }
-    last_p4_metrics_.elapsed_ms =
-        (rclcpp::Clock().now() - started).seconds() * 1000.0;
+    last_p4_metrics_.elapsed_ms = elapsed_seconds() * 1000.0;
     last_p4_metrics_.time_state_count = static_cast<int>(best.size());
     last_p4_metrics_.fallback_reason =
         last_p4_metrics_.provider_incomplete_reject_count > 0
@@ -534,9 +592,14 @@ double AStar::edgeCostWithRisk(const Vector3d &current_pos, const Vector3d &neig
 
 bool AStar::astarSearchImpl(const double step_size, Vector3d start_pt, Vector3d end_pt, bool use_risk)
 {
-    rclcpp::Time time_1 = rclcpp::Clock().now();
+    const auto time_1 = std::chrono::steady_clock::now();
+    const auto elapsed_seconds = [&]() {
+        return std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - time_1).count();
+    };
     ++rounds_;
     last_p4_metrics_ = P4AStarMetrics{};
+    last_reachable_frontier_path_.clear();
     last_p4_metrics_.risk_enabled = use_risk;
     last_p4_metrics_.snapshot_generation_id = (use_risk && risk_snapshot_) ? risk_snapshot_->generation_id() : 0;
     last_p4_metrics_.fallback_reason = use_risk ? "risk_search" : "original_search";
@@ -574,6 +637,7 @@ bool AStar::astarSearchImpl(const double step_size, Vector3d start_pt, Vector3d 
 
     GridNodePtr neighborPtr = NULL;
     GridNodePtr current = NULL;
+    GridNodePtr nearest_frontier = startPtr;
 
     startPtr->index = start_idx;
     startPtr->rounds = rounds_;
@@ -604,6 +668,7 @@ bool AStar::astarSearchImpl(const double step_size, Vector3d start_pt, Vector3d 
                 frontier_distance;
             last_p4_metrics_.nearest_reachable_frontier =
                 Index2Coord(current->index);
+            nearest_frontier = current;
         }
 
         // if ( num_iter < 10000 )
@@ -616,8 +681,7 @@ bool AStar::astarSearchImpl(const double step_size, Vector3d start_pt, Vector3d 
             // if((time_2 - time_1).toSec() > 0.1)
             //     ROS_WARN("Time consume in A star path finding is %f", (time_2 - time_1).toSec() );
             gridPath_ = retrievePath(current);
-            rclcpp::Time time_2 = rclcpp::Clock().now();
-            last_p4_metrics_.elapsed_ms = (time_2 - time_1).seconds() * 1000.0;
+            last_p4_metrics_.elapsed_ms = elapsed_seconds() * 1000.0;
             if (p4_valid_cost_count_ > 0)
                 last_p4_metrics_.path_mean_cost = p4_valid_cost_sum_ / static_cast<double>(p4_valid_cost_count_);
             return true;
@@ -629,6 +693,9 @@ bool AStar::astarSearchImpl(const double step_size, Vector3d start_pt, Vector3d 
                 for (int dz = -1; dz <= 1; dz++)
                 {
                     if (dx == 0 && dy == 0 && dz == 0)
+                        continue;
+                    if (axis_aligned_vertical_motion_ && dz != 0 &&
+                        (dx != 0 || dy != 0))
                         continue;
 
                     Vector3i neighborIdx;
@@ -689,24 +756,35 @@ bool AStar::astarSearchImpl(const double step_size, Vector3d start_pt, Vector3d 
                         neighborPtr->fScore = tentative_gScore + getHeu(neighborPtr, endPtr);
                     }
                 }
-        rclcpp::Time time_2 = rclcpp::Clock().now();
-        if ((time_2 - time_1).seconds() > 0.2)
+        if (elapsed_seconds() > search_time_limit_s_)
         {
-            RCLCPP_WARN(rclcpp::get_logger("AstarSearch"), "Failed in A star path searching !!! 0.2 seconds time limit exceeded.");
-            last_p4_metrics_.elapsed_ms = (time_2 - time_1).seconds() * 1000.0;
+            RCLCPP_WARN(
+                rclcpp::get_logger("AstarSearch"),
+                "Failed in A star path searching: %.3f seconds time limit exceeded.",
+                search_time_limit_s_);
+            last_p4_metrics_.elapsed_ms = elapsed_seconds() * 1000.0;
             last_p4_metrics_.fallback_reason = "timeout";
             last_p4_metrics_.failure_kind = P4AStarFailureKind::TIMEOUT;
+            if (nearest_frontier)
+            {
+                const auto frontier_nodes = retrievePath(nearest_frontier);
+                last_reachable_frontier_path_.reserve(frontier_nodes.size());
+                for (const auto *node : frontier_nodes)
+                    last_reachable_frontier_path_.push_back(
+                        Index2Coord(node->index));
+                std::reverse(last_reachable_frontier_path_.begin(),
+                             last_reachable_frontier_path_.end());
+            }
             return false;
         }
     }
 
-    rclcpp::Time time_2 = rclcpp::Clock().now();
-
-    if ((time_2 - time_1).seconds() > 0.1)
+    const double elapsed_s = elapsed_seconds();
+    if (elapsed_s > 0.1)
         RCLCPP_WARN(rclcpp::get_logger("AstarSearch"),
-                    "Time consume in A star path finding is %.3fs, iter=%d", (time_2 - time_1).seconds(), num_iter);
+                    "Time consume in A star path finding is %.3fs, iter=%d", elapsed_s, num_iter);
 
-    last_p4_metrics_.elapsed_ms = (time_2 - time_1).seconds() * 1000.0;
+    last_p4_metrics_.elapsed_ms = elapsed_s * 1000.0;
     last_p4_metrics_.fallback_reason = "no_path";
     last_p4_metrics_.failure_kind = P4AStarFailureKind::NO_PATH;
     return false;

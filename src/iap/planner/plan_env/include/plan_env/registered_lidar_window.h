@@ -2,11 +2,12 @@
 
 #include <Eigen/Core>
 #include <Eigen/Geometry>
+#include <plan_env/local_evidence_snapshot.h>
 
 #include <cstdint>
 #include <array>
 #include <initializer_list>
-#include <map>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
@@ -20,6 +21,18 @@ enum class RegisteredVoxelState : std::uint8_t {
   OCCUPIED = 2,
 };
 
+enum class RegisteredLidarBeamOutcome : std::uint8_t {
+  INVALID = 0,
+  HIT = 1,
+  NO_RETURN = 2,
+};
+
+struct RegisteredLidarBeamData {
+  Eigen::Vector3d direction_lidar = Eigen::Vector3d::Zero();
+  RegisteredLidarBeamOutcome outcome = RegisteredLidarBeamOutcome::INVALID;
+  double range_m = std::numeric_limits<double>::quiet_NaN();
+};
+
 struct RegisteredLidarFrameData {
   std::int64_t frame_id = -1;
   double stamp_s = 0.0;
@@ -27,6 +40,17 @@ struct RegisteredLidarFrameData {
   std::uint64_t sensor_receipt_steady_ns = 0;
   Eigen::Isometry3d T_map_lidar = Eigen::Isometry3d::Identity();
   std::vector<Eigen::Vector3d> hits_lidar;
+  std::string sensor_model_id;
+  std::uint32_t horizontal_samples = 0;
+  std::uint32_t vertical_samples = 0;
+  double horizontal_fov_rad = std::numeric_limits<double>::quiet_NaN();
+  double vertical_min_rad = std::numeric_limits<double>::quiet_NaN();
+  double vertical_max_rad = std::numeric_limits<double>::quiet_NaN();
+  double min_range_m = std::numeric_limits<double>::quiet_NaN();
+  double max_range_m = std::numeric_limits<double>::quiet_NaN();
+  bool beam_evidence_complete = false;
+  std::string beam_content_hash;
+  std::vector<RegisteredLidarBeamData> beams;
   std::string frame_contract_id;
   bool source_is_map_reference = false;
   bool source_health_valid = false;
@@ -129,9 +153,21 @@ class RegisteredLidarWindow {
   currentOccupiedVoxelCenters() const;
   std::shared_ptr<const std::vector<RegisteredLidarObstacleSource>>
   activeObstacleSources() const;
+  std::shared_ptr<const LocalEvidenceSnapshot> captureLocalEvidenceSnapshot(
+      std::uint64_t occupancy_generation) const;
 
  private:
   using EnvironmentVoxelKey = std::array<int, 3>;
+  struct EnvironmentVoxelKeyHash {
+    std::size_t operator()(const EnvironmentVoxelKey& key) const {
+      std::size_t seed = 1469598103934665603ULL;
+      for (const int value : key) {
+        seed ^= std::hash<int>{}(value);
+        seed *= 1099511628211ULL;
+      }
+      return seed;
+    }
+  };
 
   struct FrameContribution {
     RegisteredLidarFrameData source;
@@ -171,7 +207,9 @@ class RegisteredLidarWindow {
   std::vector<std::uint32_t> active_free_count_;
   std::vector<std::uint8_t> current_hit_;
   std::vector<std::uint8_t> current_free_;
-  std::map<EnvironmentVoxelKey, std::uint32_t> environment_voxel_ref_count_;
+  std::unordered_map<EnvironmentVoxelKey, std::uint32_t,
+                     EnvironmentVoxelKeyHash>
+      environment_voxel_ref_count_;
   std::shared_ptr<const std::vector<Eigen::Vector3d>>
       environment_occupied_voxel_centers_ =
           std::make_shared<const std::vector<Eigen::Vector3d>>();

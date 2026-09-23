@@ -3,8 +3,11 @@
 // existing CloudDeskewing implementation, but adds an IAP-owned ordered delta
 // protocol; it does not copy or alter GLIM's registration pipeline.
 #include <iap/common/cloud_deskewing.hpp>
+#include <iap/local_map/beam_evidence_binding.hpp>
+#include <iap/local_map/registered_hit_wire_filter.hpp>
 #include <iap/msg/active_lidar_window_delta.hpp>
 #include <iap/msg/integrity_report.hpp>
+#include <iap/msg/lidar_beam_evidence.hpp>
 #include <iap/msg/registered_lidar_frame.hpp>
 #include <iap/odometry/callbacks.hpp>
 #include <iap/odometry/estimation_frame.hpp>
@@ -29,9 +32,11 @@
 #include <cstdint>
 #include <deque>
 #include <limits>
+#include <iomanip>
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -128,6 +133,9 @@ class PlannerLocalMapExtension final : public glim::ExtensionModuleROS2 {
     integrity_topic_ = config.param_nested<std::string>(
         {"glim_ros", "planner_local_map"}, "integrity_topic",
         "/iap/integrity");
+    beam_evidence_topic_ = config.param_nested<std::string>(
+        {"glim_ros", "planner_local_map"}, "beam_evidence_topic",
+        "/iap/simulator/lidar_beam_evidence");
     current_hits_map_topic_ = config.param_nested<std::string>(
         {"glim_ros", "planner_local_map"}, "current_hits_map_topic",
         "/iap/local_map/current_hits_map");
@@ -145,6 +153,26 @@ class PlannerLocalMapExtension final : public glim::ExtensionModuleROS2 {
         0.1, 20.0);
     max_active_keyframes_ = std::max<std::size_t>(1, config.param_nested<int>(
         {"glim_ros", "planner_local_map"}, "max_active_keyframes", 15));
+    planning_lattice_.resolution_m = config.param_nested<double>(
+        {"glim_ros", "planner_local_map"},
+        "planning_lattice_resolution_m", -1.0);
+    const auto planning_lattice_origin =
+        config.param_nested<std::vector<double>>(
+            {"glim_ros", "planner_local_map"},
+            "planning_lattice_origin_m", {});
+    const auto planning_lattice_extent =
+        config.param_nested<std::vector<double>>(
+            {"glim_ros", "planner_local_map"},
+            "planning_lattice_extent_m", {});
+    if (planning_lattice_origin.size() == 3U &&
+        planning_lattice_extent.size() == 3U) {
+      planning_lattice_.origin_m = Eigen::Vector3d(
+          planning_lattice_origin[0], planning_lattice_origin[1],
+          planning_lattice_origin[2]);
+      planning_lattice_.extent_m = Eigen::Vector3d(
+          planning_lattice_extent[0], planning_lattice_extent[1],
+          planning_lattice_extent[2]);
+    }
     const auto static_translation = config.param_nested<std::vector<double>>(
         {"glim_ros", "planner_local_map"}, "static_planner_translation_m",
         std::vector<double>{0.0, 0.0, 0.0});
@@ -159,6 +187,11 @@ class PlannerLocalMapExtension final : public glim::ExtensionModuleROS2 {
     if (frame_contract_id_.empty()) {
       throw std::runtime_error(
           "planner_local_map.frame_contract_id must not be empty");
+    }
+    if (!planning_lattice_.valid()) {
+      throw std::runtime_error(
+          "planner_local_map planning lattice must have a positive finite "
+          "resolution and three finite positive extents");
     }
 
     update_new_frame_callback_id_ =
@@ -205,6 +238,22 @@ class PlannerLocalMapExtension final : public glim::ExtensionModuleROS2 {
             [this](const iap::msg::IntegrityReport::ConstSharedPtr report) {
               rememberIntegrity(report);
             });
+    beam_evidence_subscription_ =
+        node.create_subscription<iap::msg::LidarBeamEvidence>(
+            beam_evidence_topic_, rclcpp::SensorDataQoS().keep_last(8),
+            [this](const iap::msg::LidarBeamEvidence::ConstSharedPtr evidence) {
+              if (!evidence ||
+                  !iap::local_map::validBeamEvidenceMessage(*evidence)) {
+                invalid_beam_evidence_count_.fetch_add(
+                    1U, std::memory_order_relaxed);
+                return;
+              }
+              std::lock_guard<std::mutex> lock(beam_evidence_mutex_);
+              beam_evidence_history_.push_back(*evidence);
+              while (beam_evidence_history_.size() > 64U) {
+                beam_evidence_history_.pop_front();
+              }
+            });
     delta_publisher_ =
         node.create_publisher<iap::msg::ActiveLidarWindowDelta>(
             delta_topic_, rclcpp::QoS(128).reliable());
@@ -221,9 +270,10 @@ class PlannerLocalMapExtension final : public glim::ExtensionModuleROS2 {
               current_hits_map_topic_, rclcpp::SensorDataQoS().keep_last(1));
     }
     logger_->info(
-        "[planner_local_map] current={} current_hits_map={} delta={} recovery={} integrity={} rate={:.1f}Hz contract={}",
+        "[planner_local_map] current={} current_hits_map={} delta={} recovery={} integrity={} rate={:.1f}Hz wire_voxel_m={:.3f} contract={}",
         current_topic_, current_hits_map_topic_, delta_topic_,
         recovery_service_, integrity_topic_, window_rate_hz_,
+        planning_lattice_.resolution_m,
         frame_contract_id_);
     condition_.notify_all();
     return {};
@@ -531,6 +581,32 @@ class PlannerLocalMapExtension final : public glim::ExtensionModuleROS2 {
     message.sensor_receipt_steady_ns = frame.sensor_receipt_steady_ns;
     message.t_map_lidar = toMessagePose(frame.T_map_lidar);
     message.frame_contract_id = frame_contract_id_;
+    {
+      std::lock_guard<std::mutex> lock(beam_evidence_mutex_);
+      const auto evidence = std::find_if(
+          beam_evidence_history_.rbegin(), beam_evidence_history_.rend(),
+          [&frame](const auto& candidate) {
+            return iap::local_map::beamEvidenceMatchesRegisteredScan(
+                candidate, frame.stamp_s, frame.scan_end_stamp_s);
+          });
+      if (evidence != beam_evidence_history_.rend()) {
+        message.sensor_model_id = evidence->sensor_model_id;
+        message.horizontal_samples = evidence->horizontal_samples;
+        message.vertical_samples = evidence->vertical_samples;
+        message.horizontal_fov_rad = evidence->horizontal_fov_rad;
+        message.vertical_min_rad = evidence->vertical_min_rad;
+        message.vertical_max_rad = evidence->vertical_max_rad;
+        message.min_range_m = evidence->min_range_m;
+        message.max_range_m = evidence->max_range_m;
+        message.beam_evidence_complete = evidence->complete;
+        message.beam_outcomes = evidence->outcomes;
+        message.beam_direction_x = evidence->direction_x;
+        message.beam_direction_y = evidence->direction_y;
+        message.beam_direction_z = evidence->direction_z;
+        message.beam_ranges_m = evidence->ranges_m;
+        message.beam_content_hash = evidence->content_hash;
+      }
+    }
     message.source_is_map_reference =
         frame.id == reference_frame_id_.load(std::memory_order_acquire);
     if (message.source_is_map_reference) {
@@ -567,7 +643,9 @@ class PlannerLocalMapExtension final : public glim::ExtensionModuleROS2 {
       message.source_lidar_pl_u = health->lidar_pl_u;
     }
 
-    const auto points = deskew(frame);
+    const auto deskewed = deskew(frame);
+    const auto points = filterRegisteredHitsForWire(
+        deskewed, frame.T_map_lidar, planning_lattice_);
     if (deskewed_points) {
       *deskewed_points = points;
     }
@@ -857,6 +935,7 @@ class PlannerLocalMapExtension final : public glim::ExtensionModuleROS2 {
   std::string delta_topic_;
   std::string recovery_service_;
   std::string integrity_topic_;
+  std::string beam_evidence_topic_;
   std::string current_hits_map_topic_;
   bool publish_current_hits_map_ = false;
   std::string planner_frame_id_;
@@ -870,6 +949,7 @@ class PlannerLocalMapExtension final : public glim::ExtensionModuleROS2 {
   double window_rate_hz_ = 2.0;
   std::size_t max_active_keyframes_ = 15U;
   Eigen::Isometry3d T_planner_glim_ = Eigen::Isometry3d::Identity();
+  PlanningLatticeWireContract planning_lattice_;
 
   std::atomic<bool> stop_{false};
   std::thread worker_;
@@ -907,6 +987,11 @@ class PlannerLocalMapExtension final : public glim::ExtensionModuleROS2 {
   std::deque<iap::msg::IntegrityReport> integrity_history_;
   rclcpp::Subscription<iap::msg::IntegrityReport>::SharedPtr
       integrity_subscription_;
+  mutable std::mutex beam_evidence_mutex_;
+  std::deque<iap::msg::LidarBeamEvidence> beam_evidence_history_;
+  std::atomic<std::uint64_t> invalid_beam_evidence_count_{0};
+  rclcpp::Subscription<iap::msg::LidarBeamEvidence>::SharedPtr
+      beam_evidence_subscription_;
   rclcpp::Publisher<iap::msg::RegisteredLidarFrame>::SharedPtr
       current_publisher_;
   rclcpp::Publisher<iap::msg::ActiveLidarWindowDelta>::SharedPtr

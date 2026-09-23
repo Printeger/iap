@@ -1,0 +1,21 @@
+std_msgs/Header header
+float64 scan_end_stamp_s
+string sensor_model_id
+uint32 horizontal_samples
+uint32 vertical_samples
+float64 horizontal_fov_rad
+float64 vertical_min_rad
+float64 vertical_max_rad
+float64 min_range_m
+float64 max_range_m
+bool complete
+
+uint8 INVALID=0
+uint8 HIT=1
+uint8 NO_RETURN=2
+uint8[] outcomes
+float32[] direction_x
+float32[] direction_y
+float32[] direction_z
+float32[] ranges_m
+string content_hash

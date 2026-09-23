@@ -70,4 +70,18 @@ TEST(PredictorRiskConversion, UsesOkAndDoesNotInferStaleWithoutFallback) {
   EXPECT_DOUBLE_EQ(result.vpl_pred, -1.0);
 }
 
+TEST(PredictorRiskConversion,
+     ReusesPositionCanonicalSatelliteIdentityAcrossHorizons) {
+  iap::PredictorQueryResult prediction;
+  prediction.gnss.used_sat_ids = {9, 2, 9};
+  const std::vector<int> canonical_ids{2, 9};
+  constexpr std::uint64_t canonical_hash = 123456u;
+
+  const auto result = iap::makeRiskPredictionResult(
+      std::move(prediction), 10.0, 20.0, &canonical_ids, canonical_hash);
+
+  EXPECT_EQ(result.gnss_used_satellite_ids, canonical_ids);
+  EXPECT_EQ(result.gnss_local_satellite_set_hash, canonical_hash);
+}
+
 }  // namespace

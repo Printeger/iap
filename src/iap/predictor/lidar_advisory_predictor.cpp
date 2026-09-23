@@ -46,8 +46,14 @@ void LidarAdvisoryPredictor::rebuild_lidar_fim_index() {
     primitive_index_.reset();
     return;
   }
+  // A radius-sized cell makes a spherical query inspect roughly four times
+  // its useful volume. Half-radius cells reduce exact distance tests for the
+  // dense forest primitive set while queryRadius still applies the unchanged
+  // Euclidean cutoff, so the scientific result is bit-for-bit equivalent.
+  const double index_cell_size_m = std::max(
+      0.25, 0.5 * params_.fim_params.fim_radius_m);
   primitive_index_ = LidarFimPrimitiveIndex::build(
-      primitives_, params_.fim_params.fim_radius_m);
+      primitives_, index_cell_size_m);
 }
 
 LidarAdvisoryResult LidarAdvisoryPredictor::query(

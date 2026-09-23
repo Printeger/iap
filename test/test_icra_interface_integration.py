@@ -125,6 +125,152 @@ class TestStageContracts(unittest.TestCase):
             "limited-prefix", MODULE.FOREST_SCENARIO)
         self.assertEqual(args["p4.debug_generation_probe_enable"], "true")
 
+    def test_continuous_flight_stage_has_180_second_budget(self):
+        self.assertIn("continuous-flight", MODULE.STAGE_CHOICES)
+        self.assertNotIn("continuous-flight", MODULE.STAGE_ORDER)
+        self.assertEqual(
+            MODULE.stage_duration_s("continuous-flight"), 180.0)
+
+    def test_continuous_flight_uses_command_controller_and_odom_evidence(self):
+        records = []
+        identities = [(7, trajectory, 1_000_000_000 * trajectory,
+                       f"curve-{trajectory}")
+                      for trajectory in (10, 11, 12)]
+        for execution, trajectory, start_ns, curve_hash in identities:
+            common = {
+                "execution_instance_id": execution,
+                "trajectory_id": trajectory,
+                "start_time_ns": start_ns,
+                "curve_hash": curve_hash,
+            }
+            records.extend([
+                {"kind": "normal_bspline", "payload": common},
+                {"kind": "trajectory_status", "payload": {
+                    **common, "state": "ACTIVATED"}},
+                {"kind": "poscmd", "payload": {
+                    **common, "position_xyz": [0.0, 0.0, 1.5]}},
+                {"kind": "controller_trace", "payload": {
+                    **common, "position_xyz": [0.0, 0.0, 1.5],
+                    "feedback_position_xyz": [0.05, 0.0, 1.5],
+                    "saturated": False}},
+            ])
+        records.extend([
+            {"kind": "iap_odom", "payload": {
+                "stamp_s": 1.0, "position_m": [-18.0, 0.0, 1.5],
+                "velocity_mps": [1.0, 0.0, 0.0]}},
+            {"kind": "iap_odom", "payload": {
+                "stamp_s": 10.0, "position_m": [0.0, 0.0, 1.5],
+                "velocity_mps": [1.0, 0.0, 0.0]}},
+            {"kind": "iap_odom", "payload": {
+                "stamp_s": 20.0, "position_m": [18.0, 0.0, 1.5],
+                "velocity_mps": [0.0, 0.0, 0.0]}},
+        ])
+
+        summary = MODULE.analyze_continuous_flight(records)
+
+        self.assertEqual(summary["result"], "PASS")
+        self.assertEqual(summary["successor_switch_count"], 2)
+        self.assertAlmostEqual(summary["maximum_tracking_error_m"], 0.05)
+
+    def test_continuous_flight_allows_unbound_hover_before_first_activation(self):
+        records = [{
+            "kind": "poscmd", "receive_steady_s": 0.5,
+            "payload": {
+                "execution_instance_id": 0, "trajectory_id": 0,
+                "start_time_ns": 0, "curve_hash": "",
+                "position_xyz": [-18.0, 0.0, 1.5],
+            },
+        }, {
+            "kind": "controller_trace", "receive_steady_s": 0.6,
+            "payload": {
+                "execution_instance_id": 0, "trajectory_id": 0,
+                "start_time_ns": 0, "curve_hash": "",
+                "position_xyz": [-18.0, 0.0, 1.5],
+                "feedback_position_xyz": [-18.0, 0.0, 1.5],
+                "saturated": False,
+            },
+        }]
+        for index, trajectory in enumerate((10, 11, 12)):
+            common = {
+                "execution_instance_id": 7,
+                "trajectory_id": trajectory,
+                "start_time_ns": 1_000_000_000 * trajectory,
+                "curve_hash": f"curve-{trajectory}",
+            }
+            stamp = 1.0 + index
+            records.extend([
+                {"kind": "normal_bspline", "receive_steady_s": stamp - .1,
+                 "payload": common},
+                {"kind": "trajectory_status", "receive_steady_s": stamp,
+                 "payload": {**common, "state": "ACTIVATED"}},
+                {"kind": "poscmd", "receive_steady_s": stamp + .01,
+                 "payload": {**common,
+                             "position_xyz": [float(index), 0.0, 1.5]}},
+                {"kind": "controller_trace", "receive_steady_s": stamp + .02,
+                 "payload": {
+                     **common,
+                     "position_xyz": [float(index), 0.0, 1.5],
+                     "feedback_position_xyz": [float(index), 0.0, 1.5],
+                     "saturated": False,
+                 }},
+            ])
+            if index == 0:
+                for receive_s in (stamp + .005, stamp + .03):
+                    records.append({
+                        "kind": "controller_trace",
+                        "receive_steady_s": receive_s,
+                        "payload": {
+                            "execution_instance_id": 0, "trajectory_id": 0,
+                            "start_time_ns": 0, "curve_hash": "",
+                            "position_xyz": [-18.0, 0.0, 1.5],
+                            "feedback_position_xyz": [-18.0, 0.0, 1.5],
+                            "saturated": False,
+                        },
+                    })
+        records.extend([
+            {"kind": "iap_odom", "payload": {
+                "stamp_s": 1.0, "position_m": [-18.0, 0.0, 1.5],
+                "velocity_mps": [1.0, 0.0, 0.0]}},
+            {"kind": "iap_odom", "payload": {
+                "stamp_s": 2.0, "position_m": [0.0, 0.0, 1.5],
+                "velocity_mps": [1.0, 0.0, 0.0]}},
+            {"kind": "iap_odom", "payload": {
+                "stamp_s": 3.0, "position_m": [18.0, 0.0, 1.5],
+                "velocity_mps": [0.0, 0.0, 0.0]}},
+        ])
+
+        summary = MODULE.analyze_continuous_flight(records)
+
+        self.assertEqual(summary["result"], "PASS")
+        self.assertEqual(summary["startup_hover_command_count"], 1)
+        self.assertEqual(summary["startup_hover_trace_count"], 3)
+
+        records.append({
+            "kind": "poscmd", "receive_steady_s": 4.0,
+            "payload": {
+                "execution_instance_id": 0, "trajectory_id": 0,
+                "start_time_ns": 0, "curve_hash": "",
+                "position_xyz": [18.0, 0.0, 1.5],
+            },
+        })
+        failed = MODULE.analyze_continuous_flight(records)
+        self.assertIn("position_command_identity_incomplete",
+                      failed["failures"])
+
+    def test_continuous_stage_process_result_ignores_launch_exit(self):
+        failures = MODULE.run_process_failures(
+            "continuous-flight", early_exit=True, launch_exit_code=-9,
+            launch_group_cleared=True, capture_group_cleared=True,
+            graph_failures=[])
+        self.assertEqual(failures, [])
+
+        failures = MODULE.run_process_failures(
+            "full", early_exit=True, launch_exit_code=-9,
+            launch_group_cleared=True, capture_group_cleared=True,
+            graph_failures=[])
+        self.assertEqual(
+            failures, ["launch_exited_early", "launch_exit_nonzero"])
+
     def test_process_group_resource_stats_reports_peak_and_cpu_cores(self):
         stats = MODULE.process_group_resource_stats([
             {"elapsed_s": 0.0, "process_count": 2,
@@ -313,6 +459,10 @@ class TestStageContracts(unittest.TestCase):
                          "icra072_p4_selection_trigger_v1")
         default_args = MODULE.stage_launch_args("full", MODULE.DEFAULT_SCENARIO)
         self.assertEqual(default_args["scenario"], MODULE.DEFAULT_SCENARIO)
+
+        mirror_args = MODULE.stage_launch_args(
+            "p4", MODULE.MIRROR_SCENARIO)
+        self.assertEqual(mirror_args["scenario"], MODULE.MIRROR_SCENARIO)
 
         forest_args = MODULE.stage_launch_args(
             "full", MODULE.FOREST_SCENARIO, forest_variant="risk")

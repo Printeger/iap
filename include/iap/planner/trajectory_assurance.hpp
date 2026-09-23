@@ -192,6 +192,16 @@ struct LocalMotionCurve {
   std::vector<LocalMotionSample> samples;
 };
 
+// A narrowly scoped certificate for leaving a state that is still inside the
+// hard collision envelope but has lost the generation-only planning reserve.
+// It is never enabled for ordinary nominal trajectories.  The nominal curve
+// must regain the full reserve within the bounded transition; braking curves
+// anchored during that transition remain subject to the hard envelope.
+struct LocalMotionInitialClearanceRecovery {
+  bool enabled = false;
+  double maximum_transition_duration_s = 0.75;
+};
+
 struct LocalMotionAssurancePolicy {
   double vehicle_radius_m = 0.35;
   double safety_margin_m = 0.20;
@@ -310,6 +320,11 @@ struct LocalMotionAssuranceResult {
   double surface_error_bound_m = std::numeric_limits<double>::quiet_NaN();
   std::string surface_error_calibration_id;
   double planning_buffer_m = 0.0;
+  bool initial_clearance_recovery = false;
+  bool initial_clearance_recovery_complete = false;
+  double initial_clearance_recovery_time_s =
+      std::numeric_limits<double>::quiet_NaN();
+  double minimum_hard_margin_m = std::numeric_limits<double>::quiet_NaN();
   std::size_t checked_sample_count = 0;
   LocalMotionSampleResult first_failure;
   std::string evidence_identity;
@@ -324,7 +339,8 @@ class LocalMotionAssurance {
   LocalMotionAssuranceResult evaluate(
       const LocalMotionEvidence& evidence,
       const std::vector<LocalMotionCurve>& curves,
-      double planning_buffer_m = 0.0) const;
+      double planning_buffer_m = 0.0,
+      LocalMotionInitialClearanceRecovery initial_recovery = {}) const;
 
   const LocalMotionAssurancePolicy& policy() const { return policy_; }
 
@@ -343,6 +359,7 @@ struct TrajectoryAssuranceRequest {
   // Generation-time reserve. Runtime rechecks leave this at zero and retain
   // the unchanged hard authorization boundary signed_margin > 0.
   double local_planning_buffer_m = 0.0;
+  LocalMotionInitialClearanceRecovery local_initial_clearance_recovery;
   bool certified_braking_available = false;
   double mission_progress_m = 0.0;
   double lidar_observability_improvement = 0.0;

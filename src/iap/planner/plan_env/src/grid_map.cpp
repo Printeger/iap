@@ -102,6 +102,41 @@ bool registeredFrameFromMessage(
   frame->sensor_receipt_steady_ns = message.sensor_receipt_steady_ns;
   frame->T_map_lidar = poseFromMessage(message.t_map_lidar);
   frame->frame_contract_id = message.frame_contract_id;
+  frame->sensor_model_id = message.sensor_model_id;
+  frame->horizontal_samples = message.horizontal_samples;
+  frame->vertical_samples = message.vertical_samples;
+  frame->horizontal_fov_rad = message.horizontal_fov_rad;
+  frame->vertical_min_rad = message.vertical_min_rad;
+  frame->vertical_max_rad = message.vertical_max_rad;
+  frame->min_range_m = message.min_range_m;
+  frame->max_range_m = message.max_range_m;
+  frame->beam_evidence_complete = message.beam_evidence_complete;
+  frame->beam_content_hash = message.beam_content_hash;
+  if (message.beam_evidence_complete)
+  {
+    const std::size_t count = message.beam_outcomes.size();
+    const std::size_t expected =
+        static_cast<std::size_t>(message.horizontal_samples) *
+        static_cast<std::size_t>(message.vertical_samples);
+    if (count != expected || message.beam_direction_x.size() != count ||
+        message.beam_direction_y.size() != count ||
+        message.beam_direction_z.size() != count ||
+        message.beam_ranges_m.size() != count ||
+        message.sensor_model_id.empty() || message.beam_content_hash.empty())
+      return false;
+    frame->beams.reserve(count);
+    for (std::size_t index = 0; index < count; ++index)
+    {
+      RegisteredLidarBeamData beam;
+      beam.direction_lidar = Eigen::Vector3d(
+          message.beam_direction_x[index], message.beam_direction_y[index],
+          message.beam_direction_z[index]);
+      beam.outcome = static_cast<RegisteredLidarBeamOutcome>(
+          message.beam_outcomes[index]);
+      beam.range_m = message.beam_ranges_m[index];
+      frame->beams.push_back(std::move(beam));
+    }
+  }
   frame->source_is_map_reference = message.source_is_map_reference;
   frame->source_health_valid = message.source_health_valid;
   frame->source_health_stamp_s = message.source_health_stamp_s;
@@ -2429,6 +2464,7 @@ GridMap::captureFrozenExecutionOccupancyEpoch() const
     std::shared_ptr<const std::vector<RegisteredLidarObstacleSource>>
         active_obstacle_sources;
     std::optional<RegisteredLidarFrameMetadata> current_frame;
+    std::shared_ptr<const LocalEvidenceSnapshot> local_evidence_snapshot;
     std::vector<RegisteredLidarFrameMetadata> support_history;
   };
 
@@ -2472,6 +2508,9 @@ GridMap::captureFrozenExecutionOccupancyEpoch() const
         registered_lidar_window_->activeObstacleSources();
     state->current_frame =
         registered_lidar_window_->currentFrameMetadata();
+    state->local_evidence_snapshot =
+        registered_lidar_window_->captureLocalEvidenceSnapshot(
+            state->generation);
     state->support_history.assign(
         registered_support_history_.begin(),
         registered_support_history_.end());
@@ -2484,7 +2523,9 @@ GridMap::captureFrozenExecutionOccupancyEpoch() const
     return nullptr;
 
   auto raw_centers = std::make_shared<std::vector<Eigen::Vector3d>>();
+  auto raw_keys = std::make_shared<std::vector<iap::VoxelKey>>();
   raw_centers->reserve(state->raw_addresses.size());
+  raw_keys->reserve(state->raw_addresses.size());
   const int yz = state->dimensions.y() * state->dimensions.z();
   for (const int address : state->raw_addresses)
   {
@@ -2492,6 +2533,7 @@ GridMap::captureFrozenExecutionOccupancyEpoch() const
     const int remainder = address % yz;
     const int y = remainder / state->dimensions.z();
     const int z = remainder % state->dimensions.z();
+    raw_keys->push_back(iap::VoxelKey{x, y, z});
     raw_centers->push_back(
         (Eigen::Vector3i(x, y, z).cast<double>() +
          Eigen::Vector3d::Constant(0.5)) * state->resolution +
@@ -2606,7 +2648,11 @@ GridMap::captureFrozenExecutionOccupancyEpoch() const
 
   auto epoch = std::make_shared<FrozenOccupancyEpoch>();
   epoch->diagnostic_query = std::move(diagnostic_query);
+  epoch->local_evidence_snapshot = state->local_evidence_snapshot;
+  epoch->sparse_occupancy_derived_from_raw_centers = true;
+  epoch->map_inflation_m = state->inflation;
   epoch->raw_occupied_voxel_centers = std::move(raw_centers);
+  epoch->raw_occupied_voxel_keys = std::move(raw_keys);
   epoch->current_frame_occupied_voxel_centers = state->current_hits;
   epoch->active_window_obstacle_sources = state->active_obstacle_sources;
   epoch->environment_occupied_voxel_centers = state->environment_hits;
@@ -2696,7 +2742,12 @@ GridMap::captureFrozenOccupancyEpoch() const
     std::vector<char> observed;
     std::shared_ptr<const std::vector<Eigen::Vector3d>> environment_hits;
     std::shared_ptr<const std::vector<Eigen::Vector3d>> raw_centers;
+    std::shared_ptr<const std::vector<iap::VoxelKey>> raw_keys;
+    std::shared_ptr<const std::vector<Eigen::Vector3d>> current_hits;
+    std::shared_ptr<const std::vector<RegisteredLidarObstacleSource>>
+        active_obstacle_sources;
     std::optional<RegisteredLidarFrameMetadata> current_registered_frame;
+    std::shared_ptr<const LocalEvidenceSnapshot> local_evidence_snapshot;
     std::vector<RegisteredLidarFrameMetadata> support_history;
   };
 
@@ -2737,6 +2788,13 @@ GridMap::captureFrozenOccupancyEpoch() const
     buffers->virtual_ceiling_height = mp_.virtual_ceil_height_;
     buffers->min_occupancy_log = mp_.min_occupancy_log_;
     buffers->frame_id = mp_.frame_id_;
+    // The legacy depth/cloud path is already expressed directly in the map
+    // lattice.  Give that coordinate contract an explicit stable identity so
+    // the strict P0 LOS adapter can distinguish it from missing provenance.
+    // Registered-window mode replaces this with its externally declared
+    // contract below.
+    buffers->frame_contract_id =
+        "grid_map_native_v1:" + mp_.frame_id_;
     buffers->cloud_stamp_s = cloud_stamp_s;
     buffers->generation = sequence / 2u;
     if (registered_lidar_window_)
@@ -2748,13 +2806,22 @@ GridMap::captureFrozenOccupancyEpoch() const
       buffers->frame_contract_id = registered_frame_contract_id_;
       buffers->environment_hits =
           registered_lidar_window_->environmentOccupiedVoxelCenters();
+      buffers->current_hits =
+          registered_lidar_window_->currentOccupiedVoxelCenters();
+      buffers->active_obstacle_sources =
+          registered_lidar_window_->activeObstacleSources();
       buffers->current_registered_frame =
           registered_lidar_window_->currentFrameMetadata();
+      buffers->local_evidence_snapshot =
+          registered_lidar_window_->captureLocalEvidenceSnapshot(
+              buffers->generation);
       buffers->support_history.assign(
           registered_support_history_.begin(),
           registered_support_history_.end());
       auto centers = std::make_shared<std::vector<Eigen::Vector3d>>();
+      auto keys = std::make_shared<std::vector<iap::VoxelKey>>();
       centers->reserve(registered_raw_occupied_addresses_.size());
+      keys->reserve(registered_raw_occupied_addresses_.size());
       const int yz = mp_.map_voxel_num_(1) * mp_.map_voxel_num_(2);
       for (const int address : registered_raw_occupied_addresses_)
       {
@@ -2762,12 +2829,14 @@ GridMap::captureFrozenOccupancyEpoch() const
         const int remainder = address % yz;
         const int y = remainder / mp_.map_voxel_num_(2);
         const int z = remainder % mp_.map_voxel_num_(2);
+        keys->push_back(iap::VoxelKey{x, y, z});
         centers->push_back(
             (Eigen::Vector3i(x, y, z).cast<double>() +
              Eigen::Vector3d::Constant(0.5)) * mp_.resolution_ +
             mp_.map_origin_);
       }
       buffers->raw_centers = std::move(centers);
+      buffers->raw_keys = std::move(keys);
     }
     // Registered-window mode has no depth/fused writer by contract. Avoid
     // copying the 59 MiB log-odds layer while holding the occupancy mutex;
@@ -2784,9 +2853,12 @@ GridMap::captureFrozenOccupancyEpoch() const
       ? std::make_shared<std::vector<Eigen::Vector3d>>(
             *buffers->raw_centers)
       : std::make_shared<std::vector<Eigen::Vector3d>>();
+  auto current_centers = std::make_shared<std::vector<Eigen::Vector3d>>();
+  std::ostringstream native_current_content;
   if (!buffers->raw_centers)
   {
     centers->reserve(buffers->raw_cloud.size());
+    current_centers->reserve(buffers->raw_cloud.size());
     for (int x = 0; x < buffers->map_voxel_num(0); ++x)
       for (int y = 0; y < buffers->map_voxel_num(1); ++y)
         for (int z = 0; z < buffers->map_voxel_num(2); ++z)
@@ -2802,12 +2874,23 @@ GridMap::captureFrozenOccupancyEpoch() const
           const bool raw_fused = !buffers->fused.empty() &&
               buffers->fused[address] > buffers->min_occupancy_log;
           if (raw_cloud || raw_fused)
-            centers->push_back(
+          {
+            const Eigen::Vector3d center =
                 (Eigen::Vector3i(x, y, z).cast<double>() +
                  Eigen::Vector3d::Constant(0.5)) *
-                    buffers->resolution +
-                buffers->map_origin);
-        }
+                    buffers->resolution + buffers->map_origin;
+            centers->push_back(center);
+            // The independent PointCloud2 callback clears raw_cloud before
+            // every accepted frame.  Those cells therefore have exact
+            // current-frame provenance; fused depth cells remain outside
+            // this vector and are conservatively uncertified downstream.
+            if (raw_cloud)
+            {
+              current_centers->push_back(center);
+              native_current_content << x << ',' << y << ',' << z << ';';
+            }
+          }
+  }
   }
 
   const std::shared_ptr<const FrozenBuffers> frozen_buffers = buffers;
@@ -2868,9 +2951,13 @@ GridMap::captureFrozenOccupancyEpoch() const
 
   auto epoch = std::make_shared<FrozenOccupancyEpoch>();
   epoch->diagnostic_query = std::move(diagnostic_query);
+  epoch->local_evidence_snapshot = buffers->local_evidence_snapshot;
+  epoch->map_inflation_m = frozen_buffers->inflation;
   epoch->raw_occupied_voxel_centers = std::move(centers);
-  epoch->current_frame_occupied_voxel_centers = nullptr;
-  epoch->active_window_obstacle_sources = nullptr;
+  epoch->raw_occupied_voxel_keys = buffers->raw_keys;
+  epoch->current_frame_occupied_voxel_centers =
+      buffers->raw_centers ? buffers->current_hits : std::move(current_centers);
+  epoch->active_window_obstacle_sources = buffers->active_obstacle_sources;
   epoch->environment_occupied_voxel_centers = buffers->environment_hits
       ? buffers->environment_hits : epoch->raw_occupied_voxel_centers;
   epoch->lattice_origin = frozen_buffers->map_origin;
@@ -2887,7 +2974,27 @@ GridMap::captureFrozenOccupancyEpoch() const
   epoch->generation = frozen_buffers->generation;
   epoch->active_window_generation =
       frozen_buffers->active_window_generation;
-  epoch->current_frame_id = frozen_buffers->current_frame_id;
+  epoch->current_frame_id = buffers->raw_centers
+      ? frozen_buffers->current_frame_id
+      : static_cast<int64_t>(frozen_buffers->generation);
+  if (buffers->raw_centers && buffers->current_registered_frame)
+  {
+    epoch->current_frame_content_hash =
+        buffers->current_registered_frame->content_hash;
+  }
+  else if (!buffers->raw_centers)
+  {
+    std::uint64_t hash = 1469598103934665603ULL;
+    for (const unsigned char byte : native_current_content.str())
+    {
+      hash ^= byte;
+      hash *= 1099511628211ULL;
+    }
+    std::ostringstream identity;
+    identity << "native_cloud_v1:" << std::hex << std::setw(16)
+             << std::setfill('0') << hash;
+    epoch->current_frame_content_hash = identity.str();
+  }
   epoch->frame_contract_id = frozen_buffers->frame_contract_id;
   if (trusted_local_map_support_enabled_ &&
       frozen_buffers->current_registered_frame)

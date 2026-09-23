@@ -7,6 +7,7 @@
 #include <cstring>
 #include <iomanip>
 #include <limits>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <unordered_map>
@@ -132,6 +133,34 @@ private:
   double maximum_observed_latency_s_ = 0.0;
 };
 
+struct TrajectoryExecutionClockEstimate
+{
+  double elapsed_s = 0.0;
+  bool extrapolated = false;
+};
+
+inline std::optional<TrajectoryExecutionClockEstimate>
+estimateTrajectoryExecutionClock(
+    const double sampled_elapsed_s, const double sample_stamp_s,
+    const double now_s, const double duration_s,
+    const double maximum_extrapolation_s = 0.5)
+{
+  if (!std::isfinite(sampled_elapsed_s) || sampled_elapsed_s < 0.0 ||
+      !std::isfinite(sample_stamp_s) || !std::isfinite(now_s) ||
+      !std::isfinite(duration_s) || duration_s < 0.0 ||
+      !std::isfinite(maximum_extrapolation_s) ||
+      maximum_extrapolation_s < 0.0)
+    return std::nullopt;
+  const double gap_s = now_s - sample_stamp_s;
+  if (gap_s < -1.0e-6 || gap_s > maximum_extrapolation_s + 1.0e-9)
+    return std::nullopt;
+  TrajectoryExecutionClockEstimate estimate;
+  estimate.elapsed_s = std::clamp(
+      sampled_elapsed_s + std::max(0.0, gap_s), 0.0, duration_s);
+  estimate.extrapolated = gap_s > 1.0e-6;
+  return estimate;
+}
+
 class PendingGuardDeadlineGate
 {
 public:
@@ -202,6 +231,96 @@ private:
   TrajectoryIdentity identity_;
 };
 
+// Converts a possibly pausing or catch-up-jumping ROS clock into continuous
+// curve time. A trajectory always begins at t=0 on actual activation. After
+// that, progress is supported by both clocks: a ROS pause freezes execution,
+// while a ROS catch-up jump is limited by elapsed same-host steady time.
+class TrajectoryExecutionClock
+{
+public:
+  void activate(const double ros_now_s, const double steady_now_s)
+  {
+    active_ = std::isfinite(ros_now_s) && std::isfinite(steady_now_s);
+    elapsed_s_ = 0.0;
+    last_ros_s_ = ros_now_s;
+    last_steady_s_ = steady_now_s;
+  }
+
+  double advance(const double ros_now_s, const double steady_now_s)
+  {
+    if (!active_ || !std::isfinite(ros_now_s) ||
+        !std::isfinite(steady_now_s))
+      return elapsed_s_;
+    const double ros_delta_s = std::max(0.0, ros_now_s - last_ros_s_);
+    const double steady_delta_s =
+        std::max(0.0, steady_now_s - last_steady_s_);
+    elapsed_s_ += std::min(ros_delta_s, steady_delta_s);
+    last_ros_s_ = ros_now_s;
+    last_steady_s_ = steady_now_s;
+    return elapsed_s_;
+  }
+
+  void clear()
+  {
+    active_ = false;
+    elapsed_s_ = 0.0;
+    last_ros_s_ = 0.0;
+    last_steady_s_ = 0.0;
+  }
+
+  double elapsedSeconds() const { return elapsed_s_; }
+  bool active() const { return active_; }
+
+private:
+  bool active_ = false;
+  double elapsed_s_ = 0.0;
+  double last_ros_s_ = 0.0;
+  double last_steady_s_ = 0.0;
+};
+
+inline bool trajectoryParentExecutionAnchorReached(
+    const TrajectoryIdentity &active,
+    const TrajectoryIdentity &declared_parent,
+    const double parent_switch_elapsed_s,
+    const double active_execution_elapsed_s)
+{
+  return active.valid() && declared_parent.valid() &&
+      active == declared_parent &&
+      std::isfinite(parent_switch_elapsed_s) &&
+      parent_switch_elapsed_s >= 0.0 &&
+      std::isfinite(active_execution_elapsed_s) &&
+      active_execution_elapsed_s + 1.0e-9 >= parent_switch_elapsed_s;
+}
+
+// Execution-side last line of defence for an atomic parent -> child switch.
+// These tolerances are deliberately well inside the 0.15 m tracking envelope;
+// they are not planning tolerances and must not be relaxed to admit a curve.
+inline bool trajectorySwitchBoundaryContinuous(
+    const Eigen::Vector3d &parent_position,
+    const Eigen::Vector3d &parent_velocity,
+    const Eigen::Vector3d &parent_acceleration,
+    const Eigen::Vector3d &child_position,
+    const Eigen::Vector3d &child_velocity,
+    const Eigen::Vector3d &child_acceleration,
+    const double position_tolerance_m = 0.02,
+    const double velocity_tolerance_mps = 0.05,
+    const double acceleration_tolerance_mps2 = 0.10)
+{
+  return parent_position.allFinite() && parent_velocity.allFinite() &&
+      parent_acceleration.allFinite() && child_position.allFinite() &&
+      child_velocity.allFinite() && child_acceleration.allFinite() &&
+      std::isfinite(position_tolerance_m) && position_tolerance_m >= 0.0 &&
+      std::isfinite(velocity_tolerance_mps) &&
+      velocity_tolerance_mps >= 0.0 &&
+      std::isfinite(acceleration_tolerance_mps2) &&
+      acceleration_tolerance_mps2 >= 0.0 &&
+      (parent_position - child_position).norm() <= position_tolerance_m &&
+      (parent_velocity - child_velocity).norm() <=
+          velocity_tolerance_mps &&
+      (parent_acceleration - child_acceleration).norm() <=
+          acceleration_tolerance_mps2;
+}
+
 inline void appendTrajectoryHashBytes(
     std::uint64_t *hash, const void *data, const std::size_t size)
 {
@@ -253,7 +372,8 @@ inline rclcpp::QoS trajectoryCommandQos(const std::size_t depth = 1u)
 inline traj_utils::msg::Bspline makeTrajectoryCommand(
     const UniformBspline &trajectory, const rclcpp::Time &start_time,
     const int trajectory_id, const std::uint64_t execution_instance_id = 0,
-    const TrajectoryIdentity &parent = {})
+    const TrajectoryIdentity &parent = {},
+    const double parent_switch_elapsed_s = 0.0)
 {
   traj_utils::msg::Bspline command;
   command.order = 3;
@@ -264,6 +384,7 @@ inline traj_utils::msg::Bspline makeTrajectoryCommand(
   command.parent_traj_id = parent.trajectory_id;
   command.parent_start_time = rclcpp::Time(parent.start_time_ns, RCL_ROS_TIME);
   command.parent_curve_hash = parent.curve_hash;
+  command.parent_switch_elapsed_s = parent_switch_elapsed_s;
   UniformBspline mutable_trajectory = trajectory;
   const Eigen::MatrixXd control_points =
       mutable_trajectory.getControlPoint();
@@ -287,12 +408,19 @@ inline traj_utils::msg::Bspline makeTrajectoryCommand(
 inline traj_utils::msg::Bspline makeTrajectoryCommand(
     const LocalTrajData &trajectory)
 {
-  return makeTrajectoryCommand(
+  auto command = makeTrajectoryCommand(
       trajectory.position_traj_, trajectory.start_time_, trajectory.traj_id_,
       trajectory.execution_instance_id_,
       {trajectory.parent_execution_instance_id_, trajectory.parent_traj_id_,
        trajectory.parent_start_time_.nanoseconds(),
-       trajectory.parent_curve_hash_});
+       trajectory.parent_curve_hash_},
+      trajectory.parent_switch_elapsed_s_);
+  // This may be an already queued command whose full identity was reserved
+  // before activation (notably a certified guard brake).  Preserve that
+  // exact hash rather than silently deriving a new identity on republish.
+  if (!trajectory.curve_hash_.empty())
+    command.curve_hash = trajectory.curve_hash_;
+  return command;
 }
 
 inline traj_utils::msg::Bspline makeTrajectoryCancellation(

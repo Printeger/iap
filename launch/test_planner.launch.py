@@ -1051,6 +1051,11 @@ DENSE_FOUR_FORK_FOREST_ONLINE_PRESET = {
     "grid_map/unknown_as_occupied": "false",
     "manager/planning_horizon": "8.0",
     "fsm/planning_horizon": "8.0",
+    # Initial/refill channel refinement may run a bounded local A*; it is
+    # prepare-only work and never runs in the handoff callback.  Reserve enough
+    # wall time for both mirrored channels while direct authorization retains
+    # its independent 150 ms cap.
+    "p4.forward.route_compute_budget_ms": "1200.0",
     "grid_map/local_update_range_x": "9.0",
     "grid_map/local_update_range_y": "9.0",
     "grid_map/local_update_range_z": "4.5",
@@ -1089,13 +1094,14 @@ DENSE_FOUR_FORK_FOREST_ONLINE_PRESET = {
     "p4.forward.sensing_range_m": "10.0",
     "p4.forward.topology_resolution_m": "0.5",
     "p4.forward.nominal_query_speed_mps": "1.5",
-    "p4.forward.route_compute_budget_ms": "500.0",
+    "p4.forward.route_compute_budget_ms": "1200.0",
     "p4.forward.compute_budget_ms": "150.0",
     "p4.forward.gnss_core_policy": "braking_window_core",
     "p4.forward.window_transition_overlap_s": "0.4",
-    "p4.execution.successor_prepare_wcet_s": "0.8",
+    "p4.execution.successor_prepare_wcet_s": "1.2",
     "p4.execution.successor_control_switch_margin_s": "0.2",
     "p4.execution.successor_scheduler_guard_s": "0.2",
+    "p4.execution.successor_max_parent_execution_s": "2.5",
     "p4.execution.successor_progress_jitter_floor_m": "0.10",
     "p4.execution.successor_progress_stability_margin_m": "0.05",
     "p4.forward.min_creep_progress_m": "0.25",
@@ -1103,7 +1109,11 @@ DENSE_FOUR_FORK_FOREST_ONLINE_PRESET = {
     "p4.forward.max_creep_progress_m": "-1.0",
     "p4.forward.max_observe_speed_mps": "0.5",
     "p4.forward.max_channel_searches": "32",
-    "p4.forward.channel_enumeration_budget_ms": "60.0",
+    # Dense four-fork enumeration exceeded 60 ms once the local occupancy
+    # corridor contained the second fork.  This work runs in the cooperative
+    # route worker; the 250 ms allowance is still bounded by the 1.2 s route
+    # budget and does not relax any flight-safety predicate.
+    "p4.forward.channel_enumeration_budget_ms": "250.0",
     "p4.forward.advisory_min_relative_improvement": "0.10",
     "p4.execution.max_tracking_error_m": "0.15",
     "p4.execution.marginal_unsafe_ratio_max": "1.005",
@@ -1416,9 +1426,9 @@ SCENARIO_PRESETS = {
         "p0.predictor.use_current_integrity_prior": "true",
         "p0.predictor.conservative_max_with_gnss": "true",
         "fsm.thresh_replan_time": "0.2",
-        "manager/max_vel": "1.0",
-        "optimization/max_vel": "1.0",
-        "bspline/limit_vel": "1.0",
+        "manager/max_vel": "0.5",
+        "optimization/max_vel": "0.5",
+        "bspline/limit_vel": "0.5",
         "lidar_sensing_rate_hz": "10.0",
     },
     "icra_dense_forest_four_fork_v2": {
@@ -1444,9 +1454,9 @@ SCENARIO_PRESETS = {
         "p0.predictor.use_current_integrity_prior": "true",
         "p0.predictor.conservative_max_with_gnss": "true",
         "fsm.thresh_replan_time": "0.2",
-        "manager/max_vel": "1.0",
-        "optimization/max_vel": "1.0",
-        "bspline/limit_vel": "1.0",
+        "manager/max_vel": "0.5",
+        "optimization/max_vel": "0.5",
+        "bspline/limit_vel": "0.5",
         "lidar_sensing_rate_hz": "10.0",
     },
     "icra_p0_p5_fused_degraded_corridor_v1": {
@@ -1513,9 +1523,9 @@ SCENARIO_PRESETS = {
         "integrity_fusion_mode": "max_pl",
         "p0.predictor.use_current_integrity_prior": "true",
         "fsm.thresh_replan_time": "0.2",
-        "manager/max_vel": "1.0",
-        "optimization/max_vel": "1.0",
-        "bspline/limit_vel": "1.0",
+        "manager/max_vel": "0.5",
+        "optimization/max_vel": "0.5",
+        "bspline/limit_vel": "0.5",
         "p1_fixture_central_obstacle_enabled": "true",
         "p1_fixture_central_x_min_m": "-9.0",
         "p1_fixture_central_x_max_m": "-7.0",
@@ -1528,6 +1538,12 @@ SCENARIO_PRESETS = {
         # development planning transaction; occupancy remains authoritative.
         "lidar_sensing_rate_hz": "2.0",
     },
+}
+
+SCENARIO_PRESETS["icra072_p4_selection_trigger_mirror_v1"] = {
+    **SCENARIO_PRESETS["icra072_p4_selection_trigger_v1"],
+    "p1_map_fixture": "icra072_p4_selection_trigger_mirror_v1",
+    "p1_fixture_mirror_y": "true",
 }
 
 
@@ -1726,10 +1742,24 @@ EXPERIMENT_PRESETS = {
         "planner_enable_p5_final": "true",
         "p0.enable_risk_grid": "true",
         "p0.debug_metrics_enable": "true",
-        # BDS is the production default for this dense forest profile. Six
-        # worker-local predictors preserve the formula while reducing the
-        # larger exact geometry batch latency.
-        "p0.predictor.worker_count": "6",
+        # Online P0 consumes GridMap's immutable occupancy epoch.  Bind both
+        # grids to the same fixed geofence and the required five-to-one risk
+        # overlay ratio for the default 30 m scenario; scenario-specific
+        # combo presets (for example forest-v2) replace the whole tuple.
+        "grid_map/origin_x": "-15.0",
+        "grid_map/origin_y": "-15.0",
+        "grid_map/origin_z": "0.0",
+        "p0.resolution_m": "0.5",
+        "p0.size_x_m": "30.0",
+        "p0.size_y_m": "30.0",
+        "p0.size_z_m": "3.5",
+        "p0.origin_x_m": "-15.0",
+        "p0.origin_y_m": "-15.0",
+        "p0.origin_z_m": "0.0",
+        # BDS is the production default for this dense forest profile. Eight
+        # worker-local predictors preserve the formula and keep the growing
+        # exact forest geometry batch inside the fixed 500 ms grid budget.
+        "p0.predictor.worker_count": "8",
         "p0.horizons_s": "0.0,0.5,1.0,1.5,2.0,2.5,3.0,4.0,5.0,6.0",
         "p0.predictor.sigma_grow_m_sqrt_s": "0.01",
         "p0.predictor.sigma_growth_profile": "legacy_iap_rq320_baseline_v1",
@@ -2214,6 +2244,7 @@ ARG_DEFAULTS = [
     ("p4.execution.successor_prepare_wcet_s", "0.8"),
     ("p4.execution.successor_control_switch_margin_s", "0.2"),
     ("p4.execution.successor_scheduler_guard_s", "0.2"),
+    ("p4.execution.successor_max_parent_execution_s", "2.5"),
     ("p4.execution.successor_progress_jitter_floor_m", "0.10"),
     ("p4.execution.successor_progress_stability_margin_m", "0.05"),
     ("p4.forward.min_creep_progress_m", "0.25"),
@@ -2840,6 +2871,12 @@ def _runtime_config(context, use_gnss, use_araim, allow_truth_alignment):
                 context, "planner_local_map_window_rate_hz"),
             "max_active_keyframes": 15,
             "static_planner_translation_m": init_xyz,
+            "planning_lattice_resolution_m": frame_contract_payload[
+                "ego_resolution_m"],
+            "planning_lattice_origin_m": frame_contract_payload[
+                "geofence_origin_m"],
+            "planning_lattice_extent_m": frame_contract_payload[
+                "geofence_extent_m"],
         }
         config_ros["glim_ros"]["sim"]["enable_metrics_csv"] = False
     config_ros["glim_ros"]["sim"]["metrics_csv_path"] = str(export_dir / "iap_sim_truth_vs_est.csv")
@@ -3115,6 +3152,10 @@ def _ego_planner_node(context, drone_id, planner_odom_topic, imu_topic, cloud_to
             ("planning/bspline", bspline_topic),
             ("planning/pending_guard_bspline", bspline_topic.replace("/bspline", "/pending_guard_bspline")),
             ("planning/pending_guard_status", bspline_topic.replace("/bspline", "/pending_guard_status")),
+            # The watchdog consumes traj_server's identity-bound command and
+            # zero-based execution progress; keep it on the same per-drone
+            # wire as the controller and capture process.
+            ("/position_cmd", f"/drone_{drone_id}_planning/pos_cmd"),
             ("planning/data_display", f"/drone_{drone_id}_planning/data_display"),
             ("planning/broadcast_bspline_from_planner", "/broadcast_bspline"),
             ("planning/broadcast_bspline_to_planner", "/broadcast_bspline"),
@@ -3408,6 +3449,7 @@ def _ego_planner_node(context, drone_id, planner_odom_topic, imu_topic, cloud_to
             {"p4.execution.successor_prepare_wcet_s": _param_float(context, "p4.execution.successor_prepare_wcet_s")},
             {"p4.execution.successor_control_switch_margin_s": _param_float(context, "p4.execution.successor_control_switch_margin_s")},
             {"p4.execution.successor_scheduler_guard_s": _param_float(context, "p4.execution.successor_scheduler_guard_s")},
+            {"p4.execution.successor_max_parent_execution_s": _param_float(context, "p4.execution.successor_max_parent_execution_s")},
             {"p4.execution.successor_progress_jitter_floor_m": _param_float(context, "p4.execution.successor_progress_jitter_floor_m")},
             {"p4.execution.successor_progress_stability_margin_m": _param_float(context, "p4.execution.successor_progress_stability_margin_m")},
             {"p4.forward.min_creep_progress_m": _param_float(context, "p4.forward.min_creep_progress_m")},

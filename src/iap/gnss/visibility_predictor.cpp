@@ -41,7 +41,8 @@ VisibilityResult VisibilityPredictor::predict(const Eigen::Vector3d& pos_world,
                                               const bool measured_epoch_support,
                                               const bool retain_unknown_support,
                                               const double query_time_s,
-                                              const double evaluation_time_s) const {
+                                              const double evaluation_time_s,
+                                              const bool unknown_as_open_bound) const {
   VisibilityResult res;
   const std::size_t N = epoch.sats.size();
   res.vis_flags.resize(N, false);
@@ -198,7 +199,7 @@ VisibilityResult VisibilityPredictor::predict(const Eigen::Vector3d& pos_world,
     res.known_occupancy_kappas[i] = known_occupancy_kappa;
     res.unknown_kappa_upper_bounds[i] = unknown_kappa_upper_bound;
     res.combined_conservative_kappas[i] = combined_conservative_kappa;
-    res.kappas[i] = retain_unknown_support
+    res.kappas[i] = retain_unknown_support && !unknown_as_open_bound
         ? combined_conservative_kappa : known_occupancy_kappa;
     res.blocked_flags[i] = blocked;
     if (blocked) {

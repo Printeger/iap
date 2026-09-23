@@ -24,6 +24,7 @@
 #include <iap/msg/active_lidar_window_delta.hpp>
 #include <iap/msg/registered_lidar_frame.hpp>
 #include <iap/srv/get_active_lidar_window.hpp>
+#include <iap/map/local_occupancy.hpp>
 #include <iap/map/trusted_local_map_support.hpp>
 
 #include <pcl/point_cloud.h>
@@ -201,8 +202,22 @@ using GridMapOccupancyDiagnosticQuery =
 struct FrozenOccupancyEpoch
 {
   GridMapOccupancyDiagnosticQuery diagnostic_query;
+  // Immutable accumulated beam evidence. This is the sole formal GNSS LOS
+  // support authority; the trusted FOV envelope below is diagnostic only.
+  std::shared_ptr<const LocalEvidenceSnapshot> local_evidence_snapshot;
+  // Registered-window snapshots derive their complete collision state from
+  // the sparse raw centers plus the fixed inflation/ceiling policy. Consumers
+  // may use this contract to avoid repeating a binary search for every voxel
+  // in an already-built swept corridor.
+  bool sparse_occupancy_derived_from_raw_centers = false;
+  double map_inflation_m = std::numeric_limits<double>::quiet_NaN();
   std::shared_ptr<const std::vector<Eigen::Vector3d>>
       raw_occupied_voxel_centers;
+  // Producer-native, already sorted and unique lattice identity.  P0 can
+  // bind this directly instead of converting every center back to an index
+  // and sorting it again on each 10 Hz execution-snapshot capture.
+  std::shared_ptr<const std::vector<iap::VoxelKey>>
+      raw_occupied_voxel_keys;
   std::shared_ptr<const std::vector<Eigen::Vector3d>>
       current_frame_occupied_voxel_centers;
   std::shared_ptr<const std::vector<RegisteredLidarObstacleSource>>

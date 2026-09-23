@@ -3,6 +3,7 @@
 
 #include <Eigen/Eigen>
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <iostream>
@@ -11,6 +12,8 @@
 #include "nav_msgs/msg/path.hpp"
 #include "nav_msgs/msg/odometry.hpp"
 #include "sensor_msgs/msg/imu.hpp"
+#include "quadrotor_msgs/msg/position_command.hpp"
+#include "quadrotor_msgs/msg/controller_command_trace.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "std_msgs/msg/empty.hpp"
 #include "std_msgs/msg/string.hpp"
@@ -32,6 +35,15 @@ using std::vector;
 
 namespace ego_planner
 {
+  inline Eigen::Vector3d specificForceBodyToWorldAcceleration(
+      const Eigen::Vector3d &specific_force_body,
+      const Eigen::Quaterniond &body_to_world)
+  {
+    constexpr double kGravityMps2 = 9.81;
+    return body_to_world * specific_force_body +
+        Eigen::Vector3d(0.0, 0.0, -kGravityMps2);
+  }
+
   enum class P4PlanningCycleResult
   {
     NEW_TRAJECTORY_READY = 0,
@@ -61,6 +73,21 @@ namespace ego_planner
   inline bool p4PlanningCycleMayRetry(const P4PlanningCycleResult result)
   {
     return result == P4PlanningCycleResult::RETRYABLE_FAILURE;
+  }
+
+  inline bool p4PlanningCycleRequiresEmergency(
+      const P4PlanningCycleResult result)
+  {
+    return result == P4PlanningCycleResult::EXECUTION_REVOKED;
+  }
+
+  inline bool p4ExecutionUsesRollingSuccessor(
+      const P4ExecutionCertificate &certificate,
+      const bool execution_revoked)
+  {
+    return certificate.valid && !execution_revoked &&
+        certificate.authority !=
+            P4ExecutionAuthority::LIMITED_PREFIX_BRAKING;
   }
 
   class P4ObserveMoreReplanScheduler
@@ -202,9 +229,12 @@ namespace ego_planner
     FSM_EXEC_STATE exec_state_;
     int continously_called_times_{0};
 
-    Eigen::Vector3d odom_pos_, odom_vel_, odom_acc_; // odometry state
+    Eigen::Vector3d odom_pos_, odom_vel_;
+    Eigen::Vector3d odom_acc_ = Eigen::Vector3d::Zero(); // world acceleration
     Eigen::Quaterniond odom_orient_;
     rclcpp::Time latest_odom_stamp_{0, 0, RCL_ROS_TIME};
+    std::chrono::steady_clock::time_point latest_odom_receive_steady_{};
+    bool have_odom_receive_steady_ = false;
     rclcpp::Time latest_imu_stamp_{0, 0, RCL_ROS_TIME};
     bool have_imu_acceleration_ = false;
 
@@ -217,6 +247,7 @@ namespace ego_planner
     bool flag_escape_emergency_ = false;
   bool p5_final_gate_emergency_candidate_ = false;
   unsigned int p4_actual_curve_feedback_depth_ = 0u;
+    bool p4_normal_channel_prepare_recursion_ = false;
     bool p5_waiting_for_p0_ready_ = false;
     bool p4_waiting_for_risk_grid_ready_ = false;
     bool p4_require_risk_grid_ready_before_planning_ = false;
@@ -233,6 +264,11 @@ namespace ego_planner
     rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr waypoint_sub_;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
     rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_sub_;
+    rclcpp::Subscription<quadrotor_msgs::msg::PositionCommand>::SharedPtr
+        position_command_sub_;
+    rclcpp::CallbackGroup::SharedPtr controller_trace_callback_group_;
+    rclcpp::Subscription<quadrotor_msgs::msg::ControllerCommandTrace>::SharedPtr
+        controller_trace_sub_;
     rclcpp::Subscription<traj_utils::msg::MultiBsplines>::SharedPtr swarm_trajs_sub_;
     rclcpp::Subscription<traj_utils::msg::Bspline>::SharedPtr broadcast_bspline_sub_;
     rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr trigger_sub_;
@@ -265,6 +301,7 @@ namespace ego_planner
     int globalTrajTrialLimitForP5FinalGate() const;
     void getLocalTarget();
     rclcpp::Time plannerNow() const;
+    rclcpp::Time plannerSchedulingNow() const;
 
     /* ROS functions */
     void execFSMCallback();
@@ -302,6 +339,8 @@ namespace ego_planner
       p4_require_risk_grid_ready_before_planning_ = true;
       p4_admitted_risk_grid_snapshot_ = std::move(admitted_snapshot);
       latest_odom_stamp_ = planning_time;
+      latest_odom_receive_steady_ = std::chrono::steady_clock::now();
+      have_odom_receive_steady_ = true;
       rebound_planner_for_test_ = std::move(rebound_planner);
     }
     bool callReboundReplanForTest()

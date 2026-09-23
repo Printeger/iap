@@ -49,6 +49,11 @@ the current overlay, never the active base.
 
 ## Wire protocol
 
+- `/iap/simulator/lidar_beam_evidence`: `LidarBeamEvidence`, sensor-data QoS,
+  carrying the explicit beam outcome/range lattice emitted with the simulated
+  point cloud. `planner_local_map_extension` accepts an association only when
+  header stamp and scan-end stamp both match the hit cloud (tolerance
+  `1e-6 s`); missing or mismatched evidence never becomes observed free.
 - `/iap/local_map/current_frame`: `RegisteredLidarFrame`, best effort, depth 1.
 - `/iap/local_map/window_delta`: `ActiveLidarWindowDelta`, reliable, ordered.
 - `/iap/local_map/get_active_window`: full-state recovery after startup, a
@@ -59,6 +64,13 @@ the current overlay, never the active base.
 Every delta names its base and resulting active-window generation. The
 consumer rejects a gap before mutating state, then recovers a complete window.
 The current frame is independent of this reliable generation stream.
+
+The simulator parameters defining the frozen sensor contract are
+`renderer_mode=first_hit_spherical_v1`, `lidar.horizontal_samples`,
+`lidar.vertical_samples`, `lidar.horizontal_fov_deg`,
+`lidar.vertical_min_deg`, `lidar.vertical_max_deg`, `lidar.min_range_m`, and
+`lidar.max_range_m`. A sensor-model ID with different numeric parameters is a
+contract mismatch and is rejected rather than merged.
 
 Complete and incomplete producer states form an ordered event stream. Only
 consecutive events with the same state may be coalesced. A failed full-window
@@ -132,3 +144,25 @@ active evidence is not silently discarded. P0 and P4 continue to report
 unknown when accumulated successful-return rays cannot establish the required
 sky or LiDAR support; neither the adapter nor the planner reads world truth or
 turns absence of points into observed-free space.
+
+## Immutable local-evidence snapshot
+
+Every explicit registered frame contributes hit-prefix free voxels,
+no-return free voxels through maximum range, and raw hit endpoints. The active
+window resolves overlaps by newest provenance while raw occupied wins over
+free at a voxel. The frozen epoch shares a compact two-bit state lattice plus
+a source-table index; LOS queries do not copy the dense map. Snapshot identity
+binds occupancy and active-window generations, coordinate contract, complete
+sensor geometry, source-set hash, and content hash.
+
+`TrustedLocalMapSupport` remains a diagnostic FOV/range envelope and candidate
+observation hint. It is not observed-free authority. Formal route evidence is
+queried only over the final swept/clearance tube, all certified brake tubes,
+and the GNSS LOS samples at those space-time points. Consequently
+`whole_grid_unknown_fraction` may be high without rejecting a fully supported
+route, but any unknown route, LOS, or braking sample fails closed.
+
+Captures predating explicit beam data are
+`non_exact_replay_for_local_evidence`. They may support decision-level
+analysis only and cannot reconstruct no-return, invalid-beam, voxel age, or
+source provenance.

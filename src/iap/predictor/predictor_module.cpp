@@ -3,8 +3,10 @@
 #include <Eigen/Cholesky>
 #include <Eigen/Eigenvalues>
 
+#include <atomic>
 #include <chrono>
 #include <cmath>
+#include <thread>
 #include <unordered_map>
 #include <utility>
 
@@ -502,7 +504,8 @@ PredictorQueryResult PredictorModule::queryWithSpatialAdvisory(
     PredictorBatchDiagnostics* diagnostics,
     const std::vector<bool>* gnss_satellite_mask,
     const GnssAdvisoryResult* selected_receiver_advisory,
-    const GlobalNavigationTaskMode task_mode) const {
+    const GlobalNavigationTaskMode task_mode,
+    const bool gnss_unknown_as_open_bound) const {
   PredictorQueryResult out;
   out.query_position_map = input.query_position_map;
   out.query_time_s = input.query_time_s;
@@ -615,10 +618,15 @@ PredictorQueryResult PredictorModule::queryWithSpatialAdvisory(
                                ? std::chrono::steady_clock::now()
                                : std::chrono::steady_clock::time_point{};
         out.gnss = gnss_satellite_mask != nullptr
-            ? gnss_.query_with_satellite_mask(
+            ? (gnss_unknown_as_open_bound
+                ? gnss_.query_lower_bound_with_satellite_mask(
                   working_input.query_position_map, working_input.snapshot,
                   *gnss_satellite_mask, working_input.query_time_s,
-                  freshness_time_s(working_input), task_mode)
+                  freshness_time_s(working_input))
+                : gnss_.query_with_satellite_mask(
+                  working_input.query_position_map, working_input.snapshot,
+                  *gnss_satellite_mask, working_input.query_time_s,
+                  freshness_time_s(working_input), task_mode))
             : gnss_.query(working_input.query_position_map,
                           working_input.snapshot,
                           working_input.query_time_s,
@@ -901,6 +909,72 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
   const std::size_t sat_count = request.snapshot.gnss_epoch.sats.size();
   std::vector<std::vector<bool>> local_satellite_masks;
   local_satellite_masks.reserve(request.points.size());
+  std::vector<std::vector<bool>> lower_bound_satellite_masks;
+  lower_bound_satellite_masks.reserve(request.points.size());
+  // Visibility/support ray casts dominate long braking-window batches. They
+  // depend only on the frozen snapshot and one physical sample, so evaluate
+  // unique samples concurrently, then reduce windows in deterministic request
+  // order below. The shared steady-clock budget still fails closed.
+  std::vector<std::size_t> unique_evidence_rows;
+  unique_evidence_rows.reserve(request.points.size());
+  std::unordered_map<std::uint64_t, std::size_t> prefetch_rows;
+  prefetch_rows.reserve(request.points.size());
+  for (std::size_t point_index = 0;
+       point_index < request.points.size(); ++point_index) {
+    const auto& query = request.points[point_index];
+    if (query.evidence_point_id == 0) {
+      unique_evidence_rows.push_back(point_index);
+      continue;
+    }
+    const auto inserted = prefetch_rows.emplace(
+        query.evidence_point_id, point_index);
+    if (inserted.second) {
+      unique_evidence_rows.push_back(point_index);
+      continue;
+    }
+    const auto& original = request.points[inserted.first->second];
+    if (query.position_map != original.position_map ||
+        query.query_time_s != original.query_time_s ||
+        query.horizon_s != original.horizon_s) {
+      fail_from(point_index,
+                ForwardRiskFailureReason::EVIDENCE_IDENTITY_MISMATCH);
+      return out;
+    }
+  }
+  std::vector<VisibilityResult> prefetched_visibility(request.points.size());
+  std::atomic<std::size_t> next_unique_row{0u};
+  std::atomic<bool> prefetch_aborted{false};
+  const auto prefetch_worker = [&]() {
+    while (!prefetch_aborted.load(std::memory_order_relaxed)) {
+      const std::size_t work_index = next_unique_row.fetch_add(
+          1u, std::memory_order_relaxed);
+      if (work_index >= unique_evidence_rows.size()) return;
+      if (budget_expired()) {
+        prefetch_aborted.store(true, std::memory_order_relaxed);
+        return;
+      }
+      const std::size_t point_index = unique_evidence_rows[work_index];
+      const auto& query = request.points[point_index];
+      prefetched_visibility[point_index] = gnss_.visibility_evidence(
+          query.position_map, request.snapshot, query.query_time_s,
+          request.evaluation_time_s,
+          GlobalNavigationTaskMode::MISSION_BEST_EFFORT);
+    }
+  };
+  const std::size_t worker_count = std::min<std::size_t>(
+      unique_evidence_rows.size(), static_cast<std::size_t>(
+          std::max(1, params_.execution_batch_worker_count)));
+  std::vector<std::thread> prefetch_workers;
+  prefetch_workers.reserve(worker_count > 0u ? worker_count - 1u : 0u);
+  for (std::size_t worker = 1u; worker < worker_count; ++worker) {
+    prefetch_workers.emplace_back(prefetch_worker);
+  }
+  prefetch_worker();
+  for (auto& worker : prefetch_workers) worker.join();
+  if (prefetch_aborted.load(std::memory_order_relaxed) || budget_expired()) {
+    fail_from(0, ForwardRiskFailureReason::COMPUTE_BUDGET_EXCEEDED);
+    return out;
+  }
   std::unordered_map<std::uint64_t, std::size_t> evidence_rows;
   evidence_rows.reserve(request.points.size());
   std::unordered_map<std::uint64_t, std::size_t> evidence_counts;
@@ -930,15 +1004,14 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
         out.points[point_index] = out.points[found->second];
         local_satellite_masks.push_back(
             local_satellite_masks[found->second]);
+        lower_bound_satellite_masks.push_back(
+            lower_bound_satellite_masks[found->second]);
         ++out.timing.evidence_reuse_count;
         continue;
       }
       evidence_rows.emplace(query.evidence_point_id, point_index);
     }
-    const VisibilityResult evidence =
-        gnss_.visibility_evidence(
-            query.position_map, request.snapshot, query.query_time_s,
-            request.evaluation_time_s, request.task_mode);
+    const VisibilityResult& evidence = prefetched_visibility[point_index];
     if (budget_expired()) {
       // Evidence retained above is diagnostic only; every advisory point is
       // still unfinished until the second pass evaluates GNSS/LiDAR/FIM.
@@ -947,6 +1020,7 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
     }
     auto& result = out.points[point_index];
     std::vector<bool> local_mask(sat_count, false);
+    std::vector<bool> lower_bound_mask(sat_count, false);
     int eligible_satellites = 0;
     double eligible_unknown_support_fraction_sum = 0.0;
     double known_degradation = 0.0;
@@ -1005,6 +1079,11 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
       diagnostic.unknown_support_fraction =
           sat_index < evidence.unknown_support_fractions.size()
               ? evidence.unknown_support_fractions[sat_index] : 0.0;
+      diagnostic.known_occupied_fraction =
+          diagnostic.known_occupancy_kappa;
+      diagnostic.kappa_lower = diagnostic.known_occupancy_kappa;
+      diagnostic.kappa_upper = diagnostic.combined_conservative_kappa;
+      diagnostic.support_complete = diagnostic.support_known;
       diagnostic.first_missing_support_distance_m =
           sat_index < evidence.first_missing_support_distances_m.size()
               ? evidence.first_missing_support_distances_m[sat_index]
@@ -1035,8 +1114,6 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
         continue;
       }
       const bool known = diagnostic.support_known;
-      const bool retain_unknown =
-          request.task_mode == GlobalNavigationTaskMode::MISSION_BEST_EFFORT;
       const bool blocked = diagnostic.blocked;
       if (blocked) {
         ++result.gnss_blocked_satellite_count;
@@ -1059,11 +1136,6 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
           std::clamp(diagnostic.combined_conservative_kappa, 0.0, 1.0));
       if (!known) {
         ++result.gnss_unknown_satellite_count;
-        if (!retain_unknown) {
-          diagnostic.exclusion_reason = "local_map_support_unknown";
-          result.gnss_satellites.push_back(std::move(diagnostic));
-          continue;
-        }
       }
       if (known) {
         ++result.gnss_known_satellite_count;
@@ -1075,11 +1147,16 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
           : 0.0;
       if (visible) {
         ++result.gnss_visible_satellite_count;
-        local_mask[sat_index] = true;
-        ++result.gnss_used_satellite_count;
-        diagnostic.used = true;
-        diagnostic.exclusion_reason = known
-            ? "used" : "used_with_unknown_support_penalty";
+        lower_bound_mask[sat_index] = true;
+        if (known) {
+          local_mask[sat_index] = true;
+          ++result.gnss_used_satellite_count;
+          diagnostic.used = true;
+          diagnostic.exclusion_reason = "used";
+        } else {
+          diagnostic.exclusion_reason =
+              "excluded_from_pl_upper_unknown_support";
+        }
         if (kappa > 0.0) {
           ++result.gnss_attenuated_satellite_count;
         }
@@ -1124,6 +1201,7 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
     result.gnss_hard_occlusion =
         params_.gnss.visibility_params.hard_occlusion;
     local_satellite_masks.push_back(std::move(local_mask));
+    lower_bound_satellite_masks.push_back(std::move(lower_bound_mask));
   }
 
   out.timing.unique_evidence_point_count =
@@ -1281,78 +1359,160 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
   struct CandidateAdvisoryCacheEntry {
     std::uint64_t evidence_point_id = 0;
     std::vector<bool> satellite_mask;
-    PredictorQueryResult prediction;
+    std::size_t source_index = 0;
   };
   std::unordered_multimap<std::uint64_t, CandidateAdvisoryCacheEntry>
       candidate_cache;
   candidate_cache.reserve(request.points.size());
   const auto advisory_started_at = std::chrono::steady_clock::now();
+  std::vector<GnssAdvisoryResult> receiver_advisories(
+      request.points.size());
+  std::vector<GnssAdvisoryResult> lower_receiver_advisories(
+      request.points.size());
+  std::vector<std::size_t> advisory_source_rows(request.points.size());
+  std::vector<std::size_t> unique_advisory_rows;
+  unique_advisory_rows.reserve(request.points.size());
   for (std::size_t index = 0; index < request.points.size(); ++index) {
-    const auto point_started_at = std::chrono::steady_clock::now();
-    if (budget_expired()) {
-      fail_from(index, ForwardRiskFailureReason::COMPUTE_BUDGET_EXCEEDED);
-      break;
-    }
-    auto& result = out.points[index];
+    const auto& result = out.points[index];
     const auto& local_mask = local_satellite_masks[index];
+    const auto& lower_mask = lower_bound_satellite_masks[index];
     auto cached_receiver = receiver_cache.find(
         result.local_satellite_set_hash);
-    GnssAdvisoryResult uncached_receiver;
-    const GnssAdvisoryResult* receiver_advisory = nullptr;
     if (cached_receiver != receiver_cache.end() &&
         cached_receiver->second.satellite_mask == local_mask) {
-      receiver_advisory = &cached_receiver->second.advisory;
+      receiver_advisories[index] = cached_receiver->second.advisory;
       ++out.timing.receiver_cache_hit_count;
     } else {
-      uncached_receiver =
-          gnss_.query_receiver_measured_with_satellite_mask(
-              request.snapshot, local_mask);
+      auto receiver = gnss_.query_receiver_measured_with_satellite_mask(
+          request.snapshot, local_mask);
+      receiver_advisories[index] = receiver;
       if (cached_receiver == receiver_cache.end()) {
-        auto inserted = receiver_cache.emplace(
+        receiver_cache.emplace(
             result.local_satellite_set_hash,
-            ReceiverAdvisoryCacheEntry{local_mask, uncached_receiver});
-        receiver_advisory = &inserted.first->second.advisory;
-      } else {
-        // A hash collision must never cause a receiver advisory from another
-        // satellite set to be reused.
-        receiver_advisory = &uncached_receiver;
+            ReceiverAdvisoryCacheEntry{local_mask, std::move(receiver)});
       }
     }
+    lower_receiver_advisories[index] =
+        gnss_.query_receiver_measured_with_satellite_mask(
+            request.snapshot, lower_mask);
+
     const auto& query = request.points[index];
-    const PredictorQueryInput input(
-        query.position_map, request.snapshot, query.query_time_s,
-        query.horizon_s, "map", request.evaluation_time_s);
-    bool reused_candidate = false;
-    if (query.evidence_point_id != 0) {
-      const std::uint64_t cache_key = result.local_satellite_set_hash ^
-          (query.evidence_point_id + 0x9e3779b97f4a7c15ULL +
-           (result.local_satellite_set_hash << 6U) +
-           (result.local_satellite_set_hash >> 2U));
-      const auto range = candidate_cache.equal_range(cache_key);
-      for (auto candidate = range.first; candidate != range.second;
-           ++candidate) {
-        if (candidate->second.evidence_point_id == query.evidence_point_id &&
-            candidate->second.satellite_mask == local_mask) {
-          result.prediction = candidate->second.prediction;
-          reused_candidate = true;
-          ++out.timing.candidate_cache_hit_count;
-          break;
-        }
-      }
-      if (!reused_candidate) {
-        result.prediction = queryWithSpatialAdvisory(
-            input, nullptr, nullptr, diagnostics, &local_mask,
-            receiver_advisory, request.task_mode);
-        candidate_cache.emplace(
-            cache_key, CandidateAdvisoryCacheEntry{
-                query.evidence_point_id, local_mask, result.prediction});
-      }
-    } else {
-      result.prediction = queryWithSpatialAdvisory(
-          input, nullptr, nullptr, diagnostics, &local_mask,
-          receiver_advisory, request.task_mode);
+    advisory_source_rows[index] = index;
+    if (query.evidence_point_id == 0) {
+      unique_advisory_rows.push_back(index);
+      continue;
     }
-    result.gnss_supported = result.prediction.gnss.valid &&
+    const std::uint64_t cache_key = result.local_satellite_set_hash ^
+        (query.evidence_point_id + 0x9e3779b97f4a7c15ULL +
+         (result.local_satellite_set_hash << 6U) +
+         (result.local_satellite_set_hash >> 2U));
+    bool reused_candidate = false;
+    const auto range = candidate_cache.equal_range(cache_key);
+    for (auto candidate = range.first; candidate != range.second;
+         ++candidate) {
+      if (candidate->second.evidence_point_id == query.evidence_point_id &&
+          candidate->second.satellite_mask == local_mask) {
+        advisory_source_rows[index] = candidate->second.source_index;
+        reused_candidate = true;
+        ++out.timing.candidate_cache_hit_count;
+        break;
+      }
+    }
+    if (!reused_candidate) {
+      candidate_cache.emplace(
+          cache_key, CandidateAdvisoryCacheEntry{
+              query.evidence_point_id, local_mask, index});
+      unique_advisory_rows.push_back(index);
+    }
+  }
+
+  std::vector<PredictorQueryResult> prefetched_predictions(
+      request.points.size());
+  std::vector<PredictorQueryResult> prefetched_lower_predictions(
+      request.points.size());
+  std::atomic<std::size_t> next_advisory_row{0u};
+  std::atomic<bool> advisory_aborted{false};
+  const auto advisory_worker = [&]() {
+    while (!advisory_aborted.load(std::memory_order_relaxed)) {
+      const std::size_t work_index = next_advisory_row.fetch_add(
+          1u, std::memory_order_relaxed);
+      if (work_index >= unique_advisory_rows.size()) return;
+      if (budget_expired()) {
+        advisory_aborted.store(true, std::memory_order_relaxed);
+        return;
+      }
+      const std::size_t index = unique_advisory_rows[work_index];
+      const auto& query = request.points[index];
+      const PredictorQueryInput input(
+          query.position_map, request.snapshot, query.query_time_s,
+          query.horizon_s, "map", request.evaluation_time_s);
+      prefetched_predictions[index] = queryWithSpatialAdvisory(
+          input, nullptr, nullptr, diagnostics,
+          &local_satellite_masks[index], &receiver_advisories[index],
+          request.task_mode);
+      prefetched_lower_predictions[index] = queryWithSpatialAdvisory(
+          input, nullptr, nullptr, nullptr,
+          &lower_bound_satellite_masks[index],
+          &lower_receiver_advisories[index],
+          GlobalNavigationTaskMode::MISSION_BEST_EFFORT, true);
+    }
+  };
+  const std::size_t advisory_worker_count = std::min<std::size_t>(
+      unique_advisory_rows.size(), static_cast<std::size_t>(
+          std::max(1, diagnostics == nullptr
+              ? params_.execution_batch_worker_count : 1)));
+  std::vector<std::thread> advisory_workers;
+  advisory_workers.reserve(
+      advisory_worker_count > 0u ? advisory_worker_count - 1u : 0u);
+  for (std::size_t worker = 1u; worker < advisory_worker_count; ++worker) {
+    advisory_workers.emplace_back(advisory_worker);
+  }
+  advisory_worker();
+  for (auto& worker : advisory_workers) worker.join();
+  if (advisory_aborted.load(std::memory_order_relaxed) || budget_expired()) {
+    fail_from(0, ForwardRiskFailureReason::COMPUTE_BUDGET_EXCEEDED);
+    return out;
+  }
+
+  for (std::size_t index = 0; index < request.points.size(); ++index) {
+    const auto point_started_at = std::chrono::steady_clock::now();
+    auto& result = out.points[index];
+    result.prediction = prefetched_predictions[advisory_source_rows[index]];
+    const auto& lower_prediction =
+        prefetched_lower_predictions[advisory_source_rows[index]];
+    result.pl_lower_available = lower_prediction.gnss.valid &&
+        lower_prediction.fused.valid &&
+        std::isfinite(lower_prediction.fused.hpl) &&
+        std::isfinite(lower_prediction.fused.vpl);
+    if (result.pl_lower_available) {
+      result.hpl_lower_m = lower_prediction.fused.hpl;
+      result.vpl_lower_m = lower_prediction.fused.vpl;
+      result.safety_ratio_lower = std::max(
+          result.hpl_lower_m / request.hal,
+          result.vpl_lower_m / request.val);
+    }
+    result.pl_upper_available = result.prediction.gnss.valid &&
+        result.prediction.fused.valid &&
+        std::isfinite(result.prediction.fused.hpl) &&
+        std::isfinite(result.prediction.fused.vpl);
+    if (result.pl_upper_available) {
+      result.hpl_upper_m = result.prediction.fused.hpl;
+      result.vpl_upper_m = result.prediction.fused.vpl;
+      result.safety_ratio_upper = std::max(
+          result.hpl_upper_m / request.hal,
+          result.vpl_upper_m / request.val);
+    }
+    if (result.pl_lower_available && result.pl_upper_available &&
+        (result.hpl_upper_m + 1.0e-9 < result.hpl_lower_m ||
+         result.vpl_upper_m + 1.0e-9 < result.vpl_lower_m ||
+         result.safety_ratio_upper + 1.0e-9 < result.safety_ratio_lower)) {
+      result.pl_upper_available = false;
+      result.hpl_upper_m = std::numeric_limits<double>::infinity();
+      result.vpl_upper_m = std::numeric_limits<double>::infinity();
+      result.safety_ratio_upper = std::numeric_limits<double>::infinity();
+    }
+    result.gnss_supported = result.pl_upper_available &&
+        result.prediction.gnss.valid &&
         result.prediction.gnss.n_used >= params_.gnss.geometry_params.min_sats;
     result.lidar_supported = result.prediction.lidar.valid;
     result.fim_supported = result.prediction.fused.valid &&
@@ -1386,9 +1546,7 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
     } else if (!result.fim_supported) {
       result.failure_reason = ForwardRiskFailureReason::FIM_SUPPORT_MISSING;
     } else {
-      result.safety_ratio = std::max(
-          result.prediction.fused.hpl / request.hal,
-          result.prediction.fused.vpl / request.val);
+      result.safety_ratio = result.safety_ratio_upper;
       result.fim_ratio = std::max(
           result.prediction.fused.pre_conservative_hpl / request.hal,
           result.prediction.fused.pre_conservative_vpl / request.val);

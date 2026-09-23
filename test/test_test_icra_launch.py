@@ -69,8 +69,18 @@ class TestIcraLaunchTest(unittest.TestCase):
         self.assertEqual(profile["p0.fit_grid_to_map_cloud"], "false")
         self.assertEqual(profile["p0.map_topic"], "")
         self.assertEqual(profile["planner_executor_thread_count"], "6")
+        self.assertEqual(profile["p0.predictor.worker_count"], "8")
         scenario = MODULE.SCENARIO_PRESETS["icra072_p4_selection_trigger_v1"]
         self.assertEqual(scenario["lidar_sensing_rate_hz"], "10.0")
+        mirror = MODULE.SCENARIO_PRESETS[
+            "icra072_p4_selection_trigger_mirror_v1"]
+        differing = {
+            key for key in set(scenario) | set(mirror)
+            if scenario.get(key) != mirror.get(key)
+        }
+        self.assertEqual(
+            differing, {"p1_map_fixture", "p1_fixture_mirror_y"})
+        self.assertEqual(mirror["p1_fixture_mirror_y"], "true")
         self.assertEqual(
             {key: profile[key] for key in MODULE.ICRA_DEV_FIXED_VALUES},
             MODULE.ICRA_DEV_FIXED_VALUES,

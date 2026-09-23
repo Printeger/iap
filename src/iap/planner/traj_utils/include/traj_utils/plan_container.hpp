@@ -193,15 +193,15 @@ namespace ego_planner
   struct PlanParameters
   {
     /* planning algorithm parameters */
-    double max_vel_, max_acc_, max_jerk_; // physical limits
-    double ctrl_pt_dist;                  // distance between adjacient B-spline control points
-    double feasibility_tolerance_;        // permitted ratio of vel/acc exceeding limits
-    double planning_horizen_;
+    double max_vel_ = 2.0, max_acc_ = 3.0, max_jerk_ = 4.0;
+    double ctrl_pt_dist = 0.4;  // adjacent B-spline control-point distance
+    double feasibility_tolerance_ = 0.05;
+    double planning_horizen_ = 7.5;
     double p1_collision_fanout_clearance_m_ = 0.0;
     bool p1_collision_fanout_preserve_homotopies_ = false;
     bool p1_collision_fanout_mirror_y_ = false;
-    bool use_distinctive_trajs;
-    int drone_id; // single drone: drone_id <= -1, swarm: drone_id >= 0
+    bool use_distinctive_trajs = true;
+    int drone_id = -1; // single drone: drone_id <= -1, swarm: drone_id >= 0
 
     /* processing time */
     double time_search_ = 0.0;
@@ -220,6 +220,7 @@ namespace ego_planner
     int parent_traj_id_ = 0;
     rclcpp::Time parent_start_time_{0, 0, RCL_ROS_TIME};
     std::string parent_curve_hash_;
+    double parent_switch_elapsed_s_ = 0.0;
     double duration_ = 0.0;
     rclcpp::Time start_time_;
     Eigen::Vector3d start_pos_;

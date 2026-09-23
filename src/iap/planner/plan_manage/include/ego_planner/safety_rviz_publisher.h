@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -350,6 +351,7 @@ class SafetyRvizPublisher {
   double last_p4_publish_s_ = std::numeric_limits<double>::quiet_NaN();
   double last_p4_topology_publish_s_ =
       std::numeric_limits<double>::quiet_NaN();
+  std::set<uint64_t> last_p4_topology_channel_ids_;
 };
 
 }  // namespace ego_planner

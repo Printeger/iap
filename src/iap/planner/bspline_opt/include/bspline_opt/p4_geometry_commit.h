@@ -45,10 +45,11 @@ struct P4GeometryCommitRequest
   std::shared_ptr<const FrozenOccupancyEpoch> latest_occupancy;
   OccupancyCollisionDeltaHistory history;
   std::vector<Eigen::Vector3d> executable_path;
-  // Stable identity of the continuous curve. The sampled-path hash remains
-  // part of the cache key, so a trimmed suffix can never reuse a full-curve
-  // corridor accidentally.
+  // Stable identity of the continuous curve. Runtime callers submit the
+  // same full sampled path and advance this station instead of rebuilding a
+  // differently hashed suffix on every watchdog tick.
   std::string curve_hash;
+  double minimum_path_station_m = 0.0;
   double vehicle_radius_m = std::numeric_limits<double>::quiet_NaN();
   double map_inflation_m = std::numeric_limits<double>::quiet_NaN();
   std::string expected_geometry_id;
@@ -116,10 +117,15 @@ private:
     {
       std::size_t address = 0;
       double first_path_distance_m = 0.0;
+      double last_path_distance_m = 0.0;
       bool in_inflated_corridor = false;
     };
     std::vector<Voxel> voxels;
-    bool baseline_clear = false;
+    // Corridor geometry is independent of occupancy generation.  Keep the
+    // generation whose immutable baseline was actually scanned separately so
+    // a later map can reuse voxel/station geometry without inheriting stale
+    // clearance evidence.
+    uint64_t baseline_clear_generation = 0;
   };
   mutable std::mutex cache_mutex_;
   mutable std::unordered_map<std::string, std::shared_ptr<const CachedCorridor>>

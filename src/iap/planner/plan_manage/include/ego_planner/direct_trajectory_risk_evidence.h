@@ -158,6 +158,22 @@ struct P4DirectTrajectoryRiskEvidence {
     return certified_safe ||
         (trajectory_assurance_complete && trajectory_assurance.authorized());
   }
+
+  bool missionDegradedAuthorized() const {
+    return task_mode ==
+               iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT &&
+        trajectory_assurance_complete &&
+        trajectory_assurance.mode ==
+            iap::TrajectoryExecutionMode::MISSION_DEGRADED_EXECUTION &&
+        trajectory_assurance.authorized();
+  }
+
+  // `complete` truthfully remains false when GNSS rows are unavailable.
+  // Mission-best-effort may nevertheless authorize the curve when the
+  // bounded global-exposure policy and complete local/braking evidence do.
+  bool admissionComplete() const {
+    return complete || missionDegradedAuthorized();
+  }
 };
 
 }  // namespace ego_planner

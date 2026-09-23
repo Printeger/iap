@@ -338,6 +338,30 @@ TEST(RollingSpatialAdvisoryWindowTest,
 }
 
 TEST(RollingSpatialAdvisoryWindowTest,
+     ReusableOutputBufferPreservesHorizonResultsAndCapacity) {
+  auto occupancy = std::make_shared<LocalOccupancyGrid>();
+  const auto snapshot = makeSnapshot(1);
+  RollingSpatialAdvisoryWindow window;
+  ASSERT_TRUE(window.beginRefresh(makeRefreshInput(occupancy, snapshot)));
+
+  const Eigen::Vector3d position(0.5, 0.5, 0.5);
+  std::vector<PredictorQueryInput> inputs;
+  inputs.emplace_back(position, snapshot, 100.0, 0.0, "map", 100.0);
+  inputs.emplace_back(position, snapshot, 101.0, 1.0, "map", 100.0);
+  std::vector<PredictorQueryResult> outputs;
+  outputs.reserve(8u);
+  const auto capacity = outputs.capacity();
+  PredictorBatchDiagnostics diagnostics;
+
+  ASSERT_TRUE(window.queryPositionHorizons(inputs, &outputs, &diagnostics));
+  ASSERT_EQ(outputs.size(), inputs.size());
+  EXPECT_EQ(outputs.capacity(), capacity);
+  EXPECT_DOUBLE_EQ(outputs[0].horizon_s, 0.0);
+  EXPECT_DOUBLE_EQ(outputs[1].horizon_s, 1.0);
+  EXPECT_EQ(diagnostics.fusion_advisory_invocations, 2u);
+}
+
+TEST(RollingSpatialAdvisoryWindowTest,
      EvaluationTimeControlsSupportWhileFutureQueryTimeStillVaries) {
   auto occupancy = std::make_shared<LocalOccupancyGrid>();
   const auto snapshot = makeGnssSnapshot(1);

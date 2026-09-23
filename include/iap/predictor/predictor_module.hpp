@@ -81,7 +81,8 @@ class PredictorModule {
       const std::vector<bool>* gnss_satellite_mask = nullptr,
       const GnssAdvisoryResult* selected_receiver_advisory = nullptr,
       GlobalNavigationTaskMode task_mode =
-          GlobalNavigationTaskMode::STRICT_GLOBAL) const;
+          GlobalNavigationTaskMode::STRICT_GLOBAL,
+      bool gnss_unknown_as_open_bound = false) const;
 };
 
 }  // namespace iap

@@ -74,6 +74,7 @@ void extendBounds(const iap::VoxelKey& key,
 
 std::optional<P0OccupancyEpoch> P0OccupancyEpochAdapter::adaptFields(
     std::shared_ptr<const std::vector<Eigen::Vector3d>> occupied_centers,
+    std::shared_ptr<const std::vector<iap::VoxelKey>> occupied_keys,
     std::shared_ptr<const std::vector<Eigen::Vector3d>> environment_centers,
     std::shared_ptr<const iap::TrustedLocalMapSupport> trusted_support,
     const Eigen::Vector3d& lattice_origin,
@@ -92,7 +93,13 @@ std::optional<P0OccupancyEpoch> P0OccupancyEpochAdapter::adaptFields(
     const double clearance_transition_m,
     std::optional<P0ReusableLosOccupancy> reusable_los,
     std::shared_ptr<const std::vector<Eigen::Vector3d>>
-        current_frame_centers) {
+        current_frame_centers,
+    std::string* failure_reason) {
+  const auto fail = [failure_reason](const char* reason) {
+      if (failure_reason) *failure_reason = reason;
+      return std::optional<P0OccupancyEpoch>{};
+    };
+  if (failure_reason) failure_reason->clear();
   if (!diagnostic_query || !occupied_centers || !environment_centers ||
       !source_owner ||
       !live_source_owner || !live_generation ||
@@ -102,49 +109,58 @@ std::optional<P0OccupancyEpoch> P0OccupancyEpochAdapter::adaptFields(
       !extent_m.allFinite() || (extent_m.array() <= 0.0).any() ||
       (voxel_dimensions.array() <= 0).any() || geometry_id.empty() ||
       frame_contract_id.empty()) {
-    return std::nullopt;
+    return fail("invalid_metadata_or_source_seam");
   }
 
   const std::size_t captured_count = occupied_centers->size();
   if (captured_count > static_cast<std::size_t>(INT_MAX)) {
-    return std::nullopt;
+    return fail("occupied_center_count_overflow");
   }
   std::vector<iap::VoxelKey> normalized_keys;
-  normalized_keys.reserve(captured_count);
-  for (const auto& center : *occupied_centers) {
-    if (!center.allFinite()) {
-      return std::nullopt;
-    }
-    iap::VoxelKey key{};
-    for (int axis = 0; axis < 3; ++axis) {
-      const double scaled =
-          (center(axis) - lattice_origin(axis)) / resolution_m;
-      const double floored = std::floor(scaled);
-      if (!std::isfinite(floored) ||
-          floored < static_cast<double>(std::numeric_limits<int>::min()) ||
-          floored > static_cast<double>(std::numeric_limits<int>::max())) {
-        return std::nullopt;
+  if (occupied_keys) {
+    if (occupied_keys->size() != captured_count ||
+        !std::is_sorted(occupied_keys->begin(), occupied_keys->end(), keyLess) ||
+        std::adjacent_find(occupied_keys->begin(), occupied_keys->end()) !=
+            occupied_keys->end())
+      return fail("producer_voxel_keys_invalid");
+    normalized_keys = *occupied_keys;
+  } else {
+    normalized_keys.reserve(captured_count);
+    for (const auto& center : *occupied_centers) {
+      if (!center.allFinite()) {
+        return fail("occupied_center_nonfinite");
       }
-      const double expected = lattice_origin(axis) +
-          (floored + 0.5) * resolution_m;
-      const double scale = std::max(
-          {1.0, std::abs(center(axis)), std::abs(lattice_origin(axis)),
-           std::abs(resolution_m)});
-      const double tolerance =
-          64.0 * std::numeric_limits<double>::epsilon() * scale;
-      if (std::abs(center(axis) - expected) > tolerance) {
-        return std::nullopt;
+      iap::VoxelKey key{};
+      for (int axis = 0; axis < 3; ++axis) {
+        const double scaled =
+            (center(axis) - lattice_origin(axis)) / resolution_m;
+        const double floored = std::floor(scaled);
+        if (!std::isfinite(floored) ||
+            floored < static_cast<double>(std::numeric_limits<int>::min()) ||
+            floored > static_cast<double>(std::numeric_limits<int>::max())) {
+          return fail("occupied_center_index_overflow");
+        }
+        const double expected = lattice_origin(axis) +
+            (floored + 0.5) * resolution_m;
+        const double scale = std::max(
+            {1.0, std::abs(center(axis)), std::abs(lattice_origin(axis)),
+             std::abs(resolution_m)});
+        const double tolerance =
+            64.0 * std::numeric_limits<double>::epsilon() * scale;
+        if (std::abs(center(axis) - expected) > tolerance) {
+          return fail("occupied_center_not_on_lattice");
+        }
+        if (axis == 0) key.x = static_cast<int>(floored);
+        if (axis == 1) key.y = static_cast<int>(floored);
+        if (axis == 2) key.z = static_cast<int>(floored);
       }
-      if (axis == 0) key.x = static_cast<int>(floored);
-      if (axis == 1) key.y = static_cast<int>(floored);
-      if (axis == 2) key.z = static_cast<int>(floored);
+      normalized_keys.push_back(key);
     }
-    normalized_keys.push_back(key);
-  }
-  std::sort(normalized_keys.begin(), normalized_keys.end(), keyLess);
-  if (std::adjacent_find(normalized_keys.begin(), normalized_keys.end()) !=
-      normalized_keys.end()) {
-    return std::nullopt;
+    std::sort(normalized_keys.begin(), normalized_keys.end(), keyLess);
+    if (std::adjacent_find(normalized_keys.begin(), normalized_keys.end()) !=
+        normalized_keys.end()) {
+      return fail("duplicate_occupied_voxel");
+    }
   }
 
   iap::LocalOccupancyGrid::Params params;
@@ -160,7 +176,7 @@ std::optional<P0OccupancyEpoch> P0OccupancyEpochAdapter::adaptFields(
           iap::LocalOccupancyGrid::kMaxClearanceTransitionM ||
       clearance_transition_m / resolution_m >
           iap::LocalOccupancyGrid::kMaxClearanceTransitionRadiusVoxels) {
-    return std::nullopt;
+    return fail("invalid_clearance_transition");
   }
   params.clearance_transition_m =
       clearance_transition_m;
@@ -189,7 +205,7 @@ std::optional<P0OccupancyEpoch> P0OccupancyEpochAdapter::adaptFields(
         diagnostics.inserted_count != environment_centers->size() ||
         diagnostics.voxel_count != environment_centers->size() ||
         built->size() != environment_centers->size()) {
-      return std::nullopt;
+      return fail("environment_voxel_capacity_or_count_mismatch");
     }
     los_owner = std::move(built);
   }

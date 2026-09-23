@@ -14,6 +14,7 @@
 #include <iap/map/local_occupancy.hpp>
 #include <iap/map/trusted_local_map_support.hpp>
 #include <iap/planner/risk_grid_map.hpp>
+#include <plan_env/local_evidence_snapshot.h>
 
 struct FrozenOccupancyEpoch;
 
@@ -28,6 +29,30 @@ auto currentFrameCenters(const Epoch& epoch, int)
 
 template <typename Epoch>
 std::shared_ptr<const std::vector<Eigen::Vector3d>> currentFrameCenters(
+    const Epoch&, long) {
+  return nullptr;
+}
+
+template <typename Epoch>
+auto rawVoxelKeys(const Epoch& epoch, int)
+    -> decltype(epoch.raw_occupied_voxel_keys) {
+  return epoch.raw_occupied_voxel_keys;
+}
+
+template <typename Epoch>
+std::shared_ptr<const std::vector<iap::VoxelKey>> rawVoxelKeys(
+    const Epoch&, long) {
+  return nullptr;
+}
+
+template <typename Epoch>
+auto localEvidenceSnapshot(const Epoch& epoch, int)
+    -> decltype(epoch.local_evidence_snapshot) {
+  return epoch.local_evidence_snapshot;
+}
+
+template <typename Epoch>
+std::shared_ptr<const LocalEvidenceSnapshot> localEvidenceSnapshot(
     const Epoch&, long) {
   return nullptr;
 }
@@ -107,6 +132,7 @@ struct P0OccupancyEpoch {
   std::shared_ptr<const std::vector<Eigen::Vector3d>>
       environment_occupied_voxel_centers;
   std::shared_ptr<const iap::TrustedLocalMapSupport> trusted_local_map_support;
+  std::shared_ptr<const LocalEvidenceSnapshot> local_evidence_snapshot;
   // The exact producer-owned epoch used to build this P0 snapshot. P4 uses
   // it as the immutable base for route-local commit validation; it must never
   // be replaced with a newly captured live map.
@@ -132,9 +158,38 @@ inline iap::LocalMapSupportQuery queryP0LocalMapSupport(
   if (epoch.trusted_local_map_support) {
     model = epoch.trusted_local_map_support->query(
         position, evaluation_time_s, query_time_s);
-    if (model.complete()) {
-      return model;
+    // The FOV/range envelope predicts sensing capability only. It cannot
+    // authorize observed-free GNSS LOS support.
+    if (model.complete())
+      model.status = iap::LocalMapSupportStatus::OBSERVATION_INCOMPLETE;
+  }
+  if (epoch.local_evidence_snapshot) {
+    const auto evidence = epoch.local_evidence_snapshot->queryVoxel(
+        position, evaluation_time_s, epoch.generation,
+        epoch.local_evidence_snapshot->identity().active_window_generation,
+        epoch.frame_contract_id,
+        epoch.local_evidence_snapshot->identity().sensor_model_identity);
+    iap::LocalMapSupportQuery strict;
+    strict.authority = iap::LocalMapSupportAuthority::STRICT_OBSERVATION;
+    strict.observation_stamp_s = evidence.observation_timestamp_s;
+    strict.observation_age_s = evidence.age_s;
+    if (evidence.state != EvidenceVoxelState::UNKNOWN) {
+      strict.status = iap::LocalMapSupportStatus::MODEL_COMPLETE;
+      return strict;
     }
+    if (evidence.reason == LocalEvidenceReason::STALE_OBSERVATION) {
+      strict.status = iap::LocalMapSupportStatus::EXPIRED;
+    } else if (evidence.reason == LocalEvidenceReason::OUT_OF_RANGE) {
+      strict.status = iap::LocalMapSupportStatus::OUTSIDE_ENVELOPE;
+    } else if (evidence.reason ==
+                   LocalEvidenceReason::COORDINATE_CONTRACT_MISMATCH ||
+               evidence.reason == LocalEvidenceReason::SENSOR_MODEL_MISMATCH ||
+               evidence.reason == LocalEvidenceReason::GENERATION_MISMATCH) {
+      strict.status = iap::LocalMapSupportStatus::FRAME_INVALID;
+    } else {
+      strict.status = iap::LocalMapSupportStatus::OBSERVATION_INCOMPLETE;
+    }
+    return strict;
   }
   if (!epoch.diagnostic_query || !position.allFinite() ||
       !std::isfinite(evaluation_time_s) || !std::isfinite(query_time_s)) {
@@ -190,7 +245,8 @@ class P0OccupancyEpochAdapter {
       P0OccupancyEpoch::LiveSourceOwner live_source_owner,
       P0OccupancyEpoch::LiveGeneration live_generation,
       double clearance_transition_m = 0.0,
-      std::optional<P0ReusableLosOccupancy> reusable_los = std::nullopt) {
+      std::optional<P0ReusableLosOccupancy> reusable_los = std::nullopt,
+      std::string* failure_reason = nullptr) {
     iap::RiskGridMap::OccupancyDiagnosticQuery diagnostic_query;
     if (epoch.diagnostic_query) {
       const auto neutral_query = epoch.diagnostic_query;
@@ -218,7 +274,8 @@ class P0OccupancyEpochAdapter {
             return out;
           };
     }
-    return adaptFields(epoch.raw_occupied_voxel_centers,
+    auto adapted = adaptFields(epoch.raw_occupied_voxel_centers,
+                       p0_occupancy_detail::rawVoxelKeys(epoch, 0),
                        epoch.environment_occupied_voxel_centers,
                        epoch.trusted_local_map_support,
                        epoch.lattice_origin, epoch.extent_m,
@@ -231,7 +288,13 @@ class P0OccupancyEpochAdapter {
                        std::move(live_source_owner),
                        std::move(live_generation), clearance_transition_m,
                        std::move(reusable_los),
-                       p0_occupancy_detail::currentFrameCenters(epoch, 0));
+                       p0_occupancy_detail::currentFrameCenters(epoch, 0),
+                       failure_reason);
+    if (adapted) {
+      adapted->local_evidence_snapshot =
+          p0_occupancy_detail::localEvidenceSnapshot(epoch, 0);
+    }
+    return adapted;
   }
 
   static bool sameVersion(const P0OccupancyEpoch& base,
@@ -242,6 +305,7 @@ class P0OccupancyEpochAdapter {
  private:
   static std::optional<P0OccupancyEpoch> adaptFields(
       std::shared_ptr<const std::vector<Eigen::Vector3d>> occupied_centers,
+      std::shared_ptr<const std::vector<iap::VoxelKey>> occupied_keys,
       std::shared_ptr<const std::vector<Eigen::Vector3d>> environment_centers,
       std::shared_ptr<const iap::TrustedLocalMapSupport> trusted_support,
       const Eigen::Vector3d& lattice_origin,
@@ -260,7 +324,8 @@ class P0OccupancyEpochAdapter {
       double clearance_transition_m,
       std::optional<P0ReusableLosOccupancy> reusable_los,
       std::shared_ptr<const std::vector<Eigen::Vector3d>>
-          current_frame_centers);
+          current_frame_centers,
+      std::string* failure_reason);
 };
 
 }  // namespace ego_planner

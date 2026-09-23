@@ -212,9 +212,28 @@ class P5RuntimeIntegrityGate {
       const P4DirectTrajectoryRiskEvidence* direct_risk = nullptr,
       const std::string& required_gnss_core_policy = {},
       const std::string& required_window_layout_hash = {},
-      const std::string& required_window_satellite_sets_hash = {});
+      const std::string& required_window_satellite_sets_hash = {},
+      double runtime_authority_end_s =
+          std::numeric_limits<double>::infinity(),
+      double runtime_trajectory_time_s =
+          std::numeric_limits<double>::quiet_NaN());
 
   P5GateStatus evaluateFinal(
+      LocalTrajData& local_data,
+      const std::shared_ptr<const iap::RiskGridSnapshot>& snapshot,
+      double now_s,
+      double emergency_time_s,
+      const P4DirectTrajectoryRiskEvidence* direct_risk = nullptr,
+      const std::string& required_gnss_core_policy = {},
+      const std::string& required_window_layout_hash = {},
+      const std::string& required_window_satellite_sets_hash = {});
+
+  // Typed admission for an exact, terminal-stopping common observation
+  // curve. It intentionally applies the same current, collision-bound direct
+  // risk, alert-limit, freshness, dynamics and braking certificate checks as
+  // final admission; the distinct entry point prevents callers from treating
+  // unresolved branch suffixes as part of the executable curve.
+  P5GateStatus evaluateObservationFinal(
       LocalTrajData& local_data,
       const std::shared_ptr<const iap::RiskGridSnapshot>& snapshot,
       double now_s,
@@ -271,6 +290,10 @@ class P5RuntimeIntegrityGate {
     std::string required_gnss_core_policy;
     std::string required_window_layout_hash;
     std::string required_window_satellite_sets_hash;
+    double runtime_authority_end_s =
+        std::numeric_limits<double>::infinity();
+    double runtime_trajectory_time_s =
+        std::numeric_limits<double>::quiet_NaN();
   };
 
   void createRosInterfaces();

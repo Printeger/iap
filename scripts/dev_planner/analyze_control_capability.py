@@ -35,7 +35,7 @@ def _records(path: Path) -> list[dict[str, Any]]:
         for line in stream:
             if line.strip():
                 row = json.loads(line)
-                if row.get("event") == "controller_trace":
+                if row.get("event", row.get("kind")) == "controller_trace":
                     output.append(row.get("payload", row))
     return output
 

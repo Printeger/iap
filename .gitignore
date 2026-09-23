@@ -76,3 +76,16 @@ CATKIN_IGNORE
 /tools/build/
 /tools/install/
 /symlink_install_manifest.txt
+
+# Repository-root planner test outputs
+/*.csv.execution_events.csv
+/*.csv.forward_candidates.csv
+/*.csv.forward_channel_decisions.csv
+/*.csv.forward_lineage.csv
+/*.csv.forward_risk_samples.csv
+/*.csv.gnss_risk_detail.csv
+/*.csv.runtime_window.csv
+/*.csv.runtime_window_batch.csv
+/*.csv.runtime_window_satellite.csv
+/planner_p1_planning_context_timeline.csv
+/src/iap/planner/log/

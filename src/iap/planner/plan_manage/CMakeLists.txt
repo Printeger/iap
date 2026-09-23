@@ -130,7 +130,7 @@ if(BUILD_TESTING)
     src/p0_occupancy_epoch_adapter.cpp
   )
   ament_target_dependencies(test_p0_occupancy_epoch_adapter
-    Eigen3 iap
+    Eigen3 iap plan_env
   )
   target_link_libraries(test_p0_occupancy_epoch_adapter iap::iap)
 
@@ -173,7 +173,7 @@ if(BUILD_TESTING)
   )
   ament_target_dependencies(test_p5_runtime_integrity_gate
     rclcpp nav_msgs geometry_msgs std_msgs sensor_msgs visualization_msgs
-    traj_utils bspline_opt iap
+    traj_utils bspline_opt plan_env iap
   )
   target_link_libraries(test_p5_runtime_integrity_gate
     ${TRAJ_UTILS_LIB}
