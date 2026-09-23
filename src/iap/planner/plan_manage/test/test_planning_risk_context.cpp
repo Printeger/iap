@@ -2258,6 +2258,11 @@ void bindObservationSensorEvidence(
   decision->observation_raw_occluders =
       std::make_shared<const std::vector<Eigen::Vector3d>>();
   decision->observation_missing_los_by_channel = {{target}, {target}};
+  decision->observation_channel_guides.clear();
+  for (const auto& candidate : decision->candidates)
+    decision->observation_channel_guides.push_back(
+        candidate.topology_path.empty() ? candidate.path :
+                                          candidate.topology_path);
 }
 
 }  // namespace
@@ -3030,10 +3035,15 @@ TEST(P4ObservationPublication,
   auto manager = std::make_unique<ego_planner::EGOPlannerManager>();
   manager->pp_.max_vel_ = 20.0;
   manager->pp_.max_acc_ = 100.0;
+  manager->pp_.use_distinctive_trajs = false;
   manager->setP4ControlCapabilityProfileForTest(
       permissiveTestControlProfile());
   manager->setP4VerticalSliceOptimizerForTest(std::move(optimizer), map);
+  manager->deliverTrajToOptimizer();
   manager->setLatestRiskSnapshotForTest(snapshot);
+  manager->setTimeProvider([] {
+    return rclcpp::Time(10, 0, RCL_ROS_TIME);
+  });
 
   ego_planner::P5RuntimeIntegrityGate::Config p5_config;
   p5_config.enable_final_gate = true;
@@ -3052,6 +3062,8 @@ TEST(P4ObservationPublication,
 
   auto node = std::make_shared<rclcpp::Node>(
       "certified_observation_publication_test");
+  manager->setPlanningVisualizationForTest(
+      std::make_shared<ego_planner::PlanningVisualization>(node));
   const std::string topic = "/planning/bspline";
   auto publisher = node->create_publisher<traj_utils::msg::Bspline>(
       topic, ego_planner::trajectoryCommandQos());
@@ -3089,16 +3101,16 @@ TEST(P4ObservationPublication,
       [manager_ptr, snapshot, occupancy, safe_risk, bound_execution, map]() {
         manager_ptr->setPlanningRiskContextForTest(
             snapshot, 10.0, occupancy, safe_risk, bound_execution);
-        auto observation = ego_planner::UniformBspline(
-            p4StoppedControlPoints(), 3, 0.5);
-        const auto terminal = ego_planner::imposeP4TerminalStop(
-            &observation, terminalStartState(observation),
-            20.0, 100.0, 0.0);
-        EXPECT_TRUE(terminal.success) << terminal.reason;
-        std::vector<Eigen::Vector3d> observation_guide;
-        for (int index = 0; index <= 8; ++index)
-          observation_guide.push_back(observation.evaluateDeBoorT(
-              observation.getTimeSum() * static_cast<double>(index) / 8.0));
+        const std::vector<Eigen::Vector3d> observation_guide = {
+            Eigen::Vector3d(-4.0, 0.0, 0.0),
+            Eigen::Vector3d(-3.0, 0.0, 0.0),
+            Eigen::Vector3d(-2.0, 0.0, 0.0),
+            Eigen::Vector3d(-1.0, 0.0, 0.0),
+            Eigen::Vector3d(0.0, 0.0, 0.0),
+            Eigen::Vector3d(1.0, 0.0, 0.0),
+            Eigen::Vector3d(2.0, 0.0, 0.0),
+            Eigen::Vector3d(3.0, 0.0, 0.0),
+            Eigen::Vector3d(4.0, 0.0, 0.0)};
 
         auto decision = makeForwardDecision(
             snapshot,
@@ -3111,6 +3123,9 @@ TEST(P4ObservationPublication,
             map->getResolution(), map->getVirtualCeilingHeight());
         decision.action =
             ego_planner::P4ForwardAction::DEFER_RISK_SELECTION;
+        decision.planning_disposition =
+            ego_planner::P4PlanningDisposition::NEW_TRAJECTORY_READY;
+        decision.result_status = ego_planner::P4ForwardResultStatus::READY;
         decision.executable_intent =
             ego_planner::P4ExecutableIntent::COMMON_OBSERVATION_SEGMENT;
         decision.selection_authority =
@@ -3134,6 +3149,7 @@ TEST(P4ObservationPublication,
             decision.geometry_common_corridor.back();
         decision.observation_stopping_reserve_m = 0.85;
         decision.observation_predicted_information_gain = 0.4;
+        decision.speed_cap_mps = 10.0;
         decision.reason = "certified_observation_segment";
 
         auto upper = decision.candidates.front();
@@ -3141,25 +3157,43 @@ TEST(P4ObservationPublication,
         upper.channel_id = 11u;
         upper.path = decision.geometry_common_corridor;
         upper.path.push_back(Eigen::Vector3d(6.0, 1.5, 0.0));
+        upper.topology_path = upper.path;
         upper.path_hash = "observation-upper-channel";
         auto lower = upper;
         lower.candidate_id = 102u;
         lower.channel_id = 12u;
         lower.path.back().y() = -1.5;
+        lower.topology_path = lower.path;
         lower.path_hash = "observation-lower-channel";
         decision.candidates = {upper, lower};
-        bindObservationSensorEvidence(&decision, observation);
-        manager_ptr->setP4ForwardDecisionForTest(std::move(decision));
-        manager_ptr->local_data_.position_traj_ = observation;
-        manager_ptr->local_data_.velocity_traj_ = observation.getDerivative();
-        manager_ptr->local_data_.acceleration_traj_ =
-            manager_ptr->local_data_.velocity_traj_.getDerivative();
-        manager_ptr->local_data_.traj_id_ =
-            manager_ptr->allocateTrajectoryId();
-        manager_ptr->local_data_.start_time_ =
-            rclcpp::Time(11, 0, RCL_ROS_TIME);
-        manager_ptr->local_data_.duration_ = observation.getTimeSum();
-        return terminal.success;
+        decision.observation_channel_guides = {
+            upper.topology_path, lower.topology_path};
+        decision.observation_sensor_model.identity =
+            "unit-observation-sensor";
+        decision.observation_sensor_model.horizontal_fov_rad =
+            6.283185307179586;
+        decision.observation_sensor_model.vertical_min_rad =
+            -1.5707963267948966;
+        decision.observation_sensor_model.vertical_max_rad =
+            1.5707963267948966;
+        decision.observation_sensor_model.min_range_m = 0.0;
+        // The production optimizer stops the observation curve before the
+        // coarse guide endpoint.  Keep the unresolved voxel observable from
+        // that actual stopped endpoint, not merely from the route-level guide.
+        decision.observation_sensor_model.max_range_m = 3.0;
+        decision.observation_sensor_model.occluder_radius_m = 0.05;
+        decision.observation_raw_occluders =
+            std::make_shared<const std::vector<Eigen::Vector3d>>();
+        decision.observation_missing_los_by_channel = {
+            {Eigen::Vector3d(5.0, 0.0, 0.0)},
+            {Eigen::Vector3d(5.0, 0.0, 0.0)}};
+        manager_ptr->setP4ForwardDecisionForNextReplanForTest(
+            std::move(decision));
+        return manager_ptr->reboundReplan(
+            observation_guide.front(), Eigen::Vector3d::Zero(),
+            Eigen::Vector3d::Zero(), observation_guide.back(),
+            Eigen::Vector3d::Zero(), true, false,
+            observation_guide.front());
       });
 
   const bool planned = fsm.callReboundReplanForTest();
@@ -3181,7 +3215,8 @@ TEST(P4ObservationPublication,
   }
 
   EXPECT_TRUE(planned)
-      << "certified common observation was rejected before publication";
+      << "certified common observation was rejected before publication: "
+      << manager_ptr->lastP4ForwardDecision().reason;
   EXPECT_EQ(manager_ptr->p4PlanningDisposition(),
             ego_planner::P4PlanningDisposition::NEW_TRAJECTORY_READY);
   ASSERT_NE(published, nullptr)
@@ -3316,6 +3351,10 @@ TEST(P4ObservationPublication,
                 "observation_collision", &reason),
             ego_planner::P4NormalChannelPreparationDisposition::REJECTED);
   EXPECT_EQ(reason, "observation_curve_failure_hold");
+  EXPECT_EQ(manager.lastP4ForwardDecision().executable_intent,
+            ego_planner::P4ExecutableIntent::HOLD);
+  EXPECT_EQ(manager.lastP4ForwardDecision().deferred_motion_mode,
+            ego_planner::P4ForwardDeferredMotionMode::HOLD);
   EXPECT_FALSE(manager.pendingP4ActualCurveFeedbackForTest().has_value());
 
   auto invalid_final = observation;
@@ -3484,6 +3523,11 @@ TEST(P4ObservationExecution, RecomputesDivergenceAndStoppingReserve) {
       lower.topology_path = lower.path;
       lower.path_hash = "observation-lower";
       observation.candidates = {upper, lower};
+      observation.observation_channel_guides = {
+          upper.topology_path, lower.topology_path};
+      // Simulate bounded refinement retaining only the completed channel.
+      // Divergence certification must still use the frozen full guide set.
+      observation.candidates = {upper};
       manager->setP4ForwardDecisionForTest(std::move(observation));
       return manager;
     };
@@ -3690,7 +3734,9 @@ TEST(P4ForwardTerminalLineageTest,
   ASSERT_TRUE(manager.recordP4VerticalSliceLineage(
       "forward_decision", 10.0));
   ASSERT_TRUE(manager.recordP4VerticalSliceLineage(
-      "final_bspline_before_p5", 10.0));
+      "final_bspline_before_p5", 10.0))
+      << manager.lastP4ForwardDecision().geometry_commit.reason << ":"
+      << manager.lastP4ForwardDecision().reason;
   ASSERT_TRUE(manager.recordP4VerticalSliceLineage(
       "normal_publish_authorized", 10.0));
   const auto certificate = manager.p4ExecutionCertificate();

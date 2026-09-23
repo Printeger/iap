@@ -236,7 +236,8 @@ void bindObservationValidation(
   validation.newly_observable_los_voxel_count = 1u;
   validation.brake_library_identity = "p5-observation-brakes";
   validation.task_mode = evidence->task_mode;
-  validation.certificate_hash = "p5-observation-certificate";
+  validation.certificate_hash =
+      ego_planner::p4ObservationValidationHash(validation);
 }
 
 void bindFreshExecutionSnapshot(
@@ -1335,6 +1336,45 @@ TEST(P5RuntimeIntegrityGateTest,
   EXPECT_EQ(status.reason, ego_planner::P5GateReason::FINAL_GATE_FAILED);
   EXPECT_EQ(status.future_reason,
             "observation_certificate_identity_mismatch");
+
+}
+
+TEST(P5RuntimeIntegrityGateTest,
+     ObservationFinalRecomputesValidationCertificateHash) {
+  auto config = baseConfig();
+  config.test_only_allow_grid_risk_authority = false;
+  config.current_stale_to_replan_s = 100.0;
+  config.current_stale_to_emergency_s = 100.0;
+  ego_planner::P5RuntimeIntegrityGate gate(nullptr, config, false);
+  gate.setCurrentIntegrityForTest(integrityMsg(
+      0.0, 1.0, 1.0, 10.0, 10.0));
+  auto trajectory = makeTrajectory();
+  const auto snapshot = makeSnapshot(500.0, 500.0);
+  auto direct = directRiskEvidence(trajectory, snapshot, 1.0, 1.0);
+  bindObservationValidation(&trajectory, &direct);
+  const std::string certified_hash =
+      direct.observation_validation.certificate_hash;
+  direct.observation_validation.snapshot_identity =
+      "mutated-after-certification";
+
+  const auto status = gate.evaluateObservationFinal(
+      trajectory, snapshot, 0.0, -1.0, &direct, {}, {}, {},
+      certified_hash);
+
+  EXPECT_EQ(status.action, ego_planner::P5GateAction::REQUEST_REPLAN);
+  EXPECT_EQ(status.reason, ego_planner::P5GateReason::FINAL_GATE_FAILED);
+  EXPECT_EQ(status.future_reason,
+            "observation_certificate_identity_mismatch");
+
+  config.enable_final_gate = false;
+  ego_planner::P5RuntimeIntegrityGate disabled_gate(nullptr, config, false);
+  const auto disabled_status = disabled_gate.evaluateObservationFinal(
+      trajectory, snapshot, 0.0, -1.0, &direct, {}, {}, {},
+      certified_hash);
+  EXPECT_EQ(disabled_status.action,
+            ego_planner::P5GateAction::REQUEST_REPLAN);
+  EXPECT_EQ(disabled_status.reason,
+            ego_planner::P5GateReason::FINAL_GATE_FAILED);
 }
 
 TEST(P5RuntimeIntegrityGateTest,

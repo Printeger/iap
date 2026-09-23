@@ -1069,6 +1069,7 @@ namespace ego_planner
         double now_s, const P5GateStatus &p5_preview,
         std::string *reason = nullptr);
     P4ObservationValidationResult validateObservationExecutionEnvelope(
+        double evidence_time_s,
         const std::vector<P4BrakingAnchor> *braking_library = nullptr) const;
     const P4ObservationValidationResult &observationValidationResult() const
     {
@@ -1077,6 +1078,7 @@ namespace ego_planner
     P4NormalChannelPreparationDisposition recordP4NormalChannelCurveFailure(
         double now_s, P4PreparedCurveFailure failure,
         const std::string &detail, std::string *reason = nullptr);
+    bool demoteP4ObservationToHold(const std::string &reason);
     bool preparedP4SuccessorBundleDue(double now_s) const;
     bool activatePreparedP4SuccessorBundle(
         double now_s, std::string *reason = nullptr);
@@ -1203,6 +1205,10 @@ namespace ego_planner
     {
       last_p4_forward_decision_ = std::move(decision);
     }
+    void setP4ForwardDecisionForNextReplanForTest(P4ForwardDecision decision)
+    {
+      p4_forward_decision_override_for_test_ = std::move(decision);
+    }
     void setP4ControlCapabilityProfileForTest(
         P4ControlCapabilityProfile profile)
     {
@@ -1220,6 +1226,10 @@ namespace ego_planner
     {
       bspline_optimizer_ = std::move(optimizer);
       grid_map_ = std::move(grid_map);
+    }
+    void setPlanningVisualizationForTest(PlanningVisualization::Ptr visualization)
+    {
+      visualization_ = std::move(visualization);
     }
     void setLatestRiskSnapshotForTest(
         std::shared_ptr<const iap::RiskGridSnapshot> snapshot)
@@ -1446,6 +1456,9 @@ namespace ego_planner
     P4SuccessorPreparationState p4_successor_preparation_state_ =
         P4SuccessorPreparationState::ROUTE_PENDING;
     std::optional<P4ForwardDecision> p4_actual_curve_feedback_override_;
+    // Approved publication seam: freeze only route-level inputs, then let
+    // reboundReplan generate and identify the actual B-spline normally.
+    std::optional<P4ForwardDecision> p4_forward_decision_override_for_test_;
     std::set<std::string> p4_actual_curve_failure_signatures_;
     std::string p4_last_astar_replay_signature_;
     std::vector<P4BrakingAnchor> p4_braking_anchors_;

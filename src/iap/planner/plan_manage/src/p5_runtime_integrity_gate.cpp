@@ -704,12 +704,6 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateObservationFinal(
     const std::string& required_window_layout_hash,
     const std::string& required_window_satellite_sets_hash,
     const std::string& required_observation_validation_hash) {
-  if (!config_.enable_final_gate) {
-    resetFinalGateFailureState();
-    P5GateStatus status;
-    status.reason = P5GateReason::DISABLED;
-    return status;
-  }
   const auto reject_identity = [&]() {
       P5GateStatus rejected;
       rejected.action = P5GateAction::REQUEST_REPLAN;
@@ -741,6 +735,8 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateObservationFinal(
       validation->certificate_hash.empty() ||
       required_observation_validation_hash.empty() ||
       validation->certificate_hash != required_observation_validation_hash ||
+      validation->certificate_hash !=
+          p4ObservationValidationHash(*validation) ||
       validation->execution_instance_id == 0u ||
       validation->execution_instance_id !=
           local_data.execution_instance_id_ ||
@@ -756,6 +752,12 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateObservationFinal(
       validation->brake_library_identity.empty() ||
       validation->task_mode != direct_risk->task_mode)
     return reject_identity();
+  if (!config_.enable_final_gate) {
+    resetFinalGateFailureState();
+    P5GateStatus status;
+    status.reason = P5GateReason::DISABLED;
+    return status;
+  }
   P5GateStatus status = evaluate(
       local_data, snapshot,
       EvalContext{true, now_s, emergency_time_s, direct_risk,

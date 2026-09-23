@@ -17,7 +17,13 @@
   selecting an alternate channel. Final channels still require their selected
   bundle. The planner-process seam passes its actual serialized B-spline to
   `traj_server` and verifies unchanged QUEUED, ACTIVATED and PositionCommand
-  identity through a stopped endpoint.
+  identity through a stopped endpoint. Review hardening freezes the complete
+  pre-refinement channel-guide set, audits nominal and every brake swept tube
+  against the unchanged local-clearance policy, checks brake p/v/a continuity,
+  terminal dynamics and hashes, and recomputes the canonical certificate hash
+  before both enabled and disabled P5 outcomes. The approved test seam freezes
+  only route-level input; normal `reboundReplan` still owns optimization,
+  terminal stopping, trajectory identity and publication.
   Existing collision, clearance, dynamics, braking, freshness, PL/AL, and
   STRICT/MISSION policy thresholds are unchanged.
 - fix(frozen-local-evidence-and-interval-selection): IAP-RQ-312 /

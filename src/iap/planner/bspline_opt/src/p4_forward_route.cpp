@@ -2050,6 +2050,10 @@ bool configureSafeLimitedCommonPrefix(
   }
   if (has_missing_los_target && missing_los_by_channel.size() >= 2u)
   {
+    if (decision->observation_channel_guides.empty())
+      for (const auto &candidate : decision->candidates)
+        if (candidate.path.size() >= 2u)
+          decision->observation_channel_guides.push_back(candidate.path);
     decision->observation_sensor_model = request.observation_sensor_model;
     decision->observation_raw_occluders =
       request.raw_occupied_voxel_centers;
@@ -4307,6 +4311,10 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
   if (decision.candidates.size() >= 2) {
     decision.geometry_common_corridor = commonExecutableCorridorPrefix(
       request, decision.candidates, graph);
+    decision.observation_channel_guides.clear();
+    for (const auto &candidate : decision.candidates)
+      if (candidate.path.size() >= 2u)
+        decision.observation_channel_guides.push_back(candidate.path);
   }
 
   // A best-effort route with a native refiner has no authority until the

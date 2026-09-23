@@ -841,6 +841,10 @@ namespace ego_planner
       observation_raw_occluders;
     std::vector<std::vector<Eigen::Vector3d>>
       observation_missing_los_by_channel;
+    // Frozen full channel guides from before bounded refinement. Final
+    // observation certification must not infer a common corridor from only
+    // the subset that happened to finish refinement.
+    std::vector<std::vector<Eigen::Vector3d>> observation_channel_guides;
     // Archived v1 readers use this field. New v2 production decisions leave
     // it empty and publish deferred_trajectory instead.
     std::vector < Eigen::Vector3d > observe_more_trajectory;

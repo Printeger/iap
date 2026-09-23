@@ -24,6 +24,10 @@ endpoint、divergence、brake identity 和 task mode。零/非有限增益或没
 LOS voxel 均为 typed HOLD，且不进入 alternate channel。聚焦 CPU 测试与真实
 planner→traj_server seam 已通过，核心激活测试连续 20/20；75 秒 live 仍须在 GPU
 preflight、增量审查和干净提交之后执行，因此此处不宣称 live 或完整 S0–S6 完成。
+增量复审后，分歧重算固定使用 bounded refinement 之前的完整通道 guide；名义曲线和
+每条 brake 的 swept tube、p/v/a 连续性、导数/终端状态、碰撞与净空均从冻结证据重新
+计算。P5 在启用或禁用 final gate 时都会先重算证书 hash。Seam A 仅冻结 route-level
+输入，实际曲线、终端停止和 ID/start/hash 仍由正常 `reboundReplan` 路径产生。
 本闭环未新增运行参数，也未修改 PL/AL、1 秒 freshness、碰撞/净空、0.05 m planning
 buffer、制动认证、0.15 m tracking envelope 或 STRICT/MISSION 门限。
 

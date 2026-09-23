@@ -79,6 +79,28 @@ inline std::string p4IdentityHash(const std::string& canonical) {
   return output.str();
 }
 
+inline std::string p4ObservationValidationHash(
+    const P4ObservationValidationResult& validation) {
+  std::ostringstream canonical;
+  canonical << "p4_observation_validation_v1;"
+            << validation.execution_instance_id << ';'
+            << validation.trajectory_id << ';'
+            << validation.start_time_ns << ';' << validation.curve_hash << ';'
+            << validation.execution_snapshot_id << ';'
+            << validation.snapshot_identity << ';' << std::hexfloat
+            << validation.endpoint.x() << ';' << validation.endpoint.y() << ';'
+            << validation.endpoint.z() << ';'
+            << validation.divergence_boundary.x() << ';'
+            << validation.divergence_boundary.y() << ';'
+            << validation.divergence_boundary.z() << ';'
+            << validation.minimum_stopping_margin_m << ';'
+            << validation.predicted_information_gain << ';'
+            << validation.newly_observable_los_voxel_count << ';'
+            << validation.brake_library_identity << ';'
+            << static_cast<int>(validation.task_mode);
+  return p4IdentityHash(canonical.str());
+}
+
 inline std::string p4ControlPointHash(const Eigen::MatrixXd& points) {
   std::ostringstream canonical;
   canonical << points.rows() << ';' << points.cols() << ';';

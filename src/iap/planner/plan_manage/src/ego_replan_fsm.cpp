@@ -2092,6 +2092,9 @@ namespace ego_planner
                       P5RuntimeIntegrityGate::reasonName(p5_status.reason),
                       static_cast<unsigned long>(planning_generation_id),
                       static_cast<unsigned long>(final_gate_generation_id));
+          if (preparing_common_observation)
+            planner_manager_->demoteP4ObservationToHold(
+                "observation_p5_rejected");
           planner_manager_->recordP4VerticalSliceLineage(
               "p5_final_rejected", plannerNow().seconds());
           if (preparing_successor_curve)
