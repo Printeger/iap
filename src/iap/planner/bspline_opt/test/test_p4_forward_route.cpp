@@ -1633,7 +1633,7 @@ TEST(P4ForwardRoute,
 }
 
 TEST(P4ForwardRoute,
-     BestEffortStopsRefiningToPreserveDirectAuthorizationBudget)
+     BestEffortPartialComparisonDoesNotAuthorizeACompleteBranch)
 {
   auto request = straightRequest();
   request.limits.task_mode =
@@ -1699,10 +1699,10 @@ TEST(P4ForwardRoute,
 
   const auto decision = P4ForwardRoutePlanner().decide(request);
 
-  ASSERT_EQ(decision.action, P4ForwardAction::CANDIDATE_READY)
+  ASSERT_EQ(decision.action, P4ForwardAction::DEFER_RISK_SELECTION)
       << decision.reason;
   EXPECT_EQ(refinement_calls, 1);
-  EXPECT_EQ(batch_calls, 2);
+  EXPECT_GE(batch_calls, 2);
   EXPECT_GT(observed_direct_budget_ms, 0.0);
   EXPECT_LE(observed_direct_budget_ms,
             request.limits.compute_budget_ms);
@@ -1710,8 +1710,24 @@ TEST(P4ForwardRoute,
   EXPECT_EQ(decision.channel_comparison_state,
             ego_planner::P4ChannelComparisonState::PARTIAL_COMPARISON);
   EXPECT_GT(decision.unevaluated_channel_count, 0u);
-  EXPECT_EQ(decision.reason,
-            "partial_comparison_certified_candidate_ready");
+  EXPECT_EQ(decision.selected_candidate_id, 0u);
+  EXPECT_TRUE(decision.selected_guide.empty());
+  EXPECT_TRUE(
+      decision.deferred_motion_mode ==
+          ego_planner::P4ForwardDeferredMotionMode::COMMON_PREFIX ||
+      decision.deferred_motion_mode ==
+          ego_planner::P4ForwardDeferredMotionMode::HOLD);
+  if (decision.deferred_motion_mode ==
+      ego_planner::P4ForwardDeferredMotionMode::COMMON_PREFIX)
+  {
+    EXPECT_EQ(decision.reason, "safe_limited_common_prefix");
+    EXPECT_GE(decision.deferred_trajectory.size(), 2u);
+    EXPECT_LE(std::abs(decision.deferred_trajectory.back().y()), 0.2);
+  }
+  else
+  {
+    EXPECT_TRUE(decision.deferred_trajectory.empty());
+  }
   EXPECT_TRUE(decision.candidates.front().risk_supported);
   EXPECT_GT(std::max_element(
       decision.candidates.front().path.begin(),

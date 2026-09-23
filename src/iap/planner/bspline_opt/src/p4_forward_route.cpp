@@ -1864,8 +1864,19 @@ bool configureSafeLimitedCommonPrefix(
   // Execute only nominal samples that lie inside every candidate's swept
   // tube. Merely proving that the tubes overlap does not prove that the first
   // candidate's centreline is itself inside their intersection.
-  const auto prefix = commonExecutableCorridorPrefix(
-    request, decision->candidates, graph);
+  // Once the refinement budget has produced only a subset of the channels,
+  // decision->candidates contains that subset.  Recomputing the intersection
+  // from it would turn the one refined branch into a "common" prefix and
+  // silently authorize commitment before the comparison is complete.  The
+  // frozen-geometry intersection captured before refinement is the only
+  // corridor shared by every discovered channel in that case.
+  const auto prefix =
+    decision->channel_comparison_state ==
+        P4ChannelComparisonState::PARTIAL_COMPARISON &&
+      decision->geometry_common_corridor.size() >= 2u
+    ? decision->geometry_common_corridor
+    : commonExecutableCorridorPrefix(
+        request, decision->candidates, graph);
   decision->common_prefix_length_m = pathLength(prefix);
   if (prefix.size() < 2 || decision->common_prefix_length_m <= kEpsilon) {
     decision->reason = "safe_common_prefix_unavailable";
@@ -1974,6 +1985,9 @@ bool configureSafeLimitedCommonPrefix(
   decision->selection_authority = P4ForwardSelectionAuthority::NONE;
   decision->formal_support = false;
   decision->selected_candidate_id = 0;
+  decision->selected_channel_id = 0;
+  decision->runner_up_candidate_id = 0;
+  decision->runner_up_channel_id = 0;
   decision->selected_guide.clear();
   decision->deferred_motion_mode = P4ForwardDeferredMotionMode::COMMON_PREFIX;
   decision->deferred_trajectory = std::move(executable);
@@ -3441,6 +3455,36 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
     decision.trigger_reason = P4ForwardTriggerReason::NO_SAFE_ROUTE;
     if (decision.reason == "not_evaluated" || decision.reason == "ok") {
       decision.reason = "no_refined_candidate_passed_safety_gate";
+    }
+    return finalize(std::move(decision));
+  }
+  if (decision.channel_comparison_state ==
+      P4ChannelComparisonState::PARTIAL_COMPARISON)
+  {
+    // A certified curve from the one channel that happened to receive this
+    // round's refinement slice is not evidence that it is preferable to the
+    // unevaluated channels.  Only motion inside the already-established
+    // common corridor may proceed while the stable slots retain their work
+    // for the next round-robin slice.
+    if (configureSafeLimitedCommonPrefix(
+        request, graph, &budget, &decision))
+    {
+      return finalize(std::move(decision));
+    }
+    decision.action = P4ForwardAction::DEFER_RISK_SELECTION;
+    decision.trigger_reason = P4ForwardTriggerReason::SUPPORT_INCOMPLETE;
+    decision.selection_authority = P4ForwardSelectionAuthority::NONE;
+    decision.formal_support = false;
+    decision.selected_candidate_id = 0;
+    decision.selected_channel_id = 0;
+    decision.runner_up_candidate_id = 0;
+    decision.runner_up_channel_id = 0;
+    decision.selected_guide.clear();
+    decision.deferred_motion_mode = P4ForwardDeferredMotionMode::HOLD;
+    decision.deferred_trajectory.clear();
+    decision.speed_cap_mps = 0.0;
+    if (decision.reason == "not_evaluated" || decision.reason == "ok") {
+      decision.reason = "partial_comparison_hold";
     }
     return finalize(std::move(decision));
   }

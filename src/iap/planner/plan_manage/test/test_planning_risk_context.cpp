@@ -3643,6 +3643,96 @@ TEST(P4PreparedChannelComparison,
   EXPECT_EQ(comparison.winner_channel_id, record.channel_id);
 }
 
+TEST(P4PreparedChannelComparison,
+     DefersOverlappingUnknownRiskAndMirrorsObservableWinner)
+{
+  ego_planner::P4ForwardSnapshotIdentity snapshot;
+  snapshot.geometry_id = "frozen-map";
+  snapshot.frame_id = "map";
+  snapshot.frame_contract_id = "map-v1";
+  snapshot.local_map_support_identity = "strict-observation";
+  snapshot.alert_limit_policy_id = "hal-val-v1";
+  snapshot.risk_config_hash = "risk-v1";
+  snapshot.risk_source_identity_hash = "source-v1";
+  snapshot.occupancy_generation = 7u;
+  snapshot.execution_snapshot_id = 9u;
+  snapshot.risk_generation = 11u;
+  snapshot.gnss_epoch_identity = 13u;
+  snapshot.gnss_epoch_stamp_s = 10.0;
+  snapshot.occupancy_stamp_s = 10.0;
+  snapshot.risk_stamp_s = 10.0;
+  const auto record = [&snapshot](const uint64_t channel_id,
+                                  const double peak_ratio) {
+      ego_planner::P4PreparedChannelRecord value;
+      value.channel_id = channel_id;
+      value.snapshot_identity = snapshot;
+      value.guide_identity = "guide-" + std::to_string(channel_id);
+      value.refined_path_identity =
+          "refined-" + std::to_string(channel_id);
+      value.curve_identity = "curve-" + std::to_string(channel_id);
+      value.actual_endpoint = Eigen::Vector3d(
+          4.0, channel_id == 81u ? -1.0 : 1.0, 1.0);
+      value.duration_s = 2.0;
+      value.global_peak_ratio = peak_ratio;
+      value.global_rolling_worst_ratio = peak_ratio;
+      value.global_continuous_exceedance_s = 0.0;
+      value.global_exposure_integral_ratio_s = 0.0;
+      value.global_recovery_time_s = 0.0;
+      value.fim_max_ratio = 0.4;
+      value.fim_integral = 1.0;
+      value.minimum_local_clearance_margin_m = 0.2;
+      value.final_curve_evaluated = true;
+      value.local_geometry_passed = true;
+      value.dynamics_passed = true;
+      value.collision_passed = true;
+      value.clearance_passed = true;
+      value.braking_passed = true;
+      value.gnss_exposure_complete = true;
+      value.p5_preview_passed = true;
+      value.failure = ego_planner::P4PreparedCurveFailure::NONE;
+      return value;
+    };
+
+  auto negative_y = record(81u, 0.60);
+  auto positive_y = record(82u, 0.70);
+  negative_y.unknown_support_fraction = 0.15;
+  negative_y.unknown_kappa_upper_bound = 0.15;
+  negative_y.combined_conservative_kappa = 0.15;
+  positive_y.unknown_support_fraction = 0.10;
+  positive_y.unknown_kappa_upper_bound = 0.10;
+  positive_y.combined_conservative_kappa = 0.10;
+  auto comparison = ego_planner::compareP4PreparedChannels(
+      {negative_y, positive_y}, snapshot, 2u);
+  EXPECT_EQ(comparison.state,
+            ego_planner::P4ChannelComparisonState::PARTIAL_COMPARISON);
+  EXPECT_EQ(comparison.winner_channel_id, 0u);
+  EXPECT_EQ(comparison.runner_up_channel_id, 0u);
+
+  // With both arms observed, swapping only the measured risk must swap the
+  // winner. Channel IDs and world-frame Y signs are deliberately unchanged.
+  negative_y.unknown_support_fraction = 0.0;
+  negative_y.unknown_kappa_upper_bound = 0.0;
+  negative_y.combined_conservative_kappa = 0.0;
+  positive_y.unknown_support_fraction = 0.0;
+  positive_y.unknown_kappa_upper_bound = 0.0;
+  positive_y.combined_conservative_kappa = 0.0;
+  comparison = ego_planner::compareP4PreparedChannels(
+      {negative_y, positive_y}, snapshot, 2u);
+  ASSERT_EQ(comparison.state,
+            ego_planner::P4ChannelComparisonState::COMPLETE);
+  EXPECT_EQ(comparison.winner_channel_id, negative_y.channel_id);
+
+  negative_y.global_peak_ratio = 0.70;
+  negative_y.global_rolling_worst_ratio = 0.70;
+  positive_y.global_peak_ratio = 0.60;
+  positive_y.global_rolling_worst_ratio = 0.60;
+  comparison = ego_planner::compareP4PreparedChannels(
+      {negative_y, positive_y}, snapshot, 2u);
+  ASSERT_EQ(comparison.state,
+            ego_planner::P4ChannelComparisonState::COMPLETE);
+  EXPECT_EQ(comparison.winner_channel_id, positive_y.channel_id);
+}
+
 TEST(P4PreparedSuccessorPolicy,
      BindsParentSwitchWindowBoundaryStateAndDirectAuthority)
 {

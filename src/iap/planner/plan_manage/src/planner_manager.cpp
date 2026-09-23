@@ -685,6 +685,24 @@ namespace ego_planner
         result.snapshot_mismatch_count == 0u
       ? P4ChannelComparisonState::COMPLETE
       : P4ChannelComparisonState::PARTIAL_COMPARISON;
+    if (result.state == P4ChannelComparisonState::COMPLETE &&
+        feasible.size() > 1u)
+    {
+      const bool has_unknown_only_influence = std::any_of(
+          feasible.begin(), feasible.end(),
+          [](const P4PreparedChannelRecord *record) {
+            return record->unknown_support_fraction > 1.0e-9 ||
+                record->unknown_kappa_upper_bound > 1.0e-9 ||
+                record->combined_conservative_kappa >
+                    record->known_occupancy_kappa + 1.0e-9;
+          });
+      // A conservative upper bound that differs only because one corridor
+      // has less observed support is not evidence that its physical hazard is
+      // larger. Keep both full branches non-authoritative until observation
+      // removes that interval ambiguity.
+      if (has_unknown_only_influence)
+        result.state = P4ChannelComparisonState::PARTIAL_COMPARISON;
+    }
     result.feasible_count = feasible.size();
     if (result.state == P4ChannelComparisonState::COMPLETE)
     {
@@ -6631,6 +6649,49 @@ namespace ego_planner
     }
     if (!bundle.complete())
       return finish(false, "successor_prepared_bundle_incomplete");
+    const bool certified_common_prefix_observation =
+        bundle.decision.action == P4ForwardAction::DEFER_RISK_SELECTION &&
+        bundle.decision.deferred_motion_mode ==
+            P4ForwardDeferredMotionMode::COMMON_PREFIX &&
+        bundle.decision.deferred_trajectory.size() >= 2u;
+    if (certified_common_prefix_observation)
+    {
+      bundle.decision.channel_comparison_state =
+          P4ChannelComparisonState::PARTIAL_COMPARISON;
+      bundle.decision.selected_candidate_id = 0u;
+      bundle.decision.selected_channel_id = 0u;
+      bundle.decision.runner_up_candidate_id = 0u;
+      bundle.decision.runner_up_channel_id = 0u;
+      bundle.decision.selected_actual_endpoint =
+          bundle.certificate.approved_endpoint;
+      bundle.decision.runner_up_actual_endpoint =
+          Eigen::Vector3d::Constant(
+              std::numeric_limits<double>::quiet_NaN());
+      p4_prepared_channel_bundles_.clear();
+      p4_cached_successor_bundle_ = std::move(bundle);
+      p4_cached_successor_activation_in_progress_ = false;
+      if (!appendP4ForwardDecision(
+              last_p4_forward_decision_,
+              "successor_observation_prefix_prepared", now_s))
+      {
+        p4_cached_successor_bundle_.reset();
+        return finish(false, "successor_observation_lineage_failed");
+      }
+      p4_successor_preparation_state_ =
+          P4SuccessorPreparationState::PREPARED_CERTIFIED;
+      P4ExecutionCheckDiagnostics prepared;
+      prepared.applicable = true;
+      prepared.allowed = true;
+      prepared.identity_match = true;
+      prepared.execution_snapshot_id =
+          p4_execution_certificate_.execution_snapshot_id;
+      prepared.direct_batch_duration_ms =
+          p4_direct_risk_evidence_.compute_duration_ms;
+      prepared.reason = "successor_common_prefix_observation_certified";
+      appendP4ExecutionEvent(
+          "SUCCESSOR_OBSERVATION_PREFIX_CERTIFIED", now_s, prepared);
+      return finish(true, "successor_observation_prefix_cached");
+    }
     // Certification is a statement about the atomically cached complete
     // bundle, not merely about a refined curve. Install first, then emit the
     // state transition; a lineage failure rolls the unpublished cache back.
@@ -6699,6 +6760,54 @@ namespace ego_planner
         feasible_channel_ids.empty()
           ? prepared_records.size() : feasible_channel_ids.size(),
         p4_execution_certificate_.successor_channel_id);
+    if (comparison.state == P4ChannelComparisonState::PARTIAL_COMPARISON)
+    {
+      p4_cached_successor_bundle_.reset();
+      p4_cached_successor_activation_in_progress_ = false;
+      P4ForwardDecision observe = bundle.decision;
+      observe.channel_comparison_state = comparison.state;
+      observe.action = P4ForwardAction::DEFER_RISK_SELECTION;
+      observe.trigger_reason = P4ForwardTriggerReason::SUPPORT_INCOMPLETE;
+      observe.selection_authority = P4ForwardSelectionAuthority::NONE;
+      observe.formal_support = false;
+      observe.selected_candidate_id = 0u;
+      observe.selected_channel_id = 0u;
+      observe.runner_up_candidate_id = 0u;
+      observe.runner_up_channel_id = 0u;
+      observe.selected_guide.clear();
+      observe.selected_actual_endpoint = Eigen::Vector3d::Constant(
+          std::numeric_limits<double>::quiet_NaN());
+      observe.runner_up_actual_endpoint = Eigen::Vector3d::Constant(
+          std::numeric_limits<double>::quiet_NaN());
+      observe.deferred_motion_mode = P4ForwardDeferredMotionMode::HOLD;
+      observe.deferred_trajectory.clear();
+      observe.speed_cap_mps = 0.0;
+      p4_prepared_channel_bundles_.clear();
+      if (observe.geometry_common_corridor.size() >= 2u)
+      {
+        observe.deferred_motion_mode =
+            P4ForwardDeferredMotionMode::COMMON_PREFIX;
+        observe.deferred_trajectory = observe.geometry_common_corridor;
+        observe.speed_cap_mps = p4_forward_limits_.max_observe_speed_mps;
+        observe.reason =
+            "final_channel_intervals_overlap_observe_common_prefix";
+        last_p4_forward_decision_ = observe;
+        p4_actual_curve_feedback_override_ = std::move(observe);
+        p4_successor_preparation_state_ =
+            P4SuccessorPreparationState::CURVE_PREPARING;
+        appendP4ForwardDecision(
+            last_p4_forward_decision_,
+            "successor_channel_comparison_incomparable", now_s);
+        return finish(true, "successor_common_prefix_observation_pending");
+      }
+      observe.reason = "final_channel_intervals_overlap_hold";
+      last_p4_forward_decision_ = std::move(observe);
+      p4_successor_preparation_state_ = P4SuccessorPreparationState::FAILED;
+      appendP4ForwardDecision(
+          last_p4_forward_decision_,
+          "successor_channel_comparison_incomparable", now_s);
+      return finish(false, "successor_channel_comparison_incomparable_hold");
+    }
     P4PreparedSuccessorBundle selected_bundle = bundle;
     const auto winner = p4_prepared_channel_bundles_.find(
         comparison.winner_channel_id);
