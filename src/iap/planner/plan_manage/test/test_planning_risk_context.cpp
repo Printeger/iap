@@ -3473,6 +3473,9 @@ TEST(P4PreparedChannelComparison,
       ego_planner::P4PreparedChannelRecord value;
       value.channel_id = channel_id;
       value.snapshot_identity = snapshot;
+      value.guide_identity = "guide-" + std::to_string(channel_id);
+      value.refined_path_identity =
+          "refined-" + std::to_string(channel_id);
       value.curve_identity = "curve-" + std::to_string(channel_id);
       value.actual_endpoint = Eigen::Vector3d(
           static_cast<double>(channel_id), 0.0, 1.0);
@@ -3485,6 +3488,14 @@ TEST(P4PreparedChannelComparison,
       value.fim_max_ratio = 0.4;
       value.fim_integral = 1.0;
       value.minimum_local_clearance_margin_m = 0.2;
+      value.final_curve_evaluated = true;
+      value.local_geometry_passed = true;
+      value.dynamics_passed = true;
+      value.collision_passed = true;
+      value.clearance_passed = true;
+      value.braking_passed = true;
+      value.gnss_exposure_complete = true;
+      value.p5_preview_passed = true;
       value.failure = ego_planner::P4PreparedCurveFailure::NONE;
       return value;
     };
@@ -3508,7 +3519,128 @@ TEST(P4PreparedChannelComparison,
       {incumbent, safer}, snapshot, 3u, incumbent.channel_id);
   EXPECT_EQ(comparison.state,
             ego_planner::P4ChannelComparisonState::PARTIAL_COMPARISON);
-  EXPECT_EQ(comparison.winner_channel_id, incumbent.channel_id);
+  EXPECT_EQ(comparison.winner_channel_id, 0u);
+}
+
+TEST(P4PreparedChannelComparison,
+     DoesNotTreatMissingFinalEndpointAsAnEvaluatedHardFailure)
+{
+  ego_planner::P4ForwardSnapshotIdentity snapshot;
+  snapshot.geometry_id = "frozen-map";
+  snapshot.frame_id = "map";
+  snapshot.frame_contract_id = "map-v1";
+  snapshot.local_map_support_identity = "strict-observation";
+  snapshot.alert_limit_policy_id = "hal-val-v1";
+  snapshot.risk_config_hash = "risk-v1";
+  snapshot.risk_source_identity_hash = "source-v1";
+  snapshot.occupancy_generation = 7u;
+  snapshot.execution_snapshot_id = 9u;
+  snapshot.risk_generation = 11u;
+  snapshot.gnss_epoch_identity = 13u;
+  snapshot.gnss_epoch_stamp_s = 10.0;
+  snapshot.occupancy_stamp_s = 10.0;
+  snapshot.risk_stamp_s = 10.0;
+
+  ego_planner::P4PreparedChannelRecord complete;
+  complete.channel_id = 41u;
+  complete.snapshot_identity = snapshot;
+  complete.guide_identity = "guide-41";
+  complete.refined_path_identity = "refined-41";
+  complete.curve_identity = "curve-41";
+  complete.actual_endpoint = Eigen::Vector3d(4.0, 1.0, 1.0);
+  complete.duration_s = 2.0;
+  complete.global_peak_ratio = 0.7;
+  complete.global_rolling_worst_ratio = 0.7;
+  complete.global_continuous_exceedance_s = 0.0;
+  complete.global_exposure_integral_ratio_s = 0.0;
+  complete.global_recovery_time_s = 0.0;
+  complete.fim_max_ratio = 0.4;
+  complete.fim_integral = 1.0;
+  complete.minimum_local_clearance_margin_m = 0.2;
+  complete.final_curve_evaluated = true;
+  complete.local_geometry_passed = true;
+  complete.dynamics_passed = true;
+  complete.collision_passed = true;
+  complete.clearance_passed = true;
+  complete.braking_passed = true;
+  complete.gnss_exposure_complete = true;
+  complete.p5_preview_passed = true;
+  complete.failure = ego_planner::P4PreparedCurveFailure::NONE;
+
+  auto missing_endpoint = complete;
+  missing_endpoint.channel_id = 42u;
+  missing_endpoint.curve_identity = "curve-42";
+  missing_endpoint.actual_endpoint = Eigen::Vector3d::Constant(
+      std::numeric_limits<double>::quiet_NaN());
+
+  const auto comparison = ego_planner::compareP4PreparedChannels(
+      {complete, missing_endpoint}, snapshot, 2u);
+  EXPECT_EQ(comparison.state,
+            ego_planner::P4ChannelComparisonState::PARTIAL_COMPARISON);
+  EXPECT_EQ(comparison.hard_failure_count, 0u);
+  EXPECT_EQ(comparison.feasible_count, 1u);
+  EXPECT_EQ(comparison.winner_channel_id, 0u);
+  EXPECT_EQ(comparison.runner_up_channel_id, 0u);
+}
+
+TEST(P4PreparedChannelComparison,
+     RequiresEverySuccessfulChannelToCarryACompleteFinalBundle)
+{
+  ego_planner::P4ForwardSnapshotIdentity snapshot;
+  snapshot.geometry_id = "frozen-map";
+  snapshot.frame_id = "map";
+  snapshot.frame_contract_id = "map-v1";
+  snapshot.local_map_support_identity = "strict-observation";
+  snapshot.alert_limit_policy_id = "hal-val-v1";
+  snapshot.risk_config_hash = "risk-v1";
+  snapshot.risk_source_identity_hash = "source-v1";
+  snapshot.occupancy_generation = 7u;
+  snapshot.execution_snapshot_id = 9u;
+  snapshot.risk_generation = 11u;
+  snapshot.gnss_epoch_identity = 13u;
+  snapshot.gnss_epoch_stamp_s = 10.0;
+  snapshot.occupancy_stamp_s = 10.0;
+  snapshot.risk_stamp_s = 10.0;
+
+  ego_planner::P4PreparedChannelRecord record;
+  record.channel_id = 71u;
+  record.snapshot_identity = snapshot;
+  record.guide_identity = "guide-71";
+  record.refined_path_identity = "refined-71";
+  record.curve_identity = "curve-71";
+  record.actual_endpoint = Eigen::Vector3d(4.0, -1.0, 1.0);
+  record.duration_s = 2.0;
+  record.global_peak_ratio = 0.7;
+  record.global_rolling_worst_ratio = 0.7;
+  record.global_continuous_exceedance_s = 0.0;
+  record.global_exposure_integral_ratio_s = 0.0;
+  record.global_recovery_time_s = 0.0;
+  record.fim_max_ratio = 0.4;
+  record.fim_integral = 1.0;
+  record.minimum_local_clearance_margin_m = 0.2;
+  record.final_curve_evaluated = true;
+  record.local_geometry_passed = true;
+  record.dynamics_passed = true;
+  record.collision_passed = true;
+  record.clearance_passed = true;
+  record.braking_passed = true;
+  record.gnss_exposure_complete = true;
+  record.p5_preview_passed = false;
+  record.failure = ego_planner::P4PreparedCurveFailure::NONE;
+
+  auto comparison = ego_planner::compareP4PreparedChannels(
+      {record}, snapshot, 1u);
+  EXPECT_EQ(comparison.state,
+            ego_planner::P4ChannelComparisonState::PARTIAL_COMPARISON);
+  EXPECT_EQ(comparison.feasible_count, 0u);
+  EXPECT_EQ(comparison.hard_failure_count, 0u);
+
+  record.p5_preview_passed = true;
+  comparison = ego_planner::compareP4PreparedChannels(
+      {record}, snapshot, 1u);
+  EXPECT_EQ(comparison.state,
+            ego_planner::P4ChannelComparisonState::COMPLETE);
+  EXPECT_EQ(comparison.winner_channel_id, record.channel_id);
 }
 
 TEST(P4PreparedSuccessorPolicy,

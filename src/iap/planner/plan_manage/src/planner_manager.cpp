@@ -594,11 +594,12 @@ namespace ego_planner
     P4PreparedChannelComparison result;
     std::vector<const P4PreparedChannelRecord *> feasible;
     const std::string latest_identity = latest_snapshot.canonical();
+    std::set<uint64_t> seen_channels;
     std::set<uint64_t> evaluated_channels;
     for (const auto &record : records)
     {
       if (record.channel_id == 0u ||
-          !evaluated_channels.insert(record.channel_id).second)
+          !seen_channels.insert(record.channel_id).second)
         continue;
       if (!latest_snapshot.valid() || !record.snapshot_identity.valid() ||
           record.snapshot_identity.canonical() != latest_identity)
@@ -606,11 +607,18 @@ namespace ego_planner
         ++result.snapshot_mismatch_count;
         continue;
       }
-      if (!record.feasible())
+      if (record.failure != P4PreparedCurveFailure::NONE)
       {
-        ++result.hard_failure_count;
+        if (record.failure != P4PreparedCurveFailure::INCOMPLETE)
+        {
+          evaluated_channels.insert(record.channel_id);
+          ++result.hard_failure_count;
+        }
         continue;
       }
+      if (!record.feasible())
+        continue;
+      evaluated_channels.insert(record.channel_id);
       feasible.push_back(&record);
     }
     const auto finite_or_infinity = [](const double value) {
@@ -672,16 +680,19 @@ namespace ego_planner
             return left->channel_id == incumbent_channel_id;
           return left->channel_id < right->channel_id;
         });
-    result.feasible_count = feasible.size();
-    if (!feasible.empty())
-      result.winner_channel_id = feasible.front()->channel_id;
-    if (feasible.size() > 1u)
-      result.runner_up_channel_id = feasible[1]->channel_id;
     result.state = expected_channel_count > 0u &&
         evaluated_channels.size() >= expected_channel_count &&
         result.snapshot_mismatch_count == 0u
       ? P4ChannelComparisonState::COMPLETE
       : P4ChannelComparisonState::PARTIAL_COMPARISON;
+    result.feasible_count = feasible.size();
+    if (result.state == P4ChannelComparisonState::COMPLETE)
+    {
+      if (!feasible.empty())
+        result.winner_channel_id = feasible.front()->channel_id;
+      if (feasible.size() > 1u)
+        result.runner_up_channel_id = feasible[1]->channel_id;
+    }
     return result;
   }
 
@@ -6550,6 +6561,15 @@ namespace ego_planner
       bundle.channel_record.channel_id = selected_candidate->channel_id;
     bundle.channel_record.snapshot_identity =
         bundle.decision.snapshot_identity;
+    if (selected_candidate)
+    {
+      bundle.channel_record.guide_identity = selected_candidate->path_hash;
+      // The candidate path stored by the route worker is the completed
+      // refinement, not the coarse lattice-only representative. Retain both
+      // roles explicitly even when they currently share one stable hash.
+      bundle.channel_record.refined_path_identity =
+          selected_candidate->path_hash;
+    }
     bundle.channel_record.curve_identity = bundle.curve_identity;
     bundle.channel_record.actual_endpoint =
         bundle.certificate.approved_endpoint;
@@ -6558,6 +6578,37 @@ namespace ego_planner
         bundle.certificate.global_peak_ratio;
     bundle.channel_record.global_exposure_integral_ratio_s =
         bundle.certificate.global_exposure_integral_ratio_s;
+    bundle.channel_record.final_curve_evaluated =
+        bundle.trajectory.traj_id_ > 0 && bundle.certificate.valid &&
+        bundle.direct_risk_evidence.complete &&
+        bundle.channel_record.actual_endpoint.allFinite();
+    const bool assurance_passed = bundle.boundary.assurance.complete &&
+        bundle.boundary.assurance.safe &&
+        bundle.boundary.assurance.failure == P4SuccessorFailure::NONE;
+    bundle.channel_record.local_geometry_passed = assurance_passed;
+    bundle.channel_record.dynamics_passed = assurance_passed;
+    bundle.channel_record.collision_passed = assurance_passed;
+    bundle.channel_record.clearance_passed = assurance_passed;
+    bundle.channel_record.braking_passed = !bundle.braking_anchors.empty();
+    bundle.channel_record.gnss_exposure_complete =
+        bundle.direct_risk_evidence.complete;
+    bundle.channel_record.p5_preview_passed =
+        bundle.p5_preview_complete && bundle.p5_preview_action == 0;
+    for (const auto &point : bundle.direct_risk_evidence.points)
+    {
+      bundle.channel_record.known_occupancy_kappa = std::max(
+          bundle.channel_record.known_occupancy_kappa,
+          std::clamp(point.known_occupancy_kappa, 0.0, 1.0));
+      bundle.channel_record.unknown_support_fraction = std::max(
+          bundle.channel_record.unknown_support_fraction,
+          std::clamp(point.unknown_support_fraction, 0.0, 1.0));
+      bundle.channel_record.unknown_kappa_upper_bound = std::max(
+          bundle.channel_record.unknown_kappa_upper_bound,
+          std::clamp(point.unknown_kappa_upper_bound, 0.0, 1.0));
+      bundle.channel_record.combined_conservative_kappa = std::max(
+          bundle.channel_record.combined_conservative_kappa,
+          std::clamp(point.combined_conservative_kappa, 0.0, 1.0));
+    }
     bundle.channel_record.failure = P4PreparedCurveFailure::NONE;
     if (selected_candidate)
     {
@@ -6600,11 +6651,53 @@ namespace ego_planner
     std::vector<P4PreparedChannelRecord> prepared_records;
     for (const auto &entry : p4_prepared_channel_bundles_)
       prepared_records.push_back(entry.second.channel_record);
+    std::set<uint64_t> feasible_channel_ids;
+    for (const auto &candidate : bundle.decision.candidates)
+      if (candidate.channel_id > 0u && candidate.occupancy_supported)
+        feasible_channel_ids.insert(candidate.channel_id);
+
+    // Prepare every locally feasible channel's actual terminal curve while
+    // the parent still owns execution. The normal rebound/P5 path is reused
+    // serially, so no second mutable certification pipeline is introduced.
+    // Each completed channel remains immutable in the bounded bundle map.
+    const auto next_unprepared = std::find_if(
+        bundle.decision.candidates.begin(), bundle.decision.candidates.end(),
+        [this](const P4ForwardCandidate &candidate) {
+          return candidate.channel_id > 0u && candidate.occupancy_supported &&
+              p4_prepared_channel_bundles_.count(candidate.channel_id) == 0u;
+        });
+    if (next_unprepared != bundle.decision.candidates.end())
+    {
+      last_p4_forward_decision_ = bundle.decision;
+      last_p4_forward_decision_.selected_candidate_id =
+          next_unprepared->candidate_id;
+      last_p4_forward_decision_.selected_channel_id =
+          next_unprepared->channel_id;
+      last_p4_forward_decision_.selected_guide = next_unprepared->path;
+      last_p4_forward_decision_.selected_actual_endpoint =
+          Eigen::Vector3d::Constant(
+              std::numeric_limits<double>::quiet_NaN());
+      last_p4_forward_decision_.selected_unevaluated_suffix_m =
+          std::numeric_limits<double>::quiet_NaN();
+      last_p4_forward_decision_.channel_comparison_state =
+          P4ChannelComparisonState::PARTIAL_COMPARISON;
+      p4_successor_preparation_state_ =
+          P4SuccessorPreparationState::CURVE_PREPARING;
+      p4_cached_successor_bundle_.reset();
+      // Feed the already-enumerated next channel back through the ordinary
+      // rebound/terminal-stop pipeline.  The route worker has completed for
+      // this frozen snapshot; without this explicit handoff the next callback
+      // observes result_delivered and silently falls into an unrelated normal
+      // replan, leaving the multi-channel comparison permanently partial.
+      p4_actual_curve_feedback_override_ = last_p4_forward_decision_;
+      appendP4ForwardDecision(
+          bundle.decision, "successor_channel_curve_prepared", now_s);
+      return finish(true, "successor_next_channel_curve_pending");
+    }
     const auto comparison = compareP4PreparedChannels(
         prepared_records, bundle.decision.snapshot_identity,
-        bundle.decision.channel_comparison_state ==
-            P4ChannelComparisonState::COMPLETE
-          ? bundle.decision.channel_slots.size() : prepared_records.size(),
+        feasible_channel_ids.empty()
+          ? prepared_records.size() : feasible_channel_ids.size(),
         p4_execution_certificate_.successor_channel_id);
     P4PreparedSuccessorBundle selected_bundle = bundle;
     const auto winner = p4_prepared_channel_bundles_.find(

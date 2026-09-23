@@ -311,6 +311,8 @@ namespace ego_planner
   {
     uint64_t channel_id = 0;
     P4ForwardSnapshotIdentity snapshot_identity;
+    std::string guide_identity;
+    std::string refined_path_identity;
     std::string curve_identity;
     Eigen::Vector3d actual_endpoint = Eigen::Vector3d::Constant(
         std::numeric_limits<double>::quiet_NaN());
@@ -326,15 +328,31 @@ namespace ego_planner
     double global_recovery_time_s = std::numeric_limits<double>::infinity();
     double fim_max_ratio = std::numeric_limits<double>::infinity();
     double fim_integral = std::numeric_limits<double>::infinity();
+    double known_occupancy_kappa = 0.0;
+    double unknown_support_fraction = 0.0;
+    double unknown_kappa_upper_bound = 0.0;
+    double combined_conservative_kappa = 0.0;
     double minimum_local_clearance_margin_m =
         -std::numeric_limits<double>::infinity();
+    bool final_curve_evaluated = false;
+    bool local_geometry_passed = false;
+    bool dynamics_passed = false;
+    bool collision_passed = false;
+    bool clearance_passed = false;
+    bool braking_passed = false;
+    bool gnss_exposure_complete = false;
+    bool p5_preview_passed = false;
     P4PreparedCurveFailure failure = P4PreparedCurveFailure::INCOMPLETE;
 
     bool feasible() const
     {
       return channel_id != 0u && snapshot_identity.valid() &&
+          !guide_identity.empty() && !refined_path_identity.empty() &&
           !curve_identity.empty() && actual_endpoint.allFinite() &&
           std::isfinite(duration_s) && duration_s > 0.0 &&
+          final_curve_evaluated && local_geometry_passed &&
+          dynamics_passed && collision_passed && clearance_passed &&
+          braking_passed && gnss_exposure_complete && p5_preview_passed &&
           failure == P4PreparedCurveFailure::NONE;
     }
   };
