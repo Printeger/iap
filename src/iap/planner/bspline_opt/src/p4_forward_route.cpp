@@ -1075,10 +1075,53 @@ P4ForwardRiskSample aggregateRiskSamples(
   return aggregate;
 }
 
+void resetCandidateRiskEvidence(P4ForwardCandidate * candidate)
+{
+  if (!candidate) {
+    return;
+  }
+  candidate->risk_supported = false;
+  candidate->risk_support = P4ForwardRiskSupport::INCOMPLETE;
+  candidate->safety_state = P4ForwardSafetyState::UNKNOWN;
+  candidate->safety_gate_passed = false;
+  candidate->fim_max_ratio = 0.0;
+  candidate->fim_integral = 0.0;
+  candidate->safety_max_ratio = 0.0;
+  candidate->controlled_degraded_candidate = false;
+  candidate->mission_degraded_candidate = false;
+  candidate->global_peak_ratio = 0.0;
+  candidate->global_rolling_worst_ratio = 0.0;
+  candidate->global_continuous_exceedance_s = 0.0;
+  candidate->global_exceedance_integral_ratio_s = 0.0;
+  candidate->global_recovery_time_s = std::numeric_limits<double>::infinity();
+  candidate->global_budget_utilization = std::numeric_limits<double>::infinity();
+  candidate->minimum_gnss_used_satellite_count =
+    std::numeric_limits<int>::max();
+  candidate->maximum_gnss_geometry_condition = 0.0;
+  candidate->support_recovery_time_s = std::numeric_limits<double>::infinity();
+  candidate->formal_support = false;
+  candidate->known_hazard_evidence = false;
+  candidate->known_hazard_max = 0.0;
+  candidate->known_hazard_integral = 0.0;
+  candidate->known_fim_max_ratio =
+    std::numeric_limits<double>::quiet_NaN();
+  candidate->unknown_coverage = 0.0;
+  candidate->risk_samples.clear();
+  candidate->first_failed_risk = P4ForwardRiskSample{};
+  candidate->first_failed_position = Eigen::Vector3d::Constant(
+    std::numeric_limits<double>::quiet_NaN());
+  candidate->first_failed_query_time_s =
+    std::numeric_limits<double>::quiet_NaN();
+  candidate->first_failed_arc_length_m =
+    std::numeric_limits<double>::quiet_NaN();
+  candidate->reason = "not_evaluated";
+}
+
 void evaluateRisk(
   const P4ForwardRequest & request, const ComputeBudget * budget,
   P4ForwardCandidate * candidate)
 {
+  resetCandidateRiskEvidence(candidate);
   const auto samples = resample(candidate->path, std::min(
       0.25, request.limits.topology_resolution_m));
   candidate->risk_supported = !samples.empty();
@@ -1219,21 +1262,9 @@ void evaluateCandidateRiskSet(
     candidate_index < candidates->size(); ++candidate_index)
   {
     auto & candidate = (*candidates)[candidate_index];
+    resetCandidateRiskEvidence(&candidate);
     candidate.risk_supported = true;
     candidate.safety_gate_passed = true;
-    candidate.fim_max_ratio = 0.0;
-    candidate.fim_integral = 0.0;
-    candidate.safety_max_ratio = 0.0;
-    candidate.known_hazard_evidence = false;
-    candidate.known_hazard_max = 0.0;
-    candidate.known_hazard_integral = 0.0;
-    candidate.known_fim_max_ratio =
-      std::numeric_limits<double>::quiet_NaN();
-    candidate.unknown_coverage = 0.0;
-    candidate.minimum_gnss_used_satellite_count =
-      std::numeric_limits<int>::max();
-    candidate.maximum_gnss_geometry_condition = 0.0;
-    candidate.risk_samples.clear();
     const auto path_samples = resample(candidate.path, std::min(
         0.25, request.limits.topology_resolution_m));
     double distance = 0.0;
