@@ -241,7 +241,8 @@ class P5RuntimeIntegrityGate {
       const P4DirectTrajectoryRiskEvidence* direct_risk = nullptr,
       const std::string& required_gnss_core_policy = {},
       const std::string& required_window_layout_hash = {},
-      const std::string& required_window_satellite_sets_hash = {});
+      const std::string& required_window_satellite_sets_hash = {},
+      const std::string& required_observation_validation_hash = {});
 
   // Read-only final-gate evaluation for a future successor. It must not
   // advance debounce/exposure state or publish a gate decision.

@@ -834,6 +834,13 @@ namespace ego_planner
       std::numeric_limits<double>::quiet_NaN();
     double observation_predicted_information_gain =
       std::numeric_limits<double>::quiet_NaN();
+    // Frozen raw inputs used to independently reproduce the observation
+    // gain over the final B-spline. The scalar above is diagnostic only.
+    P4ObservationSensorModel observation_sensor_model;
+    std::shared_ptr<const std::vector<Eigen::Vector3d>>
+      observation_raw_occluders;
+    std::vector<std::vector<Eigen::Vector3d>>
+      observation_missing_los_by_channel;
     // Archived v1 readers use this field. New v2 production decisions leave
     // it empty and publish deferred_trajectory instead.
     std::vector < Eigen::Vector3d > observe_more_trajectory;

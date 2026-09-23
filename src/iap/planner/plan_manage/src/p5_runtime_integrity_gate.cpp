@@ -1,5 +1,6 @@
 #include <ego_planner/p5_runtime_integrity_gate.h>
 #include <ego_planner/p0_risk_grid_runtime.h>
+#include <ego_planner/trajectory_command_qos.h>
 
 #include <algorithm>
 #include <cmath>
@@ -701,13 +702,60 @@ P5GateStatus P5RuntimeIntegrityGate::evaluateObservationFinal(
     const P4DirectTrajectoryRiskEvidence* direct_risk,
     const std::string& required_gnss_core_policy,
     const std::string& required_window_layout_hash,
-    const std::string& required_window_satellite_sets_hash) {
+    const std::string& required_window_satellite_sets_hash,
+    const std::string& required_observation_validation_hash) {
   if (!config_.enable_final_gate) {
     resetFinalGateFailureState();
     P5GateStatus status;
     status.reason = P5GateReason::DISABLED;
     return status;
   }
+  const auto reject_identity = [&]() {
+      P5GateStatus rejected;
+      rejected.action = P5GateAction::REQUEST_REPLAN;
+      rejected.raw_action = rejected.action;
+      rejected.reason = P5GateReason::FINAL_GATE_FAILED;
+      rejected.raw_reason = rejected.reason;
+      rejected.future_reason =
+          "observation_certificate_identity_mismatch";
+      rejected.active_reasons.push_back(rejected.future_reason);
+      rejected.final_candidate_traj_id = local_data.traj_id_;
+      rejected.final_candidate_start_time_s =
+          local_data.start_time_.seconds();
+      rejected.final_candidate_start_time_ns =
+          local_data.start_time_.nanoseconds();
+      rejected.final_candidate_duration_s = local_data.duration_;
+      rejected.final_candidate_rejected = true;
+      rejected.final_evaluation_stamp_s = now_s;
+      publishStatus(rejected, "observation_final");
+      return rejected;
+    };
+  const auto* validation = direct_risk
+      ? &direct_risk->observation_validation : nullptr;
+  const std::string curve_hash = trajectoryCurveHash(
+      local_data.position_traj_, local_data.start_time_);
+  const double duration_s = local_data.position_traj_.getTimeSum();
+  const Eigen::Vector3d endpoint =
+      local_data.position_traj_.evaluateDeBoorT(duration_s);
+  if (!validation || !validation->applicable || !validation->valid ||
+      validation->certificate_hash.empty() ||
+      required_observation_validation_hash.empty() ||
+      validation->certificate_hash != required_observation_validation_hash ||
+      validation->execution_instance_id == 0u ||
+      validation->execution_instance_id !=
+          local_data.execution_instance_id_ ||
+      validation->trajectory_id != local_data.traj_id_ ||
+      validation->start_time_ns != local_data.start_time_.nanoseconds() ||
+      validation->curve_hash != curve_hash ||
+      validation->snapshot_identity.empty() ||
+      validation->execution_snapshot_id !=
+          direct_risk->execution_snapshot_id ||
+      !endpoint.allFinite() || !validation->endpoint.isApprox(endpoint, 1.0e-8) ||
+      !validation->divergence_boundary.allFinite() ||
+      validation->minimum_stopping_margin_m < -1.0e-6 ||
+      validation->brake_library_identity.empty() ||
+      validation->task_mode != direct_risk->task_mode)
+    return reject_identity();
   P5GateStatus status = evaluate(
       local_data, snapshot,
       EvalContext{true, now_s, emergency_time_s, direct_risk,

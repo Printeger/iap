@@ -1972,22 +1972,11 @@ void configureKnownGeometryPrefixMotion(
   if (progress < request.limits.min_creep_progress_m) {
     return;
   }
-  decision->deferred_motion_mode = P4ForwardDeferredMotionMode::COMMON_PREFIX;
-  decision->deferred_trajectory = cropPrefixToDistance(prefix, progress);
-  decision->executable_intent =
-    P4ExecutableIntent::COMMON_OBSERVATION_SEGMENT;
-  decision->channel_comparison_state =
-    P4ChannelComparisonState::PARTIAL_COMPARISON;
-  decision->observation_endpoint = decision->deferred_trajectory.back();
-  decision->observation_divergence_boundary = prefix.back();
-  decision->observation_stopping_reserve_m = terminal_reserve;
-  decision->observation_predicted_information_gain = 0.0;
+  // A collision-free common prefix without a predicted LOS gain remains a
+  // typed HOLD. It may be retained as diagnostic geometry, but it is not an
+  // observation execution authority.
+  decision->reason = "OBSERVATION_NO_POSITIVE_INFORMATION_GAIN";
   decision->certified_free_distance_m = decision->common_prefix_length_m;
-  const double stop_reserve = std::max(
-    0.0, decision->common_prefix_length_m - progress);
-  decision->speed_cap_mps = std::min(
-    request.limits.max_observe_speed_mps,
-    speedCapForDistance(stop_reserve, request.limits));
 }
 
 bool configureSafeLimitedCommonPrefix(
@@ -2054,8 +2043,17 @@ bool configureSafeLimitedCommonPrefix(
     has_missing_los_target = has_missing_los_target || !targets.empty();
     missing_los_by_channel.push_back(std::move(targets));
   }
+  if (!has_missing_los_target)
+  {
+    decision->reason = "OBSERVATION_NO_POSITIVE_INFORMATION_GAIN";
+    return false;
+  }
   if (has_missing_los_target && missing_los_by_channel.size() >= 2u)
   {
+    decision->observation_sensor_model = request.observation_sensor_model;
+    decision->observation_raw_occluders =
+      request.raw_occupied_voxel_centers;
+    decision->observation_missing_los_by_channel = missing_los_by_channel;
     const double fixed_reserve_m = request.limits.vehicle_radius_m +
       request.limits.safety_margin_m;
     const double dynamic_stopping_reserve_m = std::max(
@@ -2066,7 +2064,7 @@ bool configureSafeLimitedCommonPrefix(
     observation.current_acceleration = request.acceleration;
     observation.common_corridor = prefix;
     observation.divergence_point = prefix.back();
-    observation.missing_los_by_channel = std::move(missing_los_by_channel);
+    observation.missing_los_by_channel = missing_los_by_channel;
     observation.raw_occluders = request.raw_occupied_voxel_centers;
     observation.sensor = request.observation_sensor_model;
     observation.candidate_spacing_m = std::min(
@@ -2079,7 +2077,7 @@ bool configureSafeLimitedCommonPrefix(
     if (!planned.available || planned.route_winner_authority ||
       !planned.terminal_stop_required || planned.guide.size() < 2u)
     {
-      decision->reason = "OBSERVATION_UNAVAILABLE_SENSOR_GEOMETRY";
+      decision->reason = planned.reason;
       return false;
     }
     observation_segment_selected = true;
@@ -3033,7 +3031,9 @@ P4ObservationSegmentResult P4ObservationSegmentPlanner::plan(
       break;
   }
   if (best_fair_gain <= 0.0)
+  {
     return result;
+  }
 
   result.guide = cropPrefixToDistance(input.common_corridor, best_station);
   if (result.guide.size() < 2u ||

@@ -19,6 +19,30 @@ namespace ego_planner {
 struct P0ExecutionRiskSnapshot;
 struct P4CommittedRiskWindowPlan;
 
+struct P4ObservationValidationResult {
+  bool applicable = false;
+  bool valid = false;
+  std::string reason = "OBSERVATION_NOT_VALIDATED";
+  std::uint64_t execution_instance_id = 0;
+  int trajectory_id = 0;
+  std::int64_t start_time_ns = 0;
+  std::string curve_hash;
+  std::uint64_t execution_snapshot_id = 0;
+  std::string snapshot_identity;
+  Eigen::Vector3d endpoint = Eigen::Vector3d::Constant(
+      std::numeric_limits<double>::quiet_NaN());
+  Eigen::Vector3d divergence_boundary = Eigen::Vector3d::Constant(
+      std::numeric_limits<double>::quiet_NaN());
+  double minimum_stopping_margin_m =
+      -std::numeric_limits<double>::infinity();
+  double predicted_information_gain = 0.0;
+  std::size_t newly_observable_los_voxel_count = 0u;
+  std::string brake_library_identity;
+  iap::GlobalNavigationTaskMode task_mode =
+      iap::GlobalNavigationTaskMode::STRICT_GLOBAL;
+  std::string certificate_hash;
+};
+
 enum class P4ActualCurveCertificationStatus {
   NOT_EVALUATED = 0,
   SAFE,
@@ -153,6 +177,7 @@ struct P4DirectTrajectoryRiskEvidence {
   std::shared_ptr<const P4CommittedRiskWindowPlan> committed_window_plan;
   bool trajectory_assurance_complete = false;
   iap::TrajectoryAssuranceResult trajectory_assurance;
+  P4ObservationValidationResult observation_validation;
 
   bool executionAuthorized() const {
     return certified_safe ||

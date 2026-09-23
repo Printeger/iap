@@ -2063,7 +2063,8 @@ namespace ego_planner
                 &direct_evidence,
                 execution_certificate.gnss_core_policy,
                 execution_certificate.window_layout_hash,
-                execution_certificate.window_satellite_sets_hash)
+                execution_certificate.window_satellite_sets_hash,
+                execution_certificate.observation_validation_hash)
             : (preparing_successor_curve ||
                preparing_normal_multi_channel_curve)
             ? planner_manager_->p5_integrity_gate_->evaluateFinalPreview(
