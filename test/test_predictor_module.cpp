@@ -1229,6 +1229,15 @@ TEST(PredictorModuleTest,
   EXPECT_EQ(inside.points.front().gnss_used_satellite_count,
             outside.points.front().gnss_used_satellite_count);
   EXPECT_GT(outside.points.front().unknown_coverage, 0.0);
+  // Unknown-only support inflation remains in the conservative production
+  // sigma, but it is not evidence of a physically observed canopy hazard.
+  EXPECT_FALSE(outside.points.front().known_hazard_evidence);
+  EXPECT_DOUBLE_EQ(
+      outside.points.front().known_gnss_degradation_ratio, 0.0);
+  EXPECT_DOUBLE_EQ(outside.points.front().known_occupancy_kappa, 0.0);
+  EXPECT_GT(outside.points.front().unknown_support_fraction, 0.0);
+  EXPECT_GT(outside.points.front().unknown_kappa_upper_bound, 0.0);
+  EXPECT_GT(outside.points.front().combined_conservative_kappa, 0.0);
   EXPECT_EQ(inside.points.front().local_satellite_set_hash,
             outside.points.front().local_satellite_set_hash);
   for (const auto& satellite : outside.points.front().gnss_satellites) {
@@ -1238,6 +1247,11 @@ TEST(PredictorModuleTest,
       EXPECT_GT(satellite.support_sample_count, 0u);
       EXPECT_GE(satellite.unknown_support_fraction, 0.0);
       EXPECT_LE(satellite.unknown_support_fraction, 1.0);
+      EXPECT_DOUBLE_EQ(satellite.known_occupancy_kappa, 0.0);
+      EXPECT_DOUBLE_EQ(satellite.unknown_kappa_upper_bound,
+                       satellite.unknown_support_fraction);
+      EXPECT_DOUBLE_EQ(satellite.combined_conservative_kappa,
+                       satellite.kappa);
       EXPECT_EQ(satellite.exclusion_reason,
                 "used_with_unknown_support_penalty");
     }
@@ -1290,6 +1304,11 @@ TEST(VisibilityPredictorTest,
   // reduces exactly to kappa_upper=unknown_fraction.
   EXPECT_NEAR(best_effort.kappas.front(), unknown_fraction, 1.0e-12);
   EXPECT_NEAR(best_effort.first_missing_support_distances_m.front(),
+  EXPECT_DOUBLE_EQ(best_effort.known_occupancy_kappas.front(), 0.0);
+  EXPECT_NEAR(best_effort.unknown_kappa_upper_bounds.front(),
+              unknown_fraction, 1.0e-12);
+  EXPECT_NEAR(best_effort.combined_conservative_kappas.front(),
+              unknown_fraction, 1.0e-12);
               1.0, 1.0e-12);
   EXPECT_EQ(best_effort.first_missing_support_statuses.front(),
             iap::LocalMapSupportStatus::OUTSIDE_ENVELOPE);

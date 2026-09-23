@@ -1430,6 +1430,11 @@ namespace ego_planner
       target.known_hazard_evidence = source.known_hazard_evidence;
       target.known_gnss_degradation_ratio =
           source.known_gnss_degradation_ratio;
+      target.known_occupancy_kappa = source.known_occupancy_kappa;
+      target.unknown_support_fraction = source.unknown_support_fraction;
+      target.unknown_kappa_upper_bound = source.unknown_kappa_upper_bound;
+      target.combined_conservative_kappa =
+          source.combined_conservative_kappa;
       target.known_fim_ratio = source.known_fim_ratio;
       target.unknown_coverage = source.unknown_coverage;
       target.floor_source_h = source.prediction.fused.floor_source_h;
@@ -4282,6 +4287,8 @@ namespace ego_planner
                         "risk_support,safety_state,risk_supported,"
                         "safety_gate_passed,fim_max_ratio,fim_integral,"
                         "safety_max_ratio,formal_support,known_hazard_evidence,"
+                        "known_occupancy_kappa,unknown_support_fraction,"
+                        "unknown_kappa_upper_bound,combined_conservative_kappa,"
                         "known_hazard_max,known_hazard_integral,known_fim_max_ratio,"
                         "unknown_coverage,point_count,path_xyz,reason\n";
     candidates_csv << std::setprecision(17);
@@ -4310,6 +4317,10 @@ namespace ego_planner
           << candidate.safety_max_ratio << ','
           << (candidate.formal_support ? 1 : 0) << ','
           << (candidate.known_hazard_evidence ? 1 : 0) << ','
+          << candidate.known_occupancy_kappa << ','
+          << candidate.unknown_support_fraction << ','
+          << candidate.unknown_kappa_upper_bound << ','
+          << candidate.combined_conservative_kappa << ','
           << candidate.known_hazard_max << ','
           << candidate.known_hazard_integral << ','
           << candidate.known_fim_max_ratio << ','

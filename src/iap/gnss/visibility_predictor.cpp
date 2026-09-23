@@ -46,6 +46,9 @@ VisibilityResult VisibilityPredictor::predict(const Eigen::Vector3d& pos_world,
   const std::size_t N = epoch.sats.size();
   res.vis_flags.resize(N, false);
   res.kappas.resize(N, 0.0);
+  res.known_occupancy_kappas.resize(N, 0.0);
+  res.unknown_kappa_upper_bounds.resize(N, 0.0);
+  res.combined_conservative_kappas.resize(N, 0.0);
   res.sigma_effs.resize(N, params_.canopy.sigma_c);
   res.unknown_flags.resize(N, false);
   res.known_flags.resize(N, false);
@@ -162,7 +165,7 @@ VisibilityResult VisibilityPredictor::predict(const Eigen::Vector3d& pos_world,
     }
 
     // κ and occlusion
-    double kappa = 0.0;
+    double known_occupancy_kappa = 0.0;
     bool blocked = false;
     if (grid_ != nullptr) {
       const double start_offset = std::max(0.0, params_.ray_start_offset);
@@ -174,23 +177,29 @@ VisibilityResult VisibilityPredictor::predict(const Eigen::Vector3d& pos_world,
         // reduces to proximity without retaining the binary boundary jump.
         // Do this once: aggregating first and unioning the two aggregate
         // ratios would both double-count canopy and remain discontinuous.
-        kappa = grid_->clearance_proximity_ratio(
+        known_occupancy_kappa = grid_->clearance_proximity_ratio(
             ray_origin, dir, params_.occ_L);
       } else {
-        kappa = grid_->occupancy_ratio(ray_origin, dir, params_.occ_L);
+        known_occupancy_kappa =
+            grid_->occupancy_ratio(ray_origin, dir, params_.occ_L);
       }
       blocked = params_.hard_occlusion &&
                 grid_->ray_occluded(ray_origin, dir, occ_range);
     }
 
-    if (retain_unknown_support && unknown_support) {
-      const double unknown_fraction = std::clamp(
-          res.unknown_support_fractions[i], 0.0, 1.0);
-      kappa = 1.0 - (1.0 - std::clamp(kappa, 0.0, 1.0)) *
-                        (1.0 - unknown_fraction);
-    }
-
-    res.kappas[i]    = kappa;
+    known_occupancy_kappa =
+        std::clamp(known_occupancy_kappa, 0.0, 1.0);
+    const double unknown_kappa_upper_bound = unknown_support
+        ? std::clamp(res.unknown_support_fractions[i], 0.0, 1.0)
+        : 0.0;
+    const double combined_conservative_kappa =
+        1.0 - (1.0 - known_occupancy_kappa) *
+                  (1.0 - unknown_kappa_upper_bound);
+    res.known_occupancy_kappas[i] = known_occupancy_kappa;
+    res.unknown_kappa_upper_bounds[i] = unknown_kappa_upper_bound;
+    res.combined_conservative_kappas[i] = combined_conservative_kappa;
+    res.kappas[i] = retain_unknown_support
+        ? combined_conservative_kappa : known_occupancy_kappa;
     res.blocked_flags[i] = blocked;
     if (blocked) {
       ++res.n_blocked;
@@ -198,12 +207,12 @@ VisibilityResult VisibilityPredictor::predict(const Eigen::Vector3d& pos_world,
     res.vis_flags[i] = !blocked;
     if (!blocked) {
       ++res.n_vis;
-      kappa_sum += kappa;
+      kappa_sum += res.kappas[i];
     }
 
     // σ_eff (RQ-314)
     const double canopy_sigma =
-        sigma_eff_canopy(params_.canopy, kappa, sat.elevation);
+        sigma_eff_canopy(params_.canopy, res.kappas[i], sat.elevation);
     // The same epoch S_i and measurement-noise floor are used on both sides
     // of the receiver measured-support radius. That radius changes support
     // admission only; it must not create a discontinuous drop in sigma/PL.

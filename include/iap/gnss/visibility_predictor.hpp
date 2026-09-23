@@ -18,7 +18,13 @@ namespace iap {
 struct VisibilityResult {
   int                  n_vis      = 0;   ///< number of visible (unblocked) satellites
   std::vector<bool>    vis_flags;        ///< visibility flag per satellite
-  std::vector<double>  kappas;           ///< κ per satellite (occupancy_ratio along LOS)
+  // `kappas` is the conservative production value retained for API
+  // compatibility. The decomposition below keeps observed physical canopy
+  // separate from the upper bound contributed by missing LOS support.
+  std::vector<double>  kappas;
+  std::vector<double>  known_occupancy_kappas;
+  std::vector<double>  unknown_kappa_upper_bounds;
+  std::vector<double>  combined_conservative_kappas;
   std::vector<double>  sigma_effs;       ///< predicted σ_eff per satellite (IAP-RQ-314)
   std::vector<bool>    unknown_flags;    ///< LOS support contains unobserved space
   std::vector<bool>    known_flags;      ///< LOS support required by the model is observed

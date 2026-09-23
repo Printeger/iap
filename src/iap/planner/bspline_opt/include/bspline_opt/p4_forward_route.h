@@ -475,6 +475,10 @@ namespace ego_planner
     // support is incomplete.
     bool known_hazard_evidence = false;
     double known_gnss_degradation_ratio = 0.0;
+    double known_occupancy_kappa = 0.0;
+    double unknown_support_fraction = 0.0;
+    double unknown_kappa_upper_bound = 0.0;
+    double combined_conservative_kappa = 0.0;
     double known_fim_ratio = std::numeric_limits < double > ::quiet_NaN();
     double unknown_coverage = 1.0;
     std::string floor_source_h = "none";
@@ -539,6 +543,10 @@ namespace ego_planner
     uint64_t channel_id = 0;
     bool formal_support = false;
     bool known_hazard_evidence = false;
+    double known_occupancy_kappa = 0.0;
+    double unknown_support_fraction = 0.0;
+    double unknown_kappa_upper_bound = 0.0;
+    double combined_conservative_kappa = 0.0;
     double known_hazard_max = 0.0;
     double known_hazard_integral = 0.0;
     double known_fim_max_ratio = std::numeric_limits < double > ::quiet_NaN();

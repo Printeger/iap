@@ -960,6 +960,10 @@ P4ForwardRiskSample aggregateRiskSamples(
   aggregate.safety_ratio = 0.0;
   aggregate.fim_ratio = 0.0;
   aggregate.known_gnss_degradation_ratio = 0.0;
+  aggregate.known_occupancy_kappa = 0.0;
+  aggregate.unknown_support_fraction = 0.0;
+  aggregate.unknown_kappa_upper_bound = 0.0;
+  aggregate.combined_conservative_kappa = 0.0;
   aggregate.unknown_coverage = 0.0;
   aggregate.reason = begin < end ? "ok" : "risk_support_incomplete";
   for (std::size_t index = begin; index < end; ++index) {
@@ -981,6 +985,18 @@ P4ForwardRiskSample aggregateRiskSamples(
         aggregate.known_gnss_degradation_ratio,
         std::max(0.0, sample.known_gnss_degradation_ratio));
     }
+    aggregate.known_occupancy_kappa = std::max(
+        aggregate.known_occupancy_kappa,
+        std::clamp(sample.known_occupancy_kappa, 0.0, 1.0));
+    aggregate.unknown_support_fraction = std::max(
+        aggregate.unknown_support_fraction,
+        std::clamp(sample.unknown_support_fraction, 0.0, 1.0));
+    aggregate.unknown_kappa_upper_bound = std::max(
+        aggregate.unknown_kappa_upper_bound,
+        std::clamp(sample.unknown_kappa_upper_bound, 0.0, 1.0));
+    aggregate.combined_conservative_kappa = std::max(
+        aggregate.combined_conservative_kappa,
+        std::clamp(sample.combined_conservative_kappa, 0.0, 1.0));
     if (std::isfinite(sample.known_fim_ratio)) {
       aggregate.known_fim_ratio = std::isfinite(aggregate.known_fim_ratio) ?
         std::max(aggregate.known_fim_ratio, sample.known_fim_ratio) :
@@ -1042,6 +1058,11 @@ P4ForwardRiskSample aggregateRiskSamples(
       aggregate.known_gnss_degradation_ratio;
     result.known_fim_ratio = aggregate.known_fim_ratio;
     result.unknown_coverage = aggregate.unknown_coverage;
+    result.known_occupancy_kappa = aggregate.known_occupancy_kappa;
+    result.unknown_support_fraction = aggregate.unknown_support_fraction;
+    result.unknown_kappa_upper_bound = aggregate.unknown_kappa_upper_bound;
+    result.combined_conservative_kappa =
+        aggregate.combined_conservative_kappa;
     // Missing support must not erase a separately observed safety violation
     // in the same swept volume. Geometry remains clear, but deferred motion
     // must HOLD rather than traverse the known-unsafe portion.
@@ -1102,6 +1123,10 @@ void resetCandidateRiskEvidence(P4ForwardCandidate * candidate)
   candidate->formal_support = false;
   candidate->known_hazard_evidence = false;
   candidate->known_hazard_max = 0.0;
+  candidate->known_occupancy_kappa = 0.0;
+  candidate->unknown_support_fraction = 0.0;
+  candidate->unknown_kappa_upper_bound = 0.0;
+  candidate->combined_conservative_kappa = 0.0;
   candidate->known_hazard_integral = 0.0;
   candidate->known_fim_max_ratio =
     std::numeric_limits<double>::quiet_NaN();
@@ -1319,6 +1344,18 @@ void evaluateCandidateRiskSet(
       risk.known_hazard_evidence ||
       (std::isfinite(risk.known_gnss_degradation_ratio) &&
       risk.known_gnss_degradation_ratio > 0.0);
+    candidate.known_occupancy_kappa = std::max(
+        candidate.known_occupancy_kappa,
+        std::clamp(risk.known_occupancy_kappa, 0.0, 1.0));
+    candidate.unknown_support_fraction = std::max(
+        candidate.unknown_support_fraction,
+        std::clamp(risk.unknown_support_fraction, 0.0, 1.0));
+    candidate.unknown_kappa_upper_bound = std::max(
+        candidate.unknown_kappa_upper_bound,
+        std::clamp(risk.unknown_kappa_upper_bound, 0.0, 1.0));
+    candidate.combined_conservative_kappa = std::max(
+        candidate.combined_conservative_kappa,
+        std::clamp(risk.combined_conservative_kappa, 0.0, 1.0));
     if (std::isfinite(risk.known_gnss_degradation_ratio)) {
       const double known_hazard = std::max(
         0.0, risk.known_gnss_degradation_ratio);

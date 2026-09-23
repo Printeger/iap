@@ -466,6 +466,9 @@ struct GnssRiskSatelliteDiagnostic {
   double elevation_rad = std::numeric_limits<double>::quiet_NaN();
   double azimuth_rad = std::numeric_limits<double>::quiet_NaN();
   double kappa = std::numeric_limits<double>::quiet_NaN();
+  double known_occupancy_kappa = 0.0;
+  double unknown_kappa_upper_bound = 0.0;
+  double combined_conservative_kappa = 0.0;
   double epoch_pr_sigma_m = std::numeric_limits<double>::quiet_NaN();
   double canopy_sigma_m = std::numeric_limits<double>::quiet_NaN();
   double sigma_eff_m = std::numeric_limits<double>::quiet_NaN();
@@ -523,6 +526,10 @@ struct ForwardRiskPointResult {
   std::vector<GnssRiskSatelliteDiagnostic> gnss_satellites;
   bool known_hazard_evidence = false;
   double known_gnss_degradation_ratio = 0.0;
+  double known_occupancy_kappa = 0.0;
+  double unknown_support_fraction = 0.0;
+  double unknown_kappa_upper_bound = 0.0;
+  double combined_conservative_kappa = 0.0;
   double known_fim_ratio = std::numeric_limits<double>::quiet_NaN();
   double unknown_coverage = 1.0;
 };

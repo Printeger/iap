@@ -950,6 +950,9 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
     int eligible_satellites = 0;
     double eligible_unknown_support_fraction_sum = 0.0;
     double known_degradation = 0.0;
+    double maximum_unknown_support_fraction = 0.0;
+    double maximum_unknown_kappa_upper_bound = 0.0;
+    double maximum_combined_conservative_kappa = 0.0;
     for (std::size_t sat_index = 0; sat_index < sat_count; ++sat_index) {
       const auto& sat = request.snapshot.gnss_epoch.sats[sat_index];
       GnssRiskSatelliteDiagnostic diagnostic;
@@ -974,6 +977,16 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
       diagnostic.kappa = sat_index < evidence.kappas.size()
           ? evidence.kappas[sat_index]
           : std::numeric_limits<double>::quiet_NaN();
+      diagnostic.known_occupancy_kappa =
+          sat_index < evidence.known_occupancy_kappas.size()
+              ? evidence.known_occupancy_kappas[sat_index] : 0.0;
+      diagnostic.unknown_kappa_upper_bound =
+          sat_index < evidence.unknown_kappa_upper_bounds.size()
+              ? evidence.unknown_kappa_upper_bounds[sat_index] : 0.0;
+      diagnostic.combined_conservative_kappa =
+          sat_index < evidence.combined_conservative_kappas.size()
+              ? evidence.combined_conservative_kappas[sat_index]
+              : diagnostic.kappa;
       diagnostic.epoch_pr_sigma_m = sat.pr_sigma;
       diagnostic.canopy_sigma_m =
           std::isfinite(diagnostic.kappa)
@@ -1035,6 +1048,15 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
       ++eligible_satellites;
       eligible_unknown_support_fraction_sum += std::clamp(
           diagnostic.unknown_support_fraction, 0.0, 1.0);
+      maximum_unknown_support_fraction = std::max(
+          maximum_unknown_support_fraction,
+          std::clamp(diagnostic.unknown_support_fraction, 0.0, 1.0));
+      maximum_unknown_kappa_upper_bound = std::max(
+          maximum_unknown_kappa_upper_bound,
+          std::clamp(diagnostic.unknown_kappa_upper_bound, 0.0, 1.0));
+      maximum_combined_conservative_kappa = std::max(
+          maximum_combined_conservative_kappa,
+          std::clamp(diagnostic.combined_conservative_kappa, 0.0, 1.0));
       if (!known) {
         ++result.gnss_unknown_satellite_count;
         if (!retain_unknown) {
@@ -1064,7 +1086,9 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
       } else {
         diagnostic.exclusion_reason = "visibility_rejected";
       }
-      known_degradation = std::max(known_degradation, kappa);
+      known_degradation = std::max(
+          known_degradation,
+          std::clamp(diagnostic.known_occupancy_kappa, 0.0, 1.0));
       result.gnss_satellites.push_back(std::move(diagnostic));
     }
     std::vector<int> local_satellite_ids;
@@ -1083,6 +1107,11 @@ ForwardRiskBatchResult PredictorModule::queryForwardRiskBatch(
     result.local_satellite_set_hash =
         forwardRiskSatelliteSetHash(local_satellite_ids);
     result.known_gnss_degradation_ratio = known_degradation;
+    result.known_occupancy_kappa = known_degradation;
+    result.unknown_support_fraction = maximum_unknown_support_fraction;
+    result.unknown_kappa_upper_bound = maximum_unknown_kappa_upper_bound;
+    result.combined_conservative_kappa =
+        maximum_combined_conservative_kappa;
     result.known_hazard_evidence = known_degradation > 0.0;
     result.unknown_coverage = eligible_satellites > 0
         ? std::clamp(eligible_unknown_support_fraction_sum /
