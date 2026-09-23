@@ -116,6 +116,14 @@ if(BUILD_TESTING)
       ${CMAKE_CURRENT_SOURCE_DIR}/../../../../test/test_traj_server_handshake.py
       --server $<TARGET_FILE:traj_server>
   )
+  add_test(
+    NAME P4ObservationPublication.PlannerMessageActivatesUnchangedInTrajServer
+    COMMAND ${Python3_EXECUTABLE}
+      ${CMAKE_CURRENT_SOURCE_DIR}/../../../../test/test_traj_server_handshake.py
+      --server $<TARGET_FILE:traj_server>
+      --planner-test $<TARGET_FILE:test_planning_risk_context>
+      -k test_planner_message_activates_unchanged_in_traj_server
+  )
   ament_target_dependencies(test_gate0_qualification_writer Eigen3)
 
   ament_add_gtest(test_p0_risk_grid_runtime
@@ -230,6 +238,9 @@ if(BUILD_TESTING)
     iap::iap
     ${IAP_MSGS_TYPESUPPORT_CPP}
   )
+  set_tests_properties(
+    P4ObservationPublication.PlannerMessageActivatesUnchangedInTrajServer
+    PROPERTIES DEPENDS test_planning_risk_context)
 endif()
 
 # Install targets

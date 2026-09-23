@@ -3045,7 +3045,7 @@ TEST(P4ObservationPublication,
 
   auto node = std::make_shared<rclcpp::Node>(
       "certified_observation_publication_test");
-  const std::string topic = "/test/certified_observation_publication";
+  const std::string topic = "/planning/bspline";
   auto publisher = node->create_publisher<traj_utils::msg::Bspline>(
       topic, ego_planner::trajectoryCommandQos());
   auto listener = std::make_shared<rclcpp::Node>(
@@ -3060,6 +3060,19 @@ TEST(P4ObservationPublication,
   executor.add_node(node);
   executor.add_node(listener);
   executor.spin_some();
+  if (std::getenv("IAP_PROCESS_HANDSHAKE"))
+  {
+    const auto discovery_deadline = std::chrono::steady_clock::now() +
+        std::chrono::seconds(4);
+    while (publisher->get_subscription_count() < 3u &&
+           std::chrono::steady_clock::now() < discovery_deadline)
+    {
+      executor.spin_some();
+      std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    ASSERT_GE(publisher->get_subscription_count(), 3u)
+        << "external traj_server and observer subscriptions were not discovered";
+  }
 
   auto *manager_ptr = manager.get();
   ego_planner::EGOReplanFSM fsm;
@@ -3147,6 +3160,16 @@ TEST(P4ObservationPublication,
   while (!published && std::chrono::steady_clock::now() < deadline) {
     executor.spin_some();
     std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+  if (published && std::getenv("IAP_PROCESS_HANDSHAKE"))
+  {
+    const auto delivery_deadline = std::chrono::steady_clock::now() +
+        std::chrono::seconds(1);
+    while (std::chrono::steady_clock::now() < delivery_deadline)
+    {
+      executor.spin_some();
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
   }
 
   EXPECT_TRUE(planned)
@@ -3280,6 +3303,154 @@ TEST(P4ObservationPublication,
   EXPECT_EQ(manager.prepareP4NormalChannelComparison(10.0, p5_ok, &reason),
             ego_planner::P4NormalChannelPreparationDisposition::REJECTED);
   EXPECT_EQ(reason, "normal_channel_selected_candidate_missing");
+}
+
+TEST(P4ObservationExecution, ZeroInformationGainCannotPublish) {
+  const auto snapshot = makeP4SelectionSnapshot();
+  ego_planner::EGOPlannerManager manager;
+  auto observation = makeForwardDecision(snapshot, 0u);
+  observation.action = ego_planner::P4ForwardAction::DEFER_RISK_SELECTION;
+  observation.executable_intent =
+      ego_planner::P4ExecutableIntent::COMMON_OBSERVATION_SEGMENT;
+  observation.selection_authority =
+      ego_planner::P4ForwardSelectionAuthority::NONE;
+  observation.formal_support = false;
+  observation.channel_comparison_state =
+      ego_planner::P4ChannelComparisonState::PARTIAL_COMPARISON;
+  observation.selected_candidate_id = 0u;
+  observation.selected_channel_id = 0u;
+  observation.runner_up_candidate_id = 0u;
+  observation.runner_up_channel_id = 0u;
+  observation.selected_guide.clear();
+  observation.deferred_motion_mode =
+      ego_planner::P4ForwardDeferredMotionMode::COMMON_PREFIX;
+  observation.geometry_common_corridor = {
+      Eigen::Vector3d(0.0, 0.0, 0.0),
+      Eigen::Vector3d(4.0, 0.0, 0.0),
+      Eigen::Vector3d(5.0, 0.0, 0.0)};
+  observation.deferred_trajectory = {
+      observation.geometry_common_corridor[0],
+      observation.geometry_common_corridor[1]};
+  observation.observation_endpoint =
+      observation.deferred_trajectory.back();
+  observation.observation_divergence_boundary =
+      observation.geometry_common_corridor.back();
+  observation.observation_stopping_reserve_m = 0.85;
+  observation.observation_predicted_information_gain = 0.0;
+  auto second = observation.candidates.front();
+  second.candidate_id += 1u;
+  second.channel_id += 1u;
+  observation.candidates.push_back(second);
+  manager.setP4ForwardDecisionForTest(std::move(observation));
+
+  ego_planner::P5GateStatus p5_ok;
+  std::string reason;
+  EXPECT_EQ(manager.prepareP4NormalChannelComparison(
+                10.0, p5_ok, &reason),
+            ego_planner::P4NormalChannelPreparationDisposition::REJECTED);
+  EXPECT_EQ(reason, "OBSERVATION_NO_POSITIVE_INFORMATION_GAIN");
+  EXPECT_EQ(manager.lastP4ForwardDecision().executable_intent,
+            ego_planner::P4ExecutableIntent::HOLD);
+  EXPECT_EQ(manager.lastP4ForwardDecision().selected_candidate_id, 0u);
+  EXPECT_EQ(manager.lastP4ForwardDecision().selected_channel_id, 0u);
+  EXPECT_FALSE(manager.pendingP4ActualCurveFeedbackForTest().has_value());
+  EXPECT_EQ(manager.local_data_.traj_id_, 0);
+}
+
+TEST(P4ObservationExecution, RecomputesDivergenceAndStoppingReserve) {
+  const auto snapshot = makeP4SelectionSnapshot();
+  const auto make_manager = [&snapshot](const double actual_endpoint_x,
+                                        const double declared_reserve_m) {
+      auto manager = std::make_unique<ego_planner::EGOPlannerManager>();
+      Eigen::MatrixXd points = p4Seed();
+      const Eigen::Vector3d endpoint(actual_endpoint_x, 0.0, 0.0);
+      points.col(points.cols() - 3) = endpoint;
+      points.col(points.cols() - 2) = endpoint;
+      points.col(points.cols() - 1) = endpoint;
+      auto curve = ego_planner::UniformBspline(points, 3, 0.5);
+      manager->local_data_.position_traj_ = curve;
+      manager->local_data_.velocity_traj_ = curve.getDerivative();
+      manager->local_data_.acceleration_traj_ =
+          manager->local_data_.velocity_traj_.getDerivative();
+      manager->local_data_.traj_id_ = 301;
+      manager->local_data_.start_time_ =
+          rclcpp::Time(10, 0, RCL_ROS_TIME);
+      manager->local_data_.duration_ = curve.getTimeSum();
+
+      auto profile = permissiveTestControlProfile();
+      profile.maximum_acceleration_mps2 = Eigen::Vector3d::Constant(0.5);
+      manager->setP4ControlCapabilityProfileForTest(profile);
+
+      ego_planner::P4ExecutionCertificate certificate;
+      certificate.valid = true;
+      certificate.trajectory_id = manager->local_data_.traj_id_;
+      certificate.start_time_ns =
+          manager->local_data_.start_time_.nanoseconds();
+      certificate.control_points_hash = ego_planner::p4ControlPointHash(
+          curve.getControlPoint());
+      certificate.knot_vector_hash = ego_planner::p4KnotVectorHash(
+          curve.getKnot());
+      certificate.braking_distance_m = declared_reserve_m;
+      manager->setP4ExecutionCertificateForTest(certificate);
+
+      ego_planner::P4DirectTrajectoryRiskEvidence evidence;
+      evidence.complete = true;
+      evidence.certified_safe = true;
+      evidence.trajectory_assurance_complete = true;
+      evidence.trajectory_assurance.mode =
+          iap::TrajectoryExecutionMode::NORMAL_EXECUTION;
+      manager->setP4DirectRiskEvidenceForTest(std::move(evidence));
+
+      auto observation = makeForwardDecision(snapshot, 0u);
+      observation.action =
+          ego_planner::P4ForwardAction::DEFER_RISK_SELECTION;
+      observation.executable_intent =
+          ego_planner::P4ExecutableIntent::COMMON_OBSERVATION_SEGMENT;
+      observation.selection_authority =
+          ego_planner::P4ForwardSelectionAuthority::NONE;
+      observation.formal_support = false;
+      observation.channel_comparison_state =
+          ego_planner::P4ChannelComparisonState::PARTIAL_COMPARISON;
+      observation.selected_candidate_id = 0u;
+      observation.selected_channel_id = 0u;
+      observation.runner_up_candidate_id = 0u;
+      observation.runner_up_channel_id = 0u;
+      observation.selected_guide.clear();
+      observation.deferred_motion_mode =
+          ego_planner::P4ForwardDeferredMotionMode::COMMON_PREFIX;
+      observation.geometry_common_corridor = {
+          curve.evaluateDeBoorT(0.0), Eigen::Vector3d(4.0, 0.0, 0.0),
+          Eigen::Vector3d(5.0, 0.0, 0.0)};
+      observation.deferred_trajectory = {
+          observation.geometry_common_corridor.front(),
+          observation.geometry_common_corridor[1]};
+      observation.observation_endpoint =
+          observation.deferred_trajectory.back();
+      observation.observation_divergence_boundary =
+          observation.geometry_common_corridor.back();
+      observation.observation_stopping_reserve_m = declared_reserve_m;
+      observation.observation_predicted_information_gain = 0.4;
+      auto second = observation.candidates.front();
+      second.candidate_id += 1u;
+      second.channel_id += 1u;
+      observation.candidates.push_back(second);
+      manager->setP4ForwardDecisionForTest(std::move(observation));
+      return manager;
+    };
+
+  ego_planner::P5GateStatus p5_ok;
+  std::string reason;
+  auto crosses_divergence = make_manager(5.25, 0.1);
+  EXPECT_EQ(crosses_divergence->prepareP4NormalChannelComparison(
+                10.0, p5_ok, &reason),
+            ego_planner::P4NormalChannelPreparationDisposition::REJECTED);
+  EXPECT_EQ(reason, "OBSERVATION_CROSSES_DIVERGENCE");
+
+  auto lacks_stopping_reserve = make_manager(4.4, 0.1);
+  EXPECT_EQ(lacks_stopping_reserve->prepareP4NormalChannelComparison(
+                10.0, p5_ok, &reason),
+            ego_planner::P4NormalChannelPreparationDisposition::REJECTED);
+  EXPECT_EQ(reason, "OBSERVATION_STOPPING_RESERVE_INSUFFICIENT");
 }
 
 TEST(P4ForwardTerminalLineageTest,

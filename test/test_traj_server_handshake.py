@@ -29,6 +29,157 @@ def fnv_curve_hash(start_ns, points, knots):
 
 
 class TrajectoryServerHandshakeTest(unittest.TestCase):
+    def test_planner_message_activates_unchanged_in_traj_server(self):
+        import rclpy
+        from nav_msgs.msg import Odometry
+        from quadrotor_msgs.msg import PositionCommand
+        from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
+        from traj_utils.msg import Bspline, TrajectoryCommandStatus
+
+        self.assertIsNotNone(
+            ARGS.planner_test,
+            "the planner publication executable is required for this seam")
+        environment = os.environ.copy()
+        environment["ROS_DOMAIN_ID"] = str(190 + os.getpid() % 20)
+        environment["IAP_PROCESS_HANDSHAKE"] = "1"
+        server = subprocess.Popen(
+            [ARGS.server], env=environment, stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT, text=True)
+        previous_domain = os.environ.get("ROS_DOMAIN_ID")
+        os.environ["ROS_DOMAIN_ID"] = environment["ROS_DOMAIN_ID"]
+        rclpy.init()
+        node = rclpy.create_node("planner_observation_handoff_test")
+        retained = QoSProfile(
+            depth=20, reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL)
+        odom_pub = node.create_publisher(Odometry, "odometry", 10)
+        planner_messages = []
+        statuses = []
+        commands = []
+        planner_subscription = node.create_subscription(
+            Bspline, "planning/bspline", planner_messages.append, retained)
+        status_subscription = node.create_subscription(
+            TrajectoryCommandStatus, "planning/pending_guard_status",
+            statuses.append, retained)
+        command_subscription = node.create_subscription(
+            PositionCommand, "/position_cmd", commands.append, 50)
+        self.assertIsNotNone(planner_subscription)
+        self.assertIsNotNone(status_subscription)
+        self.assertIsNotNone(command_subscription)
+
+        def spin_at(stamp_ns, duration_s):
+            deadline = time.monotonic() + duration_s
+            while time.monotonic() < deadline:
+                odom = Odometry()
+                odom.header.stamp.sec = stamp_ns // 1_000_000_000
+                odom.header.stamp.nanosec = stamp_ns % 1_000_000_000
+                odom.pose.pose.position.z = 1.0
+                odom_pub.publish(odom)
+                rclpy.spin_once(node, timeout_sec=0.01)
+
+        planner = None
+        planner_output = ""
+        try:
+            spin_at(10_000_000_000, 1.3)
+            planner = subprocess.Popen(
+                [ARGS.planner_test,
+                 "--gtest_filter=P4ObservationPublication."
+                 "CertifiedCommonObservationReachesP5AndPublishesFromPlanningCycle"],
+                env=environment, stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT, text=True)
+            deadline = time.monotonic() + 8.0
+            while (not planner_messages or not any(
+                    item.state == item.QUEUED for item in statuses)) and (
+                    time.monotonic() < deadline):
+                spin_at(10_000_000_000, 0.05)
+            planner_output, _ = planner.communicate(timeout=5)
+            self.assertEqual(planner.returncode, 0, planner_output)
+            self.assertTrue(
+                planner_messages,
+                "the process test did not consume the planner's actual "
+                f"message\nplanner output:\n{planner_output}")
+            published = planner_messages[-1]
+            self.assertGreater(published.traj_id, 0)
+            self.assertGreater(published.execution_instance_id, 0)
+            self.assertTrue(published.curve_hash)
+            start_ns = (
+                published.start_time.sec * 1_000_000_000
+                + published.start_time.nanosec)
+            queued = [item for item in statuses
+                      if item.state == item.QUEUED
+                      and item.trajectory_id == published.traj_id]
+            self.assertTrue(queued)
+            self.assertTrue(all(
+                item.execution_instance_id == published.execution_instance_id
+                and item.start_time == published.start_time
+                and item.curve_hash == published.curve_hash
+                for item in queued))
+
+            spin_at(start_ns + 50_000_000, 0.5)
+            activated = [item for item in statuses
+                         if item.state == item.ACTIVATED
+                         and item.trajectory_id == published.traj_id]
+            self.assertTrue(activated)
+            self.assertTrue(all(
+                item.execution_instance_id == published.execution_instance_id
+                and item.start_time == published.start_time
+                and item.curve_hash == published.curve_hash
+                for item in activated))
+
+            motion_deadline = time.monotonic() + 4.5
+            while time.monotonic() < motion_deadline:
+                rclpy.spin_once(node, timeout_sec=0.02)
+            matching_commands = [item for item in commands
+                                 if item.trajectory_id == published.traj_id]
+            self.assertTrue(matching_commands)
+            self.assertTrue(all(
+                item.execution_instance_id == published.execution_instance_id
+                and item.trajectory_start_time == published.start_time
+                and item.curve_hash == published.curve_hash
+                for item in matching_commands))
+            self.assertTrue(any(
+                (item.velocity.x ** 2 + item.velocity.y ** 2
+                 + item.velocity.z ** 2) ** 0.5 > 0.05
+                for item in matching_commands))
+            self.assertLessEqual(
+                max(item.position.x for item in matching_commands), 5.0)
+            terminal = matching_commands[-1]
+            self.assertLess(
+                (terminal.velocity.x ** 2 + terminal.velocity.y ** 2
+                 + terminal.velocity.z ** 2) ** 0.5, 1.0e-6)
+            self.assertLess(
+                (terminal.acceleration.x ** 2 + terminal.acceleration.y ** 2
+                 + terminal.acceleration.z ** 2) ** 0.5, 1.0e-6)
+            self.assertAlmostEqual(
+                terminal.position.x, published.pos_pts[-1].x, places=6)
+            self.assertNotIn(
+                "normal_channel_selected_candidate_missing", planner_output)
+            self.assertNotIn(
+                "P4-v2 P5-pass lineage write failed before publish",
+                planner_output)
+            self.assertNotIn("alternate-channel", planner_output)
+        finally:
+            node.destroy_node()
+            rclpy.shutdown()
+            if planner is not None and planner.poll() is None:
+                planner.terminate()
+                planner.wait(timeout=3)
+            server.terminate()
+            try:
+                server.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                server.kill()
+                server.wait(timeout=3)
+            self.assertEqual(
+                server.returncode, 0,
+                "traj_server must tear down all ROS entities before shutdown")
+            if server.stdout is not None:
+                server.stdout.close()
+            if previous_domain is None:
+                os.environ.pop("ROS_DOMAIN_ID", None)
+            else:
+                os.environ["ROS_DOMAIN_ID"] = previous_domain
+
     def test_future_activation_and_identity_conflict(self):
         import rclpy
         from geometry_msgs.msg import Point
@@ -328,6 +479,7 @@ class TrajectoryServerHandshakeTest(unittest.TestCase):
 
 PARSER = argparse.ArgumentParser()
 PARSER.add_argument("--server", required=True)
+PARSER.add_argument("--planner-test")
 ARGS, UNITTEST_ARGS = PARSER.parse_known_args()
 
 
