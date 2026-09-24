@@ -2007,6 +2007,32 @@ namespace ego_planner
       return true;
     }
 
+    bool p4NormalChannelCertificationContextReady(
+        const EGOPlannerManager::PlanningRiskContext &context,
+        const double now_s)
+    {
+      const auto &risk = context.snapshot;
+      const auto &execution = context.execution_snapshot;
+      const auto health = risk ? risk->health() : iap::RiskGridHealth{};
+      const double risk_age_s = risk
+          ? now_s - risk->stamp_s()
+          : std::numeric_limits<double>::infinity();
+      const double risk_timeout_s = risk
+          ? risk->params().stale_timeout_s : 0.0;
+      const bool risk_ready = risk && health.ready && !health.stale &&
+          risk->generation_id() > 0u && std::isfinite(risk_age_s) &&
+          risk_age_s >= -1.0e-6 &&
+          (risk_timeout_s < 0.0 || risk_age_s <= risk_timeout_s);
+      const bool execution_ready = execution &&
+          execution->execution_snapshot_id > 0u && execution->occupancy &&
+          execution->occupancy->generation > 0u &&
+          execution->occupancy->diagnostic_query &&
+          execution->source_identity.gnss_epoch_identity > 0u &&
+          std::isfinite(execution->source_identity.gnss_stamp_s) &&
+          execution->freshAt(now_s);
+      return risk_ready && execution_ready;
+    }
+
     std::vector<Eigen::Vector3d> p4RemainingPath(
         const std::vector<Eigen::Vector3d> &path,
         const Eigen::Vector3d &position)
@@ -6827,7 +6853,30 @@ namespace ego_planner
     P4ExecutionRiskWindowLayout direct_window_layout;
     std::shared_ptr<const P4CommittedRiskWindowPlan>
         prepared_committed_window_plan;
-    if (use_braking_windows)
+    if (use_braking_windows &&
+        last_p4_forward_decision_.selected_channel_id > 0u)
+    {
+      const auto pending = p4_prepared_channel_bundles_.find(
+          last_p4_forward_decision_.selected_channel_id);
+      const std::string curve_identity = current_control_points_hash + ":" +
+          current_knot_vector_hash + ":" +
+          std::to_string(local_data_.start_time_.nanoseconds());
+      if (pending != p4_prepared_channel_bundles_.end() &&
+          pending->second.state ==
+              P4SuccessorPreparationState::CURVE_PREPARING &&
+          pending->second.curve_identity == curve_identity &&
+          !pending->second.braking_anchors.empty() &&
+          pending->second.risk_window_plan &&
+          pending->second.risk_window_plan->valid)
+      {
+        prepared_braking_anchors = pending->second.braking_anchors;
+        prepared_committed_window_plan = pending->second.risk_window_plan;
+        braking_window_curves =
+            prepared_committed_window_plan->braking_curves;
+        direct_window_layout = prepared_committed_window_plan->layout;
+      }
+    }
+    if (use_braking_windows && !prepared_committed_window_plan)
     {
       int braking_build_failures = 0;
       int braking_contract_failures = 0;
@@ -7063,6 +7112,41 @@ namespace ego_planner
       }
     }
 
+    if (frozen_normal_channel_comparison)
+    {
+      if (!p4NormalChannelCertificationContextReady(
+              planning_risk_context_, stamp_s))
+      {
+        // The immutable physical candidate is already available, including
+        // its braking layout. Dense-risk startup is not a completed GNSS
+        // observation and must not be translated into a satellite-count or
+        // geometry failure. Keep these artifacts for the next healthy
+        // generation; the normal-channel FSM owns the later reauthorization.
+        p4_braking_anchors_ = std::move(prepared_braking_anchors);
+        p4_committed_risk_window_plan_ =
+            std::move(prepared_committed_window_plan);
+        p4_direct_risk_evidence_ = P4DirectTrajectoryRiskEvidence{};
+        p4_last_actual_curve_certification_.complete = false;
+        p4_last_actual_curve_certification_.failure =
+            P4PreparedCurveFailure::INCOMPLETE;
+        p4_last_actual_curve_certification_.detail =
+            "normal_channel_risk_snapshot_not_ready";
+        last_p4_forward_decision_.result_status =
+            P4ForwardResultStatus::PENDING;
+        last_p4_forward_decision_.channel_comparison_state =
+            P4ChannelComparisonState::PARTIAL_COMPARISON;
+        last_p4_forward_decision_.selection_authority =
+            P4ForwardSelectionAuthority::NONE;
+        last_p4_forward_decision_.formal_support = false;
+        last_p4_forward_decision_.reason =
+            "normal_channel_risk_snapshot_not_ready";
+        appendP4ForwardDecision(
+            last_p4_forward_decision_,
+            stage + "_risk_snapshot_pending", stamp_s);
+        return false;
+      }
+    }
+
     // RiskGrid is a coarse search field. Every terminal stage is checked by
     // one direct ForwardRisk batch over the actual B-spline, including tests
     // and offline contexts that do not carry a live occupancy generation.
@@ -7123,6 +7207,51 @@ namespace ego_planner
     const double direct_duration_ms =
         std::chrono::duration<double, std::milli>(
             std::chrono::steady_clock::now() - direct_start).count();
+    if (frozen_normal_channel_comparison)
+    {
+      const auto current_risk = planning_risk_context_.snapshot;
+      const auto current_execution =
+          planning_risk_context_.execution_snapshot;
+      const bool frozen_identity_still_current = current_risk && snapshot &&
+          current_risk->generation_id() == snapshot->generation_id() &&
+          current_execution && execution_snapshot &&
+          current_execution->execution_snapshot_id ==
+              execution_snapshot->execution_snapshot_id &&
+          current_execution->source_identity.gnss_epoch_identity ==
+              execution_snapshot->source_identity.gnss_epoch_identity &&
+          current_execution->occupancy && execution_snapshot->occupancy &&
+          current_execution->occupancy->generation ==
+              execution_snapshot->occupancy->generation;
+      if (!frozen_identity_still_current)
+      {
+        // The direct batch is synchronous, but another callback may publish
+        // and freeze a newer comparison snapshot while it runs. The older
+        // answer must never overwrite that newer identity. Preserve the
+        // physical candidate and retry all evidence on the new snapshot.
+        p4_braking_anchors_ = std::move(prepared_braking_anchors);
+        p4_committed_risk_window_plan_ =
+            std::move(prepared_committed_window_plan);
+        p4_direct_risk_evidence_ = P4DirectTrajectoryRiskEvidence{};
+        p4_last_actual_curve_certification_.complete = false;
+        p4_last_actual_curve_certification_.failure =
+            P4PreparedCurveFailure::INCOMPLETE;
+        p4_last_actual_curve_certification_.detail =
+            "normal_channel_risk_snapshot_superseded";
+        last_p4_forward_decision_.result_status =
+            P4ForwardResultStatus::PENDING;
+        last_p4_forward_decision_.channel_comparison_state =
+            P4ChannelComparisonState::PARTIAL_COMPARISON;
+        last_p4_forward_decision_.selection_authority =
+            P4ForwardSelectionAuthority::NONE;
+        last_p4_forward_decision_.formal_support = false;
+        last_p4_forward_decision_.reason =
+            "normal_channel_risk_snapshot_superseded";
+        appendP4ForwardDecision(
+            last_p4_forward_decision_,
+            stage + "_risk_snapshot_superseded", stamp_s);
+        return false;
+      }
+    }
     const bool final_global_only_degradation =
         p4_global_exposure_policy_.task_mode ==
             iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT &&
@@ -9520,6 +9649,207 @@ namespace ego_planner
         now_s <= latest_queue_time_s + 1.0e-9;
   }
 
+  bool EGOPlannerManager::p4ActualCurveAwaitingRiskSnapshot() const
+  {
+    return !p4_last_actual_curve_certification_.complete &&
+        p4_last_actual_curve_certification_.failure ==
+            P4PreparedCurveFailure::INCOMPLETE &&
+        (p4_last_actual_curve_certification_.detail ==
+             "normal_channel_risk_snapshot_not_ready" ||
+         p4_last_actual_curve_certification_.detail ==
+             "normal_channel_risk_snapshot_superseded");
+  }
+
+  P4NormalChannelPreparationDisposition
+  EGOPlannerManager::deferP4NormalChannelCertificationForRiskSnapshot(
+      const double now_s, std::string *reason)
+  {
+    const auto finish = [reason](
+        const P4NormalChannelPreparationDisposition disposition,
+        const char *why) {
+      if (reason) *reason = why;
+      return disposition;
+    };
+    if (!p4ActualCurveAwaitingRiskSnapshot())
+      return finish(
+          P4NormalChannelPreparationDisposition::NOT_APPLICABLE,
+          "normal_channel_risk_snapshot_is_not_pending");
+
+    std::set<uint64_t> expected_channel_ids;
+    for (const auto &candidate : last_p4_forward_decision_.candidates)
+      if (candidate.channel_id > 0u && candidate.occupancy_supported)
+        expected_channel_ids.insert(candidate.channel_id);
+    if (expected_channel_ids.size() < 2u)
+      return finish(
+          P4NormalChannelPreparationDisposition::NOT_APPLICABLE,
+          "normal_multi_channel_comparison_not_required");
+
+    const auto selected = std::find_if(
+        last_p4_forward_decision_.candidates.begin(),
+        last_p4_forward_decision_.candidates.end(),
+        [this](const P4ForwardCandidate &candidate) {
+          return candidate.channel_id > 0u && candidate.occupancy_supported &&
+              ((last_p4_forward_decision_.selected_candidate_id > 0u &&
+                candidate.candidate_id ==
+                    last_p4_forward_decision_.selected_candidate_id) ||
+               (last_p4_forward_decision_.selected_candidate_id == 0u &&
+                candidate.channel_id ==
+                    last_p4_forward_decision_.selected_channel_id));
+        });
+    if (selected == last_p4_forward_decision_.candidates.end())
+      return finish(
+          P4NormalChannelPreparationDisposition::REJECTED,
+          "normal_channel_pending_candidate_missing");
+
+    const std::string control_hash = p4ControlPointHash(
+        local_data_.position_traj_.getControlPoint());
+    const std::string knot_hash = p4KnotVectorHash(
+        local_data_.position_traj_.getKnot());
+    P4PreparedSuccessorBundle pending;
+    pending.state = P4SuccessorPreparationState::CURVE_PREPARING;
+    pending.prepared_stamp_s = now_s;
+    pending.trajectory = local_data_;
+    pending.decision = last_p4_forward_decision_;
+    pending.risk_window_plan = p4_committed_risk_window_plan_;
+    pending.braking_anchors = p4_braking_anchors_;
+    pending.checked_generation = published_p4_checked_generation_;
+    pending.curve_identity = control_hash + ":" + knot_hash + ":" +
+        std::to_string(local_data_.start_time_.nanoseconds());
+    if (planning_risk_context_.execution_snapshot &&
+        planning_risk_context_.execution_snapshot->occupancy)
+      pending.bound_occupancy = planning_risk_context_.execution_snapshot->
+          occupancy->frozen_grid_map_epoch;
+    pending.channel_record.channel_id = selected->channel_id;
+    pending.channel_record.snapshot_identity =
+        last_p4_forward_decision_.snapshot_identity;
+    pending.channel_record.guide_identity = selected->path_hash;
+    pending.channel_record.refined_path_identity = p4PreparedGuideIdentity(
+        last_p4_forward_decision_.selected_guide);
+    pending.channel_record.curve_identity = pending.curve_identity;
+    pending.channel_record.actual_endpoint =
+        local_data_.position_traj_.evaluateDeBoorT(
+            local_data_.position_traj_.getTimeSum());
+    pending.channel_record.duration_s =
+        local_data_.position_traj_.getTimeSum();
+    pending.channel_record.failure = P4PreparedCurveFailure::INCOMPLETE;
+    p4_prepared_channel_bundles_[selected->channel_id] = std::move(pending);
+
+    const auto schedule = [this](const P4ForwardCandidate &candidate,
+                                 const bool freeze_context) {
+      P4ForwardDecision next = last_p4_forward_decision_;
+      next.result_status = freeze_context ? P4ForwardResultStatus::READY
+                                          : P4ForwardResultStatus::PENDING;
+      next.action = P4ForwardAction::CANDIDATE_READY;
+      next.executable_intent = P4ExecutableIntent::FINAL_CHANNEL;
+      next.selection_authority = P4ForwardSelectionAuthority::NONE;
+      next.formal_support = false;
+      next.selected_candidate_id = candidate.candidate_id;
+      next.selected_channel_id = candidate.channel_id;
+      next.runner_up_candidate_id = 0u;
+      next.runner_up_channel_id = 0u;
+      next.selected_guide = candidate.path;
+      next.selected_actual_endpoint = Eigen::Vector3d::Constant(
+          std::numeric_limits<double>::quiet_NaN());
+      next.runner_up_actual_endpoint = Eigen::Vector3d::Constant(
+          std::numeric_limits<double>::quiet_NaN());
+      next.channel_comparison_state =
+          P4ChannelComparisonState::PARTIAL_COMPARISON;
+      next.reason = freeze_context
+          ? "normal_next_channel_curve_pending"
+          : "normal_channel_risk_snapshot_not_ready";
+      last_p4_forward_decision_ = next;
+      p4_pending_channel_work_item_ = std::move(next);
+      if (freeze_context)
+        p4_pending_channel_context_ = planning_risk_context_;
+      else
+        p4_pending_channel_context_.reset();
+    };
+
+    const auto missing = std::find_if(
+        last_p4_forward_decision_.candidates.begin(),
+        last_p4_forward_decision_.candidates.end(),
+        [this](const P4ForwardCandidate &candidate) {
+          return candidate.channel_id > 0u && candidate.occupancy_supported &&
+              p4_prepared_channel_bundles_.count(candidate.channel_id) == 0u;
+        });
+    if (missing != last_p4_forward_decision_.candidates.end())
+    {
+      schedule(*missing, true);
+      return finish(
+          P4NormalChannelPreparationDisposition::NEXT_CHANNEL_PENDING,
+          "normal_next_channel_curve_pending");
+    }
+
+    const auto retry = std::find_if(
+        last_p4_forward_decision_.candidates.begin(),
+        last_p4_forward_decision_.candidates.end(),
+        [this](const P4ForwardCandidate &candidate) {
+          const auto entry = p4_prepared_channel_bundles_.find(
+              candidate.channel_id);
+          return entry != p4_prepared_channel_bundles_.end() &&
+              entry->second.state ==
+                  P4SuccessorPreparationState::CURVE_PREPARING;
+        });
+    if (retry == last_p4_forward_decision_.candidates.end())
+      return finish(
+          P4NormalChannelPreparationDisposition::REJECTED,
+          "normal_channel_pending_curve_missing");
+    schedule(*retry, false);
+    appendP4ForwardDecision(
+        last_p4_forward_decision_,
+        "normal_channel_risk_snapshot_pending", now_s);
+    return finish(
+        P4NormalChannelPreparationDisposition::NEXT_CHANNEL_PENDING,
+        "normal_channel_risk_snapshot_pending");
+  }
+
+  bool EGOPlannerManager::activateP4NormalChannelPendingCertification(
+      const double now_s, bool *waiting_for_risk_snapshot)
+  {
+    if (waiting_for_risk_snapshot)
+      *waiting_for_risk_snapshot = false;
+    if (!p4_pending_channel_work_item_)
+      return false;
+    const auto pending = p4_prepared_channel_bundles_.find(
+        p4_pending_channel_work_item_->selected_channel_id);
+    if (pending == p4_prepared_channel_bundles_.end() ||
+        pending->second.state !=
+            P4SuccessorPreparationState::CURVE_PREPARING)
+      return false;
+
+    const PlanningRiskContext *context = nullptr;
+    if (p4_pending_channel_context_ &&
+        p4NormalChannelCertificationContextReady(
+            *p4_pending_channel_context_, now_s))
+      context = &*p4_pending_channel_context_;
+    else if (p4NormalChannelCertificationContextReady(
+                 planning_risk_context_, now_s))
+      context = &planning_risk_context_;
+    if (!context)
+    {
+      if (waiting_for_risk_snapshot)
+        *waiting_for_risk_snapshot = true;
+      return false;
+    }
+
+    const PlanningRiskContext frozen_context = *context;
+    local_data_ = pending->second.trajectory;
+    last_p4_forward_decision_ = pending->second.decision;
+    last_p4_forward_decision_.planning_attempt_id =
+        frozen_context.planning_attempt_id;
+    last_p4_forward_decision_.result_status = P4ForwardResultStatus::READY;
+    last_p4_forward_decision_.action = P4ForwardAction::CANDIDATE_READY;
+    last_p4_forward_decision_.selection_authority =
+        P4ForwardSelectionAuthority::NONE;
+    last_p4_forward_decision_.formal_support = false;
+    p4_braking_anchors_ = pending->second.braking_anchors;
+    p4_committed_risk_window_plan_ = pending->second.risk_window_plan;
+    planning_risk_context_ = frozen_context;
+    p4_pending_channel_work_item_.reset();
+    p4_pending_channel_context_.reset();
+    return true;
+  }
+
   P4NormalChannelPreparationDisposition
   EGOPlannerManager::recordP4NormalChannelCurveFailure(
       const double now_s, const P4PreparedCurveFailure failure,
@@ -9626,7 +9956,9 @@ namespace ego_planner
          entry != p4_prepared_channel_bundles_.end();)
     {
       if (entry->second.channel_record.snapshot_identity.canonical() !=
-          record.snapshot_identity.canonical())
+              record.snapshot_identity.canonical() &&
+          entry->second.state !=
+              P4SuccessorPreparationState::CURVE_PREPARING)
         entry = p4_prepared_channel_bundles_.erase(entry);
       else
         ++entry;
@@ -9929,7 +10261,9 @@ namespace ego_planner
          entry != p4_prepared_channel_bundles_.end();)
     {
       if (entry->second.channel_record.snapshot_identity.canonical() !=
-          record.snapshot_identity.canonical())
+              record.snapshot_identity.canonical() &&
+          entry->second.state !=
+              P4SuccessorPreparationState::CURVE_PREPARING)
         entry = p4_prepared_channel_bundles_.erase(entry);
       else
         ++entry;
@@ -9976,6 +10310,43 @@ namespace ego_planner
       return finish(
           P4NormalChannelPreparationDisposition::NEXT_CHANNEL_PENDING,
           "normal_next_channel_curve_pending");
+    }
+
+    const auto pending_certification = std::find_if(
+        bundle.decision.candidates.begin(), bundle.decision.candidates.end(),
+        [this](const P4ForwardCandidate &candidate) {
+          const auto entry = p4_prepared_channel_bundles_.find(
+              candidate.channel_id);
+          return entry != p4_prepared_channel_bundles_.end() &&
+              entry->second.state ==
+                  P4SuccessorPreparationState::CURVE_PREPARING;
+        });
+    if (pending_certification != bundle.decision.candidates.end())
+    {
+      const auto cached = p4_prepared_channel_bundles_.find(
+          pending_certification->channel_id);
+      P4ForwardDecision next = cached->second.decision;
+      next.planning_attempt_id = planning_risk_context_.planning_attempt_id;
+      next.result_status = P4ForwardResultStatus::PENDING;
+      next.action = P4ForwardAction::CANDIDATE_READY;
+      next.executable_intent = P4ExecutableIntent::FINAL_CHANNEL;
+      next.selection_authority = P4ForwardSelectionAuthority::NONE;
+      next.formal_support = false;
+      next.selected_candidate_id = pending_certification->candidate_id;
+      next.selected_channel_id = pending_certification->channel_id;
+      next.selected_guide = pending_certification->path;
+      next.channel_comparison_state =
+          P4ChannelComparisonState::PARTIAL_COMPARISON;
+      next.reason = "normal_channel_cached_curve_recertification_pending";
+      last_p4_forward_decision_ = next;
+      p4_pending_channel_work_item_ = std::move(next);
+      p4_pending_channel_context_ = planning_risk_context_;
+      appendP4ForwardDecision(
+          bundle.decision,
+          "normal_channel_cached_curve_recertification_pending", now_s);
+      return finish(
+          P4NormalChannelPreparationDisposition::NEXT_CHANNEL_PENDING,
+          "normal_channel_cached_curve_recertification_pending");
     }
 
     std::vector<P4PreparedChannelRecord> prepared_records;

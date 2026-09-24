@@ -999,7 +999,8 @@ class RuntimeAheadUnsafeProvider final : public iap::RiskPredictionProvider {
 std::shared_ptr<const iap::RiskGridSnapshot> makeP4SelectionSnapshot(
     const double stale_timeout_s = 100.0,
     const std::string& geometry_id = {},
-    const bool complete_source_identity = false) {
+    const bool complete_source_identity = false,
+    const int generation_count = 1) {
   iap::RiskGridMapParams params;
   params.frame_id = "map";
   params.resolution_m = 0.5;
@@ -1022,14 +1023,16 @@ std::shared_ptr<const iap::RiskGridSnapshot> makeP4SelectionSnapshot(
   source_identity.predictor_algorithm_identity = "test_direct_v1";
   source_identity.alert_limit_policy_id = params.alert_limit_policy_id;
   std::string reason;
-  const bool refreshed = complete_source_identity
-      ? grid.refreshFromProvider(
-          Eigen::Vector3d::Zero(), 10.0, provider,
-          iap::RiskGridMap::OccupancyDiagnosticQuery{},
-          iap::RiskGridMap::SourceValidator{}, source_identity, &reason)
-      : grid.refreshFromProvider(
-          Eigen::Vector3d::Zero(), 10.0, provider, &reason);
-  EXPECT_TRUE(refreshed) << reason;
+  for (int generation = 0; generation < generation_count; ++generation) {
+    const bool refreshed = complete_source_identity
+        ? grid.refreshFromProvider(
+            Eigen::Vector3d::Zero(), 10.0, provider,
+            iap::RiskGridMap::OccupancyDiagnosticQuery{},
+            iap::RiskGridMap::SourceValidator{}, source_identity, &reason)
+        : grid.refreshFromProvider(
+            Eigen::Vector3d::Zero(), 10.0, provider, &reason);
+    EXPECT_TRUE(refreshed) << reason;
+  }
   return grid.acquireSnapshot();
 }
 
@@ -6717,6 +6720,524 @@ TEST(P4PreparedSuccessorPolicy,
   parent.selected_channel_id = parent.candidates.front().channel_id;
   EXPECT_FALSE(ego_planner::p4RequiresFullSuccessorChannelSearch(
       parent, ego_planner::P4ExecutionAuthority::FORMAL_RISK_SELECTED));
+}
+
+TEST(P4PreparedChannelPreparation,
+     RiskSnapshotNotReadyKeepsActualBundlesPending)
+{
+  ensureRclcpp();
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureNoCollision(map.get());
+  const auto frozen_occupancy = map->captureFrozenOccupancyEpoch();
+  ASSERT_NE(frozen_occupancy, nullptr);
+  std::const_pointer_cast<FrozenOccupancyEpoch>(frozen_occupancy)
+      ->frame_contract_id = "map:test";
+  const auto policy_seed = makeP4SelectionSnapshot(
+      1.0, frozen_occupancy->geometry_id, true);
+  auto optimizer = makeP4Optimizer(
+      map, policy_seed,
+      p4LineageTestPath("normal_channel_risk_not_ready.csv").string(), 1);
+
+  ego_planner::EGOPlannerManager manager;
+  manager.pp_.max_vel_ = 20.0;
+  manager.pp_.max_acc_ = 100.0;
+  manager.setP4ControlCapabilityProfileForTest(
+      permissiveTestControlProfile());
+  manager.setP4VerticalSliceOptimizerForTest(std::move(optimizer), map);
+
+  std::size_t formal_gnss_calls = 0u;
+  const auto not_ready_risk = [&formal_gnss_calls](
+      const iap::ForwardRiskBatchRequest &request) {
+    ++formal_gnss_calls;
+    auto result = directRiskCallback(0.4)(request);
+    result.complete = false;
+    result.failure_reason =
+        iap::ForwardRiskFailureReason::GNSS_LOCAL_USABLE_SATS_LT_MIN;
+    for (auto &window : result.windows)
+    {
+      window.complete = false;
+      window.satellite_ids.clear();
+      window.failure_reason =
+          iap::ForwardRiskFailureReason::GNSS_LOCAL_USABLE_SATS_LT_MIN;
+    }
+    for (auto &point : result.points)
+    {
+      point.gnss_supported = false;
+      point.ranking_state = iap::ForwardRiskRankingState::INCOMPLETE;
+      point.safety_state = iap::ForwardRiskSafetyState::UNKNOWN;
+      point.failure_reason =
+          iap::ForwardRiskFailureReason::GNSS_LOCAL_USABLE_SATS_LT_MIN;
+    }
+    return result;
+  };
+  const auto execution = makeP4ExecutionSnapshot(
+      policy_seed, not_ready_risk, 10.0, 811u);
+  auto occupancy = std::make_shared<ego_planner::P0OccupancyEpoch>(
+      *execution->occupancy);
+  occupancy->frozen_grid_map_epoch = frozen_occupancy;
+  auto bound_execution =
+      std::make_shared<ego_planner::P0ExecutionRiskSnapshot>(*execution);
+  bound_execution->occupancy = occupancy;
+  manager.setPlanningRiskContextForTest(
+      nullptr, 10.0, occupancy, not_ready_risk, bound_execution);
+  manager.setLatestRiskSnapshotForTest(nullptr);
+
+  auto decision = makeForwardDecision(
+      policy_seed, manager.planningRiskContext().planning_attempt_id);
+  decision.snapshot_identity.risk_generation = 0u;
+  decision.vehicle_radius_m =
+      ego_planner::P4ForwardLimits{}.vehicle_radius_m;
+  decision.map_inflation_m = map->getObstacleInflation();
+  decision.collision_policy_id = ego_planner::p4CollisionPolicyIdentity(
+      decision.vehicle_radius_m, decision.map_inflation_m,
+      map->getResolution(), map->getVirtualCeilingHeight());
+  decision.action = ego_planner::P4ForwardAction::CANDIDATE_READY;
+  decision.selection_authority =
+      ego_planner::P4ForwardSelectionAuthority::NONE;
+  decision.formal_support = false;
+  decision.selected_channel_id = decision.candidates.front().channel_id;
+  auto second_channel = decision.candidates.front();
+  second_channel.candidate_id += 1u;
+  second_channel.channel_id += 1u;
+  second_channel.path[1].y() *= -1.0;
+  second_channel.path_hash = "risk-not-ready-runner-up";
+  decision.candidates.push_back(std::move(second_channel));
+  manager.setP4ForwardDecisionForTest(std::move(decision));
+
+  auto stopped = ego_planner::UniformBspline(
+      p4StoppedControlPoints(), 3, 0.5);
+  const auto terminal = ego_planner::imposeP4TerminalStop(
+      &stopped, terminalStartState(stopped), 20.0, 100.0, 0.0);
+  ASSERT_TRUE(terminal.success) << terminal.reason;
+  manager.local_data_.position_traj_ = stopped;
+  manager.local_data_.velocity_traj_ = stopped.getDerivative();
+  manager.local_data_.acceleration_traj_ =
+      manager.local_data_.velocity_traj_.getDerivative();
+  manager.local_data_.traj_id_ = 911;
+  manager.local_data_.start_time_ = rclcpp::Time(10, 0, RCL_ROS_TIME);
+  manager.local_data_.duration_ = stopped.getTimeSum();
+
+  EXPECT_FALSE(manager.certifyP4ActualCurve(
+      "final_bspline_before_p5", 10.0));
+  EXPECT_EQ(formal_gnss_calls, 0u)
+      << "generation zero must not be interpreted as a completed GNSS query";
+  EXPECT_EQ(manager.lastP4ActualCurveCertification().failure,
+            ego_planner::P4PreparedCurveFailure::INCOMPLETE);
+  EXPECT_EQ(manager.lastP4ActualCurveCertification().detail,
+            "normal_channel_risk_snapshot_not_ready");
+  EXPECT_EQ(manager.lastP4ForwardDecision().result_status,
+            ego_planner::P4ForwardResultStatus::PENDING);
+  EXPECT_EQ(manager.lastP4ForwardDecision().selection_authority,
+            ego_planner::P4ForwardSelectionAuthority::NONE);
+  EXPECT_FALSE(manager.lastP4ForwardDecision().formal_support);
+}
+
+TEST(P4PreparedChannelPreparation,
+     FirstHealthyRiskGenerationRecertifiesCachedActualBundles)
+{
+  ensureRclcpp();
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureNoCollision(map.get());
+  const auto frozen_occupancy = map->captureFrozenOccupancyEpoch();
+  ASSERT_NE(frozen_occupancy, nullptr);
+  std::const_pointer_cast<FrozenOccupancyEpoch>(frozen_occupancy)
+      ->frame_contract_id = "map:test";
+  const auto healthy_risk_grid = makeP4SelectionSnapshot(
+      1.0, frozen_occupancy->geometry_id, true);
+  auto optimizer = makeP4Optimizer(
+      map, healthy_risk_grid,
+      p4LineageTestPath("normal_channel_first_healthy_generation.csv")
+          .string(),
+      1);
+
+  ego_planner::EGOPlannerManager manager;
+  manager.pp_.max_vel_ = 20.0;
+  manager.pp_.max_acc_ = 100.0;
+  manager.setP4ControlCapabilityProfileForTest(
+      permissiveTestControlProfile());
+  manager.setP4VerticalSliceOptimizerForTest(std::move(optimizer), map);
+
+  std::size_t premature_gnss_calls = 0u;
+  const auto premature_risk = [&premature_gnss_calls](
+      const iap::ForwardRiskBatchRequest &request) {
+    ++premature_gnss_calls;
+    auto result = directRiskCallback(0.4)(request);
+    result.complete = false;
+    result.failure_reason =
+        iap::ForwardRiskFailureReason::GNSS_LOCAL_USABLE_SATS_LT_MIN;
+    return result;
+  };
+  auto not_ready_execution = makeP4ExecutionSnapshot(
+      healthy_risk_grid, premature_risk, 10.0, 812u);
+  auto occupancy = std::make_shared<ego_planner::P0OccupancyEpoch>(
+      *not_ready_execution->occupancy);
+  occupancy->frozen_grid_map_epoch = frozen_occupancy;
+  not_ready_execution->occupancy = occupancy;
+  manager.setPlanningRiskContextForTest(
+      nullptr, 10.0, occupancy, premature_risk, not_ready_execution);
+
+  auto decision = makeForwardDecision(
+      healthy_risk_grid, manager.planningRiskContext().planning_attempt_id);
+  decision.snapshot_identity.risk_generation = 0u;
+  decision.vehicle_radius_m =
+      ego_planner::P4ForwardLimits{}.vehicle_radius_m;
+  decision.map_inflation_m = map->getObstacleInflation();
+  decision.collision_policy_id = ego_planner::p4CollisionPolicyIdentity(
+      decision.vehicle_radius_m, decision.map_inflation_m,
+      map->getResolution(), map->getVirtualCeilingHeight());
+  decision.action = ego_planner::P4ForwardAction::CANDIDATE_READY;
+  decision.selection_authority =
+      ego_planner::P4ForwardSelectionAuthority::NONE;
+  decision.formal_support = false;
+  decision.selected_channel_id = decision.candidates.front().channel_id;
+  auto second_channel = decision.candidates.front();
+  second_channel.candidate_id += 1u;
+  second_channel.channel_id += 1u;
+  second_channel.path[1].y() *= -1.0;
+  second_channel.path_hash = "first-healthy-generation-runner-up";
+  decision.candidates.push_back(second_channel);
+  manager.setP4ForwardDecisionForTest(decision);
+
+  const auto install_curve = [&manager](
+      Eigen::MatrixXd points, const int trajectory_id) {
+    auto curve = ego_planner::UniformBspline(points, 3, 0.5);
+    const auto terminal = ego_planner::imposeP4TerminalStop(
+        &curve, terminalStartState(curve), 20.0, 100.0, 0.0);
+    EXPECT_TRUE(terminal.success) << terminal.reason;
+    manager.local_data_.position_traj_ = curve;
+    manager.local_data_.velocity_traj_ = curve.getDerivative();
+    manager.local_data_.acceleration_traj_ =
+        manager.local_data_.velocity_traj_.getDerivative();
+    manager.local_data_.traj_id_ = trajectory_id;
+    manager.local_data_.start_time_ =
+        rclcpp::Time(10, 0, RCL_ROS_TIME);
+    manager.local_data_.duration_ = curve.getTimeSum();
+  };
+
+  install_curve(p4StoppedControlPoints(), 921);
+  ASSERT_FALSE(manager.certifyP4ActualCurve(
+      "final_bspline_before_p5", 10.0));
+  std::string reason;
+  ASSERT_EQ(
+      manager.deferP4NormalChannelCertificationForRiskSnapshot(
+          10.0, &reason),
+      ego_planner::P4NormalChannelPreparationDisposition::
+          NEXT_CHANNEL_PENDING)
+      << reason;
+  ASSERT_TRUE(manager.pendingP4ChannelWorkItemForTest().has_value());
+  const auto second_decision =
+      *manager.pendingP4ChannelWorkItemForTest();
+  manager.clearP4PendingChannelWorkItemForTest();
+  manager.setP4ForwardDecisionForTest(second_decision);
+  Eigen::MatrixXd mirrored_points = p4StoppedControlPoints();
+  mirrored_points.row(1) *= -1.0;
+  install_curve(std::move(mirrored_points), 922);
+  ASSERT_FALSE(manager.certifyP4ActualCurve(
+      "final_bspline_before_p5", 10.0));
+  ASSERT_EQ(
+      manager.deferP4NormalChannelCertificationForRiskSnapshot(
+          10.0, &reason),
+      ego_planner::P4NormalChannelPreparationDisposition::
+          NEXT_CHANNEL_PENDING)
+      << reason;
+
+  EXPECT_EQ(premature_gnss_calls, 0u);
+  ASSERT_EQ(manager.pendingP4NormalCurveCountForTest(), 2u);
+  const auto original_hashes =
+      manager.pendingP4NormalCurveHashesForTest();
+  ASSERT_EQ(original_hashes.size(), 2u);
+  const auto original_braking_counts =
+      manager.pendingP4NormalBrakingCountsForTest();
+  ASSERT_EQ(original_braking_counts.size(), 2u);
+  EXPECT_TRUE(std::all_of(
+      original_braking_counts.begin(), original_braking_counts.end(),
+      [](const std::size_t count) { return count > 0u; }));
+
+  bool waiting = false;
+  EXPECT_FALSE(manager.activateP4NormalChannelPendingCertification(
+      10.0, &waiting));
+  EXPECT_TRUE(waiting);
+
+  std::size_t healthy_gnss_calls = 0u;
+  const auto healthy_direct = [&healthy_gnss_calls](
+      const iap::ForwardRiskBatchRequest &request) {
+    ++healthy_gnss_calls;
+    double signed_lateral_sum = 0.0;
+    for (const auto &point : request.points)
+      signed_lateral_sum += point.position_map.y();
+    return directRiskCallback(
+        signed_lateral_sum < 0.0 ? 0.6 : 0.3)(request);
+  };
+  auto healthy_execution = makeP4ExecutionSnapshot(
+      healthy_risk_grid, healthy_direct, 10.0, 813u);
+  healthy_execution->occupancy = occupancy;
+  manager.setPlanningRiskContextForTest(
+      healthy_risk_grid, 10.0, occupancy, healthy_direct,
+      healthy_execution);
+  manager.setLatestRiskSnapshotForTest(healthy_risk_grid);
+
+  ASSERT_TRUE(manager.activateP4NormalChannelPendingCertification(
+      10.0, &waiting));
+  EXPECT_FALSE(waiting);
+  ASSERT_TRUE(manager.certifyP4ActualCurve(
+      "final_bspline_before_p5", 10.0));
+  ego_planner::P5GateStatus disabled_preview;
+  ASSERT_EQ(
+      manager.prepareP4NormalChannelComparison(
+          10.0, disabled_preview, &reason),
+      ego_planner::P4NormalChannelPreparationDisposition::
+          NEXT_CHANNEL_PENDING)
+      << reason;
+
+  ASSERT_TRUE(manager.activateP4NormalChannelPendingCertification(
+      10.0, &waiting));
+  EXPECT_FALSE(waiting);
+  ASSERT_TRUE(manager.certifyP4ActualCurve(
+      "final_bspline_before_p5", 10.0));
+  ASSERT_EQ(
+      manager.prepareP4NormalChannelComparison(
+          10.0, disabled_preview, &reason),
+      ego_planner::P4NormalChannelPreparationDisposition::READY_TO_PUBLISH)
+      << reason;
+
+  EXPECT_EQ(healthy_gnss_calls, 2u);
+  EXPECT_EQ(manager.lastP4ForwardDecision().action,
+            ego_planner::P4ForwardAction::RISK_SELECTED);
+  EXPECT_EQ(manager.lastP4ForwardDecision().selection_authority,
+            ego_planner::P4ForwardSelectionAuthority::FORMAL);
+  EXPECT_TRUE(manager.lastP4ForwardDecision().formal_support);
+  EXPECT_TRUE(
+      manager.lastP4ForwardDecision().selected_actual_endpoint.allFinite());
+  EXPECT_TRUE(
+      manager.lastP4ForwardDecision().runner_up_actual_endpoint.allFinite());
+  EXPECT_EQ(manager.pendingP4NormalCurveCountForTest(), 0u);
+  const std::string selected_identity =
+      manager.p4ExecutionCertificate().control_points_hash + ":" +
+      manager.p4ExecutionCertificate().knot_vector_hash + ":" +
+      std::to_string(
+          manager.p4ExecutionCertificate().start_time_ns);
+  EXPECT_NE(std::find(
+      original_hashes.begin(), original_hashes.end(), selected_identity),
+      original_hashes.end());
+  EXPECT_EQ(manager.lastP4ForwardDecision().snapshot_identity.risk_generation,
+            healthy_risk_grid->generation_id());
+  EXPECT_EQ(
+      manager.lastP4ForwardDecision().snapshot_identity.execution_snapshot_id,
+      healthy_execution->execution_snapshot_id);
+}
+
+TEST(P4PreparedChannelPreparation,
+     LateOlderGenerationCannotOverrideFrozenNewerComparison)
+{
+  ensureRclcpp();
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureNoCollision(map.get());
+  const auto frozen_occupancy = map->captureFrozenOccupancyEpoch();
+  ASSERT_NE(frozen_occupancy, nullptr);
+  std::const_pointer_cast<FrozenOccupancyEpoch>(frozen_occupancy)
+      ->frame_contract_id = "map:test";
+  const auto generation_one = makeP4SelectionSnapshot(
+      1.0, frozen_occupancy->geometry_id, true, 1);
+  const auto generation_two = makeP4SelectionSnapshot(
+      1.0, frozen_occupancy->geometry_id, true, 2);
+  ASSERT_LT(generation_one->generation_id(), generation_two->generation_id());
+  auto optimizer = makeP4Optimizer(
+      map, generation_one,
+      p4LineageTestPath("normal_channel_superseded_generation.csv").string(),
+      1);
+
+  ego_planner::EGOPlannerManager manager;
+  manager.pp_.max_vel_ = 20.0;
+  manager.pp_.max_acc_ = 100.0;
+  manager.setP4ControlCapabilityProfileForTest(
+      permissiveTestControlProfile());
+  manager.setP4VerticalSliceOptimizerForTest(std::move(optimizer), map);
+
+  const auto generation_two_risk = directRiskCallback(0.3);
+  auto generation_two_execution = makeP4ExecutionSnapshot(
+      generation_two, generation_two_risk, 10.0, 816u);
+  auto occupancy = std::make_shared<ego_planner::P0OccupancyEpoch>(
+      *generation_two_execution->occupancy);
+  occupancy->frozen_grid_map_epoch = frozen_occupancy;
+  generation_two_execution->occupancy = occupancy;
+
+  std::size_t generation_one_calls = 0u;
+  const auto late_generation_one =
+      [&manager, &generation_one_calls, generation_two, occupancy,
+       generation_two_risk, generation_two_execution](
+          const iap::ForwardRiskBatchRequest &request) {
+        ++generation_one_calls;
+        manager.setPlanningRiskContextForTest(
+            generation_two, 10.0, occupancy, generation_two_risk,
+            generation_two_execution);
+        manager.setLatestRiskSnapshotForTest(generation_two);
+        return directRiskCallback(0.4)(request);
+      };
+  auto generation_one_execution = makeP4ExecutionSnapshot(
+      generation_one, late_generation_one, 10.0, 815u);
+  generation_one_execution->occupancy = occupancy;
+  manager.setPlanningRiskContextForTest(
+      generation_one, 10.0, occupancy, late_generation_one,
+      generation_one_execution);
+  manager.setLatestRiskSnapshotForTest(generation_one);
+
+  auto decision = makeForwardDecision(
+      generation_one, manager.planningRiskContext().planning_attempt_id);
+  decision.vehicle_radius_m =
+      ego_planner::P4ForwardLimits{}.vehicle_radius_m;
+  decision.map_inflation_m = map->getObstacleInflation();
+  decision.collision_policy_id = ego_planner::p4CollisionPolicyIdentity(
+      decision.vehicle_radius_m, decision.map_inflation_m,
+      map->getResolution(), map->getVirtualCeilingHeight());
+  decision.action = ego_planner::P4ForwardAction::CANDIDATE_READY;
+  decision.selection_authority =
+      ego_planner::P4ForwardSelectionAuthority::NONE;
+  decision.formal_support = false;
+  decision.selected_channel_id = decision.candidates.front().channel_id;
+  auto second_channel = decision.candidates.front();
+  second_channel.candidate_id += 1u;
+  second_channel.channel_id += 1u;
+  second_channel.path[1].y() *= -1.0;
+  second_channel.path_hash = "superseded-generation-runner-up";
+  decision.candidates.push_back(std::move(second_channel));
+  manager.setP4ForwardDecisionForTest(std::move(decision));
+
+  auto stopped = ego_planner::UniformBspline(
+      p4StoppedControlPoints(), 3, 0.5);
+  const auto terminal = ego_planner::imposeP4TerminalStop(
+      &stopped, terminalStartState(stopped), 20.0, 100.0, 0.0);
+  ASSERT_TRUE(terminal.success) << terminal.reason;
+  manager.local_data_.position_traj_ = stopped;
+  manager.local_data_.velocity_traj_ = stopped.getDerivative();
+  manager.local_data_.acceleration_traj_ =
+      manager.local_data_.velocity_traj_.getDerivative();
+  manager.local_data_.traj_id_ = 923;
+  manager.local_data_.start_time_ = rclcpp::Time(10, 0, RCL_ROS_TIME);
+  manager.local_data_.duration_ = stopped.getTimeSum();
+
+  EXPECT_FALSE(manager.certifyP4ActualCurve(
+      "final_bspline_before_p5", 10.0));
+  EXPECT_EQ(generation_one_calls, 1u);
+  EXPECT_EQ(manager.lastP4ActualCurveCertification().failure,
+            ego_planner::P4PreparedCurveFailure::INCOMPLETE);
+  EXPECT_EQ(manager.lastP4ActualCurveCertification().detail,
+            "normal_channel_risk_snapshot_superseded");
+  EXPECT_EQ(manager.lastP4ForwardDecision().result_status,
+            ego_planner::P4ForwardResultStatus::PENDING);
+  EXPECT_EQ(manager.lastP4ForwardDecision().selection_authority,
+            ego_planner::P4ForwardSelectionAuthority::NONE);
+  EXPECT_FALSE(manager.lastP4ForwardDecision().formal_support);
+  ASSERT_NE(manager.planningRiskContext().snapshot, nullptr);
+  EXPECT_EQ(manager.planningRiskContext().snapshot->generation_id(),
+            generation_two->generation_id());
+}
+
+TEST(P4PreparedChannelPreparation,
+     HealthySnapshotWithTooFewSatellitesStillFailsClosed)
+{
+  ensureRclcpp();
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureNoCollision(map.get());
+  const auto frozen_occupancy = map->captureFrozenOccupancyEpoch();
+  ASSERT_NE(frozen_occupancy, nullptr);
+  std::const_pointer_cast<FrozenOccupancyEpoch>(frozen_occupancy)
+      ->frame_contract_id = "map:test";
+  const auto snapshot = makeP4SelectionSnapshot(
+      1.0, frozen_occupancy->geometry_id, true);
+  auto optimizer = makeP4Optimizer(
+      map, snapshot,
+      p4LineageTestPath("healthy_snapshot_too_few_satellites.csv").string(),
+      1);
+
+  ego_planner::EGOPlannerManager manager;
+  manager.pp_.max_vel_ = 20.0;
+  manager.pp_.max_acc_ = 100.0;
+  manager.setP4ControlCapabilityProfileForTest(
+      permissiveTestControlProfile());
+  manager.setP4TaskModeForTest(
+      iap::GlobalNavigationTaskMode::STRICT_GLOBAL);
+  manager.setP4VerticalSliceOptimizerForTest(std::move(optimizer), map);
+
+  std::size_t formal_gnss_calls = 0u;
+  const auto too_few_satellites = [&formal_gnss_calls](
+      const iap::ForwardRiskBatchRequest &request) {
+    ++formal_gnss_calls;
+    auto result = directRiskCallback(0.4)(request);
+    result.complete = false;
+    result.failure_reason =
+        iap::ForwardRiskFailureReason::GNSS_LOCAL_USABLE_SATS_LT_MIN;
+    result.first_failure_index = 0u;
+    for (auto &window : result.windows)
+    {
+      window.complete = false;
+      window.satellite_ids = {1, 2, 3};
+      window.failure_reason =
+          iap::ForwardRiskFailureReason::GNSS_LOCAL_USABLE_SATS_LT_MIN;
+    }
+    for (auto &point : result.points)
+    {
+      point.gnss_supported = false;
+      point.ranking_state = iap::ForwardRiskRankingState::INCOMPLETE;
+      point.safety_state = iap::ForwardRiskSafetyState::UNKNOWN;
+      point.failure_reason =
+          iap::ForwardRiskFailureReason::GNSS_LOCAL_USABLE_SATS_LT_MIN;
+    }
+    return result;
+  };
+  auto execution = makeP4ExecutionSnapshot(
+      snapshot, too_few_satellites, 10.0, 814u);
+  auto occupancy = std::make_shared<ego_planner::P0OccupancyEpoch>(
+      *execution->occupancy);
+  occupancy->frozen_grid_map_epoch = frozen_occupancy;
+  execution->occupancy = occupancy;
+  manager.setPlanningRiskContextForTest(
+      snapshot, 10.0, occupancy, too_few_satellites, execution);
+  manager.setLatestRiskSnapshotForTest(snapshot);
+
+  auto decision = makeForwardDecision(
+      snapshot, manager.planningRiskContext().planning_attempt_id);
+  decision.vehicle_radius_m =
+      ego_planner::P4ForwardLimits{}.vehicle_radius_m;
+  decision.map_inflation_m = map->getObstacleInflation();
+  decision.collision_policy_id = ego_planner::p4CollisionPolicyIdentity(
+      decision.vehicle_radius_m, decision.map_inflation_m,
+      map->getResolution(), map->getVirtualCeilingHeight());
+  decision.action = ego_planner::P4ForwardAction::CANDIDATE_READY;
+  decision.selection_authority =
+      ego_planner::P4ForwardSelectionAuthority::NONE;
+  decision.formal_support = false;
+  decision.selected_channel_id = decision.candidates.front().channel_id;
+  auto second_channel = decision.candidates.front();
+  second_channel.candidate_id += 1u;
+  second_channel.channel_id += 1u;
+  second_channel.path_hash = "true-low-satellite-runner-up";
+  decision.candidates.push_back(std::move(second_channel));
+  manager.setP4ForwardDecisionForTest(std::move(decision));
+
+  auto stopped = ego_planner::UniformBspline(
+      p4StoppedControlPoints(), 3, 0.5);
+  const auto terminal = ego_planner::imposeP4TerminalStop(
+      &stopped, terminalStartState(stopped), 20.0, 100.0, 0.0);
+  ASSERT_TRUE(terminal.success) << terminal.reason;
+  manager.local_data_.position_traj_ = stopped;
+  manager.local_data_.velocity_traj_ = stopped.getDerivative();
+  manager.local_data_.acceleration_traj_ =
+      manager.local_data_.velocity_traj_.getDerivative();
+  manager.local_data_.traj_id_ = 923;
+  manager.local_data_.start_time_ = rclcpp::Time(10, 0, RCL_ROS_TIME);
+  manager.local_data_.duration_ = stopped.getTimeSum();
+
+  EXPECT_FALSE(manager.certifyP4ActualCurve(
+      "final_bspline_before_p5", 10.0));
+  EXPECT_EQ(formal_gnss_calls, 1u);
+  EXPECT_EQ(manager.lastP4ActualCurveCertification().failure,
+            ego_planner::P4PreparedCurveFailure::GNSS_RISK);
+  EXPECT_NE(manager.lastP4ActualCurveCertification().detail.find(
+                "final_bspline_direct_risk_incomplete"),
+            std::string::npos);
+  EXPECT_EQ(manager.lastP4ForwardDecision().selection_authority,
+            ego_planner::P4ForwardSelectionAuthority::NONE);
+  EXPECT_FALSE(manager.lastP4ForwardDecision().formal_support);
 }
 
 TEST(P4PreparedChannelPreparation,

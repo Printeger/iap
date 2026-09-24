@@ -1718,6 +1718,15 @@ namespace ego_planner
 
     if (!planner_manager_->preserveP4ExecutionCommitmentForCandidate())
       return false;
+    bool waiting_for_normal_risk_snapshot = false;
+    const bool using_cached_normal_curve =
+        planner_manager_->activateP4NormalChannelPendingCertification(
+            plannerNow().seconds(), &waiting_for_normal_risk_snapshot);
+    if (waiting_for_normal_risk_snapshot)
+    {
+      planner_manager_->restoreP4ExecutionCommitmentAfterCandidateRejection();
+      return false;
+    }
     bool using_cached_successor = false;
     std::string cached_successor_reason;
     if (!rebound_planner_for_test_ &&
@@ -1728,10 +1737,12 @@ namespace ego_planner
           planner_manager_->activatePreparedP4SuccessorBundle(
               plannerNow().seconds(), &cached_successor_reason);
     }
-    if (!using_cached_successor && !rebound_planner_for_test_)
+    if (!using_cached_normal_curve && !using_cached_successor &&
+        !rebound_planner_for_test_)
       getLocalTarget();
 
-    bool plan_and_refine_success = using_cached_successor ||
+    bool plan_and_refine_success = using_cached_normal_curve ||
+        using_cached_successor ||
         (rebound_planner_for_test_
         ? rebound_planner_for_test_()
         : planner_manager_->reboundReplan(
@@ -1815,6 +1826,21 @@ namespace ego_planner
                   : "final_bspline_before_p5",
               plannerNow().seconds()))
       {
+        if (preparing_normal_multi_channel_curve &&
+            planner_manager_->p4ActualCurveAwaitingRiskSnapshot())
+        {
+          std::string pending_reason;
+          const auto pending_disposition = planner_manager_->
+              deferP4NormalChannelCertificationForRiskSnapshot(
+                  plannerNow().seconds(), &pending_reason);
+          RCLCPP_INFO(
+              node_->get_logger(),
+              "P4 normal actual curve retained pending risk snapshot: %s",
+              pending_reason.c_str());
+          reject_candidate();
+          (void)pending_disposition;
+          return false;
+        }
         RCLCPP_ERROR(node_->get_logger(),
                      "P4 actual-curve certification failed before P5");
         P4NormalChannelPreparationDisposition normal_failure_disposition =

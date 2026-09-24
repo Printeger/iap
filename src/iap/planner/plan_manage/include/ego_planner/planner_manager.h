@@ -1067,6 +1067,12 @@ namespace ego_planner
     P4NormalChannelPreparationDisposition recordP4NormalChannelCurveFailure(
         double now_s, P4PreparedCurveFailure failure,
         const std::string &detail, std::string *reason = nullptr);
+    bool p4ActualCurveAwaitingRiskSnapshot() const;
+    P4NormalChannelPreparationDisposition
+    deferP4NormalChannelCertificationForRiskSnapshot(
+        double now_s, std::string *reason = nullptr);
+    bool activateP4NormalChannelPendingCertification(
+        double now_s, bool *waiting_for_risk_snapshot = nullptr);
     bool preparedP4SuccessorBundleDue(double now_s) const;
     bool activatePreparedP4SuccessorBundle(
         double now_s, std::string *reason = nullptr);
@@ -1144,6 +1150,33 @@ namespace ego_planner
     pendingP4ChannelWorkItemForTest() const
     {
       return p4_pending_channel_work_item_;
+    }
+    std::size_t pendingP4NormalCurveCountForTest() const
+    {
+      return static_cast<std::size_t>(std::count_if(
+          p4_prepared_channel_bundles_.begin(),
+          p4_prepared_channel_bundles_.end(), [](const auto &entry) {
+            return entry.second.state ==
+                P4SuccessorPreparationState::CURVE_PREPARING;
+          }));
+    }
+    std::vector<std::string> pendingP4NormalCurveHashesForTest() const
+    {
+      std::vector<std::string> hashes;
+      for (const auto &entry : p4_prepared_channel_bundles_)
+        if (entry.second.state ==
+            P4SuccessorPreparationState::CURVE_PREPARING)
+          hashes.push_back(entry.second.curve_identity);
+      return hashes;
+    }
+    std::vector<std::size_t> pendingP4NormalBrakingCountsForTest() const
+    {
+      std::vector<std::size_t> counts;
+      for (const auto &entry : p4_prepared_channel_bundles_)
+        if (entry.second.state ==
+            P4SuccessorPreparationState::CURVE_PREPARING)
+          counts.push_back(entry.second.braking_anchors.size());
+      return counts;
     }
     void setP4PendingChannelWorkItemForTest(P4ForwardDecision decision)
     {
