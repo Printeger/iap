@@ -1950,6 +1950,63 @@ namespace ego_planner
       return {};
     }
 
+    bool prepareNormalChannelsBeforeGuideRiskGate(
+        P4ForwardDecision *decision)
+    {
+      if (!decision || decision->successor_fast_path ||
+          decision->action != P4ForwardAction::DEFER_RISK_SELECTION ||
+          decision->selection_authority !=
+              P4ForwardSelectionAuthority::NONE ||
+          decision->unevaluated_channel_count != 0u)
+        return false;
+
+      const P4ForwardCandidate *first = nullptr;
+      std::set<uint64_t> channel_ids;
+      for (const auto &candidate : decision->candidates)
+      {
+        if (candidate.channel_id == 0u ||
+            !candidate.occupancy_supported ||
+            candidate.geometry_state != P4ForwardGeometryState::CLEAR ||
+            candidate.path.size() < 2u)
+          continue;
+        if (!first)
+          first = &candidate;
+        channel_ids.insert(candidate.channel_id);
+      }
+      if (!first || channel_ids.size() < 2u)
+        return false;
+
+      // Route-level risk over the complete guide is diagnostic. It cannot
+      // veto construction of the exact terminal-stop B-splines whose swept
+      // tubes, braking library and direct-risk evidence are the actual motion
+      // authority. Select only the first stable work item here; the existing
+      // normal-channel preparation transaction freezes and certifies every
+      // remaining guide before comparing complete bundles.
+      decision->action = P4ForwardAction::CANDIDATE_READY;
+      decision->executable_intent = P4ExecutableIntent::FINAL_CHANNEL;
+      decision->selection_authority = P4ForwardSelectionAuthority::NONE;
+      decision->formal_support = false;
+      decision->selected_candidate_id = first->candidate_id;
+      decision->selected_channel_id = first->channel_id;
+      decision->runner_up_candidate_id = 0u;
+      decision->runner_up_channel_id = 0u;
+      decision->selected_guide = first->path;
+      decision->selected_actual_endpoint = Eigen::Vector3d::Constant(
+          std::numeric_limits<double>::quiet_NaN());
+      decision->runner_up_actual_endpoint = Eigen::Vector3d::Constant(
+          std::numeric_limits<double>::quiet_NaN());
+      decision->selected_unevaluated_suffix_m =
+          std::numeric_limits<double>::quiet_NaN();
+      decision->runner_up_unevaluated_suffix_m =
+          std::numeric_limits<double>::quiet_NaN();
+      decision->channel_comparison_state =
+          P4ChannelComparisonState::PARTIAL_COMPARISON;
+      decision->planning_disposition =
+          P4PlanningDisposition::NEW_TRAJECTORY_READY;
+      decision->reason = "normal_actual_channel_preparation_required";
+      return true;
+    }
+
     std::vector<Eigen::Vector3d> p4RemainingPath(
         const std::vector<Eigen::Vector3d> &path,
         const Eigen::Vector3d &position)
@@ -5193,6 +5250,7 @@ namespace ego_planner
       // below retain sole publication authority.
       configureP4RefinementClearanceRecovery(
           start_pt, start_vel, p4_planning_clearance_buffer_m_, &*completed);
+      prepareNormalChannelsBeforeGuideRiskGate(&*completed);
       if (!validate_geometry_commit(&*completed, false))
       {
         p4_last_decision_position_.setConstant(
@@ -5236,6 +5294,7 @@ namespace ego_planner
       cached.result_status = P4ForwardResultStatus::READY;
       cached.planning_attempt_id = request.planning_attempt_id;
       cached.reason = "cached_same_snapshot_target";
+      prepareNormalChannelsBeforeGuideRiskGate(&cached);
       if (!validate_geometry_commit(&cached, true))
       {
         p4_latched_guide_.clear();
@@ -7462,11 +7521,22 @@ namespace ego_planner
                 P4GeometryCommitVerdict::INVALID_PATH,
                 "optimized_bspline_left_committed_guide_corridor");
         }
-        // A limited prefix may terminate earlier than its coarse guide after
-        // the terminal-stop fit, provided the actual curve remains inside the
-        // committed public corridor. Final-channel curves retain the exact
-        // guide-end contract.
+        std::set<uint64_t> normal_channel_ids;
+        if (!preparingP4SuccessorCurve())
+          for (const auto &candidate : last_p4_forward_decision_.candidates)
+            if (candidate.channel_id != 0u &&
+                candidate.occupancy_supported)
+              normal_channel_ids.insert(candidate.channel_id);
+        const bool normal_multi_channel_preparation =
+            normal_channel_ids.size() >= 2u;
+        // In the normal multi-channel transaction the guide is lookahead
+        // geometry, not execution authority. Its terminal-stop fit may end
+        // before the coarse guide, while every actual sample must still stay
+        // inside the committed corridor above. The prepared bundle records
+        // the unexecuted suffix. Preserve the exact guide-end contract for
+        // single-channel and successor paths, which are outside this seam.
         if (!limited_prefix_intent &&
+            !normal_multi_channel_preparation &&
             (executable_trajectory.back() - reference_path.back()).norm() >
                 maximum_deviation)
           return reject_final_commit(
@@ -14197,6 +14267,8 @@ namespace ego_planner
         evaluated = evaluateP4ForwardRoute(
             start_pt, start_vel, start_acc, local_target_pt);
       }
+      if (!preparingP4SuccessorCurve())
+        prepareNormalChannelsBeforeGuideRiskGate(&evaluated);
       const bool transient_wait =
           evaluated.result_status == P4ForwardResultStatus::PENDING ||
           evaluated.result_status == P4ForwardResultStatus::RATE_LIMITED;

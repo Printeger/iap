@@ -2082,8 +2082,244 @@ TEST(P4ForwardTerminalLineageTest,
   EXPECT_EQ(rows.front().at("selection_applied"), "0");
 }
 
+TEST(P4PreparedChannelPreparation,
+     GuideUnknownDoesNotBlockActualCurvePreparation) {
+  ensureRclcpp();
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureTwoForkNoCollision(map.get());
+  const auto frozen_occupancy = map->captureFrozenOccupancyEpoch();
+  ASSERT_NE(frozen_occupancy, nullptr);
+  std::const_pointer_cast<FrozenOccupancyEpoch>(frozen_occupancy)
+      ->frame_contract_id = "map:test";
+  const auto snapshot = makeP4SelectionSnapshot(
+      100.0, frozen_occupancy->geometry_id, true);
+  auto hard_gate_queries =
+      std::make_shared<std::vector<Eigen::Vector3d>>();
+  const auto actual_risk = [hard_gate_queries](
+      const iap::ForwardRiskBatchRequest &request) {
+    double signed_lateral_sum = 0.0;
+    for (const auto &point : request.points) {
+      signed_lateral_sum += point.position_map.y();
+      hard_gate_queries->push_back(point.position_map);
+    }
+    return directRiskCallback(
+        signed_lateral_sum < 0.0 ? 0.6 : 0.3)(request);
+  };
+  const auto execution = makeP4ExecutionSnapshot(
+      snapshot, actual_risk, 10.0, 918u);
+  auto occupancy = std::make_shared<ego_planner::P0OccupancyEpoch>(
+      *execution->occupancy);
+  occupancy->frozen_grid_map_epoch = frozen_occupancy;
+  auto bound_execution =
+      std::make_shared<ego_planner::P0ExecutionRiskSnapshot>(*execution);
+  bound_execution->occupancy = occupancy;
+  bound_execution->forward_risk_batch = actual_risk;
+
+  const auto debug_path =
+      p4LineageTestPath("guide_unknown_actual_curve_preparation.csv");
+  std::filesystem::remove(std::filesystem::path(
+      debug_path.string() + ".forward_lineage.csv"));
+  std::filesystem::remove(std::filesystem::path(
+      debug_path.string() + ".forward_channel_decisions.csv"));
+  auto optimizer = makeP4Optimizer(
+      map, snapshot, debug_path.string(), 1);
+  auto manager = std::make_unique<ego_planner::EGOPlannerManager>();
+  manager->pp_.max_vel_ = 20.0;
+  manager->pp_.max_acc_ = 100.0;
+  manager->pp_.use_distinctive_trajs = false;
+  manager->setP4ControlCapabilityProfileForTest(
+      permissiveTestControlProfile());
+  manager->setP4VerticalSliceOptimizerForTest(std::move(optimizer), map);
+  manager->deliverTrajToOptimizer();
+  manager->setLatestRiskSnapshotForTest(snapshot);
+  manager->setTimeProvider([] {
+    return rclcpp::Time(10, 0, RCL_ROS_TIME);
+  });
+
+  const Eigen::Vector3d fork_start(
+      -17.9973, -0.000552504, 1.49739);
+  const Eigen::Vector3d fork_exit(
+      -9.9973, -0.00063628, 1.49976);
+  auto initial = makeForwardDecision(snapshot, 0u);
+  initial.request_position = fork_start;
+  initial.local_target = fork_exit;
+  initial.common_anchor = fork_exit;
+  initial.vehicle_radius_m =
+      ego_planner::P4ForwardLimits{}.vehicle_radius_m;
+  initial.map_inflation_m = map->getObstacleInflation();
+  initial.collision_policy_id = ego_planner::p4CollisionPolicyIdentity(
+      initial.vehicle_radius_m, initial.map_inflation_m,
+      map->getResolution(), map->getVirtualCeilingHeight());
+  initial.action = ego_planner::P4ForwardAction::DEFER_RISK_SELECTION;
+  initial.planning_disposition =
+      ego_planner::P4PlanningDisposition::NEW_TRAJECTORY_READY;
+  initial.result_status = ego_planner::P4ForwardResultStatus::READY;
+  initial.executable_intent =
+      ego_planner::P4ExecutableIntent::LIMITED_PREFIX;
+  initial.trigger_reason =
+      ego_planner::P4ForwardTriggerReason::SUPPORT_INCOMPLETE;
+  initial.risk_support = ego_planner::P4ForwardRiskSupport::INCOMPLETE;
+  initial.safety_state = ego_planner::P4ForwardSafetyState::UNKNOWN;
+  initial.selection_authority =
+      ego_planner::P4ForwardSelectionAuthority::NONE;
+  initial.formal_support = false;
+  initial.channel_comparison_state =
+      ego_planner::P4ChannelComparisonState::PARTIAL_COMPARISON;
+  initial.selected_candidate_id = 0u;
+  initial.selected_channel_id = 0u;
+  initial.selected_guide.clear();
+  initial.selected_actual_endpoint = Eigen::Vector3d::Constant(
+      std::numeric_limits<double>::quiet_NaN());
+  initial.runner_up_actual_endpoint = Eigen::Vector3d::Constant(
+      std::numeric_limits<double>::quiet_NaN());
+  initial.deferred_trajectory = {
+      fork_start,
+      Eigen::Vector3d(-17.5, 0.0, 1.49739),
+      Eigen::Vector3d(-17.0, 0.0, 1.49739),
+      Eigen::Vector3d(-16.5, 0.0, 1.49739),
+      Eigen::Vector3d(-16.0, 0.0, 1.49739),
+      Eigen::Vector3d(-15.5, 0.0, 1.49739),
+      Eigen::Vector3d(-15.25, 0.0, 1.49739)};
+  initial.geometry_common_corridor = initial.deferred_trajectory;
+  initial.geometry_common_corridor.push_back(
+      Eigen::Vector3d(-14.2473, 0.0, 1.49739));
+  initial.common_prefix_length_m = 3.75;
+  initial.stopping_distance_m = 0.85;
+  initial.limited_prefix_endpoint = initial.deferred_trajectory.back();
+  initial.limited_prefix_boundary =
+      initial.geometry_common_corridor.back();
+  initial.limited_prefix_stopping_reserve_m = 0.85;
+  initial.speed_cap_mps = 10.0;
+  initial.reason = "mission_degraded_gnss_incomplete_candidate_ready";
+
+  auto upper = initial.candidates.front();
+  upper.candidate_id = 31u;
+  upper.channel_id = 41u;
+  upper.path = {
+      fork_start,
+      Eigen::Vector3d(-17.0, 0.10, 1.4977),
+      Eigen::Vector3d(-16.0, 0.15, 1.4980),
+      Eigen::Vector3d(-15.0, 0.18, 1.4983),
+      Eigen::Vector3d(-14.0, 0.20, 1.4986),
+      Eigen::Vector3d(-13.0, 0.20, 1.4989),
+      Eigen::Vector3d(-12.0, 0.18, 1.4992),
+      Eigen::Vector3d(-11.0, 0.12, 1.4995),
+      fork_exit};
+  upper.topology_path = upper.path;
+  upper.path_hash = "decision31-upper-guide";
+  upper.occupancy_supported = true;
+  upper.risk_supported = false;
+  upper.safety_gate_passed = false;
+  upper.unknown_support_fraction = 1.0;
+  upper.combined_conservative_kappa = 1.0;
+  upper.reason = "mission_degraded_gnss_incomplete_candidate_ready";
+  auto lower = upper;
+  lower.candidate_id = 32u;
+  lower.channel_id = 42u;
+  lower.path = {
+      fork_start,
+      Eigen::Vector3d(-17.0, -0.10, 1.4977),
+      Eigen::Vector3d(-16.0, -0.15, 1.4980),
+      Eigen::Vector3d(-15.0, -0.18, 1.4983),
+      Eigen::Vector3d(-14.0, -0.20, 1.4986),
+      Eigen::Vector3d(-13.0, -0.20, 1.4989),
+      Eigen::Vector3d(-12.0, -0.18, 1.4992),
+      Eigen::Vector3d(-11.0, -0.12, 1.4995),
+      fork_exit};
+  lower.topology_path = lower.path;
+  lower.path_hash = "decision31-lower-guide";
+  initial.candidates = {upper, lower};
+
+  auto node = std::make_shared<rclcpp::Node>(
+      "guide_unknown_actual_curve_preparation_test");
+  manager->setPlanningVisualizationForTest(
+      std::make_shared<ego_planner::PlanningVisualization>(node));
+  ego_planner::P5RuntimeIntegrityGate::Config p5_config;
+  p5_config.enable_final_gate = true;
+  p5_config.test_only_allow_grid_risk_authority = true;
+  manager->p5_integrity_gate_ =
+      std::make_unique<ego_planner::P5RuntimeIntegrityGate>(
+          nullptr, p5_config, false);
+  iap::msg::IntegrityReport integrity;
+  integrity.header.stamp.sec = 10;
+  integrity.hpl = 1.0;
+  integrity.vpl = 1.0;
+  integrity.hal = 20.0;
+  integrity.val = 40.0;
+  integrity.im = 19.0;
+  manager->p5_integrity_gate_->setCurrentIntegrityForTest(integrity);
+  auto publisher = node->create_publisher<traj_utils::msg::Bspline>(
+      "/test/guide_unknown_actual_curve_preparation",
+      ego_planner::trajectoryCommandQos());
+  auto *manager_ptr = manager.get();
+  std::size_t planning_callbacks = 0u;
+  ego_planner::EGOReplanFSM fsm;
+  fsm.setP4TerminalFlowForTest(
+      std::move(manager), node, publisher, snapshot,
+      rclcpp::Time(10, 0, RCL_ROS_TIME),
+      [manager_ptr, snapshot, occupancy, actual_risk, bound_execution,
+       initial, fork_start, fork_exit, &planning_callbacks]() mutable {
+        manager_ptr->setPlanningRiskContextForTest(
+            snapshot, 10.0, occupancy, actual_risk, bound_execution);
+        if (planning_callbacks++ == 0u) {
+          initial.planning_attempt_id =
+              manager_ptr->planningRiskContext().planning_attempt_id;
+          manager_ptr->setP4ForwardDecisionForNextReplanForTest(initial);
+        }
+        return manager_ptr->reboundReplan(
+            fork_start, Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero(),
+            fork_exit, Eigen::Vector3d::Zero(), true, false, fork_start);
+      });
+
+  EXPECT_FALSE(fsm.callReboundReplanForTest())
+      << "the first actual curve must be prepare-only until both channels "
+         "reach a terminal bundle or typed failure";
+  ASSERT_TRUE(manager_ptr->pendingP4ChannelWorkItemForTest().has_value());
+  EXPECT_FALSE(manager_ptr->trajectoryCommandAwaitingActivation());
+  EXPECT_EQ(manager_ptr->lastP4ForwardDecision().selected_candidate_id,
+            lower.candidate_id);
+  EXPECT_EQ(manager_ptr->lastP4ForwardDecision().selected_channel_id,
+            lower.channel_id);
+
+  EXPECT_TRUE(fsm.callReboundReplanForTest());
+  EXPECT_FALSE(manager_ptr->pendingP4ChannelWorkItemForTest().has_value());
+  const auto &selected = manager_ptr->lastP4ForwardDecision();
+  ASSERT_EQ(selected.candidates.size(), 2u);
+  EXPECT_EQ(selected.action, ego_planner::P4ForwardAction::RISK_SELECTED);
+  EXPECT_EQ(selected.selection_authority,
+            ego_planner::P4ForwardSelectionAuthority::FORMAL);
+  EXPECT_TRUE(selected.formal_support);
+  EXPECT_TRUE(selected.selected_actual_endpoint.allFinite());
+  EXPECT_TRUE(selected.runner_up_actual_endpoint.allFinite());
+  EXPECT_EQ(selected.channel_comparison_state,
+            ego_planner::P4ChannelComparisonState::COMPLETE);
+  EXPECT_TRUE(manager_ptr->trajectoryCommandAwaitingActivation());
+  for (const auto &candidate : selected.candidates) {
+    EXPECT_DOUBLE_EQ(candidate.unknown_support_fraction, 1.0);
+    EXPECT_DOUBLE_EQ(candidate.combined_conservative_kappa, 1.0);
+  }
+  const auto channel_rows = readCsvRows(std::filesystem::path(
+      debug_path.string() + ".forward_channel_decisions.csv"));
+  ASSERT_EQ(channel_rows.size(), 2u);
+  for (const auto &row : channel_rows) {
+    EXPECT_EQ(row.at("stage"), "normal_channel_comparison_complete");
+    EXPECT_NE(row.at("actual_endpoint_x"), "nan");
+    EXPECT_EQ(row.at("unknown_support_fraction"), "0");
+    EXPECT_EQ(row.at("combined_conservative_kappa"), "0");
+    EXPECT_EQ(row.at("final_curve_status"), "SAFE");
+  }
+  ASSERT_FALSE(hard_gate_queries->empty());
+  const double furthest_hard_query_x = std::max_element(
+      hard_gate_queries->begin(), hard_gate_queries->end(),
+      [](const Eigen::Vector3d &left, const Eigen::Vector3d &right) {
+        return left.x() < right.x();
+      })->x();
+  EXPECT_LT(furthest_hard_query_x, fork_exit.x() - 1.0)
+      << "the unevaluated guide suffix must not enter the formal query set";
+}
+
 TEST(P4LimitedPrefixPublication,
-     DivergingCenterlinesPublishTubeIntersectionPrefixThroughStandardFlow) {
+     IncompleteChannelGeometryPublishesTubeIntersectionPrefix) {
   ensureRclcpp();
   auto map = std::make_shared<GridMap>();
   GridMapTestAccess::configureTwoForkNoCollision(map.get());
@@ -2242,6 +2478,7 @@ TEST(P4LimitedPrefixPublication,
             fork_exit};
         upper.topology_path = upper.path;
         upper.path_hash = "limited-prefix-upper-channel";
+        upper.occupancy_supported = false;
         auto lower = upper;
         lower.candidate_id = 102u;
         lower.channel_id = 12u;
@@ -6636,7 +6873,7 @@ TEST(P4PreparedChannelPreparation,
 }
 
 TEST(P4PreparedChannelPreparation,
-     NormalMultiChannelComparisonKeepsEarlierBundleWhenLastChannelFails)
+     PreferredHardFailureSelectsCompletedRunnerUpBundle)
 {
   ensureRclcpp();
   auto map = std::make_shared<GridMap>();
@@ -6693,27 +6930,13 @@ TEST(P4PreparedChannelPreparation,
   const uint64_t preferred_channel_id = decision.selected_channel_id;
   manager.setP4ForwardDecisionForTest(std::move(decision));
 
-  auto preferred_curve = ego_planner::UniformBspline(
-      p4StoppedControlPoints(), 3, 0.5);
-  const auto terminal = ego_planner::imposeP4TerminalStop(
-      &preferred_curve, terminalStartState(preferred_curve),
-      20.0, 100.0, 0.0);
-  ASSERT_TRUE(terminal.success) << terminal.reason;
-  manager.local_data_.position_traj_ = preferred_curve;
-  manager.local_data_.velocity_traj_ = preferred_curve.getDerivative();
-  manager.local_data_.acceleration_traj_ =
-      manager.local_data_.velocity_traj_.getDerivative();
-  manager.local_data_.traj_id_ = 94;
-  manager.local_data_.start_time_ = rclcpp::Time(10, 0, RCL_ROS_TIME);
-  manager.local_data_.duration_ = preferred_curve.getTimeSum();
-  ASSERT_TRUE(manager.certifyP4ActualCurve(
-      "final_bspline_before_p5", 10.0));
-
   ego_planner::P5GateStatus disabled_preview;
   std::string reason;
   EXPECT_EQ(
-      manager.prepareP4NormalChannelComparison(
-          10.0, disabled_preview, &reason),
+      manager.recordP4NormalChannelCurveFailure(
+          10.0,
+          ego_planner::P4PreparedCurveFailure::LOCAL_CLEARANCE,
+          "preferred_channel_local_clearance_failed", &reason),
       ego_planner::P4NormalChannelPreparationDisposition::
           NEXT_CHANNEL_PENDING)
       << reason;
@@ -6725,17 +6948,37 @@ TEST(P4PreparedChannelPreparation,
   manager.setP4ForwardDecisionForTest(
       *manager.pendingP4ChannelWorkItemForTest());
   manager.clearP4PendingChannelWorkItemForTest();
+
+  Eigen::MatrixXd runner_points = p4StoppedControlPoints();
+  runner_points.row(1) *= -1.0;
+  auto runner_curve = ego_planner::UniformBspline(
+      runner_points, 3, 0.5);
+  const auto terminal = ego_planner::imposeP4TerminalStop(
+      &runner_curve, terminalStartState(runner_curve),
+      20.0, 100.0, 0.0);
+  ASSERT_TRUE(terminal.success) << terminal.reason;
+  manager.local_data_.position_traj_ = runner_curve;
+  manager.local_data_.velocity_traj_ = runner_curve.getDerivative();
+  manager.local_data_.acceleration_traj_ =
+      manager.local_data_.velocity_traj_.getDerivative();
+  manager.local_data_.traj_id_ = 94;
+  manager.local_data_.start_time_ = rclcpp::Time(10, 0, RCL_ROS_TIME);
+  manager.local_data_.duration_ = runner_curve.getTimeSum();
+  ASSERT_TRUE(manager.certifyP4ActualCurve(
+      "final_bspline_before_p5", 10.0));
   EXPECT_EQ(
-      manager.recordP4NormalChannelCurveFailure(
-          10.0,
-          ego_planner::P4PreparedCurveFailure::LOCAL_CLEARANCE,
-          "normal_last_channel_local_clearance_failed", &reason),
+      manager.prepareP4NormalChannelComparison(
+          10.0, disabled_preview, &reason),
       ego_planner::P4NormalChannelPreparationDisposition::READY_TO_PUBLISH)
       << reason;
   EXPECT_EQ(reason, "normal_channel_comparison_complete");
   EXPECT_EQ(manager.lastP4ForwardDecision().selected_candidate_id,
-            preferred_candidate_id);
+            runner_up.candidate_id);
   EXPECT_EQ(manager.lastP4ForwardDecision().selected_channel_id,
+            runner_up.channel_id);
+  EXPECT_NE(manager.lastP4ForwardDecision().selected_candidate_id,
+            preferred_candidate_id);
+  EXPECT_NE(manager.lastP4ForwardDecision().selected_channel_id,
             preferred_channel_id);
   EXPECT_EQ(manager.p4ExecutionCertificate().trajectory_id, 94);
   EXPECT_EQ(manager.p4ExecutionCertificate().authority,
