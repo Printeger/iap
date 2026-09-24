@@ -1393,6 +1393,60 @@ makeP4ExecutionSnapshot(
   return execution;
 }
 
+std::shared_ptr<const LocalEvidenceSnapshot>
+makeRuntimeUnknownStrictEvidence(
+    const uint64_t occupancy_generation,
+    const std::string& frame_contract_id) {
+  RegisteredLidarWindow::Geometry geometry;
+  geometry.origin = Eigen::Vector3d(-20.0, -20.0, -5.0);
+  geometry.dimensions = Eigen::Vector3i(80, 80, 20);
+  geometry.resolution_m = 0.5;
+  geometry.frame_contract_id = frame_contract_id;
+  RegisteredLidarWindow window(geometry);
+
+  RegisteredLidarBeamData invalid_beam;
+  invalid_beam.direction_lidar = Eigen::Vector3d::UnitX();
+  invalid_beam.outcome = RegisteredLidarBeamOutcome::INVALID;
+  invalid_beam.range_m = 30.0;
+  RegisteredLidarFrameData frame;
+  frame.frame_id = 817;
+  frame.stamp_s = 10.0;
+  frame.scan_end_stamp_s = 10.1;
+  frame.sensor_receipt_steady_ns = 1u;
+  frame.T_map_lidar = Eigen::Isometry3d::Identity();
+  frame.sensor_model_id = "first_hit_spherical_v1";
+  frame.horizontal_samples = 1u;
+  frame.vertical_samples = 1u;
+  frame.horizontal_fov_rad = 2.0 * M_PI;
+  frame.vertical_min_rad = -0.5 * M_PI;
+  frame.vertical_max_rad = 0.5 * M_PI;
+  frame.min_range_m = 0.0;
+  frame.max_range_m = 30.0;
+  frame.beam_evidence_complete = true;
+  frame.beam_content_hash = "runtime-unknown-strict-v1";
+  frame.beams = {invalid_beam};
+  frame.frame_contract_id = frame_contract_id;
+  EXPECT_TRUE(window.applyCurrentFrame(frame).accepted);
+  return window.captureLocalEvidenceSnapshot(occupancy_generation);
+}
+
+std::shared_ptr<iap::TrustedLocalMapSupport>
+makeRuntimeTrustedModelSupport(const double valid_until_s) {
+  auto trusted = std::make_shared<iap::TrustedLocalMapSupport>();
+  trusted->T_map_sensor = Eigen::Isometry3d::Identity();
+  trusted->retained_min_map = Eigen::Vector3d(-20.0, -20.0, -5.0);
+  trusted->retained_max_map = Eigen::Vector3d(20.0, 20.0, 5.0);
+  trusted->min_range_m = 0.0;
+  trusted->max_range_m = 30.0;
+  trusted->horizontal_fov_rad = 2.0 * M_PI;
+  trusted->vertical_min_rad = -0.5 * M_PI;
+  trusted->vertical_max_rad = 0.5 * M_PI;
+  trusted->stamp_s = 10.0;
+  trusted->valid_until_s = valid_until_s;
+  trusted->frame_id = "map";
+  return trusted;
+}
+
 TEST(P0ExecutionSnapshotSelectionTest,
      FutureLatestFallsBackToFreshGridBoundSnapshot) {
   const auto risk = makeP4SelectionSnapshot();
@@ -2281,6 +2335,139 @@ TEST(P4LimitedPrefixPublication,
   EXPECT_TRUE(std::any_of(rows.begin(), rows.end(), [](const auto &row) {
     return row.at("stage") == "normal_publish_authorized";
   }));
+}
+
+TEST(P4ForwardTerminalLineageTest,
+     RuntimeTrustedModelSupportSurvivesUnknownStrictVoxel) {
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureNoCollision(map.get());
+  const auto frozen_occupancy = map->captureFrozenOccupancyEpoch();
+  ASSERT_NE(frozen_occupancy, nullptr);
+  const auto snapshot = makeP4SelectionSnapshot(
+      1.0, frozen_occupancy->geometry_id);
+  auto optimizer = makeP4Optimizer(
+      map, snapshot,
+      p4LineageTestPath("runtime_trusted_model_support.csv").string(), 1);
+  const auto safe_direct = directRiskCallback(0.5);
+  auto execution_snapshot = makeP4ExecutionSnapshot(
+      snapshot, safe_direct, 10.0, 817u);
+  auto committed_occupancy =
+      std::make_shared<ego_planner::P0OccupancyEpoch>(
+          *execution_snapshot->occupancy);
+  committed_occupancy->generation = frozen_occupancy->generation;
+  committed_occupancy->frame_contract_id = "map:test";
+  committed_occupancy->trusted_local_map_support =
+      makeRuntimeTrustedModelSupport(11.0);
+  committed_occupancy->local_evidence_snapshot =
+      makeRuntimeUnknownStrictEvidence(
+          committed_occupancy->generation,
+          committed_occupancy->frame_contract_id);
+  committed_occupancy->frozen_grid_map_epoch = frozen_occupancy;
+  ASSERT_NE(committed_occupancy->local_evidence_snapshot, nullptr);
+  execution_snapshot->occupancy = committed_occupancy;
+  execution_snapshot->source_identity.occupancy_generation =
+      committed_occupancy->generation;
+
+  ego_planner::EGOPlannerManager manager;
+  manager.pp_.max_vel_ = 20.0;
+  manager.pp_.max_acc_ = 100.0;
+  manager.setP4ControlCapabilityProfileForTest(
+      permissiveTestControlProfile());
+  manager.setP4VerticalSliceOptimizerForTest(std::move(optimizer), map);
+  manager.setPlanningRiskContextForTest(
+      snapshot, 10.0, committed_occupancy, safe_direct,
+      execution_snapshot);
+  manager.setLatestRiskSnapshotForTest(snapshot);
+
+  auto stopped = ego_planner::UniformBspline(
+      p4StoppedControlPoints(), 3, 0.5);
+  const auto terminal = ego_planner::imposeP4TerminalStop(
+      &stopped, terminalStartState(stopped), 20.0, 100.0, 0.0);
+  ASSERT_TRUE(terminal.success) << terminal.reason;
+  std::vector<Eigen::Vector3d> prefix;
+  for (int index = 0; index <= 8; ++index)
+    prefix.push_back(stopped.evaluateDeBoorT(
+        stopped.getTimeSum() * static_cast<double>(index) / 8.0));
+
+  auto decision = makeForwardDecision(
+      snapshot, manager.planningRiskContext().planning_attempt_id);
+  decision.action = ego_planner::P4ForwardAction::DEFER_RISK_SELECTION;
+  decision.executable_intent =
+      ego_planner::P4ExecutableIntent::LIMITED_PREFIX;
+  decision.trigger_reason =
+      ego_planner::P4ForwardTriggerReason::NO_SAFE_ROUTE;
+  decision.selection_authority =
+      ego_planner::P4ForwardSelectionAuthority::NONE;
+  decision.formal_support = false;
+  decision.selected_candidate_id = 0u;
+  decision.selected_channel_id = 0u;
+  decision.selected_guide.clear();
+  decision.deferred_trajectory = prefix;
+  decision.geometry_common_corridor = prefix;
+  decision.geometry_common_corridor.push_back(
+      Eigen::Vector3d(5.0, 0.0, 0.0));
+  decision.limited_prefix_endpoint = prefix.back();
+  decision.limited_prefix_boundary =
+      decision.geometry_common_corridor.back();
+  decision.limited_prefix_stopping_reserve_m = 0.85;
+  decision.vehicle_radius_m =
+      ego_planner::P4ForwardLimits{}.vehicle_radius_m;
+  decision.map_inflation_m = map->getObstacleInflation();
+  decision.collision_policy_id = ego_planner::p4CollisionPolicyIdentity(
+      decision.vehicle_radius_m, decision.map_inflation_m,
+      map->getResolution(), map->getVirtualCeilingHeight());
+  decision.reason = "runtime_trusted_model_support_fixture";
+  manager.setP4ForwardDecisionForTest(std::move(decision));
+
+  manager.local_data_.position_traj_ = stopped;
+  manager.local_data_.traj_id_ = 817;
+  manager.local_data_.start_time_ = rclcpp::Time(10, 0, RCL_ROS_TIME);
+  manager.local_data_.duration_ = stopped.getTimeSum();
+  ASSERT_TRUE(manager.certifyP4ActualCurve(
+      "forward_decision", 10.0));
+  ASSERT_TRUE(manager.certifyP4ActualCurve(
+      "final_bspline_before_p5", 10.0))
+      << manager.lastP4ActualCurveCertification().detail;
+  ASSERT_TRUE(manager.certifyP4ActualCurve(
+      "normal_publish_authorized", 10.0));
+  ASSERT_EQ(manager.p4ExecutionCertificate().authority,
+            ego_planner::P4ExecutionAuthority::LIMITED_PREFIX);
+
+  manager.local_data_.execution_instance_id_ = manager.executionInstanceId();
+  manager.local_data_.curve_hash_ = ego_planner::trajectoryCurveHash(
+      manager.local_data_.position_traj_, manager.local_data_.start_time_);
+  const double runtime_s = 10.5;
+  const auto commanded_position = stopped.evaluateDeBoorT(runtime_s - 10.0);
+  const auto continuing = manager.validateCommittedP4TrajectoryExecution(
+      runtime_s, commanded_position);
+  EXPECT_TRUE(continuing.allowed) << continuing.reason;
+  EXPECT_EQ(continuing.reason, "runtime_execution_contract_valid");
+  EXPECT_EQ(continuing.reason.find(
+                "runtime_corridor_support_stale_or_invalid"),
+            std::string::npos);
+  EXPECT_FALSE(continuing.guard_braking_preschedule_requested);
+  EXPECT_FALSE(manager.pendingP4GuardBrakingCommand().has_value());
+
+  auto expired_execution = makeP4ExecutionSnapshot(
+      snapshot, safe_direct, runtime_s, 818u);
+  auto expired_occupancy =
+      std::make_shared<ego_planner::P0OccupancyEpoch>(
+          *committed_occupancy);
+  expired_occupancy->trusted_local_map_support =
+      makeRuntimeTrustedModelSupport(10.4);
+  expired_execution->occupancy = expired_occupancy;
+  expired_execution->source_identity.occupancy_generation =
+      expired_occupancy->generation;
+  manager.setPlanningRiskContextForTest(
+      snapshot, runtime_s, expired_occupancy, safe_direct,
+      expired_execution);
+  const auto fail_closed = manager.validateCommittedP4TrajectoryExecution(
+      runtime_s, commanded_position);
+  EXPECT_TRUE(fail_closed.allowed) << fail_closed.reason;
+  EXPECT_EQ(fail_closed.reason.rfind("failsafe_braking_scheduled", 0), 0u)
+      << fail_closed.reason;
+  EXPECT_TRUE(fail_closed.guard_braking_preschedule_requested);
+  EXPECT_TRUE(manager.pendingP4GuardBrakingCommand().has_value());
 }
 
 TEST(P4ForwardTerminalLineageTest,

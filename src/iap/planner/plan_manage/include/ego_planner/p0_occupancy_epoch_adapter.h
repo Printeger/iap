@@ -158,10 +158,6 @@ inline iap::LocalMapSupportQuery queryP0LocalMapSupport(
   if (epoch.trusted_local_map_support) {
     model = epoch.trusted_local_map_support->query(
         position, evaluation_time_s, query_time_s);
-    // The FOV/range envelope predicts sensing capability only. It cannot
-    // authorize observed-free GNSS LOS support.
-    if (model.complete())
-      model.status = iap::LocalMapSupportStatus::OBSERVATION_INCOMPLETE;
   }
   if (epoch.local_evidence_snapshot) {
     const auto evidence = epoch.local_evidence_snapshot->queryVoxel(
@@ -186,9 +182,16 @@ inline iap::LocalMapSupportQuery queryP0LocalMapSupport(
                evidence.reason == LocalEvidenceReason::SENSOR_MODEL_MISMATCH ||
                evidence.reason == LocalEvidenceReason::GENERATION_MISMATCH) {
       strict.status = iap::LocalMapSupportStatus::FRAME_INVALID;
+      return strict;
     } else {
       strict.status = iap::LocalMapSupportStatus::OBSERVATION_INCOMPLETE;
     }
+    // A fresh trusted hit-only envelope is independent model support. It is
+    // neither strict voxel evidence nor an OBSERVED_FREE claim, so preserve
+    // its authority when the strict voxel is merely unknown. Identity
+    // mismatches above remain fail-closed and can never fall back.
+    if (model.complete())
+      return model;
     return strict;
   }
   if (!epoch.diagnostic_query || !position.allFinite() ||

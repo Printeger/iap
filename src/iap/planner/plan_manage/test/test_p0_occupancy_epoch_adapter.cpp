@@ -7,6 +7,7 @@
 #include <vector>
 
 #include <ego_planner/p0_occupancy_epoch_adapter.h>
+#include <plan_env/registered_lidar_window.h>
 
 namespace {
 
@@ -82,6 +83,69 @@ std::optional<ego_planner::P0OccupancyEpoch> adaptEpoch(
     FakeFrozenOccupancyEpoch epoch,
     const ego_planner::P0OccupancyEpoch::SourceOwner& source_owner);
 
+std::shared_ptr<const LocalEvidenceSnapshot> makeUnknownStrictEvidence(
+    const uint64_t occupancy_generation,
+    const std::string& frame_contract_id) {
+  RegisteredLidarWindow::Geometry geometry;
+  geometry.origin = Eigen::Vector3d::Zero();
+  geometry.dimensions = Eigen::Vector3i(4, 4, 4);
+  geometry.resolution_m = 1.0;
+  geometry.frame_contract_id = frame_contract_id;
+  RegisteredLidarWindow window(geometry);
+
+  RegisteredLidarBeamData invalid_beam;
+  invalid_beam.direction_lidar = Eigen::Vector3d::UnitX();
+  invalid_beam.outcome = RegisteredLidarBeamOutcome::INVALID;
+  invalid_beam.range_m = 4.0;
+  RegisteredLidarFrameData frame;
+  frame.frame_id = 17;
+  frame.stamp_s = 100.0;
+  frame.scan_end_stamp_s = 100.1;
+  frame.sensor_receipt_steady_ns = 1u;
+  frame.T_map_lidar = Eigen::Isometry3d::Identity();
+  frame.sensor_model_id = "first_hit_spherical_v1";
+  frame.horizontal_samples = 1u;
+  frame.vertical_samples = 1u;
+  frame.horizontal_fov_rad = 2.0 * M_PI;
+  frame.vertical_min_rad = -0.5 * M_PI;
+  frame.vertical_max_rad = 0.5 * M_PI;
+  frame.min_range_m = 0.1;
+  frame.max_range_m = 4.0;
+  frame.beam_evidence_complete = true;
+  frame.beam_content_hash = "unknown-strict-evidence-v1";
+  frame.beams = {invalid_beam};
+  frame.frame_contract_id = frame_contract_id;
+  EXPECT_TRUE(window.applyCurrentFrame(frame).accepted);
+  return window.captureLocalEvidenceSnapshot(occupancy_generation);
+}
+
+std::shared_ptr<iap::TrustedLocalMapSupport> makeTrustedModelSupport() {
+  auto trusted = std::make_shared<iap::TrustedLocalMapSupport>();
+  trusted->T_map_sensor = Eigen::Isometry3d::Identity();
+  trusted->retained_min_map = Eigen::Vector3d::Zero();
+  trusted->retained_max_map = Eigen::Vector3d::Constant(4.0);
+  trusted->min_range_m = 0.1;
+  trusted->max_range_m = 4.0;
+  trusted->horizontal_fov_rad = 2.0 * M_PI;
+  trusted->vertical_min_rad = -0.5 * M_PI;
+  trusted->vertical_max_rad = 0.5 * M_PI;
+  trusted->stamp_s = 100.0;
+  trusted->valid_until_s = 101.0;
+  trusted->frame_id = "map";
+  return trusted;
+}
+
+ego_planner::P0OccupancyEpoch makeDualSupportEpoch() {
+  ego_planner::P0OccupancyEpoch epoch;
+  epoch.generation = 7u;
+  epoch.frame_id = "map";
+  epoch.frame_contract_id = "map:trusted-model-test";
+  epoch.trusted_local_map_support = makeTrustedModelSupport();
+  epoch.local_evidence_snapshot = makeUnknownStrictEvidence(
+      epoch.generation, epoch.frame_contract_id);
+  return epoch;
+}
+
 TEST(P0OccupancyEpochAdapterTest,
      PreservesPlanningGeometryAndTriStateObservation) {
   const auto source_owner = std::make_shared<const int>(1);
@@ -147,6 +211,69 @@ TEST(P0OccupancyEpochAdapterTest,
   EXPECT_FALSE(occupied.complete());
   EXPECT_EQ(occupied.authority,
             iap::LocalMapSupportAuthority::TRUSTED_LOCAL_MAP);
+}
+
+TEST(P0OccupancyEpochAdapterTest,
+     TrustedModelCompleteSurvivesUnknownStrictVoxel) {
+  const auto epoch = makeDualSupportEpoch();
+  ASSERT_NE(epoch.local_evidence_snapshot, nullptr);
+  const Eigen::Vector3d point(1.5, 0.5, 0.5);
+  ASSERT_EQ(epoch.local_evidence_snapshot
+                ->queryVoxel(point, 100.5)
+                .state,
+            EvidenceVoxelState::UNKNOWN);
+
+  const auto support = ego_planner::queryP0LocalMapSupport(
+      epoch, point, 100.5, 105.0);
+
+  EXPECT_TRUE(support.complete());
+  EXPECT_EQ(support.status, iap::LocalMapSupportStatus::MODEL_COMPLETE);
+  EXPECT_EQ(support.authority,
+            iap::LocalMapSupportAuthority::TRUSTED_LOCAL_MAP);
+  EXPECT_NE(support.authority,
+            iap::LocalMapSupportAuthority::STRICT_OBSERVATION);
+}
+
+TEST(P0OccupancyEpochAdapterTest,
+     TrustedModelFallbackKeepsInvalidEvidenceFailClosed) {
+  const Eigen::Vector3d covered_point(1.5, 0.5, 0.5);
+
+  auto expired = makeDualSupportEpoch();
+  auto expired_model = makeTrustedModelSupport();
+  expired_model->valid_until_s = 100.4;
+  expired.trusted_local_map_support = expired_model;
+  EXPECT_FALSE(ego_planner::queryP0LocalMapSupport(
+      expired, covered_point, 100.5, 105.0).complete());
+
+  auto outside = makeDualSupportEpoch();
+  auto narrow_model = makeTrustedModelSupport();
+  narrow_model->retained_max_map = Eigen::Vector3d(1.0, 4.0, 4.0);
+  outside.trusted_local_map_support = narrow_model;
+  EXPECT_FALSE(ego_planner::queryP0LocalMapSupport(
+      outside, covered_point, 100.5, 105.0).complete());
+
+  auto frame_mismatch = makeDualSupportEpoch();
+  frame_mismatch.frame_contract_id = "map:wrong-contract";
+  EXPECT_FALSE(ego_planner::queryP0LocalMapSupport(
+      frame_mismatch, covered_point, 100.5, 105.0).complete());
+
+  auto generation_mismatch = makeDualSupportEpoch();
+  ++generation_mismatch.generation;
+  EXPECT_FALSE(ego_planner::queryP0LocalMapSupport(
+      generation_mismatch, covered_point, 100.5, 105.0).complete());
+
+  auto invalid_model = makeDualSupportEpoch();
+  auto incomplete_model = makeTrustedModelSupport();
+  incomplete_model->max_range_m =
+      std::numeric_limits<double>::quiet_NaN();
+  invalid_model.trusted_local_map_support = incomplete_model;
+  EXPECT_FALSE(ego_planner::queryP0LocalMapSupport(
+      invalid_model, covered_point, 100.5, 105.0).complete());
+
+  auto neither_complete = makeDualSupportEpoch();
+  neither_complete.trusted_local_map_support.reset();
+  EXPECT_FALSE(ego_planner::queryP0LocalMapSupport(
+      neither_complete, covered_point, 100.5, 105.0).complete());
 }
 
 std::tuple<int, int, int> keyTuple(const iap::VoxelKey& key) {
