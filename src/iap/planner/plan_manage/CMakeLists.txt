@@ -119,7 +119,7 @@ if(BUILD_TESTING)
       --planner-test $<TARGET_FILE:test_planning_risk_context>
   )
   add_test(
-    NAME P4ObservationPublication.PlannerMessageActivatesUnchangedInTrajServer
+    NAME P4LimitedPrefixPublication.PlannerMessageActivatesUnchangedInTrajServer
     COMMAND ${Python3_EXECUTABLE}
       ${CMAKE_CURRENT_SOURCE_DIR}/../../../../test/test_traj_server_handshake.py
       --server $<TARGET_FILE:traj_server>
@@ -250,7 +250,7 @@ if(BUILD_TESTING)
     ${IAP_MSGS_TYPESUPPORT_CPP}
   )
   set_tests_properties(
-    P4ObservationPublication.PlannerMessageActivatesUnchangedInTrajServer
+    P4LimitedPrefixPublication.PlannerMessageActivatesUnchangedInTrajServer
     PROPERTIES DEPENDS test_planning_risk_context)
 endif()
 

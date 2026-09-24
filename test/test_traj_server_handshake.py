@@ -48,7 +48,7 @@ class TrajectoryServerHandshakeTest(unittest.TestCase):
         previous_domain = os.environ.get("ROS_DOMAIN_ID")
         os.environ["ROS_DOMAIN_ID"] = environment["ROS_DOMAIN_ID"]
         rclpy.init()
-        node = rclpy.create_node("planner_observation_handoff_test")
+        node = rclpy.create_node("planner_actual_curve_handoff_test")
         retained = QoSProfile(
             depth=20, reliability=ReliabilityPolicy.RELIABLE,
             durability=DurabilityPolicy.TRANSIENT_LOCAL)
@@ -83,8 +83,8 @@ class TrajectoryServerHandshakeTest(unittest.TestCase):
             spin_at(10_000_000_000, 1.3)
             planner = subprocess.Popen(
                 [ARGS.planner_test,
-                 "--gtest_filter=P4ObservationPublication."
-                 "CertifiedCommonObservationReachesP5AndPublishesFromPlanningCycle"],
+                 "--gtest_filter=P4LimitedPrefixPublication."
+                 "DivergingCenterlinesPublishTubeIntersectionPrefixThroughStandardFlow"],
                 env=environment, stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT, text=True)
             deadline = time.monotonic() + 8.0
@@ -164,6 +164,144 @@ class TrajectoryServerHandshakeTest(unittest.TestCase):
             if planner is not None and planner.poll() is None:
                 planner.terminate()
                 planner.wait(timeout=3)
+            server.terminate()
+            try:
+                server.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                server.kill()
+                server.wait(timeout=3)
+            self.assertEqual(
+                server.returncode, 0,
+                "traj_server must tear down all ROS entities before shutdown")
+            if server.stdout is not None:
+                server.stdout.close()
+            if previous_domain is None:
+                os.environ.pop("ROS_DOMAIN_ID", None)
+            else:
+                os.environ["ROS_DOMAIN_ID"] = previous_domain
+
+    def test_parent_child_switch_activates_without_intermediate_stop(self):
+        import rclpy
+        from geometry_msgs.msg import Point
+        from nav_msgs.msg import Odometry
+        from quadrotor_msgs.msg import PositionCommand
+        from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
+        from traj_utils.msg import Bspline, TrajectoryCommandStatus
+
+        environment = os.environ.copy()
+        environment["ROS_DOMAIN_ID"] = str(210 + os.getpid() % 20)
+        environment["IAP_PROCESS_HANDSHAKE"] = "1"
+        server = subprocess.Popen(
+            [ARGS.server], env=environment, stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT, text=True)
+        previous_domain = os.environ.get("ROS_DOMAIN_ID")
+        os.environ["ROS_DOMAIN_ID"] = environment["ROS_DOMAIN_ID"]
+        rclpy.init()
+        node = rclpy.create_node("continuous_successor_handoff_test")
+        retained = QoSProfile(
+            depth=20, reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL)
+        command_pub = node.create_publisher(Bspline, "planning/bspline", retained)
+        odom_pub = node.create_publisher(Odometry, "odometry", 10)
+        statuses = []
+        commands = []
+        node.create_subscription(
+            TrajectoryCommandStatus, "planning/pending_guard_status",
+            statuses.append, retained)
+        node.create_subscription(
+            PositionCommand, "/position_cmd", commands.append, 50)
+
+        base_ns = 200_000_000_000
+
+        def spin_ramp(start_ns, duration_s):
+            started = time.monotonic()
+            deadline = started + duration_s
+            while time.monotonic() < deadline:
+                stamp_ns = start_ns + int(
+                    (time.monotonic() - started) * 1_000_000_000)
+                odom = Odometry()
+                odom.header.stamp.sec = stamp_ns // 1_000_000_000
+                odom.header.stamp.nanosec = stamp_ns % 1_000_000_000
+                odom.pose.pose.position.z = 1.0
+                odom_pub.publish(odom)
+                rclpy.spin_once(node, timeout_sec=0.01)
+
+        def linear_command(trajectory_id, start_ns, point_offset):
+            command = Bspline()
+            command.order = 3
+            command.traj_id = trajectory_id
+            command.execution_instance_id = 9901
+            command.start_time.sec = start_ns // 1_000_000_000
+            command.start_time.nanosec = start_ns % 1_000_000_000
+            points = [
+                (0.05 * (index + point_offset), 0.0, 1.0)
+                for index in range(14)]
+            knots = [0.1 * (index - 3) for index in range(18)]
+            command.pos_pts = [Point(x=x, y=y, z=z) for x, y, z in points]
+            command.knots = knots
+            command.curve_hash = fnv_curve_hash(start_ns, points, knots)
+            return command
+
+        try:
+            spin_ramp(base_ns, 1.2)
+            parent_start_ns = base_ns + 1_500_000_000
+            parent = linear_command(21, parent_start_ns, 0)
+            command_pub.publish(parent)
+            spin_ramp(base_ns + 1_200_000_000, 0.55)
+            self.assertTrue(any(
+                item.state == item.ACTIVATED and item.trajectory_id == 21
+                for item in statuses))
+
+            switch_elapsed_s = 0.8
+            child_start_ns = parent_start_ns + 800_000_000
+            child = linear_command(22, child_start_ns, 8)
+            child.parent_execution_instance_id = parent.execution_instance_id
+            child.parent_traj_id = parent.traj_id
+            child.parent_start_time = parent.start_time
+            child.parent_curve_hash = parent.curve_hash
+            child.parent_switch_elapsed_s = switch_elapsed_s
+            command_pub.publish(child)
+            spin_ramp(base_ns + 1_750_000_000, 1.0)
+
+            queued = [item for item in statuses
+                      if item.state == item.QUEUED
+                      and item.trajectory_id == child.traj_id]
+            activated = [item for item in statuses
+                         if item.state == item.ACTIVATED
+                         and item.trajectory_id == child.traj_id]
+            self.assertTrue(queued)
+            self.assertTrue(activated)
+            self.assertTrue(all(
+                item.execution_instance_id == child.execution_instance_id
+                and item.start_time == child.start_time
+                and item.curve_hash == child.curve_hash
+                for item in queued + activated))
+
+            handoff_commands = [
+                item for item in commands
+                if item.trajectory_id in (parent.traj_id, child.traj_id)]
+            first_child = next(
+                index for index, item in enumerate(handoff_commands)
+                if item.trajectory_id == child.traj_id)
+            self.assertGreater(first_child, 0)
+            before = handoff_commands[first_child - 1]
+            after = handoff_commands[first_child]
+            before_speed = (
+                before.velocity.x ** 2 + before.velocity.y ** 2
+                + before.velocity.z ** 2) ** 0.5
+            after_speed = (
+                after.velocity.x ** 2 + after.velocity.y ** 2
+                + after.velocity.z ** 2) ** 0.5
+            self.assertGreater(before_speed, 0.05)
+            self.assertGreater(after_speed, 0.05)
+            position_jump = (
+                (after.position.x - before.position.x) ** 2
+                + (after.position.y - before.position.y) ** 2
+                + (after.position.z - before.position.z) ** 2) ** 0.5
+            self.assertLess(position_jump, 0.1)
+        finally:
+            node.destroy_node()
+            rclpy.shutdown()
             server.terminate()
             try:
                 server.wait(timeout=3)
