@@ -468,6 +468,10 @@ namespace ego_planner
     void setP4RiskSnapshot(std::shared_ptr<const iap::RiskGridSnapshot> snapshot,
                            double query_base_time_s,
                            uint64_t planning_attempt_id);
+    void setP4ActualCurveClearanceQuery(
+        P4ForwardClearanceQuery clearance_query,
+        double planning_clearance_buffer_m);
+    void clearP4ActualCurveClearanceQuery();
     void releaseP4RiskSnapshot();
     void clearP4RiskSnapshot();
     bool validateP4AttemptLineage(uint64_t planning_attempt_id);
@@ -699,6 +703,8 @@ namespace ego_planner
     std::shared_ptr<const GridMap::FrozenOccupancyEpoch>
         p4_occupancy_snapshot_;
     uint64_t active_p4_attempt_id_{0};
+    P4ForwardClearanceQuery p4_actual_curve_clearance_query_;
+    double p4_actual_curve_planning_clearance_buffer_m_{0.0};
     void invalidateP4AttemptLineage();
     void syncP4AdmittedLineage();
     static P4AttemptLineageRecord makeP4AttemptLineageRecord(
@@ -750,6 +756,9 @@ namespace ego_planner
     void calcFeasibilityCost(const Eigen::MatrixXd &q, double &cost, Eigen::MatrixXd &gradient);
     void calcTerminalCost(const Eigen::MatrixXd &q, double &cost, Eigen::MatrixXd &gradient);
     void calcDistanceCostRebound(const Eigen::MatrixXd &q, double &cost, Eigen::MatrixXd &gradient, int iter_num, double smoothness_cost);
+    void calcP4ActualCurveClearanceCost(
+        const Eigen::MatrixXd &q, double &cost,
+        Eigen::MatrixXd &gradient);
     void calcMovingObjCost(const Eigen::MatrixXd &q, double &cost, Eigen::MatrixXd &gradient);
     void calcSwarmCost(const Eigen::MatrixXd &q, double &cost, Eigen::MatrixXd &gradient);
     void calcFitnessCost(const Eigen::MatrixXd &q, double &cost, Eigen::MatrixXd &gradient);

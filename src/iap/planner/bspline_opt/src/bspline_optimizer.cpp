@@ -552,6 +552,28 @@ namespace ego_planner
         GridMapOccupancyDiagnosticQuery{});
   }
 
+  void BsplineOptimizer::setP4ActualCurveClearanceQuery(
+      P4ForwardClearanceQuery clearance_query,
+      const double planning_clearance_buffer_m)
+  {
+    if (!clearance_query ||
+        !std::isfinite(planning_clearance_buffer_m) ||
+        planning_clearance_buffer_m <= 0.0)
+    {
+      clearP4ActualCurveClearanceQuery();
+      return;
+    }
+    p4_actual_curve_clearance_query_ = std::move(clearance_query);
+    p4_actual_curve_planning_clearance_buffer_m_ =
+        planning_clearance_buffer_m;
+  }
+
+  void BsplineOptimizer::clearP4ActualCurveClearanceQuery()
+  {
+    p4_actual_curve_clearance_query_ = {};
+    p4_actual_curve_planning_clearance_buffer_m_ = 0.0;
+  }
+
   void BsplineOptimizer::releaseP4RiskSnapshot()
   {
     p4_risk_snapshot_.reset();
@@ -2724,6 +2746,71 @@ namespace ego_planner
           gradient.col(i) += -(2.0 * a * dist_err + b) * dist_grad;
         }
       }
+    }
+  }
+
+  void BsplineOptimizer::calcP4ActualCurveClearanceCost(
+      const Eigen::MatrixXd &q, double &cost, Eigen::MatrixXd &gradient)
+  {
+    cost = 0.0;
+    gradient.setZero();
+    if (!p4_actual_curve_clearance_query_ || order_ != 3 ||
+        q.cols() < order_ + 1 || !(bspline_interval_ > 0.0) ||
+        !std::isfinite(p4_actual_curve_planning_clearance_buffer_m_) ||
+        p4_actual_curve_planning_clearance_buffer_m_ <= 0.0)
+      return;
+
+    const double duration =
+        static_cast<double>(q.cols() - order_) * bspline_interval_;
+    if (!(duration > 0.0) || !std::isfinite(duration))
+      return;
+
+    // The callback owns the final envelope formula.  This bounded generation
+    // lattice supplies its base signed margin to the existing L-BFGS pass;
+    // final local assurance still densely resamples the immutable result and
+    // remains the authorization boundary.  Normalizing by the reserve keeps
+    // sub-millimetre violations visible without making objective strength
+    // depend on the number of samples per knot span.
+    constexpr int subdivisions_per_span = 2;
+    const int sample_count = std::max(
+        1, static_cast<int>(q.cols() - order_) * subdivisions_per_span);
+    const double sample_weight =
+        1.0 / static_cast<double>(subdivisions_per_span);
+    const double normalization_m =
+        p4_actual_curve_planning_clearance_buffer_m_;
+    for (int sample_index = 0; sample_index <= sample_count; ++sample_index)
+    {
+      const double time_s = duration *
+          static_cast<double>(sample_index) /
+          static_cast<double>(sample_count);
+      int first_control_point = 0;
+      double weights[4] = {};
+      if (!cubicBasisForTime(
+              time_s, static_cast<int>(q.cols()), first_control_point,
+              weights))
+        continue;
+      Eigen::Vector3d point = Eigen::Vector3d::Zero();
+      for (int basis = 0; basis < 4; ++basis)
+        point += weights[basis] * q.col(first_control_point + basis);
+      const auto clearance = p4_actual_curve_clearance_query_(point);
+      if (!clearance.available ||
+          !std::isfinite(clearance.signed_margin_m) ||
+          !clearance.escape_direction.allFinite() ||
+          clearance.escape_direction.squaredNorm() <= 1.0e-12)
+        continue;
+      const double violation_m =
+          p4_actual_curve_planning_clearance_buffer_m_ -
+          clearance.signed_margin_m;
+      if (!(violation_m > 0.0))
+        continue;
+      const double normalized_violation = violation_m / normalization_m;
+      cost += sample_weight * normalized_violation;
+      const Eigen::Vector3d point_gradient =
+          -sample_weight / normalization_m *
+          clearance.escape_direction.normalized();
+      for (int basis = 0; basis < 4; ++basis)
+        gradient.col(first_control_point + basis) +=
+            weights[basis] * point_gradient;
     }
   }
 
@@ -5821,10 +5908,13 @@ namespace ego_planner
     memcpy(cps_.points.data() + 3 * order_, x, n * sizeof(x[0]));
 
     /* ---------- evaluate cost and gradient ---------- */
-    double f_smoothness, f_distance, f_feasibility /*, f_mov_objs*/, f_swarm, f_terminal;
+    double f_smoothness, f_distance, f_p4_actual_clearance,
+        f_feasibility /*, f_mov_objs*/, f_swarm, f_terminal;
 
     Eigen::MatrixXd g_smoothness = Eigen::MatrixXd::Zero(3, cps_.size);
     Eigen::MatrixXd g_distance = Eigen::MatrixXd::Zero(3, cps_.size);
+    Eigen::MatrixXd g_p4_actual_clearance =
+        Eigen::MatrixXd::Zero(3, cps_.size);
     Eigen::MatrixXd g_feasibility = Eigen::MatrixXd::Zero(3, cps_.size);
     // Eigen::MatrixXd g_mov_objs = Eigen::MatrixXd::Zero(3, cps_.size);
     Eigen::MatrixXd g_swarm = Eigen::MatrixXd::Zero(3, cps_.size);
@@ -5832,17 +5922,25 @@ namespace ego_planner
 
     calcSmoothnessCost(cps_.points, f_smoothness, g_smoothness);
     calcDistanceCostRebound(cps_.points, f_distance, g_distance, iter_num_, f_smoothness);
+    calcP4ActualCurveClearanceCost(
+        cps_.points, f_p4_actual_clearance, g_p4_actual_clearance);
     calcFeasibilityCost(cps_.points, f_feasibility, g_feasibility);
     // calcMovingObjCost(cps_.points, f_mov_objs, g_mov_objs);
     calcSwarmCost(cps_.points, f_swarm, g_swarm);
     calcTerminalCost(cps_.points, f_terminal, g_terminal);
 
-    f_combine = lambda1_ * f_smoothness + new_lambda2_ * f_distance + lambda3_ * f_feasibility + new_lambda2_ * f_swarm + lambda2_ * f_terminal;
+    f_combine = lambda1_ * f_smoothness +
+        new_lambda2_ * (f_distance + f_p4_actual_clearance) +
+        lambda3_ * f_feasibility + new_lambda2_ * f_swarm +
+        lambda2_ * f_terminal;
     const double f_original = f_combine;
     // f_combine = lambda1_ * f_smoothness + new_lambda2_ * f_distance + lambda3_ * f_feasibility + new_lambda2_ * f_mov_objs;
     // printf("origin %f %f %f %f\n", f_smoothness, f_distance, f_feasibility, f_combine);
 
-    Eigen::MatrixXd grad_3D = lambda1_ * g_smoothness + new_lambda2_ * g_distance + lambda3_ * g_feasibility + new_lambda2_ * g_swarm + lambda2_ * g_terminal;
+    Eigen::MatrixXd grad_3D = lambda1_ * g_smoothness +
+        new_lambda2_ * (g_distance + g_p4_actual_clearance) +
+        lambda3_ * g_feasibility + new_lambda2_ * g_swarm +
+        lambda2_ * g_terminal;
     // Eigen::MatrixXd grad_3D = lambda1_ * g_smoothness + new_lambda2_ * g_distance + lambda3_ * g_feasibility + new_lambda2_ * g_mov_objs;
 
     last_p1_metrics_ = P1IntegrityMetrics{};

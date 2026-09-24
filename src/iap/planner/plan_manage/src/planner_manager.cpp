@@ -3867,6 +3867,12 @@ namespace ego_planner
       const uint64_t planning_attempt_id)
   {
     planning_risk_context_ = PlanningRiskContext{};
+    p4_actual_curve_clearance_evaluator_.reset();
+    p4_actual_curve_clearance_evidence_ = iap::LocalMotionEvidence{};
+    p4_actual_curve_clearance_execution_snapshot_id_ = 0u;
+    p4_actual_curve_clearance_occupancy_generation_ = 0u;
+    if (bspline_optimizer_)
+      bspline_optimizer_->clearP4ActualCurveClearanceQuery();
     planning_risk_context_.active = true;
     planning_risk_context_.planning_start_s = now_s;
     planning_risk_context_.snapshot_acquired_s = now_s;
@@ -3969,6 +3975,12 @@ namespace ego_planner
   void EGOPlannerManager::clearPlanningRiskContext()
   {
     planning_risk_context_ = PlanningRiskContext{};
+    p4_actual_curve_clearance_evaluator_.reset();
+    p4_actual_curve_clearance_evidence_ = iap::LocalMotionEvidence{};
+    p4_actual_curve_clearance_execution_snapshot_id_ = 0u;
+    p4_actual_curve_clearance_occupancy_generation_ = 0u;
+    if (bspline_optimizer_)
+      bspline_optimizer_->clearP4ActualCurveClearanceQuery();
   }
 
   std::string EGOPlannerManager::p1PlanningContextTimelinePath() const
@@ -6493,7 +6505,21 @@ namespace ego_planner
     const bool frozen_normal_channel_comparison =
         normal_prepared_channel_ids.size() >= 2u &&
         planning_risk_context_.execution_snapshot;
-    const auto execution_snapshot = frozen_normal_channel_comparison
+    const bool initial_actual_curve_certification =
+        stage == "final_bspline_before_p5" ||
+        stage == "successor_curve_before_p5";
+    const bool frozen_actual_clearance_identity =
+        initial_actual_curve_certification &&
+        p4_actual_curve_clearance_evaluator_ &&
+        planning_risk_context_.execution_snapshot &&
+        planning_risk_context_.execution_snapshot->occupancy &&
+        p4_actual_curve_clearance_execution_snapshot_id_ ==
+            planning_risk_context_.execution_snapshot->execution_snapshot_id &&
+        p4_actual_curve_clearance_occupancy_generation_ ==
+            planning_risk_context_.execution_snapshot->occupancy->generation;
+    const auto execution_snapshot =
+        (frozen_normal_channel_comparison ||
+         frozen_actual_clearance_identity)
         ? planning_risk_context_.execution_snapshot
         : (p0_risk_grid_runtime_
             ? p0_risk_grid_runtime_->
@@ -7010,6 +7036,88 @@ namespace ego_planner
       }
     }
 
+    std::vector<iap::LocalMotionCurve> generation_local_curves;
+    iap::LocalMotionCurve nominal_local_curve;
+    nominal_local_curve.curve_id = "nominal";
+    nominal_local_curve.samples.reserve(executable_trajectory.size());
+    for (std::size_t index = 0; index < executable_trajectory.size(); ++index)
+      nominal_local_curve.samples.push_back(iap::LocalMotionSample{
+          executable_times[index], executable_trajectory[index],
+          p4_local_tracking_error_bound_m_});
+    generation_local_curves.push_back(std::move(nominal_local_curve));
+    for (const auto &anchor : prepared_braking_anchors)
+    {
+      iap::LocalMotionCurve braking_curve;
+      braking_curve.curve_id = "brake-" +
+          std::to_string(anchor.braking_certificate_id);
+      braking_curve.braking_curve = true;
+      braking_curve.samples.reserve(anchor.risk_points.size());
+      for (std::size_t index = 0; index < anchor.risk_points.size(); ++index)
+        braking_curve.samples.push_back(iap::LocalMotionSample{
+            index < anchor.risk_relative_times.size()
+                ? anchor.risk_relative_times[index]
+                : std::numeric_limits<double>::quiet_NaN(),
+            anchor.risk_points[index], p4_local_tracking_error_bound_m_});
+      generation_local_curves.push_back(std::move(braking_curve));
+    }
+    const auto local_occupancy = execution_snapshot
+        ? execution_snapshot->occupancy
+        : planning_risk_context_.occupancy_snapshot;
+    const iap::CurrentIntegrityState *generation_local_integrity =
+        execution_snapshot
+        ? &execution_snapshot->integrity_anchor.current
+        : &planning_risk_context_.current_integrity_anchor;
+    const bool reuse_generation_clearance_evidence =
+        frozen_actual_clearance_identity && execution_snapshot &&
+        execution_snapshot->occupancy &&
+        !p4_actual_curve_clearance_evidence_.identity.empty();
+    const iap::LocalMotionEvidence generation_local_evidence =
+        reuse_generation_clearance_evidence
+        ? p4_actual_curve_clearance_evidence_
+        : generation_local_integrity
+            ? buildP4LocalMotionEvidence(
+                  local_occupancy, *generation_local_integrity,
+                  generation_local_curves,
+                  execution_snapshot
+                      ? execution_snapshot->execution_snapshot_id : 0u,
+                  !p0_risk_grid_runtime_ ||
+                      (execution_snapshot &&
+                       (p4_global_exposure_policy_.task_mode ==
+                                iap::GlobalNavigationTaskMode::
+                                    MISSION_BEST_EFFORT
+                            ? execution_snapshot->localFreshAt(stamp_s)
+                            : execution_snapshot->freshAt(stamp_s))),
+                  execution_snapshot
+                      ? &execution_snapshot->
+                            local_obstacle_source_certifications
+                      : nullptr)
+            : iap::LocalMotionEvidence{};
+    const bool trajectory_assurance_required =
+        execution_snapshot && use_braking_windows;
+    const auto generation_local_assurance =
+        iap::LocalMotionAssurance(p4_local_motion_policy_).evaluate(
+            generation_local_evidence, generation_local_curves,
+            p4_planning_clearance_buffer_m_);
+    if (trajectory_assurance_required &&
+        generation_local_assurance.status !=
+            iap::LocalMotionAssuranceStatus::SAFE)
+    {
+      const bool braking_failure =
+          generation_local_assurance.first_failure.curve_id.find(
+              "brake-") == 0u;
+      const auto typed_failure =
+          generation_local_assurance.status ==
+                  iap::LocalMotionAssuranceStatus::UNSAFE
+              ? (braking_failure ? P4PreparedCurveFailure::BRAKING
+                                 : P4PreparedCurveFailure::LOCAL_CLEARANCE)
+              : P4PreparedCurveFailure::SUPPORT;
+      return reject_final_identity(
+          P4GeometryCommitVerdict::INVALID_PATH,
+          "trajectory_assurance_rejected:local_precheck:" +
+              generation_local_assurance.reason,
+          typed_failure);
+    }
+
     if (frozen_normal_channel_comparison)
     {
       if (!p4NormalChannelCertificationContextReady(
@@ -7224,51 +7332,8 @@ namespace ego_planner
     // authorization boundary.
     assurance_request.local_planning_buffer_m =
         p4_planning_clearance_buffer_m_;
-    iap::LocalMotionCurve nominal_curve;
-    nominal_curve.curve_id = "nominal";
-    nominal_curve.samples.reserve(executable_trajectory.size());
-    for (std::size_t index = 0; index < executable_trajectory.size(); ++index)
-      nominal_curve.samples.push_back(iap::LocalMotionSample{
-          executable_times[index], executable_trajectory[index],
-          p4_local_tracking_error_bound_m_});
-    assurance_request.local_curves.push_back(std::move(nominal_curve));
-    for (const auto &anchor : prepared_braking_anchors)
-    {
-      iap::LocalMotionCurve braking_curve;
-      braking_curve.curve_id = "brake-" +
-          std::to_string(anchor.braking_certificate_id);
-      braking_curve.braking_curve = true;
-      braking_curve.samples.reserve(anchor.risk_points.size());
-      for (std::size_t index = 0; index < anchor.risk_points.size(); ++index)
-        braking_curve.samples.push_back(iap::LocalMotionSample{
-            index < anchor.risk_relative_times.size()
-                ? anchor.risk_relative_times[index]
-                : std::numeric_limits<double>::quiet_NaN(),
-            anchor.risk_points[index], p4_local_tracking_error_bound_m_});
-      assurance_request.local_curves.push_back(std::move(braking_curve));
-    }
-
-    const auto occupancy = execution_snapshot
-        ? execution_snapshot->occupancy
-        : planning_risk_context_.occupancy_snapshot;
-    const iap::CurrentIntegrityState *local_integrity = execution_snapshot
-        ? &execution_snapshot->integrity_anchor.current
-        : &planning_risk_context_.current_integrity_anchor;
-    assurance_request.local_evidence = local_integrity
-        ? buildP4LocalMotionEvidence(
-              occupancy, *local_integrity, assurance_request.local_curves,
-              execution_snapshot ? execution_snapshot->execution_snapshot_id
-                                 : 0u,
-              !p0_risk_grid_runtime_ ||
-                  (execution_snapshot &&
-                   (p4_global_exposure_policy_.task_mode ==
-                            iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT
-                        ? execution_snapshot->localFreshAt(stamp_s)
-                        : execution_snapshot->freshAt(stamp_s))),
-              execution_snapshot
-                  ? &execution_snapshot->local_obstacle_source_certifications
-                  : nullptr)
-        : iap::LocalMotionEvidence{};
+    assurance_request.local_curves = generation_local_curves;
+    assurance_request.local_evidence = generation_local_evidence;
     p4_direct_risk_evidence_.trajectory_assurance =
         iap::TrajectoryAssurance(p4_global_exposure_policy_,
                                  p4_local_motion_policy_)
@@ -7276,8 +7341,6 @@ namespace ego_planner
     p4_direct_risk_evidence_.trajectory_assurance_complete =
         p4_direct_risk_evidence_.trajectory_assurance.local.status !=
             iap::LocalMotionAssuranceStatus::UNKNOWN;
-    const bool trajectory_assurance_required =
-        execution_snapshot && use_braking_windows;
     const bool controlled_degraded_authorized =
         p4_direct_risk_evidence_.trajectory_assurance_complete &&
         (p4_direct_risk_evidence_.trajectory_assurance.mode ==
@@ -14512,6 +14575,7 @@ namespace ego_planner
       {
         if (optimizer)
         {
+          optimizer->clearP4ActualCurveClearanceQuery();
           optimizer->releaseP4RiskSnapshot();
         }
       }
@@ -14782,6 +14846,69 @@ namespace ego_planner
         continous_failures_count_++;
         return false;
       }
+    }
+
+    // The topology guide and the actual curve must consume one immutable
+    // local-clearance model.  The query excludes the generation-only reserve;
+    // the optimizer enforces that reserve explicitly, exactly as final local
+    // assurance does after smoothing.
+    if (p4_runtime_config.enable_risk_aware_astar &&
+        p4_forward_seed.size() >= 2u &&
+        planning_risk_context_.execution_snapshot &&
+        planning_risk_context_.execution_snapshot->occupancy)
+    {
+      const auto execution = planning_risk_context_.execution_snapshot;
+      iap::LocalMotionCurve reference_curve;
+      reference_curve.curve_id = "p4_actual_curve_reference";
+      reference_curve.samples.reserve(p4_forward_seed.size());
+      for (std::size_t index = 0; index < p4_forward_seed.size(); ++index)
+        reference_curve.samples.push_back(iap::LocalMotionSample{
+            static_cast<double>(index), p4_forward_seed[index],
+            p4_local_tracking_error_bound_m_});
+      p4_actual_curve_clearance_evidence_ = buildP4LocalMotionEvidence(
+          execution->occupancy, execution->integrity_anchor.current,
+          {reference_curve}, execution->execution_snapshot_id,
+          p4_global_exposure_policy_.task_mode ==
+                  iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT
+              ? execution->localFreshAt(
+                    planning_risk_context_.planning_start_s)
+              : execution->freshAt(
+                    planning_risk_context_.planning_start_s),
+          &execution->local_obstacle_source_certifications);
+      p4_actual_curve_clearance_evaluator_ =
+          std::make_shared<const iap::LocalClearanceEvaluator>(
+              p4_actual_curve_clearance_evidence_, p4_local_motion_policy_);
+      p4_actual_curve_clearance_execution_snapshot_id_ =
+          execution->execution_snapshot_id;
+      p4_actual_curve_clearance_occupancy_generation_ =
+          execution->occupancy->generation;
+      const auto clearance = p4_actual_curve_clearance_evaluator_;
+      bspline_optimizer_->setP4ActualCurveClearanceQuery(
+          [clearance, tracking_error_m = p4_local_tracking_error_bound_m_](
+              const Eigen::Vector3d &point) {
+            P4ForwardClearanceSample sample;
+            const auto result = clearance->query(
+                point, tracking_error_m, 0.0);
+            sample.available =
+                result.status == iap::LocalClearanceStatus::VALID;
+            sample.signed_margin_m = result.signed_margin_m;
+            sample.nearest_obstacle_position =
+                result.nearest_obstacle_position_map;
+            sample.escape_direction = result.escape_direction_map;
+            sample.nearest_obstacle_identity =
+                result.nearest_obstacle_identity;
+            sample.reason = result.reason;
+            return sample;
+          },
+          p4_planning_clearance_buffer_m_);
+    }
+    else
+    {
+      p4_actual_curve_clearance_evaluator_.reset();
+      p4_actual_curve_clearance_evidence_ = iap::LocalMotionEvidence{};
+      p4_actual_curve_clearance_execution_snapshot_id_ = 0u;
+      p4_actual_curve_clearance_occupancy_generation_ = 0u;
+      bspline_optimizer_->clearP4ActualCurveClearanceQuery();
     }
     double incumbent_start_t_s = 0.0;
     if (has_existing_trajectory &&

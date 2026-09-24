@@ -1603,12 +1603,286 @@ ego_planner::BsplineOptimizer::Ptr makeP4Optimizer(
   return optimizer;
 }
 
+iap::LocalMotionAssurancePolicy denseForkClearancePolicy() {
+  iap::LocalMotionAssurancePolicy policy;
+  policy.vehicle_radius_m = 0.35;
+  policy.safety_margin_m = 0.20;
+  policy.curve_approximation_error_m = 0.002;
+  policy.maximum_tracking_error_m = 0.15;
+  policy.surface_error_bound_m = 0.02;
+  policy.planning_clearance_buffer_m = 0.05;
+  policy.surface_error_calibration_id = "dense-fork-test-v1";
+  return policy;
+}
+
+iap::LocalMotionEvidence denseForkTangentEvidence(
+    const double mirror_y = 1.0) {
+  iap::LocalMotionEvidence evidence;
+  evidence.complete = true;
+  evidence.support_fresh = true;
+  evidence.registration_health_valid = true;
+  evidence.icp_degenerate = false;
+  evidence.icp_rmse_m = 0.01;
+  evidence.icp_gamma = 1.0;
+  evidence.certified_empty_clearance_m = 12.0;
+  evidence.identity = "dense-fork-tangent-snapshot-917";
+  iap::LocalObstacleEvidence obstacle;
+  obstacle.center_map = Eigen::Vector3d(-12.15, mirror_y * 1.35, 1.25);
+  obstacle.half_extent_m = Eigen::Vector3d::Constant(0.05);
+  obstacle.source_frame_id = 917;
+  obstacle.provenance = iap::LocalObstacleProvenance::CURRENT_FRAME;
+  obstacle.source_identity = "dense-fork-current-frame-917";
+  evidence.obstacles.push_back(obstacle);
+  return evidence;
+}
+
+std::shared_ptr<const iap::LocalClearanceEvaluator>
+makeDenseForkTangentClearanceEvaluator(const double mirror_y = 1.0) {
+  return std::make_shared<const iap::LocalClearanceEvaluator>(
+      denseForkTangentEvidence(mirror_y), denseForkClearancePolicy());
+}
+
+Eigen::MatrixXd denseForkTangentControlPoints(const double mirror_y = 1.0) {
+  const Eigen::Vector3d tangent_point(
+      -12.77299865, mirror_y * 1.916976736, 1.29004215);
+  const Eigen::Vector3d obstacle_center(
+      -12.15, mirror_y * 1.35, 1.25);
+  const Eigen::Vector3d nearest_surface(
+      obstacle_center.x() - 0.05,
+      obstacle_center.y() + mirror_y * 0.05,
+      tangent_point.z());
+  const Eigen::Vector3d radial = tangent_point - nearest_surface;
+  Eigen::Vector3d tangent(
+      -std::abs(radial.y()), mirror_y * radial.x(), 0.0);
+  tangent.normalize();
+  Eigen::MatrixXd points(3, 9);
+  for (Eigen::Index index = 0; index < points.cols(); ++index)
+    points.col(index) = tangent_point +
+        0.25 * static_cast<double>(index - 4) * tangent;
+  return points;
+}
+
+double minimumDenseForkPlanningMargin(
+    ego_planner::UniformBspline curve,
+    const iap::LocalClearanceEvaluator &clearance) {
+  const double duration = curve.getTimeSum();
+  double minimum = std::numeric_limits<double>::infinity();
+  for (int index = 0; index <= 400; ++index) {
+    const double time = duration * static_cast<double>(index) / 400.0;
+    const auto result = clearance.query(
+        curve.evaluateDeBoorT(time), 0.15, 0.05);
+    EXPECT_EQ(result.status, iap::LocalClearanceStatus::VALID);
+    EXPECT_DOUBLE_EQ(result.planning_required_envelope_m, 0.772);
+    minimum = std::min(minimum, result.signed_margin_m);
+  }
+  return minimum;
+}
+
+iap::LocalMotionCurve sampleDenseForkCurve(
+    ego_planner::UniformBspline curve, const std::string &curve_id) {
+  iap::LocalMotionCurve sampled;
+  sampled.curve_id = curve_id;
+  const double duration = curve.getTimeSum();
+  for (int index = 0; index <= 400; ++index) {
+    const double time = duration * static_cast<double>(index) / 400.0;
+    sampled.samples.push_back(
+        {time, curve.evaluateDeBoorT(time), 0.15});
+  }
+  return sampled;
+}
+
 std::filesystem::path p4LineageTestPath(const std::string& name) {
   const char* root = std::getenv("ROS_LOG_DIR");
   return std::filesystem::path(root ? root : ".") / name;
 }
 
 }  // namespace
+
+TEST(P4ActualCurveClearanceOptimization,
+     RepairsTheMeasuredDenseForkTangentWithTheFinalClearanceQuery) {
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureTwoForkNoCollision(map.get());
+  const auto snapshot = makeP4SelectionSnapshot();
+  auto optimizer = makeP4Optimizer(
+      map, snapshot,
+      p4LineageTestPath("actual_clearance_dense_fork.csv").string());
+  ego_planner::SwarmTrajData swarm;
+  optimizer->setSwarmTrajs(&swarm);
+  optimizer->setDroneId(0);
+  auto clearance = makeDenseForkTangentClearanceEvaluator();
+  int query_count = 0;
+  double minimum_queried_base_margin =
+      std::numeric_limits<double>::infinity();
+  optimizer->setP4ActualCurveClearanceQuery(
+      [clearance, &query_count, &minimum_queried_base_margin](
+          const Eigen::Vector3d &point) {
+        ++query_count;
+        ego_planner::P4ForwardClearanceSample sample;
+        const auto result = clearance->query(point, 0.15, 0.0);
+        minimum_queried_base_margin = std::min(
+            minimum_queried_base_margin, result.signed_margin_m);
+        sample.available =
+            result.status == iap::LocalClearanceStatus::VALID;
+        sample.signed_margin_m = result.signed_margin_m;
+        sample.nearest_obstacle_position =
+            result.nearest_obstacle_position_map;
+        sample.escape_direction = result.escape_direction_map;
+        sample.nearest_obstacle_identity =
+            result.nearest_obstacle_identity;
+        sample.reason = result.reason;
+        return sample;
+      },
+      0.05);
+
+  Eigen::MatrixXd points = denseForkTangentControlPoints();
+  ego_planner::UniformBspline before(points, 3, 0.2);
+  const auto measured = clearance->query(
+      Eigen::Vector3d(-12.77299865, 1.916976736, 1.29004215),
+      0.15, 0.05);
+  ASSERT_EQ(measured.status, iap::LocalClearanceStatus::VALID);
+  EXPECT_NEAR(measured.obstacle_clearance_m, 0.7717463308, 1.0e-9);
+  EXPECT_DOUBLE_EQ(measured.planning_required_envelope_m, 0.772);
+  EXPECT_NEAR(measured.signed_margin_m, -0.0002536692, 1.0e-9);
+  EXPECT_LT(minimumDenseForkPlanningMargin(before, *clearance), 0.0);
+
+  optimizer->setLocalTargetPt(points.col(points.cols() - 2));
+  double final_cost = std::numeric_limits<double>::quiet_NaN();
+  int iterations = 0;
+  ASSERT_TRUE(optimizer->optimizeReboundCostForTest(
+      points, 0.2, 200, final_cost, iterations));
+  const ego_planner::UniformBspline after(points, 3, 0.2);
+
+  EXPECT_GT(query_count, 0);
+  EXPECT_GT(iterations, 0);
+  EXPECT_LT(minimum_queried_base_margin, 0.05);
+  EXPECT_GT(minimumDenseForkPlanningMargin(after, *clearance), 0.0);
+  auto nominal = sampleDenseForkCurve(after, "nominal");
+  auto braking = sampleDenseForkCurve(after, "brake-test");
+  braking.braking_curve = true;
+  const auto assurance = iap::LocalMotionAssurance(
+      denseForkClearancePolicy()).evaluate(
+          denseForkTangentEvidence(), {nominal, braking}, 0.05);
+  EXPECT_EQ(assurance.status, iap::LocalMotionAssuranceStatus::SAFE)
+      << assurance.reason;
+}
+
+TEST(P4ActualCurveClearanceOptimization,
+     MirroredDenseForkUsesTheEvaluatorEscapeDirection) {
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureTwoForkNoCollision(map.get());
+  const auto snapshot = makeP4SelectionSnapshot();
+  std::vector<ego_planner::UniformBspline> optimized;
+  for (const double mirror_y : {1.0, -1.0}) {
+    auto optimizer = makeP4Optimizer(
+        map, snapshot,
+        p4LineageTestPath(
+            mirror_y > 0.0 ? "actual_clearance_mirror_upper.csv"
+                           : "actual_clearance_mirror_lower.csv").string());
+    ego_planner::SwarmTrajData swarm;
+    optimizer->setSwarmTrajs(&swarm);
+    optimizer->setDroneId(0);
+    const auto clearance =
+        makeDenseForkTangentClearanceEvaluator(mirror_y);
+    optimizer->setP4ActualCurveClearanceQuery(
+        [clearance](const Eigen::Vector3d &point) {
+          ego_planner::P4ForwardClearanceSample sample;
+          const auto result = clearance->query(point, 0.15, 0.0);
+          sample.available =
+              result.status == iap::LocalClearanceStatus::VALID;
+          sample.signed_margin_m = result.signed_margin_m;
+          sample.nearest_obstacle_position =
+              result.nearest_obstacle_position_map;
+          sample.escape_direction = result.escape_direction_map;
+          sample.nearest_obstacle_identity =
+              result.nearest_obstacle_identity;
+          sample.reason = result.reason;
+          return sample;
+        },
+        0.05);
+    Eigen::MatrixXd points = denseForkTangentControlPoints(mirror_y);
+    optimizer->setLocalTargetPt(points.col(points.cols() - 2));
+    double final_cost = std::numeric_limits<double>::quiet_NaN();
+    int iterations = 0;
+    ASSERT_TRUE(optimizer->optimizeReboundCostForTest(
+        points, 0.2, 200, final_cost, iterations));
+    optimized.emplace_back(points, 3, 0.2);
+    EXPECT_GT(minimumDenseForkPlanningMargin(
+                  optimized.back(), *clearance),
+              0.0);
+  }
+
+  ASSERT_EQ(optimized.size(), 2u);
+  const double duration = optimized.front().getTimeSum();
+  ASSERT_NEAR(duration, optimized.back().getTimeSum(), 1.0e-12);
+  for (int index = 0; index <= 200; ++index) {
+    const double time = duration * static_cast<double>(index) / 200.0;
+    const auto upper = optimized.front().evaluateDeBoorT(time);
+    const auto lower = optimized.back().evaluateDeBoorT(time);
+    EXPECT_NEAR(upper.x(), lower.x(), 1.0e-3);
+    EXPECT_NEAR(upper.y(), -lower.y(), 1.0e-3);
+    EXPECT_NEAR(upper.z(), lower.z(), 1.0e-3);
+  }
+}
+
+TEST(P4ActualCurveClearanceOptimization,
+     TrulyNarrowCorridorRemainsUnsafeAfterBoundedOptimization) {
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureTwoForkNoCollision(map.get());
+  const auto snapshot = makeP4SelectionSnapshot();
+  auto optimizer = makeP4Optimizer(
+      map, snapshot,
+      p4LineageTestPath("actual_clearance_narrow_corridor.csv").string());
+  ego_planner::SwarmTrajData swarm;
+  optimizer->setSwarmTrajs(&swarm);
+  optimizer->setDroneId(0);
+
+  iap::LocalMotionEvidence evidence = denseForkTangentEvidence();
+  evidence.identity = "physically-narrow-corridor-snapshot-918";
+  evidence.obstacles.clear();
+  for (const double side : {-1.0, 1.0}) {
+    iap::LocalObstacleEvidence wall;
+    wall.center_map = Eigen::Vector3d(-12.77, side, 1.29);
+    wall.half_extent_m = Eigen::Vector3d(10.0, 0.25, 10.0);
+    wall.source_frame_id = 918;
+    wall.provenance = iap::LocalObstacleProvenance::CURRENT_FRAME;
+    wall.source_identity = side < 0.0 ? "lower-wall" : "upper-wall";
+    evidence.obstacles.push_back(wall);
+  }
+  const auto policy = denseForkClearancePolicy();
+  const auto clearance =
+      std::make_shared<const iap::LocalClearanceEvaluator>(evidence, policy);
+  optimizer->setP4ActualCurveClearanceQuery(
+      [clearance](const Eigen::Vector3d &point) {
+        ego_planner::P4ForwardClearanceSample sample;
+        const auto result = clearance->query(point, 0.15, 0.0);
+        sample.available =
+            result.status == iap::LocalClearanceStatus::VALID;
+        sample.signed_margin_m = result.signed_margin_m;
+        sample.nearest_obstacle_position =
+            result.nearest_obstacle_position_map;
+        sample.escape_direction = result.escape_direction_map;
+        sample.nearest_obstacle_identity = result.nearest_obstacle_identity;
+        sample.reason = result.reason;
+        return sample;
+      },
+      0.05);
+
+  Eigen::MatrixXd points(3, 9);
+  for (Eigen::Index index = 0; index < points.cols(); ++index)
+    points.col(index) = Eigen::Vector3d(
+        -13.77 + 0.25 * static_cast<double>(index), 0.0, 1.29);
+  optimizer->setLocalTargetPt(points.col(points.cols() - 2));
+  double final_cost = std::numeric_limits<double>::quiet_NaN();
+  int iterations = 0;
+  optimizer->optimizeReboundCostForTest(
+      points, 0.2, 200, final_cost, iterations);
+  const ego_planner::UniformBspline actual(points, 3, 0.2);
+  const auto assurance = iap::LocalMotionAssurance(policy).evaluate(
+      evidence, {sampleDenseForkCurve(actual, "nominal")}, 0.05);
+
+  EXPECT_EQ(assurance.status, iap::LocalMotionAssuranceStatus::UNSAFE);
+  EXPECT_LT(minimumDenseForkPlanningMargin(actual, *clearance), 0.0);
+}
 
 namespace {
 
@@ -1700,6 +1974,91 @@ ego_planner::P4ForwardDecision makeForwardDecision(
 }
 
 }  // namespace
+
+TEST(P4ActualCurveClearanceCertification,
+     LocalFailureIsTypedAndSkipsGnssRiskComputation) {
+  ensureRclcpp();
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureNoCollision(map.get());
+  const auto frozen_occupancy = map->captureFrozenOccupancyEpoch();
+  ASSERT_NE(frozen_occupancy, nullptr);
+  std::const_pointer_cast<FrozenOccupancyEpoch>(frozen_occupancy)
+      ->frame_contract_id = "map:test";
+  const auto snapshot = makeP4SelectionSnapshot(
+      1.0, frozen_occupancy->geometry_id, true);
+  auto optimizer = makeP4Optimizer(
+      map, snapshot,
+      p4LineageTestPath("actual_clearance_before_gnss.csv").string(), 1);
+
+  std::size_t gnss_calls = 0u;
+  const auto counted_risk = [&gnss_calls](
+      const iap::ForwardRiskBatchRequest &request) {
+    ++gnss_calls;
+    return directRiskCallback(0.4)(request);
+  };
+  auto execution = makeP4ExecutionSnapshot(
+      snapshot, counted_risk, 10.0, 919u);
+  auto occupancy = std::make_shared<ego_planner::P0OccupancyEpoch>(
+      *execution->occupancy);
+  occupancy->frozen_grid_map_epoch = frozen_occupancy;
+  occupancy->geometry.resolution_m = 0.1;
+
+  auto stopped = ego_planner::UniformBspline(
+      p4StoppedControlPoints(), 3, 0.5);
+  const auto terminal = ego_planner::imposeP4TerminalStop(
+      &stopped, terminalStartState(stopped), 20.0, 100.0, 0.0);
+  ASSERT_TRUE(terminal.success) << terminal.reason;
+  const Eigen::Vector3d nominal_midpoint = stopped.evaluateDeBoorT(
+      0.5 * stopped.getTimeSum());
+  const auto local_obstacles =
+      std::make_shared<const std::vector<Eigen::Vector3d>>(
+          std::vector<Eigen::Vector3d>{
+              nominal_midpoint + Eigen::Vector3d(0.0, 0.75, 0.0)});
+  occupancy->raw_occupied_voxel_centers = local_obstacles;
+  occupancy->current_frame_occupied_voxel_centers = local_obstacles;
+  execution->occupancy = occupancy;
+
+  ego_planner::EGOPlannerManager manager;
+  manager.pp_.max_vel_ = 20.0;
+  manager.pp_.max_acc_ = 100.0;
+  manager.setP4ControlCapabilityProfileForTest(
+      permissiveTestControlProfile());
+  manager.setP4VerticalSliceOptimizerForTest(std::move(optimizer), map);
+  manager.setPlanningRiskContextForTest(
+      snapshot, 9.75, occupancy, counted_risk, execution);
+  manager.setLatestRiskSnapshotForTest(snapshot);
+  auto decision = makeForwardDecision(
+      snapshot, manager.planningRiskContext().planning_attempt_id);
+  decision.vehicle_radius_m = ego_planner::P4ForwardLimits{}.vehicle_radius_m;
+  decision.map_inflation_m = map->getObstacleInflation();
+  decision.collision_policy_id = ego_planner::p4CollisionPolicyIdentity(
+      decision.vehicle_radius_m, decision.map_inflation_m,
+      map->getResolution(), map->getVirtualCeilingHeight());
+  decision.action = ego_planner::P4ForwardAction::CANDIDATE_READY;
+  decision.selection_authority =
+      ego_planner::P4ForwardSelectionAuthority::NONE;
+  decision.formal_support = false;
+  manager.setP4ForwardDecisionForTest(std::move(decision));
+  manager.local_data_.position_traj_ = stopped;
+  manager.local_data_.velocity_traj_ = stopped.getDerivative();
+  manager.local_data_.acceleration_traj_ =
+      manager.local_data_.velocity_traj_.getDerivative();
+  manager.local_data_.traj_id_ = 919;
+  manager.local_data_.start_time_ = rclcpp::Time(10, 0, RCL_ROS_TIME);
+  manager.local_data_.duration_ = stopped.getTimeSum();
+
+  EXPECT_FALSE(manager.certifyP4ActualCurve(
+      "final_bspline_before_p5", 10.0));
+  EXPECT_EQ(gnss_calls, 0u);
+  EXPECT_EQ(manager.lastP4ActualCurveCertification().failure,
+            ego_planner::P4PreparedCurveFailure::LOCAL_CLEARANCE);
+  EXPECT_NE(manager.lastP4ActualCurveCertification().detail.find(
+                "trajectory_assurance_rejected:local_precheck"),
+            std::string::npos);
+  EXPECT_EQ(manager.lastP4ForwardDecision().selection_authority,
+            ego_planner::P4ForwardSelectionAuthority::NONE);
+  EXPECT_FALSE(manager.p4ExecutionCertificate().valid);
+}
 
 TEST(P4ExecutionIntegrityTest,
      CertifiedCurrentIntegrityOwnsTheLiveCurrentSafetyGate) {

@@ -1406,6 +1406,11 @@ namespace ego_planner
     iap::GlobalNavigationExposureLedger p4_global_exposure_ledger_;
     iap::LocalMotionAssurancePolicy p4_local_motion_policy_;
     double p4_planning_clearance_buffer_m_ = 0.05;
+    std::shared_ptr<const iap::LocalClearanceEvaluator>
+        p4_actual_curve_clearance_evaluator_;
+    iap::LocalMotionEvidence p4_actual_curve_clearance_evidence_;
+    uint64_t p4_actual_curve_clearance_execution_snapshot_id_ = 0;
+    uint64_t p4_actual_curve_clearance_occupancy_generation_ = 0;
     P4ForwardDecisionWorker p4_forward_worker_;
     P4SuccessorPreparationWorker p4_successor_worker_;
     P4ForwardDecision last_p4_forward_decision_;
