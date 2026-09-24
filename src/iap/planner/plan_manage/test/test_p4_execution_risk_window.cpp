@@ -183,6 +183,28 @@ TEST(P4ExecutionRiskWindowTest,
 }
 
 TEST(P4ExecutionRiskWindowTest,
+     ReachableSelectionCacheIdentityAdvancesInsideOneWindow) {
+  const auto plan = buildP4CommittedRiskWindowPlan(
+      17, 177, "cp", "knots", nominalSamples(4.0), brakingCurves(4.0),
+      P4ExecutionRiskWindowParams{});
+  ASSERT_TRUE(plan.valid) << plan.reason;
+
+  const auto before_sample = selectP4CommittedRiskWindowRows(plan, 0.31);
+  const auto after_sample = selectP4CommittedRiskWindowRows(plan, 0.51);
+  ASSERT_TRUE(before_sample.valid) << before_sample.reason;
+  ASSERT_TRUE(after_sample.valid) << after_sample.reason;
+  ASSERT_EQ(before_sample.current_window_id, after_sample.current_window_id);
+  ASSERT_EQ(before_sample.next_window_id, after_sample.next_window_id);
+
+  EXPECT_NE(p4CommittedRiskWindowSelectionCacheIdentity(before_sample),
+            p4CommittedRiskWindowSelectionCacheIdentity(after_sample));
+  EXPECT_GT(before_sample.rows.size(), after_sample.rows.size());
+  for (const auto& row : after_sample.rows) {
+    EXPECT_GE(row.sample.relative_time_s, 0.51 - 1.0e-9);
+  }
+}
+
+TEST(P4ExecutionRiskWindowTest,
      NominalEndpointSurvivesAColocatedExpiredBrakeEndpoint) {
   const auto nominal = nominalSamples(4.0);
   auto brakes = brakingCurves(4.0);

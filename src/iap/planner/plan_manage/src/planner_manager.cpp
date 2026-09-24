@@ -12749,6 +12749,10 @@ namespace ego_planner
             p4_execution_certificate_.control_points_hash &&
         p4_runtime_risk_cache_.knot_vector_hash ==
             p4_execution_certificate_.knot_vector_hash &&
+        (!runtime_windowed ||
+         p4_runtime_risk_cache_.reachable_selection_identity ==
+             p4CommittedRiskWindowSelectionCacheIdentity(
+                 committed_window_selection)) &&
         p4_direct_risk_evidence_.admissionComplete() &&
         p4_direct_risk_evidence_.trajectory_id == local_data_.traj_id_ &&
         p4_direct_risk_evidence_.trajectory_start_ns ==
@@ -13173,6 +13177,10 @@ namespace ego_planner
               : p4_execution_certificate_.duration_s;
       p4_runtime_risk_cache_.query_lattice_hash = p4RiskQueryLatticeHash(
           direct_points, p4_runtime_risk_cache_.relative_times);
+      p4_runtime_risk_cache_.reachable_selection_identity = runtime_windowed
+          ? p4CommittedRiskWindowSelectionCacheIdentity(
+                committed_window_selection)
+          : std::string{};
       p4_runtime_risk_cache_.samples.reserve(result.points.size());
       for (const auto &direct : result.points)
       {

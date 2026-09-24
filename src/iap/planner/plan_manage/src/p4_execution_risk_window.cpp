@@ -405,6 +405,23 @@ P4CommittedRiskWindowSelection selectP4CommittedRiskWindowRows(
   return out;
 }
 
+std::string p4CommittedRiskWindowSelectionCacheIdentity(
+    const P4CommittedRiskWindowSelection& selection) {
+  if (!selection.valid || selection.window_layout_hash.empty() ||
+      selection.rows.size() != selection.source_row_indices.size()) {
+    return {};
+  }
+  std::ostringstream canonical;
+  canonical << "p4_reachable_window_selection_v1;"
+            << selection.window_layout_hash << ';'
+            << selection.current_window_id << ';'
+            << selection.next_window_id << ';';
+  for (const std::size_t source_index : selection.source_row_indices) {
+    canonical << source_index << ',';
+  }
+  return fnvHash(canonical.str());
+}
+
 std::vector<std::size_t> reachableP4CommittedBrakingCurveIndices(
     const P4CommittedRiskWindowPlan& plan,
     const P4CommittedRiskWindowSelection& selection,

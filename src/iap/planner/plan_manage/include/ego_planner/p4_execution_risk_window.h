@@ -151,6 +151,13 @@ P4CommittedRiskWindowPlan buildP4CommittedRiskWindowPlan(
 P4CommittedRiskWindowSelection selectP4CommittedRiskWindowRows(
     const P4CommittedRiskWindowPlan& plan, double current_time_s);
 
+// Cache identity for the rows that remain physically reachable at this
+// execution instant.  Unlike the immutable layout hash, this identity changes
+// when a nominal sample or braking anchor passes inside one responsibility
+// window.
+std::string p4CommittedRiskWindowSelectionCacheIdentity(
+    const P4CommittedRiskWindowSelection& selection);
+
 std::vector<std::size_t> reachableP4CommittedBrakingCurveIndices(
     const P4CommittedRiskWindowPlan& plan,
     const P4CommittedRiskWindowSelection& selection,

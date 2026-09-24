@@ -1416,6 +1416,7 @@ namespace ego_planner
       std::string control_points_hash;
       std::string knot_vector_hash;
       std::string query_lattice_hash;
+      std::string reachable_selection_identity;
       std::vector<double> relative_times;
       std::vector<Eigen::Vector3d> positions;
       std::vector<std::uint64_t> satellite_window_ids;
