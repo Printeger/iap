@@ -946,6 +946,47 @@ struct GridMapTestAccess {
       map->occupancy_update_sequence_.store(2u, std::memory_order_release);
   }
 
+  static void configureFirstForkEntrance(GridMap* map) {
+    constexpr double resolution = 0.1;
+    map->mp_.map_origin_ = Eigen::Vector3d(-13.0, -3.0, 0.0);
+    map->mp_.map_size_ = Eigen::Vector3d(10.0, 6.0, 3.0);
+    map->mp_.map_min_boundary_ = map->mp_.map_origin_;
+    map->mp_.map_max_boundary_ = map->mp_.map_origin_ + map->mp_.map_size_;
+    map->mp_.map_voxel_num_ = Eigen::Vector3i(100, 60, 30);
+    map->mp_.resolution_ = resolution;
+    map->mp_.resolution_inv_ = 1.0 / resolution;
+    map->mp_.obstacles_inflation_ = 0.099;
+    map->mp_.virtual_ceil_height_ = -1.0;
+    map->mp_.min_occupancy_log_ = 0.5;
+    map->mp_.clamp_min_log_ = -2.0;
+    map->mp_.unknown_flag_ = 0.01;
+    map->mp_.frame_id_ = "map";
+    const std::size_t count = 100U * 60U * 30U;
+    map->md_.occupancy_buffer_.assign(count, -2.01);
+    map->md_.occupancy_buffer_inflate_.assign(count, 0);
+    map->md_.occupancy_buffer_raw_cloud_.assign(count, 0);
+    map->md_.observed_buffer_.assign(count, 1);
+    map->occupancy_cloud_stamp_s_.store(10.0, std::memory_order_release);
+    map->occupancy_update_sequence_.store(2u, std::memory_order_release);
+    for (int x = 0; x < map->mp_.map_voxel_num_.x(); ++x) {
+      const double px = map->mp_.map_origin_.x() +
+          (static_cast<double>(x) + 0.5) * resolution;
+      if (px < -9.0 || px > -7.0) continue;
+      for (int y = 0; y < map->mp_.map_voxel_num_.y(); ++y) {
+        const double py = map->mp_.map_origin_.y() +
+            (static_cast<double>(y) + 0.5) * resolution;
+        if (std::abs(py) > 0.4) continue;
+        for (int z = 0; z < map->mp_.map_voxel_num_.z(); ++z) {
+          const auto address = static_cast<std::size_t>(
+              map->toAddress(Eigen::Vector3i(x, y, z)));
+          map->md_.occupancy_buffer_[address] = 1.0;
+          map->md_.occupancy_buffer_inflate_[address] = 1;
+          map->md_.occupancy_buffer_raw_cloud_[address] = 1;
+        }
+      }
+    }
+  }
+
   static void advanceOccupancyEpoch(GridMap* map) {
     map->occupancy_update_sequence_.fetch_add(2, std::memory_order_acq_rel);
   }
@@ -2083,6 +2124,267 @@ TEST(P4ForwardTerminalLineageTest,
   ASSERT_EQ(rows.size(), 1u);
   EXPECT_EQ(rows.front().at("action"), "DEFER_RISK_SELECTION");
   EXPECT_EQ(rows.front().at("selection_applied"), "0");
+}
+
+TEST(P4PreparedChannelPreparation,
+     GuideSweptCollisionStillReachesActualCurvePreparation) {
+  ensureRclcpp();
+  auto map = std::make_shared<GridMap>();
+  GridMapTestAccess::configureFirstForkEntrance(map.get());
+  const auto frozen_occupancy = map->captureFrozenOccupancyEpoch();
+  ASSERT_NE(frozen_occupancy, nullptr);
+  std::const_pointer_cast<FrozenOccupancyEpoch>(frozen_occupancy)
+      ->frame_contract_id = "map:test";
+  const auto snapshot = makeP4SelectionSnapshot(
+      100.0, frozen_occupancy->geometry_id, true);
+  const auto safe_risk = [](
+      const iap::ForwardRiskBatchRequest &request) {
+    double signed_lateral_sum = 0.0;
+    for (const auto &point : request.points)
+      signed_lateral_sum += point.position_map.y();
+    return directRiskCallback(
+        signed_lateral_sum < 0.0 ? 0.6 : 0.3)(request);
+  };
+  auto execution = makeP4ExecutionSnapshot(
+      snapshot, safe_risk, 10.0, 917u);
+  auto occupancy = std::make_shared<ego_planner::P0OccupancyEpoch>(
+      *execution->occupancy);
+  occupancy->generation = frozen_occupancy->generation;
+  occupancy->geometry.origin_w = frozen_occupancy->lattice_origin;
+  occupancy->geometry.extent_m = frozen_occupancy->extent_m;
+  occupancy->geometry.resolution_m = frozen_occupancy->resolution_m;
+  occupancy->geometry.geometry_id = frozen_occupancy->geometry_id;
+  occupancy->frozen_grid_map_epoch = frozen_occupancy;
+  execution->occupancy = occupancy;
+  execution->source_identity.occupancy_generation = occupancy->generation;
+
+  const auto debug_path =
+      p4LineageTestPath("guide_collision_actual_preparation.csv");
+  std::filesystem::remove(std::filesystem::path(
+      debug_path.string() + ".forward_lineage.csv"));
+  std::filesystem::remove(std::filesystem::path(
+      debug_path.string() + ".forward_channel_decisions.csv"));
+  auto optimizer = makeP4Optimizer(map, snapshot, debug_path.string(), 1);
+  auto manager = std::make_unique<ego_planner::EGOPlannerManager>();
+  manager->pp_.planning_horizen_ = 8.0;
+  manager->pp_.max_vel_ = 20.0;
+  manager->pp_.max_acc_ = 100.0;
+  manager->pp_.use_distinctive_trajs = false;
+  manager->setP4ControlCapabilityProfileForTest(
+      permissiveTestControlProfile());
+  manager->setP4VerticalSliceOptimizerForTest(std::move(optimizer), map);
+  manager->deliverTrajToOptimizer();
+  auto node = std::make_shared<rclcpp::Node>(
+      "guide_collision_actual_preparation_test");
+  manager->setPlanningVisualizationForTest(
+      std::make_shared<ego_planner::PlanningVisualization>(node));
+  ego_planner::P5RuntimeIntegrityGate::Config p5_config;
+  p5_config.enable_final_gate = true;
+  p5_config.test_only_allow_grid_risk_authority = true;
+  manager->p5_integrity_gate_ =
+      std::make_unique<ego_planner::P5RuntimeIntegrityGate>(
+          nullptr, p5_config, false);
+  iap::msg::IntegrityReport integrity;
+  integrity.header.stamp.sec = 10;
+  integrity.hpl = 1.0;
+  integrity.vpl = 1.0;
+  integrity.hal = 20.0;
+  integrity.val = 40.0;
+  integrity.im = 19.0;
+  manager->p5_integrity_gate_->setCurrentIntegrityForTest(integrity);
+  manager->setPlanningRiskContextForTest(
+      snapshot, 10.0, occupancy, safe_risk, execution);
+  manager->setLatestRiskSnapshotForTest(snapshot);
+  manager->setTimeProvider([] {
+    return rclcpp::Time(10, 0, RCL_ROS_TIME);
+  });
+
+  const Eigen::Vector3d start(-12.0, 0.0, 1.5);
+  const Eigen::Vector3d finish(-4.17581, 0.0, 1.5);
+  const std::vector<Eigen::Vector3d> upper_guide{
+      start, Eigen::Vector3d(-7.0, 1.25, 1.5), finish};
+  const std::vector<Eigen::Vector3d> lower_guide{
+      start, Eigen::Vector3d(-7.0, -1.25, 1.5), finish};
+  const double vehicle_radius_m = 0.35;
+  const std::string collision_policy =
+      ego_planner::p4CollisionPolicyIdentity(
+          vehicle_radius_m, map->getObstacleInflation(),
+          map->getResolution(), map->getVirtualCeilingHeight());
+
+  ego_planner::P4GeometryCommitRequest guide_commit_request;
+  guide_commit_request.bound_occupancy = frozen_occupancy;
+  guide_commit_request.history = map->collisionDeltasSince(
+      frozen_occupancy->generation);
+  guide_commit_request.executable_path = upper_guide;
+  guide_commit_request.vehicle_radius_m = vehicle_radius_m;
+  guide_commit_request.map_inflation_m = map->getObstacleInflation();
+  guide_commit_request.expected_geometry_id = frozen_occupancy->geometry_id;
+  guide_commit_request.expected_collision_policy_id = collision_policy;
+  ego_planner::P4GeometryCommitValidator guide_validator;
+  const auto guide_commit = guide_validator.validate(guide_commit_request);
+  ASSERT_EQ(guide_commit.verdict,
+            ego_planner::P4GeometryCommitVerdict::BASE_COLLISION)
+      << guide_commit.reason;
+  guide_commit_request.executable_path = lower_guide;
+  const auto mirrored_guide_commit =
+      guide_validator.validate(guide_commit_request);
+  ASSERT_EQ(mirrored_guide_commit.verdict,
+            ego_planner::P4GeometryCommitVerdict::BASE_COLLISION)
+      << mirrored_guide_commit.reason;
+
+  auto pending = makeForwardDecision(
+      snapshot, manager->planningRiskContext().planning_attempt_id);
+  pending.request_position = start;
+  pending.local_target = finish;
+  pending.common_anchor = finish;
+  pending.action = ego_planner::P4ForwardAction::CANDIDATE_READY;
+  pending.executable_intent = ego_planner::P4ExecutableIntent::FINAL_CHANNEL;
+  pending.selection_authority =
+      ego_planner::P4ForwardSelectionAuthority::NONE;
+  pending.formal_support = false;
+  pending.planning_disposition =
+      ego_planner::P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY;
+  pending.vehicle_radius_m = vehicle_radius_m;
+  pending.map_inflation_m = map->getObstacleInflation();
+  pending.collision_policy_id = collision_policy;
+  pending.snapshot_identity.geometry_id = frozen_occupancy->geometry_id;
+  pending.snapshot_identity.occupancy_generation =
+      frozen_occupancy->generation;
+  pending.snapshot_identity.execution_snapshot_id =
+      execution->execution_snapshot_id;
+  pending.snapshot_identity.gnss_epoch_identity =
+      execution->source_identity.gnss_epoch_identity;
+  pending.selected_candidate_id = 101u;
+  pending.selected_channel_id = 201u;
+  pending.selected_guide = upper_guide;
+  auto upper = pending.candidates.front();
+  upper.candidate_id = pending.selected_candidate_id;
+  upper.channel_id = pending.selected_channel_id;
+  upper.path = upper_guide;
+  upper.topology_path = upper_guide;
+  upper.path_hash = "first-fork-upper-guide";
+  upper.geometry_state = ego_planner::P4ForwardGeometryState::CLEAR;
+  upper.occupancy_supported = true;
+  auto lower = upper;
+  lower.candidate_id = 102u;
+  lower.channel_id = 202u;
+  lower.path = lower_guide;
+  lower.topology_path = lower_guide;
+  lower.path_hash = "first-fork-lower-guide";
+  pending.candidates = {upper, lower};
+  pending.reason = "frozen_first_fork_channel";
+  manager->setP4PendingChannelWorkItemForTest(std::move(pending));
+
+  auto consumed = manager->evaluateP4ForwardRouteForTest(
+      start, Eigen::Vector3d::Zero(), finish);
+
+  EXPECT_EQ(consumed.action, ego_planner::P4ForwardAction::CANDIDATE_READY);
+  EXPECT_EQ(consumed.planning_disposition,
+            ego_planner::P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY);
+  EXPECT_EQ(consumed.selection_authority,
+            ego_planner::P4ForwardSelectionAuthority::NONE);
+  EXPECT_EQ(consumed.geometry_commit.reason, "not_evaluated");
+  EXPECT_EQ(consumed.selected_candidate_id, upper.candidate_id);
+  EXPECT_FALSE(manager->pendingP4ChannelWorkItemForTest().has_value());
+
+  auto publisher = node->create_publisher<traj_utils::msg::Bspline>(
+      "/test/guide_collision_actual_preparation",
+      ego_planner::trajectoryCommandQos());
+  auto *manager_ptr = manager.get();
+  std::vector<ego_planner::UniformBspline> actual_curves;
+  std::size_t planning_callbacks = 0u;
+  ego_planner::EGOReplanFSM fsm;
+  fsm.setP4TerminalFlowForTest(
+      std::move(manager), node, publisher, snapshot,
+      rclcpp::Time(10, 0, RCL_ROS_TIME),
+      [manager_ptr, snapshot, occupancy, safe_risk, execution, consumed,
+       start, finish, &actual_curves, &planning_callbacks]() mutable {
+        manager_ptr->setPlanningRiskContextForTest(
+            snapshot, 10.0, occupancy, safe_risk, execution);
+        if (planning_callbacks++ == 0u) {
+          consumed.planning_attempt_id =
+              manager_ptr->planningRiskContext().planning_attempt_id;
+          manager_ptr->setP4ForwardDecisionForNextReplanForTest(consumed);
+        }
+        const bool planned = manager_ptr->reboundReplan(
+            start, Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero(), finish,
+            Eigen::Vector3d::Zero(), true, false, start);
+        if (planned)
+          actual_curves.push_back(manager_ptr->local_data_.position_traj_);
+        return planned;
+      });
+
+  EXPECT_FALSE(fsm.callReboundReplanForTest());
+  ASSERT_TRUE(manager_ptr->pendingP4ChannelWorkItemForTest().has_value());
+  ASSERT_EQ(actual_curves.size(), 1u);
+  EXPECT_EQ(manager_ptr->lastP4ForwardDecision().selected_channel_id,
+            lower.channel_id);
+
+  EXPECT_TRUE(fsm.callReboundReplanForTest())
+      << manager_ptr->lastP4ActualCurveCertification().detail << ":"
+      << manager_ptr->lastP4ForwardDecision().geometry_commit.reason;
+  ASSERT_EQ(actual_curves.size(), 2u);
+  const auto &selected = manager_ptr->lastP4ForwardDecision();
+  EXPECT_EQ(selected.action, ego_planner::P4ForwardAction::RISK_SELECTED);
+  EXPECT_EQ(selected.selection_authority,
+            ego_planner::P4ForwardSelectionAuthority::FORMAL);
+  EXPECT_TRUE(selected.formal_support);
+  EXPECT_TRUE(selected.selected_actual_endpoint.allFinite());
+  EXPECT_TRUE(selected.runner_up_actual_endpoint.allFinite());
+  EXPECT_TRUE(selected.geometry_commit.accepted());
+
+  const auto lateral_offsets = [start](
+      ego_planner::UniformBspline curve, const double sign) {
+    double maximum = -std::numeric_limits<double>::infinity();
+    double maximum_absolute = 0.0;
+    const double duration = curve.getTimeSum();
+    for (double time_s = 0.0; time_s <= duration + 1.0e-9;
+         time_s += 0.01) {
+      const Eigen::Vector3d point = curve.evaluateDeBoorT(
+          std::min(time_s, duration));
+      const double guide_y = sign * 0.25 * (point.x() - start.x());
+      const double offset = point.y() - guide_y;
+      maximum = std::max(maximum, sign * offset);
+      maximum_absolute = std::max(maximum_absolute, std::abs(offset));
+    }
+    return std::pair{maximum, maximum_absolute};
+  };
+  const auto upper_offsets = lateral_offsets(actual_curves[0], 1.0);
+  const auto lower_offsets = lateral_offsets(actual_curves[1], -1.0);
+  EXPECT_GT(upper_offsets.first, 0.01);
+  EXPECT_GT(lower_offsets.first, 0.01);
+  EXPECT_LE(upper_offsets.second, 0.5 + 1.0e-6);
+  EXPECT_LE(lower_offsets.second, 0.5 + 1.0e-6);
+
+  auto upper_curve = actual_curves[0];
+  auto lower_curve = actual_curves[1];
+  const double upper_duration = upper_curve.getTimeSum();
+  const double lower_duration = lower_curve.getTimeSum();
+  for (int index = 0; index <= 20; ++index) {
+    const double normalized_time = static_cast<double>(index) / 20.0;
+    const Eigen::Vector3d upper_point = upper_curve.evaluateDeBoorT(
+        normalized_time * upper_duration);
+    const Eigen::Vector3d lower_point = lower_curve.evaluateDeBoorT(
+        normalized_time * lower_duration);
+    EXPECT_NEAR(upper_point.x(), lower_point.x(), 1.0e-3);
+    EXPECT_NEAR(upper_point.y(), -lower_point.y(), 1.0e-3);
+    EXPECT_NEAR(upper_point.z(), lower_point.z(), 1.0e-3);
+  }
+
+  const auto channel_rows = readCsvRows(std::filesystem::path(
+      debug_path.string() + ".forward_channel_decisions.csv"));
+  ASSERT_EQ(channel_rows.size(), 2u);
+  for (const auto &row : channel_rows) {
+    EXPECT_EQ(row.at("stage"), "normal_channel_comparison_complete");
+    EXPECT_EQ(row.at("final_curve_status"), "SAFE");
+    EXPECT_NE(row.at("actual_endpoint_x"), "nan");
+  }
+  EXPECT_EQ(selected.snapshot_identity.occupancy_generation,
+            frozen_occupancy->generation);
+  EXPECT_EQ(selected.snapshot_identity.execution_snapshot_id,
+            execution->execution_snapshot_id);
+  EXPECT_EQ(selected.snapshot_identity.gnss_epoch_identity,
+            execution->source_identity.gnss_epoch_identity);
 }
 
 TEST(P4PreparedChannelPreparation,

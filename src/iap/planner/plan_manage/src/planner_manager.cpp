@@ -1934,7 +1934,7 @@ namespace ego_planner
       return evidence;
     }
 
-    std::vector<Eigen::Vector3d> p4ExecutablePath(
+    std::vector<Eigen::Vector3d> p4GuideReferencePath(
         const P4ForwardDecision &decision)
     {
       if ((decision.action == P4ForwardAction::CANDIDATE_READY ||
@@ -1950,7 +1950,7 @@ namespace ego_planner
       return {};
     }
 
-    bool prepareNormalChannelsBeforeGuideRiskGate(
+    bool prepareNormalChannelsForActualCertification(
         P4ForwardDecision *decision)
     {
       if (!decision || decision->successor_fast_path ||
@@ -2002,7 +2002,7 @@ namespace ego_planner
       decision->channel_comparison_state =
           P4ChannelComparisonState::PARTIAL_COMPARISON;
       decision->planning_disposition =
-          P4PlanningDisposition::NEW_TRAJECTORY_READY;
+          P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY;
       decision->reason = "normal_actual_channel_preparation_required";
       return true;
     }
@@ -4814,75 +4814,13 @@ namespace ego_planner
         };
     }
 
-    // A grid built from an older execution snapshot is only a stale search
-    // hint. It must neither authorize nor reject a candidate certified by the
-    // current execution authority.
+    // A guide is only a topology/reference seed.  It never owns motion
+    // authority: the exact B-spline, its tracking envelope and every braking
+    // curve are certified together later against the frozen execution
+    // snapshot.  Keep the guide policy only for stable seed reuse.
     const std::string geometry_policy =
         request.snapshot_identity.geometry_id + "|" +
         request.snapshot_identity.alert_limit_policy_id;
-    const auto validate_geometry_commit =
-        [this, occupancy, &start_pt](P4ForwardDecision *decision,
-                                    const bool trim_to_current_position)
-        {
-          if (!decision)
-            return false;
-          std::vector<Eigen::Vector3d> path = p4ExecutablePath(*decision);
-          if (trim_to_current_position)
-            path = p4RemainingPath(path, start_pt);
-          if (path.size() < 2 || !grid_map_ ||
-              !occupancy->frozen_grid_map_epoch)
-          {
-            decision->planning_disposition =
-                P4PlanningDisposition::HOLD_REQUIRED;
-            decision->geometry_commit.reason =
-                "missing_executable_path_or_bound_epoch";
-            return false;
-          }
-          const std::string live_collision_policy =
-              p4CollisionPolicyIdentity(
-                  p4_forward_limits_.vehicle_radius_m,
-                  grid_map_->getObstacleInflation(),
-                  grid_map_->getResolution(),
-                  grid_map_->getVirtualCeilingHeight());
-          if (live_collision_policy.empty() ||
-              live_collision_policy != decision->collision_policy_id)
-          {
-            decision->planning_disposition =
-                P4PlanningDisposition::HOLD_REQUIRED;
-            decision->geometry_commit.verdict =
-                P4GeometryCommitVerdict::POLICY_MISMATCH;
-            decision->geometry_commit.reason =
-                "live_collision_policy_changed";
-            decision->reason = "geometry_commit_live_collision_policy_changed";
-            return false;
-          }
-          P4GeometryCommitRequest commit_request;
-          commit_request.bound_occupancy =
-              occupancy->frozen_grid_map_epoch;
-          commit_request.history = grid_map_->collisionDeltasSince(
-              occupancy->generation);
-          if (!commit_request.history.complete)
-            commit_request.latest_occupancy =
-                grid_map_->captureFrozenExecutionOccupancyEpoch();
-          commit_request.executable_path = std::move(path);
-          commit_request.vehicle_radius_m = decision->vehicle_radius_m;
-          commit_request.map_inflation_m = decision->map_inflation_m;
-          commit_request.expected_geometry_id =
-              decision->snapshot_identity.geometry_id;
-          commit_request.expected_collision_policy_id =
-              decision->collision_policy_id;
-          commit_request.compute_budget_ms = 10.0;
-          decision->geometry_commit =
-              p4_geometry_commit_validator_.validate(commit_request);
-          decision->planning_disposition =
-              decision->geometry_commit.accepted() ?
-              P4PlanningDisposition::NEW_TRAJECTORY_READY :
-              P4PlanningDisposition::HOLD_REQUIRED;
-          if (!decision->geometry_commit.accepted())
-            decision->reason = std::string("geometry_commit_") +
-                decision->geometry_commit.reason;
-          return decision->geometry_commit.accepted();
-        };
 
     // A committed LIMITED_PREFIX owns a separate, deadline-driven planning
     // lane.  It deliberately bypasses the ordinary submission rate limiter:
@@ -4893,7 +4831,7 @@ namespace ego_planner
     const bool successor_due = p4SuccessorPreparationDue(
         successor_now_s, execution ? execution->execution_snapshot_id : 0u);
     const auto consume_pending_channel_work_item =
-        [this, &validate_geometry_commit](
+        [this](
             const bool successor_retry)
             -> std::optional<P4ForwardDecision>
         {
@@ -4915,14 +4853,6 @@ namespace ego_planner
                 p4_successor_schedule_.deadline.candidate_ready_deadline_s;
             p4_successor_preparation_state_ =
                 P4SuccessorPreparationState::CURVE_PREPARING;
-          }
-          if (!validate_geometry_commit(&retry, false))
-          {
-            retry.action = P4ForwardAction::NO_SAFE_ROUTE;
-            retry.planning_disposition =
-                P4PlanningDisposition::HOLD_REQUIRED;
-            retry.reason = "pending_channel_geometry_rejected:" +
-                retry.geometry_commit.reason;
           }
           return retry;
         };
@@ -5070,19 +5000,6 @@ namespace ego_planner
           successor.reason = std::string("successor_") +
               p4SuccessorFailureName(completed.failure) + ":" +
               completed.reason;
-          return successor;
-        }
-        // A newer generation does not invalidate the prepared geometry by ID
-        // alone. Incremental collision validation happens here; the actual
-        // optimized curve is rebound to the newest execution snapshot by the
-        // existing final publication gate.
-        if (!validate_geometry_commit(&successor, true))
-        {
-          successor.result_status = P4ForwardResultStatus::PENDING;
-          successor.planning_disposition =
-              P4PlanningDisposition::RETAIN_COMMITTED_TRAJECTORY;
-          successor.successor_failure = P4SuccessorFailure::COLLISION_CHANGED;
-          successor.reason = "successor_collision_changed";
           return successor;
         }
         successor.planning_attempt_id = request.planning_attempt_id;
@@ -5276,19 +5193,7 @@ namespace ego_planner
       // below retain sole publication authority.
       configureP4RefinementClearanceRecovery(
           start_pt, start_vel, p4_planning_clearance_buffer_m_, &*completed);
-      prepareNormalChannelsBeforeGuideRiskGate(&*completed);
-      if (!validate_geometry_commit(&*completed, false))
-      {
-        p4_last_decision_position_.setConstant(
-            std::numeric_limits<double>::quiet_NaN());
-        p4_last_decision_target_.setConstant(
-            std::numeric_limits<double>::quiet_NaN());
-        p4_latched_guide_.clear();
-        p4_latched_anchor_.setConstant(
-            std::numeric_limits<double>::quiet_NaN());
-        p4_latched_geometry_policy_.clear();
-        return *completed;
-      }
+      prepareNormalChannelsForActualCertification(&*completed);
       completed->planning_attempt_id = request.planning_attempt_id;
       if (!completed->channel_slots.empty())
         p4_channel_slots_ = completed->channel_slots;
@@ -5320,14 +5225,7 @@ namespace ego_planner
       cached.result_status = P4ForwardResultStatus::READY;
       cached.planning_attempt_id = request.planning_attempt_id;
       cached.reason = "cached_same_snapshot_target";
-      prepareNormalChannelsBeforeGuideRiskGate(&cached);
-      if (!validate_geometry_commit(&cached, true))
-      {
-        p4_latched_guide_.clear();
-        p4_latched_anchor_.setConstant(
-            std::numeric_limits<double>::quiet_NaN());
-        p4_latched_geometry_policy_.clear();
-      }
+      prepareNormalChannelsForActualCertification(&cached);
       return cached;
     }
     const double now_s = plannerNow().seconds();
@@ -7627,7 +7525,7 @@ namespace ego_planner
             return false;
           };
       const std::vector<Eigen::Vector3d> reference_path =
-          p4ExecutablePath(last_p4_forward_decision_);
+          p4GuideReferencePath(last_p4_forward_decision_);
       if (!reference_path.empty())
       {
         const bool constrained_prefix =
@@ -14639,7 +14537,7 @@ namespace ego_planner
             start_pt, start_vel, start_acc, local_target_pt);
       }
       if (!preparingP4SuccessorCurve())
-        prepareNormalChannelsBeforeGuideRiskGate(&evaluated);
+        prepareNormalChannelsForActualCertification(&evaluated);
       const bool transient_wait =
           evaluated.result_status == P4ForwardResultStatus::PENDING ||
           evaluated.result_status == P4ForwardResultStatus::RATE_LIMITED;
@@ -16678,7 +16576,7 @@ namespace ego_planner
       const std::vector<Eigen::Vector3d> decision_selected_guide =
           last_p4_forward_decision_.selected_guide.size() >= 2u
           ? last_p4_forward_decision_.selected_guide
-          : p4ExecutablePath(last_p4_forward_decision_);
+          : p4GuideReferencePath(last_p4_forward_decision_);
       const std::vector<Eigen::Vector3d> frozen_common_corridor =
           selectP4SuccessorComparisonCorridor(
               parent_certified_continuation,
