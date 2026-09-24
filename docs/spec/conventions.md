@@ -170,12 +170,13 @@
   The window layout is constructed exactly once when the actual B-spline is
   committed. Its absolute trajectory times, evidence-point IDs, original
   window IDs, transition duplicates, braking curves and layout hash are
-  immutable for that trajectory lifetime. Runtime selects existing current
-  and next windows and discards only rows that can no longer be reached; it
-  must not move a boundary, create a watchdog-time sample or renumber a
-  window. A new occupancy generation or GNSS epoch recomputes LOS, support,
-  sigma, geometry and PL on that same physical lattice. A layout-hash change
-  inside one trajectory is an internal certificate error, not GNSS evidence.
+  immutable for that trajectory lifetime. Runtime projects every still-
+  reachable nominal row and every braking row whose anchor has not passed,
+  retaining their original window responsibilities. It must not move a
+  boundary, create a watchdog-time sample or renumber a window. A new
+  occupancy generation or GNSS epoch recomputes LOS, support, sigma, geometry
+  and PL on that same physical lattice. A layout-hash change inside one
+  trajectory is an internal certificate error, not GNSS evidence.
 - The optional GNSS LOS clearance transition is part of the predictor and
   snapshot identity. For width `w>0`, an occupancy generation owns a truncated
   distance field to occupied voxel surfaces; the LOS proximity is
@@ -210,8 +211,8 @@
   approved endpoint/deadline, terminal velocity/acceleration, braking model,
   map/risk snapshot identity, GNSS core policy, window/braking layout identity
   and selection authority.
-- Every P4 curve, including common-prefix and observe-more curves, must satisfy
-  fixed zero terminal velocity and acceleration before final acceptance. The
+- Every P4 curve, including `LIMITED_PREFIX` and rolling-successor curves,
+  must satisfy fixed zero terminal velocity and acceleration before final acceptance. The
   production terminal fit treats start position/velocity/acceleration,
   approved endpoint and terminal velocity/acceleration as hard equalities.
   If it retimes a dynamically feasible curve, collision and risk are checked
@@ -220,7 +221,7 @@
   the continuous risk-safe portion of their geometry-common corridor. It
   stops at the first unsafe or unsupported sample, reserves tracking/braking
   margin, requires valid current Integrity below AL and enough distance to
-  stop, then emits `DEFER_RISK_SELECTION/COMMON_PREFIX` with
+  stop, then emits `DEFER_RISK_SELECTION/LIMITED_PREFIX` with
   `LIMITED_PREFIX` authority. It is never labelled `RISK_SELECTED`; absent
   sufficient safe distance, the action remains HOLD. Executable progress is
   the continuous safe common-corridor distance minus current-speed stopping
@@ -231,7 +232,7 @@
   independently checked at its actual arrival times and may not pass the
   approved endpoint.
 - The common corridor is the nominal path contained by every candidate's safe
-  tube. Candidate centerlines need not coincide. Decision schema v17 records
+  tube. Candidate centerlines need not coincide. Decision schema v18 records
   its actual endpoint, tube boundary, and stopping reserve as
   `limited_prefix_endpoint`, `limited_prefix_boundary`, and
   `limited_prefix_stopping_reserve_m`. Predicted information gain is a
@@ -261,11 +262,12 @@
   builds the final terminal-stop B-spline, braking library and risk-window
   layout, and completes dynamics, collision, local-clearance, direct-GNSS and
   P5-preview certification while the parent keeps executing.
-  The lane is single-flight/latest-wins, bypasses ordinary P4 rate limiting,
-  and reuses the committed channel/guide before one bounded fallback to
-  topology/A* only when that frozen suffix has a geometry, clearance or
-  corridor failure. GNSS, support, freshness or budget failures do not trigger
-  an unrelated channel search.
+  The lane is single-flight/latest-wins and bypasses ordinary P4 rate limiting.
+  It consumes one already-generated frozen guide. Any geometry, clearance,
+  corridor, GNSS, support, freshness, P5 or budget failure terminates that
+  child attempt; it does not launch topology/A*, switch channels or regenerate
+  the immutable child. The parent retains authority and stops on its certified
+  curve.
   While it runs, ordinary periodic planning cannot reset the parent. The
   prepare-only pass has no publication authority and may not mutate P5
   debounce/exposure or the parent's runtime certificate. Its complete child
@@ -331,14 +333,13 @@
   `RISK_SELECTED`. The first failure retains curve position, arc length,
   arrival time, PL/AL, satellite IDs, sigma/geometry and spatial/temporal
   growth. A braking-branch failure is projected to its anchor station on the
-  nominal B-spline; feedback cropping consumes that station and must not sum
-  braking rows or duplicated handover memberships as route progress. At most
-  two feedback regenerations may switch to an unused safe
-  channel, use one bounded `0.85` time-scale hint for a time-growth-dominated
-  failure, and then crop to the last continuous safe stoppable prefix. The
-  terminal solver may lengthen the hinted curve again when dynamics require
-  it, and every regenerated curve repeats dynamics, collision, support,
-  Integrity and direct risk checks. A cropped result remains `LIMITED_PREFIX`.
+  nominal B-spline; that projection is diagnostic and must not sum braking
+  rows or duplicated handover memberships as route progress. Certification
+  never feeds a failed actual curve back into generation: it does not crop,
+  shift, retime, switch channels or change execution intent. Multi-channel
+  preparation continues with the next already-frozen guide and records the
+  typed failure; an independently generated common corridor may become an
+  ordinary `LIMITED_PREFIX` only after the complete certification chain.
 - Best-effort route discovery first schedules refined, clearance-aware channel
   guides, then converts every locally feasible stable channel into an actual
   stopping B-spline and side-effect-free prepared bundle. Each bundle includes
@@ -479,14 +480,16 @@
   While `LIMITED_PREFIX_BRAKING` is active, ordinary replanning cannot replace
   or relabel that curve; only endpoint completion or an explicit runtime /
   collision revocation ends its authority.
-- If actual-curve feedback degrades a failed complete route to
-  `LIMITED_PREFIX`, its geometry must come from a corridor shared by at least
-  two distinct topology channels. Collision-free cross-links or pairwise tube
-  overlap alone are not enough: every executable nominal sample must lie in
-  every candidate's vehicle/tracking/topology tube. It must retain the normal stopping/tracking
-  reserve. Cropping the already selected branch and renaming it a public
-  prefix is forbidden; the regenerated curve still requires full direct
-  certification.
+- `LIMITED_PREFIX` geometry for an unresolved fork must come from a corridor
+  shared by at least two distinct topology channels. Collision-free cross-links
+  or pairwise tube overlap alone are not enough: every executable nominal
+  sample must lie in every candidate's vehicle/tracking/topology tube. It must
+  retain the normal stopping/tracking reserve and pass the same immutable
+  actual-curve, braking-library, P5 and publication certification seam as a
+  final channel or rolling successor. Certification failure never crops,
+  shifts, retimes or reinterprets that curve. Local-clearance recovery is only
+  a generation diagnostic for an ordinary `LIMITED_PREFIX`; it receives no
+  certification exception.
 - Fixed-point and generation replay are diagnostic only. If enabled on an
   execution check, once any diagnostic predictor query is attempted the
   checker refreshes ROS time after the diagnostic work (regardless of result
@@ -653,10 +656,12 @@
   immutable evidence. Refinement samples guides at no more than `0.05 m`
   spacing, and every newly generated nominal/braking spline must retain the
   `0.05 m` planning reserve after smoothing. Runtime reauthorization keeps
-  the unchanged strict condition `signed_margin > 0`. A final clearance failure carries the nearest obstacle
-  and escape direction into at most two actual-curve retries: first push the
-  local guide away from that obstacle, then try an unused topology channel.
-  Soft guidance or planning buffer never grants execution authority.
+  the unchanged strict condition `signed_margin > 0`. A final clearance
+  failure records the nearest obstacle and escape direction as diagnostics;
+  it does not retry, move or reinterpret the failed actual curve. Any bounded
+  guide repair or alternate-channel enumeration must already have occurred
+  before that immutable B-spline was generated. Soft guidance or planning
+  buffer never grants execution authority.
   Runtime tracking above the certified local bound schedules the existing
   certified brake; the larger loss-of-control threshold remains the immediate
   emergency-revocation boundary.

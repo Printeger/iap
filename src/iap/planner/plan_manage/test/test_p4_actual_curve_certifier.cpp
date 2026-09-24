@@ -123,5 +123,26 @@ TEST(P4ActualCurveCertifierTest, RejectsNonStoppedTerminalAsTypedFailure) {
   EXPECT_EQ(trajectory.curve_hash_, hash_before);
 }
 
+TEST(P4ActualCurveCertifierTest, MapsDirectEvidenceFailuresWithoutStrings) {
+  EXPECT_EQ(p4PreparedCurveFailureForForwardRisk(
+                iap::ForwardRiskFailureReason::COMPUTE_BUDGET_EXCEEDED),
+            P4PreparedCurveFailure::COMPUTE_BUDGET);
+  EXPECT_EQ(p4PreparedCurveFailureForForwardRisk(
+                iap::ForwardRiskFailureReason::STALE),
+            P4PreparedCurveFailure::FRESHNESS);
+  EXPECT_EQ(p4PreparedCurveFailureForForwardRisk(
+                iap::ForwardRiskFailureReason::EVIDENCE_IDENTITY_MISMATCH),
+            P4PreparedCurveFailure::SNAPSHOT_MISMATCH);
+  EXPECT_EQ(p4PreparedCurveFailureForForwardRisk(
+                iap::ForwardRiskFailureReason::OCCUPANCY_UNKNOWN),
+            P4PreparedCurveFailure::SUPPORT);
+  EXPECT_EQ(p4PreparedCurveFailureForForwardRisk(
+                iap::ForwardRiskFailureReason::OCCUPIED),
+            P4PreparedCurveFailure::COLLISION);
+  EXPECT_EQ(p4PreparedCurveFailureForForwardRisk(
+                iap::ForwardRiskFailureReason::GNSS_SKY_UNKNOWN),
+            P4PreparedCurveFailure::GNSS_RISK);
+}
+
 }  // namespace
 }  // namespace ego_planner

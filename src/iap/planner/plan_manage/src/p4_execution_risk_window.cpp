@@ -336,12 +336,18 @@ P4CommittedRiskWindowSelection selectP4CommittedRiskWindowRows(
       break;
     }
   }
-  const std::size_t last_window_index = std::min(
-      current_window_index + 1u, committed_windows.size() - 1u);
+  // The runtime view is every still-reachable nominal row and every braking
+  // row whose anchor has not passed. Windows remain useful satellite-set
+  // responsibilities, but they do not truncate that physical reachability
+  // view to only the next transition.
+  const std::size_t last_window_index = committed_windows.size() - 1u;
+  const std::size_t immediate_next_window_index = std::min(
+      current_window_index + 1u, last_window_index);
   out.window_layout_hash = plan.layout.identity_hash;
   out.current_window_id = committed_windows[current_window_index].window_id;
   if (last_window_index != current_window_index) {
-    out.next_window_id = committed_windows[last_window_index].window_id;
+    out.next_window_id =
+        committed_windows[immediate_next_window_index].window_id;
     out.next_window_boundary_time_s =
         committed_windows[current_window_index].nominal_end_time_s;
   }
@@ -403,23 +409,6 @@ P4CommittedRiskWindowSelection selectP4CommittedRiskWindowRows(
   out.valid = true;
   out.reason = "complete";
   return out;
-}
-
-std::string p4CommittedRiskWindowSelectionCacheIdentity(
-    const P4CommittedRiskWindowSelection& selection) {
-  if (!selection.valid || selection.window_layout_hash.empty() ||
-      selection.rows.size() != selection.source_row_indices.size()) {
-    return {};
-  }
-  std::ostringstream canonical;
-  canonical << "p4_reachable_window_selection_v1;"
-            << selection.window_layout_hash << ';'
-            << selection.current_window_id << ';'
-            << selection.next_window_id << ';';
-  for (const std::size_t source_index : selection.source_row_indices) {
-    canonical << source_index << ',';
-  }
-  return fnvHash(canonical.str());
 }
 
 std::vector<std::size_t> reachableP4CommittedBrakingCurveIndices(

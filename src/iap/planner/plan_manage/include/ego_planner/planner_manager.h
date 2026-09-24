@@ -53,18 +53,16 @@ namespace ego_planner
 
   inline double p4ForwardSeedTimeInterval(
       const double guide_length_m, const double requested_spacing_m,
-      const double maximum_velocity_mps, const double duration_scale)
+      const double maximum_velocity_mps)
   {
     if (!std::isfinite(guide_length_m) || guide_length_m <= 1.0e-6 ||
         !std::isfinite(requested_spacing_m) || requested_spacing_m <= 0.0 ||
         !std::isfinite(maximum_velocity_mps) ||
-        maximum_velocity_mps <= 1.0e-6 ||
-        !std::isfinite(duration_scale) || duration_scale <= 0.0)
+        maximum_velocity_mps <= 1.0e-6)
       return std::numeric_limits<double>::quiet_NaN();
     const double resampled_spacing_m = std::min(
         std::max(0.05, requested_spacing_m), guide_length_m / 6.0);
-    return 1.5 * resampled_spacing_m / maximum_velocity_mps *
-        duration_scale;
+    return 1.5 * resampled_spacing_m / maximum_velocity_mps;
   }
 
 
@@ -1074,8 +1072,6 @@ namespace ego_planner
         double now_s, std::string *reason = nullptr);
     bool commitP4PreparedBundle(
         double now_s, std::string *reason = nullptr);
-    bool rescheduleP4SuccessorAfterReauthorizationFailure(
-        double now_s, const std::string &failure_reason);
     bool preparedP4SuccessorCandidateEarly(double now_s) const;
     bool preparingP4SuccessorCurve() const
     {
@@ -1432,12 +1428,13 @@ namespace ego_planner
       std::string control_points_hash;
       std::string knot_vector_hash;
       std::string query_lattice_hash;
-      std::string reachable_selection_identity;
+      // Stable identities from the immutable committed layout. A newer
+      // snapshot fills these rows once; later watchdog ticks project a subset
+      // without re-querying risk for rows that merely became unreachable.
+      std::vector<std::size_t> source_row_indices;
       std::vector<double> relative_times;
       std::vector<Eigen::Vector3d> positions;
       std::vector<std::uint64_t> satellite_window_ids;
-      double rebuild_after_trajectory_time_s =
-          -std::numeric_limits<double>::infinity();
       std::vector<Sample> samples;
     };
     P4RuntimeRiskCache p4_runtime_risk_cache_;

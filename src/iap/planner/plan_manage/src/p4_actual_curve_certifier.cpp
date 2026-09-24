@@ -118,6 +118,33 @@ const char *p4PreparedCurveFailureName(
   return "unknown";
 }
 
+P4PreparedCurveFailure p4PreparedCurveFailureForForwardRisk(
+    const iap::ForwardRiskFailureReason failure_code) {
+  switch (failure_code) {
+    case iap::ForwardRiskFailureReason::COMPUTE_BUDGET_EXCEEDED:
+      return P4PreparedCurveFailure::COMPUTE_BUDGET;
+    case iap::ForwardRiskFailureReason::STALE:
+      return P4PreparedCurveFailure::FRESHNESS;
+    case iap::ForwardRiskFailureReason::GENERATION_CHANGED:
+    case iap::ForwardRiskFailureReason::EVIDENCE_IDENTITY_MISMATCH:
+      return P4PreparedCurveFailure::SNAPSHOT_MISMATCH;
+    case iap::ForwardRiskFailureReason::OCCUPANCY_UNKNOWN:
+    case iap::ForwardRiskFailureReason::LIDAR_SUPPORT_MISSING:
+    case iap::ForwardRiskFailureReason::FIM_SUPPORT_MISSING:
+      return P4PreparedCurveFailure::SUPPORT;
+    case iap::ForwardRiskFailureReason::OCCUPIED:
+      return P4PreparedCurveFailure::COLLISION;
+    case iap::ForwardRiskFailureReason::NONE:
+    case iap::ForwardRiskFailureReason::SAFETY_LIMIT_EXCEEDED:
+    case iap::ForwardRiskFailureReason::GNSS_ANCHOR_INCONSISTENT:
+    case iap::ForwardRiskFailureReason::GNSS_LOCAL_USABLE_SATS_LT_MIN:
+    case iap::ForwardRiskFailureReason::GNSS_SKY_UNKNOWN:
+    case iap::ForwardRiskFailureReason::GNSS_GEOMETRY_DEGENERATE:
+      return P4PreparedCurveFailure::GNSS_RISK;
+  }
+  return P4PreparedCurveFailure::GNSS_RISK;
+}
+
 P4ActualCurveCertificationResult P4ActualCurveCertifier::certify(
     const P4ActualCurveCertificationRequest &request) const {
   if (!validIdentity(request.trajectory)) {

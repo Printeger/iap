@@ -3317,7 +3317,6 @@ bool configureP4RefinementClearanceRecovery(
     decision->limited_prefix_stopping_reserve_m = 0.0;
     decision->local_clearance_recovery = false;
     decision->speed_cap_mps = 0.1;
-    decision->actual_curve_duration_scale = 1.0;
     decision->geometry_commit = P4GeometryCommitResult{};
     decision->planning_disposition =
       P4PlanningDisposition::NEW_TRAJECTORY_READY;
@@ -3357,9 +3356,7 @@ bool configureP4RefinementClearanceRecovery(
   decision->limited_prefix_boundary = decision->deferred_trajectory.back();
   decision->limited_prefix_stopping_reserve_m = 0.0;
   decision->local_clearance_recovery = true;
-  decision->local_clearance_recovery_max_duration_s = 1.0;
   decision->speed_cap_mps = 0.1;
-  decision->actual_curve_duration_scale = 1.0;
   decision->geometry_commit = P4GeometryCommitResult{};
   decision->planning_disposition =
     P4PlanningDisposition::NEW_TRAJECTORY_READY;

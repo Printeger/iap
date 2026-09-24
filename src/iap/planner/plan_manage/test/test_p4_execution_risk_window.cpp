@@ -183,7 +183,7 @@ TEST(P4ExecutionRiskWindowTest,
 }
 
 TEST(P4ExecutionRiskWindowTest,
-     ReachableSelectionCacheIdentityAdvancesInsideOneWindow) {
+     ReachableSelectionProjectsFixedSourceRowsInsideOneWindow) {
   const auto plan = buildP4CommittedRiskWindowPlan(
       17, 177, "cp", "knots", nominalSamples(4.0), brakingCurves(4.0),
       P4ExecutionRiskWindowParams{});
@@ -196,9 +196,12 @@ TEST(P4ExecutionRiskWindowTest,
   ASSERT_EQ(before_sample.current_window_id, after_sample.current_window_id);
   ASSERT_EQ(before_sample.next_window_id, after_sample.next_window_id);
 
-  EXPECT_NE(p4CommittedRiskWindowSelectionCacheIdentity(before_sample),
-            p4CommittedRiskWindowSelectionCacheIdentity(after_sample));
   EXPECT_GT(before_sample.rows.size(), after_sample.rows.size());
+  EXPECT_TRUE(std::includes(
+      before_sample.source_row_indices.begin(),
+      before_sample.source_row_indices.end(),
+      after_sample.source_row_indices.begin(),
+      after_sample.source_row_indices.end()));
   for (const auto& row : after_sample.rows) {
     EXPECT_GE(row.sample.relative_time_s, 0.51 - 1.0e-9);
   }
@@ -268,7 +271,13 @@ TEST(P4ExecutionRiskWindowTest,
         iap::ForwardRiskFailureReason::NONE;
     unsafe.points[index].safety_ratio = 0.5 + 0.001 * index;
   }
-  const std::size_t rejected_index = unsafe.points.size() / 2u;
+  std::vector<std::size_t> nominal_indices;
+  for (std::size_t index = 0; index < selection.rows.size(); ++index) {
+    if (selection.rows[index].nominal) nominal_indices.push_back(index);
+  }
+  ASSERT_FALSE(nominal_indices.empty());
+  const std::size_t rejected_index =
+      nominal_indices[nominal_indices.size() / 2u];
   unsafe.points[rejected_index].safety_state =
       iap::ForwardRiskSafetyState::UNSAFE;
   unsafe.points[rejected_index].failure_reason =

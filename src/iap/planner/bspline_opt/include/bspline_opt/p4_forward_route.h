@@ -792,7 +792,7 @@ namespace ego_planner
     P4ForwardSelectionAuthority selection_authority =
       P4ForwardSelectionAuthority::NONE;
     // Executable semantics are authoritative. `reason` remains diagnostic
-    // text and must never decide final-channel versus observation behavior.
+    // text and must never decide final-channel versus limited-prefix behavior.
     P4ExecutableIntent executable_intent = P4ExecutableIntent::HOLD;
     bool formal_support = false;
     uint64_t selected_candidate_id = 0;
@@ -809,8 +809,8 @@ namespace ego_planner
       std::numeric_limits<double>::quiet_NaN();
     std::vector < Eigen::Vector3d > selected_guide;
     // Geometry shared by at least two distinct topology channels. It carries
-    // no risk authority; actual-curve feedback may use it only as the shape
-    // of a LIMITED_PREFIX that is independently regenerated and certified.
+    // no risk authority; generation may use it only as the shape of a
+    // LIMITED_PREFIX that is independently generated and certified.
     std::vector < Eigen::Vector3d > geometry_common_corridor;
     std::vector < Eigen::Vector3d > deferred_trajectory;
     double common_prefix_length_m = 0.0;
@@ -825,18 +825,14 @@ namespace ego_planner
     double observation_predicted_information_gain =
       std::numeric_limits<double>::quiet_NaN();
     // Typed authority for a short, independently certified exit from a state
-    // that is hard-safe but has lost the generation planning reserve.
+    // that is hard-safe but has lost the generation planning reserve. This is
+    // diagnostic only; certification treats the curve as an ordinary
+    // LIMITED_PREFIX without a clearance-recovery exception.
     bool local_clearance_recovery = false;
-    double local_clearance_recovery_max_duration_s = 1.0;
     double stopping_distance_m = 0.0;
     double decision_horizon_m = 0.0;
     double certified_free_distance_m = 0.0;
     double speed_cap_mps = 0.0;
-    // Bounded actual-curve feedback may request a faster parameterization
-    // after proving that the first direct failure is dominated by prediction
-    // time growth. This is only a generation hint: dynamics, collision,
-    // terminal stop and direct risk are all checked again on the new curve.
-    double actual_curve_duration_scale = 1.0;
     P4ForwardRiskSample first_failed_risk;
     Eigen::Vector3d first_failed_position = Eigen::Vector3d::Constant(
       std::numeric_limits < double > ::quiet_NaN());

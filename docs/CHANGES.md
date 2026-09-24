@@ -3,6 +3,22 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- refactor(unified-actual-curve-certification): IAP-RQ-312 / IAP-RQ-320 /
+  IAP-RQ-410 — route normal, `LIMITED_PREFIX`, local-recovery and rolling-child
+  curves through one immutable actual-curve certification seam with typed
+  failures. Remove the production `OBSERVE_MORE` action/FSM and recursive
+  actual-curve feedback, including its duration override; legacy v1-v17 CSV
+  readers still accept the archived spelling while v18 cannot emit it.
+  Prepared bundles retain exact control-point, knot, start-state and curve-hash
+  identity through latest-snapshot reauthorization, and become the active
+  parent only after a full-identity `ACTIVATED` acknowledgement. Every
+  activated non-final, non-braking curve schedules a child at the final legal
+  pre-deceleration anchor; a failed or late child leaves the certified parent
+  to stop. Runtime rechecks now project the immutable committed layout onto
+  only nominal and braking rows that remain reachable, without weakening
+  freshness, tri-state support, collision, clearance, exposure or P5 gates.
+  Lineage write failure is a telemetry fault rather than a safety rejection,
+  and schema v18 records typed certification and rolling-lineage evidence.
 - fix(generic-limited-prefix-publication): IAP-RQ-312 / IAP-RQ-320 /
   IAP-RQ-410 — replace the dedicated common-observation execution protocol
   with the existing `LIMITED_PREFIX` authority and standard final-curve, P5,

@@ -1868,8 +1868,6 @@ namespace ego_planner
                       "Cached P4 successor reauthorization failed: %s",
                       reauthorization_reason.c_str());
           reject_candidate();
-          planner_manager_->rescheduleP4SuccessorAfterReauthorizationFailure(
-              plannerNow().seconds(), reauthorization_reason);
           return false;
         }
         if (rebound_p5.action == P5GateAction::OK)

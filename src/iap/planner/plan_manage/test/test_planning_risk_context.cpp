@@ -225,10 +225,10 @@ TEST(P4TerminalStopProductionTest,
 TEST(P4ForwardSeedTiming,
      ShortRecoveryUsesActualResampledSpacingInsteadOfGlobalSpacing) {
   EXPECT_NEAR(
-      ego_planner::p4ForwardSeedTimeInterval(0.1, 0.4, 0.1, 1.0),
+      ego_planner::p4ForwardSeedTimeInterval(0.1, 0.4, 0.1),
       0.25, 1.0e-12);
   EXPECT_NEAR(
-      ego_planner::p4ForwardSeedTimeInterval(4.0, 0.4, 1.0, 1.0),
+      ego_planner::p4ForwardSeedTimeInterval(4.0, 0.4, 1.0),
       0.6, 1.0e-12);
 }
 
@@ -2546,7 +2546,9 @@ TEST(P4ForwardTerminalLineageTest,
   EXPECT_TRUE(cached_continuing.allowed) << cached_continuing.reason;
   EXPECT_NEAR(cached_continuing.tracking_error_m, 0.03, 1.0e-9);
   EXPECT_EQ(cached_continuing.reason, "runtime_execution_contract_valid");
-  EXPECT_GT(cached_continuing.runtime_window_evidence_sequence_id,
+  // The occupancy snapshot is unchanged, so the immutable source-row cache
+  // is projected to the later reachable view without issuing another query.
+  EXPECT_EQ(cached_continuing.runtime_window_evidence_sequence_id,
             continuing.runtime_window_evidence_sequence_id);
   EXPECT_TRUE(manager.latestP4RuntimeWindowEvidence().complete);
 
@@ -5231,49 +5233,6 @@ TEST(P4ChannelSlotContext,
 }
 
 TEST(P4SuccessorDeadlineScheduling,
-     FailedLatestSnapshotReauthorizationGetsANewFixedAnchor)
-{
-  ego_planner::EGOPlannerManager manager;
-  ego_planner::P4ExecutionCertificate certificate;
-  certificate.valid = true;
-  certificate.trajectory_id = 17;
-  certificate.start_time_ns = 10000000000LL;
-  certificate.duration_s = 32.0;
-  certificate.execution_deadline_s = 42.0;
-  certificate.latest_rolling_switch_elapsed_s = 10.0;
-  certificate.control_points_hash = "long-parent";
-  certificate.authority =
-      ego_planner::P4ExecutionAuthority::FORMAL_RISK_SELECTED;
-  manager.local_data_.execution_instance_id_ = 1u;
-  manager.local_data_.traj_id_ = certificate.trajectory_id;
-  manager.local_data_.start_time_ =
-      rclcpp::Time(certificate.start_time_ns, RCL_ROS_TIME);
-  manager.local_data_.curve_hash_ = certificate.control_points_hash;
-  manager.local_data_.duration_ = certificate.duration_s;
-  manager.setP4ExecutionCertificateForTest(certificate);
-  manager.setTimeProvider([]() {
-    return rclcpp::Time(10000000000LL, RCL_ROS_TIME);
-  });
-  manager.recordTrajectoryCommandPublished(
-      1u, certificate.trajectory_id, certificate.start_time_ns,
-      certificate.control_points_hash);
-  ASSERT_TRUE(manager.recordTrajectoryActivated(
-      1u, certificate.trajectory_id, certificate.start_time_ns,
-      certificate.control_points_hash));
-  ASSERT_TRUE(manager.p4SuccessorPreparationDue(10.0));
-  EXPECT_NEAR(
-      manager.p4SuccessorDeadlineForTest().planned_switch_time_s,
-      12.5, 1.0e-12);
-
-  ASSERT_TRUE(manager.rescheduleP4SuccessorAfterReauthorizationFailure(
-      12.5, "local_clearance_margin_not_positive"));
-  EXPECT_NEAR(
-      manager.p4SuccessorDeadlineForTest().planned_switch_time_s,
-      13.8, 1.0e-12);
-  EXPECT_TRUE(manager.p4SuccessorPreparationDue(12.5));
-}
-
-TEST(P4SuccessorDeadlineScheduling,
      DelayedActivationAckAnchorsSwitchToObservedActivationTime)
 {
   ego_planner::EGOPlannerManager manager;
@@ -6275,7 +6234,7 @@ TEST(P4PreparedSuccessorPolicy,
       12.5, ego_planner::P4PreparedCurveFailure::GNSS_RISK,
       "successor_gnss_limit_exceeded");
   EXPECT_FALSE(fast_path_manager.preparingP4SuccessorCurve());
-  EXPECT_TRUE(
+  EXPECT_FALSE(
       fast_path_manager.p4SuccessorFullSearchFallbackPendingForTest());
   EXPECT_EQ(fast_path_manager.lastP4ForwardDecision().successor_failure,
             ego_planner::P4SuccessorFailure::GNSS_LIMIT_EXCEEDED);
@@ -6490,7 +6449,7 @@ TEST(P4PreparedChannelPreparation,
 }
 
 TEST(P4PreparedChannelPreparation,
-     NormalMultiChannelComparisonUsesRunnerUpWhenPreferredFinalCurveFails)
+     NormalMultiChannelComparisonKeepsEarlierBundleWhenLastChannelFails)
 {
   ensureRclcpp();
   auto map = std::make_shared<GridMap>();
@@ -6543,15 +6502,31 @@ TEST(P4PreparedChannelPreparation,
   runner_up.path[1].y() *= -1.0;
   runner_up.path_hash = "normal-runner-up-after-clearance-failure";
   decision.candidates.push_back(runner_up);
-  const uint64_t failed_candidate_id = decision.selected_candidate_id;
+  const uint64_t preferred_candidate_id = decision.selected_candidate_id;
+  const uint64_t preferred_channel_id = decision.selected_channel_id;
   manager.setP4ForwardDecisionForTest(std::move(decision));
 
+  auto preferred_curve = ego_planner::UniformBspline(
+      p4StoppedControlPoints(), 3, 0.5);
+  const auto terminal = ego_planner::imposeP4TerminalStop(
+      &preferred_curve, terminalStartState(preferred_curve),
+      20.0, 100.0, 0.0);
+  ASSERT_TRUE(terminal.success) << terminal.reason;
+  manager.local_data_.position_traj_ = preferred_curve;
+  manager.local_data_.velocity_traj_ = preferred_curve.getDerivative();
+  manager.local_data_.acceleration_traj_ =
+      manager.local_data_.velocity_traj_.getDerivative();
+  manager.local_data_.traj_id_ = 94;
+  manager.local_data_.start_time_ = rclcpp::Time(10, 0, RCL_ROS_TIME);
+  manager.local_data_.duration_ = preferred_curve.getTimeSum();
+  ASSERT_TRUE(manager.certifyP4ActualCurve(
+      "final_bspline_before_p5", 10.0));
+
+  ego_planner::P5GateStatus disabled_preview;
   std::string reason;
   EXPECT_EQ(
-      manager.recordP4NormalChannelCurveFailure(
-          10.0,
-          ego_planner::P4PreparedCurveFailure::LOCAL_CLEARANCE,
-          "normal_preferred_local_clearance_failed", &reason),
+      manager.prepareP4NormalChannelComparison(
+          10.0, disabled_preview, &reason),
       ego_planner::P4NormalChannelPreparationDisposition::
           NEXT_CHANNEL_PENDING)
       << reason;
@@ -6559,41 +6534,22 @@ TEST(P4PreparedChannelPreparation,
   EXPECT_EQ(
       manager.pendingP4ChannelWorkItemForTest()->selected_candidate_id,
       runner_up.candidate_id);
-  EXPECT_EQ(
-      manager.pendingP4ChannelWorkItemForTest()->selected_channel_id,
-      runner_up.channel_id);
 
   manager.setP4ForwardDecisionForTest(
       *manager.pendingP4ChannelWorkItemForTest());
   manager.clearP4PendingChannelWorkItemForTest();
-  Eigen::MatrixXd runner_points = p4StoppedControlPoints();
-  runner_points.row(1) *= -1.0;
-  auto runner_curve = ego_planner::UniformBspline(runner_points, 3, 0.5);
-  const auto terminal = ego_planner::imposeP4TerminalStop(
-      &runner_curve, terminalStartState(runner_curve), 20.0, 100.0, 0.0);
-  ASSERT_TRUE(terminal.success) << terminal.reason;
-  manager.local_data_.position_traj_ = runner_curve;
-  manager.local_data_.velocity_traj_ = runner_curve.getDerivative();
-  manager.local_data_.acceleration_traj_ =
-      manager.local_data_.velocity_traj_.getDerivative();
-  manager.local_data_.traj_id_ = 94;
-  manager.local_data_.start_time_ = rclcpp::Time(10, 0, RCL_ROS_TIME);
-  manager.local_data_.duration_ = runner_curve.getTimeSum();
-  ASSERT_TRUE(manager.certifyP4ActualCurve(
-      "final_bspline_before_p5", 10.0));
-
-  ego_planner::P5GateStatus disabled_preview;
   EXPECT_EQ(
-      manager.prepareP4NormalChannelComparison(
-          10.0, disabled_preview, &reason),
+      manager.recordP4NormalChannelCurveFailure(
+          10.0,
+          ego_planner::P4PreparedCurveFailure::LOCAL_CLEARANCE,
+          "normal_last_channel_local_clearance_failed", &reason),
       ego_planner::P4NormalChannelPreparationDisposition::READY_TO_PUBLISH)
       << reason;
+  EXPECT_EQ(reason, "normal_channel_comparison_complete");
   EXPECT_EQ(manager.lastP4ForwardDecision().selected_candidate_id,
-            runner_up.candidate_id);
+            preferred_candidate_id);
   EXPECT_EQ(manager.lastP4ForwardDecision().selected_channel_id,
-            runner_up.channel_id);
-  EXPECT_NE(manager.lastP4ForwardDecision().selected_candidate_id,
-            failed_candidate_id);
+            preferred_channel_id);
   EXPECT_EQ(manager.p4ExecutionCertificate().trajectory_id, 94);
   EXPECT_EQ(manager.p4ExecutionCertificate().authority,
             ego_planner::P4ExecutionAuthority::FORMAL_RISK_SELECTED);
@@ -7322,10 +7278,6 @@ TEST(P4PreparedSuccessorPolicy,
   prepared.assurance.safe = true;
   prepared.assurance.failure = ego_planner::P4SuccessorFailure::NONE;
   manager.setPreparedP4SuccessorForTest(prepared);
-  const std::string prepared_control_hash = ego_planner::p4ControlPointHash(
-      manager.local_data_.position_traj_.getControlPoint());
-  const std::string prepared_knot_hash = ego_planner::p4KnotVectorHash(
-      manager.local_data_.position_traj_.getKnot());
   ego_planner::P5GateStatus disabled_preview;
   std::string cache_reason;
   ASSERT_TRUE(manager.cachePreparedP4SuccessorBundle(
@@ -7454,12 +7406,14 @@ TEST(P4PreparedSuccessorPolicy,
   EXPECT_EQ(reason,
             "successor_latest_trajectory_assurance_changed:"
             "global_navigation_budget_exceeded:safe");
+  ASSERT_TRUE(manager.preparedP4SuccessorBundleForTest().has_value());
+  EXPECT_EQ(manager.preparedP4SuccessorBundleForTest()->state,
+            ego_planner::P4SuccessorPreparationState::FAILED);
+  EXPECT_FALSE(manager.preparedP4SuccessorBundleForTest()->complete());
 
-  // The rejected latest-snapshot probe did not mutate the cached curve. At
-  // the queue-release boundary the manager installs the exact pre-certified
-  // spline for reauthorization and publication; no route search or optimizer
-  // call is part of this operation and traj_server keeps the parent active
-  // until the child's fixed handoff time.
+  // Reauthorization failure is terminal for this child attempt. The exact
+  // cached curve remains available for diagnostics, but it cannot be queued
+  // and no alternate-channel/full-search attempt is authorized.
   auto parent_certificate = manager.p4ExecutionCertificate();
   parent_certificate.valid = true;
   parent_certificate.trajectory_id = incumbent.traj_id_;
@@ -7468,15 +7422,10 @@ TEST(P4PreparedSuccessorPolicy,
       incumbent.position_traj_.getControlPoint());
   manager.local_data_ = incumbent;
   manager.setP4ExecutionCertificateForTest(parent_certificate);
-  ASSERT_TRUE(manager.activatePreparedP4SuccessorBundle(10.15, &reason))
-      << reason;
-  EXPECT_TRUE(manager.activatingPreparedP4SuccessorBundle());
-  EXPECT_EQ(ego_planner::p4ControlPointHash(
-                manager.local_data_.position_traj_.getControlPoint()),
-            prepared_control_hash);
-  EXPECT_EQ(ego_planner::p4KnotVectorHash(
-                manager.local_data_.position_traj_.getKnot()),
-            prepared_knot_hash);
+  EXPECT_FALSE(manager.activatePreparedP4SuccessorBundle(10.15, &reason));
+  EXPECT_EQ(reason, "successor_prepared_bundle_not_due");
+  EXPECT_FALSE(manager.activatingPreparedP4SuccessorBundle());
+  EXPECT_EQ(manager.local_data_.traj_id_, incumbent.traj_id_);
 }
 
 TEST(P4PreparedSuccessorPolicy,

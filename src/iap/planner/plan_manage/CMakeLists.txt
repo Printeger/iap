@@ -169,8 +169,9 @@ if(BUILD_TESTING)
     src/p4_actual_curve_certifier.cpp
   )
   ament_target_dependencies(test_p4_actual_curve_certifier
-    rclcpp Eigen3 bspline_opt traj_utils
+    rclcpp Eigen3 bspline_opt traj_utils iap
   )
+  target_link_libraries(test_p4_actual_curve_certifier iap::iap)
   ament_add_gtest(test_p1_candidate_selection
     test/test_p1_candidate_selection.cpp
     src/p1_candidate_selection.cpp

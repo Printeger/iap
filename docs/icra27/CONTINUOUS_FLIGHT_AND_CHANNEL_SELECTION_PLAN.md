@@ -4,6 +4,13 @@
 
 状态：实施中；代码完成、CPU/进程门禁和 live 验收分别记录，本文不是完成报告。
 
+2026-09-24 的统一认证重构已删除生产 `OBSERVE_MORE`/feedback 状态机，所有
+normal、`LIMITED_PREFIX`、局部恢复和 rolling-child 实际曲线均进入同一认证
+入口，失败只保留 typed failure，不再修改该曲线。schema v18、完整身份
+QUEUED/ACTIVATED、减速前 child 锚点和仅对当前可达 nominal/braking rows 的
+runtime 投影已纳入代码与 CPU/进程测试；短 live 仍须在 clean commit 和 GPU
+preflight 通过后单次执行，本文不提前宣称 live 验收完成。
+
 截至 2026-09-23，第一岔路纠偏代码已覆盖候选状态重置、known/unknown
 证据拆分、完整最终 bundle 比较、不可比时公共前缀/保持，以及紧凑证据保留策略。
 CPU/进程全量门禁、单岔路 primary/mirror 和 180 秒森林验收尚未在本状态行宣称通过；

@@ -4,6 +4,7 @@
 #include <limits>
 #include <string>
 
+#include <iap/predictor/predictor_types.hpp>
 #include <traj_utils/plan_container.hpp>
 
 namespace ego_planner {
@@ -29,6 +30,8 @@ enum class P4PreparedCurveFailure {
 };
 
 const char *p4PreparedCurveFailureName(P4PreparedCurveFailure failure);
+P4PreparedCurveFailure p4PreparedCurveFailureForForwardRisk(
+    iap::ForwardRiskFailureReason failure);
 
 // The trajectory is borrowed and never modified. The certifier derives all
 // evidence from position_traj_ so stale derivative caches cannot authorize a

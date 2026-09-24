@@ -111,9 +111,11 @@ For each candidate trajectory τ:
   mismatches fail closed, including successor reauthorization.
   Window responsibility is frozen once, when that exact curve is committed:
   absolute sample times, braking anchors, evidence IDs, original window IDs
-  and the layout hash do not move during execution. The watchdog merely
-  selects the current/next committed rows. New maps and GNSS epochs update the
-  physical evidence at those same points; they do not redraw the experiment.
+  and the layout hash do not move during execution. The watchdog projects all
+  still-reachable nominal rows and braking curves whose anchors have not
+  passed, preserving their original window memberships. New maps and GNSS
+  epochs update the physical evidence at those same points; they do not redraw
+  the experiment.
   Before any runtime continue/reject/brake transition, P4 persists the full
   window evidence and makes the execution event reference it. A diagnostic
   background four-cell replay then separates map/support change, GNSS
@@ -180,9 +182,10 @@ For each candidate trajectory τ:
   and acceleration at that anchor. The selected safe guide endpoint owns the
   child terminal; a stale periodic local target cannot append an unchecked
   tail.
-  It first warm-starts from the committed channel
-  and guide; only a geometry, clearance or corridor failure permits one
-  bounded full-channel fallback. Ordinary P4 rate limiting does not apply.
+  It consumes one already-generated frozen guide. Any certification failure
+  terminates that child attempt without a full-channel fallback, alternate
+  guide, crop or retiming; the parent continues to its certified stop.
+  Ordinary P4 rate limiting does not apply.
   Preparation is not motion authority and cannot alter the parent or P5
   debounce state; its P5-preview summary remains in the cached bundle for
   audit. At handoff the planner does not rerun route search, A* or
@@ -235,14 +238,16 @@ For each candidate trajectory τ:
   curves and both cores in every transition overlap. A braking-branch failure
   is first projected to its nominal anchor station; duplicated transition or
   brake rows are never summed into executable progress. The first actual-curve
-  failure is fed back for at most two regenerations: another channel for spatial
-  failure, one bounded faster time parameterization for temporal growth, then
-  a directly certified stoppable prefix of the corridor shared by at least two
-  topology channels when a full route still fails. Every point of that nominal
-  executable prefix must be inside every channel tube; tube overlap alone is
-  insufficient. The selected branch itself
-  cannot be relabelled as that public prefix. Diagnostic fixed-point replay is
-  followed by a refreshed-time repetition of every execution safety gate.
+  failure is recorded as a typed terminal result and never fed back into curve
+  generation. The immutable failed B-spline is not cropped, shifted, retimed,
+  switched to another channel or reinterpreted. Multi-channel preparation may
+  continue only with the next already-frozen guide. A stoppable prefix of the
+  corridor shared by at least two topology channels is generated independently
+  and passes the same complete actual-curve certification chain. Every point
+  of that nominal executable prefix must be inside every channel tube; tube
+  overlap alone is insufficient. The selected branch itself cannot be
+  relabelled as that public prefix. Diagnostic fixed-point replay is followed
+  by a refreshed-time repetition of every execution safety gate.
   Publication on
   a newer execution snapshot performs at most one exact-curve reauthorization;
   an ID-only change is not a safety failure.
@@ -329,10 +334,8 @@ For each candidate trajectory τ:
   snapshot/evidence identity; deliberate latest-snapshot reauthorization
   rebuilds it from the new immutable evidence. Generation keeps an additional
   `0.05 m` buffer, while runtime authorization remains `margin > 0`. A failure
-  returns
-  the nearest obstacle and an escape direction so the bounded retry moves the
-  candidate toward corridor centre instead of regenerating the same edge-
-  hugging curve.
+  records the nearest obstacle and escape direction for diagnostics only; it
+  cannot move, crop, retime or regenerate the immutable actual curve.
   Exact ICP health is frozen into the registered-frame message before the
   frame becomes a long-lived active-window obstacle. Existing source PL fields
   are compatibility diagnostics only. Planner-local history cannot reconstruct
