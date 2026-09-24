@@ -53,6 +53,8 @@ P4_FORWARD_DECISION_SCHEMAS = {
     "p4_forward_route_decision_v13",
     "p4_forward_route_decision_v14",
     "p4_forward_route_decision_v15",
+    "p4_forward_route_decision_v16",
+    "p4_forward_route_decision_v17",
 }
 P4_FORMAL_RISK_SAMPLE_SCHEMAS = {
     "p4_forward_route_decision_v5",
@@ -66,6 +68,8 @@ P4_FORMAL_RISK_SAMPLE_SCHEMAS = {
     "p4_forward_route_decision_v13",
     "p4_forward_route_decision_v14",
     "p4_forward_route_decision_v15",
+    "p4_forward_route_decision_v16",
+    "p4_forward_route_decision_v17",
 }
 
 

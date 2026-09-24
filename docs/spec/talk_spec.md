@@ -386,14 +386,19 @@ For each candidate trajectory τ:
   other; overlap is `PARTIAL_COMPARISON`. Whole-grid unknown fraction is
   diagnostic only. Final-curve, clearance-tube, every braking tube, and GNSS
   LOS support are route-scoped formal evidence.
-- When two incomplete channels cannot yet be ordered, the independent
-  observation planner scores positions in their common pre-divergence
-  corridor by the minimum normalized information gain across channels. It
-  uses only frozen raw occluders and the registered sensor model, reserves the
-  complete stopping distance, and has no route-winner authority. The returned
-  guide still goes through the existing stopped-B-spline collision,
-  clearance, dynamics, brake, assurance, and P5 gates. No positive feasible
-  gain yields `OBSERVATION_UNAVAILABLE_SENSOR_GEOMETRY` and HOLD.
+- When two incomplete channels cannot yet be ordered, their executable common
+  region is the nominal path contained by every candidate's safe tube, not a
+  requirement that candidate centerlines coincide. A feasible result is an
+  ordinary `LIMITED_PREFIX` with zero candidate/channel IDs and no route-winner
+  authority. It reserves the complete stopping distance and uses the standard
+  stopped-B-spline collision, clearance, dynamics, direct-risk, brake,
+  assurance, P5, publication, and runtime chain.
+- The observation planner may score earlier stop points by minimum normalized
+  information gain across channels, using frozen raw occluders and the
+  registered sensor model. That score is diagnostic only: it may shorten a
+  feasible endpoint but cannot grant motion, relax a safety gate, or veto the
+  farthest safe stoppable prefix. Zero gain or unavailable sensor geometry is
+  therefore not a HOLD reason by itself.
 
 Historical captures made before the beam-evidence topic contain only
 decision-level data and are labeled `non_exact_replay_for_local_evidence`;

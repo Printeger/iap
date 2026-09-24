@@ -118,6 +118,14 @@ def lineage_for(decision, trajectory_id, start_ns):
 
 
 class TestStageContracts(unittest.TestCase):
+    def test_current_p4_schema_is_accepted_as_formal_risk_evidence(self):
+        self.assertIn(
+            "p4_forward_route_decision_v17",
+            MODULE.P4_FORWARD_DECISION_SCHEMAS)
+        self.assertIn(
+            "p4_forward_route_decision_v17",
+            MODULE.P4_FORMAL_RISK_SAMPLE_SCHEMAS)
+
     def test_limited_prefix_is_independent_not_part_of_through_ladder(self):
         self.assertIn("limited-prefix", MODULE.STAGE_CHOICES)
         self.assertNotIn("limited-prefix", MODULE.STAGE_ORDER)

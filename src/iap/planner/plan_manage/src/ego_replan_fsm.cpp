@@ -1906,10 +1906,10 @@ namespace ego_planner
       auto info = &planner_manager_->local_data_;
       const bool preparing_successor_curve = !using_cached_successor &&
           planner_manager_->preparingP4SuccessorCurve();
-      const bool preparing_common_observation = !using_cached_successor &&
+      const bool preparing_limited_prefix = !using_cached_successor &&
           !preparing_successor_curve &&
           planner_manager_->lastP4ForwardDecision().executable_intent ==
-              P4ExecutableIntent::COMMON_OBSERVATION_SEGMENT;
+              P4ExecutableIntent::LIMITED_PREFIX;
       std::vector<uint64_t> normal_channel_ids;
       if (!using_cached_successor && !preparing_successor_curve)
         for (const auto &candidate :
@@ -1919,14 +1919,12 @@ namespace ego_planner
                         candidate.channel_id) == normal_channel_ids.end())
             normal_channel_ids.push_back(candidate.channel_id);
       const bool preparing_normal_multi_channel_curve =
-          !preparing_common_observation && normal_channel_ids.size() >= 2u;
+          !preparing_limited_prefix && normal_channel_ids.size() >= 2u;
 
       if (!using_cached_successor &&
           !planner_manager_->recordP4VerticalSliceLineage(
               preparing_successor_curve
                   ? "successor_curve_before_p5"
-                  : preparing_common_observation
-                  ? "observation_curve_before_p5"
                   : "final_bspline_before_p5",
               plannerNow().seconds()))
       {
@@ -2038,31 +2036,8 @@ namespace ego_planner
       }
       if (p5_pre_evaluation_hook_for_test_)
         p5_pre_evaluation_hook_for_test_();
-      if (preparing_common_observation)
-      {
-        const auto &direct_evidence =
-            planner_manager_->latestP4DirectRiskEvidence();
-        const auto &execution_certificate =
-            planner_manager_->p4ExecutionCertificate();
-        if (!P5RuntimeIntegrityGate::observationCertificateIdentityValid(
-                *info, &direct_evidence,
-                execution_certificate.observation_validation_hash))
-        {
-          RCLCPP_WARN(
-              node_->get_logger(),
-              "Observation certificate identity changed before publish");
-          planner_manager_->demoteP4ObservationToHold(
-              "observation_certificate_identity_mismatch");
-          planner_manager_->recordP4VerticalSliceLineage(
-              "observation_certificate_identity_rejected",
-              plannerNow().seconds());
-          reject_candidate();
-          return false;
-        }
-      }
       if (planner_manager_->p5_integrity_gate_ &&
-          (planner_manager_->p5_integrity_gate_->finalGateEnabled() ||
-           preparing_common_observation) &&
+          planner_manager_->p5_integrity_gate_->finalGateEnabled() &&
           !p5_final_status_evaluated)
       {
         const double now_s = plannerNow().seconds();
@@ -2082,16 +2057,9 @@ namespace ego_planner
                       static_cast<unsigned long>(planning_generation_id),
                       static_cast<unsigned long>(final_gate_generation_id));
         }
-        const P5GateStatus p5_status = preparing_common_observation
-            ? planner_manager_->p5_integrity_gate_->evaluateObservationFinal(
-                *info, snapshot, now_s, emergency_time_,
-                &direct_evidence,
-                execution_certificate.gnss_core_policy,
-                execution_certificate.window_layout_hash,
-                execution_certificate.window_satellite_sets_hash,
-                execution_certificate.observation_validation_hash)
-            : (preparing_successor_curve ||
-               preparing_normal_multi_channel_curve)
+        const P5GateStatus p5_status =
+            (preparing_successor_curve ||
+             preparing_normal_multi_channel_curve)
             ? planner_manager_->p5_integrity_gate_->evaluateFinalPreview(
                 *info, snapshot, now_s, emergency_time_,
                 &direct_evidence,
@@ -2117,9 +2085,6 @@ namespace ego_planner
                       P5RuntimeIntegrityGate::reasonName(p5_status.reason),
                       static_cast<unsigned long>(planning_generation_id),
                       static_cast<unsigned long>(final_gate_generation_id));
-          if (preparing_common_observation)
-            planner_manager_->demoteP4ObservationToHold(
-                "observation_p5_rejected");
           planner_manager_->recordP4VerticalSliceLineage(
               "p5_final_rejected", plannerNow().seconds());
           if (preparing_successor_curve)
@@ -2158,9 +2123,7 @@ namespace ego_planner
         if (!preparing_successor_curve &&
             !preparing_normal_multi_channel_curve &&
             !planner_manager_->recordP4VerticalSliceLineage(
-                preparing_common_observation
-                    ? "observation_p5_authorized"
-                    : "p5_final_pass_before_publish",
+                "p5_final_pass_before_publish",
                 plannerNow().seconds()))
         {
           RCLCPP_ERROR(node_->get_logger(),
@@ -2365,9 +2328,7 @@ namespace ego_planner
           ? planner_manager_->commitActivatedP4SuccessorBundle(
                 plannerNow().seconds(), &successor_publish_reason)
           : planner_manager_->recordP4VerticalSliceLineage(
-                preparing_common_observation
-                    ? "observation_publish_authorized"
-                    : "normal_publish_authorized",
+                "normal_publish_authorized",
                 plannerNow().seconds());
       if (!publication_committed)
       {

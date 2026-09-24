@@ -228,27 +228,6 @@ class P5RuntimeIntegrityGate {
       const std::string& required_window_layout_hash = {},
       const std::string& required_window_satellite_sets_hash = {});
 
-  static bool observationCertificateIdentityValid(
-      LocalTrajData& local_data,
-      const P4DirectTrajectoryRiskEvidence* direct_risk,
-      const std::string& required_observation_validation_hash);
-
-  // Typed admission for an exact, terminal-stopping common observation
-  // curve. It intentionally applies the same current, collision-bound direct
-  // risk, alert-limit, freshness, dynamics and braking certificate checks as
-  // final admission; the distinct entry point prevents callers from treating
-  // unresolved branch suffixes as part of the executable curve.
-  P5GateStatus evaluateObservationFinal(
-      LocalTrajData& local_data,
-      const std::shared_ptr<const iap::RiskGridSnapshot>& snapshot,
-      double now_s,
-      double emergency_time_s,
-      const P4DirectTrajectoryRiskEvidence* direct_risk = nullptr,
-      const std::string& required_gnss_core_policy = {},
-      const std::string& required_window_layout_hash = {},
-      const std::string& required_window_satellite_sets_hash = {},
-      const std::string& required_observation_validation_hash = {});
-
   // Read-only final-gate evaluation for a future successor. It must not
   // advance debounce/exposure state or publish a gate decision.
   P5GateStatus evaluateFinalPreview(

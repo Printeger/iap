@@ -1960,22 +1960,6 @@ void configureKnownGeometryPrefixMotion(
       return;
     }
   }
-  // Reserve enough corridor to stop from the configured observation speed.
-  // Reserving only the zero-speed footprint and then subtracting that same
-  // footprint in speedCapForDistance deterministically produced a zero cap
-  // whenever the adaptive prefix consumed the rest of the clear corridor.
-  const double terminal_reserve = p4StoppingDistance(
-    request.limits.max_observe_speed_mps, request.limits);
-  const double progress = std::min(
-    limitedPrefixProgressLimit(request.limits),
-    std::max(0.0, decision->common_prefix_length_m - terminal_reserve));
-  if (progress < request.limits.min_creep_progress_m) {
-    return;
-  }
-  // A collision-free common prefix without a predicted LOS gain remains a
-  // typed HOLD. It may be retained as diagnostic geometry, but it is not an
-  // observation execution authority.
-  decision->reason = "OBSERVATION_NO_POSITIVE_INFORMATION_GAIN";
   decision->certified_free_distance_m = decision->common_prefix_length_m;
 }
 
@@ -2016,8 +2000,8 @@ bool configureSafeLimitedCommonPrefix(
     return false;
   }
 
-  bool observation_segment_selected = false;
-  double observation_endpoint_station_m =
+  bool information_gain_hint_available = false;
+  double information_gain_endpoint_station_m =
     std::numeric_limits<double>::infinity();
   double observation_information_gain = 0.0;
   std::vector<std::vector<Eigen::Vector3d>> missing_los_by_channel;
@@ -2043,21 +2027,8 @@ bool configureSafeLimitedCommonPrefix(
     has_missing_los_target = has_missing_los_target || !targets.empty();
     missing_los_by_channel.push_back(std::move(targets));
   }
-  if (!has_missing_los_target)
-  {
-    decision->reason = "OBSERVATION_NO_POSITIVE_INFORMATION_GAIN";
-    return false;
-  }
   if (has_missing_los_target && missing_los_by_channel.size() >= 2u)
   {
-    if (decision->observation_channel_guides.empty())
-      for (const auto &candidate : decision->candidates)
-        if (candidate.path.size() >= 2u)
-          decision->observation_channel_guides.push_back(candidate.path);
-    decision->observation_sensor_model = request.observation_sensor_model;
-    decision->observation_raw_occluders =
-      request.raw_occupied_voxel_centers;
-    decision->observation_missing_los_by_channel = missing_los_by_channel;
     const double fixed_reserve_m = request.limits.vehicle_radius_m +
       request.limits.safety_margin_m;
     const double dynamic_stopping_reserve_m = std::max(
@@ -2078,15 +2049,16 @@ bool configureSafeLimitedCommonPrefix(
     observation.maximum_progress_m = limitedPrefixProgressLimit(
       request.limits);
     const auto planned = P4ObservationSegmentPlanner{}.plan(observation);
-    if (!planned.available || planned.route_winner_authority ||
-      !planned.terminal_stop_required || planned.guide.size() < 2u)
+    if (planned.available && !planned.route_winner_authority &&
+      planned.terminal_stop_required && planned.guide.size() >= 2u &&
+      std::isfinite(planned.endpoint_station_m) &&
+      std::isfinite(planned.fair_information_gain) &&
+      planned.fair_information_gain > 0.0)
     {
-      decision->reason = planned.reason;
-      return false;
+      information_gain_hint_available = true;
+      information_gain_endpoint_station_m = planned.endpoint_station_m;
+      observation_information_gain = planned.fair_information_gain;
     }
-    observation_segment_selected = true;
-    observation_endpoint_station_m = planned.endpoint_station_m;
-    observation_information_gain = planned.fair_information_gain;
   }
 
   const auto path_samples = resample(
@@ -2129,11 +2101,11 @@ bool configureSafeLimitedCommonPrefix(
 
   double last_safe_arc_m = 0.0;
   double sampled_arc_m = 0.0;
-  double observation_continuous_exceedance_s = 0.0;
-  double observation_exposure_integral_ratio_s = 0.0;
-  double previous_observation_ratio =
+  double prefix_continuous_exceedance_s = 0.0;
+  double prefix_exposure_integral_ratio_s = 0.0;
+  double previous_prefix_ratio =
     request.current_integrity_anchor.safety_ratio;
-  double previous_observation_time_s = request.query_time_s;
+  double previous_prefix_time_s = request.query_time_s;
   for (std::size_t index = 0; index < samples.size(); ++index) {
     if (index > 0) {
       sampled_arc_m +=
@@ -2146,8 +2118,8 @@ bool configureSafeLimitedCommonPrefix(
       risk.ranking_state == P4ForwardRankingState::COMPARABLE &&
       std::isfinite(risk.safety_ratio) && risk.safety_ratio < 1.0 &&
       std::isfinite(risk.fim_ratio);
-    bool bounded_observation_safe = false;
-    if (!complete_safe && observation_segment_selected &&
+    bool bounded_prefix_safe = false;
+    if (!complete_safe &&
       request.limits.task_mode ==
         iap::GlobalNavigationTaskMode::MISSION_BEST_EFFORT &&
       !risk.stale && risk.lidar_supported && risk.fim_supported &&
@@ -2162,41 +2134,41 @@ bool configureSafeLimitedCommonPrefix(
         risk.gnss_anchored_hpl / risk.hal,
         risk.gnss_anchored_vpl / risk.val);
       const double dt = queries[index].query_time_s -
-        previous_observation_time_s;
-      if (std::isfinite(ratio) && std::isfinite(previous_observation_ratio) &&
+        previous_prefix_time_s;
+      if (std::isfinite(ratio) && std::isfinite(previous_prefix_ratio) &&
         dt >= 0.0)
       {
         const double previous_excess = std::max(
-          0.0, previous_observation_ratio - 1.0);
+          0.0, previous_prefix_ratio - 1.0);
         const double excess = std::max(0.0, ratio - 1.0);
-        observation_exposure_integral_ratio_s +=
+        prefix_exposure_integral_ratio_s +=
           0.5 * (previous_excess + excess) * dt;
-        if (previous_observation_ratio > 1.0 && ratio > 1.0)
-          observation_continuous_exceedance_s += dt;
+        if (previous_prefix_ratio > 1.0 && ratio > 1.0)
+          prefix_continuous_exceedance_s += dt;
         else if (ratio <= 1.0)
-          observation_continuous_exceedance_s = 0.0;
+          prefix_continuous_exceedance_s = 0.0;
         else
-          observation_continuous_exceedance_s =
+          prefix_continuous_exceedance_s =
             dt * excess / std::max(kEpsilon, previous_excess + excess);
-        bounded_observation_safe =
+        bounded_prefix_safe =
           ratio <= request.limits.maximum_global_ratio + kEpsilon &&
-          observation_continuous_exceedance_s <=
+          prefix_continuous_exceedance_s <=
             request.limits.maximum_global_continuous_exceedance_s +
               kEpsilon &&
-          observation_exposure_integral_ratio_s <=
+          prefix_exposure_integral_ratio_s <=
             request.limits.maximum_global_exceedance_integral_ratio_s +
               kEpsilon;
-        previous_observation_ratio = ratio;
-        previous_observation_time_s = queries[index].query_time_s;
+        previous_prefix_ratio = ratio;
+        previous_prefix_time_s = queries[index].query_time_s;
       }
     }
-    if (!complete_safe && !bounded_observation_safe) {
+    if (!complete_safe && !bounded_prefix_safe) {
       break;
     }
     if (complete_safe)
     {
-      previous_observation_ratio = risk.safety_ratio;
-      previous_observation_time_s = queries[index].query_time_s;
+      previous_prefix_ratio = risk.safety_ratio;
+      previous_prefix_time_s = queries[index].query_time_s;
     }
     last_safe_arc_m = sampled_arc_m;
   }
@@ -2216,9 +2188,24 @@ bool configureSafeLimitedCommonPrefix(
     decision->reason = "safe_common_prefix_too_short_to_stop";
     return false;
   }
-  const double progress_limit_m = std::min(
-    limitedPrefixProgressLimit(request.limits),
-    observation_endpoint_station_m);
+  const double generic_progress_limit_m =
+    limitedPrefixProgressLimit(request.limits);
+  // Information gain may suggest an earlier useful stop, but it cannot turn
+  // an otherwise executable prefix into HOLD. Ignore a hint that does not
+  // leave enough distance for the existing stopping/progress contract.
+  if (information_gain_hint_available &&
+    (information_gain_endpoint_station_m + kEpsilon <
+       dynamic_stopping_reserve_m ||
+     information_gain_endpoint_station_m + kEpsilon <
+       request.limits.min_creep_progress_m))
+  {
+    information_gain_hint_available = false;
+    observation_information_gain = 0.0;
+  }
+  const double progress_limit_m = information_gain_hint_available
+    ? std::min(generic_progress_limit_m,
+        information_gain_endpoint_station_m)
+    : generic_progress_limit_m;
   if (dynamic_stopping_reserve_m > progress_limit_m + kEpsilon)
   {
     decision->reason = "safe_common_prefix_progress_limit_too_short";
@@ -2253,20 +2240,20 @@ bool configureSafeLimitedCommonPrefix(
   decision->selected_guide.clear();
   decision->deferred_motion_mode = P4ForwardDeferredMotionMode::COMMON_PREFIX;
   decision->deferred_trajectory = std::move(executable);
-  decision->executable_intent =
-    P4ExecutableIntent::COMMON_OBSERVATION_SEGMENT;
+  decision->executable_intent = P4ExecutableIntent::LIMITED_PREFIX;
   decision->channel_comparison_state =
     P4ChannelComparisonState::PARTIAL_COMPARISON;
-  decision->observation_endpoint = decision->deferred_trajectory.back();
-  decision->observation_divergence_boundary = prefix.back();
-  decision->observation_stopping_reserve_m = total_terminal_reserve_m;
+  decision->limited_prefix_endpoint = decision->deferred_trajectory.back();
+  decision->limited_prefix_boundary = prefix.back();
+  decision->limited_prefix_stopping_reserve_m = total_terminal_reserve_m;
   decision->observation_predicted_information_gain =
     observation_information_gain;
   decision->speed_cap_mps = std::max(
     request.velocity.norm(), std::min(
       request.limits.max_observe_speed_mps, feasible_speed));
-  decision->reason = observation_segment_selected ?
-    "certified_observation_segment" : "safe_limited_common_prefix";
+  decision->reason = information_gain_hint_available ?
+    "safe_limited_common_prefix_information_gain_hint" :
+    "safe_limited_common_prefix";
   return true;
 }
 
@@ -3511,8 +3498,7 @@ const char * p4ExecutableIntentName(const P4ExecutableIntent intent)
 {
   switch (intent) {
     case P4ExecutableIntent::FINAL_CHANNEL: return "FINAL_CHANNEL";
-    case P4ExecutableIntent::COMMON_OBSERVATION_SEGMENT:
-      return "COMMON_OBSERVATION_SEGMENT";
+    case P4ExecutableIntent::LIMITED_PREFIX: return "LIMITED_PREFIX";
     case P4ExecutableIntent::HOLD: return "HOLD";
   }
   return "UNKNOWN";
@@ -4311,10 +4297,6 @@ P4ForwardDecision P4ForwardRoutePlanner::decide(
   if (decision.candidates.size() >= 2) {
     decision.geometry_common_corridor = commonExecutableCorridorPrefix(
       request, decision.candidates, graph);
-    decision.observation_channel_guides.clear();
-    for (const auto &candidate : decision.candidates)
-      if (candidate.path.size() >= 2u)
-        decision.observation_channel_guides.push_back(candidate.path);
   }
 
   // A best-effort route with a native refiner has no authority until the

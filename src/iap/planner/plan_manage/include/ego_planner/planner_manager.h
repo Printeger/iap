@@ -321,7 +321,6 @@ namespace ego_planner
     iap::GlobalNavigationTaskMode task_mode =
         iap::GlobalNavigationTaskMode::STRICT_GLOBAL;
     std::string trajectory_assurance_hash;
-    std::string observation_validation_hash;
     std::string local_motion_certificate_hash;
     double local_motion_minimum_margin_m =
         std::numeric_limits<double>::quiet_NaN();
@@ -1068,19 +1067,9 @@ namespace ego_planner
     P4NormalChannelPreparationDisposition prepareP4NormalChannelComparison(
         double now_s, const P5GateStatus &p5_preview,
         std::string *reason = nullptr);
-    P4ObservationValidationResult validateObservationExecutionEnvelope(
-        double evidence_time_s,
-        const std::vector<P4BrakingAnchor> *braking_library = nullptr,
-        std::shared_ptr<const P0ExecutionRiskSnapshot> execution_snapshot =
-            nullptr) const;
-    const P4ObservationValidationResult &observationValidationResult() const
-    {
-      return p4_observation_validation_;
-    }
     P4NormalChannelPreparationDisposition recordP4NormalChannelCurveFailure(
         double now_s, P4PreparedCurveFailure failure,
         const std::string &detail, std::string *reason = nullptr);
-    bool demoteP4ObservationToHold(const std::string &reason);
     bool preparedP4SuccessorBundleDue(double now_s) const;
     bool activatePreparedP4SuccessorBundle(
         double now_s, std::string *reason = nullptr);
@@ -1439,7 +1428,6 @@ namespace ego_planner
     // The original full-curve evidence remains available to P5 and audit;
     // runtime batches are generation-bound re-evaluations of its fixed plan.
     P4DirectTrajectoryRiskEvidence p4_committed_direct_risk_evidence_;
-    P4ObservationValidationResult p4_observation_validation_;
     std::shared_ptr<const P4CommittedRiskWindowPlan>
         p4_committed_risk_window_plan_;
     P4RuntimeWindowEvidence p4_last_runtime_window_evidence_;

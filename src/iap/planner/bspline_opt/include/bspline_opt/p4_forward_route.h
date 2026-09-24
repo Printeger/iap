@@ -20,7 +20,7 @@ namespace ego_planner
 {
 
   inline constexpr char kP4ForwardDecisionSchema[] =
-    "p4_forward_route_decision_v16";
+    "p4_forward_route_decision_v17";
 
   enum class P4ForwardResultStatus
   {
@@ -240,7 +240,7 @@ namespace ego_planner
   enum class P4ExecutableIntent
   {
     FINAL_CHANNEL = 0,
-    COMMON_OBSERVATION_SEGMENT,
+    LIMITED_PREFIX,
     HOLD,
   };
 
@@ -826,25 +826,16 @@ namespace ego_planner
       P4ForwardDeferredMotionMode::HOLD;
     std::vector < Eigen::Vector3d > deferred_trajectory;
     double common_prefix_length_m = 0.0;
-    Eigen::Vector3d observation_endpoint = Eigen::Vector3d::Constant(
+    Eigen::Vector3d limited_prefix_endpoint = Eigen::Vector3d::Constant(
       std::numeric_limits<double>::quiet_NaN());
-    Eigen::Vector3d observation_divergence_boundary =
+    Eigen::Vector3d limited_prefix_boundary =
       Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN());
-    double observation_stopping_reserve_m =
+    double limited_prefix_stopping_reserve_m =
       std::numeric_limits<double>::quiet_NaN();
+    // Optional endpoint-ranking diagnostic. It never grants or vetoes
+    // LIMITED_PREFIX execution authority.
     double observation_predicted_information_gain =
       std::numeric_limits<double>::quiet_NaN();
-    // Frozen raw inputs used to independently reproduce the observation
-    // gain over the final B-spline. The scalar above is diagnostic only.
-    P4ObservationSensorModel observation_sensor_model;
-    std::shared_ptr<const std::vector<Eigen::Vector3d>>
-      observation_raw_occluders;
-    std::vector<std::vector<Eigen::Vector3d>>
-      observation_missing_los_by_channel;
-    // Frozen full channel guides from before bounded refinement. Final
-    // observation certification must not infer a common corridor from only
-    // the subset that happened to finish refinement.
-    std::vector<std::vector<Eigen::Vector3d>> observation_channel_guides;
     // Archived v1 readers use this field. New v2 production decisions leave
     // it empty and publish deferred_trajectory instead.
     std::vector < Eigen::Vector3d > observe_more_trajectory;

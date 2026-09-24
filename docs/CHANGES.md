@@ -3,6 +3,22 @@
 > 规则：任何代码改动必须在这里记录，并包含 IAP-RQ-XXX。
 
 ## Unreleased
+- fix(generic-limited-prefix-publication): IAP-RQ-312 / IAP-RQ-320 /
+  IAP-RQ-410 — replace the dedicated common-observation execution protocol
+  with the existing `LIMITED_PREFIX` authority and standard final-curve, P5,
+  publication, activation, runtime-recheck, and braking transaction. The
+  executable common region remains the nominal path inside every candidate's
+  safe tube; final authorization no longer substitutes centerline coincidence
+  via `p4CommonGeometryPrefix()`. Decision schema v17 exposes
+  `limited_prefix_endpoint`, `limited_prefix_boundary`, and
+  `limited_prefix_stopping_reserve_m`; predicted information gain remains a
+  non-authorizing diagnostic and may only shorten a feasible stop point.
+  Zero gain or unavailable sensor geometry therefore still executes the
+  farthest safe, stoppable common prefix, while insufficient common distance,
+  unsafe risk, collision/clearance, dynamics, direct evidence, brake, or P5
+  failures remain HOLD. This supersedes the observation-specific publication
+  protocol described by the older entry below without changing its historical
+  failure record or any PL/AL, collision, clearance, or controller threshold.
 - fix(typed-common-observation-publication): IAP-RQ-312 / IAP-RQ-320 /
   IAP-RQ-410 — distinguish `FINAL_CHANNEL`,
   `COMMON_OBSERVATION_SEGMENT`, and `HOLD` with a versioned typed execution

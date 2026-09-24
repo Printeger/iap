@@ -3342,17 +3342,17 @@ TEST(P4ForwardRoute, UnsafeFullRoutesAuthorizeOnlyContinuousSafeCommonPrefix)
 
   const auto decision = P4ForwardRoutePlanner().decide(request);
 
-  EXPECT_EQ(decision.action, P4ForwardAction::NO_SAFE_ROUTE)
+  EXPECT_EQ(decision.action, P4ForwardAction::DEFER_RISK_SELECTION)
     << decision.reason;
   EXPECT_EQ(decision.trigger_reason, P4ForwardTriggerReason::NO_SAFE_ROUTE);
   EXPECT_EQ(decision.deferred_motion_mode,
-            ego_planner::P4ForwardDeferredMotionMode::HOLD);
+            ego_planner::P4ForwardDeferredMotionMode::COMMON_PREFIX);
   EXPECT_EQ(decision.selection_authority, P4ForwardSelectionAuthority::NONE);
   EXPECT_EQ(decision.executable_intent,
-            ego_planner::P4ExecutableIntent::HOLD);
-  EXPECT_EQ(decision.reason, "OBSERVATION_NO_POSITIVE_INFORMATION_GAIN");
-  EXPECT_TRUE(decision.deferred_trajectory.empty());
-  EXPECT_DOUBLE_EQ(decision.speed_cap_mps, 0.0);
+            ego_planner::P4ExecutableIntent::LIMITED_PREFIX);
+  EXPECT_EQ(decision.reason, "safe_limited_common_prefix");
+  EXPECT_GE(decision.deferred_trajectory.size(), 2u);
+  EXPECT_GT(decision.speed_cap_mps, 0.0);
 }
 
 TEST(P4ForwardRoute,
@@ -3390,11 +3390,11 @@ TEST(P4ForwardRoute,
 
   const auto decision = P4ForwardRoutePlanner().decide(request);
 
-  EXPECT_EQ(decision.reason, "OBSERVATION_NO_POSITIVE_INFORMATION_GAIN");
+  EXPECT_EQ(decision.reason, "safe_limited_common_prefix");
   EXPECT_EQ(decision.executable_intent,
-            ego_planner::P4ExecutableIntent::HOLD);
-  EXPECT_TRUE(decision.deferred_trajectory.empty());
-  EXPECT_DOUBLE_EQ(decision.speed_cap_mps, 0.0);
+            ego_planner::P4ExecutableIntent::LIMITED_PREFIX);
+  EXPECT_GE(decision.deferred_trajectory.size(), 2u);
+  EXPECT_GT(decision.speed_cap_mps, 0.0);
 }
 
 TEST(P4ForwardRoute,
@@ -3432,10 +3432,16 @@ TEST(P4ForwardRoute,
 
   const auto decision = P4ForwardRoutePlanner().decide(request);
 
-  EXPECT_EQ(decision.reason, "OBSERVATION_NO_POSITIVE_INFORMATION_GAIN");
+  EXPECT_EQ(decision.reason, "safe_limited_common_prefix");
   EXPECT_EQ(decision.executable_intent,
-            ego_planner::P4ExecutableIntent::HOLD);
-  EXPECT_TRUE(decision.deferred_trajectory.empty());
+            ego_planner::P4ExecutableIntent::LIMITED_PREFIX);
+  ASSERT_GE(decision.deferred_trajectory.size(), 2u);
+  double progress_m = 0.0;
+  for (std::size_t index = 1u;
+       index < decision.deferred_trajectory.size(); ++index)
+    progress_m += (decision.deferred_trajectory[index] -
+                   decision.deferred_trajectory[index - 1u]).norm();
+  EXPECT_GT(progress_m, 0.5);
 }
 
 TEST(P4ForwardRoute, SafeLimitedPrefixNeverExceedsConfiguredProgressCap)
@@ -3469,13 +3475,19 @@ TEST(P4ForwardRoute, SafeLimitedPrefixNeverExceedsConfiguredProgressCap)
 
   const auto decision = P4ForwardRoutePlanner().decide(request);
 
-  EXPECT_EQ(decision.action, P4ForwardAction::NO_SAFE_ROUTE);
+  EXPECT_EQ(decision.action, P4ForwardAction::DEFER_RISK_SELECTION);
   EXPECT_EQ(decision.executable_intent,
-    ego_planner::P4ExecutableIntent::HOLD);
+    ego_planner::P4ExecutableIntent::LIMITED_PREFIX);
   EXPECT_EQ(decision.deferred_motion_mode,
-            ego_planner::P4ForwardDeferredMotionMode::HOLD);
-  EXPECT_TRUE(decision.deferred_trajectory.empty());
-  EXPECT_EQ(decision.reason, "OBSERVATION_NO_POSITIVE_INFORMATION_GAIN");
+            ego_planner::P4ForwardDeferredMotionMode::COMMON_PREFIX);
+  ASSERT_GE(decision.deferred_trajectory.size(), 2u);
+  double progress_m = 0.0;
+  for (std::size_t index = 1u;
+       index < decision.deferred_trajectory.size(); ++index)
+    progress_m += (decision.deferred_trajectory[index] -
+                   decision.deferred_trajectory[index - 1u]).norm();
+  EXPECT_LE(progress_m, 0.5 + 1.0e-12);
+  EXPECT_EQ(decision.reason, "safe_limited_common_prefix");
 }
 
 TEST(P4ForwardRoute, UnsafeNearStartOrInsufficientStoppingDistanceHolds)
@@ -3503,7 +3515,7 @@ TEST(P4ForwardRoute, UnsafeNearStartOrInsufficientStoppingDistanceHolds)
   EXPECT_EQ(decision.deferred_motion_mode,
             ego_planner::P4ForwardDeferredMotionMode::HOLD);
   EXPECT_TRUE(decision.deferred_trajectory.empty());
-  EXPECT_EQ(decision.reason, "OBSERVATION_NO_POSITIVE_INFORMATION_GAIN");
+  EXPECT_EQ(decision.reason, "safe_common_prefix_too_short_to_stop");
 }
 
 TEST(P4ForwardRoute, FullThreeDimensionalSearchSelectsVerticalChannel)
@@ -3948,7 +3960,7 @@ TEST(P4ObservationSegmentPlannerTest,
 }
 
 TEST(P4ObservationSegmentPlannerTest,
-     ReturnsTypedHoldWhenSensorGeometryCannotRevealBothChannels) {
+     ReportsUnavailableHintWhenSensorGeometryCannotRevealBothChannels) {
   ego_planner::P4ObservationSegmentInput input;
   input.current_position = Eigen::Vector3d::Zero();
   input.common_corridor = {
@@ -3978,7 +3990,7 @@ TEST(P4ObservationSegmentPlannerTest,
 }
 
 TEST(P4ForwardRoute,
-     IncompleteProductionRiskUsesCertifiedObservationSegmentWithoutWinner) {
+     PositiveInformationGainOnlyShortensSafeLimitedPrefix) {
   auto request = incompleteObservationRequest(3.6);
 
   const auto decision = P4ForwardRoutePlanner().decide(request);
@@ -3986,8 +3998,9 @@ TEST(P4ForwardRoute,
   ASSERT_EQ(decision.action, P4ForwardAction::DEFER_RISK_SELECTION)
     << decision.reason;
   EXPECT_EQ(decision.executable_intent,
-    ego_planner::P4ExecutableIntent::COMMON_OBSERVATION_SEGMENT);
-  EXPECT_EQ(decision.reason, "certified_observation_segment");
+    ego_planner::P4ExecutableIntent::LIMITED_PREFIX);
+  EXPECT_EQ(decision.reason,
+    "safe_limited_common_prefix_information_gain_hint");
   EXPECT_EQ(decision.deferred_motion_mode,
     ego_planner::P4ForwardDeferredMotionMode::COMMON_PREFIX);
   EXPECT_EQ(decision.selection_authority,
@@ -3996,29 +4009,38 @@ TEST(P4ForwardRoute,
   EXPECT_EQ(decision.selected_channel_id, 0u);
   EXPECT_TRUE(decision.selected_guide.empty());
   ASSERT_GE(decision.deferred_trajectory.size(), 2u);
-  EXPECT_TRUE(decision.observation_endpoint.isApprox(
+  EXPECT_TRUE(decision.limited_prefix_endpoint.isApprox(
     decision.deferred_trajectory.back(), 1.0e-12));
-  EXPECT_TRUE(decision.observation_divergence_boundary.allFinite());
-  EXPECT_GT(decision.observation_stopping_reserve_m, 0.0);
+  EXPECT_TRUE(decision.limited_prefix_boundary.allFinite());
+  EXPECT_GT(decision.limited_prefix_stopping_reserve_m, 0.0);
   EXPECT_GT(decision.observation_predicted_information_gain, 0.0);
   EXPECT_GT(decision.speed_cap_mps, 0.0);
   EXPECT_LT(decision.deferred_trajectory.back().x(), 3.0);
+
+  const auto no_hint_decision = P4ForwardRoutePlanner().decide(
+      incompleteObservationRequest(0.5));
+  ASSERT_EQ(no_hint_decision.executable_intent,
+            ego_planner::P4ExecutableIntent::LIMITED_PREFIX);
+  ASSERT_GE(no_hint_decision.deferred_trajectory.size(), 2u);
+  EXPECT_LE(decision.deferred_trajectory.back().x(),
+            no_hint_decision.deferred_trajectory.back().x() + 1.0e-12);
 }
 
 TEST(P4ForwardRoute,
-     PhysicallyUnobservableProductionRiskProducesTypedHold) {
+     PhysicallyUnobservableProductionRiskUsesSafeLimitedPrefix) {
   auto request = incompleteObservationRequest(0.5);
 
   const auto decision = P4ForwardRoutePlanner().decide(request);
 
   EXPECT_EQ(decision.action, P4ForwardAction::DEFER_RISK_SELECTION);
   EXPECT_EQ(decision.executable_intent,
-    ego_planner::P4ExecutableIntent::HOLD);
-  EXPECT_EQ(decision.reason, "OBSERVATION_UNAVAILABLE_SENSOR_GEOMETRY");
+    ego_planner::P4ExecutableIntent::LIMITED_PREFIX);
+  EXPECT_EQ(decision.reason, "safe_limited_common_prefix");
   EXPECT_EQ(decision.deferred_motion_mode,
-    ego_planner::P4ForwardDeferredMotionMode::HOLD);
+    ego_planner::P4ForwardDeferredMotionMode::COMMON_PREFIX);
   EXPECT_EQ(decision.selection_authority,
     P4ForwardSelectionAuthority::NONE);
-  EXPECT_TRUE(decision.deferred_trajectory.empty());
-  EXPECT_DOUBLE_EQ(decision.speed_cap_mps, 0.0);
+  EXPECT_GE(decision.deferred_trajectory.size(), 2u);
+  EXPECT_GT(decision.speed_cap_mps, 0.0);
+  EXPECT_DOUBLE_EQ(decision.observation_predicted_information_gain, 0.0);
 }

@@ -230,6 +230,14 @@
   distance cannot stop the current state, the action remains HOLD. The cropped curve is
   independently checked at its actual arrival times and may not pass the
   approved endpoint.
+- The common corridor is the nominal path contained by every candidate's safe
+  tube. Candidate centerlines need not coincide. Decision schema v17 records
+  its actual endpoint, tube boundary, and stopping reserve as
+  `limited_prefix_endpoint`, `limited_prefix_boundary`, and
+  `limited_prefix_stopping_reserve_m`. Predicted information gain is a
+  non-authorizing diagnostic: it may choose an earlier feasible stop but may
+  neither relax a gate nor turn a safe stoppable prefix into HOLD. Missing,
+  zero, or non-positive gain therefore falls back to the farthest safe prefix.
 - A geometry-only prefix, a single route with incomplete risk support, or a
   prefix containing any invalid/stale/unsupported risk sample has no motion
   authority. The current certified monitor sample permits the prefix check to

@@ -5372,10 +5372,10 @@ namespace ego_planner
              "action,executable_intent,trigger_reason,geometry_state,risk_support,safety_state,"
              "selection_authority,formal_support,selection_applied,"
              "deferred_motion_mode,common_prefix_length_m,"
-             "observation_endpoint_x,observation_endpoint_y,"
-             "observation_endpoint_z,observation_divergence_x,"
-             "observation_divergence_y,observation_divergence_z,"
-             "observation_stopping_reserve_m,"
+             "limited_prefix_endpoint_x,limited_prefix_endpoint_y,"
+             "limited_prefix_endpoint_z,limited_prefix_boundary_x,"
+             "limited_prefix_boundary_y,limited_prefix_boundary_z,"
+             "limited_prefix_stopping_reserve_m,"
              "observation_predicted_information_gain,"
              "geometry_id,frame_id,frame_contract_id,"
              "local_map_support_identity,alert_limit_policy_id,"
@@ -5628,13 +5628,13 @@ namespace ego_planner
         << (!decision.selected_guide.empty() ? 1 : 0) << ','
         << p4ForwardDeferredMotionModeName(decision.deferred_motion_mode) << ','
         << decision.common_prefix_length_m << ','
-        << decision.observation_endpoint.x() << ','
-        << decision.observation_endpoint.y() << ','
-        << decision.observation_endpoint.z() << ','
-        << decision.observation_divergence_boundary.x() << ','
-        << decision.observation_divergence_boundary.y() << ','
-        << decision.observation_divergence_boundary.z() << ','
-        << decision.observation_stopping_reserve_m << ','
+        << decision.limited_prefix_endpoint.x() << ','
+        << decision.limited_prefix_endpoint.y() << ','
+        << decision.limited_prefix_endpoint.z() << ','
+        << decision.limited_prefix_boundary.x() << ','
+        << decision.limited_prefix_boundary.y() << ','
+        << decision.limited_prefix_boundary.z() << ','
+        << decision.limited_prefix_stopping_reserve_m << ','
         << decision.observation_predicted_information_gain << ','
         << decision.snapshot_identity.geometry_id << ','
         << decision.snapshot_identity.frame_id << ','
@@ -6255,15 +6255,13 @@ namespace ego_planner
       return true;
     const Eigen::MatrixXd control_points =
         local_data_.position_traj_.getControlPoint();
-    const bool observation_intent =
+    const bool limited_prefix_intent =
         last_p4_forward_decision_.executable_intent ==
-            P4ExecutableIntent::COMMON_OBSERVATION_SEGMENT;
+            P4ExecutableIntent::LIMITED_PREFIX;
     const bool publish_authorization_stage =
-        stage == "normal_publish_authorized" ||
-        stage == "observation_publish_authorized";
-    const bool observation_preparation_stage =
-        stage == "observation_curve_before_p5" ||
-        (observation_intent && stage == "final_bspline_before_p5");
+        stage == "normal_publish_authorized";
+    const bool limited_prefix_preparation_stage =
+        limited_prefix_intent && stage == "final_bspline_before_p5";
     if (local_data_.traj_id_ <= 0 ||
         local_data_.start_time_.nanoseconds() <= 0 ||
         control_points.rows() != 3 || control_points.cols() == 0 ||
@@ -6286,7 +6284,6 @@ namespace ego_planner
         p4KnotVectorHash(local_data_.position_traj_.getKnot());
     const bool reuse_prepared_certificate =
         (stage == "p5_final_pass_before_publish" ||
-         stage == "observation_p5_authorized" ||
          publish_authorization_stage) &&
         p4_execution_certificate_.valid &&
         p4_execution_certificate_.trajectory_id == local_data_.traj_id_ &&
@@ -6305,14 +6302,6 @@ namespace ego_planner
             current_control_points_hash &&
         p4_direct_risk_evidence_.knot_vector_hash ==
             current_knot_vector_hash &&
-        (!observation_intent ||
-         (p4_execution_certificate_.execution_instance_id ==
-              local_data_.execution_instance_id_ &&
-          p4_direct_risk_evidence_.observation_validation.valid &&
-          p4_direct_risk_evidence_.observation_validation.certificate_hash ==
-              p4_execution_certificate_.observation_validation_hash &&
-          p4_direct_risk_evidence_.observation_validation.curve_hash ==
-              local_data_.curve_hash_)) &&
         last_p4_forward_decision_.geometry_commit.accepted();
     if (reuse_prepared_certificate)
     {
@@ -6408,7 +6397,17 @@ namespace ego_planner
           last_p4_forward_decision_.geometry_commit.latency_ms = 0.0;
           last_p4_forward_decision_.planning_disposition =
               P4PlanningDisposition::HOLD_REQUIRED;
-          demoteP4ObservationToHold(reason);
+          if (last_p4_forward_decision_.executable_intent ==
+              P4ExecutableIntent::LIMITED_PREFIX)
+          {
+            last_p4_forward_decision_.executable_intent =
+                P4ExecutableIntent::HOLD;
+            last_p4_forward_decision_.deferred_motion_mode =
+                P4ForwardDeferredMotionMode::HOLD;
+            last_p4_forward_decision_.deferred_trajectory.clear();
+            last_p4_forward_decision_.speed_cap_mps = 0.0;
+            last_p4_forward_decision_.reason = reason;
+          }
           if (safety_viz_)
             safety_viz_->publishP4Guides(
                 {toSafetyVizP4Forward(
@@ -6429,7 +6428,7 @@ namespace ego_planner
          last_p4_forward_decision_.action ==
              P4ForwardAction::CONTINUE_NOMINAL) &&
         last_p4_forward_decision_.selected_guide.size() >= 2;
-    const bool deferred_route = observation_intent &&
+    const bool deferred_route = limited_prefix_intent &&
         last_p4_forward_decision_.action ==
             P4ForwardAction::DEFER_RISK_SELECTION &&
         last_p4_forward_decision_.deferred_motion_mode ==
@@ -6448,9 +6447,66 @@ namespace ego_planner
       return reject_final_identity(
           P4GeometryCommitVerdict::INVALID_PATH,
           "p4_decision_has_no_executable_route");
+    const double limited_prefix_projection_tolerance_m = std::max(
+        0.002, 0.5 * p4_forward_limits_.topology_resolution_m);
+    const auto limited_prefix_remaining_to_boundary =
+        [this, limited_prefix_projection_tolerance_m](
+          const Eigen::Vector3d &point, double *remaining_m) {
+          const auto &corridor =
+              last_p4_forward_decision_.geometry_common_corridor;
+          const Eigen::Vector3d &boundary =
+              last_p4_forward_decision_.limited_prefix_boundary;
+          if (corridor.size() < 2u || !point.allFinite() ||
+              !boundary.allFinite() ||
+              (corridor.back() - boundary).norm() > 0.002)
+            return false;
+          for (std::size_t index = corridor.size() - 1u; index > 0u;
+               --index)
+          {
+            const Eigen::Vector3d terminal_delta =
+                corridor[index] - corridor[index - 1u];
+            const double terminal_length_m = terminal_delta.norm();
+            if (!std::isfinite(terminal_length_m) ||
+                terminal_length_m <= 1.0e-9)
+              continue;
+            if ((point - boundary).dot(
+                    terminal_delta / terminal_length_m) > 1.0e-6)
+              return false;
+            break;
+          }
+          return p4CommonCorridorEndpointProgress(
+              corridor, point, boundary,
+              limited_prefix_projection_tolerance_m, remaining_m, nullptr);
+        };
+    if (limited_prefix_intent)
+    {
+      double declared_remaining_m = 0.0;
+      const bool complete_contract =
+          last_p4_forward_decision_.geometry_common_corridor.size() >= 2u &&
+          last_p4_forward_decision_.limited_prefix_endpoint.allFinite() &&
+          last_p4_forward_decision_.limited_prefix_boundary.allFinite() &&
+          std::isfinite(
+              last_p4_forward_decision_.limited_prefix_stopping_reserve_m) &&
+          last_p4_forward_decision_.limited_prefix_stopping_reserve_m >= 0.0 &&
+          (last_p4_forward_decision_.deferred_trajectory.back() -
+              last_p4_forward_decision_.limited_prefix_endpoint).norm() <=
+              limited_prefix_projection_tolerance_m &&
+          limited_prefix_remaining_to_boundary(
+              last_p4_forward_decision_.limited_prefix_endpoint,
+              &declared_remaining_m);
+      if (!complete_contract)
+        return reject_final_identity(
+            P4GeometryCommitVerdict::INVALID_PATH,
+            "limited_prefix_contract_invalid");
+      if (declared_remaining_m + 1.0e-6 <
+          last_p4_forward_decision_.limited_prefix_stopping_reserve_m)
+        return reject_final_identity(
+            P4GeometryCommitVerdict::INVALID_PATH,
+            "limited_prefix_stopping_reserve_insufficient");
+    }
     const auto snapshot = planning_risk_context_.snapshot;
     std::set<uint64_t> normal_prepared_channel_ids;
-    if (stage == "final_bspline_before_p5" && !observation_intent)
+    if (stage == "final_bspline_before_p5" && !limited_prefix_intent)
       for (const auto &candidate : last_p4_forward_decision_.candidates)
         if (candidate.channel_id > 0u && candidate.occupancy_supported)
           normal_prepared_channel_ids.insert(candidate.channel_id);
@@ -6644,7 +6700,7 @@ namespace ego_planner
         committed_velocity.evaluateDeBoorT(committed_duration).norm();
     const double committed_terminal_acceleration =
         committed_acceleration.evaluateDeBoorT(committed_duration).norm();
-    if ((publish_authorization_stage || observation_preparation_stage) &&
+    if ((publish_authorization_stage || limited_prefix_preparation_stage) &&
         (!std::isfinite(committed_duration) || committed_duration <= 0.0 ||
          !committed_endpoint.allFinite() ||
          !std::isfinite(committed_terminal_speed) ||
@@ -6655,7 +6711,22 @@ namespace ego_planner
           P4GeometryCommitVerdict::INVALID_PATH,
           "final_bspline_terminal_stop_contract_failed");
 
-    const bool limited_prefix_commit = observation_intent;
+    if (limited_prefix_intent)
+    {
+      double committed_remaining_m = 0.0;
+      if (!limited_prefix_remaining_to_boundary(
+              committed_endpoint, &committed_remaining_m))
+        return reject_final_identity(
+            P4GeometryCommitVerdict::INVALID_PATH,
+            "limited_prefix_actual_endpoint_outside_common_corridor");
+      if (committed_remaining_m + 1.0e-6 <
+          last_p4_forward_decision_.limited_prefix_stopping_reserve_m)
+        return reject_final_identity(
+            P4GeometryCommitVerdict::INVALID_PATH,
+            "limited_prefix_actual_stopping_reserve_insufficient");
+    }
+
+    const bool limited_prefix_commit = limited_prefix_intent;
     const bool configured_braking_windows =
         p4_gnss_core_policy_ == "braking_window_core";
     if (!configured_braking_windows &&
@@ -7364,12 +7435,11 @@ namespace ego_planner
                 P4GeometryCommitVerdict::INVALID_PATH,
                 "optimized_bspline_left_committed_guide_corridor");
         }
-        // A common observation is authorized by its independently recomputed
-        // actual endpoint, divergence and stopping envelope below. Requiring
-        // it to reach the coarse guide endpoint would reject a shorter,
-        // terminal-stopped curve even though it remains inside the common
-        // corridor. Final-channel curves retain the exact guide-end contract.
-        if (!observation_intent &&
+        // A limited prefix may terminate earlier than its coarse guide after
+        // the terminal-stop fit, provided the actual curve remains inside the
+        // committed public corridor. Final-channel curves retain the exact
+        // guide-end contract.
+        if (!limited_prefix_intent &&
             (executable_trajectory.back() - reference_path.back()).norm() >
                 maximum_deviation)
           return reject_final_commit(
@@ -7466,8 +7536,7 @@ namespace ego_planner
                 last_p4_forward_decision_, commit_position)},
             stamp_s);
     }
-    if ((publish_authorization_stage ||
-         stage == "observation_curve_before_p5") &&
+    if ((publish_authorization_stage || limited_prefix_preparation_stage) &&
         limited_prefix_commit && !use_braking_windows)
     {
       const int anchor_count = std::max(
@@ -7718,18 +7787,25 @@ namespace ego_planner
               "limited_prefix_braking_library_gap");
     }
 
-    if (observation_intent &&
-        (observation_preparation_stage || publish_authorization_stage))
+    if (limited_prefix_intent)
     {
-      p4_observation_validation_ =
-          validateObservationExecutionEnvelope(
-              stamp_s, &prepared_braking_anchors, execution_snapshot);
-      if (!p4_observation_validation_.valid)
-        return reject_final_identity(
-            P4GeometryCommitVerdict::INVALID_PATH,
-            p4_observation_validation_.reason);
-      p4_direct_risk_evidence_.observation_validation =
-          p4_observation_validation_;
+      for (auto &anchor : prepared_braking_anchors)
+      {
+        const int sample_count = std::max(
+            1, static_cast<int>(std::ceil(anchor.duration_s / 0.05)));
+        for (int sample = 0; sample <= sample_count; ++sample)
+        {
+          const Eigen::Vector3d point = anchor.trajectory.evaluateDeBoorT(
+              anchor.duration_s * static_cast<double>(sample) /
+              static_cast<double>(sample_count));
+          double remaining_m = 0.0;
+          if (!limited_prefix_remaining_to_boundary(point, &remaining_m) ||
+              remaining_m < -1.0e-6)
+            return reject_final_identity(
+                P4GeometryCommitVerdict::INVALID_PATH,
+                "limited_prefix_braking_curve_crossed_common_boundary");
+        }
+      }
     }
 
     const bool written = appendP4ForwardDecision(
@@ -7738,13 +7814,10 @@ namespace ego_planner
         stage == "successor_curve_before_p5";
     const bool prepared_nominal_stage =
         stage == "final_bspline_before_p5";
-    const bool prepared_observation_stage =
-        stage == "observation_curve_before_p5";
     const bool normal_selected_reauthorization_stage =
         stage == "normal_selected_bundle_latest_reauthorization";
     if (written && (publish_authorization_stage ||
                     prepared_successor_stage || prepared_nominal_stage ||
-                    prepared_observation_stage ||
                     normal_selected_reauthorization_stage))
     {
       published_p4_forward_decision_ = last_p4_forward_decision_;
@@ -7792,8 +7865,8 @@ namespace ego_planner
       p4_committed_risk_window_plan_ =
           p4_direct_risk_evidence_.committed_window_plan;
       p4_execution_certificate_.approved_endpoint = committed_endpoint;
-      if (observation_intent)
-        last_p4_forward_decision_.observation_endpoint = committed_endpoint;
+      if (limited_prefix_intent)
+        last_p4_forward_decision_.limited_prefix_endpoint = committed_endpoint;
       else
         last_p4_forward_decision_.selected_actual_endpoint =
             committed_endpoint;
@@ -7818,7 +7891,7 @@ namespace ego_planner
               last_p4_forward_decision_.action ==
                   P4ForwardAction::RISK_SELECTED
           ? P4ExecutionAuthority::FORMAL_RISK_SELECTED
-          : observation_intent
+          : limited_prefix_intent
               ? P4ExecutionAuthority::LIMITED_PREFIX
               : P4ExecutionAuthority::ADVISORY;
       const auto successor_candidate = std::find_if(
@@ -7887,8 +7960,6 @@ namespace ego_planner
           p4_global_exposure_policy_.task_mode;
       p4_execution_certificate_.trajectory_assurance_hash =
           p4_direct_risk_evidence_.trajectory_assurance.certificate_hash;
-      p4_execution_certificate_.observation_validation_hash =
-          p4_direct_risk_evidence_.observation_validation.certificate_hash;
       p4_execution_certificate_.local_motion_certificate_hash =
           p4_direct_risk_evidence_.trajectory_assurance.local.certificate_hash;
       p4_execution_certificate_.local_motion_minimum_margin_m =
@@ -9138,12 +9209,15 @@ namespace ego_planner
     }
     if (!bundle.complete())
       return finish(false, "successor_prepared_bundle_incomplete");
-    const bool certified_common_prefix_observation =
+    const bool certified_limited_prefix =
+        bundle.decision.executable_intent ==
+            P4ExecutableIntent::LIMITED_PREFIX &&
+        bundle.certificate.authority == P4ExecutionAuthority::LIMITED_PREFIX &&
         bundle.decision.action == P4ForwardAction::DEFER_RISK_SELECTION &&
         bundle.decision.deferred_motion_mode ==
             P4ForwardDeferredMotionMode::COMMON_PREFIX &&
         bundle.decision.deferred_trajectory.size() >= 2u;
-    if (certified_common_prefix_observation)
+    if (certified_limited_prefix)
     {
       bundle.decision.channel_comparison_state =
           P4ChannelComparisonState::PARTIAL_COMPARISON;
@@ -9161,10 +9235,10 @@ namespace ego_planner
       p4_cached_successor_activation_in_progress_ = false;
       if (!appendP4ForwardDecision(
               last_p4_forward_decision_,
-              "successor_observation_prefix_prepared", now_s))
+              "successor_limited_prefix_prepared", now_s))
       {
         p4_cached_successor_bundle_.reset();
-        return finish(false, "successor_observation_lineage_failed");
+        return finish(false, "successor_limited_prefix_lineage_failed");
       }
       p4_successor_preparation_state_ =
           P4SuccessorPreparationState::PREPARED_CERTIFIED;
@@ -9176,10 +9250,10 @@ namespace ego_planner
           p4_execution_certificate_.execution_snapshot_id;
       prepared.direct_batch_duration_ms =
           p4_direct_risk_evidence_.compute_duration_ms;
-      prepared.reason = "successor_common_prefix_observation_certified";
+      prepared.reason = "successor_limited_prefix_certified";
       appendP4ExecutionEvent(
-          "SUCCESSOR_OBSERVATION_PREFIX_CERTIFIED", now_s, prepared);
-      return finish(true, "successor_observation_prefix_cached");
+          "SUCCESSOR_LIMITED_PREFIX_CERTIFIED", now_s, prepared);
+      return finish(true, "successor_limited_prefix_cached");
     }
     // Certification is a statement about the atomically cached complete
     // bundle, not merely about a refined curve. Install first, then emit the
@@ -9271,24 +9345,6 @@ namespace ego_planner
       observe.deferred_motion_mode = P4ForwardDeferredMotionMode::HOLD;
       observe.deferred_trajectory.clear();
       observe.speed_cap_mps = 0.0;
-      if (observe.geometry_common_corridor.size() >= 2u)
-      {
-        observe.deferred_motion_mode =
-            P4ForwardDeferredMotionMode::COMMON_PREFIX;
-        observe.deferred_trajectory = observe.geometry_common_corridor;
-        observe.speed_cap_mps = p4_forward_limits_.max_observe_speed_mps;
-        observe.reason =
-            "final_channel_intervals_overlap_observe_common_prefix";
-        last_p4_forward_decision_ = observe;
-        p4_actual_curve_feedback_override_ = std::move(observe);
-        p4_successor_preparation_state_ =
-            P4SuccessorPreparationState::CURVE_PREPARING;
-        appendP4ForwardDecision(
-            last_p4_forward_decision_,
-            "successor_channel_comparison_incomparable", now_s);
-        p4_prepared_channel_bundles_.clear();
-        return finish(true, "successor_common_prefix_observation_pending");
-      }
       observe.reason = "final_channel_intervals_overlap_hold";
       last_p4_forward_decision_ = std::move(observe);
       p4_successor_preparation_state_ = P4SuccessorPreparationState::FAILED;
@@ -9370,34 +9426,6 @@ namespace ego_planner
         now_s <= latest_queue_time_s + 1.0e-9;
   }
 
-  bool EGOPlannerManager::demoteP4ObservationToHold(
-      const std::string &reason)
-  {
-    if (last_p4_forward_decision_.executable_intent !=
-        P4ExecutableIntent::COMMON_OBSERVATION_SEGMENT)
-      return false;
-    last_p4_forward_decision_.executable_intent = P4ExecutableIntent::HOLD;
-    last_p4_forward_decision_.deferred_motion_mode =
-        P4ForwardDeferredMotionMode::HOLD;
-    last_p4_forward_decision_.deferred_trajectory.clear();
-    last_p4_forward_decision_.speed_cap_mps = 0.0;
-    last_p4_forward_decision_.selection_authority =
-        P4ForwardSelectionAuthority::NONE;
-    last_p4_forward_decision_.selected_candidate_id = 0u;
-    last_p4_forward_decision_.selected_channel_id = 0u;
-    last_p4_forward_decision_.runner_up_candidate_id = 0u;
-    last_p4_forward_decision_.runner_up_channel_id = 0u;
-    last_p4_forward_decision_.selected_guide.clear();
-    last_p4_forward_decision_.reason = reason;
-    p4_actual_curve_feedback_override_.reset();
-    p4_observation_validation_ = P4ObservationValidationResult{};
-    p4_direct_risk_evidence_.observation_validation =
-        P4ObservationValidationResult{};
-    p4_committed_direct_risk_evidence_.observation_validation =
-        P4ObservationValidationResult{};
-    return true;
-  }
-
   P4NormalChannelPreparationDisposition
   EGOPlannerManager::recordP4NormalChannelCurveFailure(
       const double now_s, const P4PreparedCurveFailure failure,
@@ -9414,15 +9442,6 @@ namespace ego_planner
       return finish(
           P4NormalChannelPreparationDisposition::NOT_APPLICABLE,
           "normal_channel_failure_not_typed");
-
-    if (last_p4_forward_decision_.executable_intent ==
-        P4ExecutableIntent::COMMON_OBSERVATION_SEGMENT)
-    {
-      demoteP4ObservationToHold("observation_curve_failure_hold");
-      return finish(
-          P4NormalChannelPreparationDisposition::REJECTED,
-          "observation_curve_failure_hold");
-    }
 
     std::set<uint64_t> expected_channel_ids;
     for (const auto &candidate : last_p4_forward_decision_.candidates)
@@ -9562,354 +9581,6 @@ namespace ego_planner
         "normal_next_channel_after_typed_failure");
   }
 
-  P4ObservationValidationResult
-  EGOPlannerManager::validateObservationExecutionEnvelope(
-      const double evidence_time_s,
-      const std::vector<P4BrakingAnchor> *braking_library,
-      std::shared_ptr<const P0ExecutionRiskSnapshot> execution_snapshot) const
-  {
-    P4ObservationValidationResult result;
-    result.applicable = last_p4_forward_decision_.executable_intent ==
-        P4ExecutableIntent::COMMON_OBSERVATION_SEGMENT;
-    if (!result.applicable)
-      return result;
-    const auto reject = [&result](const std::string &reason) {
-        result.reason = reason;
-        return result;
-      };
-    result.execution_instance_id = local_data_.execution_instance_id_ != 0u
-        ? local_data_.execution_instance_id_ : execution_instance_id_;
-    result.trajectory_id = local_data_.traj_id_;
-    result.start_time_ns = local_data_.start_time_.nanoseconds();
-    if (!execution_snapshot)
-      execution_snapshot = p4_direct_risk_evidence_.execution_snapshot
-          ? p4_direct_risk_evidence_.execution_snapshot
-          : planning_risk_context_.execution_snapshot;
-    result.execution_snapshot_id = execution_snapshot
-        ? execution_snapshot->execution_snapshot_id
-        : last_p4_forward_decision_.snapshot_identity.execution_snapshot_id;
-    result.snapshot_identity =
-        last_p4_forward_decision_.snapshot_identity.canonical();
-    result.task_mode = p4_global_exposure_policy_.task_mode;
-    const double declared_information_gain = last_p4_forward_decision_.
-        observation_predicted_information_gain;
-    if (!std::isfinite(declared_information_gain) ||
-        declared_information_gain <= 0.0)
-      return reject("OBSERVATION_NO_POSITIVE_INFORMATION_GAIN");
-    if (result.execution_instance_id == 0u || result.trajectory_id <= 0 ||
-        result.start_time_ns <= 0)
-      return reject("OBSERVATION_TRAJECTORY_IDENTITY_INVALID");
-
-    auto curve = local_data_.position_traj_;
-    const Eigen::MatrixXd control_points = curve.getControlPoint();
-    const Eigen::VectorXd knots = curve.getKnot();
-    const double duration_s = curve.getTimeSum();
-    if (control_points.rows() != 3 || control_points.cols() == 0 ||
-        !control_points.allFinite() || knots.size() == 0 ||
-        !knots.allFinite() || !std::isfinite(duration_s) || duration_s <= 0.0)
-      return reject("OBSERVATION_CURVE_INVALID");
-    result.curve_hash = trajectoryCurveHash(
-        local_data_.position_traj_, local_data_.start_time_);
-
-    if (last_p4_forward_decision_.observation_channel_guides.size() < 2u)
-      return reject("OBSERVATION_DIVERGENCE_UNAVAILABLE");
-    std::vector<P4ForwardCandidate> frozen_channels;
-    frozen_channels.reserve(
-        last_p4_forward_decision_.observation_channel_guides.size());
-    for (std::size_t index = 0u;
-         index < last_p4_forward_decision_.observation_channel_guides.size();
-         ++index)
-    {
-      P4ForwardCandidate channel;
-      channel.candidate_id = index + 1u;
-      channel.channel_id = index + 1u;
-      channel.path = last_p4_forward_decision_.observation_channel_guides[
-          index];
-      channel.topology_path = channel.path;
-      frozen_channels.push_back(std::move(channel));
-    }
-    const auto common_corridor = p4CommonGeometryPrefix(
-        frozen_channels,
-        std::max(1.0e-3, p4_forward_limits_.occupancy_resolution_m));
-    if (common_corridor.size() < 2u)
-      return reject("OBSERVATION_DIVERGENCE_UNAVAILABLE");
-    result.divergence_boundary = common_corridor.back();
-
-    const auto project_to_corridor = [&common_corridor](
-        const Eigen::Vector3d &point, double *station_m,
-        double *distance_m) {
-        if (!station_m || !distance_m || !point.allFinite())
-          return false;
-        *station_m = 0.0;
-        *distance_m = std::numeric_limits<double>::infinity();
-        double traversed_m = 0.0;
-        for (std::size_t index = 1u; index < common_corridor.size(); ++index)
-        {
-          const Eigen::Vector3d segment =
-              common_corridor[index] - common_corridor[index - 1u];
-          const double length_m = segment.norm();
-          if (!std::isfinite(length_m) || length_m <= 1.0e-9)
-            continue;
-          const double fraction = std::clamp(
-              (point - common_corridor[index - 1u]).dot(segment) /
-                  (length_m * length_m), 0.0, 1.0);
-          const double projected_distance_m = (point -
-              (common_corridor[index - 1u] + fraction * segment)).norm();
-          if (projected_distance_m < *distance_m)
-          {
-            *distance_m = projected_distance_m;
-            *station_m = traversed_m + fraction * length_m;
-          }
-          traversed_m += length_m;
-        }
-        return std::isfinite(*station_m) && std::isfinite(*distance_m);
-      };
-    double divergence_station_m = 0.0;
-    for (std::size_t index = 1u; index < common_corridor.size(); ++index)
-      divergence_station_m +=
-          (common_corridor[index] - common_corridor[index - 1u]).norm();
-    const double corridor_tolerance_m = std::max(
-        0.002, 0.5 * p4_forward_limits_.topology_resolution_m);
-
-    auto velocity = curve.getDerivative();
-    auto acceleration = velocity.getDerivative();
-    const double minimum_deceleration_mps2 =
-        p4_control_profile_.maximum_acceleration_mps2.minCoeff();
-    if (!std::isfinite(minimum_deceleration_mps2) ||
-        minimum_deceleration_mps2 <= 0.0)
-      return reject("OBSERVATION_BRAKE_PROFILE_INVALID");
-    result.minimum_stopping_margin_m =
-        std::numeric_limits<double>::infinity();
-    const int sample_count = std::max(
-        2, static_cast<int>(std::ceil(duration_s / 0.02)));
-    std::vector<Eigen::Vector3d> actual_curve;
-    std::vector<double> actual_times;
-    actual_curve.reserve(static_cast<std::size_t>(sample_count + 1));
-    actual_times.reserve(static_cast<std::size_t>(sample_count + 1));
-    const double fixed_stopping_reserve_m =
-        p4_forward_limits_.vehicle_radius_m +
-        p4_forward_limits_.safety_margin_m;
-    for (int index = 0; index <= sample_count; ++index)
-    {
-      const double time_s = duration_s * static_cast<double>(index) /
-          static_cast<double>(sample_count);
-      const Eigen::Vector3d position = curve.evaluateDeBoorT(time_s);
-      const Eigen::Vector3d speed = velocity.evaluateDeBoorT(time_s);
-      const Eigen::Vector3d accel = acceleration.evaluateDeBoorT(time_s);
-      if (!position.allFinite() || !speed.allFinite() || !accel.allFinite())
-        return reject("OBSERVATION_DYNAMICS_INVALID");
-      actual_curve.push_back(position);
-      actual_times.push_back(time_s);
-      double station_m = 0.0;
-      double distance_m = 0.0;
-      if (!project_to_corridor(position, &station_m, &distance_m) ||
-          distance_m >= corridor_tolerance_m - 1.0e-6)
-        return reject("OBSERVATION_CROSSES_DIVERGENCE");
-      const double stopping_distance_m = speed.squaredNorm() /
-          (2.0 * minimum_deceleration_mps2);
-      result.minimum_stopping_margin_m = std::min(
-          result.minimum_stopping_margin_m,
-          divergence_station_m - station_m - stopping_distance_m -
-              fixed_stopping_reserve_m);
-    }
-    result.endpoint = curve.evaluateDeBoorT(duration_s);
-    if (!result.endpoint.allFinite())
-      return reject("OBSERVATION_CURVE_INVALID");
-    if (result.minimum_stopping_margin_m < -1.0e-6)
-      return reject("OBSERVATION_STOPPING_RESERVE_INSUFFICIENT");
-
-    const auto derivative_limits = curve.checkDerivativeLimits(
-        p4_control_profile_, pp_.feasibility_tolerance_);
-    if (!derivative_limits.valid || !derivative_limits.velocity_ok ||
-        !derivative_limits.acceleration_ok || !derivative_limits.jerk_ok)
-      return reject("OBSERVATION_DYNAMICS_INVALID");
-
-    std::ostringstream brake_identity;
-    brake_identity << "observation_brake_library_v1;" << std::hexfloat
-                   << minimum_deceleration_mps2 << ';';
-    const auto *brakes = braking_library ? braking_library :
-        &p4_braking_anchors_;
-    if (braking_library && brakes->empty())
-      return reject("OBSERVATION_BRAKE_LIBRARY_INVALID");
-    std::vector<iap::LocalMotionCurve> clearance_curves;
-    iap::LocalMotionCurve nominal_clearance_curve;
-    nominal_clearance_curve.curve_id = "observation-nominal";
-    nominal_clearance_curve.samples.reserve(actual_curve.size());
-    for (std::size_t index = 0u; index < actual_curve.size(); ++index)
-      nominal_clearance_curve.samples.push_back(iap::LocalMotionSample{
-          actual_times[index], actual_curve[index],
-          p4_local_tracking_error_bound_m_});
-    clearance_curves.push_back(std::move(nominal_clearance_curve));
-    for (const auto &anchor : *brakes)
-    {
-      if (!std::isfinite(anchor.trajectory_time_s) ||
-          anchor.trajectory_time_s < -1.0e-9 ||
-          anchor.trajectory_time_s > duration_s + 1.0e-9)
-        return reject("OBSERVATION_BRAKE_LIBRARY_INVALID");
-      brake_identity << anchor.trajectory_time_s << ':'
-                     << anchor.control_points_hash << ':'
-                     << anchor.knot_vector_hash << ';';
-      auto brake = anchor.trajectory;
-      const double brake_duration_s = brake.getTimeSum();
-      if (!std::isfinite(brake_duration_s) || brake_duration_s <= 0.0 ||
-          brake_duration_s >
-              duration_s - anchor.trajectory_time_s + 1.0e-6 ||
-          !std::isfinite(anchor.duration_s) ||
-          std::abs(anchor.duration_s - brake_duration_s) > 1.0e-8 ||
-          anchor.control_points_hash !=
-              p4ControlPointHash(brake.getControlPoint()) ||
-          anchor.knot_vector_hash != p4KnotVectorHash(brake.getKnot()))
-        return reject("OBSERVATION_BRAKE_LIBRARY_INVALID");
-      auto brake_velocity = brake.getDerivative();
-      auto brake_acceleration = brake_velocity.getDerivative();
-      const auto brake_limits = brake.checkDerivativeLimits(
-          p4_control_profile_, pp_.feasibility_tolerance_);
-      const Eigen::Vector3d nominal_position =
-          curve.evaluateDeBoorT(anchor.trajectory_time_s);
-      const Eigen::Vector3d nominal_velocity =
-          velocity.evaluateDeBoorT(anchor.trajectory_time_s);
-      const Eigen::Vector3d nominal_acceleration =
-          acceleration.evaluateDeBoorT(anchor.trajectory_time_s);
-      if (!anchor.position.allFinite() || !anchor.velocity.allFinite() ||
-          !anchor.acceleration.allFinite() ||
-          !anchor.position.isApprox(nominal_position, 1.0e-8) ||
-          !anchor.velocity.isApprox(nominal_velocity, 1.0e-8) ||
-          !anchor.acceleration.isApprox(nominal_acceleration, 1.0e-7) ||
-          !brake.evaluateDeBoorT(0.0).isApprox(
-              nominal_position, 1.0e-8) ||
-          !brake_velocity.evaluateDeBoorT(0.0).isApprox(
-              nominal_velocity, 1.0e-8) ||
-          !brake_acceleration.evaluateDeBoorT(0.0).isApprox(
-              nominal_acceleration, 1.0e-7) ||
-          !brake_limits.valid || !brake_limits.velocity_ok ||
-          !brake_limits.acceleration_ok || !brake_limits.jerk_ok ||
-          brake_velocity.evaluateDeBoorT(brake_duration_s).norm() >
-              1.0e-8 ||
-          brake_acceleration.evaluateDeBoorT(brake_duration_s).norm() >
-              1.0e-7)
-        return reject("OBSERVATION_BRAKE_DYNAMICS_INVALID");
-      const int brake_samples = std::max(
-          1, static_cast<int>(std::ceil(brake_duration_s / 0.02)));
-      iap::LocalMotionCurve brake_clearance_curve;
-      brake_clearance_curve.curve_id = "observation-brake-" +
-          std::to_string(anchor.braking_certificate_id);
-      brake_clearance_curve.braking_curve = true;
-      brake_clearance_curve.samples.reserve(
-          static_cast<std::size_t>(brake_samples + 1));
-      for (int index = 0; index <= brake_samples; ++index)
-      {
-        const double brake_time_s = brake_duration_s *
-            static_cast<double>(index) /
-            static_cast<double>(brake_samples);
-        const Eigen::Vector3d position =
-            brake.evaluateDeBoorT(brake_time_s);
-        const Eigen::Vector3d brake_speed =
-            brake_velocity.evaluateDeBoorT(brake_time_s);
-        const Eigen::Vector3d brake_accel =
-            brake_acceleration.evaluateDeBoorT(brake_time_s);
-        if (!position.allFinite() || !brake_speed.allFinite() ||
-            !brake_accel.allFinite())
-          return reject("OBSERVATION_BRAKE_DYNAMICS_INVALID");
-        double station_m = 0.0;
-        double distance_m = 0.0;
-        if (!project_to_corridor(position, &station_m, &distance_m) ||
-            distance_m >= corridor_tolerance_m - 1.0e-6 ||
-            station_m > divergence_station_m + 1.0e-6)
-          return reject("OBSERVATION_STOPPING_RESERVE_INSUFFICIENT");
-        result.minimum_stopping_margin_m = std::min(
-            result.minimum_stopping_margin_m,
-            divergence_station_m - station_m - fixed_stopping_reserve_m);
-        brake_clearance_curve.samples.push_back(iap::LocalMotionSample{
-            anchor.trajectory_time_s + brake_time_s, position,
-            p4_local_tracking_error_bound_m_});
-      }
-      clearance_curves.push_back(std::move(brake_clearance_curve));
-    }
-    if (result.minimum_stopping_margin_m < -1.0e-6)
-      return reject("OBSERVATION_STOPPING_RESERVE_INSUFFICIENT");
-    result.brake_library_identity = p4IdentityHash(brake_identity.str());
-
-    const auto occupancy = execution_snapshot
-        ? execution_snapshot->occupancy
-        : planning_risk_context_.occupancy_snapshot;
-    if (braking_library)
-    {
-      const auto &execution = execution_snapshot;
-      if (!execution || !occupancy || !occupancy->diagnostic_query)
-        return reject("OBSERVATION_FROZEN_OCCUPANCY_UNAVAILABLE");
-      const auto local_evidence = buildP4LocalMotionEvidence(
-          occupancy, execution->integrity_anchor.current, clearance_curves,
-          execution->execution_snapshot_id,
-          execution->localFreshAt(evidence_time_s),
-          &execution->local_obstacle_source_certifications);
-      const iap::LocalClearanceEvaluator clearance(
-          local_evidence, p4_local_motion_policy_);
-      for (const auto &checked_curve : clearance_curves)
-        for (const auto &sample : checked_curve.samples)
-      {
-        const auto diagnostic = occupancy->diagnostic_query(
-            sample.position_map);
-        if (!diagnostic.available || diagnostic.inflated_occupied ||
-            diagnostic.state == iap::RiskOccupancyState::OCCUPIED)
-          return reject("OBSERVATION_COLLISION_OR_CLEARANCE_INVALID");
-        const auto clearance_result = clearance.query(
-            sample.position_map, p4_local_tracking_error_bound_m_,
-            p4_planning_clearance_buffer_m_);
-        if (clearance_result.status != iap::LocalClearanceStatus::VALID ||
-            !std::isfinite(clearance_result.signed_margin_m) ||
-            clearance_result.signed_margin_m <= 0.0)
-          return reject("OBSERVATION_COLLISION_OR_CLEARANCE_INVALID");
-      }
-    }
-
-    const auto &missing_los = last_p4_forward_decision_.
-        observation_missing_los_by_channel;
-    P4ObservationSegmentInput observation_check;
-    observation_check.current_position = curve.evaluateDeBoorT(0.0);
-    observation_check.current_velocity = velocity.evaluateDeBoorT(0.0);
-    observation_check.current_acceleration =
-        acceleration.evaluateDeBoorT(0.0);
-    observation_check.common_corridor = actual_curve;
-    observation_check.divergence_point = actual_curve.back();
-    observation_check.missing_los_by_channel = missing_los;
-    observation_check.raw_occluders = last_p4_forward_decision_.
-        observation_raw_occluders;
-    observation_check.sensor = last_p4_forward_decision_.
-        observation_sensor_model;
-    observation_check.candidate_spacing_m = std::min(
-        0.05, std::max(0.01,
-            p4_forward_limits_.topology_resolution_m));
-    observation_check.stopping_reserve_m = 0.0;
-    double actual_curve_length_m = 0.0;
-    for (std::size_t index = 1u; index < actual_curve.size(); ++index)
-      actual_curve_length_m +=
-          (actual_curve[index] - actual_curve[index - 1u]).norm();
-    observation_check.maximum_progress_m = std::max(
-        0.01, actual_curve_length_m);
-    const auto recomputed_observation =
-        P4ObservationSegmentPlanner{}.plan(observation_check);
-    if (!recomputed_observation.available ||
-        !std::isfinite(recomputed_observation.fair_information_gain) ||
-        recomputed_observation.fair_information_gain <= 0.0)
-      return reject("OBSERVATION_NO_NEW_OBSERVABLE_LOS_VOXEL");
-    result.predicted_information_gain =
-        recomputed_observation.fair_information_gain;
-    for (std::size_t channel = 0u;
-         channel < recomputed_observation.per_channel_normalized_gain.size() &&
-         channel < missing_los.size(); ++channel)
-      result.newly_observable_los_voxel_count += static_cast<std::size_t>(
-          std::llround(recomputed_observation.
-              per_channel_normalized_gain[channel] *
-              static_cast<double>(missing_los[channel].size())));
-    if (result.newly_observable_los_voxel_count == 0u)
-      return reject("OBSERVATION_NO_NEW_OBSERVABLE_LOS_VOXEL");
-
-    result.certificate_hash = p4ObservationValidationHash(result);
-    result.valid = true;
-    result.reason = "OBSERVATION_EXECUTION_ENVELOPE_VALID";
-    return result;
-  }
-
   P4NormalChannelPreparationDisposition
   EGOPlannerManager::prepareP4NormalChannelComparison(
       const double now_s, const P5GateStatus &p5_preview,
@@ -9922,131 +9593,14 @@ namespace ego_planner
       return disposition;
     };
 
-    const bool common_observation =
+    const bool limited_prefix =
         last_p4_forward_decision_.executable_intent ==
-            P4ExecutableIntent::COMMON_OBSERVATION_SEGMENT;
-    const auto reject_observation = [this, reason](const std::string &why) {
-        const std::string stable_reason = why;
-        demoteP4ObservationToHold(stable_reason);
-        if (reason) *reason = stable_reason;
-        return P4NormalChannelPreparationDisposition::REJECTED;
-      };
-    if (common_observation &&
-        (!std::isfinite(last_p4_forward_decision_.
-             observation_predicted_information_gain) ||
-         last_p4_forward_decision_.observation_predicted_information_gain <=
-             0.0))
-      return reject_observation(
-          "OBSERVATION_NO_POSITIVE_INFORMATION_GAIN");
-    if (common_observation)
-    {
-      const auto execution_snapshot = p4_direct_risk_evidence_.execution_snapshot
-          ? p4_direct_risk_evidence_.execution_snapshot
-          : planning_risk_context_.execution_snapshot;
-      p4_observation_validation_ =
-          validateObservationExecutionEnvelope(
-              now_s, nullptr, execution_snapshot);
-      if (!p4_observation_validation_.valid)
-        return reject_observation(
-            p4_observation_validation_.reason);
-      p4_direct_risk_evidence_.observation_validation =
-          p4_observation_validation_;
-      p4_committed_direct_risk_evidence_.observation_validation =
-          p4_observation_validation_;
-    }
-    const auto corridor_station = [](
-        const std::vector<Eigen::Vector3d> &corridor,
-        const Eigen::Vector3d &point, double *station_m,
-        double *distance_m) {
-      if (!station_m || !distance_m || corridor.size() < 2u ||
-          !point.allFinite())
-        return false;
-      double traversed_m = 0.0;
-      *station_m = 0.0;
-      *distance_m = std::numeric_limits<double>::infinity();
-      for (std::size_t index = 1u; index < corridor.size(); ++index)
-      {
-        if (!corridor[index - 1u].allFinite() ||
-            !corridor[index].allFinite())
-          return false;
-        const Eigen::Vector3d segment =
-            corridor[index] - corridor[index - 1u];
-        const double length_m = segment.norm();
-        if (!std::isfinite(length_m) || length_m <= 1.0e-9)
-          continue;
-        const double fraction = std::clamp(
-            (point - corridor[index - 1u]).dot(segment) /
-                (length_m * length_m),
-            0.0, 1.0);
-        const double projected_distance_m =
-            (point - (corridor[index - 1u] + fraction * segment)).norm();
-        if (projected_distance_m < *distance_m)
-        {
-          *distance_m = projected_distance_m;
-          *station_m = traversed_m + fraction * length_m;
-        }
-        traversed_m += length_m;
-      }
-      return std::isfinite(*station_m) && std::isfinite(*distance_m);
-    };
-    double observation_endpoint_station_m =
-        std::numeric_limits<double>::quiet_NaN();
-    double observation_endpoint_distance_m =
-        std::numeric_limits<double>::quiet_NaN();
-    double observation_divergence_station_m =
-        std::numeric_limits<double>::quiet_NaN();
-    double observation_divergence_distance_m =
-        std::numeric_limits<double>::quiet_NaN();
-    // deferred_trajectory is the frozen route-level guide.  The certified
-    // optimizer may stop its actual curve earlier; observation_endpoint is
-    // deliberately rebound to that independently audited endpoint.
-    const bool observation_geometry_valid = !common_observation ||
-        (last_p4_forward_decision_.deferred_trajectory.size() >= 2u &&
-         std::all_of(
-             last_p4_forward_decision_.deferred_trajectory.begin(),
-             last_p4_forward_decision_.deferred_trajectory.end(),
-             [](const Eigen::Vector3d &point) { return point.allFinite(); }) &&
-         corridor_station(
-             last_p4_forward_decision_.geometry_common_corridor,
-             last_p4_forward_decision_.observation_endpoint,
-             &observation_endpoint_station_m,
-             &observation_endpoint_distance_m) &&
-         corridor_station(
-             last_p4_forward_decision_.geometry_common_corridor,
-             last_p4_forward_decision_.observation_divergence_boundary,
-             &observation_divergence_station_m,
-             &observation_divergence_distance_m) &&
-         observation_endpoint_distance_m <= 1.0e-3 &&
-         observation_divergence_distance_m <= 1.0e-3 &&
-         observation_endpoint_station_m +
-                 last_p4_forward_decision_.observation_stopping_reserve_m <=
-             observation_divergence_station_m + 1.0e-6);
-    if (common_observation &&
-        (last_p4_forward_decision_.action !=
-             P4ForwardAction::DEFER_RISK_SELECTION ||
-         last_p4_forward_decision_.deferred_motion_mode !=
-             P4ForwardDeferredMotionMode::COMMON_PREFIX ||
-         last_p4_forward_decision_.channel_comparison_state !=
-             P4ChannelComparisonState::PARTIAL_COMPARISON ||
-         last_p4_forward_decision_.selected_candidate_id != 0u ||
-         last_p4_forward_decision_.selected_channel_id != 0u ||
-         last_p4_forward_decision_.selection_authority !=
-             P4ForwardSelectionAuthority::NONE ||
-         last_p4_forward_decision_.deferred_trajectory.size() < 2u ||
-         !last_p4_forward_decision_.observation_endpoint.allFinite() ||
-         !last_p4_forward_decision_.observation_divergence_boundary.
-             allFinite() ||
-         !std::isfinite(
-             last_p4_forward_decision_.observation_stopping_reserve_m) ||
-         last_p4_forward_decision_.observation_stopping_reserve_m < 0.0 ||
-         !observation_geometry_valid))
-      return reject_observation("observation_intent_contract_invalid");
-
+            P4ExecutableIntent::LIMITED_PREFIX;
     std::set<uint64_t> expected_channel_ids;
     for (const auto &candidate : last_p4_forward_decision_.candidates)
       if (candidate.channel_id > 0u && candidate.occupancy_supported)
         expected_channel_ids.insert(candidate.channel_id);
-    if (!common_observation && expected_channel_ids.size() < 2u)
+    if (!limited_prefix && expected_channel_ids.size() < 2u)
       return finish(
           P4NormalChannelPreparationDisposition::NOT_APPLICABLE,
           "normal_multi_channel_comparison_not_required");
@@ -10075,10 +9629,10 @@ namespace ego_planner
           P4NormalChannelPreparationDisposition::REJECTED,
           "normal_channel_prepared_curve_identity_mismatch");
 
-    if (common_observation)
+    if (limited_prefix)
       return finish(
           P4NormalChannelPreparationDisposition::NOT_APPLICABLE,
-          "observation_ready");
+          "limited_prefix_ready");
 
     P4PreparedSuccessorBundle bundle;
     bundle.state = P4SuccessorPreparationState::PREPARED_CERTIFIED;
@@ -10320,7 +9874,7 @@ namespace ego_planner
       observe.deferred_motion_mode = P4ForwardDeferredMotionMode::HOLD;
       observe.deferred_trajectory.clear();
       observe.speed_cap_mps = 0.0;
-      observe.reason = "OBSERVATION_NO_POSITIVE_INFORMATION_GAIN";
+      observe.reason = "normal_channel_comparison_incomparable_hold";
       last_p4_forward_decision_ = std::move(observe);
       p4_actual_curve_feedback_override_.reset();
       appendP4ForwardDecision(
@@ -10617,9 +10171,6 @@ namespace ego_planner
         if (reason) *reason = why;
         return ready;
       };
-    if (last_p4_forward_decision_.executable_intent ==
-        P4ExecutableIntent::COMMON_OBSERVATION_SEGMENT)
-      return finish(false, "observation_curve_failure_hold");
     const bool controlled_route_preference =
         p4_direct_risk_evidence_.admissionComplete() &&
         p4_direct_risk_evidence_.trajectory_assurance_complete &&
@@ -11279,8 +10830,11 @@ namespace ego_planner
       return finish(false, "actual_curve_public_common_corridor_unavailable");
     const double fixed_reserve_m = p4_forward_limits_.vehicle_radius_m +
         p4_forward_limits_.safety_margin_m;
-    const double terminal_reserve_m = std::max(
-        fixed_reserve_m, retry.stopping_distance_m);
+    const double terminal_reserve_m = std::max({
+        fixed_reserve_m, retry.stopping_distance_m,
+        p4StoppingDistance(
+            p4_forward_limits_.max_observe_speed_mps,
+            p4_forward_limits_)});
     const double common_corridor_m =
         p4PolylineLength(retry.geometry_common_corridor);
     const double configured_progress_cap_m =
@@ -11297,7 +10851,8 @@ namespace ego_planner
             p4_forward_limits_.min_creep_progress_m)
       return finish(false, "actual_curve_safe_prefix_too_short");
     retry.action = P4ForwardAction::DEFER_RISK_SELECTION;
-    retry.executable_intent = P4ExecutableIntent::HOLD;
+    retry.executable_intent = P4ExecutableIntent::LIMITED_PREFIX;
+    retry.trigger_reason = P4ForwardTriggerReason::NO_SAFE_ROUTE;
     retry.selection_authority = P4ForwardSelectionAuthority::NONE;
     retry.formal_support = false;
     retry.selected_candidate_id = 0u;
@@ -11305,13 +10860,20 @@ namespace ego_planner
     retry.runner_up_candidate_id = 0u;
     retry.runner_up_channel_id = 0u;
     retry.selected_guide.clear();
-    retry.deferred_motion_mode = P4ForwardDeferredMotionMode::HOLD;
-    retry.deferred_trajectory.clear();
-    retry.speed_cap_mps = 0.0;
-    retry.reason = "OBSERVATION_NO_POSITIVE_INFORMATION_GAIN";
-    last_p4_forward_decision_ = std::move(retry);
-    p4_actual_curve_feedback_override_.reset();
-    return finish(false, "OBSERVATION_NO_POSITIVE_INFORMATION_GAIN");
+    retry.deferred_motion_mode = P4ForwardDeferredMotionMode::COMMON_PREFIX;
+    retry.deferred_trajectory = std::move(prefix);
+    retry.common_prefix_length_m = common_corridor_m;
+    retry.certified_free_distance_m = std::min(
+        safe_actual_arc_m, common_corridor_m);
+    retry.limited_prefix_endpoint = retry.deferred_trajectory.back();
+    retry.limited_prefix_boundary = retry.geometry_common_corridor.back();
+    retry.limited_prefix_stopping_reserve_m = terminal_reserve_m;
+    retry.observation_predicted_information_gain = 0.0;
+    retry.speed_cap_mps = p4_forward_limits_.max_observe_speed_mps;
+    retry.reason = "safe_limited_common_prefix";
+    last_p4_forward_decision_ = retry;
+    p4_actual_curve_feedback_override_ = std::move(retry);
+    return finish(true, "safe_limited_prefix_feedback_ready");
   }
 
   bool EGOPlannerManager::validatePreparedP4SuccessorBeforePublish(

@@ -9,35 +9,19 @@
 CPU/进程全量门禁、单岔路 primary/mirror 和 180 秒森林验收尚未在本状态行宣称通过；
 下方交付清单只有在对应证据命令完成后才勾选。
 
-2026-09-23 的 observation publication 回退已在独立有界切片中修复：
-`COMMON_OBSERVATION_SEGMENT` 现在是强类型执行意图，不再借用 reason string
-或 final-channel winner 合同。合法观察段保持 candidate/channel 为 0，在分叉前
-保留完整停车余量，经 exact B-spline、local/dynamics/brake、现有任务策略、P5 和
-专用 lineage 后发布；失败进入 typed HOLD，不转换为 alternate channel。该切片的
-CPU 与真实 traj_server 进程测试独立记录，不代表下文完整 S0–S6 或森林 live 已完成。
+2026-09-24 的有界修复以通用 `LIMITED_PREFIX` 取代前一日的 observation 专用
+执行协议。不可比较通道仍由“名义路径位于所有候选安全 tube 内”定义公共可执行区；
+最终阶段不再用候选中心线逐点重合重新否决该区域。合法前缀保持 candidate/channel
+为 0、`selection_authority=NONE`，预留完整停车距离，并通过标准 exact B-spline、
+local/dynamics/collision、direct risk、brake、P5、发布、激活和 runtime recheck 链。
+信息增益只可作为更早停点的启发式和诊断：零增益、非正增益或传感器几何不可用
+不得阻止最远安全可停车前缀。schema v17 使用 `limited_prefix_*` endpoint/boundary/
+reserve 字段，并删除 observation validation hash、冻结 guide/occluder/LOS 决策字段
+及专用 P5 入口。前一日失败证据保留为历史记录，不再描述当前授权协议。
 
-同日 observation execution closure 进一步移除了上游自证：最终审核器从冻结的
-通道 guide、occupancy/execution snapshot、传感器 LOS 输入、实际 B-spline、控制能力
-和制动库独立重算信息增益、首次真实分歧点、全曲线公共走廊、导数与停车余量；P5
-核对同一 validation hash、execution instance、trajectory ID/start/curve hash、snapshot、
-endpoint、divergence、brake identity 和 task mode。零/非有限增益或没有新增可观测
-LOS voxel 均为 typed HOLD，且不进入 alternate channel。聚焦 CPU 测试与真实
-planner→traj_server seam 已通过，核心激活测试连续 20/20；75 秒 live 仍须在 GPU
-preflight、增量审查和干净提交之后执行，因此此处不宣称 live 或完整 S0–S6 完成。
-增量复审后，分歧重算固定使用 bounded refinement 之前的完整通道 guide；名义曲线和
-每条 brake 的 swept tube、p/v/a 连续性、导数/终端状态、碰撞与净空均从冻结证据重新
-计算。P5 在启用或禁用 final gate 时都会先重算证书 hash。Seam A 仅冻结 route-level
-输入，实际曲线、终端停止和 ID/start/hash 仍由正常 `reboundReplan` 路径产生。
-本闭环未新增运行参数，也未修改 PL/AL、1 秒 freshness、碰撞/净空、0.05 m planning
-buffer、制动认证、0.15 m tracking envelope 或 STRICT/MISSION 门限。
-最终双轴复审还确认并修复两项发布边界：canonical observation identity 现在在
-可选 P5 对象判断之前验证，故默认 `p5_integrity_gate_ == nullptr` 也不能绕过；最终
-审核器显式消费本轮重授权选中的同一 execution snapshot，而非旧 planning-context
-副本。负向回归分别命中 occupied collision、occupancy-free 但 local-clearance margin
-不足、nominal/brake dynamics/jerk、brake hash、p/v/a 连续性与 terminal-stop 拒绝。
-最终聚焦结果为 P4 `122/122`、P5 `55/55`、planning context `161/161`、完整真实
-进程握手 `2/2`，核心激活测试再次独立运行 `20/20`；这些仍是 CPU/进程证据，唯一
-75 秒 live 的结果另行记录。
+本修复未新增运行参数，也未修改 PL/AL、1 秒 freshness、碰撞/净空、0.05 m planning
+buffer、制动认证、0.15 m tracking envelope、控制器或 STRICT/MISSION 门限。本轮只做
+聚焦 CPU/生产 seam 验证，不宣称 live、森林验收、完整 S0–S6 或正式 qualification。
 
 调查基线：`605e96e7e4c17ef6591b51a0ad1abc19579289a6`。实施时重新记录 HEAD，先核对后续改动。
 
