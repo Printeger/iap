@@ -210,7 +210,7 @@ class Icra075ExploratoryContractTest(unittest.TestCase):
         self.assertIn("first_missing = _row_first_missing", source)
         manager_source = (REPO / "src/iap/planner/plan_manage/src/planner_manager.cpp").read_text()
         lineage_function = manager_source.split(
-            "bool EGOPlannerManager::recordP4VerticalSliceLineage", 1)[1].split(
+            "bool EGOPlannerManager::certifyP4ActualCurve", 1)[1].split(
                 "bool EGOPlannerManager::", 1)[0]
         self.assertNotIn("config.objective !=", lineage_function)
 

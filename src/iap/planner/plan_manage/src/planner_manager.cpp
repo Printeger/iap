@@ -6191,7 +6191,7 @@ namespace ego_planner
         last_p4_forward_decision_, "native_rebound_no_path", stamp_s);
   }
 
-  bool EGOPlannerManager::recordP4VerticalSliceLineage(
+  bool EGOPlannerManager::certifyP4ActualCurve(
       const std::string &stage, const double stamp_s)
   {
     p4_last_actual_curve_certification_ =

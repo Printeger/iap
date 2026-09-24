@@ -32,6 +32,42 @@ P4ControlCapabilityProfile permissiveProfile() {
   return profile;
 }
 
+LocalTrajData identifiedStoppedTrajectory(const int trajectory_id) {
+  LocalTrajData trajectory;
+  trajectory.execution_instance_id_ = 7u;
+  trajectory.traj_id_ = trajectory_id;
+  trajectory.start_time_ = rclcpp::Time(
+      12000000000LL + trajectory_id, RCL_ROS_TIME);
+  trajectory.position_traj_ = stoppedCurve();
+  trajectory.duration_ = trajectory.position_traj_.getTimeSum();
+  trajectory.velocity_traj_ = trajectory.position_traj_.getDerivative();
+  trajectory.acceleration_traj_ = trajectory.velocity_traj_.getDerivative();
+  trajectory.curve_hash_ = "curve-" + std::to_string(trajectory_id);
+  return trajectory;
+}
+
+TEST(P4ActualCurveCertifierTest,
+     NormalLimitedAndSuccessorUseTheSamePureCertificationSeam) {
+  P4ActualCurveCertifier certifier;
+  for (const int trajectory_id : {41, 42, 43}) {
+    LocalTrajData trajectory = identifiedStoppedTrajectory(trajectory_id);
+    const Eigen::MatrixXd control_points_before =
+        trajectory.position_traj_.getControlPoint();
+    const Eigen::VectorXd knots_before = trajectory.position_traj_.getKnot();
+    const std::string hash_before = trajectory.curve_hash_;
+
+    const auto result = certifier.certify(
+        {trajectory, permissiveProfile(), 0.0});
+
+    ASSERT_TRUE(result.complete) << result.detail;
+    EXPECT_TRUE(trajectory.position_traj_.getControlPoint().isApprox(
+        control_points_before, 0.0));
+    EXPECT_TRUE(trajectory.position_traj_.getKnot().isApprox(
+        knots_before, 0.0));
+    EXPECT_EQ(trajectory.curve_hash_, hash_before);
+  }
+}
+
 TEST(P4ActualCurveCertifierTest,
      CertifiesImmutableTerminalCurveAndFindsPreDecelerationSwitch) {
   LocalTrajData trajectory;
@@ -72,6 +108,9 @@ TEST(P4ActualCurveCertifierTest, RejectsNonStoppedTerminalAsTypedFailure) {
   trajectory.velocity_traj_ = trajectory.position_traj_.getDerivative();
   trajectory.acceleration_traj_ = trajectory.velocity_traj_.getDerivative();
   trajectory.curve_hash_ = "curve-42";
+  const Eigen::MatrixXd control_points_before =
+      trajectory.position_traj_.getControlPoint();
+  const std::string hash_before = trajectory.curve_hash_;
 
   const auto result = P4ActualCurveCertifier{}.certify(
       {trajectory, permissiveProfile(), 0.0});
@@ -79,6 +118,9 @@ TEST(P4ActualCurveCertifierTest, RejectsNonStoppedTerminalAsTypedFailure) {
   EXPECT_FALSE(result.complete);
   EXPECT_EQ(result.failure, P4PreparedCurveFailure::TERMINAL_CONTRACT);
   EXPECT_EQ(result.detail, "terminal_stop_contract_failed");
+  EXPECT_TRUE(trajectory.position_traj_.getControlPoint().isApprox(
+      control_points_before, 0.0));
+  EXPECT_EQ(trajectory.curve_hash_, hash_before);
 }
 
 }  // namespace

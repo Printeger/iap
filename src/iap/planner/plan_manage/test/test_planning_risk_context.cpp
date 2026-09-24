@@ -1675,15 +1675,15 @@ TEST(P4ForwardTerminalLineageTest,
   manager.local_data_.traj_id_ = 29;
   manager.local_data_.start_time_ = rclcpp::Time(10, 0, RCL_ROS_TIME);
 
-  EXPECT_TRUE(manager.recordP4VerticalSliceLineage(
+  EXPECT_TRUE(manager.certifyP4ActualCurve(
       "final_bspline_before_p5", 10.0));
   EXPECT_EQ(manager.lastP4ForwardDecision().action,
             ego_planner::P4ForwardAction::RISK_SELECTED);
   EXPECT_EQ(manager.lastP4ForwardDecision().selection_authority,
             ego_planner::P4ForwardSelectionAuthority::FORMAL);
-  EXPECT_TRUE(manager.recordP4VerticalSliceLineage(
+  EXPECT_TRUE(manager.certifyP4ActualCurve(
       "p5_final_pass_before_publish", 10.1));
-  EXPECT_TRUE(manager.recordP4VerticalSliceLineage(
+  EXPECT_TRUE(manager.certifyP4ActualCurve(
       "normal_publish_authorized", 10.2));
   ASSERT_TRUE(manager.p4ExecutionCertificate().valid);
   EXPECT_EQ(manager.p4ExecutionCertificate().trajectory_id, 29);
@@ -1831,7 +1831,7 @@ TEST(P4ForwardTerminalLineageTest,
   manager.local_data_.traj_id_ = 41;
   manager.local_data_.start_time_ = rclcpp::Time(10, 0, RCL_ROS_TIME);
 
-  EXPECT_FALSE(manager.recordP4VerticalSliceLineage(
+  EXPECT_FALSE(manager.certifyP4ActualCurve(
       "final_bspline_before_p5", 10.0));
   ASSERT_EQ(requests.size(), 1u);
   const auto& request = requests.front();
@@ -1888,9 +1888,9 @@ TEST(P4ForwardTerminalLineageTest,
   manager->local_data_.traj_id_ = 61;
   manager->local_data_.start_time_ = rclcpp::Time(10, 0, RCL_ROS_TIME);
   manager->local_data_.duration_ = stopped.getTimeSum();
-  ASSERT_TRUE(manager->recordP4VerticalSliceLineage(
+  ASSERT_TRUE(manager->certifyP4ActualCurve(
       "final_bspline_before_p5", 10.0));
-  ASSERT_TRUE(manager->recordP4VerticalSliceLineage(
+  ASSERT_TRUE(manager->certifyP4ActualCurve(
       "normal_publish_authorized", 10.0));
   const auto incumbent_certificate = manager->p4ExecutionCertificate();
   const auto incumbent_control_points =
@@ -1948,20 +1948,20 @@ TEST(P4ForwardTerminalLineageTest,
   manager.local_data_.start_time_ = rclcpp::Time(10, 0, RCL_ROS_TIME);
 
   manager.setP4ForwardDecisionForTest(makeForwardDecision(snapshot, 99));
-  EXPECT_FALSE(manager.recordP4VerticalSliceLineage(
+  EXPECT_FALSE(manager.certifyP4ActualCurve(
       "final_bspline_before_p5", 10.0));
   auto decision = makeForwardDecision(
       snapshot, manager.planningRiskContext().planning_attempt_id);
   decision.selected_guide.clear();
   manager.setP4ForwardDecisionForTest(std::move(decision));
-  EXPECT_FALSE(manager.recordP4VerticalSliceLineage(
+  EXPECT_FALSE(manager.certifyP4ActualCurve(
       "final_bspline_before_p5", 10.0));
   decision = makeForwardDecision(
       snapshot, manager.planningRiskContext().planning_attempt_id);
   decision.snapshot_identity.local_map_support_identity =
       "different_support_envelope";
   manager.setP4ForwardDecisionForTest(std::move(decision));
-  EXPECT_FALSE(manager.recordP4VerticalSliceLineage(
+  EXPECT_FALSE(manager.certifyP4ActualCurve(
       "final_bspline_before_p5", 10.0));
   const auto rows = readCsvRows(std::filesystem::path(
       debug_path.string() + ".forward_lineage.csv"));
@@ -2015,7 +2015,7 @@ TEST(P4ForwardTerminalLineageTest,
   manager.local_data_.traj_id_ = 33;
   manager.local_data_.start_time_ = rclcpp::Time(10, 0, RCL_ROS_TIME);
 
-  EXPECT_FALSE(manager.recordP4VerticalSliceLineage(
+  EXPECT_FALSE(manager.certifyP4ActualCurve(
       "final_bspline_before_p5", 10.0));
   EXPECT_EQ(manager.lastP4ForwardDecision().executable_intent,
             ego_planner::P4ExecutableIntent::HOLD);
@@ -2464,13 +2464,13 @@ TEST(P4ForwardTerminalLineageTest,
   manager.local_data_.traj_id_ = 35;
   manager.local_data_.start_time_ = rclcpp::Time(10, 0, RCL_ROS_TIME);
 
-  ASSERT_TRUE(manager.recordP4VerticalSliceLineage(
+  ASSERT_TRUE(manager.certifyP4ActualCurve(
       "forward_decision", 10.0));
-  ASSERT_TRUE(manager.recordP4VerticalSliceLineage(
+  ASSERT_TRUE(manager.certifyP4ActualCurve(
       "final_bspline_before_p5", 10.0))
       << manager.lastP4ForwardDecision().geometry_commit.reason << ":"
       << manager.lastP4ForwardDecision().reason;
-  ASSERT_TRUE(manager.recordP4VerticalSliceLineage(
+  ASSERT_TRUE(manager.certifyP4ActualCurve(
       "normal_publish_authorized", 10.0));
   const auto certificate = manager.p4ExecutionCertificate();
   ASSERT_TRUE(certificate.valid);
@@ -3021,9 +3021,9 @@ TEST(P4ForwardTerminalLineageTest,
   manager.local_data_.start_time_ = rclcpp::Time(10, 0, RCL_ROS_TIME);
   manager.local_data_.duration_ = stopped.getTimeSum();
 
-  ASSERT_TRUE(manager.recordP4VerticalSliceLineage(
+  ASSERT_TRUE(manager.certifyP4ActualCurve(
       "final_bspline_before_p5", 10.0));
-  ASSERT_TRUE(manager.recordP4VerticalSliceLineage(
+  ASSERT_TRUE(manager.certifyP4ActualCurve(
       "normal_publish_authorized", 10.0));
   EXPECT_EQ(manager.lastP4ForwardDecision().action,
             ego_planner::P4ForwardAction::RISK_SELECTED);
@@ -3209,7 +3209,7 @@ TEST(P4ForwardTerminalLineageTest,
   manager.local_data_.traj_id_ = 34;
   manager.local_data_.start_time_ = rclcpp::Time(10, 0, RCL_ROS_TIME);
 
-  ASSERT_TRUE(manager.recordP4VerticalSliceLineage(
+  ASSERT_TRUE(manager.certifyP4ActualCurve(
       "final_bspline_before_p5", 10.0));
   const auto rows = readCsvRows(lineage_path);
   ASSERT_EQ(rows.size(), 1u);
@@ -3260,7 +3260,7 @@ TEST(P4ForwardTerminalLineageTest,
 }
 
 TEST(P4ForwardTerminalLineageTest,
-     RejectsSnapshotTrajectoryAndWriterFailuresBeforePublication) {
+     RejectsSafetyFailuresButTreatsWriterFailureAsTelemetry) {
   const auto snapshot = makeP4SelectionSnapshot();
   auto map = std::make_shared<GridMap>();
   GridMapTestAccess::configureNoCollision(map.get());
@@ -3285,21 +3285,21 @@ TEST(P4ForwardTerminalLineageTest,
       snapshot, manager.planningRiskContext().planning_attempt_id);
   decision.snapshot_identity.risk_config_hash = "wrong-risk-config";
   manager.setP4ForwardDecisionForTest(decision);
-  EXPECT_FALSE(manager.recordP4VerticalSliceLineage(
+  EXPECT_FALSE(manager.certifyP4ActualCurve(
       "final_bspline_before_p5", 10.0));
 
   decision = makeForwardDecision(
       snapshot, manager.planningRiskContext().planning_attempt_id);
   decision.snapshot_identity.occupancy_generation = 999;
   manager.setP4ForwardDecisionForTest(decision);
-  EXPECT_FALSE(manager.recordP4VerticalSliceLineage(
+  EXPECT_FALSE(manager.certifyP4ActualCurve(
       "final_bspline_before_p5", 10.05));
 
   decision = makeForwardDecision(
       snapshot, manager.planningRiskContext().planning_attempt_id);
   manager.setP4ForwardDecisionForTest(decision);
   manager.local_data_.traj_id_ = 0;
-  EXPECT_FALSE(manager.recordP4VerticalSliceLineage(
+  EXPECT_FALSE(manager.certifyP4ActualCurve(
       "final_bspline_before_p5", 10.1));
 
   Eigen::MatrixXd malformed = p4RefinedControlPoints();
@@ -3307,7 +3307,7 @@ TEST(P4ForwardTerminalLineageTest,
   manager.local_data_.position_traj_ =
       ego_planner::UniformBspline(malformed, 3, 0.5);
   manager.local_data_.traj_id_ = 31;
-  EXPECT_FALSE(manager.recordP4VerticalSliceLineage(
+  EXPECT_FALSE(manager.certifyP4ActualCurve(
       "final_bspline_before_p5", 10.2));
   const auto rejection_rows = readCsvRows(std::filesystem::path(
       debug_path.string() + ".forward_lineage.csv"));
@@ -3333,7 +3333,7 @@ TEST(P4ForwardTerminalLineageTest,
   missing_manager.local_data_.traj_id_ = 32;
   missing_manager.local_data_.start_time_ =
       rclcpp::Time(10, 0, RCL_ROS_TIME);
-  EXPECT_TRUE(missing_manager.recordP4VerticalSliceLineage(
+  EXPECT_TRUE(missing_manager.certifyP4ActualCurve(
       "final_bspline_before_p5", 10.3));
   EXPECT_TRUE(missing_manager.p4LineageTelemetryFault());
   EXPECT_TRUE(missing_manager.p4ExecutionCertificate().valid);
@@ -6418,7 +6418,7 @@ TEST(P4PreparedChannelPreparation,
   manager.local_data_.traj_id_ = 92;
   manager.local_data_.start_time_ = rclcpp::Time(10, 0, RCL_ROS_TIME);
   manager.local_data_.duration_ = stopped.getTimeSum();
-  ASSERT_TRUE(manager.recordP4VerticalSliceLineage(
+  ASSERT_TRUE(manager.certifyP4ActualCurve(
       "final_bspline_before_p5", 10.0));
 
   ego_planner::P5GateStatus disabled_preview;
@@ -6451,7 +6451,7 @@ TEST(P4PreparedChannelPreparation,
       manager.local_data_.velocity_traj_.getDerivative();
   manager.local_data_.traj_id_ = 93;
   manager.local_data_.duration_ = mirrored.getTimeSum();
-  ASSERT_TRUE(manager.recordP4VerticalSliceLineage(
+  ASSERT_TRUE(manager.certifyP4ActualCurve(
       "final_bspline_before_p5", 10.0));
   EXPECT_EQ(
       manager.prepareP4NormalChannelComparison(
@@ -6579,7 +6579,7 @@ TEST(P4PreparedChannelPreparation,
   manager.local_data_.traj_id_ = 94;
   manager.local_data_.start_time_ = rclcpp::Time(10, 0, RCL_ROS_TIME);
   manager.local_data_.duration_ = runner_curve.getTimeSum();
-  ASSERT_TRUE(manager.recordP4VerticalSliceLineage(
+  ASSERT_TRUE(manager.certifyP4ActualCurve(
       "final_bspline_before_p5", 10.0));
 
   ego_planner::P5GateStatus disabled_preview;
@@ -6668,7 +6668,7 @@ TEST(P4PreparedChannelPreparation,
   manager.local_data_.traj_id_ = 95;
   manager.local_data_.start_time_ = rclcpp::Time(10, 0, RCL_ROS_TIME);
   manager.local_data_.duration_ = first_curve.getTimeSum();
-  ASSERT_TRUE(manager.recordP4VerticalSliceLineage(
+  ASSERT_TRUE(manager.certifyP4ActualCurve(
       "final_bspline_before_p5", 10.0));
 
   ego_planner::P5GateStatus disabled_preview;
@@ -6738,7 +6738,7 @@ TEST(P4PreparedChannelPreparation,
   manager.local_data_.traj_id_ = 96;
   manager.local_data_.start_time_ = rclcpp::Time(10, 0, RCL_ROS_TIME);
   manager.local_data_.duration_ = second_curve.getTimeSum();
-  ASSERT_TRUE(manager.recordP4VerticalSliceLineage(
+  ASSERT_TRUE(manager.certifyP4ActualCurve(
       "final_bspline_before_p5", 10.0));
   EXPECT_EQ(
       manager.prepareP4NormalChannelComparison(
@@ -6824,7 +6824,7 @@ TEST(P4PreparedChannelPreparation,
   manager.local_data_.traj_id_ = 97;
   manager.local_data_.start_time_ = rclcpp::Time(10, 0, RCL_ROS_TIME);
   manager.local_data_.duration_ = first_curve.getTimeSum();
-  ASSERT_TRUE(manager.recordP4VerticalSliceLineage(
+  ASSERT_TRUE(manager.certifyP4ActualCurve(
       "final_bspline_before_p5", 10.0));
   auto first_evidence = manager.latestP4DirectRiskEvidence();
   for (auto &point : first_evidence.points)
@@ -6861,7 +6861,7 @@ TEST(P4PreparedChannelPreparation,
       manager.local_data_.velocity_traj_.getDerivative();
   manager.local_data_.traj_id_ = 98;
   manager.local_data_.duration_ = second_curve.getTimeSum();
-  ASSERT_TRUE(manager.recordP4VerticalSliceLineage(
+  ASSERT_TRUE(manager.certifyP4ActualCurve(
       "final_bspline_before_p5", 10.0));
   auto comparison_decision = manager.lastP4ForwardDecision();
   comparison_decision.candidates[0].path = {
@@ -7047,7 +7047,7 @@ TEST(P4PreparedChannelPreparation,
         static_cast<int64_t>(std::llround(start_s * 1.0e9)),
         RCL_ROS_TIME);
     manager.local_data_.duration_ = curve.getTimeSum();
-    if (!manager.recordP4VerticalSliceLineage(
+    if (!manager.certifyP4ActualCurve(
             "final_bspline_before_p5", start_s))
       return ego_planner::P4NormalChannelPreparationDisposition::REJECTED;
     ego_planner::P5GateStatus disabled_preview;
@@ -7299,9 +7299,9 @@ TEST(P4PreparedSuccessorPolicy,
   manager.local_data_.traj_id_ = 92;
   manager.local_data_.start_time_ = rclcpp::Time(10, 0, RCL_ROS_TIME);
   manager.local_data_.duration_ = stopped.getTimeSum();
-  ASSERT_TRUE(manager.recordP4VerticalSliceLineage(
+  ASSERT_TRUE(manager.certifyP4ActualCurve(
       "final_bspline_before_p5", 10.0));
-  ASSERT_TRUE(manager.recordP4VerticalSliceLineage(
+  ASSERT_TRUE(manager.certifyP4ActualCurve(
       "normal_publish_authorized", 10.0));
 
   ego_planner::LocalTrajData incumbent = manager.local_data_;

@@ -1809,7 +1809,7 @@ namespace ego_planner
           !preparing_limited_prefix && normal_channel_ids.size() >= 2u;
 
       if (!using_cached_successor &&
-          !planner_manager_->recordP4VerticalSliceLineage(
+          !planner_manager_->certifyP4ActualCurve(
               preparing_successor_curve
                   ? "successor_curve_before_p5"
                   : "final_bspline_before_p5",
@@ -1929,7 +1929,7 @@ namespace ego_planner
                       P5RuntimeIntegrityGate::reasonName(p5_status.reason),
                       static_cast<unsigned long>(planning_generation_id),
                       static_cast<unsigned long>(final_gate_generation_id));
-          planner_manager_->recordP4VerticalSliceLineage(
+          planner_manager_->certifyP4ActualCurve(
               "p5_final_rejected", plannerNow().seconds());
           if (preparing_successor_curve)
             planner_manager_->recordPreparedP4SuccessorCurveFailure(
@@ -1956,7 +1956,7 @@ namespace ego_planner
         p5_final_status_evaluated = true;
         if (!preparing_successor_curve &&
             !preparing_normal_multi_channel_curve &&
-            !planner_manager_->recordP4VerticalSliceLineage(
+            !planner_manager_->certifyP4ActualCurve(
                 "p5_final_pass_before_publish",
                 plannerNow().seconds()))
         {
@@ -2033,7 +2033,7 @@ namespace ego_planner
               comparison_reason.c_str());
         }
         if (preparing_normal_multi_channel_curve &&
-            !planner_manager_->recordP4VerticalSliceLineage(
+            !planner_manager_->certifyP4ActualCurve(
                 "normal_selected_bundle_latest_reauthorization",
                 plannerNow().seconds()))
         {
@@ -2076,12 +2076,12 @@ namespace ego_planner
                     p5_final_status.action),
                 P5RuntimeIntegrityGate::reasonName(
                     p5_final_status.reason));
-            planner_manager_->recordP4VerticalSliceLineage(
+            planner_manager_->certifyP4ActualCurve(
                 "p5_final_rejected", now_s);
             reject_candidate();
             return false;
           }
-          if (!planner_manager_->recordP4VerticalSliceLineage(
+          if (!planner_manager_->certifyP4ActualCurve(
                   "p5_final_pass_before_publish", now_s))
           {
             RCLCPP_ERROR(
@@ -2154,7 +2154,7 @@ namespace ego_planner
       const bool publication_committed = using_cached_successor
           ? planner_manager_->commitP4PreparedBundle(
                 plannerNow().seconds(), &successor_publish_reason)
-          : planner_manager_->recordP4VerticalSliceLineage(
+          : planner_manager_->certifyP4ActualCurve(
                 "normal_publish_authorized",
                 plannerNow().seconds());
       if (!publication_committed)
